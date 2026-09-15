@@ -43,10 +43,10 @@ void CEmuChipYm2608GetTimerDebug(CChip* c, unsigned* fireA, unsigned* fireB, uns
 void CEmuChipYm2608GetTimerDebugEx(CChip* c, unsigned* fireA, unsigned* fireB, unsigned* irqPulse,
 	int64_t* lastDurB, uint64_t* clockSum);
 void CEmuChipYm2608ClearTimerDebug(CChip* c);
-/* Play probe: data-port writes, FM key-ons (reg28), F-num / SSG period motion. */
+/* 再生プローブ: データポート書き込み、FMキーオン(reg28)、F-num / SSG周期の動き。 */
 void CEmuChipYm2608GetPlayMetrics(CChip* c, unsigned* writes, unsigned* keyOns,
 	unsigned* fnumChg, unsigned* ssgChg, unsigned* chMask);
-/* SSG A/B/C: bank0 $00-$0F shadow, per-ch period changes, YM2203 sample energy. */
+/* SSG A/B/C: bank0 $00-$0F シャドウ、ch毎周期変化、YM2203サンプルエネルギー。 */
 void CEmuChipYm2608GetSsgDebug(CChip* c, uint8_t regsOut[16], unsigned periodChg[3],
 	uint64_t energy[3]);
 void CEmuChipYm2608GetSsgDebugEx(CChip* c, uint8_t regsOut[16], unsigned periodChg[3],

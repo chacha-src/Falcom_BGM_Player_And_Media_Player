@@ -8,6 +8,7 @@
 
 
 
+/* Neo Geo ドライバ */
 CDriverNeo::CDriverNeo()
 
 	: hw_(NULL)
@@ -42,6 +43,7 @@ CDriverNeo::CDriverNeo()
 
 
 
+/* 後始末 */
 CDriverNeo::~CDriverNeo()
 
 {
@@ -52,6 +54,7 @@ CDriverNeo::~CDriverNeo()
 
 
 
+/* ROM 読込後、NMI 許可までブートして曲コマンドを決める */
 int CDriverNeo::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned titleCode)
 
 {
@@ -76,13 +79,9 @@ int CDriverNeo::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned
 
 
 
-	/*
+	/* 固定選曲: ホスト title が非 0（ユーザコマンド 0x20-0xFF）ならそれ。
 
-	 * Fixed pick: host title if nonzero (Neo Geo user cmds are 0x20-0xFF),
-
-	 * else first catalog code 0x01..0x3F (prefer 0x21+). No try-table / peak hunt.
-
-	 */
+ * さもなくばカタログ 0x01..0x3F（0x21+ 優先）。試行表／ピーク探索はしない。 */
 
 	songCmd_ = 0x20;
 
@@ -136,15 +135,15 @@ int CDriverNeo::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned
 
 
 
-	/* Catalog prefer is often SE 0x01 or empty fanfare 0x20. One fixed pass
+	/* カタログ先頭は SE 0x01 や空ファンファーレ 0x20 が多い。0x21..0x3F の
 
-	   onto the first 0x21..0x3F BGM when present - keep 0x02 logo (mslug). */
+ * 最初の BGM へ 1 回だけ寄せる。mslug の 0x02 ロゴは残す。 */
 
 	if (!titleCode && (songCmd_ == 0x01 || songCmd_ == 0x20)) {
 
 		uint8_t pick = 0;
 
-		/* Prefer stage BGM 0x22+ over short title jingles at 0x21 (kof95). */
+		/* 短いタイトルジングル 0x21 よりステージ BGM 0x22+ を優先（kof95） */
 
 		for (int i = 0; i < ge->titleCount; i++) {
 
@@ -179,11 +178,9 @@ int CDriverNeo::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned
 
 	CEmuHardNeoSetActive(hw_);
 
-	/* ADK OS 8.8 table at (2E0C): empty slots are 10 00 00 00 (mosyougi
+	/* ADK OS 8.8 表 (2E0C): 空きは 10 00 00 00（mosyougi 0x04）。穴と次の
 
-	   0x04). Skip the hole and the next live 0x20 so even/odd catalog
-
-	   picks don't both land on the following BGM. */
+ * 生きた 0x20 を飛ばし、偶奇カタログが同じ BGM に落ちないようにする。 */
 
 	if (!songCmdHi_) {
 
@@ -227,11 +224,9 @@ int CDriverNeo::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned
 
 	}
 
-	/* Early SNK: type table at (0173) ? entries 1=SE, 2+=BGM. Prefer first
+	/* 初期 SNK: 種別表 (0173)。1=SE、2+=BGM。生きた曲ポインタ付き type>=2 を
 
-	   type>=2 with a live song pointer so titles don't share the flat SE
-
-	   chirp from cmd 0x02 or land on an empty 0x20 fanfare slot. */
+ * 優先し、0x02 の平坦 SE や空の 0x20 ファンファーレに落とさない。 */
 
 	{
 
@@ -321,9 +316,7 @@ int CDriverNeo::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned
 
 				const int curLive = (songCmd_ >= 0x20) ? songLive(songCmd_) : 0;
 
-				/* Host catalog pick is authoritative. Only remap empty/SE slots
-
-				   when Open had no title (zip drop without a titlelist). */
+				/* ホストのカタログ選曲が正。Open 時に title が無い zip ドロップだけ空き/SE を付け替える */
 
 				if (!titleCode && bgm && songCmd_ < 0x40 && (curTy < 2 || curTy > 5 || !curLive))
 
@@ -335,7 +328,7 @@ int CDriverNeo::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned
 
 	}
 
-	/* Boot until NMI enable (OUT $08) or ~1s ? KOF M1 enables after bank init. */
+	/* NMI 許可（OUT $08）か約 1s までブート。KOF M1 はバンク初期化後に許可 */
 
 	RunUntil((uint64_t)cpuHz_ / 4);
 
@@ -379,17 +372,11 @@ int CDriverNeo::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned
 
 	}
 
-	/*
+	/* KOF 系 / SNK Sound Driver のみ: コールドブートは FE34=0xFF で、
 
-	 * KOF-family / SNK Sound Driver only: cold boot sets FE34=0xFF and song
+ * FE34!=0 の間は曲エントリが中断する。$08/$07 でクリア。MAKOTO は $08 を
 
-	 * entry aborts while FE34!=0. Clear with $08/$07. MAKOTO queues $08 as a
-
-	 * regular command and never clears FE34, which skipped the FE30 poke and
-
-	 * left type-3 slots (ganryu 0xF4) locked via FE35=FF.
-
-	 */
+ * 通常コマンドとして積み FE34 を消さず、FE30 poke を飛ばして type-3 が欠ける。 */
 
 	if (snkDrv && hw_->PeekRam(0xFE34) != 0) {
 
@@ -443,7 +430,7 @@ int CDriverNeo::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned
 
 		}
 
-		/* Psikyo (s1945p): BGM 0x20..0x3F returns while F902!=0. */
+		/* Psikyo (s1945p): BGM 0x20..0x3F は F902!=0 の間リターンする */
 
 		if (mBoot[0x66] == 0x08 && mBoot[0x67] == 0xd9
 
@@ -473,6 +460,7 @@ int CDriverNeo::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned
 
 
 
+/* コマンドキューが空くまで待つ */
 void CDriverNeo::WaitQueueIdle(int maxFrames60)
 
 {
@@ -527,6 +515,7 @@ void CDriverNeo::WaitQueueIdle(int maxFrames60)
 
 
 
+/* Z80 へコマンドを送り完了を待つ */
 void CDriverNeo::SendZ80Command(uint8_t cmd, int maxFrames60)
 
 {
@@ -543,6 +532,7 @@ void CDriverNeo::SendZ80Command(uint8_t cmd, int maxFrames60)
 
 
 
+/* ハード参照を捨てる */
 void CDriverNeo::Close()
 
 {
@@ -553,6 +543,7 @@ void CDriverNeo::Close()
 
 
 
+/* 同一 zip の別曲を NMI コマンドで切替 */
 int CDriverNeo::OverlayTitle(unsigned titleCode)
 
 {
@@ -573,6 +564,7 @@ int CDriverNeo::OverlayTitle(unsigned titleCode)
 
 
 
+/* YM2610 クロックを CPU 比で進める */
 void CDriverNeo::TickYm(uint64_t cpuCycles)
 
 {
@@ -593,6 +585,7 @@ void CDriverNeo::TickYm(uint64_t cpuCycles)
 
 
 
+/* YM タイマ満了を IM1、コマンドを NMI で届ける */
 void CDriverNeo::DeliverIrqs()
 
 {
@@ -607,31 +600,24 @@ void CDriverNeo::DeliverIrqs()
 
 		Ay_CpuNmi(cpu);
 
-	/* YM2610 timer IRQ ?? Z80 IM1. Prefer Irq(); also accept status timer
+	/* YM2610 タイマ IRQ → Z80 IM1。Irq() 優先。取りこぼしエッジでも
 
-	   flags so a missed ymfm_update_irq edge cannot stall the sequencer.
-
-	   Only interrupt when IFF1 is set ? ForceIm1 during DI nests/breaks
-
-	   early M1 busy-waits (nam1975 @2282). */
+ * status タイマフラグを受け、シーケンサが止まらないようにする。 */
 
 	if (!chip)
 
 		return;
 
-	/* Bank the expiries even while the ISR runs with interrupts off, so a
+	/* ISR が割り込み禁止中でも満了を貯める。DI 区間に落ちた tick は後で届ける。
 
-	   tick that lands inside a DI section is delivered afterwards rather
-
-	   than lost. The cap keeps a long DI section from producing a burst. */
+ * 上限は長い DI がバーストにならないため。 */
 
 	ymIrqPending_ += (int)chip->TakeTimerExpiries();
 
 	if (ymIrqPending_ > 2) ymIrqPending_ = 2;
 
-	/* Only interrupt when IFF1 is set ? ForceIm1 during DI nests/breaks
-
-	   early M1 busy-waits (nam1975 @2282). */
+	/* IFF1 が立っているときだけ割り込む。DI 中の ForceIm1 は初期 M1 の
+	   ビジィウェイトを壊す（nam1975 @2282）。 */
 
 	if (cpu->r.im != 1 || !cpu->r.iff1)
 
@@ -639,13 +625,8 @@ void CDriverNeo::DeliverIrqs()
 
 	const int st = (chip->ReadStatus() & 0x03) != 0;
 
-	/* One interrupt per timer expiry. Testing the merged IRQ level instead
-
-	   handed the sequencer ~11% more ticks than the programmed Timer A+B
-
-	   rate, because the line stays asserted across the ISR's EI and each
-
-	   following instruction boundary looked like a fresh request. */
+	/* タイマ満了ごとに 1 割り込み。マージした IRQ レベルを見ると、線が ISR の
+	   EI 以降もアサートされたまま次命令境界で再発火し、Timer A+B より約 11% 多い。 */
 
 	if ((chip->Irq() || st) && ymIrqPending_ > 0) {
 
@@ -659,6 +640,7 @@ void CDriverNeo::DeliverIrqs()
 
 
 
+/* Z80 を endCycle まで進める */
 void CDriverNeo::RunUntil(uint64_t endCycle)
 
 {
@@ -699,6 +681,7 @@ void CDriverNeo::RunUntil(uint64_t endCycle)
 
 
 
+/* サウンドコマンドをラッチし NMI を起こす */
 void CDriverNeo::InjectSongCommand()
 
 {
@@ -713,6 +696,7 @@ void CDriverNeo::InjectSongCommand()
 
 
 
+/* CPU＋YM2610 を進めステレオ合成 */
 int CDriverNeo::Render(int16_t* stereo, int frames)
 
 {
@@ -737,7 +721,7 @@ int CDriverNeo::Render(int16_t* stereo, int frames)
 
 			InjectSongCommand();
 
-		/* One re-send if latch unread after ~0.25s (late handler). */
+		/* ラッチ未読が約 0.25s 続く（遅いハンドラ）なら 1 回再送 */
 
 		if (injected_ && !reinjected_ && hw_->SoundCmdPending()
 
@@ -757,15 +741,8 @@ int CDriverNeo::Render(int16_t* stereo, int frames)
 
 		if (cyclesPerSample < 1) cyclesPerSample = 1;
 
-		/* Carry the overshoot. The inner loop can only stop after a whole
-
-		   instruction, so recomputing the deadline from the current time
-
-		   every sample gave each one its full budget plus whatever the
-
-		   previous sample ran over ? the Z80, and with it the YM2610's
-
-		   timers, ran about 11% fast and the sequencer with them. */
+		/* 超過サイクルを持ち越す。内側ループは命令単位でしか止まれないので、
+	   毎サンプル現在時刻から期限を再計算すると前サンプルの超過＋満額予算になり Z80 が速くなる。 */
 
 		cpuDebt_ += cyclesPerSample;
 
@@ -811,6 +788,7 @@ int CDriverNeo::Render(int16_t* stereo, int frames)
 
 
 
+/* Seek は未対応 */
 int CDriverNeo::Seek(uint64_t sample)
 
 {
@@ -823,6 +801,7 @@ int CDriverNeo::Seek(uint64_t sample)
 
 
 
+/* Neo Geo ドライバ生成 */
 CDriver* CDriverNeoCreate()
 
 {

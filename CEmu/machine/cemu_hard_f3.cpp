@@ -10,15 +10,15 @@ extern "C" {
 
 static CHardF3* g_f3Self = NULL;
 
-/* MAME taito_en: DUART IACK returns IVR (not 68K autovector). Autovector 0x78
-   hits a fatal reboot stub; firmware installs the real handler at vector IVR. */
+/* MAME taito_en: DUART IACK は IVR を返す（68K オートベクタではない）。オートベクタ 0x78 は致命リブート stub。ファームは本物ハンドラをベクタ IVR に置く。 */
 static int g_f3IntAckCount = 0;
 static int g_f3IntAckLast = -1;
 
+/* CEmuHardF3IntAck の実装 */
 static int CEmuHardF3IntAck(int level)
 {
 	CHardF3* hw = CEmuHardF3GetActive();
-	/* Match Musashi default: clear latched level on IACK; driver re-asserts if still pending. */
+	/* Musashi 既定に合わせる: IACK でラッチレベルをクリア。まだ pending ならドライバが再アサート。 */
 	m68k_set_irq(M68K_IRQ_NONE);
 	g_f3IntAckCount++;
 	if (!hw) {
@@ -34,6 +34,7 @@ int CEmuHardF3IntAckCount() { return g_f3IntAckCount; }
 int CEmuHardF3IntAckLast() { return g_f3IntAckLast; }
 void CEmuHardF3IntAckReset() { g_f3IntAckCount = 0; g_f3IntAckLast = -1; }
 
+/* CEmuHardF3SetActive の実装 */
 void CEmuHardF3SetActive(CHardF3* hw)
 {
 	g_f3Self = hw;
@@ -41,9 +42,10 @@ void CEmuHardF3SetActive(CHardF3* hw)
 	if (hw)
 		m68k_set_int_ack_callback(CEmuHardF3IntAck);
 	else
-		m68k_set_int_ack_callback(NULL); /* restore Musashi autovector for X68k */
+		m68k_set_int_ack_callback(NULL); /* X68k 用に Musashi オートベクタを戻す */
 }
 
+/* CEmuHardF3GetActive の実装 */
 CHardF3* CEmuHardF3GetActive()
 {
 	return g_f3Self ? g_f3Self : CEmuM68kBusGetF3();
@@ -75,7 +77,7 @@ CHardF3::CHardF3()
 	memset(duart_, 0, sizeof(duart_));
 	memset(esp_, 0, sizeof(esp_));
 	duartIrqPending_ = 0;
-	duartImr_ = 0x08; /* timer IRQ enabled by default until software reprograms IMR */
+	duartImr_ = 0x08; /* ソフトが IMR を組み直すまでタイマ IRQ は既定で許可 */
 	duartIsr_ = 0;
 	duartAcr_ = 0x30;
 	duartCtr_ = 0x09c4;
@@ -83,7 +85,7 @@ CHardF3::CHardF3()
 	duartFires_ = 0;
 	duartTimerAcc_ = 0;
 	ringInited_ = 0;
-	duartIp_ = 0x83; /* IP0/IP1 strapped high, bit7 always 1 (MAME mc68681) */
+	duartIp_ = 0x83; /* IP0/IP1 はストラップ High、bit7 は常に 1（MAME mc68681） */
 	duartIpcr_ = 0x03;
 	duartIpAcc_ = 0;
 	esWrites_ = 0;
@@ -94,19 +96,21 @@ CHardF3::~CHardF3()
 	Shutdown();
 }
 
+/* チップと CPU を生成する */
 int CHardF3::Init(const CEmuGameEntry* ge, int sampleRate)
 {
 	if (!ge) return 0;
 	if (_stricmp(ge->subtype, "f3system") != 0)
 		return 0;
 	sampleRate_ = sampleRate > 0 ? sampleRate : 44100;
-	cpuHz_ = 15238100; /* 30.47618 MHz / 2 */
+	cpuHz_ = 15238100; /* 音源クロック 30.47618 MHz / 2 */
 	esHz_ = 15238100;
 	chip_ = CEmuChipEs5505Create((uint32_t)esHz_, sampleRate_);
 	musashiReady_ = 0;
 	return chip_ ? 1 : 0;
 }
 
+/* チップ／CPU／ROM を破棄する */
 void CHardF3::Shutdown()
 {
 	if (CEmuHardF3GetActive() == this)
@@ -121,6 +125,7 @@ void CHardF3::Shutdown()
 	musashiReady_ = 0;
 }
 
+/* PCM／コードバンク */
 void CHardF3::RebuildOtisBanks()
 {
 	for (int i = 0; i < kOtisBankWords; i++) {
@@ -149,6 +154,7 @@ void CHardF3::PlaceInterleaved(uint8_t* dst, unsigned dstBytes, unsigned dstOff,
 		PlaceEvenBytes(dst, dstBytes, dstOff + 1, odd, oddBytes);
 }
 
+/* CEmuF3ContainsI の実装 */
 static int CEmuF3ContainsI(const char* hay, const char* needle)
 {
 	if (!hay || !needle || !needle[0]) return 0;
@@ -159,18 +165,19 @@ static int CEmuF3ContainsI(const char* hay, const char* needle)
 	return 0;
 }
 
+/* CEmuF3AudioCpuScore の実装 */
 static int CEmuF3AudioCpuScore(const char* name, const char* type, unsigned sz)
 {
 	int score = 0;
 	if (type && type[0]) {
-		/* Catalog uses sub0/sub1 for taito_en:audiocpu halves (even/odd). */
+		/* カタログは taito_en:audiocpu 半体に sub0/sub1（偶数／奇数） */
 		if (_stricmp(type, "audiocpu") == 0 || _stricmp(type, "soundcpu") == 0
 			|| _stricmp(type, "sub0") == 0 || _stricmp(type, "sub1") == 0
 			|| _stricmp(type, "sub") == 0 || _stricmp(type, "code") == 0
 			|| _stricmp(type, "68k") == 0)
 			score += 200;
 		if (_strnicmp(type, "main", 4) == 0)
-			score -= 400; /* 68EC020 program — never load as sound CPU */
+			score -= 400; /* 68EC020 プログラム — 音源 CPU としてロードしない */
 		if (_stricmp(type, "ensoniq") == 0 || _stricmp(type, "pcm") == 0
 			|| _stricmp(type, "wave") == 0 || _stricmp(type, "adpcm") == 0)
 			score -= 300;
@@ -187,6 +194,7 @@ static int CEmuF3AudioCpuScore(const char* name, const char* type, unsigned sz)
 	return score;
 }
 
+/* CEmuF3EnsoniqScore の実装 */
 static int CEmuF3EnsoniqScore(const char* name, const char* type, unsigned sz)
 {
 	int score = 0;
@@ -204,28 +212,22 @@ static int CEmuF3EnsoniqScore(const char* name, const char* type, unsigned sz)
 	return score;
 }
 
+/* 8bit 読込 */
 uint8_t CHardF3::Read8(unsigned addr)
 {
 	addr &= 0xffffffu;
-	/* MAME taito_en: OSRAM 64KB at 0-0xFFFF, mirror(0x30000) → 0-0x3FFFF,
-	   plus the high mirror at 0xFF0000. Firmware (SD-1 derived) uses both. */
+	/* MAME taito_en: OSRAM 64KB が 0-0xFFFF、mirror(0x30000) → 0-0x3FFFF、高ミラー 0xFF0000。ファーム（SD-1 由来）は両方使う。 */
 	if (addr < 0x40000u || (addr >= 0xff0000u && addr <= 0xffffffu)) {
 		return osram_[addr & 0xffffu];
 	}
 	if (addr >= 0x140000u && addr <= 0x140fffu) {
-		/* DPRAM right side, umask16 0xff00 → high byte of each word. */
+		/* DPRAM 右側、umask16 0xff00 → 各ワードの上位バイト */
 		const unsigned o = (addr - 0x140000u) >> 1;
 		if (o < kDpramBytes) {
-			/* 32 buckets of 64 bytes so the counter covers the whole DPRAM:
-			   host command packets land in bucket 0 and the ring head/tail
-			   longs at $900/$904 in bucket 18. Counting only the first 32
-			   bytes could not tell "never polled" from "polls the
-			   pointers but never reads the packet". */
+			/* 64 バイト×32 バケツでカウンタが DPRAM 全体を覆う: ホストコマンドパケットはバケツ 0、リング head/tail ロングは $900/$904（バケツ 18）。先頭 32 バイトだけだと「一度も poll していない」と「ポインタは poll するがパケットは読まない」を区別できない。 */
 			dpramReadHits_[o >> 6]++;
 			if (dpramTraceN_ < 16) {
-				/* Which firmware routines touch the mailbox, so the host
-				   side can be matched to the real protocol instead of a
-				   guessed ring layout. */
+				/* どのファームルーチンがメールボックスに触るか。ホスト側を推測リングではなく本物プロトコルに合わせる。 */
 				const unsigned pc = (unsigned)m68k_get_reg(NULL, M68K_REG_PPC);
 				int seen = 0;
 				for (int t = 0; t < dpramTraceN_; t++)
@@ -250,20 +252,18 @@ uint8_t CHardF3::Read8(unsigned addr)
 		return 0xff;
 	}
 	if (addr >= 0x280000u && addr <= 0x28001fu) {
-		/* MC68681: umask16 0x00ff — low byte of each word. Reg index = (addr>>1)&0xf. */
+		/* MC68681: umask16 0x00ff — 各ワードの下位バイト。Reg index = (addr>>1)&0xf。 */
 		if (!(addr & 1)) return 0xff;
 		const unsigned reg = ((addr - 0x280000u) >> 1) & 0x0fu;
 		switch (reg) {
-		case 0x1: /* SRA: RxRDY|TxRDY|TxEMT — TxEMT needed by UART poll loops */
-		case 0x9: /* SRB */
+		case 0x1: /* SRA: RxRDY|TxRDY|TxEMT — UART poll ループに TxEMT が要る */
+		case 0x9: /* SRB ステータス */
 			return 0x01 | 0x04 | 0x08;
-		case 0x3: /* do not mirror SRA onto CRA readback */
+		case 0x3: /* CRA リードバックへ SRA をミラーしない */
 			return duart_[reg];
-		case 0x5: /* ISR — MAME returns the register; Counter Ready is acked
-			   only by Stop Counter (0x0F), not by this read. */
+		case 0x5: /* ISR — MAME はレジスタを返す。Counter Ready の ack はこの読みではなく Stop Counter（0x0F）のみ。 */
 			return duartIsr_;
-		case 0x4: /* IPCR: bits 0-3 = IP0-3, bits 4-7 = change-of-state.
-			   Reading clears the COS bits and ISR bit 7 (MAME mc68681). */
+		case 0x4: /* IPCR: bits 0-3 = IP0-3、bits 4-7 = 状態変化。読むと COS ビットと ISR bit 7 をクリア（MAME mc68681）。 */
 			{
 				const uint8_t v = duartIpcr_;
 				duartIpcr_ &= 0x0f;
@@ -271,23 +271,21 @@ uint8_t CHardF3::Read8(unsigned addr)
 				UpdateDuartIrq();
 				return v;
 			}
-		case 0x6: /* CTUR */
+		case 0x6: /* CTUR カウンタ上位 */
 			return (uint8_t)(duartCtr_ >> 8);
-		case 0x7: /* CTLR */
+		case 0x7: /* CTLR カウンタ下位 */
 			return (uint8_t)(duartCtr_ & 0xff);
-		case 0xc: /* IVR */
+		case 0xc: /* IVR 割り込みベクタ */
 			return DuartIvr();
-		case 0xd: /* IP — Gun Buster straps IP0/IP1 high; IP2=1MHz, IP3=0.5MHz */
+		case 0xd: /* IP — Gun Buster は IP0/IP1 High。IP2=1MHz、IP3=0.5MHz */
 			return (uint8_t)(duartIp_ | 0x80);
 		case 0xe:
-			/* START COUNTER COMMAND. Timer mode (ACR bit 6) restarts the
-			   count; Counter Ready stays set until Stop Counter (MAME). */
+			/* START COUNTER コマンド。タイマモード（ACR bit 6）はカウントを再開。Counter Ready は Stop Counter までセットのまま（MAME）。 */
 			duartCounterOn_ = 1;
 			duartTimerAcc_ = 0;
 			return 0x00;
 		case 0xf:
-			/* STOP COUNTER COMMAND: clears Counter Ready. In counter mode
-			   (ACR bit 6 clear) also halts the count. */
+			/* STOP COUNTER コマンド: Counter Ready をクリア。カウンタモード（ACR bit 6 クリア）ではカウントも停止。 */
 			if (!(duartAcr_ & 0x40))
 				duartCounterOn_ = 0;
 			duartIsr_ &= (uint8_t)~0x08;
@@ -315,6 +313,7 @@ uint8_t CHardF3::Read8(unsigned addr)
 	return 0xff;
 }
 
+/* 16bit 読込 */
 uint16_t CHardF3::Read16(unsigned addr)
 {
 	addr &= 0xffffffu;
@@ -323,11 +322,13 @@ uint16_t CHardF3::Read16(unsigned addr)
 	return (uint16_t)((Read8(addr) << 8) | Read8(addr + 1));
 }
 
+/* 32bit 読込 */
 uint32_t CHardF3::Read32(unsigned addr)
 {
 	return ((uint32_t)Read16(addr) << 16) | (uint32_t)Read16(addr + 2);
 }
 
+/* 8bit 書込 */
 void CHardF3::Write8(unsigned addr, uint8_t data)
 {
 	addr &= 0xffffffu;
@@ -360,18 +361,17 @@ void CHardF3::Write8(unsigned addr, uint8_t data)
 		duart_[reg] = data;
 		if (reg == 0x4) {
 			duartAcr_ = data;
-			/* Timer mode (bit 6) free-runs once selected; counter mode has
-			   to be armed by the start-counter read. */
+			/* タイマモード（bit 6）は選択後フリーラン。カウンタモードは start-counter 読みで武装する。 */
 			if (duartAcr_ & 0x40)
 				duartCounterOn_ = 1;
-			/* ACR bits 0-3 enable IP0-3 change-of-state IRQs (MAME). */
+			/* ACR bits 0-3 は IP0-3 状態変化 IRQ を許可（MAME） */
 			if ((duartIpcr_ >> 4) & (data & 0x0f)) {
 				duartIsr_ |= 0x80;
 				UpdateDuartIrq();
 			}
 		}
 		if (reg == 0x5) {
-			/* IMR write (write to ISR address) */
+			/* IMR 書き込み（ISR 番地への書き） */
 			duartImr_ = data;
 			UpdateDuartIrq();
 		}
@@ -384,9 +384,7 @@ void CHardF3::Write8(unsigned addr, uint8_t data)
 		if (reg == 0xc) {
 			duart_[0x0c] = data ? data : 0x40;
 		}
-		/* 0x0E/0x0F on write are set/reset output port bits, not the
-		   counter commands (those are the read side). Clearing ISR here
-		   would drop a counter-ready the firmware is waiting on. */
+		/* 書き側の 0x0E/0x0F は出力ポートビットの set/reset。カウンタコマンドではない（それらは読み側）。ここで ISR をクリアするとファーム待ちの counter-ready が落ちる。 */
 		return;
 	}
 	if (addr >= 0x300000u && addr <= 0x30003fu) {
@@ -400,9 +398,10 @@ void CHardF3::Write8(unsigned addr, uint8_t data)
 		}
 		return;
 	}
-	/* 0x340000 volume (MB87078) — ignored for now. */
+	/* 0x340000 ボリューム（MB87078）— 当面無視 */
 }
 
+/* 16bit 書込 */
 void CHardF3::Write16(unsigned addr, uint16_t data)
 {
 	addr &= 0xffffffu;
@@ -423,20 +422,20 @@ void CHardF3::Write16(unsigned addr, uint16_t data)
 	Write8(addr + 1, (uint8_t)(data & 0xff));
 }
 
+/* 32bit 書込 */
 void CHardF3::Write32(unsigned addr, uint32_t data)
 {
 	Write16(addr, (uint16_t)(data >> 16));
 	Write16(addr + 2, (uint16_t)(data & 0xffff));
 }
 
+/* IRQ 配送 */
 void CHardF3::UpdateDuartIrq()
 {
 	const int was = duartIrqPending_;
 	duartIrqPending_ = (duartIsr_ & duartImr_) ? 1 : 0;
 	/*
-	 * Musashi only samples IRQ on m68k_set_irq / SR writes. If IMR enables a
-	 * timer that already set ISR mid-timeslice (just before STOP #$2000), we
-	 * must assert the line here so STOP's set_sr() check_interrupts wakes.
+	 * Musashi は IRQ を m68k_set_irq / SR 書きでのみサンプルする。IMR が既に ISR をセットしたタイマをタイムスライス途中で許可したとき（STOP #$2000 直前）、ここで線をアサートし STOP の set_sr() check_interrupts が起きる。
 	 */
 	if (duartIrqPending_ && CEmuHardF3GetActive() == this)
 		m68k_set_irq(M68K_IRQ_6);
@@ -444,14 +443,16 @@ void CHardF3::UpdateDuartIrq()
 		m68k_set_irq(M68K_IRQ_NONE);
 }
 
+/* バス読込 */
 unsigned CHardF3::DpramMovepRead(unsigned byteOff) const
 {
-	/* MOVEP.W at $140000+off reads even bytes off and off+2 → dpram[off/2], dpram[off/2+1]. */
+	/* $140000+off の MOVEP.W は偶数バイト off と off+2 を読む → dpram[off/2], dpram[off/2+1] */
 	const unsigned i0 = (byteOff >> 1) & (kDpramBytes - 1);
 	const unsigned i1 = ((byteOff + 2) >> 1) & (kDpramBytes - 1);
 	return ((unsigned)dpram_[i0] << 8) | (unsigned)dpram_[i1];
 }
 
+/* バス書込 */
 void CHardF3::DpramMovepWrite(unsigned byteOff, unsigned value)
 {
 	const unsigned i0 = (byteOff >> 1) & (kDpramBytes - 1);
@@ -460,13 +461,15 @@ void CHardF3::DpramMovepWrite(unsigned byteOff, unsigned value)
 	dpram_[i1] = (uint8_t)(value & 0xff);
 }
 
+/* バス書込 */
 void CHardF3::DpramRingWriteByte(unsigned byteOff, uint8_t data)
 {
-	/* Sound CPU reads move.b (a0,d1.w) with even d1 → dpram[d1/2]. */
+	/* 音源 CPU は even d1 で move.b (a0,d1.w) → dpram[d1/2] */
 	const unsigned i = (byteOff >> 1) & (kDpramBytes - 1);
 	dpram_[i] = data;
 }
 
+/* CHardF3::EnqueueRingPacket の実装 */
 void CHardF3::EnqueueRingPacket(const uint8_t* bytes, int nbytes)
 {
 	if (!bytes || nbytes < 1) return;
@@ -480,12 +483,11 @@ void CHardF3::EnqueueRingPacket(const uint8_t* bytes, int nbytes)
 	DpramMovepWrite(0x900, wp);
 }
 
+/* CHardF3::EnsureHostRing の実装 */
 void CHardF3::EnsureHostRing()
 {
 	/*
-	 * Firmware C10FFA writes 03008100 + MOVEP.W wp=6. If that already ran,
-	 * do not touch the read pointer at $904 — planting rp=wp makes the ring
-	 * look empty and orphans any packet we just queued.
+	 * ファーム C10FFA は 03008100 + MOVEP.W wp=6 を書く。既に走っていたら $904 の読みポインタを触らない — rp=wp を植えるとリングが空に見え、今キューしたパケットが孤立する。
 	 */
 	if (dpram_[0] == 0x03 && dpram_[1] == 0x81) {
 		ringInited_ = 1;
@@ -496,33 +498,29 @@ void CHardF3::EnsureHostRing()
 	dpram_[2] = 0x00;
 	dpram_[3] = 0x00;
 	DpramMovepWrite(0x900, 6);
-	/* Leave $904 (read pointer) at 0 so a late handshake consume still
-	   walks into the packet we place at offset 6. */
+	/* $904（読みポインタ）は 0 のまま。遅いハンドシェイク消費がオフセット 6 のパケットへ歩ける。 */
 	ringInited_ = 1;
 }
 
+/* 曲コマンドをメールボックスへ書く */
 void CHardF3::SetSongCommand(unsigned code)
 {
 	songCode_ = code ? code : 1;
 	/*
-	 * F3 mailbox, as read out of the arabianm firmware:
-	 *   ring at $140000, even bytes only, MOVEP head at $900 / tail at $904
-	 *   packet = [len][cmd][args…], len = 1 + number of bytes after len
-	 * The reader at $C11048 requires bit 7 set in cmd, then starts a task that
-	 * dispatches at $C12E1C: index (cmd & $7f) must be <= $10, and len must
-	 * equal the per-command entry in the table at $C131B0, else the packet is
-	 * dropped silently. Handlers come from the word table at $C1318E.
-	 * cmd $80/$81/$82 all reach the play routine at $C12B8C with one argument.
+	 * F3 メールボックス（arabianm ファームから読み取り）:
+	 *   リング $140000、偶数バイトのみ、MOVEP head $900 / tail $904
+	 *   パケット = [len][cmd][args…]、len = 1 + len 後のバイト数
+	 * $C11048 のリーダは cmd の bit 7 必須。その後 $C12E1C でディスパッチするタスク開始。添字 (cmd & $7f) は <= $10、len は $C131B0 表のコマンド毎エントリと一致必須。さもなくばパケットは黙って捨てられる。ハンドラはワード表 $C1318E。
+	 * cmd $80/$81/$82 はすべて引数 1 で $C12B8C の再生ルーチンへ。
 	 *
-	 * Song ids index a table of longs at ($D404)+8; arabianm has entries for
-	 * 1, 2, 9, $0A… and zeros elsewhere, and a zero entry means "no such song".
+	 * 曲 ID は ($D404)+8 の long 表を添字。arabianm は 1, 2, 9, $0A… にエントリ、他はゼロ。ゼロは「その曲は無い」。
 	 */
 	EnsureHostRing();
 	const uint8_t lo = (uint8_t)(songCode_ & 0xff);
 	const uint8_t hi = (uint8_t)((songCode_ >> 8) & 0xff);
 	uint8_t pkt[4];
 	pkt[0] = 0x03;
-	pkt[1] = 0x80; /* cmd index 0 */
+	pkt[1] = 0x80; /* cmd 添字 0 */
 	pkt[2] = lo ? lo : 1;
 	EnqueueRingPacket(pkt, 3);
 	if (hi) {
@@ -532,11 +530,10 @@ void CHardF3::SetSongCommand(unsigned code)
 	}
 }
 
+/* CHardF3::DisableDelaySeqTick の実装 */
 void CHardF3::DisableDelaySeqTick()
 {
-	/* After Open the delay trampoline's jsr C1490A is ~14Hz on SSP. Mailbox
-	   type-$E on USP is the same C1490A without a second envelope clock.
-	   Bra over the jsr; keep the subq so boot-style callers still return. */
+	/* Open 後、遅延トランポリンの jsr C1490A は SSP 上で約 14Hz。USP 上のメールボックス type-$E は第 2 エンベロープクロック無しの同じ C1490A。jsr を Bra で飛ばし、ブート風呼び出しが戻れるよう subq は残す。 */
 	if (!audioCpu_ || audioCpuSize_ < 0x100010u) return;
 	const unsigned win0 = 0x100000u;
 	const unsigned win1 = audioCpuSize_ < 0x120000u ? audioCpuSize_ : 0x120000u;
@@ -549,24 +546,24 @@ void CHardF3::DisableDelaySeqTick()
 	}
 }
 
+/* 周辺クロックを進める */
 int CHardF3::TickDuart(int cpuCycles)
 {
 	if (cpuCycles <= 0) return duartIrqPending_;
 	/*
-	 * Gun Buster: IP2/IP5 = 1 MHz, IP3/IP4 = 0.5 MHz. Ensoniq calibration
-	 * and IPCR COS IRQs (ACR bits 0-3) watch these edges.
+	 * Gun Buster: IP2/IP5 = 1 MHz、IP3/IP4 = 0.5 MHz。Ensoniq 校正と IPCR COS IRQ（ACR bits 0-3）がこれらのエッジを見る。
 	 */
 	duartIpAcc_ += cpuCycles;
 	{
 		const int hz = cpuHz_ > 0 ? cpuHz_ : 15238100;
-		const int64_t step = (int64_t)hz / 2000000; /* 1 MHz edges */
+		const int64_t step = (int64_t)hz / 2000000; /* 1 MHz エッジ */
 		if (step < 1) {
-			/* keep previous IP */
+			/* 直前の IP を保持 */
 		} else {
 			const unsigned edges = (unsigned)(duartIpAcc_ / step);
 			uint8_t ip = 0x83;
-			if (edges & 1u) ip |= 0x24;       /* IP2 + IP5 */
-			if ((edges >> 1) & 1u) ip |= 0x18; /* IP3 + IP4 */
+			if (edges & 1u) ip |= 0x24;       /* 入力ピン IP2＋IP5 */
+			if ((edges >> 1) & 1u) ip |= 0x18; /* 入力ピン IP3＋IP4 */
 			if (ip != duartIp_) {
 				const uint8_t changed = (uint8_t)((ip ^ duartIp_) & 0x0f);
 				duartIpcr_ = (uint8_t)((ip & 0x0f) | (changed << 4));
@@ -579,9 +576,9 @@ int CHardF3::TickDuart(int cpuCycles)
 		}
 	}
 	/*
-	 * Timer rate: DUART clock 16/4=4MHz, ACR=$30 → X1/CLK/16 mode bits.
-	 * Firmware loads CTR=$09C4. Period ≈ CTR * 16 / 4MHz in CPU cycles at ~15.2MHz.
-	 * Use CTR-based period clamped to a sane IRQ rate (~0.5–2 kHz).
+	 * タイマレート: DUART クロック 16/4=4MHz、ACR=$30 → X1/CLK/16 モードビット。
+	 * ファームは CTR=$09C4。周期 ≈ CTR * 16 / 4MHz（CPU 約 15.2MHz）。
+	 * CTR 基準周期を妥当な IRQ レート（約 0.5–2 kHz）へクランプ。
 	 */
 	if (!duartCounterOn_) return duartIrqPending_;
 	unsigned ctr = duartCtr_ ? duartCtr_ : 0x09c4;
@@ -591,13 +588,14 @@ int CHardF3::TickDuart(int cpuCycles)
 	duartTimerAcc_ += cpuCycles;
 	while (duartTimerAcc_ >= period) {
 		duartTimerAcc_ -= period;
-		duartIsr_ |= 0x08; /* counter/timer ready */
+		duartIsr_ |= 0x08; /* カウンタ／タイマ ready */
 		duartFires_++;
 		UpdateDuartIrq();
 	}
 	return duartIrqPending_;
 }
 
+/* zip から ROM／曲データを載せる */
 int CHardF3::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode)
 {
 	(void)titleCode;
@@ -662,7 +660,7 @@ int CHardF3::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode
 		pushCand(pcmC, &pcmN, 64, i, CEmuF3EnsoniqScore(base, "", sz), sz, 0, base);
 	}
 
-	/* Sort candidates by score desc, then name. */
+	/* 候補をスコア降順、次いで名前でソート */
 	auto sortCand = [](Cand* a, int n) {
 		for (int i = 0; i < n; i++) {
 			for (int j = i + 1; j < n; j++) {
@@ -676,8 +674,7 @@ int CHardF3::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode
 	sortCand(cpuC, cpuN);
 	sortCand(pcmC, pcmN);
 
-	/* Dedup cpu by name, keep top pair of similar size for interleave.
-	   Prefer catalog sub0/sub1 (score≥200) over main-CPU leftovers. */
+	/* cpu を名前で重複排除。インタリーブ用に似たサイズの上位ペアを残す。メイン CPU 残りよりカタログ sub0/sub1（score≥200）を優先。 */
 	Cand cpuPick[8]; int cpuPickN = 0;
 	for (int pass = 0; pass < 2 && cpuPickN < 2; pass++) {
 		for (int i = 0; i < cpuN && cpuPickN < 8; i++) {
@@ -704,7 +701,7 @@ int CHardF3::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode
 	memset(audioCpu_, 0xff, audioCpuSize_);
 
 	if (cpuPickN >= 2) {
-		/* Pair first two as even/odd at 0x100000. Prefer catalog sub0=even, sub1=odd. */
+		/* 先頭 2 つを 0x100000 の偶数／奇数として組む。カタログ sub0=偶数、sub1=奇数を優先。 */
 		Cand a = cpuPick[0], b = cpuPick[1];
 		auto typeOf = [&](const Cand& c) -> const char* {
 			if (c.fromGe && ge->rom && c.idx >= 0 && c.idx < ge->romCount)
@@ -749,9 +746,7 @@ int CHardF3::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode
 		return 0;
 	}
 
-	/* Ensoniq: MAME V2 layout — LOAD16_BYTE at catalog offsets (even lane).
-	   Do not dedupe by name: the same file is often mirrored into two banks
-	   (cbombers/dariusg). Empty bank0 is valid (pbobble3 starts at 0x400000). */
+	/* Ensoniq: MAME V2 レイアウト — カタログオフセットで LOAD16_BYTE（偶数レーン）。名前で重複排除しない: 同一ファイルが 2 バンクへミラーされることが多い（cbombers/dariusg）。空 bank0 は妥当（pbobble3 は 0x400000 開始）。 */
 	ensoniqSize_ = kEnsoniqMax;
 	ensoniq_ = (uint8_t*)malloc(ensoniqSize_);
 	if (!ensoniq_) {
@@ -811,7 +806,7 @@ int CHardF3::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode
 		}
 	}
 	if (!pcmPlaced) {
-		/* Fallback: any large file as contiguous BE words. */
+		/* フォールバック: 大きなファイルを連続 BE ワードとして */
 		for (int i = 0; i < fs->fileCount; i++) {
 			if (fs->files[i].size < 0x100000 || !fs->files[i].data) continue;
 			unsigned n = fs->files[i].size;
@@ -821,11 +816,8 @@ int CHardF3::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode
 		}
 	}
 	/*
-	 * Catalog sometimes parks the only two PCM ROMs at 0x800000/0xC00000
-	 * (popnpop) while MAME loads them at 0 / 0x400000. Relocate when bank0
-	 * is empty and both files landed in the high half.
-	 * 3-bank sets with empty bank0 (pbobble3): mirror first populated bank
-	 * into bank0 so early key-ons before otisbank writes are not silent.
+	 * カタログが唯一の 2 PCM ROM を 0x800000/0xC00000 に置くことがある（popnpop）。MAME は 0 / 0x400000 にロード。bank0 が空で両ファイルが高半面に着地したら再配置。
+	 * 3 バンクで bank0 空（pbobble3）: 最初の埋まっているバンクを bank0 へミラーし、otisbank 書き前の早期キーオンが無音にならないようにする。
 	 */
 	{
 		int bank0 = 0;
@@ -872,33 +864,26 @@ int CHardF3::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode
 	for (int i = 0; i < 3; i++)
 		cpuBankEntry_[i] = (unsigned)i % cpuBankMax_;
 
-	/* taito_en device_reset: copy reset vectors from ROM word 0x80000 (= byte 0x100000). */
+	/* taito_en device_reset: ROM ワード 0x80000（= バイト 0x100000）からリセットベクタをコピー */
 	if (audioCpuSize_ >= 0x100008u) {
 		memcpy(osram_, audioCpu_ + 0x100000, 8);
 	}
 
-	/* Patch STOP/MOVE-to-SR that lock IPL=7 — without main CPU we need DUART IRQ6.
-	   Leave TRAP #9's BCLR D0,2(A1) alone: it clears TCB+2 bit7, which is the
-	   wait flag TRAP #6 set. Pointing it at +3 instead puts a running mailbox
-	   (flags 0080) to sleep the next time IRQ delivers a packet. */
+	/* IPL=7 にロックする STOP/MOVE-to-SR をパッチ — メイン CPU 無しでは DUART IRQ6 が要る。TRAP #9 の BCLR D0,2(A1) は触らない: TCB+2 bit7（TRAP #6 が立てた待ちフラグ）をクリアする。+3 へ向けると、走っているメールボックス（flags 0080）が次の IRQ パケットでスリープする。 */
 	if (audioCpu_ && audioCpuSize_ >= 8) {
 		for (unsigned i = 0; i + 7 < audioCpuSize_; i += 2) {
 			if (audioCpu_[i] == 0x4e && audioCpu_[i + 1] == 0x72
 				&& audioCpu_[i + 2] == 0x27 && audioCpu_[i + 3] == 0x00) {
-				audioCpu_[i + 2] = 0x20; /* STOP #$2000 */
+				audioCpu_[i + 2] = 0x20; /* 命令 STOP #$2000 */
 			}
 			if (audioCpu_[i] == 0x4e && audioCpu_[i + 1] == 0x7c
 				&& audioCpu_[i + 2] == 0x27 && audioCpu_[i + 3] == 0x00) {
-				audioCpu_[i + 2] = 0x20; /* MOVE #$2000,SR */
+				audioCpu_[i + 2] = 0x20; /* 命令 MOVE #$2000,SR */
 			}
 		}
 	}
 
-	/* C10FEE is a boot spin-wait, not the 60Hz tick. After Open the CPU
-	   parks in scheduler STOP. C14884 is the type-$E mailbox handler
-	   (D098+$0E). Do not jsr C1490A from idle STOP — that empties the
-	   free list. NOP parser `move.w #0; A-line`; opcode-0 A-line
-	   becomes MOVE SR. Host drops IPL after #$2700. */
+	/* C10FEE はブートスピン待ちであり 60Hz tick ではない。Open 後 CPU はスケジューラ STOP にパーク。C14884 は type-$E メールボックスハンドラ（D098+$0E）。アイドル STOP から jsr C1490A しない — フリーリストが空になる。パーサ `move.w #0; A-line` を NOP。opcode-0 A-line は MOVE SR になる。ホストは #$2700 のあと IPL を落とす。 */
 	if (audioCpu_ && audioCpuSize_ > 0x10000Cu) {
 		static const uint8_t kDelayTail[8] = {
 			0x4e, 0x71, 0x4e, 0x71, 0x4e, 0x71, 0x53, 0x83
@@ -910,7 +895,7 @@ int CHardF3::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode
 		unsigned delayOff = 0, tickOff = 0, playOff = 0, holeOff = 0;
 		if (win1 > win0 + 16u) {
 			for (unsigned i = win0; i + 10u <= win1; i += 2) {
-				/* Callers bsr to the 3-nop body (C10FEE), not the dead move.l. */
+				/* 呼び出し側は死んだ move.l ではなく 3-nop 本体（C10FEE）へ bsr */
 				if (!delayOff && memcmp(audioCpu_ + i, kDelayTail, 8) == 0)
 					delayOff = i;
 				if (!tickOff && i >= win0 + 4u && i + 4u <= win1
@@ -955,12 +940,7 @@ int CHardF3::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode
 					audioCpu_[i + 4] = 0x4e; audioCpu_[i + 5] = 0x71;
 				}
 			}
-			/* Mailbox type $E raises IPL7 for the catalog reload, then
-			   `move.w #0; A-line` to drop back to user IPL0 before
-			   jsr C14884. The A-line RTE smashed USP; MOVE SR does the
-			   drop without leaving the mailbox task. NOP here left IPL7
-			   through C146AE and the skip-positive-words loop never
-			   yielded. */
+			/* メールボックス type $E はカタログリロードで IPL7 を上げ、`move.w #0; A-line` でユーザ IPL0 へ落としてから jsr C14884。A-line RTE が USP を壊した。MOVE SR ならメールボックスタスクを離れずに落とせる。ここで NOP すると IPL7 が C146AE まで残り、正のワードを飛ばすループが yield しない。 */
 			const unsigned mb0 = win0 + 0x13200u;
 			const unsigned mb1 = win0 + 0x13600u;
 			for (unsigned i = mb0; i + 6u <= mb1 && i + 6u <= win1; i += 2) {
@@ -973,19 +953,13 @@ int CHardF3::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode
 			static const uint8_t kAlineIpl7[6] = { 0x30, 0x3c, 0x27, 0x00, 0xa0, 0x00 };
 			for (unsigned i = mb0; i + 6u <= mb1 && i + 6u <= win1; i += 2) {
 				if (memcmp(audioCpu_ + i, kAlineIpl7, 6) == 0) {
-					/* Stay at the mailbox task SR (user IPL0). MOVE SR
-					   #$2700 left C146AE uninterruptible and the first
-					   stream word was never consumed. */
+					/* メールボックスタスク SR（ユーザ IPL0）に留まる。MOVE SR #$2700 は C146AE を割り込み不可にし、最初のストリームワードが消費されなかった。 */
 					audioCpu_[i] = 0x4e; audioCpu_[i + 1] = 0x71;
 					audioCpu_[i + 2] = 0x4e; audioCpu_[i + 3] = 0x71;
 					audioCpu_[i + 4] = 0x4e; audioCpu_[i + 5] = 0x71;
 				}
 			}
-			/* Type $E: skip C12A14 (catalog reload). Packet+6 as song id
-			   rewrites D0F4/D09A and arabianm 0x21 ended with d0f4=0.
-			   Match bsr.w / movea.w (sp)+,a5 — A-line at +6 is already
-			   MOVE SR from the loop above. C12B8C A-lines are OS calls;
-			   do not rewrite them. */
+			/* Type $E: C12A14（カタログリロード）を飛ばす。Packet+6 を曲 ID にすると D0F4/D09A が書き換わり arabianm 0x21 は d0f4=0 で終わる。bsr.w / movea.w (sp)+,a5 に合わせる — +6 の A-line は上ループで既に MOVE SR。C12B8C の A-line は OS コール。書き換えない。 */
 			for (unsigned i = mb0; i + 6u <= mb1 && i + 6u <= win1; i += 2) {
 				if (audioCpu_[i] == 0x61 && audioCpu_[i + 1] == 0x00
 					&& audioCpu_[i + 4] == 0x3a && audioCpu_[i + 5] == 0x5f) {
@@ -994,9 +968,7 @@ int CHardF3::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode
 					break;
 				}
 			}
-			/* Type $E: C13306(D098+$E) yields C1100B (odd). jsr (a0) falls
-			   into C146AE and never returns. C1490A is the proven sequencer
-			   (delay trampoline). Replace bsr C13306 / jsr (a0) — 6 bytes. */
+			/* Type $E: C13306(D098+$E) は C1100B（奇数）を返す。jsr (a0) は C146AE へ落ちて戻らない。C1490A は実証済みシーケンサ（遅延トランポリン）。bsr C13306 / jsr (a0) を置換 — 6 バイト。 */
 			if (playOff) {
 				const unsigned playCpu = 0xC00000u + (playOff - win0);
 				for (unsigned i = mb0; i + 6u <= mb1 && i + 6u <= win1; i += 2) {
@@ -1012,10 +984,7 @@ int CHardF3::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode
 					}
 				}
 			}
-			/* C14884→C149E4 copies mailbox 4(a5) into D4A6 then trap#4.
-			   Type $E stores d3 (often 0) there, so C14A10 subtracts ~0.
-			   ~138 ticks in 12s cannot eat a 0x2100 wait at quantum 1.
-			   Use 0x40 so first waits expire; do not NOP trap#4. */
+			/* C14884→C149E4 はメールボックス 4(a5) を D4A6 へコピーして trap#4。Type $E はそこに d3（多くは 0）を格納するので C14A10 が ~0 を引く。12s で約 138 tick では量子 1 の 0x2100 待ちを食えない。0x40 を使い最初の待ちを期限切れに。trap#4 は NOP しない。 */
 			{
 				const unsigned q0 = win0 + 0x149E0u;
 				const unsigned q1 = win0 + 0x14A10u;
@@ -1029,9 +998,7 @@ int CHardF3::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode
 					}
 				}
 			}
-			/* Type 1 with 4(a5)<0 loops bsr C12B8C for songs 0..$62 (stop-all)
-			   then RTS. That path kills arabianm 0x21 D0F4. NOP only the bsr;
-			   do not bra into the play path (C12E08 6A→60 smashed boot). */
+			/* Type 1 で 4(a5)<0 は曲 0..$62 に bsr C12B8C をループ（全停止）して RTS。その経路は arabianm 0x21 の D0F4 を殺す。bsr だけ NOP。再生経路へ bra しない（C12E08 6A→60 はブートを壊した）。 */
 			{
 				const unsigned p0 = win0 + 0x12E00u;
 				const unsigned p1 = win0 + 0x12E20u;
@@ -1044,8 +1011,7 @@ int CHardF3::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode
 					}
 				}
 			}
-			/* Only opcode-0 (trap #3 then A-line). Other 2700 A-lines
-			   are OS calls — replacing them all broke boot. */
+			/* opcode-0（trap #3 次いで A-line）のみ。他の 2700 A-line は OS コール — 全部置換するとブートが壊れた。 */
 			static const uint8_t kOp0Aline[8] = {
 				0x4e, 0x43, 0x30, 0x3c, 0x27, 0x00, 0xa0, 0x00
 			};
@@ -1082,7 +1048,7 @@ int CHardF3::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode
 			const unsigned holeCpu = 0xC00000u + (holeOff - win0);
 			const unsigned callOff = playOff ? playOff : tickOff;
 			const unsigned callCpu = 0xC00000u + (callOff - win0);
-			const unsigned backCpu = 0xC00000u + (delayOff - win0) + 6u; /* subq */
+			const unsigned backCpu = 0xC00000u + (delayOff - win0) + 6u; /* subq 命令 */
 			uint8_t tr[36];
 			tr[0] = 0x4a; tr[1] = 0x78; tr[2] = 0xd4; tr[3] = 0xa6;
 			tr[4] = 0x67; tr[5] = 0x12;
@@ -1103,9 +1069,7 @@ int CHardF3::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode
 			audioCpu_[delayOff + 3] = (uint8_t)(holeCpu >> 16);
 			audioCpu_[delayOff + 4] = (uint8_t)(holeCpu >> 8);
 			audioCpu_[delayOff + 5] = (uint8_t)holeCpu;
-			/* C10CE0: movea.w #0,a7 / jsr C17A80 is a fatal reset that
-			   copies STOP template onto every OTIS voice. Boot uses
-			   C1090A/C109CC; nop only this late jsr. */
+			/* C10CE0: movea.w #0,a7 / jsr C17A80 は致命リセットで STOP テンプレートを全 OTIS ボイスへコピー。ブートは C1090A/C109CC を使う。この遅い jsr だけ nop。 */
 			for (unsigned i = win0 + 0x10C00u; i + 6u <= win0 + 0x10D80u && i + 6u <= win1; i += 2) {
 				if (audioCpu_[i] == 0x4e && audioCpu_[i + 1] == 0xb9
 					&& audioCpu_[i + 2] == 0x00 && audioCpu_[i + 3] == 0xc1
@@ -1122,7 +1086,7 @@ int CHardF3::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode
 	CEmuHardF3SetActive(this);
 	m68k_init();
 	m68k_set_cpu_type(M68K_CPU_TYPE_68000);
-	/* m68k_init() clears int_ack — reinstall F3 DUART IVR callback. */
+	/* m68k_init() は int_ack をクリアする — F3 DUART IVR コールバックを再インストール */
 	m68k_set_int_ack_callback(CEmuHardF3IntAck);
 	m68k_pulse_reset();
 	{

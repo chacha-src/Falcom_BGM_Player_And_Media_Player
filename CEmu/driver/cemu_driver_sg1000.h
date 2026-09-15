@@ -2,6 +2,7 @@
 #include "cemu_driver.h"
 #include "../machine/cemu_hard_sg1000.h"
 
+/* SG-1000/SC-3000: Z80 + SN76489。BIT7 メールボックスで曲を叩く */
 class CDriverSg1000 : public CDriver {
 public:
 	CDriverSg1000();
@@ -13,7 +14,9 @@ public:
 	int Seek(uint64_t sample) override;
 	int OverlayTitle(unsigned titleCode) override;
 
+	/* PSG 書込回数（診断） */
 	unsigned PsgWrites() const;
+	/* 糊が無音ならホストがトーンを強制 */
 	int ToneFallback() const { return toneFallback_; }
 
 private:
@@ -31,8 +34,12 @@ private:
 	int knownTick_;
 
 	void RunUntil(uint64_t endCycle);
+	/* PSG クロックを CPU 比で進める */
 	void TickPsg(uint64_t cpuCycles);
+	/* HALT 番兵付きで Z80 サブルーチンを呼ぶ */
 	void CallZ80(uint16_t targetPc);
+	/* mute → メールボックス poke → update tick */
 	void TriggerSong();
+	/* PSG が無音なら Tone0 を強制 */
 	void ForceToneTest();
 };

@@ -2,11 +2,10 @@
 #include "cemu_irem_cpu_tables.h"
 #include <string.h>
 
-/* Irem "Software Guard" V35 opcode substitution tables, transcribed from
-   MAME src/mame/irem/irem_cpu.cpp (BSD-3-Clause, Bryan McPhail). The custom
-   V35 decrypts opcode fetches only — data reads go through untouched — so a
-   256-entry byte substitution on the fetch path reproduces it exactly.
-   0x90 (NOP) marks entries MAME still lists as unknown. */
+/* Irem Software Guard V35 のオペコード置換表。MAME irem_cpu.cpp
+   （BSD-3-Clause, Bryan McPhail）から転記。カスタム V35 はフェッチのみ
+   復号しデータ読込はそのまま。256 エントリ置換で再現する。
+   0x90 (NOP) は MAME が未確定としている枠。 */
 
 static const uint8_t kBombermanTable[256] = {
 	0x90, 0x90, 0x79, 0x90, 0x9d, 0x48, 0x90, 0x90, 0x90, 0x90, 0x2e, 0x90, 0x90, 0xa5, 0x72, 0x90, /* 00 */
@@ -18,10 +17,9 @@ static const uint8_t kBombermanTable[256] = {
 	0x90, 0x2b, 0x88, 0xf9, 0x90, 0xa3, 0x83, 0x90, 0x75, 0x87, 0x90, 0xab, 0xeb, 0x90, 0xfe, 0x90, /* 60 */
 	0x90, 0xaf, 0xd0, 0x2c, 0xd1, 0xe6, 0x90, 0x43, 0xa2, 0xe7, 0x85, 0xe2, 0x49, 0x22, 0x29, 0x90, /* 70 */
 	0x7c, 0x90, 0x90, 0x9a, 0x90, 0x90, 0xb9, 0x90, 0x14, 0xcf, 0x33, 0x02, 0x90, 0x90, 0x90, 0x73, /* 80 */
-	/* 0x92: MAME still lists xxxx, but Blade Master treats encrypted 0x92 as
-	   plaintext 0x92 (XCHG DX,AX). Mapping it to NOP breaks YM2151 timer setup
-	   (INTP0 never arms). FINT's trailing 0x92 is a Fetch8 data byte and does
-	   not go through this table. */
+	/* 0x92: MAME は xxxx のままだが Blade Master は暗号 0x92 を平文 0x92
+	   （XCHG DX,AX）として扱う。NOP にすると YM2151 タイマ設定が壊れ
+	   INTP0 が武装しない。FINT 末尾の 0x92 は Fetch8 データで本表を通らない。 */
 	0x90, 0xc5, 0x92, 0x90, 0x90, 0xf3, 0xf6, 0x24, 0x90, 0x56, 0xd3, 0x90, 0x09, 0x01, 0x90, 0x90, /* 90 */
 	0x03, 0x2d, 0x1b, 0x90, 0xf5, 0xbe, 0x90, 0x90, 0xfb, 0x8e, 0x21, 0x8d, 0x0b, 0x90, 0x90, 0xb2, /* A0 */
 	0xfc, 0xfa, 0xc6, 0x90, 0xe8, 0xd2, 0x90, 0x08, 0x0a, 0xa8, 0x78, 0xff, 0x90, 0xb5, 0x90, 0x90, /* B0 */
@@ -278,11 +276,13 @@ static const uint8_t kRtypeleoTable[256] = {
 	0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0xe8, 0xd2, 0x90, 0x18, 0x90, 0x90, 0x90, 0xd1, 0x90, 0x90, /* F0 */
 };
 
+/* archive 名 → 256 バイト置換表 */
 struct CEmuIremCpuSet {
 	const char* set;
 	const uint8_t* table;
 };
 
+/* セット名と置換表の対応 */
 static const CEmuIremCpuSet kSets[] = {
 	{ "bmaster", kBombermanTable },
 	{ "crossbld", kBombermanTable },
@@ -339,13 +339,14 @@ static const CEmuIremCpuSet kSets[] = {
 	{ "firebarr", kRtypeleoTable },
 };
 
+/* archive 名から置換表を返す。親セット名への接尾辞フォールバックあり */
 const uint8_t* CEmuIremCpuDecryptionTable(const char* archive)
 {
 	if (!archive || !archive[0]) return NULL;
 	for (unsigned i = 0; i < sizeof(kSets) / sizeof(kSets[0]); i++)
 		if (_stricmp(kSets[i].set, archive) == 0)
 			return kSets[i].table;
-	/* Parent set fallback: gunforcej/gunforceu style suffixes. */
+	/* 親セット名フォールバック（gunforcej / gunforceu 型の接尾辞） */
 	for (unsigned i = 0; i < sizeof(kSets) / sizeof(kSets[0]); i++) {
 		const size_t n = strlen(kSets[i].set);
 		if (n >= 4 && _strnicmp(kSets[i].set, archive, n) == 0)

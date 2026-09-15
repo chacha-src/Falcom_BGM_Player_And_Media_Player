@@ -5,8 +5,8 @@
 #include "cemu_dos98.h"
 #include "cemu_np2ctx.h"
 
-/* PC-98 hard: NP2 i286 + OPN(A) @ 0x188 + PIT/PIC + hoot EXT ports.
-   Live NP2 core is process-global; BindNp2 swaps this instance's RAM/CPU. */
+/* PC-98 ハード: NP2 i286 + OPN(A) @ 0x188 + PIT/PIC + hoot EXT。
+   ライブ NP2 コアはプロセス全体で 1 組。BindNp2 がこのインスタンスの RAM/CPU を入れ替える。 */
 
 enum { CEMU_PC98_MIDI_CAP = 256000 };
 
@@ -25,30 +25,26 @@ public:
 	int LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode);
 	int TriggerPlay(unsigned titleCode);
 	int TriggerStop();
-	/* Run CPU until interrupt returns to the boot idle loop (or budget). */
+	/* 割り込みがブートアイドルへ戻るまで（または予算まで）CPU を回す */
 	void DrainInterrupt(uint64_t budgetCycles);
-	/* DOS / general pump: IRQ delivery, trampoline DOS, idle HLT quantum. */
+	/* DOS／汎用ポンプ: IRQ 配送、トランポリン DOS、アイドル HLT 量子 */
 	void PumpCycles(uint64_t endCycle);
-	/* Feed the OPN(A) its master clocks for a span of CPU cycles. Every path
-	   that advances cpuCycles_ must call this or the chip timers run slow. */
+	/* この CPU サイクル分のマスタクロックを OPN(A) へ。cpuCycles_ を進める経路は必ず呼ぶ。呼ばないとチップタイマが遅れる。 */
 	void AdvanceOpnClocks(uint64_t cpuCycles);
 
 	Ay_Cpu* Cpu() override { return NULL; }
 	uint8_t* Mem() override;
 	CChip* SoundChip() override { return chip_; }
-	/* Second FM chip of a SOUND ORCHESTRA board, NULL on every other. */
+	/* SOUND ORCHESTRA の第 2 FM。他ボードでは NULL */
 	CChip* OplChip() const { return opl_; }
 	int SorchMode() const { return modeSorch_; }
-	/* PIT ch1 + PPI speaker (PC-98 beep / 1-bit DAC). Always mixed: OPN
-	   rips that also drive the speaker would otherwise stay silent there. */
+	/* PIT ch1 + PPI スピーカ（PC-98 beep / 1bit DAC）。常に混成。スピーカも鳴らす OPN リップが無音にならないようにする。 */
 	void MixBeep(int16_t* stereo, int frames);
 	unsigned BeepActivity() const { return beepEventCount_; }
 	int ModeBeep() const { return modeBeep_; }
-	/* CEMU_PC98_IPPROF sampling for run loops outside PumpCycles (the
-	   non-DOS pc98vx path drives np2_step from the driver). */
+	/* PumpCycles 外のランループ用 CEMU_PC98_IPPROF 採取（非 DOS pc98vx はドライバから np2_step） */
 	void ProfSample();
-	/* Boot diagnostics: tells a guest that never ran apart from one that ran
-	   but never programmed the FM chip. */
+	/* ブート診断: 一度も走らなかったゲストと、走ったが FM を組まなかったゲストを分ける */
 	uint64_t CpuCycles() const { return cpuCycles_; }
 	unsigned OpnWriteCount() const { return opnWriteCount_; }
 
@@ -58,7 +54,7 @@ public:
 	void AttachIoHooks();
 	void DetachIoHooks();
 
-	/* Advance PIT/VSYNC residuals; deliver IRQ0/VSYNC/OPN if due. */
+	/* PIT/VSYNC 端数を進め、期限なら IRQ0/VSYNC/OPN を届ける */
 	int DeliverIrqs();
 	void TickSide(uint64_t cpuCycles);
 
@@ -72,62 +68,62 @@ public:
 	int bootIp_;
 	int funcVect_;
 	int dataAddr_;
-	/* Set when the guest supplied dataAddr_ through HostService 0x10. */
+	/* ゲストが HostService 0x10 で dataAddr_ を渡したときセット */
 	int dataAddrHost_;
 	int fileSize_;
 	int data2Addr_;
 	int file2Size_;
-	int addressing_; /* 0=flat linear, 1=seg:off words */
+	int addressing_; /* 0=平坦リニア、1=seg:off ワード */
 	int isDos_;
-	int nopnDrv_; /* 1 if NOPNDRV.COM staged (song ptr at DS:19F4) */
-	int dofmd_; /* 1 if DOFMD/BRANM glue staged (host 0x11 → real-mode song ptr) */
-	int fmd98_; /* 1 if FMD98.BIN/DRV staged (Falcom TotalSound) */
-	int fmdSongOff_; /* CS-relative song buffer (e.g. 0x22E0); 0 if unknown */
-	int rx98_; /* 1 if RX.BIN glue staged (Falcom Ys/Brandish-era OPN driver) */
-	int rxSongOff_; /* CS-relative song buffer (AH=0 mov si); 0 if unknown */
-	int prog98_; /* 1 if Falcom PROG.BIN glue (Alm/LM): INT7F cmd1 reads DS:SI song */
-	int progSongAddr_; /* flat song preload (e.g. 2000:6000 → 0x26000); 0 if unknown */
-	int bst398_; /* 1 if BirdySoft BST3 (0FC00 driver; cmd0 AH!=0 selects load) */
-	int koei98_; /* 1 if koei98.bin glue staged (INT 40h, packed seg:off ROMs) */
-	int cal98_; /* 1 if BirdySoft CAL/PAL INT60 driver (needs OPN ISR IVT install) */
-	int madp98_; /* 1 if QueenSoft MADP_98 (OPN ISR planted on INT40, needs INT0B mirror) */
-	int n3golf98_; /* 1 if n3golf98.bin glue (INT D2; OPN ISR parked on INT14) */
-	int dks98_; /* 1 if KSK DKS/FQ BGMDRV family (INT69 AH=0; host seg:off song bank) */
-	int mdplay98_; /* 1 if Glodia MDPLAY.BIN (non-D) — needs INT08 timer ISR) */
-	int musicComKeepalive_; /* 1: fakecall/music/46 — hold MUSIC.COM [0294]=0 while playing */
-	int synthIfKeepalive_; /* 1: SYNTH_98/S20 leaves IF=0 after INT60; host STI so OPN IRQs run */
-	int modeMidi_; /* catalog midiout — MPU-401 UART @ E0D0/E0D2 (FMP -m etc.) */
-	int midiCapArmed_; /* 0 during BootDos shells; 1 after — avoid 0x00 flood */
-	uint8_t sound86Mask_; /* A460 low bits: bit0=OPNA enhance, bit1=OPNA mask (MAME/NP2) */
+	int nopnDrv_; /* 1 なら NOPNDRV.COM を載せた（曲ポインタは DS:19F4） */
+	int dofmd_; /* 1 なら DOFMD/BRANM 糊を載せた（host 0x11 → リアルモード曲ポインタ） */
+	int fmd98_; /* 1 なら FMD98.BIN/DRV を載せた（Falcom TotalSound） */
+	int fmdSongOff_; /* CS 相対の曲バッファ（例 0x22E0）。未知なら 0 */
+	int rx98_; /* 1 なら RX.BIN 糊を載せた（Falcom Ys/Brandish 期 OPN ドライバ） */
+	int rxSongOff_; /* CS 相対の曲バッファ（AH=0 mov si）。未知なら 0 */
+	int prog98_; /* 1 なら Falcom PROG.BIN 糊（Alm/LM）: INT7F cmd1 が DS:SI 曲を読む */
+	int progSongAddr_; /* 平坦曲プリロード（例 2000:6000 → 0x26000）。未知なら 0 */
+	int bst398_; /* 1 なら BirdySoft BST3（0FC00 ドライバ。cmd0 AH!=0 でロード選択） */
+	int koei98_; /* 1 なら koei98.bin 糊を載せた（INT 40h、パック seg:off ROM） */
+	int cal98_; /* 1 なら BirdySoft CAL/PAL INT60 ドライバ（OPN ISR の IVT 植込が要る） */
+	int madp98_; /* 1 なら QueenSoft MADP_98（OPN ISR を INT40 に植える。INT0B ミラーが要る） */
+	int n3golf98_; /* 1 なら n3golf98.bin 糊（INT D2。OPN ISR は INT14 に置く） */
+	int dks98_; /* 1 なら KSK DKS/FQ BGMDRV 系（INT69 AH=0。ホスト seg:off 曲バンク） */
+	int mdplay98_; /* 1 なら Glodia MDPLAY.BIN（非 D）— INT08 タイマ ISR が要る */
+	int musicComKeepalive_; /* 1: fakecall/music/46 — 再生中 MUSIC.COM [0294]=0 を維持 */
+	int synthIfKeepalive_; /* 1: SYNTH_98/S20 は INT60 後 IF=0。ホスト STI で OPN IRQ を通す */
+	int modeMidi_; /* カタログ midiout — MPU-401 UART @ E0D0/E0D2（FMP -m 等） */
+	int midiCapArmed_; /* BootDos シェル中は 0。以降 1 — 0x00 洪水を避ける */
+	uint8_t sound86Mask_; /* A460 下位: bit0=OPNA 拡張、bit1=OPNA マスク（MAME/NP2） */
 	uint8_t sound86FifoCtl_; /* A468 */
 	uint8_t sound86DacCtl_; /* A46A */
 	uint8_t sound86Mute_; /* A66E */
-	int wolfteam98_; /* 1 if 000_BOOT + F000 glue (INT 4A play, song @ dataaddr) */
-	int wolfMiSeg_; /* real-mode seg of staged MF instrument (0 if none) */
-	int wolfSyncRun_; /* 0=boot open-bus FF (4713); 1=runtime not-busy */
-	/* Relocated BSS (d_98 defaults; scanned from 000_BOOT opcode context). */
-	uint16_t wolfGateStop_; /* play-stop gate byte (d_98: 5B48) */
-	uint16_t wolfGatePlay_; /* play-run gate byte (d_98: 5B5A) */
-	uint16_t wolfSongPtr_; /* far ptr to song (d_98: 5B5D) */
-	uint16_t wolfSongBuf_; /* CS-relative song shadow (d_98: 7E5E) */
-	uint16_t wolfTitleWord_; /* title code word (d_98: 643A) */
-	uint16_t wolfFlagA_; /* INT4C play-armed byte (d_98: 0662; gou: 062F) */
-	int wstimer_; /* catalog wstimer>0: SORC98-style INT D2 play needs cmd re-order */
-	int dummySndRom_; /* catalog dummysndrom: plant BIOS sound-present bits */
-	int pc88VaIo_; /* 1: PC-88VA / vados — dual OPN port families */
-	int sorcGlue_; /* 1: Falcom SORCERIAN bootcs glue (data @3000 or VA @11800) */
-	uint16_t olteusMapSeg_; /* olteus_va: MAP.EXE load seg (CS) for timer ISR */
-	uint16_t olteusDataSeg_; /* MAP DS (CS+0x0F86) — [003C]/[CC4D]/[5Bxx] live here */
-	int olteusTimerOn_; /* VA ports 134/136/10A armed (OUT 10A,0022) */
-	int olteusTrampOk_; /* INT08 trampoline planted (optional) */
-	int olteusIrqPulse_; /* TickSide arms; PumpCycles soft-calls MAP:09BC */
-	int olteusInTick_; /* 1 while soft-call into MAP tick is live */
+	int wolfteam98_; /* 1 なら 000_BOOT + F000 糊（INT 4A 再生、曲 @ dataaddr） */
+	int wolfMiSeg_; /* 載せた MF 音色のリアルモード seg（無ければ 0） */
+	int wolfSyncRun_; /* 0=ブート時オープンバス FF（4713）。1=実行時 not-busy */
+	/* 再配置 BSS（d_98 既定。000_BOOT オペコード文脈からスキャン） */
+	uint16_t wolfGateStop_; /* 再生停止ゲート（d_98: 5B48） */
+	uint16_t wolfGatePlay_; /* 再生実行ゲート（d_98: 5B5A） */
+	uint16_t wolfSongPtr_; /* 曲への far ポインタ（d_98: 5B5D） */
+	uint16_t wolfSongBuf_; /* CS 相対の曲シャドウ（d_98: 7E5E） */
+	uint16_t wolfTitleWord_; /* 曲コード語（d_98: 643A） */
+	uint16_t wolfFlagA_; /* INT4C 再生武装バイト（d_98: 0662。gou: 062F） */
+	int wstimer_; /* カタログ wstimer>0: SORC98 風 INT D2 再生はコマンド順の組み直しが要る */
+	int dummySndRom_; /* カタログ dummysndrom: BIOS 音源ありビットを植える */
+	int pc88VaIo_; /* 1: PC-88VA / vados — OPN ポート族が 2 系統 */
+	int sorcGlue_; /* 1: Falcom SORCERIAN bootcs 糊（data @3000 または VA @11800） */
+	uint16_t olteusMapSeg_; /* olteus_va: タイマ ISR 用 MAP.EXE ロード seg（CS） */
+	uint16_t olteusDataSeg_; /* MAP DS（CS+0x0F86）— [003C]/[CC4D]/[5Bxx] はここ */
+	int olteusTimerOn_; /* VA ポート 134/136/10A 武装（OUT 10A,0022） */
+	int olteusTrampOk_; /* INT08 トランポリンを植えた（任意） */
+	int olteusIrqPulse_; /* TickSide が武装。PumpCycles が MAP:09BC をソフトコール */
+	int olteusInTick_; /* MAP tick へのソフトコールが生きている間 1 */
 	uint64_t olteusTimerResidual_;
-	uint64_t olteusTickGuard_; /* cycles spent in MAP since soft-call */
-	unsigned vaPc88PortHits_; /* 44h/A8h OUTs on VA */
-	unsigned vaPc98PortHits_; /* 188h OPN OUTs on VA */
-	uint8_t vaPc88LatchedAddr_; /* staged addr for PC-88 OPN ports */
-	uint8_t vaPc88LatchedAddrHi_; /* staged hi-bank addr for PC-88 OPNA */
+	uint64_t olteusTickGuard_; /* ソフトコール以降 MAP に費やしたサイクル */
+	unsigned vaPc88PortHits_; /* VA 上の 44h/A8h OUT */
+	unsigned vaPc98PortHits_; /* VA 上の 188h OPN OUT */
+	uint8_t vaPc88LatchedAddr_; /* PC-88 OPN ポートの載せ先 */
+	uint8_t vaPc88LatchedAddrHi_; /* PC-88 OPNA ハイバンクの載せ先 */
 	uint64_t cpuCycles_;
 	uint8_t extCmd_;
 	uint16_t extSong_;
@@ -139,36 +135,31 @@ public:
 	int irqEdgeSeen_;
 	int irqEdgeConsumed_;
 	unsigned opnWriteCount_;
-	unsigned opnKeyOnCount_; /* reg 0x28 with slot bits */
-	unsigned opnTlLiveCount_; /* TL/KS regs with data < 0x7F after init */
-	unsigned opnFnumCount_; /* A0-A6 / 1A0-1A6 f-number writes */
-	unsigned opnTimerCount_; /* 24/25/27 timer regs */
-	unsigned opnIrqDeliverCount_; /* accepted OPN IRQs (INT 0Bh) */
-	/* Key-ons per reg-0x28 channel field. A driver that decided it is
-	   talking to an OPNA keys channels 4-6, which a YM2203 cannot sound —
-	   the aggregate key-on count alone cannot tell that from real music. */
+	unsigned opnKeyOnCount_; /* スロットビット付き reg 0x28 */
+	unsigned opnTlLiveCount_; /* 初期化後 data < 0x7F の TL/KS レジスタ */
+	unsigned opnFnumCount_; /* A0-A6 / 1A0-1A6 F-number 書込 */
+	unsigned opnTimerCount_; /* 24/25/27 タイマレジスタ */
+	unsigned opnIrqDeliverCount_; /* 受けた OPN IRQ（INT 0Bh） */
+	/* reg 0x28 チャネル欄ごとのキーオン。OPNA だと思ったドライバは ch 4-6 を叩くが YM2203 では鳴らない。
+	   合計キーオン数だけでは本物の演奏と区別できない。 */
 	unsigned opnKeyOnCh_[8];
-	unsigned pitTickCount_;  /* PIT ch0 wraps (an IRQ0 would have fired) */
-	unsigned timerIrqCount_; /* INT 08 deliveries — tells a driver whose ISR
-	                            never runs from one that runs and does
-	                            nothing, which look identical otherwise */
+	unsigned pitTickCount_;  /* PIT ch0 ラップ（IRQ0 が撃たれたはず） */
+	unsigned timerIrqCount_; /* INT 08 配送回数 — ISR が走らないドライバと、走って何もしないドライバを分ける */
 	int lastSongLoadOk_;
 	int lastSongLoadBytes_;
-	/* Debug: last OPN addr/data pairs (addr port then data port). */
+	/* デバッグ: 直近 OPN addr/data 対（addr ポートのあと data ポート） */
 	uint16_t opnLogAddr_[64];
 	uint8_t opnLogData_[64];
 	unsigned opnLogCount_;
-	/* The first 64 writes are always the reset/init boilerplate; what a
-	   driver writes while it is failing to make sound is at the other end,
-	   so keep a ring of the most recent ones too. */
+	/* 先頭 64 書込は常にリセット／初期化の定型。音が出ないときの書込は末尾なので、直近のリングも残す */
 	uint16_t opnTailAddr_[64];
 	uint8_t opnTailData_[64];
 	unsigned opnTailCount_;
 	uint8_t opnLatchedAddr_;
-	uint8_t ssgPortAJumper_; /* soft SSG I/O A; bit7 set enables PortIn override */
-	uint8_t ssgEcho_[16]; /* last SSG 00-0F DATA0 writes; detect IN-compare */
+	uint8_t ssgPortAJumper_; /* ソフト SSG I/O A。bit7 セットで PortIn 上書きを許可 */
+	uint8_t ssgEcho_[16]; /* 直近 SSG 00-0F DATA0 書込。IN 比較を検出 */
 	uint8_t opnLatchedAddrHi_;
-	/* MPU-401 UART capture (midiout / FMP3 -m → VST live inject). */
+	/* MPU-401 UART キャプチャ（midiout / FMP3 -m → VST ライブ注入） */
 	unsigned MidiByteCount() const { return midiCount_; }
 	uint8_t MidiByteAt(unsigned i) const {
 		return (midiBytes_ && i < midiCount_) ? midiBytes_[i] : (uint8_t)0;
@@ -181,11 +172,11 @@ public:
 	const char* DosSongName() const { return dosSong_; }
 	void MidiForceUart(int on) { mpuUart_ = on ? 1 : 0; }
 	void MidiCaptureReset();
-	/* Wolfteam E0D0 command-stream capture (raw bytes written to E0D0). */
+	/* Wolfteam E0D0 コマンドストリームキャプチャ（E0D0 へ書いた生バイト） */
 	uint8_t wolfCmdLog_[2048];
 	unsigned wolfCmdLogCount_;
-	unsigned wolfCmdWriteCount_; /* total E0D0 writes (may exceed log cap) */
-	/* E0D0 MIDI stream parser state + bridge stats. */
+	unsigned wolfCmdWriteCount_; /* E0D0 書込総数（ログ上限を超え得る） */
+	/* E0D0 MIDI ストリームパーサ状態 + ブリッジ統計 */
 	int wolfBridgeEnable_;
 	unsigned wolfNoteOnCount_;
 	unsigned wolfNoteOffCount_;
@@ -195,7 +186,7 @@ public:
 	int wolfDataIdx_;
 	int wolfDataNeed_;
 	int wolfInSysex_;
-	/* OPN FM voice allocation for the MIDI→FM bridge. */
+	/* MIDI→FM ブリッジ用 OPN FM ボイス割当 */
 	int wolfVoiceCount_;
 	int wolfVoiceActive_[6];
 	int wolfVoiceMidiCh_[6];
@@ -213,7 +204,7 @@ private:
 	void PitOut(uint16_t port, uint8_t data);
 	uint8_t PitIn(uint16_t port);
 	void PitTick(uint64_t cpuCycles);
-	/* Wolfteam E0D0 MUSDRV command-stream → OPN soft bridge. */
+	/* Wolfteam E0D0 MUSDRV コマンドストリーム → OPN ソフトブリッジ */
 	void WolfCmdByte(uint8_t data);
 	void WolfBridgeReset();
 	void WolfMidiDispatch(uint8_t status, uint8_t d0, uint8_t d1);
@@ -229,19 +220,16 @@ private:
 	uint8_t MidiDataIn();
 	void MidiPushAck(uint8_t v);
 	void MidiCaptureByte(uint8_t v);
-	/* MPU-401 intelligent: clock-to-host / play step on PIT wraps. */
+	/* MPU-401 intelligent: PIT ラップで clock-to-host / play ステップ */
 	void MpuClockTick();
 	void MpuFinishReset();
 
 	CChip* chip_;
-	/* SNE SOUND ORCHESTRA: a 26K-compatible YM2203 plus a second FM chip at
-	   0x18C/0x18E, which on every other PC-98 board is the OPNA's high
-	   register bank. Non-zero switches those two ports over to opl_.
-	   1 = plain/L (YM3812), 2 = V/VS/LS (Y8950; FM part only for now). */
+	/* SNE SOUND ORCHESTRA: 26K 互換 YM2203 に加え 0x18C/0x18E の第 2 FM。他 PC-98 では OPNA ハイバンク。
+	   非 0 ならその 2 ポートを opl_ へ。1=plain/L（YM3812）、2=V/VS/LS（Y8950。当面 FM 部のみ）。 */
 	int modeSorch_;
 	CChip* opl_;
-	/* Shadow of the OPL half so its nine channels can be shown on their own
-	   monitor rows beside the OPN ones. */
+	/* OPL 半分のシャドウ。9ch を OPN の横のモニタ行に出せるようにする */
 	void SorchTrackOplWrite(uint8_t reg, uint8_t data);
 	uint8_t sorchOplRegs_[256];
 	uint8_t sorchOplOn_[9];
@@ -251,7 +239,7 @@ private:
 	uint32_t* midiDelta_;
 	unsigned midiCount_;
 	unsigned midiNoteOnCount_;
-	unsigned midiPortOutCount_; /* E0D0 OUTs even when capture disarmed */
+	unsigned midiPortOutCount_; /* キャプチャ非武装でも E0D0 OUT */
 	uint64_t midiLastCycle_;
 	int mpuUart_;
 	uint8_t mpuAckQ_[32];
@@ -259,7 +247,7 @@ private:
 	unsigned mpuAckW_;
 	uint8_t mpuRx_;
 	int mpuRxFull_;
-	/* Intelligent-mode firmware (FMD / MPU-401, not UART 3Fh). */
+	/* Intelligent モードファーム（FMD / MPU-401。UART 3Fh ではない） */
 	uint8_t mpuCmdByte_;
 	uint8_t mpuTempo_;
 	uint8_t mpuTimebase_;
@@ -270,7 +258,7 @@ private:
 	int mpuResetBusy_;
 	uint64_t mpuResetUntil_;
 
-	/* PIT ch0 */
+	/* PIT チャネル 0 */
 	uint32_t pitClockHz_;
 	uint16_t pitReload_;
 	uint32_t pitCounter_;
@@ -279,22 +267,21 @@ private:
 	int pitWriteHi_;
 	int pitReadHi_;
 	int pitRunning_;
-	/* Counter-latch command state. Reading the counter has to report where
-	   it actually is: drivers calibrate the CPU against it. */
+	/* カウンタラッチコマンド状態。読込は実際の位置を返す必要がある。ドライバが CPU をこれで較正する。 */
 	uint16_t pitLatch_;
 	int pitLatched_;
 
-	/* PIT ch1 = speaker square (ports 0x73 / control 0x77 ch=1). */
+	/* PIT ch1 = スピーカ矩形（ポート 0x73 / コントロール 0x77 ch=1） */
 	uint16_t pit1Reload_;
 	uint32_t pit1Counter_;
 	int pit1WriteHi_;
 	int pit1ReadHi_;
-	int pit1Access_; /* 8253 RW: 1=lobyte, 2=hibyte, 3=lobyte/hibyte */
+	int pit1Access_; /* 8253 RW: 1=下位、2=上位、3=下位/上位 */
 	int pit1Running_;
 	uint64_t pit1Phase_;
 	uint64_t pit1PhaseInc_;
 	void BeepCommitPit1();
-	/* PPI port C @ 0x35: bit3 clear → speaker gated on (MAME/QEMU). */
+	/* PPI ポート C @ 0x35: bit3 クリアでスピーカゲート ON（MAME/QEMU） */
 	uint8_t ppiC_;
 	int modeBeep_;
 	unsigned beepEventCount_;
@@ -303,14 +290,14 @@ private:
 	void BeepMonUpdate();
 	void BeepSetGateFromPpi();
 
-	/* VSYNC ~60 Hz */
+	/* VSYNC 約 60Hz */
 	uint64_t vsyncResidual_;
 	int vsyncPending_;
 	uint8_t gdcA0Poll_;
-	/* OPN clock residual across PumpCycles host samples (DOS path) */
+	/* PumpCycles ホストサンプルを跨ぐ OPN クロック端数（DOS 経路） */
 	uint64_t opnPumpResidual_;
 
-	/* Host service latch (0x7D0 family) */
+	/* ホストサービスラッチ（0x7D0 族） */
 	uint8_t hostFunc_;
 	uint16_t hostParam1_;
 	uint16_t hostParam2_;
@@ -342,8 +329,8 @@ private:
 	uint8_t* np2Ram_;
 	uint8_t np2Cpu_[CEMU_NP2_CPU_SIZE];
 	int np2HaveCpu_;
-	int pmdOpnIrq_; /* PMD*: music clock is OPN Timer B — do not deliver INT08 */
-	int pmdPlayArmed_; /* 1 after TriggerPlay — BootDos still needs INT08 */
+	int pmdOpnIrq_; /* PMD*: 音楽クロックは OPN Timer B — INT08 を届けない */
+	int pmdPlayArmed_; /* TriggerPlay 後 1 — BootDos はまだ INT08 が要る */
 };
 
 void CEmuHardPc98SetActive(CHardPc98* hw);

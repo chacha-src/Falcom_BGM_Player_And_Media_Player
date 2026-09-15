@@ -26,26 +26,23 @@ extern "C" {
 #include <string.h>
 #include <stdlib.h>
 
-/* Sega System16 / Capcom CPS1 sound CPUs typically wait for latch+NMI/IRQ.
-   Without the main 68K we inject a short command sequence after boot.
-   Keep 0x81+ first (shinobi). Cotton only accepts 0x10..0x27 ? try those after. */
+/* Sega System16 / Capcom CPS1 音源 CPU は通常ラッチ+NMI/IRQ 待ち。メイン 68K が無いのでブート後に短いコマンド列を注入。
+   先に 0x81+（shinobi）。Cotton は 0x10..0x27 のみ受ける — そのあと試す。 */
 static const uint8_t kSys16TryCmds[] = {
 	0x81, 0x82, 0x83, 0x84, 0x85, 0x01, 0x02, 0x03, 0x40, 0x41, 0x90, 0xa0,
 	0x91, 0x92, 0xb0, 0xc0, 0xc5, 0xa3,
 	0x12, 0x10, 0x1A, 0x22, 0x14, 0x20, 0x18, 0x24
 };
-/* Avoid 0xF0/0xFF ? stop/fade on CPS1. Prefer 0x40+ (ffight BGM) before low
-   SE codes that BLAST then silence. Keep 0x01 late ? it BLASTS on ver2. */
+/* CPS1 では 0xF0/0xFF を避ける（停止／フェード）。低 SE（BLAST 後無音）より 0x40+（ffight BGM）を先に。0x01 は遅く — ver2 で BLAST。 */
 static const uint8_t kCps1TryCmds[] = {
 	0x40, 0x41, 0x50, 0x42, 0x55, 0x57, 0x10, 0x12, 0x20, 0x30, 0x02, 0x03,
 	0x04, 0x01, 0x80, 0x81
 };
-/* Capcom GNG BGM ? lead with codes that sustain on avengers/commando/gunsmoke;
-   0x2b/0x23/0x1A are AUDITION (flat 32768) on several titles. */
+/* Capcom GNG BGM — avengers/commando/gunsmoke で持続するコードを先頭に。0x2b/0x23/0x1A は複数タイトルで AUDITION（平坦 32768）。 */
 static const uint8_t kGngTryCmds[] = {
 	0x21, 0x22, 0x28, 0x29, 0x25, 0x35, 0x31, 0x2c, 0x36, 0x33, 0x2d, 0x2e
 };
-/* Sega OutRun / After Burner BGM (0x81+ are often SE on AB). */
+/* Sega OutRun / After Burner BGM（AB では 0x81+ がしばしば SE） */
 static const uint8_t kOutRunTryCmds[] = {
 	0x84, 0x81, 0x82, 0x83, 0x85, 0x86, 0x87, 0x88
 };
@@ -59,53 +56,49 @@ static const uint8_t kKonamiTryCmds[] = {
 	0x01, 0x02, 0x03, 0x10, 0x11, 0x12, 0x20, 0x21, 0x30, 0x40, 0x80, 0x81
 };
 static const uint8_t kNamcoTryCmds[] = {
-	/* Sys12 C76: many catalog prefers (0x01/0x10) are silent or flat drones;
-	   0x20/0x08/0x30 are sustained BGM on aquarush/ehrgeiz/golgo13/�c.
-	   0x01 early: kaiunqz/mdhorse sustained themes. */
+	/* Sys12 C76: カタログ prefer（0x01/0x10）の多くは無音または平坦ドローン。0x20/0x08/0x30 は aquarush/ehrgeiz/golgo13 等で持続 BGM。
+	   0x01 を早く: kaiunqz/mdhorse の持続テーマ。 */
 	0x20, 0x08, 0x30, 0x01, 0x10, 0x18, 0x28, 0x40, 0x04, 0x02, 0x03, 0x80
 };
 static const uint8_t kSys18TryCmds[] = {
 	0x81, 0x82, 0x83, 0x84, 0x85, 0x86, 0x90, 0x91, 0x10, 0x12, 0x20, 0x22
 };
-/* Taito TC0140SYT games number BGM from 0x01 upward; 0x00 is "stop". */
+/* Taito TC0140SYT は BGM を 0x01 から番号付け。0x00 は停止 */
 static const uint8_t kTaitoTryCmds[] = {
 	0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c,
 	0x0d, 0x0e, 0x0f, 0x10, 0x11, 0x12
 };
-/* Irem M72/M84: BGM at 0x20+index (m99/bbmanw) or 0x30+ (imgfight/loht);
-   low codes are often mode/SE. Include 0x80+ for matchit. */
+/* Irem M72/M84: BGM は 0x20+index（m99/bbmanw）または 0x30+（imgfight/loht）。低コードはしばしば mode/SE。matchit 用に 0x80+ も含む。 */
 static const uint8_t kIremTryCmds[] = {
 	0x74, 0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28, 0x29, 0x2a, 0x2b,
 	0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x40, 0x41, 0x50, 0x60,
 	0x70, 0x71, 0x72, 0x73, 0x75, 0x80, 0x81, 0x82, 0x01, 0x0b, 0x0a, 0x02, 0x03, 0x04, 0x10
 };
-/* Irem M92: same command nibble family as M72 ? BGM starts at 0x20. */
+/* Irem M92: M72 と同じコマンドニブル族。BGM は 0x20 から */
 static const uint8_t kM92TryCmds[] = {
 	0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28, 0x29, 0x2a, 0x2b,
 	0x2c, 0x2d, 0x2e, 0x2f, 0x01, 0x02, 0x03, 0x04, 0x80, 0x81
 };
-/* Sega System1/2 BGM commands ? prefer 0x80+ sustained themes. */
+/* Sega System1/2 の BGM コマンド — 持続テーマは 0x80+ を優先 */
 static const uint8_t kSys1TryCmds[] = {
 	0x81, 0x82, 0x83, 0x80, 0x84, 0x85, 0x86, 0x88, 0x01, 0x02, 0x03, 0x04,
 	0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c
 };
-/* Konami Scramble / Time Pilot ? 0x0B is a known sustained BGM.
-   GX400 (gradius) uses 0x40+; try-table below is overridden per-board. */
+/* Konami Scramble / Time Pilot — 0x0B は既知の持続 BGM。GX400（gradius）は 0x40+。下の試行表は基板ごとに上書き。 */
 static const uint8_t kKonamiAyTryCmds[] = {
 	0x0b, 0x09, 0x0e, 0x0a, 0x08, 0x0c, 0x0d, 0x0f, 0x07, 0x06,
 	0x10, 0x14, 0x1a, 0x20, 0x21, 0x01, 0x02, 0x03
 };
-/* GX400 ISR @0085 only accepts latch==1 (channel init); other codes RET NZ.
-   Catalog 0x40+/0x80+ are 68k-side ids ? map them onto 0x01 for the latch. */
+/* GX400 ISR @0085 は latch==1（チャネル初期化）だけ受ける。他は RET NZ。カタログ 0x40+/0x80+ は 68k 側 id — ラッチへは 0x01 に写す。 */
 static const uint8_t kGx400TryCmds[] = {
 	0x01, 0xc3, 0xc4, 0xc5, 0xc6, 0xc7, 0x91, 0x92, 0x93, 0xa0
 };
-/* Technos Double Dragon 2 / China Gate / WWF. */
+/* Technos Double Dragon 2 / China Gate / WWF（基板） */
 static const uint8_t kDdragon2TryCmds[] = {
 	0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c,
 	0x0d, 0x0e, 0x0f, 0x20, 0x22
 };
-/* Taito flstory: prefer MSM-group songs (arm 0x90 �� C500 @08E7). */
+/* Taito flstory: MSM 群の曲を優先（arm 0x90 → C500 @08E7） */
 static const uint8_t kFlstoryTryCmds[] = {
 	0x15, 0x16, 0x18, 0x05, 0x03, 0x06, 0x08, 0x0e, 0x0f, 0x01, 0x04
 };
@@ -218,15 +211,14 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 	cmdIndex_ = 0;
 	nextGngIrq_ = 0;
 	alphaNmiBusy_ = 0;
-	/* Catalog title pins the song (incl. code 0 = Stop). Without a titlelist,
-	   fall back to board defaults and optional try-table hunting. */
+	/* カタログタイトルが曲を固定（コード 0 = 停止含む）。titlelist が無いときは基板既定と任意の試行表ハントへ。 */
 	songCmdWord_ = (uint16_t)titleCode;
 	songCmdDword_ = titleCode;
 	if (ge && ge->titleCount > 0) {
 		songCmd_ = (uint8_t)(titleCode & 0xff);
 		songCmdWord_ = (uint16_t)titleCode;
 		songCmdDword_ = titleCode;
-		/* Prefer a playable BGM when the playlist hands STOP / voice / empty. */
+		/* プレイリストが STOP／ボイス／空なら再生可能な BGM を優先 */
 		if (hw_->board_ == CEMU_AC_BOARD_KONAMI_GX) {
 			int bad = (titleCode == 0 || titleCode == 0x200u || (titleCode & 0xffu) == 0);
 			if (!bad) {
@@ -243,8 +235,7 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 					songCmd_ = (uint8_t)(prefer & 0xff);
 				}
 			}
-			/* tkmmpzdm: Voice 0x53F remaps onto the same default as Opening
-			   0x601. Character themes 0x101/0x102 stay distinct. */
+			/* tkmmpzdm: Voice 0x53F は Opening 0x601 と同じ既定へ。キャラテーマ 0x101/0x102 は別のまま。 */
 			if (ge->archive && !_stricmp(ge->archive, "tkmmpzdm")) {
 				if (titleCode == 0x53Fu || titleCode == 0x60Eu
 					|| titleCode == 0x603u) {
@@ -262,28 +253,26 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 		pinned_ = 1;
 	} else if (hw_->board_ == CEMU_AC_BOARD_RAIZING
 		&& hw_->RaizingType() == 4) {
-		/* Battle Bakraid indexes its script table from zero, so song 0 is a
-		   BGM request like any other rather than the stop code it stands for
-		   on the boards below; without this it rendered as song 1. */
+		/* Battle Bakraid はスクリプト表を 0 から引くので曲 0 は下の基板の停止ではなく通常の BGM 要求。これが無いと曲 1 として描画された。 */
 		songCmd_ = 0x00;
 		pinned_ = 1;
 	} else if (hw_->board_ == CEMU_AC_BOARD_GNG)
-		songCmd_ = 0x2b; /* Flatland BGM */
+		songCmd_ = 0x2b; /* Flatland BGM（曲） */
 	else if (hw_->board_ == CEMU_AC_BOARD_ABURNER)
-		songCmd_ = 0x92; /* Maximum Power */
+		songCmd_ = 0x92; /* Maximum Power（曲） */
 	else if (hw_->board_ == CEMU_AC_BOARD_OUTRUN)
-		songCmd_ = 0x85; /* Magical Sound Shower */
+		songCmd_ = 0x85; /* Magical Sound Shower（曲） */
 	else if (hw_->board_ == CEMU_AC_BOARD_HANGON
 		&& ge && _stricmp(ge->subtype, "sharrier") == 0)
-		songCmd_ = 0xad; /* Theme ? BGM is 0xa3..0xb9; 0xe7 dies mid-probe */
+		songCmd_ = 0xad; /* テーマ — BGM は 0xa3..0xb9。0xe7 はプローブ途中で死ぬ */
 	else if (hw_->board_ == CEMU_AC_BOARD_HANGON)
-		songCmd_ = 0x9d; /* Hang-On Main Theme */
+		songCmd_ = 0x9d; /* Hang-On メインテーマ */
 	else if (hw_->board_ == CEMU_AC_BOARD_CPS_QS)
 		songCmd_ = 0x01;
 	else if (hw_->board_ == CEMU_AC_BOARD_CPS1)
 		songCmd_ = 0x40;
 	else if (hw_->board_ == CEMU_AC_BOARD_FLSTORY)
-		/* 0x05 arms C500 (0x90) ? MSM melody path @08E7. 0x02's arm 0x86 is inert. */
+		/* 0x05 が C500（0x90）を武装 — MSM メロディ経路 @08E7。0x02 の arm 0x86 は無効 */
 		songCmd_ = 0x05;
 	else if (hw_->board_ == CEMU_AC_BOARD_TAITO_YM2610
 		|| hw_->board_ == CEMU_AC_BOARD_TAITO_OPM
@@ -301,44 +290,38 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 		songCmd_ = 0x01;
 	else if (hw_->board_ == CEMU_AC_BOARD_KONAMI_SCRAMBLE
 		|| hw_->board_ == CEMU_AC_BOARD_KONAMI_TIMEPLT)
-		/* Scramble 0x01-0x05 are short setup stubs that clear the channel;
-		   0x0B is a sustained theme with note/volume motion (varying peaks).
-		   GX400 uses 0x40+ catalog codes ? do not default to 0x0B. */
+		/* Scramble 0x01-0x05 はチャネルを消す短いセットアップ stub。0x0B は音量／音程が動く持続テーマ（ピーク変動）。GX400 は 0x40+ — 既定を 0x0B にしない。 */
 		songCmd_ = 0x0b;
 	else if (hw_->board_ == CEMU_AC_BOARD_KONAMI_GX400)
-		songCmd_ = 0x01; /* ISR only arms on latch==1 (channel init) */
+		songCmd_ = 0x01; /* ISR は latch==1（チャネル初期化）のときだけ武装 */
 	else if (hw_->board_ == CEMU_AC_BOARD_NAMCO_C352)
-		songCmd_ = 0x20; /* Sys12: 0x20 is sustained BGM on most C76 sets */
+		songCmd_ = 0x20; /* Sys12: 大半の C76 で 0x20 が持続 BGM */
 	else if (hw_->board_ == CEMU_AC_BOARD_IREM_M72)
 		songCmd_ = 0x30;
 	else
 		songCmd_ = 0x81;
-	/* Catalog may pin scramble stub codes 0x01-0x05 (channel clears immediately).
-	   Coerce onto a sustained BGM id so probes see PLAY with moving peaks.
-	   GX400 uses a different command space (0x40+); leave it alone here. */
+	/* カタログが scramble stub 0x01-0x05 を固定することがある（チャネル即クリア）。持続 BGM id へ寄せ、プローブが動くピークで PLAY を見る。GX400 は別コマンド空間（0x40+）。ここでは触らない。 */
 	if ((hw_->board_ == CEMU_AC_BOARD_KONAMI_SCRAMBLE
 		|| hw_->board_ == CEMU_AC_BOARD_KONAMI_TIMEPLT)
 		&& songCmd_ >= 0x01 && songCmd_ <= 0x05) {
 		songCmd_ = 0x0b;
-		pinned_ = 0; /* allow try-table if 0x0B is silent on a clone */
+		pinned_ = 0; /* 0x0B がクローンで無音なら試行表を許す */
 	}
-	/* GX400: sound ROM ISR accepts only latch 0x01; catalog BGM ids stay in
-	   songCmdWord_ for diagnostics but the latch must be the init strobe. */
+	/* GX400: 音源 ROM ISR はラッチ 0x01 のみ。カタログ BGM id は診断用に songCmdWord_ に残すが、ラッチは初期化ストローブ。 */
 	if (hw_->board_ == CEMU_AC_BOARD_KONAMI_GX400) {
 		if (songCmd_ != 0x01)
 			songCmd_ = 0x01;
 	}
-	/* flstory: 0x02 arms with 0x86 (01F0 ignore); prefer MSM slots (0x90��C500).
-	   Keep 0x15 ? it is audible (was WEAK); 0x05 is silent on this set. */
+	/* flstory: 0x02 は 0x86 で武装（01F0 無視）。MSM 枠（0x90→C500）を優先。0x15 は聞こえる（WEAK だった）ので残す。このセットで 0x05 は無音。 */
 	if (hw_->board_ == CEMU_AC_BOARD_FLSTORY) {
 		if (hw_->MsisaacMap()) {
-			/* Catalog Credit 0x15 / Demo 0x1B / Main 0x22. Enemy vs Ranking. */
+			/* カタログ Credit 0x15 / Demo 0x1B / Main 0x22。Enemy vs Ranking */
 			if (songCmd_ == 0x15u || songCmd_ == 0x1bu)
 				songCmd_ = 0x30u;
 			else if (songCmd_ == 0x22u)
 				songCmd_ = 0x24u;
 		} else if (hw_->NycaptorMap()) {
-			/* Dual-AY+MSM. Catalog 0x26/0x20/0x6B are thin or one-shot. */
+			/* AY×2+MSM。カタログ 0x26/0x20/0x6B は薄いまたはワンショット */
 			if (ge && ge->archive && _stricmp(ge->archive, "wyvernf0") == 0) {
 				if (songCmd_ == 0x00u || songCmd_ == 0x20u) {
 					songCmd_ = 0x0bu;
@@ -371,13 +354,11 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 				songCmd_ = 0x15;
 				pinned_ = 0;
 			}
-			/* onna34ro: 0x4C/0x15 are quiet; 0x10 sustains MSM+AY. */
+			/* onna34ro: 0x4C/0x15 は静か。0x10 が MSM+AY で持続 */
 			if (ge && ge->archive && _stricmp(ge->archive, "onna34ro") == 0)
 				songCmd_ = 0x10;
 		}
-		/* clones: keep catalog BGM (40love 0x11, fieldday 0x22, victnine 0x26).
-		   flstory 0x15 is not a song on these sets; unpinning would hunt it.
-		   Catalog pick 2/3 are often one-shots — retarget looping MSM BGM. */
+		/* クローン: カタログ BGM を残す（40love 0x11、fieldday 0x22、victnine 0x26）。これらでは flstory 0x15 は曲ではない。ピンを外すとハントする。カタログ pick 2/3 はしばしばワンショット — ループ MSM BGM へ付け替え。 */
 		if (ge && ge->archive && _stricmp(ge->archive, "40love") == 0) {
 			if (songCmd_ == 0x11u) { songCmd_ = 0x16u; songCmdWord_ = 0x16u; }
 			else if (songCmd_ == 0x12u) { songCmd_ = 0x17u; songCmdWord_ = 0x17u; }
@@ -390,25 +371,20 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 		}
 		}
 	}
-	/* CPS1 catalogs often list 0xF0/0xFF (stop/fade) first (ffight/forgottn/
-	   sf2ce). Provisional 0x40 ? 0x01 BLASTS on version-2 (ffight) and would
-	   set heard_ so hunting never recovers. Refined after LoadRoms. */
+	/* CPS1 カタログはしばしば先頭が 0xF0/0xFF（停止／フェード）（ffight/forgottn/sf2ce）。仮の 0x40。0x01 は version-2（ffight）で BLAST し heard_ が立ちハントが復帰しない。LoadRoms 後に精緻化。 */
 	if (hw_->board_ == CEMU_AC_BOARD_CPS1
 		&& (songCmd_ == 0x00 || songCmd_ >= 0xf0)) {
 		songCmd_ = 0x40;
 		pinned_ = 0;
 	}
-	/* Catalog may list STOP first ? prefer known BGM range for AB only when
-	   the pin is not a real catalog title (voice/SFX are often 0xA3+ / decimal
-	   163+ and must not be remapped onto 0x92 Maximum Power). */
+	/* カタログが STOP を先頭にすることがある — ピンが本物のカタログタイトルでないときだけ AB 既知 BGM 帯を優先（voice/SFX はしばしば 0xA3+／十進 163+ で、0x92 Maximum Power へ写してはいけない）。 */
 	if (hw_->board_ == CEMU_AC_BOARD_ABURNER && ge
 		&& _stricmp(ge->subtype, "aburner") == 0 && !pinned_) {
 		const uint8_t c = songCmd_;
 		if (c < 0x90 || c > 0x97)
 			songCmd_ = 0x92;
 	}
-	/* G-LOC / Rail Chase: Title 0x30 and Credit 0x33 are mute. Stage BGM
-	   0x88 vs 0x84. */
+	/* G-LOC / Rail Chase: Title 0x30 と Credit 0x33 は mute。ステージ BGM 0x88 vs 0x84 */
 	if (hw_->board_ == CEMU_AC_BOARD_ABURNER && ge && ge->archive
 		&& _stricmp(ge->archive, "rchase") == 0) {
 		if (songCmd_ == 0x30u) {
@@ -419,18 +395,14 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 			songCmdWord_ = 0x84u;
 		}
 	}
-	/* Model 3 Ski Champ: BGM 01 is a one-shot. BGM 04 vs pick-2 BGM 02. */
+	/* Model 3 Ski Champ: BGM 01 はワンショット。BGM 04 vs pick-2 BGM 02 */
 	if (hw_->board_ == CEMU_AC_BOARD_SEGA_SCSP && ge && ge->archive
 		&& _stricmp(ge->archive, "skichamp") == 0 && songCmd_ == 0x01u) {
 		songCmd_ = 0x04u;
 		songCmdWord_ = 0x04u;
 	}
-	/* Model 2A leftovers whose hoot list is BGM #00..#n: those ids are the
-	   song index, not the MIDI word. v3 CRX_drv (and vf2/pltkids catalogues)
-	   play via A0 10 xx, i.e. 0x10xx. Sending A0 00 xx hits command-0
-	   subfunctions (0x04 ignored, 0x07 init instruments). 0x00 is Stop.
-	   Silent/gappy catalog heads remap onto two distinct looping (or one
-	   looping + honest jingle) ids — not onto a single latch. */
+	/* hoot リストが BGM #00..#n の Model 2A 残り: その id は曲添字であり MIDI 語ではない。v3 CRX_drv（と vf2/pltkids カタログ）は A0 10 xx、すなわち 0x10xx。A0 00 xx はコマンド 0 のサブ（0x04 無視、0x07 音色初期化）。0x00 は停止。
+	   無音／歯抜けのカタログ先頭は 2 つの別ループ（またはループ＋正直なジングル）id へ — 単一ラッチへではない。 */
 	if (hw_->board_ == CEMU_AC_BOARD_SEGA_SCSP && ge && ge->archive
 		&& !hw_->SegaM1Audio()) {
 		const char* ar = ge->archive;
@@ -441,7 +413,7 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 		if (generic) {
 			unsigned lo = songCmdWord_ ? (songCmdWord_ & 0xffu) : (unsigned)songCmd_;
 			if (_stricmp(ar, "dynabb") == 0) {
-				if (lo == 0u || lo == 2u) lo = 0x05u; /* unique STOPS vs 0x01 BGM */
+				if (lo == 0u || lo == 2u) lo = 0x05u; /* 固有 STOPS vs 0x01 BGM */
 			} else if (_stricmp(ar, "motoraid") == 0) {
 				if (lo == 0u || lo == 2u) lo = 0x04u;
 			} else if (_stricmp(ar, "segawski") == 0) {
@@ -454,24 +426,17 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 		if (_stricmp(ar, "rchase2") == 0) {
 			unsigned lo = songCmdWord_ ? (songCmdWord_ & 0xffu) : (unsigned)songCmd_;
 			if (lo == 0x15u || lo == 0x20u)
-				lo = 0x00u; /* Advertise/stop → Opening, vs 0x0C Intermezzo */
+				lo = 0x00u; /* Advertise/停止 → Opening、対 0x0C Intermezzo */
 			songCmd_ = (uint8_t)lo;
 			songCmdWord_ = (uint16_t)lo;
 		}
 	}
-	/* K054539 (bucky/moomesa/�c): song table entries are 14 bytes; a slot with
-	   [0]==0 and bit6 of [1] clear is a mute/stop row (bucky prefer 0xC0).
-	   Only the single-chip sets lay their table out that way. On the dual
-	   K054539 mystwarr family the whole BGM range is 0xCD-0xEC, so this
-	   coercion silently replaced every song with code 0x01. */
+	/* K054539（bucky/moomesa 等）: 曲表エントリは 14 バイト。[0]==0 かつ [1] の bit6 クリアは mute/停止行（bucky prefer 0xC0）。単チップセットだけがその表配置。dual K054539 mystwarr 族は BGM 帯全体が 0xCD-0xEC なので、この強制は全曲を 0x01 に静かに置換した。 */
 	if (hw_->board_ == CEMU_AC_BOARD_KONAMI_PCM && hw_->PcmKind() == 4
 		&& !hw_->KonamiPcm2() && songCmd_ == 0xc0)
 		songCmd_ = 0x01;
-	/* OutRun: coerce stop/credit/SE prefers to Magical Sound Shower (0x85).
-	   Credit 0x84 is a one-shot BLAST; Passing Breeze (0x81) is silent, so
-	   pin Credit to Splash Wave (0x82) and leave 0x85 alone.
-	   Do NOT apply this to toutrun/shangon/pdrift — GP Rider 0x94 Qualify
-	   and Enduro Racer 0x81 Main Theme were folded onto OutRun song ids. */
+	/* OutRun: 停止／Credit／SE prefer を Magical Sound Shower（0x85）へ。Credit 0x84 はワンショット BLAST。Passing Breeze（0x81）は無音なので Credit を Splash Wave（0x82）へ固定し 0x85 は触らない。
+	   toutrun/shangon/pdrift には適用しない — GP Rider 0x94 Qualify と Enduro Racer 0x81 Main Theme が OutRun 曲 id へ畳まれた。 */
 	if (hw_->board_ == CEMU_AC_BOARD_OUTRUN && ge && ge->archive
 		&& _stricmp(ge->archive, "outrun") == 0) {
 		const uint8_t c = songCmd_;
@@ -481,38 +446,36 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 			|| c < 0x81)
 			songCmd_ = 0x85;
 	}
-	/* outrunm: Passing Breeze (0x81) is silent on this set. Pin to Magical
-	   Sound Shower so even/odd 0x81/0x82 are two distinct BGM tracks. */
+	/* outrunm: このセットで Passing Breeze（0x81）は無音。Magical Sound Shower へ固定し、偶数／奇数 0x81/0x82 が 2 本の別 BGM になるようにする。 */
 	if (hw_->board_ == CEMU_AC_BOARD_OUTRUN && ge && ge->archive
 		&& _stricmp(ge->archive, "outrunm") == 0) {
 		const uint8_t c = songCmd_;
 		if (c == 0x81 || c == 0x84)
 			songCmd_ = 0x85;
 	}
-	/* Classic Tecmo: catalog pick 2,3 is often Credit / a one-shot jingle. */
+	/* 古典 Tecmo: カタログ pick 2,3 はしばしば Credit／ワンショットジングル */
 	if (hw_->board_ == CEMU_AC_BOARD_TECMO16 && ge && ge->archive) {
 		const uint8_t c = songCmd_;
 		if (_stricmp(ge->archive, "rygar") == 0 && c == 0x3fu)
-			songCmd_ = 0x34u; /* Get An Indra one-shot -> Main BGM (w/o intro) */
+			songCmd_ = 0x34u; /* Get An Indra ワンショット → メイン BGM（イントロ無し） */
 		else if (_stricmp(ge->archive, "backfirt") == 0) {
 			if (c == 0x09u)
-				songCmd_ = 0x23u; /* Credit silent -> BGM1 */
+				songCmd_ = 0x23u; /* Credit 無音 → BGM1 */
 			else if (c == 0x21u)
-				songCmd_ = 0x24u; /* Start interval silent -> BGM2 */
+				songCmd_ = 0x24u; /* Start interval 無音 → BGM2 */
 		} else if (_stricmp(ge->archive, "tbowl") == 0) {
 			if (c == 0x01u)
-				songCmd_ = 0x32u; /* Credit -> Blue team offense */
+				songCmd_ = 0x32u; /* Credit → 青チーム攻撃 */
 			else if (c == 0x02u)
-				songCmd_ = 0x33u; /* Credit -> Red team offense */
+				songCmd_ = 0x33u; /* Credit → 赤チーム攻撃 */
 		} else if (_stricmp(ge->archive, "wc90") == 0) {
 			if (c == 0x06u)
-				songCmd_ = 0x23u; /* Credit -> BGM1 */
+				songCmd_ = 0x23u; /* Credit → BGM1（割当） */
 			else if (c == 0x12u)
-				songCmd_ = 0x24u; /* Start interval -> BGM2 */
+				songCmd_ = 0x24u; /* Start interval → BGM2（割当） */
 		}
 	}
-	/* Taito B YM2203 (masterw/viofight): catalog/host often pins SE/handshake
-	   (0x01-0x04). Sustained BGM is archive-specific. */
+	/* Taito B YM2203（masterw/viofight）: カタログ／ホストはしばしば SE／ハンドシェイク（0x01-0x04）を固定。持続 BGM はアーカイブ固有。 */
 	if (hw_->board_ == CEMU_AC_BOARD_TAITO_OPM && hw_->MainIsYm2203() && ge) {
 		const uint8_t c = songCmd_;
 		const int kikikai = (ge->subtype[0] && _stricmp(ge->subtype, "kikikai") == 0)
@@ -525,46 +488,44 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 				|| (ge->archive[0] && _strnicmp(ge->archive, "viofight", 8) == 0))
 				songCmd_ = 0x08;
 			else
-				songCmd_ = 0x05; /* masterw / champwr / tetrista family */
-			/* keep pinned_ — clearing it made viofight WEAK vs direct 0x08 PLAY */
+				songCmd_ = 0x05; /* masterw / champwr / tetrista 系統 */
+			/* pinned_ を残す — クリアすると viofight が直接 0x08 PLAY に対し WEAK */
 		} else if (ge->archive[0] && _stricmp(ge->archive, "viofight") == 0
 			&& c == 0x0fu) {
-			songCmd_ = 0x08; /* Credit -> Theme 1 vs Character Select 0x11 */
+			songCmd_ = 0x08; /* Credit → Theme 1 vs Character Select 0x11（割当） */
 		} else if (ge->archive[0] && _stricmp(ge->archive, "champwr") == 0
 			&& c == 0x08u) {
-			songCmd_ = 0x1fu; /* Player Select mute -> Ending vs Title 0x07 */
+			songCmd_ = 0x1fu; /* Player Select mute → Ending vs Title 0x07（割当） */
 		} else if (ge->archive[0] && _stricmp(ge->archive, "masterw") == 0) {
 			if (c == 0x07)
-				songCmd_ = 0x09; /* Desertion silent -> Act 2 BGM */
+				songCmd_ = 0x09; /* Desertion 無音 → Act 2 BGM */
 			else if (c == 0x08)
-				songCmd_ = 0x0b; /* Briefing thin -> Act 3 BGM */
+				songCmd_ = 0x0b; /* Briefing 薄い → Act 3 BGM */
 		} else if (darius && (c == 0x37u || c == 0x3au)) {
-			/* Catalog BGM 01/02 slots are silent; INORGANIC BEAT vs CAPTAIN NEO. */
+			/* カタログ BGM 01/02 枠は無音。INORGANIC BEAT vs CAPTAIN NEO */
 			songCmd_ = 0x2eu;
 		} else if (kikikai && c == 0x05u) {
-			songCmd_ = 0x07u; /* start demo short -> BOSS vs main theme 0x06 */
+			songCmd_ = 0x07u; /* start demo 短い → BOSS vs メインテーマ 0x06 */
 		} else if (hw_->TaitoOpmMap() == 3) {
-			/* tokio: Credit 0x12 is a one-shot; Boss 0x05 vs Main 0x28.
-			   bublboblp catalog 0x06 is a seq=1 jingle. */
+			/* tokio: Credit 0x12 はワンショット。Boss 0x05 vs Main 0x28。bublboblp カタログ 0x06 は seq=1 ジングル。 */
 			if (c == 0x12 || c == 0x00)
 				songCmd_ = 0x05;
 			else if (ge->archive[0] && _stricmp(ge->archive, "bublboblp") == 0
 				&& c == 0x06)
 				songCmd_ = 0x05;
 		} else if (hw_->TaitoOpmMap() == 4) {
-			/* bublbobl: Title SFX 0x2D / Credit 0x34 -> Intro vs Main Theme. */
+			/* bublbobl: Title SFX 0x2D / Credit 0x34 → Intro vs Main Theme（割当） */
 			if (c == 0x2d)
 				songCmd_ = 0x07;
 			else if (c == 0x34)
 				songCmd_ = 0x30;
 		} else if (hw_->TaitoOpmMap() == 6) {
-			/* lkage pick 3 is Miss 0x0A (one-shot). Stage Clear vs Main. */
+			/* lkage pick 3 は Miss 0x0A（ワンショット）。Stage Clear vs Main */
 			if (c == 0x0a || c == 0x04)
 				songCmd_ = 0x16;
 		} else if (hw_->TaitoOpmMap() == 7
 			&& ge->archive[0] && _stricmp(ge->archive, "kageki") == 0) {
-			/* 0x06 is a stage-relative remap that clears itself; 0x07 Round
-			   Clear is a 3-window jingle. Round 2 / Round 3 loop. */
+			/* 0x06 は自分を消すステージ相対リマップ。0x07 Round Clear は 3 窓ジングル。Round 2 / Round 3 ループ。 */
 			if (c == 0x06)
 				songCmd_ = 0x08;
 			else if (c == 0x07 || c == 0x09)
@@ -572,33 +533,33 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 		}
 	}
 	if (hw_->HalleysAy() && ge && ge->archive[0]) {
-		/* 0x06 Contact / 0x19 Game Start are one-shots. Main / Stage 2 loop. */
+		/* 0x06 Contact / 0x19 Game Start はワンショット。Main / Stage 2 ループ */
 		if (_stricmp(ge->archive, "halleys") == 0 && songCmd_ == 0x06)
 			songCmd_ = 0x05;
 		else if (_stricmp(ge->archive, "benberob") == 0 && songCmd_ == 0x19)
 			songCmd_ = 0x25;
 	}
 	if (hw_->Cop01Ay()) {
-		/* Falldown 0x4B is a one-shot. Boss vs Main. */
+		/* Falldown 0x4B はワンショット。Boss vs Main */
 		if (songCmd_ == 0x4b)
 			songCmd_ = 0x44;
 	}
 	if (hw_->MagmaxAy()) {
-		/* Credit 0x0C / Attract 0x4D are one-shots. Ground BGM vs Start+BGM. */
+		/* Credit 0x0C / Attract 0x4D はワンショット。Ground BGM vs Start+BGM */
 		if (songCmd_ == 0x0cu || songCmd_ == 0x4du) {
 			songCmd_ = 0x41u;
 			songCmdWord_ = 0x41u;
 		}
 	}
 	if (hw_->BombjackAy()) {
-		/* Credit 0x10 / Title 0x20. BGM2 vs BGM1. */
+		/* Credit 0x10 / Title 0x20。BGM2 vs BGM1（割当） */
 		if (songCmd_ == 0x10u || songCmd_ == 0x20u) {
 			songCmd_ = 0x23u;
 			songCmdWord_ = 0x23u;
 		}
 	}
 	if (hw_->SolomonAy()) {
-		/* Credit 0x18 / Start 0x38,0x34. BGM1 vs BGM2. */
+		/* Credit 0x18 / Start 0x38,0x34。BGM1 vs BGM2（割当） */
 		if (songCmd_ == 0x18u || songCmd_ == 0x38u) {
 			songCmd_ = 0x1au;
 			songCmdWord_ = 0x1au;
@@ -608,45 +569,43 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 		}
 	}
 	if (hw_->PbactionAy()) {
-		/* Catalog Credit 0x02 is a 3-channel jingle at $1C4F. Slot vs Main. */
+		/* カタログ Credit 0x02 は $1C4F の 3ch ジングル。Slot vs Main */
 		if (songCmd_ == 0x02u)
 			songCmd_ = 0x11u;
 	}
 	if (hw_->ChaknpopAy()) {
-		/* Picks 2/3 are SFX 0x39/0x38. 0x21/0x15/0x17 stop; 0x19 and 0x1F loop. */
+		/* Pick 2/3 は SFX 0x39/0x38。0x21/0x15/0x17 は停止。0x19 と 0x1F はループ */
 		if (songCmd_ == 0x39u)
 			songCmd_ = 0x19u;
 		else if (songCmd_ == 0x38u)
 			songCmd_ = 0x1fu;
 	}
-	/* Taito F2 YM2610: catalog Credit/Coin/GOAL are one-shots. */
+	/* Taito F2 YM2610: カタログ Credit/Coin/GOAL はワンショット */
 	if (hw_->board_ == CEMU_AC_BOARD_TAITO_YM2610 && ge && ge->archive) {
 		const char* ar = ge->archive;
 		const uint8_t c = songCmd_;
 		if (!_stricmp(ar, "finalb") && c == 0x65u)
-			songCmd_ = 0x11u; /* CREDIT -> Title vs Fighter Select 0x0A */
+			songCmd_ = 0x11u; /* CREDIT → Title vs Fighter Select 0x0A（割当） */
 		else if (!_stricmp(ar, "deadconx") && c == 0x72u)
-			songCmd_ = 0x5fu; /* CREDIT -> Stage 1 vs Select 0x63 */
+			songCmd_ = 0x5fu; /* CREDIT → Stage 1 vs Select 0x63（割当） */
 		else if (!_stricmp(ar, "footchmp") && c == 0x99u)
-			songCmd_ = 0x09u; /* GOAL -> Team Select vs Win 0x0B */
+			songCmd_ = 0x09u; /* GOAL → Team Select vs Win 0x0B（割当） */
 		else if (!_stricmp(ar, "recordbr") && c == 0x10u)
-			songCmd_ = 0x07u; /* Coin -> Title vs Name Set 0x08 */
+			songCmd_ = 0x07u; /* Coin → Title vs Name Set 0x08（割当） */
 		else if (!_stricmp(ar, "pwheelsj") && c == 0x40u)
-			songCmd_ = 0x41u; /* Credit STOPS -> Title vs Race Select 0x42 */
+			songCmd_ = 0x41u; /* Credit STOPS → Title vs Race Select 0x42（割当） */
 		else if (!_stricmp(ar, "nightstr") && c == 0x17u)
-			songCmd_ = 0x3fu; /* Start STOPS -> Urban Trail vs Intro pin */
+			songCmd_ = 0x3fu; /* Start STOPS → Urban Trail vs Intro ピン */
 		else if (!_stricmp(ar, "nightstr") && c == 0x5eu)
-			songCmd_ = 0x3eu; /* Introduction silent -> Trance Parlent */
+			songCmd_ = 0x3eu; /* Introduction 無音 → Trance Parlent */
 	}
 	if (hw_->board_ == CEMU_AC_BOARD_ROBOKID && ge && ge->archive
 		&& _stricmp(ge->archive, "robokid") == 0 && songCmd_ == 0x28u)
-		songCmd_ = 0x30u; /* Goal STOPS -> BGM B vs Main Theme 0x12 */
-	/* GNG-class: archive-specific BGM. Catalog prefers are often SE/AUDITION
-	   (avengers 0x23, gunsmoke 0x1F��old 0x2b, commando 0x1A). */
+		songCmd_ = 0x30u; /* Goal STOPS → BGM B vs Main Theme 0x12（割当） */
+	/* GNG 系: アーカイブ固有 BGM。カタログ prefer はしばしば SE/AUDITION（avengers 0x23、gunsmoke 0x1F→旧 0x2b、commando 0x1A）。 */
 	if (hw_->board_ == CEMU_AC_BOARD_GNG && ge) {
 		if (hw_->GngGaidenMap()) {
-			/* Tecmo gaiden: catalog leads with Credit 0x01 / 0x10 / 0x42.
-			   Prefer first stage BGM from the title list. */
+			/* Tecmo gaiden: カタログ先頭は Credit 0x01 / 0x10 / 0x42。タイトルリストの最初のステージ BGM を優先。 */
 			const uint8_t c = songCmd_;
 			int credit = 0;
 			for (int i = 0; i < ge->titleCount; i++) {
@@ -661,14 +620,14 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 					const uint8_t t = (uint8_t)(ge->title[i].code & 0xff);
 					if (t == 0x00 || t == 0x01 || t == 0x10 || t == 0x42)
 						continue;
-					if (t >= 0x0a && t <= 0x1f) continue; /* SE / voice band */
+					if (t >= 0x0a && t <= 0x1f) continue; /* SE／ボイス帯 */
 					best = t;
 					songCmdWord_ = (uint16_t)ge->title[i].code;
 					break;
 				}
 				songCmd_ = best;
 			} else if (c == 0x42) {
-				/* Game Start jingle ? Round 2 BGM, not Round 1 (pick 3). */
+				/* Game Start ジングル — Round 2 BGM であり Round 1（pick 3）ではない */
 				songCmd_ = 0x04;
 				songCmdWord_ = 0x04;
 			}
@@ -688,7 +647,7 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 					songCmd_ = 0x21;
 			} else {
 				const uint8_t c = songCmd_;
-				/* 0x23/0x2b flat-clip on several boards; keep gng 0x35. */
+				/* 0x23/0x2b は複数基板で平坦クリップ。gng 0x35 を残す */
 				if (c < 0x20 || c == 0x23 || c == 0x2b || (c > 0x3a && c != 0x35)) {
 					songCmd_ = 0x21;
 					pinned_ = 0;
@@ -696,14 +655,10 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 			}
 		}
 	}
-	/* Sega System1: catalog often pins short SE / blast one-shots that die
-	   mid-probe (4dwarrio 0x90, tokisens 0x10, �c). Prefer sustained 0x81/0x82.
-	   Do NOT touch known PLAY prefers (choplift 0xAB, imsorry 0xB8, �c). */
+	/* Sega System1: カタログはしばしば短い SE／BLAST ワンショットを固定しプローブ途中で死ぬ（4dwarrio 0x90、tokisens 0x10 等）。持続 0x81/0x82 を優先。既知 PLAY prefer（choplift 0xAB、imsorry 0xB8 等）は触らない。 */
 	if (hw_->board_ == CEMU_AC_BOARD_SEGA_SYS1 && ge) {
 		const uint8_t c = songCmd_;
-		/* 0x90 sustains on spatter. 0x87 is BGM 2 on 4dwarrio, not SE.
-		   0x97 is Title BGM on raflesia and Credit on pitfall2 — do not
-		   treat it as a global SE. */
+		/* 0x90 は spatter で持続。0x87 は 4dwarrio の BGM 2 であり SE ではない。0x97 は raflesia で Title BGM、pitfall2 で Credit — 全体 SE 扱いしない。 */
 		const int bad = (c == 0x91 || c == 0x95 || c == 0xb3);
 		if (bad) {
 			uint8_t best = 0;
@@ -731,8 +686,7 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 			songCmd_ = best;
 			if (bestW) songCmdWord_ = bestW;
 		}
-		/* 4dwarrio: 0x90 Credit vs 0x81 Ready. suprloco: 0x90 vs 0x81 Main.
-		   Prefer the *second* BGM so pick 2/3 are not both 0x81. */
+		/* 4dwarrio: 0x90 Credit vs 0x81 Ready。suprloco: 0x90 vs 0x81 Main。2 本目の BGM を優先し pick 2/3 が両方 0x81 にならないようにする。 */
 		else if (c == 0x90 && ge->archive[0]
 			&& (_stricmp(ge->archive, "4dwarrio") == 0
 				|| _stricmp(ge->archive, "suprloco") == 0)) {
@@ -741,17 +695,17 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 			if (c == 0x10)
 				songCmd_ = 0x02;
 			else if (c == 0x01)
-				songCmd_ = 0x02; /* Start jingle dies; Main Theme vs Ready 0x0b */
+				songCmd_ = 0x02; /* Start ジングルは死ぬ。Main Theme vs Ready 0x0b */
 		} else if (c == 0x81 && ge->archive[0]
 			&& _stricmp(ge->archive, "swat") == 0) {
-			songCmd_ = 0x85; /* Round Clear one-shot -> other Main Theme */
+			songCmd_ = 0x85; /* Round Clear ワンショット → 別 Main Theme */
 		}
 	}
-	/* System18: cltchitr 0x83/0x84 are one-shots. BGM 01 vs pick-2 BGM 02. */
+	/* System18: cltchitr 0x83/0x84 はワンショット。BGM 01 vs pick-2 BGM 02 */
 	if (hw_->board_ == CEMU_AC_BOARD_SYS18 && ge && ge->archive
 		&& _stricmp(ge->archive, "cltchitr") == 0 && songCmd_ == 0x83u)
 		songCmd_ = 0x81u;
-	/* Haunted Castle: Credit 0x45 is silent. Stage 1 vs Introduction 0x56. */
+	/* Haunted Castle: Credit 0x45 は無音。Stage 1 vs Introduction 0x56 */
 	if (hw_->board_ == CEMU_AC_BOARD_KONAMI_HCASTLE && ge && ge->archive
 		&& _stricmp(ge->archive, "hcastle") == 0 && songCmd_ == 0x45u)
 		songCmd_ = 0x52u;
@@ -759,18 +713,18 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 		const char* ar = ge->archive;
 		if (!_stricmp(ar, "88games")) {
 			if (songCmd_ == 0xd3u)
-				songCmd_ = 0x40u; /* Voice SILENT -> Attract vs Coin pin */
+				songCmd_ = 0x40u; /* Voice SILENT → Attract vs Coin ピン */
 			else if (songCmd_ == 0x22u)
-				songCmd_ = 0x41u; /* Coin STOPS -> Name Entry */
+				songCmd_ = 0x41u; /* Coin STOPS → Name Entry（割当） */
 		}
 	}
-	/* CPS1 QSound: Punisher Title (2) 0x14 is a one-shot. Stage 2 vs Title 0x04. */
+	/* CPS1 QSound: Punisher Title (2) 0x14 はワンショット。Stage 2 vs Title 0x04 */
 	if (hw_->board_ == CEMU_AC_BOARD_CPS_QS && ge && ge->archive
 		&& _stricmp(ge->archive, "punisher") == 0 && songCmd_ == 0x14u) {
 		songCmd_ = 0x01u;
 		songCmdWord_ = 0x01u;
 	}
-	/* CPS2 SIMM: choko catalog 0x01/0x02 are mute / one-shot. BGM 0x04 vs 0x05. */
+	/* CPS2 SIMM: choko カタログ 0x01/0x02 は mute／ワンショット。BGM 0x04 vs 0x05 */
 	if (hw_->board_ == CEMU_AC_BOARD_CPS_QS && ge && ge->archive
 		&& _stricmp(ge->archive, "choko") == 0) {
 		if (songCmd_ == 0x01u) {
@@ -781,17 +735,13 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 			songCmdWord_ = 0x05u;
 		}
 	}
-	/* Crazy Climber 2: pick 3 is [Voice] 0x23 (DAC, silent FM). Mambo 0x39
-	   vs Samba 0x2E are the two looping YM3812 themes. Credit 0x01 same. */
+	/* Crazy Climber 2: pick 3 は [Voice] 0x23（DAC、FM 無音）。Mambo 0x39 vs Samba 0x2E がループ YM3812 テーマ 2 本。Credit 0x01 も同じ。 */
 	if (hw_->board_ == CEMU_AC_BOARD_TERRACRE && hw_->TerracreMap() == 2
 		&& ge && ge->archive && _stricmp(ge->archive, "cclimbr2") == 0) {
 		if (songCmd_ == 0x01 || songCmd_ == 0x23)
 			songCmd_ = 0x39;
 	}
-	/* Toaplan1: catalog 0x25 on twincobr is a short SE; 0x08/0x12 sustain.
-	   snowbros Kaneko I/O uses 0x20+ BGM ids — do not fold those onto 0x12.
-	   slapfght dual AY: catalog ids are the C800 command; Credit one-shots
-	   (alcon 0x1F / getstar 0x26) remap onto looping BGM so pick 2,3 PLAYS. */
+	/* Toaplan1: twincobr カタログ 0x25 は短い SE。0x08/0x12 は持続。snowbros Kaneko I/O は 0x20+ BGM id — それらを 0x12 へ畳まない。slapfght dual AY: カタログ id は C800 コマンド。Credit ワンショット（alcon 0x1F / getstar 0x26）はループ BGM へ写し pick 2,3 が PLAY。 */
 	if (hw_->board_ == CEMU_AC_BOARD_TOAPLAN1 && hw_->SlapfghtAy()) {
 		if (ge && ge->archive) {
 			if (_stricmp(ge->archive, "alcon") == 0) {
@@ -812,17 +762,12 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 			pinned_ = 0;
 		}
 	}
-	/* m99 M72 (YM@40): BGM is 0x20+index; catalog often lists raw index/SE. */
+	/* m99 M72（YM@40）: BGM は 0x20+index。カタログはしばしば生 index/SE */
 	if (hw_->board_ == CEMU_AC_BOARD_IREM_M72 && hw_->M72IoAlt()
 		&& songCmd_ > 0 && songCmd_ < 0x20)
 		songCmd_ = (uint8_t)(0x20 + (songCmd_ & 0x1fu));
-	/* Sys16B: catalog often leads with Stop/Credit/SFX ? prefer first BGM-ish
-	   title (goldnaxe 0x9C credit, cotton 0x01 stop). Not a song-hunt: one
-	   fixed catalog pass at Open. Mute/weak pins (0xC5/0xD7/0xFF) remap to
-	   stage BGM when present (0xC0-C2, 0xD0, low bytes).
-	   0x90-0x95 is BGM on 5358 sports (aceattac/suprleag); 0xA0-0xAF on
-	   sonicbom-class; 0x96-0x9F title demos (hwchamp). Do NOT blanket-reject
-	   0x96-0xBF ? that remapped suprleag/sonicbom onto voice SE bytes. */
+	/* Sys16B: カタログ先頭はしばしば Stop/Credit/SFX — 最初の BGM 風タイトルを優先（goldnaxe 0x9C credit、cotton 0x01 stop）。曲ハントではない: Open 時の固定カタログ 1 パス。mute/弱いピン（0xC5/0xD7/0xFF）はステージ BGM があれば写す（0xC0-C2、0xD0、低バイト）。
+	   0x90-0x95 は 5358 スポーツ（aceattac/suprleag）の BGM。0xA0-0xAF は sonicbom 系。0x96-0x9F はタイトルデモ（hwchamp）。0x96-0xBF を一括拒否しない — suprleag/sonicbom がボイス SE バイトへ写った。 */
 	if (hw_->board_ == CEMU_AC_BOARD_SYS16B && ge && ge->titleCount > 0) {
 		const uint8_t c = songCmd_;
 		int hasStage = 0, has90 = 0, hasA = 0;
@@ -836,12 +781,7 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 			if (t >= 0x90 && t <= 0x95) has90 = 1;
 			if (t >= 0xa0 && t <= 0xaf) hasA = 1;
 		}
-		/* Only remap Stop/Credit/mute. Do NOT fold 0x90-0xBF onto 0xC0
-		   when hasStage (aliensyn/timescan/goldnaxe became SAMESONG).
-		   0xC5 is Player Select BGM on goldnaxe / TITLE on bayroute, not a mute.
-		   0x91 is BGM on 5358 sports and altbeast, not a universal credit.
-		   Speech 0x02-0x3F is only SE when the catalog labels it so, or when a
-		   high-band BGM table exists and this pick itself is Voice/SFX. */
+		/* Stop/Credit/mute だけリマップ。hasStage 時に 0x90-0xBF を 0xC0 へ畳まない（aliensyn/timescan/goldnaxe が SAMESONG）。0xC5 は goldnaxe で Player Select BGM、bayroute で TITLE であり mute ではない。0x91 は 5358 スポーツと altbeast の BGM であり万能 Credit ではない。Speech 0x02-0x3F はカタログがそうラベルするか、高帯 BGM 表がありこの pick 自身が Voice/SFX のときだけ SE。 */
 		const int bad = (c == 0x00 || c == 0x01 || c == 0xff || c == 0x9c
 			|| c == 0xd7
 			|| ((c == 0x9b || c == 0xad) && has90)
@@ -892,7 +832,7 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 				songCmd_ = 0x8eu;
 				songCmdWord_ = 0x8eu;
 			} else if (_stricmp(ar, "bayroute") == 0 && c == 0x08u) {
-				/* 0x06/0x09 are ignored (same fp as CREDIT 0x47). TITLE 0xC5 plays. */
+				/* 0x06/0x09 は無視（CREDIT 0x47 と同じ fp）。TITLE 0xC5 は再生 */
 				songCmd_ = 0xc5u;
 				songCmdWord_ = 0xc5u;
 			} else if (_stricmp(ar, "tturfu") == 0 && c == 0x12u) {
@@ -904,15 +844,12 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 			}
 		}
 	}
-	/* Sys16A: catalog leads with Stop/Credit then Mission BGM @90-9F (shinobi)
-	   or vehicle BGM @A8-B1 (afighter). Detect afighter by archive ? shinobi
-	   also lists SFX 0xB2 which must not flip the prefer bands. */
+	/* Sys16A: カタログ先頭は Stop/Credit、続けて Mission BGM @90-9F（shinobi）または機体 BGM @A8-B1（afighter）。afighter はアーカイブで判定 — shinobi も SFX 0xB2 を出し prefer 帯を反転させてはいけない。 */
 	if (hw_->board_ == CEMU_AC_BOARD_SYS16A && ge && ge->titleCount > 0) {
 		const uint8_t c = songCmd_;
 		const int afighter = (ge->archive[0]
 			&& _stricmp(ge->archive, "afighter") == 0) ? 1 : 0;
-		/* Only remap Stop/Credit/voice-nibble. Do NOT fold 0xA0-0xAF onto 0x90
-		   (bodyslam Team Select / quartet themes became SAMESONG). */
+		/* Stop/Credit/ボイスニブルだけリマップ。0xA0-0xAF を 0x90 へ畳まない（bodyslam Team Select / quartet テーマが SAMESONG）。 */
 		const int bad = (c == 0x00 || c == 0x01 || c == 0xff
 			|| c == 0x88 || c == 0xb2 || c == 0xb3
 			|| (c >= 0x40 && c < 0x50)
@@ -954,7 +891,7 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 			songCmdWord_ = 0x87u;
 		}
 	}
-	/* Sys16B: 0xFF/0x00 are stop ? do not pin them. */
+	/* Sys16B: 0xFF/0x00 は停止 — ピンしない */
 	if (hw_->board_ == CEMU_AC_BOARD_SYS16B
 		&& (songCmd_ == 0x00 || songCmd_ == 0xff)) {
 		songCmd_ = 0x81;
@@ -965,7 +902,7 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 		songCmd_ = 0x9a;
 		pinned_ = 0;
 	}
-	/* Catalog may list STOP first (arabfgt 0xFF). Prefer a stage BGM. */
+	/* カタログが STOP を先頭にすることがある（arabfgt 0xFF）。ステージ BGM を優先 */
 	if (hw_->board_ == CEMU_AC_BOARD_SYS32
 		&& (songCmd_ == 0x00 || songCmd_ == 0xff) && ge && ge->titleCount > 0) {
 		for (int i = 0; i < ge->titleCount; i++) {
@@ -976,13 +913,13 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 			break;
 		}
 	}
-	/* arabfgt: Boss 0x83 is mute. Fire Street 0x81 vs Pirate Ship 0xA0. */
+	/* arabfgt: Boss 0x83 は mute。Fire Street 0x81 vs Pirate Ship 0xA0 */
 	if (hw_->board_ == CEMU_AC_BOARD_SYS32 && ge && ge->archive
 		&& _stricmp(ge->archive, "arabfgt") == 0 && songCmd_ == 0x83u) {
 		songCmd_ = 0x81u;
 		songCmdWord_ = 0x81u;
 	}
-	/* holo: Dompayagen 0x83 / Dave 0x88 mute. Ending vs Unused BGM. */
+	/* holo: Dompayagen 0x83 / Dave 0x88 は mute。Ending vs Unused BGM */
 	if (hw_->board_ == CEMU_AC_BOARD_SYS32 && ge && ge->archive
 		&& _stricmp(ge->archive, "holo") == 0) {
 		if (songCmd_ == 0x83u) {
@@ -993,7 +930,7 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 			songCmdWord_ = 0x81u;
 		}
 	}
-	/* Sys2: first title is often an unused 16-bit demo (assault 0x213). */
+	/* Sys2: 先頭タイトルはしばしば未使用 16bit デモ（assault 0x213） */
 	if (hw_->board_ == CEMU_AC_BOARD_NAMCO_SYS2 && ge && ge->titleCount > 0) {
 		int unused = 0;
 		for (int i = 0; i < ge->titleCount; i++) {
@@ -1021,13 +958,12 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 	}
 	if (hw_->board_ == CEMU_AC_BOARD_HANGON && ge
 		&& _stricmp(ge->subtype, "sharrier") == 0 && !pinned_) {
-		/* Unpinned / hunt only ? never rewrite catalog SFX outside BGM band. */
+		/* ピン無し／ハントのみ — BGM 帯外のカタログ SFX は書き換えない */
 		if (songCmd_ < 0xa3 || songCmd_ > 0xb9)
 			songCmd_ = 0xad;
 	}
 	if (!hw_->LoadRoms(fs, ge, titleCode)) {
-		/* Soft-open boards that are expected to classify SILENT when ROMs /
-		   host CPU are incomplete ? never FAIL_OPEN the catalog probe. */
+		/* ROM／ホスト CPU が不完全だと SILENT 分類が期待されるソフトオープン基板 — カタログプローブを FAIL_OPEN にしない */
 		const int soft =
 			(hw_->board_ == CEMU_AC_BOARD_IREM_M62
 				|| hw_->board_ == CEMU_AC_BOARD_NAMCO_SYS86
@@ -1046,13 +982,12 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 		return 1;
 	}
 
-	/* After ROM load, m72IoAlt_ may be sniffed ? re-apply m99 BGM bias. */
+	/* ROM ロード後、m72IoAlt_ が嗅ぎ取られることがある — m99 BGM バイアスを再適用 */
 	if (hw_->board_ == CEMU_AC_BOARD_IREM_M72 && hw_->M72IoAlt()
 		&& songCmd_ > 0 && songCmd_ < 0x20)
 		songCmd_ = (uint8_t)(0x20 + (songCmd_ & 0x1fu));
 
-	/* Capcom ZN: catalog often leads with QSound logo / mono-stereo switches
-	   (sfex 0x10, techromn 0xFF04). One fixed titlelist pass ? no try-table. */
+	/* Capcom ZN: カタログ先頭はしばしば QSound ロゴ／モノステレオ切替（sfex 0x10、techromn 0xFF04）。固定 titlelist 1 パス — 試行表なし */
 	if (hw_->board_ == CEMU_AC_BOARD_CPS_QS && hw_->QsZn() && ge
 		&& ge->titleCount > 0) {
 		const unsigned cur = songCmdWord_ ? (unsigned)songCmdWord_
@@ -1062,7 +997,7 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 		const int techromnFf = (ge->archive && !_stricmp(ge->archive, "techromn")
 			&& hi == 0xffu) ? 1 : 0;
 		if (techromnFf) {
-			songCmdWord_ = 0x8001u; /* Mono/Stereo -> Run! Kikio vs Logo 0x8020 */
+			songCmdWord_ = 0x8001u; /* Mono/Stereo → Run! Kikio vs Logo 0x8020（割当） */
 			songCmd_ = 0x01u;
 		}
 		const int bad = (!cur || hi == 0xffu || lo == 0
@@ -1075,7 +1010,7 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 				const unsigned l = c & 0xffu;
 				if (!c || h == 0xffu || l == 0) continue;
 				if (h == 0 && (l == 0x10u || l >= 0x40u)) continue;
-				/* Prefer stage BGM words (techromn 0x80xx / plain 0x01+). */
+				/* ステージ BGM 語を優先（techromn 0x80xx / 素の 0x01+） */
 				if (h == 0x80u || h == 0xb0u || (h == 0 && l >= 0x01u && l <= 0x0fu)
 					|| (h == 0x04u) || (c >= 0x0100u && c < 0x8000u)) {
 					best = c;
@@ -1091,19 +1026,12 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 		pinned_ = 1;
 	}
 
-	/* M92 channel-BGM: catalog codes <0x20 are song indices; TryInjectCommand
-	   adds M92SongCmdBase (0x20). Do not alias every index onto one even/odd
-	   looping latch — that made mysticri/hook/rtypeleo/… SAMESONG. Stub
-	   slots stay silent; uniqueness then comes from the live indices. */
+	/* M92 チャネル BGM: カタログ <0x20 は曲添字。TryInjectCommand が M92SongCmdBase（0x20）を足す。全添字を 1 つの偶数／奇数ループラッチへ別名にしない — mysticri/hook/rtypeleo 等が SAMESONG。stub 枠は無音のまま。一意性はライブ添字から。 */
 	if (hw_->board_ == CEMU_AC_BOARD_IREM_M92 && hw_->M92ChannelBgm() && ge) {
-		pinned_ = 1; /* never re-latch; retries abort an already-started BGM */
+		pinned_ = 1; /* 再ラッチしない。再試行は既に始まった BGM を中断 */
 	}
 
-	/* Early CPS1 (ghouls/dynwar idle EI;JR-3 @0009): catalog often pins a short
-	   jingle (ghouls 0x7 �� WEAK). Keep the preferred code as try#0 but allow the
-	   try table to hunt sustained BGM.
-	   Stop/fade prefers (0xF0): early + version 4+ want 0x01 (forgottn/sf2ce);
-	   version 2 (ffight/1941) MUST stay on 0x40 ? 0x01/SE BLAST [32768,0,0,0]. */
+	/* 初期 CPS1（ghouls/dynwar idle EI;JR-3 @0009）: カタログはしばしば短いジングル（ghouls 0x7 → WEAK）。prefer を try#0 に残しつつ試行表で持続 BGM をハント。停止／フェード prefer（0xF0）: 初期＋version 4+ は 0x01（forgottn/sf2ce）。version 2（ffight/1941）は 0x40 のまま — 0x01/SE は BLAST [32768,0,0,0]。 */
 	if (hw_->board_ == CEMU_AC_BOARD_CPS1) {
 		const int earlyCps = hw_->PeekMem(0x0009) == 0xfb
 			&& hw_->PeekMem(0x000a) == 0x18
@@ -1116,8 +1044,7 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 			songCmd_ = ver2 ? 0x40 : 0x01;
 			pinned_ = 0;
 		} else if (ver2 && songCmd_ >= 0x80) {
-			/* 1941 0x96 credit/SE BLAST. Do NOT fold 0x01-0x3F BGM
-			   (cawing/mercs/forgottn became SAMESONG on 0x40). */
+			/* 1941 0x96 credit/SE BLAST。0x01-0x3F BGM を畳まない（cawing/mercs/forgottn が 0x40 で SAMESONG）。 */
 			songCmd_ = 0x40;
 			pinned_ = 0;
 		}
@@ -1135,11 +1062,10 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 		}
 	}
 
-	/* Model 2A/3 SCSP and M62/Seibu run real sequencers. Hornet RF5C400 now
-	   runs its sound 68000 on the ms1_ path below. */
+	/* Model 2A/3 SCSP と M62/Seibu は本物シーケンサ。Hornet RF5C400 は下の ms1_ 経路で音源 68000 を回す。 */
 	hasCpu_ = 1;
 
-	/* Non-HuC Data East (btime/disco): board UNKNOWN ? soft-open SILENT. */
+	/* 非 HuC Data East（btime/disco）: 基板 UNKNOWN — ソフトオープン SILENT */
 	if (hw_->board_ == CEMU_AC_BOARD_UNKNOWN) {
 		booted_ = 1;
 		hasCpu_ = 0;
@@ -1157,13 +1083,11 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 		if (!song) song = 0x20;
 		hw_->SetSoundCommand(0x80);
 		M62RunCycles(cpuHz_);
-		/* IRQ ISR stores the masked latch to a direct page mailbox that
-		   varies by title ($BC ldrun/kungfum, $C6 ldrun3, $C7 kidniki).
-		   Seed the common slots after boot, then pulse the real latch. */
+		/* IRQ ISR はマスク済みラッチをタイトル毎のダイレクトページメールボックスへ（$BC ldrun/kungfum、$C6 ldrun3、$C7 kidniki）。ブート後に共通枠を種まきし、本物ラッチをパルス。 */
 		struct m6800* cpu = hw_->M6803Cpu();
 		if (cpu) {
 			const uint8_t id = (uint8_t)(song & 0x7fu);
-			/* Mailboxes used by M62 IRQ ISRs across the set. */
+			/* セット横断で M62 IRQ ISR が使うメールボックス */
 			const uint8_t slots[] = { 0xbc, 0xc6, 0xc7, 0xcc, 0 };
 			for (int i = 0; slots[i]; i++) {
 				const uint8_t a = slots[i];
@@ -1175,7 +1099,7 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 		M62RunCycles(cpuHz_ / 2);
 		hw_->SetSoundCommand(0x80);
 		M62RunCycles(cpuHz_ / 4);
-		/* Second pulse ? covers mailboxes wiped by a late STAA #$FF. */
+		/* 2 回目のパルス — 遅い STAA #$FF で消されたメールボックスをカバー */
 		if (cpu) {
 			const uint8_t id = (uint8_t)(song & 0x7fu);
 			const uint8_t slots[] = { 0xbc, 0xc6, 0xc7, 0xcc, 0 };
@@ -1196,8 +1120,7 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 		return 1;
 	}
 
-	/* Both Sega sound boards run a 68000 on the shared Musashi core: Model 1 /
-	   early Model 2 with MultiPCM+YM3438, Model 2A/3 with SCSP. */
+	/* 両 Sega 音源基板は共有 Musashi 上の 68000: Model 1／初期 Model 2 は MultiPCM+YM3438、Model 2A/3 は SCSP */
 	sega68_ = (hw_->board_ == CEMU_AC_BOARD_SEGA_SCSP) ? 1 : 0;
 	if (sega68_) {
 		if (!hw_->Ms1Active()) return 0;
@@ -1207,15 +1130,11 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 			songCmdWord_ = songCmd_;
 		if (!songCmdWord_)
 			songCmdWord_ = 0x1001;
-		/* Longer settle ? MultiPCM firmware clears RAM then waits on UART. */
+		/* settle を長く — MultiPCM ファームが RAM をクリアして UART 待ち */
 		Sega68RunCycles(cpuHz_);
 		Sega68RunCycles(cpuHz_ / 2);
 		if (hw_->SegaM1Audio()) {
-			/* Sega68RunCycles produces no audio, so a song started here
-			   plays its intro into nothing. Finish the same settle, then
-			   let the first rendered sample issue the select instead —
-			   otherwise daytona loses the first three quarters of a
-			   second of its opening. */
+			/* Sega68RunCycles は音声を出さないので、ここで始めた曲のイントロは虚空へ。同じ settle を終え、最初の描画サンプルで select を出す — さもなくば daytona はオープニング先頭約 3/4 秒を失う。 */
 			Sega68RunCycles(cpuHz_ / 2);
 			Sega68RunCycles(cpuHz_ / 4);
 			booted_ = 1;
@@ -1227,10 +1146,7 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 		Sega68RunCycles(cpuHz_ / 2);
 		TryInjectCommand();
 		Sega68RunCycles(cpuHz_ / 4);
-		/* rchase2 copies wave RAM for ~3s after MIDI select (windows 0-2
-		   silent). Skip that pre-roll so pick 2,3 land in seq=6. Do not
-		   do this on dynabb-class titles: their BGM starts immediately
-		   and silent cycles eat the intro. */
+		/* rchase2 は MIDI 選択後約 3s ウェーブ RAM をコピー（窓 0-2 無音）。そのプレロールを飛ばし pick 2,3 が seq=6 に着地。dynabb 系ではしない: BGM はすぐ始まり、無音サイクルがイントロを食う。 */
 		if (ge && ge->archive && _stricmp(ge->archive, "rchase2") == 0)
 			Sega68RunCycles(cpuHz_ * 3);
 		booted_ = 1;
@@ -1239,13 +1155,13 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 		return 1;
 	}
 
-	/* Mega System 1 / System GX / Hornet share the Ms1 boot/render path. */
+	/* Mega System 1 / System GX / Hornet は Ms1 ブート／描画経路を共有 */
 	ms1_ = (hw_->board_ == CEMU_AC_BOARD_MEGASYSTEM1
 		|| hw_->board_ == CEMU_AC_BOARD_KONAMI_GX
 		|| hw_->board_ == CEMU_AC_BOARD_KONAMI_RF5C400
 		|| hw_->board_ == CEMU_AC_BOARD_M68K_PCM) ? 1 : 0;
 
-	/* Data East HuC6280 / M6502, and Atari System1 JSA (same M6502 runner). */
+	/* Data East HuC6280 / M6502、および Atari System1 JSA（同じ M6502 ランナー） */
 	deco_ = (hw_->board_ == CEMU_AC_BOARD_DECO
 		|| hw_->board_ == CEMU_AC_BOARD_ATARI_SYS1) ? 1 : 0;
 	if (deco_) {
@@ -1254,12 +1170,7 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 		decoChipRes_ = 0;
 		decoNextYmIrq_ = 0;
 		cmdIndex_ = 0;
-		/* Prefer BGM codes. 0x80+ are SE/volume ? strip to low 7 bits.
-		   H6280 (kind 0): catalogs may list high fanfare codes ? rewrite
-		   those down toward playable stage BGM when present.
-		   dec0/drgninja (kind 2): catalogs lead with Credit (0x05); keep
-		   host BGM >=0x1C, but lift Credit/low SE up to the first stage BGM.
-		   Atari JSA (kind 5): skip voice/chip-test catalog heads. */
+		/* BGM コードを優先。0x80+ は SE／音量 — 下位 7bit へ。H6280（kind 0）: カタログが高ファンファーレを出すことがある — 再生可能なステージ BGM があればそちらへ。dec0/drgninja（kind 2）: カタログ先頭は Credit（0x05）。ホスト BGM >=0x1C は残し、Credit／低 SE は最初のステージ BGM へ上げる。Atari JSA（kind 5）: ボイス／チップテストのカタログ先頭を飛ばす。 */
 		if (songCmd_ >= 0x80 && songCmd_ < 0xc0)
 			songCmd_ = (uint8_t)(songCmd_ & 0x7fu);
 		if (ge && ge->titleCount > 0) {
@@ -1273,8 +1184,7 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 				break;
 			}
 			if (kind == 0 && (se || credit)) {
-				/* Credit -> first stage BGM. Voice/SFX (not credit) -> 2nd
-				   BGM so pick 2/3 are not both folded onto 0x07. */
+				/* Credit → 最初のステージ BGM。Voice/SFX（Credit 以外）→ 2 本目 BGM。pick 2/3 が両方 0x07 に畳まれないようにする。 */
 				uint8_t bgm[2] = { 0, 0 };
 				int n = 0;
 				for (int i = 0; i < ge->titleCount && n < 2; i++) {
@@ -1304,13 +1214,11 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 			} else if (kind == 5 && ge->archive
 				&& _stricmp(ge->archive, "indytemp") == 0
 				&& (credit || songCmd_ == 0x1Du)) {
-				/* Coin 0x1D is a jingle; Game Start 0x2A (2nd 0x08-0x3F BGM)
-				   is also a one-shot. Free the Children vs Title 0x0A. */
+				/* Coin 0x1D はジングル。Game Start 0x2A（2 本目 0x08-0x3F BGM）もワンショット。Free the Children vs Title 0x0A */
 				songCmd_ = 0x0Bu;
 				songCmdWord_ = songCmd_;
 			} else if (kind == 5 && (se || credit || songCmd_ <= 0x05u)) {
-				/* Atari JSA: 0x64+ catalog rows are SFX (roadrunn 100/101).
-				   Do not fold every >=0x60 onto one BGM. */
+				/* Atari JSA: 0x64+ カタログ行は SFX（roadrunn 100/101）。>=0x60 を全部 1 本の BGM へ畳まない。 */
 				uint8_t bgm[2] = { 0, 0 };
 				int n = 0;
 				for (int i = 0; i < ge->titleCount && n < 2; i++) {
@@ -1329,25 +1237,25 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 		}
 		if (ge && ge->archive && _stricmp(ge->archive, "robocop2") == 0
 			&& songCmd_ == 0x05u)
-			songCmd_ = 0x08u; /* Sector 1,2 NOSEQ -> Sector 3 vs Story 0x04 */
+			songCmd_ = 0x08u; /* Sector 1,2 NOSEQ → Sector 3 vs Story 0x04（割当） */
 		else if (ge && ge->archive && _stricmp(ge->archive, "marble") == 0
 			&& songCmd_ == 0x2fu)
-			songCmd_ = 0x0au; /* Goal jingle -> Level 2 vs Level 1 0x08 */
+			songCmd_ = 0x0au; /* Goal ジングル → Level 2 vs Level 1 0x08 */
 		if (!songCmd_) songCmd_ = 0x08;
 		DecoRunCycles(cpuHz_);
 		DecoRunCycles(cpuHz_ / 2);
 		TryInjectCommand();
-		/* Extra settle so IRQ1 queues and IRQ2 drains the song. */
+		/* 追加 settle。IRQ1 がキューし IRQ2 が曲をドレイン */
 		DecoRunCycles(cpuHz_);
 		DecoRunCycles(cpuHz_ / 2);
 		booted_ = 1;
 		triggered_ = 1;
-		/* Do not schedule further injects ? repeats clear $2310. */
+		/* 追加注入をスケジュールしない — 繰り返しは $2310 をクリア */
 		nextCmdAt_ = (uint64_t)~0ull;
 		return 1;
 	}
 
-	/* Namco System 1/2: M6809 + YM2151 (+ CUS30 / C140). */
+	/* Namco System 1/2: M6809 + YM2151（+ CUS30 / C140）基板 */
 	namcoM6809_ = (hw_->board_ == CEMU_AC_BOARD_NAMCO_SYS1
 		|| hw_->board_ == CEMU_AC_BOARD_NAMCO_SYS2
 		|| (hw_->board_ == CEMU_AC_BOARD_NAMCO_WSG && hw_->WsgMappy()
@@ -1359,39 +1267,35 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 		if (!songCmd_
 			&& !(hw_->board_ == CEMU_AC_BOARD_NAMCO_WSG && hw_->WsgMappy()))
 			songCmd_ = 0x01;
-		/* Byte stop codes 0xF0..0xFF �� 0x01. Do NOT treat Sys2 words
-		   (0x0203/0x0213/�c) as stops ? songCmdWord_>=0xF0 wiped BGM. */
+		/* バイト停止コード 0xF0..0xFF → 0x01。Sys2 語（0x0203/0x0213 等）を停止扱いしない — songCmdWord_>=0xF0 が BGM を消した。 */
 		if (songCmd_ >= 0xf0u
 			|| (songCmdWord_ >= 0xf0u && songCmdWord_ <= 0x00ffu)) {
 			songCmd_ = 0x01;
 			songCmdWord_ = 0x01;
 			pinned_ = 0;
 		}
-		/* WSG6809 catalog codes are 15xx flag indices ($40+n). Do not fold
-		   Credit/SE onto a BGM latch — that was masking the all-song-0 bug.
-		   Archive-specific jingle -> looping BGM is OK now that slot flags
-		   work; still never plant the catalog id into $40. */
+		/* WSG6809 カタログコードは 15xx フラグ添字（$40+n）。Credit/SE を BGM ラッチへ畳まない — 全曲 0 バグを隠していた。スロットフラグが動くならアーカイブ固有ジングル→ループ BGM は可。カタログ id を $40 に植えない。 */
 		if (hw_->board_ == CEMU_AC_BOARD_NAMCO_WSG && hw_->WsgMappy()
 			&& !hw_->Wsg63701() && ge && ge->archive) {
 			const unsigned cur = songCmdWord_ ? (songCmdWord_ & 0xffu)
 				: (unsigned)songCmd_;
 			unsigned to = cur;
 			if (_stricmp(ge->archive, "mappy") == 0) {
-				if (cur == 0x00u) to = 0x02u; /* intro -> Main */
-				else if (cur == 0x01u) to = 0x03u; /* start -> Game Over */
+				if (cur == 0x00u) to = 0x02u; /* intro → Main（割当） */
+				else if (cur == 0x01u) to = 0x03u; /* start → Game Over（割当） */
 			} else if (_stricmp(ge->archive, "pacnpal") == 0) {
-				if (cur == 0x01u) to = 0x11u; /* start -> Rest Time */
+				if (cur == 0x01u) to = 0x11u; /* start → Rest Time（割当） */
 			} else if (_stricmp(ge->archive, "digdug2") == 0) {
-				if (cur == 0x00u) to = 0x02u; /* start -> Hurry */
+				if (cur == 0x00u) to = 0x02u; /* start → Hurry（割当） */
 			} else if (_stricmp(ge->archive, "toypop") == 0) {
-				if (cur == 0x07u) to = 0x04u; /* start -> BGM */
-				else if (cur == 0x00u) to = 0x05u; /* intro -> Bonus */
+				if (cur == 0x07u) to = 0x04u; /* start → BGM（割当） */
+				else if (cur == 0x00u) to = 0x05u; /* intro → Bonus（割当） */
 			} else if (_stricmp(ge->archive, "gaplus") == 0) {
-				if (cur == 0x00u) to = 0x03u; /* start -> Name 1st */
-				else if (cur == 0x01u) to = 0x04u; /* missile -> Name 2nd */
+				if (cur == 0x00u) to = 0x03u; /* start → Name 1st（割当） */
+				else if (cur == 0x01u) to = 0x04u; /* missile → Name 2nd（割当） */
 			} else if (_stricmp(ge->archive, "phozon") == 0) {
-				if (cur == 0x10u) to = 0x14u; /* Credit -> Game Over */
-				else if (cur == 0x11u) to = 0x15u; /* start -> Name 1st */
+				if (cur == 0x10u) to = 0x14u; /* Credit → Game Over（割当） */
+				else if (cur == 0x11u) to = 0x15u; /* start → Name 1st（割当） */
 			} else if (_stricmp(ge->archive, "grobda") == 0) {
 				if (cur == 0x03u) to = 0x0au;
 			}
@@ -1408,9 +1312,7 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 				pinned_ = 1;
 			}
 		}
-		/* Sys2 catalog often leads with unused Opening / SFX Start / Await.
-		   Prefer unique type-$20 BGM records (dummy tables alias many ids onto
-		   one stub). Type $20 at lo>=$40 must still be kept. */
+		/* Sys2 カタログ先頭はしばしば未使用 Opening / SFX Start / Await。固有 type-$20 BGM レコードを優先（dummy 表は多数 id を 1 stub へ別名）。lo>=$40 の type $20 は残す。 */
 		if (hw_->board_ == CEMU_AC_BOARD_NAMCO_SYS2 && ge && ge->titleCount > 0) {
 			const unsigned cur = songCmdWord_ ? songCmdWord_ : (unsigned)songCmd_;
 			const unsigned hi = (cur >> 8) & 0xffu;
@@ -1448,8 +1350,7 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 			if (ge->archive) {
 				const char* ar = ge->archive;
 				const unsigned odd = lo & 1u;
-				/* Only pin the silent catalog pick. Pinning a live dummy/non-$20
-				   id skips the unique type-$20 rewrite that actually plays. */
+				/* 無音のカタログ pick だけピン。ライブ dummy／非 $20 id をピンすると実際に鳴る固有 type-$20 書き換えを飛ばす。 */
 				if ((_stricmp(ar, "cosmogng") == 0 || _stricmp(ar, "cosmogngj") == 0)
 					&& !odd)
 					prefer = 0x08u;
@@ -1469,8 +1370,7 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 					prefer = 0x04u;
 				else if (_stricmp(ar, "assault") == 0
 					&& (lo == 0x12u || lo == 0x16u))
-					/* Unique Stage A record keys 10 C140 voices at F0 and
-					   clips dead. Stage D (0x18) is a distinct looping BGM. */
+					/* 固有 Stage A レコードは F0 で C140 ボイス 10 本をキーしクリップ死。Stage D（0x18）は別のループ BGM。 */
 					prefer = 0x18u;
 			}
 			const int weak = (!cur || cur == 0x200u || cur == 0x220u
@@ -1530,18 +1430,14 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 				}
 			}
 		}
-		/* Finish RAM-test / CLI before injecting so IRQ does not clobber A.
-		   Mappy-era sub CPUs wait on shared-RAM magic before CLI:
-		     grobda/motos: $40="CK" then later "GO"
+		/* 注入前に RAM テスト／CLI を終え、IRQ が A を壊さないように。Mappy 期サブ CPU は CLI 前に共有 RAM マジック待ち:
+		     grobda/motos: $40="CK" のち "GO"
 		     gaplus: $40==$11
-		     pacnpal: $40==$01 (any other non-zero �� BRA *)
-		     superpac: $FB!=0 after clearing $40
-		   Re-seed from the *current* PC each slice so multi-phase gates and
-		   soft-resets back to E000 still release ? then inject the song. */
+		     pacnpal: $40==$01（他の非 0 は BRA *）
+		     superpac: $40 クリア後 $FB!=0
+		   スライス毎に現在 PC から再種まきし、多相ゲートと E000 へのソフトリセットでも解放 — そのあと曲を注入。 */
 		if (hw_->board_ == CEMU_AC_BOARD_NAMCO_WSG && hw_->WsgMappy()) {
-			/* digdug2/todruaga begin with a 1KiB shared-RAM clear. Chip Reset
-			   already zeroed the 15xx window; skipping the STD loop avoids a
-			   long I=1 stretch where stack-clamp/IRQ edges could bounce PC. */
+			/* digdug2/todruaga は 1KiB 共有 RAM クリアから始まる。Chip Reset は既に 15xx 窓をゼロ。STD ループを飛ばし、スタッククランプ／IRQ 端が PC を跳ね返す長い I=1 区間を避ける。 */
 			{
 				mc6809__t* cpu = (mc6809__t*)hw_->NamcoM6809Cpu();
 				if (cpu && cpu->pc.w == 0xe000u) {
@@ -1551,7 +1447,7 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 					const uint8_t a6 = hw_->NamcoM6809Read8(0xe006);
 					const uint8_t a9 = hw_->NamcoM6809Read8(0xe009);
 					if (a0 == 0xb7 && a1 == 0x20 && a3 == 0x8e && a6 == 0xcc && a9 == 0xed) {
-						cpu->pc.w = 0xe00fu; /* LDS #$0400 / checksum */
+						cpu->pc.w = 0xe00fu; /* LDS #$0400 / チェックサム */
 						cpu->S.w = 0x0400u;
 					}
 				}
@@ -1568,30 +1464,30 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 				const uint8_t o5 = hw_->NamcoM6809Read8((uint16_t)(pc + 5));
 				const uint8_t o6 = hw_->NamcoM6809Read8((uint16_t)(pc + 6));
 				if (o0 == 0xdc && o1 == 0x40 && o2 == 0x10 && o3 == 0x83) {
-					/* grobda: LDD $40 / CMPD #imm ("CK" or "GO") */
+					/* grobda: LDD $40 / CMPD #imm（"CK" または "GO"） */
 					hw_->NamcoM6809Write8(0x0040, o4);
 					hw_->NamcoM6809Write8(0x0041, o5);
 				} else if (o0 == 0x9e && o1 == 0x40 && o2 == 0x8c) {
-					/* motos: LDS $40 / CMPX #imm */
+					/* motos: LDS $40 / CMPX #imm（比較） */
 					hw_->NamcoM6809Write8(0x0040, o3);
 					hw_->NamcoM6809Write8(0x0041, o4);
 				} else if (o0 == 0x96 && o1 == 0x40 && o2 == 0x81) {
-					/* pacnpal: LDA $40 / CMPA #imm */
+					/* pacnpal: LDA $40 / CMPA #imm（比較） */
 					hw_->NamcoM6809Write8(0x0040, o3);
 				} else if (o0 == 0x96 && o1 == 0x40 && o2 == 0xb7 && o5 == 0x81) {
-					/* gaplus: LDA $40 / STA $3000 / CMPA #imm */
+					/* gaplus: LDA $40 / STA $3000 / CMPA #imm（比較） */
 					hw_->NamcoM6809Write8(0x0040, o6);
 				} else if (o0 == 0x96 && o1 == 0xfb && o2 == 0x27) {
-					/* superpac: LDA $FB / BEQ wait */
+					/* superpac: LDA $FB / BEQ wait（待ち） */
 					hw_->NamcoM6809Write8(0x00fb, 0x40);
 				} else if (o0 == 0xec && o1 == 0x84 && o2 == 0x26 && o3 == 0xfc) {
-					/* superpac: spin while word at X ($40) != 0 ? clear it */
+					/* superpac: X（$40）のワードが 0 でない間スピン — クリアする */
 					hw_->NamcoM6809Write8(0x0040, 0);
 					hw_->NamcoM6809Write8(0x0041, 0);
 				} else if (o0 == 0x91 && o1 == 0x41 && o2 == 0x27) {
-					hw_->NamcoM6809Write8(0x0041, 0); /* phozon host gate */
+					hw_->NamcoM6809Write8(0x0041, 0); /* phozon ホストゲート */
 				} else {
-					/* Cold reset vector patterns (PC still near E000/F000). */
+					/* コールドリセットベクタ型（PC はまだ E000/F000 付近） */
 					uint8_t b[8];
 					const uint16_t base = (pc >= 0xf000u) ? 0xf000u : 0xe000u;
 					for (int i = 0; i < 8; i++)
@@ -1604,7 +1500,7 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 						hw_->NamcoM6809Write8(0x0041, b[4]);
 					} else if (b[0] == 0x1a && b[1] == 0xff && b[2] == 0x96 && b[3] == 0x40
 						&& b[4] == 0x81) {
-						hw_->NamcoM6809Write8(0x0040, b[5]); /* pacnpal */
+						hw_->NamcoM6809Write8(0x0040, b[5]); /* pacnpal（種まき） */
 					} else {
 						for (int i = 0; i < 16; i++) {
 							const uint8_t c0 = hw_->NamcoM6809Read8((uint16_t)(base + i));
@@ -1620,22 +1516,21 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 				NamcoM6809RunCycles(cpuHz_ / 32);
 				cpu = (mc6809__t*)hw_->NamcoM6809Cpu();
 				if (!cpu) break;
-				/* Skip fixed ROM checksum loops ? ADDA ,X+ across $E000-$FFFF
-				   can wedge under our step budget; the sums are constant. */
+				/* 固定 ROM チェックサムループを飛ばす — $E000-$FFFF の ADDA ,X+ はステップ予算で楔。和は定数。 */
 				{
 					const uint16_t pc = cpu->pc.w;
 					if (pc >= 0xe010u && pc <= 0xe018u
 						&& hw_->NamcoM6809Read8(0xe008) == 0x81
 						&& hw_->NamcoM6809Read8(0xe009) == 0x11
 						&& hw_->NamcoM6809Read8(0xe01a) == 0x81) {
-						/* gaplus: sum == 0 */
+						/* gaplus: 和 == 0 */
 						cpu->A = 0;
 						cpu->X.w = 0;
 						cpu->pc.w = 0xe01au;
 					} else if (pc >= 0xe014u && pc <= 0xe019u
 						&& hw_->NamcoM6809Read8(0xe01b) == 0x81
 						&& hw_->NamcoM6809Read8(0xe01c) == 0xddu) {
-						/* liblrabl: sum == $DD */
+						/* liblrabl: 和 == $DD */
 						cpu->A = 0xddu;
 						cpu->X.w = 0;
 						cpu->pc.w = 0xe01bu;
@@ -1648,28 +1543,24 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 							&& hw_->NamcoM6809Read8((uint16_t)(pc + 2)) == 0x00
 							&& hw_->NamcoM6809Read8((uint16_t)(pc + 3)) == 0xcc
 							&& hw_->NamcoM6809Read8((uint16_t)(pc + 6)) == 0xed)) {
-						/* motos/grobda post-GO RAM clear (same as digdug2). */
+						/* motos/grobda の GO 後 RAM クリア（digdug2 と同じ） */
 						const uint16_t skip = (hw_->NamcoM6809Read8(pc) == 0xb7)
 							? (uint16_t)(pc + 0x0fu) : (uint16_t)(pc + 0x0cu);
 						cpu->pc.w = skip;
 						cpu->S.w = 0x0400u;
 					}
 				}
-				/* CLI done �� past host handshake; safe to post BGM. */
+				/* CLI 済み — ホストハンドシェイク後。BGM 投稿可 */
 				if (!cpu->cc.i) break;
 			}
 			NamcoM6809RunCycles(cpuHz_ / 4);
 		}
 		NamcoM6809RunCycles(cpuHz_);
-		/* Blazer/rompers: command poll gated on $8119==$0E; pacmania uses $901C. */
+		/* Blazer/rompers: コマンド poll は $8119==$0E。pacmania は $901C */
 		hw_->NamcoM6809Write8(0x8119, 0x0e);
 		hw_->NamcoM6809Write8(0x811c, 0x0e);
 		hw_->NamcoM6809Write8(0x901c, 0x0e);
-		/* Never post BGM over an unfinished host handshake ? gaplus waits
-		   forever if $40 becomes the song id before $11 is seen.
-		   Sys2 (assault): ROM only ANDCC #$BF (clear F) ? I stays set for
-		   life and the sequencer is FIRQ/C140-driven. Requiring !I skipped
-		   every inject and left peak=0. */
+		/* 未完了ホストハンドシェイク上に BGM を載せない — $40 が $11 より先に曲 id になると gaplus は永久待ち。Sys2（assault）: ROM は ANDCC #$BF（F クリア）のみ。I は生涯セットでシーケンサは FIRQ/C140 駆動。!I 必須だと全注入を飛ばし peak=0。 */
 		{
 			mc6809__t* cpu = (mc6809__t*)hw_->NamcoM6809Cpu();
 			if (hw_->board_ == CEMU_AC_BOARD_NAMCO_SYS2
@@ -1677,8 +1568,7 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 				TryInjectCommand();
 		}
 		NamcoM6809RunCycles(cpuHz_ / 2);
-		/* gaplus/superpac/liblrabl finish handshake late ? warm until the
-		   15XX speaks so classify chunks are not 0,0,0,peak (WEAK). */
+		/* gaplus/superpac/liblrabl はハンドシェイクが遅い — 15XX が話すまで温め、分類チャンクが 0,0,0,peak（WEAK）にならないようにする。 */
 		if (hw_->board_ == CEMU_AC_BOARD_NAMCO_WSG && hw_->WsgMappy()) {
 			const int slice = hostRate_ > 0 ? hostRate_ / 10 : 4410;
 			int16_t* tmp = (int16_t*)malloc((size_t)slice * 2 * sizeof(int16_t));
@@ -1688,7 +1578,7 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 					if (cmdIndex_ < 1 && cpu && !cpu->cc.i)
 						TryInjectCommand();
 					else if (cmdIndex_ < 1 && cpu && cpu->cc.i) {
-						/* superpac: IRQ vector == RESET, I stays set. */
+						/* superpac: IRQ ベクタ == RESET。I はセットのまま */
 						const uint16_t irqv = (uint16_t)(
 							((unsigned)hw_->NamcoM6809Read8(0xfff8) << 8)
 							| hw_->NamcoM6809Read8(0xfff9));
@@ -1704,9 +1594,7 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 						int v = tmp[i]; if (v < 0) v = -v;
 						if (v > peak) peak = v;
 					}
-					/* Stop once the 15xx is speaking. Do not spin 80 slices
-					   after inject — one-shot flags (gaplus missile, mappy
-					   start) finish during the wait and classify as SILENT. */
+					/* 15xx が話し始めたら止める。注入後 80 スライス回さない — ワンショットフラグ（gaplus ミサイル、mappy start）が待ち中に終わり SILENT 分類。 */
 					if (peak >= 200)
 						break;
 					if (cmdIndex_ >= 1 && w >= 2)
@@ -1717,12 +1605,12 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 		}
 		booted_ = 1;
 		triggered_ = 1;
-		/* WSG6809 flag is one-shot; 60 Hz re-post restarted every title. */
+		/* WSG6809 フラグはワンショット。60Hz 再投稿は全タイトルを再開していた */
 		nextCmdAt_ = (uint64_t)~0ull;
 		return 1;
 	}
 
-	/* Namco System 86 / wsg63701: HD63701 + CUS30 (+ YM2151 on Sys86). */
+	/* Namco System 86 / wsg63701: HD63701 + CUS30（Sys86 は + YM2151） */
 	sys86_ = ((hw_->board_ == CEMU_AC_BOARD_NAMCO_SYS86
 			|| (hw_->board_ == CEMU_AC_BOARD_NAMCO_WSG && hw_->Wsg63701()))
 		&& hw_->HD63701Active()) ? 1 : 0;
@@ -1732,8 +1620,8 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 		sys86OciNeed_ = 0;
 		cmdIndex_ = 0;
 		if (!songCmd_) songCmd_ = 0x01;
-		/* Boot CUS60, edged stop (clears doorbell+$B0), then start song. */
-		nextCmdAt_ = (uint64_t)~0ull; /* freeze inject during boot/probe */
+		/* CUS60 をブート、エッジ停止（doorbell+$B0 クリア）、そのあと曲開始 */
+		nextCmdAt_ = (uint64_t)~0ull; /* ブート／プローブ中は注入を凍結 */
 		Sys86RunCycles(cpuHz_);
 		if (getenv("CEMU_SYS86_TRACE")) {
 			HD63701Cpu* cpu = hw_->HD63701CpuPtr();
@@ -1750,19 +1638,19 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 				hw_->HD63701Read8(0x14f8), hw_->HD63701Read8(0x14f9));
 		}
 		Sys86RunCycles(cpuHz_ / 2);
-		/* If CUS60 boot skipped AE install (expanded map races), seed it. */
+		/* CUS60 ブートが AE インストールを飛ばしたら（拡張マップ競合）種まき */
 		if (hw_->HD63701Read8(0x00ae) == 0 && hw_->HD63701Read8(0x00af) == 0)
-			hw_->SetSoundCommand(0); /* inject path also restores AE/table */
+			hw_->SetSoundCommand(0); /* 注入経路も AE／表を復元 */
 		hw_->SetSoundCommand(0);
 		Sys86RunCycles(cpuHz_ / 4);
-		hw_->SetSoundCommand(0); /* second stop ensures $1182 stays clear */
+		hw_->SetSoundCommand(0); /* 2 回目の停止で $1182 をクリアのまま */
 		Sys86RunCycles(cpuHz_ / 8);
 		if (ge && ge->archive && _stricmp(ge->archive, "drgnbstr") == 0
 			&& songCmd_ == 0x01u)
-			songCmd_ = 0x05u; /* ROUND START one-shot -> BGM_B vs BGM_A 0x06 */
+			songCmd_ = 0x05u; /* ROUND START ワンショット → BGM_B vs BGM_A 0x06 */
 		if (ge && ge->archive && _stricmp(ge->archive, "roishtar") == 0
 			&& songCmd_ == 0x02u)
-			songCmd_ = 0x06u; /* main theme short -> Knox vs Druaga A 0x0E */
+			songCmd_ = 0x06u; /* メインテーマ短い → Knox vs Druaga A 0x0E */
 		hw_->SetSoundCommand(songCmd_);
 		cmdIndex_ = 1;
 		Sys86RunCycles(cpuHz_);
@@ -1822,7 +1710,7 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 		return 1;
 	}
 
-	/* Namco System 12 / ND-1: H8/3002 + C352. Sys11/22/NA1: M37702. */
+	/* Namco System 12 / ND-1: H8/3002 + C352。Sys11/22/NA1: M37702（基板） */
 	h8Board_ = (hw_->board_ == CEMU_AC_BOARD_NAMCO_C352 && hw_->H8Active()) ? 1 : 0;
 	m37702Board_ = (hw_->board_ == CEMU_AC_BOARD_NAMCO_C352 && hw_->M37702Active()) ? 1 : 0;
 	if (hw_->board_ == CEMU_AC_BOARD_NAMCO_C352) {
@@ -1830,11 +1718,7 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 		if (h8Board_) {
 			h8Acc_ = 0;
 			cmdIndex_ = 0;
-			/* Warm the driver through its own init, which is silent, then post
-			   the song and stop. Running the CPU on past the request would
-			   leave it permanently that far ahead of the rendered audio, and
-			   FmMon reads the live register shadow, so the keyboard would
-			   light up that much earlier than the note is heard. */
+			/* ドライバ自身の init（無音）で温め、曲を投稿して止める。要求より先に CPU を走らせると描画音声より常に先行し、FmMon はライブレジスタ影を読むので鍵盤がその分早く点灯する。 */
 			H8RunCycles(cpuHz_);
 			H8RunCycles(cpuHz_ / 2);
 			TryInjectCommand();
@@ -1846,8 +1730,7 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 		if (m37702Board_) {
 			m37702Acc_ = 0;
 			cmdIndex_ = 0;
-			/* Same as the H8 path above: nothing may run after the request or
-			   the CPU stays that far ahead of the audio for the whole song. */
+			/* 上の H8 経路と同じ: 要求後に走らせると曲全体で CPU が音声より先行したまま */
 			M37702RunCycles(cpuHz_);
 			M37702RunCycles(cpuHz_ / 2);
 			TryInjectCommand();
@@ -1857,7 +1740,7 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 			return 1;
 		}
 		if (hw_->M37702Soft()) {
-			/* Soft fallback: no CPU ? leave silent. */
+			/* ソフトフォールバック: CPU 無し — 無音のまま */
 			hasCpu_ = 0;
 			cmdIndex_ = 0;
 			booted_ = 1;
@@ -1869,7 +1752,7 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 		return 1;
 	}
 
-	/* Irem M92 runs its encrypted NEC V35 instead of the Z80. */
+	/* Irem M92 は暗号化 NEC V35 を回し Z80 ではない */
 	m92_ = (hw_->board_ == CEMU_AC_BOARD_IREM_M92) ? 1 : 0;
 	if (m92_) {
 		if (!hw_->M92Active()) return 0;
@@ -1878,40 +1761,26 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 		m92NoteOffSeen_ = 0;
 		m92ChannelPlayOff_ = 0;
 		m92NoteStuck_ = 0;
-		/* Prefill after a longer boot so IMC/DS/SS are ready on Rev 3.40+
-		   sets (encrypted JMP FAR into low ROM). Song-gate [0316]/[0317]
-		   and drain [0319] still need host priming when init is skipped. */
+		/* 長いブートのあとプリフィルし、Rev 3.40+（暗号化 JMP FAR で低 ROM へ）で IMC/DS/SS を用意。init を飛ばすと曲ゲート [0316]/[0317] とドレイン [0319] はまだホスト priming が要る。 */
 		cmdIndex_ = 0;
-		/* Word-queue IMC (firebarr/nbbatman/�c): idle spins on [0C31]==3 until
-		   the main CPU signals ready. Without that release the freelist never
-		   builds and every BGM alloc returns empty. */
+		/* ワードキュー IMC（firebarr/nbbatman 等）: メイン CPU が ready するまで [0C31]==3 でアイドル。解放が無いとフリーリストが作られず全 BGM 割当が空。 */
 		if (hw_->M92WordQueue())
 			hw_->M92Write8(0xa0c31u, 0x03);
 		M92RunCycles(cpuHz_);
 		M92RunCycles(cpuHz_ / 2);
-		M92RunCycles(cpuHz_ / 2); /* Rev3.40 freelist/IMC can need ~2s */
-		/* Shared Irem sound sequencer: song-gate compares [0316]/[0317] and
-		   the command drain returns success only when [0319]!=0. lethalth /
-		   bmaster init write FF here; gunforce/uccops often skip that path
-		   under our host boot ? prime the same three bytes for every set. */
+		M92RunCycles(cpuHz_ / 2); /* Rev3.40 フリーリスト／IMC は約 2s 要ることがある */
+		/* 共有 Irem 音源シーケンサ: 曲ゲートは [0316]/[0317] を比較。コマンドドレインは [0319]!=0 のときだけ成功。lethalth / bmaster init はここに FF。gunforce/uccops はホストブートでその経路を飛ばしがち — 全セットで同じ 3 バイトを priming。 */
 		hw_->M92Write8(0xa0316u, 0x00);
 		hw_->M92Write8(0xa0317u, 0xff);
 		hw_->M92Write8(0xa0319u, 0xff);
-		/* lethalth/gunforce/bmaster leave the command-accept flags at
-		   [0310]/[0311] set after IMC init; some sets stall with them clear
-		   and drop the latch without writing the 0280 queue. */
+		/* lethalth/gunforce/bmaster は IMC init 後に [0310]/[0311] の受理フラグを立てる。クリアのまま止まるとラッチを落とし 0280 キューを書かないセットがある。 */
 		hw_->M92Write8(0xa0310u, 0x01);
 		hw_->M92Write8(0xa0311u, 0x01);
-		/* Rev 3.40+ ring dequeue returns a cmd only when (mask & cmd) != 0.
-		   Byte ring: rtypeleo/hook [09EA], uccops [09EF].
-		   Word ring: nbbatman/firebarr [0C31] (also the ready semaphore). */
+		/* Rev 3.40+ リング dequeue は (mask & cmd) != 0 のときだけ cmd を返す。バイトリング: rtypeleo/hook [09EA]、uccops [09EF]。ワードリング: nbbatman/firebarr [0C31]（ready セマフォでもある）。 */
 		hw_->M92Write8(0xa09eau, 0xff);
 		hw_->M92Write8(0xa09efu, 0xff);
 		if (hw_->M92WordQueue()) {
-			/* IMC freelist lives at [0B12]/[0B92]/[0B93] (stride 0x50 from
-			   0x00A0 �~ 32). Boot builds it in CALL 0597 before the [0C31]==3
-			   wait, but under host boot the list is often still empty when we
-			   reach inject ? seed the same layout the ROM init writes. */
+			/* IMC フリーリストは [0B12]/[0B92]/[0B93]（0x00A0 から stride 0x50 ×32）。ブートは [0C31]==3 待ちの前に CALL 0597 で作るが、ホストブートでは注入時まだ空 — ROM init と同じ配置を種まき。 */
 			const uint8_t* ram = hw_->M92Ram();
 			if (ram && ram[0xb93] == 0 && ram[0xb92] == 0) {
 				uint8_t* w = const_cast<uint8_t*>(ram);
@@ -1926,17 +1795,14 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 				w[0xb93] = wp;
 				w[0xb92] = 0;
 			}
-			/* Dequeue RET's ZF from CMP [0C32],#0 ? caller drops the cmd when
-			   ZF set. Boot leaves [0C32]=0; handshake would raise it.
-			   wpksoc uses [0C32] as the AND-mask (nbbatman uses [0C31]); 0x01
-			   only allowed odd catalog ids and left BGM #02 silent. */
+			/* Dequeue の RET は CMP [0C32],#0 の ZF。ZF セットだと呼び出し側が cmd を捨てる。ブートは [0C32]=0。ハンドシェイクが上げる。wpksoc は [0C32] を AND マスク（nbbatman は [0C31]）。0x01 は奇数カタログ id だけ許し BGM #02 が無音。 */
 			hw_->M92Write8(0xa0c32u, 0xff);
 			hw_->M92Write8(0xa0c31u, 0xff);
 		}
 		TryInjectCommand();
 		M92RunCycles(cpuHz_ / 4);
 		booted_ = 1;
-		/* One latch only ? retries abort channel-BGM mid-phrase (WEAK). */
+		/* ラッチは 1 回だけ — 再試行はチャネル BGM をフレーズ途中で中断（WEAK） */
 		nextCmdAt_ = (uint64_t)~0ull;
 		return 1;
 	}
@@ -1946,8 +1812,7 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 		ms1Acc_ = 0;
 		if (hw_->board_ == CEMU_AC_BOARD_KONAMI_GX
 			|| hw_->board_ == CEMU_AC_BOARD_KONAMI_RF5C400) {
-			/* Boot must finish self-test and enable K056800 IRQs before any
-			   host packet is posted ? early inject is dropped. */
+			/* ホストパケット投稿前にブート自己テストと K056800 IRQ 許可を終える — 早い注入は捨てられる */
 			Ms1RunCycles(cpuHz_);
 			Ms1RunCycles(cpuHz_ / 2);
 			Ms1RunCycles(cpuHz_ / 2);
@@ -1963,30 +1828,28 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 			nextCmdAt_ = (uint64_t)~0ull;
 			return 1;
 		}
-		Ms1RunCycles(cpuHz_ / 2); /* boot: clear RAM, program YM2151/OKI */
+		Ms1RunCycles(cpuHz_ / 2); /* ブート: RAM クリア、YM2151/OKI を組む */
 		booted_ = 1;
 		TryInjectCommand();
 		nextCmdAt_ = (uint64_t)~0ull;
 		return 1;
 	}
 
-	/* Seibu SEI80BU: boot is a long RAM clear (LDIR @00CC) then banked init.
-	   Generic settle often leaves PC mid-clear with IFF1 clear. Force past
-	   the three LDIR blocks to the CALL/EI sequence, then edge RST18. */
+	/* Seibu SEI80BU: ブートは長い RAM クリア（LDIR @00CC）のあとバンク init。汎用 settle は IFF1 クリアのままクリア途中に PC を残しがち。3 つの LDIR を過ぎ CALL/EI へ強制し、RST18 をエッジ。 */
 	if (hw_->board_ == CEMU_AC_BOARD_SEIBU_OPL) {
 		hasCpu_ = 1;
-		/* Prefer catalog title; SetSoundCommand maps 0x81��table 0x8b. */
+		/* カタログタイトルを優先。SetSoundCommand は 0x81→表 0x8b */
 		if (!songCmd_)
 			songCmd_ = 0x80;
 		CEmuHardAcSetActive(hw_);
-		/* Give the three boot LDIRs time to finish (~0.25s) before synthesizing. */
+		/* 3 つのブート LDIR が終わるまで約 0.25s 待ってから合成 */
 		RunUntil((uint64_t)cpuHz_ / 4);
 		{
 			Ay_Cpu* c = hw_->Cpu();
 			uint8_t* m = hw_->Mem();
 			if (c && m) {
 				const unsigned pc = (unsigned)c->r.pc;
-				/* Stuck in boot LDIRs (00CC/00D7/00E7) ? synthesize post-clear. */
+				/* ブート LDIR（00CC/00D7/00E7）に固まったらクリア後を合成 */
 				if (pc >= 0x00BFu && pc <= 0x00E8u) {
 					memset(m + 0x2000, 0, 0x800);
 					memcpy(m + 0x2463, m + 0x1303, 0x24);
@@ -2011,7 +1874,7 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 					c->r.iff2 = 1;
 					break;
 				}
-				/* Still before EI ? jump to it after init CALLs settled. */
+				/* まだ EI 前なら init CALL が settle したあとそこへ飛ぶ */
 				if ((unsigned)c->r.pc >= 0x0100u && (unsigned)c->r.pc < 0x0119u
 					&& i >= 4) {
 					c->r.pc = 0x0119;
@@ -2026,7 +1889,7 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 			}
 		}
 		booted_ = 1;
-		/* Unblock main loop spin at 0126 ? normally set by YM RST10 ISR. */
+		/* メインループ 0126 のスピンを解除 — 通常は YM RST10 ISR が立てる */
 		if (uint8_t* m = hw_->Mem()) {
 			m[0x201c] = 0xff;
 			m[0x201d] = 0xff;
@@ -2034,7 +1897,7 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 		hw_->SetSoundCommand(songCmd_);
 		cmdIndex_ = 1;
 		triggered_ = 1;
-		/* Let the 0x80 scan / 054A allocate finish before Render. */
+		/* Render 前に 0x80 スキャン／054A 割当を終える */
 		RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ * 2u);
 		if (uint8_t* m = hw_->Mem())
 			m[0x201c] = 0xff;
@@ -2042,40 +1905,35 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 		return 1;
 	}
 
-	/* MAME irem/m72.cpp: a periodic NMI at MASTER_CLOCK/8/512 = 7812.5 Hz pumps
-	   one PCM byte per tick. Games with an empty NMI handler (airduel, gallop,
-	   poundfor�c) get the same transfer done host-side instead (fake_nmi). */
+	/* MAME irem/m72.cpp: MASTER_CLOCK/8/512 = 7812.5 Hz の周期 NMI が tick 毎に PCM 1 バイト。空 NMI ハンドラ（airduel、gallop、poundfor 等）は同じ転送をホスト側で（fake_nmi）。 */
 	nextM72Nmi_ = 0;
 	m72FakeNmi_ = 0;
 	if (hw_->board_ == CEMU_AC_BOARD_IREM_M72) {
 		const uint8_t h0 = hw_->PeekMem(0x0066);
 		const uint8_t h1 = hw_->PeekMem(0x0067);
-		/* MAME: R-Type NMI is DI;HALT (no samples). Others RET / RETN / NOP. */
+		/* MAME: R-Type の NMI は DI;HALT（サンプル無し）。他は RET / RETN / NOP */
 		if (h0 == 0xc9 || h0 == 0x00 || h0 == 0xff || h0 == 0x76
 			|| (h0 == 0xed && h1 == 0x45)
 			|| (h0 == 0xf3 && h1 == 0x76))
 			m72FakeNmi_ = 1;
 	}
 
-	/* Boot settle ~0.5s so init clears RAM and sets up OPM. */
+	/* ブート settle 約 0.5s。init が RAM をクリアし OPM を組む */
 	uint64_t bootCycles = (uint64_t)cpuHz_ / 2;
 	if (hw_->board_ == CEMU_AC_BOARD_CPS_QS)
-		nextGngIrq_ = (uint64_t)cpuHz_ / 250; /* MAME: 8MHz/32000 ? 250 Hz */
+		nextGngIrq_ = (uint64_t)cpuHz_ / 250; /* MAME: 8MHz/32000 → 250 Hz（周期） */
 	else if (hw_->board_ == CEMU_AC_BOARD_ALPHA68K2)
-		nextGngIrq_ = 0; /* NMI as soon as port A enables (boot OUT 0E,0) */
+		nextGngIrq_ = 0; /* ポート A が許可したらすぐ NMI（ブート OUT 0E,0） */
 	else
 		nextGngIrq_ = (uint64_t)cpuHz_ / 240;
-	/* CPS1/2 QSound: init spins/HALTs until shared CFFF==0xFF (68K ready).
-	   Without a main CPU that wait turns Ay_Cpu HALT into a multi-minute
-	   boot (RunOne advances ~4 clocks per call). Release before settle.
-	   Kabuki sets (dino/wof) hit this path for real; encrypted garbage did not. */
+	/* CPS1/2 QSound: init は共有 CFFF==0xFF（68K ready）までスピン／HALT。メイン CPU が無いとその待ちが Ay_Cpu HALT を数分ブートにする（RunOne は呼出あたり約 4 クロック）。settle 前に解放。Kabuki セット（dino/wof）はこの経路を本物で踏む。暗号化ゴミは踏まなかった。 */
 	if (hw_->board_ == CEMU_AC_BOARD_CPS_QS) {
 		if (uint8_t* m = hw_->Mem()) {
 			m[0xcfff] = 0xff;
 			m[0xcffd] = 0x00;
 		}
 	}
-	/* Bosco WSG: patch LD SP,$8000 �� $9F00 before any NMI can push. */
+	/* Bosco WSG: どの NMI も push する前に LD SP,$8000 → $9F00 をパッチ */
 	if (hw_->board_ == CEMU_AC_BOARD_NAMCO_WSG && hw_->Cpu()) {
 		uint8_t* m = hw_->Mem();
 		if (m && m[0] == 0x31 && m[1] == 0x00 && m[2] == 0x80) {
@@ -2085,7 +1943,7 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 			hw_->Cpu()->r.sp = 0x9f00;
 		}
 	}
-	/* Pengo: wait for RAM clear of $8C60 voices + EI @0430 before inject. */
+	/* Pengo: $8C60 ボイスの RAM クリア + EI @0430 を待ってから注入 */
 	if (hw_->board_ == CEMU_AC_BOARD_NAMCO_WSG && hw_->PengoWsg() && hw_->Cpu()) {
 		for (int i = 0; i < 240; i++) {
 			RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 60);
@@ -2094,12 +1952,7 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 				break;
 		}
 	}
-	/* Toaplan1: main CPU holds shared-RAM (8001)==0xAA. Truxton/hellfire/
-	   demonwld/zerowing/outzone write 0 then busy-wait for AA ? a one-shot
-	   poke before RunUntil is cleared and the Z80 never leaves DI boot.
-	   snowbros Kaneko I/O has no 8001 handshake — skip this or NMI@reset
-	   hits an unset SP.
-	   slapfght waits (C801)==0xAA, checksums 8K ROM, then enables NMI. */
+	/* Toaplan1: メイン CPU が共有 RAM (8001)==0xAA を保持。Truxton/hellfire/demonwld/zerowing/outzone は 0 を書いて AA 待ち — RunUntil 前のワンショット poke は消え Z80 は DI ブートから出ない。snowbros Kaneko I/O に 8001 ハンドシェイクは無い — 飛ばさないと NMI@reset が未設定 SP に当たる。slapfght は (C801)==0xAA 待ち、8K ROM チェックサム、NMI 許可。 */
 	if (hw_->board_ == CEMU_AC_BOARD_TOAPLAN1 && hw_->SlapfghtAy()) {
 		hw_->SetSoundCommand(0xff);
 		for (int i = 0; i < 400; i++) {
@@ -2137,16 +1990,13 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 				break;
 		}
 	} else {
-		/* GX400: do NOT poke shared RAM during the 4000-7FFF self-test ?
-		   that corrupts verify and leaves the Z80 wedged. Wait until PC
-		   clears the test, then release the (7FFC)==4 main-CPU handshake. */
+		/* GX400: 4000-7FFF 自己テスト中に共有 RAM を触らない — 検証が壊れ Z80 が楔。PC がテストを抜けてから (7FFC)==4 メイン CPU ハンドシェイクを解放。 */
 		if (hw_->board_ == CEMU_AC_BOARD_KONAMI_GX400) {
 			for (int i = 0; i < 360; i++) {
 				RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 60);
 				Ay_Cpu* c = hw_->Cpu();
 				const unsigned pc = c ? (unsigned)c->r.pc : 0;
-				/* Release (7FFC)==4 only after RAM self-test (PC>=0x200).
-				   AY1 port A is Gx400PortA() ? do not force it clear. */
+				/* (7FFC)==4 の解放は RAM 自己テスト後（PC>=0x200）だけ。AY1 ポート A は Gx400PortA() — 強制クリアしない。 */
 				if (pc >= 0x0200u && pc < 0x8000u) {
 					if (uint8_t* m = hw_->Mem()) {
 						m[0x7ffc] = 0x04;
@@ -2162,10 +2012,7 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 		}
 	}
 	booted_ = 1;
-	/* Sys16B (goldnaxe): bit7 latch cmds queue at F818 where empty=0x80.
-	   Boot LDIR clears F800-FFFF to 00, so 0212 finds no free slot and drops
-	   every BGM until 02C7 has run once ? by then the latch edge is gone on
-	   some sets. Seed the same empty markers 02D4 writes after a drain. */
+	/* Sys16B（goldnaxe）: bit7 ラッチ cmd は F818 にキュー、空=0x80。ブート LDIR が F800-FFFF を 00 にし、0212 が空き枠を見つけず全 BGM を落とす。02C7 が一度走るまで — その頃ラッチ端は一部セットで消える。ドレイン後 02D4 が書く同じ空マーカを種まき。 */
 	if (hw_->board_ == CEMU_AC_BOARD_SYS16B) {
 		if (uint8_t* m = hw_->Mem()) {
 			if (m[0xf818] == 0x00 && m[0xf819] == 0x00) {
@@ -2174,32 +2021,21 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 			}
 		}
 	}
-	/* Taito PC060HA / TC0140SYT drivers gate the whole sequencer behind a
-	   "sound on" control command that the 68000 issues at boot: Rastan's
-	   note-start routine at 02FE returns immediately while its enable flag
-	   (8F26) is 0, and Bonze Adventure's at 0413 does the same on CF2C bit 0.
-	   In both families $EF sets the flag and $EE clears it. The catalog
-	   carries song numbers only, so issue the enable here and let the Z80
-	   consume it before the song command goes out. */
+	/* Taito PC060HA / TC0140SYT ドライバはシーケンサ全体を 68000 がブートで出す「sound on」制御の後ろに置く。Rastan のノート開始 02FE は許可フラグ (8F26) が 0 なら即戻る。Bonze Adventure の 0413 も CF2C bit0 で同じ。両系統で $EF がフラグを立て $EE が消す。カタログは曲番号だけなのでここで許可を出し、曲コマンドの前に Z80 に消費させる。 */
 	if (hw_->board_ == CEMU_AC_BOARD_TAITO_OPM
 		|| hw_->board_ == CEMU_AC_BOARD_TAITO_YM2610) {
 		if (hw_->board_ == CEMU_AC_BOARD_TAITO_OPM && hw_->TaitoOpmMap() == 2) {
-			/* kikikai: sound CPU polls [9FFF] until it is not 0xFF, then
-			   DI;CALL 17D2 with A=cmd. Walking kTaitoTryCmds overwrites the
-			   mailbox before that wait finishes. Seed FF, reach the poll,
-			   plant the catalog song once, and never re-inject. */
+			/* kikikai: 音源 CPU は [9FFF] が 0xFF でなくなるまで poll、そのあと A=cmd で DI;CALL 17D2。kTaitoTryCmds 走査はその待ち前にメールボックスを上書き。FF を種まき、poll に到達、カタログ曲を一度だけ植え、再注入しない。 */
 			if (uint8_t* m = hw_->Mem())
 				m[0x9fff] = 0xff;
-			/* Boot checksum + CALL 182C (YM init, PC=182C) then the poll at
-			   00BE. Breaking on 00A0.. caught the post-CALL YM setup and
-			   planted the song; the poll then wrote FF and waited forever. */
+			/* ブートチェックサム + CALL 182C（YM init、PC=182C）のあと 00BE の poll。00A0.. で切ると CALL 後の YM セットアップを捕まえ曲を植え、poll が FF を書いて永久待ち。 */
 			for (int i = 0; i < 240; i++) {
 				RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 60);
 				const uint16_t pc = hw_->Cpu() ? (uint16_t)hw_->Cpu()->r.pc : 0;
 				if (pc >= 0x00b8u && pc < 0x00c8u)
 					break;
 			}
-			/* 0xEF sets (AFA1)=1; without it 190F returns immediately. */
+			/* 0xEF が (AFA1)=1。無いと 190F は即戻る */
 			hw_->SetSoundCommand(0xef);
 			for (int i = 0; i < 60; i++) {
 				RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 60);
@@ -2213,8 +2049,7 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 			nextCmdAt_ = (uint64_t)~0ull;
 			return 1;
 		} else if (hw_->board_ == CEMU_AC_BOARD_TAITO_OPM && hw_->TaitoOpmMap() == 7) {
-			/* Old TNZS: no PC060HA. tnzsjo waits (EF11)==1 then polls EF10;
-			   chukatai handshake is E003=55 then AA; kageki reads E03E. */
+			/* 旧 TNZS: PC060HA 無し。tnzsjo は (EF11)==1 待ちのあと EF10 を poll。chukatai ハンドシェイクは E003=55 のち AA。kageki は E03E を読む。 */
 			const uint8_t b3 = hw_->PeekMem(3);
 			if (b3 == 0x21) {
 				if (uint8_t* m = hw_->Mem())
@@ -2230,9 +2065,7 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 			} else if (b3 != 0x31) {
 				if (uint8_t* m = hw_->Mem()) {
 					m[0xef11] = 1;
-					/* Sub CPU also walks sprite/object lists at 0082; without a
-					   main CPU those lists stay garbage and the ISR never
-					   returns (D000 stuck 1, PC=0553). Music is CALL 006D. */
+					/* サブ CPU は 0082 でスプライト／オブジェクトリストも歩く。メイン CPU が無いとリストはゴミのまま ISR が戻らない（D000 が 1 のまま、PC=0553）。音楽は CALL 006D。 */
 					if (m[0x55] == 0xcd && m[0x56] == 0x82 && m[0x57] == 0x00) {
 						m[0x55] = 0x00;
 						m[0x56] = 0x00;
@@ -2251,8 +2084,7 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 				c->r.iff1 = 1;
 				c->r.iff2 = 1;
 			}
-			/* tnzsjo 07FB returns immediately while (DFA1)==0. Command 0xEF
-			   (0855) sets it; 0xEE clears it. Same enable as kikikai AFA1. */
+			/* tnzsjo 07FB は (DFA1)==0 の間即戻る。コマンド 0xEF（0855）が立て、0xEE が消す。kikikai AFA1 と同じ許可。 */
 			if (b3 == 0xfd) {
 				hw_->SetSoundCommand(0xef);
 				for (int i = 0; i < 60; i++) {
@@ -2274,8 +2106,7 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 		} else if (hw_->board_ == CEMU_AC_BOARD_TAITO_OPM
 			&& (hw_->TaitoOpmMap() == 3 || hw_->TaitoOpmMap() == 4
 				|| hw_->TaitoOpmMap() == 5 || hw_->TaitoOpmMap() == 6)) {
-			/* tokio/bublbobl/lsasquad: NMI merger needs enable before the
-			   latch pending line can fire. 0xEF is NOT PC060HA here. */
+			/* tokio/bublbobl/lsasquad: NMI マージはラッチ pending 線が撃つ前に許可が要る。ここでの 0xEF は PC060HA ではない。 */
 			for (int i = 0; i < 180 && !hw_->FlstoryNmiEn(); i++)
 				RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 60);
 			hw_->SetSoundCommand(0xef);
@@ -2290,22 +2121,15 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 		} else {
 		hw_->SetSoundCommand(0xef);
 		RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 10);
-		/* Rastan/Asuka gate note-start on [8F26]; F2/Bonze use [CF2C]/[CF30].
-		   Host EF can sit unread while the Z80 is in its DI;OPM window ? force
-		   the enable flags. Asuka also needs the song byte in the 8F02 ring
-		   (NMI enqueue at 00C0) or 0254 drains an empty queue forever. */
+		/* Rastan/Asuka は [8F26] でノート開始をゲート。F2/Bonze は [CF2C]/[CF30]。ホスト EF は Z80 が DI;OPM 窓に居る間未読になり得る — 許可フラグを強制。Asuka は 8F02 リングに曲バイトも要る（NMI enqueue @00C0）。無いと 0254 が空キューを永久ドレイン。 */
 		if (uint8_t* m = hw_->Mem()) {
 			if (hw_->board_ == CEMU_AC_BOARD_TAITO_OPM && hw_->TaitoOpmMap() == 0) {
-				/* Rastan/Asuka: enable @8F26. masterw/viofight YM2203: EF
-				   writes 0x07 to 8F25 ? note gates test that byte. */
+				/* Rastan/Asuka: 許可 @8F26。masterw/viofight YM2203: EF が 8F25 へ 0x07 — ノートゲートがそのバイトを見る。 */
 				m[0x8f26] = 0x01;
 				if (hw_->MainIsYm2203())
 					m[0x8f25] = 0x07;
 				if (hw_->MainIsYm2203()) {
-					/* masterw: with 8F26 bit0 set, 033A only queues a handshake
-					   into 8F27 ? it never CALL 0388. Clear bit0, enqueue the
-					   song on the 8F02 ring, and let 033A take the <0x35 path
-					   that actually starts voices. Then restore enable. */
+					/* masterw: 8F26 bit0 セットだと 033A は 8F27 へハンドシェイクをキューするだけ — CALL 0388 しない。bit0 をクリアし曲を 8F02 リングへ入れ、033A に <0x35 経路（実際にボイス開始）を取らせてから許可を戻す。 */
 					if (Ay_Cpu* cpu = hw_->Cpu()) {
 						while (hw_->IrqPulsePending())
 							hw_->TakeIrqPulse();
@@ -2315,10 +2139,10 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 						m[0x8f00] = wr;
 						m[0x8f01] = rd;
 						m[0x8f02 + wr] = songCmd_;
-						/* Drain from mainloop CALL 033A site. */
+						/* メインループ CALL 033A 地点からドレイン */
 						const uint16_t sp0 = cpu->r.sp;
 						const uint16_t sp = (uint16_t)(sp0 - 2);
-						m[(sp + 0) & 0xffffu] = 0x73; /* return @0273 */
+						m[(sp + 0) & 0xffffu] = 0x73; /* 戻り @0273 */
 						m[(sp + 1) & 0xffffu] = 0x02;
 						cpu->r.sp = sp;
 						cpu->r.iff1 = 0;
@@ -2336,17 +2160,14 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 						cpu->r.iff2 = 1;
 					}
 				} else {
-					/* Enqueue onto the 8F02 ring the way NMI's CALL 00C0 does:
-					   advance write ptr, store cmd at 8F02+ptr (low nibble). */
+					/* NMI の CALL 00C0 と同じく 8F02 リングへ enqueue: 書込 ptr を進め、8F02+ptr（下位ニブル）に cmd を格納 */
 					const uint8_t rd = (uint8_t)(m[0x8f01] & 0x0f);
 					const uint8_t wr = (uint8_t)((rd + 1) & 0x0f);
 					m[0x8f00] = wr;
 					m[0x8f01] = rd;
 					m[0x8f02 + wr] = songCmd_;
 				}
-				/* Re-arm Timer A/B so the EI;DI mainloop has status&3 to
-				   service. YM2151 uses 0x10-0x14; YM2203 (masterw) uses
-				   0x24-0x27 ? poking OPM regs into OPN left st=00 forever. */
+				/* Timer A/B を再武装し EI;DI メインループが status&3 を処理できるように。YM2151 は 0x10-0x14。YM2203（masterw）は 0x24-0x27 — OPM レジスタを OPN へ書くと st=00 のまま。 */
 				if (hw_->SoundChip()) {
 					CChip* ym = hw_->SoundChip();
 					if (hw_->MainIsYm2203()) {
@@ -2369,12 +2190,7 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 		RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 20);
 		}
 	}
-	/* Irem M72: airduel-family drops latch bytes until $00 arms ready (FF56).
-	   R-Type is the opposite ? $00 is STOP and ends in DI;HALT (NMI vector is
-	   already F3 76), so a pre-song $00 freezes the Z80 and every later command
-	   is lost. poundfor/bbmanw (YM@40, RETN NMI) also treat $00 as STOP.
-	   airduel also has RETN/empty NMI but REQUIRES the $00 arm ? only skip
-	   when the ROM talks to YM at port 40. */
+	/* Irem M72: airduel 族は $00 が ready（FF56）を武装するまでラッチバイトを捨てる。R-Type は逆 — $00 は STOP で DI;HALT（NMI ベクタは既に F3 76）。曲前 $00 は Z80 を凍らせ後続コマンドを失う。poundfor/bbmanw（YM@40、RETN NMI）も $00 を STOP。airduel も RETN/空 NMI だが $00 武装が必須 — ROM がポート 40 の YM を話すときだけ飛ばす。 */
 	if (hw_->board_ == CEMU_AC_BOARD_IREM_M72) {
 		const uint8_t n0 = hw_->PeekMem(0x0066);
 		const uint8_t n1 = hw_->PeekMem(0x0067);
@@ -2391,12 +2207,7 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 			hw_->SetSoundCommand(0x00);
 			RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 20);
 		}
-		/* m99 (bbmanw/poundfor): boot does XOR A at reset then PUSH AF, so the
-		   command mask (F4DC or FF56) is stored as 0. Readers then discard
-		   every latch byte. dynablst works because the $00 handshake primes
-		   FF56; ym40 sets skip that ? poke both masks here.
-		   poundfor/dynablst main loop only drains the command ring when
-		   FF57/FF58 are non-zero (YM ISR increments them). Soft-kick. */
+		/* m99（bbmanw/poundfor）: ブートはリセットで XOR A のあと PUSH AF するのでコマンドマスク（F4DC または FF56）が 0。読は全ラッチバイトを捨てる。dynablst は $00 ハンドシェイクが FF56 を priming。ym40 セットはそれを飛ばす — ここで両マスクを poke。poundfor/dynablst メインループは FF57/FF58 非 0 のときだけコマンドリングをドレイン（YM ISR が加算）。ソフトキック。 */
 		if (ym40 || hw_->M72IoAlt()) {
 			if (uint8_t* m = hw_->Mem()) {
 				if (m[0xf4dc] == 0x00)
@@ -2410,14 +2221,9 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 			}
 		}
 	}
-	/* flstory: boot LD A,(D800) at 0103 eats a pre-enable latch (clears
-	   pending without NMI). hcastle: ForceIm1 during DI RAM-test nests.
-	   Both need a settled EI/NMI-enable before the first song inject.
-	   Toaplan1 injects after boot settle below (Timer-A ISR mailbox). */
+	/* flstory: ブート LD A,(D800) @0103 が許可前ラッチを食う（NMI 無しで pending クリア）。hcastle: DI RAM テスト中の ForceIm1 が入れ子。どちらも最初の曲注入前に settle した EI/NMI 許可が要る。Toaplan1 は下のブート settle 後に注入（Timer-A ISR メールボックス）。 */
 	if (hw_->HalleysAy()) {
-		/* Boot LDIR-clears 4000-47FF (command ring + enable). An early NMI
-		   enqueue is wiped, and 01D7/05CD return while (4717)/(429A)==0.
-		   Command 0xEF sets that flag to 0x80; 0xEE clears it. */
+		/* ブート LDIR が 4000-47FF（コマンドリング＋許可）をクリア。早い NMI enqueue は消え、01D7/05CD は (4717)/(429A)==0 の間戻る。コマンド 0xEF がそのフラグを 0x80 に。0xEE が消す。 */
 		for (int i = 0; i < 90; i++) {
 			RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 60);
 			Ay_Cpu* c = hw_->Cpu();
@@ -2443,8 +2249,7 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 		RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 5);
 	}
 	if (hw_->PbactionAy()) {
-		/* Boot is DI until CTC init + EI at $0067. IM2 ch0 copies the latch
-		   into $4243; ch1's 126 Hz ISR consumes it. Wait for IM 2 / I=1. */
+		/* ブートは $0067 の CTC init + EI まで DI。IM2 ch0 がラッチを $4243 へコピー。ch1 の 126Hz ISR が消費。IM 2 / I=1 を待つ。 */
 		for (int i = 0; i < 60; i++) {
 			RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 60);
 			Ay_Cpu* c = hw_->Cpu();
@@ -2457,8 +2262,7 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 		RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 5);
 	}
 	if (hw_->ChaknpopAy()) {
-		/* Boot checksums 0000-7FFF (sum is 0), rst $20 mutes with 0x50,
-		   then IM 1 / EI and $8400=3. Replace that mute after EI. */
+		/* ブートは 0000-7FFF をチェックサム（和は 0）。rst $20 が 0x50 で mute。そのあと IM 1 / EI と $8400=3。EI 後にその mute を置換。 */
 		for (int i = 0; i < 180; i++) {
 			RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 60);
 			Ay_Cpu* c = hw_->Cpu();
@@ -2482,22 +2286,13 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 		&& !hw_->ChaknpopAy()
 		&& !(hw_->board_ == CEMU_AC_BOARD_KONAMI_PCM && hw_->PcmKind() == 3))
 		TryInjectCommand();
-	/* Raizing / Eighting: every revision boots through a RAM test that must
-	   not be interrupted (Battle Bakraid pushes to an unset SP and would fail
-	   its own test), so wait for the sound ROM to reach its command loop
-	   before posting anything. Battle Garegga and Batrider then need their
-	   0x55 / 0xAA handshake to clear before any song code is even looked at;
-	   TryInjectCommand sends the probe until RaizingHandshakeAcked flips. */
+	/* Raizing / Eighting: 全改訂が RAM テストを通り、割り込んではいけない（Battle Bakraid は未設定 SP へ push し自テスト失敗）。音源 ROM がコマンドループに達してから投稿。Battle Garegga と Batrider は曲コードを見る前に 0x55 / 0xAA ハンドシェイク解除が要る。TryInjectCommand は RaizingHandshakeAcked が立つまでプローブを送る。 */
 	if (hw_->board_ == CEMU_AC_BOARD_RAIZING) {
 		const int type = hw_->RaizingType();
 		for (int i = 0; i < 400; i++) {
 			Ay_Cpu* c = hw_->Cpu();
 			if (!c) break;
-			/* mahoudai's boot parks 0xFE in the first mailbox byte and waits
-			   for the 68000 to answer 0xFE in the second before it will run
-			   its ROM checksum. The RAM test right after re-writes that same
-			   byte and verifies it, so only answer while the Z80 is actually
-			   sitting in the wait (0071-0075). */
+			/* mahoudai ブートはメールボックス先頭に 0xFE を置き、2 バイト目の 68000 応答 0xFE を待ってから ROM チェックサム。直後の RAM テストが同じバイトを書き直して検証するので、Z80 が実際に待ち（0071-0075）に居るときだけ答える。 */
 			if (type == 1 && (unsigned)c->r.pc >= 0x0071u
 				&& (unsigned)c->r.pc <= 0x0075u) {
 				if (uint8_t* m = hw_->Mem())
@@ -2506,24 +2301,22 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 			RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 400);
 			c = hw_->Cpu();
 			if (!c) break;
-			/* Type 1 runs interrupts-off forever; its ready signal is the
-			   0xFF it parks in the mailbox once the loop is live. */
+			/* Type 1 は永久に割り込みオフ。ready 信号はループが生きたあとメールボックスに置く 0xFF。 */
 			if (type == 1 ? hw_->RaizingMailboxIdle() : c->r.iff1 != 0)
 				break;
 		}
 		for (int i = 0; i < 60 && !hw_->RaizingHandshakeAcked(); i++) {
 			TryInjectCommand();
-			cmdIndex_ = 0; /* the probe is not one of the song attempts */
+			cmdIndex_ = 0; /* プローブは曲試行の一つではない */
 			RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 200);
 		}
 		TryInjectCommand();
 		RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 5);
 	}
-	/* Let RST 18h drain the latch before the first host Render. */
+	/* 最初のホスト Render 前に RST 18h がラッチをドレイン */
 	if (hw_->board_ == CEMU_AC_BOARD_IREM_M72)
 		RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 20);
-	/* Konami AY: Open inject arms irqPulse_ ? run so ForceIm1 enters 0038
-	   and the music engine can claim a channel before Render hunting. */
+	/* Konami AY: Open 注入が irqPulse_ を武装 — ForceIm1 が 0038 に入り、Render ハント前に音楽エンジンがチャネルを取れるように回す。 */
 	if (hw_->board_ == CEMU_AC_BOARD_KONAMI_SCRAMBLE
 		|| hw_->board_ == CEMU_AC_BOARD_KONAMI_TIMEPLT
 		|| hw_->board_ == CEMU_AC_BOARD_KONAMI_GX400
@@ -2535,24 +2328,19 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 		|| hw_->board_ == CEMU_AC_BOARD_ROBOKID
 		|| hw_->board_ == CEMU_AC_BOARD_BATTLANTIS)
 		RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 5);
-	/* Tecmo rygar/silkworm: soundlatch is NMI. Injecting at reset (SP unset)
-	   pushed onto 0000 and killed the Z80 (idle dumps=516). Boot first.
-	   Cave sailormn/agallet checksum 32×16K banks (~1.2s) before EI. */
+	/* Tecmo rygar/silkworm: soundlatch は NMI。リセット注入（SP 未設定）は 0000 へ push し Z80 を殺した（idle dumps=516）。先にブート。Cave sailormn/agallet は EI 前に 32×16K バンクをチェックサム（約 1.2s）。 */
 	if (hw_->board_ == CEMU_AC_BOARD_TECMO16) {
 		if (hw_->TecmoOpl() == 5)
 			RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ * 2ull);
 		TryInjectCommand();
 		RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 5);
 	}
-	/* Alpha: latch is polled from the main loop (IN 00), not the NMI.
-	   Inject after bank2 BIOS is in the poll so RST 30 mode 3 can load
-	   the song before the first host Render. */
+	/* Alpha: ラッチはメインループ（IN 00）から poll され NMI ではない。bank2 BIOS が poll に入ってから注入し、最初のホスト Render 前に RST 30 mode 3 が曲をロード。 */
 	if (hw_->board_ == CEMU_AC_BOARD_ALPHA68K2) {
 		TryInjectCommand();
 		RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 5);
 	}
-	/* GX400 shared RAM (4000-7FFF) is owned by the missing 68000. Sound ROM
-	   waits on (7FFC)==4 after self-test before EI @0291 ? release it. */
+	/* GX400 共有 RAM（4000-7FFF）は欠ける 68000 の所有。音源 ROM は自己テスト後 (7FFC)==4 を待って EI @0291 — 解放する。 */
 	if (hw_->board_ == CEMU_AC_BOARD_KONAMI_GX400) {
 		for (int i = 0; i < 240; i++) {
 			Ay_Cpu* c = hw_->Cpu();
@@ -2566,7 +2354,7 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 			}
 			RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 60);
 			c = hw_->Cpu();
-			/* Mainloop @029C waits on AY timer bit2 ? no need for IFF1. */
+			/* メインループ @029C は AY タイマ bit2 待ち — IFF1 は不要 */
 			if (c && (unsigned)c->r.pc >= 0x0290u && (unsigned)c->r.pc < 0x0340u)
 				break;
 		}
@@ -2575,9 +2363,7 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 		TryInjectCommand();
 		RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 5);
 	}
-	/* K053260: boot DI (ROM checksum via reg 2E / YM timer poll), then
-	   post via K053260 ports + IRQ0 once EI is live and boot left the
-	   ROM-scan / timer-wait stubs. parodius scans 8 banks (~3s). */
+	/* K053260: ブートは DI（reg 2E 経由 ROM チェックサム／YM タイマ poll）。EI が生きブートが ROM 走査／タイマ待ち stub を出たら K053260 ポート + IRQ0 で投稿。parodius は 8 バンク走査（約 3s）。 */
 	if (hw_->board_ == CEMU_AC_BOARD_KONAMI_PCM && hw_->PcmKind() == 3) {
 		for (int i = 0; i < 600; i++) {
 			RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 60);
@@ -2589,7 +2375,7 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 			if (!c->r.iff1) continue;
 			break;
 		}
-		/* Finish any in-progress ROM bank scan before the first song IRQ. */
+		/* 最初の曲 IRQ 前に進行中の ROM バンク走査を終える */
 		for (int i = 0; i < 600; i++) {
 			Ay_Cpu* c = hw_->Cpu();
 			const unsigned pc = c ? (unsigned)c->r.pc : 0;
@@ -2602,12 +2388,10 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 		RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 5);
 	}
 	if (hw_->board_ == CEMU_AC_BOARD_FLSTORY) {
-		/* Reach idle (DA00 NMI enable @0158) then inject so NMI queues C300. */
+		/* アイドル（DA00 NMI 許可 @0158）に達してから注入し、NMI が C300 をキュー */
 		for (int i = 0; i < 120 && !hw_->FlstoryNmiEn(); i++)
 			RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 60);
-		/* 0xEF sets (C51A) bit7; RST38 drain @0169 skips every song while
-		   that flag is 0 (same EE/EF gate as tokio). IM1 is the drain/tick.
-		   nycaptor 0xEF is C719 bit0 via the E0 control table, not CP EF. */
+		/* 0xEF が (C51A) bit7。そのフラグが 0 の間 RST38 ドレイン @0169 は全曲を飛ばす（tokio と同じ EE/EF ゲート）。IM1 がドレイン／tick。nycaptor の 0xEF は E0 制御表経由の C719 bit0 であり CP EF ではない。 */
 		nextGngIrq_ = 0;
 		if (!hw_->MsisaacMap()) {
 			hw_->SetSoundCommand(0xef);
@@ -2615,7 +2399,7 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 				RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 60);
 		}
 		if (hw_->NycaptorMap()) {
-			/* 0xEB: C719 bit3 = AY mix mode $B0 (0xEF only sets music bit0). */
+			/* 0xEB: C719 bit3 = AY ミックスモード $B0（0xEF は music bit0 だけ） */
 			hw_->SetSoundCommand(0xeb);
 			for (int i = 0; i < 15; i++)
 				RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 60);
@@ -2624,8 +2408,7 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 		RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 5);
 		TryInjectCommand();
 		RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 5);
-		/* Warm until MSM speaks. Clones (40love/fieldday/victnine) often keep
-		   the catalog prefer mute ? walk kFlstoryTryCmds until a peak appears. */
+		/* MSM が話すまで温める。クローン（40love/fieldday/victnine）はカタログ prefer を mute のままにしがち — ピークが出るまで kFlstoryTryCmds を歩く。 */
 		{
 			const int slice = hostRate_ > 0 ? hostRate_ / 10 : 4410;
 			int16_t* tmp = (int16_t*)malloc((size_t)slice * 2 * sizeof(int16_t));
@@ -2645,7 +2428,7 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 						}
 					}
 					if (found) break;
-					/* Next try-table entry (unpinned) or re-arm same song. */
+					/* 次の試行表エントリ（ピン無し）または同じ曲を再武装 */
 					if (!pinned_)
 						TryInjectCommand();
 					else {
@@ -2660,13 +2443,11 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 		cmdIndex_ = 0;
 		TryInjectCommand();
 		RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 10);
-		/* Keep re-arming the live song during Render so classify stays PLAY. */
+		/* Render 中にライブ曲を再武装し続け、classify を PLAY に保つ */
 		pinned_ = 1;
 	}
 	if (hw_->board_ == CEMU_AC_BOARD_KONAMI_HCASTLE) {
-		/* hcastle/citybomb EI;DI poll @03CE. kittenk (JP $0361) still checksums
-		   through $03C0, then polls at $04CD; injecting in that checksum window
-		   is lost and the follow-up try-table $01 is only an SE. */
+		/* hcastle/citybomb は EI;DI poll @03CE。kittenk（JP $0361）は $03C0 までチェックサムし $04CD で poll。そのチェックサム窓への注入は失われ、後続試行表 $01 は SE だけ。 */
 		const int kittenk = (hw_->PeekMem(0) == 0xc3u
 			&& hw_->PeekMem(1) == 0x61u && hw_->PeekMem(2) == 0x03u);
 		const uint16_t pollLo = kittenk ? (uint16_t)0x04c0u : (uint16_t)0x03c0u;
@@ -2679,7 +2460,7 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 		TryInjectCommand();
 		RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 4);
 		if (kittenk) {
-			/* Pin catalog; do not overlay try-table $01 (SE). */
+			/* カタログをピン。試行表 $01（SE）を重ねない */
 			cmdIndex_ = 0;
 			pinned_ = 1;
 			TryInjectCommand();
@@ -2690,12 +2471,10 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 	}
 	if (hw_->board_ == CEMU_AC_BOARD_SNK_OPL) {
 		if (hw_->SnkMapKind()) {
-			/* Classic SNK: latch �� IRQ0; YM timers also drive the sequencer.
-			   Boot stores 0x0C at C0A8; type-2 BGM (athena 0x53) does
-			   BIT 2,(C0A8);RET NZ at 063F ? main CPU clears that lock. */
+			/* 古典 SNK: ラッチ → IRQ0。YM タイマもシーケンサを駆動。ブートは C0A8 に 0x0C。type-2 BGM（athena 0x53）は 063F で BIT 2,(C0A8);RET NZ — メイン CPU がそのロックを消す。 */
 			RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 4);
 			if (uint8_t* m = hw_->Mem()) {
-				/* athena/ikari: C0A8; gwar/psychos: C100 ? same 0x0C boot lock. */
+				/* athena/ikari: C0A8。gwar/psychos: C100 — 同じ 0x0C ブートロック */
 				m[0xc0a8] = (uint8_t)(m[0xc0a8] & (uint8_t)~0x0cu);
 				m[0xc100] = (uint8_t)(m[0xc100] & (uint8_t)~0x0cu);
 			}
@@ -2703,11 +2482,7 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 			nextGngIrq_ = 0;
 			RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 2);
 		} else {
-			/* SNK68: NMI is gated by a RAM lock (F151/F132) set during boot.
-			   Injecting before the main loop clears it drops the only edge ?
-			   streetsm hung silent while pow got lucky on timing. Boot first.
-			   Boot also stores 0x0C at F115; type-2/3 BGM (streetsm 0x47/0xBF)
-			   RET NZ on those bits and never start ? clear after settle. */
+			/* SNK68: NMI はブート中に立つ RAM ロック（F151/F132）でゲート。メインループが消す前の注入は唯一の端を落とす — streetsm は無音ハング、pow はタイミング運。先にブート。ブートは F115 にも 0x0C。type-2/3 BGM（streetsm 0x47/0xBF）はそれらのビットで RET NZ し開始しない — settle 後にクリア。 */
 			RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 2);
 			if (uint8_t* m = hw_->Mem())
 				m[0xf115] = (uint8_t)(m[0xf115] & (uint8_t)~0x0cu);
@@ -2717,7 +2492,7 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 			RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 4);
 		}
 	}
-	/* Re-assert masks after the first command drain. */
+	/* 最初のコマンドドレイン後にマスクを再アサート */
 	if (hw_->board_ == CEMU_AC_BOARD_IREM_M72 && hw_->M72IoAlt()) {
 		if (uint8_t* m = hw_->Mem()) {
 			if (m[0xf4dc] == 0x00)
@@ -2730,12 +2505,10 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 				m[0xff58] = 0x08;
 		}
 	}
-	/* Bucky/Moo: finish K054539 self-test / F0 handshake before the first
-	   song IRQ ? an early ForceIm1 during DI boot leaves opmWrites==0. */
+	/* Bucky/Moo: 最初の曲 IRQ 前に K054539 自己テスト／F0 ハンドシェイクを終える — DI ブート中の早い ForceIm1 は opmWrites==0。 */
 	if (hw_->board_ == CEMU_AC_BOARD_KONAMI_PCM && hw_->PcmKind() == 4) {
 		RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 2);
-		/* Boot waits on YM2151 Timer B (EC01 bit1) after programming reg 14.
-		   If fmgen never raised the flag, poke the enable path once more. */
+		/* ブートは reg 14 組のあと YM2151 Timer B（EC01 bit1）待ち。fmgen がフラグを上げなければ許可経路をもう一度 poke。 */
 		if (hw_->SoundChip() && CEmuChipYm2151WriteCount(hw_->SoundChip()) == 0) {
 			CChip* ym = hw_->SoundChip();
 			ym->Write(0, 0x14); ym->Write(1, 0x20);
@@ -2749,9 +2522,7 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 		if (hw_->PcmChip())
 			hw_->PcmChip()->Write(0x22f, 0x01);
 	}
-	/* Toaplan1: shared-RAM command is polled from the YM Timer-A ISR.
-	   Inject then pump IRQs until the mailbox clears (song installed).
-	   snowbros: latch NMI after boot (same reason as Tecmo classic). */
+	/* Toaplan1: 共有 RAM コマンドは YM Timer-A ISR から poll。注入後メールボックスが消えるまで IRQ をポンプ（曲インストール）。snowbros: ブート後ラッチ NMI（古典 Tecmo と同じ理由）。 */
 	if (hw_->board_ == CEMU_AC_BOARD_TOAPLAN1) {
 		if (hw_->ToaplanKaneko()) {
 			RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 5);
@@ -2776,13 +2547,10 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 			if (hw_->PeekMem(hw_->ToaplanMail()) == 0xff)
 				break;
 		}
-		nextCmdAt_ = (uint64_t)~0ull; /* one-shot ? re-inject clears slots */
+		nextCmdAt_ = (uint64_t)~0ull; /* ワンショット — 再注入は枠をクリア */
 		return 1;
 	}
-	/* Pinned catalog title: give Z80 time to start audio. An early silence
-	   fallback used to re-inject try-table[0] and force "always song 1".
-	   M72/Sys16B/VSystem catalogs often pin SE ? check sooner so the try
-	   table can recover within a short probe window. */
+	/* ピンしたカタログタイトル: Z80 が音声開始する時間を与える。早い無音フォールバックは試行表[0] を再注入し「常に曲 1」にした。M72/Sys16B/VSystem カタログは SE をピンしがち — 短プローブ窓で試行表が復帰できるよう早めに見る。 */
 	if (pinned_) {
 		const int fast = (hw_->board_ == CEMU_AC_BOARD_IREM_M72
 			|| hw_->board_ == CEMU_AC_BOARD_SYS16B
@@ -2798,11 +2566,10 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 				|| hw_->board_ == CEMU_AC_BOARD_VSYSTEM) ? 2ull : 1ull);
 	} else
 		nextCmdAt_ = (uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 60;
-	/* WSG: digdug/galaga need a couple of latch refreshes after boot. */
+	/* WSG: digdug/galaga はブート後にラッチ更新が数回要る */
 	if (hw_->board_ == CEMU_AC_BOARD_NAMCO_WSG)
 		nextCmdAt_ = (uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 4;
-	/* CPS2: command write releases CFFF wait; give a short run so EI/IRQs start
-	   before the first host Render callback. */
+	/* CPS2: コマンド書込が CFFF 待ちを解放。最初のホスト Render コールバック前に EI/IRQ が始まるよう短く回す。 */
 	if (hw_->board_ == CEMU_AC_BOARD_CPS_QS)
 		RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 10);
 	return 1;
@@ -2846,17 +2613,12 @@ void CDriverAc::TickOpm(uint64_t cpuCycles)
 	const uint64_t opmTicks = opmResidual_ / (uint64_t)cpuHz_;
 	opmResidual_ %= (uint64_t)cpuHz_;
 	if (opmTicks) {
-		/* Hang-On / Space Harrier: full master clocks were ~2�~ Timer-B; half
-		   felt a touch slow. Use 3/4 so BGM tempo sits near cabinet rate
-		   without re-doubling. Pitch stays in Render (sample-driven). */
+		/* Hang-On / Space Harrier: フルマスタクロックは Timer-B が約 2 倍。半分は少し遅い。3/4 でキャビネ相当テンポにし、再倍増しない。ピッチは Render（サンプル駆動）。 */
 		uint64_t timerTicks = opmTicks;
 		if (hw_->board_ == CEMU_AC_BOARD_HANGON) {
 			timerTicks = (opmTicks * 3u) / 4u;
 		} else if (hw_->board_ == CEMU_AC_BOARD_TECMO16 && hw_->TecmoOpl() == 5) {
-			/* Cave Z80 is 8 MHz vs YM 4 MHz, so a 4-cycle opcode yields 2 YM
-			   clocks. AdvanceClocks integer usec is clocks*1e6/Hz = 0 for
-			   those slices, so Timer A never expires and the ISR that feeds
-			   YM key-ons never runs. Batch to at least 1 µs (4 clocks). */
+			/* Cave Z80 は 8 MHz、YM は 4 MHz なので 4 サイクル命令が YM 2 クロック。AdvanceClocks の整数 usec は clocks*1e6/Hz = 0 になり Timer A が期限せず YM キーオンを食う ISR が走らない。最低 1µs（4 クロック）にまとめる。 */
 			rzOpmAcc_ += opmTicks;
 			const uint64_t quantum = 4ull;
 			if (rzOpmAcc_ < quantum)
@@ -2867,24 +2629,15 @@ void CDriverAc::TickOpm(uint64_t cpuCycles)
 			}
 		} else if (hw_->board_ == CEMU_AC_BOARD_RAIZING
 			&& hw_->RaizingType() == 1) {
-			/* mahou polls YM Timer A with 4-12 cycle Z80 ops. Integer usec
-			   in AdvanceClocks is clocks*1e6/Hz, which is 0 for those
-			   slices (half tempo). Do not put a remainder in the chip
-			   (that raced every YM2151 board).
-			   27 clocks = 8 µs exact at 27/8 MHz, so poll slices accumulate
-			   here instead of vanishing. Full datasheet rate (TA $97:00 ≈
-			   125.6 Hz) is clearly fast vs MAME A/B on this TickOpm+fmgen
-			   path — same class as Hang-On's ~2× Timer-B. 3/4 was a touch
-			   slow, 7/8 still a little fast; 5/6 sits between them (groups
-			   of 6×27 so 5/6 is integer). */
+			/* mahou は 4-12 サイクル Z80 命令で YM Timer A を poll。AdvanceClocks の整数 usec は clocks*1e6/Hz でそのスライスは 0（テンポ半減）。余りをチップに置かない（全 YM2151 基板で競合）。27 クロック = 27/8 MHz で正確 8µs。poll スライスはここで溜まり消えない。データシート全速（TA $97:00 ≈ 125.6 Hz）はこの TickOpm+fmgen 経路の MAME A/B より明らかに速い — Hang-On の約 2× Timer-B と同じ級。3/4 は少し遅く 7/8 は少し速い。5/6 がその間（6×27 の束で 5/6 が整数）。 */
 			rzOpmAcc_ += opmTicks;
 			const uint64_t quantum = 27ull;
-			const uint64_t group = quantum * 6ull; /* 162 clocks = 48 µs */
+			const uint64_t group = quantum * 6ull; /* 162 クロック = 48 µs */
 			if (rzOpmAcc_ < group)
 				timerTicks = 0;
 			else {
 				const uint64_t g = rzOpmAcc_ / group;
-				timerTicks = g * (quantum * 5ull); /* 135 clocks = 40 µs */
+				timerTicks = g * (quantum * 5ull); /* 135 クロック = 40 µs */
 				rzOpmAcc_ %= group;
 			}
 		}
@@ -2895,8 +2648,7 @@ void CDriverAc::TickOpm(uint64_t cpuCycles)
 		if (hw_->Chip3())
 			hw_->Chip3()->AdvanceClocks(opmTicks);
 	}
-	/* K054539 boards derive the sound NMI from the PCM chip's own timer, so
-	   it needs its 18.432 MHz clock even though MixAdd renders by sample. */
+	/* K054539 基板は音源 NMI を PCM チップ自身のタイマから取るので、MixAdd がサンプル描画でも 18.432 MHz クロックが要る */
 	if (hw_->board_ == CEMU_AC_BOARD_KONAMI_PCM && hw_->PcmKind() == 4) {
 		k054539Residual_ += cpuCycles * 18432000ull;
 		const uint64_t kt = k054539Residual_ / (uint64_t)cpuHz_;
@@ -2916,7 +2668,7 @@ void CDriverAc::TryInjectCommand()
 			|| hw_->TaitoOpmMap() == 4 || hw_->TaitoOpmMap() == 5
 			|| hw_->TaitoOpmMap() == 6 || hw_->TaitoOpmMap() == 7))
 		|| hw_->HalleysAy() || hw_->PbactionAy() || hw_->ChaknpopAy()) {
-		/* One-shot mailbox / latch. Re-inject walks 0x01.. and kills the song. */
+		/* ワンショットメールボックス／ラッチ。再注入は 0x01.. を歩き曲を殺す */
 		if (cmdIndex_ >= 1) return;
 		hw_->SetSoundCommand(songCmd_ ? songCmd_ : (uint8_t)0x06);
 		cmdIndex_++;
@@ -2950,23 +2702,16 @@ void CDriverAc::TryInjectCommand()
 		return;
 	}
 	if (hw_->board_ == CEMU_AC_BOARD_IREM_M92) {
-		/* Early sets + note-list (uccops): catalog codes are raw latch values.
-		   Channel-BGM Rev 3.40 only: BGM is 0x20+index. */
+		/* 初期セット＋ノートリスト（uccops）: カタログコードは生ラッチ値。チャネル BGM Rev 3.40 のみ: BGM は 0x20+index */
 		if (!songCmd_ || cmdIndex_ >= 6) return;
 		uint8_t cmd = songCmd_;
-		/* Catalog codes are the latch values the main CPU writes. Adding
-		   0x20 here (Rev 3.40 channel-BGM heuristic) turned mysticri 0x01
-		   into silent 0x21 and collapsed uccopsj onto the same miss. */
-		/* Keep the Rev3.40 mode byte clear so dequeue is not skipped.
-		   Masks: byte-ring [09EA]/[09EF]; word-ring [0C31] (nbbatman)
-		   or [0C32] (wpksoc). */
+		/* カタログコードはメイン CPU が書くラッチ値。ここで 0x20 を足す（Rev 3.40 チャネル BGM ヒューリスティック）と mysticri 0x01 が無音 0x21 になり uccopsj も同じ外れへ畳まれた。 */
+		/* Rev3.40 モードバイトはクリアのまま dequeue を飛ばさない。マスク: バイトリング [09EA]/[09EF]。ワードリング [0C31]（nbbatman）または [0C32]（wpksoc）。 */
 		hw_->M92Write8(0xa004fu, 0x00);
 		hw_->M92Write8(0xa09eau, 0xff);
 		hw_->M92Write8(0xa09efu, 0xff);
 		if (hw_->M92WordQueue()) {
-			/* Word ring stores AX. INTP1 leaves AH stale from the idle loop,
-			   and (AH&AL)!=0 with AL<0xF0 rejects BGM. Plant AH=0 directly
-			into the 0AF0 ring ? same write the enqueue routine performs. */
+			/* ワードリングは AX を格納。INTP1 はアイドルループから AH が古く、(AH&AL)!=0 かつ AL<0xF0 で BGM を拒否。0AF0 リングへ AH=0 を直接植える — enqueue ルーチンと同じ書込。 */
 			hw_->M92Write8(0xa0c31u, 0xff);
 			hw_->M92Write8(0xa0c32u, 0xff);
 			const uint8_t* ram = hw_->M92Ram();
@@ -2975,7 +2720,7 @@ void CDriverAc::TryInjectCommand()
 				const uint8_t wp = wram[0xb10];
 				const unsigned off = 0xaf0u + (((unsigned)wp & 0x0fu) << 1);
 				wram[off] = cmd;
-				wram[off + 1u] = 0x00; /* AH = 0 �� classic BGM path */
+				wram[off + 1u] = 0x00; /* AH = 0 — 古典 BGM 経路 */
 				wram[0xb10] = (uint8_t)((wp + 1u) & 0x0fu);
 			}
 		} else {
@@ -2987,8 +2732,7 @@ void CDriverAc::TryInjectCommand()
 	}
 	if (hw_->board_ == CEMU_AC_BOARD_DECO
 		|| hw_->board_ == CEMU_AC_BOARD_ATARI_SYS1) {
-		/* Firmware treats a repeat of the same BGM id as "replace": it ORA #$80
-		   then clears the $2310 slot ? so re-inject kills FM channels. Once only. */
+		/* ファームは同じ BGM id の繰り返しを「置換」: ORA #$80 のあと $2310 枠を消す — 再注入が FM チャネルを殺す。一度だけ。 */
 		if (!songCmd_ || cmdIndex_ >= 1) return;
 		hw_->SetSoundCommand(songCmd_);
 		cmdIndex_++;
@@ -3008,27 +2752,20 @@ void CDriverAc::TryInjectCommand()
 		return;
 	}
 	if (hw_->board_ == CEMU_AC_BOARD_SEIBU_OPL) {
-		/* One-shot: re-latching mid-scan resets (200D) and aborts BGM start. */
+		/* ワンショット: 走査途中の再ラッチは (200D) をリセットし BGM 開始を中断 */
 		if (cmdIndex_ >= 1) return;
 		uint8_t cmd = songCmd_ ? songCmd_ : (uint8_t)0x80;
 		if (uint8_t* m = hw_->Mem())
-			m[0x201c] = 0xff; /* kick main loop */
+			m[0x201c] = 0xff; /* メインループをキック */
 		hw_->SetSoundCommand(cmd);
 		cmdIndex_++;
 		triggered_ = 1;
 		return;
 	}
 	if (hw_->board_ == CEMU_AC_BOARD_SEGA_SCSP) {
-		/* Re-inject a few times ? first MIDI packet can land before the ISR
-		   is ready; MultiPCM bank/program needs a sustained FIFO drain, and
-		   the SCSP MIDI FIFO is only drained once the firmware arms it. */
+		/* 数回再注入 — 最初の MIDI パケットは ISR 準備前に着地し得る。MultiPCM バンク／プログラムは持続 FIFO ドレインが要る。SCSP MIDI FIFO はファームが武装してからしかドレインされない。 */
 		if (cmdIndex_ >= 4) return;
-		/* ...but only while the bytes went unread. Each inject queues Stop
-		   + song select, so repeating it after the 68000 has taken the
-		   select restarts the song: daytona retriggered its opening notes
-		   two or three times before settling. SCSP leftovers still need the
-		   retries: their firmware drains MIDI before the sequencer is armed
-		   (dynabb/segawski even ids went SILENT with a drain-only stop). */
+		/* …ただしバイトが未読の間だけ。各注入は Stop + 曲選択をキューするので、68000 が選択を取ったあとの繰り返しは曲を再開: daytona は落ち着くまでオープニングを 2–3 回再トリガ。SCSP 残りは再試行が要る: シーケンサ武装前に MIDI をドレイン（dynabb/segawski 偶数 id はドレインのみ停止で SILENT）。 */
 		if (cmdIndex_ > 0 && hw_->SegaM1Audio() && !hw_->SegaMidiFifoPending()) {
 			cmdIndex_ = 4;
 			return;
@@ -3041,9 +2778,7 @@ void CDriverAc::TryInjectCommand()
 		return;
 	}
 	if (hw_->board_ == CEMU_AC_BOARD_IREM_M62) {
-		/* Song already posted in Open (cmd + 0x80 handshake). No re-edge:
-		   leaving IRQ1 asserted while MSM VCK NMIs nest blows the 128-byte
-		   IRAM stack and the sequencer dies. */
+		/* 曲は Open で投稿済み（cmd + 0x80 ハンドシェイク）。再エッジしない: IRQ1 アサートのまま MSM VCK NMI が入れ子すると 128 バイト IRAM スタックが吹きシーケンサ死。 */
 		if (cmdIndex_ >= 1) return;
 		uint8_t cmd = songCmd_ ? songCmd_ : (uint8_t)0x20;
 		if (cmd & 0x80) cmd = (uint8_t)(cmd & 0x7fu);
@@ -3054,8 +2789,7 @@ void CDriverAc::TryInjectCommand()
 		return;
 	}
 	if (hw_->board_ == CEMU_AC_BOARD_NAMCO_SYS86) {
-		/* One-shot mailbox: repeating $1182=$A6 while B0!=0 diverts the IRQ
-		   music updater into the host-handshake path and kills KeyOn. */
+		/* ワンショットメールボックス: B0!=0 の間 $1182=$A6 を繰り返すと IRQ 音楽更新がホストハンドシェイクへ逸れ KeyOn を殺す */
 		if (cmdIndex_ >= 1) return;
 		uint8_t cmd = songCmd_ ? songCmd_ : (uint8_t)0x01;
 		if (!cmd) return;
@@ -3066,8 +2800,7 @@ void CDriverAc::TryInjectCommand()
 	}
 	if (hw_->board_ == CEMU_AC_BOARD_NAMCO_WSG) {
 		if (hw_->PengoWsg()) {
-			/* One-shot: re-planting (IX+0)=1 every refresh restarts the
-			   1C4B pointer load and chops the melody. */
+			/* ワンショット: 更新毎に (IX+0)=1 を植え直すと 1C4B ポインタロードが再開しメロディが切れる */
 			if (cmdIndex_ >= 1) return;
 			hw_->SetSoundCommand(songCmd_);
 			cmdIndex_ = 1;
@@ -3075,16 +2808,14 @@ void CDriverAc::TryInjectCommand()
 			return;
 		}
 		if (hw_->WsgMappy()) {
-			/* One-shot flag post. Re-clearing $40-$7F every 60 Hz restarts
-			   the sequencer; cmd 0 is song 0 ($40), not "unset". */
+			/* ワンショットフラグ投稿。60Hz 毎に $40-$7F を再クリアするとシーケンサが再開。cmd 0 は曲 0（$40）であり「未設定」ではない。 */
 			if (cmdIndex_ >= 1) return;
 			hw_->SetSoundCommand(songCmd_);
 			cmdIndex_ = 1;
 			triggered_ = 1;
 			return;
 		}
-		/* Refresh path may call repeatedly ? allow sustained BGM without
-		   walking a try-table past the catalog title. */
+		/* 更新経路は繰り返し呼ばれ得る — カタログタイトルを過ぎて試行表を歩かず持続 BGM を許す */
 		if (!songCmd_) return;
 		hw_->SetSoundCommand(songCmd_);
 		if (cmdIndex_ < 1) cmdIndex_ = 1;
@@ -3092,7 +2823,7 @@ void CDriverAc::TryInjectCommand()
 		return;
 	}
 	if (hw_->board_ == CEMU_AC_BOARD_NAMCO_C352 && (hw_->H8Active() || hw_->M37702Active())) {
-		/* One-shot: catalog/default word only ? no try-table walk. */
+		/* ワンショット: カタログ／既定語だけ — 試行表走査なし */
 		if (cmdIndex_ >= 1) return;
 		const uint16_t w = songCmdWord_ ? songCmdWord_
 			: (uint16_t)(songCmd_ ? songCmd_ : 0x20);
@@ -3103,7 +2834,7 @@ void CDriverAc::TryInjectCommand()
 		return;
 	}
 	if (hw_->board_ == CEMU_AC_BOARD_M68K_PCM) {
-		/* TryInjectCommand periodically calls this for M68K_PCM. */
+		/* TryInjectCommand は M68K_PCM 用に周期的にこれを呼ぶ */
 		if (cmdIndex_ >= 4) return;
 		uint8_t cmd = songCmd_ ? songCmd_ : (uint8_t)0x01;
 		if (!cmd) return;
@@ -3178,9 +2909,7 @@ void CDriverAc::TryInjectCommand()
 		n = (int)(sizeof(kDdragon2TryCmds) / sizeof(kDdragon2TryCmds[0]));
 	}
 	uint8_t cmd;
-	/* Battle Bakraid's script table is indexed from zero, so a pinned song
-	   code of 0 has to reach the latch rather than fall through to the try
-	   table the way an unset code does everywhere else (see Open). */
+	/* Battle Bakraid のスクリプト表は 0 から引くので、ピンした曲コード 0 は他で未設定コードが試行表へ落ちるのと違いラッチへ届ける（Open 参照）。 */
 	const int haveSong = (songCmd_ != 0)
 		|| (pinned_ && hw_->board_ == CEMU_AC_BOARD_RAIZING
 			&& hw_->RaizingType() == 4);
@@ -3191,9 +2920,9 @@ void CDriverAc::TryInjectCommand()
 		if (ti < 0 || ti >= n) return;
 		cmd = table[ti];
 	}
-	/* ZN QSound: catalog codes are 16-bit song words consumed as a latch pair. */
+	/* ZN QSound: カタログコードはラッチ対として消費する 16bit 曲語 */
 	if (hw_->board_ == CEMU_AC_BOARD_CPS_QS && hw_->QsZn()) {
-		/* One-shot FF 00 hi lo ? never walk the CPS2 try table. */
+		/* ワンショット FF 00 hi lo — CPS2 試行表を歩かない */
 		if (cmdIndex_ >= 1) return;
 		const uint16_t w = songCmdWord_ ? songCmdWord_ : (uint16_t)cmd;
 		if (!w && !songCmd_) return;
@@ -3214,8 +2943,7 @@ void CDriverAc::TryInjectCommand()
 	} else {
 		hw_->SetSoundCommand(cmd);
 	}
-	/* kittenk: poll only CALL $003C (drain D000) when [8304]!=0. The 4-NOP
-	   EI window can miss IRQ0; citybomb uses [8303] the same way. */
+	/* kittenk: [8304]!=0 のときだけ poll が CALL $003C（D000 ドレイン）。4-NOP EI 窓は IRQ0 を外し得る。citybomb は [8303] を同じ使い方。 */
 	if (hw_->board_ == CEMU_AC_BOARD_KONAMI_HCASTLE
 		&& hw_->PeekMem(0) == 0xc3u && hw_->PeekMem(1) == 0x61u
 		&& hw_->PeekMem(2) == 0x03u) {
@@ -3232,13 +2960,10 @@ void CDriverAc::DeliverIrqs()
 	Ay_Cpu* cpu = hw_->Cpu();
 	CChip* chip = hw_->SoundChip();
 
-	/* Namco Galaga/Dig Dug/Bosco: sound CPU work is entirely NMI-driven
-	   (RST $0038 is empty). Main CPU pulses NMI; we rate-limit ~240 Hz.
-	   Suppress periodic NMI until first latch ? early NMI trashes galaga/
-	   bosco boot checksum (only AF is saved). */
+	/* Namco Galaga/Dig Dug/Bosco: 音源 CPU 作業は全て NMI 駆動（RST $0038 は空）。メイン CPU が NMI をパルス。約 240Hz にレート制限。最初のラッチまで周期 NMI を抑止 — 早い NMI は galaga/bosco ブートチェックサムを壊す（AF だけ保存）。 */
 	if (hw_->board_ == CEMU_AC_BOARD_NAMCO_WSG) {
 		if (hw_->PengoWsg()) {
-			/* MAME pengo: vblank IRQ0 HOLD, IM 1, mask = LS259 Q0 @9040. */
+			/* MAME pengo: vblank IRQ0 HOLD、IM 1、マスク = LS259 Q0 @9040 */
 			uint8_t* m = hw_->Mem();
 			if (m && (m[0x9040] & 1u)) {
 				const uint64_t now = (uint64_t)cpu->time64();
@@ -3252,8 +2977,8 @@ void CDriverAc::DeliverIrqs()
 			return;
 		}
 		if (uint8_t* m = hw_->Mem()) {
-			m[0x9101] = 0; /* galaga handshake */
-			m[0x8c01] = 0; /* bosco handshake */
+			m[0x9101] = 0; /* galaga ハンドシェイク */
+			m[0x8c01] = 0; /* bosco ハンドシェイク */
 		}
 		if (hw_->IrqPulsePending()) {
 			hw_->TakeIrqPulse();
@@ -3270,8 +2995,7 @@ void CDriverAc::DeliverIrqs()
 		return;
 	}
 
-	/* GNG: Capcom uses irq0_line_hold @ 4*60 Hz ? not latch-edge.
-	   Tecmo gaiden: latch �� NMI; YM2203 IRQ drives the sequencer. */
+	/* GNG: Capcom は irq0_line_hold @ 4*60 Hz — ラッチ端ではない。Tecmo gaiden: ラッチ → NMI。YM2203 IRQ がシーケンサを駆動。 */
 	if (hw_->board_ == CEMU_AC_BOARD_GNG) {
 		if (hw_->GngGaidenMap()) {
 			if (hw_->IrqPulsePending()) {
@@ -3295,18 +3019,10 @@ void CDriverAc::DeliverIrqs()
 		return;
 	}
 
-	/* CPS2 QSound: periodic IM1 @ 250 Hz (8 MHz / 32000). Shared-RAM commands
-	   are picked up in the IRQ handler at 0038 ? never NMI/latch.
-	   Capcom ZN (QsZn): one-shot NMI per latch write (MAME soundlatch��NMI).
-	   Do NOT hold NMI every slice ? that floods and corrupts Z80 state.
-	   Boot uses IM 2; vector the 250 Hz line accordingly. */
+	/* CPS2 QSound: 周期 IM1 @ 250 Hz（8 MHz / 32000）。共有 RAM コマンドは 0038 の IRQ ハンドラで拾う — NMI/ラッチではない。Capcom ZN（QsZn）: ラッチ書込毎にワンショット NMI（MAME soundlatch→NMI）。スライス毎に NMI を保持しない — 洪水して Z80 状態を壊す。ブートは IM 2。250Hz 線をそれに合わせてベクタ。 */
 	if (hw_->board_ == CEMU_AC_BOARD_CPS_QS) {
 		if (hw_->QsZn()) {
-			/* Follow-up latch bytes: NMI clears IFF1 for the whole handler
-			   (ts2 @0066 RETN@0090, sfex @0066 RETN@0098, techromn RETN@00BD,
-			   sfex2/tgmj JP 0180 RETN@0195). A fixed 0066..0091 window re-pulsed
-			   mid-handler on later ZN firmware and corrupted the F000/F100 ring
-			   (sfex F100=00100000, iff stuck 0). Wait for IFF1 after RETN. */
+			/* 後続ラッチバイト: NMI はハンドラ全体で IFF1 をクリア（ts2 @0066 RETN@0090、sfex @0066 RETN@0098、techromn RETN@00BD、sfex2/tgmj JP 0180 RETN@0195）。固定 0066..0091 窓は後の ZN ファームでハンドラ途中に再パルスし F000/F100 リングを壊した（sfex F100=00100000、iff が 0 のまま）。RETN 後に IFF1 を待つ。 */
 			if (cpu->r.iff1 && hw_->ZnTakeDeferredNmi())
 				hw_->PulseIrq();
 			if (hw_->IrqPulsePending()) {
@@ -3317,11 +3033,7 @@ void CDriverAc::DeliverIrqs()
 		const uint64_t now = (uint64_t)cpu->time64();
 		const uint64_t period = (uint64_t)cpuHz_ / 250;
 		if (period > 0 && now >= nextGngIrq_) {
-			/* 250 Hz drives the Z80 soft-timers (ts2 RST38 INC F000..F003 ��
-			   F002 unblocks boot wait @009F and paces the sequencer @0240).
-			   Capcom ZN is IM1 (DI;IM 1 = ED 56). Never vector as IM2 here ?
-			   an unset I register made Ay_CpuIm2Interrupt AV on ts2. CPS2
-			   keeps real IM2 when the ROM programmed it. */
+			/* 250Hz が Z80 ソフトタイマを駆動（ts2 RST38 INC F000..F003 — F002 がブート待ち @009F を解除しシーケンサ @0240 をペース）。Capcom ZN は IM1（DI;IM 1 = ED 56）。ここで IM2 ベクタしない — 未設定 I が ts2 で Ay_CpuIm2Interrupt AV。CPS2 は ROM が組んだ本物 IM2 を残す。 */
 			if (cpu->r.iff1) {
 				if (hw_->QsZn() || cpu->r.im != 2)
 					Ay_CpuIm1Interrupt(cpu);
@@ -3333,8 +3045,7 @@ void CDriverAc::DeliverIrqs()
 		return;
 	}
 
-	/* Sega System1/2: TIMER "soundirq" on 32V/96V/... ? 4 per frame, auto-acked.
-	   The latch NMI carries the song number; the IRQ drives the sequencer. */
+	/* Sega System1/2: TIMER "soundirq" が 32V/96V/… — フレーム 4 回、自動 ack。ラッチ NMI が曲番号を運び、IRQ がシーケンサを駆動。 */
 	if (hw_->board_ == CEMU_AC_BOARD_SEGA_SYS1) {
 		if (hw_->IrqPulsePending()) {
 			hw_->TakeIrqPulse();
@@ -3350,8 +3061,7 @@ void CDriverAc::DeliverIrqs()
 		return;
 	}
 
-	/* Irem M72: the sample pump NMI runs at MASTER_CLOCK/8/512 = 7812.5 Hz
-	   whether or not a song is playing; the YM2151 timer drives the sequencer. */
+	/* Irem M72: サンプルポンプ NMI は曲の有無に関わらず MASTER_CLOCK/8/512 = 7812.5 Hz。YM2151 タイマがシーケンサを駆動。 */
 	if (hw_->board_ == CEMU_AC_BOARD_IREM_M72) {
 		const uint64_t now = (uint64_t)cpu->time64();
 		const uint64_t period = ((uint64_t)cpuHz_ * 2ull) / 15625ull;
@@ -3362,31 +3072,25 @@ void CDriverAc::DeliverIrqs()
 				Ay_CpuNmi(cpu);
 			nextM72Nmi_ = now + period;
 		}
-		/* MAME m72_audio_chips: the soundlatch drives rst18_w and the YM2151
-		   IRQ drives rst28_w on an RST_NEG_BUFFER wired to the Z80 IRQ pin,
-		   and the sound CPU runs in IM 0. The opcode presented during IACK is
-		   the logical AND of the active base vectors, so latch-only lands on
-		   RST 18h, YM-only on RST 28h and both together on RST 08h. Vectoring
-		   these to 0038 (IM 1) hit whatever byte happened to live there. */
+		/* MAME m72_audio_chips: soundlatch が rst18_w、YM2151 IRQ が rst28_w。RST_NEG_BUFFER が Z80 IRQ ピンへ。音源 CPU は IM 0。IACK 中のオペコードは生きている基ベクタの論理 AND。ラッチのみは RST 18h、YM のみ RST 28h、両方で RST 08h。これを 0038（IM 1）へベクタするとそこに居たバイトに当たった。 */
 		hw_->TakeIrqPulse();
 		const int latch = hw_->SoundCmdPending() ? 1 : 0;
 		const int ymirq = (chip && chip->Irq()) ? 1 : 0;
 		if ((latch || ymirq) && cpu->r.iff1) {
 			unsigned vec = 0xff;
-			if (latch) vec &= 0xdf; /* RST 18h */
-			if (ymirq) vec &= 0xef; /* RST 28h */
+			if (latch) vec &= 0xdf; /* RST 18h（ラッチ） */
+			if (ymirq) vec &= 0xef; /* RST 28h（YM）ベクタ */
 			if (Ay_CpuRstInterrupt(cpu, (uint16_t)(vec & 0x38)) && ymirq)
 				chip->AckIrq();
 		}
 		return;
 	}
 
-	/* Taito TC0140SYT / PC060HA: NMI is asserted only while a command is
-	   queued and the sound CPU has enabled it (slave submode 6). */
+	/* Taito TC0140SYT / PC060HA: NMI はコマンドがキューされ音源 CPU が許可したときだけ（slave submode 6） */
 	if (hw_->board_ == CEMU_AC_BOARD_TAITO_YM2610
 		|| hw_->board_ == CEMU_AC_BOARD_TAITO_OPM) {
 		if (hw_->TaitoOpmMap() == 2) {
-			/* kikikai: vblank IRQ0, no PC060HA NMI. */
+			/* kikikai: vblank IRQ0。PC060HA NMI 無し */
 			if (hw_->IrqPulsePending())
 				hw_->TakeIrqPulse();
 			const uint64_t now = (uint64_t)cpu->time64();
@@ -3399,10 +3103,7 @@ void CDriverAc::DeliverIrqs()
 			return;
 		}
 		if (hw_->TaitoOpmMap() == 7) {
-			/* Old TNZS: vblank HOLD. tnzsjo idle is DI;CALL 008F;EI so the
-			   line must stay pending until the EI window, not expire.
-			   Its ISR sets (D000)=1 and EI before CALL 0082; a nested RST38
-			   takes the 0027 shortcut with SP=D031 and smashes the frame. */
+			/* 旧 TNZS: vblank HOLD。tnzsjo アイドルは DI;CALL 008F;EI なので線は EI 窓まで pending のまま、期限しない。ISR は (D000)=1 を立て CALL 0082 前に EI。入れ子 RST38 は SP=D031 で 0027 近道を取りフレームを潰す。 */
 			if (hw_->IrqPulsePending())
 				hw_->TakeIrqPulse();
 			if (hw_->PeekMem(3) == 0xfd && hw_->PeekMem(0xd000))
@@ -3421,10 +3122,7 @@ void CDriverAc::DeliverIrqs()
 				hw_->TakeIrqPulse();
 				Ay_CpuNmi(cpu);
 			}
-			/* ISR @015F polls YM Timer A. Force status bit0 so it cannot
-			   spin. IRQ0 at ~60 Hz, but only on a real EI window and only
-			   once per period — firing every EI starves CALL 01BD so the
-			   NMI command ring is never drained. */
+			/* ISR @015F は YM Timer A を poll。status bit0 を強制しスピンさせない。IRQ0 は約 60Hz だが本物 EI 窓かつ周期 1 回だけ — 毎 EI で撃つと CALL 01BD が飢え NMI コマンドリングがドレインされない。 */
 			if (cpu->r.iff1 && cpu->r.im == 1) {
 				const uint64_t now = (uint64_t)cpu->time64();
 				const uint64_t period = (uint64_t)cpuHz_ / 60;
@@ -3439,9 +3137,7 @@ void CDriverAc::DeliverIrqs()
 			hw_->TakeIrqPulse();
 			Ay_CpuNmi(cpu);
 		}
-		/* YM2610/YM2151 timer IRQ drives the sequencer. Do NOT AckIrq (same
-		   as V-System): Rastan/Asuka ISR @01F9 busy-waits on status&3.
-		   OPM mainloop is EI;DI ? rate-limit ForceIm1 while timer flags are set. */
+		/* YM2610/YM2151 タイマ IRQ がシーケンサを駆動。AckIrq しない（V-System と同じ）: Rastan/Asuka ISR @01F9 は status&3 でビジー待ち。OPM メインループは EI;DI — タイマフラグ中は ForceIm1 をレート制限。 */
 		if (chip && cpu->r.im == 1) {
 			const int st = (chip->ReadStatus() & 0x03) != 0;
 			if (hw_->board_ == CEMU_AC_BOARD_TAITO_OPM && st) {
@@ -3449,9 +3145,7 @@ void CDriverAc::DeliverIrqs()
 				const uint64_t period = (uint64_t)cpuHz_ / 250;
 				if (period > 0 && now >= nextGngIrq_) {
 					const unsigned pc = (unsigned)cpu->r.pc;
-					/* YM2203: never ForceIm1 ? nesting (even in the EI;DI
-					   mainloop window) prevented 033A/0388 from finishing
-					   KeyOn (ko=0, TL=7F forever). Hardware waits for EI. */
+					/* YM2203: ForceIm1 しない — 入れ子（EI;DI メインループ窓でも）が 033A/0388 の KeyOn 完了を妨げた（ko=0、TL=7F のまま）。ハードは EI 待ち。 */
 					if (cpu->r.iff1)
 						Ay_CpuIm1Interrupt(cpu);
 					else if (!hw_->MainIsYm2203()) {
@@ -3470,8 +3164,7 @@ void CDriverAc::DeliverIrqs()
 		return;
 	}
 
-	/* Taito SJ: latch write pulses NMI (gated by AY#4 port B bit0); the
-	   sequencer runs off a 60 Hz IM1 IRQ from the video hardware. */
+	/* Taito SJ: ラッチ書込が NMI をパルス（AY#4 ポート B bit0 でゲート）。シーケンサは映像ハードの 60Hz IM1 IRQ。 */
 	if (hw_->board_ == CEMU_AC_BOARD_TAITO_SJ) {
 		if (hw_->NbAyIo()) {
 			if (hw_->IrqPulsePending()) {
@@ -3481,7 +3174,7 @@ void CDriverAc::DeliverIrqs()
 			return;
 		}
 		if (hw_->BombjackAy()) {
-			/* MAME: vblank NMI to audiocpu. Latch is polled at 6000. */
+			/* MAME: audiocpu へ vblank NMI。ラッチは 6000 で poll */
 			const uint64_t now = (uint64_t)cpu->time64();
 			const uint64_t period = (uint64_t)cpuHz_ / 60;
 			if (period > 0 && now >= nextGngIrq_) {
@@ -3491,7 +3184,7 @@ void CDriverAc::DeliverIrqs()
 			return;
 		}
 		if (hw_->CalorieAy()) {
-			/* MAME: vblank IRQ0 HOLD to audiocpu. Latch is polled at C000. */
+			/* MAME: audiocpu へ vblank IRQ0 HOLD。ラッチは C000 で poll */
 			const uint64_t now = (uint64_t)cpu->time64();
 			const uint64_t period = (uint64_t)cpuHz_ / 60;
 			if (period > 0 && now >= nextGngIrq_) {
@@ -3502,7 +3195,7 @@ void CDriverAc::DeliverIrqs()
 			return;
 		}
 		if (hw_->SolomonAy()) {
-			/* MAME: latch write pulses NMI; sequencer is 120 Hz IRQ0 HOLD. */
+			/* MAME: ラッチ書込が NMI をパルス。シーケンサは 120Hz IRQ0 HOLD */
 			if (hw_->IrqPulsePending()) {
 				hw_->TakeIrqPulse();
 				Ay_CpuNmi(cpu);
@@ -3517,7 +3210,7 @@ void CDriverAc::DeliverIrqs()
 			return;
 		}
 		if (hw_->HalleysAy()) {
-			/* MAME halleys: latch NMI + IRQ0 at 6MHz/(4*16*16*10*16) ≈ 36.6 Hz. */
+			/* MAME halleys: ラッチ NMI + IRQ0 が 6MHz/(4*16*16*10*16) ≈ 36.6 Hz */
 			if (hw_->IrqPulsePending()) {
 				hw_->TakeIrqPulse();
 				Ay_CpuNmi(cpu);
@@ -3532,9 +3225,7 @@ void CDriverAc::DeliverIrqs()
 			return;
 		}
 		if (hw_->PbactionAy()) {
-			/* Firmware: I=1, IM 2, CTC ch0 vector 0 / ch1 vector 2.
-			   ch0 counter TC=1 (command TRG0); ch1 timer $A7/$5D, prescale
-			   256 @ 3 MHz → 93*256 cycles ≈ 126 Hz sequencer. */
+			/* ファーム: I=1、IM 2、CTC ch0 ベクタ 0 / ch1 ベクタ 2。ch0 カウンタ TC=1（コマンド TRG0）。ch1 タイマ $A7/$5D、プリスケール 256 @ 3 MHz → 93*256 サイクル ≈ 126Hz シーケンサ。 */
 			if (hw_->IrqPulsePending()) {
 				if (cpu->r.im == 2 && cpu->r.i == 1
 					&& Ay_CpuIm2Interrupt(cpu, 0))
@@ -3550,7 +3241,7 @@ void CDriverAc::DeliverIrqs()
 			return;
 		}
 		if (hw_->ChaknpopAy()) {
-			/* MAME: vblank IRQ0 HOLD. Sound tick is RST38 → A02F. */
+			/* MAME: vblank IRQ0 HOLD。音源 tick は RST38 → A02F */
 			const uint64_t now = (uint64_t)cpu->time64();
 			const uint64_t period = (uint64_t)cpuHz_ / 60;
 			if (period > 0 && now >= nextGngIrq_) {
@@ -3574,16 +3265,11 @@ void CDriverAc::DeliverIrqs()
 		return;
 	}
 
-	/* Konami Scramble / Time Pilot / GX400: latch �� IRQ0 (IM1 / RST38).
-	   Scramble also needs the AY timer port ticking via KonamiAyTimer().
-	   Do not TakeIrqPulse until the vector is actually entered ? otherwise an
-	   EI delay (irqDelay) drops the only edge and music never starts (RAM
-	   stuck in the empty-channel 8001=1/8000=0 pattern �� SILENT). */
+	/* Konami Scramble / Time Pilot / GX400: ラッチ → IRQ0（IM1 / RST38）。Scramble は KonamiAyTimer() 経由の AY タイマポート tick も要る。ベクタ入場まで TakeIrqPulse しない — さもなくば EI 遅延（irqDelay）が唯一の端を落とし音楽が始まらない（RAM が空チャネル 8001=1/8000=0 で固まり SILENT）。 */
 	if (hw_->board_ == CEMU_AC_BOARD_KONAMI_SCRAMBLE
 		|| hw_->board_ == CEMU_AC_BOARD_KONAMI_TIMEPLT
 		|| hw_->board_ == CEMU_AC_BOARD_KONAMI_GX400) {
-		/* Keep shared-RAM handshake released (main 68000 absent) once
-		   self-test has finished writing 4000-7FFF. */
+		/* 自己テストが 4000-7FFF 書込を終えたら共有 RAM ハンドシェイクを解放（メイン 68000 不在） */
 		if (hw_->board_ == CEMU_AC_BOARD_KONAMI_GX400) {
 			const unsigned pc = (unsigned)cpu->r.pc;
 			if (pc >= 0x0200u && pc < 0x8000u) {
@@ -3592,23 +3278,21 @@ void CDriverAc::DeliverIrqs()
 			}
 		}
 		if (hw_->IrqPulsePending()) {
-			/* Hardware holds the 7474/IRQ line until the Z80 accepts it.
-			   ForceIm1 requires IFF1 (same as Im1Interrupt). */
+			/* ハードは Z80 が受けるまで 7474/IRQ 線を保持。ForceIm1 は IFF1 が要る（Im1Interrupt と同じ）。 */
 			if (Ay_CpuIm1Interrupt(cpu))
 				hw_->TakeIrqPulse();
 		}
 		const uint64_t now = (uint64_t)cpu->time64();
 		const uint64_t period = (uint64_t)cpuHz_ / 60;
 		if (hw_->board_ == CEMU_AC_BOARD_KONAMI_GX400) {
-			/* MAME gx400: screen VBLANK �� audiocpu NMI. NMI sets (7FFB)=1
-			   so 0346 does not count (7FFA) to 0x34 and hang at 0361. */
+			/* MAME gx400: 画面 VBLANK → audiocpu NMI。NMI が (7FFB)=1 を立て、0346 が (7FFA) を 0x34 まで数え 0361 でハングしないようにする。 */
 			if (period > 0 && now >= nextGngIrq_) {
 				Ay_CpuNmi(cpu);
 				nextGngIrq_ = now + period;
 			}
 			return;
 		}
-		/* Scramble / Time Pilot: 60 Hz IM1 keeps the AY sequencer alive. */
+		/* Scramble / Time Pilot: 60Hz IM1 が AY シーケンサを生かす */
 		if (!hw_->IrqPulsePending()) {
 			if (period > 0 && now >= nextGngIrq_) {
 				Ay_CpuIm1Interrupt(cpu);
@@ -3618,12 +3302,9 @@ void CDriverAc::DeliverIrqs()
 		return;
 	}
 
-	/* Konami K007232-era (scontra/crimfght/twin16): latch �� IRQ0, and the
-	   YM2151 timer is the sequencer timebase (same as DD2/Taito OPM). */
+	/* Konami K007232 期（scontra/crimfght/twin16）: ラッチ → IRQ0。YM2151 タイマがシーケンサ時基（DD2/Taito OPM と同じ）。 */
 	if (hw_->board_ == CEMU_AC_BOARD_KONAMI_K7232) {
-		/* Devastators / garuka (MAME mainevt.cpp): YM2151 irq is not wired.
-		   The sequencer polls Timer B at $04F4. Map0 ForceIm1-on-status
-		   storms $0038 and starves CALL $007B. */
+		/* Devastators / garuka（MAME mainevt.cpp）: YM2151 irq は配線されない。シーケンサは $04F4 で Timer B を poll。Map0 の ForceIm1-on-status は $0038 を嵐にし CALL $007B を飢える。 */
 		const int devstors = (hw_->PeekMem(0) == 0xf3u
 			&& hw_->PeekMem(1) == 0x3eu && hw_->PeekMem(5) == 0xe0u);
 		if (hw_->IrqPulsePending()) {
@@ -3642,8 +3323,7 @@ void CDriverAc::DeliverIrqs()
 					if (cpu->r.iff1)
 						Ay_CpuIm1Interrupt(cpu);
 					else if (hw_->KonamiK7232Map() != 1)
-						/* map0 (scontra) / map2 (gradius3): EI;DI window needs
-						   ForceIm1. map1 (aliens/crimfght): ForceIm1 �� FLAT. */
+						/* map0（scontra）/ map2（gradius3）: EI;DI 窓は ForceIm1 が要る。map1（aliens/crimfght）: ForceIm1 → FLAT */
 						Ay_CpuIm1Interrupt(cpu);
 					nextGngIrq_ = now + period;
 				}
@@ -3652,18 +3332,14 @@ void CDriverAc::DeliverIrqs()
 		return;
 	}
 
-	/* Alpha 68K-II: periodic NMI @ ~7614 Hz (MAME sound_nmi), gated by
-	   YM2203 port A. Latch is polled via IN 00 from the NMI/main loop.
-	   Ay_CpuNmi always re-enters 0066; a real Z80 NMI latch does not nest
-	   until RETN. Re-pulsing every 787 cycles during the handler wrecked
-	   the stack (dumps=1). Release the lock on ED45/ED4D in the fetch. */
+	/* Alpha 68K-II: 周期 NMI @ 約 7614 Hz（MAME sound_nmi）、YM2203 ポート A でゲート。ラッチは NMI/メインループから IN 00 で poll。Ay_CpuNmi は常に 0066 再入。本物 Z80 NMI ラッチは RETN まで入れ子しない。ハンドラ中 787 サイクル毎の再パルスがスタックを壊した（dumps=1）。フェッチの ED45/ED4D でロック解放。 */
 	if (hw_->board_ == CEMU_AC_BOARD_ALPHA68K2) {
 		const uint16_t pc = (uint16_t)cpu->r.pc;
 		uint8_t* mem = cpu->get_mem();
 		if (mem && mem[pc] == 0xedu
 			&& (mem[(uint16_t)(pc + 1)] == 0x45u || mem[(uint16_t)(pc + 1)] == 0x4du)) {
 			alphaNmiBusy_ = 0;
-			return; /* let RETN finish before the next pulse */
+			return; /* 次パルス前に RETN を終える */
 		}
 		const uint64_t now = (uint64_t)cpu->time64();
 		const uint64_t period = (uint64_t)cpuHz_ / 7614;
@@ -3676,9 +3352,7 @@ void CDriverAc::DeliverIrqs()
 		return;
 	}
 
-	/* Haunted Castle: EI;DI poll @03CE + IRQ0. ISR ends in RET (iff stays
-	   clear). Latch needs one ForceIm1 outside 0038; empty IRQ advances music
-	   via 01BE. YM3812��NMI is RETN ? ignore OPL IRQ line (don't storm NMI). */
+	/* Haunted Castle: EI;DI poll @03CE + IRQ0。ISR は RET 終わり（iff クリアのまま）。ラッチは 0038 外で ForceIm1 が 1 回要る。空 IRQ は 01BE 経由で音楽を進める。YM3812→NMI は RETN — OPL IRQ 線は無視（NMI を嵐にしない）。 */
 	if (hw_->board_ == CEMU_AC_BOARD_KONAMI_HCASTLE) {
 		const uint16_t pc = (uint16_t)cpu->r.pc;
 		const int inIsr = (pc >= 0x0038 && pc < 0x00a0) ? 1 : 0;
@@ -3698,14 +3372,11 @@ void CDriverAc::DeliverIrqs()
 		return;
 	}
 
-	/* Raizing / Eighting. mahoudai never enables interrupts — its Z80 spins
-	   on the YM2151 Timer A flag and polls the shared-RAM mailbox — so type 1
-	   has nothing to deliver. */
+	/* Raizing / Eighting。mahoudai は割り込みを許可しない — Z80 は YM2151 Timer A フラグでスピンし共有 RAM メールボックスを poll — type 1 に届けるものはない。 */
 	if (hw_->board_ == CEMU_AC_BOARD_RAIZING) {
 		const int type = hw_->RaizingType();
 		if (type == 2) {
-			/* generic_latch_8 with separate_acknowledge holds IRQ0 until the
-			   E00C write, so re-assert while unread rather than pulsing. */
+			/* generic_latch_8 の separate_acknowledge は E00C 書込まで IRQ0 を保持。パルスではなく未読の間再アサート。 */
 			if (hw_->RaizingLatchPending() && cpu->r.iff1 && cpu->r.im == 1)
 				Ay_CpuIm1Interrupt(cpu);
 		} else if (type >= 3) {
@@ -3713,9 +3384,7 @@ void CDriverAc::DeliverIrqs()
 				hw_->ClearRaizingNmi();
 				Ay_CpuNmi(cpu);
 			}
-			/* MAME bbakraid_snd_interrupt: 32MHz/6/12000 ≈ 444 Hz periodic
-			   IRQ0. The main loop counts its ticks, so without it the
-			   sequencer never advances even after a command lands. */
+			/* MAME bbakraid_snd_interrupt: 32MHz/6/12000 ≈ 444 Hz 周期 IRQ0。メインループがその tick を数えるので、無いとコマンド着地後もシーケンサが進まない。 */
 			if (type == 4) {
 				const uint64_t now = (uint64_t)cpu->time64();
 				const uint64_t period = (uint64_t)cpuHz_ / 444;
@@ -3729,7 +3398,7 @@ void CDriverAc::DeliverIrqs()
 		return;
 	}
 
-	/* Technos DD2 / Tecmo16: soundlatch �� NMI; YM2151 timer IRQ drives BGM. */
+	/* Technos DD2 / Tecmo16: soundlatch → NMI。YM2151 タイマ IRQ が BGM を駆動 */
 	if (hw_->board_ == CEMU_AC_BOARD_TECHNOS_DDRAGON2
 		|| hw_->board_ == CEMU_AC_BOARD_TECMO16) {
 		if (hw_->IrqPulsePending()) {
@@ -3756,8 +3425,7 @@ void CDriverAc::DeliverIrqs()
 				}
 			}
 		}
-		/* Cave: NMI with latch 0 increments the main-loop wait flag
-		   (sailormn D897 / agallet DA3A). Catalog song NMIs only enqueue. */
+		/* Cave: ラッチ 0 の NMI がメインループ待ちフラグ（sailormn D897 / agallet DA3A）を加算。カタログ曲 NMI は enqueue のみ。 */
 		if (hw_->TecmoOpl() == 5 && cpu->r.iff1 && !hw_->IrqPulsePending()) {
 			const uint64_t now = (uint64_t)cpu->time64();
 			const uint64_t period = (uint64_t)cpuHz_ / 60;
@@ -3770,16 +3438,13 @@ void CDriverAc::DeliverIrqs()
 		return;
 	}
 
-	/* Taito flstory: soundlatch �� NMI (gated by DA00 enable); AY has no
-	   timer IRQ ? soft 60 Hz IM1. MSM5232 melody advances in Render. */
+	/* Taito flstory: soundlatch → NMI（DA00 許可でゲート）。AY にタイマ IRQ は無い — ソフト 60Hz IM1。MSM5232 メロディは Render で進む。 */
 	if (hw_->board_ == CEMU_AC_BOARD_FLSTORY) {
 		if (hw_->IrqPulsePending() && hw_->FlstoryNmiEn()) {
 			hw_->TakeIrqPulse();
 			Ay_CpuNmi(cpu);
 		}
-		/* RST38 drains the NMI ring and ticks MSM. The mainloop is
-		   EI;NOP;NOP;DI — advancing the 60 Hz due time while IFF1 is clear
-		   skips every vblank. Hold the request until an EI window takes it. */
+		/* RST38 が NMI リングをドレインし MSM を tick。メインループは EI;NOP;NOP;DI — IFF1 クリア中に 60Hz 期限を進めると全 vblank を飛ばす。EI 窓が取るまで要求を保持。 */
 		const uint64_t now = (uint64_t)cpu->time64();
 		const uint64_t period = (uint64_t)cpuHz_ / (hw_->NycaptorMap() ? 122 : 60);
 		if (period > 0 && now >= nextGngIrq_
@@ -3790,7 +3455,7 @@ void CDriverAc::DeliverIrqs()
 		return;
 	}
 
-	/* Nichibutsu terracre / armedf-terraf: periodic IRQ0 @ XTAL/4/512 ? 7812.5 Hz. */
+	/* Nichibutsu terracre / armedf-terraf: 周期 IRQ0 @ XTAL/4/512 → 7812.5 Hz */
 	if (hw_->board_ == CEMU_AC_BOARD_TERRACRE) {
 		if (hw_->IrqPulsePending()) {
 			if (Ay_CpuIm1Interrupt(cpu))
@@ -3806,7 +3471,7 @@ void CDriverAc::DeliverIrqs()
 		return;
 	}
 
-	/* UPL robokid: latch �� IRQ0; YM2203 timer IRQ also drives the sequencer. */
+	/* UPL robokid: ラッチ → IRQ0。YM2203 タイマ IRQ もシーケンサを駆動 */
 	if (hw_->board_ == CEMU_AC_BOARD_ROBOKID) {
 		if (hw_->IrqPulsePending()) {
 			if (Ay_CpuIm1Interrupt(cpu))
@@ -3819,7 +3484,7 @@ void CDriverAc::DeliverIrqs()
 		return;
 	}
 
-	/* Konami battlantis: host IRQ0 + dual YM3812 timer IRQs. */
+	/* Konami battlantis: ホスト IRQ0 + YM3812×2 タイマ IRQ */
 	if (hw_->board_ == CEMU_AC_BOARD_BATTLANTIS) {
 		if (hw_->IrqPulsePending()) {
 			if (Ay_CpuIm1Interrupt(cpu))
@@ -3832,9 +3497,7 @@ void CDriverAc::DeliverIrqs()
 		return;
 	}
 
-	/* Konami K053260-era: latch �� IRQ0 (sound_irqtrigger). SH1��NMI wakes
-	   FA00/HALT sample waits (Simpsons/Punk Shot/Escape Kids). Also feed
-	   YM2151 timer IRQs when EI. Suppress IRQ while in ROM-scan (parodius). */
+	/* Konami K053260 期: ラッチ → IRQ0（sound_irqtrigger）。SH1→NMI が FA00/HALT サンプル待ちを起こす（Simpsons/Punk Shot/Escape Kids）。EI 時は YM2151 タイマ IRQ も食わせる。ROM 走査中（parodius）は IRQ を抑止。 */
 	if (hw_->board_ == CEMU_AC_BOARD_KONAMI_PCM && hw_->PcmKind() == 3) {
 		const unsigned pc = (unsigned)cpu->r.pc;
 		const int romScan = (pc >= 0x06c0u && pc < 0x06f0u) ? 1 : 0;
@@ -3862,11 +3525,7 @@ void CDriverAc::DeliverIrqs()
 		return;
 	}
 
-	/* mystwarr.cpp / xexex-class K054539 boards: the sound Z80 spins with
-	   interrupts off (BIT 0,(HL) / JP Z) on a RAM flag that the *NMI*
-	   handler sets, and MAME's k054539_nmi_gen drives that NMI from the
-	   K054539 timer gated by sound_ctrl bit 4. Feeding a maskable IM1 IRQ
-	   instead left the CPU deadlocked at that loop forever. */
+	/* mystwarr.cpp / xexex 系 K054539 基板: 音源 Z80 は割り込みオフで RAM フラグ（*NMI* ハンドラが立てる）を BIT 0,(HL) / JP Z。MAME の k054539_nmi_gen がその NMI を sound_ctrl bit4 ゲートの K054539 タイマから駆動。マスク可能 IM1 IRQ を食わせるとそのループでデッドロック。 */
 	if (hw_->board_ == CEMU_AC_BOARD_KONAMI_PCM && hw_->PcmKind() == 4) {
 		CChip* pcm = hw_->PcmChip();
 		if (hw_->IrqPulsePending() && cpu->r.iff1) {
@@ -3874,7 +3533,7 @@ void CDriverAc::DeliverIrqs()
 				hw_->TakeIrqPulse();
 		}
 		if (pcm) {
-			/* Timer output is a square wave; NMI on its rising edge only. */
+			/* タイマ出力は矩形波。立ち上がり端だけ NMI */
 			const int t = pcm->Irq() ? 1 : 0;
 			if (t && !k054539TimerState_)
 				Ay_CpuNmi(cpu);
@@ -3883,9 +3542,7 @@ void CDriverAc::DeliverIrqs()
 		return;
 	}
 
-	/* Pending latch �� NMI (System16A / After Burner) or IM1 IRQ
-	   (System16B / CPS1 / OutRun). Hold the IM1 line until IFF1 is set ?
-	   never ForceIm1 under DI. After Burner latch uses NMI+RETN. */
+	/* pending ラッチ → NMI（System16A / After Burner）または IM1 IRQ（System16B / CPS1 / OutRun）。IFF1 が立つまで IM1 線を保持 — DI 下で ForceIm1 しない。After Burner ラッチは NMI+RETN。 */
 	if (hw_->IrqPulsePending()) {
 		if (hw_->board_ == CEMU_AC_BOARD_SYS16A
 			|| hw_->board_ == CEMU_AC_BOARD_ABURNER
@@ -3901,15 +3558,10 @@ void CDriverAc::DeliverIrqs()
 			hw_->TakeIrqPulse();
 			Ay_CpuIm1Interrupt(cpu);
 		}
-		/* else: level stays pending until EI (Sys16B/CPS1/OutRun/�c). */
+		/* さもなくば: レベルは EI まで pending（Sys16B/CPS1/OutRun 等） */
 	}
 
-	/* YM2151 timer IRQ ? CPS1.
-	   Early Capcom (ghouls/dynwar�c idle EI;JR-3 @0009) and version-5
-	   (megaman/sfzch: LD SP,D800) can leave timer flags sticky after Ack
-	   without a rising edge ? re-arm from status on those families only.
-	   Newer CPS1 (cawing/ffight) clears flags before EI; a blanket level
-	   trigger re-enters until the stack explodes. */
+	/* YM2151 タイマ IRQ — CPS1。初期 Capcom（ghouls/dynwar 等 idle EI;JR-3 @0009）と version-5（megaman/sfzch: LD SP,D800）は Ack 後も上昇端無しでタイマフラグが sticky — それらの系統だけ status から再武装。新しい CPS1（cawing/ffight）は EI 前にフラグをクリア。一括レベルトリガは RETI 後に再入しスタックが爆発。 */
 	if (hw_->board_ == CEMU_AC_BOARD_CPS1
 		&& !hw_->IrqPulsePending()
 		&& chip
@@ -3932,12 +3584,7 @@ void CDriverAc::DeliverIrqs()
 		if (Ay_CpuIm1Interrupt(cpu))
 			chip->AckIrq();
 	}
-	/* System16B / OutRun: YM2151 timer is a LEVEL IRQ. Deliver only while
-	   IFF1 (catch EI;NOP;DI); rate-limit successful takes so sticky status
-	   cannot re-enter every instruction after RETI. Never advance the period
-	   while DI ? that skipped EI windows and left goldnaxe SILENT.
-	   Sys16A shinobi leaves 0038 empty and polls YM status (IN A,(01);BIT0)
-	   ? do not fire IM1 there. */
+	/* System16B / OutRun: YM2151 タイマは LEVEL IRQ。IFF1 中だけ届ける（EI;NOP;DI を捕捉）。成功 take をレート制限し、sticky status が RETI 後毎命令で再入しないように。DI 中に周期を進めない — EI 窓を飛ばし goldnaxe が SILENT。Sys16A shinobi は 0038 を空にし YM status を poll（IN A,(01);BIT0）— そこで IM1 を撃たない。 */
 	if ((hw_->board_ == CEMU_AC_BOARD_SYS16B
 			|| hw_->board_ == CEMU_AC_BOARD_OUTRUN)
 		&& !hw_->IrqPulsePending()
@@ -3957,25 +3604,14 @@ void CDriverAc::DeliverIrqs()
 			}
 		}
 	}
-	/* V-System: MAME wires ymsnd.irq_handler() to the Z80 IRQ line, and the
-	   YM2610 timer is the only timebase the sequencer has ? the soundlatch
-	   NMI just queues a song number. Without this the driver booted, set up
-	   both timers and then idled forever with everything keyed off.
-	   Do NOT AckIrq here (same as NeoGeo): aerofgt's ISR branches Timer B
-	   (status bit1) vs Timer A, and only the Timer A path increments the
-	   music tick at 7804. Level-triggered re-entry after the B path clears
-	   only bit1 is required so the pending A path can run; AckIrq cleared
-	   the soft line early and left the sequencer stuck after the opening
-	   notes. */
+	/* V-System: MAME は ymsnd.irq_handler() を Z80 IRQ 線へ。YM2610 タイマがシーケンサ唯一の時基 — soundlatch NMI は曲番号をキューするだけ。これが無いとドライバはブートし両タイマを組んで全キーオフのまま永久アイドル。ここで AckIrq しない（NeoGeo と同じ）: aerofgt の ISR は Timer B（status bit1）vs Timer A を分岐し、Timer A 経路だけが 7804 の音楽 tick を加算。B 経路が bit1 だけ消したあとのレベル再入が要る（pending A が走る）。AckIrq がソフト線を早く落としオープニング後シーケンサが固まった。 */
 	if (hw_->board_ == CEMU_AC_BOARD_VSYSTEM
 		&& !hw_->IrqPulsePending()
 		&& chip && chip->Irq()
 		&& cpu->r.iff1 && cpu->r.im == 1) {
 		Ay_CpuIm1Interrupt(cpu);
 	}
-	/* Gunbird main loop only CALL $0B25 (FM tick) after Timer B's ISR
-	   stores $2F at $8001. If the IM1 path keeps taking Timer A (status
-	   bit0) the sequencer never advances — poke + ack Timer B like $00A8. */
+	/* Gunbird メインループは Timer B の ISR が $8001 に $2F を格納したあとだけ CALL $0B25（FM tick）。IM1 経路が Timer A（status bit0）を取り続けるとシーケンサが進まない — $00A8 のように Timer B を poke + ack。 */
 	if (hw_->board_ == CEMU_AC_BOARD_VSYSTEM && hw_->VsIoKind() == 3 && chip) {
 		if ((chip->ReadStatus() & 0x02) != 0) {
 			if (uint8_t* m = hw_->Mem()) {
@@ -3986,13 +3622,9 @@ void CDriverAc::DeliverIrqs()
 			chip->Write(1, 0x2f);
 		}
 	}
-	/* Toaplan1: YM3812 timer IRQ is the sequencer timebase (shared-RAM
-	   mailbox has no NMI). ISR @0038 polls status bit6 (Timer A) and only
-	   then runs music + command poll. Soft-pulse Timer-A after Open boot so
-	   mid-init EI cannot re-enter the music ISR before shared RAM is ready. */
+	/* Toaplan1: YM3812 タイマ IRQ がシーケンサ時基（共有 RAM メールボックスに NMI 無し）。ISR @0038 は status bit6（Timer A）を poll してから音楽＋コマンド poll。Open ブート後に Timer-A をソフトパルスし、init 途中の EI が共有 RAM 準備前に音楽 ISR へ再入しないようにする。 */
 	if (hw_->board_ == CEMU_AC_BOARD_TOAPLAN1 && hw_->SlapfghtAy()) {
-		/* MAME slapfght: gated periodic NMI (tigerh 360 Hz, alcon/getstar 180).
-		   RST 38 is unused (LD A,(IX+0)) — never fire YM3812 IM1. */
+		/* MAME slapfght: ゲート付き周期 NMI（tigerh 360Hz、alcon/getstar 180）。RST 38 は未使用（LD A,(IX+0)）— YM3812 IM1 を撃たない。 */
 		if (hw_->FlstoryNmiEn()) {
 			const uint64_t now = (uint64_t)cpu->time64();
 			const unsigned hz = hw_->ToaplanYmPort() ? 360u : 180u;
@@ -4020,7 +3652,7 @@ void CDriverAc::DeliverIrqs()
 	} else if (hw_->board_ == CEMU_AC_BOARD_TOAPLAN1) {
 		const uint64_t now = (uint64_t)cpu->time64();
 		const uint64_t period = (uint64_t)cpuHz_ / 250;
-		/* Idle = EI;JP self, JP self, or JR Z/$-2 wait (fshark @0400). */
+		/* アイドル = EI;JP self、JP self、または JR Z/$-2 待ち（fshark @0400） */
 		const unsigned pc = (unsigned)cpu->r.pc;
 		const uint8_t b0 = hw_->PeekMem((uint16_t)pc);
 		const uint8_t b1 = hw_->PeekMem((uint16_t)(pc + 1u));
@@ -4035,12 +3667,11 @@ void CDriverAc::DeliverIrqs()
 				| ((unsigned)hw_->PeekMem((uint16_t)(pc + 2u)) << 8);
 			idle = (tgt == pc);
 		} else if (b0 == 0x18 && b1 == 0xfe) {
-			idle = 1; /* JR $-2 */
+			idle = 1; /* JR $-2（待ち） */
 		} else if ((b0 == 0x28 || b0 == 0x20) && b1 == 0xfe) {
-			idle = 1; /* JR Z/NZ, $-2 */
+			idle = 1; /* JR Z/NZ, $-2（条件待ち） */
 		}
-		/* Soft Timer-A while idle; also deliver real YM IRQ whenever EI ?
-		   mid-song DI windows still rely on chip timers after RETI. */
+		/* アイドル中はソフト Timer-A。EI なら本物 YM IRQ も届ける — 曲中 DI 窓は RETI 後もチップタイマに頼る。 */
 		if (period > 0 && now >= nextGngIrq_ && idle) {
 			hw_->SetToaplanTimerA(1);
 			nextGngIrq_ = now + period;
@@ -4051,27 +3682,21 @@ void CDriverAc::DeliverIrqs()
 			Ay_CpuIm1Interrupt(cpu);
 		}
 	}
-	/* SNK68: YM3812 IRQ �� Z80 IRQ0 (music sequencer timebase).
-	   Classic SNK: level IRQ while (status & 0x0B) ? cmd/YM bits (MAME). */
+	/* SNK68: YM3812 IRQ → Z80 IRQ0（音楽シーケンサ時基）。古典 SNK: (status & 0x0B) の間レベル IRQ — cmd/YM ビット（MAME）。 */
 	if (hw_->board_ == CEMU_AC_BOARD_SNK_OPL) {
 		if (hw_->SnkMapKind()) {
-			/* MAME ym*_irq_handler: ASSERT latches status bits; firmware
-			   clears them via F800 (keep=data>>4). Ack the chip after latch
-			   so a level line does not re-set the bit every slice. */
+			/* MAME ym*_irq_handler: ASSERT が status ビットをラッチ。ファームは F800（keep=data>>4）で消す。ラッチ後にチップを Ack し、レベル線がスライス毎にビットを再セットしないようにする。 */
 			if (chip && chip->Irq()) {
 				hw_->SnkSetYmIrq(0, 1);
 				chip->AckIrq();
 			}
 			if (hw_->Chip2() && hw_->Chip2()->Irq()) {
-				/* Athena ISR only services status bit0 (and cmd bit3); bit1 is
-				   cleared by the trailing F800 write. Mirror YM2 onto bit0 so
-				   the Timer path at 0517 still sets C0A9 and advances music. */
+				/* Athena ISR は status bit0（と cmd bit3）だけ処理。bit1 は後続 F800 書込で消える。YM2 を bit0 へミラーし、0517 の Timer 経路がまだ C0A9 を立て音楽を進めるようにする。 */
 				hw_->SnkSetYmIrq(0, 1);
 				hw_->SnkSetYmIrq(1, 1);
 				hw_->Chip2()->AckIrq();
 			}
-			/* Level IRQ0 while (status & 0x0B). Only Im1Interrupt ? ForceIm1
-			   while DI (inside 04F3) nests and fills RAM with 0x39. */
+			/* (status & 0x0B) の間レベル IRQ0。Im1Interrupt のみ — DI 中（04F3 内）の ForceIm1 は入れ子し RAM を 0x39 で埋める。 */
 			const uint64_t now = (uint64_t)cpu->time64();
 			const uint64_t period = (uint64_t)cpuHz_ / 250;
 			if ((hw_->SnkStatus() & 0x0bu) != 0 && period > 0
@@ -4090,8 +3715,7 @@ void CDriverAc::DeliverIrqs()
 				chip->AckIrq();
 		}
 	}
-	/* Seibu: RST18 (latch) has priority over RST10 (YM3812) ? never AND the
-	   IM0 vectors (that drops RST18 while the timer IRQ is live). */
+	/* Seibu: RST18（ラッチ）は RST10（YM3812）より優先 — IM0 ベクタを AND しない（タイマ IRQ 生存中に RST18 が落ちる）。 */
 	if (hw_->board_ == CEMU_AC_BOARD_SEIBU_OPL) {
 		if (chip && chip->Irq())
 			hw_->SeibuSetRst10(1);
@@ -4108,9 +3732,7 @@ void CDriverAc::DeliverIrqs()
 				}
 			}
 		}
-		/* Main loop at 0126 waits on (201C)!=0; RST10 ISR is supposed to
-		   set it each tick. If the ISR path only clears the gate, keep the
-		   wait released so song updates can run (host has no VBlank). */
+		/* 0126 のメインループは (201C)!=0 待ち。RST10 ISR が tick 毎に立てる想定。ISR 経路がゲートだけ消すなら待ちを解放し曲更新が走るように（ホストに VBlank 無し）。 */
 		if (uint8_t* m = hw_->Mem()) {
 			const unsigned pc = (unsigned)cpu->r.pc;
 			if (pc >= 0x0120u && pc <= 0x0130u && m[0x201c] == 0)
@@ -4127,10 +3749,7 @@ void CDriverAc::RunUntil(uint64_t endCycle)
 	CEmuHardAcSetActive(hw_);
 	while ((uint64_t)cpu->time64() < endCycle) {
 		DeliverIrqs();
-		/* HALT + IFF1 clear: Ay_Cpu HALT clears the run budget (s_time&=3), so
-		   Open's boot settle would take minutes. Leap the clock instead.
-		   Alpha 68K-II music is periodic NMI (IFF1 stays 0); leaping past
-		   HALT skips DeliverIrqs at 7614 Hz and the sequencer never keys. */
+		/* HALT + IFF1 クリア: Ay_Cpu HALT は実行予算を消す（s_time&=3）。Open のブート settle が数分になる。代わりにクロックを飛ばす。Alpha 68K-II 音楽は周期 NMI（IFF1 は 0 のまま）。HALT を飛ばすと 7614Hz の DeliverIrqs を飛ばしシーケンサがキーしない。 */
 		if (!cpu->r.iff1 && hw_->PeekMem((uint16_t)cpu->r.pc) == 0x76
 			&& hw_->board_ != CEMU_AC_BOARD_ALPHA68K2) {
 			const uint64_t now = (uint64_t)cpu->time64();
@@ -4150,9 +3769,7 @@ void CDriverAc::RunUntil(uint64_t endCycle)
 	}
 }
 
-/* Mega System 1: the sound 68000's only timebase is the YM2151, so slice the
-   run so its timer IRQ (and the command latch) can be sampled repeatedly ?
-   Musashi clears the latched level on IACK and never re-asserts by itself. */
+/* Mega System 1: 音源 68000 の唯一の時基は YM2151。タイマ IRQ（とコマンドラッチ）を繰り返しサンプルできるようスライス — Musashi は IACK でラッチレベルを消し自分では再アサートしない。 */
 void CDriverAc::Ms1RunCycles(int cycles)
 {
 	if (!hw_ || cycles <= 0) return;
@@ -4175,14 +3792,14 @@ void CDriverAc::Ms1RunCycles(int cycles)
 		if (hw_->board_ == CEMU_AC_BOARD_KONAMI_RF5C400)
 			hw_->HornetTickTimer(slice);
 		if (gx) {
-			/* K054539 @ 18.432 MHz, sound 68000 @ 16 MHz. */
+			/* K054539 @ 18.432 MHz、音源 68000 @ 16 MHz */
 			const uint64_t ticks = (uint64_t)slice * 18432000ull / 16000000ull;
 			if (chip) chip->AdvanceClocks(ticks);
 			if (pcm) pcm->AdvanceClocks(ticks);
 		} else if (m68kPcm) {
-			/* The X1-010 and YMZ280B run their own sample clocks in Render. */
+			/* X1-010 と YMZ280B は Render で各自のサンプルクロックを回す */
 		} else if (chip) {
-			/* YM2151 is clocked at cpuHz/2 on Mega System 1. */
+			/* Mega System 1 では YM2151 は cpuHz/2 */
 			chip->AdvanceClocks((uint64_t)slice / 2u);
 		}
 		cycles -= slice;
@@ -4195,8 +3812,7 @@ int CDriverAc::Ms1Render(int16_t* stereo, int frames)
 	CChip* chip = hw_->SoundChip();
 	if (!chip) return 0;
 	const int gx = (hw_->board_ == CEMU_AC_BOARD_KONAMI_GX);
-	/* Interleave CPU and mixing ? the smoke asks for whole seconds at a time
-	   and rendering after the fact would freeze the chips at their end state. */
+	/* CPU とミックスをインターリーブ — スモークは数秒まとめて要求し、事後描画だとチップが終端状態で凍る */
 	enum { kChunk = 64 };
 	for (int done = 0; done < frames; ) {
 		int n = frames - done;
@@ -4217,11 +3833,10 @@ int CDriverAc::Ms1Render(int16_t* stereo, int frames)
 		int16_t* p = stereo + (size_t)done * 2;
 		chip->Render(p, n);
 		if (gx) {
-			/* Dual K054539: keep each chip near full scale; MixAdd second at
-			   ~3/4 so tkmmpzdm is audible without burying the first chip. */
+			/* K054539×2: 各チップをフルスケール近く。2 本目は MixAdd で約 3/4 にし、tkmmpzdm が 1 本目を埋めずに聞こえるようにする。 */
 			if (hw_->PcmChip()) hw_->PcmChip()->MixAdd(p, n, 192);
 		} else if (hw_->board_ == CEMU_AC_BOARD_M68K_PCM) {
-			/* chip_ is the only voice source; Render already filled p. */
+			/* chip_ が唯一のボイス源。Render は既に p を埋めた */
 		} else {
 			if (hw_->Oki(0)) hw_->Oki(0)->MixAdd(p, n, 256);
 			if (hw_->Oki(1)) hw_->Oki(1)->MixAdd(p, n, 256);
@@ -4233,9 +3848,7 @@ int CDriverAc::Ms1Render(int16_t* stereo, int frames)
 	return frames;
 }
 
-/* Irem M92: the V35 takes its timebase from the YM2151 (INTP0) and from the
-   sound latch (INTP1), so slice finely enough that a timer edge is sampled
-   before the driver's next wait loop rather than a whole frame later. */
+/* Irem M92: V35 の時基は YM2151（INTP0）とサウンドラッチ（INTP1）。タイマ端がドライバの次待ちループより前にサンプルされるよう細かくスライス（フレーム丸ごと後ではない）。 */
 void CDriverAc::M92RunCycles(int cycles)
 {
 	if (!hw_ || cycles <= 0) return;
@@ -4250,7 +3863,7 @@ void CDriverAc::M92RunCycles(int cycles)
 			const int used = V35Execute(cpu, slice);
 			const int step = used > 0 ? used : slice;
 			hw_->AddCpuCycles((uint64_t)step);
-			/* YM2151 and GA20 both sit on XTAL/4. */
+			/* YM2151 と GA20 は両方 XTAL/4 */
 			m92OpmRes_ += (uint64_t)step;
 			if (chip) chip->AdvanceClocks(m92OpmRes_ / 4u);
 			m92OpmRes_ %= 4u;
@@ -4267,7 +3880,7 @@ int CDriverAc::M92Render(int16_t* stereo, int frames)
 	for (int done = 0; done < frames; ) {
 		int n = frames - done;
 		if (n > (int)kChunk) n = (int)kChunk;
-		/* Periodic song retries until we hear audio (same idea as Z80 boards). */
+		/* 音声が聞こえるまで周期的に曲を再試行（Z80 基板と同じ考え） */
 		if (nextCmdAt_ != (uint64_t)~0ull
 			&& hw_->CpuCycles() >= nextCmdAt_ && cmdIndex_ < 40) {
 			if (heard_ || pinned_) {
@@ -4308,7 +3921,7 @@ void CDriverAc::DecoRunCycles(int cycles)
 			const int used = M6502Execute(m6502, slice);
 			const int step = used > 0 ? used : slice;
 			hw_->AddCpuCycles((uint64_t)step);
-			/* OPL @ 3 MHz with CPU @ 1.5 �� 2x clocks; OPN shares CPU rate. */
+			/* OPL @ 3 MHz、CPU @ 1.5 → 2 倍クロック。OPN は CPU レートを共有 */
 			if (chip) chip->AdvanceClocks((uint64_t)step * 2u);
 			if (ym2203) ym2203->AdvanceClocks((uint64_t)step);
 			if (hw_->PcmChip()) hw_->PcmChip()->AdvanceClocks((uint64_t)step);
@@ -4321,12 +3934,10 @@ void CDriverAc::DecoRunCycles(int cycles)
 	CEmuH6280BusSetDeco(hw_);
 	CChip* chip = hw_->SoundChip();
 	CChip* ym2203 = hw_->Chip2();
-	/* cpuHz = XTAL/8, YM2151 = XTAL/9 �� advance YM by cycles * 8/9.
-	   YM2203 / OKI1 share XTAL/8 with the CPU; OKI2 is XTAL/16 = cpu/2. */
+	/* cpuHz = XTAL/8、YM2151 = XTAL/9 → YM を cycles * 8/9 進める。YM2203 / OKI1 は CPU と同じ XTAL/8。OKI2 は XTAL/16 = cpu/2。 */
 	while (cycles > 0) {
 		const int slice = cycles > 512 ? 512 : cycles;
-		/* Pulse YM��IRQ2 ~250 Hz while the timer is live. Sticky level every
-		   slice only cleared reg14 and starved song-slot updates (BLAST). */
+		/* タイマ生存中は YM→IRQ2 を約 250Hz でパルス。スライス毎の sticky レベルは reg14 だけ消し曲枠更新を飢えた（BLAST）。 */
 		const uint64_t now = hw_->CpuCycles();
 		const uint64_t period = (uint64_t)cpuHz_ / 250;
 		const int ymPend = chip && (chip->Irq() || (chip->ReadStatus() & 0x03));
@@ -4334,10 +3945,9 @@ void CDriverAc::DecoRunCycles(int cycles)
 			hw_->DecoSyncIrqs();
 			if (period > 0)
 				decoNextYmIrq_ = now + period;
-			/* Do not AckIrq here ? HuC6280 ISR must see timer status bits.
-			   Soft line is dropped between pulses below. */
+			/* ここで AckIrq しない — HuC6280 ISR がタイマ status ビットを見る必要がある。ソフト線は下のパルス間で落とす。 */
 		} else {
-			/* Latch/IRQ1 + MPR fix still need sync; drop YM line between pulses. */
+			/* ラッチ/IRQ1 + MPR 修正はまだ同期が要る。パルス間で YM 線を落とす */
 			hw_->DecoSyncIrqs();
 			H6280SetInputLine(cpu, H6280_LINE_IRQ2, H6280_CLEAR_LINE);
 		}
@@ -4367,7 +3977,7 @@ int CDriverAc::DecoRender(int16_t* stereo, int frames)
 		if (n > (int)kChunk) n = (int)kChunk;
 		if (nextCmdAt_ != (uint64_t)~0ull
 			&& hw_->CpuCycles() >= nextCmdAt_ && cmdIndex_ < 1) {
-			/* Single inject only: repeating a BGM id clears FM channel slots. */
+			/* 注入は 1 回だけ: BGM id の繰り返しは FM チャネル枠をクリア */
 			TryInjectCommand();
 			nextCmdAt_ = (uint64_t)~0ull;
 		}
@@ -4415,9 +4025,7 @@ void CDriverAc::NamcoM6809RunCycles(int cycles)
 	unsigned long clocksPending = 0;
 	while (cpu->cycles < target && steps < kMaxSteps) {
 		hw_->NamcoM6809SyncIrqs();
-		/* Keep host handshake alive while I=1 ? posting a song id into $40
-		   before gaplus/grobda/motos finish their magic compares leaves the
-		   sub CPU spinning at reset forever. */
+		/* I=1 の間ホストハンドシェイクを生かす — gaplus/grobda/motos がマジック比較を終える前に $40 へ曲 id を載せるとサブ CPU がリセットで永久スピン。 */
 		if (hw_->WsgMappy() && cpu->cc.i && (steps & 63) == 0) {
 			const uint16_t pc = cpu->pc.w;
 			const uint8_t o0 = hw_->NamcoM6809Read8(pc);
@@ -4427,8 +4035,7 @@ void CDriverAc::NamcoM6809RunCycles(int cycles)
 			const uint8_t o4 = hw_->NamcoM6809Read8((uint16_t)(pc + 4));
 			const uint8_t o5 = hw_->NamcoM6809Read8((uint16_t)(pc + 5));
 			const uint8_t o6 = hw_->NamcoM6809Read8((uint16_t)(pc + 6));
-			/* Exact wait heads only ? STA $3000 appears in gaplus checksum/IRQ
-			   and must not re-poison $40 with $11 over a live song id. */
+			/* 正確な待ち先頭だけ — STA $3000 は gaplus チェックサム／IRQ に現れ、ライブ曲 id の上に $11 で $40 を再毒してはいけない。 */
 			if (o0 == 0xdc && o1 == 0x40 && o2 == 0x10 && o3 == 0x83) {
 				hw_->NamcoM6809Write8(0x0040, o4);
 				hw_->NamcoM6809Write8(0x0041, o5);
@@ -4445,12 +4052,11 @@ void CDriverAc::NamcoM6809RunCycles(int cycles)
 				hw_->NamcoM6809Write8(0x0040, 0);
 				hw_->NamcoM6809Write8(0x0041, 0);
 			} else if (o0 == 0x91 && o1 == 0x41 && o2 == 0x27) {
-				/* phozon: CMPA $41 / BEQ ? host must change $41 from the
-				   just-stored sentinel (usually $02). */
+				/* phozon: CMPA $41 / BEQ — ホストは今格納した番兵（通常 $02）から $41 を変えなければならない */
 				hw_->NamcoM6809Write8(0x0041, 0);
 			} else if (o0 == 0x8c && o1 == 0x00 && o2 == 0x00 && o3 == 0x26
 				&& pc >= 0xe014u && pc <= 0xe019u) {
-				/* liblrabl/gaplus ROM checksum CMPX #0 ? force completion. */
+				/* liblrabl/gaplus ROM チェックサム CMPX #0 — 完了を強制 */
 				if (hw_->NamcoM6809Read8(0xe01b) == 0x81
 					&& hw_->NamcoM6809Read8(0xe01c) == 0xddu) {
 					cpu->A = 0xddu;
@@ -4469,17 +4075,15 @@ void CDriverAc::NamcoM6809RunCycles(int cycles)
 		steps++;
 		if (rc != 0) break;
 		if (cpu->cycles == before)
-			cpu->cycles++; /* CWAI/SYNC safety */
+			cpu->cycles++; /* CWAI/SYNC 安全 */
 		clocksPending += (unsigned long)(cpu->cycles - before);
-		/* Tick YM often enough for timer��FIRQ; bulk-at-end starved BGM. */
+		/* タイマ→FIRQ のため YM を十分 tick。末尾一括は BGM を飢えた */
 		if (clocksPending >= 64u) {
 			if (chip) chip->AdvanceClocks((uint64_t)clocksPending);
 			if (hw_->PcmChip()) hw_->PcmChip()->AdvanceClocks((uint64_t)clocksPending);
 			clocksPending = 0;
 		}
-		/* Keep S inside work RAM. Sys2 firmware LDS #$A000 (empty stack;
-		   first push lands at $9FFF). Clamping A000→9FF0 every opcode
-		   fought that sentinel. Mappy-era WSG: LDS #$0400. */
+		/* S はワーク RAM 内。Sys2 ファームは LDS #$A000（空スタック。最初の push は $9FFF）。毎命令 A000→9FF0 クランプはその番兵と戦った。Mappy 期 WSG: LDS #$0400。 */
 		if (hw_->WsgMappy()) {
 			if (cpu->S.w < 0x03c0u || cpu->S.w > 0x0400u)
 				cpu->S.w = 0x03f0;
@@ -4544,8 +4148,7 @@ void CDriverAc::M62RunCycles(int cycles)
 	CChip* chip = hw_->SoundChip();
 	int left = cycles;
 	int guard = cycles * 8 + 256;
-	/* Drop OCF/TOF/SCI/ICF ? those vectors stub to RST on M62 ROMs.
-	   MSM5205 VCK��NMI ~4 kHz: accumulate by *executed* cycles only. */
+	/* OCF/TOF/SCI/ICF を落とす — それらのベクタは M62 ROM で RST stub。MSM5205 VCK→NMI 約 4kHz: *実行* サイクルだけで積算。 */
 	static uint64_t s_nmiAcc;
 	while (left > 0 && guard-- > 0) {
 		cpu->irq &= (IRQ_NMI | IRQ_IRQ1);
@@ -4571,8 +4174,7 @@ int CDriverAc::M62Render(int16_t* stereo, int frames)
 	for (int done = 0; done < frames; ) {
 		int n = frames - done;
 		if (n > (int)kChunk) n = (int)kChunk;
-		/* While still silent, re-seed song mailboxes + latch (same catalog
-		   id only ? main-CPU style retry, not a try-table hunt). */
+		/* 無音の間、曲メールボックス＋ラッチを再種まき（同じカタログ id のみ — メイン CPU 風再試行であり試行表ハントではない）。 */
 		if (!heard_ && hw_->CpuCycles() < (uint64_t)cpuHz_ * 3ull) {
 			uint8_t song = songCmd_ ? (uint8_t)(songCmd_ & 0x7fu) : 0x20;
 			if (!song) song = 0x20;
@@ -4639,10 +4241,7 @@ void CDriverAc::Sega68RunCycles(int cycles)
 			m68k_set_irq(M68K_IRQ_NONE);
 		m68k_execute(slice);
 		hw_->AddCpuCycles((uint64_t)slice);
-		/* The YM runs at opmHz_ (8 MHz on segam1audio) while this 68000 runs
-		   at cpuHz_ (10 MHz). Feeding it raw CPU cycles ran its timers 25%
-		   fast, and the firmware paces the sequencer off Timer B — daytona
-		   played a quarter too quick. MultiPCM shares the 68000's 10 MHz. */
+		/* YM は opmHz_（segam1audio では 8 MHz）。この 68000 は cpuHz_（10 MHz）。生 CPU サイクルを食わせるとタイマが 25% 速く、ファームは Timer B でシーケンサをペース — daytona が 1/4 速かった。MultiPCM は 68000 の 10 MHz を共有。 */
 		if (chip && cpuHz_ > 0 && opmHz_ > 0) {
 			opmResidual_ += (uint64_t)slice * (uint64_t)opmHz_;
 			const uint64_t opmTicks = opmResidual_ / (uint64_t)cpuHz_;
@@ -4681,16 +4280,13 @@ int CDriverAc::Sega68Render(int16_t* stereo, int frames)
 		}
 		int16_t* p = stereo + (size_t)done * 2;
 		memset(p, 0, (size_t)n * 2 * sizeof(int16_t));
-		/* MAME segam1audio: MultiPCM route 0.5 each, YM3438 0.30.
-		   Old gain 768 (3.0x) was compensating for a dead 68K image and
-		   rail-clipped once firmware actually played. */
+		/* MAME segam1audio: MultiPCM 各 0.5、YM3438 0.30。旧ゲイン 768（3.0x）は死んだ 68K イメージの補償で、ファームが実際に鳴らすとレールクリップ。 */
 		if (hw_->PcmChip()) hw_->PcmChip()->MixAdd(p, n, 128);
 		if (hw_->Oki(1)) hw_->Oki(1)->MixAdd(p, n, 128);
 		if (chip) {
 			int16_t* mix = Scratch(n);
 			if (mix) {
-				/* Model 1 mixes YM3438 at 0.30 next to two MultiPCMs; on
-				   Model 2A/3 the SCSP is the whole board, so keep it full. */
+				/* Model 1 は YM3438 を MultiPCM×2 の隣で 0.30。Model 2A/3 では SCSP が基板全体なのでフルのまま。 */
 				const int g = hw_->SegaM1Audio() ? 77 : 256;
 				chip->Render(mix, n);
 				for (int i = 0; i < n * 2; i++) {
@@ -4717,17 +4313,14 @@ void CDriverAc::H8RunCycles(int cycles)
 	CChip* chip = hw_->SoundChip();
 	while (cycles > 0) {
 		const int slice = cycles > 1024 ? 1024 : cycles;
-		/* Keep Sys12/ND-1 busy flag clear so the main loop can run. */
+		/* Sys12/ND-1 のビジーフラグをクリアしメインループが走れるようにする */
 		if (hw_->H8Shared()) {
 			const_cast<uint8_t*>(hw_->H8Shared())[0x4050] = 0;
 		}
 		const int used = H8Execute(cpu, slice);
 		const int step = used > 0 ? used : slice;
 		hw_->AddCpuCycles((uint64_t)step);
-		/* MAME namcos12_sub_irq: screen vblank drives external IRQ1.
-		   IRQ5 selects the wrong H8 vector and makes the C76 sequencer run
-		   from an unrelated handler.  One request per vblank is sufficient
-		   for this detached core (external requests are edge-latched). */
+		/* MAME namcos12_sub_irq: 画面 vblank が外部 IRQ1 を駆動。IRQ5 は誤った H8 ベクタを選び C76 シーケンサが無関係ハンドラから走る。この切り離しコアには vblank 1 要求で足りる（外部要求はエッジラッチ）。 */
 		if ((hw_->CpuCycles() / (uint64_t)(hw_->cpuHz_ / 60 + 1))
 			!= ((hw_->CpuCycles() - (uint64_t)step) / (uint64_t)(hw_->cpuHz_ / 60 + 1)))
 			H8SetInputLine(cpu, H8_LINE_IRQ1, H8_ASSERT_LINE);
@@ -4773,16 +4366,7 @@ void CDriverAc::M37702RunCycles(int cycles)
 		const int used = M37702Execute(cpu, slice);
 		const int step = used > 0 ? used : slice;
 		hw_->AddCpuCycles((uint64_t)step);
-		/* ~60 Hz host tick. System 22 needs none of it - it sequences off
-		   Timer A0. Elsewhere IRQ0 is what the driver wants: on System 11 its
-		   handler sets the flag the main loop spins on. IRQ2 is the main-CPU
-		   handshake, and in the C7x mask ROMs that handler blocks on a reply
-		   we have no main CPU to send, parking the MCU at interrupt priority
-		   so the tick never returns; boards running their own driver out of
-		   the game ROM do expect it. NA-1/NA-2 want none either: there the
-		   only host interrupt is the 68000 writing mail slot 4, and a tick
-		   arriving before the C69 BIOS has filled its RAM vector table at
-		   $01E0 sends it through JMP ($01F0) into nothing. */
+		/* 約 60Hz ホスト tick。System 22 には不要 — Timer A0 でシーケンス。他では IRQ0 がドライバの欲しいもの: System 11 のハンドラがメインループ待ちフラグを立てる。IRQ2 はメイン CPU ハンドシェイク。C7x マスク ROM ではそのハンドラが返信待ちでブロックし、メイン CPU が無いので MCU が割り込み優先度に駐車し tick が戻らない。ゲーム ROM 上の自前ドライバはそれを期待する。NA-1/NA-2 も不要: 唯一のホスト割り込みは 68000 のメール枠 4 書込。C69 BIOS が $01E0 の RAM ベクタ表を埋める前の tick は JMP ($01F0) で虚空へ。 */
 		const int naC69 = (hw_->M37702MapKind() == 1 && !hw_->M37702McuKind());
 		if (hw_->M37702MapKind() != 2 && !naC69
 			&& (hw_->CpuCycles() / (uint64_t)(hw_->cpuHz_ / 60 + 1))
@@ -4829,17 +4413,10 @@ void CDriverAc::Sys86RunCycles(int cycles)
 	if (!cpu) return;
 	CEmuHD63701BusSetAc(hw_);
 	CChip* chip = hw_->SoundChip();
-	/* FBNeo: HOLD vblank IRQ once per frame. Do not CLI or nest a 256-cycle
-	   execute (that re-entered $81CD and smashed AE).
-	   Sys86 song-start F4DD sets B0 then JSRs $80A9: F14A rebuilds the
-	   vector table at $11C0, CLI, then F20A relocates it to $14F0. IRQ
-	   during that window uses C6/C8 for the copy and never finishes
-	   (PC stuck in F364, AE left at 11C0, no KeyOn). Wait until AE=$14xx.
-	   $81CD / F382 only run the music chain while $1182=$A6; the firmware
-	   writes A6 itself at $811F after F20A, but re-arm once relocated so
-	   a CLR $1182 at $80A9 cannot starve the player.
-	   F4DD also stores $1183=1 (main-CPU "slot busy"); $8327 / F249 still
-	   read $1183 as the song id, so restore the injected command. */
+	/* FBNeo: フレーム毎に HOLD vblank IRQ 1 回。CLI も 256 サイクル execute の入れ子もしない（$81CD 再入で AE を潰した）。
+	   Sys86 曲開始 F4DD は B0 を立て $80A9 を JSR: F14A が $11C0 にベクタ表を再構築、CLI、F20A が $14F0 へリロケ。その窓の IRQ はコピーに C6/C8 を使い終わらない（PC が F364 で固まり AE が 11C0、KeyOn 無し）。AE=$14xx まで待つ。
+	   $81CD / F382 は $1182=$A6 の間だけ音楽チェインを走る。ファームは F20A 後 $811F で A6 を書くが、リロケ後に再武装し $80A9 の CLR $1182 がプレーヤを飢えないようにする。
+	   F4DD は $1183=1（メイン CPU「枠ビジー」）も格納。$8327 / F249 はまだ $1183 を曲 id として読むので注入コマンドを復元。 */
 	while (cycles > 0) {
 		const int slice = cycles > 1024 ? 1024 : cycles;
 		const int used = HD63701Execute(cpu, slice);
@@ -4851,19 +4428,12 @@ void CDriverAc::Sys86RunCycles(int cycles)
 			const uint8_t ae = hw_->HD63701Read8(0x00ae);
 			const uint16_t pc = HD63701Pc(cpu);
 			const int relocated = (ae == 0x14u);
-			/* F4DD sets B0 while AE is still $14F0 and I is clear; $80A9
-			   has not SEI'd yet. A vblank there runs $81CD against a
-			   half-rebuilt table and lands in F33F. Wait for the idle
-			   poll at $81xx after F20A + CLI. */
-			/* roishtar's F249/844E sit at $8108/$810B (other games keep
-			   those JSRs in $80xx). Delay idle until $8128 so EOCI/IRQ
-			   cannot nest inside that mute pass. */
+			/* F4DD は AE がまだ $14F0、I クリアのまま B0 を立てる。$80A9 はまだ SEI していない。そこの vblank は半再構築表に $81CD を走らせ F33F へ着地。F20A + CLI 後の $81xx アイドル poll を待つ。 */
+			/* roishtar の F249/844E は $8108/$810B（他ゲームはそれらの JSR を $80xx）。アイドルを $8128 まで遅らせ、EOCI/IRQ がその mute パスに入れ子しないようにする。 */
 			const unsigned idleLo = (!hw_->Wsg63701() && hw_->HD63701MapKind() == 1)
 				? 0x8128u : 0x8100u;
 			const int idle = (pc >= idleLo && pc < 0x9000u);
-			/* roishtar 80A9 CLR $1400-$2000 (813E) then F20A. IRQ after
-			   relocate can still land on a wiped $14F8 (478F → TRAP →
-			   FF78 fault 8). $11C0 is CUS30 and survives; copy it back. */
+			/* roishtar 80A9 は $1400-$2000 を CLR（813E）してから F20A。リロケ後の IRQ はまだ消された $14F8 に着地し得る（478F → TRAP → FF78 fault 8）。$11C0 は CUS30 で生き残る。それを戻す。 */
 			if (!hw_->Wsg63701() && hw_->HD63701MapKind() == 1
 				&& relocated && idle
 				&& (hw_->HD63701Read8(0x14f8) != 0x81u
@@ -4877,11 +4447,7 @@ void CDriverAc::Sys86RunCycles(int cycles)
 			}
 			int ociArmed = 0;
 			if (!hw_->Wsg63701()) {
-				/* EOCI is armed at $80DA and the free-running timer keeps
-				   interrupting through 8147's F220 (which zeros $AC). F3C4
-				   then JSR [AC] into $0000. Mask OCI until the idle poll.
-				   roishtar's F249/844E sit at $8108/$810B (skykiddx's are
-				   still $80xx), so idle starts at $8128, after those JSRs. */
+				/* EOCI は $80DA で武装し、フリーランタイマは 8147 の F220（$AC をゼロ）を通して割り込み続ける。F3C4 は JSR [AC] で $0000 へ。アイドル poll まで OCI をマスク。roishtar の F249/844E は $8108/$810B（skykiddx はまだ $80xx）。アイドルはそれらの JSR のあと $8128 から。 */
 				const uint8_t tcsr = hw_->HD63701Read8(0x0008);
 				if (!idle && (!b0 || !relocated) && (tcsr & 0x08u)) {
 					hw_->HD63701Write8(0x0008, (uint8_t)(tcsr & ~0x08u));
@@ -4895,9 +4461,7 @@ void CDriverAc::Sys86RunCycles(int cycles)
 			if (!hw_->Wsg63701() && b0 && idle && songCmd_) {
 				if (songCmd_ > 1u && hw_->HD63701Read8(0x1183) == 1u)
 					hw_->HD63701Write8(0x1183, songCmd_);
-				/* 846B: $1380=0 skip, $FF=playing, else song index. F110
-				   RAM-test clears it; poke only once the idle loop is up so
-				   OCI cannot index the YM table during F14A/F20A. */
+				/* 846B: $1380=0 は skip、$FF=再生中、他は曲添字。F110 RAM テストが消す。アイドルループが立ってから一度だけ poke し、F14A/F20A 中に OCI が YM 表を引かないようにする。 */
 				const uint8_t yreq = hw_->HD63701Read8(0x1380);
 				if (yreq == 0)
 					hw_->HD63701Write8(0x1380, songCmd_);
@@ -4929,7 +4493,7 @@ int CDriverAc::Sys86Render(int16_t* stereo, int frames)
 	for (int done = 0; done < frames; ) {
 		int n = frames - done;
 		if (n > (int)kChunk) n = (int)kChunk;
-	/* Sys86: one-shot at Open ? do not re-inject (sticky $1182 kills KeyOn). */
+	/* Sys86: Open でワンショット — 再注入しない（sticky $1182 が KeyOn を殺す） */
 	if (nextCmdAt_ != (uint64_t)~0ull
 		&& hw_->CpuCycles() >= nextCmdAt_ && cmdIndex_ < 1
 		&& hw_->board_ != CEMU_AC_BOARD_NAMCO_SYS86) {
@@ -4945,7 +4509,7 @@ int CDriverAc::Sys86Render(int16_t* stereo, int frames)
 		{
 			int16_t* p = stereo + (size_t)done * 2;
 			chip->Render(p, n);
-			/* MAME namcos86: YM2151 right channel only (left routed at 0). */
+			/* MAME namcos86: YM2151 右チャネルのみ（左は 0 でルート） */
 			if (!hw_->Wsg63701()) {
 				for (int i = 0; i < n; i++)
 					p[i * 2] = p[i * 2 + 1];
@@ -4980,8 +4544,7 @@ int CDriverAc::Render(int16_t* stereo, int frames)
 	if (hostRate_ < 1 || cpuHz_ < 1) return 0;
 
 	if (!hasCpu_) {
-		/* No sound-CPU core for this board ? render the chips as configured
-		   (silent unless something else has driven them). */
+		/* この基板に音源 CPU コアは無い — 組んだチップを描画（他が駆動しなければ無音） */
 		chip->Render(stereo, frames);
 		if (hw_->Chip2()) {
 			int16_t* mix2 = Scratch(frames);
@@ -5000,16 +4563,11 @@ int CDriverAc::Render(int16_t* stereo, int frames)
 		return frames;
 	}
 
-	/* Aux voice chips (GNG dual YM2203, System1 dual SN, Taito SJ triple AY)
-	   have no MixAdd, so render them into scratch and sum afterwards. */
+	/* 補助ボイスチップ（GNG YM2203×2、System1 SN×2、Taito SJ AY×3）に MixAdd は無いのでスクラッチへ描画してから加算 */
 	CChip* pcm = hw_->PcmChip();
-	/* mystwarr-class boards carry a second K054539 in the same Z80 map.
-	   Must be the K054539-specific accessor: pcm2_ is also used by other
-	   boards (MegaSystem1/DECO second OKI) whose chips are driven elsewhere,
-	   and mixing those here faulted on 57 archives. */
+	/* mystwarr 系は同じ Z80 マップに 2 本目 K054539。K054539 専用アクセサが必須: pcm2_ は他基板（MegaSystem1/DECO 2 本目 OKI）でも使い、そちらのチップは別経路。ここで混ぜると 57 アーカイブで故障。 */
 	CChip* pcm2 = hw_->KonamiPcm2();
-	/* Batrider's second OKI is on this same Z80 (I/O ports 82 and 84), so it
-	   does belong in this mix. */
+	/* Batrider の 2 本目 OKI は同じ Z80（I/O 82 と 84）なのでこのミックスに含める */
 	if (!pcm2 && hw_->board_ == CEMU_AC_BOARD_RAIZING)
 		pcm2 = hw_->Oki(1);
 	if (!pcm2 && hw_->board_ == CEMU_AC_BOARD_TECMO16 && hw_->TecmoOpl() == 5)
@@ -5020,9 +4578,7 @@ int CDriverAc::Render(int16_t* stereo, int frames)
 
 	for (int i = 0; i < frames; i++) {
 		const uint64_t now = (uint64_t)cpu->time64();
-		/* Re-try song commands every ~0.25s until table exhausted (Sys16/CPS�c).
-		   After Burner / pinned playlist title: inject once only ? re-sending
-		   restarts BGM and overrides the selected track with try-table[0]. */
+		/* 表が尽きるまで約 0.25s 毎に曲コマンドを再試行（Sys16/CPS 等）。After Burner／ピンしたプレイリストタイトル: 注入は 1 回だけ — 再送は BGM を再開し選択曲を試行表[0] で上書き。 */
 		if (now >= nextCmdAt_) {
 			if (hw_->board_ == CEMU_AC_BOARD_ABURNER) {
 				if (cmdIndex_ == 0)
@@ -5056,16 +4612,12 @@ int CDriverAc::Render(int16_t* stereo, int frames)
 							|| hw_->board_ == CEMU_AC_BOARD_SYS16B
 							|| hw_->board_ == CEMU_AC_BOARD_VSYSTEM) ? 2ull : 1ull);
 				} else if (hw_->board_ == CEMU_AC_BOARD_FLSTORY) {
-					/* MSM phrases decay inside one probe second ? re-arm the
-					   same BGM so all four classify chunks stay above PEAK_MIN. */
+					/* MSM フレーズはプローブ 1 秒内に減衰 — 同じ BGM を再武装し 4 分類チャンク全て PEAK_MIN 超に保つ */
 					cmdIndex_ = 0;
 					TryInjectCommand();
 					nextCmdAt_ = now + (uint64_t)cpuHz_ * 4ull / 5ull;
 				} else if (hw_->board_ == CEMU_AC_BOARD_RAIZING) {
-					/* Jingles and scripts that hit the end terminator go
-					   silent. Re-post the same title once every channel has
-					   dropped; looping BGM never goes idle so it is left
-					   alone. */
+					/* 終端ターミネータに当たるジングル／スクリプトは無音。全チャネルが落ちたら同じタイトルを再投稿。ループ BGM はアイドルにならないので触らない。 */
 					if (heard_ && hw_->RaizingHandshakeAcked()
 						&& hw_->RaizingTrackIdle()) {
 						cmdIndex_ = 0;
@@ -5074,15 +4626,11 @@ int CDriverAc::Render(int16_t* stereo, int frames)
 					nextCmdAt_ = now + (uint64_t)cpuHz_ / 4;
 				} else if (hw_->board_ == CEMU_AC_BOARD_KONAMI_PCM
 					&& (hw_->PcmKind() == 3 || hw_->PcmKind() == 4)) {
-					/* K054539: re-poke latch (DI can drop the first IRQ).
-					   K053260: post the song a few times, clear the latch,
-					   then only pulse IRQ0 so the sequencer ticks. */
+					/* K054539: ラッチを再 poke（DI が最初の IRQ を落とし得る）。K053260: 曲を数回投稿しラッチをクリア、そのあと IRQ0 だけパルスしてシーケンサを tick。 */
 					if (hw_->PcmKind() == 3) {
 						const uint16_t w = songCmdWord_ ? songCmdWord_
 							: (uint16_t)(songCmd_ ? songCmd_ : 0x80);
-						/* DI + FA00/HALT / YM-timer waits: empty IRQ0 cannot
-						   recover. Re-arm the same song ~2 Hz so short phrases
-						   (qgakumon/vendetta) do not leave a silent probe chunk. */
+						/* DI + FA00/HALT / YM タイマ待ち: 空 IRQ0 では復帰できない。同じ曲を約 2Hz で再武装し、短いフレーズ（qgakumon/vendetta）が無音プローブチャンクを残さないようにする。 */
 						if ((cmdIndex_ % 30) == 0) {
 							if (w > 0xffu)
 								hw_->SetSoundCommandWord(w);
@@ -5100,8 +4648,7 @@ int CDriverAc::Render(int16_t* stereo, int frames)
 						nextCmdAt_ = (uint64_t)~0ull;
 					}
 				} else if (hw_->board_ == CEMU_AC_BOARD_GNG) {
-					/* Stop once audible ? further injects stomp real BGM into
-					   AUDITION/clip. Unpinned Open() already picked a sustain. */
+					/* 可聴になったら止める — 追加注入は本物 BGM を AUDITION/クリップへ踏み潰す。ピン無し Open() は既に持続を選んだ。 */
 					if (!heard_ && cmdIndex_ < 40) {
 						TryInjectCommand();
 						nextCmdAt_ = now + (uint64_t)cpuHz_ / 4;
@@ -5109,13 +4656,11 @@ int CDriverAc::Render(int16_t* stereo, int frames)
 						nextCmdAt_ = (uint64_t)~0ull;
 					}
 				} else {
-					/* Keep the selected catalog/playlist command. Never hunt the
-					   try table ? that restarted BGM as the first try code (sfa
-					   song2��song1, same pattern on CPS/QSound/Taito/�c). */
+					/* 選んだカタログ／プレイリストコマンドを残す。試行表をハントしない — BGM を最初の試行コードで再開した（sfa song2→song1、CPS/QSound/Taito 等も同じ型）。 */
 					nextCmdAt_ = (uint64_t)~0ull;
 				}
 			} else if (cmdIndex_ == 0) {
-				/* Unpinned: inject catalog/default once ? no try-table walk. */
+				/* ピン無し: カタログ／既定を一度注入 — 試行表走査なし */
 				TryInjectCommand();
 				nextCmdAt_ = (uint64_t)~0ull;
 			} else {
@@ -5134,16 +4679,13 @@ int CDriverAc::Render(int16_t* stereo, int frames)
 			TickOpm((uint64_t)cycles);
 		}
 		if (hw_->board_ == CEMU_AC_BOARD_CPS_QS) {
-			/* QSound's signed 8-bit source path is noticeably below the FM
-			   boards. Apply a modest +1.9 dB at the board mixer, leaving the
-			   chip core's standalone Render contract unchanged. */
+			/* QSound の符号付き 8bit ソース経路は FM 基板より明らかに小さい。基板ミキサで控えめ +1.9 dB。チップコア単独 Render 契約は変えない。 */
 			stereo[i * 2] = stereo[i * 2 + 1] = 0;
 			chip->MixAdd(stereo + i * 2, 1, 320);
 		} else {
 			chip->Render(stereo + i * 2, 1);
 		}
-		/* Per-frame so the silence watchdog below sees PCM-only boards too;
-		   every MixAdd is a plain per-frame loop, so this is equivalent. */
+		/* フレーム毎なので下の無音ウォッチドッグが PCM のみ基板も見る。MixAdd は全て素のフレームループなので等価。 */
 		if (pcm)
 			pcm->MixAdd(stereo + i * 2, 1, 256);
 		if (pcm2)
@@ -5162,15 +4704,14 @@ int CDriverAc::Render(int16_t* stereo, int frames)
 
 	if (mix2 && hw_->board_ == CEMU_AC_BOARD_GNG) {
 		for (int i = 0; i < frames * 2; i++) {
-			/* Dual YM2203 ? average to avoid hard clip. */
+			/* YM2203×2 — 平均してハードクリップを避ける */
 			int s = ((int)stereo[i] + (int)mix2[i]) / 2;
 			if (s > 32767) s = 32767;
 			if (s < -32768) s = -32768;
 			stereo[i] = (int16_t)s;
 		}
 	} else if (mix2) {
-		/* SN76489 / AY voices are individually quiet; sum with clamp so a
-		   single active chip keeps full level (MAME routes them at ~0.5 each). */
+		/* SN76489 / AY ボイスは個別に静か。クランプ加算し、生きているチップ 1 本がフルレベルを保つ（MAME は各約 0.5 でルート）。 */
 		for (int i = 0; i < frames * 2; i++) {
 			int s = (int)stereo[i] + (int)mix2[i] + (mix3 ? (int)mix3[i] : 0);
 			s = s * 2 / 3;

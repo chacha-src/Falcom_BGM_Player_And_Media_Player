@@ -13,20 +13,20 @@
 
 enum {
 	kLiveInjCap = 512,
-	/* PC98 host-walk fallbacks hand the whole song to the capture buffer
-	   during boot, so the first pump defers every event past its 512-frame
-	   window. At 512 slots that silently dropped most Note Offs. */
+	/* PC98 の host-walk フォールバックは起動時に曲全体をキャプチャへ渡す。
+	   最初の Pump が 512 フレーム窓を超えて全部 defer し、512 スロットだと
+	   Note Off の大半が黙って落ちていた。 */
 	kLiveHoldCap = 16384,
 	kLiveRate = 44100,
-	/* SMF div 480 @ tempo 500000µs → 960 ticks/sec.
-	   ReadVar in VstMidiEngine accepts at most 4 MIDI varlen bytes
-	   (max 0x0FFFFFFF). 5-byte deltas make LoadSmf abort → length=2s pad. */
-	kStubTicks = 0x0FFFFFFFu /* ~3.23 days @ 960 ticks/sec */
+	/* SMF div 480 @ tempo 500000us → 960 ticks/sec。
+	   VstMidiEngine の ReadVar は MIDI 可変長 4 バイトまで (最大 0x0FFFFFFF)。
+	   5 バイト delta だと LoadSmf が中断し length=2s パッドになる。 */
+	kStubTicks = 0x0FFFFFFFu /* 約 3.23 日 @ 960 ticks/sec */
 };
 
 struct CEmuMidiLiveHold {
 	DWORD msg;
-	__int64 dueAbs; /* absolute MIDI-clock sample (never reset per pump) */
+	__int64 dueAbs; /* MIDI 時計の絶対サンプル (Pump ごとにリセットしない) */
 };
 
 struct CEmuMidiLive {
@@ -40,44 +40,44 @@ struct CEmuMidiLive {
 	wchar_t midPath[MAX_PATH];
 	int sampleRate;
 	unsigned midiCursor;
-	/* UART → short msg parser */
+	/* UART → ショートメッセージパーサ */
 	uint8_t run;
 	int need;
 	int haveD0;
 	uint8_t d0;
 	uint32_t pendingTicks;
-	uint32_t tickRem; /* ticks→samples fractional remainder */
-	/* Continuous clocks — do NOT reset midiSample each pump (that reordered
-	 * deferred note-offs vs new note-ons and scrambled durations). */
-	__int64 midiSample;  /* UART delta timeline → samples from stream start */
-	__int64 audioSample; /* samples already pumped (= Host64 chunk base) */
+	uint32_t tickRem; /* ticks→samples の端数 */
+	/* 時計は連続。Pump ごとに midiSample をリセットしない
+	   (defer した NoteOff と新しい NoteOn の順が入れ替わり長さが崩れる)。 */
+	__int64 midiSample;  /* UART delta タイムライン → ストリーム開始からのサンプル */
+	__int64 audioSample; /* 既に Pump したサンプル (= Host64 チャンク基準) */
 	int isMt32;
 	int laBanksSent;
 	int cc111StartSent;
 	int sawNotes;
 	int noteOns;
 	wchar_t zipPath[CEMU_ZIP_PATH];
-	/* Same-zip SE overlay: tag NoteOns in a short capture window, then
-	   Note Off only those keys when the SE ends (do not CC123 the BGM). */
+	/* 同一 zip SE overlay: 短い捕捉窓で NoteOn を印し、SE 終了時に
+	   そのキーだけ Note Off (BGM を CC123 しない)。 */
 	unsigned overlayCode;
 	volatile long overlayPend;
-	int ovlPhase; /* 0 idle, 1 capture, 2 wait for SE end */
+	int ovlPhase; /* 0 待機, 1 捕捉, 2 SE 終了待ち */
 	int ovlSeHeld;
 	uint32_t seBits[16][4];
 	__int64 ovlCapEnd;
 	__int64 ovlMaxEnd;
 	__int64 ovlHang;
 	__int64 ovlLastSe;
-	/* inject ring (ready for this audio block) */
+	/* inject リング (このオーディオブロックで出す) */
 	CEmuMidiLiveShort inj[kLiveInjCap];
 	LONG injW;
 	LONG injR;
-	/* events with dueAbs still ahead of audioSample+frames */
+	/* dueAbs がまだ audioSample+frames より先のイベント */
 	CEmuMidiLiveHold hold[kLiveHoldCap];
 	int holdN;
 	int16_t* mixBuf;
 	int mixCap;
-	/* Ring pressure. A silent drop here loses program changes / note offs. */
+	/* リング圧。ここで黙って落とすと PC / Note Off が消える。 */
 	unsigned injDropped;
 	unsigned holdDropped;
 	unsigned injPeak;
@@ -87,6 +87,7 @@ struct CEmuMidiLive {
 static CEmuMidiLive g_live;
 static int g_liveBootAsSfx;
 
+/* カタログ行が midiout 経路か */
 static int LiveModeEntryIsMidi(const CEmuGameEntry* e)
 {
 	if (!e) return 0;
@@ -100,6 +101,7 @@ static int LiveModeEntryIsMidi(const CEmuGameEntry* e)
 	return 0;
 }
 
+/* MIDI 可変長を track へ書く */
 static void SmfPutVar(uint8_t* track, unsigned* tp, uint32_t v)
 {
 	uint8_t tmp[5];
@@ -114,8 +116,8 @@ static void SmfPutVar(uint8_t* track, unsigned* tp, uint32_t v)
 		track[(*tp)++] = tmp[i];
 }
 
-/* Minimal Type-0 SMF: tempo, name, optional LA banks, CC#111=0, huge silence, EOT.
-   VST opens immediately; realtime notes arrive via inject. */
+/* 最小 Type-0 SMF: tempo, 名前, 任意 LA バンク, CC#111=0, 長い無音, EOT。
+   VST はすぐ開き、リアルタイム音符は inject で来る。 */
 static int WriteLiveStubSmf(const wchar_t* path, const char* seqName, int laBanks)
 {
 	if (!path || !path[0]) return 0;
@@ -154,8 +156,8 @@ static int WriteLiveStubSmf(const wchar_t* path, const char* seqName, int laBank
 	SmfPutVar(track, &tp, 0);
 	track[tp++] = 0xb0; track[tp++] = 111; track[tp++] = 0;
 
-	/* Multi-day body so Host64/local lengthSamples stays open for live inject.
-	   No CC#111 end here — that would make VST loop an empty 4-day SMF. */
+	/* 数日分の本体。Host64/local の lengthSamples がライブ inject 用に開いたまま。
+	   ここで CC#111 終端を書かない — 空の 4 日 SMF を VST がループしてしまう。 */
 	SmfPutVar(track, &tp, (uint32_t)kStubTicks);
 	track[tp++] = 0xb0; track[tp++] = 7; track[tp++] = 100;
 
@@ -181,6 +183,7 @@ static int WriteLiveStubSmf(const wchar_t* path, const char* seqName, int laBank
 	return (wr == tp) ? 1 : 0;
 }
 
+/* ライブ CS を一度だけ初期化 */
 static void LiveEnsureCs(void)
 {
 	if (!g_live.csReady) {
@@ -189,6 +192,7 @@ static void LiveEnsureCs(void)
 	}
 }
 
+/* inject リングへ。満杯なら黙って落とす (PC/Off が消える) */
 static void LivePushShort(DWORD msg, int sampleOfs)
 {
 	const LONG w = g_live.injW;
@@ -205,6 +209,7 @@ static void LivePushShort(DWORD msg, int sampleOfs)
 	g_live.injW = w + 1;
 }
 
+/* まだこの Pump 窓に入らないイベントを hold へ */
 static void LiveHoldPushAbs(DWORD msg, __int64 dueAbs)
 {
 	if (g_live.holdN > (int)g_live.holdPeak) g_live.holdPeak = (unsigned)g_live.holdN;
@@ -339,7 +344,7 @@ static void LiveAdvanceMidiClock(void)
 	g_live.pendingTicks = 0;
 }
 
-/* Place msg at absolute midiSample. ofs is relative to this pump's audioSample. */
+/* msg を絶対 midiSample に置く。ofs はこの Pump の audioSample 相対。 */
 static void LiveEmitTimed(DWORD msg, int frames)
 {
 	LiveAdvanceMidiClock();
@@ -349,7 +354,7 @@ static void LiveEmitTimed(DWORD msg, int frames)
 		return;
 	}
 	if (ofs64 < 0) {
-		/* MIDI clock lagged audio (clamped gaps / boot). Snap forward. */
+		/* MIDI 時計がオーディオより遅れている (ギャップクランプ / 起動)。前へスナップ。 */
 		g_live.midiSample = g_live.audioSample;
 		LivePushShort(msg, 0);
 		return;
@@ -404,7 +409,7 @@ static void LiveEmitLaBanks(int frames)
 static void LiveConsumeUart(CHardPcat* hw, int frames)
 {
 	if (!hw) return;
-	/* Deferred events first — same absolute clock as new UART traffic. */
+	/* defer したイベントを先に — 新しい UART と同じ絶対時計。 */
 	LiveFlushHolds(frames);
 
 	const unsigned n = hw->MidiByteCount();
@@ -490,8 +495,8 @@ static void LiveConsumeUart(CHardPcat* hw, int frames)
 		LiveFinishShort(msg, frames);
 	}
 
-	/* Do NOT advance pendingTicks here — incomplete messages must keep their
-	 * gap until the message completes (else note lengths double-count). */
+	/* ここで pendingTicks を進めない — 未完メッセージは完了までギャップを保持
+	   (進めないと音符長が二重計上になる)。 */
 
 	if (n >= (unsigned)CEMU_PCAT_MIDI_CAP - 64) {
 		hw->MidiCaptureReset();
@@ -576,17 +581,19 @@ static void LiveConsumeUartPc98(CHardPc98* hw, int frames)
 	}
 }
 
+/* ライブ UART セッションが走っているか */
 int CEmuMidiLiveActive(void)
 {
 	return g_live.active ? 1 : 0;
 }
 
+/* 最初の NoteOn を見たか (プレイリスト time=-1 / ループヒント) */
 int CEmuMidiLiveHasNotes(void)
 {
 	return g_live.sawNotes ? 1 : 0;
 }
 
-/* Walk a capture buffer as a UART stream (running status, SysEx skipped). */
+/* キャプチャバッファを UART ストリームとして辿る (ランニングステータス、SysEx は飛ばす)。 */
 template <class T>
 static void LiveScanCapture(const T* hw, CEmuMidiLiveDiag* d)
 {
@@ -625,6 +632,7 @@ static void LiveScanCapture(const T* hw, CEmuMidiLiveDiag* d)
 	}
 }
 
+/* UART 捕捉 vs inject/hold リングの差。ドライバが出さなかったのかチェーンが落としたのか */
 int CEmuMidiLiveGetDiag(CEmuMidiLiveDiag* out)
 {
 	if (!out) return 0;
@@ -648,6 +656,7 @@ int CEmuMidiLiveGetDiag(CEmuMidiLiveDiag* out)
 	return ok;
 }
 
+/* 走っているライブがこの zip か */
 int CEmuMidiLiveSameZip(const wchar_t* zipPath)
 {
 	if (!zipPath || !zipPath[0]) return 0;
@@ -659,6 +668,7 @@ int CEmuMidiLiveSameZip(const wchar_t* zipPath)
 	return ok;
 }
 
+/* 同一 zip SE: 曲を差し替えず title を注入 */
 int CEmuMidiLiveOverlayTitle(unsigned titleCode)
 {
 	LiveEnsureCs();
@@ -673,6 +683,7 @@ int CEmuMidiLiveOverlayTitle(unsigned titleCode)
 	return 1;
 }
 
+/* ライブセッションを止め、hard/drv を CS 外で破棄 */
 void CEmuMidiLiveStop(void)
 {
 	LiveEnsureCs();
@@ -681,8 +692,8 @@ void CEmuMidiLiveStop(void)
 	CEmuZipFs* fs = NULL;
 	int16_t* mixBuf = NULL;
 	EnterCriticalSection(&g_live.cs);
-	/* Detach under CS then destroy outside — HardDestroy/Render must not
-	   run while another thread waits on this CS (Pump) or while we hold it. */
+	/* CS 内で切り離し、外で破棄 — HardDestroy/Render が Pump 待ちの CS と
+	   入れ子にならないようにする。 */
 	drv = g_live.drv; g_live.drv = NULL;
 	hard = g_live.hard; g_live.hard = NULL;
 	fs = g_live.fs; g_live.fs = NULL;
@@ -741,13 +752,14 @@ static int MidiOutTypeFromGe(const CEmuGameEntry* e)
 	return 0;
 }
 
-/* hoot midiout_type: 1/2 = MT-32 (LA), 4/6 = GS, 8 = GM. LA banks (CC0=127)
-   make the MIDI monitor show LAmap; GM titles must not get them. */
+/* hoot midiout_type: 1/2 = MT-32 (LA), 4/6 = GS, 8 = GM。LA バンク (CC0=127)
+   で MIDI モニタが LAmap を出す。GM タイトルには付けない。 */
 static int MidiOutTypeIsLa(int t)
 {
 	return (t == 1 || t == 2) ? 1 : 0;
 }
 
+/* 既存 SMF BGM を置き換えずライブ MPU で SE を注入 */
 int CEmuMidiLiveStartOverlayPcat(const wchar_t* zipPath, unsigned titleCode)
 {
 	g_liveBootAsSfx = 1;
@@ -758,6 +770,7 @@ int CEmuMidiLiveStartOverlayPcat(const wchar_t* zipPath, unsigned titleCode)
 	return (ok && dummy[0]) ? 1 : 0;
 }
 
+/* PCAT/PC98 midiout を起動しスタブ SMF を書く。リアルタイム音符は inject */
 int CEmuMidiLiveStartPcat(const wchar_t* zipPath, unsigned titleCode,
 	wchar_t* outMidPath, int outCap)
 {
@@ -804,10 +817,10 @@ int CEmuMidiLiveStartPcat(const wchar_t* zipPath, unsigned titleCode,
 		return 0;
 	}
 
-	/* MT-32 (type 1/2) → LA banks, so the monitor names the parts from LAmap
-	   and the plug-in reads the program numbers as MT-32 timbres. GM (8) /
-	   GS (4,6) stay on GMmap/GSmap. An unlabeled row is MT-32 on PCAT but
-	   SC-55 on PC98, matching what those drivers shipped against. */
+	/* MT-32 (type 1/2) → LA バンク。モニタは LAmap でパート名を付け、
+	   プラグインはプログラム番号を MT-32 音色として読む。GM (8) / GS (4,6)
+	   は GMmap/GSmap のまま。ラベル無し行は PCAT では MT-32、PC98 では
+	   SC-55 (当時のドライバが相手にしていた音源)。 */
 	const int isPc98 = (hard->hardKind == CHard::KIND_PC98) ? 1 : 0;
 	const int midiType = MidiOutTypeFromGe(ge);
 	int laBanks = MidiOutTypeIsLa(midiType);
@@ -862,7 +875,7 @@ int CEmuMidiLiveStartPcat(const wchar_t* zipPath, unsigned titleCode,
 	g_live.audioSample = 0;
 	g_live.holdN = 0;
 	g_live.isMt32 = laBanks ? 1 : 0;
-	g_live.laBanksSent = 1; /* stub already has LA banks, or GS needs none */
+	g_live.laBanksSent = 1; /* スタブに既に LA がある、または GS は不要 */
 	g_live.cc111StartSent = 1;
 	g_live.sawNotes = 0;
 	g_live.noteOns = 0;
@@ -889,6 +902,7 @@ int CEmuMidiLiveStartPcat(const wchar_t* zipPath, unsigned titleCode,
 	return 1;
 }
 
+/* セッションレートで frames 進め、Steal 用ショートをキュー */
 int CEmuMidiLivePump(int frames)
 {
 	if (frames <= 0) return 0;
@@ -928,6 +942,7 @@ int CEmuMidiLivePump(int frames)
 	return 1;
 }
 
+/* Pump 累積フレーム。steal した short の sampleOfs の基準 */
 __int64 CEmuMidiLiveAudioFrames(void)
 {
 	LiveEnsureCs();
@@ -937,6 +952,7 @@ __int64 CEmuMidiLiveAudioFrames(void)
 	return n;
 }
 
+/* inject リングからショートを取り出す */
 int CEmuMidiLiveStealShorts(CEmuMidiLiveShort* out, int maxCount)
 {
 	if (!out || maxCount < 1) return 0;
@@ -952,7 +968,7 @@ int CEmuMidiLiveStealShorts(CEmuMidiLiveShort* out, int maxCount)
 	}
 	g_live.injR = r;
 	LeaveCriticalSection(&g_live.cs);
-	/* Host64/VST place by sampleOfs — keep chronological order. */
+	/* Host64/VST は sampleOfs で置く — 時系列を崩さない。 */
 	for (int i = 1; i < n; i++) {
 		CEmuMidiLiveShort t = out[i];
 		int j = i;

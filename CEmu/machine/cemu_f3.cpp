@@ -7,6 +7,7 @@
 #include "../fmmon/cemu_fmmon_bind.h"
 #include <string.h>
 
+/* Taito F3: zip を開き 68000 ハード＋ドライバを生成。FmMon は Open 前後で bind。 */
 int CEmuF3Open(CEmuF3* m, const CEmuGameEntry* ge, const wchar_t* zipPath, unsigned titleCode, int sampleRate)
 {
 	if (!m || !ge || !zipPath) return 0;
@@ -14,6 +15,7 @@ int CEmuF3Open(CEmuF3* m, const CEmuGameEntry* ge, const wchar_t* zipPath, unsig
 	wcsncpy_s(m->zipPath, zipPath, _TRUNCATE);
 
 	m->hard = CEmuHardCreate(ge, sampleRate);
+	/* 生成ハードが想定機種でない場合は破棄 */
 	if (!m->hard || m->hard->hardKind != CHard::KIND_F3) {
 		if (m->hard) {
 			CEmuHardDestroy(m->hard);
@@ -34,6 +36,7 @@ int CEmuF3Open(CEmuF3* m, const CEmuGameEntry* ge, const wchar_t* zipPath, unsig
 		CEmuF3Close(m);
 		return 0;
 	}
+	/* FmMon ダンプ開始 */
 	CEmuFmMonBeginOpen(ge, zipPath, sampleRate);
 	if (!m->driver->Open(m->hard, ge, &fs, titleCode)) {
 		CEmuZipFsClose(&fs);
@@ -43,10 +46,12 @@ int CEmuF3Open(CEmuF3* m, const CEmuGameEntry* ge, const wchar_t* zipPath, unsig
 	CEmuZipFsClose(&fs);
 
 	m->ready = 1;
+	/* カタログ subtype から FmMon チップ配置を決める */
 	CEmuFmMonBindFromGe(ge);
 	return 1;
 }
 
+/* ドライバ／ハードを破棄する */
 void CEmuF3Close(CEmuF3* m)
 {
 	if (!m) return;
@@ -62,12 +67,14 @@ void CEmuF3Close(CEmuF3* m)
 	memset(m, 0, sizeof(*m));
 }
 
+/* ステレオ PCM を frames 分合成する */
 int CEmuF3Render(CEmuF3* m, int16_t* stereo, int frames)
 {
 	if (!m || !m->ready || !m->driver || !stereo || frames <= 0) return 0;
 	return m->driver->Render(stereo, frames);
 }
 
+/* 再生位置を sample へ移動（未対応なら 0） */
 int CEmuF3Seek(CEmuF3* m, uint64_t sample)
 {
 	if (!m || !m->driver) return 0;

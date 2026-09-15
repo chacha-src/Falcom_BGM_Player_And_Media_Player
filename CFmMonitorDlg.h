@@ -47,28 +47,28 @@ private:
 	/* .fpy ~700ms / keys-only ~750ms。短すぎると可聴前 dump を捨てて無描画 */
 	enum { HIST_SOFT = 448 };
 
-	int PollDump();
-	void ResetDumpSync();
+	int PollDump(); /* live/ring を読み可聴位置の dump を Apply */
+	void ResetDumpSync(); /* 曲切替で履歴とハンドルを捨てる */
 	void PushHistDump(const SasamiFmMonDump& d);
 	void TrimHistForHeard(uint64_t heard, uint32_t rate);
-	void ApplyDump(const SasamiFmMonDump& d);
+	void ApplyDump(const SasamiFmMonDump& d); /* フェード・dirty・行数変化 */
 	void TickFades();
 	void InvalidateDirtyRegions();
-	uint64_t HeardSample(uint32_t sampleRate);
+	uint64_t HeardSample(uint32_t sampleRate); /* 今聞こえているサンプル */
 	uint64_t AdvanceHeard(__int64 frames, uint32_t srDump);
-	int PcmRows() const;
-	int ExRows() const;
+	int PcmRows() const; /* PPZ/ADPCM/OPL3 を含む鍵盤 PCM 行 */
+	int ExRows() const;  /* FM3EX / OPM7-8 / OPL7-9 */
 	int FmRows() const;
 	int SsgRows() const;
-	int KeysOnly() const;
+	int KeysOnly() const; /* レジスタ無しで鍵盤だけ */
 	int IsMsxDump() const;
 	int IsOpmDump() const;
 	int IsOplDump() const;
 	int IsYm2610Dump() const;
 	int IsArcadePcmDump() const;
 	unsigned MsxDevMask() const;
-	unsigned ChipProfile() const;
-	unsigned ViewCaps() const;
+	unsigned ChipProfile() const; /* pad6[1] のチップ種別 */
+	unsigned ViewCaps() const;    /* KEYS/REGS/PANELS */
 	int HideRhythm() const;
 	int HasViewRegs() const;
 	int HasViewPanels() const;

@@ -1,27 +1,33 @@
 ﻿#include "StdAfx.h"
 #include "cemu_sei80bu.h"
 
+/* アドレス a の bit n */
 static inline int Bit(uint16_t a, int n) { return (a >> n) & 1; }
 
+/* bit0↔1 スワップ */
 static uint8_t BitSwap87654301(uint8_t s)
 {
 	return (uint8_t)((s & 0xfcu) | ((s & 1u) << 1) | ((s >> 1) & 1u));
 }
+/* bit2↔3 スワップ */
 static uint8_t BitSwap87654210(uint8_t s)
 {
 	return (uint8_t)((s & 0xf0u) | ((s & 0x04u) << 1) | ((s & 0x08u) >> 1)
 		| (s & 0x03u));
 }
+/* bit4↔5 スワップ */
 static uint8_t BitSwap87645310(uint8_t s)
 {
 	return (uint8_t)((s & 0xc0u) | ((s & 0x10u) << 1) | ((s & 0x20u) >> 1)
 		| (s & 0x0fu));
 }
+/* bit6↔7 スワップ */
 static uint8_t BitSwap76543210(uint8_t s)
 {
 	return (uint8_t)(((s & 0x40u) << 1) | ((s & 0x80u) >> 1) | (s & 0x3fu));
 }
 
+/* データ読込面の XOR＋bitswap */
 uint8_t CEmuSei80buData(uint16_t a, uint8_t src)
 {
 	if (Bit(a, 9) & Bit(a, 8)) src ^= 0x80;
@@ -35,6 +41,7 @@ uint8_t CEmuSei80buData(uint16_t a, uint8_t src)
 	return src;
 }
 
+/* オペコード面。データ面より XOR/swap が多い */
 uint8_t CEmuSei80buOpcode(uint16_t a, uint8_t src)
 {
 	if (Bit(a, 9) & Bit(a, 8)) src ^= 0x80;

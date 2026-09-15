@@ -6,11 +6,11 @@
 #include "../machine/cemu_np2ctx.h"
 
 enum {
-	/* Matches the Z80 PC-88 watchdog: 2s of total register stillness is never
-	   part of a live song. */
+	/* Z80 PC-88 ウォッチドッグと同じ: レジスタが 2 秒完全静止なら演奏中ではない */
 	PC98_WD_IDLE_MS = 2000
 };
 
+/* PC-98 ドライバ */
 CDriverPc98::CDriverPc98()
 	: hw_(NULL)
 	, hostRate_(44100)
@@ -30,11 +30,13 @@ CDriverPc98::CDriverPc98()
 {
 }
 
+/* 後始末 */
 CDriverPc98::~CDriverPc98()
 {
 	Close();
 }
 
+/* ROM 読込。bootcs 経路は約 1s settle。DOS は PumpCycles */
 int CDriverPc98::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned titleCode)
 {
 	if (!hw || !ge || !fs) return 0;
@@ -60,7 +62,7 @@ int CDriverPc98::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigne
 		if (!hw_->LoadRoms(fs, ge, titleCode))
 			return 0;
 		if (!hw_->isDos_) {
-			/* Bootcs: settle ~1s */
+			/* bootcs: 約 1s settle */
 			const uint64_t bootCycles = (uint64_t)cpuHz_;
 			RunUntil(hw_->cpuCycles_ + bootCycles);
 		}
@@ -70,6 +72,7 @@ int CDriverPc98::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigne
 	return 1;
 }
 
+/* ハード参照を捨てる */
 void CDriverPc98::Close()
 {
 	hw_ = NULL;
@@ -77,6 +80,7 @@ void CDriverPc98::Close()
 	triggered_ = 0;
 }
 
+/* 同一 zip の別曲を TriggerPlay で切替 */
 int CDriverPc98::OverlayTitle(unsigned titleCode)
 {
 	if (!hw_) return 0;
@@ -88,6 +92,7 @@ int CDriverPc98::OverlayTitle(unsigned titleCode)
 	return ok;
 }
 
+/* OPN クロックを CPU 比で進める */
 void CDriverPc98::TickOpn(uint64_t cpuCycles)
 {
 	if (!hw_ || !hw_->SoundChip() || cpuCycles == 0 || cpuHz_ <= 0) return;
@@ -98,6 +103,7 @@ void CDriverPc98::TickOpn(uint64_t cpuCycles)
 		hw_->SoundChip()->AdvanceClocks(opnTicks);
 }
 
+/* i286 を endCycle まで進める。DOS は PumpCycles */
 void CDriverPc98::RunUntil(uint64_t endCycle)
 {
 	if (!hw_) return;
@@ -119,10 +125,10 @@ void CDriverPc98::RunUntil(uint64_t endCycle)
 	}
 }
 
-/* Same stall watchdog as the Z80 PC-88 driver, minus the interrupt-source
-   repairs: on V30 the play trigger is a single BIOS-style call, so replaying
-   the track is the only cure a stalled rip needs. Note motion (key-ons,
-   F-num, SSG period) is the liveness signal — idle polling is not playing. */
+/* Z80 PC-88 と同じ停滞ウォッチドッグ。IRQ 源の修復は無し。V30 の再生トリガは
+   BIOS 風の 1 コールなので、止まったリップは曲の再キックが唯一の手当て。
+   生存信号はキーオン／F-num／SSG 周期。アイドルポーリングは演奏ではない。 */
+/* 無音が続くリップを再キックする（一度鳴った後は触らない） */
 void CDriverPc98::WatchdogTick()
 {
 	CChip* chip = hw_ ? hw_->SoundChip() : NULL;
@@ -141,16 +147,16 @@ void CDriverPc98::WatchdogTick()
 	if (wdSamples_ - wdLastActive_ < (uint64_t)rate * PC98_WD_IDLE_MS / 1000u)
 		return;
 	wdLastActive_ = wdSamples_;
-	/* Only while nothing has ever sounded — see CDriverPc88::WatchdogTick.
-	   Re-kicking a player that is already running restarts it from whatever
-	   state its RAM happens to hold, which is audibly worse than the silence
-	   it was trying to cure. */
+	/* 一度も鳴っていないときだけ — CDriverPc88::WatchdogTick 参照。
+	   既に動いているプレーヤを再キックすると RAM の途中状態から再開し、
+	   直そうとした無音より耳障りになる。 */
 	if (wdEverActive_ || wdReplays_ >= 4)
 		return;
 	wdReplays_++;
 	hw_->TriggerPlay(titleCode_);
 }
 
+/* int16 へ飽和 */
 static int CEmuPc98Clamp16(int v)
 {
 	if (v > 32767) return 32767;
@@ -158,6 +164,7 @@ static int CEmuPc98Clamp16(int v)
 	return v;
 }
 
+/* CPU＋OPN を進め、BEEP/OPL を混成。定期的にウォッチドッグ */
 int CDriverPc98::Render(int16_t* stereo, int frames)
 {
 	if (!hw_ || !stereo || frames <= 0 || !booted_) return 0;
@@ -199,11 +206,9 @@ int CDriverPc98::Render(int16_t* stereo, int frames)
 		chip->Render(stereo + i * 2, 1);
 		hw_->MixBeep(stereo + i * 2, 1);
 		if (opl) {
-			/* SOUND ORCHESTRA's selling point was pseudo-stereo: the OPL sits
-			   hard left and the YM2203 hard right (the manual has these
-			   swapped). The OPN render above is mono-in-both-channels, so
-			   biasing it right and the OPL left reproduces the split without
-			   needing the FM and SSG halves separated. */
+			/* SOUND ORCHESTRA の売りは疑似ステレオ: OPL が左、YM2203 が右
+			   （マニュアルは左右逆）。上の OPN 合成は両 ch モノなので、
+			   OPN を右寄り・OPL を左に振ると分離を再現できる。 */
 			int16_t o[2] = { 0, 0 };
 			opl->Render(o, 1);
 			int16_t* p = stereo + i * 2;
@@ -217,6 +222,7 @@ int CDriverPc98::Render(int16_t* stereo, int frames)
 	return frames;
 }
 
+/* Seek は未対応 */
 int CDriverPc98::Seek(uint64_t sample)
 {
 	(void)sample;

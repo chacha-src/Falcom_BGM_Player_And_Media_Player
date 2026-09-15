@@ -33,14 +33,14 @@ public:
 
 	void PumpSyncNow(); // timerp から。同期は毎ティック、UpdateWindow は Ms2DrawDue 側
 	void IdlePulse();   // OnIdle / タイマ2。CPU 余裕があるときだけ PumpIdle
-	void ResetPlaybackState();
+	void ResetPlaybackState(); /* 再生停止・曲切替でパートとカーソルを初期化 */
 	void DetachForDestroy();
 	void PaletteApplySoft3D();
 	void PersistSoft3D();
 	void LayoutHelpBtn();
 	void ShowHelpSheet();
 	GdiSoft3D::Cam m_cam;
-	void ApplyMapForce(int force);
+	void ApplyMapForce(int force); /* GS/XG マップ強制 */
 	void ReloadCurrentMidi();
 	const wchar_t* LoadedMidiPath() const { return m_loadedPath; }
 	const wchar_t* LoadedSourcePath() const { return m_sourcePath; }

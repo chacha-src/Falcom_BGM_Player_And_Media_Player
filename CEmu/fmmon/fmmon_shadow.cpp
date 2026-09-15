@@ -91,12 +91,12 @@ static void EnsureCs(void)
 		InitializeCriticalSection(&s_cs);
 }
 
-/* SegaPCM freq (addr delta/tick) → MIDI in piano range A0–C8.
-   Absolute Hz mapping pushed notes to O10+ so DrawPiano108 blanked them. */
+/* SegaPCM freq (addr delta/tick) → ピアノ範囲 A0–C8 の MIDI。
+   絶対 Hz だと O10+ になり DrawPiano108 が空になる。 */
 static int SegaPcmFreqToMidi(unsigned freq)
 {
 	if (freq < 1u) freq = 1u;
-	/* ~0x28 ≈ unity for speech/drum loops @ clock/64 */
+	/* ~0x28 ≈ スピーチ/ドラムループの等倍 @ clock/64 */
 	const double midi = 60.0 + 12.0 * (log((double)freq / 40.0) / log(2.0));
 	int m = (int)floor(midi + 0.5);
 	if (m < 21) m = 21;
@@ -150,7 +150,7 @@ static int MidiFromSsgPeriod(uint16_t period)
 {
 	period &= 0x0FFF;
 	if (period == 0) return -1;
-	/* OPN(A) SSG: master/32; stand-alone AY/MSX: clock/16. */
+	/* OPN(A) SSG: master/32。単独 AY/MSX: clock/16。 */
 	const double div = (s_msxDevMask != 0 || s_opnaLayout < 0) ? 16.0 : 32.0;
 	const double freq = (double)s_ssgClock / (div * (double)period);
 	if (freq < 8.0) return -1;
@@ -328,9 +328,9 @@ void FmMonShadowSetKeysProfile(unsigned profile)
 
 void FmMonShadowSetOpmRegSnapshot(const unsigned char* regs256)
 {
-	/* Reg image only — do NOT derive key gates from $08 here.
-	   $08 is a write strobe for one channel; re-reading it on every KC/TL
-	   write collapsed ys368snd to a single stuck key. */
+	/* レジスタ画像だけ — ここで $08 からキーゲートを導かない。
+	   $08 は 1ch の書き込みストローブ。KC/TL のたびに読み直すと
+	   ys368snd が 1 キー張り付きになる。 */
 	FmMonShadowSetOpmRegSnapshotEx(regs256, -1);
 }
 
@@ -339,7 +339,7 @@ void FmMonShadowSetOpmRegSnapshotEx(const unsigned char* regs256, int keyRegOrNe
 	if (!regs256) return;
 	EnsureCs();
 	EnterCriticalSection(&s_cs);
-	/* Preserve GA20 shadow in bank1 ($100+) across OPM snapshot refreshes. */
+	/* OPM snapshot 更新でも bank1 ($100+) の GA20 シャドウを残す。 */
 	uint8_t ga20Keep[0x20];
 	uint8_t ga20BitsKeep[4];
 	const int keepGa20 = s_ga20Seen;
@@ -347,11 +347,10 @@ void FmMonShadowSetOpmRegSnapshotEx(const unsigned char* regs256, int keyRegOrNe
 		memcpy(ga20Keep, s_regs + 0x100, sizeof(ga20Keep));
 		memcpy(ga20BitsKeep, s_bits + 32, sizeof(ga20BitsKeep));
 	}
-	/* Same for the X1's separate AY: its shadow lives at $00-$0F, which is
-	   also where OPM $00-$0F land. Letting the snapshot win there fed the SSG
-	   gate/note math OPM control bytes (reg $08 key-on read as channel A
-	   volume), so the SSG rows keyed at random. OPM only uses $01/$08/$0F in
-	   that range, none of which the register panel shows. */
+	/* X1 の別 AY も同じ。シャドウは $00-$0F にあり、OPM $00-$0F と重なる。
+	   snapshot が勝つと SSG のゲート/音程計算に OPM 制御バイトが入り
+	   ($08 キーオンが chA 音量として読まれ)、SSG 行がランダムにキーオンする。
+	   OPM がその帯で使うのは $01/$08/$0F だけで、レジスタパネルには出ない。 */
 	uint8_t ayKeep[0x10];
 	uint8_t ayBitsKeep[2];
 	const int keepAy = s_aySeen;
@@ -563,8 +562,8 @@ void FmMonShadowWriteReg(unsigned addr, unsigned data)
 				s_adpcmMidi = 0xFF;
 				s_flushUrgent = 1;
 			} else if (on) {
-				/* Re-key with same 0x80/0xA0 still counts — drivers often
-				   rewrite execute without clearing first. */
+				/* 同じ 0x80/0xA0 の再キーも数える — ドライバはクリアせず
+				   execute を書き直すことが多い。 */
 				s_adpcmHit++;
 				s_adpcmPulse = 1;
 				s_adpcmSeen = 1;
@@ -583,8 +582,8 @@ void FmMonShadowWriteReg(unsigned addr, unsigned data)
 				RefreshAdpcmMidi();
 		}
 	} else if (addr < 0x10) {
-		/* SSG: gate needs tone/noise enable AND level (vol>0 or envelope).
-		   Period-only made SSG3 look stuck-on when drivers mute via R8-RA. */
+		/* SSG: ゲートは tone/noise enable とレベル (vol>0 またはエンベロープ) が要る。
+		   周期だけだと、ドライバが R8-RA でミュートしたとき SSG3 が張り付く。 */
 		for (int i = 0; i < 3; i++) {
 			const uint16_t per = (uint16_t)(s_regs[i * 2] | ((s_regs[i * 2 + 1] & 0x0F) << 8));
 			const int mid = MidiFromSsgPeriod(per);
@@ -606,7 +605,7 @@ void FmMonShadowWriteReg(unsigned addr, unsigned data)
 			s_midiSsg[i] = (on && mid >= 0) ? (uint8_t)mid : (uint8_t)0xFF;
 		}
 	} else if ((addr & 0xFF) >= 0xA0 && (addr & 0xFF) <= 0xAE) {
-		/* fnum update while keyed — refresh midi */
+		/* キーオン中の fnum 更新 — midi を刷新 */
 		const int fmMax = (s_opnaLayout == 2) ? 4 : 6;
 		for (int fm = 0; fm < fmMax; fm++) {
 			if (!s_keyFm[fm]) continue;
@@ -642,7 +641,7 @@ void FmMonShadowEnterKeysOnly(unsigned profile)
 	s_opmRegsValid = 0;
 	s_opnaLayout = -1;
 	s_keysProfile = profile & 0xFFu;
-	s_auxRegsValid = 1; /* enable VIEW_REGS/PANELS for PC/AT soft modes */
+	s_auxRegsValid = 1; /* PC/AT ソフトモードで VIEW_REGS/PANELS を出す */
 	s_dirty = 1;
 	LeaveCriticalSection(&s_cs);
 }
@@ -703,9 +702,9 @@ void FmMonShadowPcmNote(int ch, int midiNote, int on)
 	if (ch < 0 || ch >= SASAMI_FMMON_PCM_MAX) return;
 	EnsureCs();
 	EnterCriticalSection(&s_cs);
-	/* Ensure arcade keys-only path stays armed (GX Reset+bind race).
-	   Skip if s_opnaLayout >= 0 (hybrid OPN+PCM like YM2203+SegaPCM) to keep FM rows.
-	   Same for live YM2151: OKI/YMZ pulses must not drop the OPM keyboard. */
+	/* アーケード鍵盤専用経路を武装したまま (GX Reset+bind の競合)。
+	   s_opnaLayout >= 0 (YM2203+SegaPCM のようなハイブリッド) は FM 行を残す。
+	   ライブ YM2151 も同じ: OKI/YMZ パルスで OPM 鍵盤を落とさない。 */
 	if (s_opnaLayout < 0 && !s_opmRegsValid && (s_keysProfile == SASAMI_FMMON_KEYS_RF5C
 		|| s_keysProfile == SASAMI_FMMON_KEYS_C352
 		|| s_keysProfile == SASAMI_FMMON_KEYS_QSOUND
@@ -877,8 +876,8 @@ void FmMonShadowFlush(int force)
 		FmMonShadowFlushKeysOnly(force);
 		return;
 	}
-	/* CEmu OPM (X1/X68k/AC): never fall through to OPNA-shaped dump.
-	   Bind seeds empty snapshot; writes refresh via SetOpmRegSnapshot. */
+	/* CEmu OPM (X1/X68k/AC): OPNA 形 dump へ落とさない。
+	   Bind は空 snapshot を種にし、書き込みは SetOpmRegSnapshot で更新。 */
 	if (s_opnaLayout < 0 && !s_oplMode && !s_msxDevMask && !s_snMode
 		&& (s_opmRegsValid || s_keysProfile == SASAMI_FMMON_KEYS_MDX)) {
 		s_keysOnly = 1;
@@ -946,11 +945,11 @@ void FmMonShadowFlush(int force)
 			d.pcmNote[bi] = s_adpcmOn ? s_adpcmMidi : (uint8_t)0xFF;
 			strncat_s(extras, "+ADPCM-B", _TRUNCATE);
 		}
-		/* no OPNA rhythm row */
+		/* OPNA リズム行は出さない */
 		d.rhythmKey = 0;
 		d.rhythmPulse = 0;
 	} else if (s_opnaLayout == 1 && s_adpcmSeen && !s_oplMode && !s_msxDevMask && !s_snMode) {
-		/* OPNA ADPCM-B only when actually used (not every OPNA dump). */
+		/* OPNA ADPCM-B は実際に使ったときだけ (全 OPNA dump ではない)。 */
 		d.dumpFlags = (uint8_t)(d.dumpFlags | SASAMI_FMMON_FLAG_ADPCM);
 		if (d.pcmCount < 1) d.pcmCount = 1;
 		d.pcmOn[0] = s_adpcmOn;
@@ -993,7 +992,7 @@ void FmMonShadowFlush(int force)
 	} else {
 		d.pad6[2] = (uint8_t)(SASAMI_FMMON_VIEW_KEYS
 			| SASAMI_FMMON_VIEW_REGS | SASAMI_FMMON_VIEW_PANELS);
-		/* Hybrid OPN+SegaPCM: tag profile so UI labels SPCM not CH×16. */
+		/* ハイブリッド OPN+SegaPCM: プロファイルを付け UI が SPCM と出す (CH×16 ではない)。 */
 		if (s_keysProfile == SASAMI_FMMON_KEYS_SEGAPCM) {
 			d.pad6[1] = (uint8_t)SASAMI_FMMON_KEYS_SEGAPCM;
 			if (s_pcmCount > 0 && s_pcmCount <= 8)
@@ -1053,7 +1052,7 @@ void FmMonShadowFlushKeysOnly(int force)
 	}
 	const int arcade = ArcIsProfile(prof);
 
-	/* Clear OPNA-shaped slots; non-MDX profiles use PCM rows only. */
+	/* OPNA 形スロットをクリア。非 MDX プロファイルは PCM 行だけ。 */
 	memset(d.keyOnFm, 0, sizeof(d.keyOnFm));
 	memset(d.keyOnHitCnt, 0, sizeof(d.keyOnHitCnt));
 	memset(d.keyMidi, 0xFF, sizeof(d.keyMidi));

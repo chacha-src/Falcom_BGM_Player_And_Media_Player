@@ -15,10 +15,8 @@ enum {
 	VEC_SOUND = 0x08,
 	RTC_HZ = 600,
 	VRTC_MILLIHZ = 56400,
-	/* Longest silence a real PC-88 track holds mid-song is well under this;
-	   past it the rip has stopped rather than resting. Players rewrite F-num
-	   for vibrato every few frames, so 2s of total register stillness is
-	   never part of a live song. */
+	/* 実 PC-88 曲が曲中に無音で持つ最長はこれ未満。超えたら休みではなく停止。
+	   プレーヤは数フレームごとに F-num をビブラート用に書き換えるので、レジスタが 2 秒完全静止なら演奏中ではない。 */
 	WD_IDLE_MS = 2000
 };
 
@@ -60,6 +58,7 @@ CDriverPc88::~CDriverPc88()
 	Close();
 }
 
+/* ROM を載せ、ブートして曲を起動する */
 int CDriverPc88::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned titleCode)
 {
 	if (!hw || !ge || !fs) return 0;
@@ -92,10 +91,8 @@ int CDriverPc88::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigne
 	replayPending_ = 0;
 	if (!hw_->LoadRoms(fs, ge, titleCode))
 		return 0;
-	/* Boot: let PATCH reach poll loop. Cap at ~1.0s. feris/gunyu clobber
-	   page0 if left in DRIVER — snapshot/restore only for I=01/F3.
-	   JR-entry titles (ashe/andrgyns/…) need the full settle; early-exit
-	   on poll+iff1 cut their DRIVER init short. */
+	/* ブート: PATCH がポーリングへ達するまで。上限約 1.0s。feris/gunyu は DRIVER に残すと page0 を壊す — I=01/F3 だけスナップショット。
+	   JR 入口（ashe/andrgyns 等）はフル settle が要る。poll+iff1 の早期退出は DRIVER 初期化を切る。 */
 	{
 		Ay_Cpu* cpu = hw_->Cpu();
 		uint8_t* mem = hw_->Mem();
@@ -112,9 +109,8 @@ int CDriverPc88::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigne
 			RunUntil((uint64_t)cpu->time64() + chunk);
 			int nowPoll = hw_->CmdPollPc();
 			if (hadPoll && nowPoll < 0) {
-				/* Only Wing-class (I=F3 + snd Cxxx + high CALL, or mugen3 I=01).
-				   Bare I=F3 restore false-triggered pocky2 and left it at poll
-				   with a half-inited sequencer (key-on=0). */
+				/* Wing 系のみ（I=F3 + 音源 Cxxx + 高い CALL、または mugen3 I=01）。
+				   素の I=F3 復元は pocky2 を誤爆し、半初期化シーケンサのままポーリングに残した（キーオン=0）。 */
 				const uint16_t snd = Ay_CpuIm2Target(cpu, (uint8_t)VEC_SOUND);
 				if (cpu->r.pc >= 0x80
 					&& ((cpu->r.i == 0xF3 && snd >= 0xC000 && hw_->NeedsBootEiPulse())
@@ -126,12 +122,9 @@ int CDriverPc88::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigne
 				}
 				break;
 			}
-			/* JR-entry: stop once poll is live, except ashe (DRIVER@7800)
-			   which needs the full ~1s settle — early exit keeps peak=0.
-			   Also: poll bytes are static in PATCH; do not stop while PC is
-			   still before the poll (lizard88/gineiden/gallforc decrypt).
-			   iceclimb88: VRTC during settle can enter the cmd handler
-			   (pc past FE/CP); stopping there left B816=FF forever. */
+			/* JR 入口: ポーリングが生きたら止める。ashe（DRIVER@7800）だけフル約 1s settle — 早期退出は peak=0。
+			   PATCH 内の poll バイトは静的。PC が poll より前なら止めない（lizard88/gineiden/gallforc 復号）。
+			   iceclimb88: settle 中の VRTC がコマンドハンドラへ入り（pc が FE/CP を過ぎる）、そこで止めると B816=FF のまま。 */
 			if (nowPoll >= 0x80
 				&& cpu->r.pc >= (unsigned)nowPoll
 				&& cpu->r.pc < (unsigned)nowPoll + 8)
@@ -139,13 +132,12 @@ int CDriverPc88::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigne
 			if (nowPoll >= 0 && cpu->r.pc < 0x80) {
 				if (jrEntry) {
 					if (mem[0x7800] == 0xC3)
-						continue; /* full settle */
+						continue; /* フル settle */
 					if (mem[0x0100] == 0x31 && step < 24)
 						continue;
 					if ((int)cpu->r.pc < nowPoll)
 						continue;
-					/* Require PC exactly on IN A,(00) — JR Z disp FB must not
-					   be treated as an opcode. */
+					/* PC が正確に IN A,(00) のときだけ — JR Z の disp FB をオペコード扱いしない */
 					if ((int)cpu->r.pc != nowPoll)
 						continue;
 					break;
@@ -154,7 +146,7 @@ int CDriverPc88::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigne
 					break;
 			}
 		}
-		/* If settle ended mid cmd-handler, snap back to the poll wait. */
+		/* settle がコマンドハンドラ途中で終わったら poll 待ちへスナップバック */
 		if (cpu && mem && pollAt >= 0x80
 			&& cpu->r.pc > (unsigned)pollAt + 4
 			&& cpu->r.pc < (unsigned)pollAt + 0x60) {
@@ -170,19 +162,12 @@ int CDriverPc88::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigne
 	}
 	hw_->FixupIm2AfterBoot();
 	hw_->PruneDeadTickSources();
-	/* lizard88: PATCH plants JP 00B2 at A3DF after decrypt. Re-assert
-	   before cmd=1 or A3B0 consumes the song in one CALL. */
+	/* lizard88: PATCH は復号後 A3DF に JP 00B2 を植える。cmd=1 の前に再アサートしないと A3B0 が 1 CALL で曲を消費する */
 	if (hw_->NeedsLizardArm())
 		hw_->ArmLizardOpnTimer();
 	hw_->ArmPwmajan2();
-	/* Wing destge/hadou-class: still DI after settle with I=F3 + sound vec
-	   in Cxxx + high CALL under DI (NeedsBootEiPulse). Bare I=F3 (pocky2)
-	   must not match. gunyu has FB in PATCH so ends settle with iff1=1.
-	   scheme OPNA: PATCH@9000 / I=0x80 — NeedsBootEiPulse or IsSchemeOpna. */
-	/* Wing destge/hadou-class: still DI after settle with I=F3 + sound vec
-	   in Cxxx + high CALL under DI (NeedsBootEiPulse). Bare I=F3 (pocky2)
-	   must not match. gunyu has FB in PATCH so ends settle with iff1=1.
-	   scheme OPNA: PATCH@9000 / I=0x80 — NeedsBootEiPulse or IsSchemeOpna. */
+	/* Wing destge/hadou 系: settle 後も DI。I=F3 + 音源ベクタ Cxxx + DI 下の高い CALL（NeedsBootEiPulse）。素の I=F3（pocky2）はマッチさせない。gunyu は PATCH に FB があり settle 終了時 iff1=1。scheme OPNA: PATCH@9000 / I=0x80 — NeedsBootEiPulse または IsSchemeOpna。 */
+	/* Wing destge/hadou 系: settle 後も DI。I=F3 + 音源ベクタ Cxxx + DI 下の高い CALL（NeedsBootEiPulse）。素の I=F3（pocky2）はマッチさせない。gunyu は PATCH に FB があり settle 終了時 iff1=1。scheme OPNA: PATCH@9000 / I=0x80 — NeedsBootEiPulse または IsSchemeOpna。 */
 	{
 		Ay_Cpu* cpu = hw_->Cpu();
 		const uint16_t snd = cpu ? Ay_CpuIm2Target(cpu, (uint8_t)VEC_SOUND) : 0;
@@ -195,7 +180,7 @@ int CDriverPc88::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigne
 					&& hw_->NeedsBootEiPulse())
 				|| (snd != 0 && cpu->r.i == 0x01 && cpu->r.pc >= 0x200 && cpu->r.pc < 0x1000)
 				|| schemeBootEi)) {
-			/* INT2@8350: if MUS2 never planted I:08, point sound IRQ there. */
+			/* INT2@8350: MUS2 が I:08 を植えなければ音源 IRQ をそこに向ける */
 			if (schemeBootEi && snd == 0) {
 				uint8_t* mem = hw_->Mem();
 				if (mem && mem[0x8350] == 0xC3) {
@@ -211,14 +196,14 @@ int CDriverPc88::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigne
 				cpu->r.iff1 = 1;
 				RunUntil((uint64_t)cpu->time64() + (uint64_t)cpuHz_ / 32);
 				if (cpu->r.pc < 0x80)
-					break; /* reached PATCH poll @0 */
+					break; /* PATCH poll @0 に到達 */
 				if (hw_->IsSchemeOpna()
 					&& cpu->r.pc >= 0x9000 && cpu->r.pc < 0x9080)
-					break; /* scheme poll @9000 */
+					break; /* scheme のポーリング @9000 */
 			}
 			forceEiBoot_ = 0;
 		}
-		/* Snap: Wing after EI pulse; scheme always park on 9000 poll. */
+		/* スナップ: Wing は EI パルス後。scheme は常に 9000 poll へパーク */
 		if ((didEiPulse && cpu && cpu->r.pc >= 0x80 && !hw_->IsSchemeOpna())
 			|| (hw_->IsSchemeOpna() && cpu && cpu->r.pc >= 0xA000)) {
 			uint8_t* mem = hw_->Mem();
@@ -238,7 +223,7 @@ int CDriverPc88::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigne
 			}
 		}
 	}
-	/* Scheme: MUS2 OPN port mailbox must stay 32/44/46 after boot. */
+	/* Scheme: MUS2 の OPN ポートメールボックスはブート後も 32/44/46 のまま */
 	if (hw_->IsSchemeOpna()) {
 		uint8_t* mem = hw_->Mem();
 		if (mem) {
@@ -247,10 +232,7 @@ int CDriverPc88::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigne
 			mem[0xf0bd] = 0x46;
 		}
 	}
-	/* Final park on poll wait — VRTC during settle/EI-pulse can leave PC
-	   in the cmd dispatcher (iceclimb88 B816 stuck at ROM FF). Only the
-	   IN A,(00) address is safe; sitting on the JR Z displacement (FB)
-	   executes EI as an opcode and skips the mailbox plant. */
+	/* 最終パークは poll 待ち — settle/EI パルス中の VRTC が PC をコマンドディスパッチャに残す（iceclimb88 B816 が ROM FF）。安全なのは IN A,(00) 番地だけ。JR Z の disp（FB）にいると EI がオペコード実行されメールボックス植込を飛ばす。 */
 	{
 		Ay_Cpu* cpu = hw_->Cpu();
 		uint8_t* mem = hw_->Mem();
@@ -265,17 +247,13 @@ int CDriverPc88::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigne
 				}
 			}
 		}
-		/* lizard88's (A572) is deliberately left alone. The RET Z that reads
-		   it sits at A3A3, in A376's epilogue after CALL A3B0 has already
-		   played the song, so a zero there never blocked the player; what it
-		   does gate is the stop routine, where zero is the branch that
-		   actually writes OPN 07-0E and silences the chip. See
-		   CHardPc88::ArmLizardOpnTimer. */
+		/* lizard88 の (A572) は意図的に触らない。それを読む RET Z は A3A3、CALL A3B0 が既に曲を鳴らした A376 エピローグ。0 でもプレーヤは止まらない。ゲートするのは停止ルーチンで、0 の分岐が OPN 07-0E を書いてチップを mute する。CHardPc88::ArmLizardOpnTimer 参照。 */
 	}
 	booted_ = 1;
 	return 1;
 }
 
+/* ハード参照を捨てる */
 void CDriverPc88::Close()
 {
 	hw_ = NULL;
@@ -289,6 +267,7 @@ void CDriverPc88::Close()
 	capturing_ = 0;
 }
 
+/* 同一 zip の別曲をライブで切替する */
 int CDriverPc88::OverlayTitle(unsigned titleCode)
 {
 	if (!hw_) return 0;
@@ -298,6 +277,7 @@ int CDriverPc88::OverlayTitle(unsigned titleCode)
 	return 1;
 }
 
+/* OPN クロックを CPU 比で進める */
 void CDriverPc88::TickOpn(uint64_t cpuCycles)
 {
 	if (!hw_ || !hw_->SoundChip() || cpuCycles == 0) return;
@@ -308,13 +288,13 @@ void CDriverPc88::TickOpn(uint64_t cpuCycles)
 		hw_->SoundChip()->AdvanceClocks(opnTicks);
 }
 
+/* 期限の IRQ／NMI を届ける */
 void CDriverPc88::DeliverIrqs(uint64_t now)
 {
 	if (!hw_ || !hw_->Cpu()) return;
 	Ay_Cpu* cpu = hw_->Cpu();
 	CChip* chip = hw_->SoundChip();
-	/* castle/castleex PROG2 song-arm sets I=$1A and vectors at $1A04/$1A08.
-	   Do NOT force I=$FF — that orphans the ISR page and mutes OPN. */
+	/* castle/castleex PROG2 曲武装は I=$1A、ベクタ $1A04/$1A08。I=$FF に強制しない — ISR ページが孤立し OPN が mute する。 */
 	int vrtcDue = hw_->useVrtc && now >= nextVrtc_;
 	int rtcDue = hw_->useRtc && now >= nextRtc_;
 	int opnDue = chip && chip->Irq()
@@ -325,9 +305,7 @@ void CDriverPc88::DeliverIrqs(uint64_t now)
 		if (opnDue && Ay_CpuIm2Target(cpu, VEC_SOUND) == 0) opnDue = 0;
 	}
 	if (cpu->r.iff1 && (vrtcDue || rtcDue || opnDue)) {
-		/* Prefer FM sound IRQ over VRTC/RTC. KOEI OPN (valis2) runs Timer B
-		   near the VRTC rate; always taking VRTC first starved vector 08 and
-		   halved tempo. OPNA is less affected because Timer A is faster. */
+		/* FM 音源 IRQ を VRTC/RTC より優先。KOEI OPN（valis2）の Timer B は VRTC に近く、常に VRTC を先に取るとベクタ 08 が飢えてテンポが半減。OPNA は Timer A が速いので影響が小さい。 */
 		const uint8_t vector = opnDue ? (uint8_t)VEC_SOUND
 			: vrtcDue ? (uint8_t)VEC_VRTC
 			: (uint8_t)VEC_RTC;
@@ -335,16 +313,12 @@ void CDriverPc88::DeliverIrqs(uint64_t now)
 			if (vector == VEC_VRTC) nextVrtc_ += vrtcPeriod_;
 			else if (vector == VEC_RTC) nextRtc_ += rtcPeriod_;
 			else if (vector == VEC_SOUND && chip) {
-				/* hoot: almost all PC88 drivers raise_IRQ then lower_IRQ
-				   immediately (edge). Keeping the line high until OUT E4
-				   re-entered the ISR after EI and rushed mucom tempo.
-				   YM status flags stay sticky for KOEI; E4 still acks too. */
+				/* hoot: ほぼ全 PC88 ドライバは raise_IRQ の直後に lower_IRQ（エッジ）。線を OUT E4 まで High に保つと EI 後に ISR 再入し mucom テンポが走る。YM ステータスは KOEI 用に sticky。E4 も ack。 */
 				chip->AckIrq();
 			}
 		}
 	} else {
-		/* While DI (inside ISR), hold the due flags — do NOT slide the
-		   schedule forward or IRQs are lost / delayed incorrectly. */
+		/* DI 中（ISR 内）は期限フラグを保持 — 予定を前へ滑らせない。IRQ が落ちる／遅れる。 */
 		if (cpu->r.iff1) {
 			if (rtcDue) nextRtc_ = now + rtcPeriod_;
 			if (vrtcDue) nextVrtc_ = now + vrtcPeriod_;
@@ -352,19 +326,12 @@ void CDriverPc88::DeliverIrqs(uint64_t now)
 	}
 }
 
-/* TriggerPlay hands the song to the guest and then runs it for as long as the
-   PATCH command drain needs — a full second for most rips, because `cmd` is
-   only cleared by the host after the loop, so the early-out rarely fires. The
-   sequencer is live for all of it: 676 of 867 catalog titles key-on inside
-   that window. AdvanceClocks moves timers only (PCM comes from Render), so
-   every one of those notes used to be played into a chip nobody sampled, and
-   the track appeared to start ~1s in. Render the window instead of dropping
-   it, and hand it to the caller ahead of the live samples.
+/* TriggerPlay は曲をゲストへ渡し、PATCH コマンドドレインの間走らせる — 大半のリップは丸 1 秒。cmd はループ後にホストがクリアするので早期退出は稀。その間シーケンサは生きていて、カタログ 867 曲中 676 がこの窓でキーオンする。AdvanceClocks はタイマだけ（PCM は Render）。誰もサンプルしないチップへ鳴り、曲は約 1s から始まったように見えた。窓を捨てず合成し、ライブサンプルより先に渡す。
 
-   Silent head is trimmed in EndLeadCapture, so a rip whose kick is pure init
-   (1942_88 drains 8s without a note) does not gain a silent intro. */
+   無音先頭は EndLeadCapture で切る。キックが純初期化のリップ（1942_88 は 8s ドレインでノート無し）に無音イントロを足さない。 */
 enum { LEAD_MAX_SECONDS = 16 };
 
+/* CDriverPc88::BeginLeadCapture の実装 */
 void CDriverPc88::BeginLeadCapture()
 {
 	if (!hw_ || !hw_->SoundChip() || hostRate_ < 1) return;
@@ -372,6 +339,7 @@ void CDriverPc88::BeginLeadCapture()
 	capAcc_ = 0;
 }
 
+/* CDriverPc88::CaptureLead の実装 */
 void CDriverPc88::CaptureLead(uint64_t cpuCycles)
 {
 	if (!capturing_ || cpuCycles == 0) return;
@@ -383,7 +351,7 @@ void CDriverPc88::CaptureLead(uint64_t cpuCycles)
 		if (leadLen_ + 2 > leadCap_) {
 			const int limit = hostRate_ * 2 * LEAD_MAX_SECONDS;
 			if (leadCap_ >= limit) {
-				capturing_ = 0; /* pathological drain: stop growing */
+				capturing_ = 0; /* 異常に長いドレイン: 成長を止める */
 				return;
 			}
 			int want = leadCap_ ? leadCap_ * 2 : hostRate_ * 2 / 4;
@@ -401,26 +369,20 @@ void CDriverPc88::CaptureLead(uint64_t cpuCycles)
 	}
 }
 
-/* Last kick's recovered opening, for the head-loss probe. Global for the same
-   reason as the watchdog counters: one title renders at a time in the probes. */
+/* 直近キックが拾ったオープニング（先頭欠落プローブ用）。ウォッチドッグカウンタと同じく、プローブは同時 1 曲なのでグローバル。 */
 static unsigned s_leadFrames = 0;
 static unsigned s_leadTrimmed = 0;
 unsigned CEmuPc88LeadFrames() { return s_leadFrames; }
 unsigned CEmuPc88LeadTrimmedFrames() { return s_leadTrimmed; }
 
+/* CDriverPc88::EndLeadCapture の実装 */
 void CDriverPc88::EndLeadCapture()
 {
 	capturing_ = 0;
 	s_leadFrames = (unsigned)(leadLen_ / 2);
 	s_leadTrimmed = 0;
 	if (leadLen_ <= 0) return;
-	/* Peak-to-peak per block, not |sample|: an SSG channel left with volume
-	   set but mixer off holds a DC offset that is inaudible but never zero,
-	   and a per-block p2p reads that plateau as the silence it sounds like.
-	   The block where such an offset steps does count as loud, so a rip can
-	   keep a fraction of a second of quiet lead — that is the deliberate
-	   direction to err in. Requiring sustained level instead threw away
-	   navitune's few-ms opening click, which is all that rip produces. */
+	/* ブロック内 p2p。|sample| ではない。SSG が音量だけ残しミキサ OFF だと聞こえない DC が 0 にならず、p2p はその台地を無音と読む。オフセットが段差になるブロックは大きいので、リップは一瞬の静かなリードを残せる — そちらへ誤るのが意図。持続レベル必須にすると navitune の数 ms オープニングクリック（それだけが出力）が消えた。 */
 	const int block = 512 * 2;
 	const int thr = 96;
 	int firstLoud = -1;
@@ -439,13 +401,14 @@ void CDriverPc88::EndLeadCapture()
 	}
 	if (firstLoud < 0) {
 		s_leadTrimmed = (unsigned)((leadLen_ - leadPos_) / 2);
-		leadLen_ = leadPos_; /* nothing but init silence */
+		leadLen_ = leadPos_; /* 初期化無音だけ */
 		return;
 	}
 	s_leadTrimmed = (unsigned)((firstLoud - leadPos_) / 2);
 	leadPos_ = firstLoud;
 }
 
+/* CDriverPc88::DrainLead の実装 */
 int CDriverPc88::DrainLead(int16_t* stereo, int frames)
 {
 	if (leadPos_ >= leadLen_) {
@@ -466,6 +429,7 @@ int CDriverPc88::DrainLead(int16_t* stereo, int frames)
 	return n;
 }
 
+/* CPU を endCycle まで進める */
 void CDriverPc88::RunUntil(uint64_t endCycle)
 {
 	if (!hw_ || !hw_->Cpu()) return;
@@ -477,9 +441,7 @@ void CDriverPc88::RunUntil(uint64_t endCycle)
 		hw_->GuardHardrankPc();
 		const uint64_t now = (uint64_t)cpu->time64();
 		DeliverIrqs(now);
-		/* tf88sr PATCH play HALTs waiting for RTC; without a wake advance
-		   Ay_Cpu HALT only burns the remaining time-slice and retries the
-		   same PC, so the post-HALT play CALL never runs. */
+		/* tf88sr PATCH play は RTC 待ちで HALT。起こさず進めると Ay_Cpu HALT は残りスライスを燃やすだけ同じ PC を再試行し、HALT 後の play CALL が走らない。 */
 		uint8_t* mem = hw_->Mem();
 		if (mem && mem[cpu->r.pc] == 0x76) {
 			uint64_t wake = endCycle;
@@ -503,22 +465,20 @@ void CDriverPc88::RunUntil(uint64_t endCycle)
 	}
 }
 
-/* PATCH command poll — `IN A,(00) / OR A / JR Z,-` in the page-0 stub. */
+/* PATCH コマンドポーリング — page0 stub の `IN A,(00) / OR A / JR Z,-` */
 int CDriverPc88::FindPollLoop() const
 {
 	return hw_ ? hw_->CmdPollPc() : -1;
 }
 
-/* A replay only lands if the guest is sitting in that poll. When a stalled rip
-   has wandered off instead — runaway PC, or a player idle loop it never leaves
-   — park it back at the poll with a usable stack first. */
+/* 再キックはゲストがその poll にいるときだけ着地する。止まったリップが外へ迷った（暴走 PC、抜けないアイドル）ときは、先に使えるスタックで poll へ戻す。 */
 void CDriverPc88::Unwedge()
 {
 	Ay_Cpu* cpu = hw_ ? hw_->Cpu() : NULL;
 	if (!cpu) return;
 	const int pollAt = FindPollLoop();
 	if (pollAt < 0) return;
-	/* Already in the page-0 stub or sitting on the Falcom E027 poll. */
+	/* 既に page0 stub、または Falcom E027 poll にいる */
 	if (pollAt < 0x80 && cpu->r.pc < 0x80) return;
 	if (pollAt >= 0x80 && (int)cpu->r.pc >= pollAt && (int)cpu->r.pc < pollAt + 8)
 		return;
@@ -531,8 +491,7 @@ void CDriverPc88::Unwedge()
 	hw_->cmd = 0;
 }
 
-/* Song start. Split out of Render so the stall watchdog can re-kick a rip
-   exactly the way it was first started. */
+/* 曲開始。Render から分離し、停滞ウォッチドッグが初回と同じキックを再発行できるようにする */
 void CDriverPc88::TriggerPlay()
 {
 	Ay_Cpu* cpu = hw_ ? hw_->Cpu() : NULL;
@@ -542,36 +501,27 @@ void CDriverPc88::TriggerPlay()
 		Unwedge();
 	if (!triggered_) {
 		BeginLeadCapture();
-		/* Re-stage song at mdata/vdata in case boot clobbered it — but not
-		   when mdata sits on the PATCH/stack page. Use full titleCode_ so
-		   packed-bank offsets survive reload. */
+		/* ブートが潰した mdata/vdata を再載せ — ただし mdata が PATCH/スタックページ上ならしない。パックバンクオフセットが残るよう完全 titleCode_ を使う。 */
 		if (hw_->ShouldRestageSong())
 			hw_->LoadSongData(hw_->titleCode_);
 		hw_->ApplyFalcomPlay();
-		/* KOEI FMDRV: BGM uses play index 0 (packed CIM @4000). PCM SE
-		   titles (valis2 PCM00.. = code>=0xE0) must pass the raw code so
-		   PATCH's CP E0 path runs — forcing 0 muted ADPCM and left the
-		   guest spinning in status waits under the UI. */
+		/* KOEI FMDRV: BGM は再生添字 0（パック CIM @4000）。PCM SE タイトル（valis2 PCM00.. = code>=0xE0）は生コードを渡し PATCH の CP E0 経路を走らせる — 0 強制は ADPCM を mute し UI 下のステータス待ちで回った。 */
 		if (hw_->PackedKoei()) {
 			hw_->song = hw_->PlaySongIndex();
 			hw_->param = hw_->PlayParamIndex();
 		} else {
-			/* Match LoadRoms play-index rule (pointer-table banks → high byte). */
+			/* LoadRoms の再生添字規則に合わせる（ポインタ表バンク → 上位バイト） */
 			hw_->song = hw_->PlaySongIndex();
 			hw_->param = hw_->PlayParamIndex();
 		}
 		if (hw_->PlayKickBase()) {
-			/* Game Arts: PATCH port-play runs CALL +6 init; host then CALL
-			   player base (ISR entry). castle/castleex: ~64 host samples of
-			   cmd=1 (CALL 1033 arm) then CALL PROG2@1000. */
+			/* Game Arts: PATCH ポート再生は CALL +6 init。ホストがその後プレーヤ基点（ISR 入口）を CALL。castle/castleex: cmd=1 約 64 ホストサンプル（CALL 1033 武装）のあと CALL PROG2@1000。 */
 			const unsigned base = hw_->PlayKickBase();
-			/* N88 thexder/bokosuka: cmd=1 before kick lets PATCH port-play
-			   CALL stop (E80E) / wander into N88 and clobber F304. Kick only. */
+			/* N88 thexder/bokosuka: キック前の cmd=1 は PATCH ポート再生が CALL stop（E80E）／N88 へ迷い F304 を壊す。キックのみ。 */
 			if (hw_->NeedsDeferredRtc() && !hw_->PlayKickInitOff()) {
 				hw_->cmd = 0;
 				hw_->DirectPlayKick(base, hw_->PlayKickEi());
-				/* Wait until DEMOM/MUSIC play entry RETs to PATCH poll so
-				   channel/voice init finishes before the first RTC tick. */
+				/* DEMOM/MUSIC 再生入口が PATCH poll へ RET するまで待ち、最初の RTC tick 前にチャネル／ボイス初期化を終える */
 				for (int step = 0; step < 64; step++) {
 					RunUntil((uint64_t)cpu->time64() + (uint64_t)cpuHz_ / 64);
 					if (cpu->r.pc < 0x80)
@@ -581,10 +531,7 @@ void CDriverPc88::TriggerPlay()
 				if (hw_->NeedsPlayEi() && !cpu->r.iff1)
 					cpu->r.iff1 = 1;
 			} else if (base >= 0x40 && base < 0x100 && !hw_->PlayKickInitOff()) {
-				/* robowr88 song 1: page-0 trampoline CALL CB5A / JP CB48.
-				   cmd=1 still CALL $005B → PROG1 BA41 (zeros once PROG2 is
-				   staged). Kick only; wait until PC is back in the poll
-				   (below the trampoline at $C0), no RTC enable. */
+				/* robowr88 曲 1: page0 トランポリン CALL CB5A / JP CB48。cmd=1 はまだ CALL $005B → PROG1 BA41（PROG2 載せ後はゼロ）。キックのみ。PC が poll（トランポリン $C0 より下）に戻るまで待ち、RTC は許可しない。 */
 				hw_->cmd = 0;
 				hw_->DirectPlayKick(base, hw_->PlayKickEi());
 				for (int step = 0; step < 64; step++) {
@@ -595,12 +542,7 @@ void CDriverPc88::TriggerPlay()
 				if (hw_->NeedsPlayEi() && !cpu->r.iff1)
 					cpu->r.iff1 = 1;
 			} else if (base == 0x1000) {
-				/* castle/castleex: PROG2@1000 init then PATCH cmd=1 song arm.
-				   105D ends in CALL wipe (LD SP,$FE80 + PUSH MUSIC@F800).
-				   castle: CALL 1374 / ISR 154E / tick 1669 / enable 14F4
-				   castleex PROG2 is relocated: CALL 12DE / ISR 14B8 /
-				   tick 15D3 / enable 145E — match those by opcode, not
-				   hardcoded RAM. */
+				/* castle/castleex: PROG2@1000 初期化のあと PATCH cmd=1 で曲武装。105D は CALL wipe で終わる（LD SP,$FE80 + PUSH MUSIC@F800）。castle: CALL 1374 / ISR 154E / tick 1669 / enable 14F4。castleex PROG2 は再配置: CALL 12DE / ISR 14B8 / tick 15D3 / enable 145E — ハードコード RAM ではなくオペコードで合わせる。 */
 				uint8_t* mem = hw_->Mem();
 				if (mem && mem[0x1082] == 0xCD) {
 					const unsigned tgt = (unsigned)mem[0x1083]
@@ -675,11 +617,7 @@ void CDriverPc88::TriggerPlay()
 				cpu->r.iff1 = 1;
 			} else if (!hw_->PlayKickInitOff()
 				&& base >= 0xb000 && base < 0xe000) {
-				/* yokosuka SOUND@B5C3: PATCH cmd=1 (param!=FF) does
-				   DI; CALL SOUND+0x1BD and returns to the poll loop.
-				   Host DirectPlayKick of the same entry nested inside a
-				   short cmd RunUntil and muted FM; let PATCH finish the
-				   CALL, then EI for RTC. Effects: param=FF → (E23C). */
+				/* yokosuka SOUND@B5C3: PATCH cmd=1（param!=FF）は DI; CALL SOUND+0x1BD して poll へ戻る。ホスト DirectPlayKick で同じ入口を短い cmd RunUntil にネストすると FM が mute。PATCH に CALL を終えさせ、その後 RTC 用に EI。効果音: param=FF → (E23C)。 */
 				hw_->cmd = 1;
 				for (int step = 0; step < 256; step++) {
 					RunUntil((uint64_t)cpu->time64() + (uint64_t)cpuHz_ / 64);
@@ -698,7 +636,7 @@ void CDriverPc88::TriggerPlay()
 							break;
 					}
 				} else {
-					/* Match probe: 64 host samples at cpuHz/hostRate. */
+					/* プローブ合わせ: cpuHz/hostRate で 64 ホストサンプル */
 					RunUntil((uint64_t)cpu->time64()
 						+ (uint64_t)cpuHz_ * 64u / (uint64_t)(hostRate_ > 0 ? hostRate_ : 44100));
 				}
@@ -706,16 +644,10 @@ void CDriverPc88::TriggerPlay()
 				hw_->DirectPlayKick(base, hw_->PlayKickEi());
 			}
 		} else {
-			/* DI while PATCH consumes cmd=1. hangon88/iceclimb poll under EI;
-			   an RTC/VRTC tick between IN A,(01) and LD (mailbox),A clobbers
-			   A (0x8F→0x80) or skips the store (B816 stays ROM FF). Also
-			   clear B so ED 49 OUT (C),C with C=0 hits port 0. */
+			/* cmd=1 消費中は DI。hangon88/iceclimb は EI 下で poll。IN A,(01) と LD (mailbox),A の間の RTC/VRTC が A を壊す（0x8F→0x80）かストアを飛ばす（B816 が ROM FF）。B もクリアし、ED 49 OUT (C),C で C=0 がポート 0 を叩くようにする。 */
 			const int wantEi = cpu->r.iff1 || hw_->NeedsPlayEi();
 			uint8_t* mem = hw_->Mem();
-			/* yaksa PATCH2 polls under DI + use_vrtc; play CALL needs EI.
-			   Do NOT key this off NeedsPlayEi() — forcePlayEi titles
-			   (and makai with use_vrtc) must still drain cmd under DI or
-			   VRTC nests into the handler and parks mid-ISR. */
+			/* yaksa PATCH2 は DI + use_vrtc で poll。play CALL には EI が要る。NeedsPlayEi() をキーにしない — forcePlayEi タイトル（と use_vrtc の makai）は cmd を DI 下でドレインしないと VRTC がハンドラにネストし ISR 途中でパークする。 */
 			const int keepEiForVrtcLoad = hw_->useVrtc && !cpu->r.iff1
 				&& mem && mem[0] == 0x18;
 			if (!keepEiForVrtcLoad)
@@ -730,17 +662,14 @@ void CDriverPc88::TriggerPlay()
 					cpu2->r.sp = 0x0100;
 				}
 			}
-			/* spitfl88 only: let PATCH arm A6A9, then re-assert A824 (boot
-			   CALL A826 clears it when mid-RAM 79D7 < 0x34). Must not run for
-			   Game Arts kick titles (jikochu*) — A6A9/A824 collide with music. */
+			/* spitfl88 のみ: PATCH に A6A9 を武装させ、A824 を再アサート（ブート CALL A826 は mid-RAM 79D7 < 0x34 のときクリア）。Game Arts キック（jikochu*）では走らせない — A6A9/A824 が音楽と衝突する。 */
 			if (mem && hw_->useRtc && mem[0xA826] == 0xF3
 				&& mem[0xA830] == 0xFE && mem[0xA831] == 0x34) {
 				RunUntil((uint64_t)cpu->time64() + (uint64_t)cpuHz_ / 32);
 				if (mem[0xA6A9] == 0x20 && mem[0xA824] == 0)
 					mem[0xA824] = 1;
 			}
-			/* gineiden: let PATCH play plant vec08 / load song, then re-arm
-			   Timer B that CALL 4E2F cleared. */
+			/* gineiden: PATCH play に vec08／曲ロードを植えさせ、CALL 4E2F がクリアした Timer B を再武装 */
 			if (hw_->NeedsGineidenArm()) {
 				RunUntil((uint64_t)cpu->time64() + (uint64_t)cpuHz_ / 8);
 				hw_->ArmGineidenOpnTimer();
@@ -753,8 +682,7 @@ void CDriverPc88::TriggerPlay()
 			hw_->ArmPwmajan2();
 			hw_->ArmYaksaPlay();
 			if (hw_->NeedsNavituneArm()) {
-				/* Plant list ptr at 7700 before cmd=1 LDIR/cmd10. SP=$0200
-				   would clobber a $01E0 plant; park below navimus. */
+				/* cmd=1 LDIR/cmd10 の前にリストポインタを 7700 へ。SP=$0200 は $01E0 の植込を潰す。navimus より下へパーク。 */
 				if (cpu->r.sp < 0x4000 || cpu->r.sp >= 0x7700)
 					cpu->r.sp = 0x7000;
 				hw_->ApplyNavituneTitleSong();
@@ -763,11 +691,11 @@ void CDriverPc88::TriggerPlay()
 				hw_->FinishNavitunePlay();
 			}
 			if (hw_->NeedsYakyufanArm()) {
-				/* Let PATCH cmd=1 reach CALL play (clears 0118 via 0C5D). */
+				/* PATCH cmd=1 が CALL play に達するまで（0C5D 経由で 0118 をクリア） */
 				RunUntil((uint64_t)cpu->time64() + (uint64_t)cpuHz_ / 8);
 				hw_->ArmYakyufanPlay();
 			}
-			/* Drain cmd under DI before sample loop re-enables IRQs. */
+			/* サンプルループが IRQ を再許可する前に DI 下で cmd をドレイン */
 			const int pollAt = FindPollLoop();
 			int sawDispatch = (pollAt < 0);
 			const int drainSteps = hw_->NeedsLongPlayDrain() ? 512 : 64;
@@ -784,8 +712,7 @@ void CDriverPc88::TriggerPlay()
 						sawDispatch = 1;
 				} else if (pollAt >= 0 && pc < 0x80 && pc > pollAt + 4)
 					sawDispatch = 1;
-				/* 1942 ADEE lives at 0034 (still <0x80). Breaking on any
-				   page0 PC aborts mid-LDIR before A343 arms I+Timer. */
+				/* 1942 ADEE は 0034（まだ <0x80）。page0 PC なら何でも中断すると LDIR 途中で止まり、A343 が I+Timer を武装する前に終わる。 */
 				if (hw_->NeedsLongPlayDrain()) {
 					if (step >= 8 && hw_->cmd == 0 && pollAt >= 0
 						&& pc == pollAt && sawDispatch)
@@ -799,8 +726,7 @@ void CDriverPc88::TriggerPlay()
 			hw_->FixupIm2AfterPlay();
 			hw_->ArmYaksaPlay();
 			if (hw_->NeedsLongPlayDrain() && hw_->SoundChip() && cpu) {
-				/* 1942 A343 ends with mode 2A; ensure Timer B is live and
-				   port32 is unmasked so AD92 can sequence FM. */
+				/* 1942 A343 はモード 2A で終わる。Timer B を生かし port32 をアンマスクし、AD92 が FM をシーケンスできるようにする。 */
 				hw_->PortOut(0x44, 0x26);
 				hw_->PortOut(0x45, 0xCF);
 				hw_->PortOut(0x44, 0x27);
@@ -827,21 +753,9 @@ unsigned CEmuPc88WatchdogReplays() { return s_wdReplayCount; }
 void CEmuPc88WatchdogResetCount() { s_wdReplayCount = 0; }
 void CEmuPc88WatchdogSetEnabled(int on) { s_wdEnabled = on ? 1 : 0; }
 
-/* Stall watchdog for a boot that left the player with no way to run: the guest
-   turned interrupts off, it masked the sound IRQ, or nothing at all is ticking.
-   Note motion (key-ons + F-num + SSG period changes) is the liveness signal —
-   idle register polling does not count as playing — and the whole thing
-   disarms itself the moment notes appear.
+/* プレーヤが走る手段を残さず終わったブート用の停滞ウォッチドッグ: ゲストが割り込みを落とした、音源 IRQ をマスクした、tick 源が無い。生存信号はキーオン＋F-num＋SSG 周期変化。アイドルのレジスタポーリングは演奏ではない。ノートが出た瞬間に武装解除。
 
-   It deliberately will NOT restart a track that has played. Re-running the
-   play kick over a live player resumes from whatever state its RAM is in, so
-   what came out was a garbled half-restart every couple of seconds, and a
-   real defect (yokosuka: the port-70h text window went unemulated, so the
-   sequencer read its note lengths from the wrong page and died a second in)
-   sounded like a bad loop instead of showing up as the stall it was. A clean
-   restart would mean re-reading the roms, and the zip is closed once Open
-   returns, so the honest choice is to leave a finished song silent and fix
-   whatever stopped it. */
+   一度鳴った曲は再起動しない。生きたプレーヤへ play キックを重ねると RAM 途中状態から再開し、数秒ごとに壊れた半再起動になる。本物の欠陥（yokosuka: ポート 70h テキスト窓未実装でシーケンサが別ページから音価を読み 1 秒で死ぬ）が悪いループに聞こえる。きれいな再起動は ROM 再読が要るが Open 後 zip は閉じているので、終わった曲は無音のまま、止めた原因を直す。 */
 void CDriverPc88::WatchdogTick()
 {
 	Ay_Cpu* cpu = hw_ ? hw_->Cpu() : NULL;
@@ -862,8 +776,7 @@ void CDriverPc88::WatchdogTick()
 		return;
 	wdLastActive_ = wdSamples_;
 
-	/* Cheap and idempotent, so apply both every time rather than spending a
-	   timeout each — the gap between loops is audible. */
+	/* 安く冪等なので毎回両方かける。ループ間ギャップは聞こえる。タイムアウトを使うより安い。 */
 	const int haveVec = Ay_CpuIm2Target(cpu, VEC_SOUND)
 		|| Ay_CpuIm2Target(cpu, VEC_VRTC) || Ay_CpuIm2Target(cpu, VEC_RTC);
 	if (!cpu->r.iff1 && cpu->r.im == 2 && haveVec)
@@ -875,10 +788,7 @@ void CDriverPc88::WatchdogTick()
 	CEmuChipYm2608GetTimerDebug(chip, &fa, &fb, &ip);
 	const int ticking = (fa + fb) != wdTimerFires_;
 	wdTimerFires_ = fa + fb;
-	/* Some rips (mappy88, jikochu*) leave the play call to write the opening
-	   notes inline and never program a tick, so the sequencer advances once
-	   and stops. Give the installed vector a clock — once only, and only when
-	   the boot really left every source dead. */
+	/* 一部リップ（mappy88, jikochu*）は play コールがオープニングノートをインラインで書き、tick を組まない。シーケンサは 1 回進んで止まる。インストール済みベクタにクロックを 1 回だけ与える。ブートが全源を死なせたときのみ。 */
 	if (!wdArmedTick_ && !ticking && !hw_->useVrtc && !hw_->useRtc) {
 		wdArmedTick_ = 1;
 		if (Ay_CpuIm2Target(cpu, VEC_SOUND)) {
@@ -896,10 +806,7 @@ void CDriverPc88::WatchdogTick()
 			return;
 		}
 	}
-	/* Last resort, and only while the track has never made a note: the kick
-	   may have raced the boot. Once anything has sounded, stop interfering.
-	   gra88 / gallforc need ~3s of DRIVER init before the first note —
-	   don't count that lead-in as a stall. */
+	/* 最後の手段、かつ一度もノートが出ていないときだけ: キックがブートと競った可能性。何か鳴ったら干渉を止める。gra88 / gallforc は初ノートまで DRIVER 初期化約 3s — そのリードインを停滞と数えない。 */
 	if (wdEverActive_ || wdReplays_ >= 4)
 		return;
 	if (!wdEverActive_) {
@@ -912,6 +819,7 @@ void CDriverPc88::WatchdogTick()
 	replayPending_ = 1;
 }
 
+/* CPU とチップを進めステレオ PCM を合成する */
 int CDriverPc88::Render(int16_t* stereo, int frames)
 {
 	if (!hw_ || !stereo || frames <= 0) return 0;
@@ -928,16 +836,14 @@ int CDriverPc88::Render(int16_t* stereo, int frames)
 	if (!triggered_)
 		TriggerPlay();
 	if (hostRate_ < 1 || cpuHz_ < 1) return 0;
-	/* Opening bars the play kick already generated (see BeginLeadCapture). */
+	/* play キックが既に出したオープニング小節（BeginLeadCapture） */
 	const int lead = DrainLead(stereo, frames);
 	for (int i = lead; i < frames; i++) {
 		cpuAcc_ += (int64_t)cpuHz_;
 		int cyclesPerSample = (int)(cpuAcc_ / (int64_t)hostRate_);
 		cpuAcc_ %= (int64_t)hostRate_;
 		if (cyclesPerSample < 1) cyclesPerSample = 1;
-		/* Carry insn overshoot into the next sample. Without this, each sample
-		   runs past the budget by ~half an instruction (~5–6% extra Z80/OPN
-		   clocks) and soundtrack tempo runs fast. */
+		/* 命令の超過を次サンプルへ持ち越す。無いと各サンプルが予算を約半命令（Z80/OPN クロック約 5–6% 増）超え、サントラテンポが速くなる。 */
 		cpuCycleBudget_ += (int64_t)cyclesPerSample;
 		hw_->GuardHardrankPc();
 		while (cpuCycleBudget_ > 0) {
@@ -965,7 +871,7 @@ int CDriverPc88::Render(int16_t* stereo, int frames)
 			hw_->AddCpuCycles((uint64_t)cycles);
 			TickOpn((uint64_t)cycles);
 		}
-		/* schwarz FE19 / Falcom E000 PATCH: DI around play, no matching EI. */
+		/* schwarz FE19 / Falcom E000 PATCH: play 周りを DI し、対応する EI が無い */
 		if (hw_->NeedsPlayEi() && !cpu->r.iff1)
 			cpu->r.iff1 = 1;
 		if (hw_->NeedsN88RtcGuard() && (i & 63) == 0)
@@ -973,8 +879,7 @@ int CDriverPc88::Render(int16_t* stereo, int frames)
 		chip->Render(stereo + i * 2, 1);
 		if ((++wdSamples_ & 511) == 0) {
 			WatchdogTick();
-			/* Replay in place: deferring to the next Render() call would add
-			   that call's whole buffer to the gap between loops. */
+			/* その場で再キック。次 Render() へ先送りすると、そのコールのバッファ全体がループ間ギャップに足される。 */
 			if (replayPending_) {
 				replayPending_ = 0;
 				triggered_ = 0;
@@ -986,6 +891,7 @@ int CDriverPc88::Render(int16_t* stereo, int frames)
 	return frames;
 }
 
+/* Seek は未対応 */
 int CDriverPc88::Seek(uint64_t sample)
 {
 	(void)sample;

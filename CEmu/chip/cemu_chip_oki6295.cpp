@@ -5,7 +5,7 @@
 #include <math.h>
 #include <string.h>
 
-/* Adapted from hoot ssMSM6295/ssADPCM.cpp and MAME OKI ADPCM tables. */
+/* hoot ssMSM6295/ssADPCM.cpp と MAME OKI ADPCM テーブルを参考。 */
 enum { kOkiVoices = 4, kOkiShift = 12 };
 
 static int CEmuOkiClamp16(int v)
@@ -47,6 +47,7 @@ public:
 		(void)addr;
 		const uint8_t v = (uint8_t)(data & 0xff);
 		lastCommand_ = v;
+		/* FMモニタへOKIコマンドをシャドウ。 */
 		FmMonShadowApplyOki6295(v);
 		if (!cmdState_) {
 			if (v & 0x80) {
@@ -107,12 +108,12 @@ public:
 				vc.count += vc.incr;
 			}
 			const int s = mix * gain / 256;
+			/* モノラルADPCMを L/R へ同じ値。 */
 			stereo[i * 2] = (int16_t)CEmuOkiClamp16((int)stereo[i * 2] + s);
 			stereo[i * 2 + 1] = (int16_t)CEmuOkiClamp16((int)stereo[i * 2 + 1] + s);
 		}
-		/* One-shot samples key on before classify windows start. Pulse a
-		   hit while a voice is still decoding so looping SFX score as
-		   sequenced rather than a flat NOSEQ tone. */
+		/* ワンショットは分類窓の前にキーオンする。デコード中にヒットをパルスし、
+		   ループSFXをフラットなNOSEQではなくシーケンスとして採点させる。 */
 		if (playing) {
 			monAcc_ += frames;
 			const int period = sampleRate_ / 5;
@@ -196,15 +197,14 @@ private:
 		}
 		for (int vol = 0; vol < 16; vol++) {
 			double out = 256.0;
-			for (int i = 0; i < vol; i++) out /= 1.412537545; /* 3 dB */
+			for (int i = 0; i < vol; i++) out /= 1.412537545; /* 3dB ステップ */
 			volumeTable_[vol] = (unsigned)out;
 		}
 	}
 
-	/* Logical chip address → sample-ROM offset. Identity unless a bank table
-	   is installed (see CEmuChipOki6295SetBankTable). Every window resolves to
-	   entry*0x10000 + (addr & 0xFFFF) because the NMK112 page bases and the
-	   window bases cancel out. */
+	/* 論理チップアドレス → サンプルROMオフセット。バンク表が無ければ恒等。
+	   （CEmuChipOki6295SetBankTable 参照）。各窓は entry*0x10000+(addr&0xFFFF)。
+	   NMK112 のページ基底と窓基底が打ち消し合うため。 */
 	uint32_t Xlat(uint32_t addr) const
 	{
 		if (!bank_) return addr;
@@ -241,11 +241,11 @@ private:
 	{
 		Voice& vc = voice_[ch];
 		memset(&vc, 0, sizeof(vc));
-		vc.playing = 1;
+		vc.playing = 1; /* キーオン */
 		vc.start = start;
 		vc.length = length;
 		vc.volume = volumeTable_[vol & 15];
-		vc.incr = (int)(((uint64_t)clockHz_ << kOkiShift) / (uint64_t)sampleRate_);
+		vc.incr = (int)(((uint64_t)clockHz_ << kOkiShift) / (uint64_t)sampleRate_); /* クロック→ホスト */
 		if (vc.incr <= 0) vc.incr = 1;
 		Fetch(vc);
 	}
@@ -293,6 +293,7 @@ private:
 	uint8_t snapshot_[4 + kOkiVoices * 8];
 };
 
+/* MSM6295 ラッパ生成。 */
 CChip* CEmuChipOki6295Create(uint32_t clockHz, int sampleRate)
 {
 	return new CChipOki6295(clockHz, sampleRate);

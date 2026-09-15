@@ -4,7 +4,7 @@
 #include <string.h>
 #include <math.h>
 
-/* Adapted from MAME/hoot ssSN76496 — self-contained, no ss* deps. */
+/* MAME/hoot ssSN76496 を参考。ss* 依存なしの自己完結コア。 */
 enum { kSnStep = 0x10000, kSnMaxOut = 0x7fff };
 #define FB_WNOISE 0x12000
 #define FB_PNOISE 0x08000
@@ -60,7 +60,7 @@ public:
 
 	void AdvanceClocks(uint64_t chipCycles) override
 	{
-		(void)chipCycles; /* sample-driven in Render */
+		(void)chipCycles; /* 音声は Render 側でサンプル駆動 */
 	}
 
 	void Render(int16_t* stereo, int frames) override
@@ -68,7 +68,7 @@ public:
 		if (!stereo || frames <= 0) return;
 		while (frames > 0) {
 			int mix = 0;
-			/* Advance one host sample. */
+			/* ホスト1サンプル分だけ位相を進める。 */
 			for (int i = 0; i < 3; i++) {
 				int volAcc = 0;
 				if (output_[i]) volAcc += count_[i];
@@ -108,6 +108,7 @@ public:
 			if (mix > kSnMaxOut * kSnStep) mix = kSnMaxOut * kSnStep;
 			if (mix < 0) mix = 0;
 			const int16_t s = (int16_t)(mix / kSnStep);
+			/* SN76489 はモノラル。L/R へ同じ値を書く。 */
 			*stereo++ = s;
 			*stereo++ = s;
 			frames--;
@@ -130,13 +131,14 @@ private:
 		for (int i = 0; i < 15; i++) {
 			volTable_[i] = (out > (double)kSnMaxOut / 3.0)
 				? (kSnMaxOut / 3) : (int)out;
-			out /= 1.258925412; /* 2 dB */
+			out /= 1.258925412; /* 2dB ステップ */
 		}
 		volTable_[15] = 0;
 	}
 
 	void WriteByte(uint8_t data)
 	{
+		/* FMモニタへSN76489の1バイト書き込みを通知。 */
 		FmMonShadowWriteSnByte(data);
 		writeCount_++;
 		if (data & 0x80) {
@@ -207,6 +209,7 @@ private:
 		const int mode = regs_[6] & 3;
 		if (mode == 3) noisePer = tone[2];
 		else noisePer = 0x10u << mode;
+		/* トーン周期・ノイズ・音量・オンマスクをFMモニタへ反映。 */
 		FmMonShadowApplySn76489(tone, noisePer, vol, on);
 	}
 
@@ -225,6 +228,7 @@ private:
 	int noiseFb_;
 };
 
+/* SN76489 ラッパ生成。clockHz はマスタクロック。 */
 CChip* CEmuChipSn76489Create(uint32_t clockHz, int sampleRate)
 {
 	return new CChipSn76489(clockHz, sampleRate);

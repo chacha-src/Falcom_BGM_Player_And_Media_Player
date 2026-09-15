@@ -1,43 +1,43 @@
 #pragma once
 
-/* Realtime MPU UART → growing SMF + short-message stream for VST inject.
-   PC/AT (SC-55/MT-32/SC-88 via midiout glue) first; PC98 MIDI zips share Pump/Stop. */
+/* リアルタイム MPU UART → 伸長 SMF + ショートメッセージ列 (VST inject)。
+   先に PC/AT (SC-55/MT-32/SC-88 を midiout glue)。PC98 MIDI zip も Pump/Stop を共有。 */
 
 struct CEmuMidiLiveShort {
 	DWORD msg;
-	int sampleOfs; /* within the last Pump window; -1 = as-soon-as */
+	int sampleOfs; /* 直近 Pump 窓内。-1 = すぐ出す */
 };
 
 int CEmuMidiLiveActive(void);
 
-/* Boot PCAT/PC98 midiout, write stub SMF (multi-day length + CC#111 start), return path. */
+/* PCAT/PC98 midiout を起動し、スタブ SMF（数日長 + CC#111 開始）を書いてパスを返す */
 int CEmuMidiLiveStartPcat(const wchar_t* zipPath, unsigned titleCode,
 	wchar_t* outMidPath, int outCap);
 
 void CEmuMidiLiveStop(void);
 
-/* Same-zip SE while live UART BGM is running: inject title, do not restart. */
+/* ライブ UART BGM 中の同一 zip SE: 曲を差し替えず title を注入する */
 int CEmuMidiLiveSameZip(const wchar_t* zipPath);
 int CEmuMidiLiveOverlayTitle(unsigned titleCode);
 
-/* SMF BGM already on VST: boot live MPU and inject SE without replacing the SMF. */
+/* VST に既に SMF BGM があるとき: ライブ MPU を起動し SMF を置き換えずに SE を注入 */
 int CEmuMidiLiveStartOverlayPcat(const wchar_t* zipPath, unsigned titleCode);
 
-/* Advance emu by frames @ session rate; queue shorts for Steal. */
+/* セッションレートで frames 進める。Steal 用ショートをキューする */
 int CEmuMidiLivePump(int frames);
 
 int CEmuMidiLiveStealShorts(CEmuMidiLiveShort* out, int maxCount);
 
-/* Frames pumped since the session started. sampleOfs of a stolen short is
-   relative to this, so the caller can stamp it onto the audible timeline. */
+/* セッション開始からの Pump 累積フレーム。steal した short の sampleOfs は
+   これに相対なので、呼び出し側が可聴タイムラインへスタンプできる。 */
 __int64 CEmuMidiLiveAudioFrames(void);
 
-/* 1 after first NoteOn seen (for playlist time=-1 / loop hint). */
+/* 最初の NoteOn を見たあと 1（プレイリスト time=-1 / ループヒント用） */
 int CEmuMidiLiveHasNotes(void);
 
-/* What the UART capture held vs what the inject/defer rings could carry.
-   hw* are parsed from the machine's capture buffer, so a probe can tell a
-   driver that never sent program changes from a chain that dropped them. */
+/* UART 捕捉が持っていたものと、inject/defer リングが運べたものの差。
+   hw* はマシン側キャプチャからパースするので、ドライバが PC を出さなかったのか
+   チェーンが落としたのかをプローブで切り分けられる。 */
 struct CEmuMidiLiveDiag {
 	unsigned injDropped;
 	unsigned holdDropped;

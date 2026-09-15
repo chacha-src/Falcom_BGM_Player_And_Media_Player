@@ -7,12 +7,13 @@
 #include <string.h>
 #include <stdlib.h>
 
-/* SG-1000 / SC-3000: Z80 + SN76489 @ ~3.58 MHz, cart ROM 0000-BFFF, RAM C000+. */
+/* SG-1000 / SC-3000: Z80 + SN76489 @ ~3.58 MHz。カート ROM 0000-BFFF、RAM C000+ */
 enum {
 	SG1000_CPU_HZ = 3579545,
 	SG1000_PSG_HZ = 3579545
 };
 
+/* SG-1000 ハード: Star Jacker メールボックス既定 */
 CHardSg1000::CHardSg1000()
 	: mailboxAddr_(0xC066)
 	, soundUpdatePc_(0x5AFA)
@@ -33,11 +34,13 @@ CHardSg1000::CHardSg1000()
 	memset(mem_, 0, sizeof(mem_));
 }
 
+/* チップ／CPU を破棄 */
 CHardSg1000::~CHardSg1000()
 {
 	Shutdown();
 }
 
+/* カタログが SG-1000/SC-3000 か */
 static int IsSg1000Platform(const CEmuGameEntry* ge)
 {
 	if (!ge) return 0;
@@ -48,10 +51,9 @@ static int IsSg1000Platform(const CEmuGameEntry* ge)
 	return 0;
 }
 
-/* Locate Sega-style PSG play glue: LD A,(mbox); BIT 7,A; JP Z,mute.
-   Update entry is the CALL site that targets that check when present
-   (Star Jacker 5AFA→5E0A, Hero 734A→7367); otherwise a nearby
-   externally-called prologue (Mikie 02CF→02E6). */
+/* Sega 風 PSG 再生糊を探す: LD A,(mbox); BIT 7,A; JP Z,mute。
+   update 入口は、その検査を CALL する箇所（Star Jacker 5AFA→5E0A、Hero 734A→7367）。
+   無ければ近くの外部 CALL プロローグ（Mikie 02CF→02E6）。 */
 static int Sg1000DetectBit7Glue(const uint8_t* rom, unsigned romSize,
 	uint16_t* outBox, uint16_t* outUpdate, uint16_t* outMute)
 {
@@ -61,8 +63,7 @@ static int Sg1000DetectBit7Glue(const uint8_t* rom, unsigned romSize,
 			|| rom[i + 5] != 0xCA)
 			continue;
 		const uint16_t box = (uint16_t)(rom[i + 1] | (rom[i + 2] << 8));
-		/* Star-Jacker-style boxes live in C000-C2FF; Congo/Mikie engines
-		   use C1E6 / C300 — allow the wider work-RAM window. */
+		/* Star Jacker 型メールボックスは C000-C2FF。Congo/Mikie は C1E6 / C300 — 広めのワーク RAM を許す */
 		if (box < 0xC000 || box > 0xC3FF) continue;
 		const uint16_t mute = (uint16_t)(rom[i + 6] | (rom[i + 7] << 8));
 		if (mute < 0x100 || mute >= 0xC000) continue;
@@ -79,7 +80,7 @@ static int Sg1000DetectBit7Glue(const uint8_t* rom, unsigned romSize,
 			}
 		}
 		if (!foundCall) {
-			/* Walk back for a prologue that other code CALLs. */
+			/* 他コードが CALL するプロローグを手前に探す */
 			for (unsigned dist = 1; dist < 64 && i >= dist; dist++) {
 				const unsigned pc = i - dist;
 				int refs = 0;
@@ -102,26 +103,25 @@ static int Sg1000DetectBit7Glue(const uint8_t* rom, unsigned romSize,
 	return 0;
 }
 
+/* CPU/PSG を生成し、既知アーカイブのメールボックスを上書き */
 int CHardSg1000::Init(const CEmuGameEntry* ge, int sampleRate)
 {
 	if (!ge || !IsSg1000Platform(ge)) return 0;
 	sampleRate_ = sampleRate > 0 ? sampleRate : 44100;
 	cpuHz_ = SG1000_CPU_HZ;
 	psgHz_ = SG1000_PSG_HZ;
-	/* Defaults: Star Jacker layout (overwritten after ROM load / detect). */
+	/* 既定: Star Jacker 配置（ROM 読込／検出後に上書き） */
 	mailboxAddr_ = 0xC066;
 	soundUpdatePc_ = 0x5AFA;
 	soundMutePc_ = 0x5DEB;
-	/* Congo Bongo: PSG engine mailbox C1E6 (BIT7 song cmd), tick @4D3D
-	   (IRQ 0465 calls this). C06A is only a game "music on" flag. */
+	/* Congo Bongo: PSG エンジンメールボックス C1E6（BIT7 曲コマンド）、tick @4D3D（IRQ 0465 が呼ぶ）。C06A はゲームの「音楽 ON」フラグだけ。 */
 	if (_stricmp(ge->archive, "sc_congobongo") == 0
 		|| _stricmp(ge->archive, "sc_congo") == 0) {
 		mailboxAddr_ = 0xC1E6;
 		soundUpdatePc_ = 0x4D3D;
 		soundMutePc_ = 0x510A;
 	}
-	/* Mikie: PSG engine mailbox C300 / tick @6BA2 (IRQ calls this).
-	   C015/02CF is the game boot path that JP's into gameplay. */
+	/* Mikie: PSG エンジンメールボックス C300 / tick @6BA2（IRQ が呼ぶ）。C015/02CF はゲームプレイへ JP するブート経路。 */
 	if (_stricmp(ge->archive, "sc_mikie") == 0
 		|| _stricmp(ge->archive, "sc_shinnyushain") == 0) {
 		mailboxAddr_ = 0xC300;
@@ -134,6 +134,7 @@ int CHardSg1000::Init(const CEmuGameEntry* ge, int sampleRate)
 	return (chip_ && cpu_) ? 1 : 0;
 }
 
+/* CPU/チップを破棄 */
 void CHardSg1000::Shutdown()
 {
 	if (CEmuZ80BusGetActive() == this)
@@ -145,10 +146,11 @@ void CHardSg1000::Shutdown()
 	}
 }
 
+/* VDP ステータスと入力 stub */
 uint8_t CHardSg1000::PortIn(uint16_t port)
 {
 	const uint8_t p = (uint8_t)(port & 0xff);
-	/* VDP status (BF): always report frame IRQ ready so polls don't spin. */
+	/* VDP ステータス (BF): フレーム IRQ 準備済みを返し、ポーリングが回らないようにする */
 	if (p == 0xbf) {
 		const uint8_t st = vdpStatus_;
 		vdpStatus_ &= (uint8_t)~0x80;
@@ -157,12 +159,13 @@ uint8_t CHardSg1000::PortIn(uint16_t port)
 	}
 	if (p == 0xbe)
 		return 0x00;
-	/* Joystick / keyboard stubs — unused by sound path. */
+	/* ジョイスティック／キーボード stub — 音源経路では未使用 */
 	if (p == 0xdc || p == 0xdd || p == 0xde || p == 0xdf)
 		return 0xff;
 	return 0xff;
 }
 
+/* VDP アドレス／データ。PSG は OUT 経由 */
 void CHardSg1000::PortOut(uint16_t port, uint8_t data)
 {
 	const uint8_t p = (uint8_t)(port & 0xff);
@@ -184,23 +187,26 @@ void CHardSg1000::PortOut(uint16_t port, uint8_t data)
 		return;
 	}
 	if (p == 0xbe) {
-		/* VDP data — ignored (no VRAM). */
+		/* VDP データ — 無視（VRAM 無し） */
 		return;
 	}
 }
 
+/* カート ROM は無視。C000+ のみ書く */
 void CHardSg1000::MemWrite(uint16_t addr, uint8_t data)
 {
-	/* Cart ROM is not writable; keep C000-FFFF as work RAM. */
+	/* カート ROM は書けない。C000-FFFF をワーク RAM として残す */
 	if (addr >= 0xC000)
 		mem_[addr] = data;
 }
 
+/* 64K ビュー */
 uint8_t CHardSg1000::MemRead(uint16_t addr)
 {
 	return mem_[addr];
 }
 
+/* zip メンバ名から拡張子を除いたベース名 */
 static void CEmuSgZipBaseName(const char* name, char* out, int outCap)
 {
 	if (!out || outCap <= 0) return;
@@ -213,6 +219,7 @@ static void CEmuSgZipBaseName(const char* name, char* out, int outCap)
 	strncpy_s(out, (size_t)outCap, base, _TRUNCATE);
 }
 
+/* カート ROM を 0000 へ載せ、BIT7 糊を検出 */
 int CHardSg1000::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode)
 {
 	(void)titleCode;
@@ -236,7 +243,7 @@ int CHardSg1000::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned title
 		loaded++;
 	}
 
-	/* Fallback: first .sg member. */
+	/* フォールバック: 最初の .sg メンバ */
 	if (!loaded) {
 		for (int i = 0; i < fs->fileCount; i++) {
 			char pathA[CEMU_ZIP_PATH];
@@ -246,7 +253,7 @@ int CHardSg1000::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned title
 			size_t n = strlen(base);
 			if (n < 3) continue;
 			if (n >= 3 && _stricmp(base + n - 3, ".sg") == 0) {
-				/* ok */
+				/* 読込成功 */
 			} else if (fs->files[i].size != 0x8000 && fs->files[i].size != 0xC000) {
 				continue;
 			}
@@ -259,8 +266,7 @@ int CHardSg1000::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned title
 	}
 	if (!loaded) return 0;
 
-	/* Auto-detect BIT7 mailbox glue from the cart image (overrides defaults
-	   except Congo / Mikie archive overrides set in Init). */
+	/* カート画像から BIT7 メールボックス糊を自動検出（Init で Congo/Mikie を上書きした場合は除く） */
 	if (!(_stricmp(ge->archive, "sc_congobongo") == 0
 		|| _stricmp(ge->archive, "sc_congo") == 0
 		|| _stricmp(ge->archive, "sc_mikie") == 0
@@ -284,6 +290,7 @@ int CHardSg1000::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned title
 	return 1;
 }
 
+/* Z80 バスのアクティブ SG-1000 を設定 */
 void CEmuHardSg1000SetActive(CHardSg1000* hw)
 {
 	CEmuZ80BusSetActive(hw);

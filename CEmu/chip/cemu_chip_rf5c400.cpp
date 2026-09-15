@@ -6,16 +6,14 @@
 #include <string.h>
 #include <stdlib.h>
 
-/* Ricoh RF5C400: 32-channel PCM with per-channel AR/DR/RR envelopes, used on
-   Konami Hornet/Firebeat. Modelled on MAME sound/rf5c400.cpp (Ville Linde and
-   the hoot team).
+/* Ricoh RF5C400: 32ch PCM、チャンネル毎 AR/DR/RR。Konami Hornet/Firebeat 用。
+   MAME sound/rf5c400.cpp（Ville Linde と hoot チーム）を参考。
 
-   Register layout is offset-based, not byte-based: offsets below 0x400 are the
-   global/command file, above that a channel is selected by (offset>>5)&0x1f
-   with the register in the low 5 bits.
+   レジスタはオフセット基準（バイトではない）: 0x400未満がグローバル/コマンド、
+   それ以上は (offset>>5)&0x1f がチャンネル、下位5bitがレジスタ。
 
-   The sample ROM is a 25-bit little-endian word space; a channel address is a
-   word index, so a fetch is read_word((pos>>16)<<1). */
+   サンプルROMは25bitリトルエンディアンワード空間。チャンネルアドレスはワード索引
+   なのでフェッチは read_word((pos>>16)<<1)。 */
 
 namespace {
 
@@ -36,7 +34,7 @@ enum {
 	kPhaseRelease
 };
 
-/* val>=0x80 selects the upper, coarser half of the envelope curve. */
+/* val>=0x80 はエンベロープ曲線の粗い上半分を選ぶ。 */
 inline uint8_t Decode80(uint8_t val)
 {
 	return (uint8_t)((val & 0x80) ? ((val & 0x7f) + 0x1f) : val);
@@ -87,8 +85,8 @@ public:
 		switch (offset) {
 		case 0x00: return status_;
 		case 0x09: {
-			/* Streaming BGM polls how far the channel has advanced so it can
-			   DMA into the half of the buffer that is not playing. */
+			/* ストリーミングBGMはチャンネル進行をポーリングし、再生していない
+			   バッファ半分へDMAする。 */
 			const Channel* c = &chan_[reqChannel_ & 0x1fu];
 			if (c->envPhase == kPhaseNone) return 0;
 			const uint32_t start =
@@ -112,8 +110,8 @@ public:
 	void MixAdd(int16_t* stereo, int frames, int gain) override
 	{
 		if (!stereo || frames <= 0) return;
-		/* The chip streams at clock/384 (44.1 kHz on Hornet's 16.9344 MHz);
-		   scale the phase step when the host runs at another rate. */
+		/* チップは clock/384 でストリーム（Hornet 16.9344 MHz では 44.1 kHz）。
+		   ホストが別レートなら位相ステップをスケールする。 */
 		const double nativeRate = (double)clockHz_ / 384.0;
 		const double rateScale = nativeRate / (double)sampleRate_;
 
@@ -171,9 +169,8 @@ public:
 
 				sample *= volumeTable_[vol];
 				const double v = (double)(sample >> 9) * level;
-				/* Channels 2/3 are the effect sends; the external effect board
-				   is not modelled, so fold them back in at half level rather
-				   than dropping music that is routed through them. */
+				/* ch2/3 はエフェクトセンド。外部エフェクト基板はモデルしないので、
+				   経由する曲を落とさず半分のレベルで畳み込む。 */
 				const double l = v * (panTable_[lvol] + panTable_[elvol] * 0.5);
 				const double r = v * (panTable_[rvol] + panTable_[ervol] * 0.5);
 				int16_t* p = stereo + (size_t)i * 2;
@@ -240,7 +237,7 @@ private:
 			status_ = d;
 			break;
 		case 0x01: {
-			/* Channel control: 0x60 key-on, 0x40 release, else hard stop. */
+			/* チャンネル制御: 0x60 キーオン、0x40 リリース、それ以外はハード停止。 */
 			const int ch = d & 0x1f;
 			Channel* c = &chan_[ch];
 			if ((d & 0x60u) == 0x60u) {
@@ -276,8 +273,8 @@ private:
 			extData_ = d;
 			break;
 		default:
-			/* 0x14 is an external-memory write and 0x20-0x32 are the
-			   reverb/chorus macros; both target hardware we do not model. */
+			/* 0x14 は外部メモリ書き、0x20-0x32 はリバーブ/コーラスマクロ。
+			   どちらもモデルしていないハードウェア向け。 */
 			break;
 		}
 	}
@@ -289,7 +286,7 @@ private:
 		case 0x00: c->startH = d; break;
 		case 0x01: c->startL = d; break;
 		case 0x02:
-			/* 13-bit mantissa with a 3-bit octave shift, in 16.16 word steps. */
+			/* 13bit仮数 + 3bitオクターブシフト。16.16 ワードステップ。 */
 			c->step = (uint64_t)(((uint32_t)(d & 0x1fffu) << (d >> 13)) * 4u);
 			c->freq = d;
 			UpdateMon(ch);
@@ -316,8 +313,7 @@ private:
 			&& ((c->pan & 0xffu) || ((c->pan >> 8) & 0xffu))) ? 1 : 0;
 		int midi = 60;
 		if (on) {
-			/* step 0x10000 replays the sample at its recorded rate, so treat
-			   that ratio as middle C. */
+			/* step 0x10000 は録音レート再生。その比を中央ドとみなす。 */
 			midi = FmMonShadowHzToMidi(261.6255653
 				* (double)c->step / 65536.0);
 			if (midi < 0) midi = 60;
@@ -326,6 +322,7 @@ private:
 			return;
 		monOn_[ch] = (uint8_t)on;
 		monMidi_[ch] = (uint8_t)midi;
+		/* FMモニタへキーオン/オフ。 */
 		FmMonShadowPcmNote(ch, midi, on);
 	}
 
@@ -340,8 +337,7 @@ private:
 		for (int i = 0; i < 0x48; i++)
 			panTable_[i] = sqrt((double)(0x47 - i)) / sqrt((double)0x47);
 
-		/* Envelope rates are per native sample; MAME's constants are tuned
-		   experimentally against clock/384. */
+		/* エンベロープレートはネイティブサンプル単位。MAME定数は clock/384 向け。 */
 		const double kArSpeed = 0.1, kDrSpeed = 2.0, kRrSpeed = 0.7;
 		const int kMinAr = 0x02, kMaxAr = 0x80;
 		const int kMinDr = 0x20, kMaxDr = 0x73;
@@ -385,6 +381,7 @@ private:
 	uint8_t monMidi_[kRf5c400Channels];
 };
 
+/* RF5C400 ラッパ生成。ストリームは clock/384。 */
 CChip* CEmuChipRf5c400Create(uint32_t clockHz, int sampleRate)
 {
 	return new CChipRf5c400(clockHz, sampleRate);

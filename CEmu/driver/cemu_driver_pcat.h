@@ -3,6 +3,7 @@
 
 class CHardPcat;
 
+/* PC/AT: NP2 i286＋DOS＋OPL/CMS/BEEP/MIDI 音源 */
 class CDriverPcat : public CDriver {
 public:
 	CDriverPcat();
@@ -14,6 +15,7 @@ public:
 	int Seek(uint64_t sample) override;
 	int OverlayTitle(unsigned titleCode) override;
 
+	/* YM3812 レジスタ書込回数（診断） */
 	unsigned OplWrites() const;
 
 private:

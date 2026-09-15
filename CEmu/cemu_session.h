@@ -31,6 +31,7 @@ enum {
 	CEMU_KIND_PMD = 13
 };
 
+/* 再生セッション。kind で S98/MDX/PMD と hard 系を切り替える */
 struct CEmuSession {
 	int kind;
 	int sampleRate;
@@ -63,12 +64,15 @@ struct CEmuSession {
 	volatile long overlayPend;
 };
 
+/* セッションをゼロ初期化 */
 void CEmuSessionInit(CEmuSession* s);
+/* 全 kind のプレーヤを閉じる */
 void CEmuSessionClose(CEmuSession* s);
+/* zip / 仮想パスを開き、S98→MDX→hard の順で kind を決める */
 int CEmuSessionOpen(CEmuSession* s, const wchar_t* path, unsigned titleCode, DWORD sampleRate);
 int CEmuSessionRender(CEmuSession* s, short* stereo, int frames);
 int CEmuSessionSeek(CEmuSession* s, UINT64 sample);
-/* Same-zip SE: queue OverlayTitle on the live driver (one instance, no mix). */
+/* 同一 zip の SE: 実体は 1 つ。OverlayTitle をキューして混ぜない */
 int CEmuSessionUsesGlobalNp2(const CEmuSession* s);
 int CEmuSessionOverlayTitle(CEmuSession* s, unsigned titleCode);
 void CEmuSessionMixStereo(short* dst, const short* add, int frames);

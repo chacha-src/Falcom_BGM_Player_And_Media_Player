@@ -5,6 +5,7 @@
 #include "../vendor/np2/np2ffi.h"
 #include "../machine/cemu_np2ctx.h"
 
+/* PC/AT ドライバ: メンバを安全な既定値へ */
 CDriverPcat::CDriverPcat()
 	: hw_(NULL)
 	, hostRate_(44100)
@@ -18,16 +19,19 @@ CDriverPcat::CDriverPcat()
 {
 }
 
+/* Close してハード参照を切る */
 CDriverPcat::~CDriverPcat()
 {
 	Close();
 }
 
+/* YM3812 書込回数 */
 unsigned CDriverPcat::OplWrites() const
 {
 	return hw_ ? hw_->oplWriteCount_ : 0;
 }
 
+/* ROM 読込と DOS ブート。NP2 コアをこのハードへ bind */
 int CDriverPcat::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned titleCode)
 {
 	if (!hw || !ge || !fs) return 0;
@@ -51,6 +55,7 @@ int CDriverPcat::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigne
 	return 1;
 }
 
+/* ハード参照を捨てる（NP2 の破棄はハード側） */
 void CDriverPcat::Close()
 {
 	hw_ = NULL;
@@ -58,6 +63,7 @@ void CDriverPcat::Close()
 	triggered_ = 0;
 }
 
+/* 同一 zip の別曲をライブで切替 */
 int CDriverPcat::OverlayTitle(unsigned titleCode)
 {
 	if (!hw_) return 0;
@@ -69,6 +75,7 @@ int CDriverPcat::OverlayTitle(unsigned titleCode)
 	return ok;
 }
 
+/* CPU を進め OPL を合成。補助チップは MixExtra */
 int CDriverPcat::Render(int16_t* stereo, int frames)
 {
 	if (!hw_ || !stereo || frames <= 0 || !booted_) return 0;
@@ -82,7 +89,7 @@ int CDriverPcat::Render(int16_t* stereo, int frames)
 	}
 	const int rate = hostRate_ > 0 ? hostRate_ : 44100;
 	if (cpuHz_ < 1 || rate < 1) return 0;
-	/* Pump+mix in chunks — per-sample PumpCycles dwarfed realtime for silp/AIL. */
+	/* チャンク単位でポンプ＋混成。サンプル毎 PumpCycles は silp/AIL で実時間を超える */
 	const int chunk = 512;
 	for (int i = 0; i < frames; ) {
 		const int n = (frames - i > chunk) ? chunk : (frames - i);
@@ -100,6 +107,7 @@ int CDriverPcat::Render(int16_t* stereo, int frames)
 	return frames;
 }
 
+/* Seek は未対応 */
 int CDriverPcat::Seek(uint64_t sample)
 {
 	(void)sample;

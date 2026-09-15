@@ -1,14 +1,12 @@
 ﻿#pragma once
 
-/* Playback-verified archive list.
+/* 再生確認済みアーカイブ一覧。
 
-   The CEmu catalog describes far more archives than currently play correctly.
-   These helpers answer "does this archive actually play?" from the generated
-   table in cemu_support.cpp, so the UI can hide the rest and tell the user
-   they are not supported yet instead of opening a silent title.
+   カタログは実際に鳴る zip より遥かに多い。cemu_support.cpp の生成テーブルで
+   「このアーカイブは本当に鳴るか」を答え、未対応を UI が隠して無音再生を避ける。
 
-   `archive` is a CEmuGameEntry::archive value (zip stem, optionally in the
-   "stem,companion" form); matching is case-insensitive. */
+   archive は CEmuGameEntry::archive（zip stem。任意で "stem,companion"）。
+   照合は大文字小文字を無視する。 */
 
 #ifdef __cplusplus
 extern "C" {

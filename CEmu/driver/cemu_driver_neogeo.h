@@ -6,6 +6,7 @@
 
 
 
+/* Neo Geo AES/MVS: Z80 + YM2610。NMI でコマンド、IM1 でタイマ */
 class CDriverNeo : public CDriver {
 
 public:
@@ -51,10 +52,10 @@ private:
 
 	int reinjected_;
 
-	/* Timer expiries taken from the YM2610 but not yet delivered as IM1. */
+	/* YM2610 のタイマ満了。まだ IM1 として届けていない */
 	int ymIrqPending_;
 
-	/* Unspent CPU cycle budget, carried so overshoot does not add up. */
+	/* 使い残した CPU サイクル。超過が積み上がらないよう持ち越す */
 	int64_t cpuDebt_;
 
 
@@ -63,6 +64,7 @@ private:
 
 	void TickYm(uint64_t cpuCycles);
 
+	/* YM タイマ満了を IM1、コマンドを NMI で届ける */
 	void DeliverIrqs();
 
 	void InjectSongCommand();
@@ -75,6 +77,7 @@ private:
 
 
 
+/* Neo Geo ドライバ生成 */
 CDriver* CDriverNeoCreate();
 
 

@@ -19,6 +19,7 @@ struct CEmuMdxImpl {
 	int started;
 };
 
+/* MDX プレーヤをゼロ初期化 */
 void CEmuMdxInit(CEmuMdxPlayer* p)
 {
 	if (!p) return;
@@ -55,7 +56,7 @@ static unsigned CEmuMdxBe32(const BYTE* p)
 	return ((unsigned)p[0] << 24) | ((unsigned)p[1] << 16) | ((unsigned)p[2] << 8) | p[3];
 }
 
-/* MDD/MDX packs often store a 16-slot BE32 offset table (tone @ 0x40). MXDRV wants BE16. */
+/* MDD/MDX パックは 16 スロット BE32 オフセット表 (音色 @ 0x40) が多い。MXDRV は BE16。 */
 static int CEmuMdxLooksDwordBody(const BYTE* mdx, DWORD mdxSize)
 {
 	if (!mdx || mdxSize < 64) return 0;
@@ -76,8 +77,8 @@ static int CEmuMdxHasTitleHeader(const BYTE* mdx, DWORD mdxSize)
 	return MdxSeekFileImage(mdx, mdxSize, MDX_CHUNK_TYPE_MDX_BODY, &ofs) ? 1 : 0;
 }
 
-/* Own a normalized MDX image suitable for MdxUtil* (caller frees).
-   pdxFileName: when wrapping a headerless body, bake this PDX/PCM.DAT name. */
+/* MdxUtil* 用に正規化した MDX イメージを所有する (呼び出し側が free)。
+   pdxFileName: ヘッダ無し本体をラップするとき、この PDX/PCM.DAT 名を焼く。 */
 static BYTE* CEmuMdxNormalize(const BYTE* mdx, DWORD mdxSize, DWORD* outSize,
 	const char* pdxFileName)
 {
@@ -87,7 +88,7 @@ static BYTE* CEmuMdxNormalize(const BYTE* mdx, DWORD mdxSize, DWORD* outSize,
 	BYTE* owned = NULL;
 	unsigned sz = (unsigned)mdxSize;
 
-	/* MDC → MDX (mdc2mdx takes ownership of its input buffer). */
+	/* MDC → MDX (mdc2mdx は入力バッファの所有権を取る)。 */
 	if (mdxSize >= 4 && CEmuMdxBe32(mdx) == 0x4d44431a) {
 		owned = (BYTE*)malloc(mdxSize);
 		if (!owned) return NULL;
@@ -108,7 +109,7 @@ static BYTE* CEmuMdxNormalize(const BYTE* mdx, DWORD mdxSize, DWORD* outSize,
 		return owned;
 	}
 
-	/* Headerless body: optionally shrink BE32 table → BE16, then wrap title+PDX name. */
+	/* ヘッダ無し本体: 任意で BE32 表を BE16 に縮め、タイトル+PDX 名でラップ。 */
 	const BYTE* body = mdx;
 	DWORD bodySize = mdxSize;
 	BYTE* converted = NULL;
@@ -151,6 +152,7 @@ static BYTE* CEmuMdxNormalize(const BYTE* mdx, DWORD mdxSize, DWORD* outSize,
 	return wrapped;
 }
 
+/* 正規化して MXDRV を開く。PDX 名をヘッダ無しラップへ焼く */
 int CEmuMdxOpenBuffer(CEmuMdxPlayer* p,
 	const BYTE* mdx, DWORD mdxSize,
 	const BYTE* pdx, DWORD pdxSize,
@@ -276,6 +278,7 @@ int CEmuMdxOpenBuffer(CEmuMdxPlayer* p,
 	return 1;
 }
 
+/* サンプル位置へ。シャドウ時計も合わせる */
 int CEmuMdxSeek(CEmuMdxPlayer* p, UINT64 sample, DWORD flags)
 {
 	(void)flags;

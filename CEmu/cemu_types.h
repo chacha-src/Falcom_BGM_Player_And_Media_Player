@@ -1,6 +1,6 @@
 ﻿#pragma once
-// CEmu — hoot アーカイブ互換サウンドエミュレーション (exe 内完結、オープンソース・期限なし)
-// mode/sub 帯: MODE_CEMU_BASE (-1000) から CPU / チップ / ドライバを割当
+/* CEmu — hoot アーカイブ互換サウンドエミュレーション (exe 内完結、オープンソース・期限なし)
+   mode/sub 帯: MODE_CEMU_BASE (-1000) から CPU / チップ / ドライバを割当 */
 
 #include <stdint.h>
 
@@ -37,8 +37,7 @@ enum {
 	CEMU_CHIP_IREM_DAC = 23,
 	CEMU_CHIP_C140 = 24,
 	CEMU_CHIP_C30 = 25, /* Namco CUS30 / 15XX wavetable */
-	/* Chips the arcade catalog names but that had no id, so the monitor could
-	   never label them and they all fell through to a generic OPM. */
+	/* アーケードカタログに名前はあるが ID が無く、モニタが全部 OPM 扱いしていたチップ */
 	CEMU_CHIP_MSM5205 = 26,
 	CEMU_CHIP_MSM5232 = 27,
 	CEMU_CHIP_UPD7759 = 28,
@@ -80,10 +79,10 @@ enum {
 	CEMU_DRIVER_TYPE = 32,
 	CEMU_DATA_DIR = 16,
 	CEMU_ROM_NAME = 128,
-	/* Fixed slot budget: parse prefers code/bgm/voice over adpcm when full.
-	   arcus2 OPNA has 103 rows — without priority, late BGM banks are dropped.
-	   DOS packs list every song as file+conin (night_s USMD is 264 rows;
-	   metajo2 is 833). 128 evicted the glue COM/EXE in favor of late shells. */
+	/* 枠が埋まると code/bgm/voice を adpcm より優先。
+	   arcus2 OPNA は 103 行 — 優先無しだと後半 BGM が落ちる。
+	   DOS パックは曲ごとに file+conin (night_s USMD は 264、metajo2 は 833)。
+	   128 だと後半シェルのために COM/EXE が追い出されていた。 */
 	CEMU_ROM_MAX = 1024,
 	CEMU_TITLE_MAX = 256,
 	CEMU_OPTION_MAX = 32,
@@ -126,10 +125,9 @@ struct CEmuGameEntry {
 	int cpuId;
 	int chipIds[8];
 	int chipCount;
-	/* Chips the catalog spells out in <name>, e.g. "Riot (YM2151+MSM6295)".
-	   Most arcade entries carry no <chip> tag, so this text is the only
-	   record of what the board really has. Kept separate from chipIds so it
-	   can label the monitor without disturbing board resolution. */
+	/* <name> に書かれたチップ名 (例 "Riot (YM2151+MSM6295)")。
+	   アーケードは <chip> が無いことが多く、基板構成の唯一の記録。
+	   chipIds とは別枠 — モニタ表示用で、基板解決を壊さない。 */
 	int docChipIds[12];
 	int docChipCount;
 };

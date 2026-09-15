@@ -4,6 +4,7 @@
 #include "minizip/iowin32.h"
 #include <string.h>
 
+/* 大文字小文字・スラッシュを無視したパス一致 */
 static int CEmuZipNameMatch(const char* a, const char* b)
 {
 	if (!a || !b) return 0;
@@ -21,7 +22,7 @@ static int CEmuZipNameMatch(const char* a, const char* b)
 	}
 }
 
-/* ASCII skeleton: keep letters/digits only so epr11112 ↔ epr-11112.17 match. */
+/* ASCII 骨格: 英数字だけ残すので epr11112 ↔ epr-11112.17 が一致する */
 static void CEmuZipNameSkeleton(const char* in, char* out, int outCap)
 {
 	if (!out || outCap <= 0) return;
@@ -39,8 +40,8 @@ static void CEmuZipNameSkeleton(const char* in, char* out, int outCap)
 	out[o] = 0;
 }
 
-/* Longest consecutive digit run (e.g. epr-16720.7 → "16720"). Catalog
-   often ships "16720.epr" while MAME zips use "epr-16720.7". */
+/* 最長の連続数字 (例 epr-16720.7 → "16720")。カタログは "16720.epr"、
+   MAME zip は "epr-16720.7" になりがち。 */
 static int CEmuZipDigitRun(const char* in, char* out, int outCap)
 {
 	if (!out || outCap <= 0) return 0;
@@ -61,6 +62,7 @@ static int CEmuZipDigitRun(const char* in, char* out, int outCap)
 	return bestLen;
 }
 
+/* 骨格一致、だめなら数字コア一致 */
 static int CEmuZipNameFuzzy(const char* a, const char* b)
 {
 	char sa[CEMU_ROM_NAME], sb[CEMU_ROM_NAME];
@@ -68,7 +70,7 @@ static int CEmuZipNameFuzzy(const char* a, const char* b)
 	CEmuZipNameSkeleton(b, sb, (int)sizeof(sb));
 	if (!sa[0] || !sb[0]) return 0;
 	if (CEmuZipNameMatch(sa, sb)) return 1;
-	/* Digit-core: 16720.epr ↔ epr-16720.7, 16491.mpr ↔ mpr-16491.32 */
+	/* 数字コア: 16720.epr ↔ epr-16720.7, 16491.mpr ↔ mpr-16491.32 */
 	char da[32], db[32];
 	if (CEmuZipDigitRun(a, da, (int)sizeof(da)) && CEmuZipDigitRun(b, db, (int)sizeof(db))
 		&& CEmuZipNameMatch(da, db))
@@ -76,6 +78,7 @@ static int CEmuZipNameFuzzy(const char* a, const char* b)
 	return 0;
 }
 
+/* 拡張子を落とす (MMD2.SYS → MMD2) */
 static void CEmuZipStripExt(const char* in, char* out, int outCap)
 {
 	if (!out || outCap <= 0) return;
@@ -86,6 +89,7 @@ static void CEmuZipStripExt(const char* in, char* out, int outCap)
 	if (dot && dot != out) *dot = 0;
 }
 
+/* ディレクトリを除いたベース名 */
 static void CEmuZipBaseName(const char* path, char* out, int outCap)
 {
 	if (!out || outCap <= 0) return;
@@ -117,6 +121,7 @@ void CEmuZipFsClose(CEmuZipFs* fs)
 	fs->namesOnly = 0;
 }
 
+/* zip メンバを fs へ追加。namesOnly なら展開しない */
 static int CEmuZipFsAppendEx(CEmuZipFs* fs, const wchar_t* zipPath, int namesOnly)
 {
 	if (!fs || !zipPath || !zipPath[0]) return 0;
@@ -192,18 +197,21 @@ int CEmuZipFsOpen(CEmuZipFs* fs, const wchar_t* zipPath)
 	return CEmuZipFsOpenEx(fs, zipPath, 0);
 }
 
+/* カタログ順位付け用: 展開せずメンバ一覧だけ */
 int CEmuZipFsOpenNames(CEmuZipFs* fs, const wchar_t* zipPath)
 {
 	return CEmuZipFsOpenEx(fs, zipPath, 1);
 }
 
+/* 既に開いた fs へ別 zip のメンバを追加（カンマ同伴 zip） */
 int CEmuZipFsMergeZip(CEmuZipFs* fs, const wchar_t* zipPath)
 {
 	if (!fs || !zipPath || !zipPath[0]) return 0;
-	/* Keep primary namesOnly mode when merging companions. */
+	/* 同伴 zip を足すとき、元の namesOnly を維持する */
 	return CEmuZipFsAppendEx(fs, zipPath, fs->namesOnly);
 }
 
+/* フルパス優先。拡張子無し名は COM を SYS と取り違えないよう制限する */
 static int CEmuZipFsFindIndex(const CEmuZipFs* fs, const char* name)
 {
 	if (!fs || !name) return -1;
@@ -217,8 +225,8 @@ static int CEmuZipFsFindIndex(const CEmuZipFs* fs, const char* name)
 		char pathA[CEMU_ZIP_PATH];
 		WideCharToMultiByte(932, 0, fs->files[i].path, -1, pathA, (int)sizeof(pathA), NULL, NULL);
 		CEmuZipBaseName(pathA, fn, (int)sizeof(fn));
-		/* Directory-qualified names (ran2/patch vs mzz/patch) must not
-		   collapse to the first basename hit in the zip. */
+		/* ディレクトリ付き名 (ran2/patch vs mzz/patch) は
+		   zip 先頭の同名ベースに潰してはいけない。 */
 		if (CEmuZipNameMatch(pathA, name))
 			return i;
 		if (!strchr(name, '/') && !strchr(name, '\\')
@@ -232,10 +240,10 @@ static int CEmuZipFsFindIndex(const CEmuZipFs* fs, const char* name)
 		WideCharToMultiByte(932, 0, fs->files[i].path, -1, pathA, (int)sizeof(pathA), NULL, NULL);
 		CEmuZipBaseName(pathA, fn, (int)sizeof(fn));
 		CEmuZipStripExt(fn, fnNoExt, (int)sizeof(fnNoExt));
-		/* No-ext fallback is for catalog names without a suffix ("MMD2").
-		   `MMD2.SYS 4096` (CONFIG tail) stripped to "MMD2" and hit mmd2.com
-		   first in the zip, then AddFile overwrote the real SYS (orangerd
-		   device INIT ran the COM: FA/CLI at CS:0, pic=FF, dosmiss=intD2). */
+		/* 拡張子無しフォールバックはカタログの "MMD2" 用。
+		   `MMD2.SYS 4096` (CONFIG 末尾) を "MMD2" に削ると zip 先頭の
+		   mmd2.com に当たり、AddFile が本物の SYS を上書きした
+		   (orangerd の device INIT が CS:0 の COM: FA/CLI、pic=FF、dosmiss=intD2)。 */
 		if (strchr(name, '/') || strchr(name, '\\'))
 			continue;
 		const int queryHasExt = (strchr(base, '.') != NULL);
@@ -253,7 +261,7 @@ const unsigned char* CEmuZipFsFind(const CEmuZipFs* fs, const char* name, unsign
 	if (idx < 0) return NULL;
 	if (outSize) *outSize = fs->files[idx].size;
 	if (fs->namesOnly || !fs->files[idx].data) {
-		/* names-only: signal presence via non-NULL when size>0 for hit counting */
+		/* names-only: ヒット数用に size>0 なら非 NULL で存在を知らせる */
 		return fs->files[idx].size > 0 ? (const unsigned char*)1 : NULL;
 	}
 	return fs->files[idx].data;
@@ -270,6 +278,7 @@ int CEmuZipFsHas(const CEmuZipFs* fs, const char* name, unsigned* outSize)
 	return 1;
 }
 
+/* ベース名 / フルパス一致のみ — 数字コアのあいまい一致なし（カタログ順位用） */
 int CEmuZipFsHasExact(const CEmuZipFs* fs, const char* name, unsigned* outSize)
 {
 	if (outSize) *outSize = 0;

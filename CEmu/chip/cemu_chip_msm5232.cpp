@@ -4,8 +4,8 @@
 #include "../fmmon/fmmon_shadow.h"
 #include <string.h>
 
-/* Compact MSM5232: pitch ROM + square TG + simple AR/DR envelopes.
-   Enough for flstory/nycaptor melody without full MAME capacitor model. */
+/* 簡易 MSM5232: ピッチROM + 矩形TG + 単純 AR/DR。
+   flstory/nycaptor メロディ用。MAMEのコンデンサモデルは持たない。 */
 
 #define MSM_STEP_SH 16
 #define MSM_VMIN 0
@@ -179,11 +179,12 @@ public:
 			GroupAdvance(1, &o2, &o4, &o8, &o16);
 			s += o2 + o4 + o8 + o16;
 			AdvanceNoise();
-			/* GroupAdvance mid-scale is quiet vs AY residual; keep melody well
-			   above PEAK_MIN (200) for flstory classify without hard clip. */
+			/* GroupAdvance の中域は AY残差より静か。flstory 分類で
+			   PEAK_MIN(200) を超えるようメロディを持ち上げ、ハードクリップは避ける。 */
 			s *= 32;
 			if (s > 32767) s = 32767;
 			if (s < -32768) s = -32768;
+			/* モノラル矩形を L/R へ同じ値。 */
 			stereo[i * 2] = (int16_t)s;
 			stereo[i * 2 + 1] = (int16_t)s;
 		}
@@ -214,7 +215,7 @@ private:
 	{
 		const double rate = (double)sampleRate_;
 		const double clock = (double)clockHz_;
-		updateStep_ = (int)((double)(1 << MSM_STEP_SH) * rate / clock);
+		updateStep_ = (int)((double)(1 << MSM_STEP_SH) * rate / clock); /* クロック→サンプル */
 		noiseStep_ = (int)(((1 << MSM_STEP_SH) / 128.0) * (clock / rate));
 		for (int i = 0; i < 8; i++) {
 			const int rcp = 1 << ((i & 4) ? (i & ~2) : i);
@@ -254,8 +255,8 @@ private:
 				v->mode = 0;
 				v->egSect = 0;
 			}
-			/* Firmware usually arms group outs via 0x0C/0x0D; if still zero,
-			   enable the matching group's outs so keyed pitches are audible. */
+			/* ファームは通常 0x0C/0x0D でグループ出力を武装する。まだ0なら
+			   対応グループの出力を有効化し、キーオンしたピッチが聞こえるようにする。 */
 			const int g = ch < 4 ? 0 : 1;
 			if (!enOut16_[g] && !enOut8_[g] && !enOut4_[g] && !enOut2_[g]) {
 				enOut16_[g] = enOut8_[g] = enOut4_[g] = enOut2_[g] = ~0;
@@ -266,8 +267,8 @@ private:
 		UpdateMon(ch);
 	}
 
-	/* Pitch writes are the MSM key strobe. Without this the FM monitor stays
-	   blank on nycaptor/msisaac/40love while the square melody is audible. */
+	/* ピッチ書き込みがMSMのキーストローブ。これが無いと nycaptor/msisaac/40love
+	   で矩形メロディは聞こえるのにFMモニタが空白のままになる。 */
 	void UpdateMon(int ch)
 	{
 		if (ch < 0 || ch >= 8) return;
@@ -280,6 +281,7 @@ private:
 			return;
 		monOn_[ch] = (uint8_t)on;
 		monMidi_[ch] = (uint8_t)midi;
+		/* FMモニタへキーオン/オフ。 */
 		FmMonShadowPcmNote(ch, midi, on);
 	}
 
@@ -412,6 +414,7 @@ private:
 	int noiseStep_;
 };
 
+/* MSM5232 ラッパ生成。 */
 CChip* CEmuChipMsm5232Create(uint32_t clockHz, int sampleRate)
 {
 	return new CChipMsm5232(clockHz, sampleRate);

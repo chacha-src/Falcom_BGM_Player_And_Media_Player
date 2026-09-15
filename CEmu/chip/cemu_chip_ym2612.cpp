@@ -6,7 +6,7 @@
 #include "ymfm_opn.h"
 #include <string.h>
 
-/* YM2612 wrapper patterned after cemu_chip_opna.cpp; ymfm BSD-3-Clause core. */
+/* YM2612 ラッパ。cemu_chip_opna.cpp と同型。コアは ymfm（BSD-3-Clause）。 */
 static int CEmuYm2612Clamp16(int32_t v)
 {
 	if (v > 32767) return 32767;
@@ -32,8 +32,8 @@ public:
 		ym_ = new ymfm::ym2612(*this);
 		chipRate_ = (int)ym_->sample_rate(clockHz_);
 		if (chipRate_ <= 0) chipRate_ = (int)(clockHz_ / 72);
-		/* Layout/identity come from CEmuFmMonBindFromGe (OPN2 vs OPN+SSG vs
-		   Sys32 composite). Do not force OPN layout 0 here. */
+		/* レイアウト/識別は CEmuFmMonBindFromGe（OPN2 vs OPN+SSG vs
+		   Sys32 複合）。ここで OPN レイアウト0を強制しない。 */
 		Reset();
 	}
 
@@ -68,6 +68,7 @@ public:
 		ym_->write(off, v);
 		const unsigned shadowAddr = ((off & 2) ? 0x100u : 0u) | lastAddr_[(off >> 1) & 1];
 		reg_[shadowAddr & 0x1ff] = v;
+		/* FMモニタへOPN2レジスタをシャドウ。 */
 		FmMonShadowWriteReg(shadowAddr, v);
 	}
 
@@ -100,6 +101,7 @@ public:
 			int64_t l = 0, r = 0;
 			int n = 0;
 			chipAcc_ += chipRate_;
+			/* chipRate_ は ymfm sample_rate（通常 clock/72）。ホストへリサンプル。 */
 			while (chipAcc_ >= hostRate_) {
 				chipAcc_ -= hostRate_;
 				ymfm::ym2612::output_data o;
@@ -114,6 +116,7 @@ public:
 				curL_ = (int32_t)(l / n);
 				curR_ = (int32_t)(r / n);
 			}
+			/* ステレオMix: 生成済み L/R を既存バッファへ加算。 */
 			stereo[i * 2] = (int16_t)CEmuYm2612Clamp16((int32_t)stereo[i * 2] + curL_ * gain / 256);
 			stereo[i * 2 + 1] = (int16_t)CEmuYm2612Clamp16((int32_t)stereo[i * 2 + 1] + curR_ * gain / 256);
 		}
@@ -153,6 +156,7 @@ private:
 	uint8_t reg_[512];
 };
 
+/* YM2612/OPN2 ラッパ生成。 */
 CChip* CEmuChipYm2612Create(uint32_t clockHz, int sampleRate)
 {
 	return new CChipYm2612(clockHz, sampleRate);

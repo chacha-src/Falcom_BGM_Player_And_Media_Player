@@ -19,6 +19,7 @@ extern "C" {
 #include <string.h>
 #include <stdlib.h>
 
+/* CEmuAcIsCodeRomType の実装 */
 static int CEmuAcIsCodeRomType(const char* t)
 {
 	if (!t || !t[0]) return 0;
@@ -28,7 +29,7 @@ static int CEmuAcIsCodeRomType(const char* t)
 		|| _strnicmp(t, "code", 4) == 0) ? 1 : 0;
 }
 
-/* ---- SEI80BU helpers ---- */
+/* ---- SEI80BU ヘルパ ---- */
 
 void CHardAc::SeibuSetBank(unsigned bank)
 {
@@ -36,13 +37,14 @@ void CHardAc::SeibuSetBank(unsigned bank)
 	SeibuRefreshOpcodes();
 }
 
+/* CHardAc::SeibuRefreshOpcodes の実装 */
 void CHardAc::SeibuRefreshOpcodes()
 {
 	if (!soundRom_) return;
 	if (!seibuEnc_) {
 		const unsigned bankOff = seibuBank_ ? 0x18000u : 0x10000u;
 		for (unsigned a = 0; a < 0x10000u; a++) {
-			if (a >= 0x2000u && a <= 0x27ffu) continue; /* RAM */
+			if (a >= 0x2000u && a <= 0x27ffu) continue; /* RAM（ワーク） */
 			unsigned phys;
 			if (a < 0x8000u)
 				phys = a;
@@ -54,7 +56,7 @@ void CHardAc::SeibuRefreshOpcodes()
 	}
 	const unsigned bankOff = seibuBank_ ? 0x18000u : 0x10000u;
 	for (unsigned a = 0; a < 0x10000u; a++) {
-		if (a >= 0x2000u && a <= 0x27ffu) continue; /* RAM */
+		if (a >= 0x2000u && a <= 0x27ffu) continue; /* RAM（ワーク） */
 		unsigned phys;
 		if (a < 0x8000u)
 			phys = a;
@@ -68,6 +70,7 @@ void CHardAc::SeibuRefreshOpcodes()
 	}
 }
 
+/* CEmuSeibuPhys の実装 */
 static unsigned CEmuSeibuPhys(CHardAc* hw, uint16_t addr)
 {
 	(void)hw;
@@ -76,6 +79,7 @@ static unsigned CEmuSeibuPhys(CHardAc* hw, uint16_t addr)
 	return 0x10000u + (addr & 0x7fffu);
 }
 
+/* データを載せる */
 int CHardAc::LoadRomsSeibu(CEmuZipFs* fs, const CEmuGameEntry* ge)
 {
 	if (!fs || !ge || !cpu_ || !chip_) return 0;
@@ -83,7 +87,7 @@ int CHardAc::LoadRomsSeibu(CEmuZipFs* fs, const CEmuGameEntry* ge)
 	if (soundRom_) { free(soundRom_); soundRom_ = NULL; soundRomSize_ = 0; }
 	if (pcmRom_) { free(pcmRom_); pcmRom_ = NULL; pcmRomSize_ = 0; }
 
-	/* Code ROM → 0x20000 MAME layout. */
+	/* コード ROM → 0x20000 MAME レイアウト */
 	for (int i = 0; i < ge->romCount; i++) {
 		const CEmuRomEntry* r = &ge->rom[i];
 		if (!CEmuAcIsCodeRomType(r->type)) continue;
@@ -110,7 +114,7 @@ int CHardAc::LoadRomsSeibu(CEmuZipFs* fs, const CEmuGameEntry* ge)
 	}
 	if (!soundRomSize_) return 0;
 
-	/* OKI PCM */
+	/* OKI PCM サンプル */
 	for (int i = 0; i < ge->romCount; i++) {
 		const CEmuRomEntry* r = &ge->rom[i];
 		if (!r->type || (_stricmp(r->type, "pcm") != 0 && _stricmp(r->type, "oki") != 0
@@ -141,7 +145,7 @@ int CHardAc::LoadRomsSeibu(CEmuZipFs* fs, const CEmuGameEntry* ge)
 	irqPulse_ = 0;
 	opmWrites_ = 0;
 	cpuCycles_ = 0;
-	/* Local raiden/heatbrl dumps are plaintext (JP @$04 / LD SP @$70). */
+	/* 手元の raiden/heatbrl ダンプは平文（JP @$04 / LD SP @$70） */
 	seibuEnc_ = !(soundRom_[4] == 0xc3 || soundRom_[0x70] == 0x31);
 	SeibuRefreshOpcodes();
 	if (chip_) chip_->Reset();
@@ -151,22 +155,19 @@ int CHardAc::LoadRomsSeibu(CEmuZipFs* fs, const CEmuGameEntry* ge)
 	return 1;
 }
 
-/* ---- Raizing / Eighting ---- */
+/* ---- Raizing / Eighting 基板 ---- */
 
-/* Fixed ROM window, i.e. everything below the bank window (or below RAM on
-   the two boards that have no bank window at all). */
+/* 固定 ROM 窓。バンク窓より下（バンク窓が無い 2 基板では RAM より下）のすべて */
 static unsigned CEmuRaizingFixedSize(int type)
 {
 	switch (type) {
-	case 1: return 0xc000u; /* mahoudai: 0000-BFFF ROM, C000-DFFF RAM */
-	case 4: return 0xc000u; /* bbakraid: 0000-BFFF ROM, C000-FFFF RAM */
-	default: return 0x8000u; /* bgaregga / batrider: bank window at 8000 */
+	case 1: return 0xc000u; /* mahoudai マップ: 0000-BFFF ROM、C000-DFFF RAM */
+	case 4: return 0xc000u; /* bbakraid マップ: 0000-BFFF ROM、C000-FFFF RAM */
+	default: return 0x8000u; /* bgaregga / batrider: バンク窓は 8000 */
 	}
 }
 
-/* The catalog parks Battle Garegga's snd.bin at offset 0x8000 because Hoot
-   describes the bank window rather than the ROM, so the recorded offset is
-   not a destination here — the image always starts at 0. */
+/* カタログは Battle Garegga の snd.bin をオフセット 0x8000 に置く。Hoot が ROM ではなくバンク窓を記述するため、記録オフセットはここでの配置先ではない — イメージは常に 0 開始。 */
 int CHardAc::LoadRomsRaizing(CEmuZipFs* fs, const CEmuGameEntry* ge)
 {
 	if (!fs || !ge || !cpu_ || !chip_) return 0;
@@ -195,9 +196,7 @@ int CHardAc::LoadRomsRaizing(CEmuZipFs* fs, const CEmuGameEntry* ge)
 		memcpy(mem_, soundRom_, n);
 	}
 
-	/* Sample ROMs. Batrider's two OKIs get one image each (catalog types
-	   adpcm1 / adpcm2); Battle Bakraid's YMZ280B takes three 4 MB banks
-	   concatenated at the offsets the catalog gives. */
+	/* サンプル ROM。Batrider の 2 OKI は各 1 イメージ（カタログ type adpcm1 / adpcm2）。Battle Bakraid の YMZ280B はカタログオフセットで連結した 4MB バンク×3。 */
 	for (int i = 0; i < ge->romCount; i++) {
 		const CEmuRomEntry* r = &ge->rom[i];
 		if (!r->type || CEmuAcIsCodeRomType(r->type)) continue;
@@ -246,38 +245,40 @@ int CHardAc::LoadRomsRaizing(CEmuZipFs* fs, const CEmuGameEntry* ge)
 	return 1;
 }
 
-/* ---- M62 / M6803 ---- */
+/* ---- M62 / M6803 基板 ---- */
 
 static uint8_t M62BusRead(struct m6800* cpu, uint16_t addr)
 {
 	CHardAc* hw = (CHardAc*)cpu->ctx;
 	if (!hw) return 0xff;
 	addr = (uint16_t)(addr & hw->M62BusMask());
-	/* M62/M52-large: ROM 4000-FFFF. M52-small (mask 7FFF): ROM 2000-7FFF. */
+	/* M62/M52-large: ROM 4000-FFFF。M52-small（mask 7FFF）: ROM 2000-7FFF マップ */
 	if (addr >= 0x2000)
 		return hw->Mem()[addr];
-	/* Internal 6803 IRAM / IO handled by m6800_do_read before this; open bus. */
+	/* 内部 6803 IRAM / IO はこれより前に m6800_do_read。オープンバス */
 	return 0xff;
 }
 
+/* IRQ 配送 */
 static void M62IrqAck(struct m6800* cpu, CHardAc* hw)
 {
-	/* MAME sound_irq_ack_w: clear IRQ only while latch bit7 is set. */
+	/* MAME sound_irq_ack_w: ラッチ bit7 セット中だけ IRQ をクリア */
 	if ((hw->SoundCommand() & 0x80) != 0)
 		m6800_clear_interrupt(cpu, IRQ_IRQ1);
 }
 
+/* バス書込 */
 static void M62BusWrite(struct m6800* cpu, uint16_t addr, uint8_t val)
 {
 	CHardAc* hw = (CHardAc*)cpu->ctx;
 	if (!hw) return;
 	addr = (uint16_t)(addr & hw->M62BusMask());
-	/* M62: 0800 irq ack (mirror f7fc); 0801/0802 ADPCM (AY BGM ignores). */
+	/* M62: 0800 irq ack（ミラー f7fc）。0801/0802 ADPCM（AY BGM は無視） */
 	if ((addr & 0xf7fc) == 0x0800) {
 		M62IrqAck(cpu, hw);
 		return;
 	}
-	/* M52-small: irq ack 1000-1fff; M52-large: 2000-3fff. */
+	/* M52-small: irq ack 1000-1fff。M52-large: 2000-3fff 応答 */
 	if ((addr >= 0x1000 && addr <= 0x1fff) || (addr >= 0x2000 && addr <= 0x3fff)) {
 		M62IrqAck(cpu, hw);
 		return;
@@ -285,12 +286,13 @@ static void M62BusWrite(struct m6800* cpu, uint16_t addr, uint8_t val)
 	(void)val;
 }
 
+/* M62PortIn の実装 */
 static uint8_t M62PortIn(struct m6800* cpu, int port)
 {
 	CHardAc* hw = (CHardAc*)cpu->ctx;
 	if (!hw) return 0xff;
 	if (port == 1) {
-		/* MAME m6803_port1_r: PSG data bus when selected. */
+		/* MAME m6803_port1_r: 選択時 PSG データバス */
 		if ((hw->M62Port2() & 0x08) && hw->SoundChip())
 			return hw->SoundChip()->ReadData();
 		if ((hw->M62Port2() & 0x10) && hw->Chip2())
@@ -298,10 +300,11 @@ static uint8_t M62PortIn(struct m6800* cpu, int port)
 		return 0xff;
 	}
 	if (port == 2)
-		return 0x00; /* tied high via resistor — MAME returns 0 */
+		return 0x00; /* 抵抗で High 固定 — MAME は 0 を返す */
 	return 0xff;
 }
 
+/* M62PortOut の実装 */
 static void M62PortOut(struct m6800* cpu, int port, uint8_t val)
 {
 	CHardAc* hw = (CHardAc*)cpu->ctx;
@@ -314,10 +317,10 @@ static void M62PortOut(struct m6800* cpu, int port, uint8_t val)
 		hw->M62OnPort2Write(val);
 }
 
+/* バス書込 */
 void CHardAc::M62OnPort2Write(uint8_t val)
 {
-	/* MAME irem.cpp m6803_port2_w: BC1/PSG selects come from the PREVIOUS
-	   port2 value; only bit0 falling-edge is the strobe from `val`. */
+	/* MAME irem.cpp m6803_port2_w: BC1/PSG 選択は直前の port2 値。ストローブは `val` の bit0 立ち下がりだけ。 */
 	const uint8_t prev = m62Port2_;
 	if ((prev & 0x01) && !(val & 0x01)) {
 		CChip* ayM = chip_;
@@ -332,7 +335,7 @@ void CHardAc::M62OnPort2Write(uint8_t val)
 			if ((prev & 0x08) && ayM) {
 				ayM->Write(1, m62Port1_);
 				opmWrites_++;
-				/* AY#0 port B bit0 = MSM5205 #1 reset (MAME ay8910_45M_portb_w). */
+				/* AY#0 port B bit0 = MSM5205 #1 リセット（MAME ay8910_45M_portb_w） */
 				if (m62AyMAddr_ == 0x0f)
 					m62MsmReset_ = (m62Port1_ & 0x01) ? 1 : 0;
 			}
@@ -345,11 +348,12 @@ void CHardAc::M62OnPort2Write(uint8_t val)
 	m62Port2_ = val;
 }
 
+/* データを載せる */
 int CHardAc::LoadRomsM62(CEmuZipFs* fs, const CEmuGameEntry* ge)
 {
 	if (!fs || !ge || !chip_ || !m6803_) return 0;
 	memset(mem_, 0xff, sizeof(mem_));
-	/* MAME m52_small_sound_map uses global_mask 0x7fff (mpatrol/travrusa). */
+	/* MAME m52_small_sound_map は global_mask 0x7fff（mpatrol/travrusa） */
 	m62BusMask_ = 0xffffu;
 	if (ge->archive && (!_stricmp(ge->archive, "mpatrol")
 		|| !_stricmp(ge->archive, "travrusa")))
@@ -363,7 +367,7 @@ int CHardAc::LoadRomsM62(CEmuZipFs* fs, const CEmuGameEntry* ge)
 		if (!data || !sz || data == (const unsigned char*)1) continue;
 		int off = r->offset;
 		if (off < 0) off = 0;
-		/* XML F000 + 15-bit bus → physical 7000 (vectors at 7FFx). */
+		/* XML F000 + 15bit バス → 物理 7000（ベクタは 7FFx） */
 		if (m62BusMask_ == 0x7fffu && (unsigned)off > m62BusMask_)
 			off = (int)((unsigned)off & m62BusMask_);
 		if ((unsigned)off >= 0x10000u) continue;
@@ -373,7 +377,7 @@ int CHardAc::LoadRomsM62(CEmuZipFs* fs, const CEmuGameEntry* ge)
 		loaded++;
 	}
 	if (!loaded) {
-		/* Fallback: place members at high addresses in name order. */
+		/* フォールバック: メンバを名前順で高番地へ置く */
 		unsigned off = 0x10000u;
 		for (int i = fs->fileCount - 1; i >= 0 && off > 0x4000u; i--) {
 			const unsigned sz = fs->files[i].size;
@@ -392,8 +396,7 @@ int CHardAc::LoadRomsM62(CEmuZipFs* fs, const CEmuGameEntry* ge)
 	m62Port2_ = 0;
 	m62AyMAddr_ = 0;
 	m62MsmReset_ = 1;
-	/* Idle latch with bit7 set so ack can clear; IRQ starts clear so init
-	   (SEI/CLI around FA22) can finish before the host posts a song. */
+	/* アイドルラッチは bit7 セットで ack がクリアできる。IRQ はクリア開始し、ホストが曲を投げる前に init（FA22 周りの SEI/CLI）が終わる。 */
 	soundCmd_ = 0x80;
 	soundCmdPending_ = 0;
 	irqPulse_ = 0;
@@ -403,7 +406,7 @@ int CHardAc::LoadRomsM62(CEmuZipFs* fs, const CEmuGameEntry* ge)
 	if (chip2_) chip2_->Reset();
 	if (chip_) CEmuChipAySetPortA(chip_, 0x80);
 
-	/* m6800_reset memset()s the CPU — install bus hooks after reset. */
+	/* m6800_reset は CPU を memset — リセット後にバスフックを入れる */
 	m6800_reset(m6803_, CPU_6803, INTIO_6803, 2);
 	m6803_->ctx = this;
 	m6803_->read = M62BusRead;
@@ -412,16 +415,15 @@ int CHardAc::LoadRomsM62(CEmuZipFs* fs, const CEmuGameEntry* ge)
 	m6803_->port_out = M62PortOut;
 	m6803_->pc = ((uint16_t)M62BusRead(m6803_, 0xFFFE) << 8)
 		| M62BusRead(m6803_, 0xFFFF);
-	m6803_->s = 0x00ff; /* until firmware LDS */
+	m6803_->s = 0x00ff; /* ファームが LDS するまで */
 	m6803_->debug = 0;
-	/* $BC is the latched song id; 0 means "stop" and memset'd IRAM would
-	   make the first main-loop pass kill BGM before the host posts a title. */
+	/* $BC はラッチした曲 ID。0 は「停止」。memset 済み IRAM だと最初のメインループがホスト投稿前に BGM を殺す。 */
 	if (m6803_->iram_base <= 0xbc && 0xbc <= 0xff)
 		m6803_->iram[0xbc - m6803_->iram_base] = 0xff;
 	return 1;
 }
 
-/* ---- Sega Model1 / early Model2 MultiPCM + 68000 MIDI host ---- */
+/* ---- Sega Model1 / 初期 Model2 MultiPCM + 68000 MIDI ホスト ---- */
 
 void CHardAc::SegaMidiPush(uint8_t b)
 {
@@ -432,29 +434,27 @@ void CHardAc::SegaMidiPush(uint8_t b)
 	segaMidiIrq_ = 1;
 }
 
+/* CHardAc::SegaMidiInjectSong の実装 */
 void CHardAc::SegaMidiInjectSong(uint16_t cmd)
 {
-	/* Default: A0 + title as big-endian (hi, lo). Firmware @ $2AF2 uses
-	   byte0 as bank-table index and byte1 as song index. */
+	/* 既定: A0 + タイトルをビッグエンディアン（hi, lo）。ファーム @ $2AF2 は byte0 をバンク表添字、byte1 を曲添字。 */
 	SegaMidiInjectSongMode(cmd, 1);
 }
 
+/* CHardAc::SegaMidiInjectSongMode の実装 */
 void CHardAc::SegaMidiInjectSongMode(uint16_t cmd, int hiFirst)
 {
-	/* Never leave the 68K MIDI framer mid-message: wiping the host FIFO while
-	   F01000 still expects data bytes makes the next status byte look like
-	   payload → wrong song + PCM stutter on re-inject. */
+	/* 68K MIDI フレーマをメッセージ途中で残さない: F01000 がデータバイト待ちのままホスト FIFO を消すと次ステータスがペイロードに見え、再注入で曲違い＋PCM 途切れ。 */
 	if (ms1Ram_) {
-		ms1Ram_[0x1000] = 0; /* expected remaining data bytes */
+		ms1Ram_[0x1000] = 0; /* 残り期待データバイト */
 		ms1Ram_[0x1001] = 0;
-		ms1Ram_[0x1008] = 0; /* running status */
+		ms1Ram_[0x1008] = 0; /* ランニングステータス */
 	}
 	segaMidiHead_ = segaMidiTail_ = 0;
 	segaMidiIrq_ = 0;
 	const uint8_t lo = (uint8_t)(cmd & 0xff);
 	const uint8_t hi = (uint8_t)((cmd >> 8) & 0xff);
-	/* Non-stop titles: queue Stop (0x1000) in the same FIFO before the
-	   real select so MultiPCM voices drop cleanly (avoids start stutter). */
+	/* 非停止タイトル: 本物選択の前に同じ FIFO へ Stop（0x1000）をキューし MultiPCM ボイスをきれいに落とす（開始途切れ回避） */
 	if (cmd != 0x1000u) {
 		SegaMidiPush(0xa0);
 		SegaMidiPush(0x10);
@@ -470,12 +470,13 @@ void CHardAc::SegaMidiInjectSongMode(uint16_t cmd, int hiFirst)
 	}
 }
 
+/* バス読込 */
 uint8_t CHardAc::SegaUartRead(unsigned reg)
 {
 	if (reg & 1) {
-		/* 8251 status: TxRDY always, RxRDY if FIFO has data. */
-		uint8_t st = 0x01; /* TxRDY */
-		if (segaMidiHead_ != segaMidiTail_) st |= 0x02; /* RxRDY */
+		/* 8251 ステータス: TxRDY 常時、FIFO にデータがあれば RxRDY */
+		uint8_t st = 0x01; /* TxRDY（送信 ready） */
+		if (segaMidiHead_ != segaMidiTail_) st |= 0x02; /* RxRDY（受信 ready） */
 		return st;
 	}
 	if (segaMidiHead_ == segaMidiTail_) return 0x00;
@@ -485,12 +486,14 @@ uint8_t CHardAc::SegaUartRead(unsigned reg)
 	return b;
 }
 
+/* バス書込 */
 void CHardAc::SegaUartWrite(unsigned reg, uint8_t data)
 {
 	(void)reg;
-	(void)data; /* TX / mode ignored */
+	(void)data; /* TX／モードは無視 */
 }
 
+/* バス読込 */
 unsigned CHardAc::Sega68Read16(unsigned addr)
 {
 	addr &= 0xfffffeu;
@@ -516,6 +519,7 @@ unsigned CHardAc::Sega68Read16(unsigned addr)
 	return 0xffff;
 }
 
+/* バス読込 */
 unsigned CHardAc::Sega68Read8(unsigned addr)
 {
 	if (addr < 0x040000u || (addr >= 0x080000u && addr <= 0x09ffffu)) {
@@ -544,6 +548,7 @@ unsigned CHardAc::Sega68Read8(unsigned addr)
 	return 0xff;
 }
 
+/* バス書込 */
 void CHardAc::Sega68Write16(unsigned addr, uint16_t v)
 {
 	addr &= 0xfffffeu;
@@ -558,6 +563,7 @@ void CHardAc::Sega68Write16(unsigned addr, uint16_t v)
 	Sega68Write8(addr + 1, (uint8_t)v);
 }
 
+/* バス書込 */
 void CHardAc::Sega68Write8(unsigned addr, uint8_t v)
 {
 	if (addr >= 0xf00000u && addr <= 0xf0ffffu) {
@@ -568,17 +574,13 @@ void CHardAc::Sega68Write8(unsigned addr, uint8_t v)
 		SegaUartWrite((addr >> 1) & 1u, v);
 		return;
 	}
-	/* MAME segam1audio_map maps both MultiPCMs and the YM3438 with
-	   umask16(0x00ff), so only the odd (low) byte lane reaches them. Serving
-	   the even lane as well made every word store hit the register twice -
-	   once with the high half as bogus data - which is what turned daytona
-	   and vf into a rail-to-rail buzz. */
+	/* MAME segam1audio_map は両 MultiPCM と YM3438 を umask16(0x00ff) でマップし、奇数（下位）バイトレーンだけ届く。偶数レーンも出すとワードストアが毎回レジスタを 2 回叩き — 上位半分が偽データ — daytona と vf がレールツーレールbuzz になった原因。 */
 	if (addr >= 0xc40000u && addr <= 0xc40007u) {
 		if ((addr & 1u) && pcm_) pcm_->Write((addr >> 1) & 3u, v);
 		return;
 	}
 	if (addr >= 0xc50000u && addr <= 0xc50001u) {
-		/* m1_snd_mpcm_bnk1_w takes the whole word; bits are in the low half. */
+		/* m1_snd_mpcm_bnk1_w はワード全体。ビットは下位半分 */
 		if (addr & 1u) CEmuChipMultiPcmSetBank(pcm_, v & 3u);
 		return;
 	}
@@ -599,29 +601,25 @@ void CHardAc::Sega68Write8(unsigned addr, uint8_t v)
 	}
 }
 
-/* ---- Sega Model 2A/2B/2C/3 sound board: 68000 + SCSP ----------------------
+/* ---- Sega Model 2A/2B/2C/3 音源基板: 68000 + SCSP ----------------------
 
    MAME sega/model2.cpp model2_snd:
-     000000-07FFFF  soundram — also the SCSP's whole wave space (scsp_map)
-     100000-100FFF  SCSP registers
-     400000-400001  model2snd_ctrl: sample bank select (bit 0x20)
-     600000-67FFFF  sound program ROM (audiocpu, ROM_LOAD16_WORD_SWAP)
-     800000-9FFFFF  samples +0x000000
-     A00000-DFFFFF  bank4: samples +0x200000, or +0x800000 when the latch is low
-     E00000-FFFFFF  bank5: samples +0x600000, or +0xA00000
+     000000-07FFFF  soundram — SCSP の波形空間全体でもある（scsp_map）
+     100000-100FFF  SCSP レジスタ
+     400000-400001  model2snd_ctrl: サンプルバンク選択（bit 0x20）
+     600000-67FFFF  音源プログラム ROM（audiocpu、ROM_LOAD16_WORD_SWAP）
+     800000-9FFFFF  サンプル +0x000000
+     A00000-DFFFFF  bank4: サンプル +0x200000、ラッチ Low なら +0x800000
+     E00000-FFFFFF  bank5: サンプル +0x600000、または +0xA00000
 
-   reset_model2_scsp also copies the ROM's first 16 bytes (the 68000 vector
-   table) into soundram, which is how the CPU boots into the 0x600000 window.
+   reset_model2_scsp は ROM 先頭 16 バイト（68000 ベクタ表）を soundram へコピーし、CPU が 0x600000 窓へブートする。
 
-   soundram holds 16-bit words in host order — the vendored SCSP core follows
-   the byte-swapped-RAM convention that eng_ssf uses — so byte access from the
-   68000 side goes through addr^1. */
+   soundram はホスト順 16bit ワード — ベンダー SCSP コアは eng_ssf のバイトスワップ RAM 規約に従う — 68000 側バイトアクセスは addr^1。 */
 
 static const unsigned kScspRegBase = 0x100000u;
 static const unsigned kScspRomBase = 0x600000u;
 
-/* Map a 68000 address in the three sample windows to a wave-ROM offset, or
-   0xffffffff when the address is outside them. */
+/* 3 つのサンプル窓内の 68000 番地を波形 ROM オフセットへ。窓外なら 0xffffffff */
 unsigned CHardAc::Sega2ASampleOffset(unsigned addr) const
 {
 	if (addr >= 0x800000u && addr <= 0x9fffffu)
@@ -633,13 +631,14 @@ unsigned CHardAc::Sega2ASampleOffset(unsigned addr) const
 	return 0xffffffffu;
 }
 
+/* バス読込 */
 unsigned CHardAc::Sega2ARead16(unsigned addr)
 {
 	addr &= 0xfffffeu;
 	if (addr < 0x080000u) {
 		uint8_t* ram = CEmuChipScspRam();
 		if (!ram) return 0xffff;
-		/* Host-order word: read it as stored, no lane swap. */
+		/* ホスト順ワード: 格納どおり読む。レーンスワップ無し */
 		return (unsigned)(((uint16_t)ram[addr + 1] << 8) | ram[addr]);
 	}
 	if (addr >= kScspRegBase && addr <= kScspRegBase + 0xffeu)
@@ -655,6 +654,7 @@ unsigned CHardAc::Sega2ARead16(unsigned addr)
 	return 0xffff;
 }
 
+/* バス読込 */
 unsigned CHardAc::Sega2ARead8(unsigned addr)
 {
 	if (addr < 0x080000u) {
@@ -678,6 +678,7 @@ unsigned CHardAc::Sega2ARead8(unsigned addr)
 	return 0xff;
 }
 
+/* バス書込 */
 void CHardAc::Sega2AWrite16(unsigned addr, uint16_t v)
 {
 	addr &= 0xfffffeu;
@@ -693,12 +694,13 @@ void CHardAc::Sega2AWrite16(unsigned addr, uint16_t v)
 		return;
 	}
 	if (addr == 0x400000u) {
-		/* model2snd_ctrl: bit 0x20 picks the low sample half. */
+		/* model2snd_ctrl: bit 0x20 が低サンプル半面を選ぶ */
 		scspSampleBank_ = (v & 0x20u) ? 0 : 1;
 		return;
 	}
 }
 
+/* バス書込 */
 void CHardAc::Sega2AWrite8(unsigned addr, uint8_t v)
 {
 	if (addr < 0x080000u) {
@@ -708,7 +710,7 @@ void CHardAc::Sega2AWrite8(unsigned addr, uint8_t v)
 	}
 	if (addr >= kScspRegBase && addr <= kScspRegBase + 0xfffu) {
 		if (!chip_) return;
-		/* Byte lane merge — the register file is word wide. */
+		/* バイトレーンマージ — レジスタファイルはワード幅 */
 		const unsigned idx = (addr - kScspRegBase) >> 1;
 		unsigned cur = CEmuChipScspReadReg(chip_, idx);
 		if (addr & 1u)
@@ -724,9 +726,7 @@ void CHardAc::Sega2AWrite8(unsigned addr, uint8_t v)
 	}
 }
 
-/* Song select reaches the sound program over the SCSP MIDI input, the same
-   route the main board uses on real hardware. The catalog codes are the
-   16-bit ids the firmware expects after the 0xA0 status byte. */
+/* 曲選択は実機メイン基板と同じ SCSP MIDI 入力で音源プログラムへ届く。カタログコードは 0xA0 ステータス後にファームが期待する 16bit ID。 */
 void CHardAc::Sega2AInjectSong(uint16_t cmd)
 {
 	if (!chip_) return;
@@ -740,11 +740,13 @@ void CHardAc::Sega2AInjectSong(uint16_t cmd)
 	CEmuChipScspMidiIn(chip_, (uint8_t)(cmd & 0xff));
 }
 
+/* CHardAc::SegaScspMidiPending の実装 */
 int CHardAc::SegaScspMidiPending() const
 {
 	return CEmuChipScspMidiPending();
 }
 
+/* データを載せる */
 int CHardAc::LoadRomsSegaScsp(CEmuZipFs* fs, const CEmuGameEntry* ge)
 {
 	if (!fs || !ge || segaM1Audio_) return 0;
@@ -752,9 +754,7 @@ int CHardAc::LoadRomsSegaScsp(CEmuZipFs* fs, const CEmuGameEntry* ge)
 	if (pcmRom_) { free(pcmRom_); pcmRom_ = NULL; pcmRomSize_ = 0; }
 	scspSampleBank_ = 0;
 
-	/* Sound program: ROM_LOAD16_WORD_SWAP into a 512KB window. The catalog
-	   keeps it at a region offset (0x80000 for Model 2A), but the CPU sees it
-	   at 0x600000, so normalise to a window-relative image. */
+	/* 音源プログラム: 512KB 窓へ ROM_LOAD16_WORD_SWAP。カタログは領域オフセット（Model 2A は 0x80000）だが CPU は 0x600000 で見るので、窓相対イメージへ正規化する。 */
 	unsigned romNeed = 0x80000u;
 	uint8_t* prog = (uint8_t*)calloc(1, romNeed);
 	if (!prog) return 0;
@@ -777,9 +777,7 @@ int CHardAc::LoadRomsSegaScsp(CEmuZipFs* fs, const CEmuGameEntry* ge)
 	ms1Rom_ = prog;
 	ms1RomSize_ = romNeed;
 
-	/* Wave ROMs: ROM_REGION16_BE, each part ROM_LOAD16_WORD_SWAP at the
-	   catalog offset. Keep them big-endian so the 68000 copy loop sees the
-	   same bytes it would on hardware. */
+	/* 波形 ROM: ROM_REGION16_BE、各パートはカタログオフセットで ROM_LOAD16_WORD_SWAP。68000 コピーループが実機と同じバイトを見るようビッグエンディアンのまま。 */
 	unsigned pcmNeed = 0xc00000u;
 	for (int i = 0; i < ge->romCount; i++) {
 		const CEmuRomEntry* r = &ge->rom[i];
@@ -817,9 +815,7 @@ int CHardAc::LoadRomsSegaScsp(CEmuZipFs* fs, const CEmuGameEntry* ge)
 	cpuCycles_ = 0;
 	if (chip_) chip_->Reset();
 
-	/* reset_model2_scsp: the vector table lives in RAM, copied from the ROM.
-	   soundram keeps host-order words, and the ROM image is already big-endian
-	   after the word swap above, so the 16 bytes go back through a swap. */
+	/* reset_model2_scsp: ベクタ表は RAM にあり ROM からコピー。soundram はホスト順ワード。ROM イメージは上のワードスワップ後すでにビッグエンディアンなので 16 バイトはスワップして戻す。 */
 	uint8_t* ram = CEmuChipScspRam();
 	if (ram) {
 		for (unsigned j = 0; j + 1u < 16u; j += 2u) {
@@ -836,6 +832,7 @@ int CHardAc::LoadRomsSegaScsp(CEmuZipFs* fs, const CEmuGameEntry* ge)
 	return 1;
 }
 
+/* データを載せる */
 int CHardAc::LoadRomsSegaM1(CEmuZipFs* fs, const CEmuGameEntry* ge)
 {
 	if (!fs || !ge || !segaM1Audio_) return 0;
@@ -844,10 +841,7 @@ int CHardAc::LoadRomsSegaM1(CEmuZipFs* fs, const CEmuGameEntry* ge)
 	if (pcmRom_) { free(pcmRom_); pcmRom_ = NULL; pcmRomSize_ = 0; }
 	if (pcmRom2_) { free(pcmRom2_); pcmRom2_ = NULL; pcmRom2Size_ = 0; }
 
-	/* MAME M1AUDIO_CPU_REGION: ROM_LOAD16_WORD_SWAP at absolute offsets
-	   (daytona epr-16720 @0, epr-16721 @0x20000). This is NOT odd/even byte
-	   interleave — that scramble left the 68K executing garbage and only the
-	   old MultiPCM host-poke path made noise. */
+	/* MAME M1AUDIO_CPU_REGION: 絶対オフセットで ROM_LOAD16_WORD_SWAP（daytona epr-16720 @0、epr-16721 @0x20000）。これは奇数／偶数バイトインタリーブではない — そのスクランブルは 68K がゴミ実行し、旧 MultiPCM ホスト poke 経路だけが音を出した。 */
 	unsigned romNeed = 0x40000u;
 	for (int i = 0; i < ge->romCount; i++) {
 		const CEmuRomEntry* r = &ge->rom[i];
@@ -872,7 +866,7 @@ int CHardAc::LoadRomsSegaM1(CEmuZipFs* fs, const CEmuGameEntry* ge)
 		unsigned n = sz;
 		if (off + n > romNeed) n = romNeed - off;
 		memcpy(p + off, data, n);
-		/* ROM_LOAD16_WORD_SWAP: swap each 16-bit word in the loaded span. */
+		/* ROM_LOAD16_WORD_SWAP: ロード範囲の各 16bit ワードをスワップ */
 		for (unsigned j = 0; j + 1u < n; j += 2u) {
 			const uint8_t t = p[off + j];
 			p[off + j] = p[off + j + 1u];
@@ -887,7 +881,7 @@ int CHardAc::LoadRomsSegaM1(CEmuZipFs* fs, const CEmuGameEntry* ge)
 	ms1Ram_ = (uint8_t*)calloc(1, 0x10000);
 	if (!ms1Ram_) return 0;
 
-	/* pcm0 / pcm1 wave ROMs (up to 4MB each). */
+	/* pcm0 / pcm1 波形 ROM（各最大 4MB） */
 	auto loadPcm = [&](const char* type, uint8_t** dst, unsigned* dstSz) {
 		unsigned need = 0x400000u;
 		uint8_t* buf = (uint8_t*)calloc(1, need);
@@ -937,23 +931,22 @@ int CHardAc::LoadRomsSegaM1(CEmuZipFs* fs, const CEmuGameEntry* ge)
 
 /* ---- Konami Hornet / GTI Club: 68000 + RF5C400 + K056800 -----------------
 
-   Hornet / nwk-tr (MAME hornet.cpp sound_memmap):
-     000000-07FFFF  program ROM (ROM_LOAD16_WORD_SWAP)
-     100000-10FFFF  work RAM
+   Hornet / nwk-tr（MAME hornet.cpp sound_memmap）:
+     000000-07FFFF  プログラム ROM（ROM_LOAD16_WORD_SWAP）
+     100000-10FFFF  ワーク RAM
      200000-200FFF  RF5C400
-     300000-30001F  K056800 sound side (umask16 0x00ff → odd bytes)
-     500000         soundtimer_en_w  (bit0 clear = enable IRQ1)
-     600000         soundtimer_ack_w (clear IRQ1)
+     300000-30001F  K056800 音源側（umask16 0x00ff → 奇数バイト）
+     500000         soundtimer_en_w（bit0 クリア = IRQ1 許可）
+     600000         soundtimer_ack_w（IRQ1 クリア）
 
-   GTI Club relocates RAM to 0x200000 and the RF5C400 to 0x400000; the
-   K056800 and timer ports stay put. Periodic IRQ1 fires at
-   16.9344MHz/384/128 ≈ 344.5 Hz while enabled; K056800 raises IRQ2. */
+   GTI Club は RAM を 0x200000、RF5C400 を 0x400000 へ移す。K056800 とタイマポートは同じ。周期 IRQ1 は許可中 16.9344MHz/384/128 ≈ 344.5 Hz。K056800 は IRQ2 を上げる。 */
 
 static unsigned CEmuHornetK056800Off(unsigned addr)
 {
 	return ((addr >> 1) & 7u);
 }
 
+/* バス読込 */
 unsigned CHardAc::HornetRead16(unsigned addr)
 {
 	addr &= 0xfffffeu;
@@ -970,10 +963,11 @@ unsigned CHardAc::HornetRead16(unsigned addr)
 	const unsigned chipBase = hornetGti_ ? 0x400000u : 0x200000u;
 	if (addr >= chipBase && addr <= chipBase + 0xffeu)
 		return CEmuChipRf5c400ReadReg(chip_, (addr - chipBase) >> 1);
-	/* K056800 / timer only visible on the low byte via Read8. */
+	/* K056800／タイマは Read8 経由の下位バイトだけ見える */
 	return 0xffff;
 }
 
+/* バス読込 */
 unsigned CHardAc::HornetRead8(unsigned addr)
 {
 	if (addr < 0x080000u) {
@@ -998,6 +992,7 @@ unsigned CHardAc::HornetRead8(unsigned addr)
 	return 0xff;
 }
 
+/* バス書込 */
 void CHardAc::HornetWrite16(unsigned addr, uint16_t v)
 {
 	addr &= 0xfffffeu;
@@ -1015,7 +1010,7 @@ void CHardAc::HornetWrite16(unsigned addr, uint16_t v)
 		return;
 	}
 	if (addr == 0x500000u) {
-		/* soundtimer_en_w: bit0 clear enables the 344.5 Hz IRQ1. */
+		/* soundtimer_en_w: bit0 クリアで 344.5 Hz IRQ1 を許可 */
 		hornetTimerEn_ = (v & 1u) ? 0 : 1;
 		if (!hornetTimerEn_) hornetTimerIrq_ = 0;
 		return;
@@ -1024,10 +1019,11 @@ void CHardAc::HornetWrite16(unsigned addr, uint16_t v)
 		hornetTimerIrq_ = 0;
 		return;
 	}
-	/* Fall through to byte lanes for K056800 (umask 0x00ff). */
+	/* K056800（umask 0x00ff）用にバイトレーンへフォールスルー */
 	HornetWrite8(addr + 1, (uint8_t)v);
 }
 
+/* バス書込 */
 void CHardAc::HornetWrite8(unsigned addr, uint8_t v)
 {
 	const unsigned ramBase = hornetGti_ ? 0x200000u : 0x100000u;
@@ -1075,9 +1071,10 @@ void CHardAc::HornetWrite8(unsigned addr, uint8_t v)
 	}
 }
 
+/* CHardAc::HornetInjectSong の実装 */
 void CHardAc::HornetInjectSong(unsigned code)
 {
-	/* Catalog codes are 0x01xx0000-style: four host_to_snd bytes, high first. */
+	/* カタログコードは 0x01xx0000 系: ホスト→snd 4 バイト、上位から */
 	if (!code) return;
 	GxHostInject(
 		(uint8_t)(code >> 24),
@@ -1086,10 +1083,11 @@ void CHardAc::HornetInjectSong(unsigned code)
 		(uint8_t)code);
 }
 
+/* CHardAc::HornetTickTimer の実装 */
 void CHardAc::HornetTickTimer(int cycles)
 {
 	if (!hornetTimerEn_ || cycles <= 0) return;
-	/* 16 MHz CPU, IRQ at 16.9344MHz/384/128 ≈ 344.53125 Hz → ~46440 cycles. */
+	/* 16 MHz CPU、IRQ は 16.9344MHz/384/128 ≈ 344.53125 Hz → 約 46440 サイクル */
 	const int period = 46440;
 	hornetTimerAcc_ += cycles;
 	while (hornetTimerAcc_ >= period) {
@@ -1098,6 +1096,7 @@ void CHardAc::HornetTickTimer(int cycles)
 	}
 }
 
+/* データを載せる */
 int CHardAc::LoadRomsHornet(CEmuZipFs* fs, const CEmuGameEntry* ge)
 {
 	if (!fs || !ge) return 0;
@@ -1115,7 +1114,7 @@ int CHardAc::LoadRomsHornet(CEmuZipFs* fs, const CEmuGameEntry* ge)
 		const unsigned char* data = CEmuZipFsFind(fs, r->name, &sz);
 		if (!data || !sz) continue;
 		unsigned n = sz < romNeed ? sz : romNeed;
-		/* ROM_LOAD16_WORD_SWAP → big-endian words for Musashi. */
+		/* ROM_LOAD16_WORD_SWAP → Musashi 用ビッグエンディアンワード */
 		for (unsigned j = 0; j + 1u < n; j += 2u) {
 			prog[j] = data[j + 1u];
 			prog[j + 1u] = data[j];
@@ -1155,7 +1154,7 @@ int CHardAc::LoadRomsHornet(CEmuZipFs* fs, const CEmuGameEntry* ge)
 		if (off >= pcmNeed) continue;
 		unsigned n = sz;
 		if (off + n > pcmNeed) n = pcmNeed - off;
-		/* RF5C400 ROM is little-endian words (device_rom_interface LE). */
+		/* RF5C400 ROM はリトルエンディアンワード（device_rom_interface LE） */
 		memcpy(pcm + off, data, n);
 	}
 	pcmRom_ = pcm;

@@ -4,7 +4,7 @@
 #include <windows.h>
 #endif
 
-/* In-process PMDWin (CEmu/pmd/pmdwin) for CEmu PMD zips. No DLL. */
+/* プロセス内 PMDWin (CEmu/pmd/pmdwin)。CEmu PMD zip 用。DLL なし */
 
 struct CEmuZipFs;
 

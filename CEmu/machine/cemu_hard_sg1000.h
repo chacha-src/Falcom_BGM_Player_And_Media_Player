@@ -26,7 +26,7 @@ public:
 	uint64_t CpuCycles() const { return cpuCycles_; }
 	void AddCpuCycles(uint64_t n) { cpuCycles_ += n; }
 
-	/* Star Jacker-class: mailbox @C066, update @5AFA. */
+	/* Star Jacker 系: メールボックス @C066、update @5AFA */
 	uint16_t mailboxAddr_;
 	uint16_t soundUpdatePc_;
 	uint16_t soundMutePc_;

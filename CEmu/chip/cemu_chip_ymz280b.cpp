@@ -5,23 +5,22 @@
 #include <math.h>
 #include <string.h>
 
-/* Yamaha YMZ280B, modelled on MAME ymz280b.cpp.
+/* Yamaha YMZ280B。MAME ymz280b.cpp を参考。
 
-   Register map (voice = (reg >> 2) & 7, field = reg & 0xe3):
-     $00+4v  pitch low 8 bits
-     $01+4v  bit0 pitch high, bits5-6 mode (1=ADPCM 2=8bit 3=16bit),
-             bit4 loop, bit7 key on
-     $02+4v  total level
-     $03+4v  pan (0=hard left, 8=centre, 15=hard right)
-     $20+4v / $40+4v / $60+4v   start address  high / mid / low
-     $21/$41/$61                loop start
-     $22/$42/$62                loop end
-     $23/$43/$63                stop address
-     $FF     bit7 enables key-on
+   レジスタマップ（voice = (reg >> 2) & 7, field = reg & 0xe3）:
+     $00+4v  ピッチ下位8bit
+     $01+4v  bit0 ピッチ上位, bits5-6 モード（1=ADPCM 2=8bit 3=16bit）,
+             bit4 ループ, bit7 キーオン
+     $02+4v  トータルレベル
+     $03+4v  パン（0=左、8=中央、15=右）
+     $20+4v / $40+4v / $60+4v   開始アドレス  上位 / 中 / 下位
+     $21/$41/$61                ループ開始
+     $22/$42/$62                ループ終了
+     $23/$43/$63                停止アドレス
+     $FF     bit7 がキーオンを許可
 
-   The three address bytes form a byte offset, but the play position counts
-   ADPCM nibbles, so each register triple is shifted up one bit and a 16-bit
-   PCM voice consumes four position steps per sample, an 8-bit voice two. */
+   アドレス3バイトはバイトオフセットだが、再生位置はADPCMニブルなので
+   各トリプルは1bit左シフト。16bit PCMはサンプルあたり4ステップ、8bitは2。 */
 enum {
 	kYmzVoices = 8,
 	kYmzFracBits = 14
@@ -55,7 +54,7 @@ public:
 		return n;
 	}
 
-	/* Board wiring, not chip state, so Reset must not clear it. */
+	/* 基板配線でありチップ状態ではないので、Reset で消さない。 */
 	void SetMono(int mono) { mono_ = (uint8_t)(mono ? 1 : 0); }
 
 	void Reset() override
@@ -85,7 +84,7 @@ public:
 	uint8_t ReadStatus() override
 	{
 		const uint8_t s = status_;
-		status_ = 0; /* status bits clear on read */
+		status_ = 0; /* 読みでステータスbitをクリア */
 		return s;
 	}
 	uint8_t ReadData() override { return 0; }
@@ -111,7 +110,7 @@ public:
 			playing++;
 			int volL, volR;
 			PanVolume(vc, &volL, &volR);
-			if (mono_) volL = volR = volL + volR;
+			if (mono_) volL = volR = volL + volR; /* 両出力をモノラル合算 */
 			for (int f = 0; f < frames; f++) {
 				while (vc.frac >= (1u << kYmzFracBits)) {
 					vc.frac -= (1u << kYmzFracBits);
@@ -119,6 +118,7 @@ public:
 				}
 				if (!vc.playing) break;
 				const int s = vc.sample;
+				/* ステレオMix: サンプル×パン音量を既存バッファへ。 */
 				const int l = (s * volL) >> 8;
 				const int r = (s * volR) >> 8;
 				const int al = (int)stereo[f * 2] + (l * gain >> 8);
@@ -128,9 +128,8 @@ public:
 				vc.frac += vc.step;
 			}
 		}
-		/* Held ADPCM streams key on once. The classify probe scores
-		   sequencing from monitor edges, so pulse a hit while a voice
-		   is still decoding — otherwise looping Bakraid BGM looks GAPPY. */
+		/* 保持ADPCMはキーオン1回。分類プローブはモニタ辺でシーケンスを採点するので、
+		   デコード中にヒットをパルスする — しないとループBGM（Bakraid）がGAPPYになる。 */
 		if (playing) {
 			monAcc_ += frames;
 			const int period = sampleRate_ / 5;
@@ -167,12 +166,12 @@ public:
 private:
 	struct Voice {
 		uint32_t start, loopStart, loopEnd, stop;
-		uint32_t pos;      /* current nibble address */
+		uint32_t pos;      /* 現在のニブルアドレス */
 		uint32_t frac, step;
 		uint16_t fnum;
 		uint8_t mode, loop, keyon, level, pan, playing;
-		int sample;        /* last decoded sample, 16-bit signed */
-		int signal, stepIndex;  /* ADPCM state */
+		int sample;        /* 直前のデコードサンプル（符号付き16bit） */
+		int signal, stepIndex;  /* ADPCM 状態 */
 		int loopSignal, loopStepIndex;
 		uint8_t loopLatched;
 	};
@@ -183,12 +182,12 @@ private:
 		if (reg == 0xff) {
 			const int en = (data & 0x80) ? 1 : 0;
 			if (keyEnable_ && !en) {
-				/* Dropping the enable silences every voice. */
+				/* イネーブルを落とすと全ボイス無音。 */
 				for (int i = 0; i < kYmzVoices; i++)
 					SetPlaying(i, 0);
 			} else if (!keyEnable_ && en) {
-				/* Raising it restarts the held loops, so a program that keys
-				   on before enabling still gets its voices (MAME 0xFF). */
+				/* 上げると保持ループを再開。イネーブル前にキーオンしたプログラムも
+				   ボイスを取る（MAME 0xFF）。 */
 				for (int i = 0; i < kYmzVoices; i++)
 					if (v_[i].keyon && v_[i].loop) SetPlaying(i, 1);
 			}
@@ -206,15 +205,15 @@ private:
 		case 0x01: {
 			vc.fnum = (uint16_t)((vc.fnum & 0x0ffu) | ((data & 1u) << 8));
 			vc.loop = (uint8_t)((data >> 4) & 1);
-			/* Mode 0 is not a mode: it leaves the previous one in place and
-			   reads as key-off however bit 7 is set. */
+			/* モード0はモードではない: 直前モードを残し、bit7が立っていても
+			   キーオフとして読む。 */
 			if ((data & 0x60u) == 0) data &= 0x7fu;
 			else vc.mode = (uint8_t)((data & 0x60u) >> 5);
 			const int on = (data & 0x80) ? 1 : 0;
 			UpdateStep(vc);
 			if (on && keyEnable_ && !vc.playing) {
 				vc.pos = vc.start;
-				vc.frac = 1u << kYmzFracBits; /* fetch on first sample */
+				vc.frac = 1u << kYmzFracBits; /* 最初のサンプルでフェッチ */
 				vc.signal = 0;
 				vc.stepIndex = 127;
 				vc.sample = 0;
@@ -227,7 +226,7 @@ private:
 			break;
 		}
 		case 0x02: vc.level = data; break;
-		case 0x03: vc.pan = (uint8_t)(data & 0x0f); break;
+		case 0x03: vc.pan = (uint8_t)(data & 0x0f); break; /* 0=左 … 8=中央 … 15=右 */
 		case 0x20: vc.start = (vc.start & (0x00ffffu << 1)) | ((uint32_t)data << 17); break;
 		case 0x21: vc.loopStart = (vc.loopStart & (0x00ffffu << 1)) | ((uint32_t)data << 17); break;
 		case 0x22: vc.loopEnd = (vc.loopEnd & (0x00ffffu << 1)) | ((uint32_t)data << 17); break;
@@ -246,7 +245,7 @@ private:
 
 	void UpdateStep(Voice& vc)
 	{
-		/* ADPCM ignores the 9th pitch bit. */
+		/* ADPCM はピッチの9bit目を無視。ストリームは clock/384。 */
 		const unsigned n = (vc.mode == 1) ? (vc.fnum & 0x0ffu) : (vc.fnum & 0x1ffu);
 		const double masterHz = (double)clockHz_ / 384.0;
 		const double rate = masterHz * (double)(n + 1) / 256.0;
@@ -261,6 +260,7 @@ private:
 		if (vc.playing == (uint8_t)on) return;
 		vc.playing = (uint8_t)on;
 		if (!on) status_ = (uint8_t)(status_ | (1u << i));
+		/* FMモニタへキーオン/オフ。 */
 		FmMonShadowPcmNote(i, 60 + i, on);
 	}
 
@@ -269,12 +269,12 @@ private:
 		return (byteAddr < romSize_) ? rom_[byteAddr] : 0;
 	}
 
-	/* Decode one output sample; returns 0 once the voice has stopped. */
+	/* 出力サンプル1つをデコード。停止したら0。 */
 	int NextSample(int i, Voice& vc)
 	{
 		uint32_t adv;
 		switch (vc.mode) {
-		case 1: { /* 4-bit ADPCM, two samples per byte */
+		case 1: { /* 4bit ADPCM。1バイトに2サンプル */
 			const uint8_t b = RomByte(vc.pos >> 1);
 			const int nib = (vc.pos & 1u) ? (b & 0x0f) : (b >> 4);
 			const int delta = vc.stepIndex * kNibbleStep[nib & 7] / 8;
@@ -288,11 +288,11 @@ private:
 			adv = 1;
 			break;
 		}
-		case 2: /* 8-bit signed PCM: one sample per two position steps */
+		case 2: /* 符号付き8bit PCM。位置2ステップで1サンプル */
 			vc.sample = (int)(int8_t)RomByte(vc.pos >> 1) * 256;
 			adv = 2;
 			break;
-		case 3: { /* 16-bit signed PCM, little endian */
+		case 3: { /* 符号付き16bit PCM（リトルエンディアン） */
 			const uint32_t a = vc.pos >> 1;
 			vc.sample = (int)(int16_t)((uint16_t)RomByte(a)
 				| ((uint16_t)RomByte(a + 1) << 8));
@@ -306,8 +306,8 @@ private:
 		vc.pos += adv;
 		if (vc.loop) {
 			if (!vc.loopLatched && vc.pos >= vc.loopStart) {
-				/* Snapshot the ADPCM predictor at the loop point so repeats
-				   do not drift away from the first pass. */
+				/* ループ点でADPCM予測器をスナップショットし、繰り返しが
+				   初回パスからドリフトしないようにする。 */
 				vc.loopSignal = vc.signal;
 				vc.loopStepIndex = vc.stepIndex;
 				vc.loopLatched = 1;
@@ -358,14 +358,15 @@ private:
 	Voice v_[kYmzVoices];
 };
 
-/* The chip carries its ADPCM step as a live 0x7F..0x6000 value scaled by the
-   nibble magnitude, rather than an index into a precomputed step table. */
+/* チップはADPCMステップを 0x7F..0x6000 の生値として持ち、ニブル振幅で
+   スケールする。事前計算ステップ表の索引ではない。 */
 const int CChipYmz280b::kIndexScale[8] = {
 	0x0e6, 0x0e6, 0x0e6, 0x0e6, 0x133, 0x199, 0x200, 0x266
 };
 
 const int CChipYmz280b::kNibbleStep[8] = { 1, 3, 5, 7, 9, 11, 13, 15 };
 
+/* YMZ280B ラッパ生成。ストリームは clock/384。 */
 CChip* CEmuChipYmz280bCreate(uint32_t clockHz, int sampleRate)
 {
 	return new CChipYmz280b(clockHz, sampleRate);

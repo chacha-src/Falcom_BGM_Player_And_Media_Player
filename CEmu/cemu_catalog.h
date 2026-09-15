@@ -35,7 +35,7 @@ const CEmuGameEntry* CEmuCatalogFindArchive(const CEmuCatalog* cat,
 const CEmuGameEntry* CEmuCatalogFindArchiveForZip(const CEmuCatalog* cat,
 	const char* archive, const char* dataDirHint, const CEmuZipFs* zipFs);
 
-/* Ranked list of same-archive catalog rows (zip member hits). For open/play retry. */
+/* 同一アーカイブの候補を zip メンバ一致で順位付け。open/play の再試行用 */
 int CEmuCatalogCollectArchiveForZip(const CEmuCatalog* cat,
 	const char* archive, const CEmuZipFs* zipFs,
 	const CEmuGameEntry** out, int outCap);
@@ -44,12 +44,11 @@ int CEmuCatalogParseFile(CEmuCatalog* cat, const wchar_t* xmlPath, const char* d
 int CEmuCatalogParseBuffer(CEmuCatalog* cat, const char* xmlText, const char* dataDirHint);
 
 void CEmuCatalogAssignHwIds(CEmuGameEntry* ge);
-/* Fill ge->docChipIds from the chip names written in ge->name. */
+/* ge->name に書かれたチップ名から ge->docChipIds を埋める */
 void CEmuCatalogAssignDocChips(CEmuGameEntry* ge);
-/* Chip ids named anywhere in text, using every spelling the rips use.
-   Returns how many were written. */
+/* テキスト中のチップ ID。rip 側の表記ゆれを全部見る。書いた件数を返す */
 int CEmuCatalogChipsFromText(const char* text, int* ids, int maxIds);
-/* Let duplicate rows for one archive share whichever row names the chips. */
+/* 同一アーカイブの重複行で、チップ名がある行の docChip を共有する */
 void CEmuCatalogShareDocChips(CEmuCatalog* cat);
 
 int CEmuArchiveStemFromPath(const wchar_t* zipPath, char* out, int outCap);

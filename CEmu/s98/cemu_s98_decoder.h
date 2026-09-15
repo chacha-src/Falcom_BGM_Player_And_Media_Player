@@ -4,10 +4,11 @@
 #include "kpi_impl.h"
 #include "kbs98_config.h"
 
-extern const wchar_t SEC_GENERAL[];// = L"General";
-extern const wchar_t KEY_RHYTHM[];// = L"Rhythm";
+extern const wchar_t SEC_GENERAL[]; /* = L"General" */
+extern const wchar_t KEY_RHYTHM[]; /* = L"Rhythm" */
 
 class s98File;
+/* KPI IKpiDecoder 実装。CEmuS98Player が impl として保持する */
 class KbS98Decoder : public KbKpiUnknownImpl<IKpiDecoder>
 {
 private:

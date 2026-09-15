@@ -4,7 +4,7 @@
 #include <string.h>
 #include <stdlib.h>
 
-/* Compact SAA1099 core from MAME (BSD-3-Clause; Buchmueller/Abadia). */
+/* Compact SAA1099 コア（MAME BSD-3-Clause; Buchmueller/Abadia）。 */
 
 enum { SAA_LEFT = 0, SAA_RIGHT = 1, SAA_DIV = 256 };
 
@@ -45,8 +45,8 @@ public:
 		, writeCount_(0)
 		, toneOnCount_(0)
 		, selectedReg_(0)
-		/* CMS.DRV never writes reg 0x1C (all-enable); Creative titles rely on
-		   sound being live once freq_enable (0x14) is programmed. Default on. */
+		/* CMS.DRV は reg 0x1C（全イネーブル）を書かない。Creative系は
+		   freq_enable(0x14) を書いた時点で鳴る前提。既定でオン。 */
 		, allEnable_(1)
 		, clockResidual_(0)
 	{
@@ -95,8 +95,8 @@ public:
 		if (!stereo || frames <= 0) return;
 		memset(stereo, 0, (size_t)frames * 2 * sizeof(int16_t));
 		if (!allEnable_ || clockHz_ == 0 || sampleRate_ == 0) return;
-		/* MAME: stream rate = clock/256; each StepOne is one stream tick
-		   (counter -= 256). Running at full clock made tones ~8 octaves high. */
+		/* MAME: ストリームレート=clock/256。StepOne はストリーム1ティック
+		   （counter -= 256）。フルクロックだと約8オクターブ高い。 */
 		for (int i = 0; i < frames; i++) {
 			clockResidual_ += (uint64_t)clockHz_;
 			const uint64_t den = (uint64_t)sampleRate_ * (uint64_t)SAA_DIV;
@@ -109,6 +109,7 @@ public:
 			if (ol < -32768) ol = -32768;
 			if (orr > 32767) orr = 32767;
 			if (orr < -32768) orr = -32768;
+			/* ステレオMix: 左/右アンプをそのまま書く。 */
 			stereo[i * 2] = (int16_t)ol;
 			stereo[i * 2 + 1] = (int16_t)orr;
 		}
@@ -189,8 +190,8 @@ private:
 				ch_[ch].freq_enable = (data >> ch) & 1;
 				if (ch_[ch].freq_enable) toneOnCount_++;
 			}
-			/* CMS.DRV never writes reg 0x1C; it only arms tones via 0x14.
-			   Keep/restore all-enable so Render is not stuck silent. */
+			/* CMS.DRV は 0x1C を書かず 0x14 だけでトーンを武装する。
+			   all-enable を戻し、Render が無音のまま固まらないようにする。 */
 			if (data & 0x3f)
 				allEnable_ = 1;
 			break;
@@ -303,6 +304,7 @@ private:
 	uint64_t clockResidual_;
 };
 
+/* SAA1099 ラッパ生成。ストリームは clock/256。 */
 CChip* CEmuChipSaa1099Create(uint32_t clockHz, int sampleRate)
 {
 	return new CChipSaa1099(clockHz, sampleRate);

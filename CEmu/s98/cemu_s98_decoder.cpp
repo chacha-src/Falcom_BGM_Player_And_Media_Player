@@ -729,6 +729,7 @@ DWORD s98File::Write(double *Buffer, DWORD numSample)
 
 #include "../cemu_s98.h"
 
+/* S98 プレーヤをゼロ初期化 */
 void CEmuS98Init(CEmuS98Player* p)
 {
 	if (!p) return;
@@ -744,6 +745,7 @@ void CEmuS98Close(CEmuS98Player* p)
 	p->open = 0;
 }
 
+/* バッファから S98/VGM を開き、モニタへ identity を渡す */
 int CEmuS98OpenBuffer(CEmuS98Player* p, const BYTE* buf, DWORD size, DWORD sampleRate, const wchar_t* srcPath)
 {
 	if (!p || !buf || !size) return 0;
@@ -775,6 +777,7 @@ int CEmuS98OpenBuffer(CEmuS98Player* p, const BYTE* buf, DWORD size, DWORD sampl
 	return 1;
 }
 
+/* サンプル位置へ。シャドウ時計も合わせる */
 int CEmuS98Seek(CEmuS98Player* p, UINT64 sample, DWORD flags)
 {
 	(void)flags;
@@ -786,6 +789,7 @@ int CEmuS98Seek(CEmuS98Player* p, UINT64 sample, DWORD flags)
 	return 1;
 }
 
+/* 描画。FmMon は readcemu で一度だけ進める */
 int CEmuS98Render(CEmuS98Player* p, short* outStereo, int sampleFrames)
 {
 	if (!p || !p->impl || !outStereo || sampleFrames <= 0) return 0;

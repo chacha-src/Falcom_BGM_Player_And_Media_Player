@@ -5,14 +5,14 @@
 #include <string.h>
 #include <stdlib.h>
 
-/* Konami SCC: 5 tone channels. Period is a 12-bit value in master clocks per
-   wave step; the wave is 32 signed bytes. Channel 4 reuses channel 3's wave
-   on the original SCC (SCC+ has a separate wave — we keep the original). */
+/* Konami SCC: 5トーンch。周期は波形1ステップあたりのマスタクロック12bit。
+   波形は符号付き32バイト。原SCCではch4がch3波形を再利用（SCC+は独立だが
+   こちらは原仕様のまま）。 */
 
 namespace {
 const int kSccChannels = 5;
 const int kSccWave = 32;
-const int kSccRegs = 0xC0; /* SCC-I also uses $A0-$BF (ch5 wave / test) */
+const int kSccRegs = 0xC0; /* SCC-I は $A0-$BF も使う（ch5波形 / テスト） */
 } /* namespace */
 
 class CChipScc : public CChip {
@@ -45,7 +45,7 @@ public:
 		if (reg >= (unsigned)kSccRegs) return;
 		regs_[reg] = data;
 		if (reg >= 0x80u)
-			UpdateMon();
+			UpdateMon(); /* 周波数/音量/オンをFMモニタへ */
 	}
 
 	uint8_t ReadReg(unsigned reg) const
@@ -66,7 +66,7 @@ public:
 	void MixAdd(int16_t* stereo, int frames, int gain) override
 	{
 		if (!stereo || frames <= 0) return;
-		/* Advance master clocks per output sample. */
+		/* 出力1サンプルあたりマスタクロックを進める。 */
 		const uint32_t step = (clockHz_ + (uint32_t)sampleRate_ / 2u)
 			/ (uint32_t)sampleRate_;
 
@@ -87,7 +87,7 @@ public:
 						phase_[ch] = (phase_[ch] + 1) & (kSccWave - 1);
 					}
 				} else if (period > 1) {
-					/* Keep phase moving so mute→unmute doesn't click. */
+					/* ミュート中も位相を動かし、unmute時のクリックを防ぐ。 */
 					acc_[ch] += step;
 					while (acc_[ch] >= period) {
 						acc_[ch] -= period;
@@ -95,7 +95,7 @@ public:
 					}
 				}
 			}
-			/* wave±128 * vol15 * 5ch → scale into a comfortable headroom. */
+			/* 波形±128 * vol15 * 5ch → 余裕あるヘッドルームへスケール。 */
 			mix = (mix * gain) / (16 * 4);
 			int32_t l = (int32_t)stereo[i * 2] + mix;
 			int32_t r = (int32_t)stereo[i * 2 + 1] + mix;
@@ -128,7 +128,7 @@ private:
 		if (plusMode_)
 			return (const int8_t*)(regs_ + ch * kSccWave);
 		if (ch >= 4)
-			return (const int8_t*)(regs_ + 0xA0); /* SCC-I ch5 wave */
+			return (const int8_t*)(regs_ + 0xA0); /* SCC-I ch5 波形 */
 		return (const int8_t*)(regs_ + ch * kSccWave);
 	}
 
@@ -141,6 +141,7 @@ private:
 			freq[i] = Period(i) - 1u;
 			vol[i] = (unsigned)regs_[volBase + i] & 0x0fu;
 		}
+		/* SCC周波数/音量/オンマスクをFMモニタへ。 */
 		FmMonShadowSetMsxDevices(SASAMI_FMMON_DEV_PSG | SASAMI_FMMON_DEV_SCC);
 		FmMonShadowApplyScc(freq, vol, onMask & 0x1fu);
 	}
@@ -153,6 +154,7 @@ private:
 	uint32_t acc_[kSccChannels];
 };
 
+/* SCC ラッパ生成。 */
 CChip* CEmuChipSccCreate(uint32_t clockHz, int sampleRate)
 {
 	return new CChipScc(clockHz, sampleRate);

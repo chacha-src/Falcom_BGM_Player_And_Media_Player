@@ -1,25 +1,25 @@
-#include "StdAfx.h"
+﻿#include "StdAfx.h"
 #include "cemu_chip_c30.h"
 #include "cemu_chip.h"
 #include "../fmmon/fmmon_shadow.h"
 #include <string.h>
 
-/* Namco CUS30 8-voice wavetable PSG.
-   Ported from hoot ssC30.cpp / ssC30.h (MAME namco.cpp CUS30 / 15XX register
-   behavior — license:BSD-3-Clause, copyright-holders:Nicola Salmoria,
-   Aaron Giles; hoot adaptation retains the same algorithm). Adapted to the
-   CEmu CChip interface (no ssSoundChip / track-info layer).
+/* Namco CUS30 8ボイス ウェーブテーブル PSG。
+   hoot ssC30.cpp / ssC30.h からの移植（MAME namco.cpp の CUS30 / 15XX レジスタ
+   挙動 — license:BSD-3-Clause, copyright-holders:Nicola Salmoria,
+   Aaron Giles。hoot 適応は同じアルゴリズム）。CEmu CChip 向け
+   （ssSoundChip / track-info 層は無し）。
 
-   MAME namco_cus30 amap (relative):
-     0x000-0x0ff  wave RAM (16 waves x 16 packed nibbles)
-     0x100-0x13f  voice registers (8 voices x 8)
-     0x140-0x3ff  shared RAM (ignored here)
+   MAME namco_cus30 amap（相対）:
+     0x000-0x0ff  波形RAM（16波 × 16パックニブル）
+     0x100-0x13f  ボイスレジスタ（8ボイス × 8）
+     0x140-0x3ff  共有RAM（ここでは無視）
 
-   System 1 / 86 register layout (per voice, base = ch*8):
-     +0 left vol    +1 wave_sel|freq_hi  +2/+3 freq
-     +4 right vol; bit7 of +4 keys noise on next channel
-   Mappy / 15XX layout (WriteMAPPY):
-     +3 volume (mono)  +4/+5/+6 frequency  +6 hi nibble selects wave */
+   System 1 / 86 レイアウト（ボイス毎、base = ch*8）:
+     +0 左音量    +1 wave_sel|freq_hi  +2/+3 freq
+     +4 右音量; +4 の bit7 が次chのノイズをキー
+   Mappy / 15XX レイアウト（WriteMAPPY）:
+     +3 音量（モノ）  +4/+5/+6 周波数  +6 上位ニブルが波形選択 */
 
 enum { kC30Voices = 8, kC30WaveBytes = 0x100, kC30Regs = 0x40 };
 
@@ -68,7 +68,7 @@ public:
 			WritePacman(a & 0x1fu, (uint8_t)(d & 0x0fu));
 			return;
 		}
-		/* MAME namco_15xx amap: 000-03F regs, 040-3FF shared RAM (no wave RAM). */
+		/* MAME namco_15xx amap: 000-03F レジスタ、040-3FF 共有RAM（波形RAM無し）。 */
 		if (mode_ == CEMU_C30_MAPPY) {
 			if (a < 0x40u)
 				WriteRegMappy((int)a, d);
@@ -84,7 +84,7 @@ public:
 			WriteReg((int)(a - 0x100u), d);
 			return;
 		}
-		/* Direct 0x00-0x3f register poke (audition / stripped maps). */
+		/* 直接 0x00-0x3f レジスタpoke（試聴 / 簡略マップ）。 */
 		if (a < kC30Regs)
 			WriteReg((int)a, d);
 	}
@@ -131,7 +131,8 @@ public:
 						s = (int8_t)((ch.wave[p >> 1] >> 4) - 8);
 					s = (int8_t)(s << 4);
 					const int l = (int)s * vl;
-					const int r = (int)s * vr;
+					const int r = (int)s * vr; /* 左右音量（パン） */
+					/* ステレオMix: 波形×L/R を既存バッファへ。 */
 					stereo[f * 2] = (int16_t)CEmuC30Clamp16(
 						(int)stereo[f * 2] + l * gain / 256);
 					stereo[f * 2 + 1] = (int16_t)CEmuC30Clamp16(
@@ -167,8 +168,8 @@ public:
 
 	void SetPcmRom(const uint8_t* data, unsigned size) override
 	{
-		/* PROM / dumped wave tables for older WSG boards. CUS30 normally
-		   gets wave RAM written by the sound CPU into 0x000-0x0ff. */
+		/* 旧WSG基板向け PROM / ダンプ波形。CUS30 は通常サウンドCPUが
+		   0x000-0x0ff へ波形RAMを書く。 */
 		if (!data || !size) return;
 		const unsigned n = size < kC30WaveBytes ? size : (unsigned)kC30WaveBytes;
 		memcpy(wave_, data, n);
@@ -204,11 +205,10 @@ private:
 		int noise_seed;
 	};
 
-	/* Report the voice to the FM monitor. CUS30 has no key-on strobe: a voice
-	   sounds whenever it has volume and a non-zero divisor, which is exactly
-	   the condition MixAdd uses. The bind table already lists CUS30 as 8 PCM
-	   rows, so without this the monitor stayed blank on every WSG board while
-	   audio played (rally-x, wsg6809, nd1, wsg63701). */
+	/* ボイスをFMモニタへ報告。CUS30 にキーオンストローブは無い: 音量があり
+	   除数が非0なら鳴る（MixAdd と同じ条件）。束縛表は CUS30 を 8 PCM 行として
+	   載せるので、これが無いと全WSG基板で音声は出てもモニタが空白
+	   （rally-x, wsg6809, nd1, wsg63701）。 */
 	void UpdateMon(int channel)
 	{
 		if (channel < 0 || channel >= kC30Voices) return;
@@ -216,10 +216,10 @@ private:
 		const int hasVol = (ch.voll || ch.volr) ? 1 : 0;
 		const int on = ch.noise ? (hasVol && (ch.freq & 0xff))
 			: (hasVol && ch.freq);
-		int midi = 36; /* noise has no pitch; park it at the low end */
+		int midi = 36; /* ノイズにピッチは無い。低域に置く */
 		if (on && !ch.noise) {
-			/* MixAdd walks 32 wave steps per 2^21 of offset accumulator and
-			   incr = freq*clock*2/rate, so the tone is freq*clock/2^20 Hz. */
+			/* MixAdd はオフセットアキュムレータ 2^21 あたり波形32ステップ。
+			   incr = freq*clock*2/rate なのでトーンは freq*clock/2^20 Hz。 */
 			midi = FmMonShadowHzToMidi((double)ch.freq * (double)clockHz_
 				/ 1048576.0);
 			if (midi < 0) midi = 36;
@@ -229,12 +229,13 @@ private:
 			return;
 		monOn_[channel] = (uint8_t)on;
 		monMidi_[channel] = (uint8_t)midi;
+		/* FMモニタへキーオン相当。 */
 		FmMonShadowPcmNote(channel, midi, on);
 	}
 
 	void RecomputeIncr(Channel& ch)
 	{
-		/* ssC30: incr = freq * basefreq * 2 / sample_rate (truncated to int). */
+		/* ssC30: incr = freq * basefreq * 2 / sample_rate（int切り捨て）。 */
 		if (ch.freq <= 0 || sampleRate_ <= 0) {
 			ch.incr = 0;
 			return;
@@ -254,7 +255,7 @@ private:
 		case 4:
 			ch_[(channel + 1) % kC30Voices].noise = (uint8_t)(data & 0x80);
 			alsoMon = (channel + 1) % kC30Voices;
-			/* fall through */
+			/* フォールスルー */
 		case 0: {
 			ch.voll = (reg_[channel * 8 + 0] & 0x0f);
 			if (stereo_)
@@ -265,7 +266,7 @@ private:
 		}
 		case 1:
 			ch.wave = wave_ + ((data >> 4) & 0x0f) * 16;
-			/* fall through */
+			/* フォールスルー */
 		case 2:
 		case 3:
 			ch.freq = ((reg_[channel * 8 + 1] & 0x0f) << 16)
@@ -296,7 +297,7 @@ private:
 		}
 		case 6:
 			ch.wave = wave_ + ((data >> 4) & 7) * 16;
-			/* fall through */
+			/* フォールスルー */
 		case 4:
 		case 5:
 			ch.freq = ((reg_[channel * 8 + 6] & 0x0f) << 16)
@@ -318,7 +319,7 @@ private:
 			WriteRegStereo(adr, data);
 	}
 
-	/* MAME namco_wsg_device::pacman_sound_w — 3 voices, nibble regs @0x00-0x1F. */
+	/* MAME namco_wsg_device::pacman_sound_w — 3ボイス、ニブルレジスタ @0x00-0x1F。 */
 	void WritePacman(unsigned offset, uint8_t data)
 	{
 		if (offset > 0x1fu) return;
@@ -377,6 +378,7 @@ private:
 	uint8_t monMidi_[kC30Voices];
 };
 
+/* CUS30 / 15XX / Pac-Man WSG ラッパ生成。 */
 CChip* CEmuChipC30Create(uint32_t clockHz, int sampleRate, int mode)
 {
 	return new CChipC30(clockHz, sampleRate, mode);

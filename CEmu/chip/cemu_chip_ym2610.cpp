@@ -1,4 +1,4 @@
-#include "StdAfx.h"
+﻿#include "StdAfx.h"
 #include "cemu_chip_ym2610.h"
 #include "cemu_chip.h"
 #include "../fmmon/fmmon_shadow.h"
@@ -7,7 +7,7 @@
 #include <string.h>
 #include <vector>
 
-/* YM2610 wrapper patterned after cemu_chip_opna.cpp; ymfm BSD-3-Clause core. */
+/* YM2610 ラッパ。cemu_chip_opna.cpp と同型。コアは ymfm（BSD-3-Clause）。 */
 static int CEmuYm2610Clamp16(int32_t v)
 {
 	if (v > 32767) return 32767;
@@ -34,7 +34,7 @@ public:
 		ym_ = new ymfm::ym2610(*this);
 		chipRate_ = (int)ym_->sample_rate(clockHz_);
 		if (chipRate_ <= 0) chipRate_ = (int)(clockHz_ / 144);
-		/* Bind owns the title (NeoGeo / Taito F2 / VSys); don't clobber. */
+		/* タイトル束縛（NeoGeo / Taito F2 / VSys）は Bind 側。上書きしない。 */
 		FmMonShadowSetOpnaLayout(2);
 		Reset();
 	}
@@ -85,6 +85,7 @@ public:
 		ym_->write(off, v);
 		const unsigned shadowAddr = ((off & 2) ? 0x100u : 0u) | lastAddr_[(off >> 1) & 1];
 		reg_[shadowAddr & 0x1ff] = v;
+		/* FMモニタへOPNレジスタをシャドウ。 */
 		FmMonShadowWriteReg(shadowAddr, v);
 	}
 
@@ -118,6 +119,7 @@ public:
 			int64_t l = 0, r = 0;
 			int n = 0;
 			chipAcc_ += chipRate_;
+			/* chipRate_ は ymfm sample_rate（通常 clock/144）。ホストへリサンプル。 */
 			while (chipAcc_ >= hostRate_) {
 				chipAcc_ -= hostRate_;
 				ymfm::ym2610::output_data o;
@@ -126,6 +128,7 @@ public:
 				int32_t fl = o.data[0];
 				int32_t fr = o.data[1 % outs];
 				if (outs > 2) {
+					/* 出力2以降はADPCM。L/Rへ半分ずつ加算（ステレオMix）。 */
 					fl += o.data[2] / 2;
 					fr += o.data[2] / 2;
 				}
@@ -201,6 +204,7 @@ private:
 	std::vector<uint8_t> adpcmB_;
 };
 
+/* YM2610/OPNB ラッパ生成。 */
 CChip* CEmuChipYm2610Create(uint32_t clockHz, int sampleRate)
 {
 	return new CChipYm2610(clockHz, sampleRate);

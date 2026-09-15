@@ -1,4 +1,4 @@
-﻿/* Embedded PMDWin player. Compiled MBCS to match PMDWIN TCHAR=char. */
+﻿/* プロセス内 PMDWin プレーヤ。PMDWIN TCHAR=char に合わせ MBCS でコンパイル。 */
 #include <windows.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -15,6 +15,7 @@ PMDWIN* g_pmdwinFmMonActive = NULL;
 
 static LONG s_pmdTempSeq = 0;
 
+/* パスからベース名 */
 static const char* CEmuPmdBaseName(const char* name)
 {
 	const char* base = name ? name : "";
@@ -25,6 +26,7 @@ static const char* CEmuPmdBaseName(const char* name)
 	return base;
 }
 
+/* .M/.M2/.M26 等の PMD 曲か */
 static int CEmuPmdNameLooksPmd(const char* name)
 {
 	if (!name || !name[0]) return 0;
@@ -34,6 +36,7 @@ static int CEmuPmdNameLooksPmd(const char* name)
 	return _strnicmp(base, "PMD", 3) == 0;
 }
 
+/* カタログ行が PMD パッケージに見えるか */
 int CEmuPmdGeLooks(const CEmuGameEntry* ge)
 {
 	if (!ge) return 0;
@@ -321,6 +324,7 @@ void CEmuPmdClose(CEmuPmdPlayer* p)
 	p->endSample = 0;
 }
 
+/* zip から PMD を開き、モニタへ identity を渡す */
 int CEmuPmdOpen(CEmuPmdPlayer* p, const CEmuGameEntry* ge, const wchar_t* zipPath,
 	unsigned titleCode, DWORD sampleRate, CEmuZipFs* fsIn)
 {
@@ -419,7 +423,7 @@ int CEmuPmdOpen(CEmuPmdPlayer* p, const CEmuGameEntry* ge, const wchar_t* zipPat
 	win->setrhythmwait(0);
 	win->setadpcmwait(0);
 
-	/* getlength reloads the file and walks the sequence once; skip the extra music_load. */
+	/* getlength はファイルを再読込してシーケンスを一度辿る。余分な music_load を省く。 */
 	int lengthMs = 0, loopMs = 0;
 	int ret = PMDWIN_OK;
 	if (win->getlength(songPathA, &lengthMs, &loopMs) && lengthMs > 0) {
@@ -457,6 +461,7 @@ int CEmuPmdOpen(CEmuPmdPlayer* p, const CEmuGameEntry* ge, const wchar_t* zipPat
 	return 1;
 }
 
+/* サンプル位置へ。シャドウ時計も合わせる */
 int CEmuPmdSeek(CEmuPmdPlayer* p, UINT64 sample, DWORD flags)
 {
 	(void)flags;
@@ -470,6 +475,7 @@ int CEmuPmdSeek(CEmuPmdPlayer* p, UINT64 sample, DWORD flags)
 	return 1;
 }
 
+/* Mix してモニタへ Flush */
 int CEmuPmdRender(CEmuPmdPlayer* p, short* outStereo, int sampleFrames)
 {
 	if (!p || !p->impl || !p->open || !outStereo || sampleFrames <= 0)

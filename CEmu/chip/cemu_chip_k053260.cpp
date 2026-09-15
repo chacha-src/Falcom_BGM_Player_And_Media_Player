@@ -4,7 +4,7 @@
 #include "../fmmon/fmmon_shadow.h"
 #include <string.h>
 
-/* Simplified from hoot ss053260.cpp / MAME K053260. */
+/* hoot ss053260.cpp / MAME K053260 を簡略化。 */
 enum { kK053260Channels = 4, kK053260Shift = 16 };
 
 static int CEmuK053Clamp16(int v)
@@ -29,7 +29,7 @@ public:
 	void Reset() override
 	{
 		memset(reg_, 0, sizeof(reg_));
-		memset(port_, 0xff, sizeof(port_)); /* idle = 0xFF (not stop-code 0x00) */
+		memset(port_, 0xff, sizeof(port_)); /* アイドル=0xFF（停止コード0x00ではない） */
 		memset(ch_, 0, sizeof(ch_));
 		mode_ = 0;
 		keyOn_ = 0;
@@ -40,13 +40,13 @@ public:
 		const unsigned r = offset & 0x3fu;
 		if (r <= 0x01u) {
 			const uint8_t v = port_[r];
-			/* Destructive read — main leaves the byte until sound drains it;
-			   otherwise every IRQ restarts the same song. */
+			/* 破壊読み — メインはサウンドが抜くまでバイトを残す。
+			   残さないと毎回IRQで同じ曲が再スタートする。 */
 			port_[r] = 0xff;
 			return v;
 		}
 		if (r == 0x2e) {
-			/* ROM readback while mode bit0 set (boot checksum / sample probe). */
+			/* mode bit0 時のROM読み戻し（起動チェックサム / サンプルプローブ）。 */
 			if (!(mode_ & 1) || !rom_)
 				return 0;
 			Channel& vc = ch_[0];
@@ -65,12 +65,12 @@ public:
 
 	void MainWrite(unsigned offset, uint8_t data)
 	{
-		port_[offset & 1u] = data; /* main → sound */
+		port_[offset & 1u] = data; /* メイン → サウンド */
 	}
 
 	uint8_t MainRead(unsigned offset) const
 	{
-		return port_[2u + (offset & 1u)]; /* sound → main */
+		return port_[2u + (offset & 1u)]; /* サウンド → メイン */
 	}
 
 	void Write(uint32_t addr, uint32_t data) override
@@ -78,16 +78,16 @@ public:
 		const uint8_t r = (uint8_t)(addr & 0x3f);
 		if (r > 0x2f) return;
 		const uint8_t v = (uint8_t)(data & 0xff);
-		/* 0x00/0x01 are read-only on the sound side (main→sub ports). */
+		/* 0x00/0x01 はサウンド側では読み取り専用（メイン→サブポート）。 */
 		if (r <= 0x01)
 			return;
 		if (r == 0x02 || r == 0x03) {
-			port_[r] = v; /* sound → main */
+			port_[r] = v; /* サウンド → メイン */
 			return;
 		}
 		if (r == 0x28) {
 			const uint8_t rising = (uint8_t)(v & ~keyOn_);
-			keyOn_ = v;
+			keyOn_ = v; /* 下位4bitがキーオン、上位がリバース */
 			reg_[r] = v;
 			for (int i = 0; i < kK053260Channels; i++) {
 				ch_[i].reverse = (v >> (4 + i)) & 1;
@@ -118,6 +118,7 @@ public:
 				ch_[i].ppcm = (v >> (4 + i)) & 1;
 			}
 		} else if (r == 0x2c) {
+			/* パン: ch0/ch1 を3bitずつ。 */
 			ch_[0].pan = v & 7;
 			ch_[1].pan = (v >> 3) & 7;
 		} else if (r == 0x2d) {
@@ -155,7 +156,7 @@ public:
 				const uint32_t adr = vc.reverse ? (base - off) : (base + off);
 				const int8_t s = (adr < romSize_) ? (int8_t)rom_[adr] : 0;
 				const int pan = vc.pan & 7;
-				/* Approximate MAME pan_mul[8][2] with integer weights. */
+				/* MAME pan_mul[8][2] を整数重みで近似。 */
 				static const int kPanL[8] = { 0, 256, 234, 210, 181, 148, 104, 0 };
 				static const int kPanR[8] = { 0, 0, 104, 148, 181, 210, 234, 256 };
 				l += (s * (int)vc.volume * kPanL[pan]) >> 8;
@@ -205,9 +206,10 @@ private:
 	void Start(int c)
 	{
 		ch_[c].play = 1;
-		/* MAME: KADPCM starts at nybble 1 due to preincrement. */
+		/* MAME: KADPCM はプリインクリメントのためニブル1から始まる。 */
 		ch_[c].pos = ch_[c].ppcm ? (1u << kK053260Shift) : 0;
 		ch_[c].ppcmData = 0;
+		/* FMモニタへキーオン。 */
 		FmMonShadowPcmNote(c, 60 + c, 1);
 	}
 
@@ -222,13 +224,14 @@ private:
 	const uint8_t* rom_;
 	unsigned romSize_;
 	uint8_t reg_[0x30];
-	uint8_t port_[4]; /* 0/1 main→sound, 2/3 sound→main */
+	uint8_t port_[4]; /* 0/1 メイン→サウンド、2/3 サウンド→メイン */
 	uint8_t mode_;
 	uint8_t keyOn_;
 	uint32_t delta_[0x1000];
 	Channel ch_[kK053260Channels];
 };
 
+/* K053260 ラッパ生成。 */
 CChip* CEmuChipK053260Create(uint32_t clockHz, int sampleRate)
 {
 	return new CChipK053260(clockHz, sampleRate);

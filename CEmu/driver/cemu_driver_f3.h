@@ -2,6 +2,7 @@
 #include "cemu_driver.h"
 #include "../machine/cemu_hard_f3.h"
 
+/* Taito F3: 68000 + ES5505。DPRAM リングへコマンド注入 */
 class CDriverF3 : public CDriver {
 public:
 	CDriverF3();
@@ -14,7 +15,9 @@ public:
 	int OverlayTitle(unsigned titleCode) override;
 
 private:
+	/* Musashi を cycles 進める */
 	void RunCycles(int cycles);
+	/* 試行テーブルから曲コードを注入 */
 	void TryInjectCommand();
 	void WakeMailboxIfQueued();
 	void KickMailboxOnce();
@@ -51,4 +54,5 @@ private:
 	unsigned irq6Vec_;
 };
 
+/* F3 ドライバ生成 */
 CDriver* CDriverF3Create();

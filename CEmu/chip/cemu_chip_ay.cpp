@@ -14,7 +14,7 @@ public:
 		, addrLatch_(0)
 		, writeCount_(0)
 	{
-		/* hoot ssAY8910 Initialize(clock) then SetClock(clock/2). */
+		/* hoot ssAY8910 は Initialize(clock) のあと SetClock(clock/2)。 */
 		const int psgClk = (int)(clockHz_ / 2u);
 		psg_.SetClock(psgClk > 0 ? psgClk : 1000000, sampleRate_);
 		psg_.SetVolume(0);
@@ -45,12 +45,13 @@ public:
 		regs_[addrLatch_ & 15] = (uint8_t)(data & 0xff);
 		regWriteCount_[addrLatch_ & 15]++;
 		writeCount_++;
+		/* FMモニタへAYレジスタのシャドウ書き込み。 */
 		FmMonShadowWriteAyReg(addrLatch_, data);
 	}
 
 	void AdvanceClocks(uint64_t chipCycles) override
 	{
-		(void)chipCycles; /* sample-driven in Render */
+		(void)chipCycles; /* 音声は Render 側でサンプル駆動 */
 	}
 
 	void Render(int16_t* stereo, int frames) override
@@ -60,6 +61,7 @@ public:
 			const int n = frames > 64 ? 64 : frames;
 			PSG::Sample tmp[128];
 			memset(tmp, 0, (size_t)n * 2 * sizeof(PSG::Sample));
+			/* fmgen PSG のステレオMixを16bitへ飽和。 */
 			psg_.Mix(tmp, n);
 			for (int i = 0; i < n * 2; i++) {
 				int32_t v = (int32_t)tmp[i];
@@ -108,11 +110,13 @@ private:
 	uint8_t portA_;
 };
 
+/* AY-3-8910 / YM2149 ラッパ生成。 */
 CChip* CEmuChipAyCreate(uint32_t clockHz, int sampleRate)
 {
 	return new CChipAy(clockHz, sampleRate);
 }
 
+/* ポートA読み戻し値（I/O入力）。 */
 void CEmuChipAySetPortA(CChip* c, uint8_t v)
 {
 	if (!c) return;

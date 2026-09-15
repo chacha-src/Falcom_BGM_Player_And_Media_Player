@@ -2,7 +2,7 @@
 #include <stdint.h>
 #include "cemu_chip.h"
 
-/* Irem M72 8-bit sample DAC (m72_audio_device). The sound CPU pumps one
-   unsigned byte per NMI; Write(0, level) sets the current DAC level. */
+/* Irem M72 8bit サンプルDAC（m72_audio_device）。サウンドCPUがNMI毎に
+   符号なし1バイトを送る。Write(0, level) が現在のDACレベル。 */
 CChip* CEmuChipIremDacCreate(int sampleRate);
 void CEmuChipIremDacDestroy(CChip* c);

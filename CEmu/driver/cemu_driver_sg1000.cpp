@@ -4,6 +4,7 @@
 #include "../z80/Ay_Cpu.h"
 #include <string.h>
 
+/* SG-1000: Star Jacker 系メールボックスを既定に */
 CDriverSg1000::CDriverSg1000()
 	: hw_(NULL)
 	, hostRate_(44100)
@@ -20,16 +21,19 @@ CDriverSg1000::CDriverSg1000()
 {
 }
 
+/* 後始末 */
 CDriverSg1000::~CDriverSg1000()
 {
 	Close();
 }
 
+/* SN76489 書込回数 */
 unsigned CDriverSg1000::PsgWrites() const
 {
 	return hw_ ? hw_->psgWrites_ : 0;
 }
 
+/* PSG クロックを CPU 比で進める */
 void CDriverSg1000::TickPsg(uint64_t cpuCycles)
 {
 	if (!hw_ || !hw_->SoundChip() || cpuCycles == 0) return;
@@ -40,6 +44,7 @@ void CDriverSg1000::TickPsg(uint64_t cpuCycles)
 		hw_->SoundChip()->AdvanceClocks(ticks);
 }
 
+/* Z80 を endCycle まで進める。HALT でループを抜ける */
 void CDriverSg1000::RunUntil(uint64_t endCycle)
 {
 	if (!hw_ || !hw_->Cpu()) return;
@@ -51,7 +56,7 @@ void CDriverSg1000::RunUntil(uint64_t endCycle)
 		if (cycles <= 0) break;
 		hw_->AddCpuCycles((uint64_t)cycles);
 		TickPsg((uint64_t)cycles);
-		/* HALT: bump time so we can escape idle loops. */
+		/* HALT: 時刻を進めてアイドルループを抜ける */
 		if (cpu->get_mem() && cpu->get_mem()[cpu->r.pc] == 0x76) {
 			cpu->adjust_time(4);
 			hw_->AddCpuCycles(4);
@@ -61,6 +66,7 @@ void CDriverSg1000::RunUntil(uint64_t endCycle)
 	}
 }
 
+/* HALT 番兵を積んで Z80 サブルーチンを呼ぶ（0.5s 上限） */
 void CDriverSg1000::CallZ80(uint16_t targetPc)
 {
 	if (!hw_ || !hw_->Cpu()) return;
@@ -70,7 +76,7 @@ void CDriverSg1000::CallZ80(uint16_t targetPc)
 	CEmuHardSg1000SetActive(hw_);
 
 	const uint16_t ret = 0xFF80;
-	mem[ret] = 0x76; /* HALT sentinel */
+	mem[ret] = 0x76; /* HALT 番兵 */
 	uint16_t sp = cpu->r.sp;
 	sp -= 2;
 	mem[sp] = (uint8_t)(ret & 0xff);
@@ -79,7 +85,7 @@ void CDriverSg1000::CallZ80(uint16_t targetPc)
 	cpu->r.pc = targetPc;
 
 	const uint64_t start = (uint64_t)cpu->time64();
-	const uint64_t limit = start + (uint64_t)cpuHz_ / 2; /* 0.5s cap */
+	const uint64_t limit = start + (uint64_t)cpuHz_ / 2; /* 0.5s 上限 */
 	int guard = 0;
 	while (guard++ < 2000000) {
 		if (cpu->r.pc == ret)
@@ -100,21 +106,23 @@ void CDriverSg1000::CallZ80(uint16_t targetPc)
 	cpu->r.pc = ret;
 }
 
+/* 糊が無音なら Tone0 を強制（他チャネル mute） */
 void CDriverSg1000::ForceToneTest()
 {
 	if (!hw_ || !hw_->SoundChip()) return;
 	CChip* chip = hw_->SoundChip();
-	/* Tone0 period ~0x100, volume loud; mute others. */
-	chip->Write(0, 0x80 | 0x00 | 0x00); /* latch tone0 fine */
-	chip->Write(0, 0x10);               /* tone0 coarse */
-	chip->Write(0, 0x90 | 0x00);         /* tone0 vol = 0 (loud) */
-	chip->Write(0, 0xBF);               /* tone1 mute */
-	chip->Write(0, 0xDF);               /* tone2 mute */
-	chip->Write(0, 0xFF);               /* noise mute */
+	/* Tone0 周期 ~0x100、音量最大。他は mute */
+	chip->Write(0, 0x80 | 0x00 | 0x00); /* Tone0 fine ラッチ */
+	chip->Write(0, 0x10);               /* Tone0 粗ピッチ */
+	chip->Write(0, 0x90 | 0x00);         /* Tone0 音量 0=最大 */
+	chip->Write(0, 0xBF);               /* Tone1 ミュート */
+	chip->Write(0, 0xDF);               /* Tone2 ミュート */
+	chip->Write(0, 0xFF);               /* ノイズ mute */
 	toneFallback_ = 1;
 	hw_->psgWrites_ = CEmuChipSn76489WriteCount(chip);
 }
 
+/* mute → メールボックス poke → update tick。無音ならトーン強制 */
 void CDriverSg1000::TriggerSong()
 {
 	if (!hw_ || !hw_->Cpu() || !hw_->Mem()) return;
@@ -123,11 +131,11 @@ void CDriverSg1000::TriggerSong()
 	const uint16_t upd = hw_->soundUpdatePc_;
 	const uint16_t mute = hw_->soundMutePc_;
 
-	/* Clear work RAM used by Sega PSG drivers (C000-C3FF covers Congo
-	   C1E6 and Mikie C300 engine mailboxes / channel blocks). */
+	/* Sega PSG ドライバのワーク RAM をクリア（C000-C3FF は Congo C1E6 と
+	   Mikie C300 のメールボックス／チャネルブロック） */
 	memset(mem + 0xC000, 0, 0x400);
 
-	/* BIT7 mailbox glue: mute → poke cmd → update tick. */
+	/* BIT7 メールボックス糊: mute → コマンド poke → update tick */
 	const int haveGlue = (box >= 0xC000 && box <= 0xC3FF
 		&& upd > 0 && upd < 0xC000 && mute > 0 && mute < 0xC000
 		&& mem[upd] != 0x00);
@@ -137,17 +145,18 @@ void CDriverSg1000::TriggerSong()
 		if ((songCmd_ & 0x80) == 0)
 			mem[box] = (uint8_t)(0x80 | (songCmd_ & 0x7f));
 		CallZ80(upd);
-		/* Second tick helps Congo/Mikie sequencers leave init. */
+		/* 2 回目 tick で Congo/Mikie シーケンサが初期化を抜ける */
 		CallZ80(upd);
 		knownTick_ = 1;
 	}
 
 	triggered_ = 1;
-	/* Prefer real PSG traffic; tone fallback only if glue produced nothing. */
+	/* 実 PSG 通信を優先。糊が無音のときだけトーン強制 */
 	if (hw_->psgWrites_ == 0)
 		ForceToneTest();
 }
 
+/* ROM 読込後に短い settle、BIT7 糊で曲を叩く */
 int CDriverSg1000::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned titleCode)
 {
 	if (!hw || !ge || !fs) return 0;
@@ -162,7 +171,7 @@ int CDriverSg1000::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsig
 	toneFallback_ = 0;
 	knownTick_ = 0;
 
-	uint8_t code = 0x0d; /* Star Jacker title BGM */
+	uint8_t code = 0x0d; /* Star Jacker タイトル BGM */
 	if (titleCode && (titleCode & 0xff) != 0)
 		code = (uint8_t)(titleCode & 0xff);
 	else if (ge->titleCount > 0 && ge->title[0].code)
@@ -173,7 +182,7 @@ int CDriverSg1000::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsig
 		return 0;
 
 	CEmuHardSg1000SetActive(hw_);
-	/* Brief settle so reset vectors exist; we don't run the full game. */
+	/* リセットベクタが乗る程度に短く settle。ゲーム本体は走らせない */
 	RunUntil((uint64_t)cpuHz_ / 120);
 	booted_ = 1;
 	TriggerSong();
@@ -181,6 +190,7 @@ int CDriverSg1000::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsig
 	return 1;
 }
 
+/* ハード参照を捨てる */
 void CDriverSg1000::Close()
 {
 	hw_ = NULL;
@@ -188,6 +198,7 @@ void CDriverSg1000::Close()
 	triggered_ = 0;
 }
 
+/* 同一 zip の別曲をメールボックス経由で切替 */
 int CDriverSg1000::OverlayTitle(unsigned titleCode)
 {
 	if (!hw_) return 0;
@@ -199,6 +210,7 @@ int CDriverSg1000::OverlayTitle(unsigned titleCode)
 	return 1;
 }
 
+/* 60Hz tick で update を呼び、PSG をサンプル合成 */
 int CDriverSg1000::Render(int16_t* stereo, int frames)
 {
 	if (!hw_ || !stereo || frames <= 0) return 0;
@@ -219,14 +231,14 @@ int CDriverSg1000::Render(int16_t* stereo, int frames)
 		int cyclesPerSample = (int)(cpuAcc_ / (int64_t)hostRate_);
 		cpuAcc_ %= (int64_t)hostRate_;
 		if (cyclesPerSample < 1) cyclesPerSample = 1;
-		/* Tone fallback: no Z80 needed; just advance chip time conceptually. */
+		/* トーン強制: Z80 不要。チップ時刻だけ進める */
 		if (toneFallback_) {
 			TickPsg((uint64_t)cyclesPerSample);
 			cpu->adjust_time(cyclesPerSample);
 			hw_->AddCpuCycles((uint64_t)cyclesPerSample);
 		} else {
 			const uint64_t end = (uint64_t)cpu->time64() + (uint64_t)cyclesPerSample;
-			/* Idle between ticks — keep PSG clocks moving. */
+			/* tick 間はアイドル。PSG クロックだけ進める */
 			const uint64_t cur = (uint64_t)cpu->time64();
 			if (end > cur) {
 				cpu->adjust_time((int)(end - cur));
@@ -239,6 +251,7 @@ int CDriverSg1000::Render(int16_t* stereo, int frames)
 	return frames;
 }
 
+/* Seek は未対応 */
 int CDriverSg1000::Seek(uint64_t sample)
 {
 	(void)sample;

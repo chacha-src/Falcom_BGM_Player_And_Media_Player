@@ -1,4 +1,4 @@
-﻿// PMD FM monitor flush — latch every call, write on even sample grid.
+﻿// PMD FM モニタ flush — 毎呼び出しでラッチし、偶数サンプルグリッドで書く。
 #include <windows.h>
 #include <stdio.h>
 #include <string.h>
@@ -48,6 +48,7 @@ static int PartMidi(PMDWIN* self, int part)
 	return OnkaiToMidi(qq->onkai);
 }
 
+/* Mix 後にシャドウへスナップショット。4ms グリッドで dirty 落とさない */
 void PmdFmMonFlushAfterRender(PMDWIN* self, uint32_t sampleRate, uint64_t curSample)
 {
 	if (!self) return;
@@ -145,7 +146,7 @@ void PmdFmMonFlushAfterRender(PMDWIN* self, uint32_t sampleRate, uint64_t curSam
 		}
 		s_prevPcm[i] = gPcm[i];
 	}
-	/* Part 9 = ADPCM (OPNA) or 86PCM (use_p86) — was missing from monitor */
+	/* パート 9 = ADPCM (OPNA) または 86PCM (use_p86) — モニタから欠けていた */
 	{
 		gAdp = (uint8_t)PartGate(self, 9);
 		const int midi = PartMidi(self, 9);
@@ -263,7 +264,7 @@ void PmdFmMonFlushAfterRender(PMDWIN* self, uint32_t sampleRate, uint64_t curSam
 		pd->pcmCount = hasAdp ? 9 : 8;
 		pd->dumpFlags |= SASAMI_FMMON_FLAG_PPZ;
 	} else if (hasAdp) {
-		/* No PPZ: put ADPCM/86 at slot 0 so UI is not 8 empty rows + one */
+		/* PPZ 無し: ADPCM/86 を slot 0 へ。UI が空 8 行 + 1 にならないように */
 		pd->pcmOn[0] = pd->pcmOn[8];
 		pd->pcmNote[0] = pd->pcmNote[8];
 		pd->pcmOn[8] = 0;

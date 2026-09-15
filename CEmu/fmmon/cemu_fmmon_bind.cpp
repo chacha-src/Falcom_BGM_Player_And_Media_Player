@@ -1,4 +1,4 @@
-#include "StdAfx.h"
+﻿#include "StdAfx.h"
 #include "cemu_fmmon_bind.h"
 #include "fmmon_shadow.h"
 #include "../cemu_catalog.h"
@@ -9,27 +9,26 @@ static int HasChip(const CEmuGameEntry* ge, int id)
 	if (!ge) return 0;
 	for (int i = 0; i < ge->chipCount && i < 8; i++)
 		if (ge->chipIds[i] == id) return 1;
-	/* Also honour the chips the catalog spells out in <name>. Most arcade
-	   entries carry no <chip> tag, so without this the subtype table decided
-	   everything and anything it did not recognise was labelled "OPM". */
+	/* カタログ <name> に書かれたチップも見る。アーケードは <chip> が無く、
+	   基板構成の唯一の記録であることが多い。subtype 表だけだと未知は全部
+	   "OPM" ラベルになっていた。 */
 	for (int i = 0; i < ge->docChipCount && i < 12; i++)
 		if (ge->docChipIds[i] == id) return 1;
 	return 0;
 }
 
-/* Display name and monitor shape for each chip the catalog can document. */
+/* カタログが記載できるチップごとの表示名とモニタ形 */
 struct FmMonChipInfo {
 	int id;
 	const char* label;
-	int channels;   /* rows to show, 0 when the label carries no count */
-	int layout;     /* OPN(A)-shaped layout this chip implies, -1 = not OPN */
-	unsigned ssgHz; /* SSG/PSG clock to report, 0 when not applicable */
-	unsigned keys;  /* keyboard/panel profile this chip's rows need */
-	int isPcm;      /* sample player, so it picks the profile over the FM part */
+	int channels;   /* 表示行。ラベルに数が無いときは 0 */
+	int layout;     /* このチップが暗示する OPN(A) 形。-1 = 非 OPN */
+	unsigned ssgHz; /* 報告する SSG/PSG クロック。無関係なら 0 */
+	unsigned keys;  /* このチップの行が要る鍵盤/パネルプロファイル */
+	int isPcm;      /* サンプルプレーヤ。FM よりプロファイルを取る */
 };
 
-/* Ordered so the FM part of a set is named before its PCM part, which is how
-   the monitor lays its rows out and how the catalog writes these names. */
+/* FM 部品を PCM より先に名前を付ける。モニタの行順とカタログ表記に合わせる。 */
 static const FmMonChipInfo kFmMonChips[] = {
 	{ CEMU_CHIP_OPNA,     "OPNA",      6,  1, 3993600u, SASAMI_FMMON_KEYS_MDX,     0 },
 	{ CEMU_CHIP_YM2610,   "YM2610",    4,  2, 2000000u, SASAMI_FMMON_KEYS_MDX,     0 },
@@ -75,9 +74,9 @@ static const FmMonChipInfo* FmMonFindChipInfo(int id)
 	return NULL;
 }
 
-/* True when every chip the catalog documents is already named in the label.
-   Compared by chip identity, not spelling, so a hand-tuned "YM3438+MultiPCMx2"
-   still counts as covering a documented YM2612-class part. */
+/* カタログ記載チップがラベルに全部含まれるか。
+   表記ではなくチップ ID で比べるので、手調整の "YM3438+MultiPCMx2" も
+   記載された YM2612 系をカバーしたとみなす。 */
 static int FmMonLabelCoversDocChips(const CEmuGameEntry* ge, const char* label)
 {
 	if (!ge || ge->docChipCount <= 0) return 1;
@@ -92,8 +91,8 @@ static int FmMonLabelCoversDocChips(const CEmuGameEntry* ge, const char* label)
 	return 1;
 }
 
-/* Build the label from the documented chip set, in kFmMonChips order, and
-   report the FM shape and SSG clock the leading FM chip implies. */
+/* 記載チップ集合から kFmMonChips 順でラベルを組み、先頭 FM が暗示する
+   FM 形と SSG クロックを返す。 */
 static int FmMonComposeDocLabel(const CEmuGameEntry* ge, char* out,
 	unsigned outLen, int* layoutOut, unsigned* ssgOut, unsigned* keysOut)
 {
@@ -120,10 +119,10 @@ static int FmMonComposeDocLabel(const CEmuGameEntry* ge, char* out,
 			haveLayout = 1;
 		}
 		if (ci->ssgHz && !ssg) ssg = ci->ssgHz;
-		/* OPN-shaped boards (layout>=0): PCM owns the key-row profile and
-		   overlays the FM dump. OPM hybrids (layout -1, keys already MDX)
-		   must keep the OPM keyboard — stealing OKI/RF5C here made Raizing
-		   flicker between "Raizing  OPM+OKI" and "AC  OKI×4". */
+		/* OPN 形基板 (layout>=0): PCM がキー行プロファイルを持ち FM dump に重ねる。
+		   OPM ハイブリッド (layout -1、keys は既に MDX) は OPM 鍵盤を残す —
+		   ここで OKI/RF5C を奪うと Raizing が "Raizing  OPM+OKI" と "AC  OKI×4"
+		   の間で点滅した。 */
 		if (!keys) {
 			keys = ci->keys;
 			keysFromPcm = ci->isPcm;
@@ -140,6 +139,7 @@ static int FmMonComposeDocLabel(const CEmuGameEntry* ge, char* out,
 	return 1;
 }
 
+/* Reset 後: platform+chip ラベルと OPNA layout をシャドウへ */
 void CEmuFmMonBindFromGe(const CEmuGameEntry* ge)
 {
 	if (!ge) return;
@@ -148,7 +148,7 @@ void CEmuFmMonBindFromGe(const CEmuGameEntry* ge)
 	char chip[48];
 	plat[0] = 0;
 	chip[0] = 0;
-	int layout = 1; /* default OPNA-shaped */
+	int layout = 1; /* 既定は OPNA 形 */
 	int seedOpm = 0;
 
 	const char* dd = ge->dataDir[0] ? ge->dataDir : "";
@@ -221,14 +221,14 @@ void CEmuFmMonBindFromGe(const CEmuGameEntry* ge)
 		strncpy_s(plat, dd, _TRUNCATE);
 	}
 
-	/* Chip label + layout — QSound / PCM banks first (arcade xml2) */
+	/* チップラベル + layout — QSound / PCM バンクを先に (アーケード xml2) */
 	const int isFm7 = (_stricmp(dd, "fm7") == 0 || _stricmp(pf, "fm7") == 0
 		|| _stricmp(pf, "fm77av") == 0 || _stricmp(pf, "mucomfm") == 0);
 	const int isMsx = (_stricmp(dd, "msx") == 0 || _stricmp(pf, "msx") == 0);
 	const size_t archiveLen = strlen(ge->archive);
-	/* Platform wins: the same *_fm7 zip has PSG (fm7) and OPN (fm77av) rows.
-	   Catalog chipIds can still list AY from the zip stem; do not let that
-	   pick the AY keyboard for an fm77av session (monitor went MON_DEAD). */
+	/* platform が勝つ。同じ *_fm7 zip に PSG (fm7) と OPN (fm77av) 行がある。
+	   カタログ chipIds が zip stem 由来の AY を残しても、fm77av セッションで
+	   AY 鍵盤を選ばない (モニタが MON_DEAD になった)。 */
 	const int fm7Opn = isFm7 && (
 		_stricmp(pf, "fm77av") == 0 || _stricmp(sub, "opn") == 0
 		|| _stricmp(sub, "ysav") == 0
@@ -236,10 +236,10 @@ void CEmuFmMonBindFromGe(const CEmuGameEntry* ge)
 		|| HasChip(ge, CEMU_CHIP_OPN));
 	const int fm7Ay = isFm7 && !fm7Opn;
 	if (isMsx) {
-		/* KSS/FMPAC titles often omit <chip type=OPLL>; runtime always has
-		   YM2413 when subtype is kss/opll. Keep layout non-OPNA so the MSX
-		   dump path (FLAG_MSX + padHit=3) owns the keyboard — OPNA layout
-		   made Quinpl look blank even while OPLL regs were streaming. */
+		/* KSS/FMPAC は <chip type=OPLL> を省略しがち。runtime は subtype が
+		   kss/opll なら常に YM2413。layout を非 OPNA にして MSX dump 経路
+		   (FLAG_MSX + padHit=3) が鍵盤を持つ。OPNA layout だと Quinpl が
+		   OPLL レジスタを流しても鍵盤が空になった。 */
 		const int hasOpll = HasChip(ge, CEMU_CHIP_OPLL)
 			|| _stricmp(sub, "kss") == 0 || _stricmp(sub, "opll") == 0
 			|| _stricmp(sub, "fmpac") == 0 || _stricmp(sub, "ascii16") == 0
@@ -258,7 +258,7 @@ void CEmuFmMonBindFromGe(const CEmuGameEntry* ge)
 	} else if (fm7Ay) {
 		strncpy_s(chip, "AY-3-8910", _TRUNCATE);
 		layout = -1;
- /* FM-7 AY master; CChipAy halves once (hoot). FmMon uses the post-/2 rate. */
+		/* FM-7 AY master。CChipAy が一度半分 (hoot)。FmMon は /2 後のレート。 */
 		FmMonShadowSetSsgClock(1228800u);
 	} else if (isFm7) {
 		strncpy_s(chip, "OPN", _TRUNCATE);
@@ -281,7 +281,7 @@ void CEmuFmMonBindFromGe(const CEmuGameEntry* ge)
 	} else if (HasChip(ge, CEMU_CHIP_K054539)
 		|| _stricmp(sub, "systemgx") == 0
 		|| _strnicmp(sub, "054539", 6) == 0) {
-		/* Dual K054539 (systemgx/054539x2) = 16 PCM rows; single = 8. */
+		/* Dual K054539 (systemgx/054539x2) = 16 PCM 行。単発は 8。 */
 		const int dual = (_stricmp(sub, "systemgx") == 0
 			|| _stricmp(sub, "054539x2") == 0) ? 1 : 0;
 		strncpy_s(chip, dual ? "K054539x16" : "K054539x8", _TRUNCATE);
@@ -297,7 +297,7 @@ void CEmuFmMonBindFromGe(const CEmuGameEntry* ge)
 		FmMonShadowEnterKeysOnly(SASAMI_FMMON_KEYS_C352);
 	} else if (_stricmp(sub, "na1") == 0 || _stricmp(sub, "na2") == 0
 		|| _stricmp(sub, "nb1") == 0 || _stricmp(sub, "nb2") == 0) {
-		/* MAME namcona1: C219 only. Must not steal Sys2 (C140+YM2151). */
+		/* MAME namcona1: C219 のみ。Sys2 (C140+YM2151) を奪わない。 */
 		strncpy_s(chip, "C219x24", _TRUNCATE);
 		layout = -1;
 		FmMonShadowSetKeysProfile(SASAMI_FMMON_KEYS_RF5C);
@@ -319,7 +319,7 @@ void CEmuFmMonBindFromGe(const CEmuGameEntry* ge)
 		|| _strnicmp(sub, "system32", 8) == 0 || _strnicmp(sub, "system18", 8) == 0
 		|| _stricmp(sub, "multi32") == 0) {
 		strncpy_s(chip, "YM2612+RF5C68x8", _TRUNCATE);
-		layout = 0; /* OPN2-shaped FM + RF5C PCM rows */
+		layout = 0; /* OPN2 形 FM + RF5C PCM 行 */
 		FmMonShadowSetSsgClock(7670453u);
 		FmMonShadowSetKeysProfile(SASAMI_FMMON_KEYS_RF5C);
 	} else if (HasChip(ge, CEMU_CHIP_SEGAPCM)) {
@@ -328,8 +328,8 @@ void CEmuFmMonBindFromGe(const CEmuGameEntry* ge)
 			strncpy_s(chip, "YM2203+SegaPCMx8", _TRUNCATE);
 			layout = 0;
 			FmMonShadowSetSsgClock(4000000u);
-			/* Keep OPN flush path (not KEYSONLY) so title stays SegaOut and FM
-			   rows don't blank. Profile tags PCM rows as SPCMx8. */
+			/* OPN flush 経路を残す (KEYSONLY ではない)。タイトルは SegaOut、
+			   FM 行を空にしない。プロファイルが PCM 行を SPCMx8 と付ける。 */
 			FmMonShadowSetKeysProfile(SASAMI_FMMON_KEYS_SEGAPCM);
 		} else if (HasChip(ge, CEMU_CHIP_OPM)) {
 			strncpy_s(chip, "OPM+SegaPCM", _TRUNCATE);
@@ -341,10 +341,10 @@ void CEmuFmMonBindFromGe(const CEmuGameEntry* ge)
 			FmMonShadowSetKeysProfile(SASAMI_FMMON_KEYS_SEGAPCM);
 		}
 	} else if (_stricmp(sub, "model2") == 0 || _stricmp(sub, "model1") == 0) {
-		/* daytona / vf: MAME model2o → Model 1 audio board =
-		   YM3438 (OPN2: FM×6, no SSG) + 2× MultiPCM. */
+		/* daytona / vf: MAME model2o → Model 1 オーディオ基板 =
+		   YM3438 (OPN2: FM×6、SSG 無し) + MultiPCM 双発。 */
 		strncpy_s(chip, "YM3438+MultiPCMx2", _TRUNCATE);
-		layout = 3; /* OPN2 FM×6 — not OPNA [10ch]+SSG */
+		layout = 3; /* OPN2 FM×6 — OPNA [10ch]+SSG ではない */
 		FmMonShadowSetKeysProfile(SASAMI_FMMON_KEYS_RF5C);
 	} else if (_strnicmp(sub, "model2", 6) == 0 || _strnicmp(sub, "model3", 6) == 0) {
 		strncpy_s(chip, "SCSPx32", _TRUNCATE);
@@ -363,11 +363,10 @@ void CEmuFmMonBindFromGe(const CEmuGameEntry* ge)
 		layout = 2; /* FMx4 + SSGx3 + ADPCM-A/B */
 		FmMonShadowSetSsgClock(2000000u); /* YM2610 SSG = clock/4 at 8MHz */
 	} else if (_strnicmp(sub, "soundorchestra", 14) == 0) {
-		/* SNE SOUND ORCHESTRA: 26K-compatible YM2203 plus a second FM chip
-		   (YM3812, or Y8950 on the V/VS/LS) at 0x18C/0x18E. Keep the OPN
-		   layout so the 3 FM + 3 SSG rows stay visible — the OPL register
-		   writes reach the shadow through FmMonShadowWriteOplReg — and name
-		   the board so it is not mistaken for a plain OPN. */
+		/* SNE SOUND ORCHESTRA: 26K 互換 YM2203 + 2 本目の FM
+		   (YM3812、V/VS/LS は Y8950) @ 0x18C/0x18E。OPN layout を残し
+		   3FM+3SSG 行を見せる。OPL 書きは FmMonShadowWriteOplReg でシャドウへ。
+		   素の OPN と取り違えないよう基板名を付ける。 */
 		strncpy_s(chip, (sub[14] == 'v' || sub[14] == 'V')
 			? "YM2203+Y8950" : "YM2203+OPL2", _TRUNCATE);
 		layout = 0;
@@ -376,9 +375,9 @@ void CEmuFmMonBindFromGe(const CEmuGameEntry* ge)
 	} else if (_stricmp(sub, "opna") == 0 || HasChip(ge, CEMU_CHIP_OPNA)) {
 		strncpy_s(chip, "OPNA", _TRUNCATE);
 		layout = 1;
-		/* ym2608 SSG effective clock == YM2203@3.9936M (master/4 with
-		   default prescale). FmMon uses master/32, so pass 3993600 — not
-		   7987200 — or SSG MIDI notes (esp. SSG3) read one octave high. */
+		/* ym2608 SSG 実効クロック == YM2203@3.9936M (既定プリスケールで master/4)。
+		   FmMon は master/32 なので 3993600 を渡す — 7987200 だと
+		   SSG MIDI (特に SSG3) が 1 オクターブ高く読める。 */
 		FmMonShadowSetSsgClock(3993600u);
 	} else if (_stricmp(sub, "opn") == 0 || _stricmp(sub, "opn2") == 0
 		|| HasChip(ge, CEMU_CHIP_OPN) || HasChip(ge, CEMU_CHIP_YM2612)) {
@@ -398,7 +397,7 @@ void CEmuFmMonBindFromGe(const CEmuGameEntry* ge)
 		layout = -1;
 		seedOpm = 1;
 		FmMonShadowSetKeysProfile(SASAMI_FMMON_KEYS_MDX);
-		/* Prefill 4 PCM rows so PcmRows() is ready before first GA20 write. */
+		/* 4 PCM 行を先に埋め、最初の GA20 書きの前に PcmRows() が使えるようにする。 */
 		FmMonShadowApplyGa20Reg(0, 0);
 	} else if (HasChip(ge, CEMU_CHIP_C30) && HasChip(ge, CEMU_CHIP_OPM)) {
 		strncpy_s(chip, "OPM+CUS30", _TRUNCATE);
@@ -421,13 +420,13 @@ void CEmuFmMonBindFromGe(const CEmuGameEntry* ge)
 		|| _stricmp(sub, "batrider") == 0
 		|| ((HasChip(ge, CEMU_CHIP_OPM) && HasChip(ge, CEMU_CHIP_OKI6295))
 			&& (_stricmp(pf, "raizing") == 0 || _stricmp(pf, "eighting") == 0))) {
-		/* Keep OPM keys. OKI rows overlay — do not EnterKeysOnly(OKI). */
+		/* OPM 鍵盤を残す。OKI 行は重ねる — EnterKeysOnly(OKI) しない。 */
 		strncpy_s(chip, "OPM+OKI6295", _TRUNCATE);
 		layout = -1;
 		seedOpm = 1;
 		FmMonShadowSetKeysProfile(SASAMI_FMMON_KEYS_MDX);
 	} else if (_stricmp(sub, "kikikai") == 0) {
-		/* Catalog xml2 tags this as OPM; the Z80 program is YM2203 @C000. */
+		/* カタログ xml2 は OPM。Z80 プログラムは YM2203 @C000。 */
 		strncpy_s(chip, "YM2203", _TRUNCATE);
 		layout = 0;
 		FmMonShadowSetSsgClock(3000000u);
@@ -450,15 +449,15 @@ void CEmuFmMonBindFromGe(const CEmuGameEntry* ge)
 			strncpy_s(chip, "OPM+AY", _TRUNCATE);
 			layout = -1;
 			seedOpm = 1;
-			/* X1 AY master 2 MHz; CChipAy halves once → 1 MHz tone clock.
-			   FmMon /16 must use the post-divider clock or SSG MIDI is ~1oct off. */
+			/* X1 AY master 2 MHz。CChipAy が一度半分 → 1 MHz トーンクロック。
+			   FmMon /16 は分周後のクロックを使わないと SSG MIDI が約 1 オクターブずれる。 */
 			FmMonShadowSetSsgClock(1000000u);
 		} else {
 			strncpy_s(chip, "OPM", _TRUNCATE);
 			layout = -1;
 			seedOpm = 1;
 		}
-		/* X68000: OPM keys + MSM6258 ADPCM PCM row. */
+		/* X68000: OPM 鍵盤 + MSM6258 ADPCM PCM 行。 */
 		if (_stricmp(dd, "x68k") == 0 || _stricmp(pf, "x68k") == 0)
 			strncpy_s(chip, "OPM+ADPCM", _TRUNCATE);
 		FmMonShadowSetKeysProfile(SASAMI_FMMON_KEYS_MDX);
@@ -478,8 +477,8 @@ void CEmuFmMonBindFromGe(const CEmuGameEntry* ge)
 		layout = 0;
 		FmMonShadowSetSsgClock(1500000u);
 	} else if (_stricmp(sub, "68k2") == 0) {
-		/* BGM 0x1x is YM2413. OPN layout let YM2203 dumps zero the FM keys
-		   while OPLL streamed, so the probe stayed MON_DEAD / keys=0. */
+		/* BGM 0x1x は YM2413。OPN layout だと YM2203 dump が FM キーを消す一方
+		   OPLL は流れ、プローブが MON_DEAD / keys=0 のまま。 */
 		strncpy_s(chip, "YM2203+OPLL", _TRUNCATE);
 		layout = -1;
 		FmMonShadowSetSsgClock(1500000u);
@@ -508,8 +507,8 @@ void CEmuFmMonBindFromGe(const CEmuGameEntry* ge)
 		layout = -1;
 		FmMonShadowEnterKeysOnly(SASAMI_FMMON_KEYS_MIDI);
 	} else if (_stricmp(sub, "beep") == 0) {
-		/* hoot XML often tags GM/MT-32 rows as type=beep + midiout=1.
-		   Those play through MPU UART → MIDI monitor, not the FM panel. */
+		/* hoot XML は GM/MT-32 行を type=beep + midiout=1 と付けることが多い。
+		   再生は MPU UART → MIDI モニタで、FM パネルではない。 */
 		int midiOut = 0;
 		for (int i = 0; i < ge->optCount; i++) {
 			if (_stricmp(ge->opt[i].name, "midiout") == 0) { midiOut = 1; break; }
@@ -540,11 +539,10 @@ void CEmuFmMonBindFromGe(const CEmuGameEntry* ge)
 		layout = 1;
 	}
 
-	/* The subtype chain above is hand-maintained and cannot know every board,
-	   so anything it did not recognise came out labelled "OPM". When the
-	   catalog documents the chip set and the chain's label leaves one out,
-	   the catalog wins - it is the only per-archive record of the real
-	   hardware. Boards the chain does recognise keep their tuned labels. */
+	/* 上の subtype 連鎖は手メンテで全基板は知れない。未知は "OPM" ラベル
+	   になっていた。カタログがチップ集合を書いて連鎖のラベルが欠けていれば
+	   カタログが勝つ — 実ハードの唯一の per-archive 記録。連鎖が認識した
+	   基板は調整済みラベルを残す。 */
 	if (!isFm7 && !FmMonLabelCoversDocChips(ge, chip)) {
 		char docLabel[48];
 		int docLayout = layout;
@@ -555,8 +553,8 @@ void CEmuFmMonBindFromGe(const CEmuGameEntry* ge)
 			layout = docLayout;
 			if (docSsg) FmMonShadowSetSsgClock(docSsg);
 			if (docKeys) FmMonShadowSetKeysProfile(docKeys);
-			/* A composed set is no longer guaranteed to be OPM-shaped, so
-			   drop the OPM snapshot seeding that assumed it was. */
+			/* 組み立てた集合はもう OPM 形とは限らないので、
+			   それを前提にした OPM snapshot 種まきを落とす。 */
 			if (docLayout != -1) seedOpm = 0;
 		}
 	}

@@ -21,6 +21,7 @@ static uint8_t g_x68MidiBuf[CEMU_X68_MIDI_CAP];
 
 static unsigned g_x68MidiOff[16];
 
+/* X68MidiReset の実装 */
 static void X68MidiReset()
 {
 	g_x68MidiAck = 0;
@@ -31,6 +32,7 @@ static void X68MidiReset()
 	memset(g_x68MidiOff, 0, sizeof(g_x68MidiOff));
 }
 
+/* X68MidiCapture の実装 */
 static void X68MidiCapture(uint8_t v)
 {
 	if (g_x68MidiN < (unsigned)CEMU_X68_MIDI_CAP)
@@ -61,6 +63,7 @@ static void X68MidiCapture(uint8_t v)
 extern "C" unsigned CEmuX68kMidiByteCount() { return g_x68MidiN; }
 extern "C" unsigned CEmuX68kMidiNoteOnCount() { return g_x68MidiNotes; }
 extern "C" unsigned CEmuX68kMidiPortWrites() { return g_x68MidiWr; }
+/* CEmuX68kMidiDump の実装 */
 extern "C" void CEmuX68kMidiDump(FILE* f)
 {
 	if (!f) return;
@@ -75,6 +78,7 @@ extern "C" void CEmuX68kMidiDump(FILE* f)
 	fprintf(f, "\n");
 }
 
+/* CEmuX68kMidiDumpRegs の実装 */
 extern "C" void CEmuX68kMidiDumpRegs(FILE* f)
 {
 	if (!f) return;
@@ -93,6 +97,7 @@ extern "C" void CEmuX68kMidiDumpRegs(FILE* f)
 		hw ? (hw->Read32(0x10cu) & 0xffffffu) : 0u);
 }
 
+/* CEmuX68kIntAck の実装 */
 static int CEmuX68kIntAck(int level)
 {
 	CHardX68k* hw = CEmuM68kBusGetX68k();
@@ -103,13 +108,12 @@ static int CEmuX68kIntAck(int level)
 	}
 	if (hw && hw->SoundChip())
 		hw->SoundChip()->AckIrq();
-	/* Pulse: drop the Musashi line on ack. Holding IRQ6 through the
-	   trampoline's jsr/ISR lets move #$2500,sr (or any IPL≤5) re-enter
-	   immediately and walk SSP down through the DOS image @ $F08700. */
+	/* パルス: ack で Musashi 線を落とす。トランポリン jsr/ISR 中に IRQ6 を保持すると move #$2500,sr（または IPL≤5）が即座に再入し SSP が DOS イメージ $F08700 を下へ歩く。 */
 	m68k_set_irq(M68K_IRQ_NONE);
 	return M68K_INT_ACK_AUTOVECTOR;
 }
 
+/* CEmuHardX68kSetActive の実装 */
 void CEmuHardX68kSetActive(CHardX68k* hw)
 {
 	CEmuM68kBusSetX68k(hw);
@@ -119,6 +123,7 @@ void CEmuHardX68kSetActive(CHardX68k* hw)
 		m68k_set_int_ack_callback(NULL);
 }
 
+/* CEmuHardX68kGetActive の実装 */
 CHardX68k* CEmuHardX68kGetActive()
 {
 	return CEmuM68kBusGetX68k();
@@ -184,6 +189,7 @@ CHardX68k::~CHardX68k()
 	Shutdown();
 }
 
+/* チップと CPU を生成する */
 int CHardX68k::Init(const CEmuGameEntry* ge, int sampleRate)
 {
 	if (!ge) return 0;
@@ -204,6 +210,7 @@ int CHardX68k::Init(const CEmuGameEntry* ge, int sampleRate)
 	return chip_ ? 1 : 0;
 }
 
+/* チップ／CPU／ROM を破棄する */
 void CHardX68k::Shutdown()
 {
 	if (CEmuM68kBusGetX68k() == this)
@@ -215,12 +222,14 @@ void CHardX68k::Shutdown()
 	musashiReady_ = 0;
 }
 
+/* 曲コマンドをメールボックスへ書く */
 void CHardX68k::SetSongCommand(unsigned code)
 {
 	songCode_ = (uint16_t)(code & 0xffff);
 	songFlag_ = 0x01;
 }
 
+/* CHardX68k::HighPtr の実装 */
 uint8_t* CHardX68k::HighPtr(unsigned addr24)
 {
 	const unsigned page = addr24 & 0xff0000u;
@@ -229,6 +238,7 @@ uint8_t* CHardX68k::HighPtr(unsigned addr24)
 	return NULL;
 }
 
+/* CHardX68k::HighPtr の実装 */
 const uint8_t* CHardX68k::HighPtr(unsigned addr24) const
 {
 	const unsigned page = addr24 & 0xff0000u;
@@ -237,6 +247,7 @@ const uint8_t* CHardX68k::HighPtr(unsigned addr24) const
 	return NULL;
 }
 
+/* 8bit 読込 */
 uint8_t CHardX68k::Read8(unsigned addr)
 {
 	addr &= 0xffffffu;
@@ -254,15 +265,15 @@ uint8_t CHardX68k::Read8(unsigned addr)
 		return (uint8_t)(songCode_ & 0xff);
 	if (addr == 0xe00002u)
 		return (uint8_t)((songCode_ >> 8) & 0xff);
-	/* DOS file-op result mailbox $E00018..$E0001B (big-endian long). */
+	/* DOS ファイル操作結果メールボックス $E00018..$E0001B（ビッグエンディアン long） */
 	if (addr >= 0xe00018u && addr <= 0xe0001bu) {
 		const unsigned sh = (3u - (addr - 0xe00018u)) * 8u;
 		return (uint8_t)((dosMbResult_ >> sh) & 0xffu);
 	}
-	/* YM2151 status (odd ports). */
+	/* YM2151 ステータス（奇数ポート） */
 	if (addr == 0xe90003u || addr == 0xe90001u)
 		return chip_ ? (uint8_t)(chip_->ReadStatus() & 0x7fu) : 0;
-	/* MSM6258V status: report idle so _ADPCMSNS spin loops always drain. */
+	/* MSM6258V ステータス: idle を返し _ADPCMSNS スピンが常にドレインする */
 	if (addr == 0xe92001u || addr == 0xe92003u)
 		return 0;
 	if (addr == 0xe9a005u || addr == 0xe9a007u)
@@ -274,15 +285,11 @@ uint8_t CHardX68k::Read8(unsigned addr)
 			m68k_end_timeslice();
 		return 0;
 	}
-	/* Soft MFP ($E88000 / $E8A000). Do not remap 0→$FF: IER/IMR/TCDCR
-	   reset to 0 (disabled/stopped). Open-bus $FF hid "timer already on". */
+	/* Soft MFP（$E88000 / $E8A000）。0→$FF にリマップしない: IER/IMR/TCDCR リセットは 0（無効／停止）。オープンバス $FF は「タイマ既に ON」を隠した。 */
 	if ((addr >= 0xe88000u && addr <= 0xe88fffu) || (addr >= 0xe8a000u && addr <= 0xe8afffu)) {
 		const unsigned off = addr & 0xfffu;
 		uint8_t v = mfp_[off];
-		/* GPIP ($E88001): open-bus high, bit7 set so `tst.b / bmi` cannot
-		   hang. Bit4 is VDISP — arcus waits for it clear (`btst #4 / bne`),
-		   MIDI_DRV.68K waits for set then clear (`btst #4 / beq` then bne).
-		   Toggle every read so both two-phase waits retire. */
+		/* GPIP（$E88001）: オープンバス High、bit7 セットで `tst.b / bmi` がハングしない。Bit4 は VDISP — arcus はクリア待ち（`btst #4 / bne`）、MIDI_DRV.68K はセット後クリア待ち（`btst #4 / beq` 次いで bne）。毎回トグルし両相待ちを終わらせる。 */
 		if (off == 0x001u) {
 			if (v == 0) v = 0xff;
 			g_x68GpipPhase++;
@@ -294,10 +301,7 @@ uint8_t CHardX68k::Read8(unsigned addr)
 		(void)softMfp_;
 		return v;
 	}
-	/* CZ-6BM1 / YM3802 MIDI. Open-bus $FF looks busy-forever.
-	   DSR ($EAFA09): bit7 IRQ, bit6 TxRDY (ZMUSIC `btst #6,(a4)` /
-	   set_a3a4 in zmusic2 macro.mac), bit2 TxEMPTY, bit1 TxRDY. MIDI_DRV waits
-	   `tst.b (a4) / bpl` with A4=$EAFA09, then writes Tx data at +4. */
+	/* CZ-6BM1 / YM3802 MIDI。オープンバス $FF は永久 busy。DSR（$EAFA09）: bit7 IRQ、bit6 TxRDY（ZMUSIC `btst #6,(a4)` / zmusic2 macro.mac の set_a3a4）、bit2 TxEMPTY、bit1 TxRDY。MIDI_DRV は A4=$EAFA09 で `tst.b (a4) / bpl` 待ち、+4 に Tx データを書く。 */
 	if ((addr >= 0xeafa00u && addr <= 0xeafa0fu)
 		|| (addr >= 0xefa000u && addr <= 0xefa00fu)) {
 		g_x68MidiRd++;
@@ -310,7 +314,7 @@ uint8_t CHardX68k::Read8(unsigned addr)
 		if (r == 0x03u) return g_x68MidiIer;
 		return st;
 	}
-	/* $E00000..$E7FFFF extra RAM after mailbox / timeslice MMIO. */
+	/* $E00000..$E7FFFF メールボックス／タイムスライス MMIO 後の追加 RAM */
 	if (addr >= (unsigned)kExtBase && addr < (unsigned)kExtBase + (unsigned)kExtBytes)
 		return ext_[addr - (unsigned)kExtBase];
 	if (addr >= 0xe80000u && addr <= 0xefffffu)
@@ -318,18 +322,21 @@ uint8_t CHardX68k::Read8(unsigned addr)
 	return 0;
 }
 
+/* 16bit 読込 */
 uint16_t CHardX68k::Read16(unsigned addr)
 {
 	addr &= 0xffffffu;
 	return (uint16_t)((Read8(addr) << 8) | Read8((addr + 1) & 0xffffffu));
 }
 
+/* 32bit 読込 */
 uint32_t CHardX68k::Read32(unsigned addr)
 {
 	addr &= 0xffffffu;
 	return ((uint32_t)Read16(addr) << 16) | (uint32_t)Read16((addr + 2) & 0xffffffu);
 }
 
+/* 8bit 書込 */
 void CHardX68k::Write8(unsigned addr, uint8_t data)
 {
 	addr &= 0xffffffu;
@@ -353,7 +360,7 @@ void CHardX68k::Write8(unsigned addr, uint8_t data)
 		songFlag_ = data;
 		return;
 	}
-	/* Guest may poke song code bytes; keep mailbox coherent. */
+	/* ゲストが曲コードバイトを poke し得る。メールボックスを一貫させる */
 	if (addr == 0xe00001u) {
 		songCode_ = (uint16_t)((songCode_ & 0xff00u) | data);
 		return;
@@ -378,12 +385,7 @@ void CHardX68k::Write8(unsigned addr, uint8_t data)
 			opmWrites_ = CEmuChipYm2151WriteCount(chip_);
 		return;
 	}
-	/* HD63450 DMAC channel 3 is what feeds the MSM6258V. Latch the transfer
-	   count and memory address from the bytes actually written to MTC/MAR:
-	   reading them out of D2/A1 instead only works for the one driver idiom
-	   that happens to still hold them there, which is why whole families
-	   played OPM fine but never a single PCM sample. The register snoop is
-	   kept as a fallback for rips that program the channel some other way. */
+	/* HD63450 DMAC チャネル 3 が MSM6258V を供給。転送カウントとメモリアドレスは MTC/MAR へ実際に書かれたバイトからラッチする。D2/A1 から読むのはそれらがまだそこに残る 1 ドライバイディオムだけ有効で、系統全体が OPM は鳴るが PCM サンプルが 1 つも出なかった理由。レジスタスヌープは別経路でチャネルを組むリップのフォールバックとして残す。 */
 	if (addr >= 0xe840c0u && addr <= 0xe840ffu) {
 		switch (addr) {
 		case 0xe840c5u: dmacOcr_ = data; break;
@@ -417,10 +419,8 @@ void CHardX68k::Write8(unsigned addr, uint8_t data)
 		return;
 	}
 	if (addr == 0xe840c7u) {
-		/* CCR: bit7 STR start, bit5 HLT halt, bit4 SAB software abort.
-		   The old exact-0x88 start test missed every driver that starts
-		   with a different byte in the low bits. */
-		if (data & 0x10u) { /* SAB */
+		/* CCR: bit7 STR 開始、bit5 HLT 停止、bit4 SAB ソフトアボート。旧来の厳密 0x88 開始テストは下位ビットが違う開始バイトのドライバを全部逃した。 */
+		if (data & 0x10u) { /* SAB（ソフトアボート） */
 			adpcmPlaying_ = 0;
 			adpcmPaused_ = 0;
 			adpcmChainLeft_ = 0;
@@ -428,8 +428,7 @@ void CHardX68k::Write8(unsigned addr, uint8_t data)
 			return;
 		}
 		if (!(data & 0x80u)) {
-			/* HLT toggles pause without dropping the block being played;
-			   MUCO's _ADPCMMOD pause/resume pair is exactly this. */
+			/* HLT は再生中ブロックを落とさずポーズ切替。MUCO の _ADPCMMOD ポーズ／再開ペアがまさにこれ。 */
 			adpcmPaused_ = (data & 0x20u) ? 1 : 0;
 			if (!adpcmPlaying_)
 				FmMonShadowPcmNote(0, 0, 0);
@@ -439,10 +438,7 @@ void CHardX68k::Write8(unsigned addr, uint8_t data)
 		adpcmSignal_ = 0;
 		adpcmStep_ = 0;
 		adpcmNibble_ = 0;
-		/* OCR bits 3-2 select chaining: 10 = array chaining, where the
-		   channel walks 6-byte {address, count} descriptors at BAR instead
-		   of using MAR/MTC. Drivers that queue a short priming block ahead
-		   of the sample (CODE-ZERO) only ever use this form. */
+		/* OCR bits 3-2 がチェイン選択: 10 = 配列チェイン。チャネルは MAR/MTC ではなく BAR 上の 6 バイト {address, count} 記述子を歩く。サンプル前に短いプライミングブロックをキューするドライバ（CODE-ZERO）はこの形だけ使う。 */
 		if ((dmacOcr_ & 0x0cu) == 0x08u && dmacBtc_ > 0) {
 			adpcmChainPtr_ = dmacBar_ & 0xffffffu;
 			adpcmChainLeft_ = dmacBtc_;
@@ -470,9 +466,7 @@ void CHardX68k::Write8(unsigned addr, uint8_t data)
 		}
 		return;
 	}
-	/* MSM6258V command register. $E9200x is the ADPCM chip on real hardware,
-	   not a second OPM window: $01 stops, $02 starts playback. $E92003 is the
-	   CPU-fed data port, which the DMA-driven rips only poke to flush. */
+	/* MSM6258V コマンドレジスタ。$E9200x は実機の ADPCM チップであり第 2 OPM 窓ではない: $01 停止、$02 再生開始。$E92003 は CPU 給電データポート。DMA 駆動リップはフラッシュ用に poke するだけ。 */
 	if (addr == 0xe92001u) {
 		if (data & 0x01u) {
 			adpcmPlaying_ = 0;
@@ -514,7 +508,7 @@ void CHardX68k::Write8(unsigned addr, uint8_t data)
 		g_x68MidiOff[r]++;
 		if (r == 0x03u)
 			g_x68MidiIer = data;
-		/* Odd-byte YM3802: +9 TxD, +B/+D also used by some MIDI_DRV.68K builds. */
+		/* 奇数バイト YM3802: +9 TxD。一部 MIDI_DRV.68K ビルドは +B/+D も使う */
 		if (r == 0x09u || r == 0x0Bu || r == 0x0Du)
 			X68MidiCapture(data);
 		g_x68MidiAck = 1;
@@ -522,11 +516,12 @@ void CHardX68k::Write8(unsigned addr, uint8_t data)
 	}
 }
 
-/* OKI ADPCM step table (MSM6258 / similar). */
+/* OKI ADPCM ステップ表（MSM6258 / 類似） */
 static const int kAdpcmIndexShift[8] = { -1, -1, -1, -1, 2, 4, 6, 8 };
 static int kAdpcmDiffLut[49 * 16];
 static int kAdpcmLutReady = 0;
 
+/* CEmuX68kAdpcmInitLut の実装 */
 static void CEmuX68kAdpcmInitLut()
 {
 	if (kAdpcmLutReady) return;
@@ -551,25 +546,22 @@ static void CEmuX68kAdpcmInitLut()
 	kAdpcmLutReady = 1;
 }
 
+/* CHardX68k::AdpcmStartBlock の実装 */
 void CHardX68k::AdpcmStartBlock(unsigned addr, unsigned bytes)
 {
 	adpcmAddr_ = addr & 0xffffffu;
-	adpcmSize_ = bytes << 1; /* nibbles */
+	adpcmSize_ = bytes << 1; /* ニブル */
 	adpcmPos_ = 0;
 	adpcmPhase_ = 0;
 	adpcmPlaying_ = 1;
-	/* MSM6258 → FM monitor ADPCM key row (OPM+ADPCM). 15.6kHz is the native
-	   playback rate, not an audible oscillator frequency: display it as unity
-	   pitch (C4), since absolute Hz conversion incorrectly clamped to O10. */
+	/* MSM6258 → FM モニタ ADPCM キー行（OPM+ADPCM）。15.6kHz はネイティブ再生レートであり可聴発振周波数ではない。絶対 Hz 変換は O10 へ誤クランプするのでユニティピッチ（C4）として表示する。 */
 	const unsigned rate = (unsigned)(adpcmRateHz_ > 0 ? adpcmRateHz_ : 15600);
 	const int mid = FmMonShadowPitchRateToMidi(
 		(unsigned)(((uint64_t)rate * 4096u + 7800u) / 15600u));
 	FmMonShadowPcmNote(0, (mid >= 0) ? mid : 60, 1);
 }
 
-/* Pull the next 6-byte {address, count} descriptor of an array chain.
-   The decoder state (signal/step) carries across blocks: the chain is one
-   continuous ADPCM stream to the chip. */
+/* 配列チェインの次 6 バイト {address, count} 記述子を取る。デコーダ状態（signal/step）はブロックを跨ぐ: チェインはチップへの 1 本の連続 ADPCM ストリーム。 */
 int CHardX68k::AdpcmLoadChainEntry()
 {
 	while (adpcmChainLeft_ > 0) {
@@ -585,6 +577,7 @@ int CHardX68k::AdpcmLoadChainEntry()
 	return 0;
 }
 
+/* ADPCM をステレオへ混成する */
 void CHardX68k::MixAdpcm(int16_t* stereo, int frames)
 {
 	if (!stereo || frames <= 0 || !adpcmPlaying_ || adpcmPaused_ || adpcmSize_ < 1) return;
@@ -618,10 +611,7 @@ void CHardX68k::MixAdpcm(int16_t* stereo, int frames)
 			adpcmStep_ = stepIdx;
 		}
 		if (!adpcmPlaying_) break;
-		/* 12-bit decoder output. A straight <<4 puts a single bass-drum block
-		   at digital full scale and leaves the OPM sum nowhere to go, so keep
-		   hoot's 0xF0/0xC0 PCM-to-OPM balance by attenuating the PCM side
-		   instead of turning the (unscaled) OPM down. */
+		/* 12bit デコーダ出力。単純 <<4 はバスドラム 1 ブロックをデジタルフルスケールにし OPM 合計の行き先がなくなる。hoot の 0xF0/0xC0 PCM対OPM バランスを保つため、未スケール OPM を下げず PCM 側を減衰する。 */
 		int32_t s = adpcmSignal_ * 12;
 		int32_t l = s, r = s;
 		if (adpcmPan_ == 1) r = 0;
@@ -638,6 +628,7 @@ void CHardX68k::MixAdpcm(int16_t* stereo, int frames)
 	}
 }
 
+/* IRQ 配送 */
 int CHardX68k::AckMfpIrq()
 {
 	const int vec = mfpIrqVec_ ? (int)mfpIrqVec_ : M68K_INT_ACK_AUTOVECTOR;
@@ -646,12 +637,14 @@ int CHardX68k::AckMfpIrq()
 	return vec;
 }
 
+/* IRQ 配送 */
 int CHardX68k::MfpTimerDIrqArmed() const
 {
-	/* IERB bit4 + IMRB bit4 + TCDCR Timer-D delay != stop. */
+	/* IERB bit4＋IMRB bit4＋TCDCR Timer-D delay ≠ stop（許可判定） */
 	return ((mfp_[0x09] & 0x10u) && (mfp_[0x15] & 0x10u) && (mfp_[0x1d] & 7u)) ? 1 : 0;
 }
 
+/* 周辺クロックを進める */
 void CHardX68k::TickMfp(int cpuCycles)
 {
 	if (cpuCycles <= 0 || cpuHz_ <= 0 || mfpIrqPending_) return;
@@ -664,8 +657,7 @@ void CHardX68k::TickMfp(int cpuCycles)
 	int minPeriod = cpuHz_ / 4000;
 	if (minPeriod < 1) minPeriod = 1;
 
-	/* Timer D source 4 → vec (VR&F0)|4 → $110 when VR=$40.
-	   Timer C source 5 → $114. */
+	/* Timer D 源 4 → vec (VR&F0)|4 → VR=$40 なら $110。Timer C 源 5 → $114。 */
 	const int preD = kPre[tcdcr & 7u];
 	const int preC = kPre[(tcdcr >> 4) & 7u];
 	if ((ierb & 0x10u) && (imrb & 0x10u) && preD > 0) {
@@ -705,10 +697,11 @@ void CHardX68k::TickMfp(int cpuCycles)
 	}
 }
 
+/* 16bit 書込 */
 void CHardX68k::Write16(unsigned addr, uint16_t data)
 {
 	addr &= 0xffffffu;
-	/* DOS file-op trigger: fn in low byte (Human68k $3D/$3E/$3F/$4E/…). */
+	/* DOS ファイル操作トリガ: 下位バイトが fn（Human68k $3D/$3E/$3F/$4E/…） */
 	if (addr == 0xe0001eu) {
 		dosMbResult_ = DosFileOp(data & 0xffu, dosMbA1_, dosMbD0_, dosMbD1_);
 		return;
@@ -717,6 +710,7 @@ void CHardX68k::Write16(unsigned addr, uint16_t data)
 	Write8((addr + 1) & 0xffffffu, (uint8_t)(data & 0xff));
 }
 
+/* 32bit 書込 */
 void CHardX68k::Write32(unsigned addr, uint32_t data)
 {
 	addr &= 0xffffffu;
@@ -736,6 +730,7 @@ void CHardX68k::Write32(unsigned addr, uint32_t data)
 	Write16((addr + 2) & 0xffffffu, (uint16_t)(data & 0xffff));
 }
 
+/* CEmuX68kIsTrapF の実装 */
 static int CEmuX68kIsTrapF(const char* name)
 {
 	if (!name) return 0;
@@ -746,8 +741,7 @@ static int CEmuX68kIsTrapF(const char* name)
 	return _stricmp(base, "trap_f.bin") == 0;
 }
 
-/* Human68k .X (HU) — NetBSD hux.h / aout2hux layout.
-   Strip 64-byte header, clear BSS, apply delta-encoded relocs only. */
+/* Human68k .X（HU）— NetBSD hux.h / aout2hux レイアウト。64 バイトヘッダを剥がし BSS をクリアし、デルタ符号化リロケだけ適用。 */
 static int CEmuX68kLoadHumanX(uint8_t* dst, unsigned dstCap, unsigned loadAddr,
 	const unsigned char* data, unsigned sz)
 {
@@ -780,7 +774,7 @@ static int CEmuX68kLoadHumanX(uint8_t* dst, unsigned dstCap, unsigned loadAddr,
 		memset(dst + loadAddr + body, 0, bz);
 	}
 
-	/* Delta-encoded relocs: short BE16, or 0x0001 + BE32 long delta. */
+	/* デルタ符号化リロケ: 短い BE16、または 0x0001 + BE32 長いデルタ */
 	if (rsize && 0x40u + body + rsize <= sz && n == body) {
 		const unsigned char* rel = data + 0x40 + body;
 		unsigned ri = 0;
@@ -811,9 +805,7 @@ static int CEmuX68kLoadHumanX(uint8_t* dst, unsigned dstCap, unsigned loadAddr,
 	return 1;
 }
 
-/* ARTDINK maps FLOAT2.X at $2E000 and A2.X at $30000, but FLOAT2's text is
-   $2F80 and KEEPPR never runs, so A2.X overwrites the FPU op table. Slide
-   FLOAT2 into the hole below A2.X ($2A000+$2F80=$2CF80). */
+/* ARTDINK は FLOAT2.X を $2E000、A2.X を $30000 にマップするが FLOAT2 の text は $2F80 で KEEPPR が走らないため A2.X が FPU op 表を上書きする。FLOAT2 を A2.X 下の穴へ滑らせる（$2A000+$2F80=$2CF80）。 */
 static unsigned CEmuX68kFloat2LoadAddr(const CEmuGameEntry* ge, unsigned xmlOff,
 	const unsigned char* data, unsigned sz)
 {
@@ -834,9 +826,7 @@ static unsigned CEmuX68kFloat2LoadAddr(const CEmuGameEntry* ge, unsigned xmlOff,
 	return clash ? 0x2a000u : xmlOff;
 }
 
-/* hoot opmdrv.bin: a second pass through init (BOOT restarted from $F08xxx
-   IRQ/trap) misses $48E77FFE because the first pass stored $10000 over it.
-   Turn the three fail-spins into "already inited" → restore/rts. */
+/* hoot opmdrv.bin: init の 2 回目（BOOT が $F08xxx IRQ/trap から再起動）は最初のパスが $10000 を上書きしたため $48E77FFE を逃す。3 つの失敗スピンを「既に初期化済み」→ restore/rts にする。 */
 static void CEmuX68kFixOpmdrvBinInit(uint8_t* rom, unsigned n)
 {
 	if (!rom || n < 0xB9Au) return;
@@ -845,32 +835,26 @@ static void CEmuX68kFixOpmdrvBinInit(uint8_t* rom, unsigned n)
 	if (rom[0xB16] != 0x22 || rom[0xB17] != 0x3C) return;
 	if (rom[0xB18] != 0x48 || rom[0xB19] != 0xE7 || rom[0xB1A] != 0x7F || rom[0xB1B] != 0xFE)
 		return;
-	/* bra.s $B94 (movem/rts). Displacement is from the next instruction. */
+	/* bra.s $B94（movem/rts）。変位は次命令から */
 	if (rom[0xB32] == 0x60 && rom[0xB33] == 0xFE) {
 		rom[0xB32] = 0x60;
-		rom[0xB33] = 0x60; /* B34+0x60 = B94 */
+		rom[0xB33] = 0x60; /* 番地 B34+0x60 = B94 */
 	}
 	if (rom[0xB4C] == 0x60 && rom[0xB4D] == 0xFE) {
 		rom[0xB4C] = 0x60;
-		rom[0xB4D] = 0x46; /* B4E+0x46 = B94 */
+		rom[0xB4D] = 0x46; /* 番地 B4E+0x46 = B94 */
 	}
 	if (rom[0xB70] == 0x60 && rom[0xB71] == 0xFE) {
 		rom[0xB70] = 0x60;
-		rom[0xB71] = 0x22; /* B72+0x22 = B94 */
+		rom[0xB71] = 0x22; /* 番地 B72+0x22 = B94 */
 	}
 }
 
-/* AliceSoft System3 BOOT (OPMDRV2.X + FLOAT2 + ADV + AMUS.DAT): three
-   1000-word scans starting at $15200 for $48E77FFE, then plant $10000 and
-   call OPMDRV M_INTON/M_ALLOC/M_INIT. Each miss ends in bra.s *. Settle can
-   see PC in our trap15 image ($F08xxx), classify that as wrecked, and
-   restart from the reset vector after the first pass already overwrote the
-   landmark — retry spins forever (abtengu $574, dps $55C, tousin $536).
-   Skip those spins to the M_INTON trap like FixOpmdrvBinInit. */
+/* AliceSoft System3 BOOT（OPMDRV2.X + FLOAT2 + ADV + AMUS.DAT）: $15200 から $48E77FFE を 1000 ワード×3 スキャンし、$10000 を植えて OPMDRV M_INTON/M_ALLOC/M_INIT を呼ぶ。ミスはそれぞれ bra.s *。Settle が PC を trap15 イメージ（$F08xxx）と見て壊れた分類し、最初のパスが目印を上書きしたあとリセットベクタから再起動 — 再試行が永久スピン（abtengu $574、dps $55C、tousin $536）。FixOpmdrvBinInit と同様それらのスピンを M_INTON trap へ飛ばす。 */
 static void CEmuX68kFixAliceOpmScan(uint8_t* rom, unsigned n)
 {
 	if (!rom || n < 0x600u) return;
-	/* Distinct from hoot opmdrv.bin glue ($400 = $B06). */
+	/* hoot opmdrv.bin グルー（$400 = $B06）とは別 */
 	if (n > 0xB16u && rom[0x400] == 0 && rom[0x401] == 0
 		&& rom[0x402] == 0x0B && rom[0x403] == 0x06)
 		return;
@@ -901,10 +885,7 @@ static void CEmuX68kFixAliceOpmScan(uint8_t* rom, unsigned n)
 	}
 }
 
-/* KOEI MML (MUS*.opm) starts with (i) then notes, voices live in TEST.OPM /
-   EWMX.OPM. Glue WRITE sends (i), then the voice bank, then the song — so
-   the song's own (i) wipes the bank before notes compile. Drop a leading
-   init that is not followed by (v…) in the first 512 bytes. */
+/* KOEI MML（MUS*.opm）は (i) で始まりノートが続き、ボイスは TEST.OPM / EWMX.OPM。グルー WRITE は (i)、次いでボイスバンク、次いで曲を送るので、曲自身の (i) がノートコンパイル前にバンクを消す。先頭 512 バイトで (v…) が続かない先頭 init を落とす。 */
 static void CEmuX68kSkipBareOpmInit(const unsigned char** pdata, unsigned* psz)
 {
 	const unsigned char* data = *pdata;
@@ -927,11 +908,7 @@ static void CEmuX68kSkipBareOpmInit(const unsigned char** pdata, unsigned* psz)
 	*psz = sz - skip;
 }
 
-/* SD_DRV.X's IRQ path tests a Human68k resident-state byte at A5+$D28.
-   In this ROM-shell use that OS-owned byte remains zero even after the BGM
-   command succeeds, so the branch skips the sequencer forever. The following
-   instructions immediately perform the normal channel-state checks and are
-   safe for the shell; remove only this exact, version-specific gate. */
+/* SD_DRV.X の IRQ 経路は A5+$D28 の Human68k 常駐状態バイトを見る。この ROM シェルでは BGM コマンド成功後もその OS 所有バイトが 0 のままで、分岐がシーケンサを永久に飛ばす。直後の命令は通常のチャネル状態チェックでシェルに安全。この正確な版固有ゲートだけ除く。 */
 static void CEmuX68kFixSdDrvHostGate(uint8_t* ram, unsigned loadAddr, unsigned body)
 {
 	if (!ram || body < 0xfecu) return;
@@ -946,20 +923,12 @@ static void CEmuX68kFixSdDrvHostGate(uint8_t* ram, unsigned loadAddr, unsigned b
 	ram[gate + 7] = 0x71;
 }
 
-/* StarCraft OP.X / OPMDRV.X (rougea, phantas4, qstaff): M_ALLOC's track
-   pool sits in the driver TEXT at ~$11A96, and the IRQ6 ISR / $1243C flag
-   live inside that same window. BOOT asks for $103FF of MML workspace, then
-   compiles KIM.OPM/P4.OPM (~27KB) on top of the ISR. m_and_m skips compile
-   (songs live in MAIN.X) so the ISR survives. Retarget the pool to the DOS
-   heap at $A00000 — 41F9 abs.l can move directly; 41FA/43FA pc-rel lea
-   cannot reach $A00000, so those become move.l ptr(pc),An with the pointer
-   stored in the trailing zeros of the HU data section. */
+/* StarCraft OP.X / OPMDRV.X（rougea, phantas4, qstaff）: M_ALLOC のトラックプールはドライバ TEXT 約 $11A96。IRQ6 ISR / $1243C フラグも同じ窓。BOOT は $103FF の MML ワークスペースを要求し、その上に KIM.OPM/P4.OPM（約 27KB）をコンパイルする。m_and_m はコンパイルを飛ばす（曲は MAIN.X）ので ISR が残る。プールを DOS ヒープ $A00000 へ付け替える — 41F9 abs.l は直接移せる。41FA/43FA pc-rel lea は $A00000 に届かないので move.l ptr(pc),An にし、ポインタは HU データ節末尾ゼロに置く。 */
 static void CEmuX68kFixOpxTrackHeap(uint8_t* rom, unsigned n, uint8_t* heapRam, unsigned heapBytes)
 {
 	if (!rom || n < 0x20000u) return;
 	if (!heapRam || heapBytes < 0x3FF20u) return;
-	/* m_and_m / phantas3 share this OP.X but compile in MAIN.X — do not
-	   steal their in-driver pool. */
+	/* m_and_m / phantas3 はこの OP.X を共有するが MAIN.X でコンパイル — ドライバ内プールを奪わない */
 	{
 		int hasMml = 0;
 		const unsigned hi = (n < 0x800u) ? n : 0x800u;
@@ -973,7 +942,7 @@ static void CEmuX68kFixOpxTrackHeap(uint8_t* rom, unsigned n, uint8_t* heapRam, 
 		}
 		if (!hasMml) return;
 	}
-	/* VOPM is often at an odd address (header padding after $FFFFFFFF). */
+	/* VOPM は奇数番地にあることが多い（$FFFFFFFF 後のヘッダパディング） */
 	unsigned load = 0;
 	for (unsigned a = 0x8000u; a + 4u < 0x20000u && a + 4u < n; a++) {
 		if (rom[a] == 'V' && rom[a + 1] == 'O'
@@ -1004,17 +973,11 @@ static void CEmuX68kFixOpxTrackHeap(uint8_t* rom, unsigned n, uint8_t* heapRam, 
 			pool = dest;
 		}
 	}
-	/* Do not retarget the 41F9/41FA M_ALLOC pointer table to $A00000.
-	   Play cmd 1 indexes that same table (`lea table(pc)` then mulu #4);
-	   stealing it leaves every mailbox in an empty heap slot and all three
-	   compile-family rips (identical KIM/P4/QS.OPM) render one drone.
-	   Compile workspace still lives on the DOS heap via $10A44/$10A48. */
+	/* 41F9/41FA M_ALLOC ポインタ表を $A00000 へ付け替えない。Play cmd 1 が同じ表を添字する（`lea table(pc)` 次いで mulu #4）。奪うと全メールボックスが空ヒープスロットになり、コンパイル系統 3 リップ（同一 KIM/P4/QS.OPM）が 1 ドローンになる。コンパイルワークスペースは $10A44/$10A48 経由で DOS ヒープに残る。 */
 	(void)pool;
 	(void)poolHits;
 
-	/* M_INIT stores data-section $152D2 / driver $10000 into $10A44/$10A48.
-	   Compile then fills downward through TEXT (ISR at $11C58). Point the
-	   bump at the DOS heap instead. */
+	/* M_INIT はデータ節 $152D2 / ドライバ $10000 を $10A44/$10A48 へ格納。コンパイルは TEXT を下へ埋める（ISR $11C58）。バンプを DOS ヒープへ向ける。 */
 	{
 		const unsigned tramp = CEMU_X68K_DOS_HEAP + 0x3FF00u;
 		int planted = 0;
@@ -1037,7 +1000,7 @@ static void CEmuX68kFixOpxTrackHeap(uint8_t* rom, unsigned n, uint8_t* heapRam, 
 		}
 		if (planted) {
 			uint8_t* t = heapRam + 0x3FF00u;
-			/* move.l #$A00000,$10A48 ; move.l #$A40000,$10A44 ; rts */
+			/* 命令 move.l #$A00000,$10A48 ; move.l #$A40000,$10A44 ; rts */
 			t[0] = 0x23; t[1] = 0xfc;
 			t[2] = 0x00; t[3] = 0xa0; t[4] = 0x00; t[5] = 0x00;
 			t[6] = 0x00; t[7] = 0x01; t[8] = 0x0a; t[9] = 0x48;
@@ -1048,8 +1011,7 @@ static void CEmuX68kFixOpxTrackHeap(uint8_t* rom, unsigned n, uint8_t* heapRam, 
 		}
 	}
 
-	/* Data section: dc.l dataStart, $10A44 — M_INIT copies dataStart into
-	   $10A44 as the compile bump. Redirect to heap top. */
+	/* データ節: dc.l dataStart, $10A44 — M_INIT が dataStart を $10A44 へコピーしてコンパイルバンプにする。ヒープ頂へリダイレクト。 */
 	{
 		unsigned dataStart = 0;
 		for (unsigned a = load + 0x5000u; a + 4u < load + 0x7000u && a + 4u < n; a += 2u) {
@@ -1078,9 +1040,7 @@ static void CEmuX68kFixOpxTrackHeap(uint8_t* rom, unsigned n, uint8_t* heapRam, 
 	}
 }
 
-/* Compile-family BOOT (lea $30000 then jsr MAIN): the $48E77FFE scan plants
-   #$10000 at the OP.X $10A48 heap slot, so MML compile fills driver TEXT.
-   Point that plant at the DOS heap. Skip m_and_m (no $30000 MML overlay). */
+/* コンパイル系統 BOOT（lea $30000 次いで jsr MAIN）: $48E77FFE スキャンが OP.X $10A48 ヒープスロットへ #$10000 を植えるので MML コンパイルがドライバ TEXT を埋める。その植込を DOS ヒープへ向ける。m_and_m は飛ばす（$30000 MML オーバーレイ無し）。 */
 static void CEmuX68kFixOpxCompileBoot(uint8_t* rom, unsigned n, uint8_t* heapRam, unsigned heapBytes)
 {
 	if (!rom) return;
@@ -1102,7 +1062,7 @@ static void CEmuX68kFixOpxCompileBoot(uint8_t* rom, unsigned n, uint8_t* heapRam
 		if (rom[a] == 0x22 && rom[a + 1] == 0xbc
 			&& rom[a + 2] == 0 && rom[a + 3] == 0xa0
 			&& rom[a + 4] == 0 && rom[a + 5] == 0) {
-			/* 22BC already retargeted, or still #$10000 below. */
+			/* 22BC は既に付け替え済み、または下にまだ #$10000 */
 			break;
 		}
 		if (rom[a] == 0x22 && rom[a + 1] == 0xbc
@@ -1115,8 +1075,7 @@ static void CEmuX68kFixOpxCompileBoot(uint8_t* rom, unsigned n, uint8_t* heapRam
 			break;
 		}
 	}
-	/* After move.l #$A00000,(a1) the next insn is move.l a0,-4(a0); moveq #1.
-	   jsr a trampoline that keeps those and also sets $10A44 = heap top. */
+	/* move.l #$A00000,(a1) の次は move.l a0,-4(a0); moveq #1。それらを残し $10A44 = ヒープ頂もセットするトランポリンを jsr。 */
 	for (unsigned a = 0x400u; a + 6u < hi; a += 2u) {
 		if (rom[a] == 0x23 && rom[a + 1] == 0x48
 			&& rom[a + 2] == 0xff && rom[a + 3] == 0xfc
@@ -1129,7 +1088,7 @@ static void CEmuX68kFixOpxCompileBoot(uint8_t* rom, unsigned n, uint8_t* heapRam
 			rom[a + 4] = (uint8_t)(tramp >> 8);
 			rom[a + 5] = (uint8_t)tramp;
 			uint8_t* t = heapRam + 0x3FF20u;
-			/* move.l a0,-4(a0) ; move.l #$A40000,$10A44 ; moveq #1,d1 ; rts */
+			/* 命令 move.l a0,-4(a0) ; move.l #$A40000,$10A44 ; moveq #1,d1 ; rts */
 			t[0] = 0x23; t[1] = 0x48; t[2] = 0xff; t[3] = 0xfc;
 			t[4] = 0x23; t[5] = 0xfc;
 			t[6] = 0x00; t[7] = 0xa4; t[8] = 0x00; t[9] = 0x00;
@@ -1140,7 +1099,7 @@ static void CEmuX68kFixOpxCompileBoot(uint8_t* rom, unsigned n, uint8_t* heapRam
 		}
 	}
 
-	/* Snapshot the IRQ6 ISR before BOOT compile can overwrite it. */
+	/* BOOT コンパイルが上書きする前に IRQ6 ISR をスナップショット */
 	if (heapRam && heapBytes >= 0x3F880u) {
 		for (unsigned a = 0x10000u; a + 12u < 0x18000u && a + 12u < n; a += 2u) {
 			if (rom[a] != 0x70 || rom[a + 1] != 0x6a) continue;
@@ -1155,6 +1114,7 @@ static void CEmuX68kFixOpxCompileBoot(uint8_t* rom, unsigned n, uint8_t* heapRam
 	}
 }
 
+/* CEmuX68kBasename の実装 */
 static void CEmuX68kBasename(const char* path, char* out, int outMax)
 {
 	if (!out || outMax < 2) return;
@@ -1181,6 +1141,7 @@ struct CEmuX68kOpmSlot {
 	unsigned off;
 };
 
+/* CEmuX68kOpmSlotNameCmp の実装 */
 static int CEmuX68kOpmSlotNameCmp(const void* a, const void* b)
 {
 	const CEmuX68kOpmSlot* sa = (const CEmuX68kOpmSlot*)a;
@@ -1188,6 +1149,7 @@ static int CEmuX68kOpmSlotNameCmp(const void* a, const void* b)
 	return _stricmp(sa->name, sb->name);
 }
 
+/* CEmuX68kIsOpmdrvName の実装 */
 static int CEmuX68kIsOpmdrvName(const char* name)
 {
 	char base[32];
@@ -1195,10 +1157,7 @@ static int CEmuX68kIsOpmdrvName(const char* name)
 	return _strnicmp(base, "OPMDRV", 6) == 0;
 }
 
-/* hoot XML still lists Bretonne Lays as BR1000M0.OPM while the zip ships
-   BR_01.OPM. Fuzzy digit-core matching will not pair those. When every
-   missed 16KB music slot has exactly one leftover MML file, drop them in
-   XML order so title bytes land on real data. */
+/* hoot XML は Bretonne Lays をまだ BR1000M0.OPM と書くが zip は BR_01.OPM。ファジー数字コア照合では対にならない。逃した 16KB 音楽スロット全部に残り MML がちょうど 1 つなら XML 順で落とし、タイトルバイトが実データに着地するようにする。 */
 static int CEmuX68kFillMissingOpmSlots(CHardX68k* hw, CEmuZipFs* fs,
 	CEmuX68kOpmSlot* miss, int missN, const unsigned char** used, int usedN)
 {
@@ -1243,6 +1202,7 @@ static int CEmuX68kFillMissingOpmSlots(CHardX68k* hw, CEmuZipFs* fs,
 	return filled;
 }
 
+/* CHardX68k::DosRegisterFile の実装 */
 void CHardX68k::DosRegisterFile(const char* name, unsigned addr, unsigned size)
 {
 	if (!name || !size || dosFileCount_ >= kDosFiles) return;
@@ -1256,6 +1216,7 @@ void CHardX68k::DosRegisterFile(const char* name, unsigned addr, unsigned size)
 	f->size = size;
 }
 
+/* CHardX68k::DosFindFile の実装 */
 int CHardX68k::DosFindFile(const char* path) const
 {
 	char want[32];
@@ -1268,15 +1229,14 @@ int CHardX68k::DosFindFile(const char* path) const
 	return -1;
 }
 
-/* Read guest ASCIZ path, or reconstruct NAME.EXT from a Human68k namecks
-   (drive@+0, path@+1, name@+66, ext@+74) when a1 points at a filled namecks. */
+/* ゲスト ASCIZ パスを読む。a1 が埋まった namecks を指すときは Human68k namecks（drive@+0、path@+1、name@+66、ext@+74）から NAME.EXT を再構成。 */
 static int CEmuX68kReadDosPath(CHardX68k* hw, unsigned a1, char* path, int pathMax)
 {
 	if (!hw || !path || pathMax < 4) return 0;
 	path[0] = 0;
 	a1 &= 0xffffffu;
 	const unsigned b0 = hw->Read8(a1);
-	/* Heuristic: namecks drive is 0..26 and path[0] is '\\' or 0 — not ASCIZ. */
+	/* ヒューリスティック: namecks ドライブは 0..26、path[0] は '\\' または 0 — ASCIZ ではない */
 	const unsigned b1 = hw->Read8((a1 + 1u) & 0xffffffu);
 	if (b0 <= 26u && (b1 == '\\' || b1 == '/' || b1 == 0)) {
 		char name[9], ext[4];
@@ -1308,7 +1268,7 @@ static int CEmuX68kReadDosPath(CHardX68k* hw, unsigned a1, char* path, int pathM
 	return path[0] ? 1 : 0;
 }
 
-/* Human68k NAMECK: fill 91-byte namecks immediately after the ASCIZ path. */
+/* Human68k NAMECK: ASCIZ パス直後に 91 バイト namecks を埋める */
 static void CEmuX68kFillNamecks(CHardX68k* hw, unsigned a1, const char* path)
 {
 	if (!hw || !path || !path[0]) return;
@@ -1331,7 +1291,7 @@ static void CEmuX68kFillNamecks(CHardX68k* hw, unsigned a1, const char* path)
 
 	char base[32];
 	CEmuX68kBasename(path, base, (int)sizeof(base));
-	/* Path portion without basename (backslash-normalized, 65 bytes). */
+	/* ベース名無しのパス部分（バックスラッシュ正規化、65 バイト） */
 	{
 		char dir[66];
 		memset(dir, 0, sizeof(dir));
@@ -1350,7 +1310,7 @@ static void CEmuX68kFillNamecks(CHardX68k* hw, unsigned a1, const char* path)
 		for (int i = 0; i < 65; i++)
 			hw->Write8((ncks + 1u + (unsigned)i) & 0xffffffu, (uint8_t)dir[i]);
 	}
-	/* name[8] + ext[3], space-padded Human68k style */
+	/* name[8] + ext[3]、Human68k 風スペースパッド */
 	{
 		const char* dot = nullptr;
 		for (const char* p = base; *p; p++) {
@@ -1378,6 +1338,7 @@ static void CEmuX68kFillNamecks(CHardX68k* hw, unsigned a1, const char* path)
 	}
 }
 
+/* CHardX68k::DosFileOp の実装 */
 unsigned CHardX68k::DosFileOp(unsigned fn, unsigned a1, unsigned d0, unsigned d1)
 {
 	fn &= 0xffu;
@@ -1443,39 +1404,38 @@ unsigned CHardX68k::DosFileOp(unsigned fn, unsigned a1, unsigned d0, unsigned d1
 	return 0;
 }
 
+/* CHardX68k::BootIplFf0b86 の実装 */
 void CHardX68k::BootIplFf0b86()
 {
-	/* Real IPL subroutine (trap_f @ $FF0B86 → RTS @ $FF0CAC): MFP/ADPCM bring-up
-	   that BOOT.BIN invokes after copying $1F0000→$FF0000. high_ already aliases
-	   both pages, so the copy is a no-op; we only need the JSR. */
+	/* 本物 IPL サブルーチン（trap_f @ $FF0B86 → RTS @ $FF0CAC）: BOOT.BIN が $1F0000→$FF0000 コピー後に呼ぶ MFP/ADPCM 立ち上げ。high_ は両ページを既にエイリアスするのでコピーは no-op。要るのは JSR だけ。 */
 	if (!musashiReady_) return;
 	if (high_[0x0b86] == 0 && high_[0x0b87] == 0) return;
-	/* Signature: lea $E8A000,a0 */
+	/* シグネチャ: lea $E8A000,a0 */
 	if (high_[0x0b86] != 0x41 || high_[0x0b87] != 0xf9) return;
 
 	const unsigned bootSp = (unsigned)m68k_get_reg(NULL, M68K_REG_SP) & 0xffffffu;
 	const unsigned bootPc = (unsigned)m68k_get_reg(NULL, M68K_REG_PC) & 0xffffffu;
 	unsigned sp = bootSp;
 	if (sp < 8u || sp > 0xfffff8u)
-		sp = 0x2000u; /* IPL reset SP */
+		sp = 0x2000u; /* IPL リセット SP */
 
-	/* Return trampoline in $F0 work RAM: RTS. */
+	/* $F0 ワーク RAM の戻りトランポリン: RTS */
 	const unsigned ret = 0xf0ffe0u;
 	Write16(ret, 0x4e75);
 	sp = (sp - 4u) & 0xffffffu;
 	Write32(sp, ret);
 
-	m68k_set_reg(M68K_REG_SR, 0x2700); /* supervisor, IRQs masked during IPL */
+	m68k_set_reg(M68K_REG_SR, 0x2700); /* スーパーバイザ、IPL 中は IRQ マスク */
 	m68k_set_reg(M68K_REG_SP, sp);
 	m68k_set_reg(M68K_REG_PC, 0xff0b86u);
 
-	/* Bound: subroutine is ~0x294 bytes; generous cycle budget. */
+	/* 上限: サブルーチンは約 0x294 バイト。余裕あるサイクル予算 */
 	for (int n = 0; n < 200000; n += 64) {
 		m68k_execute(64);
 		const unsigned pc = (unsigned)m68k_get_reg(NULL, M68K_REG_PC) & 0xffffffu;
 		if (pc == ret || pc == (ret + 2u))
 			break;
-		/* Ran off into the weeds — abort. */
+		/* 暴走した — 中止 */
 		if (pc < 0xff0000u || pc > 0xff0fffu)
 			break;
 	}
@@ -1485,6 +1445,7 @@ void CHardX68k::BootIplFf0b86()
 	pc_ = bootPc;
 }
 
+/* zip から ROM／曲データを載せる */
 int CHardX68k::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode)
 {
 	(void)titleCode;
@@ -1495,7 +1456,7 @@ int CHardX68k::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCo
 	memset(heap_, 0, sizeof(heap_));
 	memset(ext_, 0, sizeof(ext_));
 	memset(mfp_, 0, sizeof(mfp_));
-	mfp_[0x17] = 0x40; /* VR: Timer D → vec $44 → $110 */
+	mfp_[0x17] = 0x40; /* VR: Timer D → vec $44 → $110（ベクタ） */
 	mfpTdAcc_ = 0;
 	mfpTcAcc_ = 0;
 	mfpIrqPending_ = 0;
@@ -1531,12 +1492,10 @@ int CHardX68k::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCo
 		}
 		if (usedN < (int)_countof(usedPtr))
 			usedPtr[usedN++] = data;
-		/* Human68k relocate ONLY for type=x (XML load address = body).
-		   type=code is raw bytes like hoot — HU headers stay so body lands at
-		   offset+0x40 when XML uses base-0x40 (dsj 01.bin @67C0 → body @6800). */
+		/* Human68k リロケは type=x のみ（XML ロード番地 = 本体）。type=code は hoot 同様生バイト — XML が base-0x40 なら HU ヘッダを残し本体が offset+0x40 に着地（dsj 01.bin @67C0 → 本体 @6800）。 */
 		const int isTypeX = (_stricmp(r->type, "x") == 0);
 
-		/* trap_f / IPL high page */
+		/* trap_f / IPL 高ページ */
 		if (CEmuX68kIsTrapF(r->name) || off == 0x1f0000u || off == 0xff0000u) {
 			unsigned n = sz > (unsigned)kHighBytes ? (unsigned)kHighBytes : sz;
 			memcpy(high_, data, n);
@@ -1544,7 +1503,7 @@ int CHardX68k::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCo
 			continue;
 		}
 
-		/* $E00000..$E7FFFF extra RAM (ADPCM / expansion; mailbox is MMIO). */
+		/* $E00000..$E7FFFF 追加 RAM（ADPCM／拡張。メールボックスは MMIO） */
 		if (off >= (unsigned)kExtBase && off < (unsigned)kExtBase + (unsigned)kExtBytes) {
 			const unsigned local = off - (unsigned)kExtBase;
 			unsigned n = sz;
@@ -1556,7 +1515,7 @@ int CHardX68k::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCo
 			continue;
 		}
 
-		/* Main RAM $000000..$3FFFFF (4MB). Former mid window $10xxxx is here. */
+		/* メイン RAM $000000..$3FFFFF（4MB）。旧 mid 窓 $10xxxx はここ */
 		if (off < (unsigned)kRomBytes) {
 			if (isTypeX)
 				off = CEmuX68kFloat2LoadAddr(ge, off, data, sz);
@@ -1586,7 +1545,7 @@ int CHardX68k::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCo
 			continue;
 		}
 
-		/* Offset outside known windows — skip (no guessing). */
+		/* 既知窓の外のオフセット — 飛ばす（推測しない） */
 	}
 
 	if (missN > 0 && rom_[0x400] == 0 && rom_[0x401] == 0
@@ -1616,10 +1575,10 @@ int CHardX68k::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCo
 	}
 	musashiReady_ = 1;
 	pc_ = m68k_get_reg(NULL, M68K_REG_PC) & 0xffffffu;
-	/* trap_f present: run IPL $FF0B86 once before BOOT (same sub BOOT JSRs). */
+	/* trap_f あり: BOOT の前に IPL $FF0B86 を一度走らせる（BOOT が JSR する同じサブルーチン） */
 	if (trapFLoaded)
 		BootIplFf0b86();
-	/* Coherent Human68k DOS/IOCS at $F08000 when BOOT left thin stubs. */
+	/* BOOT が薄い stub を残したとき $F08000 に一貫した Human68k DOS/IOCS */
 	CEmuX68kDosInstall(this);
 	CEmuX68kHookFloat2(this);
 	fetchCount_ = 0;

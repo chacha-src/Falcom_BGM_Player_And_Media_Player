@@ -14,7 +14,7 @@ public:
 
 	int hardKind;
 
-	/* Z80 machines override; i286 (PC-98) returns NULL and uses NP2 FFI. */
+	/* Z80 機は override。i286 (PC-98) は NULL を返し NP2 FFI を使う */
 	virtual Ay_Cpu* Cpu() { return NULL; }
 	virtual uint8_t* Mem() = 0;
 	virtual CChip* SoundChip() = 0;

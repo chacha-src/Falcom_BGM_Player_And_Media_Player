@@ -10,6 +10,7 @@ static CEmuGameEntry s_cemuFallbackGe;
 static CRITICAL_SECTION s_cemuCatCs;
 static int s_cemuCatCsReady = 0;
 
+/* カタログ CS を一度だけ初期化 */
 static void CEmuMgrCatCsInit()
 {
 	if (s_cemuCatCsReady) return;
@@ -17,6 +18,7 @@ static void CEmuMgrCatCsInit()
 	s_cemuCatCsReady = 1;
 }
 
+/* プロセス内シングルトン */
 CEmuMgr* CEmuMgrGet()
 {
 	return &s_cemuMgr;
@@ -33,6 +35,7 @@ void CEmuMgrShutdown()
 	LeaveCriticalSection(&s_cemuCatCs);
 }
 
+/* platform 文字列 → data サブフォルダ名 */
 void CEmuMgrPlatformToDataDir(const char* platform, char* out, int outCap)
 {
 	if (!out || outCap <= 0) return;
@@ -50,6 +53,7 @@ void CEmuMgrPlatformToDataDir(const char* platform, char* out, int outCap)
 	strncpy_s(out, (size_t)outCap, platform, _TRUNCATE);
 }
 
+/* path::0001 — 物理 zip と 1 始まり曲番号を分離 */
 int CEmuParseVirtualPath(const wchar_t* in, wchar_t* outPhysical, int outPhysChars,
 	unsigned* outTitleIndex1)
 {
@@ -80,6 +84,7 @@ int CEmuParseVirtualPath(const wchar_t* in, wchar_t* outPhysical, int outPhysCha
 	return 0;
 }
 
+/* フルパス zip + 曲番 → …\\artofwar.zip::0001 */
 void CEmuFormatVirtualPath(const wchar_t* zipPhysical, unsigned titleIndex1,
 	wchar_t* out, int outChars)
 {
@@ -90,6 +95,7 @@ void CEmuFormatVirtualPath(const wchar_t* zipPhysical, unsigned titleIndex1,
 	_snwprintf_s(out, (size_t)outChars, _TRUNCATE, L"%s::%04u", zipPhysical, titleIndex1);
 }
 
+/* 表示用 basename::0001 */
 void CEmuFormatVirtualBasename(const wchar_t* zipPhysical, unsigned titleIndex1,
 	wchar_t* out, int outChars)
 {
@@ -104,6 +110,7 @@ void CEmuFormatVirtualBasename(const wchar_t* zipPhysical, unsigned titleIndex1,
 	_snwprintf_s(out, (size_t)outChars, _TRUNCATE, L"%s::%04u", base, titleIndex1);
 }
 
+/* exe 隣 data\ を既定ルートにする */
 static void CEmuMgrDefaultDataRoot(wchar_t* out, int outChars)
 {
 	if (!out || outChars <= 0) return;
@@ -115,6 +122,7 @@ static void CEmuMgrDefaultDataRoot(wchar_t* out, int outChars)
 	_snwprintf_s(out, outChars, _TRUNCATE, L"%sdata", exe);
 }
 
+/* 既定ルート（exe\\data）を解決。savedPath は互換のため残すが通常は無視 */
 void CEmuMgrGetEffectiveDataRoot(const wchar_t* savedPath, wchar_t* out, int outChars)
 {
 	if (!out || outChars <= 0) return;
@@ -129,6 +137,7 @@ void CEmuMgrGetEffectiveDataRoot(const wchar_t* savedPath, wchar_t* out, int out
 	CEmuMgrDefaultDataRoot(out, outChars);
 }
 
+/* dataRoot を決め ready を立てる。カタログはまだ読まない */
 static void CEmuMgrSetRoot(CEmuMgr* m, const wchar_t* dataRootOverride)
 {
 	if (!m) return;
@@ -161,11 +170,13 @@ static void CEmuMgrSetRoot(CEmuMgr* m, const wchar_t* dataRootOverride)
 	}
 }
 
+/* 初回利用時にカタログを読込。既に読込済みなら no-op */
 int CEmuMgrEnsureCatalog(CEmuMgr* m)
 {
 	return CEmuMgrEnsureCatalogEx(m, NULL, NULL);
 }
 
+/* 進捗付き。起動時 KPI 読込画面などから呼ぶ */
 int CEmuMgrEnsureCatalogEx(CEmuMgr* m, CEmuCatalogProgressFn progress, void* progressUser)
 {
 	if (!m) return 0;
@@ -178,6 +189,7 @@ int CEmuMgrEnsureCatalogEx(CEmuMgr* m, CEmuCatalogProgressFn progress, void* pro
 	return n;
 }
 
+/* exe 隣 data\ を既定。Init は起動時 1 回（ルート設定のみ・カタログは遅延） */
 int CEmuMgrInit(CEmuMgr* m, const wchar_t* dataRootOverride)
 {
 	if (!m) return 0;
@@ -192,6 +204,7 @@ int CEmuMgrInit(CEmuMgr* m, const wchar_t* dataRootOverride)
 	return m->ready;
 }
 
+/* データパス変更後にカタログを再読込（ディスクキャッシュは維持。更新時は Invalidate） */
 int CEmuMgrReload(CEmuMgr* m, const wchar_t* dataRootOverride)
 {
 	if (!m) return 0;
@@ -207,8 +220,8 @@ int CEmuMgrReload(CEmuMgr* m, const wchar_t* dataRootOverride)
 	return m->ready;
 }
 
-/* Soft folder hint only (physical lookup / last-resort fallback).
-   Identity is zip stem + contents — never "roms" (dump folder, not a catalog dataDir). */
+/* フォルダはヒントだけ（物理検索 / 最終フォールバック）。
+   同一性は zip stem + 中身 — "roms" はダンプフォルダでカタログ dataDir ではない。 */
 static int CEmuPathIsAbsolute(const wchar_t* path)
 {
 	if (!path || !path[0]) return 0;
@@ -219,6 +232,7 @@ static int CEmuPathIsAbsolute(const wchar_t* path)
 	return 0;
 }
 
+/* zip パスのフォルダ名から dataDir ヒントを取る。\\roms\\ は無視 */
 static void CEmuMgrStemDataDirFromPath(const wchar_t* zipPath, char* out, int outCap)
 {
 	if (!out || outCap <= 0) return;
@@ -251,9 +265,10 @@ static void CEmuMgrStemDataDirFromPath(const wchar_t* zipPath, char* out, int ou
 		strncpy_s(out, (size_t)outCap, "ac", _TRUNCATE);
 	else if (wcsstr(low, L"\\sc3000\\") || wcsstr(low, L"/sc3000/"))
 		strncpy_s(out, (size_t)outCap, "sc3000", _TRUNCATE);
-	/* \\roms\\ intentionally ignored — not a catalog identity. */
+	/* \\roms\\ は意図的に無視 — カタログの同一性ではない */
 }
 
+/* カタログ欠落時の仮エントリ。stem 誤タグを避けるため既知名だけ細かく振る */
 static const CEmuGameEntry* CEmuMgrFallbackEntry(const char* stem, const char* dataDir)
 {
 	if (!stem || !stem[0] || !dataDir || !dataDir[0]) return NULL;
@@ -267,7 +282,7 @@ static const CEmuGameEntry* CEmuMgrFallbackEntry(const char* stem, const char* d
 		strncpy_s(s_cemuFallbackGe.platform, "pc98dos", _TRUNCATE);
 		strncpy_s(s_cemuFallbackGe.subtype, "opna", _TRUNCATE);
 	} else if (_stricmp(dataDir, "ac") == 0) {
-		/* Known stems only — avoid mis-tagging Capcom GNG etc. as System16. */
+		/* 既知 stem だけ — Capcom GNG 等を System16 に誤タグしない */
 		strncpy_s(s_cemuFallbackGe.platform, "sega", _TRUNCATE);
 		strncpy_s(s_cemuFallbackGe.subtype, "unknown", _TRUNCATE);
 		if (_strnicmp(stem, "sfa", 3) == 0 || _strnicmp(stem, "sfz", 3) == 0
@@ -278,7 +293,7 @@ static const CEmuGameEntry* CEmuMgrFallbackEntry(const char* stem, const char* d
 			|| _stricmp(stem, "nwarr") == 0 || _stricmp(stem, "spf2t") == 0
 			|| _stricmp(stem, "ssf2") == 0 || _stricmp(stem, "ssf2t") == 0
 			|| _stricmp(stem, "hsf2") == 0) {
-			/* CPS-2 / QSound — not CPS1 OKI. */
+			/* CPS-2 / QSound — CPS1 OKI ではない */
 			strncpy_s(s_cemuFallbackGe.platform, "capcom", _TRUNCATE);
 			strncpy_s(s_cemuFallbackGe.subtype, "cps2", _TRUNCATE);
 		} else if (_stricmp(stem, "ghouls") == 0 || _stricmp(stem, "sf2ce") == 0
@@ -290,7 +305,7 @@ static const CEmuGameEntry* CEmuMgrFallbackEntry(const char* stem, const char* d
 		} else if (_stricmp(stem, "fantzone") == 0) {
 			strncpy_s(s_cemuFallbackGe.subtype, "system16a", _TRUNCATE);
 		} else if (_stricmp(stem, "gngjap") == 0 || _strnicmp(stem, "gng", 3) == 0) {
-			/* Capcom Ghosts'n Goblins: Z80+YM2203 — not System16 YM2151. */
+			/* Capcom Ghosts'n Goblins: Z80+YM2203 — System16 YM2151 ではない */
 			strncpy_s(s_cemuFallbackGe.platform, "capcom", _TRUNCATE);
 			strncpy_s(s_cemuFallbackGe.subtype, "gng", _TRUNCATE);
 		} else if (_stricmp(stem, "outrunm") == 0 || _stricmp(stem, "outrun") == 0
@@ -320,7 +335,7 @@ static const CEmuGameEntry* CEmuMgrFallbackEntry(const char* stem, const char* d
 		strncpy_s(s_cemuFallbackGe.platform, "sega", _TRUNCATE);
 		strncpy_s(s_cemuFallbackGe.subtype, "sg1000", _TRUNCATE);
 	} else if (_stricmp(dataDir, "fm7") == 0) {
-		/* *_fmav archives are FM77AV/OPN; plain *_fm7 are PSG. */
+		/* *_fmav は FM77AV/OPN。素の *_fm7 は PSG */
 		const size_t n = strlen(stem);
 		if (n >= 5 && _stricmp(stem + n - 5, "_fmav") == 0)
 			strncpy_s(s_cemuFallbackGe.platform, "fm77av", _TRUNCATE);
@@ -334,7 +349,7 @@ static const CEmuGameEntry* CEmuMgrFallbackEntry(const char* stem, const char* d
 	return &s_cemuFallbackGe;
 }
 
-/* When catalog misses: sniff zip members (Neo M1/V*, etc.). */
+/* カタログ欠落時: zip メンバを嗅ぐ (Neo M1/V* など) */
 static const CEmuGameEntry* CEmuMgrSniffFallback(const char* stem, const CEmuZipFs* zipFs)
 {
 	if (!stem || !stem[0] || !zipFs) return NULL;
@@ -369,6 +384,7 @@ static const CEmuGameEntry* CEmuMgrSniffFallback(const char* stem, const CEmuZip
 	return NULL;
 }
 
+/* D&D / 再生: zip パスからゲーム特定。outZipPath=実 zip フルパス */
 const CEmuGameEntry* CEmuMgrResolveZip(CEmuMgr* m, const wchar_t* droppedZip,
 	wchar_t* outZipPath, int outZipChars, char* outDataDir, int outDataDirCap)
 {
@@ -422,36 +438,36 @@ const CEmuGameEntry* CEmuMgrResolveZip(CEmuMgr* m, const wchar_t* droppedZip,
 	char dirHint[CEMU_DATA_DIR];
 	CEmuMgrStemDataDirFromPath(full, dirHint, (int)sizeof(dirHint));
 
-	/* Score duplicate catalog rows (xml vs xml2) against actual zip members
-	   so FC88 DATA* packs are not stuck on MUS*-only lists.
-	   Heap — CEmuZipFs is ~0.5MB and must not sit on the stack. */
+	/* 重複カタログ行 (xml vs xml2) を実 zip メンバで採点する。
+	   FC88 DATA* パックが MUS* 専用リストに張り付かないように。
+	   ヒープ — CEmuZipFs は約 0.5MB でスタックに置かない。 */
 	CEmuZipFs* zipProbe = (CEmuZipFs*)calloc(1, sizeof(CEmuZipFs));
 	const CEmuZipFs* zipFs = NULL;
-	/* Names-only: ranking must not decompress multi-MB ADPCM on every resolve
-	   (playlist paint / DnD used to freeze and starve DS). */
+	/* 名前のみ: 順位付けで毎回数 MB の ADPCM を展開しない
+	   (プレイリスト描画 / DnD が凍って DS が飢えていた)。 */
 	if (zipProbe && CEmuZipFsOpenNames(zipProbe, full))
 		zipFs = zipProbe;
 
 	char preferTag[CEMU_MODE_TAG] = {};
 	CEmuModePrefGet(full, preferTag, (int)sizeof(preferTag));
 
-	/* Identity = zip stem + member hits. Folder is usually not a filter
-	   (pc88/ac/roms collide), but x1/fm7 share stems across platforms
-	   (rebirth→pc88 vs x1) — bind those folders to dataDir.
-	   fmtowns local zips are catalogued as pc98vx (Falcom RX+2608), so do
-	   not bind dataDir=fmtowns (that only yields empty fallbacks). */
+	/* 同一性 = zip stem + メンバ一致。フォルダは通常フィルタにしない
+	   (pc88/ac/roms が衝突する) が、x1/fm7 はプラットフォーム横断で
+	   stem が被る (rebirth→pc88 vs x1) — それらのフォルダは dataDir に結ぶ。
+	   fmtowns のローカル zip はカタログ上 pc98vx (Falcom RX+2608) なので
+	   dataDir=fmtowns に結ばない (空フォールバックしか出ない)。 */
 	const char* bindDir = NULL;
 	if (dirHint[0]
 		&& (_stricmp(dirHint, "x1") == 0 || _stricmp(dirHint, "fm7") == 0))
 		bindDir = dirHint;
 	const CEmuGameEntry* ge = CEmuCatalogFindArchiveForZipMode(&m->catalog, stem,
 		bindDir, zipFs, preferTag[0] ? preferTag : NULL);
-	/* Local zip is gngjap.zip; catalog archive is "gng". */
+	/* ローカル zip は gngjap.zip。カタログ archive は "gng" */
 	if (!ge && (_stricmp(stem, "gngjap") == 0 || _stricmp(stem, "gngj") == 0)) {
 		ge = CEmuCatalogFindArchiveForZipMode(&m->catalog, "gng", NULL, zipFs,
 			preferTag[0] ? preferTag : NULL);
 	}
-	/* Local dezeniw.zip matches hudsonsoft dezeniwsr (PATCH+MAIN@1000). */
+	/* ローカル dezeniw.zip は hudsonsoft dezeniwsr (PATCH+MAIN@1000) */
 	if (!ge && _stricmp(stem, "dezeniw") == 0) {
 		static const char* kDezeniw[] = { "dezeniwsr", "dezeniw88", NULL };
 		for (int a = 0; kDezeniw[a] && !ge; a++) {
@@ -459,17 +475,17 @@ const CEmuGameEntry* CEmuMgrResolveZip(CEmuMgr* m, const wchar_t* droppedZip,
 				NULL, zipFs, preferTag[0] ? preferTag : NULL);
 		}
 	}
-	/* Local bpoint.zip romlist is catalog archive bpoint88. */
+	/* ローカル bpoint.zip の romlist はカタログ archive bpoint88 */
 	if (!ge && _stricmp(stem, "bpoint") == 0) {
 		ge = CEmuCatalogFindArchiveForZipMode(&m->catalog, "bpoint88", NULL, zipFs,
 			preferTag[0] ? preferTag : NULL);
 	}
-	/* Local aspicsp.zip is catalog archive x1aspicsp (already OK). */
+	/* ローカル aspicsp.zip はカタログ archive x1aspicsp (既に一致する) */
 	if (!ge && _stricmp(stem, "aspicsp") == 0) {
 		ge = CEmuCatalogFindArchiveForZipMode(&m->catalog, "x1aspicsp", bindDir, zipFs,
 			preferTag[0] ? preferTag : NULL);
 	}
-	/* Local rebirthx1.zip shares catalog archive "rebirth" (X1 OPM twin). */
+	/* ローカル rebirthx1.zip はカタログ archive "rebirth" を共有 (X1 OPM 双子) */
 	if (!ge && _stricmp(stem, "rebirthx1") == 0) {
 		ge = CEmuCatalogFindArchiveForZipMode(&m->catalog, "rebirth",
 			bindDir ? bindDir : "x1", zipFs, preferTag[0] ? preferTag : NULL);

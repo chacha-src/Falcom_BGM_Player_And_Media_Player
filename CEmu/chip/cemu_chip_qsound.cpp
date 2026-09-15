@@ -5,7 +5,7 @@
 #include <math.h>
 #include <string.h>
 
-/* Adapted from hoot ssQSound.cpp / MAME qsound.c; signed char ROM samples. */
+/* hoot ssQSound.cpp / MAME qsound.c を参考。ROMサンプルは符号付き char。 */
 enum { kQSoundChannels = 16, kQSoundClockDiv = 166, kQSoundLengthDiv = 1 };
 
 static int CEmuQClamp16(int v)
@@ -79,9 +79,8 @@ public:
 		const uint16_t value = dataLatch_;
 		reg_[ch * 32 + r * 2 + 0] = (uint8_t)(value >> 8);
 		reg_[ch * 32 + r * 2 + 1] = (uint8_t)value;
-		/* Shadow API uses the native command packing: 8 words per voice.
-		   The old *16 stride made channels 8..15 look like offsets >=0x80,
-		   so half of QSound's keyboard never reached a PCM row. */
+		/* シャドウはネイティブの8ワード/ボイス詰め。旧*16ストライドだと
+		   ch8..15 がオフセット>=0x80 に見え、キーボード半分がPCM行に届かなかった。 */
 		FmMonShadowApplyQSoundReg((unsigned)(ch * 8 + r), value);
 
 		Channel& c = ch_[ch];
@@ -106,7 +105,7 @@ public:
 			c.vol = value;
 			if (value == 0) c.key = 0;
 			else if (!c.key) {
-				c.key = 1;
+				c.key = 1; /* 音量立ち上がりでキーオン */
 				c.offset = 0;
 				c.last = 0;
 			}
@@ -114,6 +113,7 @@ public:
 		case 8: {
 			int pan = (value - 0x10) & 0x3f;
 			if (pan > 32) pan = 32;
+			/* 0x10=中央。sqrtテーブルで L/R を割り当て。 */
 			c.rvol = panTable_[pan];
 			c.lvol = panTable_[32 - pan];
 			c.pan = value;
@@ -180,6 +180,7 @@ public:
 					const uint32_t romAdr = c.bank + address;
 					last = (romAdr < romSize_) ? (int)((int8_t)rom_[romAdr]) : 0;
 				}
+				/* ステレオMix: サンプル×パン音量を既存バッファへ加算。 */
 				const int l = ((last * lvol) >> 6) * gain / 256;
 				const int r = ((last * rvol) >> 6) * gain / 256;
 				stereo[i * 2] = (int16_t)CEmuQClamp16((int)stereo[i * 2] + l);
@@ -237,6 +238,7 @@ private:
 	Channel ch_[kQSoundChannels];
 };
 
+/* QSound ラッパ生成。クロックは通常 4MHz、内部は /166。 */
 CChip* CEmuChipQSoundCreate(uint32_t clockHz, int sampleRate)
 {
 	return new CChipQSound(clockHz, sampleRate);
@@ -247,6 +249,7 @@ void CEmuChipQSoundDestroy(CChip* c)
 	delete c;
 }
 
+/* データラッチ済みのコマンドバイトを直接投入。 */
 void CEmuChipQSoundWriteCommand(CChip* c, uint8_t data)
 {
 	if (!c) return;

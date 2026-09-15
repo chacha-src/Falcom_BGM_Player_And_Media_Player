@@ -2,6 +2,6 @@
 #include <stdint.h>
 #include "cemu_chip.h"
 
-/* Yamaha YM2610/OPNB via ymfm. */
+/* Yamaha YM2610/OPNB（ymfm）。 */
 CChip* CEmuChipYm2610Create(uint32_t clockHz, int sampleRate);
 void CEmuChipYm2610Destroy(CChip* c);

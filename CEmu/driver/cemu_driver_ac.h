@@ -2,6 +2,7 @@
 #include "cemu_driver.h"
 #include "../machine/cemu_hard_ac.h"
 
+/* アーケード音源: ボード種別ごとに Z80/V35/68K/H8 等へ分岐 */
 class CDriverAc : public CDriver {
 public:
 	CDriverAc();
@@ -22,49 +23,50 @@ private:
 	int opmHz_;
 	int booted_;
 	int triggered_;
-	int pinned_; /* playlist/catalog title — inject once, do not hunt try table */
+	int pinned_; /* プレイリスト／カタログ曲 — 1 回注入し試行表を探さない */
 	uint8_t songCmd_;
-	uint16_t songCmdWord_; /* full title code for boards with 16-bit commands */
-	unsigned songCmdDword_; /* Hornet/GTI: catalog codes are 32-bit (0x01xx0000) */
+	uint16_t songCmdWord_; /* 16bit コマンドボード用の完全 title code */
+	unsigned songCmdDword_; /* Hornet/GTI: カタログは 32bit (0x01xx0000) */
 	uint64_t opmResidual_;
-	uint64_t rzOpmAcc_; /* Raizing / Cave YM2151: batched timer clocks */
+	uint64_t rzOpmAcc_; /* Raizing / Cave YM2151: まとめて進めるタイマ */
 	int64_t cpuAcc_;
 	int cmdIndex_;
 	uint64_t nextCmdAt_;
 	uint64_t nextGngIrq_;
-	int alphaNmiBusy_;     /* 1 while Alpha 68K-II NMI has not RETN'd */
-	/* Last sampled K054539 timer output, for rising-edge NMI generation. */
+	int alphaNmiBusy_;     /* Alpha 68K-II NMI が RETN するまで 1 */
+	/* 直前の K054539 タイマ出力。立ち上がりで NMI を起こす */
 	int k054539TimerState_;
 	uint64_t k054539Residual_;
-	uint64_t nextM72Nmi_;  /* MASTER_CLOCK/8/512 = 7812.5 Hz sample pump */
-	int m72FakeNmi_;       /* game has an empty NMI handler — pump host-side */
-	int hasCpu_;           /* 0 for boards whose sound CPU CEmu cannot run */
-	int ms1_;              /* Mega System 1 / System GX: Musashi 68000 path */
+	uint64_t nextM72Nmi_;  /* MASTER_CLOCK/8/512 = 7812.5 Hz サンプルポンプ */
+	int m72FakeNmi_;       /* NMI ハンドラが空 — ホスト側でポンプ */
+	int hasCpu_;           /* CEmu が音源 CPU を回せないボードは 0 */
+	int ms1_;              /* Mega System 1 / System GX: Musashi 68000 音源CPU */
 	int64_t ms1Acc_;
-	int m92_;              /* Irem M92: NEC V35 path */
+	int m92_;              /* Irem M92: NEC V35 音源CPU */
 	int64_t m92Acc_;
-	uint64_t m92OpmRes_;   /* YM2151 runs at the V35 clock / 4 */
-	int deco_;             /* Data East: HuC6280 path */
+	uint64_t m92OpmRes_;   /* YM2151 は V35 クロック / 4 */
+	int deco_;             /* Data East: HuC6280 音源CPU */
 	int64_t decoAcc_;
-	uint64_t decoChipRes_; /* residual for YM2151 clock ratio */
-	uint64_t decoNextYmIrq_; /* rate-limit HuC6280 IRQ2 pulses */
-	int h8Board_;          /* Namco C352: H8/3002 path */
+	uint64_t decoChipRes_; /* YM2151 クロック比の端数 */
+	uint64_t decoNextYmIrq_; /* HuC6280 IRQ2 のレート制限 */
+	int h8Board_;          /* Namco C352: H8/3002 音源CPU */
 	int64_t h8Acc_;
-	int m37702Board_;      /* Namco Sys11/NA1: M37702 path */
+	int m37702Board_;      /* Namco Sys11/NA1: M37702 音源CPU */
 	int64_t m37702Acc_;
-	int namcoM6809_;       /* Namco Sys1/2: mc6809 path */
+	int namcoM6809_;       /* Namco Sys1/2: mc6809 音源CPU */
 	int64_t namcoAcc_;
-	int sys86_;             /* Namco Sys86: HD63701 path */
+	int sys86_;             /* Namco Sys86: HD63701 音源CPU */
 	int64_t sys86Acc_;
-	int sys86OciNeed_;      /* re-arm EOCI once after song-start idle */
-	int m62_;              /* Irem M62: M6803 path */
+	int sys86OciNeed_;      /* 曲開始アイドル後に EOCI を一度再武装 */
+	int m62_;              /* Irem M62: M6803 音源CPU */
 	int64_t m62Acc_;
-	int sega68_;           /* Model1 MultiPCM / Model2 SCSP: 68000 path */
+	int sega68_;           /* Model1 MultiPCM / Model2 SCSP: 68000 音源CPU */
 	int64_t sega68Acc_;
-	int16_t* scratch_;     /* aux-chip mix buffer (dual SN / triple AY) */
+	int16_t* scratch_;     /* 補助チップ混成バッファ（SN×2 / AY×3） */
 	int scratchFrames_;
-	int heard_;            /* any non-zero sample since the last command */
+	int heard_;            /* 直前コマンド以降に非ゼロサンプルが出たか */
 
+	/* Z80 ボード用 */
 	void RunUntil(uint64_t endCycle);
 	void Ms1RunCycles(int cycles);
 	int Ms1Render(int16_t* stereo, int frames);
@@ -86,9 +88,11 @@ private:
 	int Sega68Render(int16_t* stereo, int frames);
 	void TickOpm(uint64_t cpuCycles);
 	void DeliverIrqs();
+	/* ラッチ／NMI へ曲コマンドを注入 */
 	void TryInjectCommand();
 	uint16_t m92NoteOffSeen_;
-	uint16_t m92ChannelPlayOff_; /* channel-BGM ptr after FB/F6/F7 skip */
+	uint16_t m92ChannelPlayOff_; /* FB/F6/F7 スキップ後のチャネル BGM ポインタ */
 	int m92NoteStuck_;
+	/* 補助混成バッファを確保して返す */
 	int16_t* Scratch(int frames);
 };

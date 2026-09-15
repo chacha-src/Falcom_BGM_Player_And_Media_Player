@@ -2,10 +2,10 @@
 #include <stdint.h>
 #include "cemu_chip.h"
 
-/* Namco CUS30 / 15XX / Pac-Man WSG wavetable.
-   mode: 0 = System 1 / System 86 stereo register map (ssC30::Write)
-         1 = Mappy / 15XX mono register map (ssC30::WriteMAPPY)
-         2 = Pac-Man / Galaga / Dig Dug 3-voice PROM WSG (pacman_sound_w) */
+/* Namco CUS30 / 15XX / Pac-Man WSG ウェーブテーブル。
+   mode: 0 = System 1 / System 86 ステレオレジスタマップ（ssC30::Write）
+         1 = Mappy / 15XX モノラルレジスタマップ（ssC30::WriteMAPPY）
+         2 = Pac-Man / Galaga / Dig Dug 3ボイス PROM WSG（pacman_sound_w） */
 enum {
 	CEMU_C30_STEREO = 0,
 	CEMU_C30_MAPPY = 1,

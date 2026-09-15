@@ -2,21 +2,19 @@
 #include <stdint.h>
 #include "cemu_chip.h"
 
-/* Yamaha YMZ280B (PCMD8), 8 channels of 4-bit ADPCM / 8-bit / 16-bit PCM
-   streamed from an external sample ROM. The host interface is two ports:
-   write the register number, then the value. */
+/* Yamaha YMZ280B（PCMD8）。外部サンプルROMから 4bit ADPCM / 8bit / 16bit PCM
+   を8chストリーム。ホストIFは2ポート: レジスタ番号のあと値を書く。 */
 CChip* CEmuChipYmz280bCreate(uint32_t clockHz, int sampleRate);
 void CEmuChipYmz280bDestroy(CChip* c);
 
-/* Port 0 = register select, port 1 = data. */
+/* ポート0=レジスタ選択、ポート1=データ。 */
 void CEmuChipYmz280bWritePort(CChip* c, unsigned port, uint8_t data);
 uint8_t CEmuChipYmz280bReadStatus(CChip* c);
 
-/* Boards that tie both chip outputs to one amplifier (Battle Bakraid is
-   MAME's add_route(ALL_OUTPUTS, "mono")) hear L+R on both sides, which
-   matters because such programs leave voices panned hard to one side. */
+/* 両出力を1アンプへ結ぶ基板（Battle Bakraid は MAME add_route(ALL_OUTPUTS,"mono")）
+   は L+R を両chで聞く。片側ハードパンのまま残すプログラムがあるため重要。 */
 void CEmuChipYmz280bSetMono(CChip* c, int mono);
 
-/* Voices currently decoding. Status-port reads clear IRQ bits, so boards
-   that only need a "is anything still playing" test use this instead. */
+/* 現在デコード中のボイス数。ステータスポート読みはIRQビットを落とすので、
+   「何か鳴っているか」だけ知りたい基板はこちらを使う。 */
 unsigned CEmuChipYmz280bPlayingCount(const CChip* c);

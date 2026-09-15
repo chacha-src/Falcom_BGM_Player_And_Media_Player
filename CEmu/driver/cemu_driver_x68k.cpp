@@ -8,10 +8,7 @@ extern "C" {
 }
 #include <string.h>
 
-/* angdive/bfighter BOOT: after IPL they plant RTE on $100.. then bra.s *
-   at $1040 (SR unmasked, MFP IER=0). Real bring-up is
-   `move #$2500,sr / jsr init / tst.b $E00000` just below. Do not overlay
-   RTE on $1040 and do not snap to the poll (that skips the jsr). */
+/* angdive/bfighter BOOT: IPL 後 $100.. に RTE を植え、$1040 で bra.s *（SR アンマスク、MFP IER=0）。本立ち上げはすぐ下の `move #$2500,sr / jsr init / tst.b $E00000`。$1040 に RTE を重ねず poll へスナップしない（jsr を飛ばす）。 */
 static int CDriverX68kIs1040MailboxHang(CHardX68k* hw, unsigned pc)
 {
 	if (!hw) return 0;
@@ -22,6 +19,7 @@ static int CDriverX68kIs1040MailboxHang(CHardX68k* hw, unsigned pc)
 	return 1;
 }
 
+/* CDriverX68kFindZmusicBootJsr の実装 */
 static unsigned CDriverX68kFindZmusicBootJsr(CHardX68k* hw)
 {
 	if (!hw) return 0;
@@ -39,6 +37,7 @@ static unsigned CDriverX68kFindZmusicBootJsr(CHardX68k* hw)
 	return 0;
 }
 
+/* CDriverX68kResidentZmusic の実装 */
 static unsigned CDriverX68kResidentZmusic(CHardX68k* hw)
 {
 	if (!hw) return 0;
@@ -51,7 +50,7 @@ static unsigned CDriverX68kResidentZmusic(CHardX68k* hw)
 	}
 	if (s_ent)
 		return s_ent;
-	/* libzm2internal.h: trap #3 is ident+8, version < $3000, skip ZMD. */
+	/* libzm2internal.h: trap #3 は ident+8、version < $3000、ZMD を飛ばす */
 	for (unsigned a = 0; a + 10u < 0x400000u; a += 2u) {
 		if (hw->Read8(a) != 'Z' || hw->Read8(a + 1) != 'm') continue;
 		if (hw->Read8(a + 2) != 'u' || hw->Read8(a + 3) != 'S') continue;
@@ -68,14 +67,14 @@ static unsigned CDriverX68kResidentZmusic(CHardX68k* hw)
 	return 0;
 }
 
+/* CDriverX68kZmusicIntEntry の実装 */
 static unsigned CDriverX68kZmusicIntEntry(CHardX68k* hw, unsigned zmusic)
 {
 	if (!hw || !zmusic)
 		return 0;
 	const unsigned hi = (zmusic + 0x20000u < 0x800000u)
 		? (zmusic + 0x20000u) : 0x800000u;
-	/* zmsc_int.s int_entry: opmwait; move.b #$14,$E90001; move.b #$35,$E90003.
-	   First 48E7 FEFE after ident is some other movem (angdive $1E092). */
+	/* zmsc_int.s int_entry: opmwait; move.b #$14,$E90001; move.b #$35,$E90003。ident 後の最初の 48E7 FEFE は別 movem（angdive $1E092）。 */
 	for (unsigned a = zmusic; a + 12u < hi; a += 2u) {
 		if (hw->Read16(a) != 0x13FCu || hw->Read16(a + 2u) != 0x0014u)
 			continue;
@@ -91,6 +90,7 @@ static unsigned CDriverX68kZmusicIntEntry(CHardX68k* hw, unsigned zmusic)
 	return 0;
 }
 
+/* CDriverX68kBindZmusicIsr の実装 */
 static void CDriverX68kBindZmusicIsr(CHardX68k* hw)
 {
 	if (!hw)
@@ -108,12 +108,11 @@ static void CDriverX68kBindZmusicIsr(CHardX68k* hw)
 	hw->Write32(0x78u, CEMU_X68K_DOS_IRQ6);
 }
 
+/* CDriverX68kResume1040Hang の実装 */
 static void CDriverX68kResume1040Hang(CHardX68k* hw, unsigned code)
 {
 	if (!hw) return;
-	/* TRAP#3 vector $xx001042 wraps to the $1040 hang island. Real ZMUSIC
-	   RTEs; the DOS trampoline jsrs and smashes that frame (PC=$1ED2).
-	   Point $8C at ident+8. Do not overlay RTE on $1040/$1042. */
+	/* TRAP#3 ベクタ $xx001042 は $1040 hang 島へ回る。本物 ZMUSIC は RTE。DOS トランポリン jsr がそのフレームを壊す（PC=$1ED2）。$8C を ident+8 へ。$1040/$1042 に RTE を重ねない。 */
 	if (hw->Read16(0x1040u) == 0x60FEu) {
 		const unsigned zmusic = CDriverX68kResidentZmusic(hw);
 		if (zmusic)
@@ -155,9 +154,9 @@ static void CDriverX68kResume1040Hang(CHardX68k* hw, unsigned code)
 			}
 			if (isr) {
 				hw->Write32(0x10cu, isr);
-				hw->Write16(CEMU_X68K_DOS_IRQ6 + 0u, 0x2078u); /* move.l $10C,a0 */
+				hw->Write16(CEMU_X68K_DOS_IRQ6 + 0u, 0x2078u); /* 命令 move.l $10C,a0 */
 				hw->Write16(CEMU_X68K_DOS_IRQ6 + 2u, 0x010Cu);
-				hw->Write16(CEMU_X68K_DOS_IRQ6 + 4u, 0x4ED0u); /* jmp (a0) */
+				hw->Write16(CEMU_X68K_DOS_IRQ6 + 4u, 0x4ED0u); /* 命令 jmp (a0) */
 				hw->Write32(0x78u, CEMU_X68K_DOS_IRQ6);
 			}
 			CDriverX68kBindZmusicIsr(hw);
@@ -180,16 +179,15 @@ static void CDriverX68kResume1040Hang(CHardX68k* hw, unsigned code)
 				return;
 			}
 			s_stubOnce = 1;
-			hw->Write16(stub + 0u, 0x7200u); /* moveq #0,d1  m_init */
+			hw->Write16(stub + 0u, 0x7200u); /* 命令 moveq #0,d1  m_init */
 			hw->Write16(stub + 2u, 0x4E43u);
-			hw->Write16(stub + 4u, 0x227Cu); /* move.l #zmd,a1 */
+			hw->Write16(stub + 4u, 0x227Cu); /* 命令 move.l #zmd,a1 */
 			hw->Write32(stub + 6u, zmd);
-			hw->Write16(stub + 10u, 0x7400u); /* moveq #0,d2 */
-			hw->Write16(stub + 12u, 0x7211u); /* moveq #$11,d1 play_cnv_data */
+			hw->Write16(stub + 10u, 0x7400u); /* 命令 moveq #0,d2 */
+			hw->Write16(stub + 12u, 0x7211u); /* 命令 moveq #$11,d1 play_cnv_data */
 			hw->Write16(stub + 14u, 0x4E43u);
-			/* m_play00 `ori #$0700,sr` / t_dat_ok RTS. If the trap RTE
-			   keeps IPL7, YM Timer A never preempts. Drop it here. */
-			hw->Write16(stub + 16u, 0x027Cu); /* andi.w #$F8FF,sr */
+			/* m_play00 `ori #$0700,sr` / t_dat_ok RTS。trap RTE が IPL7 のままだと YM Timer A が割り込めない。ここで落とす。 */
+			hw->Write16(stub + 16u, 0x027Cu); /* 命令 andi.w #$F8FF,sr */
 			hw->Write16(stub + 18u, 0xF8FFu);
 			const unsigned boot = CDriverX68kFindZmusicBootJsr(hw);
 			if (boot) {
@@ -214,14 +212,14 @@ static void CDriverX68kResume1040Hang(CHardX68k* hw, unsigned code)
 	}
 }
 
+/* CDriverX68kSkipDmacScan の実装 */
 static void CDriverX68kSkipDmacScan(CHardX68k* hw)
 {
 	if (!hw || hw->Read16(0x1040u) != 0x60FEu)
 		return;
 	if (hw->Read16(0x1556u) == 0x60FEu)
 		hw->Write16(0x1556u, 0x4E75u);
-	/* BOOT `move.l #$14E6,$2C / $F000 / rts` steals LINE-F back onto the
-	   $14E6 Human68k cmp chain (PC=$1ED2). Leave $2C on the OS image. */
+	/* BOOT `move.l #$14E6,$2C / $F000 / rts` が LINE-F を $14E6 Human68k cmp 連鎖へ奪う（PC=$1ED2）。$2C は OS イメージのまま。 */
 	for (unsigned a = 0x1400u; a + 12u < 0x1600u; a += 2u) {
 		if (hw->Read16(a) != 0x23FCu)
 			continue;
@@ -234,9 +232,7 @@ static void CDriverX68kSkipDmacScan(CHardX68k* hw)
 	const unsigned lf = hw->Read32(0x2cu) & 0xffffffu;
 	if (lf >= 0x1040u && lf < 0x1080u)
 		hw->Write32(0x2cu, CEMU_X68K_DOS_LINEF);
-	/* $1F16/$243C jsr $15B0/$15A0 (Human68k/DMAC + trap #3 play). Keep
-	   that init; the $1D42 `cmpi.b #$6B,2(A5) / bne` never sees a PSP.
-	   NOP the branch so bring-up can reach play_cnv_data. */
+	/* $1F16/$243C jsr $15B0/$15A0（Human68k/DMAC + trap #3 play）。その init は残す。$1D42 `cmpi.b #$6B,2(A5) / bne` は PSP を見ない。分岐を NOP し bring-up が play_cnv_data に届くようにする。 */
 	for (unsigned a = 0x1C00u; a + 8u < 0x1E80u; a += 2u) {
 		const unsigned op = hw->Read16(a);
 		if (op != 0x0C2Du && op != 0x0C6Du)
@@ -259,6 +255,7 @@ static void CDriverX68kSkipDmacScan(CHardX68k* hw)
 	m68k_set_reg(M68K_REG_A0, a1);
 }
 
+/* IRQ 配送 */
 static void CDriverX68kApplyIrq(CHardX68k* hw, CChip* chip, int hold)
 {
 	if (hold) {
@@ -273,9 +270,7 @@ static void CDriverX68kApplyIrq(CHardX68k* hw, CChip* chip, int hold)
 		m68k_set_irq(M68K_IRQ_NONE);
 }
 
-/* StarCraft compile BOOT plants $A00000 at $10A48 (low) but leaves $10A44
-   at the OP.X data section (~$152D2). MML compile fills downward through
-   the ISR. Move the bump to the DOS heap top once the low plant is visible. */
+/* StarCraft compile BOOT は $10A48（low）へ $A00000 を植えるが $10A44 は OP.X データ節（~$152D2）のまま。MML コンパイルは ISR を下へ埋める。low 植込が見えたらバンプを DOS ヒープ頂へ移す。 */
 static void CDriverX68kRetargetOpxCompileHeap(CHardX68k* hw)
 {
 	if (!hw) return;
@@ -285,11 +280,7 @@ static void CDriverX68kRetargetOpxCompileHeap(CHardX68k* hw)
 		hw->Write32(0x10a44, 0x00A40000u);
 }
 
-/* ARTDINK A2.X: $4F38A is a C frame function (clr.l -4(a6)) that BOOT jsrs
-   without link. Plant a DOS-stack frame so the empty-buffer parse during
-   init cannot smash OPMDRV's ISR at $11C58. After init BOOT leaves
-   `move.w #$4E75,$4F428` in place, which skips `jsr $487A4` on every later
-   play — restore the jsr once settle has finished. */
+/* ARTDINK A2.X: $4F38A は C フレーム関数（clr.l -4(a6)）。BOOT が link 無しで jsr。DOS スタックフレームを植え、init 中の空バッファ解析が OPMDRV ISR $11C58 を壊さないようにする。init 後 BOOT は `move.w #$4E75,$4F428` を残し、以降の play で `jsr $487A4` を飛ばす — settle 完了後 jsr を戻す。 */
 static int CDriverX68kIsA2Boot(CHardX68k* hw)
 {
 	if (!hw) return 0;
@@ -304,6 +295,7 @@ static int CDriverX68kIsA2Boot(CHardX68k* hw)
 	return 1;
 }
 
+/* CDriverX68kPlantA2Frame の実装 */
 static void CDriverX68kPlantA2Frame(CHardX68k* hw)
 {
 	if (!CDriverX68kIsA2Boot(hw)) return;
@@ -314,6 +306,7 @@ static void CDriverX68kPlantA2Frame(CHardX68k* hw)
 	hw->Write32(0x00F0FDFCu, 0);
 }
 
+/* CDriverX68kRestoreA2Play の実装 */
 static void CDriverX68kRestoreA2Play(CHardX68k* hw)
 {
 	if (!CDriverX68kIsA2Boot(hw)) return;
@@ -326,9 +319,7 @@ static void CDriverX68kRestoreA2Play(CHardX68k* hw)
 		hw->Write32(0x11c58u, 0x48e77ffeu);
 }
 
-/* Onion SND.X (cave): DOS _INTVCS is called with C ABI
-   `pea handler; move.w #32,-(sp); FF25` while leftover d1 is $1F0, so
-   trap #0 stays a hang stub and play's `trap #0` never reaches $1021C. */
+/* Onion SND.X（cave）: DOS _INTVCS は C ABI `pea handler; move.w #32,-(sp); FF25`。残り d1 が $1F0 だと trap #0 が hang stub のまま、play の `trap #0` が $1021C に届かない。 */
 static void CDriverX68kPlantCaveTrap0(CHardX68k* hw)
 {
 	if (!hw) return;
@@ -343,7 +334,7 @@ static void CDriverX68kPlantCaveTrap0(CHardX68k* hw)
 		hw->Write32(0x7Cu, 0x10150u);
 }
 
-/* C-compiled type=x (MAIN.X / GOLF.X) uses -4(a6). BOOT clears A6 to 0. */
+/* C コンパイル type=x（MAIN.X / GOLF.X）は -4(a6)。BOOT が A6 を 0 クリア。 */
 static void CDriverX68kPlantCFrame(CHardX68k* hw)
 {
 	if (!hw) return;
@@ -410,6 +401,7 @@ CDriverX68k::CDriverX68k()
 	memset(tryCodes_, 0, sizeof(tryCodes_));
 }
 
+/* driverOpmGlue の実装 */
 static int driverOpmGlue(CHardX68k* hw)
 {
 	if (!hw) return 0;
@@ -438,37 +430,32 @@ static unsigned driverDoOpmdrv2Poll(CHardX68k* hw)
 	return (poll && hasLea) ? poll : 0;
 }
 
+/* driverDoOpmdrv2 の実装 */
 static int driverDoOpmdrv2(CHardX68k* hw)
 {
 	return driverDoOpmdrv2Poll(hw) != 0;
 }
 
-/* WRITE (`lea -0x200,sp` at $808C) plus a Timer-B edge lets the ISR rte a
-   frame from the scratch pad. Parse continues PAST $88B0 (dispatcher $8A90,
-   OPMSET $A804), so a PC-only hold through $88B0 still smashed longer
-   compiles. Hold while SSP is on that scratch pad, except in OPMDRV's
-   `tst.b $24xx / bne.s` flag wait (haou $88B8 $2490, sshang $88E2 $24EC)
-   which WRITE calls and which needs Timer-B. Play's ISR keeps the high
-   stack ($F0FFxx) so it is not held. */
+/* WRITE（$808C の `lea -0x200,sp`）＋ Timer-B エッジで ISR がスクラッチパッド上のフレームを RTE。解析は $88B0 を過ぎて続く（ディスパッチャ $8A90、OPMSET $A804）。$88B0 までの PC のみ hold では長いコンパイルが壊れた。SSP がそのパッド上なら hold。ただし OPMDRV の `tst.b $24xx / bne.s` フラグ待ち（haou $88B8 $2490、sshang $88E2 $24EC）は WRITE が呼び Timer-B が要るので除外。play の ISR は高スタック（$F0FFxx）なので hold しない。 */
 static int driverOpmFlagWait(CHardX68k* hw, unsigned pc)
 {
 	if (!hw) return 0;
 	return hw->Read16(pc) == 0x4A39u && hw->Read16(pc + 6u) == 0x66F8u;
 }
 
+/* IRQ 配送 */
 static int driverOpmHoldIrq(CHardX68k* hw, unsigned pc, unsigned sp)
 {
 	if (driverOpmFlagWait(hw, pc))
 		return 0;
-	/* WRITE's lea -0x200,sp. Mailbox poll stays on $F0FFxx so it is not
-	   held. Require PC in OPMDRV so cmd6 IOCS at $F08xxx can take Timer-B
-	   (flag-wait is already excluded above). */
+	/* WRITE の lea -0x200,sp。メールボックス poll は $F0FFxx のままなので hold しない。PC が OPMDRV 内であることを要求し、$F08xxx の cmd6 IOCS が Timer-B を取れるようにする（フラグ待ちは上で除外済み）。 */
 	if (sp >= 0x00F0F000u && sp < 0x00F0FEF0u
 		&& pc >= 0x8000u && pc < 0xE000u)
 		return 1;
 	return 0;
 }
 
+/* driverOpmLandmark の実装 */
 static unsigned driverOpmLandmark(CHardX68k* hw)
 {
 	int k;
@@ -480,8 +467,7 @@ static unsigned driverOpmLandmark(CHardX68k* hw)
 	return 0;
 }
 
-/* Finish a live IRQ6 trampoline. skipSpin=1 leaves PC in the trampoline when
-   the stacked return is the unassigned-vector nop-slide at $94A. */
+/* 生きた IRQ6 トランポリンを完走。skipSpin=1 だと積み戻りが未割当ベクタ nop-slide $94A のとき PC がトランポリンに残る。 */
 static int driverRteIrq6(CHardX68k* hw, int skipSpin)
 {
 	const unsigned pc = (unsigned)m68k_get_reg(NULL, M68K_REG_PC) & 0xffffffu;
@@ -493,7 +479,7 @@ static int driverRteIrq6(CHardX68k* hw, int skipSpin)
 	const unsigned ret = hw->Read32(sp + 2u) & 0xffffffu;
 	if (skipSpin && ret >= 0x94Au && ret < 0x95Au)
 		return 0;
-	/* TRAP#1 stub is $F08740; a smashed nest can RTE onto itself. */
+	/* TRAP#1 stub は $F08740。壊れたネストは自分へ RTE し得る。 */
 	if (ret >= CEMU_X68K_DOS_IRQ6 && ret < (CEMU_X68K_DOS_IRQ6 + 0x50u))
 		return 0;
 	if ((ret & 1u) || ret < 0x400u || ret >= 0xf00000u)
@@ -504,9 +490,7 @@ static int driverRteIrq6(CHardX68k* hw, int skipSpin)
 	return 1;
 }
 
-/* MIDI_DRV.68K waits `tst.b (a4) / bpl` with A4=$EAFA09 (YM3802 DSR).
-   Uninstall / BOOT jsr the wait without reloading A4, so A4=0 reads ROM
-   byte 0 and the branch never retires. */
+/* MIDI_DRV.68K は A4=$EAFA09（YM3802 DSR）で `tst.b (a4) / bpl` 待ち。Uninstall / BOOT が A4 を再ロードせず jsr するので A4=0 が ROM 0 を読み、分岐が終わらない。 */
 static void CDriverX68kFixMidiA4(CHardX68k* hw)
 {
 	if (!hw) return;
@@ -525,20 +509,23 @@ CDriverX68k::~CDriverX68k()
 	Close();
 }
 
+/* CDriverX68k::OpmWrites の実装 */
 unsigned CDriverX68k::OpmWrites() const
 {
 	return hw_ ? hw_->OpmWrites() : 0;
 }
 
+/* CDriverX68k::Pc の実装 */
 unsigned CDriverX68k::Pc() const
 {
 	return hw_ ? ((unsigned)m68k_get_reg(NULL, M68K_REG_PC) & 0xffffffu) : 0;
 }
 
+/* CDriverX68kPushTry の実装 */
 static void CDriverX68kPushTry(unsigned* dst, int* n, int cap, unsigned code)
 {
 	if (!dst || !n || *n >= cap) return;
-	/* Skip Stop=0x5f for mailbox spam; 0xffff is valid play. */
+	/* メールボックス連打では Stop=0x5f を飛ばす。0xffff は有効な play。 */
 	if (code == 0x5f) return;
 	for (int i = 0; i < *n; i++) {
 		if (dst[i] == code) return;
@@ -546,14 +533,11 @@ static void CDriverX68kPushTry(unsigned* dst, int* n, int cap, unsigned code)
 	dst[(*n)++] = code;
 }
 
-/* Konami gra2 etc.: stop=0xf0, fade=0xf9 — silent if pinned alone.
-   0x00FF is 0xFF numerically, but Humming Bird Laplace catalogs it as
-   DOORWAY. A title-list hit is never a hunter-only dead cmd unless XML
-   stop= says so. */
+/* Konami gra2 等: stop=0xf0、fade=0xf9 — 単独固定だと無音。0x00FF は数値 0xFF だが Humming Bird Laplace は DOORWAY とカタログする。タイトルリスト命中は XML stop= がそう言わない限りハンター専用デッド cmd ではない。 */
 static int CDriverX68kIsDeadCmd(unsigned code, unsigned stopCode,
 	const CEmuGameEntry* ge)
 {
-	/* Always hunter-dead, even when XML lists them (gra2 FADE 0xF9). */
+	/* XML に載っていても常にハンター死（gra2 FADE 0xF9）。 */
 	if (code == 0x5f || code == 0xf9) return 1;
 	if (stopCode && code == stopCode) return 1;
 	if (ge) {
@@ -566,7 +550,7 @@ static int CDriverX68kIsDeadCmd(unsigned code, unsigned stopCode,
 	return 0;
 }
 
-/* Prefer BGM-ish codes (0xA0..0xEF) before SFX / utility. */
+/* BGM っぽいコード（0xA0..0xEF）を SFX／ユーティリティより先に */
 static int CDriverX68kCmdPriority(unsigned code, unsigned stopCode,
 	const CEmuGameEntry* ge)
 {
@@ -576,6 +560,7 @@ static int CDriverX68kCmdPriority(unsigned code, unsigned stopCode,
 	return 2;
 }
 
+/* CDriverX68kStopCode の実装 */
 static unsigned CDriverX68kStopCode(const CEmuGameEntry* ge)
 {
 	if (!ge) return 0xf0;
@@ -585,9 +570,10 @@ static unsigned CDriverX68kStopCode(const CEmuGameEntry* ge)
 			return v ? v : 0xf0;
 		}
 	}
-	return 0x5f; /* generic OPMDRV / ZMUSIC */
+	return 0x5f; /* 汎用 OPMDRV / ZMUSIC */
 }
 
+/* ROM を載せ、ブートして曲を起動する */
 int CDriverX68k::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned titleCode)
 {
 	if (!hw || !ge || !fs || hw->hardKind != CHard::KIND_X68K) return 0;
@@ -618,9 +604,7 @@ int CDriverX68k::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigne
 	softTimerBusy_ = 0;
 	const unsigned stopCode = CDriverX68kStopCode(ge);
 
-	/* Catalog titles first (XML order, BGM-priority sorted). Open(...,1) must
-	   NOT steal slot 0 ahead of catalog 0x18/etc — aquales INTRO sticks and
-	   never hears later codes without mailbox resume. */
+	/* カタログタイトルを先に（XML 順、BGM 優先ソート）。Open(...,1) がカタログ 0x18 等より先にスロット 0 を奪ってはいけない — aquales INTRO が固まり、メールボックス再開無しでは後続コードが聞こえない。 */
 	unsigned catalog[CEMU_TITLE_MAX];
 	int catalogN = 0;
 	unsigned deferred[64];
@@ -658,7 +642,7 @@ int CDriverX68k::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigne
 		}
 		catalog[catalogN++] = c;
 	}
-	/* Sort catalog: BGM (0xA0+) before SFX. */
+	/* カタログをソート: BGM（0xA0+）を SFX より前 */
 	for (int a = 0; a < catalogN; a++) {
 		for (int b = a + 1; b < catalogN; b++) {
 			if (CDriverX68kCmdPriority(catalog[b], stopCode, ge)
@@ -672,10 +656,7 @@ int CDriverX68k::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigne
 	for (int i = 0; i < deferredN; i++)
 		CDriverX68kPushTry(tryCodes_, &tryCount_, (int)_countof(tryCodes_), deferred[i]);
 
-	/* Put Open(titleCode) first when it is a catalog entry (playlist / batch
-	   Open(...,1)). Dead INTRO sticks are recovered by ResumeMailboxForSong
-	   when hunting later codes (aquales 0x18). Keep 0xA0+ BGM prepend for
-	   non-catalog playlist picks. */
+	/* Open(titleCode) がカタログ項目なら先頭へ（プレイリスト／バッチ Open(...,1)）。死んだ INTRO 固まりは後続コード探索時 ResumeMailboxForSong で回復（aquales 0x18）。非カタログプレイリスト選びは 0xA0+ BGM 前置を維持。 */
 	if (titleCode && !CDriverX68kIsDeadCmd(titleCode, stopCode, ge)) {
 		int found = -1;
 		for (int i = 0; i < tryCount_; i++) {
@@ -696,17 +677,13 @@ int CDriverX68k::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigne
 				CDriverX68kPushTry(tryCodes_, &tryCount_, (int)_countof(tryCodes_), titleCode);
 			}
 		}
-		/* Any explicit catalog selection is authoritative. Falling through
-		   the audition list after a quiet intro/effect replaced the requested
-		   mailbox byte with the first loud BGM, making different selections
-		   converge on the same song and restarting its loop position. */
+		/* 明示カタログ選択は権威。静かなイントロ／効果のあとオーディションリストへ落ちると、要求したメールボックスバイトが最初の大きい BGM に置換され、別選択が同じ曲へ収束しループ位置が再起動する。 */
 		for (int i = 0; i < ge->titleCount; i++) {
 			if (ge->title[i].code == titleCode) { pinned_ = 1; break; }
 		}
 	}
 
-	/* If playlist asked for a dead cmd (FADE OUT), still try it once after BGM
-	   hunt fails — rare. Prefer putting requested dead code at end. */
+	/* プレイリストがデッド cmd（FADE OUT）を要求したら、BGM ハント失敗後に一度試す — 稀。要求デッドコードは末尾へ置く方がよい。 */
 	if (titleCode && CDriverX68kIsDeadCmd(titleCode, stopCode, ge))
 		CDriverX68kPushTry(tryCodes_, &tryCount_, (int)_countof(tryCodes_), titleCode);
 
@@ -740,8 +717,7 @@ int CDriverX68k::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigne
 	CDriverX68kPlantA2Frame(hw_);
 	CDriverX68kPlantCFrame(hw_);
 	CDriverX68kKeepByakuyaPlay(hw_);
-	/* Boot settle: multi-file / trap_f copy needs ~0.5s; single BOOT ~0.35s.
-	   Slice so OPM IRQ edges can fire from chip Irq(). */
+	/* ブート settle: 複数ファイル／trap_f コピーは約 0.5s、単一 BOOT は約 0.35s。チップ Irq() から OPM IRQ エッジが打てるようスライスする。 */
 	const int settleHundredths = (ge->romCount > 2) ? 50 : 35;
 	const int opmGlue = driverOpmGlue(hw_);
 	const unsigned opmLandmark = opmGlue ? driverOpmLandmark(hw_) : 0;
@@ -773,9 +749,7 @@ int CDriverX68k::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigne
 				m68k_set_irq(M68K_IRQ_NONE);
 				continue;
 			}
-			/* Settle-only rebind if BOOT re-plants nop;bra* hang vectors.
-			   Skip rewrite while PC sits in our DOS image — re-emitting
-			   trampoline/trap15 under the PC smashes the running handler. */
+			/* Settle 専用再バインド。BOOT が nop;bra* hang ベクタを再植えしたら。PC が DOS イメージ内なら書き換えを飛ばす — 実行中ハンドラの下へトランポリン／trap15 を再出力すると壊す。 */
 			if ((slices % 10) == 0) {
 				const unsigned pc = (unsigned)m68k_get_reg(NULL, M68K_REG_PC) & 0xffffffu;
 				if (pc < 0xf08000u || pc >= 0xf0c000u)
@@ -787,10 +761,7 @@ int CDriverX68k::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigne
 					opmPostScanOs = 1;
 				}
 				const int irq = hw_->SoundChip()->Irq() ? 1 : 0;
-				/* The acknowledge callback clears the chip's event latch.
-				   Drive Musashi from its current level: an IRQ can be acked and
-				   reasserted entirely inside one CPU slice, so host-side edge
-				   filtering here loses the new timer event. */
+				/* ack コールバックがチップのイベントラッチをクリアする。Musashi は現在レベルから駆動: 1 CPU スライス内で IRQ が ack され再アサートされ得るので、ホスト側エッジフィルタは新しいタイマイベントを落とす。 */
 				m68k_set_irq(irq ? M68K_IRQ_6 : M68K_IRQ_NONE);
 				irqWas_ = irq;
 			}
@@ -809,10 +780,7 @@ int CDriverX68k::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigne
 		}
 	}
 	m68k_set_irq(M68K_IRQ_NONE);
-	/* Settle may leave irqWas_ set while the chip latch is still live (or
-	   IPL stuck at 6 after a smashed trampoline). Re-arm edges and unmask.
-	   Also recover supervisor if a prior JSR-vs-RTE mismatch left us in
-	   user mode with USP=0 (PC running through empty mid RAM). */
+	/* Settle は irqWas_ を残しチップラッチが生きたまま（または壊れたトランポリン後 IPL が 6 で固まる）ことがある。エッジを再武装しアンマスク。先の JSR vs RTE 不一致でユーザモード＋USP=0（空 mid RAM を走る）ならスーパーバイザも回復。 */
 	irqWas_ = 0;
 	{
 		unsigned sr = (unsigned)m68k_get_reg(NULL, M68K_REG_SR);
@@ -823,19 +791,14 @@ int CDriverX68k::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigne
 		const int inDos = (pc >= 0xf08000u && pc < 0xf0c000u);
 		const int spBad = (isp < 0x200u || isp > 0xfffff0u
 			|| (isp >= 0xf08000u && isp < 0xf08700u));
-		/* hoot opmdrv.bin: IRQ6 trampoline lives in $F08xxx. Treating that as
-		   wrecked restarted BOOT, re-ran init after it had overwritten the
-		   $48E77FFE scan landmark, and spun at $B32. columns/comet still need
-		   the inDos restart (smashed SSP at the trampoline). */
+		/* hoot opmdrv.bin: IRQ6 トランポリンは $F08xxx。それを壊れた扱いすると BOOT を再起動し、$48E77FFE スキャン目印を上書きしたあと init を再走し $B32 で回る。columns/comet は inDos 再起動が要る（トランポリンで SSP 破壊）。 */
 		const int opmGlue = ((hw_->Read32(0x400) & 0xffffffu) == 0xB06u
 			&& hw_->Read16(0xB16) == 0x223Cu);
 		const int wrecked = (opmGlue ? (pc == 0x10000u || spBad
 				|| (((sr & 0x2000u) == 0u) && usp < 0x100u))
 			: (inDos || pc == 0x10000u || spBad
 				|| (((sr & 0x2000u) == 0u) && usp < 0x100u)));
-		/* Double Eagle: poll is $4A4 like OP.X, but init jsrs $4D6 first and
-		   hits DOS (M_INTON). Jumping to $4A4 mid-init skips the GOLF.X
-		   RTS-patch and hangs the probe. Leave DOS until $5A7D8 is RTS. */
+		/* Double Eagle: poll は OP.X と同じ $4A4 だが、init が先に $4D6 を jsr し DOS（M_INTON）へ入る。init 途中で $4A4 へ飛ぶと GOLF.X の RTS パッチを飛ばしプローブがハング。$5A7D8 が RTS になるまで DOS に残す。 */
 		const int dbleagleBusy = (hw_->Read16(0x4ecu) == 0x41f9u
 			&& hw_->Read32(0x4eeu) == 0x00015200u
 			&& hw_->Read16(0x5a7d8u) != 0x4e75u);
@@ -844,9 +807,7 @@ int CDriverX68k::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigne
 				m68k_set_reg(M68K_REG_ISP, 0xf0fffeu);
 			sr = 0x2500u;
 			m68k_set_reg(M68K_REG_SR, sr);
-			/* OP.X BOOT (rougea/m_and_m): poll is tst.b $E00000 at $4A4.
-			   Do NOT FindMailboxPoll() here — Alice's poll is $4F2 and
-			   jumping there before M_INTON/ADV skips compile (ayakata code 5). */
+			/* OP.X BOOT（rougea/m_and_m）: poll は $4A4 の tst.b $E00000。ここで FindMailboxPoll() しない — Alice の poll は $4F2 で、M_INTON/ADV 前に飛ぶとコンパイルを飛ばす（ayakata コード 5）。 */
 			if (hw_->Read16(0x4a4) == 0x4a39u
 				&& hw_->Read32(0x4a6) == 0x00e00000u)
 				m68k_set_reg(M68K_REG_PC, 0x4a4);
@@ -883,16 +844,14 @@ int CDriverX68k::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigne
 			m68k_set_reg(M68K_REG_SR, (sr & ~0x0700u) | 0x2000u);
 		}
 	}
-	/* BOOT settle may re-plant thin DOS/IOCS stubs — reinstall OS once if needed. */
+	/* BOOT settle が薄い DOS/IOCS stub を再植えすることがある — 必要なら OS を一度入れ直す */
 	CEmuX68kDosInstall(hw_);
 	CDriverX68kRestoreA2Play(hw_);
 	CDriverX68kPlantA2Frame(hw_);
 	CDriverX68kPlantCaveTrap0(hw_);
 	CDriverX68kPlantCFrame(hw_);
 	{
-		/* If PC sits on a neutralized hang stub (rte;rte) that WE wrote over
-		   nop;bra*, complete the trap RTE from the exception frame.
-		   Require double-rte so we never steal a live IRQ's single rte ($546). */
+		/* PC が我々が nop;bra* の上に書いた中和 hang stub（rte;rte）にいるなら、例外フレームから trap RTE を完了する。二重 rte を要求し、生きた IRQ の単一 rte（$546）を奪わない。 */
 		const unsigned pc = (unsigned)m68k_get_reg(NULL, M68K_REG_PC) & 0xffffffu;
 		const int ourHangRte = (hw_->Read16(pc) == 0x4e73u
 			&& hw_->Read16(pc + 2u) == 0x4e73u
@@ -910,7 +869,7 @@ int CDriverX68k::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigne
 				m68k_set_reg(M68K_REG_SP, (sp + 6u) & 0xffffffu);
 			} else if (hw_->Read16(0x4f2) == 0x4a39u
 				&& hw_->Read32(0x4f4) == 0x00e00000u) {
-				/* abtengu-family song wait — resume mailbox poll. */
+				/* abtengu 系の曲待ち — メールボックス poll を再開 */
 				m68k_set_reg(M68K_REG_SR, 0x2500);
 				m68k_set_reg(M68K_REG_PC, 0x4f2);
 			} else {
@@ -937,10 +896,7 @@ int CDriverX68k::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigne
 			hw_->SetPc(poll);
 		}
 	}
-	/* $94A is the unassigned-vector hang (nop;bra*). opmdrv.bin spins there
-	   until M_INIT; Laplace / VMFA BOOTs finish init then IRQ-RTE onto the
-	   same stub and never reach the $E00000 poll, so pinned 16-bit codes stay
-	   SILENT. Snap once $10C is a live ISR. */
+	/* $94A は未割当ベクタ hang（nop;bra*）。opmdrv.bin は M_INIT までそこで回る。Laplace / VMFA BOOT は init 後 IRQ-RTE で同じ stub に乗り $E00000 poll に届かず、固定 16bit コードは無音のまま。$10C が生きた ISR になったら一度スナップ。 */
 	if (opmGlue)
 		driverRteIrq6(hw_, 1);
 	{
@@ -954,14 +910,13 @@ int CDriverX68k::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigne
 			CDriverX68kResume1040Hang(hw_, songCode_);
 		hw_->SetPc((unsigned)m68k_get_reg(NULL, M68K_REG_PC) & 0xffffffu);
 	}
-	/* A playlist/catalog pick must never be replaced by the loudness hunter.
-	   The mailbox command is already armed; locking only disables fallthrough. */
+	/* プレイリスト／カタログ選択をラウドネスハンターで置換しない。メールボックスコマンドは既に武装済み。ロックはフォールスルーを止めるだけ。 */
 	if (pinned_)
 		locked_ = 1;
 	nextCmdAt_ = (uint64_t)cpuHz_ / 60;
 	if (hostRate_ > 0) {
 		dwellFrames_ = (ge->romCount > 8) ? (hostRate_ + hostRate_ / 2) : (hostRate_ / 2);
-		/* Playlist pick: give selected code ~2s before falling through. */
+		/* プレイリスト選択: フォールスルー前に選択コードへ約 2s 与える */
 		if (pinned_)
 			dwellFrames_ = hostRate_ * 2;
 	} else {
@@ -974,12 +929,14 @@ int CDriverX68k::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigne
 	return 1;
 }
 
+/* ハード参照を捨てる */
 void CDriverX68k::Close()
 {
 	hw_ = NULL;
 	booted_ = 0;
 }
 
+/* 同一 zip の別曲をライブで切替する */
 int CDriverX68k::OverlayTitle(unsigned titleCode)
 {
 	if (!hw_) return 0;
@@ -991,6 +948,7 @@ int CDriverX68k::OverlayTitle(unsigned titleCode)
 	return 1;
 }
 
+/* OPM クロックを CPU 比で進める */
 void CDriverX68k::TickOpm(uint64_t cpuCycles)
 {
 	if (!hw_ || !hw_->SoundChip() || cpuCycles == 0) return;
@@ -1001,10 +959,11 @@ void CDriverX68k::TickOpm(uint64_t cpuCycles)
 		hw_->SoundChip()->AdvanceClocks(opmTicks);
 }
 
+/* CDriverX68k::FindMailboxPoll の実装 */
 unsigned CDriverX68k::FindMailboxPoll() const
 {
 	if (!hw_) return 0;
-	/* Prefer low BOOT / early RAM; also mid if EXDOS relocated the poll. */
+	/* 低い BOOT／早期 RAM を優先。EXDOS が poll を再配置していれば mid も */
 	static const unsigned kRanges[][2] = {
 		{ 0x0400u, 0x3000u },
 		{ 0x10000u, 0x20000u },
@@ -1022,6 +981,7 @@ unsigned CDriverX68k::FindMailboxPoll() const
 	return 0;
 }
 
+/* CDriverX68k::ResumeMailboxForSong の実装 */
 void CDriverX68k::ResumeMailboxForSong(unsigned code)
 {
 	if (!hw_) return;
@@ -1029,16 +989,16 @@ void CDriverX68k::ResumeMailboxForSong(unsigned code)
 	const unsigned poll = FindMailboxPoll();
 	if (!poll) return;
 	const unsigned pc = (unsigned)m68k_get_reg(NULL, M68K_REG_PC) & 0xffffffu;
-	/* Already in / just after the poll loop — mailbox poke is enough. */
+	/* 既に poll ループ内／直後 — メールボックス poke で足りる */
 	if (pc >= poll && pc < poll + 0x40u)
 		return;
-	/* Dead INTRO / EXDOS sticks leave PC in mid-RAM; return to song wait so
-	   the next catalog code is observed (no BOOT plant — resume existing poll). */
+	/* 死んだ INTRO／EXDOS 固まりは PC を mid RAM に残す。曲待ちへ戻し次カタログコードを観測する（BOOT 植込なし — 既存 poll を再開）。 */
 	m68k_set_reg(M68K_REG_SR, 0x2500);
 	m68k_set_reg(M68K_REG_PC, poll);
 	hw_->SetPc(poll);
 }
 
+/* CDriverX68k::CallUserHook の実装 */
 void CDriverX68k::CallUserHook(unsigned hook, int tickOpmDuring)
 {
 	if (!hw_ || !hook || softTimerBusy_) return;
@@ -1047,10 +1007,7 @@ void CDriverX68k::CallUserHook(unsigned hook, int tickOpmDuring)
 	unsigned sp = (unsigned)m68k_get_reg(NULL, M68K_REG_SP) & 0xffffffu;
 	if (sp < 8u || sp > 0xfffff8u) return;
 	softTimerBusy_ = 1;
-	/* TIMERDST/VDISPST callbacks are interrupt handlers and return with RTE,
-	   not subroutines returning with RTS. Plant a 68000 format-0 exception
-	   frame (SR, PC); an RTS-only frame makes RTE consume a bogus SR/PC and
-	   each high-rate Arcus timer tick runs to the safety limit. */
+	/* TIMERDST/VDISPST コールバックは割り込みハンドラで RTE 戻り。サブルーチン RTS ではない。68000 format-0 例外フレーム（SR, PC）を植える。RTS のみだと RTE が偽 SR/PC を消費し、高レート Arcus タイマ tick が毎回安全上限まで走る。 */
 	sp = (sp - 6u) & 0xffffffu;
 	hw_->Write16(sp, (uint16_t)sr);
 	hw_->Write32(sp + 2u, pc);
@@ -1059,9 +1016,7 @@ void CDriverX68k::CallUserHook(unsigned hook, int tickOpmDuring)
 	int ok = 0;
 	for (int n = 0; n < 200000; n += 64) {
 		m68k_execute(64);
-		/* Soft SD_DRV IRQ6: RunCycles already TickOpm'd the quantum. Nested
-		   TickOpm here re-armed YM Timer-B during "stopped" windows and
-		   double-stepped gra268snd (~2× until HW TB took over ~16s later). */
+		/* Soft SD_DRV IRQ6: RunCycles は既にその量子を TickOpm 済み。ここでネスト TickOpm すると「停止」窓中に YM Timer-B が再武装し gra268snd が倍速になる（HW TB が約 16s 後に引き継ぐまで）。 */
 		if (tickOpmDuring)
 			TickOpm(64);
 		const unsigned p = (unsigned)m68k_get_reg(NULL, M68K_REG_PC) & 0xffffffu;
@@ -1076,6 +1031,7 @@ void CDriverX68k::CallUserHook(unsigned hook, int tickOpmDuring)
 	softTimerBusy_ = 0;
 }
 
+/* CDriverX68k::CallUserSubroutine の実装 */
 void CDriverX68k::CallUserSubroutine(unsigned hook)
 {
 	if (!hw_ || !hook || softTimerBusy_) return;
@@ -1106,10 +1062,11 @@ void CDriverX68k::CallUserSubroutine(unsigned hook)
 	softTimerBusy_ = 0;
 }
 
+/* CDriverX68k::ServiceSoftTimers の実装 */
 void CDriverX68k::ServiceSoftTimers(int cycles)
 {
 	if (!hw_ || cycles <= 0 || softTimerBusy_) return;
-	/* TIMERDST ($6B): d1.hb=unit (1..7 µs scale), d1.b=count (0→256). */
+	/* TIMERDST ($6B): d1.hb=単位（1..7 µs スケール）、d1.b=カウント（0→256） */
 	const unsigned timerHook = hw_->Read32(CEMU_X68K_DOS_DATA + 0x10u) & 0xffffffu;
 	if (timerHook) {
 		const unsigned d1 = hw_->Read16(CEMU_X68K_DOS_DATA + 0x14u);
@@ -1119,7 +1076,7 @@ void CDriverX68k::ServiceSoftTimers(int cycles)
 		static const int kUnitUs[8] = { 0, 1, 3, 4, 13, 16, 25, 50 };
 		const int us = (unit >= 1 && unit <= 7) ? (kUnitUs[unit] * count) : 1000;
 		int periodCy = (int)(((int64_t)cpuHz_ * (us > 0 ? us : 1000)) / 1000000);
-		if (periodCy < (cpuHz_ / 4000)) periodCy = cpuHz_ / 4000; /* cap ~4kHz */
+		if (periodCy < (cpuHz_ / 4000)) periodCy = cpuHz_ / 4000; /* 上限約 4kHz */
 		if (periodCy < 1) periodCy = 1;
 		timerDAcc_ += cycles;
 		while (timerDAcc_ >= periodCy) {
@@ -1129,20 +1086,14 @@ void CDriverX68k::ServiceSoftTimers(int cycles)
 	} else {
 		const unsigned irq6 = hw_->Read32(0x78) & 0xffffffu;
 		const unsigned work = 0x00e81eu;
-		/* SD_DRV's non-resident FM mode services the $500 channel bank from
-		   OPM IRQ6. Its command-delay path stops Timer B immediately before
-		   the first sequence tick; Human68k's resident OPM service supplies
-		   the continuing cadence. Pulse the already-installed IRQ vector at
-		   the driver's programmed $F0 Timer-B rate only while that bank is
-		   active and the hardware timer is stopped. */
+		/* SD_DRV の非常駐 FM モードは OPM IRQ6 から $500 チャネルバンクをサービス。コマンド遅延経路は最初のシーケンスタick 直前に Timer B を止める。Human68k 常駐 OPM サービスが継続カデンツを供給する。そのバンクが生き HW タイマが止まっている間だけ、ドライバが組んだ $F0 Timer-B レートで既インストール IRQ ベクタをパルスする。 */
 		if (hw_->Read16(0x8308u) == 0x48e7u
 			&& hw_->Read8(work + 0xd28u) == 0
 			&& hw_->Read8(work + 0xd39u) == 0
 			&& hw_->Read8(work + 0x501u) >= 0x80
 			&& hw_->Read8(work + 0x501u) <= 0x8f
 			&& irq6 != 0) {
-			/* TB=$F0 wall period in CPU clocks: cpuHz * 16*1024 / opmHz.
-			   Do not TickOpm inside the soft IRQ6 (see CallUserHook). */
+			/* TB=$F0 壁周期（CPU クロック）: cpuHz * 16*1024 / opmHz。soft IRQ6 内で TickOpm しない（CallUserHook 参照）。 */
 			int periodCy = 1;
 			if (opmHz_ > 0)
 				periodCy = (int)(((int64_t)cpuHz_ * 16384) / (int64_t)opmHz_);
@@ -1153,11 +1104,7 @@ void CDriverX68k::ServiceSoftTimers(int cycles)
 				CallUserHook(irq6, 0);
 			}
 		}
-		/* MUX.R/X (arkanoid2/twinbee/salamander/...): sequencer is MFP Timer D
-		   at vector $110, ISR `movem #$F8F4` + a5-relative work. No OPMINTST
-		   and TCDCR is not OPDRV's $75, so YM IRQ6 never runs — one-shot
-		   key-on then STOPS. Keep ticking $110 (unlike OPDRV which hands off
-		   to YM Timer B). */
+		/* MUX.R/X（arkanoid2/twinbee/salamander/...）: シーケンサはベクタ $110 の MFP Timer D、ISR は `movem #$F8F4` + a5 相対ワーク。OPMINTST 無し、TCDCR は OPDRV の $75 でもないので YM IRQ6 は走らず、ワンショットキーオンで停止。$110 を tick し続ける（YM Timer B へ渡す OPDRV と違う）。 */
 		else {
 			const unsigned tdIsr = hw_->Read32(0x110u) & 0xffffffu;
 			const int muxTd = (tdIsr >= 0x8000u && tdIsr < 0x40000u
@@ -1201,7 +1148,7 @@ void CDriverX68k::ServiceSoftTimers(int cycles)
 			}
 		}
 	}
-	/* VDISPST ($6C): ~60Hz. */
+	/* VDISPST ($6C): 約 60Hz */
 	const unsigned vdispHook = hw_->Read32(CEMU_X68K_DOS_DATA + 0x18u) & 0xffffffu;
 	if (vdispHook) {
 		const int periodCy = cpuHz_ / 60;
@@ -1215,17 +1162,15 @@ void CDriverX68k::ServiceSoftTimers(int cycles)
 	}
 }
 
+/* CPU を cycles 進める */
 void CDriverX68k::RunCycles(int cycles)
 {
 	if (!hw_ || cycles <= 0) return;
 	CEmuHardX68kSetActive(hw_);
 	CDriverX68kFixMidiA4(hw_);
-	/* Always advance OPM by the full wall-time quantum. m68k_execute may
-	   return early on $E00800 idle / end_timeslice — tying chip time to
-	   `got` made Timer B (and music) run ~half speed while audio kept
-	   real time. Hoot drives YM2151 from the sound timebase, not CPU ICount. */
+	/* OPM は常に壁時間量子ぶん進める。m68k_execute は $E00800 idle / end_timeslice で早めに戻ることがあり、チップ時間を `got` に縛ると Timer B（と曲）が約半速、音声はリアルタイムのまま。Hoot は YM2151 を CPU ICount ではなくサウンド時基で駆動する。 */
 	if (driverOpmGlue(hw_)) {
-		/* Mask IRQ6 in WRITE parse + helpers; $88B8 flag-wait stays live. */
+		/* WRITE 解析＋ヘルパでは IRQ6 をマスク。$88B8 フラグ待ちは生きたまま */
 		int left = cycles;
 		while (left > 0) {
 			const unsigned pc = (unsigned)m68k_get_reg(NULL, M68K_REG_PC) & 0xffffffu;
@@ -1238,16 +1183,13 @@ void CDriverX68k::RunCycles(int cycles)
 		}
 		TickOpm((uint64_t)cycles);
 	} else if (driverDoOpmdrv2(hw_) && hw_->SoundChip()) {
-		/* Continue past $E00800 end_timeslice inside one quantum (k4 cmd6log).
-		   Hold IRQ only on this family's compile stack — not a global
-		   deep-SP hold. Poll sits on $F0FFxx and still takes Timer-B. */
+		/* 1 量子内で $E00800 end_timeslice を越えて続ける（k4 cmd6log）。IRQ hold はこの系統のコンパイルスタックのみ — グローバルな深い SP hold ではない。poll は $F0FFxx にあり Timer-B を取る。 */
 		CChip* chip = hw_->SoundChip();
 		int left = cycles;
 		while (left > 0) {
 			const unsigned pc = (unsigned)m68k_get_reg(NULL, M68K_REG_PC) & 0xffffffu;
 			const unsigned sp = (unsigned)m68k_get_reg(NULL, M68K_REG_SP) & 0xffffffu;
-			/* $13E86 busy-wait (tst.b / bne.s) is cleared by the OPM ISR.
-			   Holding IRQ here deadlocks compile at $10A60. */
+			/* $13E86 busy-wait（tst.b / bne.s）は OPM ISR がクリアする。ここで IRQ を hold すると $10A60 でコンパイルがデッドロック。 */
 			if (!driverOpmFlagWait(hw_, pc)
 				&& sp >= 0x00F0F000u && sp < 0x00F0FEF0u)
 				CDriverX68kApplyIrq(hw_, chip, 1);
@@ -1267,6 +1209,7 @@ void CDriverX68k::RunCycles(int cycles)
 	hw_->SetPc((unsigned)m68k_get_reg(NULL, M68K_REG_PC));
 }
 
+/* CPU とチップを進めステレオ PCM を合成する */
 int CDriverX68k::Render(int16_t* stereo, int frames)
 {
 	if (!hw_ || !stereo || frames <= 0) return 0;
@@ -1284,9 +1227,7 @@ int CDriverX68k::Render(int16_t* stereo, int frames)
 					bestSongCode_ = songCode_;
 				}
 				windowPeak_ = 0;
-				/* High OPM traffic but still silent: give one extra dwell before
-				   hunting the next code (avoids restarting mid-phrase on $94A
-				   packs that key late). */
+				/* OPM トラフィックは多いがまだ無音: 次コード探索の前に追加ドウェル 1 回（遅いキーオンの $94A パックでフレーズ途中再起動を避ける） */
 				const unsigned opmNow = hw_->OpmWrites();
 				if (!dwellExtendUsed_ && bestPeak_ <= 800
 					&& opmNow > opmAtWindow_ + 800u) {
@@ -1294,8 +1235,7 @@ int CDriverX68k::Render(int16_t* stereo, int frames)
 					dwellLeft_ = dwellFrames_;
 					opmAtWindow_ = opmNow;
 				} else if (bestPeak_ > 800) {
-					/* Lock once audible — do NOT re-SetSongCommand every second
-					   (that restarts ZMUSIC/OPMDRV mid-phrase). */
+					/* 聞こえたらロック — 毎秒 SetSongCommand し直さない（ZMUSIC/OPMDRV をフレーズ途中で再起動する） */
 					locked_ = 1;
 					if (songCode_ != bestSongCode_) {
 						songCode_ = bestSongCode_;
@@ -1324,8 +1264,7 @@ int CDriverX68k::Render(int16_t* stereo, int frames)
 		RunCycles(cyclesPerSample);
 		CDriverX68kSkipDmacScan(hw_);
 		{
-			/* OP.X/rougea: nest RTE lands on TRAP#1 ($F08740) with PC looping
-			   on the stub. Finish a real frame, else resume the mailbox poll. */
+			/* OP.X/rougea: ネスト RTE が TRAP#1（$F08740）に着地し PC が stub で回る。本物フレームを完了し、だめならメールボックス poll を再開。 */
 			const unsigned pc = (unsigned)m68k_get_reg(NULL, M68K_REG_PC) & 0xffffffu;
 			if (pc >= CEMU_X68K_DOS_TRAP1 && pc < (CEMU_X68K_DOS_TRAP1 + 8u)) {
 				if (!driverRteIrq6(hw_, 0) && !driverDoOpmdrv2(hw_))
@@ -1335,8 +1274,7 @@ int CDriverX68k::Render(int16_t* stereo, int frames)
 		if (!opmSpinRescue_) {
 			const unsigned pc = (unsigned)m68k_get_reg(NULL, M68K_REG_PC) & 0xffffffu;
 			const unsigned h10 = hw_->Read32(0x10c) & 0xffffffu;
-			/* $94A hang is nop;bra* from opmdrv.bin. D.O. OPMDRV2 play lives
-			   at $950 (moveq #3,d7 / rol.l) — do not steal that as a hang. */
+			/* $94A hang は opmdrv.bin の nop;bra*。D.O. OPMDRV2 play は $950（moveq #3,d7 / rol.l）— hang として奪わない。 */
 			if (pc >= 0x94Au && pc < 0x95Au && h10 >= 0x8000u && h10 < 0xf00000u
 				&& hw_->Read16(0x94A) == 0x4e71u) {
 				opmSpinRescue_ = 1;
@@ -1345,7 +1283,7 @@ int CDriverX68k::Render(int16_t* stereo, int frames)
 				CDriverX68kResume1040Hang(hw_, songCode_);
 			}
 		}
-		/* YM2151 IRQ6, else MFP Timer C/D IRQ2. */
+		/* YM2151 IRQ6、なければ MFP Timer C/D IRQ2 */
 		{
 			const unsigned pc = (unsigned)m68k_get_reg(NULL, M68K_REG_PC) & 0xffffffu;
 			const unsigned sp = (unsigned)m68k_get_reg(NULL, M68K_REG_SP) & 0xffffffu;
@@ -1370,6 +1308,7 @@ int CDriverX68k::Render(int16_t* stereo, int frames)
 	return frames;
 }
 
+/* Seek は未対応 */
 int CDriverX68k::Seek(uint64_t sample)
 {
 	(void)sample;

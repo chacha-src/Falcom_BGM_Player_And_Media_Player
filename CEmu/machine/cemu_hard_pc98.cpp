@@ -9,8 +9,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* Hoot KOEI / addressing=1 code ROMs pack load as high16=seg, low16=off
-   (e.g. 0x01000100 → 0100:0100). Flat phys stays when value fits in 2MB. */
+/* Hoot KOEI / addressing=1 のコード ROM パックは上位16=seg、下位16=off（例 0x01000100 → 0100:0100）。2MB に収まる値は平坦物理のまま。 */
 static unsigned Pc98RomPhys(int offset)
 {
 	const unsigned raw = (unsigned)offset;
@@ -24,30 +23,23 @@ static unsigned Pc98RomPhys(int offset)
 
 static int DosShellStarts(const CEmuGameEntry* ge, const char* const* prefixes);
 
-/* Last OPN DATA0 write. YM2203 FM regs are write-only; PC-98 boards bus-hold
-   the byte so OPNDRV can IN-compare a 27h/40h canary (c2gp / dynamo98). */
+/* 直近 OPN DATA0 書込。YM2203 FM レジスタは書込専用。PC-98 基板はバスホールドするので OPNDRV が 27h/40h カナリアを IN 比較できる（c2gp / dynamo98）。 */
 static uint8_t g_opnDataLatch = 0;
 static int g_opnBusHold = 0;
-/* MMD2.SYS INT14 ISR: OCW3 0Bh / IN 00h / TEST 80h, then slave EOI.
-   Soft-PIC used to return 0 so it skipped OUT 08h,20h and IRQ12 stuck. */
+/* MMD2.SYS INT14 ISR: OCW3 0Bh / IN 00h / TEST 80h、続けてスレーブ EOI。ソフト PIC は 0 を返し OUT 08h,20h を飛ばし IRQ12 が固まった。 */
 static int g_mmdPicIsr = 0;
-/* VALKY/SSCP sequencer is INT 08. Guest OUT 02h = F7 remasks IRQ0. */
+/* VALKY/SSCP シーケンサは INT 08。ゲスト OUT 02h = F7 が IRQ0 を再マスク。 */
 static int s_valkyKeepIrq0 = 0;
+/* IRQ 配送 */
 int CEmuPc98ValkyKeepIrq0()
 {
 	return s_valkyKeepIrq0;
 }
-/* FairyDust FMX 3.10 (lemmona) same: one-shot INT08 @3660 masks IRQ0
-   after PIT calib, so the real sequencer at CS:1D60 never ticks. */
+/* FairyDust FMX 3.10（lemmona）も同じ: PIT 校正後のワンショット INT08 @3660 が IRQ0 をマスクし、本物シーケンサ CS:1D60 が tick しない。 */
 static int s_fmxKeepIrq0 = 0;
-/* FMX 3.10 spins on CS:[3B84] after planting a one-shot INT08. IRQ0
-   would CALL FAR [3B6C] (still 0000:0000) so we poke a nonzero count
-   the first time the wait opcode is at CS:IP. */
+/* FMX 3.10 はワンショット INT08 を植えたあと CS:[3B84] でスピン。IRQ0 は CALL FAR [3B6C]（まだ 0000:0000）。待ちオペコードが CS:IP の最初に非 0 カウントを poke。 */
 static int s_fmxCalibAssist = 0;
-/* SS:SP before np2_interrupt(OPN). Soft-PIC used to drop opnInService_ as
-   soon as the YM line acked, so OPNDRV's STI-before-EOI re-entered INT0B
-   on the private CS:24E4 stack (tlove12_98: 40 IRQs, then IF=0 at 9A00).
-   Hold in-service until that frame IRETs — real 8259 keeps ISR until EOI. */
+/* np2_interrupt(OPN) 前の SS:SP。ソフト PIC は YM 線 ack ですぐ opnInService_ を落とし、OPNDRV の STI-before-EOI が私有 CS:24E4 スタックで INT0B 再入（tlove12_98: 40 IRQ のち 9A00 で IF=0）。そのフレーム IRET まで in-service を保持 — 本物 8259 は EOI まで ISR を残す。 */
 static uint16_t g_opnIsrSs = 0;
 static uint16_t g_opnIsrSp = 0;
 static uint16_t g_pitIsrSs = 0;
@@ -56,10 +48,9 @@ static int g_pitInService = 0;
 static int g_mpuInService = 0;
 static uint16_t g_mpuIsrSs = 0;
 static uint16_t g_mpuIsrSp = 0;
-/* PC-98 8259 is edge-triggered. Level re-fire while DSR stays low traps
-   ISRs that latch status without IN E0D0 (old MMD /I auto at CS:16D0). */
+/* PC-98 8259 はエッジトリガ。DSR が Low のままレベル再撃すると、IN E0D0 せず status をラッチする ISR（旧 MMD /I auto @CS:16D0）が罠。 */
 static int g_mpuIrqAsserted = 0;
-/* Last MPU I/O (FMD intelligent). Ring of 128. */
+/* 直近 MPU I/O（FMD intelligent）。リング 128 */
 struct MpuTrRec {
 	uint16_t cs, ip, port;
 	uint8_t wr, val;
@@ -69,6 +60,7 @@ static unsigned g_mpuTrI, g_mpuTrN;
 static uint8_t g_mpuLastSt = 0xff;
 static char g_fmdLoadedSong[96];
 
+/* MpuTrace の実装 */
 static void MpuTrace(uint16_t port, int wr, uint8_t val)
 {
 	MpuTrRec* r = &g_mpuTr[g_mpuTrI];
@@ -82,6 +74,7 @@ static void MpuTrace(uint16_t port, int wr, uint8_t val)
 	r->val = val;
 }
 
+/* CEmuPc98DumpMpuTrace の実装 */
 extern "C" void CEmuPc98DumpMpuTrace(FILE* f)
 {
 	if (!f) return;
@@ -94,20 +87,18 @@ extern "C" void CEmuPc98DumpMpuTrace(FILE* f)
 			r->cs, r->ip, r->wr ? "OUT" : "IN ", r->port, r->val);
 	}
 }
-/* MMD.SYS (header "MMD200  ", not MMD2 "MMD200OR"): 07FF copies [si+3]
-   into duration. Parse leaves gate 0, so the first note stores duration 0
-   and 0732 RETs the channel forever (sbr_98 SILENT with song resident). */
+/* MMD.SYS（ヘッダ "MMD200  "。MMD2 "MMD200OR" ではない）: 07FF が [si+3] を duration へ。Parse は gate 0 のままなので最初のノートが duration 0 を格納し 0732 がチャネルを永久 RET（sbr_98 は曲常駐で SILENT）。 */
 static int g_mmdClassic = 0;
 static unsigned g_mmdLoadSeg = 0;
 static int g_mmdPlayAssist = 0;
 static const uint8_t* g_mmd2FnSrc = NULL;
-/* MMD2 0x654 writes A0/A4 then never 28h|F0, so F-num slides on mute ops.
-   First A0 per channel latches 28h|F0 until a real key-off. */
+/* MMD2 0x654 は A0/A4 を書き 28h|F0 を書かないので mute オペで F-num が滑る。チャネル最初の A0 は本物キーオフまで 28h|F0 をラッチ。 */
 static uint8_t g_mmdKeyOn = 0;
 static unsigned g_sddLoadSeg = 0;
 static unsigned g_muse2Seg = 0;
 static uint16_t g_muse2Intr = 0;
 
+/* MmdPlayAssist の実装 */
 static void MmdPlayAssist(uint8_t* mem)
 {
 	if (!mem || !g_mmdLoadSeg) return;
@@ -127,17 +118,13 @@ static void MmdPlayAssist(uint8_t* mem)
 				mem[p + 3] = 1;
 		}
 	}
-	/* 4655 overlay: COM parks far ptrs at CS:09D0. File F-num writer is
-	   still CALLed there, so IP=09D7 hits 0F (#UD). DF is at 09D6. */
+	/* 4655 オーバーレイ: COM は far ptr を CS:09D0 に置く。ファイル F-num ライターはまだそこを CALL するので IP=09D7 が 0F（#UD）。DF は 09D6。 */
 	if (g_mmdPlayAssist && g_mmd2FnSrc && lin + 0x9E0u < 0x200000u
 		&& mem[lin + 0x9D6] == 0xDF && mem[lin + 0x9D7] == 0x0F)
 		memcpy(mem + lin + 0x9C0, g_mmd2FnSrc, 32);
 }
 
-/* Real PC-98: ITF @ F000-F7FF, N88 BIOS @ F800-FFFF, text VRAM @ A000,
-   attribute VRAM @ A200, DIP/MEMSW in the text page, BIOS work @ 0000:0500.
-   Empty F000:0000 used to be 00h (ADD [BX+SI],AL) and F800:0001 was IRET, so a
-   far CALL into firmware popped the wrong frame and later hit INT6. */
+/* 実 PC-98: ITF @ F000-F7FF、N88 BIOS @ F800-FFFF、テキスト VRAM @ A000、属性 VRAM @ A200、DIP/MEMSW はテキスト頁、BIOS ワーク @ 0000:0500。空の F000:0000 は 00h（ADD [BX+SI],AL）で F800:0001 は IRET だったので、ファームへの far CALL が誤フレームを pop し後で INT6。 */
 static void PlantPc98BiosMap(uint8_t* mem)
 {
 	if (!mem) return;
@@ -147,11 +134,10 @@ static void PlantPc98BiosMap(uint8_t* mem)
 			if (mem[a]) { empty = 0; break; }
 		}
 		if (!empty) return;
-		memset(mem + lo, 0xCB, hi - lo); /* RETF — far CALL firmware */
+		memset(mem + lo, 0xCB, hi - lo); /* RETF — far CALL ファーム */
 	};
 	fillRetf(0xF0000u, 0xF8000u);
-	/* F800 BIOS window: byte0 RETF for far CALL F800:0000; the rest IRET so
-	   a corrupt IVT that landed in high ROM still returns from INT. */
+	/* F800 BIOS 窓: byte0 は far CALL F800:0000 用 RETF。残りは IRET で、高 ROM に落ちた壊れた IVT でも INT から戻る。 */
 	{
 		int empty = 1;
 		for (unsigned a = 0xF8000u; a < 0x100000u; a++) {
@@ -177,30 +163,26 @@ static void PlantPc98BiosMap(uint8_t* mem)
 	fillText(0xA0000u);
 	fillText(0xA2000u);
 
-	/* MEMSW (NP2 A000:3FE2, 16 bytes). Bit0/bit3 at 3FEE = 286 + FM board. */
+	/* MEMSW（NP2 A000:3FE2、16 バイト）。3FEE の bit0/bit3 = 286 + FM 基板 */
 	if (0xA0000u + 0x3FEFu < 0x200000u) {
 		if (mem[0xA0000u + 0x3FE2u] == 0)
 			mem[0xA0000u + 0x3FE2u] = 0x48;
 		mem[0xA0000u + 0x3FEEu] = (uint8_t)(mem[0xA0000u + 0x3FEEu] | 0x09);
 	}
 
-	/* BIOS work: skip 0510-0544 (DOS LOL / non-DOS INT18 stub). */
+	/* BIOS ワーク: 0510-0544 を飛ばす（DOS LOL / 非 DOS INT18 stub） */
 	mem[0x501] = (uint8_t)(mem[0x501] | 0x08); /* 80286 / QueenSoft FM */
 	if (mem[0x504] == 0 && mem[0x505] == 0) {
-		mem[0x504] = 0x80; /* conventional 640 KB */
+		mem[0x504] = 0x80; /* 通常 640 KB */
 		mem[0x505] = 0x02;
 	}
-	mem[0x536] = (uint8_t)(mem[0x536] | 0x04); /* sound board present */
-	/* Expansion-memory KB at 0584; daily timer at 05A0 (INT 08 trampoline). */
+	mem[0x536] = (uint8_t)(mem[0x536] | 0x04); /* 音源基板あり */
+	/* 拡張メモリ KB @0584。日時計 @05A0（INT 08 トランポリン） */
 	if (mem[0x584] == 0 && mem[0x585] == 0)
 		mem[0x584] = 0;
 }
 
-/* Real PC-98 BIOS INT 08: bump 0000:05A0 (and IBM 0040:006C), chain INT 1C,
-   EOI the master PIC. Parked at 00C0 — below the DOS arena (1000h) and
-   outside the trampoline (0060) / F000 ROM that IvtHooked rejects.
-   Drivers that HLT or poll the daily timer need this the same way PC/AT
-   already plants a BDA tick on IRQ0. */
+/* 実 PC-98 BIOS INT 08: 0000:05A0（と IBM 0040:006C）を加算、INT 1C をチェイン、マスタ PIC を EOI。00C0 に置く — DOS アリーナ（1000h）より下、IvtHooked が拒否するトランポリン（0060）/ F000 ROM の外。日時計を HLT または poll するドライバは、PC/AT が IRQ0 に BDA tick を植えるのと同じくこれが要る。 */
 static void PlantPc98BiosTimer(uint8_t* mem)
 {
 	if (!mem) return;
@@ -229,10 +211,7 @@ static void PlantPc98BiosTimer(uint8_t* mem)
 	mem[0x08 * 4 + 3] = (uint8_t)(tickSeg >> 8);
 }
 
-/* CEMU_PC98_IPPROF=<file>: histogram of the linear PC executed during the
-   play pump. A driver that loads its song and then goes mute is almost always
-   spinning on one wait condition, and the hot address names the instruction
-   to look at. */
+/* CEMU_PC98_IPPROF=<file>: play ポンプ中に実行した線形 PC のヒストグラム。曲を載せて mute するドライバはほぼ待ち条件でスピンし、ホット番地が見る命令を示す。 */
 namespace {
 
 struct Pc98IpProf {
@@ -248,6 +227,7 @@ struct Pc98IpProf {
 		memset(hits, 0, sizeof(hits));
 	}
 
+	/* Note の実装 */
 	void Note(unsigned lin)
 	{
 		total++;
@@ -261,8 +241,7 @@ struct Pc98IpProf {
 
 	~Pc98IpProf() { Dump(); }
 
-	/* Static teardown is not guaranteed to run for every host that embeds
-	   the core, so the pump's owner flushes this explicitly on Close. */
+	/* 静的解体はコアを埋め込む全ホストで走る保証が無いので、ポンプ所有者が Close で明示フラッシュ。 */
 	void Dump()
 	{
 		if (!path || !total) return;
@@ -284,8 +263,7 @@ struct Pc98IpProf {
 	}
 };
 
-/* CEMU_PC98_MEMDUMP="<linhex>,<len>,<path>": hex of guest memory as it stood
-   when the pump last returned, for reading the wait loop the profiler found. */
+/* CEMU_PC98_MEMDUMP="<linhex>,<len>,<path>": ポンプが最後に戻ったときのゲストメモリ hex。プロファイラが見た待ちループを読むため。 */
 void Pc98MemDump(const uint8_t* mem)
 {
 	static const char* spec = NULL;
@@ -308,9 +286,7 @@ void Pc98MemDump(const uint8_t* mem)
 	fclose(f);
 }
 
-/* CEMU_PC98_IVT=<path>: which vectors the guest actually owns when play is
-   poked, next to the vector we are about to poke. A driver whose API sits on
-   a vector we never fire is silent no matter how healthy the rest is. */
+/* CEMU_PC98_IVT=<path>: play を poke するときゲストが実際に持つベクタと、これから poke するベクタ。API が一度も撃たないベクタにあるドライバは他が健全でも無音。 */
 struct Pc98CensusPair { uint16_t a; uint8_t d; };
 
 struct Pc98CensusCounts {
@@ -320,17 +296,14 @@ struct Pc98CensusCounts {
 	unsigned tailN;
 };
 
-/* Why an asserted OPN IRQ did not reach the guest. One machine is live at a
-   time in the sweep, so file statics are enough and cost no header churn. */
-unsigned g_censLine = 0;   /* chip Irq() seen asserted */
-unsigned g_censSvc = 0;    /* ...but opnInService_ still latched */
-unsigned g_censNoVec = 0;  /* ...but nothing hooked the vector */
-unsigned g_censMasked = 0; /* ...but the PIC had the line masked */
-unsigned g_censIfOff = 0;  /* ...but the CPU had interrupts disabled */
+/* アサートした OPN IRQ がゲストに届かなかった理由。掃引では同時に生きる機械は 1 台なのでファイル静的で足り、ヘッダを増やさない。 */
+unsigned g_censLine = 0;   /* チップ Irq() がアサートを観測 */
+unsigned g_censSvc = 0;    /* …だが opnInService_ はまだラッチ */
+unsigned g_censNoVec = 0;  /* …だがベクタに何もフックされていない */
+unsigned g_censMasked = 0; /* …だが PIC がその線をマスクしていた */
+unsigned g_censIfOff = 0;  /* …だが CPU が割り込み禁止だった */
 
-/* Last value the guest wrote to OPN reg 0x27. Bits 2/3 enable timer A/B, so
-   a value with both clear means the sequencer's clock is off and nothing more
-   will be played until someone re-arms it. */
+/* ゲストが OPN レジスタ 0x27 へ書いた最後の値。bit2/3 がタイマ A/B を許可。両方クリアならシーケンサ時計はオフで、再武装まで何も鳴らない。 */
 uint8_t g_lastTimerCtrl = 0;
 
 void Pc98IvtCensus(const uint8_t* mem, int funcVect, const Pc98CensusCounts& c,
@@ -352,9 +325,7 @@ void Pc98IvtCensus(const uint8_t* mem, int funcVect, const Pc98CensusCounts& c,
 		if ((seg == 0 && off == 0) || seg == DOS98_TRAMP_SEG) continue;
 		fprintf(f, "%02X=%04X:%04X,", v, seg, off);
 	}
-	/* %ls aborts the whole fprintf when a wide char has no multibyte form in
-	   the C locale, which silently swallowed the newline for every Japanese
-	   title. Fold to ASCII by hand so the record always terminates. */
+	/* %ls は C ロケールにマルチバイトが無いワイド文字で fprintf 全体を中断し、日本語タイトル毎に改行を静かに飲み込んだ。手で ASCII に折り、レコードが必ず終端するようにする。 */
 	fputs(" name=", f);
 	for (const wchar_t* p = tag; p && *p; p++)
 		fputc((*p >= 0x20 && *p < 0x7f) ? (char)*p : '?', f);
@@ -368,8 +339,7 @@ void Pc98IvtCensus(const uint8_t* mem, int funcVect, const Pc98CensusCounts& c,
 	fclose(f);
 }
 
-/* Members are private and adding a method would force a full rebuild of every
-   object in the probe link, so the snapshot reads them at the call site. */
+/* メンバは private。メソッド追加はプローブリンクの全オブジェクト再ビルドを強いるので、スナップショットは呼出側で読む。 */
 #define PC98_CENSUS(phase) do { \
 	Pc98CensusCounts c__; \
 	c__.wr = opnWriteCount_; c__.keyOn = opnKeyOnCount_; \
@@ -390,11 +360,10 @@ void Pc98IvtCensus(const uint8_t* mem, int funcVect, const Pc98CensusCounts& c,
 		dosGe_ ? dosGe_->name : NULL); \
 } while (0)
 
-/* Resolved once at first use and then read straight off this pointer: the
-   hook sits on the per-instruction path, so it must cost one null test when
-   profiling is off. */
+/* 初回利用で解決し、以降このポインタから直読: フックは命令毎経路なので、プロファイリングオフ時はヌル判定 1 回のコストに抑える。 */
 Pc98IpProf* g_ipProf = NULL;
 
+/* IpProfInit の実装 */
 void IpProfInit()
 {
 	const char* p = getenv("CEMU_PC98_IPPROF");
@@ -406,8 +375,7 @@ void IpProfInit()
 
 } /* namespace */
 
-/* Catalog <rom type="binary">00 a0 00 00</rom> embeds hex in the name —
-   there is no zip member. type="string" is raw ASCII. */
+/* カタログ <rom type="binary">00 a0 00 00</rom> は名前に hex を埋め込む — zip メンバは無い。type="string" は生 ASCII。 */
 static int Pc98ParseInlineRom(const char* name, uint8_t* out, int outCap)
 {
 	if (!name || !out || outCap <= 0) return 0;
@@ -426,7 +394,7 @@ static int Pc98ParseInlineRom(const char* name, uint8_t* out, int outCap)
 		else if (c1 >= 'a' && c1 <= 'f') lo = c1 - 'a' + 10;
 		else if (c1 >= 'A' && c1 <= 'F') lo = c1 - 'A' + 10;
 		if (hi < 0 || lo < 0) {
-			/* Not hex — treat whole name as ASCII string payload. */
+			/* hex ではない — 名前全体を ASCII 文字列ペイロードとして扱う */
 			if (haveHex) break;
 			n = 0;
 			for (const char* q = name; *q && n < outCap; q++)
@@ -447,13 +415,9 @@ enum {
 	PC98_PIT_CLOCK_HZ = 1996800,
 	PC98_OPN_IRQ_VEC = 0x0B,
 	PC98_TIMER_VEC = 0x08,
-	/* The BIOS timer handler chains this one; drivers that want a tick and
-	   nothing else hook it instead of taking IRQ0 over. */
+	/* BIOS タイマハンドラがこれをチェイン。tick だけ欲しいドライバは IRQ0 を奪わずここにフック。 */
 	PC98_USER_TICK_VEC = 0x1C,
-	/* Low RAM BIOS tick ISR. IVT08 cannot stay on the DOS trampoline
-	   (HLT;IRET): DeliverIrqs treats that segment as unhooked and drops
-	   IRQ0, and F000 is rejected as high ROM. 00C0 sits above the idle
-	   packet at 00A0:0100 and below the DOS arena at 1000. */
+	/* 低 RAM BIOS tick ISR。IVT08 を DOS トランポリン（HLT;IRET）に置けない: DeliverIrqs はそのセグメントを未フックと見て IRQ0 を落とす。F000 は高 ROM として拒否。00C0 は 00A0:0100 のアイドルパケットより上、DOS アリーナ 1000 より下。 */
 	PC98_BIOS_TICK_SEG = 0x00C0,
 	PC98_VSYNC_VEC = 0x0A,
 	OPN_ADDR0 = 0x188,
@@ -492,9 +456,7 @@ enum {
 	WOLF_SYNC1 = 0xE0D2
 };
 
-/* Later PC-9801 PIT decode at 3FD9–3FDF (odd) aliases 71/73/75/77.
-   DOSBox-X and radioc.dat; BGML_98 writes the speaker divisor to 3FDBh
-   and never touches 73h, so without this the PPI gate stays on as DC. */
+/* 後期 PC-9801 の PIT デコード 3FD9–3FDF（奇数）は 71/73/75/77 の別名。DOSBox-X と radioc.dat。BGML_98 はスピーカ分周を 3FDBh に書き 73h を触らない。これが無いと PPI ゲートが DC のまま。 */
 static uint16_t Pc98FoldPitAlias(uint16_t port)
 {
 	if ((port & 0xfff8u) == 0x3fd8u && (port & 1u))
@@ -505,6 +467,7 @@ static uint16_t Pc98FoldPitAlias(uint16_t port)
 static CHardPc98* g_pc98Active = NULL;
 static int g_pc98Eoi = 0;
 
+/* CEmuParseOptHex の実装 */
 static int CEmuParseOptHex(const CEmuGameEntry* ge, const char* name, int defVal)
 {
 	if (!ge || !name) return defVal;
@@ -517,12 +480,14 @@ static int CEmuParseOptHex(const CEmuGameEntry* ge, const char* name, int defVal
 	return defVal;
 }
 
+/* Pc98Out8 の実装 */
 static void Pc98Out8(unsigned port, unsigned char val)
 {
 	CHardPc98* hw = g_pc98Active;
 	if (hw) hw->PortOut((uint16_t)port, (uint8_t)val);
 }
 
+/* Pc98In8 の実装 */
 static unsigned char Pc98In8(unsigned port)
 {
 	CHardPc98* hw = g_pc98Active;
@@ -530,9 +495,7 @@ static unsigned char Pc98In8(unsigned port)
 	return hw->PortIn((uint16_t)port);
 }
 
-/* The OPL half of a SOUND ORCHESTRA gets its own nine monitor rows rather
-   than sharing the OPN ones: with s_opnaLayout held at the OPN layout the
-   shadow keeps the FM rows and appends these as extra channels. */
+/* SOUND ORCHESTRA の OPL 側は OPN 行を共有せず 9 本のモニタ行を持つ。s_opnaLayout を OPN レイアウトに保つと影は FM 行を残し、これらを追加チャネルとして付ける。 */
 void CHardPc98::SorchTrackOplWrite(uint8_t reg, uint8_t data)
 {
 	sorchOplRegs_[reg] = data;
@@ -551,7 +514,7 @@ void CHardPc98::SorchTrackOplWrite(uint8_t reg, uint8_t data)
 		| ((unsigned)(b & 0x03) << 8);
 	if (!fnum) return;
 	const unsigned block = (unsigned)((b >> 2) & 0x07);
-	/* OPL2 pitch: fnum * clock / (72 * 2^(20 - block)). */
+	/* OPL2 ピッチ: fnum * clock / (72 * 2^(20 - block)) */
 	const double hz = (double)fnum * 3579545.0
 		/ (72.0 * (double)(1u << (20u - block)));
 	const int midi = FmMonShadowHzToMidi(hz);
@@ -594,7 +557,7 @@ CHardPc98::CHardPc98()
 	, synthIfKeepalive_(0)
 	, modeMidi_(0)
 	, midiCapArmed_(0)
-	, sound86Mask_(0x00) /* MAME reset: ID=0x40; bit0 set by software for OPNA enhance */
+	, sound86Mask_(0x00) /* MAME リセット: ID=0x40。OPNA 拡張はソフトが bit0 を立てる */
 	, sound86FifoCtl_(0)
 	, sound86DacCtl_(0)
 	, sound86Mute_(0)
@@ -748,6 +711,7 @@ CHardPc98::CHardPc98()
 	mpuWsdChan_ = -1;
 }
 
+/* CHardPc98::ProfSample の実装 */
 void CHardPc98::ProfSample()
 {
 	static int profInit = 0;
@@ -766,6 +730,7 @@ CHardPc98::~CHardPc98()
 		g_ipProf->Dump();
 }
 
+/* PCM／コードバンク */
 void CHardPc98::FreeBanks()
 {
 	for (int i = 0; i < 256; i++) {
@@ -776,6 +741,7 @@ void CHardPc98::FreeBanks()
 	}
 }
 
+/* ゲストから見えるメモリ */
 uint8_t* CHardPc98::Mem()
 {
 	if (CEmuNp2IsOwner(this)) {
@@ -786,6 +752,7 @@ uint8_t* CHardPc98::Mem()
 	return np2Ram_ ? np2Ram_ : np2_mem();
 }
 
+/* NP2 RAM スナップショットを確保する */
 int CHardPc98::EnsureNp2Ram()
 {
 	if (np2Ram_)
@@ -799,6 +766,7 @@ int CHardPc98::EnsureNp2Ram()
 	return 1;
 }
 
+/* ライブ NP2 コアをこのハードへ切替する */
 void CHardPc98::BindNp2()
 {
 	if (!EnsureNp2Ram())
@@ -806,6 +774,7 @@ void CHardPc98::BindNp2()
 	CEmuNp2Bind(this, np2Ram_, np2Cpu_, np2HaveCpu_);
 }
 
+/* CEmuPc98IsFmp の実装 */
 static int CEmuPc98IsFmp(const CEmuGameEntry* ge)
 {
 	if (!ge) return 0;
@@ -819,6 +788,7 @@ static int CEmuPc98IsFmp(const CEmuGameEntry* ge)
 	return 0;
 }
 
+/* CEmuPc98IsMusicCom の実装 */
 static int CEmuPc98IsMusicCom(const CEmuGameEntry* ge)
 {
 	if (!ge) return 0;
@@ -835,6 +805,7 @@ static int CEmuPc98IsMusicCom(const CEmuGameEntry* ge)
 	return 0;
 }
 
+/* CEmuPc98NameLooksPmd の実装 */
 static int CEmuPc98NameLooksPmd(const char* name)
 {
 	if (!name || !name[0]) return 0;
@@ -853,6 +824,7 @@ static int CEmuPc98NameLooksPmd(const char* name)
 	return _strnicmp(n, "PMD", 3) == 0;
 }
 
+/* CEmuPc98GeIsPmd の実装 */
 static int CEmuPc98GeIsPmd(const CEmuGameEntry* ge)
 {
 	if (!ge) return 0;
@@ -865,6 +837,7 @@ static int CEmuPc98GeIsPmd(const CEmuGameEntry* ge)
 	return 0;
 }
 
+/* CEmuPc98DosHasPmd の実装 */
 static int CEmuPc98DosHasPmd(const CEmuDos98& dos)
 {
 	static const char* kNames[] = {
@@ -879,14 +852,12 @@ static int CEmuPc98DosHasPmd(const CEmuDos98& dos)
 	return 0;
 }
 
+/* チップと CPU を生成する */
 int CHardPc98::Init(const CEmuGameEntry* ge, int sampleRate)
 {
 	if (!ge) return 0;
 	sampleRate_ = sampleRate > 0 ? sampleRate : 44100;
-	/* type=86 is the PC-9801-86 board, but many catalog 86 rips (flixmix /
-	   kolin2) already PLAYS as YM2203 with A460 absent. Turning that on
-	   globally silenced them. emit_* FMDRV86 is the one that needs YM2608
-	   + ID 0x40 (otherwise PIC stays masked / keyOn=0). */
+	/* type=86 は PC-9801-86 基板だが、カタログ 86 リップの多く（flixmix / kolin2）は A460 無しで YM2203 として既に PLAYS。全体で入れると無音になった。要 YM2608 + ID 0x40 なのは emit_* FMDRV86（さもなくば PIC マスク／keyOn=0）。 */
 	opnaMode = (_stricmp(ge->subtype, "opna") == 0) ? 1 : 0;
 	if (!opnaMode && ge->subtype
 		&& (_stricmp(ge->subtype, "86") == 0
@@ -903,8 +874,7 @@ int CHardPc98::Init(const CEmuGameEntry* ge, int sampleRate)
 				opnaMode = 1;
 		}
 	}
-	/* SOUND ORCHESTRA is a 26K clone, so the OPN half stays a YM2203; what
-	   makes the board is the extra OPL chip sharing the 0x18C/0x18E pair. */
+	/* SOUND ORCHESTRA は 26K クローンなので OPN 側は YM2203 のまま。基板を成すのは 0x18C/0x18E 対を共有する追加 OPL。 */
 	if (_stricmp(ge->subtype, "soundorchestrav") == 0)
 		modeSorch_ = 2;
 	else if (_stricmp(ge->subtype, "soundorchestra") == 0)
@@ -916,7 +886,7 @@ int CHardPc98::Init(const CEmuGameEntry* ge, int sampleRate)
 	int clockmul = CEmuParseOptHex(ge, "clockmul", 0);
 	if (clockmul <= 0) clockmul = CEmuParseOptHex(ge, "clock_mul", 1);
 	if (clockmul < 1) clockmul = 1;
-	/* hootrip keeps CPU at 8 MHz; clockmul is reported only. Keep 8 MHz. */
+	/* hootrip は CPU を 8 MHz に保つ。clockmul は報告のみ。8 MHz のまま。 */
 	(void)clockmul;
 
 	bootCs_ = CEmuParseOptHex(ge, "bootcs", 0);
@@ -925,7 +895,7 @@ int CHardPc98::Init(const CEmuGameEntry* ge, int sampleRate)
 	dataAddr_ = CEmuParseOptHex(ge, "dataaddr", 0);
 	dataAddrHost_ = 0;
 	fileSize_ = CEmuParseOptHex(ge, "filesize", 0);
-	/* Falcom SORC98 catalog uses decimal "1000" for a 0x1000 window. */
+	/* Falcom SORC98 カタログは 0x1000 窓に十進 "1000" を使う */
 	if (fileSize_ == 1000 && dataAddr_ == 0x3000)
 		fileSize_ = 0x1000;
 	data2Addr_ = CEmuParseOptHex(ge, "data2addr", 0);
@@ -935,12 +905,9 @@ int CHardPc98::Init(const CEmuGameEntry* ge, int sampleRate)
 		addressing_ = CEmuParseOptHex(ge, "adressing", 0);
 	wstimer_ = CEmuParseOptHex(ge, "wstimer", 0);
 	dummySndRom_ = CEmuParseOptHex(ge, "dummysndrom", 0);
-	/* SORC98 v4–v10 share the same boot stub as v1–v3 but omit wstimer in
-	   the catalog. Without it TriggerPlay skips the [085A] clear / cmd0
-	   re-issue and the sequencer never leaves mute.
-	   Catalog often writes filesize as decimal "1000" (strtoul base0), not
-	   "0x1000" — accept both.
-	   PC-88VA SORCERIAN uses the same INT7F glue with song window @0x11800. */
+	/* SORC98 v4–v10 は v1–v3 と同じブート stub だがカタログに wstimer が無い。無いと TriggerPlay が [085A] クリア／cmd0 再発行を飛ばしシーケンサが mute から出ない。
+	   カタログは filesize を十進 "1000"（strtoul base0）で書くことが多く "0x1000" ではない — 両方許す。
+	   PC-88VA SORCERIAN は同じ INT7F 糊で曲窓 @0x11800。 */
 	if (wstimer_ <= 0 && bootIp_ == 0xf000 && funcVect_ == 0x7f
 		&& (dataAddr_ == 0x3000 || dataAddr_ == 0x11800))
 		wstimer_ = 1;
@@ -964,15 +931,14 @@ int CHardPc98::Init(const CEmuGameEntry* ge, int sampleRate)
 		modeMidi_ = 1;
 	modeBeep_ = (_stricmp(ge->subtype, "beep") == 0 && !modeMidi_) ? 1 : 0;
 	mpuUart_ = 0;
-	midiCapArmed_ = 0; /* BootDos shells may OUT 0→E0D0 forever; arm after */
+	midiCapArmed_ = 0; /* BootDos シェルは 0→E0D0 を永久 OUT し得る。あとで武装 */
 	MidiCaptureReset();
 
 	chip_ = CEmuChipYm2608Create((uint32_t)opnHz_, opnaMode, sampleRate_);
 	if (!chip_) return 0;
 	memset(ssgEcho_, 0, sizeof(ssgEcho_));
 	g_opnDataLatch = 0;
-	/* Old OPNDRV.EXE (md5 b5c63c42) is only c2gp/dynamo98. Echoing 27h/FFh
-	   DATA0 globally moved bny's OPNA fingerprint; gate the bus-hold. */
+	/* 旧 OPNDRV.EXE（md5 b5c63c42）は c2gp/dynamo98 のみ。27h/FFh DATA0 の全体エコーは bny の OPNA 指紋を動かした。バスホールドをゲート。 */
 	g_opnBusHold = (ge && ge->archive
 		&& (!_stricmp(ge->archive, "c2gp") || !_stricmp(ge->archive, "dynamo98")))
 		? 1 : 0;
@@ -994,45 +960,32 @@ int CHardPc98::Init(const CEmuGameEntry* ge, int sampleRate)
 	g_sddLoadSeg = 0;
 	g_muse2Seg = 0;
 	g_muse2Intr = 0;
-	/* Both YM3812 and Y8950 run off the board's own 3.579545 MHz colour-burst
-	   crystal, not the PC-98 bus clock. The V/VS/LS variants fit a Y8950
-	   instead; its FM half is register-compatible with the YM3812, so the
-	   music plays — only its 8 KB ADPCM channel is still missing. */
+	/* YM3812 と Y8950 は PC-98 バス時計ではなく基板自身の 3.579545 MHz カラーバースト。V/VS/LS 変種は Y8950。FM 側は YM3812 とレジスタ互換なので音楽は鳴る — 8KB ADPCM チャネルだけまだ無い。 */
 	if (modeSorch_) {
 		opl_ = CEmuChipYm3812Create(3579545u, sampleRate_);
 		memset(sorchOplRegs_, 0, sizeof(sorchOplRegs_));
 		memset(sorchOplOn_, 0, sizeof(sorchOplOn_));
 	}
-	/* Select clock behavior by driver family. MUSIC.COM relies on SOUND BIOS
-	   selecting YM2608 /2. FMP and Falcom RX program their own timer constants
-	   and stay at reset /6. ymfm reports timer durations in half master clocks,
-	   so FMP needs ×2 timer compensation; the old BIOS-equivalent ×3 overran
-	   the driver's own Timer B cadence. */
+	/* クロック動作はドライバ系統で選ぶ。MUSIC.COM は SOUND BIOS が YM2608 /2 を選ぶのに頼る。FMP と Falcom RX は自前タイマ定数を組みリセット /6 のまま。ymfm はタイマ長をマスタクロック半分で報告するので FMP は ×2 補償。旧 BIOS 相当 ×3 はドライバ自身の Timer B 拍を追い越した。 */
 	const int isFmp = CEmuPc98IsFmp(ge);
 	const int needBios = CEmuPc98IsMusicCom(ge);
 	const int is46oku = (_stricmp(ge->archive, "46oku98") == 0);
 	if (needBios) {
 		chip_->Write(0, 0x2F);
-		/* Restore the native synthesis rate after 2Fh's 3× prescale.
-		   46oku's remaining octave correction is an F-number block shift,
-		   so envelope/LFO time is not slowed with the pitch. */
+		/* 2Fh の 3× プリスケール後にネイティブ合成レートを戻す。46oku の残るオクターブ補正は F-number ブロックシフトなので、エンベロープ／LFO 時間はピッチと一緒に遅くしない。 */
 		chip_->SetPitchRateDiv(3u);
 		if (is46oku) {
 			chip_->SetPitchOctaveShift(-1);
-			/* 46.COM repeatedly adds its fade amount to carrier TLs even
-			   though this path has no live MUSIC.COM [0290]/[0294] state. */
+			/* 46.COM はライブ MUSIC.COM [0290]/[0294] 状態が無いのにフェード量をキャリア TL へ繰り返し足す */
 			chip_->SetCarrierFadeClamp(1);
 		}
 	} else if (isFmp && modeMidi_) {
-		chip_->Write(0, 0x2E); /* MIDI has no audible FM pitch to preserve. */
+		chip_->Write(0, 0x2E); /* MIDI に保つ可聴 FM ピッチは無い */
 	}
-	/* vg2 / other FMP: keep reset ÷6 pitch. The old ×2/×3 here was covering
-	   for the OPNA only receiving ~42% of its master clock; now that every
-	   cpuCycles_ path feeds AdvanceOpnClocks, ymfm's Timer-A/B durations are
-	   already in master clocks and any scale would just retune the tempo. */
+	/* vg2 / 他 FMP: リセット ÷6 ピッチを残す。旧 ×2/×3 は OPNA がマスタの約 42% しか受けていなかった穴埋め。今は全 cpuCycles_ 経路が AdvanceOpnClocks を食わせ、ymfm の Timer-A/B 長は既にマスタクロック。倍率はテンポをずらすだけ。 */
 	else if (isFmp && !modeMidi_) {
 		chip_->SetTimerClockScale(1u);
-		chip_->SetCarrierFadeClamp(1); /* Prevent noise on stop */
+		chip_->SetCarrierFadeClamp(1); /* 停止時のノイズを防ぐ */
 	}
 	else
 		chip_->SetTimerClockScale(1u);
@@ -1046,9 +999,7 @@ int CHardPc98::Init(const CEmuGameEntry* ge, int sampleRate)
 		np2_reset();
 		np2_setextsize(0);
 		np2_set_adrsmask(0x000FFFFFu);
-		/* PC-88VA CPU is V30; keep i286 for classic PC-98.
-		   V30 patch is opt-in after bootcs VA probes stabilize — i286 runs
-		   the Falcom SORC stub (same as SORC98) reliably. */
+		/* PC-88VA CPU は V30。古典 PC-98 は i286 のまま。V30 パッチは bootcs VA プローブが安定してから任意 — i286 は Falcom SORC stub（SORC98 と同じ）を安定して走る。 */
 		np2_set_v30(0);
 		uint8_t* mem = np2_mem();
 		if (mem) memset(mem, 0, 0x200000);
@@ -1060,6 +1011,7 @@ int CHardPc98::Init(const CEmuGameEntry* ge, int sampleRate)
 	return 1;
 }
 
+/* チップ／CPU／ROM を破棄する */
 void CHardPc98::Shutdown()
 {
 	PC98_CENSUS("end");
@@ -1083,6 +1035,7 @@ void CHardPc98::Shutdown()
 	if (g_pc98Active == this) g_pc98Active = NULL;
 }
 
+/* I/O フックを NP2 へ接続する */
 void CHardPc98::AttachIoHooks()
 {
 	g_pc98Active = this;
@@ -1090,6 +1043,7 @@ void CHardPc98::AttachIoHooks()
 	hootrip_inp8 = Pc98In8;
 }
 
+/* I/O フックを外す */
 void CHardPc98::DetachIoHooks()
 {
 	if (g_pc98Active == this) {
@@ -1099,6 +1053,7 @@ void CHardPc98::DetachIoHooks()
 	}
 }
 
+/* バンク／BGM を載せる */
 void CHardPc98::StageBanks(CEmuZipFs* fs, const CEmuGameEntry* ge)
 {
 	if (!fs || !ge) return;
@@ -1128,6 +1083,7 @@ void CHardPc98::StageBanks(CEmuZipFs* fs, const CEmuGameEntry* ge)
 	}
 }
 
+/* データを載せる */
 int CHardPc98::LoadSongToAddr(unsigned songNum, int destAddr, int maxSize, int isSecondary)
 {
 	if (destAddr <= 0) return 0;
@@ -1147,14 +1103,11 @@ int CHardPc98::LoadSongToAddr(unsigned songNum, int destAddr, int maxSize, int i
 		n = 0x200000u - (unsigned)destAddr;
 	}
 	memcpy(mem + destAddr, banks[songNum], n);
-	/* BirdySoft drivers (MU-era and MF-era reloc builds) reject or mishandle
-	   MF magic; streams are structurally MU (cal_98 __30 == calr __30 aside
-	   from the letter). Normalize MF→MU for all cal98_ preloads. */
+	/* BirdySoft ドライバ（MU 期と MF 期リロケ）は MF マジックを拒否または誤処理。ストリーム構造は MU（cal_98 __30 は文字以外 calr __30 と同じ）。全 cal98_ プリロードで MF→MU 正規化。 */
 	if (cal98_ && n >= 2
 		&& mem[destAddr] == 'M' && mem[destAddr + 1] == 'F')
 		mem[destAddr + 1] = 'U';
-	/* Wolfteam MS/MU `\x00B` streams (hioden/suzaku) share the `\x01B` layout
-	   but keep a zero type byte; bump to 01 so MUSDRV accepts the song. */
+	/* Wolfteam MS/MU `\x00B` ストリーム（hioden/suzaku）は `\x01B` 配置を共有するが type バイトが 0。01 に上げ MUSDRV が曲を受けるようにする。 */
 	if (wolfteam98_ && n >= 2
 		&& mem[destAddr] == 0x00 && mem[destAddr + 1] == 0x42)
 		mem[destAddr] = 0x01;
@@ -1163,15 +1116,14 @@ int CHardPc98::LoadSongToAddr(unsigned songNum, int destAddr, int maxSize, int i
 	return 1;
 }
 
+/* CHardPc98::HostService の実装 */
 void CHardPc98::HostService(uint8_t func)
 {
 	hostStatus_ = 0xff;
 	uint8_t* mem = np2_mem();
 	if (!mem) return;
-	/* DOFMD/BRANM glue OUT 07D4/07D6 as real-mode off/seg (SI/DS). Catalog
-	   adressing=0 would otherwise form a flat 00FA11FBh and miss the buffer. */
-	/* DKS/FQ stubs pass ES:BX as real-mode song/table pointers on 07D4/07D6
-	   (same shape as DOFMD). Flat (seg<<16)|off lands past 2MB and never loads. */
+	/* DOFMD/BRANM 糊は 07D4/07D6 をリアルモード off/seg（SI/DS）。カタログ adressing=0 だと平坦 00FA11FBh になりバッファを外す。 */
+	/* DKS/FQ stub は 07D4/07D6 で ES:BX をリアルモード曲／表ポインタ（DOFMD と同じ形）。平坦 (seg<<16)|off は 2MB を超え載らない。 */
 	const int realModeDest = addressing_ || dofmd_ || dks98_;
 	int dest = 0;
 	if (realModeDest) {
@@ -1183,32 +1135,28 @@ void CHardPc98::HostService(uint8_t func)
 	}
 	unsigned song = hostParam1_ & 0xff;
 	switch (func) {
-	case 0x20: /* primary BGM load */
+	case 0x20: /* 第 1 BGM ロード */
 		if (LoadSongToAddr(song, dest > 0 ? dest : dataAddr_, fileSize_, 0))
 			hostStatus_ = 0x00;
 		break;
-	case 0x21: /* secondary BGM load */
+	case 0x21: /* 第 2 BGM ロード */
 		if (LoadSongToAddr(song, dest > 0 ? dest : data2Addr_, file2Size_, 1))
 			hostStatus_ = 0x00;
 		break;
-	case 0x10: /* set dataaddr from real-mode DS:BX (hostParam3:hostParam2) */
-		/* Ys/Ys2 Falcom glue OUT 07D4/07D6 then OUT 07D0,10h. Catalog leaves
-		   dataaddr=0 — without this, TriggerPlay never preloads / skips cmd1. */
+	case 0x10: /* リアルモード DS:BX（hostParam3:hostParam2）から dataaddr をセット */
+		/* Ys/Ys2 Falcom 糊は OUT 07D4/07D6 のあと OUT 07D0,10h。カタログは dataaddr=0 — これが無いと TriggerPlay がプリロードせず cmd1 を飛ばす。 */
 		{
 			const int addr = ((int)hostParam3_ << 4) + (int)hostParam2_;
 			if (addr > 0 && addr < 0x200000) {
 				dataAddr_ = addr;
-				/* The guest named this address itself, so preloading there
-				   is not the "invent a load address" guess the family gates
-				   below exist to prevent. */
+				/* ゲスト自身がこの番地を名付けたので、そこにプリロードするのは下の系統ゲートが防ぐ「ロード番地の発明」ではない。 */
 				dataAddrHost_ = 1;
 			}
 			hostStatus_ = 0x00;
 		}
 		break;
 	case 0x11:
-		/* DOFMD_98.BIN / BRANM_98 play path: IN AX,07D4/07D6 → SI/DS as
-		   real-mode song pointer, then INT 45h into MSC/MV22/MUSIC.BIN. */
+		/* DOFMD_98.BIN / BRANM_98 再生経路: IN AX,07D4/07D6 → SI/DS をリアルモード曲ポインタ、続けて INT 45h で MSC/MV22/MUSIC.BIN へ。 */
 		if (dofmd_) {
 			hostParam2_ = (uint16_t)((unsigned)dataAddr_ & 0x000Fu);
 			hostParam3_ = (uint16_t)((unsigned)dataAddr_ >> 4);
@@ -1224,11 +1172,13 @@ void CHardPc98::HostService(uint8_t func)
 	}
 }
 
+/* CHardPc98::BeepSetGateFromPpi の実装 */
 void CHardPc98::BeepSetGateFromPpi()
 {
 	BeepMonUpdate();
 }
 
+/* CHardPc98::BeepMonUpdate の実装 */
 void CHardPc98::BeepMonUpdate()
 {
 	const int gate = ((ppiC_ & 0x08) == 0) ? 1 : 0;
@@ -1237,8 +1187,7 @@ void CHardPc98::BeepMonUpdate()
 		hz = (double)pitClockHz_ / (double)pit1Reload_;
 	int mid = (hz > 0) ? FmMonShadowHzToMidi(hz) : -1;
 	if (mid < 0) {
-		/* 1-bit DAC / IRQ0 square: PPI bit3 is the waveform, PIT ch1 is idle.
-		   Rising-edge period → pitch; held gate still shows a key. */
+		/* 1bit DAC / IRQ0 矩形: PPI bit3 が波形。PIT ch1 はアイドル。立ち上がり周期 → ピッチ。ゲート保持でもキーは見える。 */
 		static uint64_t lastRise;
 		static int prevGate = 0;
 		if (gate && !prevGate && cpuHz_ > 0) {
@@ -1276,6 +1225,7 @@ void CHardPc98::BeepMonUpdate()
 	}
 }
 
+/* BEEP をステレオへ混成する */
 void CHardPc98::MixBeep(int16_t* stereo, int frames)
 {
 	if (!stereo || frames <= 0) return;
@@ -1298,6 +1248,7 @@ void CHardPc98::MixBeep(int16_t* stereo, int frames)
 	}
 }
 
+/* CHardPc98::BeepCommitPit1 の実装 */
 void CHardPc98::BeepCommitPit1()
 {
 	pit1Counter_ = pit1Reload_ ? pit1Reload_ : 65536u;
@@ -1313,21 +1264,17 @@ void CHardPc98::BeepCommitPit1()
 	BeepMonUpdate();
 }
 
+/* CHardPc98::PitOut の実装 */
 void CHardPc98::PitOut(uint16_t port, uint8_t data)
 {
 	if (port == PIT_CTRL) {
 		const int ch = (data >> 6) & 3;
 		const int access = (data >> 4) & 3;
-		/* RW=00 is the counter-latch command, not a mode word: it freezes
-		   the count for reading and leaves the mode and any half-written
-		   reload alone. */
+		/* RW=00 はカウンタラッチコマンドでありモード語ではない。読取用にカウントを凍らせ、モードと書きかけリロードは触らない。 */
 		if (access == 0x00) {
 			if (ch == 0) {
 				uint16_t lat = (uint16_t)(pitCounter_ & 0xffff);
-				/* FMX 3.10 waits until CS:[3B84] != 0 then NOT/MUL/DIV.
-				   A 0 latch (IRQ at terminal count) spins until the 8s
-				   shell budget; 0xFFFF makes NOT AX = 0 and a later DIV
-				   takes INT 00. C-Class FMX divides by (FFFF−count). */
+				/* FMX 3.10 は CS:[3B84] != 0 まで待ち NOT/MUL/DIV。0 ラッチ（終端カウントの IRQ）は 8s シェル予算までスピン。0xFFFF は NOT AX = 0 で後の DIV が INT 00。C-Class FMX は (FFFF−count) で割る。 */
 				if (lat == 0) lat = 1;
 				else if (lat == 0xFFFFu) lat = 0xFFFE;
 				pitLatch_ = lat;
@@ -1380,6 +1327,7 @@ void CHardPc98::PitOut(uint16_t port, uint8_t data)
 	}
 }
 
+/* CHardPc98::PitIn の実装 */
 uint8_t CHardPc98::PitIn(uint16_t port)
 {
 	if (port == PIT_CT1) {
@@ -1392,10 +1340,7 @@ uint8_t CHardPc98::PitIn(uint16_t port)
 		return (uint8_t)(v >> 8);
 	}
 	if (port != PIT_CT0) return 0xff;
-	/* The live count, not the reload: C-Class FMX loads FFFF, spins a fixed
-	   loop, latches and reads back, then divides by (FFFF − count) to get a
-	   CPU-speed constant.  Echoing the reload made that zero and the driver
-	   died in a divide-by-zero loop before it ever played a note. */
+	/* リロードではなくライブカウント: C-Class FMX は FFFF をロードし固定ループでスピン、ラッチして読み戻し、(FFFF − count) で割って CPU 速度定数を得る。リロードをエコーすると 0 になり、音を出す前にゼロ除算ループで死ぬ。 */
 	const uint16_t raw = pitLatched_ ? pitLatch_ : (uint16_t)(pitCounter_ & 0xffff);
 	uint16_t v = raw;
 	if (v == 0) v = 1;
@@ -1409,6 +1354,7 @@ uint8_t CHardPc98::PitIn(uint16_t port)
 	return (uint8_t)(v >> 8);
 }
 
+/* CHardPc98::PitTick の実装 */
 void CHardPc98::PitTick(uint64_t cpuCycles)
 {
 	if (!pitRunning_ || cpuHz_ <= 0) return;
@@ -1430,6 +1376,7 @@ void CHardPc98::PitTick(uint64_t cpuCycles)
 	}
 }
 
+/* PIT／VSYNC 等のサイドデバイスを進める */
 void CHardPc98::TickSide(uint64_t cpuCycles)
 {
 	PitTick(cpuCycles);
@@ -1444,7 +1391,7 @@ void CHardPc98::TickSide(uint64_t cpuCycles)
 		}
 	}
 	if (chip_ && cpuHz_ > 0 && opnHz_ > 0) {
-		/* accumulate OPN clocks separately in driver; here track IRQ edge */
+		/* OPN クロックはドライバで別積算。ここでは IRQ 端を追う */
 		int irq = chip_->Irq() ? 1 : 0;
 		if (irq && !irqEdgeSeen_) {
 			irqEdgeSeen_ = 1;
@@ -1457,32 +1404,23 @@ void CHardPc98::TickSide(uint64_t cpuCycles)
 		unsigned hz = (unsigned)mpuTempo_ * (unsigned)mpuTimebase_;
 		if (mpuCthRate_ > 1)
 			hz /= (unsigned)mpuCthRate_;
-		/* tempo * timebase is clocks/minute (MPU C2=48 @ 120 BPM → 5760). */
+		/* tempo * timebase は clocks/分（MPU C2=48 @ 120 BPM → 5760） */
 		hz /= 60u;
 		if (hz < 60u) hz = 60u;
 		if (hz > 4000u) hz = 4000u;
 		mpuCthResidual_ += cpuCycles * (uint64_t)hz;
 		while (mpuCthResidual_ >= (uint64_t)cpuHz_) {
-			/* Do not burn a CTH slot while a command ACK is still queued.
-			   MMD /I auto OUT B9h then CLI-polls FE; the next empty-queue
-			   tick must still be pending so FD arrives in the short probe
-			   (CX=1000) instead of 1/60s later. */
+			/* コマンド ACK がまだキューにある間は CTH 枠を消費しない。MMD /I auto は B9h を OUT し CLI で FE を poll。次の空キュー tick は pending のまま、FD が短いプローブ（CX=1000）に 1/60s 後ではなく届くようにする。 */
 			if (mpuAckR_ != mpuAckW_ || mpuRxFull_ || mpuResetBusy_)
 				break;
-			/* Old MMD CS:1C6 ROL-polls bit0 (idle 80h never waits) under
-			   CLI. A CTH FD injected here is IN'd as "not FE", then a
-			   phantom FE succeeds and /I auto never latches INT 0E.
-			   Hold residual until IF=1 (plant + STI). */
+			/* 旧 MMD CS:1C6 は CLI 下で bit0 を ROL poll（アイドル 80h は待たない）。ここで注入した CTH FD は IN で「FE ではない」になり、幻の FE が成功して /I auto が INT 0E をラッチしない。IF=1 まで残余を保持（植込 + STI）。 */
 			if ((np2_reg_get(NP2_R_FLAGS) & 0x0200) == 0)
 				break;
 			mpuCthResidual_ -= (uint64_t)cpuHz_;
 			MpuClockTick();
 		}
 	}
-	/* olteus_va: host advances DS:[003C]/[CC4D] only through handshake (≤0x11).
-	   Past that, IRQ0 → MAP:09BC so the real sequencer owns the counter.
-	   Use ~60Hz for IRQ pulses (VA picture tick); 600Hz starved REP STOSW
-	   VRAM clears in MAP:32DD and blocked song load. */
+	/* olteus_va: ホストはハンドシェイク（≤0x11）だけで DS:[003C]/[CC4D] を進める。その先は IRQ0 → MAP:09BC で本物シーケンサがカウンタを所有。IRQ パルスは約 60Hz（VA ピクチャ tick）。600Hz は MAP:32DD の REP STOSW VRAM クリアを飢え曲ロードを止めた。 */
 	if (olteusMapSeg_ && olteusDataSeg_ && olteusTimerOn_ && cpuHz_ > 0) {
 		olteusTimerResidual_ += cpuCycles * 60ull;
 		uint8_t* mem = np2_mem();
@@ -1493,8 +1431,7 @@ void CHardPc98::TickSide(uint64_t cpuCycles)
 			unsigned flag = (unsigned)mem[base + 0xCC4D]
 				| ((unsigned)mem[base + 0xCC4D + 1] << 8);
 			if (flag < 0x0011u) {
-				/* Handshake: several soft steps per IRQ slot so boot
-				   still reaches 0x11 quickly without 600 IRQs/sec. */
+				/* ハンドシェイク: IRQ 枠あたりソフトステップを数回し、600 IRQ/秒無しでブートが早く 0x11 に届く */
 				for (int step = 0; step < 10 && flag < 0x0011u; step++) {
 					unsigned c = (unsigned)mem[base + 0x3C]
 						| ((unsigned)mem[base + 0x3D] << 8);
@@ -1510,7 +1447,7 @@ void CHardPc98::TickSide(uint64_t cpuCycles)
 					}
 				}
 			} else {
-				/* Handshake done — request sequencer tick. */
+				/* ハンドシェイク完了 — シーケンサ tick を要求 */
 				olteusIrqPulse_ = 1;
 			}
 		}
@@ -1519,7 +1456,7 @@ void CHardPc98::TickSide(uint64_t cpuCycles)
 		uint8_t* mem = np2_mem();
 		const unsigned base = (unsigned)olteusDataSeg_ << 4;
 		if (mem && base + 0x5BCFu < 0x200000u) {
-			/* play: CMP [5BCE],03E7 / JE spin — force off the magic wait value */
+			/* play: CMP [5BCE],03E7 / JE spin — マジック待ち値を強制オフ */
 			if (mem[base + 0x5BCE] == 0xE7 && mem[base + 0x5BCF] == 0x03) {
 				mem[base + 0x5BCE] = 0x00;
 				mem[base + 0x5BCF] = 0x00;
@@ -1530,6 +1467,7 @@ void CHardPc98::TickSide(uint64_t cpuCycles)
 	}
 }
 
+/* 再生／タイマを武装する */
 void CHardPc98::ArmOlteusVaTimer(uint16_t mapSeg)
 {
 	if (!mapSeg || mapSeg == (uint16_t)DOS98_TRAMP_SEG)
@@ -1538,7 +1476,7 @@ void CHardPc98::ArmOlteusVaTimer(uint16_t mapSeg)
 	uint8_t* mem = np2_mem();
 	if (!mem)
 		return;
-	/* MAP entry: MOV AX,ss; MOV SS,AX; MOV AX,ds; MOV DS,AX — DS is CS+0x0F86. */
+	/* MAP 入口: MOV AX,ss; MOV SS,AX; MOV AX,ds; MOV DS,AX — DS は CS+0x0F86 */
 	const unsigned ent = (unsigned)mapSeg << 4;
 	uint16_t dataSeg = (uint16_t)(mapSeg + 0x0F86u);
 	if (ent + 10u < 0x200000u
@@ -1547,18 +1485,14 @@ void CHardPc98::ArmOlteusVaTimer(uint16_t mapSeg)
 		dataSeg = (uint16_t)(mem[ent + 6] | ((unsigned)mem[ent + 7] << 8));
 	}
 	olteusDataSeg_ = dataSeg;
-	/* MAP image >64K; plant inside first paragraph at a BSS zero-run (FE86).
-	   near CALL 09BC / IRET — music tick ends in near RET. */
+	/* MAP イメージ >64K。最初のパラグラフ内の BSS ゼロ走り（FE86）に植える。near CALL 09BC / IRET — 音楽 tick は near RET で終わる。 */
 	const unsigned trampOff = 0xFE86u;
 	const unsigned base = (unsigned)mapSeg << 4;
 	const unsigned tramp = base + trampOff;
 	if (tramp + 16u >= 0x200000u)
 		return;
 	if (!olteusTrampOk_) {
-		/* PUSH ES; PUSHA; PUSH DS; MOV AX,dataSeg; MOV DS,AX; CALL 09BC;
-		   POP DS; POPA; POP ES; IRET
-		   09BC clobbers AX/CX/ES — without a full save, IRQ mid REP STOSW
-		   (MAP VRAM clear @32C2) never finishes and song load never runs. */
+		/* PUSH ES; PUSHA; PUSH DS; MOV AX,dataSeg; MOV DS,AX; CALL 09BC; POP DS; POPA; POP ES; IRET。09BC は AX/CX/ES を壊す — 完全保存が無いと REP STOSW 途中の IRQ（MAP VRAM クリア @32C2）が終わらず曲ロードが走らない。 */
 		mem[tramp + 0] = 0x06; /* PUSH ES */
 		mem[tramp + 1] = 0x60; /* PUSHA */
 		mem[tramp + 2] = 0x1E; /* PUSH DS */
@@ -1567,7 +1501,7 @@ void CHardPc98::ArmOlteusVaTimer(uint16_t mapSeg)
 		mem[tramp + 5] = (uint8_t)(dataSeg >> 8);
 		mem[tramp + 6] = 0x8E;
 		mem[tramp + 7] = 0xD8;
-		/* disp = 09BC - (FE86+8+3) = 09BC - FE91 = 0B2B */
+		/* 変位 = 09BC - (FE86+8+3) = 09BC - FE91 = 0B2B */
 		mem[tramp + 8] = 0xE8;
 		mem[tramp + 9] = 0x2B;
 		mem[tramp + 10] = 0x0B;
@@ -1581,7 +1515,7 @@ void CHardPc98::ArmOlteusVaTimer(uint16_t mapSeg)
 		mem[0x08 * 4 + 3] = (uint8_t)((mapSeg >> 8) & 0xff);
 		olteusTrampOk_ = 1;
 	} else {
-		/* Keep IVT08 on the trampoline if something rewrote it. */
+		/* 何かが書き換えても IVT08 をトランポリンに残す */
 		mem[tramp + 4] = (uint8_t)(dataSeg & 0xff);
 		mem[tramp + 5] = (uint8_t)(dataSeg >> 8);
 		mem[0x08 * 4 + 0] = (uint8_t)(trampOff & 0xff);
@@ -1591,14 +1525,14 @@ void CHardPc98::ArmOlteusVaTimer(uint16_t mapSeg)
 	}
 	picMask_ = (uint8_t)(picMask_ & 0xfeu);
 	np2_reg_set(NP2_R_FLAGS, (uint16_t)(np2_reg_get(NP2_R_FLAGS) | 0x0200));
-	/* Arm soft IRQ0 even before OUT 10A — boot waits on [CC4D] via this tick. */
+	/* OUT 10A の前からソフト IRQ0 を武装 — ブートはこの tick 経由で [CC4D] 待ち */
 	olteusTimerOn_ = 1;
-	/* Skip MAP VRAM plane clears (CS:32C2 REP STOSW ×4). Audio does not
-	   need them; under host IRQ0 they burn the play budget and never finish. */
+	/* MAP VRAM プレーンクリア（CS:32C2 REP STOSW ×4）を飛ばす。音声には不要。ホスト IRQ0 下では再生予算を食い終わらない。 */
 	if (base + 0x32C2u < 0x200000u && mem[base + 0x32C2] == 0x8B)
 		mem[base + 0x32C2] = 0xC3;
 }
 
+/* IvtHooked の実装 */
 static int IvtHooked(uint8_t vec, int dosMode)
 {
 	uint8_t* mem = np2_mem();
@@ -1606,22 +1540,17 @@ static int IvtHooked(uint8_t vec, int dosMode)
 	unsigned b = (unsigned)vec * 4u;
 	uint16_t off = (uint16_t)(mem[b] | (mem[b + 1] << 8));
 	uint16_t seg = (uint16_t)(mem[b + 2] | (mem[b + 3] << 8));
-	/* Null vector. SORC98 installs handlers at 0000:xxxx (CS=0) — that is
-	   valid; only reject 0000:0000. Also reject PC BIOS ROM (F000) and
-	   PC-98 high-ROM aliases (F800–FFFF) left by a corrupt INT 18 boot. */
+	/* ヌルベクタ。SORC98 は 0000:xxxx（CS=0）にハンドラを置く — それは有効。0000:0000 だけ拒否。壊れた INT 18 ブートが残す PC BIOS ROM（F000）と PC-98 高 ROM 別名（F800–FFFF）も拒否。 */
 	if (seg == 0 && off == 0) return 0;
 	if (seg >= 0xF000) return 0;
 	if (dosMode && seg == DOS98_TRAMP_SEG) return 0;
-	/* DOS INT08 into the BIOS work page is not a PIT ISR. Treating 0000:05xx
-	   as hooked fires IRQ0 at PIT rate and starves PMD's OPN Timer B. */
+	/* BIOS ワーク頁への DOS INT08 は PIT ISR ではない。0000:05xx をフック扱いすると IRQ0 が PIT レートで撃ち PMD の OPN Timer B を飢える。 */
 	if (dosMode && vec == 0x08 && seg == 0 && off < 0x800)
 		return 0;
 	return 1;
 }
 
-/* Old MMD /I auto ISR (50 52 BA D2 E0…) latches CS:[imm] on DSR but does
-   not IN E0D0. Host CLI-respect + edge IRQ can miss the CX=0 poll window;
-   poke the latch once INT 0E is that ISR and the guest has STI'd. */
+/* 旧 MMD /I auto ISR（50 52 BA D2 E0…）は DSR で CS:[imm] をラッチするが IN E0D0 しない。ホストの CLI 尊重＋エッジ IRQ は CX=0 poll 窓を外し得る。INT 0E がその ISR でゲストが STI したらラッチを poke。 */
 static void MmdAssistOldIrqProbe()
 {
 	if ((np2_reg_get(NP2_R_FLAGS) & 0x0200) == 0)
@@ -1653,11 +1582,10 @@ static void MmdAssistOldIrqProbe()
 	}
 }
 
+/* BIOS／糊をメモリへ植える */
 static void PlantFmdSongBank(CEmuDos98* dos)
 {
-	/* FMD CS:[0007] starts as a small heap next to the TSR. AH=2 then
-	   AH=3F-reads the .GS (up to ~30KB) there and overwrites the next COM
-	   (fugam). AH=1 XOR-decodes tracks into the same arena (TLOVE_13 ~30KB). */
+	/* FMD CS:[0007] は TSR 隣の小さなヒープから始まる。AH=2 のあと AH=3F が .GS（最大約 30KB）をそこに読み、次の COM（fugam）を上書き。AH=1 は同じアリーナでトラックを XOR 復号（TLOVE_13 約 30KB）。 */
 	uint8_t* mem = np2_mem();
 	if (!dos || !mem || !IvtHooked(0xD3, 1))
 		return;
@@ -1681,36 +1609,27 @@ static void PlantFmdSongBank(CEmuDos98* dos)
 	mem[b + 8] = (uint8_t)(seg >> 8);
 }
 
+/* CHardPc98::Int60Hooked の実装 */
 int CHardPc98::Int60Hooked() const
 {
 	return IvtHooked(0x60, isDos_);
 }
 
+/* 期限の IRQ／NMI を届ける */
 int CHardPc98::DeliverIrqs()
 {
 	if (g_pc98Eoi) {
 		g_pc98Eoi = 0;
-		/* MMD2 acks YM (27h=2Ah) then PIC EOI. Level-triggered ymfm
-		   re-asserts before IRET; keeping opnInService_ latched then
-		   starves AH=3's STI wait and the HLT idle (michael pick 1
-		   line/svc tens of millions, irq frozen). */
+		/* MMD2 は YM（27h=2Ah）を ack してから PIC EOI。レベルトリガ ymfm は IRET 前に再アサート。opnInService_ をラッチしたままにすると AH=3 の STI 待ちと HLT アイドルが飢える（michael pick 1 は line/svc が数千万、irq 凍結）。 */
 		if (g_mmdPicIsr)
 			opnInService_ = 0;
-		/* Do not clear opnInService_ on PIC EOI alone for other cores.
-		   YM2608 IRQs are level-triggered; clearing here before the ISR
-		   acks timer status (reg 0x27 / status read) re-enters forever
-		   and hangs PumpCycles (pc88vados tetrisva/shinrava). */
+		/* 他コアでは PIC EOI だけで opnInService_ を消さない。YM2608 IRQ はレベルトリガ。ISR がタイマ status（reg 0x27／status 読）を ack する前にここで消すと永久再入し PumpCycles がハング（pc88vados tetrisva/shinrava）。 */
 	}
-	/* Release when the injected IRQ frame IRETs back onto the pre-INT
-	   stack. Line-drop used to do this and nested OPNDRV (STI before
-	   EOI) after the status IN acked YM. NOPNDRV still IRETs after
-	   0x27 ack, so the unwind covers that path too. */
+	/* 注入 IRQ フレームが INT 前スタックへ IRET したとき解放。線落下でこれをやり、status IN が YM を ack したあと OPNDRV（EOI 前 STI）が入れ子した。NOPNDRV は 0x27 ack 後にまだ IRET するので、巻き戻しはその経路もカバー。 */
 	if (opnInService_) {
 		const uint16_t ss = np2_reg_get(NP2_R_SS);
 		const uint16_t sp = np2_reg_get(NP2_R_SP);
-		/* Exact SS:SP — not SP>=. OPNDRV INT D2 and INT0B both switch
-		   SS=CS; the ISR's SP=24E4 sits above INT D2's SP=0180, so SP>=
-		   treated the private stack as IRET'd and nested ~200k IRQs/s. */
+		/* 正確な SS:SP — SP>= ではない。OPNDRV の INT D2 と INT0B は両方 SS=CS。ISR の SP=24E4 は INT D2 の SP=0180 より上なので、SP>= は私有スタックを IRET 済みと見て約 20 万 IRQ/s 入れ子した。 */
 		if (ss == g_opnIsrSs && sp == g_opnIsrSp)
 			opnInService_ = 0;
 	}
@@ -1727,9 +1646,7 @@ int CHardPc98::DeliverIrqs()
 			g_mpuInService = 0;
 	}
 
-	/* MUSIC.COM long-BGM keepalive: while play-enable [0290]=1, hold the
-	   auto-mute counter [0294] at 0 so AH=2's 16-bar mute never trips.
-	   Also clear the channel-mute bytes [ch+3] that AH=1 leave stuck. */
+	/* MUSIC.COM 長 BGM keepalive: 再生許可 [0290]=1 の間、自動 mute カウンタ [0294] を 0 に保ち AH=2 の 16 小節 mute が飛ばないようにする。AH=1 が固着させるチャネル mute バイト [ch+3] もクリア。 */
 	if (musicComKeepalive_ && IvtHooked(0x70, 1)) {
 		uint8_t* mem = np2_mem();
 		if (mem) {
@@ -1738,7 +1655,7 @@ int CHardPc98::DeliverIrqs()
 			const unsigned b70 = s70 << 4;
 			if (b70 + 0x2A0u < 0x200000u && mem[b70 + 0x290] == 1) {
 				mem[b70 + 0x294] = 0;
-				/* Channel control blocks sit at CS:0003/0013/… — bit0 mute. */
+				/* チャネル制御ブロックは CS:0003/0013/… — bit0 が mute */
 				for (unsigned ch = 0; ch < 6; ++ch) {
 					const unsigned off = b70 + 0x03u + ch * 0x10u;
 					if (off < 0x200000u && (mem[off] & 1))
@@ -1747,8 +1664,7 @@ int CHardPc98::DeliverIrqs()
 			}
 		}
 	}
-	/* 46oku / MUSIC.COM: also poke INT14 CS when keepalive is armed but
-	   INT70 was not the park vector (fakecall mirror). */
+	/* 46oku / MUSIC.COM: keepalive 武装中で INT70 がパークベクタでないとき（fakecall ミラー）は INT14 CS も poke */
 	if (musicComKeepalive_) {
 		uint8_t* mem = np2_mem();
 		if (mem) {
@@ -1770,11 +1686,7 @@ int CHardPc98::DeliverIrqs()
 	uint16_t flags = np2_reg_get(NP2_R_FLAGS);
 	const int guestIf = (flags & 0x0200) != 0;
 	if ((modeBeep_ || modeMidi_) && pitIrqPending_ && !g_pitInService) {
-		/* Speaker rips (BGML_98) sequence notes on IRQ0. After INT 7F they
-		   often sit in a CLI wait; without IF the PIT never reaches INT08
-		   and MixBeep is a DC gate. Real BIOS would still raise IRQ0.
-		   FMD intelligent helpers CLI around MPU ACK — forcing IF here
-		   lets INT 0E steal FE and 0713 hangs or RET-smashes (portOut=2). */
+		/* スピーカリップ（BGML_98）は IRQ0 でノートを組む。INT 7F 後はしばしば CLI 待ち。IF が無いと PIT が INT08 に届かず MixBeep は DC ゲート。実 BIOS はまだ IRQ0 を上げる。FMD intelligent ヘルパは MPU ACK 周りで CLI — ここで IF を強制すると INT 0E が FE を奪い 0713 がハングまたは RET 破壊（portOut=2）。 */
 		picMask_ = (uint8_t)(picMask_ & 0xfeu);
 		const int fmdIntel = modeMidi_ && !mpuUart_ && IvtHooked(0x0E, isDos_);
 		if (!fmdIntel) {
@@ -1782,10 +1694,7 @@ int CHardPc98::DeliverIrqs()
 			np2_reg_set(NP2_R_FLAGS, flags);
 		}
 	}
-	/* Old MMD /I auto STI, prints via INT 21 AH=9, then polls [1778] for a
-	   CTH byte on INT 0E. AH=9 can return with IF clear; treating any INT 0E
-	   hook as FMD then refuses MPU IRQs and /I auto STC-fails (int61).
-	   Only FMD shares INT 0E CS with INT D3. */
+	/* 旧 MMD /I auto は STI、INT 21 AH=9 で印刷、INT 0E の CTH バイトを [1778] で poll。AH=9 は IF クリアで戻り得る。任意の INT 0E フックを FMD 扱いすると MPU IRQ を拒み /I auto が STC 失敗（int61）。FMD だけ INT 0E CS を INT D3 と共有。 */
 	if (modeMidi_ && !mpuUart_ && IvtHooked(0x0E, isDos_)) {
 		uint8_t* memIf = np2_mem();
 		int fmdPair = 0;
@@ -1806,12 +1715,11 @@ int CHardPc98::DeliverIrqs()
 		flags = (uint16_t)(flags | 0x0200);
 		np2_reg_set(NP2_R_FLAGS, flags);
 	}
-	if ((flags & 0x200) == 0) { /* IF clear */
+	if ((flags & 0x200) == 0) { /* IF クリア（割り込み禁止） */
 		if (chip_ && chip_->Irq()) g_censIfOff++;
 		return 0;
 	}
-	/* MMD2 ISR never STI. IF set means it IRET'd; ymfm may still hold
-	   the level line so the old latch starved the HLT idle. */
+	/* MMD2 ISR は STI しない。IF セットは IRET 済み。ymfm はまだレベル線を保持し得るので、旧ラッチは HLT アイドルを飢えた。 */
 	if (g_mmdPicIsr)
 		opnInService_ = 0;
 	if (chip_ && chip_->Irq()) {
@@ -1820,9 +1728,7 @@ int CHardPc98::DeliverIrqs()
 	}
 
 	if (pitIrqPending_ && (picMask_ & 0x01) == 0 && !g_pitInService) {
-		/* PMD's clock is OPN Timer B (IRQ3). A guest-programmed PIT plus a
-		   real INT08 CS starves that ISR (~3kHz IRQ0 in 250ms) and leaves
-		   IF=0, so key-ons freeze. Drop IRQ0 once the OPN vector is live. */
+		/* PMD の時計は OPN Timer B（IRQ3）。ゲスト組 PIT と本物 INT08 CS がその ISR を飢え（250ms で約 3kHz IRQ0）、IF=0 のままキーオンが凍る。OPN ベクタが生きたら IRQ0 を落とす。 */
 		if (pmdOpnIrq_ && pmdPlayArmed_) {
 			pitIrqPending_ = 0;
 		} else if (IvtHooked(PC98_TIMER_VEC, isDos_)) {
@@ -1846,9 +1752,7 @@ int CHardPc98::DeliverIrqs()
 	MpuFinishReset();
 	if (modeMidi_ && !mpuUart_ && guestIf)
 		MmdAssistOldIrqProbe();
-	/* FMD parks the MPU DSR ISR on INT 0E (IRQ6). Command ACK FE is
-	   polled by CS:0713 under CLI — raising IRQ6 on FE steals the byte.
-	   Clock-to-host F8 is unsolicited and goes through the ISR. */
+	/* FMD は MPU DSR ISR を INT 0E（IRQ6）に置く。コマンド ACK FE は CLI 下の CS:0713 が poll — FE で IRQ6 を上げるとバイトを奪う。Clock-to-host F8 は非要求で ISR を通る。 */
 	if (modeMidi_ && !mpuUart_ && (picMask_ & 0x40) == 0 && !g_mpuInService
 		&& guestIf && IvtHooked(0x0E, isDos_)) {
 		int wantMpuIrq = 0;
@@ -1856,14 +1760,12 @@ int CHardPc98::DeliverIrqs()
 			wantMpuIrq = 1;
 		else if (mpuAckR_ != mpuAckW_) {
 			const uint8_t front = mpuAckQ_[mpuAckR_ & 31];
-			/* FE is polled by FMD CS:0713 under CLI — IRQ would steal it.
-			   F8 (clock) and FD (FMD sequencer tick) must interrupt. */
+			/* FE は FMD CS:0713 が CLI 下で poll — IRQ が奪う。F8（clock）と FD（FMD シーケンサ tick）は割り込み必須。 */
 			if (front != (uint8_t)0xfe)
 				wantMpuIrq = 1;
 		}
 		if (wantMpuIrq) {
-			/* Edge, not level: old MMD probe never INs the CTH byte, so a
-			   level line would nest INT 0E until the 8s shell budget. */
+			/* エッジでありレベルではない: 旧 MMD プローブは CTH バイトを IN しないので、レベル線は 8s シェル予算まで INT 0E を入れ子する。 */
 			if (g_mpuIrqAsserted)
 				wantMpuIrq = 0;
 			else
@@ -1884,15 +1786,11 @@ int CHardPc98::DeliverIrqs()
 		np2_interrupt((uint8_t)PC98_VSYNC_VEC);
 		return 1;
 	}
-	/* Level-triggered OPN IRQ (matches PC88). Edge latch alone missed
-	   asserts that happened in TickOpn after the previous DeliverIrqs. */
+	/* レベルトリガ OPN IRQ（PC88 と同じ）。エッジラッチだけだと前回 DeliverIrqs 後の TickOpn 中のアサートを外す。 */
 	if (chip_ && chip_->Irq() && !opnInService_) {
 		uint8_t* mem = np2_mem();
-		/* famistava plants OPN on INT14 during play — mirror only when INT0B
-		   is still vacant (rtype keeps an INT0A thunk on INT0B). */
-		/* Guest OPN ISR on INT14 (MDR / famistava / MUSE-class): DeliverIrqs
-		   ticks INT0B. Mirror while 0B is still the trampoline; skip lone
-		   IRET serial stubs. */
+		/* famistava は再生中 OPN を INT14 に植える — INT0B が空のときだけミラー（rtype は INT0B に INT0A thunk を残す）。 */
+		/* ゲスト OPN ISR が INT14（MDR / famistava / MUSE 系）: DeliverIrqs は INT0B を tick。0B がまだトランポリンならミラー。単独 IRET シリアル stub は飛ばす。 */
 		if (mem && (pc88VaIo_ || isDos_) && IvtHooked(0x14, isDos_)
 			&& !IvtHooked(PC98_OPN_IRQ_VEC, isDos_) && !pmdOpnIrq_
 			&& !olteusMapSeg_) {
@@ -1908,11 +1806,9 @@ int CHardPc98::DeliverIrqs()
 			}
 			picMask_ = (uint8_t)(picMask_ & ~(1u << 3));
 		}
-		/* mbmusp/MUSE: SSG I/O A = 0xC0 → driver hooks INT14 and EOIs the
-		   slave. Deliver there (do not mirror onto INT0B). */
+		/* mbmusp/MUSE: SSG I/O A = 0xC0 → ドライバが INT14 をフックしスレーブを EOI。そこで届ける（INT0B へミラーしない）。 */
 		uint8_t vec = PC98_OPN_IRQ_VEC;
-		/* PMD owns IRQ3/INT0B (Timer B). INT14 is a DOS/MUSE hook — sending
-		   OPN there runs the wrong ISR, 30 IRQs then silence. */
+		/* PMD は IRQ3/INT0B（Timer B）を所有。INT14 は DOS/MUSE フック — そこに OPN を送ると誤 ISR が走り 30 IRQ のち無音。 */
 		if (!pmdOpnIrq_ && !olteusMapSeg_) {
 		if (IvtHooked(0x14, isDos_) && mem) {
 			const unsigned o14 = (unsigned)mem[0x14 * 4] | ((unsigned)mem[0x14 * 4 + 1] << 8);
@@ -1931,11 +1827,7 @@ int CHardPc98::DeliverIrqs()
 			picMask_ = (uint8_t)(picMask_ & ~(1u << 2)); /* cascade */
 			slavePicMask_ = (uint8_t)(slavePicMask_ & ~(1u << 4)); /* IRQ12 */
 		}
-		/* USMD overlay plants the YM sequencer on INT15 (IRQ13). INT14 is
-		   only a master-PIC chain stub (IN AL,2 / far old 14); delivering
-		   there left keyOn=0 with opnInService stuck on the level line.
-		   Unpacked titles sit overlay at CS+0x470/471; PIYO+EXEPACK packs
-		   leave INT7E and INT15 on different load copies (es95: +0x772). */
+		/* USMD オーバーレイは YM シーケンサを INT15（IRQ13）に植える。INT14 はマスタ PIC チェイン stub（IN AL,2 / far 旧 14）だけ。そこで届けると keyOn=0、opnInService がレベル線に固着。展開タイトルはオーバーレイが CS+0x470/471。PIYO+EXEPACK パックは INT7E と INT15 を別ロードコピーに残す（es95: +0x772）。 */
 		if (mem && IvtHooked(0x15, isDos_) && IvtHooked(0x7E, isDos_)) {
 			const unsigned o7e = (unsigned)mem[0x7E * 4]
 				| ((unsigned)mem[0x7E * 4 + 1] << 8);
@@ -1971,15 +1863,13 @@ int CHardPc98::DeliverIrqs()
 				}
 			}
 		}
-		} /* !pmdOpnIrq_ — keep PMD on INT0B */
+		} /* !pmdOpnIrq_ — PMD は INT0B のまま */
 		if (!IvtHooked(vec, isDos_)) {
-			/* Do not fall back to VSYNC (0x0A) or other IRQ lines — that
-			   mis-delivered OPN timer IRQs into SORC98's VSYNC stub. */
+			/* VSYNC（0x0A）や他 IRQ 線へフォールバックしない — OPN タイマ IRQ が SORC98 の VSYNC stub へ誤配送された。 */
 			g_censNoVec++;
 			return 0;
 		}
-		/* Guest ISR OUT 02h often restores a boot-time IMR that still
-		   masks IRQ3. PMD-class and INT14-mirrored drivers need the tick. */
+		/* ゲスト ISR の OUT 02h はしばしば IRQ3 をまだマスクするブート時 IMR を戻す。PMD 系と INT14 ミラードライバには tick が要る。 */
 		if (vec == PC98_OPN_IRQ_VEC)
 			picMask_ = (uint8_t)(picMask_ & ~(1u << 3));
 		if (IvtHooked(vec, isDos_)) {
@@ -2004,10 +1894,11 @@ int CHardPc98::DeliverIrqs()
 	return 0;
 }
 
-/* --- PC-98 MPU-401 UART @ E0D0/E0D2 (FMP3 -m / midiout catalog) ----------- */
+/* --- PC-98 MPU-401 UART @ E0D0/E0D2（FMP3 -m / midiout カタログ） ----------- */
 
 static uint8_t s_pc98MidiRun, s_pc98MidiNeed, s_pc98MidiD0;
 
+/* CHardPc98::MidiCaptureReset の実装 */
 void CHardPc98::MidiCaptureReset()
 {
 	if (!midiBytes_) midiBytes_ = new uint8_t[CEMU_PC98_MIDI_CAP];
@@ -2017,11 +1908,7 @@ void CHardPc98::MidiCaptureReset()
 	midiPortOutCount_ = 0;
 	midiLastCycle_ = cpuCycles_;
 	mpuRxFull_ = 0;
-	/* Do NOT queue a power-on FE here. FMP3 -m detect (CS:1790) INs E0D2
-	   and requires status != 0 && bit6 clear (idle 0x80). A pending ACK
-	   makes MidiStatusIn return 0x00, so detect fails → [1DBE]=0 and the
-	   sequencer never emits MIDI (midiBytes=0). FE is pushed from RESET
-	   (FFh) / UART-mode (3Fh) command handlers only. */
+	/* ここでパワーオン FE をキューしない。FMP3 -m 検出（CS:1790）は E0D2 を IN し status != 0 かつ bit6 クリア（アイドル 0x80）が要る。pending ACK だと MidiStatusIn が 0x00 を返し検出失敗 → [1DBE]=0、シーケンサが MIDI を出さない（midiBytes=0）。FE は RESET（FFh）／UART モード（3Fh）コマンドハンドラからのみ。 */
 	mpuAckR_ = mpuAckW_ = 0;
 	g_mpuIrqAsserted = 0;
 	mpuResetBusy_ = 0;
@@ -2031,12 +1918,14 @@ void CHardPc98::MidiCaptureReset()
 	g_mpuLastSt = 0xff;
 }
 
+/* CHardPc98::MidiPushAck の実装 */
 void CHardPc98::MidiPushAck(uint8_t v)
 {
 	mpuAckQ_[mpuAckW_ & 31] = v;
 	mpuAckW_++;
 }
 
+/* CHardPc98::MidiCaptureByte の実装 */
 void CHardPc98::MidiCaptureByte(uint8_t v)
 {
 	if (!midiBytes_ || !midiDelta_) return;
@@ -2057,8 +1946,7 @@ void CHardPc98::MidiCaptureByte(uint8_t v)
 	midiBytes_[midiCount_] = v;
 	midiCount_++;
 
-	/* SysEx (F0..F7) and realtime (F8..FF) must not become running status
-	   or the GS bulk dump leaves F0 armed and play notes never count. */
+	/* SysEx（F0..F7）とリアルタイム（F8..FF）をランニングステータスにしてはいけない。GS バルクダンプが F0 武装のまま再生ノートが数えられない。 */
 	if (v == 0xF0) {
 		s_pc98MidiRun = 0xF0;
 		s_pc98MidiNeed = 0;
@@ -2073,9 +1961,7 @@ void CHardPc98::MidiCaptureByte(uint8_t v)
 	}
 	if (v >= 0xF8)
 		return;
-	/* Data inside SysEx is not channel voice. A new 80-EF status must
-	   abort an un-terminated F0 (NARU / GS dumps that drop F7) or note-ons
-	   after the dump never count. Matches PC/AT MidiNoteOnCount. */
+	/* SysEx 内データはチャネルボイスではない。新しい 80-EF ステータスは未終端 F0 を中断しなければならない（NARU / F7 を落とす GS ダンプ）。さもないとダンプ後のノートオンが数えられない。PC/AT MidiNoteOnCount と同じ。 */
 	if (s_pc98MidiRun == 0xF0 && (v & 0x80) == 0)
 		return;
 
@@ -2109,12 +1995,12 @@ void CHardPc98::MidiCaptureByte(uint8_t v)
 	}
 }
 
+/* CHardPc98::MidiDataOut の実装 */
 void CHardPc98::MidiDataOut(uint8_t data)
 {
 	MpuTrace(0xE0D0, 1, data);
 	midiPortOutCount_++;
-	/* Intelligent cmds E0/E7/… take the next data-port byte as payload,
-	   not as MIDI. FMD play is `OUT E0` then `OUT [1798]` as tempo. */
+	/* インテリジェント cmd E0/E7/… は次のデータポートバイトを MIDI ではなくペイロードにする。FMD 再生は `OUT E0` のあと `OUT [1798]` がテンポ。 */
 	if (mpuCmdByte_ && !mpuUart_) {
 		switch (mpuCmdByte_) {
 		case 0xe0: mpuTempo_ = data; break;
@@ -2136,19 +2022,18 @@ void CHardPc98::MidiDataOut(uint8_t data)
 		}
 		return;
 	}
-	/* FMP3 -m probe loops OUT 00h to E0D0 during resident install and would
-	   fill the capture buffer with zeros before the first song byte. */
+	/* FMP3 -m プローブは常駐インストール中に E0D0 へ OUT 00h をループし、最初の曲バイト前にキャプチャバッファをゼロで埋める。 */
 	if (!midiCapArmed_)
 		return;
 	if (mpuUart_ || modeMidi_) {
 		MidiCaptureByte(data);
-		/* FMP3 -m emits a standard MIDI UART stream (same as Wolf MUSDRV).
-		   Bridge to OPN so probes / non-VST paths have audible output. */
+		/* FMP3 -m は標準 MIDI UART ストリーム（Wolf MUSDRV と同じ）。OPN へブリッジし、プローブ／非 VST 経路でも可聴出力。 */
 		if (wolfBridgeEnable_)
 			WolfCmdByte(data);
 	}
 }
 
+/* CHardPc98::MidiCmdOut の実装 */
 void CHardPc98::MidiCmdOut(uint8_t data)
 {
 	MpuTrace(0xE0D2, 1, data);
@@ -2160,9 +2045,7 @@ void CHardPc98::MidiCmdOut(uint8_t data)
 		mpuWsdChan_ = -1;
 		mpuAckR_ = mpuAckW_ = 0;
 		g_mpuIrqAsserted = 0;
-		/* FMD AH=0: OUT FFh then IN E0D2; AND 40h / JZ fail. The first
-		   status read after RESET must have bit6 set. ACK FE is queued
-		   as a side effect of that poll so CALL 0296 can drain it. */
+		/* FMD AH=0: OUT FFh のあと IN E0D2; AND 40h / JZ fail。RESET 後の最初の status 読は bit6 セットが要る。ACK FE はその poll の副作用でキューされ、CALL 0296 がドレインできる。 */
 		mpuResetBusy_ = 1;
 		return;
 	}
@@ -2177,8 +2060,7 @@ void CHardPc98::MidiCmdOut(uint8_t data)
 		MidiPushAck(0xfe);
 		return;
 	}
-	/* MPU-401 intelligent firmware. FMD /# never sends 3Fh; it talks
-	   E0/C2/E7/95 and expects version/tempo replies, not UART capture. */
+	/* MPU-401 インテリジェントファーム。FMD /# は 3Fh を送らない。E0/C2/E7/95 で話し、UART キャプチャではなく version/tempo 応答を期待。 */
 	if (data >= 0xd0 && data <= 0xd7) {
 		mpuWsdChan_ = (int)(data & 7);
 		MidiPushAck(0xfe);
@@ -2190,15 +2072,15 @@ void CHardPc98::MidiCmdOut(uint8_t data)
 		return;
 	}
 	switch (data) {
-	case 0xac: /* request version */
+	case 0xac: /* バージョン要求 */
 		MidiPushAck(0xfe);
 		MidiPushAck(0x15);
 		return;
-	case 0xad: /* request revision */
+	case 0xad: /* リビジョン要求 */
 		MidiPushAck(0xfe);
 		MidiPushAck(0x01);
 		return;
-	case 0xaf: /* request tempo */
+	case 0xaf: /* テンポ要求 */
 		MidiPushAck(0xfe);
 		MidiPushAck(mpuTempo_ ? mpuTempo_ : (uint8_t)0x40);
 		return;
@@ -2211,10 +2093,7 @@ void CHardPc98::MidiCmdOut(uint8_t data)
 		mpuClockToHost_ = 1;
 		mpuCthResidual_ = (cpuHz_ > 0) ? (uint64_t)cpuHz_ : 1ull;
 		break;
-	/* MMD.COM init ends with B9h then /I auto waits for CTH FD on INT 0E.
-	   94h left the clock off; without this the probe never latches.
-	   Seed residual with one full period so the first FD is produced on
-	   the next empty-queue TickSide (old MMD's CX=1000 poll is << 16ms). */
+	/* MMD.COM init は B9h で終わり、/I auto は INT 0E の CTH FD を待つ。94h はクロックを切った。これ無しだとプローブがラッチしない。残余を 1 周期分種まき、次の空キュー TickSide で最初の FD を出す（旧 MMD の CX=1000 poll は << 16ms）。 */
 	case 0xb8:
 	case 0xb9:
 		mpuClockToHost_ = 1;
@@ -2241,25 +2120,23 @@ void CHardPc98::MidiCmdOut(uint8_t data)
 	MidiPushAck(0xfe);
 }
 
+/* CHardPc98::MpuFinishReset の実装 */
 void CHardPc98::MpuFinishReset()
 {
 	if (!mpuResetBusy_)
 		return;
-	/* Consumed by the first status poll — see MidiStatusIn. TickSide must
-	   not retire RESET or FMD's IN after OUT FFh sees ready and fails. */
+	/* 最初の status poll が消費 — MidiStatusIn 参照。TickSide は RESET を引退させてはいけない。FMD の OUT FFh 後 IN が ready を見て失敗する。 */
 }
 
+/* CHardPc98::MpuClockTick の実装 */
 void CHardPc98::MpuClockTick()
 {
 	if (!mpuClockToHost_ || mpuUart_ || mpuResetBusy_)
 		return;
-	/* Do not clobber a pending command ACK — FMD's helper waits for FEh. */
+	/* pending コマンド ACK を壊さない — FMD ヘルパは FEh 待ち */
 	if (mpuAckR_ != mpuAckW_)
 		return;
-	/* FMD's INT 0E ISR special-cases FD (CALL 0748 → 07D3 sequencer).
-	   MMD.COM /I auto does the same: the probe ISR only latches [18A9]
-	   on FD, so generic F8 left INT 61 uninstalled. Any guest INT 0E
-	   MPU ISR wants FD; UART mode never reaches here. */
+	/* FMD の INT 0E ISR は FD を特別扱い（CALL 0748 → 07D3 シーケンサ）。MMD.COM /I auto も同じ: プローブ ISR は FD のときだけ [18A9] をラッチするので、汎用 F8 は INT 61 未インストールのまま。ゲスト INT 0E MPU ISR はどれも FD を欲する。UART モードはここへ来ない。 */
 	uint8_t clk = 0xf8;
 	uint8_t* mem = np2_mem();
 	if (mem) {
@@ -2274,22 +2151,19 @@ void CHardPc98::MpuClockTick()
 	MidiPushAck(clk);
 }
 
+/* CHardPc98::MidiStatusIn の実装 */
 uint8_t CHardPc98::MidiStatusIn()
 {
-	/* Standard MPU-401 status (Roland / RBIL / FMP3):
-	   bit7=1 → no RX data; bit6=1 → not ready for write.
-	   Idle ready = 0x80. FMP3 Wait1 accepts only nonzero+bit6clear; OUT
-	   helpers spin while bit6 set. Returning 0x40 (PC/AT swapped polarity)
-	   made FMP3 -m detect fail (midiBytes=0) and hang any E0D0 write. */
+	/* 標準 MPU-401 status（Roland / RBIL / FMP3）: bit7=1 → RX データ無し。bit6=1 → 書込未 ready。アイドル ready = 0x80。FMP3 Wait1 は非ゼロ+bit6 クリアだけ受ける。OUT ヘルパは bit6 セット中スピン。0x40（PC/AT 逆極性）を返すと FMP3 -m 検出失敗（midiBytes=0）し E0D0 書込がハング。 */
 	uint8_t st;
 	if (mpuResetBusy_) {
 		mpuResetBusy_ = 0;
 		MidiPushAck(0xfe);
-		st = 0xC0; /* this poll: write busy. next poll sees ACK. */
+		st = 0xC0; /* この poll: 書込ビジー。次 poll が ACK を見る */
 	} else if (mpuAckR_ != mpuAckW_ || mpuRxFull_)
-		st = 0x00; /* RX available, write OK */
+		st = 0x00; /* RX あり、書 OK */
 	else
-		st = 0x80; /* no RX, write OK */
+		st = 0x80; /* RX 無し、書込 OK */
 	if (st != g_mpuLastSt) {
 		MpuTrace(0xE0D2, 0, st);
 		g_mpuLastSt = st;
@@ -2297,6 +2171,7 @@ uint8_t CHardPc98::MidiStatusIn()
 	return st;
 }
 
+/* CHardPc98::MidiDataIn の実装 */
 uint8_t CHardPc98::MidiDataIn()
 {
 	uint8_t v;
@@ -2312,26 +2187,19 @@ uint8_t CHardPc98::MidiDataIn()
 	return v;
 }
 
-/* --- Wolfteam E0D0 MUSDRV command stream → OPN soft bridge ---------------
+/* --- Wolfteam E0D0 MUSDRV コマンドストリーム → OPN ソフトブリッジ ---------------
 
-   Confirmed by capture (.cursor/_cemu_wolf_e0d0_probe): the Wolfteam MUSDRV
-   timer ISR emits a *standard MIDI byte stream* out port E0D0 (an MPU-401 /
-   MIDI-board UART). It never programs the YM2203 for notes; the FM chip only
-   receives an init/mute block. Titles that detect no MIDI board still stall.
+   キャプチャ（.cursor/_cemu_wolf_e0d0_probe）で確認: Wolfteam MUSDRV タイマ ISR はポート E0D0（MPU-401／MIDI 基板 UART）へ *標準 MIDI バイト列* を出す。ノート用に YM2203 を組まない。FM チップは init/mute ブロックだけ受ける。MIDI 基板無し検出のタイトルはまだ止まる。
 
-   Since Hoot has no MIDI-board synth, we translate the live MIDI stream into
-   YM2203/2608 FM voices so the song is actually audible on the OPN. This is a
-   real (if reduced-polyphony) synthesis of the observed note events — a
-   generic FM patch is voiced per note-on and keyed off on note-off. */
+   Hoot に MIDI 基板シンセは無いので、ライブ MIDI ストリームを YM2203/2608 FM ボイスへ訳し OPN で聞こえるようにする。観測したノート事象の本物（ポリ数は減）合成 — 汎用 FM パッチをノートオン毎に鳴らしノートオフでキーオフ。 */
 
-/* One-octave OPN(A) F-number table (C..B); block carries the octave. The same
-   values work for OPN (3.9936 MHz /72) and OPNA (7.9872 MHz /144) since both
-   yield the ~55.5 kHz FM base rate. */
+/* 1 オクターブ OPN(A) F-number 表（C..B）。block がオクターブ。OPN（3.9936 MHz /72）と OPNA（7.9872 MHz /144）は同じ値 — どちらも約 55.5 kHz FM 基レート。 */
 static const uint16_t kWolfFnum[12] = {
 	0x0269, 0x028E, 0x02B4, 0x02DE, 0x030B, 0x0339,
 	0x036B, 0x03A0, 0x03D7, 0x0412, 0x0450, 0x0492
 };
 
+/* CHardPc98::WolfBridgeReset の実装 */
 void CHardPc98::WolfBridgeReset()
 {
 	wolfRunStatus_ = 0;
@@ -2350,6 +2218,7 @@ void CHardPc98::WolfBridgeReset()
 	memset(wolfChExpr_, 127, sizeof(wolfChExpr_));
 }
 
+/* CHardPc98::WolfOpnW の実装 */
 void CHardPc98::WolfOpnW(int bank, uint8_t reg, uint8_t val)
 {
 	if (!chip_) return;
@@ -2357,9 +2226,7 @@ void CHardPc98::WolfOpnW(int bank, uint8_t reg, uint8_t val)
 	chip_->Write((uint32_t)(bank | 1), val);
 }
 
-/* Voice v: 0-2 → FM1-3 (bank0), 3-5 → FM4-6 (bank1, OPNA only). Program a
-   generic 4-carrier (algorithm 7) patch with level scaled by velocity and the
-   MIDI channel volume/expression. */
+/* ボイス v: 0-2 → FM1-3（bank0）、3-5 → FM4-6（bank1、OPNA のみ）。ベロシティと MIDI チャネル音量／エクスプレッションでレベルした汎用 4 キャリア（アルゴリズム 7）パッチを組む。 */
 void CHardPc98::WolfProgramVoice(int v, int vel, int midiCh)
 {
 	const int bank = (v < 3) ? 0 : 0x100;
@@ -2368,7 +2235,7 @@ void CHardPc98::WolfProgramVoice(int v, int vel, int midiCh)
 	eff = eff * (int)wolfChVol_[midiCh & 15] / 127;
 	eff = eff * (int)wolfChExpr_[midiCh & 15] / 127;
 	if (eff < 0) eff = 0; if (eff > 127) eff = 127;
-	/* Louder notes → smaller TL (0x10 loudest .. ~0x38 quiet). */
+	/* 大きい音 → 小さい TL（0x10 が最大音量 .. 約 0x38 が静か） */
 	uint8_t tl = (uint8_t)(0x10 + ((127 - eff) * 40 / 127));
 	for (int op = 0; op < 4; op++) {
 		const uint8_t o = (uint8_t)((op << 2) + ci);
@@ -2378,19 +2245,19 @@ void CHardPc98::WolfProgramVoice(int v, int vel, int midiCh)
 		WolfOpnW(bank, (uint8_t)(0x60 + o), 0x00); /* DR=0 */
 		WolfOpnW(bank, (uint8_t)(0x70 + o), 0x00); /* SR=0 */
 		WolfOpnW(bank, (uint8_t)(0x80 + o), 0x0A); /* SL=0 RR=10 */
-		WolfOpnW(bank, (uint8_t)(0x90 + o), 0x00); /* SSG-EG off */
+		WolfOpnW(bank, (uint8_t)(0x90 + o), 0x00); /* SSG-EG オフ */
 	}
-	WolfOpnW(bank, (uint8_t)(0xB0 + ci), 0x07); /* algorithm 7, FB 0 */
-	WolfOpnW(bank, (uint8_t)(0xB4 + ci), 0xC0); /* L+R on */
+	WolfOpnW(bank, (uint8_t)(0xB0 + ci), 0x07); /* アルゴリズム 7、FB 0 */
+	WolfOpnW(bank, (uint8_t)(0xB4 + ci), 0xC0); /* L+R オン */
 }
 
+/* CHardPc98::WolfNoteOn の実装 */
 void CHardPc98::WolfNoteOn(int midiCh, int note, int vel)
 {
 	if (!chip_ || note < 0 || note > 127) return;
 	wolfNoteOnCount_++;
 	const int nv = wolfVoiceCount_ > 0 ? wolfVoiceCount_ : 3;
-	/* Reuse a voice already holding this (ch,note); else a free one; else the
-	   oldest active voice. */
+	/* 既にこの (ch,note) を持つボイスを再利用。無ければ空き。それも無ければ最古のアクティブ。 */
 	int v = -1;
 	for (int i = 0; i < nv; i++)
 		if (wolfVoiceActive_[i] && wolfVoiceMidiCh_[i] == midiCh && wolfVoiceNote_[i] == note) { v = i; break; }
@@ -2404,7 +2271,7 @@ void CHardPc98::WolfNoteOn(int midiCh, int note, int vel)
 	}
 	if (v < 0) return;
 	const int chBits = (v < 3) ? v : (0x04 + (v - 3));
-	/* Key off before retune to force a clean re-attack. */
+	/* リチューン前にキーオフし、きれいな再アタックを強制 */
 	WolfOpnW(0, 0x28, (uint8_t)chBits);
 	WolfProgramVoice(v, vel, midiCh);
 	const int oct = note / 12;
@@ -2415,13 +2282,14 @@ void CHardPc98::WolfNoteOn(int midiCh, int note, int vel)
 	const int ci = (v < 3) ? v : (v - 3);
 	WolfOpnW(bank, (uint8_t)(0xA4 + ci), (uint8_t)(((block & 7) << 3) | ((fnum >> 8) & 7)));
 	WolfOpnW(bank, (uint8_t)(0xA0 + ci), (uint8_t)(fnum & 0xff));
-	WolfOpnW(0, 0x28, (uint8_t)(0xF0 | chBits)); /* key on all 4 slots */
+	WolfOpnW(0, 0x28, (uint8_t)(0xF0 | chBits)); /* 4 スロット全部キーオン */
 	wolfVoiceActive_[v] = 1;
 	wolfVoiceMidiCh_[v] = midiCh;
 	wolfVoiceNote_[v] = note;
 	wolfVoiceAge_[v] = ++wolfVoiceClock_;
 }
 
+/* CHardPc98::WolfNoteOff の実装 */
 void CHardPc98::WolfNoteOff(int midiCh, int note)
 {
 	if (!chip_) return;
@@ -2430,13 +2298,14 @@ void CHardPc98::WolfNoteOff(int midiCh, int note)
 	for (int i = 0; i < nv; i++) {
 		if (wolfVoiceActive_[i] && wolfVoiceMidiCh_[i] == midiCh && wolfVoiceNote_[i] == note) {
 			const int chBits = (i < 3) ? i : (0x04 + (i - 3));
-			WolfOpnW(0, 0x28, (uint8_t)chBits); /* key off */
+			WolfOpnW(0, 0x28, (uint8_t)chBits); /* キーオフ */
 			wolfVoiceActive_[i] = 0;
 			wolfVoiceNote_[i] = -1;
 		}
 	}
 }
 
+/* CHardPc98::WolfAllNotesOff の実装 */
 void CHardPc98::WolfAllNotesOff()
 {
 	if (!chip_) return;
@@ -2450,6 +2319,7 @@ void CHardPc98::WolfAllNotesOff()
 	}
 }
 
+/* CHardPc98::WolfMidiDispatch の実装 */
 void CHardPc98::WolfMidiDispatch(uint8_t status, uint8_t d0, uint8_t d1)
 {
 	const uint8_t cmd = (uint8_t)(status & 0xF0);
@@ -2464,26 +2334,25 @@ void CHardPc98::WolfMidiDispatch(uint8_t status, uint8_t d0, uint8_t d1)
 		break;
 	case 0xB0:
 		wolfCtrlCount_++;
-		if (d0 == 0x07) wolfChVol_[ch] = d1;        /* channel volume */
-		else if (d0 == 0x0B) wolfChExpr_[ch] = d1;  /* expression */
-		else if (d0 == 0x78 || d0 == 0x7B) WolfAllNotesOff(); /* all sound/notes off */
+		if (d0 == 0x07) wolfChVol_[ch] = d1;        /* チャネル音量 */
+		else if (d0 == 0x0B) wolfChExpr_[ch] = d1;  /* エクスプレッション */
+		else if (d0 == 0x78 || d0 == 0x7B) WolfAllNotesOff(); /* 全音／全ノートオフ */
 		break;
 	default:
-		/* Program change / pitch bend / aftertouch: not voiced by this bridge. */
+		/* プログラムチェンジ／ピッチベンド／アフタータッチ: このブリッジではボイスしない */
 		break;
 	}
 }
 
-/* Parse the raw MIDI byte stream (handles running status, 2/3-byte channel
-   messages, sysex skip, and 0xFF stream reset). */
+/* 生 MIDI バイト列を解析（ランニングステータス、2/3 バイトチャネルメッセージ、sysex スキップ、0xFF ストリームリセット）。 */
 void CHardPc98::WolfCmdByte(uint8_t data)
 {
 	if (data & 0x80) {
 		if (data >= 0xF8)
-			return; /* realtime: ignore */
+			return; /* リアルタイム: 無視 */
 		if (data == 0xF0) { wolfInSysex_ = 1; return; }
 		if (data == 0xF7) { wolfInSysex_ = 0; wolfRunStatus_ = 0; return; }
-		if (data == 0xFF) { /* system reset within stream */
+		if (data == 0xFF) { /* ストリーム内のシステムリセット */
 			if (wolfBridgeEnable_) WolfAllNotesOff();
 			wolfRunStatus_ = 0; wolfDataIdx_ = 0; wolfInSysex_ = 0;
 			return;
@@ -2494,7 +2363,7 @@ void CHardPc98::WolfCmdByte(uint8_t data)
 			wolfDataNeed_ = (data == 0xF2) ? 2 : ((data == 0xF1 || data == 0xF3) ? 1 : 0);
 			return;
 		}
-		/* Channel voice status. */
+		/* チャネルボイス状態 */
 		wolfRunStatus_ = data;
 		wolfDataIdx_ = 0;
 		const uint8_t hi = (uint8_t)(data & 0xF0);
@@ -2506,44 +2375,33 @@ void CHardPc98::WolfCmdByte(uint8_t data)
 	wolfData_[wolfDataIdx_++] = data;
 	if (wolfDataIdx_ < wolfDataNeed_)
 		return;
-	wolfDataIdx_ = 0; /* running status: keep wolfRunStatus_ */
+	wolfDataIdx_ = 0; /* ランニングステータス: wolfRunStatus_ を残す */
 	if (wolfBridgeEnable_)
 		WolfMidiDispatch(wolfRunStatus_, wolfData_[0], wolfData_[1]);
 }
 
+/* I/O ポート読込 */
 uint8_t CHardPc98::PortIn(uint16_t port)
 {
 	port = Pc98FoldPitAlias(port);
-	/* PC-98 display status: bit 5 changes across vertical retrace.  Several
-	   resident glues synchronize command hand-off by waiting for a low->high
-	   transition (mscd_98 does this for 18 frames).  Returning the generic
-	   open-bus FF here trapped those programs in their first wait loop. */
-	/* Both µPD7220s answer here: 0x60 is the text master, 0xA0 the graphic
-	   slave.  Only 0xA0 used to be answered, so a program that frame-synced
-	   off the text GDC (C-Class FMX waits for vsync to fall and rise before
-	   probing the sound board) spun in its first wait loop forever. */
+	/* PC-98 表示 status: bit5 が垂直帰線で変わる。いくつかの常駐糊はコマンド受け渡しを低→高遷移待ちで同期（mscd_98 は 18 フレーム）。汎用オープンバス FF を返すと最初の待ちループに罠。 */
+	/* 両 µPD7220 がここで答える: 0x60 がテキストマスタ、0xA0 がグラフィックスレーブ。以前は 0xA0 だけ答えたので、テキスト GDC でフレーム同期するプログラム（C-Class FMX は vsync 下降／上昇を待ってから音源基板を探る）が最初の待ちで永久スピン。 */
 	if (port == 0x0060 || port == 0x00A0) {
 		uint8_t s;
 		if (port == 0x00A0) {
-			/* tky98 glue waits for bit5 to fall and rise 60 times before
-			   INT F1 play. A 60 Hz clock needs ~1s; DrainInterrupt is 0.5s
-			   so older TKYDRV packs never left the wait (dumps=1). Toggle
-			   every poll — OPN timers still pace the song. */
+			/* tky98 糊は INT F1 再生前に bit5 の下降／上昇を 60 回待つ。60Hz 時計なら約 1s。DrainInterrupt は 0.5s なので旧 TKYDRV パックは待ちを出なかった（dumps=1）。poll 毎にトグル — OPN タイマがまだ曲をペース。 */
 			gdcA0Poll_ = (uint8_t)(gdcA0Poll_ + 1);
 			s = (uint8_t)((gdcA0Poll_ & 1) ? 0x20 : 0x00);
 		} else {
 			const uint64_t halfFrame =
 				(cpuHz_ > 120) ? (uint64_t)cpuHz_ / 120ull : 1ull;
 			s = ((cpuCycles_ / halfFrame) & 1ull) ? 0x20 : 0x00;
-			/* An idle GDC has drained its command FIFO and is not drawing; a
-			   caller that waits for FIFO-empty before writing needs to see it.
-			   Only 0x60 reports it: 0xA0 has answered bare vsync since the
-			   glues that poll it were tuned, and they mask for bit 5 anyway. */
+			/* アイドル GDC はコマンド FIFO を空にし描画していない。書込前に FIFO 空を待つ呼び出しはそれを見る必要がある。報告するのは 0x60 だけ: 0xA0 は糊が調律されてから素の vsync を答え、それらは anyway bit5 をマスク。 */
 			s |= 0x04;
 		}
 		return s;
 	}
-	/* PC-88VA: PC-88 OPN ports read the same chip status/data. */
+	/* PC-88VA: PC-88 OPN ポートは同じチップ status/data を読む */
 	if (pc88VaIo_) {
 		switch (port) {
 		case 0x44: case 0xA8: port = OPN_ADDR0; break;
@@ -2556,44 +2414,31 @@ uint8_t CHardPc98::PortIn(uint16_t port)
 	switch (port) {
 	case OPN_ADDR0: {
 		uint8_t s = chip_ ? chip_->ReadStatus() : 0xff;
-		/* olteus MAP DA40: IN 44h / TEST 80h busy-wait. ymfm stays busy
-		   unless clocks advance between OUT and IN — mask for VA play. */
+		/* olteus MAP DA40: IN 44h / TEST 80h ビジー待ち。ymfm は OUT と IN の間にクロックが進まないとビジーのまま — VA 再生ではマスク。 */
 		if (pc88VaIo_)
 			s = (uint8_t)(s & (uint8_t)~0x80);
-		/* MMD2.SYS ISR 0x3ff / 0x4a3: OUT addr / IN 188h / TEST 80h.
-		   Nested INT14 has IF clear, so a sticky ymfm busy bit parks the
-		   ISR forever (opnInService stuck, key-on 0x28 never written). */
+		/* MMD2.SYS ISR 0x3ff / 0x4a3: OUT addr / IN 188h / TEST 80h。入れ子 INT14 は IF クリアなので、sticky ymfm busy が ISR を永久駐車（opnInService 固着、キーオン 0x28 が書かれない）。 */
 		if (g_mmdPicIsr)
 			s = (uint8_t)(s & (uint8_t)~0x80);
-		/* FMX 3.10 cmd16 (186F) near-calls CS:22C7 which IN 188h / TEST 80h.
-		   ymfm can stick busy across that fill so 196D never arms [2822]. */
+		/* FMX 3.10 cmd16（186F）は CS:22C7 を near CALL し IN 188h / TEST 80h。ymfm がその fill をまたいで busy のままだと 196D が [2822] を武装しない。 */
 		if (s_fmxKeepIrq0)
 			s = (uint8_t)(s & (uint8_t)~0x80);
 		return s;
 	}
 	case OPN_DATA0:
-		/* SSG I/O A (reg 0x0E): board IRQ jumper. MUSE/mbmusp read bits7-6
-		   to pick INT14h; default open-bus 0 makes them hook INT0B while EOI
-		   goes to the slave (hootrip preset_muse_irq_jumper). */
+		/* SSG I/O A（reg 0x0E）: 基板 IRQ ジャンパ。MUSE/mbmusp は bit7-6 を読んで INT14h を選ぶ。既定オープンバス 0 だと INT0B をフックし EOI はスレーブへ（hootrip preset_muse_irq_jumper）。 */
 		if (chip_ && opnLatchedAddr_ == 0x0E && (ssgPortAJumper_ & 0x80))
 			return ssgPortAJumper_;
-		/* YM2203/2608 SSG $00-$0F are readable. PLAY5 / MMD2.SYS / F.COM
-		   write a canary (0x55 or 1) and IN-compare; ymfm read_data() is
-		   status, not the register. Serve the last DATA0 write. */
+		/* YM2203/2608 SSG $00-$0F は読める。PLAY5 / MMD2.SYS / F.COM はカナリア（0x55 または 1）を書いて IN 比較。ymfm read_data() はレジスタではなく status。直近 DATA0 書込を返す。 */
 		if (opnLatchedAddr_ <= 0x0F)
 			return ssgEcho_[opnLatchedAddr_];
-		/* Old TKY/OPNDRV (c2gp, dynamo98) probes YM by OUT 27h/40h then
-		   IN DATA expecting 0x40, then OUT addr FFh / IN DATA not-1.
-		   Real YM2203 27h is write-only; PC-98 boards bus-hold the last
-		   data-port write. Newer OPNDRV NOPs both compares (rolling95).
-		   Only those two latched addrs echo: a blanket DATA0 latch moved
-		   rolling95's first audible window (SIL.MDT fp). */
+		/* 旧 TKY/OPNDRV（c2gp、dynamo98）は OUT 27h/40h のあと IN DATA で 0x40 を期待し、OUT addr FFh / IN DATA not-1。本物 YM2203 の 27h は書込専用。PC-98 基板は直近データポート書込をバスホールド。新しい OPNDRV は両比較を NOP（rolling95）。エコーするのはその 2 つのラッチ番地だけ: 一括 DATA0 ラッチは rolling95 の最初の可聴窓を動かした（SIL.MDT fp）。 */
 		if (g_opnBusHold && (opnLatchedAddr_ == 0x27 || opnLatchedAddr_ == 0xFF))
 			return g_opnDataLatch;
 		return chip_ ? chip_->ReadData() : 0xff;
 	case OPN_ADDR1: {
 		if (modeSorch_)
-			return opl_ ? opl_->ReadStatus() : 0x06; /* OPL2 ID pattern */
+			return opl_ ? opl_->ReadStatus() : 0x06; /* OPL2 ID パターン */
 		uint8_t s = chip_ ? chip_->ReadStatusHi() : 0xff;
 		if (pc88VaIo_)
 			s = (uint8_t)(s & (uint8_t)~0x80);
@@ -2602,7 +2447,7 @@ uint8_t CHardPc98::PortIn(uint16_t port)
 		return s;
 	}
 	case OPN_DATA1:
-		if (modeSorch_) return 0xff; /* OPL2 has no readable data port */
+		if (modeSorch_) return 0xff; /* OPL2 に読めるデータポートは無い */
 		return chip_ ? chip_->ReadDataHi() : 0xff;
 	case EXT_CMD: return extCmd_;
 	case EXT_SONG: return (uint8_t)(extSong_ & 0xff);
@@ -2618,34 +2463,24 @@ uint8_t CHardPc98::PortIn(uint16_t port)
 	case HOST_P3: return (uint8_t)(hostParam3_ & 0xff);
 	case HOST_P3 + 1: return (uint8_t)(hostParam3_ >> 8);
 	case SOUND86_ID:
-		/* PC-9801-86 @ 0188h: upper nibble Sound ID = 4 (MAME/NP2/Undocumented9801).
-		   bit0 = YM2608 enhanced; bit1 = OPNA mask. Default mask=0 → ID 0x40. */
+		/* PC-9801-86 @ 0188h: 上位ニブル Sound ID = 4（MAME/NP2/Undocumented9801）。bit0 = YM2608 拡張。bit1 = OPNA マスク。既定 mask=0 → ID 0x40。 */
 		if (!opnaMode)
-			return 0xff; /* 26K / OPN-only: port absent */
+			return 0xff; /* 26K / OPN のみ: ポート不在 */
 		return (uint8_t)(0x40 | (sound86Mask_ & 0x03));
 	case SOUND86_FIFO_CTL:
-		/* FMX 3.10 INT14 1BB4: if [2849]==2, IN A468h / TEST 10h spins
-		   CALL 011C. Open-bus FF never clears bit4. */
+		/* FMX 3.10 INT14 1BB4: [2849]==2 なら IN A468h / TEST 10h が CALL 011C でスピン。オープンバス FF は bit4 を消さない。 */
 		if (s_fmxKeepIrq0)
 			return 0;
 		return 0xff;
-	/* A466–A66E: leave open-bus unless a title needs soft 86PCM.
-	   Stubbing empty-FIFO here made FMP3 take a silent PCM path (vg2). */
+	/* A466–A66E: タイトルがソフト 86PCM を要しない限りオープンバスのまま。空 FIFO を stub すると FMP3 が無音 PCM 経路を取った（vg2）。 */
 	case 0x506:
-		/* PC-88VA: MAP polls IN 506h bit0 as busy (olteus CS:7968).
-		   Open-bus 0xFF spun forever before song load / sequencer. */
+		/* PC-88VA: MAP は IN 506h bit0 をビジーとして poll（olteus CS:7968）。オープンバス 0xFF は曲ロード／シーケンサ前に永久スピン。 */
 		if (pc88VaIo_)
 			return 0x00;
 		return 0xff;
 	case PIC_CMD:
 	case SLAVE_PIC_CMD:
-		/* OCW3 IRR/ISR polls (e.g. ys_98 MANPR1 CS:5123 after arming
-		   timer B). Unhandled reads were 0xFF and spun forever (opnW
-		   hundreds of thousands, key=0). Soft-PIC has no latched ISR.
-		   PC-88VA MAP (olteus CS:0C50): when DS:[00C0]!=0 wait for bit6
-		   then clear; when [00C0]==0 bit6 must be clear or it re-spins.
-		   MMD2 INT14: IN master ISR bit7 decides whether to EOI the slave.
-		   Returning 0 skipped OUT 08h,20h and left IRQ12 in-service. */
+		/* OCW3 IRR/ISR poll（例 ys_98 MANPR1 CS:5123 が Timer B 武装後）。未処理読は 0xFF で永久スピン（opnW が数十万、key=0）。ソフト PIC にラッチ ISR は無い。PC-88VA MAP（olteus CS:0C50）: DS:[00C0]!=0 なら bit6 を待ってクリア。[00C0]==0 なら bit6 はクリア必須、さもなくば再スピン。MMD2 INT14: マスタ ISR bit7 がスレーブ EOI するかを決める。0 を返すと OUT 08h,20h を飛ばし IRQ12 が in-service のまま。 */
 		if (port == PIC_CMD && g_mmdPicIsr && opnInService_)
 			return 0x80;
 		if (pc88VaIo_ && port == SLAVE_PIC_CMD && olteusDataSeg_) {
@@ -2663,21 +2498,21 @@ uint8_t CHardPc98::PortIn(uint16_t port)
 	case SLAVE_PIC_MASK: return slavePicMask_;
 	case PIT_CT0: case PIT_CT1: case PIT_CTRL: return PitIn(port);
 	case PPI_A:
-		/* System PPI port A = DIP SW2. QEMU returns 0x73 in input mode. */
+		/* システム PPI ポート A = DIP SW2。入力モードで QEMU は 0x73 */
 		return 0x73;
 	case PPI_B:
-		/* TYP=10 (not original 9801), MOD=1 (8 MHz / 2 MHz PIT). */
+		/* TYP=10（オリジナル 9801 ではない）、MOD=1（8 MHz / 2 MHz PIT） */
 		return 0xA0;
 	case PPI_C:
 		return ppiC_;
 	case 0x41:
-		/* Keyboard 8251 data. No scan code queued. */
+		/* キーボード 8251 データ。スキャンコードはキュー無し */
 		return 0x00;
 	case 0x43:
-		/* 8251 status (TxRDY|TxEMPTY) / system port: printer not busy. */
+		/* 8251 status（TxRDY|TxEMPTY）／システムポート: プリンタ非ビジー */
 		return 0x06;
 	case WOLF_SYNC0:
-	case 0xC0D0: /* alternate PC-98 MIDI data port */
+	case 0xC0D0: /* 代替 PC-98 MIDI データポート */
 		if (modeMidi_ || mpuUart_)
 			return MidiDataIn();
 		if (port == WOLF_SYNC0)
@@ -2694,11 +2529,11 @@ uint8_t CHardPc98::PortIn(uint16_t port)
 	}
 }
 
+/* I/O ポート書込 */
 void CHardPc98::PortOut(uint16_t port, uint8_t data)
 {
 	port = Pc98FoldPitAlias(port);
-	/* olteus_va: OUT 10A,0022 arms the picture/interval tick; 00/0C disarms.
-	   Capture CS as MAP seg if the far-table hook has not run yet. */
+	/* olteus_va: OUT 10A,0022 がピクチャ／間隔 tick を武装。00/0C が解除。far 表フックがまだ走っていなければ CS を MAP seg として捕捉。 */
 	if (pc88VaIo_ && port == 0x10A) {
 		if (data == 0x22) {
 			uint16_t cs = np2_reg_get(NP2_R_CS);
@@ -2711,15 +2546,11 @@ void CHardPc98::PortOut(uint16_t port, uint8_t data)
 			olteusTimerOn_ = 0;
 		}
 	}
-	/* PC-88VA: music uses classic PC-88 OPN (44h/A8h); BIOSD also pokes
-	   PC-98 188h. Stage address per port family so interleaved OUTs cannot
-	   steal the latch (SSG C / mixer corruption). */
+	/* PC-88VA: 音楽は古典 PC-88 OPN（44h/A8h）。BIOSD は PC-98 188h も poke。ポート族毎に番地をステージし、交互 OUT がラッチを奪えないようにする（SSG C／ミキサ破壊）。 */
 	if (pc88VaIo_) {
 		switch (port) {
 		case 0x44: case 0xA8:
-			/* Latch + commit address. BPS tetrisva OPNA detect does
-			   OUT 44h,FFh / IN 45h and expects ym2608 ID code 01 — without
-			   Write(0) the chip address stays stale and [851A] never sets. */
+			/* 番地をラッチしてコミット。BPS tetrisva の OPNA 検出は OUT 44h,FFh / IN 45h で ym2608 ID コード 01 を期待 — Write(0) が無いとチップ番地が古く [851A] が立たない。 */
 			vaPc88LatchedAddr_ = data;
 			vaPc88PortHits_++;
 			if (chip_) {
@@ -2766,7 +2597,7 @@ void CHardPc98::PortOut(uint16_t port, uint8_t data)
 		case OPN_ADDR0: case OPN_DATA0:
 		case OPN_ADDR1: case OPN_DATA1:
 			vaPc98PortHits_++;
-			break; /* fall through — keep PC-98 path with re-assert */
+			break; /* フォールスルー — PC-98 経路を再アサートしたまま */
 		default:
 			break;
 		}
@@ -2833,9 +2664,7 @@ void CHardPc98::PortOut(uint16_t port, uint8_t data)
 		}
 		break;
 	case OPN_ADDR1:
-		/* On a SOUND ORCHESTRA these two ports are a whole second chip, not
-		   the OPNA's high bank: sending them to the OPN is what made the
-		   board sound like a plain OPN however the mode was selected. */
+		/* SOUND ORCHESTRA ではこの 2 ポートは OPNA ハイバンクではなく第 2 チップ全体。OPN へ送るとモード選択に関わらず素の OPN に聞こえた。 */
 		if (modeSorch_) {
 			if (opl_) opl_->Write(0, data);
 			opnLatchedAddrHi_ = data;
@@ -2890,7 +2719,7 @@ void CHardPc98::PortOut(uint16_t port, uint8_t data)
 	case HOST_P3 + 1: hostParam3_ = (hostParam3_ & 0x00ff) | ((uint16_t)data << 8); break;
 	case WOLF_SYNC0:
 	case 0xC0D0:
-		/* midiout / FMP -m: capture UART MIDI. Wolfteam FM: command bridge. */
+		/* midiout / FMP -m: UART MIDI をキャプチャ。Wolfteam FM: コマンドブリッジ */
 		if (modeMidi_ || mpuUart_ || port == 0xC0D0) {
 			MidiDataOut(data);
 			break;
@@ -2951,7 +2780,7 @@ void CHardPc98::PortOut(uint16_t port, uint8_t data)
 		break;
 	case PPI_CTRL:
 		if ((data & 0x80) == 0) {
-			/* 8255 bit set/reset: 0x06 clears bit3 (speaker on), 0x07 sets it. */
+			/* 8255 ビット set/reset: 0x06 が bit3 クリア（スピーカオン）、0x07 がセット */
 			const unsigned bit = (unsigned)((data >> 1) & 7);
 			if (data & 1)
 				ppiC_ = (uint8_t)(ppiC_ | (uint8_t)(1u << bit));
@@ -2966,7 +2795,7 @@ void CHardPc98::PortOut(uint16_t port, uint8_t data)
 	case VSYNC_ACK: vsyncPending_ = 0; break;
 	case IO_DELAY: break;
 	case SOUND86_ID:
-		/* Preserve Sound ID nibble; update mask/enhance bits (MAME mask_w). */
+		/* Sound ID ニブルは残し、mask/enhance ビットを更新（MAME mask_w） */
 		if (opnaMode)
 			sound86Mask_ = (uint8_t)(data & 0x03);
 		break;
@@ -2975,7 +2804,7 @@ void CHardPc98::PortOut(uint16_t port, uint8_t data)
 	case SOUND86_DAC_CTL:
 	case SOUND86_FIFO_DAT:
 	case SOUND86_MUTE:
-		/* Accept writes so probes don't fault; no soft PCM engine yet. */
+		/* プローブが故障しないよう書込を受ける。ソフト PCM エンジンはまだ無い */
 		if (opnaMode) {
 			if (port == SOUND86_FIFO_CTL) sound86FifoCtl_ = data;
 			else if (port == SOUND86_DAC_CTL) sound86DacCtl_ = data;
@@ -2986,6 +2815,7 @@ void CHardPc98::PortOut(uint16_t port, uint8_t data)
 	}
 }
 
+/* zip から ROM／曲データを載せる */
 int CHardPc98::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode)
 {
 	if (!fs || !ge) return 0;
@@ -3026,9 +2856,7 @@ int CHardPc98::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCo
 	WolfBridgeReset();
 	dosStubReady_ = 0;
 
-	/* Rhythm ROM before the DOS branch: ADPCM-A reads of an empty ROM decode
-	   into a wrapping accumulator ramp, so FMP/PMD drum tracks came out as
-	   sawtooth noise on every pc98dos title. */
+	/* DOS 分岐前のリズム ROM: 空 ROM の ADPCM-A 読はラップするアキュムレータランプに復号され、FMP/PMD ドラムが全 pc98dos タイトルでのこぎりノイズになった。 */
 	if (opnaMode && chip_)
 		CEmuLoadExternalYm2608Adpcm(chip_);
 
@@ -3040,7 +2868,7 @@ int CHardPc98::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCo
 		if (_stricmp(r->type, "code") != 0 && _stricmp(r->type, "binary") != 0
 			&& _stricmp(r->type, "string") != 0)
 			continue;
-		/* KOEI packs code as seg:off dword (0xSSSSOOOO); others use flat phys. */
+		/* KOEI はコードを seg:off dword（0xSSSSOOOO）。他は平坦物理 */
 		const unsigned off = Pc98RomPhys(r->offset);
 		if (off >= 0x200000u) continue;
 		unsigned sz = 0;
@@ -3058,8 +2886,7 @@ int CHardPc98::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCo
 		memcpy(mem + off, data, n);
 		if (r->name[0] && _strnicmp(r->name, "NOPNDRV", 7) == 0)
 			nopnDrv_ = 1;
-		/* DOFMD_98 and BRANM_98 share the INT 45 + host-0x11 play path
-		   (seg:off song ptr via 07D4/07D6). BRANM skips INT 14h. */
+		/* DOFMD_98 と BRANM_98 は INT 45 + host-0x11 再生経路を共有（07D4/07D6 経由 seg:off 曲 ptr）。BRANM は INT 14h を飛ばす。 */
 		if (r->name[0] && (_strnicmp(r->name, "DOFMD", 5) == 0
 			|| _strnicmp(r->name, "BRANM", 5) == 0))
 			dofmd_ = 1;
@@ -3067,13 +2894,13 @@ int CHardPc98::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCo
 			fmd98_ = 1;
 		if (r->name[0] && _stricmp(r->name, "RX.BIN") == 0)
 			rx98_ = 1;
-		/* Ys2 / Brandish-era Falcom OPN driver without RX.BIN glue name. */
+		/* Ys2 / Brandish 期 Falcom OPN ドライバ。RX.BIN 糊名は無い */
 		if (r->name[0] && (_stricmp(r->name, "2608.BIN") == 0
 			|| _stricmp(r->name, "2203.BIN") == 0
 			|| _stricmp(r->name, "10_005.BIN") == 0)
 			&& dataAddr_ <= 0 && fileSize_ > 0)
 			rx98_ = 1;
-		/* Falcom PROG.BIN glue: only when catalog dataaddr is set (no invent). */
+		/* Falcom PROG.BIN 糊: カタログ dataaddr があるときだけ（発明しない） */
 		if (data && n >= 0x90 && n <= 512 && dataAddr_ > 0 && fileSize_ > 0
 			&& r->name[0] && _stricmp(r->name, "PROG.BIN") == 0) {
 			prog98_ = 1;
@@ -3081,29 +2908,23 @@ int CHardPc98::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCo
 		}
 		if (r->name[0] && _strnicmp(r->name, "KOEI98", 6) == 0)
 			koei98_ = 1;
-		/* BirdySoft CAL/PAL/BEAST family: glue stub + OPN driver install INT60
-		   but never hook IRQ3 (IVT 0x0B). Play spins on wait-flag [DS:269B]
-		   until the relocated OPN ISR runs. Detect by stub/bin name. */
+		/* BirdySoft CAL/PAL/BEAST 族: 糊 stub + OPN ドライバが INT60 を入れるが IRQ3（IVT 0x0B）をフックしない。リロケ済み OPN ISR が走るまで play は待ちフラグ [DS:269B] でスピン。stub/bin 名で検出。 */
 		if (r->name[0] && (_strnicmp(r->name, "CAL", 3) == 0
 			|| _strnicmp(r->name, "PAL", 3) == 0
 			|| _strnicmp(r->name, "THANATOS", 8) == 0
 			|| _strnicmp(r->name, "BEAST", 5) == 0
 			|| _strnicmp(r->name, "BST3", 4) == 0))
 			cal98_ = 1;
-		/* Beast3: 64K OPN driver at 0xFC00; glue cmd0 uses AH!=0 to pick
-		   load (AH==0 is stop). Small title codes never take the load path. */
+		/* Beast3: 64K OPN ドライバ @0xFC00。糊 cmd0 は AH!=0 でロード選択（AH==0 は停止）。小さいタイトルコードはロード経路を取らない。 */
 		if (r->name[0] && (_strnicmp(r->name, "BST3", 4) == 0
 			|| _stricmp(r->name, "0FC00.BIN") == 0))
 			bst398_ = 1;
-		/* QueenSoft MADP: catalog binary at 0x100 plants INT40 → driver
-		   (AL-indexed API @0xA000/0x7000). Glue INT7F maps cmd→INT40 AL. */
+		/* QueenSoft MADP: カタログ binary @0x100 が INT40 → ドライバ（AL 添字 API @0xA000/0x7000）。糊 INT7F は cmd→INT40 AL。 */
 		if (r->name[0] && _strnicmp(r->name, "MADP", 4) == 0)
 			madp98_ = 1;
 		if (r->name[0] && _strnicmp(r->name, "N3GOLF", 6) == 0)
 			n3golf98_ = 1;
-		/* KSK DKS/FQ family: dks.bin/fq3.bin glue + BGMDK/BGMDRV @0x35000.
-		   INT7F cmd1 → INT69 AH=0; songs are size-prefixed banks; host 07D4/07D6
-		   are real-mode ES:BX (table/BSS). No catalog dataaddr → cmd1 never ran. */
+		/* KSK DKS/FQ 族: dks.bin/fq3.bin 糊 + BGMDK/BGMDRV @0x35000。INT7F cmd1 → INT69 AH=0。曲はサイズ前置バンク。ホスト 07D4/07D6 はリアルモード ES:BX（表/BSS）。カタログ dataaddr 無しだと cmd1 が走らなかった。 */
 		if (r->name[0] && (_stricmp(r->name, "DKS.BIN") == 0
 			|| _stricmp(r->name, "FQ3.BIN") == 0
 			|| _strnicmp(r->name, "BGMDK", 5) == 0
@@ -3111,17 +2932,14 @@ int CHardPc98::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCo
 			|| _strnicmp(r->name, "BGMFQ", 5) == 0
 			|| _strnicmp(r->name, "BGMDRV", 6) == 0))
 			dks98_ = 1;
-		/* Glodia MDPLAY.BIN (etembl/ragnrk/biblem2): INT7F play uses INT 4A/40.
-		   Driver installs INT40–4D and a PIT ISR, but the ISR is only written to
-		   IVT08 from a late path — ensure INT08 is hooked after boot. MDPLAYD
-		   (difrlm) already installs INT08 in init and must stay untouched. */
+		/* Glodia MDPLAY.BIN（etembl/ragnrk/biblem2）: INT7F 再生は INT 4A/40。ドライバは INT40–4D と PIT ISR を入れるが、ISR は遅い経路でしか IVT08 に書かれない — ブート後 INT08 フックを保証。MDPLAYD（difrlm）は init で既に INT08 を入れ、触ってはいけない。 */
 		if (r->name[0] && (_stricmp(r->name, "MDPLAY.BIN") == 0
 			|| _strnicmp(r->name, "MDPLAY", 6) == 0
 			|| _stricmp(r->name, "MDRIVE.BIN") == 0
 			|| _strnicmp(r->name, "MDRIVE", 6) == 0)
 			&& _strnicmp(r->name, "MDPLAYD", 7) != 0)
 			mdplay98_ = 1;
-		/* gulfwr nests boot as 1/000_BOOT — match by basename. */
+		/* gulfwr はブートを 1/000_BOOT にネスト — ベース名で一致 */
 		{
 			const char* bootBase = r->name;
 			const char* slash = strrchr(r->name, '/');
@@ -3129,10 +2947,7 @@ int CHardPc98::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCo
 			if (slash) bootBase = slash + 1;
 			if (r->name[0] && _stricmp(bootBase, "000_BOOT") == 0) {
 			wolfteam98_ = 1;
-			/* Discover relocated play-gate / flag / title BSS via d_98 opcode
-			   context. Sibling MU* boots keep the same pre/post bytes but move
-			   abs16 (gou 560C/062F/5EFE, zan2 57AA/062F/6E84, …). Writing the
-			   d_98-only 0662 assist into relocated boots can force silence. */
+			/* d_98 オペコード文脈からリロケ済み再生ゲート／フラグ／タイトル BSS を発見。兄弟 MU* ブートは同じ前後バイトだが abs16 が動く（gou 560C/062F/5EFE、zan2 57AA/062F/6E84…）。d_98 専用 0662 補助をリロケブートへ書くと無音を強制し得る。 */
 			wolfGateStop_ = 0x5B48;
 			wolfGatePlay_ = 0x5B5A;
 			wolfSongPtr_ = 0x5B5D;
@@ -3144,8 +2959,7 @@ int CHardPc98::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCo
 				static const uint8_t kPostPlay[] = { 0x33, 0xC0, 0xC3, 0x9D };
 				static const uint8_t kPreStop[] = { 0x5B, 0x58, 0x9D, 0xF8, 0xC3, 0x2E };
 				static const uint8_t kPostStop[] = { 0x07, 0x1F, 0x5F, 0x5E };
-				/* Classic: OUT 64 / POP ES / POP DS / POPA / IRET.
-				   dmdply: OUT 64 / POPA / POP DS / POP ES / IRET. */
+				/* 古典: OUT 64 / POP ES / POP DS / POPA / IRET。dmdply: OUT 64 / POPA / POP DS / POP ES / IRET */
 				static const uint8_t kFlagPost[] = { 0xE6, 0x64, 0x07, 0x1F, 0x61, 0xCF };
 				static const uint8_t kFlagPostAlt[] = { 0xE6, 0x64, 0x61, 0x1F, 0x07, 0xCF };
 				uint16_t gp = 0, gs = 0;
@@ -3161,8 +2975,7 @@ int CHardPc98::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCo
 						gs = (uint16_t)(data[p + 2] | (data[p + 3] << 8));
 				}
 				if (gs && gp) {
-					/* Canonical layout: play = stop+0x12, song far-ptr @stop+0x15.
-					   dmdply folds play into flagA+2 (060B) — still usable. */
+					/* 正規配置: play = stop+0x12、曲 far-ptr @stop+0x15。dmdply は play を flagA+2（060B）へ畳む — まだ使える。 */
 					wolfGateStop_ = gs;
 					wolfGatePlay_ = gp;
 					if ((uint16_t)(gp - gs) == 0x0012)
@@ -3170,7 +2983,7 @@ int CHardPc98::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCo
 					else
 						wolfSongPtr_ = (uint16_t)(gs + 0x15);
 				}
-				/* INT4C play-armed byte: C6 06 fa,FF / OUT 64h / … / IRET */
+				/* INT4C 再生武装バイト: C6 06 fa,FF / OUT 64h / … / IRET */
 				for (unsigned p = 0; p + 11 < n; p++) {
 					if (data[p] != 0xC6 || data[p + 1] != 0x06 || data[p + 4] != 0xFF)
 						continue;
@@ -3180,7 +2993,7 @@ int CHardPc98::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCo
 						break;
 					}
 				}
-				/* Title word: CMP [tw],AX / JE / MOV [tw],AX / C6 [fa+1],FF */
+				/* タイトル語: CMP [tw],AX / JE / MOV [tw],AX / C6 [fa+1],FF */
 				for (unsigned p = 0; p + 12 < n; p++) {
 					if (data[p] != 0x3B || data[p + 1] != 0x06 || data[p + 4] != 0x74)
 						continue;
@@ -3194,8 +3007,7 @@ int CHardPc98::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCo
 						break;
 					}
 				}
-				/* Song shadow buffer: MOV SI/DI,imm near INT 4C (AH=08 path).
-				   dmdply has no INT4C — detect REP STOSW clear of DI buffer. */
+				/* 曲シャドウバッファ: INT 4C 近くの MOV SI/DI,imm（AH=08 経路）。dmdply に INT4C は無い — DI バッファの REP STOSW クリアで検出。 */
 				for (unsigned p = 0; p + 12 < n; p++) {
 					if (data[p] != 0xBE && data[p] != 0xBF) continue;
 					const unsigned imm = (unsigned)data[p + 1] | ((unsigned)data[p + 2] << 8);
@@ -3224,9 +3036,7 @@ int CHardPc98::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCo
 		}
 	}
 
-	/* biblem2 OPN twin boots MAIN.EXE (CS=6000) and stays silent. Zip also
-	   ships etembl-identical mdplay.bin — stage it at 0x600 and boot CS=0060
-	   like ragnrk/etembl (MDDRV already at 0x10000; FMV at dataaddr). */
+	/* biblem2 OPN 双子は MAIN.EXE（CS=6000）をブートし無音のまま。zip は etembl 同一 mdplay.bin も同梱 — 0x600 にステージし ragnrk/etembl 同様 CS=0060 でブート（MDDRV は既に 0x10000、FMV は dataaddr）。 */
 	if (mdplay98_ && bootCs_ == 0x6000 && fs) {
 		unsigned sz = 0;
 		const unsigned char* stub = CEmuZipFsFind(fs, "mdplay.bin", &sz);
@@ -3237,9 +3047,7 @@ int CHardPc98::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCo
 		}
 	}
 
-	/* DOFMD_98.BIN boot: INT 45h (MSC init) then INT 14h, then hooks INT 7Fh.
-	   Without a BIOS serial stub INT 14h vector is 0000:0000 and boot never
-	   reaches the INT 7Fh install — park a lone IRET below the glue at 0x600. */
+	/* DOFMD_98.BIN ブート: INT 45h（MSC init）のあと INT 14h、続けて INT 7Fh をフック。BIOS シリアル stub が無いと INT 14h ベクタは 0000:0000 で INT 7Fh インストールに届かない — 糊の下 0x600 に単独 IRET を置く。 */
 	if (dofmd_) {
 		mem[0x500] = 0xCF;
 		mem[0x14 * 4 + 0] = 0x00;
@@ -3248,25 +3056,15 @@ int CHardPc98::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCo
 		mem[0x14 * 4 + 3] = 0x00;
 	}
 
-	/* Wolfteam d_98.bin: after CALL 464E / INT 4C AH=08 it walks a file-id
-	   list at 7000:0000 (LODSB / CMP AL,F9 / INT 4C AH=F0). Real game path
-	   loads that list via INT 43 AX=005F after FS mount (INT 43 AX=8000), but
-	   the stub patches 80D7→RET and skips mount — 7000 stays zeroed and boot
-	   spins forever, never reaching INT 7Fh install or PIT enable. Park a
-	   lone F9 terminator so the loop exits; TriggerPlay starts PIT + [5B5A].
+	/* Wolfteam d_98.bin: CALL 464E / INT 4C AH=08 のあと 7000:0000 のファイル id リストを歩く（LODSB / CMP AL,F9 / INT 4C AH=F0）。本物ゲーム経路は FS マウント（INT 43 AX=8000）後に INT 43 AX=005F でそのリストを載せるが、stub は 80D7→RET でマウントを飛ばす — 7000 はゼロのままブートが永久スピンし INT 7Fh インストールも PIT 許可も届かない。単独 F9 終端を置きループを抜ける。TriggerPlay が PIT + [5B5A] を開始。
 
-	   Also: CALL 464E → CALL 5A9A polls ports E0D0/E0D2; open-bus 0xFF makes
-	   TEST AL,40 spin. That hang is after INT 08 install, so the stub never
-	   returns to OUT 07E8=81. NOP the handshake to a single RET (shared
-	   across Wolfteam 000_BOOT builds that keep this helper near 5A9A —
-	   locate by the E0D2 busy-wait signature). */
+	   また CALL 464E → CALL 5A9A がポート E0D0/E0D2 を poll。オープンバス 0xFF は TEST AL,40 でスピン。そのハングは INT 08 インストール後なので stub が OUT 07E8=81 に戻らない。ハンドシェイクを 1 RET に NOP（このヘルパを 5A9A 近くに保つ Wolfteam 000_BOOT ビルド横断 — E0D2 ビジー待ちシグネチャで探す）。 */
 	if (wolfteam98_) {
-		/* MUSDRV streams standard MIDI out E0D0; bridge it to the OPN. */
+		/* MUSDRV は E0D0 へ標準 MIDI を出す。OPN へブリッジ */
 		wolfBridgeEnable_ = 1;
 		WolfBridgeReset();
 		mem[0x70000] = 0xF9;
-		/* Only RET the 464E handshake busy-wait (first hit). ISR delay stubs
-		   at 5B00+ are left intact and use WOLF_SYNC1=0 (not busy). */
+		/* 464E ハンドシェイクのビジー待ちだけ RET（最初のヒット）。5B00+ の ISR 遅延 stub は残し WOLF_SYNC1=0（非ビジー）。 */
 		static const uint8_t kSyncBusy[] = { 0xBA, 0xD2, 0xE0, 0xEC, 0xA8, 0x40, 0x75, 0xFB };
 		for (unsigned p = 0x600; p + 8 < 0x10000u; p++) {
 			if (memcmp(mem + p, kSyncBusy, sizeof(kSyncBusy)) == 0) {
@@ -3274,7 +3072,7 @@ int CHardPc98::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCo
 				break;
 			}
 		}
-		/* Prefer explicit MI* banks over incidental MF (suzaku BL50). */
+		/* 偶発 MF（suzaku BL50）より明示 MI* バンクを優先 */
 		int miBest = -1, miAny = -1;
 		for (int fi = 0; fi < fs->fileCount; fi++) {
 			const unsigned char* d = fs->files[fi].data;
@@ -3288,8 +3086,7 @@ int CHardPc98::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCo
 			const wchar_t* wslash = wcsrchr(wfn, L'/');
 			if (!wslash) wslash = wcsrchr(wfn, L'\\');
 			if (wslash) wbase = wslash + 1;
-			/* Prefer real instrument banks (MM, MD, OPNM). Tiny MI stubs
-			   (zanyks 0B8_MI01 at 1K) must not beat MM01. */
+			/* 本物音色バンク（MM、MD、OPNM）を優先。小さい MI stub（zanyks 0B8_MI01 @1K）が MM01 に勝ってはいけない。 */
 			if (wcsstr(wbase, L"_MM") || wcsstr(wbase, L"_MD")
 				|| wcsstr(wbase, L"OPNM")
 				|| (wcsstr(wbase, L"_MI") && sz >= 2048u)) {
@@ -3305,8 +3102,7 @@ int CHardPc98::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCo
 			memcpy(mem + 0x90000, d, nMi);
 			wolfMiSeg_ = 0x9000;
 		} else {
-			/* apros ships songs only — plant a minimal MF header so INT4C
-			   AH=00 / bank init has a non-bogus instrument block. */
+			/* apros は曲だけ同梱 — INT4C AH=00／バンク init が偽でない音色ブロックを持つよう最小 MF ヘッダを植える。 */
 			static const uint8_t kMinMf[] = {
 				'M', 'F', 0x01, 0x00, 0x20, 0x00, 0x00, 0x00,
 				0x18, 0x00, 0x00, 0x00, 0x00, 0x28, 0x00, 0x00
@@ -3318,31 +3114,22 @@ int CHardPc98::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCo
 
 	PlantPc98BiosMap(mem);
 
-	/* QueenSoft MADP: INT40 is an AL-indexed API (not the OPN ISR). Boot
-	   glue INT40 AL=19 TESTs ES:[0501] bit3 (FM present) before programming
-	   YM — plant before CPU start. Play INT7F maps cmd→AL=1D/1B. */
+	/* QueenSoft MADP: INT40 は AL 添字 API（OPN ISR ではない）。ブート糊 INT40 AL=19 は YM 組の前に ES:[0501] bit3（FM あり）を TEST — CPU 開始前に植える。再生 INT7F は cmd→AL=1D/1B。 */
 	if (madp98_)
 		mem[0x501] = (uint8_t)(mem[0x501] | 0x08);
 
-	/* SORC98 (and similar bootcs stubs): after CALL BIOS init they idle on
-	   INT 18h (AH=98h). Catalog BIOS never hooks INT 18 — vector stays
-	   0000:0000 and the first idle iteration executes IVT as code, flipping
-	   handler segments to FFFF. Park IRET at 0x510 before CPU start. */
+	/* SORC98（と同種 bootcs stub）: CALL BIOS init のあと INT 18h（AH=98h）でアイドル。カタログ BIOS は INT 18 をフックせずベクタは 0000:0000 のまま。最初のアイドル反復が IVT をコード実行しハンドラセグメントを FFFF にする。CPU 開始前に 0x510 へ IRET。 */
 	{
 		mem[0x510] = 0xCF;
 		mem[0x18 * 4 + 0] = 0x10;
 		mem[0x18 * 4 + 1] = 0x05;
 		mem[0x18 * 4 + 2] = 0x00;
 		mem[0x18 * 4 + 3] = 0x00;
-		/* Same trap one vector along: a rip has no floppy, so a driver that
-		   calls the disk BIOS (Telenet VIS reads a 256-byte sector before it
-		   will start) otherwise runs the garbage IVT as code. Report "no
-		   error" — CF is cleared in the caller's pushed flags — because the
-		   callers treat a failed read as a fatal disk error. */
+		/* 1 ベクタ先も同じ罠: リップにフロッピーは無く、ディスク BIOS を呼ぶドライバ（Telenet VIS は開始前に 256 バイトセクタを読む）はさもなくばゴミ IVT をコード実行。「エラー無し」を報告 — CF は呼び出し側の push 済みフラグでクリア。失敗読を致命ディスクエラーと扱うため。 */
 		static const uint8_t kDiskStub[] = {
 			0x55,                    /* push bp                */
 			0x89, 0xE5,              /* mov  bp,sp             */
-			0x83, 0x66, 0x06, 0xFE,  /* and  word [bp+6],0FFFE */
+			0x83, 0x66, 0x06, 0xFE,  /* and word [bp+6],0FFFE（フラグ CF クリア） */
 			0x5D,                    /* pop  bp                */
 			0x30, 0xE4,              /* xor  ah,ah             */
 			0xCF                     /* iret                   */
@@ -3354,14 +3141,8 @@ int CHardPc98::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCo
 		mem[0x1B * 4 + 3] = 0x00;
 	}
 
-	/* Falcom 00BIOS / PR.* (ys3/xana2/…, catalog dummysndrom=1): second boot
-	   CALL reads A000:3FEE and word [0536], then only runs FM init when the
-	   derived flag at [0702] is non-zero. Zeroed RAM skips OPN setup entirely
-	   (INT51/52 stay inert, opnW=0). Plant the BIOS equipment bit that the
-	   probe tests (bit2 of [0536]) so FM init runs like a machine with a
-	   sound board — same role as hoot's dummysndrom.
-	   xana2 PR.NO0/PR.NO5/xana2e also require A000:0FEE bit3 set; without it
-	   they take the no-FM path and never plant INT14/OPN. Keep bit0 for ys3. */
+	/* Falcom 00BIOS / PR.*（ys3/xana2/…、カタログ dummysndrom=1）: 2 回目のブート CALL が A000:3FEE と word [0536] を読み、導出フラグ [0702] が非 0 のときだけ FM init を走る。ゼロ RAM は OPN セットアップを全部飛ばす（INT51/52 は inert、opnW=0）。プローブが見る BIOS 装備ビット（[0536] bit2）を植え、音源基板あり機と同じく FM init が走る — hoot の dummysndrom と同じ役割。
+	   xana2 PR.NO0/PR.NO5/xana2e は A000:0FEE bit3 も必須。無いと no-FM 経路を取り INT14/OPN を植えない。ys3 用に bit0 を残す。 */
 	if (dummySndRom_ || (bootCs_ == 0 && bootIp_ == 0x0600)) {
 		mem[0x536] = (uint8_t)(mem[0x536] | 0x04);
 		if (0xA0000u + 0x3FEEu < 0x200000u)
@@ -3373,15 +3154,14 @@ int CHardPc98::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCo
 	np2_setextsize(0);
 	np2_set_v30(0);
 
-	/* Honor bootcs=0 when bootip is set (SORC98: CS=0000 IP=F000 → phys 0xF000).
-	   Only default CS to 0x60 when both bootcs and bootip are unset/zero. */
+	/* bootip があるとき bootcs=0 を尊重（SORC98: CS=0000 IP=F000 → 物理 0xF000）。bootcs と bootip が両方未設定／0 のときだけ CS 既定を 0x60。 */
 	uint16_t cs = (uint16_t)((bootCs_ != 0 || bootIp_ != 0) ? bootCs_ : 0x0060);
 	uint16_t ip = (uint16_t)bootIp_;
 	np2_set_cs_ip(cs, ip);
 	np2_set_ss_sp(0x1000, 0xFFFE);
 	np2_reg_set(NP2_R_DS, cs);
 	np2_reg_set(NP2_R_ES, cs);
-	np2_reg_set(NP2_R_FLAGS, 0x0202); /* IF set */
+	np2_reg_set(NP2_R_FLAGS, 0x0202); /* IF セット（割り込み許可） */
 
 	extSong_ = (uint16_t)(titleCode & 0xffff);
 	extParam_ = (uint16_t)((titleCode >> 16) & 0xffff);
@@ -3389,7 +3169,7 @@ int CHardPc98::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCo
 	stubState_ = 0;
 	cpuCycles_ = 0;
 	opnPumpResidual_ = 0;
-	picMask_ = 0x00; /* unmask all for bootcs drivers that never program PIC */
+	picMask_ = 0x00; /* PIC を組まない bootcs ドライバ用に全マスク解除 */
 	slavePicMask_ = 0x00;
 	opnInService_ = 0;
 	g_opnIsrSs = 0;
@@ -3402,6 +3182,7 @@ int CHardPc98::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCo
 	return 1;
 }
 
+/* DosStripHash の実装 */
 static void DosStripHash(const char* in, char* out, int outCap)
 {
 	if (!out || outCap <= 0) return;
@@ -3418,6 +3199,7 @@ static void DosStripHash(const char* in, char* out, int outCap)
 	out[j] = 0;
 }
 
+/* DosSplitCmd の実装 */
 static void DosSplitCmd(const char* cmd, char* name, int nameCap, char* tail, int tailCap)
 {
 	if (name && nameCap > 0) name[0] = 0;
@@ -3438,8 +3220,7 @@ static void DosSplitCmd(const char* cmd, char* name, int nameCap, char* tail, in
 		strncpy_s(tail, (size_t)tailCap, t, _TRUNCATE);
 }
 
-/* CONFIG `mmd.sys /f12 4096` — `/f` is a switch, not a path separator.
-   Stem is the first whitespace token; only then take the last \/: in it. */
+/* CONFIG `mmd.sys /f12 4096` — `/f` はスイッチでありパス区切りではない。stem は最初の空白トークン。そのあと最後の \\/: だけ取る。 */
 static void DosCfgFileStem(const char* in, char* out, int outCap)
 {
 	if (!out || outCap <= 0) return;
@@ -3460,6 +3241,7 @@ static void DosCfgFileStem(const char* in, char* out, int outCap)
 	out[n] = 0;
 }
 
+/* DosIsEngineName の実装 */
 static int DosIsEngineName(const char* name)
 {
 	char stem[DOS98_NAME];
@@ -3473,11 +3255,11 @@ static int DosIsEngineName(const char* name)
 		|| _stricmp(ext, ".SYS") == 0;
 }
 
+/* CHardPc98::MaterializeDosFiles の実装 */
 void CHardPc98::MaterializeDosFiles(CEmuZipFs* fs, const CEmuGameEntry* ge)
 {
 	if (!fs || !ge) return;
-	/* Engines first so a 256+ song list cannot fill files_[] before the
-	   glue COM/EXE is copied (night_s USMD: 132 files + 130 conin). */
+	/* エンジンを先に。256+ 曲リストが glue COM/EXE コピー前に files_[] を埋めないように（night_s USMD: 132 ファイル + 130 conin）。 */
 	for (int pass = 0; pass < 2; pass++) {
 	for (int i = 0; i < ge->romCount; i++) {
 		const CEmuRomEntry* r = &ge->rom[i];
@@ -3490,9 +3272,7 @@ void CHardPc98::MaterializeDosFiles(CEmuZipFs* fs, const CEmuGameEntry* ge)
 		unsigned sz = 0;
 		char stem[96];
 		DosCfgFileStem(r->name, stem, (int)sizeof(stem));
-		/* Stem first: `MMD2.SYS 4096` used to ZipFsFind the CONFIG string
-		   and the no-ext fallback returned mmd2.com (same stem, earlier
-		   zip member), clobbering the type=file SYS image. */
+		/* stem を先に: `MMD2.SYS 4096` は CONFIG 文字列を ZipFsFind し、拡張子無しフォールバックが mmd2.com（同じ stem、先の zip メンバ）を返し type=file SYS イメージを壊した。 */
 		const unsigned char* data = NULL;
 		if (stem[0])
 			data = CEmuZipFsFind(fs, stem, &sz);
@@ -3501,8 +3281,7 @@ void CHardPc98::MaterializeDosFiles(CEmuZipFs* fs, const CEmuGameEntry* ge)
 			data = CEmuZipFsFind(fs, r->name, &sz);
 		unsigned char donorBuf[256 * 1024];
 		unsigned donorSz = 0;
-		/* Song-only zips (gdm_mo/guyna/kizuato/nekoex) omit PMD_98.COM even
-		   though the catalog lists it — pull the driver from a sibling pack. */
+		/* 曲のみ zip（gdm_mo/guyna/kizuato/nekoex）はカタログに PMD_98.COM があっても省略 — 兄弟パックからドライバを取る。 */
 		if ((!data || !sz) && fs->zipPath[0] && DosIsEngineName(r->name)) {
 			char base[DOS98_NAME];
 			DosCfgFileStem(r->name, base, (int)sizeof(base));
@@ -3536,6 +3315,7 @@ void CHardPc98::MaterializeDosFiles(CEmuZipFs* fs, const CEmuGameEntry* ge)
 	}
 }
 
+/* CHardPc98::BindDosRomHandles の実装 */
 void CHardPc98::BindDosRomHandles(const CEmuGameEntry* ge)
 {
 	if (!ge) return;
@@ -3544,7 +3324,7 @@ void CHardPc98::BindDosRomHandles(const CEmuGameEntry* ge)
 		if (_stricmp(r->type, "file") != 0 && _stricmp(r->type, "conin") != 0)
 			continue;
 		const int off = r->offset;
-		/* Handles go up to DOS98_HANDLE_MAX-1 (fc98v12 songs past 0x30). */
+		/* ハンドルは DOS98_HANDLE_MAX-1 まで（fc98v12 曲は 0x30 超） */
 		if (off < 0 || off >= DOS98_HANDLE_MAX) continue;
 		const char* base = r->name;
 		for (const char* p = r->name; *p; p++) {
@@ -3553,8 +3333,7 @@ void CHardPc98::BindDosRomHandles(const CEmuGameEntry* ge)
 		}
 		if (_stricmp(r->type, "conin") == 0) {
 			dos_.SetHandleText((uint16_t)off, base);
-			/* hoot conin@0x10 is stdin (AH=3F BX=0), not DOS handle 0x10.
-			   cplay still binds the title-numbered handle above. */
+			/* hoot conin@0x10 は stdin（AH=3F BX=0）であり DOS ハンドル 0x10 ではない。cplay はまだ上のタイトル番号ハンドルをバインド。 */
 			if (off == 0x10)
 				dos_.SetHandleText(0, base);
 		} else
@@ -3562,6 +3341,7 @@ void CHardPc98::BindDosRomHandles(const CEmuGameEntry* ge)
 	}
 }
 
+/* DosShellStarts の実装 */
 static int DosShellStarts(const CEmuGameEntry* ge, const char* const* prefixes)
 {
 	if (!ge || !prefixes) return 0;
@@ -3578,18 +3358,14 @@ static int DosShellStarts(const CEmuGameEntry* ge, const char* const* prefixes)
 	return 0;
 }
 
+/* FmxDosShell の実装 */
 static int FmxDosShell(const CEmuGameEntry* ge)
 {
 	static const char* kFmx[] = { "FMX", "fmx", NULL };
 	return DosShellStarts(ge, kFmx);
 }
 
-/* FMX 3.10 (lemmona Ver3.10L) plants a one-shot INT08 at CS:3660 that
-   measures PIT then OUT 02h |= 1. IRQ0 is masked at BootDos (0xFF), so
-   that ISR never runs, the swap to the real sequencer at CS:1D60 never
-   happens, and play is FM_TONE dumps with keyOn=0. Keep IRQ0 live for
-   FMX shells. FMX 3.91 (v_btr CS:2470) already PLAYS with IRQ0 masked
-   — drop the keep after shells so its tempo/window stay as they were. */
+/* FMX 3.10（lemmona Ver3.10L）は CS:3660 にワンショット INT08 を植え、PIT を測って OUT 02h |= 1。BootDos で IRQ0 はマスク（0xFF）なのでその ISR は走らず、本物シーケンサ CS:1D60 への入替が起きず、再生は keyOn=0 の FM_TONE ダンプ。FMX シェルでは IRQ0 を生かす。FMX 3.91（v_btr CS:2470）は IRQ0 マスクのまま既に PLAYS — シェル後に keep を落としテンポ／窓を当時のまま。 */
 static void FmxArmPitIrq0(const CEmuGameEntry* ge, int dropIf391)
 {
 	s_fmxKeepIrq0 = 0;
@@ -3607,6 +3383,7 @@ static void FmxArmPitIrq0(const CEmuGameEntry* ge, int dropIf391)
 		s_fmxKeepIrq0 = 0;
 }
 
+/* FmxKick310Play の実装 */
 static void FmxKick310Play(uint8_t* mem, CEmuDos98* dos, const char* song)
 {
 	if (!mem || !s_fmxKeepIrq0)
@@ -3631,18 +3408,15 @@ static void FmxKick310Play(uint8_t* mem, CEmuDos98* dos, const char* song)
 	}
 	mem[b + 0x281C] = 0;
 	mem[b + 0x2849] = 2;
-	/* 18E5/cmd16 walk [2868] as the song base. File BSS is 0 until init
-	   `MOV [2868],2EC0` at CS:3398; force it to the Kick buffer. */
+	/* 18E5/cmd16 は [2868] を曲基点として歩く。ファイル BSS は init `MOV [2868],2EC0` @CS:3398 まで 0。Kick バッファへ強制。 */
 	mem[b + 0x2868] = 0xC0;
 	mem[b + 0x2869] = 0x2E;
-	/* Init 30E2 stores YM2608 188h/18Ah here. File BSS is 0, so 1A40
-	   OUT DX,[2862] hits port 0 (PIC) and cmd16 never reaches the chip. */
+	/* Init 30E2 は YM2608 188h/18Ah をここに格納。ファイル BSS は 0 なので 1A40 OUT DX,[2862] がポート 0（PIC）に当たり、cmd16 がチップに届かない。 */
 	mem[b + 0x2860] = 0x88;
 	mem[b + 0x2861] = 0x01;
 	mem[b + 0x2862] = 0x8A;
 	mem[b + 0x2863] = 0x01;
-	/* INT08 1D60 is the beep PIT seq (1F08 / OUT 37h). FM is INT14 1BB4
-	   (AH=25 AL=[0118]=14h) calling 1D88 on YM Timer B. */
+	/* INT08 1D60 は beep PIT シーケンス（1F08 / OUT 37h）。FM は INT14 1BB4（AH=25 AL=[0118]=14h）が YM Timer B で 1D88 を呼ぶ。 */
 	if (mem[b + 0x1BB4] == 0x60) {
 		mem[0x14 * 4 + 0] = 0xB4;
 		mem[0x14 * 4 + 1] = 0x1B;
@@ -3651,21 +3425,19 @@ static void FmxKick310Play(uint8_t* mem, CEmuDos98* dos, const char* song)
 	}
 	mem[b + 0x281B] = (uint8_t)(mem[b + 0x281B] | 1u);
 	mem[b + 0x281F] = 0x80;
-	/* FMXP.COM INT 60: dispatcher `MOV AX,[BP+12]` is already AX
-	   (PUSHA/DS/ES). Do not patch that to [BP+18] (FLAGS). */
+	/* FMXP.COM INT 60: ディスパッチャ `MOV AX,[BP+12]` は既に AX（PUSHA/DS/ES）。それを [BP+18]（FLAGS）にパッチしない。 */
 	mem[0x60 * 4 + 0] = 0x4E;
 	mem[0x60 * 4 + 1] = 0x16;
 	mem[0x60 * 4 + 2] = (uint8_t)(seg & 0xff);
 	mem[0x60 * 4 + 3] = (uint8_t)(seg >> 8);
 }
 
+/* Fmx310EnableYmTimer の実装 */
 static void Fmx310EnableYmTimer(CChip* chip)
 {
 	if (!chip)
 		return;
-	/* 3310: YM 24h=5, 25h=0, 27h=3Fh (Timer A+B load/IRQ). FM seq 1D88
-	   runs on Timer B (status bit1); also program 26h so bit1 actually
-	   rises. */
+	/* 3310: YM 24h=5、25h=0、27h=3Fh（Timer A+B ロード/IRQ）。FM seq 1D88 は Timer B（status bit1）。bit1 が実際に上がるよう 26h も組む。 */
 	chip->Write(0, 0x25);
 	chip->Write(1, 0x00);
 	chip->Write(0, 0x24);
@@ -3676,6 +3448,7 @@ static void Fmx310EnableYmTimer(CChip* chip)
 	chip->Write(1, 0x3F);
 }
 
+/* FmxPlantInt60FromPit の実装 */
 static void FmxPlantInt60FromPit(uint8_t* mem)
 {
 	if (!mem || !s_fmxKeepIrq0)
@@ -3692,6 +3465,7 @@ static void FmxPlantInt60FromPit(uint8_t* mem)
 	mem[0x60 * 4 + 3] = (uint8_t)(seg >> 8);
 }
 
+/* Fmx310ArmSeq の実装 */
 static void Fmx310ArmSeq(uint8_t* mem, uint8_t latch281c, uint16_t ax)
 {
 	if (!mem || !s_fmxKeepIrq0)
@@ -3705,10 +3479,7 @@ static void Fmx310ArmSeq(uint8_t* mem, uint8_t latch281c, uint16_t ax)
 	const unsigned b = seg << 4;
 	if (b + 0x2EC2u >= 0x200000u)
 		return;
-	/* Song at CS:2EC0 (Kick memcpy / FMXP AH=3F).
-	   cmd16 186F: instruments via 22C7 / 1A40 (needs [2860]=188h).
-	   cmd21 18E5: fills ISR 2A40 pointers then 196D arms PIT beep.
-	   After cmd21, clear [2822] so INT08 1F08 stays quiet; FM is INT14. */
+	/* 曲は CS:2EC0（Kick memcpy / FMXP AH=3F）。cmd16 186F: 22C7 / 1A40 経由の音色（[2860]=188h が要る）。cmd21 18E5: ISR 2A40 ポインタを埋め 196D が PIT beep を武装。cmd21 後 [2822] をクリアし INT08 1F08 を静かにする。FM は INT14。 */
 	if (mem[b + 0x2EC0] == 0xff && mem[b + 0x2EC1] == 0xff)
 		return;
 	mem[b + 0x281C] = latch281c;
@@ -3726,6 +3497,7 @@ static void Fmx310ArmSeq(uint8_t* mem, uint8_t latch281c, uint16_t ax)
 		mem[b + 0x2822] = 0;
 }
 
+/* Fmx310Int60Play の実装 */
 static int Fmx310Int60Play()
 {
 	uint8_t* mem = np2_mem();
@@ -3735,7 +3507,7 @@ static int Fmx310Int60Play()
 		| ((unsigned)mem[0x08 * 4 + 1] << 8);
 	if (off08 != 0x1D60)
 		return 0;
-	/* 3.10 INT 60 was BH (saved BX); Kick patches that to AH. AX=0 is play. */
+	/* 3.10 INT 60 は BH（保存 BX）。Kick はそれを AH にパッチ。AX=0 が再生 */
 	np2_reg_set(NP2_R_FLAGS,
 		(uint16_t)(np2_reg_get(NP2_R_FLAGS) | 0x0200));
 	np2_reg_set(NP2_R_DX, 0x2EC0);
@@ -3745,6 +3517,7 @@ static int Fmx310Int60Play()
 	return 1;
 }
 
+/* ValkyWantArm の実装 */
 static int ValkyWantArm(const CEmuGameEntry* ge, CEmuDos98* dos)
 {
 	static const char* kValky[] = { "VALKY_98", "valky", NULL };
@@ -3758,12 +3531,7 @@ static int ValkyWantArm(const CEmuGameEntry* ge, CEmuDos98* dos)
 static void ValkyReplantIsr(uint8_t* mem);
 static void ValkyFixFarApiFromGlue(uint8_t* mem);
 
-/* Name-load ADVH (EB 06 USDdrv, no "03 30"): install writes mov ax,CS+0x33
-   for bind/data while the OEM ISR keeps mov ds,cs. watagolf finishes a
-   +0x330 offset reloc (ISR ~069B); name-load never does. At BootDos, retarget
-   bind-path immediates (off>=0x800) to the live INT F1 CS and plant INT0B.
-   Early CS+0x33 refs (@034B/@0442) stay — AL=0 needs them. AL=1 still walks
-   channel slots through @04AB, so TriggerPlay save/restores the ISR prologue. */
+/* 名前ロード ADVH（EB 06 USDdrv、"03 30" 無し）: インストールは bind/data 用に mov ax,CS+0x33 を書くが OEM ISR は mov ds,cs のまま。watagolf は +0x330 オフセットリロケを終える（ISR 約 069B）。名前ロードはしない。BootDos で bind 経路即値（off>=0x800）をライブ INT F1 CS へ付け替え INT0B を植える。早い CS+0x33 参照（@034B/@0442）は残す — AL=0 が要る。AL=1 はまだ @04AB でチャネル枠を歩くので、TriggerPlay が ISR プロローグを保存／復元。 */
 static int AdvhNormalizeNameLoadResident(uint8_t* mem, unsigned sF1)
 {
 	if (!mem || !sF1 || sF1 == (unsigned)DOS98_TRAMP_SEG)
@@ -3789,12 +3557,11 @@ static int AdvhNormalizeNameLoadResident(uint8_t* mem, unsigned sF1)
 	}
 	if (nBind < 2)
 		return 0;
-	/* Do NOT memcpy install bytes to +0x330 (corrupts name-load BSS).
-	   Do NOT plant INT0B yet: thin AL=1 channel state + early OEM ISR
-	   key-offs the bind notes. Bind→CS retarget alone restores audible AL=1. */
+	/* インストールバイトを +0x330 へ memcpy しない（名前ロード BSS を壊す）。INT0B はまだ植えない: 薄い AL=1 チャネル状態＋早い OEM ISR が bind ノートをキーオフ。bind→CS 付け替えだけで可聴 AL=1 が戻る。 */
 	return 1;
 }
 
+/* AdvhApplyResidentFixups の実装 */
 static void AdvhApplyResidentFixups(uint8_t* mem, unsigned sF1)
 {
 	const unsigned fb = sF1 << 4;
@@ -3824,7 +3591,7 @@ static void AdvhApplyResidentFixups(uint8_t* mem, unsigned sF1)
 				}
 			}
 		}
-		/* CS: jmp [reg+disp16] → command tables 1340/1380 (+0x330). */
+		/* CS: jmp [reg+disp16] → コマンド表 1340/1380（+0x330） */
 		if (mem[fb + off] == 0x2E && mem[fb + off + 1] == 0xFF
 			&& (mem[fb + off + 2] == 0xA5 || mem[fb + off + 2] == 0x95)) {
 			const unsigned a = (unsigned)mem[fb + off + 3] | ((unsigned)mem[fb + off + 4] << 8);
@@ -3835,7 +3602,7 @@ static void AdvhApplyResidentFixups(uint8_t* mem, unsigned sF1)
 			}
 		}
 	}
-	/* Abs16 data refs into the pre-reloc island (gate, flags) → +0x330. */
+	/* リロケ前島への Abs16 データ参照（ゲート、フラグ）→ +0x330 */
 	for (unsigned off = 0x200; off + 4 < 0x2800u && fb + off + 4 < 0x200000u; off++) {
 		const uint8_t b0 = mem[fb + off];
 		if (b0 == 0xA0 || b0 == 0xA2 || b0 == 0xA1 || b0 == 0xA3) {
@@ -3868,8 +3635,7 @@ static void AdvhApplyResidentFixups(uint8_t* mem, unsigned sF1)
 	}
 }
 
-/* olteus MAP keeps `A:\MUSIC F.MUS` / `.MTB` (space = default). Digit-poke
-   both the VFS EXE (before LoadExe) and RAM so 01 vs 02 open different files. */
+/* olteus MAP は `A:\MUSIC F.MUS` / `.MTB` を保つ（空白 = 既定）。数字 poke は LoadExe 前の VFS EXE と RAM の両方。01 vs 02 が別ファイルを開く。 */
 static void CEmuPc98PokeOlteusMusicName(uint8_t* p, unsigned n, char dig, char fp)
 {
 	if (!p || n < 12)
@@ -3891,10 +3657,11 @@ static void CEmuPc98PokeOlteusMusicName(uint8_t* p, unsigned n, char dig, char f
 	}
 }
 
+/* CHardPc98::SelectedDosSong の実装 */
 const char* CHardPc98::SelectedDosSong(const CEmuGameEntry* ge, unsigned titleCode) const
 {
 	if (!ge) return NULL;
-	/* olteus_va: all songs are file@-1; MAP builds A:\MUSIC#F/P.MUS from title. */
+	/* olteus_va: 全曲は file@-1。MAP はタイトルから A:\MUSIC#F/P.MUS を組む */
 	static char olteusSong[16];
 	static const char* kOlteusSong[] = { "olteus", NULL };
 	if (DosShellStarts(ge, kOlteusSong)) {
@@ -3923,7 +3690,7 @@ const char* CHardPc98::SelectedDosSong(const CEmuGameEntry* ge, unsigned titleCo
 			return base;
 		}
 	}
-	/* cplay98/mdrv list song banks as conin (offset == title low byte). */
+	/* cplay98/mdrv は曲バンクを conin（offset == タイトル下位バイト）として列挙 */
 	for (int i = 0; i < ge->romCount; i++) {
 		const CEmuRomEntry* r = &ge->rom[i];
 		if (_stricmp(r->type, "conin") != 0) continue;
@@ -3937,9 +3704,7 @@ const char* CHardPc98::SelectedDosSong(const CEmuGameEntry* ge, unsigned titleCo
 			continue;
 		return base;
 	}
-	/* Bio_100%/BGML_98 and similar: one shared bank listed as conin@0x10
-	   (hoot stdin) plus type=file@-1. Title codes pick a track inside that
-	   bank, so no rom offset equals the title byte. */
+	/* Bio_100%/BGML_98 等: 共有バンク 1 本が conin@0x10（hoot stdin）＋ type=file@-1。タイトルコードがそのバンク内トラックを選ぶので、rom offset がタイトルバイトと等しいものは無い。 */
 	{
 		int nConin = 0;
 		const char* only = NULL;
@@ -3962,10 +3727,7 @@ const char* CHardPc98::SelectedDosSong(const CEmuGameEntry* ge, unsigned titleCo
 	return NULL;
 }
 
-/* SYNTH_98 / HHD / similar: rom offset 5 is the overlay (S20.BIN), not
-   the song. Rebinding handle 5 to the PAI at TriggerPlay is harmless once
-   the overlay has TSR'd, but keep the catalog mapping for any AH=3F BX=5
-   that still runs. */
+/* SYNTH_98 / HHD 等: rom offset 5 は曲ではなくオーバーレイ（S20.BIN）。オーバーレイが TSR したあと TriggerPlay でハンドル 5 を PAI に再バインドしても害は無いが、まだ走る AH=3F BX=5 用にカタログマップを残す。 */
 static int DosHandleBoundToOtherFile(const CEmuGameEntry* ge, int handle, const char* songFile)
 {
 	if (!ge || handle < 0)
@@ -3988,21 +3750,14 @@ static int DosHandleBoundToOtherFile(const CEmuGameEntry* ge, int handle, const 
 	return 0;
 }
 
+/* CHardPc98::BindDosTriggerSong の実装 */
 void CHardPc98::BindDosTriggerSong(const CEmuGameEntry* ge, unsigned titleCode)
 {
 	const char* sf = SelectedDosSong(ge, titleCode);
-	/* hootrip: cplay/fplay open by ASCIIZ name; mdrv_98/mddrv_98 same (INT D2 AL=2).
-	   Do NOT match bare mdrv98+mlp_hoot (content on handle 0). */
+	/* hootrip: cplay/fplay は ASCIIZ 名で開く。mdrv_98/mddrv_98 も同じ（INT D2 AL=2）。素の mdrv98+mlp_hoot（内容はハンドル 0）には一致させない。 */
 	static const char* kCplay[] = { "cplay", "fplay", NULL };
-	/* mlalf_98 is deliberately absent: its INT 7F cmd0 reads handle 0 and
-	   hands the buffer straight to the ANNEX driver, which starts with
-	   `CMP WORD ES:[SI],1` — every .MLO song begins 01 00, so the driver
-	   wants the song bytes and rejects a filename outright. */
-	/* PLAY5_98 is not here: INT7F cmd0 AH=3F-reads handle 0 into a buffer
-	   and INT F2 AX=0 loads those bytes. Filename-text on handle 0 left
-	   PLAY5/PLAY3/MUSIC + PLAY5_98 silent.
-	   IBGMP.COM the same: cmd0 AH=3F-reads handle 0 then INT52 AX=200.
-	   Prefix "ibgm" also matches IBGMP, so it must not open-by-name. */
+	/* mlalf_98 は意図的に不在: INT 7F cmd0 はハンドル 0 を読みバッファを ANNEX ドライバへ渡す。ドライバは `CMP WORD ES:[SI],1` で始まる — 全 .MLO 曲は 01 00 始まりなので曲バイトが欲しく、ファイル名は outright 拒否。 */
+	/* PLAY5_98 はここに居ない: INT7F cmd0 はハンドル 0 を AH=3F 読してバッファへ、INT F2 AX=0 がそのバイトをロード。ハンドル 0 のファイル名テキストは PLAY5/PLAY3/MUSIC + PLAY5_98 を無音にした。IBGMP.COM も同じ: cmd0 がハンドル 0 を AH=3F 読して INT52 AX=200。接頭 "ibgm" は IBGMP にも一致するので名前開きしてはいけない。 */
 	static const char* kOpenName[] = {
 		"cplay", "fplay", "musdrv", "mbmusp", "mdrv_9", "mddrv_9",
 		"mlfplay", "bp", NULL
@@ -4024,8 +3779,7 @@ void CHardPc98::BindDosTriggerSong(const CEmuGameEntry* ge, unsigned titleCode)
 	};
 	const int cplayFamily = DosShellStarts(ge, kCplay);
 	int opensByName = cplayFamily || DosShellStarts(ge, kOpenName);
-	/* famistava conin: INT7F AH=3F reads the ASCIIZ name from handle 0, then
-	   AH=3D opens the real file — must not overwrite with song bytes. */
+	/* famistava conin: INT7F AH=3F がハンドル 0 から ASCIIZ 名を読み、AH=3D が本物ファイルを開く — 曲バイトで上書きしてはいけない。 */
 	if (sf && ge && !opensByName) {
 		const int low = (int)(titleCode & 0xff);
 		int nConin = 0, stdinConin = 0;
@@ -4048,17 +3802,11 @@ void CHardPc98::BindDosTriggerSong(const CEmuGameEntry* ge, unsigned titleCode)
 				break;
 			}
 		}
-		/* Shared-bank conin@0x10 is hoot stdin (filename), not a song handle. */
+		/* 共有バンク conin@0x10 は hoot stdin（ファイル名）であり曲ハンドルではない */
 		if (!opensByName && nConin == 1 && stdinConin)
 			opensByName = 1;
 	}
-	/* usd_98 (ADVBIOS/ADVH): INT7F AH=3F reads song BYTES from BX=0
-	   (CX=4000/FFFF). ADVH packs list songs only as conin@title — the
-	   famistava heuristic above would bind the filename text (len=10 for
-	   "DC_02P.USO") and leave keyOn=0. Always use binary handles.
-	   usmd_98 is NOT here: glue AH=3F-reads the title handle then INT 7D
-	   AH=3D-opens DS:SI as an ASCIIZ .USO name. Binary on that handle
-	   made Open AX=0002. */
+	/* usd_98（ADVBIOS/ADVH）: INT7F AH=3F は BX=0 から曲バイトを読む（CX=4000/FFFF）。ADVH パックは曲を conin@title だけ列挙 — 上の famistava ヒューリスティックはファイル名テキスト（"DC_02P.USO" は len=10）をバインドし keyOn=0。常にバイナリハンドル。usmd_98 はここに居ない: 糊 AH=3F がタイトルハンドルを読み INT 7D AH=3D が DS:SI を ASCIIZ .USO 名で開く。そのハンドルにバイナリを置くと Open AX=0002。 */
 	{
 		static const char* kUsdSong[] = {
 			"usd_98", "usd98",
@@ -4067,9 +3815,7 @@ void CHardPc98::BindDosTriggerSong(const CEmuGameEntry* ge, unsigned titleCode)
 		if (DosShellStarts(ge, kUsdSong))
 			opensByName = 0;
 	}
-	/* magpa_98: kOpenName includes "musdrv" (mbmusp packs need the filename
-	   on handle 0), but magpa's INT7F cmd0 is AH=3F BX=0 of song bytes then
-	   INT40 AX=2000. Filename text on handle 0 left MUSDRV reading ASCII. */
+	/* magpa_98: kOpenName は "musdrv" を含む（mbmusp パックはハンドル 0 にファイル名が要る）が、magpa の INT7F cmd0 は曲バイトの AH=3F BX=0 のあと INT40 AX=2000。ハンドル 0 のファイル名テキストは MUSDRV が ASCII を読んだ。 */
 	{
 		static const char* kMagpaBin[] = { "magpa_98", "magpa", NULL };
 		if (DosShellStarts(ge, kMagpaBin))
@@ -4079,20 +3825,18 @@ void CHardPc98::BindDosTriggerSong(const CEmuGameEntry* ge, unsigned titleCode)
 	if (sf) {
 		strncpy_s(dosSong_, sf, _TRUNCATE);
 		if (opensByName) {
-			/* Filename text on handle 0 — driver opens via INT21 AH=3D. */
+			/* ハンドル 0 のファイル名テキスト — ドライバは INT21 AH=3D で開く */
 			dos_.SetHandleText(0, sf);
 		} else {
 			dos_.SetHandle(0, sf);
-			/* VALKY_98 reads SSCP/CSCP from handle 5 then 6 at install.
-			   Catalog parks the driver on 6; putting the .DAT on 5 made
-			   the first AH=3F succeed and CALL FAR into song bytes (#UD). */
+			/* VALKY_98 はインストール時にハンドル 5 のち 6 から SSCP/CSCP を読む。カタログはドライバを 6 に置く。5 に .DAT を置くと最初の AH=3F が成功し曲バイトへ CALL FAR（#UD）。 */
 			static const char* kValkyH5[] = { "VALKY_98", "valky", NULL };
 			if (!DosShellStarts(ge, kValkyH5)
 				&& !DosHandleBoundToOtherFile(ge, 5, sf))
 				dos_.SetHandle(5, sf);
 			if (!DosHandleBoundToOtherFile(ge, 0x0B, sf))
 				dos_.SetHandle(0x0B, sf);
-			/* PMD_98 reads the song handle == title low byte (pre-bound at install). */
+			/* PMD_98 は曲ハンドル == タイトル下位バイト（インストール時に事前バインド） */
 			const unsigned low = titleCode & 0xff;
 			if (low < (unsigned)DOS98_HANDLE_MAX
 				&& !DosHandleBoundToOtherFile(ge, (int)low, sf))
@@ -4102,8 +3846,7 @@ void CHardPc98::BindDosTriggerSong(const CEmuGameEntry* ge, unsigned titleCode)
 	extCmd_ = 0;
 	const unsigned byte2 = (titleCode >> 16) & 0xff;
 	const unsigned hiByte = (titleCode >> 8) & 0xff;
-	/* ARTDI packed NTL.PAC: title 0xHHSS — high byte = pack handle, low = index.
-	   Stub wants the full word on EXT_SONG (hootrip). */
+	/* ARTDI パック NTL.PAC: タイトル 0xHHSS — 上位バイト = パックハンドル、下位 = 添字。stub は EXT_SONG にフル語が欲しい（hootrip）。 */
 	int pacTitle = 0;
 	int voiTitle = 0;
 	if (ge) {
@@ -4126,58 +3869,43 @@ void CHardPc98::BindDosTriggerSong(const CEmuGameEntry* ge, unsigned titleCode)
 		}
 	}
 	if (cplayFamily) {
-		/* INT 7F AH=9: in-bank index on EXT param (0x7E4). */
+		/* INT 7F AH=9: EXT param（0x7E4）上のバンク内添字 */
 		extSong_ = 0;
 		extParam_ = (uint16_t)byte2;
 	} else if (DosShellStarts(ge, kLudyMagic)) {
-		/* LUDY: IN 7E2 AX → xchg AH,BL uses AH as the .MCG handle (6) and
-		   AL as the in-pack index. MAGIC_98: AH=instrument handle (SND),
-		   AL=song handle. Low-byte-only EXT_SONG skipped the bank and left
-		   keyOn=0 / dumps=4. */
+		/* LUDY: IN 7E2 AX → xchg AH,BL が AH を .MCG ハンドル（6）、AL をパック内添字に使う。MAGIC_98: AH=音色ハンドル（SND）、AL=曲ハンドル。下位のみ EXT_SONG はバンクを飛ばし keyOn=0 / dumps=4。 */
 		extSong_ = (uint16_t)(titleCode & 0xffff);
 		extParam_ = 0;
 	} else if (pacTitle) {
 		extSong_ = (uint16_t)(titleCode & 0xffff);
 		extParam_ = 0;
 	} else if (voiTitle) {
-		/* MDR external-voice: EXT_PARAM = voice handle (byte2). */
+		/* MDR 外部ボイス: EXT_PARAM = ボイスハンドル（byte2） */
 		extSong_ = (uint16_t)(titleCode & 0xff);
 		extParam_ = (uint16_t)byte2;
 	} else if (DosShellStarts(ge, kElfMus)) {
-		/* ELFMUS98 cmd0 `IN AX,7E2`: AH>=0x0A is the packed-bank DOS
-		   handle (aress BGM.MDT titles 0x10nn / SE.MDT 0x06nn). Low-byte
-		   EXT_SONG left BX=0 and AH=3F transferred 0. 8-bit titles
-		   (birthd 0x23) keep AH=0 and still read handle 0. */
+		/* ELFMUS98 cmd0 `IN AX,7E2`: AH>=0x0A はパックバンク DOS ハンドル（aress BGM.MDT タイトル 0x10nn / SE.MDT 0x06nn）。下位 EXT_SONG は BX=0 のまま AH=3F 転送 0。8bit タイトル（birthd 0x23）は AH=0 のままハンドル 0 を読む。 */
 		extSong_ = (uint16_t)(titleCode & 0xffff);
 		extParam_ = 0;
 	} else if (DosShellStarts(ge, kExtParamVoice)) {
-		/* mmd2/iwaplay: IN 7E4 is the voice/TON handle (catalog byte2, or
-		   handle 5 when titles are 0x10-style). byte2!=0 used to set
-		   EXT_SONG=voice and skip the bank — dumps>0 / keyOn=0. */
+		/* mmd2/iwaplay: IN 7E4 はボイス/TON ハンドル（カタログ byte2、またはタイトルが 0x10 風ならハンドル 5）。byte2!=0 は EXT_SONG=voice にしてバンクを飛ばしていた — dumps>0 / keyOn=0。 */
 		extSong_ = (uint16_t)(titleCode & 0xff);
 		extParam_ = byte2 ? (uint16_t)byte2 : 5;
 	} else if (pc88VaIo_) {
-		/* PC-88VA DOS overlay glue (tetrisva/rtypeva/shinrava/famista*):
-		   IN 7E4 reads only the low byte of EXT_PARAM as play mode.
-		   Titles are either 0x0001xxxx (tetrisva) or 0xNN0000xx (rtype
-		   0x01000010 / famista 0x04000010) — take byte2, or byte3 if zero.
-		   olteus.com INT7F cmd0 = far 00DF (init) then IN AX,7E2 + far 03F0
-		   (play). cmd2 is init-only — keep EXT_CMD=0 so play runs. */
+		/* PC-88VA DOS オーバーレイ糊（tetrisva/rtypeva/shinrava/famista*）: IN 7E4 は EXT_PARAM 下位バイトだけを再生モードとして読む。タイトルは 0x0001xxxx（tetrisva）または 0xNN0000xx（rtype 0x01000010 / famista 0x04000010）— byte2、0 なら byte3。olteus.com INT7F cmd0 = far 00DF（init）のあと IN AX,7E2 + far 03F0（play）。cmd2 は init のみ — EXT_CMD=0 のまま play が走る。 */
 		extSong_ = (uint16_t)(titleCode & 0xff);
 		unsigned mode = (titleCode >> 16) & 0xff;
 		if (mode == 0)
 			mode = (titleCode >> 24) & 0xff;
 		extParam_ = (uint16_t)mode;
 	} else if (DosShellStarts(ge, kBgmlSong)) {
-		/* Bio_100% BGML_98: INT 7F cmd0 reads EXT_SONG as a 16-bit title
-		   (07E2/07E3). Catalog 0x01nn are one-shots; 0x00nn are looping BGM. */
+		/* Bio_100% BGML_98: INT 7F cmd0 は EXT_SONG を 16bit タイトルとして読む（07E2/07E3）。カタログ 0x01nn はワンショット。0x00nn はループ BGM。 */
 		extSong_ = (uint16_t)(titleCode & 0xffff);
 		extParam_ = 0;
 	} else if (ge) {
 		static const char* kAvalonSong[] = { "avalon", NULL };
 		if (DosShellStarts(ge, kAvalonSong)) {
-			/* avalon.com IN 7E4 → INT F1 AH=0B AL=in-bank index.
-			   Catalog 0xTT00HH: TT is the DAT-internal title, HH the conin. */
+			/* avalon.com IN 7E4 → INT F1 AH=0B AL=バンク内添字。カタログ 0xTT00HH: TT は DAT 内部タイトル、HH は conin。 */
 			extSong_ = (uint16_t)(titleCode & 0xff);
 			extParam_ = (uint16_t)((titleCode >> 16) & 0xff);
 		} else if (byte2 != 0) {
@@ -4196,23 +3924,20 @@ void CHardPc98::BindDosTriggerSong(const CEmuGameEntry* ge, unsigned titleCode)
 	}
 }
 
+/* Pc98DosLin の実装 */
 static unsigned Pc98DosLin(uint16_t seg, uint16_t off)
 {
 	return ((unsigned)seg << 4) + (unsigned)off;
 }
 
+/* Pc98Wr16 の実装 */
 static void Pc98Wr16(uint8_t* mem, unsigned addr, uint16_t v)
 {
 	mem[addr] = (uint8_t)(v & 0xff);
 	mem[addr + 1] = (uint8_t)(v >> 8);
 }
 
-/* SYNTH_98.COM (365-byte ylz glue): INT60 AH=0x0F returns DX=destOff in
-   the overlay (S20:3088 / S20S_4:1B86). The COM did `mov ax,ds; mov es,ax;
-   mov di,dx` so PAI landed past the AH=4A-shrunk COM and AH=0 parsed the
-   overlay's leftover init. After INIT stores the overlay at CS:0260, jump
-   to a cave that loads ES from CS:0260 (DS may still be the overlay). Skip
-   when 0260 is 0 (resident SYNTHIA — crim). */
+/* SYNTH_98.COM（365 バイト ylz 糊）: INT60 AH=0x0F がオーバーレイ内 DX=destOff を返す（S20:3088 / S20S_4:1B86）。COM は `mov ax,ds; mov es,ax; mov di,dx` なので PAI が AH=4A 縮小 COM の先に着き、AH=0 がオーバーレイの残り init を解析した。INIT がオーバーレイを CS:0260 に置いたあと、CS:0260 から ES を載せる洞穴へ飛ぶ（DS はまだオーバーレイかも）。0260 が 0 なら飛ばす（常駐 SYNTHIA — crim）。 */
 static int PatchSynth98PaiDest(uint8_t* mem, uint16_t psp)
 {
 	if (!mem || !psp)
@@ -4229,12 +3954,12 @@ static int PatchSynth98PaiDest(uint8_t* mem, uint16_t psp)
 		return 1;
 	if (memcmp(mem + at, kOld, 6) != 0)
 		return 0;
-	/* E9 disp16 → 0270; pad through the old mov ds,cs:[025C]. */
+	/* E9 disp16 → 0270。旧 mov ds,cs:[025C] まで埋める */
 	mem[at + 0] = 0xE9;
 	mem[at + 1] = 0xC8;
 	mem[at + 2] = 0x00;
 	memset(mem + at + 3, 0x90, 8);
-	/* cave@0270: mov es,[cs:0260]; mov di,dx; mov ds,[cs:025C]; jmp 01B0 */
+	/* 洞穴@0270: mov es,[cs:0260]; mov di,dx; mov ds,[cs:025C]; jmp 01B0 */
 	static const uint8_t kCave[] = {
 		0x2E, 0x8E, 0x06, 0x60, 0x02,
 		0x8B, 0xFA,
@@ -4245,11 +3970,7 @@ static int PatchSynth98PaiDest(uint8_t* mem, uint16_t psp)
 	return 1;
 }
 
-/* SS_98.COM cmd0 AH=3F-reads the ASCIIZ name at CS:0196 then INT 41 AH=1.
-   The glue does `mov si,ds / xor di,dx` (DX=0196) so SI:DI is a far pointer
-   to that name — xor assumes DI=0. BootDos leaves DI dirty, FindFirst at
-   the driver's DS:260A then misses TITLE.DAT (AX=0012). `mov di,dx` keeps
-   the pointer on the name. */
+/* SS_98.COM cmd0 は CS:0196 の ASCIIZ 名を AH=3F 読して INT 41 AH=1。糊は `mov si,ds / xor di,dx`（DX=0196）なので SI:DI はその名への far ポインタ — xor は DI=0 を仮定。BootDos は DI を汚したまま。ドライバ DS:260A の FindFirst が TITLE.DAT を外す（AX=0012）。`mov di,dx` がポインタを名に保つ。 */
 static void PatchSs98SongPtr(uint8_t* mem)
 {
 	if (!mem) return;
@@ -4271,12 +3992,7 @@ static void PatchSs98SongPtr(uint8_t* mem)
 	}
 }
 
-/* USMD.EXE plants INT 7E at CS:0005 then AH=31 TSR. The insn after that
-   INT21 is the "already loaded" uninstaller (pushf; mov ax,3; int 7e…).
-   feti puts it at 0270; hhg shifted it to 027C. Leaving CS:IP on the
-   INT21 trampoline with AX=3100 made TriggerPlay's PumpCycles abort on
-   RESIDENT before glue INT 7D opened the .USO. IRET onto the uninstaller
-   and park there. */
+/* USMD.EXE は CS:0005 に INT 7E を植え AH=31 TSR。その INT21 の次命令は「既ロード」アンインストーラ（pushf; mov ax,3; int 7e…）。feti は 0270、hhg は 027C へずらした。AX=3100 のまま CS:IP を INT21 トランポリンに残すと、糊 INT 7D が .USO を開く前に TriggerPlay の PumpCycles が RESIDENT で中断。IRET でアンインストーラへ載せそこでパーク。 */
 static int PatchUsmdUnloadHalt(uint8_t* mem, uint16_t cs, uint16_t ip)
 {
 	if (!mem || !cs || cs == (uint16_t)DOS98_TRAMP_SEG)
@@ -4297,17 +4013,11 @@ static int PatchUsmdUnloadHalt(uint8_t* mem, uint16_t cs, uint16_t ip)
 	return 1;
 }
 
-/* FairyDust MFD.EXE (koukan2/madol MIDI): Borland TSR. Shell `MFD L` wants
-   argv[1]='L' → keep() + setvect(0x42, ISR). The EXE's switch table offset
-   (CS:0422/0419) points at heap code, so L never matches and it prints the
-   menu then AH=4C-exits. INT 42 stays the trampoline; mfd_98.com's play
-   path (`INT 42 AX=3`) IRETs as a no-op (midi=0/0).
-   The real ISR is the pusha frame at CS:1AE5 (jmp cs:[bx+1F8] on AX-1).
-   Launch also setvects CS:00D5 (CRT abort), not that ISR. Point INT 42 at
-   the pusha frame and skip the argv switch straight into launch/keep. */
+/* FairyDust MFD.EXE（koukan2/madol MIDI）: Borland TSR。シェル `MFD L` は argv[1]='L' → keep() + setvect(0x42, ISR)。EXE のスイッチ表オフセット（CS:0422/0419）はヒープコードを指すので L が一致せずメニュー印刷後 AH=4C 終了。INT 42 はトランポリンのまま。mfd_98.com の再生経路（`INT 42 AX=3`）は no-op で IRET（midi=0/0）。本物 ISR は CS:1AE5 の pusha 枠（AX-1 で jmp cs:[bx+1F8]）。起動もその ISR ではなく CS:00D5（CRT abort）を setvect。INT 42 を pusha 枠へ向け、argv スイッチを飛ばして launch/keep へ。 */
 static int s_mfdInt42Host;
 static int s_midiDrvHostSmf;
 
+/* PatchMfdExeTsr の実装 */
 static void PatchMfdExeTsr(uint8_t* mem)
 {
 	if (!mem) return;
@@ -4341,18 +4051,14 @@ static void PatchMfdExeTsr(uint8_t* mem)
 	if (isr < 0)
 		return;
 	s_mfdInt42Host = 1;
-	/* CRT `mov dx, DGROUP` at CS:0000 is relocated; the ISR's
-	   `mov bp, 0x8A0` is not. */
+	/* CS:0000 の CRT `mov dx, DGROUP` はリロケ済み。ISR の `mov bp, 0x8A0` は未リロケ */
 	if (mem[base] == 0xBA && mem[base + (unsigned)isr + 9] == 0xBD
 		&& mem[base + (unsigned)isr + 12] == 0x8E
 		&& mem[base + (unsigned)isr + 13] == 0xDD) {
 		mem[base + (unsigned)isr + 10] = mem[base + 1];
 		mem[base + (unsigned)isr + 11] = mem[base + 2];
 	}
-	/* ISR far calls (9A off,seg) were emitted without MZ relocs, so they
-	   still hold the link-time segments (01A1/01FA/02C2) and #UD. Same
-	   for the rest of the driver image. Skip words already relocated
-	   (>= 0x1000) or BIOS-ish. */
+	/* ISR far 呼（9A off,seg）は MZ リロケ無しで出たのでリンク時セグメント（01A1/01FA/02C2）のままで #UD。ドライバイメージ残りも同じ。既リロケ（>= 0x1000）や BIOS 風語は飛ばす。 */
 	for (unsigned o = 0; o + 5u < 0x9100u && base + o + 5u < 0x200000u; o++) {
 		if (mem[base + o] != 0x9A)
 			continue;
@@ -4368,7 +4074,7 @@ static void PatchMfdExeTsr(uint8_t* mem)
 		mem[segAt + 1] = (uint8_t)((fix >> 8) & 0xff);
 		o += 4;
 	}
-	/* Same missing-reloc class: `mov ax/ds/bp, DGROUP` still holds 08A0h. */
+	/* 同じ欠リロケ級: `mov ax/ds/bp, DGROUP` がまだ 08A0h */
 	{
 		const uint16_t dgFix = (uint16_t)(mem[base + 1] | (mem[base + 2] << 8));
 		const uint16_t dgRaw = (uint16_t)(dgFix - cs);
@@ -4386,8 +4092,7 @@ static void PatchMfdExeTsr(uint8_t* mem)
 			}
 		}
 	}
-	/* jmp cs:[bx+1F8] was aimed at CRT bytes. The 7-word case table
-	   sits right after the ISR IRET (CS:1C08). */
+	/* jmp cs:[bx+1F8] は CRT バイトを狙っていた。7 語ケース表は ISR IRET 直後（CS:1C08） */
 	if (mem[base + (unsigned)isr + 0x1E] == 0x2E
 		&& mem[base + (unsigned)isr + 0x1F] == 0xFF
 		&& mem[base + (unsigned)isr + 0x20] == 0xA7
@@ -4441,12 +4146,10 @@ static void PatchMfdExeTsr(uint8_t* mem)
 	mem[base + (unsigned)argcAt + 5] = 0x90;
 }
 
-/* 400-byte mfd_98.com (INT 42 glue): hooks INT 7F then INT 18 AX=9801 once
-   and falls into the ISR as mainline (pusha / IRET smash). Night_s's
-   143-byte COM loops INT 18. Stop after setvect so BootDos proceeds with
-   the 64KB COM alloc still intact (AH=31 / 30h paras clipped CS:0290). */
+/* 400 バイト mfd_98.com（INT 42 糊）: INT 7F のあと INT 18 AX=9801 を一度フックし ISR を本線として落ちる（pusha / IRET smash）。Night_s の 143 バイト COM は INT 18 をループ。setvect 後に止め、BootDos が 64KB COM 割当を保ったまま進む（AH=31 / 30h パラが CS:0290 を切る）。 */
 static uint16_t s_mfd98GlueCs;
 
+/* MfdSmfVar の実装 */
 static unsigned MfdSmfVar(const uint8_t* p, unsigned n, unsigned* i)
 {
 	unsigned v = 0;
@@ -4459,6 +4162,7 @@ static unsigned MfdSmfVar(const uint8_t* p, unsigned n, unsigned* i)
 	return v;
 }
 
+/* MfdSmfLooksStatus の実装 */
 static int MfdSmfLooksStatus(const uint8_t* p, unsigned n, unsigned i)
 {
 	if (i >= n)
@@ -4478,11 +4182,9 @@ static int MfdSmfLooksStatus(const uint8_t* p, unsigned n, unsigned i)
 	return 1;
 }
 
-/* SYNUP_98 hits #UD before it can OUT E0D0, so TriggerPlay walks the resident
-   song instead. Last resort for layouts the track walker below cannot read:
-   one stream, 9x as a channel prefix with one parameter, then (note, duration)
-   pairs whose duration ticks the capture clock. */
+/* SYNUP_98 は E0D0 へ OUT する前に #UD。TriggerPlay が常駐曲を歩く。下のトラック歩行が読めない配置の最後手段: 1 ストリーム、チャネル接頭として 9x とパラメータ 1、そのあとキャプチャ時計を進める（note, duration）対。 */
 template<typename Cap, typename Tick>
+/* HostWalkSynupsMdiFlat の実装 */
 static void HostWalkSynupsMdiFlat(Cap cap, Tick tick, const uint8_t* p, unsigned n)
 {
 	unsigned start = 0;
@@ -4541,7 +4243,7 @@ static void HostWalkSynupsMdiFlat(Cap cap, Tick tick, const uint8_t* p, unsigned
 	}
 }
 
-/* One decoded message, positioned on the merged timeline. */
+/* 複合タイムライン上に置いた復号メッセージ 1 件 */
 struct SynupsEv {
 	unsigned tick;
 	unsigned seq;
@@ -4551,6 +4253,7 @@ struct SynupsEv {
 	uint8_t nd;
 };
 
+/* SynupsEvCmp の実装 */
 static int SynupsEvCmp(const void* a, const void* b)
 {
 	const SynupsEv* x = (const SynupsEv*)a;
@@ -4562,7 +4265,7 @@ static int SynupsEvCmp(const void* a, const void* b)
 	return 0;
 }
 
-/* GM/GS reserve 9 for drums and the melodic blocks must step over it. */
+/* GM/GS は 9 をドラム予約。メロディブロックはその上を踏む */
 static uint8_t SynupsChanForTrack(unsigned partId)
 {
 	unsigned ch = partId;
@@ -4571,17 +4274,9 @@ static uint8_t SynupsChanForTrack(unsigned partId)
 	return (uint8_t)(ch & 15u);
 }
 
-/* Byte 9 is the block count and the header ends at a run of six 0xFF. Each
-   block is then [partId, NUL-terminated name, events] and closes on 0xFF —
-   which may be a lone one, because the byte before it can be a command
-   operand of 0xFF (BGM203B "A0 FF"). Inside a block a byte < 0x80 is a note
-   followed by its gate in 48-per-quarter ticks, 0x80/0x81 rest, 0x90 picks the
-   part's tone, and every other 0x8x/0x9x command takes one operand.
-   Blocks each restart at tick 0, so they have to be merged before streaming:
-   reading the file as one stream played the parts one after another (a 32s
-   song ran for two minutes), put every note on one channel, and emitted
-   neither a Note Off nor a program change. */
+/* バイト 9 はブロック数。ヘッダは 0xFF 6 連で終わる。各ブロックは [partId, NUL 終端名, events] で 0xFF で閉じる — 単独でもよい。直前バイトがコマンドオペランド 0xFF（BGM203B "A0 FF"）になり得る。ブロック内で < 0x80 はノート＋ゲート（4 分=48 tick）、0x80/0x81 休符、0x90 がパート音色、他の 0x8x/0x9x はオペランド 1。各ブロックは tick 0 から再開するのでストリーム前にマージが要る: 1 ストリーム読はパートを直列再生し（32s 曲が 2 分）、全ノートを 1 チャネルに載せ、Note Off もプログラムチェンジも出さなかった。 */
 template<typename Cap, typename Tick>
+/* HostWalkSynupsTracks の実装 */
 static int HostWalkSynupsTracks(Cap cap, Tick tick, const uint8_t* p, unsigned n)
 {
 	const unsigned blocks = p[9];
@@ -4612,8 +4307,7 @@ static int HostWalkSynupsTracks(Cap cap, Tick tick, const uint8_t* p, unsigned n
 		while (i < n && p[i] != 0)
 			i++;
 		i++;
-		/* Rhythm blocks (id bit 7, named DRUMS) open with a key table and
-		   index a drum map this walker has no equivalent for. */
+		/* リズムブロック（id bit 7、名 DRUMS）はキー表で開き、この歩行に等価の無いドラムマップを添字 */
 		const int rhythm = (partId & 0x80) ? 1 : 0;
 		const uint8_t ch = SynupsChanForTrack((unsigned)(partId & 0x7f));
 		unsigned t = 0;
@@ -4635,9 +4329,7 @@ static int HostWalkSynupsTracks(Cap cap, Tick tick, const uint8_t* p, unsigned n
 				if (b == 0x80 || b == 0x81)
 					t += arg;
 				else if (b == 0x90 && !rhythm && !seenNote) {
-					/* Only the block's opening tone: files like hypersec
-					   MAIN.MDI repeat 0x90 per phrase with values that are not
-					   patch numbers, and honouring those churned the part. */
+					/* ブロック冒頭の音色だけ: hypersec MAIN.MDI のようにフレーズ毎に 0x90 を繰り返し、値はパッチ番号ではない。それを尊重するとパートが撹乱された。 */
 					ev[evN].tick = t;
 					ev[evN].seq = seq++;
 					ev[evN].st = (uint8_t)(0xc0 | ch);
@@ -4697,6 +4389,7 @@ static int HostWalkSynupsTracks(Cap cap, Tick tick, const uint8_t* p, unsigned n
 }
 
 template<typename Cap, typename Tick>
+/* HostWalkSynupsMdi の実装 */
 static void HostWalkSynupsMdi(Cap cap, Tick tick, const uint8_t* p, unsigned n)
 {
 	if (!p || n < 40u)
@@ -4708,9 +4401,9 @@ static void HostWalkSynupsMdi(Cap cap, Tick tick, const uint8_t* p, unsigned n)
 	HostWalkSynupsMdiFlat(cap, tick, p, n);
 }
 
-/* Recomposer RCP v2. Event is [cmd, delay, p1, p2]; cmd<0x80 is a note
-   (p1 gate, p2 vel). Delay is in header timebase ticks (usually 48). */
+/* Recomposer RCP v2。イベントは [cmd, delay, p1, p2]。cmd<0x80 はノート（p1 ゲート、p2 ベロ）。delay はヘッダ timebase tick（通常 48）。 */
 template<typename Cap, typename Tick>
+/* HostWalkRcp の実装 */
 static void HostWalkRcp(Cap cap, Tick tick, const uint8_t* p, unsigned n)
 {
 	if (!p || n < 0x5C0u)
@@ -4754,10 +4447,9 @@ static void HostWalkRcp(Cap cap, Tick tick, const uint8_t* p, unsigned n)
 	}
 }
 
-/* Studio Twin'kle compact MD1: two LE32s, then FF 12 header chunks.
-   Skip the first two FF records; remaining pairs are (note, duration).
-   Do not match red/mirage MD1 (no FF 12). */
+/* Studio Twin'kle 圧縮 MD1: LE32 2 つ、そのあと FF 12 ヘッダチャンク。最初の FF レコード 2 つを飛ばし、残り対は（note, duration）。red/mirage MD1（FF 12 無し）には一致させない。 */
 template<typename Cap, typename Tick>
+/* HostWalkMd1 の実装 */
 static void HostWalkMd1(Cap cap, Tick tick, const uint8_t* p, unsigned n)
 {
 	if (!p || n < 80u)
@@ -4791,6 +4483,7 @@ static void HostWalkMd1(Cap cap, Tick tick, const uint8_t* p, unsigned n)
 	}
 }
 
+/* MfdRestoreInt42Trampoline の実装 */
 static void MfdRestoreInt42Trampoline(uint8_t* mem)
 {
 	if (!mem) return;
@@ -4800,9 +4493,7 @@ static void MfdRestoreInt42Trampoline(uint8_t* mem)
 	mem[0x42 * 4 + 3] = (uint8_t)((DOS98_TRAMP_SEG >> 8) & 0xff);
 }
 
-/* VALKY/SSCP: cmd8 tests CS:[384B]/[384D] then INT 50 AH=3 for the song
-   buffer segment. SSCP never hooks INT 50. CSCP init can skip INT 7F
-   setvec; plant CS:0210 when the glue CS is still visible on INT 21/B0. */
+/* VALKY/SSCP: cmd8 は CS:[384B]/[384D] を試して曲バッファセグメント用に INT 50 AH=3。SSCP は INT 50 をフックしない。CSCP init は INT 7F setvec を飛ばし得る。糊 CS がまだ INT 21/B0 に見えるとき CS:0210 を植える。 */
 static unsigned ValkyIvtSeg(const uint8_t* mem, uint8_t vec, uint16_t wantOff)
 {
 	if (!mem) return 0;
@@ -4845,9 +4536,7 @@ static void ValkyArmSscpPlay(uint8_t* mem, uint16_t songHandle,
 	{
 		const unsigned s7 = (unsigned)mem[0x7F * 4 + 2]
 			| ((unsigned)mem[0x7F * 4 + 3] << 8);
-		/* Live VALKY (scan hit 1001:0100) already did AH=48 and AH=3F
-		   SSCP into [041E]. Overlaying 9100 copies the COM BSS ([041E]=0)
-		   and INT 7F then CALL FARs ES=0. Only plant 9100 when no image. */
+		/* ライブ VALKY（走査ヒット 1001:0100）は既に AH=48 と AH=3F で SSCP を [041E] へ入れた。9100 を重ねると COM BSS（[041E]=0）をコピーし INT 7F が CALL FAR ES=0。イメージが無いときだけ 9100 を植える。 */
 		if (!glueCs && (s7 == 0 || s7 == (unsigned)DOS98_TRAMP_SEG)) {
 			const CEmuDos98File* vf = dos ? dos->FindFile("VALKY_98.COM") : NULL;
 			if (!vf)
@@ -4881,10 +4570,7 @@ static void ValkyArmSscpPlay(uint8_t* mem, uint16_t songHandle,
 			}
 		}
 	}
-	/* CSCP/SSCP is the sequencer (INT08). VALKY CALL FAR ES:[000C] with
-	   ES=[041E]. valkyrie never finishes that install (INT 7F stays the
-	   trampoline) so host-map the blob and the far ptr. Do not overlay a
-	   live SSCP (hinadori INT08=2002:0DB5). */
+	/* CSCP/SSCP はシーケンサ（INT08）。VALKY は ES=[041E] で CALL FAR ES:[000C]。valkyrie はそのインストールを終えず（INT 7F はトランポリンのまま）なので blob と far ptr をホストマップ。ライブ SSCP（hinadori INT08=2002:0DB5）は重ねない。 */
 	const unsigned s08Now = (unsigned)mem[0x08 * 4 + 2]
 		| ((unsigned)mem[0x08 * 4 + 3] << 8);
 	if (dos && (!s08Now || s08Now == (unsigned)DOS98_TRAMP_SEG)) {
@@ -4931,9 +4617,7 @@ static void ValkyArmSscpPlay(uint8_t* mem, uint16_t songHandle,
 			}
 		}
 	}
-	/* VALKY `MOV ES,CS:[041E] / CALL FAR ES:[000C]`. File [000C] is a
-	   near API (RETF at 0078/0060). [000E]==0 makes that CALL 0000:0078.
-	   Plant a far ptr only when the live image still has the API opcode. */
+	/* VALKY `MOV ES,CS:[041E] / CALL FAR ES:[000C]`。ファイル [000C] は near API（RETF @0078/0060）。[000E]==0 だとその CALL が 0000:0078。ライブイメージがまだ API オペコードを持つときだけ far ptr を植える。 */
 	{
 		const unsigned s08 = (unsigned)mem[0x08 * 4 + 2]
 			| ((unsigned)mem[0x08 * 4 + 3] << 8);
@@ -4960,9 +4644,7 @@ static void ValkyArmSscpPlay(uint8_t* mem, uint16_t songHandle,
 					mem[dst + 0x0F] = (uint8_t)(s08 >> 8);
 				}
 			}
-			/* [041E] is VALKY's AH=48 SSCP block, not INT08 CS. A 9100
-			   overlay left it 0 — point at the live CSCP/SSCP CS so
-			   CALL FAR ES:[000C] hits the RETF API. */
+			/* [041E] は VALKY の AH=48 SSCP ブロックであり INT08 CS ではない。9100 重ねは 0 のまま — ライブ CSCP/SSCP CS を指し CALL FAR ES:[000C] が RETF API に当たるように。 */
 			const unsigned gb = glueCs << 4;
 			if (gb + 0x422u < 0x200000u) {
 			unsigned es = (unsigned)mem[gb + 0x41E]
@@ -4981,8 +4663,7 @@ static void ValkyArmSscpPlay(uint8_t* mem, uint16_t songHandle,
 					}
 				}
 			}
-			/* AH=3F BX=5/6 into the AH=48 block can fail. Host-map
-			   SSCP/CSCP so CALL FAR ES:[000C] is the RETF API. */
+			/* AH=3F BX=5/6 を AH=48 ブロックへ入れると失敗し得る。SSCP/CSCP をホストマップし CALL FAR ES:[000C] を RETF API に。 */
 			if (dos && es >= 0x1000u && es < 0xA000u) {
 				const unsigned dst = es << 4;
 				int have = (dst + 0x80u < 0x200000u
@@ -5019,8 +4700,7 @@ static void ValkyArmSscpPlay(uint8_t* mem, uint16_t songHandle,
 		mem[0x7F * 4 + 2] = (uint8_t)(glueCs & 0xff);
 		mem[0x7F * 4 + 3] = (uint8_t)(glueCs >> 8);
 	}
-	/* cmd8 INT 50 AH=3 → DS for AH=3F CX=400 into DS:0000. That buffer is
-	   VALKY [0420] (128K), not INT08/SSCP (writing SSCP:0000 smashes 0078). */
+	/* cmd8 INT 50 AH=3 → AH=3F CX=400 用 DS を DS:0000 へ。そのバッファは VALKY [0420]（128K）であり INT08/SSCP ではない（SSCP:0000 書は 0078 を壊す）。 */
 	unsigned songSeg = 0;
 	const unsigned s7f = (unsigned)mem[0x7F * 4 + 2]
 		| ((unsigned)mem[0x7F * 4 + 3] << 8);
@@ -5083,7 +4763,7 @@ static void ValkyArmSscpPlay(uint8_t* mem, uint16_t songHandle,
 	mem[0x50 * 4 + 1] = 0x06;
 	mem[0x50 * 4 + 2] = 0x00;
 	mem[0x50 * 4 + 3] = 0x00;
-	/* #UD must HLT through the trampoline so ServiceInt can skip. */
+	/* #UD はトランポリン経由で HLT し ServiceInt が飛ばせるように */
 	mem[0x06 * 4 + 0] = 0x0C;
 	mem[0x06 * 4 + 1] = 0x00;
 	mem[0x06 * 4 + 2] = (uint8_t)(DOS98_TRAMP_SEG & 0xff);
@@ -5120,7 +4800,7 @@ static void ValkyArmSscpPlay(uint8_t* mem, uint16_t songHandle,
 				&& mem[base + o + 2] == 0x06 && mem[base + o + 3] == 0x4B
 				&& mem[base + o + 4] == 0x38)
 				has384b = 1;
-			/* cmd8 `TEST CS:[imm],1 / JNZ` — hinadori 384B, CSCP 3EB1. */
+			/* cmd8 `TEST CS:[imm],1 / JNZ` — hinadori 384B、CSCP 3EB1 の判定 */
 			if (mem[base + o] == 0x2E && mem[base + o + 1] == 0xF6
 				&& mem[base + o + 2] == 0x06 && mem[base + o + 5] == 0x01
 				&& mem[base + o + 6] == 0x75) {
@@ -5130,7 +4810,7 @@ static void ValkyArmSscpPlay(uint8_t* mem, uint16_t songHandle,
 					&& base + addr < 0x200000u)
 					mem[base + addr] = 1;
 			}
-			/* cmd8 `TEST CS:[imm],FF / JZ` — hinadori 384D, CSCP 3EB4. */
+			/* cmd8 `TEST CS:[imm],FF / JZ` — hinadori 384D、CSCP 3EB4 の判定 */
 			if (mem[base + o] == 0x2E && mem[base + o + 1] == 0xF6
 				&& mem[base + o + 2] == 0x06 && mem[base + o + 5] == 0xFF
 				&& (mem[base + o + 6] == 0x74 || mem[base + o + 6] == 0x75)) {
@@ -5144,16 +4824,16 @@ static void ValkyArmSscpPlay(uint8_t* mem, uint16_t songHandle,
 		if (has384b) {
 			mem[base + 0x384B] = 1;
 			mem[base + 0x384D] = 1;
-			/* ISR 0DD2 remasks IRQ0 unless [38A9] is set. */
+			/* ISR 0DD2 は [38A9] がセットされるまで IRQ0 を再マスク */
 			if (base + 0x38A9u < 0x200000u)
 				mem[base + 0x38A9] = 1;
-			/* CS:[390A] is the INT08 busy latch: TEST/JNZ IRETs
-			   without sequencing. File default is 0. Do not set it. */
+			/* CS:[390A] は INT08 ビジーラッチ: TEST/JNZ はシーケンスせず IRET。ファイル既定は 0。セットしない。 */
 		}
 	}
 	ValkyReplantIsr(mem);
 }
 
+/* ValkyLooksIsr の実装 */
 static int ValkyLooksIsr(const uint8_t* mem, unsigned p)
 {
 	if (!mem || p + 6u >= 0x200000u)
@@ -5167,6 +4847,7 @@ static int ValkyLooksIsr(const uint8_t* mem, unsigned p)
 	return 0;
 }
 
+/* ValkyReplantIsr の実装 */
 static void ValkyReplantIsr(uint8_t* mem)
 {
 	if (!mem || !s_valkyKeepIrq0)
@@ -5240,6 +4921,7 @@ static void ValkyReplantIsr(uint8_t* mem)
 	}
 }
 
+/* ValkyFixFarApiFromGlue の実装 */
 static void ValkyFixFarApiFromGlue(uint8_t* mem)
 {
 	if (!mem || !s_valkyKeepIrq0)
@@ -5286,6 +4968,7 @@ static void ValkyFixFarApiFromGlue(uint8_t* mem)
 	}
 }
 
+/* バス読込 */
 static void ValkyRewindCmd8Read(CEmuDos98& dos, const char* song, uint8_t vec)
 {
 	if (!s_valkyKeepIrq0 || vec != 0x21 || !song || !song[0])
@@ -5296,8 +4979,7 @@ static void ValkyRewindCmd8Read(CEmuDos98& dos, const char* song, uint8_t vec)
 		return;
 	const uint16_t bx = np2_reg_get(NP2_R_BX);
 	dos.SetHandle(bx, song);
-	/* cmd8 AH=3F CX=400 into DS:0000. If DS is still SSCP (F1 11 / API
-	   FC 32 E4), that 1K header lands on CS:01A1 and INT 06 livelocks. */
+	/* cmd8 AH=3F CX=400 を DS:0000 へ。DS がまだ SSCP（F1 11 / API FC 32 E4）なら 1K ヘッダが CS:01A1 に着き INT 06 がライブロック。 */
 	uint8_t* mem = np2_mem();
 	if (!mem)
 		return;
@@ -5330,7 +5012,7 @@ static void ValkyRewindCmd8Read(CEmuDos98& dos, const char* song, uint8_t vec)
 	np2_reg_set(NP2_R_DS, (uint16_t)songSeg);
 }
 
-/* FairyDust MFD.EXE (koukan2/madol MIDI): Borland TSR. */
+/* FairyDust MFD.EXE（koukan2/madol MIDI）: Borland TSR 本体 */
 
 static void PatchMfd98Int42Keep(uint8_t* mem)
 {
@@ -5349,10 +5031,7 @@ static void PatchMfd98Int42Keep(uint8_t* mem)
 	s_mfd98GlueCs = cs;
 }
 
-/* 142-byte NC_98.com (3x3eyes MIDI): INT 7F cmd0 reads the conin name into
-   CS:017E then XOR SI,SI / INT 42 AX=0. NC.COM AX=0 REP MOVSB 128 bytes from
-   DS:SI (filename) — SI=0 copies the COM header instead of the name, so the
-   PIT ISR only emits CC all-notes-off (midi=0/2880). */
+/* 142 バイト NC_98.com（3x3eyes MIDI）: INT 7F cmd0 が conin 名を CS:017E へ読み XOR SI,SI / INT 42 AX=0。NC.COM AX=0 は DS:SI（ファイル名）から 128 バイト REP MOVSB — SI=0 は名ではなく COM ヘッダをコピーし、PIT ISR は CC 全ノートオフだけ出す（midi=0/2880）。 */
 static void PatchNc98FilenameSi(uint8_t* mem)
 {
 	if (!mem) return;
@@ -5381,6 +5060,7 @@ static void PatchNc98FilenameSi(uint8_t* mem)
 	}
 }
 
+/* CPU を進める */
 int CHardPc98::RunDosDevices(const CEmuGameEntry* ge, uint64_t budgetCycles)
 {
 	if (!ge) return 0;
@@ -5406,16 +5086,12 @@ int CHardPc98::RunDosDevices(const CEmuGameEntry* ge, uint64_t budgetCycles)
 				isLooseMmd = 1;
 		}
 		if (!isDevice && !isLooseMmd) continue;
-		/* Keep the full CONFIG string for extraParas / INIT packet.
-		   Stem-only name is for LoadDeviceImage — last-slash on
-		   `mmd.sys /f12 4096` used to look up "f12" (sbr_98 SILENT). */
+		/* extraParas / INIT パケット用に CONFIG 文字列全体を残す。stem のみ名は LoadDeviceImage 用 — `mmd.sys /f12 4096` の最終スラッシュは "f12" を探していた（sbr_98 SILENT）。 */
 		const char* base = r->name ? r->name : "";
 		char name[DOS98_NAME];
 		DosCfgFileStem(base, name, (int)sizeof(name));
 		if (!name[0]) continue;
-		/* NMUSE CONFIG -d/-k sizes are byte buffers past the image.
-		   Small -d2048 -k1024 already fits the default alloc; applying
-		   it anyway moved the COM AH=48 block and GAPPY'd pod OPEN. */
+		/* NMUSE CONFIG -d/-k サイズはイメージ先のバイトバッファ。小さい -d2048 -k1024 は既定割当に既に収まる。適用すると COM AH=48 ブロックが動き pod OPEN が GAPPY。 */
 		unsigned extraParas = 0;
 		const int isMmd = (_strnicmp(name, "mmd", 3) == 0);
 		if (isMmd)
@@ -5432,9 +5108,7 @@ int CHardPc98::RunDosDevices(const CEmuGameEntry* ge, uint64_t budgetCycles)
 				extraParas += (v + 15u) / 16u;
 			}
 		}
-		/* MMD2.SYS 4096 — bare decimal is the work-buffer size, not -d/-k.
-		   Without extra paras the next COM (mmd2.com) lands on CS:0xFBA
-		   (voice+song copy dest) and INT D2 AH=10 copies into overwritten RAM. */
+		/* MMD2.SYS 4096 — 裸の 10 進は作業バッファサイズであり -d/-k ではない。追加パラ無しだと次 COM（mmd2.com）が CS:0xFBA（ボイス+曲コピー先）に着き、INT D2 AH=10 が上書き RAM へコピー。 */
 		if (isMmd && extraParas == 0) {
 			for (const char* ap = base; *ap; ) {
 				if (*ap >= '0' && *ap <= '9') {
@@ -5448,15 +5122,13 @@ int CHardPc98::RunDosDevices(const CEmuGameEntry* ge, uint64_t budgetCycles)
 				ap++;
 			}
 			if (extraParas)
-				/* 4096 buffer + 0x400 work + 0x200 IRQ SP at [c7c]+0x200.
-				   0x40 paras stopped at image+0x1400 (0x23BA) while ISR SP
-				   is 0x25BA, so the stack landed in the next COM. */
+				/* 4096 バッファ + 0x400 作業 + [c7c]+0x200 の 0x200 IRQ SP。0x40 パラはイメージ+0x1400（0x23BA）で止まり ISR SP は 0x25BA なのでスタックが次 COM に着いた。 */
 				extraParas += 0xA0u;
 		}
 		if (extraParas <= 0x180u && !isMmd)
 			extraParas = 0;
 
-		/* MUSE/SDD devices pick IRQ from SSG I/O A bits7-6; force INT14 path. */
+		/* MUSE/SDD デバイスは SSG I/O A bits7-6 から IRQ を選ぶ。INT14 経路を強制 */
 		if (chip_ && (strstr(name, "MUSE") || strstr(name, "muse")
 			|| strstr(name, "SDD") || strstr(name, "sdd")
 			|| strstr(name, "MMD") || strstr(name, "mmd")
@@ -5472,9 +5144,7 @@ int CHardPc98::RunDosDevices(const CEmuGameEntry* ge, uint64_t budgetCycles)
 			continue;
 		if (isMmd)
 			g_mmdLoadSeg = loadSeg;
-		/* Classic MMD.SYS: OPN ports are filled by AH=0 detect (1a38).
-		   mmd2.com never sends AH=0, so 154A stays 0 and every 05d9/048a
-		   write hits port 0 (PIC) instead of 188h. */
+		/* 古典 MMD.SYS: OPN ポートは AH=0 検出（1a38）が埋める。mmd2.com は AH=0 を送らないので 154A は 0 のまま、05d9/048a 書が 188h ではなくポート 0（PIC）に当たる。 */
 		if (g_mmdClassic && mem && loadSeg) {
 			const unsigned lin = Pc98DosLin(loadSeg, 0);
 			if (lin + 0x154Du < 0x200000u) {
@@ -5484,8 +5154,7 @@ int CHardPc98::RunDosDevices(const CEmuGameEntry* ge, uint64_t budgetCycles)
 				mem[lin + 0x154D] = 0x01;
 			}
 		}
-		/* wiz6 $MUSE2$ keeps `MOV SP,005Fh` at CS:E2 (derby's image does
-		   not). Raise it in the loaded copy even if the SYS-name patch missed. */
+		/* wiz6 $MUSE2$ は CS:E2 に `MOV SP,005Fh` を保つ（derby イメージは無い）。SYS 名パッチが外れてもロード済みコピーで上げる。 */
 		if (mem && loadSeg) {
 			const unsigned lin = Pc98DosLin(loadSeg, 0);
 			if (lin + 0xE4u < 0x200000u && mem[lin + 0xE2] == 0xBC
@@ -5506,13 +5175,7 @@ int CHardPc98::RunDosDevices(const CEmuGameEntry* ge, uint64_t budgetCycles)
 		memset(mem + req, 0, 0x60);
 		mem[req + 0] = 0x22;
 		mem[req + 2] = 0x00; /* INIT */
-		/* Char-device INIT +12h is a far pointer to the CONFIG.SYS tail
-		   (space + args + CR). MMD2.SYS walks it for the 4096-byte buffer
-		   size; a NULL ptr made LDS SI from 0000:0000 and left CX=0 so
-		   mmd2.com's AH=3F song read transferred nothing (dumps=1).
-		   Packet used to live at 0050:0100 (lin 0x600) — that is the INT
-		   trampoline (0060:0000). memset 0x60 wiped INT 21's HLT stub so
-		   SYS/glue AH=25 never hooked D2/7F. */
+		/* 文字デバイス INIT +12h は CONFIG.SYS 末尾への far ポインタ（空白 + 引数 + CR）。MMD2.SYS は 4096 バイトバッファサイズを歩く。NULL ptr は 0000:0000 から LDS SI し CX=0 のまま mmd2.com の AH=3F 曲読が何も転送しなかった（dumps=1）。パケットは 0050:0100（lin 0x600）にあった — それは INT トランポリン（0060:0000）。memset 0x60 が INT 21 の HLT stub を消し SYS/糊 AH=25 が D2/7F をフックしなかった。 */
 		{
 			char argbuf[80];
 			int ai = 0;
@@ -5531,11 +5194,7 @@ int CHardPc98::RunDosDevices(const CEmuGameEntry* ge, uint64_t budgetCycles)
 			mem[req + 0x15] = (uint8_t)(reqSeg >> 8);
 			Pc98Wr16(mem, req + 0x0E, 0);
 			Pc98Wr16(mem, req + 0x10, 0x9000);
-			/* MMD2.SYS INIT does LDS SI,ES:[2C] then LDS SI,[SI+12] to reach
-			   the CONFIG tail (4026-byte: orangerd/michael). Newer 4655-byte
-			   (mjclnc/sbp/shikinjo) uses ES:[34] the same way. When ES is
-			   still the packet segment the far pointer at packet+2C/+34
-			   must be the packet itself so [SI+12] is the CONFIG ptr. */
+			/* MMD2.SYS INIT は LDS SI,ES:[2C] のあと LDS SI,[SI+12] で CONFIG 末尾へ（4026 バイト: orangerd/michael）。新しい 4655 バイト（mjclnc/sbp/shikinjo）は ES:[34] を同じ使い方。ES がまだパケットセグメントなら packet+2C/+34 の far ポインタはパケット自身で、[SI+12] が CONFIG ptr。 */
 			if (isMmd) {
 				Pc98Wr16(mem, req + 0x2C, reqOff);
 				Pc98Wr16(mem, req + 0x2E, reqSeg);
@@ -5548,7 +5207,7 @@ int CHardPc98::RunDosDevices(const CEmuGameEntry* ge, uint64_t budgetCycles)
 		const uint16_t stratPtr = 0x0040;
 		const uint16_t intrPtr = 0x0044;
 		const unsigned L0 = Pc98DosLin(launchSeg, 0);
-		/* MOV AX,reqSeg; MOV ES,AX; MOV BX,reqOff; CALL FAR [stratPtr] */
+		/* MOV AX,reqSeg; MOV ES,AX; MOV BX,reqOff; CALL FAR [stratPtr]（リクエスト実行） */
 		mem[L0 + 0x00] = 0xB8;
 		mem[L0 + 0x01] = (uint8_t)(reqSeg & 0xff);
 		mem[L0 + 0x02] = (uint8_t)(reqSeg >> 8);
@@ -5581,10 +5240,7 @@ int CHardPc98::RunDosDevices(const CEmuGameEntry* ge, uint64_t budgetCycles)
 		Pc98Wr16(mem, Pc98DosLin(launchSeg, intrPtr), intrOff);
 		Pc98Wr16(mem, Pc98DosLin(launchSeg, intrPtr) + 2, loadSeg);
 
-		/* MUSE3 plants INT14 on DEVICE OPEN (cmd 0x0D), not INIT: DOS 5+
-		   INIT skips call 6cd. muse_98.com then takes IVT[0x52] as the
-		   driver CS and far-calls [CS:8]. Trampoline CS writes 0060:0012
-		   and #BRs before AH=25 INT7F. MUSIC.SYS is not this family. */
+		/* MUSE3 は DEVICE OPEN（cmd 0x0D）で INT14 を植える。INIT ではない: DOS 5+ INIT は call 6cd を飛ばす。muse_98.com は IVT[0x52] をドライバ CS とし [CS:8] を far 呼。トランポリン CS は 0060:0012 を書き AH=25 INT7F 前に #BR。MUSIC.SYS はこの族ではない。 */
 		int museOpen = 0;
 		if (!_strnicmp(name, "muse", 4) || !_strnicmp(name, "nmuse", 5)
 			|| !_strnicmp(name, "sdd", 3))
@@ -5608,10 +5264,7 @@ int CHardPc98::RunDosDevices(const CEmuGameEntry* ge, uint64_t budgetCycles)
 			while (cpuCycles_ - start < passBudget) {
 				if (stubState_ == 0x82)
 					break;
-				/* MUSE/NMUSE/SDD/MUSE2 device stacks are tiny; a nested
-				   INT14 tick during INIT/OPEN re-enters the ISR on the same SP.
-				   MMD2 plants INT14 then STI before RETF — skip nested IRQ
-				   the same way. */
+				/* MUSE/NMUSE/SDD/MUSE2 デバイススタックは小さい。INIT/OPEN 中の入れ子 INT14 tick が同じ SP で ISR 再入。MMD2 は INT14 を植えて RETF 前に STI — 入れ子 IRQ を同じように飛ばす。 */
 				if (!museOpen && !isMmd && DeliverIrqs())
 					continue;
 				uint16_t cs = np2_reg_get(NP2_R_CS);
@@ -5646,9 +5299,7 @@ int CHardPc98::RunDosDevices(const CEmuGameEntry* ge, uint64_t budgetCycles)
 				AdvanceOpnClocks(u);
 			}
 		}
-		/* wiz6 MUSE2 OPEN `MOV SP,005Fh` can smash the header including
-		   the interrupt pointer at [CS:8]; muse_98 then far-calls 0014.
-		   Re-raise SP in case INIT/OPEN ran before the first patch. */
+		/* wiz6 MUSE2 OPEN `MOV SP,005Fh` は [CS:8] の割り込みポインタを含むヘッダを壊し得る。muse_98 は 0014 を far 呼。最初のパッチ前に INIT/OPEN が走っても SP を再上げ。 */
 		if (mem && loadSeg) {
 			const unsigned lin = Pc98DosLin(loadSeg, 0);
 			if (lin + 0xE4u < 0x200000u && mem[lin + 0xE2] == 0xBC
@@ -5665,8 +5316,7 @@ int CHardPc98::RunDosDevices(const CEmuGameEntry* ge, uint64_t budgetCycles)
 				Pc98Wr16(mem, lin + 8u, intrOff);
 				g_muse2Seg = loadSeg;
 				g_muse2Intr = intrOff;
-				/* muse_98 far-calls 0014 when OPEN smashed [CS:8].
-				   Near JMP to the interrupt routine (header name+4). */
+				/* OPEN が [CS:8] を壊したとき muse_98 は 0014 を far 呼。割り込みルーチン（ヘッダ名+4）への near JMP */
 				if (lin + 0x17u < 0x200000u && intrOff > 0x17u) {
 					mem[lin + 0x14] = 0xE9;
 					Pc98Wr16(mem, lin + 0x15u,
@@ -5674,11 +5324,7 @@ int CHardPc98::RunDosDevices(const CEmuGameEntry* ge, uint64_t budgetCycles)
 				}
 			}
 		}
-		/* MMD.SYS (sbr): parse 0619 sets duration [ch+2]=1 but never gate
-		   [ch+3]. Note 0849 copies gate→duration; gate 0 makes 0732 RET
-		   the channel forever (keys=1 from the A0 assist, then SILENT).
-		   AH=3 at 0143 also `rep stos` from 17F4 and wipes this poke —
-		   MmdPlayAssist re-applies after parse. */
+		/* MMD.SYS（sbr）: 解析 0619 は duration [ch+2]=1 を置くがゲート [ch+3] は置かない。ノート 0849 はゲート→duration をコピー。ゲート 0 は 0732 がチャネルを永久 RET（A0 補助から keys=1、その後 SILENT）。0143 の AH=3 も 17F4 から `rep stos` しこの poke を消す — 解析後に MmdPlayAssist が再適用。 */
 		if (g_mmdClassic && mem && loadSeg) {
 			const unsigned lin = Pc98DosLin(loadSeg, 0);
 			const unsigned base = lin + 0x180Fu;
@@ -5687,9 +5333,7 @@ int CHardPc98::RunDosDevices(const CEmuGameEntry* ge, uint64_t budgetCycles)
 				if (gate < 0x200000u && mem[gate] == 0)
 					mem[gate] = 1;
 			}
-			/* Classic INIT does not AH=25 the YM ISR (that is AH=0 /
-			   1d1b). mmd2.com glue never sends AH=0, so INT0B/14 stay
-			   trampolines and AH=3 spins on [17F4] (sbr SILENT). */
+			/* 古典 INIT は YM ISR を AH=25 しない（それは AH=0 / 1d1b）。mmd2.com 糊は AH=0 を送らないので INT0B/14 はトランポリンのまま、AH=3 は [17F4] でスピン（sbr SILENT）。 */
 			if (lin + 0x396u < 0x200000u && mem[lin + 0x392] == 0x2E
 				&& mem[lin + 0x393] == 0x8C) {
 				if (!IvtHooked(0x14, 1)) {
@@ -5724,10 +5368,7 @@ int CHardPc98::RunDosDevices(const CEmuGameEntry* ge, uint64_t budgetCycles)
 				Pc98Wr16(mem, 0x14u * 4u + 2u, loadSeg);
 			}
 		}
-		/* SDD 26 + DOS 5: INIT skips plant and OPEN's [152E]==0 path
-		   never writes IVT 14 (ishido dumps=1). ISR lives at CS:09BF.
-		   Force-plant even if INT14 already has a stub — IvtHooked
-		   skipped the real 09BF and left dumps=1. */
+		/* SDD 26 + DOS 5: INIT は植を飛ばし OPEN の [152E]==0 経路は IVT 14 を書かない（ishido dumps=1）。ISR は CS:09BF。INT14 に既 stub があっても強制植 — IvtHooked は本物 09BF を飛ばし dumps=1 のまま。 */
 		if (!_strnicmp(name, "sdd", 3) && mem && loadSeg) {
 			const unsigned lin = Pc98DosLin(loadSeg, 0);
 			if (lin + 0x9C2u < 0x200000u && mem[lin + 0x9BF] == 0xFA) {
@@ -5740,9 +5381,7 @@ int CHardPc98::RunDosDevices(const CEmuGameEntry* ge, uint64_t budgetCycles)
 				g_sddLoadSeg = loadSeg;
 			}
 		}
-		/* MUDRV3 SYS-in-EXE: strategy stores the request at [CS:1B]; INIT
-		   often returns before AH=25 INT 43. The API lives at CS:0248
-		   (PUSHA / CLD / CLI / AH dispatch). LW1CD_98 talks INT 43. */
+		/* MUDRV3 SYS-in-EXE: strategy は要求を [CS:1B] に格納。INIT はしばしば AH=25 INT 43 前に戻る。API は CS:0248（PUSHA / CLD / CLI / AH 配送）。LW1CD_98 は INT 43 で話す。 */
 		if (!_strnicmp(name, "mudrv", 5) && mem && loadSeg) {
 			const unsigned api = Pc98DosLin(loadSeg, 0x248);
 			if (api + 6u < 0x200000u && mem[api] == 0x60 && mem[api + 1] == 0x1E
@@ -5758,6 +5397,7 @@ int CHardPc98::RunDosDevices(const CEmuGameEntry* ge, uint64_t budgetCycles)
 	return nOk;
 }
 
+/* CPU を進める */
 int CHardPc98::RunDosCommand(const char* cmdline, uint64_t budgetCycles)
 {
 	char stripped[256];
@@ -5788,7 +5428,7 @@ int CHardPc98::RunDosCommand(const char* cmdline, uint64_t budgetCycles)
 			mem[slot] = 0x00;
 			mem[slot + 1] = 0x80;
 		}
-		/* One-shot INT08 CALL FAR [3B6C] — BSS is 0000:0000. */
+		/* ワンショット INT08 CALL FAR [3B6C] — BSS は 0000:0000 */
 		if (base + 0x3B71u < 0x200000u) {
 			mem[base + 0x3B6C] = 0x70;
 			mem[base + 0x3B6D] = 0x3B;
@@ -5868,7 +5508,7 @@ int CHardPc98::RunDosCommand(const char* cmdline, uint64_t budgetCycles)
 				dos_.IretReturn(m);
 				continue;
 			}
-			/* Genuine idle HLT — advance timers. */
+			/* 本物のアイドル HLT — タイマを進める */
 			PatchSynth98PaiDest(m, dos_.PspSeg());
 			const uint64_t q = 200;
 			cpuCycles_ += q;
@@ -5885,6 +5525,7 @@ int CHardPc98::RunDosCommand(const char* cmdline, uint64_t budgetCycles)
 	return stubState_ == 0x81 ? 1 : 0;
 }
 
+/* CHardPc98::BootDos の実装 */
 int CHardPc98::BootDos(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode)
 {
 	if (!fs || !ge) return 0;
@@ -5906,11 +5547,7 @@ int CHardPc98::BootDos(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCod
 	dos_.InstallTrampolines(mem);
 	dos_.InstallDosStructures(mem);
 	PlantPc98BiosTimer(mem);
-	/* DOS packs can still depend on fixed firmware/code images.  In
-	   particular, PONYCA's MSCDRV front end probes the SOUND.ROM signature
-	   at CEE0:0004 and installs INT D2 from that ROM before exposing INT 7E.
-	   The early isDos_ return in LoadRoms used to skip every code/binary ROM,
-	   leaving a valid-looking INT 7E wrapper backed by the DOS D2 trampoline. */
+	/* DOS パックはまだ固定ファーム／コードイメージに依存し得る。特に PONYCA の MSCDRV フロントは CEE0:0004 の SOUND.ROM シグネチャを探り、INT 7E を出す前にその ROM から INT D2 を入れる。LoadRoms の早い isDos_ return は全 code/binary ROM を飛ばし、DOS D2 トランポリンに裏打ちされた見掛け INT 7E ラッパを残した。 */
 	for (int i = 0; i < ge->romCount; i++) {
 		const CEmuRomEntry* r = &ge->rom[i];
 		if (_stricmp(r->type, "code") != 0 && _stricmp(r->type, "binary") != 0
@@ -5935,7 +5572,7 @@ int CHardPc98::BootDos(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCod
 			n = 0x200000u - off;
 		memcpy(mem + off, data, n);
 	}
-	/* PC-98 BIOS ROM window + text VRAM + MEMSW + BIOS work. */
+	/* PC-98 BIOS ROM 窓 + テキスト VRAM + MEMSW + BIOS 作業 */
 	PlantPc98BiosMap(mem);
 	MaterializeDosFiles(fs, ge);
 	{
@@ -5958,26 +5595,21 @@ int CHardPc98::BootDos(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCod
 	if (sf) {
 		strncpy_s(dosSong_, sf, _TRUNCATE);
 		dos_.SetHandle(0x0B, sf);
-		/* Pearlsoft OPN rows are catalog midiout=1 (same zip as GS /m).
-		   Leave modeMidi_ on and IRQ0 storms; MUSDRV /f then never ticks
-		   Timer B (dumps 174 vs historical 1032). */
+		/* Pearlsoft OPN 行はカタログ midiout=1（GS /m と同じ zip）。modeMidi_ を残すと IRQ0 嵐。MUSDRV /f は Timer B を進めない（dumps 174 vs 歴史 1032）。 */
 		{
 			const char* ext = strrchr(sf, '.');
 			if (ext && (_stricmp(ext, ".FM") == 0 || _stricmp(ext, ".OPN") == 0))
 				modeMidi_ = 0;
 		}
-		/* fugam boot AH=3F BX=5 then INT D3 AX=0201; bind before shells or
-		   the 0-byte read poisons FMD. FMD /# also needs handle 0. */
+		/* fugam ブート AH=3F BX=5 のあと INT D3 AX=0201。シェル前にバインドしないと 0 バイト読が FMD を毒する。FMD /# もハンドル 0 が要る。 */
 		static const char* kFmdFugam[] = { "FMD", "fugam", NULL };
 		if (DosShellStarts(ge, kFmdFugam)) {
-			/* Boot: AH=3F BX=5 then INT D3 AX=0201 AH=3D-opens DS:SI.
-			   Filename text on 5; raw .GS on 0 would make AH=3D fail. */
+			/* ブート: AH=3F BX=5 のあと INT D3 AX=0201 が DS:SI を AH=3D 開。5 はファイル名テキスト。0 の生 .GS は AH=3D 失敗。 */
 			dos_.SetHandleText(5, sf);
 			dos_.SetHandle(0, sf);
 		}
 	}
-	/* VALKY_98 AH=3F BX=5 first (CF stays 0 on a 0-byte unused handle),
-	   so SSCP on catalog handle 6 is never reached. Alias 5←6. */
+	/* VALKY_98 は先に AH=3F BX=5（未使用ハンドル 0 バイトでも CF は 0 のまま）なのでカタログハンドル 6 の SSCP に届かない。5←6 エイリアス。 */
 	{
 		static const char* kValkyH[] = { "VALKY_98", "valky", NULL };
 		if (DosShellStarts(ge, kValkyH)) {
@@ -6042,9 +5674,7 @@ int CHardPc98::BootDos(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCod
 	opnLogCount_ = 0;
 	opnTailCount_ = 0;
 
-	/* BIOS PIT counts from power-on. IRQ0 stays masked on FM (OPN Timer B
-	   is the sequencer); midi/beep need the daily timer during TSR detect
-	   (FMD stores the MPU version at CS:[1798] after a timed ACK wait). */
+	/* BIOS PIT は電源投入から数える。FM では IRQ0 はマスクのまま（シーケンサは OPN Timer B）。midi/beep は TSR 検出中に日時計が要る（FMD は時間付き ACK 待ちのあと CS:[1798] に MPU 版を格納）。 */
 	if (!pitRunning_) {
 		pitReload_ = (uint16_t)(PC98_PIT_CLOCK_HZ / 60);
 		if (pitReload_ == 0) pitReload_ = 1;
@@ -6055,18 +5685,13 @@ int CHardPc98::BootDos(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCod
 	}
 	if (modeMidi_ || modeBeep_)
 		picMask_ = (uint8_t)(picMask_ & 0xfeu);
-	/* MMD.COM /I auto plants INT 0E and waits for MPU clock-to-host FD.
-	   It never OUTs PIC mask port 02h, so IRQ6 must already be live or
-	   the probe STC-fails and INT 61 is never hooked (dosmiss=int61). */
+	/* MMD.COM /I は INT 0E を自動植し MPU clock-to-host FD を待つ。PIC マスクポート 02h へは OUT しないので、IRQ6 が既に生きていないとプローブが STC 失敗し INT 61 がフックされない（dosmiss=int61）。 */
 	if (modeMidi_)
 		picMask_ = (uint8_t)(picMask_ & (uint8_t)~(1u << 6));
 
-	/* Generous shell budget: PMDB2+PMDPCM packs need several seconds.
-	   imd_1 (PMDB2 without #/Mxx): catalog PMD→PCM→glue re-inits and drops
-	   the PPC bank — run glue before PCM. Packs with #/Mxx (imd_2..4,
-	   fc98v13) need catalog order (glue last). */
-	const uint64_t setupBudget = (uint64_t)cpuHz_ * 8ull; /* ~8s per shell */
-	/* mbmusp/MUSDRV: SSG I/O A bits7-6 select INT14; EOI assumes slave. */
+	/* 余裕あるシェル予算: PMDB2+PMDPCM パックは数秒要る。imd_1（#/Mxx 無し PMDB2）: カタログ PMD→PCM→糊が再 init し PPC バンクを落とす — PCM 前に糊を走る。#/Mxx パック（imd_2..4、fc98v13）はカタログ順（糊最後）。 */
+	const uint64_t setupBudget = (uint64_t)cpuHz_ * 8ull; /* シェルあたり約 8 秒 */
+	/* mbmusp/MUSDRV: SSG I/O A bits7-6 が INT14 を選ぶ。EOI はスレーブを仮定 */
 	static const char* kSsgJumperShell[] = {
 		"mbmus", "MBMUS", "musdrv", "MUSDRV", "muse", "MUSE",
 		"fplay", "FPLAY",
@@ -6080,8 +5705,7 @@ int CHardPc98::BootDos(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCod
 		chip_->Write(1, 0xC0);
 		opnLatchedAddr_ = 0x0E;
 	}
-	/* shangva/demo_va: rom type=device (MUSIC.SYS/DEMO2.SYS) must INIT
-	   before the glue shell so INT C8/C3 exist for play/stop. */
+	/* shangva/demo_va: rom type=device（MUSIC.SYS/DEMO2.SYS）は糊シェル前に INIT し、再生／停止用 INT C8/C3 を用意 */
 	RunDosDevices(ge, setupBudget);
 	int hasGlue = 0, hasPcm = 0, hasHashM = 0;
 	for (int i = 0; i < ge->romCount; i++) {
@@ -6117,9 +5741,7 @@ int CHardPc98::BootDos(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCod
 			if (_stricmp(r->type, "shell") != 0) continue;
 			const char* sn = r->name ? r->name : "";
 			while (*sn == ' ' || *sn == '\t' || *sn == '#') sn++;
-			/* olteus_va: MUSIC.EXE is a 1KB OPN probe that OUT 44/45 and
-			   AH=4C-exits. Running it first stamps the same SSG blip onto
-			   every title; MAP.EXE overlay (olteus.com AH=4B03) is the player. */
+			/* olteus_va: MUSIC.EXE は 1KB OPN プローブで OUT 44/45 し AH=4C 終了。先に走ると全タイトルに同じ SSG ブリップが刻まれる。プレイヤは MAP.EXE オーバーレイ（olteus.com AH=4B03）。 */
 			static const char* kOlteusSkipMus[] = { "olteus", NULL };
 			if (DosShellStarts(ge, kOlteusSkipMus)
 				&& _strnicmp(sn, "MUSIC", 5) == 0)
@@ -6133,9 +5755,7 @@ int CHardPc98::BootDos(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCod
 	}
 	dosStubReady_ = (stubState_ == 0x81) ? 1 : dosStubReady_;
 	PatchSynth98PaiDest(mem, dos_.PspSeg());
-	/* PC-88VA DOS overlays (tetrisva/shinrava/famista89): OPN ISR on INT14.
-	   Mirror to INT0B when missing so DeliverIrqs can tick the sequencer.
-	   olteus plays via IRQ0→MAP:09BC; INT14-only starved MUSIC 02. */
+	/* PC-88VA DOS オーバーレイ（tetrisva/shinrava/famista89）: OPN ISR は INT14。欠けるとき INT0B へミラーし DeliverIrqs がシーケンサを進められるように。olteus は IRQ0→MAP:09BC で再生。INT14 のみは MUSIC 02 を飢えた。 */
 	{
 		static const char* kOlteusNo14[] = { "olteus", NULL };
 		if (mem && pc88VaIo_ && !IvtHooked(PC98_OPN_IRQ_VEC, 1) && IvtHooked(0x14, 1)
@@ -6149,8 +5769,7 @@ int CHardPc98::BootDos(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCod
 		picMask_ = (uint8_t)(picMask_ & ~(1u << 3));
 		}
 	}
-	/* rtypeva: COM plants OPN on INT0A → far 0C1B (VA ports). MAIN also
-	   parks a PC-98-port ISR on INT14 — do NOT prefer that for VA play. */
+	/* rtypeva: COM は INT0A に OPN を植え far 0C1B（VA ポート）。MAIN は INT14 に PC-98 ポート ISR も置く — VA 再生でそれを優先しない。 */
 	static const char* kRtype[] = { "rtype", NULL };
 	if (mem && pc88VaIo_ && DosShellStarts(ge, kRtype) && IvtHooked(0x0A, 1)) {
 		const unsigned o0a = (unsigned)mem[0x0A * 4] | ((unsigned)mem[0x0A * 4 + 1] << 8);
@@ -6161,8 +5780,7 @@ int CHardPc98::BootDos(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCod
 		mem[PC98_OPN_IRQ_VEC * 4 + 3] = (uint8_t)((s0a >> 8) & 0xff);
 		picMask_ = (uint8_t)(picMask_ & ~((1u << 2) | (1u << 3)));
 	}
-	/* olteus_va: remember MAP.EXE load seg (COM far-table [01C4]) and plant
-	   INT08 → near tick trampoline once play is armed. */
+	/* olteus_va: MAP.EXE ロード seg（COM far 表 [01C4]）を覚え、再生武装後に INT08 → near tick トランポリンを植える */
 	olteusMapSeg_ = 0;
 	olteusDataSeg_ = 0;
 	olteusTimerOn_ = 0;
@@ -6178,7 +5796,7 @@ int CHardPc98::BootDos(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCod
 			| ((unsigned)mem[Pc98DosLin(psp, 0x1C5)] << 8);
 		if (mapSeg && mapSeg != (unsigned)DOS98_TRAMP_SEG)
 			ArmOlteusVaTimer((uint16_t)mapSeg);
-		/* Finish MAP handshake before INT18 idle — COM returns early. */
+		/* INT18 アイドル前に MAP ハンドシェイクを終える — COM は早く戻る */
 		if (olteusMapSeg_ && olteusDataSeg_) {
 			olteusTimerOn_ = 1;
 			const uint64_t hsBudget = (uint64_t)cpuHz_ * 2ull;
@@ -6193,18 +5811,10 @@ int CHardPc98::BootDos(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCod
 			}
 		}
 	}
-	/* PMD often installs the OPN ISR then leaves master mask FF; if IVT0B is
-	   hooked, unmask IRQ3 so OPN timers can run. */
+	/* PMD はしばしば OPN ISR を入れてマスタマスク FF のまま。IVT0B がフックされていれば IRQ3 を外し OPN タイマが走れるように。 */
 	if (mem && IvtHooked(PC98_OPN_IRQ_VEC, 1))
 		picMask_ = (uint8_t)(picMask_ & ~(1u << 3));
-	/* usd_98 (ASCII USO): USD hooks only INT F2 (memcpy stub). Play goes
-	   through INT F4 which ADVBIOS owns (AH=0 load / AH=1 play / …).
-	   Do NOT mirror F2→F4 — that wiped the ADVBIOS API and left keyOn=0.
-	   If F4 was never hooked, fall back to F2. INT F3 is an AH-multiplex
-	   API (not the OPN timer ISR) — do not plant it on INT0B.
-	   ADVBIOS.OVL packs often hang in far486 waiting on IN 60h bit5
-	   (never toggles here) after F2/F4/far-table are ready but before
-	   INT7F is planted — finish the install from the host. */
+	/* usd_98（ASCII USO）: USD は INT F2 だけフック（memcpy stub）。再生は ADVBIOS 所有の INT F4（AH=0 ロード / AH=1 再生 / …）。F2→F4 をミラーしない — ADVBIOS API を消し keyOn=0。F4 が未フックなら F2 にフォールバック。INT F3 は AH 多重 API（OPN タイマ ISR ではない）— INT0B に植えない。ADVBIOS.OVL パックは F2/F4/far 表が揃ったあと INT7F 植前に far486 で IN 60h bit5（ここではトグルしない）待ちでハングしがち — ホストからインストールを終える。 */
 	static const char* kUsd[] = { "usd_98", "usd98", NULL };
 	if (mem && DosShellStarts(ge, kUsd)) {
 		const unsigned f2o = (unsigned)mem[0xF2 * 4] | ((unsigned)mem[0xF2 * 4 + 1] << 8);
@@ -6230,7 +5840,7 @@ int CHardPc98::BootDos(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCod
 				mem[0x7F * 4 + 1] = 0x01;
 				mem[0x7F * 4 + 2] = (uint8_t)(f2s & 0xff);
 				mem[0x7F * 4 + 3] = (uint8_t)((f2s >> 8) & 0xff);
-				/* Park at USD HLT idle (CS:01BD). */
+				/* USD HLT アイドル（CS:01BD）にパーク */
 				if (base + 0x1BF < 0x200000u) {
 					mem[base + 0x1BD] = 0xF4;
 					mem[base + 0x1BE] = 0xEB;
@@ -6241,12 +5851,7 @@ int CHardPc98::BootDos(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCod
 				stubState_ = 0x81;
 			}
 		}
-		/* ADVH USD (1585/1599): INT7F idle at HLT @022E after install.
-		   Some ADVH.EXE builds use a DS=loadSeg decrypt stub at MZ entry
-		   (IP in 0x120..0x200, xor-loop then jmp 0010) that USD's 0395/0402
-		   miss when the TC0/EXEPACK signatures differ — F1 stays trampoline
-		   while the MZ header + overlay body sit at [0706]/[0706]+10.
-		   Finish that entry on the host, then plant INT7F + park. */
+		/* ADVH USD（1585/1599）: インストール後 HLT @022E で INT7F アイドル。一部 ADVH.EXE ビルドは MZ 入口に DS=loadSeg 復号 stub（IP 0x120..0x200、xor ループ後 jmp 0010）。TC0/EXEPACK シグネチャが違うと USD の 0395/0402 が外し、[0706]/[0706]+10 に MZ ヘッダ＋オーバーレイ本体があるのに F1 はトランポリン。ホストでその入口を終え、INT7F を植えてパーク。 */
 		{
 			unsigned usdCs = 0;
 			const unsigned cur7f = (unsigned)mem[0x7F * 4 + 2]
@@ -6290,9 +5895,7 @@ int CHardPc98::BootDos(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCod
 				stubState_ = 0x81;
 			}
 		}
-		/* Name-load ADVH: finish dual-seg data / ISR DS consistency and
-		   plant INT0B on the OEM music ISR while BootDos still owns the
-		   resident image (before TriggerPlay song I/O). */
+		/* 名前ロード ADVH: 双セグメント data / ISR DS 一貫を終え、BootDos が常駐イメージを持つ間（TriggerPlay 曲 I/O 前）に OEM 音楽 ISR へ INT0B を植える */
 		{
 			const unsigned sF1 = (unsigned)mem[0xF1 * 4 + 2]
 				| ((unsigned)mem[0xF1 * 4 + 3] << 8);
@@ -6301,12 +5904,7 @@ int CHardPc98::BootDos(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCod
 				picMask_ = (uint8_t)(picMask_ & ~(1u << 3));
 		}
 	}
-	/* Crowd CMD/CMDP: OPN probe at CS:2393 programs the chip then clears
-	   [CS:1792] on the all-CF=0 path. INT60 play (idx1) spins while
-	   [1792] < 1, so song reads succeed but keyOns never start. Later play
-	   steps also require [1792]==1 exactly (not 2/3/4 from probe stages).
-	   Music ISR is installed on INT14 (same as MADP/N3GOLF); mirror to
-	   INT0B so DeliverIrqs can fire OPN timer ticks. */
+	/* Crowd CMD/CMDP: CS:2393 の OPN プローブがチップを組んだあと全 CF=0 経路で [CS:1792] をクリア。INT60 再生（idx1）は [1792] < 1 の間スピンするので曲読は成功するが keyOn が始まらない。後の再生段階も [1792]==1 ちょうどが要る（プローブ段階の 2/3/4 ではない）。音楽 ISR は INT14（MADP/N3GOLF と同じ）。INT0B へミラーし DeliverIrqs が OPN タイマ tick を撃てるように。 */
 	static const char* kCmd[] = { "CMD", "CMDP", NULL };
 	if (mem && DosShellStarts(ge, kCmd)) {
 		const unsigned o60 = (unsigned)mem[0x60 * 4] | ((unsigned)mem[0x60 * 4 + 1] << 8);
@@ -6318,8 +5916,7 @@ int CHardPc98::BootDos(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCod
 			unsigned o14 = (unsigned)mem[0x14 * 4] | ((unsigned)mem[0x14 * 4 + 1] << 8);
 			unsigned s14 = (unsigned)mem[0x14 * 4 + 2] | ((unsigned)mem[0x14 * 4 + 3] << 8);
 			if (s14 == 0 || s14 == (unsigned)DOS98_TRAMP_SEG) {
-				/* Install path was skipped ([1792]==0 at hook time). Locate
-				   ISR prologue in the resident CMD image and plant INT14. */
+				/* インストール経路が飛ばされた（フック時 [1792]==0）。常駐 CMD イメージ内の ISR プロローグを探し INT14 を植える */
 				static const uint8_t kIsr[] = { 0x9C, 0x60, 0x55, 0x1E, 0x06, 0xFA };
 				const unsigned base = (unsigned)s60 << 4;
 				unsigned found = 0;
@@ -6351,11 +5948,7 @@ int CHardPc98::BootDos(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCod
 			(void)o60;
 		}
 	}
-	/* HuLinks fakecall→music→46: MUSIC.COM parks the OPN ISR on INT14.
-	   Mirror to INT0B only — do NOT also plant the same ISR on INT08/PIT.
-	   Dual delivery (OPN + PIT) double-ticks the sequencer: 46oku fades out
-	   as [0294] hits 0x10 early and mute-alls. Channel freeze was from the
-	   cmd2→AH=1 mute path, not from missing PIT. */
+	/* HuLinks fakecall→music→46: MUSIC.COM は INT14 に OPN ISR を置く。INT0B へだけミラー — 同じ ISR を INT08/PIT にも植えない。二重配送（OPN + PIT）はシーケンサを倍 tick: 46oku は [0294] が早く 0x10 になり mute-all でフェードアウト。チャネル凍結は欠 PIT ではなく cmd2→AH=1 mute 経路。 */
 	static const char* kStarcmd[] = { "fakecall", "music", "MUSIC", "46", NULL };
 	if (mem && DosShellStarts(ge, kStarcmd)) {
 		musicComKeepalive_ = 1;
@@ -6374,7 +5967,7 @@ int CHardPc98::BootDos(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCod
 		picMask_ = (uint8_t)(picMask_ & 0xfeu);
 		FmxPlantInt60FromPit(np2_mem());
 	}
-	/* BIOS PIT always counts. IRQ0 stays masked unless midi/beep/INT 1C. */
+	/* BIOS PIT は常に数える。IRQ0 は midi/beep/INT 1C 以外マスクのまま */
 	if (!pitRunning_) {
 		pitReload_ = (uint16_t)(PC98_PIT_CLOCK_HZ / 60);
 		if (pitReload_ == 0) pitReload_ = 1;
@@ -6383,15 +5976,7 @@ int CHardPc98::BootDos(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCod
 		pitIrqPending_ = 0;
 		pitResidual_ = 0;
 	}
-	/* Arm MPU capture only after shells finish (FMP -m probe OUTs zeros).
-	   FMD /# AH=2 D58 already streamed GS sysex during fugam boot — do not
-	   wipe that, and stay in intelligent mode.
-	   MMD.COM MIDI (INT 61 + MMP_HOOT) is the same: UART-force + CaptureReset
-	   after /K /D install drops CTH and leaves INT 61 unhooked. Do not match
-	   bare "MMD" — that is also MMD2.SYS.
-	   Pearlsoft MUSDRV /f .FM is catalog-tagged midiout (same zip as GS /m).
-	   UART-force + CaptureReset there made /f skip OPN (historical peak
-	   ~24k went silent). Leave the MPU alone when the bound song is FM. */
+	/* シェル終了後にだけ MPU キャプチャを武装（FMP -m プローブは 0 を OUT）。FMD /# AH=2 D58 は fugam ブート中に既に GS sysex を流した — 消さずインテリジェントモードのまま。MMD.COM MIDI（INT 61 + MMP_HOOT）も同じ: /K /D インストール後の UART 強制 + CaptureReset が CTH を落とし INT 61 未フック。裸 "MMD" に一致させない — それは MMD2.SYS でもある。Pearlsoft MUSDRV /f .FM はカタログ midiout タグ（GS /m と同じ zip）。そこでの UART 強制 + CaptureReset は /f が OPN を飛ばした（歴史ピーク約 24k が無音）。バインド曲が FM なら MPU を触らない。 */
 	int fmSongNoUart = 0;
 	if (dosSong_[0]) {
 		const char* ext = strrchr(dosSong_, '.');
@@ -6403,9 +5988,7 @@ int CHardPc98::BootDos(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCod
 		static const char* kMmdMidi[] = {
 			"MMD /", "MMP_HOOT", "mmp_hoot", "mmd2m", "MMD2M", NULL
 		};
-		/* HOT-B MIDIDRV.EXE (7colors): SMF player. AH=81 play is MPU cmds
-		   88/EC/01/B8/0A then the INT 0E ISR walks the track on CTH FD.
-		   Forcing UART after install made B8 a no-op (midi=01 01). */
+		/* HOT-B MIDIDRV.EXE（7colors）: SMF プレイヤ。AH=81 再生は MPU コマンド 88/EC/01/B8/0A。INT 0E ISR が CTH FD でトラックを歩く。インストール後 UART 強制は B8 を no-op にした（midi=01 01）。 */
 		static const char* kMidiDrvIntel[] = {
 			"MIDIDRV", "mididrv", "7COLM", "7colm", NULL
 		};
@@ -6422,7 +6005,7 @@ int CHardPc98::BootDos(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCod
 		} else {
 			mpuUart_ = 0;
 			midiCapArmed_ = 1;
-			/* Channel-voice after the GS dump can voice OPN for probes. */
+			/* GS ダンプ後のチャネルボイスでプローブ用に OPN を鳴らせる */
 			wolfBridgeEnable_ = 1;
 		}
 		picMask_ = (uint8_t)(picMask_ & 0xfeu);
@@ -6441,20 +6024,18 @@ int CHardPc98::BootDos(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCod
 	return 1;
 }
 
+/* CHardPc98::AdvanceOpnClocks の実装 */
 void CHardPc98::AdvanceOpnClocks(uint64_t cpuCycles)
 {
 	if (!chip_ || cpuCycles == 0 || cpuHz_ <= 0 || opnHz_ <= 0) return;
-	/* Residual carried across calls: the old per-call truncation threw away
-	   most of a clock per instruction, and the DOS INT service path advanced
-	   cpuCycles_ without feeding the chip at all. Together the OPNA saw ~42%
-	   of its master clock, which dragged every FM timer (and so the tempo)
-	   down by the same factor. */
+	/* 呼をまたぐ残余: 旧の呼毎切り捨ては命令あたりのクロック大半を捨て、DOS INT サービス経路はチップへ渡さず cpuCycles_ だけ進めた。合わせて OPNA はマスタクロックの約 42% しか見ず、全 FM タイマ（＝テンポ）が同じ係数で遅れた。 */
 	opnPumpResidual_ += cpuCycles * (uint64_t)opnHz_;
 	const uint64_t ot = opnPumpResidual_ / (uint64_t)cpuHz_;
 	opnPumpResidual_ %= (uint64_t)cpuHz_;
 	if (ot) chip_->AdvanceClocks(ot);
 }
 
+/* IRQ 配送付きで CPU を endCycle まで進める */
 void CHardPc98::PumpCycles(uint64_t endCycle)
 {
 	CEmuHardPc98SetActive(this);
@@ -6487,20 +6068,18 @@ void CHardPc98::PumpCycles(uint64_t endCycle)
 			}
 		}
 
-		/* olteus: after handshake, pulse real IRQ0 → IVT08 trampoline at
-		   MAP:FE86 (PUSH DS; DS=CS; CALL 09BC; POP DS; IRET). Soft near-call
-		   into 8419 nested badly from INT18 idle / MUSIC loops. */
+		/* olteus: ハンドシェイク後、実 IRQ0 を MAP:FE86 の IVT08 トランポリンへパルス（PUSH DS; DS=CS; CALL 09BC; POP DS; IRET）。INT18 アイドル／MUSIC ループからの 8419 へのソフト near 呼は入れ子が悪化した。 */
 		if (olteusIrqPulse_ && olteusMapSeg_) {
 			olteusIrqPulse_ = 0;
 			const unsigned base = (unsigned)olteusMapSeg_ << 4;
 			const unsigned dbase = (unsigned)olteusDataSeg_ << 4;
 			if (mem && base + 0xFE95u < 0x200000u) {
-				/* Keep DS:[5BBA]=0 so 09BC→8419 does not take the early JMP. */
+				/* DS:[5BBA]=0 を保ち 09BC→8419 が早い JMP を取らないように */
 				if (olteusDataSeg_ && dbase + 0x5BBBu < 0x200000u) {
 					mem[dbase + 0x5BBA] = 0;
 					mem[dbase + 0x5BBB] = 0;
 				}
-				/* Re-plant trampoline + IVT each pulse — MAP may rewrite IVT08. */
+				/* パルス毎にトランポリン＋IVT を再植 — MAP が IVT08 を書き直し得る */
 				if (!olteusTrampOk_
 					|| mem[0x08 * 4] != 0x86 || mem[0x08 * 4 + 1] != 0xFE
 					|| mem[0x08 * 4 + 2] != (uint8_t)(olteusMapSeg_ & 0xff)
@@ -6519,10 +6098,7 @@ void CHardPc98::PumpCycles(uint64_t endCycle)
 		ip = np2_reg_get(NP2_R_IP);
 		mem = np2_mem();
 		const unsigned phys = ((unsigned)cs << 4) + (unsigned)ip;
-		/* Sample before the HLT handling below: a driver parked on a HLT that
-		   is not a DOS trap spins here without ever reaching np2_step, which
-		   used to leave the histogram empty for exactly the hangs it exists
-		   to diagnose. */
+		/* 下の HLT 処理の前に標本化: DOS トラップでない HLT にパークしたドライバはここを回り np2_step に届かず、診断用ヒストグラムがまさにそのハングで空になっていた。 */
 		if (g_ipProf)
 			g_ipProf->Note(phys);
 		if (isDos_ && mem && phys < 0x200000 && mem[phys] == 0xF4) {
@@ -6532,8 +6108,7 @@ void CHardPc98::PumpCycles(uint64_t endCycle)
 					dosSong_[0] ? dosSong_
 						: SelectedDosSong(dosGe_, extSong_), vec);
 				CEmuDos98Result res = dos_.ServiceInt(mem, vec);
-				/* olteus MAP music keeps ticking after COM/EXE TSR or "exit";
-				   aborting PumpCycles froze host timer assist. */
+				/* olteus MAP 音楽は COM/EXE TSR や終了後も tick し続ける。PumpCycles 中断はホストタイマ補助を凍らせた。 */
 				if (res == DOS98_TERMINATED && !olteusMapSeg_)
 					return;
 				if (res == DOS98_RESIDENT && !olteusMapSeg_) {
@@ -6552,8 +6127,7 @@ void CHardPc98::PumpCycles(uint64_t endCycle)
 							continue;
 						}
 					}
-					/* FMX 3.10 ArmSeq INT 60 must run to 196D after FMXP
-					   IRETs into the HLT TSR. Aborting here leaves seq=0. */
+					/* FMX 3.10 ArmSeq INT 60 は FMXP が HLT TSR へ IRET したあと 196D まで走る必要がある。ここで中断すると seq=0。 */
 					if (s_fmxKeepIrq0 || s_valkyKeepIrq0) {
 						dos_.IretReturn(mem);
 						const uint64_t q = 50;
@@ -6593,6 +6167,7 @@ void CHardPc98::PumpCycles(uint64_t endCycle)
 	}
 }
 
+/* 曲再生をトリガする */
 int CHardPc98::TriggerPlay(unsigned titleCode)
 {
 	unsigned song = titleCode & 0xff;
@@ -6624,8 +6199,7 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 					dos_.SetHandle((uint16_t)song, dosSong_);
 			}
 		}
-		/* olteus: MAP opens A:\MUSIC#F/P.MUS — poke digit in CS and all RAM
-		   copies (image is >64K so a 128K CS window can miss DS). */
+		/* olteus: MAP は A:\MUSIC#F/P.MUS を開く — CS と全 RAM コピーの数字を poke（イメージは 64K 超なので 128K CS 窓が DS を外し得る）。 */
 		if (olteusMapSeg_) {
 			uint8_t* mem = np2_mem();
 			const unsigned n = titleCode & 0x0fu;
@@ -6643,8 +6217,7 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 				&& sys->size > 0x9E0u)
 				g_mmd2FnSrc = sys->data + 0x9C0;
 		}
-		/* mmd2.com may AH=25 INT0B to the 03EC IRET stub after SYS INIT
-		   planted 0392. Re-raise the sequencer before the AH=3 wait. */
+		/* mmd2.com は SYS INIT が 0392 を植えたあと INT0B を 03EC IRET stub へ AH=25 し得る。AH=3 待ちの前にシーケンサを再上げ。 */
 		if (g_mmdClassic && g_mmdLoadSeg) {
 			uint8_t* mem = np2_mem();
 			if (mem) {
@@ -6659,8 +6232,7 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 				}
 			}
 		}
-		/* Classic ISR 03CE is the only 27h=15h arm; mmd2.com skips AH=0
-		   so the timer never starts and AH=3 spins on [17F4] forever. */
+		/* 古典 ISR 03CE だけが 27h=15h 武装。mmd2.com は AH=0 を飛ばすのでタイマが始まらず AH=3 が [17F4] で永久スピン。 */
 		if (g_mmdClassic && chip_) {
 			chip_->Write(0, 0x27);
 			chip_->Write(1, 0x15);
@@ -6691,10 +6263,7 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 			}
 		}
 		MmdPlayAssist(np2_mem());
-		/* fugam INT 7F cmd0: AH=3F-reads handle 0 (.GS), INT D3 AH=1
-		   (XOR 0xA5 → FMD tracks into CS:[7]), then AH=3 play.
-		   Boot already INT D3 AX=0201 (GS SysEx to the module). Reload
-		   GS only when the title changes, then always run INT 7F. */
+		/* fugam INT 7F cmd0: ハンドル 0（.GS）を AH=3F 読、INT D3 AH=1（XOR 0xA5 → FMD トラックを CS:[7] へ）、その後 AH=3 再生。ブートは既に INT D3 AX=0201（モジュールへ GS SysEx）。タイトルが変わったときだけ GS 再読、常に INT 7F を走る。 */
 		static const char* kFmdPlay[] = { "FMD", "fugam", NULL };
 		if (dosGe_ && DosShellStarts(dosGe_, kFmdPlay) && IvtHooked(0xD3, 1)) {
 			uint8_t* mem = np2_mem();
@@ -6748,10 +6317,7 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 					(uint16_t)(np2_reg_get(NP2_R_FLAGS) | 0x0200));
 			}
 		} else {
-		/* MFD_98 cmd0: `MOV AL,1` / `INT 7C` (AH left stale) before the
-		   AH=3F read. That INT 7C never returns (reads stay 0, only the
-		   105-byte all-notes-off from AH=1/0 533), so skip it and let
-		   the glue load handle 0 then INT 7C AH=0 play. */
+		/* MFD_98 cmd0: AH=3F 読の前に `MOV AL,1` / `INT 7C`（AH は古い）。その INT 7C は戻らず（読は 0 のまま、AH=1/0 533 の 105 バイト全ノートオフだけ）なので飛ばし、糊がハンドル 0 を載せて INT 7C AH=0 再生。 */
 		{
 			static const char* kMfdAh1[] = { "mfd", "MFD", NULL };
 			if (dosGe_ && DosShellStarts(dosGe_, kMfdAh1)) {
@@ -6799,8 +6365,7 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 				: SelectedDosSong(dosGe_, titleCode);
 			FmxKick310Play(np2_mem(), &dos_, nm);
 			Fmx310EnableYmTimer(chip_);
-			/* FMXP INT 60 indexes BH of saved BX; AX=0600 is set-buffer.
-			   3.10 Kick also patches [BP+12]→[BP+18] (AH). Set both. */
+			/* FMXP INT 60 は保存 BX の BH を添字。AX=0600 はバッファ設定。3.10 Kick は [BP+12]→[BP+18]（AH）もパッチ。両方セット。 */
 			np2_reg_set(NP2_R_BX, 0x0600);
 		}
 		np2_reg_set(NP2_R_FLAGS, (uint16_t)(np2_reg_get(NP2_R_FLAGS) | 0x0200));
@@ -6808,8 +6373,7 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 		uint64_t playDrain = drainBudget;
 		{
 			static const char* kOlteusDrain[] = { "olteus", NULL };
-			/* MUSIC 01 is a ~0.5s phrase; a full drain eats it (peak=78).
-			   Other titles need the 0.5s arm (MUSIC 02 OK 60s). */
+			/* MUSIC 01 は約 0.5s フレーズ。全ドレインはそれを食う（peak=78）。他タイトルは 0.5s 武装が要る（MUSIC 02 は 60s OK）。 */
 			if (dosGe_ && DosShellStarts(dosGe_, kOlteusDrain)
 				&& (titleCode & 0xff) == 1 && cpuHz_ > 20)
 				playDrain = (uint64_t)cpuHz_ / 20ull;
@@ -6962,35 +6526,24 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 					HostWalkMd1(cap, tick, hf->data, hf->size);
 			}
 		}
-		/* Some PMD glue paths (love_ed2 `/i`) need a second play poke after the
-		   song buffer is resident — matches the itest double-trigger behavior.
-		   MSCD_98 cmd0 is not idempotent: it stops, waits 18 retraces, then
-		   starts.  A second poke's shorter budget stopped the new song and
-		   stranded the CPU halfway through its wait. */
+		/* 一部 PMD 糊経路（love_ed2 `/i`）は曲バッファ常駐後に 2 回目の再生 poke が要る — itest の二重トリガと同じ。MSCD_98 cmd0 は冪等ではない: 停止、18 リトレース待ち、開始。2 回目 poke の短い予算は新曲を止め、待ちの途中で CPU を置いた。 */
 		static const char* kMscdPlay[] = { "MSCDRV", "mscd_98", NULL };
 		static const char* kBgmlOnce[] = { "BGML_98", "bgml", NULL };
 		static const char* kSs98Once[] = { "SS_98", "ss_98", NULL };
-		/* MMD2 glue cmd0 INT D2 AH=3 STI-waits [f8f] then loads+AH=1.
-		   A second INT 7F re-enters AH=3 (which does not reprogram 0x27)
-		   and the render pump never leaves that wait (michael/orangerd). */
+		/* MMD2 糊 cmd0 INT D2 AH=3 は [f8f] を STI 待ちしてからロード+AH=1。2 回目 INT 7F は AH=3 に再入（0x27 は再組しない）し、レンダポンプがその待ちを出ない（michael/orangerd）。 */
 		static const char* kMmdOnce[] = { "mmd2", "MMD2", "mmd2va", NULL };
 		static const char* kOpndrvOnce[] = { "fugam", "fgplay", NULL };
-		/* olteus overlay play (INT7F cmd2 → MAP:D471) loads 20KB MUS+MTB;
-		   a second poke restarts the load mid-DEF1. */
+		/* olteus オーバーレイ再生（INT7F cmd2 → MAP:D471）は 20KB MUS+MTB を載せる。2 回目 poke は DEF1 途中でロードを再開。 */
 		static const char* kOlteusOnce[] = { "olteus", NULL };
-		/* NARU_98 cmd0 is INT 70 stop + AH=3F + load + play. A second INT 7F
-		   re-enters at stop (all-notes-off) and the shorter drain often never
-		   reaches AH=1, so [232] stays 0 and the PIT ISR emits no notes. */
+		/* NARU_98 cmd0 は INT 70 停止 + AH=3F + ロード + 再生。2 回目 INT 7F は停止（全ノートオフ）に再入し、短いドレインはしばしば AH=1 に届かず [232] が 0 のまま PIT ISR がノートを出さない。 */
 		static const char* kNaruOnce[] = { "naru", "NARU", NULL };
 		static const char* kMfdOnce[] = { "mfd", "MFD", NULL };
-		/* 7COLM cmd0 is INT 41 AH=82 (stop) then load+AH=81. A second poke
-		   re-enters at stop. */
+		/* 7COLM cmd0 は INT 41 AH=82（停止）のあとロード+AH=81。2 回目 poke は停止に再入 */
 		static const char* kMidiDrvOnce[] = {
 			"MIDIDRV", "mididrv", "7COLM", "7colm", NULL
 		};
 		static const char* kAvalonOnce[] = { "avalon", NULL };
-		/* SYNUP_98 cmd0 already INT D3 play; a second poke #UD's (C1) and
-		   can trash IVT before OverlayTitle of pick 2. */
+		/* SYNUP_98 cmd0 は既に INT D3 再生。2 回目 poke は #UD（C1）し pick 2 の OverlayTitle 前に IVT を壊し得る。 */
 		static const char* kSynupsOnce[] = {
 			"SYNUPS", "SYNUP_98", "SYNPLAY",
 			"synups", "synup_98", "synplay",
@@ -7020,10 +6573,7 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 		PC98_CENSUS("trig");
 		Pc98MemDump(np2_mem());
 		if (modeBeep_ || modeMidi_) {
-			/* BGML_98 (and other speaker rips) drive melody from IRQ0/INT08.
-			   BootDos starts with PIC mask 0xFF; the player may unmask in
-			   INT 7F, but IF/IRQ0 must stay live for the whole render.
-			   FMD MIDI uses the same IRQ0 unmask (INT0B is not hooked). */
+			/* BGML_98（他スピーカリップも）は IRQ0/INT08 からメロディを駆動。BootDos は PIC マスク 0xFF で開始。プレイヤは INT 7F で外し得るが、レンダ全体で IF/IRQ0 を生かす。FMD MIDI も同じ IRQ0 解除（INT0B は未フック）。 */
 			picMask_ = (uint8_t)(picMask_ & 0xfeu);
 			np2_reg_set(NP2_R_FLAGS,
 				(uint16_t)(np2_reg_get(NP2_R_FLAGS) | 0x0200));
@@ -7038,8 +6588,7 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 				pitResidual_ = 0;
 			}
 		}
-		/* famistava installs OPN ISR on INT14 during the play far-call — BootDos
-		   is too early. Mirror only when INT0B is still vacant. */
+		/* famistava は再生 far 呼中に INT14 へ OPN ISR を入れる — BootDos は早すぎる。INT0B が空のときだけミラー。 */
 		if (pc88VaIo_) {
 			uint8_t* mem = np2_mem();
 			if (mem && IvtHooked(0x14, 1) && !IvtHooked(PC98_OPN_IRQ_VEC, 1)) {
@@ -7051,8 +6600,7 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 				mem[PC98_OPN_IRQ_VEC * 4 + 3] = (uint8_t)((s14 >> 8) & 0xff);
 				picMask_ = (uint8_t)(picMask_ & ~(1u << 3));
 			}
-			/* rtypeva: start parses channels but leaves the ISR stream ([01C2]) and
-			   [000F] idle; mute also clears OPN timer. Arm stream from ch0 + timer. */
+			/* rtypeva: start はチャネルを解析するが ISR ストリーム（[01C2]）と [000F] をアイドルのまま。mute は OPN タイマも消す。ch0 + タイマからストリームを武装。 */
 			static const char* kRtypePlay[] = { "rtype", NULL };
 			if (mem && dosGe_ && DosShellStarts(dosGe_, kRtypePlay)) {
 				const uint16_t psp = dos_.PspSeg();
@@ -7079,11 +6627,7 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 				}
 			}
 		}
-		/* usd_98 / ADVBIOS: INT7F does F4 AH=0 (load→55D1) + AH=1 (arm).
-		   Timers + music ISR start via F4 AH=0x30, which plants ADVBIOS
-		   CS:0690 on INT16. Mirror that ISR to INT0B for OPN timer ticks.
-		   ADVH.EXE packs use INT F1 (mode=1) with song words at CS:0712/0716
-		   instead of classic 0480/0484 — F4 stays trampoline. */
+		/* usd_98 / ADVBIOS: INT7F は F4 AH=0（ロード→55D1）+ AH=1（武装）。タイマ＋音楽 ISR 開始は F4 AH=0x30 で ADVBIOS CS:0690 を INT16 に植える。その ISR を INT0B へミラーし OPN タイマ tick 用。ADVH.EXE パックは INT F1（mode=1）で曲語を古典 0480/0484 ではなく CS:0712/0716 — F4 はトランポリンのまま。 */
 		if (dosGe_) {
 			static const char* kUsdPlay[] = { "usd_98", "usd98", NULL };
 			if (DosShellStarts(dosGe_, kUsdPlay)) {
@@ -7095,8 +6639,7 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 						| ((unsigned)mem[0xF4 * 4 + 3] << 8);
 					unsigned sF1 = (unsigned)mem[0xF1 * 4 + 2]
 						| ((unsigned)mem[0xF1 * 4 + 3] << 8);
-					/* Finish Microsoft PACKED / xor-decrypt ADVH only when F1 is
-					   still trampoline after BootDos (watagolf already live). */
+					/* F1 が BootDos 後もトランポリンのときだけ Microsoft PACKED / xor 復号 ADVH を終える（watagolf は既にライブ） */
 					if ((sF1 == 0 || sF1 == (unsigned)DOS98_TRAMP_SEG)
 						&& s7f && s7f != (unsigned)DOS98_TRAMP_SEG
 						&& dos_.FindFile("ADVH.EXE")) {
@@ -7167,7 +6710,7 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 							: 0;
 						if (songLenAdvh > songLen && songLenAdvh < 0xF000)
 							songLen = songLenAdvh;
-						/* Song workspace: ADVBIOS F4 AH=0 does mov di,imm16. */
+						/* 曲作業域: ADVBIOS F4 AH=0 は mov di,imm16 */
 						unsigned workSeg = 0x55D1;
 						{
 							const unsigned t0 = (unsigned)mem[(apiSeg << 4) + 0x113]
@@ -7182,7 +6725,7 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 							}
 						}
 						if (songLen && workSeg && songLen < 0xF000 && f4Live) {
-							/* ADVBIOS: AH=0x30 arms timers+ISR; AH=1 plays. */
+							/* ADVBIOS: AH=0x30 がタイマ+ISR を武装。AH=1 が再生 */
 							const unsigned tramp = 0x50000;
 							unsigned ti = 0;
 							mem[tramp + ti++] = 0xB8;
@@ -7214,9 +6757,7 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 								(uint16_t)(np2_reg_get(NP2_R_FLAGS) | 0x0200));
 							PumpCycles(cpuCycles_ + (drainBudget / 2ull));
 						}
-						/* ADVH INT F1: call the driver's published API only.
-						   EB 06 = filename open (AL=0 -> INT21 AH=3D);
-						   EB 0F = memory load (AL=0 needs DS:0 + CX=len). */
+						/* ADVH INT F1: ドライバ公開 API だけ呼ぶ。EB 06 = ファイル名開き（AL=0 → INT21 AH=3D）。EB 0F = メモリロード（AL=0 は DS:0 + CX=len が要る）。 */
 						if (!f4Live && f1Live) {
 							unsigned songOff = 0x712, lenOff = 0x716;
 							{
@@ -7237,8 +6778,7 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 								| ((unsigned)mem[base + songOff + 1] << 8);
 							unsigned advhLen = (unsigned)mem[base + lenOff]
 								| ((unsigned)mem[base + lenOff + 1] << 8);
-							/* If INT7F left an empty buffer, materialize USO
-							   from the DOS file table (real disk contents). */
+							/* INT7F が空バッファを残したら DOS ファイル表（実ディスク内容）から USO を実体化 */
 							if (dosSong_[0]) {
 								const CEmuDos98File* sf = dos_.FindFile(dosSong_);
 								const int need = (!advhLen || !songSeg
@@ -7283,9 +6823,7 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 									memcpy(isrSave, mem + fb + 0x4AB, 0x100);
 									isrSaved = 1;
 								}
-								/* AL=0 (early CS+0x33 intact), AL=1 bind (BootDos
-								   retargeted bind immediates to CS). Restore ISR
-								   after bind walks slots through @04AB. */
+								/* AL=0（早い CS+0x33 は無傷）、AL=1 bind（BootDos が bind 即値を CS へ付け替え）。bind が @04AB で枠を歩いたあと ISR を復元。 */
 								mem[tramp + ti++] = 0xB8;
 								mem[tramp + ti++] = (uint8_t)(ns & 0xff);
 								mem[tramp + ti++] = (uint8_t)((ns >> 8) & 0xff);
@@ -7321,8 +6859,7 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 								ti = 0;
 								if (isrSaved)
 									memcpy(mem + fb + 0x4AB, isrSave, 0x100);
-								/* Re-enter TriggerPlay once; return immediately so
-								   later ISR/timer assists cannot mute the replay. */
+								/* TriggerPlay に一度だけ再入。直後に戻り、後の ISR/タイマ補助が再再生を mute できないように。 */
 								{
 									static int s_nameLoadReplay = 0;
 									if (!s_nameLoadReplay) {
@@ -7364,10 +6901,7 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 									(uint16_t)(np2_reg_get(NP2_R_FLAGS) | 0x0200));
 								PumpCycles(cpuCycles_ + (drainBudget / 2ull));
 							}
-							/* Memory-load: if AL=0 left the play flag clear
-							   (INT7F often never set CX=len into the driver's
-							   copy), place the USO into the work buffer and
-							   re-issue AL=1. */
+							/* メモリロード: AL=0 が再生フラグをクリアしたまま（INT7F がしばしば CX=len をドライバコピーへ入れない）なら、作業バッファへ USO を置き AL=1 を再発行。 */
 							if (!nameLoad && songSeg && advhLen) {
 								unsigned advhWork = 0, advhFlag = 0x5000, advhDst = 0;
 								const unsigned fb = sF1 << 4;
@@ -7421,8 +6955,7 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 								}
 							}
 						}
-						/* Bind OPN IRQ3 (INT 0B) to the driver's real music ISR.
-						   nameLoadAdvh: INT F1 entry is EB 06 'U' filename-load ADVH. */
+						/* OPN IRQ3（INT 0B）をドライバの本物音楽 ISR へバインド。nameLoadAdvh: INT F1 入口は EB 06 'U' ファイル名ロード ADVH。 */
 						int nameLoadAdvh = 0;
 						int found = 0;
 						unsigned isrOff = 0, isrSeg = apiSeg;
@@ -7498,7 +7031,7 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 							}
 						}
 						if (!found) {
-							/* Filename-load ADVH leaves OEM ISR near 04AB. */
+							/* ファイル名ロード ADVH は OEM ISR を 04AB 近くに残す */
 							for (unsigned off = 0x400; off < 0x600; off++) {
 								const unsigned bp = (apiSeg << 4) + off;
 								if (bp + 8 >= 0x200000u) break;
@@ -7520,10 +7053,7 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 								mem[PC98_OPN_IRQ_VEC * 4 + 3] = (uint8_t)((isrSeg >> 8) & 0xff);
 							}
 							picMask_ = (uint8_t)(picMask_ & ~(1u << 3));
-							/* Name-load ADVH: AL=1 programs notes but leaves the
-							   play/channel BSS thin. Forcing Timer A/B here makes
-							   the OEM ISR run immediately and key-off everything
-							   (peak→0). Memory-load (EB 0F / watagolf) arms itself. */
+							/* 名前ロード ADVH: AL=1 はノートを組むが再生／チャネル BSS は薄い。ここで Timer A/B を強制すると OEM ISR がすぐ走り全部キーオフ（peak→0）。メモリロード（EB 0F / watagolf）は自分で武装。 */
 							if (chip_) {
 								chip_->Write(0, 0x27);
 								chip_->Write(1, 0x3F);
@@ -7534,23 +7064,14 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 				}
 			}
 		}
-		/* FMPP / NLP_HOOT / MAKO_98: INT7F cmd0 loads; play is cmd2 (INT D2 /
-		   INT60 / INT40). TriggerPlay only fired cmd0 — re-fire with EXT_CMD=2.
-		   HuLinks fakecall/music/46 is different: 46.com cmd2 → INT70 AH=1 which
-		   is MUSIC.COM mute-all (keys off + sets each channel [CS:ch+3]=1 so the
-		   sequencer early-returns forever). Play-enable is INT70 AH=2.
+		/* FMPP / NLP_HOOT / MAKO_98: INT7F cmd0 がロード。再生は cmd2（INT D2 / INT60 / INT40）。TriggerPlay は cmd0 だけ撃った — EXT_CMD=2 で再撃。HuLinks fakecall/music/46 は別: 46.com cmd2 → INT70 AH=1 は MUSIC.COM mute-all（キーオフ＋各チャネル [CS:ch+3]=1 でシーケンサが永久早期 return）。再生許可は INT70 AH=2。
 
-		   TGLFMP/TGLFMP2 are NOT cmd2-play: their cmd0 already does INT D2 AL=0
-		   stop + AH=3F read + AL=1 play. cmd2 is `MOV AX,1009 / INT D2` → FMP3
-		   fn09 which sets [29AE]=1 and fade counts to 0x10, arming a fade-out
-		   that stops vg2 after the first phrase. Keep them in kGluePlay for IRQ
-		   unmask below, but do not re-fire cmd2. */
+		   TGLFMP/TGLFMP2 は cmd2 再生ではない: cmd0 が既に INT D2 AL=0 停止 + AH=3F 読 + AL=1 再生。cmd2 は `MOV AX,1009 / INT D2` → FMP3 fn09 が [29AE]=1 とフェード回数 0x10 を置き、最初のフレーズ後に vg2 を止めるフェードアウトを武装。下の IRQ 解除用に kGluePlay には残すが cmd2 は再撃しない。 */
 		{
 			static const char* kStarPlay[] = {
 				"fakecall", "music", "MUSIC", "46", NULL
 			};
-			/* TAM PLAY5/PLAY3 shipped as MUSIC.COM + PLAY5_98; that is
-			   INT F2, not HuLinks INT70. Prefix "MUSIC" must not steal it. */
+			/* TAM PLAY5/PLAY3 は MUSIC.COM + PLAY5_98 として出荷。それは INT F2 であり HuLinks INT70 ではない。接頭 "MUSIC" が盗んではいけない。 */
 			static const char* kPlay5Fam[] = {
 				"PLAY5", "play5", "PLAY5_98", "PLAY3", NULL
 			};
@@ -7562,7 +7083,7 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 			if (starPlay)
 				musicComKeepalive_ = 1;
 			static const char* kGluePlay[] = {
-				/* Hoot/GMPV4 families: INT7F/D2/60 cmd0 loads, cmd2 plays. */
+				/* Hoot/GMPV4 族: INT7F/D2/60 cmd0 がロード、cmd2 が再生 */
 				"FMPP", "FMP", "fmp3", "tglfmp",
 				"NLP_HOOT", "nlp_hoot", "NAX", "nax", "NA", "nl", "NL",
 				"MAKO_98", "MAKO", "mako", "MAKOP",
@@ -7610,7 +7131,7 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 				"MFD_98", "mfd",
 				"cplay98", "cplay", "bplay", "fplay",
 				"fgplay", "fgplay_h",
-				/* midiout catalog shells (GS/MPU). cmd2 is stop — kSkipCmd2. */
+				/* midiout カタログシェル（GS/MPU）。cmd2 は停止 — kSkipCmd2 */
 				"DOFMDX98", "DOFMDC98",
 				"MMD", "MMP_HOOT", "MSP_HOOT", "mmp_hoot", "msp_hoot",
 				"MINT",
@@ -7636,24 +7157,7 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 				"PARALIBD",
 				NULL
 			};
-			/* TGLFMP cmd2 fades. PLAY5_98 cmd2 is INT F2 AX=2 → $4F9F
-			   mute/init; play is already cmd0 (copy + $4F9F + $4EDC).
-			   MIZ3_98 cmd2 is INT40 AH=6 stop; cmd0 already AH=6 then AH=5 play.
-			   ELFMUS98 cmd2 is INT60 AX=0 stop; cmd0 already INT60 AH=1 play.
-			   SYNTH_98 cmd2 is INT60 AH=1; play is cmd0 AH=0.
-			   MAGIC_98 cmd2 is INT EF AX=4; play is cmd0 AX=5.
-			   ARTDI_98 cmd2 is far [3da](1); load/play is cmd0 [3d6].
-			   LUDY_98 cmd2 is INT52 AX=1; play is cmd0 AX=0.
-			   MUSE_98 cmd2 far-calls stop; cmd0 already loads+plays.
-			   MDR_98 glue cmd2 INT40 BX=6 waits on [1AC2] forever; cmd0
-			   already loads and 0x127a/D78 stops busy tracks. Skip cmd2.
-			   mmd2 cmd2 INT D2 AX=608; cmd0 already AH=1 play.
-			   iwaplay cmd2 INT EB AX=308; cmd0 already AH=1 play.
-			   SPLIT_98 cmd2 INT D2 AX=100; play is AX=101.
-			   tky98 cmd2 INT F1 AL=12; play is AL=11.
-			   bgmdrv98/bp/FMXP/NC cmd2 repeats the stop half of cmd0.
-			   FMD /# + fugam cmd2 is INT D3 AX=01FF (stop) after cmd0 play.
-			   fgplay_h cmd2 is INT D2 AX=3 CL=8 (stop); play is cmd0 AX=1. */
+			/* TGLFMP cmd2 はフェード。PLAY5_98 cmd2 は INT F2 AX=2 → $4F9F mute/init。再生は既に cmd0（コピー + $4F9F + $4EDC）。MIZ3_98 cmd2 は INT40 AH=6 停止。cmd0 は既に AH=6 のあと AH=5 再生。ELFMUS98 cmd2 は INT60 AX=0 停止。cmd0 は既に INT60 AH=1 再生。SYNTH_98 cmd2 は INT60 AH=1。再生は cmd0 AH=0。MAGIC_98 cmd2 は INT EF AX=4。再生は cmd0 AX=5。ARTDI_98 cmd2 は far [3da](1)。ロード/再生は cmd0 [3d6]。LUDY_98 cmd2 は INT52 AX=1。再生は cmd0 AX=0。MUSE_98 cmd2 は停止を far 呼。cmd0 は既にロード+再生。MDR_98 糊 cmd2 INT40 BX=6 は [1AC2] で永久待ち。cmd0 は既にロードし 0x127a/D78 がビジートラックを止める。cmd2 を飛ばす。mmd2 cmd2 INT D2 AX=608。cmd0 は既に AH=1 再生。iwaplay cmd2 INT EB AX=308。cmd0 は既に AH=1 再生。SPLIT_98 cmd2 INT D2 AX=100。再生は AX=101。tky98 cmd2 INT F1 AL=12。再生は AL=11。bgmdrv98/bp/FMXP/NC cmd2 は cmd0 の停止半分を繰り返す。FMD /# + fugam cmd2 は cmd0 再生後の INT D3 AX=01FF（停止）。fgplay_h cmd2 は INT D2 AX=3 CL=8（停止）。再生は cmd0 AX=1。 */
 			static const char* kSkipCmd2[] = {
 				"tglfmp", "TGLFMP",
 				"PLAY5", "play5", "PLAY5_98", "PLAY3",
@@ -7662,7 +7166,7 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 				"SYNTH_98", "synth", "SYNTHIA",
 				"MAGIC_98", "magic_", "MAGIC_",
 				"ARTDI_98", "artdi",
-				/* EMIT_98 INT40 cmd2 is FMDRV AX=0200 stop (same as TENSH). */
+				/* EMIT_98 INT40 cmd2 は FMDRV AX=0200 停止（TENSH と同じ） */
 				"EMIT", "emit",
 				"LW1CD", "lw1cd",
 				"LUDY_98", "ludy", "SCBIOS",
@@ -7711,20 +7215,13 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 				"INT7C",
 				"IKDRV",
 				"PARALIBD",
-				/* NARU_98 is also kGluePlay via the "NA" prefix (NA.COM / NAX).
-				   cmd2 is INT 70 stop. */
+				/* NARU_98 は "NA" 接頭経由でも kGluePlay（NA.COM / NAX）。cmd2 は INT 70 停止。 */
 				"naru", "NARU",
 				NULL
 			};
 			if (DosShellStarts(dosGe_, kGluePlay)
 				&& !DosShellStarts(dosGe_, kSkipCmd2)) {
-				/* The list is matched by command prefix, and "cmd2 plays" is
-				   only true for part of it — MAKO_98 answers cmd2 with its
-				   mute-all (reg 27 timers off, every TL to 7F, SSG mixer off),
-				   which silenced a song that cmd0 had already started. Rather
-				   than keep guessing per shell, notice when the re-fire
-				   stopped the sequencer instead of starting it and put the
-				   working command back. */
+				/* 一覧はコマンド接頭で一致し、「cmd2 が再生」は一部だけ真 — MAKO_98 は cmd2 に mute-all（reg 27 タイマオフ、全 TL を 7F、SSG ミキサオフ）で答え、cmd0 が既に始めた曲を消した。シェル毎に推測し続けるより、再撃がシーケンサを開始ではなく停止したときに気づき、動いていたコマンドを戻す。 */
 				const unsigned keyBefore = opnKeyOnCount_;
 				const int cmdBefore = extCmd_;
 				const uint8_t tmrBefore = g_lastTimerCtrl;
@@ -7745,10 +7242,7 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 				}
 			}
 			if (starPlay && IvtHooked(0x70, 1)) {
-				/* AH=2: [0290]=1 enables ISR; AL → [0292]/[0293] countdown.
-				   When [0294] hits 0x10 the ISR mute-alls and clears [0290].
-				   AL=FFh + reset [0294] keeps BGM alive. Beat = OPN INT0B
-				   only (no PIT twin). */
+				/* AH=2: [0290]=1 が ISR を許可。AL → [0292]/[0293] カウントダウン。[0294] が 0x10 になると ISR が mute-all し [0290] をクリア。AL=FFh + [0294] リセットで BGM を生かす。拍は OPN INT0B のみ（PIT 双子無し）。 */
 				uint8_t* m70 = np2_mem();
 				if (m70) {
 					const unsigned s70 =
@@ -7779,7 +7273,7 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 						picMask_ = (uint8_t)(picMask_ & ~(1u << 3));
 				}
 			} else if (DosShellStarts(dosGe_, kGluePlay)) {
-				/* Unmask OPN IRQ for non-star glue drivers. */
+				/* 星付き以外の糊ドライバ用に OPN IRQ を解除 */
 				uint8_t* mem = np2_mem();
 				static const char* kSlave14[] = {
 					"mbmus", "MBMUS", "musdrv", "MUSDRV", "muse", "MUSE",
@@ -7789,7 +7283,7 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 					|| ((ssgPortAJumper_ & 0xC0) == 0xC0);
 				if (mem) {
 					if (slave14 && IvtHooked(0x14, 1)) {
-						/* Keep ISR on INT14; unmask cascade + IRQ12. */
+						/* ISR を INT14 に残し、カスケード + IRQ12 を解除 */
 						picMask_ = (uint8_t)(picMask_ & ~(1u << 2));
 						slavePicMask_ = (uint8_t)(slavePicMask_ & ~(1u << 4));
 					} else if (!IvtHooked(PC98_OPN_IRQ_VEC, 1) && IvtHooked(0x14, 1)) {
@@ -7804,12 +7298,10 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 					}
 					if (!slave14 && IvtHooked(PC98_OPN_IRQ_VEC, 1))
 						picMask_ = (uint8_t)(picMask_ & ~(1u << 3));
-					/* S20 INT60 AH=0 returns with IF=0; SYNTH_98 IRET then
-					   leaves the render pump deaf (hsj GIRL dumps=1, ifoff). */
+					/* S20 INT60 AH=0 は IF=0 で戻る。SYNTH_98 IRET はレンダポンプを聾にする（hsj GIRL dumps=1、ifoff）。 */
 					np2_reg_set(NP2_R_FLAGS,
 						(uint16_t)(np2_reg_get(NP2_R_FLAGS) | 0x0200));
-					/* FMD MIDI clock: no OPN ISR (INT0B stays trampoline).
-					   Unmask IRQ0 and run the PIT so INT D3 can tick. */
+					/* FMD MIDI クロック: OPN ISR 無し（INT0B はトランポリンのまま）。IRQ0 を外し PIT を走らせ INT D3 が tick できるように。 */
 					if (modeMidi_) {
 						picMask_ = (uint8_t)(picMask_ & 0xfeu);
 						if (!pitRunning_) {
@@ -7821,7 +7313,7 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 							pitResidual_ = 0;
 						}
 					}
-					/* ABIKO-class: hooks INT 1C, leaves INT 08 to BIOS. */
+					/* ABIKO 級: INT 1C をフックし INT 08 は BIOS に残す */
 					if (IvtHooked(PC98_USER_TICK_VEC, 1)
 						&& !IvtHooked(PC98_TIMER_VEC, 1)) {
 						picMask_ = (uint8_t)(picMask_ & ~(1u << 0));
@@ -7834,9 +7326,7 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 							pitResidual_ = 0;
 						}
 					}
-					/* VALKY/SSCP plants the sequencer on INT 08 (not OPN
-					   Timer B). IRQ0 stayed masked so pitirq=1 and dumps
-					   stuck at FM_TONE init. */
+					/* VALKY/SSCP はシーケンサを INT 08 に植える（OPN Timer B ではない）。IRQ0 がマスクのままだと pitirq=1、dumps が FM_TONE init で止まる。 */
 					{
 						static const char* kValkyPit[] = {
 							"VALKY_98", "valky", NULL
@@ -7877,25 +7367,19 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 	}
 
 	int loaded = 0;
-	/* Ys/Ys2 Falcom glue sets dataAddr_ inside cmd0 (HostService 0x10) per
-	   bank — do not preload against a stale address from the previous title. */
+	/* Ys/Ys2 Falcom 糊はバンク毎に cmd0 内（HostService 0x10）で dataAddr_ を置く — 前タイトルの古いアドレスに対して先読みしない。 */
 	if (dataAddr_ > 0 && bootCs_ != 0x0160)
 		loaded = LoadSongToAddr(song & 0xff, dataAddr_, fileSize_, 0);
 	if (data2Addr_ > 0)
 		LoadSongToAddr(song & 0xff, data2Addr_, file2Size_, 1);
 
-	/* BirdySoft CAL/PAL: driver relocates an OPN ISR but never writes IVT 0x0B.
-	   Play (INT60) sets wait-flag [DS:269B]=FF and spins until the ISR clears
-	   it — without the vector DeliverIrqs refuses OPN IRQs and play hangs.
-	   Install the relocated ISR (FB50… or PUSH…/OUT 0Ah/STI variant) and park
-	   IRET on INT08 when the chain target is still null. */
+	/* BirdySoft CAL/PAL: ドライバは OPN ISR をリロケするが IVT 0x0B を書かない。再生（INT60）は待ちフラグ [DS:269B]=FF を置き ISR がクリアするまでスピン — ベクタ無しだと DeliverIrqs が OPN IRQ を拒み再生がハング。リロケ済み ISR（FB50… または PUSH…/OUT 0Ah/STI 変種）を入れ、チェイン先がまだ null なら INT08 に IRET をパーク。 */
 	if (cal98_) {
 		uint8_t* mem = np2_mem();
 		if (mem) {
 			const unsigned o60 = (unsigned)mem[0x60 * 4] | ((unsigned)mem[0x60 * 4 + 1] << 8);
 			const unsigned s60 = (unsigned)mem[0x60 * 4 + 2] | ((unsigned)mem[0x60 * 4 + 3] << 8);
-			/* Prefer relocated INT60 segment; MF-era __02.DAT also lives at
-			   phys 0x1000 before/without a finished INT60 install. */
+			/* リロケ済み INT60 セグメントを優先。MF 期 __02.DAT は INT60 インストール完了前／無しでも物理 0x1000 に居る。 */
 			unsigned bases[2];
 			int nBase = 0;
 			if (s60 && IvtHooked(0x60, 0))
@@ -7929,7 +7413,7 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 			}
 			if (s60 && IvtHooked(0x60, 0)) {
 				const unsigned base = s60 << 4;
-				/* Fix INT60 near-call table if reloc left sentinel EB00. */
+				/* リロケが番兵 EB00 を残したら INT60 near 呼表を直す */
 				for (unsigned p = base + (o60 ? o60 : 0x60); p + 8 < base + 0x200; p++) {
 					if (mem[p] == 0x83 && mem[p + 1] == 0xE7 && mem[p + 2] == 0x0E
 						&& mem[p + 3] == 0xFF && mem[p + 4] == 0x95) {
@@ -7960,8 +7444,7 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 		}
 	}
 
-	/* QueenSoft MADP: INT40 is AL-indexed API; AL=1A plants OPN ISR on
-	   INT14 (IVT@0x50) like N3GOLF. Mirror INT14→INT0B + unmask IRQ3. */
+	/* QueenSoft MADP: INT40 は AL 添字 API。AL=1A は N3GOLF 同様 INT14（IVT@0x50）へ OPN ISR を植える。INT14→INT0B ミラー + IRQ3 解除。 */
 	if (madp98_) {
 		uint8_t* mem = np2_mem();
 		if (mem) {
@@ -7981,10 +7464,7 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 		}
 	}
 
-	/* N3GOLF: glue parks the OPN timer ISR on INT 14h (IRQ12 path on the
-	   real board) but never writes IVT 0x0B. Our OPN IRQ is delivered as
-	   master IRQ3 → INT 0x0B, so copy the INT14 handler there and unmask.
-	   Songs live inside fm.bin (filesize=0); play is INT7F cmd0 + EXT_SONG. */
+	/* N3GOLF: 糊は実基板の IRQ12 経路である INT 14h に OPN タイマ ISR を置くが IVT 0x0B は書かない。こちらの OPN IRQ はマスタ IRQ3 → INT 0x0B なので INT14 ハンドラをそこへコピーして解除。曲は fm.bin 内（filesize=0）。再生は INT7F cmd0 + EXT_SONG。 */
 	if (n3golf98_) {
 		uint8_t* mem = np2_mem();
 		if (mem) {
@@ -8000,14 +7480,14 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 					&& mem[phys + 2] == 0x06 && mem[phys + 3] == 0x60)
 					ok = 1;
 			}
-			/* Fallback: scan fm.bin segment 0x0100 for CLI;PUSH DS;PUSH ES;PUSHA. */
+			/* フォールバック: fm.bin セグメント 0x0100 を CLI;PUSH DS;PUSH ES;PUSHA で走査 */
 			if (!ok) {
 				const unsigned base = 0x0100u << 4;
 				for (unsigned p = base; p + 32 < base + 0x8000u; p++) {
 					if (mem[p] == 0xFA && mem[p + 1] == 0x1E
 						&& mem[p + 2] == 0x06 && mem[p + 3] == 0x60
 						&& mem[p + 4] == 0x8C && mem[p + 5] == 0xC8) {
-						/* Prefer the EOI-bearing ISR (OUT 00h,20h nearby). */
+						/* EOI 付き ISR（近くに OUT 00h,20h）を優先 */
 						int eoi = 0;
 						for (unsigned q = p; q + 4 < p + 0x40; q++) {
 							if (mem[q] == 0xB0 && mem[q + 1] == 0x20
@@ -8034,12 +7514,10 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 				slavePicMask_ = (uint8_t)(slavePicMask_ & ~(1u << 4)); /* IRQ12 */
 			}
 		}
-		/* Fall through: cmd0 + song in EXT_SONG starts play (no dataaddr). */
+		/* フォールスルー: EXT_SONG の cmd0 + 曲が再生開始（dataaddr 無し） */
 	}
 
-	/* Falcom PROG.BIN (Alm/LM): OPN detect success plants the music ISR on
-	   INT14/INT15 (not INT0B). Mirror like MADP/N3GOLF so YM timer IRQs run.
-	   Detect-fail path uses INT08 — keep PIT alive either way. */
+	/* Falcom PROG.BIN（Alm/LM）: OPN 検出成功は音楽 ISR を INT14/INT15 に植える（INT0B ではない）。MADP/N3GOLF 同様ミラーし YM タイマ IRQ が走る。検出失敗経路は INT08 — どちらでも PIT を生かす。 */
 	if (prog98_) {
 		uint8_t* mem = np2_mem();
 		if (mem) {
@@ -8075,10 +7553,7 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 		}
 	}
 
-	/* KSK DKS/FQ (dks/duelsc/fq3/fq4): after boot INT69 AH=0A, CS:[tableVar]
-	   points at the size-prefixed song bank (BSS past the driver image).
-	   Locate the AH=0A prologue (06 1E 60 0E 1F B8 xx xx … A3 table), load
-	   the catalog song there, and force cmd1 (AH=0 play). */
+	/* KSK DKS/FQ（dks/duelsc/fq3/fq4）: ブート INT69 AH=0A 後、CS:[tableVar] がサイズ前置曲バンク（ドライバイメージ先 BSS）を指す。AH=0A プロローグ（06 1E 60 0E 1F B8 xx xx … A3 table）を探し、カタログ曲をそこに載せ cmd1（AH=0 再生）を強制。 */
 	if (dks98_) {
 		uint8_t* mem = np2_mem();
 		if (mem) {
@@ -8089,7 +7564,7 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 				unsigned tableVar = 0;
 				const unsigned span = 0x1800;
 				for (unsigned p = base; p + 24 < base + span && p + 24 < 0x200000u; p++) {
-					/* Common: 06 1E 60 0E 1F B8 … 03 C1 89 1E .. A3 table */
+					/* 共通: 06 1E 60 0E 1F B8 … 03 C1 89 1E .. A3 表 */
 					if (mem[p] == 0x06 && mem[p + 1] == 0x1E && mem[p + 2] == 0x60
 						&& mem[p + 3] == 0x0E && mem[p + 4] == 0x1F && mem[p + 5] == 0xB8
 						&& mem[p + 8] == 0x89 && mem[p + 9] == 0x0E
@@ -8100,7 +7575,7 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 						tableVar = (unsigned)mem[p + 22] | ((unsigned)mem[p + 23] << 8);
 						break;
 					}
-					/* FQ3 BGMDRV: … 03 C1; CS: MOV [seg],BX; CS: MOV [table],AX */
+					/* FQ3 BGMDRV: … 03 C1。CS: MOV [seg],BX。CS: MOV [table],AX の並び */
 					if (mem[p] == 0x03 && mem[p + 1] == 0xC1
 						&& mem[p + 2] == 0x2E && mem[p + 3] == 0x89 && mem[p + 4] == 0x1E
 						&& mem[p + 7] == 0x2E && mem[p + 8] == 0xA3) {
@@ -8120,15 +7595,14 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 		}
 	}
 
-	/* Glodia MDPLAY.BIN / MDRIVE.BIN: ensure INT08 has the driver's PIT ISR.
-	   Prefer an EOI-bearing stub that also CALLs (sequencer), not a lone EOI/IRET. */
+	/* Glodia MDPLAY.BIN / MDRIVE.BIN: INT08 にドライバの PIT ISR があることを保証。CALL もする EOI 付き stub（シーケンサ）を優先。単独 EOI/IRET ではない。 */
 	if (mdplay98_ && !IvtHooked(PC98_TIMER_VEC, 0)) {
 		uint8_t* mem = np2_mem();
 		if (mem) {
 			unsigned bases[3];
 			int nBase = 0;
 			bases[nBase++] = 0x1000u << 4;
-			/* biblem MDRIVE @0x2B000; INT40 seg is a good hint when hooked. */
+			/* biblem MDRIVE @0x2B000。フック済みなら INT40 seg が良いヒント */
 			const unsigned s40 = (unsigned)mem[0x40 * 4 + 2]
 				| ((unsigned)mem[0x40 * 4 + 3] << 8);
 			if (s40 && s40 < 0xF000)
@@ -8180,10 +7654,7 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 		}
 	}
 
-	/* Wolfteam 000_BOOT: glue INT 7Fh cmd1 → INT 4Ah (song in AX). INT 4A
-	   calls INT 43h to (re)load BX:0000 from the game filesystem, which wipes
-	   our dataaddr preload. Park IRET on INT 43 and issue cmd1 only (cmd0 is
-	   stop / AX=FFFFh). */
+	/* Wolfteam 000_BOOT: 糊 INT 7Fh cmd1 → INT 4Ah（曲は AX）。INT 4A はゲーム FS から BX:0000 を（再）ロードする INT 43h を呼び、こちらの dataaddr 先読みを消す。INT 43 に IRET をパークし cmd1 だけ発行（cmd0 は停止 / AX=FFFFh）。 */
 	if (wolfteam98_) {
 		uint8_t* mem = np2_mem();
 		if (mem) {
@@ -8196,8 +7667,8 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 				loaded = LoadSongToAddr(song & 0xff, dataAddr_, fileSize_, 0);
 		}
 		if (loaded) {
-			wolfSyncRun_ = 1; /* ISR delay stubs need not-busy E0D2 */
-			/* Boot PIC ICWs often leave IRQ0 masked; music ticks need PIT. */
+			wolfSyncRun_ = 1; /* ISR 遅延 stub は非ビジー E0D2 が要る */
+			/* ブート PIC ICW はしばしば IRQ0 をマスクしたまま。音楽 tick に PIT が要る */
 			picMask_ = (uint8_t)(picMask_ & 0xfeu);
 			slavePicMask_ = 0x00;
 			if (!pitRunning_) {
@@ -8209,9 +7680,7 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 				pitResidual_ = 0;
 			}
 			if (mem) {
-				/* INT 4C AH=00 expects DS:SI → MF instrument (byte13=0x28 after
-				   ADD SI,8). Skip when no MI (apros) — bogus song-as-MI hangs
-				   the bank load and never arms the sequencer. */
+				/* INT 4C AH=00 は DS:SI → MF 音色（ADD SI,8 後 byte13=0x28）を期待。MI が無いとき（apros）は飛ばす — 偽の曲-as-MI はバンクロードをハングしシーケンサを武装しない。 */
 				if (wolfMiSeg_ > 0) {
 					mem[wolfSongPtr_ + 0] = 0x00;
 					mem[wolfSongPtr_ + 1] = 0x00;
@@ -8224,7 +7693,7 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 							&& dataAddr_ + n <= 0x200000)
 							memcpy(mem + wolfSongBuf_, mem + dataAddr_, (size_t)n);
 					}
-					/* dmdply never installs INT4C — only call when hooked. */
+					/* dmdply は INT4C を入れない — フック済みのときだけ呼ぶ */
 					if (IvtHooked(0x4C, 0)) {
 						mem[wolfGateStop_] = 0xFF;
 						mem[wolfGatePlay_] = 0x00;
@@ -8234,9 +7703,7 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 						DrainInterrupt(drainBudget / 2);
 					}
 				}
-				/* Re-bind song ptr for ISR. Channel stream offsets from 6692
-				   are relative to the dataaddr load (7800:0000), not CS:songBuf —
-				   keep DS=dataaddr>>4 so SI like 0603 hits the song. */
+				/* ISR 用に曲 ptr を再バインド。6692 からのチャネルストリームオフセットは CS:songBuf ではなく dataaddr ロード（7800:0000）相対 — DS=dataaddr>>4 を保ち SI 0603 などが曲に当たるように。 */
 				mem[wolfGateStop_] = 0x00;
 				mem[wolfGatePlay_] = 0xFF;
 				if (dataAddr_ > 0) {
@@ -8275,9 +7742,7 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 						memcpy(mem + wolfSongBuf_, mem + dataAddr_, (size_t)n);
 					mem[wolfTitleWord_ + 0] = (uint8_t)(titleCode & 0xff);
 					mem[wolfTitleWord_ + 1] = (uint8_t)((titleCode >> 8) & 0xff);
-					/* INT4C epilogue + sequencer arm (see 000_BOOT @~6692):
-					   MOV BYTE [fa],FF / MOV WORD [fa+3],1 / MOV BYTE [fa+2],0.
-					   dmdply folds play-gate into fa+2 — keep that byte FF. */
+					/* INT4C エピローグ + シーケンサ武装（000_BOOT @約6692 参照）: MOV BYTE [fa],FF / MOV WORD [fa+3],1 / MOV BYTE [fa+2],0。dmdply は再生ゲートを fa+2 へ畳む — そのバイトを FF に保つ。 */
 					mem[wolfFlagA_] = 0xFF;
 					if ((unsigned)wolfFlagA_ + 3u < 0x10000u) {
 						const int playIsFa2 = (wolfGatePlay_ == (uint16_t)(wolfFlagA_ + 2));
@@ -8307,9 +7772,7 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 		}
 	}
 
-	/* KOEI98 glue (funcvect INT 40h): cmd0=play, cmd2=stop. Title high word is
-	   the music-bank segment (EXT 0x7E4); low word is song (0x7E2). Song data
-	   already resides in packed code ROMs — no dataaddr preload. */
+	/* KOEI98 糊（funcvect INT 40h）: cmd0=再生、cmd2=停止。タイトル上位語は音楽バンクセグメント（EXT 0x7E4）。下位語は曲（0x7E2）。曲データは既にパック済みコード ROM に居る — dataaddr 先読み無し。 */
 	if (koei98_ || funcVect_ == 0x40) {
 		extCmd_ = 0;
 		np2_interrupt((uint8_t)funcVect_);
@@ -8317,7 +7780,7 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 		return 1;
 	}
 
-	/* Song preload only when catalog dataaddr is set (no CS invent). */
+	/* カタログ dataaddr があるときだけ曲先読み（CS を発明しない） */
 	if (fmd98_ && dataAddr_ > 0 && fileSize_ > 0) {
 		if (LoadSongToAddr(song & 0xff, dataAddr_, fileSize_, 0))
 			loaded = 1;
@@ -8333,20 +7796,13 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 			loaded = 1;
 	}
 
-	/* Beast3 BST3 glue: cmd0 with AH==0 far-calls stop; AH!=0 selects load
-	   (then clears AH). Catalog titles are 00xx so default cmd0 never loads. */
+	/* Beast3 BST3 糊: AH==0 の cmd0 は停止を far 呼。AH!=0 がロードを選ぶ（その後 AH クリア）。カタログタイトルは 00xx なので既定 cmd0 はロードしない。 */
 	if (bst398_)
 		extSong_ = (uint16_t)((song & 0xff) | 0x0100);
 
-	/* DOFMD_98 play path (gated by dofmd_): glue INT 7Fh cmd=1 queries host
-	   0x11 for a real-mode song ptr (SI/DS), then INT 45h into MSC/MV22/etc.
-	   Boot also needs the INT 14h IRET stub installed in LoadRoms. Default
-	   cmd0/cmd1 INT sequence below is sufficient once those are in place. */
+	/* DOFMD_98 再生経路（dofmd_ でゲート）: 糊 INT 7Fh cmd=1 がホスト 0x11 にリアルモード曲 ptr（SI/DS）を問い、INT 45h で MSC/MV22 等へ。ブートは LoadRoms で入れた INT 14h IRET stub も要る。それが揃えば下の既定 cmd0/cmd1 INT 列で足りる。 */
 
-	/* NOPNDRV keeps song ptr at DS:19F4 (off) / DS:19F6 (seg) with DS=driver
-	   CS (0x1000). AH=3 normally sets these from INT BX/ES, but software-INT
-	   nesting made that unreliable — poke the words then INT7F play.
-	   Only for actual NOPNDRV.COM loads (MUSIC.SYS / MUSDRV2 differ). */
+	/* NOPNDRV は曲 ptr を DS:19F4（off）/ DS:19F6（seg）に保ち DS=ドライバ CS（0x1000）。AH=3 は通常 INT BX/ES からこれを置くが、ソフト INT 入れ子で信頼できなかった — 語を poke して INT7F 再生。本物 NOPNDRV.COM ロードだけ（MUSIC.SYS / MUSDRV2 は別）。 */
 	if (nopnDrv_ && bootCs_ != 0 && dataAddr_ > 0) {
 		uint8_t* mem = np2_mem();
 		const uint16_t drvCs = 0x1000;
@@ -8368,15 +7824,15 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 			np2_set_ss_sp(0x1000, 0xFFFE);
 			np2_reg_set(NP2_R_FLAGS, 0x0202);
 
-			/* Also issue AH=3 with IF clear so the driver-side bind matches. */
+			/* IF クリアで AH=3 も発行し、ドライバ側バインドを合わせる */
 			np2_reg_set(NP2_R_ES, songSeg);
 			np2_reg_set(NP2_R_BX, songOff);
 			np2_reg_set(NP2_R_AX, 0x0300);
-			np2_reg_set(NP2_R_FLAGS, 0x0002); /* IF clear — no nested IRQs */
+			np2_reg_set(NP2_R_FLAGS, 0x0002); /* IF クリア — 入れ子 IRQ 無し */
 			np2_interrupt(0x42);
 			DrainInterrupt(drainBudget / 4);
 
-			/* Re-assert ptr in case AH=3 clobbered it with a bad stack read. */
+			/* AH=3 が悪いスタック読で上書きしても ptr を再アサート */
 			mem[ptrOff] = (uint8_t)(songOff & 0xff);
 			mem[ptrOff + 1] = (uint8_t)(songOff >> 8);
 			mem[ptrSeg] = (uint8_t)(songSeg & 0xff);
@@ -8395,11 +7851,7 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 		}
 	}
 
-	/* Xanadu Scenario II (xana2e @1F000 / PR.NO0 @4000 / PR.NO5 @10000):
-	   INT7F reads EXT_SONG (07E2) as the command and EXT_CMD (07E0) as the
-	   play selector — ports swapped vs Ys/00BIOS glue. Cmd FD far-calls
-	   xana2e → PR.NO5 (INT14/15 + OPN). Play is cmd0 + selector 1 with the
-	   song already at dataaddr; only selector 1 takes the INT7E+INT41 path. */
+	/* Xanadu Scenario II（xana2e @1F000 / PR.NO0 @4000 / PR.NO5 @10000）: INT7F は EXT_SONG（07E2）をコマンド、EXT_CMD（07E0）を再生セレクタとして読む — Ys/00BIOS 糊とポートが入れ替わり。Cmd FD は xana2e → PR.NO5（INT14/15 + OPN）を far 呼。再生は曲を既に dataaddr に置いた cmd0 + セレクタ 1。セレクタ 1 だけが INT7E+INT41 経路を取る。 */
 	{
 		uint8_t* mem = np2_mem();
 		if (mem && bootIp_ == 0x0600 && funcVect_ == 0x7f
@@ -8416,8 +7868,8 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 				(uint16_t)(np2_reg_get(NP2_R_FLAGS) | 0x0200));
 			np2_interrupt((uint8_t)funcVect_);
 			DrainInterrupt(drainBudget);
-			extSong_ = 0; /* command = play */
-			extCmd_ = 1;  /* selector = INT7E + INT41 AH=2 */
+			extSong_ = 0; /* コマンド = 再生 */
+			extCmd_ = 1;  /* セレクタ = INT7E + INT41 AH=2 */
 			np2_reg_set(NP2_R_FLAGS,
 				(uint16_t)(np2_reg_get(NP2_R_FLAGS) | 0x0200));
 			np2_interrupt((uint8_t)funcVect_);
@@ -8444,7 +7896,7 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 			} else {
 				picMask_ = (uint8_t)(picMask_ & ~(1u << 3));
 			}
-			/* Re-park on the glue INT18 idle so DrainInterrupt/Render stay sane. */
+			/* DrainInterrupt/Render が正気なよう糊 INT18 アイドルへ再パーク */
 			np2_set_cs_ip(0x0000, 0x063C);
 			np2_reg_set(NP2_R_FLAGS,
 				(uint16_t)(np2_reg_get(NP2_R_FLAGS) | 0x0200));
@@ -8453,22 +7905,15 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 		}
 	}
 
-	/* An INT 1C driver expects the BIOS to already be ticking IRQ0; nothing
-	   here programs the PIT on its behalf, so give it the tick it is waiting
-	   for.  Only when it owns no OPN timer — a driver that runs off the chip
-	   does not need this, and an extra tick would double-drive it. */
+	/* INT 1C ドライバは BIOS が既に IRQ0 を進めていることを期待。こちらは代わりに PIT を組まないので、待っている tick を与える。OPN タイマを持たないときだけ — チップ駆動ドライバには不要で、余分な tick は二重駆動になる。 */
 	extCmd_ = 0;
 	np2_interrupt((uint8_t)funcVect_);
 	DrainInterrupt(drainBudget);
-	/* After cmd0, Falcom glue may HostService(0x10) a song dest — load then
-	   cmd1. Catalog dataaddr alone is also enough (no CS invent). */
+	/* cmd0 後、Falcom 糊は HostService(0x10) で曲先を渡し得る — ロードして cmd1。カタログ dataaddr だけでも足りる（CS を発明しない）。 */
 	if ((bootCs_ == 0x0160 || rx98_ || fmd98_ || prog98_ || dataAddrHost_)
 		&& dataAddr_ > 0 && fileSize_ > 0) {
 		loaded = LoadSongToAddr(song & 0xff, dataAddr_, fileSize_, 0);
-		/* Telenet splits a song into a bgm/bgm2 pair; the driver reads both,
-		   so loading only the primary leaves it waiting on half a song.
-		   Confined to the guest-supplied case so the Falcom families above
-		   keep their existing single-file behaviour. */
+		/* Telenet は曲を bgm/bgm2 対に分ける。ドライバは両方読むので主だけ載せる待ちになる。ゲスト供給ケースに限り、上の Falcom 族は既存の単ファイル動作を保つ。 */
 		if (loaded && dataAddrHost_ && data2Addr_ > 0 && file2Size_ > 0)
 			LoadSongToAddr(song & 0xff, data2Addr_, file2Size_, 1);
 	}
@@ -8476,10 +7921,7 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 		extCmd_ = 1;
 		np2_interrupt((uint8_t)funcVect_);
 		DrainInterrupt(drainBudget);
-		/* After cmd1, some glues (Ys MANPRG, Beast3, Wolf SS) leave the YM
-		   ISR on INT14/15 only. Mirror to INT0B for DeliverIrqs.
-		   Skip lone-IRET stubs (DOFMD/BRANM park serial INT14 at 0000:0500
-		   — copying that onto INT0B wipes MSC's OPN ISR). */
+		/* cmd1 後、一部糊（Ys MANPRG、Beast3、Wolf SS）は YM ISR を INT14/15 だけに残す。DeliverIrqs 用に INT0B へミラー。単独 IRET stub は飛ばす（DOFMD/BRANM はシリアル INT14 を 0000:0500 にパーク — それを INT0B へコピーすると MSC の OPN ISR を消す）。 */
 		uint8_t* mem = np2_mem();
 		if (mem) {
 			unsigned isrOff = 0, isrSeg = 0;
@@ -8492,7 +7934,7 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 					| ((unsigned)mem[vec * 4 + 3] << 8);
 				const unsigned phys = (seg << 4) + off;
 				if (phys >= 0x200000u) continue;
-				/* DOFMD serial stub: single IRET (and our 0x500 park). */
+				/* DOFMD シリアル stub: 単独 IRET（とこちらの 0x500 パーク） */
 				if (mem[phys] == 0xCF) continue;
 				if (seg == 0 && off == 0x500) continue;
 				isrOff = off;
@@ -8511,22 +7953,13 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 				(uint16_t)(np2_reg_get(NP2_R_FLAGS) | 0x0200));
 		}
 	}
-	/* SORC98 glue only (boot CS=0, song @3000/VA@11800, wstimer): INT 7Fh
-	   maps cmd0→INT D2 AL=3 (start) and cmd1→AL=0 (channel init). Default
-	   cmd0-then-cmd1 leaves start cleared — re-issue cmd0 so play sticks.
-	   Do NOT force-clear [085A].7 (old TickSide hammer): that made CALL 1CEE
-	   run every quantum and stuck SSG3 R0A at 0x0F. Native BIOS keeps .7 set
-	   and advances music on OPN Timer B (hoot-correct SSG gating).
-	   Do NOT apply to other wstimer games (Ys CS=0160 etc.). */
+	/* SORC98 糊のみ（boot CS=0、曲 @3000/VA@11800、wstimer）: INT 7Fh は cmd0→INT D2 AL=3（開始）、cmd1→AL=0（チャネル init）。既定の cmd0 のち cmd1 は開始を消す — cmd0 を再発行し再生を定着。 [085A].7 を強制クリアしない（旧 TickSide ハンマー）: 毎量子 CALL 1CEE が走り SSG3 R0A が 0x0F で固まった。ネイティブ BIOS は .7 をセットのまま OPN Timer B で音楽を進める（hoot 正しい SSG ゲート）。他 wstimer ゲーム（Ys CS=0160 等）には適用しない。 */
 	if (sorcGlue_) {
 		extCmd_ = 0;
 		np2_interrupt((uint8_t)funcVect_);
 		DrainInterrupt(drainBudget / 2);
-		/* Do NOT clear [085A] bit7 here or in TickSide. BIOS uses bit7 to
-		   gate INT08→CALL 1CEE; forcing it clear made FM advance but stuck
-		   SSG3 volume at 0x0F (hoot-correct gating needs the native skip).
-		   Music continues on OPN Timer B while [085A].7 stays set. */
-		/* Ensure PIT ticks remain available if the boot left IRQ0 masked. */
+		/* ここで、または TickSide で [085A] bit7 をクリアしない。BIOS は bit7 で INT08→CALL 1CEE をゲート。強制クリアは FM を進めたが SSG3 音量を 0x0F で固めた（hoot 正しいゲートはネイティブスキップが要る）。[085A].7 がセットのまま音楽は OPN Timer B で続く。 */
+		/* ブートが IRQ0 をマスクしたままでも PIT tick が使えるようにする */
 		picMask_ = (uint8_t)(picMask_ & 0xfeu);
 		if (!pitRunning_) {
 			pitReload_ = (uint16_t)(PC98_PIT_CLOCK_HZ / 240);
@@ -8540,10 +7973,10 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 	return 1;
 }
 
+/* CHardPc98::DrainInterrupt の実装 */
 void CHardPc98::DrainInterrupt(uint64_t budgetCycles)
 {
-	/* Step until we return near the boot HLT idle (CS==bootCs, IP in F4 patch)
-	   or consume budget. Also keep OPN/PIT ticking so nested timer IRQs work. */
+	/* ブート HLT アイドル近く（CS==bootCs、IP が F4 パッチ内）へ戻るか予算を使い切るまで進める。入れ子タイマ IRQ が動くよう OPN/PIT も tick し続ける。 */
 	const uint16_t idleCs = (uint16_t)((bootCs_ != 0 || bootIp_ != 0) ? bootCs_ : 0x0060);
 	uint64_t start = cpuCycles_;
 	while (cpuCycles_ - start < budgetCycles) {
@@ -8564,6 +7997,7 @@ void CHardPc98::DrainInterrupt(uint64_t budgetCycles)
 	}
 }
 
+/* 再生を止める */
 int CHardPc98::TriggerStop()
 {
 	extCmd_ = 2;
@@ -8571,6 +8005,7 @@ int CHardPc98::TriggerStop()
 	return 1;
 }
 
+/* CEmuHardPc98SetActive の実装 */
 void CEmuHardPc98SetActive(CHardPc98* hw)
 {
 	if (!hw) {
@@ -8587,6 +8022,7 @@ void CEmuHardPc98SetActive(CHardPc98* hw)
 	hootrip_inp8 = Pc98In8;
 }
 
+/* CEmuHardPc98GetActive の実装 */
 CHardPc98* CEmuHardPc98GetActive()
 {
 	return g_pc98Active;

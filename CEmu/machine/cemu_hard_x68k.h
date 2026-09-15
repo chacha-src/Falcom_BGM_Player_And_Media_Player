@@ -3,11 +3,11 @@
 #include "../chip/cemu_chip.h"
 #include "../cemu_zipfs.h"
 
-/* Thin X68k sound hard (hoot x68k.cpp): 68000 + YM2151 @ e90001 + song mailbox @ e00000.
-   trap_f.bin is the 64K IPL/IOCS image; BOOT copies 1F0000→FF0000 then JSR FF0B86.
-   When romlist includes trap_f, LoadRoms runs that IPL sub once (real code, not PlantDos).
-   Main RAM is 4MB ($000000..$3FFFFF); $E00000..$E7FFFF is extra RAM for ADPCM.
-   MFP Timer C/D at $E88000 raises vectored IRQ2 (vector $110/$114 when VR=$40). */
+/* 薄い X68k 音源ハード（hoot x68k.cpp）: 68000 + YM2151 @ e90001 + 曲メールボックス @ e00000。
+   trap_f.bin は 64K IPL/IOCS。BOOT は 1F0000→FF0000 をコピーして JSR FF0B86。
+   romlist に trap_f があれば LoadRoms がその IPL を一度走らせる（PlantDos ではない実コード）。
+   メイン RAM は 4MB ($000000..$3FFFFF)。$E00000..$E7FFFF は ADPCM 用拡張 RAM。
+   MFP Timer C/D @ $E88000 がベクタ付き IRQ2（VR=$40 なら $110/$114）。 */
 class CHardX68k : public CHard {
 public:
 	CHardX68k();
@@ -32,17 +32,17 @@ public:
 	int FetchCount() const { return fetchCount_; }
 	void AddFetch() { fetchCount_++; }
 	uint8_t SongFlag() const { return songFlag_; }
-	/* Mix MSM6258V ADPCM into stereo buffer (hoot x68k.cpp path). */
+	/* MSM6258V ADPCM をステレオへ混成（hoot x68k.cpp 経路） */
 	void MixAdpcm(int16_t* stereo, int frames);
 
-	/* MC68901 Timer C/D → IRQ2 (vectored). Call once per CPU quantum. */
+	/* MC68901 Timer C/D → IRQ2（ベクタ）。CPU 量子ごとに 1 回 */
 	void TickMfp(int cpuCycles);
 	int MfpIrqPending() const { return mfpIrqPending_; }
 	int AckMfpIrq();
-	/* IERB+IMRB Timer D armed — driver must not also software-pulse $110. */
+	/* IERB+IMRB で Timer D 武装済み — ドライバは $110 をソフトパルスしない */
 	int MfpTimerDIrqArmed() const;
 
-	/* XML-placed files for Human68k OPEN/READ (ZMUSIC etc.). */
+	/* Human68k OPEN/READ 用に XML が置いたファイル（ZMUSIC 等） */
 	enum { kDosFiles = 64, kDosHandles = 8 };
 	struct DosFile {
 		char name[32];
@@ -50,15 +50,15 @@ public:
 		unsigned size;
 	};
 	struct DosHandle {
-		int file; /* index into dosFiles_ or -1 */
+		int file; /* dosFiles_ の添字。無ければ -1 */
 		unsigned pos;
 	};
 	int DosFileCount() const { return dosFileCount_; }
 	const DosFile* DosFileAt(int i) const {
 		return (i >= 0 && i < dosFileCount_) ? &dosFiles_[i] : NULL;
 	}
-	/* Host-side DOS file op: fn=0x3d OPEN / 0x3f READ / 0x3e CLOSE / 0x4e NAMECK.
-	   Returns Human68k-style d0; for READ also copies into guest buffer. */
+	/* ホスト側 DOS: fn=0x3d OPEN / 0x3f READ / 0x3e CLOSE / 0x4e NAMECK。
+	   Human68k 風 d0 を返す。READ はゲストバッファへもコピー。 */
 	unsigned DosFileOp(unsigned fn, unsigned a1, unsigned d0, unsigned d1);
 
 	uint8_t Read8(unsigned addr);
@@ -80,8 +80,8 @@ private:
 	int DosFindFile(const char* path) const;
 
 	enum {
-		/* 4MB main RAM: XML code/x at $180000+ (bonnou OPM, Wolfteam, Dempa)
-		   was skipped when this was 1MB + a 512KB $10xxxx window. */
+		/* メイン RAM 4MB: XML の code/x が $180000+（bonnou OPM、Wolfteam、Dempa）。
+		   1MB + $10xxxx 512KB 窓のときはスキップされていた。 */
 		kRomBytes = 0x400000, kRamBytes = 0x10000,
 		kHighBytes = 0x10000, kMfpBytes = 0x1000,
 		kHeapBase = 0xA00000, kHeapBytes = 0x40000,
@@ -91,9 +91,9 @@ private:
 	uint8_t ram_[kRamBytes];
 	uint8_t high_[kHighBytes];
 	uint8_t heap_[kHeapBytes];
-	uint8_t ext_[kExtBytes]; /* $E00000..$E7FFFF ADPCM / expansion */
+	uint8_t ext_[kExtBytes]; /* $E00000..$E7FFFF ADPCM／拡張 */
 	uint8_t mfp_[kMfpBytes];
-	int softMfp_; /* catalog mfp=1: GPIP bit4 clear (arcus wait loops) */
+	int softMfp_; /* catalog mfp=1: GPIP bit4 クリア（arcus 待ちループ） */
 	int64_t mfpTdAcc_;
 	int64_t mfpTcAcc_;
 	int mfpIrqPending_;
@@ -110,14 +110,13 @@ private:
 	uint8_t adpcmPpi_;
 	int64_t adpcmPhase_;
 	int adpcmPaused_;
-	/* HD63450 channel 3 (MSM6258V): transfer count and memory address as the
-	   guest actually programmed them, plus the array-chaining base. */
+	/* HD63450 ch3（MSM6258V）: ゲストが組んだ転送数とメモリアドレス、配列チェイン基点 */
 	uint16_t dmacMtc_;
 	uint32_t dmacMar_;
 	uint8_t dmacOcr_;
 	uint16_t dmacBtc_;
 	uint32_t dmacBar_;
-	/* Array chaining: remaining descriptors after the one now playing. */
+	/* 配列チェイン: 再生中の次以降の残りディスクリプタ */
 	unsigned adpcmChainPtr_;
 	unsigned adpcmChainLeft_;
 	int AdpcmLoadChainEntry();
@@ -133,7 +132,7 @@ private:
 	DosFile dosFiles_[kDosFiles];
 	int dosFileCount_;
 	DosHandle dosHandles_[kDosHandles];
-	/* $E00018..$E0001F DOS file-op mailbox (guest LINE-F stubs). */
+	/* $E00018..$E0001F DOS ファイル操作メールボックス（ゲスト LINE-F stub） */
 	unsigned dosMbA1_;
 	unsigned dosMbD0_;
 	unsigned dosMbD1_;

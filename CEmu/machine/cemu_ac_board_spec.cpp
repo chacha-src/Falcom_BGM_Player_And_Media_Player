@@ -1,8 +1,8 @@
 ﻿#include "StdAfx.h"
 #include "cemu_ac_board_spec.h"
 
-/* Board constants used by Init glue / diagnostics. Subtype→board resolve
-   lives in cemu_hard_ac.cpp (CEmuAcResolveBoard) beside the subtype helpers. */
+/* Init 糊／診断用のボード定数。subtype→ボード解決は cemu_hard_ac.cpp
+   の CEmuAcResolveBoard（subtype ヘルパ横）。 */
 
 static const CEmuAcBoardSpec kSpecs[] = {
 	{ CEMU_AC_BOARD_SYS16A, "sega_sys16a", CEMU_AC_CPU_Z80, 4000000,
@@ -101,13 +101,11 @@ static const CEmuAcBoardSpec kSpecs[] = {
 	  0, 0, 0, CEMU_AC_IRQ_NONE, CEMU_AC_IRQ_NONE,
 	  CEMU_AC_CHIP_RF5C400, 0, 18432000, CEMU_AC_CHIP_NONE, 0, 0, 0,
 	  "konami/hornet.cpp — needs 68K host" },
-	/* Four revisions on one board id (raizingType_ picks the map); the
-	   constants below are the mahoudai / Type 1 variant, whose Z80 takes no
-	   interrupts at all and instead polls the OPM's Timer A flag. Battle
-	   Garegga adds a 16K bank window at 8000 and a latch on IRQ0, Batrider
-	   moves the whole section onto I/O ports 80-84 with a second OKI and a
-	   latch on NMI, and Battle Bakraid swaps the OPM+OKI pair for a YMZ280B
-	   on ports 80/81 plus a 444 Hz periodic IRQ0. */
+	/* 同一ボード ID に 4 リビジョン（raizingType_ がマップを選ぶ）。
+	   下の定数は mahoudai / Type 1。Z80 は割り込み無しで OPM Timer A を
+	   ポーリング。Garegga は 8000 に 16K バンク＋IRQ0 ラッチ、Batrider は
+	   I/O 80-84 へ移し OKI 2 個＋NMI ラッチ、Bakraid は OPM+OKI を YMZ280B
+	   （port 80/81）＋444 Hz 周期 IRQ0 に替える。 */
 	{ CEMU_AC_BOARD_RAIZING, "raizing", CEMU_AC_CPU_Z80, 4000000,
 	  0xC000, 0x2000, 0xC000, CEMU_AC_IRQ_NONE, CEMU_AC_IRQ_NONE,
 	  CEMU_AC_CHIP_YM2151, 0xE000, 3375000, CEMU_AC_CHIP_OKI6295, 0xE004, 1000000, 0,
@@ -118,6 +116,7 @@ static const CEmuAcBoardSpec kSpecs[] = {
 	  "seibu/raiden.cpp — SEI80BU decrypt when encrypted" },
 };
 
+/* ボード ID から固定仕様を返す。未知なら NULL */
 const CEmuAcBoardSpec* CEmuAcBoardSpecById(CEmuAcBoard board)
 {
 	for (unsigned i = 0; i < sizeof(kSpecs) / sizeof(kSpecs[0]); i++)

@@ -2,8 +2,8 @@
 #include <stdint.h>
 #include "cemu_chip.h"
 
-/* YM3812 (OPL2 / AdLib). Write(addr): even=address latch, odd=data.
-   Clock typically 3579545 Hz. */
+/* YM3812（OPL2 / AdLib）。Write(addr): 偶数=アドレスラッチ、奇数=データ。
+   クロックは通常 3579545 Hz。 */
 CChip* CEmuChipYm3812Create(uint32_t clockHz, int sampleRate);
 void CEmuChipYm3812Destroy(CChip* c);
 unsigned CEmuChipYm3812WriteCount(const CChip* c);

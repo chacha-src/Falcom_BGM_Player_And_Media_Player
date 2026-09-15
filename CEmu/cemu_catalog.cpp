@@ -60,7 +60,7 @@ static void CEmuAttrValue(const char* tag, const char* attr, char* out, int outC
 	if (!out || outCap <= 0) return;
 	out[0] = 0;
 	if (!tag || !attr) return;
-	/* Match attr="…" and attr = "…" (xml2 often inserts spaces around '='). */
+	/* attr="…" と attr = "…" の両方 (xml2 は '=' 周りに空白を入れがち)。 */
 	const char* p = CEmuStrStr(tag, attr);
 	while (p) {
 		const char* q = p + strlen(attr);
@@ -332,10 +332,9 @@ static CEmuGameEntry* CEmuGameEntryFromBuild(const CEmuGameBuild* b)
 	return ge;
 }
 
-/* The chip names as they are written in the catalog's <name> field, mapped to
-   our chip ids. Longest / most specific spellings must come first so that
-   "YM2610B" is not consumed by a "YM2610" test, and so that a bare "OPN" does
-   not swallow "OPNA". */
+/* カタログ <name> に書かれたチップ名 → CEmu チップ ID。
+   長くて具体的な表記を先に。"YM2610B" が "YM2610" に食われない、
+   素の "OPN" が "OPNA" を飲み込まないようにする。 */
 struct CEmuCatalogChipToken {
 	const char* token;
 	int chipId;
@@ -357,7 +356,7 @@ static const CEmuCatalogChipToken kCatalogChipTokens[] = {
 	{ "MSM6295", CEMU_CHIP_OKI6295 }, { "OKIM6295", CEMU_CHIP_OKI6295 },
 	{ "OKI6295", CEMU_CHIP_OKI6295 }, { "M6295", CEMU_CHIP_OKI6295 },
 	{ "MSM5205", CEMU_CHIP_MSM5205 }, { "MSM5232", CEMU_CHIP_MSM5232 },
-	/* uPD7759 is written several ways in the rips, "uDP" typo included. */
+	/* uPD7759 は rip 側の表記が複数。"uDP" 誤記も含む。 */
 	{ "UPD7759", CEMU_CHIP_UPD7759 }, { "UDP7759", CEMU_CHIP_UPD7759 },
 	{ "UPD7751", CEMU_CHIP_UPD7759 }, { "UDP7751", CEMU_CHIP_UPD7759 },
 	{ "D7759", CEMU_CHIP_UPD7759 },
@@ -385,18 +384,17 @@ static const CEmuCatalogChipToken kCatalogChipTokens[] = {
 	{ "GA20", CEMU_CHIP_GA20 },
 	{ "SAA1099", CEMU_CHIP_SAA1099 },
 	{ "SN76496", CEMU_CHIP_SN76489 }, { "SN76489", CEMU_CHIP_SN76489 },
-	/* System E rips say "Sega PSG"; bare "PSG" is too vague to map. */
+	/* System E の rip は "Sega PSG"。素の "PSG" は曖昧すぎてマップしない。 */
 	{ "SEGA PSG", CEMU_CHIP_SN76489 },
 	{ "AY-3-8910", CEMU_CHIP_AY },    { "AY8910", CEMU_CHIP_AY },
 	{ "YM2149", CEMU_CHIP_AY },       { "AY-3-8912", CEMU_CHIP_AY },
-	/* Last, so "Sega PSG" above has already taken its characters and only a
-	   PSG with no maker named falls through to the AY the MSX/arcade use. */
+	/* 最後。上の "Sega PSG" が文字を取ったあと、メーカー名無しの PSG だけが
+	   ここに来て MSX/アーケードの AY へ落ちる。 */
 	{ "PSG", CEMU_CHIP_AY }
 };
 
-/* Case-insensitive search that also ignores separators the catalog varies on
-   ("AY-3-8910" vs "AY3 8910"), so one spelling per chip is enough above.
-   Returns the offset just past the match, or -1 when the token is absent. */
+/* 大文字小文字無視。カタログが揺らす区切り ("AY-3-8910" vs "AY3 8910") も無視。
+   チップごとに表記は 1 つで足りる。マッチ直後のオフセット、無ければ -1。 */
 static int CEmuCatalogNameFindToken(const char* hay, const char* needle)
 {
 	char n0 = 0;
@@ -432,9 +430,8 @@ int CEmuCatalogChipsFromText(const char* text, int* ids, int maxIds)
 {
 	if (!text || !ids || maxIds <= 0) return 0;
 
-	/* Work on a copy and blank out each match, so a more specific spelling
-	   earlier in the table consumes its characters and a broader one cannot
-	   claim them again - "Sega PSG" must not also read as a bare "PSG". */
+	/* コピー上でマッチを消す。具体的な表記が文字を消費し、広い表記が
+	   再主張できない。"Sega PSG" が素の "PSG" にも当たらない。 */
 	char buf[CEMU_GAME_NAME * 4];
 	strncpy_s(buf, text, _TRUNCATE);
 
@@ -470,16 +467,15 @@ void CEmuCatalogAssignDocChips(CEmuGameEntry* ge)
 	ge->docChipCount = CEmuCatalogChipsFromText(nameA, ge->docChipIds, 12);
 }
 
-/* Assign cpuId/chipIds using whatever is already in ge->docChipIds. */
+/* 既に ge->docChipIds にあるものから cpuId/chipIds を付ける。 */
 static void CEmuCatalogAssignHwIdsFromDoc(CEmuGameEntry* ge);
 
 void CEmuCatalogShareDocChips(CEmuCatalog* cat)
 {
 	if (!cat || cat->count <= 0) return;
-	/* The same archive is often listed twice - one row spells the chips out,
-	   the other is just the game title. Whichever row a zip resolves to
-	   should describe the same board, so let the terse row borrow.
-	   Hash by archive so this stays O(n) instead of O(n^2) at catalog load. */
+	/* 同一アーカイブが二行あることが多い — 片方だけチップ名を書く。
+	   zip が解決した行が同じ基板を表すよう、短い行が借りる。
+	   archive ハッシュで O(n)。カタログ読込で O(n^2) にしない。 */
 	enum { kBuckets = 4096 };
 	int* head = (int*)malloc(sizeof(int) * kBuckets);
 	int* next = (int*)malloc(sizeof(int) * (size_t)cat->count);
@@ -1291,8 +1287,8 @@ static void CEmuCatalogParseGameBlock(CEmuCatalog* cat, const char* block, const
 		CEmuGameEntryFree(slot);
 }
 
-/* hoot XML comments out unfinished titles/roms (joker68snd gun.mu, …).
-   The naive tag scan otherwise treats those as live catalog rows. */
+/* hoot XML は未完成 title/rom をコメントアウト (joker68snd gun.mu 等)。
+   素朴なタグ走査だと生きたカタログ行として扱ってしまう。 */
 static void CEmuXmlStripComments(char* s)
 {
 	if (!s) return;
@@ -2128,11 +2124,11 @@ int CEmuCatalogLoad(CEmuCatalog* cat, const wchar_t* dataRoot)
 
 static int CEmuSubtypePreferRank(const char* subtype)
 {
-	/* Same archive often has OPNA then OPN (arcus2). Zip resolve must not
-	   last-win to OPN — that loads PATCH2 in YM2203 mode → sparse regs / silence.
-	   Also demote beep: cplay98/mars and frnunv98 otherwise pick BPLAY/PMDB over
-	   FPLAY/PMD (beep ranked above opn when both shared "other"=15). Prefer opn
-	   over bare 86 — PMD86 paths often need extra PCM drivers and stay silent. */
+	/* 同一アーカイブに OPNA と OPN が並ぶことが多い (arcus2)。zip 解決で
+	   後勝ち OPN にすると PATCH2 を YM2203 モードで読み、レジスタが疎/無音。
+	   beep も下げる: cplay98/mars と frnunv98 が BPLAY/PMDB を FPLAY/PMD より
+	   先に取る (両方 "other"=15 のとき beep が opn より上だった)。素の 86 より
+	   opn を優先 — PMD86 経路は追加 PCM ドライバが要り無音になりがち。 */
 	if (!subtype || !subtype[0]) return 0;
 	if (_stricmp(subtype, "opna") == 0) return 40;
 	if (_stricmp(subtype, "opn") == 0) return 30;
@@ -2154,9 +2150,10 @@ static int CEmuGameHasOpt(const CEmuGameEntry* e, const char* name)
 	return 0;
 }
 
-/* Score how many code/bgm/voice rom names resolve inside zipFs.
-   Exact basename matches (MAME epr-16720.7) outweigh fuzzy digit-core hits
-   (zzoriginal 16720.epr) so xml2 titlelists win when the zip is MAME-named. */
+/* zipFs 内で解決できる code/bgm/voice rom 名の数。
+   重複カタログ行の順位付けに使う。
+   完全ベース名一致 (MAME epr-16720.7) を数字コアのあいまい一致
+   (zzoriginal 16720.epr) より重くする。zip が MAME 名なら xml2 が勝つ。 */
 static int CEmuCatalogZipRomHits(const CEmuGameEntry* e, const CEmuZipFs* zipFs)
 {
 	if (!e || !zipFs) return 0;
@@ -2189,29 +2186,28 @@ static int CEmuCatalogZipRomHits(const CEmuGameEntry* e, const CEmuZipFs* zipFs)
 static int CEmuCatalogArchiveRank(const CEmuGameEntry* e, const CEmuZipFs* zipFs)
 {
 	if (!e) return -1000000;
-	/* Wolfteam / similar: same archive ships FM (MU*) and midiout (MI*)
-	   variants. Prefer the non-MIDI entry so 000_BOOT drives OPN, not E0Dx
-	   MIDI UART traffic we don't bridge. */
+	/* Wolfteam 系: 同一アーカイブに FM (MU*) と midiout (MI*) の双子。
+	   非 MIDI 行を優先し、000_BOOT が OPN を駆動。E0Dx MIDI UART は橋渡ししない。 */
 	int rank = CEmuSubtypePreferRank(e->subtype) * 100000;
-	/* FM-7 zip often lists PSG (fm7) and OPN (fm77av) twins. Prefer OPN. */
+	/* FM-7 zip は PSG (fm7) と OPN (fm77av) の双子が多い。OPN 優先。 */
 	if (_stricmp(e->platform, "fm77av") == 0)
 		rank += 50000;
 	else if (_stricmp(e->platform, "mucomfm") == 0)
 		rank += 40000;
 	else if (_stricmp(e->platform, "fm7") == 0)
 		rank += 10000;
-	/* Sharp X1 hard is OPM+AY only — never prefer catalog OPN twins (ishtar). */
+	/* Sharp X1 hard は OPM+AY のみ — カタログの OPN 双子を優先しない (ishtar)。 */
 	if ((_stricmp(e->platform, "x1") == 0 || _stricmp(e->dataDir, "x1") == 0)
 		&& e->subtype[0] && _stricmp(e->subtype, "opn") == 0)
 		rank -= 2500000;
-	/* famistava OPNA twin is the same FS.EXE/BGM.BIN as OPN but mixes mute. */
+	/* famistava の OPNA 双子は OPN と同じ FS.EXE/BGM.BIN だがミックスが無音。 */
 	if (e->archive[0] && _stricmp(e->archive, "famistava") == 0
 		&& e->subtype[0] && _strnicmp(e->subtype, "opna", 4) == 0)
 		rank -= 2000000;
 	if (CEmuGameHasOpt(e, "midiout"))
 		rank -= 800000;
-	/* undine: three twins share type=opna; demote PSG (.P) and bare OPN (.M)
-	   so zip resolve picks OPNA (.M2) for real FM+ADPCM performance. */
+	/* undine: 3 双子が type=opna を共有。PSG (.P) と素の OPN (.M) を下げ、
+	   zip 解決が OPNA (.M2) を選んで実 FM+ADPCM になる。 */
 	{
 		int hasP = 0, hasM = 0, hasM2 = 0;
 		for (int i = 0; i < e->romCount; i++) {
@@ -2228,9 +2224,9 @@ static int CEmuCatalogArchiveRank(const CEmuGameEntry* e, const CEmuZipFs* zipFs
 		else if (hasM && !hasM2)
 			rank -= 500000;
 	}
-	/* Wing destge/destjyo OPNA MCM1/WMC1 hang under DI during init; the OPN
-	   sibling uses Y230 (same as working onryo OPN). Demote MCM1 so zip
-	   resolve picks Y230. onryo OPNA (M.VA) is untouched. */
+	/* Wing destge/destjyo の OPNA MCM1/WMC1 は init 中 DI で止まる。
+	   OPN 兄弟は Y230 (動く onryo OPN と同じ)。MCM1 を下げて Y230 を選ぶ。
+	   onryo OPNA (M.VA) は触らない。 */
 	for (int i = 0; i < e->romCount; i++) {
 		if (_stricmp(e->rom[i].type, "code") != 0) continue;
 		const char* nm = e->rom[i].name;
@@ -2239,54 +2235,54 @@ static int CEmuCatalogArchiveRank(const CEmuGameEntry* e, const CEmuZipFs* zipFs
 			rank -= 2000000;
 			break;
 		}
-		/* kbreed OPNA TRPSCR2 overlaps mdata@d200; OPN TRPSCR1 (digan-class)
-		   does not and matches working barbatus/digan. Prefer OPN. */
+		/* kbreed OPNA TRPSCR2 は mdata@d200 と重なる。OPN TRPSCR1 (digan 系)
+		   は重ならず barbatus/digan と同じ。OPN を優先。 */
 		if (_stricmp(nm, "TRPSCR2.COM") == 0) {
 			rank -= 2000000;
 			break;
 		}
-		/* jesus2 OPNA (use_pcmx8) stays key-on mute; OPN sibling with the
-		   same music.com path peaks. Demote pcmx8 OPNA so zip picks OPN. */
+		/* jesus2 OPNA (use_pcmx8) はキーオン無音のまま。同じ music.com の
+		   OPN 兄弟はピーク。pcmx8 OPNA を下げて OPN を選ぶ。 */
 		if (_stricmp(nm, "music.com") == 0 && CEmuGameHasOpt(e, "use_pcmx8")) {
 			rank -= 2000000;
 			break;
 		}
-		/* bpoint88 OPNA (use_pcmx8+ADPCM) wanders DI; OPN sibling peaks. */
+		/* bpoint88 OPNA (use_pcmx8+ADPCM) は DI で迷う。OPN 兄弟はピーク。 */
 		if (_stricmp(nm, "MUCO3") == 0 && CEmuGameHasOpt(e, "use_pcmx8")) {
 			rank -= 2000000;
 			break;
 		}
-		/* scheme OPNA (MS0A) needs specialty init_pc=0x9000; OPN MD* sibling
-		   plays under generic PATCH. */
+		/* scheme OPNA (MS0A) は specialty init_pc=0x9000 が要る。OPN MD* 兄弟は
+		   汎用 PATCH で鳴る。 */
 		if (_stricmp(nm, "MS0A") == 0) {
 			rank -= 2000000;
 			break;
 		}
-		/* hydlide3 OPNA (BIOS@ED00) is mute; identical OPN sibling peaks. */
+		/* hydlide3 OPNA (BIOS@ED00) は無音。同一の OPN 兄弟はピーク。 */
 		if (_stricmp(nm, "BIOS") == 0 && e->rom[i].offset == 0xed00
 			&& e->subtype[0] && _strnicmp(e->subtype, "opna", 4) == 0) {
 			rank -= 2000000;
 			break;
 		}
-		/* p1demo1 OPNA twin of OPN (same DEMO1A/DRIVER) stays silent. */
+		/* p1demo1 の OPNA 双子 (同じ DEMO1A/DRIVER) は無音のまま。 */
 		if (_stricmp(nm, "DEMO1A") == 0
 			&& e->subtype[0] && _strnicmp(e->subtype, "opna", 4) == 0) {
 			rank -= 2000000;
 			break;
 		}
-		/* wingsp88 OPNA lists musics.mac; OPN music.mac sibling is the
-		   working GameArts path (zip ships both). */
+		/* wingsp88 OPNA は musics.mac。OPN の music.mac 兄弟が動く GameArts 経路
+		   (zip に両方ある)。 */
 		if (_stricmp(nm, "musics.mac") == 0) {
 			rank -= 2000000;
 			break;
 		}
-		/* af OPNA (opefc) stays silent; OPN sibling with same roms peaks. */
+		/* af OPNA (opefc) は無音。同じ rom の OPN 兄弟はピーク。 */
 		if (_stricmp(nm, "opefc") == 0
 			&& e->subtype[0] && _strnicmp(e->subtype, "opna", 4) == 0) {
 			rank -= 2000000;
 			break;
 		}
-		/* laptick 8801-10 (PATCH2+CAST+PROG): local zip ships PATCH (OPN). */
+		/* laptick 8801-10 (PATCH2+CAST+PROG): ローカル zip は PATCH (OPN)。 */
 		if (_stricmp(nm, "PATCH2") == 0) {
 			int hasCast = 0;
 			for (int j = 0; j < e->romCount; j++) {
@@ -2297,45 +2293,47 @@ static int CEmuCatalogArchiveRank(const CEmuGameEntry* e, const CEmuZipFs* zipFs
 				break;
 			}
 		}
-		/* bd98/bdp98 OPNA twin of OPN (BD_MAIN.COM) stays silent on OPNA. */
+		/* bd98/bdp98 の OPNA 双子 (BD_MAIN.COM) は OPNA で無音。 */
 		if (_stricmp(nm, "BD_MAIN.COM") == 0
 			&& e->subtype[0] && _strnicmp(e->subtype, "opna", 4) == 0) {
 			rank -= 2000000;
 			break;
 		}
-		/* gage98 OPNA pulls ADPCM.BIN; OPN sibling without it is preferred. */
+		/* gage98 OPNA は ADPCM.BIN を引く。それが無い OPN 兄弟を優先。 */
 		if (_stricmp(nm, "ADPCM.BIN") == 0) {
 			rank -= 2000000;
 			break;
 		}
 	}
-	/* DOS file-list twins (not type=code): demote silent OPNA+PCM packs. */
+	/* DOS ファイルリスト双子 (type=code ではない): 無音 OPNA+PCM パックを下げる。 */
 	for (int i = 0; i < e->romCount; i++) {
 		if (_stricmp(e->rom[i].type, "file") != 0) continue;
 		const char* nm = e->rom[i].name;
 		if (!nm) continue;
-		/* gao1 SPB (PMDB2+PMDPCM/GAOGAO.PPC) stays silent; OPN PMD sibling peaks. */
+		/* gao1 SPB (PMDB2+PMDPCM/GAOGAO.PPC) は無音。OPN PMD 兄弟はピーク。 */
 		if (_stricmp(nm, "GAOGAO.PPC") == 0) {
 			rank -= 2000000;
 			break;
 		}
 	}
-	/* xml vs xml2: same subtype, but rom names differ (MUS* vs DATA*).
-	   Prefer the list that actually hits the local zip. */
+	/* xml vs xml2: subtype は同じだが rom 名が違う (MUS* vs DATA*)。
+	   ローカル zip に実際に当たるリストを優先。 */
 	if (zipFs)
 		rank += CEmuCatalogZipRomHits(e, zipFs) * 100;
-	/* Tie-break: more titles / roms (range-expanded xml2, richer lists). */
+	/* 同点: 曲数 / rom が多い方 (範囲展開 xml2、より厚いリスト)。 */
 	rank += e->titleCount;
 	rank += e->romCount;
 	return rank;
 }
 
+/* archive 名で探す (zip メンバ照合なし) */
 const CEmuGameEntry* CEmuCatalogFindArchive(const CEmuCatalog* cat,
 	const char* archive, const char* dataDirHint)
 {
 	return CEmuCatalogFindArchiveForZip(cat, archive, dataDirHint, NULL);
 }
 
+/* zip メンバ一致で最良行を選ぶ */
 const CEmuGameEntry* CEmuCatalogFindArchiveForZip(const CEmuCatalog* cat,
 	const char* archive, const char* dataDirHint, const CEmuZipFs* zipFs)
 {
@@ -2348,9 +2346,9 @@ const CEmuGameEntry* CEmuCatalogFindArchiveForZip(const CEmuCatalog* cat,
 	const CEmuGameEntry* best = NULL;
 	int bestRank = -1000000;
 	const CEmuGameEntry* pass0Best = NULL;
-	/* Prefer exact archive==zip stem. Only if none: allow "stem,companion"
-	   (emdr_msx,fmpac_msx). Matching comma forms in the same pass stole
-	   rank from primary-only twins and dropped MSX OK 414→403. */
+	/* archive==zip stem の完全一致を優先。無ければ "stem,companion"
+	   (emdr_msx,fmpac_msx)。同じパスでカンマ形が当たると主 twin から
+	   順位を奪い、MSX OK が 414→403 に落ちた。 */
 	for (int pass = 0; pass < 2; pass++) {
 		for (int i = 0; i < cat->count; i++) {
 			const CEmuGameEntry* e = cat->entry[i];
@@ -2442,6 +2440,7 @@ const CEmuGameEntry* CEmuCatalogFindArchiveForZip(const CEmuCatalog* cat,
 	return best;
 }
 
+/* 同一アーカイブ候補を zip メンバ一致で順位付け。open/play の再試行用 */
 int CEmuCatalogCollectArchiveForZip(const CEmuCatalog* cat,
 	const char* archive, const CEmuZipFs* zipFs,
 	const CEmuGameEntry** out, int outCap)

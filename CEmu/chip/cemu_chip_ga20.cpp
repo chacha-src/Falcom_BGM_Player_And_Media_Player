@@ -4,9 +4,9 @@
 #include "../fmmon/fmmon_shadow.h"
 #include <string.h>
 
-/* Port of MAME src/devices/sound/iremga20.cpp (BSD-3-Clause,
-   Acho A. Tang / R. Belmont / Valley Bell). Native stream rate is clock/4;
-   host samples are produced by running that many chip steps per output frame. */
+/* MAME src/devices/sound/iremga20.cpp の移植（BSD-3-Clause,
+   Acho A. Tang / R. Belmont / Valley Bell）。ネイティブストリームは clock/4。
+   ホスト1サンプルごとにその分のチップステップを回す。 */
 enum { kGa20Voices = 4, kGa20Shift = 12 };
 
 static int CEmuGa20Clamp16(int v)
@@ -45,9 +45,10 @@ public:
 		const unsigned off = addr & 0x1f;
 		const uint8_t v = (uint8_t)(data & 0xff);
 		regs_[off] = v;
+		/* FMモニタへGA20レジスタをシャドウ。 */
 		FmMonShadowApplyGa20Reg(off, v);
 		const int c = (int)(off >> 3);
-        // Debug
+        /* デバッグ */
         {
             FILE* f = fopen("ga20_debug.txt", "a");
             if(f) { fprintf(f, "GA20 write %02X = %02X\n", off, v); fclose(f); }
@@ -60,7 +61,7 @@ public:
 			ch_[c].volume = (unsigned)((v * 256) / (v + 10));
 			break;
 		case 6:
-			/* d1: key on/off */
+			/* d1: キーオン/オフ */
 			if (v & 2) {
 				ch_[c].play = 1;
 				ch_[c].pos = (uint32_t)((regs_[(c << 3) | 0] | (regs_[(c << 3) | 1] << 8)) << 4);
@@ -99,7 +100,7 @@ public:
 			if (n > 1) out /= n;
 			else if (n == 0) out = last_;
 			last_ = out;
-			/* MAME normalises by 32768*4; keep the same headroom. */
+			/* MAME は 32768*4 で正規化。同じヘッドルームを維持。 */
 			const int s = (int)(out / 4) * gain / 256;
 			stereo[i * 2] = (int16_t)CEmuGa20Clamp16((int)stereo[i * 2] + s);
 			stereo[i * 2 + 1] = (int16_t)CEmuGa20Clamp16((int)stereo[i * 2 + 1] + s);
@@ -146,7 +147,7 @@ private:
 			Voice& v = ch_[c];
 			if (!v.play) continue;
 			const int sample = (rom_ && v.pos < romSize_) ? (int)rom_[v.pos] : 0;
-			if (sample == 0x00) { /* sample end marker */
+			if (sample == 0x00) { /* サンプル終端マーカ */
 				v.play = 0;
 				continue;
 			}
@@ -171,6 +172,7 @@ private:
 	Voice ch_[kGa20Voices];
 };
 
+/* Irem GA20 ラッパ生成。clockHz はマスタ、ストリームは clock/4。 */
 CChip* CEmuChipGa20Create(uint32_t clockHz, int sampleRate)
 {
 	return new CChipGa20(clockHz, sampleRate);

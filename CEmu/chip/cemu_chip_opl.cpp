@@ -23,12 +23,12 @@ public:
 		chip_ = YM3812Init((int)clockHz_, sampleRate_);
 		if (chip_) {
 			YM3812ResetChip(chip_);
-			/* Melodic mode (not rhythm). */
+			/* メロディモード（リズムではない）。 */
 			YM3812Write(chip_, 0, 0x01);
 			YM3812Write(chip_, 1, 0x00);
-			/* KOEI FMDRV AdLib detect (and any OPL timer user) needs
-			   TimerHandler + AdvanceClocks → YM3812TimerOver. Without
-			   this, detect fails, [0114] stays 0, INT 66 returns FFFF. */
+			/* KOEI FMDRV の AdLib 検出（およびOPLタイマ利用者）は
+			   TimerHandler + AdvanceClocks → YM3812TimerOver が必要。
+			   無いと検出失敗、[0114] が0のまま、INT 66 が FFFF を返す。 */
 			YM3812SetTimerHandler(chip_, &CChipOpl2::OnTimer, this);
 		}
 	}
@@ -68,10 +68,10 @@ public:
 		YM3812Write(chip_, 1, (int)(data & 0xff));
 		writeCount_++;
 		regHist_[addrLatch_ & 0xff]++;
-		/* Key-on: reg Bx bit5. */
+		/* キーオン: reg Bx bit5。 */
 		if ((addrLatch_ & 0xf0) == 0xb0 && (data & 0x20) != 0)
 			keyOnCount_++;
-		/* WriteOplReg enables OPL mode unless EnterKeysOnly suppressed it. */
+		/* WriteOplReg は EnterKeysOnly が抑止しない限り OPL モードを有効化する。 */
 		FmMonShadowWriteOplReg(addrLatch_, (uint8_t)(data & 0xff));
 	}
 
@@ -85,7 +85,7 @@ public:
 				const int64_t over = -timerLeft_[t];
 				timerLeft_[t] = -1;
 				YM3812TimerOver(chip_, t);
-				/* TimerOver reloads via OnTimer; if still inactive, stop. */
+				/* TimerOver は OnTimer 経由でリロード。非アクティブなら停止。 */
 				if (timerLeft_[t] < 0) break;
 				timerLeft_[t] -= over;
 			}
@@ -99,7 +99,7 @@ public:
 			memset(stereo, 0, (size_t)frames * 2 * sizeof(int16_t));
 			return;
 		}
-		/* Keep timers alive between IRQ pumps (sample-time advance). */
+		/* IRQポンプ間もタイマを生かす（サンプル時間で進める）。 */
 		if (clockHz_ > 0 && sampleRate_ > 0) {
 			const uint64_t clocks =
 				(uint64_t)frames * (uint64_t)clockHz_ / (uint64_t)sampleRate_;
@@ -111,6 +111,7 @@ public:
 			int32_t v = (int32_t)s;
 			if (v > 32767) v = 32767;
 			if (v < -32768) v = -32768;
+			/* OPL2 はモノラル。L/R へ同じ値。 */
 			stereo[i * 2] = (int16_t)v;
 			stereo[i * 2 + 1] = (int16_t)v;
 		}
@@ -118,8 +119,8 @@ public:
 
 	bool Irq() const override
 	{
-		/* Status bit7 = IRQ pending (MAME fmopl). Toaplan1 / AdLib sequencers
-		   wire this to Z80 INT; the ISR clears it via reg 04. */
+		/* ステータスbit7 = IRQ保留（MAME fmopl）。Toaplan1 / AdLib シーケンサは
+		   これを Z80 INT に配線し、ISR が reg 04 でクリアする。 */
 		return chip_ && (YM3812Read(chip_, 0) & 0x80) != 0;
 	}
 	void AckIrq() override {}
@@ -144,7 +145,7 @@ private:
 			self->timerLeft_[timer] = -1;
 			return;
 		}
-		/* Convert seconds → chip clocks. */
+		/* 秒 → チップクロック。 */
 		const double clocks = intervalSec * (double)self->clockHz_;
 		self->timerLeft_[timer] = (clocks > 1.0) ? (int64_t)clocks : 1;
 	}
@@ -159,6 +160,7 @@ private:
 	int64_t timerLeft_[2];
 };
 
+/* YM3812 (OPL2) ラッパ生成。クロックは通常 3.579545 MHz。 */
 CChip* CEmuChipYm3812Create(uint32_t clockHz, int sampleRate)
 {
 	return new CChipOpl2(clockHz, sampleRate);

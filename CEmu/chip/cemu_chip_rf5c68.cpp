@@ -4,7 +4,7 @@
 #include "../fmmon/fmmon_shadow.h"
 #include <string.h>
 
-/* Simplified MAME-style RF5C68 core: 8 channels, signed 8-bit PCM RAM/ROM. */
+/* MAME風の簡易 RF5C68: 8ch、符号付き8bit PCM（RAM/ROM）。 */
 enum { kRf5cChannels = 8, kRf5cShift = 11 };
 
 static int CEmuRf5cClamp16(int v)
@@ -38,18 +38,19 @@ public:
 	{
 		const uint8_t a = (uint8_t)(addr & 0xff);
 		const uint8_t v = (uint8_t)(data & 0xff);
+		/* FMモニタへRF5C68レジスタをシャドウ。 */
 		FmMonShadowApplyRf5cReg(a, v);
 		if (a < 7) {
 			Channel& c = ch_[curCh_ & 7];
 			reg_[(curCh_ & 7) * 8 + a] = v;
 			switch (a) {
 			case 0: c.env = v; break;
-			case 1: c.pan = v; break;
+			case 1: c.pan = v; break; /* 上位=L、下位=R */
 			case 2: c.step = (c.step & 0xff00) | v; break;
 			case 3: c.step = (c.step & 0x00ff) | (v << 8); break;
 			case 4: c.loop = (c.loop & 0xff00) | v; break;
 			case 5: c.loop = (c.loop & 0x00ff) | (v << 8); break;
-			case 6: c.start = (uint32_t)v << 8; c.addr = c.start << kRf5cShift; break;
+			case 6: c.start = (uint32_t)v << 8; c.addr = c.start << kRf5cShift; break; /* キーオン相当 */
 			}
 		} else if (a == 0x07 || a == 0xff) {
 			enable_ = (v & 0x80) ? 0 : 1;
@@ -83,6 +84,7 @@ public:
 					continue;
 				}
 				const int s = (int)((int8_t)b) * c.env;
+				/* パン上位ニブル=L、下位=R。step は clock/384 相当。 */
 				l += s * ((c.pan >> 4) & 0x0f) / 16;
 				r += s * (c.pan & 0x0f) / 16;
 				uint32_t step = (uint32_t)((uint64_t)c.step * clockHz_ / ((uint64_t)sampleRate_ * 384u));
@@ -135,6 +137,7 @@ private:
 	Channel ch_[kRf5cChannels];
 };
 
+/* RF5C68 ラッパ生成。 */
 CChip* CEmuChipRf5c68Create(uint32_t clockHz, int sampleRate)
 {
 	return new CChipRf5c68(clockHz, sampleRate);

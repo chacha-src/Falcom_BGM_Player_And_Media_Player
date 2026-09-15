@@ -1,6 +1,6 @@
 ﻿#pragma once
 #include <stdint.h>
 
-/* Per-set opcode substitution table for Irem's encrypted V35 ("Software
-   Guard") sound CPU. Returns NULL when the archive is not an encrypted set. */
+/* Irem 暗号化 V35（Software Guard）のセット別オペコード置換表。
+   非暗号セットなら NULL。 */
 const uint8_t* CEmuIremCpuDecryptionTable(const char* archive);

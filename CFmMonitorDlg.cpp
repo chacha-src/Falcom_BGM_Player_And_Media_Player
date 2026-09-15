@@ -12,6 +12,12 @@
 #include <math.h>
 #include <string.h>
 
+/*
+ * FMモニタ本体。KPI/SASAMI と CEmu が %TEMP% に書く .opna dump を読み、
+ * ヘキサ・チャンネルパネル・鍵盤行を可聴位置に同期して描く。
+ * live.opna は最新1枚、ring.opna はフラッシュ履歴。CEmu と SASAMI のフォルダは混ぜない。
+ */
+
 extern save savedata;
 extern CString filen;
 extern CString fnn;
@@ -21,6 +27,7 @@ extern int plcnt;
 
 namespace {
 
+/* パス末尾のファイル名から拡張子を除いた stem。kss::0001 のような中間名は切る */
 static void FmPathStem(const wchar_t* path, wchar_t* stem, int n)
 {
 	if (!stem || n < 2) return;
@@ -110,6 +117,7 @@ static void FmMonGeomPath(wchar_t* out, int n)
 	_snwprintf_s(out, n, _TRUNCATE, L"%sogg_kbsasami\\fmmon_geom.dat", tmp);
 }
 
+/* ウィンドウ位置を DatArc ステージ（なければ TEMP）へ書き出す */
 static void FmMonGeomSave(int open, int x, int y, int w, int h)
 {
 	FmMonGeomFile g = {};
@@ -171,6 +179,7 @@ static int FmMonGeomLoad(FmMonGeomFile* out)
 	return 1;
 }
 
+/* Per-monitor DPI。未対応 OS は 96 */
 static UINT FmUiDpi(HWND hwnd)
 {
 	typedef UINT(WINAPI* PFN)(HWND);
@@ -188,10 +197,13 @@ static UINT FmUiDpi(HWND hwnd)
 	return 96;
 }
 
+/* 96dpi 基準のピクセルを現在 DPI へ */
 static int FmScale(int v, UINT dpi) { return MulDiv(v, (int)dpi, 96); }
 
+/* キーオン／レジスタ書き込みのフェードを最大に戻す */
 static void FmBump(BYTE& g) { g = 255; }
 
+/* 鍵盤ランプ・hex 触れ色を 7/8 ずつ落とす。8 未満で消灯 */
 static void FmTickGlow(BYTE& g)
 {
 	if (g == 0) return;
@@ -199,6 +211,7 @@ static void FmTickGlow(BYTE& g)
 	if (g < 8) g = 0;
 }
 
+/* fade=0 は base、255 は hi。鍵盤ランプと hex セルの中間色 */
 static COLORREF FmMixFade(COLORREF base, COLORREF hi, BYTE fade)
 {
 	if (fade == 0) return base;
@@ -215,6 +228,7 @@ static void FmFillFade(CDC& dc, int x, int y, int w, int h, COLORREF base, COLOR
 	dc.FillSolidRect(x, y, w, h, FmMixFade(base, hi, fade));
 }
 
+/* 最新1枚 dump。CEmu は ogg_cemu、KPI/SASAMI は ogg_kbsasami */
 static void FmMonLivePath(wchar_t* out, int n)
 {
 	wchar_t tmp[MAX_PATH];
@@ -225,6 +239,7 @@ static void FmMonLivePath(wchar_t* out, int n)
 		_snwprintf_s(out, n, _TRUNCATE, L"%sogg_kbsasami\\fmmon_live.opna", tmp);
 }
 
+/* フラッシュ履歴リング。live より遅れても短音を拾う */
 static void FmMonRingPath(wchar_t* out, int n)
 {
 	wchar_t tmp[MAX_PATH];
@@ -239,6 +254,7 @@ static HANDLE s_hLiveRd = INVALID_HANDLE_VALUE;
 static HANDLE s_hRingRd = INVALID_HANDLE_VALUE;
 static int s_rdCemu = -1; /* 開いているのが CEmu 側か。切替でハンドルを捨てる */
 
+/* モード切替で CEmu/SASAMI のハンドルが食い違わないよう閉じる */
 static void FmInvalidateRdHandles()
 {
 	if (s_hLiveRd != INVALID_HANDLE_VALUE) {
@@ -251,6 +267,7 @@ static void FmInvalidateRdHandles()
 	}
 }
 
+/* 再生モードが変わったら読み先フォルダを切り替える */
 static void FmSelectRdFamily()
 {
 	const int want = IsCemuMode(mode) ? 1 : 0;
@@ -260,6 +277,7 @@ static void FmSelectRdFamily()
 	s_rdCemu = want;
 }
 
+/* live.opna を開いてハンドルを使い回す */
 static HANDLE FmOpenLiveRd()
 {
 	FmSelectRdFamily();
@@ -272,6 +290,7 @@ static HANDLE FmOpenLiveRd()
 	return s_hLiveRd;
 }
 
+/* ring.opna を開いてハンドルを使い回す */
 static HANDLE FmOpenRingRd()
 {
 	FmSelectRdFamily();
@@ -288,6 +307,7 @@ static HANDLE FmOpenRingRd()
 static const DWORD kFmDumpSize32 = (DWORD)sizeof(SasamiFmMonDump);
 static const DWORD kFmDumpSize16 = (DWORD)sizeof(SasamiFmMonDump) - 32u;
 
+/* バージョンと PCM16 互換を見て、dump の最低バイト数を決める */
 static DWORD FmDumpNeedBytes(uint32_t version, int pcm16)
 {
 	DWORD need = (DWORD)offsetof(SasamiFmMonDump, regWriteBits);
@@ -300,6 +320,7 @@ static DWORD FmDumpNeedBytes(uint32_t version, int pcm16)
 	return need;
 }
 
+/* magic とサイズが足りているか。16ch 旧 KPI も通す */
 static int FmDumpPayloadOk(const SasamiFmMonDump& d, DWORD rd)
 {
 	if (rd == 0 || !SasamiFmMonMagicOk(d)) return 0;
@@ -311,6 +332,7 @@ static int FmDumpPayloadOk(const SasamiFmMonDump& d, DWORD rd)
 	return 0;
 }
 
+/* 旧 16ch dump を 32ch 構造体へずらす（pcmOn/pcmNote の後ろに 32 バイト空隙） */
 static void FmWidenPcm16Dump(SasamiFmMonDump* d)
 {
 	if (!d) return;
@@ -330,6 +352,7 @@ static void FmWidenPcm16Dump(SasamiFmMonDump* d)
 	memcpy(base + tailOff32, tail, tailLen);
 }
 
+/* 読めたサイズに合わせて 16ch→32ch を正規化する */
 static void FmNormalizeDump(SasamiFmMonDump* d, DWORD rd)
 {
 	if (!d) return;
@@ -337,6 +360,7 @@ static void FmNormalizeDump(SasamiFmMonDump* d, DWORD rd)
 		FmWidenPcm16Dump(d);
 }
 
+/* ring ファイル長からスロット 1 個のバイト数を推定する */
 static size_t FmDumpSlotSize(HANDLE h)
 {
 	const size_t z32 = sizeof(SasamiFmMonDump);
@@ -360,6 +384,7 @@ static size_t FmDumpSlotSize(HANDLE h)
 	return z32;
 }
 
+/* ring の idx 番スロットを 1 枚読む */
 static int FmReadRingSlot(HANDLE h, uint32_t idx, size_t slotSz, SasamiFmMonDump* out)
 {
 	if (!out || slotSz == 0) return 0;
@@ -379,6 +404,7 @@ static int FmReadRingSlot(HANDLE h, uint32_t idx, size_t slotSz, SasamiFmMonDump
 	return 1;
 }
 
+/* live.opna の最新 dump。失敗したらハンドルを捨てて一度だけやり直す */
 static int FmReadDump(SasamiFmMonDump* out)
 {
 	for (int attempt = 0; attempt < 2; attempt++) {
@@ -1004,6 +1030,7 @@ static int FmSsgNoiseOn(const SasamiFmMonDump& d, int ch)
 	return (((d.regs[7] >> (3 + ch)) & 1) == 0) ? 1 : 0;
 }
 
+/* 鍵盤行の PCM 本数。PPZ/ADPCM/OPL3 の空きスロットも行として確保する */
 int CFmMonitorDlg::PcmRows() const
 {
 	if (!m_haveDump) return 0;
@@ -1029,7 +1056,7 @@ int CFmMonitorDlg::PcmRows() const
 		n = 8;
 	if (m_dump.version >= 6
 		&& (m_dump.dumpFlags & (SASAMI_FMMON_FLAG_ADPCM | SASAMI_FMMON_FLAG_PCM86))) {
-		/* PPZ+ADPCM: ADPCM at pcm[8] → need 9 rows. Alone: just pcm[0]=ADPCM. */
+		/* PPZ+ADPCM: ADPCM は pcm[8] なので 9 行。単独なら pcm[0] だけ */
 		if (m_dump.dumpFlags & SASAMI_FMMON_FLAG_PPZ) {
 			if (n < 9) n = 9;
 		} else if (n < 1) {
@@ -1049,10 +1076,11 @@ int CFmMonitorDlg::PcmRows() const
 	return n;
 }
 
+/* FM3EX / OPM7-8 / OPL7-9 / MSX OPLL の追加行数 */
 int CFmMonitorDlg::ExRows() const
 {
 	if (!m_haveDump || m_dump.version < 6) return 0;
-	if (IsYm2610Dump()) return 0; /* no FM3-EX split on YM2610 monitor */
+	if (IsYm2610Dump()) return 0; /* YM2610 モニタは FM3-EX 分割を出さない */
 	if (IsOpmDump() || ChipProfile() == SASAMI_FMMON_KEYS_MDX)
 		return 2; /* OPM7-8 */
 	if (IsOplDump())
@@ -1070,7 +1098,7 @@ int CFmMonitorDlg::ExRows() const
 	 */
 	if (m_dump.dumpFlags & SASAMI_FMMON_FLAG_FMP)
 		return (m_dump.dumpFlags & SASAMI_FMMON_FLAG_FM3EX) ? 3 : 0;
-	/* Non-FMP: FLAG or CH3 multi-freq (0x27 bits7-6). Never use 0x27 for FMP. */
+	/* 非 FMP: FLAG か CH3 複音（0x27 の bit7-6）。FMP では 0x27 を見ない */
 	if (m_dump.dumpFlags & SASAMI_FMMON_FLAG_FM3EX)
 		return 3;
 	if ((m_dump.regs[0x27] & 0xC0) != 0)
@@ -1078,6 +1106,7 @@ int CFmMonitorDlg::ExRows() const
 	return 0;
 }
 
+/* 鍵盤ブロック上段の FM 行数（OPN3 / OPNA6 / YM26104 / OPM6 など） */
 int CFmMonitorDlg::FmRows() const
 {
 	if (!m_haveDump) return 6;
@@ -1094,15 +1123,16 @@ int CFmMonitorDlg::FmRows() const
 	return 6;
 }
 
+/* SSG/PSG 行。OPN2 や OPL では 0 */
 int CFmMonitorDlg::SsgRows() const
 {
 	if (!m_haveDump) return 3;
 	if (IsOplDump() || KeysOnly()) return 0;
-	/* OPN2 / YM3438: padHit=2 with fm10=0 — no SSG block. */
+	/* OPN2 / YM3438: padHit=2 かつ fm10=0。SSG ブロック無し */
 	if (m_dump.padHit == 2 && !m_dump.fm10 && !IsYm2610Dump() && !IsOpmDump())
 		return 0;
 	if (IsOpmDump()) {
-		/* X1 OPM+AY / dual: show SSG when gated or labeled AY */
+		/* X1 の OPM+AY / デュアル: ゲート中か AY ラベルなら SSG を出す */
 		for (int i = 0; i < 3; i++)
 			if (m_dump.ssgOn[i]) return 3;
 		if (m_dump.titleSjis[0] && strstr(m_dump.titleSjis, "AY"))
@@ -1164,7 +1194,7 @@ unsigned CFmMonitorDlg::ChipProfile() const
 	if (IsOplDump()) return (unsigned)m_dump.pad6[1];
 	if (KeysOnly() || IsMsxDump())
 		return (unsigned)m_dump.pad6[1];
-	/* Hybrid OPN + arcade PCM (e.g. SegaOut YM2203+SegaPCM). */
+	/* OPN + アーケード PCM の混載（例: SegaOut の YM2203+SegaPCM） */
 	if (FmIsArcadePcmProfile((unsigned)m_dump.pad6[1]))
 		return (unsigned)m_dump.pad6[1];
 	return SASAMI_FMMON_KEYS_GENERIC;
@@ -1176,7 +1206,7 @@ unsigned CFmMonitorDlg::ViewCaps() const
 	unsigned c = (unsigned)m_dump.pad6[2] & (unsigned)(
 		SASAMI_FMMON_VIEW_KEYS | SASAMI_FMMON_VIEW_REGS | SASAMI_FMMON_VIEW_PANELS);
 	if (c) {
-		/* UI can draw MSX regs/panels even if older KPI omitted caps */
+		/* 古い KPI が caps を省略しても MSX のレジスタ／パネルは描ける */
 		if (IsMsxDump()) {
 			const unsigned m = MsxDevMask();
 			if (m & (SASAMI_FMMON_DEV_PSG | SASAMI_FMMON_DEV_OPLL
@@ -1187,7 +1217,7 @@ unsigned CFmMonitorDlg::ViewCaps() const
 		}
 		return c;
 	}
-	/* Legacy dumps without pad6[2] */
+	/* pad6[2] が無い昔の dump */
 	if (IsOpmDump() && !(m_dump.dumpFlags & SASAMI_FMMON_FLAG_KEYSONLY))
 		return SASAMI_FMMON_VIEW_KEYS | SASAMI_FMMON_VIEW_REGS | SASAMI_FMMON_VIEW_PANELS;
 	if (IsOplDump())
@@ -1214,14 +1244,14 @@ unsigned CFmMonitorDlg::ViewCaps() const
 
 int CFmMonitorDlg::HideRhythm() const
 {
-	/* MSX FMPAC / OPLL: show rhythm keys when OPLL is present (reg $0E). */
+	/* MSX FMPAC / OPLL: OPLL があるとき（$0E）リズム鍵盤を出す */
 	if (IsMsxDump()) {
 		if (MsxDevMask() & SASAMI_FMMON_DEV_OPLL)
 			return 0;
 		return 1;
 	}
 	if (KeysOnly() || IsOpmDump() || IsYm2610Dump()) return 1;
-	/* OPN / SN / non-OPNA: no ADPCM-A rhythm row */
+	/* OPN / SN / 非 OPNA: ADPCM-A リズム行は出さない */
 	if (m_haveDump && !m_dump.fm10) return 1;
 	return 0;
 }
@@ -1243,7 +1273,7 @@ int CFmMonitorDlg::PreferOpnaShell() const
 		return 1;
 	if (FmIsArcadePcmProfile(ChipProfile()))
 		return 0;
-	/* PC/AT BEEP/CMS/MPU: real aux regs — do not force empty OPNA shell. */
+	/* PC/AT の BEEP/CMS/MPU: 実 aux レジスタがあるので空の OPNA 殻を出さない */
 	if (KeysOnly() && HasViewRegs() && m_dump.titleSjis[0]
 		&& strstr(m_dump.titleSjis, "PC/AT"))
 		return 0;
@@ -1325,6 +1355,7 @@ static int FmPlayHeardLagMs(const SasamiFmMonDump* d)
    前後して交互に見えるのを防ぐ単調化。どの計測経路からも通る。
    ただし DS heard はプリフィル直後に queued≈0 で尖り、その後キューが立つと下がる。
    200ms 未満の下降を全部潰すと尖りが残り、鍵盤がデコード先頭に張り付く。 */
+/* DirectSound の進みを dump.sampleRate へ換算して可聴サンプルを進める */
 uint64_t CFmMonitorDlg::AdvanceHeard(__int64 frames, uint32_t srDump)
 {
 	extern int playy;
@@ -1350,6 +1381,7 @@ uint64_t CFmMonitorDlg::AdvanceHeard(__int64 frames, uint32_t srDump)
 	return heard;
 }
 
+/* 今聞こえているサンプル位置。CLOCK_DUMP なら dump.curSample からラグを引く */
 uint64_t CFmMonitorDlg::HeardSample(uint32_t sampleRate)
 {
 	extern int playy;
@@ -1825,6 +1857,7 @@ static void FmDrawEnvelope(CDC& dc, const CRect& rc, int ar, int dr, int sr, int
 	dc.SelectObject(oldp);
 }
 
+/* OPNA/OPN 1 チャンネルの ALG・ノブ・スロットエンベロープ */
 void CFmMonitorDlg::DrawFmChPanel(CDC& dc, const CRect& rc, int ch)
 {
 	if (rc.Width() < 100 || rc.Height() < 80) return;
@@ -2059,6 +2092,7 @@ void CFmMonitorDlg::DrawFmChPanel(CDC& dc, const CRect& rc, int ch)
 	FmDeleteFont(titleFont);
 	dc.RestoreDC(savedDC);
 }
+/* 108 鍵ピアノ。MIDI ノートが範囲内かつ lit ならその鍵を点灯する */
 void CFmMonitorDlg::DrawPiano108(CDC& dc, const CRect& rc, int midiNote, int lit)
 {
 	if (rc.Width() < 40 || rc.Height() < 8) return;
@@ -2106,6 +2140,145 @@ void CFmMonitorDlg::DrawPiano108(CDC& dc, const CRect& rc, int midiNote, int lit
 	}
 }
 
+/* 鍵盤行の LR: 「L----●----R」。●がパン位置で横に動く。縦の | は描かない */
+static int FmLrGaugeWidth(UINT dpi)
+{
+	return FmScale(56, dpi);
+}
+
+/* 2bit パン（L on / R on）を 0..255 の左右量へ */
+static void FmLrFromBits(int lOn, int rOn, int& lAmt, int& rAmt)
+{
+	lAmt = lOn ? 255 : 0;
+	rAmt = rOn ? 255 : 0;
+}
+
+/* MIDI CC10 型（128=中央）を左右量へ */
+static void FmLrFromMidiPan(int pan, int& lAmt, int& rAmt)
+{
+	if (pan < 0) pan = 0;
+	if (pan > 255) pan = 255;
+	lAmt = (pan <= 128) ? 255 : (255 - (pan - 128) * 2);
+	rAmt = (pan >= 128) ? 255 : (pan * 2);
+}
+
+/* OPN/OPNA/OPNB $B4: D7=L D6=R */
+static void FmLrFromOpnB4(uint8_t b4, int& lAmt, int& rAmt)
+{
+	FmLrFromBits((b4 >> 7) & 1, (b4 >> 6) & 1, lAmt, rAmt);
+}
+
+/* YM2151 $20+ch: D6=L D7=R */
+static void FmLrFromOpmRl(uint8_t rl, int& lAmt, int& rAmt)
+{
+	FmLrFromBits((rl >> 6) & 1, (rl >> 7) & 1, lAmt, rAmt);
+}
+
+/* OPL3 $C0 の CHA/CHB。OPL3 モードでなければモノラル（両方 255） */
+static void FmLrFromOplCh(const SasamiFmMonDump& d, int ch, int& lAmt, int& rAmt)
+{
+	lAmt = rAmt = 255;
+	if (ch < 0) return;
+	const int bank = (ch >= 9) ? 0x100 : 0;
+	const int loc = ch % 9;
+	const uint8_t c0 = d.regs[bank + 0xC0 + loc];
+	if ((d.regs[0x105] & 1) == 0)
+		return;
+	FmLrFromBits((c0 >> 4) & 1, (c0 >> 5) & 1, lAmt, rAmt);
+}
+
+/* QSound/C352/SegaPCM/RF5C の影レジスタから左右量を読む */
+static void FmLrFromArcadePcm(const SasamiFmMonDump& d, unsigned profile, int ch, int& lAmt, int& rAmt)
+{
+	lAmt = rAmt = 255;
+	if (ch < 0) return;
+	auto b = [&](int idx) -> uint8_t {
+		return (idx >= 0 && idx < 0x200) ? d.regs[idx] : 0;
+	};
+	auto wHiLo = [&](int idx) -> unsigned {
+		return ((unsigned)b(idx) << 8) | (unsigned)b(idx + 1);
+	};
+	auto wLoHi = [&](int idx) -> unsigned {
+		return (unsigned)b(idx) | ((unsigned)b(idx + 1) << 8);
+	};
+	if (profile == SASAMI_FMMON_KEYS_QSOUND) {
+		int pan = (int)(wHiLo(ch * 16 + 8) & 0xFF);
+		if (pan > 32) pan = 32;
+		FmLrFromMidiPan(pan * 255 / 32, lAmt, rAmt);
+	} else if (profile == SASAMI_FMMON_KEYS_C352) {
+		const int lv = (int)(wLoHi(ch * 16 + 8) & 0xFF);
+		const int rv = (int)(wLoHi(ch * 16 + 10) & 0xFF);
+		lAmt = (lv <= 0 && rv <= 0) ? 255 : lv;
+		rAmt = (lv <= 0 && rv <= 0) ? 255 : rv;
+		if (lAmt > 255) lAmt = 255;
+		if (rAmt > 255) rAmt = 255;
+	} else if (profile == SASAMI_FMMON_KEYS_SEGAPCM) {
+		const int dLo = 0x40 + ch * 8;
+		uint8_t pan = b(dLo + 3);
+		if (!(pan | b(dLo + 2) | b(dLo + 7)))
+			pan = b(ch * 8 + 3);
+		lAmt = ((pan >> 4) & 0x0F) * 17;
+		rAmt = (pan & 0x0F) * 17;
+		if (lAmt == 0 && rAmt == 0)
+			lAmt = rAmt = 255;
+	} else if (profile == SASAMI_FMMON_KEYS_RF5C) {
+		FmLrFromMidiPan((int)b(0x01), lAmt, rAmt);
+	}
+}
+
+/* L と R のあいだに横バーを引き、その上の ● をパンで左右へ動かす。
+   ● は未演奏が灰色、演奏中が緑。縦線の | は出さない。 */
+static void FmDrawLrGauge(CDC& dc, HFONT labFont, int x, int y, int w, int h,
+	int lAmt, int rAmt, int playing)
+{
+	if (w < 24 || h < 6) return;
+	const COLORREF cap = RGB(148, 154, 162);
+	const COLORREF barCol = RGB(72, 78, 88);
+	const COLORREF dotFill = playing ? RGB(72, 220, 112) : RGB(96, 100, 108);
+	const COLORREF dotRing = playing ? RGB(36, 140, 72) : RGB(70, 74, 80);
+
+	if (lAmt < 0) lAmt = 0;
+	if (lAmt > 255) lAmt = 255;
+	if (rAmt < 0) rAmt = 0;
+	if (rAmt > 255) rAmt = 255;
+	/* 0=左、128=中央、255=右。両方 0 なら中央のまま */
+	int pan = 128;
+	if (lAmt + rAmt > 0)
+		pan = (rAmt * 255) / (lAmt + rAmt);
+
+	const int capPx = (std::max)(8, (std::min)(11, h - 1));
+	HFONT capFont = FmMakeFont(capPx);
+	dc.SelectObject(capFont);
+	const CSize ls = dc.GetTextExtent(L"L");
+	const CSize rs = dc.GetTextExtent(L"R");
+	dc.SetTextColor(cap);
+	dc.TextOut(x, y + (h - ls.cy) / 2, L"L");
+	dc.TextOut(x + w - rs.cx, y + (h - rs.cy) / 2, L"R");
+	dc.SelectObject(labFont);
+
+	const int barLeft = x + ls.cx + 2;
+	const int barRight = x + w - rs.cx - 2;
+	const int barW = barRight - barLeft;
+	if (barW < 8) return;
+	const int barH = (std::max)(2, h / 5);
+	const int barY = y + (h - barH) / 2;
+	dc.FillSolidRect(barLeft, barY, barW, barH, barCol);
+
+	const int dot = (std::max)(6, (std::min)(h - 1, 9));
+	int travel = barW - dot;
+	if (travel < 0) travel = 0;
+	const int dx = barLeft + travel * pan / 255;
+	const int dy = y + (h - dot) / 2;
+	CBrush br(dotFill);
+	CPen pen(PS_SOLID, 1, dotRing);
+	CBrush* oldb = dc.SelectObject(&br);
+	CPen* oldp = dc.SelectObject(&pen);
+	dc.Ellipse(dx, dy, dx + dot, dy + dot);
+	dc.SelectObject(oldb);
+	dc.SelectObject(oldp);
+}
+
+/* 左ラベル＋鍵盤。SSG は N---、それ以外は L----●----R のパンゲージ */
 void CFmMonitorDlg::DrawChannelKeys(CDC& dc, int x, int y, int w, int rowH, int keyH, int labelW)
 {
 	const int live = FmMonIsLive();
@@ -2114,21 +2287,37 @@ void CFmMonitorDlg::DrawChannelKeys(CDC& dc, int x, int y, int w, int rowH, int 
 	HFONT oldf = (HFONT)dc.SelectObject(labFont);
 	dc.SetBkMode(TRANSPARENT);
 	int row = 0;
-	/* 等幅: "SSG1 O5C# N031" — # と N 桁で揺れないよう固定幅名 */
+	const UINT dpi = FmUiDpi(GetSafeHwnd());
+	const int gaugeW = FmLrGaugeWidth(dpi);
+	const int gaugeGap = FmScale(4, dpi);
+	/* 等幅: 音名の右に N031 相当の LR ゲージ（SSG は N--- テキストのまま） */
 	const int lampProbe = (keyH > 4) ? (keyH * 3 / 4) : 8;
 	const int needW = lampProbe + 4
-		+ dc.GetTextExtent(L"SSG1 O5C# N031").cx
-		+ FmScale(10, FmUiDpi(GetSafeHwnd()));
+		+ dc.GetTextExtent(L"C35232 O5C#").cx
+		+ gaugeGap + gaugeW
+		+ FmScale(6, dpi);
 	if (labelW < needW) labelW = needW;
 	int pianoW = w - labelW;
 	if (pianoW < 80) pianoW = (w > labelW) ? (w - labelW) : 80;
 
-	auto drawLabel = [&](int yy, const wchar_t* text, BYTE fade, COLORREF hi) {
+	auto drawLabel = [&](int yy, const wchar_t* text, BYTE fade, COLORREF hi) -> int {
 		const int lamp = (keyH > 4) ? (keyH * 3 / 4) : 8;
 		FmFillFade(dc, x, yy + (rowH - lamp) / 2, lamp, lamp,
 			RGB(40, 44, 50), hi, fade);
 		dc.SetTextColor(RGB(210, 215, 220));
-		dc.TextOut(x + lamp + 4, yy + (rowH - keyH) / 2, text);
+		const int tx = x + lamp + 4;
+		const int ty = yy + (rowH - keyH) / 2;
+		dc.TextOut(tx, ty, text);
+		return tx + dc.GetTextExtent(text).cx;
+	};
+	auto drawLrAfter = [&](int yy, int afterX, int lAmt, int rAmt, int playing) {
+		const int gy = yy + (rowH - keyH) / 2;
+		int gx = afterX + gaugeGap;
+		if (gx + gaugeW > x + labelW)
+			gx = x + labelW - gaugeW;
+		if (gx < afterX + 2)
+			gx = afterX + 2;
+		FmDrawLrGauge(dc, labFont, gx, gy, gaugeW, keyH, lAmt, rAmt, playing);
 	};
 
 	static const wchar_t* kFmName[6] = { L"FM1", L"FM2", L"FM3", L"FM4", L"FM5", L"FM6" };
@@ -2143,7 +2332,7 @@ void CFmMonitorDlg::DrawChannelKeys(CDC& dc, int x, int y, int w, int rowH, int 
 	const int msx = IsMsxDump();
 	const int opm = IsOpmDump() || (ChipProfile() == SASAMI_FMMON_KEYS_MDX);
 	const int opl = IsOplDump();
-	/* OPNA: EX is FM3 split → nest between FM3 and FM4. OPM/MSX/OPL keep ch7+ after. */
+	/* OPNA: EX は FM3 分割なので FM3 と FM4 の間へ。OPM/MSX/OPL は ch7 以降を後ろに置く */
 	const int nestEx = (!opm && !msx && !opl && exN > 0 && fmN >= 6) ? 1 : 0;
 
 	auto drawFmCh = [&](int ch) {
@@ -2188,7 +2377,17 @@ void CFmMonitorDlg::DrawChannelKeys(CDC& dc, int x, int y, int w, int rowH, int 
 			nm = opm ? kOpmName[ch] : (msx ? kOplName[ch] : kFmName[ch]);
 		}
 		_snwprintf_s(lab, _TRUNCATE, L"%s %s", nm, note);
-		drawLabel(yy, lab, fade, RGB(80, 220, 120));
+		const int after = drawLabel(yy, lab, fade, RGB(80, 220, 120));
+		int lAmt = 255, rAmt = 255;
+		if (m_haveDump) {
+			if (opm)
+				FmLrFromOpmRl(m_dump.regs[0x20 + ch], lAmt, rAmt);
+			else if (opl)
+				FmLrFromOplCh(m_dump, ch, lAmt, rAmt);
+			else if (!KeysOnly() && !msx)
+				FmLrFromOpnB4(m_dump.regs[bank + 0xB4 + slot], lAmt, rAmt);
+		}
+		drawLrAfter(yy, after, lAmt, rAmt, keyLit);
 
 		CRect krc(x + labelW, yy + (rowH - keyH) / 2, x + labelW + pianoW, yy + (rowH - keyH) / 2 + keyH);
 		DrawPiano108(dc, krc, midi, keyLit);
@@ -2222,7 +2421,17 @@ void CFmMonitorDlg::DrawChannelKeys(CDC& dc, int x, int y, int w, int rowH, int 
 			nm = opm ? kOpmName[6 + i] : (msx ? kOplEx[i] : kExName[i]);
 		}
 		_snwprintf_s(lab, _TRUNCATE, L"%s %s", nm, note);
-		drawLabel(yy, lab, fade, RGB(180, 120, 255));
+		const int after = drawLabel(yy, lab, fade, RGB(180, 120, 255));
+		int lAmt = 255, rAmt = 255;
+		if (m_haveDump) {
+			if (opm)
+				FmLrFromOpmRl(m_dump.regs[0x20 + 6 + i], lAmt, rAmt);
+			else if (opl)
+				FmLrFromOplCh(m_dump, 6 + i, lAmt, rAmt);
+			else if (!KeysOnly() && !msx)
+				FmLrFromOpnB4(m_dump.regs[0xB4 + 2], lAmt, rAmt);
+		}
+		drawLrAfter(yy, after, lAmt, rAmt, keyLit);
 		CRect krc(x + labelW, yy + (rowH - keyH) / 2, x + labelW + pianoW, yy + (rowH - keyH) / 2 + keyH);
 		DrawPiano108(dc, krc, midi, keyLit);
 		row++;
@@ -2298,7 +2507,7 @@ void CFmMonitorDlg::DrawChannelKeys(CDC& dc, int x, int y, int w, int rowH, int 
 		const wchar_t* pref = nullptr;
 		int num = i + 1;
 		if (IsYm2610Dump()) {
-			/* ADA1-6 = ADPCM-A, ADB = ADPCM-B (when present at index 6) */
+			/* ADA1-6 = ADPCM-A、ADB = ADPCM-B（index 6 にあるとき） */
 			if (i < 6) {
 				pref = L"ADA";
 				num = i + 1;
@@ -2350,7 +2559,23 @@ void CFmMonitorDlg::DrawChannelKeys(CDC& dc, int x, int y, int w, int rowH, int 
 			_snwprintf_s(lab, _TRUNCATE, L"%s %s", pref, note);
 		else
 			_snwprintf_s(lab, _TRUNCATE, L"%s%d %s", pref, num, note);
-		drawLabel(yy, lab, fade, RGB(220, 160, 80));
+		const int after = drawLabel(yy, lab, fade, RGB(220, 160, 80));
+		int lAmt = 255, rAmt = 255;
+		if (m_haveDump) {
+			if (IsYm2610Dump()) {
+				if (i < 6)
+					FmLrFromOpnB4(m_dump.regs[0x108 + i], lAmt, rAmt);
+				else
+					FmLrFromOpnB4(m_dump.regs[0x11], lAmt, rAmt);
+			} else if (adpcmRow && (m_dump.dumpFlags & SASAMI_FMMON_FLAG_ADPCM)) {
+				FmLrFromOpnB4(m_dump.regs[FmAdpcmCtrlReg(m_dump) + 1], lAmt, rAmt);
+			} else if (opl) {
+				FmLrFromOplCh(m_dump, i + 9, lAmt, rAmt);
+			} else if (FmIsArcadePcmProfile(prof)) {
+				FmLrFromArcadePcm(m_dump, prof, i, lAmt, rAmt);
+			}
+		}
+		drawLrAfter(yy, after, lAmt, rAmt, keyLit);
 
 		CRect krc(x + labelW, yy + (rowH - keyH) / 2, x + labelW + pianoW, yy + (rowH - keyH) / 2 + keyH);
 		DrawPiano108(dc, krc, midi, keyLit);
@@ -2375,6 +2600,7 @@ void CFmMonitorDlg::DrawChannelKeys(CDC& dc, int x, int y, int w, int rowH, int 
 	dc.SelectObject(oldf);
 }
 
+/* hex / パネル / 鍵盤の矩形と行高をクライアントサイズから割る */
 void CFmMonitorDlg::ComputeLayout(int w, int h)
 {
 	memset(&m_lay, 0, sizeof(m_lay));
@@ -2410,7 +2636,7 @@ void CFmMonitorDlg::ComputeLayout(int w, int h)
 		if (rem > 0) m_lay.topH += rem;
 	}
 	m_lay.keyH = (m_lay.rowH > 3) ? (m_lay.rowH - 2) : m_lay.rowH;
-	m_lay.labelW = FmScale(120, m_lay.dpi);
+	m_lay.labelW = FmScale(148, m_lay.dpi);
 	m_lay.topY = m_lay.pad + m_lay.headH;
 
 	/* bankTitle = タイトル行 + col ヘッダ行。DrawHexBank と一致させる */
@@ -2471,6 +2697,7 @@ void CFmMonitorDlg::ComputeLayout(int w, int h)
 	m_layOk = 1;
 }
 
+/* 曲名とチップ種。CEmu は titleSjis の機種名を優先する */
 void CFmMonitorDlg::DrawHead(CDC& dc)
 {
 	if (!m_layOk) return;
@@ -2612,6 +2839,7 @@ void CFmMonitorDlg::DrawHead(CDC& dc)
 	dc.SelectObject(old);
 }
 
+/* Bank0/Bank1 の 16×16 hex。触れ色は m_fade */
 void CFmMonitorDlg::DrawHexArea(CDC& dc)
 {
 	if (!m_layOk) return;
@@ -2652,7 +2880,7 @@ void CFmMonitorDlg::DrawHexArea(CDC& dc)
 		}
 		return;
 	}
-	/* PC/AT BEEP / GameBlaster / MPU — aux regs in keys-only dumps */
+	/* PC/AT の BEEP / GameBlaster / MPU。keys-only dump の aux レジスタ */
 	if (KeysOnly() && HasViewRegs() && m_dump.titleSjis[0]
 		&& strstr(m_dump.titleSjis, "PC/AT")) {
 		const char* t = m_dump.titleSjis;
@@ -2756,6 +2984,7 @@ void CFmMonitorDlg::DrawHexArea(CDC& dc)
 	DrawHexBank(dc, m_lay.hexX, m_lay.gridY1, m_lay.cellW, m_lay.cellH, m_lay.gapExtra, 0x100, L"Bank1");
 }
 
+/* YM2151 1ch。ALG は OPN と同じ図、パンは $20 の D6/D7 */
 void CFmMonitorDlg::DrawOpmChPanel(CDC& dc, const CRect& rc, int ch)
 {
 	/* YM2151: 8ch×4op。レジスタは ch + op*8。表示順 S1..S4 = OP1,OP2,OP3,OP4
@@ -2982,9 +3211,10 @@ void CFmMonitorDlg::DrawOpmChPanel(CDC& dc, const CRect& rc, int ch)
 	dc.RestoreDC(savedDC);
 }
 
+/* YM3812/YMF262 1ch。2op の接続とエンベロープ */
 void CFmMonitorDlg::DrawOplChPanel(CDC& dc, const CRect& rc, int ch)
 {
-	/* YM3812/YMF262: 9 or 18 × 2op. Operator slot table per chip half. */
+	/* YM3812/YMF262: 片バンク 9ch×2op。スロット表はチップ半分ごと */
 	if (rc.Width() < 80 || rc.Height() < 56 || ch < 0 || ch > 17) return;
 	static const int kOp1[9] = { 0, 1, 2, 6, 7, 8, 12, 13, 14 };
 	static const int kOp2[9] = { 3, 4, 5, 9, 10, 11, 15, 16, 17 };
@@ -3045,7 +3275,7 @@ void CFmMonitorDlg::DrawOplChPanel(CDC& dc, const CRect& rc, int ch)
 	const int infoW = innerW * 34 / 100;
 	const int knobBandW = innerW - algoW - infoW - pad * 2;
 
-	/* 2-op connection diagram */
+	/* 2op の接続図 */
 	{
 		CRect algo(rc.left + pad, headInnerTop, rc.left + pad + algoW, headInnerBot);
 		dc.FillSolidRect(algo, RGB(24, 40, 36));
@@ -3071,7 +3301,7 @@ void CFmMonitorDlg::DrawOplChPanel(CDC& dc, const CRect& rc, int ch)
 			dc.LineTo(cBox.left, cy);
 			dc.SelectObject(op);
 		} else {
-			/* Mod || Car (additive) */
+			/* 加算（Mod と Car が並列） */
 			mBox = CRect(algo.left + 8, algo.top + titlePx + 6, algo.left + 8 + bw, algo.top + titlePx + 6 + bh);
 			cBox = CRect(algo.left + 8, algo.bottom - 6 - bh, algo.left + 8 + bw, algo.bottom - 6);
 			CPen wire(PS_SOLID, 1, RGB(140, 210, 170));
@@ -3183,7 +3413,7 @@ void CFmMonitorDlg::DrawOplChPanel(CDC& dc, const CRect& rc, int ch)
 		CSize snZ = dc.GetTextExtent(sn);
 		dc.TextOut(row.left + (labW - snZ.cx) / 2, row.top + (row.Height() - snZ.cy) / 2, sn);
 
-		/* OPL AR/DR are 0..15 — scale for envelope viz like OPN 0..31 */
+		/* OPL の AR/DR は 0..15。OPN の 0..31 に合わせてエンベロープ表示を倍にする */
 		CRect env(paramLeft, row.top + 2, envRight, row.bottom - 2);
 		FmDrawEnvelope(dc, env, ar * 2, dr * 2, 0, rr * 2, sl, tl6 * 2);
 
@@ -3239,6 +3469,7 @@ void CFmMonitorDlg::DrawOplChPanel(CDC& dc, const CRect& rc, int ch)
 	dc.RestoreDC(savedDC);
 }
 
+/* YM2413 1ch。USR は $00-$07、プリセットはチップ内蔵 ROM */
 void CFmMonitorDlg::DrawOpllChPanel(CDC& dc, const CRect& rc, int ch)
 {
 	/* YM2413: 9ch。USR=regs $00-$07、preset=チップ内蔵音色 ROM（emu2413 YM2413 set）。 */
@@ -3510,6 +3741,7 @@ void CFmMonitorDlg::DrawOpllChPanel(CDC& dc, const CRect& rc, int ch)
 	dc.RestoreDC(savedDC);
 }
 
+/* アーケード PCM 1ch。ピッチ・音量・パンを影レジスタから出す */
 void CFmMonitorDlg::DrawArcadePcmChPanel(CDC& dc, const CRect& rc, int ch, unsigned profile)
 {
 	if (rc.Width() < 70 || rc.Height() < 46 || ch < 0) return;
@@ -3552,7 +3784,7 @@ void CFmMonitorDlg::DrawArcadePcmChPanel(CDC& dc, const CRect& rc, int ch, unsig
 		pitch = ((int)(wLoHi(base + 6) & 0xFF) << 8) | (int)(wLoHi(base + 4) & 0xFF);
 		pan = ((int)wLoHi(base + 8) + (int)wLoHi(base + 10)) & 0xFF;
 	} else if (profile == SASAMI_FMMON_KEYS_SEGAPCM) {
-		/* Discrete: 0x42+8*ch … / 0xC6+8*ch. 315-5218: 0x02+8*ch / 0x86+8*ch. */
+		/* ディスクリート: 0x42+8*ch … / 0xC6+8*ch。315-5218: 0x02+8*ch / 0x86+8*ch */
 		const int dLo = 0x40 + ch * 8;
 		const int dHi = 0xc0 + ch * 8;
 		if (b(dLo + 2) | b(dLo + 3) | b(dLo + 7) | b(dHi + 6)) {
@@ -3651,6 +3883,7 @@ void CFmMonitorDlg::DrawArcadePcmChPanel(CDC& dc, const CRect& rc, int ch, unsig
 	dc.RestoreDC(savedDC);
 }
 
+/* 右上パネル群。チップ種で OPNA/OPM/OPL/アーケード PCM を切り替える */
 void CFmMonitorDlg::DrawPanelsArea(CDC& dc)
 {
 	if (!m_layOk) return;
@@ -3795,6 +4028,7 @@ void CFmMonitorDlg::DrawKeysArea(CDC& dc)
 	DrawChannelKeys(dc, m_lay.pad, m_lay.keysY, m_lay.keysW, m_lay.rowH, m_lay.keyH, m_lay.labelW);
 }
 
+/* オフスクリーンへ hex/panels/keys を合成する */
 void CFmMonitorDlg::ComposeFrame(CDC& dc, int w, int h)
 {
 	if (w < 80 || h < 80) {
@@ -3828,6 +4062,7 @@ void CFmMonitorDlg::ComposeFrame(CDC& dc, int w, int h)
 	if (m_dirtyKeys) { DrawKeysArea(dc); m_dirtyKeys = 0; }
 }
 
+/* 新 dump を履歴・フェード・dirty に反映。可聴位置と曲切替もここで見る */
 void CFmMonitorDlg::ApplyDump(const SasamiFmMonDump& d)
 {
 	/* 空 sourcePath を「曲切替」にすると FMP 等で毎 dump 触れ色が落ちる。
@@ -3927,6 +4162,8 @@ void CFmMonitorDlg::ApplyDump(const SasamiFmMonDump& d)
 			const uint8_t pb4 = m_dump.regs[bank + 0xB4 + slot];
 			if (b0 != pb0 || b4 != pb4)
 				dirty = 1; /* ALG 図・FB・AMS/PMS/PAN */
+			if (b4 != pb4)
+				chgKeys = 1; /* 鍵盤行 LR ゲージ */
 			if (d.regs[bank + 0xA4 + slot] != m_dump.regs[bank + 0xA4 + slot]
 				|| d.regs[bank + 0xA0 + slot] != m_dump.regs[bank + 0xA0 + slot]) {
 				FmBump(m_fadeKey[ch]);
@@ -4004,6 +4241,34 @@ void CFmMonitorDlg::ApplyDump(const SasamiFmMonDump& d)
 				|| ((d.dumpFlags & SASAMI_FMMON_FLAG_KEYSONLY)
 					&& FmKeysOnlyPackedHit(d, i) != FmKeysOnlyPackedHit(m_dump, i)))
 				chgKeys = 1;
+		}
+		if (d.padHit == 6) {
+			if (d.regs[0x11] != m_dump.regs[0x11])
+				chgKeys = 1;
+			for (int i = 0; i < 6; i++)
+				if (d.regs[0x108 + i] != m_dump.regs[0x108 + i])
+					chgKeys = 1;
+		} else if (d.dumpFlags & SASAMI_FMMON_FLAG_ADPCM) {
+			const int panReg = FmAdpcmCtrlReg(d) + 1;
+			if (d.regs[panReg] != m_dump.regs[panReg])
+				chgKeys = 1;
+		}
+		if (d.dumpFlags & SASAMI_FMMON_FLAG_OPM) {
+			for (int i = 0; i < 8; i++)
+				if (d.regs[0x20 + i] != m_dump.regs[0x20 + i])
+					chgKeys = 1;
+		}
+		{
+			const unsigned prof = (d.version >= 6) ? (unsigned)d.pad6[1] : 0;
+			if (prof == SASAMI_FMMON_KEYS_OPL2 || prof == SASAMI_FMMON_KEYS_OPL3) {
+				for (int loc = 0; loc < 9; loc++) {
+					if (d.regs[0xC0 + loc] != m_dump.regs[0xC0 + loc]
+						|| d.regs[0x1C0 + loc] != m_dump.regs[0x1C0 + loc])
+						chgKeys = 1;
+				}
+				if (d.regs[0x105] != m_dump.regs[0x105])
+					chgKeys = 1;
+			}
 		}
 		for (int i = 0; i < 6; i++) {
 			const int was = (m_dump.rhythmKey >> i) & 1;
@@ -4235,6 +4500,7 @@ void CFmMonitorDlg::TrimHistForHeard(uint64_t heard, uint32_t rate)
 	}
 }
 
+/* live と ring を読み、可聴サンプルに一番近い dump を ApplyDump する */
 int CFmMonitorDlg::PollDump()
 {
 	/* 差し替え inode を拾う。SASAMI が CREATE_ALWAYS していた頃の常駐ハンドルずれ対策 */
@@ -4460,6 +4726,7 @@ int CFmMonitorDlg::PollDump()
 	return applied || m_haveDump;
 }
 
+/* フェードを 1 ステップ進め、消える矩形だけ dirty にする */
 void CFmMonitorDlg::TickFades()
 {
 	auto tickQ = [](BYTE& g) -> int {
@@ -4513,6 +4780,7 @@ void CFmMonitorDlg::InvalidateDirtyRegions()
 		Invalidate(FALSE);
 }
 
+/* timerp から。dump 同期のあと dirty 矩形だけ Invalidate */
 void CFmMonitorDlg::PumpSyncNow()
 {
 	if (m_inPrint || m_inPump) return;

@@ -7,12 +7,13 @@
 #include "cemu_hard_pcat.h"
 #include <string.h>
 
+/* subtype に応じ FmMon を MIDI / BEEP / CMS / OPL へ bind する */
 static void CEmuPcatBindFmMon(CHardPcat* hw, const CEmuGameEntry* ge)
 {
 	if (!hw || !ge) return;
 	CEmuFmMonBindFromGe(ge);
 	if (hw->modeMidi_) {
-		/* UART stream belongs on the MIDI monitor (GM/GS/LA maps), not FM keys. */
+		/* UART は MIDI モニタ（GM/GS/LA）。FM 鍵盤ではない */
 		FmMonShadowSetIdentity("PC/AT", "MPU-401 MIDI");
 	} 		else if (hw->modeBeep_) {
 			FmMonShadowEnterKeysOnly(SASAMI_FMMON_KEYS_MIDI);
@@ -21,11 +22,11 @@ static void CEmuPcatBindFmMon(CHardPcat* hw, const CEmuGameEntry* ge)
 			else
 				FmMonShadowSetIdentity("PC/AT", "BEEP");
 		} else if (hw->modeCms_) {
-		/* Game Blaster: SAA×2 keys; OPL may still see AdLib probes. */
+		/* Game Blaster: SAA×2 鍵盤。OPL へ AdLib プローブが残ることがある */
 		FmMonShadowEnterKeysOnly(SASAMI_FMMON_KEYS_MIDI);
 		FmMonShadowSetIdentity("PC/AT", "GameBlaster SAAx2");
 	} else {
-		/* AdLib / Sound Blaster FM — YM3812 path (9 melodic). */
+		/* AdLib / SB の FM — YM3812（旋律 9ch） */
 		FmMonShadowSetOplMode(1);
 		FmMonShadowSetOpnaLayout(-1);
 		const char* sub = ge->subtype[0] ? ge->subtype : "";
@@ -39,14 +40,15 @@ static void CEmuPcatBindFmMon(CHardPcat* hw, const CEmuGameEntry* ge)
 	FmMonShadowFlush(1);
 }
 
+/* zip を開き PC/AT ハード＋ドライバを生成。FmMon は subtype で bind。 */
 int CEmuPcatOpen(CEmuPcat* m, const CEmuGameEntry* ge, const wchar_t* zipPath, unsigned titleCode, int sampleRate)
 {
 	if (!m || !ge || !zipPath) return 0;
 	memset(m, 0, sizeof(*m));
 	wcsncpy_s(m->zipPath, zipPath, _TRUNCATE);
 
-	/* silp/AIL + OPL/SAA cannot sustain 96–192 kHz realtime; past ~30s the
-	   host underruns and last keys hang. Cap at 48 kHz for PC/AT. */
+	/* silp/AIL + OPL/SAA は 96–192 kHz を実時間維持できない。約 30s 超で
+	   ホストがアンダーランし最終鍵が残る。PC/AT は 48 kHz 上限。 */
 	int rate = sampleRate > 0 ? sampleRate : 44100;
 	if (rate > 48000) rate = 48000;
 
@@ -79,6 +81,7 @@ int CEmuPcatOpen(CEmuPcat* m, const CEmuGameEntry* ge, const wchar_t* zipPath, u
 	return 1;
 }
 
+/* ドライバ／ハードを破棄する */
 void CEmuPcatClose(CEmuPcat* m)
 {
 	if (!m) return;
@@ -94,13 +97,14 @@ void CEmuPcatClose(CEmuPcat* m)
 	memset(m, 0, sizeof(*m));
 }
 
+/* ステレオ PCM を合成し、FmMon を Flush */
 int CEmuPcatRender(CEmuPcat* m, int16_t* stereo, int frames)
 {
 	if (!m || !m->ready || !m->driver || !stereo || frames <= 0) return 0;
 	const int got = m->driver->Render(stereo, frames);
 	if (got > 0 && m->hard && m->hard->hardKind == CHard::KIND_PCAT) {
 		CHardPcat* hw = (CHardPcat*)m->hard;
-		/* Beep / CMS / MIDI: keys(+aux regs). AdLib/SB: full OPL flush. */
+		/* Beep / CMS / MIDI は鍵盤(+補助)。AdLib/SB は OPL 全 Flush */
 		if (hw->modeMidi_ || hw->modeBeep_ || hw->modeCms_)
 			FmMonShadowFlushKeysOnly(0);
 		else
@@ -109,6 +113,7 @@ int CEmuPcatRender(CEmuPcat* m, int16_t* stereo, int frames)
 	return got;
 }
 
+/* 再生位置を sample へ移動（未対応なら 0） */
 int CEmuPcatSeek(CEmuPcat* m, uint64_t sample)
 {
 	if (!m || !m->driver) return 0;

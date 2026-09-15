@@ -2,7 +2,7 @@
 #include "cemu_kabuki.h"
 #include <string.h>
 
-/* Known CPS1 QSound Kabuki keys (swap digits are hex-encoded permutations). */
+/* 既知 CPS1 QSound Kabuki 鍵（swap 桁は hex 符号化の順列） */
 static const struct {
 	const char* archive;
 	uint32_t swap1;
@@ -27,6 +27,7 @@ static const struct {
 	{ "mbombrd",  0x54321076u, 0x65432107u, 0x3131u, 0x19u },
 };
 
+/* archive 名から Kabuki 鍵を引く。未知なら 0 */
 int CEmuKabukiLookup(const char* archive, CEmuKabukiKey* out)
 {
 	if (!archive || !out) return 0;
@@ -42,6 +43,7 @@ int CEmuKabukiLookup(const char* archive, CEmuKabukiKey* out)
 	return 0;
 }
 
+/* 下位ニブル側の 2bit 対スワップ */
 static int BitSwap1(int src, int key, int sel)
 {
 	if (sel & (1 << ((key >> 0) & 7)))
@@ -55,6 +57,7 @@ static int BitSwap1(int src, int key, int sel)
 	return src;
 }
 
+/* 上位ニブル側の 2bit 対スワップ（BitSwap1 の逆順） */
 static int BitSwap2(int src, int key, int sel)
 {
 	if (sel & (1 << ((key >> 12) & 7)))
@@ -68,6 +71,7 @@ static int BitSwap2(int src, int key, int sel)
 	return src;
 }
 
+/* 1 バイト復号: swap → 回転 → XOR → もう一度 swap */
 static int ByteDecode(int src, uint32_t swapKey1, uint32_t swapKey2,
 	uint8_t xorKey, int sel)
 {
@@ -82,6 +86,7 @@ static int ByteDecode(int src, uint32_t swapKey1, uint32_t swapKey2,
 	return src;
 }
 
+/* オペコード面とデータ面を別 sel で復号する */
 void CEmuKabukiDecode(const uint8_t* src, uint8_t* destOp, uint8_t* destData,
 	int baseAddr, int length, uint32_t swapKey1, uint32_t swapKey2,
 	uint16_t addrKey, uint8_t xorKey)

@@ -5,8 +5,8 @@
 #include <string.h>
 #include <math.h>
 
-/* Sega PCM — 315-5218 (16ch, banked) and discrete Hang-On/Space Harrier (8ch, no bank).
-   Addressing matches MAME: sample @ get_bank(ctrl) + (addr >> 8). */
+/* Sega PCM — 315-5218（16ch、バンクあり）とディスクリート Hang-On/Space Harrier（8ch、バンクなし）。
+   アドレスは MAME と同じ: サンプル @ get_bank(ctrl) + (addr >> 8)。 */
 enum { kSegaPcmMaxChannels = 16 };
 
 static int CEmuSegaClamp16(int v)
@@ -28,8 +28,8 @@ public:
 		, rom_(NULL)
 		, romSize_(0)
 	{
-		/* MAME: CLOCK_DIVIDER = MaxVoices * 8 → output rate = clock / divider.
-		   Discrete Hang-On/Space Harrier = 8ch → clock/64; 315-5218 = 16ch → clock/128. */
+		/* MAME: CLOCK_DIVIDER = MaxVoices * 8 → 出力レート = clock / divider。
+		   ディスクリート Hang-On/Space Harrier = 8ch → clock/64。315-5218 = 16ch → clock/128。 */
 		rateMul_ = clockHz_ / ((unsigned)maxCh_ * 8u);
 		if (rateMul_ == 0) rateMul_ = 1;
 		rateDiv_ = (uint32_t)sampleRate_;
@@ -55,12 +55,13 @@ public:
 		const uint8_t a = (uint8_t)(addr & 0xff);
 		const uint8_t v = (uint8_t)(data & 0xff);
 		ram_[a] = v;
+		/* FMモニタへ RAM 書き込みをシャドウ。 */
 		FmMonShadowApplySegaPcmMem(a, v);
 
 		if (discrete_) {
-			/* MAME segapcm_discrete_device::map — only these are voice regs.
-			   Other bytes are scratch RAM; treating 0x02/0x86 as 315-5218
-			   destroyed ch0 and caused noise / single-channel playback. */
+			/* MAME segapcm_discrete_device::map — これらだけがボイスレジスタ。
+			   他バイトはスクラッチRAM。0x02/0x86 を 315-5218 扱いすると
+			   ch0 が壊れ、ノイズ / 単ch再生になる。 */
 			const int ch = (a & 0x38) >> 3;
 			if (ch < 0 || ch >= maxCh_) return;
 			const uint8_t base = (uint8_t)(a & (uint8_t)~0x38);
@@ -84,7 +85,7 @@ public:
 			return;
 		}
 
-		/* 315-5218: 16ch at 0x00+8*ch / 0x80+8*ch */
+		/* 315-5218: 16ch @ 0x00+8*ch / 0x80+8*ch */
 		const int ch = (a >> 3) & 0x0f;
 		if (ch < 0 || ch >= maxCh_) return;
 		const int r = a & 0x87;
@@ -138,16 +139,16 @@ public:
 		if (!stereo || frames <= 0 || !rom_ || romSize_ == 0) return;
 		int g = gain;
 		if (discrete_) {
-			/* Driver passes 256. Old 110 clamp was for per-voice saturate;
-			   accumulate-then-clamp can take AB-class gain without going thin. */
+			/* ドライバは 256 を渡す。旧 110 クランプはボイス毎飽和向け。
+			   加算してから飽和なら AB クラスのゲインでも薄くならない。 */
 			if (g > 220) g = 200;
 		} else if (g > 220) {
-			/* 315-5218 (AB/OutRun): keep loud but leave room for 4+ voices. */
+			/* 315-5218（AB/OutRun）: 大きくしつつ 4+ボイスの余裕を残す。 */
 			g = 180;
 		}
 		for (int i = 0; i < frames; i++)
 			TickHost(stereo + i * 2, g);
-		/* Piano keys: drive from live voice state (MIDI must stay in 21..108). */
+		/* ピアノキー: ライブボイス状態から駆動（MIDI は 21..108 に収める）。 */
 		for (int ch = 0; ch < maxCh_; ch++) {
 			if (ctrl_[ch] & 1) {
 				FmMonShadowPcmNote(ch, 0, 0);
@@ -173,8 +174,8 @@ public:
 		if (!buf || cap == 0) return 0;
 		const unsigned n = cap < sizeof(ram_) ? cap : (unsigned)sizeof(ram_);
 		memcpy(buf, ram_, n);
-		/* Overlay live voice state — Z80 polls ctrl/addr for channel alloc.
-		   Stale ROM/RAM here made AB/SH stop sibling voices when starting/stopping one. */
+		/* ライブボイス状態を重ねる — Z80 は ctrl/addr をチャンネル割り当てにポーリング。
+		   ここが古い ROM/RAM だと AB/SH で1chの開始/停止が兄弟ボイスを止めた。 */
 		for (int ch = 0; ch < maxCh_; ch++) {
 			if (discrete_) {
 				const int b = 0xc0 + ch * 8;
@@ -223,8 +224,8 @@ private:
 
 	void TickHost(int16_t* lr, int gain)
 	{
-		/* Sum all voices in 32-bit first. Saturating after each channel
-		   crushed multi-PCM (SH PCM1+2+3) into thin clipped mush. */
+		/* 全ボイスを先に32bit加算。ch毎に飽和すると複数PCM（SH PCM1+2+3）が
+		   薄いクリップの塊になる。 */
 		int32_t accL = (int32_t)lr[0];
 		int32_t accR = (int32_t)lr[1];
 
@@ -235,7 +236,7 @@ private:
 			if ((addr_[ch] >> 16) == (uint32_t)((end_[ch] + 1) & 0xff)) {
 				if (ctrl_[ch] & 2) {
 					ctrl_[ch] |= 1;
-					/* Discrete ctrl lives at 0xC6+8*ch — NOT 0x46 (end). */
+					/* ディスクリートの ctrl は 0xC6+8*ch — 0x46（終端）ではない。 */
 					const int ramOff = discrete_ ? (0xc0 + ch * 8 + 6) : (ch * 8 + 0x86);
 					if (ramOff >= 0 && ramOff < 256)
 						ram_[ramOff] = ctrl_[ch];
@@ -251,19 +252,19 @@ private:
 			if (romSize_ && romAdr < romSize_) {
 				sample = (int)rom_[romAdr] - 0x80;
 			} else if (!discrete_ && romSize_ > 0) {
-				/* 315-5218: brief bank overrun → wrap in ROM (hard 0 = dropouts). */
+				/* 315-5218: 短いバンク超過 → ROM内ラップ（ハード0はドロップアウト）。 */
 				romAdr %= romSize_;
 				sample = (int)rom_[romAdr] - 0x80;
 			}
 
 			accL += sample * (lvol_[ch] & 0x7f) * gain / 128;
-			accR += sample * (rvol_[ch] & 0x7f) * gain / 128;
+			accR += sample * (rvol_[ch] & 0x7f) * gain / 128; /* ステレオMix */
 
 			frac_[ch] += (uint32_t)freq_[ch] * rateMul_;
 			const uint32_t add = frac_[ch] / rateDiv_;
 			frac_[ch] %= rateDiv_;
 			addr_[ch] = (addr_[ch] + add) & 0xffffffu;
-			/* Keep RAM mirror live — Z80 / FM mon may read addr/ctrl. */
+			/* RAMミラーを生かす — Z80 / FMモニタが addr/ctrl を読む。 */
 			if (discrete_) {
 				ram_[0xc0 + ch * 8 + 4] = (uint8_t)((addr_[ch] >> 8) & 0xff);
 				ram_[0xc0 + ch * 8 + 5] = (uint8_t)((addr_[ch] >> 16) & 0xff);
@@ -298,6 +299,7 @@ private:
 	uint8_t ctrl_[kSegaPcmMaxChannels];
 };
 
+/* Sega 315-5218 PCM ラッパ生成。 */
 CChip* CEmuChipSegaPcmCreate(uint32_t clockHz, int sampleRate, unsigned bankShift, unsigned bankMask)
 {
 	return new CChipSegaPcm(clockHz, sampleRate, bankShift, bankMask, 16);
@@ -305,7 +307,7 @@ CChip* CEmuChipSegaPcmCreate(uint32_t clockHz, int sampleRate, unsigned bankShif
 
 CChip* CEmuChipSegaPcmCreateDiscrete(uint32_t clockHz, int sampleRate)
 {
-	/* Hang-On / Space Harrier: 8ch, no bank switch */
+	/* Hang-On / Space Harrier: 8ch、バンク切替なし */
 	return new CChipSegaPcm(clockHz, sampleRate, 0, 0, 8);
 }
 

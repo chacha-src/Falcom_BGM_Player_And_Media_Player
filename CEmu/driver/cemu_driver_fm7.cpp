@@ -4,6 +4,7 @@
 #include "../chip/cemu_chip_ay.h"
 #include <string.h>
 
+/* FM-7: M6809 + AY/YM2203。vsync とチップタイマ */
 CDriverFm7::CDriverFm7()
 	: hw_(NULL)
 	, hostRate_(44100)
@@ -28,21 +29,25 @@ CDriverFm7::CDriverFm7()
 {
 }
 
+/* 後始末 */
 CDriverFm7::~CDriverFm7()
 {
 	Close();
 }
 
+/* OPN 書込回数 */
 unsigned CDriverFm7::OpnWrites() const
 {
 	return hw_ ? hw_->OpnWrites() : 0;
 }
 
+/* AY 書込回数 */
 unsigned CDriverFm7::AyWrites() const
 {
 	return hw_ ? hw_->AyWrites() : 0;
 }
 
+/* OPN/AY クロックを CPU 比で進める */
 void CDriverFm7::TickChips(uint64_t cpuCycles)
 {
 	if (!hw_ || cpuCycles == 0) return;
@@ -63,6 +68,7 @@ void CDriverFm7::TickChips(uint64_t cpuCycles)
 	}
 }
 
+/* vsync とチップ IRQ を 1 線で届ける */
 void CDriverFm7::DeliverIrqs(uint64_t now)
 {
 	if (!hw_) return;
@@ -76,8 +82,8 @@ void CDriverFm7::DeliverIrqs(uint64_t now)
 	if (chipIrq)
 		hw_->ymIrqSeen_ = 1;
 
-	/* ISR-sniffed polarity: laydock needs bit2; reviver bit0+bit3; default clear bit3.
-	   Re-sniff when $FFF8 remounts after play (asteka2 PATCH: $20D1 stub → $A1C9). */
+	/* ISR から極性を嗅ぐ: laydock は bit2、reviver は bit0+bit3、既定は bit3 クリア。
+	   play 後 $FFF8 再マウントで再嗅ぎ（asteka2 PATCH: $20D1 stub → $A1C9）。 */
 	const uint16_t irqNow = (uint16_t)(((uint16_t)hw_->Mem()[0xFFF8] << 8) | hw_->Mem()[0xFFF9]);
 	if (irqNow != lastFd03IrqVec_) {
 		lastFd03IrqVec_ = irqNow;
@@ -86,9 +92,8 @@ void CDriverFm7::DeliverIrqs(uint64_t now)
 	if (vsyncDue)
 		hw_->ApplyFd03Vsync();
 
-	/* Pulse music IRQ from one tick source:
-	   OPN titles → chip timer edge (vsync+timer double-fired ys2_fmav ultra-fast).
-	   PSG titles → vsync only. Always ApplyFd03Vsync above for $FD03 status. */
+	/* 音楽 IRQ は 1 源だけ: OPN タイトルはチップタイマ端（vsync+タイマ二重は ys2_fmav が超速）。
+	   PSG タイトルは vsync のみ。$FD03 ステータスは上で ApplyFd03Vsync。 */
 	int chipIrqEdge = (chipIrq && !prevChipIrq_) ? 1 : 0;
 	prevChipIrq_ = chipIrq;
 
@@ -103,14 +108,11 @@ void CDriverFm7::DeliverIrqs(uint64_t now)
 	const uint16_t firqVec = (uint16_t)(((uint16_t)hw_->Mem()[0xFFF6] << 8) | hw_->Mem()[0xFFF7]);
 	const int irqStub = isFd03Stub(irqVec);
 	const int firqStub = isFd03Stub(firqVec);
-	/* kohaku PATCH $103F and albatrss PATCH $005D are lone RTI. FIRQ into
-	   them mid-IRQ (I set, F clear) pulls only CC+PC and smashes the frame. */
+	/* kohaku PATCH $103F と albatrss PATCH $005D は単独 RTI。IRQ 中に FIRQ すると I セット・F クリアで CC+PC だけ引きフレームを壊す。 */
 	const int firqIsRti = (firqVec != 0 && firqVec != 0xFFFF && firqVec < 0xFE00
 		&& hw_->Mem()[firqVec] == 0x3B) ? 1 : 0;
-	/* albatrss DRIVER hang loop keeps ORCC #$10; drop I on the vsync that
-	   must reach OP.BIN $87CA or the ISR never runs. Do not unmask while
-	   PC is inside DRIVER $F000–$F8FF (SWI $F819 lives at $F819) or the
-	   OP.BIN ISR: a nested IRQ corrupts Y in $F48F and never RTIs. */
+	/* albatrss DRIVER ハングは ORCC #$10 を維持。OP.BIN $87CA に届く vsync では I を落とし ISR を走らせる。
+	   PC が DRIVER $F000–$F8FF（SWI $F819）や OP.BIN ISR 内のときはマスクしたまま。ネスト IRQ が Y を壊す。 */
 	if (vsyncDue && irqVec == 0x87CA) {
 		const uint16_t pc = cpu->pc.w;
 		if (pc < 0x0080) {
@@ -131,31 +133,22 @@ void CDriverFm7::DeliverIrqs(uint64_t now)
 		raiseFromChip = chipIrqEdge;
 		if (chipIrqEdge)
 			chipIrqSeen_ = 1;
-		/* YM2203 Timer B is the music clock once it arms (ys2_fmav). Until
-		   then keep the board's 60 Hz timer so PATCH/DRIVER ISRs still tick.
-		   Cap-at-8 left most OPN titles silent after the boot burst. */
+		/* YM2203 Timer B が武装すれば音楽クロック（ys2_fmav）。それまでは基板 60Hz で PATCH/DRIVER ISR を進める。
+	   cap-at-8 はブートバースト後に大半の OPN を無音にした。 */
 		if (!raiseFromChip && vsyncDue && !chipIrqSeen_)
 			raiseFromVsync = 1;
-		/* daiva OP.BIN $2B3A: BITA #1 then poll YM timer B. Chip-timer
-		   takeover left FD03 bit0 clear so the ISR only re-inits timers. */
+		/* daiva OP.BIN $2B3A: BITA #1 のあと YM Timer B をポーリング。チップタイマ乗っ取りは FD03 bit0 を落とし ISR がタイマ再初期化だけになる。 */
 		if (vsyncDue && irqVec == 0x2B3A)
 			raiseFromVsync = 1;
 	} else {
 		raiseFromVsync = vsyncDue;
-		/* Ys' ripped image omits BIOS code reached after the hardware ISR.
-		   Dispatch its installed soft vector at the real 60 Hz IRQ cadence,
-		   then keep the absent foreground parked. */
+		/* Ys のリップはハード ISR の先の BIOS が無い。実 60Hz IRQ でインストール済みソフトベクタをディスパッチし、欠けたフォアグラウンドはパーク。 */
 		if (vsyncDue && hw_->patchTableBase_ == 0xFED0) {
 			const uint16_t tick = (uint16_t)(((uint16_t)hw_->Mem()[0xFFE2] << 8)
 				| hw_->Mem()[0xFFE3]);
 			if (tick >= 0x0100 && tick < 0xFE00) {
 				if (tick == 0x28EA || tick == 0x29EC) {
-					/* MANPR1 and MANPR2 use the same work/channel format but
-					   MANPR2's code grew independently, so use its real entry
-					   addresses rather than assuming one relocation delta.
-					   Execute all three native channel parsers and recover the
-					   pointer store when a stripped BIOS output helper unwinds
-					   before the driver's STU 2,X epilogue. */
+					/* MANPR1 と MANPR2 はワーク／チャネル形式は同じだがコードは独立成長。実エントリを使い、3 チャネルパーサを実行してポインタ格納を回復する。 */
 					uint8_t* m = hw_->Mem();
 					const int man2 = (tick == 0x29EC) ? 1 : 0;
 					const uint16_t phase = man2 ? 0x2987 : 0x2885;
@@ -168,10 +161,8 @@ void CDriverFm7::DeliverIrqs(uint64_t now)
 					static const uint16_t kChannel1[3] = { 0x2E9A, 0x2EBF, 0x2EE4 };
 					static const uint16_t kChannel2[3] = { 0x3040, 0x3065, 0x308A };
 					const uint16_t* channels = man2 ? kChannel2 : kChannel1;
-					/* The real hardware timer is 488Hz, which TTLPRG divides by 3 (~162Hz).
-					   Then MANPR divides by 3 again (~54Hz channel updates).
-					   Since we are dispatching this from vsyncDue (60Hz), we must bypass
-					   MANPR's internal divide-by-3 so the tempo runs at 60Hz instead of 20Hz. */
+					/* 実機タイマは 488Hz。TTLPRG が /3（~162Hz）、MANPR がさらに /3（~54Hz チャネル更新）。
+	   vsyncDue（60Hz）からディスパッチするので MANPR 内部 /3 をバイパスしテンポを合わせる。 */
 					m[phase] = 3;
 					if (m[phase] >= 3) {
 						m[phase] = 0;
@@ -193,10 +184,7 @@ void CDriverFm7::DeliverIrqs(uint64_t now)
 								if (origin >= 0x4D00u && origin < 0x4F00u)
 									origin += 0x200u;
 							}
-							/* Terminator 00: F6 inner-loop or phrase loop.
-							   Native fetch would wrap here, but the host skips
-							   the parser on 00 (F8 mute / $4Fxx smash-restore).
-							   Short loops like Devil's wind then die in window 0. */
+							/* 終端 00: F6 内ループかフレーズループ。ネイティブフェッチはここで回るが、ホストは 00 でパーサを飛ばす（F8 mute / $4Fxx 破壊回復）。短いループ（Devil's wind）は窓 0 で死ぬ。 */
 							if (origin >= hw_->mdataAddr_ && origin < mdataEnd
 								&& m[origin] == 0) {
 								const uint8_t f6left = m[base + 18];
@@ -224,13 +212,7 @@ void CDriverFm7::DeliverIrqs(uint64_t now)
 									origin = restart;
 								}
 							}
-							/* Native FE/F6 never STU 2,X, so LDU 2,X / LBRA
-							   $2960 can spin ~200k steps and stomp $4F00.
-							   Dispatch F-cmds on the host, plant the duration,
-							   then parse once with a short step cap.
-							   MANPR2 (MUSD10B/DKMUS) also opens with F7/F8/F9
-							   mixer ops; running the parser on those leftover
-							   F-cmds left one stuck AY tone (seq=1 keys=1). */
+							/* ネイティブ FE/F6 は STU 2,X しない。LDU 2,X / LBRA $2960 が約 20 万ステップ回り $4F00 を踏む。F コマンドはホストで処理し duration を植え、短い step 上限で 1 回パース。 */
 							unsigned keepPtr = origin;
 							if (origin >= hw_->mdataAddr_ && origin < mdataEnd
 								&& m[origin] >= 0xF0) {
@@ -249,17 +231,13 @@ void CDriverFm7::DeliverIrqs(uint64_t now)
 										else if (op == 0xF9) { handler = 0x2AB6; fallback = 1; }
 										else if (op == 0xF7 || op == 0xF8) { fallback = 2; }
 										else if (op == 0xFA || op == 0xFB) {
-											/* PULS Y / LBRA parser — do not JSR.
-											   FA nn [note] then F6... (First step ch2). */
+											/* PULS Y / LBRA パーサ — JSR しない。FA nn [note] のあと F6…（First step ch2）。 */
 											fallback = 2;
 											if (p + 2 < mdataEnd && m[p + 2] && m[p + 2] < 0xF0)
 												fallback = 3;
 										}
 									} else {
-										/* Phrase arm now plants 4Fxx streams.
-										   JSR FC/FD/FE/F6 (tone flags + loops).
-										   Skip F7/F8 — those call $2E58/$2EBB
-										   and a 400-step cap muted the mixer. */
+										/* フレーズ武装は 4Fxx ストリームを植える。JSR FC/FD/FE/F6（音色フラグ＋ループ）。F7/F8 は飛ばす — $2E58/$2EBB を呼び 400 step 上限でミキサが mute した。 */
 										switch (op) {
 										case 0xF4: handler = 0x2F1B; fallback = 1; break;
 										case 0xF5: handler = 0x2F09; fallback = 5; break;
@@ -330,9 +308,7 @@ void CDriverFm7::DeliverIrqs(uint64_t now)
 								m[base + 2] = (uint8_t)((livePtr + 2u) >> 8);
 								m[base + 3] = (uint8_t)(livePtr + 2u);
 							}
-							/* Keep AY R8+ch in sync with the shadow.  $2C4E is
-							   a 4D00→4F00 reloc, not an AY dump, so ch0 can
-							   sit at vol 0 while its period walks the melody. */
+							/* AY R8+ch をシャドウと同期。$2C4E は 4D00→4F00 再配置であり AY ダンプではない。ch0 音量 0 のまま周期だけメロディを歩くことがある。 */
 							if (m[base] > 0 && hw_->ChipAy()) {
 								uint8_t vol = m[shadowVolume + ch];
 								if (vol == 0) {
@@ -360,8 +336,7 @@ void CDriverFm7::DeliverIrqs(uint64_t now)
 		}
 	}
 
-	/* XA2PSGPATCH tick (bank-relocated). Native IRQ $FF94 is a trampoline;
-	   the tempo reload is /8 for the AV timer, so force /1 at 60 Hz. */
+	/* XA2PSGPATCH tick（バンク再配置）。ネイティブ IRQ $FF94 はトランポリン。テンポ再ロードは AV タイマ /8 なので 60Hz では /1 に強制。 */
 	if (vsyncDue && !ranHostTick && hw_->Xana2Tick() && hw_->Xana2Tempo()) {
 		hw_->Mem()[hw_->Xana2Tempo()] = 1;
 		hw_->RunSubroutine(hw_->Xana2Tick(), 80000, 1);
@@ -376,10 +351,7 @@ void CDriverFm7::DeliverIrqs(uint64_t now)
 	}
 
 	if (!ranHostTick && (raiseFromChip || raiseFromVsync)) {
-		/* A vsync source is wired to one 6809 line, not both.  When exactly
-		   one vector is the $FD03 handler, use that line; firing the other
-		   vector on Ys jumps into PATCH data at $FF00 and destroys the RTI
-		   frame before MANPR can produce its first note. */
+		/* vsync 源は 6809 の 1 線だけ。ちょうど 1 ベクタが $FD03 ハンドラならその線。Ys で他ベクタを撃つと $FF00 の PATCH データへ飛び、MANPR 初ノート前に RTI フレームを壊す。 */
 		const int ysPsg = (!hw_->useOpn_ && hw_->patchTableBase_ == 0xFED0) ? 1 : 0;
 		const int routeFd03 = (raiseFromVsync && !raiseFromChip
 			&& (irqStub != firqStub)) ? 1 : 0;
@@ -389,8 +361,7 @@ void CDriverFm7::DeliverIrqs(uint64_t now)
 				|| (pcNow >= 0x8500 && pcNow < 0xC500)));
 		if (!inAlbDrv) {
 			if (hw_->useOpn_) {
-				/* Dual IRQ+FIRQ (I and F both clear) stormed kohaku: 4000+
-				   pulses and almost no YM writes. One line, IRQ first. */
+				/* IRQ+FIRQ 同時（I も F もクリア）は kohaku を嵐にした: 4000+ パルスで YM 書込がほぼ無い。1 線、IRQ 優先。 */
 				if (!cpu->cc.i) {
 					cpu->irq = true;
 					irqPulses_++;
@@ -423,6 +394,7 @@ void CDriverFm7::DeliverIrqs(uint64_t now)
 	}
 }
 
+/* M6809 を endCycle まで進める。CWAI/SYNC は次 IRQ へ */
 void CDriverFm7::RunUntil(uint64_t endCycle)
 {
 	if (!hw_) return;
@@ -433,7 +405,7 @@ void CDriverFm7::RunUntil(uint64_t endCycle)
 	while ((uint64_t)cpu->cycles < endCycle && guard++ < 4000000) {
 		const uint64_t now = (uint64_t)cpu->cycles;
 		DeliverIrqs(now);
-		/* CWAI/SYNC: jump to next vsync/sample so IRQs stay realtime. */
+		/* CWAI/SYNC: 次の vsync/サンプルへ飛ばし、IRQ を実時間に保つ */
 		if (cpu->cwai || cpu->sync) {
 			uint64_t wake = endCycle;
 			if (vsyncPeriod_ > 0 && nextVsync_ > now && nextVsync_ < wake)
@@ -458,6 +430,7 @@ void CDriverFm7::RunUntil(uint64_t endCycle)
 	}
 }
 
+/* $FD58/$FD80 メールボックスへ曲を載せる */
 void CDriverFm7::TriggerSong()
 {
 	if (!hw_) return;
@@ -465,6 +438,7 @@ void CDriverFm7::TriggerSong()
 	triggered_ = 1;
 }
 
+/* ROM 読込、PATCH がベクタを植えるまでブート */
 int CDriverFm7::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned titleCode)
 {
 	if (!hw || !ge || !fs) return 0;
@@ -477,9 +451,7 @@ int CDriverFm7::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned
 	opnResidual_ = 0;
 	opnTimerMul_ = 1;
 	opnTimerDiv_ = 1;
-	/* Ys II FM77AV's staged Timer B cadence measures about 63.8 Hz.
-	   Keep this title on the board's 60 Hz cadence without derating
-	   unrelated FM-7 OPN drivers. */
+	/* Ys II FM77AV の載せた Timer B は約 63.8Hz。このタイトルは基板 60Hz のまま。他 FM-7 OPN は下げない。 */
 	if (ge->archive[0] && _stricmp(ge->archive, "ys2_fmav") == 0) {
 		opnTimerMul_ = 15;
 		opnTimerDiv_ = 16;
@@ -496,8 +468,7 @@ int CDriverFm7::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned
 	if (titleCode || ge->titleCount <= 0) {
 		titleCode_ = titleCode;
 	} else {
-		/* Auto-pick only when caller passed 0 AND the set has no real title 0
-		   (jikochu uses 0 as a playable song index). */
+		/* 自動選曲は呼び出しが 0 かつセットに本物の title 0 が無いときだけ（jikochu は 0 が演奏可能な曲番号）。 */
 		int hasTitleZero = 0;
 		for (int i = 0; i < ge->titleCount; i++) {
 			if (ge->title[i].code == 0) { hasTitleZero = 1; break; }
@@ -529,7 +500,7 @@ int CDriverFm7::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned
 		mc6809__t* cpu = hw_->Mc6809();
 		if (cpu) {
 			nextVsync_ = (uint64_t)cpu->cycles + vsyncPeriod_;
-			/* ~1.0s boot so PATCH installs vectors and reaches FD58 poll. */
+			/* 約 1.0s ブート。PATCH がベクタを植え FD58 ポーリングに達する */
 			RunUntil((uint64_t)cpu->cycles + (uint64_t)cpuHz_);
 			hw_->UnwindStuckBootJsr();
 		}
@@ -537,18 +508,16 @@ int CDriverFm7::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned
 	booted_ = 1;
 	hw_->RefreshFd03Polarity();
 	TriggerSong();
-	/* Let PATCH consume $FD58/$FD80 play and remount IRQ vectors. */
+	/* PATCH に $FD58/$FD80 再生を消費させ、IRQ ベクタを再マウントさせる */
 	{
 		mc6809__t* cpu = hw_->Mc6809();
 		if (cpu) {
 			uint64_t settle = (uint64_t)cpuHz_ / 10;
-			/* Laydock: IRQ $3502 + $5E6F arm needs extra settle so OPN
-			   voice init finishes before the first vsync music ticks. */
+			/* Laydock: IRQ $3502 + $5E6F 武装に追加 settle。最初の vsync 音楽 tick 前に OPN 音色初期化を終える。 */
 			const uint16_t irq = (uint16_t)(((uint16_t)hw_->Mem()[0xFFF8] << 8) | hw_->Mem()[0xFFF9]);
 			if (irq == 0x3502)
 				settle = (uint64_t)cpuHz_ / 2;
-			/* PATCH now sees TTLPRG row zero immediately; the former
-			   five-second settle consumed its embedded title before render. */
+			/* PATCH は TTLPRG 行 0 をすぐ見る。かつての 5 秒 settle は描画前に埋め込みタイトルを消費した。 */
 			RunUntil((uint64_t)cpu->cycles + settle);
 			hw_->FinishDaivaOpPlay();
 			hw_->FinishDaivaEdPlay();
@@ -556,9 +525,7 @@ int CDriverFm7::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned
 			hw_->ArmLaydockChannels();
 			if (!hw_->useOpn_ && hw_->patchTableBase_ == 0xFED0
 				&& hw_->Mem()[0xFFE2] == 0xFF && hw_->Mem()[0xFFE3] == 0xFF) {
-				/* The resident handoff initialized TTLPRG but the ripped BIOS
-				   cannot return to PATCH's final STD $FFE2.  Complete that one
-				   vector write from row zero and park the missing foreground. */
+				/* 常駐引き渡しは TTLPRG を初期化したが、リップ BIOS は PATCH 最後の STD $FFE2 に戻れない。行 0 からその 1 ベクタ書込を完了し、欠けたフォアグラウンドをパーク。 */
 				hw_->Mem()[0xFFE2] = 0x11;
 				hw_->Mem()[0xFFE3] = 0xB7;
 				hw_->Mem()[0xFC00] = 0x20;
@@ -569,12 +536,10 @@ int CDriverFm7::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned
 			}
 		}
 	}
-	/* Vectors / DRIVER may remount after play — refresh once more. */
+	/* ベクタ／DRIVER は play 後に再マウントし得る — もう一度更新 */
 	hw_->RefreshFd03Polarity();
 	hw_->FinishXana2PsgPlay();
-	/* albatrss: PATCH JSR $F000/$F004 never returns (I stays set) so the
-	   OP.BIN ISR at $87CA never runs despite tens of thousands of mute
-	   writes. Unmask when the installed vector is a real $FD03 handler. */
+	/* albatrss: PATCH JSR $F000/$F004 は戻らない（I が立ったまま）ので OP.BIN ISR $87CA が無音書込数万回でも走らない。インストール済みベクタが本物の $FD03 ハンドラならマスク解除。 */
 	{
 		mc6809__t* cpu = hw_->Mc6809();
 		if (cpu && cpu->cc.i) {
@@ -589,9 +554,7 @@ int CDriverFm7::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned
 		}
 		hw_->ParkAlbatrssIfStuck();
 	}
-	/* jikochu: PATCH clears $0614 after consuming $FD58; re-arm PSG gate.
-	   Also re-apply song entry — play does JSR $C006 before reading $FD59,
-	   so a short settle can leave boot init as the only active song. */
+	/* jikochu: PATCH は $FD58 消費後に $0614 をクリア。PSG ゲートを再武装。曲エントリも再適用 — play は $FD59 読前に JSR $C006 するので、短い settle はブート初期化だけがアクティブ曲になる。 */
 	if (!hw_->useOpn_ && hw_->ChipAy() && hw_->mdataAddr_ == 0xC000) {
 		uint8_t* m = hw_->Mem();
 		if (m && m[0xC19D] == 0x7D && m[0xC19E] == 0x06 && m[0xC19F] == 0x14) {
@@ -622,6 +585,7 @@ int CDriverFm7::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned
 	return 1;
 }
 
+/* ハード参照を捨てる */
 void CDriverFm7::Close()
 {
 	hw_ = NULL;
@@ -629,6 +593,7 @@ void CDriverFm7::Close()
 	triggered_ = 0;
 }
 
+/* 同一 zip の別曲 */
 int CDriverFm7::OverlayTitle(unsigned titleCode)
 {
 	if (!hw_) return 0;
@@ -640,6 +605,7 @@ int CDriverFm7::OverlayTitle(unsigned titleCode)
 	return 1;
 }
 
+/* CPU＋チップを進めステレオ合成 */
 int CDriverFm7::Render(int16_t* stereo, int frames)
 {
 	if (!hw_ || !stereo || frames <= 0) return 0;
@@ -676,6 +642,7 @@ int CDriverFm7::Render(int16_t* stereo, int frames)
 	return frames;
 }
 
+/* Seek は未対応 */
 int CDriverFm7::Seek(uint64_t sample)
 {
 	(void)sample;

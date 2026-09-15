@@ -24,6 +24,7 @@
 #include "machine/cemu_hard_f3.h"
 #include <string.h>
 
+/* PC-98 系 (VA/VA-DOS 含む)。Z80 PC-88 ではない */
 static int IsPc98Platform(const CEmuGameEntry* ge)
 {
 	if (!ge) return 0;
@@ -31,19 +32,21 @@ static int IsPc98Platform(const CEmuGameEntry* ge)
 		|| _stricmp(ge->platform, "pc98dos") == 0
 		|| _stricmp(ge->platform, "pc9821") == 0
 		|| _stricmp(ge->platform, "pc98vx") == 0
-		/* PC-88VA / VA-DOS: V30 + bootcs/BIOSD like PC-98 (not Z80 PC-88). */
+		/* PC-88VA / VA-DOS: V30 + bootcs/BIOSD は PC-98 相当 (Z80 PC-88 ではない) */
 		|| _stricmp(ge->platform, "pc88va") == 0
 		|| _stricmp(ge->platform, "pc88vados") == 0) ? 1 : 0;
 }
 
+/* Z80 PC-88。VA は上の PC-98 経路へ回す */
 static int IsPc88Z80Platform(const CEmuGameEntry* ge)
 {
 	if (!ge) return 0;
-	if (IsPc98Platform(ge)) return 0; /* excludes pc88va / pc88vados */
+	if (IsPc98Platform(ge)) return 0; /* pc88va / pc88vados を除外 */
 	return (_strnicmp(ge->platform, "pc88", 4) == 0
 		|| _stricmp(ge->platform, "pc80sr") == 0) ? 1 : 0;
 }
 
+/* SG-1000 / SC-3000。アーケード catch-all より先に見る */
 static int IsSg1000Platform(const CEmuGameEntry* ge)
 {
 	if (!ge) return 0;
@@ -56,12 +59,13 @@ static int IsSg1000Platform(const CEmuGameEntry* ge)
 
 static int IsF3Platform(const CEmuGameEntry* ge);
 
+/* アーケード基板。MSX/F3/SG は dataDir=ac でもここへ落とさない */
 static int IsAcPlatform(const CEmuGameEntry* ge)
 {
 	if (!ge) return 0;
 	if (IsSg1000Platform(ge)) return 0;
 	if (_stricmp(ge->subtype, "f3system") == 0) return 0;
-	/* MSX/KSS must not fall into AC via dataDir=ac (zip in data\\ac). */
+	/* MSX/KSS を dataDir=ac (data\\ac 置き zip) で AC 扱いしない */
 	if (_stricmp(ge->platform, "msx") == 0 || _stricmp(ge->subtype, "kss") == 0
 		|| _stricmp(ge->subtype, "opll") == 0 || _stricmp(ge->dataDir, "msx") == 0)
 		return 0;
@@ -73,7 +77,7 @@ static int IsAcPlatform(const CEmuGameEntry* ge)
 	if (_stricmp(ge->platform, "taito") == 0) return 1;
 	if (_stricmp(ge->platform, "irem") == 0) return 1;
 	if (_stricmp(ge->platform, "dataeast") == 0) return 1;
-	/* NeoGeo → CHardNeo (checked before AC); do not claim as AC board=0. */
+	/* NeoGeo は CHardNeo (AC より先)。AC board=0 にしない */
 	if (_stricmp(ge->platform, "videosystem") == 0) return 1;
 	if (_stricmp(ge->platform, "jaleco") == 0) return 1;
 	if (_stricmp(ge->platform, "technos") == 0) return 1;
@@ -86,7 +90,7 @@ static int IsAcPlatform(const CEmuGameEntry* ge)
 	if (_stricmp(ge->platform, "cave") == 0) return 1;
 	if (_stricmp(ge->platform, "psikyo") == 0) return 1;
 	if (_stricmp(ge->platform, "nmk") == 0) return 1;
-	/* Smaller arcade houses present in local roms/ + arcdata xml2. */
+	/* ローカル roms/ + arcdata xml2 にある小さめのアーケードメーカー */
 	static const char* const kMoreAc[] = {
 		"tehkan", "upl", "alpha", "yunsung", "athena", "atlus", "kaneko",
 		"raizing", "eighting", "allumer", "atari", "bootleg", "deniam",
@@ -139,12 +143,13 @@ static int IsAcPlatform(const CEmuGameEntry* ge)
 	return 0;
 }
 
+/* Neo Geo。誤タグの SNK+YM2610 も AC board=0 へ落とさない */
 static int IsNeoPlatform(const CEmuGameEntry* ge)
 {
 	if (!ge) return 0;
 	if (_stricmp(ge->platform, "neogeo") == 0 || _stricmp(ge->subtype, "neogeo") == 0)
 		return 1;
-	/* Mis-tagged Neo: snk/generic with YM2610 must not fall into AC board=0. */
+	/* 誤タグ Neo: snk/generic + YM2610 は AC board=0 へ落とさない */
 	if (_stricmp(ge->platform, "snk") == 0
 		&& (_stricmp(ge->subtype, "generic") == 0 || ge->subtype[0] == 0)) {
 		for (int i = 0; i < ge->chipCount; i++)
@@ -154,12 +159,14 @@ static int IsNeoPlatform(const CEmuGameEntry* ge)
 	return 0;
 }
 
+/* Taito F3。AC より先に見る */
 static int IsF3Platform(const CEmuGameEntry* ge)
 {
 	if (!ge) return 0;
 	return (_stricmp(ge->subtype, "f3system") == 0) ? 1 : 0;
 }
 
+/* X68000 ROM / MXDRV 経路 */
 static int IsX68kPlatform(const CEmuGameEntry* ge)
 {
 	if (!ge) return 0;
@@ -168,6 +175,7 @@ static int IsX68kPlatform(const CEmuGameEntry* ge)
 	return 0;
 }
 
+/* Sharp X1 (OPM / PSG) */
 static int IsX1Platform(const CEmuGameEntry* ge)
 {
 	if (!ge) return 0;
@@ -177,6 +185,7 @@ static int IsX1Platform(const CEmuGameEntry* ge)
 	return 0;
 }
 
+/* FM-7 / FM77AV / MUCOM */
 static int IsFm7Platform(const CEmuGameEntry* ge)
 {
 	if (!ge) return 0;
@@ -187,6 +196,7 @@ static int IsFm7Platform(const CEmuGameEntry* ge)
 	return 0;
 }
 
+/* MSX/KSS。dataDir=ac でも AC より先に見る */
 static int IsMsxPlatform(const CEmuGameEntry* ge)
 {
 	if (!ge) return 0;
@@ -196,6 +206,7 @@ static int IsMsxPlatform(const CEmuGameEntry* ge)
 	return 0;
 }
 
+/* PC/AT AdLib/SB/CMS/BEEP/midiout */
 static int IsPcatAdlibPlatform(const CEmuGameEntry* ge)
 {
 	if (!ge) return 0;
@@ -215,6 +226,7 @@ static int IsPcatAdlibPlatform(const CEmuGameEntry* ge)
 	return 0;
 }
 
+/* platform/subtype から hard を生成。順は F3→Neo→PCAT→88→98→SG→MSX→AC… */
 CHard* CEmuHardCreate(const CEmuGameEntry* ge, int sampleRate)
 {
 	if (!ge) return NULL;
@@ -266,7 +278,7 @@ CHard* CEmuHardCreate(const CEmuGameEntry* ge, int sampleRate)
 		}
 		return hw;
 	}
-	/* MSX before AC: dataDir=ac alone used to steal KSS archives. */
+	/* MSX を AC より先に。dataDir=ac だけだと KSS が奪われていた */
 	if (IsMsxPlatform(ge)) {
 		CHardMsx* hw = new CHardMsx();
 		if (!hw->Init(ge, sampleRate)) {
@@ -310,6 +322,7 @@ CHard* CEmuHardCreate(const CEmuGameEntry* ge, int sampleRate)
 	return NULL;
 }
 
+/* kind に応じて Shutdown して delete */
 void CEmuHardDestroy(CHard* hw)
 {
 	if (!hw) return;
@@ -382,6 +395,7 @@ void CEmuHardDestroy(CHard* hw)
 	delete hw;
 }
 
+/* hard と同じ順でドライバを生成 */
 CDriver* CEmuDriverCreate(const CEmuGameEntry* ge)
 {
 	if (!ge) return NULL;
@@ -410,6 +424,7 @@ CDriver* CEmuDriverCreate(const CEmuGameEntry* ge)
 	return NULL;
 }
 
+/* ドライバを delete するだけ (Shutdown は hard 側) */
 void CEmuDriverDestroy(CDriver* drv)
 {
 	delete drv;

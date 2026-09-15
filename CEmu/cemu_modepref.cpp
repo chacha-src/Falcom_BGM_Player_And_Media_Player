@@ -67,7 +67,7 @@ int CEmuModeTagFromEntry(const CEmuGameEntry* e, char* tag, int tagCap)
 		strncpy_s(tag, (size_t)tagCap, "FM", _TRUNCATE);
 		return 1;
 	}
-	/* Normalize common hoot subtypes to playlist chip tags. */
+	/* よくある hoot subtype をプレイリストのチップタグへ正規化。 */
 	if (_stricmp(s, "opna") == 0 || _stricmp(s, "8801-10") == 0)
 		strncpy_s(tag, (size_t)tagCap, "OPNA", _TRUNCATE);
 	else if (_stricmp(s, "opn") == 0 || _stricmp(s, "opn2") == 0 || _stricmp(s, "opnb") == 0)
@@ -93,7 +93,7 @@ int CEmuModeTagFromEntry(const CEmuGameEntry* e, char* tag, int tagCap)
 	else if (_stricmp(s, "beep") == 0)
 		strncpy_s(tag, (size_t)tagCap, "BEEP", _TRUNCATE);
 	else {
-		/* Uppercase short subtype for chip (max tag-1). */
+		/* 短い subtype を大文字にしてチップタグに (最大 tag-1)。 */
 		char tmp[CEMU_MODE_TAG];
 		int j = 0;
 		for (const char* p = s; *p && j < CEMU_MODE_TAG - 1; p++) {
@@ -123,7 +123,7 @@ static int CEmuModeTagPreferRank(const char* tag)
 	if (_stricmp(tag, "GAMEBLASTER") == 0) return 22;
 	if (_stricmp(tag, "86") == 0) return 20;
 	if (_stricmp(tag, "BEEP") == 0) return 2;
-	if (_stricmp(tag, "MIDI") == 0) return -100; /* selectable, never default when FM exists */
+	if (_stricmp(tag, "MIDI") == 0) return -100; /* 選べるが、FM があるときは既定にしない */
 	return 10;
 }
 
@@ -135,6 +135,7 @@ static void CEmuModeNormKey(const char* archive, char* key, int keyCap)
 	}
 }
 
+/* アーカイブのユニークモード。非 MIDI 優先 */
 int CEmuCatalogListArchiveModes(const CEmuCatalog* cat, const char* archive,
 	const char* dataDirHint, const CEmuZipFs* zipFs,
 	CEmuArchiveMode* out, int outCap)
@@ -161,7 +162,7 @@ int CEmuCatalogListArchiveModes(const CEmuCatalog* cat, const char* archive,
 			if (_stricmp(out[j].tag, tag) == 0) { found = j; break; }
 		}
 		if (found >= 0) {
-			/* Keep higher-chip entry index for same tag (more titles). */
+			/* 同じ tag ならチップが多い行の index を残す (曲数が多い)。 */
 			const CEmuGameEntry* prev = cat->entry[out[found].entryIndex];
 			if (prev && e->titleCount > prev->titleCount)
 				out[found].entryIndex = i;
@@ -175,7 +176,7 @@ int CEmuCatalogListArchiveModes(const CEmuCatalog* cat, const char* archive,
 		out[n].entryIndex = i;
 		n++;
 	}
-	/* Sort: non-MIDI by prefer rank desc, MIDI last. */
+	/* 並び: 非 MIDI を prefer 降順、MIDI は末尾。 */
 	for (int a = 0; a < n; a++) {
 		for (int b = a + 1; b < n; b++) {
 			const int ra = CEmuModeTagPreferRank(out[a].tag);
@@ -205,7 +206,7 @@ const CEmuGameEntry* CEmuCatalogFindArchiveForZipMode(const CEmuCatalog* cat,
 		const CEmuGameEntry* pick = cat->entry[modes[i].entryIndex];
 		return pick;
 	}
-	/* Tag not found — fall back to default prefer (non-MIDI). */
+	/* タグ無し — 既定の prefer (非 MIDI) へ戻す。 */
 	return CEmuCatalogFindArchiveForZip(cat, archive, dataDirHint, zipFs);
 }
 
@@ -227,7 +228,7 @@ static ULONGLONG CEmuModeHashStemA(const char* stem)
 {
 	ULONGLONG h = 14695981039346656037ULL;
 	if (!stem) return h;
-	/* Namespace prefix so stem keys never collide with legacy path hashes. */
+	/* 名前空間プレフィックス。stem キーが旧パスハッシュと衝突しない。 */
 	static const char kNs[] = "cemu-mode-stem:";
 	for (const char* p = kNs; *p; p++) {
 		h ^= (ULONGLONG)(unsigned char)*p;
@@ -256,7 +257,7 @@ static int CEmuModePrefFileFromHash(ULONGLONG h, wchar_t* out, int outCap)
 	return 1;
 }
 
-/* Keys: archive stem (stable across relative/absolute/::title) + legacy path hashes. */
+/* キー: アーカイブ stem (相対/絶対/::title で安定) + 旧パスハッシュ。 */
 static int CEmuModePrefCollectKeys(const wchar_t* zipPath, ULONGLONG* keys, int keyCap,
 	ULONGLONG* outCanon)
 {
@@ -292,7 +293,7 @@ static int CEmuModePrefCollectKeys(const wchar_t* zipPath, ULONGLONG* keys, int 
 	if (got > 0 && got < (DWORD)_countof(full) && full[0])
 		addPath(full);
 
-	/* Canonical write key = stem when known (survives path spelling). */
+	/* 正規の書き込みキー = 分かっているなら stem (パス表記ゆれに耐える)。 */
 	ULONGLONG canon = keys[0];
 	if (stem[0])
 		canon = CEmuModeHashStemA(stem);
@@ -322,6 +323,7 @@ static int CEmuModePrefReadFile(const wchar_t* path, char* tagOut, int tagCap)
 	return 1;
 }
 
+/* zip 物理パスごとのモード好みを読む */
 int CEmuModePrefGet(const wchar_t* zipPath, char* tagOut, int tagCap)
 {
 	if (!tagOut || tagCap <= 0) return 0;
@@ -334,7 +336,7 @@ int CEmuModePrefGet(const wchar_t* zipPath, char* tagOut, int tagCap)
 	for (int i = 0; i < nk; i++) {
 		if (!CEmuModePrefFileFromHash(keys[i], path, MAX_PATH)) continue;
 		if (!CEmuModePrefReadFile(path, tagOut, tagCap)) continue;
-		/* Migrate legacy path-hash sidecar → stem key for ResolveZip. */
+		/* 旧パスハッシュのサイドカーを ResolveZip 用 stem キーへ移す。 */
 		if (canon && keys[i] != canon) {
 			wchar_t canonPath[MAX_PATH];
 			if (CEmuModePrefFileFromHash(canon, canonPath, MAX_PATH)) {
@@ -396,6 +398,7 @@ static int CEmuModeIsMidiExtW(const wchar_t* name)
 		|| _wcsicmp(dot, L".smf") == 0) ? 1 : 0;
 }
 
+/* zip 内の最初の .mid/.rmi/.smf → KPI/VST MIDI 再生用 temp */
 int CEmuZipExtractFirstMidi(const wchar_t* zipPath, wchar_t* outMidPath, int outCap)
 {
 	if (!zipPath || !outMidPath || outCap <= 0) return 0;
@@ -475,6 +478,7 @@ static int ZipWriteTempMidi(CEmuZipFs* fs, int idx, wchar_t* outMidPath, int out
 	return 1;
 }
 
+/* この title のカタログ曲ファイルが SMF なら抽出 */
 int CEmuZipExtractCatalogMidi(const wchar_t* zipPath, const CEmuGameEntry* ge,
 	unsigned titleCode, wchar_t* outMidPath, int outCap)
 {
@@ -520,6 +524,7 @@ int CEmuZipExtractCatalogMidi(const wchar_t* zipPath, const CEmuGameEntry* ge,
 	return ok;
 }
 
+/* PCAT midiout glue を起動し、MPU-401 UART を Type-0 SMF に捕捉 */
 int CEmuCapturePcatMidiToFile(const wchar_t* zipPath, unsigned titleCode,
 	wchar_t* outMidPath, int outCap)
 {
@@ -532,8 +537,9 @@ int CEmuCapturePcatMidiToFile(const wchar_t* zipPath, unsigned titleCode,
 	CEmuMgr* mgr = CEmuMgrGet();
 	const CEmuGameEntry* ge = CEmuMgrResolveZip(mgr, zipPath, zipOut,
 		(int)_countof(zipOut), dataDir, (int)sizeof(dataDir));
-	/* MT-32 rows are often driver type=beep + midiout=1. ResolveZip can
-	   miss prefer=MIDI if the pref hash path differs — force MIDI entry. */
+	/* MT-32 行は type=beep + midiout=1 が多い。ResolveZip が beep 行に
+	   着いても Capture は midiout glue が要る。pref ハッシュパスが違うと
+	   prefer=MIDI を外すので、MIDI 行を強制する。 */
 	if (!ge || !CEmuModeEntryIsMidi(ge)) {
 		char stem[CEMU_ARCHIVE_NAME] = {};
 		const wchar_t* openZip = (zipOut[0] ? zipOut : zipPath);
@@ -559,16 +565,15 @@ int CEmuCapturePcatMidiToFile(const wchar_t* zipPath, unsigned titleCode,
 	if (hard && drv && hard->hardKind == CHard::KIND_PCAT
 		&& drv->Open(hard, ge, fs, titleCode ? titleCode : 0x10)) {
 		CHardPcat* hw = (CHardPcat*)hard;
-		/* Reset after DOS boot so SMF is song-only. Do NOT TriggerPlay here —
-		   CDriverPcat::Render fires TriggerPlay once when triggered_==0.
-		   A second INT 7Fh play tears MT32/silp down to init/"THANKS" only. */
+		/* DOS 起動後にリセットして SMF を曲だけにする。ここで TriggerPlay しない —
+		   CDriverPcat::Render が triggered_==0 のとき一度だけ撃つ。
+		   2 回目の INT 7Fh は MT32/silp を init/"THANKS" だけにしてしまう。 */
 		hw->MidiCaptureReset();
 		hw->MidiForceUart(1);
-		/* Chunked render until the UART stream goes quiet. Do NOT key off
-		   NoteOn plateau alone — sparse MT-32/SCI phrases hold notes for
-		   seconds with no new NoteOns, and that used to cut mid-song (wrong
-		   loop end + “wrong track” feel). Require a minimum after first
-		   notes, then stop when MIDI bytes stall (re-loop hush / end). */
+		/* UART が静かになるまでチャンク描画。NoteOn 高原だけでキーオフしない —
+		   疎な MT-32/SCI フレーズは新規 NoteOn 無しで数秒ホールドし、
+		   途中で切るとループ終端と「別トラック」感が出ていた。
+		   最初の音符のあと最低時間を置き、MIDI バイトが止まったら終了。 */
 		enum {
 			kChunk = 44100 / 2,
 			kMax = 44100 * 240,
@@ -596,7 +601,7 @@ int CEmuCapturePcatMidiToFile(const wchar_t* zipPath, unsigned titleCode,
 			}
 			free(buf);
 		}
-		/* Setup-only captures (sysex/CC, no notes) → silent VST; reject. */
+		/* セットアップのみの捕捉 (sysex/CC、音符なし) → 無音 VST。棄却。 */
 		if (hw->MidiByteCount() >= 16 && hw->MidiNoteOnCount() > 0) {
 			wchar_t tmpDir[MAX_PATH] = {};
 			GetTempPathW(MAX_PATH, tmpDir);

@@ -4,7 +4,7 @@
 
 class CHard;
 
-/* hoot ドライバ層 — ブート・IRQ・再生トリガ */
+/* hoot ドライバ層: ブート・IRQ・再生トリガ */
 class CDriver {
 public:
 	virtual ~CDriver() {}
@@ -13,7 +13,7 @@ public:
 	virtual void Close() = 0;
 	virtual int Render(int16_t* stereo, int frames) = 0;
 	virtual int Seek(uint64_t sample) = 0;
-	/* Same-zip SE while BGM plays: poke the live mailbox / command. 0 = unsupported. */
+	/* 同一 zip の SE を BGM 再生中に重ねる。メールボックスへ poke。0=非対応 */
 	virtual int OverlayTitle(unsigned titleCode) { (void)titleCode; return 0; }
 };
 

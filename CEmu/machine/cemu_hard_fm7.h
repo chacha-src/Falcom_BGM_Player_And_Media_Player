@@ -19,8 +19,8 @@ extern "C" {
 #undef U
 #undef S
 
-/* Fujitsu FM-7 / FM77AV: M6809 + AY ($FD0D/$FD0E) and/or YM2203 ($FD15/$FD16).
-   Play mailbox: $FD58=cmd (1=play), $FD59=song; BGM staged at mdata_addr. */
+/* 富士通 FM-7 / FM77AV: M6809 + AY ($FD0D/$FD0E) および／または YM2203 ($FD15/$FD16)。
+   再生メールボックス: $FD58=cmd（1=play）、$FD59=曲。BGM は mdata_addr へ載せる。 */
 class CHardFm7 : public CHard {
 public:
 	CHardFm7();
@@ -46,14 +46,14 @@ public:
 
 	uint64_t CpuCycles() const { return cpuCycles_; }
 	void AddCpuCycles(uint64_t n) { cpuCycles_ += n; }
-	/* Run mc6809_step until at least `cycles` elapsed; returns cycles consumed. */
+	/* mc6809_step を少なくとも cycles 進める。消費サイクルを返す */
 	uint64_t RunCpu(uint64_t cycles);
-	/* JSR helper for Falcom table init vectors (no live sub-CPU). */
+	/* Falcom 表初期化ベクタ用 JSR（生きたサブ CPU は無い） */
 	void RunSubroutine(uint16_t addr, int maxSteps = 200000, int clockChips = 0);
 
 	void TriggerPlay(unsigned titleCode);
-	/* If PATCH's boot JSR never returns (albatrss DRIVER / ishtar MUSIC.P),
-	   land back on the $FD58 poll with IRQ unmasked. */
+	/* PATCH のブート JSR が戻らないとき（albatrss DRIVER / ishtar MUSIC.P）、
+	   IRQ マスクを外して $FD58 ポーリングへ戻す。 */
 	void UnwindStuckBootJsr();
 	void ParkAlbatrssIfStuck();
 	void ArmLaydockChannels();
@@ -73,43 +73,43 @@ public:
 	int cpuHz_;
 	int opnHz_;
 	int ayHz_;
-	int useOpn_; /* fm77av / OPN path */
+	int useOpn_; /* fm77av / OPN 経路 */
 	uint16_t initPc_;
-	/* Falcom PATCH 8-byte table base (often FED0). Survives boot PC skip past table. */
+	/* Falcom PATCH の 8 バイト表基点（多くは FED0）。ブート PC が表を飛ばしても残す */
 	uint16_t patchTableBase_;
 	uint16_t mdataAddr_;
 	unsigned mdataSize_;
 	unsigned titleCode_;
-	uint8_t playCmdLatch_; /* $FD58 */
-	uint8_t playSongLatch_; /* $FD59 */
-	uint8_t playParamA_; /* $FD5A */
-	uint8_t playParamB_; /* $FD5B */
-	uint8_t playParamC_; /* $FD5C */
-	int playCmdHold_; /* keep $FD58 asserted for N polls (X1-style) */
-	/* Falcom specialty (xana/ys): mailbox at $FD80/$FD82, not $FD58. */
-	uint8_t falcomCmdLatch_; /* $FD80 */
-	uint8_t falcomSongLatch_; /* $FD82 */
+	uint8_t playCmdLatch_; /* ポート $FD58 */
+	uint8_t playSongLatch_; /* ポート $FD59 */
+	uint8_t playParamA_; /* ポート $FD5A */
+	uint8_t playParamB_; /* ポート $FD5B */
+	uint8_t playParamC_; /* ポート $FD5C */
+	int playCmdHold_; /* $FD58 を N 回ポーリングの間アサート（X1 流） */
+	/* Falcom 専用（xana/ys）: メールボックスは $FD80/$FD82。$FD58 ではない */
+	uint8_t falcomCmdLatch_; /* ポート $FD80 */
+	uint8_t falcomSongLatch_; /* ポート $FD82 */
 	int falcomCmdHold_;
 	uint8_t fd02_;
 	uint8_t fd03_;
-	uint8_t fd05_; /* sub-CPU interface: bit7 busy */
-	uint8_t fd05HaltSticky_; /* keep busy until main clears halt req */
-	uint8_t ymIrqSeen_; /* YM2203 IRQ sticky for $FD17 (MAME fmirq_r bit3) */
-	/* Vsync IRQ status polarity (PATCH ISRs disagree on bit0/2/3). */
+	uint8_t fd05_; /* サブ CPU インタフェース: bit7 busy */
+	uint8_t fd05HaltSticky_; /* メインが halt 要求を落とすまで busy を維持 */
+	uint8_t ymIrqSeen_; /* YM2203 IRQ を $FD17 用に sticky（MAME fmirq_r bit3） */
+	/* vsync IRQ ステータス極性（PATCH ISR は bit0/2/3 で食い違う） */
 	uint8_t fd03VsyncSet_;
 	uint8_t fd03VsyncClr_;
 	unsigned fd03VsyncPhase_;
 	void RefreshFd03Polarity();
 	void ApplyFd03Vsync();
-	/* FM-7 PSG/OPN bus: FD0E/FD16=data latch, FD0D/FD15=BDIR/BC1 cmd. */
+	/* FM-7 PSG/OPN バス: FD0E/FD16=データラッチ、FD0D/FD15=BDIR/BC1 コマンド */
 	uint8_t opnDataLatch_;
 	uint8_t psgDataLatch_;
 	uint8_t opnCmd_;
 	uint8_t psgCmd_;
-	int falcomMode_; /* prog banks / FD80 mailbox */
+	int falcomMode_; /* prog バンク / FD80 メールボックス */
 	int vdataAddr_;
 	int vdataSize_;
-	/* Highest exclusive address of loaded code (not irom). */
+	/* ロード済みコードの排他的上限（irom 以外） */
 	uint16_t codeHighWater_;
 
 	enum { BGM_SIZE = 64 * 1024, PROG_BANKS = 32, MMR_PAGES = 64 };
@@ -138,9 +138,9 @@ private:
 	void ArmSharrierSeq();
 
 	uint8_t mem_[0x10000];
-	/* FM77AV 256KB main RAM. MMR disabled maps CPU $0000-$FBFF to
-	   physical $30000 (pages $30-$3F); pages $00-$0F hold an identity
-	   copy so rips that enable MMR with low page numbers still see code. */
+	/* FM77AV 256KB メイン RAM。MMR オフ時は CPU $0000-$FBFF を物理 $30000
+	   （ページ $30-$3F）へ。$00-$0F は identity コピーを持ち、低いページ番号で
+	   MMR を入れるリップでもコードが見える。 */
 	uint8_t mmrRam_[MMR_PAGES * 0x1000];
 	uint8_t mmrBank_[8][16];
 	uint8_t mmrSeg_;

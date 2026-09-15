@@ -3,8 +3,8 @@
 #include "cemu_catalog.h"
 #include "cemu_zipfs.h"
 
-/* Playlist chip / context-menu labels for multi-subtype archives.
-   Sidecar under %LOCALAPPDATA%\oggYSED\cemumode\ — does not touch playlistdata0 / save.dat. */
+/* 複数 subtype アーカイブ向けのプレイリストチップ / コンテキストメニューラベル。
+   サイドカーは %LOCALAPPDATA%\oggYSED\cemumode\ — playlistdata0 / save.dat は触らない。 */
 
 enum { CEMU_MODE_MAX = 24, CEMU_MODE_TAG = 16 };
 
@@ -12,37 +12,37 @@ struct CEmuArchiveMode {
 	char tag[CEMU_MODE_TAG];   /* OPNA / OPN / OPM / OPLL / MIDI / 86 / BEEP … */
 	char subtype[CEMU_DRIVER_TYPE];
 	int isMidi;
-	int entryIndex;            /* index into CEmuCatalog::entry, or -1 */
+	int entryIndex;            /* CEmuCatalog::entry の index。無ければ -1 */
 };
 
-/* Map catalog entry → display tag. Returns 1 on success. */
+/* カタログエントリ → 表示タグ。成功で 1 */
 int CEmuModeTagFromEntry(const CEmuGameEntry* e, char* tag, int tagCap);
 
 int CEmuModeIsMidiTag(const char* tag);
 
-/* Unique modes for archive (dedupe by tag). Prefer non-MIDI default ordering. */
+/* アーカイブのユニークモード（tag で重複排除）。既定順は非 MIDI 優先 */
 int CEmuCatalogListArchiveModes(const CEmuCatalog* cat, const char* archive,
 	const char* dataDirHint, const CEmuZipFs* zipFs,
 	CEmuArchiveMode* out, int outCap);
 
-/* Like FindArchiveForZip, but if preferTag is set pick that mode; else best non-MIDI. */
+/* FindArchiveForZip 相当。preferTag があればそのモード、無ければ最良の非 MIDI */
 const CEmuGameEntry* CEmuCatalogFindArchiveForZipMode(const CEmuCatalog* cat,
 	const char* archive, const char* dataDirHint, const CEmuZipFs* zipFs,
 	const char* preferTag);
 
-/* Per-zip mode preference (physical zip path). Empty tag clears. */
+/* zip 物理パスごとのモード好み。空 tag で解除 */
 int CEmuModePrefGet(const wchar_t* zipPath, char* tagOut, int tagCap);
 void CEmuModePrefSet(const wchar_t* zipPath, const char* tag);
 
-/* First .mid/.rmi/.smf inside zip → temp file for KPI/VST MIDI play. */
+/* zip 内の最初の .mid/.rmi/.smf → KPI/VST MIDI 再生用 temp */
 int CEmuZipExtractFirstMidi(const wchar_t* zipPath, wchar_t* outMidPath, int outCap);
 
-/* Catalog song file for this title (offset matches title code) if it is SMF. */
+/* この title のカタログ曲ファイルが SMF なら抽出（offset は title code と一致） */
 int CEmuZipExtractCatalogMidi(const wchar_t* zipPath, const CEmuGameEntry* ge,
 	unsigned titleCode, wchar_t* outMidPath, int outCap);
 
-/* Boot PCAT midiout glue, capture MPU-401 UART → Type-0 SMF for KPI/VST. */
+/* PCAT midiout glue を起動し、MPU-401 UART を Type-0 SMF に捕捉して KPI/VST へ */
 int CEmuCapturePcatMidiToFile(const wchar_t* zipPath, unsigned titleCode,
 	wchar_t* outMidPath, int outCap);
 
-/* Realtime stream: CEmuMidiLive* in cemu_midi_live.h (stub SMF + inject). */
+/* リアルタイム流: CEmuMidiLive* は cemu_midi_live.h（スタブ SMF + inject） */

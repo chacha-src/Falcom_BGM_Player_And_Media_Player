@@ -1,6 +1,7 @@
 ﻿#pragma once
 #include <stdint.h>
 
+/* CEmu 内 S98 プレーヤ。impl は KbS98Decoder。長さはファイルから分かる */
 struct CEmuS98Player {
 	void* impl;
 	DWORD sampleRate;

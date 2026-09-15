@@ -4,20 +4,20 @@
 #include "../fmmon/fmmon_shadow.h"
 #include <string.h>
 
-/* Namco C140, 24-voice PCM. Ported from MAME / FBNeo c140.cpp
-   (license:BSD-3-Clause, copyright-holders:R. Belmont), stripped of the
-   BurnLib stream/resampler so it renders straight to the host rate like the
-   other CEmu chips (see cemu_chip_c352.cpp / cemu_chip_k053260.cpp).
+/* Namco C140、24ボイス PCM。MAME / FBNeo c140.cpp からの移植
+   （license:BSD-3-Clause, copyright-holders:R. Belmont）。BurnLib の
+   ストリーム/リサンプラは外し、他CEmuチップ同様ホストレートへ直レンダ
+   （cemu_chip_c352.cpp / cemu_chip_k053260.cpp 参照）。
 
-   16 bytes of register space per voice:
+   ボイスあたり16バイト:
      +0 volume_right  +1 volume_left  +2 freq_msb  +3 freq_lsb
-     +4 bank          +5 mode(key on = bit7)
+     +4 bank          +5 mode（bit7=キーオン）
      +6 start_msb     +7 start_lsb    +8 end_msb   +9 end_lsb
-     +10 loop_msb     +11 loop_lsb    +12..15 reserved */
+     +10 loop_msb     +11 loop_lsb    +12..15 予約 */
 
 enum { kC140Voices = 24, kC140Regs = 0x200 };
 
-/* Banking type (only System 2 is wired here; System 21 kept for reference). */
+/* バンキング種別（ここは System 2 のみ配線。System 21 は参照用）。 */
 enum { kC140TypeSystem2 = 0, kC140TypeSystem21 = 1, kC140TypeC219 = 2 };
 
 static int CEmuC140Clamp16(int v)
@@ -49,8 +49,8 @@ public:
 		, lastModeWrite_(0)
 		, keyedPeak_(0)
 	{
-		/* MAME passes C140_SOUND_CLOCK (~21333) directly as baserate.
-		   Older ports used 8.192 MHz / 384 — accept either. */
+		/* MAME は C140_SOUND_CLOCK（約21333）を baserate に直渡し。
+		   旧移植は 8.192 MHz / 384 — どちらも受け付ける。 */
 		if (clockHz_ >= 100000u)
 			baseRate_ = clockHz_ / 384u;
 		else
@@ -84,7 +84,7 @@ public:
 	void Write(uint32_t addr, uint32_t data) override
 	{
 		unsigned o = addr & 0x1ff;
-		/* C219 mirrors odd bank regs (fixes bkrtmaq). */
+		/* C219 は奇数バンクレジスタをミラー（bkrtmaq 対策）。 */
 		if (bankingType_ == kC140TypeC219 && o >= 0x1f8u && (o & 1u))
 			o -= 8u;
 		const uint8_t d = (uint8_t)(data & 0xff);
@@ -102,7 +102,7 @@ public:
 		if (o < voiceLimit) {
 			const int ch = (int)(o >> 4);
 			if ((o & 0xf) == 0x5) {
-				/* MAME: key when bit7 set, or bit6 while already keyed (re-key). */
+				/* MAME: bit7 でキー、または既キー時の bit6（再キー）。 */
 				if ((d & 0x80) || ((d & 0x40) && v_[ch].key)) {
 					KeyOn(ch, d);
 					if (keyedPeak_ < KeyedCount())
@@ -112,9 +112,9 @@ public:
 			}
 			return;
 		}
-		/* MAME INT1: 1f8=reload, 1fa=ack+rearm, 1fe bit0=enable.
-		   Sys2 FIRQ handler STA $51FA each tick — without this the sequencer
-		   only sees our soft vblank pulse and never keys YM/C140 on assault. */
+		/* MAME INT1: 1f8=リロード、1fa=ack+再武装、1fe bit0=イネーブル。
+		   Sys2 FIRQ ハンドラは毎ティック STA $51FA — これが無いとシーケンサは
+		   ソフト vblank パルスしか見えず、assault で YM/C140 をキーしない。 */
 		switch (o) {
 		case 0x1f8:
 			break;
@@ -126,7 +126,7 @@ public:
 		case 0x1fe:
 			if (d & 1u) {
 				if (!timerArmed_) {
-					irq_ = true; /* first enable → immediate INT1 */
+					irq_ = true; /* 初回イネーブル → 即 INT1 */
 					timerArmed_ = 1;
 					ArmTimer();
 				}
@@ -142,8 +142,8 @@ public:
 		}
 	}
 
-	/* MAME c140_r: voice+5 returns in-progress in bit6 (Final Lap / Suzuka
-	   poll this); raw bit7 alone leaves voices stuck "busy" forever. */
+	/* MAME c140_r: voice+5 は進行中を bit6 で返す（Final Lap / Suzuka がポーリング）。
+	   生の bit7 だけだとボイスが永久に「busy」のまま。 */
 	uint8_t ReadReg(unsigned offset) const
 	{
 		unsigned o = offset & 0x1ffu;
@@ -183,7 +183,7 @@ public:
 	{
 		if (!timerArmed_ || timerPeriod_ == 0 || chipCycles == 0)
 			return;
-		/* Map CPU clocks → C140 base ticks. Fed M6809 clocks (~2.048 MHz). */
+		/* CPUクロック → C140 ベースティック。供給は M6809 クロック（約2.048 MHz）。 */
 		uint64_t ticks = chipCycles * (uint64_t)baseRate_ / 2048000ull;
 		if (ticks == 0) ticks = 1;
 		while (ticks > 0 && timerPeriod_ > 0) {
@@ -248,7 +248,7 @@ public:
 
 				int dt;
 				if ((vc.mode & 8) && bankingType_ != kC140TypeSystem21) {
-					/* compressed 12-bit PCM */
+					/* 圧縮 12bit PCM */
 					if (cnt) {
 						const uint32_t adr = base + (uint32_t)pos;
 						const int8_t raw = (adr < romSize_) ? (int8_t)rom_[adr] : 0;
@@ -263,7 +263,7 @@ public:
 					lsum += (dt * lvol) >> (5 + 5);
 					rsum += (dt * rvol) >> (5 + 5);
 				} else {
-					/* linear 8-bit signed PCM */
+					/* 線形 符号付き8bit PCM */
 					if (cnt) {
 						const uint32_t adr = base + (uint32_t)pos;
 						prevdt = lastdt;
@@ -281,7 +281,7 @@ public:
 				vc.prevdt = prevdt;
 				vc.dltdt = dltdt;
 			}
-			/* MAME renders lmix*8 into the output stream. */
+			/* MAME は lmix*8 を出力ストリームへ。 */
 			lsum *= 8;
 			rsum *= 8;
 			stereo[f * 2] = (int16_t)CEmuC140Clamp16((int)stereo[f * 2] + lsum * gain / 256);
@@ -323,7 +323,7 @@ private:
 		}
 	}
 
-	/* System 2 / System 21 / C219 sample-address banking (MAME find_sample). */
+	/* System 2 / System 21 / C219 のサンプルアドレスバンキング（MAME find_sample）。 */
 	uint32_t FindSample(int adrs, int bank, int voice) const
 	{
 		long a = ((long)bank << 16) + adrs;
@@ -357,13 +357,13 @@ private:
 		vc.sampleStart = vreg[6] * 256 + vreg[7];
 		vc.sampleEnd = vreg[8] * 256 + vreg[9];
 		vc.sampleLoop = vreg[10] * 256 + vreg[11];
-		/* C219 addresses are in words. */
+		/* C219 アドレスはワード単位。 */
 		if (bankingType_ == kC140TypeC219) {
 			vc.sampleStart <<= 1;
 			vc.sampleEnd <<= 1;
 			vc.sampleLoop <<= 1;
 		}
-		if (ch < 16) FmMonShadowPcmNote(ch, 48 + ch, 1);
+		if (ch < 16) FmMonShadowPcmNote(ch, 48 + ch, 1); /* FMモニタへキーオン */
 	}
 
 	void KeyOff(int ch)
@@ -375,7 +375,7 @@ private:
 
 	void ArmTimer()
 	{
-		/* MAME: interval = (reg[1f8]+1)*2 ticks at baserate. */
+		/* MAME: interval = (reg[1f8]+1)*2 ティック（baserate）。 */
 		const unsigned reload = (unsigned)reg_[0x1f8] + 1u;
 		timerPeriod_ = (uint64_t)reload * 2ull;
 		timerLeft_ = timerPeriod_;
@@ -406,6 +406,7 @@ private:
 	int keyedPeak_;
 };
 
+/* C140 ラッパ生成。baserate は clock/384 または直接クロック。 */
 CChip* CEmuChipC140Create(uint32_t clockHz, int sampleRate)
 {
 	return new CChipC140(clockHz, sampleRate);

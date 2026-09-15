@@ -18,18 +18,23 @@ class COggDlg;
 extern COggDlg* og;
 #include <algorithm>
 #include <new>
-/* クロスフェードで B(スロット1)が現行になった後も、UI から正しいエンジンを見る */
-void MmBindVstActiveSlot();
-extern save savedata;
 
 /*
- * MIDI モニタの描画ペース
+ * MIDI 32パート・モニタ。SMF を再生カーソルに同期して CC/ノート/SysEx を描く。
+ * 音色名は SASAMI_GS/XG/EX.DAT。VST ホストと CEmu MPU のライブタップも同じ表に載せる。
+ *
+ * 描画ペース:
  *   タイマ1 (16ms): 位置保存 + PumpIdle（本体）
  *   タイマ2 (4ms): IdlePulse（キューが空で CPU に余裕があるときだけ追加同期）
  *   COggApp::OnIdle: 同じく IdlePulse。TRUE を返すと OnIdle が回り続けるので基底へ返す。
  *   timerp: PumpSyncNow は毎ティック。UpdateWindow だけ Ms2DrawDue。
- * QS_POSTMESSAGE で IdlePulse を止めると timerp の投稿でstarveするので見ない。
  */
+
+/* クロスフェードで B(スロット1)が現行になった後も、UI から正しいエンジンを見る */
+void MmBindVstActiveSlot();
+extern save savedata;
+
+/* QS_POSTMESSAGE で IdlePulse を止めると timerp の投稿でstarveするので見ない。 */
 extern CString filen;
 extern int mode;
 extern int tempo;
@@ -74,8 +79,8 @@ enum {
 
 HMIDIOUT s_kpiLiveOut = NULL;
 
-// イベント時刻のサンプルレート。VST はエンジン、KPI MIDI は実際に開いたレート
-// （savedata.samples だと 48k 設定＋44.1k KPI でモニタだけ走る）。
+/* モニタが使うサンプルレート。VST はエンジン、KPI MIDI は実際に開いたレート
+   （savedata.samples だと 48k 設定＋44.1k KPI でモニタだけ走る） */
 static int MmWantMonitorSampleRate()
 {
 	if (mode == MODE_VST_MIDI) {
@@ -98,13 +103,13 @@ static void MmCloseKpiLiveOut()
 	s_kpiLiveOut = NULL;
 }
 
+/* VST ホスト窓が生きているか */
 static int MmVstHostOpen()
 {
 	return (g_vstHostDlg && ::IsWindow(g_vstHostDlg->GetSafeHwnd())) ? 1 : 0;
 }
 
-// Host wiring: a multi on parts 1–16 covers only that block. Empty B rows
-// must not follow A MIDI (and the other way around).
+/* ホスト配線: 1–16 の multi はそのブロックだけ。空の B 行が A の MIDI を追ってはいけない（逆も同じ） */
 static int MmLiveHostPartOn(int part)
 {
 	if (part < 0 || part >= CMidiMonitorDlg::PART_MAX) return 0;
@@ -114,7 +119,7 @@ static int MmLiveHostPartOn(int part)
 	return plug[0] ? 1 : 0;
 }
 
-// Host closed → 0. Do not reuse MmLiveHostPartOn (that returns 1 when closed).
+/* ホスト閉鎖時は 0。MmLiveHostPartOn は閉鎖時に 1 を返すので流用しない */
 static int MmHostSlotOccupied(int part)
 {
 	if (part < 0 || part >= CMidiMonitorDlg::PART_MAX) return 0;
@@ -723,8 +728,8 @@ static int MmEvSoftRank(DWORD msg)
 	const int st = (int)(msg & 0xF0);
 	const int d1 = (int)((msg >> 8) & 0x7F);
 	const int d2 = (int)((msg >> 16) & 0x7F);
-	/* Same-tick order mirrors score CmpEv: setup CC → notes → tear-down CC.
-	   CC64 on before notes; CC64 off after. */
+	/* 同時刻の並びは譜面 CmpEv と同じ: 準備 CC → ノート → 後始末 CC。
+	   CC64 on はノートより前、CC64 off はノートより後。 */
 	if (st == 0xB0) {
 		if (d1 == 64) return (d2 >= 64) ? 1 : 5;
 		return 2;
@@ -1918,6 +1923,7 @@ void CMidiMonitorDlg::ApplyGsPartByte(Part& p, int kind, int a, BYTE v, int* cha
 	}
 }
 
+/* ショート MIDI をパート状態へ。fromUser は鍵盤クリック、liveExact はタップ直書き */
 void CMidiMonitorDlg::ApplyShort(int port, DWORD msg, BOOL fromUser, BOOL liveExact)
 {
 	const int st = msg & 0xf0;
@@ -2063,6 +2069,7 @@ void CMidiMonitorDlg::ApplyShort(int port, DWORD msg, BOOL fromUser, BOOL liveEx
 	}
 }
 
+/* GM/GS/XG SysEx をパートとシステムへ適用する */
 void CMidiMonitorDlg::ApplySysex(const BYTE* d, int n, int livePort)
 {
 	if (!d || n < 6) return;
@@ -2302,6 +2309,7 @@ void CMidiMonitorDlg::ApplyEvent(const MmEv& e)
 	ApplyShort(e.port, e.msg);
 }
 
+/* 再生中の SMF を開き、tick→サンプルのイベント列を組む */
 void CMidiMonitorDlg::LoadCurrentMidi()
 {
 	const wchar_t* src = filen;
@@ -2996,10 +3004,8 @@ void CMidiMonitorDlg::SyncFromPlayback()
 			pbHeard = m_loopStartSample + ((pbHeard - m_loopEndSample - 1) % span);
 	}
 	if (pbRaw < m_lastPlayb || (m_hearPlayb >= 0 && pbHeard < m_hearPlayb)) {
-		/* A live MPU session's programs and CCs arrive once over the tap and are
-		   not in the stub SMF, so there is nothing to replay them from: wiping
-		   the parts here left every row back on the default piano for the rest
-		   of the song. Only the SMF cursor is rewound. */
+		/* ライブ MPU はプログラムと CC がタップに一度しか来ず、スタブ SMF には無い。
+		   ここでパートを消すと曲の残り全部が初期ピアノに戻る。巻き戻すのは SMF カーソルだけ。 */
 		if (!CEmuMidiLiveActive()) {
 			ResetParts();
 			m_evPos = 0;
@@ -3120,6 +3126,7 @@ void CMidiMonitorDlg::UpdatePlayPos()
 	m_posNum = num;
 }
 
+/* CC 縦バー。idle のときは溝だけ */
 void CMidiMonitorDlg::DrawVBar(CDC& dc, int x, int y, int bw, int bh, int v0, int vmax, COLORREF col, int glow, int idle)
 {
 	if (bw < 2 || bh < 2) return;
@@ -3142,6 +3149,7 @@ void CMidiMonitorDlg::DrawVBar(CDC& dc, int x, int y, int bw, int bh, int v0, in
 		dc.FillSolidRect(x, y + bh - h, bw, 1, MmMix(c, RGB(255, 255, 255), 120));
 }
 
+/* PAN は中央が 64。左右に伸びる細いバー */
 void CMidiMonitorDlg::DrawPanBar(CDC& dc, int x, int y, int bw, int bh, int pan, int glow, int idle)
 {
 	if (bw < 3 || bh < 2) return;
@@ -3453,6 +3461,7 @@ void CMidiMonitorDlg::DrawHeader(CDC& dc, int w, int headH, UINT dpi)
 	dc.SelectObject(oldF);
 }
 
+/* 1 パート行。VOL/EXP/PAN バーとミニ鍵盤 */
 void CMidiMonitorDlg::DrawPartRow(CDC& dc, int i, int y, int rowH, int w, UINT dpi, int forceKeys)
 {
 	const Part& p = m_part[i];
@@ -4018,9 +4027,8 @@ void CMidiMonitorDlg::DrainLiveTap()
 	BYTE ports[64];
 	DWORD msgs[64];
 	int applied = 0;
-	/* CEmu live MPU stamps each tap with the frame it is heard at, and the VST
-	   prefetch renders seconds ahead of the speakers, so hold the taps back to
-	   the play cursor instead of applying them at render time. */
+	/* CEmu ライブ MPU は聞こえたフレームでタップを刻む。VST 先読みはスピーカーより秒単位で先行するので、
+	   レンダ時刻ではなく再生カーソルまでタップを遅らせる。 */
 	__int64 nowFrame = -1;
 	if (CEmuMidiLiveActive())
 		nowFrame = OggGetCemuLiveHeardFrames();
@@ -4283,6 +4291,7 @@ bool CMidiMonitorDlg::HitVolBar(CPoint clientPt) const
 }
 
 // 変化した行だけ Invalidate。lev/glow はピクセル量子化して比べる（生値だと毎フレーム全行）。
+/* 変化した行だけ Invalidate。lev/glow はピクセル量子化して比べる（生値だと毎フレーム全行） */
 void CMidiMonitorDlg::InvalidateDirty()
 {
 	if (!::IsWindow(m_hWnd)) return;

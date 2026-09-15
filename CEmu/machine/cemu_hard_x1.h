@@ -3,8 +3,8 @@
 #include "../chip/cemu_chip.h"
 #include "../cemu_zipfs.h"
 
-/* Sharp X1 mucom88 (hoot mucomx1): Z80 + YM2151 + AY-3-8910.
-   Mailbox C010/C011/C012; BGM bank OUT(0); OPM @0700; AY @1B00/1C00. */
+/* Sharp X1 mucom88（hoot mucomx1）: Z80 + YM2151 + AY-3-8910。
+   メールボックス C010/C011/C012。BGM バンク OUT(0)。OPM @0700。AY @1B00/1C00。 */
 class CHardX1 : public CHard {
 public:
 	CHardX1();
@@ -29,10 +29,10 @@ public:
 	uint64_t CpuCycles() const { return cpuCycles_; }
 	void AddCpuCycles(uint64_t n) { cpuCycles_ += n; }
 
-	/* titleCode: hoot packed 0xSS0000BB → song=SS, bank=BB; plain 0xNN → both.
-	   ydos: KOEI 0x010000SS uses hi as a loop flag, song in lo. */
+	/* titleCode: hoot パック 0xSS0000BB → 曲=SS、バンク=BB。素の 0xNN は両方。
+	   ydos: KOEI 0x010000SS は hi がループフラグ、曲は lo。 */
 	void TriggerPlay(unsigned titleCode);
-	/* Stage BGM into mdata/IO without arming the play mailbox (DRIVER boot). */
+	/* 再生メールボックスを武装せず mdata/IO へ BGM を載せる（DRIVER ブート） */
 	void PrestageBgm(unsigned titleCode);
 	unsigned OpmWrites() const;
 	unsigned AyWrites() const;
@@ -43,87 +43,84 @@ public:
 	int cpuHz_;
 	int opmHz_;
 	int ayHz_;
-	int psgOnly_; /* subtype=psg / x1psg */
-	int opnMode_; /* subtype=opn — YM2203 at E0/E1, not CZ-8BS1 OPM */
+	int psgOnly_; /* サブタイプ psg / x1psg */
+	int opnMode_; /* subtype=opn — YM2203 at E0/E1。CZ-8BS1 OPM ではない */
 	uint16_t initPc_;
-	uint16_t mdataAddr_; /* BGM stage in RAM; default 0x4000 */
-	unsigned mdataSize_; /* bytes to stage; default BGM_SIZE */
+	uint16_t mdataAddr_; /* RAM 上の BGM 載せ先。既定 0x4000 */
+	unsigned mdataSize_; /* 載せるバイト数。既定 BGM_SIZE */
 	unsigned titleCode_;
-	/* Falcom PATCH polls IN 0 / IN 1 for cmd/song (hoot also pokes C010/C011). */
+	/* Falcom PATCH は IN 0 / IN 1 で cmd/曲を見る（hoot も C010/C011 を poke） */
 	uint8_t playCmdLatch_;
 	uint8_t playSongLatch_;
-	uint8_t playSongLatchF_; /* jesus: port 0F is OPMTBL index, port 1 is 0-8 */
-	int playCmdHoldIrqs_; /* keep cmd level-high for N IRQs, then clear */
-	/* YDOS: set when PortIn(0) returned a pending cmd from PATCH wait PC. */
+	uint8_t playSongLatchF_; /* jesus: ポート 0F は OPMTBL 添字、ポート 1 は 0-8 */
+	int playCmdHoldIrqs_; /* コマンドを N IRQ の間 High に保ち、その後クリア */
+	/* YDOS: PortIn(0) が PATCH 待ち PC から未処理コマンドを返したときセット */
 	uint8_t ydosCmdSeen_;
-	/* YDOS: after accidental OUT0 pointer build, hide cmd from wait-loop re-entry. */
+	/* YDOS: 誤 OUT0 でポインタを組んだあと、待ちループ再入にコマンドを隠す */
 	uint8_t ydosInhibitReentry_;
-	/* Catalog has YDOS*.SYS — gen1 may lack OVL-1 until after PATCH decrypt. */
+	/* カタログに YDOS*.SYS — 第 1 世代は PATCH 復号まで OVL-1 が無いことがある */
 	uint8_t ydosRom_;
-	/* Telenet OPMDRV: PATCH writes BGM ptr at drv+0x0A but never arms the
-	   ISR play-enable at drv+0x0F (luxsor play XOR-clears it). 0 = n/a. */
+	/* Telenet OPMDRV: PATCH は drv+0x0A に BGM ポインタを書くが、ISR 再生許可 drv+0x0F を
+	   武装しない（luxsor の play が XOR で落とす）。0 = 対象外。 */
 	uint16_t opmPlayGate_;
 	uint16_t opmPlayTempo_;
 	void ArmTelenetPlayGate();
-	/* sghost: host copy of OPMDRV $4595. PATCH CALL INIT returns at $F05A. */
+	/* sghost: OPMDRV $4595 のホストコピー。PATCH CALL INIT の戻りは $F05A */
 	void LoadSghostOpmPatches();
-	/* Tecnosoft OPMDRV: PATCH does `IN A,(1); … CP FF; AND 0F; CALL drv`.
-	   Port 1 is the 0x80/0x81/0xFF command, not the bank index. */
+	/* Tecnosoft OPMDRV: PATCH は `IN A,(1); … CP FF; AND 0F; CALL drv`。
+	   ポート 1 は 0x80/0x81/0xFF コマンドでありバンク添字ではない。 */
 	uint8_t tecnoCmdHi_;
-	/* Enix JESUS: PATCH `CP 09` on port 1 (copy descriptor 0-8) then
-	   `CP 72` on port 0F (OPMTBL index). Global ids >= 9 must not share
-	   the port 1 latch or play is skipped. */
+	/* Enix JESUS: PATCH はポート 1 で `CP 09`（コピー記述 0-8）、ポート 0F で `CP 72`
+	   （OPMTBL 添字）。グローバル id >= 9 がポート 1 ラッチを共有すると再生が飛ばされる。 */
 	uint8_t jesusSplitPorts_;
-	/* Herzog `LD DE,2802` / revo2 `LD A,(F5F8); CP 03`: each BGM file is
-	   its own song. Title 0xSS0000BB must latch SS (0 when hi=0), not lo.
-	   Using lo as the track made HZ-BG3/MUS103 index off the end of the file. */
+	/* Herzog `LD DE,2802` / revo2 `LD A,(F5F8); CP 03`: 各 BGM ファイルが 1 曲。
+	   Title 0xSS0000BB は SS をラッチ（hi=0 なら 0）。lo をトラックにすると
+	   HZ-BG3/MUS103 がファイル末尾を外す。 */
 	uint8_t songIdFromHi_;
-	/* produce: BGM banks overlay PROG* at mdata_addr after boot. xanaopm:
-	   PR.NO0 sits inside the mdata window and must survive PATCH's LDIR
-	   of the player to $F000. Skip RAM StageBgm during Prestage only. */
+	/* produce: ブート後 BGM バンクが mdata_addr の PROG* を覆う。xanaopm:
+	   PR.NO0 は mdata 窓内にあり、PATCH のプレーヤ LDIR → $F000 を生き延びる必要がある。
+	   RAM StageBgm は Prestage 中だけ飛ばす。 */
 	uint8_t skipPrestageRam_;
-	/* produce: the code at mdata_addr IS the player (PROG1). Staging a
-	   different PROG* bank on TriggerPlay replaces JP $0285 with game
-	   text. Song id still selects the track inside PROG1/OPMMUS5. */
+	/* produce: mdata_addr のコードがプレーヤ本体（PROG1）。TriggerPlay で別 PROG* を
+	   載せると JP $0285 がゲームテキストに置き換わる。曲 id は PROG1/OPMMUS5 内のトラック。 */
 	uint8_t skipTriggerStage_;
-	/* Port 1A01 busy/ready toggle (mars JP P / JP M vs Laplace BIT 2). */
+	/* ポート 1A01 busy/ready トグル（mars JP P / JP M 対 Laplace BIT 2） */
 	uint8_t psgStatToggle_;
-	/* ys2 PATCH `LDIR C000→4000` for songs >= 0x20; mode 0 still reads $4000. */
+	/* ys2 PATCH は曲 >= 0x20 で `LDIR C000→4000`。mode 0 はまだ $4000 を読む */
 	uint8_t ys2Mirror4000_;
-	/* Laplace PATCH `IN E,(0F)` feeds CTC ch3 time constant, not a song id. */
+	/* Laplace PATCH の `IN E,(0F)` は CTC ch3 タイムコンスタント。曲 id ではない */
 	uint8_t laplaceCtcF_;
-	/* wibarm: port F is the in-file track / $FF overlay, port 1 a play cmd. */
+	/* wibarm: ポート F はファイル内トラック / $FF overlay、ポート 1 は再生コマンド */
 	uint8_t wibarmPortF_;
-	/* Falcom xana2: `IN A,(0F); SUB 2` indexes PR.NO2/3/4/5. Port F is hi
-	   (family 2/3/4/5), not the staged file id in lo. */
+	/* Falcom xana2: `IN A,(0F); SUB 2` が PR.NO2/3/4/5 を指す。ポート F は hi
+	   （系列 2/3/4/5）。lo の載せたファイル id ではない。 */
 	uint8_t falcomPortF_;
-	/* ametruck: `CP 03` on port 1 (file 0-2); port F is the in-file variant. */
+	/* ametruck: ポート 1 で `CP 03`（ファイル 0-2）。ポート F はファイル内バリアント */
 	uint8_t ametruckPortF_;
-	/* mars PROG `$420A JP P` handshake. Boot EI's before play; the ISR never
-	   RETI's so the wait loop never sees the mailbox. Hold IRQs until the
-	   PATCH play CALL has returned from PROG. */
+	/* mars PROG `$420A JP P` ハンドシェイク。ブートは play 前に EI。ISR が RETI しないので
+	   待ちループがメールボックスを見ない。PATCH の play CALL が PROG から戻るまで IRQ を止める。 */
 	uint8_t marsHoldIrq_;
 	uint8_t marsSeenProg_;
 	uint8_t marsPlayReady_;
 
-	/* Z80 CTC @1FA0-1FA3 (MAME X1; mirror 1FA8). Guest programs vector base
-	   and per-channel IE; driver delivers IM2 as base+2*ch. */
+	/* Z80 CTC @1FA0-1FA3（MAME X1。ミラー 1FA8）。ゲストがベクタ基点とチャネル IE を組む。
+	   ドライバは IM2 を base+2*ch で届ける。 */
 	uint8_t CtcVector(int channel) const;
 	int CtcVectorProgrammed() const { return ctcVectorProgrammed_; }
 	int CtcIe(int channel) const {
 		return (channel >= 0 && channel < 4) ? ctcIe_[channel] : 0;
 	}
-	/* Timer-mode ch0 period in CPU clocks (0 = not programmed / use default). */
+	/* タイマモード ch0 周期（CPU クロック）。0 = 未プログラム／既定 */
 	unsigned CtcTimerPeriodCycles(int channel) const;
-	/* Counter-mode divider (0 = channel is not a counter). The X1 wires CTC
-	   ZC0 to TRG3, so ch3 in counter mode divides ch0's timer output. */
+	/* カウンタモード分周（0 = カウンタではない）。X1 は CTC ZC0 を TRG3 へ配線するので、
+	   ch3 カウンタは ch0 タイマ出力を分周する。 */
 	unsigned CtcCounterTc(int channel) const;
 
 	enum {
 		PLAY_FLAG = 0xC010,
 		PLAY_CODE = 0xC011,
 		LOAD_FLAG = 0xC012,
-		/* hoot default 8K; some titles set mfile_size up to ~0x8000. */
+		/* hoot 既定 8K。タイトルによっては mfile_size が約 0x8000 まで */
 		BGM_SIZE = 32 * 1024
 	};
 
@@ -137,20 +134,20 @@ private:
 	uint8_t ioport_[0x10000];
 	Ay_Cpu* cpu_;
 	CChip* chipOpm_;
-	CChip* chipOpn_; /* YM2203 (ishtar OPN). NULL on OPM/PSG rows. */
+	CChip* chipOpn_; /* YM2203（ishtar OPN）。OPM/PSG 行では NULL */
 	CChip* chipAy_;
 	int sampleRate_;
 	uint64_t cpuCycles_;
-	/* Highest exclusive address StageBgm may write (avoid clobbering code). */
+	/* StageBgm が書いてよい排他的上限（コードを潰さない） */
 	uint32_t stageLimit_;
-	/* Laplace title mid word: byte offset into the staged MUSIC file. */
+	/* Laplace 曲 mid ワード: 載せた MUSIC ファイル内のバイトオフセット */
 	unsigned bgmStageOff_;
 
 	unsigned char* bgmBank_[128];
 	unsigned bgmBankSize_[128];
 	int bgmPresent_[128];
 
-	/* CTC: vector base from ch0 bit0=0 write; IE from control bit7. */
+	/* CTC: ベクタ基点は ch0 の bit0=0 書込。IE はコントロール bit7 */
 	uint8_t ctcVectorBase_;
 	int ctcVectorProgrammed_;
 	uint8_t ctcIe_[4];
@@ -158,7 +155,7 @@ private:
 	uint8_t ctcControl_[4];
 	uint8_t ctcTc_[4];
 	int ctcTcValid_[4];
-	/* XML ctc0/ctc3: hoot use_ctcN vector when guest has not programmed CTC. */
+	/* XML ctc0/ctc3: ゲストが CTC を組む前の hoot use_ctcN ベクタ */
 	int xmlCtcVec_[4];
 };
 

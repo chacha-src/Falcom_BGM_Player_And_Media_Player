@@ -13,6 +13,7 @@
 #include <string.h>
 #include <stdlib.h>
 
+/* セッションをゼロ初期化。既定はステレオ */
 void CEmuSessionInit(CEmuSession* s)
 {
 	if (!s) return;
@@ -20,6 +21,7 @@ void CEmuSessionInit(CEmuSession* s)
 	s->channels = 2;
 }
 
+/* 全 kind のプレーヤを閉じ、セッションを空に戻す */
 void CEmuSessionClose(CEmuSession* s)
 {
 	if (!s) return;
@@ -40,6 +42,7 @@ void CEmuSessionClose(CEmuSession* s)
 	s->channels = 2;
 }
 
+/* MDX 系拡張子 (.mdx/.mdc/.fmx) か */
 static int CEmuSessionIsMdxName(const char* fn)
 {
 	size_t n = fn ? strlen(fn) : 0;
@@ -50,6 +53,7 @@ static int CEmuSessionIsMdxName(const char* fn)
 	return 0;
 }
 
+/* zip 内パスからベース名だけ取る */
 static void CEmuSessionZipBaseName(const char* path, char* out, int outCap)
 {
 	if (!out || outCap <= 0) return;
@@ -62,6 +66,7 @@ static void CEmuSessionZipBaseName(const char* path, char* out, int outCap)
 	strncpy_s(out, (size_t)outCap, slash, _TRUNCATE);
 }
 
+/* 指定 PDX 名を zip から探す。拡張子無しなら .pdx を付ける */
 static const unsigned char* CEmuSessionFindPdxInZip(CEmuZipFs* fs, const char* pdxName, unsigned* outSize)
 {
 	if (outSize) *outSize = 0;
@@ -79,8 +84,8 @@ static const unsigned char* CEmuSessionFindPdxInZip(CEmuZipFs* fs, const char* p
 	return NULL;
 }
 
-/* MDD shared PCM.DAT: 64×(BE32 start, BE32 end) + ADPCM payload @512.
-   Convert to MXDRV PDX (96× ptr+len) so portable_mdx can bind the bank. */
+/* MDD 共用 PCM.DAT: 64×(BE32 start, BE32 end) + ADPCM 本体 @512。
+   MXDRV PDX (96× ptr+len) に変換して portable_mdx がバンクを掴めるようにする。 */
 static unsigned char* CEmuSessionConvertPcmDatToPdx(const unsigned char* pcm, unsigned pcmSz,
 	unsigned* outSz)
 {
@@ -90,7 +95,7 @@ static unsigned char* CEmuSessionConvertPcmDatToPdx(const unsigned char* pcm, un
 	return p;
 }
 
-/* Extract PDX filename after title / 0x1A terminator (plain MDX; mirrors mdx_util). */
+/* タイトル / 0x1A 終端のあとから PDX ファイル名を取る（素の MDX。mdx_util と同じ） */
 static int CEmuSessionExtractPdxName(const unsigned char* mdx, unsigned mdxSz, char* out, int outCap)
 {
 	if (!mdx || !mdxSz || !out || outCap <= 0) return 0;
@@ -103,7 +108,7 @@ static int CEmuSessionExtractPdxName(const unsigned char* mdx, unsigned mdxSz, c
 		if (c < 0x20 && c != 0x1b && c != 0x09) return 0;
 	}
 	if (i >= mdxSz) return 0;
-	i += (i & 1); /* 2-byte align */
+	i += (i & 1); /* 2 バイトアライン */
 	if (i >= mdxSz) return 0;
 	if (c != 0x0d) {
 		while (i < mdxSz && mdx[i++] != 0x0d) {}
@@ -118,11 +123,13 @@ static int CEmuSessionExtractPdxName(const unsigned char* mdx, unsigned mdxSz, c
 	return out[0] ? 1 : 0;
 }
 
+/* TONE*.MDX は音色バンク。曲より後回し */
 static int CEmuSessionIsToneMdxName(const char* base)
 {
 	return base && _strnicmp(base, "TONE", 4) == 0;
 }
 
+/* MDD パック本体 (MDALL/FMALL/MSCALL) か */
 static int CEmuSessionIsMdxPackName(const char* base)
 {
 	if (!base || !base[0]) return 0;
@@ -133,7 +140,7 @@ static int CEmuSessionIsMdxPackName(const char* base)
 	return 0;
 }
 
-/* MDD MDALL/MSCALL pack: u16le count, then count×(name[14]+u32le ofs+u32le size). */
+/* MDD MDALL/MSCALL パック: u16le 曲数、続けて count×(name[14]+u32le ofs+u32le size) */
 static int CEmuSessionExtractMdxPackSong(const unsigned char* pack, unsigned packSz,
 	unsigned songIndex1, const unsigned char** out, unsigned* outSz)
 {
@@ -156,6 +163,7 @@ static int CEmuSessionExtractMdxPackSong(const unsigned char* pack, unsigned pac
 	return 1;
 }
 
+/* MDX バイト列を開き、PDX を zip から結び付ける */
 static int CEmuSessionOpenMdxBytes(CEmuSession* s, const unsigned char* mdx, unsigned mdxSz,
 	CEmuZipFs* fs, const wchar_t* path, DWORD sampleRate)
 {
@@ -165,7 +173,7 @@ static int CEmuSessionOpenMdxBytes(CEmuSession* s, const unsigned char* mdx, uns
 	char pdxName[512];
 	pdxName[0] = 0;
 
-	/* MDC: PDX name lives at BE32 offset 0x1c (mdc2mdx), not in a title header. */
+	/* MDC: PDX 名は BE32 オフセット 0x1c (mdc2mdx)。タイトルヘッダには無い */
 	if (mdxSz >= 0x20
 		&& mdx[0] == 'M' && mdx[1] == 'D' && mdx[2] == 'C' && mdx[3] == 0x1a) {
 		unsigned pdxOfs = ((unsigned)mdx[0x1c] << 24) | ((unsigned)mdx[0x1d] << 16)
@@ -182,7 +190,7 @@ static int CEmuSessionOpenMdxBytes(CEmuSession* s, const unsigned char* mdx, uns
 	if (pdxName[0])
 		pdx = CEmuSessionFindPdxInZip(fs, pdxName, &pdxSz);
 
-	/* Loose packs: PCMDATA.PDX, shared MDD PCM.DAT bank, or first *.pdx. */
+	/* ばら置き: PCMDATA.PDX、共用 MDD PCM.DAT、または先頭の *.pdx */
 	unsigned char* convertedPdx = NULL;
 	if (!pdx) {
 		static const char* kFallback[] = {
@@ -193,7 +201,7 @@ static int CEmuSessionOpenMdxBytes(CEmuSession* s, const unsigned char* mdx, uns
 			const unsigned char* raw = CEmuSessionFindPdxInZip(fs, kFallback[i], &rawSz);
 			if (!raw) continue;
 			if (_stricmp(kFallback[i], "PCM.DAT") == 0) {
-				/* FMX bodies (tone @ 0x140) are FM-only — skip MDD PCM.DAT. */
+				/* FMX 本体 (音色 @ 0x140) は FM のみ — MDD PCM.DAT を付けない */
 				unsigned first = ((unsigned)mdx[0] << 24) | ((unsigned)mdx[1] << 16)
 					| ((unsigned)mdx[2] << 8) | (unsigned)mdx[3];
 				if (first > 0x40) continue;
@@ -229,7 +237,7 @@ static int CEmuSessionOpenMdxBytes(CEmuSession* s, const unsigned char* mdx, uns
 		if (convertedPdx) pdx = convertedPdx;
 	}
 
-	/* Bake name into headerless wrap inside OpenBuffer (after BE32→BE16). */
+	/* OpenBuffer 内のヘッダ無しラップへ名前を焼く（BE32→BE16 のあと） */
 	int ok = CEmuMdxOpenBuffer(&s->mdx, mdx, mdxSz, pdx, pdxSz, sampleRate, path,
 			pdxName[0] ? pdxName : NULL);
 	if (!ok && pdx) {
@@ -242,6 +250,7 @@ static int CEmuSessionOpenMdxBytes(CEmuSession* s, const unsigned char* mdx, uns
 	return 1;
 }
 
+/* zip 内の MDX/FMX/MDC/パックから曲を選んで開く */
 static int CEmuSessionTryMdxInZip(CEmuSession* s, CEmuZipFs* fs, const wchar_t* path,
 	DWORD sampleRate, unsigned titleIdx)
 {
@@ -274,7 +283,7 @@ static int CEmuSessionTryMdxInZip(CEmuSession* s, CEmuZipFs* fs, const wchar_t* 
 		if (CEmuSessionOpenMdxBytes(s, fs->files[best].data, fs->files[best].size, fs, path, sampleRate))
 			return 1;
 	}
-	/* FMX first — 38k/yami MDX bodies are PCM-bank songs; FMX is FM-only. */
+	/* FMX 優先 — 38k/yami の MDX 本体は PCM バンク曲。FMX は FM のみ */
 	for (int n = 0; n < fmxCount; n++) {
 		int i = fmxPick[n];
 		if (CEmuSessionOpenMdxBytes(s, fs->files[i].data, fs->files[i].size, fs, path, sampleRate))
@@ -286,7 +295,7 @@ static int CEmuSessionTryMdxInZip(CEmuSession* s, CEmuZipFs* fs, const wchar_t* 
 			return 1;
 	}
 
-	/* MDD packs: prefer FMALL / MSCALL.FMX over MDALL / MSCALL.MD* */
+	/* MDD パック: FMALL / MSCALL.FMX を MDALL / MSCALL.MD* より先に */
 	int packOrder[64];
 	int packCount = 0;
 	for (int i = 0; i < fs->fileCount; i++) {
@@ -334,6 +343,7 @@ static int CEmuSessionTryMdxInZip(CEmuSession* s, CEmuZipFs* fs, const wchar_t* 
 	return 0;
 }
 
+/* zip 内の .s98 を順に試す */
 static int CEmuSessionTryS98InZip(CEmuSession* s, CEmuZipFs* fs, const wchar_t* path, DWORD sampleRate)
 {
 	for (int i = 0; i < fs->fileCount; i++) {
@@ -355,6 +365,7 @@ static int CEmuSessionTryS98InZip(CEmuSession* s, CEmuZipFs* fs, const wchar_t* 
 	return 0;
 }
 
+/* カタログ行から hard / PMD を開く。platform/subtype で kind を決める */
 static int CEmuSessionTryHardGe(CEmuSession* s, const CEmuGameEntry* ge,
 	const wchar_t* zipPath, unsigned titleCode, CEmuZipFs* fs)
 {
@@ -366,7 +377,7 @@ static int CEmuSessionTryHardGe(CEmuSession* s, const CEmuGameEntry* ge,
 		s->lengthSamples = CEmuPmdLengthSamples(&s->pmd);
 		return 1;
 	}
-	/* Non-MDX X68k ROM zips (BOOT.BIN / Musashi hard) after MDX miss. */
+	/* MDX が無い X68k ROM zip (BOOT.BIN / Musashi hard) は MDX 失敗後 */
 	if (_stricmp(ge->platform, "x68k") == 0 || _stricmp(ge->dataDir, "x68k") == 0) {
 		if (CEmuX68kOpen(&s->x68k, ge, zipPath, titleCode, s->sampleRate)) {
 			s->kind = CEMU_KIND_X68K;
@@ -436,7 +447,7 @@ static int CEmuSessionTryHardGe(CEmuSession* s, const CEmuGameEntry* ge,
 			|| _stricmp(ge->subtype, "beep") == 0
 			|| _stricmp(ge->subtype, "tandy") == 0
 			|| _stricmp(ge->subtype, "midiout") == 0)) {
-		/* midiout uses MPU-401 UART capture → SMF for KPI/VST when possible. */
+		/* midiout は可能なら MPU-401 UART 捕捉 → SMF を KPI/VST へ */
 		if (CEmuPcatOpen(&s->pcat, ge, zipPath, titleCode, s->sampleRate)) {
 			s->kind = CEMU_KIND_PCAT;
 			if (s->pcat.sampleRate > 0)
@@ -454,7 +465,7 @@ static int CEmuSessionTryHardGe(CEmuSession* s, const CEmuGameEntry* ge,
 		}
 		return 0;
 	}
-	/* MSX/KSS — must run before dataDir=ac catch-all (ac\ に置かれた MSX zip). */
+	/* MSX/KSS — dataDir=ac の catch-all より先 (ac\ に置かれた MSX zip)。 */
 	if (_stricmp(ge->platform, "msx") == 0 || _stricmp(ge->dataDir, "msx") == 0
 		|| _stricmp(ge->subtype, "kss") == 0 || _stricmp(ge->subtype, "opll") == 0) {
 		if (CEmuMsxOpen(&s->msx, ge, zipPath, titleCode, s->sampleRate)) {
@@ -509,6 +520,7 @@ static int CEmuSessionTryHardGe(CEmuSession* s, const CEmuGameEntry* ge,
 	return 0;
 }
 
+/* zip / 仮想パスを開き、S98→MDX→hard の順で kind を決める */
 int CEmuSessionOpen(CEmuSession* s, const wchar_t* path, unsigned titleCode, DWORD sampleRate)
 {
 	if (!s || !path) return 0;
@@ -540,9 +552,9 @@ int CEmuSessionOpen(CEmuSession* s, const wchar_t* path, unsigned titleCode, DWO
 		return 1;
 	}
 
-	/* Same archive name may have multiple xml rows — try ranked until one opens.
-	   When the user picked a CEmu sound mode (preferTag), do NOT fall through to
-	   a sibling subtype (sorc_at AdLib absorbing GameBlaster/Beep/MIDI). */
+	/* 同一アーカイブ名に xml 行が複数ある — 順位付けして開くまで試す。
+	   ユーザが音源モード (preferTag) を選んだら兄弟 subtype へ落とさない
+	   (sorc_at の AdLib が GameBlaster/Beep/MIDI を飲み込むのを防ぐ)。 */
 	const CEmuGameEntry* cands[32];
 	int nc = 0;
 	char stem[CEMU_ARCHIVE_NAME] = {};
@@ -650,7 +662,7 @@ static void CEmuSessionWatchHardSilence(CEmuSession* s, short* stereo, int frame
 
 	if (!s->silenceHeard) {
 		if (peak >= noiseFloor) {
-			/* Weak boot noise only — do not count as a real attack. */
+			/* 起動ノイズ程度 — 実曲のアタックには数えない */
 		}
 		if (s->silenceFrames >= neverHeardNeed) {
 			s->endedBySilence = 1;
@@ -664,7 +676,7 @@ static void CEmuSessionWatchHardSilence(CEmuSession* s, short* stereo, int frame
 	if (s->silenceFrames < settleNeed)
 		return;
 
-	/* After real music: near-silence OR stuck ultra-low hum. */
+	/* 実曲が鳴ったあと: ほぼ無音、または超低音ハミングが張り付いた */
 	s->silenceRun += (uint32_t)frames;
 	if (s->lengthSamples == 0 && s->silenceRun >= xfadeArmNeed) {
 		uint32_t remain = (silenceNeed > s->silenceRun)
@@ -678,11 +690,11 @@ static void CEmuSessionWatchHardSilence(CEmuSession* s, short* stereo, int frame
 		s->lengthSamples = s->curSample + (UINT64)frames;
 		if (s->lengthSamples == 0)
 			s->lengthSamples = 1;
-		/* PC/AT: drivers often leave KEY ON; mute so notes do not hang. */
+		/* PC/AT: ドライバが KEY ON のまま残しがち。ミュートして音を切る */
 		if (s->kind == CEMU_KIND_PCAT && s->pcat.hard
 			&& s->pcat.hard->hardKind == CHard::KIND_PCAT)
 			((CHardPcat*)s->pcat.hard)->MuteAllSound();
-		/* Model1 MultiPCM: send Stop and reset chips so ultra-low dies. */
+		/* Model1 MultiPCM: Stop を送りチップをリセットして超低音を止める */
 		if (s->kind == CEMU_KIND_AC && s->ac.hard
 			&& s->ac.hard->hardKind == CHard::KIND_AC) {
 			CHardAc* ac = (CHardAc*)s->ac.hard;
@@ -695,6 +707,7 @@ static void CEmuSessionWatchHardSilence(CEmuSession* s, short* stereo, int frame
 	}
 }
 
+/* kind に応じて描画。overlayPend があれば同一インスタンスへ OverlayTitle */
 int CEmuSessionRender(CEmuSession* s, short* stereo, int frames)
 {
 	if (!s || !stereo || frames <= 0) return 0;
@@ -740,6 +753,7 @@ int CEmuSessionRender(CEmuSession* s, short* stereo, int frames)
 	return got;
 }
 
+/* hard 系のドライバ。S98/MDX/PMD は NULL */
 static CDriver* CEmuSessionDriver(CEmuSession* s)
 {
 	if (!s) return NULL;
@@ -798,6 +812,7 @@ static int CEmuSessionSeekHard(CEmuSession* s, UINT64 sample)
 	return 1;
 }
 
+/* S98/MDX はネイティブ Seek。hard はダミー Render。時計をシャドウへ渡す */
 int CEmuSessionSeek(CEmuSession* s, UINT64 sample)
 {
 	if (!s) return 0;
@@ -836,14 +851,16 @@ int CEmuSessionSeek(CEmuSession* s, UINT64 sample)
 	}
 }
 
+/* クロスフェード可否。NP2 はプロセスグローバルだが RAM/CPU は hard ごと */
 int CEmuSessionUsesGlobalNp2(const CEmuSession* s)
 {
 	if (!s) return 0;
-	/* NP2 core is still process-global, but each hard now has its own RAM
-	   and CPU snapshot so two PC-98/PC-AT sessions can crossfade. */
+	/* NP2 コアはプロセス共通のまま。hard ごとに RAM/CPU スナップショットを
+	   持つので、PC-98/PC-AT 同士のクロスフェードが可能。 */
 	return (s->kind == CEMU_KIND_PC98 || s->kind == CEMU_KIND_PCAT) ? 1 : 0;
 }
 
+/* 同一 zip SE: Render スレッドで OverlayTitle するようフラグを立てる */
 int CEmuSessionOverlayTitle(CEmuSession* s, unsigned titleCode)
 {
 	if (!s || s->kind == 0) return 0;
@@ -854,6 +871,7 @@ int CEmuSessionOverlayTitle(CEmuSession* s, unsigned titleCode)
 	return 1;
 }
 
+/* ステレオ加算。クリップして 16bit に収める */
 void CEmuSessionMixStereo(short* dst, const short* add, int frames)
 {
 	if (!dst || !add || frames <= 0) return;

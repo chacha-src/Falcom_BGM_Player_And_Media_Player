@@ -5,7 +5,7 @@
 #include "opm.h"
 #include <string.h>
 
-/* Optional diagnostics for itests (zero-cost when unused). */
+/* 任意診断用（未使用時はコストゼロ）。 */
 unsigned g_opmHist[256];
 unsigned g_opmHistTotal;
 unsigned g_opmIrqEdges;
@@ -25,9 +25,9 @@ public:
 		memset(regs_, 0, sizeof(regs_));
 		opm_.Init(clockHz_, (uint)sampleRate_, false);
 		opm_.Reset();
-		/* fmgen Mix: pan==0 → ibuf[0] discarded. Real YM2151 RL=0 is mute;
-		   Reset also leaves TL=127. Default RL=L+R until guest $20-$27 only
-		   (never rewrite TL). Mirror into regs_ for honest peeks. */
+		/* fmgen Mix: pan==0 → ibuf[0] は捨てられる。実YM2151の RL=0 はミュート。
+		   Reset 後は TL=127 のまま。ゲストが $20-$27 を書くまで RL=L+R を既定
+		   （TLは書き換えない）。regs_ にもミラーして Peek を正直にする。 */
 		for (int i = 0; i < 8; i++) {
 			opm_.SetReg(0x20 + i, 0xc0);
 			regs_[0x20 + i] = 0xc0;
@@ -35,7 +35,7 @@ public:
 		opm_.SetVolume(0);
 	}
 
-	/* Kept for X68k/X1 API compat — no register rewrite. */
+	/* X68k/X1 API互換のため残す — レジスタは書き換えない。 */
 	void SetAudibleAssist(int /*enable*/) {}
 	void SetRlZeroAsLr(int enable) { rlZeroAsLr_ = enable ? 1 : 0; }
 
@@ -48,8 +48,8 @@ public:
 		irqLatch_ = 0;
 		memset(regs_, 0, sizeof(regs_));
 		opm_.Reset();
-		/* Same as ctor: default RL=L+R until guest $20-$27. Do not touch TL —
-		   Operator::Reset leaves TL=127 (silent) until the guest programs it. */
+		/* コンストラクタと同じ: ゲスト $20-$27 まで RL=L+R。TLは触らない —
+		   Operator::Reset はゲストが書くまで TL=127（無音）。 */
 		for (int i = 0; i < 8; i++) {
 			opm_.SetReg(0x20 + i, 0xc0);
 			regs_[0x20 + i] = 0xc0;
@@ -64,8 +64,8 @@ public:
 		}
 		const uint8_t reg = addrLatch_;
 		uint8_t val = (uint8_t)(data & 0xff);
-		/* fmgen Mix: pan==0 → ibuf[0] is never summed. Real YM2151 RL=0 is
-		   mute, but X1 KOEI/KSK MML often programs FB with RL bits clear. */
+		/* fmgen Mix: pan==0 → ibuf[0] は加算されない。実YM2151の RL=0 はミュート
+		   だが、X1 KOEI/KSK MML は FB を RL ビット未設定で書くことが多い。 */
 		if (rlZeroAsLr_ && reg >= 0x20 && reg <= 0x27 && (val & 0xC0) == 0)
 			val = (uint8_t)(val | 0xC0);
 		opm_.SetReg(reg, val);
@@ -73,14 +73,14 @@ public:
 		writeCount_++;
 		g_opmHist[reg]++;
 		g_opmHistTotal++;
-		/* Clearing timer enable / flag bits drops status — release edge latch
-		   so sequencers that arm handlers after the first tick still get IRQs
-		   (X68k OPMDRV soft-waits on $A490 via DOS-registered $10C). */
+		/* タイマイネーブル/フラグbitを落とすとステータスが落ちる — エッジラッチ
+		   を解放し、初回ティック後にハンドラを武装するシーケンサでもIRQを取る
+		   （X68k OPMDRV は DOS登録 $10C 経由で $A490 をソフトウェイト）。 */
 		if (reg == 0x14 && (opm_.ReadStatus() & 0x03) == 0)
 			irqLatch_ = 0;
 		if (reg == 0x08 && (val & 0x78) != 0)
 			keyOnCount_++;
-		/* Pass key strobe only for $08 so multi-channel gates stay latched. */
+		/* $08 だけキーストローブを渡し、他chゲートはラッチしたまま。 */
 		FmMonShadowSetOpmRegSnapshotEx(regs_, (reg == 0x08) ? (int)val : -1);
 		FmMonShadowMarkRegWrite(reg);
 	}
@@ -92,19 +92,16 @@ public:
 		while (timerUsec_ > 0) {
 			const int step = (timerUsec_ > 1000) ? 1000 : (int)timerUsec_;
 			if (step <= 0) break;
-			/* Count returns true on timer A/B expire, but fmgen only raises a
-			   status bit when the matching IRQEN bit of reg 0x14 is set, so
-			   both flags are legitimate interrupt sources. Rastan drives its
-			   sequencer off Timer A alone (reg 14 = 0x35), so masking A here
-			   left it silent. Latch on the rising edge rather than the level
-			   to avoid re-entering the ISR immediately after EI.
-			   After Burner does not use this latch (status poll only). */
-			/* Latch once per timer expire while status/IRQEN is live.
-			   Rising-edge-only (st1 & ~st0) stalled forever when the ISR left
-			   status set (abtengu Alice Soft) — Assist used to paper over that
-			   by rewriting 0x14 every soft-wait, which also stomped ys368's
-			   Timer B period to $00 (~half tempo). Count-event latch keeps
-			   one IRQ per period without level re-entry after EI. */
+			/* Count はタイマA/B満了で真を返すが、fmgen がステータスbitを立てるのは
+			   reg 0x14 の対応IRQENが立っているときだけ。どちらも正当な割込源。
+			   Rastan はタイマAのみ（reg 14 = 0x35）なので、ここでAをマスクすると無音。
+			   レベルではなく立ち上がり辺でラッチし、EI直後のISR再入を避ける。
+			   After Burner はこのラッチを使わない（ステータスポーリングのみ）。 */
+			/* ステータス/IRQENが生きている間、タイマ満了ごとに1回ラッチ。
+			   立ち上がり辺のみ（st1 & ~st0）だと ISR がステータスを残したまま
+			   永久待ちになる（abtengu Alice Soft）。Assist はソフトウェイト毎に
+			   0x14 を書き直し、ys368 のタイマB周期を $00（約半分テンポ）に潰していた。
+			   Countイベントラッチなら周期1回のIRQを保ち、EI後のレベル再入も無い。 */
 			if (opm_.Count(step)) {
 				if ((opm_.ReadStatus() & 0x03) != 0) {
 					irqLatch_ = 1;
@@ -122,6 +119,7 @@ public:
 			const int n = frames > 64 ? 64 : frames;
 			FM::Sample tmp[128];
 			memset(tmp, 0, (size_t)n * 2 * sizeof(FM::Sample));
+			/* fmgen Mix は既にステレオ。16bitへ飽和。 */
 			opm_.Mix(tmp, n);
 			for (int i = 0; i < n * 2; i++) {
 				int32_t v = (int32_t)tmp[i];
@@ -134,17 +132,17 @@ public:
 		}
 	}
 
-	/* Count-event latch: one IRQ per timer expire while status is live.
-	   Level Irq() re-entered after EI (~2x); rising-edge-only stalled when
-	   status stayed set (Assist had been papering that by stomping 0x14). */
+	/* Countイベントラッチ: ステータス生存中はタイマ満了ごとにIRQ1本。
+	   レベル Irq() は EI後に再入（約2倍）。立ち上がり辺のみだとステータスが
+	   残ったまま止まる（Assist は 0x14 を潰して隠していた）。 */
 	bool Irq() const override { return irqLatch_ != 0; }
 	void AckIrq() override { irqLatch_ = 0; }
 
 	uint8_t ReadStatus() override
 	{
-		/* Do not clear irqLatch here — M92 OPM-out busy-waits on status and
-		   M92SyncIrqs polls every slice; clearing the edge on those reads
-		   dropped Timer IRQs for Rev 3.40 sequencers. AckIrq() clears it. */
+		/* ここで irqLatch を落とさない — M92 OPM-out はステータスをビジーウェイトし、
+		   M92SyncIrqs がスライス毎に読む。その読みでエッジを消すと Rev 3.40
+		   シーケンサのタイマIRQが落ちる。クリアは AckIrq()。 */
 		return (uint8_t)(opm_.ReadStatus() & 0x03);
 	}
 	uint8_t ReadData() override { return 0; }
@@ -180,6 +178,7 @@ private:
 	uint8_t regs_[256];
 };
 
+/* YM2151 (OPM) ラッパ生成。 */
 CChip* CEmuChipYm2151Create(uint32_t clockHz, int sampleRate)
 {
 	return new CChipYm2151(clockHz, sampleRate);

@@ -2,6 +2,7 @@
 #include "cemu_driver.h"
 #include "../machine/cemu_hard_fm7.h"
 
+/* FM-7/FM77AV: M6809 + AY/YM2203。$FD58 メールボックス */
 class CDriverFm7 : public CDriver {
 public:
 	CDriverFm7();
@@ -15,6 +16,7 @@ public:
 
 	unsigned OpnWrites() const;
 	unsigned AyWrites() const;
+	/* vsync/チップ IRQ 投入回数 */
 	unsigned IrqPulses() const { return irqPulses_; }
 
 private:
@@ -40,7 +42,10 @@ private:
 	uint16_t lastFd03IrqVec_;
 
 	void RunUntil(uint64_t endCycle);
+	/* OPN/AY クロックを進める */
 	void TickChips(uint64_t cpuCycles);
+	/* vsync とチップ IRQ を届ける */
 	void DeliverIrqs(uint64_t now);
+	/* $FD58/$FD80 メールボックスへ曲コード */
 	void TriggerSong();
 };

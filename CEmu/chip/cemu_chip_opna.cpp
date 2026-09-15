@@ -8,7 +8,7 @@
 
 struct CEmuChipOpnaImpl : ymfm::ymfm_interface {
 	ymfm::ym2608* opna; /* Sound Board II / subtype opna|8801-10 */
-	ymfm::ym2203* opn;  /* PC-88 OPN (subtype opn) — not ym2608@4MHz */
+	ymfm::ym2203* opn;  /* PC-88 OPN（subtype opn）— ym2608@4MHz ではない */
 	int32_t hostRate;
 	int32_t chipRate;
 	uint32_t inputClock;
@@ -24,7 +24,7 @@ struct CEmuChipOpnaImpl : ymfm::ymfm_interface {
 	uint8_t mode27;
 	unsigned timerClockScale;
 	unsigned pitchRateDiv;
-	int pitchOctaveShift; /* FM block rewrite only; shadow retains original block. */
+	int pitchOctaveShift; /* FMブロック書き換えのみ。シャドウは元のブロックを保持。 */
 	int carrierFadeClamp;
 	struct FadePatch {
 		uint8_t valid;
@@ -32,18 +32,18 @@ struct CEmuChipOpnaImpl : ymfm::ymfm_interface {
 		uint8_t keyTl[4];
 		uint8_t minTl[4];
 	} fadePatch[64];
-	/* ADPCM-A: fixed 8KiB rhythm ROM (ym2608_adpcm_rom.bin). */
+	/* ADPCM-A: 固定 8KiB リズムROM（ym2608_adpcm_rom.bin）。 */
 	uint8_t adpcmRom[0x2000];
 	unsigned adpcmRomSize;
-	/* ADPCM-B: game sample RAM (catalog type=adpcm, often 100KB+). */
+	/* ADPCM-B: ゲームサンプルRAM（catalog type=adpcm、多くの場合100KB超）。 */
 	uint8_t adpcmB[256 * 1024];
 	unsigned adpcmBSize;
 
-	int allowTimerAIrq; /* 0 = mucom88-style (Timer B only); 1 = most PC88 drivers */
+	int allowTimerAIrq; /* 0=mucom88流（タイマBのみ）、1=多くのPC88ドライバ */
 	unsigned dbgFireA, dbgFireB, dbgIrqPulse;
 	uint64_t dbgClockSum;
 
-	/* Play-probe metrics (data-port writes only). */
+	/* 再生プローブ指標（データポート書き込みのみ）。 */
 	unsigned playWrites;
 	unsigned playKeyOns;
 	unsigned playFnumChanges;
@@ -56,9 +56,9 @@ struct CEmuChipOpnaImpl : ymfm::ymfm_interface {
 	uint16_t playLastSsgPeriod[3];
 	uint8_t playHaveFnum[6];
 	uint8_t playHaveSsg[3];
-	uint8_t ssgRegs[16]; /* bank0 $00-$0F shadow */
-	uint8_t fmRegs[512]; /* bank0+bank1 image for FmMon (probes use [0..255]) */
-	unsigned ssgRegWrites[16]; /* write counts per SSG reg */
+	uint8_t ssgRegs[16]; /* bank0 $00-$0F シャドウ */
+	uint8_t fmRegs[512]; /* bank0+bank1 イメージ（FmMon。プローブは [0..255]） */
+	unsigned ssgRegWrites[16]; /* SSGレジスタ毎の書き込み回数 */
 	uint8_t ssgVolCHist[64];
 	unsigned ssgVolCHistN;
 	unsigned ssgVolCNon0F;
@@ -67,7 +67,7 @@ struct CEmuChipOpnaImpl : ymfm::ymfm_interface {
 	uint8_t ssgMixHist[64];
 	unsigned ssgMixHistN;
 	uint8_t ssgMixSeen[32]; /* 256/8 */
-	uint64_t ssgEnergy[3]; /* |sample| sum for YM2203 A/B/C (0 for OPNA MixTo1) */
+	uint64_t ssgEnergy[3]; /* YM2203 A/B/C の |sample| 合計（OPNA MixTo1 では0） */
 
 	CEmuChipOpnaImpl()
 		: opna(NULL)
@@ -141,10 +141,9 @@ struct CEmuChipOpnaImpl : ymfm::ymfm_interface {
 		opnaMode = wantOpna ? 1 : 0;
 		if (opnaMode) {
 			opna = new ymfm::ym2608(*this);
-			/* The local ymfm volume extension defaults FM+ADPCM to 2x before
-			   its internal clamp.  Use reference ymfm unity here; otherwise
-			   dense FM clips even with ADPCM-B absent.  Keep SSG at 50% so
-			   its mono MixTo1 output has headroom beside the stereo bus. */
+			/* ローカル ymfm 音量拡張は内部クランプ前に FM+ADPCM を2倍にする。
+			   ここでは参照 ymfm の unity。そうしないと ADPCM-B 無しでも密なFMがクリップ。
+			   SSG は50%のまま、モノラル MixTo1 がステレオバス横でヘッドルームを持つ。 */
 			opna->setfmvolume(32768);
 			opna->setpsgvolume(32768);
 		} else {
@@ -154,9 +153,9 @@ struct CEmuChipOpnaImpl : ymfm::ymfm_interface {
 
 	void ymfm_update_irq(bool asserted) override
 	{
-		/* asserted=true is ignored: CPU sound IRQ edges come from ExpireTimers
-		   (mucom = Timer B only; other PC88 = A and/or B via allowTimerAIrq).
-		   asserted=false still clears. */
+		/* asserted=true は無視: CPUサウンドIRQ辺は ExpireTimers から来る
+		   （mucom=タイマBのみ、他PC88=allowTimerAIrq 経由でAおよび/またはB）。
+		   asserted=false はクリアする。 */
 		if (!asserted)
 			irqAsserted = 0;
 	}
@@ -164,7 +163,7 @@ struct CEmuChipOpnaImpl : ymfm::ymfm_interface {
 	void ymfm_set_timer(uint32_t tnum, int32_t duration_in_clocks) override
 	{
 		if (tnum >= 2) return;
-		/* negative = cancel */
+		/* 負 = キャンセル */
 		timerLeft[tnum] = duration_in_clocks;
 		if (duration_in_clocks > 0)
 			dbgLastDur[tnum] = duration_in_clocks;
@@ -193,8 +192,8 @@ struct CEmuChipOpnaImpl : ymfm::ymfm_interface {
 		for (int t = 0; t < 2; t++) {
 			if (timerLeft[t] < 0) continue;
 			timerLeft[t] -= clocks;
-			/* Apply overshoot across reloads so large AdvanceClocks steps do
-			   not stretch periods (that made KOEI OPN a touch slow). */
+			/* リロード跨ぎでオーバーシュートを適用し、大きな AdvanceClocks が
+			   周期を伸ばさないようにする（KOEI OPN がわずかに遅くなる原因だった）。 */
 			while (timerLeft[t] <= 0) {
 				const int64_t over = -timerLeft[t];
 				timerLeft[t] = -1;
@@ -202,9 +201,9 @@ struct CEmuChipOpnaImpl : ymfm::ymfm_interface {
 					m_engine->engine_timer_expired((uint32_t)t);
 				if (t == 0) dbgFireA++;
 				else dbgFireB++;
-				/* Match hoot ssFMTimer: need load-enable AND irq-enable.
-				   IRQ-only (no load) still gets ymfm auto-reloads; pulsing
-				   those rushed mucom a few percent vs soundtrack. */
+				/* hoot ssFMTimer と同じ: load-enable と irq-enable の両方が必要。
+				   IRQのみ（load無し）でも ymfm は自動リロードする。それをパルスすると
+				   mucom がサントラより数%急ぐ。 */
 				const uint8_t loadEn = (uint8_t)(mode27 & (t == 0 ? 0x01 : 0x02));
 				const uint8_t irqEn = (uint8_t)(mode27 & (t == 0 ? 0x04 : 0x08));
 				if (loadEn && irqEn && (t == 1 || allowTimerAIrq)) {
@@ -212,15 +211,15 @@ struct CEmuChipOpnaImpl : ymfm::ymfm_interface {
 					dbgIrqPulse++;
 				}
 				if (timerLeft[t] < 0)
-					break; /* cancelled */
+					break; /* キャンセル済み */
 				timerLeft[t] -= over;
 			}
 		}
 	}
 
-	/* Audio sample path only (called from Render). Do NOT use from AdvanceClocks —
-	   that used to double-clock generate() vs Render and made OPN/OPNA run ~2×.
-	   Timers/IRQ advance only in AdvanceClocks (same split as OPM Count vs Mix). */
+	/* 音声サンプル経路のみ（Renderから呼ぶ）。AdvanceClocks からは使わない —
+	   以前は generate() が Render と二重クロックになり OPN/OPNA が約2倍速だった。
+	   タイマ/IRQ は AdvanceClocks のみ（OPM の Count vs Mix と同じ分離）。 */
 	void ChipSample()
 	{
 		if (opn && opnKeyFlush_) {
@@ -234,17 +233,17 @@ struct CEmuChipOpnaImpl : ymfm::ymfm_interface {
 			const int32_t a = o.data[0];
 			const int32_t b = o.data[1 % n];
 			const int32_t c = o.data[2 % n];
+			/* ステレオMix: FM L/R に ADPCM を両ch加算。 */
 			curL = a + c;
 			curR = b + c;
 		} else if (opn) {
 			ymfm::ym2203::output_data o;
 			opn->generate(&o, 1);
-			/* YM2203: data[0]=FM (mono), data[1..3]=SSG A/B/C.
-			   Sum all three (scale 2/3 like OPNA MixTo1) — channel-C-only
-			   drivers (SORC98 heartbeat / many Falcom OPN songs) were silent
-			   when only data[1] was mixed. */
+			/* YM2203: data[0]=FM（モノラル）、data[1..3]=SSG A/B/C。
+			   3ch合計（OPNA MixTo1 と同様 2/3 スケール）— Cのみのドライバ
+			   （SORC98 heartbeat / 多くの Falcom OPN）は data[1] だけだと無音だった。 */
 			const int32_t fm = o.data[0];
-			/* Half SSG like OPNA setpsgvolume(32768); keep MixTo1 2/3 sum. */
+			/* SSG は OPNA setpsgvolume(32768) と同様に半分。MixTo1 の 2/3 合計を維持。 */
 			const int32_t ssg = (o.data[1] + o.data[2] + o.data[3]) / 3;
 			ssgEnergy[0] += (uint64_t)(o.data[1] < 0 ? -o.data[1] : o.data[1]);
 			ssgEnergy[1] += (uint64_t)(o.data[2] < 0 ? -o.data[2] : o.data[2]);
@@ -262,7 +261,7 @@ struct CEmuChipOpnaImpl : ymfm::ymfm_interface {
 	void WritePort(uint32_t offset, uint8_t data)
 	{
 		if (opna) opna->write(offset, data);
-		else if (opn && (offset & 2) == 0) /* OPN has no hi ports */
+		else if (opn && (offset & 2) == 0) /* OPN に hi ポートは無い */
 			opn->write(offset & 1, data);
 	}
 
@@ -282,11 +281,11 @@ struct CEmuChipOpnaImpl : ymfm::ymfm_interface {
 
 	uint8_t ReadStatusHi()
 	{
-		/* Extended port exposes ADPCM-B EOS/BRDY/PLAYING and its IRQ flags.
-		   Forcing 0x0c over the low timer status made guest status polling
-		   observe EOS permanently and hid the live PLAYING state. */
+		/* 拡張ポートは ADPCM-B の EOS/BRDY/PLAYING とそのIRQフラグを出す。
+		   低タイマステータスの上に 0x0c を強制すると、ゲストのポーリングが
+		   EOS を常時観測し、生きている PLAYING 状態が隠れた。 */
 		if (opna) return opna->read_status_hi();
-		/* OPN: no hi status; mirror lo */
+		/* OPN: hi ステータス無し。lo をミラー。 */
 		return ReadStatus();
 	}
 
@@ -308,7 +307,7 @@ struct CEmuChipOpnaImpl : ymfm::ymfm_interface {
 		if (!carrierFadeClamp || ch >= 3) return;
 		static const uint8_t kOff[4] = { 0x00, 0x04, 0x08, 0x0C };
 		const unsigned alg = fmRegs[0xB0 + ch] & 7u;
-		/* Register groups are SLOT1,SLOT3,SLOT2,SLOT4. */
+		/* レジスタ群は SLOT1,SLOT3,SLOT2,SLOT4。 */
 		static const uint8_t kCarrierMask[8] = {
 			0x08, 0x08, 0x08, 0x08, 0x0C, 0x0E, 0x0E, 0x0F
 		};
@@ -352,7 +351,7 @@ struct CEmuChipOpnaImpl : ymfm::ymfm_interface {
 				fmRegs[0x40 + kOff[op] + ch] = patch->minTl[op];
 			}
 		}
-		/* Restore the address selected by the driver before its key-on data. */
+		/* ドライバがキーオンデータの前に選んでいたアドレスを戻す。 */
 		WritePort(0, 0x28);
 	}
 
@@ -374,6 +373,7 @@ static int32_t CEmuClamp16(int32_t v)
 	return v;
 }
 
+/* YM2608/YM2203 初期化。opnaMode≠0 なら OPNA、0 なら OPN。 */
 void CEmuChipOpnaInit(CEmuChipOpna* c, uint32_t clockHz, int opnaMode, int sampleRate)
 {
 	if (!c) return;
@@ -382,9 +382,9 @@ void CEmuChipOpnaInit(CEmuChipOpna* c, uint32_t clockHz, int opnaMode, int sampl
 	impl->CreateChips(opnaMode ? 1 : 0);
 	impl->hostRate = sampleRate > 0 ? sampleRate : 44100;
 	impl->ResetChip();
-	/* OPN uses real ym2203 (clock/72 FM+timers). Do not emulate OPN with
-	   ym2608@4MHz — that is clock/144 and needs error-prone 2× hacks that
-	   skew tempo (sorc88 etc.). */
+	/* OPN は実 ym2203（clock/72 の FM+タイマ）。ym2608@4MHz で OPN を
+	   エミュレートしない — それは clock/144 で、誤差の多い2倍ハックが
+	   テンポを歪める（sorc88 など）。 */
 	const uint32_t clk = clockHz ? clockHz : (impl->opnaMode ? 7987200u : 3993600u);
 	impl->inputClock = clk;
 	impl->chipRate = (int32_t)impl->SampleRateForClock(clk);
@@ -444,10 +444,10 @@ void CEmuChipOpnaWrite(CEmuChipOpna* c, uint32_t addr, uint32_t data)
 		const int p = (addr == 0x100) ? 1 : 0;
 		impl->lastAddr[p] = (uint8_t)data;
 		impl->WritePort((uint32_t)(p * 2), (uint8_t)data);
-		/* YM2608/2203: writing address 2D/2E/2F selects FM clock ÷6/÷3/÷2
-		   immediately (no data write). sample_rate() tracks prescale, so
-		   refresh chipRate here — otherwise BIOS/app 2Fh triples pitch
-		   while Render still steps at the reset ÷6 rate (vg2 etc.). */
+		/* YM2608/2203: アドレス 2D/2E/2F 書きで FMクロック ÷6/÷3/÷2 を
+		   即時選択（データ書き不要）。sample_rate() はプリスケールを追うので
+		   ここで chipRate を更新 — しないと BIOS/アプリの 2Fh がピッチを3倍し、
+		   Render はリセット ÷6 のまま進む（vg2 など）。 */
 		if (p == 0 && (data == 0x2D || data == 0x2E || data == 0x2F)) {
 			impl->RefreshChipRate();
 		}
@@ -460,9 +460,8 @@ void CEmuChipOpnaWrite(CEmuChipOpna* c, uint32_t addr, uint32_t data)
 		const unsigned reg = impl->lastAddr[p];
 		if (p == 0 && reg == 0x28 && (rawData & 0xF0) != 0)
 			impl->ClampCarrierTlBeforeKeyOn(rawData & 7u);
-		/* A4-A6 are normal-channel F-number/block highs; AC-AE are the
-		   three special-mode operator highs. Shift only the YM input.
-		   Metrics/FmMon below deliberately retain the driver's raw block. */
+		/* A4-A6 は通常chの F-number/block 上位。AC-AE は特殊モード演算子の上位。
+		   YM入力だけシフトする。下の指標/FmMon はドライバの生ブロックを意図的に保持。 */
 		if (impl->pitchOctaveShift != 0
 			&& ((reg >= 0xA4 && reg <= 0xA6)
 				|| (p == 0 && reg >= 0xAC && reg <= 0xAE))) {
@@ -476,11 +475,11 @@ void CEmuChipOpnaWrite(CEmuChipOpna* c, uint32_t addr, uint32_t data)
 		const unsigned shadowAddr = (p ? 0x100u : 0u) | impl->lastAddr[p];
 		if (p == 0 && impl->lastAddr[0] == 0x27)
 			impl->mode27 = (uint8_t)data;
-		/* YM2203: key-on latches until FM clock. Defer flush to ChipSample
-		   — calling clock_fm from inside Z80 IRQ/PortOut nested badly. */
+		/* YM2203: キーオンはFMクロックまでラッチ。フラッシュは ChipSample へ延期 —
+		   Z80 IRQ/PortOut 内から clock_fm を呼ぶとネストが壊れた。 */
 		if (impl->opn && p == 0 && impl->lastAddr[0] == 0x28)
 			impl->opnKeyFlush_ = 1;
-		/* Play metrics: ignore timer/status (0x24-0x27) noise. */
+		/* 再生指標: タイマ/ステータス（0x24-0x27）ノイズは無視。 */
 		{
 			const unsigned r = impl->lastAddr[p];
 			const uint8_t d = rawData;
@@ -490,7 +489,7 @@ void CEmuChipOpnaWrite(CEmuChipOpna* c, uint32_t addr, uint32_t data)
 				impl->playKeyOns++;
 				impl->playChMask |= 1u << (d & 7);
 			}
-			/* A0-A2 / A4-A6 (+0x100 for OPNA ch3-5): F-number motion. */
+			/* A0-A2 / A4-A6（OPNA ch3-5 は +0x100）: F-number の動き。 */
 			if ((r >= 0xA0 && r <= 0xA2) || (r >= 0xA4 && r <= 0xA6)) {
 				const int slot = (r <= 0xA2) ? (int)(r - 0xA0) : (int)(r - 0xA4);
 				const int ch = slot + (p ? 3 : 0);
@@ -510,7 +509,7 @@ void CEmuChipOpnaWrite(CEmuChipOpna* c, uint32_t addr, uint32_t data)
 					}
 				}
 			}
-			/* SSG tone periods 00/01, 02/03, 04/05. */
+			/* SSG トーン周期 00/01, 02/03, 04/05。 */
 			if (p == 0 && r <= 0x05) {
 				const int ch = (int)(r >> 1);
 				uint16_t per = impl->playLastSsgPeriod[ch];
@@ -543,7 +542,7 @@ void CEmuChipOpnaWrite(CEmuChipOpna* c, uint32_t addr, uint32_t data)
 			}
 			impl->fmRegs[shadowAddr & 0x1FFu] = d;
 		}
-		FmMonShadowWriteReg(shadowAddr, rawData);
+		FmMonShadowWriteReg(shadowAddr, rawData); /* FMモニタへOPNレジスタをシャドウ */
 	}
 }
 
@@ -552,10 +551,9 @@ void CEmuChipOpnaAdvanceClocks(CEmuChipOpna* c, uint64_t chipCycles)
 	if (!c || !c->chip || chipCycles == 0) return;
 	CEmuChipOpnaImpl* impl = (CEmuChipOpnaImpl*)c->chip;
 	impl->dbgClockSum += chipCycles;
-	/* Timer/IRQ only — PCM is produced exclusively in Render/ChipSample.
-	   Do not scale master clocks here: YM 2D/2E/2F already shorten timer
-	   durations. A separate timerClockScale×3 on top of BIOS 2Fh made
-	   PC-98 titles (ys2 etc.) race several times too fast. */
+	/* タイマ/IRQのみ — PCMは Render/ChipSample のみで生成。
+	   ここでマスタクロックをスケールしない: YM 2D/2E/2F が既にタイマ長を短くする。
+	   BIOS 2Fh の上に timerClockScale×3 を重ねると PC-98（ys2 など）が数倍速になる。 */
 	const uint64_t scaled = chipCycles * (uint64_t)impl->timerClockScale;
 	impl->ExpireTimers((int64_t)scaled);
 }
@@ -570,9 +568,9 @@ void CEmuChipOpnaAckIrq(CEmuChipOpna* c)
 {
 	if (!c || !c->chip) return;
 	CEmuChipOpnaImpl* impl = (CEmuChipOpnaImpl*)c->chip;
-	/* Port 0xE4 = PC-88 INT ack (hoot z80_lower_IRQ). Do not pulse YM
-	   reg 0x27 — KOEI FMDRV reads timer flags AFTER OUT E4. Fresh edges come
-	   from ExpireTimers on each period even while flags stay sticky. */
+	/* ポート 0xE4 = PC-88 INT ack（hoot z80_lower_IRQ）。YM reg 0x27 はパルスしない —
+	   KOEI FMDRV は OUT E4 のあとでタイマフラグを読む。新しい辺は周期ごとに
+	   ExpireTimers から来る（フラグはスティッキーのまま）。 */
 	impl->irqAsserted = 0;
 }
 
@@ -608,6 +606,7 @@ void CEmuChipOpnaRender(CEmuChipOpna* c, int16_t* stereo, int frames)
 		int64_t sumL = 0, sumR = 0;
 		int nGen = 0;
 		impl->chipAcc += (int64_t)impl->chipRate;
+		/* chipRate は ymfm sample_rate（プリスケール後）。ホストへリサンプル。 */
 		while (impl->chipAcc >= (int64_t)impl->hostRate) {
 			impl->chipAcc -= (int64_t)impl->hostRate;
 			impl->ChipSample();
@@ -619,6 +618,7 @@ void CEmuChipOpnaRender(CEmuChipOpna* c, int16_t* stereo, int frames)
 			impl->curL = (int32_t)(sumL / nGen);
 			impl->curR = (int32_t)(sumR / nGen);
 		}
+		/* ステレオMix: 生成済み L/R を 16bit へ飽和。 */
 		stereo[i * 2] = (int16_t)CEmuClamp16(impl->curL);
 		stereo[i * 2 + 1] = (int16_t)CEmuClamp16(impl->curR);
 	}
@@ -917,6 +917,7 @@ private:
 	CEmuChipOpna core_;
 };
 
+/* YM2608/YM2203 の CChip ラッパ生成。 */
 CChip* CEmuChipYm2608Create(uint32_t clockHz, int opnaMode, int sampleRate)
 {
 	return new CChipYm2608(clockHz, opnaMode, sampleRate);

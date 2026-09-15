@@ -4,26 +4,25 @@
 #include "../fmmon/fmmon_shadow.h"
 #include <string.h>
 
-/* Seta X1-010, modelled on MAME x1_010.cpp.
+/* Seta X1-010。MAME x1_010.cpp を参考。
 
-   The chip is an 8 KB RAM window. $0000-$007F is 16 channels x 8 control
-   bytes; everything above that is table space that the control bytes index
-   in 128-byte pages:
+   チップは 8KB RAM窓。$0000-$007F が 16ch×8 制御バイト。それより上は
+   制御バイトが128バイトページで索引するテーブル空間:
 
-     reg 0  status   bit0 = key on, bit1 = 0:PCM 1:wavetable, bit2 = env one-shot
-     reg 1  PCM: volume, low nibble = left, high nibble = right
-            wave: waveform page number
-     reg 2  PCM: frequency (low 5 bits)      wave: pitch low
-     reg 3  wave: pitch high
-     reg 4  PCM: sample start, in 4 KB units  wave: envelope period
-     reg 5  PCM: sample end as 0x100-end   wave: envelope page number
+     reg 0  status   bit0=キーオン, bit1=0:PCM 1:波形, bit2=envワンショット
+     reg 1  PCM: 音量、下位ニブル=左、上位=右
+            wave: 波形ページ番号
+     reg 2  PCM: 周波数（下位5bit）      wave: ピッチ下位
+     reg 3  wave: ピッチ上位
+     reg 4  PCM: サンプル開始（4KB単位）  wave: エンベロープ周期
+     reg 5  PCM: サンプル終端 0x100-end  wave: エンベロープページ
 */
 enum {
 	kX1010Channels = 16,
 	kX1010RamSize = 0x2000,
 	kX1010FreqBits = 14,
-	/* An 8-bit sample times a 4-bit volume only reaches +-1920, so scale to
-	   full range the way MAME's VOL_BASE does. */
+	/* 8bitサンプル×4bit音量は ±1920 までなので、MAME VOL_BASE と同様に
+	   フルレンジへスケールする。 */
 	kX1010VolScale = 16
 };
 
@@ -67,9 +66,9 @@ public:
 			if (reg == 0) {
 				const int wasOn = ram_[a] & 1;
 				const int nowOn = data & 1;
-				/* A fresh key-on restarts the sample and the envelope; the
-				   driver rewrites reg0 every frame while a note is held, so
-				   only an off->on edge may rewind. */
+				/* 新規キーオンでサンプルとエンベロープを再開。ドライバは
+				   ノート保持中に毎フレーム reg0 を書き直すので、off→on 辺
+				   だけ巻き戻してよい。 */
 				if (nowOn && !wasOn) {
 					smpOffs_[ch] = 0;
 					envOffs_[ch] = 0;
@@ -122,8 +121,8 @@ public:
 
 	unsigned GetRegSnapshot(uint8_t* buf, unsigned cap) const override
 	{
-		/* Only the control block is meaningful to the register panel; the
-		   table pages behind it would just scroll waveform bytes past. */
+		/* レジスタパネルに意味があるのは制御ブロックだけ。後ろのテーブル
+		   ページは波形バイトが流れるだけになる。 */
 		if (!buf || cap == 0) return 0;
 		const unsigned n = cap < kX1010Channels * 8u ? cap : kX1010Channels * 8u;
 		memcpy(buf, ram_, n);
@@ -138,17 +137,17 @@ private:
 	{
 		if (playing_[ch] == (uint8_t)on) return;
 		playing_[ch] = (uint8_t)on;
+		/* FMモニタへキーオン/オフ。 */
 		FmMonShadowPcmNote(ch, 60 + (ch & 15), on);
 	}
 
-	/* PCM: 8-bit signed samples straight out of the sample ROM. reg2's low 5
-	   bits scale a fixed 1/8192 divider of the master clock; Meta Fox leaves
-	   the register at zero and relies on that default rate. */
+	/* PCM: サンプルROMから符号付き8bitを直読み。reg2 下位5bitはマスタクロックの
+	   固定 1/8192 分周に掛かる。Meta Fox はレジスタ0のままその既定レートを使う。 */
 	void MixPcm(int ch, const uint8_t* reg, int16_t* stereo, int frames, int gain)
 	{
 		if (!rom_ || !romSize_) return;
-		/* reg5 encodes the sample length as 0x100-pages, counted from the
-		   start page in reg4 - it is not an absolute end address. */
+		/* reg5 はサンプル長を 0x100-ページで、reg4 の開始ページから数える。
+		   絶対終端アドレスではない。 */
 		const uint32_t base = (uint32_t)reg[4] * 0x1000u;
 		const uint32_t len = (uint32_t)(0x100u - reg[5]) * 0x1000u;
 		if (!len) return;
@@ -159,12 +158,12 @@ private:
 			/ (double)sampleRate_);
 		if (!step) step = 1;
 		const int volL = (reg[1] & 0x0f) * kX1010VolScale;
-		const int volR = ((reg[1] >> 4) & 0x0f) * kX1010VolScale;
+		const int volR = ((reg[1] >> 4) & 0x0f) * kX1010VolScale; /* パン=L/Rニブル */
 		uint32_t offs = smpOffs_[ch];
 		for (int i = 0; i < frames; i++) {
 			const uint32_t pos = offs >> kX1010FreqBits;
 			if (pos >= len) {
-				/* Sample ran out: the chip clears its own key-on bit. */
+				/* サンプル尽きた: チップ自身がキーオンbitを落とす。 */
 				ram_[ch * 8] &= (uint8_t)~1u;
 				SetPlaying(ch, 0);
 				break;
@@ -177,17 +176,16 @@ private:
 		smpOffs_[ch] = offs;
 	}
 
-	/* Wavetable: a 128-byte signed waveform page selected by reg1, amplitude
-	   shaped by a 128-byte stereo envelope page selected by reg5. */
+	/* 波形: reg1 が選ぶ128バイト符号付きページ。振幅は reg5 の
+	   128バイトステレオエンベロープページで整形。 */
 	void MixWave(int ch, const uint8_t* reg, int16_t* stereo, int frames, int gain)
 	{
 		const int8_t* wave = (const int8_t*)&ram_[((unsigned)reg[1] * 0x80u)
 			& (kX1010RamSize - 1)];
 		const uint8_t* env = &ram_[((unsigned)reg[5] * 0x80u)
 			& (kX1010RamSize - 1)];
-		/* One base step drives both the waveform and the envelope; reg2 is a
-		   plain multiplier on the waveform side and reg4 divides the
-		   envelope, so a note's pitch and its decay scale independently. */
+		/* 1つの基底ステップが波形とエンベロープの両方を駆動。reg2 は波形側の
+		   単なる乗数、reg4 はエンベロープを割るので、ピッチと減衰は独立。 */
 		const double ebase = (double)clockHz_ / 128.0 / 1024.0 / 4.0;
 		const uint32_t unit = (uint32_t)(ebase * (double)(1u << kX1010FreqBits)
 			/ (double)sampleRate_);
@@ -201,7 +199,7 @@ private:
 		for (int i = 0; i < frames; i++) {
 			const unsigned ei = (eoffs >> kX1010FreqBits);
 			if ((reg[0] & 4) && ei >= 0x80u) {
-				/* One-shot envelope finished. */
+				/* ワンショットエンベロープ終了。 */
 				ram_[ch * 8] &= (uint8_t)~1u;
 				SetPlaying(ch, 0);
 				break;
@@ -220,6 +218,7 @@ private:
 
 	void AddSample(int16_t* stereo, int i, int l, int r, int gain)
 	{
+		/* ステレオMix: L/R を既存バッファへ加算して飽和。 */
 		const int sl = (int)stereo[i * 2] + (l * gain >> 8);
 		const int sr = (int)stereo[i * 2 + 1] + (r * gain >> 8);
 		stereo[i * 2] = (int16_t)CEmuX1010Clamp16(sl);
@@ -236,6 +235,7 @@ private:
 	uint8_t playing_[kX1010Channels];
 };
 
+/* X1-010 ラッパ生成。 */
 CChip* CEmuChipX1010Create(uint32_t clockHz, int sampleRate)
 {
 	return new CChipX1010(clockHz, sampleRate);

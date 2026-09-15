@@ -3,6 +3,7 @@
 #include <string.h>
 #include "fmmon_write.h"
 
+/* %TEMP%\ogg_cemu を用意。KPI の ogg_kbsasami とは別 */
 static void FmMonEnsureDir(wchar_t* dir, int n)
 {
 	wchar_t tmp[MAX_PATH];
@@ -21,12 +22,14 @@ static uint32_t s_gen = 0;
 static int s_ringReady = 0;
 static uint32_t s_liveEvery = 0; /* live は間引き書き（I/O 負荷） */
 
+/* dump I/O の CS を一度だけ */
 static void FmMonIoInit()
 {
 	if (InterlockedCompareExchange(&s_ioOnce, 1, 0) == 0)
 		InitializeCriticalSection(&s_ioCs);
 }
 
+/* リングファイルを固定サイズに伸ばす */
 static BOOL FmMonEnsureRingSized(HANDLE h)
 {
 	LARGE_INTEGER sz;
@@ -52,6 +55,7 @@ static BOOL FmMonEnsureRingSized(HANDLE h)
 	return SetEndOfFile(h) ? TRUE : FALSE;
 }
 
+/* 最新 1 枚の live dump ハンドル (リングが空のときのフォールバック) */
 static HANDLE FmMonOpenLive()
 {
 	if (s_hLive != INVALID_HANDLE_VALUE)
@@ -64,6 +68,7 @@ static HANDLE FmMonOpenLive()
 	return s_hLive;
 }
 
+/* 時系列リング dump。UI は gen で latest を読む */
 static HANDLE FmMonOpenRing()
 {
 	if (s_hRing != INVALID_HANDLE_VALUE)
@@ -84,6 +89,7 @@ static HANDLE FmMonOpenRing()
 	return s_hRing;
 }
 
+/* dump をゼロ初期化。VIEW_KEYS/REGS/PANELS + CLOCK_DUMP */
 void FmMonInitDump(SasamiFmMonDump* d)
 {
 	if (!d) return;
@@ -98,6 +104,7 @@ void FmMonInitDump(SasamiFmMonDump* d)
 		| SASAMI_FMMON_CLOCK_DUMP);
 }
 
+/* 曲切り替え時にリング/live を空にする。前曲の 1 枚が残ると誤表示 */
 void FmMonWriteRingReset(void)
 {
 	FmMonIoInit();
@@ -136,6 +143,7 @@ void FmMonWriteRingReset(void)
 	LeaveCriticalSection(&s_ioCs);
 }
 
+/* ライブリングへ 1 フレーム書く。gen で latest。live は間引き */
 void FmMonWriteDump(const SasamiFmMonDump* d)
 {
 	if (!d) return;
@@ -147,7 +155,7 @@ void FmMonWriteDump(const SasamiFmMonDump* d)
 
 	HANDLE hr = FmMonOpenRing();
 	if (hr != INVALID_HANDLE_VALUE) {
-		/* Sync gen from file so multi-module writers don't regress "latest". */
+		/* ファイル上の gen と同期。複数モジュールが書くと "latest" が後戻りする */
 		{
 			SasamiFmMonRingHdr rhdr;
 			DWORD rd = 0;

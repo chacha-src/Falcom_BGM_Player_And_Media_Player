@@ -5,10 +5,10 @@
 #include "cemu_dos98.h"
 #include "cemu_np2ctx.h"
 
-/* PC/AT hard: NP2 i286 + DOS + AdLib/SB OPL @0x388 + CMS SAA @0x220 +
-   PC speaker (PIT2+0x61) + MPU-401 UART @0x330 + hoot EXT.
-   Subtypes: adlib/opl/sb16, gameblaster/cms, beep, tandy (SN76496 @0xC0),
-   ps1 (IBM PS/1 Audio SN @0x200), midiout (MPU capture). */
+/* PC/AT ハード: NP2 i286 + DOS + AdLib/SB OPL @0x388 + CMS SAA @0x220 +
+   PC スピーカ（PIT2+0x61）+ MPU-401 UART @0x330 + hoot EXT。
+   subtype: adlib/opl/sb16、gameblaster/cms、beep、tandy（SN76496 @0xC0）、
+   ps1（IBM PS/1 Audio SN @0x200）、midiout（MPU キャプチャ）。 */
 
 enum { CEMU_PCAT_MIDI_CAP = 256000 };
 
@@ -39,11 +39,11 @@ public:
 	int DeliverIrqs();
 	void TickSide(uint64_t cpuCycles);
 
-	/* Mix speaker + CMS into OPL (or empty) stereo buffer. */
+	/* スピーカと CMS を OPL（または空）ステレオへ混成 */
 	void MixExtra(int16_t* stereo, int frames);
-	/* Key-off OPL / mute SAA / gate speaker — end-of-song hang fix. */
+	/* OPL キーオフ／SAA mute／スピーカゲート — 曲終了のハング対策 */
 	void MuteAllSound();
-	/* Export captured MPU UART bytes as Type-0 SMF. Returns 1 if enough events. */
+	/* キャプチャした MPU UART を Type-0 SMF で出す。イベントが足りれば 1 */
 	int ExportCapturedSmf(const wchar_t* path) const;
 	unsigned MidiByteCount() const { return midiCount_; }
 	unsigned MidiNoteOnCount() const;
@@ -62,7 +62,7 @@ public:
 	CEmuDos98* Dos() { return &dos_; }
 
 	int cpuHz_;
-	int bootClockMul_; /* catalog clockmul — applied only while booting DOS */
+	int bootClockMul_; /* カタログ clockmul — DOS ブート中だけ適用 */
 	int oplHz_;
 	int funcVect_;
 	uint64_t cpuCycles_;
@@ -82,17 +82,16 @@ public:
 	int modeBeep_;
 	int modeSb_;
 	int modeMidi_;
-	/* Sierra silp_at.com glue. The silp repairs poke CS:0265..027B and read
-	   a song-buffer segment from CS:0275 — offsets that mean nothing in the
-	   other INT 7Fh glues (CODE.COM, HOOT.EXE, PMDL_AT), where they smash
-	   unrelated glue data and, via the song memcpy, the loaded driver. */
+	/* Sierra silp_at.com 糊。silp 修復は CS:0265..027B を poke し CS:0275 から曲バッファ
+	   セグメントを読む。他の INT 7Fh 糊（CODE.COM、HOOT.EXE、PMDL_AT）では無意味なオフセットで、
+	   無関係な糊データと、曲 memcpy 経由でロード済みドライバを壊す。 */
 	int modeSilp_;
-	int modePs1_; /* IBM PS/1 Audio Card (IBMCARD.DRV, ports 0x200-0x206) */
-	char hootAdvName_[16]; /* e.g. ADLIB.ADV / SBP2FM.ADV */
-	uint16_t hootAdvSeg_; /* resident AIL .ADV image for HOOT register_driver */
+	int modePs1_; /* IBM PS/1 Audio Card（IBMCARD.DRV、ポート 0x200-0x206） */
+	char hootAdvName_[16]; /* 例: ADLIB.ADV / SBP2FM.ADV */
+	uint16_t hootAdvSeg_; /* HOOT register_driver 用の常駐 AIL .ADV イメージ */
 	unsigned hootAdvSize_;
-	uint16_t hootAdvQuantumOff_; /* XMIDI quantum (ADLIB=232D, SBP2FM=295B) */
-	uint16_t hootAdvIoOff_; /* CS offset of runtime OPL base port word */
+	uint16_t hootAdvQuantumOff_; /* XMIDI クォンタム（ADLIB=232D、SBP2FM=295B） */
+	uint16_t hootAdvIoOff_; /* 実行時 OPL ベースポート語の CS オフセット */
 
 private:
 	void MaterializeDosFiles(CEmuZipFs* fs, const CEmuGameEntry* ge);
@@ -136,7 +135,7 @@ private:
 	char dosSong_[CEMU_ROM_NAME];
 
 	uint32_t pitClockHz_;
-	/* Channel 0 = IRQ0 timer */
+	/* チャネル 0 = IRQ0 タイマ */
 	uint16_t pit0Reload_;
 	uint32_t pit0Counter_;
 	uint64_t pit0Residual_;
@@ -144,7 +143,7 @@ private:
 	int pit0WriteHi_;
 	int pit0ReadHi_;
 	int pit0Running_;
-	/* Channel 2 = PC speaker */
+	/* チャネル 2 = PC スピーカ */
 	uint16_t pit2Reload_;
 	uint32_t pit2Counter_;
 	uint64_t pit2Residual_;
@@ -152,18 +151,18 @@ private:
 	int pit2ReadHi_;
 	int pit2Out_;
 	int pit2Running_;
-	uint8_t pitCtrlLatch_; /* last control for channel select */
+	uint8_t pitCtrlLatch_; /* チャネル選択用の直前コントロール */
 	uint8_t port61_;
 	uint64_t spkPhase_;
 	uint64_t spkPhaseInc_;
 
 	uint8_t picMask_;
-	int pic0Isr_; /* unused: kept so the class layout matches already-built objs */
+	int pic0Isr_; /* 未使用: 既存 obj とクラス配置を合わせるため残す */
 	int picMasterIcw_;
 	uint8_t picMasterIcw1_;
 	uint64_t oplPumpResidual_;
 
-	/* MPU-401 UART @ 0x330/0x331 */
+	/* MPU-401 UART ポート（0x330/0x331） */
 	int mpuUart_;
 	uint8_t mpuRx_;
 	int mpuRxFull_;
@@ -171,18 +170,18 @@ private:
 	int mpuAckR_, mpuAckW_;
 	uint8_t mpuCmdByte_;
 
-	uint8_t* midiBytes_;   /* heap CEMU_PCAT_MIDI_CAP */
-	uint32_t* midiDelta_;  /* heap CEMU_PCAT_MIDI_CAP */
+	uint8_t* midiBytes_;   /* ヒープ CEMU_PCAT_MIDI_CAP */
+	uint32_t* midiDelta_;  /* ヒープ CEMU_PCAT_MIDI_CAP */
 	uint64_t midiLastCycle_;
-	uint16_t silpDrvSeg_; /* Sierra silp_at.com: preserve ADL/CMS/MT32 load seg */
-	uint16_t silpSongSeg_; /* preserve song buffer seg at CS:0275 */
-	unsigned silpSongBytes_; /* SCI/song bytes; IRQ stack sits above this */
-	int silpScanDone_;    /* one-shot full-mem DRV scan */
-	uint16_t mokDrvSeg_; /* Mok MID.DRV CS — INT8 re-plant after IVT smash */
+	uint16_t silpDrvSeg_; /* Sierra silp_at.com: ADL/CMS/MT32 ロード seg を保持 */
+	uint16_t silpSongSeg_; /* CS:0275 の曲バッファ seg を保持 */
+	unsigned silpSongBytes_; /* SCI/曲バイト。IRQ スタックはこの上 */
+	int silpScanDone_;    /* フルメモリ DRV スキャンは一度だけ */
+	uint16_t mokDrvSeg_; /* Mok MID.DRV CS — IVT 破壊後に INT8 を再植 */
 	int hootTimerFixed_;
-	uint16_t hootAilCs_; /* AIL code segment once API_timer is known */
+	uint16_t hootAilCs_; /* API_timer 確定後の AIL コードセグメント */
 
-	/* Minimal Sound Blaster DSP detect (0x226/22A/22C/22E) — music is still OPL. */
+	/* 最小 Sound Blaster DSP 検出（0x226/22A/22C/22E）。音楽は依然 OPL */
 	int sbDspResetting_;
 	uint8_t sbDspReadData_;
 	int sbDspReadAvail_;

@@ -8,6 +8,7 @@ extern "C" {
 #include <stdlib.h>
 #include <stdio.h>
 
+/* Taito F3: 68000＋ES5505 音源基板 */
 CDriverF3::CDriverF3()
 	: hw_(NULL)
 	, hostRate_(44100)
@@ -39,11 +40,13 @@ CDriverF3::CDriverF3()
 	memset(tryCodes_, 0, sizeof(tryCodes_));
 }
 
+/* 後始末 */
 CDriverF3::~CDriverF3()
 {
 	Close();
 }
 
+/* 試行テーブルへ曲コードを追加（重複なし） */
 static void CDriverF3Push(unsigned* dst, int* n, int cap, unsigned code)
 {
 	if (!dst || !n || *n >= cap || code == 0) return;
@@ -53,6 +56,7 @@ static void CDriverF3Push(unsigned* dst, int* n, int cap, unsigned code)
 	dst[(*n)++] = code;
 }
 
+/* ROM 読込、DUART settle、キーオンゲート武装 */
 int CDriverF3::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned titleCode)
 {
 	if (!hw || !ge || !fs || hw->hardKind != CHard::KIND_F3) return 0;
@@ -90,10 +94,10 @@ int CDriverF3::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 		return 0;
 
 	CEmuHardF3SetActive(hw_);
-	/* Boot settle: DUART/IVR, TCB copy, first task slice. */
+	/* ブート settle: DUART/IVR、TCB コピー、最初のタスクスライス */
 	RunCycles(cpuHz_);
 	booted_ = 1;
-	/* If still IPL-masked in a delay, drop IPL once so DUART can run (no main CPU). */
+	/* 遅延中も IPL マスクなら一度落とし、DUART が走れるようにする（メイン CPU 無し） */
 	{
 		const unsigned sr = (unsigned)m68k_get_reg(NULL, M68K_REG_SR);
 		if (((sr >> 8) & 7) >= 6)
@@ -104,21 +108,18 @@ int CDriverF3::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 	cmdIndex_ = tryCount_;
 	locked_ = 1;
 	hw_->SetSongCommand(songCode_);
-	/* C15702 (voice-chain setup inside C15538) returns immediately unless
-	   D4C0 is set; task0 ST's that flag on the real board. D4F9 is the
-	   C15702 "key-on enable" byte tested before bset #4 on the catalog. */
+	/* C15702（C15538 内のボイスチェイン）は D4C0 が立つまで即 return。実機は task0 がフラグを ST。
+	   D4F9 は C15702 のキーオン許可で、カタログの bset #4 前に見る。 */
 	hw_->Write8(0xD4F9u, 1);
 	hw_->Write8(0xD4C0u, 1);
-	/* Do not plant $6DFC. C12B8C is stop-if-listed (compact + C12AD0
-	   poison of 5DAA+4); C12E70 always BRA's to C12C36 to start. */
+	/* $6DFC は植えない。C12B8C はリストにあれば停止（compact + C12AD0 が 5DAA+4 を壊す）。C12E70 は常に C12C36 へ BRA して開始。 */
 	KickMailboxOnce();
 	RunCycles(cpuHz_ / 2);
-	/* C15538 clears D4B3 and C13B94 runs before the D0F4 chain exists, so
-	   C152B0 never sees its key-on gates. Arm them after the chain is live. */
+	/* C15538 が D4B3 をクリアし、D0F4 チェイン前に C13B94 が走るので C152B0 はキーオンゲートを見ない。チェイン生存後に武装。 */
 	ArmKeyOnGates();
 	irq6Vec_ = hw_->Read32(0x100u);
 	{
-		/* C14A10 walks D0F4 on A7; reset SSP is $FFFFFFF8 (8 bytes, IRQ only). */
+		/* C14A10 は A7 上の D0F4 を歩く。リセット SSP は $FFFFFFF8（8 バイト、IRQ のみ）。 */
 		const unsigned ssp = (unsigned)m68k_get_reg(NULL, M68K_REG_ISP);
 		if (ssp < 0x400u || ssp >= 0xFFFF00u || ssp == 0x4C00u)
 			m68k_set_reg(M68K_REG_ISP, 0x9E00);
@@ -126,13 +127,14 @@ int CDriverF3::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 	dwellFrames_ = hostRate_ > 0 ? hostRate_ / 2 : 22050;
 	if (dwellFrames_ < 1) dwellFrames_ = 1;
 	dwellLeft_ = dwellFrames_;
-	/* Do not hunt other song codes (SAMESONG) and do not enqueue again. */
+	/* 他の曲コードを探さない（SAMESONG）。再エンキューもしない。 */
 	locked_ = 1;
 	bestSongCode_ = songCode_;
 	LogState("open");
 	return 1;
 }
 
+/* ハード参照を捨てる */
 void CDriverF3::Close()
 {
 	if (hw_)
@@ -141,6 +143,7 @@ void CDriverF3::Close()
 	booted_ = 0;
 }
 
+/* 同一 zip の別曲をメールボックスへ */
 int CDriverF3::OverlayTitle(unsigned titleCode)
 {
 	if (!hw_) return 0;
@@ -150,10 +153,11 @@ int CDriverF3::OverlayTitle(unsigned titleCode)
 	return 1;
 }
 
+/* C152B0 が見るキーオンゲートを武装 */
 void CDriverF3::ArmKeyOnGates()
 {
 	if (!hw_) return;
-	/* C152B0: cmpi.w #stamp, $d09a / bne skip. Prefer the 6630 key-on gate. */
+	/* C152B0: cmpi.w #stamp, $d09a / bne skip。6630 キーオンゲートを優先。 */
 	unsigned stamp = 0;
 	for (unsigned a = 0xC13600u; a + 8u < 0xC15400u; a += 2u) {
 		if (hw_->Read16(a) != 0x0C78u || hw_->Read16(a + 4u) != 0xD09Au)
@@ -174,7 +178,7 @@ void CDriverF3::ArmKeyOnGates()
 	}
 	if (hw_->Read8(0xD4F9u) == 0)
 		hw_->Write8(0xD4F9u, 1);
-	/* After C15538, D4B3 is 0 so the "start mode" branch of C152B0 is dead. */
+	/* C15538 後 D4B3 は 0 なので C152B0 の start mode 分岐は死ぬ */
 	if (hw_->Read8(0xD4B3u) == 0)
 		hw_->Write8(0xD4B3u, 3);
 	unsigned n = hw_->Read16(0xD0F4u);
@@ -188,6 +192,7 @@ void CDriverF3::ArmKeyOnGates()
 	}
 }
 
+/* メールボックスを 1 回起こす */
 void CDriverF3::KickMailboxOnce()
 {
 	if (!hw_ || kickedMail_) return;
@@ -195,8 +200,7 @@ void CDriverF3::KickMailboxOnce()
 	unsigned wp = hw_->RingWp();
 	unsigned pkt = (wp >= 6u) ? (wp - 6u) : ((wp + 0x800u - 6u) & 0x7feu);
 	pkt &= 0x7feu;
-	/* $EE00 sits just before the OS free list at $EE8A. Do not use $EE88
-	   (TRAP #3 / list head) or $D200 (OS vars). */
+	/* $EE00 は OS フリーリスト $EE8A の直前。$EE88（TRAP #3 / リスト頭）と $D200（OS 変数）は使わない。 */
 	hw_->Write16(0xEE00u, 0);
 	hw_->Write16(0xEE02u, 1);
 	hw_->Write16(0xEE04u, pkt);
@@ -211,15 +215,12 @@ void CDriverF3::KickMailboxOnce()
 		hw_->Write8(tcb + 2u, (uint8_t)(b2 ^ 0x80u));
 }
 
+/* キュー済みならメールボックスを起こす */
 void CDriverF3::WakeMailboxIfQueued()
 {
-	/*
-	 * TRAP #6 wait sets TCB+3 bit7; TRAP #9 then BSET TCB+2 bit7 to
-	 * deliver a message. When both bits match, the scheduler XOR is 0
-	 * and the mailbox sleeps on a queued packet. Flip +2 only if +$10
-	 * is a real queue head — waking an empty wait poisons the $0136
-	 * free list via TRAP #4 with A5=0.
-	 */
+	/* TRAP #6 待ちは TCB+3 bit7。TRAP #9 は TCB+2 bit7 を BSET してメッセージを届ける。
+ * 両ビットが合うとスケジューラ XOR が 0 になり、キュー済みパケットのままメールボックスが眠る。
+ * +$10 が実キュー頭のときだけ +2 を反転する。 */
 	if (!hw_) return;
 	const unsigned tcb = 0xFB3Eu;
 	if (hw_->Read16(tcb + 0x10u) == 0)
@@ -230,20 +231,18 @@ void CDriverF3::WakeMailboxIfQueued()
 		hw_->Write8(tcb + 2u, (uint8_t)(b2 ^ 0x80u));
 }
 
+/* type-E パケットをホスト側で alloc+post */
 void CDriverF3::PostTypeE()
 {
-	/* C12D94 trap#3-allocs a type-$E packet and trap#9-posts it to FB3E.
-	   Doing that from the timer IRQ runs C14884 on SSP and hangs. Do the
-	   same alloc+wake from the host so the mailbox task runs it on USP.
-	   A static $EE20 is fatal: C149E4 trap#4 frees A5 onto $136. */
+	/* C12D94 は trap#3 で type-$E を確保し trap#9 で FB3E へ post。タイマ IRQ からやると C14884 が SSP でハング。
+	   ホストから同じ alloc+wake し、メールボックスタスクが USP で走るようにする。 */
 	if (!hw_) return;
 	const unsigned tcb = 0xFB3Eu;
 	const uint8_t b2 = hw_->Read8(tcb + 2u);
 	const uint8_t b3 = hw_->Read8(tcb + 3u);
 	if (b2 != b3)
 		return;
-	/* 0000 is the scheduler's "currently dispatched" paint, not asleep.
-	   Waking it nests RTE into C14884 and smashes USP. 8080/0101 sleep. */
+	/* 0000 はスケジューラの「ディスパッチ中」であり sleep ではない。起こすと RTE が C14884 にネストし USP を壊す。8080/0101 が sleep。 */
 	if (b2 != 0x80u && b2 != 0x01u)
 		return;
 	const unsigned pc = hw_->Read32(tcb + 4u);
@@ -264,6 +263,7 @@ void CDriverF3::PostTypeE()
 	hw_->Write8(tcb + 2u, (uint8_t)(b2 ^ 0x80u));
 }
 
+/* 診断用に PC/DPRAM/DUART を出す */
 void CDriverF3::LogState(const char* tag)
 {
 	if (!hw_ || !tag) return;
@@ -382,18 +382,13 @@ void CDriverF3::LogState(const char* tag)
 	fclose(log);
 }
 
+/* Musashi をスライス実行し DUART IRQ6 を挟む */
 void CDriverF3::RunCycles(int cycles)
 {
 	if (!hw_ || cycles <= 0) return;
 	CEmuHardF3SetActive(hw_);
-	/*
-	 * Interleave DUART timer with CPU: timer only advances here, so a single
-	 * giant m68k_execute would allow at most one IRQ (IACK clears the line and
-	 * the handler clears ISR). Slice so STOP/idle loops keep getting IRQ6.
-	 *
-	 * Task RTE loads SR=0 (user) from the task block; song start uses A-line to
-	 * raise IPL. Repair only after a slice — never mid-handler — so DUART can run.
-	 */
+	/* DUART タイマと CPU をインターリーブ。タイマはこの経路だけ進むので、巨大 m68k_execute 1 発では IRQ 最大 1 回（IACK で線が落ちハンドラが ISR をクリア）。
+ * STOP/アイドルが IRQ6 を受け続けられるようスライスする。 */
 	while (cycles > 0) {
 		int slice = cycles;
 		if (slice > 4000) slice = 4000;
@@ -404,14 +399,11 @@ void CDriverF3::RunCycles(int cycles)
 			m68k_set_irq(M68K_IRQ_NONE);
 		const int ran = m68k_execute(slice);
 		{
-			/* Only unstick a CPU parked in STOP with IPL masking DUART.
-			   Do not rewrite user-mode SR: Ensoniq OS RTE's into tasks that
-			   way, and clobbering them every slice kills the mailbox reader. */
+			/* STOP で IPL が DUART をマスクしている CPU だけ起こす。ユーザモード SR は書き換えない。Ensoniq OS が RTE でタスクに入り、毎スライス壊すとメールボックス読者が死ぬ。 */
 			const unsigned sr = (unsigned)m68k_get_reg(NULL, M68K_REG_SR);
 			const unsigned ipl = (sr >> 8) & 7u;
 			const int stuck = (ran == slice);
-			/* STOP at IPL 7 returns ~0 cycles (IRQ masked), so "full slice"
-			   never trips. Unmask those waits; leave busy C1490A alone. */
+			/* IPL 7 の STOP は約 0 サイクル（IRQ マスク）なので「満スライス」判定が立たない。その待ちはマスク解除。忙しい C1490A は触らない。 */
 			if (ipl >= 6u && (stuck || ran < 256))
 				m68k_set_reg(M68K_REG_SR, (sr | 0x2000u) & ~0x0700u);
 		}
@@ -432,6 +424,7 @@ void CDriverF3::RunCycles(int cycles)
 		m68k_set_irq(M68K_IRQ_NONE);
 }
 
+/* 試行テーブルから曲コードを注入 */
 void CDriverF3::TryInjectCommand()
 {
 	if (!hw_ || locked_) return;
@@ -463,6 +456,7 @@ void CDriverF3::TryInjectCommand()
 	}
 }
 
+/* CPU＋ES5505 を進めステレオ合成 */
 int CDriverF3::Render(int16_t* stereo, int frames)
 {
 	if (!hw_ || !stereo || frames <= 0) return 0;
@@ -509,12 +503,14 @@ int CDriverF3::Render(int16_t* stereo, int frames)
 	return frames;
 }
 
+/* Seek は未対応 */
 int CDriverF3::Seek(uint64_t sample)
 {
 	(void)sample;
 	return 0;
 }
 
+/* F3 ドライバ生成 */
 CDriver* CDriverF3Create()
 {
 	return new CDriverF3();

@@ -1,23 +1,19 @@
 ﻿#pragma once
 #include <stdint.h>
 
-/* Minimal MS-DOS for PC-98 PMD / glue-stub rehost (hootrip MiniDos port). */
+/* PC-98 PMD／糊 stub 再ホスト用の最小 MS-DOS（hootrip MiniDos 移植） */
 
 enum {
 	DOS98_TRAMP_SEG = 0x0060,
 	DOS98_CALL_RET_OFF = 0x0200,
 	DOS98_SYSVARS_SEG = 0x0050,
 	DOS98_LOL_OFF = 0x0010,
-	/* Environment block (PSP:002C). Must sit above trampoline
-	   0x60:0000..01FF (lin 0x600..0x7FF) — 0x70 overlapped and was wiped.
-	   The block needs a real arena header one paragraph below it: TSRs that
-	   shrink their environment read the size out of it (OPNDRV.COM did, got
-	   the trampoline's tail as a paragraph count, and copied garbage over
-	   its own code).  0x7F:0000 is the last paragraph of the trampoline
-	   table, holding the stubs for INT F8-FF; those go to a bare IRET
-	   instead (see InstallTrampolines) because nothing on PC-98 uses them,
-	   and moving the environment itself instead broke titles that reach it
-	   at a fixed address. */
+	/* 環境ブロック（PSP:002C）。トランポリン 0x60:0000..01FF（lin 0x600..0x7FF）の上に置く。
+	   0x70 は重なって消えた。1 パラグラフ下に本物のアリーナヘッダが要る: 環境を縮める TSR が
+	   そこからサイズを読む（OPNDRV.COM はトランポリン末尾をパラグラフ数と誤読し、自分のコードへ
+	   ゴミをコピーした）。0x7F:0000 はトランポリン表の最終パラグラフ（INT F8-FF stub）。
+	   PC-98 は使わないので素の IRET にする（InstallTrampolines）。環境自体を動かすと
+	   固定番地で触るタイトルが壊れた。 */
 	DOS98_ENV_MCB_SEG = 0x007F,
 	DOS98_ENV_SEG = 0x0080,
 	DOS98_ARENA_START = 0x1000,
@@ -32,7 +28,7 @@ enum CEmuDos98Result {
 	DOS98_CONTINUE = 0,
 	DOS98_TERMINATED = 1,
 	DOS98_RESIDENT = 2,
-	/* INT 21 AH=4B/00 already switched CS:IP onto the child; do not IRET. */
+	/* INT 21 AH=4B/00 は既に CS:IP を子へ切替済み。IRET しない */
 	DOS98_EXEC = 3
 };
 
@@ -67,7 +63,7 @@ public:
 	int LoadCom(uint8_t* mem, const unsigned char* image, unsigned imageSize, const char* tail);
 	int LoadExe(uint8_t* mem, const unsigned char* image, unsigned imageSize, const char* tail);
 	void LoadOverlay(uint8_t* mem, const unsigned char* image, unsigned imageSize, uint16_t loadSeg, uint16_t reloc) const;
-	/* Load a .SYS character device image; returns load segment (CS=loadSeg). */
+	/* .SYS キャラクタデバイスを載せる。ロードセグメント（CS=loadSeg）を返す */
 	int LoadDeviceImage(uint8_t* mem, const char* name, uint16_t* outSeg,
 		uint16_t* outStratOff, uint16_t* outIntrOff,
 		unsigned extraParas = 0) const;
@@ -77,8 +73,7 @@ public:
 	CEmuDos98Result ServiceIntInner(uint8_t* mem, uint8_t vec);
 	void IretReturn(uint8_t* mem);
 
-	/* INT 1Ah is the BIOS time-of-day on PC/AT but the CG access BIOS on
-	   PC-98, so the host machine has to opt in. */
+	/* INT 1Ah は PC/AT では時刻 BIOS、PC-98 では CG BIOS。ホスト機種がオプトインする */
 	void SetPcAtBios(int on) { pcAtBios_ = on ? 1 : 0; }
 
 	int VectorInstalled(uint8_t vec) const;
@@ -90,37 +85,32 @@ public:
 	uint16_t readLogHandle_[32];
 	unsigned readLogBytes_[32];
 
-	/* A DOS call this layer does not implement returns "success, did
-	   nothing", which is indistinguishable from a working call until the
-	   driver ends up silent. Record what fell through so a sweep can rank
-	   the missing services by how many archives need them. */
-	uint8_t unhandledFn_[256];  /* INT 21h AH */
-	uint8_t unhandledVec_[256]; /* other INT vectors */
-	/* First CPU exception (INT 00/06/07/0C/0D) CS:IP from the IRET frame. */
+	/* 未実装の DOS コールは「成功・何もしない」を返す。動いているように見えてドライバが無音になる。
+	   落ちたサービスを記録し、何アーカイブが必要とするか順位を付ける。 */
+	uint8_t unhandledFn_[256];  /* INT 21h の AH */
+	uint8_t unhandledVec_[256]; /* その他 INT ベクタ */
+	/* 最初の CPU 例外（INT 00/06/07/0C/0D）の CS:IP（IRET フレーム） */
 	uint8_t trapVec_;
 	uint16_t trapCs_, trapIp_;
-	/* INT 18h is the PC-98 keyboard/CRT BIOS and only AH=00/01 are answered;
-	   everything else returns whatever was in the registers. Rank the AH
-	   values that fall through the same way as the INT 21h ones. */
+	/* INT 18h は PC-98 キーボード／CRT BIOS。AH=00/01 だけ応答し、他はレジスタそのまま。
+	   落ちた AH を INT 21h と同様に数える。 */
 	uint8_t unhandledInt18_[256];
 
-	/* Optional call log. The interesting window is short — what the resident
-	   driver asks for between the play trigger and the first note — so a
-	   small ring that the host arms on demand is enough. */
+	/* 任意のコールログ。興味があるのは短い窓 — 常駐ドライバが再生トリガから初ノートまでに
+	   聞いたもの。ホストが必要時に武装する小さなリングで足りる。 */
 	struct Call {
 		uint8_t vec;
-		uint16_t ax, bx, cx, dx; /* on entry */
-		uint16_t rax;            /* on return */
-		uint16_t cs, ip;         /* caller, for disassembly */
+		uint16_t ax, bx, cx, dx; /* 入口 */
+		uint16_t rax;            /* 戻り */
+		uint16_t cs, ip;         /* 呼び出し元（逆アセンブル用） */
 		int8_t cf;
 		char name[24];
 	};
 	void TraceReset(int on) { traceOn_ = on; traceCount_ = 0; }
-	/* Boot-time tracing has to survive Reset(), which the shell run calls
-	   before the host has any handle on the DOS object. */
+	/* ブート時トレースは Reset() を生き延びる必要がある。シェル実行はホストが DOS オブジェクトを
+	   握る前に Reset する。 */
 	static void TraceDefault(int on) { traceDefault_ = on; }
-	/* Ring: a boot sequence makes thousands of calls and the interesting part
-	   is the tail, so keep the newest kTraceMax and report the true total. */
+	/* リング: ブートは数千コール。興味は末尾なので最新 kTraceMax を残し、真の総数を報告する */
 	unsigned TraceTotal() const { return traceCount_; }
 	unsigned TraceCount() const
 	{
@@ -164,8 +154,7 @@ private:
 	uint16_t instSeg_[256];
 	uint16_t instOff_[256];
 
-	/* AH=4E/4F state. The search set is the archive's file list, so the
-	   pattern and a cursor into files_ is the whole handle. */
+	/* AH=4E/4F 状態。検索集合はアーカイブのファイル一覧なので、パターンと files_ カーソルがハンドル全体 */
 	int FindMatch(uint8_t* mem);
 	char findPat_[DOS98_NAME];
 	int findNext_;

@@ -10,10 +10,7 @@
 #include <stdio.h>
 #include <stdarg.h>
 
-/* CEMU_PCAT_IVT=<path>: one record per play poke naming the vector we fire,
-   the vectors the guest actually owns, and how much the sound hardware moved.
-   A family that is uniformly mute is either never reaching its driver API or
-   reaching it and writing nothing, and these two numbers separate those. */
+/* CEMU_PCAT_IVT=<path>: play poke 毎に 1 レコード。発火ベクタ、ゲストが所有するベクタ、音源ハードがどれだけ動いたか。系統が一律 mute ならドライバ API に届いていないか、届いても何も書いていない。この 2 数がそれを分ける。 */
 namespace {
 
 struct PcatCensus {
@@ -46,8 +43,7 @@ void PcatIvtCensus(const uint8_t* mem, const PcatCensus& c, const char* phase,
 		if ((seg == 0 && off == 0) || seg == DOS98_TRAMP_SEG) continue;
 		fprintf(f, "%02X=%04X:%04X,", v, seg, off);
 	}
-	/* %ls aborts the whole call on a wide char with no multibyte form, which
-	   would swallow the newline for every Japanese title. */
+	/* %ls はマルチバイト形の無いワイド文字で呼び出し全体を abort し、日本語タイトル毎に改行が消える。 */
 	fputs(" name=", f);
 	for (const wchar_t* p = tag; p && *p; p++)
 		fputc((*p >= 0x20 && *p < 0x7f) ? (char)*p : '?', f);
@@ -55,10 +51,7 @@ void PcatIvtCensus(const uint8_t* mem, const PcatCensus& c, const char* phase,
 	fclose(f);
 }
 
-/* CEMU_PCAT_IPPROF=<file>: histogram of the linear PC executed during the
-   play pump. A driver that installs its ISR and then makes no sound is either
-   spinning on one wait or running somewhere it should not be, and the hot
-   address says which. */
+/* CEMU_PCAT_IPPROF=<file>: play ポンプ中に実行した線形 PC のヒストグラム。ISR を入れて無音のドライバは 1 待ちで回るか、居るべきでない所を走っている。ホット番地がどちらを示す。 */
 struct PcatIpProf {
 	enum { SLOTS = 4096 };
 	enum { RING = 65536 };
@@ -66,9 +59,7 @@ struct PcatIpProf {
 	uint64_t hits[SLOTS];
 	uint64_t total;
 	const char* path;
-	/* The histogram cannot show which of a dozen exit(1) branches a guest
-	   took, so keep the trail leading up to the moment the host freezes it
-	   (the first DOS terminate). */
+	/* ヒストグラムはゲストが取った十数の exit(1) 分岐のどれかを示せない。ホストが凍結する直前（最初の DOS 終了）までの軌跡を残す。 */
 	unsigned ring[RING];
 	unsigned ringPos;
 	int frozen;
@@ -82,6 +73,7 @@ struct PcatIpProf {
 
 	void Freeze() { frozen = 1; }
 
+	/* Note の実装 */
 	void Note(unsigned lin)
 	{
 		total++;
@@ -122,8 +114,7 @@ struct PcatIpProf {
 	}
 };
 
-/* CEMU_PCAT_MEMDUMP="<linhex>,<len>,<path>": hex of guest memory the first
-   time the play pump returns, for reading whatever the profiler pointed at. */
+/* CEMU_PCAT_MEMDUMP="<linhex>,<len>,<path>": play ポンプが最初に戻ったときのゲストメモリ hex。プロファイラが指した先を読む。 */
 void PcatMemDump(const uint8_t* mem)
 {
 	static const char* spec = NULL;
@@ -149,16 +140,14 @@ void PcatMemDump(const uint8_t* mem)
 	fclose(f);
 }
 
-/* CEMU_PCAT_IOLOG="<path>": which ports a guest touches that nothing here
-   answers. A driver that probes for its card by reading a register back is
-   indistinguishable from a silent driver without this. */
+/* CEMU_PCAT_IOLOG="<path>": ここが答えないポートをゲストが触るか。レジスタを読み戻してカードをプローブするドライバは、これが無いと無音ドライバと区別できない。 */
 void PcatIoLog(char dir, uint16_t port, uint8_t data)
 {
 	static const char* path = NULL;
 	static int checked = 0;
 	if (!checked) { checked = 1; path = getenv("CEMU_PCAT_IOLOG"); }
 	if (!path || !path[0]) return;
-	/* One line per port and direction: the probe loops thousands of times. */
+	/* ポートと方向ごとに 1 行: プローブは数千回ループする */
 	static uint8_t seen[2][8192];
 	const int d = (dir == 'w') ? 1 : 0;
 	if (seen[d][port >> 3] & (1u << (port & 7))) return;
@@ -169,15 +158,14 @@ void PcatIoLog(char dir, uint16_t port, uint8_t data)
 	fclose(f);
 }
 
-/* MID.DRV byte-scans every track for the next "MTrk". Type-1 files with
-   many tracks (or MTrk-like bytes in the payload) either miss the play
-   flag or walk off into the IVT. Fold to Type-0 so AH=0 sees one MTrk. */
+/* MID.DRV は次の "MTrk" を全トラックでバイトスキャン。多トラック Type-1（またはペイロード内の MTrk 風バイト）は play フラグを逃すか IVT へ歩く。Type-0 に折り AH=0 が MTrk 1 つを見る。 */
 struct MokSmfEv {
 	uint32_t tick;
 	uint8_t n;
 	uint8_t b[3];
 };
 
+/* MokSmfEvCmp の実装 */
 static int MokSmfEvCmp(const void* a, const void* b)
 {
 	const MokSmfEv* x = (const MokSmfEv*)a;
@@ -187,6 +175,7 @@ static int MokSmfEvCmp(const void* a, const void* b)
 	return 0;
 }
 
+/* バス読込 */
 static unsigned MokReadVlq(const uint8_t* p, unsigned n, unsigned* i)
 {
 	unsigned v = 0, k = 0;
@@ -199,6 +188,7 @@ static unsigned MokReadVlq(const uint8_t* p, unsigned n, unsigned* i)
 	return v;
 }
 
+/* バス書込 */
 static void MokWriteVlq(uint8_t* o, unsigned* p, unsigned cap, unsigned v)
 {
 	uint8_t tmp[5];
@@ -337,9 +327,7 @@ static int MokFlattenSmfType0(const uint8_t* src, unsigned srcN,
 	return 1;
 }
 
-/* Mok SMF/HOOT CODE.COM: `call set_busy` is assembled so it lands in the
-   `int 18` / `jmp short` idle instead of `out 07E8,80; ret`. INT7F then
-   never returns. Retarget those near calls to the out-80 stub. */
+/* Mok SMF/HOOT CODE.COM: `call set_busy` が `out 07E8,80; ret` ではなく `int 18`／`jmp short` idle に着地するよう組んである。INT7F が戻らない。それらの near call を out-80 stub へ付け替える。 */
 int PatchMokHootIdleCalls(uint8_t* mem, uint16_t psp, unsigned imageSize)
 {
 	if (!mem || psp < 0x0100 || imageSize < 24 || imageSize > 4096)
@@ -375,19 +363,14 @@ int PatchMokHootIdleCalls(uint8_t* mem, uint16_t psp, unsigned imageSize)
 	return n;
 }
 
-/* Infogrames code.com MZ load: `minalloc - header_paras` extra. Real DOS
-   adds minalloc paragraphs after the image. ASOUND.DRV BSS (play-enable at
-   DGROUP:19AAh, voice tables) sits in that extra; the subtract leaves only
-   48 bytes and the tick path sees [19AA]==0 → keys=0. NOP the subtract so
-   extra is minalloc*16 (and SS:SP at 0x30A still fits). */
+/* Infogrames code.com MZ ロード: `minalloc - header_paras` 余分。実 DOS はイメージ後に minalloc 段落を足す。ASOUND.DRV BSS（play-enable は DGROUP:19AAh、ボイステーブル）がその余分に居る。引き算は 48 バイトだけ残し tick 経路が [19AA]==0 → keys=0。引き算を NOP し extra を minalloc*16 に（SS:SP は 0x30A でも収まる）。 */
 void PatchInfogramesMzExtra(uint8_t* mem, uint16_t psp, CEmuDos98& dos)
 {
 	(void)dos;
 	if (!mem || psp < 0x0100) return;
 	const unsigned img = ((unsigned)psp << 4) + 0x100u;
 	if (img + 8 >= 0x200000) return;
-	/* `sub cx,[033F]` — header paras. Scan the tiny COM; zip/XML spelling
-	   of ASOUND.DRV must not gate this. */
+	/* `sub cx,[033F]` — ヘッダ段落。tiny COM をスキャン。ASOUND.DRV の zip/XML 綴りでゲートしない。 */
 	for (unsigned i = 0; i + 4 < 0x400 && img + i + 4 < 0x200000; i++) {
 		if (mem[img + i] == 0x2B && mem[img + i + 1] == 0x0E
 			&& mem[img + i + 2] == 0x3F && mem[img + i + 3] == 0x03) {
@@ -400,12 +383,14 @@ void PatchInfogramesMzExtra(uint8_t* mem, uint16_t psp, CEmuDos98& dos)
 	}
 }
 
+/* PcatMem16 の実装 */
 static uint16_t PcatMem16(const uint8_t* mem, unsigned addr)
 {
 	if (addr + 1 >= 0x200000) return 0;
 	return (uint16_t)(mem[addr] | (mem[addr + 1] << 8));
 }
 
+/* PcatPut16 の実装 */
 static void PcatPut16(uint8_t* mem, unsigned addr, uint16_t v)
 {
 	if (addr + 1 >= 0x200000) return;
@@ -413,12 +398,7 @@ static void PcatPut16(uint8_t* mem, unsigned addr, uint16_t v)
 	mem[addr + 1] = (uint8_t)(v >> 8);
 }
 
-/* Sword of the Samurai ASOUND.DRV (vtable play=0868 tick=0886): CODE.COM
-   copies the MZ header+image to one alloc and applies relocs with that
-   base, so image-relative relocs land 512 bytes early and INT 7Fh reads
-   the reloc table as the vtable (play offset 0008 → keys=0). tf1942 uses
-   a different vtable (10A8/10FD) and already plays — do not touch it.
-   Retarget CS:0349/0354/0358 to the image and slide those relocs. */
+/* Sword of the Samurai ASOUND.DRV（vtable play=0868 tick=0886）: CODE.COM は MZ ヘッダ＋イメージを 1 alloc へコピーしその基点でリロケを適用する。イメージ相対リロケが 512 バイト早く着地し INT 7Fh がリロケ表を vtable として読む（play オフセット 0008 → keys=0）。tf1942 は別 vtable（10A8/10FD）で既に鳴る — 触らない。CS:0349/0354/0358 をイメージへ付け替えそれらのリロケを滑らせる。 */
 void RepairAsoundPlayEnable(uint8_t* mem)
 {
 	if (!mem) return;
@@ -427,8 +407,7 @@ void RepairAsoundPlayEnable(uint8_t* mem)
 		return;
 	const unsigned com = (unsigned)comCs << 4;
 	if (com + 0x35A >= 0x200000) return;
-	/* CODE.COM [0349] often lands on the MZ header or on zeroed extra, not
-	   the image. Scan for the play prologue at image+0868 (swords-only). */
+	/* CODE.COM [0349] はイメージではなく MZ ヘッダまたはゼロ extra に着地することが多い。イメージ+0868 の play プロローグをスキャン（swords のみ）。 */
 	uint16_t imgCs = 0, fileCs = 0, hdrParas = 0;
 	for (unsigned s = 0x0100; s < 0xA000; s++) {
 		const unsigned a = s << 4;
@@ -473,7 +452,7 @@ void RepairAsoundPlayEnable(uint8_t* mem)
 	if (img + 0x38 >= 0x200000) return;
 	if (PcatMem16(mem, img + 0x34) != 0x0868 || PcatMem16(mem, img + 0x36) != 0x0886)
 		return;
-	/* Image DGROUP word still 014Fh → relocs were applied 512 bytes early. */
+	/* イメージ DGROUP ワードがまだ 014Fh → リロケが 512 バイト早く適用された */
 	if (fileCs && hdrParas && PcatMem16(mem, img + 0x2A) == 0x014F) {
 		const uint16_t nreloc = PcatMem16(mem, file + 6);
 		const uint16_t relOff = PcatMem16(mem, file + 0x18);
@@ -509,11 +488,7 @@ void RepairAsoundPlayEnable(uint8_t* mem)
 		mem[aa] = 0xFF;
 }
 
-/* MicroProse RSOUND.DRV (Ultimate NFL / GMRESET family): song 0x0A is
-   `lea bx, start / mov [732h], bx / ret` and the INT 8 dispatcher only
-   calls that ptr after [730h] counts down. Cold DGROUP leaves [730h]=0,
-   so the title stays SysEx/CC. ASOUND/GSOUND start the same song
-   immediately — retarget every deferred jump-table slot at `start`. */
+/* MicroProse RSOUND.DRV（Ultimate NFL／GMRESET 系統）: 曲 0x0A は `lea bx, start / mov [732h], bx / ret`。INT 8 ディスパッチャは [730h] がカウントダウンしたあとだけその ptr を呼ぶ。コールド DGROUP は [730h]=0 のままタイトルが SysEx/CC に留まる。ASOUND/GSOUND は同じ曲を即開始 — 遅延ジャンプ表スロットを全部 `start` へ付け替える。 */
 static int RepairMpsDeferredSong(uint8_t* mem)
 {
 	if (!mem) return 0;
@@ -566,10 +541,7 @@ static int RepairMpsDeferredSong(uint8_t* mem)
 	return n;
 }
 
-/* Pacific Islands ADLIB.BIN: INT 8 far-calls [21A] (tick=0000, CS at [21C])
-   but INT 7Fh song select uses ES=[218]. If the loader only filled the tick
-   pointer, [218] stays 0, ES writes hit BIOS, and 0x10/0x11 stay the boot
-   default (SAMESONG). volfied's BIN does not contain "Pacific". */
+/* Pacific Islands ADLIB.BIN: INT 8 が [21A] を far-call（tick=0000、CS は [21C]）するが INT 7Fh 曲選択は ES=[218]。ローダが tick ポインタだけ埋めると [218] が 0 のまま、ES 書きが BIOS に当たり 0x10/0x11 がブート既定のまま（SAMESONG）。volfied の BIN に "Pacific" は含まれない。 */
 static int PacificBinAt(const uint8_t* mem, unsigned a)
 {
 	if (a + 0x30 >= 0x200000) return 0;
@@ -586,6 +558,7 @@ static int PacificBinAt(const uint8_t* mem, unsigned a)
 	return 1;
 }
 
+/* ゲスト状態を修復する */
 static void RepairPacificIslandsSong(uint8_t* mem, uint16_t extSong)
 {
 	if (!mem) return;
@@ -622,7 +595,7 @@ static void RepairPacificIslandsSong(uint8_t* mem, uint16_t extSong)
 		}
 		if (!hit) return;
 	}
-	/* Point both far pointers at the image before INT 7Fh uses [218]. */
+	/* INT 7Fh が [218] を使う前に両 far ポインタをイメージへ向ける */
 	PcatPut16(mem, com + 0x216, 0x0004);
 	PcatPut16(mem, com + 0x218, drvCs);
 	PcatPut16(mem, com + 0x21A, 0x0000);
@@ -633,8 +606,7 @@ static void RepairPacificIslandsSong(uint8_t* mem, uint16_t extSong)
 	mem[drv + 9] = 0;
 	mem[drv + 0x5E] = 0;
 	mem[drv + 0x62] = 0;
-	/* 0x41d may ignore [8] and keep table slot 1 (boot default). Point
-	   every used slot at the title's blob so 0x10 and 0x11 diverge. */
+	/* 0x41d は [8] を無視し表スロット 1（ブート既定）を残し得る。使っているスロットを全部タイトルの blob へ向け 0x10 と 0x11 が分かれるようにする。 */
 	if (drv + 0x9A8 < 0x200000 && idx >= 1 && idx <= 3) {
 		const uint16_t blob = PcatMem16(mem, drv + 0x9A0 + (unsigned)idx * 2u);
 		if (blob) {
@@ -642,8 +614,7 @@ static void RepairPacificIslandsSong(uint8_t* mem, uint16_t extSong)
 				PcatPut16(mem, drv + 0x9A0 + i * 2u, blob);
 		}
 	}
-	/* 0x41d skips reading [8] while [9]!=0, then sees [5e]==0 and keeps
-	   the boot voices (SAMESONG). Always sample [8]. */
+	/* 0x41d は [9]!=0 の間 [8] 読みを飛ばし、[5e]==0 を見てブートボイスを残す（SAMESONG）。常に [8] をサンプル。 */
 	if (drv + 0x425 < 0x200000
 		&& mem[drv + 0x423] == 0x75 && mem[drv + 0x424] == 0x06) {
 		mem[drv + 0x423] = 0x90;
@@ -665,9 +636,10 @@ static void RepairPacificIslandsSong(uint8_t* mem, uint16_t extSong)
 	}
 }
 
-/* Resolved once: the hook is on the per-instruction path. */
+/* 一度解決: フックは命令毎経路上 */
 PcatIpProf* g_pcatIpProf = NULL;
 
+/* PcatIpProfInit の実装 */
 void PcatIpProfInit()
 {
 	const char* p = getenv("CEMU_PCAT_IPPROF");
@@ -677,8 +649,7 @@ void PcatIpProfInit()
 	g_pcatIpProf = &inst;
 }
 
-/* HOOT's own INT8 helper: jnb +4 / sub dx,1000h. Azrael/kyrandia already
-   point INT8 here and play; WarCraft 2 / Blackthorne leave AIL CS:0000. */
+/* HOOT 自身の INT8 ヘルパ: jnb +4／sub dx,1000h。Azrael/kyrandia は既に INT8 をここへ向けて鳴る。WarCraft 2／Blackthorne は AIL CS:0000 を残す。 */
 int PcatHootInt8Sig(const uint8_t* mem, unsigned lin)
 {
 	if (!mem || lin + 6 >= 0x200000) return 0;
@@ -689,6 +660,7 @@ int PcatHootInt8Sig(const uint8_t* mem, unsigned lin)
 
 void PcatAilTrace(const char* fmt, ...);
 
+/* PcatFindHootInt8 の実装 */
 int PcatFindHootInt8(const uint8_t* mem, uint16_t* segOut, uint16_t* offOut)
 {
 	if (!mem || !segOut || !offOut) return 0;
@@ -696,7 +668,7 @@ int PcatFindHootInt8(const uint8_t* mem, uint16_t* segOut, uint16_t* offOut)
 		if (seg < 0x1200 || seg >= 0xA000) return 0;
 		const unsigned lin = (unsigned)seg << 4;
 		if (lin + 3 >= 0x200000) return 0;
-		/* HOOT.EXE CS:IP 0000:0000 is `mov dx,0492h`. */
+		/* HOOT.EXE CS:IP 0000:0000 は `mov dx,0492h` */
 		return (mem[lin] == 0xBA && mem[lin + 1] == 0x92 && mem[lin + 2] == 0x04) ? 1 : 0;
 	};
 	static const uint16_t kOff[] = { 0x040E, 0x0411, 0x0417, 0x0400, 0x080E, 0 };
@@ -713,13 +685,12 @@ int PcatFindHootInt8(const uint8_t* mem, uint16_t* segOut, uint16_t* offOut)
 	};
 	const uint16_t i7f = (uint16_t)(mem[0x7F * 4 + 2] | (mem[0x7F * 4 + 3] << 8));
 	if (trySeg(i7f)) return 1;
-	/* Prefer a real HOOT.EXE image (entry + helper). The old 0x4000 cap
-	   missed images loaded high; the 07E0 scan was O(n*16K) per IRQ0. */
+	/* 本物 HOOT.EXE イメージ（入口＋ヘルパ）を優先。旧 0x4000 上限は高く載ったイメージを逃した。07E0 スキャンは IRQ0 毎に O(n*16K)。 */
 	for (unsigned s = 0x1200; s < 0xA000; s++) {
 		if (!looksHootEntry((uint16_t)s)) continue;
 		if (trySeg((uint16_t)s)) return 1;
 	}
-	/* Helper only: derive CS from a CS:040Eh hit. */
+	/* ヘルパのみ: CS:040Eh 命中から CS を導く */
 	for (unsigned a = 0x12000u + 0x040Eu; a + 6 < 0xA0000u; a += 0x10u) {
 		if (!PcatHootInt8Sig(mem, a)) continue;
 		const uint16_t seg = (uint16_t)((a - 0x040Eu) >> 4);
@@ -731,8 +702,7 @@ int PcatFindHootInt8(const uint8_t* mem, uint16_t* segOut, uint16_t* offOut)
 	return 0;
 }
 
-/* AIL2 API stub: `mov ax,APIh / jmp`. HOOT CS:040E is not AIL; FarCallAil
-   that lands there hangs (Hanse irq0 stays at boot count). */
+/* AIL2 API stub: `mov ax,APIh / jmp`。HOOT CS:040E は AIL ではない。そこに着地する FarCallAil はハング（Hanse irq0 がブートカウントのまま）。 */
 int PcatSegHasAilApi(const uint8_t* mem, uint16_t seg, uint16_t api)
 {
 	if (!mem || seg < 0x0100 || seg >= 0xA000) return 0;
@@ -747,12 +717,10 @@ int PcatSegHasAilApi(const uint8_t* mem, uint16_t seg, uint16_t api)
 	return 0;
 }
 
+/* PcatApiTimerAt の実装 */
 int PcatApiTimerAt(const uint8_t* mem, unsigned a)
 {
-	/* AIL2 API_timer: `inc word [CS:0006]` (Hanse/Omar) or `[CS:000E]`
-	   (Lost Vikings / HOOT v1.1) / cld / 6+ register pushes.
-	   v1.1 is `2E FF 06 0E 00 FC` at CS:0416h — matching at 0417h (the FF)
-	   ran one byte into the instruction and hung Blackthorne. */
+	/* AIL2 API_timer: `inc word [CS:0006]`（Hanse/Omar）または `[CS:000E]`（Lost Vikings／HOOT v1.1）／cld／6+ レジスタ push。v1.1 は CS:0416h の `2E FF 06 0E 00 FC` — 0417h（FF）でマッチすると命令 1 バイト中へ走り Blackthorne がハング。 */
 	if (!mem || a + 24 >= 0x200000) return 0;
 	if (a >= 1 && mem[a - 1] == 0x2E) return 0;
 	unsigned s = 0;
@@ -774,6 +742,7 @@ int PcatApiTimerAt(const uint8_t* mem, unsigned a)
 	return (pushes >= 6) ? 1 : 0;
 }
 
+/* PcatI8LooksLikeHootAil の実装 */
 static int PcatI8LooksLikeHootAil(const uint8_t* mem)
 {
 	if (!mem) return 0;
@@ -787,6 +756,7 @@ static int PcatI8LooksLikeHootAil(const uint8_t* mem)
 	return PcatApiTimerAt(mem, lin) || PcatHootInt8Sig(mem, lin);
 }
 
+/* PcatFindApiTimerOff の実装 */
 unsigned PcatFindApiTimerOff(const uint8_t* mem, uint16_t seg)
 {
 	if (!mem || seg < 0x0100 || seg >= 0xA000) return 0;
@@ -804,18 +774,19 @@ unsigned PcatFindApiTimerOff(const uint8_t* mem, uint16_t seg)
 	return 0;
 }
 
+/* PcatSegHasApiTimer の実装 */
 int PcatSegHasApiTimer(const uint8_t* mem, uint16_t seg)
 {
 	return PcatFindApiTimerOff(mem, seg) != 0;
 }
 
+/* PcatFindAilApiCs の実装 */
 uint16_t PcatFindAilApiCs(const uint8_t* mem, uint16_t skipSeg)
 {
 	if (!mem) return 0;
 	const uint16_t i8Seg = (uint16_t)(mem[0x08 * 4 + 2] | (mem[0x08 * 4 + 3] << 8));
 	const uint16_t i8Off = (uint16_t)(mem[0x08 * 4] | (mem[0x08 * 4 + 1] << 8));
-	/* Hanse/Omar: AIL stubs live in HOOT CS (INT8 = CS:040E). A low-memory
-	   false match at 1200h FarCalls into INT6 and starves IRQ0. */
+	/* Hanse/Omar: AIL stub は HOOT CS（INT8 = CS:040E）。1200h の低メモリ誤マッチが INT6 へ FarCall し IRQ0 を飢える。 */
 	PcatAilTrace("findenter i8=%04X:%04X skip=%04X sig=%d\n",
 		i8Seg, i8Off, skipSeg,
 		PcatHootInt8Sig(mem, ((unsigned)i8Seg << 4) + i8Off));
@@ -847,8 +818,7 @@ uint16_t PcatFindAilApiCs(const uint8_t* mem, uint16_t skipSeg)
 	return 0;
 }
 
-/* XMIDI TIMB: count, then {patch,bank}*. Hanse/Lost Vikings GTL files have
-   100+ entries; dumping the first 24 never reaches the patches the song uses. */
+/* XMIDI TIMB: カウント、次いで {patch,bank}*。Hanse/Lost Vikings GTL は 100+ エントリ。先頭 24 をダンプしても曲が使うパッチに届かない。 */
 int PcatXmiTimbList(const uint8_t* d, unsigned n, uint16_t* out, int maxn)
 {
 	if (!d || n < 16 || !out || maxn <= 0) return 0;
@@ -881,10 +851,7 @@ int PcatXmiTimbList(const uint8_t* d, unsigned n, uint16_t* out, int maxn)
 	return 0;
 }
 
-/* Hanse XMI EVNT starts with FF 01 08 "*MERGED*" / "*UNDO*". AIL's XMIDI
-   parser does not skip generic MIDI text metas, so the rest of the track
-   never yields note-ons (OPL writes from 156, keys=0). Zero the tag; XMIDI
-   delay-0 bytes are harmless. Omar/LV have no such tag. */
+/* Hanse XMI EVNT は FF 01 08 "*MERGED*"／"*UNDO*" で始まる。AIL の XMIDI パーサは汎用 MIDI テキストメタを飛ばさないので、残りのトラックがノートオンを出さない（OPL 書き 156、keys=0）。タグをゼロ。XMIDI delay-0 バイトは無害。Omar/LV にそのタグは無い。 */
 void PcatXmiWipeSeqTextMeta(uint8_t* d, unsigned n)
 {
 	static const char* tags[] = { "*MERGED*", "*UNDO*", NULL };
@@ -901,6 +868,7 @@ void PcatXmiWipeSeqTextMeta(uint8_t* d, unsigned n)
 	}
 }
 
+/* PcatAilTrace の実装 */
 void PcatAilTrace(const char* fmt, ...)
 {
 	const char* p = getenv("CEMU_PCAT_AIL");
@@ -914,7 +882,7 @@ void PcatAilTrace(const char* fmt, ...)
 	fclose(f);
 }
 
-} /* namespace */
+} /* 名前空間 */
 
 static int s_pcatHootNullGtl = 0;
 
@@ -934,9 +902,7 @@ enum {
 	PCAT_SAA_HZ = 7159090,
 	PCAT_PIT_HZ = 1193182,
 	PCAT_TIMER_VEC = 0x08,
-	/* Idle HLT must sit past the 0060:0000–01FF trampoline traps
-	   (TrapVector = IP/2). Parking on INT 0's HLT;IRET pops the DOS
-	   stack and CODE.COM resumes in zeroed RAM (IP 12C0). */
+	/* アイドル HLT は 0060:0000–01FF トランポリントラップ（TrapVector = IP/2）より先。INT 0 の HLT;IRET に置くと DOS スタックを pop し CODE.COM がゼロ RAM で再開（IP 12C0）。 */
 	PCAT_IDLE_IP = 0x0250,
 	PIC_SLAVE_CMD = 0xA0,
 	PIC_SLAVE_MASK = 0xA1,
@@ -944,25 +910,25 @@ enum {
 	KBC_STAT = 0x64,
 	CMOS_ADDR = 0x70,
 	CMOS_DATA = 0x71,
-	/* AdLib / SB OPL */
+	/* HOOT アイドル番兵: 未使用ハンドルは FFFF。0→FFFF に強制しない — AIL ドライバ／シーケンスハンドル 0 は有効。INT7F play 後に消すと成功した AIL_register_driver を取り消す。 */
 	ADLIB_ADDR = 0x388,
 	ADLIB_DATA = 0x389,
-	/* CMS / Game Blaster (MAME gblaster.cpp) */
+	/* [0444] はファイル名ではなく常駐 ADV イメージを既に指す。MIDI.ADV は 7KB。16KB OPL blob 扱いすると 232Dh 量子フォールバックがドライバを越えて書く。 */
 	CMS_DATA0 = 0x220,
 	CMS_ADDR0 = 0x221,
 	CMS_DATA1 = 0x222,
 	CMS_ADDR1 = 0x223,
-	/* IBM PIT / PIC / PPI */
+	/* ファイル名を [0444] に残し、常駐コピーも載せる。2 回目 INT21 open/alloc が play 途中で失敗しても HOOT ADV ローダ far 先が DX:AX = イメージを返せる。 */
 	PIT_CT0 = 0x40,
 	PIT_CT2 = 0x42,
 	PIT_CTRL = 0x43,
 	PIC_CMD = 0x20,
 	PIC_MASK = 0x21,
 	PORT_61 = 0x61,
-	/* MPU-401 UART (MAME isa mpu401 default) */
+	/* MPU-401 UART（MAME isa mpu401 既定） */
 	MPU_DATA = 0x330,
 	MPU_STAT = 0x331,
-	/* hoot EXT (same as PC-98) */
+	/* hoot EXT（PC-98 と同じ） */
 	EXT_CMD = 0x07E0,
 	EXT_SONG = 0x07E2,
 	EXT_PARAM = 0x07E4,
@@ -972,19 +938,17 @@ enum {
 static CHardPcat* g_pcatActive = NULL;
 static int g_pcatEoi = 0;
 
-/* IBM AT CMOS / slave 8259 / 8042. File-static so CHardPcat stays unchanged
-   (any new member forces a full k2 rebuild of every object that includes the
-   header). */
+/* IBM AT CMOS／スレーブ 8259／8042。ファイル静的にして CHardPcat を変えない（新メンバはヘッダを include する全オブジェクトの k2 全再ビルドを強制する）。 */
 static uint8_t s_cmosIdx;
 static uint8_t s_cmos[128];
 static uint8_t s_picSlaveMask;
 static uint8_t s_picSlaveIcw;
 static uint8_t s_picSlaveIcw1;
-/* MPU-401 intelligent CTH — file-static so CHardPcat layout stays put. */
+/* MPU-401 intelligent CTH — ファイル静的で CHardPcat レイアウトを固定 */
 static int s_mpuClockToHost;
 static int s_mpuCthArmed;
 static int s_mpuPlay;
-/* Mok .RLP wants DATA REQUEST F0; KAJA MMD.COM INT 71 ISR only clocks on FD. */
+/* Mok .RLP は DATA REQUEST F0 を欲する。KAJA MMD.COM INT 71 ISR は FD でのみクロック */
 static int s_mpuMokDataReq;
 static int s_ailFarCli;
 static uint8_t s_mpuTempo = 0x40;
@@ -994,6 +958,7 @@ static int s_mpuInService;
 static uint16_t s_mpuIsrSs;
 static uint16_t s_mpuIsrSp;
 
+/* PcatCmosInit の実装 */
 static void PcatCmosInit()
 {
 	memset(s_cmos, 0, sizeof(s_cmos));
@@ -1009,14 +974,14 @@ static void PcatCmosInit()
 	s_mpuTimebase = 120;
 	s_mpuCthResidual = 0;
 	s_mpuInService = 0;
-	s_cmos[0x0A] = 0x26; /* 32.768 kHz, rate 6 */
-	s_cmos[0x0B] = 0x02; /* 24-hour */
-	s_cmos[0x0D] = 0x80; /* battery good */
-	s_cmos[0x10] = 0x40; /* 1.44M floppy */
-	s_cmos[0x14] = 0x21; /* match BDA equipment */
-	s_cmos[0x15] = 0x80; /* base 640K */
+	s_cmos[0x0A] = 0x26; /* 32.768 kHz、レート 6 */
+	s_cmos[0x0B] = 0x02; /* 24 時間制 */
+	s_cmos[0x0D] = 0x80; /* バッテリ良好 */
+	s_cmos[0x10] = 0x40; /* 1.44M フロッピー */
+	s_cmos[0x14] = 0x21; /* BDA 装備に合わせる */
+	s_cmos[0x15] = 0x80; /* 基本 640K */
 	s_cmos[0x16] = 0x02;
-	s_cmos[0x32] = 0x19; /* century BCD */
+	s_cmos[0x32] = 0x19; /* 世紀 BCD */
 	s_cmos[0x07] = 0x24;
 	s_cmos[0x08] = 0x12;
 	s_cmos[0x09] = 0x96;
@@ -1027,11 +992,11 @@ static void PcatCmosInit()
 	s_cmos[0x2F] = (uint8_t)sum;
 }
 
+/* BIOS／糊をメモリへ植える */
 static void PlantAtBiosRom(uint8_t* mem)
 {
 	if (!mem) return;
-	/* INT 15h AH=C0 table at F000:E000 — model FC / submodel 01 (5170).
-	   Feature 0x74 = 2nd 8259 + RTC + wait; no EBDA bit. */
+	/* INT 15h AH=C0 表 @ F000:E000 — モデル FC／サブモデル 01（5170）。機能 0x74 = 第 2 8259＋RTC＋wait。EBDA ビット無し。 */
 	mem[0xFE000] = 8;
 	mem[0xFE001] = 0;
 	mem[0xFE002] = 0xFC;
@@ -1042,33 +1007,36 @@ static void PlantAtBiosRom(uint8_t* mem)
 	mem[0xFE007] = 0;
 	mem[0xFE008] = 0;
 	mem[0xFE009] = 0;
-	/* Dummy POST so a far jump through the reset vector does not fetch 00. */
-	mem[0xFE05B] = 0xFB; /* STI */
-	mem[0xFE05C] = 0xF4; /* HLT */
+	/* ダミー POST。リセットベクタ経由の far jump が 00 を fetch しない */
+	mem[0xFE05B] = 0xFB; /* 命令 STI */
+	mem[0xFE05C] = 0xF4; /* 命令 HLT */
 	mem[0xFE05D] = 0xEB;
 	mem[0xFE05E] = 0xFD;
-	mem[0xFFFF0] = 0xEA; /* JMP F000:E05B */
+	mem[0xFFFF0] = 0xEA; /* INT7F play は既に ADV をマップ。[0444] はまだファイル名または 0 のことがある。バイトで常駐 Miles ヘッダを探す。 */
 	mem[0xFFFF1] = 0x5B;
 	mem[0xFFFF2] = 0xE0;
 	mem[0xFFFF3] = 0x00;
 	mem[0xFFFF4] = 0xF0;
 	memcpy(mem + 0xFFFF5, "01/01/88", 8);
-	mem[0xFFFFE] = 0xFC; /* IBM AT */
+	mem[0xFFFFE] = 0xFC; /* IBM AT 機種 */
 	mem[0xFFFFF] = 0x00;
 }
 
+/* PcatOut8 の実装 */
 static void PcatOut8(unsigned port, unsigned char val)
 {
 	CHardPcat* hw = g_pcatActive;
 	if (hw) hw->PortOut((uint16_t)port, (uint8_t)val);
 }
 
+/* PcatIn8 の実装 */
 static unsigned char PcatIn8(unsigned port)
 {
 	CHardPcat* hw = g_pcatActive;
 	return hw ? hw->PortIn((uint16_t)port) : 0x00;
 }
 
+/* CEmuParseOptHex の実装 */
 static int CEmuParseOptHex(const CEmuGameEntry* ge, const char* name, int defVal)
 {
 	if (!ge || !name) return defVal;
@@ -1081,6 +1049,7 @@ static int CEmuParseOptHex(const CEmuGameEntry* ge, const char* name, int defVal
 	return defVal;
 }
 
+/* DosStripHash の実装 */
 static void DosStripHash(const char* in, char* out, int outCap)
 {
 	if (!out || outCap <= 0) return;
@@ -1095,6 +1064,7 @@ static void DosStripHash(const char* in, char* out, int outCap)
 		out[--n] = 0;
 }
 
+/* DosSplitCmd の実装 */
 static void DosSplitCmd(const char* cmdline, char* name, int nameCap, char* tail, int tailCap)
 {
 	if (name && nameCap > 0) name[0] = 0;
@@ -1112,6 +1082,7 @@ static void DosSplitCmd(const char* cmdline, char* name, int nameCap, char* tail
 		strncpy_s(tail, (size_t)tailCap, sp, _TRUNCATE);
 }
 
+/* DosIsEngineName の実装 */
 static int DosIsEngineName(const char* name)
 {
 	if (!name || !name[0]) return 0;
@@ -1225,6 +1196,7 @@ CHardPcat::~CHardPcat()
 	Shutdown();
 }
 
+/* チップと CPU を生成する */
 int CHardPcat::Init(const CEmuGameEntry* ge, int sampleRate)
 {
 	if (!ge) return 0;
@@ -1232,8 +1204,7 @@ int CHardPcat::Init(const CEmuGameEntry* ge, int sampleRate)
 	if (!profInit) { profInit = 1; PcatIpProfInit(); }
 	sampleRate_ = sampleRate > 0 ? sampleRate : 44100;
 	cpuHz_ = PCAT_CPU_HZ;
-	/* Catalog clockmul (often 5–8) is for DOS boot only — applying it to
-	   realtime Render multiplies host CPU by the same factor. */
+	/* カタログ clockmul（しばしば 5–8）は DOS ブート専用 — リアルタイム Render に適用するとホスト CPU も同じ倍率。 */
 	bootClockMul_ = CEmuParseOptHex(ge, "clockmul", 0);
 	if (bootClockMul_ <= 0) bootClockMul_ = CEmuParseOptHex(ge, "clock_mul", 1);
 	if (bootClockMul_ < 1) bootClockMul_ = 1;
@@ -1252,11 +1223,10 @@ int CHardPcat::Init(const CEmuGameEntry* ge, int sampleRate)
 	modeBeep_ = ((_stricmp(ge->subtype, "beep") == 0
 		|| _stricmp(ge->subtype, "tandy") == 0
 		|| modePs1_) && !modeMidi_) ? 1 : 0;
-	/* An AdLib card has no mixer, and answering one lets a Miles driver
-	   pick the Sound Blaster output path on a machine that is not one. */
+	/* AdLib カードにミキサは無い。答えると Miles ドライバが SB でないマシンで Sound Blaster 出力経路を選ぶ。 */
 	modeSb_ = (_strnicmp(ge->subtype, "soundblaster", 12) == 0) ? 1 : 0;
 
-	/* Always keep OPL — AdLib/SB and MIDI soft fallback. CMS adds SAA. */
+	/* OPL は常に残す — AdLib/SB と MIDI ソフトフォールバック。CMS は SAA を足す。 */
 	chip_ = CEmuChipYm3812Create((uint32_t)oplHz_, sampleRate_);
 	if (!chip_) return 0;
 	if (modeCms_) {
@@ -1291,6 +1261,7 @@ int CHardPcat::Init(const CEmuGameEntry* ge, int sampleRate)
 	return 1;
 }
 
+/* チップ／CPU／ROM を破棄する */
 void CHardPcat::Shutdown()
 {
 	PCAT_CENSUS("end");
@@ -1315,6 +1286,7 @@ void CHardPcat::Shutdown()
 	if (g_pcatActive == this) g_pcatActive = NULL;
 }
 
+/* ゲストから見えるメモリ */
 uint8_t* CHardPcat::Mem()
 {
 	if (CEmuNp2IsOwner(this)) {
@@ -1325,6 +1297,7 @@ uint8_t* CHardPcat::Mem()
 	return np2Ram_ ? np2Ram_ : np2_mem();
 }
 
+/* NP2 RAM スナップショットを確保する */
 int CHardPcat::EnsureNp2Ram()
 {
 	if (np2Ram_)
@@ -1338,6 +1311,7 @@ int CHardPcat::EnsureNp2Ram()
 	return 1;
 }
 
+/* ライブ NP2 コアをこのハードへ切替する */
 void CHardPcat::BindNp2()
 {
 	if (!EnsureNp2Ram())
@@ -1345,6 +1319,7 @@ void CHardPcat::BindNp2()
 	CEmuNp2Bind(this, np2Ram_, np2Cpu_, np2HaveCpu_);
 }
 
+/* I/O フックを NP2 へ接続する */
 void CHardPcat::AttachIoHooks()
 {
 	g_pcatActive = this;
@@ -1352,6 +1327,7 @@ void CHardPcat::AttachIoHooks()
 	hootrip_inp8 = PcatIn8;
 }
 
+/* I/O フックを外す */
 void CHardPcat::DetachIoHooks()
 {
 	if (g_pcatActive == this) {
@@ -1361,6 +1337,7 @@ void CHardPcat::DetachIoHooks()
 	}
 }
 
+/* CEmuHardPcatSetActive の実装 */
 void CEmuHardPcatSetActive(CHardPcat* hw)
 {
 	if (!hw) {
@@ -1377,6 +1354,7 @@ void CEmuHardPcatSetActive(CHardPcat* hw)
 	hootrip_inp8 = PcatIn8;
 }
 
+/* CHardPcat::IvtHooked の実装 */
 int CHardPcat::IvtHooked(uint8_t vec) const
 {
 	uint8_t* mem = np2_mem();
@@ -1384,13 +1362,12 @@ int CHardPcat::IvtHooked(uint8_t vec) const
 	const unsigned off = (unsigned)mem[vec * 4] | ((unsigned)mem[vec * 4 + 1] << 8);
 	const unsigned seg = (unsigned)mem[vec * 4 + 2] | ((unsigned)mem[vec * 4 + 3] << 8);
 	if (seg == 0 && off == 0) return 0;
-	/* Trampoline segment = still default HLT/IRET. */
+	/* トランポリンセグメント = まだ既定 HLT/IRET */
 	if (seg == DOS98_TRAMP_SEG) return 0;
 	return 1;
 }
 
-/* DOS trampoline HLT;IRET stubs. INT 08's BIOS INT 1C chain is delivered
-   from DeliverIrqs — SOUND.COM often stops chaining the previous vector. */
+/* DOS トランポリン HLT;IRET stub。INT 08 の BIOS INT 1C チェインは DeliverIrqs から配送。SOUND.COM はしばしば前ベクタのチェインを止める。 */
 static int PcatTrampolineHlt(CEmuDos98* dos, uint8_t* mem,
 	uint16_t cs, uint16_t ip, CEmuDos98Result* outRes)
 {
@@ -1406,6 +1383,7 @@ static int PcatTrampolineHlt(CEmuDos98* dos, uint8_t* mem,
 	return 1;
 }
 
+/* CHardPcat::PitOut の実装 */
 void CHardPcat::PitOut(uint16_t port, uint8_t data)
 {
 	if (port == PIT_CTRL) {
@@ -1437,7 +1415,7 @@ void CHardPcat::PitOut(uint16_t port, uint8_t data)
 			pit2WriteHi_ = 0;
 			pit2Counter_ = pit2Reload_ ? pit2Reload_ : 65536u;
 			pit2Running_ = 1;
-			/* Mode 3 square: phase increment per host sample. */
+			/* モード 3 矩形: ホストサンプルあたり位相増分 */
 			if (pit2Reload_ > 0 && sampleRate_ > 0) {
 				const double hz = (double)pitClockHz_ / (double)pit2Reload_;
 				spkPhaseInc_ = (uint64_t)(hz * 4294967296.0 / (double)sampleRate_);
@@ -1460,6 +1438,7 @@ void CHardPcat::PitOut(uint16_t port, uint8_t data)
 	}
 }
 
+/* CHardPcat::PitIn の実装 */
 uint8_t CHardPcat::PitIn(uint16_t port)
 {
 	if (port == PIT_CT0) {
@@ -1469,9 +1448,7 @@ uint8_t CHardPcat::PitIn(uint16_t port)
 		return (uint8_t)(v >> 8);
 	}
 	if (port == PIT_CT2) {
-		/* ADLIBM.COM (Infogrames) calibrates delays by latching PIT2 in a
-		   CLI spin. Each ISA IN burns time; kick the counter so the 0x0200
-		   countdown's high byte can reach 0 instead of timing out at CX=FFFF. */
+		/* ADLIBM.COM（Infogrames）は CLI スピンで PIT2 をラッチして遅延を校正。各 ISA IN が時間を燃やす。カウンタを蹴り 0x0200 カウントダウンの上位バイトが 0 に届くようにする（CX=FFFF でタイムアウトしない）。 */
 		if (pit2Running_ && (port61_ & 0x01) && cpuHz_ > 0 && pitClockHz_ > 0) {
 			uint64_t one = ((uint64_t)cpuHz_ + (uint64_t)pitClockHz_ - 1ull)
 				/ (uint64_t)pitClockHz_;
@@ -1486,6 +1463,7 @@ uint8_t CHardPcat::PitIn(uint16_t port)
 	return 0xff;
 }
 
+/* CHardPcat::PitTick の実装 */
 void CHardPcat::PitTick(uint64_t cpuCycles)
 {
 	if (cpuHz_ <= 0) return;
@@ -1523,6 +1501,7 @@ void CHardPcat::PitTick(uint64_t cpuCycles)
 	}
 }
 
+/* PIT／VSYNC 等のサイドデバイスを進める */
 void CHardPcat::TickSide(uint64_t cpuCycles)
 {
 	PitTick(cpuCycles);
@@ -1536,23 +1515,17 @@ void CHardPcat::TickSide(uint64_t cpuCycles)
 			if (mpuAckR_ != mpuAckW_ || mpuRxFull_)
 				break;
 			s_mpuCthResidual -= (uint64_t)cpuHz_;
-			/* Hired Guns Mok CODE.COM streams .RLP on DATA REQUEST (F0).
-			   AT MMD.COM's INT 71 ISR only sequences on FD (`cmp al,0FDh`). */
+			/* Hired Guns Mok CODE.COM は DATA REQUEST（F0）で .RLP をストリーム。AT MMD.COM の INT 71 ISR は FD でのみシーケンス（`cmp al,0FDh`）。 */
 			MidiPushAck((s_mpuPlay && s_mpuMokDataReq) ? (uint8_t)0xf0 : (uint8_t)0xfd);
 		}
 	}
 }
 
+/* ゲスト状態を修復する */
 void CHardPcat::RepairSilpDriverFar()
 {
 	if (!modeSilp_) return;
-	/* silp_at.com keeps a far ptr at CS:026B (off) / CS:026D (seg) to the
-	   loaded *.DRV. Sierra drivers store their OPL base (0x220/0x388) at
-	   DS:026D when DS still points at silp — clobbering the far segment and
-	   sending later calls to 0220:0000 (silence, no key-on).
-	   CS:0275 (song buffer seg) is similarly overwritten during BP=2 init,
-	   which runs *before* INT 7Fh is hooked — snapshot via PSP early.
-	   Driver far-ptr restore stays INT-7Fh-only (avoids sex_at false scans). */
+	/* silp_at.com は載った *.DRV への far ptr を CS:026B（off）／CS:026D（seg）に保つ。Sierra ドライバは DS がまだ silp を指すとき OPL 基点（0x220/0x388）を DS:026D に格納し far セグメントを壊し、後続呼び出しを 0220:0000 へ送る（無音、キーオン無し）。CS:0275（曲バッファ seg）も BP=2 init 中に上書きされる。それは INT 7Fh フック前 — PSP 経由で早くスナップショット。ドライバ far-ptr 復元は INT-7Fh のみ（sex_at 誤スキャン回避）。 */
 	uint8_t* mem = np2_mem();
 	if (!mem) return;
 
@@ -1567,7 +1540,7 @@ void CHardPcat::RepairSilpDriverFar()
 	const unsigned base = (unsigned)silpCs << 4;
 	if (base + 0x278 >= 0x200000) return;
 
-	/* Hot path: only heal dig ptr. Full song/DRV repair is rare. */
+	/* ホットパス: dig ptr だけ直す。完全な曲／DRV 修復は稀 */
 	if (IvtHooked(0x7F)) {
 		const uint16_t p284 = (uint16_t)(mem[base + 0x284] | (mem[base + 0x285] << 8));
 		if (p284 != 0x0273) {
@@ -1590,19 +1563,18 @@ void CHardPcat::RepairSilpDriverFar()
 	auto looksDrv = [&](uint16_t s) -> int {
 		if (s < 0x1000 || s >= 0xA000) return 0;
 		const unsigned a = (unsigned)s << 4;
-		/* Sierra DRV: near jmp + magic / "xxxdrv" name field. */
+		/* Sierra DRV: near jmp＋マジック／"xxxdrv" 名フィールド */
 		if (mem[a] == 0xE9 && mem[a + 4] == 0x21) return 1;
 		if (mem[a + 8] == 'd' && mem[a + 9] == 'r' && mem[a + 10] == 'v') return 1;
 		return 0;
 	};
 	auto looksSongBuf = [&](uint16_t s) -> int {
-		/* Song alloc is third (after DRV / PATCH). Sorcerian lands near 0x113C.
-		   Prefer SCI magic; also accept empty/non-DRV/non-PATCH paras. */
+		/* 曲 alloc は 3 番目（DRV／PATCH のあと）。Sorcerian は 0x113C 付近。SCI マジックを優先。空／非 DRV／非 PATCH 段落も受け入れる。 */
 		if (s < 0x1000 || s >= 0xA000 || looksDrv(s)) return 0;
 		const unsigned a = (unsigned)s << 4;
 		if (a + 2 >= 0x200000) return 0;
 		if (mem[a] == 0x84 && mem[a + 1] == 0x00) return 1;
-		if (mem[a] == 0x89) return 0; /* PATCH.00x */
+		if (mem[a] == 0x89) return 0; /* PATCH.00x ファイル */
 		return 1;
 	};
 
@@ -1614,7 +1586,7 @@ void CHardPcat::RepairSilpDriverFar()
 		mem[base + 0x276] = (uint8_t)(silpSongSeg_ >> 8);
 	}
 
-	/* Far-ptr restore only once INT 7Fh identifies this as Sierra silp. */
+	/* INT 7Fh がこれを Sierra silp と識別したあとだけ far-ptr 復元 */
 	if (!IvtHooked(0x7F)) return;
 
 	uint16_t seg = (uint16_t)(mem[base + 0x26D] | (mem[base + 0x26E] << 8));
@@ -1643,17 +1615,19 @@ void CHardPcat::RepairSilpDriverFar()
 	silpScanDone_ = 1;
 }
 
+/* CHardPcat::SbMixerReset の実装 */
 void CHardPcat::SbMixerReset()
 {
 	memset(sbMixer_, 0, sizeof(sbMixer_));
-	sbMixer_[0x04] = 0xEE; /* voice   L/R */
-	sbMixer_[0x0A] = 0x06; /* mic */
-	sbMixer_[0x22] = 0xEE; /* master  L/R */
-	sbMixer_[0x26] = 0xEE; /* FM      L/R */
+	sbMixer_[0x04] = 0xEE; /* ボイス L/R */
+	sbMixer_[0x0A] = 0x06; /* マイク */
+	sbMixer_[0x22] = 0xEE; /* マスタ L/R */
+	sbMixer_[0x26] = 0xEE; /* HOOT play: push [446]; push [444]; CALL FAR loader。そのローダ入口だけ付け替え、載った ADV セグメントを返す（mov dx,seg／xor ax,ax／retf）— 成功ロードと同じ結果。 */
 	sbMixer_[0x28] = 0x00; /* CD */
-	sbMixer_[0x2E] = 0x00; /* line */
+	sbMixer_[0x2E] = 0x00; /* ライン */
 }
 
+/* CHardPcat::SbDspPush の実装 */
 void CHardPcat::SbDspPush(uint8_t v)
 {
 	sbDspQueue_[sbDspQueueW_ & 3] = v;
@@ -1661,6 +1635,7 @@ void CHardPcat::SbDspPush(uint8_t v)
 	sbDspReadAvail_ = 1;
 }
 
+/* CHardPcat::CmsTrackSaa の実装 */
 void CHardPcat::CmsTrackSaa(int chip, uint8_t data)
 {
 	if (!modeCms_ || chip < 0 || chip > 1) return;
@@ -1684,7 +1659,7 @@ void CHardPcat::CmsTrackSaa(int chip, uint8_t data)
 		const int en = (saaEn_[chip] >> ch) & 1;
 		const int amp = (saaAmp_[chip][ch] & 0x0f) | ((saaAmp_[chip][ch] >> 4) & 0x0f);
 		const int on = (en && amp > 0) ? 1 : 0;
-		/* Match chip Freq(): clock / (2 * ((511-f) << (8-oct))). */
+		/* チップ Freq() に合わせる: clock / (2 * ((511-f) << (8-oct))) */
 		const int freq = saaFreq_[chip][ch];
 		const int oct = saaOct_[chip][ch] & 7;
 		const unsigned period = (unsigned)((511 - freq) > 0 ? (511 - freq) : 1) << (8 - oct);
@@ -1695,9 +1670,7 @@ void CHardPcat::CmsTrackSaa(int chip, uint8_t data)
 	}
 }
 
-/* AIL OPL ADVs keep an XMIDI "quantum" word in CS BSS. Timer serve skips
-   voice updates while it stays 0. ADLIB.ADV uses [232D]; SBP2FM.ADV (larger
-   code) shifts the same slot to [295B]. Discover via clear+inc pair. */
+/* AIL OPL ADV は CS BSS に XMIDI 「量子」ワードを置く。0 の間タイマサービスはボイス更新を飛ばす。ADLIB.ADV は [232D]。SBP2FM.ADV（大きいコード）は同じスロットを [295B] へずらす。clear+inc 対で発見。 */
 static uint16_t FindHootAdvQuantumOff(const uint8_t* data, unsigned size)
 {
 	if (!data || size < 16) return 0;
@@ -1707,9 +1680,7 @@ static uint16_t FindHootAdvQuantumOff(const uint8_t* data, unsigned size)
 			continue;
 		if (data[off + 5] != 0 || data[off + 6] != 0) continue;
 		const uint16_t t = (uint16_t)(data[off + 3] | (data[off + 4] << 8));
-		/* OPL ADVs keep the pair in 1800h–3800h (ADLIB 232Dh, SBP2FM 295Bh).
-		   MIDI.ADV is a 7KB MPU driver whose pair sits at 04BFh/04C3h — the
-		   OPL window skipped it, the 232Dh fallback wrote past the image. */
+		/* OPL ADV は対を 1800h–3800h に置く（ADLIB 232Dh、SBP2FM 295Bh）。MIDI.ADV は 7KB MPU ドライバで対が 04BFh/04C3h — OPL 窓はそれを飛ばし、232Dh フォールバックがイメージを越えて書いた。 */
 		if (t > 0x3800) continue;
 		if (t < 0x0400) continue;
 		if (t < 0x1800 && size > 0x3000) continue;
@@ -1723,17 +1694,14 @@ static uint16_t FindHootAdvQuantumOff(const uint8_t* data, unsigned size)
 			}
 		}
 		if (!hasInc) continue;
-		/* Paired counters (ADLIB 232D/2331) — feed the low one. MIDI.ADV
-		   serve tests 04C3h; poking that word desyncs native serve. */
+		/* 対カウンタ（ADLIB 232D/2331）— 下位を給電。MIDI.ADV サービスは 04C3h を見る。そのワードを poke するとネイティブサービスがずれる。 */
 		if (!bestLow || t < bestLow)
 			bestLow = t;
 	}
 	return bestLow;
 }
 
-/* Runtime OPL base port lives in ADV CS (mov dx,cs:[imm]). Detect/init should
-   fill it from default_IO; when detect fails it stays 0 and every OUT DX hits
-   port 0 — silent SBP2FM with oplW≈detect-only. */
+/* 実行時 OPL 基点ポートは ADV CS（mov dx,cs:[imm]）。detect/init が default_IO から埋めるはず。detect 失敗で 0 のままだと毎 OUT DX がポート 0 — oplW≈detect のみの無音 SBP2FM。 */
 static uint16_t FindHootAdvIoOff(const uint8_t* data, unsigned size)
 {
 	if (!data || size < 16) return 0;
@@ -1758,9 +1726,10 @@ static uint16_t FindHootAdvIoOff(const uint8_t* data, unsigned size)
 	return (bestN >= 2) ? (uint16_t)bestOff : (uint16_t)0;
 }
 
+/* FindHootAdvDefaultIo の実装 */
 static uint16_t FindHootAdvDefaultIo(const uint8_t* data, unsigned size)
 {
-	/* describe_driver default_IO sits after the "OPL\0" / near "Ad Lib" label. */
+	/* describe_driver default_IO は "OPL\0"／近くの "Ad Lib" ラベルのあと */
 	if (!data || size < 12) return 0;
 	for (unsigned i = 0; i + 12 < size; i++) {
 		if (data[i] == 'O' && data[i + 1] == 'P' && data[i + 2] == 'L' && data[i + 3] == 0) {
@@ -1769,7 +1738,7 @@ static uint16_t FindHootAdvDefaultIo(const uint8_t* data, unsigned size)
 		}
 		if (data[i] == 'A' && data[i + 1] == 'd' && data[i + 2] == ' '
 			&& data[i + 3] == 'L' && data[i + 4] == 'i' && data[i + 5] == 'b') {
-			/* ADLIB.ADV: default_IO dword-aligned before the name table. */
+			/* ADLIB.ADV: 名表の前で default_IO が dword 整列 */
 			if (i >= 4) {
 				const uint16_t v = (uint16_t)(data[i - 4] | (data[i - 3] << 8));
 				if (v == 0x220 || v == 0x240 || v == 0x388) return v;
@@ -1779,10 +1748,10 @@ static uint16_t FindHootAdvDefaultIo(const uint8_t* data, unsigned size)
 	return 0;
 }
 
+/* CHardPcat::PrepHootAilState の実装 */
 void CHardPcat::PrepHootAilState()
 {
-	/* Observe HOOT DS after INT 7Fh is live — do not patch guest binaries.
-	   Record ADV name / quantum / IO offsets for IRQ0 quantum feed only. */
+	/* INT 7Fh が生きたあと HOOT DS を観察 — ゲストバイナリはパッチしない。IRQ0 量子給電用に ADV 名／量子／IO オフセットだけ記録。 */
 	if (!IvtHooked(0x7F)) return;
 	uint8_t* mem = np2_mem();
 	if (!mem) return;
@@ -1805,7 +1774,7 @@ void CHardPcat::PrepHootAilState()
 			ds = (uint16_t)(mem[lin + i + 1] | (mem[lin + i + 2] << 8));
 			break;
 		}
-		/* Tiny-model HOOT: mov ax,cs / mov ds,ax — data lives in INT7F CS. */
+		/* Tiny モデル HOOT: mov ax,cs／mov ds,ax — データは INT7F CS */
 		if (mem[lin + i] == 0x8C && mem[lin + i + 1] == 0xC8
 			&& mem[lin + i + 2] == 0x8E && mem[lin + i + 3] == 0xD8) {
 			ds = (uint16_t)seg;
@@ -1824,9 +1793,7 @@ void CHardPcat::PrepHootAilState()
 		mem[base + o] = (uint8_t)(v & 0xff);
 		mem[base + o + 1] = (uint8_t)(v >> 8);
 	};
-	/* HOOT idle sentinels: unused handles are FFFF. Do NOT coerce 0→FFFF —
-	   AIL driver/sequence handle 0 is valid; wiping it after INT7F play
-	   undoes a successful AIL_register_driver. */
+	/* Play ポンプアイドル: トラップベクタではない */
 
 	const uint16_t drvOff = rd(0x444);
 	const uint16_t drvSeg = rd(0x446);
@@ -1835,9 +1802,7 @@ void CHardPcat::PrepHootAilState()
 	if (nameLin + 12 < 0x200000 && drvSeg >= 0x100 && drvSeg < 0xA000) {
 		if (mem[nameLin] == 0x2D && mem[nameLin + 1] == 0x00
 			&& mem[nameLin + 2] == 'C' && mem[nameLin + 3] == 'o') {
-			/* [0444] already points at the resident ADV image, not the
-			   filename. MIDI.ADV is 7KB; treating it as a 16KB OPL blob made
-			   the 232Dh quantum fallback write past the driver. */
+			/* AIL は前 INT8（0060:0010）へ pushf;call far をチェイン。BDA タイマ tick を進め ADV の XMIDI 量子 [232D] が非ゼロになるようにする。 */
 			hootAdvSeg_ = drvSeg;
 			const CEmuDos98File* adv = NULL;
 			auto matchAdv = [&](const CEmuDos98File* f) -> int {
@@ -1908,9 +1873,7 @@ void CHardPcat::PrepHootAilState()
 						hootAdvQuantumOff_ = FindHootAdvQuantumOff(adv->data, adv->size);
 					if (!hootAdvIoOff_)
 						hootAdvIoOff_ = FindHootAdvIoOff(adv->data, adv->size);
-					/* Keep filename at [0444]; also stage a resident copy so the
-					   HOOT ADV-loader far target can return DX:AX = image when
-					   a second INT21 open/alloc fails mid-play. */
+					/* API_timer シグネチャ（INC word、FC、近くの 6 push）は弱く通常コードに当たる。命中すると INT 8 を書き換え、CS:000E の 2 バイトをゼロし CS:0124 の 4 バイトを書き換える。8KB シーケンサではコインフリップ: MDI.DRV 等が自分の途中へリダイレクトされ割り込みベクタ表へ走った。アーカイブが実際に HOOT .ADV ドライバをブートしたとき、またはこのタイトルで AIL が既に確認されたときだけ探す。 */
 					if (!hootAdvSeg_) {
 						const uint16_t paras = (uint16_t)((adv->size + 15u) / 16u + 0x80u);
 						uint16_t segOut = 0;
@@ -1927,8 +1890,7 @@ void CHardPcat::PrepHootAilState()
 		}
 	}
 	if (!hootAdvSeg_) {
-		/* INT7F play already mapped the ADV; [0444] is sometimes still a
-		   filename or 0. Locate the resident Miles header by its bytes. */
+		/* Azrael は既に HOOT CS:040Eh を持ち鳴る。WarCraft 2／Blackthorne は AIL CS:0000（EXE 入口）を残し INT 7Fh はしばしば AIL CS なので、旧 7Fh:040Eh のみ植込は発火しなかった。ヘルパをスキャン。API_timer を植えず AIL [000E] も書き換えない（ハング／Death mute）。 */
 		const CEmuDos98File* adv = dos_.FindFile("MIDI.ADV");
 		if (!adv && dosGe_) {
 			for (int i = 0; i < dosGe_->romCount; i++) {
@@ -1960,9 +1922,7 @@ void CHardPcat::PrepHootAilState()
 		}
 	}
 	if (hootAdvSeg_ && retargetLoader) {
-		/* HOOT play: push [446]; push [444]; CALL FAR loader.
-		   Retarget only that loader entry to return the staged ADV segment
-		   (mov dx,seg / xor ax,ax / retf) — same result as a successful load. */
+		/* 生きた非入口 ISR（Azrael 040Eh、silp、CODE.COM）。奪わない。Fix 時のトランポリンはここに戻していた。HOOT は AH=25s CS:0000、DeliverIrqs は EXE 入口を飛ばすので Blackthorne が IRQ0 を見なかった。 */
 		for (unsigned a = 0x10000; a + 13 < 0xA0000; a++) {
 			if (mem[a] != 0xFF || mem[a + 1] != 0x36 || mem[a + 2] != 0x46 || mem[a + 3] != 0x04)
 				continue;
@@ -1989,6 +1949,7 @@ void CHardPcat::PrepHootAilState()
 		FixHootAilTimer();
 }
 
+/* CHardPcat::RestoreHootIdleTrampoline の実装 */
 void CHardPcat::RestoreHootIdleTrampoline(uint8_t* mem)
 {
 	if (!mem) return;
@@ -1998,14 +1959,13 @@ void CHardPcat::RestoreHootIdleTrampoline(uint8_t* mem)
 		mem[tb + 1] = 0xEB;
 		mem[tb + 2] = 0xFD;
 	}
-	/* Play-pump idle: not a trap vector. */
+	/* Blackthorne／WarCraft 2 は INT8 を HOOT CS:0000（MZ CS:IP）に残す。ヘルパは同じ CS:040Eh。INT 7Fh はしばしば AIL を指す。PrepHootAilState の ADV 名を要求しない — INT 7Fh は AIL であり得る。 */
 	if (mem[tb + PCAT_IDLE_IP] != 0xF4) {
 		mem[tb + PCAT_IDLE_IP] = 0xF4;
 		mem[tb + PCAT_IDLE_IP + 1] = 0xEB;
 		mem[tb + PCAT_IDLE_IP + 2] = 0xFD;
 	}
-	/* AIL chains pushf;call far to the previous INT8 (0060:0010). Advance
-	   BDA timer ticks so ADV's XMIDI quantum [232D] is non-zero. */
+	/* Mok OPL HOOT-driver v1.1 は API_timer を CS:0416h に植える。detect が 0 のままなら MIDI.ADV IO=330 を種まき。AIL 100/151/170 を FarCall しない — このイメージではそれらの thunk がハングし IRQ0 予算を燃やす。 */
 	if (mem[tb + 0x10] == 0x1E && mem[tb + 0x11] == 0x50 && mem[tb + 0x1F] == 0xCF)
 		return;
 	static const uint8_t kBiosTick[] = {
@@ -2017,24 +1977,16 @@ void CHardPcat::RestoreHootIdleTrampoline(uint8_t* mem)
 	memcpy(mem + tb + 0x10, kBiosTick, sizeof(kBiosTick));
 }
 
-/* The API_timer signature (an INC word, an FC, and six pushes nearby) is weak
-   enough to hit ordinary code, and a hit rewrites INT 8, zeroes two bytes at
-   CS:000E and rewrites four at CS:0124. In an 8KB sequencer that is a coin
-   flip: MDI.DRV and friends were being redirected into the middle of
-   themselves and ran off into the interrupt vector table. Only go looking
-   when the archive actually booted a HOOT .ADV driver, or when AIL has
-   already been confirmed for this title. */
+/* v1.1 API_timer は `cmp word [si+0076h],2`。HOOT は登録タイマを停止したまま（status=1）にしがち。 */
 int CHardPcat::HootAilPossible() const
 {
 	return (hootAdvSeg_ != 0 || hootAdvName_[0] != 0 || hootAilCs_ != 0) ? 1 : 0;
 }
 
+/* ゲスト状態を修復する */
 void CHardPcat::FixHootMidiInt8()
 {
-	/* Azrael already has HOOT CS:040Eh and plays. WarCraft 2 / Blackthorne
-	   leave AIL CS:0000 (EXE entry) and INT 7Fh is often the AIL CS, so the
-	   old 7Fh:040Eh-only plant never fired. Scan for the helper. Do not
-	   plant API_timer or rewrite AIL [000E] (hang / Death mute). */
+	/* MIDI.ADV [04BF] は登録シーケンス数。v1.02 HOOT は INT 7Fh で埋める。v1.1 は MPU を初期化（GM リセット）するが AIL 151 を呼ばない。 */
 	if (!modeMidi_ || modeSilp_) return;
 	uint8_t* mem = np2_mem();
 	if (!mem) return;
@@ -2045,14 +1997,10 @@ void CHardPcat::FixHootMidiInt8()
 		return;
 	const int tramp = (i8Seg == (uint16_t)DOS98_TRAMP_SEG) || (i8Seg < 0x0100);
 	const int exeEntry = (i8Off == 0 && i8Seg >= 0x0100 && i8Seg < 0xA000);
-	/* Live non-entry ISR (Azrael 040Eh, silp, CODE.COM). Do not steal.
-	   Trampoline at Fix time used to return here; HOOT then AH=25s CS:0000
-	   and DeliverIrqs skips EXE-entry, so Blackthorne never saw IRQ0. */
+	/* 151/170 中のネスト IRQ0 は MIDI.ADV [04C3] を固める（対応 DEC 無しの再入スキップ）ので後続 tick がサービスしない。 */
 	if (!tramp && !exeEntry)
 		return;
-	/* Blackthorne / WarCraft 2 leave INT8 at HOOT CS:0000 (MZ CS:IP). The
-	   helper is the same CS:040Eh; INT 7Fh often points at AIL instead.
-	   Do not require PrepHootAilState's ADV name — INT 7Fh may be AIL. */
+	/* Mok CODE.COM＋MID.DRV: INT7F は既に SMF を AH=3F 済み（読みログがカタログサイズと一致）だが AH=0 の `les si,[03A4]` が MThd を見ないことが多い — グルー呼び出し中のネスト IRQ0、または INT 21h 時 DS が曲ブロックではない。カタログ SMF を CS:[0200] へコピーし、きれいなスタック（TickSide／IRQ 無し）で CX:DX = song:0 として MID.DRV AH=0 を far-call。 */
 	if (exeEntry && i8Seg >= 0x1200 && i8Seg < 0xA000) {
 		const unsigned base = (unsigned)i8Seg << 4;
 		static const uint16_t kTry[] = { 0x040E, 0x0416, 0x080E, 0x0411, 0x0417, 0 };
@@ -2091,11 +2039,10 @@ void CHardPcat::FixHootMidiInt8()
 	mem[0x08 * 4 + 3] = (uint8_t)(hs >> 8);
 }
 
+/* CHardPcat::StartHootMidiSequence の実装 */
 void CHardPcat::StartHootMidiSequence()
 {
-	/* Mok OPL HOOT-driver v1.1 plants API_timer at CS:0416h. Seed MIDI.ADV
-	   IO=330 if detect left it 0. Do not FarCall AIL 100/151/170 — those
-	   thunks hang on this image and burn the IRQ0 budget. */
+	/* INT8 溢れ経路は前ベクタへ `jmp far [03B0]`。それは我々の HLT トランポリンで IRET しない — 約 40 tick 後スタック／IVT が死ぬ。チェインをドライバ BSS の EOI+IRET へ向ける。 */
 	if (!modeMidi_ || modeSilp_) return;
 	uint8_t* mem = np2_mem();
 	if (!mem || !hootAdvSeg_) return;
@@ -2116,8 +2063,7 @@ void CHardPcat::StartHootMidiSequence()
 	pokeIo(0x11B, 0x331);
 	if (hootAdvIoOff_ && hootAdvIoOff_ != 0x11B)
 		pokeIo(hootAdvIoOff_, 0x330);
-	/* v1.1 API_timer does `cmp word [si+0076h],2`. HOOT often leaves
-	   registered timers stopped (status=1). */
+	/* Hired Guns／Laser Squad／Sabre Team／Shadow Worlds: Mok CODE.COM は intelligent MPU コンダクタ（IRQ9／INT 71h）。INT 7Fh cmd0 は STOP、.RLP をハンドル 0 へ AH=3F、START 無しで曲 0 を選ぶ。ロード後に B8h/0Ah＋INT 71 フックが走るよう CS:02DDh を far-call。 */
 	const uint16_t i8Seg = (uint16_t)(mem[0x08 * 4 + 2] | (mem[0x08 * 4 + 3] << 8));
 	if (i8Seg >= 0x1200 && i8Seg < 0xA000) {
 		const unsigned b = (unsigned)i8Seg << 4;
@@ -2131,8 +2077,7 @@ void CHardPcat::StartHootMidiSequence()
 			}
 		}
 	}
-	/* MIDI.ADV [04BF] is the registered-sequence count. v1.02 HOOT fills it
-	   via INT 7Fh; v1.1 inits the MPU (GM reset) but never calls AIL 151. */
+	/* 02DDh は [14FB]=1 で終わり、最初の F0 がダミー FE トラックを植える。クリアし、INT 7Fh がちょうど埋めた .RLP ポインタを 0565h が使うようにする。 */
 	if (!hootAdvSeg_ || hootAdvSize_ < 0x04C4u) return;
 	const unsigned adv = (unsigned)hootAdvSeg_ << 4;
 	if (adv + 0x04C3u >= 0x200000) return;
@@ -2204,8 +2149,7 @@ void CHardPcat::StartHootMidiSequence()
 	words[1] = hDrvr;
 	FarCallAil(170, words, 2, budget);
 	s_ailFarCli = 0;
-	/* Nested IRQ0 during 151/170 can leave MIDI.ADV [04C3] stuck (re-entry
-	   skip without the matching DEC) so later ticks never serve. */
+	/* 02DD は OUT FFh のあと B8h/0Ah し得る。MidiCmdOut FFh は Mok の F0 vs FD 分類を落としてはいけない。far-call 後に再アサート。 */
 	mem[adv + 0x04C3] = 0;
 	mem[adv + 0x04C4] = 0;
 	{
@@ -2225,13 +2169,10 @@ void CHardPcat::StartHootMidiSequence()
 	np2_reg_set(NP2_R_FLAGS, (uint16_t)(np2_reg_get(NP2_R_FLAGS) | 0x0200));
 }
 
+/* ゲスト状態を修復する */
 void CHardPcat::RepairMokMidiPlay()
 {
-	/* Mok CODE.COM + MID.DRV: INT7F already AH=3F'd the SMF (read log matches
-	   the catalog size) but AH=0's `les si,[03A4]` often does not see MThd —
-	   nested IRQ0 during the glue call, or DS at INT 21h not the song block.
-	   Copy the catalog SMF into CS:[0200] and far-call MID.DRV AH=0 with
-	   CX:DX = song:0 on a clean stack (no TickSide / IRQ). */
+	/* 02DD は OUT B8h/0Ah し得る。今は MidiCmdOut が CTH を武装する。プリロードパス（armCth=0）は .RLP がハンドル 0 に入るまで静か。 */
 	if (!modeMidi_ || modeSilp_) return;
 	if (hootAdvSeg_ || hootAdvName_[0]) return;
 	uint8_t* mem = np2_mem();
@@ -2296,9 +2237,7 @@ void CHardPcat::RepairMokMidiPlay()
 	mem[0x08 * 4 + 2] = (uint8_t)(drvSeg & 0xff);
 	mem[0x08 * 4 + 3] = (uint8_t)(drvSeg >> 8);
 	mem[drv + 0x3A3] = 1;
-	/* Overflow path of INT8 is `jmp far [03B0]` to the previous vector.
-	   That is our HLT trampoline, which never IRETs — stack/IVT die after
-	   ~40 ticks. Point the chain at EOI+IRET in the driver's BSS. */
+	/* AIL hook_timer は INT 8 を API_timer へ向けるはず。HOOT／ネスト IRQ0 は IVT を ailCS:0000 に残すか DOS トランポリンを戻すことが多い — 毎回再確認。 */
 	mem[drv + 0x5C0] = 0xB0;
 	mem[drv + 0x5C1] = 0x20;
 	mem[drv + 0x5C2] = 0xE6;
@@ -2346,12 +2285,10 @@ void CHardPcat::RepairMokMidiPlay()
 	mokDrvSeg_ = drvSeg;
 }
 
+/* ゲスト状態を修復する */
 void CHardPcat::RepairMokIntelMpu(int armCth)
 {
-	/* Hired Guns / Laser Squad / Sabre Team / Shadow Worlds: Mok CODE.COM
-	   is an intelligent MPU conductor (IRQ9 / INT 71h). INT 7Fh cmd0 STOPs,
-	   AH=3F's the .RLP into handle 0, then selects song 0 without START.
-	   Far-call CS:02DDh so B8h/0Ah + INT 71 hook run after the load. */
+	/* AIL 再入カウンタをクリアし、先のネスト IRQ0 故障が残らないようにする */
 	if (!modeMidi_ || modeSilp_) return;
 	if (hootAdvSeg_ || hootAdvName_[0]) return;
 	uint8_t* mem = np2_mem();
@@ -2427,18 +2364,15 @@ void CHardPcat::RepairMokIntelMpu(int armCth)
 		const int32_t c = np2_step();
 		cpuCycles_ += (c > 0) ? (uint64_t)c : 1ull;
 	}
-	/* 02DDh ends with [14FB]=1, which makes the first F0 plant a dummy FE
-	   track. Clear it so 0565h uses the .RLP pointers INT 7Fh just filled. */
+	/* HOOT/AIL が DOS トランポリン RAM を消す。アイドル＋BIOS tick チェインを戻す */
 	mem[com + 0x14F5] = 1;
 	mem[com + 0x10A5] = 0;
 	mem[com + 0x14FB] = 0;
 	s_picSlaveMask = (uint8_t)(s_picSlaveMask & (uint8_t)~0x02);
 	picMask_ = (uint8_t)(picMask_ & (uint8_t)~0x04);
-	/* 02DD may OUT FFh then B8h/0Ah. MidiCmdOut FFh must not drop the Mok
-	   F0-vs-FD classification; re-assert after the far-call. */
+	/* AIL の保存 BIOS タイマ ptr があれば IRET stub へ強制 */
 	s_mpuMokDataReq = 1;
-	/* 02DD may OUT B8h/0Ah, which now arms CTH in MidiCmdOut. Keep the
-	   pre-load pass (armCth=0) quiet until the .RLP is in handle 0. */
+	/* 既に 0060:0010 — 上で stub 復元済み */
 	s_mpuCthArmed = armCth ? 1 : 0;
 	np2_reg_set(NP2_R_CS, (uint16_t)DOS98_TRAMP_SEG);
 	np2_reg_set(NP2_R_IP, (uint16_t)PCAT_IDLE_IP);
@@ -2447,10 +2381,10 @@ void CHardPcat::RepairMokIntelMpu(int armCth)
 	np2_reg_set(NP2_R_FLAGS, (uint16_t)(np2_reg_get(NP2_R_FLAGS) | 0x0200));
 }
 
+/* ゲスト状態を修復する */
 void CHardPcat::FixHootAilTimer()
 {
-	/* AIL hook_timer should point INT 8 at API_timer. HOOT / nested IRQ0 often
-	   leave IVT at ailCS:0000 or restore the DOS trampoline — re-check always. */
+	/* よくある AIL2 レイアウト: dword BIOS_timer @ CS:0124 */
 	if (!HootAilPossible()) return;
 	uint8_t* mem = np2_mem();
 	if (!mem) return;
@@ -2468,19 +2402,19 @@ void CHardPcat::FixHootAilTimer()
 		mem[0x08 * 4 + 1] = (uint8_t)(found >> 8);
 		mem[0x08 * 4 + 2] = (uint8_t)(seg & 0xff);
 		mem[0x08 * 4 + 3] = (uint8_t)(seg >> 8);
-		/* Clear AIL re-entry counter so a prior nested IRQ0 fault doesn't stick. */
+		/* AIL stack_check 即値は書き換えない — ゲストバイナリを保つ */
 		mem[base + 0x0E] = 0;
 		mem[base + 0x0F] = 0;
-		/* HOOT/AIL wipe DOS trampoline RAM; restore idle + BIOS tick chain. */
+		/* 既に妥当な ISR か？残す（固まった再入ワードは直す）。API_timer を HOOT 040Eh ヘルパで置換しない: Lost Vikings は AIL CS:0417 をクロックし、偽 040Eh への入替が無音にした。 */
 		RestoreHootIdleTrampoline(mem);
-		/* If AIL's saved BIOS timer ptr is present, force it to the IRET stub. */
+		/* 未知の非ゼロハンドラ */
 		if (base + 0x128 < 0x200000
 			&& mem[base + 0x124] == 0x10 && mem[base + 0x125] == 0x00
 			&& mem[base + 0x126] == (uint8_t)(DOS98_TRAMP_SEG & 0xff)
 			&& mem[base + 0x127] == (uint8_t)(DOS98_TRAMP_SEG >> 8)) {
-			/* already 0060:0010 — stub restored above */
+			/* 既知 AIL CS を優先。さもなくば AIL データ／コードに見える現在 INT8 セグメント */
 		} else if (base + 0x128 < 0x200000) {
-			/* Common AIL2 layout: dword BIOS_timer @ CS:0124 */
+			/* INT 66h は一部ビルドの AIL マルチプレックス。スキャンへフォールバック */
 			const uint16_t bo = (uint16_t)(mem[base + 0x124] | (mem[base + 0x125] << 8));
 			const uint16_t bs = (uint16_t)(mem[base + 0x126] | (mem[base + 0x127] << 8));
 			if (bs == DOS98_TRAMP_SEG || (bs < 0x0100 && bo < 0x200)) {
@@ -2490,14 +2424,12 @@ void CHardPcat::FixHootAilTimer()
 				mem[base + 0x127] = (uint8_t)(DOS98_TRAMP_SEG >> 8);
 			}
 		}
-		/* Do not rewrite AIL stack_check immediates — keep guest binary intact. */
+		/* MIDI HOOT（Blackthorne）は INT8 をデータ CS:0000 に残す。INT 7Fh は HOOT stub。AIL API_timer は近くの CS（Azrael 1269:040E）。 */
 		hootAilCs_ = seg;
 		hootTimerFixed_ = 1;
 	};
 
-	/* Already a plausible ISR? Keep it (but heal a stuck re-entry word).
-	   Do not replace API_timer with a HOOT 040Eh helper: Lost Vikings clocks
-	   AIL CS:0417 and a swap to a false 040Eh made it SILENT. */
+	/* silp play 経路: AH=3F BX=0 を DS=[0275] へ。CS:0275 が壊れたかハンドル 0 が bind を逃したらバッファに種をまき BP=6 が本物 SCI バイトを見る。 */
 	if (i8Seg >= 0x0100 && i8Seg < 0xA000 && i8Seg != DOS98_TRAMP_SEG && i8Off != 0) {
 		const unsigned cur = ((unsigned)i8Seg << 4) + i8Off;
 		const int looksInc = (cur + 16 < 0x200000 && mem[cur] == 0xFF && mem[cur + 1] == 0x06);
@@ -2518,16 +2450,16 @@ void CHardPcat::FixHootAilTimer()
 			hootTimerFixed_ = 1;
 			return;
 		}
-		if (i8Off != 0) return; /* unknown non-zero handler */
+		if (i8Off != 0) return; /* 空 alloc は埋めてよい。明らかな DRV イメージは拒否 */
 
 	}
 
-	/* Prefer known AIL CS, else current INT8 seg if it looks like AIL data/code. */
+	/* Sorcerian SS*（約 15KB+）は silp COM のすぐ上に確保された。SS=DS=silp、SP=7F00 だと IRQ スタックが下へそのバッファへ伸び MIDI をフレーズ途中で切る（SS001 で約 16s／pos 0xE29）。SCI イメージを silp の 64K から十分離れた高段落へ移す。 */
 	uint16_t trySeg = hootAilCs_;
 	if (!trySeg && i8Seg >= 0x0100 && i8Seg < 0xA000 && i8Seg != DOS98_TRAMP_SEG)
 		trySeg = i8Seg;
 	if (!trySeg) {
-		/* INT 66h is AIL's multiplex on some builds; fall back to scan. */
+		/* 曲が silp の 64K 内（または重なる）とき移す */
 		const uint16_t s66 = (uint16_t)(mem[0x66 * 4 + 2] | (mem[0x66 * 4 + 3] << 8));
 		if (s66 >= 0x0100 && s66 < 0xA000 && s66 != DOS98_TRAMP_SEG)
 			trySeg = s66;
@@ -2547,8 +2479,7 @@ void CHardPcat::FixHootAilTimer()
 			return;
 		}
 	}
-	/* MIDI HOOT (Blackthorne) leaves INT8 at a data CS:0000. INT 7Fh is the
-	   HOOT stub; AIL API_timer lives in a nearby CS (Azrael 1269:040E). */
+	/* silp のデジタルスキップに合わせる: オフセット = [1] + 2（SCI マジック 84 00 …） */
 	if (modeMidi_ && i8Off == 0) {
 		uint16_t extra[4];
 		int n = 0;
@@ -2574,10 +2505,10 @@ void CHardPcat::FixHootAilTimer()
 	}
 }
 
+/* CHardPcat::PreloadSilpSong の実装 */
 void CHardPcat::PreloadSilpSong(unsigned titleCode)
 {
-	/* silp play path: AH=3F BX=0 into DS=[0275]. If CS:0275 was clobbered or
-	   handle 0 missed the bind, seed the buffer so BP=6 sees real SCI bytes. */
+	/* Tiny モデル silp/ADL は SS=DS=silp が要る。スタックは SCI 曲より上（しばしば同じ 64K 内 — silpheed RESOURCE 約 26KB）。曲より下のギャップ SP は dig/param を壊す。曲内 SP はシーケンスを壊す。固定 SP=7F00 が短い（sorc）と長い（silpheed）SCI の両方を進める水位。曲毎 SP=6000 は sorc [288] を巻き戻した。 */
 	if (!modeSilp_ || !IvtHooked(0x7F)) return;
 	uint8_t* mem = np2_mem();
 	if (!mem) return;
@@ -2591,7 +2522,7 @@ void CHardPcat::PreloadSilpSong(unsigned titleCode)
 		if (s < 0x1000 || s >= 0xA000) return 0;
 		const unsigned a = (unsigned)s << 4;
 		if (a + 2 >= 0x200000) return 0;
-		/* Empty alloc is OK to fill; reject obvious DRV images. */
+		/* Sierra silp_at COM は INT 7Fh と INT 8 に同じ CS:IP を使う。CS だけだと CODE.COM（同じ CS、別 IP）にも当たり、silp ISR パーク／80k ステップ切断／トランポリン復元が入り play も tick も終わらない。modeSilp_（rom 名 SILP*）でゲート。 */
 		if (mem[a] == 0xE9 && mem[a + 8] == 'd') return 0;
 		return 1;
 	};
@@ -2606,17 +2537,14 @@ void CHardPcat::PreloadSilpSong(unsigned titleCode)
 	const CEmuDos98File* file = dos_.FindFile(sf);
 	if (!file || !file->data || !file->size) return;
 
-	/* Sorcerian SS* (~15KB+) was allocated just above silp COM. With
-	   SS=DS=silp and SP=7F00 the IRQ stack grows down into that buffer and
-	   truncates MIDI mid-phrase (~16s / pos 0xE29 on SS001). Relocate the
-	   SCI image to a high paragraph well clear of silp's 64K. */
+	/* HOOT AIL タイマ修復はゲスト RAM をスキャン — Sierra silp（INT8==INT7F）では飛ばす */
 	enum { kSafeSongSeg = 0x7000 };
 	const unsigned need = file->size + 16u;
 	const unsigned safeBase = (unsigned)kSafeSongSeg << 4;
 	if (safeBase + need < 0xA0000u && safeBase + need < 0x200000u) {
 		const unsigned silpEnd = base + 0x10000u;
 		const unsigned curBase = (unsigned)songSeg << 4;
-		/* Move when song lies inside silp's 64K (or overlaps it). */
+		/* 実 8259 は IF を尊重。CODE.COM は INT 8 far-call tick 周りを CLI。注入すると 2 つ目 IRQ0 が Sound Images AH=3 にネスト（再入バイト → no-op tick、保持コード）。Sierra silp は例外 1: 80k ステップ ISR 後 IRET 無しで CS をトランポリンへ戻すので IF はクリアのまま。CODE.COM はもう一方: 約 4 tick 毎に ADD 5000h／JC し保存 INT 8（我々の HLT トランポリン）へ JMP FAR、IRET しない。IF=0 でパークしても次 IRQ0 を受けないと曲が最初の BIOS チェイン後に死ぬ。 */
 		if (curBase >= base && curBase < silpEnd) {
 			memset(mem + safeBase, 0, need);
 			songSeg = (uint16_t)kSafeSongSeg;
@@ -2632,7 +2560,7 @@ void CHardPcat::PreloadSilpSong(unsigned titleCode)
 	silpSongBytes_ = n;
 	mem[base + 0x275] = (uint8_t)(songSeg & 0xff);
 	mem[base + 0x276] = (uint8_t)(songSeg >> 8);
-	/* Match silp's digital-skip: offset = [1] + 2 (SCI magic 84 00 …). */
+	/* トラップ stub より先のアイドル HLT は CODE.COM の JMP FAR チェイン後 IF=0 のことがある。そこで次 tick を受ける。IP<200h はトランポリン stub — TrapVector IRET させる。 */
 	unsigned dig = (unsigned)mem[dst + 1] + 2u;
 	mem[base + 0x273] = (uint8_t)(dig & 0xff);
 	mem[base + 0x274] = (uint8_t)((dig >> 8) & 0xff);
@@ -2644,11 +2572,7 @@ void CHardPcat::PreloadSilpSong(unsigned titleCode)
 		dos_.SetHandle((uint16_t)low, sf);
 }
 
-/* Tiny-model silp/ADL need SS=DS=silp. Stack must sit above the SCI song
-   (often mapped inside the same 64K — silpheed RESOURCE ~26KB). Gap-below-
-   song SP smashes dig/param; SP into the song corrupts the sequence.
-   Fixed SP=7F00 is the waterline that keeps both short (sorc) and long
-   (silpheed) SCI advancing; per-song SP=6000 rewound sorc [288]. */
+/* AIL API_timer は CS:[000E] を再入ガードに使う。ISR 内 IF=1 のネスト IRQ0 が 1 を越え AIL が旧（トランポリン）ベクタを戻す — XMI が進まない。pending ビットを保持。Sierra silp は INT8 CS を INT7F と共有。[000E] は PSP ゴミ — そこで AIL ガードを適用しない。 */
 static uint16_t SilpIrqStackSp(uint8_t* mem, uint16_t silpCs, uint16_t songSegHint,
 	unsigned songBytes)
 {
@@ -2659,6 +2583,7 @@ static uint16_t SilpIrqStackSp(uint8_t* mem, uint16_t silpCs, uint16_t songSegHi
 	return 0x7F00;
 }
 
+/* 期限の IRQ／NMI を届ける */
 int CHardPcat::DeliverIrqs()
 {
 	uint8_t* memEarly = np2_mem();
@@ -2666,12 +2591,9 @@ int CHardPcat::DeliverIrqs()
 		? (uint16_t)(memEarly[0x7F * 4 + 2] | (memEarly[0x7F * 4 + 3] << 8)) : (uint16_t)0;
 	const uint16_t i8Early = memEarly
 		? (uint16_t)(memEarly[0x08 * 4 + 2] | (memEarly[0x08 * 4 + 3] << 8)) : (uint16_t)0;
-	/* Sierra silp_at COM uses the same CS:IP for INT 7Fh and INT 8. Matching
-	   CS alone also hits CODE.COM (same CS, different IP), which then gets
-	   the silp ISR park / 80k-step cut-off / trampoline restore and never
-	   finishes a play or a tick. Gate on modeSilp_ (rom name SILP*). */
+	/* …そして AIL でない他のすべての PC/AT ドライバも。それらの [000E] は普通のコードまたはデータ。非ゼロワードが pending ビットを永久保持: CODE.COM はシーケンサを INT 8 に入れ 1 tick も受け取らず OPL init のあとノート無し。hootAilCs_ は API_timer シグネチャ発見後にだけ立つので、これをキーにするのが正しい。 */
 	const int silpHot = (modeSilp_ && i7Early == i8Early && i7Early >= 0x0100);
-	/* HOOT AIL timer repair scans guest RAM — skip on Sierra silp (INT8==INT7F). */
+	/* Sierra silp_at COM ISR は DS を再ロードせず DS 相対 [027B]/[026B] を使う。実ブートでは COM 入口後 DS=CS のまま。我々のアイドルトランポリンはしばしば DS を他所に残し、IRQ が dig/param ブロックを壊し ADL.DRV ノートオンに届かない。 */
 	if (silpHot)
 		RepairSilpDriverFar();
 	else
@@ -2707,21 +2629,11 @@ int CHardPcat::DeliverIrqs()
 		}
 	}
 	if (pit0IrqPending_ && (picMask_ & 0x01) == 0) {
-		/* Real 8259 honors IF. CODE.COM CLI around the INT 8 far-call tick;
-		   injecting anyway nested a second IRQ0 into Sound Images AH=3
-		   (re-entry byte → no-op ticks, held chords). Sierra silp is one
-		   exception: after the 80k-step ISR we force CS back to the
-		   trampoline without IRET, so IF stays clear.
-		   CODE.COM is the other: every ~4 ticks it ADD 5000h / JC and
-		   JMP FAR to the saved INT 8, which is our HLT trampoline, and
-		   never IRETs. Parked there with IF=0 we still have to accept
-		   the next IRQ0 or the song dies after the first BIOS chain. */
+		/* tiny モデルローカルは SS=DS（ADL 内）。SP は SCI 曲より上 */
 		if (!silpHot && (np2_reg_get(NP2_R_FLAGS) & 0x0200) == 0) {
 			const uint16_t csIf = np2_reg_get(NP2_R_CS);
 			const uint16_t ipIf = np2_reg_get(NP2_R_IP);
-			/* Idle HLT past the trap stubs may sit with IF=0 after
-			   CODE.COM's JMP FAR chain; accept the next tick there.
-			   IP<200h is a trampoline stub — let TrapVector IRET. */
+			/* AIL XMIDI 量子は BDA タイマ（0040:006C）から来る。HOOT の前 INT8 は我々のトランポリンなので BIOS tick が進まず ADV が全 OPL ボイス更新を飛ばした（[232D]==0）。 */
 			if (!(csIf == (uint16_t)DOS98_TRAMP_SEG && ipIf >= (uint16_t)PCAT_IDLE_IP))
 				return 0;
 		}
@@ -2729,18 +2641,9 @@ int CHardPcat::DeliverIrqs()
 		const uint16_t i8Seg = i8Early;
 		const uint16_t i8Off = mem
 			? (uint16_t)(mem[0x08 * 4] | (mem[0x08 * 4 + 1] << 8)) : (uint16_t)0;
-		/* AIL API_timer uses CS:[000E] as a re-entry guard. Nested IRQ0 while
-		   IF=1 inside the ISR increments it past 1 and AIL restores the old
-		   (trampoline) vector — XMI never advances. Hold the pending bit.
-		   Sierra silp shares INT8 CS with INT7F; its [000E] is PSP junk — do
-		   not apply the AIL guard there. */
+		/* ADLIB [232D] は登録シーケンス数（151 で inc、serve でループ CX）であり XMIDI 量子ではない。ホストが 8 へバンプすると serve が空 230Dh スロットを歩く。残り BSS は常に 230F==0 ではなくボイスアロケータを壊す（Hanse keys=0、seq PLAYING）。2331 も poke しない（serve 再入）。 */
 		const int silpOwnsIrq = silpHot;
-		/* ...and so is every other PC/AT driver that is simply not AIL. Their
-		   [000E] is ordinary code or data, and a non-zero word there held the
-		   pending bit forever: CODE.COM installs its sequencer on INT 8 and
-		   never received a single tick, so it emitted an OPL init and then no
-		   notes at all. hootAilCs_ is only set once the API_timer signature
-		   has been found, so it is the right thing to key this on. */
+		/* IBM BIOS INT 08 は INT 1Ch を far-call。SOUND.COM は IRQ0 を保持し、ROL.DRV が独自 PIT レートをセットすると前ベクタのチェインを止めるので、自分で 1C を配送しないと AdLib シーケンサが飢える。1C が INT 8 の CS を共有するときは飛ばす — そのドライバが既に tick を所有。AIL/silp も飛ばす。下の ISR ループはネスト 1C を想定していない。 */
 		const int ailOwnsIrq = (hootAilCs_ != 0 && i8Seg == hootAilCs_);
 		if (!silpOwnsIrq && ailOwnsIrq && mem
 			&& i8Seg >= 0x0100 && i8Seg < 0xA000 && i8Off != 0) {
@@ -2762,10 +2665,7 @@ int CHardPcat::DeliverIrqs()
 				mem[0x08 * 4 + 3] = (uint8_t)(mokDrvSeg_ >> 8);
 			}
 		}
-		/* Sierra silp_at COM ISR uses DS-relative [027B]/[026B] without
-		   reloading DS. On a real boot DS stays = CS after the COM entry;
-		   our idle trampoline often leaves DS elsewhere, so the IRQ corrupts
-		   dig/param block and never reaches ADL.DRV note-ons. */
+		/* TickSide 無しで ISR を完走（AIL は SS:SP を切替） */
 		if (mem && i8Seg >= 0x0100 && i8Seg < 0xA000) {
 			const unsigned sb = (unsigned)i8Seg << 4;
 			const int silpIsr = silpHot;
@@ -2777,7 +2677,7 @@ int CHardPcat::DeliverIrqs()
 					if (sf && sf->size)
 						silpSongBytes_ = sf->size;
 				}
-				/* SS=DS for tiny-model locals inside ADL; SP above SCI song. */
+				/* silp は ADL.DRV を far-call。余裕あるステップ予算が要る。それらのステップを cpuCycles_（下）に課金しない。PIT／音声が這う。 */
 				const uint16_t spSilp = SilpIrqStackSp(mem, i8Seg, silpSongSeg_, silpSongBytes_);
 				np2_reg_set(NP2_R_SS, i8Seg);
 				np2_reg_set(NP2_R_SP, spSilp);
@@ -2785,9 +2685,7 @@ int CHardPcat::DeliverIrqs()
 			}
 			(void)sb;
 		}
-		/* AIL XMIDI quanta come from BDA timer (0040:006C). HOOT's prior
-		   INT8 was our trampoline, so the BIOS tick never advanced and
-		   ADV skipped all OPL voice updates ([232D]==0). */
+		/* AIL のみ早期退出。silp は毎 tick に ADL.DRV（別 CS）を far-call — それを「ISR 離脱」と見るとノート途中で中断し dig/[288] を壊す。 */
 		if (mem) {
 			unsigned t = (unsigned)mem[0x46C] | ((unsigned)mem[0x46D] << 8);
 			t++;
@@ -2799,11 +2697,7 @@ int CHardPcat::DeliverIrqs()
 				mem[0x46E] = (uint8_t)(t2 & 0xff);
 				mem[0x46F] = (uint8_t)(t2 >> 8);
 			}
-			/* ADLIB [232D] is the registered-sequence count (inc at 151,
-			   loop CX in serve), not an XMIDI quantum. Host-bumping it to 8
-			   made serve walk empty 230Dh slots; leftover BSS there is not
-			   always 230F==0 and corrupts the voice allocator (Hanse keys=0
-			   with seq PLAYING). Do not poke 2331 either (serve reentry). */
+			/* silp ISR ステップを音声クロックに課金しない — ここで数万サイクル燃やすと PIT が Render に対し固まり再生が這った。far-call を予算外で終える。 */
 		}
 		int skipMidiExeEntry = 0;
 		if (modeMidi_ && i8Off == 0
@@ -2823,12 +2717,7 @@ int CHardPcat::DeliverIrqs()
 			np2_interrupt((uint8_t)PCAT_TIMER_VEC);
 		if (skipMidiExeEntry)
 			return 0;
-		/* IBM BIOS INT 08 far-calls INT 1Ch. SOUND.COM keeps IRQ0 and
-		   stops chaining the previous vector once ROL.DRV sets a custom
-		   PIT rate, so the AdLib sequencer starves unless we deliver 1C
-		   ourselves. Skip when 1C shares INT 8's CS — that driver already
-		   owns the tick — and skip AIL/silp, whose ISR loop below is not
-		   expecting a nested 1C. */
+		/* カウンタを置くのは AIL だけ — 他ドライバでゼロにするとゲスト自身のデータの 2 バイトを上書きする */
 		if (!silpHot && !ailOwnsIrq) {
 			if (mem) {
 				const unsigned o1c = (unsigned)mem[0x1C * 4]
@@ -2841,7 +2730,7 @@ int CHardPcat::DeliverIrqs()
 			}
 			return 1;
 		}
-		/* Run ISR to completion without TickSide (AIL switches SS:SP). */
+		/* アイドル区間は SS=DS=silp を保つ: silpheed の ADL 経路は SS が DOS トランポリンスタックへ流れると故障。SP は SCI 曲より上（SilpIrqStackSp 参照）。 */
 		{
 			const int silpIsr = silpHot;
 			const uint16_t ailSeg = (i8Seg >= 0x0100 && i8Seg < 0xA000) ? i8Seg : hootAilCs_;
@@ -2850,8 +2739,7 @@ int CHardPcat::DeliverIrqs()
 				? (uint16_t)(mem[((unsigned)i8Seg << 4) + 0x26D]
 					| (mem[((unsigned)i8Seg << 4) + 0x26E] << 8)) : (uint16_t)0;
 			int done = 0;
-			/* silp far-calls ADL.DRV; needs a generous step budget. Do not
-			   charge those steps to cpuCycles_ (below) or PIT/audio crawl. */
+			/* IBM PS/1 Audio: detect は 0203h/0205h/0206h を 0 として読む */
 			const int guardMax = (silpIsr || (modeMidi_ && hootAdvSeg_)) ? 80000 : 4000;
 			for (int guard = 0; guard < guardMax; guard++) {
 				const uint16_t cs = np2_reg_get(NP2_R_CS);
@@ -2862,9 +2750,7 @@ int CHardPcat::DeliverIrqs()
 					done = 1;
 					break;
 				}
-				/* AIL-only early exit. silp far-calls ADL.DRV (other CS) for
-				   every tick — treating that as "left ISR" aborts mid-note and
-				   corrupts dig/[288]. */
+				/* AdLib detect は `in al,dx`／`loop` busy-wait。実 ISA の各 IN は時間を燃やす。タイマフラグがホスト壁時計無しで出るよう OPL クロックを進める。約 80 チップクロック ≈ 古典 poll 1 ステップ。 */
 				if (!silpIsr && re == 0 && cs != ailSeg && cs != hootAdvSeg_ && guard > 20) {
 					done = 1;
 					break;
@@ -2876,23 +2762,18 @@ int CHardPcat::DeliverIrqs()
 					break;
 				}
 				const int32_t c = np2_step();
-				/* Do not charge silp ISR steps to the audio clock — burning
-				   tens of kcycles here used to freeze PIT relative to Render
-				   and make playback crawl. Finish the far-call off-budget. */
+				/* MAME YM3812Read は 0x06 を OR（未使用ビット High 固定）。実 ISA AdLib はタイマ idle で 0 を読む。Silky MUSICV.COM は `in al,388h / or al,al / jnz fail` し、さもなくば INT D0 「ボードあり」フラグを立てない — PLAY5_AT が .M/.WM をロードして無音。それらの ID ビットをマスク。タイマ／IRQ フラグ（0xE0）は残す。 */
 				if (!silpIsr)
 					cpuCycles_ += (c > 0) ? (uint64_t)c : 1ull;
 			}
-			/* Only AIL keeps a counter there — zeroing it on any other driver
-			   overwrote two bytes of the guest's own data. */
+			/* Game Blaster: SAA は書き込み専用。Sound Blaster: 同じポートは OPL */
 			if (mem && ailBase && !silpIsr && ailOwnsIrq) {
 				mem[ailBase + 0x0E] = 0;
 				mem[ailBase + 0x0F] = 0;
 			}
 			RestoreHootIdleTrampoline(mem);
 			if (silpIsr) {
-				/* Keep SS=DS=silp for the idle stretch: silpheed's ADL path
-				   faults if SS drifts to the DOS trampoline stack. SP stays
-				   above the SCI song (see SilpIrqStackSp). */
+				/* SB Pro ミキサ添字 */
 				if (silpSongBytes_ == 0 && dosSong_[0]) {
 					const CEmuDos98File* sf = dos_.FindFile(dosSong_);
 					if (sf && sf->size)
@@ -2917,23 +2798,18 @@ int CHardPcat::DeliverIrqs()
 	return 0;
 }
 
+/* I/O ポート読込 */
 uint8_t CHardPcat::PortIn(uint16_t port)
 {
-	/* IBM PS/1 Audio: detect reads 0203h/0205h/0206h as 0. */
+	/* SB Pro ミキサデータ */
 	if (modePs1_ && port >= 0x200 && port <= 0x206)
 		return 0x00;
-	/* AdLib detect uses `in al,dx` / `loop` busy-waits. Each IN on real ISA
-	   burns time; advance OPL clocks so timer flags appear without needing
-	   host wall-clock. ~80 chip clocks ≈ one classic poll step. */
+	/* SB DSP 書きステータス: bit7=0 → 書いてよい */
 	auto oplStatus = [this]() -> uint8_t {
 		if (!chip_) return 0x00;
 		if (oplHz_ > 0)
 			chip_->AdvanceClocks(80);
-		/* MAME YM3812Read ORs 0x06 (unused bits stuck high). Real ISA AdLib
-		   reads 0 when timers are idle. Silky's MUSICV.COM does
-		   `in al,388h / or al,al / jnz fail` and otherwise never sets the
-		   INT D0 "board present" flag — PLAY5_AT loads the .M/.WM and stays
-		   silent. Mask those ID bits; timer/IRQ flags (0xE0) stay intact. */
+		/* SB DSP 読みデータ */
 		return (uint8_t)(chip_->ReadStatus() & (uint8_t)~0x06);
 	};
 	switch (port) {
@@ -2943,17 +2819,17 @@ uint8_t CHardPcat::PortIn(uint16_t port)
 	case 0x228: case 0x229:
 		return oplStatus();
 	case CMS_DATA0: case CMS_ADDR0: case CMS_DATA1: case CMS_ADDR1:
-		/* Game Blaster: SAA is write-only. Sound Blaster: same ports are OPL. */
+		/* SB DSP 書きステータス（代替）: bit7=0 ready */
 		if (modeCms_)
 			return 0xff;
 		return oplStatus();
-	case 0x224: /* SB Pro mixer index */
+	case 0x224: /* SB DSP データあり: バイト ready なら bit7=1 */
 		return modeSb_ ? sbMixerIdx_ : (uint8_t)0x00;
-	case 0x225: /* SB Pro mixer data */
+	case 0x225: /* bit4 = リフレッシュトグル。bit5 = PIT2 out（よくある poll） */
 		return modeSb_ ? sbMixer_[sbMixerIdx_] : (uint8_t)0x00;
-	case 0x226: /* SB DSP write-status: bit7=0 → OK to write */
+	case 0x226: /* bit0=0 スキャンコード無し、bit1=0 入力空、bit4=1 キーボード許可 */
 		return 0x00;
-	case 0x22A: /* SB DSP read data */
+	case 0x22A: /* Sound Blaster FM アドレスミラー */
 		if (sbDspQueueW_ != sbDspQueueR_) {
 			uint8_t v = sbDspQueue_[sbDspQueueR_ & 3];
 			sbDspQueueR_++;
@@ -2965,9 +2841,9 @@ uint8_t CHardPcat::PortIn(uint16_t port)
 			return sbDspReadData_;
 		}
 		return 0x00;
-	case 0x22C: /* SB DSP write-status (alt): bit7=0 ready */
+	case 0x22C: /* SB Pro／SBP2FM OPL ポート @ 0x220 */
 		return 0x00;
-	case 0x22E: /* SB DSP data-available: bit7=1 when byte ready */
+	case 0x22E: /* SB OPL データ @ 0x221 */
 		return (sbDspReadAvail_ || sbDspQueueW_ != sbDspQueueR_) ? 0x80 : 0x00;
 	case EXT_CMD: return extCmd_;
 	case EXT_SONG: return (uint8_t)(extSong_ & 0xff);
@@ -2977,7 +2853,7 @@ uint8_t CHardPcat::PortIn(uint16_t port)
 	case EXT_STATE: return stubState_;
 	case PIT_CT0: case PIT_CT2: return PitIn(port);
 	case PORT_61:
-		/* bit4 = refresh toggle; bit5 = PIT2 out (common poll). */
+		/* デュアル OPL 左 @ 0x222 */
 		return (uint8_t)((port61_ & 0x0f)
 			| ((pit2Out_ ? 0x20 : 0))
 			| (((cpuCycles_ >> 15) & 1) ? 0x10 : 0));
@@ -2986,7 +2862,7 @@ uint8_t CHardPcat::PortIn(uint16_t port)
 	case PIC_SLAVE_MASK: return s_picSlaveMask;
 	case PIC_SLAVE_CMD: return 0x00;
 	case KBC_STAT:
-		/* bit0=0 no scancode, bit1=0 input empty, bit4=1 keyboard enabled */
+		/* SB Pro ミキサ。SBP2FM.ADV はミキサレジスタを書いて読み戻し比較してカード有無を決めるので、レジスタファイルは stub ではなく本物ストレージ。 */
 		return 0x10;
 	case KBC_DATA:
 		return 0x00;
@@ -3004,6 +2880,7 @@ uint8_t CHardPcat::PortIn(uint16_t port)
 	}
 }
 
+/* I/O ポート書込 */
 void CHardPcat::PortOut(uint16_t port, uint8_t data)
 {
 	if (sn764_ && modePs1_ && (port == 0x200 || port == 0x205)) {
@@ -3032,7 +2909,7 @@ void CHardPcat::PortOut(uint16_t port, uint8_t data)
 	case ADLIB_DATA:
 		oplData(data);
 		break;
-	case 0x228: /* Sound Blaster FM address mirror */
+	case 0x228: /* SB DSP リセット: 1 次いで 0 → DSP が 0xAA を返す */
 		oplAddr(data);
 		break;
 	case 0x229:
@@ -3047,7 +2924,7 @@ void CHardPcat::PortOut(uint16_t port, uint8_t data)
 				+ (saa2_ ? CEmuChipSaa1099ToneOnCount(saa2_) : 0);
 			CmsTrackSaa(0, data);
 		} else {
-			oplAddr(data); /* SB Pro / SBP2FM OPL @ 0x220 */
+			oplAddr(data); /* SB DSP コマンド／データ書き */
 		}
 		break;
 	case CMS_ADDR0:
@@ -3055,7 +2932,7 @@ void CHardPcat::PortOut(uint16_t port, uint8_t data)
 			if (saa1_) saa1_->Write(1, data);
 			saaSel_[0] = (uint8_t)(data & 0x1f);
 		} else {
-			oplData(data); /* SB OPL data @ 0x221 */
+			oplData(data); /* DSP バージョン取得 → major, minor */
 		}
 		break;
 	case CMS_DATA1:
@@ -3067,7 +2944,7 @@ void CHardPcat::PortOut(uint16_t port, uint8_t data)
 				+ (saa2_ ? CEmuChipSaa1099ToneOnCount(saa2_) : 0);
 			CmsTrackSaa(1, data);
 		} else {
-			oplAddr(data); /* dual-OPL left @ 0x222 */
+			oplAddr(data); /* DSP ステータス／埋め込み DAC ack */
 		}
 		break;
 	case CMS_ADDR1:
@@ -3078,9 +2955,7 @@ void CHardPcat::PortOut(uint16_t port, uint8_t data)
 			oplData(data);
 		}
 		break;
-	/* SB Pro mixer. SBP2FM.ADV decides whether a card is present by writing
-	   a mixer register, reading it back and comparing, so the register file
-	   has to be real storage rather than a stub. */
+	/* スピーカ on/off／DMA — 黙って受け入れる */
 	case 0x224:
 		if (modeSb_) sbMixerIdx_ = data;
 		break;
@@ -3092,7 +2967,7 @@ void CHardPcat::PortOut(uint16_t port, uint8_t data)
 		else
 			sbMixer_[sbMixerIdx_] = data;
 		break;
-	case 0x226: /* SB DSP reset: 1 then 0 → DSP returns 0xAA */
+	case 0x226: /* 一部 HOOT AIL2 .ADV ダンプは切れた `mov cx,xxxxh`／IN 遅延ループ（10h/20h）で YM3812 timer1（約 255*80 クロック）を待てない。古典 1000h busy-wait を戻す。悪い `mov si,00C8h` リロケも直す。 */
 		if (data & 1) {
 			sbDspResetting_ = 1;
 			sbDspReadAvail_ = 0;
@@ -3102,16 +2977,16 @@ void CHardPcat::PortOut(uint16_t port, uint8_t data)
 			SbDspPush(0xAA);
 		}
 		break;
-	case 0x22C: /* SB DSP command/data write */
-		if (data == 0xE1) { /* get DSP version → major, minor */
+	case 0x22C: /* 定数 1000h */
+		if (data == 0xE1) { /* DSP バージョン取得 → major, minor */
 			SbDspPush(0x03);
 			SbDspPush(0x01);
 		} else if (data == 0xE3) {
 			SbDspPush(0x01);
-		} else if (data == 0xE0) { /* DSP status / embedded DAC ack */
+		} else if (data == 0xE0) { /* DSP ステータス／埋め込み DAC ack */
 			SbDspPush(0xAA);
 		} else if (data == 0xD3 || data == 0xD1 || data == 0xD0 || data == 0xD4) {
-			/* speaker on/off / DMA — accept silently */
+			/* スピーカ on/off／DMA — 黙って受け入れる */
 		}
 		break;
 	case EXT_CMD: extCmd_ = data; break;
@@ -3191,12 +3066,11 @@ void CHardPcat::PortOut(uint16_t port, uint8_t data)
 	}
 }
 
+/* CHardPcat::MaterializeDosFiles の実装 */
 void CHardPcat::MaterializeDosFiles(CEmuZipFs* fs, const CEmuGameEntry* ge)
 {
 	if (!fs || !ge) return;
-	/* Some HOOT AIL2 .ADV dumps have truncated `mov cx,xxxxh` / IN delay
-	   loops (10h/20h) that cannot wait out YM3812 timer1 (~255*80 clocks).
-	   Restore classic 1000h busy-waits. Also heal bad `mov si,00C8h` reloc. */
+	/* 一部 HOOT AIL2 .ADV ダンプは切れた `mov cx,xxxxh`／IN 遅延ループ（10h/20h）で YM3812 timer1（約 255*80 クロック）を待てない。古典 1000h busy-wait を戻す。悪い `mov si,00C8h` リロケも直す。 */
 	auto repairMilesAdv = [](unsigned char* d, unsigned n) {
 		if (!d || n < 0x200) return;
 		int miles = 0;
@@ -3212,7 +3086,7 @@ void CHardPcat::MaterializeDosFiles(CEmuZipFs* fs, const CEmuGameEntry* ge)
 				const uint16_t cx = (uint16_t)(d[i + 1] | (d[i + 2] << 8));
 				if (cx > 0 && cx < 0x1000) {
 					d[i + 1] = 0x00;
-					d[i + 2] = 0x10; /* 1000h */
+					d[i + 2] = 0x10; /* 即値 1000h */
 				}
 			}
 			if (d[i] == 0x83 && d[i + 1] == 0xC4 && d[i + 2] == 0x04
@@ -3230,9 +3104,7 @@ void CHardPcat::MaterializeDosFiles(CEmuZipFs* fs, const CEmuGameEntry* ge)
 			if (copy) {
 				memcpy(copy, data, sz);
 				repairMilesAdv(copy, sz);
-				/* MIDI.ADV CS:[0119]=data, CS:[011B]=status (base+1). The
-				   image stores 0 until detect; v1.1 HOOT never writes them.
-				   Seeding both as 0x330 made status reads hit the data port. */
+				/* MIDI.ADV CS:[0119]=データ、CS:[011B]=ステータス（base+1）。イメージは detect まで 0。v1.1 HOOT は書かない。両方を 0x330 に種まきするとステータス読みがデータポートに当たる。 */
 				if (modeMidi_ && _stricmp(base, "MIDI.ADV") == 0 && sz > 0x11Cu) {
 					const uint16_t dport = (uint16_t)(copy[0x119] | (copy[0x11A] << 8));
 					const uint16_t sport = (uint16_t)(copy[0x11B] | (copy[0x11C] << 8));
@@ -3266,7 +3138,7 @@ void CHardPcat::MaterializeDosFiles(CEmuZipFs* fs, const CEmuGameEntry* ge)
 		}
 		addMaybeAdv(base, data, sz);
 	}
-	/* Also expose every zip member so shell-resolved COMs / songs resolve. */
+	/* シェル解決 COM／曲も解決するよう zip メンバを全部露出 */
 	for (int i = 0; i < fs->fileCount; i++) {
 		char pathA[CEMU_ZIP_PATH];
 		WideCharToMultiByte(932, 0, fs->files[i].path, -1, pathA, (int)sizeof(pathA), NULL, NULL);
@@ -3276,12 +3148,7 @@ void CHardPcat::MaterializeDosFiles(CEmuZipFs* fs, const CEmuGameEntry* ge)
 				base = p + 1;
 		}
 		if (!base[0]) continue;
-		/* Zip extras exist so shell-resolved COMs / songs resolve. Do not
-		   also dump every .ADV in the archive: hanse/bchess OPL catalogs
-		   list ADLIB.ADV, but the same zip carries MIDI.ADV for the SC-55
-		   sibling, and HOOT then registers the MPU driver on an OPL machine
-		   (irq0 stays in the dozens, keys=0). Once the romlist named an ADV,
-		   only those ADVs belong on the DOS disk. */
+		/* zip 余分はシェル解決 COM／曲が解決するため。アーカイブの全 .ADV もダンプしない: hanse/bchess OPL カタログは ADLIB.ADV を列挙するが同じ zip に SC-55 兄弟用 MIDI.ADV があり、HOOT が OPL 機に MPU ドライバを登録する（irq0 が数十、keys=0）。romlist が ADV を名指したら DOS ディスクに置くのはそれらの ADV だけ。 */
 		{
 			const char* ext = strrchr(base, '.');
 			if (ext && _stricmp(ext, ".ADV") == 0) {
@@ -3306,10 +3173,10 @@ void CHardPcat::MaterializeDosFiles(CEmuZipFs* fs, const CEmuGameEntry* ge)
 		}
 		addMaybeAdv(base, fs->files[i].data, fs->files[i].size);
 	}
-	/* Do NOT materialize a fake NULL/NONE file — HOOT treats open-failure as
-	   "no timbre bank" and continues; a zero-byte success aborts ADV install. */
+	/* 偽 NULL/NONE ファイルを実体化しない — HOOT は open 失敗を「音色バンク無し」として続ける。0 バイト成功は ADV インストールを abort。 */
 }
 
+/* CHardPcat::BindDosRomHandles の実装 */
 void CHardPcat::BindDosRomHandles(const CEmuGameEntry* ge)
 {
 	if (!ge) return;
@@ -3324,11 +3191,7 @@ void CHardPcat::BindDosRomHandles(const CEmuGameEntry* ge)
 			if (*p == '\\' || *p == '/' || *p == ':')
 				base = p + 1;
 		}
-		/* Battle Chess 4000 lists ADLIB.ADV at offset 9 and SAMPLE.AD at 10.
-		   Those are catalog slots, not DOS handles. Pre-opening them as
-		   handles 9/10 makes HOOT inherit a GTL it was told to skip (NULL),
-		   and detect/init then leaves hDrvr=FFFF. Omar Sharif uses offset -1
-		   for the same files and plays. */
+		/* Battle Chess 4000 はオフセット 9 に ADLIB.ADV、10 に SAMPLE.AD。それらはカタログスロットであり DOS ハンドルではない。ハンドル 9/10 として事前 open すると HOOT が飛ばすよう言われた GTL（NULL）を継承し、detect/init が hDrvr=FFFF を残す。Omar Sharif は同じファイルにオフセット -1 を使い鳴る。 */
 		if (off < 0x10) {
 			const char* ext = strrchr(base, '.');
 			if (ext && _stricmp(ext, ".ADV") == 0)
@@ -3343,13 +3206,14 @@ void CHardPcat::BindDosRomHandles(const CEmuGameEntry* ge)
 	}
 }
 
+/* CHardPcat::SelectedDosSong の実装 */
 const char* CHardPcat::SelectedDosSong(const CEmuGameEntry* ge, unsigned titleCode) const
 {
 	if (!ge) return NULL;
 	const int low = (int)(titleCode & 0xff);
 	const int hi = (int)((titleCode >> 8) & 0xff);
 	const int full = (int)titleCode;
-	/* HOOT/AIL packs often use title 0x1n00 → DOS handle/offset 0x1n. */
+	/* HOOT/AIL パックはしばしばタイトル 0x1n00 → DOS ハンドル／オフセット 0x1n */
 	for (int pass = 0; pass < 3; pass++) {
 		const int want = pass == 0 ? full : (pass == 1 ? hi : low);
 		if (want == 0 && pass != 0) continue;
@@ -3369,6 +3233,7 @@ const char* CHardPcat::SelectedDosSong(const CEmuGameEntry* ge, unsigned titleCo
 	return NULL;
 }
 
+/* CHardPcat::BindDosTriggerSong の実装 */
 void CHardPcat::BindDosTriggerSong(const CEmuGameEntry* ge, unsigned titleCode)
 {
 	const char* sf = SelectedDosSong(ge, titleCode);
@@ -3385,17 +3250,12 @@ void CHardPcat::BindDosTriggerSong(const CEmuGameEntry* ge, unsigned titleCode)
 			dos_.SetHandle((uint16_t)hi, sf);
 	}
 	extCmd_ = 0;
-	/* PMDIBM titles are single-byte (EXT_SONG=code). KOEI FMDRV_AT /
-	   Infogrames CODE.COM pack song in the high word (EXT_PARAM) and the
-	   bank/file selector in the low word (EXT_SONG) — same as PC-98 KOEI.
-	   HOOT/AIL uses the full EXT_SONG word (often 0x1n00). */
+	/* PMDIBM タイトルは 1 バイト（EXT_SONG=code）。KOEI FMDRV_AT／Infogrames CODE.COM は曲を上位ワード（EXT_PARAM）、バンク／ファイル選択を下位ワード（EXT_SONG）— PC-98 KOEI と同じ。HOOT/AIL は EXT_SONG ワード全体（しばしば 0x1n00）。 */
 	extSong_ = (uint16_t)(titleCode & 0xffff);
 	extParam_ = (uint16_t)((titleCode >> 16) & 0xffff);
 }
 
-/* Rewrite HOOT's argv so the song file and subsong index follow the title
-   code. Songs are catalogued at offset >= 0x10; drivers and samples sit at
-   0x8/0x9 and glue at -1, so those tokens are left untouched. */
+/* HOOT の argv を書き換え、曲ファイルとサブソング添字がタイトルコードに続くようにする。曲はオフセット >= 0x10 にカタログ。ドライバとサンプルは 0x8/0x9、グルーは -1。それらのトークンは触らない。 */
 void CHardPcat::HootSubstArgv(char* tail, int tailCap)
 {
 	char out[160];
@@ -3439,9 +3299,7 @@ void CHardPcat::HootSubstArgv(char* tail, int tailCap)
 				rep = dosSong_;
 				break;
 			}
-			/* Lost Vikings MT-32: argv is `MT.XMI MT32MPU.ADV`. MT.XMI is
-			   catalogued at offset -1 (init), so the >=0x10 match never
-			   fires and every title plays the 420-byte stub. */
+			/* Lost Vikings MT-32: argv は `MT.XMI MT32MPU.ADV`。MT.XMI はオフセット -1（init）にカタログされるので >=0x10 マッチが発火せず、どのタイトルも 420 バイト stub を鳴らす。 */
 			if (!rep && dosSong_[0]) {
 				const char* ext = strrchr(t, '.');
 				const char* songExt = strrchr(dosSong_, '.');
@@ -3458,6 +3316,7 @@ void CHardPcat::HootSubstArgv(char* tail, int tailCap)
 	strncpy_s(tail, (size_t)tailCap, out, _TRUNCATE);
 }
 
+/* CPU を進める */
 int CHardPcat::RunDosCommand(const char* cmdline, uint64_t budgetCycles, int stopWhenReady)
 {
 	CEmuNp2Guard np2;
@@ -3467,8 +3326,7 @@ int CHardPcat::RunDosCommand(const char* cmdline, uint64_t budgetCycles, int sto
 	char tail[160];
 	DosStripHash(cmdline, stripped, (int)sizeof(stripped));
 	DosSplitCmd(stripped, name, (int)sizeof(name), tail, (int)sizeof(tail));
-	/* Catalog ABI: HOOT's no-GTL token is NULL (not NONE). Normalize argv here
-	   so cached catalogs that still say NONE match the guest binary. */
+	/* カタログ ABI: HOOT の no-GTL トークンは NULL（NONE ではない）。まだ NONE と書くキャッシュカタログがゲストバイナリと合うようここで argv を正規化。 */
 	if (_stricmp(name, "HOOT.EXE") == 0 && tail[0]) {
 		char fixed[160];
 		const char* s = tail;
@@ -3487,11 +3345,7 @@ int CHardPcat::RunDosCommand(const char* cmdline, uint64_t budgetCycles, int sto
 		*d = 0;
 		strncpy_s(tail, fixed, _TRUNCATE);
 	}
-	/* HOOT argv carries the song file for a few packs (kyrandia, roabod,
-	   stuntisland) instead of the NULL placeholder. The catalog writes one
-	   fixed name there, so leaving it alone plays that same track for every
-	   title code. Songs are the roms at offset >= 0x10; swap such a token for
-	   the code-selected song, and a bare number for the code's low byte. */
+	/* HOOT argv は一部パック（kyrandia, roabod, stuntisland）で NULL プレースホルダではなく曲ファイルを運ぶ。カタログはそこに固定名を書くので、触らないと全タイトルコードが同じトラックを鳴らす。曲はオフセット >= 0x10 の rom。そのようなトークンをコード選択曲へ、裸の数字をコードの下位バイトへ入れ替える。 */
 	if (_stricmp(name, "HOOT.EXE") == 0 && tail[0] && dosGe_ && dosSong_[0])
 		HootSubstArgv(tail, (int)sizeof(tail));
 	if (_stricmp(name, "HOOT.EXE") == 0) {
@@ -3521,8 +3375,7 @@ int CHardPcat::RunDosCommand(const char* cmdline, uint64_t budgetCycles, int sto
 		PatchInfogramesMzExtra(mem, dos_.PspSeg(), dos_);
 	}
 
-	/* silp play load: mov bl,[1]; add bx,2 → offset 2 after SCI magic 84 00.
-	   Rewriting to mov bx,[0] (0x84) makes ADL.DRV BP=6 reject (es:[si]!=0/2). */
+	/* silp play ロード: mov bl,[1]; add bx,2 → SCI マジック 84 00 のあとオフセット 2。mov bx,[0]（0x84）へ書き換えると ADL.DRV BP=6 が拒否（es:[si]!=0/2）。 */
 
 	dosStubReady_ = 0;
 	silpDrvSeg_ = 0;
@@ -3532,17 +3385,10 @@ int CHardPcat::RunDosCommand(const char* cmdline, uint64_t budgetCycles, int sto
 	const uint64_t start = cpuCycles_;
 	while (cpuCycles_ - start < budgetCycles) {
 		RepairSilpDriverFar();
-		/* PMD_98 / Sierra silp_at: EXT_STATE=0x81 means ready.
-		   Infogrames CODE.COM only installs INT 7Fh then idles (never
-		   touches EXT_STATE). Sierra writes 0x80 first, then hooks 7Fh,
-		   then 0x81 — do NOT treat 7Fh alone as ready while state is 0x80. */
-		/* Sierra: EXT_STATE 0x80 while hooking, then 0x81.
-		   HOOT/AIL: often leaves EXT_STATE at 0x80 after INT 7Fh is live —
-		   accept 7Fh once the vector has been stable (not still mid-CRT). */
+		/* PMD_98／Sierra silp_at: EXT_STATE=0x81 は ready。Infogrames CODE.COM は INT 7Fh を入れてアイドルするだけ（EXT_STATE を触らない）。Sierra は先に 0x80、次いで 7Fh フック、次いで 0x81 — 状態が 0x80 の間 7Fh 単独を ready と見ない。 */
+		/* Sierra: フック中 EXT_STATE 0x80、次いで 0x81。HOOT/AIL: INT 7Fh が生きたあと EXT_STATE を 0x80 のままにしがち — ベクタが安定したら（まだ CRT 途中でなければ）7Fh を受け入れる。 */
 		if (stopWhenReady && stubState_ == 0x81) {
-			/* Sierra silp: 0x81 means ready. HOOT also writes 0x81 before
-			   finishing DS handle init — only accept if INT 7Fh is not HOOT
-			   or HOOT handles are no longer 0/0. */
+			/* Sierra silp: 0x81 は ready。HOOT も DS ハンドル init 完了前に 0x81 を書く — INT 7Fh が HOOT でない、または HOOT ハンドルがもう 0/0 でないときだけ受け入れる。 */
 			int accept = 1;
 			uint8_t* hm = np2_mem();
 			if (IvtHooked(0x7F)) {
@@ -3579,9 +3425,7 @@ int CHardPcat::RunDosCommand(const char* cmdline, uint64_t budgetCycles, int sto
 					}
 				}
 			} else if (modeMidi_ && hm && PcatI8LooksLikeHootAil(hm)) {
-				/* Lost Vikings MT32MPU: HOOT writes 0x81 after API_timer
-				   (CS:0416) but before INT 7Fh. Accepting here left the
-				   trampoline on 7Fh so 01MT.XMI never registered. */
+				/* Lost Vikings MT32MPU: HOOT は INT 7Fh 前に API_timer（CS:0416）のあと 0x81 を書く。ここで受け入れると 7Fh にトランポリンが残り 01MT.XMI が登録されない。 */
 				accept = 0;
 			}
 			if (accept) {
@@ -3591,9 +3435,7 @@ int CHardPcat::RunDosCommand(const char* cmdline, uint64_t budgetCycles, int sto
 		}
 		if (stopWhenReady && IvtHooked(0x7F)) {
 			if (stubState_ != 0x80) {
-				/* HOOT may hook INT 7Fh before writing idle sentinels FFFF into
-				   DS:[043C]/[043E]. Returning here leaves hDrv=0 and play does
-				   free(0) / abort. Wait until AIL timer is live or handles heal. */
+				/* HOOT は DS:[043C]/[043E] へアイドル番兵 FFFF を書く前に INT 7Fh をフックし得る。ここで戻すと hDrv=0 のまま play が free(0)／abort。AIL タイマが生きるかハンドルが直るまで待つ。 */
 				uint8_t* hm = np2_mem();
 				int hootIdle = 0;
 				if (hm) {
@@ -3613,7 +3455,7 @@ int CHardPcat::RunDosCommand(const char* cmdline, uint64_t budgetCycles, int sto
 						const uint16_t hd = (uint16_t)(hm[db + 0x43E] | (hm[db + 0x43F] << 8));
 						if ((hs == 0xFFFF || hs != 0) && (hd == 0xFFFF || hd != 0))
 							hootIdle = 1;
-						/* Still 0/0: HOOT mid-init — keep stepping. */
+						/* まだ 0/0: HOOT init 途中 — ステップを続ける */
 						if (hs == 0 && hd == 0)
 							hootIdle = 0;
 					}
@@ -3622,14 +3464,9 @@ int CHardPcat::RunDosCommand(const char* cmdline, uint64_t budgetCycles, int sto
 					dosStubReady_ = 1;
 					return 1;
 				}
-				/* Fall through and keep running HOOT init. */
+				/* フォールスルーし HOOT init を走らせ続ける */
 				} else {
-				/* HOOT/AIL leaves EXT_STATE=0x80. Wait until the timer (IRQ0 /
-				   INT 8) or AIL (INT 66h) is also hooked — otherwise we stop
-				   mid-install and XMI never clocks.
-				   Sword of the Samurai CODE.COM hooks 7Fh then far-calls
-				   ASOUND init (es:[3Ch]) before INT 18h. INT 8 is already
-				   live, so a naive ready-check skips that init (keys=0). */
+				/* HOOT/AIL は EXT_STATE=0x80 を残す。タイマ（IRQ0／INT 8）または AIL（INT 66h）もフックされるまで待つ — さもなくばインストール途中で止まり XMI がクロックしない。Sword of the Samurai CODE.COM は 7Fh をフックしたあと INT 18h 前に ASOUND init（es:[3Ch]）を far-call。INT 8 は既に生きているので素朴な ready 検査がその init を飛ばす（keys=0）。 */
 				uint8_t* sm = np2_mem();
 				int swordsInit = 0;
 				if (sm) {
@@ -3645,9 +3482,7 @@ int CHardPcat::RunDosCommand(const char* cmdline, uint64_t budgetCycles, int sto
 				if (swordsInit)
 					swordsHold = 1;
 				if (swordsHold) {
-					/* Stay in the pump until ASOUND init returns and
-					   CODE.COM writes EXT_STATE=0x81 (then the 0x81
-					   branch above accepts). */
+					/* ASOUND init が戻り CODE.COM が EXT_STATE=0x81 を書くまでポンプに残る（その後上の 0x81 分岐が受け入れる） */
 				} else if (IvtHooked(PCAT_TIMER_VEC) || IvtHooked(0x66)) {
 					dosStubReady_ = 1;
 					return 1;
@@ -3667,8 +3502,7 @@ int CHardPcat::RunDosCommand(const char* cmdline, uint64_t budgetCycles, int sto
 					continue;
 				if (res == DOS98_TERMINATED || res == DOS98_RESIDENT) {
 					if (g_pcatIpProf) g_pcatIpProf->Freeze();
-					/* Buffers a loader frees on the way out are gone by the
-					   time the play pump ends, so snapshot here instead. */
+					/* 出口でローダが解放するバッファは play ポンプ終了時には無い。ここでスナップショット。 */
 					PcatMemDump(m);
 					return 1;
 				}
@@ -3678,7 +3512,7 @@ int CHardPcat::RunDosCommand(const char* cmdline, uint64_t budgetCycles, int sto
 			cpuCycles_ += q;
 			TickSide(q);
 			if (chip_ && cpuHz_ > 0 && oplHz_ > 0) {
-				/* Residual: clockmul=8 truncates q*opl/cpu to 0. */
+				/* 残り: clockmul=8 は q*opl/cpu を 0 に切り詰める */
 				oplPumpResidual_ += q * (uint64_t)oplHz_;
 				uint64_t ot = oplPumpResidual_ / (uint64_t)cpuHz_;
 				oplPumpResidual_ %= (uint64_t)cpuHz_;
@@ -3702,6 +3536,7 @@ int CHardPcat::RunDosCommand(const char* cmdline, uint64_t budgetCycles, int sto
 	return stubState_ == 0x81 ? 1 : 0;
 }
 
+/* CHardPcat::BootDos の実装 */
 int CHardPcat::BootDos(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode)
 {
 	if (!fs || !ge) return 0;
@@ -3727,8 +3562,7 @@ int CHardPcat::BootDos(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCod
 	np2_setextsize(0);
 	np2_set_v30(0);
 	memset(mem, 0, 0xA0000);
-	/* Tandy 1000: wibarmat.com does `cmp es:[C000h], 21h` with ES=F000h
-	   before enabling SN76496 outs. F000:C000 is outside the 640K clear. */
+	/* Tandy 1000: wibarmat.com は SN76496 out 許可前に ES=F000h で `cmp es:[C000h], 21h`。F000:C000 は 640K クリアの外。 */
 	if (_stricmp(ge->subtype, "tandy") == 0)
 		mem[0xFC000] = 0x21;
 	PcatCmosInit();
@@ -3766,7 +3600,7 @@ int CHardPcat::BootDos(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCod
 		}
 		dos_.InstallDosStructures(mem, memKb, blaster);
 	}
-	/* Arm PIT0 during shell boot so AIL can hook INT8 while HOOT installs. */
+	/* シェルブート中に PIT0 を武装し、HOOT インストール中 AIL が INT8 をフックできるようにする */
 	picMask_ = (uint8_t)(picMask_ & 0xfeu);
 	pit0Reload_ = (uint16_t)(PCAT_PIT_HZ / 18);
 	if (pit0Reload_ == 0) pit0Reload_ = 1;
@@ -3790,12 +3624,7 @@ int CHardPcat::BootDos(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCod
 	stubState_ = 0;
 	cpuCycles_ = 0;
 	oplPumpResidual_ = 0;
-	/* Keep IRQ0 live for the shells. TIMER.COM+CMD.COM (kinbaku/kurodan)
-	   INT 61 fn5 spins on a tick counter decremented from INT 8; masking
-	   here left INT 60 unhooked (dosmiss=int60) and CMDP silent.
-	   HOOT/AIL also calibrates against IRQ0 during ADV install.
-	   Sierra silp's INT 7Fh loader is not re-entrant with its INT 8 —
-	   leave IRQ0 masked for that family (TriggerPlay unmasks after park). */
+	/* シェル用に IRQ0 を生かす。TIMER.COM+CMD.COM（kinbaku/kurodan）INT 61 fn5 は INT 8 から減らす tick カウンタで回る。ここでマスクすると INT 60 がフックされず（dosmiss=int60）CMDP が無音。HOOT/AIL も ADV インストール中 IRQ0 に対して校正する。Sierra silp の INT 7Fh ローダは INT 8 と再入不可 — その系統は IRQ0 をマスクのまま（TriggerPlay がパーク後にアンマスク）。 */
 	picMask_ = modeSilp_ ? (uint8_t)0xff : (uint8_t)0xfe;
 	picMasterIcw_ = 0;
 	oplWriteCount_ = 0;
@@ -3819,9 +3648,7 @@ int CHardPcat::BootDos(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCod
 		if (_stricmp(ge->rom[i].type, "shell") == 0)
 			shellTotal++;
 	}
-	/* Run every shell in order (MUSICV → PLAY5_AT, SOUND → CODE, …).
-	   Earlier shells only exit on DOS RESIDENT/TERMINATED; the last may
-	   stop when EXT_STATE/INT 7Fh look ready. */
+	/* シェルを順に全部走らせる（MUSICV → PLAY5_AT、SOUND → CODE、…）。先のシェルは DOS RESIDENT/TERMINATED でのみ抜ける。最後は EXT_STATE/INT 7Fh が ready に見えたら止まってよい。 */
 	int shellIdx = 0;
 	char ranNames[8][96];
 	int ranNameCount = 0;
@@ -3838,16 +3665,13 @@ int CHardPcat::BootDos(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCod
 		}
 		ranShell = 1;
 	}
-	/* Sierra / hoot: <rom type="file" offset="-1">silp_at.com</rom> is glue,
-	   not a DOS handle — run it when no explicit shells. */
+	/* Sierra／hoot: <rom type="file" offset="-1">silp_at.com</rom> はグルーであり DOS ハンドルではない。明示シェルが無いとき走らせる。 */
 	if (!ranShell || !(dosStubReady_ || stubState_ == 0x81 || IvtHooked(0x7F))) {
 		for (int i = 0; i < ge->romCount; i++) {
 			const CEmuRomEntry* r = &ge->rom[i];
 			if (_stricmp(r->type, "file") != 0) continue;
 			if (r->offset >= 0) continue;
-			/* A shell already ran this program with its real arguments.
-			   Starting a second copy with none makes it fail, exit, and
-			   trample the resident state the first copy left behind. */
+			/* シェルは既に本物引数でこのプログラムを走らせた。引数無しの 2 コピー目を開始すると失敗し exit し、1 コピー目が残した常駐状態を踏みつける。 */
 			int already = 0;
 			for (int k = 0; k < ranNameCount; k++)
 				if (_stricmp(ranNames[k], r->name) == 0) already = 1;
@@ -3858,16 +3682,16 @@ int CHardPcat::BootDos(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCod
 		}
 	}
 	dosStubReady_ = (stubState_ == 0x81 || IvtHooked(0x7F) || IvtHooked(0x66)) ? 1 : dosStubReady_;
-	/* Catalog defaults funcvect=0x7E (PMD_98). KOEI FMDRV_AT / Infogrames
-	   CODE.COM / PMDL_AT / Sierra silp_at / HOOT.EXE install INT 7Fh instead. */
+	/* カタログ既定 funcvect=0x7E（PMD_98）。KOEI FMDRV_AT／Infogrames CODE.COM／PMDL_AT／Sierra silp_at／HOOT.EXE は代わりに INT 7Fh を入れる。 */
 	if (IvtHooked(0x7F) && !IvtHooked((uint8_t)funcVect_))
 		funcVect_ = 0x7F;
 	RepairSilpDriverFar();
 	PrepHootAilState();
-	cpuHz_ = playHz; /* realtime Render stays at base ISA clock */
+	cpuHz_ = playHz; /* リアルタイム Render は基点 ISA クロックのまま */
 	return 1;
 }
 
+/* zip から ROM／曲データを載せる */
 int CHardPcat::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode)
 {
 	if (!fs || !ge) return 0;
@@ -3893,13 +3717,13 @@ int CHardPcat::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCo
 	return BootDos(fs, ge, titleCode);
 }
 
+/* 曲再生をトリガする */
 int CHardPcat::TriggerPlay(unsigned titleCode)
 {
 	const uint64_t drainBudget = (uint64_t)cpuHz_ / 2ull;
 	PCAT_CENSUS("pre");
 	if (dosGe_) {
-		/* HOOT CRT may close catalog song handles (0x10+) during boot.
-		   INT7F cmd0 then AH=3F BX=title>>8 and reads 0 bytes. */
+		/* HOOT CRT はブート中にカタログ曲ハンドル（0x10+）を閉じ得る。INT7F cmd0 は AH=3F BX=title>>8 で 0 バイト読む。 */
 		BindDosRomHandles(dosGe_);
 		BindDosTriggerSong(dosGe_, titleCode);
 	}
@@ -3917,15 +3741,12 @@ int CHardPcat::TriggerPlay(unsigned titleCode)
 		}
 	}
 	RepairMokIntelMpu(0);
-	/* PMD_98 glue: cmd0 then cmd1 (load/play).
-	   KOEI FMDRV_AT / Infogrames CODE.COM (INT 7Fh): cmd0=play, cmd2=stop;
-	   CODE.COM treats any other cmd as teardown — do not issue cmd1.
-	   Sierra silp_at / HOOT.EXE also use INT 7Fh with cmd0=load+play. */
+	/* PMD_98 グルー: cmd0 次いで cmd1（ロード／再生）。KOEI FMDRV_AT／Infogrames CODE.COM（INT 7Fh）: cmd0=play、cmd2=stop。CODE.COM は他 cmd を teardown と見る — cmd1 を出さない。Sierra silp_at／HOOT.EXE も INT 7Fh で cmd0=load+play。 */
 	const int use7f = IvtHooked(0x7F) ? 1 : 0;
 	if (use7f)
 		funcVect_ = 0x7F;
 	const int cmd0Only = (funcVect_ == 0x7F);
-	/* Only fire a hooked vector — never INT into the DOS trampoline. */
+	/* フック済みベクタだけ発火 — DOS トランポリンへ INT しない */
 	const int haveVect = IvtHooked((uint8_t)funcVect_);
 	PreloadSilpSong(titleCode);
 	if (!modeMidi_ && !use7f)
@@ -3933,17 +3754,10 @@ int CHardPcat::TriggerPlay(unsigned titleCode)
 	np2_reg_set(NP2_R_FLAGS, (uint16_t)(np2_reg_get(NP2_R_FLAGS) | 0x0200));
 	extCmd_ = 0;
 	RepairSilpDriverFar();
-	/* CODE.COM+ROL.DRV play waits for ten BIOS INT 1C ticks after STI.
-	   BootDos remasks PIC at the end of setup, so IRQ0 must be live
-	   before the drain or that wait never completes.
-	   Sierra silp's INT 7Fh loader is not re-entrant with its INT 8 —
-	   leave IRQ0 masked until the park below. */
+	/* CODE.COM+ROL.DRV play は STI 後 BIOS INT 1C tick を 10 待つ。BootDos はセットアップ末尾で PIC を再マスクするので、ドレイン前に IRQ0 が生きていないとその待ちが終わらない。Sierra silp の INT 7Fh ローダは INT 8 と再入不可 — 下のパークまで IRQ0 をマスクのまま。 */
 	if (!(use7f && modeSilp_))
 		picMask_ = (uint8_t)(picMask_ & 0xfeu);
-	/* Neverending Story II CODE.COM AH=42 uses leftover CX (boot AH=3F
-	   left 8000h → origin-0 offset 80000000h → EOF) and leftover DX from
-	   IN AX,7E2h (seek to 2018). Zeroing here covers CX; dos98 AH=42
-	   also treats DX=07E2h as port leftover. Hoot play pokes 7E0/7E2, not CX. */
+	/* Neverending Story II CODE.COM AH=42 は残り CX（ブート AH=3F が 8000h を残し原点 0 オフセット 80000000h → EOF）と IN AX,7E2h の残り DX（シーク 2018）を使う。ここでゼロにすると CX を覆う。dos98 AH=42 も DX=07E2h をポート残りと見る。Hoot play は 7E0/7E2 を poke し CX ではない。 */
 	if (!modeSilp_) {
 		np2_reg_set(NP2_R_CX, 0);
 		np2_reg_set(NP2_R_DX, 0);
@@ -4011,8 +3825,7 @@ int CHardPcat::TriggerPlay(unsigned titleCode)
 		FixHootMidiInt8();
 		FixHootAilTimer();
 		StartHootMidiSequence();
-		/* MMD.COM may have issued B8h during boot; CTH must keep ticking
-		   after we park on the idle trampoline. Skip Mok (F0 data-req). */
+		/* MMD.COM はブート中に B8h を出したかもしれない。アイドルトランポリンへパークしたあと CTH は tick し続ける必要がある。Mok（F0 data-req）は飛ばす。 */
 		if (!mpuUart_ && !s_mpuMokDataReq && IvtHooked(0x71)
 			&& (s_mpuClockToHost || s_mpuCthArmed)) {
 			s_mpuClockToHost = 1;
@@ -4025,17 +3838,12 @@ int CHardPcat::TriggerPlay(unsigned titleCode)
 		uint8_t* mem = np2_mem();
 		if (mem && !modeMidi_ && !use7f)
 			RestoreHootIdleTrampoline(mem);
-		/* Park on idle trampoline so IRQ0 can enter cleanly.
-		   Sierra silp's ISR is tiny-model SS=DS=CS; other INT 7Fh glues
-		   (CODE.COM) keep a normal DOS stack.
-		   Do not yank CS/SS if INT 7Fh is still inside the guest — Kingsoft
-		   CODE.COM+ROL.DRV waits for ten BIOS INT 1C ticks (~0.55s) before
-		   it even reads the .ROL, and 0.5s of drain is not always enough. */
+		/* アイドルトランポリンへパークし IRQ0 がきれいに入れるようにする。Sierra silp の ISR は tiny モデル SS=DS=CS。他の INT 7Fh グルー（CODE.COM）は通常 DOS スタック。ゲスト内に INT 7Fh がまだ居るなら CS/SS を引き抜かない — Kingsoft CODE.COM+ROL.DRV は .ROL を読む前に BIOS INT 1C tick を 10（約 0.55s）待ち、0.5s ドレインでは足りないことがある。 */
 		RestoreHootIdleTrampoline(mem);
 		const uint16_t csNow = np2_reg_get(NP2_R_CS);
 		const int guestBusy = (csNow >= 0x0100 && csNow != (uint16_t)DOS98_TRAMP_SEG);
 		if (use7f && modeSilp_) {
-			/* Keep SS=DS=silp — same as IRQ0 path. */
+			/* IRQ0 経路と同じく SS=DS=silp を保つ */
 			uint16_t silpCs = (uint16_t)(mem
 				? (mem[0x7F * 4 + 2] | (mem[0x7F * 4 + 3] << 8)) : 0);
 			if (silpCs >= 0x0100) {
@@ -4058,16 +3866,10 @@ int CHardPcat::TriggerPlay(unsigned titleCode)
 		}
 		np2_reg_set(NP2_R_FLAGS, (uint16_t)(np2_reg_get(NP2_R_FLAGS) | 0x0200));
 	}
-	/* HOOT AIL timbres — never after Sierra silp/MT32 play (tears down song).
-	   HOOT.EXE uses INT 7Fh, so the old `!use7f` skip never ran NULL-GTL
-	   packs. Restrict to argv NULL so already-playing ADV packs (exassault /
-	   privateer) are not given a second sequence. */
+	/* HOOT AIL 音色 — Sierra silp/MT32 play のあとにはしない（曲が解体される）。HOOT.EXE は INT 7Fh を使うので旧 `!use7f` 飛ばしは NULL-GTL パックで走らなかった。argv NULL に限り、既に鳴っている ADV パック（exassault／privateer）に 2 本目シーケンスを渡さない。 */
 	if (!modeMidi_ && !modeSilp_ && s_pcatHootNullGtl
 		&& (hootAdvSeg_ || hootAdvName_[0])) {
-		/* Lost Vikings keys one note during INT 7Fh, so oplKeyOnCount_ is
-		   already 1 here. Skipping the GTL install left seq=1 / STOPS.
-		   Omar Sharif still has keys=0 at this point; a second 170 is a
-		   restart of the same XMI, not a different song. */
+		/* Lost Vikings は INT 7Fh 中にノート 1 つキーするので、ここですでに oplKeyOnCount_ が 1。GTL インストール飛ばしは seq=1／STOPS を残した。Omar Sharif はこの時点でまだ keys=0。2 回目 170 は別曲ではなく同じ XMI の再起動。 */
 		InstallHootAilTimbres();
 		FixHootAilTimer();
 		if (oplKeyOnCount_ == 0) {
@@ -4084,12 +3886,12 @@ int CHardPcat::TriggerPlay(unsigned titleCode)
 	return 1;
 }
 
+/* CHardPcat::FarCallAil の実装 */
 int CHardPcat::FarCallAil(uint16_t api, uint16_t* stackWords, int nWords, uint64_t budget)
 {
 	uint8_t* mem = np2_mem();
 	if (!mem || nWords < 0 || nWords > 16) return 0;
-	/* Prefer known AIL CS; INT8 may be HOOT CS:040E (Hanse / Omar Sharif).
-	   Calling AIL APIs in HOOT hangs inside the helper and starves IRQ0. */
+	/* 既知 AIL CS を優先。INT8 は HOOT CS:040E のことがある（Hanse／Omar Sharif）。HOOT 内で AIL API を呼ぶとヘルパ内でハングし IRQ0 が飢える。 */
 	uint16_t ailCs = hootAilCs_;
 	if (ailCs < 0x1200)
 		ailCs = 0;
@@ -4123,8 +3925,7 @@ int CHardPcat::FarCallAil(uint16_t api, uint16_t* stackWords, int nWords, uint64
 	}
 	unsigned wrapOff = 0;
 	int foundWrap = 0;
-	/* HOOT CS thunks: 151 at ~0CC0h, 150/156/170 sit at fixed deltas from it
-	   (file 3640h table). First-match 170 can be a decoy that does not start. */
+	/* HOOT CS thunk: 151 は約 0CC0h。150/156/170 はその固定デルタ（ファイル 3640h 表）。first-match 170 は開始しないデコイになり得る。 */
 	if (wrap151) {
 		unsigned rel = 0;
 		int haveRel = 0;
@@ -4214,11 +4015,10 @@ int CHardPcat::FarCallAil(uint16_t api, uint16_t* stackWords, int nWords, uint64
 	return ok;
 }
 
+/* CHardPcat::InstallHootAilTimbres の実装 */
 void CHardPcat::InstallHootAilTimbres()
 {
-	/* Drive guest AIL APIs after INT 7Fh play. HOOT.EXE NULL skips GTL open;
-	   XMI TIMB still needs SAMPLE.* via AIL_timbre_request / install_timbre.
-	   If HOOT registered the ADV but detect/init failed, finish init here. */
+	/* INT 7Fh play 後にゲスト AIL API を駆動。HOOT.EXE NULL は GTL open を飛ばす。XMI TIMB はまだ AIL_timbre_request／install_timbre 経由で SAMPLE.* が要る。HOOT が ADV を登録したが detect/init が失敗したらここで init を終える。 */
 	uint8_t* mem = np2_mem();
 	if (!mem || !IvtHooked(0x7F)) return;
 	const int isSb = (hootAdvName_[0]
@@ -4268,10 +4068,9 @@ void CHardPcat::InstallHootAilTimbres()
 	const uint64_t tbudget = (uint64_t)cpuHz_ / 16ull;
 	uint16_t words[8];
 
-	/* Capture AIL CS before register_driver — FarCallAil scans that CS. */
+	/* register_driver 前に AIL CS をキャプチャ — FarCallAil がその CS をスキャン */
 	FixHootAilTimer();
-	/* Handle 0 is a valid AIL handle; only FFFF means unused. Battle Chess
-	   often never finishes AIL_register_driver (hDrvr stays FFFF). */
+	/* ハンドル 0 は有効な AIL ハンドル。未使用は FFFF のみ。Battle Chess はしばしば AIL_register_driver を終えず hDrvr が FFFF のまま。 */
 	if (hDrvr == 0xFFFF && hootAdvSeg_) {
 		words[0] = hootAdvSeg_;
 		words[1] = 0;
@@ -4290,9 +4089,7 @@ void CHardPcat::InstallHootAilTimbres()
 		return;
 	}
 
-	/* Ensure detect+init even when HOOT 0383 aborted after register.
-	   Skip when INT8 is already HOOT CS:040E — FarCall 101 hits a decoy
-	   stub that wipes AIL 151 (Hanse / Omar). */
+	/* HOOT 0383 が register 後に abort しても detect+init を保証。INT8 が既に HOOT CS:040E なら飛ばす — FarCall 101 が AIL 151 を消すデコイ stub に当たる（Hanse／Omar）。 */
 	{
 		const uint16_t i8OffNow = (uint16_t)(mem[0x08 * 4] | (mem[0x08 * 4 + 1] << 8));
 		if (i8OffNow != 0x040E) {
@@ -4364,8 +4161,7 @@ void CHardPcat::InstallHootAilTimbres()
 		if (xf && xf->data && xf->size >= 12)
 			nTimb = PcatXmiTimbList(xf->data, xf->size, timb, 64);
 	}
-	/* Privateer .ADL and other non-XMI HOOT songs already play via INT 7Fh.
-	   151/170 on a dummy FORM restarted them into SILENT/STOPS. */
+	/* Privateer .ADL や他の非 XMI HOOT 曲は既に INT 7Fh 経由で鳴る。ダミー FORM 上の 151/170 はそれらを SILENT/STOPS へ再起動した。 */
 	if (nTimb <= 0) {
 		RestoreHootIdleTrampoline(mem);
 		np2_reg_set(NP2_R_CS, (uint16_t)DOS98_TRAMP_SEG);
@@ -4399,8 +4195,7 @@ void CHardPcat::InstallHootAilTimbres()
 			const unsigned a0 = (unsigned)hootAdvSeg_ << 4;
 			return (lin >= a0 && lin < a0 + hootAdvSize_) ? 1 : 0;
 		};
-		/* NULL-GTL packs often never map the XMI into 0x10000+, so the
-		   RAM scan hits a dummy FORM in the ADV and play stays silent. */
+		/* NULL-GTL パックはしばしば XMI を 0x10000+ へマップせず、RAM スキャンが ADV 内のダミー FORM に当たり play が無音のまま。 */
 		if (s_pcatHootNullGtl)
 			injectSong();
 		if (!xmidLin) {
@@ -4419,8 +4214,7 @@ void CHardPcat::InstallHootAilTimbres()
 			injectSong();
 		if (xmidLin && !inAdv(xmidLin))
 			PcatXmiWipeSeqTextMeta(mem + xmidLin, 0x4000u);
-		/* HOOT's own XMI buffer (handle 10) still has the tag; native seq 0
-		   uses that copy. */
+		/* HOOT 自身の XMI バッファ（ハンドル 10）はまだタグを持つ。ネイティブ seq 0 はそのコピーを使う。 */
 		if (s_pcatHootNullGtl) {
 			for (unsigned a = 0x10000; a + 16 < 0xA0000; a++) {
 				if (mem[a] != 0xFF || mem[a + 1] < 1 || mem[a + 1] > 7)
@@ -4430,9 +4224,7 @@ void CHardPcat::InstallHootAilTimbres()
 			}
 		}
 		if (xmidLin) {
-			/* AIL 150 in HOOT CS hits a decoy at 0CBAh that does not RETF.
-			   520 bytes was under ADLIB's state table (~590+); seq 4 then
-			   reports PLAYING with no note-ons (Hanse). Omar keys on seq 0. */
+			/* HOOT CS の AIL 150 は RETF しない 0CBAh のデコイに当たる。520 バイトは ADLIB の状態表（約 590+）に足りず、seq 4 がノートオン無しで PLAYING と報告（Hanse）。Omar は seq 0 でキーオン。 */
 			uint16_t stSize = 2048;
 			uint16_t stSeg = 0x8F00;
 			uint16_t ctSeg = 0x8E80;
@@ -4541,10 +4333,7 @@ void CHardPcat::InstallHootAilTimbres()
 		}
 	}
 	(void)installed;
-	/* Skip 101/102 when INT8 is already CS:040E (Omar). Hanse takes that
-	   path too, so detect never writes the ADV IO word and serve_driver
-	   OUTs DX=0. Fill default 388/220 here; a live Omar word is already
-	   388 and is left alone. */
+	/* INT8 が既に CS:040E（Omar）なら 101/102 を飛ばす。Hanse もその経路を取るので detect が ADV IO ワードを書かず serve_driver が OUT DX=0。ここで既定 388/220 を埋める。生きた Omar ワードは既に 388 で触らない。 */
 	if (hootAdvIoOff_ && hootAdvSeg_ >= 0x0100 && hootAdvSeg_ < 0xA000) {
 		const unsigned ol = ((unsigned)hootAdvSeg_ << 4) + hootAdvIoOff_;
 		if (ol + 1 < 0x200000) {
@@ -4578,8 +4367,7 @@ void CHardPcat::InstallHootAilTimbres()
 	}
 	mem[dbase + 0x43E] = (uint8_t)(hDrvr & 0xff);
 	mem[dbase + 0x43F] = (uint8_t)(hDrvr >> 8);
-	/* Hanse copies API_timer onto CS:040Eh (`2E FF 06 06 00 FC` / pushes).
-	   INT8 already points there — do not plant a second ISR over it. */
+	/* Hanse は API_timer を CS:040Eh へコピー（`2E FF 06 06 00 FC`／push）。INT8 は既にそこを指す — 2 つ目 ISR を上に植えない。 */
 	if (oplKeyOnCount_ == 0 && hootAilCs_ >= 0x1200 && hootAilCs_ < 0xA000) {
 		const uint16_t i8Off = (uint16_t)(mem[0x08 * 4] | (mem[0x08 * 4 + 1] << 8));
 		const unsigned base = (unsigned)hootAilCs_ << 4;
@@ -4601,6 +4389,7 @@ void CHardPcat::InstallHootAilTimbres()
 	np2_reg_set(NP2_R_IP, (uint16_t)PCAT_IDLE_IP);
 }
 
+/* CHardPcat::DrainInterrupt の実装 */
 void CHardPcat::DrainInterrupt(uint64_t budgetCycles)
 {
 	CEmuNp2Guard np2;
@@ -4631,20 +4420,20 @@ void CHardPcat::DrainInterrupt(uint64_t budgetCycles)
 	}
 }
 
+/* IRQ 配送付きで CPU を endCycle まで進める */
 void CHardPcat::PumpCycles(uint64_t endCycle)
 {
 	CEmuNp2Guard np2;
 	CEmuHardPcatSetActive(this);
 	while (cpuCycles_ < endCycle) {
 		uint8_t* mem = np2_mem();
-		/* While AIL API_timer is live, only step — TickSide+nested DeliverIrqs
-		   mid-ISR trashes AIL's private stack switch and IRET. */
+		/* AIL API_timer が生きている間はステップのみ — ISR 途中の TickSide＋ネスト DeliverIrqs は AIL の私有スタック切替と IRET を壊す。 */
 		int inAilIsr = 0;
 		if (mem && hootAilCs_ >= 0x0100 && hootAilCs_ < 0xA000) {
 			const unsigned base = (unsigned)hootAilCs_ << 4;
 			uint16_t re = (uint16_t)(mem[base + 0x0E] | (mem[base + 0x0F] << 8));
 			const uint16_t cs0 = np2_reg_get(NP2_R_CS);
-			/* Abandoned ISR: back on idle trampoline but re-entry left set. */
+			/* 捨てられた ISR: アイドルトランポリンに戻っているが再入が残っている */
 			if (re != 0 && cs0 == (uint16_t)DOS98_TRAMP_SEG) {
 				mem[base + 0x0E] = 0;
 				mem[base + 0x0F] = 0;
@@ -4660,8 +4449,7 @@ void CHardPcat::PumpCycles(uint64_t endCycle)
 		uint16_t cs = np2_reg_get(NP2_R_CS);
 		uint16_t ip = np2_reg_get(NP2_R_IP);
 		const unsigned phys = ((unsigned)cs << 4) + (unsigned)ip;
-		/* DOS trampoline HLTs are real traps; do not skip 200 cycles — AIL's
-		   DDA/XMIDI timing and post-HLT IP (= next opcode) both care. */
+		/* DOS トランポリン HLT は本物トラップ。200 サイクル飛ばしをしない — AIL の DDA/XMIDI タイミングと HLT 後 IP（= 次オペコード）の両方が気にする。 */
 		if (!inAilIsr && mem && phys < 0x200000 && mem[phys] == 0xF4) {
 			CEmuDos98Result res = DOS98_CONTINUE;
 			if (PcatTrampolineHlt(&dos_, mem, cs, ip, &res)) {
@@ -4671,7 +4459,7 @@ void CHardPcat::PumpCycles(uint64_t endCycle)
 					continue;
 				continue;
 			}
-			/* Batch idle HLT retires in small hops — large skips desync silp. */
+			/* アイドル HLT 退職を小さいホップでバッチ。大きなスキップは silp をずらす */
 			if (cs == (uint16_t)DOS98_TRAMP_SEG && !pit0IrqPending_) {
 				uint64_t remain = endCycle - cpuCycles_;
 				uint64_t skip = remain > 64ull ? 64ull : remain;
@@ -4705,6 +4493,7 @@ void CHardPcat::PumpCycles(uint64_t endCycle)
 	PcatMemDump(np2_mem());
 }
 
+/* CHardPcat::MidiNoteOnCount の実装 */
 unsigned CHardPcat::MidiNoteOnCount() const
 {
 	if (!midiBytes_ || midiCount_ == 0) return 0;
@@ -4735,31 +4524,31 @@ unsigned CHardPcat::MidiNoteOnCount() const
 	return noteOns;
 }
 
+/* CHardPcat::MidiCaptureReset の実装 */
 void CHardPcat::MidiCaptureReset()
 {
 	if (!midiBytes_) midiBytes_ = new uint8_t[CEMU_PCAT_MIDI_CAP];
 	if (!midiDelta_) midiDelta_ = new uint32_t[CEMU_PCAT_MIDI_CAP];
 	midiCount_ = 0;
 	midiLastCycle_ = cpuCycles_;
-	/* Keep UART mode if already entered (0x3F). Clearing it mid-session after
-	   DOS/MT32 boot made Capture miss note traffic / confuse the driver. */
+	/* 既に入っていれば UART モードを保つ（0x3F）。DOS/MT32 ブート後セッション途中でクリアすると Capture がノート交通を逃す／ドライバが混乱する。 */
 	mpuRxFull_ = 0;
 	mpuAckR_ = mpuAckW_ = 0;
 	mpuCmdByte_ = 0;
-	/* Do not drop intelligent CTH here — probe/export reset the SMF buffer
-	   after TriggerPlay has already STARTed the Mok conductor. */
-	/* Power-on / reset ACK only when not yet in UART — MT32.DRV waits for
-	   bit6 clear (data ready) on 0x331 before the first command. */
+	/* ここで intelligent CTH を落とさない — probe/export は TriggerPlay が既に Mok コンダクタを START したあと SMF バッファをリセットする。 */
+	/* まだ UART でないときだけパワーオン／リセット ACK — MT32.DRV は最初のコマンド前に 0x331 の bit6 クリア（データ ready）を待つ。 */
 	if (!mpuUart_)
 		MidiPushAck(0xfe);
 }
 
+/* CHardPcat::MidiPushAck の実装 */
 void CHardPcat::MidiPushAck(uint8_t v)
 {
 	mpuAckQ_[mpuAckW_ & 7] = v;
 	mpuAckW_++;
 }
 
+/* CHardPcat::MidiCaptureByte の実装 */
 void CHardPcat::MidiCaptureByte(uint8_t v)
 {
 	if (!midiBytes_ || !midiDelta_) return;
@@ -4767,19 +4556,16 @@ void CHardPcat::MidiCaptureByte(uint8_t v)
 	uint32_t delta = 0;
 	if (cpuHz_ > 0) {
 		const uint64_t dc = cpuCycles_ - midiLastCycle_;
-		/* SMF div 480 @ tempo 500000µs → 960 ticks/sec: ticks = dc * 960 / cpuHz.
-		   Before first notes, clamp hard (0.25s) so DOS/MT32 boot stalls do not
-		   inflate SMF. After notes / MIDI-out mode: no musical clamp — live inject
-		   and export need real note lengths (half/whole, phrase gaps). */
+		/* SMF div 480、テンポ 500000µs → 960 ticks/sec: ticks = dc * 960 / cpuHz。初ノート前は強くクランプ（0.25s）し DOS/MT32 ブート停滞が SMF を膨らませない。ノート／MIDI-out モード後: 音楽クランプ無し — ライブ注入と export は本物の音価が要る（半／全、フレーズ隙間）。 */
 		uint64_t ticks = (dc * 960ull) / ((uint64_t)cpuHz_ + 1ull);
 		if (!modeMidi_ && MidiNoteOnCount() == 0) {
-			const uint64_t cap = 960ull / 4ull; /* 0.25s boot only */
+			const uint64_t cap = 960ull / 4ull; /* ブート 0.25s のみ */
 			if (ticks > cap) ticks = cap;
 		} else if (!modeMidi_) {
 			const uint64_t cap = 960ull * 8ull;
 			if (ticks > cap) ticks = cap;
 		}
-		/* modeMidi_: leave ticks unclamped (still uint32 delta below). */
+		/* modeMidi_: ticks をクランプしない（下の uint32 デルタのまま） */
 		if (ticks > 0xffffffffull) ticks = 0xffffffffull;
 		delta = (uint32_t)ticks;
 	}
@@ -4789,6 +4575,7 @@ void CHardPcat::MidiCaptureByte(uint8_t v)
 	midiCount_++;
 }
 
+/* CHardPcat::MidiDataOut の実装 */
 void CHardPcat::MidiDataOut(uint8_t data)
 {
 	if (mpuCmdByte_ && !mpuUart_) {
@@ -4796,16 +4583,16 @@ void CHardPcat::MidiDataOut(uint8_t data)
 		(void)data;
 		return;
 	}
-	/* Capture in UART mode; also accept post-reset traffic once any ACK
-	   handshake started (Sierra MT32.DRV may stream after 0x3F). */
+	/* UART モードで Capture。ACK ハンドシェイクが始まったらリセット後交通も受け入れる（Sierra MT32.DRV は 0x3F 後にストリームし得る）。 */
 	if (mpuUart_ || modeMidi_)
 		MidiCaptureByte(data);
 }
 
+/* CHardPcat::MidiCmdOut の実装 */
 void CHardPcat::MidiCmdOut(uint8_t data)
 {
 	auto cmdAck = [this]() {
-		/* Command ACK must be the next data byte. Drop raced CTH FD/F0. */
+		/* コマンド ACK は次データバイトでなければならない。競った CTH FD/F0 を落とす */
 		mpuAckR_ = mpuAckW_;
 		MidiPushAck(0xfe);
 	};
@@ -4851,17 +4638,11 @@ void CHardPcat::MidiCmdOut(uint8_t data)
 		s_mpuPlay = 0;
 		s_mpuCthArmed = 0;
 	} else if (data == 0xb8 || data == 0xb9 || data == 0x95) {
-		/* Same as PC-98: B8h/B9h turn CTH on. AT used to wait for Mok's
-		   RepairMokIntelMpu to set s_mpuCthArmed, so KAJA MMD.COM never
-		   saw FD on INT 71. Mok still arms only from RepairMokIntelMpu
-		   so F0 does not start during INT 7Fh load. */
+		/* PC-98 と同じ: B8h/B9h が CTH を入れる。AT は Mok の RepairMokIntelMpu が s_mpuCthArmed をセットするまで待っていたので KAJA MMD.COM が INT 71 で FD を見なかった。Mok はまだ RepairMokIntelMpu からのみ武装し、INT 7Fh ロード中に F0 が始まらない。 */
 		s_mpuClockToHost = 1;
 		if (!s_mpuMokDataReq)
 			s_mpuCthArmed = 1;
-		/* Start the CTH period from zero. Seeding residual=cpuHz made the
-		   next TickSide push FD as soon as the command ACK was consumed,
-		   so Bitmap Brothers PLAYER.BIN `cmp al,0FEh` after B9h/3Fh read
-		   FD and CODE.COM deadlooped (AX=DEAD) before INT 7Fh. */
+		/* CTH 周期をゼロから開始。residual=cpuHz を種まきすると次 TickSide がコマンド ACK 消費直後に FD を押し、Bitmap Brothers PLAYER.BIN が B9h/3Fh 後 `cmp al,0FEh` で FD を読み CODE.COM が INT 7Fh 前にデッドループ（AX=DEAD）。 */
 		s_mpuCthResidual = 0;
 	} else if (data == 0x0a || data == 0x02) {
 		s_mpuPlay = 1;
@@ -4882,21 +4663,17 @@ void CHardPcat::MidiCmdOut(uint8_t data)
 	cmdAck();
 }
 
+/* CHardPcat::MidiStatusIn の実装 */
 uint8_t CHardPcat::MidiStatusIn()
 {
-	/* MPU-401: bit7=1 write busy; bit6=1 no data to read.
-	   Only report DSReady when we actually have an ACK/RX byte.
-	   Always returning ready+0xFE made MT32.DRV spin on phantom input
-	   and never reach note-ons (capture was init sysex + "THANKS" only). */
+	/* MPU-401: bit7=1 書き busy。bit6=1 読みデータ無し。ACK/RX バイトが実際にあるときだけ DSReady を報告。常に ready+0xFE を返すと MT32.DRV が幽霊入力で回りノートオンに届かない（capture は init sysex＋"THANKS" のみ）。 */
 	if (mpuAckR_ != mpuAckW_ || mpuRxFull_)
 		return 0x00;
-	/* Empty = 0x80 (bit7=no RX, bit6=ready to write). Idle 0x40 made
-	   Sound Images hang on `add al,al / js` (waits for bit6 clear) after
-	   it had already consumed the detect ACK, so INT 8 was never hooked.
-	   MT32.DRV / Sierra silp were re-checked after this polarity change. */
+	/* 空 = 0x80（bit7=RX 無し、bit6=書き ready）。アイドル 0x40 は Sound Images が detect ACK を消費したあと `add al,al / js`（bit6 クリア待ち）でハングし INT 8 がフックされなかった。この極性変更後 MT32.DRV／Sierra silp を再確認。 */
 	return 0x80;
 }
 
+/* CHardPcat::MidiDataIn の実装 */
 uint8_t CHardPcat::MidiDataIn()
 {
 	if (mpuAckR_ != mpuAckW_) {
@@ -4911,9 +4688,10 @@ uint8_t CHardPcat::MidiDataIn()
 	return 0xfe;
 }
 
+/* CHardPcat::MuteAllSound の実装 */
 void CHardPcat::MuteAllSound()
 {
-	/* Clear OPL key-on bits (B0–B8 bit5) so sustain does not hang after stop. */
+	/* OPL キーオンビット（B0–B8 bit5）をクリアし、stop 後サステインが残らないようにする */
 	if (chip_) {
 		for (int ch = 0; ch < 9; ch++) {
 			chip_->Write(0, (uint32_t)(0xB0 + ch));
@@ -4936,6 +4714,7 @@ void CHardPcat::MuteAllSound()
 	FmMonShadowFlush(1);
 }
 
+/* 補助チップをステレオへ混成する */
 void CHardPcat::MixExtra(int16_t* stereo, int frames)
 {
 	if (!stereo || frames <= 0) return;
@@ -4988,7 +4767,7 @@ void CHardPcat::MixExtra(int16_t* stereo, int frames)
 			off += n;
 		}
 	}
-	/* PC speaker: port61 bit0=gate2, bit1=spkrdata; out = pit2 & spkrdata (MAME). */
+	/* PC スピーカ: port61 bit0=gate2、bit1=spkrdata。out = pit2 & spkrdata（MAME） */
 	if ((port61_ & 0x03) == 0x03 && spkPhaseInc_ > 0) {
 		for (int i = 0; i < frames; i++) {
 			spkPhase_ += spkPhaseInc_;
@@ -5004,6 +4783,7 @@ void CHardPcat::MixExtra(int16_t* stereo, int frames)
 	}
 }
 
+/* SmfPutVar の実装 */
 static void SmfPutVar(uint8_t* track, unsigned* tp, uint32_t v)
 {
 	uint8_t tmp[5];
@@ -5018,6 +4798,7 @@ static void SmfPutVar(uint8_t* track, unsigned* tp, uint32_t v)
 		track[(*tp)++] = tmp[i];
 }
 
+/* CHardPcat::ExportCapturedSmf の実装 */
 int CHardPcat::ExportCapturedSmf(const wchar_t* path) const
 {
 	if (!path || !path[0] || midiCount_ < 16 || !midiBytes_ || !midiDelta_) return 0;
@@ -5025,7 +4806,7 @@ int CHardPcat::ExportCapturedSmf(const wchar_t* path) const
 		FILE_ATTRIBUTE_TEMPORARY, NULL);
 	if (h == INVALID_HANDLE_VALUE) return 0;
 
-	/* Locate first/last note; trim at long silence (in-driver loop / idle). */
+	/* 最初／最後のノートを探す。長い無音で切る（ドライバ内ループ／アイドル） */
 	uint32_t firstNoteTick = 0, lastNoteTick = 0;
 	int sawNote = 0, isMt32 = 0;
 	{
@@ -5039,7 +4820,7 @@ int CHardPcat::ExportCapturedSmf(const wchar_t* path) const
 			if (v & 0x80) {
 				haveD0 = 0;
 				if (v == 0xf0) {
-					/* Peek Roland model id at status+3. */
+					/* ステータス+3 で Roland モデル ID を覗く */
 					if (i + 3 < midiCount_ && midiBytes_[i + 1] == 0x41
 						&& midiBytes_[i + 3] == 0x16)
 						isMt32 = 1;
@@ -5055,9 +4836,7 @@ int CHardPcat::ExportCapturedSmf(const wchar_t* path) const
 			if (need == 1 || haveD0) {
 				const uint8_t hi = (uint8_t)(run & 0xf0);
 				if (hi == 0x90 || hi == 0x80) {
-					/* Ignore short rests — SCI/MT-32 phrases often gap >1.5s.
-					   Only treat a hush as loop/end after ~45s of music
-					   (960 ticks/sec) and ≥4s of silence. */
+					/* 短い休符は無視 — SCI/MT-32 フレーズはしばしば 1.5s 超の隙間。音楽約 45s（960 ticks/sec）のあと無音 ≥4s だけループ／終了と見る。 */
 					const uint32_t minBody = 960u * 45u;
 					const uint32_t gapTicks = 960u * 4u;
 					if (sawNote && (tickAt - firstNoteTick) >= minBody
@@ -5083,7 +4862,7 @@ int CHardPcat::ExportCapturedSmf(const wchar_t* path) const
 	track[tp++] = 0xff; track[tp++] = 0x51; track[tp++] = 0x03;
 	track[tp++] = 0x07; track[tp++] = 0xa1; track[tp++] = 0x20;
 
-	/* Sequence/track name: DOS song file (SS032 etc.) so UI/debug match capture. */
+	/* シーケンス／トラック名: DOS 曲ファイル（SS032 等）。UI／デバッグが capture と合う。 */
 	{
 		char seqName[64];
 		seqName[0] = 0;
@@ -5102,7 +4881,7 @@ int CHardPcat::ExportCapturedSmf(const wchar_t* path) const
 	}
 
 	if (isMt32) {
-		/* SC-VA Capital Tone / LA map = Bank MSB 127 (melodic only). */
+		/* SC-VA Capital Tone／LA マップ = Bank MSB 127（メロディックのみ） */
 		for (int ch = 0; ch < 16; ch++) {
 			if (ch == 9) continue;
 			SmfPutVar(track, &tp, 0);
@@ -5112,8 +4891,7 @@ int CHardPcat::ExportCapturedSmf(const wchar_t* path) const
 		}
 	}
 
-	/* UART bytes -> complete SMF messages. Raw dump put delta before every
-	   0x80+ byte (broke running status / fake statuses -> silent + ~45min). */
+	/* UART バイト → 完全 SMF メッセージ。生ダンプは 0x80+ バイト毎にデルタを置き（ランニングステータス／偽ステータスが壊れ無音＋約 45 分）。 */
 	uint32_t pending = 0, tickAt = 0;
 	uint8_t run = 0, d0 = 0;
 	int need = 0, haveD0 = 0, msgCount = 0;
@@ -5133,8 +4911,7 @@ int CHardPcat::ExportCapturedSmf(const wchar_t* path) const
 		if (v & 0x80) {
 			haveD0 = 0;
 			if (v == 0xf0) {
-				/* Absorb MT-32 SysEx timing into pending; do not write to SMF.
-				   Feeding F0 41 xx 16 into SC-VA/GS after Bank127 mutes playback. */
+				/* MT-32 SysEx タイミングを pending へ吸収。SMF に書かない。Bank127 後に F0 41 xx 16 を SC-VA/GS へ給電すると再生が mute。 */
 				int mt = 0;
 				if (i + 3 < midiCount_ && midiBytes_[i + 1] == 0x41
 					&& midiBytes_[i + 3] == 0x16)
@@ -5152,11 +4929,11 @@ int CHardPcat::ExportCapturedSmf(const wchar_t* path) const
 					run = 0; need = 0;
 					continue;
 				}
-				/* Non-MT sysex: rewrite from buffered range (rare on this path). */
+				/* 非 MT sysex: バッファ範囲から書き換え（この経路では稀） */
 				SmfPutVar(track, &tp, pending);
 				pending = 0;
 				track[tp++] = 0xf0;
-				/* Already consumed; cannot re-emit easily — skip body. */
+				/* 既に消費済み。再出力は難しい — 本体を飛ばす */
 				run = 0; need = 0; msgCount++;
 				continue;
 			}
@@ -5202,7 +4979,7 @@ int CHardPcat::ExportCapturedSmf(const wchar_t* path) const
 			loopStartDone = 1;
 		}
 
-		/* Ensure LA bank sticks before each Program Change (not rhythm ch). */
+		/* 各 Program Change の前に LA バンクが付くようにする（リズム ch ではない） */
 		if (isMt32 && hi == 0xc0 && ch != 9 && chBank[ch] != 127) {
 			SmfPutVar(track, &tp, pending);
 			pending = 0;

@@ -6,6 +6,7 @@
 #include "../fmmon/cemu_fmmon_bind.h"
 #include <string.h>
 
+/* FM-7: zip を開きハード＋ドライバを生成して曲を起動。FmMon は Open 前後で bind。 */
 int CEmuFm7Open(CEmuFm7* m, const CEmuGameEntry* ge, const wchar_t* zipPath, unsigned titleCode, int sampleRate)
 {
 	if (!m || !ge || !zipPath) return 0;
@@ -27,6 +28,7 @@ int CEmuFm7Open(CEmuFm7* m, const CEmuGameEntry* ge, const wchar_t* zipPath, uns
 		CEmuFm7Close(m);
 		return 0;
 	}
+	/* FmMon ダンプ開始（Open 失敗時も後で Close が掃除する） */
 	CEmuFmMonBeginOpen(ge, zipPath, sampleRate);
 	if (!m->driver->Open(m->hard, ge, &fs, titleCode)) {
 		CEmuZipFsClose(&fs);
@@ -36,10 +38,12 @@ int CEmuFm7Open(CEmuFm7* m, const CEmuGameEntry* ge, const wchar_t* zipPath, uns
 	CEmuZipFsClose(&fs);
 
 	m->ready = 1;
+	/* カタログ subtype から FmMon チップ配置を決める */
 	CEmuFmMonBindFromGe(ge);
 	return 1;
 }
 
+/* ドライバ／ハードを破棄する */
 void CEmuFm7Close(CEmuFm7* m)
 {
 	if (!m) return;
@@ -55,12 +59,14 @@ void CEmuFm7Close(CEmuFm7* m)
 	memset(m, 0, sizeof(*m));
 }
 
+/* ステレオ PCM を frames 分合成する */
 int CEmuFm7Render(CEmuFm7* m, int16_t* stereo, int frames)
 {
 	if (!m || !m->ready || !m->driver || !stereo || frames <= 0) return 0;
 	return m->driver->Render(stereo, frames);
 }
 
+/* 再生位置を sample へ移動（未対応なら 0） */
 int CEmuFm7Seek(CEmuFm7* m, uint64_t sample)
 {
 	if (!m || !m->driver) return 0;

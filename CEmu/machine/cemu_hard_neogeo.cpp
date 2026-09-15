@@ -12,11 +12,11 @@ enum {
 	NEO_YM2610_HZ = 8000000
 };
 
-/* Window sizes / base offsets into M1 (wiki.neogeodev Z80 bankswitching). */
+/* M1 内の窓サイズ／ベース（wiki.neogeodev の Z80 バンク切替） */
 static const unsigned kNeoWinSize[4] = { 0x0800, 0x1000, 0x2000, 0x4000 };
 static const uint16_t kNeoWinBase[4] = { 0xF000, 0xE000, 0xC000, 0x8000 };
 
-/* ---- CMC50 M1 decrypt (MAME prot_cmc.cpp cmc50_m1_decrypt) ---- */
+/* CMC50 M1 復号（MAME prot_cmc.cpp cmc50_m1_decrypt） */
 static const uint8_t kCmc50M1Addr8_15Xor[256] = {
 	0x0a,0x72,0xb7,0xaf,0x67,0xde,0x1d,0xb1,0x78,0xc4,0x4f,0xb5,0x4b,0x18,0x76,0xdd,
 	0x11,0xe2,0x36,0xa1,0x82,0x03,0x98,0xa0,0x10,0x5f,0x3f,0xd6,0x1f,0x90,0x6a,0x0b,
@@ -54,6 +54,7 @@ static const uint8_t kCmc50M1Addr0_7Xor[256] = {
 	0x76,0xea,0x5c,0x82,0x1a,0x4f,0xaa,0xca,0xe1,0x0b,0x4e,0xcb,0x6a,0xef,0xd1,0xd6
 };
 
+/* 16bit の指定順 bitswap */
 static unsigned CEmuNeoBitSwap16(unsigned v, const int* o)
 {
 	unsigned r = 0;
@@ -62,6 +63,7 @@ static unsigned CEmuNeoBitSwap16(unsigned v, const int* o)
 	return r;
 }
 
+/* CMC50 M1 アドレススクランブル */
 static int CEmuNeoCmc50M1Scramble(int address, uint16_t key)
 {
 	static const int p1[8][16] = {
@@ -91,12 +93,12 @@ static int CEmuNeoCmc50M1Scramble(int address, uint16_t key)
 	return (block << 16) | (int)aux;
 }
 
-/* In-place CMC50 address scramble for encrypted 512K M1 (mslug5 etc.).
-   MAME cmc50_m1_decrypt: key = byte sum of the first 64KiB (not word sum). */
+/* 暗号化 512K M1（mslug5 等）の CMC50 アドレススクランブルをその場で解く。
+   MAME: key = 先頭 64KiB のバイト合計（ワード合計ではない）。 */
 static void CEmuNeoCmc50M1Decrypt(uint8_t* rom, unsigned size)
 {
 	if (!rom || size < 0x80000u) return;
-	/* Skip if already looks like a Z80 reset vector (decrypted dumps). */
+	/* 既に Z80 リセットベクタに見える（復号済みダンプ）ならスキップ */
 	if (rom[0] == 0xc3 || rom[0] == 0xf3 || rom[0] == 0x31)
 		return;
 	uint16_t key = 0;
@@ -110,6 +112,7 @@ static void CEmuNeoCmc50M1Decrypt(uint8_t* rom, unsigned size)
 	free(buf);
 }
 
+/* Neo Geo 音源ハード: Z80 + YM2610 + 4 窓バンク */
 CHardNeo::CHardNeo()
 	: cpuHz_(NEO_Z80_HZ)
 	, ymHz_(NEO_YM2610_HZ)
@@ -134,11 +137,13 @@ CHardNeo::CHardNeo()
 	memset(bank_, 0, sizeof(bank_));
 }
 
+/* チップ／CPU を破棄 */
 CHardNeo::~CHardNeo()
 {
 	Shutdown();
 }
 
+/* カタログに YM2610 があるか */
 static int CEmuNeoHasYm2610(const CEmuGameEntry* ge)
 {
 	if (!ge) return 0;
@@ -148,12 +153,13 @@ static int CEmuNeoHasYm2610(const CEmuGameEntry* ge)
 	return 0;
 }
 
+/* Neo Geo / 誤タグ MVS か */
 static int IsNeoPlatform(const CEmuGameEntry* ge)
 {
 	if (!ge) return 0;
 	if (_stricmp(ge->platform, "neogeo") == 0 || _stricmp(ge->subtype, "neogeo") == 0)
 		return 1;
-	/* Mis-tagged MVS sets: platform=snk subtype=generic + YM2610. */
+	/* 誤タグの MVS: platform=snk subtype=generic + YM2610 */
 	if (_stricmp(ge->platform, "snk") == 0
 		&& (_stricmp(ge->subtype, "generic") == 0 || ge->subtype[0] == 0)
 		&& CEmuNeoHasYm2610(ge))
@@ -161,6 +167,7 @@ static int IsNeoPlatform(const CEmuGameEntry* ge)
 	return 0;
 }
 
+/* Z80 と YM2610 を生成 */
 int CHardNeo::Init(const CEmuGameEntry* ge, int sampleRate)
 {
 	if (!ge || !IsNeoPlatform(ge)) return 0;
@@ -172,6 +179,7 @@ int CHardNeo::Init(const CEmuGameEntry* ge, int sampleRate)
 	return (chip_ && cpu_) ? 1 : 0;
 }
 
+/* CPU/チップ/PCM を破棄 */
 void CHardNeo::Shutdown()
 {
 	if (CEmuZ80BusGetActive() == this)
@@ -186,6 +194,7 @@ void CHardNeo::Shutdown()
 	if (adpcmB_) { free(adpcmB_); adpcmB_ = NULL; adpcmBSize_ = 0; }
 }
 
+/* M1 ROM から 8bit */
 uint8_t CHardNeo::ReadM1(uint32_t off) const
 {
 	if (!m1Rom_ || m1Size_ == 0) return 0xff;
@@ -193,6 +202,7 @@ uint8_t CHardNeo::ReadM1(uint32_t off) const
 	return m1Rom_[off];
 }
 
+/* NEO-ZMC 窓へバンクを載せる */
 void CHardNeo::SetBankWindow(int window, uint8_t bank)
 {
 	if (window < 0 || window > 3) return;
@@ -204,23 +214,24 @@ void CHardNeo::SetBankWindow(int window, uint8_t bank)
 		mem_[winBase + i] = ReadM1(romOff + i);
 }
 
+/* 68K ラッチへコマンド。NMI 許可中ならパルス */
 void CHardNeo::SetSoundCommand(uint8_t cmd)
 {
 	soundCmd_ = cmd;
 	soundCmdPending_ = 1;
-	/* Hardware: 68K latch write asserts NMI only while the Z80 has enabled
-	   it via OUT $08. Do not force-enable — early M1 boots with OUT $18 and
-	   a forced NMI storm corrupts SP/RAM (mslug nmiN thousands). */
+	/* 実機: 68K ラッチ書込は Z80 が OUT $08 で NMI 許可中だけアサート。強制許可しない。
+	   初期 M1 は OUT $18 でブートし、強制 NMI 嵐は SP/RAM を壊す（mslug nmiN 数千）。 */
 	if (nmiEnabled_)
 		nmiPulse_ = 1;
 }
 
+/* サウンドラッチと NEO-ZMC バンクリード */
 uint8_t CHardNeo::PortIn(uint16_t port)
 {
 	const uint8_t p = (uint8_t)(port & 0xff);
 	const uint8_t hi = (uint8_t)(port >> 8);
 
-	/* Sound latch — also mirrors on $C0 (decode mask $0C). */
+	/* サウンドラッチ — $C0 にもミラー（デコードマスク $0C） */
 	if ((p & 0x0c) == 0x00 && (p & 0x03) == 0x00) {
 		soundCmdPending_ = 0;
 		return soundCmd_;
@@ -234,20 +245,21 @@ uint8_t CHardNeo::PortIn(uint16_t port)
 		default: return chip_->ReadDataHi();
 		}
 	}
-	/* NEO-ZMC bank select: IN with bank in A15..A8 */
+	/* NEO-ZMC バンク選択: IN 時バンクは A15..A8 */
 	if (p >= 0x08 && p <= 0x0b) {
 		SetBankWindow(p - 0x08, hi);
 		return 0x00;
 	}
-	/* $18..$1B mirror bank reads on some docs; ignore */
+	/* 一部資料では $18..$1B がバンクリードミラー。無視 */
 	return 0xff;
 }
 
+/* NMI 許可/禁止、コードクリア、68K 応答 */
 void CHardNeo::PortOut(uint16_t port, uint8_t data)
 {
 	const uint8_t p = (uint8_t)(port & 0xff);
 	if ((p & 0x0c) == 0x00 && (p & 0x03) == 0x00) {
-		/* Clear sound code from Z80 side */
+		/* Z80 側からサウンドコードをクリア */
 		soundCmd_ = 0;
 		soundCmdPending_ = 0;
 		return;
@@ -257,9 +269,8 @@ void CHardNeo::PortOut(uint16_t port, uint8_t data)
 		return;
 	}
 	if ((p & 0x1c) == 0x08) {
-		/* Enable NMIs. Only the rising edge of enable (with a pending latch)
-		   asserts NMI — mslug's NMI prologue OUT $08 while pending would
-		   otherwise re-pulse every instruction → nested NMI storm. */
+		/* NMI 許可。許可の立ち上がり（ラッチ待ちあり）だけアサート。mslug の NMI プロローグが
+	   pending 中に OUT $08 すると命令ごとに再パルスしネスト嵐になる。 */
 		const int was = nmiEnabled_;
 		nmiEnabled_ = 1;
 		if (!was && soundCmdPending_)
@@ -271,26 +282,28 @@ void CHardNeo::PortOut(uint16_t port, uint8_t data)
 		return;
 	}
 	if (p == 0x0c) {
-		/* Reply byte to 68K — unused for playback */
+		/* 68K への応答バイト — 再生では未使用 */
 		(void)data;
 		return;
 	}
 }
 
+/* $F800+ ワークと $FC00 作業領域 */
 void CHardNeo::MemWrite(uint16_t addr, uint8_t data)
 {
-	/* Work RAM is $F800-$FFFF. Early SNK M1 also parks channel/timer scratch
-	   in $FC00-$FCFF (inside bank window 0) — allow those writes so song
-	   setup sticks; ROM tables in $F000-$FBFF stay read-only from identity. */
+	/* ワーク RAM は $F800-$FFFF。初期 SNK M1 はチャネル／タイマ作業を $FC00-$FCFF
+	   （バンク窓 0 内）にも置く。そこは書いて曲設定が残るようにする。$F000-$FBFF の ROM 表は identity から読専。 */
 	if (addr >= 0xF800 || (addr >= 0xFC00 && addr <= 0xFCFF))
 		mem_[addr] = data;
 }
 
+/* 固定 32K + バンク窓 + ワーク */
 uint8_t CHardNeo::MemRead(uint16_t addr)
 {
 	return mem_[addr];
 }
 
+/* zip メンバのベース名 */
 static void CEmuNeoZipBaseName(const char* name, char* out, int outCap)
 {
 	if (!out || outCap <= 0) return;
@@ -303,6 +316,7 @@ static void CEmuNeoZipBaseName(const char* name, char* out, int outCap)
 	strncpy_s(out, (size_t)outCap, base, _TRUNCATE);
 }
 
+/* 大文字小文字無視の部分一致 */
 static int CEmuNeoContainsI(const char* s, const char* needle)
 {
 	if (!s || !needle || !needle[0]) return 0;
@@ -313,9 +327,10 @@ static int CEmuNeoContainsI(const char* s, const char* needle)
 	return 0;
 }
 
+/* M1 候補スコア */
 static int CEmuNeoZ80Score(const char* name, const char* type, unsigned sz)
 {
-	/* M1 can be up to 4MiB (banked). */
+	/* M1 は最大 4MiB（バンク） */
 	if (!name || !sz || sz > 0x400000u) return -1000;
 	char base[CEMU_ZIP_PATH];
 	CEmuNeoZipBaseName(name, base, (int)sizeof(base));
@@ -329,7 +344,7 @@ static int CEmuNeoZ80Score(const char* name, const char* type, unsigned sz)
 	return score;
 }
 
-/* ---- NEO-PCM2 encrypted V (ADPCM) ROMs ---- */
+/* NEO-PCM2 暗号化 V（ADPCM）ROM */
 
 static int CEmuNeoOpt(const CEmuGameEntry* ge, const char* name, int defVal)
 {
@@ -343,8 +358,7 @@ static int CEmuNeoOpt(const CEmuGameEntry* ge, const char* name, int defVal)
 	return defVal;
 }
 
-/* MAME pcm2_prot_device::decrypt — address lines swapped in groups of `value`
-   bytes. Catalog spells this neo_pcm2_snk_1999 (value 4 / 8 / 16). */
+/* MAME pcm2_prot_device::decrypt — アドレス線を `value` バイト単位で入替。カタログは neo_pcm2_snk_1999（value 4/8/16）。 */
 static void CEmuNeoPcm2Decrypt(uint8_t* rom, unsigned size, int value)
 {
 	if (!rom || value < 2 || (value & 3) != 0) return;
@@ -359,9 +373,7 @@ static void CEmuNeoPcm2Decrypt(uint8_t* rom, unsigned size, int value)
 	}
 }
 
-/* MAME pcm2_prot_device::swap — the later PCM2 titles add an address/data
-   scramble over a full 16MiB V ROM. Catalog spells this neo_pcm2_swap (0..6).
-   The bitswap in MAME only exchanges address bits 0 and 16. */
+/* MAME pcm2_prot_device::swap — 後期 PCM2 は 16MiB V ROM 全体をアドレス／データスクランブル。カタログは neo_pcm2_swap (0..6)。MAME の bitswap はアドレス bit 0 と 16 だけ入替。 */
 static void CEmuNeoPcm2Swap(uint8_t* rom, unsigned size, int value)
 {
 	static const unsigned kAddrs[7][2] = {
@@ -385,7 +397,7 @@ static void CEmuNeoPcm2Swap(uint8_t* rom, unsigned size, int value)
 	if (!buf) return;
 	memcpy(buf, rom, kSpan);
 	for (unsigned i = 0; i < kSpan; i++) {
-		/* bitswap<24>(i, …,0,15..1,16): address bits 0 and 16 exchanged. */
+		/* bitswap<24>(i, …,0,15..1,16): アドレス bit 0 と 16 を入替 */
 		unsigned j = (i & ~0x00010001u)
 			| (((i >> 0) & 1u) << 16) | (((i >> 16) & 1u) << 0);
 		j ^= kAddrs[value][1];
@@ -395,6 +407,7 @@ static void CEmuNeoPcm2Swap(uint8_t* rom, unsigned size, int value)
 	free(buf);
 }
 
+/* V ROM 候補スコア */
 static int CEmuNeoAdpcmScore(const char* name, const char* type, unsigned sz)
 {
 	if (!name || !sz) return -1000;
@@ -432,6 +445,7 @@ static int CEmuNeoPlace(uint8_t** dst, unsigned* dstSize, unsigned offset,
 	return 1;
 }
 
+/* M1/V を載せ、CMC50/PCM2 を解き、バンクを identity マップ */
 int CHardNeo::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode)
 {
 	(void)titleCode;
@@ -510,12 +524,11 @@ int CHardNeo::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCod
 	}
 	if (!loaded && !adpcmASize_) return 0;
 
-	/* CMC50 encrypted M1 (mslug5 / kof2000-class 512K): descramble before map. */
+	/* CMC50 暗号化 M1（mslug5 / kof2000 系 512K）: マップ前にデスクランブル */
 	if (m1Rom_ && m1Size_ >= 0x80000u)
 		CEmuNeoCmc50M1Decrypt(m1Rom_, m1Size_);
 
-	/* NEO-PCM2 encrypted V ROMs. Left scrambled the YM2610 walks noise-shaped
-	   garbage and every one of these titles renders silent. */
+	/* NEO-PCM2 暗号化 V ROM。スクランブルのままだと YM2610 がノイズ状ゴミを歩き無音になる */
 	if (adpcmA_ && adpcmASize_) {
 		const int snk1999 = CEmuNeoOpt(ge, "neo_pcm2_snk_1999", 0);
 		if (snk1999 > 0)
@@ -525,16 +538,13 @@ int CHardNeo::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCod
 			CEmuNeoPcm2Swap(adpcmA_, adpcmASize_, swapIdx);
 	}
 
-	/* Fixed bank $0000-$7FFF = first 32KiB of M1 */
+	/* 固定バンク $0000-$7FFF = M1 先頭 32KiB */
 	const unsigned fix = m1Size_ < 0x8000u ? m1Size_ : 0x8000u;
 	if (m1Rom_ && fix)
 		memcpy(mem_, m1Rom_, fix);
-	/*
-	 * Identity-map $8000-$FFFF from M1 (bank = addr/windowSize).
-	 * Early SNK drivers (bstars/cyberlip/nam1975/…) never IN $08-$0B — they
-	 * expect a flat 64KiB view so song tables at $E314/$F4DA resolve. Later
-	 * KOF-family code rebanks via IN immediately after boot.
-	 */
+	/* $8000-$FFFF を M1 から identity マップ（bank = addr/windowSize）。
+ * 初期 SNK（bstars/cyberlip/nam1975/…）は IN $08-$0B をせず、平坦 64KiB で
+ * $E314/$F4DA の曲表を見る。後期 KOF 系は IN で再バンクする。 */
 	if (m1Rom_ && m1Size_ > 0x8000u) {
 		const unsigned tail = m1Size_ < 0x10000u ? (m1Size_ - 0x8000u) : 0x8000u;
 		memcpy(mem_ + 0x8000, m1Rom_ + 0x8000, tail);
@@ -543,10 +553,10 @@ int CHardNeo::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCod
 	} else {
 		memset(mem_ + 0x8000, 0xff, 0x8000);
 	}
-	bank_[0] = 0x1e; /* $F000 / 2KiB */
-	bank_[1] = 0x0e; /* $E000 / 4KiB */
-	bank_[2] = 0x06; /* $C000 / 8KiB */
-	bank_[3] = 0x02; /* $8000 / 16KiB */
+	bank_[0] = 0x1e; /* $F000 / 2KiB 窓 */
+	bank_[1] = 0x0e; /* $E000 / 4KiB 窓 */
+	bank_[2] = 0x06; /* $C000 / 8KiB 窓 */
+	bank_[3] = 0x02; /* $8000 / 16KiB 窓 */
 	memset(mem_ + 0xF800, 0, 0x800);
 
 	chip_->Reset();
@@ -568,6 +578,7 @@ int CHardNeo::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCod
 	return 1;
 }
 
+/* Z80 バスのアクティブ Neo を設定 */
 void CEmuHardNeoSetActive(CHardNeo* hw)
 {
 	CEmuZ80BusSetActive(hw);

@@ -1,7 +1,7 @@
-/* license:BSD-3-Clause
+﻿/* license:BSD-3-Clause
  * copyright-holders:Aaron Giles
- * Ensoniq ES5505 (OTIS) core — adapted from MAME src/devices/sound/es5506.cpp
- * for CEmu (MSVC / no MAME device framework).
+ * Ensoniq ES5505（OTIS）コア — MAME src/devices/sound/es5506.cpp を
+ * CEmu 向けに適応（MSVC / MAMEデバイス枠組みなし）。
  */
 #include "StdAfx.h"
 #include "cemu_chip_es5505.h"
@@ -136,7 +136,7 @@ public:
 
 	void Write(uint32_t addr, uint32_t data) override
 	{
-		/* Word offset 0..0xf into page registers (CPU maps 0x200000 + offset*2). */
+		/* ワードオフセット 0..0xf をページレジスタへ（CPUマップは 0x200000 + offset*2）。 */
 		const unsigned offset = (unsigned)(addr & 0x0f);
 		const uint16_t d = (uint16_t)(data & 0xffff);
 		Voice* voice = &voice_[page_ & 0x1f];
@@ -214,7 +214,7 @@ public:
 		if (!buf || cap < 4) return 0;
 		buf[0] = page_;
 		buf[1] = activeVoices_;
-		/* buf[2]: voices currently not STOP'd (audible candidates). */
+		/* buf[2]: 現在 STOP されていないボイス（可聴候補）。 */
 		uint8_t live = 0;
 		for (int j = 0; j <= activeVoices_ && j < kEs5505Voices; j++) {
 			if (!(voice_[j].control & kControlStopMask))
@@ -275,7 +275,7 @@ private:
 
 	void ComputeTables()
 	{
-		/* ES5505: 4-bit exponent + 4-bit mantissa, total volume bit = 8. */
+		/* ES5505: 4bit指数 + 4bit仮数、音量ビット合計=8。 */
 		volumeShift_ = 0;
 		const unsigned volumeLen = 1u << 8;
 		const unsigned exponentShift = 16;
@@ -385,7 +385,7 @@ private:
 		voiceIndex_ = voice->index;
 		if (!rom_ || romWords_ < 2u) return 0;
 		uint64_t idx = voiceBank_[voice->index] + wordAddr;
-		/* Also honor BS bit as second half within a 2-bank window when no otisbank. */
+		/* otisbank が無いとき、2バンク窓内の後半として BS ビットも尊重する。 */
 		if (GetBank(voice->control) && voiceBank_[voice->index] == 0 && romWords_ > 0x100000ull)
 			idx += 0x100000ull;
 		if ((romWords_ & (romWords_ - 1ull)) == 0)
@@ -396,7 +396,7 @@ private:
 		const size_t byteOff = (size_t)idx * 2u;
 		if (byteOff + 1u >= (size_t)romWords_ * 2u) return 0;
 		const uint8_t* p = rom_ + byteOff;
-		return (uint16_t)((p[0] << 8) | p[1]); /* BE word */
+		return (uint16_t)((p[0] << 8) | p[1]); /* BE ワード */
 	}
 
 	void CheckEndForward(Voice* voice, uint64_t& accum)
@@ -446,7 +446,7 @@ private:
 		const uint32_t freqcount = (uint32_t)voice->freqcount;
 		uint64_t accum = voice->accum & addrAccMask_;
 		if (!(voice->control & kControlStopMask)) {
-			/* OTIS per-voice vol often left at 0; board gain is MB87078 (0dB reset). */
+			/* OTIS のボイス毎音量は0のままが多い。基板ゲインは MB87078（リセット0dB）。 */
 			uint32_t lv = voice->lvol ? voice->lvol : 0xffu;
 			uint32_t rv = voice->rvol ? voice->rvol : 0xffu;
 			if (!(voice->control & kControlDir)) {
@@ -492,7 +492,7 @@ private:
 			GeneratePcm(voice, &ch[l]);
 			GenerateIrq(voice, v);
 		}
-		/* Mix 4 stereo pairs → L/R; samples are ~20-bit — shift to 16. */
+		/* 4ステレオ対を L/R へ合算。サンプルは約20bit — 16bitへシフト。 */
 		int64_t l = 0, r = 0;
 		for (int c = 0; c < 4; c++) {
 			l += ch[c * 2];
@@ -705,13 +705,14 @@ private:
 	Voice voice_[kEs5505Voices];
 };
 
-/* Expose ReadReg via a thin cast helper used by hard layer. */
+/* ハード層向けに ReadReg を薄いキャストで公開。 */
 uint16_t CEmuChipEs5505Read(CChip* c, uint32_t addr)
 {
 	if (!c) return 0xffff;
 	return ((CChipEs5505*)c)->ReadReg(addr);
 }
 
+/* ES5505 (OTIS) ラッパ生成。 */
 CChip* CEmuChipEs5505Create(uint32_t clockHz, int sampleRate)
 {
 	return new CChipEs5505(clockHz, sampleRate);

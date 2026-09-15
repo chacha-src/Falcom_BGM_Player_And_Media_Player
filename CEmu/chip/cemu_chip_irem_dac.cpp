@@ -1,10 +1,10 @@
-#include "StdAfx.h"
+﻿#include "StdAfx.h"
 #include "cemu_chip_irem_dac.h"
 #include "cemu_chip.h"
 #include <string.h>
 
-/* MAME irem/m72_a.cpp drives DAC_8BIT_R2R from the sound CPU: sample_w()
-   writes one unsigned byte and bumps the sample pointer. 0x80 is silence. */
+/* MAME irem/m72_a.cpp はサウンドCPUから DAC_8BIT_R2R を駆動する。
+   sample_w() が符号なし1バイトを書き、ポインタを進める。0x80 が無音。 */
 static int CEmuIremDacClamp16(int v)
 {
 	if (v > 32767) return 32767;
@@ -46,7 +46,8 @@ public:
 	void MixAdd(int16_t* stereo, int frames, int gain) override
 	{
 		if (!stereo || frames <= 0) return;
-		if (!writes_) return; /* never driven — stay silent, no DC step */
+		if (!writes_) return; /* 未駆動なら無音のまま（DCステップを出さない） */
+		/* 符号なし8bitを中点0x80基準でステレオへ加算。 */
 		const int s = ((int)level_ - 0x80) * 96 * gain / 256;
 		for (int i = 0; i < frames; i++) {
 			stereo[i * 2] = (int16_t)CEmuIremDacClamp16((int)stereo[i * 2] + s);
@@ -75,6 +76,7 @@ private:
 	unsigned writes_;
 };
 
+/* Irem M72 8bit DAC ラッパ生成。 */
 CChip* CEmuChipIremDacCreate(int sampleRate)
 {
 	return new CChipIremDac(sampleRate);

@@ -6,6 +6,7 @@
 #include "../fmmon/cemu_fmmon_bind.h"
 #include <string.h>
 
+/* PC-88: zip を開きハード＋ドライバを生成して曲を起動。FmMon は Open 前後で bind。 */
 int CEmuPc88Open(CEmuPc88* m, const CEmuGameEntry* ge, const wchar_t* zipPath, unsigned titleCode, int sampleRate)
 {
 	if (!m || !ge || !zipPath) return 0;
@@ -27,6 +28,7 @@ int CEmuPc88Open(CEmuPc88* m, const CEmuGameEntry* ge, const wchar_t* zipPath, u
 		CEmuPc88Close(m);
 		return 0;
 	}
+	/* FmMon ダンプ開始（Open 失敗時も後で Close が掃除する） */
 	CEmuFmMonBeginOpen(ge, zipPath, sampleRate);
 	if (!m->driver->Open(m->hard, ge, &fs, titleCode)) {
 		CEmuZipFsClose(&fs);
@@ -36,10 +38,12 @@ int CEmuPc88Open(CEmuPc88* m, const CEmuGameEntry* ge, const wchar_t* zipPath, u
 	CEmuZipFsClose(&fs);
 
 	m->ready = 1;
+	/* カタログ subtype から FmMon チップ配置を決める */
 	CEmuFmMonBindFromGe(ge);
 	return 1;
 }
 
+/* ドライバ／ハードを破棄する */
 void CEmuPc88Close(CEmuPc88* m)
 {
 	if (!m) return;
@@ -55,12 +59,14 @@ void CEmuPc88Close(CEmuPc88* m)
 	memset(m, 0, sizeof(*m));
 }
 
+/* ステレオ PCM を frames 分合成する */
 int CEmuPc88Render(CEmuPc88* m, int16_t* stereo, int frames)
 {
 	if (!m || !m->ready || !m->driver || !stereo || frames <= 0) return 0;
 	return m->driver->Render(stereo, frames);
 }
 
+/* 再生位置を sample へ移動（未対応なら 0） */
 int CEmuPc88Seek(CEmuPc88* m, uint64_t sample)
 {
 	if (!m || !m->driver) return 0;

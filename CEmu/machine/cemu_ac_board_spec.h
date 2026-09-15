@@ -1,7 +1,7 @@
 ﻿#pragma once
-/* Fixed arcade sound-board specifications.
-   Catalog XML supplies ROM names/offsets and title codes; this table supplies
-   the hardware constants (CPU, regions, chips, IRQ lines, latch). */
+/* アーケード音源ボードの固定仕様。
+   カタログ XML は ROM 名／オフセットと曲コード。本表はハード定数
+   （CPU・領域・チップ・IRQ 線・ラッチ）。 */
 
 #include "cemu_hard_ac.h"
 
@@ -73,5 +73,7 @@ struct CEmuAcBoardSpec {
 	const char* mameRef;
 };
 
+/* ボード ID から固定仕様を返す */
 const CEmuAcBoardSpec* CEmuAcBoardSpecById(CEmuAcBoard board);
+/* カタログ subtype からボード種別を解決 */
 CEmuAcBoard CEmuAcResolveBoard(const CEmuGameEntry* ge);

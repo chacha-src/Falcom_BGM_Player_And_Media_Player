@@ -5,10 +5,9 @@
 #include <string.h>
 #include <stdlib.h>
 
-/* Sega Model 2A/2B/2C/3 SCSP (YMF292-F): 32 slots of PCM/noise with envelope,
-   LFO and DSP, wrapped around the standalone core vendored under
-   CEmu/vendor/scsp (Audio Overload eng_ssf, the same core the SSF Saturn
-   music format uses — Model 2/3 drive it identically over the MIDI port). */
+/* Sega Model 2A/2B/2C/3 SCSP（YMF292-F）: 32スロット PCM/ノイズ + エンベロープ、
+   LFO、DSP。コアは CEmu/vendor/scsp（Audio Overload eng_ssf。SSF Saturn 音楽と
+   同じコア — Model 2/3 は MIDIポート経由で同じ駆動）。 */
 extern "C" {
 #include "../vendor/scsp/ao.h"
 #include "../vendor/scsp/scsp.h"
@@ -19,15 +18,14 @@ double CEmuScspSlotRate(int s);
 
 enum { kScspSlots = 32, kScspBlock = 512, kScspRamBytes = 512 * 1024 };
 
-/* The core signals the sound 68000 through one context-free callback (it keeps
-   a single instance in AllocedSCSP), so the pending level lives here. A
-   positive argument asserts that IPL, a negative one clears it, 0 clears all. */
+/* コアはコンテキスト無しコールバック1本でサウンド68000へ通知する
+   （AllocedSCSP に1インスタンス）。保留レベルはここに置く。
+   正の引数はそのIPLをアサート、負はクリア、0は全クリア。 */
 static int g_scspIrqLevel = 0;
 
-/* The core keeps exactly one instance in its own AllocedSCSP global, so only
-   the wrapper that started it may drive or tear it down. Without this guard a
-   new chip created before the old one is destroyed makes the old destructor
-   free the live instance. */
+/* コアは AllocedSCSP グローバルに1インスタンスだけ持つので、起動したラッパだけが
+   駆動/破棄してよい。このガードが無いと、旧インスタンス破棄前に新規生成すると
+   旧デストラクタが生きている実体を解放する。 */
 class CChipScsp;
 static const CChipScsp* g_scspOwner = NULL;
 
@@ -81,7 +79,7 @@ public:
 
 	void Write(uint32_t addr, uint32_t data) override
 	{
-		/* Register file is 0x1000 bytes; CEmu addresses it as 16-bit words. */
+		/* レジスタファイルは 0x1000 バイト。CEmu は16bitワードでアドレスする。 */
 		const unsigned a = addr & 0x7ffu;
 		const uint16_t v = (uint16_t)(data & 0xffffu);
 		reg_[a] = v;
@@ -92,11 +90,10 @@ public:
 
 	void AdvanceClocks(uint64_t clocks) override
 	{
-		/* Model 2A/3 boot runs the 68000 for ~1.5 s before the first mix.
-		   The firmware programs SCSP timers and then waits on them; a no-op
-		   here left Timer A/B and MIDI SCIPD frozen, so every SCSP title
-		   stayed silent even though MIDI was queued. 512 chip clocks = one
-		   44.1 kHz sample (22.5792 MHz / 44100). */
+		/* Model 2A/3 起動は最初のMixまで68000を約1.5秒回す。ファームはSCSPタイマを
+		   プログラムして待つ。ここがno-opだとタイマA/BとMIDI SCIPDが止まり、
+		   MIDIが積まれていても全SCSPタイトルが無音。512チップクロック=44.1kHz
+		   1サンプル（22.5792 MHz / 44100）。 */
 		if (!Live() || clocks == 0) return;
 		clockAcc_ += clocks;
 		uint64_t samples = clockAcc_ / 512u;
@@ -129,6 +126,7 @@ public:
 			memset(bufR_, 0, sizeof(bufR_));
 			INT16* buf[2] = { bufL_, bufR_ };
 			SCSP_Update(NULL, NULL, buf, n);
+			/* ステレオMix: コア出力を既存バッファへ加算。 */
 			for (int i = 0; i < n; i++) {
 				int16_t* p = stereo + (size_t)(done + i) * 2;
 				p[0] = (int16_t)CEmuScspClamp16((int)p[0] + (int)bufL_[i] * gain / 256);
@@ -139,9 +137,8 @@ public:
 		UpdateMon();
 	}
 
-	/* The wave ROM is not wired to the SCSP on Model 2/3 — the sound 68000
-	   copies samples from its ROM windows into the shared 512KB RAM. Keep the
-	   pointer only so the host bus can serve those windows. */
+	/* Model 2/3 では波形ROMはSCSPに配線されない — サウンド68000がROM窓から
+	   共有512KB RAMへコピーする。ホストバスがそれらの窓を出せるようポインタだけ残す。 */
 	void SetPcmRom(const uint8_t* data, unsigned size) override
 	{
 		rom_ = data;
@@ -201,8 +198,8 @@ private:
 			if (on) {
 				const double rate = CEmuScspSlotRate(s);
 				if (rate > 0.0) {
-					/* Sample root pitch is unknown, so report the rate
-					   relative to unity playback with C4 as the origin. */
+					/* サンプルのルート音は不明なので、unity再生に対する相対レートを
+					   C4起点で報告する。 */
 					midi = FmMonShadowHzToMidi(261.6255653 * rate);
 					if (midi < 0) midi = 60;
 				}
@@ -212,6 +209,7 @@ private:
 				continue;
 			monOn_[s] = (uint8_t)on;
 			monMidi_[s] = (uint8_t)midi;
+			/* FMモニタへスロット状態。 */
 			FmMonShadowPcmNote(s, midi, on);
 		}
 	}
@@ -229,6 +227,7 @@ private:
 	INT16 bufR_[kScspBlock];
 };
 
+/* SCSP ラッパ生成。512チップクロック = 1サンプル。 */
 CChip* CEmuChipScspCreate(uint32_t clockHz, int sampleRate)
 {
 	return new CChipScsp(clockHz, sampleRate);

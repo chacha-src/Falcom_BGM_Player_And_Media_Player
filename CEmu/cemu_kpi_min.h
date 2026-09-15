@@ -26,6 +26,7 @@ struct CEMU_S98_MEDIAINFO {
 	DWORD dwReserved[6];
 };
 
+/* KPI 互換 MEDIAINFO を 16bit stereo 44.1k で初期化 */
 inline void CEmuS98InitMediaInfo(CEMU_S98_MEDIAINFO* m)
 {
 	if (!m) return;
@@ -36,12 +37,14 @@ inline void CEmuS98InitMediaInfo(CEMU_S98_MEDIAINFO* m)
 	m->dwChannels = 2;
 }
 
+/* サンプル位置 → 100ns。rate=0 は 0 */
 inline UINT64 CEmuS98SampleTo100ns(UINT64 samples, DWORD rate)
 {
 	if (!rate) return 0;
 	return samples * 10000000ull / rate;
 }
 
+/* 100ns → サンプル位置。rate=0 は 0 */
 inline UINT64 CEmuS98_100nsToSample(UINT64 t100ns, DWORD rate)
 {
 	if (!rate) return 0;

@@ -16,6 +16,7 @@ enum {
 	X1_AY_HZ = 2000000
 };
 
+/* CEmuParseOptHex の実装 */
 static int CEmuParseOptHex(const CEmuGameEntry* ge, const char* name, int defVal)
 {
 	if (!ge || !name) return defVal;
@@ -28,6 +29,7 @@ static int CEmuParseOptHex(const CEmuGameEntry* ge, const char* name, int defVal
 	return defVal;
 }
 
+/* IsX1Platform の実装 */
 static int IsX1Platform(const CEmuGameEntry* ge)
 {
 	if (!ge) return 0;
@@ -37,10 +39,7 @@ static int IsX1Platform(const CEmuGameEntry* ge)
 	return 0;
 }
 
-/* KOEI YDOS3X: require the load+10 "OVL-1" marker at D200 or D000.
-   Do NOT key off F800 stub alone — many mucom titles leave 0xF37C there
-   and must keep hoot IM2 vec 0/6 (F37C-only detection silenced them with
-   high opmW / peak=0). */
+/* KOEI YDOS3X: D200 または D000 の load+10 「OVL-1」印が要る。F800 stub だけでは判定しない — 多くの mucom はそこに 0xF37C を残し、hoot IM2 ベクタ 0/6 が要る（F37C のみ検出は high opmW／peak=0 で無音にした）。 */
 static int MemHasYdos(const uint8_t* mem)
 {
 	if (!mem) return 0;
@@ -53,8 +52,7 @@ static int MemHasYdos(const uint8_t* mem)
 	return 0;
 }
 
-/* Gen1 sangoku ships YDOS3X.SYS without a readable OVL-1 at load (ciphered
-   until PATCH runs). Catalog rom name enables CIM mirror in LoadRoms. */
+/* Gen1 sangoku は load 時に読める OVL-1 無しで YDOS3X.SYS を載せる（PATCH まで暗号）。カタログ rom 名が LoadRoms の CIM ミラーを許可する。 */
 static int GeHasYdosRom(const CEmuGameEntry* ge)
 {
 	if (!ge) return 0;
@@ -66,14 +64,13 @@ static int GeHasYdosRom(const CEmuGameEntry* ge)
 	return 0;
 }
 
+/* X1IsYdos の実装 */
 static int X1IsYdos(CHardX1* hw)
 {
 	return (hw && (hw->ydosRom_ || MemHasYdos(hw->Mem()))) ? 1 : 0;
 }
 
-/* Tecnosoft kugyoku: `CP FF; JR Z; LD B,A; AND 0F; CALL drv`. Port 1/F
-   carry the 0x80/0x81/0xFF command; AND 0F is the track nibble. Using lo
-   as the latch made 0x80000003 call drv with A=3 (no such track). */
+/* Tecnosoft kugyoku: `CP FF; JR Z; LD B,A; AND 0F; CALL drv`。ポート 1/F が 0x80/0x81/0xFF コマンド。AND 0F がトラックニブル。lo をラッチにすると 0x80000003 が A=3 で drv を呼ぶ（そのトラックは無い）。 */
 static int CEmuX1TecnoCmdHi(const uint8_t* mem, unsigned patchOff, unsigned patchLen)
 {
 	if (!mem || patchLen < 8u) return 0;
@@ -91,9 +88,7 @@ static int CEmuX1TecnoCmdHi(const uint8_t* mem, unsigned patchOff, unsigned patc
 	return 0;
 }
 
-/* PATCH `LD HL,4000 / LD (drv+0x0A),HL` — Telenet dds/luxsor/yakyufan. The
-   CTC ISR does `LD A,(drv+0x0F); OR A; RET Z` and skips TL programming when
-   that byte stays 0 (high keyOn, hist60=0, peak=0). */
+/* PATCH `LD HL,4000 / LD (drv+0x0A),HL` — Telenet dds/luxsor/yakyufan。CTC ISR は `LD A,(drv+0x0F); OR A; RET Z` し、そのバイトが 0 のままだと TL 組みを飛ばす（high keyOn、hist60=0、peak=0）。 */
 static uint16_t CEmuX1TelenetPlayGate(const uint8_t* mem, unsigned patchOff, unsigned patchLen)
 {
 	if (!mem || patchLen < 6u) return 0;
@@ -111,8 +106,7 @@ static uint16_t CEmuX1TelenetPlayGate(const uint8_t* mem, unsigned patchOff, uns
 	return 0;
 }
 
-/* Enix JESUS: `CP 09; JR NC` (port 1 must be 0-8) then later `CP 72`
-   (port 0F is the OPMTBL index, which is the global music id). */
+/* Enix JESUS: `CP 09; JR NC`（ポート 1 は 0-8）のあと `CP 72`（ポート 0F は OPMTBL 添字＝グローバル音楽 ID）。 */
 static int CEmuX1JesusSplit(const uint8_t* mem, unsigned patchOff, unsigned patchLen)
 {
 	if (!mem || patchLen < 8u) return 0;
@@ -129,10 +123,7 @@ static int CEmuX1JesusSplit(const uint8_t* mem, unsigned patchOff, unsigned patc
 	return (saw09 && saw72) ? 1 : 0;
 }
 
-/* Herzog OPMX1: `LD DE,2802; LD L,A; ADD HL,HL; ADD HL,DE` indexes a
-   pointer table at mdata+2. PSGX1 uses `LD DE,2800` at $1B60 (track 0 is
-   the first word). revo2 DEMO: `LD A,(F5F8); CP 03; JP NC` treats
-   song >= 3 as a mute/init path (MUS103 lo=3 hit that and wrote TL=7F). */
+/* Herzog OPMX1: `LD DE,2802; LD L,A; ADD HL,HL; ADD HL,DE` が mdata+2 のポインタ表を添字。PSGX1 は $1B60 で `LD DE,2800`（トラック 0 が先頭ワード）。revo2 DEMO: `LD A,(F5F8); CP 03; JP NC` は曲 >= 3 を mute/init（MUS103 lo=3 が当たり TL=7F を書いた）。 */
 static int CEmuX1SongIdFromHi(const uint8_t* mem)
 {
 	if (!mem) return 0;
@@ -149,8 +140,7 @@ static int CEmuX1SongIdFromHi(const uint8_t* mem)
 	return 0;
 }
 
-/* Falcom xana2: `IN A,(0F); SUB 2` — family hi is always 0x02, track in lo.
-   Ungated, that steal turned euphory 0x02000004 (song 2, bank 4) into track 4. */
+/* Falcom xana2: `IN A,(0F); SUB 2` — 系統 hi は常に 0x02、トラックは lo。ゲート無しだと euphory 0x02000004（曲 2、バンク 4）がトラック 4 になる。 */
 static int CEmuX1FalcomLoTrack(const uint8_t* mem, unsigned patchOff, unsigned patchLen)
 {
 	if (!mem || patchLen < 4u) return 0;
@@ -171,8 +161,7 @@ static int CEmuX1FalcomLoTrack(const uint8_t* mem, unsigned patchOff, unsigned p
 	return 0;
 }
 
-/* pwmajan PATCH: `LD HL,$6000; LD D,A; DEC D` then per-file LDIR.
-   SASURAI dest $4800 / POCO dest $5000, source still $6000. */
+/* pwmajan PATCH: `LD HL,$6000; LD D,A; DEC D` のあとファイル毎 LDIR。SASURAI dest $4800／POCO dest $5000、ソースは $6000 のまま。 */
 static int X1IsPwmajanPatch(const uint8_t* mem)
 {
 	return mem
@@ -180,8 +169,7 @@ static int X1IsPwmajanPatch(const uint8_t* mem)
 		&& mem[0xF042] == 0x57 && mem[0xF043] == 0x15;
 }
 
-/* sghost PATCH: port F selects OPDEMO (1) / BACKUP (>=2) / driver (0),
-   not the MA00x index. `LD HL,$B000; LD DE,$E000`. */
+/* sghost PATCH: ポート F は OPDEMO（1）／BACKUP（>=2）／ドライバ（0）を選び、MA00x 添字ではない。`LD HL,$B000; LD DE,$E000`。 */
 static int X1IsSghostPatch(const uint8_t* mem)
 {
 	return mem
@@ -189,8 +177,7 @@ static int X1IsSghostPatch(const uint8_t* mem)
 		&& mem[0xF02E] == 0x11 && mem[0xF02F] == 0x00 && mem[0xF030] == 0xE0;
 }
 
-/* ishtar PATCH @ $F000: `DI; LD SP,$F100; IM 2; LD A,1; LD I,A; CALL $0B96`.
-   Title mid is a byte offset into the staged IBGM/IS* file. */
+/* ishtar PATCH @ $F000: `DI; LD SP,$F100; IM 2; LD A,1; LD I,A; CALL $0B96`。タイトル mid は載せた IBGM/IS* ファイル内のバイトオフセット。 */
 static int X1IsIshtarPatch(const uint8_t* mem)
 {
 	return mem
@@ -200,9 +187,7 @@ static int X1IsIshtarPatch(const uint8_t* mem)
 		&& mem[0xF00C] == 0x0B;
 }
 
-/* ys_x1 PATCH: `LD HL,$C000; LD DE,$4D00; LD BC,$0D00; LDIR` then
-   `IN A,(0F); LD ($28A5),A`. Port F is the in-file track (0 is valid);
-   port 1's high nibble is mode ($00 in-game / $20 title / $30 ending). */
+/* ys_x1 PATCH: `LD HL,$C000; LD DE,$4D00; LD BC,$0D00; LDIR` のあと `IN A,(0F); LD ($28A5),A`。ポート F はファイル内トラック（0 は有効）。ポート 1 の上位ニブルはモード（$00 ゲーム内／$20 タイトル／$30 エンディング）。 */
 static int X1IsYs1Patch(const uint8_t* mem)
 {
 	if (!mem) return 0;
@@ -216,9 +201,7 @@ static int X1IsYs1Patch(const uint8_t* mem)
 	return 0;
 }
 
-/* gand PATCH: `LD HL,$8600; LD DE,$0200; LD BC,$1000; LDIR` then
-   `IN A,(1); CP $1C` indexes 8-byte rows at $00FC. Port 1 is the song
-   id (0 = effect); port F 1 copies mdata→$B700, 2 takes the 78B2 path. */
+/* gand PATCH: `LD HL,$8600; LD DE,$0200; LD BC,$1000; LDIR` のあと `IN A,(1); CP $1C` が $00FC の 8 バイト行を添字。ポート 1 は曲 ID（0 = 効果）。ポート F 1 は mdata→$B700、2 は 78B2 経路。 */
 static int X1IsGandPatch(const uint8_t* mem)
 {
 	return mem
@@ -228,8 +211,7 @@ static int X1IsGandPatch(const uint8_t* mem)
 		&& mem[0x2E] == 0xED && mem[0x2F] == 0xB0;
 }
 
-/* ys2: `LD HL,C000; LD DE,4000; LD BC,1000; LDIR` — songs >= $20 copy BGM
-   to $4000; songs < $20 still index a table there (mode 0). */
+/* ys2: `LD HL,C000; LD DE,4000; LD BC,1000; LDIR` — 曲 >= $20 は BGM を $4000 へコピー。曲 < $20 はそこにある表を添字（モード 0）。 */
 static int CEmuX1Ys2Mirror4000(const uint8_t* mem, unsigned patchOff, unsigned patchLen)
 {
 	if (!mem || patchLen < 11u) return 0;
@@ -246,8 +228,7 @@ static int CEmuX1Ys2Mirror4000(const uint8_t* mem, unsigned patchOff, unsigned p
 	return 0;
 }
 
-/* Laplace: `LD C,0F; IN E,(C)` then `LD A,D5; OUT (1FA3); OUT (C),E` —
-   port F is the CTC time constant, not a track index. */
+/* Laplace: `LD C,0F; IN E,(C)` のあと `LD A,D5; OUT (1FA3); OUT (C),E` — ポート F は CTC 時定数でありトラック添字ではない。 */
 static int CEmuX1LaplaceCtcF(const uint8_t* mem, unsigned patchOff, unsigned patchLen)
 {
 	if (!mem || patchLen < 8u) return 0;
@@ -265,8 +246,7 @@ static int CEmuX1LaplaceCtcF(const uint8_t* mem, unsigned patchOff, unsigned pat
 	return 0;
 }
 
-/* wibarm: `LD BC,000F; IN A,(C); CP FF; CALL Z` — port F is the in-file
-   track (0 = field) or $FF for the ending overlay, not a copy of port 1. */
+/* wibarm: `LD BC,000F; IN A,(C); CP FF; CALL Z` — ポート F はファイル内トラック（0 = フィールド）またはエンディングオーバーレイの $FF。ポート 1 のコピーではない。 */
 static int CEmuX1WibarmPortF(const uint8_t* mem, unsigned patchOff, unsigned patchLen)
 {
 	if (!mem || patchLen < 8u) return 0;
@@ -284,8 +264,7 @@ static int CEmuX1WibarmPortF(const uint8_t* mem, unsigned patchOff, unsigned pat
 	return 0;
 }
 
-/* ametruck: `IN A,(1); CP 03; JR NC` — port 1 is OPENING/HISCORE/ENDING.
-   `IN A,(0F); CALL play` — hi selects the in-file variant (ROUTE 333). */
+/* ametruck: `IN A,(1); CP 03; JR NC` — ポート 1 は OPENING/HISCORE/ENDING。`IN A,(0F); CALL play` — hi がファイル内バリアント（ROUTE 333）。 */
 static int CEmuX1AmetruckPortF(const uint8_t* mem, unsigned patchOff, unsigned patchLen)
 {
 	if (!mem || patchLen < 10u) return 0;
@@ -303,6 +282,7 @@ static int CEmuX1AmetruckPortF(const uint8_t* mem, unsigned patchOff, unsigned p
 	return (sawCp03 && sawInF) ? 1 : 0;
 }
 
+/* CEmuX1TelenetPlayTempo の実装 */
 static uint16_t CEmuX1TelenetPlayTempo(const uint8_t* mem, uint16_t gate)
 {
 	if (!mem || !gate) return 0;
@@ -320,6 +300,7 @@ static uint16_t CEmuX1TelenetPlayTempo(const uint8_t* mem, uint16_t gate)
 	return 0;
 }
 
+/* 再生／タイマを武装する */
 void CHardX1::ArmTelenetPlayGate()
 {
 	if (!opmPlayGate_) return;
@@ -327,18 +308,15 @@ void CHardX1::ArmTelenetPlayGate()
 	const unsigned bgm = (unsigned)mem_[ptr] | ((unsigned)mem_[ptr + 1] << 8);
 	if (bgm < 0x100u || bgm >= 0xE000u) return;
 	mem_[opmPlayGate_] = 1;
-	/* ISR `DEC (tempo); RET NZ` from a zeroed BSS byte waits 256 ticks
-	   (~5s) before the first TL write. Prime so the first IRQ runs. */
+	/* ISR `DEC (tempo); RET NZ` はゼロ BSS バイトから 256 tick（約 5s）待って最初の TL 書き。最初の IRQ が走るようにプライムする。 */
 	if (opmPlayTempo_ && mem_[opmPlayTempo_] == 0)
 		mem_[opmPlayTempo_] = 1;
 }
 
+/* データを載せる */
 void CHardX1::LoadSghostOpmPatches()
 {
-	/* OPMDRV INIT $4595: slot 1..7, word table at $B030, FB at $20+ch,
-	   PMS at $38+ch, 24 operator bytes starting $40+ch step 8, then $0F.
-	   PATCH CALL INIT returns to $F05A; host-apply here so MA00x that
-	   landed after a zero-table INIT still programs TL/AR. */
+	/* OPMDRV INIT $4595: スロット 1..7、ワード表 $B030、FB は $20+ch、PMS は $38+ch、オペレータ 24 バイトは $40+ch step 8、最後に $0F。PATCH CALL INIT は $F05A へ戻る。ホスト側で適用し、ゼロ表 INIT 後に着地した MA00x も TL/AR を組む。 */
 	if (psgOnly_ || !chipOpm_ || !X1IsSghostPatch(mem_))
 		return;
 	if (playSongLatchF_ != 0)
@@ -433,6 +411,7 @@ CHardX1::~CHardX1()
 	Shutdown();
 }
 
+/* チップと CPU を生成する */
 int CHardX1::Init(const CEmuGameEntry* ge, int sampleRate)
 {
 	if (!ge || !IsX1Platform(ge)) return 0;
@@ -442,7 +421,7 @@ int CHardX1::Init(const CEmuGameEntry* ge, int sampleRate)
 	ayHz_ = X1_AY_HZ;
 	psgOnly_ = (_stricmp(ge->subtype, "psg") == 0 || _stricmp(ge->subtype, "x1psg") == 0) ? 1 : 0;
 	opnMode_ = (_stricmp(ge->subtype, "opn") == 0) ? 1 : 0;
-	/* init_pc / mdata_* finalized in LoadRoms after roms+options are known. */
+	/* init_pc／mdata_* は ROM＋オプション確定後に LoadRoms で最終化 */
 	initPc_ = 0xC000;
 	mdataAddr_ = 0x4000;
 	mdataSize_ = (unsigned)BGM_SIZE;
@@ -457,6 +436,7 @@ int CHardX1::Init(const CEmuGameEntry* ge, int sampleRate)
 	return (cpu_ && chipAy_ && (psgOnly_ || chipOpm_ || chipOpn_)) ? 1 : 0;
 }
 
+/* PCM／コードバンク */
 void CHardX1::FreeBanks()
 {
 	for (int i = 0; i < 128; i++) {
@@ -469,6 +449,7 @@ void CHardX1::FreeBanks()
 	}
 }
 
+/* チップ／CPU／ROM を破棄する */
 void CHardX1::Shutdown()
 {
 	if (CEmuZ80BusGetActive() == this)
@@ -489,16 +470,17 @@ void CHardX1::Shutdown()
 	}
 }
 
+/* バンク／BGM を載せる */
 void CHardX1::StageBgm(uint8_t index)
 {
-	/* Exact bank only — no YDOS bank0 guess. */
+	/* 正確なバンクのみ — YDOS の bank0 推測はしない */
 	uint8_t use = index;
 	if (use >= 128 || !bgmPresent_[use] || !bgmBank_[use])
 		return;
 	unsigned n = bgmBankSize_[use];
 	if (n > mdataSize_) n = mdataSize_;
 	if (n > (unsigned)BGM_SIZE) n = (unsigned)BGM_SIZE;
-	/* Clamp so BGM cannot clobber code loaded above mdata (crimson OP@7A00). */
+	/* BGM が mdata より上に載ったコードを壊さないようクランプ（crimson OP@7A00） */
 	if (stageLimit_ > mdataAddr_) {
 		unsigned room = (unsigned)stageLimit_ - (unsigned)mdataAddr_;
 		if (n > room) n = room;
@@ -510,10 +492,7 @@ void CHardX1::StageBgm(uint8_t index)
 	unsigned avail = bgmBankSize_[use] - srcOff;
 	if (n > avail) n = avail;
 	const uint8_t* src = bgmBank_[use] + srcOff;
-	/* OUT 0 path: mucomx1 stages into an 8K IO window at $5000. KOEI YDOS
-	   already maps MUSIC.CIM at mdata ($4000) and IN (C)s that window —
-	   copying the file to $5000 overlays CIM+$1000 and relocates song 6+
-	   onto the wrong bytes (suiko 01000006.. SILENT, CTC TC stuck at 1). */
+	/* OUT 0 経路: mucomx1 は $5000 の 8K IO 窓へ載せる。KOEI YDOS は既に MUSIC.CIM を mdata（$4000）へマップしその窓を IN (C) — ファイルを $5000 へコピーすると CIM+$1000 が重なり曲 6+ が別バイトへ移る（suiko 01000006.. 無音、CTC TC が 1 で固まる）。 */
 	if (X1IsYdos(this) && mdataAddr_ != 0x5000) {
 		unsigned ioBase = mdataAddr_;
 		unsigned ioN = n;
@@ -528,10 +507,7 @@ void CHardX1::StageBgm(uint8_t index)
 		if (ioN < 0x2000u)
 			memset(ioport_ + 0x5000 + ioN, 0, 0x2000u - ioN);
 	}
-	/* Mirror into RAM at mdata_addr (per-title option).
-	   Never memset the full mdataSize_ window: sphari mdata@A000 + default
-	   32K wiped OPMDRV@E000 (opmW=0); hayato mdata@C000 + 32K wiped top RAM.
-	   Clear only the staged bytes + a short pad (same idea as YDOS). */
+	/* mdata_addr の RAM へミラー（タイトル毎オプション）。mdataSize_ 窓全体を memset しない: sphari mdata@A000＋既定 32K は OPMDRV@E000 を消す（opmW=0）。hayato mdata@C000＋32K は頂上 RAM を消す。載せたバイト＋短いパッドだけクリア（YDOS と同じ考え）。 */
 	if (mdataAddr_ + n <= 0x10000) {
 		memcpy(mem_ + mdataAddr_, src, n);
 		unsigned pad = 0x100;
@@ -539,18 +515,13 @@ void CHardX1::StageBgm(uint8_t index)
 		if (pad && mdataAddr_ + n + pad <= 0x10000)
 			memset(mem_ + mdataAddr_ + n, 0, pad);
 	}
-	/* ENDING's tick returns NZ while a note is held; the in-file loop
-	   treats that as song-end (`JR NZ,$10E6` → JP $FE00). PSG I/O port A
-	   bit5 also drops out of the wait (`JR NZ,$1095`). OPENING's player
-	   returns Z and keeps bit5. */
+	/* ENDING の tick はノート保持中 NZ。ファイル内ループはそれを曲終了と見る（`JR NZ,$10E6` → JP $FE00）。PSG I/O ポート A bit5 も待ちから抜ける（`JR NZ,$1095`）。OPENING のプレーヤは Z を返し bit5 を保つ。 */
 	if (ametruckPortF_ && mem_[0x1098] == 0x20 && mem_[0x1099] == 0x4C) {
 		mem_[0x1098] = mem_[0x1099] = 0x00;
 		if (mem_[0x10C3] == 0x20 && mem_[0x10C4] == 0xD0)
 			mem_[0x10C3] = 0x18;
 	}
-	/* ys2 mode 0 indexes a pointer table at $4000 without the C000 LDIR.
-	   Ending (lo==$20) LDIR C000→$2800; mirror here so $16C6 sees data
-	   even if the first PATCH stop returned late. */
+	/* ys2 モード 0 は C000 LDIR 無しで $4000 のポインタ表を添字。エンディング（lo==$20）は LDIR C000→$2800。ここでミラーし、最初の PATCH stop が遅れても $16C6 がデータを見る。 */
 	if (ys2Mirror4000_ && n) {
 		unsigned n4 = n;
 		if (n4 > 0x1000u) n4 = 0x1000u;
@@ -561,9 +532,7 @@ void CHardX1::StageBgm(uint8_t index)
 	mem_[LOAD_FLAG] = 0xff;
 }
 
-/* CEMU_X1_CTC_TRACE=1 dumps the guest's CTC programming (both the main-board
-   CTC at 1FA0 and the CZ-8BS1 sound-board CTC at 0704) so the tick source and
-   its divider can be read off instead of guessed. */
+/* CEMU_X1_CTC_TRACE=1 はゲストの CTC 組み（メイン基板 1FA0 と CZ-8BS1 音源基板 0704）をダンプし、tick 源と分周を推測ではなく読む。 */
 static void X1CtcTrace(CHardX1* hw, uint16_t port, uint8_t data)
 {
 	static int mode = -1;
@@ -581,6 +550,7 @@ static void X1CtcTrace(CHardX1* hw, uint16_t port, uint8_t data)
 		(data & 0x01) ? "  ctrl" : "  vec/tc");
 }
 
+/* CHardX1::CtcReset の実装 */
 void CHardX1::CtcReset()
 {
 	ctcVectorBase_ = 0;
@@ -592,25 +562,26 @@ void CHardX1::CtcReset()
 	memset(ctcTcValid_, 0, sizeof(ctcTcValid_));
 }
 
+/* バス書込 */
 void CHardX1::CtcWrite(int channel, uint8_t data)
 {
 	if (channel < 0 || channel > 3) return;
 	if (ctcExpectTc_[channel]) {
-		/* Time constant: 0 means 256 (Zilog CTC). */
+		/* 時定数: 0 は 256（Zilog CTC） */
 		ctcTc_[channel] = data;
 		ctcTcValid_[channel] = 1;
 		ctcExpectTc_[channel] = 0;
 		return;
 	}
 	if ((data & 0x01) == 0) {
-		/* Interrupt vector load (Zilog: channel 0 only; bits7-3 = base). */
+		/* 割り込みベクタロード（Zilog: チャネル 0 のみ。bits7-3 = 基点） */
 		if (channel == 0) {
 			ctcVectorBase_ = (uint8_t)(data & 0xf8);
 			ctcVectorProgrammed_ = 1;
 		}
 		return;
 	}
-	/* Control word: bit7=IE, bit6=counter, bit5=prescale /256, bit2=TC follows. */
+	/* 制御ワード: bit7=IE、bit6=カウンタ、bit5=プリスケール /256、bit2=続く TC */
 	ctcControl_[channel] = data;
 	ctcIe_[channel] = (data & 0x80) ? 1 : 0;
 	ctcExpectTc_[channel] = (data & 0x04) ? 1 : 0;
@@ -618,51 +589,50 @@ void CHardX1::CtcWrite(int channel, uint8_t data)
 		ctcTcValid_[channel] = 0;
 }
 
+/* CHardX1::CtcTimerPeriodCycles の実装 */
 unsigned CHardX1::CtcTimerPeriodCycles(int channel) const
 {
 	if (channel < 0 || channel > 3) return 0;
 	if (!ctcTcValid_[channel]) return 0;
-	/* Counter mode (bit6): host still uses vsync/default — not a free timer. */
+	/* カウンタモード（bit6）: ホストは vsync／既定のまま — フリータイマではない */
 	if (ctcControl_[channel] & 0x40) return 0;
 	unsigned tc = ctcTc_[channel] ? (unsigned)ctcTc_[channel] : 256u;
 	const unsigned prescale = (ctcControl_[channel] & 0x20) ? 256u : 16u;
 	return tc * prescale;
 }
 
+/* CHardX1::CtcCounterTc の実装 */
 unsigned CHardX1::CtcCounterTc(int channel) const
 {
 	if (channel < 0 || channel > 3) return 0;
 	if (!ctcTcValid_[channel]) return 0;
-	/* Counter mode only (bit6): the channel divides its trigger input. */
+	/* カウンタモードのみ（bit6）: チャネルはトリガ入力を分周する */
 	if (!(ctcControl_[channel] & 0x40)) return 0;
 	return ctcTc_[channel] ? (unsigned)ctcTc_[channel] : 256u;
 }
 
+/* CHardX1::CtcVector の実装 */
 uint8_t CHardX1::CtcVector(int channel) const
 {
 	if (channel < 0 || channel > 3)
 		return 0;
-	/* Guest-programmed CTC base wins (manreq OPMDRV writes 0x18 → ch3=0x1E). */
+	/* ゲストが組んだ CTC 基点が勝つ（manreq OPMDRV は 0x18 を書き ch3=0x1E） */
 	if (ctcVectorProgrammed_)
 		return (uint8_t)(ctcVectorBase_ + (uint8_t)(channel * 2));
-	/* XML ctc0/ctc3 = hoot use_ctcN vector override. */
+	/* XML ctc0/ctc3 = hoot use_ctcN ベクタ上書き */
 	if (xmlCtcVec_[channel] >= 0)
 		return (uint8_t)(xmlCtcVec_[channel] & 0xff);
-	/* hoot mucomx1 defaults: TIMER ch0→0, VSYNC ch3→6. */
+	/* hoot mucomx1 既定: TIMER ch0→0、VSYNC ch3→6 */
 	return (uint8_t)(channel * 2);
 }
 
+/* I/O ポート読込 */
 uint8_t CHardX1::PortIn(uint16_t port)
 {
 	const uint16_t p = port;
-	/* Command / song mailbox — level-readable. Cleared by playCmdHoldIrqs_
-	   decay (and optionally OUT0). YDOS PATCH returns to the IN-wait loop
-	   after dispatch; latch must stay high long enough for OUT0 StageBgm.
-	   Mark ydosCmdSeen_ so accidental IRQ OUT0,0 before the wait-loop IN
-	   cannot drop the play edge. */
+	/* コマンド／曲メールボックス — レベル読み。playCmdHoldIrqs_ 減衰（と任意 OUT0）がクリア。YDOS PATCH はディスパッチ後 IN 待ちへ戻る。ラッチは OUT0 StageBgm に足りる間 High。ydosCmdSeen_ を立て、待ちループ IN 前の事故 IRQ OUT0,0 が play エッジを落とさないようにする。 */
 	if (p == 0x0000) {
-		/* After YDOS pointer-build OUT0, keep latch for hold accounting but
-		   return 0 so PATCH cannot re-enter 0x91 before/after 0x90. */
+		/* YDOS ポインタ構築 OUT0 のあと、hold 会計のためラッチは残すが 0 を返し、PATCH が 0x90 の前後で 0x91 に再入しないようにする */
 		if (ydosInhibitReentry_)
 			return 0;
 		if (playCmdLatch_ && X1IsYdos(this) && cpu_
@@ -672,15 +642,11 @@ uint8_t CHardX1::PortIn(uint16_t port)
 	}
 	if (p == 0x0001)
 		return playSongLatch_;
-	/* Falcom xana2 PATCH: IN A,(0F); SUB 2 indexes the play/IRQ vector
-	   table. Mirror the song latch (hoot music id base 2).
-	   Herzog/revo2: port 1 is a non-zero play command; port 0F is the
-	   in-file track (0 is valid — herzog PATCH `OR A; JR Z` skips play). */
-	/* gand PATCH `LD BC,$0F01; IN A,(C)` — Z80 puts BC on the bus, not 000F. */
+	/* Falcom xana2 PATCH: IN A,(0F); SUB 2 が play/IRQ ベクタ表を添字。曲ラッチをミラー（hoot 音楽 ID 基点 2）。Herzog/revo2: ポート 1 は非ゼロ play コマンド。ポート 0F はファイル内トラック（0 は有効 — herzog PATCH `OR A; JR Z` が play を飛ばす）。 */
+	/* gand PATCH `LD BC,$0F01; IN A,(C)` — Z80 はバスに BC を出す。000F ではない。 */
 	if (p == 0x000f
 		|| (X1IsGandPatch(mem_) && ((p & 0xff) == 0x0f || (p >> 8) == 0x0f))) {
-		/* pwmajan: port 1 = file, port F = track.
-		   sghost: port F = 0/1/2 (driver / OPDEMO / BACKUP), not MA00x. */
+		/* pwmajan: ポート 1 = ファイル、ポート F = トラック。sghost: ポート F = 0/1/2（ドライバ／OPDEMO／BACKUP）。MA00x ではない。 */
 		if (X1IsPwmajanPatch(mem_) || X1IsSghostPatch(mem_)
 			|| X1IsYs1Patch(mem_) || X1IsGandPatch(mem_))
 			return playSongLatchF_;
@@ -695,32 +661,21 @@ uint8_t CHardX1::PortIn(uint16_t port)
 		return chipOpn_->ReadData();
 	if (!psgOnly_ && chipOpm_ && (p == 0x0700 || p == 0x0701))
 		return chipOpm_->ReadStatus();
-	/* No CZ-8BS1 in psg xml: OPM status bit7 must read clear.
-	   Square PROG $1A40 `IN A,(0700); BIT 7; JP NZ` and T&E
-	   $8A58 `IN A,(0701); JP M` otherwise spin forever. */
+	/* psg xml に CZ-8BS1 が無い: OPM ステータス bit7 はクリア読み。Square PROG $1A40 `IN A,(0700); BIT 7; JP NZ` と T&E $8A58 `IN A,(0701); JP M` はさもなくば永久スピン。 */
 	if (psgOnly_ && (p == 0x0700 || p == 0x0701))
 		return 0;
-	/* OUT 0704,$47 then $5A (or $47) echoes through ioport, so the
-	   "OPM board present" probe succeeds on a PSG-only machine.
-	   KING' KNIGHT then stores ($000C)=1 and ISR $1139 CALL $169A;
-	   PSY-O-BLADE stores ($00A3)=1 and $0082 JP $8A66. Both write
-	   0700 which psgOnly_ ignores. Returning 0 fails the probe so
-	   those drivers take the AY path. CTC OUTs still program the
-	   live timer — only the echo is suppressed. */
+	/* OUT 0704,$47 のあと $5A（または $47）が ioport にエコーするので PSG 専用機でも「OPM ボードあり」プローブが成功する。KING' KNIGHT は ($000C)=1 を格納し ISR $1139 CALL $169A。PSY-O-BLADE は ($00A3)=1、$0082 JP $8A66。どちらも 0700 を書くが psgOnly_ は無視。0 を返すとプローブ失敗しそれらのドライバは AY 経路へ。CTC OUT は生きたタイマを組む — エコーだけ抑止。 */
 	if (psgOnly_ && p >= 0x0704 && p <= 0x0707)
 		return 0;
 	if (p == 0x1a01) {
-		/* Bit2 = ready (Laplace / Dempa BIT 2). Bit7 must alternate:
-		   mars ISR `IN A,(1A01); JP P` waits for S=1 then `JP M` for S=0.
-		   A constant 0x04 (S=0) never leaves the first wait; 0x80 fails BIT 2. */
+		/* Bit2 = ready（Laplace／Dempa BIT 2）。Bit7 は交互: mars ISR `IN A,(1A01); JP P` が S=1 待ち、`JP M` が S=0。定数 0x04（S=0）は最初の待ちから出ない。0x80 は BIT 2 失敗。 */
 		psgStatToggle_ ^= 1;
 		return psgStatToggle_ ? 0x84 : 0x04;
 	}
-	/* Microcabin msnk: busy-wait IN A,(0FF8); AND 81; JP NZ — clear = ready. */
+	/* Microcabin msnk: busy-wait IN A,(0FF8); AND 81; JP NZ — クリア = ready */
 	if (p == 0x0ff8 || p == 0x0ff9 || p == 0x0ffc)
 		return 0x00;
-	/* X1 PSG is decoded on the high byte. DRIVER `OUT (C),A` keeps the
-	   data in C, so the port is 1C<data> / 1B<data> not 1C00/1B00. */
+	/* X1 PSG は上位バイトでデコード。DRIVER `OUT (C),A` はデータを C に残すのでポートは 1C<data>／1B<data>。1C00/1B00 ではない。 */
 	{
 		const uint16_t ph = (uint16_t)(p & 0xff00);
 		if (ph == 0x1c00 || ph == 0x1b00 || ph == 0x1900
@@ -732,14 +687,13 @@ uint8_t CHardX1::PortIn(uint16_t port)
 	return ioport_[p];
 }
 
+/* I/O ポート書込 */
 void CHardX1::PortOut(uint16_t port, uint8_t data)
 {
 	const uint16_t p = port;
 	if (p == 0x0000) {
 		int ydos = X1IsYdos(this);
-		/* ys_x1 title/ending `XOR A; OUT (0),A` acks the mailbox. Staging
-		   bank 0 there replaces TTLMUS/ENDMUS at $C000 before the LDIR
-		   to $8000/$6000. */
+		/* ys_x1 タイトル／エンディング `XOR A; OUT (0),A` がメールボックスを ack。そこでバンク 0 を載せるると LDIR で $8000/$6000 へ行く前に $C000 の TTLMUS/ENDMUS が置換される。 */
 		if (X1IsYs1Patch(mem_) && data == 0) {
 			playCmdLatch_ = 0;
 			playCmdHoldIrqs_ = 0;
@@ -749,10 +703,7 @@ void CHardX1::PortOut(uint16_t port, uint8_t data)
 				mem_[PLAY_FLAG] = 0x00;
 			return;
 		}
-		/* Mucom intentionally OUTs the BGM bank index here. KOEI YDOS PATCH
-		   does `IN A,(1); DEC C; OUT (C),C` while building a CIM pointer —
-		   that accidental OUT 0,0 must NOT StageBgm/clobber the CIM.
-		   Arm re-entry inhibit so 0x90 still runs, then wait-loop INs see 0. */
+		/* Mucom は意図してここに BGM バンク添字を OUT。KOEI YDOS PATCH は CIM ポインタ構築中 `IN A,(1); DEC C; OUT (C),C` — その事故 OUT 0,0 で StageBgm／CIM 破壊をしてはいけない。再入抑止を武装し 0x90 は走らせ、待ちループ IN は 0 を見る。 */
 		if (ydos && data == 0) {
 			int patchPtr = (cpu_ && cpu_->r.pc >= 0x0040 && cpu_->r.pc < 0x0050);
 			if (ydosCmdSeen_ && patchPtr)
@@ -769,11 +720,7 @@ void CHardX1::PortOut(uint16_t port, uint8_t data)
 			mem_[PLAY_FLAG] = 0x00;
 		return;
 	}
-	/* Telenet PATCH: IN A,(1); OUT (C),A echoes the song then CALL play.
-	   The cmd latch is level-high for ~1.5s; play itself takes ~1s of DI
-	   so the wait loop sees cmd=1 again and re-enters. luxsor's play
-	   XOR-clears the ISR gate and LDIRs the work RAM — GAPPY/STOPS.
-	   Consume the edge here so play is one-shot. */
+	/* Telenet PATCH: IN A,(1); OUT (C),A が曲をエコーして CALL play。cmd ラッチは約 1.5s レベル High。play 自体が約 1s DI なので待ちループが cmd=1 を再見て再入する。luxsor の play は ISR ゲートを XOR クリアしワーク RAM を LDIR — GAPPY/STOPS。エッジをここで消費し play をワンショットに。 */
 	if (p == 0x0001 && opmPlayGate_) {
 		playCmdLatch_ = 0;
 		playCmdHoldIrqs_ = 0;
@@ -782,9 +729,7 @@ void CHardX1::PortOut(uint16_t port, uint8_t data)
 		ioport_[p] = data;
 		return;
 	}
-	/* produce: PATCH `CALL stop` at PROG1 $0285, then OUT 1,song, then
-	   `CALL play` at the overlay's $0AB8/$29AE. Overlay here, not at
-	   TriggerPlay (that would wipe stop before it runs). */
+	/* produce: PATCH が PROG1 $0285 で `CALL stop`、OUT 1,song、オーバーレイの $0AB8/$29AE で `CALL play`。オーバーレイはここ。TriggerPlay ではない（stop が走る前に消す）。 */
 	if (p == 0x0001 && skipTriggerStage_) {
 		StageBgm(data);
 		playCmdLatch_ = 0;
@@ -794,9 +739,7 @@ void CHardX1::PortOut(uint16_t port, uint8_t data)
 		ioport_[p] = data;
 		return;
 	}
-	/* Laplace / wibarm: wait-loop re-entry. OUT 1 echoes then CALL play;
-	   a level-high cmd re-inits (DI) every pass. wibarm's $FF path LDDRs
-	   the song header — a second pass slides it twice and goes silent. */
+	/* Laplace／wibarm: 待ちループ再入。OUT 1 エコーのあと CALL play。レベル High cmd は毎パスで再初期化（DI）。wibarm の $FF 経路は曲ヘッダを LDDR — 2 回目で二重スライドし無音。 */
 	if (p == 0x0001 && (laplaceCtcF_ || wibarmPortF_
 		|| (X1IsGandPatch(mem_) && playSongLatch_ >= 5 && playSongLatch_ <= 0x0A))) {
 		playCmdLatch_ = 0;
@@ -814,8 +757,7 @@ void CHardX1::PortOut(uint16_t port, uint8_t data)
 		chipOpm_->Write((uint32_t)(p & 1), data);
 		return;
 	}
-	/* CZ-8BS1 carries its own Z80 CTC at 0704-0707 next to the OPM.
-	   Same 4 channels as the main-board 1FA0 map — program the live CTC. */
+	/* CZ-8BS1 は OPM 隣 0704-0707 に独自 Z80 CTC。メイン基板 1FA0 マップと同じ 4 チャネル — 生きた CTC を組む。 */
 	if (p >= 0x0704 && p <= 0x0707) {
 		X1CtcTrace(this, p, data);
 		CtcWrite((int)(p - 0x0704), data);
@@ -825,21 +767,19 @@ void CHardX1::PortOut(uint16_t port, uint8_t data)
 	{
 		const uint16_t ph = (uint16_t)(p & 0xff00);
 		if (ph == 0x1b00 || (ph == 0x1a00 && (p & 0xff) != 0x01)) {
-			/* hoot passes port>>8 to ssAY8910: 1B is odd, therefore data.
-			   mars also clocks data at 1A00 next to status 1A01.
-			   Ignore C in the low byte — Laplace 8613 leaves data there. */
+			/* hoot は port>>8 を ssAY8910 へ: 1B は奇数なのでデータ。mars もステータス 1A01 隣の 1A00 でデータをクロック。下位バイトの C は無視 — Laplace 8613 はそこにデータを残す。 */
 			if (chipAy_) chipAy_->Write(1, data);
 			ioport_[p] = data;
 			return;
 		}
 		if (ph == 0x1c00 || ph == 0x1900) {
-			/* 1C is even, therefore the AY address latch. mars uses 1900. */
+			/* 1C は偶数なので AY アドレスラッチ。mars は 1900。 */
 			if (chipAy_) chipAy_->Write(0, data);
 			ioport_[p] = data;
 			return;
 		}
 	}
-	/* Z80 CTC: MAME maps 1FA0-1FA3 and mirror 1FA8-1FAB. */
+	/* Z80 CTC: MAME は 1FA0-1FA3 とミラー 1FA8-1FAB */
 	if ((p >= 0x1fa0 && p <= 0x1fa3) || (p >= 0x1fa8 && p <= 0x1fab)) {
 		X1CtcTrace(this, p, data);
 		CtcWrite((int)(p & 3), data);
@@ -849,11 +789,13 @@ void CHardX1::PortOut(uint16_t port, uint8_t data)
 	ioport_[p] = data;
 }
 
+/* メモリ 8bit 書込 */
 void CHardX1::MemWrite(uint16_t addr, uint8_t data)
 {
 	mem_[addr] = data;
 }
 
+/* メモリ 8bit 読込 */
 uint8_t CHardX1::MemRead(uint16_t addr)
 {
 	return mem_[addr];
@@ -862,17 +804,7 @@ uint8_t CHardX1::MemRead(uint16_t addr)
 void CHardX1::UnpackTitle(unsigned titleCode, uint8_t* songOut, uint8_t* bankOut,
 	int ydos)
 {
-	/* hoot X1/NCS: 0xSS0000BB → song=SS bank=BB; 0xSS000000 → song=SS bank=0;
-	   low-only 0x000000NN → song=NN bank=NN (legacy StageBgm(song)).
-	   Extended mid!=0 codes (ishtar 0x00028408) keep lo as song/bank.
-	   Humming Bird Laplace uses hi as a flags byte (0x68..0xC0) with the
-	   real song/bank in lo — treating hi as song yielded song=0x80 and silent
-	   DRIVER calls. Threshold is 0x60 so Falcom xanaopm 0x48000001 / 0x2C000002
-	   still unpack as song=hi (MML id) bank=lo.
-	   KOEI YDOS: 0x010000SS = looping, 0x000000SS = one-shot. hi is a play
-	   flag, not the track. Using hi as song made every 0x01****** title
-	   play track 1 (SAMESONG on sangoku/suiko/sangoku2). NCS 0x01000000
-	   really is song 1 — do not apply this unless ydos. */
+	/* hoot X1/NCS: 0xSS0000BB → song=SS bank=BB。0xSS000000 → song=SS bank=0。low のみ 0x000000NN → song=NN bank=NN（旧 StageBgm(song)）。拡張 mid!=0 コード（ishtar 0x00028408）は lo を song/bank に保つ。Humming Bird Laplace は hi をフラグバイト（0x68..0xC0）、本物 song/bank は lo — hi を曲にすると song=0x80 で DRIVER 呼び出しが無音。閾値 0x60 で Falcom xanaopm 0x48000001／0x2C000002 はまだ song=hi（MML id）bank=lo に解く。KOEI YDOS: 0x010000SS = ループ、0x000000SS = ワンショット。hi は再生フラグでありトラックではない。hi を曲にするとすべての 0x01****** タイトルがトラック 1（sangoku/suiko/sangoku2 で SAMESONG）。NCS 0x01000000 は本当に曲 1 — ydos でなければ適用しない。 */
 	const unsigned lo = titleCode & 0xffu;
 	const unsigned hi = (titleCode >> 24) & 0xffu;
 	const unsigned mid = (titleCode >> 8) & 0xffffu;
@@ -884,7 +816,7 @@ void CHardX1::UnpackTitle(unsigned titleCode, uint8_t* songOut, uint8_t* bankOut
 		song = (uint8_t)lo;
 		bank = (uint8_t)lo;
 	} else if (mid == 0 && (hi != 0 || lo != 0)) {
-		/* Standard hoot pack — song may be 0 (main theme). */
+		/* 標準 hoot パック — 曲は 0 でもよい（メインテーマ） */
 		song = (uint8_t)hi;
 		bank = (uint8_t)lo;
 		if (hi == 0 && lo != 0) {
@@ -905,13 +837,13 @@ void CHardX1::UnpackTitle(unsigned titleCode, uint8_t* songOut, uint8_t* bankOut
 	if (bankOut) *bankOut = bank;
 }
 
+/* CHardX1::PrestageBgm の実装 */
 void CHardX1::PrestageBgm(unsigned titleCode)
 {
 	uint8_t song = 0, bank = 0;
 	UnpackTitle(titleCode, &song, &bank, ydosRom_);
 	bgmStageOff_ = 0;
-	/* pwmajan: 0xTT0000BB — BB is PROG2/NORMAL/SASURAI/POCO, TT is the
-	   in-file track. Unpack of 0x00000004 set song=bank=4. */
+	/* pwmajan: 0xTT0000BB — BB は PROG2/NORMAL/SASURAI/POCO、TT はファイル内トラック。0x00000004 の Unpack は song=bank=4。 */
 	{
 		const unsigned lo = titleCode & 0xffu;
 		const unsigned mid = (titleCode >> 8) & 0xffffu;
@@ -929,15 +861,14 @@ void CHardX1::PrestageBgm(unsigned titleCode)
 	if (X1IsIshtarPatch(mem_) && !laplaceCtcF_) {
 		const unsigned lo = titleCode & 0xffu;
 		const unsigned mid = (titleCode >> 8) & 0xffffu;
-		/* 0xFE has no bank; catalog points at IBGM5 (druaga B / trap #2). */
+		/* 0xFE にバンク無し。カタログは IBGM5（druaga B／trap #2）を指す */
 		if (lo == 0xFEu && bgmPresent_[4] && bgmBank_[4])
 			bank = 4;
 		else if (lo < 128 && bgmPresent_[lo] && bgmBank_[lo])
 			bank = (uint8_t)lo;
 		bgmStageOff_ = mid;
 	}
-	/* hyd2: lo is flags:bank nibbles (0x12 = flag1 bank2). Staging 0x12
-	   misses PROG2/PROG3. The $4000 mirror also smashes the $81xx player. */
+	/* hyd2: lo は flags:bank ニブル（0x12 = flag1 bank2）。0x12 を載せると PROG2/PROG3 を逃す。$4000 ミラーは $81xx プレーヤも壊す。 */
 	if (initPc_ == 0xFE00) {
 		const unsigned nibble = (titleCode & 0x0fu);
 		if (nibble < 128 && bgmPresent_[nibble] && bgmBank_[nibble])
@@ -958,12 +889,11 @@ void CHardX1::PrestageBgm(unsigned titleCode)
 			memset(mem_ + 0x4000, 0, n);
 			memcpy(mem_ + 0x4000, bgmBank_[stage], n);
 		}
-		/* Overlay-on-play: keep boot code (produce PROG1, xanaopm PR.NO0)
-		   until PATCH has inited. TriggerPlay still StageBgm. */
+		/* 再生時オーバーレイ: PATCH が初期化するまでブートコード（produce PROG1、xanaopm PR.NO0）を残す。TriggerPlay はまだ StageBgm。 */
 		if (!skipPrestageRam_)
 			StageBgm(stage);
 	}
-	/* Keep play mailbox idle through DRIVER boot. */
+	/* DRIVER ブート中は play メールボックスをアイドルに保つ */
 	playCmdLatch_ = 0;
 	playSongLatch_ = 0;
 	playSongLatchF_ = 0;
@@ -974,26 +904,26 @@ void CHardX1::PrestageBgm(unsigned titleCode)
 	mem_[PLAY_CODE] = 0;
 }
 
+/* 曲再生をトリガする */
 void CHardX1::TriggerPlay(unsigned titleCode)
 {
 	uint8_t song = 0, bank = 0;
 	UnpackTitle(titleCode, &song, &bank, ydosRom_);
-	/* Dual mailbox: port latch (Falcom) + C010/C011 when free (hoot Play).
-	   Stage IO@5000 always; RAM mirror only when StageBgm deems safe. */
+	/* 二重メールボックス: ポートラッチ（Falcom）＋空きなら C010/C011（hoot Play）。IO@5000 は常に載せる。RAM ミラーは StageBgm が安全と見たときだけ。 */
 	playCmdLatch_ = 0x01;
-	/* Falcom xana2: fixed family hi=0x02, track id in lo (port0F / CP 1Ah). */
+	/* Falcom xana2: 固定系統 hi=0x02、トラック ID は lo（ポート0F／CP 1Ah） */
 	{
 		const unsigned lo = titleCode & 0xffu;
 		const unsigned hi = (titleCode >> 24) & 0xffu;
 		const unsigned mid = (titleCode >> 8) & 0xffffu;
 		if (X1IsPwmajanPatch(mem_) && mid == 0 && lo >= 1u && lo <= 5u) {
-			/* Port 1 = file (must be NZ), port F = track (0 is #00). */
+			/* ポート 1 = ファイル（NZ 必須）、ポート F = トラック（0 は #00） */
 			song = (uint8_t)lo;
 			bank = (uint8_t)lo;
 			playSongLatchF_ = (uint8_t)hi;
 		}
 		if (X1IsSghostPatch(mem_) && mid == 0) {
-			/* hi 0/1/2 = driver / OPDEMO / BACKUP; lo is MA00x/MB00x. */
+			/* hi 0/1/2 = ドライバ／OPDEMO／BACKUP。lo は MA00x/MB00x */
 			playSongLatchF_ = (uint8_t)hi;
 			song = (uint8_t)lo;
 			bank = (uint8_t)lo;
@@ -1002,22 +932,17 @@ void CHardX1::TriggerPlay(unsigned titleCode)
 			playSongLatch_ = lo ? (uint8_t)lo : (uint8_t)hi;
 		else
 			playSongLatch_ = song;
-		/* Tecnosoft: hi is 0x80/0x81/0xFF (play / skip-intro / with-intro).
-		   Bank is already `lo` from UnpackTitle's hi>=0x40 path. */
+		/* Tecnosoft: hi は 0x80/0x81/0xFF（play／イントロ飛ばし／イントロ付き）。バンクは UnpackTitle の hi>=0x40 経路から既に `lo`。 */
 		if (tecnoCmdHi_ && mid == 0 && hi >= 0x80)
 			playSongLatch_ = (uint8_t)hi;
-		/* JESUS: port 1 = copy descriptor 0-8, port 0F = OPMTBL index.
-		   Global ids >= 9 used to share port 1 and were skipped (CP 09). */
+		/* JESUS: ポート 1 = コピー記述子 0-8、ポート 0F = OPMTBL 添字。グローバル ID >= 9 はポート 1 を共有し飛ばされていた（CP 09）。 */
 		if (jesusSplitPorts_) {
 			playSongLatchF_ = song;
 			playSongLatch_ = (song < 9) ? song : bank;
 		}
 		if (songIdFromHi_ && mid == 0 && hi < 0x80 && !tecnoCmdHi_ && !falcomPortF_) {
 			playSongLatchF_ = (uint8_t)hi;
-			/* Herzog PATCH `IN A,(1); OR A; JR Z` skips CALL play when A=0.
-			   BGM track 0 still has to reach 1800 with port 0F = 0 and a
-			   non-zero port 1. EFFECT titles are lo==0 — keep port 1 = 0 so
-			   PSG PATCH2 takes CALL $180c instead of play(track=lo). */
+			/* Herzog PATCH `IN A,(1); OR A; JR Z` は A=0 で CALL play を飛ばす。BGM トラック 0 はポート 0F = 0 と非ゼロ ポート 1 で 1800 へ届く必要がある。EFFECT タイトルは lo==0 — ポート 1 = 0 を保ち PSG PATCH2 が play(track=lo) ではなく CALL $180c を取る。 */
 			if (psgOnly_ && lo == 0)
 				playSongLatch_ = 0;
 			else
@@ -1028,7 +953,7 @@ void CHardX1::TriggerPlay(unsigned titleCode)
 			if (lo < 128 && bgmPresent_[lo] && bgmBank_[lo])
 				bank = (uint8_t)lo;
 			bgmStageOff_ = mid;
-			/* Port F is CTC TC (0 = 256), not the track. */
+			/* ポート F は CTC TC（0 = 256）でありトラックではない */
 			playSongLatchF_ = 0;
 		}
 		if (X1IsIshtarPatch(mem_) && !laplaceCtcF_) {
@@ -1038,9 +963,7 @@ void CHardX1::TriggerPlay(unsigned titleCode)
 				bank = (uint8_t)lo;
 			bgmStageOff_ = mid;
 		}
-		/* ys2: port 1 is the PATCH command (CP $20 selects mode 0/1);
-		   port F is the in-file track. TTLMSn (lo>=$30) PLAYS as
-		   in-game MANPR1; title-engine (port1>=$20) STOPS on part 0. */
+		/* ys2: ポート 1 は PATCH コマンド（CP $20 がモード 0/1）。ポート F はファイル内トラック。TTLMSn（lo>=$30）はゲーム内 MANPR1 として PLAY。タイトルエンジン（port1>=$20）はパート 0 で STOP。 */
 		if (ys2Mirror4000_ && mid == 0 && !laplaceCtcF_) {
 			if (lo >= 0x30u) {
 				playSongLatch_ = 1;
@@ -1051,33 +974,25 @@ void CHardX1::TriggerPlay(unsigned titleCode)
 			}
 		}
 		if (wibarmPortF_ && mid == 0 && !laplaceCtcF_ && !ys2Mirror4000_) {
-			/* 0x00000002 field = track 0; 0x01000002 battle = track 1;
-			   0xFF000003 ending = overlay + track 0. Port 1 must stay NZ. */
+			/* 0x00000002 フィールド = トラック 0。0x01000002 バトル = トラック 1。0xFF000003 エンディング = オーバーレイ＋トラック 0。ポート 1 は NZ のまま。 */
 			playSongLatchF_ = (uint8_t)hi;
 			playSongLatch_ = (hi && hi != 0xFFu) ? (uint8_t)hi : 1;
 		}
-		/* xana2 PSG/OPM: port F is the PR.NOx family (hi), SUB 2 indexes
-		   the play/IRQ vectors. lo is only the staged m.000x bank. */
+		/* xana2 PSG/OPM: ポート F は PR.NOx 系統（hi）。SUB 2 が play/IRQ ベクタを添字。lo は載せた m.000x バンクだけ。 */
 		if (falcomPortF_ && mid == 0 && hi && !wibarmPortF_ && !laplaceCtcF_
 			&& !ys2Mirror4000_ && !jesusSplitPorts_) {
 			playSongLatchF_ = (uint8_t)hi;
-			/* Family 3/4/5 (PR.NO3+) — staged m.000x is one song.
-			   OPM xml still uses PR.NO0 @ $1000; stealing port1=0
-			   silenced every family-3 title (c1 played, same latch). */
+			/* 系統 3/4/5（PR.NO3+）— 載せた m.000x は 1 曲。OPM xml はまだ PR.NO0 @ $1000。ポート1=0 を奪うと系統 3 タイトル全部が無音（c1 は鳴り同じラッチ）。 */
 			if (psgOnly_ && hi >= 3u)
 				playSongLatch_ = 0;
 		}
 		if (ametruckPortF_ && mid == 0 && !wibarmPortF_ && !falcomPortF_
 			&& !laplaceCtcF_ && !ys2Mirror4000_) {
-			/* Port 1 = file 0-2 (must stay < 3); port F = variant in hi. */
+			/* ポート 1 = ファイル 0-2（< 3 のまま）。ポート F = hi のバリアント */
 			playSongLatch_ = (uint8_t)lo;
 			playSongLatchF_ = (uint8_t)hi;
 		}
-		/* Telenet luxsor/yakyufan PATCH `IN A,(0F); CALL play`. Play
-		   stores A in $EA1D/$EA18 then copies it to ix+23. 0 = restart
-		   at table+2 (infinite loop). Hoot's ioport[0x0F] is never
-		   written, so it stays 0. Returning the song id here wrapped
-		   BGM N times then STOPS (seq=2). */
+		/* Telenet luxsor/yakyufan PATCH `IN A,(0F); CALL play`。Play は A を $EA1D/$EA18 に格納し ix+23 へコピー。0 = 表+2 で再起動（無限ループ）。Hoot の ioport[0x0F] は書かれないので 0 のまま。ここで曲 ID を返すと BGM が N 回ラップして STOPS（seq=2）。 */
 		if (initPc_ == 0xE900 && opmPlayGate_ && !ametruckPortF_
 			&& !wibarmPortF_ && !falcomPortF_ && !laplaceCtcF_
 			&& !ys2Mirror4000_)
@@ -1088,21 +1003,18 @@ void CHardX1::TriggerPlay(unsigned titleCode)
 			if (nibble < 128 && bgmPresent_[nibble] && bgmBank_[nibble])
 				bank = (uint8_t)nibble;
 		}
-		/* x1sc EFC00P / euphory PSG: each staged MUS/DEM is one song.
-		   Unpack of 0x000000NN sets song=NN, which is OOB. Play 0. */
+		/* x1sc EFC00P／euphory PSG: 載せた各 MUS/DEM は 1 曲。0x000000NN の Unpack は song=NN で範囲外。Play 0。 */
 		if (psgOnly_ && mid == 0 && hi == 0) {
 			if ((initPc_ == 0xF000 && mdataAddr_ == 0x5000 && mem_[0xEB00] != 0)
 				|| (initPc_ == 0xF000 && mdataAddr_ == 0x9000
 					&& mdataSize_ == 0x1000))
 				playSongLatch_ = 0;
 		}
-		/* x1sc DRIVER $3E5B treats a 0704 CTC readback as "OPM board"
-		   and stores 1 at $0003. ISR/play then take the FM path and
-		   write 0700, which psgOnly_ ignores. EFC00P starts $48. */
+		/* x1sc DRIVER $3E5B は 0704 CTC リードバックを「OPM ボード」と見て $0003 に 1 を格納。ISR/play が FM 経路を取り 0700 を書くが psgOnly_ は無視。EFC00P は $48 開始。 */
 		if (psgOnly_ && initPc_ == 0xF000 && mdataAddr_ == 0x5000
 			&& mem_[0xEB00] == 0x48)
 			mem_[0x0003] = 0;
-		/* Re-assert after songIdFromHi_/falcom steals. */
+		/* songIdFromHi_／falcom 奪取のあと再アサート */
 		if (X1IsPwmajanPatch(mem_) && mid == 0 && lo >= 1u && lo <= 5u) {
 			playSongLatch_ = (uint8_t)lo;
 			playSongLatchF_ = (uint8_t)hi;
@@ -1113,9 +1025,7 @@ void CHardX1::TriggerPlay(unsigned titleCode)
 		}
 		if (X1IsYs1Patch(mem_) && mid == 0 && !ys2Mirror4000_ && !falcomPortF_) {
 			playSongLatchF_ = (uint8_t)hi;
-			/* Port 1 high nibble: $00 in-game, $20 title, $30 ending.
-			   In-game track 0 still needs a non-zero port 1 so PATCH's
-			   `IN A,(1); AND F0; CP 20` stays on the $4D00 path. */
+			/* ポート 1 上位ニブル: $00 ゲーム内、$20 タイトル、$30 エンディング。ゲーム内トラック 0 でも非ゼロ ポート 1 が要る。PATCH の `IN A,(1); AND F0; CP 20` が $4D00 経路に留まる。 */
 			if (lo >= 0x20u)
 				playSongLatch_ = (uint8_t)lo;
 			else
@@ -1126,15 +1036,14 @@ void CHardX1::TriggerPlay(unsigned titleCode)
 			playSongLatchF_ = (uint8_t)hi;
 		}
 	}
-	playCmdHoldIrqs_ = 90; /* ~1.5s hold so slow PATCH polls see cmd before OUT0/clear */
+	playCmdHoldIrqs_ = 90; /* 約 1.5s hold。遅い PATCH poll が OUT0／クリア前に cmd を見る */
 	ydosCmdSeen_ = 0;
 	ydosInhibitReentry_ = 0;
 	{
 		int mailboxFree = 1;
 		if (initPc_ >= 0xC000 && initPc_ < 0xC100)
 			mailboxFree = 0;
-		/* gaia/hayato: mdata_addr=0xC000 — poking C010/C011 corrupts BGM
-		   headers (music writes C0/1A back over the mailbox). Port latch only. */
+		/* gaia/hayato: mdata_addr=0xC000 — C010/C011 を poke すると BGM ヘッダが壊れる（音楽がメールボックス上へ C0/1A を書き戻す）。ポートラッチのみ。 */
 		if (mdataAddr_ <= PLAY_FLAG
 			&& (unsigned)mdataAddr_ + mdataSize_ > (unsigned)PLAY_FLAG)
 			mailboxFree = 0;
@@ -1162,8 +1071,7 @@ void CHardX1::TriggerPlay(unsigned titleCode)
 		if (!skipTriggerStage_)
 			StageBgm(stage);
 	}
-	/* pwmajan SASURAI/POCO: PATCH LDIR $6000→$4800/$5000 overlaps the
-	   source, so host-copy to the play address and NOP those LDIRs. */
+	/* pwmajan SASURAI/POCO: PATCH LDIR $6000→$4800/$5000 がソースと重なるので、ホストが再生番地へコピーしそれらの LDIR を NOP。 */
 	if (X1IsPwmajanPatch(mem_)) {
 		const unsigned lo = titleCode & 0xffu;
 		uint16_t dest = 0;
@@ -1183,9 +1091,7 @@ void CHardX1::TriggerPlay(unsigned titleCode)
 			memcpy(mem_ + dest, bgmBank_[lo], n);
 		}
 	}
-	/* gand MENU: play ptrs sit at $4B14+ after PATCH LDDR $1200→$2D00.
-	   Copy from the bank buffer (memcpy $1200→$2D00 overlaps). Port F=1
-	   skips that LDDR so the host copy (and the $7939 RET) stays put. */
+	/* gand MENU: play ptr は PATCH LDDR $1200→$2D00 のあと $4B14+。バンクバッファからコピー（memcpy $1200→$2D00 は重なる）。ポート F=1 はその LDDR を飛ばすのでホストコピー（と $7939 RET）が残る。 */
 	if (X1IsGandPatch(mem_) && mdataAddr_ == 0x1200) {
 		const unsigned lo = titleCode & 0xffu;
 		if (lo >= 5u && lo <= 0x0Au && lo < 128 && bgmPresent_[lo] && bgmBank_[lo]) {
@@ -1211,6 +1117,7 @@ void CHardX1::TriggerPlay(unsigned titleCode)
 	ArmTelenetPlayGate();
 }
 
+/* CHardX1::OpmWrites の実装 */
 unsigned CHardX1::OpmWrites() const
 {
 	if (chipOpn_) {
@@ -1221,11 +1128,13 @@ unsigned CHardX1::OpmWrites() const
 	return chipOpm_ ? CEmuChipYm2151WriteCount(chipOpm_) : 0;
 }
 
+/* CHardX1::AyWrites の実装 */
 unsigned CHardX1::AyWrites() const
 {
 	return chipAy_ ? CEmuChipAyWriteCount(chipAy_) : 0;
 }
 
+/* zip から ROM／曲データを載せる */
 int CHardX1::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode)
 {
 	if (!fs || !ge || !cpu_) return 0;
@@ -1237,14 +1146,14 @@ int CHardX1::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode
 	psgStatToggle_ = 0;
 	for (int i = 0; i < 4; i++)
 		xmlCtcVec_[i] = -1;
-	/* hoot X1 driver use_ctcN / game option ctcN = IM2 vector for that channel. */
+	/* hoot X1 ドライバ use_ctcN／ゲームオプション ctcN = そのチャネルの IM2 ベクタ */
 	{
 		static const char* kNames[4] = { "ctc0", "ctc1", "ctc2", "ctc3" };
 		static const char* kUseNames[4] = { "use_ctc0", "use_ctc1", "use_ctc2", "use_ctc3" };
 		for (int ch = 0; ch < 4; ch++) {
 			int v = CEmuParseOptHex(ge, kNames[ch], -1);
 			if (v < 0) v = CEmuParseOptHex(ge, kUseNames[ch], -1);
-			/* use_ctcN value 0 means disabled in hoot — keep default. */
+			/* hoot の use_ctcN 値 0 は無効 — 既定を保つ */
 			if (v > 0)
 				xmlCtcVec_[ch] = v & 0xff;
 		}
@@ -1257,8 +1166,7 @@ int CHardX1::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode
 	jesusSplitPorts_ = 0;
 	songIdFromHi_ = 0;
 
-	/* Resolve mdata window early so oversized code (Falcom PR.NO2 @0 with
-	   mdata@5c00) cannot spill into the music region before Prestage. */
+	/* mdata 窓を早く解決し、過大コード（Falcom PR.NO2 @0、mdata@5c00）が Prestage 前に音楽領域へ溢れないようにする */
 	mdataAddr_ = (uint16_t)CEmuParseOptHex(ge, "mdata_addr", 0x4000);
 	{
 		int ms = CEmuParseOptHex(ge, "mdata_size", (int)BGM_SIZE);
@@ -1289,7 +1197,7 @@ int CHardX1::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode
 		const CEmuRomEntry* r = &ge->rom[i];
 		const int isVoice = (_stricmp(r->type, "voice") == 0 || _stricmp(r->type, "vdata") == 0);
 		const int isCode = (_stricmp(r->type, "code") == 0);
-		/* Pass0: voice underlay (Falcom). Pass1: code/data/bgm — code wins. */
+		/* Pass0: ボイス下地（Falcom）。Pass1: code/data/bgm — コードが勝つ */
 		if (pass == 0 && !isVoice) continue;
 		if (pass == 1 && isVoice) continue;
 		unsigned sz = 0;
@@ -1303,11 +1211,7 @@ int CHardX1::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode
 			unsigned n = sz;
 			if (off + (int)n > 0x10000)
 				n = (unsigned)(0x10000 - off);
-			/* Clamp code below mdata_addr when the blob would invade it
-			   (xana2 PR.NO2 24K@0 vs mdata@5c00). Prefer vdata_size when
-			   voice window starts at the same offset.
-			   Default mdata $4000 with no catalog window and no bgm
-			   (aspic PSG PROG @0FD0) must keep the player at $581E. */
+			/* ブロブが侵入するときコードを mdata_addr より下へクランプ（xana2 PR.NO2 24K@0 vs mdata@5c00）。ボイス窓が同じオフセット開始なら vdata_size を優先。カタログ窓も bgm も無い既定 mdata $4000（aspic PSG PROG @0FD0）はプレーヤを $581E に残す。 */
 			if ((hasMdataOpt || hasBgmRom) && (int)mdataAddr_ > off) {
 				unsigned cap = (unsigned)((int)mdataAddr_ - off);
 				if (vdataAddr == off && vdataSize > 0 && (unsigned)vdataSize < cap)
@@ -1317,11 +1221,7 @@ int CHardX1::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode
 			memcpy(mem_ + off, data, n);
 			loadedCode++;
 		} else if (_stricmp(r->type, "data") == 0) {
-			/* Catalog "data" is the hoot IO window. YDOS also LD the CIM as
-			   Z80 RAM — mirror when safe. Unconditional mirrors at the mucom
-			   0x4000 IO window broke jesus/sghost/zeliard (high opmW, peak=0).
-			   Gen1 sangoku parks OPMDAT.CIM at B400 without an OVL-1 marker
-			   at load time (decrypt later), so key off empty dest + non-4000. */
+			/* カタログ「data」は hoot IO 窓。YDOS は CIM を Z80 RAM としても LD — 安全ならミラー。mucom 0x4000 IO 窓への無条件ミラーは jesus/sghost/zeliard を壊した（high opmW、peak=0）。Gen1 sangoku は load 時 OVL-1 印無しで OPMDAT.CIM を B400 に置く（復号は後）。空 dest＋非 4000 でキーする。 */
 			int off = r->offset;
 			if (off < 0) off = 0;
 			if (off >= 0x10000) continue;
@@ -1366,8 +1266,7 @@ int CHardX1::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode
 			bgmBankSize_[idx] = n;
 			bgmPresent_[idx] = 1;
 		} else if (isVoice) {
-			/* Falcom: voice underlay at vdata_addr for the selected track only.
-			   Code pass then overlays PR.NO0/etc on top (xana2opm). */
+			/* Falcom: 選択トラックだけ vdata_addr にボイス下地。コードパスがその上へ PR.NO0 等を載せる（xana2opm）。 */
 			int vaddr = vdataAddr;
 			int vsize = vdataSize;
 			if (vsize <= 0) vsize = CEmuParseOptHex(ge, "vfile_size", (int)sz);
@@ -1390,13 +1289,9 @@ int CHardX1::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode
 			memcpy(mem_ + dest, data, n);
 		}
 	}
-	} /* pass */
+	} /* パス */
 
-	/* Falcom xana2 PSG: catalog code is always PR.NO2 @0. Family hi>=3 must
-	   keep the matching voice PR.NOx as the player — pass1 would overlay
-	   PR.NO2 and leave bosses/ending on the wrong engine (SILENT).
-	   OPM xml keeps PR.NO0 @ $1000; overlaying 0x5c00 of PR.NO3 at $0000
-	   wipes that stub (every family-3 title went SILENT). */
+	/* Falcom xana2 PSG: カタログコードは常に PR.NO2 @0。系統 hi>=3 は一致するボイス PR.NOx をプレーヤとして残す — pass1 が PR.NO2 を載せボス／エンディングが別エンジン（SILENT）。OPM xml は PR.NO0 @ $1000。$0000 へ PR.NO3 の 0x5c00 を載せるとその stub が消える（系統 3 タイトル全部 SILENT）。 */
 	if (psgOnly_ && vdataAddr == 0 && vdataSize > 0) {
 		const unsigned lo = titleCode & 0xffu;
 		const unsigned hi = (titleCode >> 24) & 0xffu;
@@ -1427,7 +1322,7 @@ int CHardX1::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode
 
 	if (!loadedCode) return 0;
 
-	/* Resolve start PC: explicit init_pc → PATCH code offset → first code → C000. */
+	/* 開始 PC を解決: 明示 init_pc → PATCH コードオフセット → 最初のコード → C000 */
 	{
 		int hasInit = 0;
 		for (int i = 0; i < ge->optCount; i++) {
@@ -1459,11 +1354,7 @@ int CHardX1::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode
 			if (ms <= 0 || ms > BGM_SIZE) ms = BGM_SIZE;
 			mdataSize_ = (unsigned)ms;
 		}
-		/* Nearest code blob above mdata_addr caps StageBgm writes.
-		   Code sitting inside the mdata window when mdata_addr==0 is an
-		   overlay stub (xanaopm PR.NO0 @1000) — music is meant to replace
-		   it after PATCH copies the player to $F000. crimson VOICE@6200
-		   with mdata@4000 must still cap. */
+		/* mdata_addr より上の最寄りコードブロブが StageBgm 書きを上限にする。mdata_addr==0 で mdata 窓内のコードはオーバーレイ stub（xanaopm PR.NO0 @1000）— PATCH がプレーヤを $F000 へコピーしたあと音楽が置換する想定。crimson VOICE@6200 と mdata@4000 はまだ上限が要る。 */
 		stageLimit_ = 0x10000u;
 		skipPrestageRam_ = 0;
 		skipTriggerStage_ = 0;
@@ -1485,17 +1376,15 @@ int CHardX1::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode
 				continue;
 			}
 			if (r->offset == (int)mdataAddr_ && mdataAddr_ != 0) {
-				/* produce: PROG1 at mdata is the player, not a music
-				   overlay target. Staging PROG4 here wipes JP $0285. */
+				/* produce: mdata 上の PROG1 はプレーヤであり音楽オーバーレイ先ではない。ここで PROG4 を載せると JP $0285 が消える。 */
 				skipPrestageRam_ = 1;
 				skipTriggerStage_ = 1;
 			}
 			if (mdataAddr_ == 0 && r->offset > 0 && r->offset < (int)mdataSize_) {
 				skipPrestageRam_ = 1;
-				continue; /* overlay stub inside the music window */
+				continue; /* 音楽窓内のオーバーレイ stub */
 			}
-			/* gand OPENING is code@$3900 and bgm banks 1-3. Capping at 3900
-			   truncated MENU (0x4D00) so songs 5-0A never reached $4B14+. */
+			/* gand OPENING は code@$3900 と bgm バンク 1-3。3900 で上限すると MENU（0x4D00）が切れ曲 5-0A が $4B14+ に届かない。 */
 			{
 				int alsoBgm = 0;
 				for (int j = 0; j < ge->romCount; j++) {
@@ -1529,46 +1418,36 @@ int CHardX1::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode
 			falcomPortF_ = (uint8_t)CEmuX1FalcomLoTrack(mem_, (unsigned)r->offset, plen);
 			ametruckPortF_ = (uint8_t)CEmuX1AmetruckPortF(mem_, (unsigned)r->offset, plen);
 			if (X1IsPwmajanPatch(mem_)) {
-				/* Keep PROG2 intact through CALL $40F3; TriggerPlay stages. */
+				/* CALL $40F3 の間 PROG2 を残す。TriggerPlay が載せる */
 				skipPrestageRam_ = 1;
-				/* NOP overlapping SASURAI/POCO LDIRs (ED B0). */
+				/* 重なる SASURAI/POCO LDIR（ED B0）を NOP */
 				mem_[0xF079] = mem_[0xF07A] = 0;
 				mem_[0xF088] = mem_[0xF089] = 0;
 			}
 			if (X1IsGandPatch(mem_)) {
-				/* Boot `CALL $390E` needs code OPENING. MENU @ mdata is
-				   0x4D00 and would wipe $3900 during Prestage. */
+				/* ブート `CALL $390E` はコード OPENING が要る。mdata の MENU は 0x4D00 で Prestage 中に $3900 を消す。 */
 				skipPrestageRam_ = 1;
 			}
-			/* OPENING lives at mdata $1000, so the produce-style
-			   skipTriggerStage_ latch fires. Each file IS the player
-			   — HISCORE/ENDING must overlay $1000. Also NOP the
-			   `LD A,C9; LD ($107C),A` so CALL play runs the in-file
-			   loop (CTC3 never ticks the IM2 ISR here). */
+			/* OPENING は mdata $1000 に居るので produce 風 skipTriggerStage_ ラッチが立つ。各ファイルがプレーヤ — HISCORE/ENDING は $1000 へオーバーレイ必須。`LD A,C9; LD ($107C),A` も NOP し CALL play がファイル内ループを走る（ここは CTC3 が IM2 ISR を tick しない）。 */
 			if (ametruckPortF_) {
 				skipTriggerStage_ = 0;
 				if (mem_[0x0068] == 0x3E && mem_[0x0069] == 0xC9
 					&& mem_[0x006A] == 0x32)
 					memset(mem_ + 0x0068, 0x00, 5);
-				/* OPENING's in-file JR never returns here. HISCORE already
-				   has C9 at $1321 and ENDING RET NZ — both need the CTC3
-				   IM2 tick, which this guest never gets (ch0 has no TC so
-				   ZC0→TRG3 is idle). Poll the PATCH ISR instead. */
+				/* OPENING のファイル内 JR はここへ戻らない。HISCORE は既に $1321 に C9、ENDING は RET NZ — どちらも CTC3 IM2 tick が要る。このゲストは届かない（ch0 に TC が無く ZC0→TRG3 が idle）。代わりに PATCH ISR を poll。 */
 				if (mem_[0x0075] == 0x21 && mem_[0x0076] == 0x38
 					&& mem_[0x0077] == 0x07) {
-					mem_[0x0075] = 0xF3; /* DI */
+					mem_[0x0075] = 0xF3; /* DI 命令 */
 					mem_[0x0076] = 0xCD;
 					mem_[0x0077] = 0xA3;
-					mem_[0x0078] = 0x00; /* CALL $00A3 */
+					mem_[0x0078] = 0x00; /* 命令 CALL $00A3 */
 					mem_[0x0079] = 0x18;
-					mem_[0x007A] = 0xFB; /* JR $0076 */
+					mem_[0x007A] = 0xFB; /* 命令 JR $0076 */
 				}
 			}
 			break;
 		}
-		/* ys2 PSG is PATCH2 (same C000→4000 LDIR). The PATCH-only scan
-		   above never sees it, so TTLMS packing and the $2F0E NOP never
-		   armed — port1 became $30 (title) and SSG volumes stayed 0. */
+		/* ys2 PSG は PATCH2（同じ C000→4000 LDIR）。上の PATCH のみスキャンは見ないので TTLMS パックと $2F0E NOP が武装せず、port1 が $30（タイトル）になり SSG 音量が 0 のまま。 */
 		if (!ys2Mirror4000_ && psgOnly_) {
 			for (int i = 0; i < ge->romCount; i++) {
 				const CEmuRomEntry* r = &ge->rom[i];
@@ -1583,10 +1462,7 @@ int CHardX1::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode
 				break;
 			}
 		}
-		/* kugyoku PSG is PATCH2 with the same `CP FF; AND 0F` command
-		   nibble as OPM PATCH. The PATCH-only scan never arms tecnoCmdHi_
-		   so 0x80/0x81/0xFF titles latched lo as the track (AND 0F of 5
-		   is track 5 of a 1-track file → SILENT). */
+		/* kugyoku PSG は OPM PATCH と同じ `CP FF; AND 0F` コマンドニブルの PATCH2。PATCH のみスキャンは tecnoCmdHi_ を武装せず、0x80/0x81/0xFF タイトルが lo をトラックとしてラッチ（5 の AND 0F は 1 トラックファイルのトラック 5 → SILENT）。 */
 		if (!tecnoCmdHi_) {
 			for (int i = 0; i < ge->romCount; i++) {
 				const CEmuRomEntry* r = &ge->rom[i];
@@ -1601,10 +1477,7 @@ int CHardX1::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode
 				break;
 			}
 		}
-		/* ASPIC SPECIAL PSG PATCH2: ISR $0089 CALL $0071 (stop) every
-		   VSYNC while $0097=0. NOP the per-tick stop so play can arm.
-		   PROG play $581E ends `POP AF; OR A; RET Z` but PATCH2 never
-		   pushes — that pops the return and RET Z back to $0000. RET. */
+		/* ASPIC SPECIAL PSG PATCH2: ISR $0089 が $0097=0 の間毎 VSYNC に CALL $0071（stop）。tick 毎 stop を NOP し play が武装できるようにする。PROG play $581E は `POP AF; OR A; RET Z` で終わるが PATCH2 は push しない — 戻りを pop し RET Z で $0000 へ。RET。 */
 		if (psgOnly_ && initPc_ == 0
 			&& mem_[0x0000] == 0xF3 && mem_[0x0001] == 0xED
 			&& mem_[0x0013] == 0x32 && mem_[0x0014] == 0x32
@@ -1621,21 +1494,15 @@ int CHardX1::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode
 			mem_[0x5837] = 0x00;
 		}
 		songIdFromHi_ = (uint8_t)CEmuX1SongIdFromHi(mem_);
-		/* hyd2: flag 0 (intro+loop) times out to CALL $FF46, which
-		   CALL $FEAB = JP $81F2 and never reaches JP $8170 (loop).
-		   Skip-intro already CALLs $8170 and PLAYS. */
+		/* hyd2: flag 0（イントロ＋ループ）はタイムアウトで CALL $FF46。それは CALL $FEAB = JP $81F2 で JP $8170（ループ）に届かない。イントロ飛ばしは既に CALL $8170 して PLAYS。 */
 		if (initPc_ == 0xFE00
 			&& mem_[0xFF46] == 0xCD && mem_[0xFF47] == 0xAB
 			&& mem_[0xFF48] == 0xFE && mem_[0xFF4F] == 0xC3
 			&& mem_[0xFF50] == 0x70 && mem_[0xFF51] == 0x81) {
-			/* CALL $FEAB = JP $81F2 never returns to JP $8170. Leave the
-			   $0744 countdown alone — shrinking it JP $8170 from the ISR
-			   muted flag 0. Intro wrap has to carry the loop. */
+			/* CALL $FEAB = JP $81F2 は JP $8170 へ戻らない。$0744 カウントダウンは触らない — 縮めると ISR から JP $8170 し flag 0 が mute。イントロラップがループを運ぶ必要がある。 */
 			memset(mem_ + 0xFF46, 0x00, 3);
 		}
-		/* luxsor OPMDRV/PSGDRV play LDIRs work RAM then `XOR A; LD ($EA0F),A`
-		   clearing the ISR gate ArmTelenetPlayGate just primed. ISR
-		   `LD A,($EA0F); OR A; RET Z` then never ticks. */
+		/* luxsor OPMDRV/PSGDRV play はワーク RAM を LDIR したあと `XOR A; LD ($EA0F),A` で ArmTelenetPlayGate がちょうどプライムした ISR ゲートをクリア。ISR `LD A,($EA0F); OR A; RET Z` はそれ以降 tick しない。 */
 		if (initPc_ == 0xE900 && opmPlayGate_ == 0xEA0F) {
 			if (mem_[0xECCD] == 0x32 && mem_[0xECCE] == 0x0F
 				&& mem_[0xECCF] == 0xEA)
@@ -1643,9 +1510,7 @@ int CHardX1::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode
 			if (mem_[0xEAE9] == 0xAF && mem_[0xEAEA] == 0x32
 				&& mem_[0xEAEB] == 0x0F && mem_[0xEAEC] == 0xEA)
 				memset(mem_ + 0xEAEA, 0x00, 3);
-			/* `LD A,($EA1D/$EA18); LD (IX+23),A` — 0 = infinite loop at
-			   table+2. Port F used to feed the song id so BGM wrapped N
-			   times then STOPS. Force A=0 even if IN (F) still sees the id. */
+			/* `LD A,($EA1D/$EA18); LD (IX+23),A` — 0 = 表+2 の無限ループ。ポート F が曲 ID を給電していたので BGM が N 回ラップして STOPS。IN (F) がまだ ID を見ても A=0 を強制。 */
 			if (mem_[0xED29] == 0x3A && mem_[0xED2A] == 0x1D
 				&& mem_[0xED2B] == 0xEA && mem_[0xED2C] == 0xDD
 				&& mem_[0xED2D] == 0x77 && mem_[0xED2E] == 0x17) {
@@ -1660,32 +1525,21 @@ int CHardX1::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode
 				mem_[0xEB42] = 0x00;
 				mem_[0xEB43] = 0x00;
 			}
-			/* ISR `INC ($EA1E)` is a 128-tick end flag for the game, but
-			   $EC53 `LD A,($EA1E); ADD A,D` uses the same byte as a TL
-			   addend. After ~128 music ticks D clamps to $7F (mute) and
-			   stays there — STOPS/GAPPY with keys still moving. Hoot
-			   never increments it (ioport BSS stays 0). */
+			/* ISR `INC ($EA1E)` はゲーム用 128 tick 終了フラグだが、$EC53 `LD A,($EA1E); ADD A,D` は同じバイトを TL 加算に使う。約 128 音楽 tick 後 D が $7F（mute）へクランプしたまま — キーは動くが STOPS/GAPPY。Hoot はインクリメントしない（ioport BSS は 0）。 */
 			if (mem_[0xEEE5] == 0x21 && mem_[0xEEE6] == 0x1E
 				&& mem_[0xEEE7] == 0xEA && mem_[0xEEE8] == 0x34)
 				mem_[0xEEE8] = 0x00;
-			/* `DEC (IX+7)` is the TL envelope index. $E1 would reload it
-			   but ISR skips $E1 while $EA0F is NZ (ArmTelenet). After 15
-			   music ticks the index hits the table's 127 slot and BGM
-			   goes inaudible with keys still moving (STOPS/GAPPY MON_OK). */
+			/* `DEC (IX+7)` は TL エンベロープ添字。$E1 がリロードするが、$EA0F が NZ の間 ISR は $E1 を飛ばす（ArmTelenet）。15 音楽 tick 後添字が表の 127 スロットに当たり、キーは動くが BGM が聞こえない（STOPS/GAPPY MON_OK）。 */
 			if (mem_[0xEF0A] == 0xDD && mem_[0xEF0B] == 0x35
 				&& mem_[0xEF0C] == 0x07)
 				memset(mem_ + 0xEF0A, 0x00, 3);
-			/* PSGDRV `$EA72` computes AY volume from ix+7 then
-			   `LD A,($EA0F); OR A; RET NZ` — ArmTelenet keeps the gate
-			   at 1 so the write never happens (ayW>0, peak=0). OPMDRV
-			   does not have this sequence. */
+			/* PSGDRV `$EA72` は ix+7 から AY 音量を計算し `LD A,($EA0F); OR A; RET NZ` — ArmTelenet がゲートを 1 に保つので書きが起きない（ayW>0、peak=0）。OPMDRV にこの列はない。 */
 			if (mem_[0xEA79] == 0x3A && mem_[0xEA7A] == 0x0F
 				&& mem_[0xEA7B] == 0xEA && mem_[0xEA7C] == 0xB7
 				&& mem_[0xEA7D] == 0xC0 && mem_[0xEA7E] == 0xDD
 				&& mem_[0xEA7F] == 0x72 && mem_[0xEA80] == 0x13)
 				mem_[0xEA7D] = 0x00;
-			/* Same driver's `$ED07` envelope `DEC D; JP P; LD D,0`
-			   decays ix+19 to mute in ~2.5s. Hold the key-on level. */
+			/* 同じドライバの `$ED07` エンベロープ `DEC D; JP P; LD D,0` は約 2.5s で ix+19 を mute へ減衰。キーオンレベルを保持。 */
 			if (mem_[0xED1C] == 0x15 && mem_[0xED1D] == 0xF2
 				&& mem_[0xED1E] == 0x22 && mem_[0xED1F] == 0xED
 				&& mem_[0xED20] == 0x16 && mem_[0xED21] == 0x00
@@ -1693,9 +1547,7 @@ int CHardX1::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode
 				&& mem_[0xED24] == 0x13)
 				memset(mem_ + 0xED1C, 0x00, 6);
 		}
-		/* ys_x1: MANPR1 @ $0100 is 0x4C00 and covers $4000. Title/ending
-		   engines live there (TTLPRG / ENDPRG). Restore after the code pass
-		   so PATCH's LDIR $4000→$8800 / CALL $4A2E see the right player. */
+		/* ys_x1: MANPR1 @ $0100 は 0x4C00 で $4000 を覆う。タイトル／エンディングエンジンがそこ（TTLPRG／ENDPRG）。コードパス後に戻し、PATCH の LDIR $4000→$8800／CALL $4A2E が正しいプレーヤを見る。 */
 		if (X1IsYs1Patch(mem_) && vdataAddr >= 0) {
 			const unsigned lo = titleCode & 0xffu;
 			const char* vn = NULL;
@@ -1724,11 +1576,7 @@ int CHardX1::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode
 				if (vdataAddr + (int)n > 0x10000)
 					n = (unsigned)(0x10000 - vdataAddr);
 				memcpy(mem_ + vdataAddr, man, n);
-				/* Mode 0 (cmd < $20) needs the full in-game player.
-				   TTLPRG overlay is only for title-screen mode 1.
-				   TTLMSn (lo>=$30) is played as in-game, so keep MANPR1.
-				   Ending (lo==$20) patches CALL $16C6 / JP $1A8F and
-				   LDIR C000→$2800 — those land in ENDPRG, not TTLPRG. */
+				/* モード 0（cmd < $20）は完全なゲーム内プレーヤが要る。TTLPRG オーバーレイはタイトル画面モード 1 のみ。TTLMSn（lo>=$30）はゲーム内再生なので MANPR1 を残す。エンディング（lo==$20）は CALL $16C6／JP $1A8F をパッチし LDIR C000→$2800 — それらは ENDPRG に着地し TTLPRG ではない。 */
 				const unsigned hi = (titleCode >> 24) & 0xffu;
 				const unsigned lo = titleCode & 0xffu;
 				const unsigned cmd = hi ? hi : lo;
@@ -1743,11 +1591,7 @@ int CHardX1::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode
 							en = (unsigned)(0x10000 - vdataAddr);
 						memcpy(mem_ + vdataAddr, endp, en);
 					}
-					/* First command CALLs $00AE/$00C2 = JP $2F91 before
-					   the ending table rewrites that stub to $1A8F.
-					   $2F91 sits inside the $2800 BGM window, so a
-					   planted RET is wiped by StageBgm. NOP the CALL
-					   in PATCH (no previous song to stop). */
+					/* 最初のコマンドは CALL $00AE/$00C2 = JP $2F91。エンディング表がその stub を $1A8F へ書き換える前。$2F91 は $2800 BGM 窓内なので植えた RET は StageBgm に消される。PATCH の CALL を NOP（止める前曲は無い）。 */
 					if (mem_[0x0026] == 0xCD && mem_[0x0027] == 0xAE
 						&& mem_[0x0028] == 0x00)
 						memset(mem_ + 0x0026, 0x00, 3);
@@ -1773,11 +1617,7 @@ int CHardX1::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode
 				}
 			}
 		}
-		/* ys2 PATCH2 plants `LD A,$C9; LD ($2F0E),A` at boot and again on
-		   the title path. $2F0E is `POP AF; RET`; replacing it with RET
-		   leaks the pushed AF and the SSG volume path never runs
-		   (ayW>0, mixer=$38, vols=0). Keep the in-game `$39D4=C9`
-		   (OPM port 0700). OPM PATCH does not have this store. */
+		/* ys2 PATCH2 はブート時とタイトル経路で `LD A,$C9; LD ($2F0E),A` を植える。$2F0E は `POP AF; RET`。RET に置換すると push した AF が漏れ SSG 音量経路が走らない（ayW>0、mixer=$38、vols=0）。ゲーム内 `$39D4=C9`（OPM ポート 0700）は残す。OPM PATCH にこのストアは無い。 */
 		if (psgOnly_ && ys2Mirror4000_) {
 			if (mem_[0x0010] == 0x3E && mem_[0x0011] == 0xC9
 				&& mem_[0x0012] == 0x32 && mem_[0x0013] == 0x0E
@@ -1788,7 +1628,7 @@ int CHardX1::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode
 				&& mem_[0x0054] == 0x2F)
 				memset(mem_ + 0x0052, 0x00, 3);
 		}
-		/* Unpatched mars ISR: IN (1A01); JP P,$4208; IN; JP M,$420D. */
+		/* 未パッチ mars ISR: IN (1A01); JP P,$4208; IN; JP M,$420D */
 		if (mem_[0x420A] == 0xF2 && mem_[0x420B] == 0x08 && mem_[0x420C] == 0x42
 			&& mem_[0x420F] == 0xFA && mem_[0x4210] == 0x0D && mem_[0x4211] == 0x42)
 			marsHoldIrq_ = 1;
@@ -1800,10 +1640,11 @@ int CHardX1::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode
 	if (chipOpm_) chipOpm_->Reset();
 	if (chipOpn_) chipOpn_->Reset();
 	if (chipAy_) chipAy_->Reset();
-	/* Do NOT poke C010-C012 here — reserved for Play()/TriggerPlay. */
+	/* ここで C010-C012 を poke しない — Play()／TriggerPlay 用に予約 */
 	return 1;
 }
 
+/* CEmuHardX1SetActive の実装 */
 void CEmuHardX1SetActive(CHardX1* hw)
 {
 	CEmuZ80BusSetActive(hw);

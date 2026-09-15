@@ -6,6 +6,7 @@
 #include <string.h>
 #include <stdlib.h>
 
+/* MSX ドライバ: VBlank 周期は 60Hz */
 CDriverMsx::CDriverMsx()
 	: hw_(NULL)
 	, hostRate_(44100)
@@ -25,36 +26,38 @@ CDriverMsx::CDriverMsx()
 {
 }
 
+/* 後始末 */
 CDriverMsx::~CDriverMsx()
 {
 	Close();
 }
 
+/* AY/OPLL は Render でサンプル駆動するためここでは no-op */
 void CDriverMsx::TickChips(uint64_t cpuCycles)
 {
 	(void)cpuCycles;
-	/* AY/OPLL are sample-driven in Render. */
+	/* AY/OPLL は Render 側でサンプル駆動 */
 }
 
+/* 出力タイムライン上の VBlank。IM2 ベクタが空なら IM1 へ落とす */
 void CDriverMsx::PulseVblankIrq()
 {
 	if (!hw_ || !hw_->Cpu() || !playing_) return;
 	Ay_Cpu* cpu = hw_->Cpu();
-	/* ran2 play LDIR/WRTPSG can smash page0 and drop IFF1. Replant before
-	   the IFF1 gate so the next vblank can reach H.TIMI again. */
+	/* ran2 の play LDIR/WRTPSG が page0 を壊し IFF1 を落とす。IFF1 ゲート前に
+	   植え直し、次の VBlank が H.TIMI に届くようにする。 */
 	hw_->KeepCompileRan2Alive();
-	/* Sample-timeline VBlank only (not CPU-cycle DeliverIrq inside RunUntil).
-	   Dual scheduling ran Quinpl's play routine twice per frame, blew the
-	   Z80 stack into adjacent heap, and crashed on driver destroy. */
+	/* VBlank はサンプル軸のみ（RunUntil 内の CPU サイクル IRQ は使わない）。
+	   二重スケジュールは Quinpl の play を 1 フレーム 2 回走らせ、Z80 スタックを
+	   隣ヒープへ壊し、ドライバ破棄で落ちた。 */
 	if (!cpu->r.iff1) return;
-	/* EI;HALT (yosikon play): HALT is the delayed insn, so accept IRQ. */
+	/* EI;HALT（yosikon play）: HALT は遅延命令なので IRQ を受け付ける */
 	if (cpu->get_mem() && cpu->get_mem()[cpu->r.pc] == 0x76)
 		cpu->irqDelay = 0;
-	/* hoot kss.cpp Interrupt: raise_IRQ(0xff) under IM2 IPL.
-	   The IPL ISR lives at $0038; IM2 only works if the game filled
-	   (I<<8)|$FF with a real vector. KSS StartSong fills $0000-$3FFF
-	   with $C9, so an unset I register yields a $C9C9 target and the
-	   music ISR never runs (judo/replcart/labyr SILENT). */
+	/* hoot kss.cpp Interrupt: IM2 IPL 下で raise_IRQ(0xff)。IPL ISR は $0038。
+	   IM2 はゲームが (I<<8)|$FF に実ベクタを書いたときだけ有効。KSS StartSong は
+	   $0000-$3FFF を $C9 で埋めるため、I 未設定だと $C9C9 を踏み音源 ISR が
+	   走らない（judo/replcart/labyr 無音）。 */
 	if (cpu->r.im == 2) {
 		const uint16_t target = Ay_CpuIm2Target(cpu, 0xff);
 		uint8_t* mem = cpu->get_mem();
@@ -72,6 +75,7 @@ void CDriverMsx::PulseVblankIrq()
 	irqPulses_++;
 }
 
+/* Z80 を endCycle まで進める。HALT はサンプル予算まで眠る */
 void CDriverMsx::RunUntil(uint64_t endCycle)
 {
 	if (!hw_ || !hw_->Cpu()) return;
@@ -80,12 +84,10 @@ void CDriverMsx::RunUntil(uint64_t endCycle)
 	int guard = 0;
 	while ((uint64_t)cpu->time64() < endCycle && guard++ < 4000000) {
 		const uint64_t now = (uint64_t)cpu->time64();
-		/* HALT: sleep until this sample's CPU budget ends. VBlank is
-		   injected from Render on the hostRate/60 sample grid.
-		   DI;HALT (f1sp3d CALL $9003, yosikon CALL $D406) never wakes
-		   because PulseVblankIrq requires IFF1 — step past as NOP.
-		   EI;HALT: irqDelay would otherwise stick — RunUntil never
-		   executes HALT as an insn, so PulseVblankIrq keeps dropping. */
+		/* HALT: このサンプルの CPU 予算まで眠る。VBlank は Render が hostRate/60
+		   グリッドで注入。DI;HALT（f1sp3d / yosikon）は IFF1 が無いので起きない
+		   → NOP として踏み越す。EI;HALT: irqDelay が固まる — RunUntil は HALT を
+		   命令実行しないので PulseVblankIrq が落ち続ける。 */
 		if (cpu->get_mem() && cpu->get_mem()[cpu->r.pc] == 0x76) {
 			cpu->irqDelay = 0;
 			if (hw_->GenericMode() && !cpu->r.iff1) {
@@ -108,6 +110,7 @@ void CDriverMsx::RunUntil(uint64_t endCycle)
 	}
 }
 
+/* KSS/カートリッジを読み、曲を開始する */
 int CDriverMsx::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned titleCode)
 {
 	if (!hw || !ge || !fs) return 0;
@@ -129,8 +132,7 @@ int CDriverMsx::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned
 
 	if (!hw_->LoadKss(fs, ge, titleCode))
 		return 0;
-	/* Pass the whole code, including 0 (fmpac sample 00, ds4 track 0).
-	   Forcing 0→1 collapsed two picks onto one song. */
+	/* コード 0 も通す（fmpac sample 00、ds4 track 0）。0→1 強制は 2 曲が潰れた */
 	if (!hw_->StartSong(titleCode))
 		return 0;
 
@@ -140,18 +142,21 @@ int CDriverMsx::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned
 	return 1;
 }
 
+/* ハード参照を捨てる */
 void CDriverMsx::Close()
 {
 	hw_ = NULL;
 	playing_ = 0;
 }
 
+/* 同一 zip の別曲を StartSong で切替 */
 int CDriverMsx::OverlayTitle(unsigned titleCode)
 {
 	if (!hw_) return 0;
 	return hw_->StartSong(titleCode) ? 1 : 0;
 }
 
+/* サンプル軸で Z80 を進め、AY/SCC/SN/OPLL/OPL を混成 */
 int CDriverMsx::Render(int16_t* stereo, int frames)
 {
 	if (!hw_ || !stereo || frames <= 0) return 0;
@@ -160,25 +165,22 @@ int CDriverMsx::Render(int16_t* stereo, int frames)
 	CEmuHardMsxSetActive(hw_);
 
 	for (int i = 0; i < frames; i++) {
-		/* Absolute sample→CPU mapping: VBlank is scheduled on the output
-		   timeline (hostRate/60), not on whatever instruction overshoot the
-		   Z80 accumulated. That removes Quinpl's tempo wobble. */
+		/* サンプル→CPU の絶対写像。VBlank は出力タイムライン (hostRate/60) 上。
+		   Z80 命令の超過には載せない。Quinpl のテンポ揺れを消す。 */
 		sampleIndex_++;
 		const uint64_t want = (sampleIndex_ * (uint64_t)cpuHz_) / (uint64_t)hostRate_;
 		if (want > cpuTarget_)
 			cpuTarget_ = want;
 		RunUntil(cpuTarget_);
 		if (sampleIndex_ >= nextIrqSample_) {
-			/* Advance the 60 Hz grid even under DI so EI never catches up
-			   multiple missed edges (Quinpl ~2x). */
+			/* DI 中も 60Hz グリッドを進める。EI 時に取りこぼし端がまとめて来ないように
+			   （Quinpl が約 2 倍速になった）。 */
 			const uint64_t step = (uint64_t)hostRate_ / 60u;
 			nextIrqSample_ += step ? step : 1u;
 			PulseVblankIrq();
-			/* Do not add an out-of-band ISR budget here.  The next output
-			   samples naturally execute the handler on the same absolute
-			   sample-to-CPU timeline.  A 200 us bonus on every VBlank made
-			   the CPU run in periodic bursts, then idle until the timeline
-			   caught up, which was audible as Quinpl tempo wobble. */
+			/* 帯域外の ISR 予算は足さない。次の出力サンプルが同じ絶対タイムラインで
+			   ハンドラを実行する。VBlank 毎 200us ボーナスは CPU をバーストさせて
+			   タイムライン待ちのアイドルを作り、Quinpl のテンポ揺れになった。 */
 		}
 
 		int16_t ayBuf[2] = { 0, 0 };
@@ -226,6 +228,7 @@ int CDriverMsx::Render(int16_t* stereo, int frames)
 	return frames;
 }
 
+/* Seek は未対応 */
 int CDriverMsx::Seek(uint64_t sample)
 {
 	(void)sample;

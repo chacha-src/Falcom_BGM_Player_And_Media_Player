@@ -4,8 +4,8 @@
 #include "../fmmon/fmmon_shadow.h"
 #include <string.h>
 
-/* Namco C352 ? simplified from MAME devices/sound/c352.cpp (superctr).
-   32 voices, 8-bit linear/muLaw, key-on via global register 0x202. */
+/* Namco C352。MAME devices/sound/c352.cpp（superctr）を簡略化。
+   32ボイス、8bit線形/μ-law。キーオンはグローバルレジスタ 0x202。 */
 enum {
 	kC352Voices = 32,
 	kC352RegsPerVoice = 8,
@@ -47,7 +47,7 @@ public:
 		, heldR_(0)
 	{
 		BuildMulaw();
-		FmMonShadowSetC352Clock(clockHz_);
+		FmMonShadowSetC352Clock(clockHz_); /* FMモニタへクロック通知 */
 		Reset();
 	}
 
@@ -78,7 +78,7 @@ public:
 			const int r = (int)(offset & 7u);
 			uint16_t* p = VoiceReg(ch, r);
 			*p = d;
-			FmMonShadowApplyC352Reg(offset, d);
+			FmMonShadowApplyC352Reg(offset, d); /* ボイスレジスタをFMモニタへ */
 			return;
 		}
 		if (offset == 0x200u) {
@@ -86,12 +86,11 @@ public:
 			return;
 		}
 		if (offset == 0x202u) {
-			/* Global key-on / key-off execute (MAME c352_device::write). */
+			/* グローバルキーオン/キーオフ実行（MAME c352_device::write）。 */
 			for (int i = 0; i < kC352Voices; i++) {
 				if (v_[i].flags & C352_FLG_KEYON) {
-					/* Match C352 hardware/MAME: execute the programmed voice
-					   exactly. Zero volume/frequency is valid driver state and
-					   must not be promoted into a permanent audible voice. */
+					/* 実機/MAMEに合わせ、プログラム済みボイスをそのまま実行。
+					   音量/周波数0は正当なドライバ状態で、常時可聴ボイスへ昇格しない。 */
 					v_[i].pos = ((uint32_t)v_[i].wave_bank << 16) | v_[i].wave_start;
 					v_[i].sample = 0;
 					v_[i].last_sample = 0;
@@ -101,9 +100,8 @@ public:
 					v_[i].curr_vol[0] = v_[i].curr_vol[1] = 0;
 					v_[i].curr_vol[2] = v_[i].curr_vol[3] = 0;
 					if (i < 32) {
-						/* Sample root notes are not encoded in C352 registers.
-						   Treat the phase increment as relative pitch instead
-						   of displaying the sample stepping rate as O10. */
+						/* サンプルのルート音はC352レジスタに無い。位相増分を
+						   相対ピッチとして扱い、ステップレートをO10表示しない。 */
 						int midi = FmMonShadowC352PitchToMidi(v_[i].freq);
 						if (midi < 0) midi = 60;
 						FmMonShadowPcmNote(i, midi, 1);
@@ -132,7 +130,7 @@ public:
 	void MixAdd(int16_t* stereo, int frames, int gain) override
 	{
 		if (!stereo || frames <= 0) return;
-		const uint64_t tickDen = (uint64_t)sampleRate_ * 288u;
+		const uint64_t tickDen = (uint64_t)sampleRate_ * 288u; /* ネイティブ=clock/288 */
 		for (int i = 0; i < frames; i++) {
 			renderAcc_ += clockHz_;
 			unsigned ticks = (unsigned)(renderAcc_ / tickDen);
@@ -256,7 +254,7 @@ private:
 			const int fr = (v.flags & C352_FLG_PHASEFR) ? -s : s;
 			outL += (fl * v.curr_vol[0]) >> 8;
 			outR += (fr * v.curr_vol[1]) >> 8;
-			/* Rear pair folded into stereo for CEmu's 2ch output. */
+			/* リア対を CEmu の2ch出力へ畳み込む。 */
 			outL += (((v.flags & C352_FLG_PHASERL) ? -s : s) * v.curr_vol[2]) >> 8;
 			outR += (fr * v.curr_vol[3]) >> 8;
 		}
@@ -323,6 +321,7 @@ private:
 	Voice v_[kC352Voices];
 };
 
+/* C352 ラッパ生成。ネイティブストリームは clock/288。 */
 CChip* CEmuChipC352Create(uint32_t clockHz, int sampleRate)
 {
 	return new CChipC352(clockHz, sampleRate);

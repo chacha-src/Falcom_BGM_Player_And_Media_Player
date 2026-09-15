@@ -26,8 +26,7 @@ public:
 	uint8_t SoundCommand() const { return soundCmd_; }
 	int SoundCmdPending() const { return soundCmdPending_; }
 	int TakeNmiPulse() {
-		/* Deliver only while NMI is enabled (OUT $08); keep pulse pending
-		   across OUT $18 so OUT $08 can raise it later. */
+		/* NMI 許可中（OUT $08）だけ届ける。OUT $18 を跨いでもパルスを残し、後の OUT $08 で上げられるようにする */
 		if (!nmiEnabled_ || !nmiPulse_)
 			return 0;
 		nmiPulse_ = 0;
@@ -47,10 +46,10 @@ private:
 	void SetBankWindow(int window, uint8_t bank);
 	uint8_t ReadM1(uint32_t off) const;
 
-	uint8_t mem_[0x10000]; /* Z80 view: fixed+windows+RAM */
+	uint8_t mem_[0x10000]; /* Z80 ビュー: 固定＋窓＋RAM */
 	uint8_t* m1Rom_;
 	unsigned m1Size_;
-	uint8_t bank_[4]; /* windows 0..3 ($F000 / $E000 / $C000 / $8000) */
+	uint8_t bank_[4]; /* 窓 0..3（$F000 / $E000 / $C000 / $8000） */
 	Ay_Cpu* cpu_;
 	CChip* chip_;
 	int sampleRate_;

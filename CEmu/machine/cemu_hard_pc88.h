@@ -26,56 +26,55 @@ public:
 
 	int LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode);
 
-	/* Stage selected bgm/voice into mdata/vdata (safe to re-call).
-	   titleCode: low 8 = bank index; bits 8..23 = byte offset into that bank
-	   (KOEI packed MMLDATA / mfile_size sets). Copies clip at 64K. */
+	/* 選んだ bgm/voice を mdata/vdata へ載せる（再呼出可）。
+	   titleCode: 下位 8=バンク添字、bit 8..23=そのバンク内バイトオフセット
+	   （KOEI パック MMLDATA / mfile_size）。コピーは 64K で切る。 */
 	void LoadSongData(unsigned titleCode);
 
-	/* Full title code from last LoadRoms (for song reload). */
+	/* 直前 LoadRoms の完全 title code（曲の再ロード用） */
 	unsigned titleCode_;
 
-	/* Restage on play is unsafe when mdata overlaps PATCH/stack (SP=0x100). */
+	/* mdata が PATCH/スタック（SP=0x100）と重なると play 時の再載せは危険 */
 	int ShouldRestageSong() const;
 
-	/* KOEI FMDRV.SYS family: packed CIM at default 0x4000, play with E=0. */
+	/* KOEI FMDRV.SYS 系: パック CIM は既定 0x4000、再生は E=0 */
 	int PackedKoei() const { return packedKoei_; }
 
-	/* Port-80/01 play index for the current titleCode_ (herzog sub-song etc.). */
+	/* 現 titleCode_ のポート 80/01 再生添字（herzog サブ曲など） */
 	uint8_t PlaySongIndex() const;
 
-	/* Port-01 param: usually PlaySongIndex(), but song<<8 PATCHes keep the
-	   title low byte (duel CP 30 on param while port80 carries the page). */
+	/* ポート 01 パラメータ: 通常は PlaySongIndex()。song<<8 の PATCH は title 下位バイトを残す
+	   （duel は param で CP 30、port80 がページ）。 */
 	uint8_t PlayParamIndex() const;
 
-	/* After PATCH boot: fill missing FE19 IM2 vectors when I!=0 page is empty. */
+	/* PATCH ブート後: I!=0 ページが空なら欠けた FE19 IM2 ベクタを埋める */
 	void FixupIm2AfterBoot();
 
-	/* Catalog offers RTC+VRTC: keep only the ones the IM2 table really uses. */
+	/* カタログが RTC+VRTC を出す: IM2 表が本当に使うものだけ残す */
 	void PruneDeadTickSources();
 
-	/* gineiden: play plants sound ISR but leaves RTC slot empty — mirror. */
+	/* gineiden: play は音源 ISR を植えるが RTC 枠は空 — ミラーする */
 	void FixupIm2AfterPlay();
 
-	/* gineiden: PATCH 4E2F clears OPN Timer B; re-arm like AMAIN 4E00. */
+	/* gineiden: PATCH 4E2F が OPN Timer B をクリア。AMAIN 4E00 同様に再武装 */
 	void ArmGineidenOpnTimer();
-	/* lizard88: re-arm Timer B + unmask after play CALL 9F0F. */
+	/* lizard88: play CALL 9F0F のあと Timer B 再武装＋マスク解除 */
 	void ArmLizardOpnTimer();
 	void ArmFallbackOpnTimer();
 	void ArmPwmajan2();
-	/* yaksa PATCH2: ISR@086A CALL 3556 RET Z unless (37D1)!=0. Play
-	   CALL 0774/07A7 never arms that gate, so BGM dies after the 3CA4
-	   opener. */
+	/* yaksa PATCH2: ISR@086A は (37D1)!=0 でなければ CALL 3556 RET Z。play の
+	   CALL 0774/07A7 はそのゲートを武装しないので、3CA4 オープナのあと BGM が死ぬ。 */
 	void ArmYaksaPlay();
-	/* navitune-class: title bits 8..23 select song inside code@mdata.
-	   Rewrite PATCH's LD BC,mdata for cmd07 before retarget play (no host stubs). */
+	/* navitune 系: title bit 8..23 が code@mdata 内の曲を選ぶ。
+	   cmd07 の PATCH LD BC,mdata を書き換えてから play を付け替える（ホスト stub なし）。 */
 	void ApplyNavituneTitleSong();
-	/* navitune: PATCH DI→EI once after code load (hoot patch never EI's). */
+	/* navitune: コードロード後 PATCH が DI→EI を一度（hoot patch は EI しない） */
 	void PrepareNavitunePatch();
-	/* PC of PATCH LD A,07 / LD BC,… / CALL 4D00 (0 if not found). */
+	/* PATCH の LD A,07 / LD BC,… / CALL 4D00 の PC（無ければ 0） */
 	unsigned NavituneRetargetPc() const;
-	/* navitune: after PATCH play — unmask sound IRQ / EI only. */
+	/* navitune: PATCH play 後 — 音源 IRQ マスク解除 / EI のみ */
 	void FinishNavitunePlay();
-	/* yakyufan: re-assert play enable flags after mute@0C5D. */
+	/* yakyufan: mute@0C5D のあと再生許可フラグを再アサート */
 	int NeedsYakyufanArm() const;
 	void ArmYakyufanPlay();
 	int NeedsGineidenArm() const { return armGineidenTimer_; }
@@ -92,7 +91,7 @@ public:
 		useRtc = 1;
 		deferRtcAfterPlay_ = 0;
 	}
-	/* N88+DEMOM/MUSIC: force IM2 RTC vector to the known player ISR. */
+	/* N88+DEMOM/MUSIC: IM2 RTC ベクタを既知プレーヤ ISR へ強制 */
 	void ArmN88RtcPlayer();
 	int NeedsN88RtcGuard() const { return n88RtcIsr_ != 0; }
 	void GuardN88RtcVector()
@@ -111,33 +110,32 @@ public:
 			cpu_->r.sp = 0x0200;
 	}
 
-	/* schwarz PATCH DI's around play and never EI — keep IRQs alive after cmd. */
+	/* schwarz PATCH は play 周りを DI したまま EI しない — コマンド後も IRQ を生かす */
 	int NeedsFe19PlayEi() const;
 
-	/* Falcom E000 / FE19: DI around play with IM2 sound vector installed. */
+	/* Falcom E000 / FE19: IM2 音源ベクタを植えた状態で play 周りを DI */
 	int NeedsPlayEi() const;
 
-	/* PATCH IM2 + CALL init under DI (hadou/gra88): need EI during boot. */
+	/* PATCH IM2 + CALL init が DI 下（hadou/gra88）: ブート中に EI が要る */
 	int NeedsBootEiPulse() const;
 
-	/* BOTHTEC The Scheme OPNA (MUS2+ADR_+INT2): PATCH lives at 0x9000. */
+	/* BOTHTEC The Scheme OPNA（MUS2+ADR_+INT2）: PATCH は 0x9000 */
 	int IsSchemeOpna() const { return schemeMode_; }
 
-	/* hoot scheme Play(): flags at 0x9010/11/13 (title low + bank high). */
+	/* hoot scheme Play(): フラグ 0x9010/11/13（title 下位 + バンク上位） */
 	void SchemePlayTrigger(unsigned titleCode);
 
-	/* Falcom masks port-32 sound IRQ around JP into type=prog; the prog still
-	   needs OPN timer IRQs or it never returns to the PATCH unmask. */
+	/* Falcom は type=prog へ JP する前後でポート 32 音源 IRQ をマスク。prog は OPN タイマ IRQ が無いと PATCH のマスク解除に戻れない */
 	int IgnoreSoundIrqMask() const;
 
-	/* hoot oldfalcom Play(): copy type=prog, plant E00E..E014, RAM flags. */
+	/* hoot oldfalcom Play(): type=prog をコピーし E00E..E014 と RAM フラグを植える */
 	void ApplyFalcomPlay();
 
-	/* PATCH command poll PC (page0 stub or Falcom E027). -1 if none. */
+	/* PATCH コマンド待ち PC（page0 stub または Falcom E027）。無ければ -1 */
 	int CmdPollPc() const;
 
-	/* Game Arts / castle: port cmd arms IRQ-driven play, but ISR lives on
-	   RTC vector 04 (or castle needs PROG2 entry). Host CALL init then base. */
+	/* Game Arts / castle: ポートコマンドは IRQ 駆動再生を武装するが、ISR は RTC ベクタ 04
+	   （castle は PROG2 入口）。ホストが init を CALL してから base。 */
 	unsigned PlayKickBase() const { return playKickBase_; }
 	unsigned PlayKickInitOff() const { return playKickInitOff_; }
 	int PlayKickEi() const { return playKickEi_; }
@@ -184,7 +182,7 @@ public:
 
 	int opnaMode;
 
-	/* Effective Z80 Hz: 4000000 * max(1, clockmul). */
+	/* 実効 Z80 Hz: 4000000 * max(1, clockmul) */
 	int cpuHz_;
 
 
@@ -201,7 +199,7 @@ private:
 
 	void SetSoundIrqPort(uint8_t data);
 
-	/* PC-8801 text window (I/O 70h / 78h): move the 1KB view at 8000-83FF. */
+	/* PC-8801 テキスト窓（I/O 70h / 78h）: 8000-83FF の 1KB ビューを動かす */
 	void SetTextWindow(uint8_t hi);
 
 
@@ -216,13 +214,12 @@ private:
 
 	uint64_t cpuCycles_;
 
-	/* hoot-style ioport latch (default 0). Unknown ports RMW here —
-	   open-bus 0xFF on IN would stick bit7 of 0x32 forever (arcus2 silence).
-	   Ports 0x32 and 0xAA share the byte at ioPorts_[0x32]. */
+	/* hoot 風 ioport ラッチ（既定 0）。未知ポートはここで RMW。
+	   IN のオープンバス 0xFF は 0x32 の bit7 を永久に立て arcus2 が無音になる。
+	   ポート 0x32 と 0xAA は ioPorts_[0x32] を共有。 */
 	uint8_t ioPorts_[256];
 
-	/* Text-window base page (0x80 = window closed, i.e. plain main RAM), and
-	   the real 8000-83FF bytes hidden while it is open. */
+	/* テキスト窓のベースページ（0x80=閉じ=素のメイン RAM）と、開いている間隠す 8000-83FF 実バイト */
 	uint8_t textWinHi_;
 	uint8_t textWinShadow_[0x400];
 
@@ -238,8 +235,8 @@ private:
 
 	int wolfteamMode_;
 
-	/* Port-0 bank-copy is mucom88-only. KOEI PATCH keeps IRQ opcodes at
-	   0x5C/0x5D (POP AF / EI); treating them as a dst pointer corrupts RAM. */
+	/* ポート 0 バンクコピーは mucom88 のみ。KOEI PATCH は 0x5C/0x5D に IRQ オペコード
+	   （POP AF / EI）を置く。dst ポインタと扱うと RAM が壊れる。 */
 	int mucomBankCopy_;
 
 	int mdataAddrDefaulted_;
@@ -248,42 +245,42 @@ private:
 
 	int initPc_;
 
-	/* f_crisis-class: PATCH never EI's; arm once at LoadRoms. */
+	/* f_crisis 系: PATCH は EI しない。LoadRoms で一度武装 */
 	int forcePlayEi_;
 
-	/* gineiden: mirror IM2 sound vector into empty RTC slot after play. */
+	/* gineiden: play 後、空 RTC 枠へ IM2 音源ベクタをミラー */
 	int mirrorSoundToRtc_;
 
-	/* gineiden: host re-arm OPN Timer B after PATCH clears it. */
+	/* gineiden: PATCH がクリアした OPN Timer B をホストが再武装 */
 	int armGineidenTimer_;
-	/* lizard88: host re-arm OPN Timer B after play. */
+	/* lizard88: play 後にホストが OPN Timer B を再武装 */
 	int armLizardTimer_;
-	/* 1942_88: ADEE LDIR needs a longer cmd=1 drain. */
+	/* 1942_88: ADEE LDIR は cmd=1 のドレインを長くする */
 	int longPlayDrain_;
-	/* yaksa PATCH2: catalog rom name — play index must stay nonzero. */
+	/* yaksa PATCH2: カタログ ROM 名 — 再生添字は非 0 のまま */
 	int yaksaPatch2_;
-	/* navitune-class: code@mdata + bgm same image; title fileOff → song. */
+	/* navitune 系: code@mdata と bgm は同一イメージ。title fileOff → 曲 */
 	int armNavituneTimer_;
-	uint16_t naviSongAddr_; /* absolute song header (mdata+fileOff) */
+	uint16_t naviSongAddr_; /* 絶対曲ヘッダ（mdata+fileOff） */
 
-	/* rogueal: enable RTC only after play (boot LDIR vs RTC race). */
+	/* rogueal: play 後にだけ RTC を許可（ブート LDIR と RTC の競合） */
 	int deferRtcAfterPlay_;
 
-	/* N88 thexder/bokosuka: RTC ISR address DEMOM/MUSIC would LD (F304),HL. */
+	/* N88 thexder/bokosuka: DEMOM/MUSIC が LD (F304),HL する RTC ISR 番地 */
 	unsigned n88RtcIsr_;
 	unsigned n88RtcThrottleAddr_;
 
-	/* hardrank SMD-88.sb2: keep I=$91 / vec04@9104 on the player ISR. */
+	/* hardrank SMD-88.sb2: I=$91 / vec04@9104 をプレーヤ ISR に保つ */
 	int hardrankSb2_;
 
-	/* Scheme OPNA specialty (PATCH@9000, BGM via port0 → C000). */
+	/* Scheme OPNA 専用（PATCH@9000、BGM は port0 → C000） */
 	int schemeMode_;
 
-	/* hoot OldFalcomDriver: 0 none, 1 XANADU, 2 XANADU2, 3 ASTEKA2. */
+	/* hoot OldFalcomDriver: 0 なし、1 XANADU、2 XANADU2、3 ASTEKA2 */
 	int falcomType_;
 
-	/* Direct CALL play: base address (PLAY88/C000/PROG2), optional +init
-	   offset (Game Arts +6), and whether to EI after the base CALL. */
+	/* 直接 CALL 再生: 基点（PLAY88/C000/PROG2）、任意の +init オフセット（Game Arts +6）、
+	   基点 CALL 後に EI するか */
 	unsigned playKickBase_;
 	unsigned playKickInitOff_;
 	int playKickEi_;
@@ -292,7 +289,7 @@ private:
 
 	unsigned bgmBankSize_[256];
 
-	/* Falcom type=prog (separate from bgm — xana2 uses both). */
+	/* Falcom type=prog（bgm とは別。xana2 は両方使う） */
 	unsigned char* progBank_[256];
 
 	unsigned progBankSize_[256];

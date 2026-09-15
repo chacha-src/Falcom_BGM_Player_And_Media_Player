@@ -1,4 +1,4 @@
-#include "StdAfx.h"
+﻿#include "StdAfx.h"
 #include "cemu_rhythm.h"
 #include "cemu_mgr.h"
 #include <wchar.h>
@@ -50,8 +50,8 @@ static unsigned RhythmFileSize(const wchar_t* path)
 	return fad.nFileSizeLow;
 }
 
-/* Visit root and every subfolder up to kRhythmMaxDepth.
-   onDir returns 1 to stop. */
+/* root と深さ kRhythmMaxDepth までのサブフォルダを辿る。
+   onDir が 1 を返すと打ち切り。 */
 static int RhythmWalkUnder(const wchar_t* root,
 	int (*onDir)(const wchar_t* dir, void* ctx), void* ctx)
 {
@@ -121,7 +121,7 @@ static int RhythmTryRomInDir(const wchar_t* dir, RhythmRomCtx* c)
 		wchar_t probe[MAX_PATH];
 		_snwprintf_s(probe, _TRUNCATE, L"%s\\%s", dir, kNames[i]);
 		const unsigned sz = RhythmFileSize(probe);
-		/* Prefer the real 8KiB ADPCM-A ROM; skip huge misnamed blobs. */
+		/* 本物の 8KiB ADPCM-A ROM を優先。巨大な誤名ブロブは飛ばす。 */
 		if (sz < 0x1000 || sz > 0x8000) continue;
 		if (!c->out[0] || sz == 0x2000 || (c->bestSize != 0x2000 && sz < c->bestSize)) {
 			wcsncpy_s(c->out, (size_t)c->outCch, probe, _TRUNCATE);
@@ -222,7 +222,7 @@ static int RhythmFindAdpcmRom(wchar_t* out, int outCch)
 	RhythmExeDir(exeDir, (int)_countof(exeDir));
 	addRoot(exeDir);
 
-	/* CEmu data lives under .../ogg_binary/data — Plugins is the sibling. */
+	/* CEmu データは .../ogg_binary/data。Plugins はその隣。 */
 	CEmuMgr* m = CEmuMgrGet();
 	if (m && m->dataRoot[0]) {
 		wchar_t dataRoot[MAX_PATH], parent[MAX_PATH];
@@ -273,8 +273,8 @@ void GetRhythmPath(wchar_t* pszPath, int nSize)
 
 void CEmuLoadExternalYm2608Adpcm(CChip* chip)
 {
-	/* Always load/overwrite ADPCM-A. Real YM2608 rhythm ROM is fixed silicon;
-	   zip "adpcm" is ADPCM-B and must not block this. */
+	/* 常に ADPCM-A を載せる/上書き。本物の YM2608 リズム ROM はシリコン固定。
+	   zip の "adpcm" は ADPCM-B で、これを阻んではいけない。 */
 	if (!chip) return;
 	if (getenv("CEMU_SKIP_RHYTHM")) return;
 	wchar_t path[MAX_PATH];

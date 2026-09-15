@@ -24,7 +24,7 @@ public:
 		, lastR_(0)
 		, romSize_(0)
 	{
-		nativeRate_ = device_start_multipcm(chipId_, (int)clockHz_);
+		nativeRate_ = device_start_multipcm(chipId_, (int)clockHz_); /* ベンダーコアのネイティブレート */
 		if (nativeRate_ <= 0) nativeRate_ = 44100;
 		device_reset_multipcm(chipId_);
 	}
@@ -43,6 +43,7 @@ public:
 		const uint8_t v = (uint8_t)(data & 0xff);
 		const unsigned port = (unsigned)(addr & 3u);
 		multipcm_w(chipId_, (offs_t)port, (UINT8)v);
+		/* FMモニタへ MultiPCM レジスタをシャドウ。 */
 		FmMonShadowApplyMultiPcm((int)chipId_, port, v);
 	}
 	void AdvanceClocks(uint64_t) override {}
@@ -51,6 +52,7 @@ public:
 		if (!stereo || frames <= 0) return;
 		for (int i = 0; i < frames; i++) {
 			frac_ += (uint32_t)nativeRate_;
+			/* ネイティブレートからホストサンプルへリサンプル。 */
 			while (frac_ >= (uint32_t)sampleRate_) {
 				frac_ -= (uint32_t)sampleRate_;
 				stream_sample_t L = 0, R = 0;
@@ -59,6 +61,7 @@ public:
 				lastL_ = (int16_t)Clamp(L);
 				lastR_ = (int16_t)Clamp(R);
 			}
+			/* ステレオMix: 保持した L/R を書く。 */
 			stereo[i * 2] = lastL_;
 			stereo[i * 2 + 1] = lastR_;
 		}
@@ -117,6 +120,7 @@ private:
 	unsigned romSize_;
 };
 
+/* MultiPCM (YMW-258-F) ラッパ生成。chipId は 0/1。 */
 CChip* CEmuChipMultiPcmCreate(uint32_t clockHz, int sampleRate, int chipId)
 {
 	return new CChipMultiPcm(clockHz, sampleRate, chipId);

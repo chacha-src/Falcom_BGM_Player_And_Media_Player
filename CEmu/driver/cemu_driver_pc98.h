@@ -3,6 +3,7 @@
 
 class CHardPc98;
 
+/* PC-98: NP2 i286/V30 + OPN/OPNA。DOS 経路は PumpCycles */
 class CDriverPc98 : public CDriver {
 public:
 	CDriverPc98();
@@ -15,8 +16,11 @@ public:
 	int OverlayTitle(unsigned titleCode) override;
 
 private:
+	/* i286 を endCycle まで進める */
 	void RunUntil(uint64_t endCycle);
+	/* OPN クロックを CPU 比で進める */
 	void TickOpn(uint64_t cpuCycles);
+	/* 無音が続くリップを再キックする */
 	void WatchdogTick();
 
 	CHardPc98* hw_;
@@ -29,8 +33,7 @@ private:
 	int64_t cpuAcc_;
 	int64_t cpuDebt_;
 	unsigned titleCode_;
-	/* Stall watchdog: replays the track when the sequencer goes quiet, so a
-	   rip that does not loop on its own still loops (see WatchdogTick). */
+	/* 停滞ウォッチドッグ: シーケンサが黙ると曲を再キックしてループさせる */
 	uint64_t wdSamples_;
 	uint64_t wdLastActive_;
 	unsigned wdMotion_;

@@ -3,7 +3,7 @@
 #include "../chip/cemu_chip.h"
 #include "../cemu_zipfs.h"
 
-/* MSX: KSS (hoot IPL) + generic offset romlists (patch@init_pc + driver + mdata). */
+/* MSX: KSS（hoot IPL）+ 汎用オフセット romlist（patch@init_pc + driver + mdata） */
 class CHardMsx : public CHard {
 public:
 	CHardMsx();
@@ -61,7 +61,7 @@ public:
 		PLAY_CODE_PORT = 0x00,
 		SKIP_PORT = 0x01,
 		BGM_BANKS = 128,
-		/* ankoku BTL.COM is 26K; 16K clipped $60AD play records to 0. */
+		/* ankoku BTL.COM は 26K。16K だと $60AD の再生レコードが 0 に切れる */
 		BGM_SIZE = 0x8000,
 		MAP_NONE = 0,
 		MAP_ASCII16 = 1,
@@ -120,8 +120,8 @@ private:
 	uint8_t bankShadow_[0x4000];
 	int bank8kRam_[2];
 	int sccEnable_;
-	int sccMapped_; /* Konami mapper: 0x3F→$9000 exposes SCC at $9800 */
-	int sccAccessed_; /* MixAdd only after a real SCC register write */
+	int sccMapped_; /* Konami マッパ: 0x3F→$9000 で SCC を $9800 に出す */
+	int sccAccessed_; /* 実 SCC レジスタ書込のあとだけ MixAdd */
 	unsigned ayWriteCount_;
 	unsigned opllWriteCount_;
 	uint8_t opllLatch_;
