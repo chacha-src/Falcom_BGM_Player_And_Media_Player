@@ -128,9 +128,12 @@ public:
 				int32_t fl = o.data[0];
 				int32_t fr = o.data[1 % outs];
 				if (outs > 2) {
-					/* 出力2以降はADPCM。L/Rへ半分ずつ加算（ステレオMix）。 */
-					fl += o.data[2] / 2;
-					fr += o.data[2] / 2;
+					/* data[0/1] は FM+ADPCM（ymfm が既に混成）。data[2] は SSG MixTo1。
+					   以前は ADPCM と誤認して /2 を両chに足し、SSG がざらついてクリップした。
+					   MAME neogeo: SSG 0.28 / FM 0.98。 */
+					const int32_t ssg = o.data[2] * 72 / 256;
+					fl += ssg;
+					fr += ssg;
 				}
 				curL_ = fl;
 				curR_ = fr;

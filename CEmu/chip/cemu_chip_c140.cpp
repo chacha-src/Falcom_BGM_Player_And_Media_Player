@@ -99,6 +99,7 @@ public:
 			if (d) modeNzWriteCount_++;
 		}
 		reg_[o] = d;
+		FmMonShadowSetCompanionRegs(reg_, 0x100u);
 		if (o < voiceLimit) {
 			const int ch = (int)(o >> 4);
 			if ((o & 0xf) == 0x5) {

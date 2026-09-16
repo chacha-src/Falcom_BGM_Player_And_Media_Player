@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 // CFmMonitorDlg : SASAMI FPY / OPNA (YM2608) レジスタ・鍵盤モニタ
 // KPI/SASAMI: %TEMP%\ogg_kbsasami\*.opna
 // CEmu:       %TEMP%\ogg_cemu\*.opna （混ぜない）
@@ -72,6 +72,12 @@ private:
 	int HideRhythm() const;
 	int HasViewRegs() const;
 	int HasViewPanels() const;
+	int PrimaryPanelN() const;
+	int CompanionPanelN() const;
+	int PrimarySilent() const; /* ハイブリッドで主FMが一度も発音していない */
+	int HexBankCount() const;
+	int HistPeekFmKey() const;
+	void TickFmViewReady();
 	/* 起動直後／keys-only(MIDI等)でチップUIが無いとき OPNA 殻を出す */
 	int PreferOpnaShell() const;
 	bool EnsureFrameBuffer(CDC& refDC, int w, int h);
@@ -87,9 +93,9 @@ private:
 	void DrawHexBank(CDC& dc, int x, int y, int cellW, int cellH, int gapExtra, int bankBase, const wchar_t* title, int rowCount = 16);
 	void DrawFmChPanel(CDC& dc, const CRect& rc, int ch);
 	void DrawOpmChPanel(CDC& dc, const CRect& rc, int ch);
-	void DrawOplChPanel(CDC& dc, const CRect& rc, int ch);
-	void DrawOpllChPanel(CDC& dc, const CRect& rc, int ch);
-	void DrawArcadePcmChPanel(CDC& dc, const CRect& rc, int ch, unsigned profile);
+	void DrawOplChPanel(CDC& dc, const CRect& rc, int ch, int packedCompanion = 0);
+	void DrawOpllChPanel(CDC& dc, const CRect& rc, int ch, int packedCompanion = 0);
+	void DrawArcadePcmChPanel(CDC& dc, const CRect& rc, int ch, unsigned profile, int useComp = 0);
 	void DrawPiano108(CDC& dc, const CRect& rc, int midiNote, int lit);
 	void DrawChannelKeys(CDC& dc, int x, int y, int w, int rowH, int keyH, int labelW);
 	static int ApproxMidiFromFnum(uint8_t a4, uint8_t a0);
@@ -105,8 +111,8 @@ private:
 	uint64_t m_histSamp[HIST_MAX]; /* dump.curSample（デコード書き込み位置） */
 	int m_histN;
 	int m_histHead;
-	BYTE m_fade[0x200];
-	BYTE m_touched[0x200];
+	BYTE m_fade[0x300];
+	BYTE m_touched[0x300];
 	BYTE m_fadeKey[6];
 	BYTE m_fadeEx[3];
 	BYTE m_fadeSsg[3];
@@ -135,12 +141,17 @@ private:
 	int m_inPrint; /* PrintWindow / スクショ中。CPaintDC と Poll を混ぜない */
 	int m_inPump; /* PumpSyncNow 再入防止（timerp / OnIdle / タイマ） */
 	int m_lastPlayy; /* FmMonIsLive() の前回値。停止遷移で鍵盤クリア */
+	int m_fmEverOn; /* この曲で主FM/OPMが一度でもキーオンした */
+	int m_fmViewReady; /* 0=先読み中。決まり次第 hex/panels/keys を出す */
+	ULONGLONG m_fmHoldMs;
 
 	struct Layout {
 		int w, h, dpi;
 		int pad, headH, topY, topH, gapHexKeys;
 		int cellW, cellH, gapExtra, hexX, hexColW;
-		int gridY0, gridY1, bankTitle, bankGap;
+		int gridY0, gridY1, gridY2, bankTitle, bankGap;
+		int hexBanks;
+		int panN, panCols, panRows;
 		int fmX, fmW, pw, ph, gap;
 		int keysY, keysW, rowH, keyH, labelW;
 		int pcmRows; /* 鍵盤ブロック行数に効く。変化時は ComputeLayout 必須 */

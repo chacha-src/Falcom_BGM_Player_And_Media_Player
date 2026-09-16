@@ -279,6 +279,7 @@ private:
 		}
 		UpdateMon(channel);
 		if (alsoMon >= 0) UpdateMon(alsoMon);
+		FmMonShadowSetCompanionRegs(reg_, kC30Regs);
 	}
 
 	void WriteRegMappy(int adr, uint8_t data)
@@ -309,6 +310,7 @@ private:
 			break;
 		}
 		UpdateMon(channel);
+		FmMonShadowSetCompanionRegs(reg_, kC30Regs);
 	}
 
 	void WriteReg(int adr, uint8_t data)

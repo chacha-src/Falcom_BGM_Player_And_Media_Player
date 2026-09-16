@@ -88,27 +88,27 @@ public:
 	void AdvanceClocks(uint64_t chipCycles) override
 	{
 		if (clockHz_ == 0) return;
-		timerUsec_ += (__int64)chipCycles * 1000000 / (__int64)clockHz_;
-		while (timerUsec_ > 0) {
-			const int step = (timerUsec_ > 1000) ? 1000 : (int)timerUsec_;
+		/* 余りを捨てると 3.579545 MHz（CPS1 等）で 4 サイクル命令が 1.117µs → 1µs になり
+		   Timer A が約 10% 遅れる。4 MHz は割り切れるので旧経路では CPS1 だけ遅かった。 */
+		timerUsec_ += (__int64)chipCycles * 1000000;
+		const __int64 us = timerUsec_ / (__int64)clockHz_;
+		timerUsec_ %= (__int64)clockHz_;
+		__int64 left = us;
+		while (left > 0) {
+			const int step = (left > 1000) ? 1000 : (int)left;
 			if (step <= 0) break;
 			/* Count はタイマA/B満了で真を返すが、fmgen がステータスbitを立てるのは
 			   reg 0x14 の対応IRQENが立っているときだけ。どちらも正当な割込源。
 			   Rastan はタイマAのみ（reg 14 = 0x35）なので、ここでAをマスクすると無音。
-			   レベルではなく立ち上がり辺でラッチし、EI直後のISR再入を避ける。
-			   After Burner はこのラッチを使わない（ステータスポーリングのみ）。 */
-			/* ステータス/IRQENが生きている間、タイマ満了ごとに1回ラッチ。
-			   立ち上がり辺のみ（st1 & ~st0）だと ISR がステータスを残したまま
-			   永久待ちになる（abtengu Alice Soft）。Assist はソフトウェイト毎に
-			   0x14 を書き直し、ys368 のタイマB周期を $00（約半分テンポ）に潰していた。
-			   Countイベントラッチなら周期1回のIRQを保ち、EI後のレベル再入も無い。 */
+			   マスタクロック別カウンタで IRQ を立てると、Count のステータスと位相がずれ、
+			   sf2 は ISR が $14 を書くたびに線が再アサートされノイズになった。 */
 			if (opm_.Count(step)) {
 				if ((opm_.ReadStatus() & 0x03) != 0) {
 					irqLatch_ = 1;
 					++g_opmIrqEdges;
 				}
 			}
-			timerUsec_ -= step;
+			left -= step;
 		}
 	}
 

@@ -179,6 +179,7 @@ private:
 	void WriteReg(uint8_t reg, uint8_t data)
 	{
 		reg_[reg] = data;
+		FmMonShadowSetCompanionRegs(reg_, (unsigned)sizeof(reg_));
 		if (reg == 0xff) {
 			const int en = (data & 0x80) ? 1 : 0;
 			if (keyEnable_ && !en) {

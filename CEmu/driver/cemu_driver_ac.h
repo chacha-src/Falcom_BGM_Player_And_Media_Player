@@ -33,6 +33,9 @@ private:
 	int cmdIndex_;
 	uint64_t nextCmdAt_;
 	uint64_t nextGngIrq_;
+	int irqPaceAcc_;       /* 再生中 250Hz をホストサンプルへロックする端数 */
+	int irqPaceDue_;       /* 取ってよい周期 IRQ 残 */
+	int irqPaceLive_;      /* Render 中は 1。Open のブートは CPU 時間のまま */
 	int alphaNmiBusy_;     /* Alpha 68K-II NMI が RETN するまで 1 */
 	/* 直前の K054539 タイマ出力。立ち上がりで NMI を起こす */
 	int k054539TimerState_;

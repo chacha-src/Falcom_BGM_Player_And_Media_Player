@@ -40,6 +40,7 @@ public:
 		const uint8_t v = (uint8_t)(data & 0xff);
 		/* FMモニタへRF5C68レジスタをシャドウ。 */
 		FmMonShadowApplyRf5cReg(a, v);
+		FmMonShadowSetCompanionRegs(reg_, (unsigned)sizeof(reg_));
 		if (a < 7) {
 			Channel& c = ch_[curCh_ & 7];
 			reg_[(curCh_ & 7) * 8 + a] = v;

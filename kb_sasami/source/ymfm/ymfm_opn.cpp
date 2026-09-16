@@ -2204,9 +2204,16 @@ void ym2610::clock_fm_and_adpcm()
 	// update the FM content; OPNB is 13-bit with no intermediate clipping
 	m_fm.output(m_last_fm.clear(), 1, 32767, m_fm_mask);
 
-	// mix in the ADPCM and clamp
-	m_adpcm_a.output(m_last_fm, 0x3f);
-	m_adpcm_b.output(m_last_fm, 1);
+	/* ADPCM-A は最大6chが 12bit フル近く。そのまま足して clamp16 すると
+	   FM が食われてざらつく。160/256 ≈ -4.1dB をクランプ前に掛ける。 */
+	{
+		fm_engine::output_data pcm;
+		pcm.clear();
+		m_adpcm_a.output(pcm, 0x3f);
+		m_adpcm_b.output(pcm, 1);
+		for (uint32_t i = 0; i < fm_engine::OUTPUTS; i++)
+			m_last_fm.data[i] += pcm.data[i] * 160 / 256;
+	}
 	m_last_fm.clamp16();
 }
 

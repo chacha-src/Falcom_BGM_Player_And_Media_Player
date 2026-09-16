@@ -141,6 +141,9 @@ CDriverAc::CDriverAc()
 	, cmdIndex_(0)
 	, nextCmdAt_(0)
 	, nextGngIrq_(0)
+	, irqPaceAcc_(0)
+	, irqPaceDue_(0)
+	, irqPaceLive_(0)
 	, alphaNmiBusy_(0)
 	, k054539TimerState_(0)
 	, k054539Residual_(0)
@@ -210,6 +213,9 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 	pinned_ = 0;
 	cmdIndex_ = 0;
 	nextGngIrq_ = 0;
+	irqPaceAcc_ = 0;
+	irqPaceDue_ = 0;
+	irqPaceLive_ = 0;
 	alphaNmiBusy_ = 0;
 	/* カタログタイトルが曲を固定（コード 0 = 停止含む）。titlelist が無いときは基板既定と任意の試行表ハントへ。 */
 	songCmdWord_ = (uint16_t)titleCode;
@@ -3030,6 +3036,18 @@ void CDriverAc::DeliverIrqs()
 				Ay_CpuNmi(cpu);
 			}
 		}
+		if (irqPaceLive_) {
+			/* 再生: 250Hz をホストサンプルにロック。time64 がサンプルあたり 2 倍進むと
+			   sf2/ssf2 ともシーケンサが倍速になる。ブート settle は下の CPU 周期のまま。 */
+			if (irqPaceDue_ > 0 && cpu->r.iff1) {
+				if (hw_->QsZn() || cpu->r.im != 2)
+					Ay_CpuIm1Interrupt(cpu);
+				else
+					Ay_CpuIm2Interrupt(cpu, 0xff);
+				irqPaceDue_--;
+			}
+			return;
+		}
 		const uint64_t now = (uint64_t)cpu->time64();
 		const uint64_t period = (uint64_t)cpuHz_ / 250;
 		if (period > 0 && now >= nextGngIrq_) {
@@ -3574,8 +3592,12 @@ void CDriverAc::DeliverIrqs()
 			&& hw_->PeekMem(0x0005) == 0xd8;
 		const int ymPend = chip->Irq()
 			|| ((earlyCps || cpsVer5) && ((chip->ReadStatus() & 0x03) != 0));
-		if (ymPend && Ay_CpuIm1Interrupt(cpu))
+		if (ymPend && (!irqPaceLive_ || irqPaceDue_ > 0)
+			&& Ay_CpuIm1Interrupt(cpu)) {
 			chip->AckIrq();
+			if (irqPaceLive_ && irqPaceDue_ > 0)
+				irqPaceDue_--;
+		}
 	}
 	if (hw_->board_ == CEMU_AC_BOARD_HANGON
 		&& !hw_->IrqPulsePending()
@@ -4542,6 +4564,9 @@ int CDriverAc::Render(int16_t* stereo, int frames)
 	CEmuHardAcSetActive(hw_);
 
 	if (hostRate_ < 1 || cpuHz_ < 1) return 0;
+	if (hw_->board_ == CEMU_AC_BOARD_CPS1
+		|| hw_->board_ == CEMU_AC_BOARD_CPS_QS)
+		irqPaceLive_ = 1;
 
 	if (!hasCpu_) {
 		/* この基板に音源 CPU コアは無い — 組んだチップを描画（他が駆動しなければ無音） */
@@ -4667,6 +4692,14 @@ int CDriverAc::Render(int16_t* stereo, int frames)
 				nextCmdAt_ = (uint64_t)~0ull;
 			}
 		}
+		if (irqPaceLive_ && hostRate_ > 0) {
+			irqPaceAcc_ += 250;
+			while (irqPaceAcc_ >= hostRate_) {
+				irqPaceAcc_ -= hostRate_;
+				if (irqPaceDue_ < 2)
+					irqPaceDue_++;
+			}
+		}
 		cpuAcc_ += (int64_t)cpuHz_;
 		int cyclesPerSample = (int)(cpuAcc_ / (int64_t)hostRate_);
 		cpuAcc_ %= (int64_t)hostRate_;
@@ -4686,8 +4719,15 @@ int CDriverAc::Render(int16_t* stereo, int frames)
 			chip->Render(stereo + i * 2, 1);
 		}
 		/* フレーム毎なので下の無音ウォッチドッグが PCM のみ基板も見る。MixAdd は全て素のフレームループなので等価。 */
-		if (pcm)
-			pcm->MixAdd(stereo + i * 2, 1, 256);
+		if (pcm) {
+			/* CPS1: YM2151 は fmgen フルスケール。OKI 1ch も 12bit×16 で 16bit 一杯なので
+			   gain 256 だとドラムで FM がクリップしてざらつく。
+			   MAME は YM 0.35 / OKI 0.30。hoot pcm_mix 0x3c を MixAdd に生で入れると
+			   （以前 /256 を外して溢れた）量子化と誤ゲインでノイズになるので使わない。
+			   96/256 ≈ 0.375 は 1ch ピークが MAME 0.30 付近、2ch 同時でも FM の頭が残る。 */
+			const int pcmGain = (hw_->board_ == CEMU_AC_BOARD_CPS1) ? 96 : 256;
+			pcm->MixAdd(stereo + i * 2, 1, pcmGain);
+		}
 		if (pcm2)
 			pcm2->MixAdd(stereo + i * 2, 1, 256);
 		if (hw_->board_ == CEMU_AC_BOARD_ALPHA68K2)

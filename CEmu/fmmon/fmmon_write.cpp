@@ -1,4 +1,4 @@
-#include <windows.h>
+﻿#include <windows.h>
 #include <stdio.h>
 #include <string.h>
 #include "fmmon_write.h"
@@ -95,7 +95,7 @@ void FmMonInitDump(SasamiFmMonDump* d)
 	if (!d) return;
 	memset(d, 0, sizeof(*d));
 	d->magic[0] = 'O'; d->magic[1] = 'P'; d->magic[2] = 'N'; d->magic[3] = 'A';
-	d->version = SASAMI_FMMON_VERSION_V6;
+	d->version = SASAMI_FMMON_VERSION_V7;
 	memset(d->keyMidi, 0xFF, sizeof(d->keyMidi));
 	memset(d->exMidi, 0xFF, sizeof(d->exMidi));
 	memset(d->ssgMidi, 0xFF, sizeof(d->ssgMidi));

@@ -57,6 +57,7 @@ public:
 		ram_[a] = v;
 		/* FMモニタへ RAM 書き込みをシャドウ。 */
 		FmMonShadowApplySegaPcmMem(a, v);
+		FmMonShadowSetCompanionRegs(ram_, 0x100u);
 
 		if (discrete_) {
 			/* MAME segapcm_discrete_device::map — これらだけがボイスレジスタ。

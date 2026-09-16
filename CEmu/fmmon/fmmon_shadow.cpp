@@ -1,4 +1,4 @@
-#include <windows.h>
+﻿#include <windows.h>
 #include <string.h>
 #include <stdio.h>
 #include <math.h>
@@ -31,8 +31,12 @@ static uint8_t s_adpcmPulse; /* Flush 区間の ADPCM-B execute（同一 0x80 �
 static uint8_t s_adpcmAPulse; /* YM2610 ADPCM-A bits 0-5（リズム行を使わない） */
 static uint8_t s_midiChOn[16], s_midiChNote[16], s_midiHit[16];
 static uint8_t s_pcmOn[SASAMI_FMMON_PCM_MAX], s_pcmNote[SASAMI_FMMON_PCM_MAX];
+static uint8_t s_pcmPan[SASAMI_FMMON_PCM_MAX]; /* MultiPCM: 4bit panpot (0=C) */
 static uint8_t s_pcmCount = 0;
 static uint8_t s_pcmHit[SASAMI_FMMON_PCM_MAX];
+static uint8_t s_mpcmSlot[2];
+static uint8_t s_mpcmReg[2];
+static uint8_t s_mpcmRegs[2][28][8];
 static uint32_t s_sr = 44100;
 static uint64_t s_cur = 0;
 static uint64_t s_lastWrite = 0;
@@ -47,6 +51,10 @@ static int s_keysOnly = 0;
 static unsigned s_keysProfile = 0;
 static int s_opmRegsValid = 0;
 static int s_ga20Seen = 0; /* OPM+GA20: regs live at dump+$100 */
+static uint8_t s_comp[0x100]; /* xxxx+yyyy の yyyy 圧縮 256B */
+static uint8_t s_compBits[32];
+static unsigned s_compN = 0;
+static int s_compSeen = 0;
 static int s_aySeen = 0;   /* OPM+AY (X1): AY shadow owns $00-$0F */
 static int s_arcRegsValid = 0;
 static int s_auxRegsValid = 0; /* PC/AT BEEP PIT / GameBlaster SAA / … */
@@ -188,6 +196,87 @@ static void MarkBit(unsigned addr)
 	s_written[addr >> 3] |= m;
 }
 
+static int IdentHasPlus(void)
+{
+	const char* p = strchr(s_identChip, '+');
+	return (p && p[1]) ? 1 : 0;
+}
+
+/* OPN/OPNA/OPL3/QSound/C352 は bank0+bank1 が xxxx。yyyy は bank2。 */
+static int PrimaryFillsBothBanks(void)
+{
+	if (s_opnaLayout >= 0) return 1;
+	if (s_oplMode >= 2) return 1;
+	if (s_keysProfile == SASAMI_FMMON_KEYS_QSOUND) return 1;
+	if (s_keysProfile == SASAMI_FMMON_KEYS_C352) return 1;
+	return 0;
+}
+
+static void CompMark(unsigned idx, uint8_t data)
+{
+	idx &= 0xFFu;
+	s_comp[idx] = data;
+	s_compBits[idx >> 3] |= (uint8_t)(1u << (idx & 7));
+	if (s_compN < idx + 1u) s_compN = idx + 1u;
+	s_compSeen = 1;
+	s_dirty = 1;
+}
+
+static void CompCopy(const uint8_t* data, unsigned n)
+{
+	if (!data || !n) return;
+	if (n > 0x100u) n = 0x100u;
+	memcpy(s_comp, data, n);
+	if (n < 0x100u)
+		memset(s_comp + n, 0, 0x100u - n);
+	memset(s_compBits, 0, sizeof(s_compBits));
+	for (unsigned i = 0; i < n; i++)
+		s_compBits[i >> 3] |= (uint8_t)(1u << (i & 7));
+	s_compN = n;
+	s_compSeen = 1;
+	s_dirty = 1;
+}
+
+static unsigned CompRows(void)
+{
+	if (!s_compSeen && !IdentHasPlus()) return 0;
+	unsigned n = s_compN ? s_compN : 1u;
+	unsigned rows = (n + 15u) / 16u;
+	if (rows < 1u) rows = 1u;
+	if (rows > 16u) rows = 16u;
+	return rows;
+}
+
+static void FillCompanionDump(SasamiFmMonDump* d)
+{
+	if (!d) return;
+	if (s_msxDevMask) return;
+	if (!s_compSeen && !IdentHasPlus()) return;
+	/* Dual MultiPCM: pan は reg0 上位ニブル。YM3438 占有の $1E0 には載せない */
+	if (s_keysProfile == SASAMI_FMMON_KEYS_MULTIPCM && IdentHasPlus()) {
+		for (int i = 0; i < SASAMI_FMMON_PCM_MAX; i++) {
+			const unsigned idx = ((unsigned)(i / 16) * 128u
+				+ (unsigned)(i % 16) * 8u) & 0xFFu;
+			s_comp[idx] = (uint8_t)((s_comp[idx] & 0x0Fu)
+				| ((s_pcmPan[i] & 0x0Fu) << 4));
+			s_compBits[idx >> 3] |= (uint8_t)(1u << (idx & 7));
+			if (s_compN < idx + 1u)
+				s_compN = idx + 1u;
+		}
+		s_compSeen = 1;
+	}
+	memcpy(d->bank2, s_comp, 0x100);
+	memcpy(d->bank2Bits, s_compBits, sizeof(d->bank2Bits));
+	d->bank2Rows = (uint8_t)CompRows();
+	d->version = SASAMI_FMMON_VERSION_V7;
+	/* OPM / OPL2 / 単発 PCM: bank1 が空なので圧縮 yyyy を $100 にも載せる */
+	if (!PrimaryFillsBothBanks()) {
+		memcpy(d->regs + 0x100, s_comp, 0x100);
+		for (int i = 0; i < 32; i++)
+			d->regWriteBits[32 + i] = (uint8_t)(d->regWriteBits[32 + i] | s_compBits[i]);
+	}
+}
+
 void FmMonShadowHold(int on)
 {
 	if (on)
@@ -230,7 +319,11 @@ void FmMonShadowReset(void)
 	memset(s_midiHit, 0, sizeof(s_midiHit));
 	memset(s_pcmOn, 0, sizeof(s_pcmOn));
 	memset(s_pcmNote, 0xFF, sizeof(s_pcmNote));
+	memset(s_pcmPan, 0, sizeof(s_pcmPan));
 	memset(s_pcmHit, 0, sizeof(s_pcmHit));
+	memset(s_mpcmSlot, 0, sizeof(s_mpcmSlot));
+	memset(s_mpcmReg, 0, sizeof(s_mpcmReg));
+	memset(s_mpcmRegs, 0, sizeof(s_mpcmRegs));
 	s_pcmCount = 0;
 	s_rhyKey = s_rhyPulse = 0;
 	s_cur = 0;
@@ -242,6 +335,10 @@ void FmMonShadowReset(void)
 	s_keysProfile = 0;
 	s_opmRegsValid = 0;
 	s_ga20Seen = 0;
+	memset(s_comp, 0, sizeof(s_comp));
+	memset(s_compBits, 0, sizeof(s_compBits));
+	s_compN = 0;
+	s_compSeen = 0;
 	s_aySeen = 0;
 	s_arcRegsValid = 0;
 	s_auxRegsValid = 0;
@@ -706,6 +803,7 @@ void FmMonShadowPcmNote(int ch, int midiNote, int on)
 	   s_opnaLayout >= 0 (YM2203+SegaPCM のようなハイブリッド) は FM 行を残す。
 	   ライブ YM2151 も同じ: OKI/YMZ パルスで OPM 鍵盤を落とさない。 */
 	if (s_opnaLayout < 0 && !s_opmRegsValid && (s_keysProfile == SASAMI_FMMON_KEYS_RF5C
+		|| s_keysProfile == SASAMI_FMMON_KEYS_MULTIPCM
 		|| s_keysProfile == SASAMI_FMMON_KEYS_C352
 		|| s_keysProfile == SASAMI_FMMON_KEYS_QSOUND
 		|| s_keysProfile == SASAMI_FMMON_KEYS_SEGAPCM
@@ -999,6 +1097,13 @@ void FmMonShadowFlush(int force)
 				d.pcmCount = s_pcmCount;
 			else if (s_opnaLayout == 0 && d.pcmCount < 8)
 				d.pcmCount = 8;
+		} else if (s_keysProfile == SASAMI_FMMON_KEYS_MULTIPCM) {
+			/* YM3438 が regs[] を占有するので、MultiPCM パンは companion へ。 */
+			d.pad6[1] = (uint8_t)SASAMI_FMMON_KEYS_MULTIPCM;
+			if (!IdentHasPlus()) {
+				for (int i = 0; i < SASAMI_FMMON_PCM_MAX; i++)
+					d.regs[0x1E0 + i] = s_pcmPan[i];
+			}
 		}
 	}
 	if (s_opnaLayout == 2) {
@@ -1009,6 +1114,7 @@ void FmMonShadowFlush(int force)
 	}
 	if (d.dumpFlags & SASAMI_FMMON_FLAG_ADPCM)
 		d.pcmNote[SASAMI_FMMON_ADPCM_HIT_SLOT] = s_adpcmHit;
+	FillCompanionDump(&d);
 	FillIdentityTitle(&d, extras);
 	s_rhyPulse = 0;
 	s_adpcmPulse = 0;
@@ -1042,6 +1148,7 @@ void FmMonShadowFlushKeysOnly(int force)
 	case SASAMI_FMMON_KEYS_GSF: pcmN = 4; break;
 	case SASAMI_FMMON_KEYS_MDX: pcmN = 8; break;
 	case SASAMI_FMMON_KEYS_RF5C: pcmN = 8; break;
+	case SASAMI_FMMON_KEYS_MULTIPCM: pcmN = 32; break;
 	case SASAMI_FMMON_KEYS_OKI: pcmN = 4; break;
 	case SASAMI_FMMON_KEYS_QSOUND: pcmN = 16; break;
 	case SASAMI_FMMON_KEYS_C352: pcmN = 32; break;
@@ -1067,15 +1174,14 @@ void FmMonShadowFlushKeysOnly(int force)
 		/* OPM ×8 → FM1-6 + EX1-2 (UI labels OPM1-8). Regs when snapshotted. */
 		if (s_opmRegsValid) {
 			d.dumpFlags = SASAMI_FMMON_FLAG_OPM;
-			/* Include bank1 when GA20 (or other hybrid PCM) shadowed at $100+. */
-			memcpy(d.regs, s_regs, s_ga20Seen ? 0x200 : 256);
+			memcpy(d.regs, s_regs, 256);
 			memcpy(d.regWriteBits, s_written, sizeof(d.regWriteBits));
 			d.pad6[2] = (uint8_t)(SASAMI_FMMON_VIEW_KEYS
 				| SASAMI_FMMON_VIEW_REGS | SASAMI_FMMON_VIEW_PANELS);
 		} else {
 			d.dumpFlags = (uint8_t)(SASAMI_FMMON_FLAG_KEYSONLY | SASAMI_FMMON_FLAG_OPM);
 			d.pad6[2] = SASAMI_FMMON_VIEW_KEYS;
-			if (s_ga20Seen) {
+			if (s_ga20Seen && !s_compSeen) {
 				memcpy(d.regs + 0x100, s_regs + 0x100, 0x20);
 				d.pad6[2] = (uint8_t)(SASAMI_FMMON_VIEW_KEYS
 					| SASAMI_FMMON_VIEW_REGS | SASAMI_FMMON_VIEW_PANELS);
@@ -1111,6 +1217,9 @@ void FmMonShadowFlushKeysOnly(int force)
 		}
 		if (anyPdx || s_pcmCount > 0)
 			d.pcmCount = (uint8_t)pcmCap;
+		if (s_compSeen || IdentHasPlus())
+			d.pad6[2] = (uint8_t)(d.pad6[2]
+				| SASAMI_FMMON_VIEW_REGS | SASAMI_FMMON_VIEW_PANELS);
 	} else {
 		d.dumpFlags = SASAMI_FMMON_FLAG_KEYSONLY;
 		const int softRegs = (s_auxRegsValid || (arcade && s_arcRegsValid)) ? 1 : 0;
@@ -1130,6 +1239,10 @@ void FmMonShadowFlushKeysOnly(int force)
 			}
 		}
 		d.pcmCount = (uint8_t)pcmN;
+		if (prof == SASAMI_FMMON_KEYS_MULTIPCM) {
+			for (int i = 0; i < SASAMI_FMMON_PCM_MAX; i++)
+				d.regs[0x1E0 + i] = s_pcmPan[i];
+		}
 		/* Mirror first 6 MIDI ch into FM key slots so OPNA-shell panels
 		   (PC/AT BEEP/CMS) light up when VIEW_PANELS is set. */
 		if (s_auxRegsValid && !arcade) {
@@ -1162,6 +1275,7 @@ void FmMonShadowFlushKeysOnly(int force)
 	}
 
 	FmMonKeepProbeTags();
+	FillCompanionDump(&d);
 	FillIdentityTitle(&d, "");
 	s_dirty = 0;
 	s_flushUrgent = 0;
@@ -1196,6 +1310,11 @@ void FmMonShadowWriteAyReg(unsigned reg, unsigned data)
 	data &= 0xFFu;
 	s_aySeen = 1;
 	FmMonShadowWriteReg(reg, data);
+	EnsureCs();
+	EnterCriticalSection(&s_cs);
+	if (IdentHasPlus() && !s_msxDevMask)
+		CompMark(reg, (uint8_t)data);
+	LeaveCriticalSection(&s_cs);
 }
 
 void FmMonShadowSetMsxDevices(unsigned deviceMask)
@@ -1219,18 +1338,24 @@ void FmMonShadowApplyOpllRegs(const unsigned char* reg64)
 	s_keysOnly = 0;
 	/* Keep MSX device mask alive across incidental Reset/profile changes so
 	   OPLL key dumps stay on the MSX keyboard path (quinpl_msx). */
-	if (!(s_msxDevMask & SASAMI_FMMON_DEV_OPLL)) {
+	if (!(s_msxDevMask & SASAMI_FMMON_DEV_OPLL)
+		&& !(IdentHasPlus() && s_opnaLayout >= 0)) {
 		s_msxDevMask |= (unsigned)(SASAMI_FMMON_DEV_PSG | SASAMI_FMMON_DEV_OPLL);
 		s_dirty = 1;
 	}
 	if (s_ssgClock == 0 || s_ssgClock == 7987200u)
 		s_ssgClock = 3579545u;
 	int changed = 0;
+	if (IdentHasPlus() && s_opnaLayout >= 0 && !s_msxDevMask) {
+		CompCopy(reg64, 64);
+		changed = 1;
+	} else {
 	for (int i = 0; i < 64; i++) {
 		if (s_regs[0x40 + i] == reg64[i]) continue;
 		s_regs[0x40 + i] = reg64[i];
 		MarkBit(0x40 + i);
 		changed = 1;
+	}
 	}
 	const int rhythm = (reg64[0x0e] & 0x20) != 0;
 	for (int ch = 0; ch < 9; ch++) {
@@ -1642,6 +1767,11 @@ void FmMonShadowWriteOplReg(unsigned addr, unsigned data)
 	}
 	addr &= 0x1FF;
 	data &= 0xFF;
+	if (IdentHasPlus() && s_opnaLayout >= 0 && !s_msxDevMask) {
+		CompMark(addr & 0xFFu, (uint8_t)data);
+		LeaveCriticalSection(&s_cs);
+		return;
+	}
 	const unsigned r = addr & 0xFF;
 	{
 		const uint8_t already = (uint8_t)(s_written[addr >> 3] & (uint8_t)(1u << (addr & 7)));
@@ -1693,6 +1823,7 @@ static int ArcIsProfile(unsigned profile)
 {
 	return (profile == SASAMI_FMMON_KEYS_QSOUND
 		|| profile == SASAMI_FMMON_KEYS_RF5C
+		|| profile == SASAMI_FMMON_KEYS_MULTIPCM
 		|| profile == SASAMI_FMMON_KEYS_C352
 		|| profile == SASAMI_FMMON_KEYS_SEGAPCM
 		|| profile == SASAMI_FMMON_KEYS_OKI) ? 1 : 0;
@@ -1794,7 +1925,10 @@ void FmMonShadowApplyRf5cReg(unsigned ofs, unsigned data8)
 	ArcEnterKeys(SASAMI_FMMON_KEYS_RF5C, 8);
 	ofs &= 0x7Fu;
 	data8 &= 0xFFu;
-	ArcMarkReg(ofs, (uint8_t)data8);
+	if (IdentHasPlus())
+		CompMark(ofs, (uint8_t)data8);
+	else
+		ArcMarkReg(ofs, (uint8_t)data8);
 	if (ofs == 0x07) {
 		/* low nibble = channel when bit6 clear; also stores enable bank */
 		if (!(data8 & 0x40))
@@ -1838,25 +1972,39 @@ void FmMonShadowApplyRf5cReg(unsigned ofs, unsigned data8)
 	LeaveCriticalSection(&s_cs);
 }
 
-/* Dual MultiPCM (daytona): chip0 → PCM rows 0-15, chip1 → 16-31. */
+/* Dual MultiPCM (daytona): chip0 → PCM rows 0-15, chip1 → 16-31.
+   ホストのスロット選択は 0-6/8-14/16-22/24-30（7 おきに穴）。 */
+static const int kMultiPcmVal2Chan[32] = {
+	0, 1, 2, 3, 4, 5, 6, -1,
+	7, 8, 9, 10, 11, 12, 13, -1,
+	14, 15, 16, 17, 18, 19, 20, -1,
+	21, 22, 23, 24, 25, 26, 27, -1
+};
+
+static int MultiPcmPcmCh(int chipId, int slot)
+{
+	if (chipId < 0 || chipId > 1 || slot < 0 || slot >= 28) return -1;
+	const int slotRow = (slot < 16) ? slot : (slot & 15);
+	return chipId * 16 + slotRow;
+}
+
 void FmMonShadowApplyMultiPcm(int chipId, unsigned port, unsigned data8)
 {
-	static uint8_t s_slot[2];
-	static uint8_t s_reg[2];
-	static uint8_t s_regs[2][28][8];
 	if (chipId < 0 || chipId > 1) return;
 	EnsureCs();
 	EnterCriticalSection(&s_cs);
-	ArcEnterKeys(SASAMI_FMMON_KEYS_RF5C, 32);
+	ArcEnterKeys(SASAMI_FMMON_KEYS_MULTIPCM, 32);
 	port &= 3u;
 	data8 &= 0xFFu;
 	if (port == 1) {
-		s_slot[chipId] = (uint8_t)(data8 & 0x1fu);
+		const int mapped = kMultiPcmVal2Chan[data8 & 0x1fu];
+		if (mapped >= 0)
+			s_mpcmSlot[chipId] = (uint8_t)mapped;
 		LeaveCriticalSection(&s_cs);
 		return;
 	}
 	if (port == 2) {
-		s_reg[chipId] = (uint8_t)((data8 > 7u) ? 7u : data8);
+		s_mpcmReg[chipId] = (uint8_t)((data8 > 7u) ? 7u : data8);
 		LeaveCriticalSection(&s_cs);
 		return;
 	}
@@ -1864,26 +2012,39 @@ void FmMonShadowApplyMultiPcm(int chipId, unsigned port, unsigned data8)
 		LeaveCriticalSection(&s_cs);
 		return;
 	}
-	const int slot = (int)s_slot[chipId];
-	const int reg = (int)s_reg[chipId];
-	if (slot >= 28) {
+	const int slot = (int)s_mpcmSlot[chipId];
+	const int reg = (int)s_mpcmReg[chipId];
+	if (slot < 0 || slot >= 28) {
 		LeaveCriticalSection(&s_cs);
 		return;
 	}
-	s_regs[chipId][slot][reg] = (uint8_t)data8;
+	s_mpcmRegs[chipId][slot][reg] = (uint8_t)data8;
+	if (IdentHasPlus()) {
+		const int slotRow = (slot < 16) ? slot : (slot & 15);
+		CompMark(((unsigned)chipId * 128u + (unsigned)slotRow * 8u + (unsigned)reg) & 0xFFu,
+			(uint8_t)data8);
+	}
+	const int pcmCh = MultiPcmPcmCh(chipId, slot);
+	if (pcmCh >= 0 && pcmCh < SASAMI_FMMON_PCM_MAX) {
+		/* reg0 上位ニブル = パンポット。0=中央。regs[] は YM3438 占有なので別保存。 */
+		const uint8_t pan4 = (uint8_t)((s_mpcmRegs[chipId][slot][0] >> 4) & 0x0fu);
+		if (s_pcmPan[pcmCh] != pan4) {
+			s_pcmPan[pcmCh] = pan4;
+			s_dirty = 1;
+		}
+	}
 	if (reg == 4) {
 		/* Prefer low slot indices (songs usually use 0..15); wrap high slots. */
-		const int slotRow = (slot < 16) ? slot : (slot & 15);
-		const int pcmCh = chipId * 16 + slotRow;
 		const int on = (data8 & 0x80) != 0;
 		/* Octave in reg3[7:4], coarse pitch in reg2/3 — map to a rough MIDI. */
-		const unsigned oct = (s_regs[chipId][slot][3] >> 4) & 0x0fu;
-		const unsigned fns = ((unsigned)(s_regs[chipId][slot][3] & 0x0f) << 6)
-			| ((unsigned)s_regs[chipId][slot][2] >> 2);
+		const unsigned oct = (s_mpcmRegs[chipId][slot][3] >> 4) & 0x0fu;
+		const unsigned fns = ((unsigned)(s_mpcmRegs[chipId][slot][3] & 0x0f) << 6)
+			| ((unsigned)s_mpcmRegs[chipId][slot][2] >> 2);
 		int mid = 48 + (int)oct * 12 + (int)(fns / 85u);
 		if (mid < 12) mid = 12;
 		if (mid > 108) mid = 108;
-		ArcSetPcm(pcmCh, on, mid);
+		if (pcmCh >= 0)
+			ArcSetPcm(pcmCh, on, mid);
 	}
 	LeaveCriticalSection(&s_cs);
 }
@@ -1915,7 +2076,12 @@ void FmMonShadowApplyC352Reg(unsigned ofs, unsigned data16)
 	ArcEnterKeys(SASAMI_FMMON_KEYS_C352, 32);
 	ofs &= 0xFFFFu;
 	data16 &= 0xFFFFu;
-	ArcMarkReg16LoHi((ofs & 0xFFu) * 2u, data16);
+	if (IdentHasPlus()) {
+		const unsigned packed = ((ofs & 0x7Fu) * 2u) & 0xFFu;
+		CompMark(packed, (uint8_t)(data16 & 0xFFu));
+		CompMark((packed + 1u) & 0xFFu, (uint8_t)((data16 >> 8) & 0xFFu));
+	} else
+		ArcMarkReg16LoHi((ofs & 0xFFu) * 2u, data16);
 	/* Voice registers: bank of 8 words per voice. All 32 voices. */
 	const unsigned vbase = ofs & ~7u;
 	const int ch = (int)(vbase / 8u);
@@ -1952,7 +2118,10 @@ void FmMonShadowApplySegaPcmMem(unsigned addr, unsigned data8)
 
 	addr &= 0xFFu;
 	data8 &= 0xFFu;
-	ArcMarkReg(addr, (uint8_t)data8);
+	if (IdentHasPlus())
+		CompMark(addr, (uint8_t)data8);
+	else
+		ArcMarkReg(addr, (uint8_t)data8);
 
 	int ch = -1;
 	int isDiscrete = 0;
@@ -2025,8 +2194,10 @@ void FmMonShadowApplyK054539Reg(unsigned ofs, unsigned data8)
 	ArcEnterKeys(SASAMI_FMMON_KEYS_RF5C, 8);
 	ofs &= 0x3FFu;
 	data8 &= 0xFFu;
-	/* Pack into 512-byte shadow window (regs panel). */
-	ArcMarkReg(ofs & 0x1FFu, (uint8_t)data8);
+	if (IdentHasPlus())
+		CompMark(ofs & 0xFFu, (uint8_t)data8);
+	else
+		ArcMarkReg(ofs & 0x1FFu, (uint8_t)data8);
 	LeaveCriticalSection(&s_cs);
 }
 
@@ -2043,31 +2214,32 @@ void FmMonShadowApplyOki6295(unsigned data8)
 	else if (s_pcmCount < 4)
 		s_pcmCount = 4;
 	data8 &= 0xFFu;
+	if (IdentHasPlus()) {
+		CompMark(0, (uint8_t)data8);
+		if (s_okiCmd) {
+			CompMark(1, (uint8_t)data8);
+			s_okiCmd = 0;
+		} else if (data8 & 0x80) {
+			s_okiCmd = 1;
+			s_okiChBits = data8;
+			CompMark(1, (uint8_t)s_okiChBits);
+		} else {
+			CompMark(1, (uint8_t)data8);
+		}
+		LeaveCriticalSection(&s_cs);
+		return;
+	}
 	ArcMarkReg(0, (uint8_t)data8);
 	if (s_okiCmd) {
-		/* Second byte: channel mask in low nibble for start */
-		const unsigned mask = data8 & 0x0Fu;
+		/* 2 バイト目: 上位 4bit がボイス（bit4=ch0）。鍵盤はチップ Play/Stop が出す。 */
 		ArcMarkReg(1, (uint8_t)data8);
-		for (int ch = 0; ch < 4; ch++) {
-			if (mask & (1u << ch)) {
-				ArcSetPcm(ch, 1, 60 + ch * 3);
-				ArcMarkReg(0x10u + (unsigned)ch, 1);
-			}
-		}
 		s_okiCmd = 0;
 	} else if (data8 & 0x80) {
-		/* Start command — next write has channel bits */
 		s_okiCmd = 1;
 		s_okiChBits = data8;
 		ArcMarkReg(1, (uint8_t)s_okiChBits);
 	} else {
-		/* Stop: bits select channels to silence */
-		for (int ch = 0; ch < 4; ch++) {
-			if (data8 & (1u << ch)) {
-				ArcSetPcm(ch, 0, -1);
-				ArcMarkReg(0x10u + (unsigned)ch, 0);
-			}
-		}
+		ArcMarkReg(1, (uint8_t)data8);
 	}
 	LeaveCriticalSection(&s_cs);
 }
@@ -2090,7 +2262,10 @@ void FmMonShadowApplyGa20Reg(unsigned ofs, unsigned data8)
 	data8 &= 0xFFu;
 	s_ga20Seen = 1;
 	s_arcRegsValid = 1;
-	ArcMarkReg(0x100u + ofs, (uint8_t)data8);
+	if (IdentHasPlus())
+		CompMark(ofs, (uint8_t)data8);
+	else
+		ArcMarkReg(0x100u + ofs, (uint8_t)data8);
 
 	const int ch = (int)(ofs >> 3);
 	const int r = (int)(ofs & 7);
@@ -2098,9 +2273,10 @@ void FmMonShadowApplyGa20Reg(unsigned ofs, unsigned data8)
 		LeaveCriticalSection(&s_cs);
 		return;
 	}
-	const uint8_t ctrl = s_regs[0x100u + (unsigned)(ch << 3) + 6u];
-	const unsigned rate = s_regs[0x100u + (unsigned)(ch << 3) + 4u];
-	const unsigned vol = s_regs[0x100u + (unsigned)(ch << 3) + 5u];
+	const uint8_t* gbase = IdentHasPlus() ? s_comp : (s_regs + 0x100);
+	const uint8_t ctrl = gbase[(unsigned)(ch << 3) + 6u];
+	const unsigned rate = gbase[(unsigned)(ch << 3) + 4u];
+	const unsigned vol = gbase[(unsigned)(ch << 3) + 5u];
 	const int on = (ctrl & 2) != 0;
 	/* Refresh MIDI on key/rate/vol so the keyboard shows notes, not blank. */
 	if (r == 4 || r == 5 || r == 6 || on) {
@@ -2113,5 +2289,18 @@ void FmMonShadowApplyGa20Reg(unsigned ofs, unsigned data8)
 			mid = 60 + (int)(vol & 15);
 		ArcSetPcm(ch, on, on ? mid : -1);
 	}
+	LeaveCriticalSection(&s_cs);
+}
+
+void FmMonShadowSetCompanionRegs(const uint8_t* data, unsigned nbytes)
+{
+	if (!data || !nbytes) return;
+	EnsureCs();
+	EnterCriticalSection(&s_cs);
+	if (s_msxDevMask || !IdentHasPlus()) {
+		LeaveCriticalSection(&s_cs);
+		return;
+	}
+	CompCopy(data, nbytes);
 	LeaveCriticalSection(&s_cs);
 }

@@ -48,7 +48,7 @@ static const FmMonChipInfo kFmMonChips[] = {
 	{ CEMU_CHIP_C140,     "C140",     24, -1, 0u,       SASAMI_FMMON_KEYS_C352,    1 },
 	{ CEMU_CHIP_C30,      "CUS30",     8, -1, 0u,       SASAMI_FMMON_KEYS_C352,    1 },
 	{ CEMU_CHIP_SCSP,     "SCSP",     32, -1, 0u,       SASAMI_FMMON_KEYS_RF5C,    1 },
-	{ CEMU_CHIP_MULTIPCM, "MultiPCM", 28, -1, 0u,       SASAMI_FMMON_KEYS_RF5C,    1 },
+	{ CEMU_CHIP_MULTIPCM, "MultiPCM", 28, -1, 0u,       SASAMI_FMMON_KEYS_MULTIPCM, 1 },
 	{ CEMU_CHIP_SEGAPCM,  "SegaPCM",  16, -1, 0u,       SASAMI_FMMON_KEYS_SEGAPCM, 1 },
 	{ CEMU_CHIP_RF5C400,  "RF5C400",  32, -1, 0u,       SASAMI_FMMON_KEYS_RF5C,    1 },
 	{ CEMU_CHIP_RF5C68,   "RF5C68",    8, -1, 0u,       SASAMI_FMMON_KEYS_RF5C,    1 },
@@ -273,7 +273,8 @@ void CEmuFmMonBindFromGe(const CEmuGameEntry* ge)
 	} else if (_strnicmp(sub, "cps1", 4) == 0) {
 		strncpy_s(chip, "OPM+OKIx4", _TRUNCATE);
 		layout = -1;
-		FmMonShadowSetKeysProfile(SASAMI_FMMON_KEYS_OKI);
+		seedOpm = 1;
+		FmMonShadowSetKeysProfile(SASAMI_FMMON_KEYS_MDX);
 	} else if (HasChip(ge, CEMU_CHIP_K053260) || _stricmp(sub, "053260") == 0) {
 		strncpy_s(chip, "K053260x4", _TRUNCATE);
 		layout = -1;
@@ -334,6 +335,7 @@ void CEmuFmMonBindFromGe(const CEmuGameEntry* ge)
 		} else if (HasChip(ge, CEMU_CHIP_OPM)) {
 			strncpy_s(chip, "OPM+SegaPCM", _TRUNCATE);
 			layout = -1;
+			seedOpm = 1;
 			FmMonShadowSetKeysProfile(SASAMI_FMMON_KEYS_MDX);
 		} else {
 			strncpy_s(chip, "SegaPCMx16", _TRUNCATE);
@@ -345,7 +347,7 @@ void CEmuFmMonBindFromGe(const CEmuGameEntry* ge)
 		   YM3438 (OPN2: FM×6、SSG 無し) + MultiPCM 双発。 */
 		strncpy_s(chip, "YM3438+MultiPCMx2", _TRUNCATE);
 		layout = 3; /* OPN2 FM×6 — OPNA [10ch]+SSG ではない */
-		FmMonShadowSetKeysProfile(SASAMI_FMMON_KEYS_RF5C);
+		FmMonShadowSetKeysProfile(SASAMI_FMMON_KEYS_MULTIPCM);
 	} else if (_strnicmp(sub, "model2", 6) == 0 || _strnicmp(sub, "model3", 6) == 0) {
 		strncpy_s(chip, "SCSPx32", _TRUNCATE);
 		layout = -1;

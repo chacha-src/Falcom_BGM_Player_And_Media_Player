@@ -559,6 +559,19 @@ void CHardX68k::AdpcmStartBlock(unsigned addr, unsigned bytes)
 	const int mid = FmMonShadowPitchRateToMidi(
 		(unsigned)(((uint64_t)rate * 4096u + 7800u) / 15600u));
 	FmMonShadowPcmNote(0, (mid >= 0) ? mid : 60, 1);
+	{
+		uint8_t snap[8];
+		memset(snap, 0, sizeof(snap));
+		snap[0] = 1;
+		snap[1] = (uint8_t)(rate >> 8);
+		snap[2] = (uint8_t)rate;
+		snap[3] = (uint8_t)(adpcmAddr_ >> 16);
+		snap[4] = (uint8_t)(adpcmAddr_ >> 8);
+		snap[5] = (uint8_t)adpcmAddr_;
+		snap[6] = (uint8_t)(adpcmSize_ >> 8);
+		snap[7] = (uint8_t)adpcmSize_;
+		FmMonShadowSetCompanionRegs(snap, sizeof(snap));
+	}
 }
 
 /* 配列チェインの次 6 バイト {address, count} 記述子を取る。デコーダ状態（signal/step）はブロックを跨ぐ: チェインはチップへの 1 本の連続 ADPCM ストリーム。 */

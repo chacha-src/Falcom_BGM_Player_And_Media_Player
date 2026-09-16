@@ -62,6 +62,7 @@ public:
 		reg_[o] = v;
 		/* FMモニタへK054539レジスタをシャドウ。 */
 		FmMonShadowApplyK054539Reg(o, v);
+		FmMonShadowSetCompanionRegs(reg_, 0x100u);
 		if (o == 0x214) {
 			for (int c = 0; c < kK054539Channels; c++)
 				if (v & (1 << c)) KeyOn(c);

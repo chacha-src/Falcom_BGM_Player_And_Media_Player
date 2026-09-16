@@ -37,6 +37,11 @@ struct SasamiFmMonDump {
 	uint8_t ssgMidi[3];
 	uint8_t dumpFlags;        /* bit0=keys-only bit1=PPZ bit2=FM3EX bit3=MSX bit4=FMP bit5=OPM */
 	uint8_t pad6[3];          /* [0]=MSX deviceMask  [1]=chip profile  [2]=VIEW_* | CLOCK_DUMP */
+	/* v7: xxxx+yyyy の yyyy。xxxx が bank0/1 を占有するときはここ（圧縮 256B） */
+	uint8_t bank2[0x100];
+	uint8_t bank2Bits[32];
+	uint8_t bank2Rows;        /* 0=なし  1..16 hex 行 */
+	uint8_t pad7[3];
 };
 
 /* リングヘッダのみ（slot 全体 ~320KB をスタックに置かないこと） */
@@ -59,6 +64,7 @@ struct SasamiFmMonRing {
 
 enum { SASAMI_FMMON_VERSION = 5 };
 enum { SASAMI_FMMON_VERSION_V6 = 6 };
+enum { SASAMI_FMMON_VERSION_V7 = 7 };
 enum { SASAMI_FMMON_RING_VERSION = 1 };
 enum {
 	SASAMI_FMMON_FLAG_KEYSONLY = 1,
@@ -98,7 +104,8 @@ enum {
 	SASAMI_FMMON_KEYS_RF5C = 12,    /* RF5C68/164 ×8 */
 	SASAMI_FMMON_KEYS_C352 = 13,    /* Namco C352 ×32 */
 	SASAMI_FMMON_KEYS_SEGAPCM = 14, /* SegaPCM ×16 */
-	SASAMI_FMMON_KEYS_OKI = 15      /* OKIM6295/6258 ×4 */
+	SASAMI_FMMON_KEYS_OKI = 15,     /* OKIM6295/6258 ×4 */
+	SASAMI_FMMON_KEYS_MULTIPCM = 16 /* YMW-258 MultiPCM ×32 (daytona dual) */
 };
 /* pad6[2]: what this dump actually provides (grow keys → regs → panels) */
 enum {
@@ -119,7 +126,7 @@ inline bool SasamiFmMonDumpClock(const SasamiFmMonDump& d)
 inline bool SasamiFmMonMagicOk(const SasamiFmMonDump& d)
 {
 	return d.magic[0] == 'O' && d.magic[1] == 'P' && d.magic[2] == 'N' && d.magic[3] == 'A'
-		&& d.version >= 2 && d.version <= 6;
+		&& d.version >= 2 && d.version <= 7;
 }
 inline bool SasamiFmMonRingMagicOk(const SasamiFmMonRingHdr& r)
 {

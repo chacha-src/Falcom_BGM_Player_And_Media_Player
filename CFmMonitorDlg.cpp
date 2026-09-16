@@ -304,14 +304,18 @@ static HANDLE FmOpenRingRd()
 }
 
 /* PCM_MAX 16→32 で dumpFlags 以降が 32 バイト後ろへ。旧 KPI/SASAMI は 16ch のまま書く */
-static const DWORD kFmDumpSize32 = (DWORD)sizeof(SasamiFmMonDump);
-static const DWORD kFmDumpSize16 = (DWORD)sizeof(SasamiFmMonDump) - 32u;
+static const DWORD kFmDumpSizeV7 = (DWORD)sizeof(SasamiFmMonDump);
+static const DWORD kFmDumpSizeV6 = (DWORD)offsetof(SasamiFmMonDump, bank2);
+static const DWORD kFmDumpSize32 = kFmDumpSizeV6;
+static const DWORD kFmDumpSize16 = kFmDumpSizeV6 - 32u;
 
 /* バージョンと PCM16 互換を見て、dump の最低バイト数を決める */
 static DWORD FmDumpNeedBytes(uint32_t version, int pcm16)
 {
 	DWORD need = (DWORD)offsetof(SasamiFmMonDump, regWriteBits);
-	if (version >= 6)
+	if (version >= 7)
+		need = (DWORD)offsetof(SasamiFmMonDump, pad7);
+	else if (version >= 6)
 		need = (DWORD)offsetof(SasamiFmMonDump, dumpFlags) + 1;
 	else if (version >= 5)
 		need = (DWORD)offsetof(SasamiFmMonDump, keyOnEx);
@@ -363,25 +367,27 @@ static void FmNormalizeDump(SasamiFmMonDump* d, DWORD rd)
 /* ring ファイル長からスロット 1 個のバイト数を推定する */
 static size_t FmDumpSlotSize(HANDLE h)
 {
-	const size_t z32 = sizeof(SasamiFmMonDump);
-	const size_t z16 = z32 - 32;
+	const size_t z7 = sizeof(SasamiFmMonDump);
+	const size_t z6 = offsetof(SasamiFmMonDump, bank2);
+	const size_t z16 = (z6 > 32) ? (z6 - 32) : z6;
 	LARGE_INTEGER sz;
 	sz.QuadPart = 0;
-	if (!h || h == INVALID_HANDLE_VALUE || !GetFileSizeEx(h, &sz))
-		return z32;
+	if (h == NULL || h == INVALID_HANDLE_VALUE || !GetFileSizeEx(h, &sz))
+		return z7;
 	ULONGLONG body = (ULONGLONG)sz.QuadPart;
 	if (body <= sizeof(SasamiFmMonRingHdr))
-		return z32;
+		return z7;
 	body -= sizeof(SasamiFmMonRingHdr);
-	if (z16 && (body % z16) == 0
-		&& (body / z16) == (ULONGLONG)SASAMI_FMMON_RING)
-		return z16;
-	if ((body % z32) == 0
-		&& (body / z32) == (ULONGLONG)SASAMI_FMMON_RING)
-		return z32;
-	if (z16 && (body % z16) == 0)
-		return z16;
-	return z32;
+	auto exact = [&](size_t z) -> int {
+		return (z && (body % z) == 0
+			&& (body / z) == (ULONGLONG)SASAMI_FMMON_RING) ? 1 : 0;
+	};
+	if (exact(z7)) return z7;
+	if (exact(z6)) return z6;
+	if (exact(z16)) return z16;
+	if (z16 && (body % z16) == 0) return z16;
+	if (z6 && (body % z6) == 0) return z6;
+	return z7;
 }
 
 /* ring の idx 番スロットを 1 枚読む */
@@ -486,6 +492,168 @@ static int FmRegWrote(const SasamiFmMonDump& d, int i)
 	if (i < 0 || i >= 0x200) return 0;
 	if (d.version < 5) return 1;
 	return (d.regWriteBits[i >> 3] & (uint8_t)(1u << (i & 7))) ? 1 : 0;
+}
+
+static int FmBank2Wrote(const SasamiFmMonDump& d, int i)
+{
+	if (d.version < 7 || i < 0 || i >= 0x100) return 0;
+	return (d.bank2Bits[i >> 3] & (uint8_t)(1u << (i & 7))) ? 1 : 0;
+}
+
+/* title "Capcom  OPM+OKIx4" → yyyy。YM2610+ADPCM-A のような同一チップ付加は無視 */
+static int FmChipIsOpnFamily(const char* chip)
+{
+	if (!chip || !chip[0]) return 0;
+	if (strstr(chip, "YM2610") || strstr(chip, "YM2612") || strstr(chip, "YM3438")
+		|| strstr(chip, "YM2203") || strstr(chip, "OPNA") || strstr(chip, "OPN2"))
+		return 1;
+	if (_strnicmp(chip, "OPN", 3) == 0) return 1;
+	return 0;
+}
+
+static int FmTokIsOpnExtra(const char* tok)
+{
+	if (!tok || !tok[0]) return 0;
+	if (_stricmp(tok, "EX") == 0 || _stricmp(tok, "PPZ") == 0
+		|| _stricmp(tok, "86PCM") == 0)
+		return 1;
+	if (_strnicmp(tok, "ADPCM", 5) == 0) {
+		const char c = tok[5];
+		if (c == 0 || c == '-') return 1;
+	}
+	return 0;
+}
+
+static int FmDumpHasFmKey(const SasamiFmMonDump& d)
+{
+	for (int i = 0; i < 6; i++)
+		if (d.keyOnFm[i]) return 1;
+	if (d.version >= 6) {
+		for (int i = 0; i < 3; i++)
+			if (d.keyOnEx[i]) return 1;
+	}
+	return 0;
+}
+
+static int FmIdentYyyy(const char* title, wchar_t* out, int n)
+{
+	if (!out || n < 2) return 0;
+	out[0] = 0;
+	if (!title || !title[0]) return 0;
+	const char* chip = title;
+	const char* sp = strstr(title, "  ");
+	if (sp && sp[2]) chip = sp + 2;
+	const char* plus = strchr(chip, '+');
+	if (!plus || !plus[1]) return 0;
+	if (FmChipIsOpnFamily(chip)) {
+		const char* p = plus;
+		while (p && p[1]) {
+			const char* nx = strchr(p + 1, '+');
+			char tok[40];
+			int nt = 0;
+			for (const char* s = p + 1; *s && *s != '+' && nt < 39; s++)
+				tok[nt++] = *s;
+			tok[nt] = 0;
+			if (!FmTokIsOpnExtra(tok)) {
+				_snwprintf_s(out, n, _TRUNCATE, L"%S", p + 1);
+				return out[0] ? 1 : 0;
+			}
+			p = nx;
+		}
+		return 0;
+	}
+	_snwprintf_s(out, n, _TRUNCATE, L"%S", plus + 1);
+	return out[0] ? 1 : 0;
+}
+
+/* xxxx+yyyy の xxxx が OPN 系なら、yyyy が OPLL でも OPL 殻にしない */
+static int FmIdentPrimaryIsFm(const char* title)
+{
+	wchar_t y[8];
+	if (!FmIdentYyyy(title, y, 8)) return 0;
+	const char* chip = title;
+	const char* sp = strstr(title, "  ");
+	if (sp && sp[2]) chip = sp + 2;
+	if (_strnicmp(chip, "OPM", 3) == 0) return 0;
+	if (strstr(chip, "OPNA") || strstr(chip, "OPN2") || strstr(chip, "OPN+")
+		|| strstr(chip, "YM2203") || strstr(chip, "YM2612")
+		|| strstr(chip, "YM2610") || strstr(chip, "YM3438"))
+		return 1;
+	if (_strnicmp(chip, "OPN", 3) == 0) return 1;
+	return 0;
+}
+
+static int FmCompanionRows(const SasamiFmMonDump& d)
+{
+	if (d.version < 7 || d.bank2Rows < 1) return 0;
+	return (d.bank2Rows > 16) ? 16 : (int)d.bank2Rows;
+}
+
+static int FmPrimaryBothBanks(const SasamiFmMonDump& d)
+{
+	/* dump 側 PrimaryFillsBothBanks と揃える: OPN 系は bank0+1 が xxxx */
+	if (FmIdentPrimaryIsFm(d.titleSjis)) return 1;
+	if (d.dumpFlags & SASAMI_FMMON_FLAG_OPM) return 0;
+	if ((unsigned)d.pad6[1] == SASAMI_FMMON_KEYS_OPL2 && d.pad6[0] < 2) return 0;
+	if ((unsigned)d.pad6[1] == SASAMI_FMMON_KEYS_OKI) return 0;
+	if ((unsigned)d.pad6[1] == SASAMI_FMMON_KEYS_SEGAPCM
+		&& (d.dumpFlags & SASAMI_FMMON_FLAG_KEYSONLY)) return 0;
+	if ((unsigned)d.pad6[1] == SASAMI_FMMON_KEYS_RF5C
+		&& (d.dumpFlags & SASAMI_FMMON_FLAG_KEYSONLY)) return 0;
+	return 1;
+}
+
+static int FmHexBankCount(const SasamiFmMonDump& d, int haveDump)
+{
+	if (!haveDump) return 2;
+	if (FmCompanionRows(d) > 0 && FmPrimaryBothBanks(d)) return 3;
+	return 2;
+}
+
+static uint8_t FmCompByte(const SasamiFmMonDump& d, int i)
+{
+	i &= 0xFF;
+	if (d.version >= 7 && d.bank2Rows)
+		return d.bank2[i];
+	return d.regs[0x100 + i];
+}
+
+/* YMW-258 panpot 4bit。ハイブリッドは packed companion、単独は $1E0 */
+static uint8_t FmMultiPcmPan4(const SasamiFmMonDump& d, int ch)
+{
+	if (ch < 0 || ch >= SASAMI_FMMON_PCM_MAX) return 0;
+	wchar_t y[8];
+	if (FmIdentYyyy(d.titleSjis, y, 8)
+		|| (d.version >= 7 && d.bank2Rows && d.pad6[1] == SASAMI_FMMON_KEYS_MULTIPCM)) {
+		const int chip = ch / 16;
+		const int slot = ch % 16;
+		const uint8_t r0 = FmCompByte(d, chip * 128 + slot * 8);
+		return (uint8_t)((r0 >> 4) & 0x0F);
+	}
+	return d.regs[0x1E0 + ch] & 0x0F;
+}
+
+static int FmDumpUsesCompanion(const SasamiFmMonDump& d)
+{
+	wchar_t y[8];
+	if (FmIdentYyyy(d.titleSjis, y, 8)) return 1;
+	return (d.version >= 7 && d.bank2Rows) ? 1 : 0;
+}
+
+static int FmPanelCols(int n)
+{
+	if (n <= 1) return 1;
+	if (n <= 2) return 2;
+	if (n <= 6) return 3;
+	if (n <= 12) return 4;
+	if (n <= 18) return 6;
+	if (n <= 24) return 6;
+	return 8;
+}
+
+static int FmYyyyHas(const wchar_t* y, const wchar_t* tok)
+{
+	return (y && y[0] && tok && wcsstr(y, tok)) ? 1 : 0;
 }
 
 /* FMP は ymfm ADPCM-B 影を Bank1 $00-$10 に重ねる。未使用でも内部値が毎フレーム変わる */
@@ -599,6 +767,7 @@ static int FmIsArcadePcmProfile(unsigned p)
 {
 	return (p == SASAMI_FMMON_KEYS_QSOUND
 		|| p == SASAMI_FMMON_KEYS_RF5C
+		|| p == SASAMI_FMMON_KEYS_MULTIPCM
 		|| p == SASAMI_FMMON_KEYS_C352
 		|| p == SASAMI_FMMON_KEYS_SEGAPCM
 		|| p == SASAMI_FMMON_KEYS_OKI) ? 1 : 0;
@@ -608,6 +777,7 @@ static int FmArcadePcmChannels(unsigned p)
 {
 	if (p == SASAMI_FMMON_KEYS_OKI) return 4;
 	if (p == SASAMI_FMMON_KEYS_RF5C) return 8;
+	if (p == SASAMI_FMMON_KEYS_MULTIPCM) return 32;
 	return 16;
 }
 
@@ -616,6 +786,7 @@ static const wchar_t* FmArcadePcmName(unsigned p)
 	switch (p) {
 	case SASAMI_FMMON_KEYS_QSOUND: return L"QSound";
 	case SASAMI_FMMON_KEYS_RF5C: return L"RF5C/K053260";
+	case SASAMI_FMMON_KEYS_MULTIPCM: return L"MultiPCM";
 	case SASAMI_FMMON_KEYS_C352: return L"C352";
 	case SASAMI_FMMON_KEYS_SEGAPCM: return L"SegaPCM";
 	case SASAMI_FMMON_KEYS_OKI: return L"OKI6295";
@@ -628,6 +799,7 @@ static const wchar_t* FmArcadePcmShort(unsigned p)
 	switch (p) {
 	case SASAMI_FMMON_KEYS_QSOUND: return L"QS";
 	case SASAMI_FMMON_KEYS_RF5C: return L"RF";
+	case SASAMI_FMMON_KEYS_MULTIPCM: return L"MPCM";
 	case SASAMI_FMMON_KEYS_C352: return L"C352";
 	case SASAMI_FMMON_KEYS_SEGAPCM: return L"SPCM";
 	case SASAMI_FMMON_KEYS_OKI: return L"OKI";
@@ -652,6 +824,9 @@ CFmMonitorDlg::CFmMonitorDlg(CWnd* pParent)
 	, m_inPrint(0)
 	, m_inPump(0)
 	, m_lastPlayy(-1)
+	, m_fmEverOn(0)
+	, m_fmViewReady(1)
+	, m_fmHoldMs(0)
 	, m_layOk(0)
 	, m_frameOld(nullptr), m_frameW(0), m_frameH(0)
 #if CCUSTOM_AERO_SUPPORT
@@ -1080,6 +1255,7 @@ int CFmMonitorDlg::PcmRows() const
 int CFmMonitorDlg::ExRows() const
 {
 	if (!m_haveDump || m_dump.version < 6) return 0;
+	if (PrimarySilent()) return 0;
 	if (IsYm2610Dump()) return 0; /* YM2610 モニタは FM3-EX 分割を出さない */
 	if (IsOpmDump() || ChipProfile() == SASAMI_FMMON_KEYS_MDX)
 		return 2; /* OPM7-8 */
@@ -1110,6 +1286,7 @@ int CFmMonitorDlg::ExRows() const
 int CFmMonitorDlg::FmRows() const
 {
 	if (!m_haveDump) return 6;
+	if (PrimarySilent()) return 0;
 	if (IsOpmDump() || ChipProfile() == SASAMI_FMMON_KEYS_MDX)
 		return 6; /* OPM1-6; +ExRows=2 → 8 */
 	if (IsOplDump())
@@ -1166,6 +1343,7 @@ int CFmMonitorDlg::IsOpmDump() const
 int CFmMonitorDlg::IsOplDump() const
 {
 	if (!m_haveDump || m_dump.version < 6) return 0;
+	if (FmIdentPrimaryIsFm(m_dump.titleSjis)) return 0;
 	const unsigned p = (unsigned)m_dump.pad6[1];
 	return (p == SASAMI_FMMON_KEYS_OPL2 || p == SASAMI_FMMON_KEYS_OPL3) ? 1 : 0;
 }
@@ -1178,7 +1356,14 @@ int CFmMonitorDlg::IsYm2610Dump() const
 int CFmMonitorDlg::IsArcadePcmDump() const
 {
 	if (!m_haveDump || m_dump.version < 6) return 0;
-	return FmIsArcadePcmProfile(ChipProfile());
+	if (!FmIsArcadePcmProfile(ChipProfile())) return 0;
+	wchar_t y[8];
+	/* xxxx+yyyy は FM パネルと PCM を連結するので、PCM 専用殻にしない */
+	if (FmIdentYyyy(m_dump.titleSjis, y, 8)) return 0;
+	/* YM3438+MultiPCM 混載は hex/パネルを OPN のまま（regs を PCM で上書きしない） */
+	if (!KeysOnly() && ChipProfile() == SASAMI_FMMON_KEYS_MULTIPCM)
+		return 0;
+	return 1;
 }
 
 unsigned CFmMonitorDlg::MsxDevMask() const
@@ -1264,6 +1449,127 @@ int CFmMonitorDlg::HasViewRegs() const
 int CFmMonitorDlg::HasViewPanels() const
 {
 	return (ViewCaps() & SASAMI_FMMON_VIEW_PANELS) ? 1 : 0;
+}
+
+int CFmMonitorDlg::PrimaryPanelN() const
+{
+	if (PrimarySilent()) return 0;
+	if (!m_haveDump) return PreferOpnaShell() ? 6 : 0;
+	wchar_t yyyy[40];
+	const int hy = FmIdentYyyy(m_dump.titleSjis, yyyy, 40);
+	const char* t = m_dump.titleSjis;
+	if (hy) {
+		if (IsOpmDump() || (t && strstr(t, "OPM"))) return 8;
+		if (t && strstr(t, "YM2610")) return 4;
+		if (t && (strstr(t, "YM2203") || strstr(t, " OPN+") || strstr(t, "  OPN+")
+			|| strstr(t, "OPN+")))
+			return 3;
+		if (t && (strstr(t, "OPNA") || strstr(t, "YM2612") || strstr(t, "YM3438")
+			|| strstr(t, "OPN2")))
+			return 6;
+		if (t && strstr(t, "OPL3")) return 18;
+		if (t && (strstr(t, "OPL2") || strstr(t, "AdLib"))) return 9;
+	}
+	if (IsOpmDump() || ChipProfile() == SASAMI_FMMON_KEYS_MDX) return 8;
+	if (IsOplDump())
+		return (ChipProfile() == SASAMI_FMMON_KEYS_OPL3) ? 18 : 9;
+	if (IsMsxDump())
+		return (MsxDevMask() & SASAMI_FMMON_DEV_OPLL) ? 9 : 0;
+	if (IsArcadePcmDump())
+		return FmArcadePcmChannels(ChipProfile());
+	if (PreferOpnaShell()) return 6;
+	if (!HasViewPanels()) return 0;
+	return FmRows();
+}
+
+int CFmMonitorDlg::CompanionPanelN() const
+{
+	wchar_t y[40];
+	if (!m_haveDump || !FmIdentYyyy(m_dump.titleSjis, y, 40)) return 0;
+	if (FmYyyyHas(y, L"AY") || FmYyyyHas(y, L"PSG")) return 0;
+	if (FmYyyyHas(y, L"OPLL") || FmYyyyHas(y, L"YM2413")) return 9;
+	if (FmYyyyHas(y, L"OPL2") || FmYyyyHas(y, L"Y8950") || FmYyyyHas(y, L"YM3812"))
+		return 9;
+	if (FmYyyyHas(y, L"GA20") || FmYyyyHas(y, L"OKI")) return 4;
+	if (FmYyyyHas(y, L"RF5C")) return 8;
+	if (FmYyyyHas(y, L"SegaPCM"))
+		return FmYyyyHas(y, L"x8") ? 8 : 16;
+	if (FmYyyyHas(y, L"MultiPCM")) return 32;
+	if (FmYyyyHas(y, L"C140")) return 24;
+	if (FmYyyyHas(y, L"CUS30") || FmYyyyHas(y, L"C30")) return 8;
+	if (FmYyyyHas(y, L"C352")) return 32;
+	if (FmYyyyHas(y, L"ADPCM") || FmYyyyHas(y, L"86PCM")) {
+		if (IsYm2610Dump() || (m_dump.titleSjis[0] && strstr(m_dump.titleSjis, "YM2610")))
+			return 0;
+		return 1;
+	}
+	const int pcm = PcmRows();
+	return (pcm > 0) ? pcm : 0;
+}
+
+int CFmMonitorDlg::PrimarySilent() const
+{
+	if (!m_haveDump || !m_fmViewReady) return 0;
+	wchar_t y[8];
+	if (!FmIdentYyyy(m_dump.titleSjis, y, 8)) return 0;
+	if (IsMsxDump() || IsArcadePcmDump()) return 0;
+	return m_fmEverOn ? 0 : 1;
+}
+
+int CFmMonitorDlg::HistPeekFmKey() const
+{
+	for (int n = 0; n < m_histN; n++) {
+		const int i = (m_histHead + n) % HIST_MAX;
+		if (FmDumpHasFmKey(m_hist[i]))
+			return 1;
+	}
+	return 0;
+}
+
+void CFmMonitorDlg::TickFmViewReady()
+{
+	if (m_fmViewReady) return;
+	if (!m_haveDump) return;
+	wchar_t y[8];
+	const int hy = FmIdentYyyy(m_dump.titleSjis, y, 8);
+	if (HistPeekFmKey() || FmDumpHasFmKey(m_dump))
+		m_fmEverOn = 1;
+	if (!hy || m_fmEverOn) {
+		m_fmViewReady = 1;
+		m_layOk = 0;
+		m_fullDraw = 1;
+		m_dirtyHead = m_dirtyHex = m_dirtyPanels = m_dirtyKeys = 1;
+		return;
+	}
+	const ULONGLONG dt = GetTickCount64() - m_fmHoldMs;
+	if (dt >= 120ull && m_histN >= 6) {
+		m_fmViewReady = 1;
+		m_layOk = 0;
+		m_fullDraw = 1;
+		m_dirtyHead = m_dirtyHex = m_dirtyPanels = m_dirtyKeys = 1;
+	}
+}
+
+int CFmMonitorDlg::HexBankCount() const
+{
+	if (PrimarySilent())
+		return 1;
+	return FmHexBankCount(m_dump, m_haveDump);
+}
+
+static unsigned FmCompanionPcmProf(const wchar_t* y)
+{
+	if (FmYyyyHas(y, L"QSound")) return SASAMI_FMMON_KEYS_QSOUND;
+	if (FmYyyyHas(y, L"C352")) return SASAMI_FMMON_KEYS_C352;
+	if (FmYyyyHas(y, L"SegaPCM")) return SASAMI_FMMON_KEYS_SEGAPCM;
+	if (FmYyyyHas(y, L"MultiPCM")) return SASAMI_FMMON_KEYS_MULTIPCM;
+	if (FmYyyyHas(y, L"RF5C") || FmYyyyHas(y, L"C140") || FmYyyyHas(y, L"CUS30")
+		|| FmYyyyHas(y, L"K054539") || FmYyyyHas(y, L"K053260"))
+		return SASAMI_FMMON_KEYS_RF5C;
+	if (FmYyyyHas(y, L"GA20") || FmYyyyHas(y, L"OKI") || FmYyyyHas(y, L"ADPCM")
+		|| FmYyyyHas(y, L"86PCM"))
+		return SASAMI_FMMON_KEYS_OKI;
+	return SASAMI_FMMON_KEYS_OKI;
 }
 
 int CFmMonitorDlg::PreferOpnaShell() const
@@ -1416,8 +1722,14 @@ int CFmMonitorDlg::ContentHeight(int dpi, int pcmRows) const
 	const int head = pad + FmScale(14, dpi);
 	const int cellH = FmScale(9, dpi);
 	const int bankGap = FmScale(10, dpi);
-	const int hexH = 2 * (FmScale(18, dpi) + 16 * cellH) + bankGap;
-	const int fmPanelH = (std::max)(hexH, FmScale(320, dpi));
+	const int nBanks = HexBankCount();
+	const int hexH = nBanks * (FmScale(18, dpi) + 16 * cellH) + (nBanks - 1) * bankGap;
+	const int nPan = PrimaryPanelN() + CompanionPanelN();
+	const int cols = FmPanelCols((std::max)(1, nPan));
+	const int rows = (nPan <= 0) ? 1 : ((nPan + cols - 1) / cols);
+	const int minPh = FmScale(110, dpi);
+	const int panH = rows * minPh + (rows - 1) * FmScale(3, dpi);
+	const int fmPanelH = (std::max)(hexH, (std::max)(panH, FmScale(320, dpi)));
 	const int rowH = FmScale(14, dpi);
 	const int chRows = FmRows() + ExRows() + SsgRows() + pcmRows + (HideRhythm() ? 0 : 1);
 	const int keys = FmScale(4, dpi) + chRows * rowH;
@@ -1430,7 +1742,10 @@ int CFmMonitorDlg::PreferredWidth(int dpi) const
 	const int cellW = FmScale(18, dpi); /* Consolas "00" + margin */
 	const int gapExtra = FmScale(4, dpi);
 	const int hexW = cellW + 16 * cellW + 4 * gapExtra + FmScale(8, dpi);
-	const int fmW = FmScale(560, dpi);
+	const int nPan = PrimaryPanelN() + CompanionPanelN();
+	const int cols = FmPanelCols((std::max)(1, nPan));
+	const int minPw = FmScale(150, dpi);
+	const int fmW = (std::max)(FmScale(560, dpi), cols * minPw + (cols - 1) * FmScale(3, dpi));
 	const int labelW = FmScale(58, dpi);
 	const int pianoMin = FmScale(360, dpi);
 	const int top = hexW + FmScale(6, dpi) + fmW;
@@ -1443,7 +1758,7 @@ void CFmMonitorDlg::RestoreGeom()
 	const UINT dpi = FmUiDpi(m_hWnd ? m_hWnd : nullptr);
 	const int capH = CCC_GetCustomCaptionHeight(m_hWnd);
 	const int clientW = PreferredWidth((int)dpi);
-	const int clientH = ContentHeight((int)dpi, 0);
+	const int clientH = ContentHeight((int)dpi, PcmRows());
 	/* クライアント→外枠 */
 	CRect rc(0, 0, clientW, clientH + capH);
 	AdjustWindowRectEx(&rc, GetStyle(), FALSE, GetExStyle());
@@ -1596,29 +1911,41 @@ void CFmMonitorDlg::DrawHexBank(CDC& dc, int x, int y, int cellW, int cellH, int
 		dc.SetBkMode(TRANSPARENT);
 		dc.TextOut(x - cellW + 1, y + row * cellH + (cellH - fontPx) / 2, hdr);
 
-		const int opsRow = FmHexRowIsFmOps(row);
+		const int opsRow = (bankBase == 0 || (bankBase == 0x100 && rowCount >= 16))
+			? FmHexRowIsFmOps(row) : 0;
 		for (int col = 0; col < 16; col++) {
 			const int idx = bankBase + row * 16 + col;
-			if (idx < 0 || idx >= 0x200) continue;
+			int tidx = idx;
+			uint8_t val = 0;
+			if (bankBase >= 0x200) {
+				const int cidx = idx - 0x200;
+				if (cidx < 0 || cidx >= 0x100) continue;
+				tidx = 0x200 + cidx;
+				if (m_haveDump) val = m_dump.bank2[cidx];
+			} else {
+				if (idx < 0 || idx >= 0x200) continue;
+				tidx = idx;
+				if (m_haveDump) val = m_dump.regs[idx];
+			}
 			const int px = x + FmHexColX(col, cellW, gapExtra);
 			const int py = y + row * cellH;
 			const int inGroup = FmHexColInOpGroup(col);
 			COLORREF base = baseDark;
 			if (inGroup && opsRow)
-				base = m_touched[idx] ? baseTouched : baseGroup;
-			else if (m_touched[idx])
+				base = m_touched[tidx] ? baseTouched : baseGroup;
+			else if (m_touched[tidx])
 				base = baseTouched;
 
-			const COLORREF cellBg = FmMixFade(base, hi, m_fade[idx]);
+			const COLORREF cellBg = FmMixFade(base, hi, m_fade[tidx]);
 			dc.FillSolidRect(px, py, cellW - 1, cellH - 1, cellBg);
 			wchar_t t[4];
 			if (m_haveDump)
-				_snwprintf_s(t, _TRUNCATE, L"%02X", m_dump.regs[idx]);
+				_snwprintf_s(t, _TRUNCATE, L"%02X", val);
 			else
 				wcscpy_s(t, L"--");
 			/* OPAQUE+base だとフェード塗りを文字背景で潰し縁だけ緑に見える */
 			dc.SetBkMode(TRANSPARENT);
-			dc.SetTextColor(m_touched[idx] ? RGB(240, 250, 245) : RGB(130, 145, 138));
+			dc.SetTextColor(m_touched[tidx] ? RGB(240, 250, 245) : RGB(130, 145, 138));
 			CSize ts = dc.GetTextExtent(t);
 			dc.TextOut(px + (cellW - ts.cx) / 2, py + (cellH - ts.cy) / 2, t);
 		}
@@ -2192,7 +2519,12 @@ static void FmLrFromArcadePcm(const SasamiFmMonDump& d, unsigned profile, int ch
 {
 	lAmt = rAmt = 255;
 	if (ch < 0) return;
+	const int useComp = FmDumpUsesCompanion(d);
 	auto b = [&](int idx) -> uint8_t {
+		if (useComp) {
+			if (idx < 0 || idx > 0xFF) return 0;
+			return FmCompByte(d, idx);
+		}
 		return (idx >= 0 && idx < 0x200) ? d.regs[idx] : 0;
 	};
 	auto wHiLo = [&](int idx) -> unsigned {
@@ -2221,6 +2553,19 @@ static void FmLrFromArcadePcm(const SasamiFmMonDump& d, unsigned profile, int ch
 		rAmt = (pan & 0x0F) * 17;
 		if (lAmt == 0 && rAmt == 0)
 			lAmt = rAmt = 255;
+	} else if (profile == SASAMI_FMMON_KEYS_MULTIPCM) {
+		/* YMW-258: panpot 上位4bit。0=中央、1-7=右、9-15=左、8=ミュート */
+		const uint8_t pan4 = FmMultiPcmPan4(d, ch);
+		if (pan4 == 0 || pan4 == 8) {
+			lAmt = rAmt = 255;
+		} else if (pan4 & 0x08) {
+			lAmt = 255;
+			const int n = 16 - (int)pan4;
+			rAmt = (n <= 1) ? 0 : (255 * (n - 1) / 6);
+		} else {
+			rAmt = 255;
+			lAmt = (pan4 >= 7) ? 0 : (255 * (7 - (int)pan4) / 6);
+		}
 	} else if (profile == SASAMI_FMMON_KEYS_RF5C) {
 		FmLrFromMidiPan((int)b(0x01), lAmt, rAmt);
 	}
@@ -2549,6 +2894,7 @@ void CFmMonitorDlg::DrawChannelKeys(CDC& dc, int x, int y, int w, int rowH, int 
 			case SASAMI_FMMON_KEYS_MIDI: pref = L"CH"; break;
 			case SASAMI_FMMON_KEYS_QSOUND: pref = L"QS"; break;
 			case SASAMI_FMMON_KEYS_RF5C: pref = L"RF"; break;
+			case SASAMI_FMMON_KEYS_MULTIPCM: pref = L"MPCM"; break;
 			case SASAMI_FMMON_KEYS_C352: pref = L"C352"; break;
 			case SASAMI_FMMON_KEYS_SEGAPCM: pref = L"SPCM"; break;
 			case SASAMI_FMMON_KEYS_OKI: pref = L"OKI"; break;
@@ -2641,16 +2987,22 @@ void CFmMonitorDlg::ComputeLayout(int w, int h)
 
 	/* bankTitle = タイトル行 + col ヘッダ行。DrawHexBank と一致させる */
 	const int titleLine = FmScale(14, m_lay.dpi);
-	m_lay.cellH = (m_lay.topH - 2 * titleLine - m_lay.bankGap) / 34; /* 仮: 2*(title+cellH)+32*cellH */
-	if (m_lay.cellH < 12) m_lay.cellH = 12;
+	const int nBanks = HexBankCount();
+	m_lay.hexBanks = nBanks;
+	const int nTitle = nBanks;
+	const int nHex = nBanks * 16;
+	m_lay.cellH = (m_lay.topH - nTitle * titleLine - (nTitle - 1) * m_lay.bankGap) / nHex;
+	if (m_lay.cellH < 8) m_lay.cellH = 8;
 	if (m_lay.cellH > 22) m_lay.cellH = 22;
 	m_lay.bankTitle = m_lay.cellH + titleLine + 2;
 	{
-		const int need = 2 * (m_lay.bankTitle + 16 * m_lay.cellH) + m_lay.bankGap;
+		const int need = nTitle * m_lay.bankTitle + nHex * m_lay.cellH
+			+ (nTitle - 1) * m_lay.bankGap;
 		if (need > m_lay.topH) {
-			const int room = m_lay.topH - m_lay.bankGap - 2 * (titleLine + 2);
-			m_lay.cellH = room / 34;
-			if (m_lay.cellH < 10) m_lay.cellH = 10;
+			const int room = m_lay.topH - (nTitle - 1) * m_lay.bankGap
+				- nTitle * (titleLine + 2);
+			m_lay.cellH = (nHex > 0) ? (room / nHex) : 8;
+			if (m_lay.cellH < 6) m_lay.cellH = 6;
 			if (m_lay.cellH > 22) m_lay.cellH = 22;
 			m_lay.bankTitle = m_lay.cellH + titleLine + 2;
 		}
@@ -2677,15 +3029,26 @@ void CFmMonitorDlg::ComputeLayout(int w, int h)
 	m_lay.hexX = m_lay.pad + m_lay.cellW;
 	m_lay.gridY0 = m_lay.topY + m_lay.bankTitle;
 	m_lay.gridY1 = m_lay.gridY0 + 16 * m_lay.cellH + m_lay.bankGap + m_lay.bankTitle;
+	m_lay.gridY2 = m_lay.gridY1 + 16 * m_lay.cellH + m_lay.bankGap + m_lay.bankTitle;
 	m_lay.fmX = m_lay.pad + m_lay.hexColW + FmScale(4, m_lay.dpi);
 	m_lay.fmW = (std::max)(100, w - m_lay.pad - m_lay.fmX);
 	m_lay.gap = FmScale(3, m_lay.dpi);
 	{
-		const int fmN = FmRows();
-		const int cols = (fmN <= 2) ? (std::max)(1, fmN) : ((fmN <= 4) ? 2 : 3);
-		const int rows = (fmN <= 0) ? 1 : ((fmN + cols - 1) / cols);
-		m_lay.pw = (m_lay.fmW - m_lay.gap * (cols - 1)) / (std::max)(1, cols);
-		m_lay.ph = (m_lay.topH - m_lay.gap * (rows - 1)) / (std::max)(1, rows);
+		const int nPan = PrimaryPanelN() + CompanionPanelN();
+		const int n = (nPan > 0) ? nPan : (std::max)(1, FmRows());
+		const int cols = FmPanelCols(n);
+		const int rows = (n + cols - 1) / cols;
+		m_lay.panN = n;
+		m_lay.panCols = cols;
+		m_lay.panRows = rows;
+		const int minPw = FmScale(140, m_lay.dpi);
+		const int minPh = FmScale(100, m_lay.dpi);
+		int pw = (m_lay.fmW - m_lay.gap * (cols - 1)) / (std::max)(1, cols);
+		int ph = (m_lay.topH - m_lay.gap * (rows - 1)) / (std::max)(1, rows);
+		if (pw < minPw) pw = minPw;
+		if (ph < minPh) ph = minPh;
+		m_lay.pw = pw;
+		m_lay.ph = ph;
 	}
 	m_lay.keysY = m_lay.topY + m_lay.topH + m_lay.gapHexKeys;
 	m_lay.keysW = (std::max)(120, w - m_lay.pad * 2);
@@ -2762,6 +3125,7 @@ void CFmMonitorDlg::DrawHead(CDC& dc)
 			}
 			case SASAMI_FMMON_KEYS_QSOUND: chip = L"AC  QSound×16"; break;
 			case SASAMI_FMMON_KEYS_RF5C: chip = L"AC  RF5C68×8"; break;
+			case SASAMI_FMMON_KEYS_MULTIPCM: chip = L"AC  MultiPCM×32"; break;
 			case SASAMI_FMMON_KEYS_C352: chip = L"AC  C352×16"; break;
 			case SASAMI_FMMON_KEYS_SEGAPCM: chip = L"Sega  SegaPCM×8/16"; break;
 			case SASAMI_FMMON_KEYS_OKI: chip = L"AC  OKI×4"; break;
@@ -2844,13 +3208,26 @@ void CFmMonitorDlg::DrawHexArea(CDC& dc)
 {
 	if (!m_layOk) return;
 	dc.FillSolidRect(m_lay.rcHex, FM_BG);
+	if (PrimarySilent() && HasViewRegs()) {
+		wchar_t yyyy[40];
+		wchar_t title[72];
+		if (m_haveDump && FmIdentYyyy(m_dump.titleSjis, yyyy, 40))
+			_snwprintf_s(title, _TRUNCATE, L"%s packed", yyyy);
+		else
+			wcsncpy_s(title, L"yyyy packed", _TRUNCATE);
+		const int base = FmPrimaryBothBanks(m_dump) ? 0x200 : 0x100;
+		DrawHexBank(dc, m_lay.hexX, m_lay.gridY0, m_lay.cellW, m_lay.cellH, m_lay.gapExtra,
+			base, title);
+		return;
+	}
 	if (IsOpmDump() && HasViewRegs()) {
 		DrawHexBank(dc, m_lay.hexX, m_lay.gridY0, m_lay.cellW, m_lay.cellH, m_lay.gapExtra, 0x000, L"OPM $00-$FF");
-		const int ga20 = (m_haveDump && m_dump.titleSjis[0]
-			&& strstr(m_dump.titleSjis, "GA20")) ? 1 : 0;
-		if (ga20) {
-			DrawHexBank(dc, m_lay.hexX, m_lay.gridY1, m_lay.cellW, m_lay.cellH, m_lay.gapExtra, 0x100,
-				L"GA20 $00-$1F (@$100)");
+		wchar_t yyyy[40];
+		const int hasY = (m_haveDump && FmIdentYyyy(m_dump.titleSjis, yyyy, 40)) ? 1 : 0;
+		if (hasY || (m_haveDump && FmCompanionRows(m_dump) > 0)) {
+			wchar_t b1[72];
+			_snwprintf_s(b1, _TRUNCATE, L"%s packed @$100", hasY ? yyyy : L"yyyy");
+			DrawHexBank(dc, m_lay.hexX, m_lay.gridY1, m_lay.cellW, m_lay.cellH, m_lay.gapExtra, 0x100, b1);
 		} else {
 			CGdiObject* old = dc.SelectStockObject(DEFAULT_GUI_FONT);
 			dc.SetBkMode(TRANSPARENT);
@@ -2860,16 +3237,27 @@ void CFmMonitorDlg::DrawHexArea(CDC& dc)
 		}
 		return;
 	}
-		if (IsOplDump() && HasViewRegs()) {
+	if (IsOplDump() && HasViewRegs()) {
 		const int opl3 = (ChipProfile() == SASAMI_FMMON_KEYS_OPL3) ? 1 : 0;
 		const int pcat = (m_dump.titleSjis[0]
 			&& strstr(m_dump.titleSjis, "PC/AT")) ? 1 : 0;
+		wchar_t yyyy[40];
+		const int hasY = (m_haveDump && FmIdentYyyy(m_dump.titleSjis, yyyy, 40)) ? 1 : 0;
 		DrawHexBank(dc, m_lay.hexX, m_lay.gridY0, m_lay.cellW, m_lay.cellH, m_lay.gapExtra, 0x000,
 			opl3 ? L"OPL port0 / chip0"
 			: (pcat ? L"AdLib/SB OPL2 $00-$FF" : L"OPL2 $00-$FF"));
 		if (opl3) {
 			DrawHexBank(dc, m_lay.hexX, m_lay.gridY1, m_lay.cellW, m_lay.cellH, m_lay.gapExtra, 0x100,
 				L"OPL port1 / chip1");
+			if (m_lay.hexBanks >= 3 && hasY) {
+				wchar_t b2[72];
+				_snwprintf_s(b2, _TRUNCATE, L"%s packed bank2", yyyy);
+				DrawHexBank(dc, m_lay.hexX, m_lay.gridY2, m_lay.cellW, m_lay.cellH, m_lay.gapExtra, 0x200, b2);
+			}
+		} else if (hasY || (m_haveDump && FmCompanionRows(m_dump) > 0)) {
+			wchar_t b1[72];
+			_snwprintf_s(b1, _TRUNCATE, L"%s packed @$100", hasY ? yyyy : L"yyyy");
+			DrawHexBank(dc, m_lay.hexX, m_lay.gridY1, m_lay.cellW, m_lay.cellH, m_lay.gapExtra, 0x100, b1);
 		} else {
 			CGdiObject* old = dc.SelectStockObject(DEFAULT_GUI_FONT);
 			dc.SetBkMode(TRANSPARENT);
@@ -2948,6 +3336,8 @@ void CFmMonitorDlg::DrawHexArea(CDC& dc)
 	if (IsArcadePcmDump() && HasViewRegs()) {
 		const unsigned prof = ChipProfile();
 		wchar_t title[64];
+		wchar_t yyyy[40];
+		const int hasY = (m_haveDump && FmIdentYyyy(m_dump.titleSjis, yyyy, 40)) ? 1 : 0;
 		_snwprintf_s(title, _TRUNCATE, L"%s regs $00-$FF", FmArcadePcmName(prof));
 		DrawHexBank(dc, m_lay.hexX, m_lay.gridY0, m_lay.cellW, m_lay.cellH, m_lay.gapExtra,
 			0x000, title);
@@ -2955,6 +3345,15 @@ void CFmMonitorDlg::DrawHexArea(CDC& dc)
 			_snwprintf_s(title, _TRUNCATE, L"%s regs $100-$1FF", FmArcadePcmName(prof));
 			DrawHexBank(dc, m_lay.hexX, m_lay.gridY1, m_lay.cellW, m_lay.cellH, m_lay.gapExtra,
 				0x100, title);
+			if (m_lay.hexBanks >= 3 && hasY) {
+				wchar_t b2[72];
+				_snwprintf_s(b2, _TRUNCATE, L"%s packed bank2", yyyy);
+				DrawHexBank(dc, m_lay.hexX, m_lay.gridY2, m_lay.cellW, m_lay.cellH, m_lay.gapExtra, 0x200, b2);
+			}
+		} else if (hasY || (m_haveDump && FmCompanionRows(m_dump) > 0)) {
+			wchar_t b1[72];
+			_snwprintf_s(b1, _TRUNCATE, L"%s packed @$100", hasY ? yyyy : L"yyyy");
+			DrawHexBank(dc, m_lay.hexX, m_lay.gridY1, m_lay.cellW, m_lay.cellH, m_lay.gapExtra, 0x100, b1);
 		} else {
 			CGdiObject* old = dc.SelectStockObject(DEFAULT_GUI_FONT);
 			dc.SetBkMode(TRANSPARENT);
@@ -2964,12 +3363,21 @@ void CFmMonitorDlg::DrawHexArea(CDC& dc)
 		}
 		return;
 	}
-	/* 起動直後・MIDI等 keys-only・通常 OPNA: Bank0/1 */
+	/* 起動直後・MIDI等 keys-only・通常 OPNA: Bank0/1、bank2 があれば等分配の3段 */
 	if (PreferOpnaShell() || HasViewRegs()) {
 		const wchar_t* b0 = IsYm2610Dump() ? L"Bank0 SSG/FM/ADPCM-B" : L"Bank0";
 		const wchar_t* b1 = IsYm2610Dump() ? L"Bank1 ADPCM-A/FM" : L"Bank1";
 		DrawHexBank(dc, m_lay.hexX, m_lay.gridY0, m_lay.cellW, m_lay.cellH, m_lay.gapExtra, 0x000, b0);
 		DrawHexBank(dc, m_lay.hexX, m_lay.gridY1, m_lay.cellW, m_lay.cellH, m_lay.gapExtra, 0x100, b1);
+		if (m_lay.hexBanks >= 3) {
+			wchar_t yyyy[40];
+			wchar_t b2[72];
+			if (m_haveDump && FmIdentYyyy(m_dump.titleSjis, yyyy, 40))
+				_snwprintf_s(b2, _TRUNCATE, L"%s packed bank2", yyyy);
+			else
+				wcsncpy_s(b2, L"yyyy packed bank2", _TRUNCATE);
+			DrawHexBank(dc, m_lay.hexX, m_lay.gridY2, m_lay.cellW, m_lay.cellH, m_lay.gapExtra, 0x200, b2);
+		}
 		return;
 	}
 	if (IsMsxDump()) {
@@ -3212,16 +3620,18 @@ void CFmMonitorDlg::DrawOpmChPanel(CDC& dc, const CRect& rc, int ch)
 }
 
 /* YM3812/YMF262 1ch。2op の接続とエンベロープ */
-void CFmMonitorDlg::DrawOplChPanel(CDC& dc, const CRect& rc, int ch)
+void CFmMonitorDlg::DrawOplChPanel(CDC& dc, const CRect& rc, int ch, int packedCompanion)
 {
 	/* YM3812/YMF262: 片バンク 9ch×2op。スロット表はチップ半分ごと */
 	if (rc.Width() < 80 || rc.Height() < 56 || ch < 0 || ch > 17) return;
 	static const int kOp1[9] = { 0, 1, 2, 6, 7, 8, 12, 13, 14 };
 	static const int kOp2[9] = { 3, 4, 5, 9, 10, 11, 15, 16, 17 };
-	const int bank = (ch >= 9) ? 0x100 : 0;
 	const int loc = ch % 9;
 	auto reg = [&](int r) -> uint8_t {
-		return m_haveDump ? m_dump.regs[bank + (r & 0xFF)] : 0;
+		if (packedCompanion)
+			return FmCompByte(m_dump, r & 0xFF);
+		const int bnk = (ch >= 9) ? 0x100 : 0;
+		return m_haveDump ? m_dump.regs[bnk + (r & 0xFF)] : 0;
 	};
 
 	const int savedDC = dc.SaveDC();
@@ -3470,7 +3880,7 @@ void CFmMonitorDlg::DrawOplChPanel(CDC& dc, const CRect& rc, int ch)
 }
 
 /* YM2413 1ch。USR は $00-$07、プリセットはチップ内蔵 ROM */
-void CFmMonitorDlg::DrawOpllChPanel(CDC& dc, const CRect& rc, int ch)
+void CFmMonitorDlg::DrawOpllChPanel(CDC& dc, const CRect& rc, int ch, int packedCompanion)
 {
 	/* YM2413: 9ch。USR=regs $00-$07、preset=チップ内蔵音色 ROM（emu2413 YM2413 set）。 */
 	if (rc.Width() < 80 || rc.Height() < 56 || ch < 0 || ch > 8) return;
@@ -3498,6 +3908,8 @@ void CFmMonitorDlg::DrawOpllChPanel(CDC& dc, const CRect& rc, int ch)
 		{ 0x41,0x41,0x89,0x03,0xf1,0xe4,0xc0,0x13 },
 	};
 	auto reg = [&](int r) -> uint8_t {
+		if (packedCompanion)
+			return FmCompByte(m_dump, r & 0x3F);
 		return m_haveDump ? m_dump.regs[0x40 + (r & 0x3F)] : 0;
 	};
 
@@ -3742,7 +4154,7 @@ void CFmMonitorDlg::DrawOpllChPanel(CDC& dc, const CRect& rc, int ch)
 }
 
 /* アーケード PCM 1ch。ピッチ・音量・パンを影レジスタから出す */
-void CFmMonitorDlg::DrawArcadePcmChPanel(CDC& dc, const CRect& rc, int ch, unsigned profile)
+void CFmMonitorDlg::DrawArcadePcmChPanel(CDC& dc, const CRect& rc, int ch, unsigned profile, int useComp)
 {
 	if (rc.Width() < 70 || rc.Height() < 46 || ch < 0) return;
 	const int savedDC = dc.SaveDC();
@@ -3758,6 +4170,10 @@ void CFmMonitorDlg::DrawArcadePcmChPanel(CDC& dc, const CRect& rc, int ch, unsig
 	FmFrameRect(dc, rc, RGB(170, 120, 85));
 
 	auto b = [&](int idx) -> uint8_t {
+		if (useComp) {
+			if (idx < 0 || idx > 0xFF) return 0;
+			return FmCompByte(m_dump, idx);
+		}
 		return (m_haveDump && idx >= 0 && idx < 0x200) ? m_dump.regs[idx] : 0;
 	};
 	auto wHiLo = [&](int idx) -> unsigned {
@@ -3804,11 +4220,27 @@ void CFmMonitorDlg::DrawArcadePcmChPanel(CDC& dc, const CRect& rc, int ch, unsig
 		pan = b(0x01);
 		pitch = b(0x02) | (b(0x03) << 8);
 		ctl = b(0x08);
+	} else if (profile == SASAMI_FMMON_KEYS_MULTIPCM) {
+		if (useComp) {
+			const int chip = ch / 16;
+			const int slot = ch % 16;
+			const int base = chip * 128 + slot * 8;
+			const uint8_t r0 = b(base);
+			pan = (r0 >> 4) & 0x0F;
+			pitch = ((b(base + 3) & 0x0F) << 6) | (b(base + 2) >> 2);
+			vol = b(base + 1);
+			ctl = b(base + 4);
+		} else {
+			pan = b(0x1E0 + ch) & 0x0F;
+			ctl = 0;
+			vol = 0;
+			pitch = 0;
+		}
 	} else if (profile == SASAMI_FMMON_KEYS_OKI) {
 		const int ga20 = (m_haveDump && m_dump.titleSjis[0]
 			&& strstr(m_dump.titleSjis, "GA20")) ? 1 : 0;
 		if (ga20) {
-			const int base = 0x100 + ch * 8;
+			const int base = useComp ? (ch * 8) : (0x100 + ch * 8);
 			pitch = b(base + 4);
 			vol = b(base + 5);
 			ctl = b(base + 6);
@@ -3883,111 +4315,14 @@ void CFmMonitorDlg::DrawArcadePcmChPanel(CDC& dc, const CRect& rc, int ch, unsig
 	dc.RestoreDC(savedDC);
 }
 
-/* 右上パネル群。チップ種で OPNA/OPM/OPL/アーケード PCM を切り替える */
+/* 右上パネル群。xxxx+yyyy は主チップとコンパニオンを連結して全部出す */
 void CFmMonitorDlg::DrawPanelsArea(CDC& dc)
 {
 	if (!m_layOk) return;
-	if (IsArcadePcmDump() && HasViewPanels()) {
-		dc.FillSolidRect(m_lay.rcPanels, FM_BG);
-		const unsigned prof = ChipProfile();
-		const int nCh = FmArcadePcmChannels(prof);
-		const int cols = (nCh >= 16) ? 4 : (nCh >= 8 ? 4 : 2);
-		const int rows = (nCh + cols - 1) / cols;
-		const int gap = m_lay.gap;
-		const int pw = (m_lay.rcPanels.Width() - gap * (cols - 1) - 8) / cols;
-		const int ph = (m_lay.rcPanels.Height() - gap * (rows - 1) - 8) / rows;
-		for (int i = 0; i < nCh; i++) {
-			const int c = i % cols;
-			const int r = i / cols;
-			CRect pr(
-				m_lay.fmX + 4 + c * (pw + gap),
-				m_lay.topY + 4 + r * (ph + gap),
-				m_lay.fmX + 4 + c * (pw + gap) + pw,
-				m_lay.topY + 4 + r * (ph + gap) + ph);
-			DrawArcadePcmChPanel(dc, pr, i, prof);
-		}
-		m_panelDirtyMask = 0;
-		return;
-	}
-	if (IsOplDump() && HasViewPanels()) {
-		dc.FillSolidRect(m_lay.rcPanels, FM_BG);
-		const int nCh = (ChipProfile() == SASAMI_FMMON_KEYS_OPL3) ? 18 : 9;
-		const int cols = (nCh > 9) ? 6 : 3;
-		const int rows = (nCh + cols - 1) / cols;
-		const int gap = m_lay.gap;
-		const int pw = (m_lay.rcPanels.Width() - gap * (cols - 1) - 8) / cols;
-		const int ph = (m_lay.rcPanels.Height() - gap * (rows - 1) - 8) / rows;
-		for (int i = 0; i < nCh; i++) {
-			const int c = i % cols;
-			const int r = i / cols;
-			CRect pr(
-				m_lay.fmX + 4 + c * (pw + gap),
-				m_lay.topY + 4 + r * (ph + gap),
-				m_lay.fmX + 4 + c * (pw + gap) + pw,
-				m_lay.topY + 4 + r * (ph + gap) + ph);
-			DrawOplChPanel(dc, pr, i);
-		}
-		m_panelDirtyMask = 0;
-		return;
-	}
-	if (IsOpmDump() && HasViewPanels()) {
-		dc.FillSolidRect(m_lay.rcPanels, FM_BG);
-		const int ga20 = (m_haveDump && m_dump.titleSjis[0]
-			&& strstr(m_dump.titleSjis, "GA20")) ? 1 : 0;
-		const int cols = 4;
-		const int rows = ga20 ? 3 : 2; /* 8 OPM + optional 4 GA20 */
-		const int gap = m_lay.gap;
-		const int pw = (m_lay.rcPanels.Width() - gap * (cols - 1) - 8) / cols;
-		const int ph = (m_lay.rcPanels.Height() - gap * (rows - 1) - 8) / rows;
-		for (int i = 0; i < 8; i++) {
-			const int c = i % cols;
-			const int r = i / cols;
-			CRect pr(
-				m_lay.fmX + 4 + c * (pw + gap),
-				m_lay.topY + 4 + r * (ph + gap),
-				m_lay.fmX + 4 + c * (pw + gap) + pw,
-				m_lay.topY + 4 + r * (ph + gap) + ph);
-			DrawOpmChPanel(dc, pr, i);
-		}
-		if (ga20) {
-			for (int i = 0; i < 4; i++) {
-				const int c = i % cols;
-				const int r = 2;
-				CRect pr(
-					m_lay.fmX + 4 + c * (pw + gap),
-					m_lay.topY + 4 + r * (ph + gap),
-					m_lay.fmX + 4 + c * (pw + gap) + pw,
-					m_lay.topY + 4 + r * (ph + gap) + ph);
-				DrawArcadePcmChPanel(dc, pr, i, SASAMI_FMMON_KEYS_OKI);
-			}
-		}
-		m_panelDirtyMask = 0;
-		return;
-	}
-	if (IsMsxDump() && HasViewPanels()
-		&& (MsxDevMask() & SASAMI_FMMON_DEV_OPLL)) {
-		dc.FillSolidRect(m_lay.rcPanels, FM_BG);
-		const int cols = 3;
-		const int rows = 3;
-		const int gap = m_lay.gap;
-		const int pw = (m_lay.rcPanels.Width() - gap * (cols - 1) - 8) / cols;
-		const int ph = (m_lay.rcPanels.Height() - gap * (rows - 1) - 8) / rows;
-		for (int i = 0; i < 9; i++) {
-			const int c = i % cols;
-			const int r = i / cols;
-			CRect pr(
-				m_lay.fmX + 4 + c * (pw + gap),
-				m_lay.topY + 4 + r * (ph + gap),
-				m_lay.fmX + 4 + c * (pw + gap) + pw,
-				m_lay.topY + 4 + r * (ph + gap) + ph);
-			DrawOpllChPanel(dc, pr, i);
-		}
-		m_panelDirtyMask = 0;
-		return;
-	}
+	dc.FillSolidRect(m_lay.rcPanels, FM_BG);
+
 	if (IsMsxDump() && !(MsxDevMask() & SASAMI_FMMON_DEV_OPLL)
-		&& !PreferOpnaShell()) {
-		dc.FillSolidRect(m_lay.rcPanels, FM_BG);
+		&& CompanionPanelN() == 0 && !PreferOpnaShell()) {
 		CGdiObject* old = dc.SelectStockObject(DEFAULT_GUI_FONT);
 		dc.SetBkMode(TRANSPARENT);
 		dc.SetTextColor(RGB(140, 145, 155));
@@ -3997,26 +4332,70 @@ void CFmMonitorDlg::DrawPanelsArea(CDC& dc)
 		m_panelDirtyMask = 0;
 		return;
 	}
-	/* OPNA/OPN パネル（起動直後・MIDI keys-only・通常 OPN(A)） */
-	BYTE mask = m_panelDirtyMask;
-	const int fmN = FmRows();
-	const int fmMaskBits = (fmN >= 6) ? 0x3F : ((1 << fmN) - 1);
-	if (PreferOpnaShell() || !HasViewPanels() || KeysOnly())
-		mask = (BYTE)fmMaskBits;
-	if (mask == 0) mask = (BYTE)fmMaskBits;
-	if (mask == (BYTE)fmMaskBits)
-		dc.FillSolidRect(m_lay.rcPanels, FM_BG);
-	const int cols = (fmN <= 2) ? (std::max)(1, fmN) : ((fmN <= 4) ? 2 : 3);
-	for (int i = 0; i < fmN && i < 6; i++) {
-		if (!(mask & (1 << i))) continue;
+
+	wchar_t yyyy[40];
+	const int hasY = (m_haveDump && FmIdentYyyy(m_dump.titleSjis, yyyy, 40)) ? 1 : 0;
+	const int nPri = PrimaryPanelN();
+	const int nComp = CompanionPanelN();
+	const int n = nPri + nComp;
+	if (n <= 0) {
+		m_panelDirtyMask = 0;
+		return;
+	}
+	const int cols = (m_lay.panCols > 0) ? m_lay.panCols : FmPanelCols(n);
+	const int gap = m_lay.gap;
+	const int pw = m_lay.pw;
+	const int ph = m_lay.ph;
+	int idx = 0;
+	auto place = [&](int i) -> CRect {
 		const int c = i % cols;
 		const int r = i / cols;
-		CRect pr(m_lay.fmX + c * (m_lay.pw + m_lay.gap), m_lay.topY + r * (m_lay.ph + m_lay.gap),
-			m_lay.fmX + c * (m_lay.pw + m_lay.gap) + m_lay.pw,
-			m_lay.topY + r * (m_lay.ph + m_lay.gap) + m_lay.ph);
-		if (mask != (BYTE)fmMaskBits)
-			dc.FillSolidRect(pr, FM_BG);
-		DrawFmChPanel(dc, pr, i);
+		return CRect(
+			m_lay.fmX + c * (pw + gap),
+			m_lay.topY + r * (ph + gap),
+			m_lay.fmX + c * (pw + gap) + pw,
+			m_lay.topY + r * (ph + gap) + ph);
+	};
+
+	const char* t = m_haveDump ? m_dump.titleSjis : "";
+	if (nPri > 0) {
+		if (IsOpmDump() || ChipProfile() == SASAMI_FMMON_KEYS_MDX
+			|| (hasY && t && strstr(t, "OPM"))) {
+			for (int i = 0; i < nPri && i < 8; i++)
+				DrawOpmChPanel(dc, place(idx++), i);
+		} else if (!hasY && IsArcadePcmDump()) {
+			const unsigned prof = ChipProfile();
+			for (int i = 0; i < nPri; i++)
+				DrawArcadePcmChPanel(dc, place(idx++), i, prof, 0);
+		} else if (!hasY && IsOplDump()) {
+			for (int i = 0; i < nPri; i++)
+				DrawOplChPanel(dc, place(idx++), i, 0);
+		} else if (!hasY && IsMsxDump() && (MsxDevMask() & SASAMI_FMMON_DEV_OPLL)) {
+			for (int i = 0; i < nPri && i < 9; i++)
+				DrawOpllChPanel(dc, place(idx++), i, 0);
+		} else if (hasY && t && (strstr(t, "OPL3") || strstr(t, "OPL2") || strstr(t, "AdLib"))
+			&& !FmIdentPrimaryIsFm(t)) {
+			for (int i = 0; i < nPri; i++)
+				DrawOplChPanel(dc, place(idx++), i, 0);
+		} else {
+			for (int i = 0; i < nPri && i < 6; i++)
+				DrawFmChPanel(dc, place(idx++), i);
+		}
+	}
+
+	if (nComp > 0 && hasY) {
+		if (FmYyyyHas(yyyy, L"OPLL") || FmYyyyHas(yyyy, L"YM2413")) {
+			for (int i = 0; i < nComp && i < 9; i++)
+				DrawOpllChPanel(dc, place(idx++), i, 1);
+		} else if (FmYyyyHas(yyyy, L"OPL2") || FmYyyyHas(yyyy, L"Y8950")
+			|| FmYyyyHas(yyyy, L"YM3812")) {
+			for (int i = 0; i < nComp && i < 9; i++)
+				DrawOplChPanel(dc, place(idx++), i, 1);
+		} else {
+			const unsigned prof = FmCompanionPcmProf(yyyy);
+			for (int i = 0; i < nComp; i++)
+				DrawArcadePcmChPanel(dc, place(idx++), i, prof, 1);
+		}
 	}
 	m_panelDirtyMask = 0;
 }
@@ -4039,11 +4418,21 @@ void CFmMonitorDlg::ComposeFrame(CDC& dc, int w, int h)
 	const int exNow = ExRows();
 	const int fmNow = FmRows();
 	const int ssgNow = SsgRows();
+	const int panNow = PrimaryPanelN() + CompanionPanelN();
+	const int hexNow = HexBankCount();
 	const int needLay = !m_layOk || m_lay.w != w || m_lay.h != h || m_fullDraw
 		|| m_lay.pcmRows != pcmNow || m_lay.exRows != exNow
-		|| m_lay.fmRows != fmNow || m_lay.ssgRows != ssgNow;
+		|| m_lay.fmRows != fmNow || m_lay.ssgRows != ssgNow
+		|| m_lay.panN != panNow || m_lay.hexBanks != hexNow;
 	if (needLay)
 		ComputeLayout(w, h);
+
+	if (!m_fmViewReady && m_haveDump) {
+		dc.FillSolidRect(0, 0, w, h, FM_BG);
+		DrawHead(dc);
+		m_fullDraw = 1;
+		return;
+	}
 
 	if (m_fullDraw || needLay) {
 		dc.FillSolidRect(0, 0, w, h, FM_BG);
@@ -4081,6 +4470,9 @@ void CFmMonitorDlg::ApplyDump(const SasamiFmMonDump& d)
 		memset(m_fadePcm, 0, sizeof(m_fadePcm));
 		memset(m_fadeRzmPad, 0, sizeof(m_fadeRzmPad));
 		wcsncpy_s(m_lastSong, d.sourcePath, _TRUNCATE);
+		m_fmEverOn = 0;
+		m_fmViewReady = 0;
+		m_fmHoldMs = GetTickCount64();
 		m_layOk = 0;
 		m_fullDraw = 1;
 		m_dirtyHead = 1;
@@ -4091,6 +4483,13 @@ void CFmMonitorDlg::ApplyDump(const SasamiFmMonDump& d)
 
 	int chgHex = 0, chgKeys = 0;
 	BYTE panelMask = 0;
+	const int wasEver = m_fmEverOn;
+	if (FmDumpHasFmKey(d) || HistPeekFmKey())
+		m_fmEverOn = 1;
+	if (wasEver != m_fmEverOn) {
+		m_layOk = 0;
+		m_fullDraw = 1;
+	}
 	const int keysOnly = (d.version >= 6 && (d.dumpFlags & SASAMI_FMMON_FLAG_KEYSONLY)) ? 1 : 0;
 	const int arcadeRegs = (keysOnly && d.version >= 6
 		&& FmIsArcadePcmProfile((unsigned)d.pad6[1])
@@ -4118,6 +4517,22 @@ void CFmMonitorDlg::ApplyDump(const SasamiFmMonDump& d)
 				if (!m_touched[i])
 					chgHex = 1;
 				m_touched[i] = 1;
+			}
+		}
+		if (trackHex && d.version >= 7) {
+			for (int i = 0; i < 0x100; i++) {
+				const int tidx = 0x200 + i;
+				const int wrote = FmBank2Wrote(d, i);
+				const int changed = (d.bank2[i] != m_dump.bank2[i]) ? 1 : 0;
+				if (wrote && changed) {
+					FmBump(m_fade[tidx]);
+					m_touched[tidx] = 1;
+					chgHex = 1;
+				} else if (wrote) {
+					if (!m_touched[tidx])
+						chgHex = 1;
+					m_touched[tidx] = 1;
+				}
 			}
 		}
 		/* チャンネル単位: ALG(B0) / AMS·PMS·PAN(B4) / Fnum / オペレータ / keyOn */
@@ -4241,6 +4656,9 @@ void CFmMonitorDlg::ApplyDump(const SasamiFmMonDump& d)
 				|| ((d.dumpFlags & SASAMI_FMMON_FLAG_KEYSONLY)
 					&& FmKeysOnlyPackedHit(d, i) != FmKeysOnlyPackedHit(m_dump, i)))
 				chgKeys = 1;
+			if (d.pad6[1] == SASAMI_FMMON_KEYS_MULTIPCM
+				&& FmMultiPcmPan4(d, i) != FmMultiPcmPan4(m_dump, i))
+				chgKeys = 1;
 		}
 		if (d.padHit == 6) {
 			if (d.regs[0x11] != m_dump.regs[0x11])
@@ -4354,6 +4772,11 @@ void CFmMonitorDlg::ApplyDump(const SasamiFmMonDump& d)
 			if (wrote || (d.version < 5 && d.regs[i] != 0))
 				m_touched[i] = 1;
 		}
+		if (d.version >= 7) {
+			for (int i = 0; i < 0x100; i++)
+				if (FmBank2Wrote(d, i))
+					m_touched[0x200 + i] = 1;
+		}
 		if (FmMonIsLive()) {
 			for (int i = 0; i < 6; i++)
 				if (d.keyOnFm[i]) FmBump(m_fadeKey[i]);
@@ -4383,6 +4806,9 @@ void CFmMonitorDlg::ApplyDump(const SasamiFmMonDump& d)
 	const int hadDump = m_haveDump;
 	m_prev = m_dump;
 	m_dump = d;
+	if (!hadDump || m_prev.bank2Rows != d.bank2Rows
+		|| ((m_prev.dumpFlags ^ d.dumpFlags) & SASAMI_FMMON_FLAG_OPM))
+		m_layOk = 0;
 	if (trackHex) {
 		for (int i = 0; i < 0x200; i++) {
 			if (FmHexIsFmpAdpcmNoise(d, i)) {
@@ -4413,6 +4839,7 @@ void CFmMonitorDlg::ApplyDump(const SasamiFmMonDump& d)
 		}
 	}
 	if (chgKeys) m_dirtyKeys = 1;
+	TickFmViewReady();
 }
 
 void CFmMonitorDlg::ResetDumpSync()
@@ -4429,6 +4856,9 @@ void CFmMonitorDlg::ResetDumpSync()
 	m_lastSeq = 0;
 	m_readFail = 0;
 	m_haveDump = 0;
+	m_fmEverOn = 0;
+	m_fmViewReady = 0;
+	m_fmHoldMs = GetTickCount64();
 	m_lastSong[0] = 0;
 	/* m_playIdent は残す（同じ曲で毎フレ Reset し続けない） */
 	memset(&m_dump, 0, sizeof(m_dump));
@@ -4468,7 +4898,9 @@ void CFmMonitorDlg::PushHistDump(const SasamiFmMonDump& d)
 			&& (d.version < 6 || memcmp(d.keyOnExHitCnt, m_hist[lastI].keyOnExHitCnt, 3) == 0)
 			&& (d.pcmCount == m_hist[lastI].pcmCount
 				&& memcmp(d.pcmOn, m_hist[lastI].pcmOn, SASAMI_FMMON_PCM_MAX) == 0
-				&& memcmp(d.pcmNote, m_hist[lastI].pcmNote, SASAMI_FMMON_PCM_MAX) == 0))
+				&& memcmp(d.pcmNote, m_hist[lastI].pcmNote, SASAMI_FMMON_PCM_MAX) == 0)
+			&& (d.version < 7 || (d.bank2Rows == m_hist[lastI].bank2Rows
+				&& memcmp(d.bank2, m_hist[lastI].bank2, 0x100) == 0)))
 			return;
 	}
 	/* 満杯で最古＝表示中を潰さない。SOFT 超えたら最古を捨ててから追加 */
@@ -4737,7 +5169,7 @@ void CFmMonitorDlg::TickFades()
 		return before != after || g == 0;
 	};
 	int hex = 0, keys = 0, panels = 0;
-	for (int i = 0; i < 0x200; i++)
+	for (int i = 0; i < 0x300; i++)
 		if (tickQ(m_fade[i])) hex = 1;
 	for (int i = 0; i < 6; i++)
 		if (tickQ(m_fadeKey[i])) { keys = 1; panels = 1; }
@@ -4821,6 +5253,11 @@ void CFmMonitorDlg::PumpSyncNow()
 		if (m_haveDump && !FmDumpMatchesPlay(m_dump))
 			ResetDumpSync();
 		PollDump();
+		if (!m_fmViewReady) {
+			for (int k = 0; k < 8 && !m_fmViewReady; k++)
+				PollDump();
+			TickFmViewReady();
+		}
 	} else {
 		m_playIdent[0] = 0;
 	}

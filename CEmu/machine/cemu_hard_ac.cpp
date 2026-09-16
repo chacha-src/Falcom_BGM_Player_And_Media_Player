@@ -2297,15 +2297,24 @@ int CHardAc::Init(const CEmuGameEntry* ge, int sampleRate)
 		chip2_ = NULL;
 		pcm_ = CEmuChipSegaPcmCreate(4000000u, sampleRate_, 12u, 0x70u);
 		pcmKind_ = 1;
+	} else if (board_ == CEMU_AC_BOARD_CPS1) {
+		/* MAME cps1: Z80+YM2151 @ 3.579545 MHz、OKI @ 1 MHz PIN7 HIGH。
+		   Timer A は 64*(1024-0xC8<<2)/clock ≈ 249.7 Hz（sf2 ISR が毎割込 $10=$C8）。
+		   QSound 250 Hz と同じ時基。4 MHz だと 279 Hz。 */
+		cpuHz_ = 3579545;
+		opmHz_ = 3579545;
+		chip_ = CEmuChipYm2151Create((uint32_t)opmHz_, sampleRate_);
+		chip2_ = NULL;
+		pcm_ = CEmuChipOki6295Create(1000000u / 132u, sampleRate_);
+		pcmKind_ = 2;
+		bankBase_ = 0x8000u;
+		bankSize_ = 0x4000u;
 	} else {
 		cpuHz_ = 4000000;
 		opmHz_ = 4000000;
 		chip_ = CEmuChipYm2151Create((uint32_t)opmHz_, sampleRate_);
 		chip2_ = NULL;
-		if (board_ == CEMU_AC_BOARD_CPS1) {
-			pcm_ = CEmuChipOki6295Create(1056000u, sampleRate_);
-			pcmKind_ = 2;
-		} else if (hasSegaPcm) {
+		if (hasSegaPcm) {
 			pcm_ = CEmuChipSegaPcmCreate(4000000u, sampleRate_, 12u, 0x70u);
 			pcmKind_ = 1;
 		}
@@ -2587,6 +2596,27 @@ void CHardAc::SetBank(int bank)
 		bankLoaded_ = 1;
 		unsigned n = 0x4000u;
 		if (src + n > soundRomSize_) n = soundRomSize_ - src;
+		memset(mem_ + 0x8000, 0xff, 0x4000);
+		if (n) memcpy(mem_ + 0x8000, soundRom_ + src, n);
+		return;
+	}
+	/* CPS1: MAME membank("bank1")->configure_entries(0, n, &audiocpu[0x10000], 0x4000);
+	   cps1_snd_bankswitch_w は data&1 のみ。64K ファイルは 32K 固定@0000 + CONTINUE 32K@10000。
+	   汎用 src=bank*0x4000 だと偶数=ROM先頭・奇数=固定 4000 を 8000 へ載せ、II テーマ（論理 C000=bank1）が無音または先頭曲ループになる。 */
+	if (board_ == CEMU_AC_BOARD_CPS1) {
+		const int b = bank & 1;
+		if (soundRomSize_ < 0x14000u)
+			return;
+		const unsigned src = 0x10000u + (unsigned)b * 0x4000u;
+		if (src >= soundRomSize_)
+			return;
+		if (b == bank_ && bankLoaded_)
+			return;
+		bank_ = b;
+		bankLoaded_ = 1;
+		unsigned n = 0x4000u;
+		if (src + n > soundRomSize_)
+			n = soundRomSize_ - src;
 		memset(mem_ + 0x8000, 0xff, 0x4000);
 		if (n) memcpy(mem_ + 0x8000, soundRom_ + src, n);
 		return;
@@ -4277,8 +4307,8 @@ void CHardAc::PortOut(uint16_t port, uint8_t data)
 		}
 		if ((p == 0x02 || p == 0x03) && pcm_)
 			pcm_->Write(p - 0x02, data);
-		else if (p == 0x04 && pcm_)
-			pcm_->Write(0x100, data);
+		else if (p == 0x04)
+			SetBank(data);
 		break;
 	case CEMU_AC_BOARD_CPS_QS:
 		if (p <= 0x02)
@@ -4604,8 +4634,8 @@ int CHardAc::RaizingTrackIdle()
 	}
 	/* KeyOnCount は累積なので、!= 0 だけだと終わったジングルも「忙しい」。新規 KeyOn も OKI ボイスも無い 1 秒区間をトラック終端と見る。ループ BGM は $08 をストローブし続け、OKI 多用曲は ReadStatus を立て続けるのでライブのまま。 */
 	const unsigned keys = chip_ ? CEmuChipYm2151KeyOnCount(chip_) : 0;
-	const int oki = (pcm_ && pcm_->ReadStatus())
-		|| (pcm2_ && pcm2_->ReadStatus());
+	const int oki = (pcm_ && (pcm_->ReadStatus() & 0x0f))
+		|| (pcm2_ && (pcm2_->ReadStatus() & 0x0f));
 	const int grew = keys > raizingLastKeyOns_;
 	raizingLastKeyOns_ = keys;
 	if (oki || grew) {
@@ -5554,8 +5584,9 @@ void CHardAc::MemWrite(uint16_t addr, uint8_t data)
 			pcm_->Write(addr & 1, data);
 			return;
 		}
-		if (addr == 0xf004 && pcm_) {
-			pcm_->Write(0x100, data);
+		if (addr == 0xf004) {
+			/* MAME cps1_snd_bankswitch_w: data&1 で CONTINUE 16K を 8000 へ。OKI バンクではない。 */
+			SetBank(data & 1);
 			return;
 		}
 		/* その他 I/O — データプレーンを無視し、F0xx の ROM イメージが MemRead で読まれないように */
@@ -9097,12 +9128,13 @@ int CHardAc::LoadRomsPcmChip(CEmuZipFs* fs, const CEmuGameEntry* ge)
 		|| board_ == CEMU_AC_BOARD_KONAMI_RF5C400) ? 1 : 0;
 }
 
-/* QSound 1.04 表歩行はオペコードフェッチと即値／ディスプレースメント読を混ぜる。Kabuki はそれらを別プレーンへ復号するので、21 00 90 の平文 memcmp は dino/wof に一致しない。isImm[i]==1 がデータプレーンを比較。 */
+/* QSound 1.04 表歩行はオペコードフェッチと即値／ディスプレースメント読を混ぜる。Kabuki はそれらを別プレーンへ復号するので、21 00 90 の平文 memcmp は dino/wof に一致しない。isImm[i]==1 がデータプレーンを比較。care==NULL は全バイト照合。care[i]==0 は即値番地など無視（1.03 は表が 7C10 で 9000 固定パターンに落ちない）。 */
 static int QsMatchMixed(const uint8_t* op, const uint8_t* dt, unsigned a,
-	const uint8_t* pat, const uint8_t* isImm, unsigned n)
+	const uint8_t* pat, const uint8_t* isImm, unsigned n, const uint8_t* care)
 {
 	if (!op || !dt) return 0;
 	for (unsigned i = 0; i < n; i++) {
+		if (care && !care[i]) continue;
 		const uint8_t got = isImm[i] ? dt[a + i] : op[a + i];
 		if (got != pat[i]) return 0;
 	}
@@ -9350,9 +9382,11 @@ int CHardAc::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode
 				}
 			}
 		}
-		/* Capcom QSound: カタログタイトルは packet[0] の 1 バイトだが、Z80 は (IY+0)/(IY+1) から 16bit BE コードを読む → code<<8。8bit 添字書き換えが要るドライバ族は 2 つ:
+		/* Capcom QSound: カタログタイトルは packet[0] の 1 バイトだが、Z80 は (IY+0)/(IY+1) から 16bit BE コードを読む → code<<8。8bit 添字書き換えが要るドライバ族は 3 つ:
 
 		   古典（1.04–1.06b）: 個数は (9000)、表は 9006 — 0100..0800 でパターン走査（番地は改訂毎に動く。ハードコード 0206 パッチはかつて 1.04 を壊し ssf2t を無音にした）。
+
+		   初期（ssf2 1.03）: 同じ IY 16bit + 剰余 + *4 だが個数は (7C10)、表は 7C16。9000/8000 固定照合は外れ、HL=code<<8 が表+0x400 を指して選曲と実音がずれる。
 
 		   後期（batcir/ddsom/1944/…）: 個数は (F010)、表 ptr は (F013) — 同じ IY 16bit ロードのあと DE=(F010) 剰余。書き換え無しだと HL=code<<8 が誤った（しばしば空）項目へ畳み、アイドルループは tick したまま（pc 約 0180）SILENT。 */
 		if (soundRom_ && soundRomSize_ >= 0x8000u) {
@@ -9367,6 +9401,18 @@ int CHardAc::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode
 				0,
 				0, 0,
 				0, 1, 1,
+			};
+			/* LD HL,nn / LD DE,nn の番地は版で動く。オペコードと IY 剰余だけ見る。 */
+			static const uint8_t kQsCare[] = {
+				1, 0, 0,
+				1, 1, 1,
+				1, 1, 1,
+				1, 1, 1,
+				1, 1, 1,
+				1, 1,
+				1,
+				1, 1,
+				1, 0, 0,
 			};
 			static const uint8_t kQsPat9000[] = {
 				0x21, 0x00, 0x90,
@@ -9395,7 +9441,7 @@ int CHardAc::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode
 				0x26, 0x00,       /* LD H,0 */
 				0x29,             /* ADD HL,HL */
 				0x29,             /* ADD HL,HL */
-				0x18, 0x0b,       /* JR +11 → LD DE,xx06 */
+				0x18, 0x0b,       /* JR +11 → LD DE,表 */
 			};
 			/* LD H,(IY+0) / LD L,(IY+1) / LD DE,(F010) — 後期 QSound エンジン */
 			static const uint8_t kQsLookupF010[] = {
@@ -9415,8 +9461,9 @@ int CHardAc::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode
 				const uint8_t* dt = (qsKabuki_ && qsKabukiData_) ? qsKabukiData_ : mem_;
 				int patched = 0;
 				for (unsigned a = 0x0100u; a + sizeof(kQsPat9000) <= 0x0800u; a++) {
-					if (!QsMatchMixed(op, dt, a, kQsPat9000, kQsIsImm, sizeof(kQsPat9000))
-						&& !QsMatchMixed(op, dt, a, kQsPat8000, kQsIsImm, sizeof(kQsPat8000)))
+					if (!QsMatchMixed(op, dt, a, kQsPat9000, kQsIsImm, sizeof(kQsPat9000), NULL)
+						&& !QsMatchMixed(op, dt, a, kQsPat8000, kQsIsImm, sizeof(kQsPat8000), NULL)
+						&& !QsMatchMixed(op, dt, a, kQsPat9000, kQsIsImm, sizeof(kQsPat9000), kQsCare))
 						continue;
 					memcpy(soundRom_ + a, kQsIdx, sizeof(kQsIdx));
 					memcpy(mem_ + a, kQsIdx, sizeof(kQsIdx));
@@ -9612,6 +9659,29 @@ int CHardAc::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode
 			int off = r->offset;
 			if (off < 0) off = 0;
 			chip_->SetAdpcmB(data, sz, (unsigned)off);
+		}
+	}
+
+	/* CPS1: MAME audiocpu は 32K 固定 @0000 + ROM_CONTINUE 32K @0x10000。64K を線形に 0000-FFFF へ置くと F004 バンク 1（file+0x4000 を 8000 へ）が CONTINUE 後半を読み、OKI サンプル番号が壊れる。 */
+	if (board_ == CEMU_AC_BOARD_CPS1 && codeRom && codeRomSize) {
+		const unsigned need = (codeRomSize == 0x10000u) ? 0x18000u : codeRomSize;
+		uint8_t* p = (uint8_t*)malloc(need);
+		if (p) {
+			memset(p, 0xff, need);
+			if (codeRomSize == 0x10000u) {
+				memcpy(p, codeRom, 0x8000u);
+				memcpy(p + 0x10000u, codeRom + 0x8000u, 0x8000u);
+			} else {
+				memcpy(p, codeRom, codeRomSize);
+			}
+			if (soundRom_) free(soundRom_);
+			soundRom_ = p;
+			soundRomSize_ = need;
+			unsigned n = (need < 0x8000u) ? need : 0x8000u;
+			memcpy(mem_, soundRom_, n);
+			if (n < 0x8000u)
+				memset(mem_ + n, 0xff, 0x8000u - n);
+			memset(mem_ + 0x8000, 0xff, 0x8000u);
 		}
 	}
 

@@ -89,6 +89,7 @@ public:
 			const uint8_t rising = (uint8_t)(v & ~keyOn_);
 			keyOn_ = v; /* 下位4bitがキーオン、上位がリバース */
 			reg_[r] = v;
+			FmMonShadowSetCompanionRegs(reg_, (unsigned)sizeof(reg_));
 			for (int i = 0; i < kK053260Channels; i++) {
 				ch_[i].reverse = (v >> (4 + i)) & 1;
 				if (rising & (1 << i))
@@ -99,6 +100,7 @@ public:
 			return;
 		}
 		reg_[r] = v;
+		FmMonShadowSetCompanionRegs(reg_, (unsigned)sizeof(reg_));
 		if (r >= 8 && r < 0x28) {
 			const int c = (r - 8) / 8;
 			Channel& vc = ch_[c];

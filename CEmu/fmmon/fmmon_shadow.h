@@ -95,6 +95,8 @@ void FmMonShadowApplyC352Reg(unsigned ofs, unsigned data16);
 void FmMonShadowApplySegaPcmMem(unsigned addr, unsigned data8);
 void FmMonShadowApplyOki6295(unsigned data8);
 void FmMonShadowApplyGa20Reg(unsigned ofs, unsigned data8);
+/* xxxx+yyyy の yyyy を 256B に圧縮して bank1 または bank2 へ。n>256 は先頭だけ。 */
+void FmMonShadowSetCompanionRegs(const uint8_t* data, unsigned nbytes);
 /* YMW258 MultiPCM: chipId 0/1, port 0=data 1=slot 2=reg */
 void FmMonShadowApplyMultiPcm(int chipId, unsigned port, unsigned data8);
 

@@ -8,6 +8,15 @@
 /* hoot ssMSM6295/ssADPCM.cpp と MAME OKI ADPCM テーブルを参考。 */
 enum { kOkiVoices = 4, kOkiShift = 12 };
 
+/* 鍵盤は A0–C8（21–108）。sf2 のドラム番号 0x0B は o0b で範囲外→点灯しない。 */
+static int CEmuOkiMonMidi(int sampleKey)
+{
+	int m = sampleKey & 127;
+	if (m < 21) m += 36;
+	if (m > 108) m = 108;
+	return m;
+}
+
 static int CEmuOkiClamp16(int v)
 {
 	if (v > 32767) return 32767;
@@ -26,8 +35,8 @@ public:
 		, sampleKey_(0)
 		, lastCommand_(0)
 		, bank_(NULL)
-		, monAcc_(0)
 	{
+		memset(monOn_, 0, sizeof(monOn_));
 		BuildTables();
 		Reset();
 	}
@@ -39,7 +48,7 @@ public:
 		cmdState_ = 0;
 		sampleKey_ = 0;
 		lastCommand_ = 0;
-		monAcc_ = 0;
+		memset(monOn_, 0, sizeof(monOn_));
 	}
 
 	void Write(uint32_t addr, uint32_t data) override
@@ -54,15 +63,16 @@ public:
 				cmdState_ = 1;
 				sampleKey_ = (uint8_t)(v & 0x7f);
 			} else {
-				if (v & 0x40) Stop(0);
-				if (v & 0x20) Stop(1);
-				if (v & 0x10) Stop(2);
-				if (v & 0x08) Stop(3);
+				/* MAME: bits 6-3 がボイス（bit3=ch0）。複数可。 */
+				unsigned mask = (unsigned)v >> 3;
+				for (int ch = 0; ch < kOkiVoices; ch++, mask >>= 1) {
+					if (mask & 1)
+						Stop(ch);
+				}
 			}
 		} else {
 			cmdState_ = 0;
-			const int ch = DecodeChannel(v >> 4);
-			if (ch < 0 || !rom_) return;
+			if (!rom_) return;
 			const uint32_t table = (uint32_t)sampleKey_ * 8u;
 			uint8_t hdr[6];
 			for (int k = 0; k < 6; k++) {
@@ -72,10 +82,15 @@ public:
 			}
 			const uint32_t start = ((hdr[0] << 16) | (hdr[1] << 8) | hdr[2]) & 0x3ffffu;
 			const uint32_t end = ((hdr[3] << 16) | (hdr[4] << 8) | hdr[5]) & 0x3ffffu;
-			if (start > end || Xlat(start) >= romSize_) {
-				Stop(ch);
-			} else {
-				Play(ch, start, end - start + 1, v & 0x0f);
+			/* 再生スロットは MAME（bit4=voice0）。同じビットへの再キーは hoot 同様に置き換え
+			   （sf2 は Ch1 に BD とシンバルを重ね、無視するとシンバルが欠ける）。 */
+			unsigned mask = (unsigned)v >> 4;
+			for (int ch = 0; ch < kOkiVoices; ch++, mask >>= 1) {
+				if (!(mask & 1)) continue;
+				if (start >= end || Xlat(start) >= romSize_)
+					Stop(ch);
+				else
+					Play(ch, start, end - start + 1, v & 0x0f);
 			}
 		}
 		UpdateSnapshot();
@@ -93,51 +108,48 @@ public:
 	void MixAdd(int16_t* stereo, int frames, int gain) override
 	{
 		if (!stereo || frames <= 0 || !rom_) return;
-		int playing = 0;
+		if (gain <= 0) return;
 		for (int i = 0; i < frames; i++) {
 			int mix = 0;
 			for (int ch = 0; ch < kOkiVoices; ch++) {
 				Voice& vc = voice_[ch];
 				if (!vc.playing) continue;
-				playing = 1;
 				while (vc.count >= (1 << kOkiShift)) {
 					Fetch(vc);
 					vc.count -= (1 << kOkiShift);
 				}
-				mix += vc.prevSignal * vc.volume / 16;
+				/* hoot ssADPCM: ニブル間を線形補間。ZOH だと 7.5kHz がざらつく。
+				   乗算は 12bit×位相×volume が int32 上限に触るので 64bit。 */
+				const int64_t dat = ((int64_t)vc.prevSignal * vc.count
+					+ (int64_t)vc.signal * ((1 << kOkiShift) - vc.count))
+					* (int64_t)vc.volume / ((int64_t)16 << kOkiShift);
+				mix += (int)dat;
 				vc.count += vc.incr;
 			}
-			const int s = mix * gain / 256;
+			/* gain は 256=unity。hoot pcm_mix を生で渡して /256 を外すと溢れてノイズになる。 */
+			const int s = (int)((int64_t)mix * gain / 256);
 			/* モノラルADPCMを L/R へ同じ値。 */
 			stereo[i * 2] = (int16_t)CEmuOkiClamp16((int)stereo[i * 2] + s);
 			stereo[i * 2 + 1] = (int16_t)CEmuOkiClamp16((int)stereo[i * 2 + 1] + s);
 		}
-		/* ワンショットは分類窓の前にキーオンする。デコード中にヒットをパルスし、
-		   ループSFXをフラットなNOSEQではなくシーケンスとして採点させる。 */
-		if (playing) {
-			monAcc_ += frames;
-			const int period = sampleRate_ / 5;
-			if (period > 0 && monAcc_ >= period) {
-				monAcc_ = 0;
-				for (int ch = 0; ch < kOkiVoices; ch++) {
-					if (!voice_[ch].playing) continue;
-					FmMonShadowPcmNote(ch, 60 + ch, 0);
-					FmMonShadowPcmNote(ch, 60 + ch, 1);
-				}
-			}
-		} else {
-			monAcc_ = 0;
+		/* サンプル終了でキーオフ。PDX1 = ファームの voice bit0（MAME bit4）。 */
+		for (int ch = 0; ch < kOkiVoices; ch++) {
+			const int on = voice_[ch].playing ? 1 : 0;
+			if (monOn_[ch] && !on)
+				FmMonShadowPcmNote(ch, 0, 0);
+			monOn_[ch] = (uint8_t)on;
 		}
 		UpdateSnapshot();
 	}
 
 	uint8_t ReadStatus() override
 	{
-		uint8_t d = 0;
-		if (voice_[0].playing) d |= 0x08;
-		if (voice_[1].playing) d |= 0x04;
-		if (voice_[2].playing) d |= 0x02;
-		if (voice_[3].playing) d |= 0x01;
+		/* MAME: 上位は 1 固定（naname）。bit0=ch0 … bit3=ch3。 */
+		uint8_t d = 0xf0;
+		if (voice_[0].playing) d |= 0x01;
+		if (voice_[1].playing) d |= 0x02;
+		if (voice_[2].playing) d |= 0x04;
+		if (voice_[3].playing) d |= 0x08;
 		return d;
 	}
 
@@ -170,12 +182,6 @@ private:
 		int incr;
 		unsigned volume;
 	};
-
-	static int DecodeChannel(int code)
-	{
-		static const signed char tbl[16] = { -1, 3, 2, -1, 1, -1, -1, -1, 0, -1, -1, -1, -1, -1, -1, -1 };
-		return tbl[code & 15];
-	}
 
 	void BuildTables()
 	{
@@ -248,10 +254,16 @@ private:
 		vc.incr = (int)(((uint64_t)clockHz_ << kOkiShift) / (uint64_t)sampleRate_); /* クロック→ホスト */
 		if (vc.incr <= 0) vc.incr = 1;
 		Fetch(vc);
+		FmMonShadowPcmNote(ch, CEmuOkiMonMidi(sampleKey_), 1);
+		monOn_[ch] = 1;
 	}
 
 	void Stop(int ch)
 	{
+		if (ch < 0 || ch >= kOkiVoices) return;
+		if (monOn_[ch] || voice_[ch].playing)
+			FmMonShadowPcmNote(ch, 0, 0);
+		monOn_[ch] = 0;
 		voice_[ch].playing = 0;
 		voice_[ch].sample = 0;
 		voice_[ch].step = 0;
@@ -275,6 +287,7 @@ private:
 			snapshot_[o + 6] = (uint8_t)(voice_[ch].signal >> 8);
 			snapshot_[o + 7] = (uint8_t)voice_[ch].signal;
 		}
+		FmMonShadowSetCompanionRegs(snapshot_, (unsigned)sizeof(snapshot_));
 	}
 
 	uint32_t clockHz_;
@@ -285,7 +298,7 @@ private:
 	uint8_t sampleKey_;
 	uint8_t lastCommand_;
 	const unsigned* bank_;
-	int monAcc_;
+	uint8_t monOn_[kOkiVoices];
 	Voice voice_[kOkiVoices];
 	int indexShift_[8];
 	int diffLookup_[49 * 16];
