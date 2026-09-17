@@ -651,6 +651,15 @@ static int FmPanelCols(int n)
 	return 8;
 }
 
+/* PCM 専用グリッド。FM アルゴより余白が多いので列を増やして収める */
+static int FmPanelColsPcm(int n)
+{
+	if (n <= 4) return (std::max)(1, n);
+	if (n <= 8) return 4;
+	if (n <= 12) return 6;
+	return 8;
+}
+
 static int FmYyyyHas(const wchar_t* y, const wchar_t* tok)
 {
 	return (y && y[0] && tok && wcsstr(y, tok)) ? 1 : 0;
@@ -778,6 +787,7 @@ static int FmArcadePcmChannels(unsigned p)
 	if (p == SASAMI_FMMON_KEYS_OKI) return 4;
 	if (p == SASAMI_FMMON_KEYS_RF5C) return 8;
 	if (p == SASAMI_FMMON_KEYS_MULTIPCM) return 32;
+	if (p == SASAMI_FMMON_KEYS_C352) return 32;
 	return 16;
 }
 
@@ -805,6 +815,34 @@ static const wchar_t* FmArcadePcmShort(unsigned p)
 	case SASAMI_FMMON_KEYS_OKI: return L"OKI";
 	default: return L"PCM";
 	}
+}
+
+/* 接頭辞と番号を空ける。C35201 だと C352 の 01 か C3520 の 1 か判らない。
+   prefWidth があれば短い接頭辞をスペース埋めして番号の桁を縦に揃える（FM  1 / SSG 1）。 */
+static void FmFormatChNum(wchar_t* out, int cap, const wchar_t* pref, int num, int total, int prefWidth = 0)
+{
+	if (!out || cap <= 0) return;
+	if (!pref) pref = L"";
+	if (num <= 0) {
+		_snwprintf_s(out, cap, _TRUNCATE, L"%s", pref);
+		return;
+	}
+	wchar_t head[16];
+	int n = 0;
+	while (pref[n] && n < 12) {
+		head[n] = pref[n];
+		n++;
+	}
+	int field = n;
+	if (prefWidth > field) field = prefWidth;
+	if (field > 12) field = 12;
+	while (n < field)
+		head[n++] = L' ';
+	head[n] = 0;
+	if (total >= 10)
+		_snwprintf_s(out, cap, _TRUNCATE, L"%s %02d", head, num);
+	else
+		_snwprintf_s(out, cap, _TRUNCATE, L"%s %d", head, num);
 }
 
 } // namespace
@@ -1475,8 +1513,12 @@ int CFmMonitorDlg::PrimaryPanelN() const
 		return (ChipProfile() == SASAMI_FMMON_KEYS_OPL3) ? 18 : 9;
 	if (IsMsxDump())
 		return (MsxDevMask() & SASAMI_FMMON_DEV_OPLL) ? 9 : 0;
-	if (IsArcadePcmDump())
-		return FmArcadePcmChannels(ChipProfile());
+	if (IsArcadePcmDump()) {
+		int n = FmArcadePcmChannels(ChipProfile());
+		if (m_dump.pcmCount > 0 && m_dump.pcmCount <= SASAMI_FMMON_PCM_MAX)
+			n = (int)m_dump.pcmCount;
+		return n;
+	}
 	if (PreferOpnaShell()) return 6;
 	if (!HasViewPanels()) return 0;
 	return FmRows();
@@ -1505,6 +1547,24 @@ int CFmMonitorDlg::CompanionPanelN() const
 	}
 	const int pcm = PcmRows();
 	return (pcm > 0) ? pcm : 0;
+}
+
+int CFmMonitorDlg::PanelGridPcmCompact() const
+{
+	const int nPri = PrimaryPanelN();
+	const int nComp = CompanionPanelN();
+	if (nPri > 0 && nComp == 0)
+		return IsArcadePcmDump() ? 1 : 0;
+	if (nPri == 0 && nComp > 0) {
+		wchar_t y[40];
+		if (!m_haveDump || !FmIdentYyyy(m_dump.titleSjis, y, 40))
+			return 1;
+		if (FmYyyyHas(y, L"OPLL") || FmYyyyHas(y, L"YM2413")
+			|| FmYyyyHas(y, L"OPL2") || FmYyyyHas(y, L"Y8950") || FmYyyyHas(y, L"YM3812"))
+			return 0;
+		return 1;
+	}
+	return 0;
 }
 
 int CFmMonitorDlg::PrimarySilent() const
@@ -1725,10 +1785,13 @@ int CFmMonitorDlg::ContentHeight(int dpi, int pcmRows) const
 	const int nBanks = HexBankCount();
 	const int hexH = nBanks * (FmScale(18, dpi) + 16 * cellH) + (nBanks - 1) * bankGap;
 	const int nPan = PrimaryPanelN() + CompanionPanelN();
-	const int cols = FmPanelCols((std::max)(1, nPan));
+	const int pcmCompact = PanelGridPcmCompact();
+	const int cols = pcmCompact
+		? FmPanelColsPcm((std::max)(1, nPan))
+		: FmPanelCols((std::max)(1, nPan));
 	const int rows = (nPan <= 0) ? 1 : ((nPan + cols - 1) / cols);
-	const int minPh = FmScale(110, dpi);
-	const int panH = rows * minPh + (rows - 1) * FmScale(3, dpi);
+	const int minPh = pcmCompact ? FmScale(52, dpi) : FmScale(110, dpi);
+	const int panH = rows * minPh + (rows - 1) * FmScale(pcmCompact ? 2 : 3, dpi);
 	const int fmPanelH = (std::max)(hexH, (std::max)(panH, FmScale(320, dpi)));
 	const int rowH = FmScale(14, dpi);
 	const int chRows = FmRows() + ExRows() + SsgRows() + pcmRows + (HideRhythm() ? 0 : 1);
@@ -1743,9 +1806,13 @@ int CFmMonitorDlg::PreferredWidth(int dpi) const
 	const int gapExtra = FmScale(4, dpi);
 	const int hexW = cellW + 16 * cellW + 4 * gapExtra + FmScale(8, dpi);
 	const int nPan = PrimaryPanelN() + CompanionPanelN();
-	const int cols = FmPanelCols((std::max)(1, nPan));
-	const int minPw = FmScale(150, dpi);
-	const int fmW = (std::max)(FmScale(560, dpi), cols * minPw + (cols - 1) * FmScale(3, dpi));
+	const int pcmCompact = PanelGridPcmCompact();
+	const int cols = pcmCompact
+		? FmPanelColsPcm((std::max)(1, nPan))
+		: FmPanelCols((std::max)(1, nPan));
+	const int minPw = pcmCompact ? FmScale(86, dpi) : FmScale(150, dpi);
+	const int fmW = (std::max)(FmScale(pcmCompact ? 420 : 560, dpi),
+		cols * minPw + (cols - 1) * FmScale(pcmCompact ? 2 : 3, dpi));
 	const int labelW = FmScale(58, dpi);
 	const int pianoMin = FmScale(360, dpi);
 	const int top = hexW + FmScale(6, dpi) + fmW;
@@ -2241,7 +2308,12 @@ void CFmMonitorDlg::DrawFmChPanel(CDC& dc, const CRect& rc, int ch)
 	dc.SetBkColor(headBg);
 	dc.SetTextColor(RGB(220, 245, 230));
 	wchar_t title[24];
-	_snwprintf_s(title, _TRUNCATE, L"FM CH%d", ch + 1);
+	int padN = 6;
+	if (CompanionPanelN() >= 10) padN = CompanionPanelN();
+	if (padN >= 10)
+		_snwprintf_s(title, _TRUNCATE, L"FM CH %02d", ch + 1);
+	else
+		_snwprintf_s(title, _TRUNCATE, L"FM CH %d", ch + 1);
 	dc.TextOut(rc.left + pad, rc.top + 2, title);
 
 	const int headInnerTop = rc.top + titlePx + 4;
@@ -2576,7 +2648,7 @@ static void FmLrFromArcadePcm(const SasamiFmMonDump& d, unsigned profile, int ch
 static void FmDrawLrGauge(CDC& dc, HFONT labFont, int x, int y, int w, int h,
 	int lAmt, int rAmt, int playing)
 {
-	if (w < 24 || h < 6) return;
+	if (w < 16 || h < 4) return;
 	const COLORREF cap = RGB(148, 154, 162);
 	const COLORREF barCol = RGB(72, 78, 88);
 	const COLORREF dotFill = playing ? RGB(72, 220, 112) : RGB(96, 100, 108);
@@ -2591,25 +2663,37 @@ static void FmDrawLrGauge(CDC& dc, HFONT labFont, int x, int y, int w, int h,
 	if (lAmt + rAmt > 0)
 		pan = (rAmt * 255) / (lAmt + rAmt);
 
-	const int capPx = (std::max)(8, (std::min)(11, h - 1));
-	HFONT capFont = FmMakeFont(capPx);
-	dc.SelectObject(capFont);
-	const CSize ls = dc.GetTextExtent(L"L");
-	const CSize rs = dc.GetTextExtent(L"R");
-	dc.SetTextColor(cap);
-	dc.TextOut(x, y + (h - ls.cy) / 2, L"L");
-	dc.TextOut(x + w - rs.cx, y + (h - rs.cy) / 2, L"R");
-	dc.SelectObject(labFont);
+	const int compact = (h < 10 || w < 36) ? 1 : 0;
+	int barLeft = x + 1;
+	int barRight = x + w - 1;
+	if (!compact) {
+		const int capPx = (std::max)(8, (std::min)(11, h - 1));
+		HFONT capFont = FmMakeFont(capPx);
+		dc.SelectObject(capFont);
+		const CSize ls = dc.GetTextExtent(L"L");
+		const CSize rs = dc.GetTextExtent(L"R");
+		dc.SetTextColor(cap);
+		dc.TextOut(x, y + (h - ls.cy) / 2, L"L");
+		dc.TextOut(x + w - rs.cx, y + (h - rs.cy) / 2, L"R");
+		dc.SelectObject(labFont);
+		barLeft = x + ls.cx + 2;
+		barRight = x + w - rs.cx - 2;
+	}
 
-	const int barLeft = x + ls.cx + 2;
-	const int barRight = x + w - rs.cx - 2;
 	const int barW = barRight - barLeft;
-	if (barW < 8) return;
-	const int barH = (std::max)(2, h / 5);
+	if (barW < 6) return;
+	const int barH = (std::max)(2, compact ? (h / 3) : (h / 5));
 	const int barY = y + (h - barH) / 2;
 	dc.FillSolidRect(barLeft, barY, barW, barH, barCol);
+	{
+		const int cx = barLeft + barW / 2;
+		const int tickW = (std::max)(1, (std::min)(2, barW / 24));
+		const int tickH = barH + (std::max)(1, h / 6);
+		const int tickY = barY - (tickH - barH) / 2;
+		dc.FillSolidRect(cx - tickW / 2, tickY, (std::max)(1, tickW), tickH, RGB(186, 192, 202));
+	}
 
-	const int dot = (std::max)(6, (std::min)(h - 1, 9));
+	const int dot = (std::max)(3, (std::min)(h - 1, compact ? 5 : 9));
 	int travel = barW - dot;
 	if (travel < 0) travel = 0;
 	const int dx = barLeft + travel * pan / 255;
@@ -2621,6 +2705,157 @@ static void FmDrawLrGauge(CDC& dc, HFONT labFont, int x, int y, int w, int h,
 	dc.Ellipse(dx, dy, dx + dot, dy + dot);
 	dc.SelectObject(oldb);
 	dc.SelectObject(oldp);
+}
+
+static int FmTlLoud(int tl, int maxTl)
+{
+	if (maxTl <= 0) return 0;
+	if (tl < 0) tl = 0;
+	if (tl > maxTl) tl = maxTl;
+	return (maxTl - tl) * 255 / maxTl;
+}
+
+/* OPN キャリア TL → 0..255。alg 0-3 は S4、4 は S2+S4、5-6 は S2-4、7 は全部 */
+static int FmOpnCarrierLevel(const SasamiFmMonDump& d, int bank, int slot)
+{
+	if (bank < 0 || slot < 0) return 0;
+	const int alg = d.regs[bank + 0xB0 + slot] & 7;
+	static const int kCar[8] = { 8, 8, 8, 8, 10, 14, 14, 15 };
+	int best = 0;
+	for (int op = 0; op < 4; op++) {
+		if (!((kCar[alg] >> op) & 1)) continue;
+		const int lv = FmTlLoud(d.regs[bank + 0x40 + op * 4 + slot] & 0x7F, 127);
+		if (lv > best) best = lv;
+	}
+	return best;
+}
+
+static int FmOpmCarrierLevel(const SasamiFmMonDump& d, int ch)
+{
+	if (ch < 0 || ch > 7) return 0;
+	static const int kSOff[4] = { 0, 16, 8, 24 };
+	const int alg = d.regs[0x20 + ch] & 7;
+	static const int kCar[8] = { 8, 8, 8, 8, 10, 14, 14, 15 };
+	int best = 0;
+	for (int op = 0; op < 4; op++) {
+		if (!((kCar[alg] >> op) & 1)) continue;
+		const int lv = FmTlLoud(d.regs[0x60 + kSOff[op] + ch] & 0x7F, 127);
+		if (lv > best) best = lv;
+	}
+	return best;
+}
+
+static int FmOplCarrierLevel(const SasamiFmMonDump& d, int ch)
+{
+	if (ch < 0 || ch > 17) return 0;
+	static const int kOp2[9] = { 3, 4, 5, 9, 10, 11, 15, 16, 17 };
+	const int bank = (ch >= 9) ? 0x100 : 0;
+	const int tl = d.regs[bank + 0x40 + kOp2[ch % 9]] & 0x3F;
+	return FmTlLoud(tl, 63);
+}
+
+static int FmSsgLevel(const SasamiFmMonDump& d, int ch)
+{
+	if (ch < 0 || ch > 2) return 0;
+	const uint8_t v = d.regs[8 + ch];
+	if (v & 0x10) return 200;
+	return (v & 0x0F) * 255 / 15;
+}
+
+static int FmMapPcmBarLevel(unsigned profile, int vol)
+{
+	if (profile == SASAMI_FMMON_KEYS_QSOUND) {
+		if (vol <= 0) return 0;
+		if (vol >= 0x1000) return 255;
+		return vol * 255 / 0x1000;
+	}
+	if (profile == SASAMI_FMMON_KEYS_C352) {
+		const int a = vol & 0xFF;
+		const int b = (vol >> 8) & 0xFF;
+		return (a > b) ? a : b;
+	}
+	if (vol < 0) return 0;
+	if (vol > 255) return 255;
+	return vol;
+}
+
+static int FmArcadePcmVol255(const SasamiFmMonDump& d, unsigned profile, int ch)
+{
+	if (ch < 0) return 0;
+	const int useComp = FmDumpUsesCompanion(d);
+	auto b = [&](int idx) -> uint8_t {
+		if (useComp) {
+			if (idx < 0 || idx > 0xFF) return 0;
+			return FmCompByte(d, idx);
+		}
+		return (idx >= 0 && idx < 0x200) ? d.regs[idx] : 0;
+	};
+	auto wHiLo = [&](int idx) -> unsigned {
+		return ((unsigned)b(idx) << 8) | (unsigned)b(idx + 1);
+	};
+	auto wLoHi = [&](int idx) -> unsigned {
+		return (unsigned)b(idx) | ((unsigned)b(idx + 1) << 8);
+	};
+	int vol = 0;
+	if (profile == SASAMI_FMMON_KEYS_QSOUND)
+		vol = (int)wHiLo(ch * 16 + 12);
+	else if (profile == SASAMI_FMMON_KEYS_C352)
+		vol = (int)wLoHi(ch * 16 + 2);
+	else if (profile == SASAMI_FMMON_KEYS_SEGAPCM) {
+		const int dLo = 0x40 + ch * 8;
+		vol = b(dLo + 2) ? b(dLo + 2) : b(ch * 8 + 2);
+	} else if (profile == SASAMI_FMMON_KEYS_RF5C)
+		vol = b(0x00);
+	else if (profile == SASAMI_FMMON_KEYS_MULTIPCM) {
+		if (useComp) {
+			const int base = (ch / 16) * 128 + (ch % 16) * 8;
+			vol = b(base + 1);
+		}
+	} else if (profile == SASAMI_FMMON_KEYS_OKI) {
+		const int ga20 = (d.titleSjis[0] && strstr(d.titleSjis, "GA20")) ? 1 : 0;
+		if (ga20)
+			vol = b((useComp ? 0 : 0x100) + ch * 8 + 5);
+		else
+			vol = b(4 + ch * 8);
+	}
+	return FmMapPcmBarLevel(profile, vol);
+}
+
+static void FmRhythmVolPan(const SasamiFmMonDump& d, int i, int msx, int& vol, int& lAmt, int& rAmt)
+{
+	vol = 0;
+	lAmt = rAmt = 255;
+	if (i < 0 || i > 5) return;
+	if (msx) {
+		/* OPLL: $36 BD、$37 HH/SD、$38 TOM/CYM。TOP=CYM、RIM は無し */
+		int tl = 15;
+		if (i == 0) tl = d.regs[0x36] & 0x0F;
+		else if (i == 1) tl = d.regs[0x37] & 0x0F;
+		else if (i == 2) tl = d.regs[0x38] & 0x0F;
+		else if (i == 3) tl = (d.regs[0x37] >> 4) & 0x0F;
+		else if (i == 4) tl = (d.regs[0x38] >> 4) & 0x0F;
+		else return;
+		vol = FmTlLoud(tl, 15);
+		return;
+	}
+	const uint8_t r = d.regs[0x18 + i];
+	FmLrFromBits((r >> 7) & 1, (r >> 6) & 1, lAmt, rAmt);
+	const int inst = FmTlLoud(r & 0x1F, 31);
+	const int master = FmTlLoud(d.regs[0x11] & 0x3F, 63);
+	vol = inst * master / 255;
+}
+
+static void FmDrawKeyVolBar(CDC& dc, int x, int y, int w, int h, int level, COLORREF fill = RGB(255, 150, 70))
+{
+	if (w < 8 || h < 2) return;
+	if (level < 0) level = 0;
+	if (level > 255) level = 255;
+	dc.FillSolidRect(x, y, w, h, RGB(28, 30, 34));
+	int fw = w * level / 255;
+	if (level > 0 && fw < 2) fw = 2;
+	if (fw > w) fw = w;
+	if (fw > 0)
+		dc.FillSolidRect(x, y, fw, h, fill);
 }
 
 /* 左ラベル＋鍵盤。SSG は N---、それ以外は L----●----R のパンゲージ */
@@ -2638,45 +2873,119 @@ void CFmMonitorDlg::DrawChannelKeys(CDC& dc, int x, int y, int w, int rowH, int 
 	/* 等幅: 音名の右に N031 相当の LR ゲージ（SSG は N--- テキストのまま） */
 	const int lampProbe = (keyH > 4) ? (keyH * 3 / 4) : 8;
 	const int needW = lampProbe + 4
-		+ dc.GetTextExtent(L"C35232 O5C#").cx
+		+ dc.GetTextExtent(L"C352 32 O5C#").cx
 		+ gaugeGap + gaugeW
 		+ FmScale(6, dpi);
 	if (labelW < needW) labelW = needW;
 	int pianoW = w - labelW;
 	if (pianoW < 80) pianoW = (w > labelW) ? (w - labelW) : 80;
 
-	auto drawLabel = [&](int yy, const wchar_t* text, BYTE fade, COLORREF hi) -> int {
+	const int volBarH = (rowH >= 16) ? 3 : 2;
+	int nameSlotW = dc.GetTextExtent(L"C352 32").cx;
+	const int noteSlotW = dc.GetTextExtent(L"O5C#").cx;
+	auto litVol = [&](int raw, int gate, int keyLit, BYTE fade) -> int {
+		if (!keyLit) return 0;
+		int lv = raw;
+		if (lv < 0) lv = 0;
+		if (lv > 255) lv = 255;
+		if (lv < 8)
+			lv = gate ? (std::max)(160, (int)fade) : (int)fade;
+		else if (!gate)
+			lv = lv * fade / 255;
+		return lv;
+	};
+	auto drawChHead = [&](int yy, const wchar_t* chNm, const wchar_t* note, BYTE fade, COLORREF hi, int volLevel) -> int {
 		const int lamp = (keyH > 4) ? (keyH * 3 / 4) : 8;
 		FmFillFade(dc, x, yy + (rowH - lamp) / 2, lamp, lamp,
 			RGB(40, 44, 50), hi, fade);
 		dc.SetTextColor(RGB(210, 215, 220));
 		const int tx = x + lamp + 4;
-		const int ty = yy + (rowH - keyH) / 2;
-		dc.TextOut(tx, ty, text);
-		return tx + dc.GetTextExtent(text).cx;
+		const int ty = yy + (std::max)(0, (rowH - keyH - volBarH) / 2);
+		dc.TextOut(tx, ty, chNm);
+		const int noteX = tx + nameSlotW + gaugeGap;
+		dc.TextOut(noteX, ty, note);
+		const int after = noteX + noteSlotW;
+		FmDrawKeyVolBar(dc, tx, yy + rowH - volBarH - 1, after - tx, volBarH, volLevel);
+		return after;
 	};
 	auto drawLrAfter = [&](int yy, int afterX, int lAmt, int rAmt, int playing) {
-		const int gy = yy + (rowH - keyH) / 2;
+		const int gy = yy + (std::max)(0, (rowH - keyH - volBarH) / 2);
 		int gx = afterX + gaugeGap;
 		if (gx + gaugeW > x + labelW)
 			gx = x + labelW - gaugeW;
 		if (gx < afterX + 2)
 			gx = afterX + 2;
-		FmDrawLrGauge(dc, labFont, gx, gy, gaugeW, keyH, lAmt, rAmt, playing);
+		const int gh = (std::max)(6, keyH - volBarH);
+		FmDrawLrGauge(dc, labFont, gx, gy, gaugeW, gh, lAmt, rAmt, playing);
 	};
 
-	static const wchar_t* kFmName[6] = { L"FM1", L"FM2", L"FM3", L"FM4", L"FM5", L"FM6" };
-	static const wchar_t* kOplName[6] = { L"OPL1", L"OPL2", L"OPL3", L"OPL4", L"OPL5", L"OPL6" };
-	static const wchar_t* kOpmName[8] = {
-		L"OPM1", L"OPM2", L"OPM3", L"OPM4", L"OPM5", L"OPM6", L"OPM7", L"OPM8"
-	};
-	static const wchar_t* kExName[3] = { L"EX1", L"EX2", L"EX3" };
-	static const wchar_t* kOplEx[3] = { L"OPL7", L"OPL8", L"OPL9" };
 	const int fmN = FmRows();
 	const int exN = ExRows();
+	const int pcmN = PcmRows();
 	const int msx = IsMsxDump();
 	const int opm = IsOpmDump() || (ChipProfile() == SASAMI_FMMON_KEYS_MDX);
 	const int opl = IsOplDump();
+	const int oplN = opl ? ((ChipProfile() == SASAMI_FMMON_KEYS_OPL3) ? 18 : 9) : 0;
+	/* 同じ鍵盤列でどれかが2桁なら FM も 01。音名・LR の縦位置を揃える */
+	int colPad = 9;
+	if (pcmN >= 10) colPad = (std::max)(colPad, pcmN);
+	if (oplN >= 10) colPad = (std::max)(colPad, oplN);
+	if (fmN >= 10) colPad = (std::max)(colPad, fmN);
+	int colPrefW = 2;
+	{
+		auto bump = [&](const wchar_t* p) {
+			if (!p || !p[0]) return;
+			const int n = (int)wcslen(p);
+			if (n > colPrefW) colPrefW = n;
+		};
+		if (fmN > 0) {
+			if (opl || msx) bump(L"OPL");
+			else if (opm) bump(L"OPM");
+			else bump(L"FM");
+		}
+		if (exN > 0) {
+			if (opl || msx) bump(L"OPL");
+			else if (opm) bump(L"OPM");
+			else bump(L"EX");
+		}
+		if (SsgRows() > 0)
+			bump((msx && !(MsxDevMask() & SASAMI_FMMON_DEV_HES)) ? L"PSG" : L"SSG");
+		if (pcmN > 0) {
+			const unsigned prof = ChipProfile();
+			if (IsYm2610Dump()) {
+				bump(L"ADA");
+				bump(L"ADB");
+			} else if (m_haveDump && m_dump.version >= 6
+				&& (m_dump.dumpFlags & (SASAMI_FMMON_FLAG_ADPCM | SASAMI_FMMON_FLAG_PCM86))) {
+				bump((m_dump.dumpFlags & SASAMI_FMMON_FLAG_PCM86) ? L"86PCM" : L"ADPCM");
+			}
+			if (msx && (MsxDevMask() & SASAMI_FMMON_DEV_HES)) bump(L"SSG");
+			else if (msx) bump(L"SCC");
+			if (opl) bump(L"OPL");
+			if (opm || prof == SASAMI_FMMON_KEYS_MDX)
+				bump((m_haveDump && strstr(m_dump.titleSjis, "GA20")) ? L"GA20" : L"PDX");
+			if (m_haveDump && m_dump.version >= 6 && (m_dump.dumpFlags & SASAMI_FMMON_FLAG_PPZ))
+				bump(L"PPZ");
+			bump(FmArcadePcmShort(prof));
+			switch (prof) {
+			case SASAMI_FMMON_KEYS_SPC: bump(L"DSP"); break;
+			case SASAMI_FMMON_KEYS_PSF: bump(L"SPU"); break;
+			case SASAMI_FMMON_KEYS_NCSF: bump(L"NDS"); break;
+			case SASAMI_FMMON_KEYS_MIDI: bump(L"CH"); break;
+			default: break;
+			}
+		}
+	}
+	{
+		wchar_t probe[24];
+		wchar_t pref[16];
+		const int n = (colPrefW > 12) ? 12 : colPrefW;
+		for (int i = 0; i < n; i++) pref[i] = L'W';
+		pref[n] = 0;
+		FmFormatChNum(probe, 24, pref, 32, (std::max)(colPad, 10), colPrefW);
+		const int pw = dc.GetTextExtent(probe).cx;
+		if (pw > nameSlotW) nameSlotW = pw;
+	}
 	/* OPNA: EX は FM3 分割なので FM3 と FM4 の間へ。OPM/MSX/OPL は ch7 以降を後ろに置く */
 	const int nestEx = (!opm && !msx && !opl && exN > 0 && fmN >= 6) ? 1 : 0;
 
@@ -2711,18 +3020,24 @@ void CFmMonitorDlg::DrawChannelKeys(CDC& dc, int x, int y, int w, int rowH, int 
 
 		wchar_t note[16];
 		FmFormatNoteName(midi, note, 16);
-		wchar_t lab[40];
-		const wchar_t* nm;
-		if (opl) {
-			static const wchar_t* kOplName[6] = {
-				L"OPL1", L"OPL2", L"OPL3", L"OPL4", L"OPL5", L"OPL6"
-			};
-			nm = kOplName[ch];
-		} else {
-			nm = opm ? kOpmName[ch] : (msx ? kOplName[ch] : kFmName[ch]);
+		wchar_t chNm[16];
+		if (opl)
+			FmFormatChNum(chNm, 16, L"OPL", ch + 1, colPad, colPrefW);
+		else if (opm)
+			FmFormatChNum(chNm, 16, L"OPM", ch + 1, colPad, colPrefW);
+		else if (msx)
+			FmFormatChNum(chNm, 16, L"OPL", ch + 1, colPad, colPrefW);
+		else
+			FmFormatChNum(chNm, 16, L"FM", ch + 1, colPad, colPrefW);
+		int rawVol = 0;
+		if (m_haveDump) {
+			if (opm) rawVol = FmOpmCarrierLevel(m_dump, ch);
+			else if (opl) rawVol = FmOplCarrierLevel(m_dump, ch);
+			else if (msx) rawVol = FmTlLoud(m_dump.regs[0x30 + ch] & 0x0F, 15);
+			else if (!KeysOnly()) rawVol = FmOpnCarrierLevel(m_dump, bank, slot);
 		}
-		_snwprintf_s(lab, _TRUNCATE, L"%s %s", nm, note);
-		const int after = drawLabel(yy, lab, fade, RGB(80, 220, 120));
+		const int after = drawChHead(yy, chNm, note, fade, RGB(80, 220, 120),
+			litVol(rawVol, gate, keyLit, fade));
 		int lAmt = 255, rAmt = 255;
 		if (m_haveDump) {
 			if (opm)
@@ -2757,16 +3072,24 @@ void CFmMonitorDlg::DrawChannelKeys(CDC& dc, int x, int y, int w, int rowH, int 
 		}
 		wchar_t note[16];
 		FmFormatNoteName(midi, note, 16);
-		wchar_t lab[40];
-		const wchar_t* nm;
-		if (opl) {
-			static const wchar_t* kOplEx[3] = { L"OPL7", L"OPL8", L"OPL9" };
-			nm = kOplEx[i];
-		} else {
-			nm = opm ? kOpmName[6 + i] : (msx ? kOplEx[i] : kExName[i]);
+		wchar_t chNm[16];
+		if (opl)
+			FmFormatChNum(chNm, 16, L"OPL", 7 + i, colPad, colPrefW);
+		else if (opm)
+			FmFormatChNum(chNm, 16, L"OPM", 7 + i, colPad, colPrefW);
+		else if (msx)
+			FmFormatChNum(chNm, 16, L"OPL", 7 + i, colPad, colPrefW);
+		else
+			FmFormatChNum(chNm, 16, L"EX", i + 1, colPad, colPrefW);
+		int rawVol = 0;
+		if (m_haveDump) {
+			if (opm) rawVol = FmOpmCarrierLevel(m_dump, 6 + i);
+			else if (opl) rawVol = FmOplCarrierLevel(m_dump, 6 + i);
+			else if (msx) rawVol = FmTlLoud(m_dump.regs[0x30 + 6 + i] & 0x0F, 15);
+			else if (!KeysOnly()) rawVol = FmOpnCarrierLevel(m_dump, 0, 2);
 		}
-		_snwprintf_s(lab, _TRUNCATE, L"%s %s", nm, note);
-		const int after = drawLabel(yy, lab, fade, RGB(180, 120, 255));
+		const int after = drawChHead(yy, chNm, note, fade, RGB(180, 120, 255),
+			litVol(rawVol, gate, keyLit, fade));
 		int lAmt = 255, rAmt = 255;
 		if (m_haveDump) {
 			if (opm)
@@ -2791,8 +3114,6 @@ void CFmMonitorDlg::DrawChannelKeys(CDC& dc, int x, int y, int w, int rowH, int 
 		for (int i = 0; i < exN; i++) drawExCh(i);
 	}
 
-	static const wchar_t* kSsg[3] = { L"SSG1", L"SSG2", L"SSG3" };
-	static const wchar_t* kPsg[3] = { L"PSG1", L"PSG2", L"PSG3" };
 	const int ssgN = SsgRows();
 	for (int i = 0; i < ssgN; i++, row++) {
 		const int yy = y + row * rowH;
@@ -2818,17 +3139,19 @@ void CFmMonitorDlg::DrawChannelKeys(CDC& dc, int x, int y, int w, int rowH, int 
 			_snwprintf_s(noise, _TRUNCATE, L"N%03d", FmSsgNoisePeriod(m_dump));
 		else
 			wcscpy_s(noise, L"N---");
-		wchar_t lab[48];
-		_snwprintf_s(lab, _TRUNCATE, L"%s %s %s",
-			(msx && !(MsxDevMask() & SASAMI_FMMON_DEV_HES)) ? kPsg[i] : kSsg[i],
-			note, noise);
-		drawLabel(yy, lab, fade, RGB(100, 180, 255));
+		wchar_t chNm[16];
+		FmFormatChNum(chNm, 16,
+			(msx && !(MsxDevMask() & SASAMI_FMMON_DEV_HES)) ? L"PSG" : L"SSG",
+			i + 1, colPad, colPrefW);
+		const int after = drawChHead(yy, chNm, note, fade, RGB(100, 180, 255),
+			litVol(m_haveDump ? FmSsgLevel(m_dump, i) : 0, gate, keyLit, fade));
+		dc.SetTextColor(RGB(210, 215, 220));
+		dc.TextOut(after + gaugeGap, yy + (std::max)(0, (rowH - keyH - volBarH) / 2), noise);
 
 		CRect krc(x + labelW, yy + (rowH - keyH) / 2, x + labelW + pianoW, yy + (rowH - keyH) / 2 + keyH);
 		DrawPiano108(dc, krc, midi, keyLit);
 	}
 
-	const int pcmN = PcmRows();
 	for (int i = 0; i < pcmN; i++, row++) {
 		const int yy = y + row * rowH;
 		const BYTE fade = live ? m_fadePcm[i] : (BYTE)0;
@@ -2840,7 +3163,6 @@ void CFmMonitorDlg::DrawChannelKeys(CDC& dc, int x, int y, int w, int rowH, int 
 
 		wchar_t note[16];
 		FmFormatNoteName(midi, note, 16);
-		wchar_t lab[40];
 		const int ppz = (m_haveDump && m_dump.version >= 6
 			&& (m_dump.dumpFlags & SASAMI_FMMON_FLAG_PPZ));
 		const int hes = msx && (MsxDevMask() & SASAMI_FMMON_DEV_HES);
@@ -2901,11 +3223,27 @@ void CFmMonitorDlg::DrawChannelKeys(CDC& dc, int x, int y, int w, int rowH, int 
 			default: pref = L"CH"; break;
 			}
 		}
+		wchar_t chNm[20];
 		if (num <= 0)
-			_snwprintf_s(lab, _TRUNCATE, L"%s %s", pref, note);
+			_snwprintf_s(chNm, _TRUNCATE, L"%s", pref ? pref : L"CH");
 		else
-			_snwprintf_s(lab, _TRUNCATE, L"%s%d %s", pref, num, note);
-		const int after = drawLabel(yy, lab, fade, RGB(220, 160, 80));
+			FmFormatChNum(chNm, 20, pref, num, colPad, colPrefW);
+		int pcmRaw = 0;
+		if (m_haveDump) {
+			if (IsYm2610Dump()) {
+				if (i < 6)
+					pcmRaw = FmTlLoud(m_dump.regs[0x108 + i] & 0x1F, 31);
+				else
+					pcmRaw = m_dump.regs[0x1B];
+			} else if (adpcmRow)
+				pcmRaw = (int)fade;
+			else if (opl)
+				pcmRaw = FmOplCarrierLevel(m_dump, i + 9);
+			else if (FmIsArcadePcmProfile(prof))
+				pcmRaw = FmArcadePcmVol255(m_dump, prof, i);
+		}
+		const int after = drawChHead(yy, chNm, note, fade, RGB(220, 160, 80),
+			litVol(pcmRaw, gate, keyLit, fade));
 		int lAmt = 255, rAmt = 255;
 		if (m_haveDump) {
 			if (IsYm2610Dump()) {
@@ -2928,18 +3266,37 @@ void CFmMonitorDlg::DrawChannelKeys(CDC& dc, int x, int y, int w, int rowH, int 
 	}
 
 	if (!HideRhythm()) {
-	const int rzmY = y + row * rowH + (rowH / 5);
+	/* 横並び: パッド全体をフェード。その中に名前→LR→音量 */
+	const int rzmY = y + row * rowH;
+	const int padH = rowH - 2;
+	const int volH = (padH >= 16) ? 3 : 2;
+	const int nameH = (std::max)(8, (std::min)(fontPx + 1, padH / 3));
+	const int lrH = (std::max)(4, padH - nameH - volH - 1);
 	dc.SetTextColor(RGB(200, 210, 220));
-	dc.TextOut(x, rzmY + 2, L"RHY");
-	const int padW = (keyH > 10) ? (keyH + 20) : 40;
-	const int padH = (keyH > 10) ? (keyH + 2) : 16;
+	dc.TextOut(x, rzmY + (std::max)(0, (padH - fontPx) / 2), L"RHY");
+	const int rhyAvail = (std::max)(120, w - labelW);
+	const int padGap = FmScale(4, dpi);
+	int padW = (rhyAvail - 5 * padGap) / 6;
+	if (padW < 40) padW = 40;
 	for (int i = 0; i < 6; i++) {
 		const BYTE fade = live ? m_fadeRzmPad[i] : (BYTE)0;
-		const int px = x + labelW + i * (padW + 3);
+		const int keyLit = fade >= 40;
+		const int px = x + labelW + i * (padW + padGap);
+		int rawVol = 0, lAmt = 255, rAmt = 255;
+		if (m_haveDump)
+			FmRhythmVolPan(m_dump, i, msx, rawVol, lAmt, rAmt);
+		const int vol = litVol(rawVol, keyLit, keyLit, fade);
 		FmFillFade(dc, px, rzmY, padW, padH,
 			RGB(40, 44, 50), RGB(255, 140, 80), fade);
-		dc.SetTextColor(fade > 40 ? RGB(240, 240, 245) : RGB(140, 145, 155));
-		dc.TextOut(px + 4, rzmY + 1, kRzmName[i]);
+		FmFrameRect(dc, CRect(px, rzmY, px + padW, rzmY + padH), RGB(90, 86, 80));
+		dc.SetBkMode(TRANSPARENT);
+		dc.SetTextColor(keyLit ? RGB(240, 240, 245) : RGB(140, 145, 155));
+		const CSize nz = dc.GetTextExtent(kRzmName[i]);
+		dc.TextOut(px + (std::max)(2, (int)(padW - nz.cx) / 2),
+			rzmY + (std::max)(0, (int)(nameH - nz.cy) / 2), kRzmName[i]);
+		FmDrawLrGauge(dc, labFont, px + 2, rzmY + nameH, padW - 4, lrH, lAmt, rAmt, keyLit);
+		FmDrawKeyVolBar(dc, px + 2, rzmY + nameH + lrH, padW - 4, volH, vol,
+			RGB(255, 245, 200));
 	}
 	}
 
@@ -3032,21 +3389,28 @@ void CFmMonitorDlg::ComputeLayout(int w, int h)
 	m_lay.gridY2 = m_lay.gridY1 + 16 * m_lay.cellH + m_lay.bankGap + m_lay.bankTitle;
 	m_lay.fmX = m_lay.pad + m_lay.hexColW + FmScale(4, m_lay.dpi);
 	m_lay.fmW = (std::max)(100, w - m_lay.pad - m_lay.fmX);
-	m_lay.gap = FmScale(3, m_lay.dpi);
+	const int pcmCompact = PanelGridPcmCompact();
+	m_lay.gap = FmScale(pcmCompact ? 2 : 3, m_lay.dpi);
 	{
 		const int nPan = PrimaryPanelN() + CompanionPanelN();
 		const int n = (nPan > 0) ? nPan : (std::max)(1, FmRows());
-		const int cols = FmPanelCols(n);
+		const int cols = pcmCompact ? FmPanelColsPcm(n) : FmPanelCols(n);
 		const int rows = (n + cols - 1) / cols;
 		m_lay.panN = n;
 		m_lay.panCols = cols;
 		m_lay.panRows = rows;
-		const int minPw = FmScale(140, m_lay.dpi);
-		const int minPh = FmScale(100, m_lay.dpi);
 		int pw = (m_lay.fmW - m_lay.gap * (cols - 1)) / (std::max)(1, cols);
 		int ph = (m_lay.topH - m_lay.gap * (rows - 1)) / (std::max)(1, rows);
-		if (pw < minPw) pw = minPw;
-		if (ph < minPh) ph = minPh;
+		if (pw < 1) pw = 1;
+		if (ph < 1) ph = 1;
+		/* min で押し広げると右と下が切れる。領域内に収める。
+		   FM 混在時はセルを大きくしない（ユーザが窓を広げる）。PCM 専用は余白を詰める。 */
+		if (!pcmCompact) {
+			const int minPw = FmScale(140, m_lay.dpi);
+			const int minPh = FmScale(100, m_lay.dpi);
+			if (pw < minPw && cols == 1) pw = (std::min)(minPw, m_lay.fmW);
+			if (ph < minPh && rows == 1) ph = (std::min)(minPh, m_lay.topH);
+		}
 		m_lay.pw = pw;
 		m_lay.ph = ph;
 	}
@@ -3126,7 +3490,7 @@ void CFmMonitorDlg::DrawHead(CDC& dc)
 			case SASAMI_FMMON_KEYS_QSOUND: chip = L"AC  QSound×16"; break;
 			case SASAMI_FMMON_KEYS_RF5C: chip = L"AC  RF5C68×8"; break;
 			case SASAMI_FMMON_KEYS_MULTIPCM: chip = L"AC  MultiPCM×32"; break;
-			case SASAMI_FMMON_KEYS_C352: chip = L"AC  C352×16"; break;
+			case SASAMI_FMMON_KEYS_C352: chip = L"AC  C352×32"; break;
 			case SASAMI_FMMON_KEYS_SEGAPCM: chip = L"Sega  SegaPCM×8/16"; break;
 			case SASAMI_FMMON_KEYS_OKI: chip = L"AC  OKI×4"; break;
 			default: chip = L"Keys  CH×n"; break;
@@ -3447,7 +3811,9 @@ void CFmMonitorDlg::DrawOpmChPanel(CDC& dc, const CRect& rc, int ch)
 	dc.SetBkColor(headBg);
 	dc.SetTextColor(RGB(220, 235, 255));
 	wchar_t title[24];
-	_snwprintf_s(title, _TRUNCATE, L"OPM%d", ch + 1);
+	int padN = 8;
+	if (CompanionPanelN() >= 10) padN = CompanionPanelN();
+	FmFormatChNum(title, 24, L"OPM", ch + 1, padN);
 	dc.TextOut(rc.left + pad, rc.top + 2, title);
 
 	const int headInnerTop = rc.top + titlePx + 4;
@@ -3675,7 +4041,8 @@ void CFmMonitorDlg::DrawOplChPanel(CDC& dc, const CRect& rc, int ch, int packedC
 	dc.SetBkColor(headBg);
 	dc.SetTextColor(RGB(210, 255, 230));
 	wchar_t title[24];
-	_snwprintf_s(title, _TRUNCATE, L"OPL%d", ch + 1);
+	const int oplN = (ChipProfile() == SASAMI_FMMON_KEYS_OPL3) ? 18 : 9;
+	FmFormatChNum(title, 24, L"OPL", ch + 1, oplN);
 	dc.TextOut(rc.left + pad, rc.top + 2, title);
 
 	const int headInnerTop = rc.top + titlePx + 4;
@@ -3961,7 +4328,9 @@ void CFmMonitorDlg::DrawOpllChPanel(CDC& dc, const CRect& rc, int ch, int packed
 	dc.SetBkColor(headBg);
 	dc.SetTextColor(RGB(230, 220, 255));
 	wchar_t title[24];
-	_snwprintf_s(title, _TRUNCATE, L"OPLL%d", ch + 1);
+	int padN = 9;
+	if (CompanionPanelN() >= 10) padN = CompanionPanelN();
+	FmFormatChNum(title, 24, L"OPLL", ch + 1, padN);
 	dc.TextOut(rc.left + pad, rc.top + 2, title);
 
 	const int headInnerTop = rc.top + titlePx + 4;
@@ -4156,15 +4525,16 @@ void CFmMonitorDlg::DrawOpllChPanel(CDC& dc, const CRect& rc, int ch, int packed
 /* アーケード PCM 1ch。ピッチ・音量・パンを影レジスタから出す */
 void CFmMonitorDlg::DrawArcadePcmChPanel(CDC& dc, const CRect& rc, int ch, unsigned profile, int useComp)
 {
-	if (rc.Width() < 70 || rc.Height() < 46 || ch < 0) return;
+	if (rc.Width() < 48 || rc.Height() < 32 || ch < 0) return;
 	const int savedDC = dc.SaveDC();
 	dc.IntersectClipRect(rc);
 
 	const COLORREF headBg = RGB(62, 44, 34);
 	const COLORREF bodyBg = RGB(34, 34, 42);
 	const COLORREF barBg = RGB(24, 26, 30);
-	const int pad = (std::max)(3, rc.Width() / 80);
-	const int headH = (std::max)(22, rc.Height() / 3);
+	const int pad = (std::max)(2, rc.Width() / 90);
+	/* タイトル帯だけ。1/3 だとオレンジが空きすぎて 32ch が収まらない */
+	const int headH = (std::max)(14, (std::min)(20, rc.Height() / 5));
 	dc.FillSolidRect(rc.left, rc.top, rc.Width(), headH, headBg);
 	dc.FillSolidRect(rc.left, rc.top + headH, rc.Width(), rc.Height() - headH, bodyBg);
 	FmFrameRect(dc, rc, RGB(170, 120, 85));
@@ -4246,10 +4616,12 @@ void CFmMonitorDlg::DrawArcadePcmChPanel(CDC& dc, const CRect& rc, int ch, unsig
 			ctl = b(base + 6);
 			pan = ch;
 		} else {
+			/* snapshot: 0=cmd 1=state 2=sample 3=status, then 8B/voice */
+			const int o = 4 + ch * 8;
 			ctl = b(0);
-			vol = b(0x10 + ch) ? 255 : 0;
+			vol = b(o + 0);
 			pan = ch;
-			pitch = b(1);
+			pitch = ((int)b(o + 1) << 8) | (int)b(o + 2);
 		}
 	}
 
@@ -4265,44 +4637,54 @@ void CFmMonitorDlg::DrawArcadePcmChPanel(CDC& dc, const CRect& rc, int ch, unsig
 
 	dc.FillSolidRect(rc.left, rc.top, rc.Width(), headH, headBg);
 
-	const int titlePx = (std::max)(9, (std::min)(13, headH - 6));
+	const int titlePx = (std::max)(8, (std::min)(12, headH - 4));
 	HFONT titleFont = FmMakeFont(titlePx);
 	HFONT oldf = (HFONT)dc.SelectObject(titleFont);
 	dc.SetBkMode(OPAQUE);
 	dc.SetBkColor(headBg);
 	dc.SetTextColor(RGB(250, 230, 210));
 	wchar_t title[32];
-	_snwprintf_s(title, _TRUNCATE, L"%s%d", FmArcadePcmShort(profile), ch + 1);
-	dc.TextOut(rc.left + pad, rc.top + 2, title);
+	int nCh = useComp ? CompanionPanelN() : (IsArcadePcmDump() ? PrimaryPanelN() : FmArcadePcmChannels(profile));
+	if (nCh < 1) nCh = FmArcadePcmChannels(profile);
+	FmFormatChNum(title, 32, FmArcadePcmShort(profile), ch + 1, nCh);
+	dc.TextOut(rc.left + pad, rc.top + (std::max)(0, (headH - titlePx) / 2 - 1), title);
 
-	const int lamp = (std::max)(9, headH - 8);
-	FmFillFade(dc, rc.right - pad - lamp, rc.top + 4, lamp, lamp,
+	const int lamp = (std::max)(7, (std::min)(headH - 4, 11));
+	FmFillFade(dc, rc.right - pad - lamp, rc.top + (headH - lamp) / 2, lamp, lamp,
 		RGB(42, 44, 48), RGB(255, 150, 70), lit ? (BYTE)255 : fade);
 
-	const int infoPx = (std::max)(8, (std::min)(12, (rc.Height() - headH) / 4));
+	const int bodyH = rc.Height() - headH - pad * 2;
+	const int barH = (std::max)(4, (std::min)(7, bodyH / 6));
+	const int infoPx = (std::max)(7, (std::min)(11, (bodyH - barH - 4) / 3));
 	HFONT infoFont = FmMakeFont(infoPx);
 	dc.SelectObject(infoFont);
 	dc.SetBkMode(OPAQUE);
 	dc.SetBkColor(bodyBg);
 	dc.SetTextColor(RGB(220, 225, 230));
-	int y = rc.top + headH + pad;
+	int y = rc.top + headH + (std::max)(1, pad / 2);
+	const int lineGap = (std::max)(0, (bodyH - barH - infoPx * 3) / 4);
 	wchar_t line[64];
 	_snwprintf_s(line, _TRUNCATE, L"%s  P:%04X", note, pitch & 0xFFFF);
 	dc.TextOut(rc.left + pad, y, line);
-	y += infoPx + 2;
+	y += infoPx + lineGap;
 	_snwprintf_s(line, _TRUNCATE, L"V:%04X  Pan:%02X", vol & 0xFFFF, pan & 0xFF);
 	dc.TextOut(rc.left + pad, y, line);
-	y += infoPx + 2;
+	y += infoPx + lineGap;
 	_snwprintf_s(line, _TRUNCATE, L"Ctl:%04X", ctl & 0xFFFF);
 	dc.TextOut(rc.left + pad, y, line);
 
-	CRect bar(rc.left + pad, rc.bottom - pad - (std::max)(6, infoPx / 2),
+	CRect bar(rc.left + pad, rc.bottom - pad - barH,
 		rc.right - pad, rc.bottom - pad);
 	dc.FillSolidRect(bar, barBg);
 	FmFrameRect(dc, bar, RGB(80, 80, 88));
-	int level = vol;
-	if (profile == SASAMI_FMMON_KEYS_QSOUND || profile == SASAMI_FMMON_KEYS_C352)
-		level = (std::min)(255, vol >> 8);
+	int level = FmMapPcmBarLevel(profile, vol);
+	if (!lit) {
+		level = 0;
+	} else if (gate) {
+		if (level < 32) level = (std::max)(level, 160);
+	} else {
+		level = fade;
+	}
 	if (level < 0) level = 0;
 	if (level > 255) level = 255;
 	CRect fill(bar.left + 1, bar.top + 1,
@@ -4320,6 +4702,8 @@ void CFmMonitorDlg::DrawPanelsArea(CDC& dc)
 {
 	if (!m_layOk) return;
 	dc.FillSolidRect(m_lay.rcPanels, FM_BG);
+	const int clipPanels = dc.SaveDC();
+	dc.IntersectClipRect(m_lay.rcPanels);
 
 	if (IsMsxDump() && !(MsxDevMask() & SASAMI_FMMON_DEV_OPLL)
 		&& CompanionPanelN() == 0 && !PreferOpnaShell()) {
@@ -4330,6 +4714,7 @@ void CFmMonitorDlg::DrawPanelsArea(CDC& dc)
 			L"MSX: no OPLL - panels N/A (PSG/SCC keys)");
 		dc.SelectObject(old);
 		m_panelDirtyMask = 0;
+		dc.RestoreDC(clipPanels);
 		return;
 	}
 
@@ -4340,6 +4725,7 @@ void CFmMonitorDlg::DrawPanelsArea(CDC& dc)
 	const int n = nPri + nComp;
 	if (n <= 0) {
 		m_panelDirtyMask = 0;
+		dc.RestoreDC(clipPanels);
 		return;
 	}
 	const int cols = (m_lay.panCols > 0) ? m_lay.panCols : FmPanelCols(n);
@@ -4397,6 +4783,7 @@ void CFmMonitorDlg::DrawPanelsArea(CDC& dc)
 				DrawArcadePcmChPanel(dc, place(idx++), i, prof, 1);
 		}
 	}
+	dc.RestoreDC(clipPanels);
 	m_panelDirtyMask = 0;
 }
 

@@ -845,6 +845,17 @@ int FmMonShadowPitchRateToMidi(unsigned pitchRate)
 	return m;
 }
 
+/* QSound 16bit pitch。0x1000 = ネイティブ再生（C4）。>>2 すると2オクターブ下がる。 */
+static int QsPitchToMidi(unsigned pitch)
+{
+	if (pitch < 1u) return -1;
+	const double midi = 60.0 + 12.0 * (log((double)pitch / 4096.0) / log(2.0));
+	int m = (int)floor(midi + 0.5);
+	if (m < 21) m = 21;
+	if (m > 108) m = 108;
+	return m;
+}
+
 int FmMonShadowHzToMidi(double freqHz)
 {
 	/* Standard MIDI: A4=440Hz → note 69 (O5A with FmFormatNoteName).
@@ -1895,7 +1906,7 @@ void FmMonShadowApplyQSoundReg(unsigned ofs, unsigned data16)
 			if (r == 2) {
 				s_qsPitch[ch] = data16;
 				if (s_pcmOn[ch]) {
-					const int mid = FmMonShadowPitchRateToMidi(data16 >> 2);
+					const int mid = QsPitchToMidi(data16);
 					if (mid >= 0) s_pcmNote[ch] = (uint8_t)mid;
 					s_dirty = 1;
 				}
@@ -1904,14 +1915,23 @@ void FmMonShadowApplyQSoundReg(unsigned ofs, unsigned data16)
 				const int on = (data16 & 0x8000) != 0 || data16 != 0;
 				int mid = 60;
 				if (s_qsPitch[ch]) {
-					const int m = FmMonShadowPitchRateToMidi(s_qsPitch[ch] >> 2);
+					const int m = QsPitchToMidi(s_qsPitch[ch]);
 					if (m >= 0) mid = m;
 				}
 				ArcSetPcm(ch, on ? 1 : 0, mid);
 			} else if (r == 6) {
-				/* Volume 0 → treat as note-off hint when already silent-ish */
-				if (data16 == 0 && s_pcmOn[ch])
-					ArcSetPcm(ch, 0, -1);
+				/* Volume 0 → treat as note-off; rise can key-on without r==3 */
+				if (data16 == 0) {
+					if (s_pcmOn[ch])
+						ArcSetPcm(ch, 0, -1);
+				} else {
+					int mid = 60;
+					if (s_qsPitch[ch]) {
+						const int m = QsPitchToMidi(s_qsPitch[ch]);
+						if (m >= 0) mid = m;
+					}
+					ArcSetPcm(ch, 1, mid);
+				}
 			}
 		}
 	}

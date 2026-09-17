@@ -74,6 +74,7 @@ private:
 	int HasViewPanels() const;
 	int PrimaryPanelN() const;
 	int CompanionPanelN() const;
+	int PanelGridPcmCompact() const; /* FMアルゴ無し。PCM余白を詰めて全ch収める */
 	int PrimarySilent() const; /* ハイブリッドで主FMが一度も発音していない */
 	int HexBankCount() const;
 	int HistPeekFmKey() const;

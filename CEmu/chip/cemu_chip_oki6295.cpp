@@ -278,7 +278,9 @@ private:
 		snapshot_[3] = ReadStatus();
 		for (int ch = 0; ch < kOkiVoices; ch++) {
 			const int o = 4 + ch * 8;
-			snapshot_[o + 0] = voice_[ch].playing;
+			unsigned vol = voice_[ch].playing ? voice_[ch].volume : 0u;
+			if (vol > 255u) vol = 255u;
+			snapshot_[o + 0] = (uint8_t)vol;
 			snapshot_[o + 1] = (uint8_t)(voice_[ch].start >> 8);
 			snapshot_[o + 2] = (uint8_t)voice_[ch].start;
 			snapshot_[o + 3] = (uint8_t)(voice_[ch].length >> 8);
