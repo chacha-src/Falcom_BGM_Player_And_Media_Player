@@ -7,6 +7,7 @@
 #include "oggDlg.h"
 #include "CMidiMonitorDlg.h"
 #include "CEmu/cemu_mgr.h"
+#include "gpu/GpuDx11.h"
 #include "CFmMonitorDlg.h"
 #include "CMediaPlayerDlg.h"
 #include "UpdateCheck.h"
@@ -209,6 +210,12 @@ BOOL COggApp::OnIdle(LONG lCount)
 	return CWinApp::OnIdle(lCount); // TRUE を返すと OnIdle が回り続けて他の UI を食う
 }
 
+BOOL COggApp::ExitInstance()
+{
+	GpuDx11_Shutdown();
+	return CWinApp::ExitInstance();
+}
+
 BOOL COggApp::InitInstance()
 {
 	// 旧KPIの SEH/確保失敗で WER ダイアログを出さない（配布プラグインは触らない）
@@ -289,6 +296,7 @@ BOOL COggApp::InitInstance()
 	}
 	if (DatArc_Init(karento2))
 		DatArc_Chdir();
+	GpuDx11_Startup();
 	ZeroMemory(&savedata,sizeof(save));
 	savedata.supe=1;
 	savedata.xx=-10000;

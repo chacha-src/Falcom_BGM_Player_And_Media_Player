@@ -1,4 +1,4 @@
-﻿//{{NO_DEPENDENCIES}}
+//{{NO_DEPENDENCIES}}
 // Microsoft Visual C++ �Ő������ꂽ�C���N���[�h �t�@�C���B
 // ogg.rc �Ŏg�p
 //
@@ -2176,6 +2176,11 @@
 #define ID_ETC39                        40088
 #define ID_ETC40                        40089
 #define ID_DOUGA_SUBOFF                 40090
+#define IDR_CSO_GPU_VS_RECT             4810
+#define IDR_CSO_GPU_PS_RECT             4811
+#define IDR_CSO_GPU_VS_PIANO            4812
+#define IDR_CSO_GPU_CS_HEX              4813
+#define IDR_CSO_GPU_CS_GLYPH            4814
 
 // Next default values for new objects
 // 

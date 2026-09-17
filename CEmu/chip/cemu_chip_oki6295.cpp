@@ -1,4 +1,4 @@
-﻿#include "StdAfx.h"
+#include "StdAfx.h"
 #include "cemu_chip_oki6295.h"
 #include "cemu_chip.h"
 #include "../fmmon/fmmon_shadow.h"
@@ -49,6 +49,7 @@ public:
 		sampleKey_ = 0;
 		lastCommand_ = 0;
 		memset(monOn_, 0, sizeof(monOn_));
+		snapHold_ = 0;
 	}
 
 	void Write(uint32_t addr, uint32_t data) override
@@ -109,6 +110,22 @@ public:
 	{
 		if (!stereo || frames <= 0 || !rom_) return;
 		if (gain <= 0) return;
+		int any = 0;
+		for (int ch = 0; ch < kOkiVoices; ch++) {
+			if (voice_[ch].playing) { any = 1; break; }
+		}
+		/* 机上: FMモニタは 8–16ms ポーリング。毎サンプル Snapshot+共有メモリは無駄。 */
+		auto bumpSnap = [&]() {
+			snapHold_ += frames;
+			if (snapHold_ >= 128) {
+				snapHold_ = 0;
+				UpdateSnapshot();
+			}
+		};
+		if (!any) {
+			bumpSnap();
+			return;
+		}
 		for (int i = 0; i < frames; i++) {
 			int mix = 0;
 			for (int ch = 0; ch < kOkiVoices; ch++) {
@@ -139,7 +156,7 @@ public:
 				FmMonShadowPcmNote(ch, 0, 0);
 			monOn_[ch] = (uint8_t)on;
 		}
-		UpdateSnapshot();
+		bumpSnap();
 	}
 
 	uint8_t ReadStatus() override
@@ -306,6 +323,7 @@ private:
 	int diffLookup_[49 * 16];
 	unsigned volumeTable_[16];
 	uint8_t snapshot_[4 + kOkiVoices * 8];
+	int snapHold_;
 };
 
 /* MSM6295 ラッパ生成。 */

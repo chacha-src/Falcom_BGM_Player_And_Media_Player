@@ -17,6 +17,7 @@
 #include "Soft3DGameSfx.h"
 #include "Soft3DTexRes.h"
 #include "Soft3DGfxQuality.h"
+#include "gpu/GpuDx11.h"
 
 #ifdef _MSC_VER
 #pragma comment(lib, "d3dcompiler.lib")
@@ -337,10 +338,10 @@ void CS3mHelpDlg::OnPaint()
 		LL14(L"金ネオン。到達でクリア（階は難易度次第）", L"Gold neon; reach to clear (floor depends on difficulty)", L"Néon or; but", L"Neon oro; traguardo", L"Neón dorado; meta", L"금 네온, 클리어", L"金色霓虹，通关", L"Clear goal", L"Цель", L"Ziel", L"Gol", L"Doel", L"Cel", L"Hedef"));
 	legendRow(RGB(255, 148, 40),
 		LL14(L"階段（下り）", L"Stairs (down)", L"Escaliers ↓", L"Scale ↓", L"Escaleras ↓", L"계단 ↓", L"楼梯↓", L"Stairs ↓", L"Лестница ↓", L"Treppe ↓", L"Escadas ↓", L"Trap ↓", L"Schody ↓", L"Merdiven ↓"),
-		LL14(L"橙色。矢印方向へ斜めに2マス下へ（壁1マス跨ぎ）。小さな矢印のみ", L"Orange; diagonal down 2 cells along the arrow. Small arrow only", L"Orange; descendre en diagonale. Petite flèche", L"Arancio; scendere in diagonale. Solo freccia", L"Naranja; bajar en diagonal. Solo flecha", L"주황, 화살표 방향 대각 2칸 하강. 작은 화살표만", L"橙色，沿箭头斜向2格下楼。仅小箭头", L"Diagonal down; small arrow only", L"По диагонали вниз; только стрелка", L"Diagonal abwärts; nur Pfeil", L"Diagonal descer; só seta", L"Diagonaal omlaag; alleen pijl", L"Po przekątnej w dół; tylko strzałka", L"Çapraz aşağı; sadece ok"));
+		LL14(L"橙色。矢印方向へ斜めに2マス下へ（壁1マス跨ぎ）。段のオブジェクト（鏡床とは別）", L"Orange; diagonal down 2 cells along the arrow. Step mesh (not a mirror floor)", L"Orange; descendre en diagonale. Marches (pas un miroir)", L"Arancio; scendere in diagonale. Gradini (non specchio)", L"Naranja; bajar en diagonal. Peldaños (no espejo)", L"주황, 화살표 방향 대각 2칸 하강. 계단 메쉬(거울 바닥 아님)", L"橙色，沿箭头斜向2格下楼。踏步物体（不是镜面）", L"Diagonal down; step mesh, not a mirror", L"По диагонали вниз; ступени, не зеркало", L"Diagonal abwärts; Stufen, kein Spiegel", L"Diagonal descer; degraus, não espelho", L"Diagonaal omlaag; treden, geen spiegel", L"Po przekątnej w dół; stopnie, nie lustro", L"Çapraz aşağı; basamak, ayna değil"));
 	legendRow(RGB(60, 220, 255),
 		LL14(L"階段（上り）", L"Stairs (up)", L"Escaliers ↑", L"Scale ↑", L"Escaleras ↑", L"계단 ↑", L"楼梯↑", L"Stairs ↑", L"Лестница ↑", L"Treppe ↑", L"Escadas ↑", L"Trap ↑", L"Schody ↑", L"Merdiven ↑"),
-		LL14(L"水色。矢印方向へ斜めに2マス上へ。小さな矢印のみ（段オブジェクトなし）", L"Cyan; diagonal up 2 cells. Small arrow only (no stair mesh)", L"Cyan; monter en diagonale. Petite flèche", L"Ciano; salire in diagonale. Solo freccia", L"Cian; subir en diagonal. Solo flecha", L"하늘색, 대각 2칸 상승. 작은 화살표만", L"水色，斜向2格上楼。仅小箭头", L"Diagonal up; small arrow only", L"По диагонали вверх; только стрелка", L"Diagonal aufwärts; nur Pfeil", L"Diagonal subir; só seta", L"Diagonaal omhoog; alleen pijl", L"Po przekątnej w górę; tylko strzałka", L"Çapraz yukarı; sadece ok"));
+		LL14(L"水色。矢印方向へ斜めに2マス上へ。段のオブジェクト（鏡床とは別）", L"Cyan; diagonal up 2 cells. Step mesh (not a mirror floor)", L"Cyan; monter en diagonale. Marches (pas un miroir)", L"Ciano; salire in diagonale. Gradini (non specchio)", L"Cian; subir en diagonal. Peldaños (no espejo)", L"하늘색, 대각 2칸 상승. 계단 메쉬(거울 바닥 아님)", L"水色，斜向2格上楼。踏步物体（不是镜面）", L"Diagonal up; step mesh, not a mirror", L"По диагонали вверх; ступени, не зеркало", L"Diagonal aufwärts; Stufen, kein Spiegel", L"Diagonal subir; degraus, não espelho", L"Diagonaal omhoog; treden, geen spiegel", L"Po przekątnej w górę; stopnie, nie lustro", L"Çapraz yukarı; basamak, ayna değil"));
 	legendRow(RGB(255, 235, 80),
 		LL14(L"あなた（プレイヤー）", L"You (player)", L"Vous", L"Tu", L"Tú", L"당신", L"你", L"You", L"Вы", L"Sie", L"Você", L"Jij", L"Ty", L"Siz"),
 		LL14(L"黄マーク。進行方向がミニマップの上", L"Yellow mark; forward is up on the minimap", L"Marque jaune; avant en haut", L"Marca gialla", L"Marca amarilla", L"노란 표시, 진행=위", L"黄标，前进朝上", L"Forward = up", L"Вперёд вверх", L"Vorwärts oben", L"Frente cima", L"Vooruit omhoog", L"Przód u góry", L"İleri yukarı"));
@@ -1140,6 +1141,8 @@ BOOL CS3mView::CreateShaders()
 	const char* entries[11]={"VST","HST","DST","PSW","VSS","PSS","VSH","PSH","VSQ","SSR","DOFP"};
 	const char* profiles[11]={"vs_5_0","hs_5_0","ds_5_0","ps_5_0","vs_5_0","ps_5_0","vs_5_0","ps_5_0","vs_5_0","ps_5_0","ps_5_0"};
 	auto compile=[&](const char* entry,const char* prof,ID3DBlob** out)->HRESULT{
+		if (SUCCEEDED(GpuTryLoadCso(L"s3m", entry, prof, hlsl, (SIZE_T)strlen(hlsl), (void**)out)))
+			return S_OK;
 		S3M_RELEASE(err);
 		HRESULT chr=D3DCompile(hlsl,strlen(hlsl),NULL,NULL,NULL,entry,prof,D3DCOMPILE_OPTIMIZATION_LEVEL3,0,out,&err);
 		if(FAILED(chr)){ S3M_RELEASE(err); chr=D3DCompile(hlsl,strlen(hlsl),NULL,NULL,NULL,entry,prof,D3DCOMPILE_OPTIMIZATION_LEVEL1,0,out,&err); }
@@ -6426,9 +6429,56 @@ void CSoft3DMazeDlg::RenderScene()
 		if(!emitPeekOnly) return TRUE;
 		for(int i=0;i<nPeekC;i++){
 			int dx=abs(x-peekCX[i]), dz=abs(z-peekCZ[i]);
-			if(dx<=1 && dz<=1) return TRUE;
+			if(dx==0 && dz==0) return TRUE;
 		}
 		return FALSE;
+	};
+	auto emitStairMesh=[&](int f,float yBias,int x,int z,BYTE c,float rr,float gg,float bb){
+		const BOOL dn=(c==CELL_STAIRS_DOWN);
+		int pf=f,px=x,pz=z;
+		if(!FindStairPartner(f,x,z,pf,px,pz)){px=x;pz=z;}
+		const float x0=cellX0(x),x1=x0+cellW(x),z0=cellZ0(z),z1=z0+cellD(z);
+		const float ax=cellCX(x),az=cellCZ(z),bx=cellCX(px),bz=cellCZ(pz);
+		const int alongX=(fabsf(bx-ax)>=fabsf(bz-az))?1:0;
+		const int goPos=alongX?((bx>=ax)?1:0):((bz>=az)?1:0);
+		const int ns=8;
+		const float rise=storyH/(float)ns;
+		const float y0=yBias+passH;
+		if(dn){
+			const float yLo=yBias-storyH+passH;
+			quad(x0,y0,z0,x0,y0,z1,x0,yLo,z1,x0,yLo,z0,1,0,0,rr*.62f,gg*.62f,bb*.62f,1.f);
+			quad(x1,y0,z1,x1,y0,z0,x1,yLo,z0,x1,yLo,z1,-1,0,0,rr*.62f,gg*.62f,bb*.62f,1.f);
+			quad(x0,y0,z0,x1,y0,z0,x1,yLo,z0,x0,yLo,z0,0,0,1,rr*.58f,gg*.58f,bb*.58f,1.f);
+			quad(x1,y0,z1,x0,y0,z1,x0,yLo,z1,x1,yLo,z1,0,0,-1,rr*.58f,gg*.58f,bb*.58f,1.f);
+		}else{
+			const float yHi=yBias+storyH+passH;
+			quad(x0,y0,z1,x0,y0,z0,x0,yHi,z0,x0,yHi,z1,1,0,0,rr*.62f,gg*.62f,bb*.62f,1.f);
+			quad(x1,y0,z0,x1,y0,z1,x1,yHi,z1,x1,yHi,z0,-1,0,0,rr*.62f,gg*.62f,bb*.62f,1.f);
+			quad(x1,y0,z0,x0,y0,z0,x0,yHi,z0,x1,yHi,z0,0,0,1,rr*.58f,gg*.58f,bb*.58f,1.f);
+			quad(x0,y0,z1,x1,y0,z1,x1,yHi,z1,x0,yHi,z1,0,0,-1,rr*.58f,gg*.58f,bb*.58f,1.f);
+		}
+		for(int s=0;s<ns;s++){
+			const float t0=(float)s/(float)ns, t1=(float)(s+1)/(float)ns;
+			float sx0,sx1,sz0,sz1;
+			if(alongX){
+				const float a=goPos?x0:x1, b=goPos?x1:x0;
+				sx0=a+(b-a)*t0; sx1=a+(b-a)*t1;
+				sz0=z0; sz1=z1;
+			}else{
+				const float a=goPos?z0:z1, b=goPos?z1:z0;
+				sz0=a+(b-a)*t0; sz1=a+(b-a)*t1;
+				sx0=x0; sx1=x1;
+			}
+			float yTop,yBot;
+			if(dn){
+				yTop=y0-rise*(float)s;
+				yBot=yTop-rise*0.88f;
+			}else{
+				yTop=y0+rise*(float)(s+1);
+				yBot=y0+rise*(float)s;
+			}
+			passCube(sx0,sz0,sx1,sz1,yBot,yTop,rr,gg,bb,1.f);
+		}
 	};
 	// 床・天井を先に、壁は後（溢れ時も床天井優先）。地下天井は壁パッチ（レンガ）で埋める
 	auto emitLayer=[&](int f,float yBias,int ax0,int ax1,int az0,int az1,BOOL fullVis){
@@ -6446,15 +6496,28 @@ void CSoft3DMazeDlg::RenderScene()
 			if(S3mIsSolidWall(c)||c==CELL_MIRROR_FLOOR)continue;
 			if(fullVis&&!vis(x,z))continue;
 			float x0=cellX0(x),x1=x0+cellW(x),z0=cellZ0(z),z1=z0+cellD(z);
-			if(c!=CELL_STAIRS_DOWN&&c!=CELL_STAIRS_UP){
-				float k=VisitAtF(f,x,z)?1.f:.90f;float r,g,b;themeFloorRGB(L.th,k,r,g,b);
-				const float y1=yBias+passH, y0=yBias;
-				quad(x0,y1,z0,x1,y1,z0,x1,y1,z1,x0,y1,z1,0,1,0,r,g,b,1.f);
-				quad(x0,y0,z1,x1,y0,z1,x1,y0,z0,x0,y0,z0,0,-1,0,r*.52f,g*.52f,b*.52f,1.f);
-				quad(x0,y0,z0,x1,y0,z0,x1,y1,z0,x0,y1,z0,0,0,-1,r*.72f,g*.72f,b*.72f,1.f);
-				quad(x1,y0,z1,x0,y0,z1,x0,y1,z1,x1,y1,z1,0,0,1,r*.72f,g*.72f,b*.72f,1.f);
-				quad(x0,y0,z1,x0,y0,z0,x0,y1,z0,x0,y1,z1,-1,0,0,r*.68f,g*.68f,b*.68f,1.f);
-				quad(x1,y0,z0,x1,y0,z1,x1,y1,z1,x1,y1,z0,1,0,0,r*.68f,g*.68f,b*.68f,1.f);
+			const float fy0=yBias, fy1=yBias+passH;
+			float k=VisitAtF(f,x,z)?1.f:.90f;float r,g,b;themeFloorRGB(L.th,k,r,g,b);
+			if(c==CELL_STAIRS_DOWN||c==CELL_STAIRS_UP){
+				float sr=r,sg=g,sb=b;
+				if(c==CELL_STAIRS_DOWN){ sr=r*.42f+.62f; sg=g*.32f+.36f; sb=b*.22f+.12f; }
+				else { sr=r*.32f+.16f; sg=g*.38f+.58f; sb=b*.32f+.78f; }
+				if(c==CELL_STAIRS_UP){
+					quad(x0,fy1,z0,x1,fy1,z0,x1,fy1,z1,x0,fy1,z1,0,1,0,r,g,b,1.f);
+					quad(x0,fy0,z1,x1,fy0,z1,x1,fy0,z0,x0,fy0,z0,0,-1,0,r*.52f,g*.52f,b*.52f,1.f);
+					quad(x0,fy0,z0,x1,fy0,z0,x1,fy1,z0,x0,fy1,z0,0,0,-1,r*.72f,g*.72f,b*.72f,1.f);
+					quad(x1,fy0,z1,x0,fy0,z1,x0,fy1,z1,x1,fy1,z1,0,0,1,r*.72f,g*.72f,b*.72f,1.f);
+					quad(x0,fy0,z1,x0,fy0,z0,x0,fy1,z0,x0,fy1,z1,-1,0,0,r*.68f,g*.68f,b*.68f,1.f);
+					quad(x1,fy0,z0,x1,fy0,z1,x1,fy1,z1,x1,fy1,z0,1,0,0,r*.68f,g*.68f,b*.68f,1.f);
+				}
+				emitStairMesh(f,yBias,x,z,c,sr,sg,sb);
+			}else{
+				quad(x0,fy1,z0,x1,fy1,z0,x1,fy1,z1,x0,fy1,z1,0,1,0,r,g,b,1.f);
+				quad(x0,fy0,z1,x1,fy0,z1,x1,fy0,z0,x0,fy0,z0,0,-1,0,r*.52f,g*.52f,b*.52f,1.f);
+				quad(x0,fy0,z0,x1,fy0,z0,x1,fy1,z0,x0,fy1,z0,0,0,-1,r*.72f,g*.72f,b*.72f,1.f);
+				quad(x1,fy0,z1,x0,fy0,z1,x0,fy1,z1,x1,fy1,z1,0,0,1,r*.72f,g*.72f,b*.72f,1.f);
+				quad(x0,fy0,z1,x0,fy0,z0,x0,fy1,z0,x0,fy1,z1,-1,0,0,r*.68f,g*.68f,b*.68f,1.f);
+				quad(x1,fy0,z0,x1,fy0,z1,x1,fy1,z1,x1,fy1,z0,1,0,0,r*.68f,g*.68f,b*.68f,1.f);
 			}
 		}
 		L.nF=nFloor-f0;
@@ -6523,7 +6586,6 @@ void CSoft3DMazeDlg::RenderScene()
 	}else{
 		emitPeekOnly=FALSE;
 		emitLayer(m_floor,0.f,ix0,ix1,iz0,iz1,TRUE);
-		// 階段穴とその着地だけ隣接階を出す（上りと下りでセルを分け、他階が穴から混ざらない）
 		int peekDownX[48], peekDownZ[48], nPeekDown=0;
 		int peekUpX[48], peekUpZ[48], nPeekUp=0;
 		int seenU=-1,seenD=-1;
@@ -6534,41 +6596,30 @@ void CSoft3DMazeDlg::RenderScene()
 			for(int i=0;i<n;i++) if(xs[i]==x&&zs[i]==z) return;
 			if(n>=48)return;
 			xs[n]=x; zs[n]=z; n++;
-			if(x-1<pminX)pminX=x-1; if(x+1>pmaxX)pmaxX=x+1;
-			if(z-1<pminZ)pminZ=z-1; if(z+1>pmaxZ)pmaxZ=z+1;
+			if(x<pminX)pminX=x; if(x>pmaxX)pmaxX=x;
+			if(z<pminZ)pminZ=z; if(z>pmaxZ)pmaxZ=z;
 		};
 		for(int z=iz0;z<=iz1;z++)for(int x=ix0;x<=ix1;x++){
 			if(!vis(x,z))continue;
 			BYTE c=CellAt(x,z);
-			if(c!=CELL_STAIRS_DOWN&&c!=CELL_STAIRS_UP)continue;
-			int pf=0,px=0,pz=0;
-			if(!FindStairPartner(m_floor,x,z,pf,px,pz)){px=x;pz=z;}
 			if(c==CELL_STAIRS_DOWN){
 				seenD=m_floor+1;
 				markPeekArr(peekDownX,peekDownZ,nPeekDown,pminDX,pmaxDX,pminDZ,pmaxDZ,x,z);
-				markPeekArr(peekDownX,peekDownZ,nPeekDown,pminDX,pmaxDX,pminDZ,pmaxDZ,px,pz);
-			}else{
+			}else if(c==CELL_STAIRS_UP){
 				seenU=m_floor-1;
 				markPeekArr(peekUpX,peekUpZ,nPeekUp,pminUX,pmaxUX,pminUZ,pmaxUZ,x,z);
-				markPeekArr(peekUpX,peekUpZ,nPeekUp,pminUX,pmaxUX,pminUZ,pmaxUZ,px,pz);
 			}
 		}
 		auto loadPeek=[&](int* xs,int* zs,int n){
 			nPeekC=n;
 			for(int i=0;i<n;i++){ peekCX[i]=xs[i]; peekCZ[i]=zs[i]; }
 		};
-		auto clampPeekBox=[&](int& pminX,int& pmaxX,int& pminZ,int& pmaxZ){
-			if(pminX<0)pminX=0; if(pminZ<0)pminZ=0;
-			if(pmaxX>m_n-1)pmaxX=m_n-1; if(pmaxZ>m_n-1)pmaxZ=m_n-1;
-		};
 		emitPeekOnly=TRUE;
 		if(seenD>=0&&seenD<m_nFloors&&nPeekDown>0){
-			clampPeekBox(pminDX,pmaxDX,pminDZ,pmaxDZ);
 			loadPeek(peekDownX,peekDownZ,nPeekDown);
 			emitLayer(seenD,-storyH,pminDX,pmaxDX,pminDZ,pmaxDZ,FALSE);
 		}
 		if(seenU>=0&&nPeekUp>0){
-			clampPeekBox(pminUX,pmaxUX,pminUZ,pmaxUZ);
 			loadPeek(peekUpX,peekUpZ,nPeekUp);
 			emitLayer(seenU,storyH,pminUX,pmaxUX,pminUZ,pmaxUZ,FALSE);
 		}
@@ -6631,7 +6682,7 @@ void CSoft3DMazeDlg::RenderScene()
 			fxObj[nFx++]={b,nFloor+nWall+nTrans-b,wpx,wallH*.5f,wpz,xl[i].d,wnx,0.f,wnz,TRUE,TRUE,2};
 		}else if(c==CELL_STAIRS_DOWN||c==CELL_STAIRS_UP){
 			if(nFx>=64)continue;
-			// ラベル／ミニマップで十分わかるので段オブジェクトは出さず、小さな矢印だけ
+			// 段本体は不透明メッシュ。方向だけ小さな矢印
 			const UINT b=nFloor+nWall+nTrans;const BOOL dn=(c==CELL_STAIRS_DOWN);
 			const float rr=dn?1.f:.22f,gg=dn?.58f:.86f,bb=dn?.16f:1.f;
 			const float stairA=.88f;

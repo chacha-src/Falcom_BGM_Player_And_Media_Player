@@ -273,6 +273,16 @@ IDR_SASAMI_EX           RCDATA                  "res\\SASAMI_EX.DAT"
 
 IDR_INSERTION_DAT       RCDATA                  "res\\insertion.dat"
 
+IDR_CSO_GPU_VS_RECT     RCDATA                  "res\\cso\\gpu_vs_rect.cso"
+
+IDR_CSO_GPU_PS_RECT     RCDATA                  "res\\cso\\gpu_ps_rect.cso"
+
+IDR_CSO_GPU_VS_PIANO    RCDATA                  "res\\cso\\gpu_vs_piano.cso"
+
+IDR_CSO_GPU_CS_HEX      RCDATA                  "res\\cso\\gpu_cs_hex.cso"
+
+IDR_CSO_GPU_CS_GLYPH    RCDATA                  "res\\cso\\gpu_cs_glyph.cso"
+
 IDR_S3TEX_R_FOREST      RCDATA                  "res\\s3tex\\r_forest.png"
 
 IDR_S3TEX_R_RUINS       RCDATA                  "res\\s3tex\\r_ruins.png"
@@ -2843,7 +2853,7 @@ END
 //
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 0,9,1,1015
+ FILEVERSION 0,9,1,1016
  PRODUCTVERSION 1,0,0,1
  FILEFLAGSMASK 0x3fL
 #ifdef _DEBUG
@@ -2861,10 +2871,10 @@ BEGIN
         BEGIN
             VALUE "Comments", "Falcom BGM Player & Media Player"
             VALUE "CompanyName", "Pre Prayer Power Soft"
-            VALUE "FileDescription", "Falcom BGM Player & Media Player Ver 0.9a Rel.2026.09.16 v1015"
-            VALUE "FileVersion", "0.9.1.1015"
+            VALUE "FileDescription", "Falcom BGM Player & Media Player Ver 0.9a Rel.2026.09.17 v1016"
+            VALUE "FileVersion", "0.9.1.1016"
             VALUE "InternalName", "ogg YS/ED bgm"
-            VALUE "LegalCopyright", "Copyright (C) 2026.09.16 v1015"
+            VALUE "LegalCopyright", "Copyright (C) 2026.09.17 v1016"
             VALUE "LegalTrademarks", "Pre Prayer Power Soft"
             VALUE "OriginalFilename", "oggYSEDbgm_uni_avx2.exe"
             VALUE "ProductName", "Falcom BGM Player & Media Player"

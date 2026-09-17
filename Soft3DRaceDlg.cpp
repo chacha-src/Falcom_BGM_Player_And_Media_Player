@@ -17,6 +17,7 @@
 #include "Soft3DGameSfx.h"
 #include "Soft3DTexRes.h"
 #include "Soft3DGfxQuality.h"
+#include "gpu/GpuDx11.h"
 
 #ifdef _MSC_VER
 #pragma comment(lib, "d3dcompiler.lib")
@@ -1226,6 +1227,8 @@ BOOL CS3rView::CreateShaders()
 	const char* entries[12]={"VST","HST","DST","PSB","VSS","PSS","VSH","PSH","VSQ","SSR","DOFP","FIN"};
 	const char* profiles[12]={"vs_5_0","hs_5_0","ds_5_0","ps_5_0","vs_5_0","ps_5_0","vs_5_0","ps_5_0","vs_5_0","ps_5_0","ps_5_0","ps_5_0"};
 	auto compile=[&](const char* entry,const char* prof,ID3DBlob** out)->HRESULT{
+		if (SUCCEEDED(GpuTryLoadCso(L"s3r", entry, prof, hlsl, (SIZE_T)strlen(hlsl), (void**)out)))
+			return S_OK;
 		S3R_RELEASE(err);
 		HRESULT chr=D3DCompile(hlsl,(SIZE_T)strlen(hlsl),NULL,NULL,NULL,entry,prof,D3DCOMPILE_OPTIMIZATION_LEVEL3,0,out,&err);
 		if(FAILED(chr)){
@@ -3201,10 +3204,10 @@ void CSoft3DRaceDlg::GenerateCourseWithSeed(DWORD seed)
 		}
 		for (int i = 0; i < knots; i++) {
 			float gy = gyK[i];
-			float minAir = gy + 1.6f * sc;
-			if (allowLow[i]) {
-				if (m_knots[i].y < 0.8f * sc) m_knots[i].y = 0.8f * sc;
-			} else if (m_knots[i].y < minAir && gy <= cruise[i] + 12.f * sc) {
+			float minAir = gy + 1.8f * sc;
+			if (gy > m_knots[i].y + 2.4f * sc) {
+				/* 山をトンネルで抜ける。溝にしない */
+			} else if (m_knots[i].y < minAir) {
 				m_knots[i].y = minAir;
 			}
 		}
@@ -3215,6 +3218,12 @@ void CSoft3DRaceDlg::GenerateCourseWithSeed(DWORD seed)
 				float a = (float)i / (float)knots * (float)(M_PI * 2.0);
 				m_knots[i].y += figH * cosf(a);
 			}
+		}
+		for (int i = 0; i < knots; i++) {
+			float gy = gyK[i];
+			if (gy > m_knots[i].y + 2.4f * sc) continue;
+			float minAir = gy + 1.8f * sc;
+			if (m_knots[i].y < minAir) m_knots[i].y = minAir;
 		}
 	}
 	m_camSmoothInit = 0;
@@ -3263,7 +3272,7 @@ void CSoft3DRaceDlg::GenerateCourseWithSeed(DWORD seed)
 			float i0f = (qx - m_hmX0) / m_hmStep;
 			float j0f = (qz - m_hmZ0) / m_hmStep;
 			int deepCore = m_pathDeep[i] ? 1 : 0;
-			int deep = deepCore || S3rPathNearDeep(m_pathDeep, i, 22);
+			int deep = deepCore || S3rPathNearDeep(m_pathDeep, i, 8);
 			float flare = S3rTunFlare(m_pathDeep, i);
 			if (!deepCore && deep) flare = 1.f;
 			float tunR = tunR0 * (1.f + 0.85f * flare);
@@ -3295,7 +3304,7 @@ void CSoft3DRaceDlg::GenerateCourseWithSeed(DWORD seed)
 						float t = (dd - inR) / max(0.01f, outR - inR);
 						if (t < 0.f) t = 0.f; if (t > 1.f) t = 1.f;
 						t = t * t * (3.f - 2.f * t);
-						float lo = qy - 2.8f;
+						float lo = qy - 1.35f;
 						if (lo < floorY) lo = floorY;
 						cut = lo + (m_hmRaw[idx] - lo) * t;
 					}
@@ -6175,11 +6184,8 @@ void CSoft3DRaceDlg::BakeStaticMeshes()
 		float pd3 = pathD(xa,zb); if (pd3 < pd) pd = pd3;
 		float pdC = pathD((xa + xb) * 0.5f, (za + zb) * 0.5f);
 		const float tunR = S3rTunR(m_bandHalf) * 1.20f;
-		float yMn = y00; if (y10 < yMn) yMn = y10; if (y11 < yMn) yMn = y11; if (y01 < yMn) yMn = y01;
-		float yMx = y00; if (y10 > yMx) yMx = y10; if (y11 > yMx) yMx = y11; if (y01 > yMx) yMx = y01;
 		const int hole = (pdC < tunR || pd < tunR * 0.96f) ? 1 : 0;
-		const int steepLip = ((pdC < tunR * 1.12f || pd < tunR) && (yMx - yMn) > tunR * 0.38f) ? 1 : 0;
-		if (!steepLip) {
+		{
 			float nx=(y00-y10)+(y01-y11), nz=(y00-y01)+(y10-y11), ny=(xb-xa)*2.f; S3rNorm3(nx,ny,nz);
 			put(xa,y00,za,nx,ny,nz,u0,v0,gr,gg,gb,1.f);
 			put(xa,y01,zb,nx,ny,nz,u0,v1,gr,gg,gb,1.f);
@@ -6260,23 +6266,30 @@ void CSoft3DRaceDlg::BakeStaticMeshes()
 			float rad0 = baseR * (1.f + 0.85f * flare0);
 			float rad1 = baseR * (1.f + 0.85f * flare1);
 			int portal = (deep0 != deep1 || flare0 > 0.55f || flare1 > 0.55f) ? 1 : 0;
+			const float thick0 = rad0 * 0.28f, thick1 = rad1 * 0.28f;
 			for (int p = 0; p < ringN; p++) {
 				float a0 = (float)p / (float)ringN * (float)(M_PI * 2.0);
 				float a1 = (float)(p + 1) / (float)ringN * (float)(M_PI * 2.0);
-				float sa = sinf(a0);
-				if (!portal && sa < -0.72f) continue;
+				float sa = sinf((a0 + a1) * 0.5f);
+				if (!portal && sa < -0.92f) continue;
 				float ax,ay,az, bx2,by2,bz2, cx2,cy2,cz2, dx,dy,dz;
 				ringPt(p0x,p0y,p0z, b0x,b0y,b0z, n0x,n0y,n0z, a0, rad0, ax,ay,az);
 				ringPt(p1x,p1y,p1z, b1x,b1y,b1z, n1x,n1y,n1z, a0, rad1, bx2,by2,bz2);
 				ringPt(p1x,p1y,p1z, b1x,b1y,b1z, n1x,n1y,n1z, a1, rad1, cx2,cy2,cz2);
 				ringPt(p0x,p0y,p0z, b0x,b0y,b0z, n0x,n0y,n0z, a1, rad0, dx,dy,dz);
-				float ca=cosf(a0), ss=sinf(a0);
+				float ca=cosf((a0+a1)*0.5f), ss=sinf((a0+a1)*0.5f);
 				float wnx=-(b0x*ca + n0x*ss), wny=-(b0y*ca + n0y*ss), wnz=-(b0z*ca + n0z*ss);
 				S3rNorm3(wnx,wny,wnz);
 				quad(ax,ay,az, bx2,by2,bz2, cx2,cy2,cz2, dx,dy,dz, wnx,wny,wnz, cr,cg,cb);
+				float ox0,oy0,oz0, ox1,oy1,oz1, ox2,oy2,oz2, ox3,oy3,oz3;
+				ringPt(p0x,p0y,p0z, b0x,b0y,b0z, n0x,n0y,n0z, a0, rad0+thick0, ox0,oy0,oz0);
+				ringPt(p1x,p1y,p1z, b1x,b1y,b1z, n1x,n1y,n1z, a0, rad1+thick1, ox1,oy1,oz1);
+				ringPt(p1x,p1y,p1z, b1x,b1y,b1z, n1x,n1y,n1z, a1, rad1+thick1, ox2,oy2,oz2);
+				ringPt(p0x,p0y,p0z, b0x,b0y,b0z, n0x,n0y,n0z, a1, rad0+thick0, ox3,oy3,oz3);
+				quad(ox0,oy0,oz0, ox3,oy3,oz3, ox2,oy2,oz2, ox1,oy1,oz1, -wnx,-wny,-wnz, lipRcol,lipGcol,lipBcol);
 			}
 			if (portal) {
-				float lip0 = rad0 * 1.16f, lip1 = rad1 * 1.16f;
+				float lip0 = rad0 * 1.42f, lip1 = rad1 * 1.42f;
 				for (int p = 0; p < ringN; p++) {
 					float a0 = (float)p / (float)ringN * (float)(M_PI * 2.0);
 					float a1 = (float)(p + 1) / (float)ringN * (float)(M_PI * 2.0);

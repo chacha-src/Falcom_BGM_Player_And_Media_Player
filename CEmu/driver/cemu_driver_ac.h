@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include "cemu_driver.h"
 #include "../machine/cemu_hard_ac.h"
 
@@ -65,9 +65,10 @@ private:
 	int64_t m62Acc_;
 	int sega68_;           /* Model1 MultiPCM / Model2 SCSP: 68000 音源CPU */
 	int64_t sega68Acc_;
-	int16_t* scratch_;     /* 補助チップ混成バッファ（SN×2 / AY×3） */
+	int16_t* scratch_;     /* 補助チップ混成バッファ（SN×2 / AY×3）。32byte 境界 */
 	int scratchFrames_;
 	int heard_;            /* 直前コマンド以降に非ゼロサンプルが出たか */
+	uint8_t extReserve_[64]; /* 迷路/モニタ/GPU Mix 拡張用リザーブ */
 
 	/* Z80 ボード用 */
 	void RunUntil(uint64_t endCycle);

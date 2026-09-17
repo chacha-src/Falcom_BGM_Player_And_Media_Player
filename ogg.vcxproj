@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003" DefaultTargets="Build" ToolsVersion="14.0">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="uni_2026_de|Win32">
@@ -396,6 +396,7 @@
     <ClCompile Include="CPianoRoll.cpp" />
     <ClCompile Include="CMidiMonitorDlg.cpp" />
     <ClCompile Include="CFmMonitorDlg.cpp" />
+    <ClCompile Include="gpu\GpuDx11.cpp" />
     <ClCompile Include="CWrdViewDlg.cpp" />
     <ClCompile Include="WrdEngine.cpp" />
     <ClCompile Include="MagImage.cpp" />
@@ -831,6 +832,8 @@
     <ClInclude Include="CPianoRoll.h" />
     <ClInclude Include="CMidiMonitorDlg.h" />
     <ClInclude Include="CFmMonitorDlg.h" />
+    <ClInclude Include="gpu\GpuDx11.h" />
+    <ClInclude Include="CEmu\cemu_align.h" />
     <ClInclude Include="CWrdViewDlg.h" />
     <ClInclude Include="WrdEngine.h" />
     <ClInclude Include="MagImage.h" />

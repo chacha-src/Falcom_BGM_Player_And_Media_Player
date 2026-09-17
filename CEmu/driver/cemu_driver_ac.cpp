@@ -25,6 +25,7 @@ extern "C" {
 #include "../machine/cemu_m37702_bus.h"
 #include <string.h>
 #include <stdlib.h>
+#include "../cemu_align.h"
 
 /* Sega System16 / Capcom CPS1 音源 CPU は通常ラッチ+NMI/IRQ 待ち。メイン 68K が無いのでブート後に短いコマンド列を注入。
    先に 0x81+（shinobi）。Cotton は 0x10..0x27 のみ受ける — そのあと試す。 */
@@ -179,13 +180,14 @@ CDriverAc::CDriverAc()
 	, scratchFrames_(0)
 	, heard_(0)
 {
+	memset(extReserve_, 0, sizeof(extReserve_));
 }
 
 int16_t* CDriverAc::Scratch(int frames)
 {
 	if (frames <= 0) return NULL;
 	if (scratchFrames_ < frames) {
-		int16_t* p = (int16_t*)realloc(scratch_, (size_t)frames * 2 * sizeof(int16_t));
+		int16_t* p = (int16_t*)CEmuAlignedRealloc(scratch_, (size_t)frames * 2 * sizeof(int16_t));
 		if (!p) return NULL;
 		scratch_ = p;
 		scratchFrames_ = frames;
@@ -2587,7 +2589,7 @@ void CDriverAc::Close()
 	booted_ = 0;
 	triggered_ = 0;
 	if (scratch_) {
-		free(scratch_);
+		CEmuAlignedFree(scratch_);
 		scratch_ = NULL;
 		scratchFrames_ = 0;
 	}

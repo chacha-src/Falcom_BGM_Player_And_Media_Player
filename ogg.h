@@ -1,4 +1,4 @@
-﻿// ogg.h : OGG アプリケーションのメイン ヘッダー ファイルです。
+// ogg.h : OGG アプリケーションのメイン ヘッダー ファイルです。
 //
 
 #if !defined(AFX_OGG_H__9EE5937A_A5CC_4F89_8C40_77FE882D687F__INCLUDED_)
@@ -30,6 +30,7 @@ public:
 	//{{AFX_VIRTUAL(COggApp)
 	public:
 	virtual BOOL InitInstance();
+	virtual BOOL ExitInstance();
 	virtual BOOL OnIdle(LONG lCount); // MIDI モニタ IdlePulse。TRUE を返して回し続けない
 	virtual LRESULT ProcessWndProcException(CException* e, const MSG* pMsg);
 	//}}AFX_VIRTUAL

@@ -41,7 +41,7 @@ struct SasamiFmMonDump {
 	uint8_t bank2[0x100];
 	uint8_t bank2Bits[32];
 	uint8_t bank2Rows;        /* 0=なし  1..16 hex 行 */
-	uint8_t pad7[3];
+	uint8_t pad7[3];          /* GPU/拡張リザーブ。互換のためサイズ固定 */
 };
 
 /* リングヘッダのみ（slot 全体 ~320KB をスタックに置かないこと） */

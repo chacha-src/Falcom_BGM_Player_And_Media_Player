@@ -1,4 +1,4 @@
-﻿#include "StdAfx.h"
+#include "StdAfx.h"
 #include "cemu_chip_qsound.h"
 #include "cemu_chip.h"
 #include "../fmmon/fmmon_shadow.h"
@@ -151,6 +151,11 @@ public:
 	void MixAdd(int16_t* stereo, int frames, int gain) override
 	{
 		if (!stereo || frames <= 0 || !rom_) return;
+		int any = 0;
+		for (int ch = 0; ch < kQSoundChannels; ch++) {
+			if (ch_[ch].key) { any = 1; break; }
+		}
+		if (!any) return;
 		for (int ch = 0; ch < kQSoundChannels; ch++) {
 			Channel& c = ch_[ch];
 			if (!c.key) continue;

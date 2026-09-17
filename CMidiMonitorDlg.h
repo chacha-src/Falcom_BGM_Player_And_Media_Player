@@ -1,9 +1,10 @@
-﻿#pragma once
+#pragma once
 // CMidiMonitorDlg : MIDI 32パート・モニタ（XG/GS 風）
 // SMF を再生位置に同期して CC/ノート/SysEx を表示。音色名は SASAMI_GS/XG/EX.DAT。
 #include "afxdialogex.h"
 #include "CCustomControl.h"
 #include "GdiSoft3D.h"
+#include "gpu/GpuDx11.h"
 
 class CMidiMonitorDlg : public CCustomBlurDialogExBase
 {
@@ -141,6 +142,7 @@ private:
 	void DrawMonitor2D(CDC& dc, int w, int h, UINT dpi);
 	void DrawMonitor3D(CDC& dc, int w, int h);
 	void DrawMiniKeys(CDC& dc, const CRect& rc, const Part& p, COLORREF keyW, COLORREF keyB);
+	int TryGpuFrame(int w, int h, int capH, UINT dpi);
 	void DrawVBar(CDC& dc, int x, int y, int bw, int bh, int v0, int vmax, COLORREF col, int glow, int idle);
 	void DrawPanBar(CDC& dc, int x, int y, int bw, int bh, int pan, int glow, int idle);
 	void DrawHeader(CDC& dc, int w, int headH, UINT dpi);
@@ -209,6 +211,7 @@ private:
 	int m_chromaH;
 	bool m_chromaReady;
 #endif
+	GpuMonSurf m_gpu;
 
 	CFont m_fontHead;
 	CFont m_fontCell;

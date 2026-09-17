@@ -1,4 +1,4 @@
-﻿#include "stdafx.h"
+#include "stdafx.h"
 #include "ogg.h"
 #include "oggDlg.h"
 #include "CFmMonitorDlg.h"
@@ -8,6 +8,7 @@
 #include "resource.h"
 #include "DatArchive.h"
 #include "CEmu/fmmon/fmmon_shadow.h"
+#include "gpu/GpuDx11.h"
 #include <algorithm>
 #include <math.h>
 #include <string.h>
@@ -253,6 +254,10 @@ static void FmMonRingPath(wchar_t* out, int n)
 static HANDLE s_hLiveRd = INVALID_HANDLE_VALUE;
 static HANDLE s_hRingRd = INVALID_HANDLE_VALUE;
 static int s_rdCemu = -1; /* 開いているのが CEmu 側か。切替でハンドルを捨てる */
+struct FmHexJob { int x, y, cw, ch, gap, base, rows; };
+static FmHexJob s_fmHexJobs[4];
+static int s_fmHexJobN;
+static int s_fmHexSkipCells;
 
 /* モード切替で CEmu/SASAMI のハンドルが食い違わないよう閉じる */
 static void FmInvalidateRdHandles()
@@ -867,6 +872,7 @@ CFmMonitorDlg::CFmMonitorDlg(CWnd* pParent)
 	, m_fmHoldMs(0)
 	, m_layOk(0)
 	, m_frameOld(nullptr), m_frameW(0), m_frameH(0)
+	, m_gpu{}
 #if CCUSTOM_AERO_SUPPORT
 	, m_chromaW(0), m_chromaH(0), m_chromaReady(false)
 #endif
@@ -943,6 +949,8 @@ BOOL CFmMonitorDlg::OnInitDialog()
 	m_help.SetGradation(RGB(255, 245, 220), RGB(240, 210, 160), 0, TRUE);
 	CCC_CaptionLayout(m_hWnd);
 	LayoutHelpBtn();
+	ModifyStyle(0, WS_CLIPCHILDREN);
+	GpuDx11_Startup();
 	SetTimer(1, 16, NULL);
 	m_fullDraw = 1;
 	m_dirtyHead = m_dirtyHex = m_dirtyPanels = m_dirtyKeys = 1;
@@ -992,6 +1000,7 @@ bool CFmMonitorDlg::EnsureFrameBuffer(CDC& refDC, int w, int h)
 void CFmMonitorDlg::OnDestroy()
 {
 	PersistGeom();
+	GpuMonSurf_Release(&m_gpu);
 	ReleasePaintBuffers();
 	CCustomBlurDialogExBase::OnDestroy();
 }
@@ -1549,6 +1558,26 @@ int CFmMonitorDlg::CompanionPanelN() const
 	return (pcm > 0) ? pcm : 0;
 }
 
+int CFmMonitorDlg::IsOpnThreeShell() const
+{
+	/* YM2203 / OPN+ は OPNA の FM1-3。3枚を縦に伸ばさず 3×2 の下段を空ける。 */
+	if (IsOpmDump() || IsOplDump() || IsArcadePcmDump() || IsMsxDump())
+		return 0;
+	if (PanelGridPcmCompact())
+		return 0;
+	return (PrimaryPanelN() == 3 && CompanionPanelN() == 0) ? 1 : 0;
+}
+
+int CFmMonitorDlg::PanelLayoutN() const
+{
+	int n = PrimaryPanelN() + CompanionPanelN();
+	if (n <= 0)
+		n = (std::max)(1, FmRows());
+	if (IsOpnThreeShell())
+		n = 6;
+	return n;
+}
+
 int CFmMonitorDlg::PanelGridPcmCompact() const
 {
 	const int nPri = PrimaryPanelN();
@@ -1784,7 +1813,7 @@ int CFmMonitorDlg::ContentHeight(int dpi, int pcmRows) const
 	const int bankGap = FmScale(10, dpi);
 	const int nBanks = HexBankCount();
 	const int hexH = nBanks * (FmScale(18, dpi) + 16 * cellH) + (nBanks - 1) * bankGap;
-	const int nPan = PrimaryPanelN() + CompanionPanelN();
+	const int nPan = PanelLayoutN();
 	const int pcmCompact = PanelGridPcmCompact();
 	const int cols = pcmCompact
 		? FmPanelColsPcm((std::max)(1, nPan))
@@ -1919,6 +1948,8 @@ static void FmFrameRect(CDC& dc, const CRect& rc, COLORREF penColor)
 	dc.SelectObject(oldp);
 }
 
+static void DrawEmptyFmSlot(CDC& dc, const CRect& rc, int ch);
+
 static HFONT s_fmFontCache[21]; /* px 8..20 */
 
 static HFONT FmMakeFont(int px)
@@ -1964,6 +1995,21 @@ void CFmMonitorDlg::DrawHexBank(CDC& dc, int x, int y, int cellW, int cellH, int
 		dc.SetTextColor(RGB(150, 175, 160));
 		CSize hs = dc.GetTextExtent(hdr);
 		dc.TextOut(x + FmHexColX(col, cellW, gapExtra) + (cellW - hs.cx) / 2, y - cellH, hdr);
+	}
+	if (s_fmHexSkipCells) {
+		if (s_fmHexJobN < 4) {
+			FmHexJob& j = s_fmHexJobs[s_fmHexJobN++];
+			j.x = x; j.y = y; j.cw = cellW; j.ch = cellH; j.gap = gapExtra;
+			j.base = bankBase; j.rows = rowCount;
+		}
+		for (int row = 0; row < rowCount; row++) {
+			_snwprintf_s(hdr, _TRUNCATE, L"%X", row);
+			dc.SetTextColor(RGB(160, 180, 170));
+			dc.SetBkMode(TRANSPARENT);
+			dc.TextOut(x - cellW + 1, y + row * cellH + (cellH - fontPx) / 2, hdr);
+		}
+		dc.SelectObject(oldf);
+		return;
 	}
 
 	const COLORREF baseDark = RGB(24, 28, 32);
@@ -2498,6 +2544,13 @@ void CFmMonitorDlg::DrawPiano108(CDC& dc, const CRect& rc, int midiNote, int lit
 	const int k0 = 21, k1 = 108;
 	int note = midiNote;
 	if (note < k0 || note > k1) note = -1;
+	const COLORREF keyW = RGB(228, 228, 232);
+	const COLORREF keyB = RGB(22, 24, 28);
+	const COLORREF litW = RGB(220, 40, 40);
+	const COLORREF litB = RGB(255, 70, 70);
+	const COLORREF gap = RGB(12, 14, 18);
+	if (GpuMon_CapturePiano(&rc, note, lit, gap, keyW, keyB, litW, litB))
+		return;
 	int whites = 0;
 	for (int n = k0; n <= k1; ++n) {
 		const int m = n % 12;
@@ -2506,11 +2559,6 @@ void CFmMonitorDlg::DrawPiano108(CDC& dc, const CRect& rc, int midiNote, int lit
 	if (whites < 1) return;
 	const int ww = rc.Width();
 	const int hh = rc.Height();
-	const COLORREF keyW = RGB(228, 228, 232);
-	const COLORREF keyB = RGB(22, 24, 28);
-	const COLORREF litW = RGB(220, 40, 40);
-	const COLORREF litB = RGB(255, 70, 70);
-	const COLORREF gap = RGB(12, 14, 18);
 
 	dc.FillSolidRect(rc, gap);
 
@@ -3353,16 +3401,31 @@ void CFmMonitorDlg::ComputeLayout(int w, int h)
 	if (m_lay.cellH > 22) m_lay.cellH = 22;
 	m_lay.bankTitle = m_lay.cellH + titleLine + 2;
 	{
-		const int need = nTitle * m_lay.bankTitle + nHex * m_lay.cellH
+		/* cellH の下限で hex が topH を突き抜け、鍵盤ラベルに重なるのを防ぐ */
+		int need = nTitle * m_lay.bankTitle + nHex * m_lay.cellH
 			+ (nTitle - 1) * m_lay.bankGap;
+		const int minBot = keyBlockRows * 11;
+		const int maxTopH = (std::max)(40, avail - minBot);
 		if (need > m_lay.topH) {
-			const int room = m_lay.topH - (nTitle - 1) * m_lay.bankGap
-				- nTitle * (titleLine + 2);
-			m_lay.cellH = (nHex > 0) ? (room / nHex) : 8;
-			if (m_lay.cellH < 6) m_lay.cellH = 6;
-			if (m_lay.cellH > 22) m_lay.cellH = 22;
-			m_lay.bankTitle = m_lay.cellH + titleLine + 2;
+			if (need <= maxTopH) {
+				m_lay.topH = need;
+			} else {
+				m_lay.topH = maxTopH;
+				const int room = m_lay.topH - (nTitle - 1) * m_lay.bankGap
+					- nTitle * (titleLine + 2);
+				m_lay.cellH = (nHex > 0) ? (room / nHex) : 4;
+				if (m_lay.cellH < 4) m_lay.cellH = 4;
+				if (m_lay.cellH > 22) m_lay.cellH = 22;
+				m_lay.bankTitle = m_lay.cellH + titleLine + 2;
+				need = nTitle * m_lay.bankTitle + nHex * m_lay.cellH
+					+ (nTitle - 1) * m_lay.bankGap;
+				if (need > m_lay.topH)
+					m_lay.topH = (std::min)(need, maxTopH);
+			}
 		}
+		m_lay.rowH = (avail - m_lay.topH) / (std::max)(1, keyBlockRows);
+		if (m_lay.rowH < 11) m_lay.rowH = 11;
+		m_lay.keyH = (m_lay.rowH > 3) ? (m_lay.rowH - 2) : m_lay.rowH;
 	}
 	m_lay.cellW = (std::max)(16, m_lay.cellH + 6);
 	{
@@ -3392,7 +3455,7 @@ void CFmMonitorDlg::ComputeLayout(int w, int h)
 	const int pcmCompact = PanelGridPcmCompact();
 	m_lay.gap = FmScale(pcmCompact ? 2 : 3, m_lay.dpi);
 	{
-		const int nPan = PrimaryPanelN() + CompanionPanelN();
+		const int nPan = PanelLayoutN();
 		const int n = (nPan > 0) ? nPan : (std::max)(1, FmRows());
 		const int cols = pcmCompact ? FmPanelColsPcm(n) : FmPanelCols(n);
 		const int rows = (n + cols - 1) / cols;
@@ -3404,17 +3467,35 @@ void CFmMonitorDlg::ComputeLayout(int w, int h)
 		if (pw < 1) pw = 1;
 		if (ph < 1) ph = 1;
 		/* min で押し広げると右と下が切れる。領域内に収める。
-		   FM 混在時はセルを大きくしない（ユーザが窓を広げる）。PCM 専用は余白を詰める。 */
+		   FM 混在時はセルを大きくしない（ユーザが窓を広げる）。PCM 専用は余白を詰める。
+		   机上: OPN 3枚で rows=1 だと ph=topH になり引き延びる。maxPh で打ち止め。 */
 		if (!pcmCompact) {
 			const int minPw = FmScale(140, m_lay.dpi);
 			const int minPh = FmScale(100, m_lay.dpi);
+			const int maxPh = FmScale(280, m_lay.dpi);
 			if (pw < minPw && cols == 1) pw = (std::min)(minPw, m_lay.fmW);
 			if (ph < minPh && rows == 1) ph = (std::min)(minPh, m_lay.topH);
+			if (ph > maxPh) ph = maxPh;
 		}
 		m_lay.pw = pw;
 		m_lay.ph = ph;
 	}
 	m_lay.keysY = m_lay.topY + m_lay.topH + m_lay.gapHexKeys;
+	{
+		int hexBottom = m_lay.topY;
+		if (nBanks >= 1) hexBottom = m_lay.gridY0 + 16 * m_lay.cellH;
+		if (nBanks >= 2) hexBottom = m_lay.gridY1 + 16 * m_lay.cellH;
+		if (nBanks >= 3) hexBottom = m_lay.gridY2 + 16 * m_lay.cellH;
+		const int minKeysY = hexBottom + m_lay.gapHexKeys;
+		if (m_lay.keysY < minKeysY)
+			m_lay.keysY = minKeysY;
+		m_lay.topH = m_lay.keysY - m_lay.topY - m_lay.gapHexKeys;
+		int bot = h - m_lay.keysY - m_lay.pad;
+		if (bot < 1) bot = 1;
+		m_lay.rowH = bot / (std::max)(1, keyBlockRows);
+		if (m_lay.rowH < 11) m_lay.rowH = 11;
+		m_lay.keyH = (m_lay.rowH > 3) ? (m_lay.rowH - 2) : m_lay.rowH;
+	}
 	m_lay.keysW = (std::max)(120, w - m_lay.pad * 2);
 
 	m_lay.rcHead.SetRect(0, 0, w, m_lay.topY);
@@ -3572,6 +3653,14 @@ void CFmMonitorDlg::DrawHexArea(CDC& dc)
 {
 	if (!m_layOk) return;
 	dc.FillSolidRect(m_lay.rcHex, FM_BG);
+	struct HexClip {
+		CDC* p;
+		int id;
+		~HexClip() { if (p && id) p->RestoreDC(id); }
+	} hexClip;
+	hexClip.p = &dc;
+	hexClip.id = dc.SaveDC();
+	dc.IntersectClipRect(m_lay.rcHex);
 	if (PrimarySilent() && HasViewRegs()) {
 		wchar_t yyyy[40];
 		wchar_t title[72];
@@ -4769,6 +4858,11 @@ void CFmMonitorDlg::DrawPanelsArea(CDC& dc)
 		}
 	}
 
+	if (IsOpnThreeShell()) {
+		while (idx < 6)
+			DrawEmptyFmSlot(dc, place(idx), idx++);
+	}
+
 	if (nComp > 0 && hasY) {
 		if (FmYyyyHas(yyyy, L"OPLL") || FmYyyyHas(yyyy, L"YM2413")) {
 			for (int i = 0; i < nComp && i < 9; i++)
@@ -4785,6 +4879,21 @@ void CFmMonitorDlg::DrawPanelsArea(CDC& dc)
 	}
 	dc.RestoreDC(clipPanels);
 	m_panelDirtyMask = 0;
+}
+
+static void DrawEmptyFmSlot(CDC& dc, const CRect& rc, int ch)
+{
+	if (rc.Width() < 40 || rc.Height() < 20) return;
+	dc.FillSolidRect(rc, RGB(22, 28, 30));
+	FmFrameRect(dc, rc, RGB(70, 90, 80));
+	HFONT f = FmMakeFont((std::max)(10, rc.Height() / 18));
+	HFONT old = (HFONT)dc.SelectObject(f);
+	dc.SetBkMode(TRANSPARENT);
+	dc.SetTextColor(RGB(90, 110, 100));
+	wchar_t t[24];
+	_snwprintf_s(t, _TRUNCATE, L"FM CH %d", ch + 1);
+	dc.TextOut(rc.left + 6, rc.top + 4, t);
+	dc.SelectObject(old);
 }
 
 void CFmMonitorDlg::DrawKeysArea(CDC& dc)
@@ -4805,7 +4914,7 @@ void CFmMonitorDlg::ComposeFrame(CDC& dc, int w, int h)
 	const int exNow = ExRows();
 	const int fmNow = FmRows();
 	const int ssgNow = SsgRows();
-	const int panNow = PrimaryPanelN() + CompanionPanelN();
+	const int panNow = PanelLayoutN();
 	const int hexNow = HexBankCount();
 	const int needLay = !m_layOk || m_lay.w != w || m_lay.h != h || m_fullDraw
 		|| m_lay.pcmRows != pcmNow || m_lay.exRows != exNow
@@ -5760,6 +5869,56 @@ void CFmMonitorDlg::BlitCachedFrameToPrintDC(HDC hdc)
 	}
 }
 
+int CFmMonitorDlg::TryGpuFrame()
+{
+	if (!GpuDx11_Ready() || !::IsWindow(GetSafeHwnd()))
+		return 0;
+	CRect rect;
+	GetClientRect(&rect);
+	const int capH = CCC_GetCustomCaptionHeight(m_hWnd);
+	const int w = rect.Width();
+	const int h = rect.Height() - capH;
+	if (w < 80 || h < 80)
+		return 0;
+	if (!GpuMonSurf_Ensure(&m_gpu, m_hWnd, 0, capH, (unsigned)w, (unsigned)h))
+		return 0;
+	if (!m_layOk || m_lay.w != w || m_lay.h != h)
+		ComputeLayout(w, h);
+	if (!m_layOk)
+		return 0;
+	if (!GpuMonSurf_Begin(&m_gpu, FM_BG))
+		return 0;
+
+	GpuMon_CaptureBegin(&m_gpu);
+	HDC hdc = GpuMonSurf_GetDC(&m_gpu);
+	if (!hdc) {
+		GpuMon_CaptureEnd();
+		return 0;
+	}
+	CDC dc;
+	dc.Attach(hdc);
+	if (!m_fmViewReady && m_haveDump) {
+		dc.FillSolidRect(0, 0, w, h, FM_BG);
+		DrawHead(dc);
+	} else {
+		DrawHead(dc);
+		DrawHexArea(dc);
+		DrawPanelsArea(dc);
+		DrawKeysArea(dc);
+	}
+	dc.Detach();
+	GpuMonSurf_ReleaseDC(&m_gpu);
+	GpuMonSurf_ForceOpaque(&m_gpu);
+	GpuMonSurf_FlushRects(&m_gpu);
+	GpuMonSurf_FlushPianos(&m_gpu);
+	GpuMon_CaptureEnd();
+	if (!GpuMonSurf_Present(&m_gpu))
+		return 0;
+	m_fullDraw = 0;
+	m_dirtyHead = m_dirtyHex = m_dirtyPanels = m_dirtyKeys = 0;
+	return 1;
+}
+
 void CFmMonitorDlg::OnPaint()
 {
 	if (m_inPrint) {
@@ -5767,6 +5926,10 @@ void CFmMonitorDlg::OnPaint()
 		return;
 	}
 	CPaintDC dc(this);
+	if (TryGpuFrame()) {
+		CCC_CaptionPaintGdi(dc, m_hWnd);
+		return;
+	}
 	PaintClientToDC(dc.GetSafeHdc());
 }
 

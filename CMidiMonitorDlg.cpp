@@ -11,6 +11,7 @@
 #include "SasamiToneNames.h"
 #include "kb_sasami/source/sasami_midi.h"
 #include "CEmu/cemu_midi_live.h"
+#include "gpu/GpuDx11.h"
 #include <math.h>
 #include <mmsystem.h>
 
@@ -1443,6 +1444,7 @@ IMPLEMENT_DYNAMIC(CMidiMonitorDlg, CCustomBlurDialogExBase)
 CMidiMonitorDlg::CMidiMonitorDlg(CWnd* pParent)
 	: CCustomBlurDialogExBase(IDD_MIDIMONITOR, pParent)
 	, m_frameOld(nullptr), m_frameW(0), m_frameH(0)
+	, m_gpu{}
 #if CCUSTOM_AERO_SUPPORT
 	, m_chromaW(0), m_chromaH(0), m_chromaReady(false)
 #endif
@@ -3179,6 +3181,17 @@ void CMidiMonitorDlg::DrawMiniKeys(CDC& dc, const CRect& rc, const Part& p, COLO
 		if (m != 1 && m != 3 && m != 6 && m != 8 && m != 10) whites++;
 	}
 	if (whites < 1) return;
+	if (GpuMon_CaptureActive()) {
+		uint32_t bits[4] = {};
+		for (int n = k0; n <= k1; ++n) {
+			if (p.noteOn[n] || p.noteFlash[n]) {
+				int b = n - k0;
+				bits[b >> 5] |= (1u << (b & 31));
+			}
+		}
+		GpuMon_CapturePianoMask(&rc, bits, keyW, keyB, RGB(220, 40, 40), RGB(255, 70, 70));
+		return;
+	}
 	const int ww = rc.Width();
 	const int hh = rc.Height();
 	int wi = 0;
@@ -4497,6 +4510,8 @@ BOOL CMidiMonitorDlg::OnInitDialog()
 		L"MIDI 모니터", L"MIDI监视器", L"مراقب MIDI", L"MIDI-монитор", L"MIDI-Monitor",
 		L"Monitor MIDI", L"MIDI-monitor", L"Monitor MIDI", L"MIDI izleyici"));
 	ModifyStyle(WS_MINIMIZEBOX, 0);
+	ModifyStyle(0, WS_CLIPCHILDREN);
+	GpuDx11_Startup();
 	ModifyStyleEx(0, WS_EX_DLGMODALFRAME, SWP_FRAMECHANGED);
 
 	m_viewMode = (savedata.midimonviewmode == 1) ? 1 : 0;
@@ -4540,6 +4555,56 @@ BOOL CMidiMonitorDlg::OnInitDialog()
 	return TRUE;
 }
 
+int CMidiMonitorDlg::TryGpuFrame(int w, int h, int capH, UINT dpi)
+{
+	if (!GpuDx11_Ready() || w < 80 || h < 80)
+		return 0;
+	if (!GpuMonSurf_Ensure(&m_gpu, m_hWnd, 0, capH, (unsigned)w, (unsigned)h))
+		return 0;
+	if (!GpuMonSurf_Begin(&m_gpu, MM_BG))
+		return 0;
+	GpuMon_CaptureBegin(&m_gpu);
+	HDC hdc = GpuMonSurf_GetDC(&m_gpu);
+	if (!hdc) {
+		GpuMon_CaptureEnd();
+		return 0;
+	}
+	CDC gdc;
+	gdc.Attach(hdc);
+	const bool full = m_fullDraw;
+	if (full) {
+		DrawMonitor2D(gdc, w, h, dpi);
+		for (int i = 0; i < PART_MAX; ++i)
+			m_show[i] = m_part[i];
+		m_fullDraw = false;
+		m_dirtyRows = 0;
+		m_dirtyHead = false;
+	} else {
+		if (m_layHeadH <= 0 || m_layRowH <= 0)
+			DrawMonitor2D(gdc, w, h, dpi);
+		else {
+			if (m_dirtyHead) {
+				DrawHeader(gdc, w, m_layHeadH, dpi);
+				if (m_layFootH > 0)
+					DrawInsFoot(gdc, LayFootY(), w, m_layFootH, dpi);
+			}
+			for (int i = 0; i < PART_MAX; ++i) {
+				if (m_dirtyRows & (1u << i))
+					DrawPartRow(gdc, i, LayPartY(i), LayPartH(i), w, dpi, 0);
+			}
+		}
+		m_dirtyRows = 0;
+		m_dirtyHead = false;
+	}
+	gdc.Detach();
+	GpuMonSurf_ReleaseDC(&m_gpu);
+	GpuMonSurf_ForceOpaque(&m_gpu);
+	GpuMonSurf_FlushRects(&m_gpu);
+	GpuMonSurf_FlushPianos(&m_gpu);
+	GpuMon_CaptureEnd();
+	return GpuMonSurf_Present(&m_gpu);
+}
+
 void CMidiMonitorDlg::OnPaint()
 {
 	CPaintDC dc(this);
@@ -4571,6 +4636,11 @@ void CMidiMonitorDlg::OnPaint()
 		m_fontTiny.CreateFontIndirect(&lf);
 		m_fontDpi = (int)dpi;
 		m_fullDraw = true;
+	}
+
+	if (!IsView3D() && TryGpuFrame(w, h, capH, dpi)) {
+		CCC_CaptionPaintGdi(dc, m_hWnd);
+		return;
 	}
 
 	if (!EnsureFrameBuffer(dc, w, h) || !m_frameDC.GetSafeHdc()) {
@@ -4747,6 +4817,7 @@ void CMidiMonitorDlg::OnDestroy()
 	KillTimer(2);
 	ReleasePlayNote();
 	PersistPos();
+	GpuMonSurf_Release(&m_gpu);
 	CCC_CaptionUnregister(m_hWnd);
 	CCustomBlurDialogExBase::OnDestroy();
 }

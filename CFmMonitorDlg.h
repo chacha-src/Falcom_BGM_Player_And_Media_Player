@@ -1,10 +1,11 @@
-﻿#pragma once
+#pragma once
 // CFmMonitorDlg : SASAMI FPY / OPNA (YM2608) レジスタ・鍵盤モニタ
 // KPI/SASAMI: %TEMP%\ogg_kbsasami\*.opna
 // CEmu:       %TEMP%\ogg_cemu\*.opna （混ぜない）
 #include "afxdialogex.h"
 #include "CCustomControl.h"
 #include "kb_sasami/source/sasami_fmmon.h"
+#include "gpu/GpuDx11.h"
 
 class CFmMonitorDlg : public CCustomBlurDialogExBase
 {
@@ -76,6 +77,9 @@ private:
 	int CompanionPanelN() const;
 	int PanelGridPcmCompact() const; /* FMアルゴ無し。PCM余白を詰めて全ch収める */
 	int PrimarySilent() const; /* ハイブリッドで主FMが一度も発音していない */
+	int IsOpnThreeShell() const; /* YM2203/OPN+: OPNA の FM1-3。下は空欄 */
+	int PanelLayoutN() const; /* グリッド枠。OPN は 6 */
+	int TryGpuFrame(); /* DX11。失敗時は GDI */
 	int HexBankCount() const;
 	int HistPeekFmKey() const;
 	void TickFmViewReady();
@@ -174,4 +178,5 @@ private:
 	int m_chromaH;
 	bool m_chromaReady;
 #endif
+	GpuMonSurf m_gpu;
 };

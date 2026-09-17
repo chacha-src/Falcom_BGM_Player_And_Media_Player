@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include <stdint.h>
 
 /* 音源チップ抽象 — ym2608/2203 等 */
@@ -18,6 +18,7 @@ public:
 	virtual unsigned GetAdpcmBSize() const { return 0; }
 	virtual void SetPcmRom(const uint8_t* data, unsigned size) { (void)data; (void)size; }
 	virtual void MixAdd(int16_t* stereo, int frames, int gain) { (void)stereo; (void)frames; (void)gain; }
+	/* stereo は 32byte 境界が望ましい（AVX2 Mix）。未整列だと遅くなる。 */
 	virtual unsigned GetRegSnapshot(uint8_t* buf, unsigned cap) const { (void)buf; (void)cap; return 0; }
 	/* 前回呼び出し以降のタイマ満了回数を返し、内部カウンタをゼロにする。
 	   合体IRQ線だけを見るドライバは満了の区別ができないため、満了1回につき
