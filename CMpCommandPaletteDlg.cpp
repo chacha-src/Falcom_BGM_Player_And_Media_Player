@@ -329,9 +329,9 @@ const wchar_t* PalCmdName(int id)
 			L"피아노 롤", L"钢琴卷帘", L"لفة البيانو", L"Пианоролл", L"Piano Roll",
 			L"Piano roll", L"Piano roll", L"Piano roll", L"Piano roll");
 	case PAL_WIN_MIDIMON:
-		return LL14(L"MIDIモニタ", L"MIDI monitor", L"Moniteur MIDI", L"Monitor MIDI", L"Monitor MIDI",
-			L"MIDI 모니터", L"MIDI监视器", L"مراقب MIDI", L"MIDI-монитор", L"MIDI-Monitor",
-			L"Monitor MIDI", L"MIDI-monitor", L"Monitor MIDI", L"MIDI izleyici");
+		return LL14(L"FM/MIDIモニタ", L"FM/MIDI monitor", L"Moniteur FM/MIDI", L"Monitor FM/MIDI", L"Monitor FM/MIDI",
+			L"FM/MIDI 모니터", L"FM/MIDI监视器", L"مراقب FM/MIDI", L"FM/MIDI-монитор", L"FM/MIDI-Monitor",
+			L"Monitor FM/MIDI", L"FM/MIDI-monitor", L"Monitor FM/MIDI", L"FM/MIDI izleyici");
 	case PAL_WIN_WRD:
 		return LL14(L"WRD画面", L"WRD screen", L"Ecran WRD", L"Schermo WRD", L"Pantalla WRD",
 			L"WRD 화면", L"WRD画面", L"شاشة WRD", L"Экран WRD", L"WRD-Bildschirm",

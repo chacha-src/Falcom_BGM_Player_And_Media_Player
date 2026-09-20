@@ -1,4 +1,4 @@
-﻿// stdafx.h : 標準のシステム インクルード ファイルのインクルード ファイル、または
+// stdafx.h : 標準のシステム インクルード ファイルのインクルード ファイル、または
 // 参照回数が多く、かつあまり変更されない、プロジェクト専用のインクルード ファイル
 // を記述します。
 
@@ -43,6 +43,9 @@
 #endif // _AFX_NO_AFXCMN_SUPPORT
 
 #include <atlimage.h> // CImage / GDI+（oggDlg を PCH から外したためここで確保）
+#ifdef _OPENMP
+#include <omp.h>
+#endif
 
 #pragma warning(disable : 4995)
 
@@ -875,6 +878,12 @@ struct save{
 	int wrdx, wrdy, wrdw, wrdh;
 	int wrdMainLock;
 	int wrdtopmost;
+
+	/* --- ピアノロール／MIDIモニタ MIDI In 1/2（末尾追記。旧.datは空＝未選択）--- */
+	TCHAR pcMidiIn1Name[32];
+	TCHAR pcMidiIn2Name[32];
+	TCHAR pcMidiOutName[32]; /* 空=なし。MIDI Mapper は pcMidiOutMode=1 */
+	int pcMidiOutMode;       /* 0=なし 1=Mapper 2=名前指定 */
 };
 extern save savedata;
 

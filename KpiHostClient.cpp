@@ -662,17 +662,27 @@ bool KpiHost64Client::VstOpen(const std::wstring& midPath, const std::wstring& v
 // inj* はモニタ／鍵盤からのショート。ホストが次ブロックで VSTi へ注入する。
 bool KpiHost64Client::VstRender(uint32_t bytesWanted, std::vector<uint8_t>& outPcm, bool& outEof,
 	const uint8_t* injPorts, const uint32_t* injMsgs, const int32_t* injOfs, uint32_t injCount, uint32_t slot,
-	uint32_t* outMidiFlags)
+	uint32_t* outMidiFlags,
+	const uint8_t* sxPorts, const uint8_t* sxPacked, const int32_t* sxLens, uint32_t sxCount)
 {
 	if (slot > 1) slot = 0;
 	if (outMidiFlags) *outMidiFlags = 0;
 	KPIHOST64_RenderReq rr{};
 	rr.sessionId = slot;
 	rr.bytesWanted = bytesWanted;
-	if (injCount > 512) injCount = 512;
+	if (injCount > 8192) injCount = 8192;
 	if (!injPorts || !injMsgs) injCount = 0;
+	if (sxCount > 1024) sxCount = 1024;
+	if (!sxPorts || !sxPacked || !sxLens) sxCount = 0;
+	size_t sxBytes = 0;
+	for (uint32_t i = 0; i < sxCount; ++i) {
+		int32_t n = sxLens[i];
+		if (n < 2) n = 0;
+		sxBytes += sizeof(uint32_t) * 2 + (size_t)n;
+	}
 	std::vector<uint8_t> req(sizeof(rr) + sizeof(uint32_t) +
-		(size_t)injCount * sizeof(KPIHOST64_VstLiveMidiReq));
+		(size_t)injCount * sizeof(KPIHOST64_VstLiveMidiReq) +
+		sizeof(uint32_t) + sxBytes);
 	uint8_t* p = req.data();
 	memcpy(p, &rr, sizeof(rr)); p += sizeof(rr);
 	memcpy(p, &injCount, sizeof(injCount)); p += sizeof(injCount);
@@ -683,6 +693,19 @@ bool KpiHost64Client::VstRender(uint32_t bytesWanted, std::vector<uint8_t>& outP
 		mr.sampleOfs = injOfs ? injOfs[i] : 0;
 		memcpy(p, &mr, sizeof(mr));
 		p += sizeof(mr);
+	}
+	memcpy(p, &sxCount, sizeof(sxCount)); p += sizeof(sxCount);
+	size_t sxOff = 0;
+	for (uint32_t i = 0; i < sxCount; ++i) {
+		uint32_t port = sxPorts[i];
+		uint32_t nb = (sxLens[i] > 0) ? (uint32_t)sxLens[i] : 0;
+		memcpy(p, &port, sizeof(port)); p += sizeof(port);
+		memcpy(p, &nb, sizeof(nb)); p += sizeof(nb);
+		if (nb) {
+			memcpy(p, sxPacked + sxOff, nb);
+			p += nb;
+			sxOff += nb;
+		}
 	}
 	std::vector<uint8_t> reply;
 	uint32_t st = 0;

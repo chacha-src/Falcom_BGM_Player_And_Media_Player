@@ -39,19 +39,23 @@ uint8_t CHardAc::HD63701Read8(uint16_t addr)
 		return hd63701Ram_[addr];
 	if ((addr & 0xfc00u) == 0x1000u) {
 		const unsigned off = addr & 0x3ffu;
-		/* CUS60 F0DC: $1180=$A6 のあと $1181=$A6 待ち（メイン 6809 ドアベル）。ホスト CPU は無い — A6 を返し待ちを完了させる。IRQ ネストが F33F の後続 JSR [AE+4] をリブート嵐にした。 */
-		if (off == 0x181u && namcoCus30_[0x180u] == 0xa6u)
-			return 0xa6u;
+		/* CUS60 F0DC: $1180=$A6 のあと $1181=$A6 待ち（メイン 6809 ドアベル）。ホスト CPU は無い — A6 を返し待ちを完了させる。IRQ ネストが F33F の後続 JSR [AE+4] をリブート嵐にした。
+		   F2E3 RAM テストは $1000→$1400（$1100 を飛ばし $1180 から再開）へ増分パターンを書いて読み戻す。$1180 が偶々 $A6 だとこのスタブが $1181 を食い、hopmappy/roishtar の F110 が fault 2 になる。テスト中は生 RAM を返す。 */
+		if (off == 0x181u && namcoCus30_[0x180u] == 0xa6u) {
+			const uint16_t pc = hd63701_ ? HD63701Pc(hd63701_) : 0;
+			if (pc < 0xf2e3u || pc >= 0xf32eu)
+				return 0xa6u;
+		}
 		return namcoCus30_[off];
 	}
 	if (wsg63701_ && addr <= 0x03ffu)
 		return chip_ ? CEmuChipC30Read(chip_, addr) : namcoCus30_[addr];
 
-	/* skykid.cpp mcu_map: ワーク RAM $C000-C7FF（drgnbstr/pacland/skykid） */
+	/* skykid.cpp mcu_map: ワーク RAM $C000-C7FF。CUS60 F20A は表を $14F0 へ
+	   リロケする — wsg でも $1400-$1FFF を RAM にする（Sys86 と同じ下駄）。 */
 	if (wsg63701_ && addr >= 0xc000u && addr <= 0xc7ffu && hd63701Rom_)
 		return hd63701Rom_[addr];
-
-	if (!wsg63701_ && addr >= 0x1400u && addr <= 0x1fffu)
+	if (addr >= 0x1400u && addr <= 0x1fffu)
 		return hd63701Ram_[0x200u + (addr - 0x1400u)];
 	/* MAME hopmappy YM $2000、genpeitd $2800、wndrmomo $3800、roishtar $6000。CUS60 STA $2000 stub は roishtar 以外のマップに残す。拡張ゲームの MCU ROM（$4000-$BFFF）のときは $6000 を YM デコードしない。 */
 	if (!wsg63701_) {
@@ -105,9 +109,9 @@ void CHardAc::HD63701Write8(uint16_t addr, uint8_t v)
 		hd63701Rom_[addr] = v;
 		return;
 	}
-	if (!wsg63701_ && addr >= 0x1400u && addr <= 0x1fffu) {
+	if (addr >= 0x1400u && addr <= 0x1fffu) {
 		/* 8259 は $1400 に DSW/IN をパック（32 バイト）。$C8 を F20A dest（$14F0）のままにすると 8287 のビット展開がベクタ表へ歩く（14F8=478F → TRAP → FF78 fault 8）。$14F0-$156B を F14A/F20A（PC $F364）と 813E wipe（PC $814D）用に残す。 */
-		if (addr >= 0x14f0u && addr < 0x156cu && hd63701_) {
+		if (!wsg63701_ && addr >= 0x14f0u && addr < 0x156cu && hd63701_) {
 			const uint16_t pc = HD63701Pc(hd63701_);
 			if (pc >= 0x8240u && pc < 0x82f0u)
 				return;
@@ -157,7 +161,10 @@ void CHardAc::HD63701InjectSong(uint8_t cmd)
 	   - 停止: $1183=0 かつ $B0 クリア。次開始をエッジにするため $1182 も CLR
 	   - 開始: $1183=cmd、$B0=0。メインループが $1182=$A6 を格納して F4B1 を JSR
 	   - AE ベクタ基点（0x11C0）を確保し IRQ／メイン呼び出し表を有効に保つ */
-	if (hd63701Ram_[0xaeu] == 0 && hd63701Ram_[0xafu] == 0) {
+	if (wsg63701_) {
+		/* F20A は表を [AE+0]=$C000 へコピーして AE=$C000。11C0 に戻すと
+		   $8007 パッチ済みライブ表を捨てる。ドアベルだけ書く。 */
+	} else if (hd63701Ram_[0xaeu] == 0 && hd63701Ram_[0xafu] == 0) {
 		/* 6800 STX は hi 次いで lo — AE は 11C0 BE でなければならない */
 		hd63701Ram_[0xaeu] = 0x11;
 		hd63701Ram_[0xafu] = 0xc0;
@@ -180,16 +187,40 @@ void CHardAc::HD63701InjectSong(uint8_t cmd)
 		hd63701Ram_[0xb0u] = 0;
 		namcoCus30_[0x183] = cmd;
 		namcoCus30_[0x182] = 0xa6;
-		/* $1191 は CUS60 SFX 表（1-7）。添字 6 は RESET（F4AE）を JSR。BGM は F4B1 用に $1183 に残す。曲 ID をここにミラーしない。 */
+		/* $1191 は CUS60 SFX/曲表（1-7）。添字 6 は RESET（F4AE）。
+		   wsg の 8000 サブは開始後 1183 を busy=1 にし曲 id を捨てる。1-5/7 を
+		   ここに載せ F4AE が別シーケンスを引く。 */
+		if (wsg63701_ && cmd >= 1u && cmd <= 7u && cmd != 6u) {
+			const int metroDest = hd63701Rom_
+				&& hd63701Rom_[0x8007] == 0
+				&& hd63701Rom_[0x8008] == 0x02
+				&& hd63701Rom_[0x8009] == 0xc0
+				&& hd63701Rom_[0x800a] == 0x01;
+			if (!metroDest)
+				namcoCus30_[0x191] = cmd;
+		}
 		CChip* c30 = pcm_ ? pcm_ : (wsg63701_ ? chip_ : NULL);
 		if (c30) {
 			c30->Write(0x183, cmd);
 			c30->Write(0x182, 0xa6);
 			c30->Write(0x380, cmd); /* $1380: YM 要求ラッチ（846B） */
+			if (wsg63701_ && cmd >= 1u && cmd <= 7u && cmd != 6u) {
+				const int metroDest = hd63701Rom_
+					&& hd63701Rom_[0x8007] == 0
+					&& hd63701Rom_[0x8008] == 0x02
+					&& hd63701Rom_[0x8009] == 0xc0
+					&& hd63701Rom_[0x800a] == 0x01;
+				if (!metroDest)
+					c30->Write(0x191, cmd);
+			}
 		}
 		namcoCus30_[0x380u] = cmd;
-		if (wsg63701_ && chip_)
+		if (wsg63701_ && chip_) {
 			CEmuChipC30SetEnable(chip_, 1);
+			/* Mappy 期 15XX と同様、共有 RAM $40+n に旗。Sys86 $1182 ドアベルだけだと
+			   CUS60 以外の 8000 サブが曲を拾わない。 */
+			chip_->Write(0x40u + (cmd & 0x3fu), 1);
+		}
 	}
 	if (hd63701_)
 		HD63701SetInputLine(hd63701_, HD63701_LINE_IRQ, HD63701_CLEAR_LINE);

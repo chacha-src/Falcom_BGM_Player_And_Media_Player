@@ -1,4 +1,4 @@
-// PlayList.cpp : 実装ファイル
+﻿// PlayList.cpp : 実装ファイル
 //
 
 #include "stdafx.h"
@@ -1076,6 +1076,7 @@ void CPlayList::OnNcDestroy()
 
 void CPlayList::OnDestroy()
 {
+	CancelPlaylistDrag();
 	if (g_plHelpDlg && ::IsWindow(g_plHelpDlg->GetSafeHwnd()))
 		g_plHelpDlg->DestroyWindow();
 	CCustomBlurDialogBase::OnDestroy();
@@ -1227,6 +1228,8 @@ void CPlayList::OnBnClickedOk()
 
 BOOL CPlayList::PreTranslateMessage(MSG* pMsg)
 {
+	if (HandlePlaylistDragMsg(pMsg))
+		return TRUE;
 	if (pMsg->message == WM_KEYDOWN && pMsg->wParam == VK_RETURN) {
 		CWnd* pFocus = GetFocus();
 		if (pFocus && pFocus->GetSafeHwnd() == m_find.GetSafeHwnd()) {
@@ -1262,14 +1265,33 @@ CString NormalizePlaylistPath(LPCTSTR fol)
 	if (!fol || !*fol) return CString();
 	CString in(fol);
 	in.Replace(_T('/'), _T('\\'));
+	CString phys = in;
+	CString suffix;
 	const int gt = in.Find(_T('>'));
-	CString phys = (gt >= 0) ? in.Left(gt) : in;
-	const CString inner = (gt >= 0) ? in.Mid(gt) : CString();
+	if (gt >= 0) {
+		phys = in.Left(gt);
+		suffix = in.Mid(gt);
+	} else {
+		/* CEmu / KPI サブソング: path::0001。GetFullPathName に渡すと ADS 扱い・MAX_PATH
+		   切れで曲番が落ち、同一 zip の別曲が Fol 衝突して途中行を上書きすることがある。 */
+		const int len = in.GetLength();
+		if (len >= 7 && in.GetAt(len - 5) == _T(':') && in.GetAt(len - 6) == _T(':')) {
+			bool allDigits = true;
+			for (int i = 0; i < 4; ++i) {
+				const TCHAR c = in.GetAt(len - 4 + i);
+				if (c < _T('0') || c > _T('9')) { allDigits = false; break; }
+			}
+			if (allDigits) {
+				phys = in.Left(len - 6);
+				suffix = in.Mid(len - 6);
+			}
+		}
+	}
 	TCHAR full[MAX_PATH];
 	DWORD n = GetFullPathName(phys, MAX_PATH, full, NULL);
 	CString s = (n > 0 && n < MAX_PATH) ? CString(full) : phys;
 	s.Replace(_T('/'), _T('\\'));
-	return s + inner;
+	return s + suffix;
 }
 
 int PlIsSasamiTempPreviewPath(LPCTSTR path)
@@ -3201,6 +3223,60 @@ static void PlApplyCemuModeTag(CPlayList* pl, const char* tag)
 	}
 }
 
+static void PlApplyCemuToggleFlip(CPlayList* pl, unsigned code)
+{
+	if (!pl) return;
+	extern COggDlg* og;
+	extern CString filen;
+	extern CString tagfile;
+	int touchPlaying = 0;
+	int touchRow = -1;
+	std::vector<int> selected;
+	int focus = pl->m_lc.GetNextItem(-1, LVNI_FOCUSED);
+	int top = pl->m_lc.GetTopIndex();
+	int topY = 0;
+	RECT topRect = {};
+	if (top >= 0 && pl->m_lc.GetItemRect(top, &topRect, LVIR_BOUNDS))
+		topY = topRect.top;
+	int i = -1;
+	while ((i = pl->m_lc.GetNextItem(i, LVNI_ALL | LVNI_SELECTED)) >= 0) {
+		selected.push_back(i);
+		if (!pl->pc || i >= pl->playcnt || !pl->pc[i].fol[0]) continue;
+		if (pl->pc[i].sub != MODE_CEMU) continue;
+		wchar_t zipOut[CEMU_ZIP_PATH];
+		char dataDir[CEMU_DATA_DIR];
+		CEmuMgrResolveZip(CEmuMgrGet(), pl->pc[i].fol, zipOut,
+			(int)_countof(zipOut), dataDir, (int)sizeof(dataDir));
+		CEmuTogglePrefFlip(zipOut[0] ? zipOut : pl->pc[i].fol, code);
+		for (int pass = 0; pass < 2 && !touchPlaying; pass++) {
+			const CString& playing = pass ? tagfile : filen;
+			if (playing.GetLength() <= 0) continue;
+			wchar_t physSel[CEMU_ZIP_PATH], physPlay[CEMU_ZIP_PATH];
+			unsigned t1 = 1, t2 = 1;
+			CEmuParseVirtualPath(pl->pc[i].fol, physSel, (int)_countof(physSel), &t1);
+			CEmuParseVirtualPath(playing, physPlay, (int)_countof(physPlay), &t2);
+			(void)t1; (void)t2;
+			if (physSel[0] && physPlay[0] && _wcsicmp(physSel, physPlay) == 0) {
+				touchPlaying = 1;
+				touchRow = i;
+			}
+		}
+	}
+	if (touchPlaying) {
+		if (touchRow >= 0)
+			pl->Get(touchRow);
+		if (OggPrepareResumeBeforePlayback(filen) && og && ::IsWindow(og->GetSafeHwnd())) {
+			s_cemuModeRestoreOwner = pl;
+			s_cemuModeRestoreSel.swap(selected);
+			s_cemuModeRestoreFocus = focus;
+			s_cemuModeRestoreTop = top;
+			s_cemuModeRestoreTopY = topY;
+			s_cemuModeRestoreDue = GetTickCount() + 100;
+			RequestPlaybackRestart(og->GetSafeHwnd());
+		}
+	}
+}
+
 int CPlayList::ShowTrackContextMenu(CPoint pt, CWnd* pOwner)
 {
 	int Lindex = -1;
@@ -3356,11 +3432,11 @@ int CPlayList::ShowTrackContextMenu(CPoint pt, CWnd* pOwner)
 	if (anySasamiFm) {
 		menu.AddSeparator();
 		menu.AddCheck(PL_CTX_FMMON,
-			LL14(L"FMモニタ", L"FM Monitor", L"Moniteur FM", L"Monitor FM",
-				L"Monitor FM", L"FM 모니터", L"FM 监视器", L"مراقب FM",
-				L"FM-монитор", L"FM-Monitor", L"Monitor FM", L"FM-monitor",
-				L"Monitor FM", L"FM izleyici"),
-			savedata.fmmonwindow ? TRUE : FALSE,
+			LL14(L"FM/MIDIモニタ", L"FM/MIDI Monitor", L"Moniteur FM/MIDI", L"Monitor FM/MIDI",
+				L"Monitor FM/MIDI", L"FM/MIDI 모니터", L"FM/MIDI 监视器", L"مراقب FM/MIDI",
+				L"FM/MIDI-монитор", L"FM/MIDI-Monitor", L"Monitor FM/MIDI", L"FM/MIDI-monitor",
+				L"Monitor FM/MIDI", L"FM/MIDI izleyici"),
+			(savedata.fmmonwindow || savedata.midimonwindow) ? TRUE : FALSE,
 			LL14(
 				L".fpy/PMD/FMP の FMモニタ。旧fmpmd.kpiのみでは不可（Plugins更新で対応版へ）",
 				L"FM monitor for .fpy/PMD/FMP. Old fmpmd.kpi alone will not work; update Plugins",
@@ -3471,7 +3547,7 @@ int CPlayList::ShowTrackContextMenu(CPoint pt, CWnd* pOwner)
 			char stem[CEMU_ARCHIVE_NAME];
 			if (CEmuArchiveStemFromPath(zipOut[0] ? zipOut : (LPCWSTR)cemuFol, stem, (int)sizeof(stem)))
 				modeN = CEmuCatalogListArchiveModes(&mgr->catalog, stem,
-					dataDir[0] ? dataDir : NULL, NULL, modes, CEMU_MODE_MAX);
+					NULL, NULL, modes, CEMU_MODE_MAX);
 		}
 		if (modeN > 1) {
 			char curTag[CEMU_MODE_TAG] = {};
@@ -3507,6 +3583,51 @@ int CPlayList::ShowTrackContextMenu(CPoint pt, CWnd* pOwner)
 							L" (KPI/VST)", L" (KPI/VST)");
 					cm->AddCheck(PL_CTX_CEMUMODE_BASE + mi, lab,
 						curTag[0] && _stricmp(curTag, modes[mi].tag) == 0);
+				}
+			}
+		}
+		CEmuArchiveToggle toggles[CEMU_TOGGLE_MAX];
+		const int togN = CEmuCatalogListArchiveToggles(ge, toggles, CEMU_TOGGLE_MAX);
+		if (togN > 0) {
+			if (modeN <= 1)
+				menu.AddSeparator();
+			CCustomPopupMenu* tg = menu.AddSubMenu(
+				LL14(L"CEmu トグル", L"CEmu toggles", L"Bascules CEmu", L"Toggle CEmu",
+					L"Conmutadores CEmu", L"CEmu 토글", L"CEmu 开关", L"مفاتيح CEmu",
+					L"Переключатели CEmu", L"CEmu-Schalter", L"Alternadores CEmu", L"CEmu-schakelaars",
+					L"Przelaczniki CEmu", L"CEmu anahtarlar"),
+				LL14(L"XML の (Toggle) / TO BOSS など。今の曲の上にフラグを載せます",
+					L"XML (Toggle) / TO BOSS flags. Applied on the current song",
+					L"Drapeaux XML (Toggle) / TO BOSS. Appliques a la piste actuelle",
+					L"Flag XML (Toggle) / TO BOSS. Applicati al brano corrente",
+					L"Flags XML (Toggle) / TO BOSS. Se aplican a la pista actual",
+					L"XML (Toggle) / TO BOSS 플래그. 현재 곡 위에 적용",
+					L"XML 的 (Toggle) / TO BOSS 标志。叠在当前曲上",
+					L"أعلام XML (Toggle) / TO BOSS. تُطبَّق على المقطع الحالي",
+					L"Флаги XML (Toggle) / TO BOSS. Накладываются на текущий трек",
+					L"XML-(Toggle)/TO-BOSS-Flags. Liegen auf dem aktuellen Titel",
+					L"Flags XML (Toggle) / TO BOSS. Aplicados na faixa atual",
+					L"XML (Toggle) / TO BOSS-vlaggen. Op het huidige nummer",
+					L"Flagi XML (Toggle) / TO BOSS. Nakladane na biezacy utwor",
+					L"XML (Toggle) / TO BOSS bayraklari. Gecerli parcaya uygulanir"));
+			if (tg) {
+				for (int ti = 0; ti < togN && ti < CEMU_TOGGLE_MAX; ti++) {
+					const BOOL on = CEmuTogglePrefHas(cemuFol, toggles[ti].code) ? TRUE : FALSE;
+					tg->AddCheck(PL_CTX_CEMUTOGGLE_BASE + ti, toggles[ti].label, on,
+						LL14(L"今の曲を再生したままこのフラグを切替",
+							L"Toggle this flag while keeping the current song",
+							L"Basculer ce drapeau sans changer de piste",
+							L"Commuta questo flag restando sul brano",
+							L"Cambiar este flag sin cambiar de pista",
+							L"현재 곡을 유지한 채 이 플래그를 전환",
+							L"保持当前曲目并切换此标志",
+							L"تبديل هذا العلم مع الإبقاء على المقطع",
+							L"Переключить флаг, не меняя трек",
+							L"Dieses Flag umschalten, Titel bleibt",
+							L"Alternar este flag sem mudar a faixa",
+							L"Deze vlag wisselen zonder van nummer te veranderen",
+							L"Przelacz te flage bez zmiany utworu",
+							L"Parcayi degistirmeden bu bayragi ac/kapa"));
 				}
 			}
 		}
@@ -3775,11 +3896,11 @@ int CPlayList::ShowTrackContextMenu(CPoint pt, CWnd* pOwner)
 					L"Показывает или скрывает пианоролл (высота тона)", L"Blendet die Piano-Roll (Tonhoehe) ein oder aus", L"Mostra ou oculta o piano roll (altura)", L"Toont of verbergt de piano-roll (toonhoogte)",
 					L"Pokazuje lub ukrywa piano roll (wysokosc dzwieku)", L"Piano roll (perde gosterimi) acar veya kapatir"));
 		subWin->AddCheck(PL_CTX_MIDIMON,
-				LL14(L"MIDIモニタを開く", L"Open MIDI monitor", L"Ouvrir le moniteur MIDI", L"Apri monitor MIDI",
-					L"Abrir monitor MIDI", L"MIDI 모니터 열기", L"打开MIDI监视器", L"فتح مراقب MIDI",
-					L"Открыть MIDI-монитор", L"MIDI-Monitor oeffnen", L"Abrir monitor MIDI", L"MIDI-monitor openen",
-					L"Otworz monitor MIDI", L"MIDI izleyiciyi ac"),
-				savedata.midimonwindow ? TRUE : FALSE,
+				LL14(L"FM/MIDIモニタを開く", L"Open FM/MIDI monitor", L"Ouvrir le moniteur FM/MIDI", L"Apri monitor FM/MIDI",
+					L"Abrir monitor FM/MIDI", L"FM/MIDI 모니터 열기", L"打开FM/MIDI监视器", L"فتح مراقب FM/MIDI",
+					L"Открыть FM/MIDI-монитор", L"FM/MIDI-Monitor oeffnen", L"Abrir monitor FM/MIDI", L"FM/MIDI-monitor openen",
+					L"Otworz monitor FM/MIDI", L"FM/MIDI izleyiciyi ac"),
+				(savedata.midimonwindow || savedata.fmmonwindow) ? TRUE : FALSE,
 				LL14(L"MIDI 32パート・モニタを開く／閉じる", L"Show or hide the 32-part MIDI monitor", L"Affiche ou masque le moniteur MIDI 32 parties", L"Mostra o nasconde il monitor MIDI a 32 parti",
 					L"Muestra u oculta el monitor MIDI de 32 partes", L"MIDI 32파트 모니터를 열거나 닫습니다", L"打开或关闭 MIDI 32 声部监视器", L"يظهر أو يخفي مراقب MIDI ذا 32 جزءاً",
 					L"Показывает или скрывает MIDI-монитор на 32 партии", L"Blendet den 32-Part-MIDI-Monitor ein oder aus", L"Mostra ou oculta o monitor MIDI de 32 partes", L"Toont of verbergt de MIDI-monitor met 32 partijen",
@@ -4404,9 +4525,29 @@ void CPlayList::HandleTrackContextCmd(int cmd)
 			char stem[CEMU_ARCHIVE_NAME];
 			if (mgr && CEmuArchiveStemFromPath(zipOut[0] ? zipOut : (LPCWSTR)cemuFol, stem, (int)sizeof(stem)))
 				modeN = CEmuCatalogListArchiveModes(&mgr->catalog, stem,
-					dataDir[0] ? dataDir : NULL, NULL, modes, CEMU_MODE_MAX);
+					NULL, NULL, modes, CEMU_MODE_MAX);
 			if (mi >= 0 && mi < modeN && modes[mi].tag[0])
 				PlApplyCemuModeTag(this, modes[mi].tag);
+		}
+	}
+	else if (cmd >= PL_CTX_CEMUTOGGLE_BASE && cmd <= PL_CTX_CEMUTOGGLE_LAST) {
+		const int ti = (int)(cmd - PL_CTX_CEMUTOGGLE_BASE);
+		CString cemuFol;
+		int i = -1;
+		while ((i = m_lc.GetNextItem(i, LVNI_ALL | LVNI_SELECTED)) >= 0) {
+			if (!pc || i >= playcnt || !pc[i].fol[0]) continue;
+			if (pc[i].sub == MODE_CEMU) { cemuFol = pc[i].fol; break; }
+		}
+		if (!cemuFol.IsEmpty()) {
+			wchar_t zipOut[CEMU_ZIP_PATH];
+			char dataDir[CEMU_DATA_DIR];
+			CEmuMgr* mgr = CEmuMgrGet();
+			const CEmuGameEntry* ge = CEmuMgrResolveZip(mgr, cemuFol, zipOut,
+				(int)_countof(zipOut), dataDir, (int)sizeof(dataDir));
+			CEmuArchiveToggle toggles[CEMU_TOGGLE_MAX];
+			const int togN = CEmuCatalogListArchiveToggles(ge, toggles, CEMU_TOGGLE_MAX);
+			if (ti >= 0 && ti < togN)
+				PlApplyCemuToggleFlip(this, toggles[ti].code);
 		}
 	}
 	else if (cmd >= PL_CTX_SASAMIM_BASE && cmd <= PL_CTX_SASAMIM_LAST) {
@@ -4809,14 +4950,16 @@ CString PlStorePlaylistFol(LPCTSTR fol, int sub)
 int CPlayList::chk(CString name,int sub,CString art,CString fol,int ret)
 {
 	if(!pc || playcnt<=0) return -1;
-	int i=m_lc.GetItemCount(),c=0;
+	/* GetItemCount() は SetItemCount と playcnt が一瞬ずれると未初期化スロットまで見る。 */
+	const int n = playcnt;
+	int c=0;
 	pnt1=-1;
 	CString s,s1;
 	// 単体メディアファイルはパス+形式(sub)で同一判定(タグ名とプレイリスト表示名の差異を吸収)
 	const bool pathKeyOnly = (sub == -1 || sub == -6 || sub == 33 || sub == 34 || sub == 35 ||
 		sub == -7 || sub == -8 || sub == -9 ||
 		sub == -10 || sub == 999 || sub == -2 || sub == -3 || sub == MODE_VST_MIDI || sub == MODE_CEMU);
-	for(int j=0;j<i;j++){
+	for(int j=0;j<n;j++){
 		if (pathKeyOnly) {
 			if (_tcsicmp(pc[j].fol, fol) == 0 && pc[j].sub == sub)
 				return j;
@@ -5490,7 +5633,9 @@ int CPlayList::Add(CString name,int sub,int loop1,int loop2,CString art,CString 
 	const CString folNorm = PlStorePlaylistFol(fol, sub);
 
 	if(f) {
-		if (!PlIsFalcomGameBgmMode(sub)) {
+		/* CEmu は zip::NNNN の仮想パス。FindByPath が曲番を落とすと同一 zip の別曲が
+		   既存行を上書きし、末尾に積まれない。同一判定は chk（Fol+sub）に任せる。 */
+		if (!PlIsFalcomGameBgmMode(sub) && sub != MODE_CEMU) {
 			int byPath = FindByPath(folNorm);
 			if (byPath >= 0) {
 				pc[byPath].loop1 = loop1;
@@ -5535,7 +5680,7 @@ int CPlayList::Add(CString name,int sub,int loop1,int loop2,CString art,CString 
 				}
 				pc = newPc;
 			}
-			m_lc.SetItemCount(playcnt+1);
+			m_lc.pc = pc;
 		}
 		CString dispName = name;
 		// Load では MIDI ファイルを開かない（起動で全 .mid を読むと固まる）。
@@ -5547,6 +5692,7 @@ int CPlayList::Add(CString name,int sub,int loop1,int loop2,CString art,CString 
 			PlMidiMaybeTitle(dispName, folNorm, 0);
 			PlSasamiMaybeTags(dispName, art, alb, folNorm, 0);
 		}
+		if (!pc) return -1;
 		_tcscpy(pc[playcnt].name, dispName);
 		_tcscpy(pc[playcnt].art,art);
 		_tcscpy(pc[playcnt].alb,alb);
@@ -5563,13 +5709,17 @@ int CPlayList::Add(CString name,int sub,int loop1,int loop2,CString art,CString 
 //		m_lc.RedrawWindow(&r);	
 		playcnt++;
 		MpPlaylistNatOrdNotifyAdded();
+		/* 中身を書いてから件数を上げる。先に SetItemCount すると未初期化行の
+		   GetDispInfo が 0 番を描き、GetItemCount>playcnt で chk が誤爆する。 */
+		if (ff)
+			m_lc.SetItemCount(playcnt);
 //	}		
 		
 	return -1;
 }
 
 enum { kPlUndoDepth = 16 };
-enum { kPlUndoDel = 0, kPlUndoIns = 1 };
+enum { kPlUndoDel = 0, kPlUndoIns = 1, kPlUndoMove = 2 };
 #define PL_CLIP_MAGIC 0x4C50474F
 
 struct PlUndoRec {
@@ -5628,6 +5778,26 @@ static void PlUndoPush(int op, int at, const playlistdata0* items, int n)
 	s_plUndo[s_plUndoLen].at = at;
 	s_plUndo[s_plUndoLen].n = n;
 	s_plUndo[s_plUndoLen].items = copy;
+	s_plUndoLen++;
+	s_plUndoCur = s_plUndoLen;
+}
+
+static void PlUndoPushMove(int src, int dst)
+{
+	if (src == dst) return;
+	PlUndoClearFrom(s_plUndoCur);
+	if (s_plUndoLen >= kPlUndoDepth) {
+		PlUndoFreeRec(s_plUndo[0]);
+		for (int i = 1; i < s_plUndoLen; ++i)
+			s_plUndo[i - 1] = s_plUndo[i];
+		s_plUndoLen--;
+		s_plUndo[s_plUndoLen].items = NULL;
+		s_plUndoCur = s_plUndoLen;
+	}
+	s_plUndo[s_plUndoLen].op = kPlUndoMove;
+	s_plUndo[s_plUndoLen].at = src;
+	s_plUndo[s_plUndoLen].n = dst;
+	s_plUndo[s_plUndoLen].items = NULL;
 	s_plUndoLen++;
 	s_plUndoCur = s_plUndoLen;
 }
@@ -5757,11 +5927,52 @@ void CPlayList::Del()
 	DelByIndices(sel);
 }
 
+void CPlayList::MoveTrack(int src, int dst, BOOL recordUndo)
+{
+	if (!pc) return;
+	const int n = playcnt;
+	if (src < 0 || src >= n || dst < 0 || dst >= n || src == dst) return;
+	if (recordUndo)
+		PlUndoPushMove(src, dst);
+	playlistdata0 tmp = pc[src];
+	if (src < dst) {
+		for (int i = src; i < dst; i++)
+			pc[i] = pc[i + 1];
+	} else {
+		for (int i = src; i > dst; i--)
+			pc[i] = pc[i - 1];
+	}
+	pc[dst] = tmp;
+	auto adj = [&](int idx)->int {
+		if (idx == src) return dst;
+		if (src < dst && idx > src && idx <= dst) return idx - 1;
+		if (src > dst && idx >= dst && idx < src) return idx + 1;
+		return idx;
+	};
+	extern int plcnt;
+	extern CMediaPlayerDlg* mp;
+	plcnt = adj(plcnt);
+	pnt = adj(pnt);
+	pnt1 = adj(pnt1);
+	if (mp) {
+		for (int i = 0; i < mp->m_queueN; ++i)
+			mp->m_queue[i] = adj(mp->m_queue[i]);
+	}
+	if (::IsWindow(m_lc.GetSafeHwnd()))
+		m_lc.RedrawWindow();
+	Save();
+}
+
 void CPlayList::UndoLastDelete()
 {
 	if (s_plUndoCur <= 0) return;
 	s_plUndoCur--;
 	const PlUndoRec& r = s_plUndo[s_plUndoCur];
+	if (r.op == kPlUndoMove) {
+		MoveTrack(r.n, r.at, FALSE);
+		PlRefreshAfterEdit(this);
+		return;
+	}
 	if (r.n <= 0 || !r.items) return;
 	if (r.op == kPlUndoDel) {
 		if (!PlInsertTracksRaw(this, r.at, r.items, r.n)) {
@@ -5783,6 +5994,12 @@ void CPlayList::RedoLastEdit()
 {
 	if (s_plUndoCur >= s_plUndoLen) return;
 	const PlUndoRec& r = s_plUndo[s_plUndoCur];
+	if (r.op == kPlUndoMove) {
+		MoveTrack(r.at, r.n, FALSE);
+		s_plUndoCur++;
+		PlRefreshAfterEdit(this);
+		return;
+	}
 	if (r.n <= 0 || !r.items) return;
 	if (r.op == kPlUndoDel) {
 		std::vector<int> idx;
@@ -11639,9 +11856,9 @@ static void PlCemuFillPlaylistRow(const CEmuGameEntry* ge, const wchar_t* zipPhy
 	p->sub = MODE_CEMU;
 	p->ret2 = (int)titleIndex1;
 
-	wchar_t virt[CEMU_ZIP_PATH];
+	wchar_t virt[1024];
 	CEmuFormatVirtualPath(zipPhysical, titleIndex1, virt, (int)_countof(virt));
-	_tcscpy(p->fol, virt);
+	_tcscpy_s(p->fol, virt);
 
 	wchar_t songLabel[CEMU_GAME_NAME];
 	songLabel[0] = 0;
@@ -11910,8 +12127,14 @@ bool PlCemuAddZipAndPlay(LPCTSTR zipPhysical)
 	int modesubLocal = 0;
 	CString fnnLocal;
 	const int before = pl->playcnt;
-	if (!PlAddCemuZipEntries(pl, zipPhysical, syoLocal, syosLocal, modesubLocal, fnnLocal))
+	const BOOL hadLc = pl->m_lc.GetSafeHwnd() != NULL;
+	if (hadLc)
+		pl->m_lc.SetRedraw(FALSE);
+	if (!PlAddCemuZipEntries(pl, zipPhysical, syoLocal, syosLocal, modesubLocal, fnnLocal)) {
+		if (hadLc)
+			pl->m_lc.SetRedraw(TRUE);
 		return false;
+	}
 	int playIdx = before;
 	if (playIdx < 0 || playIdx >= pl->playcnt) {
 		if (!syosLocal.IsEmpty())
@@ -11924,10 +12147,15 @@ bool PlCemuAddZipAndPlay(LPCTSTR zipPhysical)
 		RequestPlaylistRestartAsync();
 	}
 	pl->Save();
-	if (pl->m_lc.GetSafeHwnd()) {
+	if (hadLc) {
+		pl->m_lc.SetItemCount(pl->playcnt);
+		pl->m_lc.SetRedraw(TRUE);
 		pl->m_lc.Invalidate();
 		pl->m_lc.UpdateWindow();
 	}
+	extern CMediaPlayerDlg* mp;
+	if (mp && ::IsWindow(mp->GetSafeHwnd()))
+		mp->RefreshList(TRUE);
 	return true;
 }
 
@@ -12775,43 +13003,121 @@ void CPlayList::OnBnClickedCheck1()
 void CPlayList::OnLvnBegindragList1(NMHDR *pNMHDR, LRESULT *pResult)
 {
 	LPNMLISTVIEW pNM = reinterpret_cast<LPNMLISTVIEW>(pNMHDR);
-	// TODO: ここにコントロール通知ハンドラ コードを追加します。
-	POINT ptPos,ptPos2;
-    HIMAGELIST hOneImageList;
-    HIMAGELIST hTempImageList;
+	*pResult = 0;
+	if (m_plDragging)
+		CancelPlaylistDrag();
+	if ((GetKeyState(VK_LBUTTON) & 0x8000) == 0)
+		return;
+	if (!pNM || pNM->iItem < 0)
+		return;
+	m_plDragItem = pNM->iItem;
+	m_plDragging = 1;
+	m_plDragMoved = 0;
+	GetCursorPos(&m_plDragStart);
+}
+
+static int PlDragSlop()
+{
+	int x = GetSystemMetrics(SM_CXDRAG);
+	int y = GetSystemMetrics(SM_CYDRAG);
+	if (x < 4) x = 4;
+	if (y < 4) y = 4;
+	return (x > y) ? x : y;
+}
+
+void CPlayList::StartPlaylistDragVisual()
+{
+	if (!m_plDragging || m_plDragItem < 0 || !m_lc.GetSafeHwnd())
+		return;
+	if (m_hDragImage)
+		return;
+	POINT ptPos, ptPos2;
+	HIMAGELIST hOneImageList;
+	HIMAGELIST hTempImageList;
 	IMAGEINFO imf;
 	long iHeight;
-	m_hDragImage = ListView_CreateDragImage(m_lc.m_hWnd,pNM->iItem,&ptPos);
+	m_hDragImage = ListView_CreateDragImage(m_lc.m_hWnd, m_plDragItem, &ptPos);
+	if (!m_hDragImage)
+		return;
 	ImageList_GetImageInfo(m_hDragImage, 0, &imf);
 	iHeight = imf.rcImage.bottom;
-	for(int Lindex=-1;;){
-		Lindex=m_lc.GetNextItem(Lindex,LVNI_ALL |LVNI_SELECTED);//pNM->iItem
-		if(Lindex==-1) break;
-		if(pNM->iItem==Lindex){
-		}else{
-            hOneImageList= ListView_CreateDragImage(m_lc.m_hWnd,Lindex,&ptPos2);
-            hTempImageList = ImageList_Merge(m_hDragImage, 
-                             0, hOneImageList, 0, 0, iHeight);
-            ImageList_Destroy(m_hDragImage);
-            ImageList_Destroy(hOneImageList);
-            m_hDragImage = hTempImageList;
-            ImageList_GetImageInfo(m_hDragImage, 0, &imf);
-            iHeight = imf.rcImage.bottom;		}
+	for (int Lindex = -1;;) {
+		Lindex = m_lc.GetNextItem(Lindex, LVNI_ALL | LVNI_SELECTED);
+		if (Lindex == -1) break;
+		if (m_plDragItem == Lindex)
+			continue;
+		hOneImageList = ListView_CreateDragImage(m_lc.m_hWnd, Lindex, &ptPos2);
+		hTempImageList = ImageList_Merge(m_hDragImage, 0, hOneImageList, 0, 0, iHeight);
+		ImageList_Destroy(m_hDragImage);
+		ImageList_Destroy(hOneImageList);
+		m_hDragImage = hTempImageList;
+		ImageList_GetImageInfo(m_hDragImage, 0, &imf);
+		iHeight = imf.rcImage.bottom;
 	}
- 	// ドラッグ開始
 	POINT ptCursor;
 	GetCursorPos(&ptCursor);
 	m_lc.ScreenToClient(&ptCursor);
-
-	long lX = ptCursor.x- ptPos.x;
-	long lY = ptCursor.y- ptPos.y;
-
-	ImageList_BeginDrag(m_hDragImage,0,lX,lY);
-	ImageList_DragEnter(m_hWnd,0,0);
+	const long lX = ptCursor.x - ptPos.x;
+	const long lY = ptCursor.y - ptPos.y;
+	ImageList_BeginDrag(m_hDragImage, 0, lX, lY);
+	ImageList_DragEnter(m_hWnd, 0, 0);
 	SetCapture();
+}
 
+void CPlayList::CancelPlaylistDrag()
+{
+	if (GetCapture() == this)
+		ReleaseCapture();
+	if (m_hDragImage) {
+		ImageList_DragLeave(m_hWnd);
+		ImageList_EndDrag();
+		ImageList_Destroy(m_hDragImage);
+		m_hDragImage = NULL;
+		ShowCursor(TRUE);
+	}
+	m_plDragging = 0;
+	m_plDragMoved = 0;
+	m_plDragItem = -1;
+}
 
-	*pResult = 0;
+BOOL CPlayList::HandlePlaylistDragMsg(MSG* pMsg)
+{
+	if (!m_plDragging || !pMsg)
+		return FALSE;
+	if (pMsg->message == WM_MOUSEMOVE) {
+		if (!m_plDragMoved) {
+			const int slop = PlDragSlop();
+			if (abs((int)pMsg->pt.x - m_plDragStart.x) < slop
+				&& abs((int)pMsg->pt.y - m_plDragStart.y) < slop)
+				return FALSE;
+			m_plDragMoved = 1;
+			StartPlaylistDragVisual();
+		}
+		if (m_hDragImage) {
+			CPoint pt(pMsg->pt);
+			ScreenToClient(&pt);
+			OnDrag(pt.x, pt.y);
+		}
+		return FALSE;
+	}
+	if (pMsg->message == WM_LBUTTONUP) {
+		const BOOL moved = m_plDragMoved;
+		CPoint pt;
+		GetCursorPos(&pt);
+		ScreenToClient(&pt);
+		OnLButtonUp(0, pt);
+		return moved ? TRUE : FALSE;
+	}
+	if (pMsg->message == WM_RBUTTONDOWN || pMsg->message == WM_MBUTTONDOWN
+		|| (pMsg->message == WM_KEYDOWN && pMsg->wParam == VK_ESCAPE)) {
+		CancelPlaylistDrag();
+		return TRUE;
+	}
+	if (pMsg->message == WM_LBUTTONDOWN) {
+		CancelPlaylistDrag();
+		return FALSE;
+	}
+	return FALSE;
 }
 
 void CPlayList::OnDrag(int x,int y)
@@ -12835,31 +13141,35 @@ void CPlayList::OnDrag(int x,int y)
 
 void CPlayList::OnEndDrag()
 {
-	// ドラッグ終了
-	ImageList_DragLeave(m_hWnd);
-	ImageList_EndDrag();
-	ImageList_Destroy(m_hDragImage);
-	m_hDragImage = NULL;
-
-	// カーソル表示
-	ShowCursor(TRUE);
+	CancelPlaylistDrag();
 }
 void CPlayList::OnMouseMove(UINT nFlags, CPoint point)
 {
-	// TODO: ここにメッセージ ハンドラ コードを追加するか、既定の処理を呼び出します。
-	if(GetCapture()==this){
-		OnDrag(point.x,point.y);
+	if (m_plDragging) {
+		if (!m_plDragMoved) {
+			CPoint sp;
+			GetCursorPos(&sp);
+			const int slop = PlDragSlop();
+			if (abs(sp.x - m_plDragStart.x) >= slop || abs(sp.y - m_plDragStart.y) >= slop) {
+				m_plDragMoved = 1;
+				StartPlaylistDragVisual();
+			}
+		}
+		if (m_hDragImage)
+			OnDrag(point.x, point.y);
 	}
 	CCustomBlurDialogBase::OnMouseMove(nFlags, point);
 }
 
 void CPlayList::OnLButtonUp(UINT nFlags, CPoint point)
 {
-	// TODO: ここにメッセージ ハンドラ コードを追加するか、既定の処理を呼び出します。
-	if(GetCapture()==this){
-		OnEndDrag();
-		// キャプチャ解除
-		ReleaseCapture();
+	if (m_plDragging) {
+		const BOOL moved = m_plDragMoved;
+		CancelPlaylistDrag();
+		if (!moved) {
+			CCustomBlurDialogBase::OnLButtonUp(nFlags, point);
+			return;
+		}
 		//実際の移動のための座標割りだし
 		CPoint  point,point2;CRect rect;
 		GetCursorPos(&point);
@@ -12891,6 +13201,8 @@ void CPlayList::OnLButtonUp(UINT nFlags, CPoint point)
 				if(Lindexx==-1) break;
 				cn[cn1]=Lindexx;
 			}
+			const int undoSrc = (cnt2 == 1) ? cn[0] : -1;
+			const int undoDst = hItem;
 			CString s;
 			for(cnt=0,Lindex=-1;;cnt++){
 				Lindex=m_lc.GetNextItem(Lindex,LVNI_ALL |LVNI_SELECTED);
@@ -12948,6 +13260,8 @@ void CPlayList::OnLButtonUp(UINT nFlags, CPoint point)
 			}
 			free(cn);
 			free(p);
+			if (undoSrc >= 0 && undoSrc != undoDst)
+				PlUndoPushMove(undoSrc, undoDst);
 			m_lc.RedrawWindow();
 			m_lDragTopItem=0;m_lDragTopItemt=0;
 		 }

@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 // CFmMonitorDlg : SASAMI FPY / OPNA (YM2608) レジスタ・鍵盤モニタ
 // KPI/SASAMI: %TEMP%\ogg_kbsasami\*.opna
 // CEmu:       %TEMP%\ogg_cemu\*.opna （混ぜない）
@@ -25,10 +25,14 @@ public:
 	void LayoutHelpBtn();
 	void PersistGeom();
 	void RestoreGeom();
+	void SetHosted(int hosted) { m_hosted = hosted ? 1 : 0; }
+	int IsHosted() const { return m_hosted; }
+	void ApplyPcAudioKeys(const BYTE levels108[108]); /* 無演奏時のPC音鍵盤 */
 
 protected:
 	virtual void DoDataExchange(CDataExchange* pDX);
 	virtual BOOL OnInitDialog();
+	virtual BOOL PreCreateWindow(CREATESTRUCT& cs);
 	DECLARE_MESSAGE_MAP()
 
 	afx_msg void OnPaint();
@@ -42,6 +46,7 @@ protected:
 	afx_msg void OnTimer(UINT_PTR nIDEvent);
 	afx_msg void OnBnClickedHelp();
 	afx_msg void OnSysCommand(UINT nID, LPARAM lParam);
+	afx_msg void OnShowWindow(BOOL bShow, UINT nStatus);
 
 private:
 	enum { HIST_MAX = 512 }; /* リング容量（keys-only 高解像度用） */
@@ -142,6 +147,7 @@ private:
 	int m_readFail;
 	int m_persistAge;
 	int m_userClosing; /* 1=ユーザーが×で閉じた → fmmonwindow=0 */
+	int m_hosted; /* 1=CMidiMonitorDlg の子。独自キャプション/位置保存をしない */
 	ULONGLONG m_lastPollMs;
 	int m_inPrint; /* PrintWindow / スクショ中。CPaintDC と Poll を混ぜない */
 	int m_inPump; /* PumpSyncNow 再入防止（timerp / OnIdle / タイマ） */

@@ -235,6 +235,32 @@ static int S3rPathIdx(float t)
 	i %= n; if (i < 0) i += n;
 	return i;
 }
+static float S3rRand01(DWORD& rng);
+// 周回の所々だけ HP 回復。大半は非回復。スタート線付近は置かない。
+static void S3rFillHealPads(unsigned char* heal, int n, DWORD& rng)
+{
+	if (!heal || n < 16) return;
+	memset(heal, 0, (size_t)n);
+	const int npad = 5 + (int)(S3rRand01(rng) * 2.99f); // 5..7
+	const float padFrac = 0.030f; // 各島 ~3% → 合計 15〜21%
+	const int halfN = max(4, (int)(padFrac * 0.5f * (float)n));
+	for (int p = 0; p < npad; p++) {
+		float slot = ((float)p + 0.28f + 0.44f * S3rRand01(rng)) / (float)npad;
+		float c = 0.10f + slot * 0.82f;
+		if (c > 0.96f) c = 0.96f;
+		int mid = (int)floorf(c * (float)n);
+		for (int d = -halfN; d <= halfN; d++) {
+			int k = mid + d;
+			k %= n; if (k < 0) k += n;
+			if (k < 8 || k > n - 8) continue;
+			heal[k] = 1;
+		}
+	}
+}
+static int S3rHealAtT(const unsigned char* heal, float t)
+{
+	return (heal && heal[S3rPathIdx(t)]) ? 1 : 0;
+}
 static float S3rTunFlare(const unsigned char* deep, int i)
 {
 	if (!deep[i]) return 0.f;
@@ -656,10 +682,10 @@ void CS3rHelpDlg::OnPaint()
 	legendHead();
 	legendRow(RGB(140, 220, 255),
 		LL14(L"パワーバンド（光帯）", L"Power band (light ribbon)", L"Bande de puissance", L"Fascia di potenza", L"Banda de potencia", L"파워 밴드", L"能量光带", L"Power band", L"Силовая лента", L"Powerband", L"Faixa de potência", L"Powerband", L"Pas mocy", L"Güç bandı"),
-		LL14(L"コース本体。帯上で推進力／中央でHP回復。帯外フリー走行可。推進力0で離脱地点へ復帰", L"On-band: thrust regen / center HP. Off-band free flight; thrust 0 = reset to exit", L"Sur bande: poussée; hors bande libre; poussée 0 = retour", L"Sulla fascia: spinta; fuori libero; spinta 0 = reset", L"En banda: empuje; fuera libre; empuje 0 = reinicio", L"밴드 위 추진력/중앙 HP. 밖 자유비행. 추진력0이면 복귀", L"带上恢复推进力/中央回HP；带外自由飞；推进力0回脱离点", L"Thrust on-band; free off-band; thrust 0 = reset", L"Тяга на ленте; вне свободно; тяга 0 = возврат", L"Schub auf Band; off-band frei; Schub 0 = Reset", L"Empuxo na faixa; fora livre; empuxo 0 = reset", L"Stuwkracht op band; buiten vrij; 0 = reset", L"Ciąg na pasie; poza wolno; ciąg 0 = reset", L"Bantta itki; dışı serbest; itki 0 = dönüş"));
+		LL14(L"コース本体。帯上で推進力。帯外フリー走行可。推進力0で離脱地点へ復帰", L"On-band: thrust regen. Off-band free flight; thrust 0 = reset to exit", L"Sur bande: poussée; hors bande libre; poussée 0 = retour", L"Sulla fascia: spinta; fuori libero; spinta 0 = reset", L"En banda: empuje; fuera libre; empuje 0 = reinicio", L"밴드 위 추진력. 밖 자유비행. 추진력0이면 복귀", L"带上恢复推进力；带外自由飞；推进力0回脱离点", L"On-band: thrust regen. Off-band free flight; thrust 0 = reset", L"Тяга на ленте; вне свободно; тяга 0 = возврат", L"Schub auf Band; off-band frei; Schub 0 = Reset", L"Empuxo na faixa; fora livre; empuxo 0 = reset", L"Stuwkracht op band; buiten vrij; 0 = reset", L"Ciąg na pasie; poza wolno; ciąg 0 = reset", L"Bantta itki; dışı serbest; itki 0 = dönüş"));
 	legendRow(RGB(40, 220, 130),
-		LL14(L"回復ゾーン（緑の内側帯）", L"Recovery strip (inner green)", L"Zone de soin (bande verte)", L"Zona recupero (verde)", L"Zona de cura (verde)", L"회복 존(초록 내측)", L"回复区（内侧绿带）", L"Recovery strip (inner green)", L"Полоса лечения (зелёная)", L"Heilzone (grün innen)", L"Faixa de cura (verde)", L"Herstelstrook (groen)", L"Strefa leczenia (zielona)", L"İyileşme şeridi (yeşil)"),
-		LL14(L"帯の中央に描画。ここにいるとHPが回復する", L"Drawn down the band centre. Stay here to restore HP", L"Au centre de la bande. Restez-y pour soigner les PV", L"Al centro della fascia. Resta qui per curare gli HP", L"En el centro de la banda. Quédate para recuperar HP", L"밴드 중앙. 여기 있으면 HP 회복", L"画在光带正中。停在这里回HP", L"Painted on the band centre. Stay there to restore HP", L"По центру ленты. Стойте здесь — HP восстанавливается", L"In der Bandmitte. Hier regeneriert HP", L"No centro da faixa. Fique aqui para recuperar HP", L"Midden op de band. Blijf hier om HP te herstellen", L"Na środku pasa. Tu regeneruje się HP", L"Bandın ortasında. Burada HP dolar"));
+		LL14(L"回復ゾーン（所々の緑帯）", L"Recovery pads (green patches)", L"Zones de soin (verts épars)", L"Zone recupero (verde a tratti)", L"Zonas de cura (verde a ratos)", L"회복 존(곳곳의 초록)", L"回复区（间断绿带）", L"Recovery pads (scattered green)", L"Зоны лечения (зелёные пятна)", L"Heilzonen (grüne Inseln)", L"Zonas de cura (verde aos trechos)", L"Herstelzones (groene stukken)", L"Strefy leczenia (zielone wyspy)", L"İyileşme adaları (yeşil)"),
+		LL14(L"コース中央に点在。緑の区間の内側にいるとHPが回復する（大半の中央は回復しない）", L"Scattered along the centre. Only the green stretches restore HP (most of the centre does not)", L"Çà et là au centre. Seuls les verts soignent les PV (le reste du centre ne soigne pas)", L"Sparse al centro. Solo i tratti verdi curano gli HP (il resto del centro no)", L"Dispersas en el centro. Solo los tramos verdes curan HP (el resto del centro no)", L"중앙에 점재. 초록 구간에만 HP 회복(대부분의 중앙은 회복 없음)", L"散布在正中。只有绿段回HP（大部分中央不回）", L"Scattered on the centre line. Only green stretches restore HP", L"Пятнами по центру. HP только на зелёных участках", L"Verstreut in der Mitte. Nur grüne Abschnitte heilen HP", L"Espalhadas no centro. Só os trechos verdes recuperam HP", L"Verspreid in het midden. Alleen groene stukken herstellen HP", L"Wyspy na środku. HP tylko na zielonych odcinkach", L"Ortada serpiştirilmiş. HP yalnızca yeşil dilimlerde dolar"));
 	legendRow(RGB(240, 240, 245),
 		LL14(L"スタート／LAP線", L"Start / lap line", L"Ligne départ / tour", L"Linea partenza / giro", L"Línea de salida / vuelta", L"스타트/랩 라인", L"起跑／计圈线", L"Start / lap line", L"Старт / линия круга", L"Start-/Rundenlinie", L"Linha de largada / volta", L"Start-/rondelijn", L"Linia startu / okrążenia", L"Start / tur çizgisi"),
 		LL14(L"格子のゲート。通過で周回が進む（ゴールもここ）", L"Chequered gate. Crossing it counts a lap (and the finish)", L"Portique à damiers. Le franchir compte un tour (et l'arrivée)", L"Cancello a scacchi. Attraversarlo conta un giro (e l'arrivo)", L"Puerta de cuadros. Cruzarla cuenta una vuelta (y la meta)", L"체크무늬 게이트. 통과하면 랩(골도 여기)", L"格子门。穿过计一圈（终点也在这）", L"Chequered gate. Crossing counts a lap (and the finish)", L"Клетчатые ворота. Проезд считает круг (и финиш)", L"Kariertes Tor. Überfahren zählt eine Runde (und das Ziel)", L"Portão xadrez. Cruzar conta uma volta (e a chegada)", L"Geblokte poort. Passeren telt een ronde (en de finish)", L"Krata. Przejazd liczy okrążenie (i metę)", L"Damalı kapı. Geçmek tur sayar (bitiş de burada)"));
@@ -2309,6 +2335,7 @@ CSoft3DRaceDlg::CSoft3DRaceDlg(CWnd* p)
 	memset(m_hmPathDist,0,sizeof(m_hmPathDist));
 	memset(m_pathDeep,0,sizeof(m_pathDeep));
 	memset(m_pathWet,0,sizeof(m_pathWet));
+	memset(m_pathHeal,0,sizeof(m_pathHeal));
 	memset(m_hmPathY,0,sizeof(m_hmPathY));
 	memset(m_carveX0,0,sizeof(m_carveX0)); memset(m_carveY0,0,sizeof(m_carveY0)); memset(m_carveZ0,0,sizeof(m_carveZ0));
 	memset(m_carveX1,0,sizeof(m_carveX1)); memset(m_carveY1,0,sizeof(m_carveY1)); memset(m_carveZ1,0,sizeof(m_carveZ1));
@@ -3240,6 +3267,7 @@ void CSoft3DRaceDlg::GenerateCourseWithSeed(DWORD seed)
 		}
 		m_pathCumLen[i] = m_pathLen; px=x;py=y;pz=z;
 	}
+	S3rFillHealPads(m_pathHeal, S3R_PATH_SAMPLES, m_rng);
 	// コース帯に浅い溝＋山は円形トンネル（坑口を広げ、床は下半円）
 	{
 		for (int i = 0; i < S3R_HM_N * S3R_HM_N; i++) m_hmPathDist[i] = 1e8f;
@@ -5462,7 +5490,7 @@ void CSoft3DRaceDlg::TickPhysics(float dt)
 		if (latAbs <= onLat && vertAbs <= onVert) {
 			c.offBand = 0;
 			c.fuel = min(100.f, c.fuel + 28.f * dt);
-			if (latAbs <= half * 0.42f && vertAbs <= half * 0.38f) {
+			if (latAbs <= half * 0.42f && vertAbs <= half * 0.38f && S3rHealAtT(m_pathHeal, c.pathT)) {
 				c.hp = min(100.f, c.hp + 14.f * dt);
 			}
 			// 帯中央寄りでのみチェックポイント更新（端保存→復帰ループ防止）
@@ -6091,13 +6119,15 @@ void CSoft3DRaceDlg::BakeStaticMeshes()
 			  p1x-b1x*half+n1x*.08f,p1y-b1y*half+n1y*.08f,p1z-b1z*half+n1z*.08f,
 			  p1x-b1x*rh+n1x*.35f,p1y-b1y*rh+n1y*.35f,p1z-b1z*rh+n1z*.35f,
 			  -b0x,-b0y,-b0z, u0,0,u1,1, colR,colG,colB,.28f);
-		float rhRec = half * 0.40f;
-		float nLift = 0.12f;
-		patch(p0x-b0x*rhRec+n0x*nLift,p0y-b0y*rhRec+n0y*nLift,p0z-b0z*rhRec+n0z*nLift,
-			  p0x+b0x*rhRec+n0x*nLift,p0y+b0y*rhRec+n0y*nLift,p0z+b0z*rhRec+n0z*nLift,
-			  p1x+b1x*rhRec+n1x*nLift,p1y+b1y*rhRec+n1y*nLift,p1z+b1z*rhRec+n1z*nLift,
-			  p1x-b1x*rhRec+n1x*nLift,p1y-b1y*rhRec+n1y*nLift,p1z-b1z*rhRec+n1z*nLift,
-			  n0x,n0y,n0z, u0,0,u1,1, 0.22f,0.95f,0.52f,0.58f);
+		if (S3rHealAtT(m_pathHeal, t0) || S3rHealAtT(m_pathHeal, t1)) {
+			float rhRec = half * 0.40f;
+			float nLift = 0.12f;
+			patch(p0x-b0x*rhRec+n0x*nLift,p0y-b0y*rhRec+n0y*nLift,p0z-b0z*rhRec+n0z*nLift,
+				  p0x+b0x*rhRec+n0x*nLift,p0y+b0y*rhRec+n0y*nLift,p0z+b0z*rhRec+n0z*nLift,
+				  p1x+b1x*rhRec+n1x*nLift,p1y+b1y*rhRec+n1y*nLift,p1z+b1z*rhRec+n1z*nLift,
+				  p1x-b1x*rhRec+n1x*nLift,p1y-b1y*rhRec+n1y*nLift,p1z-b1z*rhRec+n1z*nLift,
+				  n0x,n0y,n0z, u0,0,u1,1, 0.22f,0.95f,0.52f,0.58f);
+		}
 	}
 	{
 		float tA = 0.f, tB = 0.012f;
@@ -7790,7 +7820,10 @@ void CSoft3DRaceDlg::RenderScene()
 			for (int i=0;i<S3R_PATH_SAMPLES-1;i+=4){
 				float ax=m_pathSampleXYZ[i][0], az=m_pathSampleXYZ[i][2];
 				float x0=mx0+(mx1-mx0)*(ax*s*0.5f+0.5f), y0=my0+(my1-my0)*(az*s*0.5f+0.5f);
-				hq(x0-.003f,y0-.003f,x0+.003f,y0+.003f, .5f,.85f,1.f,.9f);
+				if (m_pathHeal[i])
+					hq(x0-.004f,y0-.004f,x0+.004f,y0+.004f, .15f,1.f,.42f,.95f);
+				else
+					hq(x0-.003f,y0-.003f,x0+.003f,y0+.003f, .5f,.85f,1.f,.9f);
 			}
 			for (int i=0;i<m_craftN;i++){
 				float x=mx0+(mx1-mx0)*(m_crafts[i].x*s*0.5f+0.5f);
@@ -7805,7 +7838,7 @@ void CSoft3DRaceDlg::RenderScene()
 			float lat=0,vert=0,cx,cy,cz;
 			BandLocal(pl.x,pl.y,pl.z,pl.pathT,lat,vert,cx,cy,cz);
 			float half=BandHalfWidth();
-			const int healing = (fabsf(lat)<=half*0.42f && fabsf(vert)<=half*0.38f && m_phase==PHASE_RACE) ? 1 : 0;
+			const int healing = (fabsf(lat)<=half*0.42f && fabsf(vert)<=half*0.38f && m_phase==PHASE_RACE && S3rHealAtT(m_pathHeal, pl.pathT)) ? 1 : 0;
 			if (healing)
 				hq(-0.95f,0.88f,-0.95f+0.5f*(pl.hp/100.f),0.94f, .35f,1.f,.55f,.95f);
 			else

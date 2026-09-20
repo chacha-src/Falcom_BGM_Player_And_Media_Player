@@ -1,4 +1,4 @@
-// oggDlg.cpp : インプリメンテーション ファイル
+﻿// oggDlg.cpp : インプリメンテーション ファイル
 //
 //#define _DLL
 #include "stdafx.h"
@@ -31,6 +31,7 @@ int flacmode = 0;
 #include "CAnalyzerDlg.h"
 #include "CMidiMonitorDlg.h"
 #include "CFmMonitorDlg.h"
+#include "PcHwMidiIn.h"
 #include "CWrdViewDlg.h"
 #include "MidiPack.h"
 #include "CSasamiMidiScoreDlg.h"
@@ -5099,7 +5100,8 @@ DWORD COgg_GetGdiPaintPendingAgeMs()
 
 /* timerp が FM/MIDI モニタを毎ティック同期している間も、MP のボタンきらめき／
    ツールチップと、EQ コード・ピアノロール・アナライザが止まらないようにする。
-   モニタの PumpSyncNow / UpdateWindow は間引かない（描画精度はそのまま）。
+   モニタは PumpSyncNow（Invalidate）のみ。UpdateWindow/DXGI Present は WM_PAINT に任せ、
+   メインバナー GDI を 16ms 周期から押し出さない。
    WM_TIMER は低優先度で、VSYNC の PostMessage が続くと合成されない。
    NULL 宛 Peek(WM_TIMER) は EQ/ピアノ/アナライザのタイマーを奪って末尾へ回し
    飢餓させるので使わない。chrome / viz は HWND 指定 Peek でのみ取り出す。 */
@@ -5113,6 +5115,8 @@ static int OggIsChromeAnimHwnd(HWND h)
 	if (_tcsicmp(cls, TOOLTIPS_CLASS) == 0) return 1;
 	if (_tcsicmp(cls, _T("Button")) == 0) return 1;
 	if (_tcsicmp(cls, TRACKBAR_CLASS) == 0) return 1;
+	if (_tcsicmp(cls, _T("CCustomPopupMenuClass")) == 0) return 1;
+	if (_tcsicmp(cls, _T("CCustomPopupMenuChipClass")) == 0) return 1;
 	return 0;
 }
 
@@ -5226,6 +5230,11 @@ static void OggDispatchChromeMessages()
 {
 	if (g_oggUiThreadId != 0 && GetCurrentThreadId() != g_oggUiThreadId)
 		return;
+	/* Track 中にマウス/タイマを Peek するとポップアップの 16ms アニメが飢える */
+	if (CCustomPopupMenu::GetTrackingRoot() != NULL)
+		return;
+	if (CCC_ModalUiBusy())
+		return;
 	if (InterlockedCompareExchange(&s_inChromePump, 1, 0) != 0)
 		return;
 
@@ -5276,6 +5285,12 @@ static DWORD g_timerpLastPostTick = 0;
 static void COgg_RequestTimerp(COggDlg* dlg)
 {
 	if (!dlg)
+		return;
+	/* コンテキストメニュー Track 中に banner/FM/MIDI 同期を積むと
+	   出現アニメとサブメニューホバーが止まる */
+	if (CCustomPopupMenu::GetTrackingRoot() != NULL)
+		return;
+	if (CCC_ModalUiBusy())
 		return;
 	HWND h = dlg->GetSafeHwnd();
 	if (!h || !::IsWindow(h))
@@ -12244,7 +12259,7 @@ open_mode_kpi:
 			m_saisai.EnableWindow(TRUE); endflg = 0; return;
 		}
 		{
-			wchar_t virt[CEMU_ZIP_PATH];
+			wchar_t virt[1024];
 			CEmuFormatVirtualPath(openPath, titleIdx, virt, (int)_countof(virt));
 			filen = virt;
 		}
@@ -20289,12 +20304,17 @@ __int64 OggGetCemuLiveHeardFrames()
 	return heard;
 }
 
-/* CEmu MPU live: advance emu in lockstep with VST PCM, inject shorts + monitor tap. */
+/* CEmu MPU live: advance emu in lockstep with VST PCM, inject shorts + monitor tap.
+   Host64 の PCM バイト（16/24/32bit）をそのままフレームに直し、ライブ emu の
+   サンプルレートへ換算する。wavsam_depth の残り物で半分にしない。 */
 static int CEmuMidiLiveFramesFromBytes(uint32_t bytes)
 {
 	int bpf = 4;
-	if (wavchannel > 0 && abs(wavsam_depth) >= 8)
-		bpf = wavchannel * (abs(wavsam_depth) / 8);
+	int ch = VstMidiGetChannels();
+	int bits = VstMidiGetBits();
+	if (ch < 1) ch = 2;
+	if (bits < 8) bits = 16;
+	bpf = ch * (bits / 8);
 	if (bpf < 1) bpf = 4;
 	return (int)(bytes / (uint32_t)bpf);
 }
@@ -20307,28 +20327,22 @@ static void CEmuMidiLivePumpAndInject(int frames)
 	 * full VstRender window (deferral peels them 512 at a time). */
 	enum { kStep = 512 };
 	int base = 0;
-	CEmuMidiLiveShort sh[512];
-	int total = 0;
-	/* Prefetch renders up to VST_PF_SECONDS ahead of the speakers, so the
-	 * monitor tap needs the absolute frame each event is heard at. */
+	CEmuMidiLiveShort sh[2048];
 	const __int64 winStart = CEmuMidiLiveAudioFrames();
 	while (base < frames) {
 		int n = frames - base;
 		if (n > kStep) n = kStep;
 		CEmuMidiLivePump(n);
-		while (total < 512) {
-			const int got = CEmuMidiLiveStealShorts(sh + total, 512 - total);
+		for (;;) {
+			const int got = CEmuMidiLiveStealShorts(sh, 2048);
 			if (got <= 0) break;
-			for (int i = total; i < total + got; ++i)
+			for (int i = 0; i < got; ++i) {
 				sh[i].sampleOfs += base;
-			total += got;
-			if (got < 64) break;
+				VstMidiInjectShort(0, sh[i].msg, sh[i].sampleOfs);
+				VstLiveTapPushShortAt(0, sh[i].msg, winStart + sh[i].sampleOfs);
+			}
 		}
 		base += n;
-	}
-	for (int i = 0; i < total; ++i) {
-		VstMidiInjectShort(0, sh[i].msg, sh[i].sampleOfs);
-		VstLiveTapPushShortAt(0, sh[i].msg, winStart + sh[i].sampleOfs);
 	}
 }
 
@@ -20339,11 +20353,17 @@ static bool VstRemoteRenderSlot(int slot, uint32_t bytesWanted, std::vector<uint
 	/* Live MPU follows the audible slot only (avoid 2× emu during crossfade). */
 	if (slot == XfActiveSlot())
 		CEmuMidiLivePumpAndInject(CEmuMidiLiveFramesFromBytes(bytesWanted));
-	BYTE ports[512];
-	DWORD msgs[512];
-	int ofs[512];
+	BYTE ports[8192];
+	DWORD msgs[8192];
+	int ofs[8192];
 	/* ライブ鍵盤の注入は現行曲のエンジンだけに渡す */
-	const int n = (slot == XfActiveSlot()) ? VstMidiStealInjects(ports, msgs, ofs, 512) : 0;
+	const int n = (slot == XfActiveSlot()) ? VstMidiStealInjects(ports, msgs, ofs, 8192) : 0;
+	BYTE sxPorts[1024];
+	int sxLens[1024];
+	std::vector<BYTE> sxPacked((size_t)1024 * 2048);
+	int nSx = 0;
+	if (slot == XfActiveSlot())
+		nSx = VstMidiStealSysex(sxPorts, sxPacked.data(), sxLens, 1024, (int)sxPacked.size());
 	if (n > 0 && !CEmuMidiLiveActive()) {
 		int rewind = 0;
 		for (int i = 0; i < n; ++i) {
@@ -20366,7 +20386,10 @@ static bool VstRemoteRenderSlot(int slot, uint32_t bytesWanted, std::vector<uint
 	VstMidiSetIoSlot(slot);
 	uint32_t midiFlags = 0;
 	const bool ok = g_kpiHost.VstRender(bytesWanted, pcm, eof, ports,
-		reinterpret_cast<const uint32_t*>(msgs), ofs, (uint32_t)n, (uint32_t)slot, &midiFlags);
+		reinterpret_cast<const uint32_t*>(msgs), ofs, (uint32_t)n, (uint32_t)slot, &midiFlags,
+		sxPorts, nSx > 0 ? sxPacked.data() : nullptr,
+		nSx > 0 ? reinterpret_cast<const int32_t*>(sxLens) : nullptr,
+		(uint32_t)nSx);
 	if (outMidiFlags) *outMidiFlags = midiFlags;
 	return ok;
 }
@@ -20437,7 +20460,7 @@ void VstPrefetchStop(int slot)
 	VstPrefetch& pf = g_vstPf[slot];
 	if (pf.thread) {
 		SetEvent(pf.stop);
-		WaitForSingleObject(pf.thread, 3000);
+		WaitForSingleObject(pf.thread, 30000);
 		CloseHandle(pf.thread);
 		pf.thread = NULL;
 	}
@@ -23273,7 +23296,7 @@ void COggDlg::dp(CString a)
 				}
 				if (ge) {
 					const unsigned titleIdx = 1;
-					wchar_t virt[CEMU_ZIP_PATH];
+					wchar_t virt[1024];
 					CEmuFormatVirtualPath(zipOut, titleIdx, virt, (int)_countof(virt));
 					filen = virt;
 					ret2 = (int)titleIdx;
@@ -23297,8 +23320,8 @@ void COggDlg::dp(CString a)
 				}
 				MessageBox(
 					L"CEmu: この zip は hoot カタログで特定できませんでした。\n"
-					L"・exe 隣の arcdata.zip / data\\xml を確認してください。\n"
-					L"・data\\roms は形式が混在します。未登録・未実装ボードは再生できません。",
+					L"・exe と同じフォルダの arcdata.zip を確認してください。\n"
+					L"・ROM zip の場所や pc88 等のサブフォルダは問いません。",
 					L"CEmu", MB_ICONERROR | MB_OK);
 				return;
 			}
@@ -23837,7 +23860,7 @@ void COggDlg::stop()
 		plf = 0;
 		SignalPlaybackNotifyThreadStop();
 		if (::IsWindow(m_PianoRollDlg->GetSafeHwnd()))
-			m_PianoRollDlg->PauseAnalysis();
+			m_PianoRollDlg->OnPlayerFeedStopping(false);
 		if (::IsWindow(m_AnalyzerDlg->GetSafeHwnd()))
 			m_AnalyzerDlg->PauseFeed();
 		MpPromptOnPlaybackStop();
@@ -23852,7 +23875,7 @@ void COggDlg::stop()
 	playf = 0;
 	plf = 0;
 	if (::IsWindow(m_PianoRollDlg->GetSafeHwnd()))
-		m_PianoRollDlg->PauseAnalysis();
+		m_PianoRollDlg->OnPlayerFeedStopping(false);
 	if (::IsWindow(m_AnalyzerDlg->GetSafeHwnd()))
 		m_AnalyzerDlg->PauseFeed();
 
@@ -24027,7 +24050,7 @@ void COggDlg::stop()
 	plf = 0;
 	playf = 0;
 	if (::IsWindow(m_PianoRollDlg->GetSafeHwnd()))
-		m_PianoRollDlg->ResetPlaybackState();
+		m_PianoRollDlg->OnPlayerFeedStopping(true);
 	if (::IsWindow(m_AnalyzerDlg->GetSafeHwnd()))
 		m_AnalyzerDlg->ResetPlaybackState();
 	m_analyzerSyncValid = FALSE;
@@ -24087,7 +24110,7 @@ BOOL COggDlg::stop1()
 	InterlockedExchange(&g_tpLoopPending, 0);
 	// SongParams_OnSongStopped は Join 後に呼ぶ(再生スレッドが Sync 中に UI/ロックを掴むため)
 	if (::IsWindow(m_PianoRollDlg->GetSafeHwnd()))
-		m_PianoRollDlg->PauseAnalysis();
+		m_PianoRollDlg->OnPlayerFeedStopping(false);
 	if (::IsWindow(m_AnalyzerDlg->GetSafeHwnd()))
 		m_AnalyzerDlg->PauseFeed();
 
@@ -24218,7 +24241,7 @@ BOOL COggDlg::stop1()
 	plf = 0;
 	playf = 0;
 	if (::IsWindow(m_PianoRollDlg->GetSafeHwnd()))
-		m_PianoRollDlg->ResetPlaybackState();
+		m_PianoRollDlg->OnPlayerFeedStopping(true);
 	if (::IsWindow(m_AnalyzerDlg->GetSafeHwnd()))
 		m_AnalyzerDlg->ResetPlaybackState();
 	m_analyzerSyncValid = FALSE;
@@ -24302,11 +24325,6 @@ BOOL COggDlg::DestroyWindow()
 	if (::IsWindow(m_MidiMonitorDlg->GetSafeHwnd())) {
 		m_MidiMonitorDlg->DetachForDestroy();
 		m_MidiMonitorDlg->DestroyWindow();
-	}
-	if (m_FmMonitorDlg && ::IsWindow(m_FmMonitorDlg->GetSafeHwnd())) {
-		savedata.fmmonwindow = 1;
-		m_FmMonitorDlg->DetachForDestroy();
-		m_FmMonitorDlg->DestroyWindow();
 	}
 	if (m_WrdViewDlg && ::IsWindow(m_WrdViewDlg->GetSafeHwnd())) {
 		savedata.wrdwindow = 1;
@@ -25046,6 +25064,8 @@ void COggDlg::timerp()
 		COgg_RequestTimerp(this);
 		return;
 	}
+	if (CCustomPopupMenu::GetTrackingRoot() != NULL)
+		return;
 	// Soft3D迷路は再生停止中も回す（TheadLoop→timerp の VSYNC 相当）。playy 判定より前
 	{
 		extern void Soft3DMazeOnTimerp();
@@ -25571,34 +25591,18 @@ void COggDlg::timerp()
 			&& Ms2DrawDue(ms2))
 			m_AnalyzerDlg->UpdateWindow();
 	}
-	// MIDI モニタ: 同期は毎ティック。UpdateWindow だけ Ms2DrawDue（鍵盤が間引きで止まるのを防ぐ）
+	// MIDI/FM モニタ: 同期は毎ティック。Present は WM_PAINT（timerp 内 UpdateWindow しない）
 	if (plf == 1 && m_MidiMonitorDlg && ::IsWindow(m_MidiMonitorDlg->GetSafeHwnd())) {
 		m_MidiMonitorDlg->PumpSyncNow();
-		if (::IsWindow(m_MidiMonitorDlg->GetSafeHwnd())
-			&& m_MidiMonitorDlg->IsWindowVisible() && !m_MidiMonitorDlg->IsIconic()
-			&& Ms2DrawDue(ms2))
-			m_MidiMonitorDlg->UpdateWindow();
-	}
-	// FM モニタ: 可聴サンプル位置へ同期（MIDI と同じ timerp 駆動）
-	if (plf == 1 && m_FmMonitorDlg && ::IsWindow(m_FmMonitorDlg->GetSafeHwnd())) {
-		m_FmMonitorDlg->PumpSyncNow();
-		if (::IsWindow(m_FmMonitorDlg->GetSafeHwnd())
-			&& m_FmMonitorDlg->IsWindowVisible() && !m_FmMonitorDlg->IsIconic()
-			&& Ms2DrawDue(ms2))
-			m_FmMonitorDlg->UpdateWindow();
 	}
 	if (plf == 1 && m_WrdViewDlg && ::IsWindow(m_WrdViewDlg->GetSafeHwnd())) {
 		m_WrdViewDlg->PumpSyncNow();
-		if (::IsWindow(m_WrdViewDlg->GetSafeHwnd())
-			&& m_WrdViewDlg->IsWindowVisible() && !m_WrdViewDlg->IsIconic()
-			&& Ms2DrawDue(ms2))
-			m_WrdViewDlg->UpdateWindow();
 	}
 
 	OggDispatchChromeMessages();
 
 	// スペアナは不透明で先に描く（ピーク／現在を保持）。バナー文字は後から SRCINVERT（XOR）。
-	// コンテキストメニュー Track 中もスペアナ／EQコード供給は止めない（見た目とコード更新を維持）。
+	// Track 中は timerp 自体を止める（メニューアニメ／サブホバー優先）。
 	{
 		extern BOOL MpSsVizIsOpen();
 		extern CMediaPlayerDlg* mp;
@@ -26948,11 +26952,21 @@ void COggDlg::StopTimerpVsyncThread()
 
 LRESULT COggDlg::OnTimerpVsyncTick(WPARAM, LPARAM)
 {
-	InterlockedExchange(&g_timerpPosted, 0);
-	if (!IsWindow(GetSafeHwnd()))
+	if (!IsWindow(GetSafeHwnd())) {
+		InterlockedExchange(&g_timerpPosted, 0);
 		return 0;
+	}
+	if (CCustomPopupMenu::GetTrackingRoot() != NULL) {
+		InterlockedExchange(&g_timerpPosted, 0);
+		return 0;
+	}
+	if (CCC_ModalUiBusy()) {
+		InterlockedExchange(&g_timerpPosted, 0);
+		return 0;
+	}
 	timerp();
 	OggDispatchChromeMessages();
+	InterlockedExchange(&g_timerpPosted, 0);
 	return 0;
 }
 
@@ -27109,7 +27123,7 @@ UINT TheadLoop(LPVOID)
 		timing1(1, FALSE, FALSE);
 		Timing64(f2, FALSE);
 		Timing64(fpstiming, FALSE);
-		Sleep(0);
+		Sleep(1);
 	}
 }
 
@@ -27657,7 +27671,7 @@ LRESULT COggDlg::OnPlaybackAutoStopped(WPARAM, LPARAM)
 		wav = NULL;
 	}
 	if (::IsWindow(m_PianoRollDlg->GetSafeHwnd()))
-		m_PianoRollDlg->ResetPlaybackState();
+		m_PianoRollDlg->OnPlayerFeedStopping(true);
 	if (::IsWindow(m_AnalyzerDlg->GetSafeHwnd()))
 		m_AnalyzerDlg->ResetPlaybackState();
 	m_analyzerSyncValid = FALSE;
@@ -32484,7 +32498,7 @@ LRESULT COggDlg::OnToggleSubUiMsg(WPARAM wParam, LPARAM)
 	else if (wParam == 3)
 		ToggleMidiMonitor();
 	else if (wParam == 4)
-		ToggleFmMonitor();
+		ToggleMidiMonitor();
 	else if (wParam == 5)
 		ToggleWrdView();
 	else if (wParam >= 10 && wParam <= 19) {
@@ -32558,26 +32572,23 @@ LRESULT COggDlg::OnToggleSubUiMsg(WPARAM wParam, LPARAM)
 			}
 		}
 		else if (wParam == 17) {
-			if (savedata.midimonwindow == 1 && m_MidiMonitorDlg) {
+			if ((savedata.midimonwindow == 1 || savedata.fmmonwindow == 1) && m_MidiMonitorDlg) {
 				if (!::IsWindow(m_MidiMonitorDlg->GetSafeHwnd())) {
-					if (!m_MidiMonitorDlg->Create(IDD_MIDIMONITOR, this))
+					if (!m_MidiMonitorDlg->Create(IDD_MIDIMONITOR, this)) {
 						savedata.midimonwindow = 0;
+						savedata.fmmonwindow = 0;
+					}
 				}
-				if (savedata.midimonwindow == 1 && ::IsWindow(m_MidiMonitorDlg->GetSafeHwnd()))
+				if ((savedata.midimonwindow == 1 || savedata.fmmonwindow == 1)
+					&& ::IsWindow(m_MidiMonitorDlg->GetSafeHwnd())) {
+					savedata.midimonwindow = 1;
+					savedata.fmmonwindow = 1;
 					m_MidiMonitorDlg->ShowWindow(SW_SHOWNOACTIVATE);
+				}
 			}
 		}
 		else if (wParam == 18) {
-			if (savedata.fmmonwindow == 1 && m_FmMonitorDlg) {
-				if (!::IsWindow(m_FmMonitorDlg->GetSafeHwnd())) {
-					if (!m_FmMonitorDlg->Create(IDD_FMMONITOR, this))
-						savedata.fmmonwindow = 0;
-				}
-				if (savedata.fmmonwindow == 1 && ::IsWindow(m_FmMonitorDlg->GetSafeHwnd())) {
-					m_FmMonitorDlg->ShowWindow(SW_SHOWNOACTIVATE);
-					m_FmMonitorDlg->RestoreGeom();
-				}
-			}
+			/* FM は MIDI ホストに統合。17 で復元済み。 */
 		}
 		else if (wParam == 19) {
 			if (savedata.wrdwindow == 1 && m_WrdViewDlg) {
@@ -32613,9 +32624,9 @@ LRESULT COggDlg::OnToggleSubUiMsg(WPARAM wParam, LPARAM)
 			else if (next == 16)
 				need = (savedata.mpDjPadwindow == 1);
 			else if (next == 17)
-				need = (savedata.midimonwindow == 1 && m_MidiMonitorDlg);
+				need = ((savedata.midimonwindow == 1 || savedata.fmmonwindow == 1) && m_MidiMonitorDlg);
 			else if (next == 18)
-				need = (savedata.fmmonwindow == 1 && m_FmMonitorDlg);
+				need = FALSE;
 			else if (next == 19)
 				need = (savedata.wrdwindow == 1 && m_WrdViewDlg);
 			if (need) break;
@@ -34465,6 +34476,7 @@ void COggDlg::OnBnClickedHelp()
 void COggDlg::OnDestroy()
 {
 	XfPreloadCancel(20000); /* 先読みスレッドを残したまま終了するとプラグイン解放中に落ちる */
+	PcHwMidiInShutdown();
 	AudioDevWatchShutdown();
 	CEmuCatalogListDlg::CloseIfOpen();
 	if (g_oggHelpDlg && ::IsWindow(g_oggHelpDlg->GetSafeHwnd()))
@@ -34772,7 +34784,6 @@ void COggDlg::HideMidiMonitorForMinimize()
 	if (m_fmMidiToolsHiddenMask)
 		return;
 	HideFmMidiToolWnd(m_MidiMonitorDlg, kHideFmMidi_MidiMon, m_fmMidiToolsHiddenMask);
-	HideFmMidiToolWnd(m_FmMonitorDlg, kHideFmMidi_FmMon, m_fmMidiToolsHiddenMask);
 	HideFmMidiToolWnd(CSasamiMidiScoreDlg::Instance(), kHideFmMidi_MidiScore, m_fmMidiToolsHiddenMask);
 	HideFmMidiToolWnd(CSasamiFmScoreDlg::Instance(), kHideFmMidi_FmScore, m_fmMidiToolsHiddenMask);
 	HideFmMidiToolWnd(CSasamiTextDlg::Instance(), kHideFmMidi_Text, m_fmMidiToolsHiddenMask);
@@ -34802,10 +34813,8 @@ void COggDlg::RestoreMidiMonitorAfterMinimize()
 		w->ShowWindow(SW_SHOWNOACTIVATE);
 	};
 
-	if ((mask & kHideFmMidi_MidiMon) && savedata.midimonwindow == 1)
+	if ((mask & kHideFmMidi_MidiMon) && (savedata.midimonwindow == 1 || savedata.fmmonwindow == 1))
 		restore(m_MidiMonitorDlg, kHideFmMidi_MidiMon, mask);
-	if ((mask & kHideFmMidi_FmMon) && savedata.fmmonwindow == 1)
-		restore(m_FmMonitorDlg, kHideFmMidi_FmMon, mask);
 	restore(CSasamiMidiScoreDlg::Instance(), kHideFmMidi_MidiScore, mask);
 	restore(CSasamiFmScoreDlg::Instance(), kHideFmMidi_FmScore, mask);
 	restore(CSasamiTextDlg::Instance(), kHideFmMidi_Text, mask);
@@ -34829,8 +34838,9 @@ int COggDlg::MidiMonitorIsVisible() const
 
 int COggDlg::FmMonitorIsVisible() const
 {
-	HWND h = (m_FmMonitorDlg) ? m_FmMonitorDlg->GetSafeHwnd() : NULL;
-	return (h && ::IsWindow(h) && ::IsWindowVisible(h) && !::IsIconic(h)) ? 1 : 0;
+	if (!MidiMonitorIsVisible() || !m_MidiMonitorDlg)
+		return 0;
+	return m_MidiMonitorDlg->IsFmView() ? 1 : 0;
 }
 
 void COggDlg::ToggleMidiMonitor()
@@ -34841,18 +34851,21 @@ void COggDlg::ToggleMidiMonitor()
 	{
 		if (!m_MidiMonitorDlg->Create(IDD_MIDIMONITOR, this)) {
 			savedata.midimonwindow = 0;
+			savedata.fmmonwindow = 0;
 			extern CMediaPlayerDlg* mp;
 			if (mp && ::IsWindow(mp->GetSafeHwnd()))
 				mp->SyncPushToggleButtons();
 			return;
 		}
 		savedata.midimonwindow = 1;
+		savedata.fmmonwindow = 1;
 	}
 	else {
 		m_fmMidiToolsHiddenMask &= ~kHideFmMidi_MidiMon;
 		m_MidiMonitorDlg->DetachForDestroy();
 		m_MidiMonitorDlg->DestroyWindow();
 		savedata.midimonwindow = 0;
+		savedata.fmmonwindow = 0;
 	}
 
 	if (::IsWindow(m_MidiMonitorDlg->GetSafeHwnd())) {
@@ -34866,36 +34879,7 @@ void COggDlg::ToggleMidiMonitor()
 
 void COggDlg::ToggleFmMonitor()
 {
-	if (!m_FmMonitorDlg)
-		return;
-	if (!::IsWindow(m_FmMonitorDlg->GetSafeHwnd()))
-	{
-		if (!m_FmMonitorDlg->Create(IDD_FMMONITOR, this)) {
-			savedata.fmmonwindow = 0;
-			OggPersistSaveDatNow();
-			extern CMediaPlayerDlg* mp;
-			if (mp && ::IsWindow(mp->GetSafeHwnd()))
-				mp->SyncPushToggleButtons();
-			return;
-		}
-		savedata.fmmonwindow = 1;
-		m_FmMonitorDlg->ShowWindow(SW_SHOW);
-		m_FmMonitorDlg->RestoreGeom();
-		m_FmMonitorDlg->SetFocus();
-		m_FmMonitorDlg->PersistGeom();
-		OggPersistSaveDatNow();
-	}
-	else {
-		/* メニューから閉じる */
-		m_fmMidiToolsHiddenMask &= ~kHideFmMidi_FmMon;
-		savedata.fmmonwindow = 0;
-		m_FmMonitorDlg->PersistGeom();
-		m_FmMonitorDlg->DestroyWindow();
-		OggPersistSaveDatNow();
-	}
-	extern CMediaPlayerDlg* mp;
-	if (mp && ::IsWindow(mp->GetSafeHwnd()))
-		mp->SyncPushToggleButtons();
+	ToggleMidiMonitor();
 }
 
 int COggDlg::WrdViewIsVisible() const
@@ -34911,6 +34895,7 @@ void COggDlg::EnsureMidiMonitor()
 	if (!::IsWindow(m_MidiMonitorDlg->GetSafeHwnd())) {
 		if (!m_MidiMonitorDlg->Create(IDD_MIDIMONITOR, this)) {
 			savedata.midimonwindow = 0;
+			savedata.fmmonwindow = 0;
 			extern CMediaPlayerDlg* mp;
 			if (mp && ::IsWindow(mp->GetSafeHwnd()))
 				mp->SyncPushToggleButtons();
@@ -34918,6 +34903,7 @@ void COggDlg::EnsureMidiMonitor()
 		}
 	}
 	savedata.midimonwindow = 1;
+	savedata.fmmonwindow = 1;
 	m_fmMidiToolsHiddenMask &= ~kHideFmMidi_MidiMon;
 	if (::IsWindow(m_MidiMonitorDlg->GetSafeHwnd()))
 		m_MidiMonitorDlg->ShowWindow(SW_SHOWNOACTIVATE);

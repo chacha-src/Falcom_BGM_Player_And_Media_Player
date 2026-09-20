@@ -1,4 +1,4 @@
-// 本体と KpiHost64 が同じソースを使う。KpiHost64.exe は VstMidiEngine_k64.cpp 経由。
+﻿// 本体と KpiHost64 が同じソースを使う。KpiHost64.exe は VstMidiEngine_k64.cpp 経由。
 // 以前はホスト側にコピーがあり、VST2 修正が ogg.exe にしか入らなかった。
 // KPIHOST64_BUILD 時は stdafx.h が MFC 無しヘッダへ切り替わる。
 #include "stdafx.h"
@@ -209,9 +209,16 @@ extern "C" int VstMidiSysexIsGsReset(const unsigned char* d, int n)
 {
 	if (!d || n < 11 || d[0] != 0xf0 || d[1] != 0x41) return 0;
 	if (d[3] != 0x42 || d[4] != 0x12) return 0;
+	/* 40 00 7F だけが GS Reset。00 00 7F は SC-88 System Mode Set。 */
 	if (d[5] == 0x40 && d[6] == 0x00 && d[7] == 0x7f) return 1;
-	if (d[5] == 0x00 && d[6] == 0x00 && d[7] == 0x7f) return 1;
 	return 0;
+}
+
+extern "C" int VstMidiSysexIsGsSysMode(const unsigned char* d, int n)
+{
+	if (!d || n < 11 || d[0] != 0xf0 || d[1] != 0x41) return 0;
+	if (d[3] != 0x42 || d[4] != 0x12) return 0;
+	return (d[5] == 0x00 && d[6] == 0x00 && d[7] == 0x7f) ? 1 : 0;
 }
 
 extern "C" int VstMidiSysexIsXgOn(const unsigned char* d, int n)
@@ -373,6 +380,15 @@ static void GsFillRhythmDt1(BYTE* d, BYTE aa)
 	if (!d) return;
 	d[0] = 0xf0; d[1] = 0x41; d[2] = 0x10; d[3] = 0x42; d[4] = 0x12;
 	d[5] = aa; d[6] = 0x10; d[7] = 0x15; d[8] = 0x01; d[9] = 0; d[10] = 0xf7;
+	GsFixChecksum(d, 11);
+}
+
+/* A11 MAP2。SC-88 二系統ドラム（POWER + ORCHESTRA）。40 1A 15 02。 */
+static void GsFillRhythmDt1Map2(BYTE* d, BYTE aa)
+{
+	if (!d) return;
+	d[0] = 0xf0; d[1] = 0x41; d[2] = 0x10; d[3] = 0x42; d[4] = 0x12;
+	d[5] = aa; d[6] = 0x1A; d[7] = 0x15; d[8] = 0x02; d[9] = 0; d[10] = 0xf7;
 	GsFixChecksum(d, 11);
 }
 
@@ -2352,7 +2368,18 @@ static int LoadSmf(const wchar_t* path)
 		g_eng.songLa = (resolved == 8) ? 1 : 0;
 		g_eng.gsMapLsb = (resolved >= 1 && resolved <= 4) ? resolved : 0;
 	}
-	if (g_eng.gsMapLsb && count + 64 < MAX_MIDI_EVENTS) {
+	/* ライブ MPU の空スタブ。ファイル名 cemu_mpu_sc88 から 88map を足すと
+	   再生開始の CC32 が UART の Capital/PC とぶつかり、LAmap→88map で
+	   Piano/STANDARD に戻る。マップは Open 時の SendGmGsReset 側。 */
+	int liveStub = 0;
+	if (path) {
+		const wchar_t* base = wcsrchr(path, L'\\');
+		if (!base) base = wcsrchr(path, L'/');
+		base = base ? base + 1 : path;
+		if (_wcsnicmp(base, L"cemu_mpu_", 9) == 0)
+			liveStub = 1;
+	}
+	if (!liveStub && g_eng.gsMapLsb && count + 64 < MAX_MIDI_EVENTS) {
 		auto isGsReset = [&](const MidiItem& e) -> int {
 			if ((e.msg & 0xff) != 0xf0 || e.sysexOff < 0) return 0;
 			const int n = (int)e.aux;
@@ -2396,7 +2423,7 @@ static int LoadSmf(const wchar_t* path)
 	}
 	/* MT-32 / LA: SC-VA Capital Tone = Bank MSB 127. Native MT-32 streams have
 	   no CC#0 — without this, PCs land in GM/GS bank 0 (all Piano 1). */
-	if (g_eng.songLa && count + 64 < MAX_MIDI_EVENTS) {
+	if (!liveStub && g_eng.songLa && count + 64 < MAX_MIDI_EVENTS) {
 		auto putLaBank = [&](MidiItem* dst, int w, unsigned __int64 tick, __int64 samp, int port) -> int {
 			for (int ch = 0; ch < 16 && w + 2 <= MAX_MIDI_EVENTS; ++ch) {
 				if (ch == 9) continue; /* keep GS rhythm kit on ch10 */
@@ -2584,7 +2611,7 @@ static int LoadSmf(const wchar_t* path)
 }
 
 enum { kVstMidiEventIsRealtime = 1 };
-enum { VST_PEND_N = 1024, VST_PEND_SX = 256, VST_SLICE = 64 };
+enum { VST_PEND_N = 2048, VST_PEND_SX = 1024, VST_SLICE = 64 };
 
 struct VstPendBuf {
 	struct {
@@ -2726,6 +2753,7 @@ static int GsDt1SkipVstScaleFill(const BYTE* d, int n)
 // identity: extra drum parts often listen on a channel other than 10.
 static BYTE g_rxCh[2][3][16];
 static BYTE g_rxPort[2][3][16];
+static BYTE g_rxExplicit[2][3][16];
 static BYTE g_vstOn[2][3][16][128];
 static BYTE g_vstHeldFlushed[2];
 
@@ -2745,6 +2773,7 @@ static void RxListenInit()
 		for (int p = 0; p < 16; ++p) {
 			g_rxCh[s][u][p] = (BYTE)p;
 			g_rxPort[s][u][p] = (BYTE)u;
+			g_rxExplicit[s][u][p] = 0;
 		}
 		ZeroMemory(g_vstOn[s][u], sizeof(g_vstOn[s][u]));
 	}
@@ -2758,6 +2787,7 @@ static void RxChReset()
 		for (int p = 0; p < 16; ++p) {
 			g_rxCh[s][u][p] = (BYTE)p;
 			g_rxPort[s][u][p] = (BYTE)u;
+			g_rxExplicit[s][u][p] = 0;
 		}
 		ZeroMemory(g_vstOn[s][u], sizeof(g_vstOn[s][u]));
 	}
@@ -2768,6 +2798,7 @@ static void RxListenSet(int unit, int bb, BYTE v)
 	const int s = VstIoSlot();
 	const int p = GsPartXToCh(bb);
 	if (unit < 0 || unit > 2 || p < 0 || p > 15) return;
+	g_rxExplicit[s][unit][p] = 1;
 	if (v == 0x10) {
 		g_rxCh[s][unit][p] = 16;
 		return;
@@ -2831,6 +2862,26 @@ static int GsBuildRxDt1(BYTE* d, int unit, int bb)
 		const BYTE listen = g_rxCh[s][unit][p];
 		rv = (listen >= 16) ? (BYTE)0x10 : listen;
 	}
+	d[0] = 0xf0; d[1] = 0x41; d[2] = 0x10; d[3] = 0x42; d[4] = 0x12;
+	d[5] = 0x40; d[6] = (BYTE)bb; d[7] = 0x02;
+	d[8] = rv;
+	d[9] = 0; d[10] = 0xf7;
+	GsFixChecksum(d, 11);
+	return 11;
+}
+
+static int GsBuildRhythmFollowRx(BYTE* d, int unit, int bb, int isMap2)
+{
+	(void)isMap2;
+	const int p = GsPartXToCh(bb);
+	const int s = VstIoSlot();
+	if (!d || unit < 0 || unit > 2 || p < 0 || p > 15) return 0;
+	if (!g_rxExplicit[s][unit][p]) return 0;
+	const BYTE listen = g_rxCh[s][unit][p];
+	BYTE rv;
+	if (listen >= 16) rv = 0x10;
+	else if (listen == (BYTE)p) return 0;
+	else rv = listen;
 	d[0] = 0xf0; d[1] = 0x41; d[2] = 0x10; d[3] = 0x42; d[4] = 0x12;
 	d[5] = 0x40; d[6] = (BYTE)bb; d[7] = 0x02;
 	d[8] = rv;
@@ -3002,26 +3053,31 @@ static void BroadcastSongSysex(const BYTE* data, int len, int deltaFrames, int s
 		if (units & 2) SendUnitSysex(1, buf, n, deltaFrames);
 		if (units & 4) SendUnitSysex(2, buf, n, deltaFrames);
 		if (rhyBb >= 0) {
+			const int map2 = (len >= 9 && data[8] == 0x02) ? 1 : 0;
 			BYTE rx[11];
-			if (units & 1) {
-				GsBuildRxDt1(rx, 0, rhyBb);
+			if ((units & 1) && GsBuildRhythmFollowRx(rx, 0, rhyBb, map2))
 				SendUnitSysex(0, rx, 11, deltaFrames);
-			}
-			if (units & 2) {
-				GsBuildRxDt1(rx, 1, rhyBb);
+			if ((units & 2) && GsBuildRhythmFollowRx(rx, 1, rhyBb, map2))
 				SendUnitSysex(1, rx, 11, deltaFrames);
-			}
-			if (units & 4) {
-				GsBuildRxDt1(rx, 2, rhyBb);
+			if ((units & 4) && GsBuildRhythmFollowRx(rx, 2, rhyBb, map2))
 				SendUnitSysex(2, rx, 11, deltaFrames);
-			}
 		}
 		if (VstMidiSysexIsGsReset(data, len) || GsDt1IsPortReset(data, len)) {
-			BYTE rhy[11];
+			BYTE rhy[11], map2[11];
 			GsFillRhythmDt1(rhy, 0x40);
-			if (units & 1) SendUnitSysex(0, rhy, 11, deltaFrames);
-			if (units & 2) SendUnitSysex(1, rhy, 11, deltaFrames);
-			if (units & 4) SendUnitSysex(2, rhy, 11, deltaFrames);
+			GsFillRhythmDt1Map2(map2, 0x40);
+			if (units & 1) {
+				SendUnitSysex(0, rhy, 11, deltaFrames);
+				SendUnitSysex(0, map2, 11, deltaFrames);
+			}
+			if (units & 2) {
+				SendUnitSysex(1, rhy, 11, deltaFrames);
+				SendUnitSysex(1, map2, 11, deltaFrames);
+			}
+			if (units & 4) {
+				SendUnitSysex(2, rhy, 11, deltaFrames);
+				SendUnitSysex(2, map2, 11, deltaFrames);
+			}
 		}
 		if (VstMidiSysexIsXgOn(data, len)) {
 			const DWORD msb = 0xb9 | (0u << 8) | (127u << 16);
@@ -3108,14 +3164,14 @@ static void FlushUnitShorts(AEffect* effect, Vst3Inst* vst3, MidiItem* batch,
 	n = 0;
 }
 
-enum { SONG_INJ_CAP = 512, SONG_OV_PC = 6, SONG_OV_N = 7 };
+enum { SONG_INJ_CAP = 8192, SONG_OV_PC = 6, SONG_OV_N = 7 };
 static volatile LONG g_injW = 0;
 static volatile LONG g_injR = 0;
 static DWORD g_injMsg[SONG_INJ_CAP];
 static BYTE g_injPort[SONG_INJ_CAP];
 static int g_injOfs[SONG_INJ_CAP];
 static LONGLONG g_injQpc[SONG_INJ_CAP];
-enum { INJ_SX_N = 8, INJ_SX_B = 128 };
+enum { INJ_SX_N = 1024, INJ_SX_B = 2048 };
 static BYTE g_injSx[INJ_SX_N][INJ_SX_B];
 static int g_injSxLen[INJ_SX_N];
 static BYTE g_injSxPort[INJ_SX_N];
@@ -3215,7 +3271,19 @@ extern "C" void VstMidiInjectShort(int portIndex0to2, DWORD shortMsg, int sample
 		LeaveCriticalSection(&g_eng.cs);
 	}
 	const LONG w = g_injW;
-	if ((w - g_injR) >= (SONG_INJ_CAP - 1)) return;
+	if ((w - g_injR) >= (SONG_INJ_CAP - 1)) {
+		const int st = (int)(shortMsg & 0xf0);
+		const int keep = (st == 0xb0 || st == 0xc0 || st == 0xe0
+			|| st == 0x80 || (st == 0x90 && ((shortMsg >> 16) & 0x7f) == 0));
+		if (!keep) return;
+		const LONG r = g_injR;
+		const int oi = (int)(r & (SONG_INJ_CAP - 1));
+		const int ost = (int)(g_injMsg[oi] & 0xf0);
+		if (ost == 0x90 && ((g_injMsg[oi] >> 16) & 0x7f) > 0)
+			g_injR = r + 1;
+		else
+			return;
+	}
 	const int i = (int)(w & (SONG_INJ_CAP - 1));
 	g_injMsg[i] = shortMsg;
 	g_injPort[i] = (BYTE)port;
@@ -3276,6 +3344,33 @@ extern "C" int VstMidiStealInjects(BYTE* ports, DWORD* msgs, int* sampleOfs, int
 	return n;
 }
 
+extern "C" int VstMidiStealSysex(BYTE* ports, BYTE* packed, int* lens, int maxMsgs, int packedCap)
+{
+	if (!ports || !packed || !lens || maxMsgs < 1 || packedCap < 2) return 0;
+	int n = 0;
+	int used = 0;
+	LONG r = g_injSxR;
+	const LONG w = g_injSxW;
+	while (n < maxMsgs && r != w) {
+		const int i = (int)(r & (INJ_SX_N - 1));
+		const int nb = g_injSxLen[i];
+		if (nb < 2) {
+			++r;
+			continue;
+		}
+		if (used + nb > packedCap)
+			break;
+		ports[n] = g_injSxPort[i];
+		lens[n] = nb;
+		memcpy(packed + used, g_injSx[i], (size_t)nb);
+		used += nb;
+		++n;
+		++r;
+	}
+	g_injSxR = r;
+	return n;
+}
+
 namespace {
 
 static void EmitSongShort(int port, DWORD msg, __int64 start, int frames, int ofs)
@@ -3293,11 +3388,8 @@ static void EmitSongShort(int port, DWORD msg, __int64 start, int frames, int of
 		if (slot < 0 || slot >= g_eng.mixCount) return;
 		MixSlot& ms = g_eng.mix[slot];
 		MidiItem m = it;
-		const int type = (int)(msg & 0xf0);
-		if (!ms.keepMidiCh) {
-			if (type == 0xc0) return;
+		if (!ms.keepMidiCh)
 			m.msg = (m.msg & ~0x0fu) | 0u;
-		}
 		if (ms.effect) SendVstEvents(ms.effect, &m, 1, start);
 		if (ms.vst3) Vst3MidiShort(ms.vst3, m.msg, ofs);
 		return;
@@ -3383,7 +3475,7 @@ static void DispatchDueEvents(__int64 start, int frames)
 {
 	/* VST2 keeps only the last processEvents in a processReplacing, so this
 	 * callback may call it once per unit. Mid-block flush dropped note-offs. */
-	enum { SONG_BATCH = 1024, SONG_SX = 8192 };
+	enum { SONG_BATCH = 2048, SONG_SX = 65536 };
 	MidiItem batch0[SONG_BATCH], batch1[SONG_BATCH], batch2[SONG_BATCH];
 	BYTE sx0[SONG_SX], sx1[SONG_SX], sx2[SONG_SX];
 	int n0 = 0, n1 = 0, n2 = 0;
@@ -3443,6 +3535,20 @@ static void DispatchDueEvents(__int64 start, int frames)
 				if (raw && rawLen > 0) {
 					MidiKeepAliveIfCcSx(0xf0);
 					VstLiveMidiSysex(port, raw, rawLen);
+					if (VstMidiSysexIsGsReset(raw, rawLen)) {
+						BYTE rhy[11], map2[11];
+						GsFillRhythmDt1(rhy, 0x40);
+						GsFillRhythmDt1Map2(map2, 0x40);
+						VstLiveMidiSysex(port, rhy, 11);
+						VstLiveMidiSysex(port, map2, 11);
+					} else if (rawLen >= 11 && raw[0] == 0xf0 && raw[1] == 0x41
+						&& raw[3] == 0x42 && raw[4] == 0x12
+						&& raw[6] >= 0x10 && raw[6] <= 0x1f && raw[7] == 0x15
+						&& raw[8] == 0x02) {
+						BYTE rx[11];
+						if (GsBuildRhythmFollowRx(rx, 0, (int)raw[6], 1))
+							VstLiveMidiSysex(port, rx, 11);
+					}
 				}
 			} else {
 				BYTE buf[2048];
@@ -3454,6 +3560,33 @@ static void DispatchDueEvents(__int64 start, int frames)
 					if (units & 1) pushSx(0, buf, n, start, (int)g_injSxPort[i]);
 					if (units & 2) pushSx(1, buf, n, start, (int)g_injSxPort[i]);
 					if (units & 4) pushSx(2, buf, n, start, (int)g_injSxPort[i]);
+					if (rhyBb >= 0) {
+						const int map2 = (rawLen >= 9 && raw[8] == 0x02) ? 1 : 0;
+						BYTE rx[11];
+						if ((units & 1) && GsBuildRhythmFollowRx(rx, 0, rhyBb, map2))
+							pushSx(0, rx, 11, start, (int)g_injSxPort[i]);
+						if ((units & 2) && GsBuildRhythmFollowRx(rx, 1, rhyBb, map2))
+							pushSx(1, rx, 11, start, (int)g_injSxPort[i]);
+						if ((units & 4) && GsBuildRhythmFollowRx(rx, 2, rhyBb, map2))
+							pushSx(2, rx, 11, start, (int)g_injSxPort[i]);
+					}
+					if (VstMidiSysexIsGsReset(raw, rawLen) || GsDt1IsPortReset(raw, rawLen)) {
+						BYTE rhy[11], map2[11];
+						GsFillRhythmDt1(rhy, 0x40);
+						GsFillRhythmDt1Map2(map2, 0x40);
+						if (units & 1) {
+							pushSx(0, rhy, 11, start, (int)g_injSxPort[i]);
+							pushSx(0, map2, 11, start, (int)g_injSxPort[i]);
+						}
+						if (units & 2) {
+							pushSx(1, rhy, 11, start, (int)g_injSxPort[i]);
+							pushSx(1, map2, 11, start, (int)g_injSxPort[i]);
+						}
+						if (units & 4) {
+							pushSx(2, rhy, 11, start, (int)g_injSxPort[i]);
+							pushSx(2, map2, 11, start, (int)g_injSxPort[i]);
+						}
+					}
 				}
 			}
 			++r;
@@ -3515,6 +3648,13 @@ static void DispatchDueEvents(__int64 start, int frames)
 				int port = e.port < 0 ? 0 : e.port;
 				if (port > 1) port = 1;
 				VstLiveMidiSysex(port, raw, rawLen);
+				if (VstMidiSysexIsGsReset(raw, rawLen)) {
+					BYTE rhy[11], map2[11];
+					GsFillRhythmDt1(rhy, 0x40);
+					GsFillRhythmDt1Map2(map2, 0x40);
+					VstLiveMidiSysex(port, rhy, 11);
+					VstLiveMidiSysex(port, map2, 11);
+				}
 				continue;
 			}
 			BYTE buf[2048];
@@ -3528,26 +3668,31 @@ static void DispatchDueEvents(__int64 start, int frames)
 				if (units & 2) pushSx(1, buf, n, e.sample, e.port);
 				if (units & 4) pushSx(2, buf, n, e.sample, e.port);
 				if (rhyBb >= 0) {
+					const int map2 = (rawLen >= 9 && raw[8] == 0x02) ? 1 : 0;
 					BYTE rx[11];
-					if (units & 1) {
-						GsBuildRxDt1(rx, 0, rhyBb);
+					if ((units & 1) && GsBuildRhythmFollowRx(rx, 0, rhyBb, map2))
 						pushSx(0, rx, 11, e.sample, e.port);
-					}
-					if (units & 2) {
-						GsBuildRxDt1(rx, 1, rhyBb);
+					if ((units & 2) && GsBuildRhythmFollowRx(rx, 1, rhyBb, map2))
 						pushSx(1, rx, 11, e.sample, e.port);
-					}
-					if (units & 4) {
-						GsBuildRxDt1(rx, 2, rhyBb);
+					if ((units & 4) && GsBuildRhythmFollowRx(rx, 2, rhyBb, map2))
 						pushSx(2, rx, 11, e.sample, e.port);
-					}
 				}
 				if (VstMidiSysexIsGsReset(raw, rawLen) || GsDt1IsPortReset(raw, rawLen)) {
-					BYTE rhy[11];
+					BYTE rhy[11], map2[11];
 					GsFillRhythmDt1(rhy, 0x40);
-					if (units & 1) pushSx(0, rhy, 11, e.sample, e.port);
-					if (units & 2) pushSx(1, rhy, 11, e.sample, e.port);
-					if (units & 4) pushSx(2, rhy, 11, e.sample, e.port);
+					GsFillRhythmDt1Map2(map2, 0x40);
+					if (units & 1) {
+						pushSx(0, rhy, 11, e.sample, e.port);
+						pushSx(0, map2, 11, e.sample, e.port);
+					}
+					if (units & 2) {
+						pushSx(1, rhy, 11, e.sample, e.port);
+						pushSx(1, map2, 11, e.sample, e.port);
+					}
+					if (units & 4) {
+						pushSx(2, rhy, 11, e.sample, e.port);
+						pushSx(2, map2, 11, e.sample, e.port);
+					}
 				}
 			}
 			if (VstMidiSysexIsXgOn(raw, rawLen)) {
@@ -4893,11 +5038,8 @@ static void DispatchEnsemble(__int64 start, int frames)
 		if (slot < 0) continue;
 		MixSlot& ms = g_eng.mix[slot];
 		MidiItem m = e;
-		const int type = (int)(e.msg & 0xf0);
-		if (!ms.keepMidiCh) {
-			if (type == 0xc0) continue;
+		if (!ms.keepMidiCh)
 			m.msg = (m.msg & ~0x0fu) | 0u;
-		}
 		if (ms.effect) SendVstEvents(ms.effect, &m, 1, start);
 		if (ms.vst3) {
 			__int64 d = m.sample - start;
@@ -5627,12 +5769,21 @@ static void SendGmGsReset(AEffect* effect, Vst3Inst* vst3, int preferGs)
 		PumpSilent(NULL, vst3, 2);
 	}
 	if (preferGs != 2 && !g_eng.songGm) {
-		BYTE rhy[11];
+		BYTE rhy[11], map2[11];
 		GsFillRhythmDt1(rhy, 0x40);
-		if (effect) SendVstSysex(effect, rhy, 11, 0);
-		if (vst3) Vst3MidiSysex(vst3, rhy, 11, 0);
-		if (g_eng.midiOut && effect == g_eng.effect)
+		GsFillRhythmDt1Map2(map2, 0x40);
+		if (effect) {
+			SendVstSysex(effect, rhy, 11, 0);
+			SendVstSysex(effect, map2, 11, 0);
+		}
+		if (vst3) {
+			Vst3MidiSysex(vst3, rhy, 11, 0);
+			Vst3MidiSysex(vst3, map2, 11, 0);
+		}
+		if (g_eng.midiOut && effect == g_eng.effect) {
 			MapperSysex(g_eng.midiOut, rhy, 11);
+			MapperSysex(g_eng.midiOut, map2, 11);
+		}
 		PumpSilent(effect, vst3, 1);
 	}
 	if (preferGs == 2) {
@@ -6480,10 +6631,8 @@ static void SeekFastForwardEvents(__int64 ffEnd)
 			if (s < 0 || s >= g_eng.mixCount) continue;
 			MixSlot& ms = g_eng.mix[s];
 			MidiItem m = e;
-			if (!ms.keepMidiCh) {
-				if (type == 0xc0) continue;
+			if (!ms.keepMidiCh)
 				m.msg = (m.msg & ~0x0fu) | 0u;
-			}
 			/* VST2 は effProcessEvents を続けて呼ぶと最後の1件しか残らない */
 			if (ms.effect && ensDirty[s]) micro();
 			if (ms.effect) { SendVstEvents(ms.effect, &m, 1, start); ensDirty[s] = 1; }
@@ -7286,7 +7435,7 @@ static void LiveActReset()
 /* Timed taps sit here for the whole prefetch depth (seconds, not milliseconds),
    so the FIFO has to hold a dense song's events for that long or Note Offs get
    dropped on the floor. */
-enum { LIVE_TAP_SHORT_N = 8192, LIVE_TAP_SX_N = 32, LIVE_TAP_SX_B = 1024 };
+enum { LIVE_TAP_SHORT_N = 8192, LIVE_TAP_SX_N = 256, LIVE_TAP_SX_B = 2048 };
 /* due < 0 = play-as-soon-as-seen (hardware MIDI in / monitor keyboard).
    due >= 0 = the frame this message is heard at, so a renderer that runs
    seconds ahead of the speakers can still be drawn in time. */

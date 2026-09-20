@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
     <Filter Include="Source Files">
@@ -513,6 +513,9 @@
     <ClCompile Include="CMidiMonitorDlg.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="PcHwMidiIn.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="CFmMonitorDlg.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -691,6 +694,567 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="SasamiToneNames.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\cemu_catalog.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\cemu_zipfs.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\cemu_modepref.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\cemu_support.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\cemu_midi_live.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\cemu_mgr.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\cemu_session.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\machine\cemu_np2ctx.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\cemu_rhythm.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\chip\cemu_chip_opna.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\chip\cemu_chip_opm.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\chip\cemu_chip_sn76489.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\chip\cemu_chip_segapcm.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\chip\cemu_chip_ga20.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\chip\cemu_chip_irem_dac.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\chip\cemu_chip_oki6295.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\chip\cemu_chip_qsound.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\chip\cemu_chip_k053260.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\chip\cemu_chip_k054539.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\chip\cemu_chip_ym2610.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\chip\cemu_chip_ym2612.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\chip\cemu_chip_c352.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\chip\cemu_chip_c140.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\chip\cemu_chip_c30.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\chip\cemu_chip_msm5232.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\chip\cemu_chip_scsp.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\chip\cemu_chip_rf5c400.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\chip\cemu_chip_multipcm.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\chip\cemu_chip_es5505.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\chip\cemu_chip_rf5c68.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\chip\cemu_chip_ay.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\chip\cemu_chip_scc.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\chip\cemu_chip_opl.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\chip\cemu_chip_x1_010.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\chip\cemu_chip_ymz280b.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\chip\cemu_chip_saa1099.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\machine\cemu_pc88.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\machine\cemu_hard_pc88.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\driver\cemu_driver_pc88.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\machine\cemu_pc98.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\machine\cemu_hard_pc98.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\machine\cemu_dos98.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\driver\cemu_driver_pc98.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\machine\cemu_pcat.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\machine\cemu_hard_pcat.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\driver\cemu_driver_pcat.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\machine\cemu_ac.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\machine\cemu_hard_ac.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\machine\cemu_m37702_bus.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\machine\cemu_ac_board_spec.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\machine\cemu_hard_ac_p45.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\machine\cemu_sys86_hd63701.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\machine\cemu_sei80bu.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\machine\cemu_h6280_bus.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\machine\cemu_h8_bus.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\machine\cemu_hd63701_bus.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\machine\cemu_kabuki.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\driver\cemu_driver_ac.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\machine\cemu_hard_neogeo.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\driver\cemu_driver_neogeo.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\machine\cemu_sg1000.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\machine\cemu_hard_sg1000.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\driver\cemu_driver_sg1000.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\machine\cemu_pico.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\machine\cemu_hard_pico.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\driver\cemu_driver_pico.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\machine\cemu_x1.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\machine\cemu_msx.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\machine\cemu_hard_x1.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\driver\cemu_driver_x1.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\machine\cemu_fm7.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\machine\cemu_hard_fm7.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\driver\cemu_driver_fm7.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\vendor\mc6809\mc6809.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\vendor\m6502\m6502core.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\vendor\h6280\h6280core.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\vendor\h8\h8core.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\vendor\hd63701\hd63701core.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\vendor\hd63701\m6800.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\vendor\m6803\m6803core.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\vendor\multipcm\multipcm.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\vendor\scsp\scsp.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\vendor\scsp\scspdsp.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\vendor\scsp\sat_hw.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\machine\cemu_hard_msx.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\driver\cemu_driver_msx.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\machine\cemu_x68k.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\machine\cemu_hard_x68k.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\machine\cemu_x68k_dos.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\machine\cemu_m68k_bus.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\machine\cemu_v35_bus.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\machine\cemu_irem_cpu_tables.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\vendor\v35\v35core.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\vendor\m37710\m37702core.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\vendor\m37710\m37702o0.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\vendor\m37710\m37702o1.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\vendor\m37710\m37702o2.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\vendor\m37710\m37702o3.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\driver\cemu_driver_x68k.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\machine\cemu_hard_f3.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\machine\cemu_f3.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\driver\cemu_driver_f3.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\cemu_factory.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\vendor\musashi\m68kcpu.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\vendor\musashi\m68kops.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\vendor\musashi\m68kopac.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\vendor\musashi\m68kopdm.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\vendor\musashi\m68kopnz.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\vendor\np2\np2ffi.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\vendor\np2\cpu\i286c.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\vendor\np2\cpu\i286c_0f.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\vendor\np2\cpu\i286c_8x.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\vendor\np2\cpu\i286c_ea.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\vendor\np2\cpu\i286c_f6.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\vendor\np2\cpu\i286c_fe.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\vendor\np2\cpu\i286c_mn.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\vendor\np2\cpu\i286c_rp.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\vendor\np2\cpu\i286c_sf.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\vendor\np2\cpu\v30patch.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\vendor\np2\glue\np2mem.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\vendor\np2\glue\np2io.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\fmmon\fmmon_shadow.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\fmmon\cemu_fmmon_bind.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\fmmon\fmmon_write.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\z80\Ay_Cpu.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\z80\Ay_Cpu_irq.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\z80\cemu_z80_bus.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\mdx\cemu_mdx_decoder.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\pmd\cemu_pmd.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\pmd\pmd_fmmon_flush.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\pmd\pmdwin\pmdwincore\opnaw.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\pmd\pmdwin\pmdwincore\p86drv.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\pmd\pmdwin\pmdwincore\pmdwincore.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\pmd\pmdwin\pmdwincore\ppsdrv.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\pmd\pmdwin\pmdwincore\ppz8l.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\pmd\pmdwin\pmdwincore\table.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\pmd\pmdwin\pmdwincore\util.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\pmd\pmdwin\ymfm\file_opna.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\pmd\pmdwin\ymfm\opna.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\pmd\pmdwin\ymfm\sjis2utf.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\pmd\pmdwin\ymfm\ymfm_adpcm.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\pmd\pmdwin\ymfm\ymfm_opn.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\pmd\pmdwin\ymfm\ymfm_ssg.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="..\kpi_sources_20240712\kpi_decoder\kbmdx\source\mdc\mdc.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="..\kpi_sources_20240712\kpi_decoder\kbmdx\source\portable_mdx\src\mdx_util.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="..\kpi_sources_20240712\kpi_decoder\kbmdx\source\portable_mdx\src\mxdrv\mxdrv.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="..\kpi_sources_20240712\kpi_decoder\kbmdx\source\portable_mdx\src\mxdrv\mxdrv_context.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="..\kpi_sources_20240712\kpi_decoder\kbmdx\source\portable_mdx\src\mxdrv\sound_iocs.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="..\kpi_sources_20240712\kpi_decoder\kbmdx\source\portable_mdx\src\x68sound\x68sound.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="..\kpi_sources_20240712\kpi_decoder\kbmdx\source\portable_mdx\src\x68sound\x68sound_adpcm.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="..\kpi_sources_20240712\kpi_decoder\kbmdx\source\portable_mdx\src\x68sound\x68sound_context.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="..\kpi_sources_20240712\kpi_decoder\kbmdx\source\portable_mdx\src\x68sound\x68sound_lfo.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="..\kpi_sources_20240712\kpi_decoder\kbmdx\source\portable_mdx\src\x68sound\x68sound_op.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="..\kpi_sources_20240712\kpi_decoder\kbmdx\source\portable_mdx\src\x68sound\x68sound_opm.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="..\kpi_sources_20240712\kpi_decoder\kbmdx\source\portable_mdx\src\x68sound\x68sound_pcm8.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\s98\cemu_s98_decoder.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\s98\device\s98fmgen.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\s98\device\s98mame.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\s98\device\s98opll.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\s98\device\s98sng.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\s98\device\fmgen\fmgen.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\s98\device\fmgen\fmtimer.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\s98\device\fmgen\opm.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\s98\device\fmgen\opna.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\s98\device\fmgen\psg.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmu\s98\device\fmgen\file.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="kb_sasami\source\ymfm\ymfm_opn.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="kb_sasami\source\ymfm\ymfm_adpcm.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="kb_sasami\source\ymfm\ymfm_ssg.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="..\kpi_sources_20240712\kpi_decoder\kbs98\source\device\mame\fmopl.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="..\kpi_sources_20240712\kpi_decoder\kbs98\source\device\mame\ymf262.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="..\kpi_sources_20240712\kpi_decoder\kbs98\source\device\emu2413\emu2413.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="..\kpi_sources_20240712\kpi_decoder\kbs98\source\device\s_sng.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="..\kpi_sources_20240712\kpi_decoder\kbs98\source\device\s_logtbl.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmuHelpDlg.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CEmuCatalogListDlg.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CSasamiCmdHelpDlg.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CSasamiLayoutPaletteDlg.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CSasamiSimpleInputDlg.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CSasamiExcRpnDlg.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CSasamiInsertFxDlg.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CSasamiScoreMidiIn.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CSasamiScoreHist.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CSasamiScoreArrange.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CSasamiPianoRollView.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CSasamiPianoRollDlg.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="KpiEnumCache.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
@@ -1246,6 +1810,9 @@
     <ClInclude Include="CMidiMonitorDlg.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="PcHwMidiIn.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="CFmMonitorDlg.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -1433,6 +2000,264 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="SasamiToneNames.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CEmu\cemu_types.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CEmu\cemu_catalog.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CEmu\cemu_modepref.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CEmu\cemu_support.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CEmu\cemu_midi_live.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CEmu\cemu_zipfs.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CEmu\cemu_mgr.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CEmu\cemu_session.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CEmu\cemu_mdx.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CEmu\cemu_s98.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CEmu\cemu_kpi_min.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CEmu\chip\cemu_chip.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CEmu\chip\cemu_chip_opna.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CEmu\chip\cemu_chip_opm.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CEmu\chip\cemu_chip_sn76489.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CEmu\chip\cemu_chip_segapcm.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CEmu\chip\cemu_chip_ga20.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CEmu\chip\cemu_chip_irem_dac.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CEmu\chip\cemu_chip_oki6295.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CEmu\chip\cemu_chip_qsound.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CEmu\chip\cemu_chip_k053260.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CEmu\chip\cemu_chip_k054539.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CEmu\chip\cemu_chip_ym2610.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CEmu\chip\cemu_chip_ym2612.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CEmu\chip\cemu_chip_c352.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CEmu\chip\cemu_chip_c140.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CEmu\chip\cemu_chip_c30.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CEmu\chip\cemu_chip_es5505.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CEmu\machine\cemu_hard_f3.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CEmu\machine\cemu_f3.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CEmu\machine\cemu_m68k_bus.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CEmu\machine\cemu_v35_bus.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CEmu\machine\cemu_irem_cpu_tables.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CEmu\vendor\v35\v35core.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CEmu\driver\cemu_driver_f3.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CEmu\chip\cemu_chip_rf5c68.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CEmu\chip\cemu_chip_ay.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CEmu\chip\cemu_chip_opl.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CEmu\chip\cemu_chip_x1_010.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CEmu\chip\cemu_chip_ymz280b.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CEmu\chip\cemu_chip_saa1099.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CEmu\machine\cemu_pcat.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CEmu\machine\cemu_hard_pcat.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CEmu\driver\cemu_driver_pcat.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CEmu\machine\cemu_pc88.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CEmu\machine\cemu_ac.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CEmu\machine\cemu_hard_ac.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CEmu\machine\cemu_ac_board_spec.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CEmu\machine\cemu_hard_neogeo.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CEmu\machine\cemu_sg1000.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CEmu\machine\cemu_hard_sg1000.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CEmu\driver\cemu_driver_sg1000.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CEmu\machine\cemu_pico.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CEmu\machine\cemu_hard_pico.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CEmu\driver\cemu_driver_pico.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CEmu\machine\cemu_x1.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CEmu\machine\cemu_msx.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CEmu\machine\cemu_hard_x1.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CEmu\driver\cemu_driver_x1.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CEmu\machine\cemu_fm7.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CEmu\machine\cemu_hard_fm7.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CEmu\driver\cemu_driver_fm7.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CEmu\vendor\mc6809\mc6809.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CEmu\machine\cemu_hard_msx.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CEmu\driver\cemu_driver_msx.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CEmu\driver\cemu_driver_ac.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CEmu\driver\cemu_driver_neogeo.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CEmu\z80\cemu_z80_bus.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CEmu\machine\cemu_hard.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CEmu\machine\cemu_np2ctx.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CEmu\machine\cemu_hard_pc88.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CEmu\machine\cemu_pc98.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CEmu\machine\cemu_hard_pc98.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CEmu\machine\cemu_dos98.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CEmu\driver\cemu_driver.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CEmu\driver\cemu_driver_pc88.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CEmu\driver\cemu_driver_pc98.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CEmu\vendor\np2\np2ffi.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CEmu\fmmon\fmmon_shadow.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CEmuHelpDlg.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CEmuCatalogListDlg.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CSasamiCmdHelpDlg.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CSasamiLayoutPaletteDlg.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CSasamiSimpleInputDlg.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CSasamiExcRpnDlg.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CSasamiInsertFxDlg.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
@@ -1743,6 +2568,11 @@
     <None Include="res\iw\rotor.iwj" />
     <None Include="res\iw\vibe.iwj" />
     <None Include="res\insertion.dat" />
+    <None Include="res\cso\gpu_vs_rect.cso" />
+    <None Include="res\cso\gpu_ps_rect.cso" />
+    <None Include="res\cso\gpu_vs_piano.cso" />
+    <None Include="res\cso\gpu_cs_hex.cso" />
+    <None Include="res\cso\gpu_cs_glyph.cso" />
   </ItemGroup>
   <ItemGroup>
     <Text Include="codec\APPLE_LICENSE.txt">

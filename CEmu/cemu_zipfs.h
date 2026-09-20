@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include "cemu_types.h"
 
 /* minizip による ZIP 仮想 FS (メモリ展開) */
@@ -22,6 +22,8 @@ int CEmuZipFsOpenNames(CEmuZipFs* fs, const wchar_t* zipPath);
 int CEmuZipFsMergeZip(CEmuZipFs* fs, const wchar_t* zipPath);
 void CEmuZipFsClose(CEmuZipFs* fs);
 const unsigned char* CEmuZipFsFind(const CEmuZipFs* fs, const char* name, unsigned* outSize);
+/* preferDir NULL=従来（先頭ベース名）。""=ルート（パス区切りなし）優先。"KAX"=そのディレクトリ優先。 */
+const unsigned char* CEmuZipFsFindDir(const CEmuZipFs* fs, const char* name, unsigned* outSize, const char* preferDir);
 /* サイズだけの照会。namesOnly でも size>0 ならダミー非 NULL を返す */
 int CEmuZipFsHas(const CEmuZipFs* fs, const char* name, unsigned* outSize);
 /* ベース名 / フルパス一致のみ — 数字コアのあいまい一致なし（カタログ順位用） */

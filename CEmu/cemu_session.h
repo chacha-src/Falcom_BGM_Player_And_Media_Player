@@ -12,6 +12,7 @@
 #include "machine/cemu_f3.h"
 #include "machine/cemu_msx.h"
 #include "machine/cemu_fm7.h"
+#include "machine/cemu_pico.h"
 #include "pmd/cemu_pmd.h"
 
 enum {
@@ -28,7 +29,8 @@ enum {
 	CEMU_KIND_F3 = 10,
 	CEMU_KIND_MSX = 11,
 	CEMU_KIND_FM7 = 12,
-	CEMU_KIND_PMD = 13
+	CEMU_KIND_PMD = 13,
+	CEMU_KIND_PICO = 14
 };
 
 /* 再生セッション。kind で S98/MDX/PMD と hard 系を切り替える */
@@ -58,6 +60,7 @@ struct CEmuSession {
 	CEmuF3 f3;
 	CEmuMsx msx;
 	CEmuFm7 fm7;
+	CEmuPico pico;
 	CEmuPmdPlayer pmd;
 	unsigned overlayCode;
 	unsigned titleCode;

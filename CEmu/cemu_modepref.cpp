@@ -1,4 +1,4 @@
-﻿#include "StdAfx.h"
+#include "StdAfx.h"
 #include "cemu_modepref.h"
 #include "cemu_mgr.h"
 #include "cemu_zipfs.h"
@@ -6,6 +6,7 @@
 #include "machine/cemu_hard.h"
 #include "machine/cemu_hard_pcat.h"
 #include <string.h>
+#include <stdlib.h>
 #include <shlobj.h>
 
 static int CEmuModeEntryHasOpt(const CEmuGameEntry* e, const char* name)
@@ -28,10 +29,29 @@ static int CEmuModeEntryIsMidi(const CEmuGameEntry* e)
 	return 0;
 }
 
+static int CEmuModeEntryMidiOutType(const CEmuGameEntry* e)
+{
+	if (!e) return 0;
+	for (int i = 0; i < e->optCount; i++) {
+		if (_stricmp(e->opt[i].name, "midiout_type") == 0)
+			return (int)strtoul(e->opt[i].value, NULL, 0);
+	}
+	return 0;
+}
+
 int CEmuModeIsMidiTag(const char* tag)
 {
 	if (!tag || !tag[0]) return 0;
-	return (_stricmp(tag, "MIDI") == 0) ? 1 : 0;
+	if (_stricmp(tag, "MIDI") == 0) return 1;
+	if (_strnicmp(tag, "MIDI-", 5) == 0) return 1;
+	if (_stricmp(tag, "GS") == 0 || _stricmp(tag, "SC-55") == 0
+		|| _stricmp(tag, "SC-88") == 0 || _stricmp(tag, "SC88") == 0)
+		return 1;
+	if (_stricmp(tag, "LA") == 0 || _stricmp(tag, "MT-32") == 0
+		|| _stricmp(tag, "MT32") == 0)
+		return 1;
+	if (_stricmp(tag, "GM") == 0) return 1;
+	return 0;
 }
 
 int CEmuModeTagFromEntry(const CEmuGameEntry* e, char* tag, int tagCap)
@@ -40,7 +60,15 @@ int CEmuModeTagFromEntry(const CEmuGameEntry* e, char* tag, int tagCap)
 	tag[0] = 0;
 	if (!e) return 0;
 	if (CEmuModeEntryIsMidi(e)) {
-		strncpy_s(tag, (size_t)tagCap, "MIDI", _TRUNCATE);
+		/* hoot midiout_type: 1/2=MT-32(LA), 4/6=GS(SC-55), 7=SC-88, 8=GM。
+		   全部 "MIDI" に畳むと vg2_98 の SC-55/SC-88 がコンテキストで選べない。 */
+		const int mt = CEmuModeEntryMidiOutType(e);
+		const char* midiTag = "MIDI";
+		if (mt == 1 || mt == 2) midiTag = "LA";
+		else if (mt == 4 || mt == 6) midiTag = "GS";
+		else if (mt == 7) midiTag = "SC-88";
+		else if (mt == 8) midiTag = "GM";
+		strncpy_s(tag, (size_t)tagCap, midiTag, _TRUNCATE);
 		return 1;
 	}
 	if (CEmuModeEntryHasOpt(e, "use_opll")) {
@@ -123,7 +151,7 @@ static int CEmuModeTagPreferRank(const char* tag)
 	if (_stricmp(tag, "GAMEBLASTER") == 0) return 22;
 	if (_stricmp(tag, "86") == 0) return 20;
 	if (_stricmp(tag, "BEEP") == 0) return 2;
-	if (_stricmp(tag, "MIDI") == 0) return -100; /* 選べるが、FM があるときは既定にしない */
+	if (CEmuModeIsMidiTag(tag)) return -100; /* 選べるが、FM があるときは既定にしない */
 	return 10;
 }
 
@@ -243,18 +271,30 @@ static ULONGLONG CEmuModeHashStemA(const char* stem)
 	return h;
 }
 
-static int CEmuModePrefFileFromHash(ULONGLONG h, wchar_t* out, int outCap)
+static int CEmuPrefSidecarPath(ULONGLONG h, const wchar_t* sub, wchar_t* out, int outCap)
 {
-	if (!out || outCap <= 0) return 0;
+	if (!out || outCap <= 0 || !sub || !sub[0]) return 0;
 	out[0] = 0;
 	wchar_t base[MAX_PATH];
 	base[0] = 0;
 	if (FAILED(SHGetFolderPathW(NULL, CSIDL_LOCAL_APPDATA, NULL, SHGFP_TYPE_CURRENT, base)) || !base[0])
 		return 0;
-	_snwprintf_s(out, (size_t)outCap, _TRUNCATE, L"%s\\oggYSED\\cemumode", base);
+	_snwprintf_s(out, (size_t)outCap, _TRUNCATE, L"%s\\oggYSED", base);
 	CreateDirectoryW(out, NULL);
-	_snwprintf_s(out, (size_t)outCap, _TRUNCATE, L"%s\\oggYSED\\cemumode\\%016I64X", base, h);
+	_snwprintf_s(out, (size_t)outCap, _TRUNCATE, L"%s\\oggYSED\\%s", base, sub);
+	CreateDirectoryW(out, NULL);
+	_snwprintf_s(out, (size_t)outCap, _TRUNCATE, L"%s\\oggYSED\\%s\\%016I64X", base, sub, h);
 	return 1;
+}
+
+static int CEmuModePrefFileFromHash(ULONGLONG h, wchar_t* out, int outCap)
+{
+	return CEmuPrefSidecarPath(h, L"cemumode", out, outCap);
+}
+
+static int CEmuTogglePrefFileFromHash(ULONGLONG h, wchar_t* out, int outCap)
+{
+	return CEmuPrefSidecarPath(h, L"cemutoggle", out, outCap);
 }
 
 /* キー: アーカイブ stem (相対/絶対/::title で安定) + 旧パスハッシュ。 */
@@ -385,6 +425,121 @@ void CEmuModePrefSet(const wchar_t* zipPath, const char* tag)
 		if (CEmuModePrefFileFromHash(keys[i], alias, MAX_PATH))
 			DeleteFileW(alias);
 	}
+}
+
+static int CEmuTogglePrefParse(const char* text, unsigned* codes, int cap)
+{
+	if (!text || !codes || cap <= 0) return 0;
+	int n = 0;
+	const char* p = text;
+	while (*p && n < cap) {
+		while (*p == ' ' || *p == ',' || *p == '\t' || *p == '\r' || *p == '\n')
+			p++;
+		if (!*p) break;
+		char* end = NULL;
+		unsigned v = (unsigned)strtoul(p, &end, 16);
+		if (end == p) break;
+		int dup = 0;
+		for (int i = 0; i < n; i++) {
+			if (codes[i] == v) { dup = 1; break; }
+		}
+		if (!dup)
+			codes[n++] = v;
+		p = end;
+	}
+	return n;
+}
+
+int CEmuTogglePrefGet(const wchar_t* zipPath, unsigned* codes, int cap)
+{
+	if (!codes || cap <= 0) return 0;
+	memset(codes, 0, sizeof(unsigned) * (size_t)cap);
+	if (!zipPath || !zipPath[0]) return 0;
+	ULONGLONG keys[8];
+	ULONGLONG canon = 0;
+	const int nk = CEmuModePrefCollectKeys(zipPath, keys, 8, &canon);
+	wchar_t path[MAX_PATH];
+	char buf[128] = {};
+	for (int i = 0; i < nk; i++) {
+		if (!CEmuTogglePrefFileFromHash(keys[i], path, MAX_PATH)) continue;
+		if (!CEmuModePrefReadFile(path, buf, (int)sizeof(buf))) continue;
+		const int n = CEmuTogglePrefParse(buf, codes, cap);
+		if (n > 0 && canon && keys[i] != canon)
+			CEmuTogglePrefSet(zipPath, codes, n);
+		return n;
+	}
+	return 0;
+}
+
+void CEmuTogglePrefSet(const wchar_t* zipPath, const unsigned* codes, int n)
+{
+	if (!zipPath || !zipPath[0]) return;
+	ULONGLONG keys[8];
+	ULONGLONG canon = 0;
+	const int nk = CEmuModePrefCollectKeys(zipPath, keys, 8, &canon);
+	if (nk < 1) return;
+	wchar_t path[MAX_PATH];
+	if (!codes || n <= 0) {
+		for (int i = 0; i < nk; i++) {
+			if (CEmuTogglePrefFileFromHash(keys[i], path, MAX_PATH))
+				DeleteFileW(path);
+		}
+		return;
+	}
+	if (n > CEMU_TOGGLE_MAX) n = CEMU_TOGGLE_MAX;
+	char body[128] = {};
+	int pos = 0;
+	for (int i = 0; i < n && pos < (int)sizeof(body) - 12; i++) {
+		if (i) body[pos++] = ',';
+		pos += sprintf_s(body + pos, sizeof(body) - (size_t)pos, "%08X", codes[i]);
+	}
+	if (!CEmuTogglePrefFileFromHash(canon ? canon : keys[0], path, MAX_PATH))
+		return;
+	HANDLE h = CreateFileW(path, GENERIC_WRITE, FILE_SHARE_READ, NULL,
+		CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+	if (h == INVALID_HANDLE_VALUE) return;
+	DWORD wr = 0;
+	WriteFile(h, body, (DWORD)strlen(body), &wr, NULL);
+	WriteFile(h, "\n", 1, &wr, NULL);
+	CloseHandle(h);
+	for (int i = 0; i < nk; i++) {
+		if (keys[i] == (canon ? canon : keys[0])) continue;
+		wchar_t alias[MAX_PATH];
+		if (CEmuTogglePrefFileFromHash(keys[i], alias, MAX_PATH))
+			DeleteFileW(alias);
+	}
+}
+
+int CEmuTogglePrefHas(const wchar_t* zipPath, unsigned code)
+{
+	unsigned codes[CEMU_TOGGLE_MAX];
+	const int n = CEmuTogglePrefGet(zipPath, codes, CEMU_TOGGLE_MAX);
+	for (int i = 0; i < n; i++) {
+		if (codes[i] == code)
+			return 1;
+	}
+	return 0;
+}
+
+int CEmuTogglePrefFlip(const wchar_t* zipPath, unsigned code)
+{
+	unsigned codes[CEMU_TOGGLE_MAX];
+	int n = CEmuTogglePrefGet(zipPath, codes, CEMU_TOGGLE_MAX);
+	int found = -1;
+	for (int i = 0; i < n; i++) {
+		if (codes[i] == code) { found = i; break; }
+	}
+	if (found >= 0) {
+		for (int i = found; i < n - 1; i++)
+			codes[i] = codes[i + 1];
+		n--;
+		CEmuTogglePrefSet(zipPath, codes, n);
+		return 0;
+	}
+	if (n < CEMU_TOGGLE_MAX)
+		codes[n++] = code;
+	CEmuTogglePrefSet(zipPath, codes, n);
+	return 1;
 }
 
 static int CEmuModeIsMidiExtW(const wchar_t* name)

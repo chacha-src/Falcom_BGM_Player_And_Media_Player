@@ -5,6 +5,8 @@
 #include <string.h>
 
 extern int CEmuPc98ValkyKeepIrq0();
+extern int CEmuPc98ValkyInt50(uint8_t* mem);
+extern int CEmuPc98ValkyIntB0(uint8_t* mem);
 
 enum {
 	FLAG_CF = 0x0001,
@@ -123,6 +125,16 @@ void CEmuDos98::UpperCopy(char* dst, int dstCap, const char* src) const
 	dst[j] = 0;
 }
 
+/* 拡張子無し MUSIC01 は MUSIC01.MUS に当たる。STEM 完全一致のみ（SPLIT が SPLIT_98 を食わない）。 */
+static int DosStemEq(const char* file, const char* stem)
+{
+	if (!file || !stem || !stem[0]) return 0;
+	const char* dot = strrchr(file, '.');
+	const int n = dot ? (int)(dot - file) : (int)strlen(file);
+	if (n <= 0 || stem[n] != 0) return 0;
+	return _strnicmp(file, stem, n) == 0;
+}
+
 /* CEmuDos98::FindFile の実装 */
 const CEmuDos98File* CEmuDos98::FindFile(const char* name) const
 {
@@ -136,6 +148,25 @@ const CEmuDos98File* CEmuDos98::FindFile(const char* name) const
 	for (int i = 0; i < fileCount_; i++) {
 		if (_stricmp(files_[i].name, up) == 0 || _stricmp(files_[i].name, base) == 0)
 			return &files_[i];
+	}
+	/* カタログ conin は拡張子無し（ABIKO MUSIC01 → MUSIC01.MUS） */
+	if (!strchr(base, '.')) {
+		static const char* kPref[] = {
+			".MUS", ".DAT", ".GMD", ".BGM", ".NTL", ".BIN", ".MDT", ".M", NULL
+		};
+		for (int e = 0; kPref[e]; e++) {
+			for (int i = 0; i < fileCount_; i++) {
+				const char* fn = files_[i].name;
+				const char* dot = strrchr(fn, '.');
+				if (!dot || _stricmp(dot, kPref[e]) != 0) continue;
+				if (DosStemEq(fn, base))
+					return &files_[i];
+			}
+		}
+		for (int i = 0; i < fileCount_; i++) {
+			if (DosStemEq(files_[i].name, base))
+				return &files_[i];
+		}
 	}
 	return NULL;
 }
@@ -828,13 +859,10 @@ int CEmuDos98::LoadDeviceImage(uint8_t* mem, const char* name, uint16_t* outSeg,
 						img[eo + 3] = 0x90; img[eo + 4] = 0x90; img[eo + 5] = 0x90;
 					}
 				}
-				/* INT 14 プレーヤは call 0x9d0／0xde6 周りを STI し、ネスト tick が [1A12] を補充する。そのネスト IRET が COM SS:SP（switched=1）を戻し、外フレームを [1AC0]=1 のまま捨てる。STI を NOP。この IRQ が既に足した tick は走り、次 IRQ が次バッチを取る。 */
+				/* INT 14 プレーヤは call 0x9d0／0xde6 周りを STI する。ネスト tick が COM SS を戻すと [1AC0] が残るので JNZ を lock-clear へ付け替える。STI 自体は SEQ 進行に必要なので触らない。 */
 				if (nPro >= 1 && epiOff[0] > proOff[0] + 11u) {
-					for (unsigned i = proOff[0] + 11u; i < epiOff[0]; i++) {
-						if (img[i] == 0xFB)
-							img[i] = 0x90;
-					}
-					/* JNZ 飛ばしは `MOV [lock],0` の 6 バイト先（PIC 復帰またはエピローグ）。ネスト／捨てられたフレームはロックを残し、以降の tick は TAIL のみ。ロック番地は 7KB MDR.EXE で 1AC0、wlfpk で 5FD2。 */
+					/* STI は残す。NOP すると SEQ が載っても INT14 が初回 19 キーのまま全タイトル同一になる。
+					   ネスト tick の [1AC0] 固着は下の JNZ→lock-clear で解く。 */
 					unsigned clrLock = 0;
 					for (unsigned i = proOff[0] + 11u; i + 6 <= epiOff[0]; i++) {
 						if (img[i] == 0xC7 && img[i + 1] == 0x06
@@ -846,8 +874,11 @@ int CEmuDos98::LoadDeviceImage(uint8_t* mem, const char* name, uint16_t* outSeg,
 							if (img[i] != 0x75)
 								continue;
 							const unsigned dest = i + 2u + (unsigned)img[i + 1];
+							/* 元の +6B は `MOV [1AC0],0` の途中（BAA+4）。
+							   dest を clrLock+6（EOI）へずらすと INT14 が lock=1 のまま
+							   毎回即 IRET → jleage keyOn=0 FAIL_SILENT。触らない。 */
 							if (dest == clrLock + 6u)
-								img[i + 1] = (uint8_t)(clrLock - (i + 2u));
+								img[i + 1] = (uint8_t)((clrLock + 6u) - (i + 2u));
 						}
 					}
 				}
@@ -1197,7 +1228,8 @@ CEmuDos98Result CEmuDos98::Int21(uint8_t* mem)
 		break;
 	}
 	case 0x30:
-		np2_reg_set(NP2_R_AX, 0x0005);
+		/* AL=5 DOS5。AH=10h は PC-98 OEM。SPLIT.COM は `CMP AX,1003h / JAE` で 0005h を拒否し INT D2 を植えない。 */
+		np2_reg_set(NP2_R_AX, 0x1005);
 		np2_reg_set(NP2_R_BX, 0);
 		np2_reg_set(NP2_R_CX, 0);
 		break;
@@ -1793,11 +1825,8 @@ CEmuDos98Result CEmuDos98::ServiceIntInner(uint8_t* mem, uint8_t vec)
 		SetCf(0);
 		return DOS98_CONTINUE;
 	case 0x67:
-		if (!pcAtBios_) {
-			unhandledVec_[vec] = 1;
-			return DOS98_CONTINUE;
-		}
-		/* EMS 無し。AH=40h 後に AH を触らないと「status OK」に見え、次 EMM 呼び出しが HLT stub を far-call する。 */
+		/* EMS 無し。AH=40h 後に AH を触らないと「status OK」に見え、次 EMM 呼び出しが HLT stub を far-call する。
+		   pc98dos NAX -i（binyuh）も同じ誤認で ACCESS_VIOLATION する。 */
 		SetAh(0x80);
 		SetCf(1);
 		return DOS98_CONTINUE;
@@ -1873,6 +1902,13 @@ CEmuDos98Result CEmuDos98::ServiceIntInner(uint8_t* mem, uint8_t vec)
 	case 0x29:
 		SetCf(0);
 		return DOS98_CONTINUE;
+	/* INT 2Dh TSR マルチプレックス。NL.COM / MUAPLAY は常駐確認で INT 2D する。
+	   既定はレジスタそのまま IRET。AL が FF のままだと「既常駐」と誤認し INT60 を植えない。
+	   AL=00 は未インストール。本物のフック後は IVT がトランポリンを離れる。 */
+	case 0x2D:
+		SetAl(0);
+		SetCf(0);
+		return DOS98_CONTINUE;
 	/* INT 30h（CP/M 風／未使用）と INT 4Dh: MMD2.SYS init が INT D2 フック前にこれらをプローブ。トランポリンのみだと dosmiss=int30,intD2。 */
 	case 0x30:
 	case 0x4D:
@@ -1934,6 +1970,21 @@ CEmuDos98Result CEmuDos98::ServiceIntInner(uint8_t* mem, uint8_t vec)
 	/* INT 05h（BOUND／プリントスクリーン）: ここは本物サービスではない */
 	case 0x05:
 		SetCf(0);
+		return DOS98_CONTINUE;
+	/* VALKY CSCP/SSCP: INT 50 はゲーム側の曲 RAM。zip にハンドラが無い。 */
+	case 0x50:
+		if (CEmuPc98ValkyKeepIrq0() && CEmuPc98ValkyInt50(mem)) {
+			SetCf(0);
+			return DOS98_CONTINUE;
+		}
+		unhandledVec_[vec] = 1;
+		return DOS98_CONTINUE;
+	case 0xB0:
+		if (CEmuPc98ValkyKeepIrq0() && CEmuPc98ValkyIntB0(mem)) {
+			SetCf(0);
+			return DOS98_CONTINUE;
+		}
+		unhandledVec_[vec] = 1;
 		return DOS98_CONTINUE;
 	/* PC-88VA BIOS（olteus MUSIC.EXE／MAP.EXE）。トランポリン単独 IRET は init を半完成のまま残す。パックが実際に出す呼び出しを stub する。 */
 	case 0x83:

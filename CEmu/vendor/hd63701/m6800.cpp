@@ -1,4 +1,4 @@
-/*** m6800: Portable 6800 class  emulator *************************************
+﻿/*** m6800: Portable 6800 class  emulator *************************************
 
     m6800.c
 
@@ -486,6 +486,20 @@ static void ENTER_INTERRUPT(const char *,UINT16 irq_vector)
 	SEI;
 	PCD = RM16( irq_vector );
 }
+
+#if (HAS_HD63701)
+/* Host-side OCI: CUS63 FFF4 → [AE+0C]=F382 → F787 CUS30 copy.
+   External IRQ HOLD (FFF8→F3CA) wins CHECK_IRQ_LINES and starves OCF. */
+void hd63701_pulse_oci(void)
+{
+	if (CC & 0x10)
+		return;
+	m6800.tcsr |= (UINT8)(TCSR_OCF | TCSR_EOCI);
+	m6800.pending_tcsr |= TCSR_OCF;
+	MODIFIED_tcsr;
+	TAKE_OCI;
+}
+#endif
 
 /* check OCI or TOI */
 static void check_timer_event(void)

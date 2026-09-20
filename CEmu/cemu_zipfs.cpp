@@ -1,7 +1,8 @@
-﻿#include "StdAfx.h"
+#include "StdAfx.h"
 #include "cemu_zipfs.h"
 #include "minizip/unzip.h"
 #include "minizip/iowin32.h"
+#include "zlib.h"
 #include <string.h>
 
 /* 大文字小文字・スラッシュを無視したパス一致 */
@@ -102,6 +103,258 @@ static void CEmuZipBaseName(const char* path, char* out, int outCap)
 	strncpy_s(out, (size_t)outCap, slash, _TRUNCATE);
 }
 
+static int CEmuZipSeekRel(HANDLE h, __int64 off)
+{
+	LARGE_INTEGER li;
+	li.QuadPart = off;
+	return SetFilePointerEx(h, li, NULL, FILE_CURRENT) ? 1 : 0;
+}
+
+static int CEmuZipInflateRaw(const unsigned char* src, unsigned srcLen,
+	unsigned char* dst, unsigned dstLen)
+{
+	if (!src || !dst || dstLen == 0)
+		return 0;
+	z_stream zs;
+	memset(&zs, 0, sizeof(zs));
+	zs.next_in = (Bytef*)src;
+	zs.avail_in = srcLen;
+	zs.next_out = dst;
+	zs.avail_out = dstLen;
+	if (inflateInit2(&zs, -MAX_WBITS) != Z_OK)
+		return 0;
+	const int er = inflate(&zs, Z_FINISH);
+	const unsigned got = (unsigned)zs.total_out;
+	inflateEnd(&zs);
+	return (er == Z_STREAM_END && got == dstLen) ? 1 : 0;
+}
+
+/* minizip が OpenCurrentFile に失敗したメンバ (NTFS extra のみ CD 側、
+   ファイル名に括弧、など) を local header から拾う。SFX / ZIP64 は触らない。 */
+static int CEmuZipRawExtractFromHandle(HANDLE h, const char* want,
+	unsigned char* out, unsigned cap, unsigned* got)
+{
+	if (got) *got = 0;
+	if (!out || cap == 0)
+		return 0;
+	for (;;) {
+		unsigned char lh[30];
+		DWORD n = 0;
+		if (!ReadFile(h, lh, 30, &n, NULL) || n != 30)
+			return 0;
+		if (lh[0] != 'P' || lh[1] != 'K')
+			return 0;
+		if (lh[2] == 1 && lh[3] == 2)
+			return 0;
+		if (lh[2] != 3 || lh[3] != 4)
+			return 0;
+		const unsigned flags = (unsigned)lh[6] | ((unsigned)lh[7] << 8);
+		const unsigned method = (unsigned)lh[8] | ((unsigned)lh[9] << 8);
+		const unsigned csz = (unsigned)lh[18] | ((unsigned)lh[19] << 8)
+			| ((unsigned)lh[20] << 16) | ((unsigned)lh[21] << 24);
+		const unsigned usz = (unsigned)lh[22] | ((unsigned)lh[23] << 8)
+			| ((unsigned)lh[24] << 16) | ((unsigned)lh[25] << 24);
+		const unsigned nlen = (unsigned)lh[26] | ((unsigned)lh[27] << 8);
+		const unsigned elen = (unsigned)lh[28] | ((unsigned)lh[29] << 8);
+		if (nlen == 0 || nlen >= CEMU_ZIP_PATH)
+			return 0;
+		char fn[CEMU_ZIP_PATH];
+		if (!ReadFile(h, fn, nlen, &n, NULL) || n != nlen)
+			return 0;
+		fn[nlen] = 0;
+		if (elen && !CEmuZipSeekRel(h, (__int64)elen))
+			return 0;
+		if ((flags & 8u) || csz == 0xFFFFFFFFu || usz == 0xFFFFFFFFu)
+			return 0;
+		char base[CEMU_ROM_NAME];
+		CEmuZipBaseName(fn, base, (int)sizeof(base));
+		const int match = CEmuZipNameMatch(fn, want) || CEmuZipNameMatch(base, want);
+		if (!match) {
+			if (!CEmuZipSeekRel(h, (__int64)csz))
+				return 0;
+			continue;
+		}
+		if (usz == 0 || usz > cap)
+			return 0;
+		if (method == 0) {
+			if (usz != csz)
+				return 0;
+			if (!ReadFile(h, out, usz, &n, NULL) || n != usz)
+				return 0;
+			if (got) *got = usz;
+			return 1;
+		}
+		if (method != 8)
+			return 0;
+		unsigned char* src = new unsigned char[csz ? csz : 1];
+		if (!src)
+			return 0;
+		if (!ReadFile(h, src, csz, &n, NULL) || n != csz) {
+			delete[] src;
+			return 0;
+		}
+		const int ok = CEmuZipInflateRaw(src, csz, out, usz);
+		delete[] src;
+		if (!ok)
+			return 0;
+		if (got) *got = usz;
+		return 1;
+	}
+}
+
+static int CEmuZipFsHasName(const CEmuZipFs* fs, const char* fn)
+{
+	if (!fs || !fn)
+		return 0;
+	char wantBase[CEMU_ROM_NAME];
+	CEmuZipBaseName(fn, wantBase, (int)sizeof(wantBase));
+	for (int i = 0; i < fs->fileCount; i++) {
+		char pathA[CEMU_ZIP_PATH];
+		WideCharToMultiByte(932, 0, fs->files[i].path, -1, pathA, (int)sizeof(pathA), NULL, NULL);
+		char base[CEMU_ROM_NAME];
+		CEmuZipBaseName(pathA, base, (int)sizeof(base));
+		if (CEmuZipNameMatch(pathA, fn) || CEmuZipNameMatch(base, wantBase))
+			return 1;
+	}
+	return 0;
+}
+
+static int CEmuZipFsAppendRawMissing(CEmuZipFs* fs, const wchar_t* zipPath, int namesOnly)
+{
+	if (!fs || !zipPath || !zipPath[0])
+		return 0;
+	HANDLE h = CreateFileW(zipPath, GENERIC_READ, FILE_SHARE_READ, NULL,
+		OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+	if (h == INVALID_HANDLE_VALUE)
+		return 0;
+	unsigned char sig[4];
+	DWORD n = 0;
+	if (!ReadFile(h, sig, 4, &n, NULL) || n != 4
+		|| sig[0] != 'P' || sig[1] != 'K' || sig[2] != 3 || sig[3] != 4) {
+		CloseHandle(h);
+		return 0;
+	}
+	SetFilePointer(h, 0, NULL, FILE_BEGIN);
+
+	int added = 0;
+	for (;;) {
+		if (fs->fileCount >= 512)
+			break;
+		unsigned char lh[30];
+		if (!ReadFile(h, lh, 30, &n, NULL) || n != 30)
+			break;
+		if (lh[0] != 'P' || lh[1] != 'K')
+			break;
+		if (lh[2] == 1 && lh[3] == 2)
+			break;
+		if (lh[2] != 3 || lh[3] != 4)
+			break;
+		const unsigned flags = (unsigned)lh[6] | ((unsigned)lh[7] << 8);
+		const unsigned method = (unsigned)lh[8] | ((unsigned)lh[9] << 8);
+		const unsigned csz = (unsigned)lh[18] | ((unsigned)lh[19] << 8)
+			| ((unsigned)lh[20] << 16) | ((unsigned)lh[21] << 24);
+		const unsigned usz = (unsigned)lh[22] | ((unsigned)lh[23] << 8)
+			| ((unsigned)lh[24] << 16) | ((unsigned)lh[25] << 24);
+		const unsigned nlen = (unsigned)lh[26] | ((unsigned)lh[27] << 8);
+		const unsigned elen = (unsigned)lh[28] | ((unsigned)lh[29] << 8);
+		if (nlen == 0 || nlen >= CEMU_ZIP_PATH)
+			break;
+		char fn[CEMU_ZIP_PATH];
+		if (!ReadFile(h, fn, nlen, &n, NULL) || n != nlen)
+			break;
+		fn[nlen] = 0;
+		if (elen && !CEmuZipSeekRel(h, (__int64)elen))
+			break;
+		if ((flags & 8u) || csz == 0xFFFFFFFFu || usz == 0xFFFFFFFFu)
+			break;
+		const size_t fnLen = strlen(fn);
+		int skip = 0;
+		if (fnLen > 0 && (fn[fnLen - 1] == '/' || fn[fnLen - 1] == '\\'))
+			skip = 1;
+		else if (usz == 0 || usz > 64u * 1024u * 1024u)
+			skip = 1;
+		else if (CEmuZipFsHasName(fs, fn))
+			skip = 1;
+		if (skip) {
+			if (!CEmuZipSeekRel(h, (__int64)csz))
+				break;
+			continue;
+		}
+		CEmuZipFile* ent = &fs->files[fs->fileCount];
+		MultiByteToWideChar(932, 0, fn, -1, ent->path, CEMU_ZIP_PATH);
+		ent->size = usz;
+		ent->data = NULL;
+		if (namesOnly) {
+			if (!CEmuZipSeekRel(h, (__int64)csz))
+				break;
+		} else if (method == 0) {
+			if (usz != csz) {
+				if (!CEmuZipSeekRel(h, (__int64)csz))
+					break;
+				continue;
+			}
+			unsigned char* buf = new unsigned char[(size_t)usz + 4];
+			if (!buf) {
+				if (!CEmuZipSeekRel(h, (__int64)csz))
+					break;
+				continue;
+			}
+			if (!ReadFile(h, buf, usz, &n, NULL) || n != usz) {
+				delete[] buf;
+				break;
+			}
+			buf[usz] = 0;
+			ent->data = buf;
+		} else if (method == 8) {
+			unsigned char* src = new unsigned char[csz ? csz : 1];
+			unsigned char* buf = new unsigned char[(size_t)usz + 4];
+			if (!src || !buf) {
+				delete[] src;
+				delete[] buf;
+				if (!CEmuZipSeekRel(h, (__int64)csz))
+					break;
+				continue;
+			}
+			if (!ReadFile(h, src, csz, &n, NULL) || n != csz) {
+				delete[] src;
+				delete[] buf;
+				break;
+			}
+			if (!CEmuZipInflateRaw(src, csz, buf, usz)) {
+				delete[] src;
+				delete[] buf;
+				continue;
+			}
+			delete[] src;
+			buf[usz] = 0;
+			ent->data = buf;
+		} else {
+			if (!CEmuZipSeekRel(h, (__int64)csz))
+				break;
+			continue;
+		}
+		fs->fileCount++;
+		added++;
+	}
+	CloseHandle(h);
+	return added;
+}
+
+static int CEmuZipRawExtractOne(const wchar_t* zipPath, const char* innerName,
+	unsigned char* buf, unsigned bufCap, unsigned* outSize)
+{
+	if (outSize) *outSize = 0;
+	if (!zipPath || !innerName || !buf || bufCap == 0)
+		return 0;
+	HANDLE h = CreateFileW(zipPath, GENERIC_READ, FILE_SHARE_READ, NULL,
+		OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+	if (h == INVALID_HANDLE_VALUE)
+		return 0;
+	const int ok = CEmuZipRawExtractFromHandle(h, innerName, buf, bufCap, outSize);
+	CloseHandle(h);
+	return ok;
+}
+
 void CEmuZipFsClose(CEmuZipFs* fs)
 {
 	if (!fs) return;
@@ -131,11 +384,12 @@ static int CEmuZipFsAppendEx(CEmuZipFs* fs, const wchar_t* zipPath, int namesOnl
 	zlib_filefunc64_def ffunc;
 	fill_win32_filefunc64W(&ffunc);
 	unzFile uf = unzOpen2_64(zipPath, &ffunc);
-	if (!uf) return 0;
+	if (!uf)
+		return CEmuZipFsAppendRawMissing(fs, zipPath, namesOnly) > 0 ? 1 : 0;
 
 	if (unzGoToFirstFile(uf) != UNZ_OK) {
 		unzClose(uf);
-		return 0;
+		return CEmuZipFsAppendRawMissing(fs, zipPath, namesOnly) > 0 ? 1 : 0;
 	}
 
 	int added = 0;
@@ -178,6 +432,7 @@ static int CEmuZipFsAppendEx(CEmuZipFs* fs, const wchar_t* zipPath, int namesOnl
 	} while (unzGoToNextFile(uf) == UNZ_OK);
 
 	unzClose(uf);
+	added += CEmuZipFsAppendRawMissing(fs, zipPath, namesOnly);
 	return added > 0 ? 1 : 0;
 }
 
@@ -254,6 +509,73 @@ static int CEmuZipFsFindIndex(const CEmuZipFs* fs, const char* name)
 	return -1;
 }
 
+static int CEmuZipPathHasDir(const char* pathA)
+{
+	if (!pathA) return 0;
+	for (; *pathA; pathA++) {
+		if (*pathA == '/' || *pathA == '\\')
+			return 1;
+	}
+	return 0;
+}
+
+static int CEmuZipPathDirMatch(const char* pathA, const char* preferDir)
+{
+	if (!pathA || !preferDir || !preferDir[0])
+		return !CEmuZipPathHasDir(pathA);
+	int n = 0;
+	while (preferDir[n]) n++;
+	int i = 0;
+	for (; i < n && pathA[i]; i++) {
+		char a = pathA[i], b = preferDir[i];
+		if (a >= 'a' && a <= 'z') a = (char)(a - 32);
+		if (b >= 'a' && b <= 'z') b = (char)(b - 32);
+		if (a != b) return 0;
+	}
+	if (i != n) return 0;
+	return pathA[n] == '/' || pathA[n] == '\\';
+}
+
+static int CEmuZipFsFindIndexDir(const CEmuZipFs* fs, const char* name, const char* preferDir)
+{
+	if (!preferDir)
+		return CEmuZipFsFindIndex(fs, name);
+	if (!fs || !name) return -1;
+	char base[CEMU_ROM_NAME];
+	CEmuZipBaseName(name, base, (int)sizeof(base));
+	int fallback = -1;
+	for (int i = 0; i < fs->fileCount; i++) {
+		char fn[CEMU_ROM_NAME];
+		char pathA[CEMU_ZIP_PATH];
+		WideCharToMultiByte(932, 0, fs->files[i].path, -1, pathA, (int)sizeof(pathA), NULL, NULL);
+		CEmuZipBaseName(pathA, fn, (int)sizeof(fn));
+		if (CEmuZipNameMatch(pathA, name))
+			return i;
+		if (strchr(name, '/') || strchr(name, '\\'))
+			continue;
+		if (!CEmuZipNameMatch(fn, base))
+			continue;
+		if (CEmuZipPathDirMatch(pathA, preferDir))
+			return i;
+		if (fallback < 0)
+			fallback = i;
+	}
+	if (fallback >= 0)
+		return fallback;
+	return CEmuZipFsFindIndex(fs, name);
+}
+
+const unsigned char* CEmuZipFsFindDir(const CEmuZipFs* fs, const char* name, unsigned* outSize, const char* preferDir)
+{
+	if (outSize) *outSize = 0;
+	const int idx = CEmuZipFsFindIndexDir(fs, name, preferDir);
+	if (idx < 0) return NULL;
+	if (outSize) *outSize = fs->files[idx].size;
+	if (fs->namesOnly || !fs->files[idx].data)
+		return fs->files[idx].size > 0 ? (const unsigned char*)1 : NULL;
+	return fs->files[idx].data;
+}
+
 const unsigned char* CEmuZipFsFind(const CEmuZipFs* fs, const char* name, unsigned* outSize)
 {
 	if (outSize) *outSize = 0;
@@ -307,7 +629,8 @@ int CEmuZipFsExtractOne(const wchar_t* zipPath, const char* innerName,
 	zlib_filefunc64_def ffunc;
 	fill_win32_filefunc64W(&ffunc);
 	unzFile uf = unzOpen2_64(zipPath, &ffunc);
-	if (!uf) return 0;
+	if (!uf)
+		return CEmuZipRawExtractOne(zipPath, innerName, buf, bufCap, outSize);
 
 	char base[CEMU_ROM_NAME];
 	CEmuZipBaseName(innerName, base, (int)sizeof(base));
@@ -323,7 +646,8 @@ int CEmuZipFsExtractOne(const wchar_t* zipPath, const char* innerName,
 			if (!CEmuZipNameMatch(fnBase, base) && !CEmuZipNameMatch(fn, innerName))
 				continue;
 			if (fi.uncompressed_size > bufCap) break;
-			if (unzOpenCurrentFile(uf) != UNZ_OK) break;
+			if (unzOpenCurrentFile(uf) != UNZ_OK)
+				continue;
 			int rd = unzReadCurrentFile(uf, buf, (unsigned)fi.uncompressed_size);
 			unzCloseCurrentFile(uf);
 			if (rd == (int)fi.uncompressed_size) {
@@ -334,5 +658,7 @@ int CEmuZipFsExtractOne(const wchar_t* zipPath, const char* innerName,
 		} while (unzGoToNextFile(uf) == UNZ_OK);
 	}
 	unzClose(uf);
+	if (!found)
+		found = CEmuZipRawExtractOne(zipPath, innerName, buf, bufCap, outSize);
 	return found;
 }

@@ -34,6 +34,12 @@ const CEmuGameEntry* CEmuCatalogFindArchiveForZipMode(const CEmuCatalog* cat,
 int CEmuModePrefGet(const wchar_t* zipPath, char* tagOut, int tagCap);
 void CEmuModePrefSet(const wchar_t* zipPath, const char* tag);
 
+/* zip ごとのカタログトグル（Food empty / TO BOSS 等）。%LOCALAPPDATA%\oggYSED\cemutoggle\ */
+int CEmuTogglePrefGet(const wchar_t* zipPath, unsigned* codes, int cap);
+void CEmuTogglePrefSet(const wchar_t* zipPath, const unsigned* codes, int n);
+int CEmuTogglePrefHas(const wchar_t* zipPath, unsigned code);
+int CEmuTogglePrefFlip(const wchar_t* zipPath, unsigned code);
+
 /* zip 内の最初の .mid/.rmi/.smf → KPI/VST MIDI 再生用 temp */
 int CEmuZipExtractFirstMidi(const wchar_t* zipPath, wchar_t* outMidPath, int outCap);
 

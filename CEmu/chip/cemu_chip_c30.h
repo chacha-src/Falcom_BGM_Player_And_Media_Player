@@ -16,3 +16,4 @@ CChip* CEmuChipC30Create(uint32_t clockHz, int sampleRate, int mode);
 void CEmuChipC30Destroy(CChip* c);
 void CEmuChipC30SetEnable(CChip* c, int enable);
 uint8_t CEmuChipC30Read(CChip* c, uint32_t addr);
+void CEmuChipC30MixAdd(CChip* c, int16_t* stereo, int frames, int gain);

@@ -112,7 +112,7 @@ BOOL CCC_InwomanHotkey(MSG* pMsg, CWnd* pWnd);
 void CCC_StartInwomanTimer();
 // 不透明パネル等への淫女オーバーレイ描画（ポップアップメニュー等から利用）
 void CCC_DrawInwoman(CDC* pDC, const CRect& rc, BOOL bAeroTrans);
-// aero=0 の GDI キャンバス（ピアノロール／アナライザ等）へ裸体を重ねる
+// GDI キャンバス（ピアノロール／アナライザ等）へ裸体を重ねる。アクリルでもスチルは出す。
 void CCC_DrawInwomanOnRect(CDC* pDC, const CRect& rc);
 void CCC_DrawInwomanOnClient(CDC* pDC, HWND hWnd);
 void CCC_CaptionPaintGdi(CDC& dc, HWND hDlg);
@@ -124,6 +124,18 @@ void CCC_CaptureEnter();
 void CCC_CaptureLeave();
 int CCC_CaptureBusy();
 int CCC_AvoidBufferedPaint();
+/* ファイルダイアログ等の入れ子モーダル中。timerp のマウス Peek がダイアログを奪わないようにする */
+void CCC_ModalUiEnter();
+void CCC_ModalUiLeave();
+int CCC_ModalUiBusy();
+class CCC_ModalUiGuard {
+public:
+	CCC_ModalUiGuard() { CCC_ModalUiEnter(); }
+	~CCC_ModalUiGuard() { CCC_ModalUiLeave(); }
+private:
+	CCC_ModalUiGuard(const CCC_ModalUiGuard&);
+	CCC_ModalUiGuard& operator=(const CCC_ModalUiGuard&);
+};
 // ピクン時の控件全体シェイク量(非淫女/静止時は 0,0)
 void CCC_InwomanGetShake(int& dx, int& dy);
 // コンテキストメニューからアクリルON/OFFしたとき全UIへ再適用
@@ -969,6 +981,8 @@ protected:
     // メッセージハンドラ群
     afx_msg HBRUSH CtlColor(CDC*, UINT);
     afx_msg void OnCustomDraw(NMHDR*, LRESULT*);
+    afx_msg void OnLButtonDown(UINT, CPoint);
+    afx_msg void OnLButtonUp(UINT, CPoint);
     afx_msg void OnMouseMove(UINT, CPoint);
     afx_msg void OnMouseLeave();
     afx_msg void OnVScroll(UINT, UINT, CScrollBar*);
@@ -989,6 +1003,8 @@ protected:
 private:
     CBrush m_brBackground; // 背景塗りつぶし用ブラシ
     int m_nHotItem;        // 現在マウスカーソルが乗っているアイテムのインデックス（ホバー処理用）
+    CPoint m_ptLBtnDown;   // 行クリック起点。しきい値未満の移動では LVN_BEGINDRAG を出さない
+    BOOL m_bTrackDragGate; // 項目上での LBUTTON 中だけ既定 OnMouseMove を抑止
     // 回転♡: リスト全体ではなく♡の矩形だけ再描画してなめらかに回す
     CRect m_heartRcSel;    // 選択行の♡
     CRect m_heartRcHot;    // ホバー行の♡

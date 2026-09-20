@@ -1,4 +1,4 @@
-#include "stdafx.h"
+﻿#include "stdafx.h"
 #include "CMidiMonitorDlg.h"
 #include "oggDlg.h"
 #include "PlayList.h"
@@ -12,6 +12,10 @@
 #include "kb_sasami/source/sasami_midi.h"
 #include "CEmu/cemu_midi_live.h"
 #include "gpu/GpuDx11.h"
+#include "CFmMonitorDlg.h"
+#include "CPianoRoll.h"
+#include "PcHwMidiIn.h"
+#include "kb_sasami/source/sasami_file.h"
 #include <math.h>
 #include <mmsystem.h>
 
@@ -21,7 +25,8 @@ extern COggDlg* og;
 #include <new>
 
 /*
- * MIDI 32パート・モニタ。SMF を再生カーソルに同期して CC/ノート/SysEx を描く。
+ * FM/MIDI モニタのホスト。MIDI 32パートは本クラス、FM は子 CFmMonitorDlg。
+ * SMF を再生カーソルに同期して CC/ノート/SysEx を描く。
  * 音色名は SASAMI_GS/XG/EX.DAT。VST ホストと CEmu MPU のライブタップも同じ表に載せる。
  *
  * 描画ペース:
@@ -35,6 +40,20 @@ extern COggDlg* og;
 void MmBindVstActiveSlot();
 extern save savedata;
 
+/* アクリルキャプションを更新領域に入れると BeginPaint が帯を α=0 にし、
+   タイトル（FM/MIDIモニタ）が消えて戻る。ピアノ/アナライザと同じく本文だけ。 */
+static void MmInvalidateBody(CWnd* w)
+{
+	if (!w || !::IsWindow(w->m_hWnd)) return;
+	CRect cr;
+	w->GetClientRect(&cr);
+	const int capH = CCC_GetCustomCaptionHeight(w->m_hWnd);
+	if (capH > 0 && cr.Height() > capH)
+		cr.top = capH;
+	if (!cr.IsRectEmpty())
+		CCC_InvalidateRectMinusOverlay(w->m_hWnd, cr);
+}
+
 /* QS_POSTMESSAGE で IdlePulse を止めると timerp の投稿でstarveするので見ない。 */
 extern CString filen;
 extern int mode;
@@ -43,6 +62,9 @@ extern int pitch;
 extern __int64 playb;
 extern int playy;
 extern int wavbit_sample_Hz;
+extern int plf;
+extern int playf;
+extern int ps;
 
 namespace {
 
@@ -1465,7 +1487,8 @@ CMidiMonitorDlg::CMidiMonitorDlg(CWnd* pParent)
 	, m_layHeadH(0), m_layRowH(0), m_layFootH(0), m_layExtra(0), m_persistAge(0)
 	, m_visAcc(0), m_visLastMs(0), m_pbAnchor(0), m_pbQpc(0), m_pbFreq(0), m_idleLastQpc(0)
 	, m_drumGlow(0), m_dispBpm(-1)
-	, m_dirtyRows(0xFFFFFFFFu), m_rowLive(0), m_nameNeed(0), m_burstApply(0)
+	, m_dirtyRows(0xFFFFFFFFu), m_rowLive(0), m_nameNeed(0)	, m_burstApply(0)
+	, m_fm(nullptr), m_fmView(0)
 	, m_dirtyHead(true), m_fullDraw(true), m_volDragging(false)
 {
 	m_loadedPath[0] = 0;
@@ -1476,6 +1499,7 @@ CMidiMonitorDlg::CMidiMonitorDlg(CWnd* pParent)
 	m_notesBarRc.SetRectEmpty();
 	memset(m_part, 0, sizeof(m_part));
 	memset(m_show, 0, sizeof(m_show));
+	memset(m_pcAudioOn, 0, sizeof(m_pcAudioOn));
 	memset(m_plugShown, 0, sizeof(m_plugShown));
 	memset(m_gsEfx, 0, sizeof(m_gsEfx));
 	m_gsEfxHasLsb = 0;
@@ -1513,6 +1537,120 @@ void CMidiMonitorDlg::DoDataExchange(CDataExchange* pDX)
 {
 	CCustomBlurDialogExBase::DoDataExchange(pDX);
 	DDX_Control(pDX, IDC_MM_HELP, m_help);
+}
+
+static int FmMidiIsPlaying()
+{
+	if (ps != 0)
+		return 0;
+	if (plf == 0 && playf == 0)
+		return 0;
+	return 1;
+}
+
+static int FmMidiWantFmView(int sticky)
+{
+	extern int mode;
+	extern CString filen;
+	if (!FmMidiIsPlaying())
+		return sticky ? 1 : 0;
+	if (CEmuMidiLiveActive())
+		return 0;
+	if (mode == MODE_VST_MIDI)
+		return 0;
+	if (!filen.IsEmpty()) {
+		if (VstIsMidiExt(filen) || VstIsProjectExt(filen))
+			return 0;
+		if (SasamiExtIsFm(filen))
+			return 1;
+	}
+	if (mode == MODE_CEMU || IsCemuMode(mode) || mode == -3)
+		return 1;
+	return 0;
+}
+
+void CMidiMonitorDlg::EnsureFmChild()
+{
+	if (m_fm && ::IsWindow(m_fm->GetSafeHwnd()))
+		return;
+	if (!og)
+		return;
+	m_fm = og->m_FmMonitorDlg;
+	if (!m_fm)
+		return;
+	m_fm->SetHosted(1);
+	if (::IsWindow(m_fm->GetSafeHwnd())) {
+		m_fm->SetParent(this);
+		LayoutFmChild();
+		return;
+	}
+	if (!m_fm->Create(IDD_FMMONITOR, this)) {
+		m_fm = nullptr;
+		return;
+	}
+	LayoutFmChild();
+}
+
+void CMidiMonitorDlg::LayoutFmChild()
+{
+	if (!m_fm || !::IsWindow(m_fm->GetSafeHwnd()))
+		return;
+	CRect rc;
+	GetClientRect(&rc);
+	int capH = CCC_GetCustomCaptionHeight(m_hWnd);
+	if (capH < 0) capH = 0;
+	int h = rc.Height() - capH;
+	if (h < 1) h = 1;
+	const int w = rc.Width();
+	CRect cur;
+	m_fm->GetWindowRect(&cur);
+	ScreenToClient(&cur);
+	const int vis = m_fm->IsWindowVisible() ? 1 : 0;
+	const int wantVis = m_fmView ? 1 : 0;
+	if (cur.left == 0 && cur.top == capH && cur.Width() == w && cur.Height() == h && vis == wantVis)
+		return;
+	UINT flags = SWP_NOACTIVATE;
+	if (m_fmView)
+		flags |= SWP_SHOWWINDOW;
+	m_fm->SetWindowPos(&CWnd::wndTop, 0, capH, w, h, flags);
+}
+
+void CMidiMonitorDlg::SyncFmMidiView()
+{
+	if (!::IsWindow(m_hWnd))
+		return;
+	const int want = FmMidiWantFmView(m_fmView) ? 1 : 0;
+	if (want)
+		EnsureFmChild();
+	HWND hFm = (m_fm) ? m_fm->GetSafeHwnd() : NULL;
+	const int vis = (hFm && ::IsWindow(hFm) && m_fm->IsWindowVisible()) ? 1 : 0;
+	if (want == m_fmView && ((want && vis) || (!want && !vis))) {
+		if (want)
+			LayoutFmChild();
+		return;
+	}
+	m_fmView = want;
+	if (want && !(hFm && ::IsWindow(hFm))) {
+		m_fmView = 0;
+		MmInvalidateBody(this);
+		return;
+	}
+	if (hFm && ::IsWindow(hFm)) {
+		LayoutFmChild();
+		if (want) {
+			if (m_gpu.child && ::IsWindow(m_gpu.child))
+				::ShowWindow(m_gpu.child, SW_HIDE);
+			m_fm->ShowWindow(SW_SHOWNOACTIVATE);
+			m_fm->Invalidate(FALSE);
+			m_fm->UpdateWindow();
+		} else {
+			m_fm->ShowWindow(SW_HIDE);
+			if (m_gpu.child && ::IsWindow(m_gpu.child))
+				::ShowWindow(m_gpu.child, SW_SHOWNOACTIVATE);
+		}
+	}
+	if (!want)
+		MmInvalidateBody(this);
 }
 
 BEGIN_MESSAGE_MAP(CMidiMonitorDlg, CCustomBlurDialogExBase)
@@ -2104,6 +2242,32 @@ void CMidiMonitorDlg::ApplySysex(const BYTE* d, int n, int livePort)
 		ResetParts();
 		m_sysMode = 1;
 		m_varConn = 1;
+		return;
+	}
+	if (n >= 11 && VstMidiSysexIsGsSysMode(d, n)) {
+		/* Native (00) = 88map。GS compatible (01) = 55。音色は消さない。 */
+		m_sysMode = 1;
+		m_varConn = 1;
+		const int native = (n >= 9 && d[8] == 0) ? 1 : 0;
+		m_gsMapKind = native ? 2 : 1;
+		const int lo = (livePort >= 0 && livePort <= 1) ? livePort * 16 : 0;
+		const int hi = (livePort >= 0 && livePort <= 1) ? lo + 16 : PART_MAX;
+		for (int i = lo; i < hi && i < PART_MAX; ++i) {
+			Part& p = m_part[i];
+			if (native) {
+				p.mapId = 2;
+				p.bankLsb = 2;
+			} else {
+				p.mapId = 1;
+				p.bankLsb = 1;
+			}
+			if (!m_burstApply)
+				RefreshPartName(p);
+			else
+				m_nameNeed |= (1u << i);
+		}
+		m_dirtyRows = 0xFFFFFFFFu;
+		m_dirtyHead = true;
 		return;
 	}
 	if (n >= 11 && d[1] == 0x41 && d[3] == 0x42 && d[4] == 0x12 &&
@@ -3018,6 +3182,14 @@ void CMidiMonitorDlg::SyncFromPlayback()
 	}
 	m_lastPlayb = pbRaw;
 	m_hearPlayb = pbHeard;
+
+	if (CEmuMidiLiveActive()) {
+		/* スタブ SMF の CC/SysEx を鍵盤に重ねるとライブ注入と点滅する。
+		   音符・バンクは DrainLiveTap。 */
+		UpdateNoteMeter();
+		UpdatePlayPos();
+		return;
+	}
 
 	m_burstApply = 0;
 	if (!m_hadNote) {
@@ -3981,8 +4153,13 @@ void CMidiMonitorDlg::PollAppVolume()
 void CMidiMonitorDlg::UpdateNoteMeter()
 {
 	int notes = 0;
-	for (int i = 0; i < PART_MAX; ++i)
-		notes += m_part[i].held;
+	for (int i = 0; i < PART_MAX; ++i) {
+		const Part& p = m_part[i];
+		for (int n = 0; n < 128; ++n) {
+			if (p.noteOn[n] || p.noteFlash[n])
+				notes++;
+		}
+	}
 	if (notes < 0) notes = 0;
 	if (notes != m_noteCount) {
 		m_noteCount = notes;
@@ -4045,6 +4222,39 @@ void CMidiMonitorDlg::DrainLiveTap()
 	__int64 nowFrame = -1;
 	if (CEmuMidiLiveActive())
 		nowFrame = OggGetCemuLiveHeardFrames();
+	/* UART は GS Reset → PC。SysEx を後にすると ResetPartsBank が
+	   同じドレインの C0 を Piano 1 に戻す（vg2 モニタ全滅）。 */
+	for (int k = 0; k < 32; ++k) {
+		int port = 0;
+		BYTE sx[1024];
+		const int n = PcHwMidiInStealSysex(&port, sx, (int)sizeof(sx));
+		if (n <= 0) break;
+		if (!m_frozen) {
+			ApplySysex(sx, n, port);
+			++applied;
+		}
+	}
+	for (int k = 0; k < 32; ++k) {
+		int port = 0;
+		BYTE sx[1024];
+		const int n = VstLiveTapStealSysex(&port, sx, (int)sizeof(sx));
+		if (n <= 0) break;
+		if (!m_frozen) {
+			ApplySysex(sx, n, port);
+			++applied;
+		}
+	}
+	for (;;) {
+		const int n = PcHwMidiInStealShorts(ports, msgs, 64);
+		if (n <= 0) break;
+		if (!m_frozen) {
+			for (int i = 0; i < n; ++i) {
+				ApplyShort((int)ports[i], msgs[i], FALSE, TRUE);
+				++applied;
+			}
+		}
+		if (n < 64) break;
+	}
 	for (;;) {
 		const int n = VstLiveTapStealShortsDue(nowFrame, ports, msgs, 64);
 		if (n <= 0) break;
@@ -4057,16 +4267,6 @@ void CMidiMonitorDlg::DrainLiveTap()
 			}
 		}
 		if (n < 64) break;
-	}
-	for (int k = 0; k < 32; ++k) {
-		int port = 0;
-		BYTE sx[1024];
-		const int n = VstLiveTapStealSysex(&port, sx, (int)sizeof(sx));
-		if (n <= 0) break;
-		if (!m_frozen) {
-			ApplySysex(sx, n, port);
-			++applied;
-		}
 	}
 	if (applied && !m_frozen)
 		UpdateNoteMeter();
@@ -4375,7 +4575,7 @@ void CMidiMonitorDlg::InvalidateDirty()
 		}
 	}
 	if (m_fullDraw || IsView3D()) {
-		Invalidate(FALSE);
+		MmInvalidateBody(this);
 		return;
 	}
 	if (!m_dirtyHead && m_dirtyRows == 0)
@@ -4404,7 +4604,7 @@ void CMidiMonitorDlg::InvalidateDirty()
 			else acc.UnionRect(&acc, &r);
 		}
 	} else {
-		Invalidate(FALSE);
+		MmInvalidateBody(this);
 		return;
 	}
 	if (any)
@@ -4506,13 +4706,14 @@ BOOL CMidiMonitorDlg::OnInitDialog()
 	m_fullDraw = true;
 	CCustomBlurDialogExBase::OnInitDialog();
 	SetWindowText(LL14(
-		L"MIDIモニタ", L"MIDI Monitor", L"Moniteur MIDI", L"Monitor MIDI", L"Monitor MIDI",
-		L"MIDI 모니터", L"MIDI监视器", L"مراقب MIDI", L"MIDI-монитор", L"MIDI-Monitor",
-		L"Monitor MIDI", L"MIDI-monitor", L"Monitor MIDI", L"MIDI izleyici"));
+		L"FM/MIDIモニタ", L"FM/MIDI Monitor", L"Moniteur FM/MIDI", L"Monitor FM/MIDI", L"Monitor FM/MIDI",
+		L"FM/MIDI 모니터", L"FM/MIDI监视器", L"مراقب FM/MIDI", L"FM/MIDI-монитор", L"FM/MIDI-Monitor",
+		L"Monitor FM/MIDI", L"FM/MIDI-monitor", L"Monitor FM/MIDI", L"FM/MIDI izleyici"));
 	ModifyStyle(WS_MINIMIZEBOX, 0);
 	ModifyStyle(0, WS_CLIPCHILDREN);
 	GpuDx11_Startup();
 	ModifyStyleEx(0, WS_EX_DLGMODALFRAME, SWP_FRAMECHANGED);
+	PcHwMidiInRestoreFromSave();
 
 	m_viewMode = (savedata.midimonviewmode == 1) ? 1 : 0;
 	m_alwaysOnTop = (savedata.midimontopmost != 0);
@@ -4523,9 +4724,18 @@ BOOL CMidiMonitorDlg::OnInitDialog()
 
 	const UINT dpi = WindowDpi();
 	int dw = Scale(1180, dpi), dh = Scale(720, dpi);
-	if (savedata.midimonx != -1 && savedata.midimonw > 200 && savedata.midimonh > 160)
+	int gx = savedata.midimonx, gy = savedata.midimony, gw = savedata.midimonw, gh = savedata.midimonh;
+	if (!(gx != -1 && gw > 200 && gh > 160)) {
+		if (savedata.fmmonw > 200 && savedata.fmmonh > 160) {
+			gx = savedata.fmmonx;
+			gy = savedata.fmmony;
+			gw = savedata.fmmonw;
+			gh = savedata.fmmonh;
+		}
+	}
+	if (gx != -1 && gw > 200 && gh > 160)
 		SetWindowPos(m_alwaysOnTop ? &CWnd::wndTopMost : &CWnd::wndTop,
-			savedata.midimonx, savedata.midimony, savedata.midimonw, savedata.midimonh,
+			gx, gy, gw, gh,
 			SWP_NOOWNERZORDER | (m_alwaysOnTop ? 0 : SWP_NOZORDER));
 	else
 		SetWindowPos(m_alwaysOnTop ? &CWnd::wndTopMost : &CWnd::wndTop,
@@ -4552,6 +4762,8 @@ BOOL CMidiMonitorDlg::OnInitDialog()
 	SetTimer(1, 16, nullptr); // 本体。PersistPos もここ
 	SetTimer(2, 4, nullptr);  // IdlePulse。OnIdle と同じ入口
 	LoadCurrentMidi();
+	m_fmView = 0;
+	SyncFmMidiView();
 	return TRUE;
 }
 
@@ -4571,31 +4783,14 @@ int CMidiMonitorDlg::TryGpuFrame(int w, int h, int capH, UINT dpi)
 	}
 	CDC gdc;
 	gdc.Attach(hdc);
-	const bool full = m_fullDraw;
-	if (full) {
-		DrawMonitor2D(gdc, w, h, dpi);
-		for (int i = 0; i < PART_MAX; ++i)
-			m_show[i] = m_part[i];
-		m_fullDraw = false;
-		m_dirtyRows = 0;
-		m_dirtyHead = false;
-	} else {
-		if (m_layHeadH <= 0 || m_layRowH <= 0)
-			DrawMonitor2D(gdc, w, h, dpi);
-		else {
-			if (m_dirtyHead) {
-				DrawHeader(gdc, w, m_layHeadH, dpi);
-				if (m_layFootH > 0)
-					DrawInsFoot(gdc, LayFootY(), w, m_layFootH, dpi);
-			}
-			for (int i = 0; i < PART_MAX; ++i) {
-				if (m_dirtyRows & (1u << i))
-					DrawPartRow(gdc, i, LayPartY(i), LayPartH(i), w, dpi, 0);
-			}
-		}
-		m_dirtyRows = 0;
-		m_dirtyHead = false;
-	}
+	/* DXGI RT は Begin で全面クリアされる。汚れた行だけ書くと黒地にメーターだけが残り点滅する。
+	   FM モニタと同じく毎フレーム全描画する。 */
+	DrawMonitor2D(gdc, w, h, dpi);
+	for (int i = 0; i < PART_MAX; ++i)
+		m_show[i] = m_part[i];
+	m_fullDraw = false;
+	m_dirtyRows = 0;
+	m_dirtyHead = false;
 	gdc.Detach();
 	GpuMonSurf_ReleaseDC(&m_gpu);
 	GpuMonSurf_ForceOpaque(&m_gpu);
@@ -4607,14 +4802,30 @@ int CMidiMonitorDlg::TryGpuFrame(int w, int h, int capH, UINT dpi)
 
 void CMidiMonitorDlg::OnPaint()
 {
+	if (CCC_PrintBusy()) {
+		ValidateRect(NULL);
+		return;
+	}
 	CPaintDC dc(this);
 	if (m_paintDisabled) return;
+	CRect pr = dc.m_ps.rcPaint;
+	if (m_fmView) {
+		CCC_CaptionPaintGdi(dc, m_hWnd);
+		return;
+	}
 	CRect rect;
 	GetClientRect(&rect);
 	const int w = rect.Width();
 	const int capH = CCC_GetCustomCaptionHeight(m_hWnd);
 	const int h = rect.Height() - capH;
 	if (w <= 0 || h <= 0) {
+		CCC_CaptionPaintGdi(dc, m_hWnd);
+		return;
+	}
+
+	const int paintCap = (pr.IsRectEmpty() || pr.top < capH) ? 1 : 0;
+	const int paintBody = (pr.IsRectEmpty() || pr.bottom > capH) ? 1 : 0;
+	if (!paintBody) {
 		CCC_CaptionPaintGdi(dc, m_hWnd);
 		return;
 	}
@@ -4639,7 +4850,8 @@ void CMidiMonitorDlg::OnPaint()
 	}
 
 	if (!IsView3D() && TryGpuFrame(w, h, capH, dpi)) {
-		CCC_CaptionPaintGdi(dc, m_hWnd);
+		if (paintCap)
+			CCC_CaptionPaintGdi(dc, m_hWnd);
 		return;
 	}
 
@@ -4678,15 +4890,14 @@ void CMidiMonitorDlg::OnPaint()
 		m_dirtyHead = false;
 	}
 
-	CRect pr = dc.m_ps.rcPaint;
-	if (pr.IsRectEmpty()) {
-		pr.SetRect(0, capH, w, capH + h);
+	CRect prBody = dc.m_ps.rcPaint;
+	if (prBody.IsRectEmpty()) {
+		prBody.SetRect(0, capH, w, capH + h);
 	}
-	const int paintCap = (pr.top < capH) ? 1 : 0;
-	int sx = pr.left;
-	int sy = pr.top - capH;
-	int sw = pr.Width();
-	int sh = pr.Height();
+	int sx = prBody.left;
+	int sy = prBody.top - capH;
+	int sw = prBody.Width();
+	int sh = prBody.Height();
 	if (sy < 0) { sh += sy; sy = 0; }
 	if (sx < 0) { sw += sx; sx = 0; }
 	if (sx + sw > w) sw = w - sx;
@@ -4746,10 +4957,10 @@ void CMidiMonitorDlg::OnTimer(UINT_PTR nIDEvent)
 			PersistPos();
 			m_persistAge = 0;
 		}
-		/* 再生中は timerp が PumpSyncNow する。FM モニタも開いていると
-		   16ms タイマと二重になり鍵盤描画が遅れるので本体は任せる。 */
+		/* 再生中は timerp が PumpSyncNow する。ここでも PumpIdle すると
+		   ライブ MPU の鍵盤が二重適用で点滅する。 */
 		extern int plf;
-		if (!(playy != 0 && plf == 1 && og && og->FmMonitorIsVisible()))
+		if (!(playy != 0 && plf == 1) && !m_fmView)
 			PumpIdle();
 	} else if (nIDEvent == 2) {
 		IdlePulse();
@@ -4771,6 +4982,7 @@ void CMidiMonitorDlg::OnSize(UINT nType, int cx, int cy)
 #endif
 	CCC_CaptionLayout(m_hWnd);
 	LayoutHelpBtn();
+	LayoutFmChild();
 	Invalidate(FALSE);
 }
 
@@ -4797,6 +5009,7 @@ void CMidiMonitorDlg::OnShowWindow(BOOL bShow, UINT nStatus)
 		SnapshotLiveNotes();
 		MarkHostOccupiedParts();
 		PollAppVolume();
+		SyncFmMidiView();
 		Invalidate(FALSE);
 	}
 }
@@ -4805,6 +5018,7 @@ void CMidiMonitorDlg::OnClose()
 {
 	DetachForDestroy();
 	savedata.midimonwindow = 0;
+	savedata.fmmonwindow = 0;
 	DestroyWindow();
 	extern CMediaPlayerDlg* mp;
 	if (mp && ::IsWindow(mp->GetSafeHwnd()))
@@ -4834,6 +5048,7 @@ void CMidiMonitorDlg::DetachForDestroy()
 void CMidiMonitorDlg::ResetPlaybackState()
 {
 	ResetParts();
+	memset(m_pcAudioOn, 0, sizeof(m_pcAudioOn));
 	m_lastPlayb = -1;
 	m_hearPlayb = -1;
 	m_pbAnchor = 0;
@@ -4844,10 +5059,32 @@ void CMidiMonitorDlg::ResetPlaybackState()
 	m_hadNote = 0;
 	m_loadedPath[0] = 0;
 	if (::IsWindow(m_hWnd))
-		Invalidate(FALSE);
+		MmInvalidateBody(this);
 }
 
 // キュー消化。描画は InvalidateDirty まで。3D の追加パルスは IdlePulse 側で弾く。
+void CMidiMonitorDlg::ApplyPcAudioKeys(const BYTE levels108[108])
+{
+	int any = 0;
+	for (int n = 0; n < NOTE_MAX; ++n) {
+		const int on = (levels108 && n < 108 && levels108[n] > 0) ? 1 : 0;
+		if (on == (m_pcAudioOn[n] ? 1 : 0))
+			continue;
+		int vel = 64;
+		if (on) {
+			vel = (int)levels108[n] * 127 / 100;
+			if (vel < 1) vel = 1;
+			if (vel > 127) vel = 127;
+		}
+		const DWORD st = on ? 0x90u : 0x80u;
+		ApplyShort(0, st | ((DWORD)n << 8) | ((DWORD)vel << 16), FALSE, TRUE);
+		m_pcAudioOn[n] = (BYTE)on;
+		++any;
+	}
+	if (any)
+		UpdateNoteMeter();
+}
+
 void CMidiMonitorDlg::PumpIdle()
 {
 	if (!::IsWindow(m_hWnd) || m_paintDisabled) return;
@@ -4855,8 +5092,25 @@ void CMidiMonitorDlg::PumpIdle()
 	if (m_playNote >= 0 && ::GetCapture() != m_hWnd)
 		ReleasePlayNote();
 	if (!m_frozen) {
-		SyncFromPlayback();
-		DrainLiveTap();
+		const int pcAudio = (!FmMidiIsPlaying() && savedata.mpLoopbackScore
+			&& og && og->m_PianoRollDlg
+			&& ::IsWindow(og->m_PianoRollDlg->GetSafeHwnd())
+			&& og->m_PianoRollDlg->IsPcAudioScoring()) ? 1 : 0;
+		if (pcAudio) {
+			BYTE lv[108];
+			og->m_PianoRollDlg->CopyActiveKeyLevels(lv);
+			ApplyPcAudioKeys(lv);
+			DrainLiveTap();
+		} else {
+			int had = 0;
+			for (int i = 0; i < NOTE_MAX; ++i) {
+				if (m_pcAudioOn[i]) { had = 1; break; }
+			}
+			if (had)
+				ApplyPcAudioKeys(NULL);
+			SyncFromPlayback();
+			DrainLiveTap();
+		}
 		MarkHostOccupiedParts();
 		TickVisuals();
 	} else {
@@ -4904,6 +5158,12 @@ void CMidiMonitorDlg::IdlePulse()
 {
 	if (!::IsWindow(m_hWnd) || m_paintDisabled) return;
 	if (IsIconic() || !IsWindowVisible()) return;
+	SyncFmMidiView();
+	if (m_fmView) {
+		if (m_fm && ::IsWindow(m_fm->GetSafeHwnd()))
+			m_fm->IdlePulse();
+		return;
+	}
 	if (IsView3D()) return;
 	if (::GetQueueStatus(QS_KEY | QS_MOUSEBUTTON | QS_HOTKEY))
 		return;
@@ -4913,10 +5173,13 @@ void CMidiMonitorDlg::IdlePulse()
 	if (fg)
 		::GetWindowThreadProcessId(fg, &fgPid);
 	const int ours = (fgPid == GetCurrentProcessId()) ? 1 : 0;
-	const int peer = (og && og->FmMonitorIsVisible()) ? 1 : 0;
+	const int live = CEmuMidiLiveActive() ? 1 : 0;
 	/* 前面でも 4ms 強制 UpdateWindow は FM モニタの鍵盤と UI スレッドを奪い合う。
-	   同時表示中は 16ms に落とし、描画は WM_PAINT に任せる。 */
-	const int minMs = (peer || !ours) ? 16 : 4;
+	   同時表示中は 16ms に落とし、描画は WM_PAINT に任せる。
+	   ライブ MPU は timerp だけで足りる。4ms IdlePulse が点滅の主因。 */
+	if (live && playy != 0)
+		return;
+	const int minMs = (!ours) ? 16 : 4;
 
 	LONGLONG now = 0;
 	MmQpcPair(m_pbFreq, now);
@@ -4930,7 +5193,9 @@ void CMidiMonitorDlg::IdlePulse()
 
 	m_idleLastQpc = now;
 	PumpIdle();
-	if (!peer) {
+	/* 無演奏時の 4ms UpdateWindow は DXGI/GDI がアクリル帯まで触り、
+	   キャプション文字が点滅する。再生中だけ即 Present する。 */
+	if (playy != 0) {
 		CRect ur;
 		if (GetUpdateRect(&ur, FALSE))
 			UpdateWindow();
@@ -4941,6 +5206,12 @@ void CMidiMonitorDlg::IdlePulse()
 // timerp 用。同期は毎ティック。描画の間引きは呼び出し側の Ms2DrawDue。
 void CMidiMonitorDlg::PumpSyncNow()
 {
+	SyncFmMidiView();
+	if (m_fmView) {
+		if (m_fm && ::IsWindow(m_fm->GetSafeHwnd()))
+			m_fm->PumpSyncNow();
+		return;
+	}
 	PumpIdle();
 }
 
@@ -4952,6 +5223,10 @@ void CMidiMonitorDlg::PersistPos()
 	savedata.midimony = rc.top;
 	savedata.midimonw = rc.Width();
 	savedata.midimonh = rc.Height();
+	savedata.fmmonx = savedata.midimonx;
+	savedata.fmmony = savedata.midimony;
+	savedata.fmmonw = savedata.midimonw;
+	savedata.fmmonh = savedata.midimonh;
 }
 
 void CMidiMonitorDlg::SyncSoft3DFromSave()
@@ -4969,7 +5244,7 @@ void CMidiMonitorDlg::PaletteApplySoft3D()
 	m_viewMode = (savedata.midimonviewmode == 1) ? 1 : 0;
 	SyncSoft3DFromSave();
 	if (::IsWindow(m_hWnd))
-		Invalidate(FALSE);
+		MmInvalidateBody(this);
 }
 
 void CMidiMonitorDlg::LayoutHelpBtn()
@@ -4996,6 +5271,10 @@ void CMidiMonitorDlg::ShowHelpSheet()
 
 void CMidiMonitorDlg::OnBnClickedHelp()
 {
+	if (m_fmView && m_fm && ::IsWindow(m_fm->GetSafeHwnd())) {
+		m_fm->SendMessage(WM_COMMAND, MAKEWPARAM(IDC_FM_HELP, BN_CLICKED), 0);
+		return;
+	}
 	ShowHelpSheet();
 }
 
@@ -5069,6 +5348,24 @@ void CMidiMonitorDlg::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
 			drum->AddCommand(IDM_MM_DRUM_AB10, LL14(L"A10 と B10 をドラムにする", L"Make A10 and B10 drums", L"A10 et B10 en batterie", L"A10 e B10 batteria", L"A10 y B10 en bateria", L"A10과 B10을 드럼으로", L"将 A10 和 B10 设为鼓组", L"اجعل A10 و B10 طبلاً", L"A10 и B10 — ударные", L"A10 und B10 zu Drums", L"A10 e B10 em bateria", L"A10 en B10 drums maken", L"A10 i B10 jako perkusja", L"A10 ve B10 davul yap"));
 		}
 	}
+	CCustomPopupMenu* midiIn = menu.AddSubMenu(
+		LL14(L"MIDI In", L"MIDI In", L"MIDI In", L"MIDI In", L"MIDI In", L"MIDI In", L"MIDI 输入", L"MIDI In", L"MIDI In", L"MIDI In", L"MIDI In", L"MIDI In", L"MIDI In", L"MIDI In"),
+		LL14(L"MIDI In 1/2 のデバイス、SMF保存、MIDI出力。選択はモニタへ即反映。",
+			L"MIDI In 1/2 devices, SMF save, and MIDI Out. Selection applies to this monitor immediately.",
+			L"MIDI In 1/2, SMF et MIDI Out. La selection s'applique tout de suite.",
+			L"MIDI In 1/2, SMF e MIDI Out. La selezione si applica subito.",
+			L"MIDI In 1/2, SMF y MIDI Out. La seleccion se aplica al instante.",
+			L"MIDI In 1/2 장치, SMF 저장, MIDI 출력. 선택은 즉시 모니터에 반영.",
+			L"MIDI In 1/2 设备、SMF 保存、MIDI 输出。选择立即反映到监视器。",
+			L"MIDI In 1/2 وSMF وMIDI Out. الاختيار يطبق فوراً.",
+			L"MIDI In 1/2, SMF и MIDI Out. Выбор сразу на мониторе.",
+			L"MIDI In 1/2, SMF und MIDI Out. Auswahl gilt sofort am Monitor.",
+			L"MIDI In 1/2, SMF e MIDI Out. A selecao aplica-se imediatamente.",
+			L"MIDI In 1/2, SMF en MIDI Out. Selectie geldt meteen op de monitor.",
+			L"MIDI In 1/2, SMF i MIDI Out. Wybor od razu na monitorze.",
+			L"MIDI In 1/2, SMF ve MIDI Out. Secim izleyiciye hemen yansir."));
+	if (midiIn)
+		PcHwMidiInAppendToMenu(midiIn);
 	CCustomPopupMenu* map = menu.AddSubMenu(
 		(m_sourcePath[0] && SasamiPathIsMidi(m_sourcePath))
 			? LL14(L"ささみ☆ﾐ 音源モード", L"Sasami MIDI map", L"Carte Sasami MIDI", L"Mappa Sasami MIDI", L"Mapa Sasami MIDI", L"사사미 MIDI 맵", L"ささみ☆ﾐ 音源模式", L"خريطة Sasami MIDI", L"Карта Sasami MIDI", L"Sasami-Klangkarte", L"Mapa Sasami MIDI", L"Sasami MIDI-kaart", L"Mapa Sasami MIDI", L"Sasami MIDI haritasi")
@@ -5121,6 +5418,8 @@ void CMidiMonitorDlg::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
 		point = CPoint(rc.left + 8, rc.top + 8);
 	}
 	const UINT cmd = menu.Track(point, this);
+	if (PcHwMidiInHandleCmd(cmd, this))
+		return;
 	if (cmd == IDM_MM_VIEW_2D) {
 		m_viewMode = 0; savedata.midimonviewmode = 0; m_fullDraw = true; Invalidate(FALSE);
 	} else if (cmd == IDM_MM_VIEW_3D) {

@@ -14,11 +14,17 @@ enum {
 	VEC_RTC = 0x04,
 	VEC_SOUND = 0x08,
 	RTC_HZ = 600,
-	VRTC_MILLIHZ = 56400,
+	/* hoot の PC88 VSYNC は 60 Hz（tnmbox.cpp SetInterval(1/60)）。
+	   旧 56.4 Hz は 24 kHz CRT 20 行で、use_vrtc 曲が約 6% 遅かった。
+	   Timer B 駆動（mistyblue / lastarmg）はチップクロックのまま動かない。 */
+	VRTC_HZ = 60,
 	/* 実 PC-88 曲が曲中に無音で持つ最長はこれ未満。超えたら休みではなく停止。
 	   プレーヤは数フレームごとに F-num をビブラート用に書き換えるので、レジスタが 2 秒完全静止なら演奏中ではない。 */
 	WD_IDLE_MS = 2000
 };
+
+static unsigned s_vrtcIrqs = 0;
+static unsigned s_soundIrqs = 0;
 
 CDriverPc88::CDriverPc88()
 	: hw_(NULL)
@@ -68,7 +74,7 @@ int CDriverPc88::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigne
 	opnHz_ = hw_->opnaMode ? PC88_OPNA_CLOCK_HZ : PC88_OPN_CLOCK_HZ;
 	cpuHz_ = (hw_->cpuHz_ > 0) ? hw_->cpuHz_ : PC88_CPU_HZ;
 	rtcPeriod_ = (uint64_t)cpuHz_ / RTC_HZ;
-	vrtcPeriod_ = (uint64_t)cpuHz_ * 1000 / VRTC_MILLIHZ;
+	vrtcPeriod_ = (uint64_t)cpuHz_ / VRTC_HZ;
 	nextRtc_ = rtcPeriod_;
 	nextVrtc_ = vrtcPeriod_;
 	opnResidual_ = 0;
@@ -89,6 +95,7 @@ int CDriverPc88::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigne
 	wdEverActive_ = 0;
 	wdArmedTick_ = 0;
 	replayPending_ = 0;
+	CEmuPc88IrqResetCount();
 	if (!hw_->LoadRoms(fs, ge, titleCode))
 		return 0;
 	/* ブート: PATCH がポーリングへ達するまで。上限約 1.0s。feris/gunyu は DRIVER に残すと page0 を壊す — I=01/F3 だけスナップショット。
@@ -310,11 +317,27 @@ void CDriverPc88::DeliverIrqs(uint64_t now)
 			: vrtcDue ? (uint8_t)VEC_VRTC
 			: (uint8_t)VEC_RTC;
 		if (Ay_CpuIm2Interrupt(cpu, vector)) {
-			if (vector == VEC_VRTC) nextVrtc_ += vrtcPeriod_;
-			else if (vector == VEC_RTC) nextRtc_ += rtcPeriod_;
-			else if (vector == VEC_SOUND && chip) {
+			if (vector == VEC_VRTC) {
+				nextVrtc_ += vrtcPeriod_;
+				/* SOUND 優先で溜まった VRTC をバーストで埋めない。hoot VSYNC
+				   は 60 Hz グリッド。遅れ分を一気に吐くと tnmbox が暴れる。 */
+				if (vrtcPeriod_ > 0 && now > nextVrtc_) {
+					const uint64_t late = (now - nextVrtc_) / vrtcPeriod_;
+					if (late)
+						nextVrtc_ += late * vrtcPeriod_;
+				}
+				s_vrtcIrqs++;
+			} else if (vector == VEC_RTC) {
+				nextRtc_ += rtcPeriod_;
+				if (rtcPeriod_ > 0 && now > nextRtc_) {
+					const uint64_t late = (now - nextRtc_) / rtcPeriod_;
+					if (late)
+						nextRtc_ += late * rtcPeriod_;
+				}
+			} else if (vector == VEC_SOUND && chip) {
 				/* hoot: ほぼ全 PC88 ドライバは raise_IRQ の直後に lower_IRQ（エッジ）。線を OUT E4 まで High に保つと EI 後に ISR 再入し mucom テンポが走る。YM ステータスは KOEI 用に sticky。E4 も ack。 */
 				chip->AckIrq();
+				s_soundIrqs++;
 			}
 		}
 	} else {
@@ -752,6 +775,10 @@ static int s_wdEnabled = 1;
 unsigned CEmuPc88WatchdogReplays() { return s_wdReplayCount; }
 void CEmuPc88WatchdogResetCount() { s_wdReplayCount = 0; }
 void CEmuPc88WatchdogSetEnabled(int on) { s_wdEnabled = on ? 1 : 0; }
+
+unsigned CEmuPc88VrtcIrqs() { return s_vrtcIrqs; }
+unsigned CEmuPc88SoundIrqs() { return s_soundIrqs; }
+void CEmuPc88IrqResetCount() { s_vrtcIrqs = 0; s_soundIrqs = 0; }
 
 /* プレーヤが走る手段を残さず終わったブート用の停滞ウォッチドッグ: ゲストが割り込みを落とした、音源 IRQ をマスクした、tick 源が無い。生存信号はキーオン＋F-num＋SSG 周期変化。アイドルのレジスタポーリングは演奏ではない。ノートが出た瞬間に武装解除。
 

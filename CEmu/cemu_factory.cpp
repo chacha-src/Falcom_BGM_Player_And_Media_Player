@@ -11,6 +11,7 @@
 #include "driver/cemu_driver_pcat.h"
 #include "driver/cemu_driver_neogeo.h"
 #include "driver/cemu_driver_f3.h"
+#include "driver/cemu_driver_pico.h"
 #include "machine/cemu_hard_pc88.h"
 #include "machine/cemu_hard_pc98.h"
 #include "machine/cemu_hard_ac.h"
@@ -22,6 +23,7 @@
 #include "machine/cemu_hard_pcat.h"
 #include "machine/cemu_hard_neogeo.h"
 #include "machine/cemu_hard_f3.h"
+#include "machine/cemu_hard_pico.h"
 #include <string.h>
 
 /* PC-98 系 (VA/VA-DOS 含む)。Z80 PC-88 ではない */
@@ -57,13 +59,23 @@ static int IsSg1000Platform(const CEmuGameEntry* ge)
 	return 0;
 }
 
+/* Sega Pico。platform=sega の AC catch-all より先 */
+static int IsPicoPlatform(const CEmuGameEntry* ge)
+{
+	if (!ge) return 0;
+	if (_stricmp(ge->subtype, "pico") == 0) return 1;
+	if (_stricmp(ge->dataDir, "pico") == 0) return 1;
+	return 0;
+}
+
 static int IsF3Platform(const CEmuGameEntry* ge);
 
-/* アーケード基板。MSX/F3/SG は dataDir=ac でもここへ落とさない */
+/* アーケード基板。MSX/F3/SG/Pico は dataDir=ac でもここへ落とさない */
 static int IsAcPlatform(const CEmuGameEntry* ge)
 {
 	if (!ge) return 0;
 	if (IsSg1000Platform(ge)) return 0;
+	if (IsPicoPlatform(ge)) return 0;
 	if (_stricmp(ge->subtype, "f3system") == 0) return 0;
 	/* MSX/KSS を dataDir=ac (data\\ac 置き zip) で AC 扱いしない */
 	if (_stricmp(ge->platform, "msx") == 0 || _stricmp(ge->subtype, "kss") == 0
@@ -278,6 +290,14 @@ CHard* CEmuHardCreate(const CEmuGameEntry* ge, int sampleRate)
 		}
 		return hw;
 	}
+	if (IsPicoPlatform(ge)) {
+		CHardPico* hw = new CHardPico();
+		if (!hw->Init(ge, sampleRate)) {
+			delete hw;
+			return NULL;
+		}
+		return hw;
+	}
 	/* MSX を AC より先に。dataDir=ac だけだと KSS が奪われていた */
 	if (IsMsxPlatform(ge)) {
 		CHardMsx* hw = new CHardMsx();
@@ -350,6 +370,12 @@ void CEmuHardDestroy(CHard* hw)
 		delete p;
 		return;
 	}
+	if (hw->hardKind == CHard::KIND_PICO) {
+		CHardPico* p = (CHardPico*)hw;
+		p->Shutdown();
+		delete p;
+		return;
+	}
 	if (hw->hardKind == CHard::KIND_X68K) {
 		CHardX68k* p = (CHardX68k*)hw;
 		p->Shutdown();
@@ -411,6 +437,8 @@ CDriver* CEmuDriverCreate(const CEmuGameEntry* ge)
 		return new CDriverPc98();
 	if (IsSg1000Platform(ge))
 		return new CDriverSg1000();
+	if (IsPicoPlatform(ge))
+		return new CDriverPico();
 	if (IsAcPlatform(ge))
 		return new CDriverAc();
 	if (IsX68kPlatform(ge))

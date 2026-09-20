@@ -9,6 +9,9 @@
     <ClCompile Include="kpihost_savedata.cpp" />
     <ClCompile Include="VstMidiEngine_k64.cpp" />
     <ClCompile Include="Vst3Host_k64.cpp" />
+    <ClCompile Include="..\kb_sasami\source\sasami_file.cpp" />
+    <ClCompile Include="..\kb_sasami\source\sasami_midi.cpp" />
+    <ClCompile Include="..\kb_sasami\source\sasami_misao.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="KpiHost64.rc">

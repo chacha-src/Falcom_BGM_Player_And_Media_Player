@@ -92,6 +92,14 @@ void HD63701SetInputLine(HD63701Cpu* cpu, int line, int state)
 	if (state) cpu->irqCount++;
 }
 
+void HD63701PulseOci(HD63701Cpu* cpu)
+{
+	if (!cpu) return;
+	g_cpu = cpu;
+	hd63701_pulse_oci();
+	cpu->irqCount++;
+}
+
 void HD63701ClearInterruptMask(HD63701Cpu* cpu)
 {
 	if (!cpu) return;
@@ -106,6 +114,16 @@ uint16_t HD63701Pc(const HD63701Cpu* cpu)
 {
 	(void)cpu;
 	return (uint16_t)m6800_get_pc();
+}
+
+void HD63701SetPc(HD63701Cpu* cpu, uint16_t pc)
+{
+	if (!cpu) return;
+	g_cpu = cpu;
+	m6800_Regs r;
+	m6800_get_context(&r);
+	r.pc.w.l = pc;
+	m6800_set_context(&r);
 }
 
 uint32_t HD63701IrqCount(const HD63701Cpu* cpu)

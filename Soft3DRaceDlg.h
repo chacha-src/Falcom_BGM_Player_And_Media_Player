@@ -663,6 +663,7 @@ public:
 	float m_hmPathY[S3R_HM_N * S3R_HM_N];
 	unsigned char m_pathDeep[S3R_PATH_SAMPLES];
 	unsigned char m_pathWet[S3R_PATH_SAMPLES];
+	unsigned char m_pathHeal[S3R_PATH_SAMPLES]; // 1=中央レーンでも HP 回復する区間
 	float m_hmX0, m_hmZ0, m_hmStep;
 	int m_hmReady;
 	float m_waterY;

@@ -1,4 +1,4 @@
-// CMediaPlayerDlg.cpp : メディアプレイヤーモード画面(張りぼて)とモード選択ダイアログ
+﻿// CMediaPlayerDlg.cpp : メディアプレイヤーモード画面(張りぼて)とモード選択ダイアログ
 //
 // 実体は COggDlg(og->) と CPlayList(pl->)。ここは表示と操作の取り次ぎだけを行う。
 // メディアプレイヤーモード中は og / pl のウィンドウを非表示にして裏で生かしておく。
@@ -959,6 +959,7 @@ CMediaPlayerDlg::CMediaPlayerDlg(CWnd* pParent)
 	m_mpWasMaximized = false;
 	m_uiReady = false;
 	m_dragging = 0;
+	m_dragMoved = 0;
 	m_dragSrc = -1;
 	m_hDragImage = NULL;
 	m_libDrag = 0;
@@ -1633,9 +1634,7 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 		if (!m_botVst.GetSafeHwnd())
 			m_botVst.Create(_T("VST"), WS_CHILD | BS_PUSHBUTTON | WS_TABSTOP, rc, this, IDC_MP_BOT_VST);
 		if (!m_botMidi.GetSafeHwnd())
-			m_botMidi.Create(_T("MIDI"), WS_CHILD | BS_PUSHBUTTON | WS_TABSTOP, rc, this, IDC_MP_BOT_MIDI); // VST と CD のあいだ
-		if (!m_botFm.GetSafeHwnd())
-			m_botFm.Create(_T("FM"), WS_CHILD | BS_PUSHBUTTON | WS_TABSTOP, rc, this, IDC_MP_BOT_FM);
+			m_botMidi.Create(_T("FM/MIDI"), WS_CHILD | BS_PUSHBUTTON | WS_TABSTOP, rc, this, IDC_MP_BOT_MIDI); // VST と CD のあいだ
 		if (!m_botCd.GetSafeHwnd())
 			m_botCd.Create(_T("CD"), WS_CHILD | BS_PUSHBUTTON | WS_TABSTOP, rc, this, IDC_MP_BOT_CD);
 		if (!m_botMaze.GetSafeHwnd())
@@ -1666,12 +1665,8 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 				if (!bots[bi]->GetSafeHwnd()) continue;
 				bots[bi]->SetGradation(botGrad[bi][0], botGrad[bi][1], 0, TRUE);
 			}
-			if (m_botFm.GetSafeHwnd())
-				m_botFm.SetGradation(RGB(255, 245, 220), RGB(240, 195, 120), 0, TRUE);
 			MpMakePushToggle(&m_botMidi);
-			MpMakePushToggle(&m_botFm);
 			if (m_botMidi.GetSafeHwnd()) m_botMidi.SetIcon(0);
-			if (m_botFm.GetSafeHwnd()) m_botFm.SetIcon(0);
 		}
 		if (!m_findFilter.GetSafeHwnd())
 			m_findFilter.Create(_T("Filter"), WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX | WS_TABSTOP, rc, this, IDC_MP_FINDFILTER);
@@ -2346,23 +2341,21 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 	if (m_botVst.GetSafeHwnd())
 		addTip(m_botVst, LL14(L"VSTホスト（配線・MIDI入力）", L"VST host (wiring / MIDI in)", L"Hote VST (cablage / entree MIDI)", L"Host VST (cablaggio / MIDI in)", L"Host VST (cableado / MIDI in)", L"VST 호스트(배선/MIDI 입력)", L"VST主机（接线/MIDI输入）", L"مضيف VST (توصيل/إدخال MIDI)", L"Хост VST (коммутация/MIDI in)", L"VST-Host (Verdrahtung/MIDI-In)", L"Host VST (cabos/MIDI in)", L"VST-host (bedrading/MIDI in)", L"Host VST (okablowanie/MIDI in)", L"VST host (kablolama/MIDI giris)"));
 	if (m_botMidi.GetSafeHwnd())
-		addTip(m_botMidi, LL14(L"MIDIモニタを開閉します（開いているあいだ凹みます）。", L"Toggle the MIDI monitor (stays depressed while open).", L"Afficher/masquer le moniteur MIDI (enfonce tant qu'il est ouvert).", L"Apri/chiudi il monitor MIDI (premuto mentre e aperto).", L"Abrir/cerrar el monitor MIDI (hundido mientras esta abierto).", L"MIDI 모니터 열기/닫기(열려 있는 동안 눌림).", L"打开/关闭 MIDI 监视器（打开时保持按下）。", L"فتح/إغلاق مراقب MIDI (يبقى مضغوطاً وهو مفتوح).", L"Открыть/закрыть MIDI-монитор (утоплен, пока открыт).", L"MIDI-Monitor ein/aus (eingedruckt solange offen).", L"Abrir/fechar o monitor MIDI (afundado enquanto aberto).", L"MIDI-monitor aan/uit (ingedrukt zolang open).", L"Wlacz/wylacz monitor MIDI (wcisniety gdy otwarty).", L"MIDI monitoru ac/kapa (acikken basili kalir)."));
-	if (m_botFm.GetSafeHwnd())
-		addTip(m_botFm, LL14(
-			L"FMモニタ(.fpy/PMD/FMP)。旧fmpmdのみ不可・Plugins更新で反映",
-			L"FM monitor (.fpy/PMD/FMP). Old fmpmd alone will not work; update Plugins",
-			L"Moniteur FM (.fpy/PMD/FMP). Ancien fmpmd seul: non. Mettez a jour Plugins",
-			L"Monitor FM (.fpy/PMD/FMP). Solo vecchio fmpmd: no. Aggiorna Plugins",
-			L"Monitor FM (.fpy/PMD/FMP). Solo fmpmd viejo: no. Actualice Plugins",
-			L"FM 모니터(.fpy/PMD/FMP). 옛 fmpmd만으로는 불가. Plugins 갱신으로 반영",
-			L"FM监视器(.fpy/PMD/FMP)。仅旧 fmpmd 不可用；更新 Plugins 后生效",
-			L"مراقب FM (.fpy/PMD/FMP). fmpmd القديم وحده لا يكفي؛ حدّث Plugins",
-			L"FM-монитор (.fpy/PMD/FMP). Один старый fmpmd не работает; обновите Plugins",
-			L"FM-Monitor (.fpy/PMD/FMP). Altes fmpmd allein reicht nicht; Plugins aktualisieren",
-			L"Monitor FM (.fpy/PMD/FMP). So fmpmd antigo nao basta; atualize Plugins",
-			L"FM-monitor (.fpy/PMD/FMP). Alleen oude fmpmd werkt niet; werk Plugins bij",
-			L"Monitor FM (.fpy/PMD/FMP). Sam stary fmpmd nie wystarczy; zaktualizuj Plugins",
-			L"FM izleyici (.fpy/PMD/FMP). Yalniz eski fmpmd yetmez; Plugins guncelleyin"));
+		addTip(m_botMidi, LL14(
+			L"FM/MIDIモニタを開閉します（開いているあいだ凹みます）。",
+			L"Toggle the FM/MIDI monitor (stays depressed while open).",
+			L"Afficher/masquer le moniteur FM/MIDI (enfonce tant qu'il est ouvert).",
+			L"Apri/chiudi il monitor FM/MIDI (premuto mentre e aperto).",
+			L"Abrir/cerrar el monitor FM/MIDI (hundido mientras esta abierto).",
+			L"FM/MIDI 모니터 열기/닫기(열려 있는 동안 눌림).",
+			L"打开/关闭 FM/MIDI 监视器（打开时保持按下）。",
+			L"فتح/إغلاق مراقب FM/MIDI (يبقى مضغوطاً وهو مفتوح).",
+			L"Открыть/закрыть FM/MIDI-монитор (утоплен, пока открыт).",
+			L"FM/MIDI-Monitor ein/aus (eingedruckt solange offen).",
+			L"Abrir/fechar o monitor FM/MIDI (afundado enquanto aberto).",
+			L"FM/MIDI-monitor aan/uit (ingedrukt zolang open).",
+			L"Wlacz/wylacz monitor FM/MIDI (wcisniety gdy otwarty).",
+			L"FM/MIDI monitoru ac/kapa (acikken basili kalir)."));
 	if (m_botCd.GetSafeHwnd())
 		addTip(m_botCd, LL14(L"CDプレイヤー（再生・取り込み・曲目検索・書き込み）", L"CD player (play / rip / lookup / burn)", L"Lecteur CD (lecture / extraction / recherche / gravure)", L"Lettore CD (play / estrazione / ricerca / masterizza)", L"Reproductor CD (reproducir / extraer / buscar / grabar)", L"CD 플레이어(재생/추출/검색/굽기)", L"CD播放器（播放/抓轨/检索/刻录）", L"مشغل CD (تشغيل/استخراج/بحث/حرق)", L"CD-плеер (воспроизведение/извлечение/поиск/запись)", L"CD-Player (Play/Rip/Suche/Brennen)", L"Leitor de CD (play / extrair / pesquisa / gravar)", L"CD-speler (afspelen / rippen / zoeken / branden)", L"Odtwarzacz CD (odtwarzanie / zgrywanie / szukanie / nagranie)", L"CD oynatici (oynat / aktar / ara / yaz)"));
 	if (m_botMaze.GetSafeHwnd())
@@ -2479,6 +2472,8 @@ BOOL CMediaPlayerDlg::RelayPreTranslateMessage(MSG* pMsg)
 	// 途中再生確認中は Space/Enter を再生に流さない（確認ダイアログが前面ならここへ来ない）
 	if (OggIsResumePromptActive() && pMsg
 		&& pMsg->message >= WM_KEYFIRST && pMsg->message <= WM_KEYLAST)
+		return TRUE;
+	if (HandlePlaylistItemDragMsg(pMsg))
 		return TRUE;
 	// 子ボタン上の右クリックは親 OnRButtonUp に届かない → ここでクイックメニュー。
 	auto relayBtn = [&](CWnd& btn, void (CMediaPlayerDlg::*fn)(CPoint)) -> BOOL {
@@ -2703,6 +2698,7 @@ BOOL CMediaPlayerDlg::DestroyWindow()
 	// バナー内蔵ジャケ(ファルコム特化型のミニジャケ)抑止フラグを必ず解除する。
 	// これを残すと、ファルコム特化型へ戻した後もミニジャケが表示されなくなる。
 	g_mpSideJacket = 0;
+	EndPlaylistItemDrag(FALSE, CPoint(0, 0));
 	KillTimer(1);
 	KillTimer(2);
 	KillTimer(3);
@@ -3810,12 +3806,12 @@ void CMediaPlayerDlg::DoLayout()
 	const int wFull[13] = {
 		(int)(56 * s) + icoAdd, (int)(52 * s) + icoAdd, (int)(48 * s) + icoAdd, (int)(56 * s) + icoAdd,
 		(int)(60 * s) + icoAdd, (int)(40 * s) + icoAdd, (int)(56 * s) + icoAdd, (int)(64 * s) + icoAdd,
-		(int)(48 * s) + icoAdd, (int)(48 * s) + icoAdd, (int)(48 * s) + icoAdd, (int)(52 * s) + icoAdd, (int)(52 * s) + icoAdd
+		(int)(48 * s) + icoAdd, (int)(64 * s) + icoAdd, (int)(48 * s) + icoAdd, (int)(52 * s) + icoAdd, (int)(52 * s) + icoAdd
 	};
 	const int wMid[13] = {
 		(int)(40 * s) + icoAdd, (int)(40 * s) + icoAdd, (int)(40 * s) + icoAdd, (int)(40 * s) + icoAdd,
 		(int)(40 * s) + icoAdd, (int)(36 * s) + icoAdd, (int)(40 * s) + icoAdd, (int)(44 * s) + icoAdd,
-		(int)(40 * s) + icoAdd, (int)(40 * s) + icoAdd, (int)(40 * s) + icoAdd, (int)(40 * s) + icoAdd, (int)(40 * s) + icoAdd
+		(int)(40 * s) + icoAdd, (int)(52 * s) + icoAdd, (int)(40 * s) + icoAdd, (int)(40 * s) + icoAdd, (int)(40 * s) + icoAdd
 	};
 	const int wShort[13] = {
 		(int)(28 * s), (int)(28 * s), (int)(28 * s), (int)(28 * s),
@@ -3858,8 +3854,7 @@ void CMediaPlayerDlg::DoLayout()
 			if (m_botAlarm.GetSafeHwnd()) m_botAlarm.SetWindowText(L"Alm");
 			if (m_botRemote.GetSafeHwnd()) m_botRemote.SetWindowText(L"Rem");
 			if (m_botVst.GetSafeHwnd()) m_botVst.SetWindowText(L"VST");
-			if (m_botMidi.GetSafeHwnd()) m_botMidi.SetWindowText(L"MIDI");
-			if (m_botFm.GetSafeHwnd()) m_botFm.SetWindowText(L"FM");
+			if (m_botMidi.GetSafeHwnd()) m_botMidi.SetWindowText(L"F/M");
 			if (m_botCd.GetSafeHwnd()) m_botCd.SetWindowText(L"CD");
 			if (m_botMaze.GetSafeHwnd()) m_botMaze.SetWindowText(L"Mz");
 			if (m_botRace.GetSafeHwnd()) m_botRace.SetWindowText(L"Rc");
@@ -3886,9 +3881,7 @@ void CMediaPlayerDlg::DoLayout()
 			if (m_botVst.GetSafeHwnd())
 				m_botVst.SetWindowText(LL14(L"VST", L"VST", L"VST", L"VST", L"VST", L"VST", L"VST", L"VST", L"VST", L"VST", L"VST", L"VST", L"VST", L"VST"));
 			if (m_botMidi.GetSafeHwnd())
-				m_botMidi.SetWindowText(L"MIDI");
-			if (m_botFm.GetSafeHwnd())
-				m_botFm.SetWindowText(L"FM");
+				m_botMidi.SetWindowText(L"FM/MIDI");
 			if (m_botCd.GetSafeHwnd())
 				m_botCd.SetWindowText(LL14(L"CD", L"CD", L"CD", L"CD", L"CD", L"CD", L"CD", L"CD", L"CD", L"CD", L"CD", L"CD", L"CD", L"CD"));
 			if (m_botMaze.GetSafeHwnd())
@@ -3903,7 +3896,8 @@ void CMediaPlayerDlg::DoLayout()
 	MoveCtl(&m_resetdata, bx, botY, rsW, swH); bx += rsW + gapLead;
 	MoveCtl(&m_record, bx, botY, recW, swH); bx += recW + gapLead;
 	MoveCtl(&m_capture, bx, botY, capW, swH); bx += capW + gapLead;
-	BOOL midiColShown = FALSE;
+	if (m_botFm.GetSafeHwnd() && m_botFm.IsWindowVisible())
+		m_botFm.ShowWindow(SW_HIDE);
 	for (int i = 0; i < 13; ++i) {
 		CCustomStandardButton* b = botBtn[i];
 		if (!b->GetSafeHwnd()) continue;
@@ -3916,26 +3910,10 @@ void CMediaPlayerDlg::DoLayout()
 			if (b->IsWindowVisible()) b->ShowWindow(SW_HIDE);
 			continue;
 		}
-		if (b == &m_botMidi) {
-			const int stackGap = max(1, (int)(1 * s));
-			const int statusTop = H - uxBandH - max(2, (int)(2 * s));
-			int midiH = (statusTop - botY - stackGap) / 2;
-			if (midiH < 14) midiH = 14;
-			MoveCtl(b, bx, botY, bw, midiH);
-			if (!b->IsWindowVisible()) b->ShowWindow(SW_SHOW);
-			if (m_botFm.GetSafeHwnd()) {
-				MoveCtl(&m_botFm, bx, botY + midiH + stackGap, bw, midiH);
-				if (!m_botFm.IsWindowVisible()) m_botFm.ShowWindow(SW_SHOW);
-			}
-			midiColShown = TRUE;
-		} else {
-			MoveCtl(b, bx, botY, bw, swH);
-			if (!b->IsWindowVisible()) b->ShowWindow(SW_SHOW);
-		}
+		MoveCtl(b, bx, botY, bw, swH);
+		if (!b->IsWindowVisible()) b->ShowWindow(SW_SHOW);
 		bx += bw + gapBot;
 	}
-	if (!midiColShown && m_botFm.GetSafeHwnd() && m_botFm.IsWindowVisible())
-		m_botFm.ShowWindow(SW_HIDE);
 	MoveCtl(&m_exit, exitLeft, botY, exW, swH);
 
 	if (s_mpLayoutDefer) {
@@ -4098,15 +4076,10 @@ void CMediaPlayerDlg::SyncPushToggleButtons()
 		MpSetPushToggle(m_cmdroll, cmdRollOpen, RGB(200, 170, 255), RGB(160, 120, 240), RGB(230, 220, 255), RGB(200, 185, 250));
 		m_lastToggleCmdRoll = cmdRollOpen;
 	}
-	const int midiOpen = savedata.midimonwindow ? 1 : 0; // CMidiMonitorDlg.h をここに include しない（重複宣言）
+	const int midiOpen = (savedata.midimonwindow || savedata.fmmonwindow) ? 1 : 0;
 	if (m_botMidi.GetSafeHwnd() && midiOpen != m_lastToggleMidiMon) {
 		MpSetPushToggle(m_botMidi, midiOpen, RGB(90, 170, 230), RGB(50, 130, 200), RGB(230, 245, 255), RGB(155, 195, 235));
 		m_lastToggleMidiMon = midiOpen;
-	}
-	const int fmOpen = savedata.fmmonwindow ? 1 : 0;
-	if (m_botFm.GetSafeHwnd() && fmOpen != m_lastToggleFmMon) {
-		MpSetPushToggle(m_botFm, fmOpen, RGB(230, 170, 50), RGB(200, 130, 20), RGB(255, 245, 220), RGB(240, 195, 120));
-		m_lastToggleFmMon = fmOpen;
 	}
 }
 
@@ -6812,8 +6785,7 @@ void CMediaPlayerDlg::OnWrdView()
 
 void CMediaPlayerDlg::OnFmMonitor()
 {
-	if (og && ::IsWindow(og->GetSafeHwnd()))
-		og->PostMessage(WM_OGG_TOGGLE_SUBUI, 4, 0);  // 4=FM モニタ
+	OnMidiMonitor();
 }
 
 void CMediaPlayerDlg::OnProTools()
@@ -10191,9 +10163,9 @@ void CMediaPlayerDlg::OnRButtonUp(UINT nFlags, CPoint point)
 						savedata.pianorollwindow != 0,
 						LL14(L"ピアノロールウィンドウを開閉します", L"Open or close the piano-roll window", L"Ouvrir/fermer la fenetre piano roll", L"Apri/chiudi la finestra piano roll", L"Abrir/cerrar la ventana piano roll", L"피아노 롤 창을 여닫기", L"打开或关闭钢琴卷帘窗口", L"فتح/إغلاق نافذة لفة البيانو", L"Открыть/закрыть окно пианоролла", L"Piano-Roll-Fenster oeffnen/schliessen", L"Abrir/fechar a janela do piano roll", L"Piano-rollvenster openen/sluiten", L"Otworz/zamknij okno piano roll", L"Piano roll penceresini ac/kapat"));
 					wins->AddCheck(ID_MP_OPEN_MIDIMON,
-						LL14(L"MIDIモニタ...", L"MIDI monitor...", L"Moniteur MIDI...", L"Monitor MIDI...", L"Monitor MIDI...", L"MIDI 모니터...", L"MIDI监视器...", L"مراقب MIDI...", L"MIDI-монитор...", L"MIDI-Monitor...", L"Monitor MIDI...", L"MIDI-monitor...", L"Monitor MIDI...", L"MIDI izleyici..."),
-						savedata.midimonwindow != 0,
-						LL14(L"MIDI 32パート・モニタを開閉します（.mid の GS/XG 演奏状態）", L"Open or close the 32-part MIDI monitor (GS/XG state of the playing .mid)", L"Ouvrir/fermer le moniteur MIDI 32 parties (etat GS/XG du .mid)", L"Apri/chiudi il monitor MIDI a 32 parti (stato GS/XG del .mid)", L"Abrir/cerrar el monitor MIDI de 32 partes (estado GS/XG del .mid)", L"MIDI 32파트 모니터를 여닫기(재생 중 .mid의 GS/XG 상태)", L"打开或关闭 MIDI 32 声部监视器（正在播放的 .mid 的 GS/XG 状态）", L"فتح/إغلاق مراقب MIDI ذا 32 جزءاً", L"Открыть/закрыть MIDI-монитор на 32 партии (состояние GS/XG у .mid)", L"32-Part-MIDI-Monitor oeffnen/schliessen (GS/XG des .mid)", L"Abrir/fechar o monitor MIDI de 32 partes (estado GS/XG do .mid)", L"MIDI-monitor met 32 partijen openen/sluiten (GS/XG van .mid)", L"Otworz/zamknij monitor MIDI 32 partii (stan GS/XG pliku .mid)", L"32 part MIDI izleyiciyi ac/kapat (.mid GS/XG durumu)"));
+						LL14(L"FM/MIDIモニタ...", L"FM/MIDI monitor...", L"Moniteur FM/MIDI...", L"Monitor FM/MIDI...", L"Monitor FM/MIDI...", L"FM/MIDI 모니터...", L"FM/MIDI监视器...", L"مراقب FM/MIDI...", L"FM/MIDI-монитор...", L"FM/MIDI-Monitor...", L"Monitor FM/MIDI...", L"FM/MIDI-monitor...", L"Monitor FM/MIDI...", L"FM/MIDI izleyici..."),
+						(savedata.midimonwindow || savedata.fmmonwindow) != 0,
+						LL14(L"FM/MIDIモニタを開閉します（MIDI の GS/XG と FM の OPNA）", L"Open or close the 32-part MIDI monitor (GS/XG state of the playing .mid)", L"Ouvrir/fermer le moniteur MIDI 32 parties (etat GS/XG du .mid)", L"Apri/chiudi il monitor MIDI a 32 parti (stato GS/XG del .mid)", L"Abrir/cerrar el monitor MIDI de 32 partes (estado GS/XG del .mid)", L"MIDI 32파트 모니터를 여닫기(재생 중 .mid의 GS/XG 상태)", L"打开或关闭 MIDI 32 声部监视器（正在播放的 .mid 的 GS/XG 状态）", L"فتح/إغلاق مراقب MIDI ذا 32 جزءاً", L"Открыть/закрыть MIDI-монитор на 32 партии (состояние GS/XG у .mid)", L"32-Part-MIDI-Monitor oeffnen/schliessen (GS/XG des .mid)", L"Abrir/fechar o monitor MIDI de 32 partes (estado GS/XG do .mid)", L"MIDI-monitor met 32 partijen openen/sluiten (GS/XG van .mid)", L"Otworz/zamknij monitor MIDI 32 partii (stan GS/XG pliku .mid)", L"32 part MIDI izleyiciyi ac/kapat (.mid GS/XG durumu)"));
 					wins->AddCheck(ID_MP_OPEN_WRD,
 						LL14(L"WRD画面...", L"WRD screen...", L"Ecran WRD...", L"Schermo WRD...", L"Pantalla WRD...", L"WRD 화면...", L"WRD画面...", L"شاشة WRD...", L"Экран WRD...", L"WRD-Bildschirm...", L"Tela WRD...", L"WRD-scherm...", L"Ekran WRD...", L"WRD ekrani..."),
 						savedata.wrdwindow != 0,
@@ -13967,44 +13939,130 @@ void CMediaPlayerDlg::OpenCommandPalette()
 // pc[] を src→dst へ移動(リスト内ドラッグ移動)。再生インデックスも追従。
 static void MP_MovePlaylistItem(int src, int dst)
 {
-	if (!pl || !pl->pc) return;
-	int n = pl->playcnt;
-	if (src < 0 || src >= n || dst < 0 || dst >= n || src == dst) return;
-	playlistdata0 tmp = pl->pc[src];
-	if (src < dst) for (int i = src; i < dst; i++) pl->pc[i] = pl->pc[i + 1];
-	else           for (int i = src; i > dst; i--) pl->pc[i] = pl->pc[i - 1];
-	pl->pc[dst] = tmp;
-	auto adj = [&](int idx)->int {
-		if (idx == src) return dst;
-		if (src < dst && idx > src && idx <= dst) return idx - 1;
-		if (src > dst && idx >= dst && idx < src) return idx + 1;
-		return idx;
-	};
-	plcnt = adj(plcnt);
-	pl->pnt = adj(pl->pnt);
-	pl->pnt1 = adj(pl->pnt1);
-	if (::IsWindow(pl->m_lc.GetSafeHwnd())) pl->m_lc.RedrawWindow();
-	pl->Save();
+	if (!pl) return;
+	pl->MoveTrack(src, dst, TRUE);
+}
+
+static int MpDragSlop()
+{
+	int x = GetSystemMetrics(SM_CXDRAG);
+	int y = GetSystemMetrics(SM_CYDRAG);
+	if (x < 4) x = 4;
+	if (y < 4) y = 4;
+	return (x > y) ? x : y;
+}
+
+void CMediaPlayerDlg::StartPlaylistItemDragVisual()
+{
+	if (!m_dragging || m_dragSrc < 0 || !m_list.GetSafeHwnd())
+		return;
+	if (m_hDragImage)
+		return;
+	POINT ptHot = { 0, 0 };
+	m_hDragImage = ListView_CreateDragImage(m_list.m_hWnd, m_dragSrc, &ptHot);
+	if (m_hDragImage) {
+		ImageList_BeginDrag(m_hDragImage, 0, 0, 0);
+		POINT pc;
+		GetCursorPos(&pc);
+		ScreenToClient(&pc);
+		ImageList_DragEnter(GetSafeHwnd(), pc.x, pc.y);
+	}
+	SetCapture();
+}
+
+void CMediaPlayerDlg::EndPlaylistItemDrag(BOOL commit, POINT screenPt)
+{
+	if (!m_dragging)
+		return;
+	const int srcDisp = m_dragSrc;
+	m_dragging = 0;
+	m_dragSrc = -1;
+	m_dragMoved = 0;
+	if (::GetCapture() == m_hWnd)
+		ReleaseCapture();
+	if (m_hDragImage) {
+		ImageList_DragLeave(GetSafeHwnd());
+		ImageList_EndDrag();
+		ImageList_Destroy(m_hDragImage);
+		m_hDragImage = NULL;
+	}
+	if (!commit || !pl || srcDisp < 0 || !m_list.GetSafeHwnd())
+		return;
+	CPoint lp(screenPt);
+	m_list.ScreenToClient(&lp);
+	UINT fl = 0;
+	int dst = m_list.HitTest(lp, &fl);
+	if (dst < 0) {
+		CRect rc;
+		m_list.GetClientRect(&rc);
+		if (lp.y >= rc.bottom)
+			dst = m_list.GetItemCount() - 1;
+	}
+	if (dst < 0 || dst == srcDisp)
+		return;
+	int srcPc = MpDispToPc(this, srcDisp);
+	int dstPc = MpDispToPc(this, dst);
+	if (srcPc >= 0 && dstPc >= 0 && srcPc < pl->playcnt && dstPc < pl->playcnt && srcPc != dstPc) {
+		MP_MovePlaylistItem(srcPc, dstPc);
+		RefreshList(TRUE);
+		if (dst < m_list.GetItemCount()) {
+			m_list.SetItemState(dst, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
+			m_list.EnsureVisible(dst, FALSE);
+		}
+	}
+}
+
+BOOL CMediaPlayerDlg::HandlePlaylistItemDragMsg(MSG* pMsg)
+{
+	if (!m_dragging || !pMsg)
+		return FALSE;
+	if (pMsg->message == WM_MOUSEMOVE) {
+		if (!m_dragMoved) {
+			const int slop = MpDragSlop();
+			if (abs((int)pMsg->pt.x - m_dragStart.x) < slop
+				&& abs((int)pMsg->pt.y - m_dragStart.y) < slop)
+				return FALSE;
+			m_dragMoved = 1;
+			StartPlaylistItemDragVisual();
+		}
+		if (m_hDragImage) {
+			CPoint pc(pMsg->pt);
+			ScreenToClient(&pc);
+			ImageList_DragMove(pc.x, pc.y);
+		}
+		return FALSE;
+	}
+	if (pMsg->message == WM_LBUTTONUP) {
+		const BOOL moved = m_dragMoved;
+		EndPlaylistItemDrag(moved, pMsg->pt);
+		return moved ? TRUE : FALSE;
+	}
+	if (pMsg->message == WM_RBUTTONDOWN || pMsg->message == WM_MBUTTONDOWN
+		|| (pMsg->message == WM_KEYDOWN && pMsg->wParam == VK_ESCAPE)) {
+		EndPlaylistItemDrag(FALSE, pMsg->pt);
+		return TRUE;
+	}
+	if (pMsg->message == WM_LBUTTONDOWN) {
+		EndPlaylistItemDrag(FALSE, pMsg->pt);
+		return FALSE;
+	}
+	return FALSE;
 }
 
 void CMediaPlayerDlg::OnBeginDragList(NMHDR* pNMHDR, LRESULT* pResult)
 {
 	*pResult = 0;
 	LPNMLISTVIEW nm = reinterpret_cast<LPNMLISTVIEW>(pNMHDR);
+	if (m_dragging)
+		EndPlaylistItemDrag(FALSE, CPoint(0, 0));
+	if ((GetKeyState(VK_LBUTTON) & 0x8000) == 0)
+		return;
+	if (!nm || nm->iItem < 0)
+		return;
 	m_dragSrc = nm->iItem;
-	if (m_dragSrc < 0) return;
 	m_dragging = 1;
-	// ドラッグ画像(プレイリストと同様の見た目)
-	POINT ptHot = { 0,0 };
-	m_hDragImage = ListView_CreateDragImage(m_list.m_hWnd, m_dragSrc, &ptHot);
-	if (m_hDragImage) {
-		ImageList_BeginDrag(m_hDragImage, 0, 0, 0);
-		POINT pc = nm->ptAction;          // リストクライアント座標
-		m_list.ClientToScreen(&pc);
-		ScreenToClient(&pc);
-		ImageList_DragEnter(GetSafeHwnd(), pc.x, pc.y);
-	}
-	SetCapture();
+	m_dragMoved = 0;
+	GetCursorPos(&m_dragStart);
 }
 
 // ミニジャケット(幅拡張時に左へ分離表示する正方形ジャケ)クリックで、
@@ -14079,10 +14137,19 @@ void CMediaPlayerDlg::OnMouseMove(UINT nFlags, CPoint point)
 			::SetCursor(::LoadCursor(NULL, IDC_HAND));
 	}
 	if (m_dragging) {
-		::SetCursor(::LoadCursor(NULL, IDC_HAND));
-		if (m_hDragImage) {
-			ImageList_DragMove(point.x, point.y);
+		if (!m_dragMoved) {
+			CPoint sp;
+			GetCursorPos(&sp);
+			const int slop = MpDragSlop();
+			if (abs(sp.x - m_dragStart.x) >= slop || abs(sp.y - m_dragStart.y) >= slop) {
+				m_dragMoved = 1;
+				StartPlaylistItemDragVisual();
+			}
 		}
+		if (m_dragMoved)
+			::SetCursor(::LoadCursor(NULL, IDC_HAND));
+		if (m_hDragImage)
+			ImageList_DragMove(point.x, point.y);
 	}
 	if (m_libDrag) {
 		CPoint sp = point; ClientToScreen(&sp);
@@ -14119,36 +14186,9 @@ void CMediaPlayerDlg::OnLButtonUp(UINT nFlags, CPoint point)
 		return;
 	}
 	if (m_dragging) {
-		m_dragging = 0;
-		ReleaseCapture();
-		if (m_hDragImage) {
-			ImageList_DragLeave(GetSafeHwnd());
-			ImageList_EndDrag();
-			ImageList_Destroy(m_hDragImage);
-			m_hDragImage = NULL;
-		}
-		// ドロップ先の行を mp リスト座標で判定
-		CPoint sp = point; ClientToScreen(&sp);
-		CPoint lp = sp; m_list.ScreenToClient(&lp);
-		UINT fl = 0;
-		int dst = m_list.HitTest(lp, &fl);
-		if (dst < 0) {
-			CRect rc; m_list.GetClientRect(&rc);
-			if (lp.y >= rc.bottom) dst = m_list.GetItemCount() - 1; // 末尾へ
-		}
-		if (pl && m_dragSrc >= 0 && dst >= 0 && dst != m_dragSrc) {
-			int srcPc = MpDispToPc(this, m_dragSrc);
-			int dstPc = MpDispToPc(this, dst);
-			if (srcPc >= 0 && dstPc >= 0 && srcPc < pl->playcnt && dstPc < pl->playcnt && srcPc != dstPc) {
-				MP_MovePlaylistItem(srcPc, dstPc);
-				RefreshList(TRUE);
-				if (dst < m_list.GetItemCount()) {
-					m_list.SetItemState(dst, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
-					m_list.EnsureVisible(dst, FALSE);
-				}
-			}
-		}
-		m_dragSrc = -1;
+		CPoint sp = point;
+		ClientToScreen(&sp);
+		EndPlaylistItemDrag(m_dragMoved != 0, sp);
 	}
 	CCustomBlurDialogExBase::OnLButtonUp(nFlags, point);
 }

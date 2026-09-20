@@ -1,10 +1,12 @@
-#pragma once
-// CMidiMonitorDlg : MIDI 32パート・モニタ（XG/GS 風）
-// SMF を再生位置に同期して CC/ノート/SysEx を表示。音色名は SASAMI_GS/XG/EX.DAT。
+﻿#pragma once
+// CMidiMonitorDlg : FM/MIDI モニタのホスト窓（XG/GS MIDI 描画はこのクラス）。
+// FM 表示は子 CFmMonitorDlg。同時再生は無いので中身は完全に切り替える。
 #include "afxdialogex.h"
 #include "CCustomControl.h"
 #include "GdiSoft3D.h"
 #include "gpu/GpuDx11.h"
+
+class CFmMonitorDlg;
 
 class CMidiMonitorDlg : public CCustomBlurDialogExBase
 {
@@ -45,6 +47,9 @@ public:
 	void ReloadCurrentMidi();
 	const wchar_t* LoadedMidiPath() const { return m_loadedPath; }
 	const wchar_t* LoadedSourcePath() const { return m_sourcePath; }
+	int IsFmView() const { return m_fmView; }
+	void SyncFmMidiView();
+	void ApplyPcAudioKeys(const BYTE levels108[108]); /* 無演奏時のPC音鍵盤 */
 
 protected:
 	virtual void DoDataExchange(CDataExchange* pDX);
@@ -316,6 +321,11 @@ private:
 	DWORD m_rowLive;
 	DWORD m_nameNeed;
 	int m_burstApply;
+	CFmMonitorDlg* m_fm;
+	int m_fmView;
+	BYTE m_pcAudioOn[NOTE_MAX];
+	void EnsureFmChild();
+	void LayoutFmChild();
 	bool m_dirtyHead;
 	bool m_fullDraw;
 	bool m_volDragging;

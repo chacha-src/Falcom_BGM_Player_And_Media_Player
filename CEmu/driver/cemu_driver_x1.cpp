@@ -354,10 +354,12 @@ void CDriverX1::Close()
 	triggered_ = 0;
 }
 
-/* 同一 zip の別曲 */
+/* 同一 zip の別曲。トグル行は曲を変えずフラグだけ載せる。 */
 int CDriverX1::OverlayTitle(unsigned titleCode)
 {
 	if (!hw_) return 0;
+	if (hw_->ApplyCatalogToggle(titleCode))
+		return 1;
 	titleCode_ = titleCode;
 	songCode_ = (uint8_t)(titleCode & 0xff);
 	hw_->TriggerPlay(titleCode_ ? titleCode_ : (unsigned)songCode_);

@@ -42,8 +42,9 @@ public:
 	void SIconTimer(int i);
 	int Add(CString name,int sub,int loop1,int loop2,CString art,CString alb,CString fol,int ret,int time,BOOL f=TRUE,BOOL ff=TRUE);
 	void Del();
-	void UndoLastDelete(); // 直近の編集を戻す(削除/貼り付け。Ctrl+Z)
+	void UndoLastDelete(); // 直近の編集を戻す(削除/貼り付け/行移動。Ctrl+Z)
 	void RedoLastEdit();   // Ctrl+Y / Ctrl+Shift+Z
+	void MoveTrack(int src, int dst, BOOL recordUndo = TRUE); // pc[] を src→dst へ回転移動
 	BOOL CopySelectionToClipboard();
 	void PasteFromClipboard();
 	void SelectAllTracks(); // Ctrl+A
@@ -73,6 +74,13 @@ public:
 	int m_lDragTopItem = 0;
 	int m_lDragTopItemt = 0;
 	HIMAGELIST  m_hDragImage = 0;
+	int m_plDragging = 0;     // 行ドラッグ中(キャプチャ前の pending 含む)
+	int m_plDragMoved = 0;    // しきい値を超えた実ドラッグか
+	int m_plDragItem = -1;    // LVN_BEGINDRAG の iItem
+	CPoint m_plDragStart;
+	BOOL HandlePlaylistDragMsg(MSG* pMsg);
+	void StartPlaylistDragVisual();
+	void CancelPlaylistDrag();
 	BOOL w_flg;
 	CString GetModulePath();
 	void loadplaylistname();
@@ -306,6 +314,8 @@ enum {
 	PL_CTX_CEMUMODE_LAST = PL_CTX_CEMUMODE_BASE + 23, // up to 24 modes
 	PL_CTX_WRD = 122, // sidecar .wrd がある曲: WRD画面を開く（再生はしない）
 	PL_CTX_WRD_WIN = 123, // ウィンドウメニュー: WRD画面トグル
+	PL_CTX_CEMUTOGGLE_BASE = 124, // CEmu zip カタログトグル (Food empty / TO BOSS…)
+	PL_CTX_CEMUTOGGLE_LAST = PL_CTX_CEMUTOGGLE_BASE + 7, // up to 8 toggles
 	PL_CTX_MOVE_BASE = 42500,
 	PL_CTX_COPY_BASE = 43500,
 	PL_CTX_MOVE_MAX = PL_CTX_MOVE_BASE + 999,

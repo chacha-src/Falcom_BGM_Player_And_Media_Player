@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003" DefaultTargets="Build" ToolsVersion="14.0">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="uni_2026_de|Win32">
@@ -25,6 +25,7 @@
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <Import Project="$(MSBuildThisFileDirectory)ogg.compiler.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'" Label="Configuration">
     <ConfigurationType>Application</ConfigurationType>
     <UseOfMfc>Static</UseOfMfc>
@@ -32,7 +33,7 @@
     <CLRSupport>false</CLRSupport>
     <WholeProgramOptimization>false</WholeProgramOptimization>
     <PlatformToolset>v145</PlatformToolset>
-    <SpectreMitigation>false</SpectreMitigation>
+    <SpectreMitigation>Spectre</SpectreMitigation>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='uni_2026_de|Win32'" Label="Configuration">
     <ConfigurationType>Application</ConfigurationType>
@@ -40,21 +41,22 @@
     <CharacterSet>Unicode</CharacterSet>
     <CLRSupport>false</CLRSupport>
     <WholeProgramOptimization>false</WholeProgramOptimization>
-    <PlatformToolset>v145</PlatformToolset>
+    <PlatformToolset>$(OggPlatformToolset)</PlatformToolset>
     <SpectreMitigation>false</SpectreMitigation>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'" Label="Configuration">
     <ConfigurationType>Application</ConfigurationType>
     <UseOfMfc>Static</UseOfMfc>
     <CharacterSet>Unicode</CharacterSet>
-    <PlatformToolset>v145</PlatformToolset>
+    <PlatformToolset>$(OggPlatformToolset)</PlatformToolset>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='uni_2026_de|x64'" Label="Configuration">
     <ConfigurationType>Application</ConfigurationType>
     <UseOfMfc>Static</UseOfMfc>
     <CharacterSet>Unicode</CharacterSet>
-    <PlatformToolset>v145</PlatformToolset>
+    <PlatformToolset>$(OggPlatformToolset)</PlatformToolset>
   </PropertyGroup>
+  <Import Project="$(MSBuildThisFileDirectory)ogg.compiler.clamp.props" />
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
   <ImportGroup Label="ExtensionSettings">
   </ImportGroup>
@@ -150,19 +152,20 @@
       <WarningLevel>Level2</WarningLevel>
       <SuppressStartupBanner>true</SuppressStartupBanner>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
-      <FloatingPointModel>Precise</FloatingPointModel>
+      <FloatingPointModel>Fast</FloatingPointModel>
       <WholeProgramOptimization>false</WholeProgramOptimization>
-      <EnableParallelCodeGeneration>true</EnableParallelCodeGeneration>
-      <StructMemberAlignment>Default</StructMemberAlignment>
+      <StructMemberAlignment>16Bytes</StructMemberAlignment>
       <UndefinePreprocessorDefinitions>
       </UndefinePreprocessorDefinitions>
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
       <IntelJCCErratum>false</IntelJCCErratum>
       <LanguageStandard>stdcpp17</LanguageStandard>
-      <LanguageStandard_C>Default</LanguageStandard_C>
+      <LanguageStandard_C>stdc17</LanguageStandard_C>
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
       <DisableSpecificWarnings>4828;%(DisableSpecificWarnings)</DisableSpecificWarnings>
       <AdditionalIncludeDirectories>$(ProjectDir)CEmu;$(ProjectDir)..\kpi_sources_20240712\kpi_decoder\kbmdx\source\portable_mdx\include;..\kpi_sources_20240712\kpi_decoder\kbmdx\source\mdc;$(ProjectDir)..\kpi_sources_20240712\kpi_decoder\kbmdx\source\portable_mdx\src\mxdrv;$(ProjectDir)..\kpi_sources_20240712\kpi_decoder\kbmdx\source\portable_mdx\src\x68sound;$(ProjectDir)kb_sasami\source;$(ProjectDir)kb_sasami\source\ymfm;$(ProjectDir)CEmu\s98;$(ProjectDir)CEmu\s98\device;$(ProjectDir)CEmu\s98\device\fmgen;$(ProjectDir)CEmu\z80;$(ProjectDir)CEmu\fmmon;$(ProjectDir)CEmu\vendor\np2\glue;$(ProjectDir)CEmu\vendor\np2\include;$(ProjectDir)CEmu\vendor\np2\cpu;$(ProjectDir)CEmu\vendor\musashi;$(ProjectDir)CEmu\vendor\mc6809;$(ProjectDir)CEmu\vendor\m6502;$(ProjectDir)CEmu\vendor\h6280;$(ProjectDir)CEmu\vendor\h8;$(ProjectDir)CEmu\vendor\hd63701;$(ProjectDir)CEmu\vendor\m6803;$(ProjectDir)CEmu\vendor\multipcm;$(ProjectDir)CEmu\vendor\v35;$(ProjectDir)CEmu\vendor\m37710;$(ProjectDir)CEmu\vendor\np2;$(ProjectDir)..\kpi_sources_20240712\kpi_decoder\kbs98\source\device;$(ProjectDir)..\kpi_sources_20240712\kpi_decoder\kbs98\source\device\mame;$(ProjectDir)..\kpi_sources_20240712\kpi_decoder\kbs98\source\device\emu2413;$(ProjectDir)zstd;$(ProjectDir)third_party\signalsmith-stretch\include;$(ProjectDir)third_party\signalsmith-linear\include;$(ProjectDir)third_party\aimp;$(ProjectDir)third_party\vst3sdk;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <EnableParallelCodeGeneration>true</EnableParallelCodeGeneration>
+      <OpenMPSupport>true</OpenMPSupport>
     </ClCompile>
     <ResourceCompile>
       <PreprocessorDefinitions>NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
@@ -179,7 +182,7 @@
       <TargetMachine>MachineX86</TargetMachine>
       <LinkTimeCodeGeneration>Default</LinkTimeCodeGeneration>
       <IgnoreSpecificDefaultLibraries>uafxcw.lib;Libcmt.lib</IgnoreSpecificDefaultLibraries>
-      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <GenerateDebugInformation>DebugFull</GenerateDebugInformation>
       <TurnOffAssemblyGeneration>false</TurnOffAssemblyGeneration>
       <HeapReserveSize>2097152</HeapReserveSize>
       <HeapCommitSize>
@@ -395,6 +398,7 @@
     <ClCompile Include="CdPlayerDlg.cpp" />
     <ClCompile Include="CPianoRoll.cpp" />
     <ClCompile Include="CMidiMonitorDlg.cpp" />
+    <ClCompile Include="PcHwMidiIn.cpp" />
     <ClCompile Include="CFmMonitorDlg.cpp" />
     <ClCompile Include="gpu\GpuDx11.cpp" />
     <ClCompile Include="CWrdViewDlg.cpp" />
@@ -465,6 +469,9 @@
     <ClCompile Include="CEmu\machine\cemu_sg1000.cpp" />
     <ClCompile Include="CEmu\machine\cemu_hard_sg1000.cpp" />
     <ClCompile Include="CEmu\driver\cemu_driver_sg1000.cpp" />
+    <ClCompile Include="CEmu\machine\cemu_pico.cpp" />
+    <ClCompile Include="CEmu\machine\cemu_hard_pico.cpp" />
+    <ClCompile Include="CEmu\driver\cemu_driver_pico.cpp" />
     <ClCompile Include="CEmu\machine\cemu_x1.cpp" />
     <ClCompile Include="CEmu\machine\cemu_msx.cpp" />
     <ClCompile Include="CEmu\machine\cemu_hard_x1.cpp" />
@@ -520,7 +527,6 @@
     <ClCompile Include="CEmu\vendor\np2\cpu\v30patch.c" />
     <ClCompile Include="CEmu\vendor\np2\glue\np2mem.c" />
     <ClCompile Include="CEmu\vendor\np2\glue\np2io.c" />
-
     <ClCompile Include="CEmu\fmmon\fmmon_shadow.cpp" />
     <ClCompile Include="CEmu\fmmon\cemu_fmmon_bind.cpp" />
     <ClCompile Include="CEmu\fmmon\fmmon_write.cpp" />
@@ -831,6 +837,7 @@
     <ClInclude Include="PianoKeyTable.h" />
     <ClInclude Include="CPianoRoll.h" />
     <ClInclude Include="CMidiMonitorDlg.h" />
+    <ClInclude Include="PcHwMidiIn.h" />
     <ClInclude Include="CFmMonitorDlg.h" />
     <ClInclude Include="gpu\GpuDx11.h" />
     <ClInclude Include="CEmu\cemu_align.h" />
@@ -891,6 +898,9 @@
     <ClInclude Include="CEmu\machine\cemu_sg1000.h" />
     <ClInclude Include="CEmu\machine\cemu_hard_sg1000.h" />
     <ClInclude Include="CEmu\driver\cemu_driver_sg1000.h" />
+    <ClInclude Include="CEmu\machine\cemu_pico.h" />
+    <ClInclude Include="CEmu\machine\cemu_hard_pico.h" />
+    <ClInclude Include="CEmu\driver\cemu_driver_pico.h" />
     <ClInclude Include="CEmu\machine\cemu_x1.h" />
     <ClInclude Include="CEmu\machine\cemu_msx.h" />
     <ClInclude Include="CEmu\machine\cemu_hard_x1.h" />
@@ -1313,6 +1323,11 @@
   <ItemGroup>
     <None Include="cpp.hint" />
     <None Include="oggDlg_DeferredHeavy.inc" />
+    <None Include="res\cso\gpu_cs_glyph.cso" />
+    <None Include="res\cso\gpu_cs_hex.cso" />
+    <None Include="res\cso\gpu_ps_rect.cso" />
+    <None Include="res\cso\gpu_vs_piano.cso" />
+    <None Include="res\cso\gpu_vs_rect.cso" />
     <None Include="res\cur00001.cur" />
     <None Include="res\cur00002.cur" />
     <None Include="res\cur00003.cur" />
@@ -1940,6 +1955,7 @@
     <Image Include="res\ui_score\tool_erase.ico" />
     <Image Include="res\ui_score\tool_pencil.ico" />
   </ItemGroup>
+  <Import Project="$(MSBuildThisFileDirectory)ogg.compiler.targets" />
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>

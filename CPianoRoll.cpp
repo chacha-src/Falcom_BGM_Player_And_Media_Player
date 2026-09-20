@@ -1,4 +1,4 @@
-﻿#include "stdafx.h"
+#include "stdafx.h"
 #ifndef _USE_MATH_DEFINES
 #define _USE_MATH_DEFINES
 #endif
@@ -12,6 +12,7 @@
 #include "DeviceRecordDlg.h"
 #include "oggDlg.h"
 #include "CMediaPlayerDlg.h"
+#include "PcHwMidiIn.h"
 
 class COggDlg;
 extern COggDlg* og;
@@ -414,8 +415,8 @@ void CPrHelpDlg::OnPaint()
 		L"· Partytura z PC …… pętla WASAPI do rolki (stop przy ciszy)",
 		L"· PC sesinden parti …… WASAPI loopback ruloya (sessizlikte durur)")); y += lh;
 	body(L, y, LL14(
-		L"・MIDI録り / MusicXML録り …… ONでバッファ蓄積、OFFで保存。再生中またはPC音連動",
-		L"· MIDI / MusicXML capture …… ON buffers, OFF saves. During play or with PC-audio",
+		L"・MIDI録り / MusicXML録り …… ONで保存先を指定して蓄積、OFFで書き出し。再生中またはPC音連動",
+		L"· MIDI / MusicXML capture …… ON picks a file then buffers, OFF writes. During play or PC-audio",
 		L"· MIDI / MusicXML …… ON=tampon, OFF=sauver. Lecture ou audio PC",
 		L"· MIDI / MusicXML …… ON=buffer, OFF=salva. In play o con audio PC",
 		L"· MIDI / MusicXML …… ON=búfer, OFF=guardar. En play o con audio PC",
@@ -1237,6 +1238,7 @@ BOOL CPianoRoll::OnInitDialog()
         if (!parent) parent = this;
         EnsureDeviceRecordLoopbackFeed(parent);
     }
+    PcHwMidiInRestoreFromSave();
     {
         float yaw = (float)savedata.pianoroll3dyaw / 10.0f;
         float pitch = (float)savedata.pianoroll3dpitch / 10.0f;
@@ -2709,6 +2711,66 @@ void CPianoRoll::ResetScoreCaptureLocked()
     memset(m_scoreCapPrevActive, 0, sizeof(m_scoreCapPrevActive));
 }
 
+void CPianoRoll::SeedScoreCaptureLocked()
+{
+    ResetScoreCaptureLocked();
+    for (int k = 0; k < KEY_COUNT; ++k) {
+        if (!m_activeKeys[k]) continue;
+        if (m_scoreCapEvN >= SCORE_CAP_EV_MAX) break;
+        int vel = (int)(m_noteStrength[k] * 100.0f);
+        if (vel < 1) vel = 1;
+        if (vel > 127) vel = 127;
+        ScoreCapEv& e = m_scoreCapEv[m_scoreCapEvN++];
+        e.deltaTicks = 0;
+        e.status = (BYTE)0x90;
+        e.note = (BYTE)k;
+        e.vel = (BYTE)vel;
+        m_scoreCapPrevActive[k] = true;
+    }
+    if (m_scoreCapFrameN < SCORE_CAP_FRAME_MAX) {
+        uint8_t* bits = m_scoreCapFrames[m_scoreCapFrameN];
+        memset(bits, 0, (KEY_COUNT + 7) / 8);
+        for (int k = 0; k < KEY_COUNT; ++k) {
+            if (m_activeKeys[k])
+                bits[k >> 3] |= (uint8_t)(1u << (k & 7));
+        }
+        m_scoreCapFrameN++;
+    }
+}
+
+void CPianoRoll::CopyActiveKeyLevels(BYTE levels108[108]) const
+{
+    if (!levels108) return;
+    memset(levels108, 0, 108);
+    float mx = 0.0f;
+    for (int i = 0; i < KEY_COUNT; ++i) {
+        if (m_activeKeys[i] && m_noteStrength[i] > mx)
+            mx = m_noteStrength[i];
+    }
+    for (int i = 0; i < KEY_COUNT; ++i) {
+        if (!m_activeKeys[i]) continue;
+        int v = 1;
+        if (mx > 1e-8f)
+            v = (int)(m_noteStrength[i] / mx * 100.0f + 0.5f);
+        if (v < 1) v = 1;
+        if (v > 100) v = 100;
+        levels108[i] = (BYTE)v;
+    }
+}
+
+bool CPianoRoll::PickScoreSavePath(const TCHAR* defExt, const TCHAR* defName, const TCHAR* filter, CString& outPath)
+{
+    CCC_ModalUiGuard modal;
+    CWnd* parent = CCC_GetActiveMainWindow();
+    if (!parent) parent = this;
+    CFileDialog dlg(FALSE, defExt, defName,
+        OFN_HIDEREADONLY | OFN_OVERWRITEPROMPT | OFN_EXPLORER | OFN_NOCHANGEDIR | OFN_NOTESTFILECREATE,
+        filter, parent);
+    if (dlg.DoModal() != IDOK) return false;
+    outPath = dlg.GetPathName();
+    return !outPath.IsEmpty();
+}
+
 void CPianoRoll::AppendScoreCaptureLocked()
 {
     if (!m_scoreCapMidi && !m_scoreCapXml)
@@ -2771,10 +2833,19 @@ void CPianoRoll::SaveCapturedMidi()
     }
 
     if (evN < 1) {
+        CCC_ModalUiGuard modal;
         MessageBox(LL14(L"録ったノートがありません。再生(またはPC音譜面化)しながらチェックを入れてください。", L"No notes captured. Check the item while playing (or PC-audio score).", L"Aucune note. Cochez pendant la lecture.", L"Nessuna nota. Spunta durante la riproduzione.", L"Sin notas. Marque durante la reproduccion.", L"녹음된 음이 없습니다. 재생 중 체크하세요.", L"没有录到音符。请在播放时勾选。", L"لا نغمات. فعّل أثناء التشغيل.", L"Нет нот. Включите во время воспроизведения.", L"Keine Noten. Wahrend Wiedergabe aktivieren.", L"Sem notas. Marque durante a reproducao.", L"Geen noten. Vink aan tijdens afspelen.", L"Brak nut. Zaznacz podczas odtwarzania.", L"Nota yok. Calarken isaretleyin."),
             LL14(L"MIDI録り", L"MIDI capture", L"Enregistrement MIDI", L"Registrazione MIDI", L"Captura MIDI", L"MIDI 녹음", L"MIDI录制", L"تسجيل MIDI", L"Запись MIDI", L"MIDI-Aufnahme", L"Captura MIDI", L"MIDI-opname", L"Zapis MIDI", L"MIDI kayit"),
             MB_OK | MB_ICONINFORMATION);
         return;
+    }
+
+    CString path = m_scoreCapMidiPath;
+    if (path.IsEmpty()) {
+        if (!PickScoreSavePath(_T("mid"), _T("pianoroll.mid"),
+            LL14(L"MIDI (*.mid)|*.mid|すべて (*.*)|*.*||", L"MIDI (*.mid)|*.mid|All (*.*)|*.*||", L"MIDI (*.mid)|*.mid|Tous (*.*)|*.*||", L"MIDI (*.mid)|*.mid|Tutti (*.*)|*.*||", L"MIDI (*.mid)|*.mid|Todos (*.*)|*.*||", L"MIDI (*.mid)|*.mid|모두 (*.*)|*.*||", L"MIDI (*.mid)|*.mid|全部 (*.*)|*.*||", L"MIDI (*.mid)|*.mid|الكل (*.*)|*.*||", L"MIDI (*.mid)|*.mid|Все (*.*)|*.*||", L"MIDI (*.mid)|*.mid|Alle (*.*)|*.*||", L"MIDI (*.mid)|*.mid|Todos (*.*)|*.*||", L"MIDI (*.mid)|*.mid|Alles (*.*)|*.*||", L"MIDI (*.mid)|*.mid|Wszystkie (*.*)|*.*||", L"MIDI (*.mid)|*.mid|Tumu (*.*)|*.*||"),
+            path))
+            return;
     }
 
     BYTE track[65536];
@@ -2791,28 +2862,39 @@ void CPianoRoll::SaveCapturedMidi()
         for (int i = n - 1; i >= 0 && trackLen < (int)sizeof(track) - 1; --i)
             track[trackLen++] = stack[i];
     };
-    for (int i = 0; i < evN; ++i) {
-        putVlq(ev[i].deltaTicks);
-        if (trackLen + 3 < (int)sizeof(track)) {
-            track[trackLen++] = ev[i].status;
-            track[trackLen++] = ev[i].note;
-            track[trackLen++] = ev[i].vel;
-        }
+    auto putBytes = [&](const BYTE* p, int n) {
+        for (int i = 0; i < n && trackLen < (int)sizeof(track); ++i)
+            track[trackLen++] = p[i];
+    };
+    putVlq(0);
+    {
+        const BYTE tempo[6] = { 0xFF, 0x51, 0x03, 0x07, 0xA1, 0x20 };
+        putBytes(tempo, 6);
     }
     putVlq(0);
-    if (trackLen + 3 < (int)sizeof(track)) {
-        track[trackLen++] = 0xFF;
-        track[trackLen++] = 0x2F;
-        track[trackLen++] = 0x00;
+    {
+        const BYTE pc[2] = { 0xC0, 0x00 };
+        putBytes(pc, 2);
+    }
+    for (int i = 0; i < evN; ++i) {
+        putVlq(ev[i].deltaTicks);
+        BYTE evb[3] = { ev[i].status, ev[i].note, ev[i].vel };
+        putBytes(evb, 3);
+    }
+    putVlq(0);
+    {
+        const BYTE eot[3] = { 0xFF, 0x2F, 0x00 };
+        putBytes(eot, 3);
     }
 
-    CFileDialog dlg(FALSE, _T("mid"), _T("pianoroll.mid"),
-        OFN_HIDEREADONLY | OFN_OVERWRITEPROMPT,
-        LL14(L"MIDI (*.mid)|*.mid|すべて (*.*)|*.*||", L"MIDI (*.mid)|*.mid|All (*.*)|*.*||", L"MIDI (*.mid)|*.mid|Tous (*.*)|*.*||", L"MIDI (*.mid)|*.mid|Tutti (*.*)|*.*||", L"MIDI (*.mid)|*.mid|Todos (*.*)|*.*||", L"MIDI (*.mid)|*.mid|모두 (*.*)|*.*||", L"MIDI (*.mid)|*.mid|全部 (*.*)|*.*||", L"MIDI (*.mid)|*.mid|الكل (*.*)|*.*||", L"MIDI (*.mid)|*.mid|Все (*.*)|*.*||", L"MIDI (*.mid)|*.mid|Alle (*.*)|*.*||", L"MIDI (*.mid)|*.mid|Todos (*.*)|*.*||", L"MIDI (*.mid)|*.mid|Alles (*.*)|*.*||", L"MIDI (*.mid)|*.mid|Wszystkie (*.*)|*.*||", L"MIDI (*.mid)|*.mid|Tumu (*.*)|*.*||"),
-        this);
-    if (dlg.DoModal() != IDOK) return;
     CFile f;
-    if (!f.Open(dlg.GetPathName(), CFile::modeCreate | CFile::modeWrite | CFile::typeBinary)) return;
+    if (!f.Open(path, CFile::modeCreate | CFile::modeWrite | CFile::typeBinary)) {
+        CCC_ModalUiGuard modal;
+        MessageBox(LL14(L"ファイルを書けませんでした。", L"Could not write file.", L"Impossible d'ecrire le fichier.", L"Impossibile scrivere il file.", L"No se pudo escribir el archivo.", L"파일을 쓸 수 없습니다.", L"无法写入文件。", L"تعذر كتابة الملف.", L"Не удалось записать файл.", L"Datei konnte nicht geschrieben werden.", L"Nao foi possivel gravar o arquivo.", L"Kon bestand niet schrijven.", L"Nie udalo sie zapisac pliku.", L"Dosya yazilamadi."),
+            LL14(L"MIDI録り", L"MIDI capture", L"Enregistrement MIDI", L"Registrazione MIDI", L"Captura MIDI", L"MIDI 녹음", L"MIDI录制", L"تسجيل MIDI", L"Запись MIDI", L"MIDI-Aufnahme", L"Captura MIDI", L"MIDI-opname", L"Zapis MIDI", L"MIDI kayit"),
+            MB_OK | MB_ICONWARNING);
+        return;
+    }
     const int tpq = SCORE_TPQ;
     BYTE hdr[14] = {
         'M','T','h','d', 0,0,0,6, 0,0, 0,1, (BYTE)(tpq >> 8), (BYTE)(tpq & 0xff)
@@ -2840,17 +2922,20 @@ void CPianoRoll::SaveCapturedMusicXml()
     LeaveCriticalSection(&m_cs);
 
     if (frameN < 2) {
+        CCC_ModalUiGuard modal;
         MessageBox(LL14(L"録った譜面が足りません。再生(またはPC音譜面化)しながらチェックを入れてください。", L"Not enough score captured. Check while playing (or PC-audio score).", L"Partition insuffisante. Cochez pendant la lecture.", L"Partitura insufficiente. Spunta durante la riproduzione.", L"Partitura insuficiente. Marque durante la reproduccion.", L"녹음된 악보가 부족합니다. 재생 중 체크하세요.", L"录到的谱面不足。请在播放时勾选。", L"النوتة غير كافية. فعّل أثناء التشغيل.", L"Недостаточно партитуры. Включите во время воспроизведения.", L"Zu wenig Partitur. Wahrend Wiedergabe aktivieren.", L"Partitura insuficiente. Marque durante a reproducao.", L"Te weinig partituur. Vink aan tijdens afspelen.", L"Za malo partytury. Zaznacz podczas odtwarzania.", L"Parti yetersiz. Calarken isaretleyin."),
             LL14(L"MusicXML録り", L"MusicXML capture", L"Enregistrement MusicXML", L"Registrazione MusicXML", L"Captura MusicXML", L"MusicXML 녹음", L"MusicXML录制", L"تسجيل MusicXML", L"Запись MusicXML", L"MusicXML-Aufnahme", L"Captura MusicXML", L"MusicXML-opname", L"Zapis MusicXML", L"MusicXML kayit"),
             MB_OK | MB_ICONINFORMATION);
         return;
     }
 
-    CFileDialog dlg(FALSE, _T("musicxml"), _T("pianoroll.musicxml"),
-        OFN_HIDEREADONLY | OFN_OVERWRITEPROMPT,
-        LL14(L"MusicXML (*.musicxml)|*.musicxml|すべて (*.*)|*.*||", L"MusicXML (*.musicxml)|*.musicxml|All (*.*)|*.*||", L"MusicXML (*.musicxml)|*.musicxml|Tous (*.*)|*.*||", L"MusicXML (*.musicxml)|*.musicxml|Tutti (*.*)|*.*||", L"MusicXML (*.musicxml)|*.musicxml|Todos (*.*)|*.*||", L"MusicXML (*.musicxml)|*.musicxml|모두 (*.*)|*.*||", L"MusicXML (*.musicxml)|*.musicxml|全部 (*.*)|*.*||", L"MusicXML (*.musicxml)|*.musicxml|الكل (*.*)|*.*||", L"MusicXML (*.musicxml)|*.musicxml|Все (*.*)|*.*||", L"MusicXML (*.musicxml)|*.musicxml|Alle (*.*)|*.*||", L"MusicXML (*.musicxml)|*.musicxml|Todos (*.*)|*.*||", L"MusicXML (*.musicxml)|*.musicxml|Alles (*.*)|*.*||", L"MusicXML (*.musicxml)|*.musicxml|Wszystkie (*.*)|*.*||", L"MusicXML (*.musicxml)|*.musicxml|Tumu (*.*)|*.*||"),
-        this);
-    if (dlg.DoModal() != IDOK) return;
+    CString path = m_scoreCapXmlPath;
+    if (path.IsEmpty()) {
+        if (!PickScoreSavePath(_T("musicxml"), _T("pianoroll.musicxml"),
+            LL14(L"MusicXML (*.musicxml)|*.musicxml|すべて (*.*)|*.*||", L"MusicXML (*.musicxml)|*.musicxml|All (*.*)|*.*||", L"MusicXML (*.musicxml)|*.musicxml|Tous (*.*)|*.*||", L"MusicXML (*.musicxml)|*.musicxml|Tutti (*.*)|*.*||", L"MusicXML (*.musicxml)|*.musicxml|Todos (*.*)|*.*||", L"MusicXML (*.musicxml)|*.musicxml|모두 (*.*)|*.*||", L"MusicXML (*.musicxml)|*.musicxml|全部 (*.*)|*.*||", L"MusicXML (*.musicxml)|*.musicxml|الكل (*.*)|*.*||", L"MusicXML (*.musicxml)|*.musicxml|Все (*.*)|*.*||", L"MusicXML (*.musicxml)|*.musicxml|Alle (*.*)|*.*||", L"MusicXML (*.musicxml)|*.musicxml|Todos (*.*)|*.*||", L"MusicXML (*.musicxml)|*.musicxml|Alles (*.*)|*.*||", L"MusicXML (*.musicxml)|*.musicxml|Wszystkie (*.*)|*.*||", L"MusicXML (*.musicxml)|*.musicxml|Tumu (*.*)|*.*||"),
+            path))
+            return;
+    }
 
     static const char* kStep[12] = { "C","C","D","D","E","F","F","G","G","A","A","B" };
     static const int kAlter[12] = { 0,1,0,1,0,0,1,0,1,0,1,0 };
@@ -2907,7 +2992,8 @@ void CPianoRoll::SaveCapturedMusicXml()
     append("</part></score-partwise>\n");
 
     CFile f;
-    if (!f.Open(dlg.GetPathName(), CFile::modeCreate | CFile::modeWrite | CFile::typeBinary)) {
+    if (!f.Open(path, CFile::modeCreate | CFile::modeWrite | CFile::typeBinary)) {
+        CCC_ModalUiGuard modal;
         MessageBox(LL14(L"ファイルを書けませんでした。", L"Could not write file.", L"Impossible d'ecrire le fichier.", L"Impossibile scrivere il file.", L"No se pudo escribir el archivo.", L"파일을 쓸 수 없습니다.", L"无法写入文件。", L"تعذر كتابة الملف.", L"Не удалось записать файл.", L"Datei konnte nicht geschrieben werden.", L"Nao foi possivel gravar o arquivo.", L"Kon bestand niet schrijven.", L"Nie udalo sie zapisac pliku.", L"Dosya yazilamadi."),
             LL14(L"MusicXML録り", L"MusicXML capture", L"Enregistrement MusicXML", L"Registrazione MusicXML", L"Captura MusicXML", L"MusicXML 녹음", L"MusicXML录制", L"تسجيل MusicXML", L"Запись MusicXML", L"MusicXML-Aufnahme", L"Captura MusicXML", L"MusicXML-opname", L"Zapis MusicXML", L"MusicXML kayit"),
             MB_OK | MB_ICONWARNING);
@@ -2935,6 +3021,7 @@ void CPianoRoll::OnToggleLoopbackScore()
 {
     // 譜面録り中は PC 音を切れない（連動維持）
     if (savedata.mpLoopbackScore && (m_scoreCapMidi || m_scoreCapXml)) {
+        CCC_ModalUiGuard modal;
         MessageBox(LL14(L"MIDI/MusicXML録り中はPC音譜面化をオフにできません。先に録りを終えてください。", L"Cannot turn off PC-audio score while MIDI/MusicXML capture is on. Finish capture first.", L"Impossible de desactiver l'audio PC pendant l'enregistrement. Terminez d'abord.", L"Impossibile disattivare audio PC durante la registrazione. Termina prima.", L"No se puede desactivar audio PC durante la captura. Termine primero.", L"MIDI/MusicXML 녹음 중에는 PC 소리 악보화를 끌 수 없습니다. 먼저 녹음을 끝내세요.", L"MIDI/MusicXML录制中无法关闭PC声音成谱。请先结束录制。", L"لا يمكن إيقاف صوت الجهاز أثناء التسجيل. أنهِ التسجيل أولاً.", L"Нельзя выключить звук ПК во время записи. Сначала завершите запись.", L"PC-Audio-Partitur kann wahrend Aufnahme nicht aus. Zuerst Aufnahme beenden.", L"Nao e possivel desligar audio do PC durante a captura. Finalize antes.", L"Pc-audio kan niet uit tijdens opname. Beëindig eerst de opname.", L"Nie mozna wylaczyc dzwieku PC podczas zapisu. Najpierw zakoncz zapis.", L"Kayit sirasinda PC sesi kapatilamaz. Once kaydi bitirin."),
             LL14(L"PC音を譜面化", L"Score from PC audio", L"Partition depuis le PC", L"Partitura da audio PC", L"Partitura desde audio PC", L"PC 소리로 악보화", L"从PC声音成谱", L"تدوين من صوت الجهاز", L"Ноты с ПК-звука", L"Partitur aus PC-Audio", L"Partitura do audio do PC", L"Partituur van pc-audio", L"Partytura z dzwieku PC", L"PC sesinden parti"),
             MB_OK | MB_ICONINFORMATION);
@@ -2967,9 +3054,15 @@ void CPianoRoll::OnToggleCaptureMidi()
 {
     const bool wasAny = m_scoreCapMidi || m_scoreCapXml;
     if (!m_scoreCapMidi) {
+        CString path;
+        if (!PickScoreSavePath(_T("mid"), _T("pianoroll.mid"),
+            LL14(L"MIDI (*.mid)|*.mid|すべて (*.*)|*.*||", L"MIDI (*.mid)|*.mid|All (*.*)|*.*||", L"MIDI (*.mid)|*.mid|Tous (*.*)|*.*||", L"MIDI (*.mid)|*.mid|Tutti (*.*)|*.*||", L"MIDI (*.mid)|*.mid|Todos (*.*)|*.*||", L"MIDI (*.mid)|*.mid|모두 (*.*)|*.*||", L"MIDI (*.mid)|*.mid|全部 (*.*)|*.*||", L"MIDI (*.mid)|*.mid|الكل (*.*)|*.*||", L"MIDI (*.mid)|*.mid|Все (*.*)|*.*||", L"MIDI (*.mid)|*.mid|Alle (*.*)|*.*||", L"MIDI (*.mid)|*.mid|Todos (*.*)|*.*||", L"MIDI (*.mid)|*.mid|Alles (*.*)|*.*||", L"MIDI (*.mid)|*.mid|Wszystkie (*.*)|*.*||", L"MIDI (*.mid)|*.mid|Tumu (*.*)|*.*||"),
+            path))
+            return;
+        m_scoreCapMidiPath = path;
         EnterCriticalSection(&m_cs);
         if (!wasAny)
-            ResetScoreCaptureLocked();
+            SeedScoreCaptureLocked();
         m_scoreCapMidi = true;
         LeaveCriticalSection(&m_cs);
         HoldPcAudioForScoreCapture();
@@ -2980,6 +3073,7 @@ void CPianoRoll::OnToggleCaptureMidi()
     m_scoreCapMidi = false;
     LeaveCriticalSection(&m_cs);
     SaveCapturedMidi();
+    m_scoreCapMidiPath.Empty();
     EnterCriticalSection(&m_cs);
     if (!m_scoreCapMidi && !m_scoreCapXml)
         ResetScoreCaptureLocked();
@@ -2992,9 +3086,15 @@ void CPianoRoll::OnToggleCaptureMusicXml()
 {
     const bool wasAny = m_scoreCapMidi || m_scoreCapXml;
     if (!m_scoreCapXml) {
+        CString path;
+        if (!PickScoreSavePath(_T("musicxml"), _T("pianoroll.musicxml"),
+            LL14(L"MusicXML (*.musicxml)|*.musicxml|すべて (*.*)|*.*||", L"MusicXML (*.musicxml)|*.musicxml|All (*.*)|*.*||", L"MusicXML (*.musicxml)|*.musicxml|Tous (*.*)|*.*||", L"MusicXML (*.musicxml)|*.musicxml|Tutti (*.*)|*.*||", L"MusicXML (*.musicxml)|*.musicxml|Todos (*.*)|*.*||", L"MusicXML (*.musicxml)|*.musicxml|모두 (*.*)|*.*||", L"MusicXML (*.musicxml)|*.musicxml|全部 (*.*)|*.*||", L"MusicXML (*.musicxml)|*.musicxml|الكل (*.*)|*.*||", L"MusicXML (*.musicxml)|*.musicxml|Все (*.*)|*.*||", L"MusicXML (*.musicxml)|*.musicxml|Alle (*.*)|*.*||", L"MusicXML (*.musicxml)|*.musicxml|Todos (*.*)|*.*||", L"MusicXML (*.musicxml)|*.musicxml|Alles (*.*)|*.*||", L"MusicXML (*.musicxml)|*.musicxml|Wszystkie (*.*)|*.*||", L"MusicXML (*.musicxml)|*.musicxml|Tumu (*.*)|*.*||"),
+            path))
+            return;
+        m_scoreCapXmlPath = path;
         EnterCriticalSection(&m_cs);
         if (!wasAny)
-            ResetScoreCaptureLocked();
+            SeedScoreCaptureLocked();
         m_scoreCapXml = true;
         LeaveCriticalSection(&m_cs);
         HoldPcAudioForScoreCapture();
@@ -3005,6 +3105,7 @@ void CPianoRoll::OnToggleCaptureMusicXml()
     m_scoreCapXml = false;
     LeaveCriticalSection(&m_cs);
     SaveCapturedMusicXml();
+    m_scoreCapXmlPath.Empty();
     EnterCriticalSection(&m_cs);
     if (!m_scoreCapMidi && !m_scoreCapXml)
         ResetScoreCaptureLocked();
@@ -3016,7 +3117,6 @@ void CPianoRoll::OnToggleCaptureMusicXml()
 
 void CPianoRoll::OnPlayerFeedStopping(bool fullReset)
 {
-	// MIDI/MusicXML 録り中のみ停止後も PC 音フィードを維持（録り落とし防止）
 	if (m_scoreCapMidi || m_scoreCapXml) {
 		if (!savedata.mpLoopbackScore) {
 			savedata.mpLoopbackScore = 1;
@@ -3029,7 +3129,16 @@ void CPianoRoll::OnPlayerFeedStopping(bool fullReset)
 		ResumePlaybackFeed();
 		return;
 	}
-	// 演奏停止で沈黙（PC音譜面化 ON でも停止中は拾わない）
+	if (savedata.mpLoopbackScore) {
+		if (fullReset)
+			ResetPlaybackState();
+		ResumePlaybackFeed();
+		extern void EnsureDeviceRecordLoopbackFeed(CWnd* parent);
+		CWnd* parent = CCC_GetActiveMainWindow();
+		if (!parent) parent = this;
+		EnsureDeviceRecordLoopbackFeed(parent);
+		return;
+	}
 	if (fullReset)
 		ResetPlaybackState();
 	else
@@ -3068,8 +3177,10 @@ void CPianoRoll::ReleasePcAudioForScoreCaptureIfHeld()
         StopDeviceRecordLoopbackFeed();
     }
     extern int playf;
-    if (!playf)
+    if (!playf && !savedata.mpLoopbackScore)
         PauseAnalysis();
+    else if (savedata.mpLoopbackScore)
+        ResumePlaybackFeed();
 }
 
 
@@ -3179,7 +3290,7 @@ void CPianoRoll::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
     menu.AddSeparator();
     CCustomPopupMenu* subScore = menu.AddSubMenu(
         LL14(L"譜面/キャプチャ", L"Score/Capture", L"Partition/Capture", L"Partitura/Cattura", L"Partitura/Captura", L"악보/캡처", L"乐谱/捕获", L"تدوين/التقاط", L"Ноты/захват", L"Partitur/Aufnahme", L"Partitura/Captura", L"Partituur/Opname", L"Partytura/Przechwytywanie", L"Parti/Yakalama"),
-        LL14(L"コードパネル、PC音譜面化、MIDI／MusicXML録り。", L"Chord panel, PC-audio score, MIDI / MusicXML capture.", L"Panneau accords, partition PC, capture MIDI / MusicXML.", L"Pannello accordi, partitura PC, cattura MIDI / MusicXML.", L"Panel acordes, partitura PC, captura MIDI / MusicXML.", L"코드 패널, PC 소리 악보화, MIDI/MusicXML 녹음.", L"和弦面板、PC 成谱、MIDI/MusicXML 录制。", L"لوحة التآلفات وتدوين صوت الجهاز وتسجيل MIDI/MusicXML.", L"Панель аккордов, ноты с ПК, захват MIDI / MusicXML.", L"Akkordpanel, PC-Partitur, MIDI-/MusicXML-Aufnahme.", L"Painel de acordes, partitura PC, captura MIDI / MusicXML.", L"Akkoordenpaneel, pc-partituur, MIDI-/MusicXML-opname.", L"Panel akordow, partytura PC, zapis MIDI / MusicXML.", L"Akor paneli, PC partisi, MIDI/MusicXML kayit."));
+        LL14(L"コードパネル、PC音譜面化、MIDI／MusicXML録り、MIDI In 1/2。", L"Chord panel, PC-audio score, MIDI / MusicXML capture, MIDI In 1/2.", L"Panneau accords, partition PC, capture MIDI / MusicXML, MIDI In 1/2.", L"Pannello accordi, partitura PC, cattura MIDI / MusicXML, MIDI In 1/2.", L"Panel acordes, partitura PC, captura MIDI / MusicXML, MIDI In 1/2.", L"코드 패널, PC 소리 악보화, MIDI/MusicXML 녹음, MIDI In 1/2.", L"和弦面板、PC 成谱、MIDI/MusicXML 录制、MIDI In 1/2。", L"لوحة التآلفات وتدوين صوت الجهاز وتسجيل MIDI/MusicXML وMIDI In 1/2.", L"Панель аккордов, ноты с ПК, захват MIDI / MusicXML, MIDI In 1/2.", L"Akkordpanel, PC-Partitur, MIDI-/MusicXML-Aufnahme, MIDI In 1/2.", L"Painel de acordes, partitura PC, captura MIDI / MusicXML, MIDI In 1/2.", L"Akkoordenpaneel, pc-partituur, MIDI-/MusicXML-opname, MIDI In 1/2.", L"Panel akordow, partytura PC, zapis MIDI / MusicXML, MIDI In 1/2.", L"Akor paneli, PC partisi, MIDI/MusicXML kayit, MIDI In 1/2."));
     if (subScore) {
         subScore->AddCheck(IDM_ROLL_CHORD_PANEL,
             LL14(L"コード進行パネル(実験)", L"Chord panel (experimental)", L"Panneau accords (exp.)", L"Pannello accordi (sper.)", L"Panel acordes (exp.)", L"코드 진행 패널(실험)", L"和弦进行面板(实验)", L"لوحة التآلفات (تجريبي)", L"Панель аккордов (эксп.)", L"Akkordpanel (exp.)", L"Painel de acordes (exp.)", L"Akkoordenpaneel (exp.)", L"Panel akordow (eksperymentalny)", L"Akor paneli (deneysel)"),
@@ -3188,15 +3299,17 @@ void CPianoRoll::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
         subScore->AddCheck(IDM_ROLL_LOOPBACK_SCORE,
             LL14(L"PC音を譜面化", L"Score from PC audio", L"Partition depuis le PC", L"Partitura da audio PC", L"Partitura desde audio PC", L"PC 소리로 악보화", L"从PC声音成谱", L"تدوين من صوت الجهاز", L"Ноты с ПК-звука", L"Partitur aus PC-Audio", L"Partitura do audio do PC", L"Partituur van pc-audio", L"Partytura z dzwieku PC", L"PC sesinden parti"),
             savedata.mpLoopbackScore != 0,
-            LL14(L"PCの再生音（ループバック）から譜面を生成します。", L"Build a score from PC loopback audio.", L"Creer une partition depuis l'audio PC (loopback).", L"Crea una partitura dall'audio PC (loopback).", L"Crear partitura desde audio PC (loopback).", L"PC 재생음(루프백)에서 악보를 만듭니다.", L"从 PC 环回音频生成乐谱。", L"إنشاء تدوين من صوت الجهاز (loopback).", L"Создавать ноты из звука ПК (loopback).", L"Partitur aus PC-Loopback-Audio erzeugen.", L"Gerar partitura do audio loopback do PC.", L"Maak partituur van pc-loopback-audio.", L"Tworz partyture z dzwieku PC (loopback).", L"PC loopback sesinden parti olustur."));
+            LL14(L"PCの再生音（ループバック）をピアノロールへ。無演奏時はMIDI/FMモニタの鍵盤にも出します。", L"PC loopback audio to the piano roll. When idle, also light MIDI/FM monitor keys.", L"Creer une partition depuis l'audio PC (loopback).", L"Crea una partitura dall'audio PC (loopback).", L"Crear partitura desde audio PC (loopback).", L"PC 재생음(루프백)에서 악보를 만듭니다.", L"从 PC 环回音频生成乐谱。", L"إنشاء تدوين من صوت الجهاز (loopback).", L"Создавать ноты из звука ПК (loopback).", L"Partitur aus PC-Loopback-Audio erzeugen.", L"Gerar partitura do audio loopback do PC.", L"Maak partituur van pc-loopback-audio.", L"Tworz partyture z dzwieku PC (loopback).", L"PC loopback sesinden parti olustur."));
         subScore->AddCheck(IDM_ROLL_CAPTURE_MIDI,
             LL14(L"MIDI録り (PC音連動)", L"MIDI capture (PC audio)", L"Enregistrement MIDI (audio PC)", L"Registrazione MIDI (audio PC)", L"Captura MIDI (audio PC)", L"MIDI 녹음 (PC 소리)", L"MIDI录制 (PC声音)", L"تسجيل MIDI (صوت الجهاز)", L"Запись MIDI (звук ПК)", L"MIDI-Aufnahme (PC-Audio)", L"Captura MIDI (audio PC)", L"MIDI-opname (pc-audio)", L"Zapis MIDI (dzwiek PC)", L"MIDI kayit (PC sesi)"),
             m_scoreCapMidi,
-            LL14(L"PC音連動で検出ノートを MIDI として記録します。", L"Record detected notes as MIDI linked to PC audio.", L"Enregistrer les notes detectees en MIDI (audio PC).", L"Registra le note rilevate come MIDI (audio PC).", L"Grabar notas detectadas como MIDI (audio PC).", L"PC 소리 연동으로 감지 노트를 MIDI로 기록합니다.", L"将检测到的音符记录为 MIDI（联动 PC 声音）。", L"تسجيل النغمات المكتشفة كـ MIDI مع صوت الجهاز.", L"Записывать найденные ноты в MIDI вместе со звуком ПК.", L"Erkannte Noten als MIDI mit PC-Audio aufzeichnen.", L"Gravar notas detectadas como MIDI com audio PC.", L"Gedetecteerde noten als MIDI opnemen met pc-audio.", L"Zapisuj wykryte nuty jako MIDI z dzwiekiem PC.", L"Algilanan notalari PC sesiyle MIDI olarak kaydet."));
+            LL14(L"先に保存先を指定し、検出ノートを MIDI として記録します（再生中またはPC音）。", L"Pick a file first, then record detected notes as MIDI (playback or PC audio).", L"Enregistrer les notes detectees en MIDI (audio PC).", L"Registra le note rilevate come MIDI (audio PC).", L"Grabar notas detectadas como MIDI (audio PC).", L"PC 소리 연동으로 감지 노트를 MIDI로 기록합니다.", L"将检测到的音符记录为 MIDI（联动 PC 声音）。", L"تسجيل النغمات المكتشفة كـ MIDI مع صوت الجهاز.", L"Записывать найденные ноты в MIDI вместе со звуком ПК.", L"Erkannte Noten als MIDI mit PC-Audio aufzeichnen.", L"Gravar notas detectadas como MIDI com audio PC.", L"Gedetecteerde noten als MIDI opnemen met pc-audio.", L"Zapisuj wykryte nuty jako MIDI z dzwiekiem PC.", L"Algilanan notalari PC sesiyle MIDI olarak kaydet."));
         subScore->AddCheck(IDM_ROLL_CAPTURE_MUSICXML,
             LL14(L"MusicXML録り (PC音連動)", L"MusicXML capture (PC audio)", L"Enregistrement MusicXML (audio PC)", L"Registrazione MusicXML (audio PC)", L"Captura MusicXML (audio PC)", L"MusicXML 녹음 (PC 소리)", L"MusicXML录制 (PC声音)", L"تسجيل MusicXML (صوت الجهاز)", L"Запись MusicXML (звук ПК)", L"MusicXML-Aufnahme (PC-Audio)", L"Captura MusicXML (audio PC)", L"MusicXML-opname (pc-audio)", L"Zapis MusicXML (dzwiek PC)", L"MusicXML kayit (PC sesi)"),
             m_scoreCapXml,
-            LL14(L"PC音連動で検出ノートを MusicXML として記録します。", L"Record detected notes as MusicXML linked to PC audio.", L"Enregistrer les notes detectees en MusicXML (audio PC).", L"Registra le note rilevate come MusicXML (audio PC).", L"Grabar notas detectadas como MusicXML (audio PC).", L"PC 소리 연동으로 감지 노트를 MusicXML로 기록합니다.", L"将检测到的音符记录为 MusicXML（联动 PC 声音）。", L"تسجيل النغمات المكتشفة كـ MusicXML مع صوت الجهاز.", L"Записывать найденные ноты в MusicXML вместе со звуком ПК.", L"Erkannte Noten als MusicXML mit PC-Audio aufzeichnen.", L"Gravar notas detectadas como MusicXML com audio PC.", L"Gedetecteerde noten als MusicXML opnemen met pc-audio.", L"Zapisuj wykryte nuty jako MusicXML z dzwiekiem PC.", L"Algilanan notalari PC sesiyle MusicXML olarak kaydet."));
+            LL14(L"先に保存先を指定し、検出ノートを MusicXML として記録します（再生中またはPC音）。", L"Pick a file first, then record detected notes as MusicXML (playback or PC audio).", L"Enregistrer les notes detectees en MusicXML (audio PC).", L"Registra le note rilevate come MusicXML (audio PC).", L"Grabar notas detectadas como MusicXML (audio PC).", L"PC 소리 연동으로 감지 노트를 MusicXML로 기록합니다.", L"将检测到的音符记录为 MusicXML（联动 PC 声音）。", L"تسجيل النغمات المكتشفة كـ MusicXML مع صوت الجهاز.", L"Записывать найденные ноты в MusicXML вместе со звуком ПК.", L"Erkannte Noten als MusicXML mit PC-Audio aufzeichnen.", L"Gravar notas detectadas como MusicXML com audio PC.", L"Gedetecteerde noten als MusicXML opnemen met pc-audio.", L"Zapisuj wykryte nuty jako MusicXML z dzwiekiem PC.", L"Algilanan notalari PC sesiyle MusicXML olarak kaydet."));
+        subScore->AddSeparator();
+        PcHwMidiInAppendToMenu(subScore);
     }
     menu.AddSeparator();
 
@@ -3284,6 +3397,8 @@ void CPianoRoll::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
         point = CPoint(rc.left + 8, rc.top + 8);
     }
     const UINT cmd = menu.Track(point, this);
+    if (PcHwMidiInHandleCmd(cmd, this))
+        return;
     if (cmd == ID_MP_OPEN_EQ || cmd == ID_MP_OPEN_ANALYZER || cmd == ID_MP_OPEN_MIDIMON) {
         extern CMediaPlayerDlg* mp;
         if (mp && ::IsWindow(mp->GetSafeHwnd()))

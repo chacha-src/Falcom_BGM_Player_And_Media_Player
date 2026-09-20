@@ -62,7 +62,7 @@ enum CEmuAcBoard {
 	CEMU_AC_BOARD_TERRACRE = 42,        /* Nichibutsu terracre YM3526 または armedf/terraf YM3812 */
 	CEMU_AC_BOARD_ROBOKID = 43,         /* UPL robokid: Z80+YM2203×2 I/O 00/80、ラッチ@E000 */
 	CEMU_AC_BOARD_BATTLANTIS = 44,      /* Konami battlantis: Z80+YM3812×2 @A000/C000、ラッチ@E000 */
-	CEMU_AC_BOARD_ALPHA68K2 = 45,       /* Alpha 68K-II 基板: Z80＋YM2203＋YM2413＋DAC（skyadvnt/gangwars） */
+	CEMU_AC_BOARD_ALPHA68K2 = 45,       /* Alpha 68K-II: vsIoKind 0=YM2203+OPLL+DAC、1=mmpanic OPLL+AY */
 	CEMU_AC_BOARD_ATARI_SYS1 = 46,      /* Atari System1 基板: M6502＋YM2151（＋POKEY stub）JSA */
 	/* Seta/Allumer と Cave に音源 CPU は無い。メイン 68000 が PCM を直接叩く。
 	   Seta は X1-010 RAM 窓、Cave は 2 ポート YMZ280B。47 は Taito F3 が使用済み。 */
@@ -73,7 +73,17 @@ enum CEmuAcBoard {
 	     2 bgaregga  + バンク Z80 ROM、GAL サンプルバンク、ラッチ IRQ @E01C
 	     3 batrider  同じ区画を I/O ポートへ、OKI×2、ラッチ NMI
 	     4 bbakraid  YMZ280B ポート 80/81、ラッチ NMI + 周期 IRQ0 */
-	CEMU_AC_BOARD_RAIZING = 49
+	CEMU_AC_BOARD_RAIZING = 49,
+	/* Toshiba T5182（内部 Z80 ダイ）+ YM2151。darkmist / mustache / panicr / metlfrzr。
+	   内部 8K @0000、RAM 2000、共有 4000、外部曲 ROM 8000。I/O 00/01 YM、10-13 セマフォ、20 旗。 */
+	CEMU_AC_BOARD_T5182 = 50,
+	/* MAME sunelectronics/shangha3.cpp heberpop: Z80 6 MHz + YM3438 I/O 00-03
+	   + OKI6295 @80 + ラッチ IN C0。ラッチ pending → IRQ0、YM IRQ → NMI。
+	   プログラム 0000-F7FF、RAM F800-FFFF。blocken は同一音源区画。 */
+	CEMU_AC_BOARD_HEBERPOP = 51,
+	/* MAME capcom/bionicc.cpp: Z80 3.579545 + YM2151 @8000。MCU メール A000。
+	   RAM C000。68000 が E4002 で NMI。ファームはタイマを poll（YM IRQ 線なし）。 */
+	CEMU_AC_BOARD_BIONICC = 52
 };
 
 class CHardAc : public CHard {
@@ -98,12 +108,30 @@ public:
 	int LoadRomsPcmChip(CEmuZipFs* fs, const CEmuGameEntry* ge);
 	int LoadRomsHornet(CEmuZipFs* fs, const CEmuGameEntry* ge);
 	int LoadRomsSeibu(CEmuZipFs* fs, const CEmuGameEntry* ge);
+	int LoadRomsT5182(CEmuZipFs* fs, const CEmuGameEntry* ge);
+	int LoadRomsHeberpop(CEmuZipFs* fs, const CEmuGameEntry* ge);
+	int LoadRomsBionicc(CEmuZipFs* fs, const CEmuGameEntry* ge);
 	int LoadRomsM62(CEmuZipFs* fs, const CEmuGameEntry* ge);
 	int LoadRomsSegaM1(CEmuZipFs* fs, const CEmuGameEntry* ge);
 	int LoadRomsRaizing(CEmuZipFs* fs, const CEmuGameEntry* ge);
 	void SeibuRefreshOpcodes();
 	void SeibuSetBank(unsigned bank);
+	void SeibuOkiBank(uint8_t data);
 	int SeibuActive() const { return board_ == CEMU_AC_BOARD_SEIBU_OPL; }
+	int SeibuRaiden2() const { return (board_ == CEMU_AC_BOARD_SEIBU_OPL && seibuSongOr80_ == 2) ? 1 : 0; }
+	int SeibuYm2151() const { return (board_ == CEMU_AC_BOARD_SEIBU_OPL && seibuSongOr80_ >= 2) ? 1 : 0; }
+	int SeibuSdgndmps() const { return (board_ == CEMU_AC_BOARD_SEIBU_OPL && seibuSongOr80_ == 4) ? 1 : 0; }
+	int SeibuCabal() const { return (board_ == CEMU_AC_BOARD_SEIBU_OPL && seibuSongOr80_ == 5) ? 1 : 0; }
+	int T5182() const { return board_ == CEMU_AC_BOARD_T5182; }
+	int Heberpop() const { return board_ == CEMU_AC_BOARD_HEBERPOP; }
+	int Bionicc() const { return board_ == CEMU_AC_BOARD_BIONICC; }
+	int StreetFighter1() const { return board_ == CEMU_AC_BOARD_TAITO_OPM && taitoOpmMap_ == 18; }
+	int HexionMap() const { return board_ == CEMU_AC_BOARD_KONAMI_K7232 && konamiK7232Map_ == 7; }
+	int NewufoMap() const { return board_ == CEMU_AC_BOARD_SYS18 && vsIoKind_ == 1; }
+	/* irqstate: bit0 YM assert、bit1 CPU コマンド、bit4 YM ACK 残。sizeof を増やさないため seibuRst10_ を流用。 */
+	void T5182RaiseYm() { seibuRst10_ |= 5; }
+	void T5182ClearYmAssert() { seibuRst10_ &= ~1; }
+	int T5182IrqState() const { return seibuRst10_; }
 	int SeibuBank() const { return seibuBank_; }
 	int SeibuRst10() const { return seibuRst10_; }
 	int SeibuRst18() const { return seibuRst18_; }
@@ -176,6 +204,41 @@ public:
 	void ClearKonamiSh1NmiArm() { konamiSh1NmiArm_ = 0; }
 	uint8_t KonamiSoundCtrl() const { return konamiSoundCtrl_; }
 	CChip* KonamiPcm2() { return konamiPcm2Addr_ ? pcm2_ : NULL; }
+	/* gijoe/lethalen: K054539 @F800、K054321 @FC00、YM/バンク無し。 */
+	int KonamiJoeMap() const {
+		return (board_ == CEMU_AC_BOARD_KONAMI_PCM && pcmKind_ == 4
+			&& konamiPcmAddr_ == 0xf800u && konamiBankAddr_ == 0) ? 1 : 0;
+	}
+	/* xmen: K054539 @E000、YM2151 @E800（EC00 ミラー）、K054321 @F000、16K バンク @F800、RAM C000。 */
+	int KonamiXmenMap() const {
+		return (board_ == CEMU_AC_BOARD_KONAMI_PCM && pcmKind_ == 4
+			&& konamiOpmAddr_ == 0xe800u) ? 1 : 0;
+	}
+	/* glfgreat: K053260 @F800、RAM F000、NMI arm FA00、YM 無し。TIM2 500 Hz → IRQ0。 */
+	int KonamiGlfMap() const {
+		return (board_ == CEMU_AC_BOARD_KONAMI_PCM && pcmKind_ == 3
+			&& konamiPcmAddr_ == 0xf800u && konamiOpmAddr_ == 0xffffu) ? 1 : 0;
+	}
+	/* prmrsocr: K054539 @E000（E100 穴）、K054321 @F000、16K バンク @F800、RAM C000、YM 無し。 */
+	int KonamiPrmrsocrMap() const {
+		return (board_ == CEMU_AC_BOARD_KONAMI_PCM && pcmKind_ == 4
+			&& konamiOpmAddr_ == 0xffffu && konamiPcmAddr_ == 0xe000u
+			&& konamiBankAddr_ == 0xf800u) ? 1 : 0;
+	}
+	/* rollerg: YM3812 @C000、K053260 @A000、RAM 8000、NMI arm FC00。 */
+	int KonamiRollergMap() const {
+		return (board_ == CEMU_AC_BOARD_KONAMI_PCM && pcmKind_ == 3
+			&& konamiOpmAddr_ == 0xc000u) ? 1 : 0;
+	}
+	/* spy: YM3812 @C000、ラッチ @D000 poll、YM IRQ→NMI。 */
+	int HcastleSpyMap() const {
+		if (board_ != CEMU_AC_BOARD_KONAMI_HCASTLE)
+			return 0;
+		if (vsIoKind_ == 1)
+			return 1;
+		return (mem_ && mem_[0] == 0xedu && mem_[1] == 0x56u
+			&& mem_[2] == 0x31u && mem_[4] == 0x87u) ? 1 : 0;
+	}
 	/* WSG: 最初のラッチまで周期 NMI を抑止（ブートハンドシェイク） */
 	int WsgNmiEnable() const { return wsgNmiEnable_; }
 	void SetWsgNmiEnable(int v) { wsgNmiEnable_ = v ? 1 : 0; }
@@ -188,10 +251,18 @@ public:
 	unsigned Sys16RomBoard() const { return sys16RomBoard_; }
 	uint8_t ToaplanYmPort() const { return toaplanYmPort_; }
 	int ToaplanKaneko() const { return toaplanKaneko_ == 1; }
-	int SlapfghtAy() const { return toaplanKaneko_ == 3; }
+	int SlapfghtAy() const { return toaplanKaneko_ == 3 || toaplanKaneko_ == 5; }
+	int PerfrmanAy() const { return toaplanKaneko_ == 5; }
+	uint16_t SlapfghtCmd() const { return toaplanKaneko_ == 5 ? 0x8800u : 0xc800u; }
+	int ToaplanPipibibs() const { return toaplanKaneko_ == 4; }
 	uint16_t ToaplanMail() const { return toaplanKaneko_ == 2 ? 0xc000u : 0x8000u; }
 	uint16_t ToaplanReady() const { return toaplanKaneko_ == 2 ? 0xc002u : 0x8001u; }
 	int TecmoOpl() const { return tecmoOpl_; }
+	/* 5/7/8/9/10 = Cave Z80 I/O（sailormn / hotdogst / mazinger / metmqstr / pwrinst2）。6 は wc90。 */
+	int CaveZ80Io() const {
+		const int k = tecmoOpl_;
+		return (k == 5 || (k >= 7 && k <= 10)) ? k : 0;
+	}
 	/* Sailor Moon / Air Gallet: ラッチ 0 の NMI がメインループ tick */
 	void CaveEmptyLatch() { soundCmd_ = 0; soundCmdWord_ = 0; }
 	int QsZn() const { return qsZn_; }
@@ -228,8 +299,15 @@ public:
 	int AuxKind() const { return auxKind_; }
 	/* Konami AY タイマポート（scramble/timeplt ポート B） */
 	uint8_t KonamiAyTimer() const;
+	/* MAME frogger: 1×AY、RAM 4000、I/O 40/80。音源 ROM 先頭 0x800 は D0/D1 スワップ */
+	int FroggerAy() const { return (board_ == CEMU_AC_BOARD_KONAMI_SCRAMBLE && vsIoKind_ == 1) ? 1 : 0; }
+	/* MAME hustler: frogger と同じ 1×AY RAM $4000 I/O 40/80。先頭 0x800 は D0/D1 スワップ。vsIoKind 2。 */
+	int HustlerAy() const { return (board_ == CEMU_AC_BOARD_KONAMI_SCRAMBLE && vsIoKind_ == 2) ? 1 : 0; }
+	/* MAME megazone.cpp: Z80 18.432/6 + AY 14.318/8 I/O 00/02、RAM E000-E7FF 共有、VBLANK IRQ0。I8039 は DAC のみ。TIMEPLT vsIoKind 1。 */
+	int MegazoneAy() const { return (board_ == CEMU_AC_BOARD_KONAMI_TIMEPLT && vsIoKind_ == 1) ? 1 : 0; }
 	/* MAME nemesis_portA_r: bit0-3 周期タイマ、bit4/6/7 High */
 	uint8_t Gx400PortA() const;
+	int Gx400KonamiGt() const { return (board_ == CEMU_AC_BOARD_KONAMI_GX400 && vsIoKind_ == 1) ? 1 : 0; }
 
 	/* Taito TC0140SYT / PC060HA マスタ側 — SetSoundCommand が使う */
 	int SytNmiEnabled() const { return sytNmiEnabled_; }
@@ -371,8 +449,8 @@ private:
 	int wsgMappy_;     /* 1 = Mappy/15XX M6809 マップ（対 Pac-Man Z80） */
 	int wsg63701_;     /* 1 = HD63701＋CUS30 MAPPY 基板（pacland/skykid） */
 	int qsZn_; /* Capcom ZN: ラッチ+NMI（MAME zn.cpp）。CPS2 共有 RAM メールボックスではない */
-	int qsKabuki_; /* CPS1 QSound Kabuki: mem_ はオペコード。読込は qsKabukiData_ */
-	uint8_t* qsKabukiData_; /* 0x8000 データ復号面 */
+	int qsKabuki_; /* Kabuki: mem_/soundRom_ はオペコード。読込は qsKabukiData_ */
+	uint8_t* qsKabukiData_; /* データ復号面（CPS は 8K。Mitchell は soundRom_ と同じレイアウト） */
 	/* ZN QSound: PSX→Z80 はラッチ+NMI 4 バイト FF,00,hi,lo。F015/F016 リングが対を格納。FF 00 はボイスリセット。 */
 	uint8_t znQueue_[4];
 	int znQueueLen_;
@@ -380,7 +458,7 @@ private:
 	int znDeferredNmi_; /* 現ハンドラ復帰後に次 NMI を武装 */
 	uint8_t ymAddr_; /* CPS1 メモリマップのアドレスラッチ @ F000 */
 	uint8_t gngYmAddr_[2]; /* GNG YM2203 アドレスラッチ（E000 / E002） */
-	int gngCommandoMap_; /* 1: Commando/ExedExes 風 4000/6000/8000 マップ */
+	int gngCommandoMap_; /* 1: Commando。2: sidearms。3: tigeroad/srumbler。4: ironhors I/O。5: momoko A000/C000 + YM2 ポートA ラッチ。6: jumping YM2203×2 B000/B400 ラッチ B800 */
 	int gngGaidenMap_;   /* 1: Tecmo gaiden F000/F810/F820/FC20（+OKI）マップ */
 	uint8_t hangYmAddr_; /* Hang-On YM2203 アドレスラッチ @ D000 */
 	uint64_t abStatusPulseSlot_; /* After Burner: 合成 TimerA パルス枠 */
@@ -515,17 +593,32 @@ public:
 	int M37702Active() const { return m37702_ != NULL && (m37702IntRom_ != NULL || h8Rom_ != NULL); }
 	int M37702Soft() const { return m37702Soft_; }
 	int M37702C140() const { return m37702C140_; }
-	int SnkMapKind() const { return snkMapKind_; } /* 0=snk68 I/O、1=古典 dual OPL メモリ */
+	int SnkMapKind() const { return snkMapKind_; } /* 0=snk68 I/O、1=古典 dual OPL、2=aso YM3526、3=mainsnk AY×2、4=fitegolf YM3812×1 */
 	int KonamiK7232Map() const { return konamiK7232Map_; }
+	int CombatscYm() const { return (board_ == CEMU_AC_BOARD_KONAMI_K7232 && konamiK7232Map_ == 3) ? 1 : 0; }
 	/* 0 = Rastan/Asuka（YM @9000、PC060HA @A000）
 	   1 = darius（YM2203 @9000 + YM2203 #2 @A000、PC060HA @B000）
-	   2 = kikikai（YM2203 @C000、曲バイトは共有 RAM 9FFF、vblank IRQ）
+	   2 = kikikai / kicknrun（YM2203 @C000、共有 RAM。kikikai は 9FFF、kicknrun は A700=$DF 空き、vblank IRQ。0xEF で AFA1=1）
 	   3 = tokio（YM2203 @B000、ラッチ @9000、NMI A800/A000）
 	   4 = bublbobl（YM2203 @9000、YM3526 @A000、ラッチ @B000、NMI B001/B002）
-	   5 = lsasquad（YM2203 @A000 + AY @C000、ラッチ D000、NMI D400/D800）
+	   5 = lsasquad / daikaiju（YM2203 @A000 + AY @C000、ラッチ D000。daikaiju は NMI 無し・D800 polarity 反転）
 	   6 = lkage（YM2203×2 @9000/@A000、ラッチ B000、NMI B001/B002）
+	   7 = 旧 TNZS YM2203 @B000（PC060HA 無し）
+	   8 = ashnojoe（Z80 8/2=4 MHz + YM2203 4 MHz。ROM 0000-5FFF、RAM 6000-7FFF、
+	       バンク 8000-FFFF。I/O YM 00-01、ADPCM 02 stub、ラッチ 04、pending 06。
+	       YM IRQ0。SSG ポート B = 32K バンク）
+	   9 = twinhawk/daisenpu（Taito X。YM2151 @E000、PC060HA @E200、RAM C000-DFFF、バンク F200）
+	   10 = cadash/earthjkr/galmedes/topspeed（asuka Z80 マップ。ISR は YM status bit0、bit7 busy 待ち）
+	   11 = lomakai/makaiden（Jaleco Mega System 1-Z。Z80 3 MHz + YM2203 1.5 MHz。
+	       ROM 0000-3FFF、RAM C000-C7FF、ラッチ E000、I/O YM 00-01。YM IRQ0。アイドル EI; jr $0111）
+	   12 = fhawk YM2203 @F000 PC060HA @E000
+	   13 = kurikint YM2203 @E800 DPRAM @E000
+	   14 = Taito L 1cpu（palamed/cachat/horshoes/flipull）。YM2203 @A000、TC0090LVC IM2、FF08 8K バンク
+	   15 = volfied。Z80/YM2203 4 MHz。ROM 0000-7FFF、RAM 8000-87FF、PC060HA 8800、YM 9000。YM irq → IRQ0。
 	   FLSTORY 上: 1 = msisaac AY×2+MSM。3 = nycaptor AY×2+MSM。 */
 	int TaitoOpmMap() const { return taitoOpmMap_; }
+	void SetTaitoOpmMap(int m) { taitoOpmMap_ = m; }
+	void TaitoL1EnsureMem();
 	int MsisaacMap() const { return (board_ == CEMU_AC_BOARD_FLSTORY && taitoOpmMap_ == 1) ? 1 : 0; }
 	int NycaptorMap() const { return (board_ == CEMU_AC_BOARD_FLSTORY && taitoOpmMap_ == 3) ? 1 : 0; }
 	int Cop01Ay() const { return (board_ == CEMU_AC_BOARD_TAITO_SJ && vsIoKind_ == 4) ? 1 : 0; }
@@ -537,14 +630,65 @@ public:
 	int HalleysAy() const { return (board_ == CEMU_AC_BOARD_TAITO_SJ && vsIoKind_ == 9) ? 1 : 0; }
 	int PbactionAy() const { return (board_ == CEMU_AC_BOARD_TAITO_SJ && vsIoKind_ == 10) ? 1 : 0; }
 	int ChaknpopAy() const { return (board_ == CEMU_AC_BOARD_TAITO_SJ && vsIoKind_ == 11) ? 1 : 0; }
+	/* 12 = Capcom 1942（Z80 3 MHz + AY×2 1.5 MHz。ラッチ 6000 poll、AY 8000/C000、240 Hz IRQ0。1942p は別マップ） */
+	int Cap1942Ay() const { return (board_ == CEMU_AC_BOARD_TAITO_SJ && vsIoKind_ == 12) ? 1 : 0; }
+	/* 13 = Tehkan swimmer/guzzler（Z80 2 MHz + AY×2 2 MHz。ROM 0000-0FFF、RAM 2000-23FF、
+	   ラッチ 3000 clear-on-read → IRQ0、NMI ack 4000。AY I/O data_address 00/01 と 80/81。
+	   周期 NMI ≈ 4 MHz / 0x4000 ≈ 244 Hz。カタログ 0x20/0x21 はテンポ／フラグで BGM ではない） */
+	int SwimmerAy() const { return (board_ == CEMU_AC_BOARD_TAITO_SJ && vsIoKind_ == 13) ? 1 : 0; }
+	/* 14 = Nichibutsu tubep（Z80 19.968/8=2.496 MHz + AY×3 1.248 MHz。ROM 0000-3FFF、
+	   RAM E000-E7FF、IRQ ack 読 D000。I/O AY address_data 00-05、ラッチ 06=(pending<<7)|(cmd&7F)、ack 07。
+	   スキャンライン 64/192 → IRQ0 ≈ 120 Hz。ラッチは NMI しない） */
+	int TubepAy() const { return (board_ == CEMU_AC_BOARD_TAITO_SJ && vsIoKind_ == 14) ? 1 : 0; }
+	/* 15 = Taito retofinv（Z80/SN76489A×2 @ 3.072 MHz。ROM 0000-1FFF、RAM 2000-27FF、
+	   ラッチ 4000 → IRQ0、NMI 120 Hz。SN @8000/@A000。6000 は NMI カウンタ echo） */
+	int RetofinvSn() const { return (board_ == CEMU_AC_BOARD_TAITO_SJ && vsIoKind_ == 15) ? 1 : 0; }
+	/* 16 = Sunsoft ikki（サブ Z80 4 MHz、SN1 2 MHz / SN2 4 MHz。ROM 0000-1FFF、
+	   RAM C000-CFFF、SN D801/D802。曲は共有 RAM CD90/CEAD。周期 IRQ0 ≈ 120 Hz） */
+	int IkkiSn() const { return (board_ == CEMU_AC_BOARD_TAITO_SJ && vsIoKind_ == 16) ? 1 : 0; }
+	/* 17 = Konami circusc（Z80 14.318181/4 + SN76489A×2 /8。ROM 0000-3FFF、RAM 4000-43FF、
+	   ラッチ 6000、タイマ 8000=(cycles>>9)&0x1E、SN A000 latch / A001 SN0 / A002 SN1。
+	   ホスト SOUND-ON → IRQ0 IM1。シーケンサは 8000 bit3 のエッジ待ち） */
+	int CircuscSn() const { return (board_ == CEMU_AC_BOARD_TAITO_SJ && vsIoKind_ == 17) ? 1 : 0; }
+	/* 18 = Tehkan starforce/senjyo/baluba（サブ Z80 2 MHz + SN76489A×3 2 MHz。
+	   ROM 0000-1FFF、RAM 4000-43FF、SN 8000/9000/A000。I/O PIO 00-03 ラッチ、CTC 08-0B。
+	   IM2 I=02: PIO vec 00 → 00B3、CTC ch1 vec 0A → 00D0。ラッチは IRQ、CTC は ≈120 Hz） */
+	int StarforceSn() const { return (board_ == CEMU_AC_BOARD_TAITO_SJ && vsIoKind_ == 18) ? 1 : 0; }
+	/* 19 = Tehkan worldcup / tehkanwc / gridiron（Z80 18.432/4=4.608 MHz + AY×2 18.432/12=1.536 MHz。
+	   ROM 0000-3FFF、RAM 4000-47FF、MSM reset 8001 stub、ラッチ C000 → NMI。
+	   I/O AY1 00-01 / AY2 02-03 data_address_w。vblank IRQ0 HOLD） */
+	int WorldcupAy() const { return (board_ == CEMU_AC_BOARD_TAITO_SJ && vsIoKind_ == 19) ? 1 : 0; }
+	/* 20 = Jaleco fcombat（Z80 19.968/6 + YM2149×3 /12。ROM 0000-3FFF、RAM 4000-47FF、
+	   ラッチ 6000 poll。AY data_address 8002/8003・A002/A003・C002/C003。IRQ 無し。bit7 はリセット） */
+	int FcombatAy() const { return (board_ == CEMU_AC_BOARD_TAITO_SJ && vsIoKind_ == 20) ? 1 : 0; }
+	/* 21 = Sega Bank Panic / Combat Hawk。音源 CPU 無し。メイン Z80 @ 15.46848/6 + SN76489A×3 同クロック。
+	   ROM 0000-DFFF、RAM E000-FFFF。I/O 00/01/02 = SN、07 bit4 = vblank NMI。曲は attract の LD A,n / CALL 音源入口。 */
+	int BankpSn() const { return (board_ == CEMU_AC_BOARD_TAITO_SJ && vsIoKind_ == 21) ? 1 : 0; }
+	/* 22 = Konami gberet。音源 CPU 無し。メイン Z80 18.432/6 + SN76489A /12。
+	   ROM 0000-BFFF、RAM C000-DFFF。F200=SN ラッチ、F400 書で SN へ。曲は D81B、D81A=1。NMI が CALL 7801。 */
+	int GberetSn() const { return (board_ == CEMU_AC_BOARD_TAITO_SJ && vsIoKind_ == 22) ? 1 : 0; }
+	/* 23 = Capcom higemaru。音源 CPU 無し。メイン Z80 12/4 + AY8910×2 12/8。
+	   ROM 0000-7FFF、RAM E000-EFFF。C801-C802 AY1、C803-C804 AY2。IM0 RST 08/10。 */
+	int HigemaruAy() const { return (board_ == CEMU_AC_BOARD_TAITO_SJ && vsIoKind_ == 23) ? 1 : 0; }
+	/* 24 = Nintendo mario.cpp masao。Z80 1.79 MHz + AY。ROM 0000-0FFF、RAM 2000-23FF、AY データ 4000 / アドレス 6000。ラッチはポートA。 */
+	int MasaoAy() const { return (board_ == CEMU_AC_BOARD_TAITO_SJ && vsIoKind_ == 24) ? 1 : 0; }
+	/* SYS1 vsIoKind 1=trackfld SN ラッチ A000/ストローブ C000。2=hyperspt/sbasketb E001/E002。3=mikie SN×2 @8002/8004。 */
+	int TrackfldSn() const { return (board_ == CEMU_AC_BOARD_SEGA_SYS1 && vsIoKind_ >= 1 && vsIoKind_ <= 3) ? 1 : 0; }
+	int SjNmiMask() const { return sjNmiMask_; }
 	int NbAyIo() const { return Cop01Ay() || MagmaxAy(); }
 	int AlphaNmiMask() const { return alphaNmiMask_; }
 	unsigned AlphaOpllWrites() const;
 	void AlphaMixOpll(int16_t* stereo, int frames);
 	uint8_t SnkStatus() const { return snkStatus_; }
 	void SnkSetYmIrq(int which, int on);
-	/* マップ terracreMap_: 0=terracre C000 RAM。1=armedf/terraf F800。2=cclimbr2/legion C000-FFFF */
+	/* マップ terracreMap_: 0=terracre YM3526 C000 RAM。1=armedf/terraf F800。2=cclimbr2/legion C000-FFFF。3=argus YM2203×1 RAM 8000 latch C000。4=butasan YM2203×2 RAM C000 latch E000。5=valtric sound_map_a + YM×2。6=terracren YM2203 同 I/O 00/01 ラッチ 04/06 RAM C000。 */
 	int TerracreMap() const { return terracreMap_; }
+	int TerracreYm2203() const { return (board_ == CEMU_AC_BOARD_TERRACRE && terracreMap_ == 6) ? 1 : 0; }
+	/* Hang-On 族 vsIoKind_: 0=YM2203 メモリ D000（hangon/sharrier/endurobl）。1=endurob2 sound_map_2151 + YM2203×2 I/O 00/C0。 */
+	int HangonEnduroB2() const { return (board_ == CEMU_AC_BOARD_HANGON && vsIoKind_ == 1) ? 1 : 0; }
+	/* ABURNER vsIoKind_: 0=After Burner。1=smgp YM IM1 + Timer B ポール。2=lastsurv YM IM1 + NMI ラッチ。 */
+	int AburnerSmgpMap() const { return (board_ == CEMU_AC_BOARD_ABURNER && vsIoKind_ == 1) ? 1 : 0; }
+	int AburnerLastsurvMap() const { return (board_ == CEMU_AC_BOARD_ABURNER && vsIoKind_ == 2) ? 1 : 0; }
 	int M68kPcmKind() const { return m68kPcmKind_; }
 	/* 68000 スライスループから呼ぶ。vblank 線をオーディオバッファではなく CPU と同期させる */
 	void M68kPcmTickVblank(int cycles);
@@ -554,6 +698,84 @@ public:
 	unsigned GetM68kRamSize() const { return m68kRamSize_; }
 	int FlstoryNmiEn() const { return flstoryNmiEn_; }
 	int GngGaidenMap() const { return gngGaidenMap_; }
+	int GngCommandoMap() const { return (board_ == CEMU_AC_BOARD_GNG && gngCommandoMap_ == 1) ? 1 : 0; }
+	int GngSidearmsMap() const { return (board_ == CEMU_AC_BOARD_GNG && gngCommandoMap_ == 2) ? 1 : 0; }
+	int GngTigeroadMap() const { return (board_ == CEMU_AC_BOARD_GNG && gngCommandoMap_ == 3) ? 1 : 0; }
+	int GngIronhorsMap() const { return (board_ == CEMU_AC_BOARD_GNG && gngCommandoMap_ == 4) ? 1 : 0; }
+	int GngMomokoMap() const { return (board_ == CEMU_AC_BOARD_GNG && gngCommandoMap_ == 5) ? 1 : 0; }
+	int GngJumpingMap() const { return (board_ == CEMU_AC_BOARD_GNG && gngCommandoMap_ == 6) ? 1 : 0; }
+	/* decoCpuKind 6=brkthru/darwin M6809 YM3526@$2000 ラッチ@$4000 YM2203@$6000。
+	   7=exprraid M6809 YM2203@$2000 YM3526@$4000 ラッチ@$6000。namcoM6809_ 再利用。 */
+	int DecoBrkthruM6809() const { return (board_ == CEMU_AC_BOARD_DECO && (decoCpuKind_ == 6 || decoCpuKind_ == 7)) ? 1 : 0; }
+	/* decoCpuKind 9: MAME matmania.cpp sound_map。M6502 1 MHz、AY8910×2 @1.5 MHz、
+	   RAM 0000-01FF、AY1 @$2000 data_address_w、AY2 @$2002、DAC @$2004（未接続）、
+	   NMI enable @$2005、ラッチ @$2007 → IRQ、ROM @$8000。周期 NMI 約 900 Hz。 */
+	/* TECHNOS snkMapKind 4=ddragon M6809 YM2151@2800 ラッチ@1000→IRQ YM→FIRQ ROM@8000。
+	   5=kuniokun/renegade M6809 YM3526@2800 ラッチ@1000-17FF→IRQ YM→FIRQ ROM@8000。MSM5205 は未接続（YM BGM のみ）。 */
+	int TechnosDdM6809() const { return (board_ == CEMU_AC_BOARD_TECHNOS_DDRAGON2 && snkMapKind_ >= 4) ? 1 : 0; }
+	/* ROBOKID vsIoKind 1: MAME nmk16 macross2_sound_map。Z80 4 MHz、YM2203 1.5 MHz、OKI×2 4 MHz PIN7 Low、NMK112。
+	   ROM 0000-7FFF、バンク 8000-BFFF（E001 & 7）、RAM C000-DFFF、ラッチ F000 poll。I/O YM 00/01、OKI 80/88、NMK112 90-97。
+	   ラッチは IRQ しない。YM タイマ → IM1。YM ステータス busy bit7 は落とす。 */
+	int RobokidMacross2Map() const { return (board_ == CEMU_AC_BOARD_ROBOKID && vsIoKind_ == 1) ? 1 : 0; }
+	/* ROBOKID vsIoKind 2: MAME nmk16 tharrier_sound_map。tharrier Z80 4.9152 MHz / manybloc 3 MHz、
+	   YM2203 1.5 MHz、OKI×2 4 MHz PIN7 Low。ROM 0000-BFFF、RAM C000-C7FF、ラッチ F000 poll、
+	   OKI F400/F500、バンク F600/F700（data&3、3 は無視、128KiB 窓 @ROM+0x20000）。I/O YM 00/01。
+	   ラッチは IRQ しない。YM タイマ → IM1。 */
+	int RobokidTharrierMap() const { return (board_ == CEMU_AC_BOARD_ROBOKID && vsIoKind_ == 2) ? 1 : 0; }
+	/* ROBOKID vsIoKind 3: MAME airbustr sound_map / sound_io_map。Z80 6 MHz、YM2203 3 MHz、OKI 3 MHz PIN7 Low。
+	   ROM 0000-7FFF、バンク 8000-BFFF（I/O 00 & 7）、RAM C000-DFFF。
+	   I/O YM 02/03、OKI 04、ラッチ 06 → NMI。YM irq → IRQ0。 */
+	int RobokidAirbustrMap() const { return (board_ == CEMU_AC_BOARD_ROBOKID && vsIoKind_ == 3) ? 1 : 0; }
+	/* ROBOKID vsIoKind 4: MAME djboy soundcpu_am / soundcpu_port_am。Z80 6 MHz、YM2203 3 MHz、OKI×2 1.5 MHz PIN7 Low（同一 oki ROM）。
+	   ROM 0000-7FFF、バンク 8000-BFFF（I/O 00）、RAM C000-DFFF。
+	   I/O YM 02/03、ラッチ 04 → NMI、OKI-L 06、OKI-R 07。YM irq → IRQ0。 */
+	int RobokidDjboyMap() const { return (board_ == CEMU_AC_BOARD_ROBOKID && vsIoKind_ == 4) ? 1 : 0; }
+	/* ROBOKID vsIoKind 5: MAME blazeon_soundmem / blazeon_soundport。Z80 4 MHz、YM2151 4 MHz（OKI 無し）。
+	   ROM 0000-BFFF（固定）、RAM C000-DFFF。I/O YM 02/03、ラッチ 06 → NMI。YM irq 未接続。 */
+	int RobokidBlazeonMap() const { return (board_ == CEMU_AC_BOARD_ROBOKID && vsIoKind_ == 5) ? 1 : 0; }
+	/* ROBOKID vsIoKind 6: MAME hvyunit sound_memory / sound_io。Z80 6 MHz、YM2203 3 MHz（OKI 無し）。
+	   ROM 0000-7FFF、バンク 8000-BFFF（I/O 00 & 3）、RAM C000-C7FF。
+	   I/O YM 02/03、ラッチ 04 → NMI。YM irq → IRQ0。 */
+	int RobokidHvyunitMap() const { return (board_ == CEMU_AC_BOARD_ROBOKID && vsIoKind_ == 6) ? 1 : 0; }
+	/* ROBOKID vsIoKind 7: MAME crospang sound_map / sound_io_map。Z80 3.579545 MHz、YM3812 同クロック、OKI PIN7 High 14.318MHz/16。
+	   ROM 0000-BFFF 固定、RAM C000-C7FF。I/O YM 00/01、OKI 02、ラッチ 06 poll。YM irq → IRQ0。ラッチ NMI 無し。 */
+	int RobokidCrospangMap() const { return (board_ == CEMU_AC_BOARD_ROBOKID && vsIoKind_ == 7) ? 1 : 0; }
+	/* ROBOKID vsIoKind 8: MAME stfight cpu2_map（empcity/cshooter）。Z80 3 MHz、YM2203×2 1.5 MHz。
+	   ROM 0000-7FFF、RAM F800-FFFF。YM1 C000/C001、YM2 C800/C801、ラッチ F000（bit7=pending、読で落とす）。
+	   周期 IRQ0 120 Hz。YM irq 未接続。MSM5205 は MCU 駆動のため未実装。Init で YM 0x2F プリスケール。 */
+	int RobokidEmpcityMap() const { return (board_ == CEMU_AC_BOARD_ROBOKID && vsIoKind_ == 8) ? 1 : 0; }
+	/* ROBOKID vsIoKind 9: MAME nmg5/yunsun16 sound_map。Z80 4 MHz、YM3812 4 MHz、OKI 1 MHz PIN7 High。
+	   ROM 0000-DFFF、RAM E000-E7FF。I/O YM 10/11、ラッチ 18、OKI 1C、バンク 00。ラッチ → NMI。YM irq → IRQ0。 */
+	int RobokidNmg5Map() const { return (board_ == CEMU_AC_BOARD_ROBOKID && vsIoKind_ == 9) ? 1 : 0; }
+	/* ROBOKID vsIoKind 10: MAME pclubys_sound_map。I/O は nmg5 と同じ。ROM 0000-F7FF、RAM F800-FFFF。 */
+	int RobokidPclubysMap() const { return (board_ == CEMU_AC_BOARD_ROBOKID && vsIoKind_ == 10) ? 1 : 0; }
+	/* ROBOKID vsIoKind 11: MAME angelkds sound_map/sound_portmap。Z80 4 MHz、YM2203×2 4 MHz。
+	   ROM 0000-7FFF、RAM 8000-87FF。I/O YM1 00/01、YM2 40/41、メールボックス 80-83（各下位ニブル。83 bit0=strobe）。
+	   YM1 irq → IRQ0。ラッチ NMI 無し。 */
+	int RobokidAngelkdsMap() const { return (board_ == CEMU_AC_BOARD_ROBOKID && vsIoKind_ == 11) ? 1 : 0; }
+	/* ROBOKID vsIoKind 12: MAME deniam.cpp deniam16b sound_map / sound_io_map。
+	   Z80 25/4=6.25 MHz、YM3812 25/6≈4.167 MHz、OKI 25/24≈1.042 MHz PIN7 High。
+	   ROM 0000-F7FF、RAM F800-FFFF。I/O ラッチ 01、YM 02-03、OKI 05、OKI バンク 07 bit6。
+	   ラッチ pending → NMI、YM irq → IRQ0。 */
+	int RobokidDeniamMap() const { return (board_ == CEMU_AC_BOARD_ROBOKID && vsIoKind_ == 12) ? 1 : 0; }
+	/* ROBOKID vsIoKind 13: MAME lastduel.cpp sound_map。Z80/YM2203×2 @ 3.579545。
+	   ROM 0000-DFFF、RAM E000-E7FF。YM1 E800、YM2 F000、ラッチ F800 poll。YM1 irq → IRQ0。 */
+	int RobokidLastduelMap() const { return (board_ == CEMU_AC_BOARD_ROBOKID && vsIoKind_ == 13) ? 1 : 0; }
+	/* ROBOKID vsIoKind 14: MAME lastduel.cpp madgear_sound_map。Z80/YM2203×2 @ 3.579545、OKI 1 MHz PIN7 High。
+	   ROM 0000-7FFF、バンク 8000-CFFF（F00A bit0、stride 0x4000 from ROM+0x8000）、RAM D000-D7FF。
+	   YM1 F000、YM2 F002、OKI F004、ラッチ F006 poll。YM1 irq → IRQ0。 */
+	int RobokidMadgearMap() const { return (board_ == CEMU_AC_BOARD_ROBOKID && vsIoKind_ == 14) ? 1 : 0; }
+	/* ROBOKID vsIoKind 15: MAME mitchell.cpp mgakuen / marukin。Z80 8 MHz、YM2413 4 MHz I/O 03=data/04=addr、
+	   OKI 1 MHz PIN7 High @05。ROM 0000-7FFF、バンク 8000-BFFF（OUT 02 & 0x0F、16K from ROM+0x8000）、
+	   RAM C000-FFFF。vblank 2×IRQ0/frame（port5 bit0 = irq_source）。
+	   平文は CALL $03EC / $7803。Kabuki（marukin）は CALL $7629 / $76B1。
+	   Kabuki RST38 はオペコード面が DI、即値はデータ面。注入時に CALL $7645;EI;RET を植える。
+	   DDCB 第 4 バイトは M1 ではないのでデータ面（Ay_Cpu TAKE_IMM8）。 */
+	int RobokidMitchellMap() const { return (board_ == CEMU_AC_BOARD_ROBOKID && vsIoKind_ == 15) ? 1 : 0; }
+	void MitchellToggleIrqSource() { alphaPaLatch_ ^= 1; }
+	/* taitoOpmMap 16: MAME arkanoid.cpp。Z80 6 MHz 1cpu、YM2149 3 MHz（コアが /2）@D000/D001、
+	   MCU stub D018、SYSTEM D00C。曲は CALL $67AE。vblank IRQ0。
+	   67DB 成功は E995=$FF で 6638 が曲を捨てるので注入時に E995=0。 */
 	H8Cpu* H8CpuPtr() { return h8_; }
 	M37702Cpu* M37702CpuPtr() { return m37702_; }
 	uint8_t H8Read8(uint32_t addr);
@@ -612,14 +834,19 @@ private:
 	uint16_t h8C352Shadow_[0x400];
 	int m37702Soft_; /* ファミリ選択済みだがコア接続に失敗している間 1 */
 	int m37702C140_; /* NA-1/NB-1: C219/C140 代用（C352 ではない） */
-	int snkMapKind_; /* 0=snk68 YM3812 I/O+NMI。1=古典メモリマップ dual OPL+IRQ */
+	int snkMapKind_; /* 0=snk68 YM3812 I/O+NMI。1=古典 dual OPL+IRQ。2=aso YM3526@F000 ラッチ@D000。3=mainsnk AY×2 ラッチ@A000 NMI。4=fitegolf YM3812@E800 ラッチ@E000 IRQ */
 	uint8_t snkStatus_; /* 古典 F800 ステータス（ym1|ym2|busy|cmd） */
-	int terracreMap_; /* マップ 0=terracre、1=armedf/terraf、2=cclimbr2/legion */
+	int terracreMap_; /* 0=terracre 1=armedf 2=cclimbr2 3=argus YM2203×1 4=butasan YM2203×2 6=terracren YM2203 */
 	int tecmoOpl_;    /* 0=YM2151 FC04。1=rygar YM3526@8000 RAM@4000 ラッチ@C000
 	                     2=gemini YM3812@A000 RAM@8000 ラッチ@C000
-	                     3=spbactn YM3812 FC04。4=tbowl YM3812 D000+D800 RAM@C000 ラッチ@E010
+	                     3=spbactn YM3812@F810 OKI@F800 ラッチ@FC20 NMI。4=tbowl YM3812 D000+D800 RAM@C000 ラッチ@E010
 	                     5=Cave agallet/sailormn: I/O YM50 + OKI60/80、ラッチ NMI
-	                     6=wc90 YM2608 @F800、RAM F000、ラッチ FC10 NMI */
+	                     6=wc90 YM2608 @F800、RAM F000、ラッチ FC10 NMI
+	                     7=hotdogst YM2203@50 RAM@E000。8=mazinger YM2203@50 RAM@C000/F800
+	                     9=metmqstr YM2151+OKIx2 RAM@E000。10=pwrinst2 YM2203+OKIx2 RAM@E000
+	                     11=Dooyong bluehawk/superx YM2151@F808 OKI@F80A ラッチ@F800 poll
+	                     12=powerins YM2203 I/O@00/01 OKIx2@80/88 NMK112@90 RAM@C000 ラッチ@E000 poll
+	                     13=DECO32 Z80（nslasher）YM2151@A000 OKIx2@B000/C000 ラッチ@D000 IRQ0。I/O は audiocpu ROM */
 	/* M68K_PCM: 1 = Seta X1-010 RAM 窓、2 = Cave YMZ280B ポート対。
 	   ゲームごとにチップとワーク RAM のデコードが違うので、共有推測ではなくゲーム別仕様（MAME seta.cpp / seta2.cpp / cave.cpp）。 */
 	int m68kPcmKind_;
@@ -667,7 +894,7 @@ private:
 	uint64_t namcoNextVblank_;
 	/* Sys2 DPRAM 内メールボックス基点（$7100 finallap/assault、$7110 burnforc） */
 	unsigned namcoMailOff_;
-	/* Data East 音源CPU: 0=HuC6280（cninja）、1=M6502 karnov、2=M6502 dec0、3=M6502 actfancr（ROM @4000） */
+	/* Data East 音源CPU: 0=HuC6280（cninja）、1=M6502 karnov、2=M6502 dec0、3=M6502 actfancr、8=midres */
 	int decoCpuKind_;
 
 	/* Konami System GX: K056800 メールボックス + K054539×2（chip_/pcm_）。
@@ -699,9 +926,10 @@ private:
 	/* Sega Sys16 ROM ボード id（カタログ boardtype 0x5358/5521/5704/5797）。
 	   uPD7759／音源バンク bit 対応を選ぶ（MAME segas16b upd7759_control_w）。 */
 	unsigned sys16RomBoard_;
-	/* V-System I/O: 0 = aerofgt（YM@00）、1 = spinlbrk/f1gp（YM@18）、2 = fromanc/welltris（YM@08）、3 = Psikyo gunbird（YM@04、ラッチ@08） */
+	/* V-System I/O: 0 = aerofgt（YM@00）、1 = spinlbrk/f1gp（YM@18）、2 = fromanc/welltris（YM@08）、3 = Psikyo gunbird（YM@04、ラッチ@08）、6 = Psikyo sngkace（YM@00、ラッチ@08、RAM 7800）
+	   TAITO_SJ: 4..18 = cop01..starforce。ROBOKID: 1 = macross2/tdragon2、2 = tharrier/manybloc、3 = airbustr、4 = djboy、5 = blazeon、6 = hvyunit、7 = crospang、8 = empcity/cshooter、9 = nmg5/yunsun16、10 = pclubys */
 	int vsIoKind_;
-	/* Konami K007232 期 YM2151 マップ: 0 = scontra/twin16（ラッチ A000、YM C000）、1 = crimfght/aliens（ラッチ C000、YM A000）、2 = gradius3（ラッチ F010、YM F030、RAM F800） */
+	/* Konami K007232 期 YM2151 マップ: 0 = scontra/twin16（ラッチ A000、YM C000）、1 = crimfght/aliens（ラッチ C000、YM A000）、2 = gradius3（ラッチ F010、YM F030、RAM F800）、3 = combatsc YM2203 @E000 ラッチ D000 RAM 8000 UPD stub、4 = ajax YM C000 ラッチ E000、5 = chqflag YM C000 ラッチ D000、6 = wecleman/flkatck ラッチ A000 YM C000（YM irq 未配線・ラッチ IRQ0 のみ、K007452 @9000） */
 	int konamiK7232Map_;
 	int taitoOpmMap_;
 	/* Alpha 68K-II: emu2413 OPLL + YM2203 ポート A NMI ゲート */
@@ -718,13 +946,13 @@ private:
 	uint8_t sjNmiMaskSeen_;
 	uint8_t toaplanTimerA_; /* ISR 音楽経路用のソフト Timer-A ドアベル */
 	uint8_t toaplanYmPort_; /* YM3812 ベースポート: 00/60/70/A8 */
-	uint8_t toaplanKaneko_; /* 1 = snowbros Kaneko I/O。2 = Wardner C000 メールボックス。3 = slapfght AY×2 */
+	uint8_t toaplanKaneko_; /* 1 = snowbros Kaneko I/O。2 = Wardner C000 メールボックス。3 = slapfght AY×2。4 = pipibibs YM3812 @E000。5 = perfrman AY×2 @8800 NMI 240Hz */
 	uint8_t ayAddr_[3];
 
 	/* Seibu SEI80BU 暗号化 Z80 + YM3812 + OKI */
 	int seibuEnc_;
 	int seibuBank_;
-	int seibuSongOr80_; /* raiden: カタログ n → 表 n|0x80。cupsoc は 0x8e */
+	int seibuSongOr80_; /* 0=cupsoc 0x8e、1=raiden n|0x80、2=raiden2 YM2151+OKI×2、3=godzilla YM2151+OKI×1、4=sdgndmps */
 	uint8_t seibuMain2Sub_[2];
 	uint8_t seibuSub2Main_[2];
 	int seibuMainPending_;

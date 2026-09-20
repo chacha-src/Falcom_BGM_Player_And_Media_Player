@@ -1532,7 +1532,9 @@ possibly_out_of_time:
 		case 0xCB: {
 			data = IXY_DISP( ixy, (int8_t) data2 );
 			pc++;
-			data2 = READ_PROG( pc );
+			/* DDCB の第 4 バイトは M1 ではない（変位のあとの通常読）。
+			   Kabuki はデータ面。READ_PROG だと marukin の BIT/SET が RES ゴミになる。 */
+			data2 = TAKE_IMM8();
 			pc++;
 			switch ( data2 )
 			{

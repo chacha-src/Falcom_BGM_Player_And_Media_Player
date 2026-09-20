@@ -8,6 +8,9 @@ struct CEmuCatalog {
 	int capacity;
 	CEmuGameEntry** entry; /* heap 上の各エントリ */
 	int loaded; /* 1 = 読込試行済み（件数 0 でも再読込しない） */
+	/* キャッシュ一括確保。非 NULL なら entry/rom/opt/title はここ。個別 free しない */
+	void* cacheEnts;
+	void* cacheBlob;
 };
 
 typedef void (*CEmuCatalogProgressFn)(int pos, int max, void* user);
@@ -15,7 +18,8 @@ typedef void (*CEmuCatalogProgressFn)(int pos, int max, void* user);
 void CEmuCatalogInit(CEmuCatalog* cat);
 void CEmuCatalogClear(CEmuCatalog* cat);
 
-/* data ルートから xml を読込。arcdata.zip は exe 隣のみ。キャッシュがあればスキップ */
+/* xml は data ルートからも読む。arcdata.zip は exe 隣。キャッシュ鍵は zip サイズのみ。
+   ディスクキャッシュは zstd+可変長（v3）。exe 差し替えでは無効化しない。 */
 int CEmuCatalogLoad(CEmuCatalog* cat, const wchar_t* dataRoot);
 int CEmuCatalogLoadEx(CEmuCatalog* cat, const wchar_t* dataRoot,
 	CEmuCatalogProgressFn progress, void* progressUser);
@@ -23,7 +27,7 @@ int CEmuCatalogLoadEx(CEmuCatalog* cat, const wchar_t* dataRoot,
 /* %LOCALAPPDATA%\oggYSED\cemucatalog\ のキャッシュを破棄 */
 void CEmuCatalogInvalidateCache(void);
 
-/* arcdata.zip が未更新なら 1（起動 UI 用・size+flags ヘッダ照合のみ） */
+/* arcdata.zip が未更新なら 1（起動 UI 用。サイズ+parse ver。フォルダ配置は見ない） */
 int CEmuCatalogCacheIsCurrent(const wchar_t* dataRoot);
 
 /* exe 隣の arcdata.zip パス（存在しなくてもパスを返す） */
@@ -60,3 +64,15 @@ unsigned CEmuGameTitleCodeForIndex(const CEmuGameEntry* ge, unsigned titleIndex1
 /* hoot titlelist: SE / 効果音 / SFX / Sound Effect. STOP は含めない。 */
 int CEmuTitleLooksLikeSfx(const wchar_t* label);
 int CEmuGameTitleLooksLikeSfx(const CEmuGameEntry* ge, unsigned titleIndex1);
+
+/* Food empty (Toggle) / in battle (toggle) / TO BOSS BGM — 曲ではなくフラグ。 */
+enum { CEMU_TOGGLE_MAX = 8 };
+struct CEmuArchiveToggle {
+	unsigned code;
+	wchar_t label[CEMU_GAME_NAME];
+};
+int CEmuTitleLooksLikeToggle(const wchar_t* label);
+int CEmuGameTitleLooksLikeToggle(const CEmuGameEntry* ge, unsigned titleIndex1);
+int CEmuGameTitleCodeIsToggle(const CEmuGameEntry* ge, unsigned code);
+int CEmuCatalogListArchiveToggles(const CEmuGameEntry* ge,
+	CEmuArchiveToggle* out, int outCap);

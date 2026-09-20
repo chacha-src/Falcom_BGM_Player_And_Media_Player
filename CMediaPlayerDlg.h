@@ -192,8 +192,13 @@ public:
 
 	// ---- プレイリストのドラッグ&ドロップ移動 ----
 	int m_dragging;              // ドラッグ操作中(0/1) プレイリスト行
+	int m_dragMoved;             // しきい値を超えて実ドラッグになったか
 	int m_dragSrc;               // ドラッグ元の行インデックス
+	CPoint m_dragStart;          // BEGINDRAG 時点のスクリーン座標
 	HIMAGELIST m_hDragImage;     // DragMove に使うゴースト画像
+	BOOL HandlePlaylistItemDragMsg(MSG* pMsg); // リスト宛の UP でもドラッグを終える
+	void StartPlaylistItemDragVisual();
+	void EndPlaylistItemDrag(BOOL commit, POINT screenPt);
 	int m_libDrag;               // ライブラリ→PL ドラッグ中
 	HIMAGELIST m_hLibDragImage;  // Lib→PL ドラッグゴースト
 	CString m_libDragFolder;     // ドロップ中のパス(フォルダ or ファイル)
@@ -220,8 +225,8 @@ public:
 	// キャプチャ右〜終了左のツールショートカット（コンテキストでON/OFF）
 	CCustomStandardButton m_botDj, m_botTag, m_botBpm, m_botSleep;
 	CCustomStandardButton m_botMirror, m_botSsViz, m_botAlarm, m_botRemote, m_botVst, m_botMidi, m_botFm, m_botCd, m_botMaze, m_botRace;
-	// m_botMidi: VST と CD のあいだ。開いているあいだ凹む（savedata.midimonwindow）。bit 4096。
-	// m_botFm: MIDI の直下。FMモニタ開閉（savedata.fmmonwindow）。同じ列・常時表示。
+	// m_botMidi: VST と CD のあいだ。FM/MIDIモニタ開閉（savedata.midimonwindow / fmmonwindow）。bit 4096。
+	// m_botFm: 未使用（FM は MIDI ボタンに統合）。
 	int m_mpBotShort; // 底バー短縮段階 0=フル 1=中 2=短（切替〜レース）
 	CCustomStatic m_kaisuuL;
 	CCustomEdit m_kaisuu;

@@ -1,4 +1,4 @@
-﻿#include "stdafx.h"
+#include "stdafx.h"
 #include "CCustomPopupMenu.h"
 #include "GdiSoft2D.h"
 #include "GdiSoft3D.h"
@@ -6,6 +6,12 @@
 #include "CEmu/cemu_catalog.h"
 #ifndef WM_APP_CEMU_CATLIST
 #define WM_APP_CEMU_CATLIST (WM_APP + 59)
+#endif
+#ifndef WM_TIMERP_VSYNC_TICK
+#define WM_TIMERP_VSYNC_TICK (WM_APP + 70)
+#endif
+#ifndef WM_SPEANA_TICK
+#define WM_SPEANA_TICK (WM_APP + 73)
 #endif
 #include <uxtheme.h>
 #include <math.h>
@@ -64,6 +70,7 @@ BEGIN_MESSAGE_MAP(CCustomPopupMenu, CWnd)
 	ON_WM_LBUTTONUP()
 	ON_WM_KEYDOWN()
 	ON_WM_KILLFOCUS()
+	ON_WM_ACTIVATEAPP()
 	ON_WM_MOUSEWHEEL()
 	ON_WM_HSCROLL()
 	ON_WM_TIMER()
@@ -2685,6 +2692,10 @@ BOOL CCustomPopupMenu::IsForegroundOurs() const
 {
 	HWND fg = ::GetForegroundWindow();
 	if (!fg) return TRUE;
+	DWORD pid = 0;
+	::GetWindowThreadProcessId(fg, &pid);
+	if (pid && pid != ::GetCurrentProcessId())
+		return FALSE;
 	const CCustomPopupMenu* root = m_root ? m_root : this;
 	if (root->IsHwndRelated(fg))
 		return TRUE;
@@ -3873,6 +3884,16 @@ void CCustomPopupMenu::OnKillFocus(CWnd* pNewWnd)
 		root->CloseChain(0);
 }
 
+void CCustomPopupMenu::OnActivateApp(BOOL bActive, DWORD dwThreadID)
+{
+	CWnd::OnActivateApp(bActive, dwThreadID);
+	if (bActive) return;
+	CCustomPopupMenu* root = RootMenu();
+	if (!root || !root->m_tracking) return;
+	if (PopupOwnerRelaxesDismiss(root->m_owner)) return;
+	root->CloseChain(0);
+}
+
 // この窓上のホイール。チェーン跨ぎは RunModalLoop の HandleWheelInChain。
 // クライアント座標へ直して OnWheelDelta。
 BOOL CCustomPopupMenu::OnMouseWheel(UINT nFlags, short zDelta, CPoint pt)
@@ -4175,6 +4196,9 @@ void CCustomPopupMenu::RunModalLoop()
 			dismissForForeignFocus();
 			return TRUE;
 		}
+		/* banner/FM 同期は Track 後に KickTimerp。ここで Dispatch すると 16ms アニメが止まる */
+		if (m.message == WM_TIMERP_VSYNC_TICK || m.message == WM_SPEANA_TICK)
+			return TRUE;
 		if (m.message == WM_KEYDOWN && m.wParam == VK_ESCAPE) {
 			CWnd* f = GetFocus();
 			if (!(f && IsChild(f) && f->IsKindOf(RUNTIME_CLASS(CCustomEdit)))) {

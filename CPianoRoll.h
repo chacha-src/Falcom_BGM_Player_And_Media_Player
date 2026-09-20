@@ -1,4 +1,4 @@
-﻿// CPianoRoll.h : リアルタイム簡易ピアノロールビジュアライザ
+// CPianoRoll.h : リアルタイム簡易ピアノロールビジュアライザ
 //
 // PCM ストリームを Goertzel アルゴリズムで 88 鍵分に変換し、ノートのオン/オフと
 // 強度を推定して簡易ピアノロール形式で描画する。
@@ -57,6 +57,9 @@ public:
     // プレイヤー停止時: PC音譜面化または譜面録り中なら解析継続、それ以外は Pause/Reset
     void OnPlayerFeedStopping(bool fullReset);
     bool IsScoreCapturing() const { return m_scoreCapMidi || m_scoreCapXml; }
+    bool IsPcAudioScoring() const { return savedata.mpLoopbackScore != 0 && m_feedEnabled; }
+    // MIDI/FMモニタ用: MIDI 0..107 の表示強度 0..100（非活性は0）
+    void CopyActiveKeyLevels(BYTE levels108[108]) const;
     // ウィンドウ破棄前に呼ぶ。ワーカースレッド停止と GDI バッファ解放を安全に行う
     void DetachForDestroy();
 
@@ -392,7 +395,9 @@ private:
     void RunGoertzelFromBuffer(const double* winLow, const double* winBass, int bassWinLen);
     void PublishDetectResults(); // UpdateNoteStates/PushDisplayFrames または無音クリア（m_cs 下）
     void ResetScoreCaptureLocked();
+    void SeedScoreCaptureLocked();
     void AppendScoreCaptureLocked();
+    bool PickScoreSavePath(const TCHAR* defExt, const TCHAR* defName, const TCHAR* filter, CString& outPath);
     void SaveCapturedMidi();
     void SaveCapturedMusicXml();
     void HoldPcAudioForScoreCapture();
@@ -529,6 +534,8 @@ private:
     int   m_scoreCapFrameN = 0;
     bool  m_scoreCapMidi = false;
     bool  m_scoreCapXml = false;
+    CString m_scoreCapMidiPath;
+    CString m_scoreCapXmlPath;
     bool  m_scoreCapHeldPcAudio = false; // MpPcAudioRetain を録り側で保持中
     bool  m_scoreCapForcedLoopbackScore = false; // 録りのため一時的に mpLoopbackScore を立てた
     // コード進行パネル(実験的・キー検出と履歴から簡易表示)

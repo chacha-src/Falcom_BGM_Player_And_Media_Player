@@ -1,4 +1,4 @@
-#include "stdafx.h"
+﻿#include "stdafx.h"
 #include "CCustomControl.h"
 #include "resource.h"
 #include "CImageBase.h"
@@ -304,6 +304,8 @@ static BOOL DlgOnEraseBkgnd(CDC* pDC, CBrush& brDlg, BOOL bAeroEnabled, HWND hWn
 static __declspec(thread) int s_cccPrintDepth = 0;
 /* WGC/BitBlt 取り込み中（プロセス全体）。Paint 自体は止めない */
 static volatile LONG s_cccCaptureDepth = 0;
+/* CFileDialog 等。OggDispatchChromeMessages の hwnd=NULL マウス Peek を止める */
+static volatile LONG s_cccModalUiDepth = 0;
 /* PaintOpaqueIntoBuffer など内部の WM_PRINTCLIENT。Fixer の「外部は下地だけ」を通す */
 static __declspec(thread) int s_cccInternalPrintClient = 0;
 
@@ -337,6 +339,22 @@ void CCC_CaptureLeave()
 int CCC_CaptureBusy()
 {
     return InterlockedCompareExchange(&s_cccCaptureDepth, 0, 0) > 0 ? 1 : 0;
+}
+
+void CCC_ModalUiEnter()
+{
+    InterlockedIncrement(&s_cccModalUiDepth);
+}
+
+void CCC_ModalUiLeave()
+{
+    if (InterlockedCompareExchange(&s_cccModalUiDepth, 0, 0) > 0)
+        InterlockedDecrement(&s_cccModalUiDepth);
+}
+
+int CCC_ModalUiBusy()
+{
+    return InterlockedCompareExchange(&s_cccModalUiDepth, 0, 0) > 0 ? 1 : 0;
 }
 
 int CCC_AvoidBufferedPaint()
@@ -720,19 +738,8 @@ BOOL CCC_ChromaBlitCache::BlitRect(HDC hdcDest, int x, int y, int w, int h)
     const BLENDFUNCTION bf = { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
     if (::GdiAlphaBlend(hdcDest, x, y, w, h, hdcDib, x, y, w, h, bf))
         return TRUE;
-
-    static LONG s_bpInited = 0;
-    if (InterlockedCompareExchange(&s_bpInited, 1, 0) == 0)
-        ::BufferedPaintInit();
-    RECT rect = { x, y, x + w, y + h };
-    BP_PAINTPARAMS params = { sizeof(BP_PAINTPARAMS) };
-    HDC hdcBuf = NULL;
-    HPAINTBUFFER hBP = ::BeginBufferedPaint(hdcDest, &rect, BPBF_TOPDOWNDIB, &params, &hdcBuf);
-    if (!hdcBuf || !hBP) return FALSE;
-    CCC_InitBPClear(hBP, w, h);
-    ::GdiAlphaBlend(hdcBuf, x, y, w, h, hdcDib, x, y, w, h, bf);
-    ::EndBufferedPaint(hBP, TRUE);
-    return TRUE;
+    /* Win+Shift+S 中は AlphaBlend が失敗し BeginBufferedPaint が EXECUTE AV になる → BitBlt のみ */
+    return ::BitBlt(hdcDest, x, y, w, h, hdcDib, x, y, SRCCOPY) ? TRUE : FALSE;
 }
 
 // 全面提示。dest は画面座標（キャプション下 y>0 でも buffer 原点と混同しない）。
@@ -744,19 +751,8 @@ BOOL CCC_ChromaBlitCache::BlitFull(HDC hdcDest, int x, int y, int w, int h)
     const BLENDFUNCTION bf = { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
     if (::GdiAlphaBlend(hdcDest, x, y, w, h, hdcDib, 0, 0, w, h, bf))
         return TRUE;
-
-    static LONG s_bpInited = 0;
-    if (InterlockedCompareExchange(&s_bpInited, 1, 0) == 0)
-        ::BufferedPaintInit();
-    RECT rect = { x, y, x + w, y + h };
-    BP_PAINTPARAMS params = { sizeof(BP_PAINTPARAMS) };
-    HDC hdcBuf = NULL;
-    HPAINTBUFFER hBP = ::BeginBufferedPaint(hdcDest, &rect, BPBF_TOPDOWNDIB, &params, &hdcBuf);
-    if (!hdcBuf || !hBP) return FALSE;
-    CCC_InitBPClear(hBP, w, h);
-    ::GdiAlphaBlend(hdcBuf, x, y, w, h, hdcDib, 0, 0, w, h, bf);
-    ::EndBufferedPaint(hBP, TRUE);
-    return TRUE;
+    /* Win+Shift+S 中は AlphaBlend が失敗し BeginBufferedPaint が EXECUTE AV になる → BitBlt のみ */
+    return ::BitBlt(hdcDest, x, y, w, h, hdcDib, 0, 0, SRCCOPY) ? TRUE : FALSE;
 }
 
 // キャッシュ DIB へ描いてキー→α、GdiAlphaBlend。失敗時のみ BeginBufferedPaint。
@@ -784,16 +780,8 @@ static BOOL CCC_BlitChromaCachedRect(HDC hdcDest, const RECT& rect, HDC hdcSrc, 
     if (::GdiAlphaBlend(hdcDest, rect.left, rect.top, destW, destH,
             cache.hdcDib, 0, 0, destW, destH, bf))
         return TRUE;
-
-    BP_PAINTPARAMS params = { sizeof(BP_PAINTPARAMS) };
-    HDC hdcBuf = NULL;
-    HPAINTBUFFER hBP = ::BeginBufferedPaint(hdcDest, &rect, BPBF_TOPDOWNDIB, &params, &hdcBuf);
-    if (!hdcBuf || !hBP) return FALSE;
-
-    CCC_InitBPClear(hBP, destW, destH);
-    ::GdiAlphaBlend(hdcBuf, rect.left, rect.top, destW, destH, cache.hdcDib, 0, 0, destW, destH, bf);
-    ::EndBufferedPaint(hBP, TRUE);
-    return TRUE;
+    return ::BitBlt(hdcDest, rect.left, rect.top, destW, destH,
+        cache.hdcDib, 0, 0, SRCCOPY) ? TRUE : FALSE;
 }
 
 // 画面 FillRect なし。バッファを毎回クロマキーで全面初期化してからアルファ合成（残像防止）
@@ -830,34 +818,23 @@ static BOOL CCC_BlitChromaNFRect(HDC hdcDest, const RECT& rect, HDC hdcSrc, int 
         return TRUE;
     }
 
-    BP_PAINTPARAMS params = { sizeof(BP_PAINTPARAMS) };
-    HDC hdcBuf = NULL;
-    HPAINTBUFFER hBP = ::BeginBufferedPaint(hdcDest, &rect, BPBF_TOPDOWNDIB, &params, &hdcBuf);
-    if (!hdcBuf || !hBP)
-    {
-        ::SelectObject(dcDib.GetSafeHdc(), hOld);
-        ::DeleteObject(hDib);
-        dcSrc.Detach();
-        return FALSE;
-    }
-
-    CCC_InitBPClear(hBP, destW, destH);
-    // buffer DC はクライアント座標系なので rect の左上から描画する
-    ::GdiAlphaBlend(hdcBuf, rect.left, rect.top, destW, destH, dcDib.GetSafeHdc(), 0, 0, destW, destH, bf);
-    ::EndBufferedPaint(hBP, TRUE);
-
+    const BOOL ok = ::BitBlt(hdcDest, rect.left, rect.top, destW, destH,
+        dcDib.GetSafeHdc(), 0, 0, SRCCOPY) ? TRUE : FALSE;
     ::SelectObject(dcDib.GetSafeHdc(), hOld);
     ::DeleteObject(hDib);
     dcSrc.Detach();
-    return TRUE;
+    return ok;
 }
 
 // アクリル上の矩形を α=0 に戻す（隙間をガラスにする）。clrKey は互換のため残置。
 void CCC_ClearRectChroma(HDC hdcDest, const RECT& rect, COLORREF clrKey)
 {
+    (void)clrKey;
     const int w = rect.right - rect.left;
     const int h = rect.bottom - rect.top;
     if (w <= 0 || h <= 0) return;
+    if (CCC_AvoidBufferedPaint())
+        return;
 
     BP_PAINTPARAMS params = { sizeof(BP_PAINTPARAMS) };
     HDC hdcBuf = NULL;
@@ -1001,23 +978,7 @@ static void CCC_BlitToRectOpaque(HDC hdcDest, const RECT& rect, HDC hdcSrc, int 
             return;
     }
 
-    // フォールバック: BeginBufferedPaint。バッファ原点は target rect 左上(0,0)。
-    // rect.left/top で書くと枠外→BPPF_ERASE の黒だけが残り譜面が真っ黒になる。
-    BP_PAINTPARAMS params = { sizeof(BP_PAINTPARAMS) };
-    params.dwFlags = BPPF_ERASE;
-    HDC hdcBuf = NULL;
-    HPAINTBUFFER hBP = ::BeginBufferedPaint(hdcDest, &rect, BPBF_TOPDOWNDIB, &params, &hdcBuf);
-    if (hdcBuf && hBP)
-    {
-        ::SetStretchBltMode(hdcBuf, COLORONCOLOR);
-        if (bStretch && (destW != srcW || destH != srcH))
-            ::StretchBlt(hdcBuf, 0, 0, destW, destH, hdcSrc, srcX, srcY, srcW, srcH, SRCCOPY);
-        else
-            ::BitBlt(hdcBuf, 0, 0, destW, destH, hdcSrc, srcX, srcY, SRCCOPY);
-        ::BufferedPaintMakeOpaque(hBP, NULL);
-        ::EndBufferedPaint(hBP, TRUE);
-        return;
-    }
+    /* Print/Snip 中の BeginBufferedPaint は落ちる。不透明面へは素の BitBlt で足りる。 */
     ::SetStretchBltMode(hdcDest, COLORONCOLOR);
     if (bStretch)
         ::StretchBlt(hdcDest, rect.left, rect.top, destW, destH, hdcSrc, srcX, srcY, srcW, srcH, SRCCOPY);
@@ -4224,6 +4185,14 @@ static BOOL CCC_IwEnsure(int idx)
     return ok;
 }
 
+// 裏スチルの定数α。PNG 自身の α と掛け算されるので低すぎるとほぼ消える。
+static BYTE IwA(int v)
+{
+    if (v < 8) return 0;
+    if (v > 250) return 250;
+    return (BYTE)v;
+}
+
 // 裏スチルを定数αで拡縮合成。alpha<8 は無視（ノイズ防止）。
 static void CCC_IwBlit(CDC* pDC, int x, int y, int dw, int dh, int idx, BYTE alpha)
 {
@@ -4241,8 +4210,7 @@ static void CCC_IwBlit(CDC* pDC, int x, int y, int dw, int dh, int idx, BYTE alp
     ::DeleteDC(hdc);
 }
 
-// 淫女オーバーレイ: ロータ/電マ/吸引/クンニ＋XXX愛液＋控件ピクン＋イク(白み/赤み)。
-// 縁デコ中心にし、中央の文字・クリック領域はなるべく残す。
+// 淫女オーバーレイ: 暗号化スチルを控件いっぱいに。PNG 抜きは文字・クリックを残す。
 void CCC_DrawInwoman(CDC* pDC, const CRect& rc, BOOL bAeroTrans)
 {
     if (!pDC || !CCC_IsInwoman() || rc.Width() < 8 || rc.Height() < 8)
@@ -4257,16 +4225,16 @@ void CCC_DrawInwoman(CDC* pDC, const CRect& rc, BOOL bAeroTrans)
 
     // --- イク: ほんのり白み＋赤み(文字が読める強さに抑える) ---
     if (!bAeroTrans && climax > 0.22) {
-        FillRectAlpha(pDC, rc, RGB(255, 252, 255), (BYTE)(10 + (int)(36 * climax)));
-        FillRectAlpha(pDC, rc, RGB(255, 70, 120), (BYTE)(6 + (int)(28 * climax)));
+        FillRectAlpha(pDC, rc, RGB(255, 252, 255), (BYTE)(16 + (int)(48 * climax)));
+        FillRectAlpha(pDC, rc, RGB(255, 70, 120), (BYTE)(10 + (int)(40 * climax)));
     }
 
     // --- 発情の火照り(細い縁だけ。太い帯になると操作不能) ---
     if (!bAeroTrans)
     {
-        const int g = 18 + (int)(55 * heat);
+        const int g = 28 + (int)(70 * heat);
         const COLORREF hot = (climax > 0.35) ? RGB(255, 35, 95) : RGB(255, 55, 115);
-        const int b = max(2, min(5, min(W, H) / 12));
+        const int b = max(2, min(6, min(W, H) / 10));
         FillRectAlpha(pDC, CRect(rc.left, rc.top, rc.right, rc.top + b), hot, (BYTE)g);
         FillRectAlpha(pDC, CRect(rc.left, rc.bottom - b, rc.right, rc.bottom), hot, (BYTE)g);
         FillRectAlpha(pDC, CRect(rc.left, rc.top, rc.left + b, rc.bottom), hot, (BYTE)(g * 3 / 4));
@@ -4282,63 +4250,63 @@ void CCC_DrawInwoman(CDC* pDC, const CRect& rc, BOOL bAeroTrans)
                 const int rise = (int)((0.5 + 0.5 * sin(ph)) * (H / 8 + (int)(H / 14 * climax)));
                 const int py = rc.top + 2 + rise;
                 const int pr = max(2, W / 28 + (int)(1 * climax));
-                FillRectAlpha(pDC, CRect(px - pr, py - pr, px + pr, py + pr), RGB(255, 245, 250), (BYTE)(18 + (int)(22 * iku)));
+                FillRectAlpha(pDC, CRect(px - pr, py - pr, px + pr, py + pr), RGB(255, 245, 250), (BYTE)(28 + (int)(32 * iku)));
             }
         }
     }
 
-    const BYTE aLace = (BYTE)(70 + (int)(50 * heat));
-    const BYTE aBody = (BYTE)(48 + (int)(70 * heat) + (int)(40 * climax));
-    const BYTE aFace = (BYTE)(80 + (int)(90 * iku));
+    const BYTE aLace = IwA(130 + (int)(70 * heat));
+    const BYTE aBody = IwA(165 + (int)(55 * heat) + (int)(30 * climax));
+    const BYTE aFace = IwA(175 + (int)(70 * iku));
     const int ox = (int)(1.5 * sin(t / 180.0) + 2 * twitch);
     const int oy = (int)(-1 * climax);
 
-    // ジャム解除スチル。中央の文字は残すので縁・下半分中心。
+    // ジャム解除スチル。抜きPNGなので全面に出してもラベルは残る。
     if (H >= 14 && W >= 20)
-        CCC_IwBlit(pDC, rc.left + 2, rc.bottom - max(8, H / 5), W - 4, max(8, H / 5), IW_LACE, aLace);
+        CCC_IwBlit(pDC, rc.left + 1, rc.bottom - max(10, H / 4), W - 2, max(10, H / 4), IW_LACE, aLace);
 
-    if (H >= 18 && W >= 28) {
-        const int bw = max(10, W / 6), bh = max(8, H / 4);
-        CCC_IwBlit(pDC, rc.left + 2, rc.bottom - bh - 1, bw, bh, IW_BLUSH, (BYTE)(50 + 40 * heat));
-        CCC_IwBlit(pDC, rc.right - bw - 2, rc.bottom - bh - 1, bw, bh, IW_BLUSH, (BYTE)(50 + 40 * heat));
+    if (H >= 16 && W >= 24) {
+        const int bw = max(12, W / 4), bh = max(10, H / 3);
+        CCC_IwBlit(pDC, rc.left + 1, rc.bottom - bh - 1, bw, bh, IW_BLUSH, IwA(110 + (int)(60 * heat)));
+        CCC_IwBlit(pDC, rc.right - bw - 1, rc.bottom - bh - 1, bw, bh, IW_BLUSH, IwA(110 + (int)(60 * heat)));
     }
 
-    if (H >= 20 && W >= 32) {
-        const int bh = max(12, H * 12 / 20);
-        const int bw = max(18, W * 5 / 8);
+    if (H >= 16 && W >= 24) {
+        const int bh = max(12, H * 88 / 100);
+        const int bw = max(18, W * 82 / 100);
         CCC_IwBlit(pDC, rc.left + ox, rc.bottom - bh + oy, bw, bh, IW_BODY, aBody);
     }
 
-    if (H >= 26 && W >= 48) {
-        const int bw = max(14, W * 2 / 7);
-        CCC_IwBlit(pDC, rc.right - bw - 1 + ox, rc.top + 2 + oy, bw, H * 2 / 5, IW_BODY2, (BYTE)(aBody * 3 / 4));
+    if (H >= 20 && W >= 36) {
+        const int bw = max(16, W * 38 / 100);
+        CCC_IwBlit(pDC, rc.right - bw - 1 + ox, rc.top + 1 + oy, bw, max(16, H * 62 / 100), IW_BODY2, IwA(aBody * 7 / 8));
     }
 
-    if (H >= 22 && W >= 40) {
-        const int fs = min(min(H * 3 / 5, W * 2 / 5), 110);
+    if (H >= 18 && W >= 28) {
+        const int fs = min(min(H * 3 / 4, W * 3 / 5), 140);
         CCC_IwBlit(pDC, rc.left + 1 + ox, rc.top + 1 + oy, fs, fs, IW_FACE, aFace);
     }
 
-    if (H >= 20 && W >= 26) {
-        const int fw = max(12, W / 6), fh = max(16, H * 2 / 5);
-        CCC_IwBlit(pDC, rc.left + W / 4 - fw / 2, rc.bottom - fh - 1, fw, fh, IW_FLUID, (BYTE)(90 + 90 * iku));
+    if (H >= 18 && W >= 24) {
+        const int fw = max(14, W / 4), fh = max(16, H * 45 / 100);
+        CCC_IwBlit(pDC, rc.left + W / 3 - fw / 2, rc.bottom - fh - 1, fw, fh, IW_FLUID, IwA(150 + (int)(90 * iku)));
     }
 
     // トイは裸体の秘所(左下寄り)を避ける。上端・右上へ。
-    if (H >= 18 && W >= 24) {
-        const int rs = min(min(H * 2 / 5, W / 4), 42);
-        CCC_IwBlit(pDC, rc.right - rs - 2 + ox, rc.top + 1 + oy, rs, rs, IW_ROTOR,
-            (BYTE)(110 + 80 * heat));
+    if (H >= 16 && W >= 22) {
+        const int rs = min(min(H / 2, W / 3), 56);
+        CCC_IwBlit(pDC, rc.right - rs - 1 + ox, rc.top + 1 + oy, rs, rs, IW_ROTOR,
+            IwA(180 + (int)(70 * heat)));
     }
-    if (H >= 22 && W >= 36) {
-        const int vs = min(min(H * 2 / 5, W / 4), 52);
-        CCC_IwBlit(pDC, rc.right - vs - 1 + ox, rc.top + H / 3 + oy, vs, vs, IW_VIBE,
-            (BYTE)(100 + 70 * heat));
+    if (H >= 20 && W >= 30) {
+        const int vs = min(min(H / 2, W / 3), 68);
+        CCC_IwBlit(pDC, rc.right - vs - 1 + ox, rc.top + H / 4 + oy, vs, vs, IW_VIBE,
+            IwA(170 + (int)(70 * heat)));
     }
 
-    if (H >= 20 && W >= 36) {
-        const int bs = max(10, min(18, H / 3));
-        CCC_IwBlit(pDC, rc.left + W / 2 - bs / 2, rc.top + 1, bs, bs, IW_BOW, (BYTE)(90 + 40 * breath));
+    if (H >= 18 && W >= 32) {
+        const int bs = max(12, min(24, H / 2));
+        CCC_IwBlit(pDC, rc.left + W / 2 - bs / 2, rc.top + 1, bs, bs, IW_BOW, IwA(150 + (int)(50 * breath)));
     }
 
     const BOOL havePhoto = CCC_IwEnsure(IW_BODY) || CCC_IwEnsure(IW_FACE);
@@ -4401,44 +4369,44 @@ static void CCC_DrawInwomanDlgBody(CDC* pDC, const CRect& rc)
     const int oy = (int)(-2 * climax);
 
     if (!CCC_IsAeroEnabled() && climax > 0.18) {
-        FillRectAlpha(pDC, rc, RGB(255, 70, 120), (BYTE)(8 + (int)(22 * climax)));
+        FillRectAlpha(pDC, rc, RGB(255, 70, 120), (BYTE)(14 + (int)(36 * climax)));
     }
 
-    const int bodyH = max(40, H * 52 / 100);
-    const int bodyW = max(80, W * 56 / 100);
+    const int bodyH = max(40, H * 88 / 100);
+    const int bodyW = max(80, W * 78 / 100);
     CCC_IwBlit(pDC, rc.left + ox, rc.bottom - bodyH + oy, bodyW, bodyH, IW_BODY,
-        (BYTE)(70 + (int)(70 * heat)));
+        IwA(180 + (int)(55 * heat)));
 
-    const int face = min(min(W / 3, H / 2), 220);
-    CCC_IwBlit(pDC, rc.left + 6 + ox, rc.top + 8 + oy, face, face, IW_FACE,
-        (BYTE)(90 + (int)(80 * iku)));
+    const int face = min(min(W / 2, H * 3 / 5), 360);
+    CCC_IwBlit(pDC, rc.left + 4 + ox, rc.top + 4 + oy, face, face, IW_FACE,
+        IwA(190 + (int)(55 * iku)));
 
-    const int sideW = max(48, W / 5);
-    CCC_IwBlit(pDC, rc.right - sideW - 8 + ox, rc.top + 8 + oy, sideW, H * 2 / 5, IW_BODY2,
-        (BYTE)(60 + (int)(50 * heat)));
+    const int sideW = max(56, W * 34 / 100);
+    CCC_IwBlit(pDC, rc.right - sideW - 4 + ox, rc.top + 4 + oy, sideW, H * 58 / 100, IW_BODY2,
+        IwA(165 + (int)(50 * heat)));
 
     // 電マ・ロータは裸体の下腹部を避ける（右上／右中）
-    const int vh = min(140, max(52, H / 4));
-    CCC_IwBlit(pDC, rc.right - vh - 10 + ox, rc.top + 10 + oy, vh, vh, IW_VIBE,
-        (BYTE)(120 + (int)(80 * heat)));
+    const int vh = min(200, max(64, H / 3));
+    CCC_IwBlit(pDC, rc.right - vh - 6 + ox, rc.top + 6 + oy, vh, vh, IW_VIBE,
+        IwA(195 + (int)(50 * heat)));
 
-    const int rh = min(80, max(32, H / 7));
-    CCC_IwBlit(pDC, rc.right - rh - 18 + ox, rc.top + H * 38 / 100 + oy, rh, rh, IW_ROTOR,
-        (BYTE)(130 + (int)(70 * heat)));
+    const int rh = min(120, max(40, H / 5));
+    CCC_IwBlit(pDC, rc.right - rh - 12 + ox, rc.top + H * 36 / 100 + oy, rh, rh, IW_ROTOR,
+        IwA(200 + (int)(45 * heat)));
 
-    const int fh = max(36, H / 6);
-    const int fw = max(40, bodyW / 3);
+    const int fh = max(48, H / 4);
+    const int fw = max(56, bodyW / 2);
     CCC_IwBlit(pDC, rc.left + bodyW / 2 - fw / 2 + ox, rc.bottom - fh + oy, fw, fh, IW_FLUID,
-        (BYTE)(100 + (int)(90 * iku)));
+        IwA(175 + (int)(70 * iku)));
 
-    CCC_IwBlit(pDC, rc.left, rc.bottom - max(16, H / 14), W, max(16, H / 14), IW_LACE,
-        (BYTE)(90 + (int)(50 * heat)));
+    CCC_IwBlit(pDC, rc.left, rc.bottom - max(22, H / 8), W, max(22, H / 8), IW_LACE,
+        IwA(155 + (int)(50 * heat)));
 }
 
-// aero=0 の GDI キャンバスへ裸体オーバーレイ。アクリル時はガラスと干渉するので描かない。
+// GDI キャンバスへ裸体オーバーレイ。アクリルでもスチルは AlphaBlend できる（塗り潰しは DlgBody 側で弾く）。
 void CCC_DrawInwomanOnRect(CDC* pDC, const CRect& rc)
 {
-    if (!pDC || !CCC_IsInwoman() || CCC_IsAeroEnabled())
+    if (!pDC || !CCC_IsInwoman())
         return;
     CCC_DrawInwomanDlgBody(pDC, rc);
 }
@@ -4446,7 +4414,7 @@ void CCC_DrawInwomanOnRect(CDC* pDC, const CRect& rc)
 // クライアント本文（キャプション帯を除く）へ。ピアノロール等の GDI 面。
 void CCC_DrawInwomanOnClient(CDC* pDC, HWND hWnd)
 {
-    if (!pDC || !hWnd || !CCC_IsInwoman() || CCC_IsAeroEnabled())
+    if (!pDC || !hWnd || !CCC_IsInwoman())
         return;
     CRect r;
     ::GetClientRect(hWnd, &r);
@@ -4456,7 +4424,7 @@ void CCC_DrawInwomanOnClient(CDC* pDC, HWND hWnd)
     CCC_DrawInwomanDlgBody(pDC, r);
 }
 
-// カスタムキャプション描画の前に本文へ淫女を重ねる（aero=0 のみ中で弾く）。
+// カスタムキャプション描画の前に本文へ淫女を重ねる。
 void CCC_CaptionPaintGdi(CDC& dc, HWND hDlg)
 {
     CCC_DrawInwomanOnClient(&dc, hDlg);
@@ -9393,6 +9361,8 @@ IMPLEMENT_DYNAMIC(CCustomListCtrl, CListCtrlA)
 BEGIN_MESSAGE_MAP(CCustomListCtrl, CListCtrlA)
     ON_WM_CTLCOLOR_REFLECT()
     ON_NOTIFY_REFLECT(NM_CUSTOMDRAW, OnCustomDraw)
+    ON_WM_LBUTTONDOWN()
+    ON_WM_LBUTTONUP()
     ON_WM_MOUSEMOVE()
     ON_WM_MOUSELEAVE()
     ON_WM_VSCROLL()
@@ -9427,6 +9397,7 @@ void CCustomListCtrl::OnDropFiles(HDROP hDropInfo)
 // リスト全体 Invalidate は再生中ピアノ提示を遅らせるので使わない。
 CCustomListCtrl::CCustomListCtrl()
     : m_bAutoDelete(FALSE), m_nHotItem(-1), m_bAeroMode(FALSE)
+    , m_ptLBtnDown(0, 0), m_bTrackDragGate(FALSE)
 {
     m_brBackground.CreateSolidBrush(COLOR_LIST_BG);
     m_heartRcSel.SetRectEmpty();
@@ -9475,14 +9446,46 @@ HBRUSH CCustomListCtrl::CtlColor(CDC* pDC, UINT)
     return (HBRUSH)m_brBackground.GetSafeHandle();
 }
 
+// 行上クリックの選択は既定へ。起点だけ覚え、しきい値未満では BEGINDRAG を出させない。
+void CCustomListCtrl::OnLButtonDown(UINT f, CPoint p)
+{
+    UINT ht = 0;
+    m_ptLBtnDown = p;
+    m_bTrackDragGate = (HitTest(p, &ht) >= 0);
+    CListCtrl::OnLButtonDown(f, p);
+}
+
+void CCustomListCtrl::OnLButtonUp(UINT f, CPoint p)
+{
+    m_bTrackDragGate = FALSE;
+    CListCtrl::OnLButtonUp(f, p);
+}
+
 // SubItemHitTest でホバー行更新。LEAVE を張り、♡タイマは CustomDraw が必要なら開始。
 // ガラス親: 行 blit 後、既定 OnMouseMove の Invalidate だけ Validate で捨てる。
 // ※ SETREDRAW TRUE は ListView 内部の空/α=0 バッファを先に出して「だんだん消える」ので禁止。
+// 項目クリック直後の微小移動・ホット行再描画では既定 OnMouseMove に渡さず、
+// ListView が LVN_BEGINDRAG を誤送しないようにする。
 void CCustomListCtrl::OnMouseMove(UINT f, CPoint p)
 {
     LVHITTESTINFO h;
     h.pt = p;
     UpdateHotItem(SubItemHitTest(&h));
+    if (m_bTrackDragGate && (f & MK_LBUTTON)) {
+        int gx = GetSystemMetrics(SM_CXDRAG);
+        int gy = GetSystemMetrics(SM_CYDRAG);
+        if (gx < 4) gx = 4;
+        if (gy < 4) gy = 4;
+        if (abs(p.x - m_ptLBtnDown.x) < gx && abs(p.y - m_ptLBtnDown.y) < gy) {
+            TRACKMOUSEEVENT t = { sizeof(t), TME_LEAVE, m_hWnd, 0 };
+            TrackMouseEvent(&t);
+#if CCUSTOM_AERO_SUPPORT
+            if (CCC_HostNeedsChildOpaque(m_hWnd))
+                ::ValidateRect(m_hWnd, NULL);
+#endif
+            return;
+        }
+    }
     CListCtrl::OnMouseMove(f, p);
 #if CCUSTOM_AERO_SUPPORT
     if (CCC_HostNeedsChildOpaque(m_hWnd))

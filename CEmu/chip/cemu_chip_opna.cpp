@@ -23,6 +23,8 @@ struct CEmuChipOpnaImpl : ymfm::ymfm_interface {
 	int64_t dbgLastDur[2];
 	uint8_t mode27;
 	unsigned timerClockScale;
+	unsigned timerClockScaleDen;
+	uint64_t timerScaleResidual;
 	unsigned pitchRateDiv;
 	int pitchOctaveShift; /* FMブロック書き換えのみ。シャドウは元のブロックを保持。 */
 	int carrierFadeClamp;
@@ -83,6 +85,8 @@ struct CEmuChipOpnaImpl : ymfm::ymfm_interface {
 		, irqAsserted(0)
 		, mode27(0)
 		, timerClockScale(1)
+		, timerClockScaleDen(1)
+		, timerScaleResidual(0)
 		, pitchRateDiv(1)
 		, pitchOctaveShift(0)
 		, carrierFadeClamp(0)
@@ -552,10 +556,14 @@ void CEmuChipOpnaAdvanceClocks(CEmuChipOpna* c, uint64_t chipCycles)
 	CEmuChipOpnaImpl* impl = (CEmuChipOpnaImpl*)c->chip;
 	impl->dbgClockSum += chipCycles;
 	/* タイマ/IRQのみ — PCMは Render/ChipSample のみで生成。
-	   ここでマスタクロックをスケールしない: YM 2D/2E/2F が既にタイマ長を短くする。
-	   BIOS 2Fh の上に timerClockScale×3 を重ねると PC-98（ys2 など）が数倍速になる。 */
-	const uint64_t scaled = chipCycles * (uint64_t)impl->timerClockScale;
-	impl->ExpireTimers((int64_t)scaled);
+	   整数以外の補償は num/den + 残余。BIOS 2Fh の上に ×3 を重ねると
+	   PC-98（ys2 など）が数倍速になる。 */
+	const unsigned den = impl->timerClockScaleDen ? impl->timerClockScaleDen : 1u;
+	impl->timerScaleResidual += chipCycles * (uint64_t)impl->timerClockScale;
+	const uint64_t scaled = impl->timerScaleResidual / (uint64_t)den;
+	impl->timerScaleResidual %= (uint64_t)den;
+	if (scaled)
+		impl->ExpireTimers((int64_t)scaled);
 }
 
 int CEmuChipOpnaIrq(const CEmuChipOpna* c)
@@ -670,8 +678,16 @@ void CEmuChipOpnaSetTimerIrqPolicy(CEmuChipOpna* c, int allowTimerA)
 
 void CEmuChipOpnaSetTimerClockScale(CEmuChipOpna* c, unsigned scale)
 {
+	CEmuChipOpnaSetTimerClockScaleRatio(c, scale ? scale : 1u, 1u);
+}
+
+void CEmuChipOpnaSetTimerClockScaleRatio(CEmuChipOpna* c, unsigned num, unsigned den)
+{
 	if (!c || !c->chip) return;
-	((CEmuChipOpnaImpl*)c->chip)->timerClockScale = scale ? scale : 1;
+	CEmuChipOpnaImpl* impl = (CEmuChipOpnaImpl*)c->chip;
+	impl->timerClockScale = num ? num : 1u;
+	impl->timerClockScaleDen = den ? den : 1u;
+	impl->timerScaleResidual = 0;
 }
 
 void CEmuChipOpnaSetPitchRateDiv(CEmuChipOpna* c, unsigned div)
@@ -813,6 +829,11 @@ public:
 	void SetTimerClockScale(unsigned scale) override
 	{
 		CEmuChipOpnaSetTimerClockScale(&core_, scale);
+	}
+
+	void SetTimerClockScaleRatio(unsigned num, unsigned den) override
+	{
+		CEmuChipOpnaSetTimerClockScaleRatio(&core_, num, den);
 	}
 
 	void SetPitchRateDiv(unsigned div) override

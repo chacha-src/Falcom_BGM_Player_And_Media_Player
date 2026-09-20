@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 // ============================================================================
 // KpiHost64 用の最小 stdafx
 // ----------------------------------------------------------------------------
@@ -13,6 +13,9 @@
 #include <string.h>
 #include <wchar.h>
 #include <math.h>
+#ifdef _OPENMP
+#include <omp.h>
+#endif
 #include <shlobj.h>
 struct save {
 	int lang; // 0=ja … 13=tr。本体の savedata.lang と同じ。PING で上書き

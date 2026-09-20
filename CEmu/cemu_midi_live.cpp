@@ -1,4 +1,4 @@
-#include "StdAfx.h"
+﻿#include "StdAfx.h"
 #include "cemu_midi_live.h"
 #include "cemu_types.h"
 #include "cemu_modepref.h"
@@ -8,11 +8,12 @@
 #include "machine/cemu_hard.h"
 #include "machine/cemu_hard_pcat.h"
 #include "machine/cemu_hard_pc98.h"
+#include "VstMidiEngine.h"
 #include <string.h>
 #include <stdlib.h>
 
 enum {
-	kLiveInjCap = 512,
+	kLiveInjCap = 8192,
 	/* PC98 の host-walk フォールバックは起動時に曲全体をキャプチャへ渡す。
 	   最初の Pump が 512 フレーム窓を超えて全部 defer し、512 スロットだと
 	   Note Off の大半が黙って落ちていた。 */
@@ -52,10 +53,27 @@ struct CEmuMidiLive {
 	__int64 midiSample;  /* UART delta タイムライン → ストリーム開始からのサンプル */
 	__int64 audioSample; /* 既に Pump したサンプル (= Host64 チャンク基準) */
 	int isMt32;
+	int midiType; /* hoot midiout_type: 1/2 LA, 4/6 GS, 7 SC-88, 8 GM */
 	int laBanksSent;
+	int setupSent;
 	int cc111StartSent;
 	int sawNotes;
 	int noteOns;
+	uint8_t pc[16];
+	uint8_t cc[16][128];
+	uint8_t havePc[16];
+	uint8_t haveCc[16][128];
+	uint8_t pbL[16], pbM[16], havePb[16];
+	int initPcBurst;
+	int drumPcRetrig;
+	__int64 holdNotesUntil;
+	/* GM On / GS Reset / XG On のあと、プラグインが消化するまで後続を止める */
+	__int64 resetHoldUntil;
+	uint8_t sxHoldBuf[262144];
+	int sxHoldOff[1024];
+	int sxHoldLen[1024];
+	int sxHoldN;
+	int sxHoldUsed;
 	wchar_t zipPath[CEMU_ZIP_PATH];
 	/* 同一 zip SE overlay: 短い捕捉窓で NoteOn を印し、SE 終了時に
 	   そのキーだけ Note Off (BGM を CC123 しない)。 */
@@ -77,6 +95,14 @@ struct CEmuMidiLive {
 	int holdN;
 	int16_t* mixBuf;
 	int mixCap;
+	volatile LONG inPump;
+	/* SysEx は Pump をまたいで F7 まで保持。途中で打ち切るとダンプが
+	   running-status ノートになり、起動直後のゴミ音と鍵盤の往復になる。 */
+	int inSysex;
+	uint8_t sxBuf[4096];
+	int sxN;
+	int sxMt;
+	int sxOverflow;
 	/* リング圧。ここで黙って落とすと PC / Note Off が消える。 */
 	unsigned injDropped;
 	unsigned holdDropped;
@@ -116,13 +142,35 @@ static void SmfPutVar(uint8_t* track, unsigned* tp, uint32_t v)
 		track[(*tp)++] = tmp[i];
 }
 
-/* 最小 Type-0 SMF: tempo, 名前, 任意 LA バンク, CC#111=0, 長い無音, EOT。
+static void SmfPutSysex(uint8_t* track, unsigned* tp, const uint8_t* sx, int n)
+{
+	if (!track || !tp || !sx || n < 2) return;
+	SmfPutVar(track, tp, 0);
+	track[(*tp)++] = 0xf0;
+	SmfPutVar(track, tp, (uint32_t)(n - 1));
+	for (int i = 1; i < n; i++)
+		track[(*tp)++] = sx[i];
+}
+
+/* Roland GS Reset / SC-88 System Mode / GM On。チェックサムは Roland DT1。 */
+static const uint8_t kSxGsReset[] = {
+	0xF0, 0x41, 0x10, 0x42, 0x12, 0x40, 0x00, 0x7F, 0x00, 0x41, 0xF7
+};
+static const uint8_t kSxGsSysMode[] = {
+	0xF0, 0x41, 0x10, 0x42, 0x12, 0x00, 0x00, 0x7F, 0x00, 0x01, 0xF7
+};
+static const uint8_t kSxGmOn[] = {
+	0xF0, 0x7E, 0x7F, 0x09, 0x01, 0xF7
+};
+
+/* 最小 Type-0 SMF: tempo, 名前, GS/SC-88/GM/LA 前設定, CC#111=0, 長い無音, EOT。
    VST はすぐ開き、リアルタイム音符は inject で来る。 */
-static int WriteLiveStubSmf(const wchar_t* path, const char* seqName, int laBanks)
+static int WriteLiveStubSmf(const wchar_t* path, const char* seqName, int midiType)
 {
 	if (!path || !path[0]) return 0;
-	uint8_t track[1024];
+	uint8_t track[2048];
 	unsigned tp = 0;
+	const int laBanks = (midiType == 1 || midiType == 2) ? 1 : 0;
 
 	SmfPutVar(track, &tp, 0);
 	track[tp++] = 0xff; track[tp++] = 0x51; track[tp++] = 0x03;
@@ -152,9 +200,8 @@ static int WriteLiveStubSmf(const wchar_t* path, const char* seqName, int laBank
 			track[tp++] = (uint8_t)(0xb0 | ch); track[tp++] = 32; track[tp++] = 0;
 		}
 	}
-
-	SmfPutVar(track, &tp, 0);
-	track[tp++] = 0xb0; track[tp++] = 111; track[tp++] = 0;
+	/* GS Reset / CC#111 はスタブに書かない。DispatchDueEvents はライブ注入の
+	   あと SMF を歩くので、同じブロックで FMP の POWER/PC を消す。 */
 
 	/* 数日分の本体。Host64/local の lengthSamples がライブ inject 用に開いたまま。
 	   ここで CC#111 終端を書かない — 空の 4 日 SMF を VST がループしてしまう。 */
@@ -192,21 +239,40 @@ static void LiveEnsureCs(void)
 	}
 }
 
-/* inject リングへ。満杯なら黙って落とす (PC/Off が消える) */
+/* inject リングへ。満杯ならノートオンだけ捨て、並びは崩さない。 */
 static void LivePushShort(DWORD msg, int sampleOfs)
 {
 	const LONG w = g_live.injW;
-	const unsigned used = (unsigned)(w - g_live.injR);
+	unsigned used = (unsigned)(w - g_live.injR);
 	if (used > g_live.injPeak) g_live.injPeak = used;
 	if (used >= (unsigned)(kLiveInjCap - 1)) {
-		g_live.injDropped++;
-		return;
+		const int st = (int)(msg & 0xf0);
+		const int keep = (st == 0xb0 || st == 0xc0 || st == 0xe0
+			|| st == 0x80 || (st == 0x90 && ((msg >> 16) & 0x7f) == 0));
+		if (!keep) {
+			g_live.injDropped++;
+			return;
+		}
+		const LONG r = g_live.injR;
+		const int i = (int)(r & (kLiveInjCap - 1));
+		const DWORD old = g_live.inj[i].msg;
+		const int ost = (int)(old & 0xf0);
+		if (ost == 0x90 && ((old >> 16) & 0x7f) > 0) {
+			g_live.injR = r + 1;
+			g_live.injDropped++;
+		} else {
+			g_live.injDropped++;
+			return;
+		}
 	}
-	const int i = (int)(w & (kLiveInjCap - 1));
-	g_live.inj[i].msg = msg;
-	g_live.inj[i].sampleOfs = sampleOfs;
-	MemoryBarrier();
-	g_live.injW = w + 1;
+	{
+		const LONG nw = g_live.injW;
+		const int i = (int)(nw & (kLiveInjCap - 1));
+		g_live.inj[i].msg = msg;
+		g_live.inj[i].sampleOfs = sampleOfs;
+		MemoryBarrier();
+		g_live.injW = nw + 1;
+	}
 }
 
 /* まだこの Pump 窓に入らないイベントを hold へ */
@@ -366,11 +432,292 @@ static void LiveEmitTimed(DWORD msg, int frames)
 	}
 }
 
+static void LiveLatchShort(DWORD msg)
+{
+	const int ch = (int)(msg & 15);
+	const int hi = (int)(msg & 0xf0);
+	if (hi == 0xc0) {
+		g_live.pc[ch] = (uint8_t)((msg >> 8) & 0x7f);
+		g_live.havePc[ch] = 1;
+	} else if (hi == 0xb0) {
+		const int cc = (int)((msg >> 8) & 0x7f);
+		const int vv = (int)((msg >> 16) & 0x7f);
+		g_live.cc[ch][cc] = (uint8_t)vv;
+		g_live.haveCc[ch][cc] = 1;
+	} else if (hi == 0xe0) {
+		g_live.pbL[ch] = (uint8_t)((msg >> 8) & 0x7f);
+		g_live.pbM[ch] = (uint8_t)((msg >> 16) & 0x7f);
+		g_live.havePb[ch] = 1;
+	}
+}
+
+static int LiveHasProgramLatch(void)
+{
+	for (int i = 0; i < 16; i++) {
+		if (g_live.havePc[i] || g_live.havePb[i])
+			return 1;
+		for (int c = 0; c < 128; c++) {
+			if (g_live.haveCc[i][c])
+				return 1;
+		}
+	}
+	return 0;
+}
+
+static void LivePushProgramSnapshot(int ofs)
+{
+	for (int ch = 0; ch < 16; ch++) {
+		int any = g_live.havePc[ch] || g_live.havePb[ch];
+		for (int c = 0; !any && c < 128; c++)
+			if (g_live.haveCc[ch][c]) any = 1;
+		if (!any) continue;
+		if (g_live.haveCc[ch][0])
+			LivePushShort((DWORD)(0xb0 | ch) | (0u << 8)
+				| ((DWORD)g_live.cc[ch][0] << 16), ofs);
+		if (g_live.haveCc[ch][32])
+			LivePushShort((DWORD)(0xb0 | ch) | (32u << 8)
+				| ((DWORD)g_live.cc[ch][32] << 16), ofs);
+		for (int c = 1; c < 128; c++) {
+			if (c == 32 || c == 120 || c == 121 || c == 123)
+				continue;
+			if (!g_live.haveCc[ch][c]) continue;
+			LivePushShort((DWORD)(0xb0 | ch) | ((DWORD)c << 8)
+				| ((DWORD)g_live.cc[ch][c] << 16), ofs);
+		}
+		if (g_live.havePb[ch])
+			LivePushShort((DWORD)(0xe0 | ch)
+				| ((DWORD)g_live.pbL[ch] << 8)
+				| ((DWORD)g_live.pbM[ch] << 16), ofs);
+		if (g_live.havePc[ch])
+			LivePushShort((DWORD)(0xc0 | ch) | ((DWORD)g_live.pc[ch] << 8), ofs);
+	}
+}
+
+static int LiveResetHolding(void)
+{
+	return (g_live.resetHoldUntil
+		&& g_live.audioSample < g_live.resetHoldUntil) ? 1 : 0;
+}
+
+static void LiveQueueSysex(const uint8_t* d, int n)
+{
+	if (!d || n < 2) return;
+	if (g_live.sxHoldN >= 1024) return;
+	if (g_live.sxHoldUsed + n > (int)sizeof(g_live.sxHoldBuf)) return;
+	g_live.sxHoldOff[g_live.sxHoldN] = g_live.sxHoldUsed;
+	g_live.sxHoldLen[g_live.sxHoldN] = n;
+	memcpy(g_live.sxHoldBuf + g_live.sxHoldUsed, d, (size_t)n);
+	g_live.sxHoldUsed += n;
+	g_live.sxHoldN++;
+}
+
+static int LiveSysexIsHardReset(const uint8_t* d, int n)
+{
+	return VstMidiSysexIsGmOn(d, n)
+		|| VstMidiSysexIsGsReset(d, n)
+		|| VstMidiSysexIsXgOn(d, n);
+}
+
+static int LiveSysexIsModeChange(const uint8_t* d, int n)
+{
+	return LiveSysexIsHardReset(d, n)
+		|| VstMidiSysexIsGsSysMode(d, n);
+}
+
+/* GS 40/50/60 1x 15 = USE FOR RHYTHM。SC-VA は MAP2 を書くと
+   既存キット（A10 POWER など）を STANDARD に戻す。 */
+static int LiveSysexIsRhythmUse(const uint8_t* d, int n)
+{
+	if (!d || n < 11) return 0;
+	if (d[0] != 0xf0 || d[1] != 0x41 || d[3] != 0x42 || d[4] != 0x12)
+		return 0;
+	const uint8_t aa = d[5];
+	if ((aa & 0xf0) != 0x40 && (aa & 0xf0) != 0x50 && (aa & 0xf0) != 0x60)
+		return 0;
+	if (d[6] < 0x10 || d[6] > 0x1f) return 0;
+	return (d[7] == 0x15) ? 1 : 0;
+}
+
+static __int64 LiveNoteGate(void)
+{
+	__int64 gate = g_live.resetHoldUntil;
+	if (g_live.holdNotesUntil > gate)
+		gate = g_live.holdNotesUntil;
+	return gate;
+}
+
+/* PC/GS ゲートより前のノートだけ後ろへずらす。間隔は潰さない。
+   一点に揃えると TriggerPlay が先に進めたイントロが先頭 1–2s で走る。 */
+static void LivePostponeHoldsToNotes(void)
+{
+	const __int64 gate = g_live.holdNotesUntil;
+	if (gate <= 0 || g_live.holdN <= 0) return;
+	__int64 minDue = g_live.hold[0].dueAbs;
+	for (int i = 1; i < g_live.holdN; i++) {
+		if (g_live.hold[i].dueAbs < minDue)
+			minDue = g_live.hold[i].dueAbs;
+	}
+	if (minDue >= gate) return;
+	const __int64 shift = gate - minDue;
+	for (int i = 0; i < g_live.holdN; i++)
+		g_live.hold[i].dueAbs += shift;
+}
+
+static void LiveHoldNoteTimed(DWORD msg, int isOn)
+{
+	LiveAdvanceMidiClock();
+	__int64 due = g_live.midiSample;
+	const __int64 gate = LiveNoteGate();
+	if (due < gate)
+		due = gate;
+	LiveHoldPushAbs(msg, due);
+	LiveTrackMsg(msg);
+	if (isOn) {
+		g_live.noteOns++;
+		g_live.sawNotes = 1;
+	}
+}
+
+/* 1x 15 の次の process() まで PC を出さない（同一バッファだとキットが消える）。 */
+static void LiveArmRhythmPcWait(int frames)
+{
+	const int cur = frames > 0 ? frames : 512;
+	g_live.resetHoldUntil = g_live.audioSample + (__int64)cur;
+	const __int64 notes = g_live.resetHoldUntil + 512;
+	if (g_live.holdNotesUntil < notes)
+		g_live.holdNotesUntil = notes;
+	LivePostponeHoldsToNotes();
+}
+
+static void LiveCompactSysexHold(int drop)
+{
+	if (drop <= 0) return;
+	if (drop >= g_live.sxHoldN) {
+		g_live.sxHoldN = 0;
+		g_live.sxHoldUsed = 0;
+		return;
+	}
+	int used = 0;
+	int n = 0;
+	for (int i = drop; i < g_live.sxHoldN; i++) {
+		const int ln = g_live.sxHoldLen[i];
+		if (g_live.sxHoldOff[i] != used)
+			memmove(g_live.sxHoldBuf + used,
+				g_live.sxHoldBuf + g_live.sxHoldOff[i], (size_t)ln);
+		g_live.sxHoldOff[n] = used;
+		g_live.sxHoldLen[n] = ln;
+		used += ln;
+		n++;
+	}
+	g_live.sxHoldN = n;
+	g_live.sxHoldUsed = used;
+}
+
+/* VST BLOCK_FRAMES=512。Open 時の Reset 消化と同じ 12 ブロック無音。 */
+static void LiveArmResetHold(int frames)
+{
+	const int silent = 12 * 512;
+	const int cur = frames > 0 ? frames : 512;
+	g_live.resetHoldUntil = g_live.audioSample
+		+ (__int64)cur + (__int64)silent;
+	g_live.holdNotesUntil = g_live.resetHoldUntil + 512;
+	g_live.initPcBurst = 0;
+	g_live.drumPcRetrig = 0;
+	LivePostponeHoldsToNotes();
+}
+
+static void LiveFlushResetGate(int frames)
+{
+	if (!g_live.resetHoldUntil) return;
+	if (g_live.audioSample < g_live.resetHoldUntil) return;
+	g_live.resetHoldUntil = 0;
+	/* キュー先頭のモード変更（GS Reset のあとの System Mode など）は
+	   PC と同じブロックに載せない。88map 切替が PC を Piano に戻す。 */
+	int drop = 0;
+	int rearm = 0;
+	int sawRhythm = 0;
+	for (int i = 0; i < g_live.sxHoldN; i++) {
+		const uint8_t* d = g_live.sxHoldBuf + g_live.sxHoldOff[i];
+		const int n = g_live.sxHoldLen[i];
+		const int mode = LiveSysexIsModeChange(d, n);
+		if (LiveSysexIsRhythmUse(d, n))
+			sawRhythm = 1;
+		VstMidiInjectSysex(0, d, n);
+		VstLiveTapPushSysex(0, d, n);
+		drop = i + 1;
+		if (mode) {
+			rearm = 1;
+			break;
+		}
+	}
+	LiveCompactSysexHold(drop);
+	if (rearm) {
+		LiveArmResetHold(frames);
+		LivePostponeHoldsToNotes();
+		return;
+	}
+	/* A11 MAP2 など 1x 15 の直後に POWER PC を載せない。 */
+	if (sawRhythm) {
+		if (g_live.initPcBurst)
+			g_live.drumPcRetrig = 1;
+		LiveArmRhythmPcWait(frames);
+	}
+}
+
+static void LiveFlushProgramGate(int frames)
+{
+	if (LiveResetHolding()) return;
+	if (!LiveHasProgramLatch()) return;
+	if (g_live.initPcBurst && !g_live.drumPcRetrig) return;
+	LivePushProgramSnapshot(0);
+	g_live.initPcBurst = 1;
+	g_live.drumPcRetrig = 0;
+	const __int64 next = g_live.audioSample
+		+ (frames > 0 ? frames : 512);
+	if (g_live.holdNotesUntil < next)
+		g_live.holdNotesUntil = next;
+	LivePostponeHoldsToNotes();
+}
+
 static void LiveFinishShort(DWORD msg, int frames)
 {
+	LiveLatchShort(msg);
+	const uint8_t hi = (uint8_t)(msg & 0xf0);
+	const int isNote = (hi == 0x80 || hi == 0x90) ? 1 : 0;
+	const int isOn = (hi == 0x90 && ((msg >> 16) & 0x7f) > 0) ? 1 : 0;
+	/* GM/GS/XG の消化中は後続ショートを出さない。実機も Reset 完了まで無視する。
+	   due は MIDI 時計を保つ。ゲート一点へ揃えるとイントロが走る。 */
+	if (LiveResetHolding()) {
+		if (isNote)
+			LiveHoldNoteTimed(msg, isOn);
+		else {
+			LiveAdvanceMidiClock();
+			LiveTrackMsg(msg);
+		}
+		return;
+	}
+	/* Reset が無い曲用。PC スナップショットは Consume 末尾。ノートはゲート後。 */
+	if (isNote && LiveHasProgramLatch() && !g_live.initPcBurst) {
+		LiveHoldNoteTimed(msg, isOn);
+		return;
+	}
+	if (isNote && g_live.holdNotesUntil
+		&& g_live.audioSample < g_live.holdNotesUntil) {
+		LiveHoldNoteTimed(msg, isOn);
+		return;
+	}
+	if (!g_live.sawNotes && (hi == 0xc0 || hi == 0xb0 || hi == 0xe0)) {
+		LiveAdvanceMidiClock();
+		/* 初回スナップショット前の PC は UART 途中で出さない。
+		   後続の 1x 15 と同じ Pump に載ると POWER が消える。 */
+		if (g_live.initPcBurst)
+			LivePushShort(msg, 0);
+		LiveTrackMsg(msg);
+		return;
+	}
 	LiveEmitTimed(msg, frames);
 	LiveTrackMsg(msg);
-	if (((msg & 0xf0) == 0x90) && ((msg >> 16) & 0x7f) > 0) {
+	if (isOn) {
 		g_live.noteOns++;
 		g_live.sawNotes = 1;
 	}
@@ -395,6 +742,41 @@ static void LiveFlushHolds(int frames)
 	g_live.holdN = w;
 }
 
+static void LiveEmitSysex(const uint8_t* d, int n, int frames)
+{
+	if (!d || n < 2) return;
+	if (LiveSysexIsModeChange(d, n)) {
+		if (LiveResetHolding()) {
+			/* GS Reset は先に出した DT1 を無効化する。System Mode は残す。 */
+			if (LiveSysexIsHardReset(d, n)) {
+				g_live.sxHoldN = 0;
+				g_live.sxHoldUsed = 0;
+			}
+			LiveQueueSysex(d, n);
+			return;
+		}
+		VstMidiInjectSysex(0, d, n);
+		VstLiveTapPushSysex(0, d, n);
+		LiveArmResetHold(frames);
+		return;
+	}
+	if (LiveResetHolding()) {
+		LiveQueueSysex(d, n);
+		return;
+	}
+	if (LiveSysexIsRhythmUse(d, n)) {
+		/* A11 MAP2 が POWER PC と同じ process() に入るとキットが STANDARD に戻る。 */
+		VstMidiInjectSysex(0, d, n);
+		VstLiveTapPushSysex(0, d, n);
+		if (g_live.initPcBurst)
+			g_live.drumPcRetrig = 1;
+		LiveArmRhythmPcWait(frames);
+		return;
+	}
+	VstMidiInjectSysex(0, d, n);
+	VstLiveTapPushSysex(0, d, n);
+}
+
 static void LiveEmitLaBanks(int frames)
 {
 	if (g_live.laBanksSent) return;
@@ -406,11 +788,76 @@ static void LiveEmitLaBanks(int frames)
 	g_live.laBanksSent = 1;
 }
 
+/* LA だけライブ注入する。GS/SC-88/GM の Reset はスタブ SMF 側。
+   ここで二度目の GS Reset / 全ch CC32 を出すと、同じブロックの FMP PC が
+   無効化され、POWER キット等が未設定のままになる。 */
+static void LiveEmitMapSetup(int frames)
+{
+	if (g_live.setupSent) return;
+	g_live.setupSent = 1;
+	const int t = g_live.midiType;
+	if (t == 1 || t == 2)
+		LiveEmitLaBanks(frames);
+}
+
+static void LiveSysexAbort(void)
+{
+	g_live.inSysex = 0;
+	g_live.sxN = 0;
+	g_live.sxMt = 0;
+	g_live.sxOverflow = 0;
+}
+
+/* 1=このバイトは SysEx。0=未完ダンプを捨てたので status として再処理。 */
+static int LiveSysexFeed(uint8_t b, int frames)
+{
+	enum { kCap = (int)sizeof(g_live.sxBuf) };
+	if (!g_live.inSysex) {
+		if (b != 0xf0) return 0;
+		g_live.inSysex = 1;
+		g_live.sxN = 1;
+		g_live.sxBuf[0] = 0xf0;
+		g_live.sxMt = 0;
+		g_live.sxOverflow = 0;
+		return 1;
+	}
+	if (b >= 0xf8 && b != 0xf7)
+		return 1;
+	if (b == 0xf7) {
+		if (!g_live.sxOverflow && g_live.sxN < kCap)
+			g_live.sxBuf[g_live.sxN++] = 0xf7;
+		if (!g_live.sxOverflow && g_live.sxN >= 2
+			&& g_live.sxBuf[g_live.sxN - 1] == 0xf7) {
+			LiveAdvanceMidiClock();
+			LiveEmitSysex(g_live.sxBuf, g_live.sxN, frames);
+		}
+		if (g_live.sxMt) {
+			g_live.isMt32 = 1;
+			LiveEmitLaBanks(frames);
+		}
+		LiveSysexAbort();
+		return 1;
+	}
+	if (b & 0x80) {
+		LiveSysexAbort();
+		return 0;
+	}
+	if (g_live.sxN < kCap) {
+		g_live.sxBuf[g_live.sxN++] = b;
+		if (g_live.sxN == 4 && g_live.sxBuf[1] == 0x41 && g_live.sxBuf[3] == 0x16)
+			g_live.sxMt = 1;
+	} else {
+		g_live.sxOverflow = 1;
+	}
+	return 1;
+}
+
 static void LiveConsumeUart(CHardPcat* hw, int frames)
 {
 	if (!hw) return;
-	/* defer したイベントを先に — 新しい UART と同じ絶対時計。 */
-	LiveFlushHolds(frames);
+	/* Reset 消化後の DT1 をノートより先に出す。PC は UART の 1x 15 を見てから。 */
+	LiveFlushResetGate(frames);
+	LiveEmitMapSetup(frames);
 
 	const unsigned n = hw->MidiByteCount();
 	while (g_live.midiCursor < n) {
@@ -419,32 +866,17 @@ static void LiveConsumeUart(CHardPcat* hw, int frames)
 		const uint8_t v = hw->MidiByteAt(i);
 		if (v >= 0xf8) continue;
 
-		if (v & 0x80) {
-			g_live.haveD0 = 0;
-			if (v == 0xf0) {
-				int mt = 0;
-				if (i + 3 < n && hw->MidiByteAt(i + 1) == 0x41
-					&& hw->MidiByteAt(i + 3) == 0x16)
-					mt = 1;
-				for (; g_live.midiCursor < n; ) {
-					const unsigned j = g_live.midiCursor;
-					g_live.pendingTicks += hw->MidiDeltaAt(j);
-					const uint8_t b = hw->MidiByteAt(j);
-					g_live.midiCursor++;
-					if (b == 0xf7) break;
-					if (b >= 0xf8) continue;
-					if (j > i + 1024) break;
-				}
-				if (mt) {
-					g_live.isMt32 = 1;
-					LiveEmitLaBanks(frames);
-				} else {
-					LiveAdvanceMidiClock();
-				}
+		if (g_live.inSysex || v == 0xf0) {
+			if (LiveSysexFeed(v, frames)) {
 				g_live.run = 0;
 				g_live.need = 0;
+				g_live.haveD0 = 0;
 				continue;
 			}
+		}
+
+		if (v & 0x80) {
+			g_live.haveD0 = 0;
 			if ((v & 0xf0) == 0xf0) {
 				g_live.run = 0;
 				g_live.need = 0;
@@ -502,13 +934,17 @@ static void LiveConsumeUart(CHardPcat* hw, int frames)
 		hw->MidiCaptureReset();
 		g_live.midiCursor = 0;
 		g_live.pendingTicks = 0;
+		LiveSysexAbort();
 	}
+	LiveFlushProgramGate(frames);
+	LiveFlushHolds(frames);
 }
 
 static void LiveConsumeUartPc98(CHardPc98* hw, int frames)
 {
 	if (!hw) return;
-	LiveFlushHolds(frames);
+	LiveFlushResetGate(frames);
+	LiveEmitMapSetup(frames);
 
 	const unsigned n = hw->MidiByteCount();
 	while (g_live.midiCursor < n) {
@@ -517,23 +953,17 @@ static void LiveConsumeUartPc98(CHardPc98* hw, int frames)
 		const uint8_t v = hw->MidiByteAt(i);
 		if (v >= 0xf8) continue;
 
-		if (v & 0x80) {
-			g_live.haveD0 = 0;
-			if (v == 0xf0) {
-				for (; g_live.midiCursor < n; ) {
-					const unsigned j = g_live.midiCursor;
-					g_live.pendingTicks += hw->MidiDeltaAt(j);
-					const uint8_t b = hw->MidiByteAt(j);
-					g_live.midiCursor++;
-					if (b == 0xf7) break;
-					if (b >= 0xf8) continue;
-					if (j > i + 1024) break;
-				}
-				LiveAdvanceMidiClock();
+		if (g_live.inSysex || v == 0xf0) {
+			if (LiveSysexFeed(v, frames)) {
 				g_live.run = 0;
 				g_live.need = 0;
+				g_live.haveD0 = 0;
 				continue;
 			}
+		}
+
+		if (v & 0x80) {
+			g_live.haveD0 = 0;
 			if ((v & 0xf0) == 0xf0) {
 				g_live.run = 0;
 				g_live.need = 0;
@@ -578,7 +1008,10 @@ static void LiveConsumeUartPc98(CHardPc98* hw, int frames)
 		hw->MidiCaptureReset();
 		g_live.midiCursor = 0;
 		g_live.pendingTicks = 0;
+		LiveSysexAbort();
 	}
+	LiveFlushProgramGate(frames);
+	LiveFlushHolds(frames);
 }
 
 /* ライブ UART セッションが走っているか */
@@ -693,11 +1126,11 @@ void CEmuMidiLiveStop(void)
 	int16_t* mixBuf = NULL;
 	EnterCriticalSection(&g_live.cs);
 	/* CS 内で切り離し、外で破棄 — HardDestroy/Render が Pump 待ちの CS と
-	   入れ子にならないようにする。 */
+	   入れ子にならないようにする。Render 中は inPump を待ってから mixBuf
+	   と drv を捨てる（SC-55→GS の再起動が UI×prefetch で固まらない）。 */
 	drv = g_live.drv; g_live.drv = NULL;
 	hard = g_live.hard; g_live.hard = NULL;
 	fs = g_live.fs; g_live.fs = NULL;
-	mixBuf = g_live.mixBuf; g_live.mixBuf = NULL; g_live.mixCap = 0;
 	if (g_live.midPath[0])
 		g_live.midPath[0] = 0;
 	g_live.ge = NULL;
@@ -712,10 +1145,25 @@ void CEmuMidiLiveStop(void)
 	g_live.audioSample = 0;
 	g_live.holdN = 0;
 	g_live.isMt32 = 0;
+	g_live.midiType = 0;
 	g_live.laBanksSent = 0;
+	g_live.setupSent = 0;
 	g_live.cc111StartSent = 0;
 	g_live.sawNotes = 0;
 	g_live.noteOns = 0;
+	g_live.initPcBurst = 0;
+	g_live.drumPcRetrig = 0;
+	g_live.holdNotesUntil = 0;
+	g_live.resetHoldUntil = 0;
+	g_live.sxHoldN = 0;
+	g_live.sxHoldUsed = 0;
+	memset(g_live.pc, 0, sizeof(g_live.pc));
+	memset(g_live.cc, 0, sizeof(g_live.cc));
+	memset(g_live.havePc, 0, sizeof(g_live.havePc));
+	memset(g_live.haveCc, 0, sizeof(g_live.haveCc));
+	memset(g_live.pbL, 0, sizeof(g_live.pbL));
+	memset(g_live.pbM, 0, sizeof(g_live.pbM));
+	memset(g_live.havePb, 0, sizeof(g_live.havePb));
 	g_live.zipPath[0] = 0;
 	g_live.overlayCode = 0;
 	g_live.ovlPhase = 0;
@@ -724,9 +1172,17 @@ void CEmuMidiLiveStop(void)
 	g_live.holdDropped = 0;
 	g_live.injPeak = 0;
 	g_live.holdPeak = 0;
+	LiveSysexAbort();
 	memset(g_live.seBits, 0, sizeof(g_live.seBits));
 	InterlockedExchange((LONG*)&g_live.overlayPend, 0);
 	g_live.injR = g_live.injW;
+	LeaveCriticalSection(&g_live.cs);
+	while (InterlockedCompareExchange(&g_live.inPump, 0, 0) != 0)
+		Sleep(1);
+	EnterCriticalSection(&g_live.cs);
+	mixBuf = g_live.mixBuf;
+	g_live.mixBuf = NULL;
+	g_live.mixCap = 0;
 	LeaveCriticalSection(&g_live.cs);
 	if (drv) {
 		drv->Close();
@@ -779,7 +1235,14 @@ int CEmuMidiLiveStartPcat(const wchar_t* zipPath, unsigned titleCode,
 	LiveEnsureCs();
 	CEmuMidiLiveStop();
 
-	CEmuModePrefSet(zipPath, "MIDI");
+	/* 既に GS/LA/SC-88 が選ばれていればそれを残す。全部 MIDI に潰すと
+	   vg2_98 の SC-88 行が SC-55 に戻る。 */
+	{
+		char curTag[CEMU_MODE_TAG] = {};
+		if (!CEmuModePrefGet(zipPath, curTag, (int)sizeof(curTag))
+			|| !CEmuModeIsMidiTag(curTag))
+			CEmuModePrefSet(zipPath, "MIDI");
+	}
 	wchar_t zipOut[CEMU_ZIP_PATH];
 	char dataDir[CEMU_DATA_DIR];
 	CEmuMgr* mgr = CEmuMgrGet();
@@ -789,9 +1252,29 @@ int CEmuMidiLiveStartPcat(const wchar_t* zipPath, unsigned titleCode,
 		char stem[CEMU_ARCHIVE_NAME] = {};
 		const wchar_t* openZip = (zipOut[0] ? zipOut : zipPath);
 		if (CEmuArchiveStemFromPath(openZip, stem, (int)sizeof(stem))) {
-			const CEmuGameEntry* midGe = CEmuCatalogFindArchiveForZipMode(
-				&mgr->catalog, stem, NULL, NULL, "MIDI");
-			if (midGe && LiveModeEntryIsMidi(midGe))
+			char prefer[CEMU_MODE_TAG] = {};
+			CEmuModePrefGet(openZip, prefer, (int)sizeof(prefer));
+			CEmuArchiveMode modes[CEMU_MODE_MAX];
+			const int nm = CEmuCatalogListArchiveModes(&mgr->catalog, stem,
+				NULL, NULL, modes, CEMU_MODE_MAX);
+			const CEmuGameEntry* midGe = NULL;
+			for (int pass = 0; pass < 2 && !midGe; pass++) {
+				for (int i = 0; i < nm; i++) {
+					if (!modes[i].isMidi) continue;
+					if (pass == 0 && prefer[0]
+						&& _stricmp(modes[i].tag, prefer) != 0)
+						continue;
+					if (modes[i].entryIndex < 0
+						|| modes[i].entryIndex >= mgr->catalog.count)
+						continue;
+					const CEmuGameEntry* cand = mgr->catalog.entry[modes[i].entryIndex];
+					if (cand && LiveModeEntryIsMidi(cand)) {
+						midGe = cand;
+						break;
+					}
+				}
+			}
+			if (midGe)
 				ge = midGe;
 		}
 	}
@@ -826,12 +1309,22 @@ int CEmuMidiLiveStartPcat(const wchar_t* zipPath, unsigned titleCode,
 	int laBanks = MidiOutTypeIsLa(midiType);
 	if (!isPc98 && midiType == 0)
 		laBanks = 1;
-	const char* stubTag = laBanks ? "MT-32" : (midiType == 8 ? "GM" : "GS");
+	int stubType = midiType;
+	if (laBanks && stubType != 1 && stubType != 2)
+		stubType = 1;
+	if (!stubType && isPc98)
+		stubType = 4; /* PC98 無印は SC-55/GS */
+	const char* stubTag = laBanks ? "MT-32"
+		: (stubType == 8 ? "GM" : (stubType == 7 ? "SC-88" : "GS"));
 	const char* song = NULL;
 	if (isPc98) {
 		CHardPc98* hw = (CHardPc98*)hard;
-		hw->MidiCaptureReset();
-		hw->MidiForceUart(1);
+		/* FMP3 -m は UART。Falcom FMD / MMD インテリジェントは 3Fh を送らない。
+		   Open 後に UART を強制すると ACK/CTH が壊れ MIDI が無音になる。 */
+		if (hw->MidiIsUart())
+			hw->MidiCaptureReset();
+		else
+			hw->MidiArmCapture();
 		song = hw->DosSongName();
 	} else {
 		CHardPcat* hw = (CHardPcat*)hard;
@@ -843,11 +1336,15 @@ int CEmuMidiLiveStartPcat(const wchar_t* zipPath, unsigned titleCode,
 	wchar_t tmpDir[MAX_PATH] = {};
 	GetTempPathW(MAX_PATH, tmpDir);
 	wchar_t midPath[MAX_PATH] = {};
+	const wchar_t* tagW = L"gs";
+	if (laBanks) tagW = L"mt32";
+	else if (stubType == 8) tagW = L"gm";
+	else if (stubType == 7) tagW = L"sc88";
 	_snwprintf_s(midPath, _TRUNCATE, L"%scemu_mpu_%s_%08X.mid",
-		tmpDir, laBanks ? L"mt32" : (isPc98 ? L"gs" : L"gm"), (unsigned)GetTickCount());
+		tmpDir, tagW, (unsigned)GetTickCount());
 
 	if (!WriteLiveStubSmf(midPath, (song && song[0]) ? song : stubTag,
-		laBanks)) {
+		stubType)) {
 		drv->Close();
 		CEmuDriverDestroy(drv);
 		CEmuHardDestroy(hard);
@@ -875,10 +1372,25 @@ int CEmuMidiLiveStartPcat(const wchar_t* zipPath, unsigned titleCode,
 	g_live.audioSample = 0;
 	g_live.holdN = 0;
 	g_live.isMt32 = laBanks ? 1 : 0;
-	g_live.laBanksSent = 1; /* スタブに既に LA がある、または GS は不要 */
+	g_live.midiType = stubType;
+	g_live.laBanksSent = laBanks ? 1 : 0;
+	g_live.setupSent = 0;
 	g_live.cc111StartSent = 1;
 	g_live.sawNotes = 0;
 	g_live.noteOns = 0;
+	g_live.initPcBurst = 0;
+	g_live.drumPcRetrig = 0;
+	g_live.holdNotesUntil = 0;
+	g_live.resetHoldUntil = 0;
+	g_live.sxHoldN = 0;
+	g_live.sxHoldUsed = 0;
+	memset(g_live.pc, 0, sizeof(g_live.pc));
+	memset(g_live.cc, 0, sizeof(g_live.cc));
+	memset(g_live.havePc, 0, sizeof(g_live.havePc));
+	memset(g_live.haveCc, 0, sizeof(g_live.haveCc));
+	memset(g_live.pbL, 0, sizeof(g_live.pbL));
+	memset(g_live.pbM, 0, sizeof(g_live.pbM));
+	memset(g_live.havePb, 0, sizeof(g_live.havePb));
 	g_live.overlayCode = 0;
 	g_live.ovlPhase = 0;
 	g_live.ovlSeHeld = 0;
@@ -886,6 +1398,7 @@ int CEmuMidiLiveStartPcat(const wchar_t* zipPath, unsigned titleCode,
 	g_live.holdDropped = 0;
 	g_live.injPeak = 0;
 	g_live.holdPeak = 0;
+	LiveSysexAbort();
 	memset(g_live.seBits, 0, sizeof(g_live.seBits));
 	if (g_liveBootAsSfx) {
 		g_live.overlayCode = titleCode;
@@ -908,6 +1421,11 @@ int CEmuMidiLivePump(int frames)
 	if (frames <= 0) return 0;
 	LiveEnsureCs();
 	EnterCriticalSection(&g_live.cs);
+	while (InterlockedCompareExchange(&g_live.inPump, 0, 0) != 0) {
+		LeaveCriticalSection(&g_live.cs);
+		Sleep(1);
+		EnterCriticalSection(&g_live.cs);
+	}
 	if (!g_live.active || !g_live.drv || !g_live.hard) {
 		LeaveCriticalSection(&g_live.cs);
 		return 0;
@@ -926,16 +1444,33 @@ int CEmuMidiLivePump(int frames)
 		LeaveCriticalSection(&g_live.cs);
 		return 0;
 	}
+	CDriver* drv = g_live.drv;
+	CHard* hard = g_live.hard;
+	int16_t* mix = g_live.mixBuf;
+	int doOvl = 0;
+	unsigned ovlCode = 0;
 	if (InterlockedExchange((LONG*)&g_live.overlayPend, 0)) {
 		LiveArmSfxCapture();
-		if (g_live.drv)
-			g_live.drv->OverlayTitle(g_live.overlayCode);
+		doOvl = 1;
+		ovlCode = g_live.overlayCode;
 	}
-	g_live.drv->Render(g_live.mixBuf, frames);
+	InterlockedExchange(&g_live.inPump, 1);
+	LeaveCriticalSection(&g_live.cs);
+
+	if (doOvl && drv)
+		drv->OverlayTitle(ovlCode);
+	drv->Render(mix, frames);
+
+	EnterCriticalSection(&g_live.cs);
+	InterlockedExchange(&g_live.inPump, 0);
+	if (!g_live.active || g_live.drv != drv || g_live.hard != hard) {
+		LeaveCriticalSection(&g_live.cs);
+		return 1;
+	}
 	if (kind == CHard::KIND_PC98)
-		LiveConsumeUartPc98((CHardPc98*)g_live.hard, frames);
+		LiveConsumeUartPc98((CHardPc98*)hard, frames);
 	else
-		LiveConsumeUart((CHardPcat*)g_live.hard, frames);
+		LiveConsumeUart((CHardPcat*)hard, frames);
 	g_live.audioSample += (__int64)frames;
 	LiveOvlTick();
 	LeaveCriticalSection(&g_live.cs);
@@ -950,6 +1485,17 @@ __int64 CEmuMidiLiveAudioFrames(void)
 	const __int64 n = g_live.active ? g_live.audioSample : 0;
 	LeaveCriticalSection(&g_live.cs);
 	return n;
+}
+
+int CEmuMidiLiveSampleRate(void)
+{
+	LiveEnsureCs();
+	EnterCriticalSection(&g_live.cs);
+	const int rate = g_live.active
+		? (g_live.sampleRate > 0 ? g_live.sampleRate : kLiveRate)
+		: kLiveRate;
+	LeaveCriticalSection(&g_live.cs);
+	return rate;
 }
 
 /* inject リングからショートを取り出す */
@@ -979,4 +1525,9 @@ int CEmuMidiLiveStealShorts(CEmuMidiLiveShort* out, int maxCount)
 		out[j] = t;
 	}
 	return n;
+}
+
+CHard* CEmuMidiLiveHard(void)
+{
+	return g_live.active ? g_live.hard : NULL;
 }

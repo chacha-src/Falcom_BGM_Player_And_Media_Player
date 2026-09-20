@@ -1265,13 +1265,26 @@ static void ServeOnce(HANDLE pipe)
 			const uint8_t* q = p + sizeof(KPIHOST64_RenderReq);
 			if ((size_t)(end - q) >= sizeof(uint32_t)) {
 				uint32_t nInj = *(const uint32_t*)q; q += sizeof(uint32_t);
-				if (nInj > 512) nInj = 512;
+				if (nInj > 8192) nInj = 8192;
 				VstMidiSetIoSlot(slot);
 				for (uint32_t i = 0; i < nInj; ++i) {
 					if ((size_t)(end - q) < sizeof(KPIHOST64_VstLiveMidiReq)) break;
 					auto* mr = (const KPIHOST64_VstLiveMidiReq*)q;
 					VstMidiInjectShort((int)mr->port, mr->msg, (int)mr->sampleOfs);
 					q += sizeof(KPIHOST64_VstLiveMidiReq);
+				}
+				if ((size_t)(end - q) >= sizeof(uint32_t)) {
+					uint32_t nSx = *(const uint32_t*)q; q += sizeof(uint32_t);
+					if (nSx > 1024) nSx = 1024;
+					for (uint32_t i = 0; i < nSx; ++i) {
+						if ((size_t)(end - q) < sizeof(uint32_t) * 2) break;
+						uint32_t port = *(const uint32_t*)q; q += sizeof(uint32_t);
+						uint32_t nb = *(const uint32_t*)q; q += sizeof(uint32_t);
+						if (nb > 2048 || (size_t)(end - q) < nb) break;
+						if (nb >= 2)
+							VstMidiInjectSysex((int)port, q, (int)nb);
+						q += nb;
+					}
 				}
 			}
 			uint32_t eof = 0;

@@ -2524,7 +2524,7 @@ END
 
 IDD_MIDIMONITOR DIALOGEX 0, 0, 720, 420
 STYLE DS_SETFONT | WS_MAXIMIZEBOX | WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME
-CAPTION "MIDIモニタ"
+CAPTION "FM/MIDIモニタ"
 FONT 9, "メイリオ", 400, 0, 0x80
 BEGIN
     PUSHBUTTON      "?",IDC_MM_HELP,688,2,24,16
@@ -2532,8 +2532,7 @@ BEGIN
 END
 
 IDD_FMMONITOR DIALOGEX 0, 0, 720, 420
-STYLE DS_SETFONT | WS_MAXIMIZEBOX | WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME
-CAPTION "FMモニタ"
+STYLE DS_SETFONT | WS_CHILD | WS_CLIPSIBLINGS | WS_CLIPCHILDREN
 FONT 9, "メイリオ", 400, 0, 0x80
 BEGIN
     PUSHBUTTON      "?",IDC_FM_HELP,688,2,24,16
@@ -2853,7 +2852,7 @@ END
 //
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 0,9,1,1016
+ FILEVERSION 0,9,1,1019
  PRODUCTVERSION 1,0,0,1
  FILEFLAGSMASK 0x3fL
 #ifdef _DEBUG
@@ -2871,10 +2870,10 @@ BEGIN
         BEGIN
             VALUE "Comments", "Falcom BGM Player & Media Player"
             VALUE "CompanyName", "Pre Prayer Power Soft"
-            VALUE "FileDescription", "Falcom BGM Player & Media Player Ver 0.9a Rel.2026.09.17 v1016"
-            VALUE "FileVersion", "0.9.1.1016"
+            VALUE "FileDescription", "Falcom BGM Player & Media Player Ver 0.9a Rel.2026.09.20 v1019"
+            VALUE "FileVersion", "0.9.1.1019"
             VALUE "InternalName", "ogg YS/ED bgm"
-            VALUE "LegalCopyright", "Copyright (C) 2026.09.17 v1016"
+            VALUE "LegalCopyright", "Copyright (C) 2026.09.20 v1019"
             VALUE "LegalTrademarks", "Pre Prayer Power Soft"
             VALUE "OriginalFilename", "oggYSEDbgm_uni_avx2.exe"
             VALUE "ProductName", "Falcom BGM Player & Media Player"

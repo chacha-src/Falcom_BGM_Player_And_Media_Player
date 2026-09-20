@@ -245,6 +245,7 @@ static uint8 opcode, oldstatus;
 #endif
 /*externally supplied functions*/
 extern uint8 read6502(ushort address);
+extern uint8 read6502_opcode(ushort address);
 extern void write6502(ushort address, uint8 value);
 
 
@@ -1038,7 +1039,7 @@ uint32 exec6502(uint32 tickcount) {
     clockgoal6502 = tickcount;
     clockticks6502 = 0;
     while (clockticks6502 < clockgoal6502) {
-        opcode = read6502(pc++);
+        opcode = read6502_opcode(pc++);
         status |= FLAG_CONSTANT;
         penaltyop = 0;
         penaltyaddr = 0;
@@ -1053,7 +1054,7 @@ uint32 exec6502(uint32 tickcount) {
 }
 
 uint32 step6502() {
-    opcode = read6502(pc++);
+    opcode = read6502_opcode(pc++);
     status |= FLAG_CONSTANT;
 
     penaltyop = 0;

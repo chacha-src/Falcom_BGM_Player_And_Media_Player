@@ -50,6 +50,7 @@ public:
 
 	uint8_t PortIn(uint16_t port) override;
 	void PortOut(uint16_t port, uint8_t data) override;
+	void SscpForcePit(uint16_t reload);
 
 	void AttachIoHooks();
 	void DetachIoHooks();
@@ -90,9 +91,13 @@ public:
 	int n3golf98_; /* 1 なら n3golf98.bin 糊（INT D2。OPN ISR は INT14 に置く） */
 	int dks98_; /* 1 なら KSK DKS/FQ BGMDRV 系（INT69 AH=0。ホスト seg:off 曲バンク） */
 	int mdplay98_; /* 1 なら Glodia MDPLAY.BIN（非 D）— INT08 タイマ ISR が要る */
+	int packCmd1_; /* 1 なら Glodia 系パック糊（emdr/zavas/vd）INT7F cmd0=停止、cmd1=再生 */
 	int musicComKeepalive_; /* 1: fakecall/music/46 — 再生中 MUSIC.COM [0294]=0 を維持 */
 	int synthIfKeepalive_; /* 1: SYNTH_98/S20 は INT60 後 IF=0。ホスト STI で OPN IRQ を通す */
 	int modeMidi_; /* カタログ midiout — MPU-401 UART @ E0D0/E0D2（FMP -m 等） */
+	int fmpSeq_; /* FMP3 / TGLFMP。FM も MIDI も Timer B シーケンサ */
+	unsigned fmpTScaleN_;
+	unsigned fmpTScaleD_;
 	int midiCapArmed_; /* BootDos シェル中は 0。以降 1 — 0x00 洪水を避ける */
 	uint8_t sound86Mask_; /* A460 下位: bit0=OPNA 拡張、bit1=OPNA マスク（MAME/NP2） */
 	uint8_t sound86FifoCtl_; /* A468 */
@@ -171,6 +176,10 @@ public:
 	unsigned MidiPortOutCount() const { return midiPortOutCount_; }
 	const char* DosSongName() const { return dosSong_; }
 	void MidiForceUart(int on) { mpuUart_ = on ? 1 : 0; }
+	int MidiIsUart() const { return mpuUart_; }
+	unsigned PitReload() const { return pitReload_; }
+	unsigned PitClockHz() const { return pitClockHz_; }
+	void MidiArmCapture() { midiCapArmed_ = 1; }
 	void MidiCaptureReset();
 	/* Wolfteam E0D0 コマンドストリームキャプチャ（E0D0 へ書いた生バイト） */
 	uint8_t wolfCmdLog_[2048];
@@ -296,6 +305,15 @@ private:
 	uint8_t gdcA0Poll_;
 	/* PumpCycles ホストサンプルを跨ぐ OPN クロック端数（DOS 経路） */
 	uint64_t opnPumpResidual_;
+	/* TriggerPlay の settle ドレイン専用。シーケンサが動き出したら Render にテンポを渡す。
+	   0.5s フルドレインは OPN タイマだけ先に進み、先頭が圧縮再生になる。 */
+	int pumpAbortOnMusic_;
+	int pumpSameLive_;
+	unsigned pumpPlayCode_;
+	unsigned pumpMusicKey0_;
+	unsigned pumpMusicMidi0_;
+	unsigned pumpMusicTimer0_;
+	uint64_t pumpMusicCycle0_;
 
 	/* ホストサービスラッチ（0x7D0 族） */
 	uint8_t hostFunc_;

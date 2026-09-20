@@ -42,6 +42,18 @@ static void Wr16(uint8_t* p, uint16_t v)
 	p[1] = (uint8_t)(v >> 8);
 }
 
+/* KSS/カート SCC マッパ値: $3F（page2）、$80、$BF。$FF/$7F は Falcom 停止フラグ兼
+   Sorcerian プレーヤ先頭（LDIR $2000→$B000）。そこを 0x3F 扱いすると sccMapped が立ち、
+   続く $B800-B8BF がチップへ奪われ Bitbuster が 4 キードローンになる。 */
+static int MsxIsSccMapperData(uint8_t data)
+{
+	if (data == 0x80)
+		return 1;
+	if ((data & 0x3fu) == 0x3fu && (data & 0x40u) == 0)
+		return 1;
+	return 0;
+}
+
 /* 最初の有ピッチノートまでのフレーム。0xFFFF = なし。休符／ノート前に F6 が出ると *f6Before を立てる — その経路は $0416 で停滞し得る。 */
 static unsigned NukeninRestUntilNote(const uint8_t* p, unsigned n, int* f6Before)
 {
@@ -637,6 +649,11 @@ uint8_t CHardMsx::PortIn(uint16_t port)
 	if (genericMode_ && p == 0x02) {
 		if (playCmdPending_ > 0) {
 			playCmdPending_--;
+			/* firehawk 0xFF: 1 回目エッジで TMUS1M 再生済み。2 回目で CP FF 経路。 */
+			if (playCmdPending_ == 6 && ioport_[6] == 0xB0) {
+				ioport_[3] = 0xFF;
+				ioport_[6] = 0;
+			}
 			return 0x01;
 		}
 		return 0;
@@ -774,11 +791,11 @@ void CHardMsx::MemWrite(uint16_t addr, uint8_t data)
 		}
 		if (addr == 0x9000) {
 			if (!sccEnable_)
-				sccMapped_ = ((data & 0x3fu) == 0x3fu) ? 1 : 0;
+				sccMapped_ = MsxIsSccMapperData(data) ? 1 : 0;
 			/* バンクハンドラへフォールスルー */
 		} else if (addr == 0xb000) {
-			/* SCC-I／一部 MegaROM は page3 経由でミラーを出す。上位ビット形式を許可、さもなくばクリア */
-			if (data == 0x80 || (data & 0x3fu) == 0x3fu)
+			/* SCC-I／一部 MegaROM は page3 経由でミラーを出す。$3F/$80/$BF のみ。 */
+			if (MsxIsSccMapperData(data))
 				sccMapped_ = 1;
 			/* バンクハンドラへフォールスルー */
 		} else {
@@ -809,8 +826,8 @@ void CHardMsx::MemWrite(uint16_t addr, uint8_t data)
 			return;
 		}
 		if (addr == 0x9000)
-			sccMapped_ = ((data & 0x3fu) == 0x3fu) ? 1 : 0;
-		else if (data == 0x80 || (data & 0x3fu) == 0x3fu)
+			sccMapped_ = MsxIsSccMapperData(data) ? 1 : 0;
+		else if (MsxIsSccMapperData(data))
 			sccMapped_ = 1;
 	}
 
@@ -904,6 +921,13 @@ int CHardMsx::LoadGeneric(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned title
 	int catalogKss = 0;
 	int useOpll = ParseOptHex(ge, "use_opll", 0);
 	int useMsxa = ParseOptHex(ge, "use_msxa", 0);
+	int hasSccp = 0;
+	for (int i = 0; i < ge->romCount; i++) {
+		if (_stricmp(ge->rom[i].type, "sccp") == 0) {
+			hasSccp = 1;
+			break;
+		}
+	}
 	for (int i = 0; i < ge->romCount; i++) {
 		const CEmuRomEntry* r = &ge->rom[i];
 		unsigned sz = 0;
@@ -911,7 +935,7 @@ int CHardMsx::LoadGeneric(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned title
 			? FindMsxCodeRom(fs, r->name, &sz)
 			: CEmuZipFsFind(fs, r->name, &sz);
 		if (!data || !sz) {
-			/* crimson2/3 PSG xml は PMUS*.BIN を列挙。zip は FMUS* のみ */
+			/* crimson2/3 の zip は PMUS* と FMUS* の両方を持つ。PMUS が見つからないときだけ FM 側へ落とす。 */
 			if (_stricmp(r->type, "bgm") == 0 && r->name[0]
 				&& !_strnicmp(r->name, "PMUS", 4)) {
 				char alt[CEMU_ROM_NAME];
@@ -948,18 +972,8 @@ int CHardMsx::LoadGeneric(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned title
 			if (off + (int)n > 0x10000)
 				n = (unsigned)(0x10000 - off);
 			/* Nemesis SCC+: GRA.BIN @4000 は loaded4000 を立て GRASCC.BIN を飛ばす。TwinBee SCC+ 行に code @4000 は無い。sccp を GRA へ重ねず sccp をロード。 */
-			if (_stricmp(r->type, "code") == 0 && off < 0x8000
-				&& off + (int)n > 0x4000 && ParseOptHex(ge, "use_scc", 0)) {
-				int hasSccp = 0;
-				for (int j = 0; j < ge->romCount; j++) {
-					if (_stricmp(ge->rom[j].type, "sccp") == 0) {
-						hasSccp = 1;
-						break;
-					}
-				}
-				if (hasSccp)
-					continue;
-			}
+			if (hasSccp && _stricmp(r->type, "code") == 0 && off == 0x4000)
+				continue;
 			/* パッド 64K FMPAC.ROM @4000 が後続コードを消してはいけない（yosikon DRIVER @$D400、winsltn ALL.BIN @$B9B9、rona MUSDRV @$CE00） */
 			if (isFmpac) {
 				for (int j = 0; j < ge->romCount; j++) {
@@ -993,6 +1007,36 @@ int CHardMsx::LoadGeneric(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned title
 			unsigned char* buf = (unsigned char*)malloc(n ? n : 1);
 			if (!buf) continue;
 			memcpy(buf, data, n);
+			/* wingsp FMAOI は BLOAD FE 無し（周期ワード）。PSGAOI が本物の COM。
+			   FMEND は同じ周期ダンプだが PSGEND が AOI プレーヤ＋ゴミ $8DE7 なので
+			   差し替えない。LAST WING は PCH プレーヤを後から被せる。 */
+			if (n && buf[0] != 0xFE && r->name[0]
+				&& (r->name[0] == 'F' || r->name[0] == 'f')
+				&& (r->name[1] == 'M' || r->name[1] == 'm')
+				&& !((r->name[2] == 'E' || r->name[2] == 'e')
+					&& (r->name[3] == 'N' || r->name[3] == 'n'))) {
+				char alt[64];
+				unsigned k = 0;
+				alt[0] = 'P'; alt[1] = 'S'; alt[2] = 'G';
+				while (r->name[2 + k] && k + 4u < sizeof(alt)) {
+					alt[3 + k] = r->name[2 + k];
+					k++;
+				}
+				alt[3 + k] = 0;
+				unsigned asz = 0;
+				const unsigned char* altp = CEmuZipFsFind(fs, alt, &asz);
+				if (altp && asz && altp[0] == 0xFE) {
+					unsigned nn = asz;
+					if (nn > (unsigned)BGM_SIZE) nn = (unsigned)BGM_SIZE;
+					unsigned char* nb = (unsigned char*)malloc(nn ? nn : 1);
+					if (nb) {
+						memcpy(nb, altp, nn);
+						free(buf);
+						buf = nb;
+						n = nn;
+					}
+				}
+			}
 			if (bgmBank_[idx]) free(bgmBank_[idx]);
 			bgmBank_[idx] = buf;
 			bgmBankSize_[idx] = n;
@@ -1019,9 +1063,7 @@ int CHardMsx::LoadGeneric(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned title
 			if (off + (int)n > 0x10000)
 				n = (unsigned)(0x10000 - off);
 			memcpy(mem_ + off, data, n);
-			/* 16K SCC+ ダンプ（Sky Jaguar／Super Cobra）は $4000-7FFF だけ埋める。TwinBee の 32K イメージは $8000-BFFF も覆う。$80A0 のような曲ポインタは RAM に着地しなければならない。 */
-			if (off == 0x4000 && n == 0x4000u)
-				memcpy(mem_ + 0x8000, data, n);
+			/* 16K SCC+（Sky Jaguar／Super Cobra）は $4000-7FFF だけ。$8000 へ複製するとワーク RAM と SCC 窓を潰す。32K TwinBee はそのまま $4000-BFFF を覆う。 */
 			loadedCode++;
 			loaded4000 = 1;
 			break;
@@ -1148,24 +1190,29 @@ int CHardMsx::LoadGeneric(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned title
 	initPc_ = (uint16_t)ParseOptHex(ge, "init_pc", 0x400);
 	mdataAddr_ = (uint16_t)ParseOptHex(ge, "mdata_addr", 0xA400);
 	{
-		int ms = ParseOptHex(ge, "mdata_size", 0x800);
+		int catalogMs = ParseOptHex(ge, "mdata_size", 0x800);
+		int ms = catalogMs;
 		int mfs = ParseOptHex(ge, "mfile_size", 0);
 		if (mfs > ms) ms = mfs;
 		if (ms <= 0) ms = 0x800;
 		if (ms > BGM_SIZE) ms = BGM_SIZE;
 		mdataSize_ = (unsigned)ms;
-	}
-	if (zipInitPc >= 0)
-		initPc_ = (uint16_t)zipInitPc;
-	if (zipMdata >= 0)
-		mdataAddr_ = (uint16_t)zipMdata;
-	if (zipMsize > 0)
-		mdataSize_ = (unsigned)zipMsize;
-	/* Tokuma MSX·FAN／msfield: カタログ mdata_addr=0x9ff9＋size 0x2000 は 64K マップを溢れる（StageBgm は約 7 バイトコピー）。FMPAC パッチ再生経路は HL=A000 — 曲をそこに載せる。 */
-	if ((unsigned)mdataAddr_ + mdataSize_ > 0x10000u) {
-		mdataAddr_ = 0xA000;
-		if (mdataSize_ > 0x6000u)
-			mdataSize_ = 0x6000u;
+		if (catalogMs <= 0) catalogMs = 0x800;
+		/* 溢れる判定はカタログ mdata_size だけ。mfile_size で膨らますと
+		   sdaisen 9000+0x8000 が A000 へ滑り、MUSIC.COM の表 $87EB=$9000 が空になる。 */
+		if (zipInitPc >= 0)
+			initPc_ = (uint16_t)zipInitPc;
+		if (zipMdata >= 0)
+			mdataAddr_ = (uint16_t)zipMdata;
+		if (zipMsize > 0)
+			mdataSize_ = (unsigned)zipMsize;
+		/* Tokuma MSX·FAN／msfield: カタログ窓が 64K を溢れるときだけ A000 へ。
+		   FMPAC パッチ再生経路は HL=A000。mfile_size 膨張は見ない（sdaisen）。 */
+		if ((unsigned)mdataAddr_ + (unsigned)catalogMs > 0x10000u) {
+			mdataAddr_ = 0xA000;
+			if (mdataSize_ > 0x6000u)
+				mdataSize_ = 0x6000u;
+		}
 	}
 
 	if (useOpll)
@@ -1173,6 +1220,61 @@ int CHardMsx::LoadGeneric(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned title
 	if (useMsxa)
 		chips_ |= CHIP_MSXAUDIO;
 	EnsureOpll(useOpll ? 1 : 0);
+	/* dante2 PSG 行は FMPAC.ROM を載せない。MUS07 は 9ch FM のみで CALSLT $4110 が空。 */
+	if (!useOpll && initPc_ == 0x400 && mdataAddr_ == 0xB700
+		&& mem_[0xC700] == 0xC3 && mem_[0x4000] == 0) {
+		CEmuMgr* mgr = CEmuMgrGet();
+		if (mgr && mgr->dataRoot[0] && fs) {
+			wchar_t path[MAX_PATH];
+			_snwprintf_s(path, _TRUNCATE, L"%s\\msx\\fmpac_msx.zip", mgr->dataRoot);
+			if (GetFileAttributesW(path) != INVALID_FILE_ATTRIBUTES)
+				CEmuZipFsMergeZip(fs, path);
+			unsigned sz = 0;
+			const unsigned char* data = CEmuZipFsFind(fs, "FMPAC.ROM", &sz);
+			if (data && sz) {
+				unsigned n = sz;
+				if (n > 0x4000u) n = 0x4000u;
+				memcpy(mem_ + 0x4000, data, n);
+				chips_ |= CHIP_FMPAC;
+				EnsureOpll(1);
+			}
+		}
+	}
+	/* wingsp LAST WING: PSG 行のプレーヤは PSGPCH（$8DE7）。FMPCH と FMEND を末尾バンクへ退避し後で被せる。 */
+	if (initPc_ == 0x400 && mdataAddr_ == 0x83F9) {
+		unsigned sz = 0;
+		const unsigned char* fmp = CEmuZipFsFind(fs, "FMPCH.COM", &sz);
+		if (fmp && sz && fmp[0] == 0xFE) {
+			const unsigned idx = (unsigned)BGM_BANKS - 1u;
+			unsigned n = sz;
+			if (n > (unsigned)BGM_SIZE) n = (unsigned)BGM_SIZE;
+			unsigned char* nb = (unsigned char*)malloc(n ? n : 1);
+			if (nb) {
+				memcpy(nb, fmp, n);
+				if (bgmBank_[idx]) free(bgmBank_[idx]);
+				bgmBank_[idx] = nb;
+				bgmBankSize_[idx] = n;
+				bgmPresent_[idx] = 1;
+				chips_ |= CHIP_FMPAC;
+				EnsureOpll(1);
+			}
+		}
+		sz = 0;
+		const unsigned char* fend = CEmuZipFsFind(fs, "FMEND.COM", &sz);
+		if (fend && sz) {
+			const unsigned idx = (unsigned)BGM_BANKS - 2u;
+			unsigned n = sz;
+			if (n > (unsigned)BGM_SIZE) n = (unsigned)BGM_SIZE;
+			unsigned char* nb = (unsigned char*)malloc(n ? n : 1);
+			if (nb) {
+				memcpy(nb, fend, n);
+				if (bgmBank_[idx]) free(bgmBank_[idx]);
+				bgmBank_[idx] = nb;
+				bgmBankSize_[idx] = n;
+				bgmPresent_[idx] = 1;
+			}
+		}
+	}
 	if (useMsxa)
 		EnsureMsxAudio();
 	/* use_scc（kgc SCC+ 行）は残す。その後ゼロにしない: kgc3/4 が無音になった。KSS は LoadKssImage でマッパ 0x3F をまだ待つ。 */
@@ -1183,14 +1285,18 @@ int CHardMsx::LoadGeneric(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned title
 	sccMapped_ = 0;
 	sccAccessed_ = 0;
 	if (chipScc_) chipScc_->Reset();
-	/* Nemesis SCC+: grascc は $4912（GRA.BIN マッパ）を CALL するが GRASCC 再生は $4006（AND $7F のあと表） */
+	/* Nemesis SCC+: grascc は $4912（GRA.BIN マッパ）を CALL するが GRASCC 再生は $4006（AND $7F のあと表）。SE/BGM/stop の 3 箇所を付け替える。 */
 	if (sccEnable_ && initPc_ == 0x400
 		&& mem_[0x4000] == 0xC3 && mem_[0x4001] == 0xCF
-		&& mem_[0x4002] == 0x60
-		&& mem_[0x0424] == 0xCD && mem_[0x0425] == 0x12
-		&& mem_[0x0426] == 0x49) {
-		mem_[0x0425] = 0x06;
-		mem_[0x0426] = 0x40;
+		&& mem_[0x4002] == 0x60) {
+		static const unsigned kNemesisCall4912[] = { 0x041C, 0x0424, 0x042D };
+		for (unsigned k = 0; k < 3u; k++) {
+			const unsigned a = kNemesisCall4912[k];
+			if (mem_[a] == 0xCD && mem_[a + 1] == 0x12 && mem_[a + 2] == 0x49) {
+				mem_[a + 1] = 0x06;
+				mem_[a + 2] = 0x40;
+			}
+		}
 	}
 	/* Sky Jaguar SCC+: init CALL $0430 が mute $9D を E01A 優先スロットへキュー。Play $93/$91/$88 は RET C（0x13 < 0x1D）し ISR が BGM を開始しない。$4415 は PSG stub。SCC ミックスは D280 bit1 セット時のみ $4416 — 16K ダンプはそのビットを書かない。 */
 	if (sccEnable_ && initPc_ == 0x400
@@ -1777,7 +1883,8 @@ int CHardMsx::StartSongGeneric(unsigned titleCode)
 		&& mem_[0x0452] == 0xDB && mem_[0x0453] == 0x03
 		&& mem_[0x0483] == 0xDB && mem_[0x0484] == 0x04
 		&& mem_[0x0485] == 0xFE && mem_[0x0486] == 0x01) ? 1 : 0;
-	/* pup8 R-Police patch2: IN A,(4); CP 2 は DRIVER2（タイトル／SFX）。BGM 0x01–0x08 は DRIVER3 @1000。song=low が欠バンクを DRIVER2 として載せ CALL $1C1D が誤イメージで走った。 */
+	/* pup8 R-Police patch2: IN A,(4); CP 2 は DRIVER2（タイトル／SFX）。BGM 0x01–0x08
+	   と 0x20 シャッフルは DRIVER3 @1000。0x21+ が SE。 */
 	const int pup8Rp = (initPc_ == 0x400 && mdataAddr_ == 0x1000
 		&& bgmPresent_[0] && bgmPresent_[1]
 		&& mem_[0x0416] == 0xDB && mem_[0x0417] == 0x04
@@ -1801,8 +1908,83 @@ int CHardMsx::StartSongGeneric(unsigned titleCode)
 		&& mem_[0xA000] == 0xC3 && mem_[0xA001] == 0x0C
 		&& mem_[0xA002] == 0xA1
 		&& low >= 2u && low <= 4u) ? 1 : 0;
+	/* Nemesis PSG: IN A,(4); CP 1 が SE $CD。3 バイト 0x0a01a6 は top=ファイル、mid=1、low=曲。`top { sel4=mid }` が毎エッジ SE→BGM になり 1 窓で mute。 */
+	const int nemesisPsg = (initPc_ == 0x400 && mdataAddr_ == 0xBC00
+		&& mem_[0x0416] == 0xDB && mem_[0x0417] == 0x04
+		&& mem_[0x0418] == 0xFE && mem_[0x0419] == 0x01
+		&& mem_[0x042A] == 0xCD && mem_[0x042B] == 0x00
+		&& mem_[0x042C] == 0xAC) ? 1 : 0;
+	/* wingsp OPLL: IN A,(4); CP 1/2 は再生経路（0=その場 $841F、1=LDIR $C000、2=OPEN $C062）。
+	   タイトル 0x0002 BIG BOSS が sel4=low=2 で OPEN 経路に入り FMBGBS が壊れた。 */
+	const int wingspPack = (initPc_ == 0x400 && mdataAddr_ == 0x83F9
+		&& mem_[0x041D] == 0xDB && mem_[0x041E] == 0x04
+		&& mem_[0x0422] == 0xFE && mem_[0x0423] == 0x01
+		&& mem_[0x0426] == 0xFE && mem_[0x0427] == 0x02) ? 1 : 0;
+	/* youmakrn: IN A,(5)/IN A,(4) が HL 再生番地（C012）。0x900002 は sel4=low=2 で HL=$9002 になりヘッダを飛ばす。 */
+	const int youmakrnPack = (initPc_ == 0x2000 && mdataAddr_ == 0x9000
+		&& mem_[0x201F] == 0xDB && mem_[0x2020] == 0x05
+		&& mem_[0x2021] == 0x67
+		&& mem_[0x2022] == 0xDB && mem_[0x2023] == 0x04
+		&& mem_[0x2024] == 0x6F) ? 1 : 0;
+	/* dante2: タイトル 0x04=MUSIC 00=MUS00。song=low は 0x07 に MUS07 を載せ port4=7 で
+	   1 曲ファイルをはみ出す。MUS03 自体は count=0 の stub ではなく、ファイル番号がずれている。 */
+	const int dante2Pack = (initPc_ == 0x400 && mdataAddr_ == 0xB700
+		&& mem_[0x0422] == 0x21 && mem_[0x0423] == 0x00 && mem_[0x0424] == 0xB7
+		&& mem_[0x0426] == 0x3A && mem_[0x0427] == 0x02 && mem_[0x0428] == 0xB7) ? 1 : 0;
+	/* lastarmg: IN A,(3) が $80AF（PSG 10B）/$80B1（OPLL 26B）のタイトル添字。Byte0 が bgm ファイル。
+	   song=low は 0x06 コマンドII に 126 を載せ、表の file=5（0B5 @42CA/43FC）を逃した。 */
+	const int lastarmgPack = (initPc_ == 0x8000 && mdataAddr_ == 0x4000
+		&& ((mem_[0x8023] == 0x11 && mem_[0x8024] == 0xAF && mem_[0x8025] == 0x80)
+			|| (mem_[0x8025] == 0x11 && mem_[0x8026] == 0xB1 && mem_[0x8027] == 0x80))) ? 1 : 0;
+	/* yakyufan: PATCH IN A,(4)=L IN A,(5)=H が HL=title>>8。0x98BD03 は END2 @6000+38BD。
+	   `top { sel4=mid }` と同じ値だが play 側 else が song で潰さないよう明示する。 */
+	const int yakyufanPack = (initPc_ == 0x400 && mdataAddr_ == 0x6000 && mdataSize_ == 0x4000
+		&& mem_[0x0442] == 0xDB && mem_[0x0443] == 0x04 && mem_[0x0444] == 0x6F
+		&& mem_[0x0445] == 0xDB && mem_[0x0446] == 0x05 && mem_[0x0447] == 0x67) ? 1 : 0;
+	/* mmabtl: IN A,(4); LD HL,$7000; CALL $4806。HMD2 @C000。タイトル 0xTTFF は
+	   ファイル=low、ファイル内トラック=mid。n00>=3 の fileInMid が 0x0200/0x0300 を
+	   MUSIC3/4 と見なし、MUSIC5–9（0x0004–08）は MUSIC1 のトラック 4+（FC 03 に無い）へ
+	   添字して無音にした。 */
+	const int mmabtlPack = (initPc_ == 0x400 && mdataAddr_ == 0x7000 && mdataSize_ == 0x1000
+		&& mem_[0x041D] == 0xCD && mem_[0x041E] == 0x06 && mem_[0x041F] == 0x48
+		&& mem_[0xC000] == 0xC3 && mem_[0xC001] == 0x3D && mem_[0xC002] == 0xC0) ? 1 : 0;
+	/* ishido: IN A,(4); CP 1 が SE $714E vs BGM $7148（A=0 で載せたファイルを再生）。
+	   0x0001 Maple は sel4=song=1 で SE 経路に入り 2/C1.M が無音。JR Z,$0F は
+	   port4Se の床 $13 より下。0x01xx だけ port4=1。 */
+	const int ishidoPack = (initPc_ == 0x400 && mdataAddr_ == 0xAEBB
+		&& mem_[0x0413] == 0xDB && mem_[0x0414] == 0x04
+		&& mem_[0x0415] == 0xFE && mem_[0x0416] == 0x01
+		&& mem_[0x0423] == 0xCD && mem_[0x0424] == 0x48 && mem_[0x0425] == 0x71) ? 1 : 0;
+	/* nyancle: IN A,(3) が $5014 のトラック、IN A,(4) はファイル。PATCH が
+	   OUT (3),file するので 2 回目 port2 エッジは file をトラックにし、
+	   PSGDRV $8959 が $8C4C の 6 バイト枠 9+ を添字して無音。song=mid、エッジ 1。 */
+	const int nyanclePack = (initPc_ == 0x400 && mdataAddr_ == 0x8C00
+		&& mem_[0x041B] == 0xCD && mem_[0x041C] == 0x1B && mem_[0x041D] == 0x44
+		&& mem_[0x042F] == 0xCD && mem_[0x0430] == 0x14 && mem_[0x0431] == 0x50) ? 1 : 0;
+	/* hydefos: IN A,(4); CP 1 が SE $180C。BGM は C=port4 E=0 CALL $1806。
+	   $1821 は C=0 で RET Z。0xFFxx は mid=0xFF なので C=$FF（全ch）。
+	   lowFilePack が 0x0112 を sel4=0x11 にし SOUND15/17 が無音。C=$FF に固定。 */
+	const int hydefosPack = (initPc_ == 0x400 && mdataAddr_ == 0x3000
+		&& mem_[0x040B] == 0x21 && mem_[0x040C] == 0x00 && mem_[0x040D] == 0x18
+		&& mem_[0x0431] == 0xCD && mem_[0x0432] == 0x06 && mem_[0x0433] == 0x18) ? 1 : 0;
+	/* firehawk 0xFF: IN A,(3); CP FF は TO BOSS フラグ（$1B0D）だけで CALL $1B03 しない。
+	   先に TMUS1M を再生し、2 回目 port2 エッジで port3=FF を立ててボス変化を載せる。 */
+	const int firehawkPack = (initPc_ == 0x400
+		&& mem_[0x041C] == 0xDB && mem_[0x041D] == 0x03
+		&& mem_[0x041E] == 0xFE && mem_[0x041F] == 0xFF
+		&& mem_[0x1B00] == 0xC3 && mem_[0x1B03] == 0xC3) ? 1 : 0;
 
-	if (compileTbl4) {
+	if (nemesisPsg) {
+		/* Beginning 0x0001ac は top=0。表 $2C は GRAmd $B3F7。$BC00 に GRAm0 が要る（空だと無音）。 */
+		if (top && top < BGM_BANKS && bgmPresent_[top])
+			song = top;
+		else if (mid && mid < BGM_BANKS && bgmPresent_[mid])
+			song = mid;
+		else
+			song = 0;
+		sel3 = low;
+		sel4 = 0;
+	} else if (compileTbl4) {
 		song = 0;
 		sel3 = low;
 		sel4 = mid;
@@ -1815,7 +1997,7 @@ int CHardMsx::StartSongGeneric(unsigned titleCode)
 		sel3 = low;
 		sel4 = mid;
 	} else if (pup8Rp) {
-		if (mid == 2 || low >= 0x20u) {
+		if (mid == 2 || low >= 0x21u) {
 			song = 0;
 			sel3 = low;
 			sel4 = 2;
@@ -1837,6 +2019,17 @@ int CHardMsx::StartSongGeneric(unsigned titleCode)
 		song = (mid < BGM_BANKS && bgmPresent_[mid]) ? mid : 0;
 		sel3 = low;
 		sel4 = low;
+	} else if (hydefosPack) {
+		/* lowFilePack より前。0xFFxx は mid=0xFF で C=$FF（全ch）。
+		   0x0112 を lowFilePack に取られると sel4=0x11 で SOUND15 が無音。
+		   $1821 C=0 は RET Z。 */
+		song = (low < BGM_BANKS && bgmPresent_[low]) ? low : 0;
+		sel3 = low;
+		sel4 = 0xFF;
+	} else if (firehawkPack && low == 0xFFu) {
+		song = 0;
+		sel3 = 0;
+		sel4 = 0;
 	} else if (lowFilePack && low < BGM_BANKS && bgmPresent_[low]) {
 		song = low;
 		sel3 = low;
@@ -1845,6 +2038,18 @@ int CHardMsx::StartSongGeneric(unsigned titleCode)
 		song = (mid < BGM_BANKS && bgmPresent_[mid]) ? mid : 0;
 		sel3 = low;
 		sel4 = mid;
+	} else if (mmabtlPack) {
+		song = (low < BGM_BANKS && bgmPresent_[low]) ? low : 0;
+		sel3 = mid;
+		sel4 = mid;
+	} else if (nyanclePack) {
+		song = (mid < BGM_BANKS && bgmPresent_[mid]) ? mid : low;
+		sel3 = low;
+		sel4 = mid;
+	} else if (ishidoPack) {
+		song = (low < BGM_BANKS && bgmPresent_[low]) ? low : 0;
+		sel3 = low;
+		sel4 = (mid == 1) ? 1 : 0;
 	} else if (addrBoxEarly) {
 		song = low;
 		sel3 = low;
@@ -1928,6 +2133,12 @@ int CHardMsx::StartSongGeneric(unsigned titleCode)
 		song = low;
 		sel3 = low;
 		sel4 = mid;
+	} else if (initPc_ == 0x1000 && mdataAddr_ == 0x0300) {
+		/* ys/ys2: port4=ファイル内トラック=mid、port5=エンジン=top、low=rom。
+		   `top &&` 付きの下の枝は 0x000004 Y02MUS を落とした（sel4=low=4 で無音）。 */
+		song = low;
+		sel3 = low;
+		sel4 = mid;
 	} else if (((initPc_ == 0x4D00 && mdataAddr_ == 0x6000)
 		|| (initPc_ == 0x1000 && mdataAddr_ == 0x0300)
 		|| mdataAddr_ == 0x8FF9) && top && top != 0xFF) {
@@ -1940,18 +2151,51 @@ int CHardMsx::StartSongGeneric(unsigned titleCode)
 		song = low;
 		sel3 = low;
 		sel4 = mid;
-	} else if (initPc_ == 0x400 && mdataAddr_ == 0x6000 && mdataSize_ == 0x4000
-		&& top && top != 0xFF && mid == 0 && low < BGM_BANKS && bgmPresent_[low]) {
-		/* yakyufan 0x600001: 0x6000 は mdata 開始、mid=0 なので `top { sel4 = low }` が MUS.DAT トラック 0 で port4=1。0x76B300 は mid=0xB3 で PLAYS 経路を残す。 */
-		song = low;
+	} else if (yakyufanPack) {
+		/* 0x600001 → HL=$6000、0x98BD03 → 一旦 $98BD、page2 は後で $7000 へ写す。 */
+		song = (low < BGM_BANKS && bgmPresent_[low]) ? low : 0;
 		sel3 = low;
-		sel4 = 0;
+		sel4 = (titleCode >> 8) & 0xff;
 	} else if (initPc_ == 0x400 && mdataAddr_ == 0xC200 && mdataSize_ == 0x1000
 		&& top >= 1u && top <= 5u && top < BGM_BANKS && bgmPresent_[top]) {
 		/* playbal3 0x010202: port4=2 が FM0 @8000 を LDIR。play $043C は port5 を FMn 表、port3 をトラック。ファイルは top、トラックは low、バンクは 2。song=low が誤 bgm を載せた。mid はゲーム内行すべてでたまたま 2。 */
 		song = top;
 		sel3 = low;
 		sel4 = 2;
+	} else if (wingspPack) {
+		song = (low < BGM_BANKS && bgmPresent_[low]) ? low : 0;
+		sel3 = low;
+		sel4 = mid;
+	} else if (youmakrnPack) {
+		song = (low < BGM_BANKS && bgmPresent_[low]) ? low : 0;
+		sel3 = low;
+		sel4 = mid;
+	} else if (dante2Pack) {
+		const unsigned file = (low >= 4u) ? (low - 4u) : low;
+		song = (file < BGM_BANKS && bgmPresent_[file]) ? file : 0;
+		sel3 = song;
+		sel4 = 0;
+	} else if (lastarmgPack) {
+		unsigned table = 0x80AF;
+		unsigned recSz = 10;
+		if (mem_[0x8025] == 0x11 && mem_[0x8026] == 0xB1 && mem_[0x8027] == 0x80) {
+			table = 0x80B1;
+			recSz = 26;
+		}
+		unsigned file = low;
+		if (low < 64u) {
+			const unsigned rec = table + low * recSz;
+			if (rec < 0x10000u)
+				file = mem_[rec];
+		}
+		song = (file < BGM_BANKS && bgmPresent_[file]) ? file : low;
+		sel3 = low;
+		sel4 = low;
+	} else if (port56Hl) {
+		/* tantexr 0x1C0B0002: IN A,(4) はトラック=mid。`top { sel4=low }` が mid=0 のときファイル番号を渡した。 */
+		song = low;
+		sel3 = low;
+		sel4 = mid;
 	} else if (top == 0xFF) {
 		/* lenam 0xFF000A: Hertz BGMDRV CALL $0B06 does LD A,C; OR A;
 		   JP Z skip. C comes from IN A,(5). Port5=0 was a hard stop.
@@ -1983,7 +2227,7 @@ int CHardMsx::StartSongGeneric(unsigned titleCode)
 	if (!deferBgm) {
 		if (song < BGM_BANKS && bgmPresent_[song])
 			StageBgm(song);
-		else {
+		else if (!nemesisPsg) {
 			for (unsigned i = 0; i < BGM_BANKS; i++) {
 				if (bgmPresent_[i]) { StageBgm(i); break; }
 			}
@@ -2000,9 +2244,24 @@ int CHardMsx::StartSongGeneric(unsigned titleCode)
 	ioport_[0x03] = (uint8_t)(sel3 & 0xff);
 	ioport_[0x04] = (uint8_t)(sel4 & 0xff);
 	ioport_[0x05] = (top == 0xFF) ? 0 : (uint8_t)(top & 0xff);
+	if (yakyufanPack) {
+		ioport_[0x04] = (uint8_t)((titleCode >> 8) & 0xff);
+		ioport_[0x05] = (uint8_t)((titleCode >> 16) & 0xff);
+	}
 	ioport_[0x07] = (chips_ & CHIP_FMPAC) ? 0x01 : 0x00;
 	if (f1douchuPsgJingle)
 		ioport_[0x07] = 0;
+	/* kubikiri OPLL: カタログが top=0 の BGM（他は 0x01xxxx）。port5=0 だと
+	   ISR が ($048B)!=1 で CE02 を再武装せず無音。SE の 0x00xxxx は触らない。
+	   0x000203=03:03、0x000032=46:01。sel4=$FF はトラック 0 になり別曲になる。 */
+	if (port4Inc && mdataAddr_ == 0x8800 && top == 0
+		&& ((mid == 2 && low == 3) || (mid == 0 && low == 0x32)))
+		ioport_[0x05] = 1;
+	if (firehawkPack && low == 0xFFu) {
+		ioport_[0x03] = 0;
+		ioport_[0x04] = 0;
+		ioport_[0x06] = 0xB0;
+	}
 	/* KOEI genghis: PATCH IN A,(4)/IN A,(5) を HL として MMLDATA @8000 へ。番地は (titleCode>>8) であり、下位バイトの $80 刻み添字ではない。 */
 	int anyBgm = 0;
 	for (unsigned i = 0; i < BGM_BANKS; i++) {
@@ -2095,10 +2354,77 @@ int CHardMsx::StartSongGeneric(unsigned titleCode)
 	if (deferBgm) {
 		if (song < BGM_BANKS && bgmPresent_[song])
 			StageBgm(song);
-		else {
+		else if (!nemesisPsg) {
 			for (unsigned i = 0; i < BGM_BANKS; i++) {
 				if (bgmPresent_[i]) { StageBgm(i); break; }
 			}
+		}
+		if (mdataAddr_ < 0xC000u && mdataAddr_ + mdataSize_ > 0x8000u)
+			memcpy(bankShadow_, mem_ + 0x8000, 0x4000);
+	}
+	/* wingsp LAST WING: FMPCH プレーヤ（CALL $856D HL=$8E17）を被せ、END 周期データを $8E27 へ。
+	   PSG 行は先に PSGEND が載る。856D は $8E1B からあと 6 本をチャネルポインタとして読むので
+	   PSGEND の $018F/$01F3…（BIOS）を踏み peak=0 になる。FMEND を先に載せて OPLL 行と同じ
+	   $8F0E… を残す。 */
+	if (wingspPack && song == 4) {
+		const unsigned pch = (bgmPresent_[BGM_BANKS - 1] && bgmBank_[BGM_BANKS - 1]
+			&& bgmBank_[BGM_BANKS - 1][0] == 0xFE) ? (unsigned)BGM_BANKS - 1u : 0u;
+		unsigned dataBank = 4;
+		if (bgmPresent_[BGM_BANKS - 2] && bgmBank_[BGM_BANKS - 2]
+			&& bgmBankSize_[BGM_BANKS - 2])
+			dataBank = (unsigned)BGM_BANKS - 2u;
+		if (dataBank != song && bgmPresent_[dataBank])
+			StageBgm(dataBank);
+		if (bgmPresent_[pch] && bgmBank_[pch] && bgmBankSize_[pch]
+			&& bgmBank_[pch][0] == 0xFE) {
+			const unsigned table = 0x8E17;
+			const unsigned stream = 0x8E27;
+			unsigned playerLen = table - 0x83F9u;
+			if (playerLen > mdataSize_)
+				playerLen = mdataSize_;
+			if (bgmBankSize_[pch] >= playerLen)
+				memcpy(mem_ + mdataAddr_, bgmBank_[pch], playerLen);
+			mem_[table] = 0x00;
+			mem_[table + 1] = 0x00;
+			mem_[table + 2] = (uint8_t)(stream & 0xff);
+			mem_[table + 3] = (uint8_t)(stream >> 8);
+			if (bgmPresent_[dataBank] && bgmBank_[dataBank] && bgmBankSize_[dataBank]) {
+				const unsigned char* src = bgmBank_[dataBank];
+				unsigned sz = bgmBankSize_[dataBank];
+				if (src[0] == 0xFE && sz > 0xA1Eu) {
+					src += 0xA1E;
+					sz -= 0xA1E;
+				} else if (src[0] == 0xFE && sz > 7u) {
+					src += 7;
+					sz -= 7;
+				}
+				unsigned n = sz;
+				if (stream + n > (unsigned)mdataAddr_ + mdataSize_)
+					n = (unsigned)mdataAddr_ + mdataSize_ - stream;
+				if (n)
+					memcpy(mem_ + stream, src, n);
+			}
+			chips_ |= CHIP_FMPAC;
+			EnsureOpll(1);
+			ioport_[0x07] = 1;
+		}
+	}
+	/* dante2 MUS07 は 9ch FM のみ。PSG xml は use_opll 無しで port7=0、OPLL 経路を踏まず無音。
+	   MUS02 は 9ch でも PSG チャネルが残る。FMPAC を武装して MUSIC 07 を鳴らす。 */
+	if (dante2Pack) {
+		chips_ |= CHIP_FMPAC;
+		EnsureOpll(1);
+		ioport_[0x07] = 1;
+	}
+	/* yakyufan END2 0x98BD03: 曲ヘッダが $98BD（page2）。TSTO の RDSLT/CALSLT が
+	   その窓をスロット ROM として読み空になる。ヘッダを $7000 へ写して HL を付け替える。 */
+	if (yakyufanPack) {
+		const unsigned src = (titleCode >> 8) & 0xFFFFu;
+		if (src >= 0x8000u && src < 0xC000u
+			&& src >= mdataAddr_ && src < (unsigned)mdataAddr_ + mdataSize_) {
+			unsigned n = (unsigned)mdataAddr_ + mdataSize_ - src;
+			if (n > 0x800u) n = 0x800u;
+			memmove(mem_ + 0x7000, mem_ + src, n);
 		}
 	}
 	/* dssp3 ran2: LDIR 後プレーヤ CALL $410D が RST 30（F7 スロット番地）を H.TIMI へコピー。$0030 は BIOS RET なので ISR が走らない（ayW=0、0038/WRTPSG トランポリンが壊れる）。IPL JP $44F9/$48D8 を残す。RSLREG/EXTBIO は RET 必須 — CALL $0138 はさもなくば PATCH @0400 へ NOP スライド。 */
@@ -2207,6 +2533,21 @@ int CHardMsx::StartSongGeneric(unsigned titleCode)
 	mem_[0x00E4] = 0xF1;             /* 命令 POP AF */
 	mem_[0x00E5] = 0xFB;             /* 命令 EI */
 	mem_[0x00E6] = 0xC9;             /* 命令 RET */
+	/* GREAT PASTEL2: CALL $0020 is DCOMPR (HL vs DE). A RET stub keeps Z from
+	   (D460)==0 so CALL Z $D404 rewinds every vblank — FF-rest openers
+	   (kpastel MF.VRM) never key a note. Body sits after the IRQ trampoline. */
+	if (initPc_ == 0x400 && mdataAddr_ == 0x2FFC
+		&& mem_[0xCFF9] == 0xFE && mem_[0xD1FE] == 0xF3) {
+		mem_[0x0020] = 0xC3;
+		mem_[0x0021] = 0xE8;
+		mem_[0x0022] = 0x00;
+		mem_[0x00E8] = 0x7C; /* LD A,H */
+		mem_[0x00E9] = 0x92; /* SUB D */
+		mem_[0x00EA] = 0xC0; /* RET NZ */
+		mem_[0x00EB] = 0x7D; /* LD A,L */
+		mem_[0x00EC] = 0x93; /* SUB E */
+		mem_[0x00ED] = 0xC9;
+	}
 	/* Warp & Warp ISR CALL $0141（SNSMAT）。後で 0100-03FF RET 埋めが走るとロード時植込が消え、単独 C9 が行 ID を返すのでミキサ AND が 0。空または RET のみ — Compile @0100 ではない。 */
 	if ((mem_[0x0141] == 0x00 || mem_[0x0141] == 0xC9)
 		&& (mem_[0x0142] == 0x00 || mem_[0x0142] == 0xC9)
@@ -2369,6 +2710,22 @@ int CHardMsx::StartSongGeneric(unsigned titleCode)
 			CEmuChipSccSetPlusMode(chipScc_, 1);
 		playCmdPending_ = 1;
 	}
+	/* Nemesis SCC+: init が CALL $4912 を戻さないが、settle 後も $4006 を保つ。8 回 play エッジは曲を頭出しし直す。 */
+	if (sccEnable_ && initPc_ == 0x400
+		&& mem_[0x4000] == 0xC3 && mem_[0x4001] == 0xCF
+		&& mem_[0x4002] == 0x60) {
+		static const unsigned kNemesisCall4912Settle[] = { 0x041C, 0x0424, 0x042D };
+		for (unsigned k = 0; k < 3u; k++) {
+			const unsigned a = kNemesisCall4912Settle[k];
+			if (mem_[a] == 0xCD && mem_[a + 1] == 0x12 && mem_[a + 2] == 0x49) {
+				mem_[a + 1] = 0x06;
+				mem_[a + 2] = 0x40;
+			}
+		}
+		if (chipScc_)
+			CEmuChipSccSetPlusMode(chipScc_, 1);
+		playCmdPending_ = 1;
+	}
 	/* Super Cobra SCC+: 同じ mute スロット RET C。Play $8B CLEAR は init CALL $0430 の残り $D0 に対する CP (HL); RET C。 */
 	if (sccEnable_ && initPc_ == 0x400
 		&& mem_[0x4003] == 0xC3 && mem_[0x4004] == 0xC4 && mem_[0x4005] == 0x41
@@ -2501,6 +2858,13 @@ int CHardMsx::StartSongGeneric(unsigned titleCode)
 	/* daiva5 MSX.BIN: play CALL $049D が LDDR $B74F→$BF4F。2 回目エッジが既再配置イメージをコピーし $ACCC を消す。すべての ED B8 パッチに適用しない: gokudo 0x01 は後続エッジで H.TIMI を植える必要がある（pending=1 が生きた選びを無音にした）。 */
 	if (mdataAddr_ == 0x8FF9)
 		playCmdPending_ = 1;
+	/* lastarmg: play が OUT (3),file。2 回目エッジ IN A,(3) が file を曲番号として
+	   再添字し、0x0B+ は 126 上の コマンドII オフセットで OPLL を mute、0x05–0x0A は
+	   全部 コマンドになる。エッジ 1 回で足りる。 */
+	if (lastarmgPack)
+		playCmdPending_ = 1;
+	if (nyanclePack)
+		playCmdPending_ = 1;
 	if (nukeninPack)
 		playCmdPending_ = 1;
 	if (initPc_ == 0x400 && mdataAddr_ == 0xC200 && mdataSize_ == 0x1000
@@ -2523,8 +2887,13 @@ int CHardMsx::StartSongGeneric(unsigned titleCode)
 	}
 	if (sccEnable_ && initPc_ == 0x400
 		&& ((mem_[0x4009] == 0xC3 && mem_[0x400A] == 0x27 && mem_[0x400B] == 0x42)
-			|| (mem_[0x4003] == 0xC3 && mem_[0x4004] == 0xC4 && mem_[0x4005] == 0x41)))
+			|| (mem_[0x4003] == 0xC3 && mem_[0x4004] == 0xC4 && mem_[0x4005] == 0x41)
+			|| (mem_[0x4000] == 0xC3 && mem_[0x4001] == 0xCF && mem_[0x4002] == 0x60)))
 		playCmdPending_ = 1;
+	if (initPc_ == 0x400 && mdataAddr_ == 0xBC00
+		&& mem_[0x042A] == 0xCD && mem_[0x042B] == 0x00 && mem_[0x042C] == 0xAC) {
+		playCmdPending_ = 1;
+	}
 	/* dante OPLL: 余分な port2 エッジ毎に CALL $D2E4 が空 $D852 バックアップから H.TIMI を戻し（init $D37B は飛ばされた）CALSLT $4119 で mute。曲 LDIR と CALL $D2DE にはエッジ 1 回で足りる。 */
 	if (initPc_ == 0x400
 		&& mem_[0x0413] == 0xCD && mem_[0x0414] == 0xE4 && mem_[0x0415] == 0xD2
@@ -2566,6 +2935,19 @@ int CHardMsx::StartSongGeneric(unsigned titleCode)
 		ioport_[0x04] = (uint8_t)(sel4 & 0xff);
 		ioport_[0x05] = (uint8_t)(hl & 0xff);
 		ioport_[0x06] = (uint8_t)(hl >> 8);
+	} else if (yakyufanPack) {
+		uint16_t hl = (uint16_t)((titleCode >> 8) & 0xFFFFu);
+		if (hl >= 0x8000u)
+			hl = 0x7000;
+		ioport_[0x03] = (uint8_t)(sel3 & 0xff);
+		ioport_[0x04] = (uint8_t)(hl & 0xff);
+		ioport_[0x05] = (uint8_t)(hl >> 8);
+	} else if (lastarmgPack) {
+		ioport_[0x03] = (uint8_t)(sel3 & 0xff);
+		ioport_[0x04] = (uint8_t)(sel4 & 0xff);
+	} else if (wingspPack) {
+		ioport_[0x03] = (uint8_t)(sel3 & 0xff);
+		ioport_[0x04] = (uint8_t)(sel4 & 0xff);
 	} else if (top == 0xFF) {
 		ioport_[0x03] = (uint8_t)(sel3 & 0xff);
 		ioport_[0x04] = (uint8_t)(sel4 & 0xff);
@@ -2579,19 +2961,24 @@ int CHardMsx::StartSongGeneric(unsigned titleCode)
 			|| fuunrokuPack || pup8Rp
 			|| gokudoPack || nukeninPack
 			|| herzogPack || gulliverPack || mbspPack || ds00Data
-			|| ankokuPack || gshogiPack) ? sel3 : song);
+			|| ankokuPack || gshogiPack || lastarmgPack || mmabtlPack
+			|| nyanclePack || ishidoPack) ? sel3 : song);
 		ioport_[0x04] = (uint8_t)((lowFilePack || fileInMid || classInMid
 			|| cmdInMid || sameLowCmd || mdataAddr_ == 0xCEB1
 			|| compilePtr || compileCp65 || compileTbl4
 			|| fuunrokuPack || pup8Rp
 			|| port4Se || port4Inc || ds00Data
 			|| gokudoPack || nukeninPack || herzogPack || gulliverPack
-			|| mbspPack || gshogiPack
-			|| (initPc_ == 0x3000 && mdataAddr_ == 0x0300)) ? sel4 : song);
+			|| mbspPack || gshogiPack || mmabtlPack
+			|| nyanclePack || ishidoPack
+			|| (initPc_ == 0x3000 && mdataAddr_ == 0x0300)
+			|| (initPc_ == 0x1000 && mdataAddr_ == 0x0300)) ? sel4 : song);
 	}
 	ioport_[0x07] = (chips_ & CHIP_FMPAC) ? 0x01 : 0x00;
 	if (f1douchuPsgJingle)
 		ioport_[0x07] = 0;
+	if (dante2Pack)
+		ioport_[0x07] = 1;
 	idle_ = 0;
 	return 1;
 }
@@ -2964,6 +3351,23 @@ int CHardMsx::StartSong(unsigned titleCode)
 	if (genericMode_)
 		return StartSongGeneric(titleCode);
 	return StartSongKss(titleCode);
+}
+
+int CHardMsx::ApplyCatalogToggle(unsigned titleCode)
+{
+	const unsigned lo = titleCode & 0xffu;
+	if (lo != 0xFFu)
+		return 0;
+	const int firehawkPack = (initPc_ == 0x400
+		&& mem_[0x041C] == 0xDB && mem_[0x041D] == 0x03
+		&& mem_[0x041E] == 0xFE && mem_[0x041F] == 0xFF
+		&& mem_[0x1B00] == 0xC3 && mem_[0x1B03] == 0xC3) ? 1 : 0;
+	if (!firehawkPack)
+		return 0;
+	/* TO BOSS: PATCH `IN A,(3); CP FF` は $1B0D フラグ。曲は変えない。 */
+	ioport_[0x03] = 0xFF;
+	mem_[0x1B0D] = 0xFF;
+	return 1;
 }
 
 /* CEmuHardMsxSetActive の実装 */

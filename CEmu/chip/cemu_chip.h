@@ -29,6 +29,7 @@ public:
 	/* 外部供給マスタクロックをタイマ/IRQスケジュール専用にスケールする。
 	   音声は物理入力クロックに固定。 */
 	virtual void SetTimerClockScale(unsigned scale) { (void)scale; }
+	virtual void SetTimerClockScaleRatio(unsigned num, unsigned den) { (void)num; (void)den; }
 	/* 出力 chipRate を割る（ピッチのみ）。1=ネイティブ。 */
 	virtual void SetPitchRateDiv(unsigned div) { (void)div; }
 	/* 合成FMのF-numberブロックだけシフト。タイマ・エンベロープ・LFO・

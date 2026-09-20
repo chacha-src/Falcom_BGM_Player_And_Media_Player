@@ -92,7 +92,16 @@ void CEmuFormatVirtualPath(const wchar_t* zipPhysical, unsigned titleIndex1,
 	out[0] = 0;
 	if (!zipPhysical || !zipPhysical[0]) return;
 	if (titleIndex1 == 0) titleIndex1 = 1;
-	_snwprintf_s(out, (size_t)outChars, _TRUNCATE, L"%s::%04u", zipPhysical, titleIndex1);
+	/* ::NNNN を必ず残す。バッファが短いときは物理パス側を切る（曲が同一 Fol に潰れるのを防ぐ）。 */
+	wchar_t suf[8];
+	_snwprintf_s(suf, _TRUNCATE, L"::%04u", titleIndex1);
+	const int sufLen = (int)wcslen(suf);
+	if (outChars <= sufLen + 1) {
+		wcsncpy_s(out, (size_t)outChars, suf, _TRUNCATE);
+		return;
+	}
+	const int zipMax = outChars - 1 - sufLen;
+	_snwprintf_s(out, (size_t)outChars, _TRUNCATE, L"%.*s%s", zipMax, zipPhysical, suf);
 }
 
 /* 表示用 basename::0001 */
@@ -158,7 +167,7 @@ static void CEmuMgrSetRoot(CEmuMgr* m, const wchar_t* dataRootOverride)
 	}
 
 	CEmuCatalogClear(&m->catalog);
-	/* data\ が無くても exe 隣 arcdata.zip があれば ready（zip は場所不問・stem 判定） */
+	/* data\ が無くても exe 隣 arcdata.zip があれば ready。ROM zip は場所不問（stem） */
 	m->ready = 0;
 	if (GetFileAttributesW(m->dataRoot) != INVALID_FILE_ATTRIBUTES)
 		m->ready = 1;
@@ -265,6 +274,8 @@ static void CEmuMgrStemDataDirFromPath(const wchar_t* zipPath, char* out, int ou
 		strncpy_s(out, (size_t)outCap, "ac", _TRUNCATE);
 	else if (wcsstr(low, L"\\sc3000\\") || wcsstr(low, L"/sc3000/"))
 		strncpy_s(out, (size_t)outCap, "sc3000", _TRUNCATE);
+	else if (wcsstr(low, L"\\pico\\") || wcsstr(low, L"/pico/"))
+		strncpy_s(out, (size_t)outCap, "pico", _TRUNCATE);
 	/* \\roms\\ は意図的に無視 — カタログの同一性ではない */
 }
 
@@ -334,6 +345,9 @@ static const CEmuGameEntry* CEmuMgrFallbackEntry(const char* stem, const char* d
 	} else if (_stricmp(dataDir, "sc3000") == 0) {
 		strncpy_s(s_cemuFallbackGe.platform, "sega", _TRUNCATE);
 		strncpy_s(s_cemuFallbackGe.subtype, "sg1000", _TRUNCATE);
+	} else if (_stricmp(dataDir, "pico") == 0) {
+		strncpy_s(s_cemuFallbackGe.platform, "sega", _TRUNCATE);
+		strncpy_s(s_cemuFallbackGe.subtype, "pico", _TRUNCATE);
 	} else if (_stricmp(dataDir, "fm7") == 0) {
 		/* *_fmav は FM77AV/OPN。素の *_fm7 は PSG */
 		const size_t n = strlen(stem);
@@ -417,7 +431,7 @@ const CEmuGameEntry* CEmuMgrResolveZip(CEmuMgr* m, const wchar_t* droppedZip,
 			return NULL;
 		static const char* kTry[] = {
 			"pc98", "pc88", "pc88va", "ac", "x68k", "msx", "x1", "fm7", "fmtowns",
-			"sc3000", "roms", NULL
+			"sc3000", "pico", "roms", NULL
 		};
 		int found = 0;
 		for (int i = 0; kTry[i] && !found; i++) {

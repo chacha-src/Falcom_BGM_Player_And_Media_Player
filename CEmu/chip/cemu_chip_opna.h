@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include <stdint.h>
 #include "cemu_chip.h"
 
@@ -26,6 +26,7 @@ unsigned CEmuChipOpnaGetAdpcmRomSize(const CEmuChipOpna* c);
 unsigned CEmuChipOpnaGetAdpcmBSize(const CEmuChipOpna* c);
 void CEmuChipOpnaSetTimerIrqPolicy(CEmuChipOpna* c, int allowTimerA);
 void CEmuChipOpnaSetTimerClockScale(CEmuChipOpna* c, unsigned scale);
+void CEmuChipOpnaSetTimerClockScaleRatio(CEmuChipOpna* c, unsigned num, unsigned den);
 void CEmuChipOpnaSetPitchRateDiv(CEmuChipOpna* c, unsigned div);
 void CEmuChipOpnaSetPitchOctaveShift(CEmuChipOpna* c, int octaves);
 void CEmuChipOpnaSetCarrierFadeClamp(CEmuChipOpna* c, int enable);

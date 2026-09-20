@@ -14,6 +14,8 @@ public:
 	int SampleRate() const { return sampleRate_; }
 	int LoadKss(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode);
 	int StartSong(unsigned titleCode);
+	/* カタログ (Toggle) / TO BOSS を曲を変えずフラグだけ載せる。1=適用 */
+	int ApplyCatalogToggle(unsigned titleCode);
 
 	Ay_Cpu* Cpu() override { return cpu_; }
 	uint8_t* Mem() override { return mem_; }

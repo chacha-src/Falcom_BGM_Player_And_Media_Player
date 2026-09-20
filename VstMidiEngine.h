@@ -104,6 +104,8 @@ int VstMidiGuessGsMapKind(const wchar_t* title, const wchar_t* path);
 int VstMidiFoldGsMapHint(int cur, int kind);
 int VstMidiSysexIsGmOn(const unsigned char* d, int n);
 int VstMidiSysexIsGsReset(const unsigned char* d, int n);
+/* SC-88 System Mode Set (00 00 7F)。GS Reset ではない。 */
+int VstMidiSysexIsGsSysMode(const unsigned char* d, int n);
 int VstMidiSysexIsXgOn(const unsigned char* d, int n);
 /* Roland MT-32 / CM-32L / LAPC: F0 41 xx 16 … */
 int VstMidiSysexIsMt32(const unsigned char* d, int n);
@@ -127,6 +129,8 @@ void VstMidiInjectShort(int portIndex0to2, DWORD shortMsg, int sampleOfs);
 void VstMidiInjectSysex(int portIndex0to2, const unsigned char* data, int bytes);
 // x86→KpiHost64: 曲レンダーに乗せるためキューを奪う。ローカル再生では呼ばない。
 int VstMidiStealInjects(BYTE* ports, DWORD* msgs, int* sampleOfs, int maxCount);
+/* x86→KpiHost64: 曲レンダーに載せる SysEx を奪う。ローカル再生では呼ばない。 */
+int VstMidiStealSysex(BYTE* ports, BYTE* packed, int* lens, int maxMsgs, int packedCap);
 
 int VstLiveLoadPart(int part1to32, const wchar_t* pluginPath, int isVst3);
 int VstLiveLoadFx(int part1to32, int slot0to1, const wchar_t* pluginPath, int isVst3);

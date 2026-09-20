@@ -109,10 +109,10 @@ public:
 	{
 		if (!stereo || frames <= 0) return;
 		memset(stereo, 0, (size_t)frames * 2 * sizeof(int16_t));
-		MixAdd(stereo, frames, 256);
+		MixAddSafe(stereo, frames, 256);
 	}
 
-	void MixAdd(int16_t* stereo, int frames, int gain) override
+	void MixAddSafe(int16_t* stereo, int frames, int gain)
 	{
 		if (!stereo || frames <= 0 || !enable_) return;
 		if (gain <= 0) return;
@@ -122,6 +122,8 @@ public:
 			const int vr = ch.volr;
 			if (!ch.noise) {
 				if (!(vl || vr) || !ch.freq) continue;
+				if (!ch.wave)
+					continue;
 				for (int f = 0; f < frames; f++) {
 					const int p = (ch.offset >> 16) & 0x1f;
 					int8_t s;
@@ -164,6 +166,11 @@ public:
 				ch.noise_counter = c;
 			}
 		}
+	}
+
+	void MixAdd(int16_t* stereo, int frames, int gain) override
+	{
+		MixAddSafe(stereo, frames, gain);
 	}
 
 	void SetPcmRom(const uint8_t* data, unsigned size) override
@@ -399,4 +406,9 @@ void CEmuChipC30SetEnable(CChip* c, int enable)
 uint8_t CEmuChipC30Read(CChip* c, uint32_t addr)
 {
 	return c ? static_cast<CChipC30*>(c)->ReadByte(addr) : 0xff;
+}
+
+void CEmuChipC30MixAdd(CChip* c, int16_t* stereo, int frames, int gain)
+{
+	if (c) static_cast<CChipC30*>(c)->MixAddSafe(stereo, frames, gain);
 }

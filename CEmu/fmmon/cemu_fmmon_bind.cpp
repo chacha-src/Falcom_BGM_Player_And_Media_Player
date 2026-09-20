@@ -164,6 +164,8 @@ void CEmuFmMonBindFromGe(const CEmuGameEntry* ge)
 	else if (_stricmp(dd, "sc3000") == 0 || _stricmp(sub, "sg1000") == 0
 		|| _stricmp(pf, "sg1000") == 0)
 		strncpy_s(plat, "SC-3000", _TRUNCATE);
+	else if (_stricmp(dd, "pico") == 0 || _stricmp(sub, "pico") == 0)
+		strncpy_s(plat, "Pico", _TRUNCATE);
 	else if (_stricmp(dd, "x68k") == 0 || _stricmp(pf, "x68k") == 0)
 		strncpy_s(plat, "X68000", _TRUNCATE);
 	else if (_stricmp(dd, "fmtowns") == 0 || _stricmp(pf, "fmtowns") == 0)
@@ -224,6 +226,9 @@ void CEmuFmMonBindFromGe(const CEmuGameEntry* ge)
 	/* チップラベル + layout — QSound / PCM バンクを先に (アーケード xml2) */
 	const int isFm7 = (_stricmp(dd, "fm7") == 0 || _stricmp(pf, "fm7") == 0
 		|| _stricmp(pf, "fm77av") == 0 || _stricmp(pf, "mucomfm") == 0);
+	const int isLomakai = (_stricmp(sub, "lomakai") == 0
+		|| (ge->archive[0] && (_stricmp(ge->archive, "lomakai") == 0
+			|| _stricmp(ge->archive, "makaiden") == 0)));
 	const int isMsx = (_stricmp(dd, "msx") == 0 || _stricmp(pf, "msx") == 0);
 	const size_t archiveLen = strlen(ge->archive);
 	/* platform が勝つ。同じ *_fm7 zip に PSG (fm7) と OPN (fm77av) 行がある。
@@ -427,6 +432,13 @@ void CEmuFmMonBindFromGe(const CEmuGameEntry* ge)
 		layout = -1;
 		seedOpm = 1;
 		FmMonShadowSetKeysProfile(SASAMI_FMMON_KEYS_MDX);
+	} else if (isLomakai) {
+		/* カタログ xml2 は OPM+OKI6295。実機 Mega System 1-Z は YM2203 のみ。
+		   記載上書きを残すと OPM 鍵盤になり MON_DEAD / keys=0 になる。 */
+		strncpy_s(chip, "YM2203", _TRUNCATE);
+		layout = 0;
+		FmMonShadowSetSsgClock(1500000u);
+		FmMonShadowSetKeysProfile(SASAMI_FMMON_KEYS_MDX);
 	} else if (_stricmp(sub, "kikikai") == 0) {
 		/* カタログ xml2 は OPM。Z80 プログラムは YM2203 @C000。 */
 		strncpy_s(chip, "YM2203", _TRUNCATE);
@@ -464,7 +476,8 @@ void CEmuFmMonBindFromGe(const CEmuGameEntry* ge)
 			strncpy_s(chip, "OPM+ADPCM", _TRUNCATE);
 		FmMonShadowSetKeysProfile(SASAMI_FMMON_KEYS_MDX);
 	} else if (HasChip(ge, CEMU_CHIP_SN76489) || _stricmp(sub, "sg1000") == 0
-		|| _stricmp(dd, "sc3000") == 0
+		|| _stricmp(dd, "sc3000") == 0 || _stricmp(sub, "pico") == 0
+		|| _stricmp(dd, "pico") == 0
 		|| _stricmp(sub, "system1") == 0 || _stricmp(sub, "system2") == 0) {
 		strncpy_s(chip, (_stricmp(sub, "system1") == 0 || _stricmp(sub, "system2") == 0)
 			? "SN76489x2" : "SN76489", _TRUNCATE);
@@ -545,7 +558,7 @@ void CEmuFmMonBindFromGe(const CEmuGameEntry* ge)
 	   になっていた。カタログがチップ集合を書いて連鎖のラベルが欠けていれば
 	   カタログが勝つ — 実ハードの唯一の per-archive 記録。連鎖が認識した
 	   基板は調整済みラベルを残す。 */
-	if (!isFm7 && !FmMonLabelCoversDocChips(ge, chip)) {
+	if (!isFm7 && !isLomakai && !FmMonLabelCoversDocChips(ge, chip)) {
 		char docLabel[48];
 		int docLayout = layout;
 		unsigned docSsg = 0, docKeys = 0;

@@ -100,6 +100,7 @@ int m6800_execute(int cycles);
 int m6803_execute(int cycles);
 int hd63701_execute(int cycles);
 int nsc8105_execute(int cycles);
+void hd63701_pulse_oci(void);
 
 void m6800_set_irq_line(int irqline, int state);
 

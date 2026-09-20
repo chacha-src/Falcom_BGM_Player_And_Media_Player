@@ -1,4 +1,4 @@
-﻿// ogg.exe と KpiHost64.exe（Vst3Host_k64.cpp 経由）が同じソース。
+// ogg.exe と KpiHost64.exe（Vst3Host_k64.cpp 経由）が同じソース。
 // KpiHost64 配下にコピーを置くと x64 プラグインの修正が片方にしか入らない。
 #include "stdafx.h"
 #include "Vst3Host.h"
@@ -684,7 +684,7 @@ struct Vst3Inst {
 	float* extraBufs; // (mixOutBuses-1) x 2 x VST3_BLOCK。マスターへ加算
 	CRITICAL_SECTION paramCs; // コントローラからの performEdit と Process の交差
 	int paramCsReady;
-	enum { SX_STORE = 4096 };
+	enum { SX_STORE = 65536 };
 	BYTE sxStore[SX_STORE]; // SysEx をイベントが参照するあいだ保持
 	int sxUsed;
 
@@ -1139,7 +1139,14 @@ void Vst3MidiSysex(Vst3Inst* v, const unsigned char* data, int bytes, int sample
 	if (!v || !v->ok || !data || bytes < 2) return;
 	if (v->pending.count >= (int32)(sizeof(v->pending.events) / sizeof(v->pending.events[0]))) return;
 	if (bytes > Vst3Inst::SX_STORE) bytes = Vst3Inst::SX_STORE;
-	if (v->sxUsed + bytes > Vst3Inst::SX_STORE) v->sxUsed = 0;
+	/* 未処理イベントが指しているダンプを巻き戻して上書きしない。
+	   開幕の GS DT1 を一塊で送ると 4KB で Reset 本体が壊れていた。 */
+	if (v->sxUsed + bytes > Vst3Inst::SX_STORE) {
+		if (v->pending.count == 0)
+			v->sxUsed = 0;
+		if (v->sxUsed + bytes > Vst3Inst::SX_STORE)
+			return;
+	}
 	memcpy(v->sxStore + v->sxUsed, data, (size_t)bytes);
 	Event e = {};
 	e.busIndex = 0;
@@ -1329,6 +1336,8 @@ void Vst3Process(Vst3Inst* v, float* outL, float* outR, int frames)
 		v->samplePos += count;
 		done += count;
 	}
+	if (v->pending.count == 0)
+		v->sxUsed = 0;
 }
 
 int Vst3IsOk(Vst3Inst* v)

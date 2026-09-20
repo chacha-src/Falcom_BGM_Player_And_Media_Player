@@ -23,8 +23,10 @@ void HD63701SetBus(HD63701Cpu* cpu, void* ctx,
 void HD63701Reset(HD63701Cpu* cpu);
 int HD63701Execute(HD63701Cpu* cpu, int cycles);
 void HD63701SetInputLine(HD63701Cpu* cpu, int line, int state);
+void HD63701PulseOci(HD63701Cpu* cpu);
 void HD63701ClearInterruptMask(HD63701Cpu* cpu);
 uint16_t HD63701Pc(const HD63701Cpu* cpu);
+void HD63701SetPc(HD63701Cpu* cpu, uint16_t pc);
 uint32_t HD63701IrqCount(const HD63701Cpu* cpu);
 
 #ifdef __cplusplus

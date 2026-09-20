@@ -68,6 +68,9 @@ public:
 		   だが、X1 KOEI/KSK MML は FB を RL ビット未設定で書くことが多い。 */
 		if (rlZeroAsLr_ && reg >= 0x20 && reg <= 0x27 && (val & 0xC0) == 0)
 			val = (uint8_t)(val | 0xC0);
+		/* CSM ($14 bit7) だと 0x08 が KeyOff になる。Sys86/X1 は CSM 未使用。 */
+		if (rlZeroAsLr_ && reg == 0x14)
+			val = (uint8_t)(val & 0x7fu);
 		opm_.SetReg(reg, val);
 		regs_[reg] = val;
 		writeCount_++;

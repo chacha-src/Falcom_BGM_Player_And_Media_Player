@@ -149,10 +149,12 @@ void CDriverMsx::Close()
 	playing_ = 0;
 }
 
-/* 同一 zip の別曲を StartSong で切替 */
+/* 同一 zip の別曲を StartSong で切替。トグル行は曲を変えずフラグだけ載せる。 */
 int CDriverMsx::OverlayTitle(unsigned titleCode)
 {
 	if (!hw_) return 0;
+	if (hw_->ApplyCatalogToggle(titleCode))
+		return 1;
 	return hw_->StartSong(titleCode) ? 1 : 0;
 }
 

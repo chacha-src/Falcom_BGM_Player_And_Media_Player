@@ -1,4 +1,4 @@
-// ogg.cpp : アプリケーション用クラスの定義を行います。
+﻿// ogg.cpp : アプリケーション用クラスの定義を行います。
 //
 
 #include "stdafx.h"
@@ -204,8 +204,6 @@ BOOL COggApp::OnIdle(LONG lCount)
 	if (!timerpOwns) {
 		if (og && og->m_MidiMonitorDlg && ::IsWindow(og->m_MidiMonitorDlg->GetSafeHwnd()))
 			og->m_MidiMonitorDlg->IdlePulse();
-		if (og && og->m_FmMonitorDlg && ::IsWindow(og->m_FmMonitorDlg->GetSafeHwnd()))
-			og->m_FmMonitorDlg->IdlePulse();
 	}
 	return CWinApp::OnIdle(lCount); // TRUE を返すと OnIdle が回り続けて他の UI を食う
 }
@@ -433,6 +431,10 @@ BOOL COggApp::InitInstance()
 	savedata.wrdh = 0;
 	savedata.wrdMainLock = 0;
 	savedata.wrdtopmost = 0;
+	savedata.pcMidiIn1Name[0] = 0;
+	savedata.pcMidiIn2Name[0] = 0;
+	savedata.pcMidiOutName[0] = 0;
+	savedata.pcMidiOutMode = 0;
 	savedata.sasamiMidiW = savedata.sasamiMidiH = 0;
 	savedata.sasamiMidiPxBeat = 0;
 	savedata.sasamiMidiStaffScale = 0;
@@ -2154,6 +2156,18 @@ BOOL COggApp::InitInstance()
 		savedata.wrdh = 0;
 		savedata.wrdMainLock = 0;
 		savedata.wrdtopmost = 0;
+	}
+	if (datFileSize < (int)(offsetof(save, pcMidiIn1Name) + sizeof(savedata.pcMidiIn1Name))) {
+		savedata.pcMidiIn1Name[0] = 0;
+		savedata.pcMidiIn2Name[0] = 0;
+		savedata.pcMidiOutName[0] = 0;
+		savedata.pcMidiOutMode = 0;
+	} else {
+		savedata.pcMidiIn1Name[_countof(savedata.pcMidiIn1Name) - 1] = 0;
+		savedata.pcMidiIn2Name[_countof(savedata.pcMidiIn2Name) - 1] = 0;
+		savedata.pcMidiOutName[_countof(savedata.pcMidiOutName) - 1] = 0;
+		if (savedata.pcMidiOutMode != 1 && savedata.pcMidiOutMode != 2)
+			savedata.pcMidiOutMode = 0;
 	}
 	/* UI パス欄は廃止。常に exe\\data（なければ hoot）。
 	   ルートは InitInstance 冒頭の CEmuMgrInit 済み。ここで Reload すると

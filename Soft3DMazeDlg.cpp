@@ -1252,6 +1252,9 @@ BOOL CS3mView::CreateProcTextures()
 	auto genWall=[&](int theme,DWORD* atlas){
 		for(int ty=0;ty<4;ty++)for(int tx=0;tx<4;tx++){
 			const int vid=ty*4+tx;
+#ifdef _OPENMP
+#pragma omp parallel for schedule(static)
+#endif
 			for(int ly=0;ly<TH;ly++)for(int lx=0;lx<TW;lx++){
 				int x=tx*TW+lx,y=ty*TH+ly;
 				int n=(int)(fbm((float)lx * 0.15f, (float)ly * 0.15f, vid+theme*97, 4) * 255.f) - 128;
@@ -1308,6 +1311,9 @@ BOOL CS3mView::CreateProcTextures()
 		}
 	};
 	auto genFloor=[&](int theme,DWORD* p,int W,int H){
+#ifdef _OPENMP
+#pragma omp parallel for schedule(static)
+#endif
 		for(int y=0;y<H;y++)for(int x=0;x<W;x++){
 			int n=(int)(fbm((float)x * 0.1f, (float)y * 0.1f, theme * 13, 3) * 255.f) - 128;BYTE r,g,b;
 			if(theme==0){ // 土っぽい石畳
@@ -1436,6 +1442,9 @@ BOOL CS3mView::CreateProcTextures()
 		DWORD* mir=new (std::nothrow) DWORD[MW*MH];
 		if(!mir) return failHr(E_OUTOFMEMORY);
 		auto putMir=[&](BOOL wall){
+#ifdef _OPENMP
+#pragma omp parallel for schedule(static)
+#endif
 			for(int y=0;y<MH;y++)for(int x=0;x<MW;x++){
 				const float u=(float)x/(float)(MW-1),v=(float)y/(float)(MH-1);
 				const float band=.55f+.45f*sinf(v*9.f+u*1.2f);

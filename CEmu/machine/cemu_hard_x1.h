@@ -32,6 +32,8 @@ public:
 	/* titleCode: hoot パック 0xSS0000BB → 曲=SS、バンク=BB。素の 0xNN は両方。
 	   ydos: KOEI 0x010000SS は hi がループフラグ、曲は lo。 */
 	void TriggerPlay(unsigned titleCode);
+	/* カタログ (Toggle) を曲を変えずフラグだけ載せる。1=適用 */
+	int ApplyCatalogToggle(unsigned titleCode);
 	/* 再生メールボックスを武装せず mdata/IO へ BGM を載せる（DRIVER ブート） */
 	void PrestageBgm(unsigned titleCode);
 	unsigned OpmWrites() const;
@@ -97,6 +99,9 @@ public:
 	uint8_t falcomPortF_;
 	/* ametruck: ポート 1 で `CP 03`（ファイル 0-2）。ポート F はファイル内バリアント */
 	uint8_t ametruckPortF_;
+	/* XTALSOFT OP @7A00: PATCH `IN A,(F); OR A; JR NZ,7AA9` は OPM 有無。
+	   曲番号を返すと song≠0 が PSG 3 トラックだけ植わり MUS02 が無音になる。 */
+	uint8_t xtalsoftPortF_;
 	/* mars PROG `$420A JP P` ハンドシェイク。ブートは play 前に EI。ISR が RETI しないので
 	   待ちループがメールボックスを見ない。PATCH の play CALL が PROG から戻るまで IRQ を止める。 */
 	uint8_t marsHoldIrq_;

@@ -1,4 +1,4 @@
-#include "stdafx.h"
+﻿#include "stdafx.h"
 #include "gpu/GpuDx11.h"
 #include "resource.h"
 #include <d3d11.h>
@@ -499,8 +499,13 @@ int GpuMonSurf_Ensure(GpuMonSurf* s, HWND parent, int x, int y, unsigned w, unsi
 			x, y, (int)w, (int)h, parent, NULL, GetModuleHandleW(NULL), NULL);
 		if (!s->child) return 0;
 		s->parent = parent;
-	} else {
-		MoveWindow(s->child, x, y, (int)w, (int)h, TRUE);
+		s->capH = y;
+	} else if (s->parent != parent || s->w != w || s->h != h || s->capH != y) {
+		/* 同じ位置での MoveWindow(TRUE) は親のアクリル帯まで Invalidate し、
+		   無演奏時にキャプション文字だけが点滅する。Present はこちらで行う。 */
+		::MoveWindow(s->child, x, y, (int)w, (int)h, FALSE);
+		s->parent = parent;
+		s->capH = y;
 	}
 	if (s->ready && s->w == w && s->h == h && s->sc) return 1;
 	ReleaseSurfGpu(s);

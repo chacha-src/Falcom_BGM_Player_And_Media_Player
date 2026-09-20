@@ -1,7 +1,8 @@
-#include "stdafx.h"
+﻿#include "stdafx.h"
 #include "ogg.h"
 #include "oggDlg.h"
 #include "CFmMonitorDlg.h"
+#include "CPianoRoll.h"
 #include "CMediaPlayerDlg.h"
 #include "PlayList.h"
 #include "PluginKinds.h"
@@ -9,6 +10,7 @@
 #include "DatArchive.h"
 #include "CEmu/fmmon/fmmon_shadow.h"
 #include "gpu/GpuDx11.h"
+#include "kb_sasami/source/sasami_fmmon_map.h"
 #include <algorithm>
 #include <math.h>
 #include <string.h>
@@ -25,6 +27,7 @@ extern CString fnn;
 extern int mode;
 extern CPlayList* pl;
 extern int plcnt;
+extern COggDlg* og;
 
 namespace {
 
@@ -253,15 +256,26 @@ static void FmMonRingPath(wchar_t* out, int n)
 
 static HANDLE s_hLiveRd = INVALID_HANDLE_VALUE;
 static HANDLE s_hRingRd = INVALID_HANDLE_VALUE;
+static HANDLE s_hLiveMap = NULL;
+static HANDLE s_hRingMap = NULL;
+static SasamiFmMonDump* s_liveView = NULL;
+static SasamiFmMonRing* s_ringView = NULL;
 static int s_rdCemu = -1; /* 開いているのが CEmu 側か。切替でハンドルを捨てる */
 struct FmHexJob { int x, y, cw, ch, gap, base, rows; };
 static FmHexJob s_fmHexJobs[4];
 static int s_fmHexJobN;
 static int s_fmHexSkipCells;
 
+static void FmInvalidateRdMaps()
+{
+	SasamiFmMonUnmap(&s_hRingMap, (void**)&s_ringView);
+	SasamiFmMonUnmap(&s_hLiveMap, (void**)&s_liveView);
+}
+
 /* モード切替で CEmu/SASAMI のハンドルが食い違わないよう閉じる */
 static void FmInvalidateRdHandles()
 {
+	FmInvalidateRdMaps();
 	if (s_hLiveRd != INVALID_HANDLE_VALUE) {
 		CloseHandle(s_hLiveRd);
 		s_hLiveRd = INVALID_HANDLE_VALUE;
@@ -282,29 +296,65 @@ static void FmSelectRdFamily()
 	s_rdCemu = want;
 }
 
-/* live.opna を開いてハンドルを使い回す */
+static int FmMapLiveRd()
+{
+	if (s_hLiveRd == INVALID_HANDLE_VALUE) return 0;
+	LARGE_INTEGER sz;
+	sz.QuadPart = 0;
+	if (!GetFileSizeEx(s_hLiveRd, &sz) || (ULONGLONG)sz.QuadPart != sizeof(SasamiFmMonDump)) {
+		if (s_liveView)
+			FmInvalidateRdMaps();
+		return 0;
+	}
+	if (s_liveView) return 1;
+	return SasamiFmMonMapLive(s_hLiveRd, 0, &s_hLiveMap, &s_liveView);
+}
+
+static int FmMapRingRd()
+{
+	if (s_hRingRd == INVALID_HANDLE_VALUE) return 0;
+	LARGE_INTEGER sz;
+	sz.QuadPart = 0;
+	if (!GetFileSizeEx(s_hRingRd, &sz) || (ULONGLONG)sz.QuadPart != sizeof(SasamiFmMonRing)) {
+		if (s_ringView)
+			FmInvalidateRdMaps();
+		return 0;
+	}
+	if (s_ringView) return 1;
+	return SasamiFmMonMapRing(s_hRingRd, 0, &s_hRingMap, &s_ringView);
+}
+
+/* live.opna を開いてハンドル＋MapView を使い回す */
 static HANDLE FmOpenLiveRd()
 {
 	FmSelectRdFamily();
-	if (s_hLiveRd != INVALID_HANDLE_VALUE)
+	if (s_hLiveRd != INVALID_HANDLE_VALUE) {
+		FmMapLiveRd();
 		return s_hLiveRd;
+	}
 	wchar_t path[MAX_PATH];
 	FmMonLivePath(path, MAX_PATH);
 	s_hLiveRd = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
 		NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+	if (s_hLiveRd != INVALID_HANDLE_VALUE)
+		FmMapLiveRd();
 	return s_hLiveRd;
 }
 
-/* ring.opna を開いてハンドルを使い回す */
+/* ring.opna を開いてハンドル＋MapView を使い回す */
 static HANDLE FmOpenRingRd()
 {
 	FmSelectRdFamily();
-	if (s_hRingRd != INVALID_HANDLE_VALUE)
+	if (s_hRingRd != INVALID_HANDLE_VALUE) {
+		FmMapRingRd();
 		return s_hRingRd;
+	}
 	wchar_t path[MAX_PATH];
 	FmMonRingPath(path, MAX_PATH);
 	s_hRingRd = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
 		NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+	if (s_hRingRd != INVALID_HANDLE_VALUE)
+		FmMapRingRd();
 	return s_hRingRd;
 }
 
@@ -395,43 +445,59 @@ static size_t FmDumpSlotSize(HANDLE h)
 	return z7;
 }
 
-/* ring の idx 番スロットを 1 枚読む */
+/* ring の idx 番スロットを 1 枚読む（MapView 優先、無ければ ReadFile） */
 static int FmReadRingSlot(HANDLE h, uint32_t idx, size_t slotSz, SasamiFmMonDump* out)
 {
 	if (!out || slotSz == 0) return 0;
-	LARGE_INTEGER off;
-	off.QuadPart = (LONGLONG)offsetof(SasamiFmMonRing, slot)
-		+ (LONGLONG)idx * (LONGLONG)slotSz;
-	if (!SetFilePointerEx(h, off, NULL, FILE_BEGIN))
-		return 0;
 	SasamiFmMonDump d;
 	memset(&d, 0, sizeof(d));
 	DWORD rd = 0;
-	const DWORD want = (slotSz < sizeof(d)) ? (DWORD)slotSz : (DWORD)sizeof(d);
-	if (!ReadFile(h, &d, want, &rd, NULL) || !FmDumpPayloadOk(d, rd))
+	if (s_ringView) {
+		if (!SasamiFmMonCopySlot(s_ringView, idx, slotSz, &d))
+			return 0;
+		rd = (slotSz < sizeof(d)) ? (DWORD)slotSz : (DWORD)sizeof(d);
+	} else {
+		LARGE_INTEGER off;
+		off.QuadPart = (LONGLONG)offsetof(SasamiFmMonRing, slot)
+			+ (LONGLONG)idx * (LONGLONG)slotSz;
+		if (!SetFilePointerEx(h, off, NULL, FILE_BEGIN))
+			return 0;
+		const DWORD want = (slotSz < sizeof(d)) ? (DWORD)slotSz : (DWORD)sizeof(d);
+		if (!ReadFile(h, &d, want, &rd, NULL))
+			return 0;
+	}
+	if (!FmDumpPayloadOk(d, rd))
 		return 0;
 	FmNormalizeDump(&d, rd);
 	*out = d;
 	return 1;
 }
 
-/* live.opna の最新 dump。失敗したらハンドルを捨てて一度だけやり直す */
+/* live.opna の最新 dump。MapView なら memcpy。失敗したら一度だけやり直す */
 static int FmReadDump(SasamiFmMonDump* out)
 {
 	for (int attempt = 0; attempt < 2; attempt++) {
 		HANDLE h = FmOpenLiveRd();
-		if (h == INVALID_HANDLE_VALUE) {
-			Sleep(0);
+		if (h == INVALID_HANDLE_VALUE)
 			continue;
-		}
 		SasamiFmMonDump tmp;
 		memset(&tmp, 0, sizeof(tmp));
 		DWORD rd = 0;
-		SetFilePointer(h, 0, NULL, FILE_BEGIN);
-		BOOL ok = ReadFile(h, &tmp, sizeof(tmp), &rd, NULL);
-		if (!ok || rd == 0) {
-			FmInvalidateRdHandles();
-			continue;
+		if (s_liveView) {
+			LARGE_INTEGER sz;
+			sz.QuadPart = 0;
+			if (!GetFileSizeEx(h, &sz) || sz.QuadPart <= 0) {
+				FmInvalidateRdHandles();
+				continue;
+			}
+			rd = (DWORD)((sz.QuadPart < (LONGLONG)sizeof(tmp)) ? sz.QuadPart : (LONGLONG)sizeof(tmp));
+			memcpy(&tmp, s_liveView, rd);
+		} else {
+			SetFilePointer(h, 0, NULL, FILE_BEGIN);
+			if (!ReadFile(h, &tmp, sizeof(tmp), &rd, NULL) || rd == 0) {
+				FmInvalidateRdHandles();
+				continue;
+			}
 		}
 		if (FmDumpPayloadOk(tmp, rd)) {
 			FmNormalizeDump(&tmp, rd);
@@ -448,17 +514,22 @@ static int FmReadLatestRingDump(SasamiFmMonDump* out)
 	if (!out) return 0;
 	HANDLE h = FmOpenRingRd();
 	if (h == INVALID_HANDLE_VALUE) return 0;
-	SasamiFmMonRingHdr hdr;
-	memset(&hdr, 0, sizeof(hdr));
-	DWORD rd = 0;
-	SetFilePointer(h, 0, NULL, FILE_BEGIN);
-	if (!ReadFile(h, &hdr, sizeof(hdr), &rd, NULL) || rd != sizeof(hdr)
-		|| !SasamiFmMonRingMagicOk(hdr) || hdr.gen == 0) {
-		FmInvalidateRdHandles();
-		return 0;
+	uint32_t gen = 0;
+	if (s_ringView && SasamiFmMonRingMagicOk(*s_ringView)) {
+		gen = SasamiFmMonPeekGen(s_ringView);
+	} else {
+		SasamiFmMonRingHdr hdr;
+		memset(&hdr, 0, sizeof(hdr));
+		DWORD rd = 0;
+		SetFilePointer(h, 0, NULL, FILE_BEGIN);
+		if (!ReadFile(h, &hdr, sizeof(hdr), &rd, NULL) || rd != sizeof(hdr)
+			|| !SasamiFmMonRingMagicOk(hdr) || hdr.gen == 0)
+			return 0;
+		gen = hdr.gen;
 	}
-	const uint32_t idx = (hdr.gen - 1u) % SASAMI_FMMON_RING;
-	const size_t slotSz = FmDumpSlotSize(h);
+	if (gen == 0) return 0;
+	const uint32_t idx = (gen - 1u) % SASAMI_FMMON_RING;
+	const size_t slotSz = sizeof(SasamiFmMonDump);
 	if (!FmReadRingSlot(h, idx, slotSz, out))
 		return 0;
 	return 1;
@@ -709,7 +780,7 @@ static uint8_t FmAdpcmHitOf(const SasamiFmMonDump& d)
 	return d.pcmNote[SASAMI_FMMON_ADPCM_HIT_SLOT];
 }
 
-/* リング全体(~320KB)を毎回読まず、未消費スロットだけ読む */
+/* リング全体を毎回読まず、未消費スロットだけ memcpy（MapView）する */
 static int FmDrainRingSlots(uint32_t* genLast,
 	void (*onSlot)(const SasamiFmMonDump&, void*), void* ctx)
 {
@@ -717,46 +788,41 @@ static int FmDrainRingSlots(uint32_t* genLast,
 	HANDLE h = FmOpenRingRd();
 	if (h == INVALID_HANDLE_VALUE) return 0;
 
-	SasamiFmMonRingHdr hdr;
-	memset(&hdr, 0, sizeof(hdr));
-	DWORD rd = 0;
-	const DWORD hdrNeed = (DWORD)sizeof(hdr);
-	SetFilePointer(h, 0, NULL, FILE_BEGIN);
-	if (!ReadFile(h, &hdr, hdrNeed, &rd, NULL) || rd != hdrNeed
-		|| !SasamiFmMonRingMagicOk(hdr)) {
-		FmInvalidateRdHandles();
-		return 0;
+	uint32_t to = 0;
+	int magicOk = 0;
+	if (s_ringView && SasamiFmMonRingMagicOk(*s_ringView)) {
+		to = SasamiFmMonPeekGen(s_ringView);
+		magicOk = 1;
+	} else {
+		SasamiFmMonRingHdr hdr;
+		memset(&hdr, 0, sizeof(hdr));
+		DWORD rd = 0;
+		const DWORD hdrNeed = (DWORD)sizeof(hdr);
+		SetFilePointer(h, 0, NULL, FILE_BEGIN);
+		if (ReadFile(h, &hdr, hdrNeed, &rd, NULL) && rd == hdrNeed
+			&& SasamiFmMonRingMagicOk(hdr)) {
+			to = hdr.gen;
+			magicOk = 1;
+		}
 	}
+	if (!magicOk)
+		return 0;
 	uint32_t from = *genLast;
-	uint32_t to = hdr.gen;
 	if (to == from)
 		return 1;
-	/* gen 後退 = 曲切替で ring 再作成。開いたハンドルは削除済み inode のまま
-	   新ファイルを読めず、SASAMI(.fpy) が無描画になる */
+	/* gen 後退 = 曲切替で writer が gen を 0 に戻した。MapView は握ったまま */
 	if (to < from) {
-		FmInvalidateRdHandles();
 		*genLast = 0;
 		from = 0;
-		h = FmOpenRingRd();
-		if (h == INVALID_HANDLE_VALUE) return 0;
-		memset(&hdr, 0, sizeof(hdr));
-		rd = 0;
-		SetFilePointer(h, 0, NULL, FILE_BEGIN);
-		if (!ReadFile(h, &hdr, hdrNeed, &rd, NULL) || rd != hdrNeed
-			|| !SasamiFmMonRingMagicOk(hdr)) {
-			FmInvalidateRdHandles();
-			return 0;
-		}
-		to = hdr.gen;
 		if (to == 0)
 			return 1;
 	}
 	if (to - from > SASAMI_FMMON_RING)
 		from = to - SASAMI_FMMON_RING;
-	const uint32_t kMaxDrain = 320u;
+	const uint32_t kMaxDrain = 96u;
 	if ((to - from) > kMaxDrain)
 		from = to - kMaxDrain;
-	const size_t slotSz = FmDumpSlotSize(h);
+	const size_t slotSz = sizeof(SasamiFmMonDump);
 	int any = 0;
 	for (uint32_t g = from; g < to; g++) {
 		const uint32_t idx = g % SASAMI_FMMON_RING;
@@ -766,10 +832,9 @@ static int FmDrainRingSlots(uint32_t* genLast,
 		onSlot(d, ctx);
 		any = 1;
 	}
-	/* ハンドル常駐（毎回 Close しない） */
 	*genLast = to;
 	(void)any;
-	return 1; /* ファイルあり（新規スロット無しでも OK） */
+	return 1;
 }
 
 static const wchar_t* kRzmName[6] = { L"BD", L"SD", L"TOP", L"HH", L"TOM", L"RIM" };
@@ -863,7 +928,7 @@ CFmMonitorDlg::CFmMonitorDlg(CWnd* pParent)
 	, m_heardQpc(0), m_heardFreq(0), m_ringGenLast(0), m_haveDump(0)
 	, m_dirtyHead(1), m_dirtyHex(1), m_dirtyPanels(1), m_dirtyKeys(1), m_fullDraw(1)
 	, m_panelDirtyMask(0x3F)
-	, m_readFail(0), m_persistAge(-1), m_userClosing(0), m_lastPollMs(0)
+	, m_readFail(0), m_persistAge(-1), m_userClosing(0), m_hosted(0), m_lastPollMs(0)
 	, m_inPrint(0)
 	, m_inPump(0)
 	, m_lastPlayy(-1)
@@ -921,11 +986,33 @@ BEGIN_MESSAGE_MAP(CFmMonitorDlg, CCustomBlurDialogExBase)
 	ON_WM_DESTROY()
 	ON_WM_TIMER()
 	ON_WM_SYSCOMMAND()
+	ON_WM_SHOWWINDOW()
 	ON_BN_CLICKED(IDC_FM_HELP, &CFmMonitorDlg::OnBnClickedHelp)
 END_MESSAGE_MAP()
 
+BOOL CFmMonitorDlg::PreCreateWindow(CREATESTRUCT& cs)
+{
+	if (m_hosted)
+		return CCustomDialogEx::PreCreateWindow(cs);
+	return CCustomBlurDialogExBase::PreCreateWindow(cs);
+}
+
 BOOL CFmMonitorDlg::OnInitDialog()
 {
+	if (m_hosted) {
+		CCustomDialogEx::OnInitDialog();
+		EnableAero(FALSE);
+		ModifyStyle(WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME | WS_MAXIMIZEBOX | WS_MINIMIZEBOX,
+			WS_CHILD | WS_CLIPSIBLINGS | WS_CLIPCHILDREN);
+		ModifyStyleEx(WS_EX_DLGMODALFRAME | WS_EX_WINDOWEDGE | WS_EX_CLIENTEDGE, 0, SWP_FRAMECHANGED);
+		if (m_help.GetSafeHwnd())
+			m_help.ShowWindow(SW_HIDE);
+		GpuDx11_Startup();
+		SetTimer(1, 16, NULL);
+		m_fullDraw = 1;
+		m_dirtyHead = m_dirtyHex = m_dirtyPanels = m_dirtyKeys = 1;
+		return TRUE;
+	}
 	CCustomBlurDialogExBase::OnInitDialog();
 	SetWindowText(LL14(
 		L"FMモニタ (.fpy/PMD/FMP)",
@@ -999,22 +1086,34 @@ bool CFmMonitorDlg::EnsureFrameBuffer(CDC& refDC, int w, int h)
 
 void CFmMonitorDlg::OnDestroy()
 {
-	PersistGeom();
+	if (!m_hosted)
+		PersistGeom();
 	GpuMonSurf_Release(&m_gpu);
 	ReleasePaintBuffers();
 	CCustomBlurDialogExBase::OnDestroy();
+}
+
+void CFmMonitorDlg::OnShowWindow(BOOL bShow, UINT nStatus)
+{
+	if (m_hosted) {
+		CCustomDialogEx::OnShowWindow(bShow, nStatus);
+		return;
+	}
+	CCustomBlurDialogExBase::OnShowWindow(bShow, nStatus);
 }
 
 void CFmMonitorDlg::OnSize(UINT nType, int cx, int cy)
 {
 	CCustomBlurDialogExBase::OnSize(nType, cx, cy);
 	if (nType == SIZE_MINIMIZED) return;
-	if (CCC_IsAeroEnabled())
-		CCC_RefreshDwmBlur(m_hWnd);
-	CCC_CaptionLayout(m_hWnd);
-	LayoutHelpBtn();
-	/* 初期化中の誤保存を避け、ユーザー操作後だけ位置を書く（タイマーで間引き） */
-	m_persistAge = 0;
+	if (!m_hosted) {
+		if (CCC_IsAeroEnabled())
+			CCC_RefreshDwmBlur(m_hWnd);
+		CCC_CaptionLayout(m_hWnd);
+		LayoutHelpBtn();
+		/* 初期化中の誤保存を避け、ユーザー操作後だけ位置を書く（タイマーで間引き） */
+		m_persistAge = 0;
+	}
 	m_layOk = 0;
 	m_fullDraw = 1;
 	m_dirtyHead = m_dirtyHex = m_dirtyPanels = m_dirtyKeys = 1;
@@ -1024,7 +1123,8 @@ void CFmMonitorDlg::OnSize(UINT nType, int cx, int cy)
 void CFmMonitorDlg::OnMove(int x, int y)
 {
 	CCustomBlurDialogExBase::OnMove(x, y);
-	m_persistAge = 0;
+	if (!m_hosted)
+		m_persistAge = 0;
 }
 
 void CFmMonitorDlg::OnSysCommand(UINT nID, LPARAM lParam)
@@ -1122,6 +1222,7 @@ void CFmMonitorDlg::OnBnClickedHelp()
 
 BOOL CFmMonitorDlg::OnEraseBkgnd(CDC* pDC)
 {
+	/* ホストが ExtendFrame だと素 GDI 塗りは α=0。穴を開けない */
 	(void)pDC;
 	return TRUE;
 }
@@ -1129,6 +1230,10 @@ BOOL CFmMonitorDlg::OnEraseBkgnd(CDC* pDC)
 void CFmMonitorDlg::OnTimer(UINT_PTR nIDEvent)
 {
 	if (nIDEvent == 1) {
+		if (m_hosted) {
+			CCustomBlurDialogExBase::OnTimer(nIDEvent);
+			return;
+		}
 		/* 移動/リサイズ後だけ間引いて保存（常時 Commit は避ける） */
 		if (m_persistAge >= 0 && ++m_persistAge >= 12) {
 			if (!m_userClosing && IsWindowVisible())
@@ -1223,6 +1328,12 @@ static int FmMonIsLive()
 	if (ps != 0) return 0;
 	if (plf == 0 && playf == 0) return 0;
 	return 1;
+}
+
+static int FmMonShowKeys()
+{
+	if (FmMonIsLive()) return 1;
+	return savedata.mpLoopbackScore ? 1 : 0;
 }
 
 /* YM/SASAMI 流: MIDI60=O5C。音名は常に4文字（O5C / O5C#）で # 有無でも桁がずれない */
@@ -1351,7 +1462,9 @@ int CFmMonitorDlg::FmRows() const
 int CFmMonitorDlg::SsgRows() const
 {
 	if (!m_haveDump) return 3;
-	if (IsOplDump() || KeysOnly()) return 0;
+	if (IsOplDump()) return 0;
+	/* FMP は WORKS に SSG がある。KEYSONLY のまま OPNAW を取れない OPI でも行を残す */
+	if (KeysOnly() && !(m_dump.dumpFlags & SASAMI_FMMON_FLAG_FMP)) return 0;
 	/* OPN2 / YM3438: padHit=2 かつ fm10=0。SSG ブロック無し */
 	if (m_dump.padHit == 2 && !m_dump.fm10 && !IsYm2610Dump() && !IsOpmDump())
 		return 0;
@@ -1851,6 +1964,7 @@ int CFmMonitorDlg::PreferredWidth(int dpi) const
 
 void CFmMonitorDlg::RestoreGeom()
 {
+	if (m_hosted) return;
 	const UINT dpi = FmUiDpi(m_hWnd ? m_hWnd : nullptr);
 	const int capH = CCC_GetCustomCaptionHeight(m_hWnd);
 	const int clientW = PreferredWidth((int)dpi);
@@ -1883,6 +1997,7 @@ void CFmMonitorDlg::RestoreGeom()
 
 void CFmMonitorDlg::PersistGeom()
 {
+	if (m_hosted) return;
 	if (!::IsWindow(GetSafeHwnd()) || IsIconic()) return;
 	CRect rc;
 	GetWindowRect(&rc);
@@ -1899,6 +2014,10 @@ void CFmMonitorDlg::PersistGeom()
 
 void CFmMonitorDlg::DetachForDestroy()
 {
+	if (m_hosted) {
+		KillTimer(1);
+		return;
+	}
 	m_userClosing = 0;
 	savedata.fmmonwindow = 1;
 	PersistGeom();
@@ -1909,6 +2028,12 @@ void CFmMonitorDlg::DetachForDestroy()
 
 void CFmMonitorDlg::OnClose()
 {
+	if (m_hosted) {
+		CWnd* p = GetParent();
+		if (p && ::IsWindow(p->GetSafeHwnd()))
+			p->PostMessage(WM_CLOSE);
+		return;
+	}
 	m_userClosing = 1;
 	savedata.fmmonwindow = 0;
 	PersistGeom();
@@ -2324,8 +2449,8 @@ void CFmMonitorDlg::DrawFmChPanel(CDC& dc, const CRect& rc, int ch)
 	const int pad = (std::max)(3, rc.Width() / 90);
 	/* ヘッダは高さの 30%、最低 72 */
 	const int headH = (std::max)(72, rc.Height() * 30 / 100);
-	const int keyed = FmMonIsLive() && m_haveDump && m_dump.keyOnFm[ch];
-	const BYTE fade = (FmMonIsLive() && ch >= 0 && ch < 6) ? m_fadeKey[ch] : (BYTE)0;
+	const int keyed = FmMonShowKeys() && m_haveDump && m_dump.keyOnFm[ch];
+	const BYTE fade = (FmMonShowKeys() && ch >= 0 && ch < 6) ? m_fadeKey[ch] : (BYTE)0;
 	/* ヘッダ背景はフェードしない。緑は SLOT 1..4 とレジスタ／鍵盤だけ */
 	const COLORREF headBg = headBase;
 	dc.FillSolidRect(rc.left, rc.top, rc.Width(), headH, headBg);
@@ -2909,7 +3034,7 @@ static void FmDrawKeyVolBar(CDC& dc, int x, int y, int w, int h, int level, COLO
 /* 左ラベル＋鍵盤。SSG は N---、それ以外は L----●----R のパンゲージ */
 void CFmMonitorDlg::DrawChannelKeys(CDC& dc, int x, int y, int w, int rowH, int keyH, int labelW)
 {
-	const int live = FmMonIsLive();
+	const int live = FmMonShowKeys();
 	const int fontPx = (std::max)(10, (std::min)(14, keyH - 1));
 	HFONT labFont = FmMakeFont(fontPx);
 	HFONT oldf = (HFONT)dc.SelectObject(labFont);
@@ -3173,9 +3298,12 @@ void CFmMonitorDlg::DrawChannelKeys(CDC& dc, int x, int y, int w, int rowH, int 
 		const int keyLit = gate || (live && fade >= 40);
 		int midi = -1;
 		if (keyLit && m_haveDump) {
-			if (!KeysOnly())
+			/* レジスタ周期が空の OPI でも FMP ssgMidi を落とさない（FM と同じフォールバック） */
+			if (!KeysOnly()) {
 				midi = ApproxMidiFromSsg(period);
-			else if (m_dump.version >= 6 && m_dump.ssgMidi[i] != 0xFF)
+				if (midi < 0 && m_dump.version >= 6 && m_dump.ssgMidi[i] != 0xFF)
+					midi = (int)m_dump.ssgMidi[i];
+			} else if (m_dump.version >= 6 && m_dump.ssgMidi[i] != 0xFF)
 				midi = (int)m_dump.ssgMidi[i];
 		}
 
@@ -3454,32 +3582,6 @@ void CFmMonitorDlg::ComputeLayout(int w, int h)
 	m_lay.fmW = (std::max)(100, w - m_lay.pad - m_lay.fmX);
 	const int pcmCompact = PanelGridPcmCompact();
 	m_lay.gap = FmScale(pcmCompact ? 2 : 3, m_lay.dpi);
-	{
-		const int nPan = PanelLayoutN();
-		const int n = (nPan > 0) ? nPan : (std::max)(1, FmRows());
-		const int cols = pcmCompact ? FmPanelColsPcm(n) : FmPanelCols(n);
-		const int rows = (n + cols - 1) / cols;
-		m_lay.panN = n;
-		m_lay.panCols = cols;
-		m_lay.panRows = rows;
-		int pw = (m_lay.fmW - m_lay.gap * (cols - 1)) / (std::max)(1, cols);
-		int ph = (m_lay.topH - m_lay.gap * (rows - 1)) / (std::max)(1, rows);
-		if (pw < 1) pw = 1;
-		if (ph < 1) ph = 1;
-		/* min で押し広げると右と下が切れる。領域内に収める。
-		   FM 混在時はセルを大きくしない（ユーザが窓を広げる）。PCM 専用は余白を詰める。
-		   机上: OPN 3枚で rows=1 だと ph=topH になり引き延びる。maxPh で打ち止め。 */
-		if (!pcmCompact) {
-			const int minPw = FmScale(140, m_lay.dpi);
-			const int minPh = FmScale(100, m_lay.dpi);
-			const int maxPh = FmScale(280, m_lay.dpi);
-			if (pw < minPw && cols == 1) pw = (std::min)(minPw, m_lay.fmW);
-			if (ph < minPh && rows == 1) ph = (std::min)(minPh, m_lay.topH);
-			if (ph > maxPh) ph = maxPh;
-		}
-		m_lay.pw = pw;
-		m_lay.ph = ph;
-	}
 	m_lay.keysY = m_lay.topY + m_lay.topH + m_lay.gapHexKeys;
 	{
 		int hexBottom = m_lay.topY;
@@ -3495,6 +3597,33 @@ void CFmMonitorDlg::ComputeLayout(int w, int h)
 		m_lay.rowH = bot / (std::max)(1, keyBlockRows);
 		if (m_lay.rowH < 11) m_lay.rowH = 11;
 		m_lay.keyH = (m_lay.rowH > 3) ? (m_lay.rowH - 2) : m_lay.rowH;
+	}
+	{
+		/* topH 確定後にセルを割る。先に割ると hex 押し下げで下段 CH6 が rcPanels 外になる。 */
+		const int nPan = PanelLayoutN();
+		const int n = (nPan > 0) ? nPan : (std::max)(1, FmRows());
+		const int cols = pcmCompact ? FmPanelColsPcm(n) : FmPanelCols(n);
+		const int rows = (n + cols - 1) / cols;
+		m_lay.panN = n;
+		m_lay.panCols = cols;
+		m_lay.panRows = rows;
+		int pw = (m_lay.fmW - m_lay.gap * (cols - 1)) / (std::max)(1, cols);
+		int ph = (m_lay.topH - m_lay.gap * (rows - 1)) / (std::max)(1, rows);
+		if (pw < 1) pw = 1;
+		if (ph < 1) ph = 1;
+		/* min で押し広げると右と下が切れる。領域内に収める。
+		   FM 混在時はセルを大きくしない（ユーザが窓を広げる）。PCM 専用は余白を詰める。
+		   机上: OPN 3枚で rows=1 だと ph=topH になり引き延びる。maxPh は 1 段だけ。 */
+		if (!pcmCompact) {
+			const int minPw = FmScale(140, m_lay.dpi);
+			const int minPh = FmScale(100, m_lay.dpi);
+			const int maxPh = FmScale(280, m_lay.dpi);
+			if (pw < minPw && cols == 1) pw = (std::min)(minPw, m_lay.fmW);
+			if (ph < minPh && rows == 1) ph = (std::min)(minPh, m_lay.topH);
+			if (rows == 1 && ph > maxPh) ph = maxPh;
+		}
+		m_lay.pw = pw;
+		m_lay.ph = ph;
 	}
 	m_lay.keysW = (std::max)(120, w - m_lay.pad * 2);
 
@@ -3594,7 +3723,8 @@ void CFmMonitorDlg::DrawHead(CDC& dc)
 			&& !(m_dump.dumpFlags & SASAMI_FMMON_FLAG_KEYSONLY)
 			&& !IsOpmDump() && !IsMsxDump()) {
 			static wchar_t opnaChip[96];
-			const wchar_t* base = (ExRows() > 0) ? L"FMP  OPNA+EX" : L"FMP  OPNA";
+			const wchar_t* base = (m_dump.padHit == 1) ? L"FMP  OPN"
+				: ((ExRows() > 0) ? L"FMP  OPNA+EX" : L"FMP  OPNA");
 			const wchar_t* pcm =
 				(m_dump.dumpFlags & SASAMI_FMMON_FLAG_PCM86) ? L"+86PCM" :
 				(m_dump.dumpFlags & SASAMI_FMMON_FLAG_ADPCM) ? L"+ADPCM" : L"";
@@ -3890,7 +4020,7 @@ void CFmMonitorDlg::DrawOpmChPanel(CDC& dc, const CRect& rc, int ch)
 			if (m_dump.exMidi[ch - 6] != 0xFF) midi = (int)m_dump.exMidi[ch - 6];
 		}
 	}
-	const BYTE fade = !FmMonIsLive() ? (BYTE)0
+	const BYTE fade = !FmMonShowKeys() ? (BYTE)0
 		: (ch < 6 ? m_fadeKey[ch] : m_fadeEx[ch - 6]);
 
 	const int titlePx = (std::max)(11, headH / 8);
@@ -4714,7 +4844,7 @@ void CFmMonitorDlg::DrawArcadePcmChPanel(CDC& dc, const CRect& rc, int ch, unsig
 		}
 	}
 
-	const int live = FmMonIsLive();
+	const int live = FmMonShowKeys();
 	const int gate = live && m_haveDump && ch < SASAMI_FMMON_PCM_MAX && m_dump.pcmOn[ch];
 	const BYTE fade = (live && ch < SASAMI_FMMON_PCM_MAX) ? m_fadePcm[ch] : (BYTE)0;
 	const int lit = gate || fade >= 40;
@@ -4791,7 +4921,7 @@ void CFmMonitorDlg::DrawPanelsArea(CDC& dc)
 {
 	if (!m_layOk) return;
 	dc.FillSolidRect(m_lay.rcPanels, FM_BG);
-	const int clipPanels = dc.SaveDC();
+	int clipPanels = dc.SaveDC();
 	dc.IntersectClipRect(m_lay.rcPanels);
 
 	if (IsMsxDump() && !(MsxDevMask() & SASAMI_FMMON_DEV_OPLL)
@@ -4859,8 +4989,24 @@ void CFmMonitorDlg::DrawPanelsArea(CDC& dc)
 	}
 
 	if (IsOpnThreeShell()) {
-		while (idx < 6)
-			DrawEmptyFmSlot(dc, place(idx), idx++);
+		/* 直前パネルのクリップが残ると下段左が消える。3×2 の CH4-6 を位置固定で描く。 */
+		dc.RestoreDC(clipPanels);
+		clipPanels = dc.SaveDC();
+		dc.IntersectClipRect(m_lay.rcPanels);
+		const int shellCols = 3;
+		const int pwS = (pw > 0) ? pw : ((std::max)(40, m_lay.fmW - gap * 2) / shellCols);
+		const int phS = (ph > 0) ? ph : (std::max)(20, (m_lay.topH - gap) / 2);
+		for (int e = 3; e < 6; ++e) {
+			const int c = e % shellCols;
+			const int r = e / shellCols;
+			CRect er(
+				m_lay.fmX + c * (pwS + gap),
+				m_lay.topY + r * (phS + gap),
+				m_lay.fmX + c * (pwS + gap) + pwS,
+				m_lay.topY + r * (phS + gap) + phS);
+			DrawEmptyFmSlot(dc, er, e);
+		}
+		idx = 6;
 	}
 
 	if (nComp > 0 && hasY) {
@@ -4883,7 +5029,7 @@ void CFmMonitorDlg::DrawPanelsArea(CDC& dc)
 
 static void DrawEmptyFmSlot(CDC& dc, const CRect& rc, int ch)
 {
-	if (rc.Width() < 40 || rc.Height() < 20) return;
+	if (rc.Width() < 8 || rc.Height() < 8) return;
 	dc.FillSolidRect(rc, RGB(22, 28, 30));
 	FmFrameRect(dc, rc, RGB(70, 90, 80));
 	HFONT f = FmMakeFont((std::max)(10, rc.Height() / 18));
@@ -5340,9 +5486,7 @@ void CFmMonitorDlg::ApplyDump(const SasamiFmMonDump& d)
 
 void CFmMonitorDlg::ResetDumpSync()
 {
-	/* 曲切替で writer が live/ring を作り直すと、常駐ハンドルは旧 inode のまま */
-	FmInvalidateRdHandles();
-	s_rdCemu = -1;
+	/* writer は inode を握ったまま gen=0。MapView は閉じない */
 	m_histN = 0;
 	m_histHead = 0;
 	m_ringGenLast = 0;
@@ -5428,24 +5572,10 @@ void CFmMonitorDlg::TrimHistForHeard(uint64_t heard, uint32_t rate)
 	}
 }
 
-/* live と ring を読み、可聴サンプルに一番近い dump を ApplyDump する */
+/* ring を読み、可聴サンプルに一番近い dump を ApplyDump する */
 int CFmMonitorDlg::PollDump()
 {
-	/* 差し替え inode を拾う。SASAMI が CREATE_ALWAYS していた頃の常駐ハンドルずれ対策 */
-	{
-		static DWORD s_reopenTick = 0;
-		const DWORD now = GetTickCount();
-		if (s_reopenTick == 0 || (now - s_reopenTick) > 250u) {
-			s_reopenTick = now;
-			FmInvalidateRdHandles();
-		}
-	}
-	/* live を先に（SASAMI/PMD/CEmu 共通）。フォルダは FmSelectRdFamily */
-	{
-		SasamiFmMonDump live;
-		if (FmReadDump(&live) && FmDumpMatchesPlay(live))
-			PushHistDump(live);
-	}
+	FmSelectRdFamily();
 
 	struct Cb { CFmMonitorDlg* self; int got; int seen; } cb = { this, 0, 0 };
 	auto thunk = [](const SasamiFmMonDump& d, void* p) {
@@ -5465,10 +5595,9 @@ int CFmMonitorDlg::PollDump()
 	if (ringOk && cb.seen > 0 && !cb.got && m_histN <= 0 && m_ringGenLast != genBefore) {
 		m_ringGenLast = (m_ringGenLast > (uint32_t)SASAMI_FMMON_RING)
 			? (m_ringGenLast - (uint32_t)SASAMI_FMMON_RING) : 0;
-		FmInvalidateRdHandles();
 	}
 
-	/* リングファイルだけ残って live を読まない／gen リセット後に取りこぼすのを防ぐ */
+	/* ring が空／gen リセット直後は latest slot、ダメなら live */
 	if (!cb.got) {
 		SasamiFmMonDump d;
 		int gotOne = 0;
@@ -5688,7 +5817,13 @@ void CFmMonitorDlg::InvalidateDirtyRegions()
 		return;
 	const int capH = CCC_GetCustomCaptionHeight(m_hWnd);
 	if (m_fullDraw || !m_layOk) {
-		Invalidate(FALSE);
+		CRect cr;
+		GetClientRect(&cr);
+		const int bodyTop = (capH > 0 && cr.Height() > capH) ? capH : 0;
+		if (bodyTop > 0)
+			cr.top = bodyTop;
+		if (!cr.IsRectEmpty())
+			InvalidateRect(&cr, FALSE);
 		return;
 	}
 	CRect acc(0, 0, 0, 0);
@@ -5704,8 +5839,68 @@ void CFmMonitorDlg::InvalidateDirtyRegions()
 	if (m_dirtyKeys) add(m_lay.rcKeys);
 	if (!acc.IsRectEmpty())
 		InvalidateRect(&acc, FALSE);
-	else
-		Invalidate(FALSE);
+	else {
+		CRect cr;
+		GetClientRect(&cr);
+		if (capH > 0 && cr.Height() > capH)
+			cr.top = capH;
+		if (!cr.IsRectEmpty())
+			InvalidateRect(&cr, FALSE);
+	}
+}
+
+void CFmMonitorDlg::ApplyPcAudioKeys(const BYTE levels108[108])
+{
+	SasamiFmMonDump d;
+	memset(&d, 0, sizeof(d));
+	memcpy(d.magic, "OPNA", 4);
+	d.version = 6;
+	d.sampleRate = 44100;
+	d.dumpFlags = SASAMI_FMMON_FLAG_KEYSONLY;
+	d.pad6[2] = SASAMI_FMMON_VIEW_KEYS;
+	strncpy_s(d.titleSjis, "PC Audio", _TRUNCATE);
+	memset(d.keyMidi, 0xFF, sizeof(d.keyMidi));
+	memset(d.exMidi, 0xFF, sizeof(d.exMidi));
+	memset(d.ssgMidi, 0xFF, sizeof(d.ssgMidi));
+	memset(d.pcmNote, 0xFF, sizeof(d.pcmNote));
+
+	int idx[108];
+	int n = 0;
+	if (levels108) {
+		for (int i = 0; i < 108; ++i) {
+			if (levels108[i] > 0)
+				idx[n++] = i;
+		}
+		for (int a = 0; a < n; ++a) {
+			int best = a;
+			for (int b = a + 1; b < n; ++b) {
+				if (levels108[idx[b]] > levels108[idx[best]])
+					best = b;
+			}
+			const int t = idx[a];
+			idx[a] = idx[best];
+			idx[best] = t;
+		}
+	}
+	static uint32_t s_seq = 1;
+	d.seq = s_seq++;
+	d.curSample = GetTickCount64() * 44ull;
+	const int take = (n > 9) ? 9 : n;
+	for (int i = 0; i < take; ++i) {
+		const uint8_t note = (uint8_t)idx[i];
+		if (i < 6) {
+			d.keyOnFm[i] = 1;
+			d.keyMidi[i] = note;
+			d.keyOnHitCnt[i] = 1;
+		} else {
+			const int s = i - 6;
+			d.ssgOn[s] = 1;
+			d.ssgMidi[s] = note;
+			d.ssgHitCnt[s] = 1;
+		}
+	}
+	ApplyDump(d);
+	m_fmViewReady = 1;
 }
 
 /* timerp から。dump 同期のあと dirty 矩形だけ Invalidate */
@@ -5756,6 +5951,13 @@ void CFmMonitorDlg::PumpSyncNow()
 		}
 	} else {
 		m_playIdent[0] = 0;
+		if (savedata.mpLoopbackScore && og && og->m_PianoRollDlg
+			&& ::IsWindow(og->m_PianoRollDlg->GetSafeHwnd())
+			&& og->m_PianoRollDlg->IsPcAudioScoring()) {
+			BYTE lv[108];
+			og->m_PianoRollDlg->CopyActiveKeyLevels(lv);
+			ApplyPcAudioKeys(lv);
+		}
 	}
 	TickFades();
 	InvalidateDirtyRegions();
@@ -5767,7 +5969,6 @@ void CFmMonitorDlg::IdlePulse()
 	if (!::IsWindow(GetSafeHwnd()) || !IsWindowVisible() || IsIconic())
 		return;
 	const ULONGLONG now = GetTickCount64();
-	extern COggDlg* og;
 	const ULONGLONG minMs = (og && og->MidiMonitorIsVisible()) ? 16ull : 8ull;
 	if (now - m_lastPollMs < minMs)
 		return;
@@ -5792,6 +5993,17 @@ void CFmMonitorDlg::PaintClientToDC(HDC hdc)
 	}
 
 	if (!EnsureFrameBuffer(dc, w, h) || !m_frameDC.GetSafeHdc()) {
+#if CCUSTOM_AERO_SUPPORT
+		if (m_hosted) {
+			if (m_chromaCache.Ensure(dc.GetSafeHdc(), w, h)) {
+				m_chromaCache.FillOpaqueRect(0, 0, w, h, FM_BG, RGB(1, 1, 1));
+				m_chromaCache.MakeRectOpaque(0, 0, w, h);
+				m_chromaCache.BlitFull(dc.GetSafeHdc(), 0, capH, w, h);
+			}
+			dc.Detach();
+			return;
+		}
+#endif
 		dc.FillSolidRect(0, capH, w, h, FM_BG);
 		CCC_CaptionPaintGdi(dc, m_hWnd);
 		dc.Detach();
@@ -5807,8 +6019,9 @@ void CFmMonitorDlg::PaintClientToDC(HDC hdc)
 	const int paintCap = (pr.top < capH) ? 1 : 0;
 
 #if CCUSTOM_AERO_SUPPORT
-	const bool needOpaque = CCC_IsWin11()
-		&& (savedata.aero == 1 || CCC_AcrylicCaption(m_hWnd));
+	/* ホスト MIDI 窓は ExtendFrame(-1)。子の素 GDI は α=0 で完全透過になる */
+	const bool needOpaque = m_hosted || (CCC_IsWin11()
+		&& (savedata.aero == 1 || CCC_AcrylicCaption(m_hWnd)));
 	if (needOpaque) {
 		if (m_chromaW != w || m_chromaH != h) {
 			m_chromaCache.Release();
@@ -5871,6 +6084,8 @@ void CFmMonitorDlg::BlitCachedFrameToPrintDC(HDC hdc)
 
 int CFmMonitorDlg::TryGpuFrame()
 {
+	if (m_hosted)
+		return 0;
 	if (!GpuDx11_Ready() || !::IsWindow(GetSafeHwnd()))
 		return 0;
 	CRect rect;
@@ -5921,13 +6136,35 @@ int CFmMonitorDlg::TryGpuFrame()
 
 void CFmMonitorDlg::OnPaint()
 {
-	if (m_inPrint) {
+	if (m_inPrint || CCC_PrintBusy()) {
 		ValidateRect(NULL);
 		return;
 	}
+	if (m_hosted) {
+		CPaintDC paint(this);
+		/* LOCKWINDOWUPDATE は Win+Shift+S 中に変な DC を返し、後段 AlphaBlend 失敗→BP で落ちる */
+		HDC hdc = ::GetDCEx(m_hWnd, NULL,
+			DCX_CACHE | DCX_CLIPSIBLINGS | DCX_CLIPCHILDREN);
+		if (!hdc)
+			hdc = ::GetDC(m_hWnd);
+		if (hdc) {
+			PaintClientToDC(hdc);
+			::ReleaseDC(m_hWnd, hdc);
+		}
+		return;
+	}
 	CPaintDC dc(this);
-	if (TryGpuFrame()) {
+	const int capH = CCC_GetCustomCaptionHeight(m_hWnd);
+	CRect pr = dc.m_ps.rcPaint;
+	const int paintCap = (pr.IsRectEmpty() || pr.top < capH) ? 1 : 0;
+	const int paintBody = (pr.IsRectEmpty() || pr.bottom > capH) ? 1 : 0;
+	if (!paintBody) {
 		CCC_CaptionPaintGdi(dc, m_hWnd);
+		return;
+	}
+	if (TryGpuFrame()) {
+		if (paintCap)
+			CCC_CaptionPaintGdi(dc, m_hWnd);
 		return;
 	}
 	PaintClientToDC(dc.GetSafeHdc());

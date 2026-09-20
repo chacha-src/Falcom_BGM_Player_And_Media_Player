@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 /* リアルタイム MPU UART → 伸長 SMF + ショートメッセージ列 (VST inject)。
    先に PC/AT (SC-55/MT-32/SC-88 を midiout glue)。PC98 MIDI zip も Pump/Stop を共有。 */
@@ -32,6 +32,8 @@ int CEmuMidiLiveStealShorts(CEmuMidiLiveShort* out, int maxCount);
    これに相対なので、呼び出し側が可聴タイムラインへスタンプできる。 */
 __int64 CEmuMidiLiveAudioFrames(void);
 
+int CEmuMidiLiveSampleRate(void);
+
 /* 最初の NoteOn を見たあと 1（プレイリスト time=-1 / ループヒント用） */
 int CEmuMidiLiveHasNotes(void);
 
@@ -52,3 +54,7 @@ struct CEmuMidiLiveDiag {
 	__int64 audioSample;
 };
 int CEmuMidiLiveGetDiag(struct CEmuMidiLiveDiag* out);
+
+/* ライブ中のハード（プローブ用。非 Pump 時のみ触る） */
+class CHard;
+CHard* CEmuMidiLiveHard(void);

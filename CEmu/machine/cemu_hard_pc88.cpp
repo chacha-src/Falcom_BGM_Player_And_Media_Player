@@ -747,6 +747,22 @@ int CHardPc88::Init(const CEmuGameEntry* ge, int sampleRate)
 	if (clockmul <= 0)
 		clockmul = CEmuParseOptHex(ge, "clock_mul", 1);
 	if (clockmul < 1 || clockmul > 64) clockmul = 1;
+	/* hoot tnmbox.cpp は Z80 を 8 MHz で回す。カタログに clockmul が無く
+	   4 MHz だと VRTC ISR が溢れ、テンポが不安定＋少し遅くなる。
+	   PATCH@0 + MAIN@8000 + 20KB BGM 窓が Telenet Music Box のレイアウト。 */
+	if (clockmul == 1 && useVrtc && mdataSize_ == 0x5000) {
+		int hasMain8000 = 0, hasPatch0 = 0;
+		for (int i = 0; i < ge->romCount; i++) {
+			const CEmuRomEntry* r = &ge->rom[i];
+			if (_stricmp(r->type, "code") != 0 || !r->name) continue;
+			if (r->offset == 0x8000 && _stricmp(r->name, "MAIN") == 0)
+				hasMain8000 = 1;
+			if (r->offset == 0 && _strnicmp(r->name, "PATCH", 5) == 0)
+				hasPatch0 = 1;
+		}
+		if (hasMain8000 && hasPatch0)
+			clockmul = 2;
+	}
 	cpuHz_ = 4000000 * clockmul;
 	const uint32_t clk = opnaMode ? 7987200u : 3993600u;
 	chip_ = CEmuChipYm2608Create(clk, opnaMode, sampleRate_);
@@ -1414,6 +1430,20 @@ static int CEmuPc88PatchAdrnalin(const uint8_t* mem)
 		&& mem[0x2E] == 0xCD && mem[0x2F] == 0x06 && mem[0x30] == 0x91) ? 1 : 0;
 }
 
+/* Telenet Music Box: JP 0010 / IM2 / SP=C000。IN (80) を 4 回 SRL して (008A) に上位ニブル、
+   AND 0x0F を 919D の曲添字（IX+17 ディレイ）へ。タイトル下位を port80 に出すと
+   0x7E+ は添字 14.. とグループ 8 になり無音。各 MUSIC* は 1 曲 — 添字 0。バンクは LoadSongData。 */
+static int CEmuPc88PatchTnmbox(const uint8_t* mem)
+{
+	if (!mem)
+		return 0;
+	return (mem[0] == 0xC3 && mem[1] == 0x10 && mem[2] == 0x00
+		&& mem[0x10] == 0xF3 && mem[0x11] == 0xED && mem[0x12] == 0x5E
+		&& mem[0x13] == 0x31 && mem[0x14] == 0x00 && mem[0x15] == 0xC0
+		&& mem[0x42] == 0xDB && mem[0x43] == 0x80
+		&& mem[0x44] == 0xCB && mem[0x45] == 0x3F) ? 1 : 0;
+}
+
 /* CEmuPc88PatchHootCmd01 の実装 */
 static int CEmuPc88PatchHootCmd01(const uint8_t* mem, int initPc)
 {
@@ -1988,6 +2018,9 @@ uint8_t CHardPc88::PlaySongIndex() const
 	if (CEmuPc88PatchLvaccus9800(mem_))
 		return (uint8_t)((titleCode_ >> 24) & 0xff);
 	/* 標準 hoot PATCH: ポート 80 はドライバ再生入口へ渡すバイト。これらのリップはタイトル上位（triton2 効果 id、goonies88 曲、valis オープニング分岐）。 */
+	/* tnmbox: port80 はファイル内添字（常に 0）。下位曲番号を渡すと 0x7E+ が無音。 */
+	if (CEmuPc88PatchTnmbox(mem_))
+		return 0;
 	if (CEmuPc88PatchHootCmd01(mem_, initPc_))
 		return (uint8_t)((titleCode_ >> 24) & 0xff);
 	if (CEmuPc88PatchDprime(mem_) || CEmuPc88PatchAdrnalin(mem_))

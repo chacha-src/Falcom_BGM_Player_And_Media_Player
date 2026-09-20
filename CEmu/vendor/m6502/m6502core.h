@@ -27,6 +27,8 @@ enum {
 M6502Cpu* M6502Create(void);
 void M6502Destroy(M6502Cpu* cpu);
 void M6502SetBus(M6502Cpu* cpu, void* ctx, M6502ReadFn read, M6502WriteFn write);
+/* 1 = DECO 222 / C10707: opcode フェッチだけ bit5/6 を入替。データ読は平文。 */
+void M6502SetDecrypt(M6502Cpu* cpu, int kind);
 void M6502Reset(M6502Cpu* cpu);
 /* Run at least `cycles` CPU clocks; returns clocks consumed. */
 int M6502Execute(M6502Cpu* cpu, int cycles);

@@ -831,14 +831,20 @@ int CDriverX68k::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigne
 				CDriverX68kPlantCaveTrap0(hw_);
 				m68k_set_reg(M68K_REG_PC, 0x950);
 			}
-			else if (!opmGlue && (inDos || pc == 0x10000u || pc >= 0xf00000u)) {
-				const unsigned boot = hw_->Read32(4) & 0xffffffu;
-				if (boot >= 0x400u && boot < 0x10000u)
-					m68k_set_reg(M68K_REG_PC, boot);
-			} else if (opmGlue && (spBad || pc == 0x10000u)) {
-				const unsigned boot = hw_->Read32(4) & 0xffffffu;
-				if (boot >= 0x400u && boot < 0x10000u)
-					m68k_set_reg(M68K_REG_PC, boot);
+			else {
+				/* 固定 poll 以外の OPMDRV.X BOOT。$4F2 は Alice コンパイル前なので飛ばす。 */
+				const unsigned poll = FindMailboxPoll();
+				if (poll && poll != 0x4f2u)
+					m68k_set_reg(M68K_REG_PC, poll);
+				else if (!opmGlue && (inDos || pc == 0x10000u || pc >= 0xf00000u)) {
+					const unsigned boot = hw_->Read32(4) & 0xffffffu;
+					if (boot >= 0x400u && boot < 0x10000u)
+						m68k_set_reg(M68K_REG_PC, boot);
+				} else if (opmGlue && (spBad || pc == 0x10000u)) {
+					const unsigned boot = hw_->Read32(4) & 0xffffffu;
+					if (boot >= 0x400u && boot < 0x10000u)
+						m68k_set_reg(M68K_REG_PC, boot);
+				}
 			}
 		} else if (ipl >= 6) {
 			m68k_set_reg(M68K_REG_SR, (sr & ~0x0700u) | 0x2000u);

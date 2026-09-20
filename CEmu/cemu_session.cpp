@@ -9,6 +9,8 @@
 #include "machine/cemu_hard_pcat.h"
 #include "machine/cemu_hard_pc98.h"
 #include "machine/cemu_hard_ac.h"
+#include "machine/cemu_hard_x1.h"
+#include "machine/cemu_hard_msx.h"
 #include "fmmon/fmmon_shadow.h"
 #include <string.h>
 #include <stdlib.h>
@@ -38,6 +40,7 @@ void CEmuSessionClose(CEmuSession* s)
 	CEmuF3Close(&s->f3);
 	CEmuMsxClose(&s->msx);
 	CEmuFm7Close(&s->fm7);
+	CEmuPicoClose(&s->pico);
 	memset(s, 0, sizeof(*s));
 	s->channels = 2;
 }
@@ -416,6 +419,14 @@ static int CEmuSessionTryHardGe(CEmuSession* s, const CEmuGameEntry* ge,
 		}
 		return 0;
 	}
+	if (_stricmp(ge->subtype, "pico") == 0 || _stricmp(ge->dataDir, "pico") == 0) {
+		if (CEmuPicoOpen(&s->pico, ge, zipPath, titleCode, s->sampleRate)) {
+			s->kind = CEMU_KIND_PICO;
+			s->lengthSamples = 0;
+			return 1;
+		}
+		return 0;
+	}
 	if (_stricmp(ge->platform, "x1") == 0 || _stricmp(ge->dataDir, "x1") == 0
 		|| _stricmp(ge->subtype, "x1") == 0 || _stricmp(ge->subtype, "x1psg") == 0) {
 		if (CEmuX1Open(&s->x1, ge, zipPath, titleCode, s->sampleRate)) {
@@ -520,6 +531,20 @@ static int CEmuSessionTryHardGe(CEmuSession* s, const CEmuGameEntry* ge,
 	return 0;
 }
 
+static void CEmuSessionApplyTogglePrefs(CEmuSession* s)
+{
+	if (!s || !s->path[0]) return;
+	unsigned codes[CEMU_TOGGLE_MAX];
+	const int n = CEmuTogglePrefGet(s->path, codes, CEMU_TOGGLE_MAX);
+	if (n <= 0) return;
+	for (int i = 0; i < n; i++) {
+		if (s->kind == CEMU_KIND_X1 && s->x1.hard)
+			((CHardX1*)s->x1.hard)->ApplyCatalogToggle(codes[i]);
+		else if (s->kind == CEMU_KIND_MSX && s->msx.hard)
+			((CHardMsx*)s->msx.hard)->ApplyCatalogToggle(codes[i]);
+	}
+}
+
 /* zip / 仮想パスを開き、S98→MDX→hard の順で kind を決める */
 int CEmuSessionOpen(CEmuSession* s, const wchar_t* path, unsigned titleCode, DWORD sampleRate)
 {
@@ -608,6 +633,7 @@ int CEmuSessionOpen(CEmuSession* s, const wchar_t* path, unsigned titleCode, DWO
 			continue;
 		s->game = cands[i];
 		CEmuZipFsClose(&fs);
+		CEmuSessionApplyTogglePrefs(s);
 		return 1;
 	}
 
@@ -625,7 +651,8 @@ static void CEmuSessionWatchHardSilence(CEmuSession* s, short* stereo, int frame
 		&& s->kind != CEMU_KIND_AC && s->kind != CEMU_KIND_X68K
 		&& s->kind != CEMU_KIND_SG1000 && s->kind != CEMU_KIND_X1
 		&& s->kind != CEMU_KIND_PCAT && s->kind != CEMU_KIND_F3
-		&& s->kind != CEMU_KIND_MSX && s->kind != CEMU_KIND_FM7)
+		&& s->kind != CEMU_KIND_MSX && s->kind != CEMU_KIND_FM7
+		&& s->kind != CEMU_KIND_PICO)
 		return;
 	if (s->endedBySilence)
 		return;
@@ -724,12 +751,16 @@ int CEmuSessionRender(CEmuSession* s, short* stereo, int frames)
 		case CEMU_KIND_F3: drv = s->f3.driver; break;
 		case CEMU_KIND_MSX: drv = s->msx.driver; break;
 		case CEMU_KIND_FM7: drv = s->fm7.driver; break;
+		case CEMU_KIND_PICO: drv = s->pico.driver; break;
 		default: break;
 		}
-		if (drv)
+		if (drv) {
+			const int tog = (s->game && CEmuGameTitleCodeIsToggle(s->game, s->overlayCode)) ? 1 : 0;
 			drv->OverlayTitle(s->overlayCode);
-		if (s->overlayCode)
-			s->titleCode = s->overlayCode;
+			if (!tog && s->overlayCode)
+				s->titleCode = s->overlayCode;
+			CEmuSessionApplyTogglePrefs(s);
+		}
 	}
 	int got = 0;
 	switch (s->kind) {
@@ -746,6 +777,7 @@ int CEmuSessionRender(CEmuSession* s, short* stereo, int frames)
 	case CEMU_KIND_F3: got = CEmuF3Render(&s->f3, stereo, frames); break;
 	case CEMU_KIND_MSX: got = CEmuMsxRender(&s->msx, stereo, frames); break;
 	case CEMU_KIND_FM7: got = CEmuFm7Render(&s->fm7, stereo, frames); break;
+	case CEMU_KIND_PICO: got = CEmuPicoRender(&s->pico, stereo, frames); break;
 	default: return 0;
 	}
 	if (got > 0 && !s->seekRender)
@@ -768,6 +800,7 @@ static CDriver* CEmuSessionDriver(CEmuSession* s)
 	case CEMU_KIND_F3: return s->f3.driver;
 	case CEMU_KIND_MSX: return s->msx.driver;
 	case CEMU_KIND_FM7: return s->fm7.driver;
+	case CEMU_KIND_PICO: return s->pico.driver;
 	default: return NULL;
 	}
 }
@@ -844,6 +877,7 @@ int CEmuSessionSeek(CEmuSession* s, UINT64 sample)
 	case CEMU_KIND_F3:
 	case CEMU_KIND_MSX:
 	case CEMU_KIND_FM7:
+	case CEMU_KIND_PICO:
 		return CEmuSessionSeekHard(s, sample);
 	default:
 		s->curSample = sample;

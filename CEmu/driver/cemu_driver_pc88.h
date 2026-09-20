@@ -8,6 +8,11 @@ unsigned CEmuPc88WatchdogReplays();
 void CEmuPc88WatchdogResetCount();
 void CEmuPc88WatchdogSetEnabled(int on);
 
+/* 直近 Open 以降に届けた VRTC / SOUND IRQ 回数（テンポプローブ用）。 */
+unsigned CEmuPc88VrtcIrqs();
+unsigned CEmuPc88SoundIrqs();
+void CEmuPc88IrqResetCount();
+
 /* 直近の再生キックが拾ったオープニング音声と、先頭の初期無音を切った
    フレーム数。プローブ専用。 */
 unsigned CEmuPc88LeadFrames();

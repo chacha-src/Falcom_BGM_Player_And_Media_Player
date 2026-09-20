@@ -14,6 +14,8 @@ struct M6502Cpu {
 	int nmiLine;
 	int nmiPrev;
 	uint32_t irqCount;
+	int decryptKind;
+	int fetchOp;
 };
 
 static M6502Cpu* g_m6502Active = NULL;
@@ -21,8 +23,23 @@ static M6502Cpu* g_m6502Active = NULL;
 uint8 read6502(ushort address)
 {
 	M6502Cpu* cpu = g_m6502Active;
+	uint8 v;
 	if (!cpu || !cpu->read) return 0xff;
-	return cpu->read(cpu->ctx, (uint16_t)address);
+	v = cpu->read(cpu->ctx, (uint16_t)address);
+	/* MAME deco222 mi_decrypt::read_sync: bitswap<8>(v,7,5,6,4,3,2,1,0) */
+	if (cpu->decryptKind == 1 && cpu->fetchOp)
+		v = (uint8)((v & 0x9fu) | ((uint8)((v & 0x20u) << 1) | (uint8)((v & 0x40u) >> 1)));
+	return v;
+}
+
+uint8 read6502_opcode(ushort address)
+{
+	M6502Cpu* cpu = g_m6502Active;
+	uint8 v;
+	if (cpu) cpu->fetchOp = 1;
+	v = read6502(address);
+	if (cpu) cpu->fetchOp = 0;
+	return v;
 }
 
 void write6502(ushort address, uint8 value)
@@ -50,6 +67,12 @@ void M6502SetBus(M6502Cpu* cpu, void* ctx, M6502ReadFn read, M6502WriteFn write)
 	cpu->ctx = ctx;
 	cpu->read = read;
 	cpu->write = write;
+}
+
+void M6502SetDecrypt(M6502Cpu* cpu, int kind)
+{
+	if (!cpu) return;
+	cpu->decryptKind = kind;
 }
 
 void M6502Reset(M6502Cpu* cpu)

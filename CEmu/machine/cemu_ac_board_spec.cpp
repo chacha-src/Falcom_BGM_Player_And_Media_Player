@@ -114,6 +114,18 @@ static const CEmuAcBoardSpec kSpecs[] = {
 	  0x10000, 0x800, 0, CEMU_AC_IRQ_Z80_IM1, CEMU_AC_IRQ_Z80_NMI,
 	  CEMU_AC_CHIP_YM3812, 0, 3579545, CEMU_AC_CHIP_OKI6295, 0, 1000000, 0,
 	  "seibu/raiden.cpp — SEI80BU decrypt when encrypted" },
+	{ CEMU_AC_BOARD_T5182, "t5182", CEMU_AC_CPU_Z80, 3579545,
+	  0x10000, 0x800, 0, CEMU_AC_IRQ_Z80_IM1, CEMU_AC_IRQ_NONE,
+	  CEMU_AC_CHIP_YM2151, 0, 3579545, CEMU_AC_CHIP_NONE, 0, 0, 0,
+	  "seibu/t5182.cpp — internal Z80 + YM2151" },
+	{ CEMU_AC_BOARD_HEBERPOP, "heberpop", CEMU_AC_CPU_Z80, 6000000,
+	  0x10000, 0x800, 0, CEMU_AC_IRQ_Z80_IM1, CEMU_AC_IRQ_Z80_NMI,
+	  CEMU_AC_CHIP_YM2612, 0, 8000000, CEMU_AC_CHIP_OKI6295, 0x80, 1056000, 0,
+	  "sunelectronics/shangha3.cpp heberpop sound" },
+	{ CEMU_AC_BOARD_BIONICC, "bionicc", CEMU_AC_CPU_Z80, 3579545,
+	  0x8000, 0x800, 0xA000, CEMU_AC_IRQ_NONE, CEMU_AC_IRQ_Z80_NMI,
+	  CEMU_AC_CHIP_YM2151, 0x8000, 3579545, CEMU_AC_CHIP_NONE, 0, 0, 0,
+	  "capcom/bionicc.cpp sound — YM2151 poll + MCU NMI" },
 };
 
 /* ボード ID から固定仕様を返す。未知なら NULL */

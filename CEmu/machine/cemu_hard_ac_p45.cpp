@@ -18,6 +18,7 @@ extern "C" {
 }
 #include <string.h>
 #include <stdlib.h>
+#include <windows.h>
 
 /* CEmuAcIsCodeRomType の実装 */
 static int CEmuAcIsCodeRomType(const char* t)
@@ -41,6 +42,18 @@ void CHardAc::SeibuSetBank(unsigned bank)
 void CHardAc::SeibuRefreshOpcodes()
 {
 	if (!soundRom_) return;
+	if (seibuSongOr80_ == 5) {
+		/* cabal: SEI80BU は 0000-1FFF のみ。8000-FFFF は平文曲 ROM。 */
+		for (unsigned a = 0; a < 0x2000u; a++) {
+			const uint8_t raw = (a < soundRomSize_) ? soundRom_[a] : 0xff;
+			mem_[a] = seibuEnc_ ? CEmuSei80buOpcode((uint16_t)a, raw) : raw;
+		}
+		if (soundRomSize_ >= 0x10000u)
+			memcpy(mem_ + 0x8000, soundRom_ + 0x8000, 0x8000);
+		else if (soundRomSize_ > 0x8000u)
+			memcpy(mem_ + 0x8000, soundRom_ + 0x8000, soundRomSize_ - 0x8000u);
+		return;
+	}
 	if (!seibuEnc_) {
 		const unsigned bankOff = seibuBank_ ? 0x18000u : 0x10000u;
 		for (unsigned a = 0; a < 0x10000u; a++) {
@@ -86,35 +99,112 @@ int CHardAc::LoadRomsSeibu(CEmuZipFs* fs, const CEmuGameEntry* ge)
 	memset(mem_, 0, sizeof(mem_));
 	if (soundRom_) { free(soundRom_); soundRom_ = NULL; soundRomSize_ = 0; }
 	if (pcmRom_) { free(pcmRom_); pcmRom_ = NULL; pcmRomSize_ = 0; }
+	if (pcmRom2_) { free(pcmRom2_); pcmRom2_ = NULL; pcmRom2Size_ = 0; }
 
-	/* コード ROM → 0x20000 MAME レイアウト */
-	for (int i = 0; i < ge->romCount; i++) {
-		const CEmuRomEntry* r = &ge->rom[i];
-		if (!CEmuAcIsCodeRomType(r->type)) continue;
-		unsigned sz = 0;
-		const unsigned char* data = CEmuZipFsFind(fs, r->name, &sz);
-		if (!data || !sz) continue;
-		uint8_t* p = (uint8_t*)calloc(1, 0x20000);
-		if (!p) return 0;
-		if (sz >= 0x20000u) {
-			memcpy(p, data, 0x20000);
-		} else if (sz >= 0x10000u) {
-			memcpy(p, data, 0x8000);
-			memcpy(p + 0x10000, data + 0x8000, 0x8000);
-			memcpy(p + 0x18000, p, 0x8000);
-		} else {
-			memcpy(p, data, sz < 0x8000u ? sz : 0x8000u);
-			if (sz > 0x8000u)
-				memcpy(p + 0x10000, data + 0x8000, sz - 0x8000u);
-			memcpy(p + 0x18000, p, 0x8000);
+	if (seibuSongOr80_ == 5) {
+		/* cabal: 8K SEI80BU @0000 + 32K @8000。64K 68K／ADPCM はコードにしない。 */
+		const uint8_t* intern = NULL;
+		unsigned internSz = 0;
+		const uint8_t* ext = NULL;
+		unsigned extSz = 0;
+		for (int i = 0; i < fs->fileCount; i++) {
+			const unsigned sz = fs->files[i].size;
+			const uint8_t* d = fs->files[i].data;
+			if (!d || !sz) continue;
+			if (sz == 0x2000u && d[0] == 0xf3) {
+				intern = d;
+				internSz = sz;
+			} else if (sz == 0x8000u) {
+				ext = d;
+				extSz = sz;
+			}
 		}
+		if (!intern || internSz < 0x1000u) return 0;
+		uint8_t* p = (uint8_t*)calloc(1, 0x10000);
+		if (!p) return 0;
+		memcpy(p, intern, internSz < 0x2000u ? internSz : 0x2000u);
+		if (ext && extSz)
+			memcpy(p + 0x8000, ext, extSz < 0x8000u ? extSz : 0x8000u);
 		soundRom_ = p;
-		soundRomSize_ = 0x20000;
-		break;
+		soundRomSize_ = 0x10000;
+		seibuEnc_ = 1;
+		seibuBank_ = 0;
+		seibuMain2Sub_[0] = seibuMain2Sub_[1] = 0;
+		seibuSub2Main_[0] = seibuSub2Main_[1] = 0;
+		seibuMainPending_ = 0;
+		seibuSubPending_ = 0;
+		seibuRst10_ = 0;
+		seibuRst18_ = 0;
+		soundCmd_ = 0;
+		soundCmdPending_ = 0;
+		irqPulse_ = 0;
+		opmWrites_ = 0;
+		cpuCycles_ = 0;
+		SeibuRefreshOpcodes();
+		if (chip_) chip_->Reset();
+		cpu_->reset(mem_);
+		CEmuZ80BusSetActive(this);
+		return 1;
+	}
+
+		/* コード ROM → 0x20000 MAME レイアウト。
+	   raiden2.zip は 256K PCM×2 + 64K snd。カタログが PCM を code と先に列挙すると
+	   先頭 00 埋めを Z80 に載せ、NOP アイドル（ADBCD7C5）になる。JP @$04 の 64K を選ぶ。 */
+	{
+		int pick = -1, best = -1;
+		for (int pass = 0; pass < 2 && pick < 0; pass++) {
+			const int n = pass ? fs->fileCount : ge->romCount;
+			for (int i = 0; i < n; i++) {
+				const uint8_t* data = NULL;
+				unsigned sz = 0;
+				if (pass == 0) {
+					const CEmuRomEntry* r = &ge->rom[i];
+					if (!CEmuAcIsCodeRomType(r->type)) continue;
+					data = CEmuZipFsFind(fs, r->name, &sz);
+				} else {
+					data = fs->files[i].data;
+					sz = fs->files[i].size;
+				}
+				if (!data || sz < 0x8000u) continue;
+				if (sz > 0x10000u) continue; /* 256K PCM / 68K 主 CPU */
+				int sc = 0;
+				if (sz >= 5u && data[4] == 0xc3) sc = 3;
+				else if (data[0] == 0xf3 && sz > 2u && data[1] == 0xed) sc = 2;
+				else if (sz > 0x70u && data[0x70] == 0x31) sc = 1;
+				if (sc > best) {
+					best = sc;
+					pick = (pass == 0) ? -2 - i : i;
+					if (sc >= 3) break;
+				}
+			}
+		}
+		const uint8_t* data = NULL;
+		unsigned sz = 0;
+		if (pick <= -2) {
+			const CEmuRomEntry* r = &ge->rom[-2 - pick];
+			data = CEmuZipFsFind(fs, r->name, &sz);
+		} else if (pick >= 0) {
+			data = fs->files[pick].data;
+			sz = fs->files[pick].size;
+		}
+		if (data && sz >= 0x8000u) {
+			uint8_t* p = (uint8_t*)calloc(1, 0x20000);
+			if (!p) return 0;
+			if (sz >= 0x10000u) {
+				memcpy(p, data, 0x8000);
+				memcpy(p + 0x10000, data + 0x8000, 0x8000);
+				memcpy(p + 0x18000, p, 0x8000);
+			} else {
+				memcpy(p, data, 0x8000u);
+				memcpy(p + 0x18000, p, 0x8000);
+			}
+			soundRom_ = p;
+			soundRomSize_ = 0x20000;
+		}
 	}
 	if (!soundRomSize_) return 0;
 
-	/* OKI PCM サンプル */
+	/* OKI PCM サンプル。raiden2: catalog offset 0 → oki1、>=0x40000 → oki2。YM3812 基板は 1 本目だけ。 */
 	for (int i = 0; i < ge->romCount; i++) {
 		const CEmuRomEntry* r = &ge->rom[i];
 		if (!r->type || (_stricmp(r->type, "pcm") != 0 && _stricmp(r->type, "oki") != 0
@@ -123,14 +213,56 @@ int CHardAc::LoadRomsSeibu(CEmuZipFs* fs, const CEmuGameEntry* ge)
 		unsigned sz = 0;
 		const unsigned char* data = CEmuZipFsFind(fs, r->name, &sz);
 		if (!data || !sz) continue;
-		uint8_t* p = (uint8_t*)realloc(pcmRom_, sz);
+		const unsigned off = (r->offset > 0) ? (unsigned)r->offset : 0u;
+		const int second = (pcm2_ && (off >= 0x40000u || (pcmRomSize_ && off == 0))) ? 1 : 0;
+		uint8_t** dst = second ? &pcmRom2_ : &pcmRom_;
+		unsigned* dstSize = second ? &pcmRom2Size_ : &pcmRomSize_;
+		uint8_t* p = (uint8_t*)realloc(*dst, sz);
 		if (!p) return 0;
-		pcmRom_ = p;
-		pcmRomSize_ = sz;
-		memcpy(pcmRom_, data, sz);
-		break;
+		*dst = p;
+		*dstSize = sz;
+		memcpy(*dst, data, sz);
+	}
+	if (pcm2_ && !pcmRomSize_) {
+		int idxs[4];
+		int nIdx = 0;
+		for (int i = 0; i < fs->fileCount && nIdx < 4; i++) {
+			if (fs->files[i].size != 0x40000u) continue;
+			idxs[nIdx++] = i;
+		}
+		for (int a = 0; a < nIdx; a++) {
+			for (int b = a + 1; b < nIdx; b++) {
+				char pa[CEMU_ZIP_PATH], pb[CEMU_ZIP_PATH];
+				WideCharToMultiByte(CP_ACP, 0, fs->files[idxs[a]].path, -1,
+					pa, (int)sizeof(pa), NULL, NULL);
+				WideCharToMultiByte(CP_ACP, 0, fs->files[idxs[b]].path, -1,
+					pb, (int)sizeof(pb), NULL, NULL);
+				if (_stricmp(pa, pb) > 0) {
+					int t = idxs[a]; idxs[a] = idxs[b]; idxs[b] = t;
+				}
+			}
+		}
+		if (nIdx >= 1) {
+			pcmRomSize_ = fs->files[idxs[0]].size;
+			pcmRom_ = (uint8_t*)malloc(pcmRomSize_);
+			if (pcmRom_)
+				memcpy(pcmRom_, fs->files[idxs[0]].data, pcmRomSize_);
+			else
+				pcmRomSize_ = 0;
+		}
+		if (nIdx >= 2) {
+			pcmRom2Size_ = fs->files[idxs[1]].size;
+			pcmRom2_ = (uint8_t*)malloc(pcmRom2Size_);
+			if (pcmRom2_)
+				memcpy(pcmRom2_, fs->files[idxs[1]].data, pcmRom2Size_);
+			else
+				pcmRom2Size_ = 0;
+		}
 	}
 	if (pcm_ && pcmRomSize_) pcm_->SetPcmRom(pcmRom_, pcmRomSize_);
+	if (pcm2_ && pcmRom2Size_) pcm2_->SetPcmRom(pcmRom2_, pcmRom2Size_);
+	if (seibuSongOr80_ >= 3)
+		SeibuOkiBank(0);
 
 	seibuEnc_ = 1;
 	seibuBank_ = 0;
@@ -145,11 +277,190 @@ int CHardAc::LoadRomsSeibu(CEmuZipFs* fs, const CEmuGameEntry* ge)
 	irqPulse_ = 0;
 	opmWrites_ = 0;
 	cpuCycles_ = 0;
-	/* 手元の raiden/heatbrl ダンプは平文（JP @$04 / LD SP @$70） */
-	seibuEnc_ = !(soundRom_[4] == 0xc3 || soundRom_[0x70] == 0x31);
+	/* 手元の raiden/heatbrl ダンプは平文（JP @$04 / LD SP @$70）。sdgndmps は DI;IM1;JP 平文。 */
+	seibuEnc_ = !(soundRom_[4] == 0xc3 || soundRom_[0x70] == 0x31
+		|| (soundRom_[0] == 0xf3 && soundRom_[1] == 0xed));
 	SeibuRefreshOpcodes();
 	if (chip_) chip_->Reset();
 	if (pcm_) pcm_->Reset();
+	if (pcm2_) pcm2_->Reset();
+	cpu_->reset(mem_);
+	CEmuZ80BusSetActive(this);
+	return 1;
+}
+
+/* MAME darkmist: 外部曲 ROM のデータ線 D1↔D6, D2↔D5, D3↔D4。内部 t5182.rom は平文。 */
+static uint8_t CEmuT5182Descramble(uint8_t r)
+{
+	return (uint8_t)((r & 0x81u)
+		| ((r & 0x40u) >> 5)
+		| ((r & 0x20u) >> 3)
+		| ((r & 0x10u) >> 1)
+		| ((r & 0x08u) << 1)
+		| ((r & 0x04u) << 3)
+		| ((r & 0x02u) << 5));
+}
+
+/* MAME t5182.cpp: 内部 8K @0000-1FFF、RAM 2000、共有 4000、外部 32K @8000。 */
+int CHardAc::LoadRomsT5182(CEmuZipFs* fs, const CEmuGameEntry* ge)
+{
+	if (!fs || !cpu_ || !chip_) return 0;
+	(void)ge;
+	memset(mem_, 0, sizeof(mem_));
+	if (soundRom_) { free(soundRom_); soundRom_ = NULL; soundRomSize_ = 0; }
+
+	const uint8_t* intern = NULL;
+	unsigned internSz = 0;
+	const uint8_t* ext = NULL;
+	unsigned extSz = 0;
+	for (int i = 0; i < fs->fileCount; i++) {
+		const unsigned sz = fs->files[i].size;
+		const uint8_t* d = fs->files[i].data;
+		if (!d || !sz) continue;
+		char pathA[CEMU_ZIP_PATH];
+		WideCharToMultiByte(CP_ACP, 0, fs->files[i].path, -1, pathA,
+			(int)sizeof(pathA), NULL, NULL);
+		if (sz == 8192u && d[0] == 0xf3 && sz > 1u && d[1] == 0xed) {
+			intern = d;
+			internSz = sz;
+			continue;
+		}
+		if (strstr(pathA, "t5182") || strstr(pathA, "T5182")) {
+			intern = d;
+			internSz = sz;
+			continue;
+		}
+		if (sz == 0x8000u && d[0] != 0xf3) {
+			ext = d;
+			extSz = sz;
+		}
+	}
+	if (!intern || internSz < 0x1000u)
+		return 0;
+	unsigned nInt = internSz < 0x2000u ? internSz : 0x2000u;
+	memcpy(mem_, intern, nInt);
+
+	if (ext && extSz) {
+		unsigned n = extSz < 0x8000u ? extSz : 0x8000u;
+		if (vsIoKind_ == 1) {
+			for (unsigned i = 0; i < n; i++)
+				mem_[0x8000u + i] = CEmuT5182Descramble(ext[i]);
+		} else {
+			memcpy(mem_ + 0x8000, ext, n);
+		}
+		uint8_t* p = (uint8_t*)malloc(n);
+		if (p) {
+			memcpy(p, mem_ + 0x8000, n);
+			soundRom_ = p;
+			soundRomSize_ = n;
+		}
+	}
+
+	seibuEnc_ = 0;
+	seibuBank_ = 0;
+	seibuMainPending_ = 0;
+	seibuSubPending_ = 0;
+	seibuRst10_ = 0;
+	seibuRst18_ = 0;
+	soundCmd_ = 0;
+	soundCmdPending_ = 0;
+	irqPulse_ = 0;
+	opmWrites_ = 0;
+	cpuCycles_ = 0;
+	if (chip_) chip_->Reset();
+	cpu_->reset(mem_);
+	CEmuZ80BusSetActive(this);
+	return 1;
+}
+
+/* MAME shangha3.cpp heberpop: 64K audiocpu @0000、OKI 512K。68K／blitter は載せない。 */
+int CHardAc::LoadRomsHeberpop(CEmuZipFs* fs, const CEmuGameEntry* ge)
+{
+	if (!fs || !cpu_ || !chip_) return 0;
+	(void)ge;
+	memset(mem_, 0, sizeof(mem_));
+	if (soundRom_) { free(soundRom_); soundRom_ = NULL; soundRomSize_ = 0; }
+	if (pcmRom_) { free(pcmRom_); pcmRom_ = NULL; pcmRomSize_ = 0; }
+
+	const uint8_t* code = NULL;
+	unsigned codeSz = 0;
+	const uint8_t* oki = NULL;
+	unsigned okiSz = 0;
+	for (int i = 0; i < fs->fileCount; i++) {
+		const unsigned sz = fs->files[i].size;
+		const uint8_t* d = fs->files[i].data;
+		if (!d || !sz) continue;
+		if (sz == 0x10000u && d[0] == 0xf3) {
+			code = d;
+			codeSz = sz;
+			continue;
+		}
+		if (sz == 0x80000u && !oki) {
+			oki = d;
+			okiSz = sz;
+		}
+	}
+	if (!code || codeSz < 0x100u)
+		return 0;
+	unsigned n = codeSz < 0x10000u ? codeSz : 0x10000u;
+	memcpy(mem_, code, n);
+
+	if (oki && okiSz && pcm_) {
+		uint8_t* p = (uint8_t*)malloc(okiSz);
+		if (p) {
+			memcpy(p, oki, okiSz);
+			pcmRom_ = p;
+			pcmRomSize_ = okiSz;
+			pcm_->SetPcmRom(pcmRom_, pcmRomSize_);
+		}
+	}
+
+	soundCmd_ = 0;
+	soundCmdPending_ = 0;
+	irqPulse_ = 0;
+	opmWrites_ = 0;
+	cpuCycles_ = 0;
+	if (chip_) chip_->Reset();
+	if (pcm_) pcm_->Reset();
+	cpu_->reset(mem_);
+	CEmuZ80BusSetActive(this);
+	return 1;
+}
+
+/* MAME bionicc.cpp: 32K audiocpu DI;IM1;SP=C800。68K／MCU／GFX は載せない。 */
+int CHardAc::LoadRomsBionicc(CEmuZipFs* fs, const CEmuGameEntry* ge)
+{
+	if (!fs || !cpu_ || !chip_) return 0;
+	(void)ge;
+	memset(mem_, 0, sizeof(mem_));
+	if (soundRom_) { free(soundRom_); soundRom_ = NULL; soundRomSize_ = 0; }
+
+	const uint8_t* code = NULL;
+	unsigned codeSz = 0;
+	for (int i = 0; i < fs->fileCount; i++) {
+		const unsigned sz = fs->files[i].size;
+		const uint8_t* d = fs->files[i].data;
+		if (!d || sz != 0x8000u) continue;
+		if (d[0] == 0xf3 && d[1] == 0xed && d[2] == 0x56) {
+			code = d;
+			codeSz = sz;
+			break;
+		}
+		if (!code) {
+			code = d;
+			codeSz = sz;
+		}
+	}
+	if (!code || codeSz < 0x100u)
+		return 0;
+	memcpy(mem_, code, codeSz < 0x8000u ? codeSz : 0x8000u);
+
+	soundCmd_ = 0;
+	soundCmdPending_ = 0;
+	irqPulse_ = 0;
+	opmWrites_ = 0;
+	cpuCycles_ = 0;
+	if (chip_) chip_->Reset();
 	cpu_->reset(mem_);
 	CEmuZ80BusSetActive(this);
 	return 1;
