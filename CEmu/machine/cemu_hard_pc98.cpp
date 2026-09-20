@@ -224,6 +224,261 @@ static void MmdClassicPlantIvt(uint8_t* mem)
 	}
 }
 
+/* MicroCabin MMD.SYS 5408 MZ（seilane/maisok/f15eagle）: ヘッダ名 SOUND。
+   tiny モデル。DGROUP はリンク番地 010D。MZ リロケ無しだと DS=010D 固定で
+   低メモリを叩き、CS:[12] をフラグと誤認して INIT ジャンプ表を壊していた。
+   API は PUSH ES（seilane CS:025C / f15 CS:0254）。AH=0/2/3/10。
+   準備フラグは DGROUP:[12]（ファイル上は既に 1）。INT D2 は AH=25 AL=[18]=D2。
+   OPN ISR は CS:040A（f15 は 0402）。CS:4CC は IRET 番兵。 */
+static int MmdIsSound(const uint8_t* mem, unsigned lin)
+{
+	return mem && lin + 18u < 0x200000u
+		&& memcmp(mem + lin + 10, "SOUND   ", 8) == 0;
+}
+
+static void MmdSoundApplyMzRelocs(uint8_t* img, unsigned imgSize,
+	const unsigned char* mz, unsigned mzSize, uint16_t loadSeg)
+{
+	if (!img || !mz || mzSize < 0x1Cu || mz[0] != 'M' || mz[1] != 'Z')
+		return;
+	const unsigned nrel = (unsigned)(mz[6] | (mz[7] << 8));
+	const unsigned roff = (unsigned)(mz[24] | (mz[25] << 8));
+	if (nrel == 0 || nrel > 64u || roff + nrel * 4u > mzSize)
+		return;
+	int need = 0;
+	for (unsigned o = 0x40u; o + 3u < imgSize && o < 0x80u; o++) {
+		if (img[o] == 0xB8
+			&& img[o + 1] == 0x0D && img[o + 2] == 0x01) {
+			need = 1;
+			break;
+		}
+	}
+	if (!need && imgSize > 0x54u
+		&& img[0x51] == 0xB8 && img[0x52] == 0x0D && img[0x53] == 0x01)
+		need = 1;
+	if (!need)
+		return;
+	for (unsigned i = 0; i < nrel; i++) {
+		const unsigned e = roff + i * 4u;
+		const unsigned off = (unsigned)(mz[e] | (mz[e + 1] << 8));
+		const unsigned rseg = (unsigned)(mz[e + 2] | (mz[e + 3] << 8));
+		const unsigned at = rseg * 16u + off;
+		if (at + 1u >= imgSize)
+			continue;
+		unsigned w = (unsigned)img[at] | ((unsigned)img[at + 1] << 8);
+		w = (w + (unsigned)loadSeg) & 0xffffu;
+		img[at] = (uint8_t)(w & 0xff);
+		img[at + 1] = (uint8_t)((w >> 8) & 0xff);
+	}
+}
+
+static void MmdSoundPlantIvt(uint8_t* mem)
+{
+	if (!mem) return;
+	unsigned seg = g_mmdLoadSeg;
+	unsigned api = 0;
+	if (mem) {
+		const unsigned sD2 = (unsigned)mem[0xD2 * 4 + 2]
+			| ((unsigned)mem[0xD2 * 4 + 3] << 8);
+		if (sD2 && sD2 != (unsigned)DOS98_TRAMP_SEG
+			&& MmdIsSound(mem, sD2 << 4))
+			seg = sD2;
+	}
+	auto trySeg = [&](unsigned s) -> int {
+		const unsigned lin = s << 4;
+		if (lin + 0x2A0u >= 0x200000u) return 0;
+		if (!MmdIsSound(mem, lin)) return 0;
+		unsigned a = 0;
+		for (unsigned o = 0x80; o + 12u < 0x800u; o++) {
+			if (mem[lin + o] == 0x06 && mem[lin + o + 1] == 0x1E
+				&& mem[lin + o + 2] == 0x55
+				&& mem[lin + o + 9] == 0xBD) {
+				a = o;
+				break;
+			}
+		}
+		if (!a) return 0;
+		seg = s;
+		api = a;
+		return 1;
+	};
+	if (!seg || !trySeg(seg)) {
+		seg = 0;
+		api = 0;
+		for (unsigned s = 0x0400u; s < 0x9000u; s += 0x10u) {
+			if (trySeg(s))
+				break;
+		}
+	}
+	if (!seg || !api) return;
+	const unsigned lin = seg << 4;
+	g_mmdLoadSeg = seg;
+	/* DGROUP は CS+10D0。CS:[12] は cmd0=INIT の near ジャンプなので書かない。 */
+	const unsigned dg = lin + 0x10D0u;
+	if (dg + 0x21Au < 0x200000u) {
+		if (mem[dg + 0x12] == 0)
+			mem[dg + 0x12] = 1;
+		const unsigned p14 = (unsigned)mem[dg + 0x14]
+			| ((unsigned)mem[dg + 0x15] << 8);
+		if (p14 != 0x188u && p14 != 0x88u) {
+			Pc98Wr16(mem, dg + 0x14u, 0x0188);
+			Pc98Wr16(mem, dg + 0x16u, 0x018A);
+		}
+		Pc98Wr16(mem, dg + 0x216u, 0);
+		if (mem[dg + 0x218] == 0 && mem[dg + 0x219] == 0)
+			Pc98Wr16(mem, dg + 0x218u, 1);
+	}
+	Pc98Wr16(mem, 0xD2u * 4u, (uint16_t)api);
+	Pc98Wr16(mem, 0xD2u * 4u + 2u, (uint16_t)seg);
+	unsigned isr = 0;
+	if (lin + 0x410u < 0x200000u && mem[lin + 0x40A] == 0x2E
+		&& mem[lin + 0x40B] == 0x89)
+		isr = 0x040A;
+	else if (lin + 0x408u < 0x200000u && mem[lin + 0x402] == 0x2E
+		&& mem[lin + 0x403] == 0x89)
+		isr = 0x0402;
+	if (!isr) {
+		for (unsigned o = 0x3E0u; o + 8u < 0x480u; o++) {
+			if (mem[lin + o] == 0x2E && mem[lin + o + 1] == 0x89
+				&& mem[lin + o + 2] == 0x26) {
+				isr = o;
+				break;
+			}
+		}
+	}
+	if (!isr)
+		isr = 0x040A;
+	if (lin + 0x408u < 0x200000u) {
+		const unsigned ss = (unsigned)mem[lin + 0x408]
+			| ((unsigned)mem[lin + 0x409] << 8);
+		if (ss == 0x010Du)
+			Pc98Wr16(mem, lin + 0x408u, (uint16_t)(seg + 0x10Du));
+		const unsigned sp = (unsigned)mem[lin + 0x406]
+			| ((unsigned)mem[lin + 0x407] << 8);
+		if (!sp)
+			Pc98Wr16(mem, lin + 0x406u, 0x1190);
+	}
+	Pc98Wr16(mem, 0x14u * 4u, (uint16_t)isr);
+	Pc98Wr16(mem, 0x14u * 4u + 2u, (uint16_t)seg);
+	Pc98Wr16(mem, 0x0Bu * 4u, (uint16_t)isr);
+	Pc98Wr16(mem, 0x0Bu * 4u + 2u, (uint16_t)seg);
+}
+
+static void MmdSoundRelocLoaded(uint8_t* mem, CEmuDos98& dos, uint16_t seg)
+{
+	if (!mem || !seg) return;
+	const unsigned lin = (unsigned)seg << 4;
+	if (!MmdIsSound(mem, lin))
+		return;
+	const CEmuDos98File* f = dos.FindFile("MMD.SYS");
+	if (!f || !f->data || f->size < 0x20u)
+		return;
+	unsigned imgSize = f->size;
+	if (f->data[0] == 'M' && f->data[1] == 'Z') {
+		const unsigned hdr = (unsigned)(f->data[8] | (f->data[9] << 8)) * 16u;
+		if (hdr >= 0x20u && hdr < f->size)
+			imgSize = f->size - hdr;
+	}
+	if (imgSize > 0x2000u)
+		imgSize = 0x2000u;
+	MmdSoundApplyMzRelocs(mem + lin, imgSize, f->data, f->size, seg);
+}
+
+static void MmdSoundEnsureFromZip(uint8_t* mem, CEmuDos98& dos)
+{
+	MmdSoundPlantIvt(mem);
+	const CEmuDos98File* f = dos.FindFile("MMD.SYS");
+	if (!f || !f->data || f->size < 0x300u)
+		return;
+	const unsigned char* data = f->data;
+	unsigned size = f->size;
+	const unsigned char* mz = NULL;
+	unsigned mzSize = 0;
+	if (size >= 0x20u && data[0] == 'M' && data[1] == 'Z') {
+		mz = data;
+		mzSize = size;
+		const unsigned hdr = (unsigned)(data[8] | (data[9] << 8)) * 16u;
+		if (hdr >= 0x20u && hdr + 18u <= size) {
+			const uint16_t attr = (uint16_t)(data[hdr + 4] | (data[hdr + 5] << 8));
+			if (attr & 0x8000) {
+				data += hdr;
+				size -= hdr;
+			}
+		}
+	}
+	if (size < 0x270u || memcmp(data + 10, "SOUND   ", 8) != 0)
+		return;
+	uint16_t seg = (uint16_t)g_mmdLoadSeg;
+	if (!seg && mem) {
+		const unsigned sD2 = (unsigned)mem[0xD2 * 4 + 2]
+			| ((unsigned)mem[0xD2 * 4 + 3] << 8);
+		if (sD2 && sD2 != (unsigned)DOS98_TRAMP_SEG
+			&& MmdIsSound(mem, sD2 << 4))
+			seg = (uint16_t)sD2;
+	}
+	if (!seg) {
+		if (!mem || !dos.AllocBlock(mem, 0x1000, &seg) || !seg)
+			return;
+	}
+	const unsigned lin = (unsigned)seg << 4;
+	if (lin + 0x10000u >= 0x200000u)
+		return;
+	/* maisok の device 4096 は 4896 バイト SYS を切る（DGROUP ジャンプ表が欠ける）。 */
+	memset(mem + lin, 0, 0x10000u);
+	memcpy(mem + lin, data, size);
+	g_mmdLoadSeg = seg;
+	g_mmdClassic = 0;
+	g_mmdPicIsr = 0;
+	if (mz)
+		MmdSoundApplyMzRelocs(mem + lin, size, mz, mzSize, seg);
+	MmdSoundPlantIvt(mem);
+}
+
+/* SOUND AH=02 は [F4]=[F6]=1190。FE ループは [F4]=[F6] のあと DEC するので
+   曲先頭-1（ゼロ）を食ってパーサが壊れる。短い SLM02 は 8s 内に FE に届く。
+   [F6]=1191 なら DEC 後 1190。 */
+static void MmdSoundArmLoop(uint8_t* mem, CEmuDos98& dos, const char* song)
+{
+	if (!mem || !g_mmdLoadSeg)
+		return;
+	const unsigned lin = (unsigned)g_mmdLoadSeg << 4;
+	if (!MmdIsSound(mem, lin))
+		return;
+	const unsigned dg = lin + 0x10D0u;
+	if (dg + 0x11A0u >= 0x200000u)
+		return;
+	if (song && song[0]) {
+		const CEmuDos98File* sf = dos.FindFile(song);
+		if (sf && sf->data && sf->size) {
+			unsigned n = sf->size;
+			if (n > 0x7E00u)
+				n = 0x7E00u;
+			const unsigned dest = dg + 0x1190u;
+			if (dest + n < 0x200000u)
+				memcpy(mem + dest, sf->data, n);
+		}
+	}
+	/* 糊が AH=02 を飛ばすと [E2]=1 のまま ISR がパースしない（maisok）。
+	   既に再生中（seilane 0x10）へ AH=02 を重ねると 28h が死ぬ。 */
+	if (mem[dg + 0xE2]) {
+		const unsigned sD2 = (unsigned)mem[0xD2 * 4 + 2]
+			| ((unsigned)mem[0xD2 * 4 + 3] << 8);
+		if (sD2 && sD2 != (unsigned)DOS98_TRAMP_SEG) {
+			np2_reg_set(NP2_R_AX, 0x0200);
+			np2_reg_set(NP2_R_FLAGS,
+				(uint16_t)(np2_reg_get(NP2_R_FLAGS) | 0x0200));
+			np2_interrupt(0xD2);
+		}
+	}
+	mem[dg + 0xE5] = 1;
+	mem[dg + 0xE2] = 0;
+	Pc98Wr16(mem, dg + 0xF6u, 0x1191);
+	const unsigned f4 = (unsigned)mem[dg + 0xF4]
+		| ((unsigned)mem[dg + 0xF5] << 8);
+	if (f4 < 0x1190u || f4 > 0x1190u + 0x4000u)
+		Pc98Wr16(mem, dg + 0xF4u, 0x1190);
+}
+
 /* 07DC が 08AA/F4 のあと [si]=0A06（09E8 の機械語）になる。メタはホストで副作用だけやり、07FF ノートで止める。 */
 static unsigned MmdSkipToNote(uint8_t* mem, unsigned lin, unsigned off, unsigned chBlk)
 {
@@ -497,6 +752,10 @@ static void MmdPlayAssist(uint8_t* mem)
 	if (!mem || !g_mmdLoadSeg) return;
 	const unsigned lin = (unsigned)g_mmdLoadSeg << 4;
 	if (lin >= 0x200000u) return;
+	if (MmdIsSound(mem, lin)) {
+		MmdSoundPlantIvt(mem);
+		return;
+	}
 	if (g_mmdClassic) {
 		if (MmdClassicIsFray(mem, lin)) {
 			if (lin + 0x1531u < 0x200000u) {
@@ -1350,6 +1609,7 @@ CHardPc98::CHardPc98()
 	, midiNoteOnCount_(0)
 	, midiPortOutCount_(0)
 	, midiLastCycle_(0)
+	, midiTickRem_(0)
 	, mpuUart_(0)
 	, mpuAckR_(0)
 	, mpuAckW_(0)
@@ -2324,6 +2584,581 @@ static int IvtHooked(uint8_t vec, int dosMode)
 	return 1;
 }
 
+/* ASCII MUSIC.COM v2.21（9230）は INT48 AH=07 を持つ。v2.00（8792）も AH=07 はあるが cmd0 経路が違う。 */
+static int MusicComHasAh07(void)
+{
+	uint8_t* mem = np2_mem();
+	if (!mem || !IvtHooked(0x48, 1))
+		return 0;
+	const unsigned s48 = (unsigned)mem[0x48 * 4 + 2]
+		| ((unsigned)mem[0x48 * 4 + 3] << 8);
+	const unsigned b48 = s48 << 4;
+	if (!s48 || s48 == (unsigned)DOS98_TRAMP_SEG || b48 + 0x400u >= 0x200000u)
+		return 0;
+	for (unsigned o = 0; o + 3u < 0x400u; o++) {
+		if (mem[b48 + o] == 0x80 && mem[b48 + o + 1] == 0xFC
+			&& mem[b48 + o + 2] == 0x07)
+			return 1;
+	}
+	return 0;
+}
+
+/* music_98.com INT21 フックは AH=3D/3E を全部ハンドル 0 成功にする。
+   SOUND.DAT / INCLUDE が同じ MML を読んで翻訳が落ちるので、Open だけ本物へ通す。
+   v2.21 の 17B4 はチャンネルごとに AH=3D し直す。偽ハンドル 0 だと 1 パス目で EOF
+   まで読んだあと STR/チャンネルが空になる。 */
+static void Music98PatchFakeOpen(uint8_t* mem, unsigned seg)
+{
+	if (!mem || !seg || seg == (unsigned)DOS98_TRAMP_SEG)
+		return;
+	const unsigned base = seg << 4;
+	for (unsigned off = 0x100u; off + 5u < 0x1C0u; off++) {
+		const unsigned p = base + off;
+		if (p + 5u >= 0x200000u)
+			break;
+		if (mem[p] == 0x80 && mem[p + 1] == 0xFC && mem[p + 2] == 0x3D
+			&& mem[p + 3] == 0x74) {
+			mem[p + 3] = 0x90;
+			mem[p + 4] = 0x90;
+		}
+	}
+}
+
+static void Music98AllowRealOpen(void)
+{
+	uint8_t* mem = np2_mem();
+	if (!mem)
+		return;
+	if (IvtHooked(0x21, 1)) {
+		const unsigned s21 = (unsigned)mem[0x21 * 4 + 2]
+			| ((unsigned)mem[0x21 * 4 + 3] << 8);
+		const unsigned o21 = (unsigned)mem[0x21 * 4]
+			| ((unsigned)mem[0x21 * 4 + 1] << 8);
+		Music98PatchFakeOpen(mem, s21);
+		const unsigned p = (s21 << 4) + o21;
+		if (p + 5u < 0x200000u
+			&& mem[p] == 0x80 && mem[p + 1] == 0xFC && mem[p + 2] == 0x3D
+			&& mem[p + 3] == 0x74) {
+			mem[p + 3] = 0x90;
+			mem[p + 4] = 0x90;
+		}
+	}
+	if (IvtHooked(0x7F, 1)) {
+		const unsigned s7f = (unsigned)mem[0x7F * 4 + 2]
+			| ((unsigned)mem[0x7F * 4 + 3] << 8);
+		Music98PatchFakeOpen(mem, s7f);
+	}
+}
+
+static int MusicComIsV221(CEmuDos98& dos)
+{
+	const CEmuDos98File* f = dos.FindFile("MUSIC.COM");
+	return (f && f->size == 9230u) ? 1 : 0;
+}
+
+/* `$T$` 系を大量に持つ v2.00（dante BGM01 は STR 39）はハンドル 0 一括読みが要る。
+   TITLE は STR 0、ACCOR は 13、mgamescr BGM01/02 は STR 22/34 で本物 AH=3D が要る。
+   閾値 38：dante の 39+ だけ偽ハンドル。スタブ BGM00 も翻訳せず残響を残す。 */
+static int MusicComStrCount(const CEmuDos98File* f)
+{
+	if (!f || !f->data)
+		return 0;
+	int n = 0;
+	const uint8_t* d = f->data;
+	const unsigned sz = f->size;
+	int line = 1;
+	for (unsigned i = 0; i + 4u < sz; i++) {
+		if (d[i] == '\n' || d[i] == '\r') {
+			line = 1;
+			continue;
+		}
+		if (!line)
+			continue;
+		if (d[i] == ' ' || d[i] == '\t')
+			continue;
+		line = 0;
+		if ((d[i] == 'S' || d[i] == 's')
+			&& (d[i + 1] == 'T' || d[i + 1] == 't')
+			&& (d[i + 2] == 'R' || d[i + 2] == 'r')
+			&& d[i + 3] == ':')
+			n++;
+	}
+	return n;
+}
+
+/* v2.21 AH=07 の 0755 は AL=0（open+ch0）/1（ch1）/FE（SOUND）で STR 用 AL=FF が無い。
+   AL=1 を FF に、続く FE を 01 に差し open→STR→ch1→ch2.. にする（MML の SOUND:@ は落とす。
+   この系統は SOUND.DAT と STR 内 @n）。 */
+static int MusicComPatchV221StrPass(uint8_t* mem)
+{
+	if (!mem || !IvtHooked(0x48, 1))
+		return 0;
+	const unsigned s48 = (unsigned)mem[0x48 * 4 + 2]
+		| ((unsigned)mem[0x48 * 4 + 3] << 8);
+	if (!s48 || s48 == (unsigned)DOS98_TRAMP_SEG)
+		return 0;
+	const unsigned b = s48 << 4;
+	if (b + 0x800u >= 0x200000u)
+		return 0;
+	for (unsigned o = 0x740u; o + 18u < 0x7C0u; o++) {
+		if (mem[b + o] != 0xB0 || mem[b + o + 1] != 0x00
+			|| mem[b + o + 2] != 0xE8)
+			continue;
+		if (mem[b + o + 5] != 0xB0 || mem[b + o + 6] != 0x01
+			|| mem[b + o + 7] != 0xE8)
+			continue;
+		if (mem[b + o + 10] != 0xB0 || mem[b + o + 11] != 0xFE
+			|| mem[b + o + 12] != 0xE8)
+			continue;
+		mem[b + o + 6] = 0xFF;
+		mem[b + o + 11] = 0x01;
+		return 1;
+	}
+	return 0;
+}
+
+/* `{99` は v2.21 では翻訳時展開ではなく再生トークン（ISR 内で戻るオフセット 0000）になり、
+   1 IRQ から戻らず opnInService が固まる。本体だけ残して `}` を外す。
+   `{2`..`{32` の短いフレーズはそのまま。dante の `{0 $A0$` は触らない。 */
+static void MusicComRewriteBigRepeat(CEmuDos98File* f)
+{
+	if (!f || !f->data || f->size < 4u)
+		return;
+	uint8_t* d = f->data;
+	const unsigned n = f->size;
+	for (unsigned i = 0; i + 2u < n; i++) {
+		if (d[i] != '{')
+			continue;
+		unsigned j = i + 1;
+		if (j < n && (d[j] == ' ' || d[j] == '\t'))
+			j++;
+		if (j >= n || d[j] < '0' || d[j] > '9')
+			continue;
+		unsigned k = j;
+		unsigned val = 0;
+		while (k < n && d[k] >= '0' && d[k] <= '9') {
+			if (val > 9999u)
+				break;
+			val = val * 10u + (unsigned)(d[k] - '0');
+			k++;
+		}
+		if (val < 50u || k <= j)
+			continue;
+		for (unsigned p = i; p < k; p++)
+			d[p] = ' ';
+		int nest = 1;
+		unsigned p = k;
+		while (p < n && nest > 0) {
+			if (d[p] == '{')
+				nest++;
+			else if (d[p] == '}') {
+				nest--;
+				if (nest == 0)
+					d[p] = ' ';
+			}
+			p++;
+		}
+		i = k - 1;
+	}
+}
+
+/* v2.21 の `{ $A1$ }`（回数なし）はループにならず本体が落ちる。dante と同じ `{0` にする。 */
+static void MusicComBareBraceToZero(CEmuDos98File* f)
+{
+	if (!f || !f->data || f->size < 4u || f->size > 200000u)
+		return;
+	uint8_t* d = f->data;
+	unsigned n = f->size;
+	unsigned extra = 0;
+	for (unsigned i = 0; i + 1u < n; i++) {
+		if (d[i] != '{')
+			continue;
+		unsigned j = i + 1;
+		while (j < n && (d[j] == ' ' || d[j] == '\t'))
+			j++;
+		if (j < n && (d[j] < '0' || d[j] > '9'))
+			extra++;
+	}
+	if (!extra)
+		return;
+	uint8_t* out = (uint8_t*)malloc(n + extra);
+	if (!out)
+		return;
+	unsigned o = 0;
+	for (unsigned i = 0; i < n; i++) {
+		out[o++] = d[i];
+		if (d[i] != '{')
+			continue;
+		unsigned j = i + 1;
+		while (j < n && (d[j] == ' ' || d[j] == '\t'))
+			j++;
+		if (j < n && (d[j] < '0' || d[j] > '9'))
+			out[o++] = '0';
+	}
+	uint8_t* nd = (uint8_t*)realloc(f->data, n + extra);
+	if (!nd) {
+		free(out);
+		return;
+	}
+	f->data = nd;
+	f->size = n + extra;
+	memcpy(f->data, out, n + extra);
+	free(out);
+}
+
+/* v2.21 の `{` / `{0` / `{n` は再生ループトークンになり ISR がノートを吐かない。
+   展開後の本体だけ残す。フレーズが列挙されていれば 8s は持つ。 */
+static void MusicComUnwrapAllBraces(CEmuDos98File* f)
+{
+	if (!f || !f->data || f->size < 2u)
+		return;
+	uint8_t* d = f->data;
+	unsigned n = f->size;
+	unsigned o = 0;
+	int comment = 0;
+	for (unsigned i = 0; i < n; i++) {
+		if (d[i] == '\n' || d[i] == '\r')
+			comment = 0;
+		else if (!comment && d[i] == ';')
+			comment = 1;
+		if (comment) {
+			d[o++] = d[i];
+			continue;
+		}
+		if (d[i] == '{') {
+			i++;
+			while (i < n && (d[i] == ' ' || d[i] == '\t'
+				|| (d[i] >= '0' && d[i] <= '9')))
+				i++;
+			i--;
+			continue;
+		}
+		if (d[i] == '}')
+			continue;
+		d[o++] = d[i];
+	}
+	if (o < n)
+		memset(d + o, 0x1A, n - o);
+	f->size = o;
+}
+
+/* AH=07 中に INT14 が走ると翻訳バッファを踏む。INT48 入口は [flag]=1 が要るので
+   フラグは立てたまま IRQ12 だけ閉じて翻訳する。 */
+static int s_musicComCompileHold = 0;
+
+static int MusicComMmlKind(const uint8_t* s, const uint8_t* e)
+{
+	while (s < e && (*s == ' ' || *s == '\t'))
+		s++;
+	if (s >= e)
+		return 0;
+	if (*s == ';' || *s == 0x1A)
+		return 0;
+	auto nicmp = [](const uint8_t* a, const char* b, int n) -> int {
+		for (int i = 0; i < n; i++) {
+			unsigned char ca = a[i], cb = (unsigned char)b[i];
+			if (ca >= 'a' && ca <= 'z') ca = (unsigned char)(ca - 32);
+			if (cb >= 'a' && cb <= 'z') cb = (unsigned char)(cb - 32);
+			if (ca != cb)
+				return 0;
+		}
+		return 1;
+	};
+	if (s + 4 <= e && nicmp(s, "STR:", 4))
+		return 1;
+	if (s + 5 <= e && nicmp(s, "SOUND", 5))
+		return 1;
+	if (s + 7 <= e && nicmp(s, "INCLUDE", 7))
+		return 1;
+	if (s + 4 <= e && nicmp(s, "LFO:", 4))
+		return 1;
+	if (s + 4 <= e && (nicmp(s, "OP1:", 4) || nicmp(s, "OP2:", 4)
+		|| nicmp(s, "OP3:", 4) || nicmp(s, "OP4:", 4)))
+		return 1;
+	if (s + 2 <= e && s[0] >= '1' && s[0] <= '9' && s[1] == ':')
+		return 2;
+	return 0;
+}
+
+/* v2.21 は 1 パス。チャンネル行が STR:/SOUND: より先だと $A0$ が空のまま SOUND:@ だけ残る。 */
+static void MusicComHoistMacros(CEmuDos98File* f)
+{
+	if (!f || !f->data || f->size < 16u || f->size > 200000u)
+		return;
+	const uint8_t* src = f->data;
+	const unsigned n = f->size;
+	enum { kMaxLines = 4096 };
+	unsigned ls[kMaxLines], le[kMaxLines];
+	int kind[kMaxLines];
+	int nline = 0;
+	unsigned i = 0;
+	while (i < n && nline < kMaxLines) {
+		unsigned a = i;
+		while (i < n && src[i] != '\n' && src[i] != '\r')
+			i++;
+		unsigned b = i;
+		if (i < n && src[i] == '\r')
+			i++;
+		if (i < n && src[i] == '\n')
+			i++;
+		ls[nline] = a;
+		le[nline] = b;
+		kind[nline] = MusicComMmlKind(src + a, src + b);
+		nline++;
+	}
+	if (nline < 4)
+		return;
+	int firstCh = -1, macroAfter = 0;
+	for (int k = 0; k < nline; k++) {
+		if (kind[k] == 2 && firstCh < 0)
+			firstCh = k;
+		if (kind[k] == 1 && firstCh >= 0 && k > firstCh)
+			macroAfter = 1;
+	}
+	if (!macroAfter || firstCh < 0)
+		return;
+	const unsigned cap = n + (unsigned)nline * 2u + 16u;
+	uint8_t* out = (uint8_t*)malloc(cap);
+	if (!out)
+		return;
+	unsigned o = 0;
+	auto emit = [&](int k) {
+		unsigned a = ls[k], b = le[k];
+		unsigned len = b - a;
+		if (o + len + 2u > cap)
+			return;
+		memcpy(out + o, src + a, len);
+		o += len;
+		out[o++] = '\r';
+		out[o++] = '\n';
+	};
+	for (int k = 0; k < firstCh; k++) {
+		if (kind[k] != 1)
+			emit(k);
+	}
+	for (int k = 0; k < nline; k++) {
+		if (kind[k] == 1)
+			emit(k);
+	}
+	for (int k = firstCh; k < nline; k++) {
+		if (kind[k] != 1)
+			emit(k);
+	}
+	if (o > n) {
+		uint8_t* nd = (uint8_t*)realloc(f->data, o);
+		if (!nd) {
+			free(out);
+			return;
+		}
+		f->data = nd;
+		f->size = o;
+		memcpy(f->data, out, o);
+	} else {
+		memcpy(f->data, out, o);
+		if (o < n)
+			memset(f->data + o, 0x1A, n - o);
+	}
+	free(out);
+}
+
+/* v2.21 AH=07 の 0755 は AL=0/1/FE と ch2.. だけで、STR 用 AL=FF を呼ばない。
+   `$A1$` が空のまま `{ $A1$ $A2$ }` だけ翻訳され 2 キーで止まる。定義をチャンネル行へ展開する。 */
+static void MusicComExpandStr(CEmuDos98File* f)
+{
+	if (!f || !f->data || f->size < 8u || f->size > 200000u)
+		return;
+	enum { kMaxDef = 96, kName = 12 };
+	char names[kMaxDef][kName];
+	const uint8_t* bodies[kMaxDef];
+	unsigned blen[kMaxDef];
+	int ndef = 0;
+	const uint8_t* s = f->data;
+	const unsigned n = f->size;
+	unsigned i = 0;
+	while (i < n && ndef < kMaxDef) {
+		unsigned a = i;
+		while (i < n && s[i] != '\n' && s[i] != '\r')
+			i++;
+		unsigned b = i;
+		if (i < n && s[i] == '\r')
+			i++;
+		if (i < n && s[i] == '\n')
+			i++;
+		const uint8_t* p = s + a;
+		const uint8_t* e = s + b;
+		while (p < e && (*p == ' ' || *p == '\t'))
+			p++;
+		if (p + 4 >= e)
+			continue;
+		if ((p[0] != 'S' && p[0] != 's') || (p[1] != 'T' && p[1] != 't')
+			|| (p[2] != 'R' && p[2] != 'r') || p[3] != ':')
+			continue;
+		p += 4;
+		char nm[kName];
+		int ni = 0;
+		while (p < e && *p != '=' && ni < kName - 1) {
+			unsigned char c = *p++;
+			if (c >= 'a' && c <= 'z')
+				c = (unsigned char)(c - 32);
+			if (c == '$')
+				continue;
+			nm[ni++] = (char)c;
+		}
+		nm[ni] = 0;
+		if (p >= e || *p != '=' || ni <= 0)
+			continue;
+		p++;
+		while (p < e && (*p == ' ' || *p == '\t'))
+			p++;
+		int dup = 0;
+		for (int d = 0; d < ndef; d++) {
+			if (strcmp(names[d], nm) == 0) {
+				dup = 1;
+				break;
+			}
+		}
+		if (dup)
+			continue;
+		memcpy(names[ndef], nm, (unsigned)kName);
+		bodies[ndef] = p;
+		blen[ndef] = (unsigned)(e - p);
+		ndef++;
+	}
+	if (ndef < 1)
+		return;
+	unsigned cap = n * 4u + 4096u;
+	if (cap < n + 64u)
+		cap = n + 64u;
+	if (cap > 120000u)
+		cap = 120000u;
+	uint8_t* cur = (uint8_t*)malloc(n);
+	if (!cur)
+		return;
+	memcpy(cur, s, n);
+	unsigned clen = n;
+	for (int round = 0; round < 24; round++) {
+		uint8_t* nxt = (uint8_t*)malloc(cap);
+		if (!nxt)
+			break;
+		unsigned o = 0;
+		int hit = 0;
+		for (unsigned p = 0; p < clen; p++) {
+			if (cur[p] != '$') {
+				if (o + 1u >= cap)
+					break;
+				nxt[o++] = cur[p];
+				continue;
+			}
+			unsigned q = p + 1;
+			while (q < clen && cur[q] != '$' && cur[q] != '\n' && cur[q] != '\r')
+				q++;
+			if (q >= clen || cur[q] != '$' || q <= p + 1) {
+				if (o + 1u >= cap)
+					break;
+				nxt[o++] = cur[p];
+				continue;
+			}
+			char nm[kName];
+			int ni = 0;
+			for (unsigned k = p + 1; k < q && ni < kName - 1; k++) {
+				unsigned char c = cur[k];
+				if (c >= 'a' && c <= 'z')
+					c = (unsigned char)(c - 32);
+				nm[ni++] = (char)c;
+			}
+			nm[ni] = 0;
+			int found = -1;
+			for (int d = 0; d < ndef; d++) {
+				if (strcmp(names[d], nm) == 0) {
+					found = d;
+					break;
+				}
+			}
+			if (found < 0) {
+				if (o + 1u >= cap)
+					break;
+				nxt[o++] = cur[p];
+				continue;
+			}
+			const uint8_t* bp = bodies[found];
+			unsigned bl = blen[found];
+			if (bl >= 2u && (bp[0] == 'V' || bp[0] == 'v') && bp[1] == '0') {
+				unsigned k = 0;
+				while (k < bl) {
+					unsigned char c = bp[k];
+					if ((c == 'O' || c == 'o') && k + 1u < bl
+						&& bp[k + 1] >= '1' && bp[k + 1] <= '8')
+						break;
+					if (c == '@')
+						break;
+					if ((c == 'V' || c == 'v') && k + 1u < bl
+						&& bp[k + 1] >= '1' && bp[k + 1] <= '9')
+						break;
+					k++;
+				}
+				bp += k;
+				bl -= k;
+			}
+			unsigned k = 0;
+			while (k < bl) {
+				if ((bp[k] == 'I' || bp[k] == 'i')
+					&& k + 1u < bl && bp[k + 1] >= '0' && bp[k + 1] <= '9') {
+					k++;
+					while (k < bl && ((bp[k] >= '0' && bp[k] <= '9') || bp[k] == ','))
+						k++;
+					continue;
+				}
+				if (o + 1u >= cap)
+					break;
+				nxt[o++] = bp[k++];
+			}
+			p = q;
+			hit = 1;
+		}
+		free(cur);
+		cur = nxt;
+		clen = o;
+		if (!hit)
+			break;
+	}
+	if (clen > 0 && clen <= 120000u) {
+		uint8_t* nd = (uint8_t*)realloc(f->data, clen);
+		if (nd) {
+			f->data = nd;
+			f->size = clen;
+			memcpy(f->data, cur, clen);
+		}
+	}
+	free(cur);
+}
+
+/* MUSIC.COM は起動時に 188/18A へ 256 通り書いて IN 一致で [flag] を立てる。
+   1 回でも不一致だと flag=0 のまま ISR が即帰り、AH=02 の Timer B 武装（3FE）も RET。
+   v2.21 は CS:[2663]、v2.00 は CS:[239C]。INT14 ISR 先頭 `CMP BYTE CS:[flag],0` から取る。 */
+static void MusicComForceOpnPresent(uint8_t* mem)
+{
+	if (!mem || !IvtHooked(0x14, 1))
+		return;
+	const unsigned s14 = (unsigned)mem[0x14 * 4 + 2]
+		| ((unsigned)mem[0x14 * 4 + 3] << 8);
+	const unsigned o14 = (unsigned)mem[0x14 * 4]
+		| ((unsigned)mem[0x14 * 4 + 1] << 8);
+	if (!s14 || s14 == (unsigned)DOS98_TRAMP_SEG)
+		return;
+	const unsigned lin = s14 << 4;
+	const unsigned ip = lin + o14;
+	if (ip + 6u >= 0x200000u)
+		return;
+	if (mem[ip] != 0x2E || mem[ip + 1] != 0x80 || mem[ip + 2] != 0x3E)
+		return;
+	const unsigned flag = (unsigned)mem[ip + 3] | ((unsigned)mem[ip + 4] << 8);
+	if (flag < 0x2000u || flag > 0x4000u)
+		return;
+	if (lin + flag >= 0x200000u)
+		return;
+	mem[lin + flag] = 1;
+}
+
 /* Wolfteam F000 糊: INT7F は IN 7E0 の cmd1 → IN 7E2 AX / INT 4A。000_BOOT が INT7F を MOV AX;IRET（apros CS:28CE）へ差し替えると cmd1 が無音。糊ディスパッチへ戻す。 */
 static void WolfReplantGlueInt7f(uint8_t* mem)
 {
@@ -2612,11 +3447,27 @@ int CHardPc98::DeliverIrqs()
 			}
 		}
 	}
+	/* ASCII MUSIC.COM -r: シーケンサは INT14（IRQ12）。ゲスト 03C3 が IMR AND FA で IRQ3 を戻し、
+	   flag=0 だと 3FE がスレーブを解除しない。毎 tick カスケード+IRQ12 を開ける。 */
+	if (isDos_ && dosGe_) {
+		static const char* kAsciiMus[] = { "music -r", "music_98", NULL };
+		if (DosShellStarts(dosGe_, kAsciiMus) && !s_musicComCompileHold) {
+			picMask_ = (uint8_t)(picMask_ & ~(1u << 2));
+			slavePicMask_ = (uint8_t)(slavePicMask_ & ~(1u << 4));
+			if (IvtHooked(PC98_OPN_IRQ_VEC, 1))
+				picMask_ = (uint8_t)(picMask_ & ~(1u << 3));
+		}
+	}
 	uint16_t flags = np2_reg_get(NP2_R_FLAGS);
 	const int guestIf = (flags & 0x0200) != 0;
 	if ((modeBeep_ || modeMidi_ || s_valkyKeepIrq0) && pitIrqPending_ && !g_pitInService) {
 		/* スピーカリップ（BGML_98）は IRQ0 でノートを組む。INT 7F 後はしばしば CLI 待ち。IF が無いと PIT が INT08 に届かず MixBeep は DC ゲート。実 BIOS はまだ IRQ0 を上げる。FMD intelligent ヘルパは MPU ACK 周りで CLI — ここで IF を強制すると INT 0E が FE を奪い 0713 がハングまたは RET 破壊（portOut=2）。 */
-		picMask_ = (uint8_t)(picMask_ & 0xfeu);
+		/* FMP3 UART は Timer B。IRQ0 を開けると BIOS INT08（00C0:0000）が
+		   FMP ロックを落とし TB が入れ子して MIDI が爆速になる。 */
+		if (fmpSeq_ && mpuUart_)
+			picMask_ = (uint8_t)(picMask_ | 0x01);
+		else
+			picMask_ = (uint8_t)(picMask_ & 0xfeu);
 		if (s_valkyKeepIrq0)
 			ValkySscpKeepAlive(np2_mem());
 		const int fmdIntel = modeMidi_ && !mpuUart_ && IvtHooked(0x0E, isDos_);
@@ -2804,6 +3655,11 @@ int CHardPc98::DeliverIrqs()
 			}
 		}
 		} /* !pmdOpnIrq_ — PMD は INT0B のまま */
+		if (mem && g_mmdLoadSeg
+			&& MmdIsSound(mem, (unsigned)g_mmdLoadSeg << 4)) {
+			vec = PC98_OPN_IRQ_VEC;
+			picMask_ = (uint8_t)(picMask_ & ~(1u << 3));
+		}
 		if (!IvtHooked(vec, isDos_)) {
 			/* VSYNC（0x0A）や他 IRQ 線へフォールバックしない — OPN タイマ IRQ が SORC98 の VSYNC stub へ誤配送された。 */
 			g_censNoVec++;
@@ -2864,6 +3720,7 @@ void CHardPc98::MidiCaptureReset()
 	midiNoteOnCount_ = 0;
 	midiPortOutCount_ = 0;
 	midiLastCycle_ = cpuCycles_;
+	midiTickRem_ = 0;
 	mpuRxFull_ = 0;
 	/* ここでパワーオン FE をキューしない。FMP3 -m 検出（CS:1790）は E0D2 を IN し status != 0 かつ bit6 クリア（アイドル 0x80）が要る。pending ACK だと MidiStatusIn が 0x00 を返し検出失敗 → [1DBE]=0、シーケンサが MIDI を出さない（midiBytes=0）。FE は RESET（FFh）／UART モード（3Fh）コマンドハンドラからのみ。 */
 	mpuAckR_ = mpuAckW_ = 0;
@@ -2894,7 +3751,10 @@ void CHardPc98::MidiCaptureByte(uint8_t v)
 	uint32_t delta = 0;
 	if (cpuHz_ > 0) {
 		const uint64_t dc = cpuCycles_ - midiLastCycle_;
-		uint64_t ticks = (dc * 960ull) / ((uint64_t)cpuHz_ + 1ull);
+		/* 960 ticks/sec。切り捨てだと Timer B 間隔が系統的に短く MIDI が走る。 */
+		midiTickRem_ += dc * 960ull;
+		uint64_t ticks = midiTickRem_ / ((uint64_t)cpuHz_ + 1ull);
+		midiTickRem_ %= ((uint64_t)cpuHz_ + 1ull);
 		/* SysEx ダンプの隙間だけ短くする。最初の NoteOn までの休符まで
 		   250ms に潰すと MIDI 先頭が詰まる。 */
 		if (midiNoteOnCount_ == 0 && (s_pc98MidiRun == 0xF0 || v == 0xF0)) {
@@ -4865,7 +5725,9 @@ void CHardPc98::BindDosTriggerSong(const CEmuGameEntry* ge, unsigned titleCode)
 	/* PLAY5_98 はここに居ない: INT7F cmd0 はハンドル 0 を AH=3F 読してバッファへ、INT F2 AX=0 がそのバイトをロード。ハンドル 0 のファイル名テキストは PLAY5/PLAY3/MUSIC + PLAY5_98 を無音にした。IBGMP.COM も同じ: cmd0 がハンドル 0 を AH=3F 読して INT52 AX=200。接頭 "ibgm" は IBGMP にも一致するので名前開きしてはいけない。 */
 	static const char* kOpenName[] = {
 		"cplay", "fplay", "musdrv", "mbmusp", "mdrv_9", "mddrv_9",
-		"mlfplay", "bp",
+		"bp",
+		/* mlfplay は意図的に不在: INT7F cmd0 は AH=3F BX=0 CX=FFFF で曲バイトを読み INT60 AH=0。
+		   ハンドル 0 を ASCIIZ 名にすると E1.OBJ の 7 バイトだけ渡り keyOn=3 で止まる。 */
 		/* ABIKO_98 cmd0: AH=3F ハンドル 0 を 0168 へ読み INT40 AH=4 がその ASCIIZ を fopen。曲バイトだと最初の 0 までを名前にして Open 失敗、AH=2 は [998D]=0 で帰る。 */
 		"ABIKO", "abiko",
 		NULL
@@ -7936,7 +8798,17 @@ int CHardPc98::RunDosDevices(const CEmuGameEntry* ge, uint64_t budgetCycles)
 		/* MMD200OR な MMD.SYS（xak2）は API 0072、gazzel 5273 は API 00A2。名前だけで classic にしない。 */
 		if (isMmd && mem && loadSeg) {
 			const unsigned lin = Pc98DosLin(loadSeg, 0);
-			if (lin + 0xA3u < 0x200000u
+			if (MmdIsSound(mem, lin)) {
+				g_mmdClassic = 0;
+				g_mmdPicIsr = 0;
+				ssgPortAJumper_ = 0;
+				if (chip_) {
+					chip_->Write(0, 0x0E);
+					chip_->Write(1, 0x00);
+					opnLatchedAddr_ = 0x0E;
+				}
+				MmdSoundRelocLoaded(mem, dos_, loadSeg);
+			} else if (lin + 0xA3u < 0x200000u
 				&& (mem[lin + 0x78] == 0x06 || mem[lin + 0x72] == 0x06
 					|| mem[lin + 0xA2] == 0x06))
 				g_mmdClassic = 0;
@@ -7955,7 +8827,8 @@ int CHardPc98::RunDosDevices(const CEmuGameEntry* ge, uint64_t budgetCycles)
 				mem[lin + 0x154C] = 0x8A;
 				mem[lin + 0x154D] = 0x01;
 			}
-		} else if (isMmd && mem && loadSeg) {
+		} else if (isMmd && mem && loadSeg
+			&& !MmdIsSound(mem, Pc98DosLin(loadSeg, 0))) {
 			Mmd2PlantPorts(mem, Pc98DosLin(loadSeg, 0));
 		}
 		/* wiz6 $MUSE2$ は CS:E2 に `MOV SP,005Fh` を保つ（derby イメージは無い）。SYS 名パッチが外れてもロード済みコピーで上げる。 */
@@ -8131,6 +9004,8 @@ int CHardPc98::RunDosDevices(const CEmuGameEntry* ge, uint64_t budgetCycles)
 		/* MMD.SYS（sbr）: 解析 0619 は duration [ch+2]=1 を置くがゲート [ch+3] は置かない。ノート 0849 はゲート→duration をコピー。ゲート 0 は 0732 がチャネルを永久 RET（A0 補助から keys=1、その後 SILENT）。0143 の AH=3 も 17F4 から `rep stos` しこの poke を消す — 解析後に MmdPlayAssist が再適用。INT D2 は COM 常駐の AH=0 より前に要る。 */
 		if (g_mmdClassic && mem && loadSeg)
 			MmdClassicPlantIvt(mem);
+		if (mem)
+			MmdSoundPlantIvt(mem);
 		if (!_strnicmp(name, "muse2", 5) && mem && loadSeg) {
 			const unsigned lin = Pc98DosLin(loadSeg, 0);
 			if (lin + 0x538u < 0x200000u && mem[lin + 0x535] == 0x9C
@@ -8862,33 +9737,85 @@ int CHardPc98::BootDos(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCod
 		}
 	}
 	/* IWADRV F.COM: カナリア失敗時は INT EB だけ TSR。INT EB の CS から OPN ISR を
-	   INT14/INT0B へ植える。IBM `OUT 08h,20h` を PC-98 `OUT 00h,20h` に直す。 */
+	   INT14/INT0B へ植える。IBM `OUT 08h,20h` を PC-98 `OUT 00h,20h` に直す。
+	   btltech は ISR が CS:457D（旧スキャン 4000h 外）。clrd3 は STI 無しの CLD PUSHA。 */
 	{
 		static const char* kIwa[] = { "iwaplay", "IWAPLAY", NULL };
 		if (mem && DosShellStarts(ge, kIwa) && !IvtHooked(0x14, 1)) {
 			unsigned found = 0, fseg = 0;
-			const unsigned seb = (unsigned)mem[0xEB * 4 + 2]
-				| ((unsigned)mem[0xEB * 4 + 3] << 8);
-			if (seb && seb != (unsigned)DOS98_TRAMP_SEG) {
+			unsigned segs[3];
+			unsigned nseg = 0;
+			const unsigned cand[3] = {
+				(unsigned)mem[0xEB * 4 + 2] | ((unsigned)mem[0xEB * 4 + 3] << 8),
+				(unsigned)mem[0xD2 * 4 + 2] | ((unsigned)mem[0xD2 * 4 + 3] << 8),
+				(unsigned)mem[0x7F * 4 + 2] | ((unsigned)mem[0x7F * 4 + 3] << 8)
+			};
+			for (unsigned ci = 0; ci < 3; ci++) {
+				const unsigned s = cand[ci];
+				if (!s || s == (unsigned)DOS98_TRAMP_SEG)
+					continue;
+				unsigned dup = 0;
+				for (unsigned k = 0; k < nseg; k++) {
+					if (segs[k] == s) { dup = 1; break; }
+				}
+				if (!dup && nseg < 3)
+					segs[nseg++] = s;
+			}
+			for (unsigned si = 0; si < nseg && !found; si++) {
+				const unsigned seb = segs[si];
 				const unsigned base = seb << 4;
-				for (unsigned off = 0x100; off + 80u < 0x4000u; off++) {
+				for (unsigned off = 0x80; off + 96u < 0xC000u; off++) {
 					const unsigned p = base + off;
-					if (p + 80u >= 0x200000u)
+					if (p + 96u >= 0x200000u)
 						break;
-					if (mem[p] == 0xFB && mem[p + 1] == 0xFC && mem[p + 2] == 0x60
-						&& mem[p + 3] == 0x1E && mem[p + 4] == 0x06
-						&& mem[p + 5] == 0x8C && mem[p + 6] == 0xC8) {
-						found = off;
-						fseg = seb;
-						break;
+					unsigned o = (mem[p] == 0xFB) ? 1u : 0u;
+					if (mem[p + o] == 0xFC && mem[p + o + 1] == 0x60
+						&& mem[p + o + 2] == 0x1E && mem[p + o + 3] == 0x06
+						&& mem[p + o + 4] == 0x8C && mem[p + o + 5] == 0xC8) {
+						unsigned has188 = 0;
+						for (unsigned k = 0; k < 56u && p + o + k + 2u < 0x200000u; k++) {
+							if (mem[p + o + k] == 0xBA && mem[p + o + k + 1] == 0x88
+								&& mem[p + o + k + 2] == 0x01) {
+								has188 = 1;
+								break;
+							}
+						}
+						if (has188) {
+							found = off;
+							fseg = seb;
+							break;
+						}
 					}
+				}
+			}
+			if (!found) {
+				for (unsigned phys = 0x1000u; phys + 64u < 0xA0000u; phys++) {
+					unsigned o = (mem[phys] == 0xFB) ? 1u : 0u;
+					if (mem[phys + o] != 0xFC || mem[phys + o + 1] != 0x60
+						|| mem[phys + o + 2] != 0x1E || mem[phys + o + 3] != 0x06
+						|| mem[phys + o + 4] != 0x8C || mem[phys + o + 5] != 0xC8)
+						continue;
+					unsigned has188 = 0;
+					for (unsigned k = 0; k < 56u; k++) {
+						if (mem[phys + o + k] == 0xBA && mem[phys + o + k + 1] == 0x88
+							&& mem[phys + o + k + 2] == 0x01) {
+							has188 = 1;
+							break;
+						}
+					}
+					if (!has188)
+						continue;
+					found = phys & 0xFu;
+					fseg = (unsigned)(phys >> 4);
+					break;
 				}
 			}
 			if (found && fseg) {
 				const unsigned phys = (fseg << 4) + found;
-				if (phys + 65u < 0x200000u
-					&& mem[phys + 63u] == 0xE6 && mem[phys + 64u] == 0x08)
-					mem[phys + 64u] = 0x00;
+				for (unsigned k = 0; k < 96u && phys + k + 1u < 0x200000u; k++) {
+					if (mem[phys + k] == 0xE6 && mem[phys + k + 1] == 0x08)
+						mem[phys + k + 1] = 0x00;
+				}
 				mem[0x14 * 4 + 0] = (uint8_t)(found & 0xff);
 				mem[0x14 * 4 + 1] = (uint8_t)((found >> 8) & 0xff);
 				mem[0x14 * 4 + 2] = (uint8_t)(fseg & 0xff);
@@ -8975,7 +9902,12 @@ int CHardPc98::BootDos(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCod
 			/* GS ダンプ後のチャネルボイスでプローブ用に OPN を鳴らせる */
 			wolfBridgeEnable_ = 1;
 		}
-		picMask_ = (uint8_t)(picMask_ & 0xfeu);
+		/* FMP UART は IRQ0 をマスクのまま。BootDos で開けると TriggerPlay
+		   前に BIOS INT08 が入り、MIDI テンポが TB+PIT になる。 */
+		if (fmpSeq_ && mpuUart_)
+			picMask_ = (uint8_t)(picMask_ | 0x01);
+		else
+			picMask_ = (uint8_t)(picMask_ & 0xfeu);
 		if (mpuIntel && IvtHooked(0x0E, 1))
 			picMask_ = (uint8_t)(picMask_ & (uint8_t)~(1u << 6));
 		if (fmdIntel && dosSong_[0] && IvtHooked(0x7F, 1))
@@ -9019,7 +9951,8 @@ void CHardPc98::PumpCycles(uint64_t endCycle)
 			&& (cpuCycles_ - pumpMusicCycle0_) >= ((uint64_t)cpuHz_ / 200ull)
 			&& (pumpSameLive_
 				|| opnKeyOnCount_ > pumpMusicKey0_
-				|| MidiNoteOnCount() > pumpMusicMidi0_))
+				|| MidiNoteOnCount() > pumpMusicMidi0_
+				|| (fmpSeq_ && !mpuUart_ && opnTimerCount_ > pumpMusicTimer0_)))
 			break;
 		uint8_t* mem = np2_mem();
 		uint16_t cs = np2_reg_get(NP2_R_CS);
@@ -9229,7 +10162,8 @@ void CHardPc98::PumpCycles(uint64_t endCycle)
 			}
 		}
 
-		if (!g_mmdClassic && g_mmdPicIsr && g_mmdLoadSeg && chip_ && mem) {
+		if (!g_mmdClassic && g_mmdPicIsr && g_mmdLoadSeg && chip_ && mem
+			&& !MmdIsSound(mem, (unsigned)g_mmdLoadSeg << 4)) {
 			const unsigned lin = (unsigned)g_mmdLoadSeg << 4;
 			const int lay = Mmd2Layout(mem, lin);
 			if (lay != 1) {
@@ -9338,6 +10272,7 @@ void CHardPc98::PumpCycles(uint64_t endCycle)
 		}
 
 		if (!g_mmdClassic && g_mmdPicIsr && g_mmdLoadSeg && chip_ && mem
+			&& !MmdIsSound(mem, (unsigned)g_mmdLoadSeg << 4)
 			&& Mmd2Layout(mem, (unsigned)g_mmdLoadSeg << 4) != 1
 			&& Mmd2Layout(mem, (unsigned)g_mmdLoadSeg << 4) != 4) {
 			/* 4026 MMD2: ISR が 27h=2A のあと Timer A が死ぬ（michael irq=56 で停止）。 */
@@ -9368,6 +10303,52 @@ void CHardPc98::PumpCycles(uint64_t endCycle)
 						opnIrqDeliverCount_++;
 						np2_interrupt(vec);
 					}
+				}
+			}
+		}
+
+		if (g_mmdLoadSeg && chip_ && mem
+			&& MmdIsSound(mem, (unsigned)g_mmdLoadSeg << 4)) {
+			picMask_ = (uint8_t)(picMask_ & ~(1u << 3));
+			{
+				const unsigned dg = ((unsigned)g_mmdLoadSeg << 4) + 0x10D0u;
+				if (dg + 0xF8u < 0x200000u) {
+					if (mem[dg + 0xE5] == 0)
+						mem[dg + 0xE5] = 1;
+					const unsigned f6 = (unsigned)mem[dg + 0xF6]
+						| ((unsigned)mem[dg + 0xF7] << 8);
+					if (f6 == 0x1190u)
+						Pc98Wr16(mem, dg + 0xF6u, 0x1191);
+				}
+			}
+			static uint64_t s_sndArmCyc;
+			static unsigned s_sndArmIrq;
+			if (opnIrqDeliverCount_ != s_sndArmIrq) {
+				s_sndArmIrq = opnIrqDeliverCount_;
+				s_sndArmCyc = cpuCycles_;
+			} else if (cpuHz_ > 20
+				&& (cpuCycles_ - s_sndArmCyc) > ((uint64_t)cpuHz_ / 200ull)) {
+				const uint16_t cs = np2_reg_get(NP2_R_CS);
+				if (cs != (uint16_t)g_mmdLoadSeg) {
+					opnInService_ = 0;
+					chip_->Write(0, 0x26);
+					chip_->Write(1, 0xBC);
+					chip_->Write(0, 0x27);
+					chip_->Write(1, 0x3A);
+					opnLatchedAddr_ = 0x27;
+					g_lastTimerCtrl = 0x3A;
+					s_sndArmCyc = cpuCycles_;
+					if (!opnInService_ && IvtHooked(PC98_OPN_IRQ_VEC, 1)) {
+						opnInService_ = 1;
+						opnIrqDeliverCount_++;
+						np2_interrupt((uint8_t)PC98_OPN_IRQ_VEC);
+					}
+				} else {
+					const uint16_t ip = np2_reg_get(NP2_R_IP);
+					if (ip >= 0x0528u && ip <= 0x052Cu)
+						np2_reg_set(NP2_R_IP, 0x052D);
+					else if (ip >= 0x053Bu && ip <= 0x053Eu)
+						np2_reg_set(NP2_R_IP, 0x0540);
 				}
 			}
 		}
@@ -9513,7 +10494,9 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 		else {
 			extCmd_ = 0;
 			extSong_ = (uint16_t)(titleCode & 0xff);
-			extParam_ = 0;
+			/* hoot 0xNN0010: 上位が曲番号（MAKO/AMUS.DAT）。0 にすると
+			   rance4_2 の偶数・奇数が同じワンショットになる。 */
+			extParam_ = (uint16_t)((titleCode >> 16) & 0xffff);
 			if (dosSong_[0]) {
 				dos_.SetHandle(0, dosSong_);
 				dos_.SetHandle(5, dosSong_);
@@ -9559,6 +10542,7 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 			uint8_t* mem = np2_mem();
 			if (mem) {
 				MmdClassicPlantIvt(mem);
+				MmdSoundPlantIvt(mem);
 				const unsigned s7f = (unsigned)mem[0x7F * 4 + 2]
 					| ((unsigned)mem[0x7F * 4 + 3] << 8);
 				if (s7f && s7f != (unsigned)DOS98_TRAMP_SEG && s7f < 0xA000u) {
@@ -9572,8 +10556,12 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 				}
 			}
 		}
-		/* 古典 ISR 03CE は 27h=15h。0255 は FC テンポで 24h/25h と 27h=35h。mmd2.com は AH=0 を飛ばす。 */
+		MmdSoundEnsureFromZip(np2_mem(), dos_);
+		/* 古典 ISR 03CE は 27h=15h。0255 は FC テンポで 24h/25h と 27h=35h。mmd2.com は AH=0 を飛ばす。
+		   SOUND は INIT が 27h=3A（Timer B）。ここでの 35h は Timer B を止めて ISR を餓死させる。 */
 		if (g_mmdLoadSeg && chip_) {
+			uint8_t* smem = np2_mem();
+			if (!(smem && MmdIsSound(smem, (unsigned)g_mmdLoadSeg << 4))) {
 			chip_->Write(0, 0x24);
 			chip_->Write(1, 0xCA);
 			chip_->Write(0, 0x25);
@@ -9582,6 +10570,7 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 			chip_->Write(1, 0x35);
 			opnLatchedAddr_ = 0x27;
 			g_lastTimerCtrl = 0x35;
+			}
 		}
 		if (g_sddLoadSeg) {
 			uint8_t* mem = np2_mem();
@@ -9729,6 +10718,9 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 			dosGe_ ? SelectedDosSong(dosGe_, titleCode) : NULL);
 		np2_reg_set(NP2_R_FLAGS, (uint16_t)(np2_reg_get(NP2_R_FLAGS) | 0x0200));
 		np2_interrupt((uint8_t)funcVect_);
+		MmdSoundArmLoop(np2_mem(), dos_,
+			dosSong_[0] ? dosSong_
+			: (dosGe_ ? SelectedDosSong(dosGe_, titleCode) : NULL));
 		MdrPlantChannels(np2_mem());
 		uint64_t playDrain = drainBudget;
 		{
@@ -9738,11 +10730,13 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 				&& (titleCode & 0xff) == 1 && cpuHz_ > 20)
 				playDrain = (uint64_t)cpuHz_ / 20ull;
 		}
-		/* FMP MIDI: 0.5s settle はイントロ休符～最初のノートまでゲストを先に進める。
-		   UART デルタが最初の Pump に載り、GS hold が間隔を潰すと先頭 1–2s の
-		   テンポが走ってから落ち着く。PLAY/GS/PC だけ武装し、休符は Render 1x。 */
+		/* FMP MIDI: 0.1s で SysEx／Timer B 武装。FM は 5ms — 0.5s だと
+		   rance/tlove/sorc/vg2 の先頭休符が圧縮される。MIDI はタイマ打ち切り
+		   しない（SysEx 中に TB が動きノート前に settle が終わる）。 */
 		if (fmpSeq_ && mpuUart_ && cpuHz_ > 20)
 			playDrain = (uint64_t)cpuHz_ / 10ull;
+		else if (fmpSeq_ && cpuHz_ > 20)
+			playDrain = (uint64_t)cpuHz_ / 200ull;
 		/* 同じ曲の再 TriggerPlay（probe の hw+Render など）は 0.5s を再食しない */
 		if (pumpSameLive_ && cpuHz_ > 200)
 			playDrain = (uint64_t)cpuHz_ / 200ull;
@@ -10112,8 +11106,13 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 		PC98_CENSUS("trig");
 		Pc98MemDump(np2_mem());
 		if (modeBeep_ || modeMidi_) {
-			/* BGML_98（他スピーカリップも）は IRQ0/INT08 からメロディを駆動。BootDos は PIC マスク 0xFF で開始。プレイヤは INT 7F で外し得るが、レンダ全体で IF/IRQ0 を生かす。FMD MIDI も同じ IRQ0 解除（INT0B は未フック）。 */
-			picMask_ = (uint8_t)(picMask_ & 0xfeu);
+			/* BGML_98（他スピーカリップも）は IRQ0/INT08 からメロディを駆動。BootDos は PIC マスク 0xFF で開始。プレイヤは INT 7F で外し得るが、レンダ全体で IF/IRQ0 を生かす。FMD MIDI も同じ IRQ0 解除（INT0B は未フック）。
+			   FMP3 -m は Timer B シーケンサ。PIT カウンタは較正用に回すが IRQ0 はマスクのまま
+			   （BIOS INT08 が FMP ロックと競合し MIDI が PIT+TB で走る）。 */
+			if (fmpSeq_ && mpuUart_)
+				picMask_ = (uint8_t)(picMask_ | 0x01);
+			else
+				picMask_ = (uint8_t)(picMask_ & 0xfeu);
 			np2_reg_set(NP2_R_FLAGS,
 				(uint16_t)(np2_reg_get(NP2_R_FLAGS) | 0x0200));
 			if (modeMidi_ && IvtHooked(0x0E, 1))
@@ -10838,6 +11837,9 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 				"NLP_HOOT", "nlp_hoot", "NAX", "nax",
 				/* YNS_98 cmd0: INT40 AH=0 / AX=0101 / AH=3 ロード+再生。cmd2 は AH=09 AL=91（停止）。 */
 				"ynsound", "YNSOUND", "yns_98", "YNS_98",
+				"MAKO_98", "MAKO", "mako", "MAKOP",
+				/* mlfplay cmd2 は INT60 AH=4 停止。cmd0 が既に AH=1 停止 + AH=2 + 読込 + AH=0 再生。 */
+				"mlfplay",
 				NULL
 			};
 			if (DosShellStarts(dosGe_, kGluePlay)
@@ -10894,12 +11896,66 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 						picMask_ = (uint8_t)(picMask_ & ~(1u << 3));
 				}
 			} else if (asciiMusicR) {
-				/* ASCII MUSIC.COM INT48 AH=07: CX:DX ファイル名を [2189] へコピーして再生。糊 cmd0 は AH=3/1/2 で空バッファを鳴らすだけ。
-				   BGM/ 以下の曲は basename だと開けない。MML 翻訳は数秒。 */
+				s_musicComCompileHold = 0;
+				/* ASCII MUSIC.COM INT48: AH=07 は CX:DX 名をコピーして MML 翻訳するだけ。
+				   再生は AH=02（糊 cmd0 は AH=3 停止 + AH=1 既定名翻訳 + AH=02）。
+				   v2.21 既定名は B:\SOUND\BGM_ .MML なので cmd0 だけでは空シーケンスになる。
+				   AH=07 が無い 6728 版は cmd0 の AH=01/02 がハンドル 0 を鳴らす — 触らない。 */
 				uint8_t* mem = np2_mem();
 				const char* nm = dosSong_[0] ? dosSong_
 					: SelectedDosSong(dosGe_, titleCode);
-				if (mem && nm && nm[0] && IvtHooked(0x48, 1)) {
+				int musicHasAh07 = 0;
+				if (mem && IvtHooked(0x48, 1)) {
+					const unsigned s48 = (unsigned)mem[0x48 * 4 + 2]
+						| ((unsigned)mem[0x48 * 4 + 3] << 8);
+					const unsigned b48 = s48 << 4;
+					if (s48 && s48 != (unsigned)DOS98_TRAMP_SEG
+						&& b48 + 0x400u < 0x200000u) {
+						for (unsigned o = 0; o + 3u < 0x400u; o++) {
+							if (mem[b48 + o] == 0x80 && mem[b48 + o + 1] == 0xFC
+								&& mem[b48 + o + 2] == 0x07) {
+								musicHasAh07 = 1;
+								break;
+							}
+						}
+					}
+				}
+				if (mem && musicHasAh07 && nm && nm[0] && IvtHooked(0x48, 1)) {
+					const int v221 = MusicComIsV221(dos_);
+					const CEmuDos98File* songf = dos_.FindFile(nm);
+					const int stubMml = (songf && songf->size > 0 && songf->size < 400u);
+					const int manyStr = MusicComStrCount(songf) >= 38;
+					if (v221 || (!stubMml && !manyStr))
+						Music98AllowRealOpen();
+					CEmuDos98File* mf = const_cast<CEmuDos98File*>(songf);
+					if (mf)
+						MusicComRewriteBigRepeat(mf);
+					if (v221) {
+						dos_.SetHandle(0, nm);
+						if (mf && MusicComStrCount(mf) >= 1)
+							MusicComHoistMacros(mf);
+						if (mf)
+							MusicComExpandStr(mf);
+						if (mf)
+							MusicComUnwrapAllBraces(mf);
+						if (mf && mf->size > 10000u && mem && IvtHooked(0x48, 1)) {
+							const unsigned s48 = (unsigned)mem[0x48 * 4 + 2]
+								| ((unsigned)mem[0x48 * 4 + 3] << 8);
+							const unsigned b48 = s48 << 4;
+							if (s48 && s48 != (unsigned)DOS98_TRAMP_SEG
+								&& b48 + 0x1904u < 0x200000u) {
+								for (unsigned o = 0x1860u; o + 5u < 0x18C0u; o++) {
+									if (mem[b48 + o] == 0xB9 && mem[b48 + o + 1] == 0x10
+										&& mem[b48 + o + 2] == 0x27) {
+										mem[b48 + o + 1] = 0x00;
+										mem[b48 + o + 2] = 0x80;
+										break;
+									}
+								}
+							}
+						}
+					}
+					MusicComForceOpnPresent(mem);
 					unsigned dst = 0x7C00;
 					size_t n = 0;
 					while (nm[n] && n < 78) {
@@ -10910,6 +11966,10 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 						++n;
 					}
 					mem[dst + n] = 0;
+					uint8_t ivt14[4];
+					memcpy(ivt14, mem + 0x14 * 4, 4);
+					s_musicComCompileHold = 1;
+					slavePicMask_ = (uint8_t)(slavePicMask_ | (1u << 4));
 					np2_reg_set(NP2_R_CX, 0);
 					np2_reg_set(NP2_R_DX, (uint16_t)dst);
 					np2_reg_set(NP2_R_DS, 0);
@@ -10917,9 +11977,24 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 					np2_reg_set(NP2_R_FLAGS,
 						(uint16_t)(np2_reg_get(NP2_R_FLAGS) | 0x0200));
 					np2_interrupt(0x48);
-					const uint64_t compileBudget = (uint64_t)cpuHz_ * 3ull;
+					const uint64_t compileBudget = (uint64_t)cpuHz_ * (v221 ? 5ull : 3ull);
 					PumpCycles(cpuCycles_ + (compileBudget > drainBudget
 						? compileBudget : drainBudget));
+					s_musicComCompileHold = 0;
+					memcpy(mem + 0x14 * 4, ivt14, 4);
+					/* v2.21 の AH=03 は翻訳バッファまで消す。cmd0 を飛ばしたので停止は不要。 */
+					if (!v221) {
+						np2_reg_set(NP2_R_AX, 0x0300);
+						np2_reg_set(NP2_R_FLAGS,
+							(uint16_t)(np2_reg_get(NP2_R_FLAGS) | 0x0200));
+						np2_interrupt(0x48);
+					}
+					MusicComForceOpnPresent(mem);
+					np2_reg_set(NP2_R_AX, 0x0200);
+					np2_reg_set(NP2_R_FLAGS,
+						(uint16_t)(np2_reg_get(NP2_R_FLAGS) | 0x0200));
+					np2_interrupt(0x48);
+					PumpCycles(cpuCycles_ + (drainBudget / 2ull));
 				}
 				if (mem) {
 					if (!IvtHooked(PC98_OPN_IRQ_VEC, 1) && IvtHooked(0x14, 1)) {
@@ -11824,7 +12899,8 @@ void CHardPc98::DrainInterrupt(uint64_t budgetCycles)
 			&& (cpuCycles_ - pumpMusicCycle0_) >= ((uint64_t)cpuHz_ / 200ull)
 			&& (pumpSameLive_
 				|| opnKeyOnCount_ > pumpMusicKey0_
-				|| MidiNoteOnCount() > pumpMusicMidi0_))
+				|| MidiNoteOnCount() > pumpMusicMidi0_
+				|| (fmpSeq_ && !mpuUart_ && opnTimerCount_ > pumpMusicTimer0_)))
 			break;
 		uint16_t cs = np2_reg_get(NP2_R_CS);
 		uint16_t ip = np2_reg_get(NP2_R_IP);

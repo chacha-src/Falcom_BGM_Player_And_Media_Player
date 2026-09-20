@@ -199,11 +199,14 @@ BOOL COggApp::OnIdle(LONG lCount)
 	extern COggDlg* og;
 	extern int playy;
 	extern int plf;
-	const int timerpOwns = (playy != 0 && plf == 1
-		&& og && og->MidiMonitorIsVisible() && og->FmMonitorIsVisible()) ? 1 : 0;
-	if (!timerpOwns) {
-		if (og && og->m_MidiMonitorDlg && ::IsWindow(og->m_MidiMonitorDlg->GetSafeHwnd()))
-			og->m_MidiMonitorDlg->IdlePulse();
+	/* 停止中は IdlePulse を回さない。OnIdle が空キューで連打されると 1 コアを食う。 */
+	if (playy != 0) {
+		const int timerpOwns = (playy != 0 && plf == 1
+			&& og && og->MidiMonitorIsVisible() && og->FmMonitorIsVisible()) ? 1 : 0;
+		if (!timerpOwns) {
+			if (og && og->m_MidiMonitorDlg && ::IsWindow(og->m_MidiMonitorDlg->GetSafeHwnd()))
+				og->m_MidiMonitorDlg->IdlePulse();
+		}
 	}
 	return CWinApp::OnIdle(lCount); // TRUE を返すと OnIdle が回り続けて他の UI を食う
 }

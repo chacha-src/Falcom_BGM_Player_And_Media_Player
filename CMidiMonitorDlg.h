@@ -5,6 +5,7 @@
 #include "CCustomControl.h"
 #include "GdiSoft3D.h"
 #include "gpu/GpuDx11.h"
+#include "CMidiHwPanel.h"
 
 class CFmMonitorDlg;
 
@@ -151,6 +152,8 @@ private:
 	void DrawVBar(CDC& dc, int x, int y, int bw, int bh, int v0, int vmax, COLORREF col, int glow, int idle);
 	void DrawPanBar(CDC& dc, int x, int y, int bw, int bh, int pan, int glow, int idle);
 	void DrawHeader(CDC& dc, int w, int headH, UINT dpi);
+	void FillLcdSnap(MidiHwLcdPartSnap out[16], BYTE keyBits[16], int bank) const;
+	int LcdHeardHi() const;
 	void DrawInsFoot(CDC& dc, int y, int w, int footH, UINT dpi);
 	void DrawPartRow(CDC& dc, int i, int y, int rowH, int w, UINT dpi, int forceKeys);
 	void BuildInsLine(int slot, wchar_t* out, int outN);
@@ -331,6 +334,18 @@ private:
 	bool m_volDragging;
 	CRect m_volBarRc;
 	CRect m_notesBarRc;
+	CRect m_lcdRc;
+	MidiHwLcdState m_lcd;
+	int m_lcdSelA;
+	int m_lcdSelB;
+	BYTE m_showLcdSeg[PART_MAX];
+	int m_showLcdMode;
+	int m_showLcdSelA;
+	int m_showLcdSelB;
+	int m_showLcdKind;
+	int m_showLcdPage;
+	int m_showLcdScroll;
+	unsigned m_showLcdGen;
 	wchar_t m_plugShown[PART_MAX][40];
 	wchar_t m_insLine[4][220];
 	wchar_t m_showInsLine[4][220];

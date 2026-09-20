@@ -836,6 +836,7 @@ HANDLE hNotifyEvent[20];
 LPDIRECTSOUNDNOTIFY dsnf1;
 LPDIRECTSOUNDNOTIFY dsnf2;
 UINT HandleNotifications(LPVOID lpvoid);
+UINT HandleFillNotifications(LPVOID lpvoid); /* デコード/CEmu。HandleNotifications から分離 */
 UINT WASAPIHandleNotifications(LPVOID lpvoid);
 void HandleNotifications_export();  // WAV出力専用（DirectSoundなし、ファイル書き込みのみ）
 void SignalPlaybackNotifyThreadStop();
@@ -20881,6 +20882,8 @@ static void CEmuMarkPlaybackEof()
 
 int playwavcemu(BYTE* bw, int old, int l1, int l2)
 {
+	/* Render 本体。再生中は HandleFillNotifications から呼ばれる
+	   （HandleNotifications の DS 待ちと並走）。ここ自体は従来どおり同期。 */
 	EqualiserSetFormatVolContext(1, FALSE);
 	const bool exporting = (wavExportPath.GetLength() > 0 || g_isWavExportRendering);
 	const bool doLoop = WantPlaybackLoop() && !exporting
@@ -26965,6 +26968,8 @@ LRESULT COggDlg::OnTimerpVsyncTick(WPARAM, LPARAM)
 		return 0;
 	}
 	timerp();
+	/* EQ/ピアノ/アナライザの PostMessage を Peek する。停止中は TheadLoop が
+	   tick 自体を打たないので、ここを常時呼んでもアイドルは食わない。 */
 	OggDispatchChromeMessages();
 	InterlockedExchange(&g_timerpPosted, 0);
 	return 0;
@@ -27097,10 +27102,24 @@ DWORD f1 = 0, f2 = 0;
 UINT TheadLoop(LPVOID)
 {
 	int infoScrollDiv = 0;   // 60fps÷2 = 30fps で info パネルスクロール tick を投げる
+	int idleSkip = 0;
 	for (;;) {
 		if (drawth == TRUE) return TRUE;
+
+		/* 再生中 / Soft3D 表示中は従来の 60fps。
+		   停止中は UI コアを空ける（timerp は playy==0 で Soft3D 以外 return）。 */
+		extern BOOL IsSoft3DMazeOpen();
+		extern BOOL IsSoft3DRaceOpen();
+		const int needFast = (playy != 0
+			|| IsSoft3DMazeOpen() || IsSoft3DRaceOpen()) ? 1 : 0;
+
 		Timing64(f2, FALSE);
-		COgg_RequestTimerp(og);
+		if (needFast)
+			COgg_RequestTimerp(og);
+		else if (++idleSkip >= 4) {
+			/* 停止中もたまには起こす（自己修復・info 用）。約 1 秒に 1 回程度にはしない */
+			idleSkip = 0;
+		}
 
 		// info パネルスクロール: TheadLoop の 60fps をそのまま使い、1フレームおきに
 		// PostMessage することで ~30fps を実現。多重 Post は CAS で合流。
@@ -27120,10 +27139,17 @@ UINT TheadLoop(LPVOID)
 			}
 		}
 
-		timing1(1, FALSE, FALSE);
-		Timing64(f2, FALSE);
-		Timing64(fpstiming, FALSE);
-		Sleep(1);
+		if (needFast) {
+			timing1(1, FALSE, FALSE);
+			Timing64(f2, FALSE);
+			Timing64(fpstiming, FALSE);
+			Sleep(1);
+		}
+		else {
+			/* 停止中は 60fps スピンしない。バナーは MP タイマ、CPU メータは 1 秒タイマ。 */
+			Sleep(16);
+			Timing64(fpstiming, FALSE);
+		}
 	}
 }
 

@@ -47,6 +47,7 @@ protected:
 	afx_msg void OnBnClickedHelp();
 	afx_msg void OnSysCommand(UINT nID, LPARAM lParam);
 	afx_msg void OnShowWindow(BOOL bShow, UINT nStatus);
+	afx_msg LRESULT OnComposeDone(WPARAM wParam, LPARAM lParam);
 
 private:
 	enum { HIST_MAX = 512 }; /* リング容量（keys-only 高解像度用） */
@@ -100,6 +101,14 @@ private:
 	void DrawPanelsArea(CDC& dc);
 	void DrawKeysArea(CDC& dc);
 	void ComposeFrame(CDC& dc, int w, int h);
+	void StartComposeThread();
+	void StopComposeThread();
+	void KickCompose(int w, int h);
+	int EnsureWorkBuffers(int w, int h);
+	void ReleaseWorkBuffers();
+	HDC FrontWorkDc();
+	void ComposeThreadLoop();
+	static UINT ComposeThreadProc(LPVOID p);
 	void DrawHexBank(CDC& dc, int x, int y, int cellW, int cellH, int gapExtra, int bankBase, const wchar_t* title, int rowCount = 16);
 	void DrawFmChPanel(CDC& dc, const CRect& rc, int ch);
 	void DrawOpmChPanel(CDC& dc, const CRect& rc, int ch);
@@ -185,4 +194,21 @@ private:
 	bool m_chromaReady;
 #endif
 	GpuMonSurf m_gpu;
+
+	/* hex/panel/keys の GDI 合成は UI から外し、提示だけ UI が BitBlt する */
+	CWinThread* m_composeThread;
+	HANDLE m_composeWake;
+	CRITICAL_SECTION m_dataCs;
+	CRITICAL_SECTION m_bufCs;
+	CDC m_workDC[2];
+	CBitmap m_workBmp[2];
+	CBitmap* m_workOld[2];
+	int m_workW;
+	int m_workH;
+	volatile LONG m_composeFront;
+	volatile LONG m_composeNeed;
+	volatile LONG m_composeStop;
+	volatile LONG m_composeCsReady;
+	int m_composeReqW;
+	int m_composeReqH;
 };

@@ -36,6 +36,14 @@ CDriverF3::CDriverF3()
 	, seqTickAcc_(0)
 	, seqCalls_(0)
 	, irq6Vec_(0)
+	, delayGated_(0)
+	, expiredHead_(0)
+	, lastHeadWait_(0)
+	, waitDecs_(0)
+	, typeEPosts_(0)
+	, f3Arabianm_(0)
+	, idlePark_(0xC10A9Au)
+	, mbDisp_(0xC131E6u)
 {
 	memset(tryCodes_, 0, sizeof(tryCodes_));
 }
@@ -82,6 +90,14 @@ int CDriverF3::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 	seqTickAcc_ = 0;
 	seqCalls_ = 0;
 	irq6Vec_ = 0;
+	delayGated_ = 0;
+	expiredHead_ = 0;
+	lastHeadWait_ = 0;
+	waitDecs_ = 0;
+	typeEPosts_ = 0;
+	f3Arabianm_ = 0;
+	idlePark_ = 0xC10A9Au;
+	mbDisp_ = 0xC131E6u;
 
 	songCode_ = titleCode ? titleCode : 1;
 	CDriverF3Push(tryCodes_, &tryCount_, (int)_countof(tryCodes_), songCode_);
@@ -104,9 +120,11 @@ int CDriverF3::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 			m68k_set_reg(M68K_REG_SR, (sr & ~0x0700u) | 0x2000u);
 	}
 	RunCycles(cpuHz_ / 5);
+	f3Arabianm_ = (hw_->Read32(0x28u) == 0xC10D12u) ? 1 : 0;
 	songCode_ = tryCodes_[0];
 	cmdIndex_ = tryCount_;
 	locked_ = 1;
+	songCode_ = MapSongCode(songCode_);
 	hw_->SetSongCommand(songCode_);
 	/* C15702（C15538 内のボイスチェイン）は D4C0 が立つまで即 return。実機は task0 がフラグを ST。
 	   D4F9 は C15702 のキーオン許可で、カタログの bset #4 前に見る。 */
@@ -118,6 +136,18 @@ int CDriverF3::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 	/* C15538 が D4B3 をクリアし、D0F4 チェイン前に C13B94 が走るので C152B0 はキーオンゲートを見ない。チェイン生存後に武装。 */
 	ArmKeyOnGates();
 	irq6Vec_ = hw_->Read32(0x100u);
+	{
+		const unsigned pc = (unsigned)m68k_get_reg(NULL, M68K_REG_PC);
+		if (pc >= 0xC10A80u && pc < 0xC10B80u)
+			idlePark_ = pc;
+		else
+			idlePark_ = f3Arabianm_ ? 0xC10A9Au : 0xC10B14u;
+		const unsigned disp = hw_->Read32(0xFB3Eu + 4u);
+		if (disp >= 0xC13100u && disp < 0xC13400u)
+			mbDisp_ = disp;
+		else
+			mbDisp_ = f3Arabianm_ ? 0xC131E6u : 0xC13296u;
+	}
 	{
 		/* C14A10 は A7 上の D0F4 を歩く。リセット SSP は $FFFFFFF8（8 バイト、IRQ のみ）。 */
 		const unsigned ssp = (unsigned)m68k_get_reg(NULL, M68K_REG_ISP);
@@ -149,6 +179,15 @@ int CDriverF3::OverlayTitle(unsigned titleCode)
 	if (!hw_) return 0;
 	songCode_ = titleCode;
 	locked_ = 1;
+	if (delayGated_)
+		hw_->EnableDelaySeqTick();
+	expiredHead_ = 0;
+	delayGated_ = 0;
+	lastHeadWait_ = 0;
+	waitDecs_ = 0;
+	typeEPosts_ = 0;
+	seqCalls_ = 0;
+	songCode_ = MapSongCode(titleCode);
 	hw_->SetSongCommand(songCode_);
 	return 1;
 }
@@ -231,36 +270,262 @@ void CDriverF3::WakeMailboxIfQueued()
 		hw_->Write8(tcb + 2u, (uint8_t)(b2 ^ 0x80u));
 }
 
-/* type-E パケットをホスト側で alloc+post */
+/* type-E を 136 から確保し、TCB+A 経由で A5 に載せて C131E6 へ起こす */
 void CDriverF3::PostTypeE()
 {
-	/* C12D94 は trap#3 で type-$E を確保し trap#9 で FB3E へ post。タイマ IRQ からやると C14884 が SSP でハング。
-	   ホストから同じ alloc+wake し、メールボックスタスクが USP で走るようにする。 */
 	if (!hw_) return;
 	const unsigned tcb = 0xFB3Eu;
+	const unsigned cpuPc = (unsigned)m68k_get_reg(NULL, M68K_REG_PC);
+	const unsigned cur = hw_->Read16(0x134u);
+	if (cur == tcb && cpuPc >= 0xC131C0u && cpuPc < (f3Arabianm_ ? 0xC14B00u : 0xC15480u))
+		return;
+	/* FFFF / 音源レジスタ空間へ落ちたメールボックスはアイドル STOP へ戻す */
+	if (cpuPc < 0xC00000u || cpuPc >= 0xC18000u || (cpuPc >= 0x200000u && cpuPc < 0x400000u)) {
+		m68k_set_reg(M68K_REG_PC, idlePark_ ? idlePark_ : 0xC10A9Au);
+		m68k_set_reg(M68K_REG_SR, 0x2000);
+		hw_->Write8(tcb + 2u, 0x80);
+		hw_->Write8(tcb + 3u, 0x80);
+		hw_->Write32(tcb + 4u, mbDisp_ ? mbDisp_ : 0xC131E6u);
+		return;
+	}
+	if ((seqCalls_ & 3u) != 0u)
+		return;
+	if (f3Arabianm_) {
+		if (cpuPc < 0xC10A90u || cpuPc >= 0xC10AA0u)
+			return;
+	} else {
+		const unsigned idle = idlePark_ ? idlePark_ : 0xC10B14u;
+		if (cpuPc + 0x10u < idle || cpuPc >= idle + 0x10u)
+			return;
+	}
 	const uint8_t b2 = hw_->Read8(tcb + 2u);
 	const uint8_t b3 = hw_->Read8(tcb + 3u);
 	if (b2 != b3)
 		return;
-	/* 0000 はスケジューラの「ディスパッチ中」であり sleep ではない。起こすと RTE が C14884 にネストし USP を壊す。8080/0101 が sleep。 */
 	if (b2 != 0x80u && b2 != 0x01u)
-		return;
-	const unsigned pc = hw_->Read32(tcb + 4u);
-	if (pc < 0xC131C0u || pc >= 0xC13320u)
 		return;
 	const unsigned msg = hw_->Read16(0x0136u);
 	if ((msg & 1u) || msg < 0x200u || msg >= 0xFF00u)
 		return;
 	if (msg >= 0xFB00u && msg < 0xFC00u)
 		return;
-	hw_->Write16(0x0136u, hw_->Read16(msg));
-	hw_->Write8(0x014Du, (uint8_t)(hw_->Read8(0x014Du) + 1u));
+	const unsigned nxt = hw_->Read16(msg);
+	if ((nxt & 1u) && nxt != 0)
+		return;
+	if (nxt == 0 && hw_->Read16(0x0136u) == msg)
+		return;
+	hw_->Write16(0x0136u, nxt);
 	hw_->Write16(msg, 0);
 	hw_->Write16(msg + 2u, 0x000Eu);
 	hw_->Write16(msg + 4u, 1);
 	hw_->Write16(msg + 6u, 0);
 	hw_->Write16(tcb + 0x0Au, (uint16_t)msg);
+	hw_->Write32(tcb + 4u, mbDisp_ ? mbDisp_ : 0xC131E6u);
 	hw_->Write8(tcb + 2u, (uint8_t)(b2 ^ 0x80u));
+	typeEPosts_++;
+}
+
+/* 待ちループに戻ったメールボックスが flags=0000 のままなら sleep (8080) に戻す */
+void CDriverF3::RestoreMailboxSleep()
+{
+	if (!hw_) return;
+	const unsigned tcb = 0xFB3Eu;
+	const unsigned saved = hw_->Read32(tcb + 4u);
+	if (saved < 0xC131C0u || saved >= 0xC13320u)
+		return;
+	const unsigned cpuPc = (unsigned)m68k_get_reg(NULL, M68K_REG_PC);
+	/* メールボックス／type ハンドラ実行中に起こすと USP が壊れる */
+	if (cpuPc >= 0xC14884u && cpuPc < (f3Arabianm_ ? 0xC14B00u : 0xC15480u))
+		return;
+	if (cpuPc >= 0xC131C0u && cpuPc < 0xC13320u)
+		return;
+	if (cpuPc >= 0xC1E000u && cpuPc < 0xC20000u)
+		return;
+	if (hw_->Read16(0x134u) == 0xFB3Eu)
+		return;
+	const uint8_t b2 = hw_->Read8(tcb + 2u);
+	const uint8_t b3 = hw_->Read8(tcb + 3u);
+	/* 0000=ディスパッチ中の残骸、0080=起こしたまま CPU が遅延へ逃げた */
+	if ((b2 == 0 && b3 == 0) || (b2 == 0 && b3 == 0x80u) || (b2 == 0x80u && b3 == 0)) {
+		hw_->Write8(tcb + 2u, 0x80);
+		hw_->Write8(tcb + 3u, 0x80);
+	}
+}
+
+/* 頭の巨大スタート待ちだけ、メールボックス C14A10 が生きてから 1 へ。以降の量子は type-E。 */
+void CDriverF3::ExpireHeadWaitOnce()
+{
+	if (!hw_ || expiredHead_) return;
+	const unsigned cpuPc = (unsigned)m68k_get_reg(NULL, M68K_REG_PC);
+	if (cpuPc >= 0xC10F00u && cpuPc < 0xC11100u)
+		return;
+	const unsigned head = hw_->Read16(0xD0F4u);
+	if (head < 0xD000u || head >= 0xEE00u) return;
+	const unsigned wait = hw_->Read16(head + 4u);
+	if (lastHeadWait_ && wait < lastHeadWait_)
+		waitDecs_++;
+	lastHeadWait_ = wait;
+	if (hitTick_ < 4u || wait < 0x0400u)
+		return;
+	if ((songCode_ & 0xffu) == 0x0Au)
+		return;
+	hw_->Write16(head + 4u, 1);
+	expiredHead_ = 1;
+}
+
+/* 2s ごと。中休符は常に、巨大待ちは頭を落とした曲だけ。 */
+void CDriverF3::PunchMediumWaits()
+{
+	if (!hw_) return;
+	unsigned n = hw_->Read16(0xD0F4u);
+	int hops = 0;
+	while (n >= 0xD000u && n < 0xEE00u && hops < 16) {
+		const unsigned wait = hw_->Read16(n + 4u);
+		if (wait >= 0x10u && (wait < 0x0400u || expiredHead_))
+			hw_->Write16(n + 4u, 1);
+		n = hw_->Read16(n);
+		hops++;
+	}
+}
+
+/* 起動は遅延 D4A6。頭を落としたあとは 30Hz。中休符はホストが潰す。 */
+void CDriverF3::TickSeqHost()
+{
+	if (!hw_) return;
+	if (f3Arabianm_) {
+		const unsigned obj = hw_->Read16(0x6DFCu);
+		if ((songCode_ & 0xffu) != 0x0Au && obj >= 0x200u && obj < 0xC000u && hw_->Read16(obj) == 0)
+			hw_->Write16(obj, 0x10);
+		const unsigned head = hw_->Read16(0xD0F4u);
+		if (head >= 0xD000u && head < 0xEE00u) {
+			if (seqCalls_ <= 8u)
+				ArmKeyOnGates();
+			ExpireHeadWaitOnce();
+			if (seqCalls_ >= 60u && (seqCalls_ % 120u) == 0u)
+				PunchMediumWaits();
+			if (expiredHead_ && seqCalls_ >= 60u && seqCalls_ <= 720u
+				&& (seqCalls_ % 60u) == 0u) {
+				const unsigned n = hw_->Read16(0xD0F4u);
+				if (n >= 0xD000u && n < 0xEE00u) {
+					const unsigned wait = hw_->Read16(n + 4u);
+					if (wait >= 0x10u)
+						hw_->Write16(n + 4u, 1);
+				}
+			}
+			if (expiredHead_ && seqCalls_ < 480u && hw_->SoundChip()) {
+				CChip* chip = hw_->SoundChip();
+				for (int v = 0; v < 8; v++) {
+					const uint16_t cr = CEmuChipEs5505PeekCr(chip, v);
+					if ((cr & 3u) == 0)
+						continue;
+					chip->Write(0x0f, (uint32_t)v);
+					chip->Write(0x00, (uint32_t)(cr & (uint16_t)~3u));
+				}
+			}
+			if (!expiredHead_ || (seqCalls_ & 1u) == 0u)
+				hw_->Write16(0xD4A6u, 1);
+			{
+				const unsigned ssp = (unsigned)m68k_get_reg(NULL, M68K_REG_ISP);
+				if (ssp < 0x400u || ssp >= 0xFFFF00u)
+					m68k_set_reg(M68K_REG_ISP, 0x9E00);
+			}
+			if (irq6Vec_ && hw_->Read32(0x100u) == 0)
+				hw_->Write32(0x100u, irq6Vec_);
+		}
+	} else {
+		const unsigned cpuPc = (unsigned)m68k_get_reg(NULL, M68K_REG_PC);
+		if (cpuPc >= 0xC10B08u && cpuPc < 0xC10B20u) {
+			const unsigned a5cat = hw_->Read32(0xD098u);
+			if (a5cat >= 0xC00000u && a5cat < 0xC18000u)
+				m68k_set_reg(M68K_REG_A5, a5cat);
+		}
+		if (cpuPc >= 0xC14F00u && cpuPc < 0xC15480u && seqCalls_ >= 180u
+			&& (seqCalls_ % 16u) == 15u) {
+			m68k_set_reg(M68K_REG_PC, idlePark_ ? idlePark_ : 0xC10B14u);
+			m68k_set_reg(M68K_REG_SR, 0x2000);
+		}
+		if (hw_->Read8(0xD4C0u) == 0)
+			hw_->Write8(0xD4C0u, 1);
+		if (hw_->Read8(0xD4F9u) == 0)
+			hw_->Write8(0xD4F9u, 1);
+		{
+			const unsigned bank = hw_->Read32(0xD408u);
+			if (bank >= 0xC00000u && bank < 0xC80000u)
+				hw_->Write32(0xD0E8u, bank);
+		}
+		{
+			unsigned stamp = 0;
+			for (unsigned a = 0xC13600u; a + 8u < 0xC15400u; a += 2u) {
+				if (hw_->Read16(a) != 0x0C78u || hw_->Read16(a + 4u) != 0xD09Au)
+					continue;
+				const unsigned imm = hw_->Read16(a + 2u);
+				if (imm < 0x3000u || imm > 0x36FFu)
+					continue;
+				stamp = imm;
+				if (hw_->Read16(a + 6u) == 0x6630u)
+					break;
+			}
+			if (stamp) {
+				if (hw_->Read16(0xD09Au) != stamp)
+					hw_->Write16(0xD09Au, (uint16_t)stamp);
+				if (hw_->Read16(0xD09Eu) != stamp)
+					hw_->Write16(0xD09Eu, (uint16_t)stamp);
+			}
+		}
+		const unsigned head = hw_->Read16(0xD0F4u);
+		if (head >= 0xD000u && head < 0xEE00u) {
+			if (seqCalls_ <= 8u)
+				ArmKeyOnGates();
+			ExpireHeadWaitOnce();
+			if (!expiredHead_) {
+				const unsigned wait = hw_->Read16(head + 4u);
+				if (wait >= 0x80u) {
+					hw_->Write16(head + 4u, 0x30);
+					expiredHead_ = 1;
+				}
+			}
+			if (seqCalls_ >= 30u && (seqCalls_ % 60u) == 0u)
+				PunchMediumWaits();
+			if (expiredHead_ && seqCalls_ >= 30u
+				&& (seqCalls_ % 30u) == 0u) {
+				const unsigned n = hw_->Read16(0xD0F4u);
+				if (n >= 0xD000u && n < 0xEE00u) {
+					const unsigned wait = hw_->Read16(n + 4u);
+					if (wait >= 0x10u && wait < 0xF000u)
+						hw_->Write16(n + 4u, 1);
+				}
+			}
+		}
+		if (!expiredHead_ || (seqCalls_ & 1u) == 0u)
+			hw_->Write16(0xD4A6u, 1);
+		PostTypeE();
+		{
+			const unsigned ssp = (unsigned)m68k_get_reg(NULL, M68K_REG_ISP);
+			if (ssp < 0x400u || ssp >= 0xFFFF00u)
+				m68k_set_reg(M68K_REG_ISP, 0x9E00);
+		}
+		if (irq6Vec_ && hw_->Read32(0x100u) == 0)
+			hw_->Write32(0x100u, irq6Vec_);
+	}
+	seqCalls_++;
+}
+
+/* D404 表が空の hoot コード（gunlock の $5C 起点）を実エントリへ */
+unsigned CDriverF3::MapSongCode(unsigned code)
+{
+	if (!hw_) return code;
+	const unsigned tab = hw_->Read32(0xD404u);
+	if (tab < 0xC00000u || tab >= 0xC80000u) return code;
+	const unsigned lo = code & 0xffu;
+	const unsigned ptr = hw_->Read32(tab + 8u + lo * 4u);
+	if (ptr != 0 && ptr < 0x00100000u) return code;
+	if (lo >= 0x5Cu && lo < 0x9Cu) {
+		const unsigned alt = lo - 0x5Cu;
+		const unsigned p2 = hw_->Read32(tab + 8u + alt * 4u);
+		if (p2 != 0 && p2 < 0x00100000u)
+			return (code & ~0xffu) | alt;
+	}
+	return code;
 }
 
 /* 診断用に PC/DPRAM/DUART を出す */
@@ -274,7 +539,7 @@ void CDriverF3::LogState(const char* tag)
 		hw_->SoundChip()->GetRegSnapshot(snap, 4);
 	const unsigned mq = hw_->Read16(0xFB3Eu + 0x0Eu);
 	fprintf(log,
-		"%s code=%04X PC=%06X SR=%04X USP=%08X SSP=%08X A5=%08X A6=%08X A0=%08X fires=%u hits0=%u hits18=%u wp=%04X rp=%04X esW=%u live=%u d404=%08X v28=%08X v8C=%08X vA4=%08X v100=%08X cur=%04X flist=%04X ack=%d ivr=%02X idle=%u irq=%u t0=%u mail=%u play=%u disp=%u tick=%u t9=%04X ee=%04X %04X %04X mh=%04X %04X %04X cr=%04X %04X %04X %04X seqc=%u\n",
+		"%s code=%04X PC=%06X SR=%04X USP=%08X SSP=%08X A5=%08X A6=%08X A0=%08X fires=%u hits0=%u hits18=%u wp=%04X rp=%04X esW=%u live=%u d404=%08X v28=%08X v8C=%08X vA4=%08X v100=%08X cur=%04X flist=%04X ack=%d ivr=%02X idle=%u irq=%u t0=%u mail=%u play=%u disp=%u tick=%u t9=%04X ee=%04X %04X %04X mh=%04X %04X %04X cr=%04X %04X %04X %04X seqc=%u te=%u wd=%u exp=%d dg=%d\n",
 		tag, songCode_,
 		(unsigned)m68k_get_reg(NULL, M68K_REG_PC),
 		(unsigned)m68k_get_reg(NULL, M68K_REG_SR),
@@ -297,7 +562,7 @@ void CDriverF3::LogState(const char* tag)
 		CEmuChipEs5505PeekCr(hw_->SoundChip(), 1),
 		CEmuChipEs5505PeekCr(hw_->SoundChip(), 2),
 		CEmuChipEs5505PeekCr(hw_->SoundChip(), 3),
-		seqCalls_);
+		seqCalls_, typeEPosts_, waitDecs_, expiredHead_, delayGated_);
 	{
 		const unsigned obj = hw_->Read16(0x6DFCu);
 		fprintf(log, "  list 6DFC=%04X %04X %04X %04X ch=%04X obj=%04X w0=%04X w2=%04X w4=%04X w6=%04X w1c=%04X d40e=%04X d4c0=%02X d0f4=%04X d414=%08X d408=%08X loop=%04X %04X hole=%04X %04X\n",
@@ -355,6 +620,30 @@ void CDriverF3::LogState(const char* tag)
 		fprintf(log, "\n");
 	}
 	{
+		CChip* chip = hw_->SoundChip();
+		if (chip) {
+			fprintf(log, "  vox");
+			for (int v = 0; v < 4; v++) {
+				chip->Write(0x0f, (uint32_t)v);
+				fprintf(log, " %d:cr=%04X fc=%04X st=%04X%04X en=%04X%04X k2=%04X k1=%04X lv=%04X rv=%04X ac=%04X%04X",
+					v,
+					CEmuChipEs5505Read(chip, 0x00),
+					CEmuChipEs5505Read(chip, 0x01),
+					CEmuChipEs5505Read(chip, 0x02),
+					CEmuChipEs5505Read(chip, 0x03),
+					CEmuChipEs5505Read(chip, 0x04),
+					CEmuChipEs5505Read(chip, 0x05),
+					CEmuChipEs5505Read(chip, 0x06),
+					CEmuChipEs5505Read(chip, 0x07),
+					CEmuChipEs5505Read(chip, 0x08),
+					CEmuChipEs5505Read(chip, 0x09),
+					CEmuChipEs5505Read(chip, 0x0a),
+					CEmuChipEs5505Read(chip, 0x0b));
+			}
+			fprintf(log, "\n");
+		}
+	}
+	{
 		unsigned n = hw_->Read16(0xD0F4u);
 		int hops = 0;
 		fprintf(log, "  chain");
@@ -399,23 +688,30 @@ void CDriverF3::RunCycles(int cycles)
 			m68k_set_irq(M68K_IRQ_NONE);
 		const int ran = m68k_execute(slice);
 		{
-			/* STOP で IPL が DUART をマスクしている CPU だけ起こす。ユーザモード SR は書き換えない。Ensoniq OS が RTE でタスクに入り、毎スライス壊すとメールボックス読者が死ぬ。 */
+			/* STOP で IPL が DUART をマスクしている CPU だけ起こす。ユーザモード SR は書き換えない。 */
 			const unsigned sr = (unsigned)m68k_get_reg(NULL, M68K_REG_SR);
 			const unsigned ipl = (sr >> 8) & 7u;
+			const unsigned pc = (unsigned)m68k_get_reg(NULL, M68K_REG_PC);
 			const int stuck = (ran == slice);
-			/* IPL 7 の STOP は約 0 サイクル（IRQ マスク）なので「満スライス」判定が立たない。その待ちはマスク解除。忙しい C1490A は触らない。 */
-			if (ipl >= 6u && (stuck || ran < 256))
+			/* C14884–C14A10 を IPL7 のまま走らせる。ここで落とすと IRQ6 がネストして C14A6C で止まり live ボイスが無音になる。 */
+			/* C14884–C14A10 を IPL7 のまま走らせる。C14A6C の正ワード待ちは yield させる。gunlock シーケンサは +0xB0 の C14AC0、キーオンは C15360。 */
+			const int inSeq = f3Arabianm_
+				? ((pc >= 0xC14884u && pc < 0xC14A60u) ? 1 : 0)
+				: ((pc >= 0xC14884u && pc < 0xC15480u) ? 1 : 0);
+			const int inIrq = (!f3Arabianm_ && pc >= 0xC10E00u && pc < 0xC11080u) ? 1 : 0;
+			if (ipl >= 6u && !inSeq && !inIrq && (stuck || ran < 256))
 				m68k_set_reg(M68K_REG_SR, (sr | 0x2000u) & ~0x0700u);
 		}
 		{
 			const unsigned pc = (unsigned)m68k_get_reg(NULL, M68K_REG_PC);
-			if (pc >= 0xC10A90u && pc < 0xC10AA0u) hitIdle_++;
+			if ((pc >= 0xC10A90u && pc < 0xC10AA0u)
+				|| (pc >= 0xC10B08u && pc < 0xC10B18u)) hitIdle_++;
 			else if (pc >= 0xC10E68u && pc < 0xC10F00u) hitIrq_++;
 			else if (pc >= 0xC0B5D0u && pc < 0xC0B700u) hitTask0_++;
 			else if (pc >= 0xC131C0u && pc < 0xC13320u) hitMail_++;
 			else if (pc >= 0xC12B8Cu && pc < 0xC12D70u) hitPlay_++;
 			else if (pc >= 0xC12DFEu && pc < 0xC12E80u) hitDisp_++;
-			else if (pc >= 0xC14884u && pc < 0xC14910u) hitTick_++;
+			else if (pc >= 0xC14884u && pc < 0xC14B00u) hitTick_++;
 		}
 		WakeMailboxIfQueued();
 		cycles -= slice;
@@ -470,20 +766,7 @@ int CDriverF3::Render(int16_t* stereo, int frames)
 		seqTickAcc_ += 1;
 		if (seqTickAcc_ >= (hostRate_ > 60 ? hostRate_ / 60 : 1)) {
 			seqTickAcc_ = 0;
-			const unsigned head = hw_->Read16(0xD0F4u);
-			if (head >= 0xD000u && head < 0xEE00u) {
-				hw_->Write16(0xD4A6u, 1);
-				seqCalls_++;
-				if (seqCalls_ <= 8u)
-					ArmKeyOnGates();
-				{
-					const unsigned ssp = (unsigned)m68k_get_reg(NULL, M68K_REG_ISP);
-					if (ssp < 0x400u || ssp >= 0xFFFF00u)
-						m68k_set_reg(M68K_REG_ISP, 0x9E00);
-				}
-				if (irq6Vec_ && hw_->Read32(0x100u) == 0)
-					hw_->Write32(0x100u, irq6Vec_);
-			}
+			TickSeqHost();
 		}
 		cpuAcc_ += (int64_t)cpuHz_;
 		int cyclesPerSample = (int)(cpuAcc_ / (int64_t)hostRate_);

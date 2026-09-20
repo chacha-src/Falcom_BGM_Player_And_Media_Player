@@ -7443,7 +7443,7 @@ struct LiveTapShort { BYTE port; DWORD msg; __int64 due; };
 static LiveTapShort g_liveTapShort[LIVE_TAP_SHORT_N];
 static volatile LONG g_liveTapShortW = 0;
 static volatile LONG g_liveTapShortR = 0;
-struct LiveTapSx { BYTE port; unsigned short len; BYTE d[LIVE_TAP_SX_B]; };
+struct LiveTapSx { BYTE port; unsigned short len; __int64 due; BYTE d[LIVE_TAP_SX_B]; };
 static LiveTapSx g_liveTapSx[LIVE_TAP_SX_N];
 static volatile LONG g_liveTapSxW = 0;
 static volatile LONG g_liveTapSxR = 0;
@@ -7471,9 +7471,10 @@ extern "C" void VstLiveTapPushShort(int portIndex0to2, DWORD shortMsg)
 extern "C" void VstLiveTapFlush(void)
 {
 	g_liveTapShortR = g_liveTapShortW;
+	g_liveTapSxR = g_liveTapSxW;
 }
 
-extern "C" void VstLiveTapPushSysex(int portIndex0to2, const unsigned char* data, int bytes)
+extern "C" void VstLiveTapPushSysexAt(int portIndex0to2, const unsigned char* data, int bytes, __int64 dueFrame)
 {
 	if (!data || bytes < 2) return;
 	if (portIndex0to2 < 0) portIndex0to2 = 0;
@@ -7484,9 +7485,15 @@ extern "C" void VstLiveTapPushSysex(int portIndex0to2, const unsigned char* data
 	const int i = (int)(w & (LIVE_TAP_SX_N - 1));
 	g_liveTapSx[i].port = (BYTE)portIndex0to2;
 	g_liveTapSx[i].len = (unsigned short)bytes;
+	g_liveTapSx[i].due = dueFrame;
 	memcpy(g_liveTapSx[i].d, data, (size_t)bytes);
 	MemoryBarrier();
 	g_liveTapSxW = w + 1;
+}
+
+extern "C" void VstLiveTapPushSysex(int portIndex0to2, const unsigned char* data, int bytes)
+{
+	VstLiveTapPushSysexAt(portIndex0to2, data, bytes, -1);
 }
 
 extern "C" int VstLiveTapStealShortsDue(__int64 nowFrame, BYTE* ports, DWORD* msgs, int maxCount)
@@ -7516,12 +7523,14 @@ extern "C" int VstLiveTapStealShorts(BYTE* ports, DWORD* msgs, int maxCount)
 	return VstLiveTapStealShortsDue(-1, ports, msgs, maxCount);
 }
 
-extern "C" int VstLiveTapStealSysex(int* portIndex0to2, unsigned char* data, int maxBytes)
+extern "C" int VstLiveTapStealSysexDue(__int64 nowFrame, int* portIndex0to2, unsigned char* data, int maxBytes)
 {
 	if (!portIndex0to2 || !data || maxBytes < 1) return 0;
 	const LONG r = g_liveTapSxR;
 	if (r == g_liveTapSxW) return 0;
 	const int i = (int)(r & (LIVE_TAP_SX_N - 1));
+	const __int64 due = g_liveTapSx[i].due;
+	if (due >= 0 && nowFrame >= 0 && due > nowFrame) return 0;
 	int n = (int)g_liveTapSx[i].len;
 	if (n > maxBytes) n = maxBytes;
 	*portIndex0to2 = (int)g_liveTapSx[i].port;
@@ -7529,6 +7538,11 @@ extern "C" int VstLiveTapStealSysex(int* portIndex0to2, unsigned char* data, int
 	MemoryBarrier();
 	g_liveTapSxR = r + 1;
 	return n;
+}
+
+extern "C" int VstLiveTapStealSysex(int* portIndex0to2, unsigned char* data, int maxBytes)
+{
+	return VstLiveTapStealSysexDue(-1, portIndex0to2, data, maxBytes);
 }
 
 extern "C" int VstLiveActivity(int part1to32, struct VstLiveActInfo* out)

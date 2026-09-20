@@ -250,6 +250,7 @@ private:
 	unsigned midiNoteOnCount_;
 	unsigned midiPortOutCount_; /* キャプチャ非武装でも E0D0 OUT */
 	uint64_t midiLastCycle_;
+	uint64_t midiTickRem_; /* (dc*960) の端数。切り捨てると MIDI が系統的に速い */
 	int mpuUart_;
 	uint8_t mpuAckQ_[32];
 	unsigned mpuAckR_;

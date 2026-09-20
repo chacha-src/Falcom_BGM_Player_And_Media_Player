@@ -1,4 +1,4 @@
-#include "StdAfx.h"
+﻿#include "StdAfx.h"
 #include "cemu_fmmon_bind.h"
 #include "fmmon_shadow.h"
 #include "../cemu_catalog.h"
@@ -199,7 +199,9 @@ void CEmuFmMonBindFromGe(const CEmuGameEntry* ge)
 			strncpy_s(plat, "Sys16", _TRUNCATE);
 		else if (_strnicmp(sub, "system18", 8) == 0)
 			strncpy_s(plat, "Sys18", _TRUNCATE);
-		else if (_strnicmp(sub, "system32", 8) == 0)
+		else if (_strnicmp(sub, "system32", 8) == 0
+			|| _stricmp(sub, "system_multi") == 0
+			|| _stricmp(sub, "multi32") == 0)
 			strncpy_s(plat, "Sys32", _TRUNCATE);
 		else if (_stricmp(sub, "gng") == 0 || _stricmp(sub, "opn2") == 0)
 			strncpy_s(plat, "GNG", _TRUNCATE);
@@ -321,9 +323,12 @@ void CEmuFmMonBindFromGe(const CEmuGameEntry* ge)
 		layout = -1;
 		FmMonShadowSetKeysProfile(SASAMI_FMMON_KEYS_RF5C);
 		FmMonShadowEnterKeysOnly(SASAMI_FMMON_KEYS_RF5C);
+	} else if (_stricmp(sub, "system_multi") == 0 || _stricmp(sub, "multi32") == 0) {
+		strncpy_s(chip, "YM3438+MultiPCM", _TRUNCATE);
+		layout = 3;
+		FmMonShadowSetKeysProfile(SASAMI_FMMON_KEYS_MULTIPCM);
 	} else if ((HasChip(ge, CEMU_CHIP_YM2612) && HasChip(ge, CEMU_CHIP_RF5C68))
-		|| _strnicmp(sub, "system32", 8) == 0 || _strnicmp(sub, "system18", 8) == 0
-		|| _stricmp(sub, "multi32") == 0) {
+		|| _strnicmp(sub, "system32", 8) == 0 || _strnicmp(sub, "system18", 8) == 0) {
 		strncpy_s(chip, "YM2612+RF5C68x8", _TRUNCATE);
 		layout = 0; /* OPN2 形 FM + RF5C PCM 行 */
 		FmMonShadowSetSsgClock(7670453u);

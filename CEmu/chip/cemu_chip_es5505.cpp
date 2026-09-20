@@ -329,7 +329,11 @@ private:
 	{
 		uint32_t idx = (uint32_t)CEmuEsRshiftU(volume, volumeShift_);
 		if (idx > 255) idx = 255;
-		return volLut_[idx];
+		uint32_t v = volLut_[idx];
+		/* 指数 0（0x01–0x0F）は LUT が 0。Taito のリリース 0x0F が F60C ループを無音にする。 */
+		if (v == 0 && idx)
+			v = volLut_[0x90];
+		return v;
 	}
 
 	int64_t GetSample(int32_t sample, uint32_t volume) const
@@ -347,34 +351,40 @@ private:
 
 	void ApplyFilters(Voice* voice, int32_t& sample)
 	{
-		sample = CEmuEsApplyLowpass(sample, (int32_t)voice->k1, voice->o1n1);
+		/* k1/k2=0 は LPF が直前値（初期 0）を返す。Taito はリリースで k1 を 0 に落とすので
+		   F60C ループが無音になる。閉じた係数はパススルー相当にする。 */
+		int32_t k1 = (int32_t)voice->k1;
+		int32_t k2 = (int32_t)voice->k2;
+		if (k1 < 0x80) k1 = 0xffff;
+		if (k2 < 0x80) k2 = 0xffff;
+		sample = CEmuEsApplyLowpass(sample, k1, voice->o1n1);
 		voice->o1n1 = sample;
-		sample = CEmuEsApplyLowpass(sample, (int32_t)voice->k1, voice->o2n1);
+		sample = CEmuEsApplyLowpass(sample, k1, voice->o2n1);
 		voice->o2n2 = voice->o2n1;
 		voice->o2n1 = sample;
 		switch (GetLp(voice->control)) {
 		case 0:
-			sample = CEmuEsApplyHighpass(sample, (int32_t)voice->k2, voice->o3n1, voice->o2n2);
+			sample = CEmuEsApplyHighpass(sample, k2, voice->o3n1, voice->o2n2);
 			voice->o3n2 = voice->o3n1; voice->o3n1 = sample;
-			sample = CEmuEsApplyHighpass(sample, (int32_t)voice->k2, voice->o4n1, voice->o3n2);
+			sample = CEmuEsApplyHighpass(sample, k2, voice->o4n1, voice->o3n2);
 			voice->o4n1 = sample;
 			break;
 		case kLp3:
-			sample = CEmuEsApplyLowpass(sample, (int32_t)voice->k1, voice->o3n1);
+			sample = CEmuEsApplyLowpass(sample, k1, voice->o3n1);
 			voice->o3n2 = voice->o3n1; voice->o3n1 = sample;
-			sample = CEmuEsApplyHighpass(sample, (int32_t)voice->k2, voice->o4n1, voice->o3n2);
+			sample = CEmuEsApplyHighpass(sample, k2, voice->o4n1, voice->o3n2);
 			voice->o4n1 = sample;
 			break;
 		case kLp4:
-			sample = CEmuEsApplyLowpass(sample, (int32_t)voice->k2, voice->o3n1);
+			sample = CEmuEsApplyLowpass(sample, k2, voice->o3n1);
 			voice->o3n2 = voice->o3n1; voice->o3n1 = sample;
-			sample = CEmuEsApplyLowpass(sample, (int32_t)voice->k2, voice->o4n1);
+			sample = CEmuEsApplyLowpass(sample, k2, voice->o4n1);
 			voice->o4n1 = sample;
 			break;
 		default:
-			sample = CEmuEsApplyLowpass(sample, (int32_t)voice->k1, voice->o3n1);
+			sample = CEmuEsApplyLowpass(sample, k1, voice->o3n1);
 			voice->o3n2 = voice->o3n1; voice->o3n1 = sample;
-			sample = CEmuEsApplyLowpass(sample, (int32_t)voice->k2, voice->o4n1);
+			sample = CEmuEsApplyLowpass(sample, k2, voice->o4n1);
 			voice->o4n1 = sample;
 			break;
 		}
@@ -449,14 +459,23 @@ private:
 			/* OTIS のボイス毎音量は0のままが多い。基板ゲインは MB87078（リセット0dB）。 */
 			uint32_t lv = voice->lvol ? voice->lvol : 0xffu;
 			uint32_t rv = voice->rvol ? voice->rvol : 0xffu;
+			uint64_t lvm = GetVolume(lv);
+			uint64_t rvm = GetVolume(rv);
+			if (voice->control & kControlLpe) {
+				const unsigned w = (unsigned)((voice->accum >> 14) & 0xffu);
+				if (w < 0x80u) {
+					lvm += lvm / 2u;
+					rvm += rvm / 2u;
+				}
+			}
 			if (!(voice->control & kControlDir)) {
 				int32_t val1 = (int16_t)ReadSampleWord(voice, IntegerAddr(accum));
 				int32_t val2 = (int16_t)ReadSampleWord(voice, IntegerAddr(accum, 1));
 				val1 = Interpolate(val1, val2, accum);
 				accum = (accum + freqcount) & addrAccMask_;
 				ApplyFilters(voice, val1);
-				dest[0] += (int32_t)GetSample(val1, lv);
-				dest[1] += (int32_t)GetSample(val1, rv);
+				dest[0] += (int32_t)CEmuEsRshiftU((uint64_t)((int64_t)val1 * (int64_t)lvm), (int)volumeAccShift_);
+				dest[1] += (int32_t)CEmuEsRshiftU((uint64_t)((int64_t)val1 * (int64_t)rvm), (int)volumeAccShift_);
 				CheckEndForward(voice, accum);
 			} else {
 				int32_t val1 = (int16_t)ReadSampleWord(voice, IntegerAddr(accum));
@@ -464,8 +483,8 @@ private:
 				val1 = Interpolate(val1, val2, accum);
 				accum = (accum - freqcount) & addrAccMask_;
 				ApplyFilters(voice, val1);
-				dest[0] += (int32_t)GetSample(val1, lv);
-				dest[1] += (int32_t)GetSample(val1, rv);
+				dest[0] += (int32_t)CEmuEsRshiftU((uint64_t)((int64_t)val1 * (int64_t)lvm), (int)volumeAccShift_);
+				dest[1] += (int32_t)CEmuEsRshiftU((uint64_t)((int64_t)val1 * (int64_t)rvm), (int)volumeAccShift_);
 				CheckEndReverse(voice, accum);
 			}
 		}

@@ -48,10 +48,33 @@ int CEmuModeIsMidiTag(const char* tag)
 		|| _stricmp(tag, "SC-88") == 0 || _stricmp(tag, "SC88") == 0)
 		return 1;
 	if (_stricmp(tag, "LA") == 0 || _stricmp(tag, "MT-32") == 0
-		|| _stricmp(tag, "MT32") == 0)
+		|| _stricmp(tag, "MT32") == 0 || _stricmp(tag, "CM-64") == 0
+		|| _stricmp(tag, "CM64") == 0)
 		return 1;
 	if (_stricmp(tag, "GM") == 0) return 1;
 	return 0;
+}
+
+static const char* CEmuModeMidiTagFromName(const CEmuGameEntry* e)
+{
+	if (!e) return NULL;
+	const wchar_t* n = e->name;
+	if (!n || !n[0]) return NULL;
+	if (wcsstr(n, L"SC-88") || wcsstr(n, L"SC88") || wcsstr(n, L"sc-88")
+		|| wcsstr(n, L"sc88"))
+		return "SC-88";
+	if (wcsstr(n, L"SC-55") || wcsstr(n, L"SC55") || wcsstr(n, L"sc-55")
+		|| wcsstr(n, L"sc55") || wcsstr(n, L"(GS)") || wcsstr(n, L"(gs)"))
+		return "GS";
+	if (wcsstr(n, L"CM-64") || wcsstr(n, L"CM64") || wcsstr(n, L"cm-64")
+		|| wcsstr(n, L"cm64") || wcsstr(n, L"(CM)"))
+		return "CM-64";
+	if (wcsstr(n, L"MT-32") || wcsstr(n, L"MT32") || wcsstr(n, L"mt-32")
+		|| wcsstr(n, L"mt32") || wcsstr(n, L"(LA)") || wcsstr(n, L"(la)"))
+		return "LA";
+	if (wcsstr(n, L"(GM)") || wcsstr(n, L"(gm)"))
+		return "GM";
+	return NULL;
 }
 
 int CEmuModeTagFromEntry(const CEmuGameEntry* e, char* tag, int tagCap)
@@ -61,13 +84,19 @@ int CEmuModeTagFromEntry(const CEmuGameEntry* e, char* tag, int tagCap)
 	if (!e) return 0;
 	if (CEmuModeEntryIsMidi(e)) {
 		/* hoot midiout_type: 1/2=MT-32(LA), 4/6=GS(SC-55), 7=SC-88, 8=GM。
-		   全部 "MIDI" に畳むと vg2_98 の SC-55/SC-88 がコンテキストで選べない。 */
+		   全部 "MIDI" に畳むと vg2_98 の SC-55/SC-88 がコンテキストで選べない。
+		   キャッシュに midiout_type が無い行は <name> の SC-55/SC-88 を使う。 */
 		const int mt = CEmuModeEntryMidiOutType(e);
-		const char* midiTag = "MIDI";
+		const char* midiTag = NULL;
 		if (mt == 1 || mt == 2) midiTag = "LA";
+		else if (mt == 3) midiTag = "CM-64";
 		else if (mt == 4 || mt == 6) midiTag = "GS";
 		else if (mt == 7) midiTag = "SC-88";
 		else if (mt == 8) midiTag = "GM";
+		if (!midiTag)
+			midiTag = CEmuModeMidiTagFromName(e);
+		if (!midiTag)
+			midiTag = "MIDI";
 		strncpy_s(tag, (size_t)tagCap, midiTag, _TRUNCATE);
 		return 1;
 	}

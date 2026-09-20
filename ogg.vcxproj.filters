@@ -513,6 +513,9 @@
     <ClCompile Include="CMidiMonitorDlg.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="CMidiHwPanel.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="PcHwMidiIn.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -1808,6 +1811,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="CMidiMonitorDlg.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CMidiHwPanel.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="PcHwMidiIn.h">

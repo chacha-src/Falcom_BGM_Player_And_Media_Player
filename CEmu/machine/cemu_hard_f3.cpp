@@ -530,20 +530,37 @@ void CHardF3::SetSongCommand(unsigned code)
 	}
 }
 
+/* 遅延トランポリンの D4A6 分岐を探す */
+static unsigned CHardF3FindDelayGate(uint8_t* cpu, unsigned size)
+{
+	if (!cpu || size < 0x100010u) return 0;
+	const unsigned win0 = 0x100000u;
+	const unsigned win1 = size < 0x120000u ? size : 0x120000u;
+	for (unsigned i = win0; i + 8u <= win1; i += 2) {
+		if (cpu[i] == 0x4a && cpu[i + 1] == 0x78
+			&& cpu[i + 2] == 0xd4 && cpu[i + 3] == 0xa6
+			&& cpu[i + 5] == 0x12 && cpu[i + 6] == 0x2f && cpu[i + 7] == 0x0e
+			&& (cpu[i + 4] == 0x67 || cpu[i + 4] == 0x60))
+			return i;
+	}
+	return 0;
+}
+
 /* CHardF3::DisableDelaySeqTick の実装 */
 void CHardF3::DisableDelaySeqTick()
 {
 	/* Open 後、遅延トランポリンの jsr C1490A は SSP 上で約 14Hz。USP 上のメールボックス type-$E は第 2 エンベロープクロック無しの同じ C1490A。jsr を Bra で飛ばし、ブート風呼び出しが戻れるよう subq は残す。 */
-	if (!audioCpu_ || audioCpuSize_ < 0x100010u) return;
-	const unsigned win0 = 0x100000u;
-	const unsigned win1 = audioCpuSize_ < 0x120000u ? audioCpuSize_ : 0x120000u;
-	static const uint8_t k[8] = { 0x4a, 0x78, 0xd4, 0xa6, 0x67, 0x12, 0x2f, 0x0e };
-	for (unsigned i = win0; i + 8u <= win1; i += 2) {
-		if (memcmp(audioCpu_ + i, k, 8) == 0) {
-			audioCpu_[i + 4] = 0x60;
-			return;
-		}
-	}
+	const unsigned i = CHardF3FindDelayGate(audioCpu_, audioCpuSize_);
+	if (i)
+		audioCpu_[i + 4] = 0x60;
+}
+
+/* OverlayTitle で頭待ちを再開するため beq に戻す */
+void CHardF3::EnableDelaySeqTick()
+{
+	const unsigned i = CHardF3FindDelayGate(audioCpu_, audioCpuSize_);
+	if (i)
+		audioCpu_[i + 4] = 0x67;
 }
 
 /* 周辺クロックを進める */
@@ -893,6 +910,15 @@ int CHardF3::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode
 		const unsigned win0 = 0x100000u;
 		const unsigned win1 = (audioCpuSize_ < 0x120000u) ? audioCpuSize_ : 0x120000u;
 		unsigned delayOff = 0, tickOff = 0, playOff = 0, holeOff = 0;
+		int gunOs = 0;
+		if (audioCpuSize_ > 0x10002Cu) {
+			const unsigned v28 = ((unsigned)audioCpu_[0x100028] << 24)
+				| ((unsigned)audioCpu_[0x100029] << 16)
+				| ((unsigned)audioCpu_[0x10002A] << 8)
+				| (unsigned)audioCpu_[0x10002B];
+			if (v28 == 0x00C10D8Cu || v28 == 0xC10D8Cu)
+				gunOs = 1;
+		}
 		if (win1 > win0 + 16u) {
 			for (unsigned i = win0; i + 10u <= win1; i += 2) {
 				/* 呼び出し側は死んだ move.l ではなく 3-nop 本体（C10FEE）へ bsr */
@@ -921,16 +947,18 @@ int CHardF3::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode
 				0x2a, 0x38, 0xd0, 0xe8, 0x6f, 0x00, 0x00, 0x74
 			};
 			static const uint8_t kLoadD0e8[4] = { 0x2a, 0x38, 0xd0, 0xe8 };
-			for (unsigned i = nop0; i + 8u <= nop1 && i + 8u <= win1; i += 2) {
-				if (memcmp(audioCpu_ + i, kLoadD0e8Ble, 8) == 0) {
-					memset(audioCpu_ + i, 0x4e, 8);
-					audioCpu_[i + 1] = audioCpu_[i + 3] = audioCpu_[i + 5] = audioCpu_[i + 7] = 0x71;
+			if (!gunOs) {
+				for (unsigned i = nop0; i + 8u <= nop1 && i + 8u <= win1; i += 2) {
+					if (memcmp(audioCpu_ + i, kLoadD0e8Ble, 8) == 0) {
+						memset(audioCpu_ + i, 0x4e, 8);
+						audioCpu_[i + 1] = audioCpu_[i + 3] = audioCpu_[i + 5] = audioCpu_[i + 7] = 0x71;
+					}
 				}
-			}
-			for (unsigned i = nop0; i + 4u <= nop1 && i + 4u <= win1; i += 2) {
-				if (memcmp(audioCpu_ + i, kLoadD0e8, 4) == 0) {
-					audioCpu_[i] = 0x4e; audioCpu_[i + 1] = 0x71;
-					audioCpu_[i + 2] = 0x4e; audioCpu_[i + 3] = 0x71;
+				for (unsigned i = nop0; i + 4u <= nop1 && i + 4u <= win1; i += 2) {
+					if (memcmp(audioCpu_ + i, kLoadD0e8, 4) == 0) {
+						audioCpu_[i] = 0x4e; audioCpu_[i + 1] = 0x71;
+						audioCpu_[i + 2] = 0x4e; audioCpu_[i + 3] = 0x71;
+					}
 				}
 			}
 			for (unsigned i = nop0; i + 6u <= nop1 && i + 6u <= win1; i += 2) {
@@ -968,8 +996,8 @@ int CHardF3::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode
 					break;
 				}
 			}
-			/* Type $E: C13306(D098+$E) は C1100B（奇数）を返す。jsr (a0) は C146AE へ落ちて戻らない。C1490A は実証済みシーケンサ（遅延トランポリン）。bsr C13306 / jsr (a0) を置換 — 6 バイト。 */
-			if (playOff) {
+			/* Type $E: C13306(D098+$E) は C1100B（奇数）を返す。jsr (a0) は C146AE へ落ちて戻らない。C1490A は実証済みシーケンサ（遅延トランポリン）。bsr C13306 / jsr (a0) を置換 — 6 バイト。gunlock OS は playOff が RAM を 2600 で潰すので触らない。 */
+			if (playOff && !gunOs) {
 				const unsigned playCpu = 0xC00000u + (playOff - win0);
 				for (unsigned i = mb0; i + 6u <= mb1 && i + 6u <= win1; i += 2) {
 					if (audioCpu_[i] == 0x61 && audioCpu_[i + 1] == 0x00
@@ -984,22 +1012,23 @@ int CHardF3::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode
 					}
 				}
 			}
-			/* C14884→C149E4 はメールボックス 4(a5) を D4A6 へコピーして trap#4。Type $E はそこに d3（多くは 0）を格納するので C14A10 が ~0 を引く。12s で約 138 tick では量子 1 の 0x2100 待ちを食えない。0x40 を使い最初の待ちを期限切れに。trap#4 は NOP しない。 */
-			{
-				const unsigned q0 = win0 + 0x149E0u;
-				const unsigned q1 = win0 + 0x14A10u;
+			/* C14884→C149E4 はメールボックス 4(a5) を D4A6 へ。tickOff 直前をファーム共通で探す。gunlock は D4A6 を立てると tickOff が 2600 smash。 */
+			if (tickOff >= win0 + 0x80u && !gunOs) {
+				const unsigned q0 = tickOff - 0x80u;
+				const unsigned q1 = tickOff;
 				for (unsigned i = q0; i + 8u <= q1 && i + 8u <= win1; i += 2) {
 					if (audioCpu_[i] == 0x30 && audioCpu_[i + 1] == 0x2d
 						&& audioCpu_[i + 2] == 0x00 && audioCpu_[i + 3] == 0x04
-						&& audioCpu_[i + 4] == 0x31 && audioCpu_[i + 5] == 0xc0) {
+						&& audioCpu_[i + 4] == 0x31 && audioCpu_[i + 5] == 0xc0
+						&& audioCpu_[i + 6] == 0xd4 && audioCpu_[i + 7] == 0xa6) {
 						audioCpu_[i] = 0x30; audioCpu_[i + 1] = 0x3c;
 						audioCpu_[i + 2] = 0x00; audioCpu_[i + 3] = 0x01;
 						break;
 					}
 				}
 			}
-			/* Type 1 で 4(a5)<0 は曲 0..$62 に bsr C12B8C をループ（全停止）して RTS。その経路は arabianm 0x21 の D0F4 を殺す。bsr だけ NOP。再生経路へ bra しない（C12E08 6A→60 はブートを壊した）。 */
-			{
+			/* Type 1 で 4(a5)<0 は曲 0..$62 に bsr C12B8C をループ（全停止）して RTS。その経路は arabianm 0x21 の D0F4 を殺す。bsr だけ NOP。再生経路へ bra しない（C12E08 6A→60 はブートを壊した）。gunlock OS はアドレスがずれるので触らない。 */
+			if (!gunOs) {
 				const unsigned p0 = win0 + 0x12E00u;
 				const unsigned p1 = win0 + 0x12E20u;
 				for (unsigned i = p0; i + 8u <= p1 && i + 8u <= win1; i += 2) {
@@ -1020,6 +1049,17 @@ int CHardF3::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode
 					audioCpu_[i + 2] = 0x46; audioCpu_[i + 3] = 0xfc;
 					audioCpu_[i + 4] = 0x27; audioCpu_[i + 5] = 0x00;
 					audioCpu_[i + 6] = 0x4e; audioCpu_[i + 7] = 0x71;
+				}
+			}
+			if (gunOs) {
+				/* C152B0: cmpi.w #stamp,$d09a / bne skip。変位は 6630 とは限らない。 */
+				for (unsigned i = win0 + 0x13600u; i + 8u <= win0 + 0x15400u && i + 8u <= win1; i += 2) {
+					if (audioCpu_[i] == 0x0c && audioCpu_[i + 1] == 0x78
+						&& audioCpu_[i + 4] == 0xd0 && audioCpu_[i + 5] == 0x9a
+						&& audioCpu_[i + 6] == 0x66) {
+						audioCpu_[i + 6] = 0x4e;
+						audioCpu_[i + 7] = 0x71;
+					}
 				}
 			}
 			if (tickOff + 0x80u <= win1) {
@@ -1046,19 +1086,31 @@ int CHardF3::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode
 		}
 		if (delayOff && tickOff && holeOff) {
 			const unsigned holeCpu = 0xC00000u + (holeOff - win0);
-			const unsigned callOff = playOff ? playOff : tickOff;
-			const unsigned callCpu = 0xC00000u + (callOff - win0);
 			const unsigned backCpu = 0xC00000u + (delayOff - win0) + 6u; /* subq 命令 */
 			uint8_t tr[36];
+			memset(tr, 0x4e, sizeof(tr));
 			tr[0] = 0x4a; tr[1] = 0x78; tr[2] = 0xd4; tr[3] = 0xa6;
 			tr[4] = 0x67; tr[5] = 0x12;
 			tr[6] = 0x2f; tr[7] = 0x0e;
-			tr[8] = 0x3c; tr[9] = 0x78; tr[10] = 0xd0; tr[11] = 0xf4;
-			tr[12] = 0x4e; tr[13] = 0xb9;
-			tr[14] = (uint8_t)(callCpu >> 24); tr[15] = (uint8_t)(callCpu >> 16);
-			tr[16] = (uint8_t)(callCpu >> 8); tr[17] = (uint8_t)callCpu;
-			tr[18] = 0x2c; tr[19] = 0x5f;
-			tr[20] = 0x42; tr[21] = 0x78; tr[22] = 0xd4; tr[23] = 0xa6;
+			if (gunOs) {
+				const unsigned callOff = playOff ? playOff : tickOff;
+				const unsigned callCpu = 0xC00000u + (callOff - win0);
+				tr[8] = 0x3c; tr[9] = 0x78; tr[10] = 0xd0; tr[11] = 0xf4;
+				tr[12] = 0x4e; tr[13] = 0xb9;
+				tr[14] = (uint8_t)(callCpu >> 24); tr[15] = (uint8_t)(callCpu >> 16);
+				tr[16] = (uint8_t)(callCpu >> 8); tr[17] = (uint8_t)callCpu;
+				tr[18] = 0x2c; tr[19] = 0x5f;
+				tr[20] = 0x42; tr[21] = 0x78; tr[22] = 0xd4; tr[23] = 0xa6;
+			} else {
+				const unsigned callOff = playOff ? playOff : tickOff;
+				const unsigned callCpu = 0xC00000u + (callOff - win0);
+				tr[8] = 0x3c; tr[9] = 0x78; tr[10] = 0xd0; tr[11] = 0xf4;
+				tr[12] = 0x4e; tr[13] = 0xb9;
+				tr[14] = (uint8_t)(callCpu >> 24); tr[15] = (uint8_t)(callCpu >> 16);
+				tr[16] = (uint8_t)(callCpu >> 8); tr[17] = (uint8_t)callCpu;
+				tr[18] = 0x2c; tr[19] = 0x5f;
+				tr[20] = 0x42; tr[21] = 0x78; tr[22] = 0xd4; tr[23] = 0xa6;
+			}
 			tr[24] = 0x4e; tr[25] = 0xf9;
 			tr[26] = (uint8_t)(backCpu >> 24); tr[27] = (uint8_t)(backCpu >> 16);
 			tr[28] = (uint8_t)(backCpu >> 8); tr[29] = (uint8_t)backCpu;
@@ -1069,15 +1121,17 @@ int CHardF3::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode
 			audioCpu_[delayOff + 3] = (uint8_t)(holeCpu >> 16);
 			audioCpu_[delayOff + 4] = (uint8_t)(holeCpu >> 8);
 			audioCpu_[delayOff + 5] = (uint8_t)holeCpu;
-			/* C10CE0: movea.w #0,a7 / jsr C17A80 は致命リセットで STOP テンプレートを全 OTIS ボイスへコピー。ブートは C1090A/C109CC を使う。この遅い jsr だけ nop。 */
-			for (unsigned i = win0 + 0x10C00u; i + 6u <= win0 + 0x10D80u && i + 6u <= win1; i += 2) {
-				if (audioCpu_[i] == 0x4e && audioCpu_[i + 1] == 0xb9
-					&& audioCpu_[i + 2] == 0x00 && audioCpu_[i + 3] == 0xc1
-					&& audioCpu_[i + 4] == 0x7a && audioCpu_[i + 5] == 0x80) {
-					audioCpu_[i] = 0x4e; audioCpu_[i + 1] = 0x71;
-					audioCpu_[i + 2] = 0x4e; audioCpu_[i + 3] = 0x71;
-					audioCpu_[i + 4] = 0x4e; audioCpu_[i + 5] = 0x71;
-					break;
+			/* C10CE0: movea.w #0,a7 / jsr C17A80 は致命リセットで STOP テンプレートを全 OTIS ボイスへコピー。ブートは C1090A/C109CC を使う。この遅い jsr だけ nop。gunlock OS はアドレスがずれる。 */
+			if (!gunOs) {
+				for (unsigned i = win0 + 0x10C00u; i + 6u <= win0 + 0x10D80u && i + 6u <= win1; i += 2) {
+					if (audioCpu_[i] == 0x4e && audioCpu_[i + 1] == 0xb9
+						&& audioCpu_[i + 2] == 0x00 && audioCpu_[i + 3] == 0xc1
+						&& audioCpu_[i + 4] == 0x7a && audioCpu_[i + 5] == 0x80) {
+						audioCpu_[i] = 0x4e; audioCpu_[i + 1] = 0x71;
+						audioCpu_[i + 2] = 0x4e; audioCpu_[i + 3] = 0x71;
+						audioCpu_[i + 4] = 0x4e; audioCpu_[i + 5] = 0x71;
+						break;
+					}
 				}
 			}
 		}

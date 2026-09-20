@@ -345,6 +345,382 @@ static CCriticalSection s_playNotifyThreadCs;
 DWORD g_playbackNotifyJoinTimeoutMs = 2500;
 volatile LONG g_interactiveTrackChange = 0;
 
+/* -------------------------------------------------------------------------
+ * HandleFillNotifications
+ *   HandleNotifications が担っていた「デコード / CEmu Render」を別スレッドへ。
+ *   DS 待ち(WaitForMultipleObjects)の裏で次チャンクを積み、通知スレッドは
+ *   ステージ済み PCM を Lock するだけにする。
+ *   playwav* / CEmuSessionRender はすべてこの fill スレッドから呼ぶ
+ *   （KPI 2SF の JIT はスレッドを跨ぐと落ちるので、途中で HN 側へ戻さない）。
+ * ------------------------------------------------------------------------- */
+enum { kFillBlkMax = 8 };
+enum { kFillBlkCap = 64 * 1024 };
+static BYTE s_fillBlk[kFillBlkMax][kFillBlkCap];
+static int s_fillBlkBytes[kFillBlkMax];
+static int s_fillBlkReadme[kFillBlkMax]; /* 0=終端なし。>0 ならこの塊の有効 PCM バイト */
+static int s_fillHead = 0, s_fillTail = 0, s_fillN = 0;
+static int s_fillOff = 0; /* 先頭ブロックの消費オフセット */
+static std::mutex s_fillCs;
+static HANDLE s_fillWake = NULL;    /* 空きができた / 停止 */
+static HANDLE s_fillHasData = NULL; /* 1 塊積んだ */
+static LONG s_fillStop = 0;
+static LONG s_fillEpoch = 0;        /* シークで捨てる世代 */
+static LONG s_fillExitReq = 0;
+static CWinThread* s_fillThread = nullptr;
+
+static void HandleFillWakeAll()
+{
+	if (s_fillWake)
+		SetEvent(s_fillWake);
+	if (s_fillHasData)
+		SetEvent(s_fillHasData);
+}
+
+static void HandleFillQueueResetLocked()
+{
+	s_fillN = 0;
+	s_fillHead = 0;
+	s_fillTail = 0;
+	s_fillOff = 0;
+}
+
+static void HandleFillFlush()
+{
+	InterlockedIncrement(&s_fillEpoch);
+	{
+		std::lock_guard<std::mutex> lk(s_fillCs);
+		HandleFillQueueResetLocked();
+	}
+	HandleFillWakeAll();
+}
+
+static int HandleFillQueuedBytes()
+{
+	std::lock_guard<std::mutex> lk(s_fillCs);
+	int n = 0;
+	if (s_fillN <= 0)
+		return 0;
+	n = s_fillBlkBytes[s_fillHead] - s_fillOff;
+	for (int i = 1; i < s_fillN; ++i) {
+		const int idx = (s_fillHead + i) % kFillBlkMax;
+		n += s_fillBlkBytes[idx];
+	}
+	return n;
+}
+
+/* 1 塊のデコード。cl2 保持中に呼ぶ。dest は線形（旧 bufwav3 ラップをやめる）。 */
+static int HandleFillDecodeOne(BYTE* dest, int n, int* pReadme, bool* pExitNow)
+{
+	if (pReadme)
+		*pReadme = 0;
+	if (pExitNow)
+		*pExitNow = false;
+	if (!dest || n <= 0)
+		return 0;
+
+	static int s_fade2 = 0;
+
+	if (thn1) {
+		if (pExitNow)
+			*pExitNow = true;
+		return 0;
+	}
+
+	sflg = TRUE;
+	/* 混合開始はこのサイクル境界で行う。UI タイマ経由にすると
+	 * ジャケ読み込み等で UI が詰まった分だけ開始が遅れ、その遅れ量が
+	 * そのままクロス末尾と B の頭のずれになる。 */
+	if (!InterlockedCompareExchange(&g_xfInProgress, 0, 0)
+		&& InterlockedCompareExchange(&g_xfPrepared, 0, 0)
+		&& XfShouldStartEarly(g_heardBytes, g_endWrittenBytes)) {
+		const int cur = XfActiveSlot();
+		if (g_openDecoderModeSlot[XfOtherSlot(cur)] != INT_MIN)
+			XfBeginMixLocked(cur);
+	}
+	if (m_dsb) {
+		if (InterlockedCompareExchange(&g_xfInProgress, 0, 0)) {
+			const int aSlot = XfActiveSlot();
+			const int bSlot = (int)InterlockedCompareExchange(&g_xfSecSlot, 0, 0);
+			const int total = n;
+			static BYTE s_xfA[512 * 1024];
+			static BYTE s_xfB[512 * 1024];
+			static BYTE s_xfMix[512 * 1024];
+			const int cap = (int)sizeof(s_xfA);
+			const int nn = (total > cap) ? cap : total;
+			ZeroMemory(s_xfA, nn);
+			ZeroMemory(s_xfB, nn);
+			ZeroMemory(s_xfMix, nn);
+			extern int g_pcm_upscale_active;
+			/* A: スロット配列→作業用にロードしてからデコード */
+			InterlockedExchange(&g_xfFillSlot, aSlot);
+			XfLoadSlotDecodeState(aSlot);
+			XfApplySlotFormatToGlobals(aSlot);
+			g_pcm_upscale_active = g_audioUpscalerArr[aSlot].IsActive() ? 1 : 0;
+			DispatchPlaywavFill(s_xfA, 0, nn, 0);
+			XfSaveSlotDecodeState(aSlot);
+			XfCaptureGlobalsToSlot(aSlot);
+			/* B */
+			InterlockedExchange(&g_xfFillSlot, bSlot);
+			XfLoadSlotDecodeState(bSlot);
+			XfApplySlotFormatToGlobals(bSlot);
+			g_pcm_upscale_active = g_audioUpscalerArr[bSlot].IsActive() ? 1 : 0;
+			DispatchPlaywavFill(s_xfB, 0, nn, 0);
+			XfSaveSlotDecodeState(bSlot);
+			XfCaptureGlobalsToSlot(bSlot);
+			/* 作業用を本流 A に戻す */
+			InterlockedExchange(&g_xfFillSlot, -1);
+			XfLoadSlotDecodeState(aSlot);
+			XfApplySlotFormatToGlobals(aSlot);
+			g_pcm_upscale_active = g_audioUpscalerArr[aSlot].IsActive() ? 1 : 0;
+			const int bits = (g_ds_pcm_bits >= 8) ? g_ds_pcm_bits : 16;
+			const int ch = (g_ds_pcm_ch >= 1) ? g_ds_pcm_ch : 2;
+			const int bpfMix = (bits / 8) * ch;
+			int nMix = nn;
+			if (bpfMix > 1)
+				nMix -= (nMix % bpfMix);
+			if (nMix > 0)
+				XfMixEqualPower(s_xfMix, s_xfA, s_xfB, nMix, bits, ch);
+			/* 端数は A を残す（未初期化/無音クリック防止） */
+			if (nMix < nn)
+				memcpy(s_xfMix + nMix, s_xfA + nMix, (size_t)(nn - nMix));
+			memcpy(dest, s_xfMix, (size_t)nn);
+			if (nn < n)
+				ZeroMemory(dest + nn, (size_t)(n - nn));
+			if (g_xfFadePos >= g_xfFadeTotalFrames)
+				XfOnCrossfadeFinished();
+		}
+		else {
+			/* CEmu / KPI / 通常デコード。線形なので old=0, l2=0。 */
+			DispatchPlaywavFill(dest, 0, n, 0);
+		}
+	}
+	else {
+		ZeroMemory(dest, (size_t)n);
+	}
+
+	const int readmeThis = readme;
+	if (pReadme)
+		*pReadme = readmeThis;
+	/* 線形チャンクの余りを無音にする（旧ラップ式 ZeroMemory の置き）。 */
+	if (readmeThis > 0 && readmeThis < n
+		&& !InterlockedCompareExchange(&g_xfInProgress, 0, 0))
+		ZeroMemory(dest + readmeThis, (size_t)(n - readmeThis));
+
+	if (thn1) {
+		if (pExitNow)
+			*pExitNow = true;
+		sflg = FALSE;
+		return 0;
+	}
+
+	readme = 0;
+	s_fade2 = fade1;
+	if (flg3 != 0)
+		flg3--;
+	sflg = FALSE;
+	return n;
+}
+
+static int HandleFillChunkBytes()
+{
+	int bpf = (g_outBytesPerFrame > 0) ? g_outBytesPerFrame : 4;
+	if (bpf < 1)
+		bpf = 4;
+	int hz = (wavbit_sample_Hz > 0) ? wavbit_sample_Hz : 44100;
+	int ms = (savedata.ms > 0) ? (int)savedata.ms : 10;
+	int n = (hz / 1000) * ms * bpf;
+	if (n < bpf * 64)
+		n = bpf * 64;
+	if (n > kFillBlkCap)
+		n = kFillBlkCap;
+	n -= n % bpf;
+	if (n < bpf)
+		n = bpf;
+	return n;
+}
+
+UINT HandleFillNotifications(LPVOID)
+{
+	BYTE tmp[kFillBlkCap];
+	for (;;) {
+		if (InterlockedCompareExchange(&s_fillStop, 0, 0)
+			|| thn1 || syukai == 2)
+			break;
+		if (sek || sek4 || ps == 1) {
+			WaitForSingleObject(s_fillWake, 8);
+			continue;
+		}
+		const int chunk = HandleFillChunkBytes();
+		int queued = HandleFillQueuedBytes();
+		/* 先読みは 3 塊まで。DS 待ちの裏に乗る分だけで、シーク捨て量を抑える。 */
+		if (queued >= chunk * 3 || s_fillN >= kFillBlkMax - 1) {
+			WaitForSingleObject(s_fillWake, 8);
+			continue;
+		}
+
+		const LONG epoch = InterlockedCompareExchange(&s_fillEpoch, 0, 0);
+		int readmeBlk = 0;
+		bool exitNow = false;
+		int got = 0;
+		{
+			std::lock_guard<std::mutex> guard(cl2);
+			got = HandleFillDecodeOne(tmp, chunk, &readmeBlk, &exitNow);
+		}
+		if (exitNow) {
+			InterlockedExchange(&s_fillExitReq, 1);
+			HandleFillWakeAll();
+			break;
+		}
+		if (got <= 0) {
+			WaitForSingleObject(s_fillWake, 4);
+			continue;
+		}
+		if (InterlockedCompareExchange(&s_fillEpoch, 0, 0) != epoch) {
+			/* シーク中にデコードした塊は捨てる */
+			continue;
+		}
+
+		{
+			std::lock_guard<std::mutex> lk(s_fillCs);
+			if (s_fillN >= kFillBlkMax) {
+				/* 満杯。次周回で待つ */
+			}
+			else {
+				const int idx = s_fillTail;
+				if (got > kFillBlkCap)
+					got = kFillBlkCap;
+				memcpy(s_fillBlk[idx], tmp, (size_t)got);
+				s_fillBlkBytes[idx] = got;
+				s_fillBlkReadme[idx] = readmeBlk;
+				s_fillTail = (s_fillTail + 1) % kFillBlkMax;
+				s_fillN++;
+			}
+		}
+		if (s_fillHasData)
+			SetEvent(s_fillHasData);
+	}
+	return 0;
+}
+
+static int HandleFillTake(BYTE* dest, int need, int* pReadme, bool* pExitNow)
+{
+	if (pReadme)
+		*pReadme = 0;
+	if (pExitNow)
+		*pExitNow = false;
+	if (!dest || need <= 0)
+		return 0;
+
+	int copied = 0;
+	int readmeOut = 0;
+	const DWORD t0 = GetTickCount();
+	while (copied < need) {
+		if (thn1 || sek || InterlockedCompareExchange(&s_fillStop, 0, 0))
+			break;
+		if (InterlockedCompareExchange(&s_fillExitReq, 0, 0)) {
+			if (pExitNow)
+				*pExitNow = true;
+			break;
+		}
+		int take = 0;
+		{
+			std::lock_guard<std::mutex> lk(s_fillCs);
+			if (s_fillN > 0) {
+				const int idx = s_fillHead;
+				const int avail = s_fillBlkBytes[idx] - s_fillOff;
+				take = avail;
+				if (take > need - copied)
+					take = need - copied;
+				if (take > 0) {
+					memcpy(dest + copied, s_fillBlk[idx] + s_fillOff, (size_t)take);
+					/* この塊に終端が乗っていて、今回その境界を跨いだら readme を合成する */
+					const int rm = s_fillBlkReadme[idx];
+					if (rm > 0 && readmeOut == 0) {
+						if (s_fillOff < rm && s_fillOff + take >= rm)
+							readmeOut = copied + (rm - s_fillOff);
+						else if (s_fillOff >= rm)
+							;
+						else if (s_fillOff + take <= rm && copied + take == need)
+							readmeOut = 0; /* まだ終端の前 */
+					}
+					s_fillOff += take;
+					copied += take;
+					if (s_fillOff >= s_fillBlkBytes[idx]) {
+						s_fillOff = 0;
+						s_fillHead = (s_fillHead + 1) % kFillBlkMax;
+						s_fillN--;
+					}
+				}
+			}
+		}
+		if (take > 0) {
+			if (s_fillWake)
+				SetEvent(s_fillWake);
+			continue;
+		}
+		if ((DWORD)(GetTickCount() - t0) > 5000u)
+			break;
+		WaitForSingleObject(s_fillHasData, 10);
+	}
+	if (pReadme)
+		*pReadme = readmeOut;
+	return copied;
+}
+
+static int HandleFillIsRunning()
+{
+	return (s_fillThread != nullptr) ? 1 : 0;
+}
+
+static void HandleFillStop()
+{
+	InterlockedExchange(&s_fillStop, 1);
+	HandleFillWakeAll();
+	if (s_fillThread) {
+		if (s_fillThread->m_hThread)
+			::WaitForSingleObject(s_fillThread->m_hThread, 5000);
+		delete s_fillThread;
+		s_fillThread = nullptr;
+	}
+	{
+		std::lock_guard<std::mutex> lk(s_fillCs);
+		HandleFillQueueResetLocked();
+	}
+	if (s_fillWake) {
+		CloseHandle(s_fillWake);
+		s_fillWake = NULL;
+	}
+	if (s_fillHasData) {
+		CloseHandle(s_fillHasData);
+		s_fillHasData = NULL;
+	}
+}
+
+static void HandleFillStart()
+{
+	HandleFillStop();
+	InterlockedExchange(&s_fillStop, 0);
+	InterlockedExchange(&s_fillExitReq, 0);
+	InterlockedExchange(&s_fillEpoch, 1);
+	s_fillWake = CreateEvent(NULL, FALSE, FALSE, NULL);
+	s_fillHasData = CreateEvent(NULL, FALSE, FALSE, NULL);
+	if (!s_fillWake || !s_fillHasData) {
+		HandleFillStop();
+		return;
+	}
+	/* DeSmuME / CEmu 系はスタックを大きく予約する（HN と同じ）。 */
+	CWinThread* t = AfxBeginThread((AFX_THREADPROC)HandleFillNotifications, NULL,
+		THREAD_PRIORITY_TIME_CRITICAL, 64 * 1024 * 1024,
+		CREATE_SUSPENDED | STACK_SIZE_PARAM_IS_A_RESERVATION);
+	if (!t) {
+		HandleFillStop();
+		return;
+	}
+	t->m_bAutoDelete = FALSE;
+	s_fillThread = t;
+	t->ResumeThread();
+}
+
 void SignalPlaybackNotifyThreadStop()
 {
 	thn1 = TRUE;
@@ -356,6 +732,7 @@ void SignalPlaybackNotifyThreadStop()
 	// 再生スレッドは syukai2 を立てずに終了するため、ここで必ず解放する。
 	syukai2 = 1;
 	InterlockedExchange(&g_dsDeviceOpBusy, 0);
+	HandleFillWakeAll();
 	if (og)
 		og->timer.SetEvent();
 }
@@ -441,6 +818,7 @@ BOOL WaitForPlaybackNotifyThreadExit(DWORD timeoutMs)
 
 void KillPlaybackNotifyThread()
 {
+	HandleFillStop();
 	CSingleLock lk(&s_playNotifyThreadCs, TRUE);
 	if (s_playNotifyThread && s_playNotifyThread->m_hThread) {
 		TerminateThread(s_playNotifyThread->m_hThread, 0);
@@ -540,6 +918,12 @@ UINT HandleNotifications(LPVOID)
 	fade1 = 0;
 	sek4 = FALSE;
 
+	/* DS 待ちの裏で CEmu/KPI を回す。失敗時は従来どおり HN 内デコード。 */
+	HandleFillStart();
+	struct FillGuard {
+		~FillGuard() { HandleFillStop(); }
+	} fillGuard;
+
 	auto stopPlaybackAndExit = [&]() -> UINT {
 		playf = 1;
 		thn = FALSE;
@@ -576,6 +960,7 @@ UINT HandleNotifications(LPVOID)
 		}
 
 		if (sek == 1) {
+			HandleFillFlush();
 			sflg = TRUE; flg3 = 3; sek = FALSE; sflg = FALSE;
 			// シーク直後は書き込み位置を再調整する必要があるため continue
 			continue;
@@ -654,125 +1039,64 @@ UINT HandleNotifications(LPVOID)
 		const int writtenThisCycle = len1 + len2;
 		bool exitAfterCl2 = false;
 
-		{
-			std::lock_guard<std::mutex> guard(cl2);
-
-			if (og->m_dou.GetCheck() == 1 && pGraphBuilder && pMediaControl) {
-				if (timeee > 900 && dougainit == 0) {
-					pMediaControl->Run();
-					dougainit = 1;
-				}
+		/* 動画 Run は DirectShow 側。fill スレッドへ移さない（COM アパート）。 */
+		if (og && og->m_dou.GetCheck() == 1 && pGraphBuilder && pMediaControl) {
+			if (timeee > 900 && dougainit == 0) {
+				pMediaControl->Run();
+				dougainit = 1;
 			}
-			timeee += savedata.ms;
+		}
+		timeee += savedata.ms;
 
+		stageBytes = writtenThisCycle;
+		if (stageBytes > 0 && (int)s_dsStage.size() < stageBytes)
+			s_dsStage.resize((size_t)stageBytes);
+
+		if (HandleFillIsRunning()) {
+			/* デコードは Fill 側。ここは DS 空きに合わせて取り出すだけ。 */
+			bool fillExit = false;
+			int got = HandleFillTake(s_dsStage.data(), stageBytes, &readmeThisCycle, &fillExit);
+			if (sek == 1) {
+				HandleFillFlush();
+				sflg = TRUE; flg3 = 3; sek = FALSE; sflg = FALSE;
+				continue;
+			}
+			if (fillExit || thn1)
+				return stopPlaybackAndExit();
+			if (got < stageBytes && stageBytes > 0)
+				ZeroMemory(s_dsStage.data() + got, (size_t)(stageBytes - got));
+			stageFade = (!InterlockedCompareExchange(&g_xfInProgress, 0, 0)
+				&& drainSilence) ? true : false;
+		}
+		else {
+			std::lock_guard<std::mutex> guard(cl2);
 			if (thn1) {
 				exitAfterCl2 = true;
 			}
 			else {
-				sflg = TRUE;
-				/* 混合開始はこのサイクル境界で行う。UI タイマ経由にすると
-				 * ジャケ読み込み等で UI が詰まった分だけ開始が遅れ、その遅れ量が
-				 * そのままクロス末尾と B の頭のずれになる。 */
-				if (!InterlockedCompareExchange(&g_xfInProgress, 0, 0)
-					&& InterlockedCompareExchange(&g_xfPrepared, 0, 0)
-					&& XfShouldStartEarly(g_heardBytes, g_endWrittenBytes)) {
-					const int cur = XfActiveSlot();
-					if (g_openDecoderModeSlot[XfOtherSlot(cur)] != INT_MIN)
-						XfBeginMixLocked(cur);
-				}
-				if (m_dsb) {
-					if (InterlockedCompareExchange(&g_xfInProgress, 0, 0)) {
-						const int aSlot = XfActiveSlot();
-						const int bSlot = (int)InterlockedCompareExchange(&g_xfSecSlot, 0, 0);
-						const int total = len1 + len2;
-						static BYTE s_xfA[512 * 1024];
-						static BYTE s_xfB[512 * 1024];
-						static BYTE s_xfMix[512 * 1024];
-						const int cap = (int)sizeof(s_xfA);
-						const int n = (total > cap) ? cap : total;
-						ZeroMemory(s_xfA, n);
-						ZeroMemory(s_xfB, n);
-						ZeroMemory(s_xfMix, n);
-						extern int g_pcm_upscale_active;
-						/* A: スロット配列→作業用にロードしてからデコード */
-						InterlockedExchange(&g_xfFillSlot, aSlot);
-						XfLoadSlotDecodeState(aSlot);
-						XfApplySlotFormatToGlobals(aSlot);
-						g_pcm_upscale_active = g_audioUpscalerArr[aSlot].IsActive() ? 1 : 0;
-						DispatchPlaywavFill(s_xfA, 0, n, 0);
-						XfSaveSlotDecodeState(aSlot);
-						XfCaptureGlobalsToSlot(aSlot);
-						/* B */
-						InterlockedExchange(&g_xfFillSlot, bSlot);
-						XfLoadSlotDecodeState(bSlot);
-						XfApplySlotFormatToGlobals(bSlot);
-						g_pcm_upscale_active = g_audioUpscalerArr[bSlot].IsActive() ? 1 : 0;
-						DispatchPlaywavFill(s_xfB, 0, n, 0);
-						XfSaveSlotDecodeState(bSlot);
-						XfCaptureGlobalsToSlot(bSlot);
-						/* 作業用を本流 A に戻す */
-						InterlockedExchange(&g_xfFillSlot, -1);
-						XfLoadSlotDecodeState(aSlot);
-						XfApplySlotFormatToGlobals(aSlot);
-						g_pcm_upscale_active = g_audioUpscalerArr[aSlot].IsActive() ? 1 : 0;
-						const int bits = (g_ds_pcm_bits >= 8) ? g_ds_pcm_bits : 16;
-						const int ch = (g_ds_pcm_ch >= 1) ? g_ds_pcm_ch : 2;
-						const int bpfMix = (bits / 8) * ch;
-						int nMix = n;
-						if (bpfMix > 1)
-							nMix -= (nMix % bpfMix);
-						if (nMix > 0)
-							XfMixEqualPower(s_xfMix, s_xfA, s_xfB, nMix, bits, ch);
-						/* 端数は A を残す（未初期化/無音クリック防止） */
-						if (nMix < n)
-							memcpy(s_xfMix + nMix, s_xfA + nMix, (size_t)(n - nMix));
-						if (len1 > 0)
-							memcpy(bufwav3 + oldw, s_xfMix, (size_t)((len1 < n) ? len1 : n));
-						if (len2 > 0 && len1 < n)
-							memcpy(bufwav3, s_xfMix + len1, (size_t)((len2 < n - len1) ? len2 : (n - len1)));
-						if (g_xfFadePos >= g_xfFadeTotalFrames)
-							XfOnCrossfadeFinished();
-					}
-					else {
-						DispatchPlaywavFill(bufwav3, oldw, len1, len2);
-					}
-				}
-				// 曲最後まで行ったとき
-				readmeThisCycle = readme; // 終端確定に使うため reset 前に退避
-				if (readme && !InterlockedCompareExchange(&g_xfInProgress, 0, 0)) {
-					if (len1 > readme)
-						ZeroMemory(bufwav3 + readme, len2);
-					else
-						ZeroMemory(bufwav3 + oldw + readme, len1 - readme);
-				}
-				if (thn1) {
+				bool decExit = false;
+				HandleFillDecodeOne(s_dsStage.data(), stageBytes, &readmeThisCycle, &decExit);
+				if (decExit)
 					exitAfterCl2 = true;
-					sflg = FALSE;
-				}
 				else {
-					// fade1 直後は KPI/RB/リング排水中。fade2 だけで無音化すると末尾約1秒が消える。
-					// 終端バイト確定後のオーバーランだけ無音で埋める。
 					stageFade = (!InterlockedCompareExchange(&g_xfInProgress, 0, 0)
 						&& drainSilence) ? true : false;
-					stageBytes = writtenThisCycle;
-					if (stageBytes > 0) {
-						if ((int)s_dsStage.size() < stageBytes)
-							s_dsStage.resize((size_t)stageBytes);
-						if (len1 > 0)
-							memcpy(s_dsStage.data(), bufwav3 + oldw, (size_t)len1);
-						if (len2 > 0)
-							memcpy(s_dsStage.data() + len1, bufwav3, (size_t)len2);
-					}
-
-					readme = 0;
 					fade2 = fade1;
-					if (flg3 != 0) flg3--;
-					sflg = FALSE;
 				}
 			}
 		} // guard(cl2) — Lock 前に必ず解放
 		if (exitAfterCl2)
 			return stopPlaybackAndExit();
+
+		/* Speana / アナライザ / ピアノロール / EQコードは bufwav3 を
+		   DS リングの鏡として PlayCursor から読む。Fill は線形ステージなので、
+		   Lock 前に従来どおりラップして戻す。ここが空だと棒もコードも止まる。 */
+		if (stageBytes > 0 && (int)s_dsStage.size() >= stageBytes) {
+			if (len1 > 0)
+				memcpy(bufwav3 + oldw, s_dsStage.data(), (size_t)len1);
+			if (len2 > 0)
+				memcpy(bufwav3, s_dsStage.data() + len1, (size_t)len2);
+		}
 
 		// DirectSound 転送（cl2 外。UI 側 Closeds で m_dsb が NULL でもローカル参照で安全）
 		dsb = m_dsb;

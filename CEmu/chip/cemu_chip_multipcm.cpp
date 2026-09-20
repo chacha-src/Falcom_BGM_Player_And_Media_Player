@@ -96,6 +96,12 @@ public:
 		const UINT32 off = (UINT32)(bankMb & 3u) * 0x100000u;
 		multipcm_set_bank(chipId_, off, off);
 	}
+	void SetBankPair(unsigned lo512, unsigned hi512)
+	{
+		const UINT32 lo = (UINT32)(lo512 & 7u) * 0x80000u;
+		const UINT32 hi = (UINT32)(hi512 & 7u) * 0x80000u;
+		multipcm_set_bank(chipId_, lo, hi);
+	}
 	bool Irq() const override { return false; }
 	void AckIrq() override {}
 	uint8_t ReadStatus() override { return multipcm_r(chipId_, 0); }
@@ -130,4 +136,9 @@ void CEmuChipMultiPcmSetBank(CChip* c, unsigned bankMb)
 {
 	if (!c) return;
 	static_cast<CChipMultiPcm*>(c)->SetBank(bankMb);
+}
+void CEmuChipMultiPcmSetBankPair(CChip* c, unsigned lo512, unsigned hi512)
+{
+	if (!c) return;
+	static_cast<CChipMultiPcm*>(c)->SetBankPair(lo512, hi512);
 }

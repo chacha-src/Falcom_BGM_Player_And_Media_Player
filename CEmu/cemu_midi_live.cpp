@@ -566,11 +566,10 @@ static void LivePostponeHoldsToNotes(void)
 static void LiveHoldNoteTimed(DWORD msg, int isOn)
 {
 	LiveAdvanceMidiClock();
-	__int64 due = g_live.midiSample;
-	const __int64 gate = LiveNoteGate();
-	if (due < gate)
-		due = gate;
-	LiveHoldPushAbs(msg, due);
+	/* ゲートへ一点クランプすると TriggerPlay が先に進めたイントロが
+	   先頭 1–2s に畳まれる。間隔は Postpone でまとめて後ろへずらす。 */
+	LiveHoldPushAbs(msg, g_live.midiSample);
+	LivePostponeHoldsToNotes();
 	LiveTrackMsg(msg);
 	if (isOn) {
 		g_live.noteOns++;
@@ -643,7 +642,7 @@ static void LiveFlushResetGate(int frames)
 		if (LiveSysexIsRhythmUse(d, n))
 			sawRhythm = 1;
 		VstMidiInjectSysex(0, d, n);
-		VstLiveTapPushSysex(0, d, n);
+		VstLiveTapPushSysexAt(0, d, n, g_live.midiSample);
 		drop = i + 1;
 		if (mode) {
 			rearm = 1;
@@ -756,7 +755,7 @@ static void LiveEmitSysex(const uint8_t* d, int n, int frames)
 			return;
 		}
 		VstMidiInjectSysex(0, d, n);
-		VstLiveTapPushSysex(0, d, n);
+		VstLiveTapPushSysexAt(0, d, n, g_live.midiSample);
 		LiveArmResetHold(frames);
 		return;
 	}
@@ -767,14 +766,14 @@ static void LiveEmitSysex(const uint8_t* d, int n, int frames)
 	if (LiveSysexIsRhythmUse(d, n)) {
 		/* A11 MAP2 が POWER PC と同じ process() に入るとキットが STANDARD に戻る。 */
 		VstMidiInjectSysex(0, d, n);
-		VstLiveTapPushSysex(0, d, n);
+		VstLiveTapPushSysexAt(0, d, n, g_live.midiSample);
 		if (g_live.initPcBurst)
 			g_live.drumPcRetrig = 1;
 		LiveArmRhythmPcWait(frames);
 		return;
 	}
 	VstMidiInjectSysex(0, d, n);
-	VstLiveTapPushSysex(0, d, n);
+	VstLiveTapPushSysexAt(0, d, n, g_live.midiSample);
 }
 
 static void LiveEmitLaBanks(int frames)
@@ -1212,7 +1211,8 @@ static int MidiOutTypeFromGe(const CEmuGameEntry* e)
    で MIDI モニタが LAmap を出す。GM タイトルには付けない。 */
 static int MidiOutTypeIsLa(int t)
 {
-	return (t == 1 || t == 2) ? 1 : 0;
+	/* 1/2 MT-32(LA), 3 CM-64（LA + PCM）。GS/SC-88/GM には LA バンクを付けない。 */
+	return (t == 1 || t == 2 || t == 3) ? 1 : 0;
 }
 
 /* 既存 SMF BGM を置き換えずライブ MPU で SE を注入 */
@@ -1235,14 +1235,8 @@ int CEmuMidiLiveStartPcat(const wchar_t* zipPath, unsigned titleCode,
 	LiveEnsureCs();
 	CEmuMidiLiveStop();
 
-	/* 既に GS/LA/SC-88 が選ばれていればそれを残す。全部 MIDI に潰すと
-	   vg2_98 の SC-88 行が SC-55 に戻る。 */
-	{
-		char curTag[CEMU_MODE_TAG] = {};
-		if (!CEmuModePrefGet(zipPath, curTag, (int)sizeof(curTag))
-			|| !CEmuModeIsMidiTag(curTag))
-			CEmuModePrefSet(zipPath, "MIDI");
-	}
+	/* 既に GS/LA/SC-88 が選ばれていればそれを残す。汎用 "MIDI" に潰すと
+	   vg2_98 の SC-88 行が SC-55 に戻る。未選択なら XML の midiout_type へ。 */
 	wchar_t zipOut[CEMU_ZIP_PATH];
 	char dataDir[CEMU_DATA_DIR];
 	CEmuMgr* mgr = CEmuMgrGet();
@@ -1282,6 +1276,16 @@ int CEmuMidiLiveStartPcat(const wchar_t* zipPath, unsigned titleCode,
 		return 0;
 
 	const wchar_t* openZip = zipOut[0] ? zipOut : zipPath;
+	{
+		char curTag[CEMU_MODE_TAG] = {};
+		char fromGe[CEMU_MODE_TAG] = {};
+		CEmuModeTagFromEntry(ge, fromGe, (int)sizeof(fromGe));
+		if (!CEmuModePrefGet(openZip, curTag, (int)sizeof(curTag))
+			|| !CEmuModeIsMidiTag(curTag)) {
+			if (fromGe[0] && CEmuModeIsMidiTag(fromGe))
+				CEmuModePrefSet(openZip, fromGe);
+		}
+	}
 	CEmuZipFs* fs = (CEmuZipFs*)calloc(1, sizeof(CEmuZipFs));
 	if (!fs) return 0;
 	if (!CEmuZipFsOpen(fs, openZip)) { free(fs); return 0; }
@@ -1305,7 +1309,22 @@ int CEmuMidiLiveStartPcat(const wchar_t* zipPath, unsigned titleCode,
 	   は GMmap/GSmap のまま。ラベル無し行は PCAT では MT-32、PC98 では
 	   SC-55 (当時のドライバが相手にしていた音源)。 */
 	const int isPc98 = (hard->hardKind == CHard::KIND_PC98) ? 1 : 0;
-	const int midiType = MidiOutTypeFromGe(ge);
+	int midiType = MidiOutTypeFromGe(ge);
+	{
+		char geTag[CEMU_MODE_TAG] = {};
+		CEmuModeTagFromEntry(ge, geTag, (int)sizeof(geTag));
+		if (!midiType) {
+			if (!_stricmp(geTag, "LA") || !_stricmp(geTag, "MT-32")
+				|| !_stricmp(geTag, "CM-64") || !_stricmp(geTag, "CM64"))
+				midiType = 1;
+			else if (!_stricmp(geTag, "GS") || !_stricmp(geTag, "SC-55"))
+				midiType = 4;
+			else if (!_stricmp(geTag, "SC-88") || !_stricmp(geTag, "SC88"))
+				midiType = 7;
+			else if (!_stricmp(geTag, "GM"))
+				midiType = 8;
+		}
+	}
 	int laBanks = MidiOutTypeIsLa(midiType);
 	if (!isPc98 && midiType == 0)
 		laBanks = 1;

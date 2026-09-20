@@ -1192,8 +1192,8 @@ void CMmHelpDlg::OnPaint()
 	title(L, y, LL14(L"表示", L"View", L"Affichage", L"Vista", L"Vista", L"표시", L"显示", L"العرض", L"Вид", L"Ansicht", L"Vista", L"Weergave", L"Widok", L"Gorunum"));
 	y += titleLh;
 	body(L, y, LL14(
-		L"・通常(2D) …… ヘッダ(BPM/拍子/小節・拍・tick/リバーブ等)と32行のチャンネル表。パートの間に薄い横線。右端はミニ鍵盤。",
-		L"· Normal (2D) …… Header (BPM/meter/bar-beat-tick/reverb…) and a 32-row channel table. Thin lines between parts. Mini keyboard on the right.",
+		L"・通常(2D) …… ヘッダ(BPM/拍子/小節・拍・tick/リバーブ等)と32行のチャンネル表。右上は実機LCD（16ch=16バー、32ch=16×2列。SC-88橙/XG緑/LA緑など）。SysEx文字・ビットマップもLED表示。パートの間に薄い横線。右端はミニ鍵盤。",
+		L"· Normal (2D) …… Header (BPM/meter/bar-beat-tick/reverb…) and a 32-row channel table. Top-right hardware LCD (16 bars, or 16x2 in 32ch; SC-88 amber / XG green / LA green). SysEx LED/bitmap too. Thin lines between parts. Mini keyboard on the right.",
 		L"· Normal (2D) …… En-tete (BPM/mesure/mesure-temps-tick/reverb…) et tableau 32 canaux. Traits fins entre les parties. Mini clavier a droite.",
 		L"· Normale (2D) …… Intestazione (BPM/misura/battuta-tick/reverb…) e tabella 32 canali. Linee sottili tra le parti. Mini tastiera a destra.",
 		L"· Normal (2D) …… Cabecera (BPM/compas/compas-pulso-tick/reverb…) y tabla de 32 canales. Lineas finas entre partes. Mini teclado a la derecha.",
@@ -1490,6 +1490,8 @@ CMidiMonitorDlg::CMidiMonitorDlg(CWnd* pParent)
 	, m_dirtyRows(0xFFFFFFFFu), m_rowLive(0), m_nameNeed(0)	, m_burstApply(0)
 	, m_fm(nullptr), m_fmView(0)
 	, m_dirtyHead(true), m_fullDraw(true), m_volDragging(false)
+	, m_lcdSelA(0), m_lcdSelB(0), m_showLcdMode(0), m_showLcdSelA(-1), m_showLcdSelB(-1), m_showLcdKind(-1)
+	, m_showLcdPage(-1), m_showLcdScroll(-1), m_showLcdGen(0)
 {
 	m_loadedPath[0] = 0;
 	m_sourcePath[0] = 0;
@@ -1497,6 +1499,9 @@ CMidiMonitorDlg::CMidiMonitorDlg(CWnd* pParent)
 	m_hoverTip[0] = 0;
 	m_volBarRc.SetRectEmpty();
 	m_notesBarRc.SetRectEmpty();
+	m_lcdRc.SetRectEmpty();
+	MidiHwLcdReset(&m_lcd);
+	memset(m_showLcdSeg, 0, sizeof(m_showLcdSeg));
 	memset(m_part, 0, sizeof(m_part));
 	memset(m_show, 0, sizeof(m_show));
 	memset(m_pcAudioOn, 0, sizeof(m_pcAudioOn));
@@ -1862,6 +1867,10 @@ void CMidiMonitorDlg::ResetParts()
 	m_nameNeed = 0;
 	m_rowLive = 0;
 	m_drumGlow = 0;
+	m_lcdSelA = 0;
+	m_lcdSelB = 0;
+	MidiHwLcdReset(&m_lcd);
+	memset(m_showLcdSeg, 0, sizeof(m_showLcdSeg));
 	memset(m_latchUntil, 0, sizeof(m_latchUntil));
 	memset(m_latchMask, 0, sizeof(m_latchMask));
 }
@@ -2101,6 +2110,9 @@ void CMidiMonitorDlg::ApplyShort(int port, DWORD msg, BOOL fromUser, BOOL liveEx
 			p.lastVel = d2;
 			p.held++;
 			if (p.held < 1) p.held = 1;
+			if (part < 16) m_lcdSelA = part;
+			else m_lcdSelB = part - 16;
+			m_dirtyHead = true;
 			const float lv = (float)d2 / 127.f;
 			if (lv > p.lev) p.lev = lv;
 			MmBumpFade(p.fadeCh, m_burstApply);
@@ -2214,6 +2226,8 @@ void CMidiMonitorDlg::ApplySysex(const BYTE* d, int n, int livePort)
 {
 	if (!d || n < 6) return;
 	if (d[0] != 0xf0) return;
+	if (MidiHwLcdApplySysex(&m_lcd, d, n))
+		m_dirtyHead = true;
 	if (n >= 6 && VstMidiSysexIsGmOn(d, n)) {
 		const int gm2 = (n >= 5 && d[4] == 0x03);
 		m_sysMode = 0;
@@ -2970,6 +2984,26 @@ static DWORD MmSxParamKey(int port, const BYTE* d, int n)
 	return k | ((DWORD)d[1] << 16) | ((DWORD)d[2] << 8) | (DWORD)d[3];
 }
 
+/* GS/XG LCD は同じアドレスへ連打してアニメする。圧縮すると肉球が止まる。 */
+static int MmSxIsLcd(const BYTE* d, int n)
+{
+	if (!d || n < 8 || d[0] != 0xf0) return 0;
+	if (d[1] == 0x41 && n >= 10 && d[4] == 0x12) {
+		if (d[3] == 0x45 && d[5] == 0x10) return 1;
+		if (d[3] == 0x16 && d[5] == 0x20) return 1;
+	}
+	if ((d[1] == 0x43 || d[1] == 0x42) && n >= 8 && d[3] == 0x4c) {
+		const int cmd = d[2] & 0xf0;
+		int ah = 0;
+		if (cmd == 0x10 || (d[1] == 0x42 && cmd == 0x30))
+			ah = d[4] & 127;
+		else if (cmd == 0x00 && n >= 12)
+			ah = d[6] & 127;
+		if (ah == 0x06 || ah == 0x07) return 1;
+	}
+	return 0;
+}
+
 static int MmEvIsModeReset(const CMidiMonitorDlg::MmEv& e, const BYTE* sx, int sxBytes)
 {
 	if (e.msg != 0xf0 || e.sysexOff < 0) return 0;
@@ -3030,6 +3064,8 @@ void CMidiMonitorDlg::ApplyDueEvents(int lastDue)
 					continue;
 				if (e.sysexOff < 0 || e.sysexOff + (int)e.aux > m_sxBytes)
 					continue;
+				if (MmSxIsLcd(m_sx + e.sysexOff, (int)e.aux))
+					continue;
 				const DWORD key = MmSxParamKey(e.port, m_sx + e.sysexOff, (int)e.aux);
 				unsigned s = key & 2047u;
 				int put = 0;
@@ -3070,6 +3106,9 @@ void CMidiMonitorDlg::ApplyDueEvents(int lastDue)
 			else if (e.msg == 0xf0) {
 				if (MmEvIsModeReset(e, m_sx, m_sxBytes))
 					keep = (k == start);
+				else if (e.sysexOff >= 0 && e.sysexOff + (int)e.aux <= m_sxBytes
+					&& MmSxIsLcd(m_sx + e.sysexOff, (int)e.aux))
+					keep = 1;
 				else if (!sxFail && e.sysexOff >= 0 && e.sysexOff + (int)e.aux <= m_sxBytes) {
 					const DWORD key = MmSxParamKey(e.port, m_sx + e.sysexOff, (int)e.aux);
 					unsigned s = key & 2047u;
@@ -3390,12 +3429,59 @@ void CMidiMonitorDlg::DrawMiniKeys(CDC& dc, const CRect& rc, const Part& p, COLO
 	}
 }
 
+int CMidiMonitorDlg::LcdHeardHi() const
+{
+	for (int i = 16; i < PART_MAX; ++i) {
+		if (m_part[i].heard) return 1;
+	}
+	return 0;
+}
+
+void CMidiMonitorDlg::FillLcdSnap(MidiHwLcdPartSnap out[16], BYTE keyBits[16], int bank) const
+{
+	if (!out) return;
+	memset(out, 0, sizeof(MidiHwLcdPartSnap) * 16);
+	if (keyBits) memset(keyBits, 0, 16);
+	for (int i = 0; i < 16; ++i) {
+		const int src = bank * 16 + i;
+		if (src < 0 || src >= PART_MAX) continue;
+		const Part& p = m_part[src];
+		MidiHwLcdPartSnap& o = out[i];
+		o.pc = p.pc;
+		o.vol = p.vol;
+		o.pan = p.pan;
+		o.rev = p.rev;
+		o.crs = p.crs;
+		o.kshift = p.dt;
+		o.midiCh = p.rxCh;
+		o.port = (p.rxPort == 1) ? 1 : 0;
+		if (p.rxPort == 2) o.port = bank;
+		o.isDrum = p.isDrum;
+		o.heard = p.heard;
+		o.held = p.held;
+		o.lev = p.lev;
+		wcsncpy_s(o.name, p.name, _TRUNCATE);
+		if (keyBits) {
+			for (int n = 0; n < NOTE_MAX; ++n) {
+				if (p.noteOn[n] || p.noteFlash[n])
+					keyBits[n >> 3] |= (BYTE)(1 << (n & 7));
+			}
+		}
+	}
+}
+
 void CMidiMonitorDlg::DrawHeader(CDC& dc, int w, int headH, UINT dpi)
 {
 	dc.FillSolidRect(0, 0, w, headH, MM_HEAD_BG);
 	dc.SetBkMode(TRANSPARENT);
 	CFont* oldF = dc.SelectObject(&m_fontHead);
 	dc.SetTextColor(MM_HEAD_TX);
+
+	const int ch32 = MidiHwLcdCh32(m_gs32, LcdHeardHi());
+	CRect lcdAll, lcdA, lcdB;
+	MidiHwLcdReserve(w, dpi, ch32, &lcdAll, &lcdA, &lcdB);
+	m_lcdRc = lcdAll;
+	const int textR = (!lcdAll.IsRectEmpty()) ? (lcdAll.left - Scale(6, dpi)) : w;
 
 	int bpm = 0;
 	if (m_usecQn > 0)
@@ -3420,9 +3506,12 @@ void CMidiMonitorDlg::DrawHeader(CDC& dc, int w, int headH, UINT dpi)
 	wchar_t line1[560];
 	_snwprintf_s(line1, _TRUNCATE, L"BPM %3d    %3d%%    %s    TB %d    %d/%d    Transpose %d    %s",
 		bpm, tpc, keyBuf, m_division, m_tsNum, m_tsDen, m_transpose, nameBuf);
-	dc.TextOut(Scale(8, dpi), Scale(4, dpi), line1);
+	{
+		CRect t1(Scale(8, dpi), Scale(2, dpi), max(Scale(48, dpi), textR), Scale(20, dpi));
+		dc.DrawText(line1, t1, DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
+	}
 
-	const int volBarW = max(40, w / 3);
+	const int volBarW = max(40, min(w / 3, max(40, textR - Scale(16, dpi))));
 	const int vx = Scale(8, dpi);
 	const int vy = Scale(22, dpi);
 	const int vh = Scale(10, dpi);
@@ -3538,12 +3627,15 @@ void CMidiMonitorDlg::DrawHeader(CDC& dc, int w, int headH, UINT dpi)
 		_snwprintf_s(line3, _TRUNCATE, L"Reverb  %s     Chorus  %s     Variation  %s     SYS  %s     INSERTION 1/2  %s / %s",
 			revN, choN, varN, sysN, ins1n, ins2n);
 	}
-	dc.TextOut(Scale(8, dpi), Scale(36, dpi), line3);
+	{
+		CRect t3(Scale(8, dpi), Scale(34, dpi), max(Scale(48, dpi), textR), Scale(52, dpi));
+		dc.DrawText(line3, t3, DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
+	}
 
 	dc.SelectObject(&m_fontTiny);
 	dc.SetTextColor(MM_HEAD_TX);
-	const int yCol = Scale(54, dpi);
-	const int ySub = Scale(66, dpi);
+	const int yCol = headH - Scale(24, dpi);
+	const int ySub = headH - Scale(12, dpi);
 	const int meterX = Scale(280, dpi);
 	const int textRX = Scale(360, dpi);
 	const int keysX = Scale(672, dpi);
@@ -3643,6 +3735,29 @@ void CMidiMonitorDlg::DrawHeader(CDC& dc, int w, int headH, UINT dpi)
 	m_showNum = m_posNum;
 	m_showFrozen = m_frozen ? 1 : 0;
 	wcsncpy_s(m_showTitle, m_titleBuf, _TRUNCATE);
+	{
+		const int kind = MidiHwLcdKind(m_sysMode, m_gsMapKind);
+		const wchar_t* model = MidiHwLcdModelName(m_sysMode, m_gsMapKind);
+		MidiHwLcdPartSnap snap[16];
+		BYTE keyBits[16];
+		if (!lcdA.IsRectEmpty()) {
+			FillLcdSnap(snap, keyBits, 0);
+			MidiHwLcdDraw(dc, lcdA, dpi, kind, model, m_lcd, snap, keyBits, m_lcdSelA, 0);
+		}
+		if (ch32 && !lcdB.IsRectEmpty()) {
+			FillLcdSnap(snap, keyBits, 1);
+			MidiHwLcdDraw(dc, lcdB, dpi, kind, model, m_lcd, snap, keyBits, m_lcdSelB, 1);
+		}
+		m_showLcdMode = m_lcd.mode;
+		m_showLcdSelA = m_lcdSelA;
+		m_showLcdSelB = m_lcdSelB;
+		m_showLcdKind = kind;
+		m_showLcdPage = m_lcd.showPage;
+		m_showLcdScroll = MidiHwLcdScrollIdx(&m_lcd, GetTickCount());
+		m_showLcdGen = m_lcd.gen;
+		for (int i = 0; i < PART_MAX; ++i)
+			m_showLcdSeg[i] = (BYTE)MidiHwLcdSeg(m_part[i].lev, m_part[i].held);
+	}
 	dc.SelectObject(oldF);
 }
 
@@ -4008,7 +4123,7 @@ int CMidiMonitorDlg::LayPartH(int i) const
 
 void CMidiMonitorDlg::DrawMonitor2D(CDC& dc, int w, int h, UINT dpi)
 {
-	const int headH = Scale(78, dpi);
+	const int headH = MidiHwLcdHeadH(dpi);
 	const int footH = Scale(14 * InsFootCount(), dpi);
 	dc.FillSolidRect(0, headH, w, h - headH, MM_BG);
 	DrawHeader(dc, w, headH, dpi);
@@ -4041,6 +4156,8 @@ void CMidiMonitorDlg::TickVisuals()
 	}
 	m_visLastMs = now;
 	m_visAcc += dt;
+	if (MidiHwLcdTick(&m_lcd, now))
+		m_dirtyHead = true;
 
 	for (int i = 0; i < PART_MAX; ++i) {
 		Part& p = m_part[i];
@@ -4237,7 +4354,7 @@ void CMidiMonitorDlg::DrainLiveTap()
 	for (int k = 0; k < 32; ++k) {
 		int port = 0;
 		BYTE sx[1024];
-		const int n = VstLiveTapStealSysex(&port, sx, (int)sizeof(sx));
+		const int n = VstLiveTapStealSysexDue(nowFrame, &port, sx, (int)sizeof(sx));
 		if (n <= 0) break;
 		if (!m_frozen) {
 			ApplySysex(sx, n, port);
@@ -4512,6 +4629,7 @@ void CMidiMonitorDlg::InvalidateDirty()
 		int bh = m_layRowH - 4;
 		if (bh < 2) bh = 2;
 		DWORD diff = 0;
+		int notesDirty = 0;
 		for (int i = 0; i < PART_MAX; ++i) {
 			const Part& a = m_part[i];
 			const Part& b = m_show[i];
@@ -4537,10 +4655,16 @@ void CMidiMonitorDlg::InvalidateDirty()
 				|| PartHasInsertion(i) != (int)b.insMark
 				|| wcscmp(a.name, b.name) != 0
 				|| memcmp(a.noteOn, b.noteOn, sizeof(a.noteOn)) != 0
-				|| memcmp(a.noteFlash, b.noteFlash, sizeof(a.noteFlash)) != 0)
+				|| memcmp(a.noteFlash, b.noteFlash, sizeof(a.noteFlash)) != 0) {
 				diff |= (1u << i);
+				if (memcmp(a.noteOn, b.noteOn, sizeof(a.noteOn)) != 0
+					|| memcmp(a.noteFlash, b.noteFlash, sizeof(a.noteFlash)) != 0)
+					notesDirty = 1;
+			}
 		}
 		m_dirtyRows = diff;
+		const int lcdPartDirty = ((diff & (1u << m_lcdSelA)) != 0)
+			|| ((diff & (1u << (16 + m_lcdSelB))) != 0);
 		int bpm = 0;
 		if (m_usecQn > 0)
 			bpm = (int)((60000000.0 / (double)m_usecQn) + 0.5);
@@ -4549,7 +4673,8 @@ void CMidiMonitorDlg::InvalidateDirty()
 		if (tpc < 1) tpc = 100;
 		int transp = (pitch != 0) ? (int)((double)pitch / 100.0 + (pitch > 0 ? 0.5 : -0.5)) : 0;
 		const int pk = (int)(m_notesPeak + 0.5f);
-		m_dirtyHead = (bpm != m_showBpm || tpc != m_showTpc || m_noteCount != m_showNotes
+		m_dirtyHead = (lcdPartDirty || notesDirty
+			|| bpm != m_showBpm || tpc != m_showTpc || m_noteCount != m_showNotes
 			|| pk != m_showPeak || m_masterVol != m_showVol || m_sysMode != m_showSys
 			|| m_revType != m_showRev || m_choType != m_showCho || m_varType != m_showVar
 			|| m_revPacked != m_showRevPacked || m_choPacked != m_showChoPacked
@@ -4562,6 +4687,21 @@ void CMidiMonitorDlg::InvalidateDirty()
 			|| m_posBar != m_showBar || m_posBars != m_showBars || m_posBeat != m_showBeat
 			|| m_posTick != m_showTick || m_posTpm != m_showTpm || m_posNum != m_showNum
 			|| wcscmp(m_titleBuf, m_showTitle) != 0);
+		if (!m_dirtyHead) {
+			const int kind = MidiHwLcdKind(m_sysMode, m_gsMapKind);
+			if (kind != m_showLcdKind || m_lcd.mode != m_showLcdMode
+				|| m_lcdSelA != m_showLcdSelA || m_lcdSelB != m_showLcdSelB
+				|| m_lcd.showPage != m_showLcdPage
+				|| m_lcd.gen != m_showLcdGen
+				|| MidiHwLcdScrollIdx(&m_lcd, GetTickCount()) != m_showLcdScroll)
+				m_dirtyHead = true;
+			else {
+				for (int i = 0; i < PART_MAX; ++i) {
+					const BYTE seg = (BYTE)MidiHwLcdSeg(m_part[i].lev, m_part[i].held);
+					if (seg != m_showLcdSeg[i]) { m_dirtyHead = true; break; }
+				}
+			}
+		}
 		if (!m_dirtyHead) {
 			const int nLine = InsFootCount();
 			for (int s = 0; s < nLine; ++s) {
@@ -4760,7 +4900,7 @@ BOOL CMidiMonitorDlg::OnInitDialog()
 	CCC_CaptionLayout(m_hWnd);
 	LayoutHelpBtn();
 	SetTimer(1, 16, nullptr); // 本体。PersistPos もここ
-	SetTimer(2, 4, nullptr);  // IdlePulse。OnIdle と同じ入口
+	SetTimer(2, 16, nullptr);  // IdlePulse。再生中かつ timerp 非所有のときだけ。停止中は止める
 	LoadCurrentMidi();
 	m_fmView = 0;
 	SyncFmMidiView();
@@ -4958,12 +5098,19 @@ void CMidiMonitorDlg::OnTimer(UINT_PTR nIDEvent)
 			m_persistAge = 0;
 		}
 		/* 再生中は timerp が PumpSyncNow する。ここでも PumpIdle すると
-		   ライブ MPU の鍵盤が二重適用で点滅する。 */
+		   ライブ MPU の鍵盤が二重適用で点滅する。
+		   停止中の 16ms 描画は UI コアを食うので触らない。 */
 		extern int plf;
-		if (!(playy != 0 && plf == 1) && !m_fmView)
+		extern int playy;
+		if (playy != 0 && !(plf == 1) && !m_fmView)
 			PumpIdle();
 	} else if (nIDEvent == 2) {
-		IdlePulse();
+		/* 再生中は timerp が PumpSyncNow する。追加パルスは UI コアを二重に食う。
+		   停止中は何もしない（なにも演奏してないときの 70% コア対策）。 */
+		extern int playy;
+		extern int plf;
+		if (playy != 0 && !(plf == 1))
+			IdlePulse();
 	}
 	CCustomBlurDialogExBase::OnTimer(nIDEvent);
 }

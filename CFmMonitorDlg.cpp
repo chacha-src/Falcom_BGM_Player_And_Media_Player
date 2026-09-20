@@ -938,10 +938,20 @@ CFmMonitorDlg::CFmMonitorDlg(CWnd* pParent)
 	, m_layOk(0)
 	, m_frameOld(nullptr), m_frameW(0), m_frameH(0)
 	, m_gpu{}
+	, m_composeThread(nullptr)
+	, m_composeWake(NULL)
+	, m_workOld{}
+	, m_workW(0), m_workH(0)
+	, m_composeFront(0), m_composeNeed(0), m_composeStop(0), m_composeCsReady(0)
+	, m_composeReqW(0), m_composeReqH(0)
 #if CCUSTOM_AERO_SUPPORT
 	, m_chromaW(0), m_chromaH(0), m_chromaReady(false)
 #endif
 {
+	m_workOld[0] = m_workOld[1] = nullptr;
+	InitializeCriticalSection(&m_dataCs);
+	InitializeCriticalSection(&m_bufCs);
+	m_composeCsReady = 1;
 	memset(&m_dump, 0, sizeof(m_dump));
 	memset(&m_prev, 0, sizeof(m_prev));
 	memset(m_hist, 0, sizeof(m_hist));
@@ -965,6 +975,12 @@ CFmMonitorDlg::CFmMonitorDlg(CWnd* pParent)
 
 CFmMonitorDlg::~CFmMonitorDlg()
 {
+	StopComposeThread();
+	if (m_composeCsReady) {
+		DeleteCriticalSection(&m_dataCs);
+		DeleteCriticalSection(&m_bufCs);
+		m_composeCsReady = 0;
+	}
 	ReleasePaintBuffers();
 	FmReleaseFontCache();
 }
@@ -988,6 +1004,7 @@ BEGIN_MESSAGE_MAP(CFmMonitorDlg, CCustomBlurDialogExBase)
 	ON_WM_SYSCOMMAND()
 	ON_WM_SHOWWINDOW()
 	ON_BN_CLICKED(IDC_FM_HELP, &CFmMonitorDlg::OnBnClickedHelp)
+	ON_MESSAGE(WM_APP + 0x46, OnComposeDone)
 END_MESSAGE_MAP()
 
 BOOL CFmMonitorDlg::PreCreateWindow(CREATESTRUCT& cs)
@@ -1011,6 +1028,7 @@ BOOL CFmMonitorDlg::OnInitDialog()
 		SetTimer(1, 16, NULL);
 		m_fullDraw = 1;
 		m_dirtyHead = m_dirtyHex = m_dirtyPanels = m_dirtyKeys = 1;
+		StartComposeThread();
 		return TRUE;
 	}
 	CCustomBlurDialogExBase::OnInitDialog();
@@ -1041,6 +1059,7 @@ BOOL CFmMonitorDlg::OnInitDialog()
 	SetTimer(1, 16, NULL);
 	m_fullDraw = 1;
 	m_dirtyHead = m_dirtyHex = m_dirtyPanels = m_dirtyKeys = 1;
+	StartComposeThread();
 	return TRUE;
 }
 
@@ -1086,6 +1105,7 @@ bool CFmMonitorDlg::EnsureFrameBuffer(CDC& refDC, int w, int h)
 
 void CFmMonitorDlg::OnDestroy()
 {
+	StopComposeThread();
 	if (!m_hosted)
 		PersistGeom();
 	GpuMonSurf_Release(&m_gpu);
@@ -1117,6 +1137,7 @@ void CFmMonitorDlg::OnSize(UINT nType, int cx, int cy)
 	m_layOk = 0;
 	m_fullDraw = 1;
 	m_dirtyHead = m_dirtyHex = m_dirtyPanels = m_dirtyKeys = 1;
+	KickCompose(cx, (std::max)(1, cy - CCC_GetCustomCaptionHeight(m_hWnd)));
 	Invalidate(FALSE);
 }
 
@@ -1242,11 +1263,12 @@ void CFmMonitorDlg::OnTimer(UINT_PTR nIDEvent)
 			m_persistAge = -1; /* 次の OnSize/OnMove まで休止 */
 		}
 		/* 再生中は timerp が PumpSyncNow する。MIDI モニタ同時表示では
-		   こちらの 16ms パルスを重ねると鍵盤が遅れる。 */
+		   こちらの 16ms パルスを重ねると鍵盤が遅れる。
+		   停止中は IdlePulse しない（モニタを開いたままのアイドル負荷）。 */
 		extern int playy;
 		extern int plf;
 		extern COggDlg* og;
-		if (!(playy != 0 && plf == 1 && og && og->MidiMonitorIsVisible()))
+		if (playy != 0 && !(plf == 1 && og && og->MidiMonitorIsVisible()))
 			IdlePulse();
 	}
 	CCustomBlurDialogExBase::OnTimer(nIDEvent);
@@ -5911,56 +5933,15 @@ void CFmMonitorDlg::PumpSyncNow()
 		return;
 	m_inPump = 1;
 	struct PumpDone { int* p; ~PumpDone() { *p = 0; } } done{ &m_inPump };
-	const int live = FmMonIsLive();
-	if (m_lastPlayy != 0 && live == 0) {
-		memset(m_fadeKey, 0, sizeof(m_fadeKey));
-		memset(m_fadeEx, 0, sizeof(m_fadeEx));
-		memset(m_fadeSsg, 0, sizeof(m_fadeSsg));
-		memset(m_fadePcm, 0, sizeof(m_fadePcm));
-		memset(m_fadeRzmPad, 0, sizeof(m_fadeRzmPad));
-		/* 表示上の gate も落とす（描画側でも live 判定するが残骸を残さない） */
-		memset(m_dump.keyOnFm, 0, sizeof(m_dump.keyOnFm));
-		memset(m_dump.keyOnEx, 0, sizeof(m_dump.keyOnEx));
-		memset(m_dump.ssgOn, 0, sizeof(m_dump.ssgOn));
-		memset(m_dump.pcmOn, 0, sizeof(m_dump.pcmOn));
-		m_dump.rhythmKey = 0;
-		m_dump.rhythmPulse = 0;
-		m_dirtyKeys = 1;
-		m_panelDirtyMask = 0x3F;
-		m_dirtyPanels = 1;
-		m_fullDraw = 1;
-	}
-	if (m_lastPlayy == 0 && live == 1)
-		ResetDumpSync();
-	m_lastPlayy = live;
-	if (live) {
-		/* 再生曲切替（filen）で必ず hist/ring 位置を捨てる。前曲 dump が残るのを防ぐ */
-		wchar_t playId[260];
-		FmPlayIdentity(playId, 260);
-		if (playId[0] && (m_playIdent[0] == 0 || _wcsicmp(m_playIdent, playId) != 0)) {
-			wcsncpy_s(m_playIdent, playId, _TRUNCATE);
-			ResetDumpSync();
-		}
-		if (m_haveDump && !FmDumpMatchesPlay(m_dump))
-			ResetDumpSync();
-		PollDump();
-		if (!m_fmViewReady) {
-			for (int k = 0; k < 8 && !m_fmViewReady; k++)
-				PollDump();
-			TickFmViewReady();
-		}
+
+	if (m_composeThread) {
+		CRect rc;
+		GetClientRect(&rc);
+		const int capH = CCC_GetCustomCaptionHeight(m_hWnd);
+		KickCompose(rc.Width(), (std::max)(1, rc.Height() - capH));
 	} else {
-		m_playIdent[0] = 0;
-		if (savedata.mpLoopbackScore && og && og->m_PianoRollDlg
-			&& ::IsWindow(og->m_PianoRollDlg->GetSafeHwnd())
-			&& og->m_PianoRollDlg->IsPcAudioScoring()) {
-			BYTE lv[108];
-			og->m_PianoRollDlg->CopyActiveKeyLevels(lv);
-			ApplyPcAudioKeys(lv);
-		}
+		InvalidateDirtyRegions();
 	}
-	TickFades();
-	InvalidateDirtyRegions();
 }
 
 void CFmMonitorDlg::IdlePulse()
@@ -5974,6 +5955,166 @@ void CFmMonitorDlg::IdlePulse()
 		return;
 	m_lastPollMs = now;
 	PumpSyncNow();
+}
+
+UINT CFmMonitorDlg::ComposeThreadProc(LPVOID p)
+{
+	CFmMonitorDlg* self = (CFmMonitorDlg*)p;
+	if (self)
+		self->ComposeThreadLoop();
+	return 0;
+}
+
+void CFmMonitorDlg::StartComposeThread()
+{
+	if (m_composeThread)
+		return;
+	InterlockedExchange(&m_composeStop, 0);
+	InterlockedExchange(&m_composeNeed, 0);
+	if (!m_composeWake)
+		m_composeWake = CreateEventW(NULL, FALSE, FALSE, NULL);
+	if (!m_composeWake)
+		return;
+	m_composeThread = AfxBeginThread((AFX_THREADPROC)ComposeThreadProc, this,
+		THREAD_PRIORITY_BELOW_NORMAL, 0, CREATE_SUSPENDED);
+	if (!m_composeThread) {
+		CloseHandle(m_composeWake);
+		m_composeWake = NULL;
+		return;
+	}
+	m_composeThread->m_bAutoDelete = FALSE;
+	m_composeThread->ResumeThread();
+}
+
+void CFmMonitorDlg::StopComposeThread()
+{
+	InterlockedExchange(&m_composeStop, 1);
+	if (m_composeWake)
+		SetEvent(m_composeWake);
+	if (m_composeThread) {
+		::WaitForSingleObject(m_composeThread->m_hThread, 2000);
+		delete m_composeThread;
+		m_composeThread = nullptr;
+	}
+	if (m_composeWake) {
+		CloseHandle(m_composeWake);
+		m_composeWake = NULL;
+	}
+	if (m_composeCsReady)
+		EnterCriticalSection(&m_bufCs);
+	ReleaseWorkBuffers();
+	if (m_composeCsReady)
+		LeaveCriticalSection(&m_bufCs);
+}
+
+void CFmMonitorDlg::KickCompose(int w, int h)
+{
+	if (!m_composeThread || !m_composeWake)
+		return;
+	if (w > 0) m_composeReqW = w;
+	if (h > 0) m_composeReqH = h;
+	InterlockedExchange(&m_composeNeed, 1);
+	SetEvent(m_composeWake);
+}
+
+void CFmMonitorDlg::ReleaseWorkBuffers()
+{
+	for (int i = 0; i < 2; i++) {
+		if (m_workDC[i].GetSafeHdc()) {
+			if (m_workOld[i])
+				m_workDC[i].SelectObject(m_workOld[i]);
+			m_workOld[i] = nullptr;
+			m_workDC[i].DeleteDC();
+		}
+		if (m_workBmp[i].GetSafeHandle())
+			m_workBmp[i].DeleteObject();
+	}
+	m_workW = m_workH = 0;
+	InterlockedExchange(&m_composeFront, 0);
+}
+
+int CFmMonitorDlg::EnsureWorkBuffers(int w, int h)
+{
+	if (w < 80 || h < 80)
+		return 0;
+	if (m_workDC[0].GetSafeHdc() && m_workW == w && m_workH == h)
+		return 1;
+	EnterCriticalSection(&m_bufCs);
+	ReleaseWorkBuffers();
+	int ok = 1;
+	for (int i = 0; i < 2; i++) {
+		HDC hdc = ::CreateCompatibleDC(NULL);
+		BITMAPINFO bi = {};
+		bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+		bi.bmiHeader.biWidth = w;
+		bi.bmiHeader.biHeight = -h;
+		bi.bmiHeader.biPlanes = 1;
+		bi.bmiHeader.biBitCount = 32;
+		void* bits = nullptr;
+		HBITMAP bmp = ::CreateDIBSection(hdc, &bi, DIB_RGB_COLORS, &bits, NULL, 0);
+		if (!hdc || !bmp) {
+			if (bmp) ::DeleteObject(bmp);
+			if (hdc) ::DeleteDC(hdc);
+			ok = 0;
+			break;
+		}
+		m_workDC[i].Attach(hdc);
+		m_workBmp[i].Attach(bmp);
+		m_workOld[i] = m_workDC[i].SelectObject(&m_workBmp[i]);
+	}
+	if (!ok)
+		ReleaseWorkBuffers();
+	else {
+		m_workW = w;
+		m_workH = h;
+	}
+	LeaveCriticalSection(&m_bufCs);
+	return ok;
+}
+
+HDC CFmMonitorDlg::FrontWorkDc()
+{
+	const LONG idx = InterlockedCompareExchange(&m_composeFront, 0, 0) & 1;
+	return m_workDC[idx].GetSafeHdc();
+}
+
+void CFmMonitorDlg::ComposeThreadLoop()
+{
+	while (InterlockedCompareExchange(&m_composeStop, 0, 0) == 0) {
+		if (m_composeWake)
+			WaitForSingleObject(m_composeWake, 50);
+		if (InterlockedCompareExchange(&m_composeStop, 0, 0) != 0)
+			break;
+		if (InterlockedExchange(&m_composeNeed, 0) == 0)
+			continue;
+		const int w = m_composeReqW;
+		const int h = m_composeReqH;
+		if (!EnsureWorkBuffers(w, h))
+			continue;
+		const LONG write = 1 - (InterlockedCompareExchange(&m_composeFront, 0, 0) & 1);
+		if (m_composeCsReady)
+			EnterCriticalSection(&m_dataCs);
+		ComposeFrame(m_workDC[write], w, h);
+		if (m_composeCsReady)
+			LeaveCriticalSection(&m_dataCs);
+		InterlockedExchange(&m_composeFront, write);
+		if (::IsWindow(m_hWnd))
+			::PostMessage(m_hWnd, WM_APP + 0x46, 0, 0);
+	}
+}
+
+LRESULT CFmMonitorDlg::OnComposeDone(WPARAM, LPARAM)
+{
+	if (!::IsWindow(m_hWnd) || m_inPrint)
+		return 0;
+	CRect cr;
+	GetClientRect(&cr);
+	const int capH = CCC_GetCustomCaptionHeight(m_hWnd);
+	if (capH > 0 && cr.Height() > capH)
+		cr.top = capH;
+	if (!cr.IsRectEmpty())
+		InvalidateRect(&cr, FALSE);
+	return 0;
 }
 
 void CFmMonitorDlg::PaintClientToDC(HDC hdc)
@@ -5992,25 +6133,56 @@ void CFmMonitorDlg::PaintClientToDC(HDC hdc)
 		return;
 	}
 
-	if (!EnsureFrameBuffer(dc, w, h) || !m_frameDC.GetSafeHdc()) {
+	KickCompose(w, h);
+
+	HDC src = NULL;
+	CDC* srcDc = NULL;
+	if (m_composeThread && m_composeCsReady) {
+		EnterCriticalSection(&m_bufCs);
+		if (m_workW == w && m_workH == h)
+			src = FrontWorkDc();
+		LeaveCriticalSection(&m_bufCs);
+	}
+
+	if (!src) {
+		if (m_composeThread) {
 #if CCUSTOM_AERO_SUPPORT
-		if (m_hosted) {
-			if (m_chromaCache.Ensure(dc.GetSafeHdc(), w, h)) {
-				m_chromaCache.FillOpaqueRect(0, 0, w, h, FM_BG, RGB(1, 1, 1));
-				m_chromaCache.MakeRectOpaque(0, 0, w, h);
-				m_chromaCache.BlitFull(dc.GetSafeHdc(), 0, capH, w, h);
+			if (m_hosted) {
+				if (m_chromaCache.Ensure(dc.GetSafeHdc(), w, h)) {
+					m_chromaCache.FillOpaqueRect(0, 0, w, h, FM_BG, RGB(1, 1, 1));
+					m_chromaCache.MakeRectOpaque(0, 0, w, h);
+					m_chromaCache.BlitFull(dc.GetSafeHdc(), 0, capH, w, h);
+				}
+				dc.Detach();
+				return;
 			}
+#endif
+			dc.FillSolidRect(0, capH, w, h, FM_BG);
+			CCC_CaptionPaintGdi(dc, m_hWnd);
 			dc.Detach();
 			return;
 		}
+		if (!EnsureFrameBuffer(dc, w, h) || !m_frameDC.GetSafeHdc()) {
+#if CCUSTOM_AERO_SUPPORT
+			if (m_hosted) {
+				if (m_chromaCache.Ensure(dc.GetSafeHdc(), w, h)) {
+					m_chromaCache.FillOpaqueRect(0, 0, w, h, FM_BG, RGB(1, 1, 1));
+					m_chromaCache.MakeRectOpaque(0, 0, w, h);
+					m_chromaCache.BlitFull(dc.GetSafeHdc(), 0, capH, w, h);
+				}
+				dc.Detach();
+				return;
+			}
 #endif
-		dc.FillSolidRect(0, capH, w, h, FM_BG);
-		CCC_CaptionPaintGdi(dc, m_hWnd);
-		dc.Detach();
-		return;
+			dc.FillSolidRect(0, capH, w, h, FM_BG);
+			CCC_CaptionPaintGdi(dc, m_hWnd);
+			dc.Detach();
+			return;
+		}
+		ComposeFrame(m_frameDC, w, h);
+		srcDc = &m_frameDC;
+		src = m_frameDC.GetSafeHdc();
 	}
-
-	ComposeFrame(m_frameDC, w, h);
 
 	CRect pr;
 	dc.GetClipBox(&pr);
@@ -6019,10 +6191,9 @@ void CFmMonitorDlg::PaintClientToDC(HDC hdc)
 	const int paintCap = (pr.top < capH) ? 1 : 0;
 
 #if CCUSTOM_AERO_SUPPORT
-	/* ホスト MIDI 窓は ExtendFrame(-1)。子の素 GDI は α=0 で完全透過になる */
 	const bool needOpaque = m_hosted || (CCC_IsWin11()
 		&& (savedata.aero == 1 || CCC_AcrylicCaption(m_hWnd)));
-	if (needOpaque) {
+	if (needOpaque && src) {
 		if (m_chromaW != w || m_chromaH != h) {
 			m_chromaCache.Release();
 			m_chromaReady = false;
@@ -6030,7 +6201,7 @@ void CFmMonitorDlg::PaintClientToDC(HDC hdc)
 			m_chromaH = h;
 		}
 		if (m_chromaCache.Ensure(dc.GetSafeHdc(), w, h)) {
-			m_chromaCache.UpdateOpaqueRect(m_frameDC.GetSafeHdc(), 0, 0, 0, 0, w, h);
+			m_chromaCache.UpdateOpaqueRect(src, 0, 0, 0, 0, w, h);
 			m_chromaReady = true;
 			m_chromaCache.BlitFull(dc.GetSafeHdc(), 0, capH, w, h);
 			if (paintCap)
@@ -6038,8 +6209,7 @@ void CFmMonitorDlg::PaintClientToDC(HDC hdc)
 			dc.Detach();
 			return;
 		}
-		CCC_BlitStretchOpaque(dc.GetSafeHdc(), 0, capH, w, h,
-			m_frameDC.GetSafeHdc(), 0, 0, w, h);
+		CCC_BlitStretchOpaque(dc.GetSafeHdc(), 0, capH, w, h, src, 0, 0, w, h);
 		if (paintCap)
 			CCC_CaptionPaintGdi(dc, m_hWnd);
 		dc.Detach();
@@ -6054,8 +6224,12 @@ void CFmMonitorDlg::PaintClientToDC(HDC hdc)
 	if (sx < 0) { sw += sx; sx = 0; }
 	if (sx + sw > w) sw = w - sx;
 	if (sy + sh > h) sh = h - sy;
-	if (sw > 0 && sh > 0)
-		dc.BitBlt(sx, capH + sy, sw, sh, &m_frameDC, sx, sy, SRCCOPY);
+	if (sw > 0 && sh > 0 && src) {
+		if (srcDc)
+			dc.BitBlt(sx, capH + sy, sw, sh, srcDc, sx, sy, SRCCOPY);
+		else
+			::BitBlt(dc.GetSafeHdc(), sx, capH + sy, sw, sh, src, sx, sy, SRCCOPY);
+	}
 	if (paintCap)
 		CCC_CaptionPaintGdi(dc, m_hWnd);
 	dc.Detach();

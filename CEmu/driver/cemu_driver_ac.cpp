@@ -126,6 +126,59 @@ static int CEmuAcCatalogCreditLabel(const wchar_t* s)
 	return 0;
 }
 
+/* hyperspt: RST 10 は JP (HL) なので 0328 の duration 書きに戻らない。CALL 4F00 に差し、init のあと 4001 を立てる。
+   2202 は FF で RET して曲を落とす。先頭ポインタを 4F30 に退避し、FF で巻き戻す。 */
+static void CEmuAcArmHypersptSeq(CHardAc* hw)
+{
+	if (!hw || !hw->HypersptSn())
+		return;
+	uint8_t* m = hw->Mem();
+	if (!m)
+		return;
+	static const uint8_t kTr[] = {
+		0x87, 0x85, 0x6f, 0x7c, 0xce, 0x00, 0x67, 0x7e, 0x23, 0x66, 0x6f,
+		0x11, 0x10, 0x4f, 0xd5, 0xe9, 0xc9
+	};
+	memcpy(m + 0x4f00, kTr, sizeof(kTr));
+	if (m[0x032b] == 0xd7) {
+		m[0x032b] = 0xcd;
+		m[0x032c] = 0x00;
+		m[0x032d] = 0x4f;
+		m[0x032e] = 0x00;
+	}
+	/* 4F20: 退避した 415F/4162/4164/4166 を戻して 2202 へ。 */
+	static const uint8_t kRestart[] = {
+		0x2a, 0x30, 0x4f, 0x22, 0x5f, 0x41,
+		0x2a, 0x32, 0x4f, 0x22, 0x62, 0x41,
+		0x2a, 0x34, 0x4f, 0x22, 0x64, 0x41,
+		0x2a, 0x36, 0x4f, 0x22, 0x66, 0x41,
+		0xc3, 0x02, 0x22
+	};
+	memcpy(m + 0x4f20, kRestart, sizeof(kRestart));
+	/* 4F50: 初回だけポインタ退避、その後元の 2202。 */
+	static const uint8_t kSnap[] = {
+		0x3a, 0x3e, 0x4f, 0xb7, 0x20, 0x1c,
+		0x3c, 0x32, 0x3e, 0x4f,
+		0x2a, 0x5f, 0x41, 0x22, 0x30, 0x4f,
+		0x2a, 0x62, 0x41, 0x22, 0x32, 0x4f,
+		0x2a, 0x64, 0x41, 0x22, 0x34, 0x4f,
+		0x2a, 0x66, 0x41, 0x22, 0x36, 0x4f,
+		0x3a, 0x69, 0x41, 0xc3, 0x05, 0x22
+	};
+	memcpy(m + 0x4f50, kSnap, sizeof(kSnap));
+	m[0x4f3e] = 0;
+	if (m[0x2202] == 0x3a && m[0x2203] == 0x69) {
+		m[0x2202] = 0xc3;
+		m[0x2203] = 0x50;
+		m[0x2204] = 0x4f;
+	}
+	if (m[0x229b] == 0xc9) {
+		m[0x229b] = 0xc3;
+		m[0x229c] = 0x20;
+		m[0x229d] = 0x4f;
+	}
+}
+
 CDriverAc::CDriverAc()
 	: hw_(NULL)
 	, hostRate_(44100)
@@ -679,6 +732,19 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 				songCmd_ = 0x09; /* Desertion 無音 → Act 2 BGM */
 			else if (c == 0x08)
 				songCmd_ = 0x0b; /* Briefing 薄い → Act 3 BGM */
+		} else if (ge->archive[0] && _stricmp(ge->archive, "tetrista") == 0) {
+			if (c == 0x11 || c == 0x0e)
+				songCmd_ = 0x09; /* Coin / Deadlock → Main 1 */
+			else if (c == 0x0f)
+				songCmd_ = 0x0a; /* Game Over → Main 2 */
+		} else if (ge->archive[0] && _stricmp(ge->archive, "cameltrya") == 0) {
+			if (c == 0x08 || c == 0x09)
+				songCmd_ = 0x0b; /* Credit / Course Select → Pa.Ma.Day */
+			else if (c == 0x0a || c == 0x0f)
+				songCmd_ = 0x0c; /* Message / Goal → Psychedelic Delicacy */
+		} else if (ge->archive[0] && _stricmp(ge->archive, "viofight") == 0
+			&& c == 0x11u) {
+			songCmd_ = 0x0a; /* Character Select → Theme 2 vs Theme 1 0x08 */
 		} else if (darius && (c == 0x37u || c == 0x3au)) {
 			/* カタログ BGM 01/02 枠は無音。INORGANIC BEAT vs CAPTAIN NEO */
 			songCmd_ = 0x2eu;
@@ -813,6 +879,13 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 			songCmd_ = 0x3fu; /* Start STOPS → Urban Trail vs Intro ピン */
 		else if (!_stricmp(ar, "nightstr") && c == 0x5eu)
 			songCmd_ = 0x3eu; /* Introduction 無音 → Trance Parlent */
+		else if (!_stricmp(ar, "gigandes")) {
+			/* 015D は cmd>$1D を捨てる。Credit/Start は短い。Stage 1 vs Stage 4（バンク 1 vs 2）。 */
+			if (c == 0x01u || c == 0x02u)
+				songCmd_ = 0x04u;
+			else if (c == 0x04u || c == 0x05u || c == 0x03u)
+				songCmd_ = 0x0bu;
+		}
 		else if (!_stricmp(ar, "mgcldtex")) {
 			/* TC0140SYT は 8bit。hoot 0x1A7/0x1A1 は 16bit。同じ titlelist の 8bit BGM へ。 */
 			if (songCmdWord_ == 0x1a7u || c == 0xa7u)
@@ -1014,8 +1087,14 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 			}
 		}
 	}
+	/* hyperspt: 0x01-0x23 は短い SE。bit6 の 0x45/0x44 が 2202 の長い DAC+SN（Ranking / Commendation）。 */
+	if (hw_->HypersptSn()) {
+		const uint8_t c = songCmd_;
+		if (c > 0 && c < 0x40u)
+			songCmd_ = (c & 1u) ? (uint8_t)0x44u : (uint8_t)0x45u;
+	}
 	/* Sega System1: カタログはしばしば短い SE／BLAST ワンショットを固定しプローブ途中で死ぬ（4dwarrio 0x90、tokisens 0x10 等）。持続 0x81/0x82 を優先。既知 PLAY prefer（choplift 0xAB、imsorry 0xB8 等）は触らない。Konami trackfld 族は 0x01 台の BGM。 */
-	if (hw_->board_ == CEMU_AC_BOARD_SEGA_SYS1 && ge && !hw_->TrackfldSn()) {
+	if (hw_->board_ == CEMU_AC_BOARD_SEGA_SYS1 && ge && !hw_->TrackfldSn() && !hw_->SystemePsg()) {
 		const uint8_t c = songCmd_;
 		/* 0x90 は spatter で持続。0x87 は 4dwarrio の BGM 2 であり SE ではない。0x97 は raflesia で Title BGM、pitfall2 で Credit — 全体 SE 扱いしない。 */
 		const int bad = (c == 0x91 || c == 0x95 || c == 0xb3);
@@ -1219,9 +1298,9 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 				songCmd_ = 0x09u;
 				songCmdWord_ = 0x09u;
 			} else if (_stricmp(ar, "bayroute") == 0 && c == 0x08u) {
-				/* START → TITLE。CREDIT は STAGE 1 なので even/odd が分かれる。 */
-				songCmd_ = 0xc5u;
-				songCmdWord_ = 0xc5u;
+				/* START → BOSS。TITLE 0xC5 は $0374 が高帯で RST 00。 */
+				songCmd_ = 0x06u;
+				songCmdWord_ = 0x06u;
 			} else if (_stricmp(ar, "tturfu") == 0 && c == 0x12u) {
 				songCmd_ = 0x09u;
 				songCmdWord_ = 0x09u;
@@ -2659,6 +2738,8 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 				|| (hw_->PeekMem(0) == 0xc3 && hw_->PeekMem(1) == 0xd0
 					&& hw_->PeekMem(2) == 0x03))) {
 			/* horshoes/flipull: 汎用 0.5s は map 0 の A000 へ落ちる。palamed/cachat は通常 settle。 */
+		} else if (hw_->BankpSn()) {
+			/* 0220 の CALL 07D4 が RST38 スクリプト。汎用 0.5s は DAF3 に届かない。 */
 		} else {
 			RunUntil(bootCycles);
 		}
@@ -2724,6 +2805,41 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 		cmdIndex_ = 1;
 		triggered_ = 1;
 		RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 5);
+		nextCmdAt_ = (uint64_t)~0ull;
+		return 1;
+	}
+	if (hw_->GigandesSyt()) {
+		/* East Tech Gigandes: NMI $0066 は RETI。$0068 が SYT PORT01 をポール。
+		   汎用 0xEF は C000 初期化前だと 0091 が PORT23 を消費し、後続曲が 00C5 で待つ。 */
+		for (int i = 0; i < 180; i++) {
+			RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 60);
+			Ay_Cpu* c = hw_->Cpu();
+			const unsigned pc = c ? (unsigned)c->r.pc : 0;
+			if (c && c->r.iff1 && pc >= 0x0068u && pc <= 0x007bu)
+				break;
+		}
+		const uint8_t cmd = songCmd_ ? songCmd_ : (uint8_t)0x04;
+		hw_->SetSoundCommand(cmd);
+		/* 013D が F200 でバンク切替。曲データは 4000-7FFF。未切替だと 0000 のミラーを読む。 */
+		if (cmd <= 0x0au)
+			hw_->TaitoF200Bank(1);
+		else if (cmd <= 0x18u)
+			hw_->TaitoF200Bank(2);
+		else
+			hw_->TaitoF200Bank(3);
+		cmdIndex_ = 1;
+		triggered_ = 1;
+		RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 5);
+		if (uint8_t* m = hw_->Mem()) {
+			if ((m[0xc006] & 1u) == 0) {
+				m[0xc005] = cmd;
+				m[0xc006] = 1;
+				const unsigned src = 0x2f40u + 0x16u * (unsigned)(cmd ? (cmd - 1u) : 0);
+				if (src + 0x16u <= 0x4000u)
+					memcpy(m + 0xc104, m + src, 0x16);
+				memset(m + 0xc029, 0, 0x0b);
+			}
+		}
 		nextCmdAt_ = (uint64_t)~0ull;
 		return 1;
 	}
@@ -2831,6 +2947,8 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 			/* 旧 TNZS: PC060HA 無し。tnzsjo は (EF11)==1 待ちのあと EF10 を poll。chukatai ハンドシェイクは E003=55 のち AA。kageki は E03E を読む。insectx は EC09 握手のあと RST 08。 */
 			const uint8_t b3 = hw_->PeekMem(3);
 			if (b3 == 0xc3 && hw_->PeekMem(4) == 0xa1 && hw_->PeekMem(5) == 0x01) {
+				/* insectx: CALL $01FB が EC09==EE 待ち。そのあと 01F8 EI;JR $ がアイドル。
+				   旧トランポリンは SP=D77E / PC=0008 で戻り先が無く RST 00 になった。 */
 				if (uint8_t* m = hw_->Mem())
 					m[0xec09] = 0xee;
 				for (int i = 0; i < 90; i++) {
@@ -2840,20 +2958,28 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 				}
 				if (uint8_t* m = hw_->Mem())
 					m[0xec09] = 0;
-				for (int i = 0; i < 90; i++) {
+				for (int i = 0; i < 120; i++) {
 					RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 60);
 					Ay_Cpu* c = hw_->Cpu();
 					const unsigned pc = c ? (unsigned)c->r.pc : 0;
-					if (pc >= 0x01e8u && pc <= 0x01f4u)
+					if (pc == 0x01f8u || pc == 0x01f9u)
 						break;
 				}
 				if (Ay_Cpu* c = hw_->Cpu()) {
-					c->r.sp = 0xd77e;
+					if (uint8_t* m = hw_->Mem()) {
+						uint16_t sp = c->r.sp;
+						if (sp < 0xd000u || sp >= 0xe000u)
+							sp = 0xd77e;
+						sp = (uint16_t)(sp - 2);
+						m[sp] = 0xf9;
+						m[(uint16_t)(sp + 1)] = 0x01;
+						c->r.sp = sp;
+					}
 					c->r.b.a = songCmd_ ? songCmd_ : (uint8_t)0x01;
 					c->r.iff1 = 0;
 					c->r.iff2 = 0;
 					c->irqDelay = 0;
-					c->r.pc = 0x0008;
+					c->r.pc = 0x011d;
 				}
 				cmdIndex_ = 1;
 				triggered_ = 1;
@@ -3071,19 +3197,14 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 				|| (m[0x0060] == 0x2d && m[0x0061] == 0x03));
 			const int flip = m && (m[0] == 0xc3 && m[1] == 0xd0 && m[2] == 0x03);
 			if (hors) {
-				/* horshoes: $00C3 = CALL $016B（$4511 が A000 へ YM）。
-				   $0503 は DIP/PPI、$05F9 は FF03 クリア、$0C6C は 8BE2 の FF 待ち。 */
+				/* horshoes: $00C3 = CALL $016B（$4511 が音源 RAM）。05A2 は PPI 読、
+				   05F9 はテーブル初期化。0503 DIP と 0C6C の 8BE2=$FF 待ちだけ RET。 */
 				hw_->SetTaitoOpmMap(14);
-				m[0x00b2] = 0x00;
-				m[0x00b3] = 0x00;
-				{
-					unsigned a;
-					for (a = 0x00c6u; a < 0x00e6u; a++)
-						m[a] = 0x00;
-				}
-				m[0xff00] = 0x60;
+				m[0x0503] = 0xc9;
+				m[0x0c6c] = 0xc9;
+				m[0xff00] = 0x5e;
 				m[0xff01] = 0x60;
-				m[0xff02] = 0x60;
+				m[0xff02] = 0x62;
 				if (c) {
 					c->r.pc = 0x00c3;
 					c->r.sp = 0x9ffe;
@@ -3094,31 +3215,50 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 					c->irqDelay = 0;
 				}
 			} else if (flip) {
+				/* 04D0 は I=0、FF00=04/06/08、FF03=07、IM 2 のあと CALL $0068（8231 待ち）。
+				   0B00 の DSW AND は 8215/8216 の「前回値」を見るので 0xFF を種まき。
+				   0569 の EI 直後に切ると 059A の 0xEF が後から曲を潰すので数フレーム置く。 */
 				hw_->SetTaitoOpmMap(14);
+				m[0x8213] = 0xff;
+				m[0x8214] = 0xff;
+				m[0x8215] = 0xff;
+				m[0x8216] = 0xff;
+				m[0x8219] = 0xff;
+				m[0x821a] = 0xff;
+				m[0xff00] = 0x04;
+				m[0xff01] = 0x06;
+				m[0xff02] = 0x08;
+				m[0xff03] = 0x07;
 				if (c) {
 					c->r.pc = 0x04d0;
 					c->r.sp = 0x9ffe;
-					c->r.im = 0;
+					c->r.im = 2;
+					c->r.i = 0;
 					c->r.iff1 = 0;
+					c->r.iff2 = 0;
 					c->irqDelay = 0;
 				}
 			}
 			for (int i = 0; i < 240; i++) {
 				RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 60);
 				Ay_Cpu* c2 = hw_->Cpu();
-				if (c2 && c2->r.iff1 && c2->r.im == 2)
+				if (c2 && c2->r.iff1 && c2->r.im == 2 && (!flip || i >= 40))
 					break;
 			}
 			if (hors && m) {
-				m[0xff00] = 0x60;
+				m[0xff00] = 0x5e;
 				m[0xff01] = 0x60;
-				m[0xff02] = 0x60;
-				if ((m[0xff03] & 7u) == 0)
-					m[0xff03] = 0x06;
+				m[0xff02] = 0x62;
+				m[0xff03] = (uint8_t)(m[0xff03] | 0x04u);
+			} else if (flip && m) {
+				m[0xff00] = 0x04;
+				m[0xff01] = 0x06;
+				m[0xff02] = 0x08;
+				m[0xff03] = (uint8_t)(m[0xff03] | 0x02u);
 			}
 			hw_->SetSoundCommand(songCmd_ ? songCmd_ : (uint8_t)0x01);
 			if (Ay_Cpu* c2 = hw_->Cpu()) {
-				if (hors) {
+				if (hors || flip) {
 					c2->r.im = 2;
 					c2->r.i = 0;
 				}
@@ -3208,7 +3348,10 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 				if (hw_->MainIsYm2203())
 					m[0x8f25] = 0x07;
 				if (hw_->MainIsYm2203()) {
-					/* masterw: 8F26 bit0 セットだと 033A は 8F27 へハンドシェイクをキューするだけ — CALL 0388 しない。bit0 をクリアし曲を 8F02 リングへ入れ、033A に <0x35 経路（実際にボイス開始）を取らせてから許可を戻す。 */
+					/* masterw/champwr: 8F26 bit0 セットだと 033A は 8F27 へハンドシェイクをキューするだけ。
+					   tetrista/cameltrya/viofight は 000B で PC060HA を追加待ちし、ドレインは
+					   LD A,$0E / LD ($9000),A（YM バンク）のあと 8F02 を見る。champwr の
+					   PC=033A/戻る 0273 は tetrista では CP $EF 途中と曲表で RST 00 になる。 */
 					if (Ay_Cpu* cpu = hw_->Cpu()) {
 						while (hw_->IrqPulsePending())
 							hw_->TakeIrqPulse();
@@ -3218,21 +3361,59 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 						m[0x8f00] = wr;
 						m[0x8f01] = rd;
 						m[0x8f02 + wr] = songCmd_;
-						/* メインループ CALL 033A 地点からドレイン */
+						uint16_t drain = 0x033a;
+						uint16_t retv = 0x0273;
+						if (m[0x0b] == 0x3e && m[0x05] == 0x32
+							&& m[0x06] == 0x00 && m[0x07] == 0xa0) {
+							drain = 0;
+							for (unsigned a = 0x180u; a < 0x280u && a + 5u < 0x10000u; a++) {
+								if (m[a] == 0x3eu && m[a + 1] == 0x0eu
+									&& m[a + 2] == 0x32u && m[a + 3] == 0x00u
+									&& m[a + 4] == 0x90u) {
+									drain = (uint16_t)a;
+									break;
+								}
+							}
+							if (drain) {
+								retv = 0;
+								for (unsigned a = 0x100u; a < 0x200u && a + 3u < 0x10000u; a++) {
+									if (m[a] == 0xcdu && m[a + 1] == (uint8_t)drain
+										&& m[a + 2] == (uint8_t)(drain >> 8)) {
+										retv = (uint16_t)(a + 3u);
+										break;
+									}
+								}
+								if (!retv)
+									retv = (uint16_t)(drain + 0x13u);
+							} else {
+								drain = 0x033a;
+							}
+							if (cpu->r.sp < 0x8000u)
+								cpu->r.sp = 0x8ffe;
+						}
 						const uint16_t sp0 = cpu->r.sp;
 						const uint16_t sp = (uint16_t)(sp0 - 2);
-						m[(sp + 0) & 0xffffu] = 0x73; /* 戻り @0273 */
-						m[(sp + 1) & 0xffffu] = 0x02;
+						m[(sp + 0) & 0xffffu] = (uint8_t)retv;
+						m[(sp + 1) & 0xffffu] = (uint8_t)(retv >> 8);
 						cpu->r.sp = sp;
 						cpu->r.iff1 = 0;
 						cpu->r.iff2 = 0;
 						cpu->irqDelay = 0;
-						cpu->r.pc = 0x033a;
+						cpu->r.pc = drain;
 					}
 					RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 30);
 					if (uint8_t* mm = hw_->Mem()) {
-						mm[0x8f25] = 0x07;
-						mm[0x8f26] = 0x01;
+						if (mm[0x0b] == 0x3e && mm[0x05] == 0x32
+							&& mm[0x06] == 0x00 && mm[0x07] == 0xa0) {
+							/* cameltrya/tetrista: 0xEF は 8F26=7。1 だと bit1/2 が無くシーケンサが止まる。
+							   8F27 bit0 はドレインが曲開始を捨ててハンドシェイクに逃げる。 */
+							mm[0x8f26] = 0x07;
+							mm[0x8f27] = 0x00;
+							mm[0x8f25] = 0x07;
+						} else {
+							mm[0x8f25] = 0x07;
+							mm[0x8f26] = 0x01;
+						}
 					}
 					if (Ay_Cpu* cpu = hw_->Cpu()) {
 						cpu->r.iff1 = 1;
@@ -3353,6 +3534,78 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 		triggered_ = 1;
 		RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 5);
 	}
+	if (hw_->BankpSn()) {
+		uint8_t* m = hw_->Mem();
+		Ay_Cpu* c = hw_->Cpu();
+		const int combh = (m && m[0] == 0x31 && m[1] == 0xa0 && m[2] == 0xe7) ? 1 : 0;
+		if (combh) {
+			/* combh: 0220 は FF。E800 で 4C58 mute / 4B90 開始 / HALT+4C84。NMI SP=E770。 */
+			if (c) {
+				c->r.pc = 0xe800;
+				c->r.sp = 0xe7a0;
+				c->r.iff1 = 0;
+				c->r.iff2 = 0;
+				c->irqDelay = 0;
+			}
+			hw_->SetSoundCommand(songCmd_);
+			int reached = 0;
+			for (int i = 0; i < 240; i++) {
+				RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 60);
+				Ay_Cpu* c2 = hw_->Cpu();
+				const unsigned pc = c2 ? (unsigned)c2->r.pc : 0;
+				if (pc == 0xe810u || pc == 0xe811u || pc == 0xe814u || pc == 0xe815u
+					|| (pc >= 0x4c84u && pc <= 0x4ca8u)) {
+					reached = 1;
+					break;
+				}
+			}
+			if (!reached) {
+				if (Ay_Cpu* c3 = hw_->Cpu())
+					c3->r.pc = 0xe810;
+				RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 15);
+			}
+		} else {
+			/* 0220 は CALL DAF3 / RST 28 / JP E800。07D4 の RST38 は踏まない。
+			   トランポリンは NMI SP=E780 の下ではなく E800。DA04 が再生 bit7 を立てる。 */
+			if (m) {
+				if (m[0] == 0xc3 && m[1] == 0xc0 && m[2] == 0xab) {
+					m[1] = 0x20;
+					m[2] = 0x02;
+				}
+				if (m[0x0220] == 0x31 && m[0x0221] == 0x50 && m[0x0222] == 0xe7) {
+					m[0x0223] = 0xcd; m[0x0224] = 0xf3; m[0x0225] = 0xda;
+					m[0x0226] = 0xef;
+					m[0x0227] = 0xc3; m[0x0228] = 0x00; m[0x0229] = 0xe8;
+				}
+			}
+			if (c) {
+				c->r.pc = 0x0220;
+				c->r.sp = 0xe750;
+				c->r.iff1 = 0;
+				c->r.iff2 = 0;
+				c->irqDelay = 0;
+			}
+			hw_->SetSoundCommand(songCmd_);
+			int reached = 0;
+			for (int i = 0; i < 240; i++) {
+				RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 60);
+				Ay_Cpu* c2 = hw_->Cpu();
+				const unsigned pc = c2 ? (unsigned)c2->r.pc : 0;
+				if (pc == 0xe80cu || pc == 0xe80du) {
+					reached = 1;
+					break;
+				}
+			}
+			if (!reached) {
+				if (Ay_Cpu* c3 = hw_->Cpu())
+					c3->r.pc = 0xe800;
+				RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 15);
+			}
+		}
+		cmdIndex_ = 1;
+		triggered_ = 1;
+		RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 5);
+	}
 	if (hw_->GberetSn()) {
 		/* 7307 の C000 塗りは DJNZ で数 10 万サイクル。終わる前の NMI は SP=FFEC のまま。 */
 		for (int i = 0; i < 180; i++) {
@@ -3457,6 +3710,22 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 			if (c && c->r.iff1)
 				break;
 		}
+		CEmuAcArmHypersptSeq(hw_);
+		if (hw_->HypersptSn() && songCmd_ > 0 && songCmd_ < 0x40u)
+			songCmd_ = (songCmd_ & 1u) ? (uint8_t)0x44u : (uint8_t)0x45u;
+		hw_->SetSoundCommand(songCmd_);
+		cmdIndex_ = 1;
+		triggered_ = 1;
+		RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 5);
+	}
+	if (hw_->SystemePsg()) {
+		/* hangonjr: 062C ディレイ + RST08 が C204 を待つ。EI 後に CA00 注入。NMI は無い。 */
+		for (int i = 0; i < 180; i++) {
+			RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 60);
+			Ay_Cpu* c = hw_->Cpu();
+			if (c && c->r.iff1)
+				break;
+		}
 		hw_->SetSoundCommand(songCmd_);
 		cmdIndex_ = 1;
 		triggered_ = 1;
@@ -3473,6 +3742,7 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 		&& !hw_->PbactionAy()
 		&& !hw_->ChaknpopAy()
 		&& !hw_->GberetSn()
+		&& !hw_->BankpSn()
 		&& !hw_->HigemaruAy()
 		&& !hw_->MasaoAy()
 		&& !hw_->HustlerAy()
@@ -3480,8 +3750,23 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 		&& !hw_->TerracreYm2203()
 		&& !hw_->RobokidMitchellMap()
 		&& !hw_->TrackfldSn()
-		&& !(hw_->board_ == CEMU_AC_BOARD_KONAMI_PCM && hw_->PcmKind() == 3))
+		&& !hw_->SystemePsg()
+		&& !(hw_->board_ == CEMU_AC_BOARD_KONAMI_PCM && hw_->PcmKind() == 3)
+		&& hw_->board_ != CEMU_AC_BOARD_SYS32)
 		TryInjectCommand();
+	/* SYS32: ブート LDIR が E000 キューを 0x80/0 で埋める。その後ワンショット注入。
+	   4Hz 再注入は KEEP BGM を頭からやり直すのでしない。 */
+	if (hw_->board_ == CEMU_AC_BOARD_SYS32 && hw_->Cpu()) {
+		RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 5);
+		/* ga2 $00EA は (FFFF)!=0 なら待ち。ホスト V60 が居ないので 0 に戻す。 */
+		if (uint8_t* m = hw_->Mem())
+			m[0xffff] = 0;
+		cmdIndex_ = 0;
+		TryInjectCommand();
+		nextCmdAt_ = (uint64_t)~0ull;
+		booted_ = 1;
+		return 1;
+	}
 	/* Raizing / Eighting: 全改訂が RAM テストを通り、割り込んではいけない（Battle Bakraid は未設定 SP へ push し自テスト失敗）。音源 ROM がコマンドループに達してから投稿。Battle Garegga と Batrider は曲コードを見る前に 0x55 / 0xAA ハンドシェイク解除が要る。TryInjectCommand は RaizingHandshakeAcked が立つまでプローブを送る。 */
 	if (hw_->board_ == CEMU_AC_BOARD_RAIZING) {
 		const int type = hw_->RaizingType();
@@ -3938,6 +4223,33 @@ int CDriverAc::OverlayTitle(unsigned titleCode)
 	}
 	if (hw_->TerracreYm2203()) {
 		hw_->SetSoundCommand(songCmd_);
+		cmdIndex_ = 1;
+		triggered_ = 1;
+		heard_ = 0;
+		return 1;
+	}
+	if (hw_->HypersptSn()) {
+		if (songCmd_ > 0 && songCmd_ < 0x40u)
+			songCmd_ = (songCmd_ & 1u) ? (uint8_t)0x44u : (uint8_t)0x45u;
+		CEmuAcArmHypersptSeq(hw_);
+		hw_->SetSoundCommand(songCmd_);
+		cmdIndex_ = 1;
+		triggered_ = 1;
+		heard_ = 0;
+		return 1;
+	}
+	if (hw_->GigandesSyt()) {
+		if (songCmd_ == 0x01u || songCmd_ == 0x02u)
+			songCmd_ = 0x04u;
+		else if (songCmd_ == 0x04u || songCmd_ == 0x05u || songCmd_ == 0x03u)
+			songCmd_ = 0x0bu;
+		hw_->SetSoundCommand(songCmd_);
+		if (songCmd_ <= 0x0au)
+			hw_->TaitoF200Bank(1);
+		else if (songCmd_ <= 0x18u)
+			hw_->TaitoF200Bank(2);
+		else
+			hw_->TaitoF200Bank(3);
 		cmdIndex_ = 1;
 		triggered_ = 1;
 		heard_ = 0;
@@ -4584,6 +4896,16 @@ void CDriverAc::DeliverIrqs()
 
 	/* Sega System1/2: TIMER "soundirq" が 32V/96V/… — フレーム 4 回、自動 ack。ラッチ NMI が曲番号を運び、IRQ がシーケンサを駆動。 */
 	if (hw_->board_ == CEMU_AC_BOARD_SEGA_SYS1) {
+		if (hw_->SystemePsg()) {
+			/* MAME seage: VDP2 n_int → IRQ0 60Hz。NMI 無し。240Hz SYS1 タイマは使わない。 */
+			const uint64_t now = (uint64_t)cpu->time64();
+			const uint64_t period = (uint64_t)cpuHz_ / 60;
+			if (period > 0 && now >= nextGngIrq_ && cpu->r.iff1)
+				Ay_CpuIm1Interrupt(cpu);
+			if (period > 0 && now >= nextGngIrq_)
+				nextGngIrq_ = now + period;
+			return;
+		}
 		if (hw_->TrackfldSn()) {
 			/* MAME trackfld_audio sh_irqtrigger: ラッチエッジ → Z80 IRQ0 HOLD。周期 240Hz は無い。 */
 			if (hw_->IrqPulsePending()) {
@@ -4858,6 +5180,33 @@ void CDriverAc::DeliverIrqs()
 			}
 			return;
 		}
+		/* cameltrya extraHs（drain $0222）: NMI は RETN、メインは EI;DI。YM タイマ bit が 0 のままだと
+		   250Hz ゲートが IM1 を撃たず、ISR $01B3 の bit0 待ちでシーケンサが死ぬ。cadash と同じ 75Hz。 */
+		if (hw_->MainIsYm2203() && hw_->TaitoOpmMap() == 0
+			&& hw_->PeekMem(0x0b) == 0x3e && hw_->PeekMem(5) == 0x32
+			&& hw_->PeekMem(7) == 0xa0
+			&& hw_->PeekMem(0x222) == 0x3e && hw_->PeekMem(0x223) == 0x0e) {
+			if (hw_->IrqPulsePending()) {
+				hw_->TakeIrqPulse();
+				Ay_CpuNmi(cpu);
+			}
+			if (cpu->r.im == 1) {
+				const uint64_t now = (uint64_t)cpu->time64();
+				const uint64_t period = (uint64_t)cpuHz_ / 75;
+				if (period > 0 && now >= nextGngIrq_) {
+					const unsigned pc = (unsigned)cpu->r.pc;
+					const int inIsr = (pc >= 0x01b3u && pc < 0x0222u);
+					if (!inIsr && hw_->PeekMem(0x0066) == 0xed) {
+						cpu->r.iff1 = 1;
+						cpu->irqDelay = 0;
+					}
+					if (cpu->r.iff1 && !inIsr)
+						Ay_CpuIm1Interrupt(cpu);
+					nextGngIrq_ = now + period;
+				}
+			}
+			return;
+		}
 		if (hw_->TaitoOpmMap() == 3 || hw_->TaitoOpmMap() == 4
 			|| hw_->TaitoOpmMap() == 5 || hw_->TaitoOpmMap() == 6) {
 			if (hw_->IrqPulsePending() && hw_->FlstoryNmiEn()) {
@@ -5122,7 +5471,7 @@ void CDriverAc::DeliverIrqs()
 			return;
 		}
 		if (hw_->BankpSn()) {
-			/* MAME bankp: vblank NMI。00B4 ワーカーと DA73 の両方が同一 NMI 時基。 */
+			/* MAME bankp: vblank NMI。port 07 bit4 は RST 28 で立つ。0220 中も DB6B が要るので落とさない。 */
 			const uint64_t now = (uint64_t)cpu->time64();
 			const uint64_t period = (uint64_t)cpuHz_ / 60;
 			if (period > 0 && now >= nextGngIrq_) {
@@ -5652,6 +6001,19 @@ void CDriverAc::DeliverIrqs()
 	}
 
 	/* pending ラッチ → NMI（System16A / After Burner）または IM1 IRQ（System16B / CPS1 / OutRun）。IFF1 が立つまで IM1 線を保持 — DI 下で ForceIm1 しない。After Burner ラッチは NMI+RETN。 */
+	if (hw_->board_ == CEMU_AC_BOARD_SYS32) {
+		hw_->Sys32TickYmIrq();
+		if (hw_->IrqPulsePending()) {
+			hw_->TakeIrqPulse();
+			if (hw_->PeekMem(0x66) == 0xED && hw_->PeekMem(0x67) == 0x45)
+				Ay_CpuNmi(cpu);
+		}
+		/* IM2 は I テーブルがデータ領域のタイトル（f1en $0100）を壊す。
+		   system_multi は IM1 RST38。YM は status poll（arabfgt/ga2）。 */
+		if (hw_->Sys32IrqPending() && cpu->r.iff1 && cpu->r.im == 1)
+			Ay_CpuIm1Interrupt(cpu);
+		return;
+	}
 	if (hw_->IrqPulsePending()) {
 		if (hw_->board_ == CEMU_AC_BOARD_SYS16A
 			|| hw_->board_ == CEMU_AC_BOARD_ABURNER
@@ -5659,7 +6021,6 @@ void CDriverAc::DeliverIrqs()
 			|| (hw_->board_ == CEMU_AC_BOARD_SYS18 && !hw_->NewufoMap())
 			|| hw_->board_ == CEMU_AC_BOARD_SYS24
 			|| hw_->board_ == CEMU_AC_BOARD_VSYSTEM
-			|| hw_->board_ == CEMU_AC_BOARD_SYS32
 			|| (hw_->board_ == CEMU_AC_BOARD_SNK_OPL && (hw_->SnkMapKind() == 0 || hw_->SnkMapKind() == 3))) {
 			hw_->TakeIrqPulse();
 			Ay_CpuNmi(cpu);

@@ -30,6 +30,7 @@ public:
 
 	void SetSongCommand(unsigned code);
 	void DisableDelaySeqTick();
+	void EnableDelaySeqTick();
 	unsigned SongCommand() const { return songCode_; }
 	int MusashiReady() const { return musashiReady_; }
 	/* DPRAM バケット i の読込回数。各 64 バイト（Read8 参照） */

@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include <Windows.h>
 #include "PluginKinds.h"
@@ -257,10 +257,12 @@ void VstLiveTapPushShort(int portIndex0to2, DWORD shortMsg);
    Renderers that run seconds ahead of the speakers must stamp their taps. */
 void VstLiveTapPushShortAt(int portIndex0to2, DWORD shortMsg, __int64 dueFrame);
 void VstLiveTapFlush(void);
+void VstLiveTapPushSysexAt(int portIndex0to2, const unsigned char* data, int bytes, __int64 dueFrame);
 void VstLiveTapPushSysex(int portIndex0to2, const unsigned char* data, int bytes);
 int VstLiveTapStealShorts(BYTE* ports, DWORD* msgs, int maxCount);
 int VstLiveTapStealShortsDue(__int64 nowFrame, BYTE* ports, DWORD* msgs, int maxCount);
 int VstLiveTapStealSysex(int* portIndex0to2, unsigned char* data, int maxBytes);
+int VstLiveTapStealSysexDue(__int64 nowFrame, int* portIndex0to2, unsigned char* data, int maxBytes);
 
 #ifdef __cplusplus
 }

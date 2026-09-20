@@ -398,6 +398,7 @@
     <ClCompile Include="CdPlayerDlg.cpp" />
     <ClCompile Include="CPianoRoll.cpp" />
     <ClCompile Include="CMidiMonitorDlg.cpp" />
+    <ClCompile Include="CMidiHwPanel.cpp" />
     <ClCompile Include="PcHwMidiIn.cpp" />
     <ClCompile Include="CFmMonitorDlg.cpp" />
     <ClCompile Include="gpu\GpuDx11.cpp" />
@@ -837,6 +838,7 @@
     <ClInclude Include="PianoKeyTable.h" />
     <ClInclude Include="CPianoRoll.h" />
     <ClInclude Include="CMidiMonitorDlg.h" />
+    <ClInclude Include="CMidiHwPanel.h" />
     <ClInclude Include="PcHwMidiIn.h" />
     <ClInclude Include="CFmMonitorDlg.h" />
     <ClInclude Include="gpu\GpuDx11.h" />

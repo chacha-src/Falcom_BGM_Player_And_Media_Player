@@ -5142,6 +5142,16 @@ void CMediaPlayerDlg::OnTimer(UINT nIDEvent)
 		}
 	}
 	else if (nIDEvent == 3) {
+		extern int playy;
+		/* 停止中は 33ms BPM/LRC/リモートを回さない。ホバーだけ残してバナー前面化の種は維持。 */
+		if (playy == 0) {
+			if (::IsWindowVisible(GetSafeHwnd()) && !IsIconic()) {
+				CPoint pt; ::GetCursorPos(&pt); ScreenToClient(&pt);
+				g_mpBannerHover = (!g_mpSideJacket && m_bannerRect.PtInRect(pt)) ? 1 : 0;
+			}
+			else g_mpBannerHover = 0;
+		}
+		else {
 		MpBpmOnTimerTick();
 		if (savedata.mpRemoteOn)
 			MpRemoteUiTick(this);
@@ -5178,6 +5188,7 @@ void CMediaPlayerDlg::OnTimer(UINT nIDEvent)
 			// Timer3 では行わない（精度不足のため TheadLoop ベースに移植済み）
 		}
 		else g_mpBannerHover = 0;
+		} /* playy != 0 */
 	}
 	else if (nIDEvent == 4) {
 		// 遅延アクリル再適用(合成確定後)。一度きり。

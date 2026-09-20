@@ -23,6 +23,11 @@ private:
 	void KickMailboxOnce();
 	void PostTypeE();
 	void ArmKeyOnGates();
+	void TickSeqHost();
+	void RestoreMailboxSleep();
+	void ExpireHeadWaitOnce();
+	void PunchMediumWaits();
+	unsigned MapSongCode(unsigned code);
 	void LogState(const char* tag);
 
 	CHardF3* hw_;
@@ -52,6 +57,14 @@ private:
 	int seqTickAcc_;
 	unsigned seqCalls_;
 	unsigned irq6Vec_;
+	int delayGated_;
+	int expiredHead_;
+	unsigned lastHeadWait_;
+	unsigned waitDecs_;
+	unsigned typeEPosts_;
+	int f3Arabianm_;
+	unsigned idlePark_;
+	unsigned mbDisp_;
 };
 
 /* F3 ドライバ生成 */
