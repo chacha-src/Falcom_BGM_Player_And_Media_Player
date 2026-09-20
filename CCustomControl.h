@@ -110,6 +110,8 @@ static inline BOOL CCC_IsInwoman()
 BOOL CCC_InwomanHotkey(MSG* pMsg, CWnd* pWnd);
 // 淫女モードのアニメ用に全ウィンドウを定期再描画するタイマーを用意(冪等)
 void CCC_StartInwomanTimer();
+// 終了直前。再描画タイマーを止めて BN_CLICKED / stop() を食わない。
+void CCC_StopInwomanTimer();
 // 不透明パネル等への淫女オーバーレイ描画（ポップアップメニュー等から利用）
 void CCC_DrawInwoman(CDC* pDC, const CRect& rc, BOOL bAeroTrans);
 // GDI キャンバス（ピアノロール／アナライザ等）へ裸体を重ねる。アクリルでもスチルは出す。
@@ -1200,6 +1202,8 @@ protected:
     afx_msg void OnKillFocus(CWnd*);
     afx_msg void OnEnable(BOOL);
     afx_msg void OnTimer(UINT_PTR nIDEvent);
+    afx_msg void OnLButtonDown(UINT nFlags, CPoint point);
+    afx_msg void OnLButtonUp(UINT nFlags, CPoint point);
 
     DECLARE_MESSAGE_MAP()
 

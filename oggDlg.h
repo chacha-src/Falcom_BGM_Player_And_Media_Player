@@ -1,4 +1,4 @@
-// oggDlg.h : ヘッダー ファイル
+﻿// oggDlg.h : ヘッダー ファイル
 //
 #include "afxmt.h"
 //#include "afxcmn.h"
@@ -8,6 +8,8 @@
 // プレイリスト行の表示用メタデータを og 側へ反映(未再生時のバナー/情報パネル用)
 void ApplyPlaylistRowDisplay(const playlistdata0& row);
 void OggPersistSaveDatNow();
+/* 旧独立 FM モニタ旗 → MIDI モニタ旗。fmmonwindow=1 なら midimonwindow=1 にして FM 旗は落とす。 */
+void OggMigrateFmMonToMidiMonFlag();
 
 #ifndef WM_TIMERP_VSYNC_TICK
 #define WM_TIMERP_VSYNC_TICK (WM_APP + 70)

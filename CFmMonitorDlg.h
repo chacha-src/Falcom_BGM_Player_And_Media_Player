@@ -25,8 +25,9 @@ public:
 	void LayoutHelpBtn();
 	void PersistGeom();
 	void RestoreGeom();
-	void SetHosted(int hosted) { m_hosted = hosted ? 1 : 0; }
+	void SetHosted(int hosted);
 	int IsHosted() const { return m_hosted; }
+	int BodyTop() const; /* hosted は 0。親キャプションの下に載せる */
 	void ApplyPcAudioKeys(const BYTE levels108[108]); /* 無演奏時のPC音鍵盤 */
 
 protected:

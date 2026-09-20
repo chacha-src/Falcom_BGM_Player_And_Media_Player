@@ -329,6 +329,8 @@ private:
 	BYTE m_pcAudioOn[NOTE_MAX];
 	void EnsureFmChild();
 	void LayoutFmChild();
+	void HideMidiGpuOverlay();
+	int FmShowing() const;
 	bool m_dirtyHead;
 	bool m_fullDraw;
 	bool m_volDragging;

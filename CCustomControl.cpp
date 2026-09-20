@@ -13,6 +13,7 @@
 #include <TlHelp32.h>
 #include <imm.h>
 #include <wincodec.h>
+#include <zstd.h>
 
 #pragma comment(lib, "msimg32.lib")
 #pragma comment(lib, "psapi.lib")
@@ -3438,10 +3439,21 @@ static void CCC_IwSeqReset()
     g_holdT0 = 0;
 }
 
+// 終了／閉じる。全控件 Invalidate で BN_CLICKED が落ちやすいので再描画対象から外す。
+static BOOL CCC_IwIsQuitCtrl(HWND hWnd)
+{
+    if (!hWnd)
+        return FALSE;
+    const UINT id = (UINT)::GetDlgCtrlID(hWnd);
+    return id == IDOK || id == IDC_MP_EXIT || id == IDC_CAP_CLOSE;
+}
+
 // ちらつき対策: 背景消去を伴う全画面再描画はやめ、オーナードロー(ダブルバッファ)の
 // カスタムコントロールだけを消去なしで無効化する。
 static BOOL CALLBACK CCC_InwomanInvalidateChild(HWND hChild, LPARAM)
 {
+    if (CCC_IwIsQuitCtrl(hChild) || CCC_IsCaptionChromeCtrl(hChild))
+        return TRUE;
     CWnd* p = CWnd::FromHandlePermanent(hChild);
     if (p && ::IsWindowVisible(hChild) &&
         (p->IsKindOf(RUNTIME_CLASS(CCustomStandardButton)) ||
@@ -3516,6 +3528,7 @@ static void CALLBACK CCC_InwomanTimerProc(HWND, UINT, UINT_PTR, DWORD)
     }
     // クリック／ドラッグ中に全控件 Invalidate すると BN_CLICKED が欠落しやすい
     if (::GetCapture() != NULL) return;
+    if (::GetKeyState(VK_LBUTTON) < 0 || ::GetKeyState(VK_RBUTTON) < 0) return;
     if (CCustomPopupMenu::GetTrackingRoot() != NULL) return;
     CCC_InwomanInvalidateAll();
 }
@@ -3526,6 +3539,14 @@ void CCC_StartInwomanTimer()
     if (g_inwomanTimer == 0)
         // 55ms 全控件再描画は入力飢餓の温床。Soft タイマと同程度に間引く
         g_inwomanTimer = ::SetTimer(NULL, 0, 180, CCC_InwomanTimerProc);
+}
+
+void CCC_StopInwomanTimer()
+{
+    if (g_inwomanTimer) {
+        ::KillTimer(NULL, g_inwomanTimer);
+        g_inwomanTimer = 0;
+    }
 }
 
 // 隠し演出の入口/出口。各メインダイアログの PreTranslateMessage から。ヘルプ非掲載。
@@ -4042,13 +4063,15 @@ static void CCC_DrawVibrator(CDC* pDC, int cx, int cy, int sz, double t, double 
     }
 }
 
-// 裏演出スチル: RCDATA は IWJ1 ジャム。読み出し時だけ元 PNG に戻す。
+// 裏演出スチル: RCDATA は IWJ2。XOR(inner*13) → zstd → XOR(outer*7)。
 static const BYTE kIwJamKey[32] = {
     0xA7, 0x3C, 0x91, 0xE2, 0x5B, 0x08, 0xD4, 0x6F,
     0xC1, 0x2A, 0x77, 0xBE, 0x14, 0x9D, 0xF0, 0x33,
     0x4E, 0x88, 0x1B, 0xC6, 0x59, 0xA0, 0x7D, 0x02,
     0xE5, 0x36, 0xB9, 0x4C, 0x70, 0xAD, 0x18, 0xF3
 };
+static const int kIwXorInnerMul = 13;
+static const int kIwXorOuterMul = 7;
 
 struct CCC_IwBmp {
     HBITMAP hbm = NULL;
@@ -4066,20 +4089,36 @@ static const UINT kIwResId[IW_COUNT] = {
     IDR_IW_FLUID, IDR_IW_ROTOR, IDR_IW_VIBE
 };
 
-// RCDATA の IWJ1 ジャムを PNG バイト列へ。ヘルプ非掲載の裏リソース。
+static void CCC_IwXor(BYTE* p, DWORD n, int mul)
+{
+    if (!p || n == 0)
+        return;
+    for (DWORD i = 0; i < n; ++i)
+        p[i] = (BYTE)(p[i] ^ kIwJamKey[i % 32] ^ ((i * (DWORD)mul + 7) & 0xFF));
+}
+
+// RCDATA の IWJ2 を PNG バイト列へ。外側XOR → zstd展開 → 内側XOR。
 static BOOL CCC_IwUnjam(const BYTE* src, DWORD n, BYTE* out, DWORD outn)
 {
-    if (!src || !out || n < 8 || memcmp(src, "IWJ1", 4) != 0)
+    if (!src || !out || n < 12 || memcmp(src, "IWJ2", 4) != 0)
         return FALSE;
-    DWORD sz = 0;
-    memcpy(&sz, src + 4, 4);
-    if (sz == 0 || sz > 8 * 1024 * 1024 || 8 + sz > n) // 8MB 上限（壊れたリソース対策）
+    DWORD unc = 0, cmp = 0;
+    memcpy(&unc, src + 4, 4);
+    memcpy(&cmp, src + 8, 4);
+    if (unc == 0 || unc > 8 * 1024 * 1024 || cmp == 0 || cmp > 8 * 1024 * 1024)
         return FALSE;
-    if (sz > outn)
+    if (12 + cmp > n || unc > outn)
         return FALSE;
-    const BYTE* p = src + 8;
-    for (DWORD i = 0; i < sz; ++i)
-        out[i] = (BYTE)(p[i] ^ kIwJamKey[i % 32] ^ ((i * 13 + 7) & 0xFF));
+    BYTE* z = new (std::nothrow) BYTE[cmp];
+    if (!z)
+        return FALSE;
+    memcpy(z, src + 12, cmp);
+    CCC_IwXor(z, cmp, kIwXorOuterMul);
+    const size_t got = ZSTD_decompress(out, unc, z, cmp);
+    delete[] z;
+    if (ZSTD_isError(got) || got != (size_t)unc)
+        return FALSE;
+    CCC_IwXor(out, unc, kIwXorInnerMul);
     return TRUE;
 }
 
@@ -4165,22 +4204,23 @@ static BOOL CCC_IwEnsure(int idx)
         return FALSE;
     const DWORD n = ::SizeofResource(hi, hrs);
     const BYTE* mem = (const BYTE*)::LockResource(hg);
-    if (!mem || n < 8)
+    if (!mem || n < 12)
         return FALSE;
-    if (n < 8 || memcmp(mem, "IWJ1", 4) != 0)
+    if (memcmp(mem, "IWJ2", 4) != 0)
         return FALSE;
-    DWORD sz = 0;
-    memcpy(&sz, mem + 4, 4);
-    if (sz == 0 || sz > 8 * 1024 * 1024 || 8 + sz > n)
+    DWORD unc = 0, cmp = 0;
+    memcpy(&unc, mem + 4, 4);
+    memcpy(&cmp, mem + 8, 4);
+    if (unc == 0 || unc > 8 * 1024 * 1024 || cmp == 0 || cmp > 8 * 1024 * 1024 || 12 + cmp > n)
         return FALSE;
-    BYTE* png = new (std::nothrow) BYTE[sz];
+    BYTE* png = new (std::nothrow) BYTE[unc];
     if (!png)
         return FALSE;
-    if (!CCC_IwUnjam(mem, n, png, sz)) {
+    if (!CCC_IwUnjam(mem, n, png, unc)) {
         delete[] png;
         return FALSE;
     }
-    BOOL ok = CCC_IwDecodePng(png, sz, b);
+    BOOL ok = CCC_IwDecodePng(png, unc, b);
     delete[] png;
     return ok;
 }
@@ -4208,6 +4248,26 @@ static void CCC_IwBlit(CDC* pDC, int x, int y, int dw, int dh, int idx, BYTE alp
     ::GdiAlphaBlend(pDC->GetSafeHdc(), x, y, dw, dh, hdc, 0, 0, g_iwBmp[idx].w, g_iwBmp[idx].h, bf);
     ::SelectObject(hdc, old);
     ::DeleteDC(hdc);
+}
+
+// アスペクト維持で box 内に収める（横長ウィンドウで裸体を潰さない）。
+static void CCC_IwBlitContain(CDC* pDC, const CRect& box, int idx, BYTE alpha)
+{
+    if (!pDC || !CCC_IwEnsure(idx) || !g_iwBmp[idx].hbm)
+        return;
+    const int iw = g_iwBmp[idx].w, ih = g_iwBmp[idx].h;
+    const int bw = box.Width(), bh = box.Height();
+    if (iw < 2 || ih < 2 || bw < 2 || bh < 2)
+        return;
+    int dw, dh;
+    if ((LONGLONG)iw * bh > (LONGLONG)ih * bw) {
+        dw = bw;
+        dh = max(2, (int)((LONGLONG)bw * ih / iw));
+    } else {
+        dh = bh;
+        dw = max(2, (int)((LONGLONG)bh * iw / ih));
+    }
+    CCC_IwBlit(pDC, box.left + (bw - dw) / 2, box.top + (bh - dh) / 2, dw, dh, idx, alpha);
 }
 
 // 淫女オーバーレイ: 暗号化スチルを控件いっぱいに。PNG 抜きは文字・クリックを残す。
@@ -4256,8 +4316,8 @@ void CCC_DrawInwoman(CDC* pDC, const CRect& rc, BOOL bAeroTrans)
     }
 
     const BYTE aLace = IwA(130 + (int)(70 * heat));
-    const BYTE aBody = IwA(165 + (int)(55 * heat) + (int)(30 * climax));
-    const BYTE aFace = IwA(175 + (int)(70 * iku));
+    const BYTE aBody = IwA(200 + (int)(40 * heat) + (int)(10 * climax));
+    const BYTE aFace = IwA(210 + (int)(35 * iku));
     const int ox = (int)(1.5 * sin(t / 180.0) + 2 * twitch);
     const int oy = (int)(-1 * climax);
 
@@ -4271,36 +4331,31 @@ void CCC_DrawInwoman(CDC* pDC, const CRect& rc, BOOL bAeroTrans)
         CCC_IwBlit(pDC, rc.right - bw - 1, rc.bottom - bh - 1, bw, bh, IW_BLUSH, IwA(110 + (int)(60 * heat)));
     }
 
+    // 控件は1枚のM字スチルをアスペクト維持。潰して3枚重ねない。
     if (H >= 16 && W >= 24) {
-        const int bh = max(12, H * 88 / 100);
-        const int bw = max(18, W * 82 / 100);
-        CCC_IwBlit(pDC, rc.left + ox, rc.bottom - bh + oy, bw, bh, IW_BODY, aBody);
-    }
-
-    if (H >= 20 && W >= 36) {
-        const int bw = max(16, W * 38 / 100);
-        CCC_IwBlit(pDC, rc.right - bw - 1 + ox, rc.top + 1 + oy, bw, max(16, H * 62 / 100), IW_BODY2, IwA(aBody * 7 / 8));
+        CRect bodyBox(rc.left + ox, rc.top + oy, rc.right - 1, rc.bottom - 1);
+        CCC_IwBlitContain(pDC, bodyBox, IW_BODY, aBody);
     }
 
     if (H >= 18 && W >= 28) {
-        const int fs = min(min(H * 3 / 4, W * 3 / 5), 140);
+        const int fs = min(min(H / 3, W / 3), 72);
         CCC_IwBlit(pDC, rc.left + 1 + ox, rc.top + 1 + oy, fs, fs, IW_FACE, aFace);
     }
 
     if (H >= 18 && W >= 24) {
-        const int fw = max(14, W / 4), fh = max(16, H * 45 / 100);
+        const int fw = max(10, W / 6), fh = max(12, H / 5);
         CCC_IwBlit(pDC, rc.left + W / 3 - fw / 2, rc.bottom - fh - 1, fw, fh, IW_FLUID, IwA(150 + (int)(90 * iku)));
     }
 
-    // トイは裸体の秘所(左下寄り)を避ける。上端・右上へ。
+    // トイは裸体の秘所を避ける。右上へ小さく。
     if (H >= 16 && W >= 22) {
-        const int rs = min(min(H / 2, W / 3), 56);
+        const int rs = min(min(H / 4, W / 5), 40);
         CCC_IwBlit(pDC, rc.right - rs - 1 + ox, rc.top + 1 + oy, rs, rs, IW_ROTOR,
             IwA(180 + (int)(70 * heat)));
     }
     if (H >= 20 && W >= 30) {
-        const int vs = min(min(H / 2, W / 3), 68);
-        CCC_IwBlit(pDC, rc.right - vs - 1 + ox, rc.top + H / 4 + oy, vs, vs, IW_VIBE,
+        const int vs = min(min(H / 4, W / 5), 48);
+        CCC_IwBlit(pDC, rc.right - vs - 1 + ox, rc.top + H / 5 + oy, vs, vs, IW_VIBE,
             IwA(170 + (int)(70 * heat)));
     }
 
@@ -4372,35 +4427,36 @@ static void CCC_DrawInwomanDlgBody(CDC* pDC, const CRect& rc)
         FillRectAlpha(pDC, rc, RGB(255, 70, 120), (BYTE)(14 + (int)(36 * climax)));
     }
 
-    const int bodyH = max(40, H * 88 / 100);
-    const int bodyW = max(80, W * 78 / 100);
-    CCC_IwBlit(pDC, rc.left + ox, rc.bottom - bodyH + oy, bodyW, bodyH, IW_BODY,
-        IwA(180 + (int)(55 * heat)));
+    // メインはM字スチル1枚。顔は左上の小さな表情、2枚目は右下サムネ。潰して重ねない。
+    CRect bodyBox(rc);
+    bodyBox.DeflateRect(max(6, W / 48), max(6, H / 40));
+    bodyBox.OffsetRect(ox, oy);
+    CCC_IwBlitContain(pDC, bodyBox, IW_BODY, IwA(220 + (int)(25 * heat)));
 
-    const int face = min(min(W / 2, H * 3 / 5), 360);
-    CCC_IwBlit(pDC, rc.left + 4 + ox, rc.top + 4 + oy, face, face, IW_FACE,
-        IwA(190 + (int)(55 * iku)));
+    const int face = min(min(W / 6, H / 4), 176);
+    CCC_IwBlit(pDC, rc.left + 10 + ox, rc.top + 10 + oy, face, face, IW_FACE,
+        IwA(225 + (int)(25 * iku)));
 
-    const int sideW = max(56, W * 34 / 100);
-    CCC_IwBlit(pDC, rc.right - sideW - 4 + ox, rc.top + 4 + oy, sideW, H * 58 / 100, IW_BODY2,
-        IwA(165 + (int)(50 * heat)));
+    const int thumb = min(min(W / 5, H / 3), 220);
+    CRect t2(rc.right - thumb - 10 + ox, rc.bottom - thumb - 10 + oy,
+        rc.right - 10 + ox, rc.bottom - 10 + oy);
+    CCC_IwBlitContain(pDC, t2, IW_BODY2, IwA(200 + (int)(30 * heat)));
 
-    // 電マ・ロータは裸体の下腹部を避ける（右上／右中）
-    const int vh = min(200, max(64, H / 3));
-    CCC_IwBlit(pDC, rc.right - vh - 6 + ox, rc.top + 6 + oy, vh, vh, IW_VIBE,
+    const int vh = min(88, max(36, H / 8));
+    CCC_IwBlit(pDC, rc.right - vh - 8 + ox, rc.top + 8 + oy, vh, vh, IW_VIBE,
         IwA(195 + (int)(50 * heat)));
 
-    const int rh = min(120, max(40, H / 5));
-    CCC_IwBlit(pDC, rc.right - rh - 12 + ox, rc.top + H * 36 / 100 + oy, rh, rh, IW_ROTOR,
+    const int rh = min(56, max(28, H / 12));
+    CCC_IwBlit(pDC, rc.right - rh - 14 + ox, rc.top + vh + 12 + oy, rh, rh, IW_ROTOR,
         IwA(200 + (int)(45 * heat)));
 
-    const int fh = max(48, H / 4);
-    const int fw = max(56, bodyW / 2);
-    CCC_IwBlit(pDC, rc.left + bodyW / 2 - fw / 2 + ox, rc.bottom - fh + oy, fw, fh, IW_FLUID,
+    const int fh = max(28, H / 10);
+    const int fw = max(32, W / 10);
+    CCC_IwBlit(pDC, rc.left + W / 2 - fw / 2 + ox, rc.bottom - fh - 4 + oy, fw, fh, IW_FLUID,
         IwA(175 + (int)(70 * iku)));
 
-    CCC_IwBlit(pDC, rc.left, rc.bottom - max(22, H / 8), W, max(22, H / 8), IW_LACE,
-        IwA(155 + (int)(50 * heat)));
+    CCC_IwBlit(pDC, rc.left, rc.bottom - max(18, H / 14), W, max(18, H / 14), IW_LACE,
+        IwA(140 + (int)(40 * heat)));
 }
 
 // GDI キャンバスへ裸体オーバーレイ。アクリルでもスチルは AlphaBlend できる（塗り潰しは DlgBody 側で弾く）。
@@ -11672,6 +11728,8 @@ BEGIN_MESSAGE_MAP(CCustomStandardButton, CButton)
     ON_WM_KILLFOCUS()
     ON_WM_ENABLE()
     ON_WM_TIMER()
+    ON_WM_LBUTTONDOWN()
+    ON_WM_LBUTTONUP()
 END_MESSAGE_MAP()
 
 // カスタム標準ボタン。グラデ/影/アイコン/スパークル軌道の初期値。
@@ -11808,7 +11866,9 @@ void CCustomStandardButton::OnTimer(UINT_PTR nIDEvent)
         SparkleTick(m_bMouseOver && !m_bFlat);
         UpdateAnimTimer(); // 残点ゼロ＆非ホバーなら停止
         Invalidate(FALSE);
-        UpdateWindow();
+        // 終了ボタンは UpdateWindow 連打で BN_CLICKED が落ちる
+        if (!(CCC_IsInwoman() && CCC_IwIsQuitCtrl(m_hWnd)))
+            UpdateWindow();
         return;
     }
     CButton::OnTimer(nIDEvent);
@@ -12266,7 +12326,8 @@ void CCustomStandardButton::PaintClient(CDC& dc, const CRect& r)
     }
     mDC.SelectObject(pOF);
 
-    if (!bD) CCC_DrawInwoman(&mDC, r, bAeroTrans); // 淫女モード演出
+    if (!bD && !(CCC_IsInwoman() && CCC_IwIsQuitCtrl(m_hWnd)))
+        CCC_DrawInwoman(&mDC, r, bAeroTrans); // 淫女モード演出
 
 #if CCUSTOM_AERO_SUPPORT
     if (bAeroTrans) {
@@ -12508,6 +12569,34 @@ void CCustomStandardButton::OnEnable(BOOL b)
     CButton::OnEnable(b);
     UpdateAnimTimer();
     Invalidate(FALSE);
+}
+
+void CCustomStandardButton::OnLButtonDown(UINT nFlags, CPoint point)
+{
+    if (CCC_IsInwoman() && CCC_IwIsQuitCtrl(m_hWnd)) {
+        SetCapture();
+        SendMessage(BM_SETSTATE, TRUE, 0);
+        return;
+    }
+    CButton::OnLButtonDown(nFlags, point);
+}
+
+void CCustomStandardButton::OnLButtonUp(UINT nFlags, CPoint point)
+{
+    if (CCC_IsInwoman() && CCC_IwIsQuitCtrl(m_hWnd)) {
+        if (GetCapture() == this)
+            ReleaseCapture();
+        SendMessage(BM_SETSTATE, FALSE, 0);
+        CRect r;
+        GetClientRect(&r);
+        if (r.PtInRect(point) && IsWindowEnabled()) {
+            CWnd* p = GetParent();
+            if (p && p->GetSafeHwnd())
+                p->PostMessage(WM_COMMAND, MAKEWPARAM(GetDlgCtrlID(), BN_CLICKED), (LPARAM)m_hWnd);
+        }
+        return;
+    }
+    CButton::OnLButtonUp(nFlags, point);
 }
 
 // ============================================================================

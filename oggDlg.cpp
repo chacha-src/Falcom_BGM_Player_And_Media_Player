@@ -29487,7 +29487,7 @@ BOOL COggDlg::PreTranslateMessage(MSG* pMsg)
 
 void COggDlg::OnOK()
 {
-	// TODO: この位置にその他の検証用のコードを追加してください
+	CCC_StopInwomanTimer();
 	const DWORD prevJoin = g_playbackNotifyJoinTimeoutMs;
 	g_playbackNotifyJoinTimeoutMs = 0;
 	stop();
@@ -31568,8 +31568,27 @@ void COggDlg::OnCheck6()
 }
 
 static void OggPersistSaveDat();
+void OggMigrateFmMonToMidiMonFlag()
+{
+	/* 独立 FM モニタは MIDI モニタのホスト子にした。旧 dat / fmmon_geom.bin が
+	   fmmonwindow=1 のままだと、復元 18 が空なのに旗だけ残る。
+	   MIDI 旗を立てて FM 旗は落とす。位置は MIDI 側が未設定のときだけ引き継ぐ。 */
+	if (savedata.fmmonwindow != 1)
+		return;
+	savedata.midimonwindow = 1;
+	savedata.fmmonwindow = 0;
+	if ((savedata.midimonw < 200 || savedata.midimonh < 160)
+		&& savedata.fmmonw >= 200 && savedata.fmmonh >= 160) {
+		savedata.midimonx = savedata.fmmonx;
+		savedata.midimony = savedata.fmmony;
+		savedata.midimonw = savedata.fmmonw;
+		savedata.midimonh = savedata.fmmonh;
+	}
+}
+
 void OggPersistSaveDatNow()
 {
+	OggMigrateFmMonToMidiMonFlag();
 	OggPersistSaveDat();
 }
 
@@ -32533,6 +32552,7 @@ LRESULT COggDlg::OnToggleSubUiMsg(WPARAM wParam, LPARAM)
 		// SW_SHOWNOACTIVATE でフォーカス奪取・ちらつきを抑える。
 		g_oggSubUiRestoring = 1;
 		try {
+		OggMigrateFmMonToMidiMonFlag();
 		if (wParam == 10) {
 			if (savedata.eqwindow == 1 && m_EqualizerDlg) {
 				if (!::IsWindow(m_EqualizerDlg->GetSafeHwnd())) {
@@ -32598,17 +32618,15 @@ LRESULT COggDlg::OnToggleSubUiMsg(WPARAM wParam, LPARAM)
 			}
 		}
 		else if (wParam == 17) {
-			if ((savedata.midimonwindow == 1 || savedata.fmmonwindow == 1) && m_MidiMonitorDlg) {
+			OggMigrateFmMonToMidiMonFlag();
+			if (savedata.midimonwindow == 1 && m_MidiMonitorDlg) {
 				if (!::IsWindow(m_MidiMonitorDlg->GetSafeHwnd())) {
-					if (!m_MidiMonitorDlg->Create(IDD_MIDIMONITOR, this)) {
+					if (!m_MidiMonitorDlg->Create(IDD_MIDIMONITOR, this))
 						savedata.midimonwindow = 0;
-						savedata.fmmonwindow = 0;
-					}
 				}
-				if ((savedata.midimonwindow == 1 || savedata.fmmonwindow == 1)
+				if (savedata.midimonwindow == 1
 					&& ::IsWindow(m_MidiMonitorDlg->GetSafeHwnd())) {
-					savedata.midimonwindow = 1;
-					savedata.fmmonwindow = 1;
+					savedata.fmmonwindow = 0;
 					m_MidiMonitorDlg->ShowWindow(SW_SHOWNOACTIVATE);
 				}
 			}
@@ -32650,7 +32668,7 @@ LRESULT COggDlg::OnToggleSubUiMsg(WPARAM wParam, LPARAM)
 			else if (next == 16)
 				need = (savedata.mpDjPadwindow == 1);
 			else if (next == 17)
-				need = ((savedata.midimonwindow == 1 || savedata.fmmonwindow == 1) && m_MidiMonitorDlg);
+				need = (savedata.midimonwindow == 1 && m_MidiMonitorDlg);
 			else if (next == 18)
 				need = FALSE;
 			else if (next == 19)
@@ -34839,7 +34857,7 @@ void COggDlg::RestoreMidiMonitorAfterMinimize()
 		w->ShowWindow(SW_SHOWNOACTIVATE);
 	};
 
-	if ((mask & kHideFmMidi_MidiMon) && (savedata.midimonwindow == 1 || savedata.fmmonwindow == 1))
+	if ((mask & kHideFmMidi_MidiMon) && savedata.midimonwindow == 1)
 		restore(m_MidiMonitorDlg, kHideFmMidi_MidiMon, mask);
 	restore(CSasamiMidiScoreDlg::Instance(), kHideFmMidi_MidiScore, mask);
 	restore(CSasamiFmScoreDlg::Instance(), kHideFmMidi_FmScore, mask);
@@ -34884,7 +34902,7 @@ void COggDlg::ToggleMidiMonitor()
 			return;
 		}
 		savedata.midimonwindow = 1;
-		savedata.fmmonwindow = 1;
+		savedata.fmmonwindow = 0;
 	}
 	else {
 		m_fmMidiToolsHiddenMask &= ~kHideFmMidi_MidiMon;
@@ -34929,7 +34947,7 @@ void COggDlg::EnsureMidiMonitor()
 		}
 	}
 	savedata.midimonwindow = 1;
-	savedata.fmmonwindow = 1;
+	savedata.fmmonwindow = 0;
 	m_fmMidiToolsHiddenMask &= ~kHideFmMidi_MidiMon;
 	if (::IsWindow(m_MidiMonitorDlg->GetSafeHwnd()))
 		m_MidiMonitorDlg->ShowWindow(SW_SHOWNOACTIVATE);

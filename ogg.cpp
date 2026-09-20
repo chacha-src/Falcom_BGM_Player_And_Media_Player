@@ -2214,6 +2214,7 @@ BOOL COggApp::InitInstance()
 			CloseHandle(hf);
 		}
 	}
+	OggMigrateFmMonToMidiMonFlag();
 	{
 		extern void MpFeatInitDefaults();
 		MpFeatInitDefaults();

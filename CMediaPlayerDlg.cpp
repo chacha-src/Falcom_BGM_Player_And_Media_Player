@@ -2682,6 +2682,7 @@ BOOL CMediaPlayerDlg::PreTranslateMessage(MSG* pMsg)
 
 void CMediaPlayerDlg::RequestAppShutdown()
 {
+	CCC_StopInwomanTimer();
 	DesktopLyricsPrepareAppExit();
 	MpDjPadPrepareAppExit();
 	CloseRenderIfOpen();

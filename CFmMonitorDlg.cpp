@@ -991,6 +991,37 @@ void CFmMonitorDlg::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDC_FM_HELP, m_help);
 }
 
+static void FmHideDialogButtons(CWnd* dlg)
+{
+	if (!dlg || !::IsWindow(dlg->GetSafeHwnd()))
+		return;
+	if (CWnd* w = dlg->GetDlgItem(IDC_FM_HELP))
+		w->ShowWindow(SW_HIDE);
+	if (CWnd* w = dlg->GetDlgItem(IDOK))
+		w->ShowWindow(SW_HIDE);
+}
+
+int CFmMonitorDlg::BodyTop() const
+{
+	if (m_hosted || !::IsWindow(m_hWnd))
+		return 0;
+	const int capH = CCC_GetCustomCaptionHeight(m_hWnd);
+	return (capH > 0) ? capH : 0;
+}
+
+void CFmMonitorDlg::SetHosted(int hosted)
+{
+	m_hosted = hosted ? 1 : 0;
+	if (!m_hosted || !::IsWindow(m_hWnd))
+		return;
+	EnableAero(FALSE);
+	ModifyStyle(WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME | WS_MAXIMIZEBOX | WS_MINIMIZEBOX,
+		WS_CHILD | WS_CLIPSIBLINGS | WS_CLIPCHILDREN);
+	ModifyStyleEx(WS_EX_DLGMODALFRAME | WS_EX_WINDOWEDGE | WS_EX_CLIENTEDGE, 0, SWP_FRAMECHANGED);
+	CCC_CaptionUnregister(m_hWnd);
+	FmHideDialogButtons(this);
+}
+
 BEGIN_MESSAGE_MAP(CFmMonitorDlg, CCustomBlurDialogExBase)
 	ON_WM_PAINT()
 	ON_MESSAGE(WM_PRINT, OnPrint)
@@ -1022,13 +1053,12 @@ BOOL CFmMonitorDlg::OnInitDialog()
 		ModifyStyle(WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME | WS_MAXIMIZEBOX | WS_MINIMIZEBOX,
 			WS_CHILD | WS_CLIPSIBLINGS | WS_CLIPCHILDREN);
 		ModifyStyleEx(WS_EX_DLGMODALFRAME | WS_EX_WINDOWEDGE | WS_EX_CLIENTEDGE, 0, SWP_FRAMECHANGED);
-		if (m_help.GetSafeHwnd())
-			m_help.ShowWindow(SW_HIDE);
+		CCC_CaptionUnregister(m_hWnd);
+		FmHideDialogButtons(this);
 		GpuDx11_Startup();
 		SetTimer(1, 16, NULL);
 		m_fullDraw = 1;
 		m_dirtyHead = m_dirtyHex = m_dirtyPanels = m_dirtyKeys = 1;
-		StartComposeThread();
 		return TRUE;
 	}
 	CCustomBlurDialogExBase::OnInitDialog();
@@ -1124,20 +1154,27 @@ void CFmMonitorDlg::OnShowWindow(BOOL bShow, UINT nStatus)
 
 void CFmMonitorDlg::OnSize(UINT nType, int cx, int cy)
 {
+	if (m_hosted) {
+		CDialogEx::OnSize(nType, cx, cy);
+		if (nType == SIZE_MINIMIZED) return;
+		m_layOk = 0;
+		m_fullDraw = 1;
+		m_dirtyHead = m_dirtyHex = m_dirtyPanels = m_dirtyKeys = 1;
+		Invalidate(FALSE);
+		return;
+	}
 	CCustomBlurDialogExBase::OnSize(nType, cx, cy);
 	if (nType == SIZE_MINIMIZED) return;
-	if (!m_hosted) {
-		if (CCC_IsAeroEnabled())
-			CCC_RefreshDwmBlur(m_hWnd);
-		CCC_CaptionLayout(m_hWnd);
-		LayoutHelpBtn();
-		/* 初期化中の誤保存を避け、ユーザー操作後だけ位置を書く（タイマーで間引き） */
-		m_persistAge = 0;
-	}
+	if (CCC_IsAeroEnabled())
+		CCC_RefreshDwmBlur(m_hWnd);
+	CCC_CaptionLayout(m_hWnd);
+	LayoutHelpBtn();
+	/* 初期化中の誤保存を避け、ユーザー操作後だけ位置を書く（タイマーで間引き） */
+	m_persistAge = 0;
 	m_layOk = 0;
 	m_fullDraw = 1;
 	m_dirtyHead = m_dirtyHex = m_dirtyPanels = m_dirtyKeys = 1;
-	KickCompose(cx, (std::max)(1, cy - CCC_GetCustomCaptionHeight(m_hWnd)));
+	KickCompose(cx, (std::max)(1, cy - BodyTop()));
 	Invalidate(FALSE);
 }
 
@@ -1243,7 +1280,7 @@ void CFmMonitorDlg::OnBnClickedHelp()
 
 BOOL CFmMonitorDlg::OnEraseBkgnd(CDC* pDC)
 {
-	/* ホストが ExtendFrame だと素 GDI 塗りは α=0。穴を開けない */
+	/* ExtendFrame 上の素 GDI 塗りは α=0 で穴になる。不透明 blit に任せる */
 	(void)pDC;
 	return TRUE;
 }
@@ -1252,7 +1289,7 @@ void CFmMonitorDlg::OnTimer(UINT_PTR nIDEvent)
 {
 	if (nIDEvent == 1) {
 		if (m_hosted) {
-			CCustomBlurDialogExBase::OnTimer(nIDEvent);
+			CDialogEx::OnTimer(nIDEvent);
 			return;
 		}
 		/* 移動/リサイズ後だけ間引いて保存（常時 Commit は避ける） */
@@ -1988,7 +2025,7 @@ void CFmMonitorDlg::RestoreGeom()
 {
 	if (m_hosted) return;
 	const UINT dpi = FmUiDpi(m_hWnd ? m_hWnd : nullptr);
-	const int capH = CCC_GetCustomCaptionHeight(m_hWnd);
+	const int capH = BodyTop();
 	const int clientW = PreferredWidth((int)dpi);
 	const int clientH = ContentHeight((int)dpi, PcmRows());
 	/* クライアント→外枠 */
@@ -2041,7 +2078,8 @@ void CFmMonitorDlg::DetachForDestroy()
 		return;
 	}
 	m_userClosing = 0;
-	savedata.fmmonwindow = 1;
+	savedata.midimonwindow = 1;
+	savedata.fmmonwindow = 0;
 	PersistGeom();
 	KillTimer(1);
 	DatArc_InvalidateLeaf(L"oggYSEDbgmu.dat");
@@ -5837,7 +5875,7 @@ void CFmMonitorDlg::InvalidateDirtyRegions()
 {
 	if (!(m_fullDraw || m_dirtyHead || m_dirtyHex || m_dirtyPanels || m_dirtyKeys))
 		return;
-	const int capH = CCC_GetCustomCaptionHeight(m_hWnd);
+	const int capH = BodyTop();
 	if (m_fullDraw || !m_layOk) {
 		CRect cr;
 		GetClientRect(&cr);
@@ -5934,10 +5972,22 @@ void CFmMonitorDlg::PumpSyncNow()
 	m_inPump = 1;
 	struct PumpDone { int* p; ~PumpDone() { *p = 0; } } done{ &m_inPump };
 
+	if (m_composeCsReady)
+		EnterCriticalSection(&m_dataCs);
+	PollDump();
+	TickFades();
+	if (m_composeCsReady)
+		LeaveCriticalSection(&m_dataCs);
+
+	if (m_hosted) {
+		Invalidate(FALSE);
+		return;
+	}
+
 	if (m_composeThread) {
 		CRect rc;
 		GetClientRect(&rc);
-		const int capH = CCC_GetCustomCaptionHeight(m_hWnd);
+		const int capH = BodyTop();
 		KickCompose(rc.Width(), (std::max)(1, rc.Height() - capH));
 	} else {
 		InvalidateDirtyRegions();
@@ -6109,7 +6159,7 @@ LRESULT CFmMonitorDlg::OnComposeDone(WPARAM, LPARAM)
 		return 0;
 	CRect cr;
 	GetClientRect(&cr);
-	const int capH = CCC_GetCustomCaptionHeight(m_hWnd);
+	const int capH = BodyTop();
 	if (capH > 0 && cr.Height() > capH)
 		cr.top = capH;
 	if (!cr.IsRectEmpty())
@@ -6124,7 +6174,7 @@ void CFmMonitorDlg::PaintClientToDC(HDC hdc)
 	dc.Attach(hdc);
 	CRect rect;
 	GetClientRect(&rect);
-	const int capH = CCC_GetCustomCaptionHeight(m_hWnd);
+	const int capH = BodyTop();
 	const int w = rect.Width();
 	const int h = rect.Height() - capH;
 	if (w <= 0 || h <= 0) {
@@ -6142,6 +6192,34 @@ void CFmMonitorDlg::PaintClientToDC(HDC hdc)
 		if (m_workW == w && m_workH == h)
 			src = FrontWorkDc();
 		LeaveCriticalSection(&m_bufCs);
+	}
+
+	if (m_hosted) {
+#if CCUSTOM_AERO_SUPPORT
+		/* ExtendFrame 上の BitBlt/FillSolidRect は α=0 で穴になる。不透明 DIB 経由で焼く。 */
+		if (m_chromaW != w || m_chromaH != h) {
+			m_chromaCache.Release();
+			m_chromaReady = false;
+			m_chromaW = w;
+			m_chromaH = h;
+		}
+		if (m_chromaCache.Ensure(dc.GetSafeHdc(), w, h)) {
+			if (src)
+				m_chromaCache.UpdateOpaqueRect(src, 0, 0, 0, 0, w, h);
+			else {
+				m_chromaCache.FillOpaqueRect(0, 0, w, h, FM_BG, RGB(1, 1, 1));
+				m_chromaCache.MakeRectOpaque(0, 0, w, h);
+			}
+			m_chromaReady = true;
+			m_chromaCache.BlitFull(dc.GetSafeHdc(), 0, 0, w, h);
+			dc.Detach();
+			return;
+		}
+		if (src)
+			CCC_BlitStretchOpaque(dc.GetSafeHdc(), 0, 0, w, h, src, 0, 0, w, h);
+#endif
+		dc.Detach();
+		return;
 	}
 
 	if (!src) {
@@ -6240,7 +6318,7 @@ void CFmMonitorDlg::BlitCachedFrameToPrintDC(HDC hdc)
 	if (!hdc || !m_hWnd) return;
 	RECT rc = {};
 	::GetClientRect(m_hWnd, &rc);
-	const int capH = CCC_GetCustomCaptionHeight(m_hWnd);
+	const int capH = BodyTop();
 	const int w = rc.right - rc.left;
 	const int h = (rc.bottom - rc.top) - capH;
 	if (w <= 0 || h <= 0)
@@ -6258,13 +6336,11 @@ void CFmMonitorDlg::BlitCachedFrameToPrintDC(HDC hdc)
 
 int CFmMonitorDlg::TryGpuFrame()
 {
-	if (m_hosted)
-		return 0;
 	if (!GpuDx11_Ready() || !::IsWindow(GetSafeHwnd()))
 		return 0;
 	CRect rect;
 	GetClientRect(&rect);
-	const int capH = CCC_GetCustomCaptionHeight(m_hWnd);
+	const int capH = BodyTop();
 	const int w = rect.Width();
 	const int h = rect.Height() - capH;
 	if (w < 80 || h < 80)
@@ -6316,19 +6392,13 @@ void CFmMonitorDlg::OnPaint()
 	}
 	if (m_hosted) {
 		CPaintDC paint(this);
-		/* LOCKWINDOWUPDATE は Win+Shift+S 中に変な DC を返し、後段 AlphaBlend 失敗→BP で落ちる */
-		HDC hdc = ::GetDCEx(m_hWnd, NULL,
-			DCX_CACHE | DCX_CLIPSIBLINGS | DCX_CLIPCHILDREN);
-		if (!hdc)
-			hdc = ::GetDC(m_hWnd);
-		if (hdc) {
-			PaintClientToDC(hdc);
-			::ReleaseDC(m_hWnd, hdc);
-		}
+		if (TryGpuFrame())
+			return;
+		PaintClientToDC(paint.GetSafeHdc());
 		return;
 	}
 	CPaintDC dc(this);
-	const int capH = CCC_GetCustomCaptionHeight(m_hWnd);
+	const int capH = BodyTop();
 	CRect pr = dc.m_ps.rcPaint;
 	const int paintCap = (pr.IsRectEmpty() || pr.top < capH) ? 1 : 0;
 	const int paintBody = (pr.IsRectEmpty() || pr.bottom > capH) ? 1 : 0;

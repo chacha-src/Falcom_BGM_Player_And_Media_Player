@@ -1559,6 +1559,12 @@ static int FmMidiWantFmView(int sticky)
 	extern CString filen;
 	if (!FmMidiIsPlaying())
 		return sticky ? 1 : 0;
+	/* CEmu FM / PMD を先に見る。MIDI ライブや filen の .mid 残骸で引き戻すと
+	   パネルが MIDI↔FM で点滅し、鍵盤 dump も届かない。 */
+	if (!filen.IsEmpty() && SasamiExtIsFm(filen))
+		return 1;
+	if (mode == MODE_CEMU || IsCemuMode(mode) || mode == -3)
+		return 1;
 	if (CEmuMidiLiveActive())
 		return 0;
 	if (mode == MODE_VST_MIDI)
@@ -1566,11 +1572,7 @@ static int FmMidiWantFmView(int sticky)
 	if (!filen.IsEmpty()) {
 		if (VstIsMidiExt(filen) || VstIsProjectExt(filen))
 			return 0;
-		if (SasamiExtIsFm(filen))
-			return 1;
 	}
-	if (mode == MODE_CEMU || IsCemuMode(mode) || mode == -3)
-		return 1;
 	return 0;
 }
 
@@ -1612,12 +1614,29 @@ void CMidiMonitorDlg::LayoutFmChild()
 	ScreenToClient(&cur);
 	const int vis = m_fm->IsWindowVisible() ? 1 : 0;
 	const int wantVis = m_fmView ? 1 : 0;
-	if (cur.left == 0 && cur.top == capH && cur.Width() == w && cur.Height() == h && vis == wantVis)
+	if (vis == wantVis
+		&& abs(cur.left) <= 1 && abs(cur.top - capH) <= 1
+		&& abs(cur.Width() - w) <= 1 && abs(cur.Height() - h) <= 1)
 		return;
-	UINT flags = SWP_NOACTIVATE;
+	UINT flags = SWP_NOACTIVATE | SWP_NOZORDER | SWP_NOREDRAW;
 	if (m_fmView)
-		flags |= SWP_SHOWWINDOW;
-	m_fm->SetWindowPos(&CWnd::wndTop, 0, capH, w, h, flags);
+		flags = SWP_NOACTIVATE | SWP_SHOWWINDOW;
+	m_fm->SetWindowPos(m_fmView ? &CWnd::wndTop : NULL, 0, capH, w, h, flags);
+}
+
+void CMidiMonitorDlg::HideMidiGpuOverlay()
+{
+	if (m_gpu.child || m_gpu.ready)
+		GpuMonSurf_Release(&m_gpu);
+}
+
+int CMidiMonitorDlg::FmShowing() const
+{
+	if (m_fmView)
+		return 1;
+	if (m_fm && ::IsWindow(m_fm->GetSafeHwnd()) && m_fm->IsWindowVisible())
+		return 1;
+	return 0;
 }
 
 void CMidiMonitorDlg::SyncFmMidiView()
@@ -1629,11 +1648,8 @@ void CMidiMonitorDlg::SyncFmMidiView()
 		EnsureFmChild();
 	HWND hFm = (m_fm) ? m_fm->GetSafeHwnd() : NULL;
 	const int vis = (hFm && ::IsWindow(hFm) && m_fm->IsWindowVisible()) ? 1 : 0;
-	if (want == m_fmView && ((want && vis) || (!want && !vis))) {
-		if (want)
-			LayoutFmChild();
+	if (want == m_fmView && ((want && vis) || (!want && !vis)))
 		return;
-	}
 	m_fmView = want;
 	if (want && !(hFm && ::IsWindow(hFm))) {
 		m_fmView = 0;
@@ -1641,17 +1657,15 @@ void CMidiMonitorDlg::SyncFmMidiView()
 		return;
 	}
 	if (hFm && ::IsWindow(hFm)) {
-		LayoutFmChild();
 		if (want) {
-			if (m_gpu.child && ::IsWindow(m_gpu.child))
-				::ShowWindow(m_gpu.child, SW_HIDE);
+			HideMidiGpuOverlay();
+			ModifyStyle(0, WS_CLIPCHILDREN);
+			LayoutFmChild();
 			m_fm->ShowWindow(SW_SHOWNOACTIVATE);
 			m_fm->Invalidate(FALSE);
-			m_fm->UpdateWindow();
 		} else {
 			m_fm->ShowWindow(SW_HIDE);
-			if (m_gpu.child && ::IsWindow(m_gpu.child))
-				::ShowWindow(m_gpu.child, SW_SHOWNOACTIVATE);
+			LayoutFmChild();
 		}
 	}
 	if (!want)
@@ -4625,6 +4639,8 @@ bool CMidiMonitorDlg::HitVolBar(CPoint clientPt) const
 void CMidiMonitorDlg::InvalidateDirty()
 {
 	if (!::IsWindow(m_hWnd)) return;
+	if (FmShowing())
+		return;
 	if (!m_fullDraw && !IsView3D()) {
 		int bh = m_layRowH - 4;
 		if (bh < 2) bh = 2;
@@ -4909,6 +4925,8 @@ BOOL CMidiMonitorDlg::OnInitDialog()
 
 int CMidiMonitorDlg::TryGpuFrame(int w, int h, int capH, UINT dpi)
 {
+	if (FmShowing())
+		return 0;
 	if (!GpuDx11_Ready() || w < 80 || h < 80)
 		return 0;
 	if (!GpuMonSurf_Ensure(&m_gpu, m_hWnd, 0, capH, (unsigned)w, (unsigned)h))
@@ -4949,7 +4967,7 @@ void CMidiMonitorDlg::OnPaint()
 	CPaintDC dc(this);
 	if (m_paintDisabled) return;
 	CRect pr = dc.m_ps.rcPaint;
-	if (m_fmView) {
+	if (FmShowing()) {
 		CCC_CaptionPaintGdi(dc, m_hWnd);
 		return;
 	}
@@ -5102,7 +5120,7 @@ void CMidiMonitorDlg::OnTimer(UINT_PTR nIDEvent)
 		   停止中の 16ms 描画は UI コアを食うので触らない。 */
 		extern int plf;
 		extern int playy;
-		if (playy != 0 && !(plf == 1) && !m_fmView)
+		if (playy != 0 && !(plf == 1) && !FmShowing())
 			PumpIdle();
 	} else if (nIDEvent == 2) {
 		/* 再生中は timerp が PumpSyncNow する。追加パルスは UI コアを二重に食う。
@@ -5130,7 +5148,16 @@ void CMidiMonitorDlg::OnSize(UINT nType, int cx, int cy)
 	CCC_CaptionLayout(m_hWnd);
 	LayoutHelpBtn();
 	LayoutFmChild();
-	Invalidate(FALSE);
+	if (FmShowing()) {
+		const int capH = CCC_GetCustomCaptionHeight(m_hWnd);
+		CRect cap;
+		GetClientRect(&cap);
+		if (capH > 0 && cap.Height() > capH)
+			cap.bottom = capH;
+		InvalidateRect(&cap, FALSE);
+	} else {
+		Invalidate(FALSE);
+	}
 }
 
 // タスクバー／システムメニューの最小化はアイコン化せず隠す（所有ポップアップの残骸防止）。
@@ -5236,6 +5263,8 @@ void CMidiMonitorDlg::PumpIdle()
 {
 	if (!::IsWindow(m_hWnd) || m_paintDisabled) return;
 	if (IsIconic() || !IsWindowVisible()) return;
+	if (FmShowing())
+		return;
 	if (m_playNote >= 0 && ::GetCapture() != m_hWnd)
 		ReleasePlayNote();
 	if (!m_frozen) {

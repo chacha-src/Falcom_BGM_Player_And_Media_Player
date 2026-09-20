@@ -97,6 +97,7 @@ static void RegisterHostClass()
 	wc.hInstance = GetModuleHandleW(NULL);
 	wc.lpszClassName = L"OggGpuMonHost";
 	wc.hCursor = LoadCursor(NULL, IDC_ARROW);
+	wc.hbrBackground = (HBRUSH)GetStockObject(BLACK_BRUSH);
 	s_wndClass = RegisterClassW(&wc);
 }
 
@@ -495,7 +496,7 @@ int GpuMonSurf_Ensure(GpuMonSurf* s, HWND parent, int x, int y, unsigned w, unsi
 	if (h < 8) h = 8;
 	if (!s->child) {
 		s->child = CreateWindowExW(0, L"OggGpuMonHost", L"",
-			WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS,
+			WS_CHILD | WS_CLIPSIBLINGS,
 			x, y, (int)w, (int)h, parent, NULL, GetModuleHandleW(NULL), NULL);
 		if (!s->child) return 0;
 		s->parent = parent;
@@ -781,6 +782,8 @@ int GpuMonSurf_Present(GpuMonSurf* s)
 	if (!s || !s->sc) return 0;
 	if (s->gdiLock) GpuMonSurf_ReleaseDC(s);
 	HRESULT hr = ((IDXGISwapChain1*)s->sc)->Present(0, 0);
+	if (SUCCEEDED(hr) && s->child && ::IsWindow(s->child) && !::IsWindowVisible(s->child))
+		::ShowWindow(s->child, SW_SHOWNA);
 	return SUCCEEDED(hr) ? 1 : 0;
 }
 
