@@ -290,8 +290,8 @@ public:
 		S3R_MAX_ITEMS = 64,
 		S3R_SPLINE_MAX = 96,
 		S3R_PATH_SAMPLES = 1024,
-		S3R_CRAFT_VMAX = 4800,
-		S3R_CRAFT_IMAX = 12000,
+		S3R_CRAFT_VMAX = 20480,
+		S3R_CRAFT_IMAX = 61440,
 		S3R_OBS_VMAX = 32768,
 		S3R_OBS_IMAX = 98304,
 		S3R_HM_N = 161,
@@ -596,6 +596,8 @@ public:
 	float m_craftVert[S3R_CRAFT_VMAX * 16];
 	UINT m_craftIdx[S3R_CRAFT_IMAX];
 	int m_craftNv, m_craftNi;
+	int m_craftMeshI0[S3R_MAX_CRAFT];
+	int m_craftMeshNi[S3R_MAX_CRAFT];
 	float m_obsVert[S3R_OBS_VMAX * 16];
 	UINT m_obsIdx[S3R_OBS_IMAX];
 	int m_obsNv, m_obsNi;

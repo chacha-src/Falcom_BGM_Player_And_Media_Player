@@ -502,7 +502,7 @@ private:
     DWORD m_lastAnalysisDonePostTick = 0;
     int   m_rollSpeedPct = 100;       // 表示スクロール速度(%) 25..200
     int   m_rollSpeedCredit = 0;      // PushFrame 用アキュムレータ(壁時計×速度%)
-    DWORD m_lastRollPushTick = 0;     // PushDisplayFrames の前回時刻
+    LONGLONG m_lastRollPushQpc = 0;   // PushDisplayFrames の前回 QPC（GetTickCount は 15ms 粒度でガクつく）
     bool  m_frozen = false;           // 表示スクロール停止(解析は継続、ライブ行は更新)
     bool  m_showExprLegend = true;    // 記号凡例パネル
     bool  m_showExprMarks = true;     // 表現記号グリフ/音階移行/バー装飾

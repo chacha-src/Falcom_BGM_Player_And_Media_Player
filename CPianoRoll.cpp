@@ -839,7 +839,7 @@ CPianoRoll::CPianoRoll(CWnd* pParent)
     m_historyCount = 0;
     m_historyHead = 0;
     m_rollSpeedCredit = 0;
-    m_lastRollPushTick = 0;
+    m_lastRollPushQpc = 0;
     for (int hi = 0; hi < (int)MAX_HISTORY; ++hi) {
         auto& f = m_historyRing[hi];
         memset(f.active, 0, sizeof(f.active));
@@ -1057,7 +1057,7 @@ void CPianoRoll::ResetPlaybackState()
         m_historyHead = 0;
         m_framesPending = 0;
         m_rollSpeedCredit = 0;
-        m_lastRollPushTick = 0;
+        m_lastRollPushQpc = 0;
         m_rollScrollValid = false;
         m_rollReady = false;
         m_bufwav3LevelDb = -60.0f;
@@ -1218,7 +1218,7 @@ BOOL CPianoRoll::OnInitDialog()
         if (sp < 25 || sp > 200) sp = 100;
         m_rollSpeedPct = sp;
         m_rollSpeedCredit = 0;
-        m_lastRollPushTick = 0;
+        m_lastRollPushQpc = 0;
     }
     m_showExprLegend = (savedata.pianorollexprlegend != 0);
     m_showExprMarks = (savedata.pianorollexprmarks != 0);
@@ -2361,19 +2361,28 @@ void CPianoRoll::PushDisplayFrames()
     }
     // 表示速度: 解析ホップとは独立に、壁時計で約60行/秒×速度% を目標にする。
     // （旧: 解析1回=1行 → ANALYZE_MIN_MS=3 のとき理論333行/秒でワーカーだけ過負荷）
+    // GetTickCount は timeBeginPeriod(1) でも ~15.6ms 粒度のことがあり、
+    // dt=0 と dt=16 が交互になって行送りがガクガクする。QPC で測る。
     int pct = m_rollSpeedPct;
     if (pct < 25) pct = 25;
     if (pct > 200) pct = 200;
 
-    const DWORD now = GetTickCount();
-    if (m_lastRollPushTick == 0)
-        m_lastRollPushTick = now;
-    DWORD dt = now - m_lastRollPushTick;
-    if (dt > 80) dt = 80;
-    m_lastRollPushTick = now;
+    LARGE_INTEGER nowQ;
+    QueryPerformanceCounter(&nowQ);
+    static LARGE_INTEGER s_qpcFreq = {};
+    if (s_qpcFreq.QuadPart == 0)
+        QueryPerformanceFrequency(&s_qpcFreq);
+    if (m_lastRollPushQpc == 0)
+        m_lastRollPushQpc = nowQ.QuadPart;
+    double dtMs = 0.0;
+    if (s_qpcFreq.QuadPart > 0)
+        dtMs = (double)(nowQ.QuadPart - m_lastRollPushQpc) * 1000.0 / (double)s_qpcFreq.QuadPart;
+    m_lastRollPushQpc = nowQ.QuadPart;
+    if (dtMs > 80.0) dtMs = 80.0;
+    if (dtMs < 0.0) dtMs = 0.0;
 
     // credit = Σ(dt_ms * pct)。100%・16.67ms で約 1667 → 1行。
-    m_rollSpeedCredit += (int)dt * pct;
+    m_rollSpeedCredit += (int)(dtMs * (double)pct + 0.5);
     static constexpr int kCreditPerRow = 1667;
     int pushed = 0;
     while (m_rollSpeedCredit >= kCreditPerRow && pushed < 4) {
@@ -2391,7 +2400,7 @@ void CPianoRoll::SetRollSpeedPct(int pct)
     m_rollSpeedPct = pct;
     savedata.pianorollscrollspeed = pct;
     m_rollSpeedCredit = 0;
-    m_lastRollPushTick = 0;
+    m_lastRollPushQpc = 0;
 }
 
 int CPianoRoll::RollSpeedIndex() const
@@ -2485,7 +2494,7 @@ void CPianoRoll::ClearRollHistory()
     m_historyCount = 0;
     m_historyHead = 0;
     m_rollSpeedCredit = 0;
-    m_lastRollPushTick = 0;
+    m_lastRollPushQpc = 0;
     m_framesPending = 0;
     for (int hi = 0; hi < (int)MAX_HISTORY; ++hi) {
         auto& f = m_historyRing[hi];
@@ -4672,8 +4681,9 @@ void CPianoRoll::DrawPlayheadRow(CDC& dc, int width, int rollH, const NoteFrame&
     DrawHistoryRowAt(dc, width, yTop, yBot, live);
 }
 
-// pendingCount 行分を1回の BitBlt でスクロールし、空いた帯に履歴+live を描く。
-// 旧: pending 回フルバッファ転送 → 遅延時に O(n) で重くなり EQ を圧迫した。
+// 1行分を ScrollDC で繰り上げ、空いた帯に live を描く。
+// 複数行まとめは見かけのジャンプになるので n は 1 に固定。
+// 旧: scratch へ全面 BitBlt×2。重く、遅延時に 3 行飛ばしでガクついた。
 bool CPianoRoll::TryAdvanceRollBuffer(int width, int rollH, int histCount, const NoteFrame* hist,
     int pendingCount, const NoteFrame& live)
 {
@@ -4681,12 +4691,13 @@ bool CPianoRoll::TryAdvanceRollBuffer(int width, int rollH, int histCount, const
     m_lastScrollHealTop = 0;
     if (!m_rollReady || rollH <= 0)
         return false;
-    if (!m_rollDC.GetSafeHdc() || !m_rollScratchDC.GetSafeHdc())
+    if (!m_rollDC.GetSafeHdc())
         return false;
 
-    int n = pendingCount;
-    if (n < 1) n = 1;
-    if (n > 3) n = 3;
+    (void)histCount;
+    (void)hist;
+    (void)pendingCount;
+    const int n = 1;
 
     const int scrollPx = HistoryScrollPx(rollH, n);
     const int preserveH = rollH - scrollPx;
@@ -4699,26 +4710,23 @@ bool CPianoRoll::TryAdvanceRollBuffer(int width, int rollH, int histCount, const
     if (rollH - yBandTop <= 0)
         return false;
 
-    // A) 履歴ピクセルを scrollPx 分まとめて繰り上げ（n 回分を1回の BitBlt）
-    m_rollScratchDC.BitBlt(0, 0, width, preserveH, &m_rollDC, 0, scrollPx, SRCCOPY);
-
-    // B) 空いた帯にグリッド + 各行
-    m_rollScratchDC.FillSolidRect(0, yBandTop, width, rollH - yBandTop, RGB(20, 20, 20));
-    DrawHistoryGrid(m_rollScratchDC, width, yBandTop, rollH);
-
-    // 連続 TryAdvance と同じ並び: row r(r>=1) ← hist[r-1]、row0 ← live
-    // （ComposeRollBuffer/DrawHistoryArea と同一。hist[r] だと1フレーム古く、
-    //  hist 不足時は live を複数行に描いて縦に太く見える）
-    for (int r = n - 1; r >= 1; --r) {
-        const NoteFrame& fr = (hist && histCount >= r) ? hist[r - 1] : live;
-        int yTop, yBot;
-        GetHistoryRowBounds(rollH, r, yTop, yBot);
-        if (yBot > yTop)
-            DrawHistoryRowAt(m_rollScratchDC, width, yTop, yBot, fr);
+    CRect rc(0, 0, width, rollH);
+    BOOL scrolled = m_rollDC.ScrollDC(0, -scrollPx, &rc, &rc, NULL, NULL);
+    if (!scrolled) {
+        if (!m_rollScratchDC.GetSafeHdc())
+            return false;
+        m_rollScratchDC.BitBlt(0, 0, width, preserveH, &m_rollDC, 0, scrollPx, SRCCOPY);
+        m_rollScratchDC.FillSolidRect(0, yBandTop, width, rollH - yBandTop, RGB(20, 20, 20));
+        DrawHistoryGrid(m_rollScratchDC, width, yBandTop, rollH);
+        DrawPlayheadRow(m_rollScratchDC, width, rollH, live);
+        m_rollDC.BitBlt(0, 0, width, rollH, &m_rollScratchDC, 0, 0, SRCCOPY);
     }
-    DrawPlayheadRow(m_rollScratchDC, width, rollH, live);
+    else {
+        m_rollDC.FillSolidRect(0, yBandTop, width, rollH - yBandTop, RGB(20, 20, 20));
+        DrawHistoryGrid(m_rollDC, width, yBandTop, rollH);
+        DrawPlayheadRow(m_rollDC, width, rollH, live);
+    }
 
-    m_rollDC.BitBlt(0, 0, width, rollH, &m_rollScratchDC, 0, 0, SRCCOPY);
     m_lastScrollPx = scrollPx;
     m_lastScrollHealTop = yBandTop;
     return true;
@@ -6125,25 +6133,14 @@ void CPianoRoll::OnPaint()
         didRollUpdate = true;
         didRollScroll = false;
     }
-    // pending 分は1回の BitBlt スクロールで消化（n 回フル転送しない）。
+    // 1行/Present。複数行まとめと同一 vsync の追い付きはスクロールが跳ぶ。
     else if (pending > 0 && m_rollReady) {
-        int n = pending;
-        if (n > 3) n = 3;
-        NoteFrame histSnap[3];
-        int histCount = 0;
-        if (n > 1) {
-            EnterCriticalSection(&m_cs);
-            const int avail = (m_historyCount < n) ? m_historyCount : n;
-            for (int i = 0; i < avail; ++i)
-                histSnap[i] = HistoryAt(i);
-            histCount = avail;
-            LeaveCriticalSection(&m_cs);
-        }
-        if (TryAdvanceRollBuffer(w, rollH, histCount, histSnap, n, liveSnap)) {
+        const int n = 1;
+        if (TryAdvanceRollBuffer(w, rollH, 0, nullptr, n, liveSnap)) {
             EnterCriticalSection(&m_cs);
             m_framesPending -= n;
             if (m_framesPending < 0) m_framesPending = 0;
-            needAnotherRollFrame = (m_framesPending > 0);
+            needAnotherRollFrame = false;
             LeaveCriticalSection(&m_cs);
             m_rollScrollValid = true;
             m_rollReady = true;

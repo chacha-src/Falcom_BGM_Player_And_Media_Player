@@ -24846,8 +24846,22 @@ static void BannerBlitScrollValue(CDC& dst, CDC& src, int valueX_px, int viewW_p
 
 	if (si_px > viewW_px) {
 		dst.BitBlt(valueX_px, y_px, xorW, blitH_px, &src, mcnt_scroll, 0, SRCINVERT);
+		// ソース +4 固定だと Stretch 後の画面 1px と合わず、同じ列が 2 フレ続いたり飛ぶ。
+		// 画面 1px 進んだ先のソース x（destPx * srcW / destW）へ送る。
+		int srcStep = 4;
+		extern CMediaPlayerDlg* mp;
+		if (savedata.playerMode == 1 && mp) {
+			const int destW = mp->m_bannerRect.Width();
+			const int srcW = MDCP + 5;
+			if (destW > 0 && srcW > 0) {
+				const int destPx = (int)(((__int64)mcnt_scroll * destW) / srcW);
+				const int nextSrc = (int)(((__int64)(destPx + 1) * srcW) / destW);
+				srcStep = nextSrc - mcnt_scroll;
+				if (srcStep < 1) srcStep = 1;
+			}
+		}
 		if (si_px - mcnt_scroll < viewW_px) {
-			mcnt_wrap += 4;
+			mcnt_wrap += srcStep;
 			const int x2 = viewW_px - mcnt_wrap + valueX_px;
 			const int w2 = valueX_px + xorW - x2;
 			if (w2 > 0)
@@ -24857,7 +24871,7 @@ static void BannerBlitScrollValue(CDC& dst, CDC& src, int valueX_px, int viewW_p
 		else {
 			mcnt_wrap = 0;
 		}
-		mcnt_scroll += 4;
+		mcnt_scroll += srcStep;
 	}
 	else {
 		// 短文でも xorW 分 SRCINVERT（ソースの黒は無変化、文字画素だけスペアナを反転）
@@ -25574,22 +25588,14 @@ void COggDlg::timerp()
 
 
 	// ピアノ/アナライザは Speana より前に同期する。
-	// 同期は MIDI と同様に毎ティック（Ms2DrawDue だけだとモニタ UpdateWindow が
-	// 長いとき供給が間引きされ、履歴/スペクトラムが遅く見える）。
-	// UpdateWindow だけ Ms2DrawDue。
+	// 同期は毎ティック。Present は MIDI と同じく WM_PAINT に任せる。
+	// timerp 内 UpdateWindow はピアノ OnPaint がバナー合成・info スクロールを
+	// 16ms 周期から押し出し、MP 側が全部ガクガクになる。
 	if (plf == 1 && m_PianoRollDlg && ::IsWindow(m_PianoRollDlg->GetSafeHwnd())) {
 		m_PianoRollDlg->PumpSyncNow();
-		if (::IsWindow(m_PianoRollDlg->GetSafeHwnd())
-			&& m_PianoRollDlg->IsWindowVisible() && !m_PianoRollDlg->IsIconic()
-			&& Ms2DrawDue(ms2))
-			m_PianoRollDlg->UpdateWindow();
 	}
 	if (plf == 1 && m_AnalyzerDlg && ::IsWindow(m_AnalyzerDlg->GetSafeHwnd())) {
 		m_AnalyzerDlg->PumpSyncNow();
-		if (::IsWindow(m_AnalyzerDlg->GetSafeHwnd())
-			&& m_AnalyzerDlg->IsWindowVisible() && !m_AnalyzerDlg->IsIconic()
-			&& Ms2DrawDue(ms2))
-			m_AnalyzerDlg->UpdateWindow();
 	}
 	// MIDI/FM モニタ: 同期は毎ティック。Present は WM_PAINT（timerp 内 UpdateWindow しない）
 	if (plf == 1 && m_MidiMonitorDlg && ::IsWindow(m_MidiMonitorDlg->GetSafeHwnd())) {
@@ -27098,7 +27104,6 @@ DWORD f1 = 0, f2 = 0;
 
 UINT TheadLoop(LPVOID)
 {
-	int infoScrollDiv = 0;   // 60fps÷2 = 30fps で info パネルスクロール tick を投げる
 	int idleSkip = 0;
 	for (;;) {
 		if (drawth == TRUE) return TRUE;
@@ -27118,10 +27123,9 @@ UINT TheadLoop(LPVOID)
 			idleSkip = 0;
 		}
 
-		// info パネルスクロール: TheadLoop の 60fps をそのまま使い、1フレームおきに
-		// PostMessage することで ~30fps を実現。多重 Post は CAS で合流。
-		if (++infoScrollDiv >= 2) {
-			infoScrollDiv = 0;
+		// info パネルスクロール: TheadLoop の ~60fps で 1px/frame。
+		// 旧 30fps×2px はフレーム落ちと重なって 4〜6px 跳びになりぎこちなかった。
+		{
 			extern CMediaPlayerDlg* mp;
 			// mp 破棄と競合しうるため、ポインタをスナップショットしてから HWND のみ検証する。
 			// Create 完了前や破棄中にメンバを触らないよう、IsWindow 後も PostMessage だけにする。
@@ -27138,9 +27142,8 @@ UINT TheadLoop(LPVOID)
 
 		if (needFast) {
 			timing1(1, FALSE, FALSE);
-			Timing64(f2, FALSE);
 			Timing64(fpstiming, FALSE);
-			Sleep(1);
+			// 到達後の Sleep(1) は周期を 17ms 超に伸ばし、バナー/info が 60fps から外れる。
 		}
 		else {
 			/* 停止中は 60fps スピンしない。バナーは MP タイマ、CPU メータは 1 秒タイマ。 */

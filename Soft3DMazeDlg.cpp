@@ -953,7 +953,7 @@ BOOL CS3mView::CreateShaders()
 		"P VST(V x){P o;o.p=x.p;o.n=x.n;o.uv=x.uv;o.c=x.c;return o;}"
 		"struct HC{float e[4]:SV_TessFactor;float i[2]:SV_InsideTessFactor;};"
 		"HC HPC(InputPatch<P,4> p,uint id:SV_PrimitiveID){HC o;float3 c=(p[0].p+p[1].p+p[2].p+p[3].p)*.25;float d=distance(c,Eye.xyz);"
-		"float tf=(LightDir.w<.5)?4.:lerp(8.,3.,saturate((d-1.2)/14.));tf=clamp(tf,3.,12.);"
+		"float tf=(LightDir.w<.5)?5.:lerp(12.,3.4,saturate((d-1.2)/14.));tf=clamp(tf,3.5,14.);"
 		"o.e[0]=o.e[1]=o.e[2]=o.e[3]=tf;o.i[0]=o.i[1]=tf;return o;}"
 		"[domain(\"quad\")][partitioning(\"integer\")][outputtopology(\"triangle_cw\")][outputcontrolpoints(4)][patchconstantfunc(\"HPC\")]"
 		"P HST(InputPatch<P,4> p,uint i:SV_OutputControlPointID,uint id:SV_PrimitiveID){return p[i];}"
@@ -961,61 +961,65 @@ BOOL CS3mView::CreateShaders()
 		"float noise(float2 p){float2 i=floor(p),f=frac(p);float a=hash(i),b=hash(i+float2(1,0)),c=hash(i+float2(0,1)),d=hash(i+float2(1,1));"
 		"float2 u=f*f*(3.-2.*f);return lerp(a,b,u.x)+(c-a)*u.y*(1.-u.x)+(d-b)*u.x*u.y;}"
 		"float fbm(float2 p){float f=0.,a=0.5;for(int i=0;i<4;i++){f+=a*noise(p);p*=2.;a*=.5;}return f;}"
+		"float Dggx(float nh,float a){float a2=max(a*a,.002);float d=nh*nh*(a2-1.)+1.;return a2/(3.14159265*d*d);}"
+		"float3 Fres(float3 F0,float vh){return F0+(1.-F0)*pow(1.-saturate(vh),5.);}"
+		"float Gsch(float nv,float nl,float a){float k=pow(a+1.,2.)/8.;return (nv/(nv*(1.-k)+k))*(nl/(nl*(1.-k)+k));}"
+		"float3 SpecB(float3 n,float3 l,float3 v,float rough,float3 F0){float3 h=normalize(l+v);float nh=saturate(dot(n,h)),nv=saturate(dot(n,v)),nl=saturate(dot(n,l)),vh=saturate(dot(v,h));float a=max(rough*rough,.002);return Dggx(nh,a)*Gsch(nv,nl,a)*Fres(F0,vh)/max(4.*nv*nl,1e-4);}"
+		"float3 EnvR(float3 n,float3 v,float rough){return Env.SampleLevel(SL,reflect(-v,n),clamp(rough*5.5,0.,7.)).rgb;}"
+		"float2 POM(float2 uv,float3 vw,float3 n,float s){float3 t=normalize(cross(n,abs(n.y)>.9?float3(1,0,0):float3(0,1,0)));float2 du=float2(dot(vw,t),-vw.y)*s;[unroll]for(int i=0;i<8;i++)uv-=du*(lerp(T0.Sample(SL,uv).a,T1.Sample(SL,uv).r,.55)-.44);return uv;}"
+		"float ContAO(float3 n){float g=length(float2(ddx(n.y),ddy(n.y)));return saturate(1.-g*4.0);}"
 		"[domain(\"quad\")]D DST(HC h,float2 q:SV_DomainLocation,const OutputPatch<P,4> p){"
 		"P a,b,o;a.p=lerp(p[0].p,p[1].p,q.x);b.p=lerp(p[3].p,p[2].p,q.x);o.p=lerp(a.p,b.p,q.y);"
 		"a.n=lerp(p[0].n,p[1].n,q.x);b.n=lerp(p[3].n,p[2].n,q.x);o.n=normalize(lerp(a.n,b.n,q.y));"
 		"a.uv=lerp(p[0].uv,p[1].uv,q.x);b.uv=lerp(p[3].uv,p[2].uv,q.x);o.uv=lerp(a.uv,b.uv,q.y);o.c=p[0].c;"
 		"float nrm=fbm(o.p.xz*3.2+o.p.y*2.4)-.5;"
 		"float pulse=sin(Misc.w*1.55+o.p.x*1.7+o.p.z*1.4)*0.016*(0.55+0.45*Wind.w);"
-		"if(LightDir.w>=0.5){o.p+=o.n*(nrm*0.022+pulse*saturate(1.05-abs(o.n.y)));}"
+		"if(LightDir.w>=0.5){o.p+=o.n*(nrm*0.038+pulse*saturate(1.05-abs(o.n.y)));}"
 		"D z;z.w=o.p;z.n=o.n;z.uv=o.uv;z.c=o.c;z.p=mul(float4(o.p,1),VP);return z;}"
 		"[maxvertexcount(3)]void GSW(triangle D i[3],inout TriangleStream<D> s){"
 		"float y0=min(i[0].w.y,min(i[1].w.y,i[2].w.y));"
 		"[unroll]for(int k=0;k<3;k++){D o=i[k];float h=saturate((o.w.y-y0)*2.2);"
 		"float sway=sin(Misc.w*1.4+o.w.x*1.8+o.w.z*1.5)*Wind.w*h;o.w.xz+=Wind.xz*sway*0.035;o.p=mul(float4(o.w,1),VP);s.Append(o);}s.RestartStrip();}"
 		"float ShadowAt(float3 w,float3 n){float3 nn=normalize(n);float3 l=normalize(LightDir.xyz);float ndl=saturate(dot(nn,l));"
-		"w+=nn*(0.015+(1-ndl)*0.025);float4 sp=mul(float4(w,1),LightVP);float iw=1.0/max(sp.w,1e-5);"
+		"w+=nn*(0.018+(1.-ndl)*0.028);float4 sp=mul(float4(w,1),LightVP);float iw=1.0/max(sp.w,1e-5);"
 		"float2 uv=sp.xy*iw*float2(.5,-.5)+.5;"
-		"uv+=float2(2.0,-2.0)/1024.0;"
-		"float z=sp.z*iw-0.003;"
+		"float z=sp.z*iw-0.0024;"
 		"if(any(uv<0)||any(uv>1)||z<=0||z>=1)return 1;"
-		"const float2 o[8]={float2(-0.326,-0.406),float2(-0.840,-0.074),float2(-0.696,0.457),float2(-0.203,0.621),"
-		"float2(0.962,-0.195),float2(0.473,-0.480),float2(0.519,0.767),float2(0.185,-0.893)};"
-		"float s=0;const float t=2.0/1024.0;[unroll]for(int k=0;k<8;k++)s+=ShadowMap.SampleCmpLevelZero(SCmp,uv+o[k]*t,z);"
-		"s*=0.125;return pow(saturate(s),1.12);}"
-		"float ShadeLit(float ndl,float sh){float d=saturate(ndl);float wrap=saturate(ndl*.52+.48);float amb=.48+.11*saturate(Eye.w*.5);"
-		"float lit=lerp(amb,max(d,amb*.92),sh);return saturate(lit*.62+wrap*wrap*.48);}"
+		"const float2 o[12]={float2(-0.326,-0.406),float2(-0.840,-0.074),float2(-0.696,0.457),float2(-0.203,0.621),"
+		"float2(0.962,-0.195),float2(0.473,-0.480),float2(0.519,0.767),float2(0.185,-0.893),"
+		"float2(0.507,0.064),float2(0.896,0.412),float2(-0.458,-0.882),float2(-0.054,0.937)};"
+		"float s=0,pen=lerp(1.15,2.8,1.-ndl);const float t=pen/1024.0;"
+		"[unroll]for(int k=0;k<12;k++)s+=ShadowMap.SampleCmpLevelZero(SCmp,uv+o[k]*t,z);"
+		"s*=0.08333;return pow(saturate(s),1.18);}"
+		"float ShadeLit(float ndl,float sh){float d=saturate(ndl);float wrap=saturate(ndl*.48+.52);float amb=.26+.10*saturate(Eye.w*.5);"
+		"float lit=lerp(amb,max(d,amb*.48),sh);return saturate(lit*.72+wrap*wrap*.36);}"
 		"float4 PlanarMir(float3 w,row_major float4x4 RVP,Texture2D M){float4 rp=mul(float4(w,1),RVP);float iw=max(rp.w,1e-5);float2 muv=rp.xy/iw*float2(.5,-.5)+.5;"
 		"float mb=(rp.w>0)*(muv.x>=0)*(muv.x<=1)*(muv.y>=0)*(muv.y<=1)*saturate(min(min(muv.x,1-muv.x),min(muv.y,1-muv.y))*12);return float4(M.Sample(SL,saturate(muv)).rgb,mb);}"
-		"float4 PSW(D i):SV_Target{float3 vW=normalize(Eye.xyz-i.w);float3 n0=normalize(i.n);"
-		"float3 tng=normalize(cross(n0,abs(n0.y)>0.95?float3(1,0,0):float3(0,1,0)));float2 duv=float2(dot(vW,tng),-vW.y)*.038;"
-		"float2 uv=i.uv;[unroll]for(int s=0;s<5;s++)uv-=duv*(T0.Sample(SL,uv*2.5).a-.42);"
-		"float4 a=T0.Sample(SL,uv*2.5)*i.c;float h=T0.Sample(SL,uv*2.5).a;"
-		"float3 det=T1.Sample(SL,uv*8.2).rgb;a.rgb=lerp(a.rgb,saturate(a.rgb*det*1.28),0.46);"
-		"float hx=T0.Sample(SL,uv*2.5+float2(.004,0)).a-h;float hy=T0.Sample(SL,uv*2.5+float2(0,.004)).a-h;"
-		"float nz=fbm(uv*250.+Misc.w*.02)*0.1;"
-		"float3 n=normalize(i.n+float3(hx+nz,hy+nz,0)*4.2);float3 l=normalize(LightDir.xyz);float sh=ShadowAt(i.w,n);"
+		"float4 PSW(D i):SV_Target{float3 v=normalize(Eye.xyz-i.w);float3 n0=normalize(i.n);"
+		"float2 uv=POM(i.uv*2.35,v,n0,.030);float4 a=T0.Sample(SL,uv)*i.c;float h=a.a;"
+		"float3 det=T1.Sample(SL,uv*3.6).rgb;a.rgb=lerp(a.rgb,saturate(a.rgb*det*1.34),0.55);"
+		"float hx=T0.Sample(SL,uv+float2(.0035,0)).a-h;float hy=T0.Sample(SL,uv+float2(0,.0035)).a-h;"
+		"float nz=fbm(uv*210.+Misc.w*.02)*0.09;"
+		"float3 n=normalize(n0+float3(hx+nz,hy+nz,0)*5.4);float3 l=normalize(LightDir.xyz);float sh=ShadowAt(i.w,n);"
 		"float nd=ShadeLit(dot(n,l),sh);"
-		"float3 v=normalize(Eye.xyz-i.w);float3 r=reflect(-l,n);float rv=saturate(dot(r,v));"
-		"float sp=pow(rv,56)*sh;float spark=pow(rv,180)*sh;float3 sun=float3(1.0,.94,.78);"
-		"float3 env=Env.Sample(SL,reflect(-v,n)).rgb;"
+		"float3 env=EnvR(n,v,lerp(.46,.18,saturate(1.-abs(n.y))));"
 		"float metal=saturate((i.c.a-1.01)*8);float doorM=saturate(1-abs(i.c.a-1.05)*50);float keyM=saturate(1-abs(i.c.a-1.12)*40);"
 		"float useMir=LightDir.w;"
 		"float4 mir=PlanarMir(i.w,ReflectVP,MirrorMap);float4 mir2=PlanarMir(i.w+reflect(-v,n)*1.2,ReflectVP,MirrorMap);if(mir2.a>mir.a)mir=mir2;"
 		"float mw=metal*useMir*max(mir.a,.35);env=lerp(env,lerp(env,mir.rgb,saturate(mir.a)),mw);"
 		"float pulse=.5+.5*sin(Misc.w*1.65+i.w.x*.4+i.w.z*.3);"
-		"float occ=lerp(0.84,1.08,a.a);if(Eye.w>0.5)occ=lerp(0.94,1.14,a.a);"
-		"float F0=lerp(0.04,0.78,metal);float Fs=F0+(1.-F0)*pow(1.-saturate(dot(n,v)),5.);"
-		"float3 hemi=lerp(float3(.42,.38,.36),float3(.62,.72,.9),saturate(n.y*.5+.5));"
-		"float3 col=lerp(a.rgb*nd*occ*lerp(float3(1,1,1),hemi,.18),mir.rgb*(.25+.75*a.rgb),mw*.92);"
-		"col+=sun*(sp*.5+spark*.9)*Fs+env*(.10+Fs*.32)*(1-mw*.55)*lerp(.55,1,sh);"
-		"col+=sun*(sp*.55+spark*1.1)*doorM*(.55+.45*pulse);col+=float3(1,.92,.35)*(spark*1.6+sp*.4)*keyM*(.6+.4*pulse);"
-		"col=lerp(col,env*(.4+.6*a.rgb)+mir.rgb*.5,keyM*.35*useMir);"
-		"float corner=saturate(1.-abs(i.n.y)*1.2)*.12;col*=1.-corner;"
-		"float str=0;if(abs(n.y)<.48)str=smoothstep(.58,.92,fbm(float2(i.w.x+i.w.z,i.w.y*2.3-Misc.w*.05)*3.8));"
-		"col=lerp(col,col*float3(.84,.91,.95)+sun*sp*str*.35,str*.26);"
+		"float occ=lerp(0.78,1.12,a.a)*ContAO(n);if(Eye.w>0.5)occ=lerp(0.88,1.18,a.a);"
+		"float3 F0c=lerp(float3(.045,.045,.05),float3(.74,.76,.80),metal);"
+		"float3 hemi=lerp(float3(.36,.32,.30),float3(.64,.76,.94),saturate(n.y*.5+.5));"
+		"float3 col=lerp(a.rgb*nd*occ*lerp(float3(1,1,1),hemi,.24),mir.rgb*(.20+.80*a.rgb),mw*.92);"
+		"col+=SpecB(n,l,v,lerp(.50,.14,metal),F0c)*sh*2.55+env*(.13+.30*metal)*lerp(.48,1,sh);"
+		"col+=float3(1,.94,.78)*doorM*(.42+.58*pulse)*sh*.62;col+=float3(1,.92,.32)*keyM*(.52+.48*pulse)*sh;"
+		"col=lerp(col,env*(.38+.62*a.rgb)+mir.rgb*.52,keyM*.38*useMir);"
+		"float corner=saturate(1.-abs(n.y)*1.15)*.18;col*=1.-corner;"
+		"float str=0;if(abs(n.y)<.50)str=smoothstep(.55,.92,fbm(float2(i.w.x+i.w.z,i.w.y*2.3-Misc.w*.05)*3.8));"
+		"col=lerp(col,col*float3(.82,.90,.96)+float3(1,.94,.80)*str*.22,str*.30);"
 		"float d=length(Eye.xyz-i.w),fg=saturate((d-Fog.x)/max(.01,Fog.y-Fog.x));fg=saturate(fg+max(0,Fog.w-i.w.y)*Fog.z);fg=fg*fg*(3-2*fg);"
-		"return float4(lerp(col,float3(.52,.66,.84),fg*.72),1);}"
+		"return float4(lerp(col,float3(.50,.64,.82),fg*.58),1);}"
 		"D VSS(V x){D o;o.w=x.p;o.n=x.n;o.uv=x.uv;o.c=x.c;o.p=mul(float4(x.p,1),VP);return o;}"
 		"struct VK{float3 p:POSITION;float3 n:NORMAL;float2 uv:TEXCOORD0;float4 c:TEXCOORD1;float4 sk:TEXCOORD2;};"
 		"D VSSKIN(VK x){uint bi=min((uint)x.sk.w,15);float bw=saturate(frac(x.sk.w));float3 root=x.sk.xyz;float3 lp=x.p-root;"
@@ -1030,40 +1034,45 @@ BOOL CS3mView::CreateShaders()
 		"float nz=fbm(i.w.xz*18.+i.w.y*14.+Misc.w*.02)*0.1;"
 		"n=normalize(n+float3(nz,nz*0.5,nz)*0.8);"
 		"float3 v=normalize(Eye.xyz-i.w);float nd=ShadeLit(dot(n,l),sh);"
-		"float sp=pow(saturate(dot(reflect(-l,n),v)),64)*sh;float3 env=Env.Sample(SL,reflect(-v,n)).rgb;"
 		"float mirror=saturate((i.c.a-1.01)*8);float glass=saturate((i.c.a-1.18)*10);float useMir=LightDir.w;"
 		"float doorM=saturate(1-abs(i.c.a-1.05)*50);float keyM=saturate(1-abs(i.c.a-1.12)*40);"
 		"float4 mir=PlanarMir(i.w,ReflectFloorVP,MirrorFloor);float4 mir2=PlanarMir(i.w+n*.55,ReflectFloorVP,MirrorFloor);if(mir2.a>mir.a)mir=mir2;"
-		// 鏡床は床面そのものが反射。RTが薄いときは cubemap で鏡面を保つ
 		"float floorM=saturate((i.c.a-1.13)*28);"
-		"float F0=lerp(0.04,0.92,saturate(mirror+keyM+floorM));float Fs=F0+(1.-F0)*pow(1.-saturate(dot(n,v)),5.);"
-		"float3 chrome=lerp(env*1.12,mir.rgb*1.28,saturate(mir.a));"
-		"float mw=max(mirror*useMir*saturate(mir.a),floorM*useMir);"
-		"mw=max(mw,keyM*useMir*saturate(mir.a));"
 		"float trapK=saturate(1.-abs(i.c.a-.44)*16.);float itemK=saturate(1.-abs(i.c.a-1.15)*18.);"
 		"float glassK=saturate((i.c.a-1.18)*8.);float woodK=saturate(1.-abs(i.c.a-1.05)*40.);"
 		"float prop=saturate(trapK+itemK+glassK+woodK);"
-		"float3 tex=T0.Sample(SL,lerp(i.uv*4.2,i.uv,prop)).rgb;float3 det=T1.Sample(SL,lerp(i.uv*11.0,i.uv,prop)).rgb;"
-		"float tm=saturate(dot(tex,tex)*3.);float dm=saturate(dot(det,det)*3.);"
-		"float3 albedo=lerp(i.c.rgb,saturate(tex*lerp(float3(1,1,1),det*1.32,0.42*dm)),0.64*tm);"
-		"albedo=lerp(albedo,saturate(lerp(tex,det,trapK)*i.c.rgb*1.15),prop);"
-		"float3 hemi=lerp(float3(.4,.38,.36),float3(.6,.7,.88),saturate(n.y*.5+.5));"
-		"float3 lit=albedo*nd*lerp(float3(1,1,1),hemi,.16);"
-		"float pud=0;if(n.y>.55)pud=smoothstep(.52,.84,fbm(i.w.xz*3.2))*smoothstep(.22,.02,i.w.y);"
+		"float flrK=saturate(n.y)*saturate(1.-prop-mirror);"
+		"float2 suv=lerp(i.uv*4.2,i.w.xz*0.52+i.w.y*0.20,flrK);suv=lerp(suv,i.uv,prop);"
+		"suv=lerp(suv,POM(suv,v,n,.022),flrK);"
+		"float4 tex4=T0.Sample(SL,suv);if(itemK>0.4&&tex4.a<0.10)discard;float3 tex=tex4.rgb;"
+		"float3 det=T1.Sample(SL,lerp(suv*2.6,i.uv,prop)).rgb;float tm=saturate(dot(tex,tex)*3.);float dm=saturate(dot(det,det)*3.);"
+		"float3 albedo=lerp(i.c.rgb,saturate(tex*lerp(float3(1,1,1),det*1.36,0.48*dm)),lerp(0.70*tm,0.96,itemK));"
+		"albedo=lerp(albedo,saturate(lerp(tex,det,trapK)*i.c.rgb*1.12),prop*(1.-itemK));"
+		"albedo=lerp(albedo,saturate(tex*i.c.rgb*1.08),itemK);"
+		"float3 hemi=lerp(float3(.36,.33,.31),float3(.62,.74,.92),saturate(n.y*.5+.5));"
+		"float3 lit=albedo*nd*lerp(float3(1,1,1),hemi,.22)*ContAO(n);"
+		"float pud=0;if(n.y>.55)pud=smoothstep(.50,.86,fbm(i.w.xz*3.1))*smoothstep(.22,.02,i.w.y);"
 		"float str=0;if(abs(n.y)<.45)str=smoothstep(.62,.92,fbm(float2(i.w.x+i.w.z,i.w.y*2.1-Misc.w*.07)*4.1));"
 		"float wet=saturate(pud*.9+str*.5)*(1-mirror)*(1-floorM);"
-		"float wetSp=pow(saturate(dot(reflect(-l,n),v)),80)*sh*wet*.24;"
+		"float3 F0c=lerp(float3(.04,.04,.04),float3(.78,.80,.84),saturate(mirror+keyM+floorM));"
+		"float3 chrome=lerp(EnvR(n,v,lerp(.42,.12,saturate(mirror+floorM)))*1.08,mir.rgb*1.22,saturate(mir.a));"
+		"float mw=max(mirror*useMir*saturate(mir.a),floorM*useMir);"
+		"mw=max(mw,keyM*useMir*saturate(mir.a));"
 		"float glowP=.55+.45*sin(Misc.w*2.1+i.w.y*3);"
 		"float3 c=lerp(lit,chrome*(.06+.94*saturate(i.c.rgb+.32)),max(mw,floorM*useMir)*(.99-.12*glass));"
-		"c+=env*((.10+Fs*.48)*(1-mw*.9)+mirror*.22*(1-glass))*lerp(.5,1,sh)+float3(1,.96,.9)*sp*(.35+mirror*1.35)*Fs;"
-		"c+=float3(.7,.9,1)*pow(Fs,1.15)*mirror*.55;"
-		"c=lerp(c,env*(.45+.55*saturate(i.c.rgb+.2))+mir.rgb*.55,keyM*(.42+.28*Fs)*useMir);"
-		"c+=float3(.85,.95,1)*wetSp;c+=float3(1,.9,.35)*sp*keyM*(.5+.5*glowP)*1.2;c+=float3(.75,.7,.65)*sp*doorM*.8;"
-		"float leaf=saturate(1.-abs(i.c.a-0.97)*70.);c=lerp(c,c*float3(.82,1.08,.7)+env*.10,leaf*.42);"
-		"c+=i.c.rgb*(.04+.05*glowP)*saturate(i.c.a-.35)*(1-mirror)*.35;"
-		"float al=mirror>0?lerp(lerp(.96,.90,mw),lerp(.84,.74,mw),glass):saturate(i.c.a);float d=length(Eye.xyz-i.w),fg=saturate((d-Fog.x)/max(.01,Fog.y-Fog.x));"
+		"c+=EnvR(n,v,lerp(.55,.16,saturate(mirror+itemK)))*((.12+.42*(mirror+floorM))*(1-mw*.85)+mirror*.20)*lerp(.48,1,sh);"
+		"c+=SpecB(n,l,v,lerp(.58,.14,saturate(mirror+itemK+wet)),F0c)*sh*lerp(1.7,2.6,itemK);"
+		"c+=float3(.7,.9,1)*pow(saturate(1.-dot(n,v)),2.2)*mirror*.45;"
+		"c=lerp(c,EnvR(n,v,.12)*(.45+.55*saturate(i.c.rgb+.2))+mir.rgb*.55,keyM*(.40+.28*mirror)*useMir);"
+		"c+=float3(.85,.95,1)*SpecB(n,l,v,.18,float3(.03,.04,.05))*wet*sh;"
+		"c+=float3(1,.9,.32)*keyM*(.48+.52*glowP)*.85;c+=float3(.75,.7,.65)*doorM*sh*.35;"
+		"float leaf=saturate(1.-abs(i.c.a-0.97)*70.);c=lerp(c,c*float3(.82,1.08,.7)+EnvR(n,v,.55)*.10,leaf*.42);"
+		"c+=i.c.rgb*(.04+.05*glowP)*saturate(i.c.a-.35)*(1-mirror)*.28;"
+		"float al=mirror>0?lerp(lerp(.96,.90,mw),lerp(.84,.74,mw),glass):saturate(i.c.a);"
+		"al=lerp(al,saturate(max(tex4.a,0.88)),itemK);al=max(al,saturate(0.94*flrK));"
+		"float d=length(Eye.xyz-i.w),fg=saturate((d-Fog.x)/max(.01,Fog.y-Fog.x));"
 		"fg=saturate(fg+max(0,Fog.w-i.w.y)*Fog.z);fg=fg*fg*(3-2*fg);"
-		"return float4(lerp(c,float3(.52,.66,.84),fg*.55*(1-mw*.7)),al);}"
+		"return float4(lerp(c,float3(.50,.64,.82),fg*.48*(1-mw*.7)),al);}"
 		"float4 PSMIRF(D i):SV_Target{"
 		"float4 rp=mul(float4(i.w,1),ReflectFloorVP);float iw=max(rp.w,1e-5);"
 		"float2 uv=rp.xy/iw*float2(.5,-.5)+.5;"
@@ -1086,7 +1095,7 @@ BOOL CS3mView::CreateShaders()
 		"float3 sunC=float3(1.02,.94,.82);float3 skyC=float3(.5,.64,.9);"
 		"float3 c=albedo*lerp(skyC,sunC,nl*.5+.3)*(.6+.5*nl)+sunC*pow(thin,1.3)*1.35+sunC*silver;"
 		"float d=length(Eye.xyz-i.w),fg=saturate((d-Fog.x)/max(.01,Fog.y-Fog.x));fg=fg*fg*(3-2*fg);"
-		"return float4(lerp(c,float3(.52,.66,.84),fg*.4),saturate(dens*1.05));}"
+		"return float4(lerp(c,float3(.52,.66,.84),fg*.4),saturate(dens*0.90));}"
 		"struct HV{float2 p:POSITION;float2 uv:TEXCOORD0;float4 c:TEXCOORD1;};struct HO{float4 p:SV_POSITION;float2 uv:TEXCOORD0;float4 c:TEXCOORD1;};"
 		"HO VSH(HV x){HO o;o.p=float4(x.p,0,1);o.uv=x.uv;o.c=x.c;return o;}"
 		"float4 PSH(HO i):SV_Target{if(i.uv.x<-0.5)return i.c;float4 t=T0.Sample(SL,i.uv);return float4(t.rgb*i.c.rgb,t.a*i.c.a);}"
@@ -1097,9 +1106,9 @@ BOOL CS3mView::CreateShaders()
 		"float2 oc=i.uv+float2(.0018,-.0024);float cs=saturate((Depth.Sample(SP,oc).r-z)*88.);c.rgb*=lerp(.58,1.,1.-cs*.58);"
 		"float ao=1;const float2 aoO[6]={float2(.005,.002),float2(-.004,.0035),float2(.003,-.005),float2(-.005,-.002),float2(.006,0),float2(0,.006)};"
 		"[unroll]for(int a=0;a<6;a++){float zd=Depth.Sample(SP,saturate(i.uv+aoO[a])).r;ao-=saturate((z-zd)*28.)*0.08;}c.rgb*=lerp(.68,1.,saturate(ao));"
-		"float2 rp=i.uv;float2 rd=float2((i.uv.x-.5)*.04,.018);float3 rc=c.rgb;float rk=0;"
-		"[unroll]for(int s=0;s<12;s++){rp+=rd;if(any(rp<0)||any(rp>1))break;float dz=Depth.Sample(SP,rp).r;if(dz<z-0.002){rc=T0.Sample(SL,rp).rgb;rk=exp(-s*.13);break;}}"
-		"c.rgb=lerp(c.rgb,rc,rk*0.32*smoothstep(.08,.7,z));"
+		"float2 rp=i.uv;float2 rd=float2((i.uv.x-.5)*.036,.016);float3 rc=c.rgb;float rk=0;"
+		"[unroll]for(int s=0;s<16;s++){rp+=rd;if(any(rp<0)||any(rp>1))break;float dz=Depth.Sample(SP,rp).r;if(dz<z-0.0016){rc=T0.Sample(SL,rp).rgb;rk=exp(-s*.11);break;}}"
+		"c.rgb=lerp(c.rgb,rc,rk*0.38*smoothstep(.08,.78,z));"
 		"float2 sun=th<.5?float2(.58,.11):float2(.5,.2);float2 dir=sun-i.uv;float rays=0;float2 p=i.uv;"
 		"[unroll]for(int k=0;k<16;k++){p+=dir*.018;if(any(p<0)||any(p>1))break;rays+=saturate(.13-Depth.Sample(SP,p).r)*exp(-k*.12);}"
 		"c.rgb+=(th<.5?float3(1,.93,.7):float3(.5,.72,1))*rays*(th<.5?.3:.18);"
@@ -1120,10 +1129,11 @@ BOOL CS3mView::CreateShaders()
 		"c+=(T0.Sample(SL,i.uv+float2(px.x,0))+T0.Sample(SL,i.uv-float2(px.x,0))+T0.Sample(SL,i.uv+float2(0,px.y))+T0.Sample(SL,i.uv-float2(0,px.y)))*.13;"
 		"c+=(T0.Sample(SL,i.uv+px)+T0.Sample(SL,i.uv-px)+T0.Sample(SL,i.uv+float2(px.x,-px.y))+T0.Sample(SL,i.uv+float2(-px.x,px.y)))*.05;"
 		"return c;}"
-		"float4 FIN(Q i):SV_Target{float4 c=T0.Sample(SL,i.uv);if(Misc.z>8.f){c.a*=saturate(Misc.y);return c;}float v=saturate(1-dot((i.uv-.5)*1.05,(i.uv-.5)*1.05));c.rgb*=lerp(.92,1.08,v);"
-		"float th=Eye.w;float3 tone=float3(1.05,1.02,.98);if(th>2.5)tone=float3(1.12,1.04,.98);else if(th>1.5)tone=float3(1.10,1.05,1.00);else if(th>.5)tone=float3(1.08,1.10,1.14);"
+		"float4 FIN(Q i):SV_Target{float4 c=T0.Sample(SL,i.uv);if(Misc.z>8.f){c.a*=saturate(Misc.y);return c;}float v=saturate(1-dot((i.uv-.5)*1.12,(i.uv-.5)*1.12));c.rgb*=lerp(.86,1.12,v);"
+		"float th=Eye.w;float3 tone=float3(1.08,1.03,.97);if(th>2.5)tone=float3(1.16,1.05,.96);else if(th>1.5)tone=float3(1.12,1.06,1.00);else if(th>.5)tone=float3(1.10,1.12,1.16);"
 		"c.rgb=saturate(c.rgb*tone);float3 x=max(c.rgb,0);c.rgb=saturate((x*(2.51*x+.03))/(x*(2.43*x+.59)+.14));"
-		"float lum=dot(c.rgb,float3(.299,.587,.114));c.rgb+=c.rgb*saturate(lum-.7)*.22;"
+		"c.rgb=lerp(c.rgb,c.rgb*c.rgb*(3.-2.*c.rgb),0.08);"
+		"float lum=dot(c.rgb,float3(.299,.587,.114));c.rgb+=c.rgb*saturate(lum-.66)*.28;"
 		"float cas=saturate(Dof.w);if(cas>0.01){float2 px=Screen.zw*1.25f;float3 soft=T0.Sample(SL,i.uv+float2(px.x,0)).rgb+T0.Sample(SL,i.uv-float2(px.x,0)).rgb+T0.Sample(SL,i.uv+float2(0,px.y)).rgb+T0.Sample(SL,i.uv-float2(0,px.y)).rgb;soft*=.25;c.rgb=saturate(c.rgb+(c.rgb-soft)*cas);}"
 		"float2 ca=Screen.zw*(1.1+2.4*length(i.uv-.5));c.r=lerp(c.r,T0.Sample(SL,saturate(i.uv+ca)).r,.18);c.b=lerp(c.b,T0.Sample(SL,saturate(i.uv-ca)).b,.18);"
 		"float gr=frac(sin(dot(i.uv,float2(12.9898,78.233))+Misc.w*0.7)*43758.5453);c.rgb+=(gr-.5)*0.016;"
@@ -6104,6 +6114,57 @@ void CSoft3DMazeDlg::RenderScene()
 			quadUV(ax,ay,az,bx,by,bz,cx2,cy2,cz2,dx,dy,dz,nx,ny,nz,t0,s0,t1,s1,r,g,b,a);
 		}
 	};
+	auto quadWorld=[&](float x0,float y0,float z0,float x1,float y1,float z1,float x2,float y2,float z2,float x3,float y3,float z3,float nx,float ny,float nz,float r,float g,float b,float a){
+		const float us=0.52f, vs=0.78f;
+		auto uvAt=[&](float x,float y,float z,float& u,float& vv){
+			if(fabsf(ny)>0.65f){u=x*us;vv=z*us;}
+			else if(fabsf(nx)>0.65f){u=z*us;vv=y*vs;}
+			else {u=x*us;vv=y*vs;}
+		};
+		const float cx=(x0+x1+x2+x3)*.25f,cy=(y0+y1+y2+y3)*.25f,cz=(z0+z1+z2+z3)*.25f;
+		if(nx*(ex-cx)+ny*(eyeY-cy)+nz*(ez-cz)<=0.f)return;
+		const int sd=S3MeshAxisMul();
+		const int sdQ=(sd>16)?16:sd;
+		float ua,va,ub,vb,uc,vc,ud,vd;
+		if(sdQ<=1){
+			uvAt(x0,y0,z0,ua,va);uvAt(x1,y1,z1,ub,vb);uvAt(x2,y2,z2,uc,vc);uvAt(x3,y3,z3,ud,vd);
+			tri(x0,y0,z0,x1,y1,z1,x2,y2,z2,nx,ny,nz,ua,va,ub,vb,uc,vc,r,g,b,a);
+			tri(x0,y0,z0,x2,y2,z2,x3,y3,z3,nx,ny,nz,ua,va,uc,vc,ud,vd,r,g,b,a);
+			return;
+		}
+		auto at=[&](float t,float s,float& x,float& y,float& z){
+			float xa=x0+(x1-x0)*t,ya=y0+(y1-y0)*t,za=z0+(z1-z0)*t;
+			float xb=x3+(x2-x3)*t,yb=y3+(y2-y3)*t,zb=z3+(z2-z3)*t;
+			x=xa+(xb-xa)*s;y=ya+(yb-ya)*s;z=za+(zb-za)*s;
+		};
+		for(int j=0;j<sdQ;j++)for(int i=0;i<sdQ;i++){
+			float t0=(float)i/(float)sdQ,t1=(float)(i+1)/(float)sdQ;
+			float s0=(float)j/(float)sdQ,s1=(float)(j+1)/(float)sdQ;
+			float ax,ay,az,bx,by,bz,cx2,cy2,cz2,dx,dy,dz;
+			at(t0,s0,ax,ay,az);at(t1,s0,bx,by,bz);at(t1,s1,cx2,cy2,cz2);at(t0,s1,dx,dy,dz);
+			uvAt(ax,ay,az,ua,va);uvAt(bx,by,bz,ub,vb);uvAt(cx2,cy2,cz2,uc,vc);uvAt(dx,dy,dz,ud,vd);
+			tri(ax,ay,az,bx,by,bz,cx2,cy2,cz2,nx,ny,nz,ua,va,ub,vb,uc,vc,r,g,b,a);
+			tri(ax,ay,az,cx2,cy2,cz2,dx,dy,dz,nx,ny,nz,ua,va,uc,vc,ud,vd,r,g,b,a);
+		}
+	};
+	auto emitIconBill=[&](float px,float py,float pz,int slot,float rr,float gg,float bb,float hs,float a){
+		if(slot<0||slot>15)return;
+		const float u0=(float)(slot%4)*0.25f+0.018f, v0=(float)(slot/4)*0.25f+0.018f;
+		const float u1=u0+0.214f, v1=v0+0.214f;
+		const float qx=px-rx*hs, qz=pz-rz*hs, sx=px+rx*hs, sz=pz+rz*hs;
+		quadUV(qx,py-hs,qz, sx,py-hs,sz, sx,py+hs,sz, qx,py+hs,qz, -fx,0.f,-fz, u0,v1,u1,v0, rr,gg,bb,a);
+	};
+	auto itemAtlasSlot=[&](BYTE c)->int{
+		if(c==CELL_TEMPO)return 0; if(c==CELL_TEMPO_DN)return 1;
+		if(c==CELL_PITCH_UP)return 2; if(c==CELL_PITCH_DN)return 3;
+		if(c==CELL_NEXT)return 4; if(c==CELL_PREV)return 5;
+		if(c==CELL_VOL_UP)return 6; if(c==CELL_VOL_DN)return 7;
+		if(c==CELL_EQ)return 8; if(c==CELL_EQ_FLAT)return 9;
+		if(c==CELL_REVERB)return 10; if(c==CELL_XFADE)return 11;
+		if(c==CELL_RANDOM)return 12; if(c==CELL_KEY)return 13;
+		if(c==CELL_GOAL)return 14; if(c==CELL_DOOR)return 15;
+		return -1;
+	};
 	auto patch1=[&](float x0,float y0,float z0,float x1,float y1,float z1,float x2,float y2,float z2,float x3,float y3,float z3,float nx,float ny,float nz,float u0,float v0,float u1,float v1,float r,float g,float b,float a){
 		put(x0,y0,z0,nx,ny,nz,u0,v1,r,g,b,a);put(x1,y1,z1,nx,ny,nz,u1,v1,r,g,b,a);put(x2,y2,z2,nx,ny,nz,u1,v0,r,g,b,a);put(x3,y3,z3,nx,ny,nz,u0,v0,r,g,b,a);};
 	auto patch=[&](float x0,float y0,float z0,float x1,float y1,float z1,float x2,float y2,float z2,float x3,float y3,float z3,float nx,float ny,float nz,float u0,float v0,float u1,float v1,float r,float g,float b,float a){
@@ -6129,12 +6190,12 @@ void CSoft3DMazeDlg::RenderScene()
 	};
 	// 通路立方体（低い箱）— 階段など厚みが必要なとき用
 	auto passCube=[&](float x0,float z0,float x1,float z1,float y0,float y1,float r,float g,float b,float a){
-		quad(x0,y1,z0,x1,y1,z0,x1,y1,z1,x0,y1,z1,0,1,0,r,g,b,a);
-		quad(x0,y0,z1,x1,y0,z1,x1,y0,z0,x0,y0,z0,0,-1,0,r*.7f,g*.7f,b*.7f,a);
-		quad(x0,y0,z0,x0,y0,z1,x0,y1,z1,x0,y1,z0,-1,0,0,r,g,b,a);
-		quad(x1,y0,z1,x1,y0,z0,x1,y1,z0,x1,y1,z1,1,0,0,r,g,b,a);
-		quad(x0,y0,z0,x1,y0,z0,x1,y1,z0,x0,y1,z0,0,0,-1,r,g,b,a);
-		quad(x1,y0,z1,x0,y0,z1,x0,y1,z1,x1,y1,z1,0,0,1,r,g,b,a);
+		quadWorld(x0,y1,z0,x1,y1,z0,x1,y1,z1,x0,y1,z1,0,1,0,r,g,b,a);
+		quadWorld(x0,y0,z1,x1,y0,z1,x1,y0,z0,x0,y0,z0,0,-1,0,r*.7f,g*.7f,b*.7f,a);
+		quadWorld(x0,y0,z0,x0,y0,z1,x0,y1,z1,x0,y1,z0,-1,0,0,r,g,b,a);
+		quadWorld(x1,y0,z1,x1,y0,z0,x1,y1,z0,x1,y1,z1,1,0,0,r,g,b,a);
+		quadWorld(x0,y0,z0,x1,y0,z0,x1,y1,z0,x0,y1,z0,0,0,-1,r,g,b,a);
+		quadWorld(x1,y0,z1,x0,y0,z1,x0,y1,z1,x1,y1,z1,0,0,1,r,g,b,a);
 	};
 	// 小物用：CPU背面カリングなし（細い直方体が縦線だけになるのを防ぐ）
 	auto passCubeAll=[&](float x0,float z0,float x1,float z1,float y0,float y1,float r,float g,float b,float a){
@@ -6233,10 +6294,10 @@ void CSoft3DMazeDlg::RenderScene()
 	struct Layer{UINT fBeg,nF,mfBeg,nMF,wBeg,nW,mwBeg,nMW;int th;};
 	Layer layers[4];int nLay=0;
 	auto themeFloorRGB=[&](int th,float k,float& r,float& g,float& b){
-		if(th<=0){r=.78f*k;g=.64f*k;b=.48f*k;}
-		else if(th==1){r=.66f*k;g=.76f*k;b=.90f*k;}
-		else if(th==2){r=.82f*k;g=.70f*k;b=.58f*k;}
-		else{r=.74f*k;g=.52f*k;b=.44f*k;}
+		if(th<=0){r=.94f*k;g=.80f*k;b=.58f*k;}
+		else if(th==1){r=.68f*k;g=.84f*k;b=.96f*k;}
+		else if(th==2){r=.92f*k;g=.76f*k;b=.58f*k;}
+		else{r=.90f*k;g=.46f*k;b=.30f*k;}
 	};
 	auto themeWallTint=[&](int th,float& r,float& g,float& b){
 		if(th<=0){r=1.04f;g=1.04f;b=1.02f;}
@@ -6505,27 +6566,27 @@ void CSoft3DMazeDlg::RenderScene()
 			if(fullVis&&!vis(x,z))continue;
 			float x0=cellX0(x),x1=x0+cellW(x),z0=cellZ0(z),z1=z0+cellD(z);
 			const float fy0=yBias, fy1=yBias+passH;
-			float k=VisitAtF(f,x,z)?1.f:.90f;float r,g,b;themeFloorRGB(L.th,k,r,g,b);
+			float k=VisitAtF(f,x,z)?1.f:.78f;float r,g,b;themeFloorRGB(L.th,k,r,g,b);
 			if(c==CELL_STAIRS_DOWN||c==CELL_STAIRS_UP){
 				float sr=r,sg=g,sb=b;
 				if(c==CELL_STAIRS_DOWN){ sr=r*.42f+.62f; sg=g*.32f+.36f; sb=b*.22f+.12f; }
 				else { sr=r*.32f+.16f; sg=g*.38f+.58f; sb=b*.32f+.78f; }
 				if(c==CELL_STAIRS_UP){
-					quad(x0,fy1,z0,x1,fy1,z0,x1,fy1,z1,x0,fy1,z1,0,1,0,r,g,b,1.f);
-					quad(x0,fy0,z1,x1,fy0,z1,x1,fy0,z0,x0,fy0,z0,0,-1,0,r*.52f,g*.52f,b*.52f,1.f);
-					quad(x0,fy0,z0,x1,fy0,z0,x1,fy1,z0,x0,fy1,z0,0,0,-1,r*.72f,g*.72f,b*.72f,1.f);
-					quad(x1,fy0,z1,x0,fy0,z1,x0,fy1,z1,x1,fy1,z1,0,0,1,r*.72f,g*.72f,b*.72f,1.f);
-					quad(x0,fy0,z1,x0,fy0,z0,x0,fy1,z0,x0,fy1,z1,-1,0,0,r*.68f,g*.68f,b*.68f,1.f);
-					quad(x1,fy0,z0,x1,fy0,z1,x1,fy1,z1,x1,fy1,z0,1,0,0,r*.68f,g*.68f,b*.68f,1.f);
+					quadWorld(x0,fy1,z0,x1,fy1,z0,x1,fy1,z1,x0,fy1,z1,0,1,0,r,g,b,1.f);
+					quadWorld(x0,fy0,z1,x1,fy0,z1,x1,fy0,z0,x0,fy0,z0,0,-1,0,r*.52f,g*.52f,b*.52f,1.f);
+					quadWorld(x0,fy0,z0,x1,fy0,z0,x1,fy1,z0,x0,fy1,z0,0,0,-1,r*.72f,g*.72f,b*.72f,1.f);
+					quadWorld(x1,fy0,z1,x0,fy0,z1,x0,fy1,z1,x1,fy1,z1,0,0,1,r*.72f,g*.72f,b*.72f,1.f);
+					quadWorld(x0,fy0,z1,x0,fy0,z0,x0,fy1,z0,x0,fy1,z1,-1,0,0,r*.68f,g*.68f,b*.68f,1.f);
+					quadWorld(x1,fy0,z0,x1,fy0,z1,x1,fy1,z1,x1,fy1,z0,1,0,0,r*.68f,g*.68f,b*.68f,1.f);
 				}
 				emitStairMesh(f,yBias,x,z,c,sr,sg,sb);
 			}else{
-				quad(x0,fy1,z0,x1,fy1,z0,x1,fy1,z1,x0,fy1,z1,0,1,0,r,g,b,1.f);
-				quad(x0,fy0,z1,x1,fy0,z1,x1,fy0,z0,x0,fy0,z0,0,-1,0,r*.52f,g*.52f,b*.52f,1.f);
-				quad(x0,fy0,z0,x1,fy0,z0,x1,fy1,z0,x0,fy1,z0,0,0,-1,r*.72f,g*.72f,b*.72f,1.f);
-				quad(x1,fy0,z1,x0,fy0,z1,x0,fy1,z1,x1,fy1,z1,0,0,1,r*.72f,g*.72f,b*.72f,1.f);
-				quad(x0,fy0,z1,x0,fy0,z0,x0,fy1,z0,x0,fy1,z1,-1,0,0,r*.68f,g*.68f,b*.68f,1.f);
-				quad(x1,fy0,z0,x1,fy0,z1,x1,fy1,z1,x1,fy1,z0,1,0,0,r*.68f,g*.68f,b*.68f,1.f);
+				quadWorld(x0,fy1,z0,x1,fy1,z0,x1,fy1,z1,x0,fy1,z1,0,1,0,r,g,b,1.f);
+				quadWorld(x0,fy0,z1,x1,fy0,z1,x1,fy0,z0,x0,fy0,z0,0,-1,0,r*.52f,g*.52f,b*.52f,1.f);
+				quadWorld(x0,fy0,z0,x1,fy0,z0,x1,fy1,z0,x0,fy1,z0,0,0,-1,r*.72f,g*.72f,b*.72f,1.f);
+				quadWorld(x1,fy0,z1,x0,fy0,z1,x0,fy1,z1,x1,fy1,z1,0,0,1,r*.72f,g*.72f,b*.72f,1.f);
+				quadWorld(x0,fy0,z1,x0,fy0,z0,x0,fy1,z0,x0,fy1,z1,-1,0,0,r*.68f,g*.68f,b*.68f,1.f);
+				quadWorld(x1,fy0,z0,x1,fy0,z1,x1,fy1,z1,x1,fy1,z0,1,0,0,r*.68f,g*.68f,b*.68f,1.f);
 			}
 		}
 		L.nF=nFloor-f0;
@@ -6798,6 +6859,11 @@ void CSoft3DMazeDlg::RenderScene()
 				}
 			}
 			fxObj[nFx++]={b,nFloor+nWall+nTrans-b,ocx,passH+.45f,ocz,xl[i].d,0,0,0,FALSE,FALSE,3};
+			if(nFx<64){
+				const UINT ib=nFloor+nWall+nTrans;
+				emitIconBill(ocx, passH+.72f, ocz, 15, 1.f, .82f, .42f, 0.18f, 1.15f);
+				fxObj[nFx++]={ib,nFloor+nWall+nTrans-ib,ocx,passH+.72f,ocz,xl[i].d,0,0,0,FALSE,TRUE,0};
+			}
 		}else if(c==CELL_KEY){
 			if(nFx>=64)continue;
 			const UINT b=nFloor+nWall+nTrans;
@@ -6825,7 +6891,12 @@ void CSoft3DMazeDlg::RenderScene()
 			kPut(.08f,-.02f,.08f,0.f,.06f,.04f); // 歯1
 			kPut(.08f,-.10f,-.02f,0.f,.06f,.04f); // 歯2
 			kPut(0.f,-.14f,-.06f,0.f,.04f,.04f); // 先端
-			fxObj[nFx++]={b,nFloor+nWall+nTrans-b,ocx,ky+bowY*.5f,ocz,xl[i].d,0,0,0,FALSE,TRUE,0};
+			fxObj[nFx++]={b,nFloor+nWall+nTrans-b,ocx,ky+bowY*.5f,ocz,xl[i].d,0,0,0,FALSE,TRUE,4};
+			if(nFx<64){
+				const UINT ib=nFloor+nWall+nTrans;
+				emitIconBill(ocx, ky+bowY+.18f, ocz, 13, 1.f, .92f, .38f, 0.24f, 1.15f);
+				fxObj[nFx++]={ib,nFloor+nWall+nTrans-ib,ocx,ky+bowY*.5f,ocz,xl[i].d,0,0,0,FALSE,TRUE,0};
+			}
 		}else if(S3mIsTrapCell(c)){
 			if(nFx>=64)continue;
 			const UINT b=nFloor+nWall+nTrans;
@@ -6876,73 +6947,33 @@ void CSoft3DMazeDlg::RenderScene()
 				else if(c==CELL_XFADE){rr=1;gg=.45f;bb=.75f;}
 				else if(c==CELL_RANDOM){rr=.95f;gg=.55f;bb=.2f+0.55f*(0.5f+0.5f*sinf(m_anim*3.f+x));}
 			}
-			const float ka=1.15f; // アイテム／スタート／ゴール：平面反射スロット用の金属アルファ
-			if(c!=CELL_START) emitSphere(ocx,passH+.22f+(cy-passH)*.35f,ocz,.11f,.13f,.11f,8,5,rr,gg,bb,ka,0.f,0.f,1.f,1.f);
+			const float ka=1.15f; // アイテム看板は item アトラス。台座・旗は頂点色
 			if(c==CELL_GOAL){
 				passCubeAll(ocx-.22f,ocz-.22f,ocx+.22f,ocz+.22f,passH+.02f,passH+.10f,.55f,.45f,.22f,1.f);
 				passCubeAll(ocx-.20f,ocz-.07f,ocx-.12f,ocz+.07f,passH+.10f,passH+.55f,.9f,.75f,.25f,1.05f);
 				passCubeAll(ocx+.12f,ocz-.07f,ocx+.20f,ocz+.07f,passH+.10f,passH+.55f,.9f,.75f,.25f,1.05f);
 				passCubeAll(ocx-.20f,ocz-.07f,ocx+.20f,ocz+.07f,passH+.50f,passH+.58f,1.f,.85f,.3f,1.05f);
-				passCubeAll(ocx-.06f,ocz-.06f,ocx+.06f,ocz+.06f,passH+.10f,cy-.02f,.75f,.65f,.2f,ka);
-				passCubeAll(ocx-.13f,ocz-.09f,ocx+.13f,ocz+.09f,cy-.02f,cy+.10f,rr,gg,bb,ka);
-				passCubeAll(ocx-.09f,ocz-.09f,ocx-.03f,ocz+.09f,cy+.02f,cy+.16f,rr,gg,bb,ka);
-				passCubeAll(ocx+.03f,ocz-.09f,ocx+.09f,ocz+.09f,cy+.02f,cy+.16f,rr,gg,bb,ka);
-				passCubeAll(ocx-.07f,ocz-.07f,ocx+.07f,ocz+.07f,cy+.16f,cy+.22f,1.f,.95f,.4f,ka);
+				fxObj[nFx++]={b,nFloor+nWall+nTrans-b,ocx,cy,ocz,xl[i].d,0,0,0,FALSE,TRUE,4};
+				if(nFx<64){
+					const UINT ib=nFloor+nWall+nTrans;
+					emitIconBill(ocx, cy+.12f, ocz, 14, rr, gg, bb, 0.26f, ka);
+					fxObj[nFx++]={ib,nFloor+nWall+nTrans-ib,ocx,cy,ocz,xl[i].d,0,0,0,FALSE,TRUE,0};
+				}
 			}else if(c==CELL_START){
-				// 旗：ポール縦＋布は縦面（寝かさない）
 				passCubeAll(ocx-.04f,ocz-.04f,ocx+.04f,ocz+.04f,passH+.02f,cy+.32f,.55f,.5f,.45f,1.f);
 				passCubeAll(ocx+.03f,ocz-.02f,ocx+.22f,ocz+.02f,cy+.12f,cy+.30f,rr,gg,bb,ka);
 				passCubeAll(ocx+.03f,ocz-.02f,ocx+.16f,ocz+.02f,cy+.04f,cy+.12f,rr*.85f,gg*.85f,bb*.85f,ka);
 				passCubeAll(ocx-.07f,ocz-.07f,ocx+.07f,ocz+.07f,passH+.02f,passH+.07f,.4f,.38f,.35f,1.f);
+				fxObj[nFx++]={b,nFloor+nWall+nTrans-b,ocx,cy,ocz,xl[i].d,0,0,0,FALSE,TRUE,4};
 			}else{
-				// アイテム：縦長シルエット（床に寝かさない）
 				passCubeAll(ocx-.10f,ocz-.10f,ocx+.10f,ocz+.10f,passH+.02f,passH+.08f,.28f,.26f,.3f,1.f);
-				if(c==CELL_TEMPO||c==CELL_TEMPO_DN){
-					passCubeAll(ocx-.05f,ocz-.05f,ocx+.05f,ocz+.05f,passH+.08f,cy+.22f,rr,gg,bb,ka);
-					const float tip=(c==CELL_TEMPO)?1.f:-1.f;
-					const float ty=cy+.12f+tip*.10f;
-					passCubeAll(ocx-.10f,ocz-.05f,ocx+.10f,ocz+.05f,ty-.04f,ty+.04f,rr,gg,bb,ka);
-					passCubeAll(ocx-.06f,ocz-.05f,ocx+.06f,ocz+.05f,ty+tip*.04f,ty+tip*.12f,rr,gg,bb,ka);
-				}else if(c==CELL_PITCH_UP||c==CELL_PITCH_DN){
-					passCubeAll(ocx-.05f,ocz-.05f,ocx+.05f,ocz+.05f,passH+.08f,cy+.24f,rr,gg,bb,ka);
-					const float uy=(c==CELL_PITCH_UP)?1.f:-1.f;
-					passCubeAll(ocx-.11f,ocz-.05f,ocx+.11f,ocz+.05f,cy+.08f,cy+.14f,rr,gg,bb,ka);
-					passCubeAll(ocx-.07f,ocz-.05f,ocx+.07f,ocz+.05f,cy+.14f,cy+.14f+uy*.10f,rr,gg,bb,ka);
-					passCubeAll(ocx-.04f,ocz-.05f,ocx+.04f,ocz+.05f,cy+.14f+uy*.08f,cy+.14f+uy*.16f,rr,gg,bb,ka);
-				}else if(c==CELL_NEXT||c==CELL_PREV){
-					const float s=(c==CELL_NEXT)?1.f:-1.f;
-					passCubeAll(ocx-.05f,ocz-.05f,ocx+.05f,ocz+.05f,passH+.08f,cy+.20f,rr,gg,bb,ka);
-					passCubeAll(ocx-s*.02f,ocz-.06f,ocx+s*.12f,ocz+.06f,cy+.04f,cy+.16f,rr,gg,bb,ka);
-					passCubeAll(ocx+s*.06f,ocz-.10f,ocx+s*.16f,ocz+.10f,cy+.02f,cy+.18f,rr,gg,bb,ka);
-				}else if(c==CELL_VOL_UP||c==CELL_VOL_DN){
-					passCubeAll(ocx-.08f,ocz-.05f,ocx-.01f,ocz+.05f,passH+.08f,cy+.20f,rr,gg,bb,ka);
-					const int nArc=(c==CELL_VOL_UP)?3:1;
-					for(int ai=0;ai<nArc;ai++){
-						const float rad=.06f+ai*.05f;
-						passCubeAll(ocx+rad*.15f,ocz-rad*.35f,ocx+rad*.15f+.05f,ocz+rad*.35f,
-							cy+.02f+ai*.04f,cy+.14f+ai*.04f,rr,gg,bb,ka);
-					}
-				}else if(c==CELL_EQ||c==CELL_EQ_FLAT){
-					for(int bi=0;bi<4;bi++){
-						const float hx=-.13f+bi*.08f;
-						const float h=(c==CELL_EQ_FLAT)?.18f:(.10f+((bi*3+x)&3)*.07f);
-						passCubeAll(ocx+hx,ocz-.05f,ocx+hx+.06f,ocz+.05f,passH+.08f,passH+.08f+h,rr,gg,bb,ka);
-					}
-				}else if(c==CELL_REVERB){
-					passCubeAll(ocx-.06f,ocz-.06f,ocx+.06f,ocz+.06f,passH+.08f,cy+.22f,rr,gg,bb,ka);
-					passCubeAll(ocx-.12f,ocz-.12f,ocx+.12f,ocz+.12f,cy+.04f,cy+.10f,rr,gg,bb,.75f);
-					passCubeAll(ocx-.16f,ocz-.16f,ocx+.16f,ocz+.16f,cy+.12f,cy+.16f,rr,gg,bb,.55f);
-				}else if(c==CELL_XFADE){
-					passCubeAll(ocx-.14f,ocz-.05f,ocx-.04f,ocz+.05f,passH+.08f,cy+.22f,rr,gg,bb,ka);
-					passCubeAll(ocx+.04f,ocz-.05f,ocx+.14f,ocz+.05f,passH+.08f,cy+.22f,rr*.7f,gg*.7f,bb,ka);
-					passCubeAll(ocx-.05f,ocz-.05f,ocx+.05f,ocz+.05f,cy+.06f,cy+.14f,1.f,1.f,1.f,ka);
-				}else{ // RANDOM 他
-					passCubeAll(ocx-.08f,ocz-.08f,ocx+.08f,ocz+.08f,passH+.08f,cy+.16f,rr,gg,bb,ka);
-					passCubeAll(ocx-.05f,ocz-.05f,ocx+.05f,ocz+.05f,cy+.16f,cy+.28f,rr,gg,bb,ka);
-					passCubeAll(ocx-.12f,ocz-.05f,ocx+.12f,ocz+.05f,cy+.08f,cy+.14f,rr,gg,bb,ka);
+				fxObj[nFx++]={b,nFloor+nWall+nTrans-b,ocx,cy,ocz,xl[i].d,0,0,0,FALSE,TRUE,4};
+				if(nFx<64){
+					const UINT ib=nFloor+nWall+nTrans;
+					emitIconBill(ocx, cy+.10f, ocz, itemAtlasSlot(c), rr, gg, bb, 0.28f, ka);
+					fxObj[nFx++]={ib,nFloor+nWall+nTrans-ib,ocx,cy,ocz,xl[i].d,0,0,0,FALSE,TRUE,0};
 				}
 			}
-			fxObj[nFx++]={b,nFloor+nWall+nTrans-b,ocx,cy,ocz,xl[i].d,0,0,0,FALSE,TRUE,0};
 		}
 	}
 	{int ord[64];for(int i=0;i<nFx;i++)ord[i]=i;

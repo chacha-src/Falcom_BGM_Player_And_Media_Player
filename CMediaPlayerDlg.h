@@ -302,7 +302,7 @@ public:
 	CString m_uxChipText;
 
 	// ---- 右曲情報パネルのテキスト marquee スクロール ----
-	// WM_MP_INFO_SCROLL(TheadLoop ~30fps)で進行。収まる行は静止したまま。
+	// WM_MP_INFO_SCROLL(TheadLoop ~60fps・1px)で進行。収まる行は静止したまま。
 	// [0]=タイトル, [1]=アーティスト, [2]=アルバム, [3]=曲番号, [4]=オーディオ情報, [5]=フォーマット
 	static const int kInfoRows = 6;
 	int  m_isc[kInfoRows];   // 各行の現在スクロールオフセット(px)。0=静止
