@@ -338,20 +338,94 @@ static void ScanId3v2FramesInFile(LPCTSTR path, FileTagFields& out)
 	f.Close();
 }
 
+static thread_local int s_tagOggKind = 0;
+static const BYTE kTagOggOffenc[7] = { 0xd9, 0x3F, 0x86, 0x7B, 0xC7, 0x61, 0xaa };
+
+static size_t TagOggRead(void* ptr, size_t size, size_t nmemb, void* datasource)
+{
+	FILE* fp = (FILE*)datasource;
+	if (s_tagOggKind == 0) {
+		const long iti = ftell(fp);
+		fseek(fp, 0, SEEK_SET);
+		BYTE buf[1] = { 0 };
+		fread(buf, 1, 1, fp);
+		if (buf[0] == 0x4f)
+			s_tagOggKind = 1;
+		else if (buf[0] == 0x04)
+			s_tagOggKind = 2;
+		else if (buf[0] == 0x96)
+			s_tagOggKind = 3;
+		else
+			s_tagOggKind = 1;
+		fseek(fp, iti, SEEK_SET);
+	}
+	size_t ret = 0;
+	if (s_tagOggKind == 1) {
+		ret = fread(ptr, size, nmemb, fp);
+	}
+	else if (s_tagOggKind == 2) {
+		ret = fread(ptr, size, nmemb, fp);
+		BYTE* b = (BYTE*)ptr;
+		const size_t n = ret * size;
+		for (size_t i = 0; i < n; i++) {
+			b[i] = (BYTE)((b[i] << 4) | (b[i] >> 4));
+			b[i] ^= 0x0f;
+		}
+	}
+	else if (s_tagOggKind == 3) {
+		int len1 = (int)(ftell(fp) % 7);
+		if (len1 < 0)
+			len1 = 0;
+		ret = fread(ptr, size, nmemb, fp);
+		BYTE* b = (BYTE*)ptr;
+		const size_t n = ret * size;
+		for (size_t i = 0; i < n; i++) {
+			b[i] ^= kTagOggOffenc[len1];
+			len1++;
+			if (len1 > 6)
+				len1 = 0;
+		}
+	}
+	return ret;
+}
+
+static int TagOggSeek(void* datasource, ogg_int64_t offset, int whence)
+{
+	return fseek((FILE*)datasource, (long)offset, whence);
+}
+
+static int TagOggClose(void*)
+{
+	s_tagOggKind = 0;
+	return 0;
+}
+
+static long TagOggTell(void* datasource)
+{
+	return ftell((FILE*)datasource);
+}
+
 static void ReadOggVorbisTags(LPCTSTR path, FileTagFields& out)
 {
 	FILE* fp = _tfopen(path, _T("rb"));
 	if (!fp)
 		return;
+	s_tagOggKind = 0;
+	ov_callbacks cb = { TagOggRead, TagOggSeek, TagOggClose, TagOggTell };
 	OggVorbis_File vf;
-	if (ov_open_callbacks(fp, &vf, NULL, 0, callbacks) < 0) {
+	memset(&vf, 0, sizeof(vf));
+	if (ov_open_callbacks(fp, &vf, NULL, 0, cb) < 0) {
+		s_tagOggKind = 0;
 		fclose(fp);
 		return;
 	}
-	for (int i = 0; i < vf.vc->comments; i++)
-		ApplyVorbisCommentLine(VorbisCommentLineToCString(vf.vc->user_comments[i]), out);
+	if (vf.vc) {
+		for (int i = 0; i < vf.vc->comments; i++)
+			ApplyVorbisCommentLine(VorbisCommentLineToCString(vf.vc->user_comments[i]), out);
+	}
 	ov_clear(&vf);
 	fclose(fp);
+	s_tagOggKind = 0;
 }
 
 static void ScanVorbisKeyInBuffer(const BYTE* buf, int buflen, const char* key, CString& dest)

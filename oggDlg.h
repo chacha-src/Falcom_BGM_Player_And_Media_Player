@@ -511,6 +511,9 @@ void MpTaskbarReplay();
 void MpTaskbarNextTrack();
 void MpTaskbarPrevTrack();
 double OggGetGdiPlaybackTimeSec();
+/* LRC/カラオケ用。バナー time: と同じ TempoPred ソース位置。動画は ttt */
+double OggGetLyricsPlaySec();
+DWORD OggGetLyricsPlayCentis();
 /* バナーと同じ可聴 PCM フレーム（playb − DS 書込先行）。FM モニタ同期用 */
 __int64 OggGetHeardPcmFrames();
 /* バナー経過(0:56.52)と同じソース PCM。VST MIDI の heard が 1/4 に落ちても WRD/@WAIT は壁時計に揃える */

@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "CCustomControl.h"
 #include "CLyricsViewWnd.h"
@@ -25,6 +25,9 @@ public:
 	// autoFit=TRUE: ウィンドウ高さで表示行数フィット。FALSE: ptTenths(ポイント×10)を手動適用
 	void SetDeskLrcFont(int ptTenths, BOOL autoFit);
 	void SetDeskLrcLines(int lines);
+	// timerp（WM_TIMERP_VSYNC_TICK）から 60fps。SetTimer/OnTimer は飢餓するため使わない
+	void TickView();
+	void AbortPaintForExit();
 
 protected:
 	CLyricsViewWnd m_view;
@@ -67,6 +70,9 @@ void OpenDesktopLyricsModeless(CWnd* pParent);
 void CloseDesktopLyricsIfOpen();
 void SyncDesktopLyricsIfOpen();
 BOOL IsDesktopLyricsOpen();
+void LyricsOnTimerp();
+// 終了開始: ULW を止め隠すだけ（timerp 再入中に DestroyWindow しない）
+void DesktopLyricsAbortPaintForExit();
 // アプリ終了前: 開いていれば位置を保存し deskLrcOn を残す（OnDestroy で落とさない）
 void DesktopLyricsPrepareAppExit();
 

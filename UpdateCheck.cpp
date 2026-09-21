@@ -2,6 +2,7 @@
 #include "stdafx.h"
 #include "UpdateCheck.h"
 #include "oggDlg.h"
+#include "KpiHostClient.h"
 #include "Render.h"
 #include "CCustomControl.h"
 #include "CCustomPopupMenu.h"
@@ -1865,6 +1866,180 @@ void EnsureD3dCompilerAvailable()
 		(LPCSTR)exePathA, (LPCSTR)cmdArgsA);
 	bat.Write(batContentA, batContentA.GetLength());
 	bat.Close();
+
+	const HINSTANCE hShell = ShellExecute(NULL, _T("open"), batPath, NULL, tempPath, SW_HIDE);
+	if ((INT_PTR)hShell <= 32)
+		return;
+	exit(0);
+}
+
+static bool HostExeFileLooksOk(LPCTSTR path)
+{
+	return IsLikelyPeExe(path, UPDATE_HOST_EXE_MIN_BYTES);
+}
+
+static CString HostExeBesidePath()
+{
+	TCHAR exePath[MAX_PATH] = { 0 };
+	GetModuleFileName(NULL, exePath, MAX_PATH);
+	CString dir(exePath);
+	const int slash = dir.ReverseFind(_T('\\'));
+	if (slash >= 0)
+		dir = dir.Left(slash + 1);
+	else
+		dir.Empty();
+	return dir + TARGET_HOST_EXE_NAME;
+}
+
+static CString HostExeDirOf(const CString& destPath)
+{
+	CString dir = destPath;
+	const int slash = dir.ReverseFind(_T('\\'));
+	if (slash >= 0)
+		dir = dir.Left(slash);
+	else
+		dir.Empty();
+	return dir;
+}
+
+static CString UpdateDownloadsDir()
+{
+	CString destDir;
+	PWSTR downloadsW = NULL;
+	if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_Downloads, 0, NULL, &downloadsW)) && downloadsW)
+	{
+		destDir.Format(_T("%s\\oggYSEDbgm_update"), downloadsW);
+		CoTaskMemFree(downloadsW);
+		return destDir;
+	}
+	TCHAR profile[MAX_PATH] = { 0 };
+	if (FAILED(SHGetFolderPath(NULL, CSIDL_PROFILE, NULL, SHGFP_TYPE_CURRENT, profile)) || profile[0] == 0)
+		return destDir;
+	destDir.Format(_T("%s\\Downloads\\oggYSEDbgm_update"), profile);
+	return destDir;
+}
+
+static bool CopyHostIfOk(const CString& src, const CString& dest)
+{
+	if (!HostExeFileLooksOk(src))
+		return false;
+	if (src.CompareNoCase(dest) == 0)
+		return true;
+	SetFileAttributes(dest, FILE_ATTRIBUTE_NORMAL);
+	DeleteFile(dest);
+	if (!CopyFile(src, dest, FALSE))
+		return false;
+	return HostExeFileLooksOk(dest);
+}
+
+static bool ExtractHostFromZipIfNeeded(const CString& zipPath, const CString& extractDir)
+{
+	if (GetPathFileSize(zipPath) < UPDATE_ZIP_MIN_BYTES)
+		return false;
+	CreateDirectory(extractDir, NULL);
+	return ExtractZipToDir(zipPath, extractDir, TARGET_HOST_EXE_NAME, UPDATE_HOST_EXE_MIN_BYTES);
+}
+
+void EnsureOggHost32Available()
+{
+	const CString destPath = HostExeBesidePath();
+	if (HostExeFileLooksOk(destPath)) {
+		OggPurgeObsoleteKpiHost64();
+		return;
+	}
+
+	TCHAR tempPath[MAX_PATH] = { 0 };
+	GetTempPath(MAX_PATH, tempPath);
+	CString extractDir;
+	extractDir.Format(_T("%sogg_update_extract"), tempPath);
+	CString extracted;
+	extracted.Format(_T("%s\\%s"), (LPCTSTR)extractDir, TARGET_HOST_EXE_NAME);
+
+	if (!HostExeFileLooksOk(extracted)) {
+		CString leftoverZip;
+		leftoverZip.Format(_T("%sogg_update.zip"), tempPath);
+		ExtractHostFromZipIfNeeded(leftoverZip, extractDir);
+	}
+	if (!HostExeFileLooksOk(extracted)) {
+		const CString dlDir = UpdateDownloadsDir();
+		if (!dlDir.IsEmpty()) {
+			CString dlHost;
+			dlHost.Format(_T("%s\\%s"), (LPCTSTR)dlDir, TARGET_HOST_EXE_NAME);
+			if (HostExeFileLooksOk(dlHost))
+				extracted = dlHost;
+			else {
+				CString dlZip;
+				dlZip.Format(_T("%s\\ogg_update.zip"), (LPCTSTR)dlDir);
+				if (ExtractHostFromZipIfNeeded(dlZip, extractDir))
+					extracted.Format(_T("%s\\%s"), (LPCTSTR)extractDir, TARGET_HOST_EXE_NAME);
+			}
+		}
+	}
+	if (!HostExeFileLooksOk(extracted)) {
+		DWORD dwFlags = 0;
+		if (!InternetGetConnectedState(&dwFlags, 0))
+			return;
+		time_t serverTime = 0;
+		const CString updateUrl = ResolveUpdateUrl(&serverTime);
+		if (updateUrl.IsEmpty())
+			return;
+		CString zipPath;
+		zipPath.Format(_T("%sogg_host_fetch.zip"), tempPath);
+		CreateDirectory(extractDir, NULL);
+		if (!HttpDownloadToFile(updateUrl, zipPath))
+			return;
+		ExtractZipToDir(zipPath, extractDir, TARGET_HOST_EXE_NAME, UPDATE_HOST_EXE_MIN_BYTES);
+		DeleteFile(zipPath);
+		extracted.Format(_T("%s\\%s"), (LPCTSTR)extractDir, TARGET_HOST_EXE_NAME);
+	}
+	if (!HostExeFileLooksOk(extracted))
+		return;
+
+	CopyHostIfOk(extracted, destPath);
+
+	TCHAR batPath[MAX_PATH] = { 0 };
+	_stprintf_s(batPath, _T("%sogg_host_place.bat"), tempPath);
+	CFile bat;
+	if (!bat.Open(batPath, CFile::modeCreate | CFile::modeWrite | CFile::shareExclusive))
+		return;
+
+	CStringA extractSrcA(extracted);
+	CStringA destPathA(destPath);
+	CStringA hostNameA(TARGET_HOST_EXE_NAME);
+	TCHAR exePath[MAX_PATH] = { 0 };
+	GetModuleFileName(NULL, exePath, MAX_PATH);
+	CStringA exePathA(exePath);
+	CStringA cmdArgsA;
+	{
+		CWinApp* pApp = AfxGetApp();
+		if (pApp && pApp->m_lpCmdLine && pApp->m_lpCmdLine[0])
+			cmdArgsA = CStringA(pApp->m_lpCmdLine);
+		cmdArgsA.Trim();
+		cmdArgsA.Replace("%", "%%");
+	}
+	const CString exeDir = HostExeDirOf(destPath);
+	CStringA exeDirA(exeDir);
+
+	CStringA batContentA;
+	batContentA.Format(
+		"@echo off\r\n"
+		"ping -n 3 127.0.0.1 >nul\r\n"
+		"taskkill /IM %s /F >nul 2>&1\r\n"
+		"taskkill /IM KpiHost64.exe /F >nul 2>&1\r\n"
+		"copy /y \"%s\" \"%s\" >nul 2>&1\r\n"
+		"del /f /q \"%s\\KpiHost64.exe\" >nul 2>&1\r\n"
+		"cd /d \"%s\"\r\n"
+		"start \"\" \"%s\" %s\r\n"
+		"del \"%%~f0\"\r\n",
+		(LPCSTR)hostNameA,
+		(LPCSTR)extractSrcA, (LPCSTR)destPathA,
+		(LPCSTR)exeDirA,
+		(LPCSTR)exeDirA,
+		(LPCSTR)exePathA, (LPCSTR)cmdArgsA);
+	bat.Write(batContentA, batContentA.GetLength());
+	bat.Close();
+
+	OggPurgeObsoleteKpiHost64();
 
 	const HINSTANCE hShell = ShellExecute(NULL, _T("open"), batPath, NULL, tempPath, SW_HIDE);
 	if ((INT_PTR)hShell <= 32)

@@ -106,6 +106,7 @@ public:
 	void NotifyPlayIconChanged();          // SIconTimer 直後に♪点滅を即反映(250ms待ちしない)
 	void InitListScrollPosition();          // 起動/表示確定時にリスト位置を復元
 	void SyncFromMain();         // og/pl の状態をUIへ反映
+	void TickLyricsView();       // timerp 60fps: 拡大カラオケ（SetTimer は飢餓する）
 	void UpdateDeskLrcBtnChrome(); // 歌詞窓ボタンの文言・色を開閉状態に合わせる
 	void ApplyPauseButtonLabel(); // m_mpBtnShort と ps に応じた一時停止/再開ラベル
 	void MirrorSeekVol();        // 再生位置(playb追従)/時間/音量を高速ミラー

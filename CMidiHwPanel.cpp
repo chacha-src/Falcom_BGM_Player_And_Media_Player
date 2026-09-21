@@ -113,6 +113,14 @@ const wchar_t* MidiHwLcdModelName(int sysMode, int gsMapKind)
 	if (gsMapKind == 5) return L"GM";
 	if (gsMapKind == 9) return L"GM2";
 	if (gsMapKind == 10) return L"NS5R";
+	if (gsMapKind == 11) return L"KWmap";
+	if (gsMapKind == 12) return L"SGmap";
+	if (gsMapKind == 13) return L"KRmap";
+	if (gsMapKind == 14) return L"PAmap";
+	if (gsMapKind == 15) return L"CSmap";
+	if (gsMapKind == 16) return L"GEMmap";
+	if (gsMapKind == 17) return L"LKmap";
+	if (gsMapKind == 18) return L"PVmap";
 	if (sysMode == 2) return L"XG";
 	if (sysMode == 1) return L"GS";
 	return L"GM";

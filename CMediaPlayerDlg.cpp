@@ -2685,7 +2685,9 @@ void CMediaPlayerDlg::RequestAppShutdown()
 	extern volatile LONG g_appExiting;
 	InterlockedExchange(&g_appExiting, 1);
 	CCC_StopInwomanTimer();
-	DesktopLyricsPrepareAppExit();
+	/* timerp スタック上で DestroyWindow(レイヤード歌詞)すると ULW/DWM 待ちで戻らない。
+	   ここでは描画だけ止め、破棄は og::OnOK に任せる。 */
+	DesktopLyricsAbortPaintForExit();
 	MpDjPadPrepareAppExit();
 	CloseRenderIfOpen();
 	SavePos();
@@ -2698,6 +2700,7 @@ BOOL CMediaPlayerDlg::DestroyWindow()
 	StopMissScan();
 	InterlockedIncrement(&m_waveGen);
 	SavePos();
+	CloseDesktopLyricsIfOpen();
 	// バナー内蔵ジャケ(ファルコム特化型のミニジャケ)抑止フラグを必ず解除する。
 	// これを残すと、ファルコム特化型へ戻した後もミニジャケが表示されなくなる。
 	g_mpSideJacket = 0;
@@ -4530,6 +4533,20 @@ void CMediaPlayerDlg::ApplyPauseButtonLabel()
 	}
 }
 
+void CMediaPlayerDlg::TickLyricsView()
+{
+	if (!m_uiReady)
+		return;
+	extern volatile LONG g_appExiting;
+	if (InterlockedCompareExchange(&g_appExiting, 0, 0))
+		return;
+	if (!savedata.mpLrcExpand)
+		return;
+	if (!m_lrcView.GetSafeHwnd() || !::IsWindow(m_lrcView.GetSafeHwnd()))
+		return;
+	m_lrcView.TickFrame();
+}
+
 // og/pl の UI 状態(歌詞・スライダー位置・チェック状態・コンボ選択)をこの画面へ反映する。
 // 差分のみ SetWindowText / SetCheck するのはちらつき防止のため。
 // Timer1(250ms)から定期呼び出しされるほか、コントロール操作直後にも都度呼ぶ。
@@ -4544,21 +4561,12 @@ void CMediaPlayerDlg::SyncFromMain()
 		CString s, s2;
 		const bool hasLyrics = (og->lrcnum >= 2);
 		const bool lrcScroll = (savedata.mpLrcExpand && m_lrcView.GetSafeHwnd());
-		extern UINT ttt;
 		if (lrcScroll) {
 			if (hasLyrics) {
 				const int n = (og->lrcnum > 1) ? (og->lrcnum - 1) : 0;
 				m_lrcView.SetLines(og->lrc, n, og->lrctm, og->lrcnum);
-				extern double OggGetGdiPlaybackTimeSec();
-				extern int mode;
-				extern int videoonly;
-				DWORD centis = ttt;
-				if (!(mode == -2 || videoonly)) {
-					const double sec = OggGetGdiPlaybackTimeSec();
-					if (sec >= 0.0)
-						centis = (DWORD)(sec * 100.0 + 0.5);
-				}
-				m_lrcView.SetPlayCentis(centis);
+				extern double OggGetLyricsPlaySec();
+				m_lrcView.SetPlaySec(OggGetLyricsPlaySec());
 			} else {
 				m_lrcView.Clear();
 			}
@@ -5158,25 +5166,8 @@ void CMediaPlayerDlg::OnTimer(UINT nIDEvent)
 		MpBpmOnTimerTick();
 		if (savedata.mpRemoteOn)
 			MpRemoteUiTick(this);
-		// シーク/音量ミラーは timerp 側(同一UIターン)に一本化。ここでも呼ぶと
-		// SetPlaybackMirror(UPDATENOW) が二重になり全体が約2倍重い。
-		// LRC カラオケ塗りは 250ms 同期だと荒い → GDI時間表示と同じ実再生位置で追従
-		if (savedata.mpLrcExpand && m_lrcView.GetSafeHwnd()
-			&& ::IsWindowVisible(m_lrcView.GetSafeHwnd())) {
-			extern double OggGetGdiPlaybackTimeSec();
-			extern int mode;
-			extern int videoonly;
-			extern UINT ttt;
-			DWORD centis = ttt;
-			// 音声は DS 先読み補正済みの GDI 時刻。動画は MediaPosition(ttt) を使う。
-			if (!(mode == -2 || videoonly)) {
-				const double sec = OggGetGdiPlaybackTimeSec();
-				if (sec >= 0.0)
-					centis = (DWORD)(sec * 100.0 + 0.5);
-			}
-			m_lrcView.SetPlayCentis(centis);
-		}
-		SyncDesktopLyricsIfOpen();
+		// シーク/音量ミラーは timerp 側(同一UIターン)に一本化。
+		// 歌詞は 16ms 1本（拡大ビュー自身 / 歌詞ウィンドウ親）。ここから重ねない。
 		// EQ/ピアノ/スペアナ/ST を X ボタン等で閉じたときも押下見た目を追従
 		SyncPushToggleButtons();
 		// バナーのホバー状態を再計算(カーソルが帯の上にあれば前面化アニメ継続)。
@@ -8647,17 +8638,8 @@ void CMediaPlayerDlg::OnLrcExpand()
 		if (og && og->lrcnum >= 2) {
 			const int n = og->lrcnum - 1;
 			m_lrcView.SetLines(og->lrc, n > 0 ? n : 0, og->lrctm, og->lrcnum);
-			extern UINT ttt;
-			extern double OggGetGdiPlaybackTimeSec();
-			extern int mode;
-			extern int videoonly;
-			DWORD centis = ttt;
-			if (!(mode == -2 || videoonly)) {
-				const double sec = OggGetGdiPlaybackTimeSec();
-				if (sec >= 0.0)
-					centis = (DWORD)(sec * 100.0 + 0.5);
-			}
-			m_lrcView.SetPlayCentis(centis);
+			extern double OggGetLyricsPlaySec();
+			m_lrcView.SetPlaySec(OggGetLyricsPlaySec());
 			m_lrcView.BeginCatchFromTop(); // 途中拡大: 頭から該当行へ高速 chase
 		} else {
 			m_lrcView.Clear();

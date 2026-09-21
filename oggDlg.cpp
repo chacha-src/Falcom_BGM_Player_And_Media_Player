@@ -2203,6 +2203,9 @@ static __int64 OggDsOutFramesToSrc(__int64 outFrames)
 	return outFrames;
 }
 
+extern int loop1, loop2, loop3, oggsize, endf;
+extern long data_size;
+
 // PCM バイト長 → フレーム数（旧 oggsize/4 は 16bit stereo 専用で 7.1 で 4 倍になる）
 static int PcmFramesFromBytes(int bytes)
 {
@@ -2210,6 +2213,81 @@ static int PcmFramesFromBytes(int bytes)
 	if (bpf <= 0 || bytes <= 0)
 		return 0;
 	return (int)((__int64)bytes / (__int64)bpf);
+}
+
+static void ApplyVorbisLoopCommentLine(const CString& cc)
+{
+	CString u = cc;
+	u.MakeUpper();
+	if (u.Left(10) == _T("LOOPSTART="))
+		loop1 = _tstoi(cc.Mid(10));
+	else if (u.Left(11) == _T("LOOPLENGTH="))
+		loop2 = _tstoi(cc.Mid(11));
+	else if (u.Left(8) == _T("LOOPEND=")) {
+		const int endp = _tstoi(cc.Mid(8));
+		if (endp > loop1)
+			loop2 = endp - loop1;
+	}
+}
+
+static void ApplyTagLoopPointsIfUnset(const FileTagFields& tf)
+{
+	if (loop1 != 0 || loop2 != 0)
+		return;
+	if (tf.loop1 == 0 && tf.loop2 == 0)
+		return;
+	loop1 = tf.loop1;
+	if (tf.loop2 > tf.loop1)
+		loop2 = tf.loop2 - tf.loop1;
+	else
+		loop2 = tf.loop2;
+}
+
+static void ApplyFileTagLoopsIfUnset(LPCTSTR path)
+{
+	if (loop1 != 0 || loop2 != 0)
+		return;
+	if (!path || !path[0])
+		return;
+	FileTagFields tf;
+	ReadFileTagFields(path, tf);
+	ApplyTagLoopPointsIfUnset(tf);
+}
+
+static bool ModeParksDurationInLoop2(int md)
+{
+	return md == -3 || md == -7 || md == -8 || md == -9 || md == -10 || md == 999
+		|| IsForeignPluginMode(md) || md == MODE_VST_MIDI || md == MODE_CEMU;
+}
+
+static void FinalizePlaybackLoopFlags(int md)
+{
+	if (pl && plw) {
+		if (pl->m_loop.GetCheck() == TRUE) {
+			if (loop2 == 0)
+				loop2 = (md == -10 && oggsize > 0) ? oggsize : PcmFramesFromBytes(oggsize);
+		}
+	}
+	endf = 0;
+	if (loop2 == 0)
+		endf = 1;
+	if (md == 30 && (loop1 != 0 || loop2 != 0)) {
+		const int ts = (data_size > 0) ? PcmFramesFromBytes(data_size) : PcmFramesFromBytes(oggsize);
+		const __int64 endSamp = (__int64)loop1 + (__int64)loop2;
+		if (ts <= 0 || loop1 < 0 || loop2 <= 0 || loop1 >= ts || loop2 > ts
+			|| endSamp > (__int64)ts + 8 || loop1 == loop2) {
+			loop1 = 0;
+			loop2 = 0;
+			endf = 1;
+		}
+	}
+	if (endf == 0 && ModeParksDurationInLoop2(md) && loop1 == 0) {
+		int total = (loop3 > 0) ? loop3 : 0;
+		if (total <= 0 && oggsize > 0)
+			total = (md == -10) ? oggsize : PcmFramesFromBytes(oggsize);
+		if (total <= 0 || loop2 >= total - 8)
+			endf = 1;
+	}
 }
 
 // バナー総時間: oggsize(バイト)→秒の ch 係数（旧 wavv[]）。7–8ch は標準 PCM（YsX 7.1 用）
@@ -5313,6 +5391,8 @@ static void COgg_RequestTimerp(COggDlg* dlg)
 	if (CCustomPopupMenu::GetTrackingRoot() != NULL)
 		return;
 	if (CCC_ModalUiBusy())
+		return;
+	if (InterlockedCompareExchange(&g_appExiting, 0, 0))
 		return;
 	HWND h = dlg->GetSafeHwnd();
 	if (!h || !::IsWindow(h))
@@ -10635,17 +10715,22 @@ void COggDlg::play()
 			// BeginPlaybackNotifyThread 前の初回 Fill / WAV書き出しでも ActiveDecodeMode が必要
 			g_openDecoderMode = mode;
 			loop1 = loop2 = 0; stitle = "";
-			if (vf.vc->comments >= 2)
+			vorbis_comment* vcLoop = ov_comment(&vf, -1);
+			if (!vcLoop)
+				vcLoop = vf.vc;
+			if (vcLoop && vcLoop->comments > 0 && vcLoop->user_comments)
 			{
 				CString cc;
-				for (int iii = 0; iii < vf.vc->comments; iii++) {
+				for (int iii = 0; iii < vcLoop->comments; iii++) {
+					if (!vcLoop->user_comments[iii])
+						continue;
 #if _UNICODE
 					WCHAR* f; f = new WCHAR[0x300000];
-					MultiByteToWideChar(CP_UTF8, 0, vf.vc->user_comments[iii], -1, f, 0x300000);
+					MultiByteToWideChar(CP_UTF8, 0, vcLoop->user_comments[iii], -1, f, 0x300000);
 					cc = f;
 					delete[] f;
 #else
-					cc = vf.vc->user_comments[iii];
+					cc = vcLoop->user_comments[iii];
 #endif
 					if (cc.Left(6).MakeUpper() == "TITLE=")
 					{
@@ -10656,14 +10741,7 @@ void COggDlg::play()
 #endif
 						stitle = ss;
 					}
-					if (cc.Left(10) == "LOOPSTART=")
-					{
-						loop1 = _tstoi(cc.Mid(10));
-					}
-					if (cc.Left(11) == "LOOPLENGTH=")
-					{
-						loop2 = _tstoi(cc.Mid(11));
-					}
+					ApplyVorbisLoopCommentLine(cc);
 					if (cc.Left(23) == "METADATA_BLOCK_PICTURE=")
 					{
 						m_mp3jake.EnableWindow(TRUE);
@@ -13402,17 +13480,8 @@ open_mode_vst_midi:
 			reset = TRUE;
 			endflg = 0;
 			endf = 0;
-			if (pl && plw) { if (pl->m_loop.GetCheck() == TRUE) { if (loop2 == 0)loop2 = PcmFramesFromBytes(oggsize); } }
-			if (loop2 == 0) endf = 1;
-			if (mode == 30 && (loop1 != 0 || loop2 != 0)) {
-				const int ts = (data_size > 0) ? PcmFramesFromBytes(data_size) : PcmFramesFromBytes(oggsize);
-				const __int64 endSamp = (__int64)loop1 + (__int64)loop2;
-				if (ts <= 0 || loop1 < 0 || loop2 <= 0 || loop1 >= ts || loop2 > ts
-					|| endSamp > (__int64)ts + 8 || loop1 == loop2) {
-					loop1 = 0; loop2 = 0; endf = 1;
-				}
-			}
-			if (mode == -3 || mode == -7 || mode == -8 || mode == -9 || mode == -10 || mode == 999 || IsForeignPluginMode(mode) || mode == MODE_VST_MIDI || mode == MODE_CEMU) endf = 1;
+			ApplyFileTagLoopsIfUnset(filen);
+			FinalizePlaybackLoopFlags(mode);
 			loopcnt = 0;
 			if (g_openDecoderMode == INT_MIN)
 				g_openDecoderMode = mode;
@@ -13462,18 +13531,8 @@ open_mode_vst_midi:
 		endflg = 0;
 		// 連続再生用 timer 9000 は export 中に立てない（DoEvent 再入で次曲 Restart）
 	endf = 0;
-	if (pl && plw) { if (pl->m_loop.GetCheck() == TRUE) { if (loop2 == 0)loop2 = PcmFramesFromBytes(oggsize); } }
-	if (loop2 == 0) endf = 1;
-	// mode 30: 曲長外 / loop1==loop2 は画面に出さず破棄（CWread 代入漏れ・孤児上書きの最終防衛）
-	if (mode == 30 && (loop1 != 0 || loop2 != 0)) {
-		const int ts = (data_size > 0) ? PcmFramesFromBytes(data_size) : PcmFramesFromBytes(oggsize);
-		const __int64 endSamp = (__int64)loop1 + (__int64)loop2;
-		if (ts <= 0 || loop1 < 0 || loop2 <= 0 || loop1 >= ts || loop2 > ts
-			|| endSamp > (__int64)ts + 8 || loop1 == loop2) {
-			loop1 = 0; loop2 = 0; endf = 1;
-		}
-	}
-	if (mode == -3 || mode == -7 || mode == -8 || mode == -9 || mode == -10 || mode == 999 || IsForeignPluginMode(mode) || mode == MODE_VST_MIDI || mode == MODE_CEMU) endf = 1;
+	ApplyFileTagLoopsIfUnset(filen);
+	FinalizePlaybackLoopFlags(mode);
 	loopcnt = 0;
 	if (g_openDecoderMode == INT_MIN)
 		g_openDecoderMode = mode;
@@ -13866,17 +13925,8 @@ open_mode_vst_midi:
 	// 旧: Play 後に設定 → 先読み中に endf==0（前曲のゲームループ残）だと
 	// playwavkpi の短読みが Seek(0) し「頭の巻き戻り」になる（特に KPI）。
 	endf = 0;
-	if (pl && plw) { if (pl->m_loop.GetCheck() == TRUE) { if (loop2 == 0)loop2 = PcmFramesFromBytes(oggsize); } }
-	if (loop2 == 0) endf = 1;
-	if (mode == 30 && (loop1 != 0 || loop2 != 0)) {
-		const int ts = (data_size > 0) ? PcmFramesFromBytes(data_size) : PcmFramesFromBytes(oggsize);
-		const __int64 endSamp = (__int64)loop1 + (__int64)loop2;
-		if (ts <= 0 || loop1 < 0 || loop2 <= 0 || loop1 >= ts || loop2 > ts
-			|| endSamp > (__int64)ts + 8 || loop1 == loop2) {
-			loop1 = 0; loop2 = 0; endf = 1;
-		}
-	}
-	if (mode == -3 || mode == -7 || mode == -8 || mode == -9 || mode == -10 || mode == 999 || IsForeignPluginMode(mode) || mode == MODE_VST_MIDI || mode == MODE_CEMU) endf = 1;
+	ApplyFileTagLoopsIfUnset(filen);
+	FinalizePlaybackLoopFlags(mode);
 
 	if (loop1 == 0 && loop2 == 0) {
 		const int fullLen = m_time.GetMaxValue();
@@ -14132,22 +14182,19 @@ open_mode_vst_midi:
 		if (tagalbum.IsEmpty() && !_tf.album.IsEmpty()) tagalbum = _tf.album;
 		if (tagfile.IsEmpty() && !_tf.title.IsEmpty())  tagfile = _tf.title;
 		tagtrack = _tf.track;
+		ApplyTagLoopPointsIfUnset(_tf);
 	}
 
 	SetTimer(9000, 10, NULL);
 	XfCaptureGlobalsToSlot(XfActiveSlot());
 	// endf はプリフィル前に設定済み。ここは loop チェック後の再同期のみ。
-	if (pl && plw) { if (pl->m_loop.GetCheck() == TRUE) { if (loop2 == 0)loop2 = PcmFramesFromBytes(oggsize); } }
-	if (loop2 == 0) endf = 1;
-	if (mode == 30 && (loop1 != 0 || loop2 != 0)) {
-		const int ts = (data_size > 0) ? PcmFramesFromBytes(data_size) : PcmFramesFromBytes(oggsize);
-		const __int64 endSamp = (__int64)loop1 + (__int64)loop2;
-		if (ts <= 0 || loop1 < 0 || loop2 <= 0 || loop1 >= ts || loop2 > ts
-			|| endSamp > (__int64)ts + 8 || loop1 == loop2) {
-			loop1 = 0; loop2 = 0; endf = 1;
-		}
+	FinalizePlaybackLoopFlags(mode);
+	if (loop1 != 0 || loop2 != 0) {
+		m_time.SetSelection(loop1, loop1 + loop2);
+		m_time.Invalidate();
+		g_seekSrcSel0 = loop1;
+		g_seekSrcSel1 = loop1 + loop2;
 	}
-	if (mode == -3 || mode == -7 || mode == -8 || mode == -9 || mode == -10 || mode == 999 || IsForeignPluginMode(mode) || mode == MODE_VST_MIDI || mode == MODE_CEMU) endf = 1;
 	loopcnt = 0;
 	if (pl && plw && !pl->m_tempMode) {
 		int plc = 1;
@@ -22330,7 +22377,11 @@ int playwavmp3(BYTE* bw, int old, int l1, int l2)
 			}
 			else {
 				PlaybackNoteLoop(loop1);
-				mp3_.seek(10, wavchannel); poss2 = poss3 = poss4 = poss6 = 0; poss5 = loop1;
+				if (savedata.mp3orig)
+					mp3_.seek2(Mp3SeekDwPosFromPlaybFrames(loop1), wavchannel);
+				else
+					mp3_.seek(Mp3SeekDwPosFromPlaybFrames(loop1), wavchannel);
+				poss2 = poss3 = poss4 = poss6 = 0; poss5 = loop1;
 				RubberBand_DestroyBank(0);
 				ReadMp3Accumulate(bw + old + rrr, l1 - rrr);
 			}
@@ -22359,7 +22410,11 @@ int playwavmp3(BYTE* bw, int old, int l1, int l2)
 				}
 				else {
 					PlaybackNoteLoop(loop1);
-					mp3_.seek(10, wavchannel); poss2 = poss3 = poss4 = poss6 = 0; poss5 = loop1;
+					if (savedata.mp3orig)
+						mp3_.seek2(Mp3SeekDwPosFromPlaybFrames(loop1), wavchannel);
+					else
+						mp3_.seek(Mp3SeekDwPosFromPlaybFrames(loop1), wavchannel);
+					poss2 = poss3 = poss4 = poss6 = 0; poss5 = loop1;
 					RubberBand_DestroyBank(0);
 					ReadMp3Accumulate(bw + rrr2, (int)l2 - rrr2);
 				}
@@ -25024,6 +25079,40 @@ double OggGetGdiPlaybackTimeSec()
 	return t3;
 }
 
+double OggGetLyricsPlaySec()
+{
+	extern UINT ttt;
+	extern int videoonly;
+	if (mode == -2 || videoonly)
+		return (double)ttt / 100.0;
+	/* バナーと同じ壁時計をその場で読む。g_tpSrcSec だけだと timerp 間隔で段になる */
+	if (g_tpUiValid && wavbit_sample_Hz >= 8000) {
+		double sec = g_tpSrcSec;
+		if (g_tpLastRate > 0.05) {
+			const double wall = TempoPredWallNow();
+			sec += (wall - g_tpLastWallSec) * g_tpLastRate;
+		}
+		if (sec < 0.0) sec = 0.0;
+		return sec;
+	}
+	const __int64 fr = OggGetUiSourcePcmFrames();
+	if (fr > 0 && wavbit_sample_Hz > 0) {
+		double sec = (double)fr / (double)wavbit_sample_Hz;
+		return (sec < 0.0) ? 0.0 : sec;
+	}
+	const double sec = OggGetGdiPlaybackTimeSec();
+	if (sec > 0.0)
+		return sec;
+	return (double)ttt / 100.0;
+}
+
+DWORD OggGetLyricsPlayCentis()
+{
+	const double sec = OggGetLyricsPlaySec();
+	if (sec <= 0.0) return 0;
+	return (DWORD)(sec * 100.0 + 0.5);
+}
+
 __int64 OggGetUiSourcePcmFrames()
 {
 	/* バナー time: は TempoPredWallNow()／g_tpSrcSec。OggGetHeardPcmFrames() は
@@ -25031,7 +25120,7 @@ __int64 OggGetUiSourcePcmFrames()
 	if (wavbit_sample_Hz < 8000)
 		return 0;
 	const double sr = (double)wavbit_sample_Hz;
-	if (g_tpUiValid && g_tpSrcSec > 0.0)
+	if (g_tpUiValid)
 		return (__int64)(g_tpSrcSec * sr + 0.5);
 	const double wall = TempoPredWallNow();
 	if (wall > 0.0) {
@@ -25083,8 +25172,16 @@ void COggDlg::timerp()
 	if (CCustomPopupMenu::GetTrackingRoot() != NULL)
 		return;
 	if (playy == 0)return;
+	if (InterlockedCompareExchange(&g_appExiting, 0, 0))
+		return;
 
 	OggDispatchChromeMessages();
+	/* chrome Peek が終了クリックをここで処理し得る。以降の ULW/GDI を走らせない */
+	if (InterlockedCompareExchange(&g_appExiting, 0, 0))
+		return;
+	/* 歌詞カラオケは SetTimer だと WM_TIMER が低優先で飢える。
+	   banner と同じ VSYNC Post（timerp）で TickFrame する。 */
+	LyricsOnTimerp();
 
 	if (s_lastMs2DrawMs != savedata.ms2) {
 		s_lastMs2DrawMs = savedata.ms2;
@@ -25496,6 +25593,9 @@ void COggDlg::timerp()
 		g_tpUiLoop1Sec = tLoop1;
 		g_tpUiLoop2Sec = tLoop2;
 		g_tpUiValid = 1;
+		/* LRC 比較用 ttt もバナーと同じソース位置へ。playb 先読みのままだと行が飛ばない／止まる */
+		if (g_tpSrcSec >= 0.0)
+			ttt = (UINT)(g_tpSrcSec * 100.0 + 0.5);
 	}
 	else {
 		g_tpUiValid = 0;
@@ -25526,6 +25626,24 @@ void COggDlg::timerp()
 			if (s_ssSpeanaMs == 0 || (nowSs - s_ssSpeanaMs) >= 33u) {
 				s_ssSpeanaMs = nowSs;
 				Speana(TRUE);
+			}
+		}
+	}
+
+	/* 歌詞行送りはバナー GDI フレームに乗せない。pending 中は bGdiFrame が落ちて LRC が止まる */
+	if (lrcnum >= 2) {
+		for (int lp = 0; lp < lrcnum - 1; lp++) {
+			if (lrctm[lp] <= ttt && lrctm[lp + 1] > ttt) {
+				if (lrc[lp] != lrc_backup) {
+					m_lrc.SetWindowText(lp >= 2 ? lrc[lp - 2] : L"");
+					m_lrc2.SetWindowText(lp >= 1 ? lrc[lp - 1] : L"");
+					m_lrc3.SetWindowText(lrc[lp]);
+					m_lrc4.SetWindowText(lrc[lp + 1]);
+					m_lrc5.SetWindowText((lp + 2 < lrcnum - 1) ? lrc[lp + 2] : L"");
+					lrc_backup = lrc[lp];
+				}
+				lrccur = lp;
+				break;
 			}
 		}
 	}
@@ -25571,22 +25689,6 @@ void COggDlg::timerp()
 		int alpha = 130 + (int)((220 - 130) * m_jacketFocus);
 		img.AlphaBlend(dc.m_hDC, x_dest, y_dest, w_dest, h_dest, 0, 0, jx, jy, alpha);
 	}
-
-	for (int lp = 0; lp < lrcnum - 1; lp++) {
-		if (lrctm[lp] <= ttt && lrctm[lp + 1] > ttt) {
-			CString s;
-			m_lrc3.GetWindowText(s);
-			if (lrc[lp] == lrc_backup) continue;
-			m_lrc.SetWindowText(lp >= 2 ? lrc[lp - 2] : L"");
-			m_lrc2.SetWindowText(lp >= 1 ? lrc[lp - 1] : L"");
-			m_lrc3.SetWindowText(lrc[lp]);
-			m_lrc4.SetWindowText(lrc[lp + 1]);
-			m_lrc5.SetWindowText((lp + 2 < lrcnum - 1) ? lrc[lp + 2] : L"");
-			lrc_backup = lrc[lp];
-			lrccur = lp;
-		}
-	}
-
 
 	OggDispatchChromeMessages();
 
@@ -26954,6 +27056,10 @@ LRESULT COggDlg::OnTimerpVsyncTick(WPARAM, LPARAM)
 		InterlockedExchange(&g_timerpPosted, 0);
 		return 0;
 	}
+	if (InterlockedCompareExchange(&g_appExiting, 0, 0)) {
+		InterlockedExchange(&g_timerpPosted, 0);
+		return 0;
+	}
 	if (CCustomPopupMenu::GetTrackingRoot() != NULL) {
 		InterlockedExchange(&g_timerpPosted, 0);
 		return 0;
@@ -26963,6 +27069,11 @@ LRESULT COggDlg::OnTimerpVsyncTick(WPARAM, LPARAM)
 		return 0;
 	}
 	timerp();
+	if (InterlockedCompareExchange(&g_appExiting, 0, 0)) {
+		/* ULW 直後の DestroyWindow を避ける。終了は IDOK 側で行う */
+		InterlockedExchange(&g_timerpPosted, 0);
+		return 0;
+	}
 	/* EQ/ピアノ/アナライザの PostMessage を Peek する。停止中は TheadLoop が
 	   tick 自体を打たないので、ここを常時呼んでもアイドルは食わない。 */
 	OggDispatchChromeMessages();
@@ -29597,6 +29708,7 @@ void COggDlg::OnOK()
 {
 	CCC_StopInwomanTimer();
 	InterlockedExchange(&g_appExiting, 1);
+	DesktopLyricsPrepareAppExit();
 	stop();
 	CCustomBlurDialogBase::OnOK();
 }

@@ -109,6 +109,7 @@ private:
 		BYTE noteFlash[NOTE_MAX]; // Note On で 48。TickVisuals が ms 減算。短い音でも鍵盤が点く
 		int lastNote;
 		int lastVel;
+		int sus;        // CC64 Hold
 		int isDrum;
 		BYTE xgPartMode; // XG 08 pp 06。0=Normal 1+=Drum（MSB127 と OR）
 		int held;       // 押鍵数。メータはフェードさせない（glow は使わない）
@@ -141,7 +142,11 @@ private:
 	int m_showRevPacked, m_showChoPacked;
 	int m_showDiv, m_showTsN, m_showTsD, m_showTransp, m_showKeySf, m_showKeyMin, m_showFrozen;
 	int m_showBar, m_showBars, m_showBeat, m_showTick, m_showTpm, m_showNum;
+	int m_showHeard, m_showHold, m_showMapKind, m_showCh32, m_showSmfFmt, m_showSmfTr, m_showEvN, m_showSr;
+	int m_showLiveKind;
 	wchar_t m_showTitle[280];
+	wchar_t m_showCopy[280];
+	wchar_t m_showLive[280];
 
 	void ReleasePaintBuffers();
 	bool EnsureFrameBuffer(CDC& refDC, int w, int h);
@@ -243,6 +248,11 @@ private:
 	wchar_t m_loadedPath[520];
 	wchar_t m_sourcePath[520];
 	wchar_t m_titleBuf[280];
+	wchar_t m_copyBuf[280];
+	wchar_t m_liveText[280];
+	int m_liveTextKind; // 0=なし 1=Text 5=Lyric 6=Marker 7=Cue
+	int m_smfFormat;
+	int m_smfTracks;
 	int m_gsMapKind; // 0=なし 1=55 2=88 3=88Pro 4=8820 5=GM 6=SD 8=LA 9..=ETC
 	int m_fileHasXg;
 	int m_fileHasGm;

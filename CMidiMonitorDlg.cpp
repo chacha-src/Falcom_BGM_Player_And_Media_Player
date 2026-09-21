@@ -532,6 +532,30 @@ static void MmCopyW(wchar_t* dst, int n, const wchar_t* src)
 	wcsncpy_s(dst, n, src, _TRUNCATE);
 }
 
+static void MmMetaBytesToWide(const BYTE* q, unsigned n, wchar_t* w, int wn)
+{
+	if (!w || wn <= 0) return;
+	w[0] = 0;
+	if (!q || n == 0) return;
+	char tmp[256];
+	if (n > 255) n = 255;
+	memcpy(tmp, q, n);
+	tmp[n] = 0;
+	if (!MultiByteToWideChar(932, 0, tmp, -1, w, wn))
+		MultiByteToWideChar(CP_ACP, 0, tmp, -1, w, wn);
+	w[wn - 1] = 0;
+}
+
+static const wchar_t* MmLiveKindLabel(int kind)
+{
+	if (kind == 5) return L"Lyric";
+	if (kind == 6) return L"Marker";
+	if (kind == 7) return L"Cue";
+	if (kind == 1) return L"Text";
+	if (kind == 2) return L"©";
+	return L"";
+}
+
 enum { INS_TMAX = 120, INS_PMAX = 16 };
 struct MmInsP { BYTE n; BYTE kind; char name[16]; char extra[72]; };
 struct MmInsT { BYTE fam; BYTE msb; BYTE lsb; BYTE np; char name[28]; MmInsP p[INS_PMAX]; };
@@ -759,7 +783,7 @@ static int MmEvSoftRank(DWORD msg)
 	if (st == 0xC0 || st == 0xE0) return 2;
 	if (st == 0x90 && d2 != 0) return 4;
 	if (st == 0x80 || (st == 0x90 && d2 == 0)) return 5;
-	if ((msg & 0xFF) == 0xFF) return 0; /* meta / tempo first */
+	if ((msg & 0xFF) >= 0xfa) return 0; /* meta / tempo / lyric first */
 	return 3;
 }
 
@@ -1495,6 +1519,11 @@ CMidiMonitorDlg::CMidiMonitorDlg(CWnd* pParent)
 	m_loadedPath[0] = 0;
 	m_sourcePath[0] = 0;
 	m_titleBuf[0] = 0;
+	m_copyBuf[0] = 0;
+	m_liveText[0] = 0;
+	m_liveTextKind = 0;
+	m_smfFormat = 0;
+	m_smfTracks = 0;
 	m_hoverTip[0] = 0;
 	m_volBarRc.SetRectEmpty();
 	m_notesBarRc.SetRectEmpty();
@@ -1526,6 +1555,11 @@ CMidiMonitorDlg::CMidiMonitorDlg(CWnd* pParent)
 	m_showDly = -1;
 	m_showBar = m_showBars = m_showBeat = m_showTick = m_showTpm = m_showNum = -1;
 	m_showTitle[0] = 0;
+	m_showCopy[0] = 0;
+	m_showLive[0] = 0;
+	m_showLiveKind = -1;
+	m_showHeard = m_showHold = m_showMapKind = m_showCh32 = -1;
+	m_showSmfFmt = m_showSmfTr = m_showEvN = m_showSr = -1;
 	memset(m_tsEv, 0, sizeof(m_tsEv));
 	memset(m_latchUntil, 0, sizeof(m_latchUntil));
 	memset(m_latchMask, 0, sizeof(m_latchMask));
@@ -1851,6 +1885,8 @@ void CMidiMonitorDlg::ResetParts()
 	m_keyMin = 0;
 	m_transpose = 0;
 	m_sysMode = m_fileHasXg ? 2 : ((m_fileHasGm || m_gsMapKind == 5 || m_gsMapKind == 9) ? 0 : 1);
+	m_liveText[0] = 0;
+	m_liveTextKind = 0;
 	memset(m_gsEfx, 0, sizeof(m_gsEfx));
 	m_gsEfxHasLsb = 0;
 	m_gsEfxMask = 0;
@@ -1907,6 +1943,11 @@ void CMidiMonitorDlg::UnloadMidi()
 	m_loopEndSample = 0;
 	m_loadedPath[0] = 0;
 	m_titleBuf[0] = 0;
+	m_copyBuf[0] = 0;
+	m_liveText[0] = 0;
+	m_liveTextKind = 0;
+	m_smfFormat = 0;
+	m_smfTracks = 0;
 	m_gsMapKind = 0;
 	m_fileHasXg = 0;
 	m_fileHasGm = 0;
@@ -2191,6 +2232,7 @@ void CMidiMonitorDlg::ApplyShort(int port, DWORD msg, BOOL fromUser, BOOL liveEx
 		else if (d1 == 91) { if (fromUser || !IsLatched(part, MM_LATCH_REV)) { if (p.rev != d2) { p.rev = d2; m_dirtyRows |= (1u << part); } } }
 		else if (d1 == 93) { if (fromUser || !IsLatched(part, MM_LATCH_CRS)) { if (p.crs != d2) { p.crs = d2; m_dirtyRows |= (1u << part); } } }
 		else if (d1 == 94) { if (fromUser || !IsLatched(part, MM_LATCH_VAR)) { if (p.var != d2) { p.var = d2; m_dirtyRows |= (1u << part); } } }
+		else if (d1 == 64) { p.sus = d2; m_dirtyHead = true; }
 		else if (d1 == 71) { p.rsn = d2 - 64; MmBumpFade(p.fadeFilt, m_burstApply); m_dirtyRows |= (1u << part); }
 		else if (d1 == 74) { p.lpf = d2 - 64; MmBumpFade(p.fadeFilt, m_burstApply); m_dirtyRows |= (1u << part); }
 		else if (d1 == 72) { p.rls = d2 - 64; MmBumpFade(p.fadeEnv, m_burstApply); m_dirtyRows |= (1u << part); }
@@ -2489,6 +2531,16 @@ void CMidiMonitorDlg::ApplyEvent(const MmEv& e)
 		if (e.aux >= 10000) m_usecQn = (int)e.aux;
 		return;
 	}
+	if (e.msg == 0xfa) {
+		const int kind = (int)((e.aux >> 24) & 0xff);
+		const int n = (int)(e.aux & 0xffffff);
+		if (e.sysexOff >= 0 && n > 0 && e.sysexOff + n <= m_sxBytes) {
+			MmMetaBytesToWide(m_sx + e.sysexOff, (unsigned)n, m_liveText, 280);
+			m_liveTextKind = kind;
+			m_dirtyHead = true;
+		}
+		return;
+	}
 	if (e.msg == 0xfe) {
 		m_tsNum = (int)(e.aux & 0xff);
 		m_tsDen = (int)((e.aux >> 8) & 0xff);
@@ -2580,10 +2632,13 @@ void CMidiMonitorDlg::LoadCurrentMidi()
 	if (smfSize < 14 || memcmp(smf, "MThd", 4) || MmReadBE(smf + 4, 4) < 6) {
 		delete[] data; return;
 	}
+	const int smfFmt = (int)MmReadBE(smf + 8, 2);
 	const int tracks = (int)MmReadBE(smf + 10, 2);
 	const int division = (int)MmReadBE(smf + 12, 2);
 	if (division <= 0 || (division & 0x8000)) { delete[] data; return; }
 	m_division = division;
+	m_smfFormat = smfFmt;
+	m_smfTracks = tracks;
 	MmEv* ev = new (std::nothrow) MmEv[EV_MAX];
 	BYTE* sxData = new (std::nothrow) BYTE[(size_t)size + 8 + 128];
 	if (!ev || !sxData) {
@@ -2601,6 +2656,9 @@ void CMidiMonitorDlg::LoadCurrentMidi()
 	int gs32 = 0;
 	int maxPort = 0;
 	m_titleBuf[0] = 0;
+	m_copyBuf[0] = 0;
+	m_liveText[0] = 0;
+	m_liveTextKind = 0;
 	const BYTE* p = smf + 8 + MmReadBE(smf + 4, 4);
 	const BYTE* fileEnd = smf + smfSize;
 	for (int tr = 0; tr < tracks && p + 8 <= fileEnd; ++tr) {
@@ -2649,17 +2707,10 @@ void CMidiMonitorDlg::LoadCurrentMidi()
 					if (curPort > 1) curPort = 1;
 					sawFf21 = 1;
 					if (curPort > maxPort) maxPort = curPort;
-				} else if ((type == 0x01 || type == 0x02 || type == 0x03) && ml > 0) {
-					char tmp[256];
-					unsigned n = ml;
-					if (n > 255) n = 255;
-					memcpy(tmp, q, n);
-					tmp[n] = 0;
+				} else if ((type == 0x01 || type == 0x02 || type == 0x03
+					|| type == 0x05 || type == 0x06 || type == 0x07) && ml > 0) {
 					wchar_t w[256];
-					w[0] = 0;
-					if (!MultiByteToWideChar(932, 0, tmp, -1, w, 256))
-						MultiByteToWideChar(CP_ACP, 0, tmp, -1, w, 256);
-					w[255] = 0;
+					MmMetaBytesToWide(q, ml, w, 256);
 					if (w[0]) {
 						mapHint = VstMidiFoldGsMapHint(mapHint, VstMidiGuessGsMapKind(w, NULL));
 						int junk = 1;
@@ -2673,8 +2724,21 @@ void CMidiMonitorDlg::LoadCurrentMidi()
 						}
 						if (!junk && (wcsstr(w, L"GM版") || wcscmp(w, L"GM曲") == 0))
 							junk = 1;
-						if (!junk && (type == 0x03 || !m_titleBuf[0]))
+						if (!junk && type == 0x02 && !m_copyBuf[0])
+							MmCopyW(m_copyBuf, 280, w);
+						if (!junk && (type == 0x03 || !m_titleBuf[0]) && type != 0x02 && type != 0x05 && type != 0x06 && type != 0x07)
 							MmCopyW(m_titleBuf, 280, w);
+					}
+					if ((type == 0x01 || type == 0x05 || type == 0x06 || type == 0x07)
+						&& ml > 0 && sxUsed + (int)ml <= sxCap && count < EV_MAX) {
+						const int off = sxUsed;
+						memcpy(sxData + sxUsed, q, ml);
+						sxUsed += (int)ml;
+						ev[count].tick = tick; ev[count].sample = 0;
+						ev[count].msg = 0xfa;
+						ev[count].aux = ((DWORD)type << 24) | (DWORD)ml;
+						ev[count].port = curPort; ev[count].sysexOff = off;
+						++count;
 					}
 				}
 				q += ml;
@@ -3065,7 +3129,7 @@ void CMidiMonitorDlg::ApplyDueEvents(int lastDue)
 		int lastPc[2][16];
 		int lastPb[2][16];
 		int lastAt[2][16];
-		int lastT = -1, lastS = -1, lastK = -1;
+		int lastT = -1, lastS = -1, lastK = -1, lastTx = -1;
 		memset(lastCc, 0xff, sizeof(lastCc));
 		memset(lastPc, 0xff, sizeof(lastPc));
 		memset(lastPb, 0xff, sizeof(lastPb));
@@ -3079,6 +3143,7 @@ void CMidiMonitorDlg::ApplyDueEvents(int lastDue)
 			if (e.msg == 0xff) { lastT = k; continue; }
 			if (e.msg == 0xfe) { lastS = k; continue; }
 			if (e.msg == 0xfd) { lastK = k; continue; }
+			if (e.msg == 0xfa) { lastTx = k; continue; }
 			if (e.msg == 0xf0) {
 				if (MmEvIsModeReset(e, m_sx, m_sxBytes))
 					continue;
@@ -3123,6 +3188,7 @@ void CMidiMonitorDlg::ApplyDueEvents(int lastDue)
 			if (e.msg == 0xff) keep = (k == lastT);
 			else if (e.msg == 0xfe) keep = (k == lastS);
 			else if (e.msg == 0xfd) keep = (k == lastK);
+			else if (e.msg == 0xfa) keep = (k == lastTx);
 			else if (e.msg == 0xf0) {
 				if (MmEvIsModeReset(e, m_sx, m_sxBytes))
 					keep = (k == start);
@@ -3658,6 +3724,59 @@ void CMidiMonitorDlg::DrawHeader(CDC& dc, int w, int headH, UINT dpi)
 		dc.DrawText(line3, t3, DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
 	}
 
+	int heardN = 0, holdN = 0, bendN = 0, drumN = 0, efxN = 0;
+	for (int i = 0; i < PART_MAX; ++i) {
+		if (m_part[i].heard) ++heardN;
+		if (m_part[i].sus >= 64) ++holdN;
+		if (m_part[i].dt > 2 || m_part[i].dt < -2) ++bendN;
+		if (m_part[i].heard && m_part[i].isDrum) ++drumN;
+		if (m_part[i].efxOn) ++efxN;
+	}
+	const int ch32draw = MidiHwLcdCh32(m_gs32, LcdHeardHi());
+	const wchar_t* mapN = MidiHwLcdModelName(m_sysMode, m_gsMapKind);
+	const wchar_t* varConnN = (m_sysMode == 2)
+		? ((m_varConn == 0) ? L"INS" : L"SYS")
+		: L"—";
+	const wchar_t* portN = m_mirrorToB ? L"A+B" : (ch32draw ? L"A/B" : L"A");
+	wchar_t line4[520];
+	_snwprintf_s(line4, _TRUNCATE,
+		L"MAP %s     %s     SMF%d  %dTr  %dev     %dHz     Parts %d/%d     Hold %d     Bend %d     Drum %d     EFX %d     Var %s     Port %s",
+		mapN,
+		ch32draw ? L"32ch" : L"16ch",
+		m_smfFormat, m_smfTracks, m_evCount,
+		m_sampleRate > 0 ? m_sampleRate : 0,
+		heardN, ch32draw ? 32 : 16,
+		holdN, bendN, drumN, efxN, varConnN, portN);
+	{
+		CRect t4(Scale(8, dpi), Scale(52, dpi), max(Scale(48, dpi), textR), Scale(68, dpi));
+		dc.DrawText(line4, t4, DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
+	}
+
+	wchar_t line5[520];
+	line5[0] = 0;
+	if (m_liveText[0]) {
+		const wchar_t* lab = MmLiveKindLabel(m_liveTextKind);
+		if (lab[0])
+			_snwprintf_s(line5, _TRUNCATE, L"%s  %s", lab, m_liveText);
+		else
+			MmCopyW(line5, 520, m_liveText);
+	} else if (m_copyBuf[0]) {
+		_snwprintf_s(line5, _TRUNCATE, L"©  %s", m_copyBuf);
+	} else {
+		wchar_t loopBuf[80] = {};
+		if (m_loopEndSample > m_loopStartSample && m_sampleRate > 0) {
+			const double a = (double)m_loopStartSample / (double)m_sampleRate;
+			const double b = (double)m_loopEndSample / (double)m_sampleRate;
+			_snwprintf_s(loopBuf, _TRUNCATE, L"     Loop  %.1f-%.1f", a, b);
+		}
+		_snwprintf_s(line5, _TRUNCATE, L"TB %d     Key %s     Reset %s     FF21 %s%s",
+			m_division, keyBuf, sysN, m_mirrorToB ? L"mirror" : (m_gs32 ? L"yes" : L"—"), loopBuf);
+	}
+	{
+		CRect t5(Scale(8, dpi), Scale(68, dpi), max(Scale(48, dpi), textR), Scale(84, dpi));
+		dc.DrawText(line5, t5, DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
+	}
+
 	dc.SelectObject(&m_fontTiny);
 	dc.SetTextColor(MM_HEAD_TX);
 	const int yCol = headH - Scale(24, dpi);
@@ -3761,6 +3880,17 @@ void CMidiMonitorDlg::DrawHeader(CDC& dc, int w, int headH, UINT dpi)
 	m_showNum = m_posNum;
 	m_showFrozen = m_frozen ? 1 : 0;
 	wcsncpy_s(m_showTitle, m_titleBuf, _TRUNCATE);
+	wcsncpy_s(m_showCopy, m_copyBuf, _TRUNCATE);
+	wcsncpy_s(m_showLive, m_liveText, _TRUNCATE);
+	m_showLiveKind = m_liveTextKind;
+	m_showHeard = heardN;
+	m_showHold = holdN;
+	m_showMapKind = m_gsMapKind;
+	m_showCh32 = ch32draw;
+	m_showSmfFmt = m_smfFormat;
+	m_showSmfTr = m_smfTracks;
+	m_showEvN = m_evCount;
+	m_showSr = m_sampleRate;
 	{
 		const int kind = MidiHwLcdKind(m_sysMode, m_gsMapKind);
 		const wchar_t* model = MidiHwLcdModelName(m_sysMode, m_gsMapKind);
@@ -4704,6 +4834,11 @@ void CMidiMonitorDlg::InvalidateDirty()
 		if (tpc < 1) tpc = 100;
 		int transp = (pitch != 0) ? (int)((double)pitch / 100.0 + (pitch > 0 ? 0.5 : -0.5)) : 0;
 		const int pk = (int)(m_notesPeak + 0.5f);
+		int heardN = 0, holdN = 0;
+		for (int i = 0; i < PART_MAX; ++i) {
+			if (m_part[i].heard) ++heardN;
+			if (m_part[i].sus >= 64) ++holdN;
+		}
 		m_dirtyHead = (lcdPartDirty || notesDirty
 			|| bpm != m_showBpm || tpc != m_showTpc || m_noteCount != m_showNotes
 			|| pk != m_showPeak || m_masterVol != m_showVol || m_sysMode != m_showSys
@@ -4717,7 +4852,14 @@ void CMidiMonitorDlg::InvalidateDirty()
 			|| (m_frozen ? 1 : 0) != m_showFrozen
 			|| m_posBar != m_showBar || m_posBars != m_showBars || m_posBeat != m_showBeat
 			|| m_posTick != m_showTick || m_posTpm != m_showTpm || m_posNum != m_showNum
-			|| wcscmp(m_titleBuf, m_showTitle) != 0);
+			|| heardN != m_showHeard || holdN != m_showHold
+			|| wcscmp(m_titleBuf, m_showTitle) != 0
+			|| wcscmp(m_copyBuf, m_showCopy) != 0
+			|| wcscmp(m_liveText, m_showLive) != 0
+			|| m_liveTextKind != m_showLiveKind
+			|| m_gsMapKind != m_showMapKind
+			|| m_smfFormat != m_showSmfFmt || m_smfTracks != m_showSmfTr
+			|| m_evCount != m_showEvN || m_sampleRate != m_showSr);
 		if (!m_dirtyHead) {
 			const int kind = MidiHwLcdKind(m_sysMode, m_gsMapKind);
 			if (kind != m_showLcdKind || m_lcd.mode != m_showLcdMode

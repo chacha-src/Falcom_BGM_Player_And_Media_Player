@@ -176,7 +176,8 @@ BOOL CDesktopLyricsWnd::OnInitDialog()
 		m_view.SetOverlayStyle(TRUE);
 	}
 	LayoutClient();
-	SetTimer(1, 33, NULL);
+	/* 16ms SetTimer は使わない。再生中の timerp（PostMessage）が WM_TIMER を飢餓させる。
+	   TickFrame は COggDlg::timerp → LyricsOnTimerp。 */
 
 	m_alpha.SetRange(40, 255, TRUE);
 	m_alpha.SetTicFreq(16);
@@ -249,7 +250,7 @@ void CDesktopLyricsWnd::OnShowWindow(BOOL bShow, UINT nStatus)
 		ApplyWindowAlpha();
 		if (m_view.GetSafeHwnd()) {
 			m_view.ShowWindow(SW_SHOW);
-			m_view.Invalidate(FALSE);
+			m_view.RequestRedraw();
 		}
 		Invalidate(FALSE);
 	}
@@ -314,6 +315,12 @@ void CDesktopLyricsWnd::ApplyWindowAlpha()
 			LONG cex = ::GetWindowLong(h, GWL_EXSTYLE);
 			if (!(cex & WS_EX_LAYERED))
 				::SetWindowLong(h, GWL_EXSTYLE, cex | WS_EX_LAYERED);
+			if (w == &m_view) {
+				/* SetLWA と UpdateLayeredWindow は併用不可。歌詞は毎フレ ULW で出す */
+				m_view.SetOverlayAlpha((BYTE)a);
+				m_view.RequestRedraw();
+				continue;
+			}
 			::SetLayeredWindowAttributes(h, 0, (BYTE)a, LWA_ALPHA);
 		}
 		Invalidate(FALSE);
@@ -425,25 +432,13 @@ void CDesktopLyricsWnd::SyncFromOg(BOOL catchFromTop)
 	if (!m_view.GetSafeHwnd()) return;
 	if (!og || og->lrcnum < 2) {
 		m_view.Clear();
-		m_view.Invalidate(FALSE);
+		m_view.RequestRedraw();
 		return;
 	}
 	const int n = og->lrcnum - 1;
 	m_view.SetLines(og->lrc, n > 0 ? n : 0, og->lrctm, og->lrcnum);
-	extern UINT ttt;
-	extern double OggGetGdiPlaybackTimeSec();
-	extern int mode;
-	extern int videoonly;
-	DWORD centis = ttt;
-	if (!(mode == -2 || videoonly)) {
-		const double sec = OggGetGdiPlaybackTimeSec();
-		if (sec >= 0.0)
-			centis = (DWORD)(sec * 100.0 + 0.5);
-	}
-	m_view.SetPlayCentis(centis);
 	if (catchFromTop)
 		m_view.BeginCatchFromTop();
-	m_view.Invalidate(FALSE);
 }
 
 void CDesktopLyricsWnd::OnSize(UINT nType, int cx, int cy)
@@ -966,6 +961,8 @@ void CDesktopLyricsWnd::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
 void CDesktopLyricsWnd::OnDestroy()
 {
 	KillTimer(1);
+	if (m_view.GetSafeHwnd())
+		m_view.StopAnim();
 	PersistGeometry();
 	// ユーザー閉じ: チェック／次回起動の復元を落とす。アプリ終了時は PrepareAppExit で残す
 	if (!s_deskLrcAppExit) {
@@ -975,10 +972,31 @@ void CDesktopLyricsWnd::OnDestroy()
 	CCustomBlurDialogBase::OnDestroy();
 }
 
+void CDesktopLyricsWnd::TickView()
+{
+	extern volatile LONG g_appExiting;
+	if (InterlockedCompareExchange(&g_appExiting, 0, 0))
+		return;
+	if (m_view.GetSafeHwnd() && ::IsWindow(m_view.GetSafeHwnd()))
+		m_view.TickFrame();
+}
+
+void CDesktopLyricsWnd::AbortPaintForExit()
+{
+	KillTimer(1);
+	if (m_view.GetSafeHwnd() && ::IsWindow(m_view.GetSafeHwnd())) {
+		m_view.StopAnim();
+		HWND hv = m_view.GetSafeHwnd();
+		::ShowWindow(hv, SW_HIDE);
+		const LONG ex = ::GetWindowLong(hv, GWL_EXSTYLE);
+		if (ex & WS_EX_LAYERED)
+			::SetWindowLong(hv, GWL_EXSTYLE, ex & ~WS_EX_LAYERED);
+	}
+	ShowWindow(SW_HIDE);
+}
+
 void CDesktopLyricsWnd::OnTimer(UINT_PTR nIDEvent)
 {
-	if (nIDEvent == 1)
-		SyncFromOg();
 	CCustomBlurDialogBase::OnTimer(nIDEvent);
 }
 
@@ -1086,7 +1104,9 @@ void OpenDesktopLyricsModeless(CWnd* pParent)
 void CloseDesktopLyricsIfOpen()
 {
 	if (g_desktopLyricsWnd && ::IsWindow(g_desktopLyricsWnd->GetSafeHwnd())) {
-		savedata.deskLrcOn = 0;
+		if (!s_deskLrcAppExit)
+			savedata.deskLrcOn = 0;
+		g_desktopLyricsWnd->KillTimer(1);
 		g_desktopLyricsWnd->DestroyWindow();
 	}
 }
@@ -1102,7 +1122,18 @@ BOOL IsDesktopLyricsOpen()
 	return (g_desktopLyricsWnd && ::IsWindow(g_desktopLyricsWnd->GetSafeHwnd())) ? TRUE : FALSE;
 }
 
-void DesktopLyricsPrepareAppExit()
+void LyricsOnTimerp()
+{
+	extern volatile LONG g_appExiting;
+	if (InterlockedCompareExchange(&g_appExiting, 0, 0))
+		return;
+	if (g_desktopLyricsWnd && ::IsWindow(g_desktopLyricsWnd->GetSafeHwnd()))
+		g_desktopLyricsWnd->TickView();
+	if (mp && ::IsWindow(mp->GetSafeHwnd()))
+		mp->TickLyricsView();
+}
+
+void DesktopLyricsAbortPaintForExit()
 {
 	if (!IsDesktopLyricsOpen())
 		return;
@@ -1110,5 +1141,14 @@ void DesktopLyricsPrepareAppExit()
 	g_desktopLyricsWnd->PersistGeometry();
 	savedata.deskLrcOn = 1;
 	MpPersistSavedataQuick();
+	g_desktopLyricsWnd->AbortPaintForExit();
+}
+
+void DesktopLyricsPrepareAppExit()
+{
+	DesktopLyricsAbortPaintForExit();
+	/* 親 MP 破棄より先に ULW/タイマを止める。残すと終了時に固まる */
+	if (g_desktopLyricsWnd && ::IsWindow(g_desktopLyricsWnd->GetSafeHwnd()))
+		g_desktopLyricsWnd->DestroyWindow();
 }
 

@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 // カラオケ風: 先頭は上から、途中は現在行を縦中央に追従、末尾は最終行を下端へ（MP LRC GDI と同系）。
 // 途中オープン時は頭から該当行へ高速 catch-up（timerp 相当の ~60fps）。
@@ -17,15 +17,20 @@ public:
 	// lines[0..count) を表示。times は 1/100 秒(lrctm と同じ)。NULL ならカラオケ塗り無し。
 	void SetLines(const CString* lines, int count, const DWORD* times = NULL, int timeCount = 0);
 	void SetCurrent(int idx);
-	// 再生位置(1/100秒)。現在行と行内進捗を更新しカラオケ塗りに使う。
+	// 再生位置(秒)。現在行と行内進捗を更新しカラオケ塗りに使う。
+	void SetPlaySec(double sec);
 	void SetPlayCentis(DWORD centis);
 	void EnsureFonts(int dpiPointTenths, LPCTSTR face);
 	int GetFontPt() const { return m_fontPt; }
 	// デスクトップ常時前面向け: 暗背景・高コントラスト文字
 	void SetOverlayStyle(BOOL on);
+	void SetOverlayAlpha(BYTE a);
 	// 途中オープン用: スクロールを先頭に戻し、該当行まで高速追従を開始
 	void BeginCatchFromTop();
 	BOOL IsFastCatching() const { return m_fastCatch; }
+	void RequestRedraw();
+	void TickFrame();
+	void StopAnim();
 
 protected:
 	CString m_line[kMaxLines];
@@ -33,7 +38,20 @@ protected:
 	int m_count;
 	int m_tmCount;
 	int m_cur;
-	double m_frac; // 現在行の進捗 0..1
+	double m_frac;     // 時計上の行内進捗 0..1
+	double m_fracDisp; // 描画用（60fps 補間）
+	double m_playSec;
+	double m_lineDurSec;
+	ULONGLONG m_lastPlayQpc;
+	int m_sparkGlyph;
+	double m_flashT;
+	UINT m_rng;
+	struct LrcSpark {
+		float x, y, vx, vy, life, maxLife, size;
+	};
+	static const int kMaxSparks = 16;
+	LrcSpark m_sparks[kMaxSparks];
+	int m_sparkN;
 	int m_lineH;
 	double m_scrollY;
 	double m_targetY;
@@ -48,6 +66,7 @@ protected:
 	CString m_fontFace;
 	UINT_PTR m_timer;
 	BOOL m_overlay;
+	BYTE m_overlayAlpha;
 	volatile LONG m_animPosted; // timerp 型 oneshot Post 合流
 
 	// 毎フレ CreateCompatibleBitmap しない
@@ -60,13 +79,18 @@ protected:
 	UINT GetViewDpi() const;
 	void RecalcTarget();
 	void StartAnim();
-	void StopAnim();
 	void StepScroll(double dtSec);
+	void StepKara(double dtSec);
+	BOOL NeedAnim() const;
+	void SpawnSparks(int x, int y, int n, UINT dpi);
 	void EnsureMemDC(int w, int h);
 	void RequestAnimTick();
+	void RenderFrame(CDC& mem, int w, int h);
+	void PresentOverlay();
 
 	afx_msg void OnPaint();
 	afx_msg BOOL OnEraseBkgnd(CDC* pDC);
+	afx_msg void OnDestroy();
 	afx_msg void OnTimer(UINT_PTR nIDEvent);
 	afx_msg void OnSize(UINT nType, int cx, int cy);
 	afx_msg BOOL OnMouseWheel(UINT nFlags, short zDelta, CPoint pt);

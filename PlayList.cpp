@@ -6681,10 +6681,19 @@ void CPlayList::Fol(CString fname)
 #endif
 							_tcscpy(p.alb, ss);
 						}
-						if (cc.Left(10) == "LOOPSTART=")
-							oggL1 = _tstoi(cc.Mid(10));
-						if (cc.Left(11) == "LOOPLENGTH=")
-							oggL2 = _tstoi(cc.Mid(11));
+						{
+							CString u = cc;
+							u.MakeUpper();
+							if (u.Left(10) == _T("LOOPSTART="))
+								oggL1 = _tstoi(cc.Mid(10));
+							if (u.Left(11) == _T("LOOPLENGTH="))
+								oggL2 = _tstoi(cc.Mid(11));
+							if (u.Left(8) == _T("LOOPEND=")) {
+								const int endp = _tstoi(cc.Mid(8));
+								if (endp > oggL1)
+									oggL2 = endp - oggL1;
+							}
+						}
 					}
 					ov_clear(&vf1);
 					fclose(fp);
