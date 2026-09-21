@@ -1,4 +1,4 @@
-﻿Overlay stills stored as jammed IWJ2 (XOR -> zstd -> XOR).
+Overlay stills stored as jammed IWJ2 (XOR -> zstd -> XOR).
 
 body / body2 / face: user-supplied adult still (M-spread + erotic expression).
 

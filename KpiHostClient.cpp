@@ -1,4 +1,4 @@
-#include "stdafx.h"
+﻿#include "stdafx.h"
 
 #include "KpiHostClient.h"
 #include <tlhelp32.h>
@@ -67,16 +67,27 @@ static bool FileExists(const std::wstring& p)
 	return (a != INVALID_FILE_ATTRIBUTES) && ((a & FILE_ATTRIBUTE_DIRECTORY) == 0);
 }
 
+static const wchar_t* const kHostExeNames[] = {
+	L"ogghost32.exe",
+};
+
+static bool FindHostExeInDir(const std::wstring& dir, std::wstring& outPath)
+{
+	for (const wchar_t* name : kHostExeNames) {
+		std::wstring p = JoinPath(dir, name);
+		if (FileExists(p)) {
+			outPath = p;
+			return true;
+		}
+	}
+	return false;
+}
+
 static bool FindHostExeRecursive(const std::wstring& baseDir, std::wstring& outPath, int maxDepth = 6)
 {
 	outPath.clear();
 	if (maxDepth < 0) return false;
-
-	// quick check: baseDir\KpiHost64.exe
-	{
-		std::wstring direct = JoinPath(baseDir, L"KpiHost64.exe");
-		if (FileExists(direct)) { outPath = direct; return true; }
-	}
+	if (FindHostExeInDir(baseDir, outPath)) return true;
 
 	std::wstring pattern = JoinPath(baseDir, L"*");
 	WIN32_FIND_DATAW fd{};
@@ -91,9 +102,7 @@ static bool FindHostExeRecursive(const std::wstring& baseDir, std::wstring& outP
 		if (fd.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) continue;
 
 		std::wstring subDir = JoinPath(baseDir, fd.cFileName);
-		std::wstring candidate = JoinPath(subDir, L"KpiHost64.exe");
-		if (FileExists(candidate)) {
-			outPath = candidate;
+		if (FindHostExeInDir(subDir, outPath)) {
 			FindClose(h);
 			return true;
 		}
@@ -117,7 +126,7 @@ void KpiHost64Client::Disconnect()
 	m_sentLang = -1;
 }
 
-// 本体 exe の隣（または配下）の KpiHost64.exe を CreateProcess。既に動いていればパイプ接続側が拾う。
+// 本体 exe の隣（または配下）の ogghost32.exe を CreateProcess。既に動いていればパイプ接続側が拾う。
 bool KpiHost64Client::StartHostProcess()
 {
 	wchar_t exePath[MAX_PATH]{};
@@ -128,7 +137,7 @@ bool KpiHost64Client::StartHostProcess()
 
 	std::wstring hostExe;
 	if (!FindHostExeRecursive(dir, hostExe)) {
-		hostExe = L"C:\\projects\\APPLICATION3\\ogg_binary\\KpiHost64.exe";
+		hostExe = L"C:\\projects\\APPLICATION3\\ogg_binary\\ogghost32.exe";
 	}
 	if (!FileExists(hostExe)) return false;
 	AppendLogLine((L"[StartHostProcess] hostExe=" + hostExe).c_str());
@@ -164,7 +173,9 @@ static void KillStaleKpiHost64()
 	DWORD self = GetCurrentProcessId();
 	if (Process32FirstW(snap, &pe)) {
 		do {
-			if (_wcsicmp(pe.szExeFile, L"KpiHost64.exe") != 0) continue;
+			if (_wcsicmp(pe.szExeFile, L"ogghost32.exe") != 0
+				&& _wcsicmp(pe.szExeFile, L"KpiHost64.exe") != 0)
+				continue;
 			if (pe.th32ProcessID == self) continue;
 			HANDLE p = OpenProcess(PROCESS_TERMINATE, FALSE, pe.th32ProcessID);
 			if (!p) continue;
@@ -173,6 +184,42 @@ static void KillStaleKpiHost64()
 		} while (Process32NextW(snap, &pe));
 	}
 	CloseHandle(snap);
+}
+
+void OggPurgeObsoleteKpiHost64()
+{
+	HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+	if (snap != INVALID_HANDLE_VALUE) {
+		PROCESSENTRY32W pe{};
+		pe.dwSize = sizeof(pe);
+		DWORD self = GetCurrentProcessId();
+		if (Process32FirstW(snap, &pe)) {
+			do {
+				if (_wcsicmp(pe.szExeFile, L"KpiHost64.exe") != 0)
+					continue;
+				if (pe.th32ProcessID == self) continue;
+				HANDLE p = OpenProcess(PROCESS_TERMINATE, FALSE, pe.th32ProcessID);
+				if (!p) continue;
+				TerminateProcess(p, 1);
+				CloseHandle(p);
+			} while (Process32NextW(snap, &pe));
+		}
+		CloseHandle(snap);
+	}
+
+	wchar_t nextToExe[MAX_PATH]{};
+	GetModuleFileNameW(NULL, nextToExe, MAX_PATH);
+	wchar_t* slash = wcsrchr(nextToExe, L'\\');
+	if (slash) {
+		wcscpy_s(slash + 1, MAX_PATH - (slash + 1 - nextToExe), L"KpiHost64.exe");
+		SetFileAttributesW(nextToExe, FILE_ATTRIBUTE_NORMAL);
+		DeleteFileW(nextToExe);
+	}
+	static const wchar_t kBinaryDir[] = L"C:\\projects\\APPLICATION3\\ogg_binary\\KpiHost64.exe";
+	if (_wcsicmp(nextToExe, kBinaryDir) != 0) {
+		SetFileAttributesW(kBinaryDir, FILE_ATTRIBUTE_NORMAL);
+		DeleteFileW(kBinaryDir);
+	}
 }
 
 bool KpiHost64Client::ConnectPipe(bool waitForHost)

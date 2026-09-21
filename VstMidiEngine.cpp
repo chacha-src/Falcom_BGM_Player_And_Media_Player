@@ -1,4 +1,4 @@
-﻿// 本体と KpiHost64 が同じソースを使う。KpiHost64.exe は VstMidiEngine_k64.cpp 経由。
+// 本体と KpiHost64 が同じソースを使う。KpiHost64.exe は VstMidiEngine_k64.cpp 経由。
 // 以前はホスト側にコピーがあり、VST2 修正が ogg.exe にしか入らなかった。
 // KPIHOST64_BUILD 時は stdafx.h が MFC 無しヘッダへ切り替わる。
 #include "stdafx.h"
@@ -5593,7 +5593,8 @@ extern "C" int VstPickPreferredPlugin(wchar_t* outPath, int outChars)
 	return ResolvePickedPluginArch(pick, outPath, outChars);
 }
 
-// 1 = x64 VSTi を KpiHost64 で開く。midPath で XG/GS を選ぶ。両方空なら 0。
+// 1 = 本体と違うアーキの VSTi を IPC ホストで開く。ogg x64 なら 32bit プラグイン、
+// 旧 x86 本体なら 64bit プラグイン。midPath で XG/GS を選ぶ。両方空なら 0。
 extern "C" int VstShouldOpenRemote64(const wchar_t* midPath, wchar_t* outDll, int outChars)
 {
 	if (!outDll || outChars <= 0) return 0;
@@ -5602,7 +5603,7 @@ extern "C" int VstShouldOpenRemote64(const wchar_t* midPath, wchar_t* outDll, in
 	pick[0] = 0;
 	if (!PickGsXgDll(midPath, pick, VST_PATH_CHARS)) return 0;
 	const int march = ResolvePickedPluginArch(pick, outDll, outChars);
-	if (march == 64 && outDll[0])
+	if (march && march != HostArch() && outDll[0])
 		return 1;
 	outDll[0] = 0;
 	return 0;

@@ -11,13 +11,14 @@
 #include <new>
 #include <d3dcompiler.h>
 #include <dxgi1_2.h>
+#include <dxgi1_3.h>
 #define DIRECTINPUT_VERSION 0x0800
 #include <dinput.h>
 #include "Soft3DTextD2D.h"
 #include "Soft3DGameSfx.h"
 #include "Soft3DTexRes.h"
 #include "Soft3DGfxQuality.h"
-#include "gpu/GpuDx11.h"
+#include "Soft3DLoop.h"
 
 #ifdef _MSC_VER
 #pragma comment(lib, "d3dcompiler.lib")
@@ -643,9 +644,9 @@ static void S3mSetPitchPos(int pos)
 	if (pos > 400) pos = 400;
 	pitch = pos;
 	if (og && ::IsWindow(og->GetSafeHwnd()))
-		og->m_pitch_sl.SetPos(pos);
+		og->m_pitch_sl.SetPos(pos, FALSE);
 	if (mp && ::IsWindow(mp->GetSafeHwnd()) && mp->m_pitch.GetSafeHwnd())
-		mp->m_pitch.SetPos(pos);
+		mp->m_pitch.SetPos(pos, FALSE);
 }
 
 static void S3mNudgeVolPct(int delta)
@@ -895,7 +896,7 @@ BEGIN_MESSAGE_MAP(CS3mView, CCustomStatic)
 END_MESSAGE_MAP()
 
 CS3mView::CS3mView()
-	: m_ready(FALSE), m_vw(0), m_vh(0), m_dxFailStage(0), m_dxFailHr(S_OK)
+	: m_ready(FALSE), m_scFlags(0), m_vw(0), m_vh(0), m_dxFailStage(0), m_dxFailHr(S_OK)
 	, m_mirrorSize(384), m_mirrorUseN(18), m_casStrength(0.7f), m_gfxSsr(2), m_gfxDof(2), m_aniso(16), m_shadowSize(1024)
 	, m_dev(NULL), m_imm(NULL), m_swap(NULL), m_bbRtv(NULL)
 	, m_dsTex(NULL), m_dsv(NULL), m_dsSrv(NULL), m_sceneTex(NULL), m_sceneRtv(NULL), m_sceneSrv(NULL)
@@ -1141,8 +1142,6 @@ BOOL CS3mView::CreateShaders()
 	const char* entries[11]={"VST","HST","DST","PSW","VSS","PSS","VSH","PSH","VSQ","SSR","DOFP"};
 	const char* profiles[11]={"vs_5_0","hs_5_0","ds_5_0","ps_5_0","vs_5_0","ps_5_0","vs_5_0","ps_5_0","vs_5_0","ps_5_0","ps_5_0"};
 	auto compile=[&](const char* entry,const char* prof,ID3DBlob** out)->HRESULT{
-		if (SUCCEEDED(GpuTryLoadCso(L"s3m", entry, prof, hlsl, (SIZE_T)strlen(hlsl), (void**)out)))
-			return S_OK;
 		S3M_RELEASE(err);
 		HRESULT chr=D3DCompile(hlsl,strlen(hlsl),NULL,NULL,NULL,entry,prof,D3DCOMPILE_OPTIMIZATION_LEVEL3,0,out,&err);
 		if(FAILED(chr)){ S3M_RELEASE(err); chr=D3DCompile(hlsl,strlen(hlsl),NULL,NULL,NULL,entry,prof,D3DCOMPILE_OPTIMIZATION_LEVEL1,0,out,&err); }
@@ -1516,6 +1515,7 @@ BOOL CS3mView::CreateProcTextures()
 
 BOOL CS3mView::InitDx()
 {
+	Soft3DDxGuard g;
 	ReleaseDx();
 	m_dxFailStage = 0; m_dxFailHr = S_OK;
 	if (!m_hWnd || !::IsWindow(m_hWnd)) { m_dxFailStage = 1; return FALSE; }
@@ -1539,10 +1539,19 @@ BOOL CS3mView::InitDx()
 	const UINT scW = (UINT)max(8, crc.Width());
 	const UINT scH = (UINT)max(8, crc.Height());
 	DXGI_SWAP_CHAIN_DESC1 s={};s.Width=scW;s.Height=scH;s.Format=DXGI_FORMAT_B8G8R8A8_UNORM;s.SampleDesc.Count=1;s.BufferUsage=DXGI_USAGE_RENDER_TARGET_OUTPUT;s.BufferCount=2;s.SwapEffect=DXGI_SWAP_EFFECT_FLIP_DISCARD;s.AlphaMode=DXGI_ALPHA_MODE_IGNORE;s.Scaling=DXGI_SCALING_STRETCH;
-	if(f2){IDXGISwapChain1* sc1=NULL;hr=f2->CreateSwapChainForHwnd(m_dev,m_hWnd,&s,NULL,NULL,&sc1);if(FAILED(hr)){s.SwapEffect=DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL;hr=f2->CreateSwapChainForHwnd(m_dev,m_hWnd,&s,NULL,NULL,&sc1);}if(FAILED(hr)){s.SwapEffect=DXGI_SWAP_EFFECT_DISCARD;s.BufferCount=1;hr=f2->CreateSwapChainForHwnd(m_dev,m_hWnd,&s,NULL,NULL,&sc1);}if(SUCCEEDED(hr))m_swap=sc1;}else hr=E_FAIL;
+	s.Flags=DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT;
+	m_scFlags=s.Flags;
+	if(f2){IDXGISwapChain1* sc1=NULL;hr=f2->CreateSwapChainForHwnd(m_dev,m_hWnd,&s,NULL,NULL,&sc1);if(FAILED(hr)){s.SwapEffect=DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL;hr=f2->CreateSwapChainForHwnd(m_dev,m_hWnd,&s,NULL,NULL,&sc1);}if(FAILED(hr)){s.Flags=0;m_scFlags=0;s.SwapEffect=DXGI_SWAP_EFFECT_FLIP_DISCARD;s.BufferCount=2;hr=f2->CreateSwapChainForHwnd(m_dev,m_hWnd,&s,NULL,NULL,&sc1);}if(FAILED(hr)){s.SwapEffect=DXGI_SWAP_EFFECT_DISCARD;s.BufferCount=1;hr=f2->CreateSwapChainForHwnd(m_dev,m_hWnd,&s,NULL,NULL,&sc1);}if(SUCCEEDED(hr))m_swap=sc1;}else hr=E_FAIL;
 	if(FAILED(hr)){xa->GetParent(__uuidof(IDXGIFactory),(void**)&f1);DXGI_SWAP_CHAIN_DESC o={};o.BufferDesc.Width=scW;o.BufferDesc.Height=scH;o.BufferDesc.Format=DXGI_FORMAT_B8G8R8A8_UNORM;o.SampleDesc.Count=1;o.BufferUsage=DXGI_USAGE_RENDER_TARGET_OUTPUT;o.BufferCount=1;o.OutputWindow=m_hWnd;o.Windowed=TRUE;o.SwapEffect=DXGI_SWAP_EFFECT_DISCARD;hr=f1?f1->CreateSwapChain(m_dev,&o,&m_swap):E_FAIL;}
 	S3M_RELEASE(f1);S3M_RELEASE(f2);S3M_RELEASE(xa);S3M_RELEASE(xd);
 	if(FAILED(hr)||!m_swap){ m_dxFailStage = 4; m_dxFailHr = hr; return FALSE; }
+	if(m_swap && m_scFlags){
+		IDXGISwapChain2* sc2=NULL;
+		if(SUCCEEDED(m_swap->QueryInterface(__uuidof(IDXGISwapChain2),(void**)&sc2)) && sc2){
+			sc2->SetMaximumFrameLatency(1);
+			sc2->Release();
+		}
+	}
 	{
 		IDXGIFactory* fa=NULL;
 		if(SUCCEEDED(m_swap->GetParent(__uuidof(IDXGIFactory),(void**)&fa)) && fa){
@@ -1708,9 +1717,25 @@ BOOL CS3mView::EnsureSceneTargets(int w,int h)
 
 BOOL CS3mView::ResizeDx(int w,int h)
 {
-	if(!m_swap||!m_dev||!m_imm||w<1||h<1)return FALSE;m_ready=FALSE;m_imm->OMSetRenderTargets(0,NULL,NULL);S3M_RELEASE(m_bbRtv);
-	HRESULT hr=m_swap->ResizeBuffers(0,w,h,DXGI_FORMAT_UNKNOWN,0);if(FAILED(hr))return FALSE;ID3D11Texture2D* bb=NULL;hr=m_swap->GetBuffer(0,__uuidof(ID3D11Texture2D),(void**)&bb);if(SUCCEEDED(hr))hr=m_dev->CreateRenderTargetView(bb,NULL,&m_bbRtv);S3M_RELEASE(bb);
-	if(FAILED(hr)||!EnsureSceneTargets(w,h))return FALSE;m_ready=TRUE;return TRUE;
+	Soft3DDxGuard g;
+	if(!m_swap||!m_dev||!m_imm||w<1||h<1)return FALSE;
+	m_ready=FALSE;
+	m_imm->OMSetRenderTargets(0,NULL,NULL);
+	m_imm->Flush();
+	S3M_RELEASE(m_bbRtv);
+	HRESULT hr=m_swap->ResizeBuffers(0,w,h,DXGI_FORMAT_UNKNOWN,m_scFlags);
+	if(FAILED(hr)){
+		m_imm->Flush();
+		hr=m_swap->ResizeBuffers(0,w,h,DXGI_FORMAT_UNKNOWN,m_scFlags);
+	}
+	if(FAILED(hr))return FALSE;
+	ID3D11Texture2D* bb=NULL;
+	hr=m_swap->GetBuffer(0,__uuidof(ID3D11Texture2D),(void**)&bb);
+	if(SUCCEEDED(hr))hr=m_dev->CreateRenderTargetView(bb,NULL,&m_bbRtv);
+	S3M_RELEASE(bb);
+	if(FAILED(hr)||!EnsureSceneTargets(w,h))return FALSE;
+	m_ready=TRUE;
+	return TRUE;
 }
 
 void CS3mView::NoteContextLost(HRESULT hr)
@@ -1728,8 +1753,14 @@ void CS3mView::NoteContextLost(HRESULT hr)
 void CS3mView::PresentFrame()
 {
 	if (!m_swap || !m_ready) return;
+	if (Soft3DLoopStopping() || Soft3DPresentShouldSkip()) return;
 	if (!IsWindowVisible()) return;
-	const HRESULT hr = m_swap->Present(0, 0);
+#ifndef DXGI_PRESENT_DO_NOT_WAIT
+#define DXGI_PRESENT_DO_NOT_WAIT 0x00000008UL
+#endif
+	const HRESULT hr = m_swap->Present(0, DXGI_PRESENT_DO_NOT_WAIT);
+	if (hr == DXGI_ERROR_WAS_STILL_DRAWING || hr == DXGI_STATUS_OCCLUDED)
+		return;
 	if (FAILED(hr)) NoteContextLost(hr);
 }
 void CS3mView::ReleaseClearTexture(){S3M_RELEASE(m_srvClear);S3M_RELEASE(m_texClear);m_clearTexW=m_clearTexH=0;}
@@ -1914,6 +1945,7 @@ BOOL CS3mView::BakeCalloutAtlas(const wchar_t* const* labels, int nLabels)
 
 void CS3mView::ReleaseDx()
 {
+	Soft3DDxGuard g;
 	m_ready=FALSE;if(m_imm){m_imm->ClearState();m_imm->Flush();}
 	ReleaseClearTexture();ReleaseTipTexture();ReleaseBadgeTexture();ReleaseFloorBarTexture();ReleaseCalloutTexture();S3M_RELEASE(m_srvMap);S3M_RELEASE(m_texMap);
 	delete[] m_mapCpu; m_mapCpu=NULL; m_mapCpuCount=0; m_mapTexSize=0;
@@ -2229,6 +2261,7 @@ BEGIN_MESSAGE_MAP(CSoft3DMazeDlg, CCustomBlurDialogBase)
 	ON_WM_SIZE()
 	ON_WM_SHOWWINDOW()
 	ON_WM_DESTROY()
+	ON_MESSAGE(WM_S3_DX_REINIT, &CSoft3DMazeDlg::OnDxReinit)
 	ON_WM_CLOSE()
 	ON_WM_CONTEXTMENU()
 END_MESSAGE_MAP()
@@ -2255,6 +2288,8 @@ void CSoft3DMazeDlg::PumpQueued(BOOL input)
 {
 	HWND root = GetSafeHwnd();
 	if (!root) return;
+	if (GetCurrentThreadId() != GetWindowThreadProcessId(root, NULL))
+		return;
 	MSG msg;
 	int n = 0;
 	const int cap = input ? 18 : 10;
@@ -2918,7 +2953,7 @@ void CSoft3DMazeDlg::RestoreAudioBaseline()
 	else {
 		tempo = m_baseTempoPos;
 		if (og && ::IsWindow(og->GetSafeHwnd()))
-			og->m_tempo_sl.SetPos(m_baseTempoPos);
+			og->m_tempo_sl.SetPos(m_baseTempoPos, FALSE);
 	}
 	S3mSetPitchPos(m_basePitchPos);
 }
@@ -4494,91 +4529,55 @@ void CSoft3DMazeDlg::ApplyItem(int kind)
 	case CELL_TEMPO: {
 		int pct = tempo / 2 + 10;
 		if (pct > 200) pct = 200;
-		if (mp && ::IsWindow(mp->GetSafeHwnd()))
-			mp->ApplyPracticeTempoPercent(pct);
-		else {
-			tempo = pct * 2;
-			if (og && ::IsWindow(og->GetSafeHwnd()))
-				og->m_tempo_sl.SetPos(tempo);
-		}
+		Soft3DPostPlayback(S3PB_TEMPO, pct);
 		break;
 	}
 	case CELL_TEMPO_DN: {
 		int pct = tempo / 2 - 10;
 		if (pct < 25) pct = 25;
-		if (mp && ::IsWindow(mp->GetSafeHwnd()))
-			mp->ApplyPracticeTempoPercent(pct);
-		else {
-			tempo = pct * 2;
-			if (og && ::IsWindow(og->GetSafeHwnd()))
-				og->m_tempo_sl.SetPos(tempo);
-		}
+		Soft3DPostPlayback(S3PB_TEMPO, pct);
 		break;
 	}
 	case CELL_PITCH_UP:
-		S3mSetPitchPos(pitch + 20);
+		Soft3DPostPlayback(S3PB_PITCH, pitch + 20);
 		break;
 	case CELL_PITCH_DN:
-		S3mSetPitchPos(pitch - 20);
+		Soft3DPostPlayback(S3PB_PITCH, pitch - 20);
 		break;
 	case CELL_NEXT:
-		MpTaskbarNextTrack();
+		Soft3DPostPlayback(S3PB_NEXT, 0);
 		break;
 	case CELL_PREV:
-		MpTaskbarPrevTrack();
+		Soft3DPostPlayback(S3PB_PREV, 0);
 		break;
 	case CELL_VOL_UP:
-		S3mNudgeVolPct(5);
+		Soft3DPostPlayback(S3PB_VOL, 5);
 		break;
 	case CELL_VOL_DN:
-		S3mNudgeVolPct(-5);
+		Soft3DPostPlayback(S3PB_VOL, -5);
 		break;
 	case CELL_REVERB:
-		S3mNudgeReverb(12);
+		Soft3DPostPlayback(S3PB_REVERB, 12);
 		break;
-	case CELL_XFADE: {
-		savedata.play_xfade = savedata.play_xfade ? 0 : 1;
-		if (savedata.play_xfade) {
-			int s = savedata.play_xfade_sec100 + 100;
-			if (s < 200) s = 200;
-			if (s > 12000) s = 12000;
-			savedata.play_xfade_sec100 = s;
-		}
-		if (mp && ::IsWindow(mp->GetSafeHwnd()))
-			mp->SyncPlayXfadeUi(TRUE);
-		else if (og && ::IsWindow(og->GetSafeHwnd())) {
-			if (og->m_xfade.GetSafeHwnd())
-				og->m_xfade.SetCheck(savedata.play_xfade ? BST_CHECKED : BST_UNCHECKED);
-		}
-		MpPersistSavedataQuick();
+	case CELL_XFADE:
+		Soft3DPostPlayback(S3PB_XFADE, 0);
 		break;
-	}
 	case CELL_EQ:
 		m_rng = m_rng * 1664525u + 1013904223u;
-		S3mEqBump((int)(m_rng % 15u), 18);
+		Soft3DPostPlayback(S3PB_EQ_BUMP, (int)(m_rng % 15u) | ((18 + 128) << 8));
 		m_rng = m_rng * 1664525u + 1013904223u;
-		S3mEqBump((int)(m_rng % 15u), -10);
+		Soft3DPostPlayback(S3PB_EQ_BUMP, (int)(m_rng % 15u) | ((-10 + 128) << 8));
 		break;
 	case CELL_EQ_FLAT:
-		S3mEqFlatten(12);
+		Soft3DPostPlayback(S3PB_EQ_FLAT, 12);
 		break;
 	case CELL_RANDOM:
-		if (og && ::IsWindow(og->GetSafeHwnd())) {
-			// savedata.random==0 → ランダム再生中。トグルする
-			if (savedata.random == 0)
-				og->SendMessage(WM_COMMAND, MAKEWPARAM(IDC_CHECK6, BN_CLICKED), 0);
-			else
-				og->SendMessage(WM_COMMAND, MAKEWPARAM(IDC_CHECK5, BN_CLICKED), 0);
-		} else {
-			savedata.random = savedata.random ? 0 : 1;
-			MpPersistSavedataQuick();
-		}
+		Soft3DPostPlayback(S3PB_RANDOM, 0);
 		break;
 	default:
 		break;
 	}
-	if (!playf && mp && ::IsWindow(mp->GetSafeHwnd()))
-		mp->PostMessage(WM_COMMAND, MAKEWPARAM(IDC_MP_PLAY, BN_CLICKED), 0);
+	Soft3DPostPlayIfStopped();
 	m_runDirty = 1;
 }
 
@@ -8767,7 +8766,7 @@ BOOL CSoft3DMazeDlg::OnInitDialog()
 	m_lastTick = GetTickCount();
 	m_lastAutosave = m_lastTick;
 	m_inTick = 0;
-	// 描画・更新は og の timerp（TheadLoop≈60Hz）経由。独自 SetTimer は使わない
+	Soft3DLoopEnsure();
 	return TRUE;
 }
 
@@ -8894,24 +8893,19 @@ void CSoft3DMazeDlg::OnContextMenu(CWnd* pWnd, CPoint point)
 void CSoft3DMazeDlg::TickFrame()
 {
 	if (m_inTick) return;
+	if (Soft3DLoopStopping()) return;
 	m_inTick = 1;
+	Soft3DDxGuard dx;
 	auto endTick=[&](){
 		const int pend = (GetSafeHwnd() && !m_view.m_ready && !IsWindowVisible()) ? 1 : 0;
 		m_inTick = 0;
-		if (pend) DestroyWindow();
+		if (pend && GetSafeHwnd())
+			PostMessage(WM_CLOSE);
 	};
 	if (!GetSafeHwnd()) { endTick(); return; }
 	if (!m_view.m_ready) {
 		if (GetSafeHwnd() && !IsWindowVisible()) { endTick(); return; }
-		if (m_dxRecoverTries < 2 && m_view.GetSafeHwnd()) {
-			m_dxRecoverTries++;
-			if (m_view.InitDx()) {
-				m_dxRecoverTries = 0;
-				m_mapBakeDirty = 1;
-				m_floorBarDirty = 1;
-				m_tipIsOverview = -1;
-			}
-		}
+		Soft3DPostDxReinit(GetSafeHwnd());
 		endTick();
 		return;
 	}
@@ -8930,6 +8924,10 @@ void CSoft3DMazeDlg::TickFrame()
 		GetRenderEye(ex, ez);
 		Soft3DSfxSetListener(ex, GetRenderEyeY(), ez, m_yaw);
 		Soft3DSfxPump();
+	}
+	if (Soft3DLoopStopping() || !m_view.m_ready) {
+		endTick();
+		return;
 	}
 	RenderScene();
 	m_view.RequestRedraw();
@@ -8970,8 +8968,35 @@ void CSoft3DMazeDlg::OnShowWindow(BOOL bShow, UINT nStatus)
 		LayoutAll();
 }
 
+LRESULT CSoft3DMazeDlg::OnDxReinit(WPARAM, LPARAM)
+{
+	Soft3DDxReinitAck();
+	if (!GetSafeHwnd() || !m_view.GetSafeHwnd())
+		return 0;
+	if (m_view.m_ready)
+		return 0;
+	CRect rc;
+	m_view.GetClientRect(&rc);
+	const int w = max(8, rc.Width());
+	const int h = max(8, rc.Height());
+	if (m_view.m_swap && m_view.ResizeDx(w, h)) {
+		m_mapBakeDirty = 1;
+		m_floorBarDirty = 1;
+		m_tipIsOverview = -1;
+		return 0;
+	}
+	if (m_view.InitDx()) {
+		m_mapBakeDirty = 1;
+		m_floorBarDirty = 1;
+		m_tipIsOverview = -1;
+	}
+	return 0;
+}
+
 void CSoft3DMazeDlg::OnDestroy()
 {
+	Soft3DDxReinitAck();
+	Soft3DLoopStopJoin();
 	PersistUi();
 	PersistRun();
 	extern BOOL IsSoft3DRaceOpen();
@@ -8989,15 +9014,13 @@ void CSoft3DMazeDlg::OnDestroy()
 
 void CSoft3DMazeDlg::RequestDestroyWindow()
 {
+	Soft3DLoopRequestStop();
+	Soft3DDeferPresent(1);
 	m_view.m_ready = FALSE;
+	Soft3DLoopStopJoin();
 	S3mReleaseJoypad();
-	if (GetSafeHwnd() && IsWindowVisible())
-		ShowWindow(SW_HIDE);
-	if (m_inTick) {
-		PostMessage(WM_CLOSE);
-		return;
-	}
-	DestroyWindow();
+	if (GetSafeHwnd())
+		DestroyWindow();
 }
 void CSoft3DMazeDlg::OnClose() { RequestDestroyWindow(); }
 void CSoft3DMazeDlg::OnCloseBtn() { RequestDestroyWindow(); }
@@ -9066,6 +9089,8 @@ BOOL Soft3DMazePreTranslate(MSG* pMsg)
 
 void Soft3DMazeOnTimerp()
 {
+	if (Soft3DLoopStopping())
+		return;
 	if (!g_s3m || !g_s3m->GetSafeHwnd() || !::IsWindow(g_s3m->GetSafeHwnd()))
 		return;
 	if (!g_s3m->IsWindowVisible() || g_s3m->IsIconic())

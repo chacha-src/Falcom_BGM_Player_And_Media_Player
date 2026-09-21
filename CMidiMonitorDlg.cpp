@@ -1,4 +1,4 @@
-﻿#include "stdafx.h"
+#include "stdafx.h"
 #include "CMidiMonitorDlg.h"
 #include "oggDlg.h"
 #include "PlayList.h"
@@ -1192,8 +1192,8 @@ void CMmHelpDlg::OnPaint()
 	title(L, y, LL14(L"表示", L"View", L"Affichage", L"Vista", L"Vista", L"표시", L"显示", L"العرض", L"Вид", L"Ansicht", L"Vista", L"Weergave", L"Widok", L"Gorunum"));
 	y += titleLh;
 	body(L, y, LL14(
-		L"・通常(2D) …… ヘッダ(BPM/拍子/小節・拍・tick/リバーブ等)と32行のチャンネル表。右上は実機LCD（16ch=16バー、32ch=16×2列。SC-88橙/XG緑/LA緑など）。SysEx文字・ビットマップもLED表示。パートの間に薄い横線。右端はミニ鍵盤。",
-		L"· Normal (2D) …… Header (BPM/meter/bar-beat-tick/reverb…) and a 32-row channel table. Top-right hardware LCD (16 bars, or 16x2 in 32ch; SC-88 amber / XG green / LA green). SysEx LED/bitmap too. Thin lines between parts. Mini keyboard on the right.",
+		L"・通常(2D) …… ヘッダ(BPM/拍子/小節・拍・tick/リバーブ等)と32行のチャンネル表。右上は実機LCD（16ch=16バー、32ch=上段16+下段16の1枚。SC-88橙/XG緑/LA緑など）。SysEx文字・ビットマップもLED表示。パートの間に薄い横線。右端はミニ鍵盤。",
+		L"· Normal (2D) …… Header (BPM/meter/bar-beat-tick/reverb…) and a 32-row channel table. Top-right hardware LCD (16 bars, or one stacked 16+16 in 32ch; SC-88 amber / XG green / LA green). SysEx LED/bitmap too. Thin lines between parts. Mini keyboard on the right.",
 		L"· Normal (2D) …… En-tete (BPM/mesure/mesure-temps-tick/reverb…) et tableau 32 canaux. Traits fins entre les parties. Mini clavier a droite.",
 		L"· Normale (2D) …… Intestazione (BPM/misura/battuta-tick/reverb…) e tabella 32 canali. Linee sottili tra le parti. Mini tastiera a destra.",
 		L"· Normal (2D) …… Cabecera (BPM/compas/compas-pulso-tick/reverb…) y tabla de 32 canales. Lineas finas entre partes. Mini teclado a la derecha.",
@@ -3492,8 +3492,8 @@ void CMidiMonitorDlg::DrawHeader(CDC& dc, int w, int headH, UINT dpi)
 	dc.SetTextColor(MM_HEAD_TX);
 
 	const int ch32 = MidiHwLcdCh32(m_gs32, LcdHeardHi());
-	CRect lcdAll, lcdA, lcdB;
-	MidiHwLcdReserve(w, dpi, ch32, &lcdAll, &lcdA, &lcdB);
+	CRect lcdAll;
+	MidiHwLcdReserve(w, dpi, ch32, &lcdAll, NULL, NULL);
 	m_lcdRc = lcdAll;
 	const int textR = (!lcdAll.IsRectEmpty()) ? (lcdAll.left - Scale(6, dpi)) : w;
 
@@ -3600,17 +3600,23 @@ void CMidiMonitorDlg::DrawHeader(CDC& dc, int w, int headH, UINT dpi)
 		const int bwBar = szBar.cx + pad * 2;
 		const int bwBeat = szBeat.cx + pad * 2;
 		const int bwTick = szTick.cx + pad * 2;
-		dc.FillSolidRect(px, vy, bwBar, vh, RGB(16, 28, 16));
-		dc.SetTextColor(RGB(210, 255, 210));
-		dc.TextOut(px + pad, Scale(21, dpi), sBar);
-		px += bwBar + gap;
-		dc.FillSolidRect(px, vy, bwBeat, vh, RGB(28, 24, 12));
-		dc.SetTextColor(RGB(255, 230, 150));
-		dc.TextOut(px + pad, Scale(21, dpi), sBeat);
-		px += bwBeat + gap;
-		dc.FillSolidRect(px, vy, bwTick, vh, RGB(12, 22, 36));
-		dc.SetTextColor(RGB(170, 220, 255));
-		dc.TextOut(px + pad, Scale(21, dpi), sTick);
+		if (px + bwBar <= textR) {
+			dc.FillSolidRect(px, vy, bwBar, vh, RGB(16, 28, 16));
+			dc.SetTextColor(RGB(210, 255, 210));
+			dc.TextOut(px + pad, Scale(21, dpi), sBar);
+			px += bwBar + gap;
+		}
+		if (px + bwBeat <= textR) {
+			dc.FillSolidRect(px, vy, bwBeat, vh, RGB(28, 24, 12));
+			dc.SetTextColor(RGB(255, 230, 150));
+			dc.TextOut(px + pad, Scale(21, dpi), sBeat);
+			px += bwBeat + gap;
+		}
+		if (px + bwTick <= textR) {
+			dc.FillSolidRect(px, vy, bwTick, vh, RGB(12, 22, 36));
+			dc.SetTextColor(RGB(170, 220, 255));
+			dc.TextOut(px + pad, Scale(21, dpi), sTick);
+		}
 	}
 
 	dc.SelectObject(&m_fontHead);
@@ -3752,15 +3758,18 @@ void CMidiMonitorDlg::DrawHeader(CDC& dc, int w, int headH, UINT dpi)
 	{
 		const int kind = MidiHwLcdKind(m_sysMode, m_gsMapKind);
 		const wchar_t* model = MidiHwLcdModelName(m_sysMode, m_gsMapKind);
-		MidiHwLcdPartSnap snap[16];
-		BYTE keyBits[16];
-		if (!lcdA.IsRectEmpty()) {
-			FillLcdSnap(snap, keyBits, 0);
-			MidiHwLcdDraw(dc, lcdA, dpi, kind, model, m_lcd, snap, keyBits, m_lcdSelA, 0);
-		}
-		if (ch32 && !lcdB.IsRectEmpty()) {
-			FillLcdSnap(snap, keyBits, 1);
-			MidiHwLcdDraw(dc, lcdB, dpi, kind, model, m_lcd, snap, keyBits, m_lcdSelB, 1);
+		MidiHwLcdPartSnap snapA[16], snapB[16];
+		BYTE keyA[16], keyB[16];
+		if (!lcdAll.IsRectEmpty()) {
+			FillLcdSnap(snapA, keyA, 0);
+			if (ch32) {
+				FillLcdSnap(snapB, keyB, 1);
+				MidiHwLcdDraw(dc, lcdAll, dpi, kind, model, m_lcd,
+					snapA, keyA, m_lcdSelA, snapB, keyB, m_lcdSelB);
+			} else {
+				MidiHwLcdDraw(dc, lcdAll, dpi, kind, model, m_lcd,
+					snapA, keyA, m_lcdSelA, NULL, NULL, 0);
+			}
 		}
 		m_showLcdMode = m_lcd.mode;
 		m_showLcdSelA = m_lcdSelA;

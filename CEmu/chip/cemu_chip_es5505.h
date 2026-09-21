@@ -9,6 +9,7 @@ CChip* CEmuChipEs5505Create(uint32_t clockHz, int sampleRate);
 void CEmuChipEs5505Destroy(CChip* c);
 uint16_t CEmuChipEs5505Read(CChip* c, uint32_t addr);
 uint16_t CEmuChipEs5505PeekCr(CChip* c, int voice);
+void CEmuChipEs5505SetSlowLpe(CChip* c, int on);
 
 /* 任意: ホストがボイス毎のバンク基底を設定（ワード索引。Taitoは (n&mask)<<20）。 */
 void CEmuChipEs5505SetVoiceBank(CChip* c, int voice, uint32_t wordBase);

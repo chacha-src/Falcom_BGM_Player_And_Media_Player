@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include <Windows.h>
 #include "PluginKinds.h"
@@ -53,7 +53,7 @@ int VstPluginPeArch(const wchar_t* path); // 32/64/0
 // SMF 内の XG System On なら XG、それ以外は GS。片方空ならもう片方。
 // 戻りは PE アーキ（32/64）。非 0 のとき outPath を埋める。
 int VstPickPreferredPlugin(wchar_t* outPath, int outChars);
-// 1=KpiHost64 経由で開く。midPath は XG リセット探索用。両方 DLL 空ならリモートしない。
+// 1=他アーキ IPC ホスト経由で開く。midPath は XG リセット探索用。両方 DLL 空ならリモートしない。
 int VstShouldOpenRemote64(const wchar_t* midPath, wchar_t* outDll, int outChars);
 int VstHasX64Instruments(void);
 

@@ -248,6 +248,9 @@ public:
 	/* Pengo / Pengo2: メイン Z80 + Namco 3 声 WSG @9000（Galaga NMI ではない）。
 	   マーカは WSG 未使用の sys16RomBoard_ — CHardAc にフィールドを増やさない。 */
 	int PengoWsg() const { return sys16RomBoard_ == 0x5047u; }
+	/* Pac-Man: メイン Z80 + WSG @5040。I=3F IM2。OUT 00 がベクタ（FA=checksum / FC=008D）。
+	   マーカ 0x504D。Galaga の $6800 / $9A80 とは別。 */
+	int PacmanWsg() const { return sys16RomBoard_ == 0x504Du; }
 	unsigned Sys16RomBoard() const { return sys16RomBoard_; }
 	uint8_t ToaplanYmPort() const { return toaplanYmPort_; }
 	int ToaplanKaneko() const { return toaplanKaneko_ == 1; }
@@ -303,8 +306,19 @@ public:
 	int FroggerAy() const { return (board_ == CEMU_AC_BOARD_KONAMI_SCRAMBLE && vsIoKind_ == 1) ? 1 : 0; }
 	/* MAME hustler: frogger と同じ 1×AY RAM $4000 I/O 40/80。先頭 0x800 は D0/D1 スワップ。vsIoKind 2。 */
 	int HustlerAy() const { return (board_ == CEMU_AC_BOARD_KONAMI_SCRAMBLE && vsIoKind_ == 2) ? 1 : 0; }
-	/* MAME megazone.cpp: Z80 18.432/6 + AY 14.318/8 I/O 00/02、RAM E000-E7FF 共有、VBLANK IRQ0。I8039 は DAC のみ。TIMEPLT vsIoKind 1。 */
-	int MegazoneAy() const { return (board_ == CEMU_AC_BOARD_KONAMI_TIMEPLT && vsIoKind_ == 1) ? 1 : 0; }
+	/* MAME megazone.cpp: Z80 18.432/6 + AY 14.318/8 I/O 00/02、RAM E000-E7FF 共有、VBLANK IRQ0。I8039 は DAC のみ。TIMEPLT vsIoKind 1。
+	   vsIoKind が落ちても 319e02 の AF 32 01 C0 なら同じマップ（E000 RAM）。 */
+	int MegazoneAy() const {
+		if (board_ != CEMU_AC_BOARD_KONAMI_TIMEPLT) return 0;
+		if (vsIoKind_ == 1) return 1;
+		if (!mem_) return 0;
+		if (mem_[0] == 0xafu && mem_[1] == 0x32u && mem_[2] == 0x01u && mem_[3] == 0xc0u)
+			return 1;
+		/* LoadRoms が 0000 を LD SP,E100 / JP 0255 に差し替えたあとも同じマップ。 */
+		if (mem_[0] == 0x31u && mem_[2] == 0xe1u && mem_[3] == 0xc3u && mem_[4] == 0x55u)
+			return 1;
+		return 0;
+	}
 	/* MAME nemesis_portA_r: bit0-3 周期タイマ、bit4/6/7 High */
 	uint8_t Gx400PortA() const;
 	int Gx400KonamiGt() const { return (board_ == CEMU_AC_BOARD_KONAMI_GX400 && vsIoKind_ == 1) ? 1 : 0; }
@@ -688,6 +702,12 @@ public:
 	int HigemaruAy() const { return (board_ == CEMU_AC_BOARD_TAITO_SJ && vsIoKind_ == 23) ? 1 : 0; }
 	/* 24 = Nintendo mario.cpp masao。Z80 1.79 MHz + AY。ROM 0000-0FFF、RAM 2000-23FF、AY データ 4000 / アドレス 6000。ラッチはポートA。 */
 	int MasaoAy() const { return (board_ == CEMU_AC_BOARD_TAITO_SJ && vsIoKind_ == 24) ? 1 : 0; }
+	/* 25 = Universal mrdo。音源 CPU 無し。メイン Z80 8.2/2 + SN76489×2 同クロック。
+	   ROM 0000-7FFF、VRAM 8000-90FF、RAM E000-EFFF。SN @9801/9802。曲キュー EC26（FF 終端）。VBLANK IRQ0 HOLD。 */
+	int MrDoSn() const { return (board_ == CEMU_AC_BOARD_TAITO_SJ && vsIoKind_ == 25) ? 1 : 0; }
+	/* 26 = Konami GX800 kontest。Z80 24/8 + SN76489A×2 @24/16。ROM 0000-7FFF、RAM E000-FFFF。
+	   I/O SN 00/04、control 08 bit3=IRQ。sound check は CALL $3000（E425=$55）。 */
+	int KontestSn() const { return (board_ == CEMU_AC_BOARD_TAITO_SJ && vsIoKind_ == 26) ? 1 : 0; }
 	/* SYS1 vsIoKind 1=trackfld SN ラッチ A000/ストローブ C000。2=hyperspt/sbasketb E001/E002。3=mikie SN×2 @8002/8004。
 	   4 = Sega System E（MAME sega/segae.cpp）。メイン Z80 10.738635/2、SN76496×2 @ /3。
 	   ROM 0000-7FFF、バンク 8000-BFFF、RAM C000-FFFF。PSG OUT 7B / 7E-7F。VDP INT → IM1 60Hz。 */
@@ -696,6 +716,11 @@ public:
 	int HypersptSn() const {
 		return (TrackfldSn() && vsIoKind_ == 2 && mem_
 			&& mem_[5] == 0xc3 && mem_[6] == 0xbd && mem_[7] == 0x01) ? 1 : 0;
+	}
+	/* trackfld: JP $015E。8K チェックサム F98D。bit6 の 0x40/0x41 が $13C6 ループ BGM。 */
+	int TrackfldGame() const {
+		return (TrackfldSn() && vsIoKind_ == 1 && mem_
+			&& mem_[5] == 0xc3 && mem_[6] == 0x5e && mem_[7] == 0x01) ? 1 : 0;
 	}
 	int SystemePsg() const { return (board_ == CEMU_AC_BOARD_SEGA_SYS1 && vsIoKind_ == 4) ? 1 : 0; }
 	int SjNmiMask() const { return sjNmiMask_; }
@@ -951,7 +976,7 @@ private:
 	   uPD7759／音源バンク bit 対応を選ぶ（MAME segas16b upd7759_control_w）。 */
 	unsigned sys16RomBoard_;
 	/* V-System I/O: 0 = aerofgt（YM@00）、1 = spinlbrk/f1gp（YM@18）、2 = fromanc/welltris（YM@08）、3 = Psikyo gunbird（YM@04、ラッチ@08）、6 = Psikyo sngkace（YM@00、ラッチ@08、RAM 7800）
-	   TAITO_SJ: 4..18 = cop01..starforce。ROBOKID: 1 = macross2/tdragon2、2 = tharrier/manybloc、3 = airbustr、4 = djboy、5 = blazeon、6 = hvyunit、7 = crospang、8 = empcity/cshooter、9 = nmg5/yunsun16、10 = pclubys */
+	   TAITO_SJ: 4..18 = cop01..starforce、19 worldcup、20 fcombat、21 bankp、22 gberet、23 higemaru、24 masao、25 mrdo。ROBOKID: 1 = macross2/tdragon2、2 = tharrier/manybloc、3 = airbustr、4 = djboy、5 = blazeon、6 = hvyunit、7 = crospang、8 = empcity/cshooter、9 = nmg5/yunsun16、10 = pclubys */
 	int vsIoKind_;
 	/* MAME segas32 sound_irq_control[4] + input。YM=0、V60 コマンド=1 */
 	uint8_t s32IrqCtrl_[4];

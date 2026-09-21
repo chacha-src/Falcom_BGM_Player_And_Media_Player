@@ -1,4 +1,4 @@
-﻿// oggDlg.h : ヘッダー ファイル
+// oggDlg.h : ヘッダー ファイル
 //
 #include "afxmt.h"
 //#include "afxcmn.h"
@@ -46,6 +46,9 @@ void OggMigrateFmMonToMidiMonFlag();
 // 途中再生確認。Space の KEYDOWN 中に MessageBox すると同じキーではいが押される
 #ifndef WM_OGG_RESUME_PROMPT
 #define WM_OGG_RESUME_PROMPT (WM_APP + 104)
+#endif
+#ifndef WM_OGG_S3_PLAYBACK
+#define WM_OGG_S3_PLAYBACK (WM_APP + 105)
 #endif
 #ifndef IDT_OGG_RESUME_PROMPT
 #define IDT_OGG_RESUME_PROMPT 10404
@@ -154,6 +157,7 @@ public:
 	LRESULT dp1(WPARAM, LPARAM);
 	LRESULT dp2(WPARAM, LPARAM);
 	LRESULT OnResumePrompt(WPARAM, LPARAM);
+	LRESULT OnS3Playback(WPARAM, LPARAM);
 	void SetAdd(CString fnn,int mode,int loop1,int loop2,CString filen,int ret2,REFTIME time);
 	// applyTags=false は中間WAV用(タグ/ジャケットのコピーを行わない)。
 	BOOL ExportToWav(playlistdata0* pc, CString outputPath, int loopCount, const WavExportOptions* opts = NULL, bool applyTags = true);
@@ -314,7 +318,7 @@ protected:
 	afx_msg void OnPaint();
 	afx_msg HCURSOR OnQueryDragIcon();
 	afx_msg void OnDropFiles(HDROP hDropInfo);
-#if WIN64
+#if defined(_WIN64)
 	afx_msg void OnTimer(UINT_PTR nIDEvent);
 #else
 	afx_msg void OnTimer(UINT nIDEvent);

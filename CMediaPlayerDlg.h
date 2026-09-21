@@ -501,7 +501,7 @@ protected:
 	afx_msg void OnExitSizeMove();
 	afx_msg void OnMoving(UINT fwSide, LPRECT pRect);
 	afx_msg void OnGetMinMaxInfo(MINMAXINFO* lpMMI);
-#if WIN64
+#if defined(_WIN64)
 	afx_msg void OnTimer(UINT_PTR nIDEvent);
 #else
 	afx_msg void OnTimer(UINT nIDEvent);

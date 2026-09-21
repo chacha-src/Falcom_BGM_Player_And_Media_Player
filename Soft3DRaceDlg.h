@@ -46,6 +46,7 @@ public:
 	void PresentFrame();
 	void NoteContextLost(HRESULT hr);
 	BOOL m_ready;
+	UINT m_scFlags;
 	int m_vw, m_vh;
 
 	ID3D11Device* m_dev;
@@ -469,6 +470,7 @@ public:
 	afx_msg void OnSize(UINT, int, int);
 	afx_msg void OnShowWindow(BOOL bShow, UINT nStatus);
 	afx_msg void OnDestroy();
+	afx_msg LRESULT OnDxReinit(WPARAM, LPARAM);
 	afx_msg void OnContextMenu(CWnd*, CPoint);
 
 	CCustomStandardButton m_help, m_start, m_gen, m_close;

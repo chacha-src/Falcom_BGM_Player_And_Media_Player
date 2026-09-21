@@ -39,6 +39,7 @@ public:
 	void PresentFrame();
 	void NoteContextLost(HRESULT hr);
 	BOOL m_ready;
+	UINT m_scFlags;
 	int m_vw, m_vh;
 	int m_dxFailStage; // InitDx 失敗段階（デバッグ用）
 	HRESULT m_dxFailHr;
@@ -464,6 +465,7 @@ public:
 	afx_msg void OnSize(UINT, int, int);
 	afx_msg void OnShowWindow(BOOL bShow, UINT nStatus);
 	afx_msg void OnDestroy();
+	afx_msg LRESULT OnDxReinit(WPARAM, LPARAM);
 	afx_msg void OnContextMenu(CWnd*, CPoint);
 	void ShowContextMenu(CPoint screenPt);
 

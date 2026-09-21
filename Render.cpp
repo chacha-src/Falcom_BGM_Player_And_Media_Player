@@ -1,4 +1,4 @@
-﻿// Render.cpp : インプリメンテーション ファイル
+// Render.cpp : インプリメンテーション ファイル
 //
 
 #include "stdafx.h"
@@ -1072,10 +1072,6 @@ BOOL CRender::OnInitDialog()
 		pl->KillTimer(4923);
 		pl->KillTimer(4924);
 	}
-#if WIN64
-	m_kpi.EnableWindow(FALSE);
-#else
-#endif
 	m_ms.SetRange(30, 80);
 	if (savedata.ms < 30) savedata.ms = 30;
 	m_ms.SetPos(savedata.ms);

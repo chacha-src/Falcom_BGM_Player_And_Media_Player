@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #define FLAC__NO_DLL
 #include "flac/all.h"
 
@@ -19,7 +19,7 @@ private:
 	//
 	static FLAC__StreamDecoderReadStatus read_callback(const FLAC__StreamDecoder* decoder,
 		FLAC__byte buffer[],
-		unsigned* bytes,
+		size_t* bytes,
 		void* client_data);
 	static FLAC__StreamDecoderSeekStatus seek_callback(const FLAC__StreamDecoder* decoder,
 		FLAC__uint64 absolute_byte_offset,
@@ -359,7 +359,7 @@ int loopflac1 = 0;
 /////////////////////////////////////////////////////////////////////////////
 FLAC__StreamDecoderReadStatus KbFlacDecoder::read_callback(const FLAC__StreamDecoder* decoder,
 	FLAC__byte buffer[],
-	unsigned* bytes,
+	size_t* bytes,
 	void* client_data)
 {
 	HANDLE hFile = ((KbFlacDecoder*)client_data)->m_hFile;

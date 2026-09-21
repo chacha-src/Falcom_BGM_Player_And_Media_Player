@@ -27,6 +27,8 @@ private:
 	void RestoreMailboxSleep();
 	void ExpireHeadWaitOnce();
 	void PunchMediumWaits();
+	void SnapChainOnce();
+	void RestoreChain();
 	unsigned MapSongCode(unsigned code);
 	void LogState(const char* tag);
 
@@ -65,6 +67,14 @@ private:
 	int f3Arabianm_;
 	unsigned idlePark_;
 	unsigned mbDisp_;
+	unsigned strm0_;
+	int demoRestart_;
+	unsigned restartEvery_;
+	uint16_t chainSnap_[48];
+	int chainSnapN_;
+	unsigned chainLoopEvery_;
+	unsigned tblOffs_;
+	int chainPark_;
 };
 
 /* F3 ドライバ生成 */

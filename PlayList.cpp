@@ -1,4 +1,4 @@
-﻿// PlayList.cpp : 実装ファイル
+// PlayList.cpp : 実装ファイル
 //
 
 #include "stdafx.h"
@@ -12913,7 +12913,7 @@ void timerpl(UINT nIDEvent,CPlayList* pl)
 
 extern int stflg;
 
-#if WIN64
+#if defined(_WIN64)
 void CPlayList::OnTimer(UINT_PTR nIDEvent) 
 #else
 void CPlayList::OnTimer(UINT nIDEvent) 

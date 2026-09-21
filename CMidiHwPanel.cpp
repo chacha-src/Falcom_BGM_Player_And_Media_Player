@@ -1,9 +1,9 @@
-﻿#include "stdafx.h"
+#include "stdafx.h"
 #include "CMidiHwPanel.h"
 
 /*
  * 実機 LCD:
- *   GS/SC-55/88/88Pro/8820 … 橙バックライト、16 パートバー
+ *   GS/SC-55/88/88Pro/8820 … 橙バックライト、16 パートバー（32ch は上段+下段の1枚）
  *   XG (MU)               … 緑
  *   LA / MT-32            … 黄緑、20 文字 LED
  *   SD-90                 … 青白
@@ -307,30 +307,26 @@ int MidiHwLcdReserve(int w, UINT dpi, int ch32, CRect* outAll, CRect* outA, CRec
 	if (outAll) outAll->SetRectEmpty();
 	if (outA) outA->SetRectEmpty();
 	if (outB) outB->SetRectEmpty();
+	UNREFERENCED_PARAMETER(ch32);
 	if (w < LcdSc(80, dpi)) return w;
-	const int nPanel = ch32 ? 2 : 1;
-	const int gap = LcdSc(3, dpi);
 	const int y0 = LcdSc(2, dpi);
 	const int h = LcdSc(86, dpi);
-	int oneW = LcdSc(ch32 ? 230 : 252, dpi);
-	int total = nPanel * oneW + (nPanel - 1) * gap;
-	const int cap = w * 58 / 100;
-	if (total > cap) {
-		oneW = (cap - (nPanel - 1) * gap) / nPanel;
-		if (oneW < LcdSc(168, dpi)) oneW = LcdSc(168, dpi);
-		total = nPanel * oneW + (nPanel - 1) * gap;
-	}
-	if (total > w - LcdSc(36, dpi))
-		total = w - LcdSc(36, dpi);
-	if (total < LcdSc(140, dpi))
-		total = min(w - LcdSc(8, dpi), LcdSc(140, dpi));
-	const int x0 = w - LcdSc(4, dpi) - total;
+	int oneW = LcdSc(252, dpi);
+	const int cap = w * 42 / 100;
+	if (oneW > cap)
+		oneW = cap;
+	if (oneW < LcdSc(168, dpi))
+		oneW = LcdSc(168, dpi);
+	if (oneW > w - LcdSc(36, dpi))
+		oneW = w - LcdSc(36, dpi);
+	if (oneW < LcdSc(140, dpi))
+		oneW = min(w - LcdSc(8, dpi), LcdSc(140, dpi));
+	const int x0 = w - LcdSc(4, dpi) - oneW;
+	CRect all(x0, y0, x0 + oneW, y0 + h);
 	if (outAll)
-		outAll->SetRect(x0, y0, x0 + total, y0 + h);
+		*outAll = all;
 	if (outA)
-		outA->SetRect(x0, y0, x0 + (ch32 ? oneW : total), y0 + h);
-	if (outB && ch32)
-		outB->SetRect(x0 + oneW + gap, y0, x0 + total, y0 + h);
+		*outA = all;
 	return x0;
 }
 
@@ -443,17 +439,24 @@ static void LcdDot(CDC& dc, int x, int y, int px, int py, COLORREF c)
 {
 	if (px < 1) px = 1;
 	if (py < 1) py = 1;
-	if (px >= 2 && py >= 2) {
-		CBrush br(c);
-		CPen pe(PS_SOLID, 1, c);
-		CBrush* oldB = dc.SelectObject(&br);
-		CPen* oldP = dc.SelectObject(&pe);
-		dc.Ellipse(x, y, x + px, y + py);
-		dc.SelectObject(oldB);
-		dc.SelectObject(oldP);
-		return;
-	}
 	dc.FillSolidRect(x, y, px, py, c);
+}
+
+static void LcdDrawW(CDC& dc, int x, int y, int h, int maxW, const wchar_t* s, COLORREF on)
+{
+	if (!s || !s[0] || h < 6 || maxW < 4) return;
+	CFont f;
+	f.CreateFont(-h, 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE,
+		DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+		ANTIALIASED_QUALITY, VARIABLE_PITCH | FF_SWISS, _T("Tahoma"));
+	CFont* old = dc.SelectObject(&f);
+	const int oldBk = dc.SetBkMode(TRANSPARENT);
+	const COLORREF oldC = dc.SetTextColor(on);
+	CRect r(x, y, x + maxW, y + h + 1);
+	dc.DrawText(s, -1, &r, DT_LEFT | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS | DT_VCENTER);
+	dc.SetTextColor(oldC);
+	dc.SetBkMode(oldBk);
+	dc.SelectObject(old);
 }
 
 static void LcdGlyphAt(CDC& dc, int x, int y, int px, int py, int gap, int ch, COLORREF on)
@@ -480,66 +483,51 @@ static int LcdGlyphH(int py, int gap)
 
 static void LcdText(CDC& dc, int x, int y, int px, int py, int gap, const char* s, COLORREF on)
 {
-	if (!s) return;
-	const int cw = LcdGlyphW(px, gap) + px;
-	for (; *s; ++s) {
-		LcdGlyphAt(dc, x, y, px, py, gap, (unsigned char)*s, on);
-		x += cw;
-	}
+	UNREFERENCED_PARAMETER(px);
+	UNREFERENCED_PARAMETER(py);
+	UNREFERENCED_PARAMETER(gap);
+	if (!s || !s[0]) return;
+	wchar_t w[48];
+	MultiByteToWideChar(CP_ACP, 0, s, -1, w, 48);
+	w[47] = 0;
+	int n = 0;
+	while (w[n]) ++n;
+	const int h = max(8, py * 7);
+	LcdDrawW(dc, x, y, h, max(8, n * (h * 3 / 5 + 2)), w, on);
 }
 
 static void LcdText16(CDC& dc, const CRect& rc, const char* s16, COLORREF on)
 {
-	if (!s16 || rc.Width() < 16 || rc.Height() < 7) return;
-	const int cell = rc.Width() / 16;
-	int px = max(1, cell / 6);
-	int gap = (px >= 2) ? 1 : 0;
-	while (LcdGlyphW(px, gap) + 1 > cell && px > 1) --px;
-	int py = px;
-	while (LcdGlyphH(py, gap) > rc.Height() && py > 1) --py;
-	const int gw = LcdGlyphW(px, gap);
-	const int y = rc.top;
-	for (int i = 0; i < 16; ++i) {
-		const unsigned char ch = (unsigned char)(s16[i] ? s16[i] : ' ');
-		const int x = rc.left + i * cell + max(0, (cell - gw) / 2);
-		LcdGlyphAt(dc, x, y, px, py, gap, ch, on);
-	}
+	if (!s16 || rc.Width() < 8 || rc.Height() < 6) return;
+	wchar_t w[20];
+	int n = 0;
+	for (; n < 16 && s16[n]; ++n)
+		w[n] = (wchar_t)(unsigned char)s16[n];
+	w[n] = 0;
+	const int h = max(8, min(rc.Height() - 1, 16));
+	LcdDrawW(dc, rc.left, rc.top + max(0, (rc.Height() - h) / 2), h, rc.Width(), w, on);
 }
 
 static void LcdTextFit(CDC& dc, const CRect& rc, const char* s, COLORREF on)
 {
 	if (!s || !s[0] || rc.Width() < 4 || rc.Height() < 6) return;
-	int n = 0;
-	while (s[n]) ++n;
-	int px = 2, py = 2, gap = 1;
-	for (;;) {
-		const int cw = LcdGlyphW(px, gap) + px;
-		const int ch = LcdGlyphH(py, gap);
-		if (cw * n <= rc.Width() && ch <= rc.Height())
-			break;
-		if (px <= 1 && py <= 1 && gap <= 0) break;
-		if (gap > 0) gap = 0;
-		else if (px > 1) --px;
-		else if (py > 1) --py;
-		else break;
-	}
-	const int cw = LcdGlyphW(px, gap) + px;
-	const int ch = LcdGlyphH(py, gap);
-	int x = rc.left + max(0, (rc.Width() - cw * n) / 2);
-	int y = rc.top + max(0, (rc.Height() - ch) / 2);
-	LcdText(dc, x, y, px, py, gap, s, on);
+	wchar_t w[48];
+	MultiByteToWideChar(CP_ACP, 0, s, -1, w, 48);
+	w[47] = 0;
+	const int h = max(8, min(rc.Height() - 1, 14));
+	LcdDrawW(dc, rc.left, rc.top + max(0, (rc.Height() - h) / 2), h, rc.Width(), w, on);
 }
 
 static void LcdTextLeft(CDC& dc, int x, int y, int px, int py, int gap, const char* s, COLORREF on, int maxW)
 {
-	if (!s) return;
-	const int cw = LcdGlyphW(px, gap) + px;
-	int used = 0;
-	for (; *s; ++s) {
-		if (used + LcdGlyphW(px, gap) > maxW) break;
-		LcdGlyphAt(dc, x + used, y, px, py, gap, (unsigned char)*s, on);
-		used += cw;
-	}
+	UNREFERENCED_PARAMETER(px);
+	UNREFERENCED_PARAMETER(gap);
+	if (!s || !s[0]) return;
+	wchar_t w[48];
+	MultiByteToWideChar(CP_ACP, 0, s, -1, w, 48);
+	w[47] = 0;
+	const int h = max(8, py >= 6 ? py : (py * 7 + 2));
+	LcdDrawW(dc, x, y, h, maxW, w, on);
 }
 
 static void LcdWcsToUtf(const wchar_t* w, char* out, int outN)
@@ -567,71 +555,49 @@ static void LcdDrawGs16(CDC& dc, const CRect& rc, const BYTE* d64, COLORREF on, 
 	if (rc.Width() < 16 || rc.Height() < 16) return;
 	const int cell = min(rc.Width() / 16, rc.Height() / 16);
 	if (cell < 1) return;
-	const int pad = (cell >= 3) ? 1 : 0;
-	const int dw = max(1, cell - pad);
-	const int dh = max(1, cell - pad);
 	const int ox = rc.left + (rc.Width() - cell * 16) / 2;
 	const int oy = rc.top + (rc.Height() - cell * 16) / 2;
-	CBrush brOn(on), brOff(off);
-	CPen peOn(PS_SOLID, 1, on), peOff(PS_SOLID, 1, off);
-	CBrush* oldB = dc.SelectObject(&brOff);
-	CPen* oldP = dc.SelectObject(&peOff);
-	int last = 0;
 	for (int y = 0; y < 16; ++y) {
-		for (int x = 0; x < 16; ++x) {
-			const int lit = GsDot(d64, x, y);
-			if (lit != last) {
-				dc.SelectObject(lit ? &brOn : &brOff);
-				dc.SelectObject(lit ? &peOn : &peOff);
-				last = lit;
-			}
-			if (dw >= 2 && dh >= 2)
-				dc.Ellipse(ox + x * cell, oy + y * cell, ox + x * cell + dw, oy + y * cell + dh);
-			else
-				dc.FillSolidRect(ox + x * cell, oy + y * cell, dw, dh, lit ? on : off);
-		}
+		for (int x = 0; x < 16; ++x)
+			dc.FillSolidRect(ox + x * cell, oy + y * cell, cell, cell, GsDot(d64, x, y) ? on : off);
 	}
-	dc.SelectObject(oldB);
-	dc.SelectObject(oldP);
 }
 
 static void LcdDrawMeters(CDC& dc, const CRect& rc, const MidiHwLcdPartSnap parts16[16], int sel, COLORREF on, COLORREF off, COLORREF cursor)
 {
-	const int nBar = 16, nSeg = 16;
-	if (rc.Width() < 16 || rc.Height() < 16) return;
-	const int cell = min(rc.Width() / nBar, rc.Height() / nSeg);
-	if (cell < 1) return;
-	const int pad = (cell >= 3) ? 1 : 0;
-	const int dw = max(1, cell - pad);
-	const int dh = max(1, cell - pad);
-	const int ox = rc.left + (rc.Width() - cell * nBar) / 2;
-	const int oy = rc.top + (rc.Height() - cell * nSeg) / 2;
-	CBrush brOn(on), brOff(off);
-	CPen peOn(PS_SOLID, 1, on), peOff(PS_SOLID, 1, off);
-	CBrush* oldB = dc.SelectObject(&brOff);
-	CPen* oldP = dc.SelectObject(&peOff);
-	int last = 0;
+	const int nBar = 16;
+	if (!parts16 || rc.Width() < 16 || rc.Height() < 4) return;
+	int cellW = rc.Width() / nBar;
+	if (cellW < 1) return;
+	const int gap = (cellW >= 3) ? 1 : 0;
+	const int bw = max(1, cellW - gap);
+	const int ox = rc.left + (rc.Width() - cellW * nBar) / 2;
+	const int y0 = rc.top;
+	const int h = rc.Height();
 	for (int i = 0; i < nBar; ++i) {
-		const int segs = MidiHwLcdSeg(parts16[i].lev, parts16[i].held);
-		for (int s = 0; s < nSeg; ++s) {
-			const int lit = (s < segs) ? 1 : 0;
-			if (lit != last) {
-				dc.SelectObject(lit ? &brOn : &brOff);
-				dc.SelectObject(lit ? &peOn : &peOff);
-				last = lit;
-			}
-			const int x = ox + i * cell;
-			const int y = oy + (nSeg - 1 - s) * cell;
-			if (dw >= 2 && dh >= 2)
-				dc.Ellipse(x, y, x + dw, y + dh);
-			else
-				dc.FillSolidRect(x, y, dw, dh, lit ? on : off);
-		}
+		const int x = ox + i * cellW;
+		dc.FillSolidRect(x, y0, bw, h, off);
+		int segs = MidiHwLcdSeg(parts16[i].lev, parts16[i].held);
+		int bh = (segs * h + 8) / 16;
+		if (parts16[i].held && bh < 2) bh = 2;
+		if (bh > h) bh = h;
+		if (bh > 0)
+			dc.FillSolidRect(x, y0 + h - bh, bw, bh, on);
+		if (sel == i)
+			dc.FillSolidRect(x, y0 + h - 1, bw, 1, cursor);
 	}
-	dc.SelectObject(oldB);
-	dc.SelectObject(oldP);
-	if (sel >= 0 && sel < nBar)
-		dc.FillSolidRect(ox + sel * cell, oy + nSeg * cell, dw, 2, cursor);
+}
+
+static void LcdDrawMeters32(CDC& dc, const CRect& rc,
+	const MidiHwLcdPartSnap partsA[16], const MidiHwLcdPartSnap partsB[16],
+	int selA, int selB, COLORREF on, COLORREF off, COLORREF cursor)
+{
+	if (!partsA || !partsB || rc.Width() < 16 || rc.Height() < 8) return;
+	const int gap = 1;
+	const int mid = (rc.top + rc.bottom) / 2;
+	LcdDrawMeters(dc, CRect(rc.left, rc.top, rc.right, mid - gap), partsA, selA, on, off, cursor);
+	LcdDrawMeters(dc, CRect(rc.left, mid + gap, rc.right, rc.bottom), partsB, selB, on, off, cursor);
+	dc.FillSolidRect(rc.left, mid - gap, rc.Width(), gap * 2 + 1, off);
 }
 
 static int LcdKeyLit(const BYTE keyBits[16], int note)
@@ -684,11 +650,49 @@ static void LcdPanStr(int pan, char* out, int outN)
 void MidiHwLcdDraw(CDC& dc, const CRect& rc, UINT dpi,
 	int kind, const wchar_t* model,
 	const MidiHwLcdState& st,
-	const MidiHwLcdPartSnap parts16[16],
-	const BYTE keyBits[16],
-	int sel, int bank)
+	const MidiHwLcdPartSnap partsA[16],
+	const BYTE keyBitsA[16],
+	int selA,
+	const MidiHwLcdPartSnap* partsB,
+	const BYTE* keyBitsB,
+	int selB)
 {
-	if (rc.Width() < 40 || rc.Height() < 18) return;
+	if (!partsA || rc.Width() < 40 || rc.Height() < 18) return;
+	const int stacked = partsB ? 1 : 0;
+	if (selA < 0) selA = 0;
+	if (selA > 15) selA = 15;
+	if (selB < 0) selB = 0;
+	if (selB > 15) selB = 15;
+
+	int bank = 0;
+	int sel = selA;
+	const MidiHwLcdPartSnap* parts = partsA;
+	BYTE keyOr[16];
+	const BYTE* keyBits = keyBitsA;
+	if (stacked) {
+		int aH = 0, bH = 0;
+		float aL = 0.f, bL = 0.f;
+		for (int i = 0; i < 16; ++i) {
+			if (partsA[i].held) aH++;
+			if (partsB[i].held) bH++;
+			if (partsA[i].lev > aL) aL = partsA[i].lev;
+			if (partsB[i].lev > bL) bL = partsB[i].lev;
+		}
+		if (bH > aH || (bH == aH && bL > aL)) {
+			bank = 1;
+			sel = selB;
+			parts = partsB;
+		}
+		if (keyBitsA && keyBitsB) {
+			for (int i = 0; i < 16; ++i)
+				keyOr[i] = (BYTE)(keyBitsA[i] | keyBitsB[i]);
+			keyBits = keyOr;
+		} else if (keyBitsB) {
+			keyBits = keyBitsB;
+		}
+	}
+	const MidiHwLcdPartSnap& sp = parts[sel];
+
 	const LcdPal pal = LcdPalette(kind);
 	dc.FillSolidRect(rc, pal.bezel);
 	dc.FillSolidRect(rc.left, rc.top, rc.Width(), 1, pal.bezelHi);
@@ -705,37 +709,39 @@ void MidiHwLcdDraw(CDC& dc, const CRect& rc, UINT dpi,
 	char brand[24];
 	LcdWcsToUtf(model && model[0] ? model : L"GS", brand, 24);
 	{
-		const int px = 1, py = 1, gap = 0;
-		const int bh = LcdGlyphH(py, gap);
-		int by = rc.top + max(1, (brandH + bezel - bh) / 2);
-		LcdText(dc, rc.left + bezel + 1, by, px, py, gap, brand, pal.brand);
-		char side[4] = { (char)('A' + (bank ? 1 : 0)), 0, 0, 0 };
-		const int cw = LcdGlyphW(px, gap) + px;
-		LcdText(dc, rc.right - bezel - cw - 2, by, px, py, gap, side, pal.brand);
+		wchar_t bw[24];
+		MultiByteToWideChar(CP_ACP, 0, brand, -1, bw, 24);
+		bw[23] = 0;
+		const int bh = max(8, brandH - 1);
+		int by = rc.top + max(0, (brandH + bezel - bh) / 2);
+		LcdDrawW(dc, rc.left + bezel + 1, by, bh, rc.Width() / 2, bw, pal.brand);
+		wchar_t side[4];
+		if (stacked) wcscpy_s(side, L"32");
+		else { side[0] = L'A'; side[1] = 0; }
+		LcdDrawW(dc, rc.right - bezel - LcdSc(18, dpi), by, bh, LcdSc(18, dpi), side, pal.brand);
 	}
 
-	if (sel < 0) sel = 0;
-	if (sel > 15) sel = 15;
-	const MidiHwLcdPartSnap& sp = parts16[sel];
-
-	const int barArea = max(LcdSc(86, dpi), lcd.Width() * 38 / 100);
-	CRect bars = lcd;
-	bars.left = lcd.right - barArea;
-	bars.DeflateRect(LcdSc(2, dpi), LcdSc(2, dpi));
-	CRect left = lcd;
-	left.right = bars.left - LcdSc(2, dpi);
-	left.DeflateRect(LcdSc(2, dpi), LcdSc(1, dpi));
-	const int kbH = max(LcdSc(10, dpi), min(LcdSc(20, dpi), left.Height() * 38 / 100));
-	CRect keys = left;
-	keys.top = left.bottom - kbH;
-	CRect text = left;
-	text.bottom = keys.top - LcdSc(1, dpi);
-	if (text.Height() < LcdSc(8, dpi)) {
+	CRect bars, text, keysRc;
+	{
+		const int barArea = max(LcdSc(86, dpi), lcd.Width() * 38 / 100);
+		bars = lcd;
+		bars.left = lcd.right - barArea;
+		bars.DeflateRect(LcdSc(2, dpi), LcdSc(2, dpi));
+		CRect left = lcd;
+		left.right = bars.left - LcdSc(2, dpi);
+		left.DeflateRect(LcdSc(2, dpi), LcdSc(1, dpi));
+		const int kbH = max(LcdSc(10, dpi), min(LcdSc(20, dpi), left.Height() * 38 / 100));
+		keysRc = left;
+		keysRc.top = left.bottom - kbH;
 		text = left;
-		keys.SetRectEmpty();
+		text.bottom = keysRc.top - LcdSc(1, dpi);
+		if (text.Height() < LcdSc(8, dpi)) {
+			text = left;
+			keysRc.SetRectEmpty();
+		}
 	}
 
-	if (st.mode == 1 && LcdHasLetter(st)) {
+	if (!text.IsRectEmpty() && st.mode == 1 && LcdHasLetter(st)) {
 		char raw[33];
 		int n = st.letterN;
 		if (n < 0) n = 0;
@@ -760,17 +766,14 @@ void MidiHwLcdDraw(CDC& dc, const CRect& rc, UINT dpi,
 				win[i] = raw[i];
 		}
 		LcdText16(dc, text, win, pal.pixel);
-	} else if (kind == kKindLaGreen) {
+	} else if (!text.IsRectEmpty() && kind == kKindLaGreen) {
 		char line[28];
 		char nm[24];
 		LcdWcsToUtf(sp.name, nm, 24);
 		sprintf_s(line, "P%02d %03d %s", sel + 1, (sp.pc & 127) + 1, nm);
 		LcdTextFit(dc, text, line, pal.pixel);
-	} else {
-		const int px = 1;
-		const int py = 1;
-		const int gap = 0;
-		const int lh = LcdGlyphH(py, gap) + LcdSc(1, dpi);
+	} else if (!text.IsRectEmpty()) {
+		const int lh = max(LcdSc(11, dpi), text.Height() / 4);
 		int y = text.top;
 		char line[40], nm[24], pan[12], chs[12];
 		LcdWcsToUtf(sp.name, nm, 24);
@@ -778,33 +781,35 @@ void MidiHwLcdDraw(CDC& dc, const CRect& rc, UINT dpi,
 		if (sp.midiCh >= 16) strcpy_s(chs, "OFF");
 		else sprintf_s(chs, "%c%02d", portCh, (sp.midiCh % 16) + 1);
 		sprintf_s(line, "%c%02d %03d %s", (char)('A' + bank), sel + 1, (sp.pc & 127) + 1, nm);
-		LcdTextLeft(dc, text.left, y, px, py, gap, line, pal.pixel, text.Width());
+		LcdTextLeft(dc, text.left, y, 2, lh - 1, 0, line, pal.pixel, text.Width());
 		y += lh;
 		LcdPanStr(sp.pan, pan, 12);
 		sprintf_s(line, "LEVEL %3d  PAN %s", sp.vol, pan);
-		LcdTextLeft(dc, text.left, y, px, py, gap, line, pal.pixel, text.Width());
+		LcdTextLeft(dc, text.left, y, 2, lh - 1, 0, line, pal.pixel, text.Width());
 		y += lh;
 		sprintf_s(line, "REVERB%3d  CHORUS%3d", sp.rev, sp.crs);
-		LcdTextLeft(dc, text.left, y, px, py, gap, line, pal.pixel, text.Width());
+		LcdTextLeft(dc, text.left, y, 2, lh - 1, 0, line, pal.pixel, text.Width());
 		y += lh;
 		if (y + lh <= text.bottom + 1) {
 			const int ks = sp.kshift;
 			if (ks < 0) sprintf_s(line, "K.SHIFT-%d  MIDI %s", -ks, chs);
 			else sprintf_s(line, "K.SHIFT+%d  MIDI %s", ks, chs);
-			LcdTextLeft(dc, text.left, y, px, py, gap, line, pal.pixel, text.Width());
+			LcdTextLeft(dc, text.left, y, 2, lh - 1, 0, line, pal.pixel, text.Width());
 		}
 	}
-	if (!keys.IsRectEmpty()) {
+	if (!keysRc.IsRectEmpty()) {
 		const COLORREF offB = RGB(
 			(GetRValue(pal.pixel) * 2 + GetRValue(pal.lcd)) / 3,
 			(GetGValue(pal.pixel) * 2 + GetGValue(pal.lcd)) / 3,
 			(GetBValue(pal.pixel) * 2 + GetBValue(pal.lcd)) / 3);
-		LcdDrawKb(dc, keys, keyBits, pal.pixel, pal.pixDim, offB);
+		LcdDrawKb(dc, keysRc, keyBits, pal.pixel, pal.pixDim, offB);
 	}
 
 	const int pg = st.showPage;
 	if (pg >= 1 && pg <= 10 && st.pageOn[pg - 1])
 		LcdDrawGs16(dc, bars, st.page[pg - 1], pal.pixel, pal.barEmpty);
+	else if (stacked)
+		LcdDrawMeters32(dc, bars, partsA, partsB, selA, selB, pal.pixel, pal.barEmpty, pal.cursor);
 	else
-		LcdDrawMeters(dc, bars, parts16, sel, pal.pixel, pal.barEmpty, pal.cursor);
+		LcdDrawMeters(dc, bars, partsA, sel, pal.pixel, pal.barEmpty, pal.cursor);
 }

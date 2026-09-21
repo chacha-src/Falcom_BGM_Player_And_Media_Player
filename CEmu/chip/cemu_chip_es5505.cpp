@@ -96,6 +96,7 @@ public:
 		, phase_(0)
 		, lastL_(0)
 		, lastR_(0)
+		, slowLpe_(0)
 	{
 		memset(voice_, 0, sizeof(voice_));
 		memset(voiceBank_, 0, sizeof(voiceBank_));
@@ -208,6 +209,8 @@ public:
 		if (voice < 0 || voice >= kEs5505Voices) return 0;
 		return (uint16_t)(voice_[voice].control | 0xf000);
 	}
+
+	void SetSlowLpe(int on) { slowLpe_ = on ? 1 : 0; }
 
 	unsigned GetRegSnapshot(uint8_t* buf, unsigned cap) const override
 	{
@@ -462,10 +465,23 @@ private:
 			uint64_t lvm = GetVolume(lv);
 			uint64_t rvm = GetVolume(rv);
 			if (voice->control & kControlLpe) {
-				const unsigned w = (unsigned)((voice->accum >> 14) & 0xffu);
-				if (w < 0x80u) {
-					lvm += lvm / 2u;
-					rvm += rvm / 2u;
+				const unsigned cr = voice->control & 0x0fffu;
+				if (slowLpe_ && voice->index >= 22
+					&& (cr == 0x0c4cu || cr == 0x060cu || cr == 0x0a0cu)) {
+					const unsigned w = (unsigned)((voice->accum >> 20) & 0x3u);
+					if (w == 0u) {
+						lvm += lvm / 2u;
+						rvm += rvm / 2u;
+					} else if (w == 2u) {
+						lvm /= 2u;
+						rvm /= 2u;
+					}
+				} else {
+					const unsigned w = (unsigned)((voice->accum >> 14) & 0xffu);
+					if (w < 0x80u) {
+						lvm += lvm / 2u;
+						rvm += rvm / 2u;
+					}
 				}
 			}
 			if (!(voice->control & kControlDir)) {
@@ -719,6 +735,7 @@ private:
 	uint64_t addrAccMask_;
 	int64_t phase_;
 	int lastL_, lastR_;
+	int slowLpe_;
 	uint32_t volLut_[256];
 	uint32_t voiceBank_[kEs5505Voices];
 	Voice voice_[kEs5505Voices];
@@ -752,6 +769,12 @@ uint32_t CEmuChipEs5505GetVoiceIndex(CChip* c)
 {
 	if (!c) return 0;
 	return ((CChipEs5505*)c)->VoiceIndex();
+}
+
+void CEmuChipEs5505SetSlowLpe(CChip* c, int on)
+{
+	if (!c) return;
+	((CChipEs5505*)c)->SetSlowLpe(on);
 }
 
 uint16_t CEmuChipEs5505PeekCr(CChip* c, int voice)

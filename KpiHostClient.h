@@ -8,7 +8,7 @@
 #include "kpi_host_ipc.h"
 
 // ============================================================================
-// 32bit 本体から KpiHost64.exe を呼ぶクライアント
+// 本体から ogghost32.exe（他アーキ IPC ホスト）を呼ぶクライアント
 // ----------------------------------------------------------------------------
 // EnsureConnected が exe を起こしパイプをつなぐ。1 本のパイプを CRITICAL_SECTION
 // で直列化する（ホスト側 ServeOnce も 1 接続）。
@@ -29,7 +29,7 @@ public:
 	KpiHost64Client();
 	~KpiHost64Client();
 
-	bool EnsureConnected(); // 未接続なら KpiHost64.exe を起動してパイプ接続
+	bool EnsureConnected(); // 未接続なら ogghost32.exe を起動してパイプ接続
 	void Disconnect();
 
 	bool Ping();
@@ -95,3 +95,6 @@ private:
 	int m_sentLang = -1;   // 最後に送った lang。同じなら PING しない
 	int m_syncingLang = 0; // 再入防止（PING 中に EnsureConnected が来てもループしない）
 };
+
+// 旧名 KpiHost64.exe は起動しない。残っていればプロセス停止のうえファイル削除。
+void OggPurgeObsoleteKpiHost64();

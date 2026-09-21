@@ -1,4 +1,4 @@
-﻿// CMediaPlayerDlg.cpp : メディアプレイヤーモード画面(張りぼて)とモード選択ダイアログ
+// CMediaPlayerDlg.cpp : メディアプレイヤーモード画面(張りぼて)とモード選択ダイアログ
 //
 // 実体は COggDlg(og->) と CPlayList(pl->)。ここは表示と操作の取り次ぎだけを行う。
 // メディアプレイヤーモード中は og / pl のウィンドウを非表示にして裏で生かしておく。
@@ -5075,7 +5075,7 @@ LRESULT CMediaPlayerDlg::OnMissScanDone(WPARAM wParam, LPARAM lParam)
 	return 0;
 }
 
-#if WIN64
+#if defined(_WIN64)
 void CMediaPlayerDlg::OnTimer(UINT_PTR nIDEvent)
 #else
 void CMediaPlayerDlg::OnTimer(UINT nIDEvent)
@@ -8459,13 +8459,13 @@ static void MpRemotePortCb(void* ctx, LPCTSTR text)
 void CMediaPlayerDlg::ApplyPracticeTempoPercent(int pct)
 {
 	if (!og || !::IsWindow(og->GetSafeHwnd())) return;
-	if (pct < 50) pct = 50;
+	if (pct < 25) pct = 25;
 	if (pct > 200) pct = 200;
 	// スライダー 0..400、200=100%
 	const int pos = pct * 2;
-	og->m_tempo_sl.SetPos(pos);
+	og->m_tempo_sl.SetPos(pos, FALSE);
 	if (m_tempo.GetSafeHwnd())
-		m_tempo.SetPos(pos);
+		m_tempo.SetPos(pos, FALSE);
 	tempo = pos;
 	DougaApplyTempoToVideoRate();
 }

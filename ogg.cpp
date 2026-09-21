@@ -12,6 +12,7 @@
 #include "CMediaPlayerDlg.h"
 #include "UpdateCheck.h"
 #include "KpiPluginInstall.h"
+#include "KpiHostClient.h"
 #include "OfflineHelp.h"
 #include "SongParams.h"
 #include "ProAudio.h"
@@ -290,6 +291,7 @@ BOOL COggApp::InitInstance()
 			}
 	}
 	_tchdir(karento2);
+	OggPurgeObsoleteKpiHost64();
 	{
 		wchar_t cemuData[MAX_PATH];
 		_snwprintf_s(cemuData, _TRUNCATE, L"%sdata", karento2);

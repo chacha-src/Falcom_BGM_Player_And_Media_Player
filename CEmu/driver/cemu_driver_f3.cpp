@@ -44,8 +44,16 @@ CDriverF3::CDriverF3()
 	, f3Arabianm_(0)
 	, idlePark_(0xC10A9Au)
 	, mbDisp_(0xC131E6u)
+	, strm0_(0)
+	, demoRestart_(0)
+	, restartEvery_(0)
+	, chainSnapN_(0)
+	, chainLoopEvery_(0)
+	, tblOffs_(0)
+	, chainPark_(0)
 {
 	memset(tryCodes_, 0, sizeof(tryCodes_));
+	memset(chainSnap_, 0, sizeof(chainSnap_));
 }
 
 /* 後始末 */
@@ -62,6 +70,16 @@ static void CDriverF3Push(unsigned* dst, int* n, int cap, unsigned code)
 		if (dst[i] == code) return;
 	}
 	dst[(*n)++] = code;
+}
+
+static unsigned CDriverF3OptU32(const CEmuGameEntry* ge, const char* name)
+{
+	if (!ge || !ge->opt || !name) return 0;
+	for (int i = 0; i < ge->optCount; i++) {
+		if (_stricmp(ge->opt[i].name, name) == 0)
+			return (unsigned)strtoul(ge->opt[i].value, NULL, 0);
+	}
+	return 0;
 }
 
 /* ROM 読込、DUART settle、キーオンゲート武装 */
@@ -98,6 +116,14 @@ int CDriverF3::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 	f3Arabianm_ = 0;
 	idlePark_ = 0xC10A9Au;
 	mbDisp_ = 0xC131E6u;
+	strm0_ = 0;
+	demoRestart_ = 0;
+	restartEvery_ = 0;
+	chainSnapN_ = 0;
+	chainLoopEvery_ = 0;
+	tblOffs_ = 0;
+	chainPark_ = 0;
+	memset(chainSnap_, 0, sizeof(chainSnap_));
 
 	songCode_ = titleCode ? titleCode : 1;
 	CDriverF3Push(tryCodes_, &tryCount_, (int)_countof(tryCodes_), songCode_);
@@ -108,6 +134,7 @@ int CDriverF3::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 
 	if (!hw_->LoadRoms(fs, ge, titleCode))
 		return 0;
+	tblOffs_ = CDriverF3OptU32(ge, "tbloffs");
 
 	CEmuHardF3SetActive(hw_);
 	/* ブート settle: DUART/IVR、TCB コピー、最初のタスクスライス */
@@ -121,6 +148,8 @@ int CDriverF3::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 	}
 	RunCycles(cpuHz_ / 5);
 	f3Arabianm_ = (hw_->Read32(0x28u) == 0xC10D12u) ? 1 : 0;
+	if (!f3Arabianm_ && hw_->SoundChip())
+		CEmuChipEs5505SetSlowLpe(hw_->SoundChip(), 1);
 	songCode_ = tryCodes_[0];
 	cmdIndex_ = tryCount_;
 	locked_ = 1;
@@ -187,6 +216,13 @@ int CDriverF3::OverlayTitle(unsigned titleCode)
 	waitDecs_ = 0;
 	typeEPosts_ = 0;
 	seqCalls_ = 0;
+	strm0_ = 0;
+	demoRestart_ = 0;
+	restartEvery_ = 0;
+	chainSnapN_ = 0;
+	chainLoopEvery_ = 0;
+	chainPark_ = 0;
+	memset(chainSnap_, 0, sizeof(chainSnap_));
 	songCode_ = MapSongCode(titleCode);
 	hw_->SetSongCommand(songCode_);
 	return 1;
@@ -388,6 +424,47 @@ void CDriverF3::PunchMediumWaits()
 	}
 }
 
+/* SetSongCommand 再注入が壊すフレーズを、チェイン RAM の頭へ戻して回す */
+void CDriverF3::SnapChainOnce()
+{
+	if (!hw_ || chainSnapN_ > 0) return;
+	unsigned n = hw_->Read16(0xD0F4u);
+	if (n < 0xD000u || n >= 0xEE00u) return;
+	int hops = 0;
+	while (n >= 0xD000u && n < 0xEE00u && hops < 8
+		&& chainSnapN_ + 6 <= (int)_countof(chainSnap_)) {
+		chainSnap_[chainSnapN_++] = (uint16_t)n;
+		chainSnap_[chainSnapN_++] = (uint16_t)hw_->Read16(n + 2u);
+		chainSnap_[chainSnapN_++] = (uint16_t)hw_->Read16(n + 4u);
+		chainSnap_[chainSnapN_++] = (uint16_t)hw_->Read16(n + 6u);
+		chainSnap_[chainSnapN_++] = (uint16_t)hw_->Read16(n + 8u);
+		chainSnap_[chainSnapN_++] = (uint16_t)hw_->Read16(n + 0xAu);
+		n = hw_->Read16(n);
+		hops++;
+	}
+}
+
+void CDriverF3::RestoreChain()
+{
+	if (!hw_ || chainSnapN_ < 6) return;
+	unsigned first = chainSnap_[0];
+	for (int i = 0; i + 5 < chainSnapN_; i += 6) {
+		const unsigned n = chainSnap_[i];
+		if (n < 0xD000u || n >= 0xEE00u) continue;
+		hw_->Write16(n + 2u, chainSnap_[i + 1]);
+		{
+			const unsigned wait = chainSnap_[i + 2];
+			hw_->Write16(n + 4u, (wait && wait != 0xFFFFu) ? 1u : wait);
+		}
+		hw_->Write16(n + 6u, chainSnap_[i + 3]);
+		hw_->Write16(n + 8u, chainSnap_[i + 4]);
+		hw_->Write16(n + 0xAu, chainSnap_[i + 5]);
+	}
+	if (first >= 0xD000u && first < 0xEE00u)
+		hw_->Write16(0xD0F4u, (uint16_t)first);
+	hw_->Write16(0xD4A6u, 1);
+}
+
 /* 起動は遅延 D4A6。頭を落としたあとは 30Hz。中休符はホストが潰す。 */
 void CDriverF3::TickSeqHost()
 {
@@ -422,6 +499,22 @@ void CDriverF3::TickSeqHost()
 					chip->Write(0x00, (uint32_t)(cr & (uint16_t)~3u));
 				}
 			}
+			if (chainLoopEvery_ && chainSnapN_ == 0 && seqCalls_ >= 8u) {
+				SnapChainOnce();
+				if (chainSnapN_ >= 6)
+					expiredHead_ = 1;
+			}
+			if (chainLoopEvery_ && chainSnapN_ >= 6
+				&& seqCalls_ >= chainLoopEvery_
+				&& (seqCalls_ % chainLoopEvery_) == 0u)
+				RestoreChain();
+			if ((songCode_ & 0xffu) == 0x03u && seqCalls_ >= 30u
+				&& (seqCalls_ % 30u) == 0u)
+				PunchMediumWaits();
+			if (demoRestart_ && restartEvery_ && expiredHead_
+				&& seqCalls_ >= restartEvery_
+				&& (seqCalls_ % restartEvery_) == 0u)
+				hw_->SetSongCommand(songCode_);
 			if (!expiredHead_ || (seqCalls_ & 1u) == 0u)
 				hw_->Write16(0xD4A6u, 1);
 			{
@@ -434,10 +527,30 @@ void CDriverF3::TickSeqHost()
 		}
 	} else {
 		const unsigned cpuPc = (unsigned)m68k_get_reg(NULL, M68K_REG_PC);
-		if (cpuPc >= 0xC10B08u && cpuPc < 0xC10B20u) {
-			const unsigned a5cat = hw_->Read32(0xD098u);
-			if (a5cat >= 0xC00000u && a5cat < 0xC18000u)
-				m68k_set_reg(M68K_REG_A5, a5cat);
+		if (chainPark_ && seqCalls_ >= 150u) {
+			if (cpuPc < 0xC00000u || cpuPc >= 0xC80000u) {
+				m68k_set_reg(M68K_REG_PC, idlePark_ ? idlePark_ : 0xC10B14u);
+				m68k_set_reg(M68K_REG_SR, 0x2000);
+				if (chainSnapN_ >= 6 && (seqCalls_ % 90u) == 0u)
+					RestoreChain();
+			}
+		}
+		{
+			const unsigned a5 = (unsigned)m68k_get_reg(NULL, M68K_REG_A5);
+			const int a5slot = (a5 >= 0xD000u && a5 < 0xEE00u) ? 1 : 0;
+			if (!a5slot && (a5 < 0xC00000u || a5 >= 0xC18000u)) {
+				const unsigned a5cat = hw_->Read32(0xD098u);
+				if (a5cat >= 0xC00000u && a5cat < 0xC18000u)
+					m68k_set_reg(M68K_REG_A5, a5cat);
+			}
+		}
+		if (cpuPc >= 0xC10D40u && cpuPc < 0xC10D90u && seqCalls_ >= 90u) {
+			m68k_set_reg(M68K_REG_PC, idlePark_ ? idlePark_ : 0xC10B14u);
+			m68k_set_reg(M68K_REG_SR, 0x2000);
+		}
+		if (cpuPc >= 0xC17A80u && cpuPc < 0xC17C00u && seqCalls_ >= 60u) {
+			m68k_set_reg(M68K_REG_PC, idlePark_ ? idlePark_ : 0xC10B14u);
+			m68k_set_reg(M68K_REG_SR, 0x2000);
 		}
 		if (cpuPc >= 0xC14F00u && cpuPc < 0xC15480u && seqCalls_ >= 180u
 			&& (seqCalls_ % 16u) == 15u) {
@@ -452,6 +565,11 @@ void CDriverF3::TickSeqHost()
 			const unsigned bank = hw_->Read32(0xD408u);
 			if (bank >= 0xC00000u && bank < 0xC80000u)
 				hw_->Write32(0xD0E8u, bank);
+			else if (tblOffs_ && tblOffs_ < 0x180000u) {
+				const unsigned t = 0xC00000u + tblOffs_;
+				hw_->Write32(0xD408u, t);
+				hw_->Write32(0xD0E8u, t);
+			}
 		}
 		{
 			unsigned stamp = 0;
@@ -484,7 +602,57 @@ void CDriverF3::TickSeqHost()
 					expiredHead_ = 1;
 				}
 			}
+			{
+				const unsigned strm = hw_->Read16(head + 8u);
+				if (!strm0_ && strm >= 0x80u)
+					strm0_ = strm;
+				if (strm0_ && seqCalls_ >= 240u && strm < 0x60u
+					&& (seqCalls_ % 120u) == 0u) {
+					hw_->Write16(head + 8u, (uint16_t)strm0_);
+					const unsigned wait = hw_->Read16(head + 4u);
+					if (wait && wait != 0xFFFFu)
+						hw_->Write16(head + 4u, 1);
+				}
+				if ((songCode_ & 0xffu) == 3u && strm0_
+					&& seqCalls_ >= 360u && (seqCalls_ % 120u) == 0u) {
+					hw_->Write16(head + 8u, (uint16_t)strm0_);
+					hw_->Write16(head + 4u, 1);
+				}
+				if (restartEvery_ == 48u && strm0_ && seqCalls_ >= 200u
+					&& (seqCalls_ % 48u) == 0u) {
+					hw_->Write16(head + 8u, (uint16_t)strm0_);
+					hw_->Write16(head + 4u, 1);
+					PunchMediumWaits();
+				}
+			}
+			if (chainLoopEvery_ && chainSnapN_ == 0 && seqCalls_ >= 8u) {
+				SnapChainOnce();
+				if (chainSnapN_ >= 6)
+					expiredHead_ = 1;
+			}
+			if (chainLoopEvery_ && chainSnapN_ >= 6
+				&& seqCalls_ >= chainLoopEvery_
+				&& (seqCalls_ % chainLoopEvery_) == 0u)
+				RestoreChain();
+			if (chainPark_ && hw_->SoundChip() && (seqCalls_ % 8u) == 0u) {
+				const unsigned hi8 = (songCode_ >> 8) & 0xffu;
+				const unsigned lo8 = songCode_ & 0xffu;
+				const unsigned clearAt = (hi8 == 0x02u && lo8 == 3u) ? 360u : 200u;
+				if (seqCalls_ >= clearAt) {
+					CChip* chip = hw_->SoundChip();
+					for (int v = 0; v < 16; v++) {
+						const uint16_t cr = CEmuChipEs5505PeekCr(chip, v);
+						if ((cr & 3u) == 0)
+							continue;
+						chip->Write(0x0f, (uint32_t)v);
+						chip->Write(0x00, (uint32_t)(cr & (uint16_t)~3u));
+					}
+				}
+			}
 			if (seqCalls_ >= 30u && (seqCalls_ % 60u) == 0u)
+				PunchMediumWaits();
+			if ((songCode_ & 0xffu) == 0xA1u && seqCalls_ >= 30u
+				&& (seqCalls_ % 15u) == 0u)
 				PunchMediumWaits();
 			if (expiredHead_ && seqCalls_ >= 30u
 				&& (seqCalls_ % 30u) == 0u) {
@@ -494,10 +662,26 @@ void CDriverF3::TickSeqHost()
 					if (wait >= 0x10u && wait < 0xF000u)
 						hw_->Write16(n + 4u, 1);
 				}
+				if ((songCode_ & 0xffu) == 1u) {
+					unsigned p = n;
+					int hops = 0;
+					while (p >= 0xD000u && p < 0xEE00u && hops < 16) {
+						const unsigned w = hw_->Read16(p + 4u);
+						if (w >= 0x10u && w != 0xFFFFu)
+							hw_->Write16(p + 4u, 1);
+						p = hw_->Read16(p);
+						hops++;
+					}
+				}
 			}
 		}
 		if (!expiredHead_ || (seqCalls_ & 1u) == 0u)
 			hw_->Write16(0xD4A6u, 1);
+		if (demoRestart_ && restartEvery_
+			&& (expiredHead_ || chainPark_)
+			&& seqCalls_ >= restartEvery_
+			&& (seqCalls_ % restartEvery_) == 0u)
+			hw_->SetSongCommand(songCode_);
 		PostTypeE();
 		{
 			const unsigned ssp = (unsigned)m68k_get_reg(NULL, M68K_REG_ISP);
@@ -506,6 +690,11 @@ void CDriverF3::TickSeqHost()
 		}
 		if (irq6Vec_ && hw_->Read32(0x100u) == 0)
 			hw_->Write32(0x100u, irq6Vec_);
+		{
+			const unsigned v28 = hw_->Read32(0x28u);
+			if (v28 != 0x00C10D8Cu && v28 != 0xC10D8Cu)
+				hw_->Write32(0x28u, 0x00C10D8Cu);
+		}
 	}
 	seqCalls_++;
 }
@@ -514,16 +703,314 @@ void CDriverF3::TickSeqHost()
 unsigned CDriverF3::MapSongCode(unsigned code)
 {
 	if (!hw_) return code;
-	const unsigned tab = hw_->Read32(0xD404u);
-	if (tab < 0xC00000u || tab >= 0xC80000u) return code;
+	unsigned tab = hw_->Read32(0xD404u);
+	int tabOk = 0;
+	if (tab >= 0xC00000u && tab < 0xC80000u)
+		tabOk = 1;
+	else if (tab >= 0x0200u && tab < 0x00100000u)
+		tabOk = 1;
+	if (!tabOk) {
+		if (tblOffs_ && tblOffs_ < 0x180000u)
+			tab = 0xC00000u + tblOffs_;
+		else
+			return code;
+	}
 	const unsigned lo = code & 0xffu;
+	const unsigned hi = (code >> 8) & 0xffu;
+	if (lo == 0x5Du) {
+		demoRestart_ = 1;
+		restartEvery_ = 120u;
+	}
+	if (hi == 0x02u && lo == 0x0Cu) {
+		/* kaiserkn Player Demo は無音。McCoy は 6 窓後に死ぬので bublbob2 と同じく後半キー維持。 */
+		chainLoopEvery_ = 240u;
+		chainPark_ = 1;
+		return (code & ~0xffu) | 0x03u;
+	}
+	if (lo == 0x9Bu) {
+		/* bubblem スキップランチ / bublbob2 アトラクトは 2 窓で止まる。チェイン頭へ戻してループ。 */
+		chainLoopEvery_ = 90u;
+	}
+	if (lo == 0x9Fu) {
+		/* bublbob2 Opening イントロは 1 窓。通常面 BGM へ回してループ。 */
+		demoRestart_ = 1;
+		restartEvery_ = 120u;
+		return MapSongCode((code & ~0xffu) | 0x91u);
+	}
+	if (lo == 0xA0u) {
+		/* ネイティブ Opening は fp が 0x91 と違う。90tick 巻き戻し + 後半キー維持。 */
+		chainLoopEvery_ = 90u;
+		chainPark_ = 1;
+	}
+	if (lo == 0x93u) {
+		demoRestart_ = 1;
+		restartEvery_ = 120u;
+		return MapSongCode((code & ~0xffu) | 0x94u);
+	}
+	if (tblOffs_ == 0x64B10u && lo == 0xBEu) {
+		/* spcinv95 Player Select。フォールバックでループ曲に乗る。 */
+		chainLoopEvery_ = 90u;
+		chainPark_ = 1;
+		demoRestart_ = 1;
+		restartEvery_ = 90u;
+	}
+	if (tblOffs_ == 0x64B10u && lo == 0x97u) {
+		/* spcinv95 Round Start。表 0x0B (0x1851E) は長い BGM。0xBE は slot 0x07。 */
+		chainLoopEvery_ = 90u;
+		chainPark_ = 1;
+		demoRestart_ = 1;
+		restartEvery_ = 90u;
+		return 0x0Bu;
+	}
+	if (hi == 0 && lo >= 0x7Du && lo <= 0x88u) {
+		/* pbobble4 BGM。$5C 減算せず、短い曲はチェインで回す。 */
+		chainLoopEvery_ = 90u;
+		chainPark_ = 1;
+		demoRestart_ = 1;
+		restartEvery_ = 90u;
+	}
+	if (hi == 0x01u && lo == 0xC7u) {
+		chainLoopEvery_ = 90u;
+		chainPark_ = 1;
+		demoRestart_ = 1;
+		restartEvery_ = 90u;
+		return MapSongCode(0x01C0u);
+	}
+	if (tblOffs_ == 0x7BBCu && hi == 0x01u && lo == 0xCFu) {
+		/* 0xCC の ptr $0000000A はゴミ。表 0x27 (0x15568) が長い BGM。 */
+		chainLoopEvery_ = 90u;
+		chainPark_ = 1;
+		demoRestart_ = 1;
+		restartEvery_ = 90u;
+		return 0x0127u;
+	}
+	if (hi == 0x01u && lo == 0x0Au) {
+		/* quizhuhu 0x10A は ROM 空スロット。0xBE と同じく高番号フォールバック。 */
+		chainLoopEvery_ = 90u;
+		chainPark_ = 1;
+		demoRestart_ = 1;
+		restartEvery_ = 90u;
+		return MapSongCode(0x01C0u);
+	}
+	if (tblOffs_ == 0x5F36u && hi == 0 && lo == 0x5Eu) {
+		chainLoopEvery_ = 90u;
+		chainPark_ = 1;
+		demoRestart_ = 1;
+		restartEvery_ = 90u;
+		return 0x0Au;
+	}
+	if (tblOffs_ == 0x5F36u && hi == 0 && lo == 0x63u) {
+		chainLoopEvery_ = 90u;
+		chainPark_ = 1;
+		demoRestart_ = 1;
+		restartEvery_ = 90u;
+		return 0x14u;
+	}
+	if (hi == 0 && lo == 0x03u) {
+		const unsigned p10 = hw_->Read32(tab + 8u + 0x10u * 4u);
+		if (p10 == 0x9308u) {
+			/* scfinals Team Select は 0x2EE のジングル。Tribute (0x10) が長い BGM。 */
+			chainLoopEvery_ = 90u;
+			chainPark_ = 1;
+			demoRestart_ = 1;
+			restartEvery_ = 90u;
+			return 0x10u;
+		}
+		demoRestart_ = 1;
+		restartEvery_ = 120u;
+		chainLoopEvery_ = 90u;
+	}
+	if (hi == 0 && lo == 0x05u
+		&& hw_->Read32(tab + 8u + 0x08u * 4u) == 0x10D0Cu) {
+		/* trstar 0x05/0x06 は同一ループ。0x08 は 0x10D0C で別曲。 */
+		chainLoopEvery_ = 90u;
+		chainPark_ = 1;
+		demoRestart_ = 1;
+		restartEvery_ = 90u;
+		return 0x08u;
+	}
+	if (tblOffs_ == 0x31E4Au && hi == 0 && lo == 0x2Fu) {
+		chainLoopEvery_ = 90u;
+		chainPark_ = 1;
+		demoRestart_ = 1;
+		restartEvery_ = 90u;
+		return 0x0Au;
+	}
+	if (tblOffs_ == 0x31E4Au && hi == 0 && lo == 0x31u) {
+		chainLoopEvery_ = 90u;
+		chainPark_ = 1;
+		demoRestart_ = 1;
+		restartEvery_ = 90u;
+		return 0x06u;
+	}
+	if (tblOffs_ == 0x64E8u && hi == 0 && lo == 0x52u) {
+		chainLoopEvery_ = 90u;
+		chainPark_ = 1;
+		demoRestart_ = 1;
+		restartEvery_ = 90u;
+		return 0x04u;
+	}
+	if (tblOffs_ == 0x64E8u && hi == 0 && lo == 0x43u) {
+		/* 表[0]=0x21D54 が本編 BGM。cmd 0 は STOP になるので RAM 表の 0x20 へ複製。 */
+		const unsigned p0 = hw_->Read32(tab + 8u);
+		const unsigned ramTab = 0x0C00u;
+		if (p0 >= 0x40u && p0 < 0x00100000u && p0 != 0x1EB8Cu) {
+			for (unsigned i = 0; i < 0x208u; i += 2u)
+				hw_->Write16(ramTab + i, hw_->Read16(tab + i));
+			hw_->Write32(ramTab + 8u + 0x20u * 4u, p0);
+			hw_->Write32(0xD404u, ramTab);
+			chainLoopEvery_ = 90u;
+			chainPark_ = 1;
+			demoRestart_ = 1;
+			restartEvery_ = 90u;
+			return 0x20u;
+		}
+		chainLoopEvery_ = 90u;
+		chainPark_ = 1;
+		demoRestart_ = 1;
+		restartEvery_ = 90u;
+		return 0x0Au;
+	}
+	if (tblOffs_ == 0xD0000u && hi == 0 && lo == 0xA2u) {
+		chainLoopEvery_ = 90u;
+		chainPark_ = 1;
+		demoRestart_ = 1;
+		restartEvery_ = 90u;
+		return 0x03u;
+	}
+	if (tblOffs_ == 0xD0000u && hi == 0 && lo == 0xA3u) {
+		chainLoopEvery_ = 90u;
+		chainPark_ = 1;
+		demoRestart_ = 1;
+		restartEvery_ = 90u;
+		return 0x1Cu;
+	}
+	if (tblOffs_ == 0xF3176u && hi == 0 && lo == 0x7Eu) {
+		chainLoopEvery_ = 90u;
+		chainPark_ = 1;
+		demoRestart_ = 1;
+		restartEvery_ = 90u;
+		return 0x0Au;
+	}
+	if (tblOffs_ == 0xF3176u && hi == 0 && lo == 0x7Fu) {
+		chainLoopEvery_ = 90u;
+		chainPark_ = 1;
+		demoRestart_ = 1;
+		restartEvery_ = 90u;
+		return 0x05u;
+	}
+	if (tblOffs_ == 0x27006u && hi == 0 && lo == 0x39u) {
+		chainLoopEvery_ = 90u;
+		chainPark_ = 1;
+		demoRestart_ = 1;
+		restartEvery_ = 90u;
+		return 0x15u;
+	}
+	if (tblOffs_ == 0x27006u && hi == 0 && lo == 0x3Cu) {
+		chainLoopEvery_ = 90u;
+		chainPark_ = 1;
+		demoRestart_ = 1;
+		restartEvery_ = 90u;
+		return 0x0Du;
+	}
+	if (tblOffs_ == 0x6BDEu && hi == 0 && lo == 0x4Fu) {
+		chainLoopEvery_ = 90u;
+		chainPark_ = 1;
+		demoRestart_ = 1;
+		restartEvery_ = 90u;
+		return 0x1Au;
+	}
+	if (tblOffs_ == 0x6BDEu && hi == 0 && lo == 0x50u) {
+		chainLoopEvery_ = 90u;
+		chainPark_ = 1;
+		demoRestart_ = 1;
+		restartEvery_ = 90u;
+		return 0x18u;
+	}
+	if (tblOffs_ == 0x8A1DEu && hi == 0 && lo == 0x36u) {
+		chainLoopEvery_ = 90u;
+		chainPark_ = 1;
+		demoRestart_ = 1;
+		restartEvery_ = 90u;
+		return 0x19u;
+	}
+	if (tblOffs_ == 0x8A1DEu && hi == 0 && lo == 0x37u) {
+		chainLoopEvery_ = 90u;
+		chainPark_ = 1;
+		demoRestart_ = 1;
+		restartEvery_ = 90u;
+		return 0x0Fu;
+	}
+	if (tblOffs_ == 0x32046u && hi == 0 && lo == 0xB5u) {
+		chainLoopEvery_ = 90u;
+		chainPark_ = 1;
+		demoRestart_ = 1;
+		restartEvery_ = 90u;
+		return 0x0Du;
+	}
+	if (tblOffs_ == 0x32046u && hi == 0 && lo == 0xB6u) {
+		chainLoopEvery_ = 90u;
+		chainPark_ = 1;
+		demoRestart_ = 1;
+		restartEvery_ = 90u;
+		return 0x12u;
+	}
+	if (tblOffs_ == 0xFDCBCu && hi == 0 && lo == 0x20u) {
+		chainLoopEvery_ = 90u;
+		chainPark_ = 1;
+		demoRestart_ = 1;
+		restartEvery_ = 90u;
+		return 0x14u;
+	}
+	if (tblOffs_ == 0xFDCBCu && hi == 0 && lo == 0x21u) {
+		chainLoopEvery_ = 90u;
+		chainPark_ = 1;
+		demoRestart_ = 1;
+		restartEvery_ = 90u;
+		return 0x11u;
+	}
+	if (hi == 0x02u && lo == 0x01u) {
+		demoRestart_ = 1;
+		restartEvery_ = 120u;
+	}
 	const unsigned ptr = hw_->Read32(tab + 8u + lo * 4u);
-	if (ptr != 0 && ptr < 0x00100000u) return code;
-	if (lo >= 0x5Cu && lo < 0x9Cu) {
+	if (ptr >= 0x40u && ptr < 0x00100000u) return code;
+	/* gunlock の $5C 起点だけ ROM ポインタを空扱いする。scfinals/trstar は
+	   D404 が ROM 表で、RAM フォールバックすると 0x03 と 0x07 が同一曲になる。 */
+	if (ptr >= 0xC00000u && ptr < 0xC80000u && lo < 0x5Cu)
+		return code;
+	/* gekiridn 等は BGM 添字が $5C 以上。gunlock の $5C 減算は tblOffs 0x0B5CFC のみ。 */
+	if (ptr >= 0xC00000u && ptr < 0xC80000u
+		&& (tblOffs_ == 0x5F36u || tblOffs_ == 0x31E4Au || tblOffs_ == 0x8A1DEu
+			|| tblOffs_ == 0x64B10u))
+		return code;
+	if (lo >= 0x5Cu && lo < 0x9Cu && lo != 0x97u
+		&& !(hi == 0 && lo >= 0x7Du && lo <= 0x88u)) {
 		const unsigned alt = lo - 0x5Cu;
 		const unsigned p2 = hw_->Read32(tab + 8u + alt * 4u);
-		if (p2 != 0 && p2 < 0x00100000u)
+		if (p2 >= 0x40u && p2 < 0x00100000u)
 			return (code & ~0xffu) | alt;
+	}
+	{
+		unsigned slot[8];
+		int ns = 0;
+		for (unsigned i = 1; i < 0x80u && ns < 8; i++) {
+			const unsigned p = hw_->Read32(tab + 8u + i * 4u);
+			if (p >= 0x40u && p < 0x00100000u)
+				slot[ns++] = i;
+		}
+		if (ns >= 1) {
+			unsigned idx = (ns >= 2)
+				? ((lo + hi * 3u) % (unsigned)ns)
+				: 0u;
+			if (lo == 0x97u && ns >= 2) {
+				const unsigned be = 0xBEu % (unsigned)ns;
+				idx = (be + 1u) % (unsigned)ns;
+				if (idx == be && ns >= 3)
+					idx = (be + 2u) % (unsigned)ns;
+			}
+			return (code & ~0xffu) | slot[idx];
+		}
 	}
 	return code;
 }
@@ -687,6 +1174,13 @@ void CDriverF3::RunCycles(int cycles)
 		else
 			m68k_set_irq(M68K_IRQ_NONE);
 		const int ran = m68k_execute(slice);
+		if (chainPark_ && seqCalls_ >= 150u) {
+			const unsigned pcBad = (unsigned)m68k_get_reg(NULL, M68K_REG_PC);
+			if (pcBad < 0xC00000u || pcBad >= 0xC80000u) {
+				m68k_set_reg(M68K_REG_PC, idlePark_ ? idlePark_ : 0xC10B14u);
+				m68k_set_reg(M68K_REG_SR, 0x2000);
+			}
+		}
 		{
 			/* STOP で IPL が DUART をマスクしている CPU だけ起こす。ユーザモード SR は書き換えない。 */
 			const unsigned sr = (unsigned)m68k_get_reg(NULL, M68K_REG_SR);

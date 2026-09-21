@@ -5733,6 +5733,7 @@ void CHardPc98::BindDosTriggerSong(const CEmuGameEntry* ge, unsigned titleCode)
 		NULL
 	};
 	static const char* kBgmlSong[] = { "BGML_98", "bgml", NULL };
+	static const char* kN3gvSeek[] = { "n3gv2", "N3GV2", NULL };
 	static const char* kLudyMagic[] = {
 		"LUDY", "ludy", "SCBIOS",
 		"MAGIC_98", "magic_98", "MAGIC_", "magic_",
@@ -5782,8 +5783,27 @@ void CHardPc98::BindDosTriggerSong(const CEmuGameEntry* ge, unsigned titleCode)
 			"usd_98", "usd98",
 			NULL
 		};
-		if (DosShellStarts(ge, kUsdSong))
+		if (DosShellStarts(ge, kUsdSong)) {
 			opensByName = 0;
+			/* ADVH F1 EB 06 は DS:0 ASCIIZ を AH=3D。EB 0F（watagolf）はメモリロードで曲バイト必須。 */
+			if (dos_.FindFile("ADVH.EXE")) {
+				int memLoad = 0;
+				uint8_t* mem = np2_mem();
+				if (mem) {
+					const unsigned oF1 = (unsigned)mem[0xF1 * 4]
+						| ((unsigned)mem[0xF1 * 4 + 1] << 8);
+					const unsigned sF1 = (unsigned)mem[0xF1 * 4 + 2]
+						| ((unsigned)mem[0xF1 * 4 + 3] << 8);
+					const unsigned p = (sF1 << 4) + oF1;
+					if (sF1 && sF1 != (unsigned)DOS98_TRAMP_SEG
+						&& p + 2u < 0x200000u
+						&& mem[p] == 0xEB && mem[p + 1] == 0x0F)
+						memLoad = 1;
+				}
+				if (!memLoad)
+					opensByName = 1;
+			}
+		}
 	}
 	/* USDDRV98.COM cmd0 はハンドル 0 から 0x1F の ASCIIZ 名を AH=3F し INT F1 AX=0。曲バイトだと Open が失敗する。 */
 	{
@@ -5883,6 +5903,28 @@ void CHardPc98::BindDosTriggerSong(const CEmuGameEntry* ge, unsigned titleCode)
 		/* mmd2/iwaplay: IN 7E4 はボイス/TON ハンドル（カタログ byte2、またはタイトルが 0x10 風ならハンドル 5）。byte2!=0 は EXT_SONG=voice にしてバンクを飛ばしていた — dumps>0 / keyOn=0。 */
 		extSong_ = (uint16_t)(titleCode & 0xff);
 		extParam_ = byte2 ? (uint16_t)byte2 : 5;
+		/* iwaplay.com 入口は BX=5 から TON を AH=3F し pos を EOF にする。cmd0 の再読が CF だと
+		   曲 AH=3F BX=0 まで到達せず keyOn=1。カタログ offset=7E4 を結び直し pos=0。 */
+		{
+			const unsigned vh = (unsigned)extParam_;
+			if (ge && vh < (unsigned)DOS98_HANDLE_MAX) {
+				for (int i = 0; i < ge->romCount; i++) {
+					const CEmuRomEntry* r = &ge->rom[i];
+					if (_stricmp(r->type, "file") != 0 && _stricmp(r->type, "voice") != 0)
+						continue;
+					if ((unsigned)r->offset != vh)
+						continue;
+					const char* base = r->name ? r->name : "";
+					for (const char* p = base; *p; p++) {
+						if (*p == '\\' || *p == '/' || *p == ':')
+							base = p + 1;
+					}
+					if (base[0])
+						dos_.SetHandle((uint16_t)vh, base);
+					break;
+				}
+			}
+		}
 	} else if (pc88VaIo_) {
 		/* PC-88VA DOS オーバーレイ糊（tetrisva/rtypeva/shinrava/famista*）: IN 7E4 は EXT_PARAM 下位バイトだけを再生モードとして読む。タイトルは 0x0001xxxx（tetrisva）または 0xNN0000xx（rtype 0x01000010 / famista 0x04000010）— byte2、0 なら byte3。olteus.com INT7F cmd0 = far 00DF（init）のあと IN AX,7E2 + far 03F0（play）。cmd2 は init のみ — EXT_CMD=0 のまま play が走る。 */
 		extSong_ = (uint16_t)(titleCode & 0xff);
@@ -5894,6 +5936,12 @@ void CHardPc98::BindDosTriggerSong(const CEmuGameEntry* ge, unsigned titleCode)
 		/* Bio_100% BGML_98: INT 7F cmd0 は EXT_SONG を 16bit タイトルとして読む（07E2/07E3）。カタログ 0x01nn はワンショット。0x00nn はループ BGM。 */
 		extSong_ = (uint16_t)(titleCode & 0xffff);
 		extParam_ = 0;
+	} else if (ge && DosShellStarts(ge, kN3gvSeek)) {
+		/* n3gv2/n3gv11: INT7F cmd0 は IN 7E4/7E5 を CX スキップバイトにして
+		   ハンドル 0 を AH=3F。タイトル 0xSSSS00FF の上位語がシーク。
+		   既定 byte2→EXT_SONG は 2 回目 poke で CX=0 になり MUSIC.SDT 先頭（表）を再生する。 */
+		extSong_ = (uint16_t)(titleCode & 0xff);
+		extParam_ = (uint16_t)((titleCode >> 16) & 0xffff);
 	} else if (ge) {
 		static const char* kYnsound[] = {
 			"ynsound", "YNSOUND", "yns_98", "YNS_98", NULL
@@ -8670,6 +8718,16 @@ static void PatchMfd98Int42Keep(uint8_t* mem)
 	s_mfd98GlueCs = cs;
 }
 
+/* Packen MUAPLAY 1.21R6F（kidsap/qroad/wa_1/presence）: 常駐確認は INT14 が
+   CS:03CE か見る。未常駐なら本体が XCHG で INT14/INT60 を植える。空コマンド
+   行だけは字句 STC で確認パスへ落ちるので、呼び出し側で -Z を残す。 */
+static void PatchMuaplayIvtSentinel(uint8_t* mem)
+{
+	/* 常駐確認 CALL を植込へ差し替えると未初期化 ISR になる。
+	   コマンド行は RunDosCommand が -Z を残す（空 PSP は字句 STC で INT18 待ち）。 */
+	(void)mem;
+}
+
 /* 142 バイト NC_98.com（3x3eyes MIDI）: INT 7F cmd0 が conin 名を CS:017E へ読み XOR SI,SI / INT 42 AX=0。NC.COM AX=0 は DS:SI（ファイル名）から 128 バイト REP MOVSB — SI=0 は名ではなく COM ヘッダをコピーし、PIT ISR は CC 全ノートオフだけ出す（midi=0/2880）。 */
 static void PatchNc98FilenameSi(uint8_t* mem)
 {
@@ -9066,6 +9124,35 @@ int CHardPc98::RunDosCommand(const char* cmdline, uint64_t budgetCycles)
 	char tail[160];
 	DosStripHash(cmdline, stripped, (int)sizeof(stripped));
 	DosSplitCmd(stripped, name, (int)sizeof(name), tail, (int)sizeof(tail));
+	/* GREAT カタログ `muaplay -Z -f9`。Packen MUAPLAY 1.21 の -Fx はフェード速度
+	   （0 が最長、9 が最速）でボード番号ではない。PSP が空（80h=0 / 81h=CR）だと
+	   オプション字句が STC で終わり、未常駐なのに INT18 AH=0 の CR 待ちへ落ち、
+	   INT60 を植えない。-Z（ポートウェイト×2）は残し、-F だけ落とす。 */
+	if (_strnicmp(name, "muaplay", 7) == 0) {
+		char kept[160];
+		int o = 0;
+		const char* p = tail;
+		while (*p) {
+			while (*p == ' ' || *p == '\t')
+				p++;
+			if (!*p)
+				break;
+			if ((p[0] == '-' || p[0] == '/')
+				&& (p[1] == 'F' || p[1] == 'f')
+				&& p[2] >= '0' && p[2] <= '9') {
+				p += 3;
+				continue;
+			}
+			if (o && o + 1 < (int)sizeof(kept))
+				kept[o++] = ' ';
+			while (*p && *p != ' ' && *p != '\t' && o + 1 < (int)sizeof(kept))
+				kept[o++] = *p++;
+		}
+		kept[o] = 0;
+		if (!kept[0])
+			memcpy(kept, "-Z", 3);
+		memcpy(tail, kept, strlen(kept) + 1);
+	}
 	const unsigned char* image = NULL;
 	unsigned imageSize = 0;
 	int isExe = 0;
@@ -9111,6 +9198,7 @@ int CHardPc98::RunDosCommand(const char* cmdline, uint64_t budgetCycles)
 	} else if (!isExe) {
 		PatchMfd98Int42Keep(mem);
 		PatchNc98FilenameSi(mem);
+		PatchMuaplayIvtSentinel(mem);
 	}
 
 	dosStubReady_ = 0;
@@ -9127,6 +9215,16 @@ int CHardPc98::RunDosCommand(const char* cmdline, uint64_t budgetCycles)
 		if (s_mfd98GlueCs && cs == s_mfd98GlueCs && ip == 0x112)
 			return 1;
 		uint8_t* m = np2_mem();
+		/* n3gv2.com: INT7F/INT D2 を植えたあと `MOV AX,9801 / INT 18 / JMP $-5` で常駐。
+		   8 秒予算を焼き切らず、mfd 糊の INT18 keep と同じくここで抜ける。 */
+		if (m) {
+			const unsigned keep = ((unsigned)cs << 4) + (unsigned)ip;
+			if (keep + 7u < 0x200000u
+				&& m[keep] == 0xB8 && m[keep + 1] == 0x01 && m[keep + 2] == 0x98
+				&& m[keep + 3] == 0xCD && m[keep + 4] == 0x18
+				&& m[keep + 5] == 0xEB && m[keep + 6] == 0xF9)
+				return 1;
+		}
 		if (s_fmxCalibAssist && m) {
 			const unsigned physWait = ((unsigned)cs << 4) + (unsigned)ip;
 			if (physWait + 6u < 0x200000u
@@ -10498,11 +10596,33 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 			   rance4_2 の偶数・奇数が同じワンショットになる。 */
 			extParam_ = (uint16_t)((titleCode >> 16) & 0xffff);
 			if (dosSong_[0]) {
-				dos_.SetHandle(0, dosSong_);
-				dos_.SetHandle(5, dosSong_);
-				dos_.SetHandle(0x0B, dosSong_);
-				if (song < (unsigned)DOS98_HANDLE_MAX)
-					dos_.SetHandle((uint16_t)song, dosSong_);
+				int usdNameOpen = 0;
+				if (dosGe_) {
+					static const char* kUsdName[] = { "usd_98", "usd98", NULL };
+					if (DosShellStarts(dosGe_, kUsdName) && dos_.FindFile("ADVH.EXE")) {
+						uint8_t* mem = np2_mem();
+						if (mem) {
+							const unsigned oF1 = (unsigned)mem[0xF1 * 4]
+								| ((unsigned)mem[0xF1 * 4 + 1] << 8);
+							const unsigned sF1 = (unsigned)mem[0xF1 * 4 + 2]
+								| ((unsigned)mem[0xF1 * 4 + 3] << 8);
+							const unsigned p = (sF1 << 4) + oF1;
+							if (sF1 && sF1 != (unsigned)DOS98_TRAMP_SEG
+								&& p + 2u < 0x200000u
+								&& mem[p] == 0xEB && mem[p + 1] == 0x06)
+								usdNameOpen = 1;
+						}
+					}
+				}
+				/* BindDos が ASCIIZ 名を置いたハンドル 0 を曲バイトで潰すと
+				   EB 06 の AH=3D が USO 先頭 01 00 を名前にして Open 失敗する。 */
+				if (!usdNameOpen) {
+					dos_.SetHandle(0, dosSong_);
+					dos_.SetHandle(5, dosSong_);
+					dos_.SetHandle(0x0B, dosSong_);
+					if (song < (unsigned)DOS98_HANDLE_MAX)
+						dos_.SetHandle((uint16_t)song, dosSong_);
+				}
 			}
 		}
 		if (g_sddLoadSeg && dosSong_[0]) {
@@ -11048,6 +11168,9 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 		static const char* kSs98Once[] = { "SS_98", "ss_98", "SSD_98", "ssd_98", NULL };
 		/* MMD2 糊 cmd0 INT D2 AH=3 は [f8f] を STI 待ちしてからロード+AH=1。2 回目 INT 7F は AH=3 に再入（0x27 は再組しない）し、レンダポンプがその待ちを出ない（michael/orangerd）。 */
 		static const char* kMmdOnce[] = { "mmd2", "MMD2", "mmd2va", NULL };
+		/* n3gv2 cmd0: INT D2 AH=2 停止 + 7E4 スキップ読 + AH=7 ロード + AH=1 再生。
+		   2 回目 poke は BindDos 既定で EXT_PARAM を潰し、曲ファイル先頭を再ロードしてワンショット化する。 */
+		static const char* kN3gvOnce[] = { "n3gv2", "N3GV2", NULL };
 		static const char* kOpndrvOnce[] = { "fugam", "fgplay", NULL };
 		/* olteus オーバーレイ再生（INT7F cmd2 → MAP:D471）は 20KB MUS+MTB を載せる。2 回目 poke は DEF1 途中でロードを再開。 */
 		static const char* kOlteusOnce[] = { "olteus", NULL };
@@ -11089,7 +11212,8 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 			|| DosShellStarts(dosGe_, kSynupsOnce)
 			|| DosShellStarts(dosGe_, kValkyOnce)
 			|| DosShellStarts(dosGe_, kFmxOnce)
-			|| DosShellStarts(dosGe_, kFmpOnce))));
+			|| DosShellStarts(dosGe_, kFmpOnce)
+			|| DosShellStarts(dosGe_, kN3gvOnce))));
 		if (repeatPlay) {
 			if (dosGe_)
 				BindDosTriggerSong(dosGe_, titleCode);
@@ -11375,13 +11499,15 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 								| ((unsigned)mem[base + songOff + 1] << 8);
 							unsigned advhLen = (unsigned)mem[base + lenOff]
 								| ((unsigned)mem[base + lenOff + 1] << 8);
-							/* INT7F が空バッファを残したら DOS ファイル表（実ディスク内容）から USO を実体化 */
-							if (dosSong_[0]) {
+							const unsigned ent = (sF1 << 4)
+								+ ((unsigned)mem[0xF1 * 4] | ((unsigned)mem[0xF1 * 4 + 1] << 8));
+							const int nameLoad = (ent + 2u < 0x200000u
+								&& mem[ent] == 0xEB && mem[ent + 1] == 0x06);
+							/* INT7F が空バッファを残したら DOS ファイル表から USO を実体化。
+							   EB 06 名前ロードは DS:0 ASCIIZ。曲バイトを 2002 に置くと再入の AL=0 がヘッダの 0 までをファイル名と見なし全タイトル同じ 15 key になる。 */
+							if (dosSong_[0] && !nameLoad) {
 								const CEmuDos98File* sf = dos_.FindFile(dosSong_);
-								const int need = (!advhLen || !songSeg
-									|| (songSeg << 4) + 4 >= 0x200000u
-									|| (mem[songSeg << 4] == 0 && mem[(songSeg << 4) + 1] == 0));
-								if (sf && sf->data && sf->size && sf->size < 0xF000u && need) {
+								if (sf && sf->data && sf->size && sf->size < 0xF000u) {
 									unsigned dest = songSeg;
 									if (!dest || dest == (unsigned)DOS98_TRAMP_SEG || dest < 0x1000u)
 										dest = 0x2002;
@@ -11397,14 +11523,11 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 									}
 								}
 							}
-							const unsigned ent = (sF1 << 4)
-								+ ((unsigned)mem[0xF1 * 4] | ((unsigned)mem[0xF1 * 4 + 1] << 8));
-							const int nameLoad = (ent + 10 < 0x200000u
-								&& mem[ent] == 0xEB && mem[ent + 1] == 0x06
-								&& mem[ent + 2] == 'U');
 							const unsigned tramp = 0x50000;
 							unsigned ti = 0;
 							if (nameLoad && dosSong_[0]) {
+								static int s_nameLoadReplay = 0;
+								if (!s_nameLoadReplay) {
 								unsigned ns = 0x2002;
 								unsigned np = ns << 4;
 								unsigned i = 0;
@@ -11420,7 +11543,7 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 									memcpy(isrSave, mem + fb + 0x4AB, 0x100);
 									isrSaved = 1;
 								}
-								/* AL=0（早い CS+0x33 は無傷）、AL=1 bind（BootDos が bind 即値を CS へ付け替え）。bind が @04AB で枠を歩いたあと ISR を復元。 */
+								/* AL=0（早い CS+0x33 は無傷）、AL=1 bind。04AB はチャネル BSS なので復元しない。 */
 								mem[tramp + ti++] = 0xB8;
 								mem[tramp + ti++] = (uint8_t)(ns & 0xff);
 								mem[tramp + ti++] = (uint8_t)((ns >> 8) & 0xff);
@@ -11456,15 +11579,10 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 								ti = 0;
 								if (isrSaved)
 									memcpy(mem + fb + 0x4AB, isrSave, 0x100);
-								/* TriggerPlay に一度だけ再入。直後に戻り、後の ISR/タイマ補助が再再生を mute できないように。 */
-								{
-									static int s_nameLoadReplay = 0;
-									if (!s_nameLoadReplay) {
-										s_nameLoadReplay = 1;
-										const int ok = TriggerPlay(titleCode);
-										s_nameLoadReplay = 0;
-										return ok;
-									}
+								s_nameLoadReplay = 1;
+								const int ok = TriggerPlay(titleCode);
+								s_nameLoadReplay = 0;
+								return ok;
 								}
 							} else if (songSeg && advhLen && advhLen < 0xF000u) {
 								mem[tramp + ti++] = 0xB8;
@@ -11650,7 +11768,7 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 								mem[PC98_OPN_IRQ_VEC * 4 + 3] = (uint8_t)((isrSeg >> 8) & 0xff);
 							}
 							picMask_ = (uint8_t)(picMask_ & ~(1u << 3));
-							/* 名前ロード ADVH: AL=1 はノートを組むが再生／チャネル BSS は薄い。ここで Timer A/B を強制すると OEM ISR がすぐ走り全部キーオフ（peak→0）。メモリロード（EB 0F / watagolf）は自分で武装。 */
+							/* メモリロード（EB 0F / watagolf）は自分で武装。04AB へ植えると bind ノートをキーオフ。 */
 							if (chip_) {
 								chip_->Write(0, 0x27);
 								chip_->Write(1, 0x3F);
@@ -11674,12 +11792,14 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 			};
 			/* ASCII music -r + music_98: INT48 API。接頭 "music" が HuLinks INT70 mute に乗る。cmd2 は INT48 AH=3 停止。 */
 			static const char* kAsciiMusicR[] = { "music -r", "music_98", NULL };
+			static const char* kMusicP[] = { "musicp", "MUSICP", NULL };
 			const int asciiMusicR = DosShellStarts(dosGe_, kAsciiMusicR);
 			const int play5Family = DosShellStarts(dosGe_, kPlay5Fam);
 			static const char* kOlteusNotStar[] = { "olteus", NULL };
 			const int starPlay = DosShellStarts(dosGe_, kStarPlay)
 				&& !play5Family
 				&& !asciiMusicR
+				&& !DosShellStarts(dosGe_, kMusicP)
 				&& !DosShellStarts(dosGe_, kOlteusNotStar);
 			if (starPlay)
 				musicComKeepalive_ = 1;
@@ -11755,6 +11875,8 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 				"MMIZ3", "MMIZ3_98",
 				"g3m", "G3M",
 				"nmd", "NMD",
+				/* n3gv2 cmd0 は既に INT D2 AH=7/AH=1。cmd2 は AX=0308（kSkipCmd2）。n3gv11 は別 COM。 */
+				"n3gv2", "N3GV2",
 				"hmm", "HMM",
 				"gbgm", "gbgmp",
 				"INT7C",
@@ -11826,6 +11948,7 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 				"MMIZ3", "MMIZ3_98",
 				"g3m", "G3M",
 				"nmd", "NMD",
+				"n3gv2", "N3GV2",
 				"hmm", "HMM",
 				"gbgm", "gbgmp",
 				"INT7C",

@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include "afxwin.h"
 #include "afxcmn.h"
 // CPlayList ダイアログ
@@ -136,7 +136,7 @@ public:
 	afx_msg void OnDropFiles(HDROP hDropInfo);
 	afx_msg void OnNMDblclkList1(NMHDR *pNMHDR, LRESULT *pResult);
 	afx_msg void OnSize(UINT nType, int cx, int cy);
-#if WIN64
+#if defined(_WIN64)
 	afx_msg void OnTimer(UINT_PTR nIDEvent);
 #else
 	afx_msg void OnTimer(UINT nIDEvent);

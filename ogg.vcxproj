@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003" DefaultTargets="Build" ToolsVersion="14.0">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="uni_2026_de|Win32">
@@ -48,7 +48,10 @@
     <ConfigurationType>Application</ConfigurationType>
     <UseOfMfc>Static</UseOfMfc>
     <CharacterSet>Unicode</CharacterSet>
-    <PlatformToolset>$(OggPlatformToolset)</PlatformToolset>
+    <CLRSupport>false</CLRSupport>
+    <WholeProgramOptimization>false</WholeProgramOptimization>
+    <PlatformToolset>Intel C++ Compiler 2026</PlatformToolset>
+    <SpectreMitigation>Spectre</SpectreMitigation>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='uni_2026_de|x64'" Label="Configuration">
     <ConfigurationType>Application</ConfigurationType>
@@ -111,6 +114,12 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">
     <!-- Windows SDK の d3dcompiler.lib(_47) を DirectX SDK 2010(_42) より優先。WindowsSDKLibVersion は空になることがあるので TargetPlatformVersion を使う -->
     <LibraryPath>$(WindowsSdkDir)Lib\$(TargetPlatformVersion)\um\x86;$(ProjectDir);C:\DirectX SDK (February 2010)\Lib\x86;C:\DXSDK\Lib;C:\Microsoft SDKs\Windows\v6.0\Samples\Multimedia\DirectShow\BaseClasses;$(LibraryPath)</LibraryPath>
+    <IncludePath>$(ProjectDir);$(ProjectDir)zstd;$(ProjectDir)third_party\aimp;$(ProjectDir)third_party\vst3sdk;$(ProjectDir)third_party\signalsmith-stretch\include;$(ProjectDir)third_party\signalsmith-linear\include;$(ProjectDir)minizip;C:\Microsoft SDKs\Windows\v6.0\Samples\Multimedia\DirectShow\BaseClasses;C:\ogg\include;C:\PROJECTS\APPLICATION3\faad2-2.7\common\mp4ff;C:\PROJECTS\APPLICATION3\faad2-2.7\include;$(VC_IncludePath);$(IncludePath)</IncludePath>
+    <TargetName>oggYSEDbgm_uni_avx2</TargetName>
+    <TargetPath>C:\PROJECTS\APPLICATION3\ogg_binary\oggYSEDbgm_uni_avx2.exe</TargetPath>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">
+    <LibraryPath>$(ProjectDir)x64lib;$(WindowsSdkDir)Lib\$(TargetPlatformVersion)\um\x64;C:\DirectX SDK (February 2010)\Lib\x64;C:\DXSDK\Lib\x64;$(LibraryPath)</LibraryPath>
     <IncludePath>$(ProjectDir);$(ProjectDir)zstd;$(ProjectDir)third_party\aimp;$(ProjectDir)third_party\vst3sdk;$(ProjectDir)third_party\signalsmith-stretch\include;$(ProjectDir)third_party\signalsmith-linear\include;$(ProjectDir)minizip;C:\Microsoft SDKs\Windows\v6.0\Samples\Multimedia\DirectShow\BaseClasses;C:\ogg\include;C:\PROJECTS\APPLICATION3\faad2-2.7\common\mp4ff;C:\PROJECTS\APPLICATION3\faad2-2.7\include;$(VC_IncludePath);$(IncludePath)</IncludePath>
     <TargetName>oggYSEDbgm_uni_avx2</TargetName>
     <TargetPath>C:\PROJECTS\APPLICATION3\ogg_binary\oggYSEDbgm_uni_avx2.exe</TargetPath>
@@ -303,43 +312,80 @@
       </HeaderFileName>
     </Midl>
     <ClCompile>
-      <AdditionalOptions>/FS /utf-8 %(AdditionalOptions)</AdditionalOptions>
       <Optimization>MaxSpeed</Optimization>
       <InlineFunctionExpansion>AnySuitable</InlineFunctionExpansion>
-      <PreprocessorDefinitions>WIN32;NDEBUG;_WINDOWS;_CRT_SECURE_NO_WARNINGS;FPM_INTEL;_LIB;HAVE_CONFIG_H;ASO_ZEROCHECK;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
+      <OmitFramePointers>true</OmitFramePointers>
+      <EnableFiberSafeOptimizations>true</EnableFiberSafeOptimizations>
+      <PreprocessorDefinitions>TARGET_RT_LITTLE_ENDIAN;WIN32;DEBUG;_UNICODE;_WINDOWS;_CRT_SECURE_NO_WARNINGS;FPM_INTEL;_LIB;HAVE_CONFIG_H;ASO_ZEROCHECK;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <StringPooling>true</StringPooling>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <EnableEnhancedInstructionSet>AdvancedVectorExtensions2</EnableEnhancedInstructionSet>
-      <ForceConformanceInForLoopScope>false</ForceConformanceInForLoopScope>
-      <PrecompiledHeader>
-      </PrecompiledHeader>
-      <PrecompiledHeaderOutputFile>$(IntDir)ogg.pch</PrecompiledHeaderOutputFile>
+      <ForceConformanceInForLoopScope>true</ForceConformanceInForLoopScope>
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <PrecompiledHeaderFile>stdafx.h</PrecompiledHeaderFile>
+      <PrecompiledHeaderOutputFile>$(IntDir)$(TargetName).pch</PrecompiledHeaderOutputFile>
       <AssemblerListingLocation>$(IntDir)</AssemblerListingLocation>
       <ObjectFileName>$(IntDir)</ObjectFileName>
       <ProgramDataBaseFileName>$(IntDir)</ProgramDataBaseFileName>
-      <BrowseInformation>true</BrowseInformation>
+      <BrowseInformation>false</BrowseInformation>
       <WarningLevel>Level2</WarningLevel>
       <SuppressStartupBanner>true</SuppressStartupBanner>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <FloatingPointModel>Fast</FloatingPointModel>
+      <WholeProgramOptimization>false</WholeProgramOptimization>
+      <StructMemberAlignment>16Bytes</StructMemberAlignment>
+      <UndefinePreprocessorDefinitions>
+      </UndefinePreprocessorDefinitions>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+      <IntelJCCErratum>false</IntelJCCErratum>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <LanguageStandard_C>stdc17</LanguageStandard_C>
+      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+      <DisableSpecificWarnings>4828;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+      <AdditionalIncludeDirectories>$(ProjectDir)CEmu;$(ProjectDir)..\kpi_sources_20240712\kpi_decoder\kbmdx\source\portable_mdx\include;..\kpi_sources_20240712\kpi_decoder\kbmdx\source\mdc;$(ProjectDir)..\kpi_sources_20240712\kpi_decoder\kbmdx\source\portable_mdx\src\mxdrv;$(ProjectDir)..\kpi_sources_20240712\kpi_decoder\kbmdx\source\portable_mdx\src\x68sound;$(ProjectDir)kb_sasami\source;$(ProjectDir)kb_sasami\source\ymfm;$(ProjectDir)CEmu\s98;$(ProjectDir)CEmu\s98\device;$(ProjectDir)CEmu\s98\device\fmgen;$(ProjectDir)CEmu\z80;$(ProjectDir)CEmu\fmmon;$(ProjectDir)CEmu\vendor\np2\glue;$(ProjectDir)CEmu\vendor\np2\include;$(ProjectDir)CEmu\vendor\np2\cpu;$(ProjectDir)CEmu\vendor\musashi;$(ProjectDir)CEmu\vendor\mc6809;$(ProjectDir)CEmu\vendor\m6502;$(ProjectDir)CEmu\vendor\h6280;$(ProjectDir)CEmu\vendor\h8;$(ProjectDir)CEmu\vendor\hd63701;$(ProjectDir)CEmu\vendor\m6803;$(ProjectDir)CEmu\vendor\multipcm;$(ProjectDir)CEmu\vendor\v35;$(ProjectDir)CEmu\vendor\m37710;$(ProjectDir)CEmu\vendor\np2;$(ProjectDir)..\kpi_sources_20240712\kpi_decoder\kbs98\source\device;$(ProjectDir)..\kpi_sources_20240712\kpi_decoder\kbs98\source\device\mame;$(ProjectDir)..\kpi_sources_20240712\kpi_decoder\kbs98\source\device\emu2413;$(ProjectDir)zstd;$(ProjectDir)third_party\signalsmith-stretch\include;$(ProjectDir)third_party\signalsmith-linear\include;$(ProjectDir)third_party\aimp;$(ProjectDir)third_party\vst3sdk;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <EnableParallelCodeGeneration>true</EnableParallelCodeGeneration>
+      <OpenMPSupport>true</OpenMPSupport>
     </ClCompile>
     <ResourceCompile>
       <PreprocessorDefinitions>NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <Culture>0x0411</Culture>
     </ResourceCompile>
     <Link>
-      <AdditionalDependencies>libvorbisfile_static.lib;libogg_static.lib;libvorbis_static.lib;winmm.lib;dxguid.lib;dsound.lib;strmiids.lib;libmad.lib;mfuuid.lib;libz-static.lib;%(AdditionalDependencies)</AdditionalDependencies>
-      <OutputFile>C:\FALCOM\ED_SORA2\BGM\oggYSEDbgm.exe</OutputFile>
+      <AdditionalDependencies>$(ProjectDir)x64lib\opusfile_avx2_2026.lib;$(ProjectDir)x64lib\opus_avx2_2026.lib;$(WindowsSdkDir)Lib\$(TargetPlatformVersion)\um\x64\Strmbase.lib;comctl32.lib;mfuuid.lib;mfplat.lib;mfreadwrite.lib;User32.lib;uafxcw.lib;$(ProjectDir)x64lib\libogg_static_avx2_2026.lib;$(ProjectDir)x64lib\libvorbis_static_avx2_2026.lib;$(ProjectDir)x64lib\libvorbisfile_static_avx2_2026.lib;winmm.lib;dxguid.lib;dinput8.lib;dsound.lib;strmiids.lib;$(ProjectDir)x64lib\libmad_avx2_2026.lib;$(ProjectDir)x64lib\libFLAC_static_avx2_2026.lib;$(ProjectDir)x64lib\libsoxr_avx2_2026.lib;dwmapi.lib;d3d11.lib;dxgi.lib;$(WindowsSdkDir)Lib\$(TargetPlatformVersion)\um\x64\d3dcompiler.lib;windowsapp.lib;$(ProjectDir)x64lib\libz-static.lib;$(ProjectDir)x64lib\libzstd_static.lib;$(ProjectDir)x64lib\rubberband-library_2026.lib;psapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <OutputFile>C:\PROJECTS\APPLICATION3\ogg_binary\oggYSEDbgm_uni_avx2.exe</OutputFile>
       <SuppressStartupBanner>true</SuppressStartupBanner>
-      <ProgramDatabaseFile>sse/oggYSEDbgm.pdb</ProgramDatabaseFile>
+      <ProgramDatabaseFile>$(IntDir)oggYSEDbgm_uni_avx2.pdb</ProgramDatabaseFile>
       <SubSystem>Windows</SubSystem>
+      <OptimizeReferences>true</OptimizeReferences>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <TargetMachine>MachineX64</TargetMachine>
+      <LinkTimeCodeGeneration>UseLinkTimeCodeGeneration</LinkTimeCodeGeneration>
+      <IgnoreSpecificDefaultLibraries>uafxcw.lib</IgnoreSpecificDefaultLibraries>
+      <GenerateDebugInformation>DebugFull</GenerateDebugInformation>
+      <TurnOffAssemblyGeneration>false</TurnOffAssemblyGeneration>
+      <HeapReserveSize>2097152</HeapReserveSize>
+      <HeapCommitSize>
+      </HeapCommitSize>
+      <StackReserveSize>70000000</StackReserveSize>
+      <StackCommitSize>1048576</StackCommitSize>
+      <LargeAddressAware>true</LargeAddressAware>
+      <ModuleDefinitionFile>
+      </ModuleDefinitionFile>
+      <AdditionalLibraryDirectories>$(ProjectDir)x64lib;$(WindowsSdkDir)Lib\$(TargetPlatformVersion)\um\x64</AdditionalLibraryDirectories>
+      <AdditionalOptions>/IGNORE:4099 %(AdditionalOptions)</AdditionalOptions>
     </Link>
     <Manifest>
-      <AdditionalManifestFiles>additional.manifest;%(AdditionalManifestFiles)</AdditionalManifestFiles>
+      <AdditionalManifestFiles>additional.manifest</AdditionalManifestFiles>
     </Manifest>
+    <PostBuildEvent>
+      <Command>if exist "$(WindowsSdkDir)Redist\D3D\x64\d3dcompiler_47.dll" copy /Y "$(WindowsSdkDir)Redist\D3D\x64\d3dcompiler_47.dll" "C:\PROJECTS\APPLICATION3\ogg_binary\d3dcompiler_47.dll"</Command>
+    </PostBuildEvent>
     <Bscmake>
       <SuppressStartupBanner>true</SuppressStartupBanner>
-      <OutputFile>.\sse/ogg.bsc</OutputFile>
+      <OutputFile>$(IntDir)ogg.bsc</OutputFile>
     </Bscmake>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='uni_2026_de|x64'">
@@ -727,6 +773,7 @@
     <ClCompile Include="SasamiComposerDoc.cpp" />
     <ClCompile Include="kb_sasami\source\sasami_write.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_2026_de|Win32'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="GdiSoft3D.cpp" />
@@ -756,6 +803,7 @@
     <ClCompile Include="CCustomPopupMenu.cpp" />
     <ClCompile Include="CDailog1.cpp">
       <DisableSpecificWarnings Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">4335;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+      <DisableSpecificWarnings Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">4335;%(DisableSpecificWarnings)</DisableSpecificWarnings>
     </ClCompile>
     <ClCompile Include="CEqualizer.cpp" />
     <ClCompile Include="CImageBase.cpp" />
@@ -1050,6 +1098,7 @@
     <ClCompile Include="PhotoFrameDlg.cpp" />
     <ClCompile Include="Soft3DGfxQuality.cpp" />
     <ClCompile Include="Soft3DGpuInfo.cpp" />
+    <ClCompile Include="Soft3DLoop.cpp" />
     <ClCompile Include="Soft3DMazeDlg.cpp" />
     <ClCompile Include="Soft3DRaceDlg.cpp" />
     <ClCompile Include="Soft3DTextD2D.cpp" />
@@ -1125,8 +1174,10 @@
     <ClCompile Include="CMpPlaylistIO.cpp" />
     <ClCompile Include="oggDlg.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">Use</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">Use</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_2026_de|Win32'">Use</PrecompiledHeader>
       <UseUnicodeForAssemblerListing Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">true</UseUnicodeForAssemblerListing>
+      <UseUnicodeForAssemblerListing Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">true</UseUnicodeForAssemblerListing>
       <UseUnicodeForAssemblerListing Condition="'$(Configuration)|$(Platform)'=='uni_2026_de|Win32'">true</UseUnicodeForAssemblerListing>
     </ClCompile>
     <ClCompile Include="oggDlg_ds.cpp" />
@@ -1141,6 +1192,7 @@
     <ClCompile Include="Sor.cpp" />
     <ClCompile Include="StdAfx.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">Create</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">Create</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_2026_de|Win32'">Create</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="TUKI.cpp" />
@@ -1156,11 +1208,14 @@
     <ClCompile Include="BtnST.cpp" />
     <ClCompile Include="fftsg.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_2026_de|Win32'">
       </PrecompiledHeader>
       <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">$(IntDir)%(Filename)1.obj</ObjectFileName>
+      <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">$(IntDir)%(Filename)1.obj</ObjectFileName>
       <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='uni_2026_de|Win32'">$(IntDir)%(Filename)1.obj</ObjectFileName>
       <XMLDocumentationFileName Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">$(IntDir)%(Filename)1.xdc</XMLDocumentationFileName>
+      <XMLDocumentationFileName Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">$(IntDir)%(Filename)1.xdc</XMLDocumentationFileName>
       <XMLDocumentationFileName Condition="'$(Configuration)|$(Platform)'=='uni_2026_de|Win32'">$(IntDir)%(Filename)1.xdc</XMLDocumentationFileName>
       <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">$(IntDir)%(Filename)1.obj</ObjectFileName>
       <ObjectFileName Condition="'$(Configuration)|$(Platform)'=='uni_2026_de|x64'">$(IntDir)%(Filename)1.obj</ObjectFileName>
@@ -1177,6 +1232,7 @@
   <ItemGroup>
     <ResourceCompile Include="ogg.rc">
       <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='uni_2026_de|Win32'">%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='uni_2026_de|x64'">%(PreprocessorDefinitions)</PreprocessorDefinitions>
@@ -1223,6 +1279,7 @@
     <ClInclude Include="PhotoFrameDlg.h" />
     <ClInclude Include="Soft3DGfxQuality.h" />
     <ClInclude Include="Soft3DGpuInfo.h" />
+    <ClInclude Include="Soft3DLoop.h" />
     <ClInclude Include="Soft3DMazeDlg.h" />
     <ClInclude Include="Soft3DRaceDlg.h" />
     <ClInclude Include="Soft3DGameSfx.h" />
@@ -1461,454 +1518,607 @@
   <ItemGroup>
     <ClCompile Update="codec\ag_dec.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Update="codec\ag_enc.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Update="codec\ALACBitUtilities.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Update="codec\ALACDecoder.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Update="codec\ALACEncoder.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Update="codec\bits.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Update="codec\CAFFileALAC.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Update="codec\cfft.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Update="codec\common.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Update="codec\decoder.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Update="codec\dp_dec.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Update="codec\dp_enc.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Update="codec\drc.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Update="codec\drm_dec.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Update="codec\EndianPortable.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Update="codec\error.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Update="codec\filtbank.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Update="codec\hcr.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Update="codec\huffman.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Update="codec\ic_predict.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Update="codec\is.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Update="codec\libtta.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Update="codec\lt_predict.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Update="codec\main.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Update="codec\matrix_dec.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Update="codec\matrix_enc.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Update="codec\mdct.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Update="codec\mp4.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Update="codec\mp4atom.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Update="codec\mp4ff.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Update="codec\mp4meta.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Update="codec\mp4sample.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Update="codec\mp4tagupdate.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Update="codec\mp4util.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Update="codec\ms.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Update="codec\output.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Update="codec\pns.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Update="codec\ps_dec.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Update="codec\ps_syntax.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Update="codec\pulse.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Update="codec\rvlc.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Update="codec\sbr_dct.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Update="codec\sbr_dec.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Update="codec\sbr_e_nf.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Update="codec\sbr_fbt.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Update="codec\sbr_hfadj.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Update="codec\sbr_hfgen.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Update="codec\sbr_huff.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Update="codec\sbr_qmf.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Update="codec\sbr_syntax.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Update="codec\sbr_tf_grid.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Update="codec\specrec.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Update="codec\ssr.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Update="codec\ssr_fb.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Update="codec\ssr_ipqf.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Update="codec\syntax.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Update="codec\tns.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Update="fftsg.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Update="kpi.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Update="kpi_decoder.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Update="kpi_device.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Update="kpi_player.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Update="kpi_unarc.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Update="KpiV5ConfigStore.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Update="minizip\ioapi.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Update="minizip\iowin32.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Update="minizip\unzip.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Update="CEmu\fmmon\fmmon_shadow.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Update="CEmu\fmmon\cemu_fmmon_bind.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Update="CEmu\fmmon\fmmon_write.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Update="CEmu\z80\Ay_Cpu.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Update="CEmu\z80\Ay_Cpu_irq.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Update="CEmu\mdx\cemu_mdx_decoder.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Update="..\kpi_sources_20240712\kpi_decoder\kbmdx\source\mdc\mdc.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Update="..\kpi_sources_20240712\kpi_decoder\kbmdx\source\portable_mdx\src\mdx_util.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Update="..\kpi_sources_20240712\kpi_decoder\kbmdx\source\portable_mdx\src\mxdrv\mxdrv.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Update="..\kpi_sources_20240712\kpi_decoder\kbmdx\source\portable_mdx\src\mxdrv\mxdrv_context.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Update="..\kpi_sources_20240712\kpi_decoder\kbmdx\source\portable_mdx\src\mxdrv\sound_iocs.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Update="..\kpi_sources_20240712\kpi_decoder\kbmdx\source\portable_mdx\src\x68sound\x68sound.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Update="..\kpi_sources_20240712\kpi_decoder\kbmdx\source\portable_mdx\src\x68sound\x68sound_adpcm.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Update="..\kpi_sources_20240712\kpi_decoder\kbmdx\source\portable_mdx\src\x68sound\x68sound_context.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Update="..\kpi_sources_20240712\kpi_decoder\kbmdx\source\portable_mdx\src\x68sound\x68sound_lfo.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Update="..\kpi_sources_20240712\kpi_decoder\kbmdx\source\portable_mdx\src\x68sound\x68sound_op.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Update="..\kpi_sources_20240712\kpi_decoder\kbmdx\source\portable_mdx\src\x68sound\x68sound_opm.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Update="..\kpi_sources_20240712\kpi_decoder\kbmdx\source\portable_mdx\src\x68sound\x68sound_pcm8.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Update="CEmu\s98\cemu_s98_decoder.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Update="CEmu\s98\device\s98fmgen.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Update="CEmu\s98\device\s98mame.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Update="CEmu\s98\device\s98opll.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Update="CEmu\s98\device\s98sng.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Update="CEmu\s98\device\fmgen\fmgen.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Update="CEmu\s98\device\fmgen\fmtimer.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Update="CEmu\s98\device\fmgen\opm.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Update="CEmu\s98\device\fmgen\opna.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Update="CEmu\s98\device\fmgen\psg.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Update="CEmu\s98\device\fmgen\file.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Update="kb_sasami\source\ymfm\ymfm_opn.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Update="kb_sasami\source\ymfm\ymfm_adpcm.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Update="kb_sasami\source\ymfm\ymfm_ssg.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Update="..\kpi_sources_20240712\kpi_decoder\kbs98\source\device\mame\fmopl.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
       <DisableSpecificWarnings Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">4003;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+      <DisableSpecificWarnings Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">4003;%(DisableSpecificWarnings)</DisableSpecificWarnings>
     </ClCompile>
     <ClCompile Update="..\kpi_sources_20240712\kpi_decoder\kbs98\source\device\mame\ymf262.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Update="CEmu\vendor\musashi\m68kcpu.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
       <CompileAs Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">CompileAsC</CompileAs>
     </ClCompile>
     <ClCompile Update="CEmu\vendor\musashi\m68kops.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
       <CompileAs Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">CompileAsC</CompileAs>
     </ClCompile>
     <ClCompile Update="CEmu\vendor\musashi\m68kopac.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
       <CompileAs Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">CompileAsC</CompileAs>
     </ClCompile>
     <ClCompile Update="CEmu\vendor\musashi\m68kopdm.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
       <CompileAs Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">CompileAsC</CompileAs>
     </ClCompile>
     <ClCompile Update="CEmu\vendor\musashi\m68kopnz.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
       <CompileAs Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">CompileAsC</CompileAs>
     </ClCompile>
     <ClCompile Update="CEmu\vendor\m37710\m37702core.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
       <CompileAs Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">CompileAsC</CompileAs>
     </ClCompile>
     <ClCompile Update="CEmu\vendor\m37710\m37702o0.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
       <CompileAs Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">CompileAsC</CompileAs>
     </ClCompile>
     <ClCompile Update="CEmu\vendor\m37710\m37702o1.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
       <CompileAs Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">CompileAsC</CompileAs>
     </ClCompile>
     <ClCompile Update="CEmu\vendor\m37710\m37702o2.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
       <CompileAs Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">CompileAsC</CompileAs>
     </ClCompile>
     <ClCompile Update="CEmu\vendor\m37710\m37702o3.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
       <CompileAs Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">CompileAsC</CompileAs>
     </ClCompile>
     <ClCompile Update="CEmu\vendor\v35\v35core.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
       <CompileAs Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">CompileAsC</CompileAs>
     </ClCompile>
     <ClCompile Update="CEmu\vendor\mc6809\mc6809.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
       <CompileAs Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">CompileAsC</CompileAs>
     </ClCompile>
     <ClCompile Update="CEmu\vendor\m6502\m6502core.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
       <CompileAs Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">CompileAsC</CompileAs>
     </ClCompile>
     <ClCompile Update="CEmu\vendor\h6280\h6280core.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
       <CompileAs Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">CompileAsC</CompileAs>
     </ClCompile>
     <ClCompile Update="CEmu\vendor\h8\h8core.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
       <CompileAs Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">CompileAsC</CompileAs>
     </ClCompile>
     <ClCompile Update="CEmu\vendor\m6803\m6803core.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
       <CompileAs Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">CompileAsC</CompileAs>
     </ClCompile>
     <ClCompile Update="CEmu\vendor\multipcm\multipcm.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
       <CompileAs Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">CompileAsC</CompileAs>
     </ClCompile>
     <ClCompile Update="CEmu\vendor\scsp\scsp.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
       <CompileAs Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">CompileAsC</CompileAs>
     </ClCompile>
     <ClCompile Update="CEmu\vendor\scsp\scspdsp.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
       <CompileAs Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">CompileAsC</CompileAs>
     </ClCompile>
     <ClCompile Update="CEmu\vendor\scsp\sat_hw.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
       <CompileAs Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">CompileAsC</CompileAs>
     </ClCompile>
     <ClCompile Update="CEmu\vendor\hd63701\hd63701core.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Update="CEmu\vendor\hd63701\m6800.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Update="CEmu\vendor\np2\np2ffi.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
       <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">BYTESEX_LITTLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">BYTESEX_LITTLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <ClCompile Update="CEmu\vendor\np2\cpu\i286c.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
       <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">BYTESEX_LITTLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">BYTESEX_LITTLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <ClCompile Update="CEmu\vendor\np2\cpu\i286c_0f.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
       <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">BYTESEX_LITTLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">BYTESEX_LITTLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <ClCompile Update="CEmu\vendor\np2\cpu\i286c_8x.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
       <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">BYTESEX_LITTLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">BYTESEX_LITTLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <ClCompile Update="CEmu\vendor\np2\cpu\i286c_ea.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
       <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">BYTESEX_LITTLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">BYTESEX_LITTLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <ClCompile Update="CEmu\vendor\np2\cpu\i286c_f6.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
       <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">BYTESEX_LITTLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">BYTESEX_LITTLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <ClCompile Update="CEmu\vendor\np2\cpu\i286c_fe.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
       <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">BYTESEX_LITTLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">BYTESEX_LITTLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <ClCompile Update="CEmu\vendor\np2\cpu\i286c_mn.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
       <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">BYTESEX_LITTLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">BYTESEX_LITTLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <ClCompile Update="CEmu\vendor\np2\cpu\i286c_rp.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
       <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">BYTESEX_LITTLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">BYTESEX_LITTLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <ClCompile Update="CEmu\vendor\np2\cpu\i286c_sf.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
       <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">BYTESEX_LITTLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">BYTESEX_LITTLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <ClCompile Update="CEmu\vendor\np2\cpu\v30patch.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
       <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">BYTESEX_LITTLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">BYTESEX_LITTLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <ClCompile Update="CEmu\vendor\np2\glue\np2mem.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
       <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">BYTESEX_LITTLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">BYTESEX_LITTLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <ClCompile Update="CEmu\vendor\np2\glue\np2io.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
       <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">BYTESEX_LITTLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">BYTESEX_LITTLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <ClCompile Update="..\kpi_sources_20240712\kpi_decoder\kbs98\source\device\emu2413\emu2413.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Update="..\kpi_sources_20240712\kpi_decoder\kbs98\source\device\s_sng.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Update="..\kpi_sources_20240712\kpi_decoder\kbs98\source\device\s_logtbl.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>

@@ -1,4 +1,4 @@
-﻿// Douga.cpp : インプリメンテーション ファイル
+// Douga.cpp : インプリメンテーション ファイル
 //
 
 #include "stdafx.h"
@@ -2329,7 +2329,7 @@ int rateflg = 0;
 extern DWORD videocnt3;
 extern int wavchannel,wavbit_sample_Hz;
 CString s2;
-#if WIN64
+#if defined(_WIN64)
 #else
 //static const GUID MR_VIDEO_RENDER_SERVICE =     {0x1092a86c, 0xab1a, 0x459a, {0xa3, 0x36, 0x83, 0x1f, 0xbc, 0x4d, 0x11, 0xff} };
 //static const IID IID_IMFVideoDisplayControl =   {0xa490b1e4, 0xab84, 0x4d31, {0xa1, 0xb2, 0x18, 0x1e, 0x03, 0xb1, 0x07, 0x7a} };
@@ -6855,7 +6855,7 @@ void CDouga::stop()
 
 	int mousecnt=0,mousecnt1=0;
 	int poix,poiy;
-#if WIN64
+#if defined(_WIN64)
 void CDouga::OnTimer(UINT_PTR nIDEvent) 
 #else
 void CDouga::OnTimer(UINT nIDEvent) 

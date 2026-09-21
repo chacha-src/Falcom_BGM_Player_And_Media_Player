@@ -282,7 +282,7 @@ public:
 	afx_msg void OnGetMinMaxInfo(MINMAXINFO FAR* lpMMI);
 	afx_msg int OnMouseActivate(CWnd* pDesktopWnd, UINT nHitTest, UINT message);
 	afx_msg void OnLButtonUp(UINT nFlags, CPoint point);
-#if WIN64
+#if defined(_WIN64)
 	afx_msg void OnTimer(UINT_PTR nIDEvent);
 #else
 	afx_msg void OnTimer(UINT nIDEvent);

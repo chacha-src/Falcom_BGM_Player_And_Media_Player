@@ -1,9 +1,9 @@
-﻿#pragma once
+#pragma once
 #ifndef __AFXWIN_H__
 #include <afxwin.h>
 #endif
 // MIDI モニタ右上の実機 LCD。SC-88 橙 / XG 緑 / MT-32 緑などバックライトを機種に合わせる。
-// 16ch は 16 本バー、32ch は 16ch×2 列。GS 16x16 ドットはバー位置（肉球）。32 文字は自動スクロール。
+// 16ch は 16 本バー。32ch もパネルは 1 枚で、上段 A01-16・下段 B01-16。
 
 struct MidiHwLcdState {
 	BYTE letter[32];
@@ -46,7 +46,10 @@ int MidiHwLcdReserve(int w, UINT dpi, int ch32, CRect* outAll, CRect* outA, CRec
 void MidiHwLcdDraw(CDC& dc, const CRect& rc, UINT dpi,
 	int kind, const wchar_t* model,
 	const MidiHwLcdState& st,
-	const MidiHwLcdPartSnap parts16[16],
-	const BYTE keyBits[16],
-	int sel, int bank);
+	const MidiHwLcdPartSnap partsA[16],
+	const BYTE keyBitsA[16],
+	int selA,
+	const MidiHwLcdPartSnap* partsB,
+	const BYTE* keyBitsB,
+	int selB);
 int MidiHwLcdSeg(float lev, int held);

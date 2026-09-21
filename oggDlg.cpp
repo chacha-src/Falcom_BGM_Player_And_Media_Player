@@ -50,6 +50,7 @@ int flacmode = 0;
 #include "CCommandRollDlg.h"
 #include "DecodeProgress.h"
 #include "CMediaPlayerDlg.h"
+#include "Soft3DLoop.h"
 #include "CDesktopLyricsWnd.h"
 #include "VcVocalTract.h"
 #include "MpPlayerAddons.h"
@@ -1646,13 +1647,6 @@ static int OggKpiAfxMessageBox(LPCTSTR text, UINT type)
 // reloadAfter=TRUE のとき展開後に plug+KPI適用（起動時 plug 内からは FALSE）。
 BOOL OggKpiDownloadPlugins(CWnd* owner, BOOL confirm, BOOL startupEmpty, BOOL reloadAfter)
 {
-#if WIN64
-	UNREFERENCED_PARAMETER(owner);
-	UNREFERENCED_PARAMETER(confirm);
-	UNREFERENCED_PARAMETER(startupEmpty);
-	UNREFERENCED_PARAMETER(reloadAfter);
-	return FALSE;
-#else
 	if (confirm) {
 		const int ans = OggKpiAfxMessageBox(OggKpiAskDownloadMsg(), MB_YESNO | MB_ICONQUESTION);
 		if (ans != IDYES) {
@@ -1736,15 +1730,10 @@ BOOL OggKpiDownloadPlugins(CWnd* owner, BOOL confirm, BOOL startupEmpty, BOOL re
 		COgg_KickTimerp();
 	}
 	return ok;
-#endif
 }
 
 BOOL OggKpiReloadPlugins(CWnd* owner)
 {
-#if WIN64
-	UNREFERENCED_PARAMETER(owner);
-	return FALSE;
-#else
 	if (!og || !::IsWindow(og->GetSafeHwnd()))
 		return FALSE;
 
@@ -1785,7 +1774,6 @@ BOOL OggKpiReloadPlugins(CWnd* owner)
 		COgg_KickTimerp();
 	}
 	return TRUE;
-#endif
 }
 
 double aa1_ = 0;
@@ -2056,6 +2044,7 @@ BEGIN_MESSAGE_MAP(COggDlg, CCustomBlurDialogBase)
 	ON_MESSAGE(WM_PLAYBACK_AUTO_STOPPED, OnPlaybackAutoStopped)
 	ON_MESSAGE(WM_OGG_CLOSE_DOUGA, OnCloseDougaMsg)
 	ON_MESSAGE(WM_OGG_RESUME_PROMPT, OnResumePrompt)
+	ON_MESSAGE(WM_OGG_S3_PLAYBACK, OnS3Playback)
 	ON_WM_COPYDATA()
 	ON_WM_KEYDOWN()
 	ON_WM_SYSKEYDOWN()
@@ -2616,6 +2605,20 @@ int kpicnt;
 
 // forward declarations
 static WORD GetPeMachine(const CString& path);
+static bool PeMachineNeedsRemote(WORD km)
+{
+#ifdef _WIN64
+	return km == IMAGE_FILE_MACHINE_I386;
+#else
+	return km == IMAGE_FILE_MACHINE_AMD64 || km == IMAGE_FILE_MACHINE_ARM64;
+#endif
+}
+static int PeMachineArchBits(WORD km)
+{
+	if (km == IMAGE_FILE_MACHINE_AMD64 || km == IMAGE_FILE_MACHINE_ARM64) return 64;
+	if (km == IMAGE_FILE_MACHINE_I386) return 32;
+	return 0;
+}
 static int ResolveKpiArchBits(const CString& kpiPath, const CString& mediaPathIn);
 static CString KpiArchLabel(int archBits);
 
@@ -3328,7 +3331,7 @@ IKpiDecoder* kpidec = NULL;
 bool g_kpiRemote = false;
 int g_kpiPlaybackArch = 0;   // 0=不明 32=x86 64=x64（再生中の KPI arch 表示用）
 KpiHost64Client g_kpiHost;
-static int g_vstRemote64Slot[2] = { 0, 0 }; // 1=x64 VST MIDI via KpiHost64 (SC-VA 等)
+static int g_vstRemote64Slot[2] = { 0, 0 }; // 1=他アーキ VST MIDI via ogghost32
 
 void VstPrefetchStart(int slot, int rate, int channels, int bits, int prefill, double seconds = 0.0);
 void VstPrefetchStop(int slot);
@@ -3348,6 +3351,23 @@ static int VstRemoteNow()
 	if (g_vstRemote64Slot[s]) return 1;
 	/* .mpsmv live HALion etc. uses Host64 without Foreign VstOpen. */
 	return VstLiveAnyRemotePart() ? 1 : 0;
+}
+
+static int VstBannerArchBits()
+{
+	wchar_t dll[VST_PATH_CHARS];
+	dll[0] = 0;
+	int a = VstPickPreferredPlugin(dll, VST_PATH_CHARS);
+	if (a != 32 && a != 64 && dll[0])
+		a = VstPluginPeArch(dll);
+	if (a != 32 && a != 64) {
+#ifdef _WIN64
+		a = VstRemoteNow() ? 32 : 64;
+#else
+		a = VstRemoteNow() ? 64 : 32;
+#endif
+	}
+	return a;
 }
 
 static void CloseVstMidiSessionSlot(int slot)
@@ -3685,7 +3705,7 @@ static CString KpiArchLabel(int archBits)
 // kpi パス未設定時(プレイリスト復元直後など)は拡張子から kpiarch[] を参照する。
 static int ResolveKpiArchBits(const CString& kpiPath, const CString& mediaPathIn)
 {
-	if (g_kpiRemote) return 64;
+	if (g_kpiRemote && g_kpiPlaybackArch) return g_kpiPlaybackArch;
 	if (!kpiPath.IsEmpty()) {
 		const WORD km = GetPeMachine(kpiPath);
 		if (km == IMAGE_FILE_MACHINE_AMD64 || km == IMAGE_FILE_MACHINE_ARM64) return 64;
@@ -5718,14 +5738,6 @@ BOOL COggDlg::OnInitDialog()
 			w->SetPos(pos);
 		}
 	};
-#if WIN64
-	/* x64 本体はここでの plug 無し。カタログは読込窓で表示しつつ同期完了。 */
-	loadingWnd.Create(NULL);
-	loadingWnd.Show();
-	g_pActiveLoadingWnd = &loadingWnd;
-	g_oggKpiLoading = 1;
-	haveLoadingWnd = TRUE;
-#else
 	loadingWnd.Create(NULL);
 	loadingWnd.Show();
 	g_pActiveLoadingWnd = &loadingWnd;
@@ -5750,7 +5762,6 @@ BOOL COggDlg::OnInitDialog()
 		L"Eklentiler yükleniyor…\n(Bu biraz zaman alabilir)"
 	));
 	plug(karento2, NULL);
-#endif
 	/* 先に文言を出してから Cache 判定（判定中も「プラグイン」のままにしない） */
 	loadingWnd.SetStatusText(LL14(
 		L"アーカイブデータ読み込み中…",
@@ -6818,7 +6829,7 @@ DWORD COggDlg::GetVol()
 	mmRes = waveOutOpen(&hwo,
 		WAVE_MAPPER,
 		&wfx1,
-#ifdef WIN64
+#ifdef _WIN64
 		(DWORD_PTR)m_hWnd,
 #else
 		(DWORD)m_hWnd,
@@ -7357,8 +7368,7 @@ static int XfSoftOpenSlot(int slot, const CString& path, int openMode)
 		int remote = 0;
 		int rate = 44100, ch = 2, bits = 16;
 		int lenSamp = 0;
-#if !defined(_WIN64)
-		/* Live HALion (x64) already owns Host64 — do not also Foreign-open GS. */
+		/* Live HALion already owns the IPC host — do not also Foreign-open GS. */
 		if (liveBinds <= 0) {
 			wchar_t vstPlug[VST_PATH_CHARS]; vstPlug[0] = 0;
 			if (VstShouldOpenRemote64(mid, vstPlug, VST_PATH_CHARS)) {
@@ -7374,7 +7384,6 @@ static int XfSoftOpenSlot(int slot, const CString& path, int openMode)
 				VstMidiSetReportedLatencySamples((int)orp.latencySamples);
 			}
 		}
-#endif
 		if (!remote) {
 			/* Song PCM drains live SHM — stop monitor waveOut so they don't fight. */
 			if (liveBinds > 0) {
@@ -11789,8 +11798,8 @@ open_mode_kpi:
 		g_kpiPlaybackArch = ResolveKpiArchBits(CString(kpi), filen);
 		ZeroMemory(&g_kpiSession, sizeof(g_kpiSession));
 		const WORD km = GetPeMachine(kpi);
-		if (km == IMAGE_FILE_MACHINE_AMD64 || km == IMAGE_FILE_MACHINE_ARM64) {
-			// x64 KPI は別プロセス(x64ホスト)で開く
+		if (PeMachineNeedsRemote(km)) {
+			// 本体と違うアーキの KPI は IPC ホストで開く
 			KPI_MEDIAINFO req;
 			kpi_InitMediaInfo(&req);
 			req.dwSampleRate = savedata.samples;
@@ -11843,7 +11852,8 @@ open_mode_kpi:
 			}
 
 			g_kpiRemote = true;
-			g_kpiPlaybackArch = 64;
+			g_kpiPlaybackArch = PeMachineArchBits(km);
+			if (!g_kpiPlaybackArch) g_kpiPlaybackArch = 32;
 			ResetKpiRemoteCache();
 			wavbit_sample_Hz = g_kpiSession.mediaInfo.dwSampleRate;
 			wavchannel = g_kpiSession.mediaInfo.dwChannels;
@@ -12339,9 +12349,8 @@ open_mode_vst_midi:
 		VstSongUseLiveBindsSet(liveBinds > 0 ? 1 : 0);
 		wchar_t vstPlug[VST_PATH_CHARS]; vstPlug[0] = 0;
 		int vstOk = 0;
-#if !defined(_WIN64)
 		int triedRemote = 0;
-		/* Live HALion owns Host64 — do not also Foreign-open SC-VA. */
+		/* Live HALion owns the IPC host — do not also Foreign-open SC-VA. */
 		const int useRemote = (liveBinds <= 0) && VstShouldOpenRemote64(mid, vstPlug, VST_PATH_CHARS);
 		if (useRemote) {
 			triedRemote = 1;
@@ -12358,7 +12367,7 @@ open_mode_vst_midi:
 				loop1 = 0;
 				loop2 = (int)orp.lengthSamples;
 				if (CEmuMidiLiveActive()) {
-					/* Host64 length is huge; int loop2 must stay positive & finite.
+					/* Host length is huge; int loop2 must stay positive & finite.
 					   Playlist time=-1 keeps play open for inject. */
 					const int sixHr = (wavbit_sample_Hz > 0)
 						? (wavbit_sample_Hz * 60 * 60 * 6) : 0x3fffffff;
@@ -12374,24 +12383,22 @@ open_mode_vst_midi:
 				wav_start();
 			}
 		}
-#endif
-#if !defined(_WIN64)
 		if (!vstOk && triedRemote) {
 			MessageBox(LL14(
-				L"x64 VSTホストを開けませんでした。KpiHost64.exe を確認してください。",
-				L"Could not open the x64 VST host. Check KpiHost64.exe.",
-				L"Impossible d'ouvrir l'hote VST x64.",
-				L"Impossibile aprire l'host VST x64.",
-				L"No se pudo abrir el host VST x64.",
-				L"x64 VST 호스트를 열 수 없습니다.",
-				L"无法打开 x64 VST 主机。",
-				L"تعذر فتح مضيف VST x64.",
-				L"Не удалось открыть x64 VST-хост.",
-				L"x64-VST-Host konnte nicht geöffnet werden.",
-				L"Nao foi possivel abrir o host VST x64.",
-				L"Kan de x64 VST-host niet openen.",
-				L"Nie mozna otworzyc hosta VST x64.",
-				L"x64 VST host acilamadi."),
+				L"他アーキVSTホストを開けませんでした。ogghost32.exe を確認してください。",
+				L"Could not open the other-arch VST host. Check ogghost32.exe.",
+				L"Impossible d'ouvrir l'hote VST. Verifiez ogghost32.exe.",
+				L"Impossibile aprire l'host VST. Controllare ogghost32.exe.",
+				L"No se pudo abrir el host VST. Compruebe ogghost32.exe.",
+				L"VST 호스트를 열 수 없습니다. ogghost32.exe 를 확인하세요.",
+				L"无法打开异架构 VST 主机。请检查 ogghost32.exe。",
+				L"تعذر فتح مضيف VST. تحقق من ogghost32.exe.",
+				L"Не удалось открыть VST-хост. Проверьте ogghost32.exe.",
+				L"VST-Host konnte nicht geöffnet werden. ogghost32.exe prüfen.",
+				L"Nao foi possivel abrir o host VST. Verifique ogghost32.exe.",
+				L"Kan de VST-host niet openen. Controleer ogghost32.exe.",
+				L"Nie mozna otworzyc hosta VST. Sprawdz ogghost32.exe.",
+				L"VST host acilamadi. ogghost32.exe kontrol edin."),
 				LL14(L"VST MIDI", L"VST MIDI", L"VST MIDI", L"VST MIDI", L"VST MIDI", L"VST MIDI", L"VST MIDI", L"VST MIDI", L"VST MIDI", L"VST MIDI", L"VST MIDI", L"VST MIDI", L"VST MIDI", L"VST MIDI"),
 				MB_ICONERROR | MB_OK);
 			VstSongUseLiveBindsSet(0);
@@ -12399,7 +12406,6 @@ open_mode_vst_midi:
 			CEmuMidiLiveStop();
 			m_saisai.EnableWindow(TRUE); endflg = 0; return;
 		}
-#endif
 		if (!vstOk) {
 			if (liveBinds > 0) {
 				VstLiveMonitorStop();
@@ -12456,7 +12462,7 @@ open_mode_vst_midi:
 		EqualiserSetFormatVolContext(1, FALSE); // その他のkpi
 		const WORD km = GetPeMachine(kpi);
 		int ok = 0;
-		if (km == IMAGE_FILE_MACHINE_AMD64 || km == IMAGE_FILE_MACHINE_ARM64)
+		if (PeMachineNeedsRemote(km))
 			ok = PluginWinamp_OpenRemote(kpi, filen);
 		else
 			ok = PluginWinamp_Open(kpi, filen, m_hWnd);
@@ -25069,15 +25075,6 @@ void COggDlg::timerp()
 	}
 	if (CCustomPopupMenu::GetTrackingRoot() != NULL)
 		return;
-	// Soft3D迷路は再生停止中も回す（TheadLoop→timerp の VSYNC 相当）。playy 判定より前
-	{
-		extern void Soft3DMazeOnTimerp();
-		Soft3DMazeOnTimerp();
-	}
-	{
-		extern void Soft3DRaceOnTimerp();
-		Soft3DRaceOnTimerp();
-	}
 	if (playy == 0)return;
 
 	OggDispatchChromeMessages();
@@ -25816,7 +25813,7 @@ void COggDlg::timerp()
 			s.Format(LL14(L"file:mid %s", L"file:mid %s", L"file:mid %s", L"file:mid %s", L"file:mid %s", L"file:mid %s", L"file:mid %s", L"file:mid %s", L"file:mid %s", L"file:mid %s", L"file:mid %s", L"file:mid %s", L"file:mid %s", L"file:mid %s"),
 				savedata.midiOutName[0] ? savedata.midiOutName : L"MIDI Mapper");
 		} else {
-			const CString arch = KpiArchLabel(VstRemoteNow() ? 64 : 32);
+			const CString arch = KpiArchLabel(VstBannerArchBits());
 			s.Format(LL14(L"file:mid VST (%s)", L"file:mid VST (%s)", L"file:mid VST (%s)", L"file:mid VST (%s)", L"file:mid VST (%s)", L"file:mid VST (%s)", L"file:mid VST (%s)", L"file:mid VST (%s)", L"file:mid VST (%s)", L"file:mid VST (%s)", L"file:mid VST (%s)", L"file:mid VST (%s)", L"file:mid VST (%s)", L"file:mid VST (%s)"), arch);
 		}
 	}
@@ -25978,7 +25975,7 @@ void COggDlg::timerp()
 		if (!savedata.vstMultiDll[0] && !savedata.vstExtraPath[0])
 			s.Format(_T("midi :%s"), savedata.midiOutName[0] ? savedata.midiOutName : L"MIDI Mapper");
 		else
-			s.Format(_T("vst :%s"), VstRemoteNow() ? L"x64" : L"x86");
+			s.Format(_T("vst :%s"), KpiArchLabel(VstBannerArchBits()));
 		moji(s, 1, 64, 0x7fffff);
 	}
 	else if (mode == -8 || mode == -7 || mode == 999) {
@@ -27502,7 +27499,7 @@ void timerog(UINT nIDEvent)
 	}
 	catch (...) {}
 }
-#if WIN64
+#if defined(_WIN64)
 void COggDlg::OnTimer(UINT_PTR nIDEvent)
 #else
 void COggDlg::OnTimer(UINT nIDEvent)
@@ -27610,6 +27607,120 @@ void OggRunResumePrompt()
 LRESULT COggDlg::OnResumePrompt(WPARAM, LPARAM)
 {
 	OggRunResumePrompt();
+	return 0;
+}
+
+LRESULT COggDlg::OnS3Playback(WPARAM wParam, LPARAM lParam)
+{
+	extern CMediaPlayerDlg* mp;
+	extern int tempo;
+	extern int pitch;
+	const int op = (int)wParam;
+	const int arg = (int)lParam;
+	switch (op) {
+	case S3PB_TEMPO: {
+		int pct = arg;
+		if (pct < 25) pct = 25;
+		if (pct > 200) pct = 200;
+		if (mp && ::IsWindow(mp->GetSafeHwnd()))
+			mp->ApplyPracticeTempoPercent(pct);
+		else {
+			tempo = pct * 2;
+			if (m_tempo_sl.GetSafeHwnd())
+				m_tempo_sl.SetPos(tempo, FALSE);
+			DougaApplyTempoToVideoRate();
+		}
+		break;
+	}
+	case S3PB_PITCH: {
+		int pos = arg;
+		if (pos < 0) pos = 0;
+		if (pos > 400) pos = 400;
+		pitch = pos;
+		if (m_pitch_sl.GetSafeHwnd())
+			m_pitch_sl.SetPos(pos, FALSE);
+		if (mp && ::IsWindow(mp->GetSafeHwnd()) && mp->m_pitch.GetSafeHwnd())
+			mp->m_pitch.SetPos(pos, FALSE);
+		break;
+	}
+	case S3PB_VOL: {
+		if (!m_sl.GetSafeHwnd())
+			break;
+		int p = m_sl.GetPos() + arg * 1000;
+		if (p < 0) p = 0;
+		if (p > 100000) p = 100000;
+		m_sl.SetPos(p, FALSE);
+		if (mp && ::IsWindow(mp->GetSafeHwnd()) && mp->m_vol.GetSafeHwnd()) {
+			int v = p / 1000;
+			if (v < 0) v = 0;
+			if (v > 100) v = 100;
+			mp->m_vol.SetPos(v, FALSE);
+		}
+		break;
+	}
+	case S3PB_NEXT:
+		MpTaskbarNextTrack();
+		break;
+	case S3PB_PREV:
+		MpTaskbarPrevTrack();
+		break;
+	case S3PB_PLAY:
+		if (mp && ::IsWindow(mp->GetSafeHwnd()))
+			mp->PostMessage(WM_COMMAND, MAKEWPARAM(IDC_MP_PLAY, BN_CLICKED), 0);
+		break;
+	case S3PB_REVERB: {
+		int v = savedata.eq_reverb + arg;
+		if (v < 0) v = 0;
+		if (v > 200) v = 200;
+		savedata.eq_reverb = v;
+		break;
+	}
+	case S3PB_EQ_BUMP: {
+		const int band = arg & 255;
+		const int delta = ((arg >> 8) & 255) - 128;
+		if (band >= 0 && band <= 14) {
+			int v = savedata.eq[band] + delta;
+			if (v < 0) v = 0;
+			if (v > 200) v = 200;
+			savedata.eq[band] = v;
+			savedata.eqsoundeq = 9;
+		}
+		break;
+	}
+	case S3PB_EQ_FLAT: {
+		const int step = arg;
+		for (int i = 0; i < 15; i++) {
+			int v = savedata.eq[i];
+			if (v > 100) { v -= step; if (v < 100) v = 100; }
+			else if (v < 100) { v += step; if (v > 100) v = 100; }
+			savedata.eq[i] = v;
+		}
+		savedata.eqsoundeq = 9;
+		break;
+	}
+	case S3PB_XFADE:
+		savedata.play_xfade = savedata.play_xfade ? 0 : 1;
+		if (savedata.play_xfade) {
+			int s = savedata.play_xfade_sec100 + 100;
+			if (s < 200) s = 200;
+			if (s > 12000) s = 12000;
+			savedata.play_xfade_sec100 = s;
+		}
+		if (mp && ::IsWindow(mp->GetSafeHwnd()))
+			mp->SyncPlayXfadeUi(TRUE);
+		else if (m_xfade.GetSafeHwnd())
+			m_xfade.SetCheck(savedata.play_xfade ? BST_CHECKED : BST_UNCHECKED);
+		MpPersistSavedataQuick();
+		break;
+	case S3PB_RANDOM:
+		if (savedata.random == 0)
+			SendMessage(WM_COMMAND, MAKEWPARAM(IDC_CHECK6, BN_CLICKED), 0);
+		else
+			SendMessage(WM_COMMAND, MAKEWPARAM(IDC_CHECK5, BN_CLICKED), 0);
+		break;
+	default:
+		break;
+	}
 	return 0;
 }
 
@@ -33153,9 +33264,8 @@ void plus2(int& c)
 {
 	CString ss = sswk;
 	const WORD machine = GetPeMachine(ss);
-	if (machine == IMAGE_FILE_MACHINE_AMD64 || machine == IMAGE_FILE_MACHINE_ARM64) {
-		// x86プロセスではLoadLibraryできないため、一覧だけ作る（実処理は別プロセスに委譲する想定）
-		kpiarch[kpicnt] = 64;
+	if (PeMachineNeedsRemote(machine)) {
+		kpiarch[kpicnt] = (BYTE)PeMachineArchBits(machine);
 		plugkind[kpicnt] = PLUGKIND_KPI;
 		kpif[kpicnt] = ss;
 		std::wstring exts;
@@ -33187,7 +33297,7 @@ void plus2(int& c)
 		kpi_CreateInstance cr = (kpi_CreateInstance)GetProcAddress(hDLLk1[kpicnt], "kpi_CreateInstance");
 		if (pFunck[kpicnt] || cr) {
 			if (cr) { // kpi 5
-				kpiarch[kpicnt] = 32;
+				kpiarch[kpicnt] = (BYTE)(PeMachineArchBits(machine) ? PeMachineArchBits(machine) : 32);
 				plugkind[kpicnt] = PLUGKIND_KPI;
 				IKpiDecoderModule* ob = NULL;
 				IUnknown* pMyObject = new CMyHost((const wchar_t*)ss);
@@ -33221,7 +33331,7 @@ void plus2(int& c)
 			}
 			else { // kpi 2
 				{
-					kpiarch[kpicnt] = 32;
+					kpiarch[kpicnt] = (BYTE)(PeMachineArchBits(machine) ? PeMachineArchBits(machine) : 32);
 					plugkind[kpicnt] = PLUGKIND_KPI;
 					mod1[kpicnt] = pFunck[kpicnt]();
 					kpif[kpicnt] = ss;

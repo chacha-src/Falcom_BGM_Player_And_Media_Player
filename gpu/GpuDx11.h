@@ -1,6 +1,5 @@
 #pragma once
-/* アプリ起動時に作る共有 D3D11。FM/MIDI モニタが描画、迷路/レースは各自 Open 時。
-   アクリル UI は使わない。cso はリソース、無ければ hlsl を D3DCompile。 */
+/* アプリ起動時に作る D3D11。FM/MIDI モニタ専用。迷路/レースは触らない。 */
 #ifndef GPU_DX11_H
 #define GPU_DX11_H
 
@@ -50,7 +49,7 @@ int GpuDx11_Ready(void);
 ID3D11Device* GpuDx11_Device(void);
 ID3D11DeviceContext* GpuDx11_Context(void);
 
-/* set="gpu"|"s3m"|"s3r"。リソース / shaders/cso / hlsl フォールバック */
+/* set="gpu" のみ。迷路/レースは使わない */
 HRESULT GpuTryLoadCso(const wchar_t* set, const char* entry, const char* profile,
 	const char* hlslFallback, SIZE_T hlslBytes, void** outBlob);
 

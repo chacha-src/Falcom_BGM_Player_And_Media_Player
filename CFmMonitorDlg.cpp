@@ -1,4 +1,4 @@
-﻿#include "stdafx.h"
+#include "stdafx.h"
 #include "ogg.h"
 #include "oggDlg.h"
 #include "CFmMonitorDlg.h"
@@ -1289,6 +1289,11 @@ void CFmMonitorDlg::OnTimer(UINT_PTR nIDEvent)
 {
 	if (nIDEvent == 1) {
 		if (m_hosted) {
+			extern int playy;
+			extern int plf;
+			extern int playf;
+			if (playy != 0 || plf == 1 || playf == 1)
+				PumpSyncNow();
 			CDialogEx::OnTimer(nIDEvent);
 			return;
 		}
@@ -6195,6 +6200,13 @@ void CFmMonitorDlg::PaintClientToDC(HDC hdc)
 	}
 
 	if (m_hosted) {
+		if (!src) {
+			if (EnsureFrameBuffer(dc, w, h) && m_frameDC.GetSafeHdc()) {
+				ComposeFrame(m_frameDC, w, h);
+				srcDc = &m_frameDC;
+				src = m_frameDC.GetSafeHdc();
+			}
+		}
 #if CCUSTOM_AERO_SUPPORT
 		/* ExtendFrame 上の BitBlt/FillSolidRect は α=0 で穴になる。不透明 DIB 経由で焼く。 */
 		if (m_chromaW != w || m_chromaH != h) {
@@ -6218,6 +6230,10 @@ void CFmMonitorDlg::PaintClientToDC(HDC hdc)
 		if (src)
 			CCC_BlitStretchOpaque(dc.GetSafeHdc(), 0, 0, w, h, src, 0, 0, w, h);
 #endif
+		if (src && srcDc)
+			dc.BitBlt(0, 0, w, h, srcDc, 0, 0, SRCCOPY);
+		else if (src)
+			::BitBlt(dc.GetSafeHdc(), 0, 0, w, h, src, 0, 0, SRCCOPY);
 		dc.Detach();
 		return;
 	}

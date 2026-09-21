@@ -1,4 +1,4 @@
-﻿#include "stdafx.h"
+#include "stdafx.h"
 #include "gpu/GpuDx11.h"
 #include "resource.h"
 #include <d3d11.h>
@@ -68,6 +68,31 @@ static GpuMonSurf* s_capture;
 static int s_started;
 static GpuInstRect s_cpuRects[GPU_MAX_RECT];
 static GpuPianoRow s_cpuPiano[GPU_MAX_PIANO_ROW];
+static CRITICAL_SECTION s_ctxCs;
+static volatile LONG s_ctxCsReady;
+
+static void GpuCtxLock()
+{
+	if (InterlockedCompareExchange(&s_ctxCsReady, 1, 0) == 0) {
+		InitializeCriticalSection(&s_ctxCs);
+		InterlockedExchange(&s_ctxCsReady, 2);
+	} else {
+		while (InterlockedCompareExchange(&s_ctxCsReady, 2, 2) != 2)
+			Sleep(0);
+	}
+	EnterCriticalSection(&s_ctxCs);
+}
+
+static void GpuCtxUnlock()
+{
+	if (InterlockedCompareExchange(&s_ctxCsReady, 2, 2) == 2)
+		LeaveCriticalSection(&s_ctxCs);
+}
+
+struct GpuCtxGuard {
+	GpuCtxGuard() { GpuCtxLock(); }
+	~GpuCtxGuard() { GpuCtxUnlock(); }
+};
 
 static void CrTo4(COLORREF c, float* o)
 {
@@ -167,10 +192,9 @@ static void ShaderPaths(const wchar_t* set, const char* entry, wchar_t* cso, siz
 			_snwprintf_s(hlsl, hlslN, _TRUNCATE, L"%sshaders\\gpu_piano.hlsl", base);
 		else
 			_snwprintf_s(hlsl, hlslN, _TRUNCATE, L"%sshaders\\gpu_hex.hlsl", base);
-	} else if (wcscmp(set, L"s3m") == 0)
-		_snwprintf_s(hlsl, hlslN, _TRUNCATE, L"%sshaders\\s3m.hlsl", base);
-	else
-		_snwprintf_s(hlsl, hlslN, _TRUNCATE, L"%sshaders\\s3r.hlsl", base);
+	} else {
+		hlsl[0] = 0;
+	}
 }
 
 HRESULT GpuTryLoadCso(const wchar_t* set, const char* entry, const char* profile,
@@ -191,7 +215,7 @@ HRESULT GpuTryLoadCso(const wchar_t* set, const char* entry, const char* profile
 	wchar_t cso[MAX_PATH], hlsl[MAX_PATH];
 	ShaderPaths(set, entry, cso, MAX_PATH, hlsl, MAX_PATH);
 	if (SUCCEEDED(LoadCsoFile(cso, &blob))) { *outBlob = blob; return S_OK; }
-	if (GetFileAttributesW(hlsl) != INVALID_FILE_ATTRIBUTES) {
+	if (hlsl[0] && GetFileAttributesW(hlsl) != INVALID_FILE_ATTRIBUTES) {
 		if (SUCCEEDED(CompileHlslFile(hlsl, entry, profile, &blob))) { *outBlob = blob; return S_OK; }
 	}
 	if (hlslFallback && hlslBytes) {
@@ -401,6 +425,19 @@ int GpuDx11_Ready(void) { return (s_dev && s_ctx && s_vsRect && s_psRect) ? 1 : 
 ID3D11Device* GpuDx11_Device(void) { return s_dev; }
 ID3D11DeviceContext* GpuDx11_Context(void) { return s_ctx; }
 
+static int BindBackbuffer(GpuMonSurf* s)
+{
+	if (!s || !s->sc || !s_dev) return 0;
+	GPU_RELEASE(*(ID3D11RenderTargetView**)&s->rtv);
+	GPU_RELEASE(*(ID3D11Texture2D**)&s->bb);
+	IDXGISwapChain1* sc = (IDXGISwapChain1*)s->sc;
+	if (FAILED(sc->GetBuffer(0, __uuidof(ID3D11Texture2D), (void**)&s->bb)) || !s->bb)
+		return 0;
+	if (FAILED(s_dev->CreateRenderTargetView((ID3D11Texture2D*)s->bb, NULL, (ID3D11RenderTargetView**)&s->rtv)))
+		return 0;
+	return 1;
+}
+
 static void ReleaseSurfGpu(GpuMonSurf* s)
 {
 	if (!s) return;
@@ -491,6 +528,7 @@ static int CreateSurfBuffers(GpuMonSurf* s)
 
 int GpuMonSurf_Ensure(GpuMonSurf* s, HWND parent, int x, int y, unsigned w, unsigned h)
 {
+	GpuCtxGuard g;
 	if (!s || !parent || !GpuDx11_Ready()) return 0;
 	if (w < 8) w = 8;
 	if (h < 8) h = 8;
@@ -521,12 +559,23 @@ int GpuMonSurf_Ensure(GpuMonSurf* s, HWND parent, int x, int y, unsigned w, unsi
 	sd.AlphaMode = DXGI_ALPHA_MODE_IGNORE;
 	sd.Flags = DXGI_SWAP_CHAIN_FLAG_GDI_COMPATIBLE;
 	HRESULT hr = s_fact->CreateSwapChainForHwnd(s_dev, s->child, &sd, NULL, NULL, (IDXGISwapChain1**)&s->sc);
-	if (FAILED(hr)) return 0;
-	IDXGISwapChain1* sc = (IDXGISwapChain1*)s->sc;
-	if (FAILED(sc->GetBuffer(0, __uuidof(ID3D11Texture2D), (void**)&s->bb))) return 0;
-	if (FAILED(s_dev->CreateRenderTargetView((ID3D11Texture2D*)s->bb, NULL, (ID3D11RenderTargetView**)&s->rtv)))
+	if (FAILED(hr) || !s->sc) {
+		if (s->child && ::IsWindow(s->child)) {
+			DestroyWindow(s->child);
+			s->child = NULL;
+		}
+		s->parent = NULL;
 		return 0;
-	if (!CreateSurfBuffers(s)) return 0;
+	}
+	if (!BindBackbuffer(s) || !CreateSurfBuffers(s)) {
+		ReleaseSurfGpu(s);
+		if (s->child && ::IsWindow(s->child)) {
+			DestroyWindow(s->child);
+			s->child = NULL;
+		}
+		s->parent = NULL;
+		return 0;
+	}
 	s->w = w; s->h = h; s->ready = 1; s->rectN = 0; s->pianoN = 0;
 	return 1;
 }
@@ -570,6 +619,7 @@ static void BindDraw(GpuMonSurf* s)
 
 int GpuMonSurf_Begin(GpuMonSurf* s, COLORREF bg)
 {
+	GpuCtxGuard g;
 	if (!s || !s->ready) return 0;
 	s->rectN = 0; s->pianoN = 0;
 	BindDraw(s);
@@ -725,17 +775,40 @@ int GpuMonSurf_HexExpand(GpuMonSurf* s, const void* dump512, const BYTE* fade, c
 
 HDC GpuMonSurf_GetDC(GpuMonSurf* s)
 {
+	GpuCtxGuard g;
 	if (!s || !s->ready || !s->bb) return NULL;
 	s_ctx->OMSetRenderTargets(0, NULL, NULL);
 	IDXGISurface1* surf = NULL;
-	if (FAILED(((ID3D11Texture2D*)s->bb)->QueryInterface(__uuidof(IDXGISurface1), (void**)&surf)))
-		return NULL;
 	HDC hdc = NULL;
-	HRESULT hr = surf->GetDC(FALSE, &hdc);
-	GPU_RELEASE(surf);
-	if (FAILED(hr)) return NULL;
-	s->gdiLock = 1;
-	return hdc;
+	if (SUCCEEDED(((ID3D11Texture2D*)s->bb)->QueryInterface(__uuidof(IDXGISurface1), (void**)&surf))) {
+		HRESULT hr = surf->GetDC(FALSE, &hdc);
+		GPU_RELEASE(surf);
+		if (SUCCEEDED(hr) && hdc) {
+			s->gdiLock = 1;
+			return hdc;
+		}
+	}
+	hdc = NULL;
+	if (!BindBackbuffer(s)) {
+		ReleaseSurfGpu(s);
+		if (s->child && ::IsWindow(s->child))
+			::ShowWindow(s->child, SW_HIDE);
+		return NULL;
+	}
+	s_ctx->OMSetRenderTargets(0, NULL, NULL);
+	surf = NULL;
+	if (SUCCEEDED(((ID3D11Texture2D*)s->bb)->QueryInterface(__uuidof(IDXGISurface1), (void**)&surf))) {
+		HRESULT hr = surf->GetDC(FALSE, &hdc);
+		GPU_RELEASE(surf);
+		if (SUCCEEDED(hr) && hdc) {
+			s->gdiLock = 1;
+			return hdc;
+		}
+	}
+	ReleaseSurfGpu(s);
+	if (s->child && ::IsWindow(s->child))
+		::ShowWindow(s->child, SW_HIDE);
+	return NULL;
 }
 
 void GpuMonSurf_ReleaseDC(GpuMonSurf* s)
@@ -779,12 +852,25 @@ int GpuMonSurf_ForceOpaque(GpuMonSurf* s)
 
 int GpuMonSurf_Present(GpuMonSurf* s)
 {
+	GpuCtxGuard g;
 	if (!s || !s->sc) return 0;
 	if (s->gdiLock) GpuMonSurf_ReleaseDC(s);
 	HRESULT hr = ((IDXGISwapChain1*)s->sc)->Present(0, 0);
-	if (SUCCEEDED(hr) && s->child && ::IsWindow(s->child) && !::IsWindowVisible(s->child))
+	if (FAILED(hr)) {
+		ReleaseSurfGpu(s);
+		if (s->child && ::IsWindow(s->child))
+			::ShowWindow(s->child, SW_HIDE);
+		return 0;
+	}
+	if (!BindBackbuffer(s)) {
+		ReleaseSurfGpu(s);
+		if (s->child && ::IsWindow(s->child))
+			::ShowWindow(s->child, SW_HIDE);
+		return 0;
+	}
+	if (s->child && ::IsWindow(s->child) && !::IsWindowVisible(s->child))
 		::ShowWindow(s->child, SW_SHOWNA);
-	return SUCCEEDED(hr) ? 1 : 0;
+	return 1;
 }
 
 void GpuMon_CaptureBegin(GpuMonSurf* s) { s_capture = s; }
