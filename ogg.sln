@@ -25,11 +25,11 @@ Global
 		{A09FBD07-606E-41CD-B055-88B68D6E8809}.uni_avx2_vs2026|x64(KpiHost64縺ｮ縺ｿ).Build.0 = uni_avx2_vs2026|x64
 		{A09FBD07-606E-41CD-B055-88B68D6E8809}.uni_avx2_vs2026|x86(ogg縺ｮ縺ｿ).ActiveCfg = uni_avx2_vs2026|x64
 		{A09FBD07-606E-41CD-B055-88B68D6E8809}.uni_avx2_vs2026|x86(ogg縺ｮ縺ｿ).Build.0 = uni_avx2_vs2026|x64
-		{8B16900E-38CD-4B12-9B7C-6418C5AAAF27}.avx2_vs2026_debug|x64(KpiHost64縺ｮ縺ｿ).ActiveCfg = uni_2026_de|x64
-		{8B16900E-38CD-4B12-9B7C-6418C5AAAF27}.avx2_vs2026_debug|x64(KpiHost64縺ｮ縺ｿ).Build.0 = uni_2026_de|x64
+		{8B16900E-38CD-4B12-9B7C-6418C5AAAF27}.avx2_vs2026_debug|x64(KpiHost64縺ｮ縺ｿ).ActiveCfg = uni_2026_de|Win32
+		{8B16900E-38CD-4B12-9B7C-6418C5AAAF27}.avx2_vs2026_debug|x64(KpiHost64縺ｮ縺ｿ).Build.0 = uni_2026_de|Win32
 		{8B16900E-38CD-4B12-9B7C-6418C5AAAF27}.avx2_vs2026_debug|x86(ogg縺ｮ縺ｿ).ActiveCfg = uni_2026_de|x64
-		{8B16900E-38CD-4B12-9B7C-6418C5AAAF27}.uni_avx2_vs2026|x64(KpiHost64縺ｮ縺ｿ).ActiveCfg = uni_avx2_vs2026|x64
-		{8B16900E-38CD-4B12-9B7C-6418C5AAAF27}.uni_avx2_vs2026|x64(KpiHost64縺ｮ縺ｿ).Build.0 = uni_avx2_vs2026|x64
+		{8B16900E-38CD-4B12-9B7C-6418C5AAAF27}.uni_avx2_vs2026|x64(KpiHost64縺ｮ縺ｿ).ActiveCfg = uni_avx2_vs2026|Win32
+		{8B16900E-38CD-4B12-9B7C-6418C5AAAF27}.uni_avx2_vs2026|x64(KpiHost64縺ｮ縺ｿ).Build.0 = uni_avx2_vs2026|Win32
 		{8B16900E-38CD-4B12-9B7C-6418C5AAAF27}.uni_avx2_vs2026|x86(ogg縺ｮ縺ｿ).ActiveCfg = uni_avx2_vs2026|Win32
 		{8B16900E-38CD-4B12-9B7C-6418C5AAAF27}.uni_avx2_vs2026|x86(ogg縺ｮ縺ｿ).Build.0 = uni_avx2_vs2026|Win32
 		{B8E4C12A-7D3F-4A91-9E2B-5C6D8F0A1B22}.avx2_vs2026_debug|x64(KpiHost64縺ｮ縺ｿ).ActiveCfg = uni_2026_de|x64

@@ -283,6 +283,84 @@ IDR_CSO_GPU_CS_HEX      RCDATA                  "res\\cso\\gpu_cs_hex.cso"
 
 IDR_CSO_GPU_CS_GLYPH    RCDATA                  "res\\cso\\gpu_cs_glyph.cso"
 
+IDR_CSO_MAZE_VST        RCDATA                  "res\\cso\\maze_vst.cso"
+
+IDR_CSO_MAZE_HST        RCDATA                  "res\\cso\\maze_hst.cso"
+
+IDR_CSO_MAZE_DST        RCDATA                  "res\\cso\\maze_dst.cso"
+
+IDR_CSO_MAZE_PSW        RCDATA                  "res\\cso\\maze_psw.cso"
+
+IDR_CSO_MAZE_VSS        RCDATA                  "res\\cso\\maze_vss.cso"
+
+IDR_CSO_MAZE_PSS        RCDATA                  "res\\cso\\maze_pss.cso"
+
+IDR_CSO_MAZE_VSH        RCDATA                  "res\\cso\\maze_vsh.cso"
+
+IDR_CSO_MAZE_PSH        RCDATA                  "res\\cso\\maze_psh.cso"
+
+IDR_CSO_MAZE_VSQ        RCDATA                  "res\\cso\\maze_vsq.cso"
+
+IDR_CSO_MAZE_SSR        RCDATA                  "res\\cso\\maze_ssr.cso"
+
+IDR_CSO_MAZE_DOFP       RCDATA                  "res\\cso\\maze_dofp.cso"
+
+IDR_CSO_MAZE_FIN        RCDATA                  "res\\cso\\maze_fin.cso"
+
+IDR_CSO_MAZE_PSLINE     RCDATA                  "res\\cso\\maze_psline.cso"
+
+IDR_CSO_MAZE_PSMIRF     RCDATA                  "res\\cso\\maze_psmirf.cso"
+
+IDR_CSO_MAZE_PSCLOUD    RCDATA                  "res\\cso\\maze_pscloud.cso"
+
+IDR_CSO_MAZE_CSFX       RCDATA                  "res\\cso\\maze_csfx.cso"
+
+IDR_CSO_MAZE_GSW        RCDATA                  "res\\cso\\maze_gsw.cso"
+
+IDR_CSO_MAZE_VSSKIN     RCDATA                  "res\\cso\\maze_vsskin.cso"
+
+IDR_CSO_RACE_VST        RCDATA                  "res\\cso\\race_vst.cso"
+
+IDR_CSO_RACE_HST        RCDATA                  "res\\cso\\race_hst.cso"
+
+IDR_CSO_RACE_DST        RCDATA                  "res\\cso\\race_dst.cso"
+
+IDR_CSO_RACE_PSB        RCDATA                  "res\\cso\\race_psb.cso"
+
+IDR_CSO_RACE_VSS        RCDATA                  "res\\cso\\race_vss.cso"
+
+IDR_CSO_RACE_PSS        RCDATA                  "res\\cso\\race_pss.cso"
+
+IDR_CSO_RACE_VSH        RCDATA                  "res\\cso\\race_vsh.cso"
+
+IDR_CSO_RACE_PSH        RCDATA                  "res\\cso\\race_psh.cso"
+
+IDR_CSO_RACE_VSQ        RCDATA                  "res\\cso\\race_vsq.cso"
+
+IDR_CSO_RACE_SSR        RCDATA                  "res\\cso\\race_ssr.cso"
+
+IDR_CSO_RACE_DOFP       RCDATA                  "res\\cso\\race_dofp.cso"
+
+IDR_CSO_RACE_FIN        RCDATA                  "res\\cso\\race_fin.cso"
+
+IDR_CSO_RACE_CSNOISE    RCDATA                  "res\\cso\\race_csnoise.cso"
+
+IDR_CSO_RACE_PSC        RCDATA                  "res\\cso\\race_psc.cso"
+
+IDR_CSO_RACE_PSLINE     RCDATA                  "res\\cso\\race_psline.cso"
+
+IDR_CSO_RACE_PST        RCDATA                  "res\\cso\\race_pst.cso"
+
+IDR_CSO_RACE_VSSI       RCDATA                  "res\\cso\\race_vssi.cso"
+
+IDR_CSO_RACE_PSW        RCDATA                  "res\\cso\\race_psw.cso"
+
+IDR_CSO_RACE_PSCLOUD    RCDATA                  "res\\cso\\race_pscloud.cso"
+
+IDR_CSO_RACE_GSW        RCDATA                  "res\\cso\\race_gsw.cso"
+
+IDR_CSO_RACE_VSW        RCDATA                  "res\\cso\\race_vsw.cso"
+
 IDR_S3TEX_R_FOREST      RCDATA                  "res\\s3tex\\r_forest.png"
 
 IDR_S3TEX_R_RUINS       RCDATA                  "res\\s3tex\\r_ruins.png"

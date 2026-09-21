@@ -344,6 +344,7 @@ static CCriticalSection s_playNotifyThreadCs;
 // stop()/BeginPlaybackNotifyThread が Join する上限。曲切替時は短く(UI 応答性)。
 DWORD g_playbackNotifyJoinTimeoutMs = 2500;
 volatile LONG g_interactiveTrackChange = 0;
+volatile LONG g_appExiting = 0;
 
 /* -------------------------------------------------------------------------
  * HandleFillNotifications
@@ -677,8 +678,10 @@ static void HandleFillStop()
 	InterlockedExchange(&s_fillStop, 1);
 	HandleFillWakeAll();
 	if (s_fillThread) {
-		if (s_fillThread->m_hThread)
-			::WaitForSingleObject(s_fillThread->m_hThread, 5000);
+		if (s_fillThread->m_hThread) {
+			const DWORD fillWait = InterlockedCompareExchange(&g_appExiting, 0, 0) ? 250u : 5000u;
+			::WaitForSingleObject(s_fillThread->m_hThread, fillWait);
+		}
 		delete s_fillThread;
 		s_fillThread = nullptr;
 	}

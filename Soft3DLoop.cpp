@@ -143,7 +143,7 @@ void Soft3DLoopEnsure()
 		return;
 	if (s_thr) {
 		InterlockedExchange(&s_run, 0);
-		if (WaitForSingleObject(s_thr->m_hThread, 8000) != WAIT_OBJECT_0)
+		if (WaitForSingleObject(s_thr->m_hThread, 1200) != WAIT_OBJECT_0)
 			return;
 		delete s_thr;
 		s_thr = NULL;
@@ -174,25 +174,11 @@ void Soft3DLoopStopJoin()
 		Soft3DDeferPresent(0);
 		return;
 	}
-	const DWORD t0 = GetTickCount();
-	for (;;) {
-		const DWORD w = MsgWaitForMultipleObjects(1, &s_thr->m_hThread, FALSE, 8, QS_PAINT | QS_TIMER);
-		if (w == WAIT_OBJECT_0)
-			break;
-		MSG msg;
-		while (PeekMessage(&msg, NULL, WM_PAINT, WM_PAINT, PM_REMOVE)
-			|| PeekMessage(&msg, NULL, WM_TIMER, WM_TIMER, PM_REMOVE)
-			|| PeekMessage(&msg, NULL, WM_NCPAINT, WM_NCPAINT, PM_REMOVE)) {
-			if (msg.message == WM_QUIT) {
-				PostQuitMessage((int)msg.wParam);
-				break;
-			}
-			TranslateMessage(&msg);
-			DispatchMessage(&msg);
-		}
-		if (GetTickCount() - t0 >= 8000)
-			return;
-	}
+	// PAINT/TIMER を汲むと DXGI Present 中のスワップチェーンへ WM_PAINT が入り
+	// UI とループが Soft3DDxLock で突き当たる。描画ポンプ無しで待つ。
+	const DWORD w = WaitForSingleObject(s_thr->m_hThread, 1200);
+	if (w != WAIT_OBJECT_0)
+		return;
 	delete s_thr;
 	s_thr = NULL;
 	Soft3DDeferPresent(0);

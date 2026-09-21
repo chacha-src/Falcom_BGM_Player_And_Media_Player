@@ -4279,10 +4279,11 @@ uint8_t CHardPc98::PortIn(uint16_t port)
 		if (opnLatchedAddr_ <= 0x0F)
 			return ssgEcho_[opnLatchedAddr_];
 		/* 旧 TKY/OPNDRV（c2gp、dynamo98）は OUT 27h/40h のあと IN DATA で 0x40 を期待し、OUT addr FFh / IN DATA not-1。本物 YM2203 の 27h は書込専用。PC-98 基板は直近データポート書込をバスホールド。新しい OPNDRV は両比較を NOP（rolling95）。エコーするのはその 2 つのラッチ番地だけ: 一括 DATA0 ラッチは rolling95 の最初の可聴窓を動かした（SIL.MDT fp）。 */
-		if (g_opnBusHold && (opnLatchedAddr_ == 0x27 || opnLatchedAddr_ == 0xFF))
+		if (g_opnBusHold && (opnLatchedAddr_ == 0x27 || (opnLatchedAddr_ == 0xFF && !opnaMode)))
 			return g_opnDataLatch;
-		/* NeSS SPLIT（hardshot）: OUT addr FFh / IN DATA。ymfm は 0 を返し、検出が YM2203 省略路（AH=30 / jmp 166D）へ入り [12C] bit0 が立たない。INT D2 AH≠0 は bit0 必須なので糊 AX=101 が NOP。0 でも YM2608 ID の 1 でもない値なら SSG 0x55 カナリアへ進む。TKY も IN DATA not-1 を要求。 */
-		if (opnLatchedAddr_ == 0xFF)
+		/* YM2608: addr FFh の DATA はチップ ID=1。FMP3 -2 / PMD / PC-88VA tetrisva は CMP AL,01 で 6ch+SSG+リズムを武装する。ここを常時 0xFF にすると SCH(0x29 bit7) も bank1 も書かれず FM1-3 だけになる。
+		   YM2203: ID レジスタは無い。NeSS SPLIT（hardshot）は ymfm の 0 だと YM2203 省略路へ入り [12C] bit0 が立たない。0 でも 1 でもない値なら SSG 0x55 カナリアへ進む。TKY も IN DATA not-1 を要求。 */
+		if (opnLatchedAddr_ == 0xFF && !opnaMode)
 			return 0xFF;
 		{
 			uint8_t d = chip_ ? chip_->ReadData() : 0xff;

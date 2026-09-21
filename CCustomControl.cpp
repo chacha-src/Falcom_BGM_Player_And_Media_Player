@@ -176,15 +176,22 @@ static BOOL CCC_HostNeedsChildOpaque(HWND hWnd)
 #endif
 }
 
-// キャプション帯コントロールは AcrylicCaption 時は常に透過（本文 aero と独立）
+// キャプション chrome は Win11 では不透明。x64 DWM α でクロマが本当に抜けて × が消える。
 static BOOL CCC_UseTransPaint(HWND hWnd, BOOL bAeroMode)
 {
     if (CCC_IsCustomPopupChild(hWnd)) return FALSE;
     if (hWnd) {
         HWND hParent = ::GetParent(hWnd);
-        if (hParent && CCC_AcrylicCaption(hParent) && CCC_IsCaptionChromeCtrl(hWnd))
+        if (hParent && CCC_AcrylicCaption(hParent) && CCC_IsCaptionChromeCtrl(hWnd)) {
+            if (CCC_IsWin11())
+                return FALSE;
             return TRUE;
+        }
     }
+    // x86 では子 GDI が不透明に見えたが、x64 + DWMWA_REDIRECTIONBITMAP_ALPHA では
+    // クロマ blit が本当に抜け、ボタン/スタティックが消える。本文は不透明面にする。
+    if (hWnd && CCC_HostNeedsChildOpaque(hWnd))
+        return FALSE;
     if (CCC_IsBlurDialogChild(hWnd) && CCC_IsAeroEnabled()) return TRUE;
     return bAeroMode && !CCC_IsBlurDialogChild(hWnd);
 }
@@ -6549,6 +6556,12 @@ void CCustomStatic::DrawClient(CDC& dc)
     memDC.DeleteDC();
 }
 
+BOOL CCustomStatic::PaintCustomOpaque(CDC& dc)
+{
+    DrawClient(dc);
+    return TRUE;
+}
+
 // 透過は DrawClient のみ（MakeOpaque 禁止）。ガラス下ソリッドは BufferedPaintMakeOpaque。
 void CCustomStatic::OnPaint()
 {
@@ -12068,8 +12081,8 @@ void CCustomStandardButton::PaintClient(CDC& dc, const CRect& r)
     if (bPushLike && (GetCheck() == BST_CHECKED)) bP = TRUE;
     const BOOL bShowFlow = m_bMouseOver;
 #if CCUSTOM_AERO_SUPPORT
-    // オプトイン透過は Win11+アクリル時のみ（非アクリルでクロマ穴を開けない）
-    const BOOL bAeroTrans = m_bAeroMode && CCC_IsWin11() && CCC_IsAeroEnabled();
+    // キャプション帯だけクロマ。本文ボタンは HostNeeds で不透明（x64 ガラスで消える）
+    const BOOL bAeroTrans = CCC_UseTransPaint(m_hWnd, m_bAeroMode);
 #else
     const BOOL bAeroTrans = FALSE;
 #endif
@@ -12398,8 +12411,8 @@ void CCustomStandardButton::RepaintClient()
     if (r.Width() <= 0 || r.Height() <= 0)
         return;
 #if CCUSTOM_AERO_SUPPORT
-    // オプトイン透過: 不透明パスを使わずクロマ合成
-    if (m_bAeroMode && CCC_IsWin11() && CCC_IsAeroEnabled())
+    // キャプション帯だけクロマ。本文は不透明パス（x64 ガラスで素 BitBlt が消える）
+    if (CCC_UseTransPaint(m_hWnd, m_bAeroMode) && CCC_IsWin11())
     {
         CClientDC dc(this);
         PaintClient(dc, r);
@@ -12425,7 +12438,7 @@ void CCustomStandardButton::RepaintClient()
 void CCustomStandardButton::OnPaint()
 {
 #if CCUSTOM_AERO_SUPPORT
-    if (m_bAeroMode && CCC_IsWin11() && CCC_IsAeroEnabled())
+    if (CCC_UseTransPaint(m_hWnd, m_bAeroMode) && CCC_IsWin11())
     {
         CPaintDC dc(this);
         CRect r;
@@ -12458,7 +12471,7 @@ LRESULT CCustomStandardButton::OnPrintClient(WPARAM wParam, LPARAM)
         CRect r;
         GetClientRect(&r);
 #if CCUSTOM_AERO_SUPPORT
-        if (m_bAeroMode && CCC_IsWin11() && CCC_IsAeroEnabled())
+        if (CCC_UseTransPaint(m_hWnd, m_bAeroMode) && CCC_IsWin11())
             PaintClient(*pDC, r);
         else if (CCC_IsWin11() && (CCC_IsAeroEnabled() || CCC_HostNeedsChildOpaque(m_hWnd)
             || CCC_CaptionOnlyHostGlass(m_hWnd)
@@ -12489,8 +12502,8 @@ LRESULT CCustomStandardButton::OnBmSetState(WPARAM wParam, LPARAM)
 BOOL CCustomStandardButton::OnEraseBkgnd(CDC* pDC)
 {
 #if CCUSTOM_AERO_SUPPORT
-    // 透過ボタン: 消去で不透明塗りをしない（親アクリルを残す）
-    if (m_bAeroMode && CCC_IsWin11() && CCC_IsAeroEnabled())
+    // キャプション帯の透過ボタン: 消去で不透明塗りをしない（親アクリルを残す）
+    if (CCC_UseTransPaint(m_hWnd, m_bAeroMode) && CCC_IsWin11())
         return TRUE;
     // 空返し禁止: ERASE だけの更新だとアクリル上で完全透過のまま残る（ホバーで復帰する現象）
     if (CCC_IsWin11() && (CCC_IsAeroEnabled() || CCC_HostNeedsChildOpaque(m_hWnd)
@@ -16153,8 +16166,9 @@ static BOOL CCC_CaptionOnlyHostGlass(HWND hWnd)
 static BOOL CCC_ShouldOpaqueFix(HWND hWnd)
 {
     if (!::IsWindow(hWnd)) return FALSE;
-    // キャプション帯のボタン/追随はガラス透過描画するため fixer しない
-    if (CCC_IsCaptionChromeCtrl(hWnd)) return FALSE;
+    // Win11 ではキャプション ×/最小化も α=255 が要る。クロマのままだと消える。
+    if (CCC_IsCaptionChromeCtrl(hWnd))
+        return CCC_IsWin11() ? TRUE : FALSE;
 
     // GroupBox を fixer すると全面 α=255 塗りで兄弟 Edit/Static を消す。枠は自前描画。
     if (CWnd* pwGb = CWnd::FromHandlePermanent(hWnd)) {
@@ -16164,18 +16178,33 @@ static BOOL CCC_ShouldOpaqueFix(HWND hWnd)
     if ((::GetWindowLong(hWnd, GWL_STYLE) & BS_TYPEMASK) == BS_GROUPBOX)
         return FALSE;
 
-    // キャプションのみアクリル時は、本文の blur 系（スライダー/STATIC 等）も不透明化
-    // （αホストのまま通常 GDI だと穴＝変なアクリルになる）
-    if (CCC_CaptionOnlyHostGlass(hWnd)) {
-        if (CWnd* pw = CWnd::FromHandlePermanent(hWnd))
-        {
-            // 自前 Opaque blit する GDI ビュー。fixer の PRINTCLIENT だと中身が空になる
-            if (pw->GetRuntimeClass()) {
-                const char* cn = pw->GetRuntimeClass()->m_lpszClassName;
+    // 自前 OnPaint / DXGI present するビュー。fixer の PRINTCLIENT だと中身が空／完全透過になる
+    {
+        TCHAR selfCls[64] = {};
+        ::GetClassName(hWnd, selfCls, 63);
+        if (lstrcmpi(selfCls, _T("OggGpuMonHost")) == 0)
+            return FALSE;
+        if (CWnd* pwSelf = CWnd::FromHandlePermanent(hWnd)) {
+            if (CRuntimeClass* rc = pwSelf->GetRuntimeClass()) {
+                const char* cn = rc->m_lpszClassName;
                 if (cn && (strcmp(cn, "CCommandRollView") == 0 || strcmp(cn, "CLyricsViewWnd") == 0
-                    || strcmp(cn, "CCustomDjVinylCtrl") == 0))
+                    || strcmp(cn, "CCustomDjVinylCtrl") == 0
+                    || strcmp(cn, "CFmMonitorDlg") == 0
+                    || strcmp(cn, "CMidiMonitorDlg") == 0
+                    || strcmp(cn, "CPianoRoll") == 0
+                    || strcmp(cn, "CAnalyzerDlg") == 0
+                    || strcmp(cn, "CPianoRollTuneDlg") == 0
+                    || strcmp(cn, "CWrdViewDlg") == 0))
                     return FALSE;
             }
+        }
+    }
+
+    // Win11 ガラス（全面 aero / キャプションのみ）では本文 blur 系も不透明化。
+    // x86 では素 GDI が不透明に見えたが、x64 では α=0 のまま合成されて消える。
+    if (CCC_IsWin11() && (CCC_IsAeroEnabled() || CCC_CaptionOnlyHostGlass(hWnd))) {
+        if (CWnd* pw = CWnd::FromHandlePermanent(hWnd))
+        {
             if (dynamic_cast<CCustomListBox*>(pw)) return TRUE;
             if (dynamic_cast<CCustomListCtrl*>(pw)) return TRUE;
             if (dynamic_cast<CCustomTreeCtrl*>(pw)) return TRUE;
@@ -16207,6 +16236,9 @@ static BOOL CCC_ShouldOpaqueFix(HWND hWnd)
         if (c.Find(_T("STATIC")) >= 0) return TRUE;
         if (c.Find(TRACKBAR_CLASS) >= 0) return TRUE;
         if (c.Find(_T("MSCTLS_PROGRESS32")) >= 0) return TRUE;
+        // 子ダイアログ / DXGI ホストは自前描画。fixer を載せると本文が消える
+        if (c.Compare(_T("#32770")) == 0) return FALSE;
+        if (c.Compare(_T("OGGGPUMONHOST")) == 0) return FALSE;
         return TRUE; // その他の子も穴防止
     }
 
@@ -16701,6 +16733,8 @@ struct CCC_CaptionEntry {
     BOOL installed = FALSE;
     // savedata.aero 非依存。キャプション帯は常にアクリル(1)
     BOOL acrylicCaption = TRUE;
+    // MIDI/FM モニタ等。本文ガラス禁止（DXGI 子が DWM α で消える）
+    BOOL noHostGlass = FALSE;
     // WS_POPUP では ShowWindow(SW_SHOWMAXIMIZED) が効かないことがあるので手動最大化
     BOOL manualZoomed = FALSE;
     BOOL haveRestore = FALSE;
@@ -17168,6 +17202,23 @@ static CCC_CaptionEntry* CCC_GetOrCreateCaption(HWND hWnd)
     CCC_CaptionEntry* e = &g_captions[g_captionCount++];
     e->hWnd = hWnd;
     return e;
+}
+
+// DXGI/GDI 本文を不透明のままにする。キャプションは自前 GDI。ExtendFrame(-1) はしない。
+void CCC_CaptionDisableHostGlass(HWND hWnd)
+{
+#if CCUSTOM_AERO_SUPPORT
+    if (!hWnd || !::IsWindow(hWnd))
+        return;
+    if (CCC_CaptionEntry* e = CCC_GetOrCreateCaption(hWnd)) {
+        e->noHostGlass = TRUE;
+        e->acrylicCaption = FALSE;
+    }
+    CCC_ApplyAero(hWnd, FALSE);
+    CCC_PrepareDialogSurface(hWnd, FALSE);
+#else
+    UNREFERENCED_PARAMETER(hWnd);
+#endif
 }
 
 // CCC_GetCustomCaptionHeight: カスタム UI / アクリル補助。
@@ -19498,7 +19549,8 @@ static void CCC_CaptionInstallCore(CWnd* pDlg, CToolTipCtrl* pTip)
     // ホスト α 時は CLIPCHILDREN 必須（親塗りがリスト等のスクロールバーを潰すのを防ぐ）
     pDlg->ModifyStyle(0, WS_CLIPCHILDREN | WS_CLIPSIBLINGS);
     // キャプション帯は常時アクリル（本文の不透明化は描画側）。歌詞も同様。
-    e->acrylicCaption = TRUE;
+    // noHostGlass は MIDI/FM モニタ：本文ガラス禁止（GPU 子面を消さない）
+    e->acrylicCaption = e->noHostGlass ? FALSE : TRUE;
     e->installed = TRUE;
     // WS_CAPTION は残すので、DWM/テーマのシステム帯描画だけ止める（カスタム帯のみ）
     CCC_CaptionHideDwmTitleChrome(hWnd);

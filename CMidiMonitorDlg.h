@@ -148,7 +148,7 @@ private:
 	void DrawMonitor2D(CDC& dc, int w, int h, UINT dpi);
 	void DrawMonitor3D(CDC& dc, int w, int h);
 	void DrawMiniKeys(CDC& dc, const CRect& rc, const Part& p, COLORREF keyW, COLORREF keyB);
-	int TryGpuFrame(int w, int h, int capH, UINT dpi);
+	int TryGpuFrame(HDC hdcDest, int w, int h, int capH, UINT dpi);
 	void DrawVBar(CDC& dc, int x, int y, int bw, int bh, int v0, int vmax, COLORREF col, int glow, int idle);
 	void DrawPanBar(CDC& dc, int x, int y, int bw, int bh, int pan, int glow, int idle);
 	void DrawHeader(CDC& dc, int w, int headH, UINT dpi);

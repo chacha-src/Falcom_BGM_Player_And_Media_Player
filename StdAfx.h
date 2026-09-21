@@ -1028,6 +1028,7 @@ void CCC_InvalidateRectMinusOverlay(HWND hDlg, const CRect& area);
 int  CCC_GetCustomCaptionHeight(HWND hDlg);
 // キャプション帯のアクリルは savedata.aero と完全独立。インストール済みなら常に TRUE(1)
 BOOL CCC_AcrylicCaption(HWND hWnd);
+void CCC_CaptionDisableHostGlass(HWND hWnd);
 // AcrylicCaption ホストの帯ガラスを再適用（WS_EX_LAYERED を剥がしてから）
 void CCC_CaptionEnsureHostAcrylic(HWND hWnd);
 void CCC_CaptionPaint(CDC& dc, HWND hDlg);

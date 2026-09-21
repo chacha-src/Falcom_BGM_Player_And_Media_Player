@@ -154,7 +154,6 @@ static int MmHostSlotOccupied(int part)
 
 static constexpr COLORREF MM_BG = RGB(8, 8, 12);
 static constexpr COLORREF MM_HEAD_BG = RGB(196, 196, 200);
-static constexpr COLORREF MM_CHROMA = RGB(8, 8, 12);
 static constexpr COLORREF MM_GRID = RGB(78, 82, 96);
 static constexpr COLORREF MM_FG = RGB(230, 230, 236);
 static constexpr COLORREF MM_HEAD_TX = RGB(28, 28, 36);
@@ -1553,14 +1552,19 @@ static int FmMidiIsPlaying()
 	return 1;
 }
 
+static int FmMidiEngineUp()
+{
+	return (plf != 0 || playf != 0) ? 1 : 0;
+}
+
 static int FmMidiWantFmView(int sticky)
 {
 	extern int mode;
 	extern CString filen;
-	if (!FmMidiIsPlaying())
+	/* 未演奏の初期は sticky=0 → MIDI。再生開始で種別を決める。
+	   完全停止後は最後のモードを維持（FM で止めたら FM のまま）。 */
+	if (!FmMidiEngineUp())
 		return sticky ? 1 : 0;
-	/* CEmu FM / PMD を先に見る。MIDI ライブや filen の .mid 残骸で引き戻すと
-	   パネルが MIDI↔FM で点滅し、鍵盤 dump も届かない。 */
 	if (!filen.IsEmpty() && SasamiExtIsFm(filen))
 		return 1;
 	if (mode == MODE_CEMU || IsCemuMode(mode) || mode == -3)
@@ -1573,7 +1577,7 @@ static int FmMidiWantFmView(int sticky)
 		if (VstIsMidiExt(filen) || VstIsProjectExt(filen))
 			return 0;
 	}
-	return 0;
+	return sticky ? 1 : 0;
 }
 
 void CMidiMonitorDlg::EnsureFmChild()
@@ -1618,9 +1622,11 @@ void CMidiMonitorDlg::LayoutFmChild()
 		&& abs(cur.left) <= 1 && abs(cur.top - capH) <= 1
 		&& abs(cur.Width() - w) <= 1 && abs(cur.Height() - h) <= 1)
 		return;
-	UINT flags = SWP_NOACTIVATE | SWP_NOZORDER | SWP_NOREDRAW;
+	UINT flags = SWP_NOACTIVATE | SWP_NOZORDER;
 	if (m_fmView)
-		flags = SWP_NOACTIVATE | SWP_SHOWWINDOW;
+		flags |= SWP_SHOWWINDOW;
+	else
+		flags |= SWP_HIDEWINDOW;
 	m_fm->SetWindowPos(m_fmView ? &CWnd::wndTop : NULL, 0, capH, w, h, flags);
 }
 
@@ -4870,6 +4876,7 @@ BOOL CMidiMonitorDlg::OnInitDialog()
 	m_paintDisabled = false;
 	m_fullDraw = true;
 	CCustomBlurDialogExBase::OnInitDialog();
+	m_bAeroEnabled = FALSE;
 	SetWindowText(LL14(
 		L"FM/MIDIモニタ", L"FM/MIDI Monitor", L"Moniteur FM/MIDI", L"Monitor FM/MIDI", L"Monitor FM/MIDI",
 		L"FM/MIDI 모니터", L"FM/MIDI监视器", L"مراقب FM/MIDI", L"FM/MIDI-монитор", L"FM/MIDI-Monitor",
@@ -4932,14 +4939,21 @@ BOOL CMidiMonitorDlg::OnInitDialog()
 	return TRUE;
 }
 
-int CMidiMonitorDlg::TryGpuFrame(int w, int h, int capH, UINT dpi)
+int CMidiMonitorDlg::TryGpuFrame(HDC hdcDest, int w, int h, int capH, UINT dpi)
 {
-	if (FmShowing())
+	if (FmShowing() || !hdcDest)
 		return 0;
+	extern int playy;
+	if (playy == 0) {
+		HideMidiGpuOverlay();
+		return 0;
+	}
 	if (!GpuDx11_Ready() || w < 80 || h < 80)
 		return 0;
 	if (!GpuMonSurf_Ensure(&m_gpu, m_hWnd, 0, capH, (unsigned)w, (unsigned)h))
 		return 0;
+	if (m_gpu.child && ::IsWindow(m_gpu.child))
+		::ShowWindow(m_gpu.child, SW_HIDE);
 	if (!GpuMonSurf_Begin(&m_gpu, MM_BG))
 		return 0;
 	GpuMon_CaptureBegin(&m_gpu);
@@ -4950,8 +4964,6 @@ int CMidiMonitorDlg::TryGpuFrame(int w, int h, int capH, UINT dpi)
 	}
 	CDC gdc;
 	gdc.Attach(hdc);
-	/* DXGI RT は Begin で全面クリアされる。汚れた行だけ書くと黒地にメーターだけが残り点滅する。
-	   FM モニタと同じく毎フレーム全描画する。 */
 	DrawMonitor2D(gdc, w, h, dpi);
 	for (int i = 0; i < PART_MAX; ++i)
 		m_show[i] = m_part[i];
@@ -4964,7 +4976,27 @@ int CMidiMonitorDlg::TryGpuFrame(int w, int h, int capH, UINT dpi)
 	GpuMonSurf_FlushRects(&m_gpu);
 	GpuMonSurf_FlushPianos(&m_gpu);
 	GpuMon_CaptureEnd();
-	return GpuMonSurf_Present(&m_gpu);
+	HDC src = GpuMonSurf_GetDC(&m_gpu);
+	int ok = 0;
+	if (src) {
+#if CCUSTOM_AERO_SUPPORT
+		if (m_chromaCache.Ensure(hdcDest, w, h)) {
+			m_chromaCache.UpdateOpaqueRect(src, 0, 0, 0, 0, w, h);
+			m_chromaCache.BlitFull(hdcDest, 0, capH, w, h);
+			ok = 1;
+		} else {
+			CCC_BlitStretchOpaque(hdcDest, 0, capH, w, h, src, 0, 0, w, h);
+			ok = 1;
+		}
+#else
+		ok = ::BitBlt(hdcDest, 0, capH, w, h, src, 0, 0, SRCCOPY) ? 1 : 0;
+#endif
+		GpuMonSurf_ReleaseDC(&m_gpu);
+	}
+	GpuMonSurf_Present(&m_gpu);
+	if (m_gpu.child && ::IsWindow(m_gpu.child))
+		::ShowWindow(m_gpu.child, SW_HIDE);
+	return ok;
 }
 
 void CMidiMonitorDlg::OnPaint()
@@ -5016,14 +5048,33 @@ void CMidiMonitorDlg::OnPaint()
 		m_fullDraw = true;
 	}
 
-	if (!IsView3D() && TryGpuFrame(w, h, capH, dpi)) {
+	if (!IsView3D() && TryGpuFrame(dc.GetSafeHdc(), w, h, capH, dpi)) {
 		if (paintCap)
 			CCC_CaptionPaintGdi(dc, m_hWnd);
 		return;
 	}
 
 	if (!EnsureFrameBuffer(dc, w, h) || !m_frameDC.GetSafeHdc()) {
-		dc.FillSolidRect(0, capH, w, h, MM_BG);
+#if CCUSTOM_AERO_SUPPORT
+		/* GDI FillSolidRect は α=0。Win11 アクリルでは本文が完全透過になる。 */
+		if (CCC_IsWin11() && (savedata.aero == 1 || CCC_AcrylicCaption(m_hWnd))) {
+			if (m_chromaW != w || m_chromaH != h) {
+				m_chromaCache.Release();
+				m_chromaReady = false;
+				m_chromaW = w;
+				m_chromaH = h;
+			}
+			if (m_chromaCache.Ensure(dc.GetSafeHdc(), w, h)) {
+				m_chromaCache.FillOpaqueRect(0, 0, w, h, MM_BG, RGB(1, 1, 1));
+				m_chromaCache.MakeRectOpaque(0, 0, w, h);
+				m_chromaCache.BlitFull(dc.GetSafeHdc(), 0, capH, w, h);
+				if (paintCap)
+					CCC_CaptionPaintGdi(dc, m_hWnd);
+				return;
+			}
+		} else
+#endif
+			dc.FillSolidRect(0, capH, w, h, MM_BG);
 		CCC_CaptionPaintGdi(dc, m_hWnd);
 		return;
 	}
@@ -5076,9 +5127,9 @@ void CMidiMonitorDlg::OnPaint()
 	}
 
 #if CCUSTOM_AERO_SUPPORT
-	const bool bodyAero = (savedata.aero == 1 && CCC_IsWin11());
-	const bool capGlassBody = (!bodyAero && CCC_AcrylicCaption(m_hWnd) && CCC_IsWin11());
-	if (bodyAero || capGlassBody) {
+	/* 旧経路は MM_BG をクロマキーにして本文全体を α=0 にしていた。
+	   x64 + DWMWA_REDIRECTIONBITMAP_ALPHA では完全透過になる。常に不透明 blit。 */
+	if (CCC_IsWin11() && (savedata.aero == 1 || CCC_AcrylicCaption(m_hWnd))) {
 		if (m_chromaW != w || m_chromaH != h) {
 			m_chromaCache.Release();
 			m_chromaReady = false;
@@ -5086,18 +5137,13 @@ void CMidiMonitorDlg::OnPaint()
 			m_chromaH = h;
 		}
 		if (m_chromaCache.Ensure(dc.GetSafeHdc(), w, h)) {
-			if (bodyAero)
-				m_chromaCache.UpdateRect(m_frameDC.GetSafeHdc(), 0, 0, 0, 0, w, h, MM_CHROMA);
-			else
-				m_chromaCache.UpdateOpaqueRect(m_frameDC.GetSafeHdc(), 0, 0, 0, 0, w, h);
+			m_chromaCache.UpdateOpaqueRect(m_frameDC.GetSafeHdc(), 0, 0, 0, 0, w, h);
 			m_chromaReady = true;
 			m_chromaCache.BlitFull(dc.GetSafeHdc(), 0, capH, w, h);
 			if (paintCap)
 				CCC_CaptionPaintGdi(dc, m_hWnd);
 			return;
 		}
-	}
-	if (!CCC_IsAeroEnabled() && CCC_AcrylicCaption(m_hWnd) && CCC_IsWin11()) {
 		CCC_BlitStretchOpaque(dc.GetSafeHdc(), 0, capH, w, h,
 			m_frameDC.GetSafeHdc(), 0, 0, w, h);
 		if (paintCap)
@@ -5124,9 +5170,8 @@ void CMidiMonitorDlg::OnTimer(UINT_PTR nIDEvent)
 			PersistPos();
 			m_persistAge = 0;
 		}
-		/* 再生中は timerp が PumpSyncNow する。ここでも PumpIdle すると
-		   ライブ MPU の鍵盤が二重適用で点滅する。
-		   停止中の 16ms 描画は UI コアを食うので触らない。 */
+		/* 再生中の描画は timerp / IdlePulse。停止中も種別 sticky を追従する。 */
+		SyncFmMidiView();
 		extern int plf;
 		extern int playy;
 		if (playy != 0 && !(plf == 1) && !FmShowing())
@@ -5151,8 +5196,8 @@ void CMidiMonitorDlg::OnSize(UINT nType, int cx, int cy)
 	}
 	ReleasePaintBuffers();
 #if CCUSTOM_AERO_SUPPORT
-	if (CCC_IsAeroEnabled())
-		CCC_RefreshDwmBlur(m_hWnd);
+	if (CCC_AcrylicCaption(m_hWnd))
+		CCC_CaptionEnsureHostAcrylic(m_hWnd);
 #endif
 	CCC_CaptionLayout(m_hWnd);
 	LayoutHelpBtn();

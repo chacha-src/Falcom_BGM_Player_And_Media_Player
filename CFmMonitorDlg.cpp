@@ -1062,6 +1062,7 @@ BOOL CFmMonitorDlg::OnInitDialog()
 		return TRUE;
 	}
 	CCustomBlurDialogExBase::OnInitDialog();
+	m_bAeroEnabled = FALSE;
 	SetWindowText(LL14(
 		L"FMモニタ (.fpy/PMD/FMP)",
 		L"FM Monitor (.fpy/PMD/FMP)",
@@ -1165,8 +1166,10 @@ void CFmMonitorDlg::OnSize(UINT nType, int cx, int cy)
 	}
 	CCustomBlurDialogExBase::OnSize(nType, cx, cy);
 	if (nType == SIZE_MINIMIZED) return;
-	if (CCC_IsAeroEnabled())
-		CCC_RefreshDwmBlur(m_hWnd);
+#if CCUSTOM_AERO_SUPPORT
+	if (CCC_AcrylicCaption(m_hWnd))
+		CCC_CaptionEnsureHostAcrylic(m_hWnd);
+#endif
 	CCC_CaptionLayout(m_hWnd);
 	LayoutHelpBtn();
 	/* 初期化中の誤保存を避け、ユーザー操作後だけ位置を書く（タイマーで間引き） */
@@ -6350,8 +6353,16 @@ void CFmMonitorDlg::BlitCachedFrameToPrintDC(HDC hdc)
 	}
 }
 
-int CFmMonitorDlg::TryGpuFrame()
+int CFmMonitorDlg::TryGpuFrame(HDC hdcDest)
 {
+	extern int playy;
+	if (!hdcDest)
+		return 0;
+	if (playy == 0) {
+		if (m_gpu.child || m_gpu.ready)
+			GpuMonSurf_Release(&m_gpu);
+		return 0;
+	}
 	if (!GpuDx11_Ready() || !::IsWindow(GetSafeHwnd()))
 		return 0;
 	CRect rect;
@@ -6363,6 +6374,8 @@ int CFmMonitorDlg::TryGpuFrame()
 		return 0;
 	if (!GpuMonSurf_Ensure(&m_gpu, m_hWnd, 0, capH, (unsigned)w, (unsigned)h))
 		return 0;
+	if (m_gpu.child && ::IsWindow(m_gpu.child))
+		::ShowWindow(m_gpu.child, SW_HIDE);
 	if (!m_layOk || m_lay.w != w || m_lay.h != h)
 		ComputeLayout(w, h);
 	if (!m_layOk)
@@ -6393,7 +6406,27 @@ int CFmMonitorDlg::TryGpuFrame()
 	GpuMonSurf_FlushRects(&m_gpu);
 	GpuMonSurf_FlushPianos(&m_gpu);
 	GpuMon_CaptureEnd();
-	if (!GpuMonSurf_Present(&m_gpu))
+	HDC src = GpuMonSurf_GetDC(&m_gpu);
+	int ok = 0;
+	if (src) {
+#if CCUSTOM_AERO_SUPPORT
+		if (m_chromaCache.Ensure(hdcDest, w, h)) {
+			m_chromaCache.UpdateOpaqueRect(src, 0, 0, 0, 0, w, h);
+			m_chromaCache.BlitFull(hdcDest, 0, capH, w, h);
+			ok = 1;
+		} else {
+			CCC_BlitStretchOpaque(hdcDest, 0, capH, w, h, src, 0, 0, w, h);
+			ok = 1;
+		}
+#else
+		ok = ::BitBlt(hdcDest, 0, capH, w, h, src, 0, 0, SRCCOPY) ? 1 : 0;
+#endif
+		GpuMonSurf_ReleaseDC(&m_gpu);
+	}
+	GpuMonSurf_Present(&m_gpu);
+	if (m_gpu.child && ::IsWindow(m_gpu.child))
+		::ShowWindow(m_gpu.child, SW_HIDE);
+	if (!ok)
 		return 0;
 	m_fullDraw = 0;
 	m_dirtyHead = m_dirtyHex = m_dirtyPanels = m_dirtyKeys = 0;
@@ -6408,7 +6441,7 @@ void CFmMonitorDlg::OnPaint()
 	}
 	if (m_hosted) {
 		CPaintDC paint(this);
-		if (TryGpuFrame())
+		if (TryGpuFrame(paint.GetSafeHdc()))
 			return;
 		PaintClientToDC(paint.GetSafeHdc());
 		return;
@@ -6422,7 +6455,7 @@ void CFmMonitorDlg::OnPaint()
 		CCC_CaptionPaintGdi(dc, m_hWnd);
 		return;
 	}
-	if (TryGpuFrame()) {
+	if (TryGpuFrame(dc.GetSafeHdc())) {
 		if (paintCap)
 			CCC_CaptionPaintGdi(dc, m_hWnd);
 		return;

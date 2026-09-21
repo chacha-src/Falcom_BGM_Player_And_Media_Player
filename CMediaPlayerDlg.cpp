@@ -2682,6 +2682,8 @@ BOOL CMediaPlayerDlg::PreTranslateMessage(MSG* pMsg)
 
 void CMediaPlayerDlg::RequestAppShutdown()
 {
+	extern volatile LONG g_appExiting;
+	InterlockedExchange(&g_appExiting, 1);
 	CCC_StopInwomanTimer();
 	DesktopLyricsPrepareAppExit();
 	MpDjPadPrepareAppExit();
@@ -5185,7 +5187,7 @@ void CMediaPlayerDlg::OnTimer(UINT nIDEvent)
 			// ホバー演出(タイトル減光・ジャケ前面化)は無効化する。
 			g_mpBannerHover = (!g_mpSideJacket && m_bannerRect.PtInRect(pt)) ? 1 : 0;
 
-			// info パネルスクロールは TheadLoop から WM_MP_INFO_SCROLL で駆動（~60fps・1px）
+			// info パネルスクロールは TheadLoop から WM_MP_INFO_SCROLL で駆動（~30fps・2px）
 			// Timer3 では行わない（精度不足のため TheadLoop ベースに移植済み）
 		}
 		else g_mpBannerHover = 0;
@@ -5768,8 +5770,8 @@ void CMediaPlayerDlg::ApplyListTooltipState()
 	}
 }
 
-// WM_MP_INFO_SCROLL ハンドラ。TheadLoop から ~60fps で PostMessage される。
-// 1px/frame。旧 30fps×2px はフレーム落ちで 4〜6px 跳びになりぎこちなかった。
+// WM_MP_INFO_SCROLL ハンドラ。TheadLoop から ~30fps で PostMessage される。
+// 2px/tick（60px/s）。バナーは 60fps・画面1px、こちらは半分の更新で同じ速さ。
 // m_iscActive が true なら右曲情報パネルを無効化 → DrawSidePanels がスクロールを1段進めて
 // 再び true にセットする(→次 tick でまた無効化)。スクロール不要なら m_iscActive は
 // false のままで再描画は発生しない。
@@ -5976,7 +5978,7 @@ bool CMediaPlayerDlg::DrawInfoScrollRow(CDC& mem, int tx, int y, int tw, int lin
 	mem.BitBlt(tx + szFull.cx - off, y, tw, lineH, &wdc, szFull.cx, 0, SRCCOPY);
 	mem.RestoreDC(saved);
 
-	m_isc[rowIdx] += 1;
+	m_isc[rowIdx] += 2;
 	if (m_isc[rowIdx] >= szFull.cx) m_isc[rowIdx] -= szFull.cx;
 
 	return true;

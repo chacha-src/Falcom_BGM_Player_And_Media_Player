@@ -67,8 +67,7 @@
     </ResourceCompile>
     <Link>
       <SubSystem>Console</SubSystem>
-      <TargetMachine Condition="'$(Platform)'=='x64'">MachineX86</TargetMachine>
-      <TargetMachine Condition="'$(Platform)'=='Win32'">MachineX86</TargetMachine>
+    <TargetMachine Condition="'$(Platform)'=='Win32'">MachineX86</TargetMachine>
       <LargeAddressAware Condition="'$(Platform)'=='Win32'">true</LargeAddressAware>
     </Link>
   </ItemDefinitionGroup>

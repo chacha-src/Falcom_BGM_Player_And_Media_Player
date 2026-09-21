@@ -674,6 +674,10 @@ struct Session
 	IKpiDecoder* dec = NULL;
 	HostFile* file = NULL;
 	HostFolder* folder = NULL;
+	KMPMODULE* kmp = NULL;               // 旧 KMP v2。v5 のときは NULL
+	HKMP hkmp = NULL;
+	int kpiApi = 5;                      // 5=IKpiDecoder, 2=KMPMODULE
+	DWORD kmpUnitRender = 0;             // v2 Render の推奨バイト数
 	KPI_MEDIAINFO request{};             // 本体が希望したフォーマット
 	KPI_MEDIAINFO selected{};            // 実際に開いたフォーマット
 	int sourceBitsPerSample = 16;        // MIDI シークの破棄 Render でバッファサイズ計算
@@ -808,6 +812,152 @@ static uint32_t Cmd_ListExts(const std::wstring& kpiPath, std::vector<uint8_t>& 
 	return KPIHOST64_STATUS_OK;
 }
 
+static void SoundInfoToMediaInfo(const SOUNDINFO& si, KPI_MEDIAINFO& mi)
+{
+	kpi_InitMediaInfo(&mi);
+	mi.dwNumber = 1;
+	mi.dwCount = 1;
+	mi.dwFormatType = KPI_MEDIAINFO::FORMAT_PCM;
+	mi.dwSampleRate = si.dwSamplesPerSec;
+	mi.nBitsPerSample = (INT32)si.dwBitsPerSample;
+	mi.dwChannels = si.dwChannels;
+	if (si.dwLength == 0xFFFFFFFFu)
+		mi.qwLength = (UINT64)-1;
+	else
+		mi.qwLength = (UINT64)si.dwLength * 10000ULL; // ms → 100ns
+	if (si.dwReserved1 == 1)
+		mi.qwLoop = (UINT64)-1;
+	mi.dwSeekableFlags = si.dwSeekable
+		? (KPI_MEDIAINFO::SEEK_FLAGS_ACCURATE | KPI_MEDIAINFO::SEEK_FLAGS_ROUGH)
+		: 0;
+}
+
+static HKMP SafeKmpOpen(KMPMODULE* kmp, const char* path, SOUNDINFO* si)
+{
+	HKMP hk = NULL;
+	__try {
+		hk = kmp->Open(path, si);
+	}
+	__except (EXCEPTION_EXECUTE_HANDLER) {
+		hk = NULL;
+	}
+	return hk;
+}
+
+static DWORD SafeKmpRender(KMPMODULE* kmp, HKMP hk, BYTE* buf, DWORD bytes)
+{
+	DWORD got = 0;
+	__try {
+		got = kmp->Render(hk, buf, bytes);
+	}
+	__except (EXCEPTION_EXECUTE_HANDLER) {
+		got = 0;
+	}
+	return got;
+}
+
+static DWORD SafeKmpSetPosition(KMPMODULE* kmp, HKMP hk, DWORD ms)
+{
+	DWORD got = 0;
+	__try {
+		got = kmp->SetPosition(hk, ms);
+	}
+	__except (EXCEPTION_EXECUTE_HANDLER) {
+		got = 0;
+	}
+	return got;
+}
+
+static bool WideToAcp(const std::wstring& w, std::string& out)
+{
+	if (w.empty()) { out.clear(); return true; }
+	int n = WideCharToMultiByte(CP_ACP, 0, w.c_str(), (int)w.size(), NULL, 0, NULL, NULL);
+	if (n <= 0) return false;
+	out.assign((size_t)n, '\0');
+	WideCharToMultiByte(CP_ACP, 0, w.c_str(), (int)w.size(), out.data(), n, NULL, NULL);
+	return true;
+}
+
+static void FillSessionPcm(Session& s)
+{
+	s.channels = s.selected.dwChannels ? s.selected.dwChannels : 2;
+	s.bps = (DWORD)(s.selected.nBitsPerSample
+		? (s.selected.nBitsPerSample < 0 ? -s.selected.nBitsPerSample : s.selected.nBitsPerSample)
+		: 16);
+	if (s.bps == 0) s.bps = 16;
+	s.sourceBitsPerSample = s.selected.nBitsPerSample;
+}
+
+static uint32_t Cmd_OpenKmp(HMODULE h, const std::wstring& kpiPath, const std::wstring& mediaPath,
+	const KPI_MEDIAINFO& request, uint32_t songNo, std::vector<uint8_t>& out)
+{
+	auto fn = (pfnGetKMPModule)GetProcAddress(h, SZ_KMP_GETMODULE);
+	if (!fn) {
+		AppendHostLogLine(L"[OPEN] no kpi_CreateInstance and no kmp_GetTestModule");
+		FreeLibrary(h);
+		return KPIHOST64_STATUS_NOT_SUPPORTED;
+	}
+	KMPMODULE* kmp = fn();
+	if (!kmp || !kmp->Open) {
+		AppendHostLogLine(L"[OPEN] kmp_GetTestModule returned null/no Open");
+		FreeLibrary(h);
+		return KPIHOST64_STATUS_FAIL;
+	}
+	if (kmp->Init) kmp->Init();
+
+	SOUNDINFO si{};
+	si.dwSamplesPerSec = request.dwSampleRate;
+	si.dwChannels = request.dwChannels;
+	si.dwBitsPerSample = (DWORD)request.nBitsPerSample;
+	si.dwSeekable = 1;
+	si.dwLength = 0xFFFFFFFFu;
+
+	std::string mediaA;
+	if (!WideToAcp(mediaPath, mediaA)) {
+		AppendHostLogLine(L"[OPEN] v2 path ACP convert failed");
+		FreeLibrary(h);
+		return KPIHOST64_STATUS_FAIL;
+	}
+	HKMP hk = SafeKmpOpen(kmp, mediaA.c_str(), &si);
+	if (!hk) {
+		AppendHostLogLine((L"[OPEN] KMP Open failed kpi=" + kpiPath + L" media=" + mediaPath).c_str());
+		FreeLibrary(h);
+		return KPIHOST64_STATUS_FAIL;
+	}
+	if (songNo > 1 && si.dwReserved2 == 1 && kmp->SetPosition)
+		kmp->SetPosition(hk, songNo * 1000);
+
+	Session s{};
+	s.hDll = h;
+	s.kmp = kmp;
+	s.hkmp = hk;
+	s.kpiApi = 2;
+	s.kmpUnitRender = si.dwUnitRender;
+	s.request = request;
+	SoundInfoToMediaInfo(si, s.selected);
+	s.openedSongCount = (si.dwReserved2 == 1 && si.dwLength != 0xFFFFFFFFu && si.dwLength >= 1000)
+		? (si.dwLength / 1000) : 1;
+	if (s.openedSongCount == 0) s.openedSongCount = 1;
+	s.selected.dwCount = s.openedSongCount;
+	s.selected.dwNumber = songNo ? songNo : 1;
+	FillSessionPcm(s);
+	s.mediaPath = mediaPath;
+
+	const uint32_t id = g_nextSessionId++;
+	g_sessions[id] = s;
+
+	KPIHOST64_OpenReply rep{};
+	rep.sessionId = id;
+	rep.openedSongCount = s.openedSongCount;
+	out.resize(sizeof(rep) + sizeof(KPI_MEDIAINFO));
+	memcpy(out.data(), &rep, sizeof(rep));
+	memcpy(out.data() + sizeof(rep), &s.selected, sizeof(KPI_MEDIAINFO));
+	AppendHostLogLine((L"[OPEN] v2 success sessionId=" + std::to_wstring(id) +
+		L" rate=" + std::to_wstring(s.selected.dwSampleRate) +
+		L" ch=" + std::to_wstring(s.selected.dwChannels)).c_str());
+	return KPIHOST64_STATUS_OK;
+}
+
 // メディアを開き Session をマップへ入れる。成功時 out は OpenReply + KPI_MEDIAINFO。
 static uint32_t Cmd_Open(const std::wstring& kpiPath, const std::wstring& mediaPath, const KPI_MEDIAINFO& request, uint32_t songNo, std::vector<uint8_t>& out)
 {
@@ -828,13 +978,16 @@ static uint32_t Cmd_Open(const std::wstring& kpiPath, const std::wstring& mediaP
 	}
 	AppendHostLogLine(L"[OPEN] LoadLibraryExW ok");
 	auto cr = (pfn_kpiCreateInstance)GetProcAddress(h, "kpi_CreateInstance");
-	if (!cr) { FreeLibrary(h); return KPIHOST64_STATUS_NOT_SUPPORTED; }
+	if (!cr) return Cmd_OpenKmp(h, kpiPath, mediaPath, request, songNo, out);
 
 	IKpiDecoderModule* mod = NULL;
 	HostProvider* prov = new HostProvider(kpiPath.c_str());
 	HRESULT hr = SafeKpiCreateInstance(cr, IID_IKpiDecoderModule, (void**)&mod, (IKpiUnknown*)prov);
 	prov->Release();
-	if (hr != S_OK || !mod) { FreeLibrary(h); return KPIHOST64_STATUS_FAIL; }
+	if (hr != S_OK || !mod) {
+		AppendHostLogLine(L"[OPEN] kpi_CreateInstance failed, try KMP v2");
+		return Cmd_OpenKmp(h, kpiPath, mediaPath, request, songNo, out);
+	}
 	AppendHostLogLine(L"[OPEN] kpi_CreateInstance ok");
 
 	auto* f = new HostFile();
@@ -910,6 +1063,38 @@ static uint32_t Cmd_Render(uint32_t sessionId, uint32_t bytesWanted, std::vector
 	auto it = g_sessions.find(sessionId);
 	if (it == g_sessions.end()) return KPIHOST64_STATUS_NOT_FOUND;
 	Session& s = it->second;
+	if (s.kpiApi == 2) {
+		if (!s.kmp || !s.hkmp || !s.kmp->Render) return KPIHOST64_STATUS_FAIL;
+		const uint32_t bytesPerFrame = s.channels * (s.bps / 8);
+		if (bytesPerFrame == 0) return KPIHOST64_STATUS_BAD_REQUEST;
+		uint32_t want = bytesWanted;
+		if (s.kmpUnitRender > 0 && want > s.kmpUnitRender) want = s.kmpUnitRender;
+		if (want < bytesPerFrame) want = bytesPerFrame;
+		if (want > s.pcmCap) {
+			size_t cap = s.pcmCap ? s.pcmCap : 65536;
+			while (cap < want) {
+				if (cap > (SIZE_MAX / 2)) { cap = want; break; }
+				cap *= 2;
+			}
+			uint8_t* nb = new (std::nothrow) uint8_t[cap];
+			if (!nb) return KPIHOST64_STATUS_FAIL;
+			delete[] s.pcmBuf;
+			s.pcmBuf = nb;
+			s.pcmCap = cap;
+		}
+		DWORD got = SafeKmpRender(s.kmp, s.hkmp, s.pcmBuf, want);
+		if (got > want) got = want;
+		if (got == 0) s.zeroRenderStreak++; else s.zeroRenderStreak = 0;
+		KPIHOST64_RenderReply rep{};
+		rep.sessionId = sessionId;
+		rep.bytesReturned = got;
+		if (s.selected.qwLoop == (UINT64)-1) rep.eof = 0;
+		else rep.eof = (got < want || s.zeroRenderStreak >= 3) ? 1 : 0;
+		out.resize(sizeof(rep) + got);
+		memcpy(out.data(), &rep, sizeof(rep));
+		if (got) memcpy(out.data() + sizeof(rep), s.pcmBuf, got);
+		return KPIHOST64_STATUS_OK;
+	}
 	if (!s.dec) return KPIHOST64_STATUS_FAIL;
 
 	const uint32_t bytesPerFrame = s.channels * (s.bps / 8);
@@ -991,6 +1176,24 @@ static uint32_t Cmd_Seek(uint32_t sessionId, uint64_t posSample, uint32_t flag, 
 	auto it = g_sessions.find(sessionId);
 	if (it == g_sessions.end()) return KPIHOST64_STATUS_NOT_FOUND;
 	Session& s = it->second;
+	if (s.kpiApi == 2) {
+		if (!s.kmp || !s.hkmp || !s.kmp->SetPosition) return KPIHOST64_STATUS_FAIL;
+		DWORD ms = 0;
+		if (s.selected.dwSampleRate)
+			ms = (DWORD)((posSample * 1000ull) / (uint64_t)s.selected.dwSampleRate);
+		DWORD gotMs = SafeKmpSetPosition(s.kmp, s.hkmp, ms);
+		s.zeroRenderStreak = 0;
+		UINT64 newPosK = 0;
+		if (s.selected.dwSampleRate)
+			newPosK = ((UINT64)gotMs * (UINT64)s.selected.dwSampleRate) / 1000ull;
+		KPIHOST64_SeekReply r2{};
+		r2.sessionId = sessionId;
+		r2.newPosSample = newPosK;
+		out.resize(sizeof(r2));
+		memcpy(out.data(), &r2, sizeof(r2));
+		(void)flag;
+		return KPIHOST64_STATUS_OK;
+	}
 	if (!s.dec) return KPIHOST64_STATUS_FAIL;
 
 	UINT64 newPos = 0;
@@ -1056,10 +1259,14 @@ static uint32_t Cmd_Close(uint32_t sessionId)
 	Session s = it->second;
 	g_sessions.erase(it);
 
-	if (s.dec) s.dec->Release();
-	if (s.file) s.file->Release();
-	if (s.folder) s.folder->Release();
-	if (s.mod) s.mod->Release();
+	if (s.kpiApi == 2) {
+		if (s.kmp && s.hkmp && s.kmp->Close) s.kmp->Close(s.hkmp);
+	} else {
+		if (s.dec) s.dec->Release();
+		if (s.file) s.file->Release();
+		if (s.folder) s.folder->Release();
+		if (s.mod) s.mod->Release();
+	}
 	if (s.hDll) FreeLibrary(s.hDll);
 	delete[] s.pcmBuf;
 	s.pcmBuf = nullptr;
@@ -1123,7 +1330,12 @@ static void ServeOnce(HANDLE pipe)
 			std::wstring kpiPath, mediaPath;
 			if (!ReadWString(p, end, kpiPath)) { status = KPIHOST64_STATUS_BAD_REQUEST; break; }
 			if (!ReadWString(p, end, mediaPath)) { status = KPIHOST64_STATUS_BAD_REQUEST; break; }
-			if ((size_t)(end - p) != sizeof(KPI_MEDIAINFO)) { status = KPIHOST64_STATUS_BAD_REQUEST; break; }
+			if ((size_t)(end - p) != sizeof(KPI_MEDIAINFO)) {
+				AppendHostLogLine((L"[OPEN] BAD_REQUEST remain=" + std::to_wstring((size_t)(end - p))
+					+ L" sizeof(KPI_MEDIAINFO)=" + std::to_wstring(sizeof(KPI_MEDIAINFO))).c_str());
+				status = KPIHOST64_STATUS_BAD_REQUEST;
+				break;
+			}
 			KPI_MEDIAINFO req{};
 			memcpy(&req, p, sizeof(req));
 			status = Cmd_Open(kpiPath, mediaPath, req, songNo, reply);

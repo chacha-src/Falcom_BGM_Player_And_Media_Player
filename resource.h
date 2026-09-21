@@ -1,4 +1,4 @@
-//{{NO_DEPENDENCIES}}
+﻿//{{NO_DEPENDENCIES}}
 // Microsoft Visual C++ �Ő������ꂽ�C���N���[�h �t�@�C���B
 // ogg.rc �Ŏg�p
 //
@@ -2181,6 +2181,45 @@
 #define IDR_CSO_GPU_VS_PIANO            4812
 #define IDR_CSO_GPU_CS_HEX              4813
 #define IDR_CSO_GPU_CS_GLYPH            4814
+#define IDR_CSO_MAZE_VST                4815
+#define IDR_CSO_MAZE_HST                4816
+#define IDR_CSO_MAZE_DST                4817
+#define IDR_CSO_MAZE_PSW                4818
+#define IDR_CSO_MAZE_VSS                4819
+#define IDR_CSO_MAZE_PSS                4820
+#define IDR_CSO_MAZE_VSH                4821
+#define IDR_CSO_MAZE_PSH                4822
+#define IDR_CSO_MAZE_VSQ                4823
+#define IDR_CSO_MAZE_SSR                4824
+#define IDR_CSO_MAZE_DOFP               4825
+#define IDR_CSO_MAZE_FIN                4826
+#define IDR_CSO_MAZE_PSLINE             4827
+#define IDR_CSO_MAZE_PSMIRF             4828
+#define IDR_CSO_MAZE_PSCLOUD            4829
+#define IDR_CSO_MAZE_CSFX               4830
+#define IDR_CSO_MAZE_GSW                4831
+#define IDR_CSO_MAZE_VSSKIN             4832
+#define IDR_CSO_RACE_VST                4833
+#define IDR_CSO_RACE_HST                4834
+#define IDR_CSO_RACE_DST                4835
+#define IDR_CSO_RACE_PSB                4836
+#define IDR_CSO_RACE_VSS                4837
+#define IDR_CSO_RACE_PSS                4838
+#define IDR_CSO_RACE_VSH                4839
+#define IDR_CSO_RACE_PSH                4840
+#define IDR_CSO_RACE_VSQ                4841
+#define IDR_CSO_RACE_SSR                4842
+#define IDR_CSO_RACE_DOFP               4843
+#define IDR_CSO_RACE_FIN                4844
+#define IDR_CSO_RACE_CSNOISE            4845
+#define IDR_CSO_RACE_PSC                4846
+#define IDR_CSO_RACE_PSLINE             4847
+#define IDR_CSO_RACE_PST                4848
+#define IDR_CSO_RACE_VSSI               4849
+#define IDR_CSO_RACE_PSW                4850
+#define IDR_CSO_RACE_PSCLOUD            4851
+#define IDR_CSO_RACE_GSW                4852
+#define IDR_CSO_RACE_VSW                4853
 
 // Next default values for new objects
 // 

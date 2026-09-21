@@ -210,6 +210,11 @@
     <Manifest>
       <AdditionalManifestFiles>additional.manifest</AdditionalManifestFiles>
     </Manifest>
+    <PreBuildEvent>
+      <Message>HLSL → CSO</Message>
+      <Command>call "$(ProjectDir)shaders\compile_shaders.cmd"
+if errorlevel 1 exit /b 1</Command>
+    </PreBuildEvent>
     <PostBuildEvent>
       <Command>if exist "$(WindowsSdkDir)Redist\D3D\x86\d3dcompiler_47.dll" copy /Y "$(WindowsSdkDir)Redist\D3D\x86\d3dcompiler_47.dll" "C:\PROJECTS\APPLICATION3\ogg_binary\d3dcompiler_47.dll"</Command>
     </PostBuildEvent>
@@ -296,6 +301,11 @@
     <Manifest>
       <AdditionalManifestFiles>additional.manifest</AdditionalManifestFiles>
     </Manifest>
+    <PreBuildEvent>
+      <Message>HLSL → CSO</Message>
+      <Command>call "$(ProjectDir)shaders\compile_shaders.cmd"
+if errorlevel 1 exit /b 1</Command>
+    </PreBuildEvent>
     <Bscmake>
       <SuppressStartupBanner>true</SuppressStartupBanner>
       <OutputFile>$(IntDir)ogg.bsc</OutputFile>
@@ -380,6 +390,11 @@
     <Manifest>
       <AdditionalManifestFiles>additional.manifest</AdditionalManifestFiles>
     </Manifest>
+    <PreBuildEvent>
+      <Message>HLSL → CSO</Message>
+      <Command>call "$(ProjectDir)shaders\compile_shaders.cmd"
+if errorlevel 1 exit /b 1</Command>
+    </PreBuildEvent>
     <PostBuildEvent>
       <Command>if exist "$(WindowsSdkDir)Redist\D3D\x64\d3dcompiler_47.dll" copy /Y "$(WindowsSdkDir)Redist\D3D\x64\d3dcompiler_47.dll" "C:\PROJECTS\APPLICATION3\ogg_binary\d3dcompiler_47.dll"</Command>
     </PostBuildEvent>
@@ -432,6 +447,11 @@
     <Manifest>
       <AdditionalManifestFiles>additional.manifest;%(AdditionalManifestFiles)</AdditionalManifestFiles>
     </Manifest>
+    <PreBuildEvent>
+      <Message>HLSL → CSO</Message>
+      <Command>call "$(ProjectDir)shaders\compile_shaders.cmd"
+if errorlevel 1 exit /b 1</Command>
+    </PreBuildEvent>
     <Bscmake>
       <SuppressStartupBanner>true</SuppressStartupBanner>
       <OutputFile>.\sse/ogg.bsc</OutputFile>
@@ -1387,6 +1407,51 @@
     <None Include="res\cso\gpu_ps_rect.cso" />
     <None Include="res\cso\gpu_vs_piano.cso" />
     <None Include="res\cso\gpu_vs_rect.cso" />
+    <None Include="res\cso\maze_vst.cso" />
+    <None Include="res\cso\maze_hst.cso" />
+    <None Include="res\cso\maze_dst.cso" />
+    <None Include="res\cso\maze_psw.cso" />
+    <None Include="res\cso\maze_vss.cso" />
+    <None Include="res\cso\maze_pss.cso" />
+    <None Include="res\cso\maze_vsh.cso" />
+    <None Include="res\cso\maze_psh.cso" />
+    <None Include="res\cso\maze_vsq.cso" />
+    <None Include="res\cso\maze_ssr.cso" />
+    <None Include="res\cso\maze_dofp.cso" />
+    <None Include="res\cso\maze_fin.cso" />
+    <None Include="res\cso\maze_psline.cso" />
+    <None Include="res\cso\maze_psmirf.cso" />
+    <None Include="res\cso\maze_pscloud.cso" />
+    <None Include="res\cso\maze_csfx.cso" />
+    <None Include="res\cso\maze_gsw.cso" />
+    <None Include="res\cso\maze_vsskin.cso" />
+    <None Include="res\cso\race_vst.cso" />
+    <None Include="res\cso\race_hst.cso" />
+    <None Include="res\cso\race_dst.cso" />
+    <None Include="res\cso\race_psb.cso" />
+    <None Include="res\cso\race_vss.cso" />
+    <None Include="res\cso\race_pss.cso" />
+    <None Include="res\cso\race_vsh.cso" />
+    <None Include="res\cso\race_psh.cso" />
+    <None Include="res\cso\race_vsq.cso" />
+    <None Include="res\cso\race_ssr.cso" />
+    <None Include="res\cso\race_dofp.cso" />
+    <None Include="res\cso\race_fin.cso" />
+    <None Include="res\cso\race_csnoise.cso" />
+    <None Include="res\cso\race_psc.cso" />
+    <None Include="res\cso\race_psline.cso" />
+    <None Include="res\cso\race_pst.cso" />
+    <None Include="res\cso\race_vssi.cso" />
+    <None Include="res\cso\race_psw.cso" />
+    <None Include="res\cso\race_pscloud.cso" />
+    <None Include="res\cso\race_gsw.cso" />
+    <None Include="res\cso\race_vsw.cso" />
+    <None Include="shaders\compile_shaders.cmd" />
+    <None Include="shaders\gpu_hex.hlsl" />
+    <None Include="shaders\gpu_piano.hlsl" />
+    <None Include="shaders\gpu_rect.hlsl" />
+    <None Include="shaders\soft3d_maze.hlsl" />
+    <None Include="shaders\soft3d_race.hlsl" />
     <None Include="res\cur00001.cur" />
     <None Include="res\cur00002.cur" />
     <None Include="res\cur00003.cur" />

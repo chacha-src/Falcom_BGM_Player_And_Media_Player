@@ -845,6 +845,7 @@ BOOL WaitForPlaybackNotifyThreadExit(DWORD timeoutMs = 2500);
 void KillPlaybackNotifyThread();
 extern DWORD g_playbackNotifyJoinTimeoutMs;
 extern volatile LONG g_interactiveTrackChange;
+extern volatile LONG g_appExiting;
 void BeginPlaybackNotifyThread();
 extern ULONG oldw;
 ULONG WAVDALen;
@@ -3895,7 +3896,7 @@ static void WaitPendingKpiTeardown(DWORD timeoutMs = 30000)
 static void ReleaseKpiPlaybackAsync(KMPMODULE*& modRef, HKMP& kmp1Ref, HINSTANCE& hDllRef)
 {
 	EnsureKpiTeardownEvent();
-	WaitPendingKpiTeardown(30000);
+	WaitPendingKpiTeardown(InterlockedCompareExchange(&g_appExiting, 0, 0) ? 250 : 30000);
 
 	const bool haveRemote = g_kpiRemote && g_kpiSession.sessionId != 0;
 	if (!modRef && !hDllRef && !kpidec && !ob5 && !haveRemote)
@@ -11798,7 +11799,13 @@ open_mode_kpi:
 		g_kpiPlaybackArch = ResolveKpiArchBits(CString(kpi), filen);
 		ZeroMemory(&g_kpiSession, sizeof(g_kpiSession));
 		const WORD km = GetPeMachine(kpi);
-		if (PeMachineNeedsRemote(km)) {
+#ifdef _WIN64
+		const bool needRemote = PeMachineNeedsRemote(km)
+			|| (!km && g_kpiPlaybackArch == 32);
+#else
+		const bool needRemote = PeMachineNeedsRemote(km);
+#endif
+		if (needRemote) {
 			// 本体と違うアーキの KPI は IPC ホストで開く
 			KPI_MEDIAINFO req;
 			kpi_InitMediaInfo(&req);
@@ -11852,6 +11859,7 @@ open_mode_kpi:
 			}
 
 			g_kpiRemote = true;
+			kvver = 5; // ホストが v2 を開いても PCM は IPC。readkpi は g_kpiRemote 経路を使う
 			g_kpiPlaybackArch = PeMachineArchBits(km);
 			if (!g_kpiPlaybackArch) g_kpiPlaybackArch = 32;
 			ResetKpiRemoteCache();
@@ -19904,17 +19912,15 @@ int playwavkpi(BYTE* bw, int old, int l1, int l2)
 		else if (WantPlaybackLoop() && !exporting && PlaybackShortMeansEof(rrr)) {
 			// endf は KPI/MIDI で常に 1 だが、ループ再生ONなら先頭へ戻す（FLAC/MP3 と同じ）
 			PlaybackNoteLoop(loop1);
-			if (kvver == 2)
+			if (g_kpiRemote && g_kpiSession.sessionId != 0) {
+				uint64_t np = 0;
+				g_kpiHost.Seek(g_kpiSession.sessionId, 0, 1, np);
+				ResetKpiRemoteCache();
+			}
+			else if (kvver == 2)
 				og->mod->SetPosition(og->kmp1, 0);
-			else {
-				if (g_kpiRemote && g_kpiSession.sessionId != 0) {
-					uint64_t np = 0;
-					g_kpiHost.Seek(g_kpiSession.sessionId, 0, 1, np);
-					ResetKpiRemoteCache();
-				}
-				else if (kpidec) {
-					kpidec->Seek(0, 1);
-				}
+			else if (kpidec) {
+				kpidec->Seek(0, 1);
 			}
 			kpi_silence_bytes = 0;
 			poss2 = poss3 = poss4 = poss6 = 0; poss5 = loop1;
@@ -19960,17 +19966,15 @@ int playwavkpi(BYTE* bw, int old, int l1, int l2)
 			}
 			else if (WantPlaybackLoop() && !exporting && PlaybackShortMeansEof(rrr)) {
 				PlaybackNoteLoop(loop1);
-				if (kvver == 2)
+				if (g_kpiRemote && g_kpiSession.sessionId != 0) {
+					uint64_t np = 0;
+					g_kpiHost.Seek(g_kpiSession.sessionId, 0, 1, np);
+					ResetKpiRemoteCache();
+				}
+				else if (kvver == 2)
 					og->mod->SetPosition(og->kmp1, 0);
-				else {
-					if (g_kpiRemote && g_kpiSession.sessionId != 0) {
-						uint64_t np = 0;
-						g_kpiHost.Seek(g_kpiSession.sessionId, 0, 1, np);
-						ResetKpiRemoteCache();
-					}
-					else if (kpidec) {
-						kpidec->Seek(0, 1);
-					}
+				else if (kpidec) {
+					kpidec->Seek(0, 1);
 				}
 				kpi_silence_bytes = 0;
 				poss2 = poss3 = poss4 = poss6 = 0; poss5 = loop1;
@@ -21045,7 +21049,7 @@ int readkpi(BYTE* bw, int cnt)
 						r = 1;
 						break;
 					}
-					if (kvver == 2) {
+					if (kvver == 2 && !(g_kpiRemote && g_kpiSession.sessionId != 0)) {
 						const int bitsPerSample = abs(wavsam_depth);
 						const DWORD bytesPerFrame = (DWORD)max(1, wavchannel * (bitsPerSample / 8));
 						const DWORD remainBytes = (cnt > (int)cnt3) ? (DWORD)(cnt - (int)cnt3) : 0;
@@ -21055,7 +21059,7 @@ int readkpi(BYTE* bw, int cnt)
 						if (IsBadCodePtr((FARPROC)og->mod->Render) == 0)
 							r = og->mod->Render(og->kmp1, (BYTE*)bufkpi + cnt3, requestBytes);
 					}
-					if (kvver == 5) {
+					if (kvver == 5 || (g_kpiRemote && g_kpiSession.sessionId != 0)) {
 						const int dstBitsPerSample = abs(wavsam_depth);
 						const int dstBytesPerFrame = max(1, wavchannel * (dstBitsPerSample / 8));
 						bool rIsBytes = false;
@@ -23987,15 +23991,15 @@ void COggDlg::stop()
 		// Exit(OnOK) sets g_playbackNotifyJoinTimeoutMs — honor it even when
 		// g_interactiveTrackChange is false (playlist end → 終了 used to hang).
 		DWORD joinTimeout = 0;
-		if (g_playbackNotifyJoinTimeoutMs)
+		if (InterlockedCompareExchange(&g_appExiting, 0, 0))
+			joinTimeout = 250u;
+		else if (g_playbackNotifyJoinTimeoutMs)
 			joinTimeout = g_playbackNotifyJoinTimeoutMs;
 		else if (g_interactiveTrackChange)
 			joinTimeout = 2500u;
 		if (!WaitForPlaybackNotifyThreadExit(joinTimeout)) {
-			// If we are exiting the app (timeout was forced to 8000), we must kill the thread
-			// to prevent exit-time crashes due to globals being destroyed while it runs.
-			// For interactive track changes, we return early and keep the thread alive.
-			if (joinTimeout == 8000) {
+			// 終了中は残スレッドを切る。曲切替は生存のまま戻る。
+			if (joinTimeout == 8000 || InterlockedCompareExchange(&g_appExiting, 0, 0)) {
 				KillPlaybackNotifyThread();
 			} else {
 				thn1 = FALSE;
@@ -24269,6 +24273,7 @@ BOOL COggDlg::stop1()
 
 BOOL COggDlg::DestroyWindow()
 {
+	InterlockedExchange(&g_appExiting, 1);
 	// TODO: この位置に固有の処理を追加するか、または基本クラスを呼び出してください
 	//	ReleaseOggVorbis(&ogg);
 	VstLiveEditorOpenCancelPending();
@@ -24309,7 +24314,7 @@ BOOL COggDlg::DestroyWindow()
 	if (pl && plw) {
 		killw1 = 0;
 		pl->DestroyWindow();
-		PumpUntilFlagOrTimeout(killw1);
+		PumpUntilFlagOrTimeout(killw1, InterlockedCompareExchange(&g_appExiting, 0, 0) ? 300u : 10000u);
 		pl = NULL;
 		savedata.pl = 1;
 	}
@@ -24317,7 +24322,7 @@ BOOL COggDlg::DestroyWindow()
 	if (mi) {
 		killw1 = 0;
 		mi->DestroyWindow();
-		PumpUntilFlagOrTimeout(killw1);
+		PumpUntilFlagOrTimeout(killw1, InterlockedCompareExchange(&g_appExiting, 0, 0) ? 300u : 10000u);
 		mi = NULL;
 	}
 	if (::IsWindow(m_EqualizerDlg->GetSafeHwnd())) {
@@ -24846,20 +24851,8 @@ static void BannerBlitScrollValue(CDC& dst, CDC& src, int valueX_px, int viewW_p
 
 	if (si_px > viewW_px) {
 		dst.BitBlt(valueX_px, y_px, xorW, blitH_px, &src, mcnt_scroll, 0, SRCINVERT);
-		// ソース +4 固定だと Stretch 後の画面 1px と合わず、同じ列が 2 フレ続いたり飛ぶ。
-		// 画面 1px 進んだ先のソース x（destPx * srcW / destW）へ送る。
-		int srcStep = 4;
-		extern CMediaPlayerDlg* mp;
-		if (savedata.playerMode == 1 && mp) {
-			const int destW = mp->m_bannerRect.Width();
-			const int srcW = MDCP + 5;
-			if (destW > 0 && srcW > 0) {
-				const int destPx = (int)(((__int64)mcnt_scroll * destW) / srcW);
-				const int nextSrc = (int)(((__int64)(destPx + 1) * srcW) / destW);
-				srcStep = nextSrc - mcnt_scroll;
-				if (srcStep < 1) srcStep = 1;
-			}
-		}
+		// 内部バッファは 4x。+4 ソース px = 等倍 1px。60fps なら 60px/s。
+		const int srcStep = 4;
 		if (si_px - mcnt_scroll < viewW_px) {
 			mcnt_wrap += srcStep;
 			const int x2 = viewW_px - mcnt_wrap + valueX_px;
@@ -25167,8 +25160,16 @@ void COggDlg::timerp()
 			g_gdiPaintPendingSince = 0;
 		}
 	}
+	// MP バナーのマーキーは表示間隔(ms2)に乗せない。ms2=64ms だと 15fps 相当になり、
+	// スクショどおり「数秒で数文字」しか進まない。TheadLoop の 16ms で合成する。
+	extern CMediaPlayerDlg* mp;
+	HWND hMpBanner = (mp ? mp->GetSafeHwnd() : NULL);
+	const bool mpBanner60 = (savedata.playerMode == 1 && hMpBanner && ::IsWindow(hMpBanner)
+		&& ::IsWindowVisible(hMpBanner) && !::IsIconic(hMpBanner));
+	if (mpBanner60)
+		ms2 = Ms2FrameUnits();
 	const BOOL bGdiFrame = Ms2DrawDue(ms2)
-		&& (InterlockedCompareExchange(&g_gdiPaintPending, 0, 0) == 0);
+		&& (mpBanner60 || InterlockedCompareExchange(&g_gdiPaintPending, 0, 0) == 0);
 	// 動画再生中: 埋め込み/Shell が無いとき現フレームを1回だけジャケットへ(ちらつき防止で成功時のみ反映)
 	if (bGdiFrame && (mode == -2 || videoonly) && jx <= 0 && pBasicVideo && !filen.IsEmpty()) {
 		static TCHAR s_vidJakTried[1024];
@@ -25586,24 +25587,6 @@ void COggDlg::timerp()
 		}
 	}
 
-
-	// ピアノ/アナライザは Speana より前に同期する。
-	// 同期は毎ティック。Present は MIDI と同じく WM_PAINT に任せる。
-	// timerp 内 UpdateWindow はピアノ OnPaint がバナー合成・info スクロールを
-	// 16ms 周期から押し出し、MP 側が全部ガクガクになる。
-	if (plf == 1 && m_PianoRollDlg && ::IsWindow(m_PianoRollDlg->GetSafeHwnd())) {
-		m_PianoRollDlg->PumpSyncNow();
-	}
-	if (plf == 1 && m_AnalyzerDlg && ::IsWindow(m_AnalyzerDlg->GetSafeHwnd())) {
-		m_AnalyzerDlg->PumpSyncNow();
-	}
-	// MIDI/FM モニタ: 同期は毎ティック。Present は WM_PAINT（timerp 内 UpdateWindow しない）
-	if (plf == 1 && m_MidiMonitorDlg && ::IsWindow(m_MidiMonitorDlg->GetSafeHwnd())) {
-		m_MidiMonitorDlg->PumpSyncNow();
-	}
-	if (plf == 1 && m_WrdViewDlg && ::IsWindow(m_WrdViewDlg->GetSafeHwnd())) {
-		m_WrdViewDlg->PumpSyncNow();
-	}
 
 	OggDispatchChromeMessages();
 
@@ -26157,10 +26140,22 @@ void COggDlg::timerp()
 	if (bGdiFrame)
 	{
 		extern CMediaPlayerDlg* mp;
-		const bool mediaHidden = (savedata.playerMode == 1 && mp && ::IsWindow(mp->GetSafeHwnd()) && !IsWindowVisible());
-		// メディアプレイヤーモード(メイン非表示)では og を再描画しない。
-		// mp は自前タイマーで dc を Blit し pending を解除して合成を継続させる。
-		if (!mediaHidden) {
+		const HWND hMp = (mp ? mp->GetSafeHwnd() : NULL);
+		const bool mpAlive = (savedata.playerMode == 1 && hMp && ::IsWindow(hMp));
+		const bool mpShown = (mpAlive && ::IsWindowVisible(hMp) && !::IsIconic(hMp));
+		if (mpShown) {
+			// Invalidate 待ちだとピアノ WM_PAINT に割込まれ、pending のまま次フレの
+			// 合成が落ちる（視覚的に 30fps も出ない）。合成直後にバナーだけ出す。
+			ms2 = 0;
+			mp->RedrawWindow(&mp->m_bannerRect, NULL,
+				RDW_INVALIDATE | RDW_UPDATENOW | RDW_NOERASE);
+			// OnPaint が pending を下ろす。ここで 1 に戻すと次の 16ms が死ぬ。
+		}
+		else if (mpAlive) {
+			ms2 = 0;
+			InterlockedExchange(&g_gdiPaintPending, 1);
+		}
+		else {
 			const int capH = CCC_GetCustomCaptionHeight(m_hWnd);
 			RECT rect;
 			rect.top = capH;
@@ -26168,22 +26163,19 @@ void COggDlg::timerp()
 			rect.bottom = capH + (LONG)((101) * hD * 4);
 			rect.right = (LONG)((180 + 88 * 2 + 50) * hD * 4);
 			InvalidateRect(&rect, FALSE);
-			// この後 og の OnPaint が ms2=0 リセットと pending 解除を行う(通常モード)。
+			InterlockedExchange(&g_gdiPaintPending, 1);
 		}
-		else {
-			// メディアプレイヤーモードでは og の OnPaint が走らないため、ここで
-			// フレームを「消費」する。ms2 カウンタを 0 に戻さないと伸び続け、
-			// Ms2DrawDue が常時真になって簡易ピアノロール等が ms2 設定を無視し 60fps で
-			// 描画され重くなる(=ファルコム特化型では起きない現象)。OnPaint と同じ扱いにする。
-			ms2 = 0;
-			// 新フレームができた時(=ms2レート)だけ mp のバナーを再描画させる。
-			// mp の OnPaint が dc を Blit し pending を解除する。これで mp 側の Blit も
-			// ms2 レートになり(60fps常時 Blit を避け)ファルコム特化型と同等の負荷になる。
-			if (savedata.playerMode == 1 && mp && ::IsWindow(mp->GetSafeHwnd()))
-			mp->InvalidateRect(&mp->m_bannerRect, FALSE);
-		}
-		InterlockedExchange(&g_gdiPaintPending, 1);
 	}
+
+	// バナーを出したあとで可視化同期。インライン Sync は info の 30fps まで止めるので Post する。
+	if (plf == 1 && m_PianoRollDlg && ::IsWindow(m_PianoRollDlg->GetSafeHwnd()))
+		m_PianoRollDlg->RequestSyncFromMainUi();
+	if (plf == 1 && m_AnalyzerDlg && ::IsWindow(m_AnalyzerDlg->GetSafeHwnd()))
+		m_AnalyzerDlg->RequestSyncFromMainUi();
+	if (plf == 1 && m_MidiMonitorDlg && ::IsWindow(m_MidiMonitorDlg->GetSafeHwnd()))
+		m_MidiMonitorDlg->PumpSyncNow();
+	if (plf == 1 && m_WrdViewDlg && ::IsWindow(m_WrdViewDlg->GetSafeHwnd()))
+		m_WrdViewDlg->PumpSyncNow();
 	//音量
 	//	if(tt>=4){
 	float vol = (float)m_sl.GetPos();
@@ -27104,6 +27096,7 @@ DWORD f1 = 0, f2 = 0;
 
 UINT TheadLoop(LPVOID)
 {
+	int infoScrollDiv = 0;   // 60fps÷2 = 30fps で info パネルスクロール tick を投げる
 	int idleSkip = 0;
 	for (;;) {
 		if (drawth == TRUE) return TRUE;
@@ -27123,9 +27116,10 @@ UINT TheadLoop(LPVOID)
 			idleSkip = 0;
 		}
 
-		// info パネルスクロール: TheadLoop の ~60fps で 1px/frame。
-		// 旧 30fps×2px はフレーム落ちと重なって 4〜6px 跳びになりぎこちなかった。
-		{
+		// info パネルスクロール: バナーは 60fps、こちらは 1 フレームおきで ~30fps。
+		// 多重 Post は CAS で合流。進み幅は 2px（60px/s でバナーの 1px@60fps と同じ速さ）。
+		if (++infoScrollDiv >= 2) {
+			infoScrollDiv = 0;
 			extern CMediaPlayerDlg* mp;
 			// mp 破棄と競合しうるため、ポインタをスナップショットしてから HWND のみ検証する。
 			// Create 完了前や破棄中にメンバを触らないよう、IsWindow 後も PostMessage だけにする。
@@ -27143,7 +27137,7 @@ UINT TheadLoop(LPVOID)
 		if (needFast) {
 			timing1(1, FALSE, FALSE);
 			Timing64(fpstiming, FALSE);
-			// 到達後の Sleep(1) は周期を 17ms 超に伸ばし、バナー/info が 60fps から外れる。
+			// 到達後の Sleep(1) は周期を 17ms 超に伸ばし、バナーが 60fps から外れる。
 		}
 		else {
 			/* 停止中は 60fps スピンしない。バナーは MP タイマ、CPU メータは 1 秒タイマ。 */
@@ -29602,10 +29596,8 @@ BOOL COggDlg::PreTranslateMessage(MSG* pMsg)
 void COggDlg::OnOK()
 {
 	CCC_StopInwomanTimer();
-	const DWORD prevJoin = g_playbackNotifyJoinTimeoutMs;
-	g_playbackNotifyJoinTimeoutMs = 0;
+	InterlockedExchange(&g_appExiting, 1);
 	stop();
-	g_playbackNotifyJoinTimeoutMs = prevJoin;
 	CCustomBlurDialogBase::OnOK();
 }
 extern IMediaEvent* pMediaEvent;
@@ -29851,7 +29843,7 @@ static void MicMixCaptureStop()
 {
 	InterlockedExchange(&g_micStop, 1);
 	if (g_micThread) {
-		WaitForSingleObject(g_micThread, 8000);
+		WaitForSingleObject(g_micThread, InterlockedCompareExchange(&g_appExiting, 0, 0) ? 250u : 8000u);
 		CloseHandle(g_micThread);
 		g_micThread = NULL;
 	}

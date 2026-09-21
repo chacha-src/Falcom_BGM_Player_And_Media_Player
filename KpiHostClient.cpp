@@ -546,7 +546,12 @@ bool KpiHost64Client::Open(const std::wstring& kpiPath, const std::wstring& medi
 	std::vector<uint8_t> reply;
 	uint32_t st = 0;
 	if (!SendRequest(KPIHOST64_CMD_OPEN, req.data(), (uint32_t)req.size(), reply, st)) return false;
-	if (st != KPIHOST64_STATUS_OK) return false;
+	if (st != KPIHOST64_STATUS_OK) {
+		AppendLogLine((L"[Open] host status=" + std::to_wstring(st)
+			+ L" reqBytes=" + std::to_wstring((uint32_t)req.size())
+			+ L" mediaInfo=" + std::to_wstring(sizeof(KPI_MEDIAINFO))).c_str());
+		return false;
+	}
 	if (reply.size() < sizeof(KPIHOST64_OpenReply) + sizeof(KPI_MEDIAINFO)) return false;
 
 	const KPIHOST64_OpenReply* orp = (const KPIHOST64_OpenReply*)reply.data();

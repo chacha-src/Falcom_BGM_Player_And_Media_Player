@@ -5,6 +5,7 @@
 #include <d3d11_1.h>
 #include <dxgi1_2.h>
 #include <d3dcompiler.h>
+#include <dwmapi.h>
 #include <vector>
 #include <string.h>
 #include <stdio.h>
@@ -100,6 +101,27 @@ static void CrTo4(COLORREF c, float* o)
 	o[1] = GetGValue(c) / 255.f;
 	o[2] = GetBValue(c) / 255.f;
 	o[3] = 1.f;
+}
+
+#ifndef DWMWA_SYSTEMBACKDROP_TYPE
+#define DWMWA_SYSTEMBACKDROP_TYPE 38
+#endif
+#ifndef DWMWA_REDIRECTIONBITMAP_ALPHA
+#define DWMWA_REDIRECTIONBITMAP_ALPHA 39
+#endif
+#ifndef DWMSBT_NONE
+#define DWMSBT_NONE 1
+#endif
+
+static void GpuHostDisableGlass(HWND h)
+{
+	if (!h || !::IsWindow(h)) return;
+	const int none = DWMSBT_NONE;
+	::DwmSetWindowAttribute(h, DWMWA_SYSTEMBACKDROP_TYPE, &none, sizeof(none));
+	BOOL useAlpha = FALSE;
+	::DwmSetWindowAttribute(h, DWMWA_REDIRECTIONBITMAP_ALPHA, &useAlpha, sizeof(useAlpha));
+	MARGINS z = { 0, 0, 0, 0 };
+	::DwmExtendFrameIntoClientArea(h, &z);
 }
 
 static LRESULT CALLBACK GpuHostProc(HWND h, UINT m, WPARAM w, LPARAM l)
@@ -537,6 +559,9 @@ int GpuMonSurf_Ensure(GpuMonSurf* s, HWND parent, int x, int y, unsigned w, unsi
 			WS_CHILD | WS_CLIPSIBLINGS,
 			x, y, (int)w, (int)h, parent, NULL, GetModuleHandleW(NULL), NULL);
 		if (!s->child) return 0;
+		GpuHostDisableGlass(s->child);
+		if (::IsWindow(s->child))
+			::ShowWindow(s->child, SW_HIDE);
 		s->parent = parent;
 		s->capH = y;
 	} else if (s->parent != parent || s->w != w || s->h != h || s->capH != y) {
@@ -868,8 +893,8 @@ int GpuMonSurf_Present(GpuMonSurf* s)
 			::ShowWindow(s->child, SW_HIDE);
 		return 0;
 	}
-	if (s->child && ::IsWindow(s->child) && !::IsWindowVisible(s->child))
-		::ShowWindow(s->child, SW_SHOWNA);
+	if (s->child && ::IsWindow(s->child))
+		::ShowWindow(s->child, SW_HIDE);
 	return 1;
 }
 

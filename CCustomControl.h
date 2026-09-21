@@ -91,6 +91,7 @@ void CCC_BlitChromaDwm(HDC hdcDest, int x, int y, int w, int h, HDC hdcSrc, int 
 // アクリル時のみ親を Invalidate（ラベル SetText の既定）。NoParentInvalidate 時は呼ばない。
 void CCC_InvalidateParent(HWND hWnd, BOOL bAeroMode);
 void CCC_RefreshDwmBlur(HWND hWnd); // 組成変更後にぼかしを張り直す（FRAMECHANGED は呼び出し側）
+void CCC_CaptionDisableHostGlass(HWND hWnd); // 本文ガラス禁止（DXGI モニタ等）
 void CCC_PaintAeroGaps(CDC& dc, CWnd* pWnd, const RECT* pPreserveRect = nullptr); // 子の隙間だけ薄グレー
 void CCC_ClearRectChroma(HDC hdcDest, const RECT& rect, COLORREF clrKey); // 矩形をキー色で潰して透かす
 // アクリルホスト上に定数αの矩形を塗る（本文パネルの透け用）
@@ -733,8 +734,8 @@ public:
     // 頻繁更新ラベル用: 親ぼかし Invalidate を抑えて UI 詰まりを防ぐ
     void SetNoParentInvalidate(BOOL b) { m_bNoParentInvalidate = b; }
 
-    // OpaqueFixer 経由の不透明バッファへ自前描画する（TRUE=描画済みで DrawClient を使わない）
-    virtual BOOL PaintCustomOpaque(CDC& dc) { UNREFERENCED_PARAMETER(dc); return FALSE; }
+    // OpaqueFixer 経由の不透明バッファへ自前描画する
+    BOOL PaintCustomOpaque(CDC& dc);
 
 protected:
     virtual void PreSubclassWindow();

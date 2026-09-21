@@ -86,7 +86,7 @@ private:
 	int PrimarySilent() const; /* ハイブリッドで主FMが一度も発音していない */
 	int IsOpnThreeShell() const; /* YM2203/OPN+: OPNA の FM1-3。下は空欄 */
 	int PanelLayoutN() const; /* グリッド枠。OPN は 6 */
-	int TryGpuFrame(); /* DX11。失敗時は GDI */
+	int TryGpuFrame(HDC hdcDest); /* DX11。失敗時は GDI。子 HWND は出さない */
 	int HexBankCount() const;
 	int HistPeekFmKey() const;
 	void TickFmViewReady();
