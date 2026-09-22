@@ -24,6 +24,7 @@ ja\modes.htm
 ja\falcom-main.htm
 ja\folder-setup.htm
 ja\formats.htm
+ja\datasheet.htm
 ja\mp-overview.htm
 ja\mp-transport.htm
 ja\mp-seek.htm
@@ -44,6 +45,7 @@ ja\analyzer.htm
 ja\pianoroll.htm
 ja\pianoroll-tune.htm
 ja\midi-monitor.htm
+ja\wrd.htm
 ja\video.htm
 ja\fileinfo.htm
 ja\tags.htm
@@ -75,6 +77,14 @@ ja\games.htm
 ja\maze.htm
 ja\race.htm
 ja\cemu.htm
+ja\cemu-pc98.htm
+ja\cemu-pc88.htm
+ja\cemu-x68k.htm
+ja\cemu-x1.htm
+ja\cemu-msx.htm
+ja\cemu-fm7.htm
+ja\cemu-pcat.htm
+ja\cemu-arcade.htm
 ja\acrylic.htm
 ja\shortcuts.htm
 ja\sleep-alarm.htm
@@ -87,6 +97,7 @@ en\modes.htm
 en\falcom-main.htm
 en\folder-setup.htm
 en\formats.htm
+en\datasheet.htm
 en\mp-overview.htm
 en\mp-transport.htm
 en\mp-seek.htm
@@ -107,6 +118,7 @@ en\analyzer.htm
 en\pianoroll.htm
 en\pianoroll-tune.htm
 en\midi-monitor.htm
+en\wrd.htm
 en\video.htm
 en\fileinfo.htm
 en\tags.htm
@@ -138,6 +150,14 @@ en\games.htm
 en\maze.htm
 en\race.htm
 en\cemu.htm
+en\cemu-pc98.htm
+en\cemu-pc88.htm
+en\cemu-x68k.htm
+en\cemu-x1.htm
+en\cemu-msx.htm
+en\cemu-fm7.htm
+en\cemu-pcat.htm
+en\cemu-arcade.htm
 en\acrylic.htm
 en\shortcuts.htm
 en\sleep-alarm.htm

@@ -1,4 +1,4 @@
-#ifndef NULLSOFT_WINAMP_IN2H
+﻿#ifndef NULLSOFT_WINAMP_IN2H
 #define NULLSOFT_WINAMP_IN2H
 // Input plugin interface
 

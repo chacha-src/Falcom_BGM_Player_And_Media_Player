@@ -1,7 +1,7 @@
 ﻿#pragma once
 // PC-98/88/X68k 系コンポーザー → 中間 SMF。
 // RCP/R36/G36/G18/MCP/MTD (Recomposer)、EUP (FM Towns)、素の SMF(.mff 等)。
-// 出力は %TEMP%\ogg_composer\<stem>.mid
+// 出力は %TEMP%\ogg_composer\<hash>_<stem>.mid
 
 enum {
 	COMPOSER_KIND_NONE = 0,
@@ -11,7 +11,9 @@ enum {
 	COMPOSER_KIND_MCP = 4,   // MCP/MTD (v1 近似)
 	COMPOSER_KIND_EUP = 5,
 	COMPOSER_KIND_GSD = 6,
-	COMPOSER_KIND_CM6 = 7
+	COMPOSER_KIND_CM6 = 7,
+	COMPOSER_KIND_SNG = 8,  /* BALLADE / ミュージクン */
+	COMPOSER_KIND_ZMS = 9   /* Z-MUSIC MIDI MML */
 };
 
 int ComposerEqExt(const wchar_t* path, const wchar_t* ext);

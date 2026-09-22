@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include "cemu_types.h"
 
 /* minizip による ZIP 仮想 FS (メモリ展開) */

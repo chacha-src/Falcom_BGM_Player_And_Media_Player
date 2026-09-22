@@ -28,7 +28,6 @@ protected:
 
 	DECLARE_MESSAGE_MAP()
 
-	cmnh();
 public:
 	CCustomEdit m_name;
 	CCustomEdit m_id;

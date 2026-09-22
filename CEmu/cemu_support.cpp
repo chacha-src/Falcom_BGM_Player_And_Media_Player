@@ -1,4 +1,4 @@
-/* .cursor\_k6_gen_support.py が k2 triage 報告から生成。
+﻿/* .cursor\_k6_gen_support.py が k2 triage 報告から生成。
    手で直さない: フル triage のあとジェネレータを再実行。
 
    プローブが選んだ曲がすべて無音でない別々の音として鳴った

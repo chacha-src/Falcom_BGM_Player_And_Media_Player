@@ -3,6 +3,7 @@
 #include "MidiPack.h"
 #include <vector>
 #include <algorithm>
+#include <string>
 
 static int CiEqW(wchar_t a, wchar_t b)
 {
@@ -27,7 +28,9 @@ int ComposerIsSeqExt(const wchar_t* path)
 	return ComposerEqExt(path, L".rcp") || ComposerEqExt(path, L".r36")
 		|| ComposerEqExt(path, L".g36") || ComposerEqExt(path, L".g18")
 		|| ComposerEqExt(path, L".mcp") || ComposerEqExt(path, L".mtd")
-		|| ComposerEqExt(path, L".mff") || ComposerEqExt(path, L".seq");
+		|| ComposerEqExt(path, L".mff") || ComposerEqExt(path, L".seq")
+		|| ComposerEqExt(path, L".smf") || ComposerEqExt(path, L".sng")
+		|| ComposerEqExt(path, L".zms");
 }
 
 static int StartsWith(const unsigned char* d, unsigned n, const char* s)
@@ -60,6 +63,19 @@ int ComposerKindOfMem(const unsigned char* data, unsigned size)
 		return COMPOSER_KIND_EUP;
 	if (StartsWith(data, size, "RCM-PC98V1.0"))
 		return COMPOSER_KIND_MCP;
+	if (size >= 16 && memcmp(data, "BALLADE SONG", 12) == 0)
+		return COMPOSER_KIND_SNG;
+	/* Z-MUSIC ソース。先頭が .COMMENT / (t / (i) */
+	{
+		unsigned i = 0;
+		while (i < size && (data[i] == ' ' || data[i] == '\t' || data[i] == '\r' || data[i] == '\n'))
+			i++;
+		if (i + 8 <= size && (memcmp(data + i, ".COMMENT", 8) == 0 || memcmp(data + i, ".comment", 8) == 0))
+			return COMPOSER_KIND_ZMS;
+		if (i + 3 <= size && data[i] == '(' && (data[i + 1] == 't' || data[i + 1] == 'T'
+			|| data[i + 1] == 'i' || data[i + 1] == 'I'))
+			return COMPOSER_KIND_ZMS;
+	}
 	return COMPOSER_KIND_NONE;
 }
 
@@ -94,8 +110,12 @@ int ComposerKindOf(const wchar_t* path)
 		return COMPOSER_KIND_MCP;
 	if (ComposerEqExt(path, L".eup"))
 		return COMPOSER_KIND_EUP;
-	if (ComposerEqExt(path, L".mff"))
+	if (ComposerEqExt(path, L".mff") || ComposerEqExt(path, L".smf"))
 		return COMPOSER_KIND_SMF;
+	if (ComposerEqExt(path, L".sng"))
+		return COMPOSER_KIND_SNG;
+	if (ComposerEqExt(path, L".zms"))
+		return COMPOSER_KIND_ZMS;
 	std::vector<unsigned char> buf;
 	if (!ReadAll(path, buf)) return COMPOSER_KIND_NONE;
 	return ComposerKindOfMem(buf.data(), (unsigned)buf.size());
@@ -113,7 +133,9 @@ void ComposerTempMidiPath(const wchar_t* src, wchar_t* dest, int destChars)
 	CreateDirectoryW(dir, NULL);
 	const wchar_t* name = src ? src : L"";
 	for (const wchar_t* p = name; *p; ++p) {
-		if (*p == L'\\' || *p == L'/')
+		if (*p == L'\\' || *p == L'/' || *p == L'>')
+			name = p + 1;
+		else if (p[0] == L':' && p > src && p[-1] == L':')
 			name = p + 1;
 	}
 	wchar_t stem[MAX_PATH];
@@ -123,7 +145,17 @@ void ComposerTempMidiPath(const wchar_t* src, wchar_t* dest, int destChars)
 		*dot = 0;
 	if (!stem[0])
 		wcsncpy_s(stem, L"composer", _TRUNCATE);
-	_snwprintf_s(dest, destChars, _TRUNCATE, L"%s\\%s.mid", dir, stem);
+	ULONGLONG h = 14695981039346656037ULL;
+	if (src) {
+		for (const wchar_t* p = src; *p; ++p) {
+			wchar_t c = *p;
+			if (c >= L'A' && c <= L'Z') c = (wchar_t)(c - L'A' + L'a');
+			if (c == L'/') c = L'\\';
+			h ^= (ULONGLONG)(unsigned)c;
+			h *= 1099511628211ULL;
+		}
+	}
+	_snwprintf_s(dest, destChars, _TRUNCATE, L"%s\\%016I64X_%s.mid", dir, h, stem);
 }
 
 int ComposerFindSidecar(const wchar_t* src, const wchar_t* ext, wchar_t* out, int outChars)
@@ -159,7 +191,9 @@ int ComposerFindSidecarWrd(const wchar_t* src, wchar_t* out, int outChars)
 	if (MidiPackIsVirtualPath(src))
 		return MidiPackFindSidecarWrd(src, out, outChars);
 	return ComposerFindSidecar(src, L".wrd", out, outChars)
-		|| ComposerFindSidecar(src, L".WRD", out, outChars);
+		|| ComposerFindSidecar(src, L".WRD", out, outChars)
+		|| ComposerFindSidecar(src, L".kok", out, outChars)
+		|| ComposerFindSidecar(src, L".KOK", out, outChars);
 }
 
 int ComposerHasSidecarWrd(const wchar_t* src)
@@ -168,6 +202,27 @@ int ComposerHasSidecarWrd(const wchar_t* src)
 		return MidiPackHasSidecarWrd(src);
 	wchar_t tmp[MAX_PATH];
 	return ComposerFindSidecarWrd(src, tmp, MAX_PATH);
+}
+
+static int SmfHasNoteOn(const wchar_t* path)
+{
+	HANDLE f = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
+	if (f == INVALID_HANDLE_VALUE) return 0;
+	DWORD sz = GetFileSize(f, NULL), got = 0;
+	if (sz == INVALID_FILE_SIZE || sz < 22 || sz > 8 * 1024 * 1024) {
+		CloseHandle(f);
+		return 0;
+	}
+	std::vector<unsigned char> d(sz);
+	const BOOL ok = ReadFile(f, d.data(), sz, &got, NULL);
+	CloseHandle(f);
+	if (!ok || got != sz || memcmp(d.data(), "MThd", 4) != 0) return 0;
+	for (DWORD i = 0; i + 3 < got; ++i) {
+		const unsigned char st = d[i];
+		if ((st & 0xf0) == 0x90 && d[i + 2] > 0 && d[i + 2] < 128)
+			return 1;
+	}
+	return 0;
 }
 
 static int CacheValid(const wchar_t* src, const wchar_t* dest)
@@ -190,7 +245,8 @@ static int CacheValid(const wchar_t* src, const wchar_t* dest)
 	ULARGE_INTEGER su, du;
 	su.LowPart = swt.dwLowDateTime; su.HighPart = swt.dwHighDateTime;
 	du.LowPart = dwt.dwLowDateTime; du.HighPart = dwt.dwHighDateTime;
-	return (du.QuadPart >= su.QuadPart && ss > 0) ? 1 : 0;
+	if (!(du.QuadPart >= su.QuadPart && ss > 0)) return 0;
+	return SmfHasNoteOn(dest);
 }
 
 static int WriteAll(const wchar_t* path, const unsigned char* data, unsigned size)
@@ -201,6 +257,32 @@ static int WriteAll(const wchar_t* path, const unsigned char* data, unsigned siz
 	const BOOL ok = WriteFile(f, data, size, &w, NULL);
 	CloseHandle(f);
 	return (ok && w == size) ? 1 : 0;
+}
+
+/* 変換後 SMF の隣へ DOC/HED 等をコピー（マップ判定が ogg_composer 側を見るため） */
+static void CopyComposerSidecars(const wchar_t* src, const wchar_t* destMid)
+{
+	if (!src || !destMid) return;
+	wchar_t srcStem[MAX_PATH], dstStem[MAX_PATH];
+	wcsncpy_s(srcStem, src, _TRUNCATE);
+	wcsncpy_s(dstStem, destMid, _TRUNCATE);
+	wchar_t* d1 = wcsrchr(srcStem, L'.');
+	wchar_t* s1 = wcsrchr(srcStem, L'\\');
+	if (d1 && (!s1 || d1 > s1)) *d1 = 0;
+	wchar_t* d2 = wcsrchr(dstStem, L'.');
+	wchar_t* s2 = wcsrchr(dstStem, L'\\');
+	if (d2 && (!s2 || d2 > s2)) *d2 = 0;
+	static const wchar_t* kExt[] = {
+		L".doc", L".txt", L".hed", L".tdf", L".wrd", L".kok",
+		L".DOC", L".TXT", L".HED", L".TDF", L".WRD", L".KOK"
+	};
+	for (int i = 0; i < 12; ++i) {
+		wchar_t from[MAX_PATH], to[MAX_PATH];
+		_snwprintf_s(from, _TRUNCATE, L"%s%s", srcStem, kExt[i]);
+		if (GetFileAttributesW(from) == INVALID_FILE_ATTRIBUTES) continue;
+		_snwprintf_s(to, _TRUNCATE, L"%s%s", dstStem, kExt[i]);
+		CopyFileW(from, to, FALSE);
+	}
 }
 
 /* ---- SMF writer ---- */
@@ -456,6 +538,7 @@ static int ConvertRcpMem(const unsigned char* d, unsigned size, int kind, std::v
 
 	const unsigned hdrSize = isV3 ? 0x2Eu : 0x2Cu;
 	const unsigned evSize = isV3 ? 6u : 4u;
+	int noteN = 0;
 	std::vector<SmfTrk> trks;
 	trks.resize(trkN + 1);
 	SmfTempo(trks[0], 0, 60000000u / tempoBpm);
@@ -496,7 +579,8 @@ static int ConvertRcpMem(const unsigned char* d, unsigned size, int kind, std::v
 		const int mute = th[7];
 		unsigned char port = 0;
 		int ch = 0;
-		int skipNotes = mute ? 1 : 0;
+		/* Recomposer は 01 だけミュート。02 などは演奏する */
+		int skipNotes = (mute == 1) ? 1 : 0;
 		if (midiCh == 0xff || midiCh < 0) {
 			skipNotes = 1;
 			ch = 0;
@@ -599,7 +683,9 @@ static int ConvertRcpMem(const unsigned char* d, unsigned size, int kind, std::v
 					if (idx >= 0x30)
 						tgt = pos + hdrSize + (idx - 0x30) * evSize;
 				} else {
-					tgt = pos + (p1 | (p2 << 8));
+					/* v2: オフセットは (p1&~3)|(p2<<8)。下位2bit は小節番号の上位 */
+					unsigned repeatPos = (p1 & ~3u) | (p2 << 8);
+					tgt = pos + repeatPos;
 				}
 				if (tgt >= dataBeg && tgt < dataEnd && tgt != thisOff && sameN < 8) {
 					sameRet[sameN++] = ip;
@@ -620,6 +706,7 @@ static int ConvertRcpMem(const unsigned char* d, unsigned size, int kind, std::v
 					unsigned char nn = (unsigned char)note;
 					unsigned char vel = (unsigned char)(p2 > 127 ? 127 : p2);
 					SmfPush(tr, tick, (unsigned char)(0x90 | ch), nn, vel, 3, port);
+					noteN++;
 					RcpNoteOff of;
 					of.tick = tick + (p1 > 0 ? p1 : 1);
 					of.ch = (unsigned char)ch;
@@ -729,6 +816,7 @@ static int ConvertRcpMem(const unsigned char* d, unsigned size, int kind, std::v
 		pos += trkLen;
 	}
 
+	if (noteN <= 0) return 0;
 	SmfBuild(trks, tickQ, mid);
 	return mid.size() > 22 ? 1 : 0;
 }
@@ -815,10 +903,440 @@ static int CopySmfMem(const unsigned char* d, unsigned size, std::vector<unsigne
 	return 0;
 }
 
+static int ZmsHexByte(const char*& p)
+{
+	while (*p == ' ' || *p == '\t' || *p == '$' || *p == ',' || *p == '{' || *p == '}')
+		p++;
+	if (!*p) return -1;
+	auto nibble = [](char c) -> int {
+		if (c >= '0' && c <= '9') return c - '0';
+		if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+		if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+		return -1;
+	};
+	int hi = nibble(*p);
+	if (hi < 0) {
+		if (*p == '/') return -2;
+		return -1;
+	}
+	p++;
+	int lo = nibble(*p);
+	if (lo >= 0) p++;
+	else { lo = hi; hi = 0; }
+	return (hi << 4) | lo;
+}
+
+static unsigned ZmsLenTicks(int defLen, int num, unsigned ppqn)
+{
+	int L = (num > 0) ? num : defLen;
+	if (L <= 0) L = 4;
+	/* l4 = 四分。ppqn が四分のティック */
+	unsigned t = (ppqn * 4u) / (unsigned)L;
+	if (!t) t = 1;
+	return t;
+}
+
+static int ZmsNoteVal(int noteBase, int oct, int acc)
+{
+	int n = (oct + 1) * 12 + noteBase + acc;
+	if (n < 0) n = 0;
+	if (n > 127) n = 127;
+	return n;
+}
+
+/* Z-MUSIC MIDI MML → SMF。OPM 専用コマンドは飛ばして MIDI トラックを鳴らす */
+static int ConvertZmsMem(const unsigned char* d, unsigned size, std::vector<unsigned char>& mid)
+{
+	if (!d || size < 8 || size > 8 * 1024 * 1024) return 0;
+	std::string text((const char*)d, (const char*)d + size);
+	for (size_t i = 0; i < text.size(); ++i) {
+		if (text[i] == '\r') text[i] = '\n';
+		if (text[i] == '\t') text[i] = ' ';
+	}
+	const unsigned ppqn = 48;
+	std::vector<SmfTrk> trks;
+	trks.resize(17);
+	unsigned tempoBpm = 120;
+	wchar_t titleW[256] = {};
+	int assignCh[32];
+	for (int i = 0; i < 32; i++) assignCh[i] = (i < 16) ? i : 0;
+
+	struct St {
+		int ch, oct, defLen, vel, vol, q, pan, prog;
+		unsigned tick;
+		int lastNote, lastLen;
+		int tie;
+	};
+	St st[32];
+	memset(st, 0, sizeof(st));
+	for (int i = 0; i < 32; i++) {
+		st[i].ch = i % 16;
+		st[i].oct = 4;
+		st[i].defLen = 4;
+		st[i].vel = 80;
+		st[i].vol = 100;
+		st[i].q = 8;
+		st[i].pan = 64;
+		st[i].prog = -1;
+	}
+	int curTrk = 0;
+
+	auto emitSyx = [&](const std::vector<unsigned char>& sx) {
+		if (sx.size() >= 2)
+			SmfSysex(trks[0], 0, sx.data(), (unsigned)sx.size(), 0);
+	};
+
+	size_t pos = 0;
+	while (pos < text.size()) {
+		while (pos < text.size() && (text[pos] == ' ' || text[pos] == '\n')) pos++;
+		if (pos >= text.size()) break;
+		if (text[pos] == '/') {
+			while (pos < text.size() && text[pos] != '\n') pos++;
+			continue;
+		}
+		if (text[pos] == '.' ) {
+			const char* line = text.c_str() + pos;
+			if (_strnicmp(line, ".COMMENT", 8) == 0) {
+				const char* p = line + 8;
+				while (*p == ' ') p++;
+				char tmp[200];
+				int n = 0;
+				while (*p && *p != '\n' && n < 199) tmp[n++] = *p++;
+				tmp[n] = 0;
+				MultiByteToWideChar(932, 0, tmp, -1, titleW, 256);
+				unsigned char raw[200];
+				memcpy(raw, tmp, (size_t)n);
+				SmfMeta(trks[0], 0, 0x03, raw, (unsigned)n);
+				pos += (size_t)(p - line);
+				continue;
+			}
+			if (_strnicmp(line, ".ROLAND_EXCLUSIVE", 17) == 0) {
+				const char* p = line + 17;
+				std::vector<unsigned char> sx;
+				sx.push_back(0xf0);
+				sx.push_back(0x41);
+				int v;
+				while ((v = ZmsHexByte(p)) >= 0)
+					sx.push_back((unsigned char)(v & 0x7f));
+				if (sx.size() >= 4) {
+					unsigned sum = 0;
+					for (size_t i = 4; i < sx.size(); ++i) sum += sx[i];
+					sx.push_back((unsigned char)((0x80 - (sum & 0x7f)) & 0x7f));
+					sx.push_back(0xf7);
+					emitSyx(sx);
+				}
+				while (pos < text.size() && text[pos] != '\n') pos++;
+				continue;
+			}
+			while (pos < text.size() && text[pos] != '\n') pos++;
+			continue;
+		}
+		if (text[pos] == '(') {
+			pos++;
+			char tag[16] = {};
+			int ti = 0;
+			while (pos < text.size() && text[pos] != ')' && text[pos] != ',' && ti < 14) {
+				tag[ti++] = (char)text[pos++];
+			}
+			int arg = 0, arg2 = 0;
+			if (pos < text.size() && text[pos] == ',') {
+				pos++;
+				while (pos < text.size() && text[pos] >= '0' && text[pos] <= '9')
+					arg = arg * 10 + (text[pos++] - '0');
+			}
+			if (pos < text.size() && text[pos] == ',') {
+				pos++;
+				while (pos < text.size() && text[pos] >= '0' && text[pos] <= '9')
+					arg2 = arg2 * 10 + (text[pos++] - '0');
+			}
+			while (pos < text.size() && text[pos] != ')') pos++;
+			if (pos < text.size() && text[pos] == ')') pos++;
+			if ((tag[0] == 't' || tag[0] == 'T') && tag[1] >= '0') {
+				curTrk = atoi(tag + 1);
+				if (curTrk < 1) curTrk = 1;
+				if (curTrk > 16) curTrk = 16;
+			} else if ((tag[0] == 'a' || tag[0] == 'A') && tag[1] >= '0') {
+				int tr = atoi(tag + 1);
+				int ch = arg ? arg : arg2;
+				if (tr >= 1 && tr <= 16 && ch >= 1 && ch <= 16)
+					assignCh[tr - 1] = ch - 1;
+			} else if ((tag[0] == 'o' || tag[0] == 'O') && tag[1] >= '0') {
+				int v = atoi(tag + 1);
+				if (v >= 32 && v <= 300) {
+					tempoBpm = (unsigned)v;
+					SmfTempo(trks[0], 0, 60000000u / tempoBpm);
+				}
+			}
+			continue;
+		}
+		/* MML for current track */
+		if (curTrk < 1 || curTrk > 16) {
+			pos++;
+			continue;
+		}
+		St& s = st[curTrk - 1];
+		s.ch = assignCh[curTrk - 1] & 15;
+		SmfTrk& tr = trks[curTrk];
+		char c = text[pos];
+		if (c == '\n') { pos++; continue; }
+		if (c == '[') {
+			while (pos < text.size() && text[pos] != ']') pos++;
+			if (pos < text.size()) pos++;
+			continue;
+		}
+		if (c == '|' && pos + 1 < text.size() && text[pos + 1] == ':') {
+			pos += 2;
+			int times = 0;
+			while (pos < text.size() && text[pos] >= '0' && text[pos] <= '9')
+				times = times * 10 + (text[pos++] - '0');
+			(void)times;
+			continue;
+		}
+		if (c == ':' && pos + 1 < text.size() && text[pos + 1] == '|') {
+			pos += 2;
+			continue;
+		}
+		if (c == 'n' || c == 'N') {
+			pos++;
+			int chn = 0;
+			while (pos < text.size() && text[pos] >= '0' && text[pos] <= '9')
+				chn = chn * 10 + (text[pos++] - '0');
+			if (chn >= 1 && chn <= 16) s.ch = chn - 1;
+			continue;
+		}
+		if (c == '@') {
+			pos++;
+			char k = (pos < text.size()) ? text[pos] : 0;
+			if (k == 'v' || k == 'V' || k == 'p' || k == 'P' || k == 'u' || k == 'U') {
+				pos++;
+				int v = 0;
+				while (pos < text.size() && text[pos] >= '0' && text[pos] <= '9')
+					v = v * 10 + (text[pos++] - '0');
+				if (k == 'v') s.vel = v;
+				else if (k == 'V') {
+					s.vol = v;
+					SmfPush(tr, s.tick, (unsigned char)(0xb0 | s.ch), 7, (unsigned char)(v > 127 ? 127 : v), 3, 0);
+				} else if (k == 'p' || k == 'P') {
+					s.pan = v;
+					SmfPush(tr, s.tick, (unsigned char)(0xb0 | s.ch), 10, (unsigned char)(v > 127 ? 127 : v), 3, 0);
+				}
+				continue;
+			}
+			int v = 0, digits = 0;
+			while (pos < text.size() && text[pos] >= '0' && text[pos] <= '9') {
+				v = v * 10 + (text[pos++] - '0');
+				digits++;
+			}
+			if (digits) {
+				s.prog = v;
+				SmfPush(tr, s.tick, (unsigned char)(0xc0 | s.ch), (unsigned char)(v & 0x7f), 0, 2, 0);
+			}
+			continue;
+		}
+		if (c == 'o' || c == 'O') {
+			pos++;
+			int v = 0;
+			while (pos < text.size() && text[pos] >= '0' && text[pos] <= '9')
+				v = v * 10 + (text[pos++] - '0');
+			if (v >= 0 && v <= 9) s.oct = v;
+			continue;
+		}
+		if (c == 'l' || c == 'L') {
+			pos++;
+			int v = 0;
+			while (pos < text.size() && text[pos] >= '0' && text[pos] <= '9')
+				v = v * 10 + (text[pos++] - '0');
+			if (v > 0) s.defLen = v;
+			continue;
+		}
+		if (c == 'q' || c == 'Q') {
+			pos++;
+			int v = 0;
+			while (pos < text.size() && text[pos] >= '0' && text[pos] <= '9')
+				v = v * 10 + (text[pos++] - '0');
+			if (v > 0) s.q = v;
+			continue;
+		}
+		if (c == '>') { s.oct++; if (s.oct > 9) s.oct = 9; pos++; continue; }
+		if (c == '<') { s.oct--; if (s.oct < 0) s.oct = 0; pos++; continue; }
+		if (c == '&') { s.tie = 1; pos++; continue; }
+		int noteBase = -1;
+		if (c == 'c' || c == 'C') noteBase = 0;
+		else if (c == 'd' || c == 'D') noteBase = 2;
+		else if (c == 'e' || c == 'E') noteBase = 4;
+		else if (c == 'f' || c == 'F') noteBase = 5;
+		else if (c == 'g' || c == 'G') noteBase = 7;
+		else if (c == 'a' || c == 'A') noteBase = 9;
+		else if (c == 'b' || c == 'B') noteBase = 11;
+		else if (c == 'r' || c == 'R') noteBase = -2;
+		if (noteBase == -1) { pos++; continue; }
+		pos++;
+		int acc = 0;
+		while (pos < text.size() && (text[pos] == '+' || text[pos] == '#' || text[pos] == '-')) {
+			if (text[pos] == '-') acc--;
+			else acc++;
+			pos++;
+		}
+		int lenNum = 0;
+		while (pos < text.size() && text[pos] >= '0' && text[pos] <= '9')
+			lenNum = lenNum * 10 + (text[pos++] - '0');
+		int dots = 0;
+		while (pos < text.size() && text[pos] == '.') { dots++; pos++; }
+		unsigned dur = ZmsLenTicks(s.defLen, lenNum, ppqn);
+		unsigned add = dur / 2;
+		for (int i = 0; i < dots; i++) { dur += add; add /= 2; }
+		if (noteBase == -2) {
+			s.tick += dur;
+			s.tie = 0;
+			continue;
+		}
+		int nn = ZmsNoteVal(noteBase, s.oct, acc);
+		unsigned gate = dur;
+		if (s.q > 0 && s.q < 8) {
+			gate = dur * (unsigned)s.q / 8u;
+			if (!gate) gate = 1;
+		}
+		unsigned char vv = (unsigned char)(s.vel > 127 ? 127 : (s.vel < 1 ? 1 : s.vel));
+		if (s.tie && s.lastNote == nn) {
+			/* タイ: 前のノートオフを延ばすので、ここでは on を重ねず tick だけ進める */
+			s.tick += dur;
+			s.lastLen += (int)dur;
+			continue;
+		}
+		SmfPush(tr, s.tick, (unsigned char)(0x90 | s.ch), (unsigned char)nn, vv, 3, 0);
+		SmfPush(tr, s.tick + gate, (unsigned char)(0x80 | s.ch), (unsigned char)nn, 0x40, 3, 0);
+		s.tick += dur;
+		s.lastNote = nn;
+		s.lastLen = (int)dur;
+		s.tie = 0;
+	}
+	if (trks[0].ev.empty())
+		SmfTempo(trks[0], 0, 60000000u / (tempoBpm ? tempoBpm : 120));
+	int any = 0;
+	for (size_t i = 1; i < trks.size(); ++i)
+		if (!trks[i].ev.empty()) any = 1;
+	if (!any) return 0;
+	SmfBuild(trks, ppqn, mid);
+	return mid.size() > 22 ? 1 : 0;
+}
+
+/* BALLADE / ミュージクン SNG。ヘッダの後は RCP に近い 4 バイトイベント */
+static int ConvertSngMem(const unsigned char* d, unsigned size, std::vector<unsigned char>& mid)
+{
+	if (!d || size < 64) return 0;
+	unsigned i = 0;
+	while (i + 12 < size && memcmp(d + i, "BALLADE SONG", 12) != 0)
+		i++;
+	if (i + 12 >= size) return 0;
+	unsigned eofMark = i;
+	while (eofMark < size && d[eofMark] != 0x1a)
+		eofMark++;
+	if (eofMark >= size) return 0;
+	unsigned nowAt = 0;
+	for (unsigned p = eofMark; p + 4 < size && p < eofMark + 64; p++) {
+		if (d[p] == 'n' && d[p + 1] == 'o' && d[p + 2] == 'w' && d[p + 3] == ' ') {
+			nowAt = p;
+			break;
+		}
+	}
+	if (!nowAt) nowAt = eofMark + 1;
+	unsigned titleAt = nowAt + 4;
+	unsigned tableAt = titleAt + 6;
+	if (tableAt + 8 > size) return 0;
+	unsigned lens[16] = {};
+	int nTrk = 0;
+	unsigned sum = 0;
+	for (int t = 0; t < 16; t++) {
+		unsigned v = RcpU32(d + tableAt + (unsigned)t * 4);
+		if (v == 0) continue;
+		if (v >= size) break;
+		if (sum + v > size) break;
+		lens[nTrk++] = v;
+		sum += v;
+	}
+	if (nTrk <= 0) return 0;
+	unsigned dataAt = size - sum;
+	if (dataAt < tableAt || dataAt >= size) {
+		dataAt = tableAt + 16 * 4 + 32;
+		if (dataAt + sum > size)
+			dataAt = tableAt + (unsigned)nTrk * 4;
+	}
+	unsigned tempoBpm = 120;
+	for (unsigned p = tableAt; p + 2 < dataAt && p + 2 < size; p++) {
+		if (d[p] == 0x4b && d[p + 2] >= 32 && d[p + 2] <= 240) {
+			tempoBpm = d[p + 2];
+			break;
+		}
+	}
+	const unsigned ppqn = 48;
+	std::vector<SmfTrk> trks;
+	trks.resize((size_t)nTrk + 1);
+	SmfTempo(trks[0], 0, 60000000u / tempoBpm);
+	unsigned off = dataAt;
+	for (int t = 0; t < nTrk; t++) {
+		unsigned ts = lens[t];
+		if (off + ts > size) break;
+		const unsigned char* trd = d + off;
+		unsigned ip = 0;
+		unsigned tick = 0;
+		int ch = t % 16;
+		std::vector<RcpNoteOff> offs;
+		SmfTrk& tr = trks[t + 1];
+		while (ip + 4 <= ts) {
+			unsigned char st = trd[ip];
+			unsigned char n1 = trd[ip + 1];
+			unsigned char gt = trd[ip + 2];
+			unsigned char vel = trd[ip + 3];
+			ip += 4;
+			FlushOffs(tr, offs, tick);
+			if (n1 < 0x80) {
+				if (n1 > 0 && vel > 0) {
+					unsigned gate = gt ? gt : 1;
+					SmfPush(tr, tick, (unsigned char)(0x90 | ch), n1, vel, 3, 0);
+					RcpNoteOff no;
+					no.tick = tick + gate;
+					no.ch = (unsigned char)ch;
+					no.note = n1;
+					no.port = 0;
+					offs.push_back(no);
+				}
+				tick += st ? st : 0;
+			} else if (n1 == 0xfc || n1 == 0xfd) {
+				break;
+			} else if (n1 == 0xe7) {
+				/* テンポ */
+				if (gt >= 32 && gt <= 240)
+					SmfTempo(trks[0], tick, 60000000u / gt);
+				tick += st;
+			} else if (n1 == 0xe2) {
+				SmfPush(tr, tick, (unsigned char)(0xc0 | ch), gt, 0, 2, 0);
+				tick += st;
+			} else if (n1 == 0xeb) {
+				SmfPush(tr, tick, (unsigned char)(0xb0 | ch), gt, vel, 3, 0);
+				tick += st;
+			} else {
+				tick += st;
+			}
+			if (tick > ppqn * 600u * 8u) break;
+		}
+		FlushOffs(tr, offs, tick + ppqn * 4);
+		off += ts;
+	}
+	int any = 0;
+	for (size_t t = 1; t < trks.size(); ++t)
+		if (!trks[t].ev.empty()) any = 1;
+	if (!any) return 0;
+	SmfBuild(trks, ppqn, mid);
+	return mid.size() > 22 ? 1 : 0;
+}
+
 int ComposerConvertToMidi(const wchar_t* src, wchar_t* dest, int destChars)
 {
 	if (!src || !dest || destChars < 8) return 0;
 	dest[0] = 0;
+	wchar_t pack[MIDIPACK_PATH];
+	if (MidiPackMaterialize(src, pack, MIDIPACK_PATH))
+		src = pack;
 	ComposerTempMidiPath(src, dest, destChars);
 	if (!dest[0]) return 0;
 	if (CacheValid(src, dest))
@@ -836,8 +1354,13 @@ int ComposerConvertToMidi(const wchar_t* src, wchar_t* dest, int destChars)
 			kind = COMPOSER_KIND_MCP;
 		else if (ComposerEqExt(src, L".eup"))
 			kind = COMPOSER_KIND_EUP;
-		else if (ComposerEqExt(src, L".mff") || ComposerEqExt(src, L".seq"))
+		else if (ComposerEqExt(src, L".mff") || ComposerEqExt(src, L".seq")
+			|| ComposerEqExt(src, L".smf"))
 			kind = COMPOSER_KIND_SMF;
+		else if (ComposerEqExt(src, L".sng"))
+			kind = COMPOSER_KIND_SNG;
+		else if (ComposerEqExt(src, L".zms"))
+			kind = COMPOSER_KIND_ZMS;
 	}
 	if (kind == COMPOSER_KIND_GSD || kind == COMPOSER_KIND_CM6)
 		return 0;
@@ -851,7 +1374,12 @@ int ComposerConvertToMidi(const wchar_t* src, wchar_t* dest, int destChars)
 	else if (kind == COMPOSER_KIND_RCP || kind == COMPOSER_KIND_G36 || kind == COMPOSER_KIND_MCP)
 		ok = ConvertRcpMem(buf.data(), (unsigned)buf.size(),
 			(kind == COMPOSER_KIND_G36) ? COMPOSER_KIND_G36 : COMPOSER_KIND_RCP, mid);
+	else if (kind == COMPOSER_KIND_SNG)
+		ok = ConvertSngMem(buf.data(), (unsigned)buf.size(), mid);
+	else if (kind == COMPOSER_KIND_ZMS)
+		ok = ConvertZmsMem(buf.data(), (unsigned)buf.size(), mid);
 	if (!ok || mid.size() < 22) return 0;
 	if (!WriteAll(dest, mid.data(), (unsigned)mid.size())) return 0;
+	CopyComposerSidecars(src, dest);
 	return 1;
 }

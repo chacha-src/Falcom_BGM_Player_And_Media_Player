@@ -41,6 +41,10 @@
 			    <param name="Name" value="対応形式と対応タイトル">
 			    <param name="Local" value="ja\formats.htm">
 			    </OBJECT>
+			<LI> <OBJECT type="text/sitemap">
+			    <param name="Name" value="対応データシート">
+			    <param name="Local" value="ja\datasheet.htm">
+			    </OBJECT>
 		</UL>
 		<LI> <OBJECT type="text/sitemap">
 		    <param name="Name" value="メディアプレイヤー画面">
@@ -138,8 +142,12 @@
 			    <param name="Local" value="ja\pianoroll-tune.htm">
 			    </OBJECT>
 			<LI> <OBJECT type="text/sitemap">
-			    <param name="Name" value="MIDIモニタ">
+			    <param name="Name" value="FM/MIDIモニタ">
 			    <param name="Local" value="ja\midi-monitor.htm">
+			    </OBJECT>
+			<LI> <OBJECT type="text/sitemap">
+			    <param name="Name" value="WRDを見る">
+			    <param name="Local" value="ja\wrd.htm">
 			    </OBJECT>
 			<LI> <OBJECT type="text/sitemap">
 			    <param name="Name" value="動画を再生する">
@@ -297,6 +305,43 @@
 			    </OBJECT>
 		</UL>
 		<LI> <OBJECT type="text/sitemap">
+		    <param name="Name" value="CEmu（CPUエミュレーション）">
+		    </OBJECT>
+		<UL>
+			<LI> <OBJECT type="text/sitemap">
+			    <param name="Name" value="CEmu：PC-98">
+			    <param name="Local" value="ja\cemu-pc98.htm">
+			    </OBJECT>
+			<LI> <OBJECT type="text/sitemap">
+			    <param name="Name" value="CEmu：PC-88">
+			    <param name="Local" value="ja\cemu-pc88.htm">
+			    </OBJECT>
+			<LI> <OBJECT type="text/sitemap">
+			    <param name="Name" value="CEmu：X68000">
+			    <param name="Local" value="ja\cemu-x68k.htm">
+			    </OBJECT>
+			<LI> <OBJECT type="text/sitemap">
+			    <param name="Name" value="CEmu：X1">
+			    <param name="Local" value="ja\cemu-x1.htm">
+			    </OBJECT>
+			<LI> <OBJECT type="text/sitemap">
+			    <param name="Name" value="CEmu：MSX">
+			    <param name="Local" value="ja\cemu-msx.htm">
+			    </OBJECT>
+			<LI> <OBJECT type="text/sitemap">
+			    <param name="Name" value="CEmu：FM-7">
+			    <param name="Local" value="ja\cemu-fm7.htm">
+			    </OBJECT>
+			<LI> <OBJECT type="text/sitemap">
+			    <param name="Name" value="CEmu：PC/AT">
+			    <param name="Local" value="ja\cemu-pcat.htm">
+			    </OBJECT>
+			<LI> <OBJECT type="text/sitemap">
+			    <param name="Name" value="CEmu：アーケード">
+			    <param name="Local" value="ja\cemu-arcade.htm">
+			    </OBJECT>
+		</UL>
+		<LI> <OBJECT type="text/sitemap">
 		    <param name="Name" value="使いこなす">
 		    </OBJECT>
 		<UL>
@@ -357,6 +402,10 @@
 			<LI> <OBJECT type="text/sitemap">
 			    <param name="Name" value="Supported formats and titles">
 			    <param name="Local" value="en\formats.htm">
+			    </OBJECT>
+			<LI> <OBJECT type="text/sitemap">
+			    <param name="Name" value="Support datasheet">
+			    <param name="Local" value="en\datasheet.htm">
 			    </OBJECT>
 		</UL>
 		<LI> <OBJECT type="text/sitemap">
@@ -455,8 +504,12 @@
 			    <param name="Local" value="en\pianoroll-tune.htm">
 			    </OBJECT>
 			<LI> <OBJECT type="text/sitemap">
-			    <param name="Name" value="MIDI monitor">
+			    <param name="Name" value="FM/MIDI monitor">
 			    <param name="Local" value="en\midi-monitor.htm">
+			    </OBJECT>
+			<LI> <OBJECT type="text/sitemap">
+			    <param name="Name" value="Watching WRD">
+			    <param name="Local" value="en\wrd.htm">
 			    </OBJECT>
 			<LI> <OBJECT type="text/sitemap">
 			    <param name="Name" value="Playing video">
@@ -611,6 +664,43 @@
 			<LI> <OBJECT type="text/sitemap">
 			    <param name="Name" value="Bonus: old-machine sound">
 			    <param name="Local" value="en\cemu.htm">
+			    </OBJECT>
+		</UL>
+		<LI> <OBJECT type="text/sitemap">
+		    <param name="Name" value="CEmu (CPU emulation)">
+		    </OBJECT>
+		<UL>
+			<LI> <OBJECT type="text/sitemap">
+			    <param name="Name" value="CEmu: PC-98">
+			    <param name="Local" value="en\cemu-pc98.htm">
+			    </OBJECT>
+			<LI> <OBJECT type="text/sitemap">
+			    <param name="Name" value="CEmu: PC-88">
+			    <param name="Local" value="en\cemu-pc88.htm">
+			    </OBJECT>
+			<LI> <OBJECT type="text/sitemap">
+			    <param name="Name" value="CEmu: X68000">
+			    <param name="Local" value="en\cemu-x68k.htm">
+			    </OBJECT>
+			<LI> <OBJECT type="text/sitemap">
+			    <param name="Name" value="CEmu: X1">
+			    <param name="Local" value="en\cemu-x1.htm">
+			    </OBJECT>
+			<LI> <OBJECT type="text/sitemap">
+			    <param name="Name" value="CEmu: MSX">
+			    <param name="Local" value="en\cemu-msx.htm">
+			    </OBJECT>
+			<LI> <OBJECT type="text/sitemap">
+			    <param name="Name" value="CEmu: FM-7">
+			    <param name="Local" value="en\cemu-fm7.htm">
+			    </OBJECT>
+			<LI> <OBJECT type="text/sitemap">
+			    <param name="Name" value="CEmu: PC/AT">
+			    <param name="Local" value="en\cemu-pcat.htm">
+			    </OBJECT>
+			<LI> <OBJECT type="text/sitemap">
+			    <param name="Name" value="CEmu: Arcade">
+			    <param name="Local" value="en\cemu-arcade.htm">
 			    </OBJECT>
 		</UL>
 		<LI> <OBJECT type="text/sitemap">

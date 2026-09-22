@@ -1,5 +1,6 @@
 ﻿#pragma once
-// MIDI/RCP/WRD などを含む zip/lzh 等。CEmu の zip::0001 とは別経路（arc>inner）。
+// MIDI/RCP/WRD などを含む zip/lzh 等。CEmu の zip::0001（4桁曲番）とは別経路。
+// プレイリスト fol は archive::inner.mid（旧セーブの arc>inner も読む）。
 
 enum {
 	MIDIPACK_PATH = 1024,
@@ -24,3 +25,5 @@ int MidiPackHasSidecarWrd(const wchar_t* src);
 int MidiPackFindSidecarWrd(const wchar_t* src, wchar_t* out, int outChars);
 /* 仮想パスなら一時展開して実ファイルを返す。展開したら 1。 */
 int MidiPackMaterialize(const wchar_t* src, wchar_t* out, int outChars);
+/* %TEMP%\ogg_midpack / ogg_composer。プレイリストに載せてよいパスではない。 */
+int MidiPackIsTempExtractPath(const wchar_t* path);

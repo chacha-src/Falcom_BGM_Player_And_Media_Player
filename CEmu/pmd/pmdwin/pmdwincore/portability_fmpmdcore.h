@@ -1,4 +1,4 @@
-#ifndef PORTABILITY_FMPMDCORE_H
+﻿#ifndef PORTABILITY_FMPMDCORE_H
 #define PORTABILITY_FMPMDCORE_H
 
 #include "portability_fmpmd.h"

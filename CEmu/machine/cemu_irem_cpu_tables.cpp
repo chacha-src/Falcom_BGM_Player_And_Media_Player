@@ -1,4 +1,4 @@
-#include "StdAfx.h"
+﻿#include "StdAfx.h"
 #include "cemu_irem_cpu_tables.h"
 #include <string.h>
 

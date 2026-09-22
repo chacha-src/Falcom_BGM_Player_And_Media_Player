@@ -1,4 +1,4 @@
-// CMediaPlayerDlg.cpp : メディアプレイヤーモード画面(張りぼて)とモード選択ダイアログ
+﻿// CMediaPlayerDlg.cpp : メディアプレイヤーモード画面(張りぼて)とモード選択ダイアログ
 //
 // 実体は COggDlg(og->) と CPlayList(pl->)。ここは表示と操作の取り次ぎだけを行う。
 // メディアプレイヤーモード中は og / pl のウィンドウを非表示にして裏で生かしておく。
@@ -14224,9 +14224,11 @@ void EnterMediaPlayerMode(BOOL bConvertCoords)
 
 	// 中途切替時のみ旧メイン矩形を取る。起動時は絶対に変換しない
 	// (起動のたびに (mp-og) を足すと斜め上へドリフトする)。
+	// 子UIの画面位置は Create の OnSize より前に撮る。後から足すと二度掛けでずれる。
 	CRect oldMainRc;
 	if (bConvertCoords)
 		og->GetWindowRect(&oldMainRc);
+	CCC_MainLockSnapshotForSwitch(bConvertCoords ? (const RECT*)&oldMainRc : NULL);
 
 	// プレイリストを必ず生成(裏で生かす)。再生はプレイリスト方式にする。
 	if (!pl) {
@@ -14237,8 +14239,10 @@ void EnterMediaPlayerMode(BOOL bConvertCoords)
 			pl = NULL;
 		}
 	}
-	if (!pl || !::IsWindow(pl->GetSafeHwnd()))
+	if (!pl || !::IsWindow(pl->GetSafeHwnd())) {
+		CCC_MainLockCancelSwitch();
 		return;
+	}
 	plw = 1;
 	savedata.playerMode = 1;
 
@@ -14251,6 +14255,7 @@ void EnterMediaPlayerMode(BOOL bConvertCoords)
 	CMediaPlayerDlg* creating = new CMediaPlayerDlg;
 	if (!creating->Create(og) || !::IsWindow(creating->GetSafeHwnd())) {
 		delete creating;
+		CCC_MainLockCancelSwitch();
 		return;
 	}
 	mp = creating;
@@ -14309,6 +14314,7 @@ void EnterFalcomMode()
 	g_mpSideJacket = 0;
 
 	// 切替前メイン(mp)矩形。破棄前に取得する。
+	// 他UIの位置も破棄・再表示の OnSize より前に撮る。
 	CRect oldMainRc;
 	BOOL haveOldMain = FALSE;
 	CMediaPlayerDlg* dying = mp;
@@ -14317,6 +14323,7 @@ void EnterFalcomMode()
 		if (::IsWindow(dying->GetSafeHwnd())) {
 			dying->GetWindowRect(&oldMainRc);
 			haveOldMain = TRUE;
+			CCC_MainLockSnapshotForSwitch(&oldMainRc);
 			dying->SavePos();
 			dying->DestroyWindow();
 		}
@@ -14340,8 +14347,11 @@ void EnterFalcomMode()
 		CCC_RefreshKids(og->m_hWnd);   // 再表示時の子コントロール再描画
 		og->RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_ERASE | RDW_FRAME | RDW_ALLCHILDREN);
 		og->PostRefreshAllAeroWindows();         // EQ/ピアノ/プレイリスト等も再反映
-		// mp基準の相対位置を保ったまま og 基準へ座標変換
+		// 切替前に撮った (x',y') を og の (xx,yy) からの同じ相対へ一度だけ載せる
 		CCC_MainLockRefreshOffsetsFor(og, haveOldMain ? &oldMainRc : NULL);
+	}
+	else if (haveOldMain) {
+		CCC_MainLockCancelSwitch();
 	}
 
 	// プレイリストは savedata.pl に従って表示/非表示

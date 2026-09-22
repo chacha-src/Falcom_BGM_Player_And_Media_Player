@@ -1,4 +1,4 @@
-// XMPlay plugin functions header
+﻿// XMPlay plugin functions header
 // new plugins can be submitted to plugins@xmplay.com
 
 #pragma once

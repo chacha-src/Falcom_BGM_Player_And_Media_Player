@@ -1,4 +1,4 @@
-// ED4.cpp : 実装ファイル
+﻿// ED4.cpp : 実装ファイル
 //
 
 #include "stdafx.h"

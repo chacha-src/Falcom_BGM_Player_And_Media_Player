@@ -1,4 +1,4 @@
-#include "StdAfx.h"
+﻿#include "StdAfx.h"
 #include "cemu_zipfs.h"
 #include "minizip/unzip.h"
 #include "minizip/iowin32.h"

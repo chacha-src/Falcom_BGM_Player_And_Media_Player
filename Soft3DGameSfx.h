@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 // Soft3D レース／迷路用 PCM 合成効果音（曲のストリーミングバッファとは別の DS セカンダリ）
 
 enum {

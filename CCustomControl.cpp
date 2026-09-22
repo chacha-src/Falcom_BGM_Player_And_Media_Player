@@ -18134,6 +18134,14 @@ static CCC_MainLockEntry g_mainLocks[16];
 static int g_mainLockCount = 0;
 static BOOL g_mainLockInternalMove = FALSE;
 static DWORD g_mainLockQuickPresentUntil = 0;
+// メイン切替中は OnSize 由来の追随を止める。スナップショットへ二度掛けするとずれる。
+static BOOL g_mainLockSwitchFreeze = FALSE;
+struct CCC_SwitchSnap {
+    HWND hWnd;
+    RECT rc;
+};
+static CCC_SwitchSnap g_switchSnap[16];
+static int g_switchSnapN = 0;
 
 static const int CCC_MAINLOCK_H = 20;
 static const int CCC_MAINLOCK_MIN_W = 128;
@@ -19657,7 +19665,7 @@ void CCC_MainLockUnregister(HWND hWnd)
 // 詳細は呼び出し元のコメントを優先。
 void CCC_MainLockOnMainMoving(LPRECT pMainRect)
 {
-    if (!pMainRect || g_mainLockInternalMove)
+    if (!pMainRect || g_mainLockInternalMove || g_mainLockSwitchFreeze)
         return;
     g_mainLockInternalMove = TRUE;
     g_mainLockQuickPresentUntil = GetTickCount() + 200;
@@ -19867,7 +19875,7 @@ static int CCC_CascadeGapTop(const RECT& m, const RECT& w) { return m.top - w.bo
 // 詳細は呼び出し元のコメントを優先。
 void CCC_NeighborCascadeOnMainResize(const RECT* pOldMain, const RECT* pNewMain)
 {
-    if (!pNewMain)
+    if (!pNewMain || g_mainLockSwitchFreeze)
         return;
 
     if (!pOldMain) {
@@ -20013,13 +20021,76 @@ BOOL CCC_MainLockPreferQuickPresent()
     return GetTickCount() < g_mainLockQuickPresentUntil;
 }
 
+// 切替前の画面矩形を覚える。Create/Show の OnSize が追随で動かす前に呼ぶ。
+void CCC_MainLockSnapshotForSwitch(const RECT* pOldMain)
+{
+    g_switchSnapN = 0;
+    g_mainLockSwitchFreeze = FALSE;
+    if (!pOldMain)
+        return;
+    g_mainLockSwitchFreeze = TRUE;
+    for (int i = 0; i < g_mainLockCount && g_switchSnapN < (int)_countof(g_switchSnap); ++i) {
+        CCC_MainLockEntry& e = g_mainLocks[i];
+        if (!e.locked || !::IsWindow(e.hWnd) || ::IsZoomed(e.hWnd))
+            continue;
+        g_switchSnap[g_switchSnapN].hWnd = e.hWnd;
+        ::GetWindowRect(e.hWnd, &g_switchSnap[g_switchSnapN].rc);
+        ++g_switchSnapN;
+    }
+}
+
+void CCC_MainLockCancelSwitch()
+{
+    g_switchSnapN = 0;
+    g_mainLockSwitchFreeze = FALSE;
+}
+
+static BOOL CCC_SwitchSnapRect(HWND hWnd, RECT* out)
+{
+    for (int i = 0; i < g_switchSnapN; ++i) {
+        if (g_switchSnap[i].hWnd != hWnd)
+            continue;
+        *out = g_switchSnap[i].rc;
+        return TRUE;
+    }
+    return FALSE;
+}
+
+// 置いた矩形と新メインから、次のドラッグでも同じ位置になる相対を入れ直す。
+static void CCC_MainLockAssignAttach(CCC_MainLockEntry& e, const RECT& mainRc, const RECT& childRc)
+{
+    e.offsetX = childRc.left - mainRc.left;
+    e.offsetY = childRc.top - mainRc.top;
+    e.dockH = e.dockV = 0;
+    e.gapX = e.gapY = 0;
+    if (childRc.left >= mainRc.right - 8) {
+        e.dockH = 1;
+        e.gapX = childRc.left - mainRc.right;
+    }
+    else if (childRc.right <= mainRc.left + 8) {
+        e.dockH = 2;
+        e.gapX = mainRc.left - childRc.right;
+    }
+    if (childRc.top >= mainRc.bottom - 8) {
+        e.dockV = 1;
+        e.gapY = childRc.top - mainRc.bottom;
+    }
+    else if (childRc.bottom <= mainRc.top + 8) {
+        e.dockV = 2;
+        e.gapY = mainRc.top - childRc.bottom;
+    }
+}
+
 // CCC_MainLockRefreshOffsetsFor: カスタム UI / アクリル補助。
 // ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
 // 詳細は呼び出し元のコメントを優先。
 void CCC_MainLockRefreshOffsetsFor(CWnd* pMain, const RECT* pOldMain)
 {
-    if (!pMain || !::IsWindow(pMain->GetSafeHwnd()))
+    if (!pMain || !::IsWindow(pMain->GetSafeHwnd())) {
+        if (pOldMain)
+            CCC_MainLockCancelSwitch();
         return;
+    }
 
     // オフセット再計算のみ。起動時やメイン確定後に使い、絶対座標は触らない。
     // (PlaceChild すると og 基準で付けた offset のまま mp へ飛んでドリフトする)
@@ -20037,8 +20108,8 @@ void CCC_MainLockRefreshOffsetsFor(CWnd* pMain, const RECT* pOldMain)
     pMain->GetWindowRect(&newMainRc);
     const HWND hMain = pMain->GetSafeHwnd();
 
-    // 追随ON: 旧メインで保持している offset/dock を新メインへ適用して実窓を動かす。
-    // SWP_NOREDRAW でまとめ移動し、最後に一括再描画してちらつきを防ぐ。
+    // 切替前の画面位置 (x',y') から相対を取り直し、新メイン (xx,yy) へ一度だけ載せる。
+    // 保存済み offset/dock を幅の違うメインへ掛け直すと、往復のたびに差が積もる。
     HWND moved[16];
     int nMoved = 0;
     BOOL liveEq = FALSE, livePiano = FALSE, liveAn = FALSE, livePl = FALSE;
@@ -20052,21 +20123,37 @@ void CCC_MainLockRefreshOffsetsFor(CWnd* pMain, const RECT* pOldMain)
     aeroBacks[1] = renderbase;
     aeroBacks[2] = folderbase;
 
-    if (g_mainLockInternalMove)
+    if (g_mainLockInternalMove) {
+        CCC_MainLockCancelSwitch();
         return;
+    }
     g_mainLockInternalMove = TRUE;
     g_mainLockQuickPresentUntil = GetTickCount() + 200;
     for (int i = 0; i < g_mainLockCount; ++i) {
         CCC_MainLockEntry& e = g_mainLocks[i];
         if (!e.locked || !::IsWindow(e.hWnd) || e.hWnd == hMain)
             continue;
+        if (::IsZoomed(e.hWnd))
+            continue;
+        RECT src;
+        if (!CCC_SwitchSnapRect(e.hWnd, &src))
+            ::GetWindowRect(e.hWnd, &src);
+        const int relX = src.left - pOldMain->left;
+        const int relY = src.top - pOldMain->top;
+        const int w = src.right - src.left;
+        const int h = src.bottom - src.top;
+        const int x = newMainRc.left + relX;
+        const int y = newMainRc.top + relY;
         CRect before;
         ::GetWindowRect(e.hWnd, &before);
-        CCC_MainLockPlaceChild(e, &newMainRc);
-        CRect after;
-        ::GetWindowRect(e.hWnd, &after);
-        if ((before.left != after.left || before.top != after.top) && nMoved < (int)_countof(moved))
-            moved[nMoved++] = e.hWnd;
+        if (before.left != x || before.top != y) {
+            ::SetWindowPos(e.hWnd, NULL, x, y, 0, 0,
+                SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOREDRAW);
+            if (nMoved < (int)_countof(moved))
+                moved[nMoved++] = e.hWnd;
+        }
+        CRect after(x, y, x + w, y + h);
+        CCC_MainLockAssignAttach(e, newMainRc, after);
 
         // PlaceChild は WM_MOVING を飛ばない → aero==2 グラス背面を親に追従
         for (int bi = 0; bi < 3; ++bi) {
@@ -20129,8 +20216,10 @@ void CCC_MainLockRefreshOffsetsFor(CWnd* pMain, const RECT* pOldMain)
     // 閉じている追随ON窓: 旧メイン→新メインのデルタで保存座標だけ変換
     const int dx = newMainRc.left - pOldMain->left;
     const int dy = newMainRc.top - pOldMain->top;
-    if (dx == 0 && dy == 0)
+    if (dx == 0 && dy == 0) {
+        CCC_MainLockCancelSwitch();
         return;
+    }
     if (savedata.eqMainLock && !liveEq && savedata.eqx != -1) {
         savedata.eqx += dx;
         savedata.eqy += dy;
@@ -20181,6 +20270,7 @@ void CCC_MainLockRefreshOffsetsFor(CWnd* pMain, const RECT* pOldMain)
         int ph = savedata.mpCmdRollH > 0 ? savedata.mpCmdRollH : 560;
         CCC_ClampWindowPos(savedata.mpCmdRollX, savedata.mpCmdRollY, pw, ph);
     }
+    CCC_MainLockCancelSwitch();
 }
 
 // CCC_MainLockRefreshOffsets: カスタム UI / アクリル補助。

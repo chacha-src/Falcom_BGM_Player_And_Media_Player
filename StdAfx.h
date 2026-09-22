@@ -1,4 +1,4 @@
-// stdafx.h : 標準のシステム インクルード ファイルのインクルード ファイル、または
+﻿// stdafx.h : 標準のシステム インクルード ファイルのインクルード ファイル、または
 // 参照回数が多く、かつあまり変更されない、プロジェクト専用のインクルード ファイル
 // を記述します。
 
@@ -1009,7 +1009,9 @@ void CCC_NeighborCascadeBegin(HWND hMain);
 void CCC_NeighborCascadeOnMainResize(const RECT* pOldMain, const RECT* pNewMain);
 void CCC_NeighborCascadeEnd();
 // pOldMain==NULL: 現位置からオフセットだけ取り直す(窓は動かさない)
-// pOldMain!=NULL: 旧メイン相対を保って新メインへ再配置し、閉じた追随ONの savedata もデルタ変換
+// pOldMain!=NULL: 切替前に撮った画面位置から xx'=xx+(x'-x) を一度だけ載せ、相対をセットし直す
+void CCC_MainLockSnapshotForSwitch(const RECT* pOldMain);
+void CCC_MainLockCancelSwitch();
 void CCC_MainLockRefreshOffsetsFor(CWnd* pMain, const RECT* pOldMain = NULL);
 // 窓座標をモニタ作業領域内へ。サブモニタ上の x<0/y<0 は許可。どのモニタにも無ければ最近傍へ。
 void CCC_ClampWindowPos(int& x, int& y, int w, int h);

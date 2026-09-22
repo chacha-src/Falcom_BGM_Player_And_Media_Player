@@ -94,6 +94,14 @@ void WrdEngineInit(WrdEngine* e)
 	e->dir[0] = 0;
 	e->wrdPath[0] = 0;
 	e->magOk = 0;
+	e->lineStyle = 0;
+	e->fontMecha = 0;
+	e->vsCount = 0;
+	e->textDot = 0;
+	e->magSearchDir[0] = 0;
+	e->fadeActive = 0;
+	e->fadeFromBank = e->fadeToBank = 0;
+	e->fadeStartTick = e->fadeDurTicks = 0;
 	e->smfDiv = 48;
 	e->smfOk = 0;
 	e->sr = 44100;
@@ -104,7 +112,9 @@ void WrdEngineInit(WrdEngine* e)
 	e->karaMarks.clear();
 	memset(e->cells, 0x20, sizeof(e->cells));
 	memset(e->attr, 7, sizeof(e->attr));
-	memset(e->gfx, 0, sizeof(e->gfx));
+	memset(e->gfxPage, 0, sizeof(e->gfxPage));
+	memset(e->fadePalFrom, 0, sizeof(e->fadePalFrom));
+	memset(e->fadePalTo, 0, sizeof(e->fadePalTo));
 	for (int p = 0; p < 20; ++p) {
 		static const unsigned defc[16] = {
 			0x000000, 0x0000AA, 0xAA0000, 0xAA00AA,
@@ -131,7 +141,7 @@ void WrdEngineResetScreen(WrdEngine* e)
 	if (!e) return;
 	memset(e->cells, 0x20, sizeof(e->cells));
 	memset(e->attr, 7, sizeof(e->attr));
-	memset(e->gfx, 0, sizeof(e->gfx));
+	memset(e->gfxPage, 0, sizeof(e->gfxPage));
 	e->curX = 0;
 	e->curY = 0;
 	e->saveX = 0;
@@ -143,11 +153,26 @@ void WrdEngineResetScreen(WrdEngine* e)
 	e->gfxOn = 1;
 	e->activePage = 0;
 	e->dispPage = 0;
+	e->gplane = 0;
+	e->lineStyle = 0;
+	e->fontMecha = 0;
+	e->vsCount = 0;
+	e->textDot = 0;
+	e->fadeActive = 0;
+	static const unsigned defc[16] = {
+		0x000000, 0x0000AA, 0xAA0000, 0xAA00AA,
+		0x00AA00, 0x00AAAA, 0xAA5500, 0xAAAAAA,
+		0x555555, 0x5555FF, 0xFF5555, 0xFF55FF,
+		0x55FF55, 0x55FFFF, 0xFFFF55, 0xFFFFFF
+	};
+	for (int p = 0; p < 20; ++p)
+		for (int i = 0; i < 16; ++i)
+			e->pal[p][i] = defc[i];
 }
 
 static int WrdParseInt(const char*& p)
 {
-	while (*p == ' ' || *p == '\t' || *p == ',')
+	while (*p == ' ' || *p == '\t' || *p == ',' || *p == '<' || *p == '>')
 		p++;
 	int sign = 1;
 	if (*p == '-') { sign = -1; p++; }
@@ -164,7 +189,7 @@ static int WrdParseInt(const char*& p)
 
 static int WrdParseHex3(const char*& p)
 {
-	while (*p == ' ' || *p == '\t' || *p == ',') p++;
+	while (*p == ' ' || *p == '\t' || *p == ',' || *p == '<' || *p == '>') p++;
 	if (*p == '#') p++;
 	auto hex = [](char c) -> int {
 		if (c >= '0' && c <= '9') return c - '0';
@@ -510,12 +535,224 @@ static void WrdScroll(WrdEngine* e, int x1, int y1, int x2, int y2, int mode, in
 	}
 }
 
+static int WrdPageOk(int p)
+{
+	return p >= 0 && p < WRD_PAGE_MAX;
+}
+
+static int WrdWriteMask(const WrdEngine* e)
+{
+	int m = e->gplane & 15;
+	return m ? m : 15;
+}
+
+static void WrdPlotIdx(WrdEngine* e, int page, int x, int y, int col)
+{
+	if (!e || !WrdPageOk(page)) return;
+	if ((unsigned)x >= 640 || (unsigned)y >= 400) return;
+	const int mask = WrdWriteMask(e);
+	unsigned char* d = &e->gfxPage[page][y * 640 + x];
+	*d = (unsigned char)((*d & ~mask) | (col & mask));
+}
+
+static void WrdFillPagePlanes(WrdEngine* e, int page, int planeBits)
+{
+	if (!e || !WrdPageOk(page)) return;
+	int mask = planeBits & 15;
+	if (mask == 0) mask = 15;
+	unsigned char* p = e->gfxPage[page];
+	for (int i = 0; i < 640 * 400; ++i)
+		p[i] = (unsigned char)(p[i] & ~mask);
+}
+
+static void WrdCopyRect(WrdEngine* e, int sp, int dp,
+	int x1, int y1, int x2, int y2, int xd, int yd)
+{
+	if (!e || !WrdPageOk(sp) || !WrdPageOk(dp)) return;
+	if (x2 < x1) { int t = x1; x1 = x2; x2 = t; }
+	if (y2 < y1) { int t = y1; y1 = y2; y2 = t; }
+	const int w = x2 - x1 + 1;
+	const int h = y2 - y1 + 1;
+	if (w < 1 || h < 1) return;
+	std::vector<unsigned char> tmp((size_t)w * (size_t)h);
+	for (int j = 0; j < h; ++j) {
+		for (int i = 0; i < w; ++i) {
+			int sx = x1 + i, sy = y1 + j;
+			unsigned char v = 0;
+			if ((unsigned)sx < 640 && (unsigned)sy < 400)
+				v = e->gfxPage[sp][sy * 640 + sx];
+			tmp[(size_t)j * w + i] = v;
+		}
+	}
+	const int mask = WrdWriteMask(e);
+	for (int j = 0; j < h; ++j) {
+		for (int i = 0; i < w; ++i) {
+			int dx = xd + i, dy = yd + j;
+			if ((unsigned)dx >= 640 || (unsigned)dy >= 400) continue;
+			unsigned char* d = &e->gfxPage[dp][dy * 640 + dx];
+			*d = (unsigned char)((*d & ~mask) | (tmp[(size_t)j * w + i] & mask));
+		}
+	}
+}
+
+static void WrdSwapRect(WrdEngine* e, int sp, int dp,
+	int x1, int y1, int x2, int y2, int xd, int yd)
+{
+	if (!e || !WrdPageOk(sp) || !WrdPageOk(dp)) return;
+	if (x2 < x1) { int t = x1; x1 = x2; x2 = t; }
+	if (y2 < y1) { int t = y1; y1 = y2; y2 = t; }
+	const int w = x2 - x1 + 1;
+	const int h = y2 - y1 + 1;
+	if (w < 1 || h < 1) return;
+	std::vector<unsigned char> a((size_t)w * (size_t)h), b((size_t)w * (size_t)h);
+	for (int j = 0; j < h; ++j) {
+		for (int i = 0; i < w; ++i) {
+			int sx = x1 + i, sy = y1 + j;
+			int dx = xd + i, dy = yd + j;
+			a[(size_t)j * w + i] = ((unsigned)sx < 640 && (unsigned)sy < 400)
+				? e->gfxPage[sp][sy * 640 + sx] : 0;
+			b[(size_t)j * w + i] = ((unsigned)dx < 640 && (unsigned)dy < 400)
+				? e->gfxPage[dp][dy * 640 + dx] : 0;
+		}
+	}
+	for (int j = 0; j < h; ++j) {
+		for (int i = 0; i < w; ++i) {
+			int sx = x1 + i, sy = y1 + j;
+			int dx = xd + i, dy = yd + j;
+			if ((unsigned)sx < 640 && (unsigned)sy < 400)
+				e->gfxPage[sp][sy * 640 + sx] = b[(size_t)j * w + i];
+			if ((unsigned)dx < 640 && (unsigned)dy < 400)
+				e->gfxPage[dp][dy * 640 + dx] = a[(size_t)j * w + i];
+		}
+	}
+}
+
+static unsigned WrdMixRgb(unsigned from, unsigned to, int step, int maxs)
+{
+	if (maxs <= 0 || step >= maxs) return to;
+	if (step <= 0) return from;
+	auto ch = [&](int sh) -> unsigned {
+		int a = (int)((from >> sh) & 255);
+		int b = (int)((to >> sh) & 255);
+		int v = a + (b - a) * step / maxs;
+		if (v < 0) v = 0;
+		if (v > 255) v = 255;
+		return (unsigned)v;
+	};
+	return (ch(16) << 16) | (ch(8) << 8) | ch(0);
+}
+
+static void WrdApplyFadeNow(WrdEngine* e, int tick48)
+{
+	if (!e || !e->fadeActive) return;
+	int t = tick48 - e->fadeStartTick;
+	if (t < 0) t = 0;
+	if (e->fadeDurTicks <= 0 || t >= e->fadeDurTicks) {
+		for (int i = 0; i < 16; ++i)
+			e->pal[0][i] = e->fadePalTo[i];
+		e->fadeActive = 0;
+		return;
+	}
+	for (int i = 0; i < 16; ++i)
+		e->pal[0][i] = WrdMixRgb(e->fadePalFrom[i], e->fadePalTo[i], t, e->fadeDurTicks);
+}
+
+static int WrdResolveImagePath(const WrdEngine* e, const wchar_t* name, wchar_t* out, int outN)
+{
+	if (!e || !name || !name[0] || !out || outN < 8) return 0;
+	if (name[1] == L':' || name[0] == L'\\' || name[0] == L'/') {
+		wcsncpy_s(out, outN, name, _TRUNCATE);
+		return GetFileAttributesW(out) != INVALID_FILE_ATTRIBUTES;
+	}
+	const wchar_t* dirs[3] = { e->dir, e->magSearchDir, L"" };
+	for (int i = 0; i < 3; ++i) {
+		if (i < 2 && (!dirs[i] || !dirs[i][0])) continue;
+		if (i < 2)
+			_snwprintf_s(out, outN, _TRUNCATE, L"%s%s", dirs[i], name);
+		else
+			wcsncpy_s(out, outN, name, _TRUNCATE);
+		if (GetFileAttributesW(out) != INVALID_FILE_ATTRIBUTES)
+			return 1;
+	}
+	return 0;
+}
+
+/* PC-98 PHO: 4 プレーン（B,R,G,E）× 640×400。TiMidity pho_load_pixel と同じ */
+static int WrdLoadPhoToPage(WrdEngine* e, const unsigned char* data, unsigned size, int page)
+{
+	if (!e || !data || !WrdPageOk(page)) return 0;
+	unsigned palOff = 0;
+	if (size >= 128048 && size < 128000 + 256)
+		palOff = 48;
+	else if (size >= 128000 + 256 && memcmp(data, "MAKI02  ", 8) != 0 && size < 128000 + 400)
+		palOff = (unsigned)(size - 128000);
+	if (size < palOff + 128000) return 0;
+	if (palOff == 48) {
+		for (int i = 0; i < 16; ++i) {
+			unsigned g = data[i * 3 + 0], r = data[i * 3 + 1], b = data[i * 3 + 2];
+			if (g <= 15 && r <= 15 && b <= 15) {
+				r = r ? ((r << 4) | 0x0F) : 0;
+				g = g ? ((g << 4) | 0x0F) : 0;
+				b = b ? ((b << 4) | 0x0F) : 0;
+			}
+			e->pal[0][i] = (r << 16) | (g << 8) | b;
+			e->pal[17][i] = e->pal[0][i];
+		}
+	}
+	const unsigned char* pl = data + palOff;
+	static const int shift[4] = { 0, 2, 1, 3 }; /* B,R,G,E */
+	memset(e->gfxPage[page], 0, 640 * 400);
+	for (int plane = 0; plane < 4; ++plane) {
+		const unsigned char* src = pl + plane * (640 / 8 * 400);
+		const unsigned char bitv = (unsigned char)(1 << shift[plane]);
+		for (int y = 0; y < 400; ++y) {
+			for (int xb = 0; xb < 80; ++xb) {
+				unsigned char by = src[y * 80 + xb];
+				for (int k = 0; k < 8; ++k) {
+					if (by & (0x80 >> k))
+						e->gfxPage[page][y * 640 + xb * 8 + k] |= bitv;
+				}
+			}
+		}
+	}
+	return 1;
+}
+
+static void WrdBlitMag(WrdEngine* e, const MagImage* mag, int x, int y, int scale, int palMode);
+
+static int WrdLoadImageFile(WrdEngine* e, const wchar_t* name, int page, int palMode)
+{
+	if (!e || !name || !name[0]) return 0;
+	if (!WrdPageOk(page)) page = e->activePage;
+	wchar_t full[MAX_PATH];
+	if (!WrdResolveImagePath(e, name, full, MAX_PATH))
+		return 0;
+	HANDLE f = CreateFileW(full, GENERIC_READ, FILE_SHARE_READ, NULL,
+		OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+	if (f == INVALID_HANDLE_VALUE) return 0;
+	DWORD size = GetFileSize(f, NULL), got = 0;
+	if (size < 16 || size > 16 * 1024 * 1024) { CloseHandle(f); return 0; }
+	std::vector<unsigned char> buf(size);
+	const BOOL ok = ReadFile(f, buf.data(), size, &got, NULL);
+	CloseHandle(f);
+	if (!ok || got != size) return 0;
+	if (size >= 8 && memcmp(buf.data(), "MAKI02  ", 8) == 0) {
+		MagImage mag = {};
+		if (!MagImageLoadMem(buf.data(), size, &mag)) return 0;
+		const int savePage = e->activePage;
+		e->activePage = page;
+		WrdBlitMag(e, &mag, mag.x0, mag.y0, 1, palMode);
+		e->activePage = savePage;
+		MagImageFree(&mag);
+		return 1;
+	}
+	return WrdLoadPhoToPage(e, buf.data(), size, page);
+}
+
 static void WrdGLine(WrdEngine* e, int x1, int y1, int x2, int y2, int col, int sw, int fill)
 {
 	auto plot = [&](int x, int y, int c) {
-		if ((unsigned)x >= 640 || (unsigned)y >= 400) return;
-		unsigned rgb = e->pal[0][c & 15];
-		e->gfx[y * 640 + x] = rgb;
+		WrdPlotIdx(e, e->activePage, x, y, c);
 	};
 	if (sw == 0) {
 		int dx = abs(x2 - x1), sx = x1 < x2 ? 1 : -1;
@@ -532,9 +769,10 @@ static void WrdGLine(WrdEngine* e, int x1, int y1, int x2, int y2, int col, int 
 		int xa = x1 < x2 ? x1 : x2, xb = x1 < x2 ? x2 : x1;
 		int ya = y1 < y2 ? y1 : y2, yb = y1 < y2 ? y2 : y1;
 		if (sw == 2) {
+			const int c = (fill ? fill : col) & 15;
 			for (int y = ya; y <= yb; ++y)
 				for (int x = xa; x <= xb; ++x)
-					plot(x, y, fill ? fill : col);
+					plot(x, y, c);
 		} else {
 			WrdGLine(e, xa, ya, xb, ya, col, 0, 0);
 			WrdGLine(e, xa, yb, xb, yb, col, 0, 0);
@@ -549,8 +787,7 @@ static void WrdGCircle(WrdEngine* e, int cx, int cy, int r, int col, int sw, int
 	if (r < 1) r = 1;
 	int x = r, y = 0, err = 0;
 	auto plot = [&](int px, int py) {
-		if ((unsigned)px >= 640 || (unsigned)py >= 400) return;
-		e->gfx[py * 640 + px] = e->pal[0][col & 15];
+		WrdPlotIdx(e, e->activePage, px, py, col);
 	};
 	while (x >= y) {
 		plot(cx + x, cy + y); plot(cx + y, cy + x);
@@ -562,12 +799,12 @@ static void WrdGCircle(WrdEngine* e, int cx, int cy, int r, int col, int sw, int
 		if (err > 0) { x--; err -= 2 * x + 1; }
 	}
 	if (sw == 2) {
+		const int c = (fill ? fill : col) & 15;
 		for (int yy = -r; yy <= r; ++yy) {
 			int w2 = (int)sqrt((double)(r * r - yy * yy));
 			for (int xx = -w2; xx <= w2; ++xx)
-				plot(cx + xx, cy + yy);
+				WrdPlotIdx(e, e->activePage, cx + xx, cy + yy, c);
 		}
-		(void)fill;
 	}
 }
 
@@ -582,14 +819,141 @@ static void WrdBlitMag(WrdEngine* e, const MagImage* mag, int x, int y, int scal
 		}
 	}
 	if (palMode == 2) return;
+	const int page = e->activePage;
 	for (int j = 0; j < mag->h; ++j) {
 		int dy = y + j / scale;
 		if ((unsigned)dy >= 400) continue;
 		for (int i = 0; i < mag->w; ++i) {
 			int dx = x + i / scale;
 			if ((unsigned)dx >= 640) continue;
-			e->gfx[dy * 640 + dx] = mag->px[j * mag->w + i];
+			WrdPlotIdx(e, page, dx, dy, (int)(mag->px[j * mag->w + i] & 15));
 		}
+	}
+}
+
+static unsigned char WrdGetIdx(const WrdEngine* e, int page, int x, int y)
+{
+	if (!e || !WrdPageOk(page) || (unsigned)x >= 640 || (unsigned)y >= 400) return 0;
+	return e->gfxPage[page][y * 640 + x];
+}
+
+static void WrdPutIdx(WrdEngine* e, int page, int x, int y, unsigned char v)
+{
+	if (!e || !WrdPageOk(page) || (unsigned)x >= 640 || (unsigned)y >= 400) return;
+	e->gfxPage[page][y * 640 + x] = v;
+}
+
+/* ^XCOPY。TMIDI は method=0,1,8,10。TiMidity x_XCopy は 0–10 全部 */
+static void WrdXCopy(WrdEngine* e, const int* a, int narg)
+{
+	if (!e || !a || narg < 9) return;
+	int sx1 = a[0], sy1 = a[1], sx2 = a[2], sy2 = a[3];
+	int tx = a[4], ty = a[5], ss = a[6], ts = a[7], method = a[8];
+	const int* opt = a + 9;
+	const int nopt = narg - 9;
+	if (sx2 < sx1) { int t = sx1; sx1 = sx2; sx2 = t; }
+	if (sy2 < sy1) { int t = sy1; sy1 = sy2; sy2 = t; }
+	const int w = sx2 - sx1 + 1;
+	const int h = sy2 - sy1 + 1;
+	if (w < 1 || h < 1 || w > 640 || h > 400) return;
+	if (!WrdPageOk(ss) || !WrdPageOk(ts)) return;
+	std::vector<unsigned char> src((size_t)w * (size_t)h), dst((size_t)w * (size_t)h);
+	auto grab = [&](int page, int x0, int y0, std::vector<unsigned char>& o) {
+		for (int j = 0; j < h; ++j)
+			for (int i = 0; i < w; ++i)
+				o[(size_t)j * w + i] = WrdGetIdx(e, page, x0 + i, y0 + j);
+	};
+	auto store = [&](int page, int x0, int y0, const std::vector<unsigned char>& o) {
+		for (int j = 0; j < h; ++j)
+			for (int i = 0; i < w; ++i)
+				WrdPutIdx(e, page, x0 + i, y0 + j, o[(size_t)j * w + i]);
+	};
+	grab(ss, sx1, sy1, src);
+	grab(ts, tx, ty, dst);
+	switch (method) {
+	case 1: /* パレット 0 以外をコピー */
+		for (int i = 0; i < w * h; ++i)
+			if (src[i] != 0) dst[i] = src[i];
+		store(ts, tx, ty, dst);
+		break;
+	case 2: /* XOR */
+		for (int i = 0; i < w * h; ++i) dst[i] ^= src[i];
+		store(ts, tx, ty, dst);
+		break;
+	case 3: /* AND */
+		for (int i = 0; i < w * h; ++i) dst[i] &= src[i];
+		store(ts, tx, ty, dst);
+		break;
+	case 4: /* OR */
+		for (int i = 0; i < w * h; ++i) dst[i] |= src[i];
+		store(ts, tx, ty, dst);
+		break;
+	case 5: /* 左右反転 */
+		for (int j = 0; j < h; ++j)
+			for (int i = 0; i < w / 2; ++i) {
+				unsigned char t = src[(size_t)j * w + i];
+				src[(size_t)j * w + i] = src[(size_t)j * w + (w - 1 - i)];
+				src[(size_t)j * w + (w - 1 - i)] = t;
+			}
+		store(ts, tx, ty, src);
+		break;
+	case 6: /* 上下反転 */
+		for (int j = 0; j < h / 2; ++j)
+			for (int i = 0; i < w; ++i) {
+				unsigned char t = src[(size_t)j * w + i];
+				src[(size_t)j * w + i] = src[(size_t)(h - 1 - j) * w + i];
+				src[(size_t)(h - 1 - j) * w + i] = t;
+			}
+		store(ts, tx, ty, src);
+		break;
+	case 7: /* 180 度 */
+		for (int i = 0, k = w * h - 1; i < k; ++i, --k) {
+			unsigned char t = src[i]; src[i] = src[k]; src[k] = t;
+		}
+		store(ts, tx, ty, src);
+		break;
+	case 8: /* パレット 0 以外。マスク元座標は opt[0],opt[1] */
+		if (nopt < 2) break;
+		grab(ts, opt[0], opt[1], dst);
+		for (int i = 0; i < w * h; ++i)
+			if (src[i] != 0) dst[i] = src[i];
+		store(ts, tx, ty, dst);
+		break;
+	case 9: { /* マスクコピー opt[0..3]=4ラインのビット、opt[4]=色 */
+		if (nopt < 5) break;
+		const int fillc = opt[4];
+		for (int j = 0; j < h; ++j) {
+			int m = opt[j & 3] & 0xff;
+			for (int i = 0; i < w; ++i) {
+				if ((1 << (i & 7)) & m) {
+					if (fillc == 16) continue;
+					dst[(size_t)j * w + i] = (unsigned char)(fillc & 15);
+				} else {
+					dst[(size_t)j * w + i] = src[(size_t)j * w + i];
+				}
+			}
+		}
+		store(ts, tx, ty, dst);
+		break;
+	}
+	case 10: { /* ラインコピー: opt[0] 行コピー、opt[1] 行スキップ */
+		if (nopt < 2) break;
+		int cp = opt[0], sk = opt[1];
+		if (cp < 0 || sk < 0 || cp + sk == 0) break;
+		grab(ts, tx, ty, dst);
+		int y = 0;
+		while (y < h) {
+			for (int k = 0; k < cp && y < h; ++k, ++y)
+				memcpy(&dst[(size_t)y * w], &src[(size_t)y * w], (size_t)w);
+			y += sk;
+		}
+		store(ts, tx, ty, dst);
+		break;
+	}
+	default:
+	case 0:
+		WrdCopyRect(e, ss, ts, sx1, sy1, sx2, sy2, tx, ty);
+		break;
 	}
 }
 
@@ -610,6 +974,7 @@ static int WrdKindFromName(const char* name)
 	if (WrdICmpCmd(name, "GLINE")) return WRD_GLINE;
 	if (WrdICmpCmd(name, "GCIRCLE")) return WRD_GCIRCLE;
 	if (WrdICmpCmd(name, "PALREV")) return WRD_PALREV;
+	if (WrdICmpCmd(name, "PALCHG")) return WRD_PALCHG;
 	if (WrdICmpCmd(name, "PAL")) return WRD_PAL;
 	if (WrdICmpCmd(name, "FADE")) return WRD_FADE;
 	if (WrdICmpCmd(name, "GMODE")) return WRD_GMODE;
@@ -617,10 +982,150 @@ static int WrdKindFromName(const char* name)
 	if (WrdICmpCmd(name, "MAG")) return WRD_MAG;
 	if (WrdICmpCmd(name, "WMODE")) return WRD_WMODE;
 	if (WrdICmpCmd(name, "END")) return WRD_END;
-	if (WrdICmpCmd(name, "STARTUP") || WrdICmpCmd(name, "OFFSET") || WrdICmpCmd(name, "EXEC")
-		|| WrdICmpCmd(name, "PLOAD") || WrdICmpCmd(name, "FONTM"))
-		return WRD_NOP;
+	if (WrdICmpCmd(name, "PLOAD")) return WRD_PLOAD;
+	if (WrdICmpCmd(name, "PATH")) return WRD_PATH;
+	if (WrdICmpCmd(name, "EXEC")) return WRD_EXEC;
+	if (WrdICmpCmd(name, "REM") || WrdICmpCmd(name, "REMARK")) return WRD_REM;
+	if (WrdICmpCmd(name, "STARTUP")) return WRD_STARTUP;
+	if (WrdICmpCmd(name, "STOP")) return WRD_STOP;
+	if (WrdICmpCmd(name, "MIDI")) return WRD_MIDI;
+	if (WrdICmpCmd(name, "LOOP")) return WRD_LOOP;
+	if (WrdICmpCmd(name, "SCREEN")) return WRD_SCREEN;
+	if (WrdICmpCmd(name, "OFFSET")) return WRD_NOP; /* パース時に消費 */
+	if (WrdICmpCmd(name, "FONTM")) return WRD_FONTM;
+	if (WrdICmpCmd(name, "FONTP")) return WRD_FONTP;
+	if (WrdICmpCmd(name, "FONTR")) return WRD_FONTR;
+	if (WrdICmpCmd(name, "XCOPY")) return WRD_XCOPY;
+	if (WrdICmpCmd(name, "VCOPY")) return WRD_VCOPY;
+	if (WrdICmpCmd(name, "VSRES")) return WRD_VSRES;
+	if (WrdICmpCmd(name, "VSGET")) return WRD_VSGET;
+	if (WrdICmpCmd(name, "GSC")) return WRD_EGSC;
+	if (WrdICmpCmd(name, "LINE")) return WRD_ELINE;
+	if (WrdICmpCmd(name, "TEXTDOT")) return WRD_ETEXTDOT;
+	if (WrdICmpCmd(name, "TMODE")) return WRD_ETMODE;
+	if (WrdICmpCmd(name, "TSCRL")) return WRD_ETSCRL;
+	if (WrdICmpCmd(name, "REGSAVE")) return WRD_EREGSAVE;
 	return WRD_NOP;
+}
+
+static int WrdIsCaretCommand(const char* name)
+{
+	int k = WrdKindFromName(name);
+	return k == WRD_FONTM || k == WRD_FONTP || k == WRD_FONTR
+		|| k == WRD_XCOPY || k == WRD_VCOPY || k == WRD_VSRES || k == WRD_VSGET
+		|| k == WRD_EPAL || k == WRD_PAL || k == WRD_EGSC || k == WRD_ELINE
+		|| k == WRD_ETEXTDOT || k == WRD_ETMODE || k == WRD_ETSCRL
+		|| k == WRD_EREGSAVE || k == WRD_ESCROLL || k == WRD_SCROLL;
+}
+
+static int WrdPeekCaretCommand(const char* q)
+{
+	if (!q || *q != '^') return 0;
+	q++;
+	char name[32];
+	int ni = 0;
+	while (*q && ni < 30 && ((*q >= 'A' && *q <= 'Z') || (*q >= 'a' && *q <= 'z')
+		|| (*q >= '0' && *q <= '9')))
+		name[ni++] = *q++;
+	name[ni] = 0;
+	return ni > 0 && WrdIsCaretCommand(name);
+}
+
+static void WrdStartFade(WrdEngine* e, int p1, int p2, int speed, int tick)
+{
+	if (!e) return;
+	if (p1 < 0 || p1 > 19) p1 = 0;
+	if (p2 < 0 || p2 > 19) p2 = 0;
+	if (speed < 1) {
+		for (int i = 0; i < 16; ++i)
+			e->pal[0][i] = e->pal[p2][i];
+		e->fadeActive = 0;
+		return;
+	}
+	e->fadeActive = 1;
+	e->fadeFromBank = p1;
+	e->fadeToBank = p2;
+	e->fadeStartTick = tick;
+	e->fadeDurTicks = speed;
+	for (int i = 0; i < 16; ++i) {
+		e->fadePalFrom[i] = e->pal[p1][i];
+		e->fadePalTo[i] = e->pal[p2][i];
+		e->pal[0][i] = e->fadePalFrom[i];
+	}
+}
+
+static void WrdApplyPalText(WrdEngine* e, const char* args)
+{
+	const char* p = args ? args : "";
+	int bank = 0;
+	if (*p == '#') {
+		p++;
+		bank = WrdParseInt(p);
+	}
+	if (bank < 0 || bank > 19) bank = 0;
+	for (int i = 0; i < 16; ++i) {
+		if (!*p) break;
+		int rgb = WrdParseHex3(p);
+		e->pal[bank][i] = WrdRgb4((unsigned)rgb);
+	}
+	if (bank == 0)
+		e->fadeActive = 0;
+}
+
+static void WrdExecVisual(WrdEngine* e, const char* args)
+{
+	if (!e || !args) return;
+	int page = e->activePage;
+	int gon = -1;
+	char fn[200] = {};
+	const char* p = args;
+	while (*p) {
+		while (*p == ' ' || *p == '\t') p++;
+		if (!*p) break;
+		if (p[0] == '-' && (p[1] == 'g' || p[1] == 'G')) {
+			p += 2;
+			page = WrdParseInt(p);
+			continue;
+		}
+		if (p[0] == '-' && (p[1] == 'd' || p[1] == 'D')) {
+			p += 2;
+			while (*p == ' ' || *p == '\t') p++;
+			if (_strnicmp(p, "off", 3) == 0) { gon = 0; p += 3; }
+			else if (_strnicmp(p, "on", 2) == 0) { gon = 1; p += 2; }
+			continue;
+		}
+		if (*p == '-') {
+			while (*p && *p != ' ' && *p != '\t') p++;
+			continue;
+		}
+		int fi = 0;
+		while (*p && *p != ' ' && *p != '\t' && fi < 198)
+			fn[fi++] = *p++;
+		fn[fi] = 0;
+	}
+	if (gon >= 0) e->gfxOn = gon;
+	if (!fn[0]) return;
+	wchar_t wfn[MAX_PATH];
+	WrdSjisToWide(fn, wfn, MAX_PATH);
+	const wchar_t* ext = wcsrchr(wfn, L'.');
+	int isImg = 0;
+	if (ext && (_wcsicmp(ext, L".MAG") == 0 || _wcsicmp(ext, L".PHO") == 0
+		|| _wcsicmp(ext, L".KDD") == 0 || _wcsicmp(ext, L".PI") == 0))
+		isImg = 1;
+	if (!isImg && ext && (_wcsicmp(ext, L".EXE") == 0 || _wcsicmp(ext, L".COM") == 0)) {
+		wchar_t stem[MAX_PATH];
+		wcsncpy_s(stem, wfn, _TRUNCATE);
+		wchar_t* d = wcsrchr(stem, L'.');
+		if (d) {
+			wcscpy_s(d, MAX_PATH - (d - stem), L".MAG");
+			if (WrdLoadImageFile(e, stem, page, 0)) return;
+			wcscpy_s(d, MAX_PATH - (d - stem), L".PHO");
+			WrdLoadImageFile(e, stem, page, 0);
+		}
+		return;
+	}
+	if (isImg)
+		WrdLoadImageFile(e, wfn, page, 0);
 }
 
 static void WrdApplyCmd(WrdEngine* e, const WrdCmd& c)
@@ -637,12 +1142,9 @@ static void WrdApplyCmd(WrdEngine* e, const WrdCmd& c)
 		if (e->curX < 0) e->curX = 0;
 		if (e->curY < 0) e->curY = 0;
 		WrdClampCursor(e);
-		/* LOCATE はカーソル移動のみだが、同じ行に短い歌詞を重ねる CHA2 では
-		   行末まで消さないと前の文字が残る。PC-98 の PRINT 前 CLS 相当。 */
-		WrdClsText(e, e->curX + 1, e->curY + 1, 80, e->curY + 1, e->color, 32);
+		/* TMIDI: LOCATE はカーソル移動のみ。白プレビューの上に色を順に重ねる */
 		break;
 	case WRD_COLOR: {
-		/* TMIDI: @COLOR はエスケープシーケンス。30–37 は ANSI。0–15 は PC-98 属性 */
 		if (c.a >= 30) {
 			char esc[24];
 			_snprintf_s(esc, _TRUNCATE, "[%dm", c.a);
@@ -676,16 +1178,17 @@ static void WrdApplyCmd(WrdEngine* e, const WrdCmd& c)
 		WrdScroll(e, c.a ? c.a : 1, c.b ? c.b : 1, c.c ? c.c : 80, c.d ? c.d : 25, c.e, c.f, c.g ? c.g : 32);
 		break;
 	case WRD_GINIT:
-		memset(e->gfx, 0, sizeof(e->gfx));
+		memset(e->gfxPage, 0, sizeof(e->gfxPage));
 		e->activePage = e->dispPage = 0;
 		e->gfxOn = 1;
+		e->gplane = 0;
 		break;
 	case WRD_GCLS:
-		memset(e->gfx, 0, sizeof(e->gfx));
+		WrdFillPagePlanes(e, e->activePage, c.a);
 		break;
 	case WRD_GSCREEN:
-		e->activePage = c.a;
-		e->dispPage = c.b;
+		if (WrdPageOk(c.a)) e->activePage = c.a;
+		if (WrdPageOk(c.b)) e->dispPage = c.b;
 		break;
 	case WRD_GON:
 		e->gfxOn = (c.a != 0);
@@ -700,27 +1203,13 @@ static void WrdApplyCmd(WrdEngine* e, const WrdCmd& c)
 		WrdGCircle(e, c.a, c.b, c.c, c.d, c.e, c.f);
 		break;
 	case WRD_PAL:
-		if (c.path[0]) {
-			/* packed 16 colors in text as csv already parsed into pal via extra */
-		}
-		{
-			const char* p = c.text;
-			int bank = 0;
-			if (*p == '#') {
-				p++;
-				bank = WrdParseInt(p);
-			}
-			if (bank < 0 || bank > 19) bank = 0;
-			for (int i = 0; i < 16; ++i) {
-				if (!*p) break;
-				int rgb = WrdParseHex3(p);
-				e->pal[bank][i] = WrdRgb4((unsigned)rgb);
-			}
-			if (bank == 0) { /* already applied */ }
-			else if (bank != 0) {
-				/* copy to display only when bank 0; bank 17 is MAG */
-			}
-		}
+		WrdApplyPalText(e, c.text);
+		break;
+	case WRD_PALCHG:
+		if (c.path[0])
+			WrdLoadImageFile(e, c.path, e->activePage, 2);
+		else
+			WrdApplyPalText(e, c.text);
 		break;
 	case WRD_PALREV: {
 		int bank = c.a;
@@ -729,36 +1218,166 @@ static void WrdApplyCmd(WrdEngine* e, const WrdCmd& c)
 			unsigned v = e->pal[bank][i];
 			e->pal[bank][i] = (0xFFFFFFu ^ v) & 0xFFFFFFu;
 		}
-		if (bank != 0) {
-			for (int i = 0; i < 16; ++i)
-				e->pal[0][i] = e->pal[bank][i];
-		}
+		if (bank == 0)
+			e->fadeActive = 0;
 		break;
 	}
 	case WRD_FADE:
-		if (c.a >= 0 && c.a < 20 && c.b >= 0 && c.b < 20) {
-			for (int i = 0; i < 16; ++i)
-				e->pal[0][i] = e->pal[c.b][i];
-		}
+		WrdStartFade(e, c.a, c.b, c.narg >= 3 ? c.c : 1, c.tick48);
 		break;
 	case WRD_MAG: {
 		wchar_t full[MAX_PATH];
-		if (c.path[0] && (c.path[1] == L':' || c.path[0] == L'\\' || c.path[0] == L'/'))
-			wcsncpy_s(full, c.path, _TRUNCATE);
-		else
+		if (!WrdResolveImagePath(e, c.path, full, MAX_PATH))
 			_snwprintf_s(full, _TRUNCATE, L"%s%s", e->dir, c.path);
 		MagImageFree(&e->mag);
 		e->magOk = MagImageLoadPath(full, &e->mag);
-		if (e->magOk)
-			WrdBlitMag(e, &e->mag, c.a, c.b, c.c > 0 ? c.c : 1, c.d);
+		if (e->magOk) {
+			int x = c.a, y = c.b;
+			if (c.narg < 2) {
+				x = e->mag.x0;
+				y = e->mag.y0;
+			}
+			WrdBlitMag(e, &e->mag, x, y, c.c > 0 ? c.c : 1, c.d);
+		}
 		break;
 	}
+	case WRD_PLOAD:
+		WrdLoadImageFile(e, c.path[0] ? c.path : NULL, e->activePage, 0);
+		if (!c.path[0] && c.text[0]) {
+			wchar_t wfn[MAX_PATH];
+			WrdSjisToWide(c.text, wfn, MAX_PATH);
+			WrdLoadImageFile(e, wfn, e->activePage, 0);
+		}
+		break;
+	case WRD_PATH:
+		if (c.path[0]) {
+			wcsncpy_s(e->magSearchDir, c.path, _TRUNCATE);
+			size_t n = wcslen(e->magSearchDir);
+			if (n > 0 && e->magSearchDir[n - 1] != L'\\' && e->magSearchDir[n - 1] != L'/')
+				wcsncat_s(e->magSearchDir, L"\\", _TRUNCATE);
+		} else {
+			e->magSearchDir[0] = 0;
+		}
+		break;
+	case WRD_EXEC:
+		WrdExecVisual(e, c.text);
+		break;
+	case WRD_GMOVE: {
+		int vs = c.narg >= 7 ? c.arg[6] : e->activePage;
+		int vd = c.narg >= 8 ? c.arg[7] : e->activePage;
+		int sw = c.narg >= 9 ? c.arg[8] : 0;
+		if (sw == 1)
+			WrdSwapRect(e, vs, vd, c.a, c.b, c.c, c.d, c.e, c.f);
+		else
+			WrdCopyRect(e, vs, vd, c.a, c.b, c.c, c.d, c.e, c.f);
+		break;
+	}
+	case WRD_XCOPY:
+		WrdXCopy(e, c.arg, c.narg);
+		break;
+	case WRD_VCOPY: {
+		int sx1 = c.arg[0], sy1 = c.arg[1], sx2 = c.arg[2], sy2 = c.arg[3];
+		int tx = c.arg[4], ty = c.arg[5], ss = c.arg[6], ts = c.arg[7], mode = c.arg[8];
+		int vpg = (mode != 0) ? ss : ts;
+		int rpg = (mode != 0) ? ts : ss;
+		int sp = 2 + vpg;
+		int dp = rpg;
+		if (mode == 0) { int t = sp; sp = dp; dp = t; }
+		if (!WrdPageOk(sp) || !WrdPageOk(dp)) break;
+		sx1 &= ~7; /* TMIDI: VCOPY の X は 8 ドット境界 */
+		WrdCopyRect(e, sp, dp, sx1, sy1, sx2, sy2, tx, ty);
+		break;
+	}
+	case WRD_VSGET:
+		e->vsCount = c.a;
+		if (e->vsCount < 0) e->vsCount = 0;
+		if (e->vsCount > WRD_PAGE_MAX - 2) e->vsCount = WRD_PAGE_MAX - 2;
+		for (int p = 2; p < 2 + e->vsCount && p < WRD_PAGE_MAX; ++p)
+			memset(e->gfxPage[p], 0, 640 * 400);
+		break;
+	case WRD_VSRES:
+		e->vsCount = 0;
+		for (int p = 2; p < WRD_PAGE_MAX; ++p)
+			memset(e->gfxPage[p], 0, 640 * 400);
+		break;
+	case WRD_FONTM:
+		e->fontMecha = (c.a != 0);
+		break;
+	case WRD_FONTP:
+	case WRD_FONTR:
+		e->fontMecha = 1;
+		break;
+	case WRD_EPAL:
+		if (c.a >= 0 && c.a < 20 && c.b >= 0 && c.b < 20) {
+			for (int i = 0; i < 16; ++i)
+				e->pal[c.b][i] = e->pal[c.a][i];
+			if (c.b == 0) e->fadeActive = 0;
+		}
+		break;
+	case WRD_EGSC:
+		if (WrdPageOk(c.a)) e->dispPage = c.a;
+		break;
+	case WRD_ELINE:
+		e->lineStyle = c.a;
+		break;
+	case WRD_ESCROLL: {
+		int dx = c.a, dy = c.b;
+		int page = e->dispPage;
+		if (!WrdPageOk(page)) break;
+		std::vector<unsigned char> tmp(640 * 400);
+		memcpy(tmp.data(), e->gfxPage[page], 640 * 400);
+		memset(e->gfxPage[page], 0, 640 * 400);
+		for (int y = 0; y < 400; ++y) {
+			int sy = y - dy;
+			if ((unsigned)sy >= 400) continue;
+			for (int x = 0; x < 640; ++x) {
+				int sx = x - dx;
+				if ((unsigned)sx >= 640) continue;
+				e->gfxPage[page][y * 640 + x] = tmp[sy * 640 + sx];
+			}
+		}
+		break;
+	}
+	case WRD_ETEXTDOT:
+		e->textDot = (c.a != 0);
+		break;
+	case WRD_ETMODE:
+		e->col40 = (c.a == 2);
+		e->textOn = (c.a != 0);
+		break;
+	case WRD_ETSCRL:
+		WrdScroll(e, 1, 1, 80, 25, c.a >= 0 ? 0 : 1, e->color, 32);
+		break;
+	case WRD_EREGSAVE:
+		if (c.narg >= 2 && c.a >= 0 && c.a < 20 && c.b >= 0 && c.b < 20) {
+			for (int i = 0; i < 16; ++i)
+				e->pal[c.b][i] = e->pal[c.a][i];
+		}
+		break;
 	case WRD_TEXT:
 		WrdPutText(e, c.text);
+		if (e->textDot && c.text[0] && c.text[0] != '\n') {
+			/* 文字セルをグラフィックにも塗る（演出君メカ TEXTDOT） */
+			const int x = e->curX * 8;
+			const int y = e->curY * 16;
+			for (int j = 0; j < 16; ++j)
+				for (int i = 0; i < 8; ++i)
+					WrdPlotIdx(e, e->activePage, x + i, y + j, e->color & 15);
+		}
 		break;
 	case WRD_WMODE:
 		e->wmode = c.a;
 		e->wmodeChar = c.b;
+		break;
+	case WRD_STARTUP:
+		WrdEngineResetScreen(e);
+		break;
+	case WRD_STOP:
+	case WRD_END:
+	case WRD_REM:
+	case WRD_MIDI:
+	case WRD_LOOP:
+	case WRD_SCREEN:
 		break;
 	default:
 		break;
@@ -790,8 +1409,23 @@ static int WrdLineIsWaitish(int kind)
 int WrdEngineLoad(WrdEngine* e, const wchar_t* wrdPath)
 {
 	if (!e || !wrdPath || !wrdPath[0]) return 0;
+	const int keepTsN = e->tsNum, keepTsD = e->tsDen;
+	const int keepSmf = e->smfOk, keepDiv = e->smfDiv, keepSr = e->sr;
+	std::vector<WrdEngine::TempoPt> keepTempo = std::move(e->tempo);
+	std::vector<int> keepNotes = std::move(e->karaNotes);
+	std::vector<WrdEngine::KaraMark> keepMarks = std::move(e->karaMarks);
 	WrdEngineFree(e);
 	WrdEngineInit(e);
+	if (keepSmf) {
+		e->tsNum = keepTsN;
+		e->tsDen = keepTsD > 0 ? keepTsD : 4;
+		e->smfOk = 1;
+		e->smfDiv = keepDiv > 0 ? keepDiv : 48;
+		e->sr = keepSr > 0 ? keepSr : 44100;
+		e->tempo = std::move(keepTempo);
+		e->karaNotes = std::move(keepNotes);
+		e->karaMarks = std::move(keepMarks);
+	}
 	wcsncpy_s(e->wrdPath, wrdPath, _TRUNCATE);
 	wcsncpy_s(e->dir, wrdPath, _TRUNCATE);
 	wchar_t* sl = wcsrchr(e->dir, L'\\');
@@ -818,7 +1452,7 @@ int WrdEngineLoad(WrdEngine* e, const wchar_t* wrdPath)
 	int tick = 0;
 	int wmode = 11;
 	int wmodeChar = 0;
-	int measT = WrdMeasTicks(4, 4);
+	int measT = WrdMeasTicks(e->tsNum, e->tsDen);
 	int offset = 0;
 	int inStartup = 0;
 	int prevEndedBs = 0;
@@ -851,27 +1485,30 @@ int WrdEngineLoad(WrdEngine* e, const wchar_t* wrdPath)
 			WrdPush(e, cr);
 		}
 		const char* q = line;
-		while (*q == ' ' || *q == '\t') q++;
-		if (*q == '*' || *q == '\'') {
+		const char* peek = line;
+		while (*peek == ' ' || *peek == '\t') peek++;
+		if (*peek == '*' || *peek == '\'') {
 			/* comment */
 		} else {
+			/* 行頭スペースは歌詞（消去・桁揃え）。コメント判定だけ peek する */
 			while (*q) {
 				if (*q == ';') {
 					sawSemiCont = 1;
 					q++;
 					continue;
 				}
-				/* コマンド間の空白だけ飛ばす。歌詞先頭のスペースは桁揃えなので残す */
+				/* @ コマンドの間の空白だけ飛ばす。; 前の空白は画面に出す */
 				if (*q == ' ' || *q == '\t') {
 					const char* nsp = q;
 					while (*nsp == ' ' || *nsp == '\t') nsp++;
-					if (*nsp == '@' || *nsp == ';' || !*nsp) {
+					if (*nsp == '@' || (*nsp == '^' && WrdPeekCaretCommand(nsp))) {
 						q = nsp;
 						continue;
 					}
 				}
 				if (!*q) break;
-				if (*q == '@') {
+				if (*q == '@' || (*q == '^' && WrdPeekCaretCommand(q))) {
+					const int caret = (*q == '^');
 					q++;
 					if (!*q || *q == ';' || *q == ' ' || *q == '\t') {
 						sawBareAt = 1;
@@ -891,11 +1528,23 @@ int WrdEngineLoad(WrdEngine* e, const wchar_t* wrdPath)
 					q = rest;
 					if (WrdICmpCmd(name, "STARTUP")) {
 						inStartup = 1;
+						WrdCmd su = {};
+						su.tick48 = 0;
+						su.kind = WRD_STARTUP;
+						const char* ap = args;
+						su.a = WrdParseInt(ap);
+						WrdPush(e, su);
 						continue;
 					}
 					if (WrdICmpCmd(name, "OFFSET")) {
 						const char* ap = args;
 						offset = WrdParseInt(ap);
+						e->offsetMeas = offset;
+						continue;
+					}
+					if (WrdICmpCmd(name, "REM") || WrdICmpCmd(name, "REMARK")) {
+						/* 括弧なし @REM　//…; の本文は歌詞にしない（TiMidity と同じ） */
+						while (*q && *q != ';') q++;
 						continue;
 					}
 					if (WrdICmpCmd(name, "WMODE")) {
@@ -908,6 +1557,8 @@ int WrdEngineLoad(WrdEngine* e, const wchar_t* wrdPath)
 						c.kind = WRD_WMODE;
 						c.a = a[0];
 						c.b = a[1];
+						c.arg[0] = a[0]; c.arg[1] = a[1];
+						c.narg = 2;
 						WrdPush(e, c);
 						continue;
 					}
@@ -922,13 +1573,26 @@ int WrdEngineLoad(WrdEngine* e, const wchar_t* wrdPath)
 						} else {
 							int m = a[0] + offset;
 							if (m < 1) m = 1;
-							tick = (m - 1) * measT + a[1];
+							const int dest = (m - 1) * measT + a[1];
+							/* WMODE 行待ちが次の絶対 WAIT を越えると、消しスペースが
+							   次フレーズの LOCATE のあとに当たって「の」が残る */
+							if (tick > dest) {
+								for (size_t i = 0; i < e->cmds.size(); ++i) {
+									if (e->cmds[i].tick48 > dest)
+										e->cmds[i].tick48 = dest;
+								}
+							}
+							tick = dest;
 						}
 						continue;
 					}
 					WrdCmd c = {};
 					c.tick48 = inStartup ? 0 : tick;
 					c.kind = WrdKindFromName(name);
+					if (caret && WrdICmpCmd(name, "PAL"))
+						c.kind = WRD_EPAL;
+					if (caret && WrdICmpCmd(name, "SCROLL"))
+						c.kind = WRD_ESCROLL;
 					if (WrdICmpCmd(name, "LOCATE")) {
 						const char* ap = args;
 						int hasSemi = 0;
@@ -939,31 +1603,64 @@ int WrdEngineLoad(WrdEngine* e, const wchar_t* wrdPath)
 						if (*ap == ';' || *ap == ',') ap++;
 						c.b = WrdParseInt(ap);
 						c.g = hasSemi;
-					} else if (WrdICmpCmd(name, "PAL")) {
+						c.arg[0] = c.a; c.arg[1] = c.b;
+						c.narg = 2;
+					} else if (WrdICmpCmd(name, "PAL") && !caret) {
 						strncpy_s(c.text, args, _TRUNCATE);
-					} else if (WrdICmpCmd(name, "MAG")) {
+					} else if (WrdICmpCmd(name, "MAG") || WrdICmpCmd(name, "PLOAD")
+						|| WrdICmpCmd(name, "PATH") || WrdICmpCmd(name, "PALCHG")) {
 						const char* ap = args;
 						char fn[200];
 						int fi = 0;
 						while (*ap == ' ' || *ap == '\t') ap++;
-						while (*ap && *ap != ',' && fi < 198)
+						while (*ap && *ap != ',' && *ap != '<' && fi < 198)
 							fn[fi++] = *ap++;
 						fn[fi] = 0;
 						while (fi > 0 && (fn[fi - 1] == ' ' || fn[fi - 1] == '\t'))
 							fn[--fi] = 0;
 						WrdSjisToWide(fn, c.path, MAX_PATH);
-						if (*ap == ',') ap++;
-						c.a = WrdParseInt(ap);
-						c.b = WrdParseInt(ap);
-						c.c = WrdParseInt(ap);
-						c.d = WrdParseInt(ap);
-					} else if (WrdICmpCmd(name, "ESC")) {
+						strncpy_s(c.text, args, _TRUNCATE);
+						if (*ap == ',' || *ap == '<') ap++;
+						int vals[4] = {};
+						int field = 0;
+						while (field < 4) {
+							while (*ap == ' ' || *ap == '\t') ap++;
+							if (!*ap && field == 0) break;
+							int sign = 1, v = 0, any = 0;
+							if (*ap == '-') { sign = -1; ap++; }
+							while (*ap >= '0' && *ap <= '9') {
+								v = v * 10 + (*ap - '0');
+								ap++;
+								any = 1;
+							}
+							vals[field++] = v * sign;
+							(void)any;
+							while (*ap == ' ' || *ap == '\t') ap++;
+							if (*ap == ',' || *ap == '<' || *ap == '>') { ap++; continue; }
+							break;
+						}
+						c.a = vals[0]; c.b = vals[1]; c.c = vals[2]; c.d = vals[3];
+						c.narg = field;
+						c.arg[0] = c.a; c.arg[1] = c.b; c.arg[2] = c.c; c.arg[3] = c.d;
+					} else if (WrdICmpCmd(name, "EXEC") || WrdICmpCmd(name, "ESC")
+						|| WrdICmpCmd(name, "MIDI")) {
 						strncpy_s(c.text, args, _TRUNCATE);
 					} else {
-						int a[8] = {};
-						WrdParseArgs(args, a, 8);
+						int a[16] = {};
+						WrdParseArgs(args, a, 16);
 						c.a = a[0]; c.b = a[1]; c.c = a[2]; c.d = a[3];
 						c.e = a[4]; c.f = a[5]; c.g = a[6];
+						for (int i = 0; i < 16; ++i) c.arg[i] = a[i];
+						c.narg = 0;
+						{
+							const char* ap = args;
+							while (*ap && c.narg < 16) {
+								const char* before = ap;
+								WrdParseInt(ap);
+								if (ap == before) break;
+								c.narg++;
+							}
+						}
 					}
 					if (c.kind != WRD_NOP)
 						WrdPush(e, c);
@@ -1063,6 +1760,7 @@ int WrdEngineLoad(WrdEngine* e, const wchar_t* wrdPath)
 					const int lead = WrdIsSjisLead(c);
 					if (!lead) {
 						if (c == '@') break;
+						if (c == '^' && WrdPeekCaretCommand(q)) break;
 						if (c == '\\') break;
 						if (c == ';' && (q[1] == 0 || q[1] == '@')) {
 							sawSemiCont = 1;
@@ -1082,9 +1780,9 @@ int WrdEngineLoad(WrdEngine* e, const wchar_t* wrdPath)
 		}
 
 		int lineWait = 0;
+		/* @WAIT は絶対小節へジャンプするだけ。その行に WMODE を足すと歌詞が遅れる */
 		if (!inStartup && !sawWait) {
 			if (sawText || sawBareAt || (line[0] && line[0] != '*' && line[0] != '\'')) {
-				/* empty lines in lyric WRDs still wait */
 				int empty = 1;
 				for (char* s = line; *s; ++s) {
 					if (*s != ' ' && *s != '\t' && *s != '\r') { empty = 0; break; }
@@ -1092,7 +1790,7 @@ int WrdEngineLoad(WrdEngine* e, const wchar_t* wrdPath)
 				if (!empty || sawBareAt || sawText)
 					lineWait = 1;
 				if (empty && !sawBareAt && !sawText)
-					lineWait = 1; /* blank line = one WMODE step (SM204 style) */
+					lineWait = 1; /* 空行も WMODE 1 歩 */
 			}
 		}
 		/* 行末 \ はカラオケ待ち（カーソル維持）。それ以外のテキスト行は画面改行 */
@@ -1110,7 +1808,7 @@ int WrdEngineLoad(WrdEngine* e, const wchar_t* wrdPath)
 		prevEndedBs = (sawBareAt && !sawWait) ? 1 : 0;
 		if (sawText && !sawBareAt && !sawWait && !sawSemiCont)
 			prevEndedBs = 0;
-		inStartup = 0;
+		/* STARTUP は @WAIT/@INKEY/@REST まで続く。行末で切ると MAG と歌詞が小節から外れる */
 
 		*lineEnd = save;
 		p = lineEnd;
@@ -1420,6 +2118,8 @@ int WrdEngineLoadSmfClock(WrdEngine* e, const wchar_t* midPath, int sampleRate)
 {
 	if (!e) return 0;
 	e->tempo.clear();
+	e->karaMarks.clear();
+	e->karaNotes.clear();
 	e->smfOk = 0;
 	e->sr = (sampleRate >= 8000) ? sampleRate : 44100;
 	e->smfDiv = 48;
@@ -1597,12 +2297,13 @@ void WrdEngineSeek(WrdEngine* e, int tick48)
 		WrdApplyCmd(e, e->cmds[e->cur]);
 		e->cur++;
 	}
+	WrdApplyFadeNow(e, tick48);
 	e->lastTick = tick48;
 }
 
 void WrdEnginePaint(WrdEngine* e, HDC hdc, const RECT* rc, int capH)
 {
-	if (!e || !hdc || !rc) return;
+	if (!e || !hdc || !rc || !e->loaded) return;
 	const int x0 = rc->left;
 	const int y0 = rc->top + capH;
 	const int cw = rc->right - rc->left;
@@ -1630,12 +2331,15 @@ void WrdEnginePaint(WrdEngine* e, HDC hdc, const RECT* rc, int capH)
 	bmi.bmiHeader.biPlanes = 1;
 	bmi.bmiHeader.biBitCount = 32;
 	bmi.bmiHeader.biCompression = BI_RGB;
-	/* pal / MAG は 0x00RRGGBB。A=0 の 32bpp を DWM に渡すと窓が完全透過する */
+	/* pal / MAG はインデックス。A=0 の 32bpp を DWM に渡すと窓が完全透過する */
 	std::vector<unsigned> fb(640 * 400, 0xFF000000u);
-	if (e->gfxOn)
-		memcpy(fb.data(), e->gfx, sizeof(e->gfx));
-	for (size_t i = 0; i < fb.size(); ++i)
-		fb[i] |= 0xFF000000u;
+	if (e->gfxOn) {
+		WrdApplyFadeNow(e, e->lastTick);
+		const int page = WrdPageOk(e->dispPage) ? e->dispPage : 0;
+		const unsigned char* src = e->gfxPage[page];
+		for (int i = 0; i < 640 * 400; ++i)
+			fb[i] = e->pal[0][src[i] & 15] | 0xFF000000u;
+	}
 
 	StretchDIBits(hdc, ox, oy, dw, dh, 0, 0, 640, 400,
 		fb.data(), &bmi, DIB_RGB_COLORS, SRCCOPY);
@@ -1647,10 +2351,10 @@ void WrdEnginePaint(WrdEngine* e, HDC hdc, const RECT* rc, int capH)
 	const int cellH = dh / 25;
 	if (cellW < 4 || cellH < 8) return;
 
-	/* 正の高さ＝セル高（内部 leading 込み）。負だと文字高=cellH になり上が欠ける */
+	/* ^FONTM(1) は演出君メカフォント。ファイル未指定時は TMIDI と同じく Windows 日本語フォント */
 	HFONT font = CreateFontW(cellH, 0, 0, 0, FW_NORMAL, 0, 0, 0,
 		SHIFTJIS_CHARSET, OUT_TT_PRECIS, CLIP_DEFAULT_PRECIS, NONANTIALIASED_QUALITY,
-		FIXED_PITCH | FF_MODERN, L"MS Gothic");
+		FIXED_PITCH | FF_MODERN, e->fontMecha ? L"MS Mincho" : L"MS Gothic");
 	HGDIOBJ oldF = SelectObject(hdc, font);
 	SetBkMode(hdc, TRANSPARENT);
 	SetTextAlign(hdc, TA_LEFT | TA_TOP | TA_NOUPDATECP);
@@ -1703,4 +2407,100 @@ void WrdEnginePaint(WrdEngine* e, HDC hdc, const RECT* rc, int capH)
 	}
 	SelectObject(hdc, oldF);
 	DeleteObject(font);
+}
+
+int WrdEngineSelfTest()
+{
+	int fail = 0;
+	WrdEngine* e = new WrdEngine();
+	WrdEngineInit(e);
+
+	/* パレット番号で描いて @PAL 後に色が変わる */
+	e->activePage = 0;
+	WrdPlotIdx(e, 0, 10, 10, 1);
+	if (e->gfxPage[0][10 * 640 + 10] != 1) fail |= 1;
+	e->pal[0][1] = 0x00FF00u;
+	if ((e->pal[0][e->gfxPage[0][10 * 640 + 10]] & 0xFFFFFF) != 0x00FF00) fail |= 2;
+
+	/* GMOVE コピー（重なり）と交換 */
+	WrdPlotIdx(e, 0, 0, 0, 3);
+	WrdPlotIdx(e, 1, 5, 5, 7);
+	WrdCopyRect(e, 0, 1, 0, 0, 0, 0, 5, 5);
+	if (e->gfxPage[1][5 * 640 + 5] != 3) fail |= 4;
+	WrdPlotIdx(e, 0, 2, 2, 4);
+	WrdPlotIdx(e, 1, 8, 8, 9);
+	WrdSwapRect(e, 0, 1, 2, 2, 2, 2, 8, 8);
+	if (e->gfxPage[0][2 * 640 + 2] != 9 || e->gfxPage[1][8 * 640 + 8] != 4) fail |= 8;
+
+	/* @FADE 補間。speed=0 は即時 */
+	e->pal[1][0] = 0x000000;
+	e->pal[2][0] = 0x0000FF;
+	WrdStartFade(e, 1, 2, 0, 0);
+	if ((e->pal[0][0] & 0xFF) != 0xFF) fail |= 16;
+	e->pal[1][0] = 0x000000;
+	e->pal[2][0] = 0x0000F0;
+	WrdStartFade(e, 1, 2, 10, 100);
+	WrdApplyFadeNow(e, 105);
+	unsigned mid = e->pal[0][0] & 0xFF;
+	if (mid < 0x70 || mid > 0x80) fail |= 32;
+	WrdApplyFadeNow(e, 120);
+	if ((e->pal[0][0] & 0xFF) != 0xF0) fail |= 64;
+
+	/* PHO 4 プレーン（B,R,G,E）→ インデックス 15 */
+	std::vector<unsigned char> pho(128000, 0);
+	memset(pho.data(), 0xFF, 80); /* 先頭 640 ドット、プレーン B */
+	memset(pho.data() + 32000, 0xFF, 80);
+	memset(pho.data() + 64000, 0xFF, 80);
+	memset(pho.data() + 96000, 0xFF, 80);
+	if (!WrdLoadPhoToPage(e, pho.data(), 128000, 0)) fail |= 128;
+	if (e->gfxPage[0][0] != 15) fail |= 256;
+
+	/* XCOPY method=1 は色 0 を抜く */
+	memset(e->gfxPage[0], 0, 640 * 400);
+	memset(e->gfxPage[1], 5, 100);
+	e->gfxPage[0][0] = 0;
+	e->gfxPage[0][1] = 2;
+	int xa[16] = { 0, 0, 1, 0, 0, 0, 0, 1, 1 };
+	WrdXCopy(e, xa, 9);
+	if (e->gfxPage[1][0] != 5 || e->gfxPage[1][1] != 2) fail |= 512;
+
+	/* LOCATE は消さない。白プレビューの上に1文字だけ色を重ねる */
+	WrdEngineResetScreen(e);
+	e->cmds.clear();
+	e->cur = 0;
+	e->lastTick = -1;
+	e->loaded = 1;
+	{
+		WrdCmd c = {};
+		c.kind = WRD_COLOR; c.a = 7; e->cmds.push_back(c);
+		c = {}; c.kind = WRD_TEXT; strncpy_s(c.text, "ABCD", _TRUNCATE); e->cmds.push_back(c);
+		c = {}; c.kind = WRD_LOCATE; c.a = 1; c.b = 1; e->cmds.push_back(c);
+		c = {}; c.kind = WRD_COLOR; c.a = 5; e->cmds.push_back(c);
+		c = {}; c.kind = WRD_TEXT; strncpy_s(c.text, "X", _TRUNCATE); e->cmds.push_back(c);
+	}
+	WrdEngineSeek(e, 0);
+	if (e->cells[0][0] != 'X') fail |= 1024;
+	if (e->cells[0][1] != 'B' || e->cells[0][2] != 'C' || e->cells[0][3] != 'D') fail |= 2048;
+	if ((e->attr[0][0] & 15) != 5) fail |= 4096;
+	if ((e->attr[0][1] & 15) != 7) fail |= 8192;
+
+	/* 空白歌詞は消去。; 前のスペースを捨てると前の行が残る */
+	WrdEngineResetScreen(e);
+	e->cmds.clear();
+	e->cur = 0;
+	e->lastTick = -1;
+	e->loaded = 1;
+	{
+		WrdCmd c = {};
+		c.kind = WRD_TEXT; strncpy_s(c.text, "ABCD", _TRUNCATE); e->cmds.push_back(c);
+		c = {}; c.kind = WRD_LOCATE; c.a = 1; c.b = 1; e->cmds.push_back(c);
+		c = {}; c.kind = WRD_TEXT; strncpy_s(c.text, "  ", _TRUNCATE); e->cmds.push_back(c);
+	}
+	WrdEngineSeek(e, 0);
+	if (e->cells[0][0] != ' ' || e->cells[0][1] != ' ') fail |= 16384;
+	if (e->cells[0][2] != 'C' || e->cells[0][3] != 'D') fail |= 32768;
+
+	WrdEngineFree(e);
+	delete e;
+	return fail;
 }

@@ -1,4 +1,4 @@
-struct InstRect
+﻿struct InstRect
 {
 	float4 xywh;
 	float4 color;

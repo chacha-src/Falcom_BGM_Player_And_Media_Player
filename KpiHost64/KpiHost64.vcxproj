@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" ToolsVersion="14.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="uni_avx2_vs2026|Win32">
@@ -34,6 +34,10 @@
     <WholeProgramOptimization>true</WholeProgramOptimization>
     <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)'=='uni_2026_de'" Label="Configuration">
+    <WholeProgramOptimization>false</WholeProgramOptimization>
+    <UseDebugLibraries>false</UseDebugLibraries>
+  </PropertyGroup>
   <Import Project="$(MSBuildThisFileDirectory)..\ogg.compiler.clamp.props" />
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
   <ImportGroup Label="ExtensionSettings" />
@@ -42,8 +46,8 @@
   <PropertyGroup>
     <OutDir>C:\projects\APPLICATION3\ogg_binary\</OutDir>
     <IntDir>$(SolutionDir)$(Platform)\$(Configuration)\$(TargetName)\</IntDir>
-    <TargetName Condition="'$(Platform)'=='x64'">ogghost32</TargetName>
     <TargetName Condition="'$(Platform)'=='Win32'">ogghost32</TargetName>
+    <TargetName Condition="'$(Platform)'=='x64'">KpiHost64</TargetName>
   </PropertyGroup>
   <ItemDefinitionGroup>
     <ClCompile>
@@ -53,13 +57,18 @@
       <AdditionalIncludeDirectories>$(ProjectDir);$(ProjectDir)..\;$(ProjectDir)..\third_party\aimp;$(ProjectDir)..\third_party\vst3sdk;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpp17</LanguageStandard>
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
-      <EnableEnhancedInstructionSet Condition="'$(Configuration)'=='uni_avx2_vs2026'">AdvancedVectorExtensions2</EnableEnhancedInstructionSet>
+      <EnableEnhancedInstructionSet Condition="'$(Configuration)'=='uni_avx2_vs2026' Or '$(Configuration)'=='uni_2026_de'">AdvancedVectorExtensions2</EnableEnhancedInstructionSet>
       <InlineFunctionExpansion Condition="'$(Configuration)'=='uni_avx2_vs2026'">AnySuitable</InlineFunctionExpansion>
-      <IntrinsicFunctions Condition="'$(Configuration)'=='uni_avx2_vs2026'">true</IntrinsicFunctions>
-      <FavorSizeOrSpeed Condition="'$(Configuration)'=='uni_avx2_vs2026'">Speed</FavorSizeOrSpeed>
+      <InlineFunctionExpansion Condition="'$(Configuration)'=='uni_2026_de'">OnlyExplicitInline</InlineFunctionExpansion>
+      <IntrinsicFunctions Condition="'$(Configuration)'=='uni_avx2_vs2026' Or '$(Configuration)'=='uni_2026_de'">true</IntrinsicFunctions>
+      <FavorSizeOrSpeed Condition="'$(Configuration)'=='uni_avx2_vs2026' Or '$(Configuration)'=='uni_2026_de'">Speed</FavorSizeOrSpeed>
       <OmitFramePointers Condition="'$(Configuration)'=='uni_avx2_vs2026'">true</OmitFramePointers>
+      <OmitFramePointers Condition="'$(Configuration)'=='uni_2026_de'">false</OmitFramePointers>
       <EnableFiberSafeOptimizations Condition="'$(Configuration)'=='uni_avx2_vs2026'">true</EnableFiberSafeOptimizations>
-      <OpenMPSupport Condition="'$(Configuration)'=='uni_avx2_vs2026'">true</OpenMPSupport>
+      <Optimization Condition="'$(Configuration)'=='uni_2026_de'">MaxSpeed</Optimization>
+      <DebugInformationFormat Condition="'$(Configuration)'=='uni_2026_de'">ProgramDatabase</DebugInformationFormat>
+      <AdditionalOptions Condition="'$(Configuration)'=='uni_2026_de'">/utf-8 /Zo %(AdditionalOptions)</AdditionalOptions>
+      <OpenMPSupport Condition="'$(Configuration)'=='uni_avx2_vs2026' Or '$(Configuration)'=='uni_2026_de'">true</OpenMPSupport>
     </ClCompile>
     <ResourceCompile>
       <AdditionalIncludeDirectories>$(ProjectDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
@@ -67,8 +76,10 @@
     </ResourceCompile>
     <Link>
       <SubSystem>Console</SubSystem>
-    <TargetMachine Condition="'$(Platform)'=='Win32'">MachineX86</TargetMachine>
+      <TargetMachine Condition="'$(Platform)'=='Win32'">MachineX86</TargetMachine>
+      <TargetMachine Condition="'$(Platform)'=='x64'">MachineX64</TargetMachine>
       <LargeAddressAware Condition="'$(Platform)'=='Win32'">true</LargeAddressAware>
+      <GenerateDebugInformation Condition="'$(Configuration)'=='uni_2026_de'">DebugFull</GenerateDebugInformation>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>

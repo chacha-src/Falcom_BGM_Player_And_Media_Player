@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 /* KPI FM モニタ向けの共有 OPNA/OPN2/MSX レジスタシャドウ + dump 書き出し */
 #include "sasami_fmmon.h"
 #include "fmmon/fmmon_write.h"

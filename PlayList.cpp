@@ -1,4 +1,4 @@
-// PlayList.cpp : 実装ファイル
+﻿// PlayList.cpp : 実装ファイル
 //
 
 #include "stdafx.h"
@@ -1272,24 +1272,16 @@ CString NormalizePlaylistPath(LPCTSTR fol)
 		phys = in.Left(gt);
 		suffix = in.Mid(gt);
 	} else {
-		/* CEmu / KPI サブソング: path::0001。GetFullPathName に渡すと ADS 扱い・MAX_PATH
-		   切れで曲番が落ち、同一 zip の別曲が Fol 衝突して途中行を上書きすることがある。 */
-		const int len = in.GetLength();
-		if (len >= 7 && in.GetAt(len - 5) == _T(':') && in.GetAt(len - 6) == _T(':')) {
-			bool allDigits = true;
-			for (int i = 0; i < 4; ++i) {
-				const TCHAR c = in.GetAt(len - 4 + i);
-				if (c < _T('0') || c > _T('9')) { allDigits = false; break; }
-			}
-			if (allDigits) {
-				phys = in.Left(len - 6);
-				suffix = in.Mid(len - 6);
-			}
+		/* CEmu zip::0001 も MidiPack archive::inner.mid も、GetFullPathName に渡すと ADS 扱いになる */
+		const int col = in.Find(_T("::"));
+		if (col >= 2) {
+			phys = in.Left(col);
+			suffix = in.Mid(col);
 		}
 	}
-	TCHAR full[MAX_PATH];
-	DWORD n = GetFullPathName(phys, MAX_PATH, full, NULL);
-	CString s = (n > 0 && n < MAX_PATH) ? CString(full) : phys;
+	TCHAR full[1024];
+	DWORD n = GetFullPathName(phys, 1024, full, NULL);
+	CString s = (n > 0 && n < 1024) ? CString(full) : phys;
 	s.Replace(_T('/'), _T('\\'));
 	return s + suffix;
 }
@@ -1333,7 +1325,7 @@ CString PlPhysicalMediaPath(LPCTSTR fol)
 
 BOOL PlIsFalcomGameBgmMode(int sub)
 {
-	return (sub >= 1 && sub <= 21) || sub == 30 ||
+	return (sub >= 1 && sub <= 21) || sub == 30 || sub == 31 ||
 		sub == -11 || sub == -12 || sub == -13 || sub == -14 || sub == -15;
 }
 
@@ -1342,7 +1334,7 @@ BOOL PlTrackLooksMissing(int sub, LPCTSTR fol)
 	if (!fol || !fol[0]) return TRUE;
 	// Falcom game BGM (mode1-21等): fol は basename のみ。play() が savedata で解決する。
 	// mode 30 はフルパス保存なので存在チェックする。
-	if (PlIsFalcomGameBgmMode(sub) && sub != 30)
+	if (PlIsFalcomGameBgmMode(sub) && sub != 30 && sub != 31)
 		return FALSE;
 	return !PathFileExists(PlPhysicalMediaPath(fol));
 }
@@ -2823,7 +2815,7 @@ static void PlPcFromPld(const playlistdata& pld, playlistdata0& out)
 	_tcscpy(out.name, pld.name);
 	out.loop1 = pld.loop1;
 	out.loop2 = pld.loop2;
-	out.sub = pld.sub;
+	out.sub = RemapLegacyPlaySub(pld.sub, pld.fol);
 	out.ret2 = pld.ret2;
 	out.time = pld.time;
 	out.icon = 1;
@@ -4915,9 +4907,9 @@ CString PlStorePlaylistFol(LPCTSTR fol, int sub)
 {
 	if (!fol || !*fol)
 		return CString();
-	// mode 30 (空の軌跡 The 1st) は savedata のゲームフォルダ chdir が無く、
+	// mode 30/31 (空の軌跡 The 1st / The 2nd) は savedata のゲームフォルダ chdir が無く、
 	// wavread が .pac をフルパスで Open する。basename 化すると Open 失敗→Seek で落ちる。
-	if (PlIsFalcomGameBgmMode(sub) && sub != 30) {
+	if (PlIsFalcomGameBgmMode(sub) && sub != 30 && sub != 31) {
 		CString s = fol;
 		int slash = s.ReverseFind(_T('\\'));
 		if (slash >= 0)
@@ -4927,7 +4919,7 @@ CString PlStorePlaylistFol(LPCTSTR fol, int sub)
 			s = s.Mid(slash + 1);
 		return s;
 	}
-	if (sub == 30) {
+	if (sub == 30 || sub == 31) {
 		CString in(fol);
 		const int cor = in.Find(L':', 6);
 		const CString phys = (cor != -1) ? in.Left(cor) : in;
@@ -4958,7 +4950,8 @@ int CPlayList::chk(CString name,int sub,CString art,CString fol,int ret)
 	// 単体メディアファイルはパス+形式(sub)で同一判定(タグ名とプレイリスト表示名の差異を吸収)
 	const bool pathKeyOnly = (sub == -1 || sub == -6 || sub == 33 || sub == 34 || sub == 35 ||
 		sub == -7 || sub == -8 || sub == -9 ||
-		sub == -10 || sub == 999 || sub == -2 || sub == -3 || sub == MODE_VST_MIDI || sub == MODE_CEMU);
+		sub == -10 || sub == 999 || sub == -2 || sub == -3 || sub == MODE_VST_MIDI
+		|| sub == MODE_MIDI_PACK || sub == MODE_CEMU);
 	for(int j=0;j<n;j++){
 		if (pathKeyOnly) {
 			if (_tcsicmp(pc[j].fol, fol) == 0 && pc[j].sub == sub)
@@ -4966,7 +4959,7 @@ int CPlayList::chk(CString name,int sub,CString art,CString fol,int ret)
 			continue;
 		}
 		c=0;
-		if ((pc[j].sub == -10) || (pc[j].sub == -2) || (pc[j].sub == -3 || pc[j].sub == 30) || (pc[j].sub == 999) || (pc[j].sub == MODE_VST_MIDI)) {
+		if ((pc[j].sub == -10) || (pc[j].sub == -2) || (pc[j].sub == -3 || pc[j].sub == 30 || pc[j].sub == 31) || (pc[j].sub == 999) || (pc[j].sub == MODE_VST_MIDI) || (pc[j].sub == MODE_MIDI_PACK)) {
 			if (_tcscmp(pc[j].fol, fol) == 0 && pc[j].sub == sub && _tcscmp(pc[j].name, name) == 0)
 				return j;
 		}else{
@@ -5061,9 +5054,10 @@ static bool IsPlaylistDropAllowedExt(const CString& pathOrName)
 		_T(".adx"), _T(".ahx"), _T(".hca"), _T(".awb"), _T(".acb"),
 		_T(".at3"), _T(".at9"), _T(".vag"), _T(".xa"), _T(".nub"),
 		_T(".bgm"), _T(".bms"), _T(".bme"), _T(".bml"),
-		_T(".mid"), _T(".midi"), _T(".kar"), _T(".rmi"),
+		_T(".mid"), _T(".midi"), _T(".kar"), _T(".rmi"), _T(".smf"),
 		_T(".rcp"), _T(".r36"), _T(".g36"), _T(".g18"),
 		_T(".mcp"), _T(".mtd"), _T(".eup"), _T(".mff"), _T(".seq"),
+		_T(".sng"), _T(".zms"), _T(".zmd"),
 		_T(".cpr"), _T(".lt10"), _T(".ss10"), _T(".ssw"), _T(".lt9"),
 		_T(".rpp"), _T(".als"), _T(".musicxml"), _T(".mxl"),
 		// ゲーム系コンテナ（ISO/IMG 系は不可。KPI 宣言分は下で許可）
@@ -5207,12 +5201,25 @@ static void PlMidiScanTrack(const BYTE* tr, const BYTE* end, wchar_t* t03, int c
 	}
 }
 
+static int PlComposerPeekTitle(const wchar_t* path, wchar_t* out, int outCap);
+
 // SMF/RMID を最大 1MB 読んで曲名を出す。UNC は呼ぶ側がスキップする（起動固まり防止）。
 static int PlMidiPeekTitle(const wchar_t* path, wchar_t* out, int outCap)
 {
 	out[0] = 0;
 	if (!path || !path[0] || outCap < 2) return 0;
-	HANDLE f = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ, NULL,
+	wchar_t phys[MIDIPACK_PATH];
+	phys[0] = 0;
+	const wchar_t* use = path;
+	if (MidiPackMaterialize(path, phys, MIDIPACK_PATH))
+		use = phys;
+	if (PlComposerPeekTitle(use, out, outCap))
+		return 1;
+	wchar_t conv[MIDIPACK_PATH];
+	conv[0] = 0;
+	if (ComposerIsSeqExt(use) && ComposerConvertToMidi(use, conv, MIDIPACK_PATH) && conv[0])
+		use = conv;
+	HANDLE f = CreateFileW(use, GENERIC_READ, FILE_SHARE_READ, NULL,
 		OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, NULL);
 	if (f == INVALID_HANDLE_VALUE) return 0;
 	LARGE_INTEGER sz;
@@ -5305,16 +5312,85 @@ static int PlMidiTitleIsCode(const wchar_t* title, const CString& stem, const CS
 	return 0;
 }
 
+// archive::inner / arc>inner なら中のファイル名。既存 mid と同じ title(file.ext) 用。
+static CString PlSeqLeafName(const CString& fol)
+{
+	CString leaf = fol;
+	int sep = leaf.Find(_T("::"));
+	if (sep >= 0)
+		leaf = leaf.Mid(sep + 2);
+	else {
+		sep = leaf.Find(_T('>'));
+		if (sep >= 0)
+			leaf = leaf.Mid(sep + 1);
+	}
+	const int slash = max(leaf.ReverseFind(_T('\\')), leaf.ReverseFind(_T('/')));
+	if (slash >= 0 && slash + 1 < leaf.GetLength())
+		leaf = leaf.Mid(slash + 1);
+	return leaf;
+}
+
+// RCP/G36/ZMS はヘッダに曲名がある。ドロップ時に SMF 化せず取る。
+static int PlComposerPeekTitle(const wchar_t* path, wchar_t* out, int outCap)
+{
+	if (out && outCap > 0) out[0] = 0;
+	if (!path || !path[0] || !out || outCap < 2) return 0;
+	HANDLE f = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ, NULL,
+		OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, NULL);
+	if (f == INVALID_HANDLE_VALUE) return 0;
+	LARGE_INTEGER sz;
+	if (!GetFileSizeEx(f, &sz) || sz.QuadPart < 16) {
+		CloseHandle(f);
+		return 0;
+	}
+	DWORD toRead = (sz.QuadPart > (LONGLONG)(256 * 1024)) ? (256 * 1024) : (DWORD)sz.QuadPart;
+	BYTE* data = (BYTE*)malloc(toRead);
+	DWORD got = 0;
+	if (!data || !ReadFile(f, data, toRead, &got, NULL) || got < 16) {
+		CloseHandle(f);
+		free(data);
+		return 0;
+	}
+	CloseHandle(f);
+	char tmp[256];
+	tmp[0] = 0;
+	const int kind = ComposerKindOfMem(data, got);
+	if (kind == COMPOSER_KIND_RCP || kind == COMPOSER_KIND_G36 || kind == COMPOSER_KIND_MCP) {
+		const unsigned tOff = 0x20;
+		const unsigned tLen = (kind == COMPOSER_KIND_G36) ? 0x80u : 0x40u;
+		int n = 0;
+		for (unsigned i = 0; i < tLen && tOff + i < got && n < 255; ++i) {
+			const unsigned char c = data[tOff + i];
+			if (c == 0) break;
+			tmp[n++] = (char)c;
+		}
+		tmp[n] = 0;
+	} else if (kind == COMPOSER_KIND_ZMS) {
+		unsigned i = 0;
+		while (i < got && (data[i] == ' ' || data[i] == '\t' || data[i] == '\r' || data[i] == '\n'))
+			i++;
+		if (i + 8 <= got && (_strnicmp((const char*)data + i, ".COMMENT", 8) == 0)) {
+			i += 8;
+			while (i < got && (data[i] == ' ' || data[i] == '\t')) i++;
+			int n = 0;
+			while (i < got && data[i] != '\r' && data[i] != '\n' && n < 255)
+				tmp[n++] = (char)data[i++];
+			tmp[n] = 0;
+		}
+	}
+	free(data);
+	if (!tmp[0]) return 0;
+	PlMidiDecodeText(tmp, out, outCap);
+	return out[0] ? 1 : 0;
+}
+
 // 表示名がファイル名のままなら SMF 曲名を「title(xxxx.mid)」にする。
 // doPeek=0 は起動 Load。ディスクを開かず、番号だけの名前は内蔵表から足す。
 static void PlMidiMaybeTitle(CString& name, const CString& fol, int doPeek)
 {
 	if (!VstIsMidiExt(fol))
 		return;
-	CString leaf = fol;
-	const int slash = max(leaf.ReverseFind(_T('\\')), leaf.ReverseFind(_T('/')));
-	if (slash >= 0 && slash + 1 < leaf.GetLength())
-		leaf = leaf.Mid(slash + 1);
+	CString leaf = PlSeqLeafName(fol);
 	if (leaf.IsEmpty())
 		return;
 	CString stem = leaf;
@@ -5496,9 +5572,13 @@ int CPlayList::Add(CString name,int sub,int loop1,int loop2,CString art,CString 
 {
 	if (PlIsSasamiTempPreviewPath(fol))
 		return -1;
+	if (MidiPackIsTempExtractPath(fol))
+		return -1;
 	// 旧プレイリストに KPI 再生として保存された動画も CDouga 再生へ移行する。
 	if (sub == -3 && IsDougaVideoFile(fol))
 		sub = -2;
+	/* 旧 MIDI パック -31 → -40。空の軌跡 pac:: が -31 になっていた行は 30/31 に戻す。 */
+	sub = RemapLegacyPlaySub(sub, fol);
 
 	int cnt1;
 	CString s,ss;
@@ -5525,7 +5605,7 @@ int CPlayList::Add(CString name,int sub,int loop1,int loop2,CString art,CString 
 		case 20:s=LL14(L"海の檻歌", L"Cagesong of the Ocean", L"Cagesong of the Ocean", L"Cagesong of the Ocean", L"Cagesong of the Ocean", L"바다의 감옥 노래", L"海之槛歌", L"Cagesong of the Ocean", L"Cagesong of the Ocean", L"Cagesong of the Ocean", L"Cagesong of the Ocean", L"Cagesong of the Ocean", L"Cagesong of the Ocean", L"Cagesong of the Ocean");break;
 		case 21:s = LL14(L"閃の軌跡Ⅰ,Ⅱ,Ys8", L"Trails of Cold Steel I,II,Ys8", L"Trails of Cold Steel I,II,Ys8", L"Trails of Cold Steel I,II,Ys8", L"Trails of Cold Steel I,II,Ys8", L"섬의 궤적 I,II,Ys8", L"闪之轨迹I,II,Ys8", L"Trails of Cold Steel I,II,Ys8", L"Trails of Cold Steel I,II,Ys8", L"Trails of Cold Steel I,II,Ys8", L"Trails of Cold Steel I,II,Ys8", L"Trails of Cold Steel I,II,Ys8", L"Trails of Cold Steel I,II,Ys8", L"Trails of Cold Steel I,II,Ys8"); break;
 		case 30:s = LL14(L"空の軌跡 The 1st", L"Trails in the Sky The 1st", L"Les Sentiers du Ciel The 1st", L"Trails in the Sky The 1st", L"Trails in the Sky The 1st", L"하늘의 궤적 The 1st", L"空之轨迹 The 1st", L"Trails in the Sky The 1st", L"Тропы в Небе The 1st", L"Himmelsleitern The 1st", L"Trails in the Sky The 1st", L"Trails in the Sky The 1st", L"Trails in the Sky The 1st", L"Trails in the Sky The 1st"); break;
-		// mode 31-32: 予約 / 33-35: Daybreak / Daybreak II / beyond the Horizon (opus loops=)
+		// 31 は The 2nd。-31 は旧 MIDI パック（今は -40）。32 は The 3rd 予約。33-35: Daybreak / Daybreak II / beyond the Horizon
 		case 31:s = LL14(L"空の軌跡 The 2nd", L"Trails in the Sky The 2nd", L"Les Sentiers du Ciel The 2nd", L"Trails in the Sky The 2nd", L"Trails in the Sky The 2nd", L"하늘의 궤적 The 2nd", L"空之轨迹 The 2nd", L"Trails in the Sky The 2nd", L"Тропы в Небе The 2nd", L"Himmelsleitern The 2nd", L"Trails in the Sky The 2nd", L"Trails in the Sky The 2nd", L"Trails in the Sky The 2nd", L"Trails in the Sky The 2nd"); break;
 		case 32:s = LL14(L"空の軌跡 The 3rd", L"Trails in the Sky The 3rd", L"Les Sentiers du Ciel The 3rd", L"Trails in the Sky The 3rd", L"Trails in the Sky The 3rd", L"하늘의 궤적 The 3rd", L"空之轨迹 The 3rd", L"Trails in the Sky The 3rd", L"Тропы в Небе The 3rd", L"Himmelsleitern The 3rd", L"Trails in the Sky The 3rd", L"Trails in the Sky The 3rd", L"Trails in the Sky The 3rd", L"Trails in the Sky The 3rd"); break;
 		case 33:s = LL14(L"英雄伝説 黎の軌跡", L"The Legend of Heroes: Trails through Daybreak", L"The Legend of Heroes: Trails through Daybreak", L"The Legend of Heroes: Trails through Daybreak", L"The Legend of Heroes: Trails through Daybreak", L"영웅전설 여의 궤적", L"英雄传说 黎之轨迹", L"The Legend of Heroes: Trails through Daybreak", L"The Legend of Heroes: Trails through Daybreak", L"The Legend of Heroes: Trails through Daybreak", L"The Legend of Heroes: Trails through Daybreak", L"The Legend of Heroes: Trails through Daybreak", L"The Legend of Heroes: Trails through Daybreak", L"The Legend of Heroes: Trails through Daybreak"); break;
@@ -5561,8 +5641,14 @@ int CPlayList::Add(CString name,int sub,int loop1,int loop2,CString art,CString 
 			s.Format(LL14(L"%sファイル(AIMP)", L"%s File(AIMP)", L"%s fichier(AIMP)", L"%s file(AIMP)", L"%s archivo(AIMP)", L"%s 파일(AIMP)", L"%s文件(AIMP)", L"ملف %s(AIMP)", L"файл %s(AIMP)", L"%s-Datei(AIMP)", L"arquivo %s(AIMP)", L"%s bestand(AIMP)", L"plik %s(AIMP)", L"%s dosyası(AIMP)"), ss);
 			break;
 
+		case MODE_ZMUSIC:
+			ss = fol.Right(fol.GetLength() - fol.ReverseFind('.') - 1);
+			s.Format(LL14(L"%sファイル(ZMUSIC)", L"%s File(ZMUSIC)", L"%s fichier(ZMUSIC)", L"%s file(ZMUSIC)", L"%s archivo(ZMUSIC)", L"%s 파일(ZMUSIC)", L"%s文件(ZMUSIC)", L"ملف %s(ZMUSIC)", L"файл %s(ZMUSIC)", L"%s-Datei(ZMUSIC)", L"arquivo %s(ZMUSIC)", L"%s bestand(ZMUSIC)", L"plik %s(ZMUSIC)", L"%s dosyası(ZMUSIC)"), ss);
+			break;
+
+		case MODE_MIDI_PACK:
 		case MODE_VST_MIDI:
-			// 自前 VST ホスト。表示は MID(VST)。優先切替は FixMidiMode。
+			// 自前 VST ホスト。アーカイブ内は MODE_MIDI_PACK。表示は MID(VST)。
 			ss = fol.Right(fol.GetLength() - fol.ReverseFind('.') - 1);
 			s.Format(LL14(L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)"), ss);
 			break;
@@ -6561,6 +6647,7 @@ void CPlayList::AddFilePath(LPCTSTR path)
 {
 	if (!path || !*path) return;
 	if (PlIsSasamiTempPreviewPath(path)) return;
+	if (MidiPackIsTempExtractPath(path)) return;
 	const CString norm = NormalizePlaylistPath(path);
 	if (norm.IsEmpty()) return;
 	if (PlIsSasamiTempPreviewPath(norm)) return;
@@ -6571,6 +6658,8 @@ void CPlayList::AddFilePath(LPCTSTR path)
 void CPlayList::Fol(CString fname)
 {
 	if (PathIsDirectory(fname) == FALSE && PlIsSasamiTempPreviewPath(fname))
+		return;
+	if (MidiPackIsTempExtractPath(fname))
 		return;
 	CString fname_full = fname;
 	CString fname1 = fname;
@@ -7879,8 +7968,9 @@ void CPlayList::Fol(CString fname)
 					_tcscpy(p.name, a);
 					_tcscpy(p.fol, fname1);
 				}
-				else if ((ft == L"bgm1.pac" || ft == L"bgm2.pac" || ft == L"bgm3.pac") && fname.Find(L"Trails in the Sky 1st Chapter") > 0) {
-					p.sub = 30; p.loop1 = p.loop2 = 0;
+				else if ((ft == L"bgm1.pac" || ft == L"bgm2.pac" || ft == L"bgm3.pac") && (fname.Find(L"Trails in the Sky 1st Chapter") > 0 || fname.Find(L"Trails in the Sky 2nd Chapter") > 0)) {
+					const int sky2 = fname.Find(L"Trails in the Sky 2nd Chapter") > 0;
+					p.sub = sky2 ? 31 : 30; p.loop1 = p.loop2 = 0;
 					TCHAR ti1[][100] = {
 						L"001 風を共に舞う気持ち",
 						L"100 地方都市ロレント",
@@ -8060,6 +8150,112 @@ void CPlayList::Fol(CString fname)
 						default: return CString(ti1_en[j]);
 						}
 					};
+					struct Sky2Title { const TCHAR* id; const TCHAR* ja; const TCHAR* en; const TCHAR* fr; };
+					const Sky2Title sky2ti[] = {
+						{ L"001", L"風を共に舞う気持ち SC Ver", L"Dancing with the Wind SC Ver", L"Sentiments dansant avec le vent SC Ver" },
+						{ L"002", L"星の在り処 Opening Size", L"Sora no Kiseki -Opening Size-", L"Sora no Kiseki -Opening Size-" },
+						{ L"003", L"星の在り処", L"Where the Stars Are", L"Où sont les étoiles" },
+						{ L"010", L"Shine of Eidos ～空の軌跡～", L"Shine of Eidos ~Trails in the Sky~", L"Shine of Eidos ~Trails in the Sky~" },
+						{ L"011", L"OP 銀の意志 金の翼/山脇宏子", L"OP Silver Will Golden Wings/Yamawaki Hiroko", L"OP Silver Will Golden Wings/Yamawaki Hiroko" },
+						{ L"012", L"ED I swear.../小寺可南子", L"ED I swear.../Kodera Kanako", L"ED I swear.../Kodera Kanako" },
+						{ L"015", L"解き放たれた至宝", L"Unleashed Treasure", L"Trésor libéré" },
+						{ L"016", L"女神の御許へ", L"To the Goddess", L"Vers la déesse" },
+						{ L"017", L"折られた翼", L"Broken Wings", L"Ailes brisées" },
+						{ L"018", L"希望の行方", L"Where Hope Goes", L"Où va l'espoir" },
+						{ L"100", L"地方都市ロレント", L"Provincial City Rolent", L"Rolent - Ville provinciale" },
+						{ L"101", L"商業都市ボース", L"Commercial City Bose", L"Bose - Ville commerciale" },
+						{ L"102", L"海港都市ルーアン", L"Port City Ruan", L"Ruan - Ville portuaire" },
+						{ L"103", L"工房都市ツァイス", L"Workshop City Zeiss", L"Zeiss - Ville atelier" },
+						{ L"104", L"王都グランセル", L"Royal Capital Grancel", L"Grancel - Capitale royale" },
+						{ L"105", L"陽だまりにて和む猫", L"Cat Relaxing in the Sun", L"Chat au soleil" },
+						{ L"106", L"国境警備も楽じゃない", L"Border Patrol Isn't Easy", L"Patrouille frontière pas facile" },
+						{ L"107", L"王城", L"Royal Castle", L"Château royal" },
+						{ L"108", L"グランアリーナ", L"Grand Arena", L"Grand Arena" },
+						{ L"110", L"ル＝ロックルへようこそ", L"Welcome to Le Locle", L"Bienvenue à Le Locle" },
+						{ L"111", L"灯火が消えた街", L"Town Where the Lights Went Out", L"Ville où les lumières se sont éteintes" },
+						{ L"112", L"Heartless Surprise Attack", L"Heartless Surprise Attack", L"Heartless Surprise Attack" },
+						{ L"113", L"飛行戦艦グロリアス", L"Flying Battleship Glorious", L"Cuirassé volant Glorious" },
+						{ L"200", L"リベールの歩き方", L"Walking in Liberl", L"Marcher dans Liberl" },
+						{ L"201", L"Secret Green Passage", L"Secret Green Passage", L"Secret Green Passage" },
+						{ L"202", L"Rock on the Road", L"Rock on the Road", L"Rock on the Road" },
+						{ L"210", L"空を見上げて", L"Look Up at the Sky", L"Regarder le ciel" },
+						{ L"300", L"闇を彷徨う", L"Wandering in the Darkness", L"Errance dans les ténèbres" },
+						{ L"301", L"行く手をはばむ鋼の床", L"Steel Floor Blocking the Path", L"Plancher d'acier bloquant le chemin" },
+						{ L"302", L"暗がりがくれた安らぎ", L"Peace in the Darkness", L"Paix des ténèbres" },
+						{ L"303", L"四輪の塔", L"Tetracyclic Towers", L"Tours tétracycliques" },
+						{ L"304", L"レイストン要塞", L"Leiston Fortress", L"Forteresse Leiston" },
+						{ L"305", L"虚ろなる光の封土", L"Hollow Land of Light", L"Terre vacante de lumière" },
+						{ L"310", L"隠された真の姿", L"Hidden True Form", L"Forme vraie cachée" },
+						{ L"311", L"潜入", L"Infiltration", L"Infiltration" },
+						{ L"312", L"浮遊都市リベルアーク", L"Floating City Liber Ark", L"Cité flottante Liber Ark" },
+						{ L"313", L"その先を目指して", L"Aiming Beyond", L"Viser au-delà" },
+						{ L"314", L"中枢塔《アクシスピラー》", L"Central Tower Axis Pillar", L"Tour centrale Axis Pillar" },
+						{ L"315", L"★効果音★", L"★Sound Effects★", L"★Sound Effects★" },
+						{ L"316", L"仲間の元へ", L"To Our Comrades", L"Vers nos compagnons" },
+						{ L"400", L"Sophisticated Fight -Quick Battle-", L"Sophisticated Fight -Quick Battle-", L"Sophisticated Fight -Combat rapide-" },
+						{ L"401", L"Sophisticated Fight -Command Battle-", L"Sophisticated Fight -Command Battle-", L"Sophisticated Fight -Combat commandé-" },
+						{ L"402", L"To be Suggestive", L"To be Suggestive", L"To be Suggestive" },
+						{ L"403", L"銀の意志", L"Silver Will", L"Volonté d'argent" },
+						{ L"404", L"Challenger Invited", L"Challenger Invited", L"Challenger Invited" },
+						{ L"405", L"Ancient Makes", L"Ancient Makes", L"Ancient Makes" },
+						{ L"406", L"至宝を守護せしモノ", L"Guardian of the Treasure", L"Gardien du trésor" },
+						{ L"407", L"撃破！！", L"Crush!!", L"Écrasement!!" },
+						{ L"408", L"消え行く星", L"Disappearing Star", L"Étoile défaillante" },
+						{ L"410", L"ピンチ！！", L"Pinch!!", L"Pinch!!" },
+						{ L"420", L"Strepitoso Fight", L"Strepitoso Fight", L"Strepitoso Fight" },
+						{ L"421", L"The Fate Of The Fairies", L"The Fate Of The Fairies", L"The Fate Of The Fairies" },
+						{ L"422", L"Obstructive Existence", L"Obstructive Existence", L"Obstructive Existence" },
+						{ L"423", L"Fight with Assailant", L"Fight with Assailant", L"Fight with Assailant" },
+						{ L"424", L"大いなる畏怖", L"Great Dread", L"Grande terreur" },
+						{ L"425", L"Fateful confrontation", L"Fateful confrontation", L"Fateful confrontation" },
+						{ L"426", L"Outskirts of Evolution", L"Outskirts of Evolution", L"Outskirts of Evolution" },
+						{ L"427", L"The Merciless Savior", L"The Merciless Savior", L"The Merciless Savior" },
+						{ L"428", L"雷の穿つ墓標", L"Grave Marker Pierced by Lightning", L"Stèle transpercée par la foudre" },
+						{ L"429", L"Feeling Danger Nearby", L"Feeling Danger Nearby", L"Feeling Danger Nearby" },
+						{ L"500", L"星の在り処 Harmonica short Ver.", L"Where the Stars Are Harmonica short Ver.", L"Où sont les étoiles Harmonica short Ver." },
+						{ L"501", L"琥珀の愛 Hum Ver.", L"Amber Love Hum Ver.", L"Amour d'ambre Hum Ver." },
+						{ L"502", L"琥珀の愛 Piano Ver.", L"Amber Love Piano Ver.", L"Amour d'ambre Piano Ver." },
+						{ L"503", L"琥珀の愛 Lute Ver.", L"Amber Love Lute Ver.", L"Amour d'ambre Lute Ver." },
+						{ L"504", L"星の在り処 Harmonica long Ver.", L"Where the Stars Are Harmonica long Ver.", L"Où sont les étoiles Harmonica long Ver." },
+						{ L"505", L"賑やかに行こう", L"Let's Go Lively", L"Allons gaiement" },
+						{ L"510", L"去り行く決意", L"Determination to Leave", L"Décision de partir" },
+						{ L"511", L"暗躍する者たち", L"Those Who Move in the Shadows", L"Ceux qui agissent dans l'ombre" },
+						{ L"512", L"奴を逃がすな！", L"Don't Let Him Escape!", L"Ne le laissez pas s'échapper!" },
+						{ L"513", L"胸の中に", L"In My Heart", L"Dans mon cœur" },
+						{ L"514", L"月明りの下で", L"Under the Moonlight", L"Sous le clair de lune" },
+						{ L"516", L"忍び寄る危機", L"Creeping Crisis", L"Crise rampante" },
+						{ L"517", L"俺達カプア一家！", L"We're the Capua Family!", L"Nous sommes la famille Capua!" },
+						{ L"518", L"旅立ちの小径", L"Path of Departure", L"Sentier du départ" },
+						{ L"519", L"奪還", L"Recapture", L"Reprise" },
+						{ L"520", L"呪縛からの解放、そして・・・", L"Liberation from the Curse, and...", L"Libération de la malédiction, et..." },
+						{ L"521", L"告白", L"Confession", L"Aveu" },
+						{ L"522", L"黒のオーブメント", L"Black Ouroboros", L"Orbement noir" },
+						{ L"523", L"リベールの誇り", L"Pride of Liberl", L"Fierté de Liberl" },
+						{ L"530", L"(劇)姫の悩み", L"(Drama) Princess's Worry", L"(Drame) Souci de la princesse" },
+						{ L"531", L"(劇)騎士達の嘆き", L"(Drama) Knights' Lament", L"(Drame) Lamentation des chevaliers" },
+						{ L"532", L"(劇)それぞれの思惑", L"(Drama) Each One's Scheme", L"(Drame) Intentions de chacun" },
+						{ L"533", L"(劇)城", L"(Drama) Castle", L"(Drame) Château" },
+						{ L"534", L"(劇)コロシアム", L"(Drama) Colosseum", L"(Drame) Colisée" },
+						{ L"535", L"(劇)決闘", L"(Drama) Duel", L"(Drame) Duel" },
+						{ L"536", L"(劇)姫の死", L"(Drama) Princess's Death", L"(Drame) Mort de la princesse" },
+						{ L"537", L"(劇)大団円", L"(Drama) Grand Finale", L"(Drame) Grand final" },
+						{ L"540", L"陰謀", L"Conspiracy", L"Complot" },
+						{ L"541", L"執行者", L"Enforcer", L"Exécuteur" },
+						{ L"542", L"福音計画", L"Gospel Plan", L"Plan Évangile" },
+						{ L"543", L"迫りくる脅威", L"Approaching Threat", L"Menace approchant" },
+						{ L"544", L"ハーメル", L"Hamel", L"Hamel" },
+						{ L"546", L"うちひしがれて", L"Crushed", L"Écrasé" },
+						{ L"547", L"荒野に潜む影", L"Shadow Lurking in the Wasteland", L"Ombre dans le désert" },
+						{ L"548", L"夢の続き", L"Continuation of the Dream", L"Suite du rêve" },
+						{ L"549", L"絆の在り処", L"Where Bonds Are", L"Où sont les liens" },
+						{ L"550", L"銀の意志 Super Arrange Ver", L"Silver Will Super Arrange Ver", L"Silver Will Super Arrange Ver" },
+						{ L"551", L"星の在り処 Instrumental ver", L"Where the Stars Are Instrumental ver", L"Where the Stars Are Instrumental ver" },
+						{ L"552", L"Etude of the Ruin", L"Etude of the Ruin", L"Etude of the Ruin" },
+						{ L"554", L"惨劇の真相", L"Truth of the Tragedy", L"Vérité de la tragédie" },
+						{ L"556", L"夢幻", L"Phantasm", L"Phantasm" },
+						{ L"560", L"豪華客船ルシタニア", L"Luxury Airship Lusitania", L"Paquebot de luxe Lusitania" },
+						{ NULL, NULL, NULL, NULL }
+					};
 					// TOC 先頭の 32byte レコードはループ表ではなく索引。誤解釈した
 					// loop1/2 を入れると初回再生で変な数字になり、再演奏(smpl再読込)で直る。
 					// ループは再生時に WAV smpl から取るので、ここでは 0 のままにする。
@@ -8070,13 +8266,22 @@ void CPlayList::Fol(CString fname)
 					CFile f;
 					if (f.Open(fname, CFile::modeRead | CFile::shareDenyWrite)) {
 						//空の軌跡 The 1st
-						f.SeekToBegin();
-						f.Seek(0x770, CFile::begin);
+						// 1st は 59件・名前表 0x770。2nd は FPAC 件数（名前表は 16+件数*32。demo 47 / 本番 106 等、ヘッダに従う）
+						int nent = 59;
+						ULONGLONG nameAt = 0x770;
+						if (sky2) {
+							int c = 0;
+							f.Seek(4, CFile::begin);
+							if (f.Read(&c, 4) == 4 && c > 0 && c < 512)
+								nent = c;
+							else
+								nent = 106;
+							nameAt = 16ull + (ULONGLONG)nent * 32ull;
+						}
+						f.Seek(nameAt, CFile::begin);
 						ZeroMemory(data, 21);
-						//bgmのファイル名は20文字
-						//bgmファイル名取得
 						CString a = L"";
-						for (int i = 0; i < 59; i++) {
+						for (int i = 0; i < nent; i++) {
 							f.Read(data, 20);
 							CString s = CString(data);
 							if (s.Find(L"fmt") > 0) break;
@@ -8090,6 +8295,7 @@ void CPlayList::Fol(CString fname)
 							CString aa1a = L"";
 							p.loop1 = 0;
 							p.loop2 = 0;
+							if (!sky2) {
 							for (int j = 0;; j++) {
 								CString s2 = ti1[j];
 								if (s2 == "") {
@@ -8139,28 +8345,76 @@ void CPlayList::Fol(CString fname)
 								}
 							}
 
+							}
+							else {
+								int hit = -1;
+								for (int j = 0; sky2ti[j].id; j++) {
+									if (s1.CompareNoCase(sky2ti[j].id) == 0) { hit = j; break; }
+								}
+								CString suf;
+								if (hit < 0 && s1.GetLength() == 4) {
+									CString base = s1.Left(3);
+									for (int j = 0; sky2ti[j].id; j++) {
+										if (base.CompareNoCase(sky2ti[j].id) == 0) {
+											hit = j;
+											suf = s1.Mid(3);
+											suf.MakeLower();
+											break;
+										}
+									}
+								}
+								if (hit >= 0) {
+									if (savedata.lang == 0) a = sky2ti[hit].ja;
+									else if (savedata.lang == 2) a = sky2ti[hit].fr;
+									else a = sky2ti[hit].en;
+									aa1a = s1;
+									if (suf == L"b") {
+										a += L" ";
+										a += LL14(
+											L"(ノーイントロ)", L"(No Intro)", L"(Sans intro)", L"(Senza intro)", L"(Sin intro)",
+											L"(전주 없음)", L"(无前奏)", L"(بدون مقدمة)", L"(Без вступления)", L"(Ohne Intro)",
+											L"(Sem intro)", L"(Zonder intro)", L"(Bez wstępu)", L"(Intro yok)");
+									}
+									else if (suf == L"e") {
+										a += L" ";
+										if (ft == L"bgm1.pac" || ft == L"bgm2.pac") a += L"(English)";
+										if (ft == L"bgm3.pac") a += LL14(
+											L"(日本語)", L"(Japanese)", L"(Japonais)", L"(Giapponese)", L"(Japonés)",
+											L"(일본어)", L"(日本語)", L"(اليابانية)", L"(Японский)", L"(Japanisch)",
+											L"(Japonês)", L"(Japans)", L"(Japoński)", L"(Japonca)");
+									}
+								}
+								else {
+									a += LL14(
+										L"不明", L"Unknown", L"Inconnu", L"Sconosciuto", L"Desconocido",
+										L"미상", L"不明", L"غير معروف", L"Неизвестно", L"Unbekannt",
+										L"Desconhecido", L"Onbekend", L"Nieznany", L"Bilinmiyor");
+								}
+							}
+
 							_tcscpy(p.name, a);
 							_tcscpy(p.fol, fname + L"::" + aa1a + a);
 							p.alb[0] = 0;
 							p.art[0] = 0;
 
 							if (ft == L"bgm1.pac") {
-								wcscpy(p.art, LL14(
-									L"steam版 空の軌跡 1st bgm1.pac",      /* 0: ja */
-									L"Steam Trails in the Sky 1st bgm1.pac", /* 1: en */
-									L"Steam Les Sentiers du Ciel 1st bgm1.pac", /* 2: fr */
-									L"Steam Trails in the Sky 1st bgm1.pac", /* 3: it */
-									L"Steam Trails in the Sky 1st bgm1.pac", /* 4: es */
-									L"Steam 하늘의 궤적 1st bgm1.pac",       /* 5: ko */
-									L"Steam 空之轨迹 1st bgm1.pac",         /* 6: zh */
-									L"Steam Trails in the Sky 1st bgm1.pac", /* 7: ar */
-									L"Steam Тропы в Небе 1st bgm1.pac",      /* 8: ru */
-									L"Steam Himmelsleitern 1st bgm1.pac",    /* 9: de */
-									L"Steam Trails in the Sky 1st bgm1.pac", /* 10: pt */
-									L"Steam Trails in the Sky 1st bgm1.pac", /* 11: nl */
-									L"Steam Trails in the Sky 1st bgm1.pac", /* 12: pl */
-									L"Steam Trails in the Sky 1st bgm1.pac"  /* 13: tr */
-								));
+								CString artSky; artSky.Format(LL14(
+									L"steam版 空の軌跡 %s bgm1.pac",      /* 0: ja */
+									L"Steam Trails in the Sky %s bgm1.pac", /* 1: en */
+									L"Steam Les Sentiers du Ciel %s bgm1.pac", /* 2: fr */
+									L"Steam Trails in the Sky %s bgm1.pac", /* 3: it */
+									L"Steam Trails in the Sky %s bgm1.pac", /* 4: es */
+									L"Steam 하늘의 궤적 %s bgm1.pac",       /* 5: ko */
+									L"Steam 空之轨迹 %s bgm1.pac",         /* 6: zh */
+									L"Steam Trails in the Sky %s bgm1.pac", /* 7: ar */
+									L"Steam Тропы в Небе %s bgm1.pac",      /* 8: ru */
+									L"Steam Himmelsleitern %s bgm1.pac",    /* 9: de */
+									L"Steam Trails in the Sky %s bgm1.pac", /* 10: pt */
+									L"Steam Trails in the Sky %s bgm1.pac", /* 11: nl */
+									L"Steam Trails in the Sky %s bgm1.pac", /* 12: pl */
+									L"Steam Trails in the Sky %s bgm1.pac"  /* 13: tr */
+								), sky2 ? L"2nd" : L"1st");
+								wcscpy(p.art, artSky);
 								wcscpy(p.alb, LL14(
 									L"BGM:標準",            /* 0: ja */
 									L"BGM:Standard",        /* 1: en */
@@ -8180,22 +8434,23 @@ void CPlayList::Fol(CString fname)
 							}
 
 							if (ft == L"bgm2.pac") {
-								wcscpy(p.art, LL14(
-									L"steam版 空の軌跡 1st bgm2.pac",
-									L"Steam Trails in the Sky 1st bgm2.pac",
-									L"Steam Les Sentiers du Ciel 1st bgm2.pac",
-									L"Steam Trails in the Sky 1st bgm2.pac",
-									L"Steam Trails in the Sky 1st bgm2.pac",
-									L"Steam 하늘의 궤적 1st bgm2.pac",
-									L"Steam 空之轨迹 1st bgm2.pac",
-									L"Steam Trails in the Sky 1st bgm2.pac",
-									L"Steam Тропы в Небе 1st bgm2.pac",
-									L"Steam Himmelsleitern 1st bgm2.pac",
-									L"Steam Trails in the Sky 1st bgm2.pac",
-									L"Steam Trails in the Sky 1st bgm2.pac",
-									L"Steam Trails in the Sky 1st bgm2.pac",
-									L"Steam Trails in the Sky 1st bgm2.pac"
-								));
+								CString artSky; artSky.Format(LL14(
+									L"steam版 空の軌跡 %s bgm2.pac",
+									L"Steam Trails in the Sky %s bgm2.pac",
+									L"Steam Les Sentiers du Ciel %s bgm2.pac",
+									L"Steam Trails in the Sky %s bgm2.pac",
+									L"Steam Trails in the Sky %s bgm2.pac",
+									L"Steam 하늘의 궤적 %s bgm2.pac",
+									L"Steam 空之轨迹 %s bgm2.pac",
+									L"Steam Trails in the Sky %s bgm2.pac",
+									L"Steam Тропы в Небе %s bgm2.pac",
+									L"Steam Himmelsleitern %s bgm2.pac",
+									L"Steam Trails in the Sky %s bgm2.pac",
+									L"Steam Trails in the Sky %s bgm2.pac",
+									L"Steam Trails in the Sky %s bgm2.pac",
+									L"Steam Trails in the Sky %s bgm2.pac"
+								), sky2 ? L"2nd" : L"1st");
+								wcscpy(p.art, artSky);
 								wcscpy(p.alb, LL14(
 									L"BGM:アレンジ",          /* 0: ja */
 									L"BGM:Arrange",         /* 1: en */
@@ -8215,22 +8470,23 @@ void CPlayList::Fol(CString fname)
 							}
 
 							if (ft == L"bgm3.pac") {
-								wcscpy(p.art, LL14(
-									L"steam版 空の軌跡 1st bgm3.pac",
-									L"Steam Trails in the Sky 1st bgm3.pac",
-									L"Steam Les Sentiers du Ciel 1st bgm3.pac",
-									L"Steam Trails in the Sky 1st bgm3.pac",
-									L"Steam Trails in the Sky 1st bgm3.pac",
-									L"Steam 하늘의 궤적 1st bgm3.pac",
-									L"Steam 空之轨迹 1st bgm3.pac",
-									L"Steam Trails in the Sky 1st bgm3.pac",
-									L"Steam Тропы в Небе 1st bgm3.pac",
-									L"Steam Himmelsleitern 1st bgm3.pac",
-									L"Steam Trails in the Sky 1st bgm3.pac",
-									L"Steam Trails in the Sky 1st bgm3.pac",
-									L"Steam Trails in the Sky 1st bgm3.pac",
-									L"Steam Trails in the Sky 1st bgm3.pac"
-								));
+								CString artSky; artSky.Format(LL14(
+									L"steam版 空の軌跡 %s bgm3.pac",
+									L"Steam Trails in the Sky %s bgm3.pac",
+									L"Steam Les Sentiers du Ciel %s bgm3.pac",
+									L"Steam Trails in the Sky %s bgm3.pac",
+									L"Steam Trails in the Sky %s bgm3.pac",
+									L"Steam 하늘의 궤적 %s bgm3.pac",
+									L"Steam 空之轨迹 %s bgm3.pac",
+									L"Steam Trails in the Sky %s bgm3.pac",
+									L"Steam Тропы в Небе %s bgm3.pac",
+									L"Steam Himmelsleitern %s bgm3.pac",
+									L"Steam Trails in the Sky %s bgm3.pac",
+									L"Steam Trails in the Sky %s bgm3.pac",
+									L"Steam Trails in the Sky %s bgm3.pac",
+									L"Steam Trails in the Sky %s bgm3.pac"
+								), sky2 ? L"2nd" : L"1st");
+								wcscpy(p.art, artSky);
 								wcscpy(p.alb, LL14(
 									L"BGM:オリジナル",        /* 0: ja */
 									L"BGM:Original",        /* 1: en */
@@ -8248,7 +8504,7 @@ void CPlayList::Fol(CString fname)
 									L"BGM:Orijinal"         /* 13: tr */
 								));
 							}
-							if (syo == 0) { syo = 1; syos = p.fol; modesub = p.sub;	fnn = p.name; syomode = 30; }
+							if (syo == 0) { syo = 1; syos = p.fol; modesub = p.sub;	fnn = p.name; syomode = p.sub; }
 							Add(p.name, p.sub, p.loop1, p.loop2, p.art, p.alb, p.fol, 0, 0);
 						}
 
@@ -11768,7 +12024,7 @@ static void PlApplyMidiGameLabel(playlistdata0& item)
 	const int dot = ss.ReverseFind(_T('.'));
 	if (dot >= 0) ss = ss.Mid(dot + 1);
 	CString game;
-	if (item.sub == MODE_VST_MIDI)
+	if (item.sub == MODE_VST_MIDI || item.sub == MODE_MIDI_PACK)
 		game.Format(LL14(L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)"), ss);
 	else if (item.sub == -3)
 		game.Format(LL14(L"%s(KPI)", L"%s(KPI)", L"%s(KPI)", L"%s(KPI)", L"%s(KPI)", L"%s(KPI)", L"%s(KPI)", L"%s(KPI)", L"%s(KPI)", L"%s(KPI)", L"%s(KPI)", L"%s(KPI)", L"%s(KPI)", L"%s(KPI)"), ss);
@@ -11782,6 +12038,16 @@ static void PlApplyMidiGameLabel(playlistdata0& item)
 // 再生中のエンジンは切らない。動画ファイルの -2 は触らない。
 void CPlayList::FixMidiMode(playlistdata0& item)
 {
+	/* 旧 -31 を付け替え。空の軌跡 pac::曲ID は MIDI パックではない（:: だけで -31 にすると再生が MIDI になる）。 */
+	item.sub = RemapLegacyPlaySub(item.sub, item.fol);
+	if (PlIsFalcomGameBgmMode(item.sub))
+		return;
+	/* lzh/zip 内シーケンスは KPI に落とさない（一次解凍＋VST） */
+	if (item.sub == MODE_MIDI_PACK || MidiPackIsVirtualPath(item.fol)) {
+		item.sub = MODE_MIDI_PACK;
+		PlApplyMidiGameLabel(item);
+		return;
+	}
 	if (VstIsMidiExt(item.fol) || VstIsProjectExt(item.fol)) {
 		const int preferVst = (savedata.midPlayPrefer == 1) ? 1 : 0;
 		// VST優先で既に -30、KPI優先で既に -3 → そのまま（表示だけ揃える）。
@@ -11809,7 +12075,7 @@ void CPlayList::FixMidiMode(playlistdata0& item)
 	TCHAR kpiBuf[512]; kpiBuf[0] = 0;
 	BYTE kv = 0;
 	plugs(item.fol, &p, kpiBuf, kv);
-	if (p.sub == MODE_VST_MIDI || (p.sub == -3 && (VstIsMidiExt(item.fol) || VstIsProjectExt(item.fol)))) {
+	if (p.sub == MODE_VST_MIDI || p.sub == MODE_MIDI_PACK || (p.sub == -3 && (VstIsMidiExt(item.fol) || VstIsProjectExt(item.fol)))) {
 		item.sub = p.sub;
 		PlApplyMidiGameLabel(item);
 		return;
@@ -11825,6 +12091,8 @@ void CPlayList::FixMidiMode(playlistdata0& item)
 		game.Format(LL14(L"%sファイル(XMPlay)", L"%s File(XMPlay)", L"%s fichier(XMPlay)", L"%s file(XMPlay)", L"%s archivo(XMPlay)", L"%s 파일(XMPlay)", L"%s文件(XMPlay)", L"ملف %s(XMPlay)", L"файл %s(XMPlay)", L"%s-Datei(XMPlay)", L"arquivo %s(XMPlay)", L"%s bestand(XMPlay)", L"plik %s(XMPlay)", L"%s dosyası(XMPlay)"), ss);
 	else if (p.sub == MODE_PLUGIN_AIMP)
 		game.Format(LL14(L"%sファイル(AIMP)", L"%s File(AIMP)", L"%s fichier(AIMP)", L"%s file(AIMP)", L"%s archivo(AIMP)", L"%s 파일(AIMP)", L"%s文件(AIMP)", L"ملف %s(AIMP)", L"файл %s(AIMP)", L"%s-Datei(AIMP)", L"arquivo %s(AIMP)", L"%s bestand(AIMP)", L"plik %s(AIMP)", L"%s dosyası(AIMP)"), ss);
+	else if (p.sub == MODE_ZMUSIC)
+		game.Format(LL14(L"%sファイル(ZMUSIC)", L"%s File(ZMUSIC)", L"%s fichier(ZMUSIC)", L"%s file(ZMUSIC)", L"%s archivo(ZMUSIC)", L"%s 파일(ZMUSIC)", L"%s文件(ZMUSIC)", L"ملف %s(ZMUSIC)", L"файл %s(ZMUSIC)", L"%s-Datei(ZMUSIC)", L"arquivo %s(ZMUSIC)", L"%s bestand(ZMUSIC)", L"plik %s(ZMUSIC)", L"%s dosyası(ZMUSIC)"), ss);
 	else
 		game.Format(LL14(L"%sファイル", L"%s File", L"%s fichier", L"%s file", L"%s archivo", L"%s 파일", L"%s文件", L"ملف %s", L"файл %s", L"%s-Datei", L"arquivo %s", L"%s bestand", L"plik %s", L"%s dosyası"), ss);
 	_tcsncpy_s(item.game, game, _TRUNCATE);
@@ -12049,10 +12317,9 @@ static bool PlAddMidiPackEntries(CPlayList* pl, const CString& arcPath, int& syo
 		TCHAR kpiBuf[512]; kpiBuf[0] = 0;
 		BYTE kv = 0;
 		pl->plugs(virt, &row, kpiBuf, kv);
-		if (row.sub == 0 || row.sub == -2) {
-			if (VstIsMidiExt(virt) || MidiPackIsSeqExt(virt))
-				row.sub = MODE_VST_MIDI;
-		}
+		row.sub = MODE_MIDI_PACK;
+		if (row.name[0] == 0)
+			_tcscpy(row.name, seqs[i].name[0] ? seqs[i].name : seqs[i].inner);
 		if (syo == 0) {
 			syo = 1;
 			syos = row.fol;
@@ -12200,9 +12467,14 @@ void CPlayList::plugs(CString fff, playlistdata *p,TCHAR* kpi, BYTE& kv)
 
 	if (p && MidiPackIsVirtualPath(fff) && (VstIsMidiExt(fff) || MidiPackIsSeqExt(fff))) {
 		_tcscpy(p->fol, fff);
-		p->sub = MODE_VST_MIDI;
-		CString ft = fff.Right(fff.GetLength() - fff.ReverseFind(L'>') - 1);
-		const int sl = ft.ReverseFind(L'\\');
+		p->sub = MODE_MIDI_PACK;
+		CString ft = fff;
+		int sep = ft.Find(L"::");
+		if (sep < 0)
+			sep = ft.ReverseFind(L'>');
+		if (sep >= 0)
+			ft = ft.Mid(sep + ((ft[sep] == L':') ? 2 : 1));
+		const int sl = max(ft.ReverseFind(L'\\'), ft.ReverseFind(L'/'));
 		if (sl >= 0) ft = ft.Mid(sl + 1);
 		_tcscpy(p->name, ft);
 		p->alb[0] = 0; p->art[0] = 0; p->loop1 = p->loop2 = p->ret2 = 0;
@@ -12358,6 +12630,20 @@ void CPlayList::plugs(CString fff, playlistdata *p,TCHAR* kpi, BYTE& kv)
 		p->alb[0]=NULL;p->art[0]=NULL;p->loop1=p->loop2=p->ret2=0;
 		_tcscpy(kpi,ss);
 		return;
+	}
+	{
+		CString zx = fff;
+		zx.MakeLower();
+		if (zx.Right(4) == L".zms" || zx.Right(4) == L".zmd") {
+			_tcscpy(p->fol, fff);
+			p->sub = MODE_ZMUSIC;
+			ft = fff.Right(fff.GetLength() - fff.ReverseFind(L'\\') - 1);
+			_tcscpy(p->name, ft);
+			p->alb[0] = 0; p->art[0] = 0; p->loop1 = p->loop2 = p->ret2 = 0;
+			if (kpi) kpi[0] = 0;
+			kv = 0;
+			return;
+		}
 	}
 	plugswinamp(fff, p, kpi, kv);
 	if (p->sub == MODE_PLUGIN_WINAMP) return;

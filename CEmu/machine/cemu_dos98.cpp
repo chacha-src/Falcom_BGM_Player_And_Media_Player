@@ -1,4 +1,4 @@
-#include "StdAfx.h"
+﻿#include "StdAfx.h"
 #include "cemu_dos98.h"
 #include "../vendor/np2/np2ffi.h"
 #include <stdlib.h>

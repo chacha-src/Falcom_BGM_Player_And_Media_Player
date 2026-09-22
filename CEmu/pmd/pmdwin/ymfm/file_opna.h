@@ -1,4 +1,4 @@
-#ifndef FILE_OPNA_H
+﻿#ifndef FILE_OPNA_H
 #define FILE_OPNA_H
 
 #include "portability_opna.h"

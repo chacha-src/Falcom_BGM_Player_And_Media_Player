@@ -1,4 +1,4 @@
-#ifndef NULLSOFT_OUTH
+﻿#ifndef NULLSOFT_OUTH
 #define NULLSOFT_OUTH
 // Output plugin interface
 

@@ -1,4 +1,4 @@
-#include "stdafx.h"
+﻿#include "stdafx.h"
 #include "gpu/GpuDx11.h"
 #include "resource.h"
 #include <d3d11.h>

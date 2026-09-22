@@ -1,4 +1,4 @@
-// OfflineHelp.cpp - CHM オフラインヘルプの配置確保と表示
+﻿// OfflineHelp.cpp - CHM オフラインヘルプの配置確保と表示
 #include "stdafx.h"
 #include "OfflineHelp.h"
 #include "UpdateCheck.h"

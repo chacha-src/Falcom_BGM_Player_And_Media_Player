@@ -42,8 +42,8 @@
 <p>Playback time follows tempo changes. A little ring-out may remain after the last note.</p>
 <h2>Watch while it plays</h2>
 <p>Open the <a href="midi-monitor.htm">MIDI monitor</a> to see all 32 parts live. Side by side with the <a href="pianoroll.htm">piano roll</a>, you get both notes and channel state.</p>
-<h2>64-bit modules</h2>
-<p>The player is 32-bit, so 64-bit VSTs go through KpiHost64.exe. If you see “Could not open the x64 VST host. Check KpiHost64.exe.”, make sure KpiHost64.exe is in the same location as the executable. Same idea as <a href="kpi.htm">Adding formats with KPI plug-ins</a>.</p>
+<h2>The player is x64; the other bitness is ogghost32</h2>
+<p>The player is x64. It used to be x86, and 64-bit VSTs were handed to another process. That is reversed: a 64-bit VST such as SC-VA x64 loads in the player, and only 32-bit VSTs start <code>ogghost32.exe</code>. That exe took over the old KpiHost64.exe job on the x86 side. Keep it next to the executable. If the host will not open, check that it is there. Same idea as <a href="kpi.htm">Adding formats with KPI plug-ins</a>.</p>
 <h2>Vs the VST host</h2>
 <table class="grid">
 <tr><th></th><th>This page (.mid playback)</th><th>VST host</th></tr>
@@ -55,9 +55,9 @@
 <p>If a project has no .mid beside it, you may be asked to export a .mid into that folder first.</p>
 </div>
 <div class="note"><span class="label">Please note</span>
-<p>“Could not open VST MIDI.” usually means a bad DLL path, a 32/64-bit mismatch, or a missing KpiHost64.exe.</p>
+<p>“Could not open VST MIDI.” usually means a bad DLL path, a 32/64-bit mismatch, or a missing ogghost32.exe.</p>
 </div>
-<div class="related"><span class="label">See also</span><ul><li><a href="render.htm">Rendering settings</a></li><li><a href="midi-monitor.htm">MIDI monitor</a></li><li><a href="vst.htm">Playing instruments with the VST host</a></li><li><a href="kpi.htm">Adding formats with KPI plug-ins</a></li><li><a href="playlist.htm">Working with playlists</a></li><li><a href="crossfade.htm">Continuous-play crossfade</a></li></ul></div>
+<div class="related"><span class="label">See also</span><ul><li><a href="render.htm">Rendering settings</a></li><li><a href="midi-monitor.htm">FM/MIDI monitor</a></li><li><a href="vst.htm">Playing instruments with the VST host</a></li><li><a href="kpi.htm">Adding formats with KPI plug-ins</a></li><li><a href="playlist.htm">Working with playlists</a></li><li><a href="crossfade.htm">Continuous-play crossfade</a></li></ul></div>
 
 <div class="botnav">
 <span class="prev">&#171; Back: <a href="vst.htm">Playing instruments with the VST host</a></span>

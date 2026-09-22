@@ -1,4 +1,4 @@
-#include "afxdialogex.h"
+﻿#include "afxdialogex.h"
 #include "afxwin.h"
 #include "afxcmn.h"
 #if !defined(AFX_RENDER_H__F5FB1AA1_8545_4B26_80A3_4E0FA43C0548__INCLUDED_)

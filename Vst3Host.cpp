@@ -1,4 +1,4 @@
-// ogg.exe と KpiHost64.exe（Vst3Host_k64.cpp 経由）が同じソース。
+﻿// ogg.exe と KpiHost64.exe（Vst3Host_k64.cpp 経由）が同じソース。
 // KpiHost64 配下にコピーを置くと x64 プラグインの修正が片方にしか入らない。
 #include "stdafx.h"
 #include "Vst3Host.h"

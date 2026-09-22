@@ -1,4 +1,4 @@
-// 本体と KpiHost64 が同じソースを使う。KpiHost64.exe は VstMidiEngine_k64.cpp 経由。
+﻿// 本体と KpiHost64 が同じソースを使う。KpiHost64.exe は VstMidiEngine_k64.cpp 経由。
 // 以前はホスト側にコピーがあり、VST2 修正が ogg.exe にしか入らなかった。
 // KPIHOST64_BUILD 時は stdafx.h が MFC 無しヘッダへ切り替わる。
 #include "stdafx.h"
@@ -196,6 +196,149 @@ extern "C" int VstMidiGuessGsMapKind(const wchar_t* title, const wchar_t* path)
 	}
 	if (!kind)
 		kind = MmKindFromText(base);
+	return kind;
+}
+
+static int MmReadDocWide(const wchar_t* path, wchar_t* out, int outChars)
+{
+	if (!path || !out || outChars < 8) return 0;
+	out[0] = 0;
+	HANDLE f = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ, NULL,
+		OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, NULL);
+	if (f == INVALID_HANDLE_VALUE) return 0;
+	DWORD sz = GetFileSize(f, NULL), got = 0;
+	if (sz == INVALID_FILE_SIZE || sz < 8 || sz > 256 * 1024) {
+		CloseHandle(f);
+		return 0;
+	}
+	std::vector<char> raw((size_t)sz + 1);
+	if (!ReadFile(f, raw.data(), sz, &got, NULL)) {
+		CloseHandle(f);
+		return 0;
+	}
+	CloseHandle(f);
+	raw[got] = 0;
+	if (MultiByteToWideChar(932, 0, raw.data(), -1, out, outChars) <= 0)
+		MultiByteToWideChar(CP_ACP, 0, raw.data(), -1, out, outChars);
+	out[outChars - 1] = 0;
+	return out[0] ? 1 : 0;
+}
+
+static int MmKindFromDocText(const wchar_t* w, const wchar_t* leaf, const wchar_t* leafStem)
+{
+	if (!w || !w[0]) return 0;
+	if (leaf && leaf[0] && wcschr(w, L'[')) {
+		wchar_t tag[280];
+		const wchar_t* sec = NULL;
+		_snwprintf_s(tag, _TRUNCATE, L"[%s]", leaf);
+		sec = wcsstr(w, tag);
+		if (!sec && leafStem && leafStem[0]) {
+			_snwprintf_s(tag, _TRUNCATE, L"[%s]", leafStem);
+			sec = wcsstr(w, tag);
+		}
+		if (sec) {
+			wchar_t chunk[1200];
+			const wchar_t* end = wcschr(sec + 1, L'[');
+			size_t n = end ? (size_t)(end - sec) : wcslen(sec);
+			if (n > 1199) n = 1199;
+			wcsncpy_s(chunk, sec, n);
+			chunk[n] = 0;
+			int sk = MmKindFromDocText(chunk, NULL, NULL);
+			if (sk) return sk;
+		}
+	}
+	/* 明示 MAP を先に（「SC-88の人は55MAPで」は 55 が本命） */
+	if (wcsstr(w, L"55MAP") || wcsstr(w, L"55map") || wcsstr(w, L"55Map"))
+		return 1;
+	if (wcsstr(w, L"88PROMAP") || wcsstr(w, L"88Promap") || wcsstr(w, L"88ProMAP"))
+		return 3;
+	if (wcsstr(w, L"8820MAP") || wcsstr(w, L"8820map"))
+		return 4;
+	if (wcsstr(w, L"88MAP") || wcsstr(w, L"88map"))
+		return 2;
+	int lineKind = 0;
+	const wchar_t* p = w;
+	while (*p) {
+		const wchar_t* nl = wcschr(p, L'\n');
+		wchar_t line[512];
+		size_t n = nl ? (size_t)(nl - p) : wcslen(p);
+		if (n >= 511) n = 511;
+		wcsncpy_s(line, p, n);
+		line[n] = 0;
+		if (wcsstr(line, L"音源") || wcsstr(line, L"対応") || wcsstr(line, L"使用ハード")
+			|| wcsstr(line, L"対応ハード") || wcsstr(line, L"MAP") || wcsstr(line, L"map")
+			|| wcsstr(line, L"ModuleName")) {
+			int k = MmKindFromText(line);
+			if (k) lineKind = VstMidiFoldGsMapHint(lineKind, k);
+		}
+		p = nl ? nl + 1 : p + n;
+		if (!nl) break;
+	}
+	if (lineKind) return lineKind;
+	return MmKindFromText(w);
+}
+
+extern "C" int VstMidiGuessGsMapFromSidecar(const wchar_t* midPath)
+{
+	if (!midPath || !midPath[0]) return 0;
+	wchar_t stem[VST_PATH_CHARS];
+	wcsncpy_s(stem, midPath, _TRUNCATE);
+	wchar_t* colon = wcsstr(stem, L"::");
+	if (colon) *colon = 0;
+	wchar_t* gt = wcschr(stem, L'>');
+	if (gt) *gt = 0;
+	wchar_t* dot = wcsrchr(stem, L'.');
+	wchar_t* sl = wcsrchr(stem, L'\\');
+	if (dot && (!sl || dot > sl)) *dot = 0;
+	const wchar_t* leaf = midPath;
+	for (const wchar_t* s = midPath; *s; ++s) {
+		if (*s == L'\\' || *s == L'/' || *s == L'>' || (s[0] == L':' && s > midPath && s[-1] == L':'))
+			leaf = s + 1;
+	}
+	wchar_t leafStem[260];
+	wcsncpy_s(leafStem, leaf, _TRUNCATE);
+	wchar_t* ld = wcsrchr(leafStem, L'.');
+	if (ld) *ld = 0;
+	static const wchar_t* kExt[] = {
+		L".doc", L".txt", L".hed", L".tdf",
+		L".DOC", L".TXT", L".HED", L".TDF"
+	};
+	wchar_t text[8192];
+	int kind = 0;
+	for (int i = 0; i < 8; i++) {
+		wchar_t p[VST_PATH_CHARS];
+		_snwprintf_s(p, _TRUNCATE, L"%s%s", stem, kExt[i]);
+		if (!MmReadDocWide(p, text, 8192)) continue;
+		int k = MmKindFromDocText(text, leaf, leafStem);
+		if (k) kind = VstMidiFoldGsMapHint(kind, k);
+	}
+	if (kind) return kind;
+	/* 同フォルダの他 DOC にファイル名が載っている場合（ED01V1.DOC → ED0101.MID） */
+	wchar_t dir[VST_PATH_CHARS];
+	wcsncpy_s(dir, stem, _TRUNCATE);
+	wchar_t* dslash = wcsrchr(dir, L'\\');
+	if (!dslash) return 0;
+	dslash[1] = 0;
+	wchar_t pat[VST_PATH_CHARS];
+	_snwprintf_s(pat, _TRUNCATE, L"%s*.*", dir);
+	WIN32_FIND_DATAW fd;
+	HANDLE h = FindFirstFileW(pat, &fd);
+	if (h == INVALID_HANDLE_VALUE) return 0;
+	do {
+		if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
+		const wchar_t* ext = wcsrchr(fd.cFileName, L'.');
+		if (!ext) continue;
+		if (_wcsicmp(ext, L".doc") != 0 && _wcsicmp(ext, L".txt") != 0
+			&& _wcsicmp(ext, L".hed") != 0 && _wcsicmp(ext, L".tdf") != 0) continue;
+		wchar_t p[VST_PATH_CHARS];
+		_snwprintf_s(p, _TRUNCATE, L"%s%s", dir, fd.cFileName);
+		if (!MmReadDocWide(p, text, 8192)) continue;
+		if (leafStem[0] && !wcsstr(text, leafStem) && !wcsstr(text, leaf))
+			continue;
+		int k = MmKindFromDocText(text, leaf, leafStem);
+		if (k) kind = VstMidiFoldGsMapHint(kind, k);
+	} while (FindNextFileW(h, &fd));
+	FindClose(h);
 	return kind;
 }
 
@@ -1976,6 +2119,16 @@ static int SmfBytesPeekListMarks(const BYTE* data, DWORD size, const wchar_t* pa
 		mapHint = VstMidiGuessGsMapKind(titleBuf, path);
 	else
 		mapHint = VstMidiFoldGsMapHint(mapHint, VstMidiGuessGsMapKind(NULL, path));
+	{
+		/* DOC/TXT の音源指定。SMF タイトルが無いときはタイトル推測より優先 */
+		const int side = VstMidiGuessGsMapFromSidecar(path);
+		if (side) {
+			if (!titleBuf[0] || !VstMidiGuessGsMapKind(titleBuf, NULL))
+				mapHint = side;
+			else
+				mapHint = VstMidiFoldGsMapHint(mapHint, side);
+		}
+	}
 	if (mapHint == 7) hasXg = 1;
 	int resolved = 0;
 	if (hasXg) resolved = 0;
@@ -2302,6 +2455,16 @@ static int LoadSmf(const wchar_t* path)
 		mapHint = VstMidiGuessGsMapKind(metaTitle, path);
 	else
 		mapHint = VstMidiFoldGsMapHint(mapHint, VstMidiGuessGsMapKind(NULL, path));
+	{
+		/* DOC/TXT の音源指定。SMF タイトルが無いときはタイトル推測より優先 */
+		const int side = VstMidiGuessGsMapFromSidecar(path);
+		if (side) {
+			if (!metaTitle[0] || !VstMidiGuessGsMapKind(metaTitle, NULL))
+				mapHint = side;
+			else
+				mapHint = VstMidiFoldGsMapHint(mapHint, side);
+		}
+	}
 	if (mapHint == 7) hasXg = 1;
 	{
 		BYTE msb[32];
@@ -5655,11 +5818,12 @@ extern "C" int VstResolvePlayPath(const wchar_t* inPath, wchar_t* outMid,
 		return FindSidecar(inPath, outMid, outMidChars);
 	}
 #ifndef KPIHOST64_BUILD
-	{
-		wchar_t pack[VST_PATH_CHARS];
-		if (MidiPackMaterialize(inPath, pack, VST_PATH_CHARS))
-			inPath = pack;
-	}
+	wchar_t pack[MIDIPACK_PATH];
+	pack[0] = 0;
+	if (MidiPackMaterialize(inPath, pack, MIDIPACK_PATH))
+		inPath = pack;
+	else if (MidiPackIsVirtualPath(inPath))
+		return 0;
 #endif
 	if (EqExt(inPath, L".mid") || EqExt(inPath, L".midi") || EqExt(inPath, L".kar") || EqExt(inPath, L".rmi")) {
 		SafeCopy(outMid, outMidChars, inPath);

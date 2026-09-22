@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 // 一時診断ログ（問題特定用）。%TEMP%\ogg_xf_seek.log に追記。
 #include <windows.h>
 #include <stdio.h>

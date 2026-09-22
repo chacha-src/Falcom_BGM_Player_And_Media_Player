@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 // 迷路／レースのシミュ＋DX11 を UI/音スレッドから切り離す。
 // immediate context は CS で直列化（生成・リサイズ・破棄と Tick の競合防止）。

@@ -1,4 +1,4 @@
-#ifndef SIGNALSMITH_LINEAR_PLATFORM_FFT_PFFFT_H
+﻿#ifndef SIGNALSMITH_LINEAR_PLATFORM_FFT_PFFFT_H
 #define SIGNALSMITH_LINEAR_PLATFORM_FFT_PFFFT_H
 
 #if defined(__has_include) && !__has_include("pffft/pffft.h")

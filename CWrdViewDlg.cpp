@@ -5,6 +5,7 @@
 #include "resource.h"
 #include "ComposerConvert.h"
 #include "VstMidiEngine.h"
+#include "PluginKinds.h"
 #include "CCustomControl.h"
 #include "CCustomPopupMenu.h"
 
@@ -33,7 +34,7 @@ int WrdWantSampleRate()
 	/* playb / heard はソース PCM。VST の内部レートと混ぜない */
 	if (wavbit_sample_Hz >= 8000)
 		return wavbit_sample_Hz;
-	if (mode == MODE_VST_MIDI) {
+	if (IsVstMidiPlayMode(mode)) {
 		const int r = VstMidiGetRate();
 		if (r > 0) return r;
 	}
@@ -42,26 +43,33 @@ int WrdWantSampleRate()
 	return 44100;
 }
 
-__int64 WrdPlaybackSamples(int sr)
-{
-	/* バナー 0:56.52 と同じソース位置。heard は VST で 14秒相当に落ちて
-	   @WAIT(8) の「答えはつかめるよ」で止まる */
-	__int64 ui = OggGetUiSourcePcmFrames();
-	if (ui > 0)
-		return ui;
-	const double sec = OggGetGdiPlaybackTimeSec();
-	if (sec > 0.0) {
+	/* 歌詞窓・バナーと同じ可聴位置。MIDI モニタの 700ms は DS 書込カーソル用で、
+	   壁時計に重ねて引くと WRD だけノートより遅れる */
+	__int64 WrdPlaybackSamples(int sr)
+	{
 		int useSr = (sr >= 8000) ? sr : WrdWantSampleRate();
 		if (useSr < 8000) useSr = 44100;
-		ui = (__int64)(sec * (double)useSr + 0.5);
-		if (ui > 0)
-			return ui;
+
+		__int64 ui = 0;
+		const double lrcSec = OggGetLyricsPlaySec();
+		if (lrcSec > 0.0)
+			ui = (__int64)(lrcSec * (double)useSr + 0.5);
+		if (ui <= 0)
+			ui = OggGetUiSourcePcmFrames();
+		if (ui <= 0) {
+			const double sec = OggGetGdiPlaybackTimeSec();
+			if (sec > 0.0)
+				ui = (__int64)(sec * (double)useSr + 0.5);
+		}
+		if (ui <= 0) {
+			__int64 pb = playb;
+			if (playy == 0 && pb < 0) pb = 0;
+			if (pb < 0) pb = 0;
+			ui = pb;
+		}
+		if (ui < 0) ui = 0;
+		return ui;
 	}
-	__int64 pb = playb;
-	if (playy == 0 && pb < 0) pb = 0;
-	if (pb < 0) pb = 0;
-	return pb;
-}
 
 void WrdResolveMidiPath(wchar_t* mid, int midChars)
 {
@@ -268,14 +276,52 @@ BOOL CWrdViewDlg::OnInitDialog()
 	return TRUE;
 }
 
+void CWrdViewDlg::UnloadWrd()
+{
+	if (!m_eng.loaded && !m_wrdPath[0])
+		return;
+	WrdEngineFree(&m_eng);
+	WrdEngineInit(&m_eng);
+	m_wrdPath[0] = 0;
+	m_lastTickDrawn = -1;
+	if (::IsWindow(m_hWnd))
+		Invalidate(FALSE);
+}
+
 int CWrdViewDlg::LoadWrdPath(const wchar_t* wrdPath)
 {
-	if (!wrdPath || !wrdPath[0]) return 0;
-	wcsncpy_s(m_wrdPath, wrdPath, _TRUNCATE);
-	if (!WrdEngineLoad(&m_eng, wrdPath))
+	if (!wrdPath || !wrdPath[0]) {
+		UnloadWrd();
 		return 0;
+	}
+	wcsncpy_s(m_wrdPath, wrdPath, _TRUNCATE);
+	if (!filen.IsEmpty())
+		wcsncpy_s(m_srcPath, filen, _TRUNCATE);
+	/* 拍子を先に読む。@WAIT の小節長は SMF の拍子に合わせる */
+	WrdEngineInit(&m_eng);
+	wcsncpy_s(m_eng.wrdPath, wrdPath, _TRUNCATE);
 	const int sr = WrdWantSampleRate();
 	WrdLoadSmfClock(&m_eng, sr);
+	if (!WrdEngineLoad(&m_eng, wrdPath)) {
+		m_wrdPath[0] = 0;
+		return 0;
+	}
+	{
+		wchar_t sib[520];
+		wcsncpy_s(sib, wrdPath, _TRUNCATE);
+		wchar_t* dot = wcsrchr(sib, L'.');
+		if (dot) {
+			const size_t rest = 520 - (size_t)(dot - sib);
+			static const wchar_t* rcpExt[] = { L".RCP", L".rcp", L".R36", L".r36", L".G36", L".g36" };
+			for (int i = 0; i < 6; ++i) {
+				wcscpy_s(dot, rest, rcpExt[i]);
+				if (GetFileAttributesW(sib) != INVALID_FILE_ATTRIBUTES
+					&& WrdEngineLoadRcpKaraoke(&m_eng, sib))
+					break;
+			}
+		}
+	}
+	WrdEngineSyncKaraoke(&m_eng);
 	m_eng.sr = sr;
 	m_lastTickDrawn = -1;
 	if (::IsWindow(m_hWnd))
@@ -285,29 +331,31 @@ int CWrdViewDlg::LoadWrdPath(const wchar_t* wrdPath)
 
 void CWrdViewDlg::ReloadCurrent()
 {
-	wchar_t wrd[MAX_PATH];
-	wrd[0] = 0;
-	const wchar_t* src = (LPCWSTR)filen;
-	if (src && src[0])
-		ComposerFindSidecarWrd(src, wrd, MAX_PATH);
-	if (!wrd[0] && m_wrdPath[0])
-		wcsncpy_s(wrd, m_wrdPath, _TRUNCATE);
-	if (wrd[0])
-		LoadWrdPath(wrd);
+	m_srcPath[0] = 0;
+	SyncFromPlayback();
+	if (::IsWindow(m_hWnd))
+		Invalidate(FALSE);
 }
 
 void CWrdViewDlg::SyncFromPlayback()
 {
-	if (!m_eng.loaded) {
-		ReloadCurrent();
-		if (!m_eng.loaded) return;
+	const wchar_t* src = filen.IsEmpty() ? L"" : (LPCWSTR)filen;
+	wchar_t wrd[MAX_PATH];
+	wrd[0] = 0;
+	if (src[0])
+		ComposerFindSidecarWrd(src, wrd, MAX_PATH);
+	if (src[0])
+		wcsncpy_s(m_srcPath, src, _TRUNCATE);
+	else
+		m_srcPath[0] = 0;
+	if (!wrd[0]) {
+		UnloadWrd();
+		return;
 	}
-	if (!filen.IsEmpty() && m_eng.wrdPath[0]) {
-		wchar_t wrd[MAX_PATH];
-		if (ComposerFindSidecarWrd(filen, wrd, MAX_PATH)
-			&& _wcsicmp(wrd, m_eng.wrdPath) != 0)
-			LoadWrdPath(wrd);
-	}
+	if (!m_eng.loaded || _wcsicmp(wrd, m_eng.wrdPath) != 0)
+		LoadWrdPath(wrd);
+	if (!m_eng.loaded)
+		return;
 	int sr = WrdWantSampleRate();
 	if (!m_eng.smfOk || m_eng.sr != sr)
 		WrdLoadSmfClock(&m_eng, sr);
@@ -355,8 +403,27 @@ void CWrdViewDlg::OnPaint()
 		return;
 	}
 	m_frameDC.FillSolidRect(0, capH, w, h, RGB(0, 0, 16));
-	RECT inner = { 0, 0, w, rect.Height() };
-	WrdEnginePaint(&m_eng, m_frameDC.GetSafeHdc(), &inner, capH);
+	if (m_eng.loaded) {
+		RECT inner = { 0, 0, w, rect.Height() };
+		WrdEnginePaint(&m_eng, m_frameDC.GetSafeHdc(), &inner, capH);
+	} else {
+		CRect tr(0, capH, w, rect.Height());
+		const UINT dpi = WindowDpi();
+		HFONT font = CreateFontW(Scale(22, dpi), 0, 0, 0, FW_NORMAL, 0, 0, 0,
+			SHIFTJIS_CHARSET, OUT_TT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
+			DEFAULT_PITCH | FF_SWISS, L"Meiryo UI");
+		HGDIOBJ oldF = m_frameDC.SelectObject(font);
+		m_frameDC.SetBkMode(TRANSPARENT);
+		m_frameDC.SetTextColor(RGB(140, 180, 210));
+		CString empty = LL14(
+			L"WRDはありません", L"No WRD", L"Pas de WRD", L"Nessun WRD",
+			L"No hay WRD", L"WRD 없음", L"没有 WRD", L"لا يوجد WRD",
+			L"Нет WRD", L"Kein WRD", L"Sem WRD", L"Geen WRD",
+			L"Brak WRD", L"WRD yok");
+		m_frameDC.DrawText(empty, &tr, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+		m_frameDC.SelectObject(oldF);
+		DeleteObject(font);
+	}
 #if CCUSTOM_AERO_SUPPORT
 	/* GDI FillSolidRect / StretchDIBits は α=0 のまま残る。Win11 アクリルでは
 	   DWMWA_REDIRECTIONBITMAP_ALPHA がそれを完全透過として扱う。 */

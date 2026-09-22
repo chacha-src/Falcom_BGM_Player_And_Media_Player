@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 // CEmuHelpDlg — CEmu (hoot archive) 操作ガイド
 #include "CCustomControl.h"
 #include "GdiSoft2D.h"

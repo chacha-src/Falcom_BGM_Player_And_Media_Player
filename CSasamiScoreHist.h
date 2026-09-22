@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include "SasamiComposerDoc.h"
 
 enum { SC_HIST_MAX = 10 };

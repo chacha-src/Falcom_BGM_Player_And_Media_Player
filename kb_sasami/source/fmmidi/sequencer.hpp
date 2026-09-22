@@ -1,4 +1,4 @@
-#ifndef midisequencer_hpp
+﻿#ifndef midisequencer_hpp
 #define midisequencer_hpp
 
 #include <cstdio>

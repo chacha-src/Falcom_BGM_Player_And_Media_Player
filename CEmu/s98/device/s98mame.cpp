@@ -1,4 +1,4 @@
-extern "C" {
+﻿extern "C" {
 #include "mame/driver.h"
 #include "mame/fmopl.h"
 #include "mame/ymf262.h"

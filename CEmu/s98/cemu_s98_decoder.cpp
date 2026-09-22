@@ -1,4 +1,4 @@
-#include <windows.h>
+﻿#include <windows.h>
 #include <wchar.h>
 #include "../cemu_kpi_min.h"
 #include "device/s98device.h"

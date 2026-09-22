@@ -74,7 +74,9 @@
 
 // Dummy identifier for grayscale icon
 #ifndef	BTNST_AUTO_GRAY
-#define	BTNST_AUTO_GRAY					(HICON)(0xffffffff - 1L)
+/* x64 では HICON がポインタ。32bit 値のまま int に落とすと切れるので、int に収まる印にする */
+#define	BTNST_AUTO_GRAY_ID				(-2)
+#define	BTNST_AUTO_GRAY					((HICON)(UINT_PTR)BTNST_AUTO_GRAY_ID)
 #endif
 
 class CButtonST : public CButton

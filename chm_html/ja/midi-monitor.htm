@@ -2,32 +2,49 @@
 <html>
 <head>
 <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
-<title>MIDIモニタ</title>
+<title>FM/MIDIモニタ</title>
 <link rel="stylesheet" type="text/css" href="../css/help.css">
 </head>
 <body>
 
 <div class="topnav"><a href="index.htm">目次</a> &nbsp;|&nbsp; <a href="../en/midi-monitor.htm">English</a></div>
 
-<h1>MIDIモニタ</h1>
+<h1>FM/MIDIモニタ</h1>
 
-<p class="lead">MIDIモニタは、再生中の SMF（.mid / .midi / .kar / .rmi）を 32パート（A01–A16 / B01–B16）で見守る画面です。ピアノロールのように音を推測するのではなく、MIDIファイルに書いてある通りを表示します。ピアノロールが「どの音が鳴ったか」なら、こちらは「各パートの音色・音量・効果」の一覧です。</p>
+<p class="lead">FM/MIDIモニタは、以前は別々だった MIDI のパート表と FM の鍵盤を、ひとつの窓にまとめたものです。同時に両方の曲は鳴らないので、再生している中身に合わせて中身が入れ替わります。MIDI のときは SMF（.mid / .midi / .kar / .rmi）を 32パート（A01–A16 / B01–B16）で見守ります。ピアノロールが「どの音が鳴ったか」なら、MIDI 側は「各パートの音色・音量・効果」の一覧です。</p>
 <div class="shot">
 <img src="../img/midi-monitor.png" alt="MIDIモニタ">
 <p class="cap">MIDIモニタ</p>
 </div>
 <h2>開く</h2>
 <ul>
-<li>メディアプレイヤー下段、VST と CD のあいだの常時表示「MIDI」（開いているあいだは押し込まれた表示になります）</li>
+<li>メディアプレイヤー下段、VST と CD のあいだの常時表示「FM/MIDI」（開いているあいだは押し込まれた表示になります。狭い幅のときは「F/M」）</li>
 <li>メディアプレイヤーのバナーを右クリック → 「ウィンドウ」→ 「MIDIモニタ…」</li>
 <li>プレイリストの右クリック → 「ウィンドウ」→ 「MIDIモニタを開く」</li>
 <li><a href="pianoroll.htm">ピアノロールで音を見る</a>・アナライザー・イコライザーの右クリック → 「開く」→ 「MIDIモニタを開く」</li>
 <li><a href="vst.htm">VSTホスト</a> の配線キャンバスを右クリック → 「MIDIモニタを開く」</li>
-<li>コマンドパレットから「MIDIモニタ」</li>
+<li>コマンドパレットから「MIDIモニタ」または「FMモニタ」</li>
 </ul>
 <div class="tip"><span class="label">ヒント</span>
-<p>窓の位置と大きさは覚えられます。次に開いたときも、前回の場所に戻ります。</p>
+<p>窓の位置と大きさは覚えられます。次に開いたときも、前回の場所に戻ります。FM と MIDI で別の窓にはなりません。</p>
 </div>
+<h2>FM と MIDI の切り替え</h2>
+<p>窓の題は「FM/MIDIモニタ」です。中身は再生に合わせて片方だけになります。</p>
+<ul>
+<li><b>MIDI</b> …… SMF、<a href="vst-midi.htm">.mid を VST 音源で鳴らす</a>、VSTホストの鍵盤、CEmu の MIDI 出力。32パートの表です。</li>
+<li><b>FM</b> …… SASAMI の .fpy、PMD、FMP、それに <a href="cemu.htm">昔マシンのサウンド</a> の OPN / OPNA / OPM / OPL など。鍵盤とレジスタです。</li>
+<li>まだ何も鳴っていないときは MIDI の表から始まります。FM の曲で止めたあとは、次に開いても FM のまま残ります。</li>
+</ul>
+<h2>FM 側に出るもの</h2>
+<p>FM 側は、鳴っているチップに合わせて殻が変わります。OPNA（YM2608）なら FM 6音と SSG、リズム、ADPCM。OPN（YM2203）は FM 3音が主体で、下の段は空きになります。OPM や OPL、アーケードの PCM も、そのチップの鍵盤とパネルになります。</p>
+<ul>
+<li>上のヘッダにチップ名と、見ている範囲（鍵盤 / レジスタ）が出ます。</li>
+<li>中央はレジスタの16進と、チャンネルごとのアルゴリズム・レベルです。</li>
+<li>下はチャンネル鍵盤です。押している音が点きます。</li>
+<li>PMD と FMP はレジスタと鍵盤の両方です。レジスタが取れない FMP だけ、鍵盤だけになることがあります。</li>
+<li>古い fmpmd.kpi だけでは PMD / FMP は動きません。起動時に Plugins が新しければ静かに差し替わります。<a href="render.htm">レンダリング設定</a> の KPI 取得でも同じ版を置けます。</li>
+</ul>
+<p>CEmu のダンプと SASAMI のダンプは混ぜません。前者は一時フォルダの ogg_cemu、後者は ogg_kbsasami です。</p>
 <h2>ヘッダに出るもの</h2>
 <ul>
 <li>BPM、テンポ%、調、タイムベース、拍子、Transpose、ファイル名（シーケンス名があれば横に出す。「???」だけの名前は出さない）</li>
@@ -104,13 +121,13 @@
 <p>「？」ボタンを押すと、この画面専用の図解（操作ガイド）が出ます。<a href="help-buttons.htm">各画面の「？」操作ガイド</a> もご覧ください。</p>
 </div>
 <div class="note"><span class="label">注意</span>
-<p>音声ファイル（mp3 など）の再生では MIDI イベントが無いのでモニタは動きません。SMF 再生中、または <a href="vst.htm">VSTホスト</a> で鍵盤／MIDI入力しているときに使います。</p>
+<p>mp3 などの音声ファイルだけでは、MIDI の表も FM の鍵盤も動きません。SMF、FM 曲（.fpy / PMD / FMP）、<a href="cemu.htm">昔マシンのサウンド</a>、または <a href="vst.htm">VSTホスト</a> の鍵盤のときに使います。</p>
 </div>
 <div class="related"><span class="label">あわせて読みたい</span><ul><li><a href="vst-midi.htm">.mid を VST 音源で鳴らす</a></li><li><a href="pianoroll.htm">ピアノロールで音を見る</a></li><li><a href="vst.htm">VSTホストで音源を鳴らす</a></li><li><a href="midi.htm">MIDIキーボードで操作する</a></li><li><a href="render.htm">レンダリング設定</a></li></ul></div>
 
 <div class="botnav">
 <span class="prev">&#171; 前へ: <a href="pianoroll-tune.htm">ピアノロールの音の拾い方</a></span>
-<span class="next">次へ: <a href="video.htm">動画を再生する</a> &#187;</span>
+<span class="next">次へ: <a href="wrd.htm">WRDを見る</a> &#187;</span>
 <span class="up"><a href="index.htm">目次</a></span>
 <div class="clear"></div>
 </div>

@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include <afx.h>
 
 // exe 配下（plug / plugloop と同じ再帰）の各ディレクトリ内候補 DLL を台帳へ追加。

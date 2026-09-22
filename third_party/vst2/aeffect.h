@@ -1,4 +1,4 @@
-/*
+﻿/*
  * Minimal Steinberg VST 2.4 ABI declarations.
  * This is an ABI compatibility header, not the Steinberg SDK.
  */

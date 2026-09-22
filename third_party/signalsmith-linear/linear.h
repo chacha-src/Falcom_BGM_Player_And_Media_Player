@@ -1,4 +1,4 @@
-#ifndef SIGNALSMITH_AUDIO_LINEAR_H
+﻿#ifndef SIGNALSMITH_AUDIO_LINEAR_H
 #define SIGNALSMITH_AUDIO_LINEAR_H
 
 #if defined(__FAST_MATH__) && (__apple_build_version__ >= 16000000) && (__apple_build_version__ <= 16000099) && !defined(SIGNALSMITH_IGNORE_BROKEN_APPLECLANG)

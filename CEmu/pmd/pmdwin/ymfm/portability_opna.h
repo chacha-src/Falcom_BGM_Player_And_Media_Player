@@ -1,4 +1,4 @@
-#ifndef PORTABILITY_OPNA_H
+﻿#ifndef PORTABILITY_OPNA_H
 #define PORTABILITY_OPNA_H
 
 

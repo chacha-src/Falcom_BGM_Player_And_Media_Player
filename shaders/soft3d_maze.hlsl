@@ -1,4 +1,4 @@
-// Soft3D Maze HLSL
+﻿// Soft3D Maze HLSL
 // fxc: shaders\compile_shaders.cmd → res\cso\
 // 実行時は埋め込み CSO を読む（無ければこのファイルから D3DCompile）
 

@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #define FLAC__NO_DLL
 #include "flac/all.h"
 

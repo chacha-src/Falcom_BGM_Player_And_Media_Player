@@ -81,6 +81,8 @@ static time_t KpiInstallZipInfoMtimeUtc(const unz_file_info64& fi)
 	return (time_t)((ull.QuadPart - 116444736000000000ULL) / 10000000ULL);
 }
 
+static BOOL KpiInstallFileExists(LPCTSTR path);
+
 /* 退避・無効化ツリーは展開しない（重複 KPI/古い DLL を戻さない） */
 static BOOL KpiInstallZipRelIsJunk(const CString& rel)
 {
@@ -92,8 +94,45 @@ static BOOL KpiInstallZipRelIsJunk(const CString& rel)
 	return FALSE;
 }
 
-/* mergeNewerOnly: 無い→追加、ZIP の方が新しい→上書き。ローカルが新しければスキップ。 */
-static BOOL KpiInstallExtractZip(const TCHAR* zipPath, const TCHAR* destDir, CString& errOut, BOOL mergeNewerOnly)
+/* Yamaha リズム PCM。再配布著作があるのでサイレント展開しない */
+static BOOL KpiInstallZipRelIsWav(const CString& rel)
+{
+	CString u(rel);
+	u.MakeLower();
+	const int n = u.GetLength();
+	if (n >= 4 && u.Right(4) == L".wav") return TRUE;
+	if (n >= 5 && u.Right(5) == L".wave") return TRUE;
+	return FALSE;
+}
+
+/* YM2608 ADPCM-A ROM。Yamaha 著作のためサイレントでは出さない */
+static BOOL KpiInstallZipRelIsYm2608Rom(const CString& rel)
+{
+	CString u(rel);
+	u.MakeLower();
+	u.Replace(L'/', L'\\');
+	if (u.Find(L"ym2608_adpcm_rom.bin") >= 0) return TRUE;
+	if (u.Find(L"2608_adpcm_rom.bin") >= 0) return TRUE;
+	return FALSE;
+}
+
+/* kbsasami フォルダの .kpi / .txt だけ新規展開してよい */
+static BOOL KpiInstallZipRelIsKbsasamiKpiOrTxt(const CString& rel)
+{
+	CString u(rel);
+	u.MakeLower();
+	u.Replace(L'/', L'\\');
+	while (u.Replace(L"\\\\", L"\\")) {}
+	if (u.Find(L"\\kbsasami\\") < 0 && u.Find(L"kbsasami\\") != 0)
+		return FALSE;
+	return (u.Right(4) == L".kpi" || u.Right(4) == L".txt");
+}
+
+/* mergeNewerOnly: ZIP の方が新しい→上書き。ローカルが新しければスキップ。
+   silentExistingOnly: 既存ファイルのみ更新。例外は kbsasami の kpi/txt 新規。
+   wav と YM2608 ROM はサイレントでは出さない（手動 Plugins.zip 取得時のみ）。 */
+static BOOL KpiInstallExtractZip(const TCHAR* zipPath, const TCHAR* destDir, CString& errOut,
+	BOOL mergeNewerOnly, BOOL silentExistingOnly = FALSE)
 {
 	errOut.Empty();
 	zlib_filefunc64_def ffunc = {};
@@ -133,9 +172,21 @@ static BOOL KpiInstallExtractZip(const TCHAR* zipPath, const TCHAR* destDir, CSt
 		CString outPath;
 		outPath.Format(L"%s\\%s", destDir, (LPCTSTR)rel);
 		if (isDir) {
-			KpiInstallMkDirDeep(outPath);
+			/* サイレントは空フォルダを作って Plugins 一式を復活させない */
+			if (!silentExistingOnly)
+				KpiInstallMkDirDeep(outPath);
 			if ((ZPOS64_T)(i + 1) < gi.number_entry) unzGoToNextFile(uf);
 			continue;
+		}
+		if (silentExistingOnly) {
+			if (KpiInstallZipRelIsWav(rel) || KpiInstallZipRelIsYm2608Rom(rel)) {
+				if ((ZPOS64_T)(i + 1) < gi.number_entry) unzGoToNextFile(uf);
+				continue;
+			}
+			if (!KpiInstallFileExists(outPath) && !KpiInstallZipRelIsKbsasamiKpiOrTxt(rel)) {
+				if ((ZPOS64_T)(i + 1) < gi.number_entry) unzGoToNextFile(uf);
+				continue;
+			}
 		}
 		if (mergeNewerOnly) {
 			const time_t tDst = KpiInstallFileMtimeUtc(outPath);
@@ -351,10 +402,11 @@ BOOL KpiInstall_DownloadAndExtract(LPCTSTR exeDir, KpiInstallProgressFn progress
 }
 
 // ---------------------------------------------------------------------------
-// Plugins.zip サイレント更新（kbsasami / fmpmd / 依存 DLL 共通）
+// Plugins.zip サイレント更新（kbsasami / 既存 KPI の日付マージ）
 // ZIP: https://ppp.oohara.jp/download/Plugins.zip
-// DL 条件: Plugins フォルダ無し → 無条件 / ZIP Last-Modified が exe より新しい
-// それ以外は DL しない（HEAD 相当の日時確認のみ）
+// DL 条件: kbsasami.kpi が無い、または ZIP Last-Modified が exe より新しい
+// 展開: kbsasami の kpi/txt は新規可。他は既存ファイルのみ。wav / リズム ROM は出さない。
+// 一式（リズム含む）はメニューから Plugins.zip を手動取得したときだけ。
 // ---------------------------------------------------------------------------
 
 static const TCHAR* PLUGINS_ZIP_URL = L"https://ppp.oohara.jp/download/Plugins.zip";
@@ -496,22 +548,23 @@ static BOOL KpiInstallSilentMaybeFetchPluginsZip(LPCTSTR exeDir)
 	if (!InternetGetConnectedState(&netFlags, 0))
 		return FALSE;
 
-	TCHAR pluginsDir[MAX_PATH * 2] = {};
-	_sntprintf_s(pluginsDir, _TRUNCATE, L"%sPlugins", exeDir);
-	const BOOL pluginsMissing =
-		(GetFileAttributes(pluginsDir) == INVALID_FILE_ATTRIBUTES) ? TRUE : FALSE;
+	TCHAR sasKpi[MAX_PATH * 2] = {};
+	TCHAR sasKpi64[MAX_PATH * 2] = {};
+	_sntprintf_s(sasKpi, _TRUNCATE, L"%sPlugins\\kbsasami\\kbsasami.kpi", exeDir);
+	_sntprintf_s(sasKpi64, _TRUNCATE, L"%sPlugins\\kbsasami\\x64\\kbsasami.kpi", exeDir);
+	const BOOL needSasami =
+		(!KpiInstallFileExists(sasKpi) && !KpiInstallFileExists(sasKpi64)) ? TRUE : FALSE;
 
 	TCHAR exePath[MAX_PATH] = {};
 	GetModuleFileName(NULL, exePath, MAX_PATH);
 	const time_t exeMt = KpiInstallFileMtimeUtc(exePath);
 
 	BOOL doDownload = FALSE;
-	if (pluginsMissing) {
-		/* Plugins 自体が無い → 無条件で取得 */
+	if (needSasami) {
 		doDownload = TRUE;
 	} else {
 		const time_t serverMod = KpiInstallHttpLastModified(PLUGINS_ZIP_URL);
-		/* ZIP が exe より新しければ更新。判定不能・古ければ DL しない */
+		/* ZIP が exe より新しければ既存分を更新。判定不能・古ければ DL しない */
 		if (serverMod != 0 && exeMt != 0 && serverMod > exeMt + 120)
 			doDownload = TRUE;
 	}
@@ -527,8 +580,8 @@ static BOOL KpiInstallSilentMaybeFetchPluginsZip(LPCTSTR exeDir)
 		return FALSE;
 
 	CString err;
-	/* 無い→追加、ZIP が新しい→上書き。自前の新しい KPI/DLL は残す */
-	const BOOL ok = KpiInstallExtractZip(zipPath, exeDir, err, TRUE);
+	/* 既存のみ更新。kbsasami の kpi/txt だけ新規。自前の新しい KPI/DLL は残す */
+	const BOOL ok = KpiInstallExtractZip(zipPath, exeDir, err, TRUE, TRUE);
 	DeleteFile(zipPath);
 	s_did = ok ? TRUE : FALSE;
 	return s_did;
@@ -538,10 +591,8 @@ BOOL KpiInstall_SilentUpdateKbsasami(LPCTSTR exeDir)
 {
 	if (!exeDir || !exeDir[0])
 		return FALSE;
-	/* kbsasami も Plugins.zip 同梱分から展開（専用 kbsasami.zip は使わない） */
-	const BOOL did = KpiInstallSilentMaybeFetchPluginsZip(exeDir);
-	KpiInstallEnsureRhythmAssets(exeDir);
-	return did;
+	/* kbsasami は kpi/txt のみ新規。リズム wav/bin は手動 Plugins.zip か自前配置 */
+	return KpiInstallSilentMaybeFetchPluginsZip(exeDir);
 }
 
 
@@ -595,7 +646,7 @@ static void KpiInstallCopyIfMissing(LPCTSTR src, LPCTSTR dst)
 	CopyFile(src, dst, TRUE);
 }
 
-/* fmpmd 内の rom/wav を揃え、kbsasami へも欠落分だけミラー（SASAMI 探索用） */
+/* 既にある rom/wav だけ揃える。ZIP から新規展開はしない */
 static void KpiInstallEnsureRhythmAssets(LPCTSTR exeDir)
 {
 	if (!exeDir || !exeDir[0]) return;
@@ -603,6 +654,8 @@ static void KpiInstallEnsureRhythmAssets(LPCTSTR exeDir)
 	TCHAR sasami[MAX_PATH * 2] = {};
 	_sntprintf_s(fmpmd, _TRUNCATE, L"%sPlugins\\Kobarin\\fmpmd", exeDir);
 	_sntprintf_s(sasami, _TRUNCATE, L"%sPlugins\\kbsasami", exeDir);
+	if (!KpiInstallFileExists(fmpmd))
+		return;
 	CreateDirectory(fmpmd, NULL);
 	{
 		TCHAR rhy[MAX_PATH * 2] = {};
@@ -1039,10 +1092,16 @@ BOOL KpiInstall_SilentUpdateFmpmd(LPCTSTR exeDir)
 	if (online)
 		did = KpiInstallSilentMaybeFetchPluginsZip(exeDir);
 
-	KpiInstallEnsureFmpmdDirs(exeDir);
-
 	TCHAR fmpmdDir[MAX_PATH * 2] = {};
 	_sntprintf_s(fmpmdDir, _TRUNCATE, L"%sPlugins\\Kobarin\\fmpmd", exeDir);
+	TCHAR kbfmp[MAX_PATH * 2] = {};
+	TCHAR kbpmd[MAX_PATH * 2] = {};
+	_sntprintf_s(kbfmp, _TRUNCATE, L"%s\\kbfmp.kpi", fmpmdDir);
+	_sntprintf_s(kbpmd, _TRUNCATE, L"%s\\kbpmd.kpi", fmpmdDir);
+	if (!KpiInstallFileExists(kbfmp) && !KpiInstallFileExists(kbpmd))
+		return did;
+
+	KpiInstallEnsureFmpmdDirs(exeDir);
 	TCHAR localPmdDll[MAX_PATH * 2] = {};
 	TCHAR localWinDll[MAX_PATH * 2] = {};
 	TCHAR localPdzDll[MAX_PATH * 2] = {};

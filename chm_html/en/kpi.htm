@@ -24,8 +24,8 @@
 <li>Typing an extension filters the list as you type. Type "mid" and only the MIDI-related plug-ins remain.</li>
 <li>Checkbox state is kept per plug-in, so you can say "read this track with this plug-in".</li>
 </ul>
-<h2>How the 64-bit build handles them</h2>
-<p>The 64-bit build loads plug-ins through a separate process called KpiHost64. Place <code>KpiHost64.exe</code> in the same location as the executable. That is what allows old plug-ins built for 32-bit to be used from a 64-bit host. 64-bit plug-ins in <a href="vst.htm">Playing instruments with the VST host</a> use the same mechanism.</p>
+<h2>The player is x64. 32-bit plug-ins use ogghost32</h2>
+<p>The player is x64. It used to be x86, and 64-bit plug-ins were handed to KpiHost64.exe. That is reversed: the other bitness (32-bit KPI and VST plug-ins, plus Winamp / XMPlay / AIMP input plug-ins) is hosted by the x86 <code>ogghost32.exe</code>. Place it next to the executable. 64-bit plug-ins load in the player itself. <a href="vst.htm">Playing instruments with the VST host</a> uses the same split. The short version is also on <a href="datasheet.htm">Support datasheet</a>.</p>
 <h2>Plug-ins that need extra setup</h2>
 <ul>
 <li><b>KPI ver5 parameters</b> — detailed settings for the newer plug-in type.</li>

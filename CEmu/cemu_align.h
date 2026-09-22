@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 /* AVX2 前提の 32byte 境界。realloc だと 16byte 未満に落ちることがあり MixAdd が遅くなる。 */
 #include <malloc.h>
 #include <stdint.h>

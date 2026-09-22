@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include <tchar.h>
 
 /* %LOCALAPPDATA%\oggYSED\kpicache\ — KPI/外部プラグイン列挙結果のキャッシュ。

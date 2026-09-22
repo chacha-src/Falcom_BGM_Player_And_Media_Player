@@ -1,4 +1,4 @@
-#ifndef SIGNALSMITH_STRETCH_H
+﻿#ifndef SIGNALSMITH_STRETCH_H
 #define SIGNALSMITH_STRETCH_H
 
 #include "signalsmith-linear/stft.h" // https://github.com/Signalsmith-Audio/linear

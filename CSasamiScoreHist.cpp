@@ -1,4 +1,4 @@
-#include "stdafx.h"
+﻿#include "stdafx.h"
 #include "CSasamiScoreHist.h"
 
 void ScScoreHistInit(ScScoreHist* h)

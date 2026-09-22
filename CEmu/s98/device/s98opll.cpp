@@ -1,4 +1,4 @@
-#include "emu2413/emu2413.h"
+﻿#include "emu2413/emu2413.h"
 #include "emu2413/emutypes.h"
 #include "s98device.h"
 #include "../../fmmon/fmmon_shadow.h"

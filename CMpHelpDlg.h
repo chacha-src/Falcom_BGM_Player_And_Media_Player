@@ -1,4 +1,4 @@
-// CMpHelpDlg.h : メディアプレイヤー操作ガイド(アクリルキャプション + Soft3D 実演)
+﻿// CMpHelpDlg.h : メディアプレイヤー操作ガイド(アクリルキャプション + Soft3D 実演)
 //
 // 旧 CMpCheatSheetDlg(素の CDialog + CCC_GdiHelpBeginPaint)の置き換え。
 // キャプション帯はアクリルのまま残し、本文だけを不透明メモリ面で描く。

@@ -1,4 +1,4 @@
-#include "StdAfx.h"
+﻿#include "StdAfx.h"
 #include "cemu_driver_pc88.h"
 #include "../machine/cemu_hard_pc88.h"
 #include "../chip/cemu_chip_opna.h"

@@ -43,8 +43,8 @@
 <p>演奏時間はテンポの変化も込めて出します。曲のあとに少し余韻が残ることがあります。</p>
 <h2>演奏の様子を見る</h2>
 <p>鳴らしている最中に <a href="midi-monitor.htm">MIDIモニタ</a> を開くと、32パートの音色・音量・効果がリアルタイムで見られます。<a href="pianoroll.htm">ピアノロールで音を見る</a> と並べると便利です。</p>
-<h2>64bit の音源について</h2>
-<p>本体は 32bit なので、64bit の VST（SC-VA x64 など）は KpiHost64.exe を経由します。「x64 VSTホストを開けませんでした。KpiHost64.exe を確認してください。」と出たときは、実行ファイルと同じ場所に KpiHost64.exe があるかを確かめてください。<a href="kpi.htm">KPIプラグインで対応形式をふやす</a> と同じしくみです。</p>
+<h2>本体は x64、プラグイン側の違いは ogghost32</h2>
+<p>プレイヤー本体は x64 になりました。以前は x86 だったので、64bit の VST を別プロセスへ預けていました。いまは逆です。64bit の VST（SC-VA x64 など）は本体が直接読み、32bit の VST だけ <code>ogghost32.exe</code> を起こします。この exe は、以前の KpiHost64.exe の役目を x86 側で引き継いだものです。実行ファイルと同じ場所に置いてください。「ホストを開けませんでした」と出たときは、まずその有無を見ます。<a href="kpi.htm">KPIプラグインで対応形式をふやす</a> と同じしくみです。</p>
 <h2>VSTホストとのちがい</h2>
 <table class="grid">
 <tr><th></th><th>このページ（.mid 再生）</th><th>VSTホスト</th></tr>
@@ -56,9 +56,9 @@
 <p>プロジェクトフォルダに .mid が無いときは、「MIDIが見つかりません。同フォルダに .mid をエクスポートしてください。」と出ることがあります。</p>
 </div>
 <div class="note"><span class="label">注意</span>
-<p>「VST MIDIを開けませんでした。」と出るときは、指定した DLL のパス、32ビットと64ビットの不一致、KpiHost64.exe の有無を順に確かめてください。</p>
+<p>「VST MIDIを開けませんでした。」と出るときは、指定した DLL のパス、32ビットと64ビットの不一致、<code>ogghost32.exe</code> の有無を順に確かめてください。</p>
 </div>
-<div class="related"><span class="label">あわせて読みたい</span><ul><li><a href="render.htm">レンダリング設定</a></li><li><a href="midi-monitor.htm">MIDIモニタ</a></li><li><a href="vst.htm">VSTホストで音源を鳴らす</a></li><li><a href="kpi.htm">KPIプラグインで対応形式をふやす</a></li><li><a href="playlist.htm">プレイリストを使う</a></li><li><a href="crossfade.htm">連続再生クロスフェード</a></li></ul></div>
+<div class="related"><span class="label">あわせて読みたい</span><ul><li><a href="render.htm">レンダリング設定</a></li><li><a href="midi-monitor.htm">FM/MIDIモニタ</a></li><li><a href="vst.htm">VSTホストで音源を鳴らす</a></li><li><a href="kpi.htm">KPIプラグインで対応形式をふやす</a></li><li><a href="playlist.htm">プレイリストを使う</a></li><li><a href="crossfade.htm">連続再生クロスフェード</a></li></ul></div>
 
 <div class="botnav">
 <span class="prev">&#171; 前へ: <a href="vst.htm">VSTホストで音源を鳴らす</a></span>

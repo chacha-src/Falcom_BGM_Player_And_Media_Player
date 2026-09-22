@@ -1,4 +1,4 @@
-#include "stdafx.h"
+﻿#include "stdafx.h"
 #include "ogg.h"
 #include "CSasamiNotePropsDlg.h"
 #include "CSasamiVstPartMenu.h"

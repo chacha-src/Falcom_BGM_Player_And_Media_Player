@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include "SasamiComposerDoc.h"
 #include "CSasamiStaffCore.h"
 

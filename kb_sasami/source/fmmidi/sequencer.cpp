@@ -1,4 +1,4 @@
-#pragma warning(disable:4786)
+﻿#pragma warning(disable:4786)
 #include <stdio.h>
 #include "sequencer.hpp"
 

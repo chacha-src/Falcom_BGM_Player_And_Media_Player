@@ -43,6 +43,8 @@ static const wchar_t* BaseNameW(const wchar_t* p)
 	for (const wchar_t* s = b; *s; ++s) {
 		if (*s == L'\\' || *s == L'/' || *s == L'>')
 			b = s + 1;
+		else if (*s == L':' && s > p && s[-1] == L':')
+			b = s + 1;
 	}
 	return b;
 }
@@ -81,8 +83,15 @@ static int SameStem(const wchar_t* a, const wchar_t* b)
 
 static int IsWantedSidecar(const wchar_t* path)
 {
-	return EqExtW(path, L".wrd") || EqExtW(path, L".mag") || EqExtW(path, L".lrc")
-		|| EqExtW(path, L".gsd") || EqExtW(path, L".cm6") || EqExtW(path, L".mki");
+	return EqExtW(path, L".wrd") || EqExtW(path, L".kok") || EqExtW(path, L".mag")
+		|| EqExtW(path, L".lrc") || EqExtW(path, L".gsd") || EqExtW(path, L".cm6")
+		|| EqExtW(path, L".mki") || EqExtW(path, L".doc") || EqExtW(path, L".txt")
+		|| EqExtW(path, L".hed") || EqExtW(path, L".tdf");
+}
+
+static int IsWrdExt(const wchar_t* path)
+{
+	return EqExtW(path, L".wrd") || EqExtW(path, L".kok");
 }
 
 static int IsSeqPath(const wchar_t* path)
@@ -90,7 +99,9 @@ static int IsSeqPath(const wchar_t* path)
 	return EqExtW(path, L".mid") || EqExtW(path, L".midi") || EqExtW(path, L".kar")
 		|| EqExtW(path, L".rmi") || EqExtW(path, L".rcp") || EqExtW(path, L".r36")
 		|| EqExtW(path, L".g36") || EqExtW(path, L".g18") || EqExtW(path, L".mcp")
-		|| EqExtW(path, L".mtd") || EqExtW(path, L".mff") || EqExtW(path, L".seq");
+		|| EqExtW(path, L".mtd") || EqExtW(path, L".mff") || EqExtW(path, L".seq")
+		|| EqExtW(path, L".smf") || EqExtW(path, L".sng") || EqExtW(path, L".zms")
+		|| EqExtW(path, L".eup");
 }
 
 static int IsJunkName(const wchar_t* n)
@@ -309,7 +320,7 @@ static int ZipExtractOne(const wchar_t* zip, const wchar_t* inner, const wchar_t
 struct LzhBit {
 	const unsigned char* p;
 	unsigned n, i;
-	unsigned acc;
+	ULONGLONG acc;
 	int accbits;
 };
 
@@ -323,21 +334,21 @@ static unsigned LzhGetBits(LzhBit* b, int need)
 	if (need <= 0) return 0;
 	while (b->accbits < need) {
 		unsigned v = (b->i < b->n) ? b->p[b->i++] : 0;
-		b->acc = (b->acc << 8) | v;
+		b->acc = (b->acc << 8) | (ULONGLONG)v;
 		b->accbits += 8;
 	}
 	b->accbits -= need;
-	return (b->acc >> b->accbits) & ((1u << need) - 1u);
+	return (unsigned)((b->acc >> b->accbits) & ((1u << need) - 1u));
 }
 
 static unsigned LzhPeek16(LzhBit* b)
 {
 	while (b->accbits < 16) {
 		unsigned v = (b->i < b->n) ? b->p[b->i++] : 0;
-		b->acc = (b->acc << 8) | v;
+		b->acc = (b->acc << 8) | (ULONGLONG)v;
 		b->accbits += 8;
 	}
-	return (b->acc >> (b->accbits - 16)) & 0xFFFFu;
+	return (unsigned)((b->acc >> (b->accbits - 16)) & 0xFFFFu);
 }
 
 enum { LZH_MAXMATCH = 256, LZH_THRESHOLD = 3 };
@@ -390,16 +401,18 @@ static void LzhMakeTable(const unsigned char* bitlen, int nchar, unsigned short*
 			for (unsigned j = k; j < nx; j++)
 				table[j] = (unsigned short)ch;
 		} else {
+			/* 16bit 左詰め。表に入らない長い符号は tablebits の次のビットから木を辿る */
+			unsigned code = k;
+			const unsigned walk = 1u << (15 - tablebits);
 			unsigned short* p = &table[(k >> jut) & (tablesize - 1)];
 			int rest = l - tablebits;
-			unsigned code = k << jut;
 			while (rest > 0) {
 				if (*p == 0) {
 					if (avail >= 2 * LZH_NC) return;
 					left[avail] = right[avail] = 0;
 					*p = (unsigned short)avail++;
 				}
-				if (code & 0x8000u)
+				if (code & walk)
 					p = &right[*p];
 				else
 					p = &left[*p];
@@ -517,6 +530,7 @@ static unsigned LzhDecodeP(LzhBit* b, LzhHuff* h)
 	return j;
 }
 
+/* -lh5-/lh6/lh7。符号ブロック長は 16bit（256 固定だと中身が潰れる） */
 static int LzhDecodeLh(const unsigned char* src, unsigned srcn, unsigned orig, int dicbit, std::vector<unsigned char>& out)
 {
 	if (orig > kMaxFile || dicbit < 12 || dicbit > 16) return 0;
@@ -532,28 +546,34 @@ static int LzhDecodeLh(const unsigned char* src, unsigned srcn, unsigned orig, i
 	unsigned loc = 0;
 	unsigned written = 0;
 	const int pbit = (dicbit <= 13) ? 4 : 5;
+	/* lh5 以降は 256 固定ではなく、16bit の符号数ごとにハフマン木を組み直す */
+	unsigned blockLeft = 0;
 	int safety = 0;
 	while (written < orig) {
-		if (++safety > 1 + (int)(orig / 16) + 8) return 0;
-		LzhReadPtLen(&br, &h, LZH_NT, 5, 3);
-		LzhReadCLenReal(&br, &h);
-		LzhReadPtLen(&br, &h, h.np, pbit, -1);
-		for (int ccc = 0; ccc < 256 && written < orig; ccc++) {
-			unsigned c = LzhDecodeC(&br, &h);
-			if (c <= 255) {
-				out[written++] = (unsigned char)c;
-				win[loc++] = (unsigned char)c;
+		if (++safety > 1 + (int)orig + 32) return 0;
+		if (blockLeft == 0) {
+			blockLeft = LzhGetBits(&br, 16);
+			LzhReadPtLen(&br, &h, LZH_NT, 5, 3);
+			LzhReadCLenReal(&br, &h);
+			LzhReadPtLen(&br, &h, h.np, pbit, -1);
+			if (blockLeft == 0)
+				continue;
+		}
+		blockLeft--;
+		unsigned c = LzhDecodeC(&br, &h);
+		if (c <= 255) {
+			out[written++] = (unsigned char)c;
+			win[loc++] = (unsigned char)c;
+			loc &= (dicsiz - 1);
+		} else {
+			unsigned len = c - (256 - LZH_THRESHOLD);
+			unsigned pos = LzhDecodeP(&br, &h);
+			pos &= (dicsiz - 1);
+			for (unsigned k = 0; k < len && written < orig; k++) {
+				unsigned char v = win[(loc - pos - 1) & (dicsiz - 1)];
+				out[written++] = v;
+				win[loc++] = v;
 				loc &= (dicsiz - 1);
-			} else {
-				unsigned len = c - (256 - LZH_THRESHOLD);
-				unsigned pos = LzhDecodeP(&br, &h);
-				if (pos >= dicsiz) return 0;
-				for (unsigned k = 0; k < len && written < orig; k++) {
-					unsigned char v = win[(loc - pos - 1) & (dicsiz - 1)];
-					out[written++] = v;
-					win[loc++] = v;
-					loc &= (dicsiz - 1);
-				}
 			}
 		}
 	}
@@ -633,7 +653,8 @@ static int LzhCollect(const unsigned char* d, unsigned n, std::vector<LzhEnt>& e
 				if (sz < 3) break;
 				unsigned char typ = d[ex + 2];
 				if (typ == 0x01 && sz > 3) {
-					MbToW((const char*)d + ex + 3, (int)sz - 5, 932, e.name, MIDIPACK_INNER);
+					/* 拡張ヘッダは [size2][type1][data size-3]。末尾に次サイズは入らない */
+					MbToW((const char*)d + ex + 3, (int)sz - 3, 932, e.name, MIDIPACK_INNER);
 				}
 				ex += sz;
 			}
@@ -655,10 +676,21 @@ static int LzhCollect(const unsigned char* d, unsigned n, std::vector<LzhEnt>& e
 		nameLen = d[off + 21];
 		nameOff = off + 22;
 		unsigned dataOff = off + hdrTotal;
-		if (level == 1) {
-			unsigned ex = off + hdrTotal;
-			if (!LzhSkipExt(d, n, &ex)) break;
-			dataOff = ex;
+		if (level == 1 && hdrTotal >= 2) {
+			/* 基本ヘッダ末尾 2 バイトが先頭拡張ヘッダ長。0 なら直後が圧縮データ */
+			unsigned firstExt = Le16(d + off + hdrTotal - 2);
+			if (firstExt) {
+				unsigned ex = dataOff;
+				unsigned next = firstExt;
+				int hops = 0;
+				while (next && hops++ < 256) {
+					if (ex + next > n) break;
+					unsigned nxt2 = (next >= 2) ? Le16(d + ex + next - 2) : 0;
+					ex += next;
+					next = nxt2;
+				}
+				dataOff = ex;
+			}
 		}
 		LzhEnt e = {};
 		e.packed = packed;
@@ -695,6 +727,32 @@ static int LzhList(const wchar_t* path, std::vector<PackName>& names)
 	return 1;
 }
 
+static int LooksMostlyZero(const unsigned char* p, unsigned n)
+{
+	if (!p || n < 8) return 1;
+	unsigned lim = n < 64 ? n : 64;
+	unsigned nz = 0;
+	for (unsigned i = 0; i < lim; ++i)
+		if (p[i]) nz++;
+	return nz < 3 ? 1 : 0;
+}
+
+static int ExtractPayloadLooksOk(const wchar_t* inner, const unsigned char* data, unsigned size)
+{
+	if (!inner || !data) return 0;
+	if (EqExtW(inner, L".mid") || EqExtW(inner, L".midi") || EqExtW(inner, L".kar")
+		|| EqExtW(inner, L".rmi") || EqExtW(inner, L".smf") || EqExtW(inner, L".mff")) {
+		if (size >= 8 && memcmp(data, "MThd", 4) == 0) return 1;
+		if (size >= 20 && memcmp(data, "RIFF", 4) == 0 && memcmp(data + 8, "RMID", 4) == 0)
+			return 1;
+		return 0;
+	}
+	if (ComposerIsSeqExt(inner))
+		return ComposerKindOfMem(data, size) != COMPOSER_KIND_NONE ? 1 : 0;
+	if (LooksMostlyZero(data, size)) return 0;
+	return 1;
+}
+
 static int LzhExtractOne(const wchar_t* path, const wchar_t* inner, const wchar_t* destFile)
 {
 	std::vector<unsigned char> buf;
@@ -712,15 +770,22 @@ static int LzhExtractOne(const wchar_t* path, const wchar_t* inner, const wchar_
 		if (ents[i].orig > kMaxFile) return 0;
 		if (ents[i].packedOff + ents[i].packed > buf.size()) return 0;
 		const unsigned char* src = buf.data() + ents[i].packedOff;
+		const unsigned char* payload = src;
+		unsigned payloadN = ents[i].orig;
+		std::vector<unsigned char> out;
 		if (ents[i].dicbit == 0) {
 			if (ents[i].packed != ents[i].orig) return 0;
-			return WriteAllFile(destFile, src, ents[i].orig);
-		}
-		if (ents[i].dicbit < 0) return 0;
-		std::vector<unsigned char> out;
-		if (!LzhDecodeLh(src, ents[i].packed, ents[i].orig, ents[i].dicbit, out))
+		} else if (ents[i].dicbit < 0) {
 			return 0;
-		return WriteAllFile(destFile, out.data(), (unsigned)out.size());
+		} else {
+			if (!LzhDecodeLh(src, ents[i].packed, ents[i].orig, ents[i].dicbit, out))
+				return 0;
+			payload = out.data();
+			payloadN = (unsigned)out.size();
+		}
+		if (!ExtractPayloadLooksOk(inner, payload, payloadN))
+			return 0;
+		return WriteAllFile(destFile, payload, payloadN);
 	}
 	return 0;
 }
@@ -964,7 +1029,10 @@ static int ExtractOne(const wchar_t* arc, const wchar_t* inner, const wchar_t* d
 static int WantExtractName(const wchar_t* inner, const wchar_t* seqInner)
 {
 	if (IsSeqPath(inner) && SameStem(inner, seqInner)) return 1;
-	if (IsWantedSidecar(inner)) return 1;
+	/* 音源メモは同stem以外（ED01V1.DOC / *.TDF）もあるのでテキストは全部出す */
+	if (EqExtW(inner, L".doc") || EqExtW(inner, L".txt")
+		|| EqExtW(inner, L".hed") || EqExtW(inner, L".tdf")) return 1;
+	if (IsWantedSidecar(inner) && SameStem(inner, seqInner)) return 1;
 	if (seqInner && seqInner[0] && SameStem(inner, seqInner)) return 1;
 	return 0;
 }
@@ -976,11 +1044,24 @@ static int MaterializeArc(const wchar_t* arc, const wchar_t* inner, wchar_t* out
 	std::vector<PackName> names;
 	if (!ListArchive(arc, names)) return 0;
 	int any = 0;
+	wchar_t want[MIDIPACK_PATH];
+	_snwprintf_s(want, _TRUNCATE, L"%s\\%s", dir, inner);
+	SlashNorm(want);
 	for (size_t i = 0; i < names.size(); ++i) {
 		if (!WantExtractName(names[i].inner, inner)) continue;
 		wchar_t dest[MIDIPACK_PATH];
 		_snwprintf_s(dest, _TRUNCATE, L"%s\\%s", dir, names[i].inner);
-		if (!FileExistsW(dest)) {
+		SlashNorm(dest);
+		const int isPlay = (_wcsicmp(dest, want) == 0) ? 1 : 0;
+		int keep = 0;
+		if (!isPlay && FileExistsW(dest)) {
+			std::vector<unsigned char> got;
+			if (ReadAllFile(dest, got) && got.size() > 0)
+				keep = ExtractPayloadLooksOk(names[i].inner, got.data(), (unsigned)got.size());
+		}
+		if (!keep) {
+			SetFileAttributesW(dest, FILE_ATTRIBUTE_NORMAL);
+			DeleteFileW(dest);
 			if (!ExtractOne(arc, names[i].inner, dest))
 				continue;
 		}
@@ -1009,11 +1090,21 @@ int MidiPackIsArchiveExt(const wchar_t* path)
 	return ArcKind(path) != 0;
 }
 
+static int InnerIsCemuIndex(const wchar_t* inner)
+{
+	if (!inner || !inner[0]) return 0;
+	int n = 0;
+	for (const wchar_t* p = inner; *p; ++p) {
+		if (*p < L'0' || *p > L'9') return 0;
+		n++;
+	}
+	return n == 4 ? 1 : 0;
+}
+
 int MidiPackIsVirtualPath(const wchar_t* path)
 {
-	if (!path) return 0;
-	const wchar_t* gt = wcschr(path, L'>');
-	return (gt && gt[1]) ? 1 : 0;
+	wchar_t arc[MIDIPACK_PATH], inner[MIDIPACK_INNER];
+	return MidiPackParseVirtual(path, arc, MIDIPACK_PATH, inner, MIDIPACK_INNER) && inner[0];
 }
 
 int MidiPackParseVirtual(const wchar_t* path, wchar_t* arc, int arcChars, wchar_t* inner, int innerChars)
@@ -1021,18 +1112,34 @@ int MidiPackParseVirtual(const wchar_t* path, wchar_t* arc, int arcChars, wchar_
 	if (arc && arcChars > 0) arc[0] = 0;
 	if (inner && innerChars > 0) inner[0] = 0;
 	if (!path || !path[0]) return 0;
-	const wchar_t* gt = wcschr(path, L'>');
-	if (!gt || !gt[1]) {
+	const wchar_t* sep = NULL;
+	int sepLen = 0;
+	/* 旧 arc>inner も残す。CEmu の zip::0001（4桁）はパックではない */
+	for (const wchar_t* p = path; *p; ++p) {
+		if (*p == L'>' && p[1]) {
+			sep = p;
+			sepLen = 1;
+		} else if (p[0] == L':' && p[1] == L':' && p[2]) {
+			sep = p;
+			sepLen = 2;
+		}
+	}
+	if (!sep) {
+		if (arc) wcsncpy_s(arc, arcChars, path, _TRUNCATE);
+		return 0;
+	}
+	const wchar_t* inn = sep + sepLen;
+	if (sepLen == 2 && InnerIsCemuIndex(inn)) {
 		if (arc) wcsncpy_s(arc, arcChars, path, _TRUNCATE);
 		return 0;
 	}
 	if (arc) {
-		size_t n = (size_t)(gt - path);
+		size_t n = (size_t)(sep - path);
 		if (n >= (size_t)arcChars) n = (size_t)arcChars - 1;
 		wcsncpy_s(arc, arcChars, path, n);
 	}
 	if (inner) {
-		wcsncpy_s(inner, innerChars, gt + 1, _TRUNCATE);
+		wcsncpy_s(inner, innerChars, inn, _TRUNCATE);
 		SlashNorm(inner);
 	}
 	return 1;
@@ -1043,7 +1150,7 @@ int MidiPackFormatVirtual(const wchar_t* arc, const wchar_t* inner, wchar_t* out
 	if (!out || outChars <= 0) return 0;
 	out[0] = 0;
 	if (!arc || !inner || !inner[0]) return 0;
-	_snwprintf_s(out, outChars, _TRUNCATE, L"%s>%s", arc, inner);
+	_snwprintf_s(out, outChars, _TRUNCATE, L"%s::%s", arc, inner);
 	return 1;
 }
 
@@ -1065,12 +1172,12 @@ int MidiPackListSeq(const wchar_t* arc, MidiPackSeq* out, int maxOut)
 	if (!ListArchive(arc, names)) return 0;
 	int n = 0;
 	for (size_t i = 0; i < names.size() && n < maxOut; ++i) {
-		if (!(IsSeqPath(names[i].inner) || EqExtW(names[i].inner, L".eup")) || IsJunkName(names[i].inner)) continue;
+		if (!IsSeqPath(names[i].inner) || IsJunkName(names[i].inner)) continue;
 		wcsncpy_s(out[n].inner, names[i].inner, _TRUNCATE);
 		wcsncpy_s(out[n].name, BaseNameW(names[i].inner), _TRUNCATE);
 		out[n].hasWrd = 0;
 		for (size_t j = 0; j < names.size(); ++j) {
-			if (EqExtW(names[j].inner, L".wrd") && SameStem(names[j].inner, names[i].inner)) {
+			if (IsWrdExt(names[j].inner) && SameStem(names[j].inner, names[i].inner)) {
 				out[n].hasWrd = 1;
 				break;
 			}
@@ -1100,7 +1207,9 @@ int MidiPackHasSidecarWrd(const wchar_t* src)
 	}
 	wchar_t tmp[MAX_PATH];
 	return ComposerFindSidecar(src, L".wrd", tmp, MAX_PATH)
-		|| ComposerFindSidecar(src, L".WRD", tmp, MAX_PATH);
+		|| ComposerFindSidecar(src, L".WRD", tmp, MAX_PATH)
+		|| ComposerFindSidecar(src, L".kok", tmp, MAX_PATH)
+		|| ComposerFindSidecar(src, L".KOK", tmp, MAX_PATH);
 }
 
 int MidiPackMaterialize(const wchar_t* src, wchar_t* out, int outChars)
@@ -1113,6 +1222,29 @@ int MidiPackMaterialize(const wchar_t* src, wchar_t* out, int outChars)
 	return MaterializeArc(arc, inner, out, outChars);
 }
 
+int MidiPackIsTempExtractPath(const wchar_t* path)
+{
+	if (!path || !path[0]) return 0;
+	wchar_t tmp[MAX_PATH];
+	if (!GetTempPathW(MAX_PATH, tmp) || !tmp[0])
+		return 0;
+	wchar_t a[MIDIPACK_PATH], b[MIDIPACK_PATH];
+	wcsncpy_s(a, path, _TRUNCATE);
+	wcsncpy_s(b, tmp, _TRUNCATE);
+	SlashNorm(a);
+	SlashNorm(b);
+	for (wchar_t* p = a; *p; ++p)
+		if (*p >= L'A' && *p <= L'Z') *p = (wchar_t)(*p - L'A' + L'a');
+	for (wchar_t* p = b; *p; ++p)
+		if (*p >= L'A' && *p <= L'Z') *p = (wchar_t)(*p - L'A' + L'a');
+	size_t nb = wcsnlen(b, MIDIPACK_PATH);
+	if (nb && b[nb - 1] != L'\\') {
+		if (nb + 1 < MIDIPACK_PATH) { b[nb] = L'\\'; b[nb + 1] = 0; nb++; }
+	}
+	if (wcsncmp(a, b, nb) != 0) return 0;
+	return (wcsstr(a, L"\\ogg_midpack\\") || wcsstr(a, L"\\ogg_composer\\")) ? 1 : 0;
+}
+
 int MidiPackFindSidecarWrd(const wchar_t* src, wchar_t* out, int outChars)
 {
 	if (!out || outChars <= 0) return 0;
@@ -1123,5 +1255,7 @@ int MidiPackFindSidecarWrd(const wchar_t* src, wchar_t* out, int outChars)
 	if (MidiPackMaterialize(src, phys, MIDIPACK_PATH))
 		seqPath = phys;
 	return ComposerFindSidecar(seqPath, L".wrd", out, outChars)
-		|| ComposerFindSidecar(seqPath, L".WRD", out, outChars);
+		|| ComposerFindSidecar(seqPath, L".WRD", out, outChars)
+		|| ComposerFindSidecar(seqPath, L".kok", out, outChars)
+		|| ComposerFindSidecar(seqPath, L".KOK", out, outChars);
 }

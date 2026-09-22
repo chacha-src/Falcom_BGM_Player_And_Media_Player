@@ -1,5 +1,6 @@
 ﻿// SongParams.cpp : 曲ごとのオーディオ/DSP パラメータ 保持・復元
 #include "stdafx.h"
+#include "PluginKinds.h"
 #include "SongParams.h"
 #include "ProAudio.h"
 #include "ogg.h"
@@ -374,6 +375,7 @@ void SongParams_LoadFile()
 		s_featLatch = savedata.saveSongParams ? 1 : 0;
 		return;
 	}
+	bool migrated = false;
 	try {
 		int ver = 0, cnt = 0;
 		if (f.Read(&ver, sizeof(int)) != sizeof(int)) { f.Close(); s_featLatch = savedata.saveSongParams ? 1 : 0; return; }
@@ -421,6 +423,13 @@ void SongParams_LoadFile()
 			}
 			e.listName[255] = 0;
 			e.path[1023] = 0;
+			{
+				const int mapped = RemapLegacyPlaySub(e.mode, e.path);
+				if (mapped != e.mode) {
+					e.mode = mapped;
+					migrated = true;
+				}
+			}
 			g_tbl.push_back(e);
 		}
 	}
@@ -428,7 +437,7 @@ void SongParams_LoadFile()
 	}
 	f.Close();
 	SpRebuildIndexLocked();
-	g_dirty = false;
+	g_dirty = migrated;
 	s_featLatch = savedata.saveSongParams ? 1 : 0;
 }
 

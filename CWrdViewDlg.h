@@ -39,6 +39,7 @@ protected:
 private:
 	void PersistPos();
 	void SyncFromPlayback();
+	void UnloadWrd();
 	void ReleasePaintBuffers();
 	bool EnsureFrameBuffer(CDC& refDC, int w, int h);
 	UINT WindowDpi() const;

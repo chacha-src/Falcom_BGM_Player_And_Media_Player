@@ -1,4 +1,4 @@
-#include "stdafx.h"
+﻿#include "stdafx.h"
 #include "CMidiMonitorDlg.h"
 #include "oggDlg.h"
 #include "PlayList.h"
@@ -106,7 +106,7 @@ HMIDIOUT s_kpiLiveOut = NULL;
    （savedata.samples だと 48k 設定＋44.1k KPI でモニタだけ走る） */
 static int MmWantMonitorSampleRate()
 {
-	if (mode == MODE_VST_MIDI) {
+	if (IsVstMidiPlayMode(mode)) {
 		MmBindVstActiveSlot();
 		const int r = VstMidiGetRate();
 		if (r > 0) return r;
@@ -814,6 +814,15 @@ static int MmGsDt1Hdr(const BYTE* d, int n)
 	if (d[1] == 0x41 && d[3] == 0x42) return 1; // Roland GS / SC-8850 / SD
 	if (d[1] == 0x42 && d[3] == 0x42) return 1; // Korg NS5R/NX5R GS 互換
 	return 0;
+}
+
+/* 00 00 7F のデータ。00=SC-55 01=SC-88 02=SC-88Pro 03以降=SC-8820/8850 */
+static int MmGsSysModeToMap(int mode)
+{
+	if (mode <= 0) return 1;
+	if (mode == 1) return 2;
+	if (mode == 2) return 3;
+	return 4;
 }
 
 static int MmXgBassHz(int v)
@@ -1605,7 +1614,7 @@ static int FmMidiWantFmView(int sticky)
 		return 1;
 	if (CEmuMidiLiveActive())
 		return 0;
-	if (mode == MODE_VST_MIDI)
+	if (IsVstMidiPlayMode(mode))
 		return 0;
 	if (!filen.IsEmpty()) {
 		if (VstIsMidiExt(filen) || VstIsProjectExt(filen))
@@ -2321,22 +2330,19 @@ void CMidiMonitorDlg::ApplySysex(const BYTE* d, int n, int livePort)
 		return;
 	}
 	if (n >= 11 && VstMidiSysexIsGsSysMode(d, n)) {
-		/* Native (00) = 88map。GS compatible (01) = 55。音色は消さない。 */
+		/* 00=SC-55 01=SC-88 02=SC-88Pro 03=SC-8820/8850。音色は消さない。 */
 		m_sysMode = 1;
 		m_varConn = 1;
-		const int native = (n >= 9 && d[8] == 0) ? 1 : 0;
-		m_gsMapKind = native ? 2 : 1;
+		if (m_mapForce != 0)
+			return;
+		const int kind = MmGsSysModeToMap((n >= 9) ? (int)(d[8] & 0x7f) : 0);
+		m_gsMapKind = kind;
 		const int lo = (livePort >= 0 && livePort <= 1) ? livePort * 16 : 0;
 		const int hi = (livePort >= 0 && livePort <= 1) ? lo + 16 : PART_MAX;
 		for (int i = lo; i < hi && i < PART_MAX; ++i) {
 			Part& p = m_part[i];
-			if (native) {
-				p.mapId = 2;
-				p.bankLsb = 2;
-			} else {
-				p.mapId = 1;
-				p.bankLsb = 1;
-			}
+			p.mapId = kind;
+			p.bankLsb = kind;
 			if (!m_burstApply)
 				RefreshPartName(p);
 			else
@@ -2810,12 +2816,21 @@ void CMidiMonitorDlg::LoadCurrentMidi()
 		mapHint = VstMidiGuessGsMapKind(m_titleBuf, mid);
 	else
 		mapHint = VstMidiFoldGsMapHint(mapHint, VstMidiGuessGsMapKind(NULL, mid));
+	{
+		const int side = VstMidiGuessGsMapFromSidecar(mid);
+		if (side) {
+			if (!m_titleBuf[0] || !VstMidiGuessGsMapKind(m_titleBuf, NULL))
+				mapHint = side;
+			else
+				mapHint = VstMidiFoldGsMapHint(mapHint, side);
+		}
+	}
 	if (mapHint == 7) hasXg = 1;
 	{
 		BYTE msb[32];
 		BYTE have[2048];
 		unsigned short pairs[256];
-		int nPairs = 0, hasGm = 0, hasGs = 0, hasSd = 0, hasGm2 = 0, cc32Max = 0;
+		int nPairs = 0, hasGm = 0, hasGs = 0, hasSd = 0, hasGm2 = 0, cc32Max = 0, lastSysMap = 0;
 		memset(msb, 0, sizeof(msb));
 		memset(have, 0, sizeof(have));
 		for (int i = 0; i < count; ++i) {
@@ -2829,6 +2844,8 @@ void CMidiMonitorDlg::LoadCurrentMidi()
 						if (n >= 5 && d[4] == 0x03) hasGm2 = 1;
 					}
 					if (VstMidiSysexIsGsReset(d, n)) hasGs = 1;
+					if (VstMidiSysexIsGsSysMode(d, n) && n >= 9)
+						lastSysMap = MmGsSysModeToMap(d[8] & 0x7f);
 				}
 				continue;
 			}
@@ -2862,6 +2879,7 @@ void CMidiMonitorDlg::LoadCurrentMidi()
 		}
 		int resolved = 0;
 		if (hasXg) resolved = 0;
+		else if (lastSysMap >= 1 && lastSysMap <= 4) resolved = lastSysMap;
 		else if (mapHint == 8) resolved = 8;
 		else if (mapHint >= 9 && mapHint <= 18) resolved = mapHint;
 		else if (mapHint >= 1 && mapHint <= 4) resolved = mapHint;
@@ -3248,7 +3266,7 @@ void CMidiMonitorDlg::SyncFromPlayback()
 	__int64 pbRaw = playb;
 	if (pbRaw < 0) pbRaw = 0;
 	__int64 pbHeard = pbRaw;
-	if (mode == MODE_VST_MIDI) {
+	if (IsVstMidiPlayMode(mode)) {
 		const int vstPcm = (savedata.vstMultiDll[0] || savedata.vstExtraPath[0]);
 		if (vstPcm) {
 			// 時間表示と同じ再生カーソル（エンジン側）。ノート表示だけ
@@ -3556,6 +3574,95 @@ void CMidiMonitorDlg::FillLcdSnap(MidiHwLcdPartSnap out[16], BYTE keyBits[16], i
 	}
 }
 
+static const wchar_t* MmPcSpell(int pc, int flats)
+{
+	static const wchar_t* sh[12] = {
+		L"C", L"C#", L"D", L"D#", L"E", L"F", L"F#", L"G", L"G#", L"A", L"A#", L"B"
+	};
+	static const wchar_t* fl[12] = {
+		L"C", L"Db", L"D", L"Eb", L"E", L"F", L"Gb", L"G", L"Ab", L"A", L"Bb", L"B"
+	};
+	if (pc < 0) pc = 0;
+	pc %= 12;
+	return flats ? fl[pc] : sh[pc];
+}
+
+/* 鳴っている音（ドラム以外）から C / Csus4 / CPower などを出す。取れなければ — */
+static void MmChordFromMask(int mask, int bass, int keySf, wchar_t* out, int outN)
+{
+	if (!out || outN < 2) return;
+	out[0] = 0;
+	int npc = 0;
+	for (int i = 0; i < 12; ++i)
+		if (mask & (1 << i)) npc++;
+	if (npc < 2 || bass > 127) {
+		wcsncpy_s(out, outN, L"—", _TRUNCATE);
+		return;
+	}
+	struct Tpl { const wchar_t* suf; int bits; int n; };
+	static const Tpl tpls[] = {
+		{ L"maj9", (1 << 0) | (1 << 2) | (1 << 4) | (1 << 7) | (1 << 11), 5 },
+		{ L"9", (1 << 0) | (1 << 2) | (1 << 4) | (1 << 7) | (1 << 10), 5 },
+		{ L"m9", (1 << 0) | (1 << 2) | (1 << 3) | (1 << 7) | (1 << 10), 5 },
+		{ L"maj7", (1 << 0) | (1 << 4) | (1 << 7) | (1 << 11), 4 },
+		{ L"m7b5", (1 << 0) | (1 << 3) | (1 << 6) | (1 << 10), 4 },
+		{ L"7sus4", (1 << 0) | (1 << 5) | (1 << 7) | (1 << 10), 4 },
+		{ L"m7", (1 << 0) | (1 << 3) | (1 << 7) | (1 << 10), 4 },
+		{ L"7", (1 << 0) | (1 << 4) | (1 << 7) | (1 << 10), 4 },
+		{ L"dim7", (1 << 0) | (1 << 3) | (1 << 6) | (1 << 9), 4 },
+		{ L"6", (1 << 0) | (1 << 4) | (1 << 7) | (1 << 9), 4 },
+		{ L"m6", (1 << 0) | (1 << 3) | (1 << 7) | (1 << 9), 4 },
+		{ L"add9", (1 << 0) | (1 << 2) | (1 << 4) | (1 << 7), 4 },
+		{ L"", (1 << 0) | (1 << 4) | (1 << 7), 3 },
+		{ L"m", (1 << 0) | (1 << 3) | (1 << 7), 3 },
+		{ L"sus4", (1 << 0) | (1 << 5) | (1 << 7), 3 },
+		{ L"sus2", (1 << 0) | (1 << 2) | (1 << 7), 3 },
+		{ L"dim", (1 << 0) | (1 << 3) | (1 << 6), 3 },
+		{ L"aug", (1 << 0) | (1 << 4) | (1 << 8), 3 },
+		{ L"Power", (1 << 0) | (1 << 7), 2 },
+	};
+	int bestScore = -1;
+	int bestRoot = 0;
+	int bestN = 0;
+	const wchar_t* bestSuf = NULL;
+	for (int root = 0; root < 12; ++root) {
+		int rel = 0;
+		for (int i = 0; i < 12; ++i)
+			if (mask & (1 << ((root + i) % 12)))
+				rel |= 1 << i;
+		for (int ti = 0; ti < (int)(sizeof(tpls) / sizeof(tpls[0])); ++ti) {
+			const Tpl& t = tpls[ti];
+			int missing = 0;
+			for (int b = 0; b < 12; ++b)
+				if ((t.bits & (1 << b)) && !(rel & (1 << b)))
+					missing++;
+			if (missing) continue;
+			int extras = 0;
+			for (int b = 0; b < 12; ++b)
+				if ((rel & (1 << b)) && !(t.bits & (1 << b)))
+					extras++;
+			const int score = t.n * 20 - extras * 15;
+			if (score > bestScore || (score == bestScore && t.n > bestN)) {
+				bestScore = score;
+				bestRoot = root;
+				bestN = t.n;
+				bestSuf = t.suf;
+			}
+		}
+	}
+	/* Power は余分な音が無いときだけ。三和音以上は1音まで許容 */
+	if (!bestSuf || bestScore < 40) {
+		wcsncpy_s(out, outN, L"—", _TRUNCATE);
+		return;
+	}
+	const int flats = (keySf < 0) ? 1 : 0;
+	const int bassPc = bass % 12;
+	if (bassPc != bestRoot)
+		_snwprintf_s(out, outN, _TRUNCATE, L"%s%s/%s", MmPcSpell(bestRoot, flats), bestSuf, MmPcSpell(bassPc, flats));
+	else
+		_snwprintf_s(out, outN, _TRUNCATE, L"%s%s", MmPcSpell(bestRoot, flats), bestSuf);
+}
+
 void CMidiMonitorDlg::DrawHeader(CDC& dc, int w, int headH, UINT dpi)
 {
 	dc.FillSolidRect(0, 0, w, headH, MM_HEAD_BG);
@@ -3769,8 +3876,20 @@ void CMidiMonitorDlg::DrawHeader(CDC& dc, int w, int headH, UINT dpi)
 			const double b = (double)m_loopEndSample / (double)m_sampleRate;
 			_snwprintf_s(loopBuf, _TRUNCATE, L"     Loop  %.1f-%.1f", a, b);
 		}
-		_snwprintf_s(line5, _TRUNCATE, L"TB %d     Key %s     Reset %s     FF21 %s%s",
-			m_division, keyBuf, sysN, m_mirrorToB ? L"mirror" : (m_gs32 ? L"yes" : L"—"), loopBuf);
+		wchar_t chord[48];
+		int chordMask = 0;
+		int chordBass = 128;
+		for (int i = 0; i < PART_MAX; ++i) {
+			if (m_part[i].isDrum) continue;
+			for (int n = 0; n < NOTE_MAX; ++n) {
+				if (!m_part[i].noteOn[n]) continue;
+				chordMask |= 1 << (n % 12);
+				if (n < chordBass) chordBass = n;
+			}
+		}
+		MmChordFromMask(chordMask, chordBass, m_keySf, chord, 48);
+		_snwprintf_s(line5, _TRUNCATE, L"Chord %s     Reset %s     FF21 %s%s",
+			chord, sysN, m_mirrorToB ? L"mirror" : (m_gs32 ? L"yes" : L"—"), loopBuf);
 	}
 	{
 		CRect t5(Scale(8, dpi), Scale(68, dpi), max(Scale(48, dpi), textR), Scale(84, dpi));
@@ -4596,7 +4715,7 @@ void CMidiMonitorDlg::InjectShort(int part, DWORD msg)
 	if (MmVstHostOpen()) {
 		MmCloseKpiLiveOut();
 		VstLiveMidiShort(port, msg);
-	} else if (mode == MODE_VST_MIDI) {
+	} else if (IsVstMidiPlayMode(mode)) {
 		MmCloseKpiLiveOut();
 		VstMidiInjectShort(port, msg, -1);
 	} else {
@@ -5885,7 +6004,7 @@ void CMidiMonitorDlg::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
 				MmBindVstActiveSlot();
 				if (MmVstHostOpen())
 					VstLiveMidiSysex(port, d, 11);
-				else if (mode == MODE_VST_MIDI)
+				else if (IsVstMidiPlayMode(mode))
 					VstMidiInjectSysex(port, d, 11);
 			}
 		}

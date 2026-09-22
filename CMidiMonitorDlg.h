@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 // CMidiMonitorDlg : FM/MIDI モニタのホスト窓（XG/GS MIDI 描画はこのクラス）。
 // FM 表示は子 CFmMonitorDlg。同時再生は無いので中身は完全に切り替える。
 #include "afxdialogex.h"

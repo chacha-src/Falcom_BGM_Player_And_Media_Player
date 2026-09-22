@@ -1,4 +1,4 @@
-#include "stdafx.h"
+﻿#include "stdafx.h"
 #include "CCustomPopupMenu.h"
 #include "GdiSoft2D.h"
 #include "GdiSoft3D.h"

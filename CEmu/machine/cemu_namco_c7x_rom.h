@@ -1,4 +1,4 @@
-/* Namco C7x 内蔵 MCU マスク ROM（各 16KB、M37702 $C000-$FFFF）。
+﻿/* Namco C7x 内蔵 MCU マスク ROM（各 16KB、M37702 $C000-$FFFF）。
    カスタム MCU 内の音源ドライバ。ゲーム zip には無いのでここに持つ。 */
 #ifndef CEMU_NAMCO_C7X_ROM_H
 #define CEMU_NAMCO_C7X_ROM_H

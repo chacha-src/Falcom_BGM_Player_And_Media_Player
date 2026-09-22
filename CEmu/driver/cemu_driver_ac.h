@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include "cemu_driver.h"
 #include "../machine/cemu_hard_ac.h"
 

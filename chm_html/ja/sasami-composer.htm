@@ -1,0 +1,47 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<title>SASAMI Composer（曲を作る）</title>
+<link rel="stylesheet" type="text/css" href="../css/help.css">
+</head>
+<body>
+
+<div class="topnav"><a href="index.htm">目次</a> &nbsp;|&nbsp; <a href="../en/sasami-composer.htm">English</a></div>
+
+<h1>SASAMI Composer（曲を作る）</h1>
+
+<p class="lead">メディアプレイヤーの「ツール」から開く SASAMI Composer で、ささみ☆ミ形式の曲データを新規作成できます。旧 Win版 sasamim の役割をここに集約しています。</p>
+<h2>開き方</h2>
+<p>メディアプレイヤー画面で <b>ツール</b> を押し、サブメニュー <b>SASAMI</b> から次を選びます。</p>
+<ul>
+<li><b>テキスト</b> … MICP／MML3 両対応の色つき編集とコンパイル</li>
+<li><b>MIDI譜面</b> … 五線スコア（左トラック／Strip／音符パレット）。VST2/3 音色</li>
+<li><b>FM譜面</b> … 同じ五線シェル（FM10＋Misao16）。ダブルクリックで音色エディタ</li>
+</ul>
+<h2>テキスト</h2>
+<p>簡易方言（<code>#1</code>・小文字 <code>t120</code>・<code>cdefgab</code>）に加え、旧 MICP／SASAMIM 実曲文法も同じコンパイルで読めます。<code>[port:ch]</code>・大文字 <code>T</code> テンポ・<code>@prog:bank</code>・<code>P</code>/<code>Q</code>/<code>O</code>/<code>L</code>/<code>V</code>・付点・<code>^</code> タイなどが使えます。コメントは <code>;</code> または <code>//</code> です。</p>
+<p><code>@SVIB</code> / <code>@STREM</code> / <code>@SPAN</code> / <code>@SPORTA</code> は 内部で <code>｛: :｝</code> 相当に展開し、クラシックなピッチ・音量・パン命令になります。そのため <b>MPY / MPW2 / FPY</b> のまま旧プレイヤーでも再生できます（MPW3/FPY2 必須ではありません）。</p>
+<p>VST3 曲にするときは <code>@VST"プラグインのパス"</code> と <code>@PROG</code>・<code>@BANK</code> を書き、保存形式は <b>MPW3</b> になります。FM は先頭に <code>OPNA</code>（または <code>OPN</code>）を置き、コンパイルすると <b>FPY</b> になります。</p>
+<h2>MIDI五線スコア</h2>
+<p>複数トラックの五線に符頭を置きます。上ツールで鉛筆／消しゴム／選択、浮遊「音符」パレットで音価、下の Expression Strip で強弱を編集します。トラック見出しや五線をダブルクリックすると、そのパートの VST2/VST3 エディタが開きます。VST を使わない曲は MPW2／MPY、VST を紐づけた曲は MPW3 で保存します。</p>
+<h2>FM五線スコアと音色</h2>
+<p>FM1–10 と Misao1–16 を同じ五線シェルで編集します。ダブルクリックで音色エディタを開き、発音を確認してから確定します。Strip 既定は Volume です。音色番号は曲内で自動採番されます。</p>
+<h2>再生確認と音声書き出し</h2>
+<p>各ウィンドウの「再生確認」は一時ファイルへ書き出してプレイリストへ追加します。「書き出し」から WAV／MP3／FLAC 変換ダイアログを開けます。</p>
+<div class="tip"><span class="label">ヒント</span>
+<p>3つのウィンドウは別々に開けます。同じ曲を同時に複数窓で編集するときは保存先に注意してください。</p>
+</div>
+<div class="related"><span class="label">あわせて読みたい</span><ul><li><a href="tools.htm">附属ツールいろいろ</a></li><li><a href="vst-midi.htm">.mid を VST 音源で鳴らす</a></li><li><a href="export.htm">音声書き出し（WAV / mp3 / FLAC）</a></li><li><a href="playlist.htm">プレイリストを使う</a></li><li><a href="formats.htm">対応形式と対応タイトル</a></li></ul></div>
+
+<div class="botnav">
+<span class="prev">&#171; 前へ: <a href="tools.htm">附属ツールいろいろ</a></span>
+<span class="next">次へ: <a href="voice.htm">ボイスチェンジャー</a> &#187;</span>
+<span class="up"><a href="index.htm">目次</a></span>
+<div class="clear"></div>
+</div>
+
+<div class="foot">メディアプレイヤー「らいら」 (oggYSEDbgm) — PrePrayerPower Soft</div>
+
+</body>
+</html>

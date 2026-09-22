@@ -2,32 +2,49 @@
 <html>
 <head>
 <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
-<title>MIDI monitor</title>
+<title>FM/MIDI monitor</title>
 <link rel="stylesheet" type="text/css" href="../css/help.css">
 </head>
 <body>
 
 <div class="topnav"><a href="index.htm">Contents</a> &nbsp;|&nbsp; <a href="../ja/midi-monitor.htm">日本語</a></div>
 
-<h1>MIDI monitor</h1>
+<h1>FM/MIDI monitor</h1>
 
-<p class="lead">The MIDI monitor watches the SMF that is playing (.mid / .midi / .kar / .rmi) as 32 parts (A01–A16 / B01–B16). It shows what is written in the MIDI file, not notes guessed from audio. Where the piano roll shows notes over time, this window lists each part's tone, level, and effects.</p>
+<p class="lead">The FM/MIDI monitor is the old MIDI part table and the old FM keyboard, in one window. Both kinds of music do not play at once, so the window swaps to match whatever is sounding. On MIDI it watches the SMF (.mid / .midi / .kar / .rmi) as 32 parts (A01–A16 / B01–B16). Where the piano roll shows notes over time, the MIDI side lists each part's tone, level, and effects.</p>
 <div class="shot">
 <img src="../img/midi-monitor.png" alt="MIDI monitor">
 <p class="cap">MIDI monitor</p>
 </div>
 <h2>How to open it</h2>
 <ul>
-<li>Always-on MIDI button between VST and CD on the media-player bottom bar (stays depressed while open)</li>
+<li>Always-on FM/MIDI button between VST and CD on the media-player bottom bar (stays depressed while open; the narrow label is F/M)</li>
 <li>Media-player banner right-click → Window → MIDI monitor…</li>
 <li>Playlist right-click → Window → Open MIDI monitor</li>
 <li><a href="pianoroll.htm">Seeing notes on the piano roll</a> / analyzer / EQ right-click → Open → MIDI monitor</li>
 <li><a href="vst.htm">VST host</a> wiring canvas right-click → Open MIDI monitor</li>
-<li>Command palette: “MIDI monitor”</li>
+<li>Command palette: “MIDI monitor” or “FM monitor”</li>
 </ul>
 <div class="tip"><span class="label">Tip</span>
-<p>Position and size are remembered for the next open.</p>
+<p>Position and size are remembered. FM and MIDI are not two windows.</p>
 </div>
+<h2>Switching between FM and MIDI</h2>
+<p>The caption is FM/MIDI monitor. Only one side is showing, chosen from what is playing.</p>
+<ul>
+<li><b>MIDI</b> — SMF, <a href="vst-midi.htm">Playing .mid through a VST</a>, the VST host keyboard, and CEmu MIDI output. The 32-part table.</li>
+<li><b>FM</b> — SASAMI .fpy, PMD, FMP, and <a href="cemu.htm">Bonus: old-machine sound</a> chips such as OPN, OPNA, OPM, and OPL. Keys and registers.</li>
+<li>Before anything is playing, the window starts on the MIDI table. After you stop an FM track, the next open stays on FM.</li>
+</ul>
+<h2>What the FM side shows</h2>
+<p>The FM side changes its shell to match the chip. OPNA (YM2608) is 6 FM channels, SSG, rhythm, and ADPCM. OPN (YM2203) is mainly 3 FM channels, and the lower rows stay empty. OPM, OPL, and arcade PCM use that chip's keys and panels.</p>
+<ul>
+<li>The header names the chip and whether you are looking at keys, registers, or both.</li>
+<li>The middle is hex registers and a panel per channel (algorithm and levels).</li>
+<li>The bottom is the channel keyboard. Held notes light up.</li>
+<li>PMD and FMP show registers and keys. If FMP cannot supply registers, only the keys remain.</li>
+<li>An old fmpmd.kpi by itself will not drive PMD or FMP. A newer Plugins pack is swapped in quietly at startup. The KPI download in <a href="render.htm">Rendering settings</a> fetches the same pack.</li>
+</ul>
+<p>CEmu dumps and SASAMI dumps are kept apart. The first uses the temp folder ogg_cemu; the second uses ogg_kbsasami.</p>
 <h2>Header</h2>
 <ul>
 <li>BPM, tempo %, key, time base, meter, transpose, file name (sequence name beside it when present; a name that is only "???" is omitted)</li>
@@ -103,13 +120,13 @@
 <p>Press <b>?</b> for the in-window guide. See also <a href="help-buttons.htm">The “?” guide on every window</a>.</p>
 </div>
 <div class="note"><span class="label">Please note</span>
-<p>Audio files (mp3 and so on) have no MIDI events, so the monitor stays idle. Use it during SMF playback, or when the <a href="vst.htm">VST host</a> is taking keyboard / MIDI in.</p>
+<p>An audio file such as mp3 does not move the MIDI table or the FM keys. Use the window during SMF, an FM song (.fpy / PMD / FMP), <a href="cemu.htm">Bonus: old-machine sound</a>, or the <a href="vst.htm">VST host</a> keyboard.</p>
 </div>
 <div class="related"><span class="label">See also</span><ul><li><a href="vst-midi.htm">Playing .mid through a VST</a></li><li><a href="pianoroll.htm">Seeing the music on a piano roll</a></li><li><a href="vst.htm">Playing instruments with the VST host</a></li><li><a href="midi.htm">Controlling Raira from a MIDI keyboard</a></li><li><a href="render.htm">Rendering settings</a></li></ul></div>
 
 <div class="botnav">
 <span class="prev">&#171; Back: <a href="pianoroll-tune.htm">How the piano roll catches notes</a></span>
-<span class="next">Next: <a href="video.htm">Playing video</a> &#187;</span>
+<span class="next">Next: <a href="wrd.htm">Watching WRD</a> &#187;</span>
 <span class="up"><a href="index.htm">Contents</a></span>
 <div class="clear"></div>
 </div>

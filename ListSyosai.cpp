@@ -385,7 +385,6 @@ void CListSyosai::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDC_SY_HELP, m_help);
 }
 
-#include "CImageBase.h"
 BEGIN_MESSAGE_MAP(CListSyosai, CCustomBlurDialogBase)
 	ON_BN_CLICKED(IDOK999, &CListSyosai::OnBnClickedExplorer)
 	ON_BN_CLICKED(ID_OK, &CListSyosai::OnBnClickedOk)
@@ -401,7 +400,7 @@ BEGIN_MESSAGE_MAP(CListSyosai, CCustomBlurDialogBase)
 	ON_WM_CLOSE()
 	ON_WM_DESTROY()
 	ON_WM_SIZE()
-	cmn(CListSyosai);
+END_MESSAGE_MAP()
 
 
 // CListSyosai メッセージ ハンドラ
@@ -417,7 +416,7 @@ static bool TrackMatchesPlaying(const playlistdata0& pc)
 	const playlistdata0& cur = pl->pc[plcnt];
 	if (_tcscmp(cur.fol, pc.fol) != 0 || cur.sub != pc.sub)
 		return false;
-	if (pc.sub == -10 || pc.sub == -2 || pc.sub == -3 || pc.sub == 30 || pc.sub == 999 || pc.sub == MODE_VST_MIDI)
+	if (pc.sub == -10 || pc.sub == -2 || pc.sub == -3 || pc.sub == 30 || pc.sub == 31 || pc.sub == 999 || pc.sub == MODE_VST_MIDI || pc.sub == MODE_MIDI_PACK)
 		return _tcscmp(cur.name, pc.name) == 0;
 	return cur.ret2 == pc.ret2;
 }
@@ -981,6 +980,8 @@ BOOL CListSyosai::OnInitDialog()
 
 	CCC_CaptionLayout(m_hWnd);
 	LayoutHelpBtn();
+	/* 旧 cmn のカラーキー透過を外したので、表示直後に fixer を張り直す */
+	PostMessage(CCC_MSG_REAPPLY_OPAQUE_FIXERS);
 	return TRUE;
 }
 

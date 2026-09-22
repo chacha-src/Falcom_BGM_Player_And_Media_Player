@@ -1,4 +1,4 @@
-#include "StdAfx.h"
+﻿#include "StdAfx.h"
 #include "cemu_chip_saa1099.h"
 #include "cemu_chip.h"
 #include <string.h>

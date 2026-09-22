@@ -1,0 +1,111 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<title>対応データシート</title>
+<link rel="stylesheet" type="text/css" href="../css/help.css">
+</head>
+<body>
+
+<div class="topnav"><a href="index.htm">目次</a> &nbsp;|&nbsp; <a href="../en/datasheet.htm">English</a></div>
+
+<h1>対応データシート</h1>
+
+<p class="lead">どの作品のBGMがゲーム中と同じループで聴けるか、そして CEmu（CPUエミュレーション）以外の音をどのエンジンが読んでいるかを、1枚にまとめたページです。昔マシンの zip はここには含めず、<a href="cemu-pc98.htm">PC-98</a>、<a href="cemu-pc88.htm">PC-88</a>、<a href="cemu-x68k.htm">X68000</a>、<a href="cemu-x1.htm">X1</a>、<a href="cemu-msx.htm">MSX</a>、<a href="cemu-fm7.htm">FM-7</a>、<a href="cemu-pcat.htm">PC/AT</a>、<a href="cemu-arcade.htm">アーケード</a> に分けてあります。</p>
+<h2>本体と、横にいるプロセス</h2>
+<p>プレイヤー本体は <b>x64</b> です。以前の本体は x86（32bit）でした。反対に、ビット数が違うプラグインを預かる側は <b>x86</b> の <code>ogghost32.exe</code> になりました。以前その役目だったのは x64 の <code>KpiHost64.exe</code> です。</p>
+<ul>
+<li>64bit の VST や KPI は、本体が直接読みます。</li>
+<li>32bit の VST や KPI、Winamp / XMPlay / AIMP の入力プラグインは、<code>ogghost32.exe</code> を起こして名前付きパイプで開きます。実行ファイルと同じ場所に置いてください。</li>
+<li>鍵盤で鳴らす VST のノートと音声はパイプを通さず、共有メモリで渡します。開く・閉じるなどの手続きだけがパイプです。</li>
+</ul>
+<p>一覧に付く <b>&amp;lt;x86&amp;gt;</b> と <b>&amp;lt;x64&amp;gt;</b> は、そのプラグインのビット数です。詳しい置き方は <a href="kpi.htm">KPIプラグインで対応形式をふやす</a> と <a href="vst.htm">VSTホストで音源を鳴らす</a> をご覧ください。</p>
+<h2>内蔵の再生エンジン（CEmu を除く）</h2>
+<p>ふだんのファイルは、CPU をまねる CEmu ではなく、次のエンジンが読みます。珍しい形式だけ <a href="kpi.htm">KPIプラグインで対応形式をふやす</a> へ回します。</p>
+<table class="grid">
+<tr><th>エンジン</th><th>主な拡張子</th><th>聴こえ方</th></tr>
+<tr><td>Vorbis（libvorbisfile）</td><td>ogg</td><td>ゲームBGMの多くと、手持ちの Ogg Vorbis。</td></tr>
+<tr><td>WAV</td><td>wav</td><td>内蔵で読むゲーム用 WAV はループできます。一般の WAV は DirectShow になり、ループとフェードアウトは付きません。</td></tr>
+<tr><td>mp3</td><td>mp3 / mp2 / mp1</td><td>内蔵デコーダ。書き出し先にも選べます。</td></tr>
+<tr><td>AAC / ALAC</td><td>m4a / aac / alac</td><td>内蔵。</td></tr>
+<tr><td>FLAC（libFLAC）</td><td>flac</td><td>内蔵。書き出し先にも選べます。</td></tr>
+<tr><td>TTA</td><td>tta</td><td>内蔵。</td></tr>
+<tr><td>Monkey's Audio</td><td>ape</td><td>内蔵。</td></tr>
+<tr><td>DSD</td><td>dsf / dff</td><td>ハイレゾ。内蔵。</td></tr>
+<tr><td>Opus（libopusfile）</td><td>opus</td><td>内蔵。デコード結果は 48 kHz です。</td></tr>
+<tr><td>SMF</td><td>mid / midi / kar / rmi</td><td>GS/XG の VST、または Windows の MIDI。<a href="vst-midi.htm">.mid を VST 音源で鳴らす</a>。</td></tr>
+<tr><td>SASAMI / PMD / FMP</td><td>fpy など</td><td>FM 曲データ。再生中のモニタは <a href="midi-monitor.htm">FM/MIDIモニタ</a> の FM 側です。</td></tr>
+<tr><td>DirectShow / EVR</td><td>avi / mp4 / mkv / wmv / mov / webm</td><td>動画。<a href="video.htm">動画を再生する</a>。</td></tr>
+</table>
+<div class="note"><span class="label">注意</span>
+<p>CEmu の CPU と音源チップは、この表には入れていません。zip まとめは <a href="cemu.htm">おまけ：昔マシンのサウンド</a> から各機種のページへ進んでください。</p>
+</div>
+<h2>イース</h2>
+<p>ファルコムBGM画面のボタンと、Steam 版をフォルダから開いたときの枠です。フォルダの指定は <a href="folder-setup.htm">ゲームフォルダの設定</a> です。</p>
+<table class="grid">
+<tr><th>作品</th><th>画面での名前</th><th>メモ</th></tr>
+<tr><td>イースI 完全版</td><td>Ys 完全版 Ys1</td><td>Windows 完全版。エターナル系の移植もこの枠で聴きます。</td></tr>
+<tr><td>イースII 完全版</td><td>Ys 完全版 Ys2</td><td>同上。I と II は別フォルダです。</td></tr>
+<tr><td>イースI Chronicles</td><td>Ys I&amp;II Chronicles 1</td><td>Chronicles。完全版とは別の曲データです。</td></tr>
+<tr><td>イースII Chronicles</td><td>Ys I&amp;II Chronicles 2</td><td>同上。</td></tr>
+<tr><td>イースVI ナピシュテムの匣</td><td>Ys6 ナピシュテム</td><td>ループ付き。</td></tr>
+<tr><td>イース フェルガナの誓い</td><td>Ys フェルガナ</td><td>ループ付き。</td></tr>
+<tr><td>イース・オリジン</td><td>Ys オリジン</td><td>ループ付き。</td></tr>
+<tr><td>イース セルセタの樹海</td><td>セルセタの樹海</td><td>Steam 版。</td></tr>
+<tr><td>イースVIII</td><td>閃の軌跡 I・II と同じ枠</td><td>Steam 版。Ys VIII のフォルダを開くとこの再生になります。</td></tr>
+<tr><td>イースIX</td><td>閃III・IV、創、零改、Ys X と同じ枠</td><td>Steam 版。</td></tr>
+<tr><td>イースX</td><td>同上</td><td>Steam 版。Nordics。</td></tr>
+</table>
+<h2>英雄伝説 軌跡シリーズ</h2>
+<table class="grid">
+<tr><th>作品</th><th>画面での名前</th><th>メモ</th></tr>
+<tr><td>空の軌跡 FC</td><td>空の軌跡FC</td><td>英雄伝説VI。</td></tr>
+<tr><td>空の軌跡 SC</td><td>空の軌跡SC</td><td></td></tr>
+<tr><td>空の軌跡 the 3rd</td><td>空の軌跡The3rd</td><td></td></tr>
+<tr><td>空の軌跡 the 1st</td><td>空の軌跡 The 1st</td><td>Steam のリメイク。</td></tr>
+<tr><td>空の軌跡 the 2nd</td><td>空の軌跡 The 2nd</td><td>リメイク側の枠。</td></tr>
+<tr><td>零の軌跡</td><td>零の軌跡</td><td></td></tr>
+<tr><td>零の軌跡改</td><td>閃III などと同じ枠</td><td>Kai。フォルダ名で判別します。</td></tr>
+<tr><td>碧の軌跡</td><td>碧の軌跡</td><td>ループ表が無いため、零の軌跡の t_bgm を借ります。</td></tr>
+<tr><td>閃の軌跡 I / II</td><td>閃の軌跡 I・II、Ys8</td><td>Steam 版。</td></tr>
+<tr><td>閃の軌跡 III / IV</td><td>閃III・IV、創、零改、Ys9、Ys X</td><td>Steam 版。</td></tr>
+<tr><td>創の軌跡</td><td>同上</td><td>Reverie。</td></tr>
+<tr><td>黎の軌跡</td><td>英雄伝説 黎の軌跡</td><td>Daybreak。</td></tr>
+<tr><td>黎の軌跡 II</td><td>英雄伝説 黎の軌跡II</td><td>Daybreak II。</td></tr>
+<tr><td>界の軌跡</td><td>英雄伝説 界の軌跡</td><td>beyond the Horizon。</td></tr>
+</table>
+<h2>そのほかのファルコム作品・近くの作品</h2>
+<table class="grid">
+<tr><th>作品</th><th>画面での名前</th><th>メモ</th></tr>
+<tr><td>Zwei!!</td><td>Zwei!!</td><td>CD 版と DVD 版で音の扱いが違います。</td></tr>
+<tr><td>Zwei II</td><td>ZWEI II</td><td></td></tr>
+<tr><td>Xanadu Next</td><td>XANADU NEXT</td><td></td></tr>
+<tr><td>ソーサリアン オリジナル</td><td>Sorcerian Original</td><td></td></tr>
+<tr><td>ぐるみん</td><td>ぐるみん</td><td></td></tr>
+<tr><td>ダイナソア リザレクション</td><td>ダイナソア</td><td></td></tr>
+<tr><td>ブランディッシュ4 眠れる神の塔</td><td>Brandish4</td><td>WAV をハードディスクへコピーして使います。</td></tr>
+<tr><td>英雄伝説III 白き魔女</td><td>白き魔女</td><td>ガガーブ。WAV をコピーします。</td></tr>
+<tr><td>英雄伝説IV 朱紅い雫</td><td>朱紅い雫</td><td>同上。</td></tr>
+<tr><td>英雄伝説V 海の檻歌</td><td>海の檻歌</td><td>同上。</td></tr>
+<tr><td>西風の狂詩曲</td><td>西風</td><td></td></tr>
+<tr><td>月影のラプソディー</td><td>月影</td><td></td></tr>
+<tr><td>アークトゥルス</td><td>アーク</td><td></td></tr>
+<tr><td>幻想三国志 1</td><td>三国志1</td><td></td></tr>
+<tr><td>幻想三国志 2</td><td>三国志2</td><td></td></tr>
+</table>
+<div class="tip"><span class="label">ヒント</span>
+<p>ボタンが無い Steam 作品も、インストール先を <a href="folder-setup.htm">ゲームフォルダの設定</a> で指せばプレイリストへ入ります。短い一覧は <a href="formats.htm">対応形式と対応タイトル</a> にもあります。</p>
+</div>
+<div class="related"><span class="label">あわせて読みたい</span><ul><li><a href="formats.htm">対応形式と対応タイトル</a></li><li><a href="folder-setup.htm">ゲームフォルダの設定</a></li><li><a href="falcom-main.htm">ファルコムBGM画面</a></li><li><a href="kpi.htm">KPIプラグインで対応形式をふやす</a></li><li><a href="cemu.htm">おまけ：昔マシンのサウンド</a></li><li><a href="vst.htm">VSTホストで音源を鳴らす</a></li></ul></div>
+
+<div class="botnav">
+<span class="prev">&#171; 前へ: <a href="formats.htm">対応形式と対応タイトル</a></span>
+<span class="next">次へ: <a href="mp-overview.htm">メディアプレイヤー画面を見てみる</a> &#187;</span>
+<span class="up"><a href="index.htm">目次</a></span>
+<div class="clear"></div>
+</div>
+
+<div class="foot">メディアプレイヤー「らいら」 (oggYSEDbgm) — PrePrayerPower Soft</div>
+
+</body>
+</html>

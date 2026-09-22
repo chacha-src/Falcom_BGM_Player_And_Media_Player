@@ -1,4 +1,4 @@
-#include "sasami_midi.h"
+﻿#include "sasami_midi.h"
 #include "sasami_misao.h"
 
 #include <windows.h>

@@ -1,4 +1,4 @@
-#ifndef PORTABILITY_FMPMD_H
+﻿#ifndef PORTABILITY_FMPMD_H
 #define PORTABILITY_FMPMD_H
 
 #include "comsupport.h"

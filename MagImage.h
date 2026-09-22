@@ -9,7 +9,7 @@ struct MagImage {
 	int y0;
 	unsigned pal[256]; // 0x00RRGGBB
 	int nCol;
-	unsigned* px;      // w*h, 0x00RRGGBB
+	unsigned* px;      // w*h、パレット番号（PC-98 16色は 0–15。@PAL/@FADE が効く）
 	MagImage() : w(0), h(0), x0(0), y0(0), nCol(0), px(nullptr)
 	{
 		memset(pal, 0, sizeof(pal));

@@ -1,0 +1,1152 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<title>CEmu: Arcade</title>
+<link rel="stylesheet" type="text/css" href="../css/help.css">
+</head>
+<body>
+
+<div class="topnav"><a href="index.htm">Contents</a> &nbsp;|&nbsp; <a href="../ja/cemu-arcade.htm">日本語</a></div>
+
+<h1>CEmu: Arcade</h1>
+
+<p class="lead">Arcade boards do not share one CPU and one chip the way a PC does, so the table is zip, title, CPU, chips, and the catalog board name. Packs live in <code>data\roms</code>. Steps are in <a href="cemu.htm">Bonus: old-machine sound</a>.</p>
+<h2>CPUs and chips</h2>
+<p>Each row is the sound section this bonus assigns from the board name. It is the chip CPU, not the game's main CPU.</p>
+<table class="grid">
+<tr><th>Board family</th><th>CPU</th><th>Sound chips</th></tr>
+<tr><td>System 16A/B, CPS1, Twin16, Rastan / Asuka</td><td>Z80</td><td>OPM (YM2151)</td></tr>
+<tr><td>Hang-On, Space Harrier</td><td>Z80</td><td>OPN + SegaPCM</td></tr>
+<tr><td>OutRun, After Burner</td><td>Z80</td><td>OPM + SegaPCM</td></tr>
+<tr><td>System 18, System 32</td><td>Z80</td><td>YM2612 + RF5C68</td></tr>
+<tr><td>System 24</td><td>68000</td><td>OPM</td></tr>
+<tr><td>CPS2, ZN, QSound</td><td>Z80</td><td>QSound</td></tr>
+<tr><td>Neo Geo</td><td>68000</td><td>YM2610</td></tr>
+<tr><td>Konami 053260</td><td>Z80</td><td>K053260 + OPM</td></tr>
+<tr><td>Konami 054539</td><td>Z80</td><td>K054539 + OPM</td></tr>
+<tr><td>System GX</td><td>68000</td><td>K054539</td></tr>
+<tr><td>Namco System 1 / System 86</td><td>6809</td><td>CUS30 + OPM</td></tr>
+<tr><td>Namco System 2 / 21</td><td>6809</td><td>C140 + OPM</td></tr>
+<tr><td>Namco WSG (Mappy and similar)</td><td>6809</td><td>CUS30</td></tr>
+<tr><td>Namco System 11 / 12 / 22</td><td>68000</td><td>C352</td></tr>
+<tr><td>Namco NA / NB</td><td>68000</td><td>C140</td></tr>
+<tr><td>Taito F3</td><td>68000</td><td>ES5505</td></tr>
+<tr><td>Taito F2 / B</td><td>Z80</td><td>YM2610</td></tr>
+<tr><td>Haunted Castle</td><td>Z80</td><td>OPL2 (YM3812)</td></tr>
+<tr><td>Salamander and other AY boards</td><td>Z80</td><td>AY</td></tr>
+<tr><td>Irem M72 (R-TYPE family)</td><td>Z80</td><td>OPM</td></tr>
+<tr><td>Irem M92</td><td>V30</td><td>OPM + GA20</td></tr>
+<tr><td>Data East (HuC6280 sound board)</td><td>HuC6280</td><td>OPM + OKI6295</td></tr>
+<tr><td>Alpha 68K-II</td><td>Z80</td><td>OPN + OPLL</td></tr>
+<tr><td>Sega Model 2 (Daytona and similar)</td><td>68000</td><td>MultiPCM + YM3438</td></tr>
+<tr><td>Hornet (Gradius IV and similar)</td><td>68000</td><td>RF5C400</td></tr>
+</table>
+<div class="note"><span class="label">Please note</span>
+<p>The zip table below lists only packs confirmed to play. A board on the map with no row here still will not play.</p>
+</div>
+<h2>What plays now</h2>
+<p>CPU and chips follow the same rules as the map above. Titles are the catalog names.</p>
+<table class="grid">
+<tr><th>zip</th><th>Title</th><th>CPU</th><th>Sound chips</th><th>Board</th></tr>
+<tr><td>10yard.zip</td><td>[Irem M62] 10-Yard Fight (AY-3-8910x2)</td><td>Z80</td><td>OPM</td><td>m62</td></tr>
+<tr><td>1941.zip</td><td>[CPS-1] 1941 (1941 -カウンターアタック-) (YM2151+MSM6295)</td><td>Z80</td><td>OPM</td><td>cps1</td></tr>
+<tr><td>1943.zip</td><td>[Ghosts and Goblins] 1943 (１９４３～ミッドウェイ海戦～) (YM2203x2)</td><td>Z80</td><td>OPM</td><td>opn2</td></tr>
+<tr><td>1943kai.zip</td><td>[Ghosts and Goblins] 1943 Kai (1943改 -ミッドウェイ海戦-) (YM2203x2)</td><td>Z80</td><td>OPM</td><td>opn2</td></tr>
+<tr><td>1944.zip</td><td>[CPS-2] 1944: The Loop Master (1944 -ザ・ループマスター-) (QSound)</td><td>Z80</td><td>QSound</td><td>cps2</td></tr>
+<tr><td>19xx.zip</td><td>[CPS-2] 19XX: The War Against Destiny (QSound)</td><td>Z80</td><td>QSound</td><td>cps2</td></tr>
+<tr><td>2020bb.zip</td><td>[Neo Geo] 2020 Super Baseball (2020年スーパーベースボール) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>3countb.zip</td><td>[Neo Geo] 3 Count Bout (ファイヤースープレックス) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>3wonders.zip</td><td>[CPS-1] Three Wonders (ワンダー３) (YM2151+MSM6295)</td><td>Z80</td><td>OPM</td><td>cps1</td></tr>
+<tr><td>40love.zip</td><td>[Taito Sound Board '84] Forty-Love (フォーティラブ) (YM2149+MSM5232)</td><td>Z80</td><td>OPM</td><td>flstory</td></tr>
+<tr><td>4dwarrio.zip</td><td>[System 1] 4D Warriors (４Ｄウォーリアーズ) (SN76496x2)</td><td>Z80</td><td>OPM</td><td>system1</td></tr>
+<tr><td>500gp.zip</td><td>[System Super 23] 500GP (C352)</td><td>68000</td><td>C352</td><td>system12</td></tr>
+<tr><td>64street.zip</td><td>[Jaleco Mega System 1] 64th. Street: A Detective Story (64番街) (YM2151+MSM6295x2)</td><td>68000</td><td>OPM + OKI6295</td><td>megasys1</td></tr>
+<tr><td>7ordi.zip</td><td>[NMG5] 7 Ordi (YM3812+MSM6295)</td><td>Z80</td><td>OPM</td><td>pclubys</td></tr>
+<tr><td>88games.zip</td><td>['88 Games] '88 Games (ハイパースポーツスペシャル) (YM2151+uPD7759x2)</td><td>Z80</td><td>OPM</td><td>88games</td></tr>
+<tr><td>abcheck.zip</td><td>[ND-1] Abnormal Check (アブノーマルチェック) (C352)</td><td>68000</td><td>C352</td><td>nd1</td></tr>
+<tr><td>abcop.zip</td><td>[X Board] AB Cop (A.B.コップ ＜エアーバイクコップ＞) (YM2151+SegaPCM)</td><td>Z80</td><td>OPM + SegaPCM</td><td>toutrun</td></tr>
+<tr><td>aburner.zip</td><td>[X Board] After Burner (アフターバーナー) (YM2151+SegaPCM)</td><td>Z80</td><td>OPM + SegaPCM</td><td>aburner</td></tr>
+<tr><td>aburner2.zip</td><td>[X Board] After Burner II (アフターバーナーⅡ) (YM2151+SegaPCM)</td><td>Z80</td><td>OPM + SegaPCM</td><td>aburner</td></tr>
+<tr><td>aburner2_3ds.zip</td><td>[X Board] After Burner II 3DS Version (アフターバーナーⅡ 3DS Version) (YM2151+SegaPCM)</td><td>Z80</td><td>OPM + SegaPCM</td><td>aburner</td></tr>
+<tr><td>aceattac.zip</td><td>[System 16B] Ace Attacker (エースアタッカー) (YM2151+uDP7759)</td><td>Z80</td><td>OPM</td><td>system16b</td></tr>
+<tr><td>acedrvrw.zip</td><td>[System 22] Ace Driver (エースドライバー -レーシングエボリューション-) (C352)</td><td>68000</td><td>C352</td><td>system22</td></tr>
+<tr><td>actfancr.zip</td><td>[Robocop] Act-Fancer Cybernetick Hyper Weapon (アクトフェンサー) (YM2203+YM3812+MSM6295)</td><td>HuC6280</td><td>OPM + OKI6295</td><td>triothep</td></tr>
+<tr><td>adillor.zip</td><td>[System Super 22] Armadillo Racing (C352)</td><td>68000</td><td>C352</td><td>system22</td></tr>
+<tr><td>aerofgt.zip</td><td>[Aero Fighters] Aero Fighters (ソニックウイングス) (YM2610)</td><td>Z80</td><td>OPM</td><td>aerofgt</td></tr>
+<tr><td>afighter.zip</td><td>[System 16A] Action Fighter (アクションファイター) (YM2151)</td><td>Z80</td><td>OPM</td><td>system16a</td></tr>
+<tr><td>agallet.zip</td><td>[Cave] Air Gallet (アクウギャレット) (YM2151+MSM6295x2)</td><td>Z80</td><td>OPM</td><td>agallet</td></tr>
+<tr><td>agress.zip</td><td>[Double Dragon 2] Agress (アグレス -ミサイル大戦略-) (YM2151+MSM6295)</td><td>Z80</td><td>OPM</td><td>ddragon2</td></tr>
+<tr><td>ainferno.zip</td><td>[Air System] Air Inferno (エアーインフェルノ) (YM2610)</td><td>Z80</td><td>YM2610</td><td>f2system</td></tr>
+<tr><td>airbustr.zip</td><td>[Air Buster] Air Buster: Trouble Specialty Raid Unit (エアバスター) (YM2203+MSM6295)</td><td>Z80</td><td>OPM</td><td>airbuster</td></tr>
+<tr><td>airco22b.zip</td><td>[System Super 22] Air Combat 22 (エアーコンバット22) (C352)</td><td>68000</td><td>C352</td><td>system22</td></tr>
+<tr><td>airduel.zip</td><td>[Irem M72] Air Duel (アイレム・エアデュエル) (YM2151)</td><td>Z80</td><td>OPM</td><td>m72</td></tr>
+<tr><td>ajax.zip</td><td>[Ajax] Ajax (エージャックス) (YM2151+K7232x2)</td><td>Z80</td><td>OPM</td><td>ajax</td></tr>
+<tr><td>alcon.zip</td><td>[Slap Fight] Alcon (スラップファイト) (AY-3-8910x2)</td><td>Z80</td><td>OPM</td><td>slapfght</td></tr>
+<tr><td>alexkidd.zip</td><td>[System 16A] Alex Kidd: The Lost Stars (アレックスキッド ロストスターズ) (YM2151+uDP7751)</td><td>Z80</td><td>OPM</td><td>system16a</td></tr>
+<tr><td>aliens.zip</td><td>[Aliens] Aliens (エイリアンズ) (YM2151+K7232)</td><td>Z80</td><td>OPM</td><td>crimfght</td></tr>
+<tr><td>aliensec.zip</td><td>[Baraduke] Baraduke (バラデューク) (C30)</td><td>6809</td><td>CUS30</td><td>wsg63701</td></tr>
+<tr><td>aliensyn.zip</td><td>[Pre-System 16] Alien Syndrome (エイリアンシンドローム) (YM2151+uDP7759)</td><td>Z80</td><td>OPM</td><td>system16b</td></tr>
+<tr><td>alpham2.zip</td><td>[Neo Geo] Alpha Mission II (ASO II -ラストガーディアン-) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>alpine.zip</td><td>[SJ System] Alpine Ski (アルペンスキー) (AY-3-8910x4+DAC)</td><td>Z80</td><td>OPM</td><td>taitosj</td></tr>
+<tr><td>alpinerd.zip</td><td>[System Super 22] Alpine Racer (アルペンレーサー) (C352)</td><td>68000</td><td>C352</td><td>system22</td></tr>
+<tr><td>alpinesa.zip</td><td>[System Super 22] Alpine Surfer (アルペンサーファー) (C352)</td><td>68000</td><td>C352</td><td>system22</td></tr>
+<tr><td>alpinr2b.zip</td><td>[System Super 22] Alpine Racer 2 (アルペンレーサー2) (C352)</td><td>68000</td><td>C352</td><td>system22</td></tr>
+<tr><td>altbeast.zip</td><td>[System 16B] Altered Beast (獣王記) (YM2151+uDP7759)</td><td>Z80</td><td>OPM</td><td>system16b</td></tr>
+<tr><td>amazon.zip</td><td>[Terra Cresta] Soldier Girl Amazon (聖戦士アマテラス) (YM3526+DAC)</td><td>Z80</td><td>OPM</td><td>terracre</td></tr>
+<tr><td>amidar.zip</td><td>[Scramble] Amidar (アミダー) (AY-3-8910x2)</td><td>Z80</td><td>OPM</td><td>scramble</td></tr>
+<tr><td>androdun.zip</td><td>[Neo Geo] Andro Dunos (アンドロデュノス) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>angelkds.zip</td><td>[Angel Kids] Angel Kids (YM2203x2)</td><td>Z80</td><td>OPM</td><td>angelkds</td></tr>
+<tr><td>animaljr.zip</td><td>[Monkey Mole Panic] Animalandia Jr. (ワイワイアニマルランドJr.) (YM2413+AY-3-8910)</td><td>Z80</td><td>OPM</td><td>mmpanic</td></tr>
+<tr><td>aodk.zip</td><td>[Neo Geo] Aggressors of Dark Kombat (痛快ガンガン行進曲) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>aof.zip</td><td>[Neo Geo] Art of Fighting (龍虎の拳) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>aof2.zip</td><td>[Neo Geo] Art of Fighting 2 (龍虎の拳2) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>aof3.zip</td><td>[Neo Geo] Art of Fighting 3: The Path of the Warrior (アートオブファイティング 龍虎の拳外伝) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>aquajack.zip</td><td>[Z System] Aqua Jack (アクアジャック) (YM2610)</td><td>Z80</td><td>YM2610</td><td>dual68</td></tr>
+<tr><td>aquajet.zip</td><td>[System Super 22] Aqua Jet (アクアジェット) (C352)</td><td>68000</td><td>C352</td><td>system22</td></tr>
+<tr><td>aquarush.zip</td><td>[System 12] Aqua Rush (アクアラッシュ) (C352)</td><td>68000</td><td>C352</td><td>system12</td></tr>
+<tr><td>arabfgt.zip</td><td>[System 32] Arabian Fight (アラビアンファイト) (YM3438x2+RF5C68)</td><td>Z80</td><td>YM2612 + RF5C68</td><td>system32</td></tr>
+<tr><td>arescue.zip</td><td>[System 32] Air Rescue (エアレスキュー) (YM3438x2+RF5C68)</td><td>Z80</td><td>YM2612 + RF5C68</td><td>system32</td></tr>
+<tr><td>argus.zip</td><td>[Argus] Argus (アーガス) (YM2203)</td><td>Z80</td><td>OPM</td><td>argus</td></tr>
+<tr><td>arkanoid.zip</td><td>[Arkanoid] Arkanoid (AY-3-8910)</td><td>Z80</td><td>OPM</td><td>arkanoid</td></tr>
+<tr><td>arkarea.zip</td><td>[Mutant Night] Ark Area (アークエリア) (YM2203x2)</td><td>Z80</td><td>OPM</td><td>robokid</td></tr>
+<tr><td>armedf.zip</td><td>[Chouji Meikyuu Legion] Armed Formation (アームドF) (YM3812+DAC)</td><td>Z80</td><td>OPM</td><td>terraf</td></tr>
+<tr><td>armorcar.zip</td><td>[Scramble] Armored Car (AY-3-8910x2)</td><td>Z80</td><td>OPM</td><td>scramble</td></tr>
+<tr><td>armwar.zip</td><td>[CPS-2] Armored Warriors (パワードギア) (QSound)</td><td>Z80</td><td>QSound</td><td>cps2</td></tr>
+<tr><td>ashnojoe.zip</td><td>[Ashita no Joe] Success Joe (あしたのジョー) (YM2203+MSM5205)</td><td>Z80</td><td>OPM</td><td>ashnojoe</td></tr>
+<tr><td>ashura.zip</td><td>[B System] Ashura Blaster (阿修羅ブラスター) (YM2610)</td><td>Z80</td><td>YM2610</td><td>bsystem</td></tr>
+<tr><td>aso.zip</td><td>[Aso] Aso (A.S.O エーエスオー) (YM3526)</td><td>68000</td><td>YM2610</td><td>aso</td></tr>
+<tr><td>assault.zip</td><td>[System 2] Assault (アサルト) (YM2151+C140)</td><td>6809</td><td>C140 + OPM</td><td>system2</td></tr>
+<tr><td>astorm.zip</td><td>[System 18] Alien Storm (エイリアンストーム) (YM3438x2+RF5C68)</td><td>Z80</td><td>YM2612 + RF5C68</td><td>system18</td></tr>
+<tr><td>astyanax.zip</td><td>[Jaleco Mega System 1] The Astyanax (ザ・ロードオブキング) (YM2151+MSM6295x2)</td><td>68000</td><td>OPM + OKI6295</td><td>megasys1</td></tr>
+<tr><td>asuka.zip</td><td>[Bonze Adventure] Asuka &amp;amp; Asuka (飛鳥&amp;amp;飛鳥) (YM2151+MSM5205)</td><td>Z80</td><td>OPM</td><td>fullt</td></tr>
+<tr><td>athena.zip</td><td>[Psycho Soldier] Athena (アテナ) (YM3526x2)</td><td>68000</td><td>YM2610</td><td>3526x2</td></tr>
+<tr><td>aurail.zip</td><td>[System 16B] Aurail (オーライル) (YM2151+uDP7759)</td><td>Z80</td><td>OPM</td><td>system16b</td></tr>
+<tr><td>avengers.zip</td><td>[Ghosts and Goblins] Avengers (必殺！無頼拳) (YM2203x2)</td><td>Z80</td><td>OPM</td><td>opn2</td></tr>
+<tr><td>avsp.zip</td><td>[CPS-2] Alien vs. Predator (エイリアンVSプレデター) (QSound)</td><td>Z80</td><td>QSound</td><td>cps2</td></tr>
+<tr><td>avspirit.zip</td><td>[Jaleco Mega System 1] Avenging Spirit (ファンタズム) (YM2151+MSM6295x2)</td><td>68000</td><td>OPM + OKI6295</td><td>megasys1</td></tr>
+<tr><td>b2b.zip</td><td>[Neo Geo] Bang Bang Busters (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>backfirt.zip</td><td>[Gemini Wing] Back Fire (YM3812+MSM5205)</td><td>Z80</td><td>OPM</td><td>gemini</td></tr>
+<tr><td>baddudes.zip</td><td>[Robocop] Bad Dudes vs. Dragonninja (ドラゴン忍者) (YM2203+YM3812+MSM6295)</td><td>HuC6280</td><td>OPM + OKI6295</td><td>drgninja</td></tr>
+<tr><td>bakatono.zip</td><td>[Neo Geo] Bakatonosama Mahjong Manyuki (バカ殿様麻雀漫遊記) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>bakutotu.zip</td><td>[System 1] Bakutotsu Kijuutei / Baraduke 2 (泊突機銃艇) (YM2151+C30)</td><td>6809</td><td>CUS30 + OPM</td><td>system1</td></tr>
+<tr><td>baluba.zip</td><td>[Star Force] Baluba-louk no Densetsu (バルバルークの伝説) (SN76496x3)</td><td>Z80</td><td>OPM</td><td>starforce</td></tr>
+<tr><td>bangbead.zip</td><td>[Neo Geo] Bang Bead (バンビィード) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>bankp.zip</td><td>[Bank Panic] Bank Panic (バンクパニック) (SN76496x3)</td><td>Z80</td><td>OPM</td><td>bankp</td></tr>
+<tr><td>batcir.zip</td><td>[CPS-2] Battle Circuit (バトルサーキット) (QSound)</td><td>Z80</td><td>QSound</td><td>cps2</td></tr>
+<tr><td>batrider.zip</td><td>[Raizing Type 3] Armed Police Batrider (アームドポリス バトライダー) (YM2151+MSM6295x2)</td><td>Z80</td><td>OPM</td><td>batrider</td></tr>
+<tr><td>battlnts.zip</td><td>[Battlantis] Battlantis (バトランティス) (YM3812x2)</td><td>Z80</td><td>OPM</td><td>battlantis</td></tr>
+<tr><td>battroad.zip</td><td>[Irem M62] The Battle-Road (ザ・バトルロード) (AY-3-8910x2)</td><td>Z80</td><td>OPM</td><td>m62</td></tr>
+<tr><td>bayroute.zip</td><td>[System 16B] Bay-Route (YM2151+uDP7759)</td><td>Z80</td><td>OPM</td><td>system16b</td></tr>
+<tr><td>bbakraid.zip</td><td>[Battle Bakraid] Battle Bakraid (バトルバクレイド) (YMZ280B)</td><td>Z80</td><td>OPM</td><td>bbakraid</td></tr>
+<tr><td>bchopper.zip</td><td>[Irem M72] Battle Chopper (ミスターヘリの大冒険) (YM2151)</td><td>Z80</td><td>OPM</td><td>m72</td></tr>
+<tr><td>benberob.zip</td><td>[SJ System] Ben Bero Beh (べんべろべえ) (YM2149x3)</td><td>Z80</td><td>OPM</td><td>halleysc</td></tr>
+<tr><td>berabohm.zip</td><td>[System 1] Beraboh Man (超絶倫人べラボ-マン) (YM2151+C30)</td><td>6809</td><td>CUS30 + OPM</td><td>system1</td></tr>
+<tr><td>bermudat.zip</td><td>[Psycho Soldier] Bermuda Triangle (バミューダトライアングル) (YM3526+Y8950)</td><td>68000</td><td>YM2610</td><td>3526_8950</td></tr>
+<tr><td>bgaregga.zip</td><td>[Raizing Type 2] Battle Garegga (バトルガレッガ) (YM2151+MSM6295)</td><td>Z80</td><td>OPM</td><td>bgaregga</td></tr>
+<tr><td>bigstrik.zip</td><td>[Jaleco Mega System 1] Big Striker (ビッグストライカー) (YM2151+MSM6295x2)</td><td>68000</td><td>OPM + OKI6295</td><td>megasys1</td></tr>
+<tr><td>bingoc.zip</td><td>[Medal] Bingo Circus (ビンゴサーカス) (YM2151)</td><td>Z80</td><td>OPM</td><td>system16a</td></tr>
+<tr><td>bioatack.zip</td><td>[SJ System] Bio Attack (バイオアタック) (AY-3-8910x4+DAC)</td><td>Z80</td><td>OPM</td><td>taitosj</td></tr>
+<tr><td>bionicc.zip</td><td>[Bionic Commando] Bionic Commando (フォゴットンワールド) (YM2151)</td><td>Z80</td><td>OPM</td><td>bionicc</td></tr>
+<tr><td>birdtry.zip</td><td>[Robocop] Birdie Try (バーディートライ) (YM2203+YM3812+MSM6295)</td><td>HuC6280</td><td>OPM + OKI6295</td><td>drgninja</td></tr>
+<tr><td>bjourney.zip</td><td>[Neo Geo] Blue's Journey (ラギ) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>blastoff.zip</td><td>[System 1] Blast Off (ブラストオフ) (YM2151+C30)</td><td>6809</td><td>CUS30 + OPM</td><td>system1</td></tr>
+<tr><td>blazeon.zip</td><td>[Blazeon] Blazeon (ブレイゾン) (YM2151)</td><td>Z80</td><td>OPM</td><td>blazeon</td></tr>
+<tr><td>blazer.zip</td><td>[System 1] Blazer (ブレイザー) (YM2151+C30)</td><td>6809</td><td>CUS30 + OPM</td><td>system1</td></tr>
+<tr><td>blazstar.zip</td><td>[Neo Geo] Blazing Star (ブレイジングスター) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>blkpnthr.zip</td><td>[Salamander] Black Panther (ブラックパンサー) (YM2151+K7232)</td><td>Z80</td><td>OPM</td><td>blkpanther</td></tr>
+<tr><td>blktiger.zip</td><td>[Black Tiger] Black Tiger (ブラックドラゴン) (YM2203x2)</td><td>Z80</td><td>OPM</td><td>blktiger</td></tr>
+<tr><td>blockgal.zip</td><td>[System 1] Block Gal (ブロックギャル) (SN76496x2)</td><td>Z80</td><td>OPM</td><td>system1</td></tr>
+<tr><td>blockhl.zip</td><td>[Thunder Cross] Block Hole (クォース) (YM2151)</td><td>Z80</td><td>OPM</td><td>thundercross</td></tr>
+<tr><td>blockout.zip</td><td>[Double Dragon 2] Block Out (ブロックアウト) (YM2151+MSM6295)</td><td>Z80</td><td>OPM</td><td>ddragon2</td></tr>
+<tr><td>bloxeed.zip</td><td>[System 18] Bloxeed (ブロクシード) (YM3438x2+RF5C68)</td><td>Z80</td><td>YM2612 + RF5C68</td><td>system18</td></tr>
+<tr><td>blswhstl.zip</td><td>BELLS AND WHISTLES［出たな！ツインビー］</td><td>Z80</td><td>K053260 + OPM</td><td>053260</td></tr>
+<tr><td>bmaster.zip</td><td>[Irem M92] Blade Master (クロスブレイズ) (YM2151+GA20)</td><td>V30</td><td>OPM + GA20</td><td>m92</td></tr>
+<tr><td>bodyslam.zip</td><td>[Pre-System 16] Body Slam / Dump Matsumoto (ダンプ松本) (YM2151+uDP7751)</td><td>Z80</td><td>OPM</td><td>system16a</td></tr>
+<tr><td>bombjack.zip</td><td>[Bomb Jack] Bomb Jack (ボンジャック) (AY-3-8910x3)</td><td>Z80</td><td>OPM</td><td>bombjack</td></tr>
+<tr><td>bombsa.zip</td><td>[Argus] Bombs Away (YM2203x2)</td><td>Z80</td><td>OPM</td><td>butasan</td></tr>
+<tr><td>bonzeadv.zip</td><td>[Bonze Adventure] Bonze Adventure (地獄めぐり) (YM2610)</td><td>Z80</td><td>YM2610</td><td>f2system</td></tr>
+<tr><td>boogwing.zip</td><td>[DECO32] Boogie Wings (ザ・グレイトラグタイムショー) (YM2151+MSM6295x2)</td><td>HuC6280</td><td>OPM + OKI6295</td><td>deco32</td></tr>
+<tr><td>bosco.zip</td><td>[Bosconian] Bosconian (ボスコニアン) (Namco WSG)</td><td>6809</td><td>CUS30</td><td>wsgz80</td></tr>
+<tr><td>boxyboy.zip</td><td>[System 1] Soukoban Deluxe / Boxy Boy (倉庫番ＤＸ) (YM2151+C30)</td><td>6809</td><td>CUS30 + OPM</td><td>system1</td></tr>
+<tr><td>brain.zip</td><td>[System 2] Brain (ブレイン) (SN76496x2)</td><td>Z80</td><td>OPM</td><td>system1</td></tr>
+<tr><td>breakers.zip</td><td>[Neo Geo] Breakers (ブレイカーズ) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>breakrev.zip</td><td>[Neo Geo] Breakers Revenge (ブレイカーズリベンジ) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>brkthru.zip</td><td>[Break Thru] Break Thru (強行突破) (YM2203+YM3526)</td><td>HuC6280</td><td>OPM + OKI6295</td><td>brkthru</td></tr>
+<tr><td>bstars.zip</td><td>[Neo Geo] Baseball Stars Professional (ベースボールスターズプロフェッショナル) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>bstars2.zip</td><td>[Neo Geo] Baseball Stars 2 (ベースボールスターズ2) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>btlkroad.zip</td><td>[Gunbird] Battle K-Road (バトルクロード) (YM2610)</td><td>Z80</td><td>OPM</td><td>gunbird</td></tr>
+<tr><td>bubbletr.zip</td><td>[System 2] Bubble Trouble (バブルトラブル -ゴーリーゴースト2-) (YM2151+C140)</td><td>6809</td><td>C140 + OPM</td><td>system2</td></tr>
+<tr><td>bublbobl.zip</td><td>[Bubble Bobble] Bubble Bobble (バブルボブル) (YM2203+YM3526)</td><td>Z80</td><td>OPM</td><td>bubblebobble</td></tr>
+<tr><td>bublboblp.zip</td><td>[Tokio] Bubble Bobble Prototype (バブルボブルプロトタイプVer) (YM2203)</td><td>Z80</td><td>OPM</td><td>tokio</td></tr>
+<tr><td>bucky.zip</td><td>[Xexex] Bucky O'Hare (バッキーオヘア) (YM2151+K54539)</td><td>Z80</td><td>K054539 + OPM</td><td>054539</td></tr>
+<tr><td>bullet.zip</td><td>[System 16B] Bullet (バレット) (YM2151+uDP7759)</td><td>Z80</td><td>OPM</td><td>system16b</td></tr>
+<tr><td>bullfgt.zip</td><td>[System 1] Bullfight / The Togyu (ザ・闘牛) (SN76496x2)</td><td>Z80</td><td>OPM</td><td>system1</td></tr>
+<tr><td>burnforc.zip</td><td>[System 2] Burning Force (バーニングフォース) (YM2151+C140)</td><td>6809</td><td>C140 + OPM</td><td>system2</td></tr>
+<tr><td>burningf.zip</td><td>[Neo Geo] Burning Fight (バーニングファイト) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>butasan.zip</td><td>[Argus] Butasan (ぶたさん) (YM2203x2)</td><td>Z80</td><td>OPM</td><td>butasan</td></tr>
+<tr><td>cabal.zip</td><td>[Cabal] Cabal (YM2151+MSM5205)</td><td>Z80</td><td>OPM</td><td>cabal</td></tr>
+<tr><td>cadash.zip</td><td>[Bonze Adventure] Cadash (カダッシュ) (YM2151+MSM5205)</td><td>Z80</td><td>OPM</td><td>fullt</td></tr>
+<tr><td>calorie.zip</td><td>[Calorie Kun vs Moguranian] Calorie Kun vs Moguranian (カロリーくんvsモグラニアン) (AY-3-8910x2)</td><td>Z80</td><td>OPM</td><td>calorie</td></tr>
+<tr><td>cameltry.zip</td><td>[F1 System] Cameltry (キャメルトライ) (YM2610)</td><td>Z80</td><td>YM2610</td><td>f2system</td></tr>
+<tr><td>cameltrya.zip</td><td>[F1 System] Cameltry (キャメルトライ) (YM2203+MSM6295)</td><td>Z80</td><td>OPM</td><td>viofight</td></tr>
+<tr><td>canvas.zip</td><td>[Main Event] Canvas Croquis (キャンバスクロッキー) (AY-3-8910x2)</td><td>68000</td><td>YM2610</td><td>mainsnk</td></tr>
+<tr><td>captaven.zip</td><td>[DECO32] Captain America and The Avengers (キャプテンアメリカ -ジ・アベンジャーズ-) (YM2151+MSM6295x2)</td><td>HuC6280</td><td>OPM + OKI6295</td><td>deco32</td></tr>
+<tr><td>captcomm.zip</td><td>[CPS-1] Captain Commando (キャプテンコマンドー) (YM2151+MSM6295)</td><td>Z80</td><td>OPM</td><td>cps1</td></tr>
+<tr><td>cawing.zip</td><td>[CPS-1] Carrier Air Wing (U.S.ネイビー) (YM2151+MSM6295)</td><td>Z80</td><td>OPM</td><td>cps1</td></tr>
+<tr><td>cbuster.zip</td><td>[Thunder Zone] Crude Buster (クルードバスター) (YM2151+YM2203+MSM6295x2)</td><td>HuC6280</td><td>OPM + OKI6295</td><td>thndzone</td></tr>
+<tr><td>cclimbr2.zip</td><td>[Chouji Meikyuu Legion] Crazy Climber 2 (クレイジークライマー2) (YM3812+DAC)</td><td>Z80</td><td>OPM</td><td>cclimbr2</td></tr>
+<tr><td>chaknpop.zip</td><td>[Chack'N Pop] Chack'N Pop (ちゃっくんぽっぷ) (AY-3-8910x2)</td><td>Z80</td><td>OPM</td><td>chaknpop</td></tr>
+<tr><td>champwr.zip</td><td>[L System] Champion Wrestler (チャンピオンレスラー) (YM2203)</td><td>Z80</td><td>OPM</td><td>masterw</td></tr>
+<tr><td>chasehq.zip</td><td>[Z System] Chase H.Q. (チェイスH.Q.) (YM2610)</td><td>Z80</td><td>YM2610</td><td>dual68</td></tr>
+<tr><td>chelnov.zip</td><td>[Karnov] Chelnov: Atomic Runner (チェルノブ -戦う人間発電所-) (YM2203+YM3526)</td><td>HuC6280</td><td>OPM + OKI6295</td><td>karnov</td></tr>
+<tr><td>chimerab.zip</td><td>[Jaleco Mega System 1] Chimera Beast (キメラビースト) (YM2151+MSM6295x2)</td><td>68000</td><td>OPM + OKI6295</td><td>megasys1</td></tr>
+<tr><td>chinagat.zip</td><td>[Double Dragon 2] China Gate (西遊降魔録 -流棒妖技ノ章-) (YM2151+MSM6295)</td><td>Z80</td><td>OPM</td><td>ddragon2</td></tr>
+<tr><td>chinatwn.zip</td><td>[Super Burger Time] China Town (チャイナタウン) (YM2151+MSM6295)</td><td>HuC6280</td><td>OPM + OKI6295</td><td>supbtime</td></tr>
+<tr><td>chkun.zip</td><td>[Time Pilot] Chance Kun (チャンス君) (AY-3-8910x2)</td><td>Z80</td><td>OPM</td><td>timeplt</td></tr>
+<tr><td>choko.zip</td><td>[CPS-2] Janpai Puzzle Choukou (雀牌パズル 長江) (QSound)</td><td>Z80</td><td>OPM</td><td>cps2simm</td></tr>
+<tr><td>choplift.zip</td><td>[System 2] Choplifter (チョップリフター) (SN76496x2)</td><td>Z80</td><td>OPM</td><td>system1</td></tr>
+<tr><td>chopper.zip</td><td>[Psycho Soldier] Chopper I (航空騎兵物語) (Y8950x2)</td><td>68000</td><td>YM2610</td><td>chopper</td></tr>
+<tr><td>chqflag.zip</td><td>[Chequered Flag] Chequered Flag (チェッカーフラグ) (YM2151+K7232x2)</td><td>Z80</td><td>OPM</td><td>chqflag</td></tr>
+<tr><td>chukatai.zip</td><td>[The New Zealand Story] Chuka Taisen (中華大仙) (YM2203)</td><td>Z80</td><td>OPM</td><td>chukatai</td></tr>
+<tr><td>circusc.zip</td><td>[Circus Charlie] Circus Charlie (サーカスチャーリー) (SN76496x2)</td><td>Z80</td><td>OPM</td><td>circusc</td></tr>
+<tr><td>citybomb.zip</td><td>[Haunted Castle] City Bomber (シティーボンバー) (YM3812+K7232+K51649)</td><td>Z80</td><td>OPL2</td><td>hcastle</td></tr>
+<tr><td>cltchitr.zip</td><td>[System 18] Clutch Hitter (YM3438x2+RF5C68)</td><td>Z80</td><td>YM2612 + RF5C68</td><td>system18</td></tr>
+<tr><td>cninja.zip</td><td>[Thunder Zone] Caveman Ninja (戦え原始人 ジョー＆マック) (YM2151+YM2203+MSM6295x2)</td><td>HuC6280</td><td>OPM + OKI6295</td><td>thndzone</td></tr>
+<tr><td>cobracom.zip</td><td>[DECO8] Cobra-Command (コブラコマンドー) (YM2203+YM3812)</td><td>HuC6280</td><td>OPM + OKI6295</td><td>cobracom</td></tr>
+<tr><td>combatsc.zip</td><td>[Combat School] Combat School (コンバットスクール) (YM2203+uPD7759)</td><td>Z80</td><td>OPM</td><td>combatsc</td></tr>
+<tr><td>combh.zip</td><td>[Bank Panic] Combat Hawk (コンバットホーク) (SN76496x3)</td><td>Z80</td><td>OPM</td><td>combh</td></tr>
+<tr><td>commando.zip</td><td>[Commando] Commando (戦場の狼) (YM2203x2)</td><td>Z80</td><td>OPM</td><td>commando</td></tr>
+<tr><td>cop01.zip</td><td>[Cop 01] Cop 01 (AY-3-8910x3)</td><td>Z80</td><td>OPM</td><td>cop01</td></tr>
+<tr><td>cosmccop.zip</td><td>[Irem M72] Cosmic Cop (ギャロップ) (YM2151)</td><td>Z80</td><td>OPM</td><td>m72</td></tr>
+<tr><td>cosmogng.zip</td><td>[System 2] Cosmo Gang The Video (コズモギャングズ・ザ・ビデオ) (YM2151+C140)</td><td>6809</td><td>C140 + OPM</td><td>system2</td></tr>
+<tr><td>cosmogngj.zip</td><td>[System 2] Cosmo Gang The Video JP (コズモギャングズ・ザ・ビデオ) (YM2151+C140)</td><td>6809</td><td>C140 + OPM</td><td>system2</td></tr>
+<tr><td>cotton.zip</td><td>[System 16B] Cotton (コットン) (YM2151+uDP7759)</td><td>Z80</td><td>OPM</td><td>system16b</td></tr>
+<tr><td>countryc.zip</td><td>[Psycho Soldier] Country Club (YM3812)</td><td>68000</td><td>YM2610</td><td>fitegolf</td></tr>
+<tr><td>crazycop.zip</td><td>[Super Contra] Gang Busters / Crazy Cop (YM2151+K7232)</td><td>Z80</td><td>OPM</td><td>scontra</td></tr>
+<tr><td>crimec.zip</td><td>[B System] Crime City (クライムシティ) (YM2610)</td><td>Z80</td><td>YM2610</td><td>bsystem</td></tr>
+<tr><td>crimfght.zip</td><td>[Aliens] Crime Fighters (クライムファイターズ) (YM2151+K7232)</td><td>Z80</td><td>OPM</td><td>crimfght</td></tr>
+<tr><td>crospang.zip</td><td>[Cross Pang] Cross Pang (YM3812+MSM6295)</td><td>Z80</td><td>OPM</td><td>crospang</td></tr>
+<tr><td>crsword.zip</td><td>[Neo Geo] Crossed Swords (クロスソード) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>crszone.zip</td><td>[System Super 23] Crisis Zone (クライシスゾーン) (C352)</td><td>68000</td><td>C352</td><td>system12</td></tr>
+<tr><td>csclub.zip</td><td>[CPS-2] Capcom Sports Club (カプコンスポーツクラブ) (QSound)</td><td>Z80</td><td>QSound</td><td>cps2</td></tr>
+<tr><td>ctomaday.zip</td><td>[Neo Geo] Captain Tomaday (キャプテントマディー) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>ctribe.zip</td><td>[Double Dragon 2] The Combatribes (ザ・コンバットライブス) (YM2151+MSM6295)</td><td>Z80</td><td>OPM</td><td>ctribe</td></tr>
+<tr><td>cuebrickj.zip</td><td>[Twin16] Cue Brick (キューブリック) (YM2151+K7232+uPD7759)</td><td>Z80</td><td>OPM</td><td>twin16</td></tr>
+<tr><td>cupsoc.zip</td><td>[Raiden] Seibu Cup Soccer (セイブカップサッカー) (YM3812+MSM6295)</td><td>Z80</td><td>OPM</td><td>raiden</td></tr>
+<tr><td>cworld2j.zip</td><td>[CPS-1] Capcom World 2 (アドベンチャークイズ カプコンワールド2) (YM2151+MSM6295)</td><td>Z80</td><td>OPM</td><td>cps1</td></tr>
+<tr><td>cyberlip.zip</td><td>[Neo Geo] Cyber-Lip (サイバーリップ) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>cybots.zip</td><td>[CPS-2] Cyberbots: Fullmetal Madness (サイバーボッツ -フルメタルマッドネス-) (QSound)</td><td>Z80</td><td>QSound</td><td>cps2</td></tr>
+<tr><td>cybrcomm.zip</td><td>[System 22] Cyber Commando (サイバーコマンド) (C352)</td><td>68000</td><td>C352</td><td>system22</td></tr>
+<tr><td>cybrcycc.zip</td><td>[System Super 22] CybeR CycleS (サイバーサイクルズ) (C352)</td><td>68000</td><td>C352</td><td>system22</td></tr>
+<tr><td>cybsled.zip</td><td>[System 21] CyberSled (サイバースレッド) (YM2151+C140)</td><td>6809</td><td>C140 + OPM</td><td>system21</td></tr>
+<tr><td>cyclshtg.zip</td><td>[N.Y.CAPTOR] Cycle Shooting (YM2149x2+MSM5232)</td><td>Z80</td><td>OPM</td><td>nycaptor</td></tr>
+<tr><td>daikaiju.zip</td><td>[Daikaiju no Gyakushu] Daikaiju no Gyakushu (大怪獣の逆襲) (YM2203+AY-3-8910)</td><td>Z80</td><td>OPM</td><td>daikaiju</td></tr>
+<tr><td>daiskiss.zip</td><td>[System GX] Daisu-Kiss (だい好キッス) (K54539x2)</td><td>68000</td><td>K054539</td><td>systemgx</td></tr>
+<tr><td>dakkochn.zip</td><td>[System 2] DakkoChan Jansoh (だっこちゃん雀荘) (SN76496x2)</td><td>Z80</td><td>OPM</td><td>system1</td></tr>
+<tr><td>danceyes.zip</td><td>[System 11] Dancing Eyes (ダンシングアイ) (C352)</td><td>68000</td><td>C352</td><td>system11</td></tr>
+<tr><td>dangar.zip</td><td>[Terra Cresta] Dangar: Ufo Robo (UFOロボ ダンガー) (YM3526+DAC)</td><td>Z80</td><td>OPM</td><td>terracre</td></tr>
+<tr><td>dangseed.zip</td><td>[System 1] Dangerous Seed (デンジャラスシード) (YM2151+C30)</td><td>6809</td><td>CUS30 + OPM</td><td>system1</td></tr>
+<tr><td>darius.zip</td><td>[Darius] Darius (ダライアス) (YM2203x2+MSM5205)</td><td>Z80</td><td>OPM</td><td>darius</td></tr>
+<tr><td>darius2.zip</td><td>[The Ninja Warriors] Darius II (ダライアスII) (YM2610)</td><td>Z80</td><td>YM2610</td><td>dual68</td></tr>
+<tr><td>darkedge.zip</td><td>[System 32] Dark Edge (ダークエッジ) (YM3438x2+RF5C68)</td><td>Z80</td><td>YM2612 + RF5C68</td><td>system32</td></tr>
+<tr><td>darkmist.zip</td><td>[Dark Mist] Dark Mist (ダークミスト) (YM2151)</td><td>Z80</td><td>OPM</td><td>darkmist</td></tr>
+<tr><td>darkseal.zip</td><td>[Thunder Zone] Dark Seal (ダークシール) (YM2151+YM2203+MSM6295x2)</td><td>HuC6280</td><td>OPM + OKI6295</td><td>thndzone</td></tr>
+<tr><td>darwin.zip</td><td>[Break Thru] Darwin 4078 (ダーウィン4078) (YM2203+YM3526)</td><td>HuC6280</td><td>OPM + OKI6295</td><td>brkthru</td></tr>
+<tr><td>daytona.zip</td><td>[Model 2] Daytona USA (デイトナＵＳＡ) (YM3438+315-5560)</td><td>68000</td><td>MultiPCM + YM3438</td><td>model2</td></tr>
+<tr><td>dbreedm72.zip</td><td>[Irem M72] Dragon Breed (ドラゴンブリード) (YM2151)</td><td>Z80</td><td>OPM</td><td>m72</td></tr>
+<tr><td>dbz.zip</td><td>[Dragon Ball Z] Dragon Ball Z (ドラゴンボールZ) (YM2151+MSM6295)</td><td>Z80</td><td>OPM</td><td>dbz</td></tr>
+<tr><td>dbz2.zip</td><td>[Dragon Ball Z] Dragonball Z 2: Super Battle (ドラゴンボールZ 2 -スーパーバトル-) (YM2151+MSM6295)</td><td>Z80</td><td>OPM</td><td>dbz</td></tr>
+<tr><td>ddragon.zip</td><td>[Double Dragon] Double Dragon (ザ・コンバットライブス) (YM2151+MSM5205)</td><td>Z80</td><td>OPM</td><td>ddragon</td></tr>
+<tr><td>ddragon2.zip</td><td>[Double Dragon 2] Double Dragon 2: The Revenge (ザ・コンバットライブス) (YM2151+MSM6295)</td><td>Z80</td><td>OPM</td><td>ddragon2</td></tr>
+<tr><td>ddragon3.zip</td><td>[Double Dragon 3] Double Dragon 3: The Rosetta Stone (ダブルドラゴン3 -ザ・ロゼッタストーン-) (YM2151+MSM6295)</td><td>Z80</td><td>OPM</td><td>ddragon3</td></tr>
+<tr><td>ddsom.zip</td><td>[CPS-2] Dungeons and Dragons: Shadow over Mystara (ダンジョンズ &amp;amp; ドラゴンズ -シャドーオーバーミスタラ-) (QSound)</td><td>Z80</td><td>QSound</td><td>cps2</td></tr>
+<tr><td>ddtod.zip</td><td>[CPS-2] Dungeons and Dragons: Tower of Doom (ダンジョンズ &amp;amp; ドラゴンズ -タワーオブドゥーム-) (QSound)</td><td>Z80</td><td>QSound</td><td>cps2</td></tr>
+<tr><td>ddux.zip</td><td>[System 16B] Dynamite Dux (ダイナマイトダックス) (YM2151+uDP7759)</td><td>Z80</td><td>OPM</td><td>system16b</td></tr>
+<tr><td>deadconx.zip</td><td>[F1 System] Dead Connection (デッドコネクション) (YM2610)</td><td>Z80</td><td>YM2610</td><td>f2system</td></tr>
+<tr><td>demonwld.zip</td><td>[Toaplan 1] Demon's World (ホラーストーリー) (YM3526)</td><td>Z80</td><td>OPM</td><td>generic</td></tr>
+<tr><td>devilw.zip</td><td>[Twin16] Devil World (魔獣の王国) (YM2151+K7232+uPD7759)</td><td>Z80</td><td>OPM</td><td>twin16</td></tr>
+<tr><td>dietgo.zip</td><td>[DECO32] Diet Go Go (ダイエットゴーゴー) (YM2151+MSM6295x2)</td><td>HuC6280</td><td>OPM + OKI6295</td><td>deco32</td></tr>
+<tr><td>digdug.zip</td><td>[Galaga] Dig Dug (ディグダグ) (Namco WSG)</td><td>6809</td><td>CUS30</td><td>wsgz80</td></tr>
+<tr><td>digdug2.zip</td><td>[Mappy] Dig Dug 2 (ディグダグ２) (Namco WSG)</td><td>6809</td><td>CUS30</td><td>wsg6809</td></tr>
+<tr><td>diggerma.zip</td><td>[Neo Geo] Digger Man (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>dimahoo.zip</td><td>[CPS-2] Dimahoo (グレート魔法大作戦) (QSound)</td><td>Z80</td><td>QSound</td><td>cps2</td></tr>
+<tr><td>dino.zip</td><td>[CPS-1] Cadillacs and Dinosaurs (キャデラックス -恐竜新世紀-) (QSound)</td><td>Z80</td><td>QSound</td><td>cps1qs</td></tr>
+<tr><td>dinorex.zip</td><td>[F2 System] Dino Rex (ダイノレックス) (YM2610)</td><td>Z80</td><td>YM2610</td><td>f2system</td></tr>
+<tr><td>dirtdash.zip</td><td>[System Super 22] Dirt Dash (ダートダッシュ) (C352)</td><td>68000</td><td>C352</td><td>system22</td></tr>
+<tr><td>dirtfoxj.zip</td><td>[System 2] Dirt Fox (ダートフォックス) (YM2151+C140)</td><td>6809</td><td>C140 + OPM</td><td>system2</td></tr>
+<tr><td>djboy.zip</td><td>[DJ Boy] DJ Boy (DJボーイ) (YM2203+MSM6295)</td><td>Z80</td><td>OPM</td><td>djboy</td></tr>
+<tr><td>dleague.zip</td><td>[H System] Dynamite League (ダイナマイトリーグ) (YM2610)</td><td>Z80</td><td>YM2610</td><td>f2system</td></tr>
+<tr><td>dondokod.zip</td><td>[F1 System] Don Doko Don (ドンドコドン) (YM2610)</td><td>Z80</td><td>YM2610</td><td>f2system</td></tr>
+<tr><td>doubledr.zip</td><td>[Neo Geo] Double Dragon (ダブルドラゴン(MVS)) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>downhill.zip</td><td>[System 23] Downhill Bikers (ダウンヒルバイカーズ) (C352)</td><td>68000</td><td>C352</td><td>system12</td></tr>
+<tr><td>dragngun.zip</td><td>[DECO32] Dragon Gun (ドラゴンガン) (YM2151+MSM6295x2)</td><td>HuC6280</td><td>OPM + OKI6295</td><td>deco32</td></tr>
+<tr><td>dragoona.zip</td><td>[System GX] Dragoon Might (ドラグーンマイト) (K54539x2)</td><td>68000</td><td>K054539</td><td>systemgx</td></tr>
+<tr><td>drgnbstr.zip</td><td>DRAGON BUSTER ［ドラゴンバスター］</td><td>6809</td><td>CUS30</td><td>wsg63701</td></tr>
+<tr><td>driftout.zip</td><td>[F2 System] Drift Out (ドリフトアウト) (YM2610)</td><td>Z80</td><td>YM2610</td><td>f2system</td></tr>
+<tr><td>driveyes.zip</td><td>[System 21] Driver's Eyes (ドライバーズアイ) (YM2151+C140)</td><td>6809</td><td>C140 + OPM</td><td>system21</td></tr>
+<tr><td>dsaber.zip</td><td>[System 2] Dragon Saber (ドラゴンセイバー) (YM2151+C140)</td><td>6809</td><td>C140 + OPM</td><td>system2</td></tr>
+<tr><td>dsoccr94j.zip</td><td>[Irem M92] Dream Soccer '94 (YM2151+GA20)</td><td>V30</td><td>OPM + GA20</td><td>m92</td></tr>
+<tr><td>dspirit.zip</td><td>[System 1] Dragon Spirit (ドラゴンスピリット) (YM2151+C30)</td><td>6809</td><td>CUS30 + OPM</td><td>system1</td></tr>
+<tr><td>dstlk.zip</td><td>[CPS-2] Darkstalkers: The Night Warriors (ヴァンパイア -ザ・ナイト・ウォリアーズ-) (QSound)</td><td>Z80</td><td>QSound</td><td>cps2</td></tr>
+<tr><td>dunkmnia.zip</td><td>[System 11] Dunk Mania (ダンクマニア) (C352)</td><td>68000</td><td>C352</td><td>system11</td></tr>
+<tr><td>dunkshot.zip</td><td>[System 16B] Dunk Shot (ダンクショット) (YM2151+uDP7759)</td><td>Z80</td><td>OPM</td><td>system16b</td></tr>
+<tr><td>dynabb.zip</td><td>[Model 2B] Dynamite Baseball (ダイナマイトベースボール) (SCSP)</td><td>68000</td><td>SCSP</td><td>model2a</td></tr>
+<tr><td>dynablst.zip</td><td>[Irem M90] Dynablaster (ボンバーマン) (YM2151)</td><td>Z80</td><td>OPM</td><td>m72</td></tr>
+<tr><td>dynwar.zip</td><td>[CPS-1] Dynasty Wars (天地を喰らう) (YM2151+MSM6295)</td><td>Z80</td><td>OPM</td><td>cps1</td></tr>
+<tr><td>earthjkr.zip</td><td>[Full Throttle] U.N. Defense Force: Earth Joker (アースジョーカー) (YM2151+MSM5205)</td><td>Z80</td><td>OPM</td><td>fullt</td></tr>
+<tr><td>ecofghtr.zip</td><td>[CPS-2] Eco Fighters (アルティミットエコロジー) (QSound)</td><td>Z80</td><td>QSound</td><td>cps2</td></tr>
+<tr><td>edf.zip</td><td>[Jaleco Mega System 1] E.D.F.: Earth Defense Force (E.D.F ＜アースディフェンスフォース＞) (YM2151+MSM6295x2)</td><td>68000</td><td>OPM + OKI6295</td><td>megasys1</td></tr>
+<tr><td>edrandy.zip</td><td>[Thunder Zone] The Cliffhanger: Edward Randy (エドワードランディ) (YM2151+MSM6295x2)</td><td>HuC6280</td><td>OPM + OKI6295</td><td>thndzone</td></tr>
+<tr><td>ehrgeiz.zip</td><td>[System 12] Ehrgeiz (エアガイツ) (C352)</td><td>68000</td><td>C352</td><td>system12</td></tr>
+<tr><td>eightman.zip</td><td>[Neo Geo] Eight Man (エイトマン) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>elevator.zip</td><td>[SJ System] Elevator Action (エレベーターアクション) (AY-3-8910x4+DAC)</td><td>Z80</td><td>OPM</td><td>taitosj</td></tr>
+<tr><td>empcity.zip</td><td>[Empire City 1931] Empire City 1931 (YM2203x2+MSM5205)</td><td>Z80</td><td>OPM</td><td>empcity</td></tr>
+<tr><td>endurob2.zip</td><td>[Enduro Racer] Enduro Racer (エンデューロレーサー) (YM2203x2+SegaPCM)</td><td>Z80</td><td>OPM</td><td>eropnx2</td></tr>
+<tr><td>endurobl.zip</td><td>[Enduro Racer] Enduro Racer (エンデューロレーサー) (YM2203+SegaPCM)</td><td>Z80</td><td>OPM</td><td>eropn</td></tr>
+<tr><td>enduror.zip</td><td>[Enduro Racer] Enduro Racer (エンデューロレーサー) (YM2151+SegaPCM)</td><td>Z80</td><td>OPM + SegaPCM</td><td>shangon</td></tr>
+<tr><td>enforce.zip</td><td>[Z System] Enforce (エンフォース) (YM2610)</td><td>Z80</td><td>YM2610</td><td>dual68</td></tr>
+<tr><td>esckids.zip</td><td>[Parodius] Escape Kids (エスケープキッズ) (YM2151+K53260)</td><td>Z80</td><td>K053260 + OPM</td><td>053260</td></tr>
+<tr><td>eswat.zip</td><td>[System 16B] E-Swat: Cyber Police (サイバーポリス・Ｅ－ＳＷＡＴ) (YM2151+uDP7759)</td><td>Z80</td><td>OPM</td><td>system16b</td></tr>
+<tr><td>eto.zip</td><td>[Full Throttle] Kokontouzai Eto Monogatari (古今東西干支物語) (YM2151+MSM5205)</td><td>Z80</td><td>OPM</td><td>fullt</td></tr>
+<tr><td>exctleag.zip</td><td>[System 16B] Excite League (エキサイトリーグ) (YM2151+uDP7759)</td><td>Z80</td><td>OPM</td><td>system16b</td></tr>
+<tr><td>exedexes.zip</td><td>[Exed Exes] Exed Exes (エグゼドエグゼス) (SN76496x2)</td><td>Z80</td><td>OPM</td><td>exedexes</td></tr>
+<tr><td>exprraid.zip</td><td>[Express Raider] Express Raider (ウエスタンエクスプレス) (YM2203+YM3526)</td><td>HuC6280</td><td>OPM + OKI6295</td><td>exprraid</td></tr>
+<tr><td>extrmatn.zip</td><td>[The New Zealand Story] Extermination (エクスターミネーション) (YM2203)</td><td>Z80</td><td>OPM</td><td>tnzs</td></tr>
+<tr><td>exzisus.zip</td><td>[Exzisus] Exzisus (イグジーザス) (YM2151+MSM5205)</td><td>Z80</td><td>OPM</td><td>fullt</td></tr>
+<tr><td>f1dream.zip</td><td>[Tiger Road] F-1 Dream (F-1ドリーム) (YM2203x2)</td><td>Z80</td><td>OPM</td><td>tigerroad</td></tr>
+<tr><td>f1en.zip</td><td>[System 32] F1 Exhaust Note (F1エキゾーストノート) (YM3438x2+RF5C68)</td><td>Z80</td><td>YM2612 + RF5C68</td><td>system32</td></tr>
+<tr><td>f1gp.zip</td><td>[F-1 Grand Prix] F-1 Grand Prix (F-1グランプリ) (YM2610)</td><td>Z80</td><td>OPM</td><td>f1gp</td></tr>
+<tr><td>f1gp2.zip</td><td>[F-1 Grand Prix] F-1 Grand Prix Part II (F-1グランプリPart II) (YM2610)</td><td>Z80</td><td>OPM</td><td>f1gp</td></tr>
+<tr><td>faceoff.zip</td><td>[System 1] Face Off (フェイスオフ) (YM2151+C30)</td><td>6809</td><td>CUS30 + OPM</td><td>system1</td></tr>
+<tr><td>fantjour.zip</td><td>[System GX] Gokujyou Parodius (極上パロディウス -過去の栄光を求めて-) (K54539x2)</td><td>68000</td><td>K054539</td><td>systemgx</td></tr>
+<tr><td>fantzone.zip</td><td>[System 16A] Fantasy Zone (ファンタジーゾーン) (YM2151)</td><td>Z80</td><td>OPM</td><td>system16a</td></tr>
+<tr><td>fantzone1.zip</td><td>[System 16A] Fantasy Zone JP (ファンタジーゾーン) (YM2151)</td><td>Z80</td><td>OPM</td><td>system16a</td></tr>
+<tr><td>fatfursp.zip</td><td>[Neo Geo] Fatal Fury Special (餓狼伝説スペシャル) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>fatfury1.zip</td><td>[Neo Geo] Fatal Fury: King of Fighters (餓狼伝説 -宿命の闘い-) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>fatfury2.zip</td><td>[Neo Geo] Fatal Fury 2 (餓狼伝説2 -新たなる闘い-) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>fatfury3.zip</td><td>[Neo Geo] Fatal Fury 3: Road to the Final Victory (餓狼伝説3 -遙かなる闘い-) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>fbfrenzy.zip</td><td>[Neo Geo] Football Frenzy (フットボールフレンジー) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>fcombat.zip</td><td>[Field Combat] Field Combat (フィールドコンバット) (AY-3-8910x3)</td><td>Z80</td><td>OPM</td><td>fcombat</td></tr>
+<tr><td>ffight.zip</td><td>[CPS-1] Final Fight (ファイナルファイト) (YM2151+MSM6295)</td><td>Z80</td><td>OPM</td><td>cps1</td></tr>
+<tr><td>fghthist.zip</td><td>[DECO32] Fighter's History (ファイターズヒストリー) (YM2151+MSM6295x2)</td><td>HuC6280</td><td>OPM + OKI6295</td><td>deco32</td></tr>
+<tr><td>fgtlayer.zip</td><td>[System 12] Fighting Layer (ファイティングレイヤー) (C352)</td><td>68000</td><td>C352</td><td>system12</td></tr>
+<tr><td>fhawk.zip</td><td>[Fighting Hawk] Fighting Hawk (ファイティングホーク) (YM2203)</td><td>Z80</td><td>OPM</td><td>fhawk</td></tr>
+<tr><td>fieldday.zip</td><td>[Taito Sound Board '84] Field Day (ザ・運動会) (YM2149+MSM5232)</td><td>Z80</td><td>OPM</td><td>flstory</td></tr>
+<tr><td>fightfev.zip</td><td>[Neo Geo] Fight Fever (ファイトフィーバー) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>finalap2.zip</td><td>[System 2] Final Lap 2 (ファイナルラップ 2) (YM2151+C140)</td><td>6809</td><td>C140 + OPM</td><td>system2</td></tr>
+<tr><td>finalap3.zip</td><td>[System 2] Final Lap 3 (ファイナルラップ 3) (YM2151+C140)</td><td>6809</td><td>C140 + OPM</td><td>system2</td></tr>
+<tr><td>finalapr.zip</td><td>[System FL] Final Lap R (ファイナルラップR) (C352)</td><td>68000</td><td>C140</td><td>nb1</td></tr>
+<tr><td>finalb.zip</td><td>[F2 System] Final Blow (ファイナルブロー) (YM2610)</td><td>Z80</td><td>YM2610</td><td>f2system</td></tr>
+<tr><td>finallap.zip</td><td>[System 2] Final Lap (ファイナルラップ) (YM2151+C140)</td><td>6809</td><td>C140 + OPM</td><td>system2</td></tr>
+<tr><td>finehour.zip</td><td>[System 2] Finest Hour (ファイネストアワー) (YM2151+C140)</td><td>6809</td><td>C140 + OPM</td><td>system2</td></tr>
+<tr><td>finfurl2.zip</td><td>[System Super 23] Final Furlong 2 (ファイナルハロン2) (C352)</td><td>68000</td><td>C352</td><td>system12</td></tr>
+<tr><td>finlflng.zip</td><td>[Gorgon] Final Furlong (ファイナルハロン) (C352)</td><td>68000</td><td>C352</td><td>system12</td></tr>
+<tr><td>firebarr.zip</td><td>[Irem M92] Fire Barrel (ファイヤーバレル) (YM2151+GA20)</td><td>V30</td><td>OPM + GA20</td><td>m92</td></tr>
+<tr><td>fitegolf.zip</td><td>[Psycho Soldier] Fighting Golf (ファイティングゴルフ) (YM3812)</td><td>68000</td><td>YM2610</td><td>fitegolf</td></tr>
+<tr><td>flicky.zip</td><td>[System 1] Flicky (フリッキー) (SN76496x2)</td><td>Z80</td><td>OPM</td><td>system1</td></tr>
+<tr><td>flipshot.zip</td><td>[Neo Geo] Battle Flip Shot (バトルフリップショット) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>flipull.zip</td><td>[L System] Plotting (フリップル) (YM2203)</td><td>Z80</td><td>OPM</td><td>flipull</td></tr>
+<tr><td>flstory.zip</td><td>[Taito Sound Board '84] The Fairyland Story (ザ・フェアリーランドストーリー) (YM2149+MSM5232)</td><td>Z80</td><td>OPM</td><td>flstory</td></tr>
+<tr><td>footchmp.zip</td><td>[F1 System] Football Champ (ハットトリックヒーロー) (YM2610)</td><td>Z80</td><td>YM2610</td><td>f2system</td></tr>
+<tr><td>forgottn.zip</td><td>[CPS-1] Forgotten Worlds (フォゴットンワールド) (YM2151+MSM6295)</td><td>Z80</td><td>OPM</td><td>cps1</td></tr>
+<tr><td>fourtrax.zip</td><td>[System 2] Four Trax (フォートラックス) (YM2151+C140)</td><td>6809</td><td>C140 + OPM</td><td>system2</td></tr>
+<tr><td>fpoint.zip</td><td>[System 16B] Flash Point (フラッシュポイント) (YM2151+uDP7759)</td><td>Z80</td><td>OPM</td><td>system16b</td></tr>
+<tr><td>frogger.zip</td><td>[Frogger] Frogger (フロッガー) (AY-3-8910)</td><td>Z80</td><td>OPM</td><td>frogger</td></tr>
+<tr><td>fromanc2.zip</td><td>[Final Romance 2] Taisen Idol-Mahjong Final Romance 2 (対戦アイドル麻雀 ファイナルロマンス2) (YM2610)</td><td>Z80</td><td>OPM</td><td>fromanc2</td></tr>
+<tr><td>fromanc4.zip</td><td>[Final Romance 2] Taisen Mahjong Final Romance 4 (対戦麻雀 ファイナルロマンス4) (YM2610)</td><td>Z80</td><td>OPM</td><td>fromanc4</td></tr>
+<tr><td>fromancr.zip</td><td>[Final Romance 2] Taisen Mahjong Final Romance R (対戦麻雀 ファイナルロマンスR) (YM2610)</td><td>Z80</td><td>OPM</td><td>fromanc2</td></tr>
+<tr><td>frontlin.zip</td><td>[SJ System] Front Line (フロントライン) (AY-3-8910x4+DAC)</td><td>Z80</td><td>OPM</td><td>taitosj</td></tr>
+<tr><td>fround.zip</td><td>[Twin16] The Final Round (ハードパンチャー -血まみれの栄光-) (YM2151+K7232+uPD7759)</td><td>Z80</td><td>OPM</td><td>twin16</td></tr>
+<tr><td>fshark.zip</td><td>[Toaplan 1] Flying Shark (飛翔鮫) (YM3526)</td><td>Z80</td><td>OPM</td><td>generic</td></tr>
+<tr><td>fstarfrc.zip</td><td>[Tecmo16] Final Star Force (ファイナルスターフォース) (YM2151+MSM6295)</td><td>Z80</td><td>OPM</td><td>tecmo16</td></tr>
+<tr><td>funkyfig.zip</td><td>[The First Funky Fighter] The First Funky Fighter (YM2413+AY-3-8910)</td><td>Z80</td><td>OPM</td><td>funkyfig</td></tr>
+<tr><td>funkyjet.zip</td><td>[DECO32] Funky Jet (ファンキージェット) (YM2151+MSM6295x2)</td><td>HuC6280</td><td>OPM + OKI6295</td><td>deco32</td></tr>
+<tr><td>fvipers2.zip</td><td>[Model 3] FV2 - Fighting Vipers 2 (YMF292x2)</td><td>68000</td><td>SCSP</td><td>model3</td></tr>
+<tr><td>fz2dx.zip</td><td>[System 16B] Fantasy Zone II DX (ファンタジーゾーンIIDX) (YM2151+uDP7759)</td><td>Z80</td><td>OPM</td><td>system16b</td></tr>
+<tr><td>g13knd.zip</td><td>[System 12] Golgo 13: Kiseki no Dandou (ゴルゴ13 -奇跡の弾道-) (C352)</td><td>68000</td><td>C352</td><td>system12</td></tr>
+<tr><td>galaga.zip</td><td>[Galaga] Galaga (ギャラガ) (Namco WSG)</td><td>6809</td><td>CUS30</td><td>wsgz80</td></tr>
+<tr><td>galaga88.zip</td><td>[System 1] Galaga '88 (ギャラガ '８８) (YM2151+C30)</td><td>6809</td><td>CUS30 + OPM</td><td>system1</td></tr>
+<tr><td>galaxyfg.zip</td><td>[Neo Geo] Galaxy Fight: Universal Warriors (ギャラクシーファイト -ユニバーサル・ウォリアーズ-) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>galivan.zip</td><td>[Terra Cresta] Galivan: Cosmo Police (コスモポリス ギャリバン) (YM3526+DAC)</td><td>Z80</td><td>OPM</td><td>terracre</td></tr>
+<tr><td>galmedes.zip</td><td>[Full Throttle] Galmedes (ガルメデス) (YM2151+MSM5205)</td><td>Z80</td><td>OPM</td><td>fullt</td></tr>
+<tr><td>gangwars.zip</td><td>[Alpha 68k] Gang Wars (ギャングウォーズ) (YM2203+YM2413+DAC)</td><td>Z80</td><td>OPN + OPLL</td><td>68k2</td></tr>
+<tr><td>ganryu.zip</td><td>[Neo Geo] Ganryu (武・巌流記) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>gaplus.zip</td><td>[Mappy] Gaplus (ギャプラス) (Namco WSG)</td><td>6809</td><td>CUS30</td><td>wsg6809</td></tr>
+<tr><td>gardia.zip</td><td>[System 1] Gardia (ガルディア) (SN76496x2)</td><td>Z80</td><td>OPM</td><td>system1</td></tr>
+<tr><td>garogun.zip</td><td>[NMG5] Garogun Seroyang (YM3812+MSM6295)</td><td>Z80</td><td>OPM</td><td>pclubys</td></tr>
+<tr><td>garou.zip</td><td>[Neo Geo] Garou: Mark of the Wolves (餓GAROU狼 -Mark of the Wolves-) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>garuka.zip</td><td>[Super Contra] Devastators (餓流禍) (YM2151+K7232)</td><td>Z80</td><td>OPM</td><td>scontra</td></tr>
+<tr><td>garyoret.zip</td><td>[DECO8] Garyo Retsuden (臥竜列伝) (YM2203+YM3812)</td><td>HuC6280</td><td>OPM + OKI6295</td><td>cobracom</td></tr>
+<tr><td>gberet.zip</td><td>[Green Beret] Green Beret (グリーンベレー) (SN76496)</td><td>Z80</td><td>OPM</td><td>gberet</td></tr>
+<tr><td>gemini.zip</td><td>[Gemini Wing] Gemini Wing (ジェミニウイング) (YM3812+MSM5205)</td><td>Z80</td><td>OPM</td><td>gemini</td></tr>
+<tr><td>genpeitd.zip</td><td>[System 86] Genpei TourmaDen (源平討魔伝) (YM2151+C30+DAC)</td><td>6809</td><td>CUS30 + OPM</td><td>system86</td></tr>
+<tr><td>getstar.zip</td><td>[Slap Fight] Get Star (ゲットスター) (AY-3-8910x2)</td><td>Z80</td><td>OPM</td><td>slapfght</td></tr>
+<tr><td>gforce2.zip</td><td>[Y Board] Galaxy Force 2 (ギャラクシーフォースⅡ) (YM2151+SegaPCM)</td><td>Z80</td><td>OPM</td><td>gforce</td></tr>
+<tr><td>ghlpanic.zip</td><td>[System 12] Ghoul Panic (オーバキューン) (C352)</td><td>68000</td><td>C352</td><td>system12</td></tr>
+<tr><td>ghostb.zip</td><td>[DECO8] The Real Ghostbusters (YM2203+YM3812)</td><td>HuC6280</td><td>OPM + OKI6295</td><td>cobracom</td></tr>
+<tr><td>ghouls.zip</td><td>GHOULS AND GOBLINS［大魔界村］</td><td>Z80</td><td>OPM</td><td>cps1</td></tr>
+<tr><td>gigandes.zip</td><td>[Gigandes] Gigandes (ギガンデス) (YM2610)</td><td>Z80</td><td>OPM</td><td>gigandes</td></tr>
+<tr><td>gigawing.zip</td><td>[CPS-2] Giga Wing (ギガウイング) (QSound)</td><td>Z80</td><td>QSound</td><td>cps2</td></tr>
+<tr><td>ginkun.zip</td><td>[Tecmo16] Ganbare Ginkun (がんばれギンくん -アクションミニゲーム集-) (YM2151+MSM6295)</td><td>Z80</td><td>OPM</td><td>tecmo16</td></tr>
+<tr><td>glfgreat.zip</td><td>[Golfing Greats] Golfing Greats (ゴルフィンググレイツ) (K53260)</td><td>Z80</td><td>OPM</td><td>glfgreat</td></tr>
+<tr><td>gloc.zip</td><td>[Y Board] G-Loc Air Battle (Ｇ－ＬＯＣ) (YM2151+SegaPCM)</td><td>Z80</td><td>OPM</td><td>gforce</td></tr>
+<tr><td>gng.zip</td><td>[Ghosts and Goblins] Ghosts and Goblins (魔界村) (YM2203x2)</td><td>Z80</td><td>OPM</td><td>opn2</td></tr>
+<tr><td>goalx3.zip</td><td>[Neo Geo] Goal! Goal! Goal! (ゴール！ゴール！ゴール！) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>godzilla.zip</td><td>[Godzilla] Godzilla (ゴジラ) (YM2151+MSM6295)</td><td>Z80</td><td>OPM</td><td>godzilla</td></tr>
+<tr><td>gokuparo.zip</td><td>極上パロディウス (AC)</td><td>68000</td><td>K054539</td><td>systemgx</td></tr>
+<tr><td>goldmedl.zip</td><td>[Alpha 68k] Gold Medalist (ゴールドメダリスト) (YM2203+YM2413+DAC)</td><td>Z80</td><td>OPN + OPLL</td><td>68k2</td></tr>
+<tr><td>goldnaxe.zip</td><td>[System 16B] Golden Axe (ゴールデンアックス) (YM2151+uDP7759)</td><td>Z80</td><td>OPM</td><td>system16b</td></tr>
+<tr><td>golgo13.zip</td><td>[System 12] Golgo 13 (ゴルゴ13) (C352)</td><td>68000</td><td>C352</td><td>system12</td></tr>
+<tr><td>gondo.zip</td><td>[DECO8] Gondomania (魔境戦士) (YM2203+YM3526)</td><td>HuC6280</td><td>OPM + OKI6295</td><td>makyosen</td></tr>
+<tr><td>gowcaizr.zip</td><td>[Neo Geo] Voltage Fighter: Gowcaizer (超人学園ゴウカイザー) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>gpilots.zip</td><td>[Neo Geo] Ghost Pilots (ゴーストパイロット) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>gprider.zip</td><td>[X Board] GP Rider (ＧＰライダー) (YM2151+SegaPCM)</td><td>Z80</td><td>OPM + SegaPCM</td><td>toutrun</td></tr>
+<tr><td>gradius.zip</td><td>[GX400] Gradius (グラディウス) (AY-3-8910+K5289)</td><td>Z80</td><td>AY</td><td>gx400</td></tr>
+<tr><td>gradius3.zip</td><td>GRADIUS3［グラディウスⅢ ‐そして伝説へ‐］</td><td>Z80</td><td>OPM</td><td>gradius3</td></tr>
+<tr><td>gradius4.zip</td><td>[Hornet] Gradius IV (グラディウスIV -復活-) (RF5C400)</td><td>68000</td><td>RF5C400</td><td>hornet</td></tr>
+<tr><td>gridiron.zip</td><td>[Tehkan World Cup] Gridiron Fight (グリダイアンファイト) (YM2149x2+MSM5205)</td><td>Z80</td><td>OPM</td><td>worldcup</td></tr>
+<tr><td>grobda.zip</td><td>[WSG6809] Grobda (Namco WSG)</td><td>6809</td><td>CUS30</td><td>wsg6809</td></tr>
+<tr><td>growl.zip</td><td>[F2 System] Growl (ルナーク) (YM2610)</td><td>Z80</td><td>YM2610</td><td>f2system</td></tr>
+<tr><td>gslgr94j.zip</td><td>GREAT SLUGGERS '94</td><td>68000</td><td>C140</td><td>nb1</td></tr>
+<tr><td>gslgr94u.zip</td><td>[NB-1] Great Sluggers '94 (グレートスラッガーズ'94) (C352)</td><td>68000</td><td>C140</td><td>nb1</td></tr>
+<tr><td>gslugrsj.zip</td><td>[NB-1] Great Sluggers (グレートスラッガーズ) (C352)</td><td>68000</td><td>C140</td><td>nb1</td></tr>
+<tr><td>gstriker.zip</td><td>[Aero Fighters] Grand Striker (グランドストライカー) (YM2610)</td><td>Z80</td><td>OPM</td><td>aerofgt</td></tr>
+<tr><td>gticlub.zip</td><td>[GTI Club] GTI Club (GTIクラブ) (RF5C400)</td><td>Z80</td><td>OPM</td><td>gticlub</td></tr>
+<tr><td>gulfwar2.zip</td><td>[Toaplan 1] Gulf War 2 (ガルフウォーII) (YM3526)</td><td>Z80</td><td>OPM</td><td>generic</td></tr>
+<tr><td>gunbird.zip</td><td>[Gunbird] Gunbird (ガンバード) (YM2610)</td><td>Z80</td><td>OPM</td><td>gunbird</td></tr>
+<tr><td>gunforc2.zip</td><td>[Irem M92] Gunforce 2 (ジオストーム) (YM2151+GA20)</td><td>V30</td><td>OPM + GA20</td><td>m92</td></tr>
+<tr><td>gunforce.zip</td><td>[Irem M92] Gunforce: Battle Fire Engulfed Terror Island (ガンフォース) (YM2151+GA20)</td><td>V30</td><td>OPM + GA20</td><td>m92</td></tr>
+<tr><td>gunfront.zip</td><td>[F2 System] Gun and Frontier (ガンフロンティア) (YM2610)</td><td>Z80</td><td>YM2610</td><td>f2system</td></tr>
+<tr><td>gunsmoke.zip</td><td>[Ghosts and Goblins] Gun Smoke (ガンスモーク) (YM2203x2)</td><td>Z80</td><td>OPM</td><td>opn2</td></tr>
+<tr><td>gunwars.zip</td><td>[System Super 23] Gunmen Wars (ガンメンウォーズ) (C352)</td><td>68000</td><td>C352</td><td>system12</td></tr>
+<tr><td>gururin.zip</td><td>[Neo Geo] Gururin (ぐるりん) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>guzzler.zip</td><td>[Swimmer] Guzzler (ガズラー) (AY-3-8910x2)</td><td>Z80</td><td>OPM</td><td>swimmer</td></tr>
+<tr><td>gwar.zip</td><td>[Psycho Soldier] Guerrilla War (ゲバラ) (YM3526+Y8950)</td><td>68000</td><td>YM2610</td><td>3526_8950</td></tr>
+<tr><td>gwarrior.zip</td><td>[GX400] Galactic Warriors (ギャラクティックウォーリアーズ) (AY-3-8910+K5289)</td><td>Z80</td><td>AY</td><td>gx400</td></tr>
+<tr><td>hachoo.zip</td><td>[Jaleco Mega System 1] Hachoo! (破兆！) (YM2151+MSM6295x2)</td><td>68000</td><td>OPM + OKI6295</td><td>megasys1</td></tr>
+<tr><td>halleys.zip</td><td>[SJ System] Halley's Comet (ハレーズコメット) (YM2149x3)</td><td>Z80</td><td>OPM</td><td>halleysc</td></tr>
+<tr><td>hangon.zip</td><td>[Enduro Racer] Hang-On (ハングオン) (YM2203+SegaPCM)</td><td>Z80</td><td>OPN + SegaPCM</td><td>hangon</td></tr>
+<tr><td>hangonjr.zip</td><td>[System E] Hang-On Jr. (Sega PSGx2)</td><td>Z80</td><td>OPM</td><td>systeme</td></tr>
+<tr><td>hangplt.zip</td><td>[Hornet] Hang Pilot (ハングパイロット) (RF5C400)</td><td>Z80</td><td>OPM</td><td>gticlub</td></tr>
+<tr><td>hangzo.zip</td><td>[DECO32] Hangzo (YM2151+MSM6295x2)</td><td>HuC6280</td><td>OPM + OKI6295</td><td>deco32</td></tr>
+<tr><td>harley.zip</td><td>[Model 3] Harley-Davidson &amp;amp; L.A. Riders (YMF292x2)</td><td>68000</td><td>SCSP</td><td>model3</td></tr>
+<tr><td>hasamu.zip</td><td>[Irem M90] Hasamu (覇沙夢) (YM2151)</td><td>Z80</td><td>OPM</td><td>m72</td></tr>
+<tr><td>hayaosi1.zip</td><td>[Jaleco Mega System 1] Hayaoshi Quiz Ouza Ketteisen: The King Of Quiz (早押しクイズ 王座決定戦) (YM2151+MSM6295x2)</td><td>68000</td><td>OPM + OKI6295</td><td>megasys1</td></tr>
+<tr><td>hbarrel.zip</td><td>[Robocop] Heavy Barrel (ヘビーバレル) (YM2203+YM3812+MSM6295)</td><td>HuC6280</td><td>OPM + OKI6295</td><td>drgninja</td></tr>
+<tr><td>hcastle.zip</td><td>[Haunted Castle] Haunted Castle (悪魔城ドラキュラ) (YM3812+K7232+K51649)</td><td>Z80</td><td>OPL2</td><td>hcastle</td></tr>
+<tr><td>heatbrl.zip</td><td>[Raiden] Heated Barrel (ヒーテッドバレル) (YM3812+MSM6295)</td><td>Z80</td><td>OPM</td><td>raiden</td></tr>
+<tr><td>heberpop.zip</td><td>[Hebereke no Popoon] Hebereke no Popoon (へべれけのぽぷーん) (YM3438+MSM6295)</td><td>Z80</td><td>OPM</td><td>heberpop</td></tr>
+<tr><td>hellfire.zip</td><td>[Toaplan 1] Hellfire (ヘルファイヤー) (YM3526)</td><td>Z80</td><td>OPM</td><td>generic</td></tr>
+<tr><td>heuksun.zip</td><td>[Cross Pang] Heuk Sun Baek Sa (YM3812+MSM6295)</td><td>Z80</td><td>OPM</td><td>crospang</td></tr>
+<tr><td>hexion.zip</td><td>[Hexion] Hexion (ヘクシオン) (K51649+MSM6295)</td><td>Z80</td><td>OPM</td><td>hexion</td></tr>
+<tr><td>hharry.zip</td><td>[Irem M82] Hammerin' Harry (大工の源さん -べらんめ町騒動記-) (YM2151)</td><td>Z80</td><td>OPM</td><td>m72</td></tr>
+<tr><td>higemaru.zip</td><td>[Pirate Ship Higemaru] Pirate Ship Higemaru (ひげ丸) (AY-3-8910x2)</td><td>Z80</td><td>OPM</td><td>higemaru</td></tr>
+<tr><td>hippodrm.zip</td><td>[Robocop] Hippodrome (ファイティングファンタジー) (YM2203+YM3812+MSM6295)</td><td>HuC6280</td><td>OPM + OKI6295</td><td>drgninja</td></tr>
+<tr><td>hitice.zip</td><td>[B System] Hit The Ice (ヒット・ジ・アイス) (YM2203+MSM6295)</td><td>Z80</td><td>OPM</td><td>viofight</td></tr>
+<tr><td>holo.zip</td><td>[System 32] Holosseum (ホロシアム) (YM3438x2+RF5C68)</td><td>Z80</td><td>YM2612 + RF5C68</td><td>system32</td></tr>
+<tr><td>hook.zip</td><td>[Irem M92] Hook (フック) (YM2151+GA20)</td><td>V30</td><td>OPM + GA20</td><td>m92</td></tr>
+<tr><td>hopmappy.zip</td><td>[System 86] Hopping Mappy (ホッピングマッピ―) (C30)</td><td>6809</td><td>CUS30</td><td>wsg63701</td></tr>
+<tr><td>horekid.zip</td><td>[Terra Cresta] Kid no Hore Hore Daisakusen (キッドのホレホレ大作戦) (YM3526+DAC)</td><td>Z80</td><td>OPM</td><td>terracre</td></tr>
+<tr><td>horizon.zip</td><td>[Irem M62] Horizon (AY-3-8910x2)</td><td>Z80</td><td>OPM</td><td>m62</td></tr>
+<tr><td>hotdogst.zip</td><td>[Hotdog Storm] Hotdog Storm (ホットドッグストーム) (YM2203+MSM6295)</td><td>Z80</td><td>OPM</td><td>hotdogst</td></tr>
+<tr><td>hsf2.zip</td><td>[CPS-2] Hyper Street Fighter 2: The Anniversary Edition (ハイパーストリートファイターII) (QSound)</td><td>Z80</td><td>QSound</td><td>cps2</td></tr>
+<tr><td>hustler.zip</td><td>[Video Hustler] Video Hustler (ビデオハスラー) (AY-3-8910)</td><td>Z80</td><td>OPM</td><td>hustler</td></tr>
+<tr><td>hvymetal.zip</td><td>[System 2] Heavy Metal (ヘビーメタル) (SN76496x2)</td><td>Z80</td><td>OPM</td><td>system1</td></tr>
+<tr><td>hvyunit.zip</td><td>[Heavy Unit] Heavy Unit (ヘビーユニット) (YM2203)</td><td>Z80</td><td>OPM</td><td>hvyunit</td></tr>
+<tr><td>hwchamp.zip</td><td>[System 16B] Heavyweight Champ (ヘビーウエイトチャンプ) (YM2151+uDP7759)</td><td>Z80</td><td>OPM</td><td>system16b</td></tr>
+<tr><td>hwrace.zip</td><td>[SJ System] High Way Race (ハイウェイレース) (AY-3-8910x4+DAC)</td><td>Z80</td><td>OPM</td><td>taitosj</td></tr>
+<tr><td>hyperspt.zip</td><td>[Hyper Sports] Hyper Sports (SN76489+DAC+VLM5030)</td><td>Z80</td><td>OPM</td><td>hyperspt</td></tr>
+<tr><td>iganinju.zip</td><td>[Jaleco Mega System 1] Iga Ninjyutsuden (伊賀忍術伝 -五神の書-) (YM2151+MSM6295x2)</td><td>68000</td><td>OPM + OKI6295</td><td>megasys1</td></tr>
+<tr><td>ikari.zip</td><td>[Psycho Soldier] Ikari Warriors (怒) (YM3526x2)</td><td>68000</td><td>YM2610</td><td>3526x2</td></tr>
+<tr><td>ikari3.zip</td><td>[SNK68] Ikari III: The Rescue (怒III) (YM3812+uPD7759)</td><td>68000</td><td>YM2610</td><td>3812</td></tr>
+<tr><td>imgfight.zip</td><td>[Irem M72] Image Fight (イメージファイト) (YM2151)</td><td>Z80</td><td>OPM</td><td>m72</td></tr>
+<tr><td>imsorry.zip</td><td>[System 1] I'm Sorry (ごんべぇの・いむそ～り～) (SN76496x2)</td><td>Z80</td><td>OPM</td><td>system1</td></tr>
+<tr><td>indytemp.zip</td><td>[Atari System1] Indiana Jones and the Temple of Doom (インディージョーンズ) (YM2151)</td><td>Z80</td><td>OPM</td><td>system1</td></tr>
+<tr><td>insectx.zip</td><td>[Insector X] Insector X (YM2203)</td><td>Z80</td><td>OPM</td><td>insectx</td></tr>
+<tr><td>inthunt.zip</td><td>[Irem M92] In The Hunt (海底大戦争) (YM2151+GA20)</td><td>V30</td><td>OPM + GA20</td><td>m92</td></tr>
+<tr><td>ironclad.zip</td><td>[Neo Geo] Ironclad (超鉄ブリキンガー) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>ironhors.zip</td><td>[Iron Horse] Iron Horse (大列車強盗) (YM2203)</td><td>Z80</td><td>OPM</td><td>ironhors</td></tr>
+<tr><td>irrmaze.zip</td><td>[Neo Geo] The Irritating Maze (ウッチャンナンチャンの炎のチャレンジャー ウルトラ電流イライラ棒) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>janshin.zip</td><td>[Neo Geo] Jyanshin Densetsu: Quest of Jongmaster (雀神伝説 -QUEST OF JONGMASTER-) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>joyjoy.zip</td><td>[Neo Geo] Puzzled (ジョイジョイキッド) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>jrpacman.zip</td><td>[Pac-Man] Jr. Pac-Man (ジュニアパックマン) (Namco WSG)</td><td>Z80</td><td>OPM</td><td>jrpacman</td></tr>
+<tr><td>jumping.zip</td><td>[Rainbow Islands] Rainbow Islands Bootleg (レインボーアイランド) (YM2203x2)</td><td>Z80</td><td>OPM</td><td>ribl</td></tr>
+<tr><td>jungler.zip</td><td>[Time Pilot] Jungler (ジャングラー) (AY-3-8910x2)</td><td>Z80</td><td>OPM</td><td>timeplt</td></tr>
+<tr><td>jyangoku.zip</td><td>[CPS-2] Jyangokushi: Haoh no Saihai (雀・志 -覇王の采牌-) (QSound)</td><td>Z80</td><td>OPM</td><td>cps2simm</td></tr>
+<tr><td>kabukikl.zip</td><td>[Neo Geo] Tengai Makyou: Kabuki Klash (天外魔境真伝) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>kabukiz.zip</td><td>[Kabuki-Z] Kabuki-Z (歌舞伎Ｚ) (YM2203)</td><td>Z80</td><td>OPM</td><td>kabukiz</td></tr>
+<tr><td>kageki.zip</td><td>[The New Zealand Story] Kageki (火激) (YM2203)</td><td>Z80</td><td>OPM</td><td>kageki</td></tr>
+<tr><td>kaiunqz.zip</td><td>[System 12] Kaiun Quiz (開運クイズ・幸福の旅人) (C352)</td><td>68000</td><td>C352</td><td>system12</td></tr>
+<tr><td>karatblz.zip</td><td>[Turbo Force] Karate Blazers (闘神ブレイザーズ) (YM2610)</td><td>Z80</td><td>OPM</td><td>turbofrc</td></tr>
+<tr><td>karianx.zip</td><td>[Deniam 16B] Karian Cross (YM3812+MSM6295)</td><td>Z80</td><td>OPM</td><td>deniam16b</td></tr>
+<tr><td>karnov.zip</td><td>[Karnov] Karnov (カルノフ) (YM2203+YM3526)</td><td>HuC6280</td><td>OPM + OKI6295</td><td>karnov</td></tr>
+<tr><td>kartduel.zip</td><td>[System 12] Kart Duel (C352)</td><td>68000</td><td>C352</td><td>system12</td></tr>
+<tr><td>kengo.zip</td><td>[Irem M84] Ken-Go (剣豪) (YM2151)</td><td>Z80</td><td>OPM</td><td>m72</td></tr>
+<tr><td>kenseim.zip</td><td>[CPS-1] Ken Sei Mogura - Street Fighter II (拳聖土竜) (YM2151+MSM6295)</td><td>Z80</td><td>OPM</td><td>cps1</td></tr>
+<tr><td>kicknrun.zip</td><td>[Kick and Run] Kick and Run (YM2203)</td><td>Z80</td><td>OPM</td><td>kicknrun</td></tr>
+<tr><td>kickoff.zip</td><td>[Jaleco Mega System 1] Kick Off (キックオフ) (YM2151+MSM6295x2)</td><td>68000</td><td>OPM + OKI6295</td><td>megasys1</td></tr>
+<tr><td>kidniki.zip</td><td>[Irem M62] Kid Niki: Radical Ninja (快傑ヤンチャ丸) (AY-3-8910x2)</td><td>Z80</td><td>OPM</td><td>m62</td></tr>
+<tr><td>kikcubic.zip</td><td>[Irem M77] Meikyu Jima (迷宮島) (YM2151)</td><td>Z80</td><td>OPM</td><td>m72</td></tr>
+<tr><td>kikikai.zip</td><td>[Kiki Kaikai] Kiki Kaikai (奇々怪界) (YM2203)</td><td>Z80</td><td>OPM</td><td>kikikai</td></tr>
+<tr><td>kikikaik.zip</td><td>奇々怪界</td><td>Z80</td><td>OPM</td><td>kikikai</td></tr>
+<tr><td>kikstart.zip</td><td>[SJ System] Kick Start Wheelie King (キックスタート) (AY-3-8910x4+DAC)</td><td>Z80</td><td>OPM</td><td>taitosj</td></tr>
+<tr><td>kingdmgp.zip</td><td>[Raizing Type 1] Shippu Mahou Daisakusen (疾風魔法大作戦 -KINGDOM GRANDPRIX-) (YM2151+MSM6295)</td><td>Z80</td><td>OPM</td><td>mahou</td></tr>
+<tr><td>kittenk.zip</td><td>[Haunted Castle] Kitten Kaboodle (にゃんにゃんパニック) (YM3812+K7232+K51649)</td><td>Z80</td><td>OPL2</td><td>hcastle</td></tr>
+<tr><td>kizuna.zip</td><td>[Neo Geo] Kizuna Encounter: Super Tag Battle (風雲スーパータッグバトル) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>knights.zip</td><td>[CPS-1] Knights of the Round (ナイツ・オブ・ザ・ラウンド) (YM2151+MSM6295)</td><td>Z80</td><td>OPM</td><td>cps1</td></tr>
+<tr><td>kod.zip</td><td>[CPS-1] The King of Dragons (キング・オブ・ザ・ドラゴンズ) (YM2151+MSM6295)</td><td>Z80</td><td>OPM</td><td>cps1</td></tr>
+<tr><td>kof2000.zip</td><td>[Neo Geo] The King of Fighters 2000 (ザ・キング・オブ・ファイターズ2000) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>kof2001.zip</td><td>[Neo Geo] The King of Fighters 2001 (ザ・キング・オブ・ファイターズ2001) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>kof2002.zip</td><td>[Neo Geo] The King of Fighters 2002 (ザ・キング・オブ・ファイターズ2002) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>kof2003.zip</td><td>[Neo Geo] The King of Fighters 2003 (ザ・キング・オブ・ファイターズ2003) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>kof94.zip</td><td>[Neo Geo] The King of Fighters '94 (ザ・キング・オブ・ファイターズ'94) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>kof95.zip</td><td>[Neo Geo] The King of Fighters '95 (ザ・キング・オブ・ファイターズ'95) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>kof96.zip</td><td>[Neo Geo] The King of Fighters '96 (ザ・キング・オブ・ファイターズ'96) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>kof97.zip</td><td>[Neo Geo] The King of Fighters '97 (ザ・キング・オブ・ファイターズ'97) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>kof98.zip</td><td>[Neo Geo] The King of Fighters '98: The Slugfest (ザ・キング・オブ・ファイターズ'98 -ドリームマッチネバーエンズ-) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>kof99.zip</td><td>[Neo Geo] The King of Fighters '99: Millennium Battle (ザ・キング・オブ・ファイターズ'99 -ミレニアムバトル-) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>konamigt.zip</td><td>[GX400] Konami GT (RF-2 ＜レッドファイター2＞) (AY-3-8910+K5289)</td><td>Z80</td><td>AY</td><td>gx400</td></tr>
+<tr><td>kontest.zip</td><td>[Konami GX800] Konami Test Board (SN76489Ax2)</td><td>Z80</td><td>OPM</td><td>kontest</td></tr>
+<tr><td>koshien.zip</td><td>[F2 System] Ah Eikou no Koshien (阻呼栄光の甲子園) (YM2610)</td><td>Z80</td><td>YM2610</td><td>f2system</td></tr>
+<tr><td>kotm.zip</td><td>[Neo Geo] King of the Monsters (キング・オブ・ザ・モンスターズ) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>kotm2.zip</td><td>[Neo Geo] King of the Monsters 2: The Next Thing (キング・オブ・ザ・モンスターズ2 -ザ・ネクストシング-) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>kozure.zip</td><td>[Chouji Meikyuu Legion] Kozure Ookami (子連れ狼) (YM3812+DAC)</td><td>Z80</td><td>OPM</td><td>terraf</td></tr>
+<tr><td>kungfum.zip</td><td>[Irem M62] Kung-Fu Master (スパルタンX) (AY-3-8910x2)</td><td>Z80</td><td>OPM</td><td>m62</td></tr>
+<tr><td>kuniokun.zip</td><td>[Kunio Kun] Renegade (熱血硬派くにおくん) (YM3526+Custom)</td><td>Z80</td><td>OPM</td><td>kuniokun</td></tr>
+<tr><td>kurikint.zip</td><td>[L System] Kuri Kinton (功里金団) (YM2203)</td><td>Z80</td><td>OPM</td><td>kurikint</td></tr>
+<tr><td>lamachin.zip</td><td>[Model 3] L.A. Machineguns (YMF292x2)</td><td>68000</td><td>SCSP</td><td>model3</td></tr>
+<tr><td>lastblad.zip</td><td>[Neo Geo] Last Blade (幕末浪漫 月華の剣士) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>lastbld2.zip</td><td>[Neo Geo] Last Blade 2 (幕末浪漫第二幕 月華の剣士 -月に咲く華、散りゆく花-) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>lastbrnx.zip</td><td>[Model 2B] Last Bronx (ラストブロンクス東京番外地) (SCSP)</td><td>68000</td><td>SCSP</td><td>model2a</td></tr>
+<tr><td>lastduel.zip</td><td>[Last Duel] Last Duel (ラストデュエル) (YM2203x2)</td><td>Z80</td><td>OPM</td><td>lastduel</td></tr>
+<tr><td>lastmisn.zip</td><td>[Last Mission] Last Mission (ラストミッション) (YM2203+YM3526)</td><td>HuC6280</td><td>OPM + OKI6295</td><td>lastmisn</td></tr>
+<tr><td>lbgrande.zip</td><td>[System 12] Libero Grande (リベログランデ) (C352)</td><td>68000</td><td>C352</td><td>system12</td></tr>
+<tr><td>lbowling.zip</td><td>[Neo Geo] League Bowling (リーグボウリング) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>ldrun.zip</td><td>[Irem M62] Lode Runner (ロードランナー) (AY-3-8910x2)</td><td>Z80</td><td>OPM</td><td>m62</td></tr>
+<tr><td>ldrun2.zip</td><td>[Irem M62] Lode Runner II: The Bungeling Strikes Back (ロードランナーII -バンゲリング帝国の逆襲-) (AY-3-8910x2)</td><td>Z80</td><td>OPM</td><td>m62</td></tr>
+<tr><td>ldrun3.zip</td><td>[Irem M62] Lode Runner III: The Golden Labyrinth (ロードランナーIII -魔神の復活-) (AY-3-8910x2)</td><td>Z80</td><td>OPM</td><td>m62</td></tr>
+<tr><td>ldrun4.zip</td><td>[Irem M62] Lode Runner IV: Teikoku Karano Dasshutsu (ロードランナーIV -帝国からの脱出-) (AY-3-8910x2)</td><td>Z80</td><td>OPM</td><td>m62</td></tr>
+<tr><td>le2.zip</td><td>[System GX] Lethal Enforcers II: Gun Fighters (リーサルエンフォーサーズII -ザ・ウエスタン-) (K54539x2)</td><td>68000</td><td>K054539</td><td>systemgx</td></tr>
+<tr><td>legendos.zip</td><td>[Neo Geo] Legend of Success Joe (・したのジョー伝説) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>legion.zip</td><td>[Chouji Meikyuu Legion] Chouji Meikyuu Legion (超時迷宮レジオン) (YM3812+DAC)</td><td>Z80</td><td>OPM</td><td>cclimbr2</td></tr>
+<tr><td>lethalen.zip</td><td>[Lethal Enforcers] Lethal Enforcers (リーサルエンフォーサーズ) (K54539)</td><td>Z80</td><td>OPM</td><td>lethal</td></tr>
+<tr><td>lethalth.zip</td><td>[Irem M92] Lethal Thunder (サンダーブラスター) (YM2151+GA20)</td><td>V30</td><td>OPM + GA20</td><td>m92</td></tr>
+<tr><td>lgtnfght.zip</td><td>[Lightning Fighters] Lightning Fighters (トライゴン) (YM2151+K53260)</td><td>Z80</td><td>K053260 + OPM</td><td>053260</td></tr>
+<tr><td>liblrabl.zip</td><td>[Mappy] Libble Rabble (リブルラブル) (Namco WSG)</td><td>6809</td><td>CUS30</td><td>wsg6809</td></tr>
+<tr><td>lifefrce.zip</td><td>[Salamander] Lifeforce (ライフフォース) (YM2151+K7232+VLM5030)</td><td>Z80</td><td>AY</td><td>salamander</td></tr>
+<tr><td>lifefrcej.zip</td><td>[Salamander] Lifeforce JP (ライフフォース) (YM2151+K7232+VLM5030)</td><td>Z80</td><td>AY</td><td>salamander</td></tr>
+<tr><td>liquidk.zip</td><td>[F2 System] Liquid Kids (ミズバク大冒険) (YM2610)</td><td>Z80</td><td>YM2610</td><td>f2system</td></tr>
+<tr><td>lkage.zip</td><td>[The Legend of Kage] The Legend of Kage (影の伝説) (YM2203x2)</td><td>Z80</td><td>OPM</td><td>kage</td></tr>
+<tr><td>lockloadu.zip</td><td>[DECO32] Locked 'n Loaded (ガンハード) (YM2151+MSM6295x2)</td><td>HuC6280</td><td>OPM + OKI6295</td><td>deco32</td></tr>
+<tr><td>locomotn.zip</td><td>[Time Pilot] Loco-Motion (ガッタンゴットン) (AY-3-8910x2)</td><td>Z80</td><td>OPM</td><td>pooyan</td></tr>
+<tr><td>loffire.zip</td><td>[X Board] Line of Fire (ラインオブファイヤー -泊弾野郎-) (YM2151+SegaPCM)</td><td>Z80</td><td>OPM + SegaPCM</td><td>toutrun</td></tr>
+<tr><td>logicpro.zip</td><td>[Deniam 16B] Logic Pro (YM3812+MSM6295)</td><td>Z80</td><td>OPM</td><td>deniam16b</td></tr>
+<tr><td>loht.zip</td><td>[Irem M72] Legend of Hero Tonma (レジェンドオブヒーロー トンマ) (YM2151)</td><td>Z80</td><td>OPM</td><td>m72</td></tr>
+<tr><td>lomakai.zip</td><td>[Jaleco Mega System 1] Legend of Makai (魔魁伝説) (YM2151+MSM6295x2)</td><td>Z80</td><td>OPM</td><td>lomakai</td></tr>
+<tr><td>lotlot.zip</td><td>[Irem M62] Lot Lot (ロットロット) (AY-3-8910x2)</td><td>Z80</td><td>OPM</td><td>m62</td></tr>
+<tr><td>lresort.zip</td><td>[Neo Geo] Last Resort (ラストリゾート) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>lsasquad.zip</td><td>[Land Sea Air Squad] Land Sea Air Squad (陸海空 -最前線-) (YM2203+AY-3-8910)</td><td>Z80</td><td>OPM</td><td>lsasquad</td></tr>
+<tr><td>luckywld.zip</td><td>[System 2] Lucky &amp;amp; Wild (ラッキー &amp;amp; ワイルド) (YM2151+C140)</td><td>6809</td><td>C140 + OPM</td><td>system2</td></tr>
+<tr><td>lwings.zip</td><td>[Ghosts and Goblins] Legendary Wings (アレスの翼) (YM2203x2)</td><td>Z80</td><td>OPM</td><td>opn2</td></tr>
+<tr><td>machbrkr.zip</td><td>[NB-2] Mach Breakers (マッハブレイカーズ -ニューマンアスレチック2-) (C352)</td><td>68000</td><td>C140</td><td>nb1</td></tr>
+<tr><td>macross2.zip</td><td>[NMK16] Super Spacefortress Macross II (超時空要塞マクロスII) (YM2203+MSM6295x2)</td><td>Z80</td><td>OPM</td><td>macross2</td></tr>
+<tr><td>madgear.zip</td><td>[Mad Gear] Mad Gear (マッドギア) (YM2203x2+MSM6295)</td><td>Z80</td><td>OPM</td><td>madgear</td></tr>
+<tr><td>magdrop3.zip</td><td>[Neo Geo] Magical Drop III (マジカルドロップ3) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>magicbub.zip</td><td>[Yunsung 16] Magic Bubble (YM3812+MSM6295)</td><td>Z80</td><td>OPM</td><td>yunsun16</td></tr>
+<tr><td>maglord.zip</td><td>[Neo Geo] Magician Lord (マジシャンロード) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>magmax.zip</td><td>[Mag Max] Mag Max (マグマックス) (AY-3-8910x3)</td><td>Z80</td><td>OPM</td><td>magmax</td></tr>
+<tr><td>mahretsu.zip</td><td>[Neo Geo] Mahjong Kyoretsuden (麻雀狂列伝 -西日本編-) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>mainsnk.zip</td><td>[Main Event] Main Event (メインエベント) (AY-3-8910x2)</td><td>68000</td><td>YM2610</td><td>mainsnk</td></tr>
+<tr><td>majtitl2.zip</td><td>[Irem M92] Major Title 2 (メジャータイトル2) (YM2151+GA20)</td><td>V30</td><td>OPM + GA20</td><td>m92</td></tr>
+<tr><td>majtitle.zip</td><td>[Irem M84] Major Title (メジャータイトル) (YM2151)</td><td>Z80</td><td>OPM</td><td>m72</td></tr>
+<tr><td>manybloc.zip</td><td>[Task Force Harrier] Many Block (YM2203+MSM6295)</td><td>Z80</td><td>OPM</td><td>tharrier</td></tr>
+<tr><td>mappy.zip</td><td>[Mappy] Mappy (マッピー) (Namco WSG)</td><td>6809</td><td>CUS30</td><td>wsg6809</td></tr>
+<tr><td>marble.zip</td><td>[Atari System1] Marble Madness (マーブルマッドネス) (YM2151)</td><td>Z80</td><td>OPM</td><td>system1</td></tr>
+<tr><td>marukin.zip</td><td>[Pang] Super Marukin-Ban (スーパー○禁版) (YM2413+MSM6295)</td><td>Z80</td><td>OPM</td><td>pang</td></tr>
+<tr><td>marukodq.zip</td><td>[Neo Geo] Chibi Marukochan Deluxe Quiz (ちびまる子ちゃん まる子デラックスクイズ) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>marvlandj.zip</td><td>[System 2] Marvel Land JP (マーベルランド) (YM2151+C140)</td><td>6809</td><td>C140 + OPM</td><td>system2</td></tr>
+<tr><td>masao.zip</td><td>[Mario Bros.] Mario Bros. Bootleg (マリオブラザーズ) (AY-3-8910)</td><td>Z80</td><td>OPM</td><td>masao</td></tr>
+<tr><td>matchit.zip</td><td>[Irem M72] Match It (四川省) (YM2151)</td><td>Z80</td><td>OPM</td><td>m72</td></tr>
+<tr><td>matchit2.zip</td><td>[Irem M97] Match It II (四川省II) (YM2151)</td><td>Z80</td><td>OPM</td><td>m72</td></tr>
+<tr><td>matmania.zip</td><td>[Mat Mania] Mat Mania (エキサイティングアワー) (AY-3-8910x2+DAC)</td><td>Z80</td><td>OPM</td><td>excthour</td></tr>
+<tr><td>matrim.zip</td><td>[Neo Geo] Matrimelee (新豪血寺一族 闘婚 -matrimelee-) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>mazinger.zip</td><td>[Mazinger] Mazinger Z (マジンガーＺ) (YM2203+MSM6295)</td><td>Z80</td><td>OPM</td><td>mazinger</td></tr>
+<tr><td>mdhorse.zip</td><td>[System 12] Derby Quiz My Dream Horse (ダービークイズ マイドリームホース) (C352)</td><td>68000</td><td>C352</td><td>system12</td></tr>
+<tr><td>megablst.zip</td><td>[F2 System] Mega Blast (メガブラスト) (YM2610)</td><td>Z80</td><td>YM2610</td><td>f2system</td></tr>
+<tr><td>megaman.zip</td><td>[CPS-1] Mega Man: The Power Battle (ロックマン ザ・パワーバトル) (YM2151+MSM6295)</td><td>Z80</td><td>OPM</td><td>cps1</td></tr>
+<tr><td>megaman2.zip</td><td>[CPS-2] Mega Man 2: The Power Fighters (ロックマン2 -ザ・パワーファイターズ-) (QSound)</td><td>Z80</td><td>QSound</td><td>cps2</td></tr>
+<tr><td>megazone.zip</td><td>[Megazone] Mega Zone (メガゾーン) (AY-3-8910+DAC)</td><td>Z80</td><td>OPM</td><td>megazone</td></tr>
+<tr><td>meikyuh.zip</td><td>[DECO8] Meikyuu Hunter G (迷宮ハンターG) (YM2203+YM3812)</td><td>HuC6280</td><td>OPM + OKI6295</td><td>cobracom</td></tr>
+<tr><td>mercs.zip</td><td>[CPS-1] Mercs (戦場の狼II) (YM2151+MSM6295)</td><td>Z80</td><td>OPM</td><td>cps1</td></tr>
+<tr><td>metalb.zip</td><td>[F1 System] Metal Black (メタルブラック) (YM2610)</td><td>Z80</td><td>YM2610</td><td>f2system</td></tr>
+<tr><td>metamrph.zip</td><td>[Mystic Warriors] Metamorphic Force (メタモルフィックフォース) (K54539x2)</td><td>Z80</td><td>K054539 + OPM</td><td>054539x2</td></tr>
+<tr><td>metlhawk.zip</td><td>[System 2] Metal Hawk (メタルホーク) (YM2151+C140)</td><td>6809</td><td>C140 + OPM</td><td>system2</td></tr>
+<tr><td>metmqstr.zip</td><td>[Cave] Metamoqester (穏忍 -THE NINJA MASTER-) (YM2151+MSM6295)</td><td>Z80</td><td>OPM</td><td>metmqstr</td></tr>
+<tr><td>metrocrs.zip</td><td>[Baraduke] Metrocross (メトロクロス) (C30)</td><td>6809</td><td>CUS30</td><td>wsg63701</td></tr>
+<tr><td>mgakuen.zip</td><td>[Pang] Mahjong Gakuen (麻雀学園) (YM2413+MSM6295)</td><td>Z80</td><td>OPM</td><td>pang</td></tr>
+<tr><td>mia.zip</td><td>[Twin16] M.I.A.: Missing in Action (ミッシングインアクション) (YM2151+K7232+uPD7759)</td><td>Z80</td><td>OPM</td><td>twin16</td></tr>
+<tr><td>mickdsr_pico.zip</td><td>[SEGA PICO] Mickey no Tokyo Disneyland Stamp Rally (ミッキーの東京ディズニーランド・スタンプラリー) (Sega PSG)</td><td>68000</td><td>SN76489</td><td>pico</td></tr>
+<tr><td>miexchng.zip</td><td>[Neo Geo] Money Puzzle Exchanger (マネーアイドルエクスチェンジャー) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>mikie.zip</td><td>[Mikie] Mikie (新入社員とおるくん) (SN76489Ax2)</td><td>Z80</td><td>OPM</td><td>mikie</td></tr>
+<tr><td>minasan.zip</td><td>[Neo Geo] Minna-san no Okage-sama desu! Daisugoroku Taikai (みなさんのおかげさまです！ -大スゴロク大会-) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>mirninja.zip</td><td>[System 2] Mirai Ninja (未来忍者) (YM2151+C140)</td><td>6809</td><td>C140 + OPM</td><td>system2</td></tr>
+<tr><td>mjleague.zip</td><td>[Pre-System 16] Major League (メジャーリーグ) (YM2151+uDP7751)</td><td>Z80</td><td>OPM</td><td>system16a</td></tr>
+<tr><td>mjnquest.zip</td><td>[F2 System] Mahjong Quest (マージャンクエスト) (YM2610)</td><td>Z80</td><td>YM2610</td><td>f2system</td></tr>
+<tr><td>mlanding.zip</td><td>[Air System] Midnight Landing (ミッドナイトランディング) (YM2151+MSM5205)</td><td>Z80</td><td>OPM</td><td>mlanding</td></tr>
+<tr><td>mmancp2u.zip</td><td>[CPS-2] Mega Man: The Power Battle (ロックマン・ザ・パワーバトル) (QSound)</td><td>Z80</td><td>QSound</td><td>cps2</td></tr>
+<tr><td>mmatrix.zip</td><td>[CPS-2] Mars Matrix: Hyper Solid Shooting (マーズマトリックス -ハイパーソリッドシューティング-) (QSound)</td><td>Z80</td><td>QSound</td><td>cps2</td></tr>
+<tr><td>mmaze.zip</td><td>[System 1] Marchen Maze / Alice In Wonderland (メルヘンメイズ) (YM2151+C30)</td><td>6809</td><td>CUS30 + OPM</td><td>system1</td></tr>
+<tr><td>mmpanic.zip</td><td>[Monkey Mole Panic] Monkey Mole Panic (YM2413+AY-3-8910)</td><td>Z80</td><td>OPM</td><td>mmpanic</td></tr>
+<tr><td>mnight.zip</td><td>[Mutant Night] Mutant Night (ミュータントナイト) (YM2203x2)</td><td>Z80</td><td>OPM</td><td>robokid</td></tr>
+<tr><td>mofflott.zip</td><td>[Bonze Adventure] Maze of Flott (メイズ・オブ・フロット) (YM2151+MSM5205)</td><td>Z80</td><td>OPM</td><td>fullt</td></tr>
+<tr><td>momoko.zip</td><td>[Momoko 120%] Momoko 120% (モモコ120%) (YM2203x2)</td><td>Z80</td><td>OPM</td><td>momoko</td></tr>
+<tr><td>moomesa.zip</td><td>[Xexex] Wild West C.O.W.-Boys of Moo Mesa (YM2151+K54539)</td><td>Z80</td><td>K054539 + OPM</td><td>054539</td></tr>
+<tr><td>mosyougi.zip</td><td>[Neo Geo] Syougi No Tatsujin: Master of Shougi (将棋の達人 -MASTER OF SYOUGI-) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>motoraid.zip</td><td>[Model 2A] Motoraid (モーターレイド) (SCSP)</td><td>68000</td><td>SCSP</td><td>model2a</td></tr>
+<tr><td>motos.zip</td><td>[Mappy] Motos (モトス) (Namco WSG)</td><td>6809</td><td>CUS30</td><td>wsg6809</td></tr>
+<tr><td>motoxgo.zip</td><td>[System 23] Motocross Go! (モトクロスゴー！) (C352)</td><td>68000</td><td>C352</td><td>system12</td></tr>
+<tr><td>mpangj.zip</td><td>[CPS-2] Mighty! Pang (マイティパン) (QSound)</td><td>Z80</td><td>QSound</td><td>cps2</td></tr>
+<tr><td>mpatrol.zip</td><td>[Irem M62] Moon Patrol (AY-3-8910x2)</td><td>Z80</td><td>OPM</td><td>m62</td></tr>
+<tr><td>mrdo.zip</td><td>[Mr. Do!] Mr. Do! (ミスターDo!) (SN76496x2)</td><td>Z80</td><td>OPM</td><td>mrdo</td></tr>
+<tr><td>mrdrillr.zip</td><td>[System 12] Mr. Driller (ミスタードリラー) (C352)</td><td>68000</td><td>C352</td><td>system12</td></tr>
+<tr><td>mrgoemon.zip</td><td>[Green Beret] Mr. Goemon (ミスター五右衛門) (SN76496)</td><td>Z80</td><td>OPM</td><td>mrgoemon</td></tr>
+<tr><td>mrviking.zip</td><td>[System 1] Mr. Viking (ミスターバイキング) (SN76496x2)</td><td>Z80</td><td>OPM</td><td>system1</td></tr>
+<tr><td>msh.zip</td><td>[CPS-2] Marvel Super Heroes (マーヴルスーパーヒーローズ) (QSound)</td><td>Z80</td><td>QSound</td><td>cps2</td></tr>
+<tr><td>mshvsf.zip</td><td>[CPS-2] Marvel Super Heroes Vs. Street Fighter (マーヴルスーパーヒーローズ VS ストリートファイター) (QSound)</td><td>Z80</td><td>QSound</td><td>cps2</td></tr>
+<tr><td>msisaac.zip</td><td>[Metal Soldier Isaac II] Metal Soldier Isaac II (メタルソルジャーアイザックII) (AY-3-8910x2+MSM5232)</td><td>Z80</td><td>OPM</td><td>msisaac</td></tr>
+<tr><td>mslug.zip</td><td>[Neo Geo] Metal Slug: Super Vehicle-001 (メタルスラッグ) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>mslug2.zip</td><td>[Neo Geo] Metal Slug 2: Super Vehicle-001/II (メタルスラッグ2) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>mslug3.zip</td><td>[Neo Geo] Metal Slug 3 (メタルスラッグ3) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>mslug4.zip</td><td>[Neo Geo] Metal Slug 4 (メタルスラッグ4) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>mslug5.zip</td><td>[Neo Geo] Metal Slug 5 (メタルスラッグ5) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>mslugx.zip</td><td>[Neo Geo] Metal Slug X: Super Vehicle-001 (メタルスラッグX -SUPER VEHICLE-001-) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>msword.zip</td><td>[CPS-1] Magic Sword: Heroic Fantasy (マジックソード) (YM2151+MSM6295)</td><td>Z80</td><td>OPM</td><td>cps1</td></tr>
+<tr><td>mtwins.zip</td><td>[CPS-1] Mega Twins (チキチキボーイズ) (YM2151+MSM6295)</td><td>Z80</td><td>OPM</td><td>cps1</td></tr>
+<tr><td>mugsmash.zip</td><td>[Double Dragon 2] Mug Smashers (YM2151+MSM6295)</td><td>Z80</td><td>OPM</td><td>ddragon2</td></tr>
+<tr><td>mustache.zip</td><td>[Mustache Boy] Mustache Boy (マスタッシュボーイ) (YM2151)</td><td>Z80</td><td>OPM</td><td>mustache</td></tr>
+<tr><td>mutantf.zip</td><td>[DECO32] Mutant Fighter (デスブレイド) (YM2151+MSM6295x2)</td><td>HuC6280</td><td>OPM + OKI6295</td><td>deco32</td></tr>
+<tr><td>mutnat.zip</td><td>[Neo Geo] Mutation Nation (ミューテイションネイション) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>mvp.zip</td><td>[System 16B] M.V.P. (YM2151+uDP7759)</td><td>Z80</td><td>OPM</td><td>system16b</td></tr>
+<tr><td>mvsc.zip</td><td>[CPS-2] Marvel Vs. Capcom: Clash of Super Heroes (マーヴルVSカプコン -クラッシュ・オブ・スーパーヒーローズ-) (QSound)</td><td>Z80</td><td>QSound</td><td>cps2</td></tr>
+<tr><td>mwalk.zip</td><td>[System 18] Michael Jackson's Moonwalker (マイケルジャクソンズ ムーンウォーカー) (YM3438x2+RF5C68)</td><td>Z80</td><td>YM2612 + RF5C68</td><td>system18</td></tr>
+<tr><td>mx5000.zip</td><td>[MX5000] MX5000 (フラックアタック) (YM2151+K7232)</td><td>Z80</td><td>OPM</td><td>flakattack</td></tr>
+<tr><td>myangel3.zip</td><td>[System 11] Kosodate Quiz My Angel 3 (子育てクイズ・マイエンジェル3 -マイリトルペット-) (C352)</td><td>68000</td><td>C352</td><td>system11</td></tr>
+<tr><td>myhero.zip</td><td>[System 1] My Hero / Seishun Scandal (青春スキャンダル) (SN76496x2)</td><td>Z80</td><td>OPM</td><td>system1</td></tr>
+<tr><td>mysticri.zip</td><td>[Irem M92] Mystic Riders (魔法警備隊ガンホーキ) (YM2151+GA20)</td><td>V30</td><td>OPM + GA20</td><td>m92</td></tr>
+<tr><td>mystwarr.zip</td><td>[Mystic Warriors] Mystic Warriors (ミスティックウォリアーズ -怒りの忍者-) (K54539x2)</td><td>Z80</td><td>K054539 + OPM</td><td>054539x2</td></tr>
+<tr><td>nam1975.zip</td><td>[Neo Geo] NAM-1975 (アンドロデュノス) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>nastar.zip</td><td>[B System] Nastar (ラスタンサーガII) (YM2610)</td><td>Z80</td><td>YM2610</td><td>bsystem</td></tr>
+<tr><td>nbapbp.zip</td><td>[Hornet] NBA Play By Play (NBAプレイバイプレイ) (RF5C400)</td><td>68000</td><td>RF5C400</td><td>hornet</td></tr>
+<tr><td>nbbatman.zip</td><td>[Irem M92] Ninja Baseball Batman (野球格闘リーグマン) (YM2151+GA20)</td><td>V30</td><td>OPM + GA20</td><td>m92</td></tr>
+<tr><td>ncombat.zip</td><td>[Neo Geo] Ninja Combat (ニンジャコンバット) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>ncommand.zip</td><td>[Neo Geo] Ninja Commando (ニンジャコマンドー) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>ncv1.zip</td><td>[ND-1] Namco Classics Vol. 1 (ナムコ クラシックコレクションVol.1) (C352)</td><td>68000</td><td>C352</td><td>nd1</td></tr>
+<tr><td>ncv2.zip</td><td>[ND-1] Namco Classics Vol. 2 (ナムコ クラシックコレクションVol.2) (C352)</td><td>68000</td><td>C352</td><td>nd1</td></tr>
+<tr><td>nebulray.zip</td><td>[NB-1] Nebulas Ray (ネビュラスレイ) (C352)</td><td>68000</td><td>C140</td><td>nb1</td></tr>
+<tr><td>nemo.zip</td><td>[CPS-1] Nemo (ニモ) (YM2151+MSM6295)</td><td>Z80</td><td>OPM</td><td>cps1</td></tr>
+<tr><td>neobombe.zip</td><td>[Neo Geo] Neo Bomberman (ネオボンバーマン) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>neocup98.zip</td><td>[Neo Geo] Neo-Geo Cup '98: The Road to the Victory (ネオジオカップ'98 -ザ・ロードトゥザビクトリー-) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>neodrift.zip</td><td>[Neo Geo] Neo Drift Out: New Technology (ネオドリフトアウト -NEW TECHNOLOGY-) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>neomrdo.zip</td><td>[Neo Geo] Neo Mr. Do! (ネオミスターDo!) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>newufo_nfl.zip</td><td>[NEWUFO] New UFO Catcher (Team NFL) (NEW UFOキャッチャー NFLバージョン) (YM3438)</td><td>Z80</td><td>OPM</td><td>newufo</td></tr>
+<tr><td>newufo_sonic.zip</td><td>[NEWUFO] New UFO Catcher (Sonic The Hedgehog) (NEW UFOキャッチャー ソニックバージョン) (YM3438)</td><td>Z80</td><td>OPM</td><td>newufo</td></tr>
+<tr><td>newufo_xmas.zip</td><td>[NEWUFO] New UFO Catcher (Christmas season ROM kit) (NEW UFOキャッチャー クリスマスバージョン) (YM3438)</td><td>Z80</td><td>OPM</td><td>newufo</td></tr>
+<tr><td>ninjak.zip</td><td>[F2 System] The Ninja Kids (ニンジャキッズ) (YM2610)</td><td>Z80</td><td>YM2610</td><td>f2system</td></tr>
+<tr><td>ninjakd2.zip</td><td>[Ninja-kun: Ashura no Shou] Ninja-kun: Ashura no Shou (忍者くん 阿修羅の章) (YM2203x2+DAC)</td><td>Z80</td><td>OPM</td><td>ninjakid2</td></tr>
+<tr><td>ninjamas.zip</td><td>[Neo Geo] Ninja Master's: haoh-ninpo-cho (ニンジャマスターズ -覇王忍法・-) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>ninjaw.zip</td><td>[The Ninja Warriors] The Ninja Warriors (ニンジャウォーリアーズ) (YM2610)</td><td>Z80</td><td>YM2610</td><td>dual68</td></tr>
+<tr><td>ninjemak.zip</td><td>[Terra Cresta] Ninja Emaki (妖魔忍法帖) (YM3526+DAC)</td><td>Z80</td><td>OPM</td><td>terracre</td></tr>
+<tr><td>nitd.zip</td><td>[Neo Geo] Nightmare in the Dark (ナイトメア・イン・ザ・ダーク) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>nitrobal.zip</td><td>[DECO32] Nitro Ball (ガンボール) (YM2151+MSM6295x2)</td><td>HuC6280</td><td>OPM + OKI6295</td><td>deco32</td></tr>
+<tr><td>nmg5.zip</td><td>[NMG5] New Multi Game 5 (YM3812+MSM6295)</td><td>Z80</td><td>OPM</td><td>nmg5</td></tr>
+<tr><td>nob.zip</td><td>[System 1] Noboranka (bootleg) (のぼらんか) (SN76496x2)</td><td>Z80</td><td>OPM</td><td>system1</td></tr>
+<tr><td>nslasher.zip</td><td>[Night Slashers] Night Slashers (ナイトスラッシャーズ) (YM2151+MSM6295x2)</td><td>HuC6280</td><td>OPM + OKI6295</td><td>nslasher</td></tr>
+<tr><td>nspirit.zip</td><td>[Irem M72] Ninja Spirit (最後の忍道) (YM2151)</td><td>Z80</td><td>OPM</td><td>m72</td></tr>
+<tr><td>nwarr.zip</td><td>[CPS-2] Night Warriors: Darkstalkers' Revenge (ヴァンパイアハンター -ダークストーカーズリベンジ-) (QSound)</td><td>Z80</td><td>QSound</td><td>cps2</td></tr>
+<tr><td>nycaptor.zip</td><td>[N.Y.CAPTOR] N.Y. Captor (YM2149x2+MSM5232)</td><td>Z80</td><td>OPM</td><td>nycaptor</td></tr>
+<tr><td>omegaf.zip</td><td>[Mutant Night] Omega Fighter (オメガファイター) (YM2203x2)</td><td>Z80</td><td>OPM</td><td>robokid</td></tr>
+<tr><td>onna34ro.zip</td><td>[Taito Sound Board '84] Onna Sanshirou: Typhoon Gal (女三四郎) (YM2149+MSM5232)</td><td>Z80</td><td>OPM</td><td>flstory</td></tr>
+<tr><td>opengolf.zip</td><td>[System GX] Konami's Open Golf Championship (ゴルフィンググレイツ2) (K54539x2)</td><td>68000</td><td>K054539</td><td>systemgx</td></tr>
+<tr><td>opwolf.zip</td><td>[Operation Wolf] Operation Wolf (オペレーションウルフ) (YM2151)</td><td>Z80</td><td>OPM</td><td>opwolf</td></tr>
+<tr><td>opwolf3.zip</td><td>[Slap Shot] Operation Wolf 3 (オペレーションウルフ3) (YM2610)</td><td>Z80</td><td>YM2610</td><td>f2system</td></tr>
+<tr><td>ordyne.zip</td><td>[System 2] Ordyne (オーダイン) (YM2151+C140)</td><td>6809</td><td>C140 + OPM</td><td>system2</td></tr>
+<tr><td>oscar.zip</td><td>[DECO8] Psycho-Nics Oscar (サイコニクスオスカー) (YM2203+YM3526)</td><td>HuC6280</td><td>OPM + OKI6295</td><td>cobracom</td></tr>
+<tr><td>othunder.zip</td><td>[Top Speed] Operation Thunderbolt (オペレーションサンダーボルト) (YM2610)</td><td>Z80</td><td>YM2610</td><td>f2system</td></tr>
+<tr><td>outfxies.zip</td><td>[NB-2] The Outfoxies (アウトフォクシーズ) (C352)</td><td>68000</td><td>C140</td><td>nb1</td></tr>
+<tr><td>outrun.zip</td><td>[OutRun] OutRun (アウトラン) (YM2151+SegaPCM)</td><td>Z80</td><td>OPM + SegaPCM</td><td>outrun</td></tr>
+<tr><td>outrunb.zip</td><td>[OutRun] OutRun Bootleg (アウトラン) (YM2151+SegaPCM)</td><td>Z80</td><td>OPM + SegaPCM</td><td>outrun</td></tr>
+<tr><td>outrunm.zip</td><td>アウトラン</td><td>Z80</td><td>OPM + SegaPCM</td><td>outrun</td></tr>
+<tr><td>outzone.zip</td><td>[Toaplan 1] Out Zone (アウトゾーン) (YM3526)</td><td>Z80</td><td>OPM</td><td>generic</td></tr>
+<tr><td>overtop.zip</td><td>[Neo Geo] Over Top (オーバートップ) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>p47.zip</td><td>[Jaleco Mega System 1] P-47: The Phantom Fighter (YM2151+MSM6295x2)</td><td>68000</td><td>OPM + OKI6295</td><td>megasys1</td></tr>
+<tr><td>pacapp.zip</td><td>[System 12] Paca Paca Passion (パカパカパッション) (C352)</td><td>68000</td><td>C352</td><td>system12</td></tr>
+<tr><td>pacapp2.zip</td><td>[System 12] Paca Paca Passion 2 (パカパカパッション2) (C352)</td><td>68000</td><td>C352</td><td>system12</td></tr>
+<tr><td>pacappsp.zip</td><td>[System 12] Paca Paca Passion Special (パカパカパッションスペシャル) (C352)</td><td>68000</td><td>C352</td><td>system12</td></tr>
+<tr><td>pacland.zip</td><td>[Baraduke] Pac Land (パックランド) (C30)</td><td>6809</td><td>CUS30</td><td>wsg63701</td></tr>
+<tr><td>pacman.zip</td><td>[Pac-Man] Pac-Man (パックマン) (Namco WSG)</td><td>Z80</td><td>OPM</td><td>pacman</td></tr>
+<tr><td>pacmania.zip</td><td>[System 1] Pac-Mania (パックマニア) (YM2151+C30)</td><td>6809</td><td>CUS30 + OPM</td><td>system1</td></tr>
+<tr><td>pacmaniaj.zip</td><td>[System 1] Pac-Mania JP (パックマニア) (YM2151+C30)</td><td>6809</td><td>CUS30 + OPM</td><td>system1</td></tr>
+<tr><td>pacnpal.zip</td><td>[Mappy] Pac And Pal (パック ＆ パル) (Namco WSG)</td><td>6809</td><td>CUS30</td><td>wsg6809</td></tr>
+<tr><td>pang3.zip</td><td>[CPS-1] Pang! 3 (パン！3 -怪盗たちの華麗な午後-) (YM2151+MSM6295)</td><td>Z80</td><td>OPM</td><td>cps1</td></tr>
+<tr><td>panicbom.zip</td><td>[Neo Geo] Panic Bomber (ボンバーマン ぱにっくボンバー) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>panicprk.zip</td><td>[System 23] Panic Park (パニックパーク) (C352)</td><td>68000</td><td>C352</td><td>system12</td></tr>
+<tr><td>panicr.zip</td><td>[Panic Road] Panic Road (パニックロード) (YM2151)</td><td>Z80</td><td>OPM</td><td>panicr</td></tr>
+<tr><td>parodius.zip</td><td>[Parodius] Parodius Da! (パロディウスだ！ -神話からお笑いへ-) (YM2151+K53260)</td><td>Z80</td><td>K053260 + OPM</td><td>053260</td></tr>
+<tr><td>passsht.zip</td><td>[System 16B] Passing Shot (パッシングショット) (YM2151+uDP7759)</td><td>Z80</td><td>OPM</td><td>system16b</td></tr>
+<tr><td>pbaction.zip</td><td>[Pinball Action] Pinball Action (ピンボールアクション) (AY-3-8910x3)</td><td>Z80</td><td>OPM</td><td>pbaction</td></tr>
+<tr><td>pbobble.zip</td><td>[B System] Puzzle Bobble (パズルボブル) (YM2610)</td><td>Z80</td><td>YM2610</td><td>bsystem</td></tr>
+<tr><td>pbobblen.zip</td><td>[Neo Geo] Puzzle Bobble (パズルボブル) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>pclubys.zip</td><td>[NMG5] Puzzle Club (YM3812+MSM6295)</td><td>Z80</td><td>OPM</td><td>pclubys</td></tr>
+<tr><td>pengo.zip</td><td>[Pengo] Pengo (ペンゴ) (Sega WSG)</td><td>Z80</td><td>OPM</td><td>pengo</td></tr>
+<tr><td>pengo2.zip</td><td>[Pengo] Pengo Set 2 (ペンゴ Set 2) (Sega WSG)</td><td>Z80</td><td>OPM</td><td>pengo</td></tr>
+<tr><td>perfrman.zip</td><td>[Performan] Performan (パフォーマン) (AY-3-8910x2)</td><td>Z80</td><td>OPM</td><td>perfrman</td></tr>
+<tr><td>peterpak.zip</td><td>[Atari System1] Peter Pack-Rat (ピーターパックラット) (YM2151)</td><td>Z80</td><td>OPM</td><td>system1</td></tr>
+<tr><td>pgoal.zip</td><td>[Neo Geo] Pleasure Goal (フットサル) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>phelios.zip</td><td>[System 2] Phelios (フェリオス) (YM2151+C140)</td><td>6809</td><td>C140 + OPM</td><td>system2</td></tr>
+<tr><td>phozon.zip</td><td>[Mappy] Phozon (フォゾン) (Namco WSG)</td><td>6809</td><td>CUS30</td><td>wsg6809</td></tr>
+<tr><td>pipibibs.zip</td><td>[Toaplan 1] Pipi and Bibis / Whoopee!! (YM3812)</td><td>Z80</td><td>OPM</td><td>pipibibs</td></tr>
+<tr><td>pistoldm.zip</td><td>[System 1] Pistol Daimyo no Bouken / Quest of Pistol Daimyo (ピストル大名の冒険) (YM2151+C30)</td><td>6809</td><td>CUS30 + OPM</td><td>system1</td></tr>
+<tr><td>pitfall2.zip</td><td>[System 1] Pitfall 2 (ピットフォールⅡ) (SN76496x2)</td><td>Z80</td><td>OPM</td><td>system1</td></tr>
+<tr><td>plegends.zip</td><td>[Cave] Power Instinct Legends (豪血寺外伝 -最強伝説-) (YM2203+MSM6295x2)</td><td>Z80</td><td>OPM</td><td>pwrinst2</td></tr>
+<tr><td>plsmaswd.zip</td><td>[ZN2] Plasma Sword (スターグラディエイター2 -ナイトメア・オブ・ビルシュタイン-) (QSound)</td><td>Z80</td><td>QSound</td><td>zn</td></tr>
+<tr><td>plumppop.zip</td><td>[The New Zealand Story] Plump Pop (プランプポップ) (YM2203)</td><td>Z80</td><td>OPM</td><td>plumppop</td></tr>
+<tr><td>plusalph.zip</td><td>[Jaleco Mega System 1] Plus Alpha (プラスアルファ) (YM2151+MSM6295x2)</td><td>68000</td><td>OPM + OKI6295</td><td>megasys1</td></tr>
+<tr><td>pnickj.zip</td><td>[CPS-1] Pnickies (ぷにっきいず) (YM2151+MSM6295)</td><td>Z80</td><td>OPM</td><td>cps1</td></tr>
+<tr><td>pnyaa.zip</td><td>[Neo Geo] Pochi and Nyaa (ポチッとにゃ～) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>pocketrc.zip</td><td>[System 11] Pocket Racer (ポケットレーサー) (C352)</td><td>68000</td><td>C352</td><td>system11</td></tr>
+<tr><td>pontoon.zip</td><td>[System 18] Pontoon (YM3438x2+RF5C68)</td><td>Z80</td><td>YM2612 + RF5C68</td><td>system18</td></tr>
+<tr><td>pooyan.zip</td><td>[Time Pilot] Pooyan (プーヤン) (AY-3-8910x2)</td><td>Z80</td><td>OPM</td><td>pooyan</td></tr>
+<tr><td>popbounc.zip</td><td>[Neo Geo] Pop 'n Bounce (ガッポリン) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>pow.zip</td><td>[SNK68] P.O.W.: Prisoners of War (脱獄 -PRISONERS OF WAR-) (YM3812+uPD7759)</td><td>68000</td><td>YM2610</td><td>3812</td></tr>
+<tr><td>powerins.zip</td><td>[Power Instinct] Power Instinct (豪血寺一族) (YM2203+MSM6295x2)</td><td>Z80</td><td>OPM</td><td>pwrinst1</td></tr>
+<tr><td>preisle2.zip</td><td>[Neo Geo] Prehistoric Isle 2 (プレヒストリックアイル2 原始島) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>primglex.zip</td><td>[System 11] Prime Goal EX (プライムゴールEX) (C352)</td><td>68000</td><td>C352</td><td>system11</td></tr>
+<tr><td>progear.zip</td><td>[CPS-2] Progear (プロギアの嵐) (QSound)</td><td>Z80</td><td>QSound</td><td>cps2</td></tr>
+<tr><td>propcycl.zip</td><td>[System Super 22] Prop Cycle (プロップサイクル) (C352)</td><td>68000</td><td>C352</td><td>system22</td></tr>
+<tr><td>pspikes.zip</td><td>[Turbo Force] Power Spikes (スーパーバレー'91) (YM2610)</td><td>Z80</td><td>OPM</td><td>turbofrc</td></tr>
+<tr><td>pspikes2.zip</td><td>[Neo Geo] Power Spikes II (パワースパイクスII) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>psychic5j.zip</td><td>[Argus] Psychic 5 (サイキック５) (YM2203x2)</td><td>Z80</td><td>OPM</td><td>robokid</td></tr>
+<tr><td>psychos.zip</td><td>[Psycho Soldier] Psycho Soldier (サイコソルジャー) (YM3526+Y8950)</td><td>68000</td><td>YM2610</td><td>3526_8950</td></tr>
+<tr><td>psychosj.zip</td><td>[Psycho Soldier] Psycho Soldier JP (サイコソルジャー) (YM3526+Y8950)</td><td>68000</td><td>YM2610</td><td>3526_8950</td></tr>
+<tr><td>psyforce.zip</td><td>[FX-1A System] Psychic Force (サイキックフォース) (YM2610B)</td><td>Z80</td><td>OPM</td><td>fx1a</td></tr>
+<tr><td>ptblank.zip</td><td>[NB-1] Point Blank / GunBullet (ガンバレット) (C352)</td><td>68000</td><td>C140</td><td>nb1</td></tr>
+<tr><td>ptblank2ua.zip</td><td>[System 11] Point Blank 2 / Gunbarl (C352)</td><td>68000</td><td>C352</td><td>system11</td></tr>
+<tr><td>pulirula.zip</td><td>[F1 System] PuLiRuLa (プリルラ) (YM2610)</td><td>Z80</td><td>YM2610</td><td>f2system</td></tr>
+<tr><td>pulstar.zip</td><td>[Neo Geo] Pulstar (パルスター) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>punisher.zip</td><td>[CPS-1] The Punisher (パニッシャー) (QSound)</td><td>Z80</td><td>QSound</td><td>cps1qs</td></tr>
+<tr><td>punkshot.zip</td><td>[Punk Shot] Punk Shot (パンクショット) (YM2151+K53260)</td><td>Z80</td><td>K053260 + OPM</td><td>053260</td></tr>
+<tr><td>puzlclub.zip</td><td>[System 1] Puzzle Club (パズルクラブ) (YM2151+C30)</td><td>6809</td><td>CUS30 + OPM</td><td>system1</td></tr>
+<tr><td>puzldama.zip</td><td>[System GX] Taisen Puzzle-dama (対戦ぱずるだま) (K54539x2)</td><td>68000</td><td>K054539</td><td>systemgx</td></tr>
+<tr><td>puzzledp.zip</td><td>[Neo Geo] Puzzle De Pon! (パズルdeポン！) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>pwheelsj.zip</td><td>[Z System] Power Wheels (パワーホイールズ) (YM2610)</td><td>Z80</td><td>YM2610</td><td>dual68</td></tr>
+<tr><td>pzloop2.zip</td><td>[CPS-2] Puzz Loop 2 (パズループ2) (QSound)</td><td>Z80</td><td>QSound</td><td>cps2</td></tr>
+<tr><td>qad.zip</td><td>[CPS-1] Quiz and Dragons (クイズ &amp;amp; ドラゴンズ) (YM2151+MSM6295)</td><td>Z80</td><td>OPM</td><td>cps1</td></tr>
+<tr><td>qadj.zip</td><td>[CPS-1] Quiz and Dragons JP (クイズ &amp;amp; ドラゴンズ) (YM2151+MSM6295)</td><td>Z80</td><td>OPM</td><td>cps1</td></tr>
+<tr><td>qcrayon.zip</td><td>[F2 System] Quiz Crayon Shin-chan (クイズクレヨンしんちゃん) (YM2610)</td><td>Z80</td><td>YM2610</td><td>f2system</td></tr>
+<tr><td>qcrayon2.zip</td><td>[F2 System] Quiz Crayon Shin-chan: Orato Asobo (クレヨンしんちゃん おらと遊ぼ) (YM2610)</td><td>Z80</td><td>YM2610</td><td>f2system</td></tr>
+<tr><td>qgakumon.zip</td><td>[Sunset Riders] Quiz Gakumon no Susume (クイズ学問ノススメ) (YM2151+K53260)</td><td>Z80</td><td>K053260 + OPM</td><td>053260</td></tr>
+<tr><td>qjinsei.zip</td><td>[F2 System] Quiz Jinsei Gekijou (クイズ人生劇場) (YM2610)</td><td>Z80</td><td>YM2610</td><td>f2system</td></tr>
+<tr><td>qndream.zip</td><td>[CPS-2] Quiz Nanairo Dreams: Nijiirochou no Kiseki (クイズなないろドリームス 虹色町の奇跡) (QSound)</td><td>Z80</td><td>QSound</td><td>cps2</td></tr>
+<tr><td>qtono2j.zip</td><td>[CPS-1] Quiz Tonosama no Yabou 2 Zenkoku-ban (クイズ 殿様の野望2 -全国版-) (YM2151+MSM6295)</td><td>Z80</td><td>OPM</td><td>cps1</td></tr>
+<tr><td>qtorimon.zip</td><td>[F2 System] Quiz Torimonochou (苦胃頭捕物・) (YM2610)</td><td>Z80</td><td>YM2610</td><td>f2system</td></tr>
+<tr><td>quartet.zip</td><td>[Pre-System 16] Quartet / Quartet 2(カルテット) (YM2151+uDP7751)</td><td>Z80</td><td>OPM</td><td>system16a</td></tr>
+<tr><td>quester.zip</td><td>[System 1] Quester (クエスター) (YM2151+C30)</td><td>6809</td><td>CUS30 + OPM</td><td>system1</td></tr>
+<tr><td>quiz18k.zip</td><td>[Welltris] Miyasu Nonki no Quiz 18-Kin (みやすのんきのクイズ18禁 -Dr. エッちゃんの診察室-) (YM2610)</td><td>Z80</td><td>OPM</td><td>welltris</td></tr>
+<tr><td>quizdai2.zip</td><td>[Neo Geo] Quiz Meitantei Neo and Geo: Quiz Daisousa Sen part 2 (クイズ迷探偵ネオ＆ジオ -クイズ大捜査線パート2-) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>quizdais.zip</td><td>[Neo Geo] Quiz Daisousa Sen: The Last Count Down (クイズ大捜査線 -THE LAST COUNT DOWN-) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>quizf1.zip</td><td>[Irem M97] Quiz F-1 1,2finish (クイズF-1 ワンツーフィニッシュ) (YM2151)</td><td>Z80</td><td>OPM</td><td>m72</td></tr>
+<tr><td>quizhq.zip</td><td>[F2 System] Quiz H.Q. (クイズH.Q.) (YM2610)</td><td>Z80</td><td>YM2610</td><td>f2system</td></tr>
+<tr><td>quizkof.zip</td><td>[Neo Geo] Quiz King of Fighters (クイズ キング・オブ・ファイターズ) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>qzchikyu.zip</td><td>[F2 System] Quiz Chikyu Bouei Gun (クイズ地球防衛軍) (YM2610)</td><td>Z80</td><td>YM2610</td><td>f2system</td></tr>
+<tr><td>qzquest.zip</td><td>[F2 System] Quiz Quest: Hime to Yuusha no Monogatari (クイズクエスト -姫と勇者の物語-) (YM2610)</td><td>Z80</td><td>YM2610</td><td>f2system</td></tr>
+<tr><td>qzshowby.zip</td><td>[B System] Quiz Sekai wa Show by Shobai (クイズ世界はSHOW by ショーバイ！！) (YM2610)</td><td>Z80</td><td>YM2610</td><td>bsystem</td></tr>
+<tr><td>rachero.zip</td><td>[X Board] Racing Hero (レーシングヒーロー) (YM2151+SegaPCM)</td><td>Z80</td><td>OPM + SegaPCM</td><td>toutrun</td></tr>
+<tr><td>racinfrc.zip</td><td>[System GX] Racin' Force (レーシングフォース) (K54539x2)</td><td>68000</td><td>K054539</td><td>systemgx</td></tr>
+<tr><td>racingb.zip</td><td>[Z System] Racing Beat (レーシングビート) (YM2610)</td><td>Z80</td><td>YM2610</td><td>dual68</td></tr>
+<tr><td>racingj.zip</td><td>[Hornet] Racing Jam (レーシングジャム) (RF5C400)</td><td>68000</td><td>RF5C400</td><td>hornet</td></tr>
+<tr><td>racingj2.zip</td><td>[Hornet] Racing Jam: Chapter 2 (レーシングジャム チャプターII) (RF5C400)</td><td>68000</td><td>RF5C400</td><td>hornet</td></tr>
+<tr><td>rackemup.zip</td><td>[Battlantis] Rack 'em Up (ザ・ハスラー) (YM3812x2)</td><td>Z80</td><td>OPM</td><td>battlantis</td></tr>
+<tr><td>raflesia.zip</td><td>[System 1] Raflesia (ラフレシア) (SN76496x2)</td><td>Z80</td><td>OPM</td><td>system1</td></tr>
+<tr><td>ragnagrd.zip</td><td>[Neo Geo] Ragnagard (神凰拳) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>raiden.zip</td><td>[Raiden] Raiden (雷電) (YM3812+MSM6295)</td><td>Z80</td><td>OPM</td><td>raiden</td></tr>
+<tr><td>raiden2.zip</td><td>[Raiden 2] Raiden 2 (電神魔傀) (YM2151+MSM6295x2)</td><td>Z80</td><td>OPM</td><td>raiden2</td></tr>
+<tr><td>raidndx.zip</td><td>[Raiden 2] Raiden DX (雷電DX) (YM2151+MSM6295x2)</td><td>Z80</td><td>OPM</td><td>raiden2</td></tr>
+<tr><td>raimais.zip</td><td>[L System] Raimais (レイメイズ) (YM2610)</td><td>Z80</td><td>YM2610</td><td>f2system</td></tr>
+<tr><td>rainbow.zip</td><td>[Rainbow Islands] Rainbow Islands (レインボーアイランド) (YM2151)</td><td>Z80</td><td>OPM</td><td>rainbow</td></tr>
+<tr><td>rallybik.zip</td><td>[Toaplan 1] Rally Bike (ダッシュ野郎) (YM3526)</td><td>Z80</td><td>OPM</td><td>generic</td></tr>
+<tr><td>rambo3p.zip</td><td>[B System] Rambo III (ランボーIII) (YM2610)</td><td>Z80</td><td>YM2610</td><td>bsystem</td></tr>
+<tr><td>rapidrvr.zip</td><td>[Gorgon] Rapid River (ラピッドリバー らぴっどりばー) (C352)</td><td>68000</td><td>C352</td><td>system12</td></tr>
+<tr><td>rastan.zip</td><td>[Rastan] Rastan (ラスタンサーガ) (YM2151+MSM5205)</td><td>Z80</td><td>OPM</td><td>fullt</td></tr>
+<tr><td>raveracw.zip</td><td>[System 22] Rave Racer (レイブレーサー) (C352)</td><td>68000</td><td>C352</td><td>system22</td></tr>
+<tr><td>rbff1.zip</td><td>[Neo Geo] Real Bout Fatal Fury (リアルバウト餓狼伝説) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>rbff2.zip</td><td>[Neo Geo] Real Bout Fatal Fury 2: The Newcomers (リアルバウト餓狼伝説2 -THE NEWCOMERS-) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>rbffspec.zip</td><td>[Neo Geo] Real Bout Fatal Fury Special (リアルバウト餓狼伝説スペシャル) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>rchase.zip</td><td>[Y Board] Rail Chase (レイルチェイス) (YM2151+SegaPCM)</td><td>Z80</td><td>OPM</td><td>gforce</td></tr>
+<tr><td>rchase2.zip</td><td>[Model 2B] Rail Chase 2 (レールチェイス 2) (SCSP)</td><td>68000</td><td>SCSP</td><td>model2a</td></tr>
+<tr><td>realpunc.zip</td><td>[B System] Real Puncher (YM2610B)</td><td>Z80</td><td>OPM</td><td>sonicb</td></tr>
+<tr><td>recordbr.zip</td><td>[H System] Recordbreaker (ゴーフォーザゴールド) (YM2610)</td><td>Z80</td><td>YM2610</td><td>f2system</td></tr>
+<tr><td>regulus.zip</td><td>[System 1] Regulus (レグルス) (SN76496x2)</td><td>Z80</td><td>OPM</td><td>system1</td></tr>
+<tr><td>ridgera2.zip</td><td>[System 22] Ridge Racer 2 (リッジレーサー2) (C352)</td><td>68000</td><td>C352</td><td>system22</td></tr>
+<tr><td>ridgerac.zip</td><td>[System 22] Ridge Racer (リッジレーサー) (C352)</td><td>68000</td><td>C352</td><td>system22</td></tr>
+<tr><td>ridgeraj.zip</td><td>RIDGE RACER</td><td>68000</td><td>C352</td><td>system22</td></tr>
+<tr><td>ridhero.zip</td><td>[Neo Geo] Riding Hero (ライディングヒーロー) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>ringdest.zip</td><td>[CPS-2] Ring of Destruction: Slammasters II (スーパーマッスルボマー) (QSound)</td><td>Z80</td><td>QSound</td><td>cps2</td></tr>
+<tr><td>riot.zip</td><td>[Tecmo16] Riot (雷軋斗) (YM2151+MSM6295)</td><td>Z80</td><td>OPM</td><td>tecmo16</td></tr>
+<tr><td>riotcity.zip</td><td>[System 16B] Riot City (ライオットシティ) (YM2151+uDP7759)</td><td>Z80</td><td>OPM</td><td>system16b</td></tr>
+<tr><td>riskchal.zip</td><td>[Irem M97] Risky Challenge (ぐっすんおよよ) (YM2151)</td><td>Z80</td><td>OPM</td><td>m72</td></tr>
+<tr><td>roadrunn.zip</td><td>[Atari System1] Road Runner (ルーニーチューンズ・ロードランナー) (YM2151)</td><td>Z80</td><td>OPM</td><td>system1</td></tr>
+<tr><td>roboarmy.zip</td><td>[Neo Geo] Robo Army (ロボアーミー) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>robocop.zip</td><td>[Robocop] Robocop (ロボコップ) (YM2203+YM3812+MSM6295)</td><td>HuC6280</td><td>OPM + OKI6295</td><td>drgninja</td></tr>
+<tr><td>robocop2.zip</td><td>[Thunder Zone] Robocop 2 (ロボコップ2) (YM2151+YM2203+MSM6295x2)</td><td>HuC6280</td><td>OPM + OKI6295</td><td>thndzone</td></tr>
+<tr><td>robokid.zip</td><td>[Mutant Night] Atomic Robo-kid (アトミックロボキッド) (YM2203x2)</td><td>Z80</td><td>OPM</td><td>robokid</td></tr>
+<tr><td>rocnrope.zip</td><td>[Time Pilot] Roc'n Rope (ロックンロープ) (AY-3-8910x2)</td><td>Z80</td><td>OPM</td><td>rocnrope</td></tr>
+<tr><td>rodland.zip</td><td>[Jaleco Mega System 1] Rod-Land (妖精物語 ロッドランド) (YM2151+MSM6295x2)</td><td>68000</td><td>OPM + OKI6295</td><td>megasys1</td></tr>
+<tr><td>rohga.zip</td><td>[DECO32] Rohga Armor Force (ウルフファング -空牙2001-) (YM2151+MSM6295x2)</td><td>HuC6280</td><td>OPM + OKI6295</td><td>deco32</td></tr>
+<tr><td>roishtar.zip</td><td>THE RETURN OF ISHTAR［ザ リターン オブ イシター］</td><td>6809</td><td>CUS30 + OPM</td><td>system86</td></tr>
+<tr><td>rollerg.zip</td><td>[Rollergames] Rollergames (ローラーゲームズ) (YM3812+K53260)</td><td>Z80</td><td>OPM</td><td>rollerg</td></tr>
+<tr><td>rompers.zip</td><td>[System 1] Rompers (ロンパーズ) (YM2151+C30)</td><td>6809</td><td>CUS30 + OPM</td><td>system1</td></tr>
+<tr><td>rotd.zip</td><td>[Neo Geo] Rage of the Dragons (レイジ・オブ・ザ・ドラゴンズ) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>rthun2.zip</td><td>[System 2] Rolling Thunder 2 (ローリングサンダー２) (YM2151+C140)</td><td>6809</td><td>C140 + OPM</td><td>system2</td></tr>
+<tr><td>rthunder.zip</td><td>[System 86] Rolling Thunder (ローリングサンダー) (YM2151+C30+DAC)</td><td>6809</td><td>CUS30 + OPM</td><td>system86</td></tr>
+<tr><td>rtype.zip</td><td>[Irem M72] R-Type (R-タイプ) (YM2151)</td><td>Z80</td><td>OPM</td><td>m72</td></tr>
+<tr><td>rtype2.zip</td><td>[Irem M82] R-Type II (R-タイプ II) (YM2151)</td><td>Z80</td><td>OPM</td><td>m72</td></tr>
+<tr><td>rtypeleo.zip</td><td>[Irem M92] R-Type Leo (R-タイプ LEO) (YM2151+GA20)</td><td>V30</td><td>OPM + GA20</td><td>m92</td></tr>
+<tr><td>rtypepj.zip</td><td>R-TYPE</td><td>Z80</td><td>OPM</td><td>rtype</td></tr>
+<tr><td>rungun2.zip</td><td>[System GX] Run and Gun 2 (スラムダンク2) (K54539x2)</td><td>68000</td><td>K054539</td><td>systemgx</td></tr>
+<tr><td>rushcrsh.zip</td><td>[Rush and Crash] The Speed Rumbler JP (ラッシュ&amp;amp;クラッシュ) (YM2203x2)</td><td>Z80</td><td>OPM</td><td>rushcrsh</td></tr>
+<tr><td>rushhero.zip</td><td>[System GX] Rushing Heroes (K54539x2)</td><td>68000</td><td>K054539</td><td>systemgx</td></tr>
+<tr><td>rvschool.zip</td><td>[ZN2] Rival Schools (私立ジャスティス学園 -LEGION OF HEROES-) (QSound)</td><td>Z80</td><td>QSound</td><td>zn</td></tr>
+<tr><td>rygar.zip</td><td>[Rygar] Rygar (アルゴスの戦士) (YM3812+MSM5205)</td><td>Z80</td><td>OPM</td><td>rygar</td></tr>
+<tr><td>ryujin.zip</td><td>[B System] Ryujin (龍神) (YM2610)</td><td>Z80</td><td>YM2610</td><td>bsystem</td></tr>
+<tr><td>ryukendn.zip</td><td>[Ninja Gaiden] Shadow Warriors JP (忍者龍剣伝) (YM2203x3+MSM6295)</td><td>Z80</td><td>OPM</td><td>gaiden</td></tr>
+<tr><td>ryukyu.zip</td><td>[System 16B] Ryu Kyu (琉球) (YM2151+uDP7759)</td><td>Z80</td><td>OPM</td><td>system16b</td></tr>
+<tr><td>s1945jn.zip</td><td>[Gunbird] Strikers 1945 (ストライカーズ1945) (YM2610)</td><td>Z80</td><td>OPM</td><td>gunbird</td></tr>
+<tr><td>s1945p.zip</td><td>[Neo Geo] Strikers 1945 Plus (ストライカーズ1945プラス) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>sailormn.zip</td><td>[Air Gallet] Pretty Soldier Sailor Moon (美少女戦士 セーラームーン) (YM2151+MSM6295x2)</td><td>Z80</td><td>OPM</td><td>agallet</td></tr>
+<tr><td>salamand.zip</td><td>SALAMANDER ～沙羅曼陀～</td><td>Z80</td><td>AY</td><td>salamander</td></tr>
+<tr><td>salmndr2.zip</td><td>[System GX] Salamander 2 (沙羅曼蛇2) (K54539x2)</td><td>68000</td><td>K054539</td><td>systemgx</td></tr>
+<tr><td>samsh5sp.zip</td><td>[Neo Geo] Samurai Shodown V Special (サムライスピリッツ零スペシャル) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>samsho.zip</td><td>[Neo Geo] Samurai Shodown (サムライスピリッツ) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>samsho2.zip</td><td>[Neo Geo] Samurai Shodown 2 (真サムライスピリッツ -覇王丸地獄変-) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>samsho3.zip</td><td>[Neo Geo] Samurai Shodown 3 (サムライスピリッツ -斬紅郎無双剣-) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>samsho4.zip</td><td>[Neo Geo] Samurai Shodown 4: Amakusa's Revenge (サムライスピリッツ -天草降臨-) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>samsho5.zip</td><td>[Neo Geo] Samurai Shodown V (サムライスピリッツ零) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>samuraia.zip</td><td>[Gunbird] Samurai Aces (戦国エース) (YM2610)</td><td>Z80</td><td>OPM</td><td>sengoku</td></tr>
+<tr><td>savagere.zip</td><td>[Neo Geo] Savage Reign (風雲黙示録 -格闘創世-) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>sbasebal.zip</td><td>[Alpha 68k] Super Champion Baseball (帰ってきたチャンピオンベースボール) (YM2203+YM2413+DAC)</td><td>Z80</td><td>OPN + OPLL</td><td>68k2</td></tr>
+<tr><td>sbasketb.zip</td><td>[Super Basketball] Super Basketball (SN76496+VLM5030+DAC)</td><td>Z80</td><td>OPM</td><td>sbasketb</td></tr>
+<tr><td>sbm.zip</td><td>[B System] Sonic Blast Man (ソニックブラストマン) (YM2610B)</td><td>Z80</td><td>OPM</td><td>sonicb</td></tr>
+<tr><td>sc_blackonyx.zip</td><td>[SC-3000] The Black Onyx (ザ・ブラックオニキス) (SN76489A)</td><td>Z80</td><td>SN76489</td><td>sg1000</td></tr>
+<tr><td>sc_chaknpop.zip</td><td>[SC-3000] Chack'n Pop (ちゃっくんぽっぷ) (SN76489A)</td><td>Z80</td><td>SN76489</td><td>sg1000</td></tr>
+<tr><td>sc_congobongo.zip</td><td>[SC-3000] Congo Bongo (コンゴボンゴ) (SN76489A)</td><td>Z80</td><td>SN76489</td><td>sg1000</td></tr>
+<tr><td>sc_hero.zip</td><td>[SC-3000] H.E.R.O. (SN76489A)</td><td>Z80</td><td>SN76489</td><td>sg1000</td></tr>
+<tr><td>sc_mikie.zip</td><td>[SC-3000] Mikie (新入社員とおるくん) (SN76489A)</td><td>Z80</td><td>SN76489</td><td>sg1000</td></tr>
+<tr><td>sc_pitfall2v1.zip</td><td>[SC-3000] Pitfall II (SN76489A)</td><td>Z80</td><td>SN76489</td><td>sg1000</td></tr>
+<tr><td>sc_starjackerv1.zip</td><td>[SC-3000] Star Jacker (スタージャッカー) (SN76489A)</td><td>Z80</td><td>SN76489</td><td>sg1000</td></tr>
+<tr><td>schmeisr.zip</td><td>[DECO32] Schmeiser Robo (シュマイザーロボ) (YM2151+MSM6295x2)</td><td>HuC6280</td><td>OPM + OKI6295</td><td>deco32</td></tr>
+<tr><td>sci.zip</td><td>[Z System] Special Criminal Investigation (YM2610)</td><td>Z80</td><td>YM2610</td><td>dual68</td></tr>
+<tr><td>scobra.zip</td><td>[Scramble] Super Cobra (スーパーコブラ) (AY-3-8910x2)</td><td>Z80</td><td>OPM</td><td>scramble</td></tr>
+<tr><td>scontra.zip</td><td>[Super Contra] Super Contra (スーパー魂斗羅 -エイリアンの逆襲-) (YM2151+K7232)</td><td>Z80</td><td>OPM</td><td>scontra</td></tr>
+<tr><td>scotrsht.zip</td><td>[Scooter Shooter] Scooter Shooter (スクーターシューター) (YM2203)</td><td>Z80</td><td>OPM</td><td>ironhors</td></tr>
+<tr><td>sdgndmps.zip</td><td>[SD Gundam] SD Gundam Psycho Salamander no Kyoui (機動戦士SDガンダム サイコサラマンダーの脅威) (YM2151+MSM6295)</td><td>Z80</td><td>OPM</td><td>sdgndmps</td></tr>
+<tr><td>sdi.zip</td><td>[System 16A] Strategic Defense Initiative (Ｓ.Ｄ.Ｉ.) (YM2151)</td><td>Z80</td><td>OPM</td><td>system16a</td></tr>
+<tr><td>sdodgeb.zip</td><td>[Neo Geo] Super Dodge Ball (くにおの熱血闘球伝説) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>searchar.zip</td><td>[SNK68] SAR: Search And Rescue (SAR -サーチアンドレスキュー-) (YM3812+uPD7759)</td><td>68000</td><td>YM2610</td><td>3812</td></tr>
+<tr><td>searchey.zip</td><td>[NMG5] Search Eye (YM3812+MSM6295)</td><td>Z80</td><td>OPM</td><td>nmg5</td></tr>
+<tr><td>sectionz.zip</td><td>[Ghosts and Goblins] Section Z (セクションＺ) (YM2203x2)</td><td>Z80</td><td>OPM</td><td>opn2</td></tr>
+<tr><td>seganinj.zip</td><td>[System 1] Sega Ninja / Ninja Princess (忍者プリンセス) (SN76496x2)</td><td>Z80</td><td>OPM</td><td>system1</td></tr>
+<tr><td>segawski.zip</td><td>[Model 2C] Sega Water Ski (セガウォータースキー) (SCSP)</td><td>68000</td><td>SCSP</td><td>model2a</td></tr>
+<tr><td>selfeena.zip</td><td>[B System] Sel Feena (セルフィーナ) (YM2610)</td><td>Z80</td><td>YM2610</td><td>bsystem</td></tr>
+<tr><td>sengoku.zip</td><td>[Neo Geo] Sengoku (戦国伝承) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>sengoku2.zip</td><td>[Neo Geo] Sengoku 2 (戦国伝承2) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>sengoku3.zip</td><td>[Neo Geo] Sengoku 3 (戦国伝承2001) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>senjyo.zip</td><td>[Star Force] Senjyo (センジョウ) (SN76496x3)</td><td>Z80</td><td>OPM</td><td>starforce</td></tr>
+<tr><td>sexyparo.zip</td><td>[System GX] Sexy Parodius (セクシーパロディウス) (K54539x2)</td><td>68000</td><td>K054539</td><td>systemgx</td></tr>
+<tr><td>sf.zip</td><td>[Street Fighter] Street Fighter (ストリートファイター) (YM2151+MSM5205)</td><td>Z80</td><td>OPM</td><td>sf1</td></tr>
+<tr><td>sf2.zip</td><td>[CPS-1] Street Fighter II: The World Warrior (ストリートファイター２) (YM2151+MSM6295)</td><td>Z80</td><td>OPM</td><td>cps1</td></tr>
+<tr><td>sf2ce.zip</td><td>[CPS-1] Street Fighter II': Champion Edition (ストリートファイター２ダッシュ) (YM2151+MSM6295)</td><td>Z80</td><td>OPM</td><td>cps1</td></tr>
+<tr><td>sfa.zip</td><td>[CPS-2] Street Fighter Alpha: Warriors' Dreams (ストリートファイターZERO) (QSound)</td><td>Z80</td><td>QSound</td><td>cps2</td></tr>
+<tr><td>sfa2.zip</td><td>[CPS-2] Street Fighter Alpha 2 (ストリートファイターZERO2) (QSound)</td><td>Z80</td><td>QSound</td><td>cps2</td></tr>
+<tr><td>sfa3.zip</td><td>ストリートファイターＺＥＲＯ３</td><td>Z80</td><td>QSound</td><td>cps2</td></tr>
+<tr><td>sfchamp.zip</td><td>[FX-1A System] Super Football Champ (スーパーフットボールチャンプ) (YM2610B)</td><td>Z80</td><td>OPM</td><td>fx1a</td></tr>
+<tr><td>sfex.zip</td><td>[ZN1] Street Fighter EX (ストリートファイターEX) (QSound)</td><td>Z80</td><td>QSound</td><td>zn</td></tr>
+<tr><td>sfex2.zip</td><td>[ZN2] Street Fighter EX 2 (ストリートファイターEX2) (QSound)</td><td>Z80</td><td>QSound</td><td>zn</td></tr>
+<tr><td>sfex2p.zip</td><td>[ZN2] Street Fighter EX 2 Plus (ストリートファイターEX2プラス) (QSound)</td><td>Z80</td><td>QSound</td><td>zn</td></tr>
+<tr><td>sfposeid.zip</td><td>[SJ System] Sea Fighter Poseidon (シーファイターポセイドン) (AY-3-8910x4+DAC)</td><td>Z80</td><td>OPM</td><td>taitosj</td></tr>
+<tr><td>sfx.zip</td><td>[Scramble] SF-X (スペースファイターX) (AY-3-8910x2)</td><td>Z80</td><td>OPM</td><td>scramble</td></tr>
+<tr><td>sfzch.zip</td><td>[CPS-1] Street Fighter Alpha (ストリートファイターＺＥＲＯ) (YM2151+MSM6295)</td><td>Z80</td><td>OPM</td><td>cps1</td></tr>
+<tr><td>sgemf.zip</td><td>[CPS-2] Super Gem Fighter Mini Mix (ポケットファイター) (QSound)</td><td>Z80</td><td>QSound</td><td>cps2</td></tr>
+<tr><td>sgunner.zip</td><td>[System 2] Steel Gunner (スティールガンナー) (YM2151+C140)</td><td>6809</td><td>C140 + OPM</td><td>system2</td></tr>
+<tr><td>sgunner2.zip</td><td>[System 2] Steel Gunner 2 (スティールガンナー2) (YM2151+C140)</td><td>6809</td><td>C140 + OPM</td><td>system2</td></tr>
+<tr><td>shackled.zip</td><td>[Last Mission] Shackled (ブレイウッド) (YM2203+YM3526)</td><td>HuC6280</td><td>OPM + OKI6295</td><td>lastmisn</td></tr>
+<tr><td>shadoww.zip</td><td>[Ninja Gaiden] Shadow Warriors (忍者龍剣伝) (YM2203x3+MSM6295)</td><td>Z80</td><td>OPM</td><td>gaiden</td></tr>
+<tr><td>sharrier.zip</td><td>[Space Harrier] Space Harrier (スペースハリアー) (YM2203+SegaPCM)</td><td>Z80</td><td>OPN + SegaPCM</td><td>sharrier</td></tr>
+<tr><td>shdancer.zip</td><td>[System 18] Shadow Dancer (シャドーダンサー) (YM3438x2+RF5C68)</td><td>Z80</td><td>YM2612 + RF5C68</td><td>system18</td></tr>
+<tr><td>shinobi.zip</td><td>[System 16A] Shinobi (忍) (YM2151+uDP7751)</td><td>Z80</td><td>OPM</td><td>system16b</td></tr>
+<tr><td>shocktr2.zip</td><td>[Neo Geo] Shock Troopers: 2nd Squad (ショックトルーパーズ -セカンドスカッド-) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>shocktro.zip</td><td>[Neo Geo] Shock Troopers (ショックトルーパーズ) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>shtngmst.zip</td><td>[System 2] Shooting Master (シューティングマスター) (SN76496x2)</td><td>Z80</td><td>OPM</td><td>system1</td></tr>
+<tr><td>sidearms.zip</td><td>[Side Arms] Side Arms: Hyper Dyne (絶対合体 HYPERDYNE サイドアームズ) (YM2203x2)</td><td>Z80</td><td>OPM</td><td>sidearms</td></tr>
+<tr><td>silentd.zip</td><td>[B System] Silent Dragon (サイレントドラゴン) (YM2610)</td><td>Z80</td><td>YM2610</td><td>bsystem</td></tr>
+<tr><td>silkworm.zip</td><td>[Gemini Wing] Silk Worm (シルクワーム) (YM3812+MSM5205)</td><td>Z80</td><td>OPM</td><td>gemini</td></tr>
+<tr><td>simpsons.zip</td><td>[The Simpsons] The Simpsons (ザ・シンプソンズ) (YM2151+K53260)</td><td>Z80</td><td>K053260 + OPM</td><td>053260</td></tr>
+<tr><td>sjryuko.zip</td><td>[System 16A] Sukeban Jansi Ryuko (スケ番雀士・竜子) (YM2151+uDP7759)</td><td>Z80</td><td>OPM</td><td>system16b</td></tr>
+<tr><td>skichamp.zip</td><td>[Model 3] Ski Champ (YMF292x2)</td><td>68000</td><td>SCSP</td><td>model3</td></tr>
+<tr><td>skyadvnt.zip</td><td>[Alpha 68k] Sky Adventure (スカイアドベンチャー) (YM2203+YM2413+DAC)</td><td>Z80</td><td>OPN + OPLL</td><td>68k2</td></tr>
+<tr><td>skyfox.zip</td><td>[Exerizer] Sky Fox (エクセライザー) (YM2203x2)</td><td>Z80</td><td>OPM</td><td>exerizer</td></tr>
+<tr><td>skykid.zip</td><td>[Baraduke] Sky Kid (スカイキッド) (C30)</td><td>6809</td><td>CUS30</td><td>wsg63701</td></tr>
+<tr><td>skykiddx.zip</td><td>[System 86] Sky Kid Deluxe (スカイキッドデラックス) (YM2151+C30+DAC)</td><td>6809</td><td>CUS30 + OPM</td><td>system86</td></tr>
+<tr><td>skyrobo.zip</td><td>[Chouji Meikyuu Legion] Sky Robo (戦え！ビッグファイター) (YM3812+DAC)</td><td>Z80</td><td>OPM</td><td>terraf</td></tr>
+<tr><td>skysoldr.zip</td><td>[Alpha 68k] Sky Soldiers (スカイソルジャー) (YM2203+YM2413+DAC)</td><td>Z80</td><td>OPN + OPLL</td><td>68k2</td></tr>
+<tr><td>slammast.zip</td><td>[CPS-1] Saturday Night Slam Masters (マッスルボマー) (QSound)</td><td>Z80</td><td>QSound</td><td>cps1qs</td></tr>
+<tr><td>slapshot.zip</td><td>[Slap Shot] Slap Shot (スラップショット) (YM2610)</td><td>Z80</td><td>YM2610</td><td>f2system</td></tr>
+<tr><td>slrasslt.zip</td><td>[GTI Club] Solar Assault (ソーラーアサルト) (RF5C400)</td><td>Z80</td><td>OPM</td><td>gticlub</td></tr>
+<tr><td>snowbros.zip</td><td>[Snow Bros] Snow Bros.: Nick and Tom (スノーブラザーズ) (YM3812)</td><td>Z80</td><td>OPM</td><td>snowbros</td></tr>
+<tr><td>socbrawl.zip</td><td>[Neo Geo] Soccer Brawl (サッカーブロール) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>soccerss.zip</td><td>[System GX] Soccer Superstars (サッカースーパースターズ) (K54539x2)</td><td>68000</td><td>K054539</td><td>systemgx</td></tr>
+<tr><td>soldam.zip</td><td>[Jaleco Mega System 1] Soldam (ソルダム) (YM2151+MSM6295x2)</td><td>68000</td><td>OPM + OKI6295</td><td>megasys1</td></tr>
+<tr><td>solfigtr.zip</td><td>[F2 System] Solitary Fighter (YM2610)</td><td>Z80</td><td>YM2610</td><td>f2system</td></tr>
+<tr><td>solomon.zip</td><td>[Solomon's Key] Solomon's Key (ソロモンの鍵) (AY-3-8910x3)</td><td>Z80</td><td>OPM</td><td>solomon</td></tr>
+<tr><td>solvalou.zip</td><td>[System 21] Solvalou (ソルバルウ) (YM2151+C140)</td><td>6809</td><td>C140 + OPM</td><td>system21</td></tr>
+<tr><td>sonicbom.zip</td><td>[System 16B] Sonic Boom (ソニックブーム) (YM2151+uDP7759)</td><td>Z80</td><td>OPM</td><td>system16b</td></tr>
+<tr><td>sonicwi2.zip</td><td>[Neo Geo] Aero Fighters 2 (ソニックウイングス2) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>sonicwi3.zip</td><td>[Neo Geo] Aero Fighters 3 (ソニックウイングス3) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>sotsugyo.zip</td><td>[DECO32] Sotsugyo Shousho (卒業証書) (YM2151+MSM6295x2)</td><td>HuC6280</td><td>OPM + OKI6295</td><td>deco32</td></tr>
+<tr><td>soulclbr.zip</td><td>[System 12] Soul Calibur (ソウルキャリバー) (C352)</td><td>68000</td><td>C352</td><td>system12</td></tr>
+<tr><td>souledgb.zip</td><td>[System 11] Soul Edge (ソウルエッジ) (C352)</td><td>68000</td><td>C352</td><td>system11</td></tr>
+<tr><td>souledge.zip</td><td>[System 11] Soul Edge Ver. II (ソウルエッジ) (C352)</td><td>68000</td><td>C352</td><td>system11</td></tr>
+<tr><td>spacedx.zip</td><td>[B System] Space Invaders DX (スペースインベーダーDX) (YM2610)</td><td>Z80</td><td>YM2610</td><td>bsystem</td></tr>
+<tr><td>spaceskr.zip</td><td>[SJ System] Space Seeker (スペースシーカー) (AY-3-8910x4+DAC)</td><td>Z80</td><td>OPM</td><td>taitosj</td></tr>
+<tr><td>spatter.zip</td><td>[System 1] Spatter / Sanrin San Chan (三輪サンちゃん) (SN76496x2)</td><td>Z80</td><td>OPM</td><td>system1</td></tr>
+<tr><td>spbactn.zip</td><td>[Super Pinball Action] Super Pinball Action (YM3812+MSM6295)</td><td>Z80</td><td>OPM</td><td>spbactn</td></tr>
+<tr><td>spcpostn.zip</td><td>[Space Position] Space Position (YM2203x2)</td><td>Z80</td><td>OPM</td><td>spcpostn</td></tr>
+<tr><td>speedrcr.zip</td><td>[System FL] Speed Racer (スピードレーサー（マッハGoGoGo）) (C352)</td><td>68000</td><td>C140</td><td>nb1</td></tr>
+<tr><td>spelunk2.zip</td><td>[Irem M62] Spelunker II (スペランカーII -23の鍵-) (AY-3-8910x2)</td><td>Z80</td><td>OPM</td><td>m62</td></tr>
+<tr><td>spelunkr.zip</td><td>[Irem M62] Spelunker (スペランカー) (AY-3-8910x2)</td><td>Z80</td><td>OPM</td><td>m62</td></tr>
+<tr><td>spf2t.zip</td><td>[CPS-2] Super Puzzle Fighter II Turbo (スーパーパズルファイターII X) (QSound)</td><td>Z80</td><td>QSound</td><td>cps2</td></tr>
+<tr><td>spinlbrk.zip</td><td>[Turbo Force] Spinal Breakers (スパイナルブレーカーズ) (YM2610)</td><td>Z80</td><td>OPM</td><td>turbofrc</td></tr>
+<tr><td>spinmast.zip</td><td>[Neo Geo] Spin Master (ミラクルアドベンチャー) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>splatter.zip</td><td>[System 1] Splatter House (スプラッターハウス) (YM2151+C30)</td><td>6809</td><td>CUS30 + OPM</td><td>system1</td></tr>
+<tr><td>srdarwin.zip</td><td>[DECO8] Super Real Darwin (YM2203+YM3526)</td><td>HuC6280</td><td>OPM + OKI6295</td><td>cobracom</td></tr>
+<tr><td>srumbler.zip</td><td>[Rush and Crash] The Speed Rumbler (ラッシュ&amp;amp;クラッシュ) (YM2203x2)</td><td>Z80</td><td>OPM</td><td>rushcrsh</td></tr>
+<tr><td>sscope.zip</td><td>[Hornet] Silent Scope (サイレントスコープ) (RF5C400)</td><td>68000</td><td>RF5C400</td><td>hornet</td></tr>
+<tr><td>sscope2.zip</td><td>[Hornet] Silent Scope 2 (イノセントスウィーパー -サイレントスコープ2-) (RF5C400)</td><td>68000</td><td>RF5C400</td><td>hornet</td></tr>
+<tr><td>ssf2.zip</td><td>[CPS-2] Super Street Fighter II: The New Challengers (スーパーストリートファイターII -ザ・ニューチャレンジャー-) (QSound)</td><td>Z80</td><td>QSound</td><td>cps2</td></tr>
+<tr><td>ssf2t.zip</td><td>[CPS-2] Super Street Fighter II Turbo (スーパーストリートファイターII X -グランドマスターチャレンジ-) (QSound)</td><td>Z80</td><td>QSound</td><td>cps2</td></tr>
+<tr><td>ssf2t_snd.zip</td><td>スーパーストリートファイターIIＸ</td><td>Z80</td><td>QSound</td><td>cps2</td></tr>
+<tr><td>ssi.zip</td><td>[F2 System] Super Space Invaders '91 (MJ-12 ＜マジェスティックトゥエルブ＞) (YM2610)</td><td>Z80</td><td>YM2610</td><td>f2system</td></tr>
+<tr><td>ssideki.zip</td><td>[Neo Geo] Super Sidekicks (得点王) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>ssideki2.zip</td><td>[Neo Geo] Super Sidekicks 2: The World Championship (得点王2 -リアルファイトフットボール-) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>ssideki3.zip</td><td>[Neo Geo] Super Sidekicks 3: The Next Glory (得点王3 -栄光への道-) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>ssideki4.zip</td><td>[Neo Geo] Ultimate 11: The SNK Football Championship (得点王 -炎のリベロ-) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>ssoldier.zip</td><td>[Irem M92] Superior Soldiers (パーフェクトソルジャーズ) (YM2151+GA20)</td><td>V30</td><td>OPM + GA20</td><td>m92</td></tr>
+<tr><td>ssriders.zip</td><td>[Sunset Riders] Sunset Riders (サンセットライダーズ) (YM2151+K53260)</td><td>Z80</td><td>K053260 + OPM</td><td>053260</td></tr>
+<tr><td>sstriker.zip</td><td>[Raizing Type 1] Mahou Daisakusen (魔法大作戦) (YM2151+MSM6295)</td><td>Z80</td><td>OPM</td><td>mahou</td></tr>
+<tr><td>stadhero.zip</td><td>[Robocop] Stadium Hero (スタジアムヒーロー) (YM2203+YM3812+MSM6295)</td><td>HuC6280</td><td>OPM + OKI6295</td><td>drgninja</td></tr>
+<tr><td>stakwin.zip</td><td>[Neo Geo] Stakes Winner (ステークスウィナー -GI完全制覇への道-) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>stakwin2.zip</td><td>[Neo Geo] Stakes Winner 2 (ステークスウィナー2) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>starblad.zip</td><td>[System 21] Starblade (スターブレード) (YM2151+C140)</td><td>6809</td><td>C140 + OPM</td><td>system21</td></tr>
+<tr><td>starforc.zip</td><td>[Star Force] Star Force (スターフォース) (SN76496x3)</td><td>Z80</td><td>OPM</td><td>starforce</td></tr>
+<tr><td>starglad.zip</td><td>[ZN1] Star Gladiator (スターグラディエイター) (QSound)</td><td>Z80</td><td>QSound</td><td>zn</td></tr>
+<tr><td>starjack.zip</td><td>[System 1] Star Jacker (スタージャッカー) (SN76496x2)</td><td>Z80</td><td>OPM</td><td>system1</td></tr>
+<tr><td>starswep.zip</td><td>[System 11] Star Sweep (スタースイープ) (C352)</td><td>68000</td><td>C352</td><td>system11</td></tr>
+<tr><td>stdragon.zip</td><td>[Jaleco Mega System 1] Saint Dragon (天聖龍) (YM2151+MSM6295x2)</td><td>68000</td><td>OPM + OKI6295</td><td>megasys1</td></tr>
+<tr><td>stratof.zip</td><td>[Ninja Gaiden] Raiga: Strato Fighter (雷牙) (YM2203x3+MSM6295)</td><td>Z80</td><td>OPM</td><td>gaiden</td></tr>
+<tr><td>streetsm.zip</td><td>[SNK68] Street Smart (ストリートスマート) (YM3812+uPD7759)</td><td>68000</td><td>YM2610</td><td>3812</td></tr>
+<tr><td>strider2.zip</td><td>[ZN2] Strider 2 (ストライダー飛竜2) (QSound)</td><td>Z80</td><td>QSound</td><td>zn</td></tr>
+<tr><td>striderua.zip</td><td>[CPS-1] Strider Hiryu (ストライダー飛竜) (YM2151+MSM6295)</td><td>Z80</td><td>OPM</td><td>cps1</td></tr>
+<tr><td>strkfgtr.zip</td><td>[Y Board] Strike Fighter (ストライクファイター) (YM2151+SegaPCM)</td><td>Z80</td><td>OPM</td><td>gforce</td></tr>
+<tr><td>supbtime.zip</td><td>[Super Burger Time] Super Burger Time (スーパーバーガータイム) (YM2151+MSM6295)</td><td>HuC6280</td><td>OPM + OKI6295</td><td>supbtime</td></tr>
+<tr><td>superman.zip</td><td>[X System] Superman (スーパーマン) (YM2610)</td><td>Z80</td><td>OPM</td><td>xsystem</td></tr>
+<tr><td>superpac.zip</td><td>[Mappy] Super Pac-Man (スーパーパックマン) (Namco WSG)</td><td>6809</td><td>CUS30</td><td>wsg6809</td></tr>
+<tr><td>superspy.zip</td><td>[Neo Geo] The Super Spy (ザ・スーパースパイ) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>superx.zip</td><td>[Super-X] Super-X (YM2151+MSM6295)</td><td>Z80</td><td>OPM</td><td>superx</td></tr>
+<tr><td>suprleag.zip</td><td>[System 16B] Super League (スーパーリーグ) (YM2151+uDP7759)</td><td>Z80</td><td>OPM</td><td>system16b</td></tr>
+<tr><td>suprloco.zip</td><td>[System 1] Super Locomotive (スーパーロコモーティヴ) (SN76496x2)</td><td>Z80</td><td>OPM</td><td>system1</td></tr>
+<tr><td>suzuk8h2.zip</td><td>[System 2] Suzuka 8 Hours 2 (スズカエイトアワーズ２) (YM2151+C140)</td><td>6809</td><td>C140 + OPM</td><td>system2</td></tr>
+<tr><td>suzuka8h.zip</td><td>[System 2] Suzuka 8 Hours (スズカエイトアワーズ１) (YM2151+C140)</td><td>6809</td><td>C140 + OPM</td><td>system2</td></tr>
+<tr><td>svcpcb.zip</td><td>[Neo Geo] SNK vs. Capcom SvC Chaos (SNK VS. CAPCOM SVCカオス) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>swat.zip</td><td>[System 1] SWAT (スワット) (SN76496x2)</td><td>Z80</td><td>OPM</td><td>system1</td></tr>
+<tr><td>swimmer.zip</td><td>[Swimmer] Swimmer (スイマー) (AY-3-8910x2)</td><td>Z80</td><td>OPM</td><td>swimmer</td></tr>
+<tr><td>sws2000.zip</td><td>[System 12] Super World Stadium 2000 (スーパーワールドスタジアム2000) (C352)</td><td>68000</td><td>C352</td><td>system12</td></tr>
+<tr><td>sws92.zip</td><td>[System 2] Super World Stadium /'92 (SUPER ワールドスタジアム) (YM2151+C140)</td><td>6809</td><td>C140 + OPM</td><td>system2</td></tr>
+<tr><td>sws95.zip</td><td>[NB-1] Super World Stadium '95-'97 (SUPER ワールドスタジアム '95-'97) (C352)</td><td>68000</td><td>C140</td><td>nb1</td></tr>
+<tr><td>sws99.zip</td><td>[System 12] Super World Stadium '99 (スーパーワールドスタジアム1999) (C352)</td><td>68000</td><td>C352</td><td>system12</td></tr>
+<tr><td>syvalion.zip</td><td>[H System] Syvalion (サイバリオン) (YM2610)</td><td>Z80</td><td>YM2610</td><td>f2system</td></tr>
+<tr><td>tactcian.zip</td><td>[Time Pilot] Tactician (タクティシャン) (AY-3-8910x2)</td><td>Z80</td><td>OPM</td><td>pooyan</td></tr>
+<tr><td>tankfrce.zip</td><td>[System 1] Tank Force (タンクフォース) (YM2151+C30)</td><td>6809</td><td>CUS30 + OPM</td><td>system1</td></tr>
+<tr><td>taotaido.zip</td><td>[Tao Taido] Tao Taido (タオ体道) (YM2610)</td><td>Z80</td><td>OPM</td><td>taotaido</td></tr>
+<tr><td>tbowl.zip</td><td>[Tecmo Bowl] Tecmo Bowl (YM3812x2+MSM5205x2)</td><td>Z80</td><td>OPM</td><td>tbowl</td></tr>
+<tr><td>tbyahhoo.zip</td><td>[System GX] Twin Bee Yahhoo! (ツインビーヤッホー！ -ふしぎの国で大・ばれ！！-) (K54539x2)</td><td>68000</td><td>K054539</td><td>systemgx</td></tr>
+<tr><td>tdfever.zip</td><td>[Psycho Soldier] TouchDown Fever (タッチダウンフィーバー) (YM3526+Y8950)</td><td>68000</td><td>YM2610</td><td>3526_8950</td></tr>
+<tr><td>tdragon2.zip</td><td>[NMK16] Thunder Dragon 2 (サンダードラゴン2) (YM2203+MSM6295)</td><td>Z80</td><td>OPM</td><td>tdragon2</td></tr>
+<tr><td>technodr.zip</td><td>[System 12] Techno Drive (テクノドライブ) (C352)</td><td>68000</td><td>C352</td><td>system12</td></tr>
+<tr><td>techromn.zip</td><td>[ZN2] Tech Romancer (超鋼戦紀キカイオー) (QSound)</td><td>Z80</td><td>QSound</td><td>zn</td></tr>
+<tr><td>teddybb.zip</td><td>[System 1] Teddy Boy Blues (テディボーイ ブルース) (SN76496x2)</td><td>Z80</td><td>OPM</td><td>system1</td></tr>
+<tr><td>tehkanwc.zip</td><td>[Tehkan World Cup] Tehkan World Cup (テーカンワールドカップ) (YM2149x2+MSM5205)</td><td>Z80</td><td>OPM</td><td>worldcup</td></tr>
+<tr><td>tekken.zip</td><td>[System 11] Tekken (鉄拳) (C352)</td><td>68000</td><td>C352</td><td>system11</td></tr>
+<tr><td>tekken2.zip</td><td>[System 11] Tekken 2 (鉄拳２) (C352)</td><td>68000</td><td>C352</td><td>system11</td></tr>
+<tr><td>tekken3.zip</td><td>[System 12] Tekken 3 (鉄拳３) (C352)</td><td>68000</td><td>C352</td><td>system12</td></tr>
+<tr><td>tekkenb.zip</td><td>鉄拳</td><td>68000</td><td>C352</td><td>system11</td></tr>
+<tr><td>tektagt.zip</td><td>[System 12] Tekken Tag Tournament (鉄拳タッグトーナメント) (C352)</td><td>68000</td><td>C352</td><td>system12</td></tr>
+<tr><td>tenkomor.zip</td><td>[System 12] Tenkomori Shooting (てんこもりシューティング) (C352)</td><td>68000</td><td>C352</td><td>system12</td></tr>
+<tr><td>terabrst.zip</td><td>[Hornet] Teraburst (テラバースト) (RF5C400)</td><td>68000</td><td>RF5C400</td><td>hornet</td></tr>
+<tr><td>terracre.zip</td><td>[Terra Cresta] Terra Cresta (テラクレスタ) (YM3526+DAC)</td><td>Z80</td><td>OPM</td><td>terracre</td></tr>
+<tr><td>terracren.zip</td><td>[Terra Cresta] Terra Cresta (テラクレスタ) (YM2203+DAC)</td><td>Z80</td><td>OPM</td><td>terracra</td></tr>
+<tr><td>terraf.zip</td><td>[Chouji Meikyuu Legion] Terra Force (テラフォース) (YM3812+DAC)</td><td>Z80</td><td>OPM</td><td>terraf</td></tr>
+<tr><td>tetris1.zip</td><td>[System 16A] Tetris (テトリス) (YM2151+uDP7759)</td><td>Z80</td><td>OPM</td><td>system16b</td></tr>
+<tr><td>tetrist.zip</td><td>[B System] Tetris (テトリス) (YM2610)</td><td>Z80</td><td>YM2610</td><td>bsystem</td></tr>
+<tr><td>tgmj.zip</td><td>[ZN2] Tetris The Grand Master (テトリス ザ・グランドマスター) (QSound)</td><td>Z80</td><td>QSound</td><td>zn</td></tr>
+<tr><td>tharrier.zip</td><td>[Task Force Harrier] Task Force Harrier (タスクフォースハリアー) (YM2203+MSM6295)</td><td>Z80</td><td>OPM</td><td>tharrier</td></tr>
+<tr><td>theend.zip</td><td>[Scramble] The End (ジ・エンド) (AY-3-8910x2)</td><td>Z80</td><td>OPM</td><td>scramble</td></tr>
+<tr><td>thndrx2.zip</td><td>[Parodius] Thunder Cross II (サンダークロスII) (YM2151+K53260)</td><td>Z80</td><td>K053260 + OPM</td><td>053260</td></tr>
+<tr><td>thndzone.zip</td><td>[Thunder Zone] Thunder Zone (サンダーゾーン) (YM2151+YM2203+MSM6295x2)</td><td>HuC6280</td><td>OPM + OKI6295</td><td>thndzone</td></tr>
+<tr><td>thrilld.zip</td><td>[Hornet] Thrill Drive (スリルドライブ) (RF5C400)</td><td>68000</td><td>RF5C400</td><td>hornet</td></tr>
+<tr><td>thunderh.zip</td><td>[GTI Club] Operation Thunder Hurricane (オペレーションサンダーハリケーン) (RF5C400)</td><td>Z80</td><td>OPM</td><td>gticlub</td></tr>
+<tr><td>thunderx.zip</td><td>[Thunder Cross] Thunder Cross (サンダークロス) (YM2151)</td><td>Z80</td><td>OPM</td><td>thundercross</td></tr>
+<tr><td>thunderxa.zip</td><td>[Thunder Cross] Thunder Cross JP (サンダークロス) (YM2151)</td><td>Z80</td><td>OPM</td><td>thundercross</td></tr>
+<tr><td>thundfox.zip</td><td>[F1 System] Thunder Fox (サンダーフォックス) (YM2610)</td><td>Z80</td><td>YM2610</td><td>f2system</td></tr>
+<tr><td>tigerh.zip</td><td>[Tiger Heli] Tiger Heli (タイガーヘリ) (AY-3-8910x2)</td><td>Z80</td><td>OPM</td><td>tigerh</td></tr>
+<tr><td>tigeroad.zip</td><td>[Tiger Road] Tiger Road (虎への道) (YM2203x2)</td><td>Z80</td><td>OPM</td><td>tigerroad</td></tr>
+<tr><td>timecris.zip</td><td>[System Super 22] Time Crisis (タイムクライシス) (C352)</td><td>68000</td><td>C352</td><td>system22</td></tr>
+<tr><td>timecrs2.zip</td><td>[System 23] Time Crisis 2 (タイムクライシスII) (C352)</td><td>68000</td><td>C352</td><td>system12</td></tr>
+<tr><td>timeplt.zip</td><td>[Time Pilot] Time Pilot (タイムパイロット) (AY-3-8910x2)</td><td>Z80</td><td>OPM</td><td>timeplt</td></tr>
+<tr><td>timescan.zip</td><td>[System 16A] Time Scanner (タイムスキャナー) (YM2151+uDP7759)</td><td>Z80</td><td>OPM</td><td>system16b</td></tr>
+<tr><td>timesold.zip</td><td>[Alpha 68k] Time Soldiers (バトルフィールド) (YM2203+YM2413+DAC)</td><td>Z80</td><td>OPN + OPLL</td><td>68k2</td></tr>
+<tr><td>timetunl.zip</td><td>[SJ System] Time Tunnel (タイムトンネル) (AY-3-8910x4+DAC)</td><td>Z80</td><td>OPM</td><td>taitosj</td></tr>
+<tr><td>tinstar.zip</td><td>[SJ System] The Tin Star (ティンスター) (AY-3-8910x4+DAC)</td><td>Z80</td><td>OPM</td><td>taitosj</td></tr>
+<tr><td>tkmmpzdm.zip</td><td>[System GX] Tokimeki Memorial Taisen Puzzle-dama (ときめきメモリアル対戦ぱずるだま) (K54539x2)</td><td>68000</td><td>K054539</td><td>systemgx</td></tr>
+<tr><td>tmnt.zip</td><td>[TMNT] Teenage Mutant Ninja Turtles (T.M.N.T. -スーパー亀忍者-) (YM2151+K7232+uPD7759+YM3014)</td><td>Z80</td><td>OPM</td><td>tmnt</td></tr>
+<tr><td>tmnt2.zip</td><td>[Sunset Riders] Teenage Mutant Ninja Turtles: Turtles in Time (YM2151+K53260)</td><td>Z80</td><td>K053260 + OPM</td><td>053260</td></tr>
+<tr><td>tnzsjo.zip</td><td>[The New Zealand Story] The New Zealand Story (ザ・ニュージーランドストーリー) (YM2203)</td><td>Z80</td><td>OPM</td><td>tnzs</td></tr>
+<tr><td>todruaga.zip</td><td>[Mappy] The Tower of Druaga (ドルアーガの塔) (Namco WSG)</td><td>6809</td><td>CUS30</td><td>wsg6809</td></tr>
+<tr><td>tokio.zip</td><td>[Bubble Bobble] Tokio (スクランブルフォーメーション) patched (YM2203)</td><td>Z80</td><td>OPM</td><td>tokio</td></tr>
+<tr><td>tokisens.zip</td><td>[System 2] Toki no Senshi: Chrono Soldier (時の戦士) (SN76496x2)</td><td>Z80</td><td>OPM</td><td>system1</td></tr>
+<tr><td>tokkae.zip</td><td>[System GX] Taisen Tokkae-dama (対戦とっかえだま) (K54539x2)</td><td>68000</td><td>K054539</td><td>systemgx</td></tr>
+<tr><td>tokyowar.zip</td><td>[System Super 22] Tokyo Wars (ダートダッシュ) (C352)</td><td>68000</td><td>C352</td><td>system22</td></tr>
+<tr><td>tophuntr.zip</td><td>[Neo Geo] Top Hunter: Roddy and Cathy (トップハンター) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>topland.zip</td><td>[Air System] Top Landing (トップランディング) (YM2610)</td><td>Z80</td><td>YM2610</td><td>f2system</td></tr>
+<tr><td>topspeed.zip</td><td>[Top Speed] Top Speed (フルスロットル) (YM2151+MSM5205)</td><td>Z80</td><td>OPM</td><td>fullt</td></tr>
+<tr><td>toryumon.zip</td><td>[System 16B] Toryumon (登龍門) (YM2151+uDP7759)</td><td>Z80</td><td>OPM</td><td>system16b</td></tr>
+<tr><td>totmejan.zip</td><td>[Raiden] Tottemo E Jong (グッとE雀 -勝ち抜き麻雀賞金王!!) (YM3812+MSM6295)</td><td>Z80</td><td>OPM</td><td>raiden</td></tr>
+<tr><td>toukon3.zip</td><td>[System 12] Shin Nihon Pro Wrestling Toukon Retsuden 3 Arcade Edition (新日本プロレスリング 闘魂烈伝3 - アーケードエディション) (C352)</td><td>68000</td><td>C352</td><td>system12</td></tr>
+<tr><td>toutrun.zip</td><td>[Turbo OutRun] Turbo OutRun (ターボアウトラン) (YM2151+SegaPCM)</td><td>Z80</td><td>OPM + SegaPCM</td><td>toutrun</td></tr>
+<tr><td>toypop.zip</td><td>[Mappy] Toypop (トイポップ) (Namco WSG)</td><td>6809</td><td>CUS30</td><td>wsg6809</td></tr>
+<tr><td>tpgolf.zip</td><td>[Neo Geo] Top Player's Golf (トッププレイヤーズゴルフ) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>trackfld.zip</td><td>[Track &amp;amp; Field] Track &amp;amp; Field (SN76489+DAC+VLM5030)</td><td>Z80</td><td>OPM</td><td>trackfld</td></tr>
+<tr><td>trally.zip</td><td>[Neo Geo] Thrash Rally (スラッシュラリー) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>transfrm.zip</td><td>[System E] Transformer (Sega PSG)</td><td>Z80</td><td>OPM</td><td>systeme</td></tr>
+<tr><td>travrusa.zip</td><td>[Irem M62] Traverse USA / Zippy Race (AY-3-8910x2)</td><td>Z80</td><td>OPM</td><td>m62</td></tr>
+<tr><td>triothep.zip</td><td>[Robocop] Trio The Punch: Never Forget Me... (トリオ・ザ・パンチ) (YM2203+YM3812+MSM6295)</td><td>HuC6280</td><td>OPM + OKI6295</td><td>triothep</td></tr>
+<tr><td>trojan.zip</td><td>[Ghosts and Goblins] Trojan (戦いの挽歌) (YM2203x2)</td><td>Z80</td><td>OPM</td><td>opn2</td></tr>
+<tr><td>truxton.zip</td><td>[Toaplan 1] Truxton (達人) (YM3526)</td><td>Z80</td><td>OPM</td><td>generic</td></tr>
+<tr><td>ts2.zip</td><td>[ZN1] Battle Arena Toshinden 2 (闘神伝2) (QSound)</td><td>Z80</td><td>QSound</td><td>zn</td></tr>
+<tr><td>tshingen.zip</td><td>[Jaleco Mega System 1] Takeda Shingen (武田信玄) (YM2151+MSM6295x2)</td><td>68000</td><td>OPM + OKI6295</td><td>megasys1</td></tr>
+<tr><td>tturfu.zip</td><td>[System 16B] Tough Turf (YM2151+uDP7759)</td><td>Z80</td><td>OPM</td><td>system16b</td></tr>
+<tr><td>tubep.zip</td><td>[Tube Panic] Tube Panic (AY-3-8910x3)</td><td>Z80</td><td>OPM</td><td>tubep</td></tr>
+<tr><td>tumblep.zip</td><td>[Super Burger Time] Tumble Pop (タンブルポップ) (YM2151+MSM6295)</td><td>HuC6280</td><td>OPM + OKI6295</td><td>supbtime</td></tr>
+<tr><td>turbofrc.zip</td><td>[Turbo Force] Turbo Force (ターボフォース) (YM2610)</td><td>Z80</td><td>OPM</td><td>turbofrc</td></tr>
+<tr><td>turfmast.zip</td><td>[Neo Geo] Neo Turf Masters (ビッグトーナメントゴルフ) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>turtles.zip</td><td>[Scramble] Turtles (ターピン) (AY-3-8910x2)</td><td>Z80</td><td>OPM</td><td>scramble</td></tr>
+<tr><td>tutankhm.zip</td><td>[Time Pilot] Tutankham (ツタンカーム) (AY-3-8910x2)</td><td>Z80</td><td>OPM</td><td>timeplt</td></tr>
+<tr><td>twinbee.zip</td><td>[GX400] Twinbee (ツインビー) (AY-3-8910+K5289)</td><td>Z80</td><td>AY</td><td>gx400</td></tr>
+<tr><td>twincobr.zip</td><td>[Toaplan 1] Twin Cobra (究極タイガー) (YM3526)</td><td>Z80</td><td>OPM</td><td>generic</td></tr>
+<tr><td>twinhawk.zip</td><td>[X System] Twin Hawk (大旋風) (YM2151)</td><td>Z80</td><td>OPM</td><td>daisenpuu</td></tr>
+<tr><td>twinspri.zip</td><td>[Neo Geo] Twinkle Star Sprites (ティンクルスタースプライツ) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>tws96.zip</td><td>[Neo Geo] Tecmo World Soccer '96 (テクモワールドサッカー'95) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>uccops.zip</td><td>[Irem M92] Undercover Cops (アンダーカバーコップス) (YM2151+GA20)</td><td>V30</td><td>OPM + GA20</td><td>m92</td></tr>
+<tr><td>uccopsj.zip</td><td>[Irem M92] Undercover Cops JP (アンダーカバーコップス) (YM2151+GA20)</td><td>V30</td><td>OPM + GA20</td><td>m92</td></tr>
+<tr><td>ufomini.zip</td><td>[UFO21] UFO Catcher Mini (UFOキャッチャーミニ) (YM3438+uPD7759)</td><td>Z80</td><td>OPM</td><td>ufo21</td></tr>
+<tr><td>ufosensi.zip</td><td>[System 2] Ufo Senshi Yohko Chan (UFO戦士 ようこちゃん) (SN76496x2)</td><td>Z80</td><td>OPM</td><td>system1</td></tr>
+<tr><td>ultraman.zip</td><td>[Ultraman] Ultraman (ウルトラマン -空想特撮シリーズ-) (YM2151+MSM6295)</td><td>Z80</td><td>OPM</td><td>ultraman</td></tr>
+<tr><td>unsquad.zip</td><td>[CPS-1] U.N. Squadron (エリア８８) (YM2151+MSM6295)</td><td>Z80</td><td>OPM</td><td>cps1</td></tr>
+<tr><td>upndown.zip</td><td>[System 1] Up n` Down (アップンダウン) (SN76496x2)</td><td>Z80</td><td>OPM</td><td>system1</td></tr>
+<tr><td>valkyrie.zip</td><td>[System 2] Legend of the Valkyrie (ワルキューレの伝説) (YM2151+C140)</td><td>6809</td><td>C140 + OPM</td><td>system2</td></tr>
+<tr><td>valtric.zip</td><td>[Argus] Valtric (バルトリック) (YM2203x2)</td><td>Z80</td><td>OPM</td><td>valtric</td></tr>
+<tr><td>vaportra.zip</td><td>[Thunder Zone] Vapor Trail: Hyper Offence Formation (空牙 -OPERATION CODE 'VAPER TRAIL'-) (YM2151+YM2203+MSM6295x2)</td><td>HuC6280</td><td>OPM + OKI6295</td><td>thndzone</td></tr>
+<tr><td>varth.zip</td><td>[CPS-1] Varth: Operation Thunderstorm (バース -オペレーションサンダーストーム-) (YM2151+MSM6295)</td><td>Z80</td><td>OPM</td><td>cps1</td></tr>
+<tr><td>vball.zip</td><td>[Double Dragon 2] U.S. Championship V'ball (ビーチバレーボール) (YM2151+MSM6295)</td><td>Z80</td><td>OPM</td><td>ddragon2</td></tr>
+<tr><td>vcop.zip</td><td>[Model 2] Virtua Cop (バーチャコップ) (YM3438+315-5560)</td><td>68000</td><td>MultiPCM + YM3438</td><td>model2</td></tr>
+<tr><td>vendetta.zip</td><td>[Parodius] Vendetta (クライムファイターズ2) (YM2151+K53260)</td><td>Z80</td><td>K053260 + OPM</td><td>053260</td></tr>
+<tr><td>vf.zip</td><td>[Model 1] Virtua Fighter (バーチャファイター) (YM3438+315-5560)</td><td>68000</td><td>MultiPCM + YM3438</td><td>model2</td></tr>
+<tr><td>vf2.zip</td><td>[Model 2A] Virtua Fighter 2 (バーチャファイター２) (SCSP)</td><td>68000</td><td>SCSP</td><td>model2a</td></tr>
+<tr><td>vf3.zip</td><td>[Model 3] Virtua Fighter 3 (バーチャファイター３) (YMF292x2)</td><td>68000</td><td>SCSP</td><td>model3</td></tr>
+<tr><td>vhunt2.zip</td><td>[CPS-2] Vampire Hunter 2: Darkstalkers Revenge (ヴァンパイアハンター2 -ダークストーカーズリベンジ-) (QSound)</td><td>Z80</td><td>QSound</td><td>cps2</td></tr>
+<tr><td>victlapw.zip</td><td>[System 22] Ace Driver: Victory Lap (エースドライバー -ビクトリーラップ-) (C352)</td><td>68000</td><td>C352</td><td>system22</td></tr>
+<tr><td>victnine.zip</td><td>[Taito Sound Board '84] Victorious Nine (ビクトリアスナイン) (YM2149+MSM5232)</td><td>Z80</td><td>OPM</td><td>flstory</td></tr>
+<tr><td>victroad.zip</td><td>[Psycho Soldier] Victory Road (怒号層圏) (YM3526+Y8950)</td><td>68000</td><td>YM2610</td><td>3526_8950</td></tr>
+<tr><td>viewpoin.zip</td><td>[Neo Geo] Viewpoint (ビューポイント) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>vigilant.zip</td><td>[Irem M75] Vigilante (ビジランテ) (YM2151)</td><td>Z80</td><td>OPM</td><td>m72</td></tr>
+<tr><td>volfied.zip</td><td>[Volfied] Volfied (ヴォルフィード) (YM2203)</td><td>Z80</td><td>OPM</td><td>volfied</td></tr>
+<tr><td>vsav.zip</td><td>[CPS-2] Vampire Savior: The Lord of Vampire (ヴァンパイアセイヴァー -ザ・ロードオブヴァンパイア-) (QSound)</td><td>Z80</td><td>QSound</td><td>cps2</td></tr>
+<tr><td>vsav2.zip</td><td>[CPS-2] Vampire Savior 2: The Lord of Vampire (ヴァンパイアセイヴァー2 -ザ・ロードオブヴァンパイア-) (QSound)</td><td>Z80</td><td>QSound</td><td>cps2</td></tr>
+<tr><td>vshoot.zip</td><td>[NB-1] J-League Soccer V-Shoot (Jリーグサッカー Vシュート) (C352)</td><td>68000</td><td>C140</td><td>nb1</td></tr>
+<tr><td>vsnetscr.zip</td><td>[System GX] Versus Net Soccer (ヴァーサスネットサッカー) (K54539x2)</td><td>68000</td><td>K054539</td><td>systemgx</td></tr>
+<tr><td>vulcan.zip</td><td>GRADIUS II ～ゴーファーの野望～</td><td>Z80</td><td>OPM</td><td>twin16</td></tr>
+<tr><td>wakuwak7.zip</td><td>[Neo Geo] Waku Waku 7 (わくわく7) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>wardner.zip</td><td>[Toaplan 1] Wardner (ワードナの森) (YM3812)</td><td>Z80</td><td>OPM</td><td>wardner</td></tr>
+<tr><td>waterski.zip</td><td>[SJ System] Water Ski (ウォータースキー) (AY-3-8910x4+DAC)</td><td>Z80</td><td>OPM</td><td>taitosj</td></tr>
+<tr><td>wb3.zip</td><td>[System 16A] Wonder Boy III: Monster Lair (ワンダーボーイIII・モンスターレア) (YM2151+uDP7759)</td><td>Z80</td><td>OPM</td><td>system16b</td></tr>
+<tr><td>wbml.zip</td><td>[System 2] Wonder Boy in Monster Land (モンスターランド) (SN76496x2)</td><td>Z80</td><td>OPM</td><td>system1</td></tr>
+<tr><td>wboy.zip</td><td>[System 1] Wonderboy (ワンダーボーイ) (SN76496x2)</td><td>Z80</td><td>OPM</td><td>system1</td></tr>
+<tr><td>wc90.zip</td><td>[Tecmo World Cup '90] Tecmo World Cup '90 (テクモワールドカップ'90) (YM2608)</td><td>Z80</td><td>OPM</td><td>wc90</td></tr>
+<tr><td>wecleman.zip</td><td>[WEC Le Mans] WEC Le Mans (ウェック・ル・マン24) (YM2151+K7232)</td><td>Z80</td><td>OPM</td><td>weclemans</td></tr>
+<tr><td>welltris.zip</td><td>[Welltris] Welltris (ウェルトリス) (YM2610)</td><td>Z80</td><td>OPM</td><td>welltris</td></tr>
+<tr><td>wgp.zip</td><td>[Top Speed] World Grand Prix (ワールドグランプリ) (YM2610)</td><td>Z80</td><td>YM2610</td><td>f2system</td></tr>
+<tr><td>wgp2.zip</td><td>[Top Speed] World Grand Prix 2 (ワールドグランプリ2) (YM2610)</td><td>Z80</td><td>YM2610</td><td>f2system</td></tr>
+<tr><td>wh1.zip</td><td>[Neo Geo] World Heroes (ワールドヒーローズ) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>wh2.zip</td><td>[Neo Geo] World Heroes 2 (ワールドヒーローズ2) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>wh2j.zip</td><td>[Neo Geo] World Heroes 2 Jet (ワールドヒーローズ2 JET) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>whp.zip</td><td>[Neo Geo] World Heroes Perfect (ワールドヒーローズパーフェクト) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>wildfang.zip</td><td>[Ninja Gaiden] Tecmo Knight (ワイルドファング) (YM2203x3+MSM6295)</td><td>Z80</td><td>OPM</td><td>gaiden</td></tr>
+<tr><td>willow.zip</td><td>[CPS-1] Willow (ウィロー) (YM2151+MSM6295)</td><td>Z80</td><td>OPM</td><td>cps1</td></tr>
+<tr><td>wingwar.zip</td><td>[Model 1] Wing War (ウィングウォー) (YM3438+315-5560)</td><td>68000</td><td>MultiPCM + YM3438</td><td>model2</td></tr>
+<tr><td>winrun91.zip</td><td>[System 21] Winning Run '91 (ウイニングラン'91) (YM2151+C140)</td><td>Z80</td><td>OPM</td><td>system21b</td></tr>
+<tr><td>winspike.zip</td><td>[System GX] Winning Spike (ウイニングスパイク) (K54539x2)</td><td>68000</td><td>K054539</td><td>systemgx</td></tr>
+<tr><td>wizdfire.zip</td><td>[DECO32] Wizard Fire (ダークシールII) (YM2151+MSM6295x2)</td><td>HuC6280</td><td>OPM + OKI6295</td><td>deco32</td></tr>
+<tr><td>wjammers.zip</td><td>[Neo Geo] Windjammers (フライング・パワー・ディスク) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>wldcourt.zip</td><td>[System 1] World Court (プロテニス・ワールドコート) (YM2151+C30)</td><td>6809</td><td>CUS30 + OPM</td><td>system1</td></tr>
+<tr><td>wmatch.zip</td><td>[System 1] Water Match (ウォーターマッチ) (SN76496x2)</td><td>Z80</td><td>OPM</td><td>system1</td></tr>
+<tr><td>wndrmomo.zip</td><td>[System 86] Wonder Momo (ワンダーモモ) (YM2151+C30+DAC)</td><td>6809</td><td>CUS30 + OPM</td><td>system86</td></tr>
+<tr><td>wndrplnt.zip</td><td>[Karnov] Wonder Planet (ワンダープラネット) (YM2203+YM3526)</td><td>HuC6280</td><td>OPM + OKI6295</td><td>karnov</td></tr>
+<tr><td>wof.zip</td><td>[CPS-1] Warriors of Fate (天地を喰らう２ 赤壁の戦い) (QSound)</td><td>Z80</td><td>QSound</td><td>cps1qs</td></tr>
+<tr><td>wondstck.zip</td><td>[NMG5] Wonder Stick (YM3812+MSM6295)</td><td>Z80</td><td>OPM</td><td>nmg5</td></tr>
+<tr><td>wpksoc.zip</td><td>[Irem M92] World PK Soccer (ワールドPKサッカー) (YM2151+GA20)</td><td>V30</td><td>OPM + GA20</td><td>m92</td></tr>
+<tr><td>wrestwar.zip</td><td>[System 16B] Wrestle War (レッスルウォー) (YM2151+uDP7759)</td><td>Z80</td><td>OPM</td><td>system16b</td></tr>
+<tr><td>ws.zip</td><td>[System 1] World Stadium (ワールドスタジアム) (YM2151+C30)</td><td>6809</td><td>CUS30 + OPM</td><td>system1</td></tr>
+<tr><td>ws89.zip</td><td>[System 1] World Stadium '89/'90 (ワールドスタジアム'89/'90) (YM2151+C30)</td><td>6809</td><td>CUS30 + OPM</td><td>system1</td></tr>
+<tr><td>wwestern.zip</td><td>[SJ System] Wild Western (ワイルドウエスタン) (AY-3-8910x4+DAC)</td><td>Z80</td><td>OPM</td><td>taitosj</td></tr>
+<tr><td>wwfsstar.zip</td><td>[Double Dragon 2] WWF Superstars (WWFスーパースターズ) (YM2151+MSM6295)</td><td>Z80</td><td>OPM</td><td>ddragon2</td></tr>
+<tr><td>wwfwfest.zip</td><td>[Double Dragon 3] WWF WrestleFest (WWFレッスルフェスト) (YM2151+MSM6295)</td><td>Z80</td><td>OPM</td><td>ddragon3</td></tr>
+<tr><td>wyvernf0.zip</td><td>[N.Y.CAPTOR] Wyvern F-0 (YM2149x2+MSM5232)</td><td>Z80</td><td>OPM</td><td>nycaptor</td></tr>
+<tr><td>xevi3dg.zip</td><td>[System 11] Xevious 3D/G (ゼビウス 3D/G) (C352)</td><td>68000</td><td>C352</td><td>system11</td></tr>
+<tr><td>xevious.zip</td><td>[Xevious] Xevious (ゼビウス) (Namco WSG)</td><td>6809</td><td>CUS30</td><td>wsgz80</td></tr>
+<tr><td>xexex.zip</td><td>[Xexex] Xexex (ゼクセクス) (YM2151+K54539)</td><td>Z80</td><td>K054539 + OPM</td><td>054539</td></tr>
+<tr><td>xmcota.zip</td><td>[CPS-2] X-Men: Children of the Atom (エックスメン -チルドレンオブジアトム-) (QSound)</td><td>Z80</td><td>QSound</td><td>cps2</td></tr>
+<tr><td>xmen.zip</td><td>[X-Men] X-Men (エックスメン) (YM2151+K54539)</td><td>Z80</td><td>K054539 + OPM</td><td>054539</td></tr>
+<tr><td>xmultiplm72.zip</td><td>[Irem M72] X Multiply (X-マルチプライ) (YM2151)</td><td>Z80</td><td>OPM</td><td>m72</td></tr>
+<tr><td>xmvsf.zip</td><td>[CPS-2] X-Men Vs. Street Fighter (エックスメンVSストリートファイター) (QSound)</td><td>Z80</td><td>QSound</td><td>cps2</td></tr>
+<tr><td>yesnoj.zip</td><td>[F2 System] Yes/No Shinri Tokimeki Chart (YES.NO 心理トキメキチャート) (YM2610)</td><td>Z80</td><td>YM2610</td><td>f2system</td></tr>
+<tr><td>youjyudn.zip</td><td>[Irem M62] Youjyuden (妖獣伝) (AY-3-8910x2)</td><td>Z80</td><td>OPM</td><td>m62</td></tr>
+<tr><td>yuyugogo.zip</td><td>[F2 System] YuuYu no Quiz de Go!Go! (ゆうゆのクイズでGo！Go！) (YM2610)</td><td>Z80</td><td>YM2610</td><td>f2system</td></tr>
+<tr><td>zedblade.zip</td><td>[Neo Geo] Zed Blade (オペレーションラグナロク) (YM2610)</td><td>68000</td><td>YM2610</td><td>generic</td></tr>
+<tr><td>zerogun.zip</td><td>[Model 2B] Zero Gunner (ゼロガンナー) (SCSP)</td><td>68000</td><td>SCSP</td><td>model2a</td></tr>
+<tr><td>zerowing.zip</td><td>[Toaplan 1] Zero Wing (ゼロウイング) (YM3526)</td><td>Z80</td><td>OPM</td><td>generic</td></tr>
+</table>
+<div class="tip"><span class="label">Tip</span>
+<p><a href="midi-monitor.htm">FM/MIDI monitor</a> follows the chip: OPN-family, OPM, OPL, or PCM keys. Arcade packs that play as MIDI use the MIDI table in the same window.</p>
+</div>
+<div class="related"><span class="label">See also</span><ul><li><a href="cemu.htm">Bonus: old-machine sound</a></li><li><a href="cemu-pc98.htm">CEmu: PC-98</a></li><li><a href="cemu-pc88.htm">CEmu: PC-88</a></li><li><a href="midi-monitor.htm">FM/MIDI monitor</a></li><li><a href="formats.htm">Supported formats and titles</a></li></ul></div>
+
+<div class="botnav">
+<span class="prev">&#171; Back: <a href="cemu-pcat.htm">CEmu: PC/AT</a></span>
+<span class="next">Next: <a href="acrylic.htm">Acrylic look and context menus</a> &#187;</span>
+<span class="up"><a href="index.htm">Contents</a></span>
+<div class="clear"></div>
+</div>
+
+<div class="foot">Media player "Raira" (oggYSEDbgm) — PrePrayerPower Soft</div>
+
+</body>
+</html>

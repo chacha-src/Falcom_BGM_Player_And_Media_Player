@@ -1,4 +1,4 @@
-#include "s_sng.h"
+﻿#include "s_sng.h"
 #include "s98device.h"
 
 class S98DEVICE_SNG : public S98DEVICEIF {

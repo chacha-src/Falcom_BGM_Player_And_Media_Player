@@ -106,11 +106,7 @@ int MagImageLoadMem(const unsigned char* data, unsigned size, MagImage* im)
 	unsigned fbPos = 0;
 	unsigned pxPos = 0;
 
-	auto rgbAt = [&](unsigned idx) -> unsigned {
-		if (idx >= nCol) idx = 0;
-		return im->pal[idx];
-	};
-
+	/* px は色ではなくパレット番号。WRD の @PAL/@FADE で後から色が変わる */
 	for (unsigned y = 0; y < ht; ++y) {
 		for (unsigned xu = 0; xu < nUnit; ++xu) {
 			unsigned byteI = faBit / 8;
@@ -127,13 +123,13 @@ int MagImageLoadMem(const unsigned char* data, unsigned size, MagImage* im)
 				if (col256) {
 					for (int k = 0; k < 2 && dstX < w; ++k) {
 						unsigned v = (pxPos < pxSize) ? pixels[pxPos++] : 0;
-						im->px[y * w + dstX++] = rgbAt(v);
+						im->px[y * w + dstX++] = v;
 					}
 				} else {
 					for (int k = 0; k < 2 && dstX + 1 < w; ++k) {
 						unsigned v = (pxPos < pxSize) ? pixels[pxPos++] : 0;
-						im->px[y * w + dstX++] = rgbAt(v >> 4);
-						im->px[y * w + dstX++] = rgbAt(v & 15);
+						im->px[y * w + dstX++] = (v >> 4) & 15;
+						im->px[y * w + dstX++] = v & 15;
 					}
 				}
 			} else {

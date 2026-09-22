@@ -1,4 +1,4 @@
-// oggDlg.h : ヘッダー ファイル
+﻿// oggDlg.h : ヘッダー ファイル
 //
 #include "afxmt.h"
 //#include "afxcmn.h"
@@ -516,6 +516,8 @@ double OggGetLyricsPlaySec();
 DWORD OggGetLyricsPlayCentis();
 /* バナーと同じ可聴 PCM フレーム（playb − DS 書込先行）。FM モニタ同期用 */
 __int64 OggGetHeardPcmFrames();
+/* DS に積んだが未再生のソースフレーム。-1 は未計測 */
+__int64 OggGetDsQueuedFrames();
 /* バナー経過(0:56.52)と同じソース PCM。VST MIDI の heard が 1/4 に落ちても WRD/@WAIT は壁時計に揃える */
 __int64 OggGetUiSourcePcmFrames();
 /* CEmu ライブ MPU の可聴フレーム。エンジンが描画済みのフレーム数から

@@ -63,6 +63,7 @@ int flacmode = 0;
 #include "dsound.h"
 #include "Douga.h"
 #include "PluginKinds.h"
+#include "ZmusicEngine.h"
 #include "CEmu/cemu_session.h"
 #include "CEmu/cemu_mgr.h"
 #include "CEmu/cemu_catalog.h"
@@ -563,10 +564,11 @@ static void ResumeDrainQueuedKeyDowns()
 
 // Space の KEYDOWN 中に MessageBox すると同じキーではいが押されるため、
 // ここでは投稿するだけ。TRUE=再生してよい / FALSE=確認待ち or キャンセル。
-/* CEmu MIDI capture/extract → TEMP\cemu_*.mid — never auto-add to playlist. */
+/* 一次展開・変換の TEMP。プレイリストには仮想パスだけ載せる。 */
 static int OggPathIsEphemeralCemuMidi(LPCTSTR path)
 {
 	if (!path || !path[0]) return 0;
+	if (MidiPackIsTempExtractPath(path)) return 1;
 	const TCHAR* base = path;
 	for (const TCHAR* p = path; *p; ++p)
 		if (*p == _T('\\') || *p == _T('/')) base = p + 1;
@@ -867,6 +869,8 @@ int readcemu(BYTE* bw, int cnt);
 int playwavwinamp(BYTE* bw, int old, int l1, int l2);
 int playwavxmplay(BYTE* bw, int old, int l1, int l2);
 int playwavaimp(BYTE* bw, int old, int l1, int l2);
+int playwavzmusic(BYTE* bw, int old, int l1, int l2);
+int readzmusic(BYTE* bw, int cnt);
 void EqualiserSetFormatVolContext(int mode, BOOL spcApplicable);
 int playwavflac(BYTE* bw, int old, int l1, int l2);
 int readflac(BYTE* bw, int cnt);
@@ -2257,7 +2261,7 @@ static void ApplyFileTagLoopsIfUnset(LPCTSTR path)
 static bool ModeParksDurationInLoop2(int md)
 {
 	return md == -3 || md == -7 || md == -8 || md == -9 || md == -10 || md == 999
-		|| IsForeignPluginMode(md) || md == MODE_VST_MIDI || md == MODE_CEMU;
+		|| IsForeignPluginMode(md) || IsVstMidiPlayMode(md) || md == MODE_CEMU;
 }
 
 static void FinalizePlaybackLoopFlags(int md)
@@ -2271,7 +2275,7 @@ static void FinalizePlaybackLoopFlags(int md)
 	endf = 0;
 	if (loop2 == 0)
 		endf = 1;
-	if (md == 30 && (loop1 != 0 || loop2 != 0)) {
+	if ((md == 30 || md == 31) && (loop1 != 0 || loop2 != 0)) {
 		const int ts = (data_size > 0) ? PcmFramesFromBytes(data_size) : PcmFramesFromBytes(oggsize);
 		const __int64 endSamp = (__int64)loop1 + (__int64)loop2;
 		if (ts <= 0 || loop1 < 0 || loop2 <= 0 || loop1 >= ts || loop2 > ts
@@ -2433,7 +2437,7 @@ static void DecodeSourceIntoScratch(uint8_t* scratch, int sb)
 	const int dm = ActiveDecodeMode();
 	if (dm == INT_MIN)
 		return;
-	if ((dm >= 10 && dm <= 21) || IsBuffwavNegMode(dm) || dm == -6 || dm == 34 || dm == 35 || dm == 30 || (dm == 999 && wav999_use_adbuf))
+	if ((dm >= 10 && dm <= 21) || IsBuffwavNegMode(dm) || dm == -6 || dm == 34 || dm == 35 || dm == 30 || dm == 31 || (dm == 999 && wav999_use_adbuf))
 		playwavBuffwav(scratch, 0, sb, 0);
 	else if (dm == -10)
 		playwavmp3(scratch, 0, sb, 0);
@@ -2443,7 +2447,7 @@ static void DecodeSourceIntoScratch(uint8_t* scratch, int sb)
 		playwavkpi(scratch, 0, sb, 0);
 	else if (dm == MODE_CEMU)
 		playwavcemu(scratch, 0, sb, 0);
-	else if (dm == MODE_VST_MIDI)
+	else if (IsVstMidiPlayMode(dm))
 		playwavvst(scratch, 0, sb, 0);
 	else if (dm == MODE_PLUGIN_WINAMP)
 		playwavwinamp(scratch, 0, sb, 0);
@@ -2451,6 +2455,8 @@ static void DecodeSourceIntoScratch(uint8_t* scratch, int sb)
 		playwavxmplay(scratch, 0, sb, 0);
 	else if (dm == MODE_PLUGIN_AIMP)
 		playwavaimp(scratch, 0, sb, 0);
+	else if (dm == MODE_ZMUSIC)
+		playwavzmusic(scratch, 0, sb, 0);
 	else if (dm == -7)
 		playwavdsd(scratch, 0, sb, 0);
 	else if (dm == -8)
@@ -2520,7 +2526,7 @@ void DispatchPlaywavFill(BYTE* bufwav3, ULONG oldw, int len1, int len2)
 	if (dm == INT_MIN)
 		return;
 	if (!g_pcm_upscale_active || len1 + len2 <= 0) {
-		if ((dm >= 10 && dm <= 21) || IsBuffwavNegMode(dm) || dm == -6 || dm == 34 || dm == 35 || dm == 30 || (dm == 999 && wav999_use_adbuf))
+		if ((dm >= 10 && dm <= 21) || IsBuffwavNegMode(dm) || dm == -6 || dm == 34 || dm == 35 || dm == 30 || dm == 31 || (dm == 999 && wav999_use_adbuf))
 			playwavBuffwav(bufwav3, oldw, len1, len2);
 		else if (dm == -10)
 			playwavmp3(bufwav3, oldw, len1, len2);
@@ -2530,7 +2536,7 @@ void DispatchPlaywavFill(BYTE* bufwav3, ULONG oldw, int len1, int len2)
 			playwavkpi(bufwav3, oldw, len1, len2);
 		else if (dm == MODE_CEMU)
 			playwavcemu(bufwav3, oldw, len1, len2);
-		else if (dm == MODE_VST_MIDI)
+		else if (IsVstMidiPlayMode(dm))
 			playwavvst(bufwav3, oldw, len1, len2);
 		else if (dm == MODE_PLUGIN_WINAMP)
 			playwavwinamp(bufwav3, oldw, len1, len2);
@@ -2538,6 +2544,8 @@ void DispatchPlaywavFill(BYTE* bufwav3, ULONG oldw, int len1, int len2)
 			playwavxmplay(bufwav3, oldw, len1, len2);
 		else if (dm == MODE_PLUGIN_AIMP)
 			playwavaimp(bufwav3, oldw, len1, len2);
+		else if (dm == MODE_ZMUSIC)
+			playwavzmusic(bufwav3, oldw, len1, len2);
 		else if (dm == -7)
 			playwavdsd(bufwav3, oldw, len1, len2);
 		else if (dm == -8)
@@ -2643,7 +2651,7 @@ void XfCloseSlotDecodersImpl(int slot)
 		opus_arr[slot].Close(og->kmp);
 		og->kmp = NULL;
 	}
-	else if (m == MODE_VST_MIDI) {
+	else if (IsVstMidiPlayMode(m)) {
 		CloseVstMidiSessionSlot(slot);
 	}
 	else if (m == MODE_CEMU) {
@@ -3578,7 +3586,7 @@ static int CEmuTryOverlayMidiSfxFromFilen(const wchar_t* openPhys, unsigned titl
 	if (playf == 0)
 		return 0;
 	const int midiPlaying = CEmuMidiLiveActive()
-		|| mode == MODE_VST_MIDI || modesub == MODE_VST_MIDI;
+		|| IsVstMidiPlayMode(mode) || IsVstMidiPlayMode(modesub);
 	if (!midiPlaying)
 		return 0;
 
@@ -4693,7 +4701,7 @@ int ret2;
 /* 次曲が SoftOpen 可能なとき、指定秒より十分前に B を開き始めるか判定 */
 static int XfModeCanSoftOpen(int m)
 {
-	if (m == MODE_VST_MIDI || m == MODE_CEMU || IsCemuMode(m))
+	if (IsVstMidiPlayMode(m) || m == MODE_CEMU || IsCemuMode(m))
 		return 1;
 	if (m == -8 || m == -9 || m == -10)
 		return 1;
@@ -4739,7 +4747,7 @@ int XfShouldPreloadNext()
 	__int64 loadBytes = xfBytes;
 	if (bpf > 0 && sr > 0) {
 		double leadSec = 0.0;
-		if (nextMode == MODE_VST_MIDI)
+		if (IsVstMidiPlayMode(nextMode))
 			leadSec = 45.0;
 		else if (nextMode == MODE_CEMU || IsCemuMode(nextMode))
 			leadSec = 12.0;
@@ -7222,7 +7230,7 @@ static bool XfSlotUsesDecodeRing(int slot)
 {
 	if (slot < 0 || slot >= XF_SLOTS) return true;
 	const int m = g_openDecoderModeSlot[slot];
-	if (m == MODE_VST_MIDI || m == MODE_CEMU || IsCemuMode(m))
+	if (IsVstMidiPlayMode(m) || m == MODE_CEMU || IsCemuMode(m))
 		return false;
 	return true;
 }
@@ -7430,7 +7438,7 @@ static int XfSoftOpenSlot(int slot, const CString& path, int openMode)
 		dsz = loop3v * ((si.dwBitsPerSample >= 8) ? (int)(si.dwBitsPerSample / 4) : 4);
 		timeMax = (loop3v > 0) ? loop3v : 1;
 	}
-	else if (openMode == MODE_VST_MIDI) {
+	else if (IsVstMidiPlayMode(openMode)) {
 		wchar_t mid[VST_PATH_CHARS]; mid[0] = 0;
 		wchar_t hints[32][128]; int hc = 0;
 		if (!VstResolvePlayPath(path, mid, VST_PATH_CHARS, hints, 32, &hc))
@@ -7539,7 +7547,7 @@ static int XfSoftOpenSlot(int slot, const CString& path, int openMode)
 		si.dwSamplesPerSec = 44100;
 	if (si.dwChannels < 1)
 		si.dwChannels = 2;
-	else if (openMode == MODE_VST_MIDI) {
+	else if (IsVstMidiPlayMode(openMode)) {
 		if (si.dwChannels > 32)
 			si.dwChannels = 32;
 	} else if (si.dwChannels > 8)
@@ -10072,7 +10080,7 @@ void COggDlg::play()
 	// プレイリストにフルパスが入っていても chdir 先ではファイル名のみ参照する
 	// （例: mode16 の wavread は filen.Left(8) で dinow_XX と照合）
 	// mode 30 は chdir 無しで .pac をフルパス Open するため basename 化しない。
-	if (((mode >= 1 && mode <= 21) || mode == -11 || mode == -12 || mode == -13 || mode == -14 || mode == -15) && mode != 30) {
+	if (((mode >= 1 && mode <= 21) || mode == -11 || mode == -12 || mode == -13 || mode == -14 || mode == -15) && mode != 30 && mode != 31) {
 		int slash = filen.ReverseFind(_T('\\'));
 		if (slash >= 0)
 			filen = filen.Mid(slash + 1);
@@ -10081,11 +10089,7 @@ void COggDlg::play()
 			filen = filen.Mid(slash + 1);
 	}
 
-	{
-		wchar_t mat[MIDIPACK_PATH];
-		if (MidiPackMaterialize(filen, mat, MIDIPACK_PATH))
-			filen = mat;
-	}
+	/* 展開実体は VstResolvePlayPath 内だけ。filen は archive::inner のまま */
 
 	CWaitCursor rrr1;
 	wavwait = 0; thend = 1; stitle = "";
@@ -10585,7 +10589,7 @@ void COggDlg::play()
 	if (cor != -1) {
 		ss = filen.Left(filen.Find(L":", 6));
 	}
-	if (!aaa_1.Open(ss, CFile::modeRead | CFile::shareDenyWrite) && !(mode > 0 && mode <= 21 || mode == -6 || mode == 34 || mode == 35 || mode == -11 || mode == -12 || mode == -13 || mode == -14 || mode == -15 || mode == 30)) {
+	if (!aaa_1.Open(ss, CFile::modeRead | CFile::shareDenyWrite) && !(mode > 0 && mode <= 21 || mode == -6 || mode == 34 || mode == 35 || mode == -11 || mode == -12 || mode == -13 || mode == -14 || mode == -15 || mode == 30 || mode == 31)) {
 		if (xfSoftOpen) { endflg = 0; return; }
 		MessageBox(LL14(
 			L"ファイルが開けませんでした。\n削除されたか移動した可能性があります。", /* 日本語 */
@@ -10631,10 +10635,10 @@ void COggDlg::play()
 	wavsam_depth = 16;
 	if (!xfSoftOpen)
 		ZeroMemory(bufwav3, sizeof(bufwav3));
-	if (((mode >= 10 && mode <= 21) || IsBuffwavNegMode(mode)) && mode != -10 || mode == -6 || mode == 34 || mode == 35 || mode == 30) {
+	if (((mode >= 10 && mode <= 21) || IsBuffwavNegMode(mode)) && mode != -10 || mode == -6 || mode == 34 || mode == 35 || mode == 30 || mode == 31) {
 		thend1 = FALSE;
 		wavwait = 0;
-		if (mode == 30) {
+		if (mode == 30 || mode == 31) {
 			wavbit_sample_Hz = 48000;
 			// 旧PLの誤ループ値が CWread 失敗時に残らないよう一旦クリア（smpl で上書き）
 			loop1 = 0;
@@ -10677,8 +10681,8 @@ void COggDlg::play()
 		for (int k = 0; k < 100; k++)
 			DoEvent();
 	}
-	else if (mode == -3 || mode == -10 || mode == -9 || mode == -8 || mode == -7 || mode == -6 || mode == 34 || mode == 35 || mode == 30 || mode == 999
-		|| mode == MODE_VST_MIDI || mode == MODE_CEMU || IsForeignPluginMode(mode)) {
+	else if (mode == -3 || mode == -10 || mode == -9 || mode == -8 || mode == -7 || mode == -6 || mode == 34 || mode == 35 || mode == 30 || mode == 31 || mode == 999
+		|| IsVstMidiPlayMode(mode) || mode == MODE_CEMU || IsForeignPluginMode(mode)) {
 		// 孤児 CWread が古い loop1/2 で SetSelection しないよう世代を進める
 		// VST MIDI / 外部プラグインは Ogg ロードに落とさない（.mid で LoadOggVorbis 失敗→即 return していた）
 		InterlockedIncrement(&g_cwreadEpoch);
@@ -10754,7 +10758,7 @@ void COggDlg::play()
 		}
 	}
 	// mode 30: CWread 完了を ys8/零軌 loop 上書きより先に待つ（0:00/古い loop1,2 のまま return するのを防ぐ）
-	if (mode == 30) {
+	if (mode == 30 || mode == 31) {
 		const DWORD wavWaitT0 = GetTickCount();
 		for (; wavwait == 0;) {
 			DoEvent();
@@ -10796,7 +10800,7 @@ void COggDlg::play()
 	playb = 0;
 	if (!xfSoftOpen) {
 		m_time.SetPos((int)playb);
-		if (ogg && mode != MODE_VST_MIDI && !IsForeignPluginMode(mode)
+		if (ogg && !IsVstMidiPlayMode(mode) && !IsForeignPluginMode(mode)
 			&& mode != -3 && mode != -10 && mode != -9 && mode != -8 && mode != -7 && mode != 999)
 			ov_pcm_seek_lap(&vf, (ogg_int64_t)0);
 	}
@@ -10815,7 +10819,7 @@ void COggDlg::play()
 	loc = 0;
 
 	//ys8用（mode 30 は CWread が loop1/2 を設定済み。ここで上書きしない）
-	if (mode != 30) {
+	if (mode != 30 && mode != 31) {
 	CStdioFile f;
 	char* buff;
 	int looping = 0;
@@ -11216,7 +11220,7 @@ void COggDlg::play()
 			}
 		}
 	}
-	} // mode != 30 (ys8/ysc/零軌 loop)
+	} // mode != 30/31 (ys8/ysc/零軌 loop)
 	//-------------------------------------------------------------------
 	/* xfSoftOpen では本流 DS を壊さない。Release すると m_dsb1 の LOOPING だけ残り、
 	 * notify は m_dsb==NULL で書けずリングが永遠ループする。 */
@@ -11226,13 +11230,13 @@ void COggDlg::play()
 		ZeroMemory(bufwav3, sizeof(bufwav3));
 	}
 	DWORD  dwDataLen = WAVDALen / OUTPUT_BUFFER_NUM;
-	if (((mode >= 10 && mode <= 21) || IsBuffwavNegMode(mode)) && mode != -10 || mode == -6 || mode == 34 || mode == 35 || mode == 30) {
+	if (((mode >= 10 && mode <= 21) || IsBuffwavNegMode(mode)) && mode != -10 || mode == -6 || mode == 34 || mode == 35 || mode == 30 || mode == 31) {
 		// mode 30 は ys8 ブロック前に CWread 完了済み
-		if (mode != 30) {
+		if (mode != 30 && mode != 31) {
 			// wavwait はデコード用ワーカースレッド(CWread)が立てる。
 			const DWORD wavWaitT0 = GetTickCount();
 			DWORD wavWaitLimitMs = g_interactiveTrackChange ? 2500u : 8000u;
-			if (((mode >= 1 && mode <= 21) || mode == 30 || mode == -11 || mode == -12 || mode == -13 || mode == -14 || mode == -15) && wavWaitLimitMs < 30000u)
+			if (((mode >= 1 && mode <= 21) || mode == 30 || mode == 31 || mode == -11 || mode == -12 || mode == -13 || mode == -14 || mode == -15) && wavWaitLimitMs < 30000u)
 				wavWaitLimitMs = 30000u;
 			for (; wavwait == 0;) {
 				CWaitCursor rrr2;
@@ -12391,7 +12395,7 @@ open_mode_kpi:
 			CEmuFmMonBindFromGe(CemuSess().game);
 		wav_start();
 	}
-	else if (mode == MODE_VST_MIDI) {
+	else if (IsVstMidiPlayMode(mode)) {
 open_mode_vst_midi:
 		ret2 = 0;
 		EqualiserSetFormatVolContext(1, FALSE); // その他のkpi（x86 直読み / KpiHost64 経由とも本体 equaliser）
@@ -12664,6 +12668,41 @@ open_mode_vst_midi:
 		g_openDecoderMode = mode;
 		wav_start();
 	}
+	else if (mode == MODE_ZMUSIC) {
+		ret2 = 0;
+		EqualiserSetFormatVolContext(1, FALSE);
+		if (ZmusicSessionOpen(filen) != ZMUSIC_OK) {
+			MessageBox(LL14(
+				L"ZMUSICを開けませんでした。",
+				L"Could not open ZMUSIC.",
+				L"Impossible d'ouvrir ZMUSIC.",
+				L"Impossibile aprire ZMUSIC.",
+				L"No se pudo abrir ZMUSIC.",
+				L"ZMUSIC을 열 수 없습니다.",
+				L"无法打开 ZMUSIC。",
+				L"تعذر فتح ZMUSIC.",
+				L"Не удалось открыть ZMUSIC.",
+				L"ZMUSIC konnte nicht geöffnet werden.",
+				L"Não foi possível abrir o ZMUSIC.",
+				L"Kan ZMUSIC niet openen.",
+				L"Nie można otworzyć ZMUSIC.",
+				L"ZMUSIC açılamadı."),
+				LL14(L"ZMUSIC", L"ZMUSIC", L"ZMUSIC", L"ZMUSIC", L"ZMUSIC", L"ZMUSIC", L"ZMUSIC", L"ZMUSIC", L"ZMUSIC", L"ZMUSIC", L"ZMUSIC", L"ZMUSIC", L"ZMUSIC", L"ZMUSIC"),
+				MB_ICONERROR | MB_OK);
+			m_saisai.EnableWindow(TRUE); endflg = 0; return;
+		}
+		wavbit_sample_Hz = 44100;
+		wavchannel = 2;
+		wavsam_src = 16;
+		wavsam_depth = 16;
+		NormalizePlaybackWaveFormat();
+		loop1 = 0;
+		loop2 = 0;
+		SetPcmByteLengthFromSamples(loop2, wavsam_depth, wavchannel);
+		m_time.SetRange(0, 1, TRUE);
+		g_openDecoderMode = mode;
+		wav_start();
+	}
 	else if (mode == -2) {
 		CFile ff;
 		CString ss11 = ss; ss11.MakeLower();
@@ -12856,7 +12895,7 @@ open_mode_vst_midi:
 			}
 		}
 
-	if (mode == 21 || mode == 30) {
+	if (mode == 21 || mode == 30 || mode == 31) {
 		wavbit_sample_Hz = 48000;
 	}
 	if (mode == -1) {
@@ -13337,7 +13376,7 @@ open_mode_vst_midi:
 			}
 		}
 	}
-	if (mode == 30) { wavbit_sample_Hz = 48000; wavsam_depth = 16; wavchannel = 2; }
+	if (mode == 30 || mode == 31) { wavbit_sample_Hz = 48000; wavsam_depth = 16; wavchannel = 2; }
 	NormalizePlaybackWaveFormat();
 
 	/* soft-open: 本流の DS 出力形式は変えない（副スロット Upscaler は後で合わせる）。
@@ -14211,7 +14250,7 @@ open_mode_vst_midi:
 			if (plc >= 0 && plc < pl->playcnt) {
 				pl->pc[plc].loop1 = loop1;
 				pl->pc[plc].loop2 = loop2;
-				const int midLoop = (mode == MODE_VST_MIDI)
+				const int midLoop = (IsVstMidiPlayMode(mode))
 					&& (VstMidiSongHasLoop() || OggMidiFileHasCc111Loop(filen)
 						|| CEmuMidiLiveActive());
 				if (midLoop)
@@ -18082,8 +18121,8 @@ if (fff == 0)
 		if (readadpcmgurumin(adpcmf, adbuf2, (int)(adpcmf.GetLength() - jk))) { thend = 1; adpcmf.Close(); return; }
 		adpcmf.Close();
 	}
-	else if (mode == 30) {
-		// 空の軌跡 The 1st: .pac 内 WAV + smpl。処理はここに直書き（ヘルパー増やさない）
+	else if (mode == 30 || mode == 31) {
+		// 空の軌跡 The 1st / The 2nd: .pac 内 WAV + smpl。処理はここに直書き（ヘルパー増やさない）
 		CWaitCursor aaaa;
 		const LONG myEpoch = InterlockedCompareExchange(&g_cwreadWorkerEpoch, 0, 0);
 		CFile adpcmf;
@@ -18124,7 +18163,7 @@ if (fff == 0)
 			}
 			if (!base.IsEmpty() && !PathFileExists(fn) && pl && pl->pc) {
 				for (int i = 0; i < pl->playcnt; ++i) {
-					if (pl->pc[i].sub != 30 || !pl->pc[i].fol[0])
+					if ((pl->pc[i].sub != 30 && pl->pc[i].sub != 31) || !pl->pc[i].fol[0])
 						continue;
 					CString phys = PlPhysicalMediaPath(pl->pc[i].fol);
 					if (phys.IsEmpty())
@@ -18232,9 +18271,10 @@ if (fff == 0)
 		}
 		aa = bestAa;
 
-		// data は先頭ヘッダ内で探す。PCM を先に読み、その後 data 直後 trail から smpl を取る。
-		// （smpl を先に読むと初回だけゴミ→0,0、再演奏で直る、という冷えキャッシュ症状になる）
+		// data は先頭ヘッダ内で探す。smpl は fmt と data の間（bgm3 の 423 など）か、data の直後。
+		// PCM を先に読み、ループ点はヘッダ側を優先し、無ければ trail から取る。
 		int newLoop1 = 0, newLoop2 = 0;
+		int preSmpl1 = 0, preSmplEnd = 0, preSmpl = 0;
 		int dataPayloadOff = -1; // seekpoint からの data ペイロード先頭
 		cnt = 0;
 		{
@@ -18247,6 +18287,31 @@ if (fff == 0)
 				if (hdr[i] == 'd' && hdr[i + 1] == 'a' && hdr[i + 2] == 't' && hdr[i + 3] == 'a') {
 					st = i;
 					break;
+				}
+			}
+			/* data より前のチャンク。smpl がここにある曲は trail を見ても 0,0 になる。 */
+			if (st > 12) {
+				UINT cpos = 12;
+				for (int nchunk = 0; nchunk < 8 && (int)cpos + 8 <= st && cpos + 8 <= hdrGot; ++nchunk) {
+					DWORD csz = (DWORD)(BYTE)hdr[cpos + 4] | ((DWORD)(BYTE)hdr[cpos + 5] << 8)
+						| ((DWORD)(BYTE)hdr[cpos + 6] << 16) | ((DWORD)(BYTE)hdr[cpos + 7] << 24);
+					if (hdr[cpos] == 's' && hdr[cpos + 1] == 'm' && hdr[cpos + 2] == 'p' && hdr[cpos + 3] == 'l'
+						&& csz >= 0x3C && cpos + 8 + 0x3C <= hdrGot) {
+						unsigned char* body = (unsigned char*)(hdr + cpos + 8);
+						int nLoops = (int)body[0x1C] | ((int)body[0x1D] << 8) | ((int)body[0x1E] << 16) | ((int)body[0x1F] << 24);
+						if (nLoops >= 1) {
+							preSmpl1 = (int)body[0x2C] | ((int)body[0x2D] << 8) | ((int)body[0x2E] << 16) | ((int)body[0x2F] << 24);
+							preSmplEnd = (int)body[0x30] | ((int)body[0x31] << 8) | ((int)body[0x32] << 16) | ((int)body[0x33] << 24);
+							preSmpl = 1;
+						}
+						break;
+					}
+					if (csz == 0 || csz > 0x10000)
+						break;
+					UINT next = cpos + 8 + (UINT)csz;
+					if (csz & 1) next++;
+					if (next <= cpos || (int)next > st) break;
+					cpos = next;
 				}
 			}
 			if (st >= 0) {
@@ -18290,9 +18355,20 @@ if (fff == 0)
 			}
 		}
 
-		// PCM 読了後に trail をまとめて読み、チャンク境界だけで smpl を取る。
+		// PCM 読了後。data 前の smpl が妥当ならそれを使う。無ければ trail をチャンク境界で取る。
 		// 0,0 / 未検出 / 曲長外はすべて「まだ確定しない」→ 代入せずリトライ。
 		{
+			int preOk = 0;
+			if (preSmpl && preSmplEnd > preSmpl1) {
+				const int preLen = preSmplEnd - preSmpl1;
+				const __int64 preEnd = (__int64)preSmpl1 + (__int64)preLen;
+				if (preLen > 0 && preSmpl1 >= 0 && preSmpl1 < totalSamples && preLen < totalSamples
+					&& preEnd < (__int64)totalSamples + 8 && preSmpl1 != preLen) {
+					newLoop1 = preSmpl1;
+					newLoop2 = preLen;
+					preOk = 1;
+				}
+			}
 			const ULONGLONG dataEnd = (ULONGLONG)aa.seekpoint + (ULONGLONG)dataPayloadOff + (ULONGLONG)cnt;
 			int trailMax = 0x10000;
 			if (aa.datasize > 0) {
@@ -18301,7 +18377,7 @@ if (fff == 0)
 				if (left > 0 && left < trailMax) trailMax = (int)left;
 				if (left <= 0) trailMax = 0x2000;
 			}
-			int loopOk = 0;
+			int loopOk = preOk;
 			for (int retry = 0; retry < 8 && !loopOk; ++retry) {
 				if (InterlockedCompareExchange(&g_cwreadEpoch, 0, 0) != myEpoch || thend1 == TRUE) {
 					free(newBuf);
@@ -19183,7 +19259,7 @@ static bool PlaybackShortMeansEof(int gotBytes)
 	const int dm = ActiveDecodeMode();
 	// KPI / 外部プラグイン / mid VST: 途中短読みは誤停止しやすい。
 	// ゼロ返却と無音連続（playwav* 側）で止める。
-	if (dm == -3 || IsForeignPluginMode(dm) || dm == MODE_VST_MIDI)
+	if (dm == -3 || IsForeignPluginMode(dm) || IsVstMidiPlayMode(dm))
 		return false;
 	const int total = PlaybackSrcTotalSamples();
 	const int hz = (wavbit_sample_Hz > 0) ? wavbit_sample_Hz : 44100;
@@ -20178,6 +20254,20 @@ int playwavaimp(BYTE* bw, int old, int l1, int l2)
 {
 	if (!PluginAimp_IsOpen()) return 0;
 	return playwavForeignPull(bw, old, l1, l2, readaimp, ForeignSeekAimp0);
+}
+static int ForeignSeekZmusic0()
+{
+	ZmusicSessionRewind();
+	return 0;
+}
+int readzmusic(BYTE* bw, int cnt)
+{
+	return ZmusicSessionRead(bw, cnt);
+}
+int playwavzmusic(BYTE* bw, int old, int l1, int l2)
+{
+	if (!ZmusicSessionIsOpen()) return 0;
+	return playwavForeignPull(bw, old, l1, l2, readzmusic, ForeignSeekZmusic0);
 }
 
 
@@ -23278,8 +23368,9 @@ void COggDlg::dp(CString a)
 		mode = 999; modesub = 999;
 		play();
 	}
-	else if (filen.Find(L".pac::") > 0 && filen.Find(L"Trails in the Sky 1st Chapter")) {
-		mode = 30; modesub = 30;
+	else if (filen.Find(L".pac::") > 0 && (filen.Find(L"Trails in the Sky 1st Chapter") > 0 || filen.Find(L"Trails in the Sky 2nd Chapter") > 0)) {
+		if (filen.Find(L"Trails in the Sky 2nd Chapter") > 0) { mode = 31; modesub = 31; }
+		else { mode = 30; modesub = 30; }
 		play();
 	}
 	else {//DirectShow
@@ -23327,8 +23418,8 @@ void COggDlg::dp(CString a)
 				play();
 				return;
 			}
-			if (p.sub == MODE_VST_MIDI) {
-				mode = modesub = MODE_VST_MIDI;
+			if (IsVstMidiPlayMode(p.sub)) {
+				mode = modesub = p.sub;
 				play();
 				return;
 			}
@@ -23851,7 +23942,7 @@ static void ResumeApplyPlaybSeek(__int64 pb)
 		KpiSeekToPlayb(playb);
 		return;
 	}
-	if (mode == MODE_VST_MIDI) {
+	if (IsVstMidiPlayMode(mode)) {
 		VstSeekToPlayb(playb);
 		return;
 	}
@@ -23898,12 +23989,16 @@ static void ResumeApplyPlaybSeek(__int64 pb)
 			PluginAimp_SeekBytes((__int64)playb * bpf);
 		return;
 	}
+	if (mode == MODE_ZMUSIC) {
+		ZmusicSessionSeekFrames((int)playb);
+		return;
+	}
 	if (mode == -1) {
 		SeekAndWarmupRubberBand((int)playb, false);
 		return;
 	}
 	// opus / ゲームBGM / adbuf 系
-	if (((mode >= 1 && mode <= 21) || IsBuffwavNegMode(mode) || mode == -6 || mode == 34 || mode == 35 || mode == 30) && mode != -10) {
+	if (((mode >= 1 && mode <= 21) || IsBuffwavNegMode(mode) || mode == -6 || mode == 34 || mode == 35 || mode == 30 || mode == 31) && mode != -10) {
 		seekadpcm((int)playb);
 		return;
 	}
@@ -23914,9 +24009,10 @@ static inline bool PlaybackNotifyThreadMayBeActive()
 {
 	return plf != 0 || playf != 0 || ogg != NULL || adbuf2 != NULL || (og && og->mod != NULL)
 		|| wav != NULL || mode == 999 || mode == -10 || mode == -9 || mode == -8
-		|| mode == -7 || mode == -6 || mode == 34 || mode == 35 || mode == -3 || mode == -1 || mode == 30
+		|| mode == -7 || mode == -6 || mode == 34 || mode == 35 || mode == -3 || mode == -1 || mode == 30 || mode == 31
 		|| mode == MODE_PLUGIN_WINAMP || mode == MODE_PLUGIN_XMPLAY || mode == MODE_PLUGIN_AIMP
-		|| mode == MODE_VST_MIDI
+		|| mode == MODE_ZMUSIC
+		|| IsVstMidiPlayMode(mode)
 		|| (mode > 0 && mode <= 21);
 }
 
@@ -24092,14 +24188,15 @@ void COggDlg::stop()
 		if (stoppingMode == -9) m4a_.Close(og->kmp);
 		if (stoppingMode == -7) dsd_.kpiClose(og->kmp);
 		if (stoppingMode == 999) wav_.Close();
-		if (stoppingMode == MODE_VST_MIDI) CloseVstMidiSession();
+		if (IsVstMidiPlayMode(stoppingMode)) CloseVstMidiSession();
 		if (stoppingMode == MODE_CEMU
-			|| stoppingMode == MODE_VST_MIDI
+			|| IsVstMidiPlayMode(stoppingMode)
 			|| CemuAnyKind())
 			CloseCemuPlaybackResources();
 		if (stoppingMode == MODE_PLUGIN_WINAMP) PluginWinamp_Close();
 		if (stoppingMode == MODE_PLUGIN_XMPLAY) PluginXmplay_Close();
 		if (stoppingMode == MODE_PLUGIN_AIMP) PluginAimp_Close();
+		if (stoppingMode == MODE_ZMUSIC) ZmusicSessionClose();
 		kmp = NULL;
 		ClearOpenDecoderMode();
 		ReleaseKpiPlaybackAsync(mod, kmp1, hDLLk);
@@ -24285,14 +24382,15 @@ BOOL COggDlg::stop1()
 	if (stoppingMode == -9 && kmp) { m4a_.Close(kmp); }
 	if (stoppingMode == -7 && kmp) { dsd_.kpiClose(kmp); }
 	if (stoppingMode == 999) wav_.Close();
-	if (stoppingMode == MODE_VST_MIDI) CloseVstMidiSession();
+	if (IsVstMidiPlayMode(stoppingMode)) CloseVstMidiSession();
 	if (stoppingMode == MODE_CEMU
-		|| stoppingMode == MODE_VST_MIDI
+		|| IsVstMidiPlayMode(stoppingMode)
 		|| CemuAnyKind())
 		CloseCemuPlaybackResources();
 	if (stoppingMode == MODE_PLUGIN_WINAMP) PluginWinamp_Close();
 	if (stoppingMode == MODE_PLUGIN_XMPLAY) PluginXmplay_Close();
 	if (stoppingMode == MODE_PLUGIN_AIMP) PluginAimp_Close();
+	if (stoppingMode == MODE_ZMUSIC) ZmusicSessionClose();
 	kmp = NULL;
 	ClearOpenDecoderMode();
 	ReleaseKpiPlaybackAsync(mod, kmp1, hDLLk);
@@ -25354,7 +25452,7 @@ void COggDlg::timerp()
 		snap_loop2 = loop2;
 	}
 	// mode 30: 曲長外の loop は表示だけ 0 に（孤児上書きで変な数字が残るのを防ぐ）
-	if (mode == 30 && (snap_loop1 != 0 || snap_loop2 != 0)) {
+	if ((mode == 30 || mode == 31) && (snap_loop1 != 0 || snap_loop2 != 0)) {
 		const int ts = PcmFramesFromBytes(snap_oggsize);
 		const __int64 endSamp = (__int64)snap_loop1 + (__int64)snap_loop2;
 		if (ts <= 0 || snap_loop1 < 0 || snap_loop2 <= 0 || snap_loop1 >= ts || snap_loop2 > ts
@@ -25710,7 +25808,7 @@ void COggDlg::timerp()
 	BannerValueLayout(nameLabelW, nameValueX, nameViewW);
 	BannerScrollResetIfLayoutChanged(0, nameValueX, nameViewW, mcnt, mcnt2);
 	if (fnn != L"")		sss = fnn;
-	if (sss.IsEmpty() && (mode == MODE_VST_MIDI || modesub == MODE_VST_MIDI)) {
+	if (sss.IsEmpty() && (IsVstMidiPlayMode(mode) || IsVstMidiPlayMode(modesub))) {
 		const int slash = max(filen.ReverseFind(_T('\\')), filen.ReverseFind(_T('/')));
 		sss = (slash >= 0) ? filen.Mid(slash + 1) : filen;
 	}
@@ -25785,7 +25883,7 @@ void COggDlg::timerp()
 			L"file:Ładowanie wtyczek…",
 			L"file:Eklentiler yükleniyor…"));
 	}
-	else if ((modesub >= 1 && modesub <= 21) || modesub == 30 ||
+	else if ((modesub >= 1 && modesub <= 21) || modesub == 30 || modesub == 31 ||
 		modesub == -11 || modesub == -12 || modesub == -13 || modesub == -14 || modesub == -15) {
 		CString fileName = filen;
 		const int slash = max(fileName.ReverseFind(_T('\\')), fileName.ReverseFind(_T('/')));
@@ -25795,7 +25893,7 @@ void COggDlg::timerp()
 		CString gameName;
 		if (pl && plcnt >= 0 && plcnt < pl->playcnt) {
 			int sub = pl->pc[plcnt].sub;
-			if ((sub >= 1 && sub <= 21) || sub == 30 ||
+			if ((sub >= 1 && sub <= 21) || sub == 30 || sub == 31 ||
 				sub == -11 || sub == -12 || sub == -13 || sub == -14 || sub == -15)
 				gameName = pl->pc[plcnt].game;
 		}
@@ -25899,7 +25997,9 @@ void COggDlg::timerp()
 		const CString arch = KpiArchLabel(ResolveKpiArchBits(CString(kpi), filen));
 		s.Format(LL14(L"file:aimpプラグイン(%s %s)", L"file:aimp plugin (%s %s)", L"file:Plugin aimp (%s %s)", L"file:Plugin aimp (%s %s)", L"file:Plugin aimp (%s %s)", L"file:aimp 플러그인(%s %s)", L"file:aimp 插件(%s %s)", L"file:إضافة aimp (%s %s)", L"file:Плагин aimp (%s %s)", L"file:aimp-Plugin (%s %s)", L"file:Plugin aimp (%s %s)", L"file:aimp-plugin (%s %s)", L"file:Wtyczka aimp (%s %s)", L"file:aimp eklentisi (%s %s)"), sss, arch);
 	}
-	if (mode == MODE_VST_MIDI) {
+	if (mode == MODE_ZMUSIC)
+		s.Format(LL14(L"file:ZMUSIC", L"file:ZMUSIC", L"file:ZMUSIC", L"file:ZMUSIC", L"file:ZMUSIC", L"file:ZMUSIC", L"file:ZMUSIC", L"file:ZMUSIC", L"file:ZMUSIC", L"file:ZMUSIC", L"file:ZMUSIC", L"file:ZMUSIC", L"file:ZMUSIC", L"file:ZMUSIC"));
+	if (IsVstMidiPlayMode(mode)) {
 		if (!savedata.vstMultiDll[0] && !savedata.vstExtraPath[0]) {
 			s.Format(LL14(L"file:mid %s", L"file:mid %s", L"file:mid %s", L"file:mid %s", L"file:mid %s", L"file:mid %s", L"file:mid %s", L"file:mid %s", L"file:mid %s", L"file:mid %s", L"file:mid %s", L"file:mid %s", L"file:mid %s", L"file:mid %s"),
 				savedata.midiOutName[0] ? savedata.midiOutName : L"MIDI Mapper");
@@ -25926,7 +26026,7 @@ void COggDlg::timerp()
 		L"file:Wściekły Katalog (%s)",    /* ポーランド語: 激怒したカタログ */
 		L"file:Zıplayan Torba (%s)"), sss); /* トルコ語: 跳ねている袋 */
 	if (mode == 30) s = LL14(L"file:空の軌跡 The 1st", L"file:Trails in the Sky The 1st", L"file:Les Sentiers du Ciel The 1st", L"file:Trails in the Sky The 1st", L"file:Trails in the Sky The 1st", L"file:하늘의 궤적 The 1st", L"file:空之轨迹 The 1st", L"file:Trails in the Sky The 1st", L"file:Тропы в Небе The 1st", L"file:Himmelsleitern The 1st", L"file:Trails in the Sky The 1st", L"file:Trails in the Sky The 1st", L"file:Trails in the Sky The 1st", L"file:Trails in the Sky The 1st");
-	// mode 31-35: プレイリスト表示用予約（再生実装は未）
+	// mode 31 は The 2nd（30 と同じ pac 内 WAV）。mode 32 は予約
 	else if (mode == 31) s = LL14(L"file:空の軌跡 The 2nd", L"file:Trails in the Sky The 2nd", L"file:Les Sentiers du Ciel The 2nd", L"file:Trails in the Sky The 2nd", L"file:Trails in the Sky The 2nd", L"file:하늘의 궤적 The 2nd", L"file:空之轨迹 The 2nd", L"file:Trails in the Sky The 2nd", L"file:Тропы в Небе The 2nd", L"file:Himmelsleitern The 2nd", L"file:Trails in the Sky The 2nd", L"file:Trails in the Sky The 2nd", L"file:Trails in the Sky The 2nd", L"file:Trails in the Sky The 2nd");
 	else if (mode == 32) s = LL14(L"file:空の軌跡 The 3rd", L"file:Trails in the Sky The 3rd", L"file:Les Sentiers du Ciel The 3rd", L"file:Trails in the Sky The 3rd", L"file:Trails in the Sky The 3rd", L"file:하늘의 궤적 The 3rd", L"file:空之轨迹 The 3rd", L"file:Trails in the Sky The 3rd", L"file:Тропы в Небе The 3rd", L"file:Himmelsleitern The 3rd", L"file:Trails in the Sky The 3rd", L"file:Trails in the Sky The 3rd", L"file:Trails in the Sky The 3rd", L"file:Trails in the Sky The 3rd");
 	else if (mode == 33) s = LL14(L"file:英雄伝説 黎の軌跡", L"file:The Legend of Heroes: Trails through Daybreak", L"file:The Legend of Heroes: Trails through Daybreak", L"file:The Legend of Heroes: Trails through Daybreak", L"file:The Legend of Heroes: Trails through Daybreak", L"file:영웅전설 여의 궤적", L"file:英雄传说 黎之轨迹", L"file:The Legend of Heroes: Trails through Daybreak", L"file:The Legend of Heroes: Trails through Daybreak", L"file:The Legend of Heroes: Trails through Daybreak", L"file:The Legend of Heroes: Trails through Daybreak", L"file:The Legend of Heroes: Trails through Daybreak", L"file:The Legend of Heroes: Trails through Daybreak", L"file:The Legend of Heroes: Trails through Daybreak");
@@ -26060,7 +26160,13 @@ void COggDlg::timerp()
 		s.Format(_T("aimp :%s"), sss.Right(sss.GetLength() - sss.ReverseFind('\\') - 1));
 		moji(s, 1, 64, 0x7fffff);
 	}
-	else if (mode == MODE_VST_MIDI) {
+	else if (mode == MODE_ZMUSIC) {
+		s = FormatBannerDataAudioLine();
+		moji(s, 1, 48, 0x7fffff);
+		s = _T("zmusic :OPM");
+		moji(s, 1, 64, 0x7fffff);
+	}
+	else if (IsVstMidiPlayMode(mode)) {
 		s = FormatBannerDataAudioLine();
 		moji(s, 1, 48, 0x7fffff);
 		if (!savedata.vstMultiDll[0] && !savedata.vstExtraPath[0])
@@ -27894,15 +28000,16 @@ LRESULT COggDlg::OnPlaybackAutoStopped(WPARAM, LPARAM)
 	if (stoppingMode == -9 && og) m4a_.Close(og->kmp);
 	if (stoppingMode == -7 && og) dsd_.kpiClose(og->kmp);
 	if (stoppingMode == 999) wav_.Close();
-	if (stoppingMode == MODE_VST_MIDI) CloseVstMidiSession();
+	if (IsVstMidiPlayMode(stoppingMode)) CloseVstMidiSession();
 	if (stoppingMode == MODE_CEMU
-		|| stoppingMode == MODE_VST_MIDI
+		|| IsVstMidiPlayMode(stoppingMode)
 		|| CemuAnyKind()
 		|| CEmuMidiLiveActive())
 		CloseCemuPlaybackResources();
 	if (stoppingMode == MODE_PLUGIN_WINAMP) PluginWinamp_Close();
 	if (stoppingMode == MODE_PLUGIN_XMPLAY) PluginXmplay_Close();
 	if (stoppingMode == MODE_PLUGIN_AIMP) PluginAimp_Close();
+	if (stoppingMode == MODE_ZMUSIC) ZmusicSessionClose();
 	kmp = NULL;
 	ClearOpenDecoderMode();
 	ReleaseKpiPlaybackAsync(mod, kmp1, hDLLk);
@@ -30400,9 +30507,9 @@ void COggDlg::OnRestart()
 					play();
 					return;
 				}
-				if (p.sub == MODE_VST_MIDI) {
+				if (IsVstMidiPlayMode(p.sub)) {
 					if (p.fol[0]) filen = p.fol;
-					mode = modesub = MODE_VST_MIDI;
+					mode = modesub = p.sub;
 					play();
 					return;
 				}
@@ -32077,7 +32184,7 @@ void COggDlg::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
 			poss = 0;
 
 			// adbuf2 全量読み込み形式(mode 10-21, -6, 30, -11〜 等)は seekadpcm
-			if (((mode >= 10 && mode <= 21) || IsBuffwavNegMode(mode) || mode == 999 || mode == -6 || mode == 34 || mode == 35 || mode == 30)) {
+			if (((mode >= 10 && mode <= 21) || IsBuffwavNegMode(mode) || mode == 999 || mode == -6 || mode == 34 || mode == 35 || mode == 30 || mode == 31)) {
 				if (mode == -10) {
 					hsc = 2;
 					// m_time は壁時計。ソースフレーム = srcCur×100
@@ -32110,7 +32217,7 @@ void COggDlg::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
 			else if (mode == -3) { // KPI
 				KpiSeekToPlayb(playb);
 			}
-			else if (mode == MODE_VST_MIDI) {
+			else if (IsVstMidiPlayMode(mode)) {
 				VstSeekToPlayb(playb);
 			}
 			else if (mode == -7) { // DSD
@@ -32330,7 +32437,7 @@ void COggDlg::rl(int a)
 	if (pMainFrame1) {
 		pMainFrame1->seek((LONGLONG)(((float)((float)playb) * 10000000.0f) / (float)wavbit_sample_Hz));
 	}
-	if (((mode >= 10 && mode <= 21) || IsBuffwavNegMode(mode) || mode == 999 || mode == -6 || mode == 34 || mode == 35 || mode == 30)) {
+	if (((mode >= 10 && mode <= 21) || IsBuffwavNegMode(mode) || mode == 999 || mode == -6 || mode == 34 || mode == 35 || mode == 30 || mode == 31)) {
 		if (mode != -10)
 			seekadpcm((int)playb);
 		sek = TRUE;

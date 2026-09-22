@@ -1,4 +1,4 @@
-// \tgEFAMIDIVZTCUB
+﻿// \tgEFAMIDIVZTCUB
 // Copyright(c)2003-2004 yuno
 #ifndef midisynth_hpp
 #define midisynth_hpp

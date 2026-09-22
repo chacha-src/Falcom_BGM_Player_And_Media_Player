@@ -1,0 +1,111 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<title>Support datasheet</title>
+<link rel="stylesheet" type="text/css" href="../css/help.css">
+</head>
+<body>
+
+<div class="topnav"><a href="index.htm">Contents</a> &nbsp;|&nbsp; <a href="../ja/datasheet.htm">日本語</a></div>
+
+<h1>Support datasheet</h1>
+
+<p class="lead">One page for which game soundtracks loop the way they do in game, and which engine reads everyday audio. CEmu (CPU emulation) is not in this table — see <a href="cemu-pc98.htm">PC-98</a>, <a href="cemu-pc88.htm">PC-88</a>, <a href="cemu-x68k.htm">X68000</a>, <a href="cemu-x1.htm">X1</a>, <a href="cemu-msx.htm">MSX</a>, <a href="cemu-fm7.htm">FM-7</a>, <a href="cemu-pcat.htm">PC/AT</a>, and <a href="cemu-arcade.htm">Arcade</a>.</p>
+<h2>The player, and the process beside it</h2>
+<p>The player itself is <b>x64</b>. It used to be x86 (32-bit). The helper that loads the other bitness is now the <b>x86</b> program <code>ogghost32.exe</code>. That job used to belong to the x64 <code>KpiHost64.exe</code>.</p>
+<ul>
+<li>64-bit VST and KPI plug-ins load directly in the player.</li>
+<li>32-bit VST and KPI plug-ins, and Winamp / XMPlay / AIMP input plug-ins, start <code>ogghost32.exe</code> and talk to it over a named pipe. Keep that exe next to the player.</li>
+<li>Live VST notes and audio do not travel through the pipe. They use shared memory. The pipe is only for load, unload, and the editor.</li>
+</ul>
+<p><b>&amp;lt;x86&amp;gt;</b> and <b>&amp;lt;x64&amp;gt;</b> after a plug-in name are its bitness. See <a href="kpi.htm">Adding formats with KPI plug-ins</a> and <a href="vst.htm">Playing instruments with the VST host</a>.</p>
+<h2>Built-in engines (not CEmu)</h2>
+<p>Ordinary files are read by the engines below, not by the CEmu CPU. Unusual types can still go through <a href="kpi.htm">Adding formats with KPI plug-ins</a>.</p>
+<table class="grid">
+<tr><th>Engine</th><th>Extensions</th><th>What you get</th></tr>
+<tr><td>Vorbis (libvorbisfile)</td><td>ogg</td><td>Most game BGM, and your own Ogg Vorbis files.</td></tr>
+<tr><td>WAV</td><td>wav</td><td>Game WAV read by the built-in player can loop. Ordinary WAV goes through DirectShow, so loop and fade-out are not available.</td></tr>
+<tr><td>mp3</td><td>mp3 / mp2 / mp1</td><td>Built-in decoder. Also an export target.</td></tr>
+<tr><td>AAC / ALAC</td><td>m4a / aac / alac</td><td>Built in.</td></tr>
+<tr><td>FLAC (libFLAC)</td><td>flac</td><td>Built in. Also an export target.</td></tr>
+<tr><td>TTA</td><td>tta</td><td>Built in.</td></tr>
+<tr><td>Monkey's Audio</td><td>ape</td><td>Built in.</td></tr>
+<tr><td>DSD</td><td>dsf / dff</td><td>High resolution. Built in.</td></tr>
+<tr><td>Opus (libopusfile)</td><td>opus</td><td>Built in. Decode output is 48 kHz.</td></tr>
+<tr><td>SMF</td><td>mid / midi / kar / rmi</td><td>GS/XG VST, or Windows MIDI. See <a href="vst-midi.htm">Playing .mid through a VST</a>.</td></tr>
+<tr><td>SASAMI / PMD / FMP</td><td>fpy and similar</td><td>FM song data. The monitor is the FM side of <a href="midi-monitor.htm">FM/MIDI monitor</a>.</td></tr>
+<tr><td>DirectShow / EVR</td><td>avi / mp4 / mkv / wmv / mov / webm</td><td>Video. See <a href="video.htm">Playing video</a>.</td></tr>
+</table>
+<div class="note"><span class="label">Please note</span>
+<p>CEmu CPUs and sound chips are not in this table. Zip packs start at <a href="cemu.htm">Bonus: old-machine sound</a>.</p>
+</div>
+<h2>Ys</h2>
+<p>Buttons on the Falcom BGM screen, and the slot used when a Steam folder is opened. Point folders in <a href="folder-setup.htm">Pointing Raira at your game folders</a>.</p>
+<table class="grid">
+<tr><th>Title</th><th>Name on screen</th><th>Notes</th></tr>
+<tr><td>Ys I Complete</td><td>Ys Complete Ys1</td><td>Windows complete edition. Eternal-line ports use this slot too.</td></tr>
+<tr><td>Ys II Complete</td><td>Ys Complete Ys2</td><td>Separate folder from Ys I.</td></tr>
+<tr><td>Ys I Chronicles</td><td>Ys I&amp;II Chronicles 1</td><td>Different music data from Complete.</td></tr>
+<tr><td>Ys II Chronicles</td><td>Ys I&amp;II Chronicles 2</td><td>Same.</td></tr>
+<tr><td>Ys VI: The Ark of Napishtim</td><td>Ys6 Napishtim</td><td>Loops.</td></tr>
+<tr><td>Ys: The Oath in Felghana</td><td>Ys Felghana</td><td>Loops.</td></tr>
+<tr><td>Ys Origin</td><td>Ys Origin</td><td>Loops.</td></tr>
+<tr><td>Ys: Memories of Celceta</td><td>Celceta</td><td>Steam.</td></tr>
+<tr><td>Ys VIII</td><td>Shared with Cold Steel I / II</td><td>Steam. Opening an Ys VIII folder uses this player.</td></tr>
+<tr><td>Ys IX</td><td>Shared with Cold Steel III / IV, Reverie, Zero Kai, Ys X</td><td>Steam.</td></tr>
+<tr><td>Ys X</td><td>Same slot</td><td>Steam. Nordics.</td></tr>
+</table>
+<h2>The Legend of Heroes: Trails</h2>
+<table class="grid">
+<tr><th>Title</th><th>Name on screen</th><th>Notes</th></tr>
+<tr><td>Trails in the Sky FC</td><td>Sky FC</td><td>Legend of Heroes VI.</td></tr>
+<tr><td>Trails in the Sky SC</td><td>Sky SC</td><td></td></tr>
+<tr><td>Trails in the Sky the 3rd</td><td>Sky the 3rd</td><td></td></tr>
+<tr><td>Trails in the Sky the 1st</td><td>Sky the 1st</td><td>Steam remake.</td></tr>
+<tr><td>Trails in the Sky the 2nd</td><td>Sky the 2nd</td><td>Remake slot.</td></tr>
+<tr><td>Trails from Zero</td><td>Zero</td><td></td></tr>
+<tr><td>Trails from Zero Kai</td><td>Shared with Cold Steel III</td><td>Detected from the folder name.</td></tr>
+<tr><td>Trails to Azure</td><td>Azure</td><td>No loop table of its own; it borrows Zero's t_bgm.</td></tr>
+<tr><td>Trails of Cold Steel I / II</td><td>Cold Steel I / II, Ys8</td><td>Steam.</td></tr>
+<tr><td>Trails of Cold Steel III / IV</td><td>CS III / IV, Reverie, Zero Kai, Ys9, Ys X</td><td>Steam.</td></tr>
+<tr><td>Trails into Reverie</td><td>Same slot</td><td></td></tr>
+<tr><td>Trails through Daybreak</td><td>Daybreak</td><td></td></tr>
+<tr><td>Trails through Daybreak II</td><td>Daybreak II</td><td></td></tr>
+<tr><td>Trails beyond the Horizon</td><td>beyond the Horizon</td><td></td></tr>
+</table>
+<h2>Other Falcom and nearby titles</h2>
+<table class="grid">
+<tr><th>Title</th><th>Name on screen</th><th>Notes</th></tr>
+<tr><td>Zwei!!</td><td>Zwei!!</td><td>CD and DVD editions handle audio differently.</td></tr>
+<tr><td>Zwei II</td><td>ZWEI II</td><td></td></tr>
+<tr><td>Xanadu Next</td><td>XANADU NEXT</td><td></td></tr>
+<tr><td>Sorcerian Original</td><td>Sorcerian Original</td><td></td></tr>
+<tr><td>Gurumin</td><td>Gurumin</td><td></td></tr>
+<tr><td>Dinosaur Resurrection</td><td>Dinosaur</td><td></td></tr>
+<tr><td>Brandish 4</td><td>Brandish4</td><td>Copy the WAV files to a hard disk.</td></tr>
+<tr><td>The Legend of Heroes III: White Witch</td><td>White Witch</td><td>Gagharv. Copy WAV files.</td></tr>
+<tr><td>The Legend of Heroes IV: A Tear of Vermillion</td><td>Tear of Vermillion</td><td>Same.</td></tr>
+<tr><td>The Legend of Heroes V: Cagesong of the Ocean</td><td>Cagesong of the Ocean</td><td>Same.</td></tr>
+<tr><td>Rhapsody of the West Wind</td><td>West Wind</td><td></td></tr>
+<tr><td>Lunacy of the Moon</td><td>Moon</td><td></td></tr>
+<tr><td>Arcturus</td><td>Arc</td><td></td></tr>
+<tr><td>Genso Sangokushi 1</td><td>Sangokushi 1</td><td></td></tr>
+<tr><td>Genso Sangokushi 2</td><td>Sangokushi 2</td><td></td></tr>
+</table>
+<div class="tip"><span class="label">Tip</span>
+<p>Steam titles without a button still play once the install folder is set. A shorter list is on <a href="formats.htm">Supported formats and titles</a>.</p>
+</div>
+<div class="related"><span class="label">See also</span><ul><li><a href="formats.htm">Supported formats and titles</a></li><li><a href="folder-setup.htm">Pointing Raira at your game folders</a></li><li><a href="falcom-main.htm">The Falcom BGM screen</a></li><li><a href="kpi.htm">Adding formats with KPI plug-ins</a></li><li><a href="cemu.htm">Bonus: old-machine sound</a></li><li><a href="vst.htm">Playing instruments with the VST host</a></li></ul></div>
+
+<div class="botnav">
+<span class="prev">&#171; Back: <a href="formats.htm">Supported formats and titles</a></span>
+<span class="next">Next: <a href="mp-overview.htm">A tour of the media player screen</a> &#187;</span>
+<span class="up"><a href="index.htm">Contents</a></span>
+<div class="clear"></div>
+</div>
+
+<div class="foot">Media player "Raira" (oggYSEDbgm) — PrePrayerPower Soft</div>
+
+</body>
+</html>

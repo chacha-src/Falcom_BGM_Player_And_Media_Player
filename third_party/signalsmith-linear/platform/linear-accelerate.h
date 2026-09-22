@@ -1,4 +1,4 @@
-//#define ACCELERATE_NEW_LAPACK
+﻿//#define ACCELERATE_NEW_LAPACK
 
 // If possible, only include vecLib, since JUCE has conflicts with vImage
 #if defined(__has_include) && __has_include(<vecLib/vecLib.h>)

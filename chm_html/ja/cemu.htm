@@ -1,0 +1,115 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<title>おまけ：昔マシンのサウンド</title>
+<link rel="stylesheet" type="text/css" href="../css/help.css">
+</head>
+<body>
+
+<div class="topnav"><a href="index.htm">目次</a> &nbsp;|&nbsp; <a href="../en/cemu.htm">English</a></div>
+
+<h1>おまけ：昔マシンのサウンド</h1>
+
+<p class="lead">メディアプレイヤー画面から、昔のパソコンやアーケード基板向けの音楽データ（多くは zip のまとめ）を再生できるおまけです。ゲーム画面を動かすためのものではなく、<b>音だけ</b>をこのプレイヤーの中で鳴らします。普通の曲と同じように、プレイリストやシークバー、イコライザーが使えます。</p>
+<h2>どんなものか</h2>
+<p>昔のマシンは、パソコン本体やゲーム基板の中に「音を出す部品」を持っていました。このおまけは、その部品の動きをまねして、当時の曲をスピーカーから出せるようにしたものです。画面の迷路やレースとは別枠で、どちらかといえば「もうひとつの再生の仕方」に近いおまけです。</p>
+<ul>
+<li>ゲームそのものは動きません。音だけです。</li>
+<li>ファルコム作品のインストールフォルダから読むBGM（<a href="folder-setup.htm">ゲームフォルダの設定</a>）とは別ルートです。</li>
+<li>対応しているまとめをプレイリストに入れると、印や曲名が付いて再生できます。</li>
+<li>CPU と音源の表は、いま鳴ることが確認できた zip だけです。<a href="cemu-pc98.htm">PC-98</a>、<a href="cemu-pc88.htm">PC-88</a>、<a href="cemu-x68k.htm">X68000</a>、<a href="cemu-x1.htm">X1</a>、<a href="cemu-msx.htm">MSX</a>、<a href="cemu-fm7.htm">FM-7</a>、<a href="cemu-pcat.htm">PC/AT</a>、<a href="cemu-arcade.htm">アーケード</a>。</li>
+</ul>
+<h2>用意するもの</h2>
+<ol>
+<li>実行ファイル（oggYSEDbgm など）と同じ場所に <code>arcdata.zip</code> があること。これは「どのまとめが、どのマシン向けか」を調べるための一覧です。無いと、zip を落としても曲が特定できません。</li>
+<li>同じく実行ファイルの近くに <code>data</code> フォルダがあり、その中にマシンごとの置き場があること（例：<code>data\pc98</code>、<code>data\x68k</code>、<code>data\roms</code>）。</li>
+<li>聴きたい曲が入った zip を、その置き場へ入れること。すでに入っているものをそのままドラッグしてもかまいません。</li>
+</ol>
+<p>フォルダ名はだいたい次のような意味です。全部そろっていなくても、手元にある分だけで聴けます。</p>
+<table class="grid">
+<tr><th>フォルダの例</th><th>どんなマシンの音か</th></tr>
+<tr><td><a href="cemu-pc98.htm">pc98 / pc9821</a></td><td>PC-9800。FM TOWNS でカタログが pc98vx の曲もここ</td></tr>
+<tr><td><a href="cemu-pc88.htm">pc88 / pc88va</a></td><td>PC-8800。VA は V30</td></tr>
+<tr><td><a href="cemu-x68k.htm">x68k</a></td><td>X68000。68000 と OPM</td></tr>
+<tr><td><a href="cemu-fm7.htm">fm7</a></td><td>FM-7（PSG）と FM77AV（OPN）</td></tr>
+<tr><td><a href="cemu-msx.htm">msx</a> / <a href="cemu-x1.htm">x1</a> / <a href="cemu-pcat.htm">pc</a></td><td>MSX、X1、DOS パソコン（PC/AT）</td></tr>
+<tr><td><a href="cemu-arcade.htm">roms</a></td><td>アーケード基板の音</td></tr>
+</table>
+<div class="note"><span class="label">注意</span>
+<p>アーケードの <code>roms</code> は形式が混ざっています。一覧に載っていても、まだ音が出せないものもあります。鳴らないときは、そのタイトルがまだこのおまけの対象外だと捉えてください。</p>
+</div>
+<h2>聴き方</h2>
+<ol>
+<li>メディアプレイヤー画面を開きます。</li>
+<li>エクスプローラから zip をプレイリストへドラッグ＆ドロップするか、すでに一覧にある行をダブルクリックします。</li>
+<li>曲が始まれば成功です。ひとつの zip に複数曲があるときは、曲の番号や名前が付いて並びます。</li>
+</ol>
+<p>再生中は、ほかの音楽と同じ道具が使えます。</p>
+<ul>
+<li><a href="mp-seek.htm">シークバーの読み方</a> で位置を動かす</li>
+<li><a href="eq.htm">イコライザーと環境モデル</a> で音色の好みを変える</li>
+<li><a href="tempo-pitch.htm">テンポとピッチを変える</a></li>
+<li><a href="export.htm">音声書き出し（WAV / mp3 / FLAC）</a> でファイルに残す</li>
+<li><a href="analyzer.htm">波形・周波数アナライザー</a> や <a href="midi-monitor.htm">MIDIモニタ</a> で様子を見る（鳴らし方によってはMIDIモニタが動きます）</li>
+</ul>
+<h2>鳴らし方を選ぶ（内蔵の音／MIDI）</h2>
+<p>タイトルによっては、次のような鳴らし方が選べます。プレイリストの行を右クリックすると、音の種類の項目が出ます。</p>
+<dl>
+<dt>内蔵の音チップで鳴らす</dt>
+<dd>当時のパソコンや基板に近い、電子音そのものの鳴り方です。印に <code>[OPNA]</code> や <code>[OPN]</code>、<code>[OPM]</code> などが付くことがあります。名前は部品の愛称のようなもので、覚えなくても大丈夫です。「ゲームっぽい電子音」が欲しいときはこちらです。</dd>
+<dt>MIDI で鳴らす</dt>
+<dd>曲の指示を MIDI として出し、<a href="vst-midi.htm">.mid を VST 音源で鳴らす</a> や KPI の音源で聴くルートです。印は <code>[MIDI]</code> になります。ソフト音源の音色で聴きたいときや、譜面・モニタと組み合わせたいときに向きます。</dd>
+</dl>
+<p>どちらが使えるかはタイトルごとに違います。選べないときは、そのタイトルが持っている鳴らし方がひとつだけ、という意味です。切り替えると、いま聴いている曲が同じまとめなら、自動で聞き直します。</p>
+<div class="tip"><span class="label">ヒント</span>
+<p>迷ったら、まず既定のまま聴いてみてください。電子音が好みなら内蔵、柔らかくしたい・音源を差し替えたいなら MIDI、という選び方で十分なことが多いです。</p>
+</div>
+<h2>ファルコムBGMとのちがい</h2>
+<table class="grid">
+<tr><th>項目</th><th>ファルコムBGM画面まわり</th><th>このおまけ</th></tr>
+<tr><td>主な材料</td><td>ゲームのインストール先のファイル</td><td><code>data</code> 以下の zip まとめ</td></tr>
+<tr><td>目的</td><td>作品の曲をループ付きで聴く</td><td>昔マシンの音をそのまま味わう</td></tr>
+<tr><td>画面</td><td>タイトル一覧の専用画面も使える</td><td>メディアプレイヤーのプレイリストが中心</td></tr>
+<tr><td>設定</td><td><a href="folder-setup.htm">ゲームフォルダの設定</a></td><td><code>arcdata.zip</code> と <code>data</code> フォルダ</td></tr>
+</table>
+<h2>うまくいかないとき</h2>
+<dl>
+<dt>zip を落としても鳴らない・エラーになる</dt>
+<dd>実行ファイルの隣に <code>arcdata.zip</code> があるか、まとめの名前が一覧と合っているかを確認してください。別名の zip や、中身だけ差し替えたものは特定できないことがあります。</dd>
+<dt>一瞬だけ鳴って止まる／無音</dt>
+<dd>鳴らし方（内蔵／MIDI）を切り替えてみます。MIDI のときは <a href="render.htm">レンダリング設定</a> の音源の好みや、VST／KPI の準備も見てください。</dd>
+<dt>アーケードの曲がまったく出ない</dt>
+<dd>まだこのおまけが対応していない基板の可能性があります。パソコン系（PC-98 や X68000 など）から試すと分かりやすいです。</dd>
+<dt>終了や曲切り替えで不安定になる</dt>
+<dd>再生を止めてから窓を閉じると安全です。最新版へ更新すると、解放まわりの不具合が直っていることがあります。<a href="update.htm">更新のチェック</a> もご覧ください。</dd>
+</dl>
+<div class="note"><span class="label">注意</span>
+<p>このおまけは「全部の昔ソフトが鳴る」ことを約束するものではありません。一覧にあっても音が出ないもの、途中までしか進まないものはあります。遊べる範囲は版によって広がっていきます。</p>
+</div>
+<div class="tip"><span class="label">ヒント</span>
+<p>普通の音楽ファイルと同じく、プレイリストに並べてギャップレスやクロスフェードの雰囲気を試せます。ただし曲の終わり方はタイトルごとに違うので、ループ感は <a href="details.htm">再生詳細</a> や曲そのものの作りに左右されます。</p>
+</div>
+<h2>クレジット</h2>
+<p>このおまけの音まわりでは、次の成果を使わせていただいています。ここに挙げきれないものもあります。作者の皆さまに感謝します。</p>
+<ul>
+<li>Neko Project II / np2kai（NP2 developer team）— PC-98 系のCPUまわり</li>
+<li>Musashi（Karl Stenerud）— 68000 系のCPUまわり</li>
+<li>fmgen（cisc）— FM音源まわり</li>
+<li>ymfm（Aaron Giles）— YM 系の音チップまわり</li>
+<li>MAME および各作者の成果物（音チップ・CPUなど。多くは BSD 系）</li>
+<li>曲の一覧データは hoot 系のカタログ形式を参照しています</li>
+</ul>
+<div class="related"><span class="label">あわせて読みたい</span><ul><li><a href="games.htm">おまけのお遊び</a></li><li><a href="formats.htm">対応形式と対応タイトル</a></li><li><a href="cemu-pc98.htm">CEmu：PC-98</a></li><li><a href="cemu-pc88.htm">CEmu：PC-88</a></li><li><a href="cemu-arcade.htm">CEmu：アーケード</a></li><li><a href="playlist.htm">プレイリストを使う</a></li></ul></div>
+
+<div class="botnav">
+<span class="prev">&#171; 前へ: <a href="race.htm">おまけ：空中レース</a></span>
+<span class="next">次へ: <a href="cemu-pc98.htm">CEmu：PC-98</a> &#187;</span>
+<span class="up"><a href="index.htm">目次</a></span>
+<div class="clear"></div>
+</div>
+
+<div class="foot">メディアプレイヤー「らいら」 (oggYSEDbgm) — PrePrayerPower Soft</div>
+
+</body>
+</html>

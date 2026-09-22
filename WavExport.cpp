@@ -1,4 +1,4 @@
-// WavExport.cpp
+﻿// WavExport.cpp
 //
 
 #include "stdafx.h"

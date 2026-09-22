@@ -1,4 +1,4 @@
-#ifndef _SAT_HW_H_
+﻿#ifndef _SAT_HW_H_
 #define _SAT_HW_H_
 
 extern uint8 sat_ram[512*1024];

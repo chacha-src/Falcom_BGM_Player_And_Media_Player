@@ -1,4 +1,4 @@
-/* Minimal Audio Overload shim for the vendored SCSP (YMF292-F) core.
+﻿/* Minimal Audio Overload shim for the vendored SCSP (YMF292-F) core.
    Only the types, INLINE and logerror that eng_ssf/scsp.c actually touches —
    the rest of the AO player framework is not needed by the chip core. */
 #ifndef _CEMU_SCSP_AO_H_

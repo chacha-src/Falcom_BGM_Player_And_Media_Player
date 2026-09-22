@@ -1,0 +1,47 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<title>SASAMI Composer (create songs)</title>
+<link rel="stylesheet" type="text/css" href="../css/help.css">
+</head>
+<body>
+
+<div class="topnav"><a href="index.htm">Contents</a> &nbsp;|&nbsp; <a href="../ja/sasami-composer.htm">日本語</a></div>
+
+<h1>SASAMI Composer (create songs)</h1>
+
+<p class="lead">Open SASAMI Composer from the Media Player Tools menu to create Sasami-format songs. This replaces the old Win sasamim workflow.</p>
+<h2>How to open</h2>
+<p>In Media Player, open <b>Tools</b> and the <b>SASAMI</b> submenu:</p>
+<ul>
+<li><b>Text</b> — MICP / MML3 syntax coloring and compile</li>
+<li><b>MIDI score</b> — staff score (tracks / strip / note palette) with VST2/3</li>
+<li><b>FM score</b> — same staff shell (FM10 + Misao16); double-click opens the voice editor</li>
+</ul>
+<h2>Text</h2>
+<p>Besides the simple dialect (<code>#1</code>, lowercase <code>t120</code>, <code>cdefgab</code>), the same compiler reads legacy MICP / SASAMIM songs: <code>[port:ch]</code>, uppercase <code>T</code> tempo, <code>@prog:bank</code>, <code>P</code>/<code>Q</code>/<code>O</code>/<code>L</code>/<code>V</code>, dots, and <code>^</code> ties. Comments: <code>;</code> or <code>//</code>.</p>
+<p><code>@SVIB</code> / <code>@STREM</code> / <code>@SPAN</code> / <code>@SPORTA</code> are compiled into classic pitch / volume / pan waits (an internal <code>｛: :｝</code> unroll) so <b>MPY / MPW2 / FPY</b> stay playable on older players. They do not force MPW3/FPY2.</p>
+<p>For VST3 songs write <code>@VST"path"</code>, <code>@PROG</code>, <code>@BANK</code> and save as <b>MPW3</b>. For FM, start with <code>OPNA</code> or <code>OPN</code> to build an <b>FPY</b>.</p>
+<h2>MIDI staff score</h2>
+<p>Place noteheads on multi-track staves. Use pencil / eraser / select, the floating note-duration palette, and the Expression strip. Double-click a track or staff to open that part's VST2/VST3 editor. Without VST binds save MPW2/MPY; with VST binds save MPW3.</p>
+<h2>FM staff score and voices</h2>
+<p>Edit FM1–10 and Misao1–16 in the same staff shell. Double-click opens the voice editor; preview, then confirm. The strip defaults to Volume. Voice numbers are assigned automatically.</p>
+<h2>Preview and audio export</h2>
+<p>Preview writes a temp file and adds it to the playlist. Use <b>Export</b> to open the WAV / MP3 / FLAC dialog.</p>
+<div class="tip"><span class="label">Tip</span>
+<p>The three windows open separately. Be careful with overwrite if you edit the same song in more than one.</p>
+</div>
+<div class="related"><span class="label">See also</span><ul><li><a href="tools.htm">The companion tools</a></li><li><a href="vst-midi.htm">Playing .mid through a VST</a></li><li><a href="export.htm">Audio export (WAV / mp3 / FLAC)</a></li><li><a href="playlist.htm">Working with playlists</a></li><li><a href="formats.htm">Supported formats and titles</a></li></ul></div>
+
+<div class="botnav">
+<span class="prev">&#171; Back: <a href="tools.htm">The companion tools</a></span>
+<span class="next">Next: <a href="voice.htm">The voice changer</a> &#187;</span>
+<span class="up"><a href="index.htm">Contents</a></span>
+<div class="clear"></div>
+</div>
+
+<div class="foot">Media player "Raira" (oggYSEDbgm) — PrePrayerPower Soft</div>
+
+</body>
+</html>

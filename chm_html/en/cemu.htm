@@ -1,0 +1,115 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<title>Bonus: old-machine sound</title>
+<link rel="stylesheet" type="text/css" href="../css/help.css">
+</head>
+<body>
+
+<div class="topnav"><a href="index.htm">Contents</a> &nbsp;|&nbsp; <a href="../ja/cemu.htm">日本語</a></div>
+
+<h1>Bonus: old-machine sound</h1>
+
+<p class="lead">From the media player, you can play music packs made for old computers and arcade boards (often zip archives). This is not a full game window — <b>sound only</b>, inside Raira. Seek, EQ and the playlist work much like they do for ordinary tracks.</p>
+<h2>What this is</h2>
+<p>Old machines had sound chips built into the computer or board. This bonus imitates those chips so the old songs can come out of your speakers. It sits apart from the maze and race; think of it as another way to play music.</p>
+<ul>
+<li>The game itself does not run — only the sound.</li>
+<li>It is a different path from Falcom BGM read from install folders (<a href="folder-setup.htm">Setting game folders</a>).</li>
+<li>Supported packs on the playlist get marks and titles, then play.</li>
+<li>CPU and sound-chip tables list only zips confirmed to play: <a href="cemu-pc98.htm">PC-98</a>, <a href="cemu-pc88.htm">PC-88</a>, <a href="cemu-x68k.htm">X68000</a>, <a href="cemu-x1.htm">X1</a>, <a href="cemu-msx.htm">MSX</a>, <a href="cemu-fm7.htm">FM-7</a>, <a href="cemu-pcat.htm">PC/AT</a>, <a href="cemu-arcade.htm">Arcade</a>.</li>
+</ul>
+<h2>What you need</h2>
+<ol>
+<li><code>arcdata.zip</code> next to the executable (oggYSEDbgm and so on). It is the catalog that matches each pack to a machine. Without it, dropped zips cannot be identified.</li>
+<li>A <code>data</code> folder near the executable, with per-machine places (for example <code>data\pc98</code>, <code>data\x68k</code>, <code>data\roms</code>).</li>
+<li>Put the zip packs you want to hear into those places. You can also drag packs that are already there onto the playlist.</li>
+</ol>
+<p>Folder names roughly mean the following. You do not need every folder — only what you have.</p>
+<table class="grid">
+<tr><th>Example folder</th><th>What kind of sound</th></tr>
+<tr><td><a href="cemu-pc98.htm">pc98 / pc9821</a></td><td>PC-9800. FM TOWNS packs catalogued as pc98vx land here</td></tr>
+<tr><td><a href="cemu-pc88.htm">pc88 / pc88va</a></td><td>PC-8800. VA uses the V30</td></tr>
+<tr><td><a href="cemu-x68k.htm">x68k</a></td><td>X68000. 68000 and OPM</td></tr>
+<tr><td><a href="cemu-fm7.htm">fm7</a></td><td>FM-7 (PSG) and FM77AV (OPN)</td></tr>
+<tr><td><a href="cemu-msx.htm">msx</a> / <a href="cemu-x1.htm">x1</a> / <a href="cemu-pcat.htm">pc</a></td><td>MSX, X1, and DOS PC/AT</td></tr>
+<tr><td><a href="cemu-arcade.htm">roms</a></td><td>Arcade-board sound</td></tr>
+</table>
+<div class="note"><span class="label">Please note</span>
+<p>Arcade <code>roms</code> mixes many formats. A pack may be listed yet still have no sound path here. If nothing plays, treat that title as out of scope for now.</p>
+</div>
+<h2>How to listen</h2>
+<ol>
+<li>Open the media player screen.</li>
+<li>Drag a zip onto the playlist from Explorer, or double-click a row already listed.</li>
+<li>When the track starts, you are set. Packs with several songs show up with song numbers or names.</li>
+</ol>
+<p>While it plays, the usual tools still apply.</p>
+<ul>
+<li>Move position with <a href="mp-seek.htm">How to read the seek bar</a></li>
+<li>Shape tone with <a href="eq.htm">Equalizer and environmental models</a></li>
+<li><a href="tempo-pitch.htm">Changing tempo and pitch</a></li>
+<li>Save a file with <a href="export.htm">Exporting audio (WAV / mp3 / FLAC)</a></li>
+<li>Watch with the <a href="analyzer.htm">Waveform and spectrum analyzer</a> or <a href="midi-monitor.htm">MIDI monitor</a> (the monitor helps when the song is played as MIDI)</li>
+</ul>
+<h2>Choosing how it sounds (built-in chip / MIDI)</h2>
+<p>Some titles let you pick how they sound. Right-click a playlist row for the sound-type items.</p>
+<dl>
+<dt>Built-in sound chip</dt>
+<dd>Closer to the electronic tone of the original machine. Marks such as <code>[OPNA]</code>, <code>[OPN]</code> or <code>[OPM]</code> may appear — nicknames for the chips; you do not need to memorize them. Choose this when you want that classic game-chip feel.</dd>
+<dt>MIDI</dt>
+<dd>The song is sent as MIDI and played through <a href="vst-midi.htm">Playing .mid through a VST</a> or a KPI instrument. The mark is <code>[MIDI]</code>. Use this when you want soft-synth timbres, or to work with score and monitor tools.</dd>
+</dl>
+<p>What you can choose depends on the title. If there is no choice, that pack only has one way to play. Changing the mode restarts the track when it is the pack you are hearing.</p>
+<div class="tip"><span class="label">Tip</span>
+<p>When unsure, leave the default. Prefer the chip tone → built-in; prefer a softer or swappable instrument → MIDI.</p>
+</div>
+<h2>How this differs from Falcom BGM</h2>
+<table class="grid">
+<tr><th></th><th>Falcom BGM side</th><th>This bonus</th></tr>
+<tr><td>Main material</td><td>Files from the game install folder</td><td>Zip packs under <code>data</code></td></tr>
+<tr><td>Goal</td><td>Loop the game's tracks</td><td>Hear old-machine sound as it was</td></tr>
+<tr><td>Screen</td><td>Dedicated title lists are available</td><td>Centered on the media-player playlist</td></tr>
+<tr><td>Setup</td><td><a href="folder-setup.htm">Setting game folders</a></td><td><code>arcdata.zip</code> and the <code>data</code> folder</td></tr>
+</table>
+<h2>If something goes wrong</h2>
+<dl>
+<dt>Dropping a zip fails or shows an error</dt>
+<dd>Check that <code>arcdata.zip</code> sits next to the executable, and that the pack name matches the catalog. Renamed zips or packs with only the insides swapped may not resolve.</dd>
+<dt>A short beep then silence, or no sound</dt>
+<dd>Try switching built-in / MIDI. For MIDI, also check instrument preference in <a href="render.htm">Rendering settings</a> and whether VST / KPI are ready.</dd>
+<dt>Arcade titles never sound</dt>
+<dd>That board may not be wired yet. PC-class packs (PC-98, X68000 and so on) are easier to try first.</dd>
+<dt>Exit or track change feels unstable</dt>
+<dd>Stop playback before closing windows. Newer builds may fix teardown issues — see <a href="update.htm">Checking for updates</a>.</dd>
+</dl>
+<div class="note"><span class="label">Please note</span>
+<p>This bonus does not promise every old title will play. Some catalog entries stay silent or only partly work. Coverage grows over releases.</p>
+</div>
+<div class="tip"><span class="label">Tip</span>
+<p>Like ordinary music, you can line packs up on a playlist and try gapless or crossfade. How a song ends still depends on the title, so loop feel follows <a href="details.htm">Playback details</a> and the music data itself.</p>
+</div>
+<h2>Credits</h2>
+<p>This bonus sound path draws on the work below. The list is not complete. Thank you to everyone involved.</p>
+<ul>
+<li>Neko Project II / np2kai (NP2 developer team) — PC-98 CPU side</li>
+<li>Musashi (Karl Stenerud) — 68000 CPU side</li>
+<li>fmgen (cisc) — FM sound</li>
+<li>ymfm (Aaron Giles) — YM-family sound chips</li>
+<li>MAME and other authors' work (sound chips, CPUs; mostly BSD-style)</li>
+<li>Title listings follow a hoot-style catalog format</li>
+</ul>
+<div class="related"><span class="label">See also</span><ul><li><a href="games.htm">The bonus games</a></li><li><a href="formats.htm">Supported formats and titles</a></li><li><a href="cemu-pc98.htm">CEmu: PC-98</a></li><li><a href="cemu-pc88.htm">CEmu: PC-88</a></li><li><a href="cemu-arcade.htm">CEmu: Arcade</a></li><li><a href="playlist.htm">Working with playlists</a></li></ul></div>
+
+<div class="botnav">
+<span class="prev">&#171; Back: <a href="race.htm">Bonus: the aerial race</a></span>
+<span class="next">Next: <a href="cemu-pc98.htm">CEmu: PC-98</a> &#187;</span>
+<span class="up"><a href="index.htm">Contents</a></span>
+<div class="clear"></div>
+</div>
+
+<div class="foot">Media player "Raira" (oggYSEDbgm) — PrePrayerPower Soft</div>
+
+</body>
+</html>

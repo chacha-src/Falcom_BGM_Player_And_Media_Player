@@ -1,4 +1,4 @@
-// Render.cpp : インプリメンテーション ファイル
+﻿// Render.cpp : インプリメンテーション ファイル
 //
 
 #include "stdafx.h"

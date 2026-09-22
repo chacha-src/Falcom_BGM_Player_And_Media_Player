@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #ifndef __AFXWIN_H__
 #include <afxwin.h>
 #endif

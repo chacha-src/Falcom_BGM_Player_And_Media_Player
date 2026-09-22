@@ -1,4 +1,4 @@
-#ifndef SCSPDSP_H
+﻿#ifndef SCSPDSP_H
 #define SCSPDSP_H
 
 //the DSP Context

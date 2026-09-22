@@ -1,4 +1,4 @@
-#include "stdafx.h"
+﻿#include "stdafx.h"
 #include "CEmuHelpDlg.h"
 #include "CEmu/cemu_mgr.h"
 

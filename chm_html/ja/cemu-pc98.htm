@@ -1,0 +1,1520 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<title>CEmu：PC-98</title>
+<link rel="stylesheet" type="text/css" href="../css/help.css">
+</head>
+<body>
+
+<div class="topnav"><a href="index.htm">目次</a> &nbsp;|&nbsp; <a href="../en/cemu-pc98.htm">English</a></div>
+
+<h1>CEmu：PC-98</h1>
+
+<p class="lead">PC-9800 シリーズ向けの zip を、本体の中で鳴らすときの早見です。ゲーム画面は出ません。聴き方の手順は <a href="cemu.htm">おまけ：昔マシンのサウンド</a> にまとめてあります。</p>
+<h2>CPU</h2>
+<p>古典 PC-98 の CPU は <b>80286</b>（i286）です。この表の行は、その 1 つの CPU で動きます。</p>
+<h2>音源チップ</h2>
+<p>対応している鳴らし方は、FM の OPN / OPNA と、MIDI モジュールの GS / SC-88 です。右クリックの音の種類で、その zip が持っているものだけ切り替えられます。</p>
+<table class="grid">
+<tr><th>欄</th><th>部品</th><th>どんな音か</th></tr>
+<tr><td>OPN</td><td>YM2203</td><td>PC-9801-26 相当の FM 3音＋SSG。</td></tr>
+<tr><td>OPNA</td><td>YM2608（86 音源）</td><td>FM 6音＋SSG＋ADPCM。カタログの 86 や OPNA がここです。</td></tr>
+<tr><td>GS</td><td>Roland GS（SC-55 系）</td><td>midiout のまとめを、GS の音源へ出すルートです。</td></tr>
+<tr><td>SC-88</td><td>Roland SC-88 系</td><td>同じ MIDI 出口の、SC-88 向けの鳴らし方です。</td></tr>
+</table>
+<p>表に載せているのは、いま実際に鳴ることが確認できた zip だけです。カタログにあっても、ここに無いまとめはまだ演奏できません。○ はその zip で確認できた鳴らし方、— は確認できていない、です。beep やサウンドオーケストラは「備考」です。GS と SC-88 は MIDI の出口として用意していますが、確認済みの PC-98 にはまだ midiout が無いので、その2列はいま全部 — です。FM TOWNS 向けでカタログが pc98vx になっているものは、同じ 80286 と OPNA でこの表に入ります。</p>
+<h2>いま鳴るもの</h2>
+<table class="grid">
+<tr><th>zip</th><th>作品</th><th>OPN</th><th>OPNA</th><th>GS</th><th>SC-88</th><th>備考</th></tr>
+<tr><td>101_shot_98.zip</td><td>[PC-9801] 101回目のアプローチショット</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>2069ad_98.zip</td><td>[PC-9801] 2069AD</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>2601_98.zip</td><td>[PC-9801] 2601 帝國機動部隊の滅亡</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>38mank98.zip</td><td>[PC-9801] 38万キロの虚空(MT-32 Emulation)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>3shimai_98.zip</td><td>[PC-9801] 三姉妹</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>3x3eyes_98.zip</td><td>[PC-9801] 3x3EYE'S ～三只眼變成～(OPN)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>46oku98.zip</td><td>[PC-9801] 46億年物語 -THE進化論-</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>48ya_98.zip</td><td>[PC-9801] 48夜物語</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>5venus_98.zip</td><td>[PC-9801] 5時間目のヴィーナス</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>7colors_98.zip</td><td>[PC-9801] THE 7colors(MT-32 Emulation)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>98stdium.zip</td><td>[PC-9801] 98スタジアム</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>a1_rep_98.zip</td><td>[PC-9801] A列車で行こう 復刻版(MT-32 Emulation)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>a3hd_98.zip</td><td>[PC-9801] A列車で行こうIII HD専用版</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>a3mv_98.zip</td><td>[PC-9801] A列車で行こうIII MV -Memorial Version-</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>a4_98.zip</td><td>[PC-9801] A列車で行こうIV(MT-32 Emulation)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>a88_etr_98.zip</td><td>[PC-9801] エリア88 ～エトランジェ1995～</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>a88_ikj_98.zip</td><td>[PC-9801] エリア88 ～一角獣の軌跡～(OPN)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>absmeg2_98.zip</td><td>[PC-9801] Absolute Mahjong 2 EG (絶対麻雀Ⅱ ＥＧ) (OPN) (Hell++)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>abtengu_98.zip</td><td>[PC-9801] あぶない天狗伝説 -よみがえった天狗が夜空を舞う-</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>abubunka_98.zip</td><td>[PC-9801] あぶない 文化祭前夜</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>ace_of_s_98.zip</td><td>[PC-9801] ACE OF SPADES</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>adndcoab_98.zip</td><td>[PC-9801] Advanced Dungeons &amp;amp; Dragons / CURSE OF THE AZURE BONDS</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>adndcok_98.zip</td><td>[PC-9801] Advanced Dungeons &amp;amp; Dragons / CHAMPIONS OF KRYNN(OPN)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>adnddkok_98.zip</td><td>[PC-9801] Advanced Dungeons &amp;amp; Dragons / DEATH KNIGHTS OF KRYNN(OPN)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>adnddof_98.zip</td><td>[PC-9801] Advanced Dungeons &amp;amp; Dragons / DRAGONS OF FLAME</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>adndhill_98.zip</td><td>[PC-9801] Advanced Dungeons &amp;amp; Dragons / HILLSFAR</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>adndpod_98.zip</td><td>[PC-9801] Advanced Dungeons &amp;amp; Dragons / POOLS OF DARKNESS</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>adndpor_98.zip</td><td>[PC-9801] Advanced Dungeons &amp;amp; Dragons / POOL OF RADIANCE</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>adndsosb_98.zip</td><td>[PC-9801] Advanced Dungeons &amp;amp; Dragons / SECRET OF THE SILVER BLADES</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>advtkr2_98.zip</td><td>[PC-9801] アドベンチャーツクール98 II</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>advtkr_98.zip</td><td>[PC-9801] アドベンチャーツクール98</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>agalta1_98.zip</td><td>[PC-9801] Agalta 1 (OPN) (Fenrir)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>agalta2_98.zip</td><td>[PC-9801] Agalta 2 (OPN) (Fenrir)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>agalta3_98.zip</td><td>[PC-9801] Agalta 3 (OPN) (Fenrir)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>airc1_98.zip</td><td>[PC-9801] AIR COMBAT 遊撃王 II</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>airc2_98.zip</td><td>[PC-9801] AIR COMBAT II</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>airc3_98.zip</td><td>[PC-9801] AIR COMBAT III</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>airmng2_98.zip</td><td>[PC-9801] エアーマネジメント II 航空王をめざせ</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>airmng_98.zip</td><td>[PC-9801] エアーマネジメント 大空に賭ける</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>aishimai_98.zip</td><td>[PC-9801] 愛姉妹 ～二人の果実～</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>akasui_98.zip</td><td>[PC-9801] 赤い水晶の瞳(OPN)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>akiko_g_98.zip</td><td>[PC-9801] 亜紀子 GOLD -THE QUEEN OF ADULT-</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>akiko_p_98.zip</td><td>[PC-9801] 亜紀子 プレミアム・バージョン</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>aktie98.zip</td><td>[PC-9801] 株式投資 アクティー</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>akumu_98.zip</td><td>[PC-9801] 悪夢 ～青い果実の散花～(OPN)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>alantia.zip</td><td>[PC-9801] ALANTIA - LEGEND OF BLUE STAR -</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>alavesk_98.zip</td><td>[PC-9801] ア・ラ・ベ・ス・ク ～少女たちの織なす愛の物語～</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>alba2_98.zip</td><td>[PC-9801] アルバトロス2/MASTERS' HISTORY(SOUND ORCHESTRA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>alm_98.zip</td><td>[PC-9801] ADVANCED LORD MONARCH(BEEP)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>alva98.zip</td><td>[PC-9801] アルヴァリーク冒険記(SC-55)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>ama2_98.zip</td><td>[PC-9801] AMARANTH II(MT-32 Emulation)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>ama2m_98.zip</td><td>[PC-9801] AMARANTH II ミュージックディスク(MT-32 Emulation)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>ama3_98.zip</td><td>[PC-9801] Amaranth III (GS) (Vermouth, Gravis Ultrasound simulation)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>ama4_98.zip</td><td>[PC-9801] Amaranth IV (GS) (Vermouth, Gravis Ultrasound simulation)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>ama98.zip</td><td>[PC-9801] AMARANTH</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>amakh_98.zip</td><td>[PC-9801] AMARANTH KH ～シュテラール王国建国譚～(OPN)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>ambi_98.zip</td><td>[PC-9801] AmbivalenZ -二律背反-(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>amgc_98.zip</td><td>[PC-9801] Alaskan Malamute G.C.</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>ami_kaze_98.zip</td><td>[PC-9801] 亜美・風立ちぬ</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>amrq_98.zip</td><td>[PC-9801] LOGIN DISK&amp;amp;BOOKシリーズ マンハッタンレクイエム(OPN)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>angel120_98.zip</td><td>[PC-9801] 濃縮ANGEL120%</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>angel_98.zip</td><td>[PC-9801] ANGEL</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>angel_h_98.zip</td><td>[PC-9801] Angel Hearts</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>angel_n_98.zip</td><td>[PC-9801] えんじぇる☆ないと ～闇夜を翔ける天使たちの物語～(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>angelarm_98.zip</td><td>[PC-9801] エンジェル☆アーミー</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>angelus_98.zip</td><td>[PC-9801] ANGELUS ～悪魔の福音～</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>anglhalo_21.zip</td><td>[PC-9821] Angel Halo(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>anglhalo_98.zip</td><td>[PC-9801] Angel Halo(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>anime_98.zip</td><td>[PC-9801] Animation Maker (アニメーション ツクール用) (OPN)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>ankoku_98.zip</td><td>[PC-9801] 暗黒千年王国 マジカルキュービック(OPN)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>anmv3_98.zip</td><td>[PC-9801] あにまーじゃんV3</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>anmx_98.zip</td><td>[PC-9801] あにまーじゃんX(BEEP)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>annivers_98.zip</td><td>[PC-9801] Anniversary ～夏休みの想い出～</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>apdoll2_98.zip</td><td>[PC-9801] Advanced Power Dolls 2 (GS) (Vermouth, Gravis Ultrasound simulation)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>appare98.zip</td><td>[PC-9801] あっぱれ伝 -伏龍の章-(SC-55)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>applec2_98.zip</td><td>[PC-9801] あっぷる・くらぶ2</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>applec_98.zip</td><td>[PC-9801] あっぷる・くらぶ</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>arbeit_98.zip</td><td>[PC-9801] アルバイト ～二人の想い～</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>arcus398.zip</td><td>[PC-9801] ARCUS III(MT-32 Emulation)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>aress_98.zip</td><td>[PC-9801] アレス王の物語 ～エレネス戦記～</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>arkanoid98.zip</td><td>[PC-9801] ARKANOID</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>armist_98.zip</td><td>[PC-9801] ARMIST</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>arquel_98.zip</td><td>[PC-9801] Arquelphos</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>artjig98.zip</td><td>[PC-9801] アートジグソー</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>ash_98.zip</td><td>[PC-9801] Ash (GS) (Vermouth, Gravis Ultrasound simulation)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>atlant_98.zip</td><td>[PC-9801] CRISIS OF ATRANTIA(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>atlas2_98.zip</td><td>[PC-9801] THE ATLAS II(OPN)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>atragon_98.zip</td><td>[PC-9801] 鉄甲旗艦アトラゴン</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>avalon_98.zip</td><td>[PC-9801] THE KNIGHTS アヴァロンの騎士(BEEP)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>ayakata1_98.zip</td><td>[PC-9801] ALICEの館</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>ayakata2_98.zip</td><td>[PC-9801] ALICEの館2</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>ayakata3_98.zip</td><td>[PC-9801] ALICEの館3(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>ayayo3_98.zip</td><td>[PC-9801] はっちゃけあやよさんIII ～私、逝っちゃったんです～ AYAYO'S LIFE AFTER</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>ayayo4_98.zip</td><td>[PC-9801] はっちゃけあやよさんIV ～セクシーオリンピック～ AYAYO'S LIVE AFFECTION</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>ayayo5_98.zip</td><td>[PC-9801] はっちゃけあやよさんV ～ピカピカの小惑星～ AYAYO'S Dive Aflame.</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>ayumi_98.zip</td><td>[PC-9801] あゆみちゃん物語</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>ayumiv_98.zip</td><td>[PC-9801] あゆみちゃん物語 実写版(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>b2mu_98.zip</td><td>[PC-9801] B2Mu: Born to Meet You (OPN) (Crystal Soft)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>bacta12_21.zip</td><td>[PC-9821] Bacta 1&amp;amp;2+Voice</td><td>—</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>bacta2_98.zip</td><td>[PC-9801] Bacta 2 (GS) (Vermouth, Gravis Ultrasound simulation)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>bacta_98.zip</td><td>[PC-9801] Bacta</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>bakasuka_98.zip</td><td>[PC-9801] シューティングツクール バカスカウォーズ</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>bakkon1_98.zip</td><td>[PC-9801] 突撃ばっこんストリート</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>bakkon2_98.zip</td><td>[PC-9801] 突撃ばっこんストリート2 ～はんてぃんぐ☆るーれっと～</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>bananac_98.zip</td><td>[PC-9801] イメージルーム バナナ倶楽部(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>bbird_98.zip</td><td>[PC-9801] BLACK BIRD ～鳥達の遠吠～(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>bd98.zip</td><td>[PC-9801] BURNING DRAGON(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>bdp98.zip</td><td>[PC-9801] BURNING DRAGON PLUS(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>beast3_98.zip</td><td>[PC-9801] BEAST III</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>beast_98.zip</td><td>[PC-9801] BEAST ～淫獣の館～</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>beast_b_98.zip</td><td>[PC-9801] ビーストブリーダーズ(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>belsavn1_98.zip</td><td>[PC-9801] Bell's Avenue(MT-32 Emulation)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>belsavn2_98.zip</td><td>[PC-9801] Bell's Avenue Vol.2 (MT-32) (Vermouth, Gravis Ultrasound simulation)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>belsavn3_98.zip</td><td>[PC-9801] Bell's Avenue vol.3(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>beyond_98.zip</td><td>[PC-9801] ビ・ヨンド ～黒大将に見られてる～</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>bg_98.zip</td><td>[PC-9801] Briganty: The Roots of Darkness (SC-55) (Vermouth, Gravis Ultrasound simulation)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>bgarnet_98.zip</td><td>[PC-9801] ブルー・ガーネット</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>bhludy_98.zip</td><td>[PC-9801] BOUNTY HUNTER ルディ</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>biblem2.zip</td><td>[PC-9801] Bible Master II: The Chaos of Aglia (SC-55) (Vermouth, Gravis Ultrasound simulation)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>birthd_98.zip</td><td>[PC-9801] Birth Days</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>bit4_98.zip</td><td>[PC-9801] DISK bit4</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>bktb98.zip</td><td>[PC-9801] 爆突TURB(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>blindg_98.zip</td><td>[PC-9801] Blind Games</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>blockb_98.zip</td><td>[PC-9801] THE BLOCK BUSTER</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>bltzkr98.zip</td><td>[PC-9801] BLITZKRIEG 東部戦線 1941～45</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>blue_98.zip</td><td>[PC-9801] ブルー</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>bny_98.zip</td><td>[PC-9801] ばにぃはんたぁ零(SC-55)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>bomquest_98.zip</td><td>[PC-9801] BOMBER QUEST</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>bonnou1_98.zip</td><td>[PC-9801] 煩悩予備校</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>bonnou2_98.zip</td><td>[PC-9801] 煩悩予備校2(MT-32 Emulation)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>bonnou3_98.zip</td><td>[PC-9801] 煩悩予備校3(MT-32 Emulation)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>bpbb98.zip</td><td>[PC-9801] ベストプレーベースボール98</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>bq_98.zip</td><td>[PC-9801] バトルクィーン 最強ファイターズ列伝</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>br1_towns.zip</td><td>[FM TOWNS] Brandish (ブランディッシュ)</td><td>—</td><td>○</td><td>—</td><td>—</td><td>TOWNS</td></tr>
+<tr><td>br1r_98.zip</td><td>[PC-9801] Brandish RENEWAL(BEEP)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>br2_98.zip</td><td>[PC-9801] Brandish 2 - THE PLANET BUSTER -(BEEP)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>br2r_98.zip</td><td>[PC-9801] Brandish 2 RENEWAL - THE PLANET BUSTER -(BEEP)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>br3_98.zip</td><td>[PC-9801] Brandish 3 - SPIRIT OF BALCAN -(BEEP)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>br3r_98.zip</td><td>[PC-9801] Brandish 3 RENEWAL - SPIRIT OF BALCAN -(BEEP)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>brm1_21.zip</td><td>[PC-9821] Branmarker</td><td>—</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>brm1_98.zip</td><td>[PC-9801] Branmarker</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>brm2_21.zip</td><td>[PC-9821] Branmarker 2 (GS) (Vermouth, Gravis Ultrasound simulation)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>brm2_98.zip</td><td>[PC-9801] Branmarker 2 (GS) (Vermouth, Gravis Ultrasound simulation)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>brtnly98.zip</td><td>[PC-9801] BRETONNE LAYS</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>bruins_98.zip</td><td>[PC-9801] BLUE RUINS ～遥かなるビバノンの秘宝～(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>brvt_98.zip</td><td>[PC-9801] Brandish VT (GS) (Vermouth, Gravis Ultrasound simulation)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>brvtdemo_98.zip</td><td>[PC-9801] Brandish VT 体験版付デモDISK(SC-55)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>bsp_21.zip</td><td>[PC-9821] バトルスキンパニック9821</td><td>—</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>bublegum_98.zip</td><td>[PC-9801] Bubblegum Crisis - Crime Wave</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>bunka_98.zip</td><td>[PC-9801] 文化祭(SC-55)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>bvmm_98.zip</td><td>[PC-9801] Beat Vice Music mode</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>c2gp.zip</td><td>[PC-9801] CarII GrandPrix (ver 0.20)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>c_doll_98.zip</td><td>[PC-9801] クローンドール 課外授業(OPN)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>c_joe_98.zip</td><td>[PC-9801] クラッシャージョウ ～歓楽惑星の陰謀～</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>c_tale_98.zip</td><td>[PC-9801] Chicks' Tale</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>cal2_98.zip</td><td>[PC-9801] CAL II</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>cal2r_98.zip</td><td>[PC-9801] CAL II リバイバル</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>cal_98.zip</td><td>[PC-9801] CAL</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>calr_98.zip</td><td>[PC-9801] CAL リバイバル</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>camisole_98.zip</td><td>[PC-9801] Camisole</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>can1_98.zip</td><td>[PC-9801] きゃんきゃんバニー</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>can2_98.zip</td><td>[PC-9801] きゃんきゃんバニー スペリオール</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>can3_98.zip</td><td>[PC-9801] きゃんきゃんバニー スピリッツ</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>can4_98.zip</td><td>[PC-9801] きゃんきゃんバニー プルミエール</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>can512_98.zip</td><td>[PC-9801] きゃんきゃんバニー リミテッド 5 1/2</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>can5_98.zip</td><td>[PC-9801] きゃんきゃんバニー エクストラ</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>carat_98.zip</td><td>[PC-9801] MAGICAL BLOCK CARAT</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>cats_p1_98.zip</td><td>[PC-9801] Cat's Part1</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>cattle_98.zip</td><td>[PC-9801] CATTLE MUTILATION</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>cd_98.zip</td><td>[PC-9801] コレクターD</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>cd_b_98.zip</td><td>[PC-9801] コレクターD 番外編 ～極楽台西地区セールス大作戦～</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>celavie_98.zip</td><td>[PC-9801] Ce'st・la・vie(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>celery_98.zip</td><td>[PC-9801] せろり</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>ch4_98.zip</td><td>[PC-9801] 電脳学園IV エイプハンターJ</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>chakura_98.zip</td><td>[PC-9801] チャクラ(MT-32 Emulation)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>chaosang_98.zip</td><td>[PC-9801] Chaos Angels(BEEP)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>charade_98.zip</td><td>[PC-9801] シャレード</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>charm2_98.zip</td><td>[PC-9801] Charm2 -虹色の風-(OPN)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>charm_98.zip</td><td>[PC-9801] Charm</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>checksix_98.zip</td><td>[PC-9801] CHECK SIX 6時方向に注意せよ(OPN)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>checksx2_98.zip</td><td>[PC-9801] CHECK SIX2 碧空の狼(MT-32 Emulation)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>cherrym_98.zip</td><td>[PC-9801] チェリーマドレット(SC-55)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>chiemi_98.zip</td><td>[PC-9801] 稚恵美 ～緊縛エアライン～</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>chilam98.zip</td><td>[PC-9801] LIBROS DE CHILAM BALAM(OPN)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>chobaku_98.zip</td><td>[PC-9801] 超･爆</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>chusya_98.zip</td><td>[PC-9801] 注射器</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>circle_m_98.zip</td><td>[PC-9801] サークルメイト</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>cityknt_98.zip</td><td>[PC-9801] CITY KNIGHTS</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>cl_21.zip</td><td>[PC-9821] クリスタルリナール -逢魔の迷宮-</td><td>—</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>cl_98.zip</td><td>[PC-9801] クリスタルリナール -逢魔の迷宮-(MT-32 Emulation)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>close98.zip</td><td>[PC-9801] 忘れえぬ炎 - ABDOR AETERNUS -</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>cloth_98.zip</td><td>[PC-9801] Cloth Out (OPNA) (Nampurrow)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>clrd4_98.zip</td><td>[PC-9801] CLASSIC ROAD 4</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>cm2_98.zip</td><td>[PC-9801] カスタムメイト2</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>cm3_98.zip</td><td>[PC-9801] カスタムメイト3</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>cm_98.zip</td><td>[PC-9801] カスタムメイト</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>cmquest_98.zip</td><td>[PC-9801] キャラメルクエスト ～冥天宮の女神像～</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>co2jin.zip</td><td>[PC-9801] 骨塵(OPNA) (CO2-PRO)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>cobram_98.zip</td><td>[PC-9801] COBRA MISSION PANIC IN COBRA CITY</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>coco_98.zip</td><td>[PC-9801] 魔法少女ファンシーCOCO</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>coin_98.zip</td><td>[PC-9801] COIN</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>columns98.zip</td><td>[PC-9801] コラムス【対戦モード付】</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>comingh_98.zip</td><td>[PC-9801] Coming Heart(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>comparga_98.zip</td><td>[PC-9801] コンパルガ</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>concert_98.zip</td><td>[PC-9801] CONCERT(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>conti_98.zip</td><td>[PC-9801] コンチネンタル</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>corpsept_98.zip</td><td>[PC-9801] コープスパーティー (KENIX SOFT)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>cosmic_p_98.zip</td><td>[PC-9801] COSMIC PSYCHO</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>cp_98.zip</td><td>[PC-9801] クロムパラダイス ～銀白色の楽園～</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>cpanic_98.zip</td><td>[PC-9801] The Tower(?) of CABIN ～キャビンパニック～</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>crescent_98.zip</td><td>[PC-9801] CRESCENT MOON がぁる</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>cresent_98.zip</td><td>[PC-9801] CRESCENT</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>crim_98.zip</td><td>[PC-9801] CRIM (TSUKKAsoftware)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>cross_ch_98.zip</td><td>[PC-9801] Cross Changer(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>crw2_98.zip</td><td>[PC-9801] CRW2(OPN)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>crys98.zip</td><td>[PC-9801] 神王伝説 クリスタニア</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>cryswepr_21.zip</td><td>[PC-9821] クライスイーパー(MT-32 Emulation)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>cs_zou2_98.zip</td><td>[PC-9801] カクテルソフト増刊号2</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>cs_zou_98.zip</td><td>[PC-9801] カクテルソフト増刊号</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>csij_98.zip</td><td>[PC-9801] カルメン サンディエゴ イン ジャパン ～犯人探して日本全国～</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>cur_of_c_98.zip</td><td>[PC-9801] Curse of Castle</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>curse_98.zip</td><td>[PC-9801] カース</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>cutycop_98.zip</td><td>[PC-9801] キューティーCOP ～盗まれたファイルの謎～</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>cx92_98.zip</td><td>[PC-9801] Carax'92</td><td>—</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>cybalpha_98.zip</td><td>[PC-9801] サイバノイドアルファ(MT-32 Emulation)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>cyberi_98.zip</td><td>[PC-9801] サイバーイリュージョン(OPN)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>cz98.zip</td><td>[PC-9801] Camel-Zoo(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>d_98.zip</td><td>[PC-9801] D [欧州蜃気楼](MT-32 Emulation)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>d_ark_98.zip</td><td>[PC-9801] D'Ark</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>d_ark_g_98.zip</td><td>[PC-9801] D'Ark外伝(MT-32 Emulation)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>daidou_98.zip</td><td>[PC-9801] 究極のパズル 極 大道棋</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>daikou98.zip</td><td>[PC-9801] 大航海時代</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>daisen2c_98.zip</td><td>[PC-9801] キャンペーン版大戦略 II</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>daiva98.zip</td><td>[PC-9801] DAIVA -カリ・ユガの光輝-</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>dalk_98.zip</td><td>[PC-9801] DALK</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>dalk_h_98.zip</td><td>[PC-9801] DALK ヒントディスク</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>dandan_98.zip</td><td>[PC-9801] ダンジョンRPGツクール だんだんダンジョン</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>dang2_98.zip</td><td>[PC-9801] 花よりダンゴ2</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>dange_sp_98.zip</td><td>[PC-9801] Dangel Special Disk</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>dangel_98.zip</td><td>[PC-9801] Dangel</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>dangtoys_98.zip</td><td>[PC-9801] DANGEROUS TOYS</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>daniel_98.zip</td><td>[PC-9801] ダニエルの宝探し</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>dante_98.zip</td><td>[PC-9801] RPGツクール DANTE98</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>darko_98.zip</td><td>[PC-9801] Dark Odyssey - The legend of wind -</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>daysduel_98.zip</td><td>[PC-9801] Days in Duel</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>dbabs_98.zip</td><td>[PC-9801] D'BaBOS(YES!付属 姫屋製品特別情報円盤)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>dbzukan_98.zip</td><td>[PC-9801] ディスク美少女大図鑑</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>dbzukn91_98.zip</td><td>[PC-9801] ディスク美少女大図鑑'91</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>ddbus_98.zip</td><td>[PC-9801] 行け行け電大バス (Kunisoft)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>deadfc98.zip</td><td>[PC-9801] 新世紀興亡史 デッドフォース(MT-32 Emulation)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>debut_98.zip</td><td>[PC-9801] 誕生 ～Debut～</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>deep_98.zip</td><td>[PC-9801] DEEP</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>defana_21.zip</td><td>[PC-9821] De・FaNa</td><td>—</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>defana_98.zip</td><td>[PC-9801] De・FaNa(OPN)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>deja2_98.zip</td><td>[PC-9801] DE・JA II</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>deja_98.zip</td><td>[PC-9801] DE・JA</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>delphi_98.zip</td><td>[PC-9801] デルフォイの神託(OPN)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>demon_c_98.zip</td><td>[PC-9801] DEMON CITY</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>dengekid_98.zip</td><td>[PC-9801] DENGEKI DIVISION</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>dennou_98.zip</td><td>[PC-9801] 電脳天使 ～デジタルアンジェ～</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>dennou_g_98.zip</td><td>[PC-9801] 電脳画廊</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>denwa_b_98.zip</td><td>[PC-9801] エロチックBAKAノベル 電話のベルが…</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>desire_21.zip</td><td>[PC-9821] DESIRE ～背徳の螺旋～</td><td>—</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>desire_98.zip</td><td>[PC-9801] DESIRE ～背徳の螺旋～</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>dhalf_98.zip</td><td>[PC-9801] カックス3世</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>diadrum_98.zip</td><td>[PC-9801] Diadrum (GM) (Vermouth, Gravis Ultrasound simulation)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>diary2_1_98.zip</td><td>[PC-9801] ツーショットDiary2 memory 1/4(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>diary2_2_98.zip</td><td>[PC-9801] ツーショットDiary2 memory 2/4(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>diary2_3_98.zip</td><td>[PC-9801] ツーショットDiary2 memory 3/4(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>diary2_4_98.zip</td><td>[PC-9801] ツーショットDiary2 memory 4/4(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>diary_98.zip</td><td>[PC-9801] ツーショットDiary</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>diesirae_98.zip</td><td>[PC-9801] Dies･Irae</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>difrlm98.zip</td><td>[PC-9801] DIFFERENT REALM -久遠の賢者-(SC-55)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>dino98.zip</td><td>[PC-9801] DINOSAUR(BEEP)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>dino_towns.zip</td><td>[FM TOWNS] Dinosaur (ダイナソア)</td><td>—</td><td>○</td><td>—</td><td>—</td><td>TOWNS</td></tr>
+<tr><td>dismix1_98.zip</td><td>[PC-9801] 電脳アクセス ディスクマガジン 季刊ディスミックス 創刊号</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>dismix2_98.zip</td><td>[PC-9801] 電脳アクセス ディスクマガジン 季刊ディスミックス 第２号</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>divers_98.zip</td><td>[PC-9801] DIVER'S</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>dk1_98.zip</td><td>[PC-9801] Dragon Knight</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>dk2_98.zip</td><td>[PC-9801] Dragon Knight II</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>dk3_98.zip</td><td>[PC-9801] Dragon Knight III</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>dk4_98.zip</td><td>[PC-9801] Dragon Knight IV</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>dkj2_98.zip</td><td>[PC-9801] 大航海時代 II</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>dks1_98.zip</td><td>[PC-9801] 同級生</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>dks2_98.zip</td><td>[PC-9801] 同級生2</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>dks2sp_98.zip</td><td>[PC-9801] 同級生2 スペシャルディスク</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>dks_98.zip</td><td>[PC-9801] DARK SERAPHIM</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>dlunch_98.zip</td><td>[PC-9801] デリシャスらんちぱっく</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>dm1_98.zip</td><td>[PC-9801] 人形使い</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>dm2_98.zip</td><td>[PC-9801] 人形使い2(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>dodoki01_98.zip</td><td>[PC-9801] D.O.ドキドキディスク vol.1</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>dodoki02_98.zip</td><td>[PC-9801] D.O.ドキドキディスク vol.2</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>dodoki03_98.zip</td><td>[PC-9801] D.O.ドキドキディスク vol.3</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>dodoki04_98.zip</td><td>[PC-9801] D.O.ドキドキディスク vol.4</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>dodoki05_98.zip</td><td>[PC-9801] D.O.ドキドキディスク vol.5</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>dodoki06_98.zip</td><td>[PC-9801] D.O.ドキドキディスク vol.6</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>dodoki07_98.zip</td><td>[PC-9801] D.O.ドキドキディスク vol.7</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>dodoki08_98.zip</td><td>[PC-9801] D.O.ドキドキディスク vol.8</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>dodoki09_98.zip</td><td>[PC-9801] D.O.ドキドキディスク vol.9</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>dodokic1_21.zip</td><td>[PC-9821] D.O.ドキドキディスクCD版 vol.1</td><td>—</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>dodokic2_21.zip</td><td>[PC-9821] D.O.ドキドキディスクCD版 vol.2</td><td>—</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>dodokic3_21.zip</td><td>[PC-9821] D.O.ドキドキディスクCD版 vol.3</td><td>—</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>dodokic4_21.zip</td><td>[PC-9821] D.O.ドキドキディスクCD版 vol.4&amp;amp;5</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>dokai_98.zip</td><td>[PC-9801] D.O. 海賊版</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>dokichan_98.zip</td><td>[PC-9801] ドキドキ! シャッターチャンス!</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>dokipl1_98.zip</td><td>[PC-9801] DokiDokiぷりてぃリーグ 第1話 ピンクエンジェルス危機一髪の巻</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>dokipl2_98.zip</td><td>[PC-9801] DokiDokiぷりてぃリーグ 第2話 もうひとつのライバル</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>dokipl3_98.zip</td><td>[PC-9801] DokiDokiぷりてぃリーグ 第3話 南の海の怪の巻</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>dokipl4_98.zip</td><td>[PC-9801] DokiDokiぷりてぃリーグ 第4話 七瀬の秘密の巻</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>dokipl5_98.zip</td><td>[PC-9801] DokiDokiぷりてぃリーグ 第5話 さらばピンクエンジェルス達</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>dokipl6_98.zip</td><td>[PC-9801] DokiDokiぷりてぃリーグ Final</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>dokiv_98.zip</td><td>[PC-9801] DOKIDOKIバケーション ～きらめく季節の中で～</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>dokuritu_98.zip</td><td>[PC-9801] 独立戦争 Liberty or Death</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>dolly_98.zip</td><td>[PC-9801] Foresight Dolly (GS) (Vermouth, Gravis Ultrasound simulation)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>dome_98.zip</td><td>[PC-9801] DOME(AMD-98)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>doop_98.zip</td><td>[PC-9801] DOOP ～ドォープ～</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>doppun_98.zip</td><td>[PC-9801] ドッぴゅんドンぴ写</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>dor1_98.zip</td><td>[PC-9801] DOR</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>dor2_98.zip</td><td>[PC-9801] DOR Part2</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>dor3_98.zip</td><td>[PC-9801] DOR Part3</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>doradora_98.zip</td><td>[PC-9801] DORADORAエモーション ～聖牌伝～</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>dorakyur_98.zip</td><td>[PC-9801] ドラキュラ伯爵</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>dorbest1_21.zip</td><td>[PC-9821] DOR ベストセレクション 上巻</td><td>—</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>dorbest2_21.zip</td><td>[PC-9821] DOR ベストセレクション 下巻</td><td>—</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>dorse93_98.zip</td><td>[PC-9801] DOR SPECIAL EDITION '93</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>dorse_sa_98.zip</td><td>[PC-9801] DOR SPECIAL EDITION 魁</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>dotb2_98.zip</td><td>[PC-9801] DEAD OF THE BRAIN2</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>dotb_98.zip</td><td>[PC-9801] DEAD OF THE BRAIN ～死霊の叫び～</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>dotmh_21.zip</td><td>[PC-9821] ディーオー監修プレミアムボックス Touch My Heart(MT-32 Emulation)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>dotmh_98.zip</td><td>[PC-9801] ディーオー監修プレミアムボックス Touch My Heart</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>dps_98.zip</td><td>[PC-9801] D.P.S</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>dpsall_98.zip</td><td>[PC-9801] D.P.S 全部(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>dpssg1_98.zip</td><td>[PC-9801] D.P.S SG</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>dpssg2_98.zip</td><td>[PC-9801] D.P.S SG Set2</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>dpssg3_98.zip</td><td>[PC-9801] D.P.S SG Set3</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>dr^2_98.zip</td><td>[PC-9801] DR^2ナイト雀鬼(OPN)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>dragon_c_98.zip</td><td>[PC-9801] DRAGON CITY X指定</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>dragoon_98.zip</td><td>[PC-9801] 竜機伝承 -ドラグーン-(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>drasou_98.zip</td><td>[PC-9801] ドラゴン創世記</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>dream_s_98.zip</td><td>[PC-9801] ドリームシアター</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>drgarm_98.zip</td><td>[PC-9801] DRAGOON ARMAR for Adult</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>drstop_98.zip</td><td>[PC-9801] Dr.STOP!</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>ds6_98.zip</td><td>[PC-9801] Dragon Slayer 英雄伝説(BEEP)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>ds6_towns.zip</td><td>[FM TOWNS] The Legend of Heroes -Dragon Slayer VI- (Dragon Slayer 英雄伝説)</td><td>—</td><td>○</td><td>—</td><td>—</td><td>TOWNS</td></tr>
+<tr><td>ds98_00.zip</td><td>[PC-9801] DiscStation98 #00(BEEP)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>ds98_01.zip</td><td>[PC-9801] DiscStation98 #01(BEEP)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>ds98_02.zip</td><td>[PC-9801] DiscStation98 #02(BEEP)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>ds98_03.zip</td><td>[PC-9801] DiscStation98 #03(BEEP)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>ds98_04.zip</td><td>[PC-9801] DiscStation98 #04(BEEP)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>ds98_06.zip</td><td>[PC-9801] DiscStation98 #06(BEEP)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>ds98_09.zip</td><td>[PC-9801] DiscStation98 #09(BEEP)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>ds98_10.zip</td><td>[PC-9801] DiscStation98 #10(BEEP)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>ds98_11.zip</td><td>[PC-9801] DiscStation98 #11(BEEP)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>ds98_12.zip</td><td>[PC-9801] DiscStation98 #12(BEEP)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>ds98_16.zip</td><td>[PC-9801] DiscStation98 #16(BEEP)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>ds98_17.zip</td><td>[PC-9801] DiscStation98 #17(BEEP)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>ds98_18.zip</td><td>[PC-9801] DiscStation98 #18(BEEP)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>ds98_20.zip</td><td>[PC-9801] DiscStation98 #20(BEEP)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>ds98ex_01.zip</td><td>[PC-9801] DiscStation98EX #1(BEEP)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>ds98ex_02.zip</td><td>[PC-9801] DiscStation98EX #2(BEEP)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>ds98ex_03.zip</td><td>[PC-9801] DiscStation98EX #3(BEEP)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>ds_01.zip</td><td>[PC-9801] DiscStation Vol.01(BEEP)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>ds_02.zip</td><td>[PC-9801] DiscStation Vol.02(BEEP)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>ds_03.zip</td><td>[PC-9801] DiscStation Vol.03(BEEP)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>ds_04.zip</td><td>[PC-9801] DiscStation Vol.04(BEEP)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>ds_05.zip</td><td>[PC-9801] DiscStation Vol.05(BEEP)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>ds_06.zip</td><td>[PC-9801] DiscStation Vol.06(BEEP)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>ds_07.zip</td><td>[PC-9801] DiscStation Vol.07(BEEP)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>ds_09.zip</td><td>[PC-9801] DiscStation Vol.09(BEEP)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>ds_11.zip</td><td>[PC-9801] DiscStation Vol.11(BEEP)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>dsen498.zip</td><td>[PC-9801] 大戦略 IV</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>dsen90.zip</td><td>[PC-9801] 大戦略 III'90</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>dsenex98.zip</td><td>[PC-9801] 現代大戦略EX</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>dualsoul_98.zip</td><td>[PC-9801] デュアルソウル</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>duel98.zip</td><td>[PC-9801] DUEL98</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>duelkn98.zip</td><td>[PC-9801] DUEL 川中島シナリオ</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>duelsc98.zip</td><td>[PC-9801] DUEL SUCCESSION</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>dynamo98.zip</td><td>[PC-9801] Dynamo</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>ed2_98.zip</td><td>[PC-9801] 英雄伝説 II(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>ed2_towns.zip</td><td>[FM TOWNS] 英雄伝説 II</td><td>—</td><td>○</td><td>—</td><td>—</td><td>TOWNS</td></tr>
+<tr><td>ed3_98.zip</td><td>[PC-9801] 英雄伝説 III 白き魔女 -もうひとつの英雄たちの物語-(BEEP)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>ed3r_98.zip</td><td>[PC-9801] 英雄伝説 III RENEWAL 白き魔女 -もうひとつの英雄たちの物語-(BEEP)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>ed4_98.zip</td><td>[PC-9801] 朱紅い雫 - THE LEGEND OF HEROES IV -(初回版)(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>eden_k_98.zip</td><td>[PC-9801] エデンの香り(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>ee2_98.zip</td><td>[PC-9801] Engage Errands II ～光輝を担うもの～(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>ee_98.zip</td><td>[PC-9801] Engage Errands ～魅惑の使徒～(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>egee16_98.zip</td><td>[PC-9801] エーゲ海の雫 16色版(OPN)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>eikan3_98.zip</td><td>[PC-9801] 栄冠は君に3 高校野球全国大会(MT-32 Emulation)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>eime_21.zip</td><td>[PC-9821] エイミーと呼ばないでっ(OPNA)</td><td>—</td><td>○</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>eime_98.zip</td><td>[PC-9801] エイミーと呼ばないでっ(OPN)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>ekudorad_98.zip</td><td>[PC-9801] エクドラード ～鏡の中の王国～(SC-55)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>SB16、beep</td></tr>
+<tr><td>eldmnon_98.zip</td><td>[PC-9801] El-Dominion</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>elementl_98.zip</td><td>[PC-9801] えれめんたる王</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>elle_98.zip</td><td>[PC-9801] ELLE</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>elm_98.zip</td><td>[PC-9801] カックス2世</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>elves98.zip</td><td>[PC-9801] ELVES</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>emagic_98.zip</td><td>[PC-9801] エコロジーマジック</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>emdr98.zip</td><td>[PC-9801] EMERALD DRAGON</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>emit2_21.zip</td><td>[PC-9821] EMIT Vol.2 命がけの旅</td><td>—</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>emit3_21.zip</td><td>[PC-9821] EMIT Vol.3 私にさよならを</td><td>—</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>emit_21.zip</td><td>[PC-9821] EMIT Vol.1 時の迷子</td><td>—</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>enchant_98.zip</td><td>[PC-9801] ENCHANTER ～若き魔導士の試練～</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>enemyh_98.zip</td><td>[PC-9801] Enemy of Humans (OPNA) (BMP)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>entax_98.zip</td><td>[PC-9801] Entax (OPN) (Aba Soft)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>eob98.zip</td><td>[PC-9801] Advanced Dungeons &amp;amp; Dragons / EYE OF THE BEHOLDER</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>eregans_98.zip</td><td>[PC-9801] 麻雀エレガンス(BEEP)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>es95_98.zip</td><td>[PC-9801] エスカレーション'95 ～お姉さまって呼んでいいですか?～(OPN)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>escape_98.zip</td><td>[PC-9801] エスケイプ!(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>eshoutei_98.zip</td><td>[PC-9801] Esの方程式(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>esp_98.zip</td><td>[PC-9801] ESP (OPN) (A Inn)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>estate_98.zip</td><td>[PC-9801] ESTATE(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>etembl98.zip</td><td>[PC-9801] エテミブル ～天壌無窮～(SC-55)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>eturaku_21.zip</td><td>[PC-9821] 悦楽の学園</td><td>—</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>eturaku_98.zip</td><td>[PC-9801] 悦楽の学園</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>europe_98.zip</td><td>[PC-9801] ヨーロッパ戦線</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>eve_98.zip</td><td>[PC-9801] EVE burst error(OPN)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>exceed_98.zip</td><td>[PC-9801] エクシ－ドジャック -カジノポリス-(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>extlien_98.zip</td><td>[PC-9801] EXTERLIEN</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>f_crisis_98.zip</td><td>[PC-9801] Final Crisis (OPN)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>f_kaizo_98.zip</td><td>[PC-9801] フェアリーテール海賊版</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>faladia_98.zip</td><td>[PC-9801] ファルアディア(OPN)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>fall_98.zip</td><td>[PC-9801] FALL</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>farce_98.zip</td><td>[PC-9801] ファルス 誘惑白書(OPN)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>fate_98.zip</td><td>[PC-9801] Fate (OPN) (ASCII)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>fc98v12.zip</td><td>[PC-9801] Firecracker MUSIC SELECTION VOL.12 Rainbow Wave～虹色町の奇跡/WAVER/他(OPN) (Firecracker)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>fc98v13.zip</td><td>[PC-9801] Firecracker MUSIC SELECTION VOL.13 アドヴァンストV.G.2(SPB) (Firecracker)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>fermion_98.zip</td><td>[PC-9801] フェルミオン ～未来からの訪問者～</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>feti_98.zip</td><td>[PC-9801] ふぇち</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>fgsel1c.zip</td><td>[PC-9801] 風雅セレクション① ～カルカッタ～(MT-32 Emulation)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>fgsel1m.zip</td><td>[PC-9801] 風雅セレクション① ～メイズクエスト～(MT-32 Emulation)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>fh2tag98.zip</td><td>[PC-9801] フィニッシュホールド2TAG</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>fh98.zip</td><td>[PC-9801] フィニッシュホールド</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>figure_98.zip</td><td>[PC-9801] Figure -奪われた放課後-</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>fih98.zip</td><td>[PC-9801] Flight in Hawaii</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>file0_98.zip</td><td>[PC-9801] FILE:0 ゴーストキラー・神村 麗(SC-55)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>file_98.zip</td><td>[PC-9801] FILE 国防総省情報部情報漏洩対策部女性尋問員(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>filsnown_98.zip</td><td>[PC-9801] Filsnown -光と刻-(OPN)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>finalb98.zip</td><td>[PC-9801] ファイナルブレイカー</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>finalty_98.zip</td><td>[PC-9801] Super Depth 2 "Finalty"</td><td>—</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>firechas_98.zip</td><td>[PC-9801] FIRE CHASE</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>flixmix.zip</td><td>[PC-9801] FlixMix</td><td>—</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>flixx_98.zip</td><td>[PC-9801] FLIXX</td><td>—</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>flpoint3_98.zip</td><td>[PC-9801] FLASH POINT 3</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>flpoint4_98.zip</td><td>[PC-9801] FLASH POINT 4</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>fnybee_98.zip</td><td>[PC-9801] 宇宙快盗ファニーBee(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>foreignr_98.zip</td><td>[PC-9801] FOREIGNER</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>foxy2_98.zip</td><td>[PC-9801] FOXY2</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>foxy_98.zip</td><td>[PC-9801] FOXY</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>fp1_98.zip</td><td>[PC-9801] FLASH POINT</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>fq1_98.zip</td><td>[PC-9801] FIRST QUEEN -オルニック戦記-</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>fq2_98.zip</td><td>[PC-9801] FIRST QUEEN II -砂漠の女王-</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>fq3_98.zip</td><td>[PC-9801] FIRST QUEEN III</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>fq4_98.zip</td><td>[PC-9801] FIRST QUEEN IV -バルシア戦記-(SC-55)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>fray_98.zip</td><td>[PC-9801] FRAY - In magical adventure -</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>freew_98.zip</td><td>[PC-9801] フリーウィル Knight of Argent</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>frnunv98.zip</td><td>[PC-9801] Frontier Universe (GS) (Vermouth, Gravis Ultrasound simulation)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>frontier_98.zip</td><td>[PC-9801] Frontier (SC-55) (Vermouth, Gravis Ultrasound simulation)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>fs1_98.zip</td><td>[PC-9801] ファーランドストーリー(MT-32 Emulation)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>fs2_98.zip</td><td>[PC-9801] ファーランドストーリー伝記 アーク王の遠征(SC-55)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>fs3_98.zip</td><td>[PC-9801] ファーランドストーリー 天使の涙(SC-55)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>fs4_98.zip</td><td>[PC-9801] ファーランドストーリー 白銀の翼(SC-55)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>fs5_98.zip</td><td>[PC-9801] ファーランドストーリー 大地の絆(SC-55)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>fs6_98.zip</td><td>[PC-9801] ファーランドストーリー 神々の遺産(SC-55)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>fs7_98.zip</td><td>[PC-9801] ファーランドストーリー 獣王の証(SC-55)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>fukeivx_98.zip</td><td>[PC-9801] 婦警さんVX</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>fuktusai_98.zip</td><td>[PC-9801] 復活祭 -アスティカーヤの魔女-</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>fukujin2_98.zip</td><td>[PC-9801] ロードス島戦記 福神漬2</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>fukushu_98.zip</td><td>[PC-9801] 復讐</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>fuun98.zip</td><td>[PC-9801] 信長の野望 武将風雲録</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>fz_lemon_98.zip</td><td>[PC-9801] 不揃いのレモン</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>g-fight_98.zip</td><td>[PC-9801] G-Fight (Ｇファイト) (OPN) (Aso Soft)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>g3goku98.zip</td><td>[PC-9801] 群雄三国志</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>gairock2_98.zip</td><td>[PC-9801] 銀聖戦神ガイナロック2</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>gakuen93_98.zip</td><td>[PC-9801] 学園物語'93 ～The Instinct～</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>galact98.zip</td><td>[PC-9801] 英雄志願 ～GAL･ACT･HEROISM～</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>gao1_98.zip</td><td>[PC-9801] GAOGAO! 1st ラジカルシークエンス(OPN)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>gao2_98.zip</td><td>[PC-9801] GAOGAO! 2nd パンドラの森(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>gao3_98.zip</td><td>[PC-9801] GAOGAO! 3rd ワイルドフォース(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>gao4_98.zip</td><td>[PC-9801] GAOGAO! 4th カナン ～約束の地～(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>gao_opt_98.zip</td><td>[PC-9801] GAOGAO! オプショナルディスク</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>garu95.zip</td><td>[PC-9801] GARUDIUS95 (CO2-PRO)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>garyu_98.zip</td><td>[PC-9801] 臥竜伝 ～三国制覇の計～</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>gatcha98.zip</td><td>[PC-9801] 科学忍者隊ガッチャマン 倒せ! ギャラクター</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>gazzel_98.zip</td><td>[PC-9801] The Tower of GAZZEL -ガゼルの塔-</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>gbakuten_98.zip</td><td>[PC-9801] 学園爆裂転校生!(MT-32 Emulation)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>gbomb_98.zip</td><td>[PC-9801] 学園ボンバー</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>gdm_ao_98.zip</td><td>[PC-9801] 機動戦士ガンダム アドバンスドオペレーション</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>gdm_mo_98.zip</td><td>[PC-9801] 機動戦士ガンダム マルチプルオペレーション</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>gdm_roz_98.zip</td><td>[PC-9801] 機動戦士ガンダム リターン･オブ･ジオン</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>gdm_yow_98.zip</td><td>[PC-9801] 機動戦士ガンダム A YEAR OF WAR</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>gedou_98.zip</td><td>[PC-9801] 外道教師 -凌辱週間-(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>gekiniti_98.zip</td><td>[PC-9801] 激突! 日米機動部隊</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>gencho98.zip</td><td>[PC-9801] 蒼き狼と白き牝鹿 元朝秘史</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>genkai_98.zip</td><td>[PC-9801] 機装神伝ゲンカイザー(SC-55)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>gensei98.zip</td><td>[PC-9801] 幻世喜譚 - Disc Saga III -(BEEP)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>geoslave_98.zip</td><td>[PC-9801] GEO SLAVE -哀奴達の肖像-</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>get_98.zip</td><td>[PC-9801] Get! (SC-55) (Vermouth, Gravis Ultrasound simulation)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>SB16、beep</td></tr>
+<tr><td>geten2_98.zip</td><td>[PC-9801] GE・TEN II ～大海信長伝・下天～</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>geten_98.zip</td><td>[PC-9801] GE・TEN ～戦国信長伝・下天～</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>ggsd_98.zip</td><td>[PC-9801] 魏・呉・蜀伝</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>giddy2_98.zip</td><td>[PC-9801] GIDDY2</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>gigamo_98.zip</td><td>[PC-9801] 戯画もーしょん(OPN)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>gigaten_98.zip</td><td>[PC-9801] 偽典・女神転生 東京黙示録(OPN)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>ginei3_98.zip</td><td>[PC-9801] 銀河英雄伝説III(MT-32 Emulation)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>ginei3sp_98.zip</td><td>[PC-9801] 銀河英雄伝説III SP(MT-32 Emulation)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>ginei4_98.zip</td><td>[PC-9801] 銀河英雄伝説IV(MT-32 Emulation)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>ginga98.zip</td><td>[PC-9801] 銀河</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>giri2tel_98.zip</td><td>[PC-9801] ギリギリ☆テレフォンコール(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>giripara_98.zip</td><td>[PC-9801] ぎりぎりパラダイス</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>gkhan98.zip</td><td>[PC-9801] 蒼き狼と白き牝鹿 GENGHIS KHAN</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>gking_98.zip</td><td>[PC-9801] 学園KING -日出彦 学校をつくる-(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>glass_98.zip</td><td>[PC-9801] ガラスの運命 ～ディスティニー～</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>gloria_98.zip</td><td>[PC-9801] GLO･RI･A ～禁断の血族～</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>gmandara_98.zip</td><td>[PC-9801] 極楽まんだら</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>gnpei_98.zip</td><td>[PC-9801] 源平合戦</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>gods98.zip</td><td>[PC-9801] GODS 神となる男の伝説(MT-32 Emulation)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>godzla98.zip</td><td>[PC-9801] GODZILLA</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>goice_98.zip</td><td>[PC-9801] GOICE(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>gokko1_98.zip</td><td>[PC-9801] GOKKO Vol.01 DOCTOR</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>gokko2_98.zip</td><td>[PC-9801] GOKKO Vol.02 School Gal's</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>gokko3_98.zip</td><td>[PC-9801] GOKKO Vol.03 ETCETERA</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>goku_98.zip</td><td>[PC-9801] 極楽アリーナ</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>gou2_98.zip</td><td>[PC-9801] 轟 II(MT-32 Emulation)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>gou_98.zip</td><td>[PC-9801] 大東亜黙示録 轟(MT-32 Emulation)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>gr_oasis_98.zip</td><td>[PC-9801] Green Oasis</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>grecall_21.zip</td><td>[PC-9821] Guardian Recall 守護獣召喚(OPN)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>grnseed_98.zip</td><td>[PC-9801] GROUNSEED(OPN)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>gsgaiden_98.zip</td><td>[PC-9801] グレイストンサーガ外伝 ～動乱の魔都～(OPN)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>gssaga_98.zip</td><td>[PC-9801] グレイストンサーガ 魔界の泉(MT-32 Emulation)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>gtriangl_98.zip</td><td>[PC-9801] 学園トライアングル(SC-55)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>guernica_98.zip</td><td>[PC-9801] ゲルニカ</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>gunyu98.zip</td><td>[PC-9801] 信長の野望 戦国群雄伝</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>guy_98.zip</td><td>[PC-9801] GUY - KILL THE TARGET -</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>gyakutam_98.zip</td><td>[PC-9801] ウエディング・エラントリー 逆玉王</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>h-plus_98.zip</td><td>[PC-9801] H+(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>h_kioku1_21.zip</td><td>[PC-9821] 花の記憶</td><td>—</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>h_kioku1_98.zip</td><td>[PC-9801] 花の記憶</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>h_kioku2_98.zip</td><td>[PC-9801] 花の記憶 ～第二章～</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>hajidsen_98.zip</td><td>[PC-9801] LOGIN DISK&amp;amp;BOOKシリーズ はじめての大戦略</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>half_p_98.zip</td><td>[PC-9801] ハーフパイプ</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>halfmoon_98.zip</td><td>[PC-9801] ハーフムーンにかわるまで ～蘭宮涼の虹色玉手箱～</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>hamlet_98.zip</td><td>[PC-9801] ハムレット</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>hanaranm_98.zip</td><td>[PC-9801] 今日もキャンパス花乱満</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>hanatiru_98.zip</td><td>[PC-9801] 華と散るらん(BEEP)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>haopk_98.zip</td><td>[PC-9801] 信長の野望 覇王伝 パワーアップキット</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>haou_98.zip</td><td>[PC-9801] 信長の野望 覇王伝</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>hardrank_98.zip</td><td>[PC-9801] HARD RANK (NOP SOFTWARE)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>haremuna_98.zip</td><td>[PC-9801] 晴れのち胸さわぎ</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>hareoo_98.zip</td><td>[PC-9801] 晴れのちおおさわぎ!</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>hashiri_98.zip</td><td>[PC-9801] 走り女2(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>hatena98.zip</td><td>[PC-9801] ハテナ？の大冒険</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>hatukoi_98.zip</td><td>[PC-9801] 初恋物語</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>hb_98.zip</td><td>[PC-9801] ハーレムブレイド The Greatest of All Time(SC-55)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>heart_r_21.zip</td><td>[PC-9821] 全日本美少女麻雀選手権大会 ハートでロン!!(MT-32 Emulation)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>heart_r_98.zip</td><td>[PC-9801] 全日本美少女麻雀選手権大会 ハートでロン!!(MT-32 Emulation)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>herceq_98.zip</td><td>[PC-9801] Hercequary</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>hfpon_21.zip</td><td>[PC-9821] 花札でPON!(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>hfpon_98.zip</td><td>[PC-9801] 花札でPON!(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>hhg_98.zip</td><td>[PC-9801] HHG ～ハートヒートガールズ～</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>himi1919_98.zip</td><td>[PC-9801] 秘密指令1919</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>himihana_98.zip</td><td>[PC-9801] 秘密の花園</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>hinadori_98.zip</td><td>[PC-9801] 雛鳥の囀(SC-55)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>hio2hd98.zip</td><td>[PC-9801] 緋王伝 II'HD(MT-32 Emulation)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>hioden98.zip</td><td>[PC-9801] 緋王伝(MT-32 Emulation)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>hiragi_98.zip</td><td>[PC-9801] 柊坂の旧館(OPN)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>houkago_98.zip</td><td>[PC-9801] 放課後は別の顔(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>houtei1_98.zip</td><td>[PC-9801] 麻雀河底撈魚</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>houtei2_98.zip</td><td>[PC-9801] 麻雀河底撈魚II</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>hs2_98.zip</td><td>[PC-9801] ホーニースイーパー2 女子校危機一発(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>hs_98.zip</td><td>[PC-9801] ホーニースイーパー 好色仕掛人(OPN)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>hsc_kata_98.zip</td><td>[PC-9801] ハードスペシャルコレクション 塊</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>hsd_98.zip</td><td>[PC-9801] HIGHスクールDAYS</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>hsj_98.zip</td><td>[PC-9801] ホップ･ステップ･雀符</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>hsuna1_98.zip</td><td>[PC-9801] 星の砂物語</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>hsuna2_98.zip</td><td>[PC-9801] 星の砂物語2</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>hsuna3_21.zip</td><td>[PC-9821] 星の砂物語3(MT-32 Emulation)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>hsuna3_98.zip</td><td>[PC-9801] 星の砂物語3(MT-32 Emulation)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>hunterzx_98.zip</td><td>[PC-9801] 美少女ハンターZX</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>hymne_98.zip</td><td>[PC-9801] Hymne (OPN) (ASCII)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>hyouryu_98.zip</td><td>[PC-9801] 漂流(OPN)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>hypersec_98.zip</td><td>[PC-9801] はいぱぁセキュリティーズ(SC-55)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>ic_98.zip</td><td>[PC-9801] 幻影都市 - Illusion City -(MT-32 Emulation)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>idol_p2_98.zip</td><td>[PC-9801] アイドルプロジェクト2(SC-55)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>idol_p_98.zip</td><td>[PC-9801] アイドルプロジェクト</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>idolwosg_98.zip</td><td>[PC-9801] 美少女オーディション アイドルを探せ!</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>ieyasnki_98.zip</td><td>[PC-9801] 家康戦旗</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>ieyasu_98.zip</td><td>[PC-9801] 乱世英傑シリーズ 徳川家康</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>if2_98.zip</td><td>[PC-9801] if2(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>if3_98.zip</td><td>[PC-9801] if3</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>if_98.zip</td><td>[PC-9801] if</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>ikenie_98.zip</td><td>[PC-9801] いけにえ～享楽の神殿～</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>ikochan_98.zip</td><td>[PC-9801] 地球防衛少女イコちゃん UFO大作戦</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>ikuikup_98.zip</td><td>[PC-9801] イクイクパッ君</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>image1_98.zip</td><td>[PC-9801] イマージュ(MT-32 Emulation)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>image2_98.zip</td><td>[PC-9801] イマージュ2(MT-32 Emulation)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>imd_2_98.zip</td><td>[PC-9801] Imagical Musion Depot Vol.2(OPNA) (ACTIVE GAMERS)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>imd_3_98.zip</td><td>[PC-9801] Imagical Musion Depot Vol.3(OPNA) (ACTIVE GAMERS)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>imd_4_98.zip</td><td>[PC-9801] Imagical Musion Depot Vol.4(OPNA) (ACTIVE GAMERS)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>imlstdy1_98.zip</td><td>[PC-9801] インモラルスタディ Scenario1 白川玲子</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>imlstdy2_98.zip</td><td>[PC-9801] インモラルスタディ Scenario2 飯嶋由佳</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>imlstdy3_98.zip</td><td>[PC-9801] インモラルスタディ Scenario3 朝倉まなみ</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>impfrc98.zip</td><td>[PC-9801] IMPERIAL FORCE</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>inindou_98.zip</td><td>[PC-9801] 伊忍道 -打倒信長-</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>inju_98.zip</td><td>[PC-9801] 淫獣学園 La☆BlueGirl</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>injuda_98.zip</td><td>[PC-9801] 淫従の堕天使(SC-88)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>injugen1_98.zip</td><td>[PC-9801] 淫獣幻夢</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>injugen2_98.zip</td><td>[PC-9801] BRAIN BURST!! ～淫獣幻夢II～</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>inma_sei_98.zip</td><td>[PC-9801] 淫魔制服狩り</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>inocent_98.zip</td><td>[PC-9801] Inocent Tour</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>intrud_98.zip</td><td>[PC-9801] Intruder (OPN) (ASCII)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>intruder_98.zip</td><td>[PC-9801] Intruder -桜屋敷の探索-</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>ippatu_j_98.zip</td><td>[PC-9801] イッパツJANG!(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>irium_98.zip</td><td>[PC-9801] Irium (SC-55) (Vermouth, Gravis Ultrasound simulation)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>irtsere_98.zip</td><td>[PC-9801] イーリス亭小夜曲</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>isaku_98.zip</td><td>[PC-9801] 遺作</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>ishido_98.zip</td><td>[PC-9801] 石道(BEEP)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>ishin98.zip</td><td>[PC-9801] 維新の嵐</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>ishinkai_98.zip</td><td>[PC-9801] 維新開国</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>itsuka_98.zip</td><td>[PC-9801] エロチックBAKAノベル2 いつかどこかで。</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>iuc001_98.zip</td><td>[PC-9801] IdesUserClubディスク会報 Vol.1</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>iuc002_98.zip</td><td>[PC-9801] IdesUserClubディスク会報 Vol.2</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>iuc003_98.zip</td><td>[PC-9801] IdesUserClubディスク会報 Vol.3</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>iuc004_98.zip</td><td>[PC-9801] IdesUserClubディスク会報 Vol.4</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>jack_98.zip</td><td>[PC-9801] JACK -背徳の女神-</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>janjaka_98.zip</td><td>[PC-9801] 雀JAKA雀</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>jankirou_98.zip</td><td>[PC-9801] 雀妃楼</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>jealousy_98.zip</td><td>[PC-9801] ジェラシー(OPN)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>jesus298.zip</td><td>[PC-9801] JESUS II(SPB)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>jikochu2_98.zip</td><td>[PC-9801] ぎゅわんぶらあ自己中心派2 自称! 強豪雀士編(BEEP)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>jikochu98.zip</td><td>[PC-9801] ぎゅわんぶらあ自己中心派(BEEP)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>jin_quiz_98.zip</td><td>[PC-9801] 人生クイズゲームだ</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>jinmon_98.zip</td><td>[PC-9801] 尋問遊戯</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>jinn_98.zip</td><td>[PC-9801] JINN ～永遠の勇士～(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>jnbgszm_98.zip</td><td>[PC-9801] 雀ボーグすずめ</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>joshua_98.zip</td><td>[PC-9801] JOSHUA ～異世界伝承～</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>jp4_98.zip</td><td>[PC-9801] ジャンパー4</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>jpbash98.zip</td><td>[PC-9801] JAPAN BASHING</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>jt2_98.zip</td><td>[PC-9801] 雀皇登龍門II(MT-32 Emulation)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>jyb_98.zip</td><td>[PC-9801] JYB ～メハメ・ハルーガは秘密の呪文～</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>k-marian_98.zip</td><td>[PC-9801] 機械じかけのマリアン(SC-55)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>k_chojin_98.zip</td><td>[PC-9801] 拘束超人</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>kaerimc_98.zip</td><td>[PC-9801] 帰り道は危険がいっぱい</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>kajitsu_98.zip</td><td>[PC-9801] 狂った果実</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>kakyusei_98.zip</td><td>[PC-9801] 下級生</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>kanako_98.zip</td><td>[PC-9801] 香奈子</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>kanim_98.zip</td><td>[PC-9801] 蟹味噌</td><td>—</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>kankin_98.zip</td><td>[PC-9801] 監禁(OPN)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>karanon_98.zip</td><td>[PC-9801] 殻の中の小鳥(SC-55)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>SB16、beep</td></tr>
+<tr><td>kareina2_98.zip</td><td>[PC-9801] 華麗なる人生2</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>kareina_98.zip</td><td>[PC-9801] 華麗なる人生 みなさんのおかげです。</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>kawais98.zip</td><td>[PC-9801] かわいそう物語</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>kawara_98.zip</td><td>[PC-9801] 河原崎家の一族</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>kekko2_98.zip</td><td>[PC-9801] けっこう仮面2 「おしおき伝説の巻」</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>kekko_98.zip</td><td>[PC-9801] けっこう仮面 「おしおきパラダイスの巻」</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>kemesis.zip</td><td>[PC-9801] KEMESIS (CO2-PRO)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>kgds98.zip</td><td>[PC-9801] 空軍大戦略</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>kibun98.zip</td><td>[PC-9801] 川中島異聞録</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>kikou2_98.zip</td><td>[PC-9801] 機甲師団II(MT-32 Emulation)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>kimidake_98.zip</td><td>[PC-9801] キミだけに愛を…</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>kinbaku_98.zip</td><td>[PC-9801] 緊縛の館(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>kingd_98.zip</td><td>[PC-9801] King's Dungeon The Story Of Heroes</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>kinketu_98.zip</td><td>[PC-9801] 禁断の血族</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>kira_98.zip</td><td>[PC-9801] キラキラ女・神・先・生</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>kirisima_98.zip</td><td>[PC-9801] 霧島診療室の午後(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>kisiden_98.zip</td><td>[PC-9801] 騎士伝説</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>kitojima_98.zip</td><td>[PC-9801] 鬼頭島女子刑務所(OPN)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>kizuato_98.zip</td><td>[PC-9801] 痕 -きずあと-(OPN)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>kmgmd_98.zip</td><td>[PC-9801] 神々の大地 古事記外伝</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>knight2_98.zip</td><td>[PC-9801] THE KNIGHTS2 何処からか来る小さな光(BEEP)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>koihime_98.zip</td><td>[PC-9801] 恋姫 Mystic Princess</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>kolinval.zip</td><td>[PC-9801] VAL-SOUND / Kolin2 sample data</td><td>—</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>konchu_98.zip</td><td>[PC-9801] 人間昆虫 覗き(OPN)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>konpeki2_98.zip</td><td>[PC-9801] 紺碧の艦隊2パーフェクト</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>konpeki_98.zip</td><td>[PC-9801] 紺碧の艦隊</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>korosi2_98.zip</td><td>[PC-9801] 殺しのドレス2</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>korosi3_98.zip</td><td>[PC-9801] 殺しのドレス3</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>kotetu_98.zip</td><td>[PC-9801] 小鉄の大冒険</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>kotohi_98.zip</td><td>[PC-9801] 琴緋ヶ丘物語</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>koukan2_98.zip</td><td>[PC-9801] こうかん日記第II章 ～聖夜をあなたと～(OPN)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>koukan_n_98.zip</td><td>[PC-9801] こうかん日記(OPN)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>kounai1_98.zip</td><td>[PC-9801] 校内写生1 世にもHな物語</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>kounai2_98.zip</td><td>[PC-9801] 校内写生2 美少女仮面の謎;美少女仮面見参!</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>kounai3_98.zip</td><td>[PC-9801] 校内写生3 セーラー服戦士アッコちゃん対美少女仮面</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>kouryu_98.zip</td><td>[PC-9801] 項劉記</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>krm_98.zip</td><td>[PC-9801] くるみちゃんにんじゃあ(SC-55)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>kurayami_98.zip</td><td>[PC-9801] 暗闇(OPN)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>kurodan_98.zip</td><td>[PC-9801] 黒の断章 THE LITERARY FRAGMENT(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>kuroken_98.zip</td><td>[PC-9801] 黒の剣</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>kusuriyb_98.zip</td><td>[PC-9801] くすり指の教科書(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>kyarukan_98.zip</td><td>[PC-9801] Kyarukan (OPN) (Toy Pops)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>kyoko_98.zip</td><td>[PC-9801] 恭子のいぢわる!! ～ハチャメチャ大進撃～(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>kyouhaku_98.zip</td><td>[PC-9801] 脅迫</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>kyouiku_98.zip</td><td>[PC-9801] 高見沢恭介 熱血!! 教育研修(MT-32 Emulation)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>kyrandia2_21.zip</td><td>[PC-9821] The Legend of Kyrandia: Hand of Fate (OPN)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>l-est_98.zip</td><td>[PC-9801] L-est ～エレスト～</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>l7impact_98.zip</td><td>[PC-9801] Libido7 IMPACT</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>laidi1_21.zip</td><td>[PC-9821] 雷の戦士ライディ</td><td>—</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>laidi1_98.zip</td><td>[PC-9801] 雷の戦士ライディ(MT-32 Emulation)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>laidi2_21.zip</td><td>[PC-9821] 雷の戦士ライディ2(MT-32 Emulation)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>laidi2_98.zip</td><td>[PC-9801] 雷の戦士ライディ2(MT-32 Emulation)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>lands_21.zip</td><td>[PC-9821] Lands of Lore(OPN)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>lastbr_98.zip</td><td>[PC-9801] LAST BREAKERS(OPNA) (CO2-PRO)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>lcompany_98.zip</td><td>[PC-9801] リーディングカンパニー</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>leap_98.zip</td><td>[PC-9801] LEAP ～時にさらわれた少女～</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>legam_98.zip</td><td>[PC-9801] Legam (GS) (Vermouth, Gravis Ultrasound simulation)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>lemmona_98.zip</td><td>[PC-9801] レモンエンジェル(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>leocyz_98.zip</td><td>[PC-9801] Leo Cyzoyd (OPN) (ASCII)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>lesserm98.zip</td><td>[PC-9801] Lesser Mern</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>lesson_98.zip</td><td>[PC-9801] 官能教習(SC-55)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>letpirat_21.zip</td><td>[PC-9821] Let's!パイレーツ ～とらぶる・ばかんす～(MT-32 Emulation)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>lguard1_98.zip</td><td>[PC-9801] Last Guardian ～獣郷の守護者～</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>liberty_98.zip</td><td>[PC-9801] LIBERTY</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>libido7_98.zip</td><td>[PC-9801] Libido7 (GS) (Vermouth, Gravis Ultrasound simulation)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>liena_98.zip</td><td>[PC-9801] リィナ☆クリスタル(SC-55)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>lifemusc_98.zip</td><td>[PC-9801] LIFE IS MUSIC</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>like_98.zip</td><td>[PC-9801] LIKE</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>lilith_98.zip</td><td>[PC-9801] リリス(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>lime_01_98.zip</td><td>[PC-9801] 宝魔ハンターライム 第01話</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>lime_02_98.zip</td><td>[PC-9801] 宝魔ハンターライム 第02話</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>lime_03_98.zip</td><td>[PC-9801] 宝魔ハンターライム 第03話</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>lime_04_98.zip</td><td>[PC-9801] 宝魔ハンターライム 第04話</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>lime_05_98.zip</td><td>[PC-9801] 宝魔ハンターライム 第05話</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>lime_06_98.zip</td><td>[PC-9801] 宝魔ハンターライム 第06話</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>lime_07_98.zip</td><td>[PC-9801] 宝魔ハンターライム 第07話</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>lime_08_98.zip</td><td>[PC-9801] 宝魔ハンターライム 第08話(BEEP)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>lime_09_98.zip</td><td>[PC-9801] 宝魔ハンターライム 第09話(BEEP)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>lime_10_98.zip</td><td>[PC-9801] 宝魔ハンターライム 第10話(BEEP)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>lime_11_98.zip</td><td>[PC-9801] 宝魔ハンターライム 第11話(BEEP)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>lime_12_98.zip</td><td>[PC-9801] 宝魔ハンターライム 第12話(BEEP)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>lime_98.zip</td><td>[PC-9801] ライム</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>lipple_98.zip</td><td>[PC-9801] 麻雀美少女伝 リップル</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>lipsadv2_98.zip</td><td>[PC-9801] リップスティックアドベンチャー2</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>lipsadv3_98.zip</td><td>[PC-9801] リップスティックアドベンチャー3</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>little_v_98.zip</td><td>[PC-9801] Little Vampire</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>lixus_98.zip</td><td>[PC-9801] リクサス</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>lm_98.zip</td><td>[PC-9801] LORD MONARCH(BEEP)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>lm_towns.zip</td><td>[FM TOWNS] Lord Monarch (ロードモナーク)</td><td>—</td><td>○</td><td>—</td><td>—</td><td>TOWNS</td></tr>
+<tr><td>lmpereur_98.zip</td><td>[PC-9801] L'EMPEREUR</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>lmspb_98.zip</td><td>[PC-9801] LORD MONARCH (スピークボード専用体験版)</td><td>—</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>lodrun98.zip</td><td>[PC-9801] 保存版Lode Runner</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>logical_98.zip</td><td>[PC-9801] LOGICAL</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>loop_98.zip</td><td>[PC-9801] :LOOP ～いざなひの回帰点～</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>lop_98.zip</td><td>[PC-9801] Lord of Panzers</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>loshalic_98.zip</td><td>[PC-9801] Legend of Shalice</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>love2_98.zip</td><td>[PC-9801] Love Love パラダイス</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>love_e_98.zip</td><td>[PC-9801] LOVE ESCALATOR(OPN)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>love_ed2_98.zip</td><td>[PC-9801] Love Escalator Demonstration Alternate Version (OPN)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>lovep_98.zip</td><td>[PC-9801] LOVE PHANTOM</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>lovey_98.zip</td><td>[PC-9801] ラブィーニ</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>lsp_98.zip</td><td>[PC-9801] light SOUP processor sample</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>lua_98.zip</td><td>[PC-9801] Lua</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>luna2_98.zip</td><td>[PC-9801] Lunatic Dawn 2 (GM) (Vermouth, Gravis Ultrasound simulation)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>luna_98.zip</td><td>[PC-9801] Lunatic Dawn (SC-55) (Vermouth, Gravis Ultrasound simulation)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>lvaccus_98_fix.zip</td><td>[PC-9801] Lightning Vaccus: The Knight of Iron (ライトニングバッカス -The Knight of Iron-) (OPN)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>m123_98.zip</td><td>[PC-9801] 魔導物語1-2-3(BEEP)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>m_age_98.zip</td><td>[PC-9801] マーシャルエイジ</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>m_futari_98.zip</td><td>[PC-9801] 魔法の天使クリィミーマミ ～2人の輪舞(ロンド)～</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>m_futatu_98.zip</td><td>[PC-9801] 魔法の天使クリィミーマミ ～2つの世界の物語～</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>m_storys_98.zip</td><td>[PC-9801] Marginal Storys(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>madara_98.zip</td><td>[PC-9801] Mouryousenki Madara: Daikon Gourin hen (魍魎戦記ＭＡＤＡＲＡ 大金剛輪編) (OPN)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>madol_98.zip</td><td>[PC-9801] 魔人形(OPN)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>mador_98.zip</td><td>[PC-9801] 魔導学院R</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>madp_98.zip</td><td>[PC-9801] MAD PARADOX</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>magic++_98.zip</td><td>[PC-9801] Magic++ マジクリメント なりゆきまかせの虹色勇者</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>magicalp_98.zip</td><td>[PC-9801] まじかるパニック(OPN)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>magicb_98.zip</td><td>[PC-9801] 魔法少女B子</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>magjam_98.zip</td><td>[PC-9801] 魔法少女隊うぉーず マジカルジャム</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>mahabara_98.zip</td><td>[PC-9801] マハ・バラタ</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>mai_98.zip</td><td>[PC-9801] 舞★MAI ふにふにぱぴゅーん・と言わせちゃる!</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>maisok98.zip</td><td>[PC-9801] めぞん一刻完結篇 ～さよなら、そして～</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>majogari_98.zip</td><td>[PC-9801] 魔女狩りの夜に</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>majokko_98.zip</td><td>[PC-9801] まじょっ子ぱらだいす(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>majoriko_98.zip</td><td>[PC-9801] 魔浄理子 淫靡界(OPN+MT-32 Emulation)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>makyoden_98.zip</td><td>[PC-9801] 魔京伝</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>manadok1_98.zip</td><td>[PC-9801] まなみのどこまでイクの?</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>manadok2_98.zip</td><td>[PC-9801] まなみのどこまでイクの? 2 リターンオブTHE黒パック</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>manami_98.zip</td><td>[PC-9801] 真奈美 ～愛と交換の日々～</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>mandara_98.zip</td><td>[PC-9801] 曼陀羅家一族</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>maniax_98.zip</td><td>[PC-9801] 教育実習 ～女子高生マニアックス～</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>marble98.zip</td><td>[PC-9801] MARBLE MADNESS</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>margarita_98.zip</td><td>[PC-9801] Datsui Mahjong Margarita (マルガリータ) (OPN) (Splush Wave)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>maria_b_98.zip</td><td>[PC-9801] マリアに捧げるバラード</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>marinb_98.zip</td><td>[PC-9801] MARINE BUSTER</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>marine_f_98.zip</td><td>[PC-9801] マリンフィルト</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>mariner_98.zip</td><td>[PC-9801] Marine Rouge (SC-55) (Vermouth, Gravis Ultrasound simulation)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>marines_98.zip</td><td>[PC-9801] マリンズ ガイロムの封印</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>marion_98.zip</td><td>[PC-9801] Marion(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>maririn_98.zip</td><td>[PC-9801] スーパーウルトラむっちんぷりぷりサイボーグ マリリンDX</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>marple98.zip</td><td>[PC-9801] ま～ぷる・まぢっく(MT-32 Emulation)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>mars_98.zip</td><td>[PC-9801] 魔導物語A・R・S(BEEP)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>masaikoj_98.zip</td><td>[PC-9801] 麻彩子雀</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>mastrs98.zip</td><td>[PC-9801] 遥かなるオーガスタ2 マスターズ(BEEP)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>masyo_k_98.zip</td><td>[PC-9801] 魔性の貌(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>mayumi_98.zip</td><td>[PC-9801] Mayumi -まゆみ-</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>mazekun_98.zip</td><td>[PC-9801] コンストラクション・ツール めいず君(BEEP)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>mbd_98.zip</td><td>[PC-9801] MOBILE DELIVERY (KuniSoft)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>mcandy_98.zip</td><td>[PC-9801] Making Candy ～お気に召すまま～</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>mchan_21.zip</td><td>[PC-9821] Mゥーンライトちゃんリンしゃん</td><td>—</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>mchan_98.zip</td><td>[PC-9801] Mゥーンライトちゃんリンしゃん</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>mcooking_98.zip</td><td>[PC-9801] Marble Cooking</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>mcrs_ls_98.zip</td><td>[PC-9801] 超時空要塞マクロス ラブ･ストーリーズ</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>mcrs_rm_98.zip</td><td>[PC-9801] 超時空要塞マクロス リメンバー･ミー</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>mcrs_sl_98.zip</td><td>[PC-9801] 超時空要塞マクロス スカルリーダー</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>mcrs_slc_98.zip</td><td>[PC-9801] 超時空要塞マクロス スカルリーダー コンプリートパック</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>megami_98.zip</td><td>[PC-9801] ああっ女神さまっ!</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>meisou_98.zip</td><td>[PC-9801] 迷走都市(OPN)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>melroon_98.zip</td><td>[PC-9801] メルルーン</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>memoref_98.zip</td><td>[PC-9801] メモリーズリフレイン 思い出はいつまでも…</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>memories_98.zip</td><td>[PC-9801] メモリーズ ～白い夜空に舞う天使～</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>mercury_98.zip</td><td>[PC-9801] MERCURY - THE PRIME MASTER -</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>mermer_98.zip</td><td>[PC-9801] メル・メル Melty Marchen</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>merrygr_98.zip</td><td>[PC-9801] Merry Go Round (GS) (Vermouth, Gravis Ultrasound simulation)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>mesuneko_98.zip</td><td>[PC-9801] 牝猫秘書室(OPN)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>metajo_98.zip</td><td>[PC-9801] メタ女 ～府立メタトポロジー大学付属女子高校SP～(OPNA+SSGPCM)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>metajod_98.zip</td><td>[PC-9801] 府立メタトポロジー大学付属女子高校(OPN+SSGPCM) (R-FORCE software)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>metal1_98.zip</td><td>[PC-9801] METAL EYE</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>metal2_98.zip</td><td>[PC-9801] METAL EYE2</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>metamol_98.zip</td><td>[PC-9801] メタモル･ミーナ</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>mforce98.zip</td><td>[PC-9801] METAL FORCE(SPB)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>mfork98.zip</td><td>[PC-9801] METAL FORK (KuniSoft)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>mgaina_98.zip</td><td>[PC-9801] みにまむがいなろっく</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>mgakuen_98.zip</td><td>[PC-9801] 迷宮学園祭 旧校舎の謎</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>mgamescr_98.zip</td><td>[PC-9801] マルチゲームScripter</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>mgarms98.zip</td><td>[PC-9801] MEGATON ARMS</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>michael98.zip</td><td>[PC-9801] What's Michael?</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>michiyo98.zip</td><td>[PC-9801] みちよドリーミィ - THE QUIZ MASTER -(OPN)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>mighty_l_98.zip</td><td>[PC-9801] 爆裂クイズ 戦え! マイティルナ</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>miho_98.zip</td><td>[PC-9801] 美穂 ～桃色病棟・面会謝絶!～</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>mikisotu_98.zip</td><td>[PC-9801] 卒業写真・美姫</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>milk_1_98.zip</td><td>[PC-9801] エキサイティングみるく 第1話(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>milk_2_98.zip</td><td>[PC-9801] エキサイティングみるく 第2話(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>mime_98.zip</td><td>[PC-9801] 舞夢 -MIME-(OPN)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>minateio_98.zip</td><td>[PC-9801] なんば金融伝 ミナミの帝王</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>minktoy1_98.zip</td><td>[PC-9801] ミンクのおもちゃ箱 Vol.01</td><td>—</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>minktoy2_98.zip</td><td>[PC-9801] ミンクのおもちゃ箱 Vol.02</td><td>—</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>minktoy3_98.zip</td><td>[PC-9801] ミンクのおもちゃ箱 Vol.03</td><td>—</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>mirage2_98.zip</td><td>[PC-9801] Mirage2 トリーXニートXローンの大冒険(MT-32 Emulation)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>mirage_98.zip</td><td>[PC-9801] Mirage(MT-32 Emulation)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>mirror_98.zip</td><td>[PC-9801] 鏡 -mirror-(MT-32 Emulation)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>misat_98.zip</td><td>[PC-9801] みさとちゃんの夢日記(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>mischif_98.zip</td><td>[PC-9801] MISCHIF</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>mission_98.zip</td><td>[PC-9801] MISSION</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>mistyblue98.zip</td><td>[PC-9801] MISTY BLUE</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>mistyfl_98.zip</td><td>[PC-9801] 時空捜査官プリティエンジェル ミスティフラッシュ</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>miwaku_98.zip</td><td>[PC-9801] 誘惑の吐息(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>miwaku_c_98.zip</td><td>[PC-9801] 魅惑の調書(SC-55)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>SB16、beep</td></tr>
+<tr><td>mj3gok98.zip</td><td>[PC-9801] 麻雀三国志演義</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>mj_prin_98.zip</td><td>[PC-9801] 麻雀プリンセスGO!GO!</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>mjclnc98.zip</td><td>[PC-9801] 麻雀クリニック 増刊号</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>mjgensk1_98.zip</td><td>[PC-9801] 麻雀幻想曲(OPN)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>mjgensk2_98.zip</td><td>[PC-9801] 麻雀幻想曲II(SC-55)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>mjgensk3_98.zip</td><td>[PC-9801] 麻雀幻想曲III(SC-55)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>mjm_98.zip</td><td>[PC-9801] 魔雀夢(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>mjpon_21.zip</td><td>[PC-9821] 麻雀でPON!(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>mjpon_98.zip</td><td>[PC-9801] 麻雀でPON!(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>mjyuen_98.zip</td><td>[PC-9801] 麻雀遊園地</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>mlancer_98.zip</td><td>[PC-9801] メルティランサー</td><td>—</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>mle2_98.zip</td><td>[PC-9801] MOON LIGHT ENERGY 2(OPN)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>mle_98.zip</td><td>[PC-9801] MOON LIGHT ENERGY</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>mmaker_98.zip</td><td>[PC-9801] モンスターメーカー</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>mmj_98.zip</td><td>[PC-9801] メタルムーバー ジャストライク</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>mnkymomo_98.zip</td><td>[PC-9801] 魔法のプリンセス ミンキーモモ ファンタスティック・ワールド</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>mobiusr_98.zip</td><td>[PC-9801] メビウスロイド</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>mofm298.zip</td><td>[PC-9801] Master of Monsters II</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>mofm98.zip</td><td>[PC-9801] Master of Monsters</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>mofmf98.zip</td><td>[PC-9801] Master of Monsters Final</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>mogler_98.zip</td><td>[PC-9801] MOGLER</td><td>—</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>moko_98.zip</td><td>[PC-9801] 性戦士もっこりまん</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>mokorpg_98.zip</td><td>[PC-9801] もっこりまんRPG(OPN)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>momoirmj_98.zip</td><td>[PC-9801] 桃色麻雀</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>momoko_98.zip</td><td>[PC-9801] ももこちゃん for Me ～見習い看護婦編～(OPN)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>monzetu_98.zip</td><td>[PC-9801] 悶絶ファイター</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>morang98.zip</td><td>[PC-9801] CYBER BLOCK METAL ORANGE</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>mp_98.zip</td><td>[PC-9801] Mercurius Pretty</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>mp_box_98.zip</td><td>[PC-9801] まぺっとぼっくす</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>mps_98.zip</td><td>[PC-9801] マルチペイント・(秘)お楽しみセットvol.1</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>mrprop98.zip</td><td>[PC-9801] Mr.プロ野球 PERFECT(BEEP)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>mrt_98.zip</td><td>[PC-9801] モラトリアム</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>mshowpmd.zip</td><td>[PC-9801] スピークボード MUSIC SHOW (ROOM2)</td><td>—</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>mshowyk2.zip</td><td>[PC-9801] スピークボード MUSIC SHOW (ROOM1)</td><td>—</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>msw98.zip</td><td>[PC-9801] プリンセスクエスト マージャンソード(OPN)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>mug-r_98.zip</td><td>[PC-9801] Mug-R (GS) (Vermouth, Gravis Ultrasound simulation)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>mugen_98.zip</td><td>[PC-9801] 夢幻泡影(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>mugenya_98.zip</td><td>[PC-9801] 夢幻夜想曲(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>mujinto2_98.zip</td><td>[PC-9801] 無人島物語2</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>multies_98.zip</td><td>[PC-9801] Multies (OPN) (A Inn)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>musabori_98.zip</td><td>[PC-9801] 慾 ～むさぼり～</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>myhomed2_98.zip</td><td>[PC-9801] My Home Dream 2</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>myuu_98.zip</td><td>[PC-9801] μ ～Myuu～(OPN)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>n3g8lk98.zip</td><td>[PC-9801] EIGHT LAKES G.C.(BEEP)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>n3gaug98.zip</td><td>[PC-9801] 遥かなるオーガスタ(BEEP)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>n3gdvl98.zip</td><td>[PC-9801] デビルズコース(BEEP)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>n3ghdp98.zip</td><td>[PC-9801] 遥かなるオーガスタ HD PACK(BEEP)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>n3gpbl98.zip</td><td>[PC-9801] ペブルビーチの波濤(BEEP)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>n3gtes98.zip</td><td>[PC-9801] T&amp;amp;E Selection(BEEP)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>n3gwai98.zip</td><td>[PC-9801] ワイアラエの奇蹟(BEEP)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>nadia98.zip</td><td>[PC-9801] ふしぎの海のナディア - THE SECRET OF THE BLUE WATER -(MT-32 Emulation)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>nanaei2_98.zip</td><td>[PC-9801] 七英雄物語II</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>nanaei_98.zip</td><td>[PC-9801] 七英雄物語(OPN)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>naomi_98.zip</td><td>[PC-9801] 奈緒美 ～美少女たちの館～</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>narumj_98.zip</td><td>[PC-9801] なる麻雀(OPN)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>natuava_98.zip</td><td>[PC-9801] 夏色アバンチュール</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>navitn98.zip</td><td>[PC-9801] ナビチューン・ドラゴン航海記</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>nazo_98.zip</td><td>[PC-9801] なぞぷよ(BEEP)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>necro_98.zip</td><td>[PC-9801] ネクロノミコン</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>nectrs98.zip</td><td>[PC-9801] NECTARIS</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>nekoex_98.zip</td><td>[PC-9801] ねこまんまEX(BEEP)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>nekomj_98.zip</td><td>[PC-9801] ねこまーぢゃん</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>never_98.zip</td><td>[PC-9801] Never Land ～ネバーランド～(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>nghtseep_98.zip</td><td>[PC-9801] NIGHT SEEP</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>nigatayu_98.zip</td><td>[PC-9801] 新潟遊園を探して…</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>night_s_98.zip</td><td>[PC-9801] Night Slave (GS) (Vermouth, Gravis Ultrasound simulation)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>night_w_98.zip</td><td>[PC-9801] ナイト・ウォーカー ～真夜中の探偵～</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>nightsft_98.zip</td><td>[PC-9801] ナイトシフター(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>nikki_98.zip</td><td>[PC-9801] 怪傑・NIKKI</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>niko2_98.zip</td><td>[PC-9801] Niko^2(MT-32 Emulation)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>nob_koz_98.zip</td><td>[PC-9801] NHK大河ドラマ 信長 -KING OF ZIPANGU-</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>noltia_98.zip</td><td>[PC-9801] NOLTIA(OPN+SSGPCM)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>nonomura_98.zip</td><td>[PC-9801] 野々村病院の人々</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>nooch1_98.zip</td><td>[PC-9801] ヌーク あばかれた陰謀</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>nooch2_98.zip</td><td>[PC-9801] ヌーク2 レミーの逆襲</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>nooch3_98.zip</td><td>[PC-9801] ヌーク3 最後の性戦(OPN)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>nostal98.zip</td><td>[PC-9801] NOSTALGIA 1907</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>nou_98.zip</td><td>[PC-9801] 脳力者</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>nova_98.zip</td><td>[PC-9801] NOVA ～魅入られた肢体～</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>nurse2_98.zip</td><td>[PC-9801] 電撃ナース2 ～モアセクシー～</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>nurse_98.zip</td><td>[PC-9801] 電撃ナース</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>nx93_98.zip</td><td>[PC-9801] NyaHaX'93</td><td>—</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>nzkykg_98.zip</td><td>[PC-9801] のぞき屋稼業(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>odanobu_98.zip</td><td>[PC-9801] 乱世英傑シリーズ 織田信長</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>oedor_98.zip</td><td>[PC-9801] 大江戸ルネッサンス</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>oerstd98.zip</td><td>[PC-9801] Oerstedia (GS) (Vermouth, Gravis Ultrasound simulation)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>oge_98.zip</td><td>[PC-9801] Olsaydeth General Education (OPN) (ASCII)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>ohkitune_98.zip</td><td>[PC-9801] Oh!きつねさま☆(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>oho_98.zip</td><td>[PC-9801] LOGIN DISK&amp;amp;BOOKシリーズ 北海道連鎖殺人事件 オホーツクに消ゆ</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>ohpai_98.zip</td><td>[PC-9801] Oh! Pai</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>okirakub_98.zip</td><td>[PC-9801] おきらくブロック ちょびんでるんるん♪ (TSUKKAsoftware)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>okuman2_98.zip</td><td>[PC-9801] 億万長者II</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>okuman3_98.zip</td><td>[PC-9801] 億万長者III</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>onlyyou_98.zip</td><td>[PC-9801] Only You ～世紀末のジュリエットたち～(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>orangerd98.zip</td><td>[PC-9801] きまぐれオレンジロード ～夏のミラージュ～</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>oshioki2.zip</td><td>[PC-9801] おしおきキライ! 2 (ほんわかソフト)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>ossaultp.zip</td><td>[PC-9801] OSSAULT PLUS(OPNA) (たぼはぜ工房)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>otome_98.zip</td><td>[PC-9801] 乙女戦記(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>otome_98m.zip</td><td>[PC-9801] Otome Senki (荵吝･ｳ謌ｦ險�) (GS) (Vermouth, Gravis Ultrasound simulation)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>outbr_98.zip</td><td>[PC-9801] OUT BREAKERS (CO2-PRO)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>outsider_98.zip</td><td>[PC-9801] とらぶるあうとさいだーず(OPN)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>oz98.zip</td><td>[PC-9801] Owl-Zoo(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>p_candy_98.zip</td><td>[PC-9801] ぺろぺろCandy ～陽の章～(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>p_club_98.zip</td><td>[PC-9801] パノラマ倶楽部(OPN)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>p_danger_98.zip</td><td>[PC-9801] ぷりんせすでんじゃあ(SC-55)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>p_school_98.zip</td><td>[PC-9801] Private School</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>pai2oja_98_fix.zip</td><td>[PC-9801] Pai Pai no Janko (パイパイお雀娘) (OPN)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>pal_98.zip</td><td>[PC-9801] PAL</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>palr_98.zip</td><td>[PC-9801] PAL リバイバル</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>panic_d_98.zip</td><td>[PC-9801] パニックドールズ(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>papa_98.zip</td><td>[PC-9801] パパラッチ(OPN)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>paradice_98.zip</td><td>[PC-9801] パラ・ダイス ～君は追い剥ぎを見たか?～</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>parena_98.zip</td><td>[PC-9801] Paradise Arena (極楽アリーナ) (OPN)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>patlabor_98.zip</td><td>[PC-9801] 機動警察パトレイバー OPERATION TOKYO BAY</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>pblue_98.zip</td><td>[PC-9801] パーフェクトブルー(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>pctv_98.zip</td><td>[PC-9801] PC's TV</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>pdoll2_98.zip</td><td>[PC-9801] Power Dolls 2 (GS) (Vermouth, Gravis Ultrasound simulation)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>pdoll2d_98.zip</td><td>[PC-9801] Power Dolls 2 Dash (GS) (Vermouth, Gravis Ultrasound simulation)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>pdoll2p_98.zip</td><td>[PC-9801] Power Dolls 2 Premium Disk (GS) (Vermouth, Gravis Ultrasound simulation)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>pdoll_98.zip</td><td>[PC-9801] Power Dolls (GS) (Vermouth, Gravis Ultrasound simulation)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>pdollp_98.zip</td><td>[PC-9801] Power Dolls 2 Premium Disk (GS) (Vermouth, Gravis Ultrasound simulation)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>pduo_98.zip</td><td>[PC-9801] Present Duo</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>pecker_98.zip</td><td>[PC-9801] PECKER</td><td>—</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>pent2_98.zip</td><td>[PC-9801] Pentium 2 (OPN) (Nampurrow)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>pent_98.zip</td><td>[PC-9801] Pentium (OPN) (Nampurrow)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>persia98.zip</td><td>[PC-9801] PRINCE of PERSIA</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>persona_98.zip</td><td>[PC-9801] PERSONA ～淫虐の仮面～</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>phobos_98.zip</td><td>[PC-9801] PHOBOS</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>photog_98.zip</td><td>[PC-9801] PhotoGenic -フォトジェニック-(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>pia_98.zip</td><td>[PC-9801] Piaキャロットへようこそ!!</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>pinksox1_98.zip</td><td>[PC-9801] PINK SOX</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>pinksox2_98.zip</td><td>[PC-9801] PINK SOX2</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>pinksox3_98.zip</td><td>[PC-9801] PINK SOX3</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>pinksox4_98.zip</td><td>[PC-9801] PINK SOX4</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>pinksox5_98.zip</td><td>[PC-9801] PINK SOX5</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>pinksox6_98.zip</td><td>[PC-9801] PINK SOX6</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>pinksox7_98.zip</td><td>[PC-9801] PINK SOX7</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>pinky1_98.zip</td><td>[PC-9801] PINKY･PONKY 第1集 びゅーてぃふる・どりーむ</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>pinky2_98.zip</td><td>[PC-9801] PINKY･PONKY 第2集 とわいらいと・げーむす</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>pinky3_98.zip</td><td>[PC-9801] PINKY･PONKY 第3集 ばとる・らばーす</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>pipedrm98.zip</td><td>[PC-9801] Pipe Dream(BEEP)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>pixygrdn_98.zip</td><td>[PC-9801] PIXY GARDEN ～妖精伝説～</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>pkmjmtr_98.zip</td><td>[PC-9801] PickUP♪ 麻雀マスター</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>plymodel_98.zip</td><td>[PC-9801] ポリゴン モデリングツクール</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>pm2_98.zip</td><td>[PC-9801] Princess Maker 2 (GM) (Vermouth, Gravis Ultrasound simulation)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>pmfoot98.zip</td><td>[PC-9801] PlayMaker FOOTBALL</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>pmydoll_98.zip</td><td>[PC-9801] Pure My Doll</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>pnzrkl98.zip</td><td>[PC-9801] Panzer Keil - BLITZKRIEG II -</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>pocky2_98.zip</td><td>[PC-9801] ポッキー2 ～怪人赤マントの挑戦～(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>poison_98.zip</td><td>[PC-9801] ぽわぞん ～六人の魔女～</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>poison_n_98.zip</td><td>[PC-9801] Poison Needle(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>polyshu_98.zip</td><td>[PC-9801] ポリゴン シューティングツクール</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>ponkan_98.zip</td><td>[PC-9801] PONKAN(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>ponyon_98.zip</td><td>[PC-9801] くっつきパズル PONYON</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>popful_98.zip</td><td>[PC-9801] ぽっぷるメイル(BEEP)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>poplus2_98.zip</td><td>[PC-9801] POPULOUS II -Trials of the Olympian Gods-</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>poplus98.zip</td><td>[PC-9801] POPULOUS</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>posesso_98.zip</td><td>[PC-9801] Possessioner</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>power_sl_98.zip</td><td>[PC-9801] POWER SLAVE</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>powerm_98.zip</td><td>[PC-9801] Powermonger</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>poy_98.zip</td><td>[PC-9801] POY</td><td>—</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>ppdisk04_98.zip</td><td>[PC-9801] PP DISK No.04</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>ppdsk10_98.zip</td><td>[PC-9801] PP Disc 10 (OPN) (Mediax)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>ppdsk6_98.zip</td><td>[PC-9801] PP Disc 6 (OPN) (mediax)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>pq_98.zip</td><td>[PC-9801] くるくる☆Party ～プリンセス・クエスト～</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>prdscard_98.zip</td><td>[PC-9801] Paradise Card</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>premium2_98.zip</td><td>[PC-9801] PREMIUM II</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>premium_98.zip</td><td>[PC-9801] PREMIUM</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>present_98.zip</td><td>[PC-9801] Present (MT-32 Emulation)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>prgtr_98.zip</td><td>[PC-9801] Progenitor</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>promise_98.zip</td><td>[PC-9801] やくそく ～PROIMISE～</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>providen_98.zip</td><td>[PC-9801] プロヴィデンツァ</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>pspace_98.zip</td><td>[PC-9801] Primal Space</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>pstdntg_98.zip</td><td>[PC-9801] ぷろすちゅーでんとG</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>psyo98.zip</td><td>[PC-9801] PSY-O-BLADE</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>psyuki98.zip</td><td>[PC-9801] 卍PSY幽記(OPNA)</td><td>—</td><td>○</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>pt_anth2_98.zip</td><td>[PC-9801] 雀ボーグすずめ (ポニーテールAnthology vol.2)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>pure2_98.zip</td><td>[PC-9801] PURE II</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>puyo2_98.zip</td><td>[PC-9821] ぷよぷよ通(SB16)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>SB16、beep</td></tr>
+<tr><td>puyo_98.zip</td><td>[PC-9801] ぷよぷよ(BEEP)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>puzznic_98.zip</td><td>[PC-9801] PUZZNIC</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>pwmajan2_98.zip</td><td>[PC-9801] 今夜も朝までPOWERFULまぁじゃん2</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>pwmajan_98.zip</td><td>[PC-9801] 今夜も朝までPOWERFULまぁじゃん</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>pwrdarby_98.zip</td><td>[PC-9801] パワーダービー THE DERBY SIMULATION</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>pwrsngd_98.zip</td><td>[PC-9801] POWER SINGER - ELLANCE SAGA #1 (DEMO)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>pzltp98.zip</td><td>[PC-9801] 芦ヶ原信之のパズルトピア</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>q_letsgo_98.zip</td><td>[PC-9801] クイズでレッツゴー!!</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>qod_98.zip</td><td>[PC-9801] the Queen of Duellist</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>qodh_98.zip</td><td>[PC-9801] the Queen of Duellist HYPER VERSION</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>qoffght98.zip</td><td>[PC-9801] Queen of Fighter (OPN) (Nekomimi Soft)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>qouji_98.zip</td><td>[PC-9801] 惑星ΩのQ王子(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>qroad2_98.zip</td><td>[PC-9801] Quintia Road II</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>qsangk98.zip</td><td>[PC-9801] クイズ知略の覇者 三国志奇譚</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>queen_98.zip</td><td>[PC-9801] クイーンズ・ライブラリー</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>queencup_98.zip</td><td>[PC-9801] ギャンブラー Queen's Cup</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>queensl_98.zip</td><td>[PC-9801] クイーンソフト ライブラリー 年内特別バージョン</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>qztono98.zip</td><td>[PC-9801] クイズ殿様の野望 全国版</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>r_san_98.zip</td><td>[PC-9801] 龍王三國志(OPN+GS)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>r_sanpb_98.zip</td><td>[PC-9801] 龍王三國志 パワーボックス(OPN+GS)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>ragalice_98.zip</td><td>[PC-9801] Rushing Anesthesia Girl Alice (OPN) (Shining Field)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>ragnrk98.zip</td><td>[PC-9801] Ragnar0kkr (SC-55) (Vermouth, Gravis Ultrasound simulation)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>raika_98.zip</td><td>[PC-9801] 蕾花 ～花仙宮～</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>rakuen1_21.zip</td><td>[PC-9821] ここは楽園荘</td><td>—</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>rakuen1_98.zip</td><td>[PC-9801] ここは楽園荘</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>rakuen2_21.zip</td><td>[PC-9821] ここは楽園荘2</td><td>—</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>rakuen2_98.zip</td><td>[PC-9801] ここは楽園荘2</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>rakuen_98.zip</td><td>[PC-9801] 失われた楽園</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>rall3_98.zip</td><td>[PC-9801] 超次元伝説RALL III ～覚醒編～(OPN)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>rance1_98.zip</td><td>[PC-9801] Rance -光を求めて-</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>rance2_98.zip</td><td>[PC-9801] Rance II -反逆の少女たち-</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>rance3h_98.zip</td><td>[PC-9801] Rance III -リーザス陥落- ヒントディスク</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>rance4_1_98.zip</td><td>[PC-9801] Rance 4.1 ～お薬工場を救え～(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>rance4_2_98.zip</td><td>[PC-9801] Rance 4.2 ～エンジェル組～(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>rance4_98.zip</td><td>[PC-9801] Rance IV -教団の遺産-(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>rance4d_98.zip</td><td>[PC-9801] Rance IV -教団の遺産- デモ</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>ranma_98.zip</td><td>[PC-9801] らんま1/2 飛龍伝説</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>ranmaru_98.zip</td><td>[PC-9801] 蘭丸</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>ranze_98.zip</td><td>[PC-9801] 戦国強者絵巻 RANZE(乱世)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>rarue_98.zip</td><td>[PC-9801] RARUE(BEEP)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>ray-gun_98.zip</td><td>[PC-9801] RAY-GUN</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>red_98.zip</td><td>[PC-9801] RED(MT-32 Emulation)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>redcobra_98.zip</td><td>[PC-9801] レッドコブラ(OPN)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>redeye_98.zip</td><td>[PC-9801] Red Eye (OPN) (Splush Wave)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>refight98.zip</td><td>[PC-9801] ReFIGHT (GroupR204)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>regpow1_98.zip</td><td>[PC-9801] REGIONAL POWER</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>regpow2_98.zip</td><td>[PC-9801] REGIONAL POWER II</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>regpow3_98.zip</td><td>[PC-9801] REGIONAL POWER III</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>reijoum_98.zip</td><td>[PC-9801] 令嬢物語(OPN)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>reiko_98.zip</td><td>[PC-9801] 学園退魔伝レイコ</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>reira_98.zip</td><td>[PC-9801] REIRA SLAVE (奴麗) DOLL</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>rekiai_98.zip</td><td>[PC-9801] 轢愛(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>reno_98.zip</td><td>[PC-9801] Re-No: Stayin' Alive (GS) (Vermouth, Gravis Ultrasound simulation)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>resulect_98.zip</td><td>[PC-9801] リザレクト</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>reverse_98.zip</td><td>[PC-9801] リバース</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>revery_98.zip</td><td>[PC-9801] Revery ～いざないの魔水晶～(OPN)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>rey1_98.zip</td><td>[PC-9801] 聖少女戦隊レイカーズ</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>rey2_98.zip</td><td>[PC-9801] 聖少女戦隊レイカーズII</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>rey3_98.zip</td><td>[PC-9801] 聖少女戦隊レイカーズIII</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>rhymes98.zip</td><td>[PC-9801] RHYME STAR(OPN)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>ribbon_98.zip</td><td>[PC-9801] Ribbon (GS) (Vermouth, Gravis Ultrasound simulation)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>rigyuru_98.zip</td><td>[PC-9801] Rigyuru (りきゅ～る！！) (OPN) (Atelier Oz)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>rina_98.zip</td><td>[PC-9801] 魔法少女りな</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>ringm2_98.zip</td><td>[PC-9801] リングマスターII 永遠なる想い</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>ringm_98.zip</td><td>[PC-9801] リングマスター フィリアス・ノギスの暗雲</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>ringout_21.zip</td><td>[PC-9821] リング・アウト!!(MT-32 Emulation)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>ringout_98.zip</td><td>[PC-9801] リング・アウト!!(MT-32 Emulation)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>rinkan_g_98.zip</td><td>[PC-9801] 林間学校</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>ripcafe_98.zip</td><td>[PC-9801] Ripple Cafe</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>risky_98.zip</td><td>[PC-9801] 輝け! キラキラ戦士 リスキージュエル</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>rnnyotai_98.zip</td><td>[PC-9801] 乱交女体釣り もっこりまんのナニでヌシ釣り(OPN)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>roboc298.zip</td><td>[PC-9801] ROBO CRUSH 2 -熱波の王者-</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>robocr98.zip</td><td>[PC-9801] ROBO CRUSH 98</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>rolling.zip</td><td>[PC-9801] ろりろりろーりんぐ</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>rolling95.zip</td><td>[PC-9801] ROLLING95</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>romans_98.zip</td><td>[PC-9801] ロマンスは剣の輝き -THE LAST CRUSADER-</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>rome_98.zip</td><td>[PC-9801] ローマは一日にしてならず(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>rondo_98.zip</td><td>[PC-9801] RONDO -ロンド-(SC-55)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>rookies_98.zip</td><td>[PC-9801] Rookies</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>rose_98.zip</td><td>[PC-9801] Rose (ロゼ) (OPN)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>rouge_d_98.zip</td><td>[PC-9801] ルージュの伝説(MT-32 Emulation)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>roundwar_98.zip</td><td>[PC-9801] Round Warrior (GM) (Vermouth, Gravis Ultrasound simulation)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>rouranmd_98.zip</td><td>[PC-9801] Rouran Software Music Disk (OPN) (Atelier Oz)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>route246_98.zip</td><td>[PC-9801] 花王フロッピー劇場 ROUTE246殺人案内</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>royalbld_98.zip</td><td>[PC-9801] ロイヤルブラッド</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>runrun_98.zip</td><td>[PC-9801] RUNRUN狂走曲</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>ruriiro_98.zip</td><td>[PC-9801] 瑠璃色の雪(OPN)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>rusty98.zip</td><td>[PC-9801] Rusty(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>rw2_98.zip</td><td>[PC-9801] ルーンワース2 時空の神戦(BEEP)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>rw3_98.zip</td><td>[PC-9801] ルーンワース3 神聖紀光臨(BEEP)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>rw_98.zip</td><td>[PC-9801] Rune Worth 黒衣の貴公子(BEEP)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>rx2_98.zip</td><td>[PC-9801] Revival XANADU 2 Remix(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>rx2_98e.zip</td><td>[PC-9801] Revival XANADU 2 Remix (easy mode)(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>rx_98.zip</td><td>[PC-9801] Revival XANADU(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>ryouki2_98.zip</td><td>[PC-9801] 猟奇の檻 第二章(SC-55)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>ryouki_98.zip</td><td>[PC-9801] 猟奇の檻(SC-55)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>ryu98.zip</td><td>[PC-9801] Ryu ～哭きの竜より～(MT-32 Emulation)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>sa1_98.zip</td><td>[PC-9801] MG BOX (S.A.)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>sa2_98.zip</td><td>[PC-9801] MG BOX (S.A.2)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>sa3_98.zip</td><td>[PC-9801] MG BOX (S.A.3)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>sa4_98.zip</td><td>[PC-9801] S.A.4</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>sabnack98.zip</td><td>[PC-9801] Sabnack</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>sailor_98.zip</td><td>[PC-9801] Sailor Senshi (OPN) (Toshio Satow)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>saintd_98.zip</td><td>[PC-9801] せいんと☆だいあり …聖ちゃんの日記…(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>sakudair_98.zip</td><td>[PC-9801] MG BOX (サクサク大強盗Returns)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>sakur_98.zip</td><td>[PC-9801] 櫻の杜(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>san1_98.zip</td><td>[PC-9801] 三國志</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>san4_98.zip</td><td>[PC-9801] 三國志 IV</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>san4pk98.zip</td><td>[PC-9801] 三國志 IV with パワーアップキット(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>sanei_98.zip</td><td>[PC-9801] 三國志 英傑伝</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>sange_98.zip</td><td>[PC-9801] Sweet Angel</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>sanii98.zip</td><td>[PC-9801] 三國志 II</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>saniii98.zip</td><td>[PC-9801] 三國志 III</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>sanina_98.zip</td><td>[PC-9801] サニーナの伝説(MT-32 Emulation)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>saori_98.zip</td><td>[PC-9801] 沙織 ～美少女たちの館～</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>satyr_98.zip</td><td>[PC-9801] サティア(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>sayaka_98.zip</td><td>[PC-9801] 沙也香 ～義母～</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>sayonara_21.zip</td><td>[PC-9821] さよならの向こう側(86)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>sayonara_98.zip</td><td>[PC-9801] さよならの向こう側</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>sbp98.zip</td><td>[PC-9801] 倉庫番Perfect</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>sbr_98.zip</td><td>[PC-9801] 倉庫番Revenge</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>sbs30_98.zip</td><td>[PC-9801] 倉庫番Select30</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>sbsp_98.zip</td><td>[PC-9801] スーパーバトルスキンパニック</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>sc_98.zip</td><td>[PC-9801] STAR CRUISER</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>schgirl_98.zip</td><td>[PC-9801] スクール ガールズ</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>school_f_98.zip</td><td>[PC-9801] スクールフェスティバル ～秋桜祭奇譚～</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>schw4_98.zip</td><td>[PC-9801] Schwarzschild IV ～クレイドルエンド～</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>sd_98.zip</td><td>[PC-9801] Sword Dancer (SC-55) (Vermouth, Gravis Ultrasound simulation)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>sdante_98.zip</td><td>[PC-9801] Super Dante (OPN) (ASCII)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>sdepth_98.zip</td><td>[PC-9801] SUPER DEPTH</td><td>—</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>sdg_98.zip</td><td>[PC-9801] ソードダンサー 凶刃の女神(SC-55)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>sdsen98.zip</td><td>[PC-9801] SUPER大戦略98</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>sdwld_98.zip</td><td>[PC-9801] スーパードッグワールド</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>sdz93_98.zip</td><td>[PC-9801] SWORD DANCER 増刊号'93(MT-32 Emulation)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>sdz_98.zip</td><td>[PC-9801] SWORD DANCER 増刊号(MT-32 Emulation)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>secrete_98.zip</td><td>[PC-9801] SECRET EYES</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>seena98.zip</td><td>[PC-9801] SeeNa98</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>seifuku_98.zip</td><td>[PC-9801] 女子校制服物語</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>seiki_98.zip</td><td>[PC-9801] 性鬼 ～凌辱の仮面～</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>seilane_98.zip</td><td>[PC-9801] セイレーン</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>seirei_98.zip</td><td>[PC-9801] Seirei Senki (精霊仙記) (OPNA) (Nampurrow)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>sela_98.zip</td><td>[PC-9801] セーラ(OPN)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>senrn_98.zip</td><td>[PC-9801] 戦乱</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>seraphit_98.zip</td><td>[PC-9801] 聖翼学園セラフィタ(SC-88)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>setujuu_98.zip</td><td>[PC-9801] 雪猫 ～ゆがんだ記憶～</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>sex2_98.zip</td><td>[PC-9801] Sex 2 (GS) (Vermouth, Gravis Ultrasound simulation)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>sex_98.zip</td><td>[PC-9801] SEX</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>sexpress_98.zip</td><td>[PC-9801] セクスプレス</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>sfkmnsn_98.zip</td><td>[PC-9801] 制服マンション 只今マン室 -1号棟-</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>sfthd198.zip</td><td>[PC-9801] ソフトでハードな物語</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>sfthd298.zip</td><td>[PC-9801] ソフトでハードな物語2</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>sh_98.zip</td><td>[PC-9801] Steam-Heart's (SC-55) (Vermouth, Gravis Ultrasound simulation)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>shaburi_98.zip</td><td>[PC-9801] しゃぶり姫 ～陰の章～(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>shake1_98.zip</td><td>[PC-9801] しぇいく! しぇいく!</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>shake2_98.zip</td><td>[PC-9801] しぇいく! しぇいく! 2</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>shan2_98.zip</td><td>[PC-9801] SHANGRLIA 2</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>shan_98.zip</td><td>[PC-9801] SHANGRLIA</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>sharedem_98.zip</td><td>[PC-9801] シャレイドマジック</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>shikinjo_98.zip</td><td>[PC-9801] 紫禁城</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>shinc_98.zip</td><td>[PC-9801] Shinc (GS) (Vermouth, Gravis Ultrasound simulation)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>shinjuku_98.zip</td><td>[PC-9801] 新宿物語</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>shngh298.zip</td><td>[PC-9801] 上海 II</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>shogis2_98.zip</td><td>[PC-9801] 将棋聖天II</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>shogisk_98.zip</td><td>[PC-9801] 将棋最強</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>showdown_98.zip</td><td>[PC-9801] SHOW DOWN</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>shulk_21.zip</td><td>[PC-9821] SPACE HULK(OPN)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>shutend_98.zip</td><td>[PC-9801] 手天童子</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>silk2_98.zip</td><td>[PC-9801] ドラゴンマスターシルク2</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>silk_98.zip</td><td>[PC-9801] ドラゴンマスターシルク ～龍召還娘～ Epsode 2</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>sinwa98.zip</td><td>[PC-9801] 神話の島 ISLAND OF MYTH</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>sinwaden_98.zip</td><td>[PC-9801] 真倭伝 -覇刀の章-(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>sizuku_98.zip</td><td>[PC-9801] 雫 -しずく-(OPN)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>sk_98.zip</td><td>[PC-9801] ソーサルキングダム(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>sker_98.zip</td><td>[PC-9801] スカーミッシュ</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>skugyoku98.zip</td><td>[PC-9801] 新九玉伝</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>slancer98.zip</td><td>[PC-9801] SOLIDLANCER</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>slayers_98.zip</td><td>[PC-9801] スレイヤーズ</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>slinker_98.zip</td><td>[PC-9801] Sonic Linker(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>slrfgtr_98.zip</td><td>[PC-9801] 学園戦士セーラーファイター</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>solfleet_98.zip</td><td>[PC-9801] ソルフリート 太陽系連邦興隆記(MT-32 Emulation)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>sorc98.zip</td><td>[PC-9801] SORCERIAN - Dragon Slayer V - (基本シナリオ)(BEEP)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>sorc98ut.zip</td><td>[PC-9801] SORCERIAN - Dragon Slayer V - (ユーティリティVol.1)(BEEP)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>sorc98v1.zip</td><td>[PC-9801] SORCERIAN - Dragon Slayer V - (追加シナリオVol.1)(BEEP)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>sorc98v10.zip</td><td>[PC-9801] SORCERIAN - Dragon Slayer V - (セレクテッドソーサリアン5)(BEEP)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>sorc98v4.zip</td><td>[PC-9801] SORCERIAN - Dragon Slayer V - (宇宙からの訪問者)(BEEP)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>sorc98v5.zip</td><td>[PC-9801] SORCERIAN - Dragon Slayer V - (ギルガメッシュソーサリアン)(BEEP)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>sorc98v6.zip</td><td>[PC-9801] SORCERIAN - Dragon Slayer V - (セレクテッドソーサリアン1)(BEEP)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>sorc98v7.zip</td><td>[PC-9801] SORCERIAN - Dragon Slayer V - (セレクテッドソーサリアン2)(BEEP)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>sorc98v8.zip</td><td>[PC-9801] SORCERIAN - Dragon Slayer V - (セレクテッドソーサリアン3)(BEEP)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>sorc98v9.zip</td><td>[PC-9801] SORCERIAN - Dragon Slayer V - (セレクテッドソーサリアン4)(BEEP)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>sotugyo2_98.zip</td><td>[PC-9801] 卒業II ～Neo Genetation～</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>sotugyo_98.zip</td><td>[PC-9801] 卒業 ～Graduation～</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>sp_line_98.zip</td><td>[PC-9801] 麻雀スポーツライン(OPN)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>spanof98.zip</td><td>[PC-9801] Span of Dream(MT-32 Emulation)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>spnd2_98.zip</td><td>[PC-9801] Spindizzy II</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>spstg_98.zip</td><td>[PC-9801] スペシャルステージ パリ～ダカール砂漠の疾走</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>srmp4_98.zip</td><td>[PC-9801] スーパーリアル麻雀PIV</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>sryokou_98.zip</td><td>[PC-9801] 卒業旅行</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>starcmd_98.zip</td><td>[PC-9801] スターコマンド 暗闇の侵略者</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>starpltn_98.zip</td><td>[PC-9801] Star Platinum(OPN)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>stars_98.zip</td><td>[PC-9801] STARS</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>starship_98.zip</td><td>[PC-9801] STAR/SHIP RENDEZVOUS</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>startrap_98.zip</td><td>[PC-9801] STAR TRAP</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>stelemy_98.zip</td><td>[PC-9801] 聖エレミヤ学園</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>stetris298.zip</td><td>[PC-9801] SUPER TETRIS2 + BOMBLISS</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>stgunyan.zip</td><td>[PC-9801] Steel GunNyan (Studio玄米茶)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>strad98.zip</td><td>[PC-9801] STRADIA</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>strange_98.zip</td><td>[PC-9801] ストレンジ・ワールド</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>striders_98.zip</td><td>[PC-9801] Star Striders (GS) (Vermouth, Gravis Ultrasound simulation)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>strodai2_98.zip</td><td>[PC-9801] ストロベリー★大戦略 II</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>sttmax2_98.zip</td><td>[PC-9801] 私立探偵マックス2 マスター・オブ・エレメンタル</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>sucharaka_98.zip</td><td>[PC-9801] Sucharaka Junior High School (私立すちゃらか女学院) (OPNA) (BMP)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>sukeban_98.zip</td><td>[PC-9801] スケバン戦国史 -PSYMEC SCHOOL WAR-</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>suki_98.zip</td><td>[PC-9801] 好き!</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>superdps_98.zip</td><td>[PC-9801] Super D.P.S</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>susum_ck_98.zip</td><td>[PC-9801] すすめ!超常現象研究部!!</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>sweet_e_98.zip</td><td>[PC-9801] Sweet Emotion(MT-32 Emulation)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>swetdays_98.zip</td><td>[PC-9801] ～Sweet Days～(OPN)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>syakyu2_98.zip</td><td>[PC-9801] Super野球道2</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>syakyu93_98.zip</td><td>[PC-9801] Super野球道'93</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>syakyulm_98.zip</td><td>[PC-9801] Super野球道リミテッド</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>syugorei_98.zip</td><td>[PC-9801] 俺は守護霊様!</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>t_backs_98.zip</td><td>[PC-9801] 爆裂少女隊Tバックス</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>t_cash_98.zip</td><td>[PC-9801] トラブルキャッシュ</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>taboo_98.zip</td><td>[PC-9801] 禁忌 Taboo</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>taiko2_98.zip</td><td>[PC-9801] 太閤立志伝 II</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>taiko_98.zip</td><td>[PC-9801] 太閤立志伝</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>tamago_r_98.zip</td><td>[PC-9801] たまご料理(OPN)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>tamamon_98.zip</td><td>[PC-9801] 魂の門 ダンテ「神曲」より</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>tania_98.zip</td><td>[PC-9801] TANIA ～タニア～(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>tarashi2_98.zip</td><td>[PC-9801] 太平洋の嵐2</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>tasogare_98.zip</td><td>[PC-9801] 黄昏の境界(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>taxi_98.zip</td><td>[PC-9801] TAXI幻夢譚 -ストレンジ・ワールド ACT.2-</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>tchaser1_98.zip</td><td>[PC-9801] トラぶるCHASER 第1話</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>tchaser2_98.zip</td><td>[PC-9801] トラぶるCHASER 第2話</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>tecera_98.zip</td><td>[PC-9801] テセラ ～キミは汚れた天使か聖なる魔女か!?～</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>teen_98.zip</td><td>[PC-9801] TEEN</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>teitok2_98.zip</td><td>[PC-9801] 提督の決断 II</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>teitok98.zip</td><td>[PC-9801] 提督の決断</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>tekkaman_98.zip</td><td>[PC-9801] 宇宙の騎士テッカマンブレード オービタルリング奪回作戦(MT-32 Emulation)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>ten3_bh_98.zip</td><td>[PC-9801] 天使たちの午後III番外編・反省版</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>ten5_98.zip</td><td>[PC-9801] 天使たちの午後V ～狙われた天使～</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>ten6_98.zip</td><td>[PC-9801] 天使たちの午後VI -My Fair Teacher-</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>ten_col1_98.zip</td><td>[PC-9801] 天使たちの午後コレクション(OPN)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>ten_col2_98.zip</td><td>[PC-9801] 天使たちの午後コレクション2(OPN)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>ten_hoho_98.zip</td><td>[PC-9801] 新・天使たちの午後 ～天使たちの微笑み～(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>ten_sp2_98.zip</td><td>[PC-9801] 天使たちの午後 SPECIAL II</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>ten_ten_98.zip</td><td>[PC-9801] 天使たちの午後 ～転校生～</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>tenbu98.zip</td><td>[PC-9801] 天舞 －三國志正史－(MT-32 Emulation)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>tenbul98.zip</td><td>[PC-9801] 天舞 LIMITED / 満漢全席(MT-32 Emulation)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>tenchi98.zip</td><td>[PC-9801] 天地無用！魎皇鬼</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>tenjin_98.zip</td><td>[PC-9801] 天神乱魔</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>tenk1_98.zip</td><td>[PC-9801] 天下統一</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>tenk2_98.zip</td><td>[PC-9801] 天下統一 II ～乱世の覇者～</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>tenk2pk_98.zip</td><td>[PC-9801] 天下統一 II パワーアップセット</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>tenkago_98.zip</td><td>[PC-9801] 天下御免(MT-32 Emulation)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>tenkousi_98.zip</td><td>[PC-9801] 転校生</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>tennis98.zip</td><td>[PC-9801] テニス・テニス</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>tensen_98.zip</td><td>[PC-9801] 天仙娘々(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>tensho_98.zip</td><td>[PC-9801] 信長の野望 天翔記(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>tenshopk_98.zip</td><td>[PC-9801] 信長の野望 天翔記 with パワーアップキット(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>tequila_98.zip</td><td>[PC-9801] Tequila Sunrise (OPN) (Splush Wave)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>tg2_98.zip</td><td>[PC-9801] たこらげーる</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>tgalice_98.zip</td><td>[PC-9801] 突撃麻酔少女アリス (SHINING FIELD)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>th98.zip</td><td>[PC-9801] TUNED HEART</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>thanatos_98.zip</td><td>[PC-9801] THANATOS</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>themm_98.zip</td><td>[PC-9801] THEMM －はるかなる迷宮－</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>thincle_98.zip</td><td>[PC-9801] てぃんくる</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>thotel_98.zip</td><td>[PC-9801] TWILIGHT HOTEL ～トワイライトホテル～(MT-32 Emulation)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>timestrm_98.zip</td><td>[PC-9801] タイムストリッパー真子ちゃん</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>tir2_98.zip</td><td>[PC-9801] Tir-nan-og II － The Sign of Chaos －</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>tiramisu_98.zip</td><td>[PC-9801] Fantastic Jewelry Tiramisu (OPN) (Excel Soft)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>tkfuzoku_98.zip</td><td>[PC-9801] 東京風俗紀行(OPN)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>tlove12_98.zip</td><td>[PC-9801] TRUE LOVE 純愛物語 Ver1.2(OPN)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>tlove_98.zip</td><td>[PC-9801] TRUE LOVE 純愛物語</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>tmix98.zip</td><td>[PC-9801] 突撃みっくす(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>tobakka_98.zip</td><td>[PC-9801] 銀河遊侠伝説トバッカー(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>tofive_98.zip</td><td>[PC-9801] TO☆FIVE ～夏の扉の向こうに君を見つける～</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>tofivec_98.zip</td><td>[PC-9801] TO☆FIVE ～夏の扉の向こうに君を見つける～ CHARACTER DISK</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>toge_98.zip</td><td>[PC-9801] TOGE 棘(OPN)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>tohofuma05_98.zip</td><td>[PC-9801] Touhou Fuumaroku: The Story of Eastern Wonderland TH05 Version (東方封魔録) (OPNA) (Amusement Makers)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>tohofuma_98.zip</td><td>[PC-9801] 東方封魔録(SC-88) (Amusement Makers)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>tohognso_98.zip</td><td>[PC-9801] 東方幻想郷(OPNA) (Amusement Makers)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>tohokaik_98.zip</td><td>[PC-9801] 東方怪綺談(OPNA) (Amusement Makers)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>tohoreii05_98.zip</td><td>[PC-9801] Touhou Reiiden: Highly Responsive to Prayers TH05 Version (東方靈異伝) (OPNA) (Amusement Makers)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>tohoreii_98.zip</td><td>[PC-9801] 東方靈異伝(OPNA) (Amusement Makers)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>tohoyume05_98.zip</td><td>[PC-9801] Touhou Yumejikuu: Phantasmagoria of Dim.Dream TH05 Version (東方夢時空) (OPNA) (Amusement Makers)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>tohoyume_98.zip</td><td>[PC-9801] 東方夢時空(OPNA) (Amusement Makers)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>tokio1_98.zip</td><td>[PC-9801] トキオ 東京都第24区(MT-32 Emulation)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>topmng2_98.zip</td><td>[PC-9801] トップマネジメント II</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>toraware_98.zip</td><td>[PC-9801] 囚われの天使(OPN)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>tougen_98.zip</td><td>[PC-9801] 桃源境 Harlem Fantasy(OPN)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>touhi_98.zip</td><td>[PC-9801] 闘牌遊戯 ～雀鬼姫伝説～(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>toumei_98.zip</td><td>[PC-9801] 透明人間あらわるあらわる</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>tousin1h_98.zip</td><td>[PC-9801] 闘神都市 ヒントディスク</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>tousin1n_98.zip</td><td>[PC-9801] 闘神都市(DALK ヒントディスク Version)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>tousin2_98.zip</td><td>[PC-9801] 闘神都市II(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>trader98.zip</td><td>[PC-9801] STAR TRADER(BEEP)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>travelj_98.zip</td><td>[PC-9801] トラベル★ジャンクション</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>trigger1_98.zip</td><td>[PC-9801] TRIGGER</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>trigger2_98.zip</td><td>[PC-9801] Trigger 2 (GS) (Vermouth, Gravis Ultrasound simulation)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>true_h_98.zip</td><td>[PC-9801] True Heart</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>trushbox_98.zip</td><td>[PC-9801] トラッシュボックス 1994-1995</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>tstar_98.zip</td><td>[PC-9801] 分裂守護神トゥインクル☆スター(MT-32 Emulation)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>tsumo_98.zip</td><td>[PC-9801] ツモっきー!(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>ttcorp_98.zip</td><td>[PC-9801] タクティカル タンク コープス</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>ttcorpdx_98.zip</td><td>[PC-9801] タクティカル タンク コープス DX</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>tukiaiti_98.zip</td><td>[PC-9801] Oh!ツキ遭いた～い!! 三芝商事花札交渉プロジェクト</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>tumobaka_98.zip</td><td>[PC-9801] つもバカ日誌(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>twin_r_98.zip</td><td>[PC-9801] 麗獣 Twin Road</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>u3_98.zip</td><td>[PC-9801] Ultima III EXODUS</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>u5_98.zip</td><td>[PC-9801] Ultima V - Warriors of Destiny -</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>ukiukiis_98.zip</td><td>[PC-9801] うきうきアイランド(OPN)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>ulamanda_98.zip</td><td>[PC-9801] 宇羅曼蛇 (CO2-PRO)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>uramhk_98.zip</td><td>[PC-9801] 裏マンション発禁(OPN)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>urban_98.zip</td><td>[PC-9801] Urban Soldier (SC-55) (Vermouth, Gravis Ultrasound simulation)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>urusei98.zip</td><td>[PC-9801] うる星やつら ～恋のサバイバル・バースデイ～</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>usagi2_98.zip</td><td>[PC-9801] うさぎなパニック2 -ペンペン島の秘宝-</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>v_btr_98.zip</td><td>[PC-9801] VIPER-BTR ～魔法の賭博師トトカル☆チョミ～(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>v_ctr_98.zip</td><td>[PC-9801] VIPER-CTR ～あすか～(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>v_gts_98.zip</td><td>[PC-9801] VIPER-GTS ～悪魔は再び～</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>v_gtsrs_98.zip</td><td>[PC-9801] VIPER-GTS RS ～悪魔は再び～(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>v_point_98.zip</td><td>[PC-9801] バニシングポイント -天使の消えた街-</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>v_v10_98.zip</td><td>[PC-9801] VIPER-V10</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>v_v10rs_98.zip</td><td>[PC-9801] Viper V10 RS (GS) (Vermouth, Gravis Ultrasound simulation)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>v_v12_98.zip</td><td>[PC-9801] Viper V12 (GS) (Vermouth, Gravis Ultrasound simulation)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>v_v16_98.zip</td><td>[PC-9801] Viper V16 (GS) (Vermouth, Gravis Ultrasound simulation)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>v_v6_98.zip</td><td>[PC-9801] VIPER-V6</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>v_v6rs_98.zip</td><td>[PC-9801] Viper V6 RS (GS) (Vermouth, Gravis Ultrasound simulation)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>v_v8_98.zip</td><td>[PC-9801] VIPER-V8</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>v_v8rs_98.zip</td><td>[PC-9801] Viper V8 RS (GS) (Vermouth, Gravis Ultrasound simulation)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>valis298.zip</td><td>[PC-9801] 夢幻戦士ヴァリスII(SOUND ORCHESTRA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>valkyrie_98.zip</td><td>[PC-9801] Valkyrie: The Power Beauties (SC-55) (Vermouth, Gravis Ultrasound simulation)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>valkzr98.zip</td><td>[PC-9801] 機甲装神ヴァルカイザー(MT-32)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>vamphigh_98.zip</td><td>[PC-9801] バンパイア･ハイすくーる</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>vangel_98.zip</td><td>[PC-9801] Virgin Angel (OPNA) (Crystal Soft)</td><td>—</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>vastness_98.zip</td><td>[PC-9801] VASTNESS ～空虚の生贄達～(OPN)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>vc2_98.zip</td><td>[PC-9801] バーチャコール2</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>vc_98.zip</td><td>[PC-9801] バーチャコール</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>vd2_98.zip</td><td>[PC-9801] Vain Dream II</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>vd_98.zip</td><td>[PC-9801] Vain Dream</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>venus_98.zip</td><td>[PC-9801] Venus (GS) (Vermouth, Gravis Ultrasound simulation)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>vg2_98.zip</td><td>[PC-9801] V.G.II ～姫神舞闘譚～(SC-55)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>vg_98.zip</td><td>[PC-9801] Variable Geo (SC-55) (Vermouth, Gravis Ultrasound simulation)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>vidro_98.zip</td><td>[PC-9801] びいどろドロップス</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>virgin_d_98.zip</td><td>[PC-9801] ヴァージン・ドリーム</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>vision2_98.zip</td><td>[PC-9801] VISION2 (M.I.N)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>visitte_98.zip</td><td>[PC-9801] ビジターズ・ラプソディー VISITTE</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>vkiss_98.zip</td><td>[PC-9801] バレンタイン・キッス ～バースデイズ2～</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>votoms_98.zip</td><td>[PC-9801] 装甲騎兵ボトムズ リアルバトル</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>vr_date_98.zip</td><td>[PC-9801] V.R.デート 五月倶楽部(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>wa_2_98.zip</td><td>[PC-9801] レッスルエンジェルス2 トップイベンター</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>wa_3_98.zip</td><td>[PC-9801] レッスルエンジェルス3</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>wa_sp_98.zip</td><td>[PC-9801] レッスルエンジェルス スペシャル もうひとりのトップイベンター</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>wa_v1_98.zip</td><td>[PC-9801] レッスルエンジェルスV1</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>wa_v2_98.zip</td><td>[PC-9801] レッスルエンジェルスV2</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>wa_v3_98.zip</td><td>[PC-9801] レッスルエンジェルスV3</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>wakers_98.zip</td><td>[PC-9801] Olsaydeth Wakers (OPN) (ASCII)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>wakpani2_98.zip</td><td>[PC-9801] わくわく麻雀パニック! 2 ～刻視夢想～(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>wakpani_98.zip</td><td>[PC-9801] わくわく麻雀パニック! ～式神伝承～(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>wakubun_98.zip</td><td>[PC-9801] Wakubun (OPN) (ASCII)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>wander_98.zip</td><td>[PC-9801] Wanderers (OPNA) (Crystal Soft)</td><td>—</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>wanpara1_98.zip</td><td>[PC-9801] WANPARAウォーズ</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>wanpara2_98.zip</td><td>[PC-9801] WANPARAウォーズII</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>warlpu3_98.zip</td><td>[PC-9801] Warlpurgis Night 3 (ワルプルギスナイト３) (OPN) (Proper)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>watagolf_98.zip</td><td>[PC-9801] 私をゴルフに連れてって</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>watashi_98.zip</td><td>[PC-9801] -私-(OPN)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>waver_98.zip</td><td>[PC-9801] WAVER ～The Seeker2～(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>wconst98.zip</td><td>[PC-9801] ウォーゲームコンストラクション</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>weapfree_98.zip</td><td>[PC-9801] Weapons Free (OPN) (Aba Soft)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>wedrahp_98.zip</td><td>[PC-9801] ウェディングラプソディー</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>welltris_98.zip</td><td>[PC-9801] WELLTRIS(BEEP)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>wfadv_98.zip</td><td>[PC-9801] うぉーたーふろんとあどべんちゃ</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>wg2_98.zip</td><td>[PC-9801] WORLD GOLF II</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>whatf_98.zip</td><td>[PC-9801] What is Fantasy?</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>will_98.zip</td><td>[PC-9801] ウィルの伝言</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>wings98.zip</td><td>[PC-9801] WINGS - BLAZE YOUR WAY TO GLORY!</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>wp1_98.zip</td><td>[PC-9801] Winning Post</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>wp1pk_98.zip</td><td>[PC-9801] Winning Post パワーアップキット</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>wp2p_98.zip</td><td>[PC-9801] Winning Post 2 Plus(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>wpoco98.zip</td><td>[PC-9801] うっでいぽこ</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>wsale298.zip</td><td>[PC-9801] 藤子不二雄(A)の笑ゥせぇるすまん②</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>wsale398.zip</td><td>[PC-9801] 藤子不二雄(A)の笑ゥせぇるすまん③</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>wsales98.zip</td><td>[PC-9801] 藤子不二雄(A)の笑ゥせぇるすまん①</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>wworth98.zip</td><td>[PC-9801] WORDS WORTH</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>wworthsp_98.zip</td><td>[PC-9801] WORDS WORTH スペシャルディスク</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>x-girl_98.zip</td><td>[PC-9801] X-GIRL</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>x_98.zip</td><td>[PC-9801] X ～エックス～</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>xak2_98.zip</td><td>[PC-9801] Xak II - Rising of The Redmoon -</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>xak3_98.zip</td><td>[PC-9801] Xak III: The Eternal Reccurence (GS) (Vermouth, Gravis Ultrasound simulation)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>xak_98.zip</td><td>[PC-9801] KAX - グリーンアスパラの観る夢 -</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>xantgeno_98.zip</td><td>[PC-9801] キサントゲノス 魔性甦る時</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>xenon_21.zip</td><td>[PC-9821] XENON ～夢幻の肢体～</td><td>—</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>xenon_98.zip</td><td>[PC-9801] XENON ～夢幻の肢体～</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>xix_98.zip</td><td>[PC-9801] XIX [ギゼ!]</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>xna_98.zip</td><td>[PC-9801] X･na [キサナ]</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>yadehsk1_98.zip</td><td>[PC-9801] PickUP♪ やどかり衛星放送局 #1</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>yadehsk2_98.zip</td><td>[PC-9801] PickUP♪ やどかり衛星放送局 #2</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>yadehsk3_98.zip</td><td>[PC-9801] PickUP♪ やどかり衛星放送局 #3</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>yadehsk4_98.zip</td><td>[PC-9801] PickUP♪ やどかり衛星放送局 #4</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>yadehsk5_98.zip</td><td>[PC-9801] PickUP♪ やどかり衛星放送局 #5</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>yadoehbs_98.zip</td><td>[PC-9801] やどかり衛星放送局 BS-896</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>yamiryou_98.zip</td><td>[PC-9801] 闇の稜線(OPN)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>yanyan2_98.zip</td><td>[PC-9801] やんやんの激闘同窓会(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>yanyanq_98.zip</td><td>[PC-9801] やんやんのクイズいっちょまえ</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>yatsu_98.zip</td><td>[PC-9801] 男(ヤツ)の名はDIAMOND(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>ycineh_98.zip</td><td>[PC-9801] ようこそシネマハウスへ</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>yes_98.zip</td><td>[PC-9801] Youthful Eager Stories (GS) (Vermouth, Gravis Ultrasound simulation)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>yeshg_98.zip</td><td>[PC-9801] Youthful Eager Stories! HG (GS) (Vermouth, Gravis Ultrasound simulation)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>yojucc_98.zip</td><td>[PC-9801] 妖獣倶楽部カスタム</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>yojus2_98.zip</td><td>[PC-9801] 妖獣戦記2 ～黎明の戦士たち～(MT-32 Emulation)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>yojus_98.zip</td><td>[PC-9801] 妖獣戦記 -A.D.2048-</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>yokoele_98.zip</td><td>[PC-9801] 横浜エレジィ</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>you1_98.zip</td><td>[PC-9801] 遊ディスクVol.1 妖獣戦記カスタム</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>you2_98.zip</td><td>[PC-9801] 遊ディスクVol.2 EXTERLIENカスタム</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>you3_98.zip</td><td>[PC-9801] 遊ディスクVol.3 加奈子さんの憂鬱</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>you4_98.zip</td><td>[PC-9801] 遊ディスクVol.4 クリスタルリナール お楽しみディスク(MT-32 Emulation)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>you5_98.zip</td><td>[PC-9801] 遊ディスクVol.5 テレホンスキャンダル</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>you6_98.zip</td><td>[PC-9801] 遊ディスクVol.6 ハートでロン!! MIDNIGHT編(MT-32 Emulation)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>you7_98.zip</td><td>[PC-9801] 遊ディスクVol.7 Mゥーンライトちゃんリンしゃん 番外編</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>you8_98.zip</td><td>[PC-9801] 遊ディスクVol.8 サイバノイドアルファ 遊ディスク版(MT-32 Emulation)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>you9_98.zip</td><td>[PC-9801] 遊ディスクVol.9 Arquelphos 激闘編</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>yougen_98.zip</td><td>[PC-9801] 妖幻道夢(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>youju_98.zip</td><td>[PC-9801] 妖獣教室</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>yozakura_98.zip</td><td>[PC-9801] You-en-tai Kuusou Yuugi Series Vol.1: Yozakura Dennou Ninpouchou (遊演体空想遊戯 Vol.1 夜桜電脳忍法帖) (OPN)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>ys2_98.zip</td><td>[PC-9801] Ys II - Ancient Ys Vanished The Final Chapter -</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>ys3_98.zip</td><td>[PC-9801] Ys III - Wanderers From Ys -(BEEP)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>ysayuri_98.zip</td><td>[PC-9801] 吉永サユリがやって来る ヤァ!ヤァ!ヤァ! A HARD DAY'S NIGHT(OPN)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>yumecol_98.zip</td><td>[PC-9801] 夢見坂コレクションズ(OPN)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>yumeji_98.zip</td><td>[PC-9801] 夢二 浅草綺譚</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>yumemi_98.zip</td><td>[PC-9801] 夢見坂</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>yumenosi_98.zip</td><td>[PC-9801] 夢の精(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>yumeut_98.zip</td><td>[PC-9801] 夢現 Dreamy -ゆめうつつ-</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>yuno_98.zip</td><td>[PC-9801] この世の果てで恋を唄う少女 YU-NO(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>yuro_98.zip</td><td>[PC-9801] 憂楼 Transient Sands(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>yuugiri_98.zip</td><td>[PC-9801] 夕霧 …人形師の遺産…(OPNA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>yuuto98.zip</td><td>[PC-9801] 遊兎伝</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>yuwaku_98.zip</td><td>[PC-9801] 誘惑</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>zan2_98.zip</td><td>[PC-9801] 斬 II ～陽炎の時代～(MT-32 Emulation)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>zan2s_98.zip</td><td>[PC-9801] 斬 II ～陽炎の時代～ 総集編(MT-32 Emulation)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>zan98.zip</td><td>[PC-9801] 斬 ～陽炎の時代～(SOUND ORCHESTRA)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>zarbartz_98.zip</td><td>[PC-9801] ザルバールの蒸留塔</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>zatuon_21.zip</td><td>[PC-9821] 雑音領域(MT-32 Emulation)</td><td>○</td><td>○</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>zatuon_98.zip</td><td>[PC-9801] 雑音領域(MT-32 Emulation)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>zavas298.zip</td><td>[PC-9801] ZAVAS II メヒテの大予言(SC-55)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>zavas98.zip</td><td>[PC-9801] ZAVAS</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>zenith_21.zip</td><td>[PC-9821] ZENITH</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+<tr><td>zenith_98.zip</td><td>[PC-9801] Zenith (GS) (Vermouth, Gravis Ultrasound simulation)</td><td>○</td><td>—</td><td>—</td><td>—</td><td>beep</td></tr>
+<tr><td>zipang_98.zip</td><td>[PC-9801] ジャパニーズカルトクイズ ジパング</td><td>○</td><td>—</td><td>—</td><td>—</td><td>—</td></tr>
+</table>
+<div class="tip"><span class="label">ヒント</span>
+<p>再生中に <a href="midi-monitor.htm">FM/MIDIモニタ</a> を開くと、OPN / OPNA のときは FM の鍵盤とレジスタ、MIDI のときは 32 パートの表に切り替わります。</p>
+</div>
+<div class="related"><span class="label">あわせて読みたい</span><ul><li><a href="cemu.htm">おまけ：昔マシンのサウンド</a></li><li><a href="cemu-pc88.htm">CEmu：PC-88</a></li><li><a href="cemu-arcade.htm">CEmu：アーケード</a></li><li><a href="midi-monitor.htm">FM/MIDIモニタ</a></li><li><a href="wrd.htm">WRDを見る</a></li></ul></div>
+
+<div class="botnav">
+<span class="prev">&#171; 前へ: <a href="cemu.htm">おまけ：昔マシンのサウンド</a></span>
+<span class="next">次へ: <a href="cemu-pc88.htm">CEmu：PC-88</a> &#187;</span>
+<span class="up"><a href="index.htm">目次</a></span>
+<div class="clear"></div>
+</div>
+
+<div class="foot">メディアプレイヤー「らいら」 (oggYSEDbgm) — PrePrayerPower Soft</div>
+
+</body>
+</html>

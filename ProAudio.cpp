@@ -1,4 +1,5 @@
-#include "stdafx.h"
+﻿#include "stdafx.h"
+#include "PluginKinds.h"
 #include "ProAudio.h"
 #include "ogg.h"
 #include "oggDlg.h"
@@ -134,6 +135,7 @@ void ProAudio_LoadExtras()
 	CFile f;
 	if (f.Open(ss, CFile::modeRead | CFile::shareDenyWrite, NULL) != TRUE)
 		return;
+	bool migrated = false;
 	try {
 		int ver = 0, cnt = 0;
 		if (f.Read(&ver, sizeof(int)) != sizeof(int)) { f.Close(); return; }
@@ -173,6 +175,13 @@ void ProAudio_LoadExtras()
 			}
 			e.listName[255] = 0;
 			e.path[1023] = 0;
+			{
+				const int mapped = RemapLegacyPlaySub(e.mode, e.path);
+				if (mapped != e.mode) {
+					e.mode = mapped;
+					migrated = true;
+				}
+			}
 			if (e.cueCount < 0) e.cueCount = 0;
 			if (e.cueCount > PRO_CUE_MAX) e.cueCount = PRO_CUE_MAX;
 			if (e.rating < 0) e.rating = 0;
@@ -185,7 +194,7 @@ void ProAudio_LoadExtras()
 	catch (...) {
 	}
 	f.Close();
-	g_extraDirty = false;
+	g_extraDirty = migrated;
 }
 
 void ProAudio_SaveExtras()

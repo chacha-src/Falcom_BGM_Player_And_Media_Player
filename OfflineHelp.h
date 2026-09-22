@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 // オフラインヘルプ (oggYSEDbgm_uni_avx2.chm)
 // F1 / キャプション「本」ボタン / 不足時の配置確保

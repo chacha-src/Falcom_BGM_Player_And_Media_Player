@@ -1,4 +1,4 @@
-#include "StdAfx.h"
+﻿#include "StdAfx.h"
 #include "cemu_driver_pcat.h"
 #include "../machine/cemu_hard_pcat.h"
 #include "../chip/cemu_chip_opl.h"

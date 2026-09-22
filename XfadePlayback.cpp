@@ -5,6 +5,7 @@
 #include "oggDlg.h"
 #include "AudioUpscaler.h"
 #include "VstMidiEngine.h"
+#include "PluginKinds.h"
 #include <math.h>
 #include <mutex>
 
@@ -239,7 +240,7 @@ __int64 XfTailPadBytes()
 {
 	if (!InterlockedCompareExchange(&g_xfInProgress, 0, 0)) {
 		extern int g_openDecoderMode;
-		if (g_openDecoderMode == MODE_VST_MIDI) {
+		if (IsVstMidiPlayMode(g_openDecoderMode)) {
 			MmBindVstActiveSlot();
 			const double sec = VstMidiTailPadSec();
 			if (sec <= 0.0)
@@ -253,7 +254,7 @@ __int64 XfTailPadBytes()
 	}
 	
 	const int s = XfActiveSlot();
-	if (g_openDecoderModeSlot[s] == MODE_VST_MIDI) {
+	if (IsVstMidiPlayMode(g_openDecoderModeSlot[s])) {
 		MmBindVstActiveSlot();
 		const double sec = VstMidiTailPadSec();
 		if (sec <= 0.0)

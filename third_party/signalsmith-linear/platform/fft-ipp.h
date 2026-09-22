@@ -1,4 +1,4 @@
-#ifndef FFT2_FFT2_IPP_H
+﻿#ifndef FFT2_FFT2_IPP_H
 #define FFT2_FFT2_IPP_H
 
 #include <ipp/ippcore.h>

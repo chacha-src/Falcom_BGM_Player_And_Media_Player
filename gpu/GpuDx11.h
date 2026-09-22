@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 /* アプリ起動時に作る D3D11。FM/MIDI モニタ専用。迷路/レースは触らない。 */
 #ifndef GPU_DX11_H
 #define GPU_DX11_H
