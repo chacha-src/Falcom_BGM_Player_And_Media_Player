@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include "afxwin.h"
 #include "afxcmn.h"
 // CPlayList ダイアログ
@@ -84,6 +84,8 @@ public:
 	BOOL w_flg;
 	CString GetModulePath();
 	void loadplaylistname();
+	/* 仮想リストは件数が同じだと中身を取り直さない。pl と mp の両方を更新する */
+	void RefreshListViews();
 
 	int GetPlaylistFileCount();
 	CString GetPlaylistDisplayName(int idx);

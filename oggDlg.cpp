@@ -34,6 +34,7 @@ int flacmode = 0;
 #include "PcHwMidiIn.h"
 #include "CWrdViewDlg.h"
 #include "MidiPack.h"
+#include "ComposerConvert.h"
 #include "CSasamiMidiScoreDlg.h"
 #include "CSasamiFmScoreDlg.h"
 #include "CSasamiTextDlg.h"
@@ -1172,6 +1173,16 @@ static LONG g_silentPluginUpdateStarted = 0;
 static unsigned __stdcall OggSilentPluginUpdateThread(void*);
 
 // KPI(.kpi) + Winamp/XMPlay/AIMP 候補 DLL を同じ再帰で数える（進捗バー総量用）
+static void KpiRewriteSeqAsMidi(CString& media)
+{
+	if (media.IsEmpty() || !ComposerIsSeqExt(media))
+		return;
+	wchar_t conv[MAX_PATH];
+	conv[0] = 0;
+	if (ComposerConvertToMidi((const wchar_t*)media, conv, MAX_PATH) && conv[0])
+		media = conv;
+}
+
 static int CountKpiFiles(CString ff)
 {
 	int count = 0;
@@ -1206,7 +1217,7 @@ static int CountKpiFiles(CString ff)
 			CString ss = cf1.GetFileName();
 			if (!(ss == "." || ss == "..")) {
 				if (cf1.IsDirectory() != 0) {
-					if (ss.GetLength() >= 5 && ss.Left(5).CompareNoCase(_T(".ogg_")) == 0)
+					if (!ss.IsEmpty() && ss[0] == _T('.'))
 						continue;
 					if (ff.Right(1) == "\\")
 						count += CountKpiFiles(ff + cf1.GetFileName());
@@ -2960,17 +2971,15 @@ static int PlaylistResolveNextIndex(int nextBtn, int apply)
 		pl->Load(FALSE);
 		if (pl->pc == NULL)
 			pl->pc = (playlistdata0*)malloc(sizeof(playlistdata0));
-		pl->m_lc.SetItemCount(pl->playcnt);
 		for (int j = 0; j < pl->playcnt; j++)
 			pl->pc[j].icon = 1;
 		changeflg = TRUE;
 		pl->loadplaylistname();
 		changeflg = FALSE;
+		pl->RefreshListViews();
 		extern CMediaPlayerDlg* mp;
-		if (mp && ::IsWindow(mp->GetSafeHwnd())) {
+		if (mp && ::IsWindow(mp->GetSafeHwnd()))
 			mp->ReloadPlaylistCombo();
-			mp->RefreshList(TRUE);
-		}
 		if (pl->playcnt > 0) {
 			if (savedata.mpListRandom && pl->playcnt > 1) {
 				unsigned mix = (unsigned)rand() ^ ((unsigned)rand() << 15);
@@ -3855,7 +3864,7 @@ static void CollectSubDirsRecursive(const std::wstring& baseDir, int depth, std:
 	if (h == INVALID_HANDLE_VALUE) return;
 	do {
 		if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) continue;
-		if (wcscmp(fd.cFileName, L".") == 0 || wcscmp(fd.cFileName, L"..") == 0) continue;
+		if (fd.cFileName[0] == L'.') continue;
 		if (fd.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) continue;
 		std::wstring sub = baseDir;
 		if (!sub.empty() && sub.back() != L'\\' && sub.back() != L'/') sub += L'\\';
@@ -12040,10 +12049,32 @@ open_mode_kpi:
 			CString ssMedia;
 			uint32_t sel = 1;
 			SplitKpiSubsongPath(filen, ssMedia, sel);
+			KpiRewriteSeqAsMidi(ssMedia);
 
 			if (!g_kpiHost.Open((const wchar_t*)kpi, (const wchar_t*)ssMedia, req, sel, g_kpiSession)) {
+				WIN32_FILE_ATTRIBUTE_DATA fad;
+				ULONGLONG mediaBytes = (ULONGLONG)-1;
+				if (GetFileAttributesExW((const wchar_t*)ssMedia, GetFileExInfoStandard, &fad))
+					mediaBytes = ((ULONGLONG)fad.nFileSizeHigh << 32) | fad.nFileSizeLow;
 				CString depMsg;
-				depMsg.Format(LL14(
+				if (mediaBytes == 0) {
+					depMsg.Format(LL14(
+						L"ファイルが 0 バイトです。曲データが入っていないので開けません。\r\n\r\n%s",
+						L"The file is 0 bytes and has no song data.\r\n\r\n%s",
+						L"Le fichier fait 0 octet et ne contient pas de morceau.\r\n\r\n%s",
+						L"Il file e' di 0 byte e non contiene dati musicali.\r\n\r\n%s",
+						L"El archivo tiene 0 bytes y no tiene datos de la cancion.\r\n\r\n%s",
+						L"파일이 0바이트라 곡 데이터가 없습니다.\r\n\r\n%s",
+						L"文件为 0 字节，没有曲目数据。\r\n\r\n%s",
+						L"الملف حجمه 0 وليس فيه بيانات المقطوعة.\r\n\r\n%s",
+						L"Файл размером 0 байт, данных песни нет.\r\n\r\n%s",
+						L"Die Datei ist 0 Byte und enthaelt keine Musikdaten.\r\n\r\n%s",
+						L"O arquivo tem 0 bytes e nao tem dados da musica.\r\n\r\n%s",
+						L"Het bestand is 0 bytes en bevat geen muziekdata.\r\n\r\n%s",
+						L"Plik ma 0 bajtow i nie zawiera danych utworu.\r\n\r\n%s",
+						L"Dosya 0 bayt, muzik verisi yok.\r\n\r\n%s"),
+						(const wchar_t*)ssMedia);
+				} else depMsg.Format(LL14(
 					L"KPIのOpenに失敗しました。\r\n依存DLL不足、または曲データ／PCM(PPC・P86・PPZ等)の読込失敗の可能性があります。\r\n\r\nKPI: %s\r\nログ: %%TEMP%%\\ogg_kpi64_host.log\r\n詳細: %%TEMP%%\\ogg_kbpmd_open.log （PMD時）", /* 日本語 */
 					L"KPI Open failed.\r\nA dependent DLL may be missing, or music/PCM (PPC/P86/PPZ) load may have failed.\r\n\r\nKPI: %s\r\nLog: %%TEMP%%\\ogg_kpi64_host.log\r\nDetail: %%TEMP%%\\ogg_kbpmd_open.log (PMD)", /* 英語 */
 					L"Echec Open KPI.\r\nDLL manquante ou echec chargement musique/PCM possible.\r\n\r\nKPI : %s\r\nJournal : %%TEMP%%\\ogg_kpi64_host.log", /* フランス語 */
@@ -12225,15 +12256,17 @@ open_mode_kpi:
 						uint32_t sel = 1;
 						SplitKpiSubsongPath(filen, ss, sel);
 					}
+					CString openPath = (ss == L"") ? filen : ss;
+					KpiRewriteSeqAsMidi(openPath);
 					if (ss == L"") {
-						if (!pHostFile->Open(filen)) {
+						if (!pHostFile->Open(openPath)) {
 							// ファイルが開けない
 							pHostFile->Release();
 							return;
 						}
 					}
 					else {
-						if (!pHostFile->Open(ss)) {
+						if (!pHostFile->Open(openPath)) {
 							// ファイルが開けない
 							pHostFile->Release();
 							return;
@@ -19569,48 +19602,62 @@ void EqualiserSetFormatVolContext(int mode, BOOL spcApplicable);
 int readBuffwav(char* bw, int cnt)
 {
 	EqualiserSetFormatVolContext(0, FALSE);
-	int r = cnt, rr = cnt;
-	int cnt2;
-	if (rr == 0)return 0;
+	if (cnt == 0) return 0;
+	const int bpf = PcmOutBytesPerFrame();
+	if (bpf <= 0) return 0;
+	cnt -= cnt % bpf;
+	if (cnt <= 0) return 0;
 
 	int max_buffer_size = OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 3;
+	/* loop1=開始サンプル、loop2=長さ。終端は loop1+loop2。
+	   playb / poss5 / lenl はすべてこのサンプル単位に揃える。
+	   出力バイトやテンポ倍率で切ると公式ループ点を通り過ぎる。 */
+	int loopEndSamples = (data_size > 0) ? (data_size / bpf) : 0;
+	if (endf == 0 && loop2 > 0 && loop1 != loop2)
+		loopEndSamples = loop1 + loop2;
+
 	if (poss4 <= cnt) {
 		int buffRbStallIters = 0;
 		const int kBuffRbStallMax = 512;
 		while (true) {
 			if (IsPlaybackStopRequested())
 				return 0;
-			int f = 0;
 			if (adbuf2 == NULL) return 0;
-			// fade は ApplyFadeCubed で音量(例: 1.0=フル)。ここでは「無音に近い」ときだけゼロ埋め+muon。
-			// fade==0 判定だと play() 開始時の fade=1.0 で常に else になり、無音のまま lenl だけ進んで即終了する。
-			if (fade > 0.0001f)
-				memcpy((void*)bufkpi, (void*)(adbuf2 + lenl), cnt);
-			else
-			{
-				ZeroMemory(bufkpi, cnt);
-				muon--;
+			const int srcPos = lenl / bpf;
+			int roomSamp = 0;
+			if (data_size > lenl)
+				roomSamp = (data_size - lenl) / bpf;
+			if (loopEndSamples > 0) {
+				const int toLoop = loopEndSamples - srcPos;
+				if (toLoop < roomSamp) roomSamp = toLoop;
 			}
+			if (roomSamp < 0) roomSamp = 0;
+			int take = roomSamp * bpf;
+			if (take > cnt) take = cnt;
+			if (take <= 0) break;
 
-			if (playb > (data_size + 100000) / PcmOutBytesPerFrame() && muon != 0) {
-				rrr = 0;
+			// fade は ApplyFadeCubed で音量(例: 1.0=フル)。ここでは「無音に近い」ときだけゼロ埋め+muon。
+			if (fade > 0.0001f)
+				memcpy((void*)bufkpi, (void*)(adbuf2 + lenl), (size_t)take);
+			else {
+				ZeroMemory(bufkpi, (size_t)take);
+				muon--;
 			}
 			if (muon <= 0) {
 				endf = 1;
 				return 0;
 			}
 
-			int len2 = readtempo(bufkpi, cnt);
-			lenl += cnt;
+			int len2 = readtempo(bufkpi, take);
+			lenl += take;
 
 			if (len2 > 0) {
 				buffRbStallIters = 0;
-				// 書き込み
 				RingBufWrite(bufkpi3, max_buffer_size, poss2, outputRawBytesData.data(), len2);
 				poss4 += len2;
 			}
-			// playb はリングから bw へ渡したバイト数で進める（len2 積み上げは cnt を超え表示が実長より長くなる）
 			if (poss4 > cnt) break;
+			if (endf == 0 && loopEndSamples > 0 && (lenl / bpf) >= loopEndSamples) break;
 			if (len2 <= 0 && fade1 == 1) break;
 			if (len2 <= 0) {
 				if (++buffRbStallIters >= kBuffRbStallMax)
@@ -19620,53 +19667,28 @@ int readBuffwav(char* bw, int cnt)
 	}
 
 	int cnt0 = cnt;
-	{
-		const int bpfLoop = PcmOutBytesPerFrame();
-		// poss5 はソースPCMサンプル。loopEnd もサンプルで比較する。
-		int loopEndSamples = 0;
-		if (loop1 == 0 && loop2 == 0) {
-			loopEndSamples = (bpfLoop > 0) ? (int)((__int64)data_size / bpfLoop) : 0;
-		}
-		else if (loop2 > 0 && loop1 != loop2) {
-			loopEndSamples = loop1 + loop2;
-		}
-		else if (loop1 != 0 && loop1 == loop2) {
-			loopEndSamples = (bpfLoop > 0) ? (int)((__int64)data_size / bpfLoop) : 0;
-		}
-		const int outSamples = (bpfLoop > 0) ? (cnt0 / bpfLoop) : 0;
-		if (loopEndSamples > 0 && endf == 0 && poss5 + outSamples > loopEndSamples) {
-			cnt0 = (loopEndSamples - poss5) * bpfLoop;
-			if (cnt0 < 0)
-				cnt0 = 0;
-		}
-	}
-	cnt2 = cnt0;
+	if (cnt0 > poss4) cnt0 = poss4;
+	cnt0 -= cnt0 % bpf;
+	if (cnt0 < 0) cnt0 = 0;
 
-	if (cnt2 > 0) {
-		RingBufRead(bw, bufkpi3, max_buffer_size, poss3, cnt0);
-		poss4 -= cnt0;
-		{
-			const int bpf = PcmOutBytesPerFrame();
-			if (bpf > 0 && cnt0 > 0)
-				playb += cnt0 / bpf;
-		}
-	}
+	if (cnt0 <= 0)
+		return 0;
 
-	equaliser(bw, cnt2, reset);
-	og->FeedPianoRoll(bw, cnt2);
+	RingBufRead(bw, bufkpi3, max_buffer_size, poss3, cnt0);
+	poss4 -= cnt0;
+	/* デコード先頭はソースサンプル。loop1+loop2 と同じ単位 */
+	playb = (__int64)(lenl / bpf);
+	poss5 = (int)playb;
+
+	equaliser(bw, cnt0, reset);
+	og->FeedPianoRoll(bw, cnt0);
 	reset = FALSE;
 
 	fade += fadeadd;
 	if (fade < 0.0001f) { fade = 0.0f; fadeadd = 0.0f; }
-	ApplyFadeCubedToInterleavedPcm(bw, cnt2);
+	ApplyFadeCubedToInterleavedPcm(bw, cnt0);
 
 	wl += PlaybackCcWrite(bw, cnt0);
-
-	{
-		const int bpf = PcmOutBytesPerFrame();
-		if (bpf > 0 && cnt0 > 0)
-			poss5 += (int)((double)(cnt0 / bpf) * TempoPlaybackRateFromPos(tempo) + 0.5);
-	}
 
 	return cnt0;
 }
@@ -21111,6 +21133,9 @@ int readcemu(BYTE* bw, int cnt)
 		sliceFrames = frames;
 	int done = 0;
 	while (done < frames) {
+		/* 終了/停止はバッファを埋め切る前に返す。ここを見ないと Join が固まる */
+		if (IsPlaybackStopRequested())
+			break;
 		if (CemuSess().lengthSamples > 0
 			&& CemuSess().curSample >= CemuSess().lengthSamples)
 			break;
@@ -21418,19 +21443,67 @@ int readkpi(BYTE* bw, int cnt)
 							const int remainBytes = max(0, (int)cnt - (int)cnt3);
 							const DWORD requestSamples = (DWORD)(remainBytes / dstBytesPerFrame);
 
+							/* CEmu と同じ約4ms。0 を返すプラグインは一括に戻し、EOF にはしない。 */
+							static IKpiDecoder* s_kpiSliceDec = NULL;
+							static int s_kpiSliceWhole = 0;
+							if (kpidec != s_kpiSliceDec) {
+								s_kpiSliceDec = kpidec;
+								s_kpiSliceWhole = 0;
+							}
+							DWORD slice = requestSamples;
+							if (!s_kpiSliceWhole && requestSamples > 0) {
+								slice = ((wavbit_sample_Hz > 0) ? (DWORD)wavbit_sample_Hz : 44100u) / 250u;
+								if (slice < 64) slice = 64;
+								if (slice > requestSamples) slice = requestSamples;
+							}
 							if (wavsam_src == -32 || wavsam_src == -64) {
 								DWORD gotSamples = 0;
 								if (requestSamples > 0) {
+									DWORD left = requestSamples;
 									if (wavsam_src == -64) {
 										std::vector<double> srcD;
 										srcD.resize((size_t)requestSamples * wavchannel);
-										gotSamples = kpidec->Render((BYTE*)srcD.data(), requestSamples);
+										BYTE* p = (BYTE*)srcD.data();
+										while (left > 0) {
+											const DWORD ask = s_kpiSliceWhole ? left : ((left > slice) ? slice : left);
+											DWORD g = kpidec->Render(p, ask);
+											if (g == 0 && gotSamples == 0 && ask < requestSamples) {
+												g = kpidec->Render((BYTE*)srcD.data(), requestSamples);
+												s_kpiSliceWhole = 1;
+												p = (BYTE*)srcD.data();
+												if (g > requestSamples) g = requestSamples;
+											}
+											if (g == 0) break;
+											if (g > ask && !s_kpiSliceWhole) g = ask;
+											if (g > left) g = left;
+											p += (size_t)g * (size_t)wavchannel * sizeof(double);
+											gotSamples += g;
+											left -= g;
+											if (s_kpiSliceWhole) break;
+										}
 										r = ConvertFloatTypedToIntBuffer(srcD.data(), gotSamples, -64, wavchannel, (BYTE*)bufkpi + cnt3, (DWORD)remainBytes, dstBitsPerSample);
 									}
 									else {
 										std::vector<float> srcF;
 										srcF.resize((size_t)requestSamples * wavchannel);
-										gotSamples = kpidec->Render((BYTE*)srcF.data(), requestSamples);
+										BYTE* p = (BYTE*)srcF.data();
+										while (left > 0) {
+											const DWORD ask = s_kpiSliceWhole ? left : ((left > slice) ? slice : left);
+											DWORD g = kpidec->Render(p, ask);
+											if (g == 0 && gotSamples == 0 && ask < requestSamples) {
+												g = kpidec->Render((BYTE*)srcF.data(), requestSamples);
+												s_kpiSliceWhole = 1;
+												p = (BYTE*)srcF.data();
+												if (g > requestSamples) g = requestSamples;
+											}
+											if (g == 0) break;
+											if (g > ask && !s_kpiSliceWhole) g = ask;
+											if (g > left) g = left;
+											p += (size_t)g * (size_t)wavchannel * sizeof(float);
+											gotSamples += g;
+											left -= g;
+											if (s_kpiSliceWhole) break;
+										}
 										r = ConvertFloatTypedToIntBuffer(srcF.data(), gotSamples, -32, wavchannel, (BYTE*)bufkpi + cnt3, (DWORD)remainBytes, dstBitsPerSample);
 									}
 								}
@@ -21441,7 +21514,27 @@ int readkpi(BYTE* bw, int cnt)
 							}
 							else {
 								if (requestSamples > 0) {
-									r = kpidec->Render((BYTE*)bufkpi + cnt3, requestSamples);
+									DWORD done = 0;
+									DWORD left = requestSamples;
+									BYTE* p = (BYTE*)bufkpi + cnt3;
+									while (left > 0) {
+										const DWORD ask = s_kpiSliceWhole ? left : ((left > slice) ? slice : left);
+										DWORD g = kpidec->Render(p, ask);
+										if (g == 0 && done == 0 && ask < requestSamples) {
+											g = kpidec->Render((BYTE*)bufkpi + cnt3, requestSamples);
+											s_kpiSliceWhole = 1;
+											p = (BYTE*)bufkpi + cnt3;
+											if (g > requestSamples) g = requestSamples;
+										}
+										if (g == 0) break;
+										if (g > ask && !s_kpiSliceWhole) g = ask;
+										if (g > left) g = left;
+										p += (size_t)g * (size_t)dstBytesPerFrame;
+										done += g;
+										left -= g;
+										if (s_kpiSliceWhole) break;
+									}
+									r = done;
 								}
 								else {
 									r = 0;
@@ -33812,8 +33905,8 @@ void COggDlg::plugloop(CString ff)
 			ss = cf1.GetFileName();
 			if (!(ss == "." || ss == "..")) {
 				if (cf1.IsDirectory() != 0) { //フォルダ？
-					/* 同梱バンドル等の隠し更新用フォルダは読み込まない */
-					if (ss.GetLength() >= 5 && ss.Left(5).CompareNoCase(_T(".ogg_")) == 0)
+					/* . で始まるフォルダ（.ogg_kpi_fmmon 等）はプラグインとして読まない */
+					if (!ss.IsEmpty() && ss[0] == _T('.'))
 						continue;
 					if (ff.Right(1) == "\\")
 						plugloop(ff + cf1.GetFileName());

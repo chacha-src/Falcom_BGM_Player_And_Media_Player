@@ -1,4 +1,4 @@
-﻿#include <windows.h>
+#include <windows.h>
 #include <string.h>
 #include <stdio.h>
 #include <math.h>
@@ -47,6 +47,8 @@ static uint32_t s_seq = 0;
 static int s_dirty = 0;
 /* note-on/off 立ち上がりは minDirty を無視して即リングへ（16分の取りこぼし防止） */
 static int s_flushUrgent = 0;
+static int s_edgeN = 0;
+static void FmMonPushKeyEdge();
 static int s_keysOnly = 0;
 static unsigned s_keysProfile = 0;
 static int s_opmRegsValid = 0;
@@ -331,6 +333,7 @@ void FmMonShadowReset(void)
 	s_seq = 0;
 	s_dirty = 1;
 	s_flushUrgent = 0;
+	s_edgeN = 0;
 	s_keysOnly = 0;
 	s_keysProfile = 0;
 	s_opmRegsValid = 0;
@@ -691,9 +694,12 @@ void FmMonShadowWriteReg(unsigned addr, unsigned data)
 			const int level = env || ((amp & 0x0F) != 0);
 			const int on = (((!toneOff && per != 0) || !noiseOff) && level) ? 1 : 0;
 			const int was = s_ssg[i] ? 1 : 0;
-			if (on && !was)
+			if (on && !was) {
 				s_hitSsg[i]++;
-			else if (on && was && (addr == (unsigned)(8 + i) || addr == 0x0D)) {
+				s_flushUrgent = 1;
+			} else if (!on && was) {
+				s_flushUrgent = 1;
+			} else if (on && was && (addr == (unsigned)(8 + i) || addr == 0x0D)) {
 				/* 同一音程のレベル／エンベロープ再書き込み = 発音再トリガ */
 				s_hitSsg[i]++;
 				s_flushUrgent = 1;
@@ -723,6 +729,7 @@ void FmMonShadowWriteReg(unsigned addr, unsigned data)
 		}
 	}
 	s_dirty = 1;
+	FmMonPushKeyEdge();
 	LeaveCriticalSection(&s_cs);
 }
 
@@ -889,10 +896,120 @@ static void RefreshAdpcmMidi(void)
 	s_adpcmMidi = (mid >= 0) ? (uint8_t)mid : (uint8_t)60;
 }
 
+/* 1回の Render で複数発音すると、Flush 時の最終状態だけ残って 8分/16分が消える。
+   WriteReg の中では書かず、端点だけ覚えて Flush で seq を分けて出す。 */
+enum { kFmMonEdgeCap = 8 };
+struct FmMonKeyEdge {
+	uint8_t keyFm[6], hitFm[6], midiFm[6];
+	uint8_t keyEx[3], hitEx[3], midiEx[3];
+	uint8_t ssg[3], hitSsg[3], midiSsg[3];
+	uint8_t rhyKey, rhyPulse, adpcmPulse, adpcmHit, pcmCount;
+	uint8_t hitRhy[6];
+	uint8_t pcmOn[SASAMI_FMMON_PCM_MAX];
+	uint8_t pcmNote[SASAMI_FMMON_PCM_MAX];
+};
+static FmMonKeyEdge s_edge[kFmMonEdgeCap];
+static SasamiFmMonDump s_edgeOut[kFmMonEdgeCap];
+
+static int FmMonEdgeSame(const FmMonKeyEdge* e)
+{
+	if (memcmp(e->keyFm, s_keyFm, 6) != 0) return 0;
+	if (memcmp(e->hitFm, s_hitFm, 6) != 0) return 0;
+	if (memcmp(e->midiFm, s_midiFm, 6) != 0) return 0;
+	if (memcmp(e->keyEx, s_keyEx, 3) != 0) return 0;
+	if (memcmp(e->hitEx, s_hitEx, 3) != 0) return 0;
+	if (memcmp(e->midiEx, s_midiEx, 3) != 0) return 0;
+	if (memcmp(e->ssg, s_ssg, 3) != 0) return 0;
+	if (memcmp(e->hitSsg, s_hitSsg, 3) != 0) return 0;
+	if (memcmp(e->midiSsg, s_midiSsg, 3) != 0) return 0;
+	if (e->rhyKey != s_rhyKey || e->rhyPulse != s_rhyPulse) return 0;
+	if (e->adpcmPulse != s_adpcmPulse || e->adpcmHit != s_adpcmHit) return 0;
+	if (memcmp(e->hitRhy, s_hitRhy, 6) != 0) return 0;
+	if (e->pcmCount != s_pcmCount) return 0;
+	if (memcmp(e->pcmOn, s_pcmOn, sizeof(s_pcmOn)) != 0) return 0;
+	if (memcmp(e->pcmNote, s_pcmNote, sizeof(s_pcmNote)) != 0) return 0;
+	return 1;
+}
+
+static void FmMonPushKeyEdge()
+{
+	if (!s_flushUrgent) return;
+	if (s_edgeN > 0 && FmMonEdgeSame(&s_edge[s_edgeN - 1])) return;
+	if (s_edgeN >= kFmMonEdgeCap) {
+		memmove(&s_edge[0], &s_edge[1], sizeof(s_edge[0]) * (kFmMonEdgeCap - 1));
+		s_edgeN = kFmMonEdgeCap - 1;
+	}
+	FmMonKeyEdge* e = &s_edge[s_edgeN++];
+	memset(e, 0, sizeof(*e));
+	memcpy(e->keyFm, s_keyFm, 6);
+	memcpy(e->hitFm, s_hitFm, 6);
+	memcpy(e->midiFm, s_midiFm, 6);
+	memcpy(e->keyEx, s_keyEx, 3);
+	memcpy(e->hitEx, s_hitEx, 3);
+	memcpy(e->midiEx, s_midiEx, 3);
+	memcpy(e->ssg, s_ssg, 3);
+	memcpy(e->hitSsg, s_hitSsg, 3);
+	memcpy(e->midiSsg, s_midiSsg, 3);
+	e->rhyKey = s_rhyKey;
+	e->rhyPulse = s_rhyPulse;
+	e->adpcmPulse = s_adpcmPulse;
+	e->adpcmHit = s_adpcmHit;
+	e->pcmCount = s_pcmCount;
+	memcpy(e->hitRhy, s_hitRhy, 6);
+	memcpy(e->pcmOn, s_pcmOn, sizeof(s_pcmOn));
+	memcpy(e->pcmNote, s_pcmNote, sizeof(s_pcmNote));
+}
+
+static void FmMonOverlayEdge(SasamiFmMonDump* d, const FmMonKeyEdge* e)
+{
+	memcpy(d->keyOnFm, e->keyFm, 6);
+	memcpy(d->keyOnHitCnt, e->hitFm, 6);
+	memcpy(d->keyMidi, e->midiFm, 6);
+	memcpy(d->keyOnEx, e->keyEx, 3);
+	memcpy(d->keyOnExHitCnt, e->hitEx, 3);
+	memcpy(d->exMidi, e->midiEx, 3);
+	memcpy(d->ssgOn, e->ssg, 3);
+	memcpy(d->ssgHitCnt, e->hitSsg, 3);
+	memcpy(d->ssgMidi, e->midiSsg, 3);
+	d->rhythmKey = e->rhyKey;
+	d->rhythmPulse = e->rhyPulse;
+	memcpy(d->rhythmHitCnt, e->hitRhy, 6);
+	d->pcmCount = e->pcmCount;
+	memcpy(d->pcmOn, e->pcmOn, sizeof(d->pcmOn));
+	memcpy(d->pcmNote, e->pcmNote, sizeof(d->pcmNote));
+	if (e->adpcmPulse)
+		d->rhythmPulse = (uint8_t)(d->rhythmPulse | SASAMI_FMMON_ADPCM_PULSE);
+	if (d->dumpFlags & SASAMI_FMMON_FLAG_ADPCM)
+		d->pcmNote[SASAMI_FMMON_ADPCM_HIT_SLOT] = e->adpcmHit;
+}
+
+/* 最終状態と同じ最後の端点は出さない。戻り値は s_edgeOut の枚数。CS 保持中。 */
+static int FmMonTakeEdges(SasamiFmMonDump* finalDump)
+{
+	if (s_edgeN <= 0 || !finalDump) return 0;
+	int n = 0;
+	for (int i = 0; i < s_edgeN; i++) {
+		if (i == s_edgeN - 1 && FmMonEdgeSame(&s_edge[i]))
+			break;
+		s_edgeOut[n] = *finalDump;
+		FmMonOverlayEdge(&s_edgeOut[n], &s_edge[i]);
+		n++;
+	}
+	if (n > 0) {
+		const uint32_t first = finalDump->seq;
+		for (int i = 0; i < n; i++)
+			s_edgeOut[i].seq = first + (uint32_t)i;
+		finalDump->seq = first + (uint32_t)n;
+		s_seq = finalDump->seq;
+	}
+	s_edgeN = 0;
+	return n;
+}
+
 static int ShouldWrite(int force)
 {
 	if (force) return 1;
-	if (s_flushUrgent) return 1;
+	if (s_flushUrgent || s_edgeN > 0) return 1;
 	if (s_lastWrite == 0) return 1;
 	const uint64_t elapsed = s_cur - s_lastWrite;
 	/* keys-only (PSF/SPC 等): 64sample 採取＋変化は ≥2ms で書き、心拍 10ms。
@@ -981,6 +1098,7 @@ void FmMonShadowFlush(int force)
 	EnsureCs();
 	EnterCriticalSection(&s_cs);
 	if (s_keysOnly) {
+		s_edgeN = 0;
 		LeaveCriticalSection(&s_cs);
 		FmMonShadowFlushKeysOnly(force);
 		return;
@@ -993,6 +1111,7 @@ void FmMonShadowFlush(int force)
 		s_keysProfile = SASAMI_FMMON_KEYS_MDX;
 		if (s_opmRegsValid)
 			RefreshOpmKeysFromRegs();
+		s_edgeN = 0;
 		LeaveCriticalSection(&s_cs);
 		FmMonShadowFlushKeysOnly(force);
 		EnsureCs();
@@ -1134,7 +1253,10 @@ void FmMonShadowFlush(int force)
 	s_lastWrite = s_cur;
 	/* 区間内の書込ビットはダンプへ渡したらクリア。残すと UI が全レジスタ常時フェードになる */
 	memset(s_bits, 0, sizeof(s_bits));
+	const int nEdge = FmMonTakeEdges(&d);
 	LeaveCriticalSection(&s_cs);
+	for (int ei = 0; ei < nEdge; ei++)
+		FmMonWriteDump(&s_edgeOut[ei]);
 	FmMonWriteDump(&d);
 }
 

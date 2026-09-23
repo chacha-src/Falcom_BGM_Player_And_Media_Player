@@ -29,14 +29,71 @@
 <p>FM1–10 と Misao1–16 を同じ五線シェルで編集します。ダブルクリックで音色エディタを開き、発音を確認してから確定します。Strip 既定は Volume です。音色番号は曲内で自動採番されます。</p>
 <h2>再生確認と音声書き出し</h2>
 <p>各ウィンドウの「再生確認」は一時ファイルへ書き出してプレイリストへ追加します。「書き出し」から WAV／MP3／FLAC 変換ダイアログを開けます。</p>
+<h2>形式ごとのコマンド</h2>
+<p>バイナリ命令の辞書は <a href="sasami-fpy.htm">.fpy</a>、<a href="sasami-fpy2.htm">.fpy2</a>、<a href="sasami-mpy.htm">.mpy</a>、<a href="sasami-mpw2.htm">.mpw2</a>、<a href="sasami-mpsmv.htm">.mpsmv</a> です。差分ページは「増えたもの」だけです。下は Composer がテキスト／譜面をどう命令に変えるかです。</p>
+<h3>どの拡張子になるか</h3>
+<table class="grid">
+<tr><th>条件</th><th>出る形式</th></tr>
+<tr><td>FM。入れ子 1 段。下の FPY2 専用なし</td><td>.fpy</td></tr>
+<tr><td>FM。入れ子≥2、または <code>@PCM</code> <code>@EX1</code>–<code>@EX4</code> <code>@LEGATO</code> <code>@FHOKRY</code> <code>@MACRO</code>／ネイティブ <code>｛:</code></td><td>.fpy2</td></tr>
+<tr><td>FM。<code>@LFO</code> <code>@DETUNE</code> <code>@FLR</code> <code>@FSLR</code>（命令番号はクラシックにもあるが、Composer は .fpy2 にする）</td><td>.fpy2</td></tr>
+<tr><td>MIDI。入れ子 1 段。VST なし。<code>@CC</code> 類なし。ネイティブ <code>｛:</code> なし</td><td>.mpy</td></tr>
+<tr><td>MIDI。入れ子≥2。VST／<code>@CC</code> 類なし</td><td>.mpw2</td></tr>
+<tr><td><code>@VST</code> <code>@METER</code> <code>@TS</code> <code>@MACRO</code> <code>@CC</code> <code>@MOD</code> <code>@SOFT</code> <code>@SOST</code> <code>@REV</code> <code>@CHO</code>／ネイティブ <code>｛:</code>／譜面 Tone の VST</td><td>.mpsmv</td></tr>
+<tr><td><code>@SVIB</code> <code>@STREM</code> <code>@SPAN</code> <code>@SPORTA</code> だけ</td><td>形式は変わらない（下のソフトFX）</td></tr>
+</table>
+<h3>ループの出方</h3>
+<table class="grid">
+<tr><th>Composer</th><th>.fpy / .mpy / .mpw2</th><th>.fpy2 / .mpsmv</th></tr>
+<tr><td><code>|:n … :|</code></td><td>ループ命令のまま（FM cmd13/14、MIDI cmd23/24）。入れ子 2 段以上は新形式</td><td>同じ命令。入れ子最大 16</td></tr>
+<tr><td><code>｛:n … ｝:</code></td><td>テキスト上で展開（同じ音符を並べる）</td><td>ループ命令のまま（展開しない）</td></tr>
+<tr><td><code>｛n … ｝</code>（コロン無し）</td><td>常に展開</td><td>常に展開</td></tr>
+<tr><td><code>Q</code> / <code>J</code></td><td>FM cmd3、MIDI cmd10</td><td>同じ</td></tr>
+</table>
+<h3>ソフトFX（どの形式でも展開）</h3>
+<p><code>@SVIB</code> / <code>@STREM</code> / <code>@SPAN</code> / <code>@SPORTA</code> は、Composer がピッチ・音量・パンと短い待ちに細分化します。FM なら cmd12/11/16、MIDI なら cmd11/5/12 の列です。プレイヤーは手書きの FM cmd25/29 と MIDI cmd46/47 も読めますが、Composer は出しません。これだけでは拡張子は変わりません。</p>
+<h3>FM — 命令の変わり方</h3>
+<table class="grid">
+<tr><th>Composer</th><th>.fpy</th><th>.fpy2</th></tr>
+<tr><td>音符 <code>cdefgab</code> / 譜面</td><td>cmd0 FNOTE</td><td>同じ</td></tr>
+<tr><td><code>r</code></td><td>cmd1</td><td>同じ</td></tr>
+<tr><td><code>@n</code> / Voice</td><td>cmd2</td><td>同じ</td></tr>
+<tr><td><code>v</code> FM / SSG</td><td>cmd11 / cmd4</td><td>同じ</td></tr>
+<tr><td><code>t</code> / <code>T</code></td><td>cmd9</td><td>同じ</td></tr>
+<tr><td><code>@FSLR</code></td><td>形式を .fpy2 にする。命令は cmd10</td><td>cmd10</td></tr>
+<tr><td><code>@FLR</code></td><td>形式を .fpy2。命令は cmd16</td><td>cmd16</td></tr>
+<tr><td><code>@DETUNE</code></td><td>形式を .fpy2。命令は cmd18</td><td>cmd18</td></tr>
+<tr><td><code>@LFO</code></td><td>形式を .fpy2。命令は cmd21+cmd22</td><td>cmd21+cmd22</td></tr>
+<tr><td><code>@LEGATO</code> / <code>@FHOKRY</code></td><td>出せない（.fpy2 必須）</td><td>cmd24</td></tr>
+<tr><td><code>@EX1</code>–<code>@EX4</code></td><td>出せない（クラシック cmd23 は no-op）</td><td>cmd23</td></tr>
+<tr><td><code>@PCM「パス」</code></td><td>出せない</td><td>Misao トラック（0xD0 から）</td></tr>
+<tr><td><code>@MACRO</code> / <code>@CALL</code></td><td>出せない</td><td>末尾 FPY2MACR</td></tr>
+</table>
+<h3>MIDI — 命令の変わり方</h3>
+<table class="grid">
+<tr><th>Composer</th><th>.mpy / .mpw2</th><th>.mpsmv</th></tr>
+<tr><td>音符 / <code>r</code> / <code>^</code></td><td>cmd1 / 8 / 3</td><td>同じ</td></tr>
+<tr><td><code>@n</code> <code>@PROG</code> <code>@BANK</code></td><td>cmd2 / cmd7</td><td>同じ＋トレイラの prog</td></tr>
+<tr><td><code>v</code> / <code>@V</code> / <code>P</code> / <code>@P</code></td><td>cmd5 / 12 / 11</td><td>同じ</td></tr>
+<tr><td><code>@PEDON</code> / <code>@PEDOFF</code></td><td>cmd20 / 21</td><td>同じ</td></tr>
+<tr><td><code>@NRPN</code> / <code>@EX</code></td><td>cmd37 / cmd36</td><td>同じ</td></tr>
+<tr><td><code>@CC</code> <code>@MOD</code> <code>@SOFT</code> <code>@SOST</code> <code>@REV</code> <code>@CHO</code></td><td>形式を .mpsmv にする</td><td>すべて cmd41（<code>@MOD</code> は CC1 でも cmd6 には落とさない。MICP の <code>I</code>＝cmd17 とは別）</td></tr>
+<tr><td><code>@EXP</code> <code>@DELAY</code> <code>@PORTA</code>（CC65）</td><td>cmd41。これだけでは形式判定に入らない</td><td>cmd41</td></tr>
+<tr><td><code>@METER</code> / <code>@TS</code></td><td>形式を .mpsmv</td><td>譜面グリッド。ストリーム命令番号は無い</td></tr>
+<tr><td><code>@VST</code> 類 / Insert FX</td><td>形式を .mpsmv</td><td>MPW3 トレイラ（パスと状態）</td></tr>
+<tr><td><code>@MACRO</code> / <code>@CALL</code></td><td>形式を .mpsmv</td><td>MACR フッタ（版2）</td></tr>
+</table>
+<div class="note"><span class="label">注意</span>
+<p>MIDI の <code>@PORTA</code>（CC65）と <code>@SPORTA</code>（ソフトポルタの細分化）は別物です。</p>
+</div>
 <div class="tip"><span class="label">ヒント</span>
 <p>3つのウィンドウは別々に開けます。同じ曲を同時に複数窓で編集するときは保存先に注意してください。</p>
 </div>
-<div class="related"><span class="label">あわせて読みたい</span><ul><li><a href="tools.htm">附属ツールいろいろ</a></li><li><a href="vst-midi.htm">.mid を VST 音源で鳴らす</a></li><li><a href="export.htm">音声書き出し（WAV / mp3 / FLAC）</a></li><li><a href="playlist.htm">プレイリストを使う</a></li><li><a href="formats.htm">対応形式と対応タイトル</a></li></ul></div>
+<div class="related"><span class="label">あわせて読みたい</span><ul><li><a href="sasami-fpy.htm">SASAMI .fpy コマンド（全部）</a></li><li><a href="sasami-fpy2.htm">SASAMI .fpy2 — .fpy からの差分</a></li><li><a href="sasami-mpy.htm">SASAMI .mpy コマンド（全部）</a></li><li><a href="sasami-mpw2.htm">SASAMI .mpw2 — .mpy からの差分</a></li><li><a href="sasami-mpsmv.htm">SASAMI .mpsmv — .mpw2 からの差分</a></li><li><a href="tools.htm">附属ツールいろいろ</a></li><li><a href="vst-midi.htm">.mid を VST 音源で鳴らす</a></li><li><a href="export.htm">音声書き出し（WAV / mp3 / FLAC）</a></li><li><a href="playlist.htm">プレイリストを使う</a></li><li><a href="formats.htm">対応形式と対応タイトル</a></li></ul></div>
 
 <div class="botnav">
 <span class="prev">&#171; 前へ: <a href="tools.htm">附属ツールいろいろ</a></span>
-<span class="next">次へ: <a href="voice.htm">ボイスチェンジャー</a> &#187;</span>
+<span class="next">次へ: <a href="sasami-fpy.htm">SASAMI .fpy コマンド（全部）</a> &#187;</span>
 <span class="up"><a href="index.htm">目次</a></span>
 <div class="clear"></div>
 </div>

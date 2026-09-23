@@ -1,0 +1,95 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<title>SASAMI .fpy commands (complete)</title>
+<link rel="stylesheet" type="text/css" href="../css/help.css">
+</head>
+<body>
+
+<div class="topnav"><a href="index.htm">Contents</a> &nbsp;|&nbsp; <a href="../ja/sasami-fpy.htm">日本語</a></div>
+
+<h1>SASAMI .fpy commands (complete)</h1>
+
+<p class="lead">Every command kbsasami accepts in classic .fpy (OPNA / OPN / BEEP). See <a href="sasami-composer.htm">SASAMI Composer</a> for how text and staff become opcodes. Nested loops and Misao PCM are in <a href="sasami-fpy2.htm">the .fpy2 delta</a>.</p>
+<h2>File layout</h2>
+<p>Ten word pointers at the start (absolute 0x1xxx; unused 0x10F0). versionWord at 0x1C is 0 for classic. 0x1E = 0xFFFF means OPNA 10ch. Title / composer / comment are Shift-JIS from 0x50, 64 bytes each. The stream is 3-byte commands from about file offset 0x100.</p>
+<ul>
+<li>Pointer 0 or 0x10F0, or jump to 0xF0, ends the channel.</li>
+<li>FNEIRO (cmd2) operands 0xFE00|index are patched to 25-byte voice blocks at the end of the file.</li>
+<li>Playback chip: playlist “SASAMI FM mode” or <code>kbsasami.fmmode</code> (0=BEEP, 1=OPN FM3+SSG3, 2=OPNA default).</li>
+</ul>
+<h2>Channels</h2>
+<p>Internal index is 0-based. Text <code>#n</code> is 1-based (<code>#1</code> = ch0).</p>
+<table class="grid">
+<tr><th>Internal</th><th>Text</th><th>Role</th></tr>
+<tr><td>0..2</td><td>#1..#3</td><td>FM 1–3 (YM2608 bank 0)</td></tr>
+<tr><td>3..5</td><td>#4..#6</td><td>SSG A/B/C; volume 0..15</td></tr>
+<tr><td>6</td><td>#7</td><td>Rhythm (OPNA $10; idle on BEEP/OPN)</td></tr>
+<tr><td>7..9</td><td>#8..#10</td><td>FM 4–6 (OPNA bank 1; unused on OPN)</td></tr>
+</table>
+<h2>Tempo</h2>
+<p>cmd9 T means one tick = hostRate × T / 1248000 samples. T=0 uses the default. Composer <code>t120</code> / <code>T120</code> convert to this T.</p>
+<h2>Opcodes (complete)</h2>
+<p>Three bytes <code>[cmd][b1][b2]</code> unless noted. w1 is little-endian.</p>
+<table class="grid">
+<tr><th>cmd</th><th>Name</th><th>Operands</th><th>Effect</th></tr>
+<tr><td>0</td><td>FNOTE</td><td>b1=note, b2=wait</td><td>Key-on FM/SSG. High nibble=octave, low=name. Rhythm channel waits only.</td></tr>
+<tr><td>1</td><td>FKYU</td><td>b2=wait</td><td>Key-off rest.</td></tr>
+<tr><td>2</td><td>FNEIRO</td><td>w1=voice</td><td>Built-in 0..31 or absolute address of a 25-byte voice. Composer <code>@n</code>.</td></tr>
+<tr><td>3</td><td>FJUMP</td><td>w1=dest</td><td>Jump. 0xF0 ends. Composer <code>J</code>.</td></tr>
+<tr><td>4</td><td>PSGVOL</td><td>b1=0..15</td><td>SSG volume. <code>v</code> on #4..#6.</td></tr>
+<tr><td>5</td><td>NEXTF</td><td>—</td><td>Skip 3 bytes (compat stub).</td></tr>
+<tr><td>6</td><td>PSGAND</td><td>reg, mask</td><td>AND SSG register.</td></tr>
+<tr><td>7</td><td>PSGOR</td><td>reg, bits</td><td>OR SSG register.</td></tr>
+<tr><td>8</td><td>FMOUT</td><td>reg, data</td><td>Direct YM write.</td></tr>
+<tr><td>9</td><td>FTMPO</td><td>w1=T</td><td>Tempo. <code>t</code> / <code>T</code>.</td></tr>
+<tr><td>10</td><td>FSLR</td><td>b2=wait</td><td>Wait without key-off. Composer <code>@FSLR</code>.</td></tr>
+<tr><td>11</td><td>FVOL</td><td>b1=YM TL</td><td>0=loud, 127=silent. FM <code>v</code>.</td></tr>
+<tr><td>12</td><td>FPICH</td><td>b1=A4, b2=A0</td><td>F-number (not little-endian).</td></tr>
+<tr><td>13</td><td>loop start</td><td>b1=count</td><td><code>|:n</code>. Classic players expect one nest.</td></tr>
+<tr><td>14</td><td>loop end</td><td>w1=back</td><td>Decrement; jump back; key-off first. <code>:|</code>.</td></tr>
+<tr><td>15</td><td>PPICH</td><td>period</td><td>SSG period.</td></tr>
+<tr><td>16</td><td>FLR</td><td>LR mask</td><td>Stereo $B4 high bits. <code>@FLR</code>.</td></tr>
+<tr><td>17</td><td>F2JP</td><td>dest</td><td>FJUMP only if OPNA 10ch.</td></tr>
+<tr><td>18</td><td>FDETUN</td><td>w1</td><td>0x8000 = centre. <code>@DETUNE</code>.</td></tr>
+<tr><td>19</td><td>frzmvl</td><td>idx, vol</td><td>Rhythm voice volume.</td></tr>
+<tr><td>20</td><td>rhythm pan</td><td>idx, bits</td><td>$18+idx high bits.</td></tr>
+<tr><td>21</td><td>FLFO_DP</td><td>AMS/PMS</td><td>$B4 low. First half of <code>@LFO</code>.</td></tr>
+<tr><td>22</td><td>LFO enable</td><td>b1</td><td>Register $22.</td></tr>
+<tr><td>23</td><td>(reserved)</td><td>—</td><td>Classic no-op. <a href="sasami-fpy2.htm">.fpy2</a> uses it for EX.</td></tr>
+<tr><td>other</td><td>skip</td><td>3 bytes</td><td>Unknown commands skip 3 bytes.</td></tr>
+</table>
+<h2>Composer mapping (classic .fpy)</h2>
+<table class="grid">
+<tr><th>Composer / MML</th><th>Opcode</th><th>Notes</th></tr>
+<tr><td><code>OPNA</code> / <code>OPN</code> / <code>;FM</code></td><td>header 0x1E</td><td>Without this, MIDI is likely</td></tr>
+<tr><td><code>#1</code>..<code>#10</code></td><td>channel</td><td>1-based</td></tr>
+<tr><td>notes <code>cdefgab</code></td><td>cmd0</td><td>length <code>l</code>, dots</td></tr>
+<tr><td><code>r</code>, empty ticks</td><td>cmd1</td><td></td></tr>
+<tr><td><code>^</code></td><td>tie length</td><td>Legato without key-off is .fpy2</td></tr>
+<tr><td><code>t</code> / <code>T</code></td><td>cmd9</td><td>Tempo button</td></tr>
+<tr><td><code>v</code> FM / SSG</td><td>cmd11 / cmd4</td><td>TL vs 0..15</td></tr>
+<tr><td><code>q90</code></td><td>gate %</td><td>Shortens sounding wait</td></tr>
+<tr><td><code>@n</code></td><td>cmd2</td><td>Voice editor</td></tr>
+<tr><td><code>|:n</code> … <code>:|</code></td><td>cmd13/14</td><td>Nest ≥2 → .fpy2</td></tr>
+<tr><td>MICP <code>｛:n ｝:</code></td><td>unrolled in text</td><td>Classic .fpy repeats data</td></tr>
+<tr><td><code>Q</code> / <code>J</code></td><td>cmd3</td><td>Soft loop</td></tr>
+<tr><td><code>@SVIB</code> family</td><td>unrolled pitch/vol/pan (cmd12/11/16)</td><td>No new opcode; extension unchanged</td></tr>
+</table>
+<div class="note"><span class="label">Please note</span>
+<p>cmd10/16/18/21/22 already exist in classic FPY, but Composer still writes <a href="sasami-fpy2.htm">.fpy2</a> when it sees <code>@FSLR</code> <code>@FLR</code> <code>@DETUNE</code> <code>@LFO</code>.</p>
+</div>
+<div class="related"><span class="label">See also</span><ul><li><a href="sasami-composer.htm">SASAMI Composer (create songs)</a></li><li><a href="sasami-fpy2.htm">SASAMI .fpy2 — delta from .fpy</a></li><li><a href="sasami-mpy.htm">SASAMI .mpy commands (complete)</a></li><li><a href="sasami-mpw2.htm">SASAMI .mpw2 — delta from .mpy</a></li><li><a href="sasami-mpsmv.htm">SASAMI .mpsmv — delta from .mpw2</a></li><li><a href="kpi.htm">Adding formats with KPI plug-ins</a></li><li><a href="formats.htm">Supported formats and titles</a></li><li><a href="midi-monitor.htm">FM/MIDI monitor</a></li><li><a href="vst-midi.htm">Playing .mid through a VST</a></li></ul></div>
+
+<div class="botnav">
+<span class="prev">&#171; Back: <a href="sasami-composer.htm">SASAMI Composer (create songs)</a></span>
+<span class="next">Next: <a href="sasami-fpy2.htm">SASAMI .fpy2 — delta from .fpy</a> &#187;</span>
+<span class="up"><a href="index.htm">Contents</a></span>
+<div class="clear"></div>
+</div>
+
+<div class="foot">Media player "Raira" (oggYSEDbgm) — PrePrayerPower Soft</div>
+
+</body>
+</html>

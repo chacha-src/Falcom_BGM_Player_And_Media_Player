@@ -19,6 +19,7 @@ namespace std
 
 */
 #include "midisynth.hpp"
+#include "ym2612_pool.hpp"
 
 #include <cassert>
 //namespace std{//�ǉ� by Kobarin
@@ -128,6 +129,10 @@ namespace std{
         mono = false;
         mute = false;
         system_mode = system_mode_default;
+        fxRevSend = fxChoSend = fxDlySend = 0;
+        fxRevMode = fxChoMode = fxDlyMode = fxInsMode = 0;
+        nrpnCutoff = nrpnReso = nrpnAtk = nrpnDec = nrpnRel = 64;
+        nrpnVibRate = nrpnVibDepth = 64;
         reset_all_controller();
     }
     // �p�����[�^��������Ԃɖ߂��B
@@ -149,6 +154,8 @@ namespace std{
         set_freeze(0);
         RPN = 0x3FFF;
         NRPN = 0x3FFF;
+        nrpnCutoff = nrpnReso = nrpnAtk = nrpnDec = nrpnRel = 64;
+        nrpnVibRate = nrpnVibDepth = 64;
     }
     // ���ׂẲ����m�[�g�I�t����B
     void channel::all_note_off()
@@ -179,6 +186,144 @@ namespace std{
         notes.clear();
     }
     // �m�[�g�I���B�����o���B
+    namespace {
+        int clampi(int v, int lo, int hi)
+        {
+            if(v < lo) return lo;
+            if(v > hi) return hi;
+            return v;
+        }
+        void paint_op(int& AR, int& DR, int& RR, int& TL, int& AMS,
+            int arD, int drD, int rrD, int cut, int amsOn, bool modulator)
+        {
+            AR = clampi(AR + arD, 0, 31);
+            DR = clampi(DR + drD, 0, 31);
+            RR = clampi(RR + rrD, 0, 15);
+            if(modulator)
+                TL = clampi(TL - cut / 3, 0, 127);
+            if(amsOn && AMS == 0)
+                AMS = 1;
+        }
+        void paint_fm(FMPARAMETER& p, const tone_color& c)
+        {
+            int cut = c.cutoff - 64;
+            int res = c.reso - 64;
+            int atk = c.attack - 64;
+            int dec = c.decay - 64;
+            int rel = c.release - 64;
+            int revMode = c.revMode;
+            if(revMode == 0 && c.revSend > 0) revMode = 2;
+            int revScale = 1;
+            if(revMode <= 2) revScale = 1 + revMode;
+            else if(revMode <= 4) revScale = 3 + (revMode - 3);
+            else revScale = 2;
+            if(revMode == 5) cut += c.revSend / 100;
+            int rrDelta = -(c.revSend * revScale) / 120;
+            int dlyMode = c.dlyMode;
+            if(dlyMode == 0 && c.dlySend > 24) dlyMode = 1;
+            rrDelta -= (c.dlySend * (dlyMode >= 3 ? 2 : 1)) / 90;
+            rrDelta += rel / 32;
+            int fbDelta = res / 64;
+            if(revMode >= 3 && revMode <= 4) fbDelta += c.revSend / 200;
+            const int ins = c.insMode;
+            if(ins == 6 || ins == 7 || ins == 15 || ins == 16){
+                fbDelta += 1;
+                cut += 4;
+            }else if(ins >= 2 && ins <= 5){
+                cut += 5;
+            }
+            if(c.choMode == 5) fbDelta += c.choSend / 160;
+            p.FB = clampi(p.FB + fbDelta, 0, 7);
+            const int arD = atk / 20;
+            const int drD = dec / 24;
+            const int amsOn = (c.choSend > 100 || (ins >= 8 && ins <= 12)) ? 1 : 0;
+            paint_op(p.op1.AR, p.op1.DR, p.op1.RR, p.op1.TL, p.op1.AMS, arD, drD, rrDelta, cut, amsOn, true);
+            paint_op(p.op2.AR, p.op2.DR, p.op2.RR, p.op2.TL, p.op2.AMS, arD, drD, rrDelta, cut, amsOn, p.ALG < 4);
+            paint_op(p.op3.AR, p.op3.DR, p.op3.RR, p.op3.TL, p.op3.AMS, arD, drD, rrDelta, cut, amsOn, p.ALG < 5);
+            paint_op(p.op4.AR, p.op4.DR, p.op4.RR, p.op4.TL, p.op4.AMS, arD, drD, rrDelta, cut, 0, false);
+        }
+    }
+    void channel::set_effect_mode(int kind, int value)
+    {
+        if(value < 0) value = 0;
+        if(kind == 3){
+            if(value > 63) value = 63;
+            fxInsMode = value;
+        }else{
+            if(value > 7) value = 7;
+            if(kind == 0) fxRevMode = value;
+            else if(kind == 1) fxChoMode = value;
+            else if(kind == 2) fxDlyMode = value;
+        }
+        update_fx_vibrato();
+    }
+    tone_color channel::effect_color() const
+    {
+        tone_color c;
+        c.revSend = fxRevSend;
+        c.choSend = fxChoSend;
+        c.dlySend = fxDlySend;
+        c.revMode = fxRevMode;
+        c.choMode = fxChoMode;
+        c.dlyMode = fxDlyMode;
+        c.insMode = fxInsMode;
+        c.cutoff = nrpnCutoff;
+        c.reso = nrpnReso;
+        c.attack = nrpnAtk;
+        c.decay = nrpnDec;
+        c.release = nrpnRel;
+        c.vibRate = nrpnVibRate;
+        c.vibDepth = nrpnVibDepth;
+        return c;
+    }
+    void channel::apply_nrpn_data(int value)
+    {
+        if(NRPN == 0x3FFF) return;
+        switch(NRPN){
+        case 0x0108: nrpnVibRate = value; update_fx_vibrato(); break;
+        case 0x0109: nrpnVibDepth = value; update_fx_vibrato(); break;
+        case 0x0120: nrpnCutoff = value; break;
+        case 0x0121: nrpnReso = value; break;
+        case 0x0163: nrpnAtk = value; break;
+        case 0x0164: nrpnDec = value; break;
+        case 0x0166: nrpnRel = value; break;
+        default: break;
+        }
+    }
+    void channel::update_fx_vibrato()
+    {
+        tone_color c = effect_color();
+        int mode = c.choMode;
+        if(mode == 0 && c.choSend > 32) mode = 1;
+        if(c.insMode >= 8 && c.insMode <= 12) mode = 6;
+        static const double rateT[8] = { 0, 0.7, 1.2, 1.8, 2.8, 1.0, 3.6, 4.2 };
+        static const double depT[8] = { 0, 0.04, 0.08, 0.14, 0.06, 0.10, 0.06, 0.03 };
+        double depth = 0;
+        double freq = 3;
+        if(mode > 0 && (c.choSend > 16 || (c.insMode >= 8 && c.insMode <= 12))){
+            const int send = c.choSend > 0 ? c.choSend : 36;
+            depth = depT[mode & 7] * send / 127.0;
+            freq = rateT[mode & 7];
+        }
+        const double vibD = (c.vibDepth - 64) / 220.0;
+        if(vibD > 0) depth += vibD;
+        if(depth < 0) depth = 0;
+        if(c.vibRate != 64) freq *= 0.55 + c.vibRate / 160.0;
+        if(freq < 0.25) freq = 0.25;
+        int trem = 0;
+        double tremHz = 4;
+        if(c.insMode == 13 || c.insMode == 14){
+            trem = (c.insMode == 14) ? 18 : 10;
+        }else if(c.dlySend > 24 && (c.dlyMode >= 6 || c.revMode >= 6)){
+            trem = 3 + c.dlySend / 20;
+            tremHz = (c.dlyMode >= 7) ? 2.2 : 3.4;
+        }
+        for(std::vector<NOTE>::iterator i = notes.begin(); i != notes.end(); ++i){
+            if(i->status != NOTE::NOTEON) continue;
+            i->note->set_vibrato(depth, freq);
+            if(trem) i->note->set_tremolo(trem, tremHz);
+        }
+    }
     void channel::note_on(int note, int velocity)
     {
         assert(note >= 0 && note < NUM_NOTES);
@@ -189,7 +334,13 @@ namespace std{
             if(mono){
                 all_sound_off();
             }
-            class note* p = factory->note_on(program, note, velocity, frequency_multiplier);
+            factory->set_tone_color(effect_color());
+            int pc = program & 0x7F;
+            int lsb = (program >> 7) & 0x7F;
+            int msb = (program >> 14) & 0x7F;
+            int drum = ((bank & 0x3F80) == 0x3C00) || msb == 126 || msb == 127;
+            int prog = pc | (lsb << 7) | (msb << 14) | ((system_mode & 7) << 21) | (drum ? (1 << 24) : 0);
+            class note* p = factory->note_on(prog, note, velocity, frequency_multiplier);
             if(p){
                 int assign = p->get_assign();
                 if(assign){
@@ -213,6 +364,7 @@ namespace std{
                     p->set_tremolo(pressure, tremolo_frequency);
                 }
                 notes.push_back(NOTE(p, note));
+                update_fx_vibrato();
             }
         }
     }
@@ -265,6 +417,7 @@ namespace std{
             break;
         case 0x06:
             set_registered_parameter((get_registered_parameter() & 0x7F) | (value << 7));
+            apply_nrpn_data(value);
             break;
         case 0x07:
             volume = (volume & 0x7F) | (value << 7);
@@ -276,7 +429,8 @@ namespace std{
             expression = (expression & 0x7F) | (value << 7);
             break;
         case 0x20:
-            bank_select((bank & 0x7F) | (value << 7));
+            /* LSB。CC0 と同じ式だと SC-55/88 のマップ（1=55, 2=88, 3=88Pro, 4=8820）が選べない */
+            bank_select((bank & 0x3F80) | value);
             break;
         case 0x21:
             set_modulation_depth((modulation_depth & ~0x7F) | value);
@@ -295,6 +449,29 @@ namespace std{
             break;
         case 0x40:
             set_damper(value);
+            break;
+        case 0x47:
+            nrpnReso = value;
+            break;
+        case 0x48:
+            nrpnRel = value;
+            break;
+        case 0x49:
+            nrpnAtk = value;
+            break;
+        case 0x4A:
+            nrpnCutoff = value;
+            break;
+        case 0x5B:
+            fxRevSend = value;
+            break;
+        case 0x5D:
+            fxChoSend = value;
+            update_fx_vibrato();
+            break;
+        case 0x5E:
+            fxDlySend = value;
+            update_fx_vibrato();
             break;
         case 0x42:
             set_sostenute(value);
@@ -355,6 +532,7 @@ namespace std{
                 set_bank(0x3C00 | (value & 0x7F));
             }else if((value & 0x3F80) == 0x3F80){
                 set_bank(0x3C00 | (value & 0x7F));
+                default_bank = 0x3C00;
             }else{
                 set_bank(value);
             }
@@ -602,14 +780,43 @@ namespace std{
             set_master_coarse_tuning((data[5] & 0x7F) | ((data[6] & 0x7F) << 7));
         }else if(size == 11 && memcmp(data, "\xF0\x41", 2) == 0 && (data[2] & 0xF0) == 0x10 && memcmp(data + 3, "\x42\x12\x40", 3) == 0 && (data[6] & 0xF0) == 0x10 && data[7] == 0x15 && data[10] == 0xF7){
             /* use for rhythm part */
-            int channel = data[6] & 0x0F;
+            /* GS: 40 1n 15. n=0 はパート10、1-9 はパート1-9、A-F はパート11-16 */
+            int block = data[6] & 0x0F;
+            int channel = (block == 0) ? 9 : (block < 10 ? block - 1 : block);
             int map = data[8];
-            if(map == 0){
-                channels[channel]->set_bank(0x3C80);
-            }else{
-                channels[channel]->set_bank(0x3C00);
-            }
+            channels[channel]->set_rhythm_part(map != 0);
             channels[channel]->program_change(0);
+        }else if(size >= 10 && data[0] == 0xF0 && data[1] == 0x43 && (data[2] & 0xF0) == 0x10
+            && data[3] == 0x4C && data[4] == 0x08 && data[6] == 0x07 && data[size - 1] == 0xF7){
+            /* XG part mode: 08 nn 07. 0=通常, 1/2=ドラム。nn はパート1-16 */
+            int part = data[5] & 0x0F;
+            int mode = data[7] & 0x7F;
+            channels[part]->set_rhythm_part(mode != 0);
+        }else if(size >= 11 && data[0] == 0xF0 && data[1] == 0x41 && data[3] == 0x42 && data[4] == 0x12
+            && data[5] == 0x40 && data[size - 1] == 0xF7){
+            /* GS: 40 01 30 reverb, 38 chorus, 50 delay。40 03 00 insertion */
+            int kind = -1;
+            int val = data[8] & 0x7F;
+            if(data[6] == 0x01 && data[7] == 0x30) kind = 0;
+            else if(data[6] == 0x01 && data[7] == 0x38) kind = 1;
+            else if(data[6] == 0x01 && data[7] == 0x50) kind = 2;
+            else if(data[6] == 0x03 && data[7] == 0x00) kind = 3;
+            if(kind >= 0){
+                for(int i = 0; i < NUM_CHANNELS; ++i)
+                    channels[i]->set_effect_mode(kind, val);
+            }
+        }else if(size >= 9 && data[0] == 0xF0 && data[1] == 0x43 && (data[2] & 0xF0) == 0x10
+            && data[3] == 0x4C && data[4] == 0x02 && data[5] == 0x01 && data[size - 1] == 0xF7){
+            /* XG: 02 01 00 reverb, 20 chorus, 40 variation */
+            int kind = -1;
+            int val = data[7] & 7;
+            if(data[6] == 0x00) kind = 0;
+            else if(data[6] == 0x20) kind = 1;
+            else if(data[6] == 0x40) kind = 2;
+            if(kind >= 0){
+                for(int i = 0; i < NUM_CHANNELS; ++i)
+                    channels[i]->set_effect_mode(kind, val);
+            }
         }
     }
     // MIDI�C�x���g�̉��ߎ��s�B
@@ -1447,8 +1654,18 @@ namespace std{
 
     // FM�m�[�g�t�@�N�g���������B
     fm_note_factory::fm_note_factory()
+        : ym(new Ym2612Pool())
     {
         clear();
+    }
+    fm_note_factory::~fm_note_factory()
+    {
+        delete ym;
+        ym = 0;
+    }
+    bool fm_note_factory::load_wopn(const wchar_t* path, int family, int append)
+    {
+        return ym && ym->load(path, family, append);
     }
     // �N���A�B
     void fm_note_factory::clear()
@@ -1557,32 +1774,51 @@ namespace std{
     // �m�[�g�I���B
     note* fm_note_factory::note_on(int_least32_t program, int note, int velocity, double frequency_multiplier)
     {
+        if(ym && ym->ready())
+            return ym->note_on(program, note, velocity, frequency_multiplier, color.choSend);
+        if((program & (1 << 24)) != 0)
+            program = (120 << 14) | (program & 0x3FFF);
         bool drum = (program >> 14) == 120;
         if(drum){
-            int n = (program & 0x3FFF) * 128 + note;
-            struct DRUMPARAMETER* p;
-            if(drums.find(n) != drums.end()){
-                p = &drums[n];
-            }else if(drums.find(n & 0x3FFF) != drums.end()){
-                p = &drums[n & 0x3FFF];
-            }else if(drums.find(note) != drums.end()){
-                p = &drums[note];
-            }else if(drums.find(-1) != drums.end()){
-                p = &drums[-1];
-            }else{
+            const int bank = program / 128;
+            const int dprog = program & 0x7F;
+            int kit = 0;
+            if((bank & 0x3F80) == 0x3C00)
+                kit = bank & 0x7F;
+            const int keys[4] = {
+                note,
+                kit * 128 + note,
+                dprog * 128 + note,
+                -1
+            };
+            struct DRUMPARAMETER* p = NULL;
+            for(int i = 0; i < 4; ++i){
+                if(drums.find(keys[i]) != drums.end()){
+                    p = &drums[keys[i]];
+                    break;
+                }
+            }
+            if(!p)
                 return NULL;
-            }
-            return new fm_note(*p, p->key, velocity, p->panpot, p->assign, 1);
+            DRUMPARAMETER painted = *p;
+            paint_fm(painted, color);
+            return new fm_note(painted, p->key, velocity, p->panpot, p->assign, 1);
         }else{
-            struct FMPARAMETER* p;
-            if(programs.find(program) != programs.end()){
+            struct FMPARAMETER* p = NULL;
+            const int pc = program & 0x7F;
+            /* バンクで別楽器を引くと番号と実音がずれる。GM 番号の定義を使う。 */
+            if(programs.find(pc) != programs.end())
+                p = &programs[pc];
+            else if(programs.find(program) != programs.end())
                 p = &programs[program];
-            }else if(programs.find(program & 0x7F) != programs.end()){
-                p = &programs[program & 0x7F];
-            }else{
+            if(!p)
                 p = &programs[-1];
-            }
-            return new fm_note(*p, note, velocity, 8192, 0, frequency_multiplier);
+            FMPARAMETER painted = *p;
+            paint_fm(painted, color);
+            int sounded = note + painted.transpose;
+            if(sounded < 0) sounded = 0;
+            if(sounded > 127) sounded = 127;
+            return new fm_note(painted, sounded, velocity, 8192, 0, frequency_multiplier);
         }
     }
 //}//�폜 by Kobarin

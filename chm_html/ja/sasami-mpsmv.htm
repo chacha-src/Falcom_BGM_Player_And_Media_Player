@@ -1,0 +1,70 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<title>SASAMI .mpsmv — .mpw2 からの差分</title>
+<link rel="stylesheet" type="text/css" href="../css/help.css">
+</head>
+<body>
+
+<div class="topnav"><a href="index.htm">目次</a> &nbsp;|&nbsp; <a href="../en/sasami-mpsmv.htm">English</a></div>
+
+<h1>SASAMI .mpsmv — .mpw2 からの差分</h1>
+
+<p class="lead">.mpsmv の MIDI 本体は <a href="sasami-mpw2.htm">.mpw2</a>（つまり <a href="sasami-mpy.htm">.mpy</a> の命令）です。ファイル末尾に MPW3 トレイラが付き、ホストが HALion などの VST をパートへ載せます。KPI 内 fmmidi ではなく、本体の <a href="vst-midi.htm">.mid を VST で鳴らす</a> と同じ経路です。</p>
+<h2>トレイラ MPW3</h2>
+<p>MIDI 本体の直後にマジック <code>MPW3</code>、続けて u32 版（1 または 2）。そのあと 32 パート分です。</p>
+<table class="grid">
+<tr><th>欄</th><th>大きさ</th><th>内容</th></tr>
+<tr><td>パス</td><td>520 バイト</td><td>UTF-16 相当の VST パス。<code>@VST"…"</code> / 譜面 Tone。</td></tr>
+<tr><td>prog / msb / lsb / forceCh</td><td>各 4 バイト</td><td><code>@PROG</code> <code>@BANK</code>。forceCh は実 MIDI ch 固定。</td></tr>
+<tr><td>compLen + blob</td><td>4+可変</td><td>完全状態。<code>@VSTSTATEB64</code>（続きは <code>@VSTSTATEB64+</code>）。</td></tr>
+<tr><td>ctrlLen + blob</td><td>4+可変</td><td>パラメータのみ。<code>@VSTCTRLB64</code>。</td></tr>
+</table>
+<p>版が 2 以上でマクロがあるとき、トレイラの後ろに <code>MACR</code> ＋個数、名前 64 wchar、本文長、本文。<code>@MACRO name ｛…｝</code> / <code>@CALL name</code>。</p>
+<h2>インサート FX</h2>
+<p><code>@VSTFX slot "path"</code> と <code>@VSTFXSTATEB64 slot</code>。譜面の Insert FX。本体はパートの VST チェーンに載ります（トレイラの拡張領域）。</p>
+<h2>本文側で Composer が変える命令</h2>
+<table class="grid">
+<tr><th>Composer</th><th>.mpy/.mpw2</th><th>.mpsmv</th></tr>
+<tr><td><code>@CC n,v</code></td><td>形式を .mpsmv にする</td><td>cmd41 のまま</td></tr>
+<tr><td><code>@MOD @SOFT @SOST @REV @CHO</code></td><td>形式を .mpsmv にする</td><td>cmd41（CC1/67/66/91/93）。クラシック cmd6/17/18 には落とさない</td></tr>
+<tr><td><code>@SVIB @STREM @SPAN</code></td><td>ピッチ等に細分化</td><td>同じ細分化（cmd46 は出さない）</td></tr>
+<tr><td><code>@SPORTA</code></td><td>細分化</td><td>同じ細分化（cmd47 は出さない）</td></tr>
+<tr><td><code>｛:n … ｝:</code></td><td>テキスト展開</td><td>cmd23/24 のネイティブ（非展開）</td></tr>
+<tr><td><code>@METER</code> / <code>@TS</code></td><td>形式を .mpsmv</td><td>譜面グリッド用（ストリーム命令ではない）</td></tr>
+<tr><td><code>@VST</code> 類</td><td>形式が変わる</td><td>トレイラへ</td></tr>
+<tr><td><code>@MACRO</code> / <code>@CALL</code></td><td>形式が変わる</td><td>MACR フッタ。呼び出しはコンパイル時展開可</td></tr>
+</table>
+<h2>Composer が .mpsmv を選ぶとき</h2>
+<ul>
+<li><code>@VST</code>、<code>@VSTSTATEB64</code>、<code>@VSTCTRLB64</code>、<code>@VSTFX</code> がある。</li>
+<li><code>@METER</code> / <code>@TS</code>。</li>
+<li><code>@MACRO</code> / <code>@CALL</code>。</li>
+<li><code>@CC</code> / <code>@MOD</code> / <code>@SOFT</code> / <code>@SOST</code> / <code>@REV</code> / <code>@CHO</code>（および CHORUS/REVERB 別名）。</li>
+<li>テキストにネイティブ <code>｛:</code> がある。</li>
+<li>譜面 Tone に VST パスがある。</li>
+</ul>
+<h2>再生経路</h2>
+<p>本体はトレイラを読んで各パートの VST を開き、SMF 相当のノートをそのパートへ送ります。MIDI マッパーの GM ピアノにはしません。<code>kbsasami.vst</code> と raira=1 の入れ替えは、プレイリストの midPlayPrefer（KPI の fmmidi かホスト VST か）用です。</p>
+<h2>テキスト UI の B64</h2>
+<p>長い <code>@VSTSTATEB64</code> は「B64折畳」で省略表示できます。保存・コンパイル時はフル行に戻します。</p>
+<div class="tip"><span class="label">ヒント</span>
+<p>命令番号の辞書は <a href="sasami-mpy.htm">.mpy 全部</a>、入れ子と 64ch は <a href="sasami-mpw2.htm">.mpw2</a>、このページはトレイラと「展開しない」系統だけです。</p>
+</div>
+<div class="note"><span class="label">注意</span>
+<p>プレビュー用の一時ファイル名は <code>ogg_sasami_score.mpsmv</code> などになります。プレイリストに残したくなければ削除してください。</p>
+</div>
+<div class="related"><span class="label">あわせて読みたい</span><ul><li><a href="sasami-composer.htm">SASAMI Composer（曲を作る）</a></li><li><a href="sasami-fpy.htm">SASAMI .fpy コマンド（全部）</a></li><li><a href="sasami-fpy2.htm">SASAMI .fpy2 — .fpy からの差分</a></li><li><a href="sasami-mpy.htm">SASAMI .mpy コマンド（全部）</a></li><li><a href="sasami-mpw2.htm">SASAMI .mpw2 — .mpy からの差分</a></li><li><a href="kpi.htm">KPIプラグインで対応形式をふやす</a></li><li><a href="formats.htm">対応形式と対応タイトル</a></li><li><a href="midi-monitor.htm">FM/MIDIモニタ</a></li><li><a href="vst-midi.htm">.mid を VST 音源で鳴らす</a></li></ul></div>
+
+<div class="botnav">
+<span class="prev">&#171; 前へ: <a href="sasami-mpw2.htm">SASAMI .mpw2 — .mpy からの差分</a></span>
+<span class="next">次へ: <a href="voice.htm">ボイスチェンジャー</a> &#187;</span>
+<span class="up"><a href="index.htm">目次</a></span>
+<div class="clear"></div>
+</div>
+
+<div class="foot">メディアプレイヤー「らいら」 (oggYSEDbgm) — PrePrayerPower Soft</div>
+
+</body>
+</html>

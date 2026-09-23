@@ -1,4 +1,4 @@
-﻿// Soft3DMazeDlg.cpp — 迷路（ミニマップ／訪問／コンテキスト設定／曲連動）
+// Soft3DMazeDlg.cpp — 迷路（ミニマップ／訪問／コンテキスト設定／曲連動）
 
 #include "stdafx.h"
 #include "ogg.h"

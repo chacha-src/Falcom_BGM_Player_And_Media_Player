@@ -63,7 +63,7 @@ static void CollectSubDirsRecursive(const std::wstring& baseDir, int depth, std:
 	if (h == INVALID_HANDLE_VALUE) return;
 	do {
 		if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) continue;
-		if (wcscmp(fd.cFileName, L".") == 0 || wcscmp(fd.cFileName, L"..") == 0) continue;
+		if (fd.cFileName[0] == L'.') continue;
 		if (fd.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) continue;
 		std::wstring sub = baseDir;
 		if (!sub.empty() && sub.back() != L'\\' && sub.back() != L'/') sub += L'\\';
@@ -685,6 +685,7 @@ struct Session
 	DWORD channels = 2;
 	DWORD bps = 16;                      // 絶対値（float は nBitsPerSample が負）
 	uint32_t zeroRenderStreak = 0;       // 連続 0 サンプル。ループ無し曲の EOF 判定
+	int renderWhole = 0;                 // 小刻み Render が 0 のプラグインは一括のまま
 	std::wstring mediaPath;              // MIDI なら Seek を「先頭＋破棄再生」にする
 	uint8_t* pcmBuf = nullptr;           // Render/Seek 再利用。伸長のみ（vector 断片化回避）
 	size_t pcmCap = 0;
@@ -1121,7 +1122,15 @@ static uint32_t Cmd_Render(uint32_t sessionId, uint32_t bytesWanted, std::vector
 	DWORD gotSamples = 0;
 	bool hadRenderException = false;
 	DWORD remain = samplesWanted;
-	const DWORD kChunkSamples = 576; // 小さめに切って KPI の内部バッファ溢れを避ける
+	/* CEmu の readcemu と同じ約4ms ごとに Render。0 を返すプラグインだけ一括に戻す。 */
+	DWORD kChunkSamples = samplesWanted;
+	if (!s.renderWhole) {
+		kChunkSamples = 176;
+		if (s.selected.dwSampleRate >= 8000)
+			kChunkSamples = s.selected.dwSampleRate / 250u;
+		if (kChunkSamples < 64) kChunkSamples = 64;
+		if (kChunkSamples > samplesWanted) kChunkSamples = samplesWanted;
+	}
 
 	while (remain > 0) {
 		const DWORD ask = (remain > kChunkSamples) ? kChunkSamples : remain;
@@ -1135,7 +1144,22 @@ static uint32_t Cmd_Render(uint32_t sessionId, uint32_t bytesWanted, std::vector
 			SafeDecoderSeek(s.dec, 0, 0, &seekEx);
 			got = SafeDecoderRender(s.dec, part, ask, &hadRenderException);
 		}
+		if (got == 0 && gotSamples == 0 && ask < samplesWanted) {
+			got = SafeDecoderRender(s.dec, s.pcmBuf, samplesWanted, &hadRenderException);
+			if (got > 0) {
+				s.renderWhole = 1;
+				if (got > samplesWanted) got = samplesWanted;
+				uint32_t partBytes = got * bytesPerFrame;
+				const size_t fullCap = (size_t)samplesWanted * (size_t)bytesPerFrame;
+				if ((size_t)partBytes > fullCap) partBytes = (uint32_t)fullCap;
+				if ((size_t)partBytes > s.pcmCap) partBytes = (uint32_t)s.pcmCap;
+				gotSamples = partBytes / bytesPerFrame;
+				gotBytes = gotSamples * bytesPerFrame;
+				break;
+			}
+		}
 		if (got == 0) break;
+		if (got > ask) got = ask;
 		uint32_t partBytes = got * bytesPerFrame;
 		if ((size_t)partBytes > partCap) partBytes = (uint32_t)partCap;
 		gotSamples += got;

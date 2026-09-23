@@ -10,6 +10,7 @@
 #include <stdio.h>
 #include <math.h>
 #include <vector>
+#include <string>
 
 #ifdef _MSC_VER
 #pragma comment(lib, "mfplat.lib")
@@ -35,39 +36,148 @@ struct PcmVoice {
 	PcmVoice() : ch(0), slot(0), pos(0), step(1), gainL(0.35), gainR(0.35) {}
 };
 
+static int MisaoReadLineInts(const char** pp, int* dst, int maxn)
+{
+	const char* p = *pp;
+	int n = 0;
+	while (n < maxn) {
+		while (*p == ' ' || *p == '\t' || *p == '\r') p++;
+		if (*p == 0 || *p == '\n' || *p == ';' || *p == '@' || *p == '*') break;
+		char* end = NULL;
+		long v = strtol(p, &end, 10);
+		if (end == p) break;
+		dst[n++] = (int)v;
+		p = end;
+	}
+	while (*p && *p != '\n') p++;
+	if (*p == '\n') p++;
+	*pp = p;
+	return n;
+}
+
+static int MisaoOpInRange(const int* op)
+{
+	return op[0] >= 0 && op[0] <= 31 && op[1] >= 0 && op[1] <= 31
+		&& op[2] >= 0 && op[2] <= 31 && op[3] >= 0 && op[3] <= 15
+		&& op[4] >= 0 && op[4] <= 15 && op[5] >= 0 && op[5] <= 127
+		&& op[6] >= 0 && op[6] <= 3 && op[7] >= 0 && op[7] <= 15
+		&& op[8] >= 0 && op[8] <= 7 && op[9] >= 0 && op[9] <= 3;
+}
+
+static void MisaoFillOps(FMPARAMETER* p, const int ops[4][10])
+{
+	p->op1.AR = ops[0][0]; p->op1.DR = ops[0][1]; p->op1.SR = ops[0][2]; p->op1.RR = ops[0][3];
+	p->op1.SL = ops[0][4]; p->op1.TL = ops[0][5]; p->op1.KS = ops[0][6]; p->op1.ML = ops[0][7];
+	p->op1.DT = ops[0][8]; p->op1.AMS = ops[0][9];
+	p->op2.AR = ops[1][0]; p->op2.DR = ops[1][1]; p->op2.SR = ops[1][2]; p->op2.RR = ops[1][3];
+	p->op2.SL = ops[1][4]; p->op2.TL = ops[1][5]; p->op2.KS = ops[1][6]; p->op2.ML = ops[1][7];
+	p->op2.DT = ops[1][8]; p->op2.AMS = ops[1][9];
+	p->op3.AR = ops[2][0]; p->op3.DR = ops[2][1]; p->op3.SR = ops[2][2]; p->op3.RR = ops[2][3];
+	p->op3.SL = ops[2][4]; p->op3.TL = ops[2][5]; p->op3.KS = ops[2][6]; p->op3.ML = ops[2][7];
+	p->op3.DT = ops[2][8]; p->op3.AMS = ops[2][9];
+	p->op4.AR = ops[3][0]; p->op4.DR = ops[3][1]; p->op4.SR = ops[3][2]; p->op4.RR = ops[3][3];
+	p->op4.SL = ops[3][4]; p->op4.TL = ops[3][5]; p->op4.KS = ops[3][6]; p->op4.ML = ops[3][7];
+	p->op4.DT = ops[3][8]; p->op4.AMS = ops[3][9];
+}
+
+static void LoadProgramsFile(fm_note_factory& factory, const wchar_t* path)
+{
+	FILE* fp = NULL;
+	_wfopen_s(&fp, path, L"rb");
+	if (!fp) return;
+	if (fseek(fp, 0, SEEK_END) != 0) { fclose(fp); return; }
+	long sz = ftell(fp);
+	if (sz <= 0 || sz > 16 * 1024 * 1024) { fclose(fp); return; }
+	if (fseek(fp, 0, SEEK_SET) != 0) { fclose(fp); return; }
+	std::string raw((size_t)sz, '\0');
+	if (fread(&raw[0], 1, (size_t)sz, fp) != (size_t)sz) { fclose(fp); return; }
+	fclose(fp);
+	const unsigned char* b = (const unsigned char*)raw.data();
+	size_t n = raw.size();
+	size_t i0 = 0;
+	int utf16 = 0;
+	if (n >= 2 && b[0] == 0xFF && b[1] == 0xFE) { utf16 = 1; i0 = 2; }
+	else if (n >= 3 && b[0] == 0xEF && b[1] == 0xBB && b[2] == 0xBF) i0 = 3;
+	else {
+		int pairs = 0, zeros = 0;
+		for (size_t i = 1; i < 80 && i < n; i += 2) { pairs++; if (b[i] == 0) zeros++; }
+		if (pairs > 8 && zeros * 4 > pairs * 3) utf16 = 1;
+	}
+	std::string text;
+	text.reserve(n);
+	if (utf16) {
+		for (size_t i = i0; i + 1 < n; i += 2) {
+			unsigned c = (unsigned)b[i] | ((unsigned)b[i + 1] << 8);
+			text.push_back(c < 128 ? (char)c : ' ');
+		}
+	} else {
+		for (size_t i = i0; i < n; i++) {
+			unsigned char c = b[i];
+			if (c < 128) text.push_back((char)c);
+			else {
+				text.push_back(' ');
+				if ((c & 0xE0) == 0xC0 && i + 1 < n) i += 1;
+				else if ((c & 0xF0) == 0xE0 && i + 2 < n) i += 2;
+				else if ((c & 0xF8) == 0xF0 && i + 3 < n) i += 3;
+			}
+		}
+	}
+	const char* p = text.c_str();
+	while (*p) {
+		while (*p == ' ' || *p == '\t' || *p == '\r') p++;
+		if (*p == '\n') { p++; continue; }
+		if (*p != '@' && *p != '*') {
+			while (*p && *p != '\n') p++;
+			continue;
+		}
+		const int drum = (*p == '*');
+		p++;
+		int prog = 0;
+		if (MisaoReadLineInts(&p, &prog, 1) != 1) continue;
+		int ops[4][10];
+		int ok = 1;
+		if (drum) {
+			int hdr[6];
+			if (MisaoReadLineInts(&p, hdr, 6) != 6) continue;
+			if (hdr[0] < 0 || hdr[0] > 7 || hdr[1] < 0 || hdr[1] > 7 || hdr[2] < 0 || hdr[2] > 7) continue;
+			if (hdr[3] < 0 || hdr[3] > 127 || hdr[4] < 0 || hdr[4] > 16383 || hdr[5] < 0 || hdr[5] > 127) continue;
+			for (int k = 0; k < 4; k++) {
+				if (MisaoReadLineInts(&p, ops[k], 10) != 10 || !MisaoOpInRange(ops[k])) { ok = 0; break; }
+			}
+			if (!ok) continue;
+			DRUMPARAMETER d;
+			memset(&d, 0, sizeof(d));
+			d.ALG = hdr[0]; d.FB = hdr[1]; d.LFO = hdr[2];
+			d.key = hdr[3]; d.panpot = hdr[4]; d.assign = hdr[5];
+			MisaoFillOps(&d, ops);
+			factory.set_drum_program(prog, d);
+		} else {
+			int hdr[4];
+			int hn = MisaoReadLineInts(&p, hdr, 4);
+			if (hn < 3) continue;
+			if (hdr[0] < 0 || hdr[0] > 7 || hdr[1] < 0 || hdr[1] > 7 || hdr[2] < 0 || hdr[2] > 7) continue;
+			int tr = (hn >= 4) ? hdr[3] : 0;
+			if (tr < -48) tr = -48;
+			if (tr > 48) tr = 48;
+			for (int k = 0; k < 4; k++) {
+				if (MisaoReadLineInts(&p, ops[k], 10) != 10 || !MisaoOpInRange(ops[k])) { ok = 0; break; }
+			}
+			if (!ok) continue;
+			FMPARAMETER fm;
+			memset(&fm, 0, sizeof(fm));
+			fm.ALG = hdr[0]; fm.FB = hdr[1]; fm.LFO = hdr[2]; fm.transpose = tr;
+			MisaoFillOps(&fm, ops);
+			factory.set_program(prog, fm);
+		}
+	}
+}
+
 static void LoadProgramsTxt(fm_note_factory& factory, const wchar_t* dir)
 {
 	if (!dir || !dir[0]) return;
 	wchar_t path[MAX_PATH];
 	_snwprintf_s(path, _TRUNCATE, L"%s\\programs.txt", dir);
-	FILE* fp = NULL;
-	_wfopen_s(&fp, path, L"rt");
-	if (!fp) return;
-	while (!feof(fp)) {
-		int c = getc(fp);
-		if (c == '@') {
-			int prog = 0;
-			FMPARAMETER p;
-			if (fscanf_s(fp, "%d%d%d%d", &prog, &p.ALG, &p.FB, &p.LFO) == 4
-				&& fscanf_s(fp, "%d%d%d%d%d%d%d%d%d%d", &p.op1.AR, &p.op1.DR, &p.op1.SR, &p.op1.RR, &p.op1.SL, &p.op1.TL, &p.op1.KS, &p.op1.ML, &p.op1.DT, &p.op1.AMS) == 10
-				&& fscanf_s(fp, "%d%d%d%d%d%d%d%d%d%d", &p.op2.AR, &p.op2.DR, &p.op2.SR, &p.op2.RR, &p.op2.SL, &p.op2.TL, &p.op2.KS, &p.op2.ML, &p.op2.DT, &p.op2.AMS) == 10
-				&& fscanf_s(fp, "%d%d%d%d%d%d%d%d%d%d", &p.op3.AR, &p.op3.DR, &p.op3.SR, &p.op3.RR, &p.op3.SL, &p.op3.TL, &p.op3.KS, &p.op3.ML, &p.op3.DT, &p.op3.AMS) == 10
-				&& fscanf_s(fp, "%d%d%d%d%d%d%d%d%d%d", &p.op4.AR, &p.op4.DR, &p.op4.SR, &p.op4.RR, &p.op4.SL, &p.op4.TL, &p.op4.KS, &p.op4.ML, &p.op4.DT, &p.op4.AMS) == 10) {
-				factory.set_program(prog, p);
-			}
-		} else if (c == '*') {
-			int prog = 0;
-			DRUMPARAMETER p;
-			if (fscanf_s(fp, "%d%d%d%d%d%d%d", &prog, &p.ALG, &p.FB, &p.LFO, &p.key, &p.panpot, &p.assign) == 7
-				&& fscanf_s(fp, "%d%d%d%d%d%d%d%d%d%d", &p.op1.AR, &p.op1.DR, &p.op1.SR, &p.op1.RR, &p.op1.SL, &p.op1.TL, &p.op1.KS, &p.op1.ML, &p.op1.DT, &p.op1.AMS) == 10
-				&& fscanf_s(fp, "%d%d%d%d%d%d%d%d%d%d", &p.op2.AR, &p.op2.DR, &p.op2.SR, &p.op2.RR, &p.op2.SL, &p.op2.TL, &p.op2.KS, &p.op2.ML, &p.op2.DT, &p.op2.AMS) == 10
-				&& fscanf_s(fp, "%d%d%d%d%d%d%d%d%d%d", &p.op3.AR, &p.op3.DR, &p.op3.SR, &p.op3.RR, &p.op3.SL, &p.op3.TL, &p.op3.KS, &p.op3.ML, &p.op3.DT, &p.op3.AMS) == 10
-				&& fscanf_s(fp, "%d%d%d%d%d%d%d%d%d%d", &p.op4.AR, &p.op4.DR, &p.op4.SR, &p.op4.RR, &p.op4.SL, &p.op4.TL, &p.op4.KS, &p.op4.ML, &p.op4.DT, &p.op4.AMS) == 10) {
-				factory.set_drum_program(prog, p);
-			}
-		}
-	}
-	fclose(fp);
+	LoadProgramsFile(factory, path);
 }
 
 static uint16_t Rd16(const uint8_t* p)

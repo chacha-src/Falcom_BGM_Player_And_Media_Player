@@ -555,12 +555,13 @@ void CSasamiCmdHelpDlg::PaintChapter(CDC& dc, int chapter, int maxTextW, int& ou
 		y = SchTitle(dc, boldFont, L, titleLh, y, L"出力形式との関係");
 		{
 			const wchar_t* ln[] = {
-				L"  @VST あり → .mpsmv（VST ライブ再生・状態 B64 保存）。",
-				L"  ループ 2 段以上 → .mpw2。1 段 → .mpy。",
-				L"  @SVIB/@STREM/@SPAN/@SPORTA は .mpy/.mpw2/.fpy へ {: :} 相当に展開（新opcodeなし）。",
-				L"  コンパイル／再生確認で自動判定。Save As でも同じ規則。"
+				L"  @VST / @CC類 / @METER / {: ネイティブ → .mpsmv。",
+				L"  ループ 2 段以上 → .mpw2（VSTなし）。1 段 → .mpy。",
+				L"  FM は入れ子≥2 / @PCM / @EX / @LEGATO / @LFO類 → .fpy2。",
+				L"  @SVIB/@STREM/@SPAN/@SPORTA はどの形式でも {: :} 相当に展開（新opcodeなし）。",
+				L"  コンパイル／再生確認で自動判定。Save As でも同じ規則。CHM に命令全部。"
 			};
-			y = SchLines(dc, L, maxTextW, lh, y, ln, 4);
+			y = SchLines(dc, L, maxTextW, lh, y, ln, 5);
 		}
 	} else if (chapter == kTabFm1) {
 		y = SchTitle(dc, boldFont, L, titleLh, y, L"FM / OPNA テキスト（FPY）— 基本（FM1）");
@@ -708,7 +709,7 @@ void CSasamiCmdHelpDlg::PaintChapter(CDC& dc, int chapter, int maxTextW, int& ou
 		{
 			const wchar_t* ln[] = {
 				L"  譜面 Save As … .mpy / .mpw2 / .mpsmv / .fpy / .fpy2 を自動選択。",
-				L"  詳細は「共通」タブ。CHM「sasami-composer」も参照可。"
+				L"  詳細は「共通」タブ。CHM の .fpy / .fpy2 / .mpy / .mpw2 / .mpsmv ページに命令全部。"
 			};
 			y = SchLines(dc, L, maxTextW, lh, y, ln, 2);
 		}

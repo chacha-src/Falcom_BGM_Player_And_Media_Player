@@ -1,0 +1,75 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<title>SASAMI .fpy2 — .fpy からの差分</title>
+<link rel="stylesheet" type="text/css" href="../css/help.css">
+</head>
+<body>
+
+<div class="topnav"><a href="index.htm">目次</a> &nbsp;|&nbsp; <a href="../en/sasami-fpy2.htm">English</a></div>
+
+<h1>SASAMI .fpy2 — .fpy からの差分</h1>
+
+<p class="lead">.fpy2 はクラシック .fpy と同じチャンネル配置・3 バイト命令です。違うのはヘッダの版、入れ子ループ、追加 opcode、Misao PCM トラック、マクロフッタです。土台の命令は <a href="sasami-fpy.htm">.fpy コマンド</a> を見てください。</p>
+<h2>ヘッダの違い</h2>
+<ul>
+<li>拡張子 <code>.fpy2</code>、または versionWord（0x1C）が 2。</li>
+<li>ループ入れ子は最大 16 段（クラシック想定は 1 段）。</li>
+<li>ファイル末尾に <code>FPY2MACR</code> があれば <code>@MACRO</code> 定義。</li>
+</ul>
+<h2>追加・意味が変わる命令</h2>
+<table class="grid">
+<tr><th>cmd</th><th>名前</th><th>オペランド</th><th>働き / Composer</th></tr>
+<tr><td>13 / 14</td><td>ループ</td><td>回数 / 戻る位置</td><td>入れ子 2 段以上もスタックで回す。<code>|:n</code> のネスト、またはネイティブ <code>｛:n ｝:</code>。</td></tr>
+<tr><td>23</td><td>EX1–4</td><td>b1=1..4、b2=データ</td><td><code>@EX1</code>..<code>@EX4</code>。SSG なら EX1＝ノイズ周期 $06、EX2＝ミキサ $07。クラシックでは no-op。</td></tr>
+<tr><td>24</td><td>fhokry</td><td>FNOTE と同じ</td><td>直前を key-off しない音符。<code>@LEGATO</code> / <code>@FHOKRY</code>。</td></tr>
+<tr><td>25</td><td>ソフトVIB/TREM</td><td>b1=mode*128+depth、b2=delay</td><td>mode0=ピッチ、1=音量。tick 待ち中に三角波。手書きファイル用。Composer の <code>@SVIB</code> / <code>@STREM</code> はここへ出さず細分化する。</td></tr>
+<tr><td>29</td><td>ソフトポルタ</td><td>b1=半音+64、b2=glide tick</td><td>手書き用。<code>@SPORTA</code> は Composer では細分化。</td></tr>
+</table>
+<h2>Misao PCM</h2>
+<p>ポインタは 0xD0 から 16 本（ワード、0x1xxx）。0xF0=1、0xF1=使用チャンネル数。命令は FM と同じ 3 バイト系です。</p>
+<table class="grid">
+<tr><th>cmd</th><th>働き</th></tr>
+<tr><td>0</td><td>ノートオン（前音オフ）。b1→MIDI キー、b2=待ち</td></tr>
+<tr><td>1</td><td>ノートオフして待ち</td></tr>
+<tr><td>2</td><td>プログラム（PCM 音色番号）</td></tr>
+<tr><td>3</td><td>ジャンプ（0xF0 で終了）</td></tr>
+<tr><td>9</td><td>テンポ T（FM と共有）</td></tr>
+<tr><td>10</td><td>待ち（key-off しない）</td></tr>
+<tr><td>11</td><td>音量 CC7</td></tr>
+<tr><td>12</td><td>ピッチベンド</td></tr>
+<tr><td>13 / 14</td><td>ループ開始 / 終端（入れ子可）</td></tr>
+<tr><td>18</td><td>デチューン（ベンドに加算）</td></tr>
+<tr><td>24</td><td>レガート（オフ無しノート）</td></tr>
+<tr><td>25</td><td>パン</td></tr>
+<tr><td>26</td><td>b2 バイト読み飛ばし</td></tr>
+</table>
+<p>Composer は <code>@PCM"パス"</code> です。未保存のプレビューはフルパス、Save As で .fpy2 の隣へコピーして相対パスに書き直します。対応サンプルは wav / mp3 / flac（プラグインの programs.txt と組み合わせ可）。</p>
+<h2>Composer が .fpy2 を選ぶとき</h2>
+<ul>
+<li>ループ入れ子が 2 段以上。</li>
+<li><code>@PCM</code>、<code>@EX1</code>..<code>@EX4</code>、<code>@LEGATO</code> / <code>@FHOKRY</code>。</li>
+<li>テキストにネイティブ <code>｛:</code> がある（展開しないソフトループ）。</li>
+<li><code>@MACRO</code> / <code>@CALL</code>。</li>
+<li><code>@LFO</code> <code>@DETUNE</code> <code>@FLR</code> <code>@FSLR</code>（クラシック opcode 自体はあるが、Composer は .fpy2 にする）。</li>
+<li>譜面で Soft loop をネイティブのまま保存した場合。</li>
+</ul>
+<h2>クラシックへ落とすとき</h2>
+<p><code>@SVIB</code> 類は .fpy でも .fpy2 でも、cmd25/29 を使わず短い cmd12/11/16 と待ちに展開します。旧 SASAMI でも鳴ります。入れ子ループと PCM と EX とレガートは展開できないので .fpy2 必須です。</p>
+<div class="tip"><span class="label">ヒント</span>
+<p><a href="sasami-fpy.htm">.fpy の全部</a> に無いものだけが、このページの差分です。</p>
+</div>
+<div class="related"><span class="label">あわせて読みたい</span><ul><li><a href="sasami-composer.htm">SASAMI Composer（曲を作る）</a></li><li><a href="sasami-fpy.htm">SASAMI .fpy コマンド（全部）</a></li><li><a href="sasami-mpy.htm">SASAMI .mpy コマンド（全部）</a></li><li><a href="sasami-mpw2.htm">SASAMI .mpw2 — .mpy からの差分</a></li><li><a href="sasami-mpsmv.htm">SASAMI .mpsmv — .mpw2 からの差分</a></li><li><a href="kpi.htm">KPIプラグインで対応形式をふやす</a></li><li><a href="formats.htm">対応形式と対応タイトル</a></li><li><a href="midi-monitor.htm">FM/MIDIモニタ</a></li><li><a href="vst-midi.htm">.mid を VST 音源で鳴らす</a></li></ul></div>
+
+<div class="botnav">
+<span class="prev">&#171; 前へ: <a href="sasami-fpy.htm">SASAMI .fpy コマンド（全部）</a></span>
+<span class="next">次へ: <a href="sasami-mpy.htm">SASAMI .mpy コマンド（全部）</a> &#187;</span>
+<span class="up"><a href="index.htm">目次</a></span>
+<div class="clear"></div>
+</div>
+
+<div class="foot">メディアプレイヤー「らいら」 (oggYSEDbgm) — PrePrayerPower Soft</div>
+
+</body>
+</html>

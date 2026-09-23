@@ -24,7 +24,7 @@ static const wchar_t kCopyright[] =
 static const GUID kGuid =
 { 0xa7c3e91f, 0x4b2d, 0x4e6a, { 0x9c, 0x18, 0x8f, 0x5d, 0x2a, 0x1b, 0x7e, 0x03 } };
 
-static const wchar_t kExts[] = L".fpy/.fpy2/.mpy/.mpw2/.mpsmv";
+static const wchar_t kExts[] = L".fpy/.fpy2/.mpy/.mpw2/.mpsmv/.mid/.midi/.rcp/.r36/.g36/.g18/.mcp/.mtd/.mff/.seq";
 
 static const wchar_t SEC_KBSASAMI[] = L"kbsasami";
 static const wchar_t KEY_VST[] = L"vst";

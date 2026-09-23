@@ -263,6 +263,26 @@
 			    <param name="Local" value="ja\sasami-composer.htm">
 			    </OBJECT>
 			<LI> <OBJECT type="text/sitemap">
+			    <param name="Name" value="SASAMI .fpy コマンド（全部）">
+			    <param name="Local" value="ja\sasami-fpy.htm">
+			    </OBJECT>
+			<LI> <OBJECT type="text/sitemap">
+			    <param name="Name" value="SASAMI .fpy2 ? .fpy からの差分">
+			    <param name="Local" value="ja\sasami-fpy2.htm">
+			    </OBJECT>
+			<LI> <OBJECT type="text/sitemap">
+			    <param name="Name" value="SASAMI .mpy コマンド（全部）">
+			    <param name="Local" value="ja\sasami-mpy.htm">
+			    </OBJECT>
+			<LI> <OBJECT type="text/sitemap">
+			    <param name="Name" value="SASAMI .mpw2 ? .mpy からの差分">
+			    <param name="Local" value="ja\sasami-mpw2.htm">
+			    </OBJECT>
+			<LI> <OBJECT type="text/sitemap">
+			    <param name="Name" value="SASAMI .mpsmv ? .mpw2 からの差分">
+			    <param name="Local" value="ja\sasami-mpsmv.htm">
+			    </OBJECT>
+			<LI> <OBJECT type="text/sitemap">
 			    <param name="Name" value="ボイスチェンジャー">
 			    <param name="Local" value="ja\voice.htm">
 			    </OBJECT>
@@ -623,6 +643,26 @@
 			<LI> <OBJECT type="text/sitemap">
 			    <param name="Name" value="SASAMI Composer (create songs)">
 			    <param name="Local" value="en\sasami-composer.htm">
+			    </OBJECT>
+			<LI> <OBJECT type="text/sitemap">
+			    <param name="Name" value="SASAMI .fpy commands (complete)">
+			    <param name="Local" value="en\sasami-fpy.htm">
+			    </OBJECT>
+			<LI> <OBJECT type="text/sitemap">
+			    <param name="Name" value="SASAMI .fpy2 ? delta from .fpy">
+			    <param name="Local" value="en\sasami-fpy2.htm">
+			    </OBJECT>
+			<LI> <OBJECT type="text/sitemap">
+			    <param name="Name" value="SASAMI .mpy commands (complete)">
+			    <param name="Local" value="en\sasami-mpy.htm">
+			    </OBJECT>
+			<LI> <OBJECT type="text/sitemap">
+			    <param name="Name" value="SASAMI .mpw2 ? delta from .mpy">
+			    <param name="Local" value="en\sasami-mpw2.htm">
+			    </OBJECT>
+			<LI> <OBJECT type="text/sitemap">
+			    <param name="Name" value="SASAMI .mpsmv ? delta from .mpw2">
+			    <param name="Local" value="en\sasami-mpsmv.htm">
 			    </OBJECT>
 			<LI> <OBJECT type="text/sitemap">
 			    <param name="Name" value="The voice changer">

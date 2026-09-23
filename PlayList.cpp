@@ -12649,6 +12649,34 @@ void CPlayList::plugs(CString fff, playlistdata *p,TCHAR* kpi, BYTE& kv)
 		wchar_t mid[VST_PATH_CHARS]; mid[0] = 0;
 		wchar_t hints[32][128]; int hc = 0;
 		const int resolved = VstResolvePlayPath(fff, mid, VST_PATH_CHARS, hints, 32, &hc);
+		if (savedata.midPlayPrefer != 1 && ComposerIsSeqExt(fff)) {
+			int pick = -1;
+			BYTE kvS = 0;
+			for (int i = 0; i < kpicnt; i++) {
+				if (plugkind[i] != PLUGKIND_KPI || kpichk[i] != 1) continue;
+				CString leaf = kpif[i];
+				leaf.MakeLower();
+				const int sas = (leaf.Find(L"kbsasami.kpi") >= 0) ? 1 : 0;
+				const int fm = (leaf.Find(L"kbfmmidi.kpi") >= 0) ? 1 : 0;
+				if (!sas && !fm) continue;
+				if (pick < 0 || sas) {
+					pick = i;
+					kvS = 0;
+				}
+				if (sas && kpiarch[i] != 64)
+					break;
+			}
+			if (pick >= 0) {
+				_tcscpy(p->fol, fff);
+				p->sub = -3;
+				CString ftR = fff.Right(fff.GetLength() - fff.ReverseFind(L'\\') - 1);
+				_tcscpy(p->name, ftR);
+				p->alb[0] = 0; p->art[0] = 0; p->loop1 = p->loop2 = p->ret2 = 0;
+				if (kpi) _tcscpy(kpi, kpif[pick]);
+				kv = kvS;
+				return;
+			}
+		}
 		if (savedata.midPlayPrefer == 1 && resolved) {
 			_tcscpy(p->fol, fff);
 			p->sub = MODE_VST_MIDI;
@@ -12737,9 +12765,6 @@ void CPlayList::plugs(CString fff, playlistdata *p,TCHAR* kpi, BYTE& kv)
 	for(int i=0;i<kpicnt;i++){
 		if (plugkind[i] != PLUGKIND_KPI) continue;
 		if (wantExt == L".mpy" || wantExt == L".mpw2" || wantExt == L".mpsmv") continue;
-		if (wantExt == L".rcp" || wantExt == L".r36" || wantExt == L".g36"
-			|| wantExt == L".g18" || wantExt == L".mcp" || wantExt == L".mtd"
-			|| wantExt == L".mff" || wantExt == L".seq") continue;
 		for(int j=0;;j++){
 			if(ext[i][j]=="") break;
 			if(ext[i][j]==wantExt){
@@ -14534,9 +14559,8 @@ void CPlayList::OnCbnSelchangeCombo1()
 			if (pc == NULL)
 				pc = (playlistdata0*)malloc(sizeof(playlistdata0));
 			m_lc.pc = pc;
-			m_lc.SetItemCount(playcnt);
 			ClampPlaylistSelectionIndices(this);
-			m_lc.RedrawWindow();
+			RefreshListViews();
 			loadplaylistname();
 			DatArc_FlushSuspend(FALSE);
 			return;
@@ -14545,15 +14569,12 @@ void CPlayList::OnCbnSelchangeCombo1()
 		if (pc == NULL)
 			pc = (playlistdata0*)malloc(sizeof(playlistdata0));
 		m_lc.pc = pc;
-		m_lc.SetItemCount(playcnt);
 		ClampPlaylistSelectionIndices(this);
-		m_lc.RedrawWindow();
+		RefreshListViews();
 		loadplaylistname();
 		extern CMediaPlayerDlg* mp;
-		if (mp && ::IsWindow(mp->GetSafeHwnd())) {
+		if (mp && ::IsWindow(mp->GetSafeHwnd()))
 			mp->ReloadPlaylistCombo();
-			mp->RefreshList(TRUE);
-		}
 		MpPersistSavedataQuick();
 		DatArc_FlushSuspend(FALSE);
 		return;
@@ -14571,7 +14592,6 @@ void CPlayList::OnCbnSelchangeCombo1()
 		pc = (playlistdata0*)malloc(sizeof(playlistdata0));
 	}
 	m_lc.pc = pc;
-	m_lc.SetItemCount(playcnt);
 	for (int j = 0; j < playcnt; j++) pc[j].icon = 1;
 	if (keepPlayback) {
 		filen = keepFol;
@@ -14598,9 +14618,27 @@ void CPlayList::OnCbnSelchangeCombo1()
 		}
 	}
 	ClampPlaylistSelectionIndices(this);
-	m_lc.RedrawWindow();
+	RefreshListViews();
 	MpPersistSavedataQuick();
 	DatArc_FlushSuspend(FALSE);
+}
+
+void CPlayList::RefreshListViews()
+{
+	if (::IsWindow(m_lc.GetSafeHwnd())) {
+		m_lc.pc = pc;
+		const int n = playcnt;
+		/* 同じ件数の SetItemCount は LVS_OWNERDATA の表示を残す */
+		if (m_lc.GetItemCount() == n)
+			m_lc.SetItemCount(n > 0 ? n + 1 : 1);
+		m_lc.SetItemCount(n);
+		if (n > 0)
+			m_lc.RedrawItems(0, n - 1);
+		m_lc.Invalidate(FALSE);
+	}
+	extern CMediaPlayerDlg* mp;
+	if (mp && ::IsWindow(mp->GetSafeHwnd()))
+		mp->RefreshList(TRUE);
 }
 
 void CPlayList::loadplaylistname()
@@ -14884,10 +14922,9 @@ void CPlayList::OnBnClickedPlaydelete()
 		if (pc == NULL) {
 			pc = (playlistdata0*)malloc(sizeof(playlistdata0));
 		}
-		m_lc.SetItemCount(playcnt);
 		for (int j = 0; j < playcnt; j++) pc[j].icon = 1;
 		ClampPlaylistSelectionIndices(this);
-		m_lc.RedrawWindow();
+		RefreshListViews();
 		Save();
 		changeflg = FALSE;
 		return;

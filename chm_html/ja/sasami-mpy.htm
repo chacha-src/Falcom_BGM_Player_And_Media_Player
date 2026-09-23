@@ -1,0 +1,120 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<title>SASAMI .mpy コマンド（全部）</title>
+<link rel="stylesheet" type="text/css" href="../css/help.css">
+</head>
+<body>
+
+<div class="topnav"><a href="index.htm">目次</a> &nbsp;|&nbsp; <a href="../en/sasami-mpy.htm">English</a></div>
+
+<h1>SASAMI .mpy コマンド（全部）</h1>
+
+<p class="lead">kbsasami が .mpy を SMF に展開して鳴らすときのコマンドを全部載せます。64 トラックや二重ポートは <a href="sasami-mpw2.htm">.mpw2 の差分</a>、VST バインドは <a href="sasami-mpsmv.htm">.mpsmv の差分</a> です。</p>
+<h2>ファイルの形</h2>
+<ul>
+<li>マジック無し（先頭はトラックポインタ）。版バイト 0x80/0x81（例 0x33 0x75）。</li>
+<li>0x82＝二重 MIDI ポート、0x83＝wide（1 なら 64 トラック）。クラシック .mpy は 32 トラック・16bit ポインタ（ch0 はオフセット 0、ch32 以降は 0x100）。</li>
+<li>曲名は 0x160 から Shift-JIS 64×3（タイトル／作者／コメント）。</li>
+<li>ストリームは 0x200 付近から。アドレスはファイルオフセット＋0x1000。</li>
+<li>命令は基本 3 バイト。cmd13/14/15 と 37、46、47 は 4 バイト。cmd36/40 は可変長。</li>
+<li>ジャンプ（cmd10/24）のオペランドは 16bit 絶対（0x1xxx）。0xF0 でトラック終了。</li>
+</ul>
+<h2>マップ</h2>
+<p>再生時の GS/XG/55/88 などは <code>kbsasami.midimode</code> とプレイリスト「ささみ☆ﾐ 音源モード」です。同じ番号の命令でも、88map では b1、55map では b2 を使うものがあります（cmd2/5/7/12）。</p>
+<h2>バイナリ命令（全部）</h2>
+<table class="grid">
+<tr><th>cmd</th><th>長さ</th><th>名前</th><th>働き</th></tr>
+<tr><td>0</td><td>—</td><td>終了</td><td>トラック停止。途中に置かない。</td></tr>
+<tr><td>1</td><td>3</td><td>NOTE</td><td>前音オフ→ノートオン。b1=音、b2=待ち。ベロシティは cmd19。Composer の音符。</td></tr>
+<tr><td>2</td><td>3</td><td>PROG</td><td>プログラム。88 は b1、55/GM は b2。<code>@n</code> / <code>@n:m</code> / <code>@PROG</code>。</td></tr>
+<tr><td>3</td><td>3</td><td>TIE</td><td>音を伸ばすだけ（待ち b2）。<code>^</code>。</td></tr>
+<tr><td>4</td><td>3</td><td>MASTERVOL</td><td>GS LCD＋GS 40 00 04＋GM Master。全体音量。</td></tr>
+<tr><td>5</td><td>3</td><td>TRACKVOL</td><td>CC7。88=b1、55=b2。<code>v</code> / <code>@V</code> / 譜面 Vol。</td></tr>
+<tr><td>6</td><td>3</td><td>MOD</td><td>CC1（MICP 経路）。Composer の <code>@MOD</code> は cmd41。</td></tr>
+<tr><td>7</td><td>3</td><td>BANK</td><td>CC0/32。マップで b1/b2 を使い分け。<code>@BANK</code> / <code>@n:m</code> のバンク。</td></tr>
+<tr><td>8</td><td>3</td><td>REST</td><td>前音オフして待ち。<code>r</code>。ch10 の <code>r</code> はライドになる方言あり。</td></tr>
+<tr><td>9</td><td>3</td><td>TEMPO</td><td>w1=T。SMF メタ 0x51。<code>t</code> / <code>T</code>。</td></tr>
+<tr><td>10</td><td>3</td><td>JUMP</td><td>w1=絶対アドレス。0xF0＝終了。後方ジャンプはループ開始として記録。<code>J</code>。</td></tr>
+<tr><td>11</td><td>3</td><td>PITCH</td><td>ピッチベンド 14bit（b1,b2）。<code>@P</code> / 譜面 Pitch。</td></tr>
+<tr><td>12</td><td>3</td><td>PAN</td><td>CC10。88 は b2、それ以外は b1。<code>P64</code>。</td></tr>
+<tr><td>13</td><td>4</td><td>LAREV</td><td>GS SysEx 10 00 01 + 3 バイト。<code>@L</code> 系。</td></tr>
+<tr><td>14</td><td>4</td><td>REVERB</td><td>GS/XG リバーブタイプ・レベル。b1/b2/b3。</td></tr>
+<tr><td>15</td><td>4</td><td>CHORUS</td><td>GS/XG コーラス。</td></tr>
+<tr><td>16</td><td>3</td><td>WHAT1 / H</td><td>原版は内部スタブ（MIDI を出さない）。MICP の <code>H</code>。</td></tr>
+<tr><td>17</td><td>3</td><td>REV SEND</td><td>CC91。<code>I</code> / <code>@REV</code>。</td></tr>
+<tr><td>18</td><td>3</td><td>CHO SEND</td><td>CC93。<code>@CHO</code>。</td></tr>
+<tr><td>19</td><td>3</td><td>VEL</td><td>以降のノートベロシティ。<code>v</code> の一部。</td></tr>
+<tr><td>20</td><td>3</td><td>PEDON</td><td>CC64=127。<code>@PEDON</code>。</td></tr>
+<tr><td>21</td><td>3</td><td>PEDOFF</td><td>CC64=0。<code>@PEDOFF</code>。</td></tr>
+<tr><td>22</td><td>3</td><td>WHAT2</td><td>原版内部ワークのみ。</td></tr>
+<tr><td>23</td><td>3</td><td>LOOP START</td><td>回数 b1 をスタックへ。<code>|:n</code>。</td></tr>
+<tr><td>24</td><td>3</td><td>LOOP END</td><td>回数を減らし、残れば dest へ。尽きれば次へ。<code>:|</code>。</td></tr>
+<tr><td>25</td><td>3</td><td>NOP</td><td>3 バイト読み飛ばし。</td></tr>
+<tr><td>26</td><td>3</td><td>PICH2</td><td>RPN ピッチベンド幅（CC101/100/6）。</td></tr>
+<tr><td>27</td><td>3</td><td>WHAT4</td><td>CC6 の続き＋RPN null。</td></tr>
+<tr><td>28</td><td>3</td><td>TITL</td><td>ヘッダ 0xC0 から 11 文字を GS LCD へ。</td></tr>
+<tr><td>29</td><td>3</td><td>KAKU1</td><td>ドラムパート。XG は CC0、GS は 40 1x 15。</td></tr>
+<tr><td>30</td><td>3</td><td>KAKU2</td><td>GS 40 1x 30。</td></tr>
+<tr><td>31</td><td>3</td><td>KAKU3</td><td>GS 40 1x 36。</td></tr>
+<tr><td>32</td><td>3</td><td>KAKU4</td><td>GS 40 1x 32。</td></tr>
+<tr><td>33</td><td>3</td><td>KAKU5</td><td>GS 40 1x 33。</td></tr>
+<tr><td>34</td><td>3</td><td>EXPR</td><td>CC11。<code>@EXP</code> / 譜面 Exp。</td></tr>
+<tr><td>35</td><td>3</td><td>MD5588</td><td>XG のみ CC32=b1+1、CC0=0。</td></tr>
+<tr><td>36</td><td>可変</td><td>SYSEX</td><td>0xF0..0xF7 をそのまま、または GS チェックサム付き。<code>@EX</code>。終端 0xFF。</td></tr>
+<tr><td>37</td><td>4</td><td>NRPN</td><td>CC99/98/6。<code>@NRPN msb,lsb,data</code>。</td></tr>
+<tr><td>38</td><td>3</td><td>PORT1</td><td>以後このトラックを MIDI ポート2 へ。</td></tr>
+<tr><td>39</td><td>3</td><td>MAPKILL</td><td>b1 が現在マップと一致したらトラック終了（機種専用パート）。</td></tr>
+<tr><td>40</td><td>可変</td><td>MAP SYSEX</td><td>タグ列が現在マップに合うときだけ SysEx。</td></tr>
+<tr><td>41</td><td>3</td><td>CC</td><td>任意 CC b1=番号、b2=値。<code>@CC</code>（Composer は .mpsmv）。</td></tr>
+<tr><td>42</td><td>3</td><td>PROG2</td><td>XG/新GM 用プログラム。</td></tr>
+<tr><td>43</td><td>3</td><td>BANK2</td><td>XG CC32 / 新GM CC0。</td></tr>
+<tr><td>44</td><td>3</td><td>VOL2</td><td>XG/新GM の CC7。</td></tr>
+<tr><td>45</td><td>3</td><td>PAN2</td><td>XG/新GM の CC10。</td></tr>
+<tr><td>46</td><td>4</td><td>SOFTVIB</td><td>mode, delay, depth。手書き用。Composer の <code>@SVIB</code> は細分化。</td></tr>
+<tr><td>47</td><td>4</td><td>PORTA</td><td>semi+64, delay, glide。手書き用。<code>@SPORTA</code> は細分化。</td></tr>
+</table>
+<h2>Composer / MML（クラシック .mpy）</h2>
+<table class="grid">
+<tr><th>Composer / MML</th><th>出る命令</th><th>メモ</th></tr>
+<tr><td><code>#n</code> / <code>[midiCh:dataArea]</code></td><td>トラック＋MIDI ch</td><td>1..32。DO--.MPY 形式も可</td></tr>
+<tr><td><code>TIT"…"</code></td><td>ヘッダ＋cmd28</td><td>Shift-JIS</td></tr>
+<tr><td><code>cdefgab</code>、付点、3連符 <code>(3</code></td><td>cmd1</td><td>ドラム ch10 は s/b/h 方言</td></tr>
+<tr><td><code>r</code></td><td>cmd8</td><td>ch10 ではライドになることがある</td></tr>
+<tr><td><code>^</code></td><td>cmd3</td><td></td></tr>
+<tr><td><code>t</code> / <code>T</code></td><td>cmd9</td><td>譜面 Tempo</td></tr>
+<tr><td><code>v</code> / <code>@V</code></td><td>cmd5 / cmd19</td><td>Vol ストリップ</td></tr>
+<tr><td><code>P</code></td><td>cmd12</td><td>0=左 64=中央 127=右。副値 <code>P64:85</code> は無視</td></tr>
+<tr><td><code>@P</code></td><td>cmd11</td><td>14bit、8192=中央。Pitch ストリップ</td></tr>
+<tr><td><code>@n</code> / <code>@n:m</code></td><td>cmd2（±cmd7）</td><td>プログラム:バンク</td></tr>
+<tr><td><code>@PROG</code> / <code>@BANK</code></td><td>cmd2 / cmd7</td><td>VST 用に書くと .mpsmv になる</td></tr>
+<tr><td><code>@METER</code> / <code>@TS</code></td><td>（本文には出ない）</td><td>拍子は .mpsmv。クラシックでは無視されがち</td></tr>
+<tr><td><code>@RPN</code></td><td>RPN 列</td><td>譜面 Exc/RPN</td></tr>
+<tr><td><code>@NRPN</code></td><td>cmd37</td><td></td></tr>
+<tr><td><code>@EX</code></td><td>cmd36</td><td>名前または F0…F7</td></tr>
+<tr><td><code>@PEDON</code> / <code>@PEDOFF</code></td><td>cmd20 / 21</td><td></td></tr>
+<tr><td><code>|:n</code> … <code>:|</code></td><td>cmd23 / 24</td><td>1 段なら .mpy。2 段以上は .mpw2</td></tr>
+<tr><td><code>｛:n … ｝:</code></td><td>テキスト展開</td><td>クラシックは並べる。ネイティブ保存は .mpsmv</td></tr>
+<tr><td><code>Q</code> / <code>J</code></td><td>cmd10</td><td>ソフトループ。0xE000 は曲先頭の |: へパッチ</td></tr>
+<tr><td><code>@SVIB</code> 類</td><td>細分化（cmd11/5/12）</td><td>cmd46 を使わない。形式もこれだけでは変わらない</td></tr>
+<tr><td><code>;MIDI</code></td><td>MIDI モード</td><td>OPNA 行が無ければ MIDI</td></tr>
+</table>
+<h2>Composer が .mpy を選ぶとき</h2>
+<p>VST バインド無し、ネイティブ <code>｛:</code> 無し、<code>@CC</code> 類無し、ループ入れ子 1 段まで。譜面 Save As でも同じ規則です。</p>
+<div class="tip"><span class="label">ヒント</span>
+<p>kbsasami は cmd41/46/47 も .mpy で解釈できます。Composer の <code>@CC</code> 類は互換のため .mpsmv＋cmd41 にします。<code>@SVIB</code> はどの形式でも細分化で、cmd46/47 は出しません。</p>
+</div>
+<div class="related"><span class="label">あわせて読みたい</span><ul><li><a href="sasami-composer.htm">SASAMI Composer（曲を作る）</a></li><li><a href="sasami-fpy.htm">SASAMI .fpy コマンド（全部）</a></li><li><a href="sasami-fpy2.htm">SASAMI .fpy2 — .fpy からの差分</a></li><li><a href="sasami-mpw2.htm">SASAMI .mpw2 — .mpy からの差分</a></li><li><a href="sasami-mpsmv.htm">SASAMI .mpsmv — .mpw2 からの差分</a></li><li><a href="kpi.htm">KPIプラグインで対応形式をふやす</a></li><li><a href="formats.htm">対応形式と対応タイトル</a></li><li><a href="midi-monitor.htm">FM/MIDIモニタ</a></li><li><a href="vst-midi.htm">.mid を VST 音源で鳴らす</a></li></ul></div>
+
+<div class="botnav">
+<span class="prev">&#171; 前へ: <a href="sasami-fpy2.htm">SASAMI .fpy2 — .fpy からの差分</a></span>
+<span class="next">次へ: <a href="sasami-mpw2.htm">SASAMI .mpw2 — .mpy からの差分</a> &#187;</span>
+<span class="up"><a href="index.htm">目次</a></span>
+<div class="clear"></div>
+</div>
+
+<div class="foot">メディアプレイヤー「らいら」 (oggYSEDbgm) — PrePrayerPower Soft</div>
+
+</body>
+</html>

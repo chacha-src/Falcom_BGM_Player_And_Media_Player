@@ -1,4 +1,4 @@
-﻿#include "stdafx.h"
+#include "stdafx.h"
 #include "NoteFundamentalPick.h"
 #include "ogg.h"
 #include "oggDlg.h"

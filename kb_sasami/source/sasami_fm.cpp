@@ -220,8 +220,11 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 	uint8_t regs[0x200];
 	uint8_t keyOnFm[6];
 	int dumpEnable;
+	int dumpMute; /* 1=Seek の空回し。seq を飛ばさない */
+	int dumpShadow; /* 1=kb 共通の FmMonShadow。自前リングは使わない */
 	int dumpDirty;
 	uint64_t dumpLastFlushSample;
+	uint64_t dumpClock; /* この tick の PCM 先頭。コマンドごとに同じ時刻で出す */
 	uint32_t dumpSeq;
 	wchar_t dumpSrc[MAX_PATH];
 	wchar_t dumpNamedDone[MAX_PATH]; /* 曲名.opna は曲ごと1回だけ（毎 Flush はオーディオを詰まらせる） */
@@ -266,8 +269,11 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 		regs[0xB4] = regs[0xB5] = regs[0xB6] = 0xC0;
 		regs[0x1B4] = regs[0x1B5] = regs[0x1B6] = 0xC0;
 		dumpEnable = 0;
+		dumpMute = 0;
+		dumpShadow = 0;
 		dumpDirty = 0;
 		dumpLastFlushSample = 0;
+		dumpClock = 0;
 		dumpSeq = 0;
 		dumpSrc[0] = 0;
 		dumpNamedDone[0] = 0;
@@ -398,7 +404,6 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 
 	void MarkDump()
 	{
-		dumpSeq++;
 		dumpDirty = 1;
 	}
 
@@ -583,13 +588,12 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 
 	void FlushDump(uint64_t curSample)
 	{
-		if (!dumpEnable) return;
-		/* dirty のみ。レート制限しない — 同じ Render 塊の終端時刻にまとめると
-		   密な FM3/4・SSG の tick 単位の変化が消え、聞こえる音とずれる。
-		   履歴はリングへ積む（UI が gen 差分で読む）。 */
-		if (!dumpDirty) return;
+		if (!dumpEnable || dumpMute) return;
+		/* レジスタが無くても Render ごとに1枚。dirty だけだと seq が発音のときしか動かない */
 		dumpDirty = 0;
 		dumpLastFlushSample = curSample;
+		/* 公開1回につき seq を1。レジスタ書き込み回数だと飛び、描画が間の音符を落とす */
+		dumpSeq++;
 		SasamiFmMonDump d;
 		memset(&d, 0, sizeof(d));
 		d.magic[0] = 'O'; d.magic[1] = 'P'; d.magic[2] = 'N'; d.magic[3] = 'A';
@@ -693,6 +697,16 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 				wcsncpy_s(dumpNamedDone, dumpSrc, _TRUNCATE);
 			}
 		}
+	}
+
+	/* 変化が無くてもこのサンプル位置を1回出す。持続中の tick でも seq が進む */
+	void FlushTick(uint64_t curSample)
+	{
+		if (!dumpEnable) return;
+		if (!dumpDirty && dumpLastFlushSample == curSample)
+			return;
+		dumpDirty = 1;
+		FlushDump(curSample);
 	}
 
 	void BeepOff(int ch)
@@ -1278,7 +1292,8 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 			}
 			int guard = 0;
 			while (alive[ch] && waitb[ch] < 2 && guard++ < 4096) {
-				if (!ExecCmd(ch)) break;
+				const int cont = ExecCmd(ch);
+				if (!cont) break;
 			}
 		}
 		if (!any) ended = 1;
@@ -1693,17 +1708,17 @@ void SasamiFmPlayer::SetFmMonDump(int enable, const wchar_t* sourcePath)
 	if (enable && m->playFmMode == 0)
 		enable = 0;
 	m->dumpEnable = enable ? 1 : 0;
+	m->dumpShadow = 0;
 	m->dumpNamedDone[0] = 0;
 	if (sourcePath && sourcePath[0])
 		wcsncpy_s(m->dumpSrc, sourcePath, _TRUNCATE);
 	else
 		m->dumpSrc[0] = 0;
 	if (m->dumpEnable) {
-		/* 曲切替: inode は消さず上書き（ホストが旧ファイルを握ったまま無描画になる） */
 		m->dumpSeq = 0;
 		m->dumpRingGen = 0;
 		m->dumpDirty = 1;
-		m->dumpLastFlushSample = 0; /* 有効化時は即1枚 */
+		m->dumpLastFlushSample = 0;
 		m->ResetDumpFiles();
 		m->FlushDump(m_curSample);
 	}
@@ -1724,69 +1739,78 @@ uint32_t SasamiFmPlayer::Render(int16_t* interleavedStereo, uint32_t frames)
 {
 	if (!m || !interleavedStereo || frames == 0) return 0;
 	if (m->eofSent) return 0;
-	uint32_t want = frames;
-	uint32_t out = 0;
-	while (out < want) {
-		if (m->samplesLeftInTick == 0) {
-			const int misaoDone = !m->misaoActive || m->misao.Ended();
-			if (m->ended && misaoDone) {
-				memset(interleavedStereo + out * 2, 0, (size_t)(want - out) * 2 * sizeof(int16_t));
-				out = want;
-				m->eofSent = 1;
-				break;
-			}
-			if (m->ended && !misaoDone) {
+	/* CEmu と同じ約4ms。tick 長（T/kTickDen の 15/16）で出すと8分が等分に見えない */
+	uint32_t slice = m->hostRate / 250u;
+	if (slice < 64) slice = 64;
+
+	uint32_t total = 0;
+	while (total < frames) {
+		if (m->eofSent) break;
+		uint32_t want = frames - total;
+		if (m->dumpEnable && !m->dumpMute && want > slice)
+			want = slice;
+		int16_t* dst = interleavedStereo + total * 2;
+		uint32_t out = 0;
+		while (out < want) {
+			if (m->samplesLeftInTick == 0) {
+				const int misaoDone = !m->misaoActive || m->misao.Ended();
+				if (m->ended && misaoDone) {
+					memset(dst + out * 2, 0, (size_t)(want - out) * 2 * sizeof(int16_t));
+					out = want;
+					m->eofSent = 1;
+					break;
+				}
+				if (m->ended && !misaoDone) {
+					m->tickCarry += (uint64_t)m->hostRate * m->T;
+					const uint32_t sl = (uint32_t)(m->tickCarry / kTickDen);
+					m->tickCarry %= kTickDen;
+					if (m->misaoActive) m->misao.TickOnce();
+					m->samplesLeftInTick = sl ? sl : 1;
+					continue;
+				}
 				m->tickCarry += (uint64_t)m->hostRate * m->T;
 				const uint32_t sl = (uint32_t)(m->tickCarry / kTickDen);
 				m->tickCarry %= kTickDen;
-				if (m->misaoActive) m->misao.TickOnce();
-				m->samplesLeftInTick = sl ? sl : 1;
-				continue;
+				m->dumpClock = m_curSample + out;
+				m->TickOnce();
+				m->samplesLeftInTick = sl;
+				/* sl==0 で TickOnce を連続すると、FNOTE の key-on が generate されず
+				   次の key-off で消える（ループ内の短い音符が無音になる）。最低1sample出す。 */
+				if (sl == 0) {
+					m->chip.flush_fm_clock();
+					m->samplesLeftInTick = 1;
+				}
 			}
-			m->tickCarry += (uint64_t)m->hostRate * m->T;
-			const uint32_t sl = (uint32_t)(m->tickCarry / kTickDen);
-			m->tickCarry %= kTickDen;
-			m->TickOnce();
-			/* この tick のレジスタ変化は「ここから出る PCM」と同時に聞こえる。
-			   ブロック終端へまとめて stamp すると 1 Render 内の複数 tick が
-			   同一 curSample になり、密な CH3/4・SSG だけ大きくずれる。 */
-			if (m->dumpEnable)
-				m->FlushDump(m_curSample + out);
-			m->samplesLeftInTick = sl;
-			/* sl==0 で TickOnce を連続すると、FNOTE の key-on が generate されず
-			   次の key-off で消える（ループ内の短い音符が無音になる）。最低1sample出す。 */
-			if (sl == 0) {
-				m->chip.flush_fm_clock();
-				m->samplesLeftInTick = 1;
+			uint32_t take = m->samplesLeftInTick;
+			if (take > want - out) take = want - out;
+			for (uint32_t i = 0; i < take; i++) {
+				int16_t L, R;
+				m->HostSample(&L, &R);
+				if (m->misaoActive) {
+					double mix[2] = { 0.0, 0.0 };
+					m->misao.SynthesizeMix(mix, 1);
+					int l = L + (int)(mix[0] * 32767.0);
+					int r = R + (int)(mix[1] * 32767.0);
+					if (l > 32767) l = 32767;
+					if (l < -32768) l = -32768;
+					if (r > 32767) r = 32767;
+					if (r < -32768) r = -32768;
+					L = (int16_t)l;
+					R = (int16_t)r;
+				}
+				dst[(out + i) * 2] = L;
+				dst[(out + i) * 2 + 1] = R;
 			}
+			m->samplesLeftInTick -= take;
+			out += take;
 		}
-		uint32_t take = m->samplesLeftInTick;
-		if (take > want - out) take = want - out;
-		for (uint32_t i = 0; i < take; i++) {
-			int16_t L, R;
-			m->HostSample(&L, &R);
-			if (m->misaoActive) {
-				double mix[2] = { 0.0, 0.0 };
-				m->misao.SynthesizeMix(mix, 1);
-				int l = L + (int)(mix[0] * 32767.0);
-				int r = R + (int)(mix[1] * 32767.0);
-				if (l > 32767) l = 32767;
-				if (l < -32768) l = -32768;
-				if (r > 32767) r = 32767;
-				if (r < -32768) r = -32768;
-				L = (int16_t)l;
-				R = (int16_t)r;
-			}
-			interleavedStereo[(out + i) * 2] = L;
-			interleavedStereo[(out + i) * 2 + 1] = R;
-		}
-		m->samplesLeftInTick -= take;
-		out += take;
+		m_curSample += out;
+		total += out;
+		if (m->dumpEnable && !m->dumpMute && out > 0)
+			m->FlushDump(m_curSample);
+		if (out < want) break;
 	}
-	m_curSample += out;
-	if (m->dumpEnable)
-		m->FlushDump(m_curSample);
-	return out;
+	return total;
 }
 
 uint64_t SasamiFmPlayer::SeekSample(uint64_t sample)
@@ -1802,6 +1826,7 @@ uint64_t SasamiFmPlayer::SeekSample(uint64_t sample)
 	m->SetupSong();
 	m_curSample = 0;
 	if (sample == 0) return 0;
+	m->dumpMute = 1;
 	int16_t dump[1024 * 2];
 	uint64_t left = sample;
 	while (left) {
@@ -1810,5 +1835,6 @@ uint64_t SasamiFmPlayer::SeekSample(uint64_t sample)
 		if (g == 0) break;
 		left -= g;
 	}
+	m->dumpMute = 0;
 	return m_curSample;
 }

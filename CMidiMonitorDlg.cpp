@@ -1610,8 +1610,15 @@ static int FmMidiWantFmView(int sticky)
 		return sticky ? 1 : 0;
 	if (!filen.IsEmpty() && SasamiExtIsFm(filen))
 		return 1;
-	if (mode == MODE_CEMU || IsCemuMode(mode) || mode == -3)
+	if (mode == MODE_CEMU || IsCemuMode(mode))
 		return 1;
+	/* KPI の MIDI / MPY / RCP は 4op を複数積むので、6ch の FM モニタではなく
+	   パート鍵盤の MIDI モニタに残す。FPY は上の拡張子で FM。 */
+	if (mode == -3) {
+		if (!filen.IsEmpty() && (VstIsMidiExt(filen) || VstIsProjectExt(filen)))
+			return 0;
+		return 1;
+	}
 	if (CEmuMidiLiveActive())
 		return 0;
 	if (IsVstMidiPlayMode(mode))

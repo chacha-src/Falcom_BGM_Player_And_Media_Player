@@ -89,7 +89,7 @@ static ULONGLONG KeHashFpList(std::vector<KeFileFp>& files)
 
 static int KeIsHiddenOggDir(const wchar_t* name)
 {
-	return (name && _wcsnicmp(name, L".ogg_", 5) == 0) ? 1 : 0;
+	return (name && name[0] == L'.') ? 1 : 0;
 }
 
 static void KeCollectPluginFilesRecursive(const std::wstring& dir, std::vector<KeFileFp>& out)

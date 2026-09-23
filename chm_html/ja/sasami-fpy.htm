@@ -1,0 +1,110 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<title>SASAMI .fpy コマンド（全部）</title>
+<link rel="stylesheet" type="text/css" href="../css/help.css">
+</head>
+<body>
+
+<div class="topnav"><a href="index.htm">目次</a> &nbsp;|&nbsp; <a href="../en/sasami-fpy.htm">English</a></div>
+
+<h1>SASAMI .fpy コマンド（全部）</h1>
+
+<p class="lead">kbsasami が読むクラシック .fpy（YM2608 OPNA / YM2203 OPN / BEEP）の使えるコマンドを全部載せます。テキストや譜面からどう命令に化けるかは<a href="sasami-composer.htm">SASAMI Composer</a> の対応表を見てください。入れ子ループや Misao PCM などは <a href="sasami-fpy2.htm">.fpy2 の差分</a> です。</p>
+<h2>ファイルの形</h2>
+<p>先頭 10 本のワードがチャンネルポインタ（絶対アドレス 0x1xxx。未使用は 0x10F0）。0x1C の versionWord はクラシックなら 0。0x1E が 0xFFFF なら OPNA 10ch。曲名・作者・コメントは Shift-JIS で 0x50 から 64 バイトずつ。ストリーム本体はファイルオフセット 0x100 付近から、命令は基本 3 バイトです。</p>
+<ul>
+<li>ポインタ 0 または 0x10F0、飛び先 0xF0 はチャンネル終了。</li>
+<li>FNEIRO（cmd2）のオペランドが 0xFE00|番号 のときは、ファイル末尾の 25 バイト音色ブロックへパッチされます。</li>
+<li>再生音源はプレイリストの「ささみ☆ﾐ FMモード」または <code>kbsasami.fmmode</code>。0=BEEP、1=OPN（FM3+SSG3）、2=OPNA（既定）。</li>
+</ul>
+<h2>チャンネル</h2>
+<p>内部は 0 始まり。テキストの <code>#n</code> は 1 始まり（<code>#1</code>＝ch0）です。</p>
+<table class="grid">
+<tr><th>内部</th><th>テキスト</th><th>役割</th></tr>
+<tr><td>0..2</td><td>#1..#3</td><td>FM 1–3（YM2608 バンク0）</td></tr>
+<tr><td>3..5</td><td>#4..#6</td><td>SSG A/B/C。音量は PSG 0..15</td></tr>
+<tr><td>6</td><td>#7</td><td>リズム（OPNA の $10。BEEP/OPN では休み）</td></tr>
+<tr><td>7..9</td><td>#8..#10</td><td>FM 4–6（OPNA バンク1。OPN では使わない）</td></tr>
+</table>
+<h2>テンポの単位</h2>
+<p>cmd9 の T は「1 tick の長さ = 出力Hz × T / 1248000 サンプル」です。T=0 は既定値。Composer の <code>t120</code> / <code>T120</code> はこの T に変換されます。</p>
+<h2>バイナリ命令（全部）</h2>
+<p>特記がなければ 3 バイト <code>[cmd][b1][b2]</code>。ワード w1 はリトルエンディアンです。</p>
+<table class="grid">
+<tr><th>cmd</th><th>名前</th><th>オペランド</th><th>働き</th></tr>
+<tr><td>0</td><td>FNOTE</td><td>b1=音程バイト、b2=待ち</td><td>FM/SSG を key-on。音程は上位ニブル＝オクターブ、下位＝音名。リズム ch は待ちだけ。</td></tr>
+<tr><td>1</td><td>FKYU</td><td>b2=待ち</td><td>key-off して休符。</td></tr>
+<tr><td>2</td><td>FNEIRO</td><td>w1=音色</td><td>ビルトイン 0..31、または埋め込み 25 バイト音色の絶対アドレス。Composer の <code>@n</code>。</td></tr>
+<tr><td>3</td><td>FJUMP</td><td>w1=飛び先</td><td>無条件ジャンプ。0xF0 で終了。Composer の <code>J</code>。</td></tr>
+<tr><td>4</td><td>PSGVOL</td><td>b1=0..15</td><td>SSG 音量。<code>#4..#6</code> の <code>v</code>。FM ではレジスタ番号をずらして書く。</td></tr>
+<tr><td>5</td><td>NEXTF</td><td>—</td><td>3 バイト読み飛ばし（互換スタブ）。</td></tr>
+<tr><td>6</td><td>PSGAND</td><td>b1=レジスタ、b2=マスク</td><td>SSG レジスタを AND。</td></tr>
+<tr><td>7</td><td>PSGOR</td><td>b1=レジスタ、b2=ビット</td><td>SSG レジスタを OR。</td></tr>
+<tr><td>8</td><td>FMOUT / PSGOUT</td><td>b1=レジスタ、b2=データ</td><td>YM へ直接書き込み（XCHG 後 AL=data, AH=reg 相当）。</td></tr>
+<tr><td>9</td><td>FTMPO</td><td>w1=T</td><td>テンポ。<code>t</code> / <code>T</code>。</td></tr>
+<tr><td>10</td><td>FSLR</td><td>b2=待ち</td><td>key-off しない待ち。Composer の <code>@FSLR</code>（書き出しは .fpy2 寄り）。</td></tr>
+<tr><td>11</td><td>FVOL</td><td>b1=YM TL</td><td>0=大きい、127=無音。FM の <code>v</code>。</td></tr>
+<tr><td>12</td><td>FPICH</td><td>b1=A4、b2=A0</td><td>F-number 直書き（リトルエンディアンではない）。</td></tr>
+<tr><td>13</td><td>ループ開始</td><td>b1=回数</td><td>スタックへ回数。<code>|:n</code>。クラシックプレイヤーは 1 段が想定。</td></tr>
+<tr><td>14</td><td>ループ終端</td><td>w1=戻る位置</td><td>回数を減らし、残っていれば戻る。戻る前に key-off。<code>:|</code>。</td></tr>
+<tr><td>15</td><td>PPICH</td><td>b1/b2=周期</td><td>SSG 周期直書き（DETUNE 加算後）。</td></tr>
+<tr><td>16</td><td>FLR</td><td>b1=LR マスク</td><td>ステレオ $B4 の上位ビット。<code>@FLR</code>。</td></tr>
+<tr><td>17</td><td>F2JP</td><td>w1=飛び先</td><td>OPNA 10ch のときだけ FJUMP。それ以外は読み飛ばし。</td></tr>
+<tr><td>18</td><td>FDETUN</td><td>w1</td><td>0x8000 が中央。<code>@DETUNE</code>。</td></tr>
+<tr><td>19</td><td>frzmvl</td><td>b1=0..5、b2=音量</td><td>リズム音色の音量（$18+idx 下位）。</td></tr>
+<tr><td>20</td><td>リズムパン</td><td>b1=0..5、b2</td><td>$18+idx の上位 2 ビット。</td></tr>
+<tr><td>21</td><td>FLFO_DP</td><td>b1=AMS/PMS</td><td>$B4 下位。<code>@LFO</code> の前半。</td></tr>
+<tr><td>22</td><td>LFO 許可</td><td>b1</td><td>レジスタ $22。<code>@LFO</code> の後半。</td></tr>
+<tr><td>23</td><td>（予約）</td><td>—</td><td>クラシックでは何もしないで 3 バイト進む。<a href="sasami-fpy2.htm">.fpy2</a> で EX に使う。</td></tr>
+<tr><td>それ以外</td><td>読み飛ばし</td><td>3 バイト</td><td>未知コマンドは 3 バイト捨てて続行。cmd が途中で 0 扱いになる終了は FNOTE 側。</td></tr>
+</table>
+<h2>Composer との対応（クラシック .fpy）</h2>
+<p>テキスト／FM譜面はコンパイル時に上の命令へ落とします。ループ入れ子が 1 段まで、かつ FPY2 専用の @ が無ければ <b>.fpy</b> になります。</p>
+<table class="grid">
+<tr><th>Composer / MML</th><th>出る命令</th><th>メモ</th></tr>
+<tr><td>先頭 <code>OPNA</code> / <code>OPN</code> / <code>;FM</code></td><td>ヘッダ 0x1E</td><td>無いと MIDI 扱いになりやすい</td></tr>
+<tr><td><code>#1</code>..<code>#10</code></td><td>チャンネル切替</td><td>1 始まり</td></tr>
+<tr><td><code>cdefgab</code>、<code>+</code>/<code>-</code>、<code>#</code></td><td>cmd0 FNOTE</td><td>長さは <code>l</code> と数字、付点 <code>.</code></td></tr>
+<tr><td><code>r</code>、譜面の Tick 空白</td><td>cmd1 FKYU</td><td></td></tr>
+<tr><td><code>^</code></td><td>直前音の長さ加算</td><td>タイ。key-off しないつなぎは .fpy2 のレガート</td></tr>
+<tr><td><code>t120</code> / <code>T120</code></td><td>cmd9</td><td>譜面 Tempo と同期</td></tr>
+<tr><td><code>o4</code>、＜ ＞</td><td>オクターブ</td><td>音程バイトの上位ニブル</td></tr>
+<tr><td><code>v</code>（FM）</td><td>cmd11 FVOL</td><td>YM TL</td></tr>
+<tr><td><code>v</code>（SSG #4-6）</td><td>cmd4 PSGVOL</td><td>0..15</td></tr>
+<tr><td><code>q90</code></td><td>ゲート％</td><td>音符の実待ちを短くする（休符で埋める）</td></tr>
+<tr><td><code>@0</code>..<code>@31</code></td><td>cmd2 FNEIRO</td><td>譜面 Voice も同じ</td></tr>
+<tr><td><code>|:n</code> … <code>:|</code></td><td>cmd13 / cmd14</td><td>展開せずネイティブ。入れ子2段以上は .fpy2</td></tr>
+<tr><td><code>｛:n … ｝:</code>（MICP）</td><td>テキスト上で展開</td><td>クラシック .fpy は繰り返した結果を並べる</td></tr>
+<tr><td><code>Q</code></td><td>ソフトループ地点</td><td>後続の <code>J</code> がここへ FJUMP</td></tr>
+<tr><td><code>J</code></td><td>cmd3 FJUMP</td><td>Q が無ければチャンネル先頭</td></tr>
+<tr><td><code>@SVIB</code> / <code>@STREM</code> / <code>@SPAN</code> / <code>@SPORTA</code></td><td>ピッチ・音量・パンの細分化（cmd12/11/16 の列）</td><td>新 opcode は出さない。形式も変わらない。旧プレイヤーでも鳴る</td></tr>
+<tr><td><code>;</code> / <code>//</code></td><td>除去</td><td></td></tr>
+<tr><td><code>|</code> <code>~</code> <code>$</code> など</td><td>無視</td><td>レイアウト用</td></tr>
+</table>
+<h2>再生の注意</h2>
+<ul>
+<li>FMモニタ（<a href="midi-monitor.htm">FM/MIDIモニタ</a>）は <code>kbsasami.raira=1</code> のとき %TEMP%\ogg_kbsasami\ へ dump します。BEEP は対象外です。</li>
+<li>リズム波形はプラグインフォルダの <code>ym2608_adpcm_rom.bin</code> か <code>2608_*.WAV</code>。</li>
+<li>未知の cmd を無視するので、壊れたストリームでも先へ進みます。飛び先が自分自身だと止まります。</li>
+</ul>
+<div class="tip"><span class="label">ヒント</span>
+<p>譜面 Save As はループの入れ子深さから .fpy / .fpy2 を自動で選びます。手で拡張子だけ変えても、versionWord が 0 のままならクラシック扱いです。</p>
+</div>
+<div class="note"><span class="label">注意</span>
+<p>cmd10 / 16 / 18 / 21 / 22 はクラシック FPY にもあります。ただし Composer は <code>@FSLR</code> <code>@FLR</code> <code>@DETUNE</code> <code>@LFO</code> を見つけると安全側で <a href="sasami-fpy2.htm">.fpy2</a> にします。</p>
+</div>
+<div class="related"><span class="label">あわせて読みたい</span><ul><li><a href="sasami-composer.htm">SASAMI Composer（曲を作る）</a></li><li><a href="sasami-fpy2.htm">SASAMI .fpy2 — .fpy からの差分</a></li><li><a href="sasami-mpy.htm">SASAMI .mpy コマンド（全部）</a></li><li><a href="sasami-mpw2.htm">SASAMI .mpw2 — .mpy からの差分</a></li><li><a href="sasami-mpsmv.htm">SASAMI .mpsmv — .mpw2 からの差分</a></li><li><a href="kpi.htm">KPIプラグインで対応形式をふやす</a></li><li><a href="formats.htm">対応形式と対応タイトル</a></li><li><a href="midi-monitor.htm">FM/MIDIモニタ</a></li><li><a href="vst-midi.htm">.mid を VST 音源で鳴らす</a></li></ul></div>
+
+<div class="botnav">
+<span class="prev">&#171; 前へ: <a href="sasami-composer.htm">SASAMI Composer（曲を作る）</a></span>
+<span class="next">次へ: <a href="sasami-fpy2.htm">SASAMI .fpy2 — .fpy からの差分</a> &#187;</span>
+<span class="up"><a href="index.htm">目次</a></span>
+<div class="clear"></div>
+</div>
+
+<div class="foot">メディアプレイヤー「らいら」 (oggYSEDbgm) — PrePrayerPower Soft</div>
+
+</body>
+</html>

@@ -1917,7 +1917,8 @@ static int FmPlayHeardLagMs(const SasamiFmMonDump* d)
 			return 600;
 		if (dumpFlags & SASAMI_FMMON_FLAG_KEYSONLY)
 			return 750;
-		return 550;
+		/* kbsasami などフラグ無し CLOCK_DUMP。550 だと鍵盤が 100-200ms 先行する */
+		return 900;
 	}
 	if (dumpFlags & SASAMI_FMMON_FLAG_FMP)
 		return 700;
@@ -5774,92 +5775,25 @@ int CFmMonitorDlg::PollDump()
 	const int fromN = (curN < 0) ? nextN : (curN + 1);
 	if (fromN > nextN) return 1;
 
+	/* 間の dump は畳まない（8分/16分が消える）。ただし一回で全部 Apply すると
+	   UI が止まり、演奏中の終了が戻ってこない。残りは次のタイマーで続ける。 */
 	int applied = 0;
-	const int pending = nextN - fromN + 1;
-	/* 2枚以上は最新の gate を残し、中間の hit だけ畳む。
-	   gate を OR すると張り付き、連打 Apply は最終 off で短音符が消える */
-	if (pending > 1) {
-		SasamiFmMonDump merged = m_hist[(m_histHead + nextN) % HIST_MAX];
-		for (int n = fromN; n < nextN; n++) {
-			const SasamiFmMonDump& s = m_hist[(m_histHead + n) % HIST_MAX];
-			for (int b = 0; b < 64; b++)
-				merged.regWriteBits[b] = (uint8_t)(merged.regWriteBits[b] | s.regWriteBits[b]);
-			for (int i = 0; i < 6; i++) {
-				if (s.keyOnHitCnt[i] > merged.keyOnHitCnt[i])
-					merged.keyOnHitCnt[i] = s.keyOnHitCnt[i];
-				if (s.keyOnFm[i] && s.keyMidi[i] != 0xFF)
-					merged.keyMidi[i] = s.keyMidi[i];
-				/* hitCnt が増えていない短パルスでもフェードを起こす */
-				if (s.keyOnFm[i] && !merged.keyOnFm[i]
-					&& s.keyOnHitCnt[i] <= m_dump.keyOnHitCnt[i]
-					&& merged.keyOnHitCnt[i] <= m_dump.keyOnHitCnt[i])
-					merged.keyOnHitCnt[i] = (uint8_t)(m_dump.keyOnHitCnt[i] + 1);
-				merged.rhythmHitCnt[i] = (s.rhythmHitCnt[i] > merged.rhythmHitCnt[i])
-					? s.rhythmHitCnt[i] : merged.rhythmHitCnt[i];
-			}
-			for (int i = 0; i < 3; i++) {
-				if (s.ssgHitCnt[i] > merged.ssgHitCnt[i])
-					merged.ssgHitCnt[i] = s.ssgHitCnt[i];
-				if (s.ssgOn[i] && s.ssgMidi[i] != 0xFF)
-					merged.ssgMidi[i] = s.ssgMidi[i];
-				if (s.ssgOn[i] && !merged.ssgOn[i]
-					&& s.ssgHitCnt[i] <= m_dump.ssgHitCnt[i]
-					&& merged.ssgHitCnt[i] <= m_dump.ssgHitCnt[i])
-					merged.ssgHitCnt[i] = (uint8_t)(m_dump.ssgHitCnt[i] + 1);
-				if (s.keyOnExHitCnt[i] > merged.keyOnExHitCnt[i])
-					merged.keyOnExHitCnt[i] = s.keyOnExHitCnt[i];
-				if (s.keyOnEx[i] && s.exMidi[i] != 0xFF)
-					merged.exMidi[i] = s.exMidi[i];
-				if (s.keyOnEx[i] && !merged.keyOnEx[i]
-					&& s.keyOnExHitCnt[i] <= m_dump.keyOnExHitCnt[i]
-					&& merged.keyOnExHitCnt[i] <= m_dump.keyOnExHitCnt[i])
-					merged.keyOnExHitCnt[i] = (uint8_t)(m_dump.keyOnExHitCnt[i] + 1);
-			}
-			for (int i = 0; i < SASAMI_FMMON_PCM_MAX; i++) {
-				if (s.pcmOn[i])
-					merged.pcmNote[i] = s.pcmNote[i];
-				/* 短い on→最終 off: hit を合成して fadePcm が点く */
-				if (s.pcmOn[i] && !merged.pcmOn[i]
-					&& (merged.dumpFlags & SASAMI_FMMON_FLAG_KEYSONLY)) {
-					const uint8_t sh = FmKeysOnlyPackedHit(s, i);
-					const uint8_t mh = FmKeysOnlyPackedHit(merged, i);
-					const uint8_t dh = FmKeysOnlyPackedHit(m_dump, i);
-					if (sh > mh)
-						FmKeysOnlySetPackedHit(merged, i, sh);
-					else if (sh <= dh && mh <= dh)
-						FmKeysOnlySetPackedHit(merged, i, (uint8_t)(dh + 1));
-				} else if (s.pcmOn[i] && (merged.dumpFlags & SASAMI_FMMON_FLAG_KEYSONLY)) {
-					const uint8_t sh = FmKeysOnlyPackedHit(s, i);
-					if (sh > FmKeysOnlyPackedHit(merged, i))
-						FmKeysOnlySetPackedHit(merged, i, sh);
-				}
-			}
-			merged.rhythmPulse = (uint8_t)(merged.rhythmPulse | s.rhythmPulse);
-			if ((s.dumpFlags & SASAMI_FMMON_FLAG_ADPCM)
-				&& s.pcmNote[SASAMI_FMMON_ADPCM_HIT_SLOT] != m_dump.pcmNote[SASAMI_FMMON_ADPCM_HIT_SLOT])
-				merged.pcmNote[SASAMI_FMMON_ADPCM_HIT_SLOT] = s.pcmNote[SASAMI_FMMON_ADPCM_HIT_SLOT];
-		}
-		ApplyDump(merged);
-		applied = 1;
-		if (nextN > 0 && nextN < m_histN) {
-			m_histHead = (m_histHead + nextN) % HIST_MAX;
-			m_histN -= nextN;
-		}
-		return 1;
-	}
-
-	{
-		const SasamiFmMonDump& show = m_hist[(m_histHead + nextN) % HIST_MAX];
+	int appliedN = fromN - 1;
+	int budget = 12;
+	for (int n = fromN; n <= nextN && budget > 0; n++) {
+		const SasamiFmMonDump& show = m_hist[(m_histHead + n) % HIST_MAX];
 		if (!(m_haveDump && show.seq == m_lastSeq
 			&& show.curSample == m_lastCurSample)) {
 			ApplyDump(show);
 			applied = 1;
 		}
+		appliedN = n;
+		budget--;
 	}
 
-	if (nextN > 0 && nextN < m_histN) {
-		m_histHead = (m_histHead + nextN) % HIST_MAX;
-		m_histN -= nextN;
+	if (appliedN > 0 && appliedN < m_histN) {
+		m_histHead = (m_histHead + appliedN) % HIST_MAX;
+		m_histN -= appliedN;
 	}
 	return applied || m_haveDump;
 }

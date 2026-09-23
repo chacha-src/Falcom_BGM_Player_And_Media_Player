@@ -2,16 +2,93 @@
 [ 名称 ]     SASAMI FM / MIDI Decoder
 [ファイル名] kbsasami.kpi
 [バージョン] 1.00
-[対応拡張子] fpy / mpy / mpw2
+[対応拡張子] fpy / fpy2 / mpy / mpw2 / mpsmv
 [ Platform ] x86(32bit) / x64(64bit)
 -------------------------------------------------------------------------------
 [概要]
 
 PC-98 ささみ (SASAMI) の曲データを再生します。
 
-  .fpy   FM (BEEP / OPN=FM3+SSG3 / OPNA) コマンドを PCM 化
-  .mpy   MIDI SASAMI Ver1
-  .mpw2  MIDI SASAMI Ver2.2
+  .fpy    FM（BEEP / OPN=FM3+SSG3 / OPNA）クラシック。ループ 1 段想定
+  .fpy2   .fpy の差分。入れ子ループ、EX、レガート、Misao PCM、マクロ
+  .mpy    MIDI SASAMI Ver1（32 トラック、16bit ポインタ）
+  .mpw2   .mpy の差分。Ver2.2 ヘッダ、64 トラック、二重ポート、入れ子ループ
+  .mpsmv  .mpw2 の差分。末尾 MPW3 トレイラ（VST パス／状態）＋マクロ
+
+命令番号の辞書と Composer の書き出し対応は、本体オフラインヘルプ CHM の
+  SASAMI .fpy / .fpy2 / .mpy / .mpw2 / .mpsmv
+各ページにも全部あります。この txt はプラグイン設定と早見です。
+
+[Composer が選ぶ拡張子]
+
+  FM:
+    入れ子 1 段、FPY2 専用 @ なし → .fpy
+    入れ子≥2 / @PCM / @EX1-4 / @LEGATO / @FHOKRY / ネイティブ {: / @MACRO
+    および @LFO @DETUNE @FLR @FSLR（クラシック命令自体はあるが Composer は .fpy2）
+    @SVIB @STREM @SPAN @SPORTA だけでは形式は変わらない（下の「ソフトFX」）
+
+  MIDI:
+    VST なし、ネイティブ {: なし、@CC 類なし、入れ子 1 段 → .mpy
+    入れ子≥2（VST / @CC 類なし） → .mpw2
+    @VST / @METER / @TS / @MACRO / @CALL / @CC @MOD @SOFT @SOST
+    @REV @CHO @CHORUS @REVERB / ネイティブ {: → .mpsmv
+    譜面 Tone に VST パス、32ch 超、Insert FX も .mpsmv
+
+[Composer 連携 — 同じテキストでも命令が変わるところ]
+
+  ループ
+    |:n ... :|     常にループ命令（FM cmd13/14、MIDI cmd23/24）。入れ子2段以上で
+                   .fpy2 / .mpw2。クラシックは 1 段想定
+    {:n ... }:     クラシック .fpy/.mpy/.mpw2 ではテキスト上で展開（同じ音符を並べる）
+                   .fpy2 / .mpsmv ではループ命令のまま（展開しない）
+    {n ... }       常にテキスト展開（コロン無し）
+    Q / J          FM cmd3、MIDI cmd10。Q が無ければチャンネル先頭へ
+
+  ソフトFX（@SVIB / @STREM / @SPAN / @SPORTA）
+    Composer はどの拡張子でもクラシック命令へ細分化する（ピッチ・音量・パン＋待ち）
+    新 opcode（FM cmd25/29、MIDI cmd46/47）は出さない
+    プレイヤーは手書きファイルの cmd25/29/46/47 を解釈できる
+    形式はこれだけでは変わらない（旧プレイヤーでも鳴る）
+
+  FM で形式が .fpy2 になり、命令番号はクラシックと同じもの
+    @FSLR   cmd10（key-off しない待ち）
+    @FLR    cmd16（$B4 ステレオ）
+    @DETUNE cmd18（0x8000 が中央）
+    @LFO    cmd21 + cmd22（$B4 下位 と $22）
+
+  FM で .fpy2 必須（クラシックには無い／no-op）
+    @LEGATO / @FHOKRY   cmd24（直前を key-off しない音符）
+    @EX1..@EX4          cmd23（クラシックでは何もしない）
+    @PCM"パス"          Misao PCM トラック（0xD0 から）
+    @MACRO / @CALL      末尾 FPY2MACR
+
+  MIDI で .mpsmv になり、ストリームは cmd41（汎用 CC）
+    @CC n,v     cmd41
+    @MOD v      cmd41 CC1（クラシック cmd6 には落とさない）
+    @SOFT v     cmd41 CC67
+    @SOST v     cmd41 CC66
+    @REV / @REVERB  cmd41 CC91（MICP の I = cmd17 とは別経路）
+    @CHO / @CHORUS  cmd41 CC93（cmd18 とは別経路）
+    プレイヤーは .mpy でも cmd41 を読める。Composer は互換のため .mpsmv にする
+
+  MIDI でトレイラへ（ストリーム命令ではない）
+    @VST"パス"  @PROG @BANK  @VSTSTATEB64  @VSTCTRLB64
+    @VSTFX slot "パス"  @VSTFXSTATEB64
+    @METER / @TS        譜面グリッド／拍子。SMF メタ用。本体コマンド番号は無い
+    @MACRO / @CALL      末尾 MACR（MPW3 版2）
+
+  MIDI でクラシック命令のまま（形式は変えない）
+    @PEDON / @PEDOFF    cmd20 / cmd21
+    @NRPN               cmd37
+    @EX F0..F7          cmd36（可変長、終端 0xFF）
+    @P                  cmd11 ピッチベンド
+    @V / v              cmd5（音量）＋ cmd19（ベロシティ経路あり）
+    @n / @n:m           cmd2 ± cmd7
+    P64                 cmd12 パン
+
+  @EXP / @DELAY / @PORTA（CC65）/ @PORT（CC5）
+    ストリームは cmd41。@CC 類の自動判定には入らないので、
+    これだけなら .mpy のまま cmd41 が出ることがある
 
 [設定] kbsasami.vst / kbsasami.raira
 
@@ -24,17 +101,18 @@ PC-98 ささみ (SASAMI) の曲データを再生します。
     0 = 本家互換 (vst をそのまま解釈)
     1 = このアプリ専用。vst の 0 と 1 を内部で入れ替え、
         FPY 再生時は %TEMP%\ogg_kbsasami\ に OPN/OPNA レジスタ dump
-        （fmmon_live.opna / <曲名>.opna）を出して FM モニタと同期する
+        （fmmon_live.opna / fmmon_ring.opna / <曲名>.opna）を出して FM モニタと同期する
         ※ dump は fmmode=OPN/OPNA（BEEP は対象外）
 
   このアプリは常に raira=1 を書き込み、midPlayPrefer に合わせて
   vst に逆値を自動代入します。結果として:
     midPlayPrefer=KPI → 実効 vst=0 (fmmidi)
     midPlayPrefer=VST → 実効 vst=1 (KPI は MIDI を開かずホストが VST)
+    .mpsmv はトレイラの VST をホストが直接開く（HALion 等）
 
 [設定] kbsasami.midimode
 
-  .mpy / .mpw2 の SMF 変換音源 (MIDI モニタの mapForce と同じ番号):
+  .mpy / .mpw2 / .mpsmv の SMF 変換音源 (MIDI モニタの mapForce と同じ番号):
 
     0=自動(この値を既定として使用)  1=GS  2=XG  3=55map  4=88map
     5=88Promap  6=8820map  7=GMmap  8=SDmap  9=LAmap  10..19=ETC
@@ -44,7 +122,7 @@ PC-98 ささみ (SASAMI) の曲データを再生します。
 
 [設定] kbsasami.fmmode
 
-  .fpy の再生音源 (SASAMI /B /N 相当):
+  .fpy / .fpy2 の再生音源 (SASAMI /B /N 相当):
 
     0=BEEP  ソフト矩形波（PC スピーカ風）
     1=OPN   YM2608 を SCH オフで FM3+SSG3（/N 相当。SSG は OPNA と同経路）
@@ -59,5 +137,111 @@ fmpmd / kpis98）:
 
   ym2608_adpcm_rom.bin     ymfm が使う ADPCM-A ROM
   2608_BD/SD/TOP/HH/TOM/RIM.WAV   fmgen 形式の PCM
+
+[命令の長さ（共通）]
+
+  FM ストリームは原則 3 バイト [cmd][b1][b2]。
+  MIDI は原則 3 バイト。cmd13/14/15/37/46/47 は 4 バイト。
+  cmd36/40 は SysEx 可変長（0xFF 終端）。
+  ジャンプのファイル内アドレスは 0x1000+オフセット。0xF0 は終了。
+  .mpw2 のトラック表だけ 24bit。ストリーム内ジャンプは 16bit のまま。
+
+[.fpy コマンド全部]  3 バイト。クラシックは cmd 0..22
+
+  0  FNOTE     音程バイト + 待ち。FM/SSG key-on。リズム ch は待ちだけ
+  1  FKYU      key-off して休符
+  2  FNEIRO    音色 0..31、または埋め込み 25 バイト音色アドレス。Composer @n
+  3  FJUMP     無条件ジャンプ。0xF0 で終了。Composer J
+  4  PSGVOL    SSG 音量 0..15。#4..#6 の v
+  5  NEXTF     3 バイト読み飛ばし
+  6  PSGAND    SSG レジスタ AND
+  7  PSGOR     SSG レジスタ OR
+  8  FMOUT     YM 直書き（リズムマスクにも使う）
+  9  FTMPO     T。1 tick = 出力Hz * T / 1248000。Composer t / T
+ 10  FSLR      key-off しない待ち。Composer @FSLR（書き出しは .fpy2）
+ 11  FVOL      YM TL。0=大きい 127=無音。FM の v
+ 12  FPICH     F-number 直書き
+ 13  ループ開始 回数をスタック。|:n   クラシックは 1 段
+ 14  ループ終端 戻る位置。:|
+ 15  PPICH     SSG 周期
+ 16  FLR       $B4 上位。@FLR
+ 17  F2JP      OPNA 10ch のときだけ FJUMP
+ 18  FDETUN    0x8000 が中央。@DETUNE
+ 19  frzmvl    リズム音色音量
+ 20  リズムパン $18+idx 上位
+ 21  FLFO_DP   $B4 下位。@LFO 前半
+ 22  LFO許可   レジスタ $22。@LFO 後半
+ 23  （予約）   クラシックは no-op。.fpy2 で EX
+
+[.fpy2 の差分]
+
+  versionWord (0x1C) = 2。ループ入れ子最大 16。末尾 FPY2MACR 可
+  13/14  入れ子ループ。ネイティブ {: もここ
+  23     EX1-4。b1=1..4、b2=データ。SSG なら EX1=$06 EX2=$07
+  24     fhokry。key-off しない音符。@LEGATO
+  25     ソフトVIB/TREM。b1=mode*128+depth、b2=delay（手書き用。Composer は展開）
+  29     ソフトポルタ。b1=半音+64、b2=glide tick（手書き用）
+  Misao  ポインタ 0xD0 から 16 本。cmd 0 ノート 1 オフ 2 プログラム 3 ジャンプ
+         9 テンポ 10 待ち 11 音量 12 ベンド 13/14 ループ 18 デチューン
+         24 レガート 25 パン 26 読み飛ばし
+
+[.mpy コマンド全部]
+
+  0      終了（トラック先頭に置かない）
+  1  3B  NOTE      前音オフ→オン。音符
+  2  3B  PROG      プログラム。88=b1、55/GM=b2。@n @PROG
+  3  3B  TIE       伸ばす。^
+  4  3B  MASTERVOL GS LCD + GM Master
+  5  3B  TRACKVOL  CC7。v / @V
+  6  3B  MOD       CC1（MICP 経路）。Composer @MOD は cmd41 側
+  7  3B  BANK      CC0/32。@BANK / @n:m
+  8  3B  REST      休符。r
+  9  3B  TEMPO     T。t / T
+ 10  3B  JUMP      16bit 絶対。0xF0=終了。J
+ 11  3B  PITCH     14bit ベンド。@P
+ 12  3B  PAN       CC10。P64。88 は b2
+ 13  4B  LAREV     GS SysEx。@L
+ 14  4B  REVERB    GS/XG リバーブタイプ
+ 15  4B  CHORUS    GS/XG コーラス
+ 16  3B  WHAT1     内部スタブ。MICP H
+ 17  3B  REV SEND  CC91。MICP I
+ 18  3B  CHO SEND  CC93
+ 19  3B  VEL       以降のベロシティ
+ 20  3B  PEDON     CC64=127。@PEDON
+ 21  3B  PEDOFF    CC64=0。@PEDOFF
+ 22  3B  WHAT2     内部ワーク
+ 23  3B  LOOP START  |:n
+ 24  3B  LOOP END    :|  飛び先は 16bit
+ 25  3B  NOP
+ 26  3B  PICH2     RPN ベンド幅
+ 27  3B  WHAT4     RPN 続き
+ 28  3B  TITL      ヘッダ 11 文字を GS LCD
+ 29-33   KAKU      ドラム／GS パート
+ 34  3B  EXPR      CC11
+ 35  3B  MD5588    XG CC32
+ 36  可変 SYSEX    @EX。終端 0xFF
+ 37  4B  NRPN      @NRPN
+ 38  3B  PORT1     以後ポート2（ヘッダ 0x82 が要る）
+ 39  3B  MAPKILL   マップ一致でトラック終了
+ 40  可変 MAP SYSEX マップ一致時だけ SysEx
+ 41  3B  CC        任意 CC。Composer @CC 類（.mpsmv 寄り）
+ 42-45   PROG2/BANK2/VOL2/PAN2  XG / 新GM
+ 46  4B  SOFTVIB   mode,delay,depth（手書き用。Composer は展開）
+ 47  4B  PORTA     semi+64,delay,glide（手書き用）
+
+[.mpw2 の差分]
+
+  先頭 EE EE EE + "SASAMI MPY Ver2.2"
+  トラック表 0x200 から 24bit アドレス＋part、最大 64
+  0x82=dualPort、0x83=wide
+  ストリーム命令番号は .mpy と同じ。ジャンプは 16bit のまま
+  ループ入れ子 16 段
+
+[.mpsmv の差分]
+
+  .mpw2 本体の直後に MPW3 + u32 版（1 または 2）＋ 32 パート
+    パス 520B、prog/msb/lsb/forceCh、完全状態 blob、パラメータ blob
+  版2 でマクロがあれば MACR（名前 64 wchar + 本文）
+  ストリームは .mpy と同じ番号。増えるのはトレイラと「展開しない {:」
 
 -------------------------------------------------------------------------------

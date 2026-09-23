@@ -40,6 +40,43 @@
 		<param name="Local" value="en\cemu-pcat.htm">
 		</OBJECT>
 	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="@PCM">
+		<param name="Name" value="日本語: SASAMI .fpy2 ? .fpy からの差分">
+		<param name="Local" value="ja\sasami-fpy2.htm">
+		<param name="Name" value="English: SASAMI .fpy2 ? delta from .fpy">
+		<param name="Local" value="en\sasami-fpy2.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="@SVIB">
+		<param name="Name" value="日本語: SASAMI .fpy コマンド（全部）">
+		<param name="Local" value="ja\sasami-fpy.htm">
+		<param name="Name" value="English: SASAMI .fpy commands (complete)">
+		<param name="Local" value="en\sasami-fpy.htm">
+		<param name="Name" value="日本語: SASAMI .mpy コマンド（全部）">
+		<param name="Local" value="ja\sasami-mpy.htm">
+		<param name="Name" value="English: SASAMI .mpy commands (complete)">
+		<param name="Local" value="en\sasami-mpy.htm">
+		<param name="Name" value="日本語: SASAMI .mpsmv ? .mpw2 からの差分">
+		<param name="Local" value="ja\sasami-mpsmv.htm">
+		<param name="Name" value="English: SASAMI .mpsmv ? delta from .mpw2">
+		<param name="Local" value="en\sasami-mpsmv.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="@VST">
+		<param name="Name" value="日本語: SASAMI .mpsmv ? .mpw2 からの差分">
+		<param name="Local" value="ja\sasami-mpsmv.htm">
+		<param name="Name" value="English: SASAMI .mpsmv ? delta from .mpw2">
+		<param name="Local" value="en\sasami-mpsmv.htm">
+		<param name="Name" value="日本語: SASAMI Composer（曲を作る）">
+		<param name="Local" value="ja\sasami-composer.htm">
+		<param name="Name" value="English: SASAMI Composer (create songs)">
+		<param name="Local" value="en\sasami-composer.htm">
+		<param name="Name" value="日本語: .mid を VST 音源で鳴らす">
+		<param name="Local" value="ja\vst-midi.htm">
+		<param name="Name" value="English: Playing .mid through a VST">
+		<param name="Local" value="en\vst-midi.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
 		<param name="Name" value="A tour of the media player screen">
 		<param name="Name" value="English: A tour of the media player screen">
 		<param name="Local" value="en\mp-overview.htm">
@@ -795,6 +832,56 @@
 		<param name="Local" value="ja\sasami-composer.htm">
 		</OBJECT>
 	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="FNEIRO">
+		<param name="Name" value="日本語: SASAMI .fpy コマンド（全部）">
+		<param name="Local" value="ja\sasami-fpy.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="FNOTE">
+		<param name="Name" value="日本語: SASAMI .fpy コマンド（全部）">
+		<param name="Local" value="ja\sasami-fpy.htm">
+		<param name="Name" value="English: SASAMI .fpy commands (complete)">
+		<param name="Local" value="en\sasami-fpy.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="FPY">
+		<param name="Name" value="日本語: SASAMI .fpy コマンド（全部）">
+		<param name="Local" value="ja\sasami-fpy.htm">
+		<param name="Name" value="English: SASAMI .fpy commands (complete)">
+		<param name="Local" value="en\sasami-fpy.htm">
+		<param name="Name" value="日本語: SASAMI .fpy2 ? .fpy からの差分">
+		<param name="Local" value="ja\sasami-fpy2.htm">
+		<param name="Name" value="English: SASAMI .fpy2 ? delta from .fpy">
+		<param name="Local" value="en\sasami-fpy2.htm">
+		<param name="Name" value="日本語: SASAMI Composer（曲を作る）">
+		<param name="Local" value="ja\sasami-composer.htm">
+		<param name="Name" value="English: SASAMI Composer (create songs)">
+		<param name="Local" value="en\sasami-composer.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="fpy">
+		<param name="Name" value="日本語: SASAMI .fpy コマンド（全部）">
+		<param name="Local" value="ja\sasami-fpy.htm">
+		<param name="Name" value="日本語: SASAMI .fpy2 ? .fpy からの差分">
+		<param name="Local" value="ja\sasami-fpy2.htm">
+		<param name="Name" value="日本語: SASAMI Composer（曲を作る）">
+		<param name="Local" value="ja\sasami-composer.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="FPY2">
+		<param name="Name" value="日本語: SASAMI .fpy2 ? .fpy からの差分">
+		<param name="Local" value="ja\sasami-fpy2.htm">
+		<param name="Name" value="English: SASAMI .fpy2 ? delta from .fpy">
+		<param name="Local" value="en\sasami-fpy2.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="fpy2">
+		<param name="Name" value="日本語: SASAMI .fpy2 ? .fpy からの差分">
+		<param name="Local" value="ja\sasami-fpy2.htm">
+		<param name="Name" value="日本語: SASAMI .fpy コマンド（全部）">
+		<param name="Local" value="ja\sasami-fpy.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
 		<param name="Name" value="game folders">
 		<param name="Name" value="English: Pointing Raira at your game folders">
 		<param name="Local" value="en\folder-setup.htm">
@@ -925,6 +1012,21 @@
 		<param name="Local" value="en\shortcuts.htm">
 		<param name="Name" value="English: Looking back at play history">
 		<param name="Local" value="en\history.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="kbsasami">
+		<param name="Name" value="日本語: SASAMI .fpy コマンド（全部）">
+		<param name="Local" value="ja\sasami-fpy.htm">
+		<param name="Name" value="English: SASAMI .fpy commands (complete)">
+		<param name="Local" value="en\sasami-fpy.htm">
+		<param name="Name" value="日本語: SASAMI .mpy コマンド（全部）">
+		<param name="Local" value="ja\sasami-mpy.htm">
+		<param name="Name" value="English: SASAMI .mpy commands (complete)">
+		<param name="Local" value="en\sasami-mpy.htm">
+		<param name="Name" value="日本語: KPIプラグインで対応形式をふやす">
+		<param name="Local" value="ja\kpi.htm">
+		<param name="Name" value="English: Adding formats with KPI plug-ins">
+		<param name="Local" value="en\kpi.htm">
 		</OBJECT>
 	<LI> <OBJECT type="text/sitemap">
 		<param name="Name" value="Kill">
@@ -1231,6 +1333,16 @@
 		<param name="Local" value="en\mirror.htm">
 		</OBJECT>
 	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="Misao">
+		<param name="Name" value="日本語: SASAMI .fpy2 ? .fpy からの差分">
+		<param name="Local" value="ja\sasami-fpy2.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="Misao PCM">
+		<param name="Name" value="English: SASAMI .fpy2 ? delta from .fpy">
+		<param name="Local" value="en\sasami-fpy2.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
 		<param name="Name" value="missing files">
 		<param name="Name" value="English: Working with playlists">
 		<param name="Local" value="en\playlist.htm">
@@ -1268,6 +1380,71 @@
 		<param name="Local" value="ja\video.htm">
 		<param name="Name" value="English: Playing video">
 		<param name="Local" value="en\video.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="MPSMV">
+		<param name="Name" value="日本語: SASAMI .mpsmv ? .mpw2 からの差分">
+		<param name="Local" value="ja\sasami-mpsmv.htm">
+		<param name="Name" value="English: SASAMI .mpsmv ? delta from .mpw2">
+		<param name="Local" value="en\sasami-mpsmv.htm">
+		<param name="Name" value="日本語: .mid を VST 音源で鳴らす">
+		<param name="Local" value="ja\vst-midi.htm">
+		<param name="Name" value="English: Playing .mid through a VST">
+		<param name="Local" value="en\vst-midi.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="mpsmv">
+		<param name="Name" value="日本語: SASAMI .mpsmv ? .mpw2 からの差分">
+		<param name="Local" value="ja\sasami-mpsmv.htm">
+		<param name="Name" value="日本語: SASAMI .mpw2 ? .mpy からの差分">
+		<param name="Local" value="ja\sasami-mpw2.htm">
+		<param name="Name" value="日本語: .mid を VST 音源で鳴らす">
+		<param name="Local" value="ja\vst-midi.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="MPW2">
+		<param name="Name" value="日本語: SASAMI .mpw2 ? .mpy からの差分">
+		<param name="Local" value="ja\sasami-mpw2.htm">
+		<param name="Name" value="English: SASAMI .mpw2 ? delta from .mpy">
+		<param name="Local" value="en\sasami-mpw2.htm">
+		<param name="Name" value="日本語: SASAMI .mpy コマンド（全部）">
+		<param name="Local" value="ja\sasami-mpy.htm">
+		<param name="Name" value="English: SASAMI .mpy commands (complete)">
+		<param name="Local" value="en\sasami-mpy.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="mpw2">
+		<param name="Name" value="日本語: SASAMI .mpw2 ? .mpy からの差分">
+		<param name="Local" value="ja\sasami-mpw2.htm">
+		<param name="Name" value="日本語: SASAMI .mpy コマンド（全部）">
+		<param name="Local" value="ja\sasami-mpy.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="MPW3">
+		<param name="Name" value="日本語: SASAMI .mpsmv ? .mpw2 からの差分">
+		<param name="Local" value="ja\sasami-mpsmv.htm">
+		<param name="Name" value="日本語: SASAMI Composer（曲を作る）">
+		<param name="Local" value="ja\sasami-composer.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="MPY">
+		<param name="Name" value="日本語: SASAMI .mpy コマンド（全部）">
+		<param name="Local" value="ja\sasami-mpy.htm">
+		<param name="Name" value="English: SASAMI .mpy commands (complete)">
+		<param name="Local" value="en\sasami-mpy.htm">
+		<param name="Name" value="日本語: SASAMI .mpw2 ? .mpy からの差分">
+		<param name="Local" value="ja\sasami-mpw2.htm">
+		<param name="Name" value="English: SASAMI .mpw2 ? delta from .mpy">
+		<param name="Local" value="en\sasami-mpw2.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="mpy">
+		<param name="Name" value="日本語: SASAMI .mpy コマンド（全部）">
+		<param name="Local" value="ja\sasami-mpy.htm">
+		<param name="Name" value="日本語: SASAMI .mpw2 ? .mpy からの差分">
+		<param name="Local" value="ja\sasami-mpw2.htm">
+		<param name="Name" value="日本語: SASAMI Composer（曲を作る）">
+		<param name="Local" value="ja\sasami-composer.htm">
 		</OBJECT>
 	<LI> <OBJECT type="text/sitemap">
 		<param name="Name" value="MSX">
@@ -1732,6 +1909,56 @@
 		<param name="Local" value="en\live.htm">
 		</OBJECT>
 	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="SASAMI .fpy commands (complete)">
+		<param name="Name" value="English: SASAMI .fpy commands (complete)">
+		<param name="Local" value="en\sasami-fpy.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="SASAMI .fpy コマンド（全部）">
+		<param name="Name" value="日本語: SASAMI .fpy コマンド（全部）">
+		<param name="Local" value="ja\sasami-fpy.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="SASAMI .fpy2 ? .fpy からの差分">
+		<param name="Name" value="日本語: SASAMI .fpy2 ? .fpy からの差分">
+		<param name="Local" value="ja\sasami-fpy2.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="SASAMI .fpy2 ? delta from .fpy">
+		<param name="Name" value="English: SASAMI .fpy2 ? delta from .fpy">
+		<param name="Local" value="en\sasami-fpy2.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="SASAMI .mpsmv ? .mpw2 からの差分">
+		<param name="Name" value="日本語: SASAMI .mpsmv ? .mpw2 からの差分">
+		<param name="Local" value="ja\sasami-mpsmv.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="SASAMI .mpsmv ? delta from .mpw2">
+		<param name="Name" value="English: SASAMI .mpsmv ? delta from .mpw2">
+		<param name="Local" value="en\sasami-mpsmv.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="SASAMI .mpw2 ? .mpy からの差分">
+		<param name="Name" value="日本語: SASAMI .mpw2 ? .mpy からの差分">
+		<param name="Local" value="ja\sasami-mpw2.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="SASAMI .mpw2 ? delta from .mpy">
+		<param name="Name" value="English: SASAMI .mpw2 ? delta from .mpy">
+		<param name="Local" value="en\sasami-mpw2.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="SASAMI .mpy commands (complete)">
+		<param name="Name" value="English: SASAMI .mpy commands (complete)">
+		<param name="Local" value="en\sasami-mpy.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="SASAMI .mpy コマンド（全部）">
+		<param name="Name" value="日本語: SASAMI .mpy コマンド（全部）">
+		<param name="Local" value="ja\sasami-mpy.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
 		<param name="Name" value="SASAMI Composer (create songs)">
 		<param name="Name" value="English: SASAMI Composer (create songs)">
 		<param name="Local" value="en\sasami-composer.htm">
@@ -1740,6 +1967,13 @@
 		<param name="Name" value="SASAMI Composer（曲を作る）">
 		<param name="Name" value="日本語: SASAMI Composer（曲を作る）">
 		<param name="Local" value="ja\sasami-composer.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="SASAMI opcode">
+		<param name="Name" value="English: SASAMI .fpy commands (complete)">
+		<param name="Local" value="en\sasami-fpy.htm">
+		<param name="Name" value="English: SASAMI .mpy commands (complete)">
+		<param name="Local" value="en\sasami-mpy.htm">
 		</OBJECT>
 	<LI> <OBJECT type="text/sitemap">
 		<param name="Name" value="save to WAV">
@@ -2423,6 +2657,21 @@
 		<param name="Local" value="ja\formats.htm">
 		</OBJECT>
 	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="|: :|">
+		<param name="Name" value="日本語: SASAMI .fpy コマンド（全部）">
+		<param name="Local" value="ja\sasami-fpy.htm">
+		<param name="Name" value="English: SASAMI .fpy commands (complete)">
+		<param name="Local" value="en\sasami-fpy.htm">
+		<param name="Name" value="日本語: SASAMI .mpy コマンド（全部）">
+		<param name="Local" value="ja\sasami-mpy.htm">
+		<param name="Name" value="English: SASAMI .mpy commands (complete)">
+		<param name="Local" value="en\sasami-mpy.htm">
+		<param name="Name" value="日本語: SASAMI .mpw2 ? .mpy からの差分">
+		<param name="Local" value="ja\sasami-mpw2.htm">
+		<param name="Name" value="English: SASAMI .mpw2 ? delta from .mpy">
+		<param name="Local" value="en\sasami-mpw2.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
 		<param name="Name" value="おまけ">
 		<param name="Name" value="日本語: おまけのお遊び">
 		<param name="Local" value="ja\games.htm">
@@ -2461,6 +2710,15 @@
 		<param name="Local" value="ja\datasheet.htm">
 		<param name="Name" value="日本語: 対応形式と対応タイトル">
 		<param name="Local" value="ja\formats.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="ささみコマンド">
+		<param name="Name" value="日本語: SASAMI .fpy コマンド（全部）">
+		<param name="Local" value="ja\sasami-fpy.htm">
+		<param name="Name" value="日本語: SASAMI .mpy コマンド（全部）">
+		<param name="Local" value="ja\sasami-mpy.htm">
+		<param name="Name" value="日本語: SASAMI Composer（曲を作る）">
+		<param name="Local" value="ja\sasami-composer.htm">
 		</OBJECT>
 	<LI> <OBJECT type="text/sitemap">
 		<param name="Name" value="ちょっとしたコツ">

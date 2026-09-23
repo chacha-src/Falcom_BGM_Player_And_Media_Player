@@ -47,9 +47,22 @@
 
     // m[gt@NgB
     // m[gIbZ[WÉÎµÄKØÈm[gðìèo·B
+    struct tone_color{
+        int revSend, choSend, dlySend;
+        int revMode, choMode, dlyMode, insMode;
+        int cutoff, reso, attack, decay, release;
+        int vibRate, vibDepth;
+        tone_color():
+            revSend(0), choSend(0), dlySend(0),
+            revMode(0), choMode(0), dlyMode(0), insMode(0),
+            cutoff(64), reso(64), attack(64), decay(64), release(64),
+            vibRate(64), vibDepth(64) {}
+    };
+
     class note_factory{//:uncopyable{//C³ by Kobarin
     public:
         virtual note* note_on(int_least32_t program, int note, int velocity, double frequency_multiplier)=0;
+        virtual void set_tone_color(const tone_color&) {}
     protected:
         ~note_factory(){}
     };
@@ -78,6 +91,17 @@
         void bank_select(int value);
 
         void set_bank(int value){ bank = value; }
+        void set_rhythm_part(int on){
+            if(on){
+                int kit = ((bank & 0x3F80) == 0x3C00) ? (bank & 0x7F) : 0;
+                default_bank = 0x3C00;
+                bank = 0x3C00 | kit;
+            }else{
+                default_bank = 0x3C80;
+                bank = 0x3C80;
+            }
+            program = bank * 128 + (program & 0x7F);
+        }
         void set_program(int value){ program = value; }
         void set_panpot(int value){ panpot = value; }
         void set_volume(int value){ volume = value; }
@@ -97,6 +121,8 @@
         void set_master_frequency_multiplier(double value){ master_frequency_multiplier = value; update_frequency_multiplier(); }
         void set_mute(bool mute_){ mute = mute_; }
         void set_system_mode(system_mode_t mode){ system_mode = mode; }
+        void set_effect_mode(int kind, int value);
+        tone_color effect_color() const;
         void mono_mode_on(){ all_note_off(); mono = true; }
         void poly_mode_on(){ all_note_off(); mono = false; }
 
@@ -158,11 +184,17 @@
         double frequency_multiplier;
         double master_frequency_multiplier;
         system_mode_t system_mode;
+        int fxRevSend, fxChoSend, fxDlySend;
+        int fxRevMode, fxChoMode, fxDlyMode, fxInsMode;
+        int nrpnCutoff, nrpnReso, nrpnAtk, nrpnDec, nrpnRel;
+        int nrpnVibRate, nrpnVibDepth;
 
         int get_registered_parameter();
         void set_registered_parameter(int value);
         void update_frequency_multiplier();
         void update_modulation();
+        void update_fx_vibrato();
+        void apply_nrpn_data(int value);
     };
 
     // MIDIVZTCUB
@@ -290,6 +322,7 @@
         struct{
             int AR, DR, SR, RR, SL, TL, KS, ML, DT, AMS;
         }op1, op2, op3, op4;
+        int transpose;
     };
     // hp[^B
     struct DRUMPARAMETER:FMPARAMETER{
@@ -355,17 +388,23 @@
     };
 
     // FM¹¹m[gt@NgB
+    class Ym2612Pool;
     class fm_note_factory:public note_factory{
     public:
         fm_note_factory();
+        ~fm_note_factory();
         void clear();
+        bool load_wopn(const wchar_t* path, int family = 0, int append = 0);
         void get_program(int number, FMPARAMETER& p);
         bool set_program(int number, const FMPARAMETER& p);
         bool set_drum_program(int number, const DRUMPARAMETER& p);
         virtual note* note_on(int_least32_t program, int note, int velocity, double frequency_multiplier);
+        void set_tone_color(const tone_color& c) { color = c; }
     private:
+        tone_color color;
         std::map<int, FMPARAMETER> programs;
         std::map<int, DRUMPARAMETER> drums;
+        Ym2612Pool* ym;
     };
 //}
 

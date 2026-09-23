@@ -1,4 +1,4 @@
-﻿#include "stdafx.h"
+#include "stdafx.h"
 #include "OSVersion.h"
 #include <winreg.h>
 #define PRODUCT_CORE_ARM                            0x00000061

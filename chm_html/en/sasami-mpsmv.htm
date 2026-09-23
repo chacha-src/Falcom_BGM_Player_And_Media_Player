@@ -1,0 +1,55 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<title>SASAMI .mpsmv — delta from .mpw2</title>
+<link rel="stylesheet" type="text/css" href="../css/help.css">
+</head>
+<body>
+
+<div class="topnav"><a href="index.htm">Contents</a> &nbsp;|&nbsp; <a href="../ja/sasami-mpsmv.htm">日本語</a></div>
+
+<h1>SASAMI .mpsmv — delta from .mpw2</h1>
+
+<p class="lead">The MIDI body is <a href="sasami-mpw2.htm">.mpw2</a> (same opcodes as <a href="sasami-mpy.htm">.mpy</a>). A trailing MPW3 block loads HALion-style VSTs per part on the host, not KPI fmmidi. Same idea as <a href="vst-midi.htm">playing .mid through VST</a>.</p>
+<h2>MPW3 trailer</h2>
+<p>Right after the MIDI body: magic <code>MPW3</code>, u32 version (1 or 2), then 32 parts:</p>
+<table class="grid">
+<tr><th>Field</th><th>Size</th><th>Source</th></tr>
+<tr><td>path</td><td>520 bytes</td><td><code>@VST"…"</code> / staff Tone</td></tr>
+<tr><td>prog / msb / lsb / forceCh</td><td>4 each</td><td><code>@PROG</code> <code>@BANK</code></td></tr>
+<tr><td>comp blob</td><td>len+bytes</td><td><code>@VSTSTATEB64</code> / <code>+</code> continuation</td></tr>
+<tr><td>ctrl blob</td><td>len+bytes</td><td><code>@VSTCTRLB64</code></td></tr>
+</table>
+<p>Version ≥ 2 may append <code>MACR</code> (name 64 wchar + body) for <code>@MACRO</code> / <code>@CALL</code>.</p>
+<h2>Insert FX</h2>
+<p><code>@VSTFX slot "path"</code> and <code>@VSTFXSTATEB64</code> — staff Insert FX.</p>
+<h2>What Composer changes</h2>
+<table class="grid">
+<tr><th>Composer</th><th>.mpy/.mpw2</th><th>.mpsmv</th></tr>
+<tr><td><code>@CC</code> family</td><td>forces .mpsmv</td><td>cmd41 (not classic cmd6/17/18)</td></tr>
+<tr><td><code>@SVIB</code> / <code>@SPORTA</code></td><td>unrolled</td><td>still unrolled (not cmd46/47)</td></tr>
+<tr><td><code>｛:n ｝:</code></td><td>text unroll</td><td>native cmd23/24</td></tr>
+<tr><td><code>@METER</code> / <code>@TS</code></td><td>forces .mpsmv</td><td>staff grid; no stream opcode</td></tr>
+<tr><td><code>@VST</code> / <code>@MACRO</code></td><td>forces this format</td><td>trailer / MACR footer</td></tr>
+</table>
+<h2>When Composer writes .mpsmv</h2>
+<ul>
+<li>Any <code>@VST</code> / state / FX bind.</li>
+<li><code>@METER</code>, <code>@MACRO</code>, <code>@CC</code> family, native <code>｛:</code>.</li>
+<li>Staff Tone row has a VST path.</li>
+</ul>
+<p>Playback opens the trailer VSTs and routes notes to those parts — not GM mapper piano. Long <code>@VSTSTATEB64</code> lines can be folded in the text UI.</p>
+<div class="related"><span class="label">See also</span><ul><li><a href="sasami-composer.htm">SASAMI Composer (create songs)</a></li><li><a href="sasami-fpy.htm">SASAMI .fpy commands (complete)</a></li><li><a href="sasami-fpy2.htm">SASAMI .fpy2 — delta from .fpy</a></li><li><a href="sasami-mpy.htm">SASAMI .mpy commands (complete)</a></li><li><a href="sasami-mpw2.htm">SASAMI .mpw2 — delta from .mpy</a></li><li><a href="kpi.htm">Adding formats with KPI plug-ins</a></li><li><a href="formats.htm">Supported formats and titles</a></li><li><a href="midi-monitor.htm">FM/MIDI monitor</a></li><li><a href="vst-midi.htm">Playing .mid through a VST</a></li></ul></div>
+
+<div class="botnav">
+<span class="prev">&#171; Back: <a href="sasami-mpw2.htm">SASAMI .mpw2 — delta from .mpy</a></span>
+<span class="next">Next: <a href="voice.htm">The voice changer</a> &#187;</span>
+<span class="up"><a href="index.htm">Contents</a></span>
+<div class="clear"></div>
+</div>
+
+<div class="foot">Media player "Raira" (oggYSEDbgm) — PrePrayerPower Soft</div>
+
+</body>
+</html>

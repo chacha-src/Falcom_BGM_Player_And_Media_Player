@@ -46,7 +46,7 @@
       <SDLCheck>false</SDLCheck>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
       <LanguageStandard>stdcpp17</LanguageStandard>
-      <AdditionalIncludeDirectories>$(ProjectDir)source;$(ProjectDir)source\ymfm;$(ProjectDir)source\fmmidi;C:\projects\APPLICATION3\kpi_sources_20240712\kpisdk;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)source;$(ProjectDir)source\ymfm;$(ProjectDir)source\fmmidi;C:\projects\APPLICATION3\kpi_sources_20240712\kpisdk;C:\projects\APPLICATION3\kpi_sources_20240712\kpi_decoder\fmmon_common;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>WIN32;_WINDOWS;_CRT_SECURE_NO_WARNINGS;_HAS_AUTO_PTR_ETC=1;NOMINMAX;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
       <ExceptionHandling>Sync</ExceptionHandling>
@@ -91,6 +91,10 @@ copy /Y "$(TargetPath)" "$(ProjectDir)..\$(Configuration)\1\Plugins\kbsasami\kbs
 copy /Y "$(TargetPath)" "C:\projects\APPLICATION3\ogg_binary\Plugins\kbsasami\kbsasami.kpi"
 copy /Y "$(ProjectDir)data\programs.txt" "$(ProjectDir)..\$(Configuration)\1\Plugins\kbsasami\programs.txt"
 copy /Y "$(ProjectDir)data\programs.txt" "C:\projects\APPLICATION3\ogg_binary\Plugins\kbsasami\programs.txt"
+copy /Y "$(ProjectDir)data\xg.wopn" "$(ProjectDir)..\$(Configuration)\1\Plugins\kbsasami\xg.wopn"
+copy /Y "$(ProjectDir)data\xg.wopn" "C:\projects\APPLICATION3\ogg_binary\Plugins\kbsasami\xg.wopn"
+copy /Y "$(ProjectDir)data\gs.wopn" "$(ProjectDir)..\$(Configuration)\1\Plugins\kbsasami\gs.wopn"
+copy /Y "$(ProjectDir)data\gs.wopn" "C:\projects\APPLICATION3\ogg_binary\Plugins\kbsasami\gs.wopn"
 copy /Y "$(ProjectDir)kbsasami.txt" "$(ProjectDir)..\$(Configuration)\1\Plugins\kbsasami\kbsasami.txt"
 copy /Y "$(ProjectDir)kbsasami.txt" "C:\projects\APPLICATION3\ogg_binary\Plugins\kbsasami\kbsasami.txt"
 if exist "C:\projects\APPLICATION3\ogg_binary\Plugins\Kobarin\fmpmd\ym2608_adpcm_rom.bin" copy /Y "C:\projects\APPLICATION3\ogg_binary\Plugins\Kobarin\fmpmd\ym2608_adpcm_rom.bin" "$(ProjectDir)..\$(Configuration)\1\Plugins\kbsasami\ym2608_adpcm_rom.bin"
@@ -107,6 +111,10 @@ copy /Y "$(TargetPath)" "$(ProjectDir)..\$(Configuration)\1\Plugins\kbsasami\x64
 copy /Y "$(TargetPath)" "C:\projects\APPLICATION3\ogg_binary\Plugins\kbsasami\x64\kbsasami.kpi"
 copy /Y "$(ProjectDir)data\programs.txt" "$(ProjectDir)..\$(Configuration)\1\Plugins\kbsasami\x64\programs.txt"
 copy /Y "$(ProjectDir)data\programs.txt" "C:\projects\APPLICATION3\ogg_binary\Plugins\kbsasami\x64\programs.txt"
+copy /Y "$(ProjectDir)data\xg.wopn" "$(ProjectDir)..\$(Configuration)\1\Plugins\kbsasami\x64\xg.wopn"
+copy /Y "$(ProjectDir)data\xg.wopn" "C:\projects\APPLICATION3\ogg_binary\Plugins\kbsasami\x64\xg.wopn"
+copy /Y "$(ProjectDir)data\gs.wopn" "$(ProjectDir)..\$(Configuration)\1\Plugins\kbsasami\x64\gs.wopn"
+copy /Y "$(ProjectDir)data\gs.wopn" "C:\projects\APPLICATION3\ogg_binary\Plugins\kbsasami\x64\gs.wopn"
 if exist "C:\projects\APPLICATION3\ogg_binary\Plugins\Kobarin\fmpmd\ym2608_adpcm_rom.bin" copy /Y "C:\projects\APPLICATION3\ogg_binary\Plugins\Kobarin\fmpmd\ym2608_adpcm_rom.bin" "$(ProjectDir)..\$(Configuration)\1\Plugins\kbsasami\x64\ym2608_adpcm_rom.bin"
 if exist "C:\projects\APPLICATION3\ogg_binary\Plugins\Kobarin\fmpmd\ym2608_adpcm_rom.bin" copy /Y "C:\projects\APPLICATION3\ogg_binary\Plugins\Kobarin\fmpmd\ym2608_adpcm_rom.bin" "C:\projects\APPLICATION3\ogg_binary\Plugins\kbsasami\x64\ym2608_adpcm_rom.bin"
 if exist "C:\projects\APPLICATION3\ogg_binary\Plugins\Kobarin\fmpmd\Rhythm\2608_BD.WAV" copy /Y "C:\projects\APPLICATION3\ogg_binary\Plugins\Kobarin\fmpmd\Rhythm\2608_*.WAV" "$(ProjectDir)..\$(Configuration)\1\Plugins\kbsasami\x64\"
@@ -124,6 +132,9 @@ if exist "C:\projects\APPLICATION3\ogg_binary\Plugins\Kobarin\fmpmd\Rhythm\2608_
     <ClCompile Include="source\sasami_fm.cpp" />
     <ClCompile Include="source\fmmidi\sequencer.cpp" />
     <ClCompile Include="source\fmmidi\midisynth.cpp" />
+    <ClCompile Include="source\fmmidi\ym2612_pool.cpp" />
+    <ClCompile Include="C:\projects\APPLICATION3\kpi_sources_20240712\kpi_decoder\fmmon_common\fmmon_write.cpp" />
+    <ClCompile Include="C:\projects\APPLICATION3\kpi_sources_20240712\kpi_decoder\fmmon_common\fmmon_shadow.cpp" />
     <ClCompile Include="source\ymfm\ymfm_opn.cpp" />
     <ClCompile Include="source\ymfm\ymfm_adpcm.cpp" />
     <ClCompile Include="source\ymfm\ymfm_ssg.cpp" />

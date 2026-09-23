@@ -2268,10 +2268,28 @@ void CRender::OnTimer(UINT_PTR nIDEvent)
 	// TODO: ここにメッセージ ハンドラー コードを追加するか、既定の処理を呼び出します。
 	if (nIDEvent == 7000) {
 		KillTimer(7000);
-		// 親を付けないとメイン背面に回り、CRender の下に隠れて操作不能になる
-		CKpilist k(this);
+		/* CRender は色キーのレイヤ窓で、その子にすると一覧が背面か透明のまま出ない。
+		   本体をオーナーにし、一覧を出している間は CRender と背面画像を隠す。 */
+		const BOOL renderVis = IsWindowVisible() ? TRUE : FALSE;
+		const BOOL baseVis = (renderbase && renderbase->GetSafeHwnd() && renderbase->IsWindowVisible()) ? TRUE : FALSE;
+		if (baseVis)
+			renderbase->ShowWindow(SW_HIDE);
+		if (renderVis)
+			ShowWindow(SW_HIDE);
+		CWnd* owner = GetParent();
+		if (!owner || !owner->GetSafeHwnd())
+			owner = AfxGetMainWnd();
+		CKpilist k(owner);
 		k.status = 0;
 		k.DoModal();
+		if (renderVis) {
+			ShowWindow(SW_SHOW);
+			::SetWindowPos(m_hWnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+		}
+		if (baseVis && renderbase && renderbase->GetSafeHwnd()) {
+			renderbase->ShowWindow(SW_SHOW);
+			::SetWindowPos(renderbase->m_hWnd, m_hWnd, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+		}
 		return;
 	}
 	savedata.ms = m_ms.GetPos();
