@@ -183,6 +183,10 @@ static BOOL CCC_UseTransPaint(HWND hWnd, BOOL bAeroMode)
     if (hWnd) {
         HWND hParent = ::GetParent(hWnd);
         if (hParent && CCC_AcrylicCaption(hParent) && CCC_IsCaptionChromeCtrl(hWnd)) {
+            /* 9月時点と同じ。追随チェックだけ地をクロマにして帯ガラスを見せる。
+               × などは Win11 で抜けるので不透明のまま。 */
+            if (::GetDlgCtrlID(hWnd) == IDC_MAINWIN_LOCK)
+                return TRUE;
             if (CCC_IsWin11())
                 return FALSE;
             return TRUE;
@@ -12781,6 +12785,17 @@ void CCustomCheckBox::OnMouseLeave()
     Invalidate();
 }
 
+// レイヤードにすると文字ごと消える。通常の透過再描画に戻す。
+void CCustomCheckBox::PresentAcrylicPlate()
+{
+    if (!GetSafeHwnd())
+        return;
+    LONG ex = ::GetWindowLong(m_hWnd, GWL_EXSTYLE);
+    if (ex & WS_EX_LAYERED)
+        ::SetWindowLong(m_hWnd, GWL_EXSTYLE, ex & ~WS_EX_LAYERED);
+    Invalidate(FALSE);
+}
+
 // WM_PAINT。透過はクロマ、ホストガラスは不透明パス、それ以外は素描画。
 // CPaintDC。経路分岐は aero / ホストガラス / 通常。
 void CCustomCheckBox::OnPaint()
@@ -12788,10 +12803,12 @@ void CCustomCheckBox::OnPaint()
     CPaintDC dc(this);
     CRect r;
     GetClientRect(&r);
+    if (r.Width() <= 0 || r.Height() <= 0)
+        return;
 
     // 透過(アクリル)時は CompositeTransparent が処理するので従来通り直接描画
     const BOOL bTrans = CCC_UseTransPaint(m_hWnd, m_bAeroMode);
-    if (bTrans || r.Width() <= 0 || r.Height() <= 0)
+    if (bTrans)
     {
         OnDrawLayer(&dc, r);
         return;
@@ -16167,8 +16184,12 @@ static BOOL CCC_ShouldOpaqueFix(HWND hWnd)
 {
     if (!::IsWindow(hWnd)) return FALSE;
     // Win11 ではキャプション ×/最小化も α=255 が要る。クロマのままだと消える。
-    if (CCC_IsCaptionChromeCtrl(hWnd))
+    // 「メインに追従」だけは地が帯ガラス。不透明 fixer を載せると黒板になる。
+    if (CCC_IsCaptionChromeCtrl(hWnd)) {
+        if (::GetDlgCtrlID(hWnd) == IDC_MAINWIN_LOCK)
+            return FALSE;
         return CCC_IsWin11() ? TRUE : FALSE;
+    }
 
     // GroupBox を fixer すると全面 α=255 塗りで兄弟 Edit/Static を消す。枠は自前描画。
     if (CWnd* pwGb = CWnd::FromHandlePermanent(hWnd)) {
@@ -16890,12 +16911,34 @@ static void CCC_CaptionChromeReapplyTrans(HWND hDlg)
 // CCC_CaptionPaintChromeNow: カスタム UI / アクリル補助。
 // ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
 // 詳細は呼び出し元のコメントを優先。
+static void CCC_ClearLockPlateOnCaption(HWND hDlg, HDC hdc)
+{
+    if (!hDlg || !hdc || !CCC_AcrylicCaption(hDlg))
+        return;
+    HWND h = ::GetDlgItem(hDlg, IDC_MAINWIN_LOCK);
+    if (!h || !::IsWindowVisible(h))
+        return;
+    RECT rc = {};
+    ::GetWindowRect(h, &rc);
+    ::MapWindowPoints(NULL, hDlg, reinterpret_cast<LPPOINT>(&rc), 2);
+    const int saved = ::SaveDC(hdc);
+    ::SelectClipRgn(hdc, NULL);
+    CCC_ClearRectChroma(hdc, rc, CCC_AERO_CHROMA_KEY);
+    ::RestoreDC(hdc, saved);
+}
+
 static void CCC_CaptionPaintChromeNow(HWND hDlg)
 {
     if (!hDlg || !::IsWindow(hDlg)) return;
     for (HWND h = ::GetWindow(hDlg, GW_CHILD); h; h = ::GetWindow(h, GW_HWNDNEXT)) {
         if (!CCC_IsCaptionChromeCtrl(h) || !::IsWindowVisible(h)) continue;
         CWnd* pw = CWnd::FromHandlePermanent(h);
+        if (auto* pLock = dynamic_cast<CCustomCheckBox*>(pw)) {
+            if (::GetDlgCtrlID(h) == IDC_MAINWIN_LOCK && CCC_AcrylicCaption(hDlg)) {
+                pLock->PresentAcrylicPlate();
+                continue;
+            }
+        }
         if (auto* pBtn = dynamic_cast<CCustomStandardButton*>(pw)) {
             pBtn->RepaintClient();
             continue;
@@ -18017,6 +18060,7 @@ void CCC_CaptionPaint(CDC& dc, HWND hDlg)
                     ::BitBlt(dc.GetSafeHdc(), 0, 0, w, h, hdcMem, 0, 0, SRCCOPY);
                 }
             }
+            CCC_ClearLockPlateOnCaption(hDlg, dc.GetSafeHdc());
             CCC_CaptionPaintChromeNow(hDlg);
             e->paintValid = TRUE;
             e->paintActive = active;
@@ -18031,6 +18075,7 @@ void CCC_CaptionPaint(CDC& dc, HWND hDlg)
             e->paintTitle[511] = 0;
         }
         else {
+            CCC_ClearLockPlateOnCaption(hDlg, dc.GetSafeHdc());
             CCC_CaptionPaintChromeNow(hDlg);
         }
         return;
@@ -18528,6 +18573,10 @@ static void CCC_MainLockSyncBtnCheck(CCC_MainLockEntry* e)
     if (!e || e->overlayPaint || !e->pLockBtn || !::IsWindow(e->pLockBtn->GetSafeHwnd()))
         return;
     e->pLockBtn->SetCheck(e->locked ? BST_CHECKED : BST_UNCHECKED);
+#if CCUSTOM_AERO_SUPPORT
+    if (CCC_AcrylicCaption(::GetParent(e->pLockBtn->GetSafeHwnd())))
+        e->pLockBtn->PresentAcrylicPlate();
+#endif
 }
 
 // CCC_ApplyMainLockState: カスタム UI / アクリル補助。
@@ -18622,6 +18671,10 @@ static void CCC_MainLockLayoutBtn(HWND hDlg)
     e->pLockBtn->SetWindowPos(&CWnd::wndTop, rc.left, rc.top, rc.Width(), rc.Height(),
         SWP_NOACTIVATE | SWP_NOCOPYBITS);
     CCC_MainLockSyncBtnCheck(e);
+#if CCUSTOM_AERO_SUPPORT
+    if (CCC_AcrylicCaption(hDlg))
+        e->pLockBtn->PresentAcrylicPlate();
+#endif
 }
 
 // CCC_MainLockShowBtn: カスタム UI / アクリル補助。

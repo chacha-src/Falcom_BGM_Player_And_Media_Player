@@ -734,7 +734,7 @@ char* wav;
 CDC dc, * cdc0, dcsub;
 CBitmap bmp, bmpsub;
 float fade, fadeadd;
-int mcnt, mcnt2, mcnt1, mcnt3, mcnt4, mcnt5, mcnt6;
+int mcnt, mcnt2, mcnt1, mcnt3, mcnt4, mcnt5, mcnt6, mcnt7;
 char cm1[10000];
 int wavbit2;
 extern save savedata;
@@ -4575,6 +4575,8 @@ void playwav();
 void playwavds(char* bw);
 
 CDouga* pMainFrame1 = NULL;
+/* 空の軌跡 movie.pac の切り出し。プレイリストには載せない */
+static CString g_skyMovieCut;
 OggVorbis_File vf_arr[2];
 OggVorbis_File* g_vfPtr = &vf_arr[0];
 #define vf (vf_arr[XfDecSlot()])
@@ -5723,7 +5725,7 @@ BOOL COggDlg::OnInitDialog()
 	mode = modesub = 0;
 	m_supe.SetCheck(savedata.supe);
 	m_st.SetCheck(savedata.supe2);
-	mcnt = mcnt1 = mcnt2 = mcnt3 = mcnt4 = mcnt5 = mcnt6 = 0;
+	mcnt = mcnt1 = mcnt2 = mcnt3 = mcnt4 = mcnt5 = mcnt6 = mcnt7 = 0;
 	m_time.SetRange(0, 1);
 	m_time.SetSelection(0, 1);
 
@@ -10238,6 +10240,142 @@ void COggDlg::play()
 		break;
 	}
 
+	/* 空の軌跡 1st/2nd の movie*.pac。中身が素の WebM/MP4 なら切り出して動画再生。
+	   プレイリスト行は pac::内部名のまま（%TEMP% は載せない）。暗号化は再生しない。 */
+	if ((mode == 30 || mode == 31) && filen.Find(L"::") > 0) {
+		CString inner = filen.Mid(filen.Find(L"::") + 2);
+		inner.Replace(L"\\", L"/");
+		CString innerLow = inner;
+		innerLow.MakeLower();
+		const int isVid = (innerLow.Right(5) == L".webm" || innerLow.Right(4) == L".mp4"
+			|| innerLow.Right(4) == L".mkv" || innerLow.Right(4) == L".mov" || innerLow.Right(4) == L".avi");
+		if (isVid) {
+			CString pac = filen.Left(filen.Find(L"::"));
+			CFile mv;
+			int opened = 0;
+			ULONGLONG dataOff = 0, dataSize = 0;
+			unsigned char mag[8];
+			ZeroMemory(mag, sizeof(mag));
+			if (mv.Open(pac, CFile::modeRead | CFile::typeBinary | CFile::shareDenyWrite, NULL)) {
+				const ULONGLONG fsz = mv.GetLength();
+				mv.Seek(16, CFile::begin);
+				for (int n = 0; n < 64; n++) {
+					const ULONGLONG rec = mv.GetPosition();
+					ULONGLONG hash = 0, nameOff = 0, sz = 0, off = 0;
+					if (mv.Read(&hash, 8) != 8 || mv.Read(&nameOff, 8) != 8
+						|| mv.Read(&sz, 8) != 8 || mv.Read(&off, 8) != 8)
+						break;
+					(void)hash;
+					if (nameOff < rec || nameOff + 4 >= fsz || off >= fsz || sz == 0 || off + sz > fsz)
+						break;
+					char nb[300];
+					ZeroMemory(nb, sizeof(nb));
+					mv.Seek(nameOff, CFile::begin);
+					mv.Read(nb, 260);
+					CString ent = CString(nb);
+					ent.Replace(L"\\", L"/");
+					int dot = 0;
+					for (int k = 0; nb[k] && k < 260; k++) {
+						if (nb[k] == '.') dot = 1;
+						if ((unsigned char)nb[k] < 32) { dot = 0; break; }
+					}
+					if (!dot)
+						break;
+					if (ent.CompareNoCase(inner) == 0) {
+						mv.Seek(off, CFile::begin);
+						mv.Read(mag, 8);
+						dataOff = off;
+						dataSize = sz;
+						opened = 1;
+						break;
+					}
+					mv.Seek(rec + 32, CFile::begin);
+				}
+				if (!opened)
+					mv.Close();
+			}
+			const int plain = opened && (
+				(mag[0] == 0x1A && mag[1] == 0x45 && mag[2] == 0xDF && mag[3] == 0xA3)
+				|| (mag[4] == 'f' && mag[5] == 't' && mag[6] == 'y' && mag[7] == 'p'));
+			if (!plain) {
+				if (mv.m_hFile != CFile::hFileNull)
+					mv.Close();
+				m_saisai.EnableWindow(TRUE);
+				endflg = 0;
+				MessageBox(opened
+					? LL14(L"この動画は暗号化されていて再生できません。", L"This video is encrypted and cannot be played.", L"Cette vidéo est chiffrée.", L"Questo video è cifrato.", L"Este vídeo está cifrado.", L"이 동영상은 암호화되어 재생할 수 없습니다.", L"此视频已加密，无法播放。", L"هذا الفيديو مشفر.", L"Это видео зашифровано.", L"Dieses Video ist verschlüsselt.", L"Este vídeo está cifrado.", L"Deze video is versleuteld.", L"Ten film jest zaszyfrowany.", L"Bu video şifreli.")
+					: LL14(L"pac 内にこの動画がありません。", L"This video is not in the pac.", L"Cette vidéo n'est pas dans le pac.", L"Questo video non è nel pac.", L"Este vídeo no está en el pac.", L"pac 안에 이 동영상이 없습니다.", L"pac 内没有此视频。", L"هذا الفيديو غير موجود في pac.", L"Этого видео нет в pac.", L"Dieses Video ist nicht in der pac.", L"Este vídeo não está no pac.", L"Deze video zit niet in de pac.", L"Tego filmu nie ma w pac.", L"Bu video pac içinde yok."),
+					LL14(L"動画", L"Movie", L"Vidéo", L"Video", L"Vídeo", L"동영상", L"视频", L"فيديو", L"Видео", L"Video", L"Vídeo", L"Video", L"Wideo", L"Video"),
+					MB_ICONEXCLAMATION | MB_OK);
+				return;
+			}
+			CString ext = (innerLow.Right(5) == L".webm") ? CString(L".webm") : innerLow.Right(4);
+			TCHAR tmpDir[MAX_PATH];
+			tmpDir[0] = 0;
+			GetTempPath(MAX_PATH, tmpDir);
+			CString cut;
+			cut.Format(L"%sogg_sky_movie%s", tmpDir, (LPCTSTR)ext);
+			if (pMainFrame1)
+				gamenkill();
+			if (!g_skyMovieCut.IsEmpty()) {
+				DeleteFile(g_skyMovieCut);
+				g_skyMovieCut.Empty();
+			}
+			CFile out;
+			if (!out.Open(cut, CFile::modeCreate | CFile::modeWrite | CFile::shareExclusive, NULL)) {
+				mv.Close();
+				m_saisai.EnableWindow(TRUE);
+				endflg = 0;
+				return;
+			}
+			mv.Seek(dataOff, CFile::begin);
+			char* chunk = (char*)malloc(1 << 20);
+			ULONGLONG left = dataSize;
+			int aborted = (chunk == NULL);
+			while (!aborted && left > 0) {
+				if (playf == 0) { aborted = 1; break; }
+				const UINT nask = (UINT)((left > (1 << 20)) ? (1 << 20) : left);
+				const UINT ngot = mv.Read(chunk, nask);
+				if (ngot == 0) { aborted = 1; break; }
+				out.Write(chunk, ngot);
+				left -= ngot;
+			}
+			if (chunk) free(chunk);
+			out.Close();
+			mv.Close();
+			if (aborted || left != 0) {
+				DeleteFile(cut);
+				m_saisai.EnableWindow(TRUE);
+				endflg = 0;
+				return;
+			}
+			g_skyMovieCut = cut;
+			loop1 = 0;
+			loop2 = 0;
+			pMainFrame1 = new CDouga;
+			pMainFrame1->Create(GetSafeHwnd());
+			pMainFrame1->ShowWindow(SW_HIDE);
+			plf = 1;
+			dougaplay(0, cut);
+			if (pMainFrame1 && pGraphBuilder) pMainFrame1->plays2();
+			if (pMediaControl) pMediaControl->Run();
+			m_saisai.EnableWindow(TRUE);
+			playy = 1;
+			ResetPauseButtonUi();
+			REFTIME aa = 0;
+			if (pMediaPosition) pMediaPosition->get_Duration(&aa);
+			aa1 = oggsize2 = aa;
+			aa1_ = 0;
+			m_time.SetRange(0, (int)(aa * 100), TRUE);
+			m_time.SetSelection(0, (int)(aa * 100) - 1);
+			m_time.Invalidate();
+			videoonly = TRUE;
+			fade = 1.0f;
+			endflg = 0;
+			return;
+		}
+	}
+
 	if (mode == -14) {
 		int i;
 		if (ret2 == 43 || ret2 == 45 || ret2 == 46 || ret2 == 47) {
@@ -13956,7 +14094,7 @@ open_mode_vst_midi:
 	ZeroMemory(bufwav3, sizeof(bufwav3));
 	g_oggPcmDecodePos = 0;
 	g_oggRbPrimingNeed = OggRbLatencyReserveBytes();
-	mcnt = mcnt1 = mcnt2 = mcnt3 = mcnt4 = mcnt5 = mcnt6 = 0;
+	mcnt = mcnt1 = mcnt2 = mcnt3 = mcnt4 = mcnt5 = mcnt6 = mcnt7 = 0;
 	char* pdsb;
 	lo = 0; loc = 0;
 
@@ -24966,12 +25104,21 @@ static int BannerCorrMeterReservePx()
 	return savedata.pro_corr_meter ? BANNER_CORR_RESERVE_PX : 0;
 }
 
+// 相違メーターがあるときはその左端まで。無いときはバナー右端まで。
+// スペアナの上は XOR で通過してよい。
+static int BannerTextRightPx()
+{
+	const int bannerRight = MDCP + 5;
+	if (savedata.pro_corr_meter)
+		return bannerRight - BANNER_CORR_RESERVE_PX;
+	return bannerRight;
+}
+
 static void BannerValueLayout(int labelW_px, int& valueX_px, int& viewW_px)
 {
 	valueX_px = labelW_px;
 	if (valueX_px < 0) valueX_px = 0;
-	const int textRight = MDC_TOTAL - BannerCorrMeterReservePx();
-	viewW_px = textRight - valueX_px;
+	viewW_px = BannerTextRightPx() - valueX_px;
 	if (viewW_px < 8 * 4) viewW_px = 8 * 4;
 }
 
@@ -24980,8 +25127,8 @@ static void BannerScrollResetIfLayoutChanged(int rowId, int valueX_px, int viewW
 	int& mcnt_scroll, int& mcnt_wrap)
 {
 	struct LayoutCache { int valueX; int viewW; };
-	static LayoutCache s_cache[3] = { {-1, -1}, {-1, -1}, {-1, -1} };
-	if (rowId < 0 || rowId >= 3) return;
+	static LayoutCache s_cache[4] = { {-1, -1}, {-1, -1}, {-1, -1}, {-1, -1} };
+	if (rowId < 0 || rowId >= 4) return;
 	if (s_cache[rowId].valueX != valueX_px || s_cache[rowId].viewW != viewW_px) {
 		s_cache[rowId].valueX = valueX_px;
 		s_cache[rowId].viewW = viewW_px;
@@ -24990,20 +25137,23 @@ static void BannerScrollResetIfLayoutChanged(int rowId, int valueX_px, int viewW
 	}
 }
 
-// dcsub 上の値テキストをバナーへ BitBlt（SRCINVERT = スペアナ上で XOR 反転）。
-// スクロール開始判定は viewW_px（メーター手前）。
-// 実際の XOR 描画幅はスペアナを含むメーター手前まで（旧 blitW 相当）。メーターには食い込ませない。
+// 黒地は XOR で変化しない。スペアナ色の上では文字が反転して通る。
+static void BannerBlitGlyphs(CDC& dst, CDC& src, int dx, int dy, int w, int h, int sx, int sy)
+{
+	if (w < 1 || h < 1) return;
+	dst.BitBlt(dx, dy, w, h, &src, sx, sy, SRCINVERT);
+}
+
+// スクロール開始と描画幅は同じ。相違メーター手前、無ければバナー右端。
 static void BannerBlitScrollValue(CDC& dst, CDC& src, int valueX_px, int viewW_px,
 	int y_px, int blitH_px, int& mcnt_scroll, int& mcnt_wrap, int si_px)
 {
 	if (viewW_px < 1) return;
-	const int xorRight = (MDCP + 5) - BannerCorrMeterReservePx();
-	int xorW = xorRight - valueX_px;
-	if (xorW < viewW_px) xorW = viewW_px;
+	int xorW = viewW_px;
 	if (xorW < 8 * 4) xorW = 8 * 4;
 
 	if (si_px > viewW_px) {
-		dst.BitBlt(valueX_px, y_px, xorW, blitH_px, &src, mcnt_scroll, 0, SRCINVERT);
+		BannerBlitGlyphs(dst, src, valueX_px, y_px, xorW, blitH_px, mcnt_scroll, 0);
 		// 内部バッファは 4x。+4 ソース px = 等倍 1px。60fps なら 60px/s。
 		const int srcStep = 4;
 		if (si_px - mcnt_scroll < viewW_px) {
@@ -25011,7 +25161,7 @@ static void BannerBlitScrollValue(CDC& dst, CDC& src, int valueX_px, int viewW_p
 			const int x2 = viewW_px - mcnt_wrap + valueX_px;
 			const int w2 = valueX_px + xorW - x2;
 			if (w2 > 0)
-				dst.BitBlt(x2, y_px, w2, blitH_px, &src, 0, 0, SRCINVERT);
+				BannerBlitGlyphs(dst, src, x2, y_px, w2, blitH_px, 0, 0);
 			if (viewW_px - mcnt_wrap <= 0) { mcnt_wrap = 0; mcnt_scroll = 0; }
 		}
 		else {
@@ -25020,8 +25170,7 @@ static void BannerBlitScrollValue(CDC& dst, CDC& src, int valueX_px, int viewW_p
 		mcnt_scroll += srcStep;
 	}
 	else {
-		// 短文でも xorW 分 SRCINVERT（ソースの黒は無変化、文字画素だけスペアナを反転）
-		dst.BitBlt(valueX_px, y_px, xorW, blitH_px, &src, 0, 0, SRCINVERT);
+		BannerBlitGlyphs(dst, src, valueX_px, y_px, xorW, blitH_px, 0, 0);
 	}
 }
 
@@ -25790,7 +25939,7 @@ void COggDlg::timerp()
 
 	OggDispatchChromeMessages();
 
-	// スペアナは不透明で先に描く（ピーク／現在を保持）。バナー文字は後から SRCINVERT（XOR）。
+	// スペアナは不透明で先に描く。バナー文字は後から XOR でバーの上を通す。
 	// Track 中は timerp 自体を止める（メニューアニメ／サブホバー優先）。
 	{
 		extern BOOL MpSsVizIsOpen();
@@ -26032,7 +26181,25 @@ void COggDlg::timerp()
 	else if (mode == 33) s = LL14(L"file:英雄伝説 黎の軌跡", L"file:The Legend of Heroes: Trails through Daybreak", L"file:The Legend of Heroes: Trails through Daybreak", L"file:The Legend of Heroes: Trails through Daybreak", L"file:The Legend of Heroes: Trails through Daybreak", L"file:영웅전설 여의 궤적", L"file:英雄传说 黎之轨迹", L"file:The Legend of Heroes: Trails through Daybreak", L"file:The Legend of Heroes: Trails through Daybreak", L"file:The Legend of Heroes: Trails through Daybreak", L"file:The Legend of Heroes: Trails through Daybreak", L"file:The Legend of Heroes: Trails through Daybreak", L"file:The Legend of Heroes: Trails through Daybreak", L"file:The Legend of Heroes: Trails through Daybreak");
 	else if (mode == 34) s = LL14(L"file:英雄伝説 黎の軌跡Ⅱ", L"file:The Legend of Heroes: Trails through Daybreak II", L"file:The Legend of Heroes: Trails through Daybreak II", L"file:The Legend of Heroes: Trails through Daybreak II", L"file:The Legend of Heroes: Trails through Daybreak II", L"file:영웅전설 여의 궤적 II", L"file:英雄传说 黎之轨迹Ⅱ", L"file:The Legend of Heroes: Trails through Daybreak II", L"file:The Legend of Heroes: Trails through Daybreak II", L"file:The Legend of Heroes: Trails through Daybreak II", L"file:The Legend of Heroes: Trails through Daybreak II", L"file:The Legend of Heroes: Trails through Daybreak II", L"file:The Legend of Heroes: Trails through Daybreak II", L"file:The Legend of Heroes: Trails through Daybreak II");
 	else if (mode == 35) s = LL14(L"file:英雄伝説 界の軌跡", L"file:The Legend of Heroes: Trails beyond the Horizon", L"file:The Legend of Heroes: Trails beyond the Horizon", L"file:The Legend of Heroes: Trails beyond the Horizon", L"file:The Legend of Heroes: Trails beyond the Horizon", L"file:영웅전설 계의 궤적", L"file:英雄传说 界之轨迹", L"file:The Legend of Heroes: Trails beyond the Horizon", L"file:The Legend of Heroes: Trails beyond the Horizon", L"file:The Legend of Heroes: Trails beyond the Horizon", L"file:The Legend of Heroes: Trails beyond the Horizon", L"file:The Legend of Heroes: Trails beyond the Horizon", L"file:The Legend of Heroes: Trails beyond the Horizon", L"file:The Legend of Heroes: Trails beyond the Horizon");
-	moji(s, 1, 16, 0xffffff);
+	{
+		// file: は name と同じマーキー。相違メーターの手前、無ければ右端まで。
+		const int colon = s.Find(_T(':'));
+		const CString fileLabel = (colon >= 0) ? s.Left(colon + 1) : s;
+		const CString fileValue = (colon >= 0) ? s.Mid(colon + 1) : CString();
+		const int fileLabelW = moji(fileLabel, 1, 16, 0xffffff);
+		int fileValueX = 0, fileViewW = 0;
+		BannerValueLayout(fileLabelW, fileValueX, fileViewW);
+		BannerScrollResetIfLayoutChanged(3, fileValueX, fileViewW, mcnt1, mcnt7);
+		int fileSi = mojisub(fileValue, 1, 0, 0xffffff);
+		if (fileSi > fileViewW) {
+			const int bodyW = fileSi;
+			const CString padded = fileValue + _T("　　　");
+			fileSi = mojisub(padded, 1, 0, 0xffffff);
+			if (Ms2DrawDue(ms2))
+				DrawScrollSepDeco(dcsub, 4 + bodyW, 16 * 4, fileSi - bodyW);
+		}
+		BannerBlitScrollValue(dc, dcsub, fileValueX, fileViewW, 16 * 4, 24 * 4, mcnt1, mcnt7, fileSi);
+	}
 	if (tc1 < 50)
 		s.Format(_T("time:%2d:%02d.%02d/%2d:%02d.%02d"), ta1, tb1, tc1, ta, tb, tc);
 	else
@@ -28260,6 +28427,9 @@ void COggDlg::gamenkill()
 		ResumePromptKillQueued();
 		InterlockedExchange(&g_inDougaTeardown, 0);
 	}
+	/* グラフを閉じてから切り出しを消す。プレイリストの fol は pac:: のまま */
+	if (!g_skyMovieCut.IsEmpty() && DeleteFile(g_skyMovieCut))
+		g_skyMovieCut.Empty();
 }
 
 // タイトルバー× / 右クリック「動画画面を閉じる」
@@ -28304,6 +28474,11 @@ void COggDlg::dougaplay(int uu, CString ss)
 			;
 			pMainFrame1->play(4, ss);
 		}
+		break;
+	case 30:
+	case 31:
+		if (!ss.IsEmpty())
+			pMainFrame1->play(0, ss);
 		break;
 	case 1://ED6SC
 		if (uu > 97) {
@@ -30431,7 +30606,7 @@ void COggDlg::OnRestart()
 		// stop() により mode は再生対象アイテム本来のモード(=pc[i].sub)へ復元済みなので、
 		// それを用いてゲーム形式か否かを判定する。
 		const bool isGameMode =
-			(mode >= 1 && mode <= 30) ||
+			(mode >= 1 && mode <= 31) ||
 			mode == -11 || mode == -12 || mode == -13 || mode == -14 || mode == -15;
 		// ネイティブ音声形式は拡張子のみで判定（game形式等からの切り替えも可能に）
 		if (!isGameMode && filen.Right(5).MakeLower() == ".opus") {
@@ -31720,7 +31895,7 @@ int COggDlg::mojiPx(CString s, int x_px, int y, COLORREF rgb)
 	if (!Ms2DrawDue(ms2))
 		return szinfo.cx;
 
-	// スペアナ（不透明）の上に載せるため SRCINVERT。黒地に色文字→BitBlt XOR。
+	// スペアナの上は XOR。黒地に色文字→BitBlt で反転。
 	const int th = 24 * 4;
 	const int tw = szinfo.cx + 8;
 	fo = (HFONT)SelectObject(dcsub, hFont);

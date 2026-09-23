@@ -8511,6 +8511,166 @@ void CPlayList::Fol(CString fname)
 						f.Close();
 					}
 				}
+				else if (ft.GetLength() >= 8 && ft.Left(5).CompareNoCase(L"movie") == 0 && ft.Right(4).CompareNoCase(L".pac") == 0
+					&& (fname.Find(L"Trails in the Sky 1st Chapter") > 0 || fname.Find(L"Trails in the Sky 2nd Chapter") > 0)) {
+					/* 落とした1本だけでなく、同じフォルダの movie*.pac（_en/_ko 等）も全部載せる */
+					const int sky2 = fname.Find(L"Trails in the Sky 2nd Chapter") > 0;
+					CString pacDir = fname;
+					{
+						const int sl = pacDir.ReverseFind(L'\\');
+						if (sl >= 0) pacDir = pacDir.Left(sl);
+					}
+					CString pacs[16];
+					int npac = 0;
+					{
+						CFileFind finder;
+						BOOL more = finder.FindFile(pacDir + L"\\movie*.pac");
+						while (more && npac < 16) {
+							more = finder.FindNextFile();
+							if (finder.IsDots() || finder.IsDirectory()) continue;
+							CString bnL = finder.GetFileName();
+							bnL.MakeLower();
+							if (bnL.Left(5) != L"movie" || bnL.Right(4) != L".pac") continue;
+							pacs[npac++] = finder.GetFilePath();
+						}
+						finder.Close();
+					}
+					if (npac == 0) pacs[npac++] = fname;
+					for (int a = 0; a < npac; a++) {
+						for (int b = a + 1; b < npac; b++) {
+							if (pacs[b].CompareNoCase(pacs[a]) < 0) {
+								CString ts = pacs[a]; pacs[a] = pacs[b]; pacs[b] = ts;
+							}
+						}
+					}
+					for (int ip = 0; ip < npac; ip++) {
+					const CString pacPath = pacs[ip];
+					CString pacFt = pacPath;
+					{
+						const int sl = pacFt.ReverseFind(L'\\');
+						if (sl >= 0) pacFt = pacFt.Mid(sl + 1);
+					}
+					{
+						int listed = 0;
+						const CString pref = pacPath + L"::";
+						if (pc) {
+							for (int i = 0; i < playcnt; i++) {
+								if ((pc[i].sub == 30 || pc[i].sub == 31)
+									&& _tcsnicmp(pc[i].fol, pref, pref.GetLength()) == 0) {
+									listed = 1;
+									break;
+								}
+							}
+						}
+						if (listed) continue;
+					}
+					CFile f;
+					if (f.Open(pacPath, CFile::modeRead | CFile::typeBinary | CFile::shareDenyWrite, NULL)) {
+						const ULONGLONG fsz = f.GetLength();
+						CString ents[48];
+						int pris[48];
+						int nvid = 0;
+						f.Seek(16, CFile::begin);
+						for (int n = 0; n < 64 && nvid < 48; n++) {
+							const ULONGLONG rec = f.GetPosition();
+							ULONGLONG hash = 0, nameOff = 0, sz = 0, off = 0;
+							if (f.Read(&hash, 8) != 8 || f.Read(&nameOff, 8) != 8
+								|| f.Read(&sz, 8) != 8 || f.Read(&off, 8) != 8)
+								break;
+							(void)hash;
+							if (nameOff < rec || nameOff + 4 >= fsz || off >= fsz || sz == 0 || off + sz > fsz)
+								break;
+							char nb[300];
+							ZeroMemory(nb, sizeof(nb));
+							f.Seek(nameOff, CFile::begin);
+							f.Read(nb, 260);
+							int okch = 1, hasDot = 0;
+							for (int k = 0; nb[k] && k < 260; k++) {
+								if (nb[k] == '.') hasDot = 1;
+								if ((unsigned char)nb[k] < 32 || (unsigned char)nb[k] >= 127) { okch = 0; break; }
+							}
+							if (!okch || !hasDot)
+								break;
+							CString ent = CString(nb);
+							ent.Replace(L"\\", L"/");
+							CString low = ent;
+							low.MakeLower();
+							const int vid = (low.Right(5) == L".webm" || low.Right(4) == L".mp4"
+								|| low.Right(4) == L".mkv" || low.Right(4) == L".mov" || low.Right(4) == L".avi");
+							if (vid) {
+								f.Seek(off, CFile::begin);
+								unsigned char mag[8];
+								ZeroMemory(mag, sizeof(mag));
+								f.Read(mag, 8);
+								const int plain = (mag[0] == 0x1A && mag[1] == 0x45 && mag[2] == 0xDF && mag[3] == 0xA3)
+									|| (mag[4] == 'f' && mag[5] == 't' && mag[6] == 'y' && mag[7] == 'p');
+								if (plain) {
+									CString stem = ent;
+									int sl = stem.ReverseFind(L'/');
+									if (sl >= 0) stem = stem.Mid(sl + 1);
+									int dot = stem.ReverseFind(L'.');
+									if (dot > 0) stem = stem.Left(dot);
+									CString stemLow = stem;
+									stemLow.MakeLower();
+									int pri = 5;
+									if (stemLow.Right(3) == L"_op") pri = 0;
+									else if (stemLow.Find(L"_ed") >= 0) pri = 1;
+									else if (stemLow.Find(L"digest") >= 0) pri = 2;
+									else if (stemLow.Find(L"_ev_") >= 0) pri = 3;
+									else if (stemLow.Find(L"logo") >= 0) pri = 4;
+									CString kind;
+									if (pri == 0) kind = LL14(L"オープニング", L"Opening", L"Ouverture", L"Apertura", L"Apertura", L"오프닝", L"片头", L"افتتاحية", L"Опенинг", L"Vorspann", L"Abertura", L"Opening", L"Czołówka", L"Açılış");
+									else if (pri == 1) kind = LL14(L"エンディング", L"Ending", L"Fin", L"Finale", L"Final", L"엔딩", L"片尾", L"النهاية", L"Эндинг", L"Abspann", L"Encerramento", L"Eind", L"Zakończenie", L"Kapanış");
+									else if (pri == 2) kind = LL14(L"ダイジェスト", L"Digest", L"Résumé", L"Riassunto", L"Resumen", L"다이제스트", L"精华", L"ملخص", L"Дайджест", L"Zusammenfassung", L"Resumo", L"Samenvatting", L"Skrót", L"Özet");
+									else if (pri == 3) kind = LL14(L"イベント", L"Event", L"Événement", L"Evento", L"Evento", L"이벤트", L"事件", L"حدث", L"Событие", L"Ereignis", L"Evento", L"Gebeurtenis", L"Wydarzenie", L"Etkinlik");
+									else if (pri == 4) kind = LL14(L"ロゴ", L"Logo", L"Logo", L"Logo", L"Logo", L"로고", L"标志", L"شعار", L"Логотип", L"Logo", L"Logo", L"Logo", L"Logo", L"Logo");
+									CString title = kind.IsEmpty() ? stem : (kind + L" " + stem);
+									/* movie_en 等の ed / ed2 も上の pri==1 でエンディング。言語だけ足す */
+									CString ftLow = pacFt;
+									ftLow.MakeLower();
+									if (ftLow.Left(6) == L"movie_") {
+										CString lang = ftLow.Mid(6);
+										lang = lang.Left(lang.GetLength() - 4);
+										title += L"(" + lang + L")";
+									}
+									ents[nvid] = title + L"\n" + ent;
+									pris[nvid] = pri;
+									nvid++;
+								}
+							}
+							f.Seek(rec + 32, CFile::begin);
+						}
+						f.Close();
+						for (int a = 0; a < nvid; a++) {
+							for (int b = a + 1; b < nvid; b++) {
+								if (pris[b] < pris[a] || (pris[b] == pris[a] && ents[b] < ents[a])) {
+									int tp = pris[a]; pris[a] = pris[b]; pris[b] = tp;
+									CString ts = ents[a]; ents[a] = ents[b]; ents[b] = ts;
+								}
+							}
+						}
+						p.sub = sky2 ? 31 : 30;
+						p.loop1 = p.loop2 = 0;
+						_tcsncpy_s(p.art, sky2
+							? LL14(L"空の軌跡 The 2nd", L"Trails in the Sky The 2nd", L"Les Sentiers du Ciel The 2nd", L"Trails in the Sky The 2nd", L"Trails in the Sky The 2nd", L"하늘의 궤적 The 2nd", L"空之轨迹 The 2nd", L"Trails in the Sky The 2nd", L"Тропы в Небе The 2nd", L"Himmelsleitern The 2nd", L"Trails in the Sky The 2nd", L"Trails in the Sky The 2nd", L"Trails in the Sky The 2nd", L"Trails in the Sky The 2nd")
+							: LL14(L"空の軌跡 The 1st", L"Trails in the Sky The 1st", L"Les Sentiers du Ciel The 1st", L"Trails in the Sky The 1st", L"Trails in the Sky The 1st", L"하늘의 궤적 The 1st", L"空之轨迹 The 1st", L"Trails in the Sky The 1st", L"Тропы в Небе The 1st", L"Himmelsleitern The 1st", L"Trails in the Sky The 1st", L"Trails in the Sky The 1st", L"Trails in the Sky The 1st", L"Trails in the Sky The 1st"),
+							_TRUNCATE);
+						CString alb;
+						alb.Format(LL14(L"動画 %s", L"Movie %s", L"Vidéo %s", L"Video %s", L"Vídeo %s", L"동영상 %s", L"视频 %s", L"فيديو %s", L"Видео %s", L"Video %s", L"Vídeo %s", L"Video %s", L"Wideo %s", L"Video %s"), (LPCTSTR)pacFt);
+						_tcsncpy_s(p.alb, alb, _TRUNCATE);
+						for (int i = 0; i < nvid; i++) {
+							int nl = ents[i].Find(L"\n");
+							CString title = ents[i].Left(nl);
+							CString ent = ents[i].Mid(nl + 1);
+							_tcsncpy_s(p.name, title, _TRUNCATE);
+							CString fol = pacPath + L"::" + ent;
+							_tcsncpy_s(p.fol, fol, _TRUNCATE);
+							if (syo == 0) { syo = 1; syos = p.fol; modesub = p.sub; fnn = p.name; syomode = p.sub; }
+							Add(p.name, p.sub, p.loop1, p.loop2, p.art, p.alb, p.fol, 0, 0);
+						}
+					}
+					}
+				}
 				else if (ft.Right(5) == ".opus") {
 					p.sub = -6; p.loop1 = p.loop2 = 0;
 					CString a = fname.Right(fname.GetLength() - fname.ReverseFind('\\') - 1);

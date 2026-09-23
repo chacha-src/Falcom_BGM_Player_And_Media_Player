@@ -6969,7 +6969,9 @@ void CSoft3DMazeDlg::RenderScene()
 				float u=(ph-hang)/(splashAt-hang);
 				float fall=u*u;
 				float y=yTop+(yBot-yTop)*fall;
-				emitTeardrop(px+m_windX*u*0.05f,y,pz+m_windZ*u*0.05f,sc*(0.95f+0.12f*u),rr,gg,bb,0.90f);
+				const float scFall=sc*(1.35f+0.35f*u);
+				emitTeardrop(px+m_windX*u*0.05f,y,pz+m_windZ*u*0.05f,scFall,rr,gg,bb,0.95f);
+				emitStreak(px,y+scFall*1.6f,pz,y-scFall*2.4f,.012f,rr,gg,bb,0.72f);
 			}else{
 				float s=(ph-splashAt)/(1.f-splashAt);
 				if(mirror){
@@ -7099,14 +7101,14 @@ void CSoft3DMazeDlg::RenderScene()
 					float yTop=wallH-.02f;
 					float yBot=passH+.03f;
 					if(thFx==1){
-						emitDropCycle(px,pz,yTop,yBot,ph,.026f,.55f,.88f,.96f,onMirror,seed+k*17);
+						emitDropCycle(px,pz,yTop,yBot,ph,.055f,.55f,.88f,.96f,onMirror,seed+k*17);
 					}else if(thFx==2){
-						emitDropCycle(px,pz,yTop,yBot,ph,.022f,.72f,.74f,.52f,onMirror,seed+k*17);
+						emitDropCycle(px,pz,yTop,yBot,ph,.048f,.72f,.74f,.52f,onMirror,seed+k*17);
 						if(((seed+k)&5)==0)
 							emitBill(px,yTop-ph*wallH*.25f,pz,.035f,.02f,.6f,.62f,.58f,.2f*(1.f-ph));
 					}else{
 						float flicker=.65f+.35f*sinf(m_anim*11.f+seed+k);
-						emitDropCycle(px,pz,yTop,yBot,ph,.020f,1.f,.42f*flicker,.12f,onMirror,seed+k*17);
+						emitDropCycle(px,pz,yTop,yBot,ph,.042f,1.f,.42f*flicker,.12f,onMirror,seed+k*17);
 					}
 					nEmit++;
 				}

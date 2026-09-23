@@ -5366,6 +5366,13 @@ void CDouga::play(int u, CString str)
 {
 	u1=u;
 	CString s0;
+	/* mode 30/31 の動画は filen（pac::名前）のまま。実体パスだけ str で渡す */
+	if ((mode == 30 || mode == 31) && str.GetLength() > 0) {
+		TCHAR* s = str.GetBuffer();
+		plays(s);
+		str.ReleaseBuffer();
+		return;
+	}
 	if(mode==-2){
 		TCHAR *s;
 //		s = new TCHAR [filen.GetLength()+1];
@@ -6598,7 +6605,11 @@ void CDouga::stops()
 
 void CDouga::stop()
 {
-	if(mode==-2) stops();
+	/* mode 30/31 は play(0) で u1 が 0。下の u1 分岐に入らずグラフが残る。
+	   窓だけ消えて前の動画の音が続き、同じ切り出しファイルを掴んだまま次が開けない。
+	   次曲の Get で mode が変わった後でも、グラフが残っていればここで止める。 */
+	if (mode == -2 || mode == 30 || mode == 31 || pGraphBuilder || pMediaControl)
+		stops();
 	if(u1!=0)
 	{
 		if (mode == -1) {//ED6SC

@@ -1,4 +1,4 @@
-﻿cbuffer FrameCB : register(b0)
+cbuffer FrameCB : register(b0)
 {
 	float2 Screen;
 	float2 InvScreen;

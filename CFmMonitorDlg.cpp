@@ -2279,10 +2279,23 @@ static void FmDrawKnob(CDC& dc, int cx, int cy, int r, int val, int vmax, const 
 	dc.Ellipse(cx - r, cy - r, cx + r + 1, cy + r + 1);
 	dc.SelectObject(oldBr);
 
-	const double a0 = 3.1415926535 * 0.75;
-	const double a1 = 3.1415926535 * 2.25;
-	const double t = (double)val / (double)vmax;
-	const double ang = a0 + (a1 - a0) * t;
+	/* 最小=左下、中央値=真上、最大=右下。旧式は中央が真下だった。 */
+	double t = (double)val / (double)vmax;
+	double ang;
+	if (name && wcscmp(name, L"PAN") == 0 && vmax <= 3) {
+		/* 0=無し 1=左 2=右 3=左右(中央)。中央は頂辺。 */
+		if (val == 1) t = 0.0;
+		else if (val == 2) t = 1.0;
+		else if (val == 3) t = 0.5;
+		else t = -1.0;
+	}
+	if (t < 0.0) {
+		ang = -3.1415926535 * 0.5; /* パン無しは真下 */
+	} else {
+		const double a0 = 3.1415926535 * 1.25;
+		const double sweep = -3.1415926535 * 1.5;
+		ang = a0 + sweep * t;
+	}
 	const int x1 = cx + (int)(cos(ang) * (r - 2));
 	const int y1 = cy - (int)(sin(ang) * (r - 2));
 	CPen needle(PS_SOLID, (std::max)(1, r / 5), RGB(255, 255, 255));

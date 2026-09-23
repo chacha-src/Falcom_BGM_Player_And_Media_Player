@@ -1510,6 +1510,7 @@ public:
         m_bAeroMode = b;
         if (GetSafeHwnd()) Invalidate();
     }
+    void PresentAcrylicPlate();
 
 protected:
     virtual void PreSubclassWindow();

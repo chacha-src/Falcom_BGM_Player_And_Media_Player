@@ -842,7 +842,14 @@ CString COSVersion::GetVersionString()
 	}
 
 	::FreeLibrary(hModule);
-	s.Format(_T("%s %s %s"), ss, in.szCSDVersion, IsWow64() ? _T("64bit") : _T("32bit"));
+	/* IsWow64 は 32bit プロセスが 64bit OS 上のときだけ TRUE。
+	   本体が x64 だと FALSE になり「32bit」と出るので、動いているプロセスの幅で書く。 */
+#if defined(_WIN64)
+	const TCHAR* procBits = _T("64bit");
+#else
+	const TCHAR* procBits = _T("32bit");
+#endif
+	s.Format(_T("%s %s %s"), ss, in.szCSDVersion, procBits);
 	return s;
 }
 

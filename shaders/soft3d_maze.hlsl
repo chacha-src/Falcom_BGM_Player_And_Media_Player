@@ -1,4 +1,4 @@
-﻿// Soft3D Maze HLSL
+// Soft3D Maze HLSL
 // fxc: shaders\compile_shaders.cmd → res\cso\
 // 実行時は埋め込み CSO を読む（無ければこのファイルから D3DCompile）
 
@@ -180,7 +180,11 @@ c.rgb+=(th<.5?float3(1,.93,.7):float3(.5,.72,1))*rays*(th<.5?.3:.18);
 if(th<.5){float rain=fx.g*smoothstep(.18,.95,1.-z)*smoothstep(.78,.12,i.uv.y);c.rgb=lerp(c.rgb,float3(.7,.82,.96),rain*.12);
 c.rgb+=float3(.82,.9,1)*fx.g*fx.b*.1;float2 st=i.uv+float2(.0015,-frac(Misc.w*1.55+i.uv.x*18.)*.04)+Wind.xz*.002;
 c.rgb+=FxMap.Sample(SL,st).g*float3(.68,.8,.95)*smoothstep(.25,1.,1.-z)*smoothstep(.7,.1,i.uv.y)*.08;}
-else{float bead=pow(saturate(fx.r*fx.b),4.)*smoothstep(.15,.85,1.-z);c.rgb+=float3(.65,.88,.95)*bead*.05;}
+else{float bead=pow(saturate(fx.r*fx.b),4.)*smoothstep(.15,.85,1.-z);c.rgb+=float3(.65,.88,.95)*bead*.22;
+float2 ds=i.uv+float2(.0012,-frac(Misc.w*1.35+i.uv.x*16.)*.06);
+float drip=max(fx.r,FxMap.Sample(SL,ds).r)*smoothstep(.2,.95,1.-z)*smoothstep(.82,.08,i.uv.y);
+c.rgb=lerp(c.rgb,float3(.62,.86,.98),saturate(drip)*0.55);
+c.rgb+=float3(.78,.92,1.)*drip*.35;}
 float3 bl=T0.Sample(SL,i.uv+Screen.zw*6.).rgb+T0.Sample(SL,i.uv-Screen.zw*6.).rgb;
 float lum=dot(c.rgb,float3(.3,.5,.2));c.rgb=lerp(c.rgb,max(c.rgb,bl*.42),saturate(lum-.55)*.2);
 return float4(c.rgb,1);}

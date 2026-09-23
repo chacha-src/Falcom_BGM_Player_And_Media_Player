@@ -4690,9 +4690,8 @@ static BlockAnalysis AnalyzeBlock(
 	ba.isChiptune = (ba.crestFactor < 3.5f && ba.peak > 0.04f);
 	ba.isVoice = (ba.crestFactor > 9.0f && ba.peak > 0.02f);
 
-	// [FIX-COMP] stageTarget 緩和: 通常音楽はほぼ無処理
-	// ProfessionalSoftSaturate(knee=0.78) が最終保護を担う
-	const float stageTarget = ba.isChiptune ? 0.82f : 0.90f;
+	// 音割れ寸前だけ。0.90 だとピーク 0.9 超の普通の曲まで常時コンプされる。
+	const float stageTarget = ba.isChiptune ? 0.98f : 0.995f;
 
 	float postGainPeak = ba.peak * masterGain;
 	if (postGainPeak > stageTarget && postGainPeak > 0.001f)
@@ -5374,7 +5373,7 @@ static void ApplyLookaheadLimiterStereo(float* L, float* R, int n, int rate, flo
 	for (int k = 0; k <= La && k < n; ++k) pushBack(k);
 
 	const float atkCoeff = expf(-1.0f / (0.0003f * (float)rate)); // ~0.3ms (La内で収束)
-	const float relCoeff = expf(-1.0f / (0.080f * (float)rate));  // ~80ms
+	const float relCoeff = expf(-1.0f / (0.012f * (float)rate));  // ~12ms。ピーク以外を引きずらない
 
 	for (int i = 0; i < n; ++i) {
 		const float laMin = req[dq[dqHead]];      // [i, i+La] の最小必要ゲイン
@@ -6609,7 +6608,8 @@ static void equaliserBankUnlocked(void* data, int len, BOOL reset) {
 				rightSamples[i] *= extBoostGain;
 			}
 		}
-		ApplyLookaheadLimiterStereo(leftSamples, rightSamples, bufferIndex, wavbitbackup, 0.97f);
+		/* 0.97 は普通のマスターでも常時かかる。フルスケール直前だけ掴む。 */
+		ApplyLookaheadLimiterStereo(leftSamples, rightSamples, bufferIndex, wavbitbackup, 0.998f);
 	}
 
 	// ===== 最終出力: float → 整数PCM 書き戻し =====
