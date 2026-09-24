@@ -3288,6 +3288,15 @@ int CPlayList::ShowTrackContextMenu(CPoint pt, CWnd* pOwner)
 				L"Abre detalles de la seleccion (ruta, duracion, etiquetas…)", L"선택 곡의 경로·시간·태그 등 상세 정보 대화상자를 엽니다", L"打开所选曲目的详细信息（路径、时长、标签等）", L"يفتح تفاصيل التحديد (المسار والمدة والوسوم…)",
 				L"Открывает сведения о выборе (путь, длительность, теги…)", L"Oeffnet Details zur Auswahl (Pfad, Dauer, Tags usw.)", L"Abre detalhes da selecao (caminho, duracao, tags…)", L"Opent details van de selectie (pad, duur, tags…)",
 				L"Otwiera szczegoly zaznaczenia (sciezka, czas, tagi…)", L"Secimin ayrintilarini acar (yol, sure, etiket…)"));
+	menu.AddCommand(PL_CTX_DEL,
+			LL14(L"削除", L"Delete", L"Supprimer", L"Elimina",
+				L"Eliminar", L"삭제", L"删除", L"حذف",
+				L"Удалить", L"Löschen", L"Excluir", L"Verwijderen",
+				L"Usuń", L"Sil"),
+			LL14(L"一覧から選択曲を削除（ファイルは残る）", L"Remove selection from list (files kept)", L"Retirer de la liste", L"Rimuovi dall'elenco",
+				L"Quitar de la lista", L"목록에서 선택 곡 삭제(파일 유지)", L"从列表删除所选（保留文件）", L"إزالة من القائمة",
+				L"Удалить из списка", L"Aus Liste entfernen", L"Remover da lista", L"Uit lijst verwijderen",
+				L"Usun z listy", L"Listeden kaldir (dosya kalir)"));
 	menu.AddSeparator();
 	CCustomPopupMenu* subEdit = menu.AddSubMenu(
 		LL14(L"編集", L"Edit", L"Edition", L"Modifica",

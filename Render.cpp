@@ -2268,28 +2268,15 @@ void CRender::OnTimer(UINT_PTR nIDEvent)
 	// TODO: ここにメッセージ ハンドラー コードを追加するか、既定の処理を呼び出します。
 	if (nIDEvent == 7000) {
 		KillTimer(7000);
-		/* CRender は色キーのレイヤ窓で、その子にすると一覧が背面か透明のまま出ない。
-		   本体をオーナーにし、一覧を出している間は CRender と背面画像を隠す。 */
-		const BOOL renderVis = IsWindowVisible() ? TRUE : FALSE;
-		const BOOL baseVis = (renderbase && renderbase->GetSafeHwnd() && renderbase->IsWindowVisible()) ? TRUE : FALSE;
-		if (baseVis)
-			renderbase->ShowWindow(SW_HIDE);
-		if (renderVis)
-			ShowWindow(SW_HIDE);
-		CWnd* owner = GetParent();
-		if (!owner || !owner->GetSafeHwnd())
-			owner = AfxGetMainWnd();
-		CKpilist k(owner);
+		/* CRender を隠すとネストモーダルが操作不能になる。
+		   オーナーを CRender のまま一覧を前面に出す。 */
+		CKpilist k(this);
 		k.status = 0;
 		k.DoModal();
-		if (renderVis) {
-			ShowWindow(SW_SHOW);
+		if (GetSafeHwnd())
 			::SetWindowPos(m_hWnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
-		}
-		if (baseVis && renderbase && renderbase->GetSafeHwnd()) {
-			renderbase->ShowWindow(SW_SHOW);
+		if (renderbase && renderbase->GetSafeHwnd())
 			::SetWindowPos(renderbase->m_hWnd, m_hWnd, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-		}
 		return;
 	}
 	savedata.ms = m_ms.GetPos();

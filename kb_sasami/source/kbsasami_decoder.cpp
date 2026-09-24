@@ -383,7 +383,9 @@ DWORD __fastcall KbSasamiDecoder::Open(const KPI_MEDIAINFO* cpRequest, IKpiFile*
 		m_MediaInfo.dwChannels = 2;
 		m_MediaInfo.nBitsPerSample = 16;
 		m_MediaInfo.dwSeekableFlags = KPI_MEDIAINFO::SEEK_FLAGS_SAMPLE;
-		m_MediaInfo.dwUnitSample = m_MediaInfo.dwSampleRate / 100;
+		/* 0 = ホストが任意サイズで Render してよい。rate/100 だと
+		   KPI 規約上は 10ms 固定になり、本体の 4ms スライスと食い違う。 */
+		m_MediaInfo.dwUnitSample = 0;
 		{
 			const UINT64 samples = m_fm.TotalSamples();
 			const DWORD sr = m_MediaInfo.dwSampleRate;

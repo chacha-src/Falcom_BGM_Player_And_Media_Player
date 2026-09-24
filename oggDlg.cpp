@@ -21450,6 +21450,11 @@ int readkpi(BYTE* bw, int cnt)
 								s_kpiSliceDec = kpidec;
 								s_kpiSliceWhole = 0;
 							}
+							/* FPY は 4ms ずつ Render すると Tick/PCM の受け渡しが
+							   細切れになり、短時間に同じ発音が連打される。
+							   MPY(midisynth) は同じスライスでも問題ない。 */
+							if (sss == "fpy" || sss == "fpy2")
+								s_kpiSliceWhole = 1;
 							DWORD slice = requestSamples;
 							if (!s_kpiSliceWhole && requestSamples > 0) {
 								slice = ((wavbit_sample_Hz > 0) ? (DWORD)wavbit_sample_Hz : 44100u) / 250u;

@@ -235,6 +235,10 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 	SasamiFmMonDump* dumpLiveView;
 	SasamiFmMonRing* dumpRingView;
 	int dumpRingReady;
+	enum { MIX_FRAMES = 8192 };
+	int16_t mixBuf[MIX_FRAMES * 2];
+	uint32_t mixHave;
+	uint32_t mixPos;
 
 	Impl() : chip(*this), playFmMode(2)
 	{
@@ -284,6 +288,8 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 		dumpLiveView = NULL;
 		dumpRingView = NULL;
 		dumpRingReady = 0;
+		mixHave = 0;
+		mixPos = 0;
 		chCount = 6;
 		fm10 = 0;
 		measureLen = 0;
@@ -646,41 +652,17 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 		strncpy_s(d.titleSjis, song.titleSjis, _TRUNCATE);
 		wcsncpy_s(d.sourcePath, dumpSrc, _TRUNCATE);
 
-		wchar_t dir[MAX_PATH];
-		EnsureDumpDir(dir, MAX_PATH);
-		/* live/ring は inode を作り直さない。slot を書いてから gen を公開する */
-		OpenDumpRing();
-		OpenDumpLive();
+		/* 音声スレッドでは mmap だけ。WriteFile / CreateDirectory は欠落や Seek の原因 */
+		if (!dumpRingView)
+			OpenDumpRing();
+		if (!dumpLiveView)
+			OpenDumpLive();
 		if (dumpRingView) {
 			if (dumpRingView->gen > dumpRingGen)
 				dumpRingGen = dumpRingView->gen;
 			SasamiFmMonPublishDump(dumpRingView, &dumpRingGen, dumpLiveView, &d);
-		} else {
-			HANDLE hl = dumpLiveH;
-			if (hl != INVALID_HANDLE_VALUE) {
-				DWORD wr = 0;
-				SetFilePointer(hl, 0, NULL, FILE_BEGIN);
-				WriteFile(hl, &d, sizeof(d), &wr, NULL);
-			}
-			dumpRingGen++;
-			HANDLE h = dumpRingH;
-			if (h != INVALID_HANDLE_VALUE) {
-				DWORD wr = 0;
-				LARGE_INTEGER off;
-				const uint32_t idx = (dumpRingGen - 1u) % SASAMI_FMMON_RING;
-				off.QuadPart = (LONGLONG)offsetof(SasamiFmMonRing, slot)
-					+ (LONGLONG)idx * (LONGLONG)sizeof(SasamiFmMonDump);
-				SetFilePointerEx(h, off, NULL, FILE_BEGIN);
-				WriteFile(h, &d, sizeof(d), &wr, NULL);
-				SasamiFmMonRingHdr hdr;
-				memset(&hdr, 0, sizeof(hdr));
-				hdr.magic[0] = 'O'; hdr.magic[1] = 'P'; hdr.magic[2] = 'N'; hdr.magic[3] = 'R';
-				hdr.version = SASAMI_FMMON_RING_VERSION;
-				hdr.gen = dumpRingGen;
-				off.QuadPart = 0;
-				SetFilePointerEx(h, off, NULL, FILE_BEGIN);
-				WriteFile(h, &hdr, sizeof(hdr), &wr, NULL);
-			}
+		} else if (dumpLiveView) {
+			memcpy(dumpLiveView, &d, sizeof(d));
 		}
 		if (dumpSrc[0] && wcscmp(dumpNamedDone, dumpSrc) != 0) {
 			const wchar_t* name = dumpSrc;
@@ -691,6 +673,8 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 			wchar_t* dot = wcsrchr(stem, L'.');
 			if (dot && dot != stem) *dot = 0;
 			if (stem[0]) {
+				wchar_t dir[MAX_PATH];
+				EnsureDumpDir(dir, MAX_PATH);
 				wchar_t named[MAX_PATH];
 				_snwprintf_s(named, _TRUNCATE, L"%s\\%s.opna", dir, stem);
 				WriteDumpFile(named, d);
@@ -1317,14 +1301,30 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 
 	void ChipSample()
 	{
-		ymfm::ym2608::output_data o;
-		chip.generate(&o, 1);
-		const int n = (int)ymfm::ym2608::OUTPUTS;
-		const int32_t a = o.data[0];
-		const int32_t b = o.data[1 % n];
-		const int32_t c = o.data[2 % n]; /* MixTo1 SSG（ノイズ含む） */
-		curL = a + c;
-		curR = b + c;
+		int64_t sl = 0, sr = 0;
+		ChipSampleN(1, &sl, &sr);
+		curL = (int32_t)sl;
+		curR = (int32_t)sr;
+	}
+
+	void ChipSampleN(int n, int64_t* sumL, int64_t* sumR)
+	{
+		if (n <= 0 || !sumL || !sumR) return;
+		enum { N = 32 };
+		ymfm::ym2608::output_data tmp[N];
+		const int nout = (int)ymfm::ym2608::OUTPUTS;
+		while (n > 0) {
+			const int k = (n < N) ? n : N;
+			chip.generate(tmp, (uint32_t)k);
+			for (int i = 0; i < k; i++) {
+				const int32_t a = tmp[i].data[0];
+				const int32_t b = tmp[i].data[1 % nout];
+				const int32_t c = tmp[i].data[2 % nout];
+				*sumL += a + c;
+				*sumR += b + c;
+			}
+			n -= k;
+		}
 	}
 
 	void BeepAdvanceTdm()
@@ -1368,18 +1368,18 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 			return;
 		}
 		/* 間引きだけだと SSG ノイズ LFSR がエイリアスしてボソボソになる。
-		   1 host sample 分の chip 出力を平均してから出す。 */
-		int64_t sumL = 0, sumR = 0;
+		   1 host sample 分の chip 出力を平均してから出す。
+		   generate(1) を22回回すと音声スレッドが遅れ、ホストの KPI リングが
+		   ゼロ埋めして極短無音が連続する。必要数をまとめて generate する。 */
 		int nGen = 0;
 		chipAcc += (int64_t)chipRate;
 		while (chipAcc >= (int64_t)hostRate) {
 			chipAcc -= (int64_t)hostRate;
-			ChipSample();
-			sumL += curL;
-			sumR += curR;
 			nGen++;
 		}
 		if (nGen > 0) {
+			int64_t sumL = 0, sumR = 0;
+			ChipSampleN(nGen, &sumL, &sumR);
 			curL = (int32_t)(sumL / nGen);
 			curR = (int32_t)(sumR / nGen);
 		}
@@ -1471,6 +1471,8 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 		ticksPlayed = 0;
 		tickCarry = 0;
 		samplesLeftInTick = 0;
+		mixHave = 0;
+		mixPos = 0;
 		chipAcc = 0;
 		for (int ch = 0; ch < 12; ch++) {
 			waitb[ch] = 0;
@@ -1732,85 +1734,98 @@ int SasamiFmPlayer::PlayFmMode() const
 uint32_t SasamiFmPlayer::Render(int16_t* interleavedStereo, uint32_t frames)
 {
 	std::lock_guard<std::mutex> lk(m_lock);
-	return RenderUnlocked(interleavedStereo, frames);
+	if (!m || !interleavedStereo || frames == 0) return 0;
+	if (m->eofSent && m->mixPos >= m->mixHave) return 0;
+
+	/* MPY と同じく大きめの内部バッファで生成し、ホストへは要求分だけ渡す。
+	   4ms ずつ Tick/key-on すると短時間に同じ発音が連打される。 */
+	uint32_t out = 0;
+	while (out < frames) {
+		if (m->mixPos >= m->mixHave) {
+			if (m->eofSent) break;
+			const uint32_t n = RenderUnlocked(m->mixBuf, (uint32_t)Impl::MIX_FRAMES);
+			m->mixHave = n;
+			m->mixPos = 0;
+			if (n == 0) {
+				m->eofSent = 1;
+				break;
+			}
+			if (m->dumpEnable && !m->dumpMute)
+				m->FlushDump(m_curSample);
+		}
+		uint32_t take = m->mixHave - m->mixPos;
+		if (take > frames - out) take = frames - out;
+		memcpy(interleavedStereo + out * 2, m->mixBuf + m->mixPos * 2,
+			(size_t)take * 2 * sizeof(int16_t));
+		m->mixPos += take;
+		out += take;
+	}
+	if (out < frames)
+		memset(interleavedStereo + out * 2, 0, (size_t)(frames - out) * 2 * sizeof(int16_t));
+	/* MPY と同じく要求フレーム数を返す。短読みは本体が Seek(0) しやすい。 */
+	return out ? frames : 0;
 }
 
-	uint32_t SasamiFmPlayer::RenderUnlocked(int16_t* interleavedStereo, uint32_t frames)
+uint32_t SasamiFmPlayer::RenderUnlocked(int16_t* interleavedStereo, uint32_t frames)
 {
 	if (!m || !interleavedStereo || frames == 0) return 0;
 	if (m->eofSent) return 0;
-	/* CEmu と同じ約4ms。tick 長（T/kTickDen の 15/16）で出すと8分が等分に見えない */
-	uint32_t slice = m->hostRate / 250u;
-	if (slice < 64) slice = 64;
 
-	uint32_t total = 0;
-	while (total < frames) {
-		if (m->eofSent) break;
-		uint32_t want = frames - total;
-		if (m->dumpEnable && !m->dumpMute && want > slice)
-			want = slice;
-		int16_t* dst = interleavedStereo + total * 2;
-		uint32_t out = 0;
-		while (out < want) {
-			if (m->samplesLeftInTick == 0) {
-				const int misaoDone = !m->misaoActive || m->misao.Ended();
-				if (m->ended && misaoDone) {
-					memset(dst + out * 2, 0, (size_t)(want - out) * 2 * sizeof(int16_t));
-					out = want;
-					m->eofSent = 1;
-					break;
-				}
-				if (m->ended && !misaoDone) {
-					m->tickCarry += (uint64_t)m->hostRate * m->T;
-					const uint32_t sl = (uint32_t)(m->tickCarry / kTickDen);
-					m->tickCarry %= kTickDen;
-					if (m->misaoActive) m->misao.TickOnce();
-					m->samplesLeftInTick = sl ? sl : 1;
-					continue;
-				}
-				m->tickCarry += (uint64_t)m->hostRate * m->T;
-				const uint32_t sl = (uint32_t)(m->tickCarry / kTickDen);
-				m->tickCarry %= kTickDen;
-				m->dumpClock = m_curSample + out;
-				m->TickOnce();
+	uint32_t out = 0;
+	while (out < frames) {
+		if (m->samplesLeftInTick == 0) {
+			const int misaoDone = !m->misaoActive || m->misao.Ended();
+			if (m->ended && misaoDone) {
+				memset(interleavedStereo + out * 2, 0, (size_t)(frames - out) * 2 * sizeof(int16_t));
+				out = frames;
+				m->eofSent = 1;
+				break;
+			}
+			const unsigned t = m->T ? m->T : kDefaultT;
+			m->tickCarry += (uint64_t)m->hostRate * t;
+			const uint32_t sl = (uint32_t)(m->tickCarry / kTickDen);
+			/* sl==0 のまま TickOnce すると 1sample=1tick になり
+			   FNOTE がダダダダと連打される。carry が溜まるまで PCM だけ出す。 */
+			if (sl == 0) {
+				m->samplesLeftInTick = 1;
+				continue;
+			}
+			m->tickCarry %= kTickDen;
+			if (m->ended && !misaoDone) {
+				if (m->misaoActive) m->misao.TickOnce();
 				m->samplesLeftInTick = sl;
-				/* sl==0 で TickOnce を連続すると、FNOTE の key-on が generate されず
-				   次の key-off で消える（ループ内の短い音符が無音になる）。最低1sample出す。 */
-				if (sl == 0) {
-					m->chip.flush_fm_clock();
-					m->samplesLeftInTick = 1;
-				}
+				continue;
 			}
-			uint32_t take = m->samplesLeftInTick;
-			if (take > want - out) take = want - out;
-			for (uint32_t i = 0; i < take; i++) {
-				int16_t L, R;
-				m->HostSample(&L, &R);
-				if (m->misaoActive) {
-					double mix[2] = { 0.0, 0.0 };
-					m->misao.SynthesizeMix(mix, 1);
-					int l = L + (int)(mix[0] * 32767.0);
-					int r = R + (int)(mix[1] * 32767.0);
-					if (l > 32767) l = 32767;
-					if (l < -32768) l = -32768;
-					if (r > 32767) r = 32767;
-					if (r < -32768) r = -32768;
-					L = (int16_t)l;
-					R = (int16_t)r;
-				}
-				dst[(out + i) * 2] = L;
-				dst[(out + i) * 2 + 1] = R;
-			}
-			m->samplesLeftInTick -= take;
-			out += take;
+			m->dumpClock = m_curSample + out;
+			m->TickOnce();
+			m->samplesLeftInTick = sl;
 		}
-		m_curSample += out;
-		total += out;
-		if (m->dumpEnable && !m->dumpMute && out > 0)
-			m->FlushDump(m_curSample);
-		if (out < want) break;
+		uint32_t take = m->samplesLeftInTick;
+		if (take > frames - out) take = frames - out;
+		int16_t* dst = interleavedStereo + out * 2;
+		for (uint32_t i = 0; i < take; i++) {
+			int16_t L, R;
+			m->HostSample(&L, &R);
+			if (m->misaoActive) {
+				double mix[2] = { 0.0, 0.0 };
+				m->misao.SynthesizeMix(mix, 1);
+				int l = L + (int)(mix[0] * 32767.0);
+				int r = R + (int)(mix[1] * 32767.0);
+				if (l > 32767) l = 32767;
+				if (l < -32768) l = -32768;
+				if (r > 32767) r = 32767;
+				if (r < -32768) r = -32768;
+				L = (int16_t)l;
+				R = (int16_t)r;
+			}
+			dst[i * 2] = L;
+			dst[i * 2 + 1] = R;
+		}
+		m->samplesLeftInTick -= take;
+		out += take;
 	}
-	return total;
+	m_curSample += out;
+	return out;
 }
 
 uint64_t SasamiFmPlayer::SeekSample(uint64_t sample)
