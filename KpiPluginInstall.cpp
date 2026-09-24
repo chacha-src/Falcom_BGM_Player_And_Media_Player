@@ -116,20 +116,25 @@ static BOOL KpiInstallZipRelIsYm2608Rom(const CString& rel)
 	return FALSE;
 }
 
-/* kbsasami フォルダの .kpi / .txt だけ新規展開してよい */
-static BOOL KpiInstallZipRelIsKbsasamiKpiOrTxt(const CString& rel)
+/* kbsasami / kbfmmidi の .kpi / .txt / .wopn は新規展開してよい（音色バンク） */
+static BOOL KpiInstallZipRelIsFmMidiSidecarNew(const CString& rel)
 {
 	CString u(rel);
 	u.MakeLower();
 	u.Replace(L'/', L'\\');
 	while (u.Replace(L"\\\\", L"\\")) {}
-	if (u.Find(L"\\kbsasami\\") < 0 && u.Find(L"kbsasami\\") != 0)
+	const BOOL inSas = (u.Find(L"\\kbsasami\\") >= 0 || u.Find(L"kbsasami\\") == 0);
+	const BOOL inMidi = (u.Find(L"\\kbfmmidi\\") >= 0 || u.Find(L"kbfmmidi\\") == 0);
+	if (!inSas && !inMidi)
 		return FALSE;
-	return (u.Right(4) == L".kpi" || u.Right(4) == L".txt");
+	const int n = u.GetLength();
+	return (n >= 4 && u.Right(4) == L".kpi")
+		|| (n >= 4 && u.Right(4) == L".txt")
+		|| (n >= 5 && u.Right(5) == L".wopn");
 }
 
 /* mergeNewerOnly: ZIP の方が新しい→上書き。ローカルが新しければスキップ。
-   silentExistingOnly: 既存ファイルのみ更新。例外は kbsasami の kpi/txt 新規。
+   silentExistingOnly: 既存ファイルのみ更新。例外は kbsasami/kbfmmidi の kpi/txt/wopn 新規。
    wav と YM2608 ROM はサイレントでは出さない（手動 Plugins.zip 取得時のみ）。 */
 static BOOL KpiInstallExtractZip(const TCHAR* zipPath, const TCHAR* destDir, CString& errOut,
 	BOOL mergeNewerOnly, BOOL silentExistingOnly = FALSE)
@@ -183,7 +188,7 @@ static BOOL KpiInstallExtractZip(const TCHAR* zipPath, const TCHAR* destDir, CSt
 				if ((ZPOS64_T)(i + 1) < gi.number_entry) unzGoToNextFile(uf);
 				continue;
 			}
-			if (!KpiInstallFileExists(outPath) && !KpiInstallZipRelIsKbsasamiKpiOrTxt(rel)) {
+			if (!KpiInstallFileExists(outPath) && !KpiInstallZipRelIsFmMidiSidecarNew(rel)) {
 				if ((ZPOS64_T)(i + 1) < gi.number_entry) unzGoToNextFile(uf);
 				continue;
 			}
@@ -405,7 +410,7 @@ BOOL KpiInstall_DownloadAndExtract(LPCTSTR exeDir, KpiInstallProgressFn progress
 // Plugins.zip サイレント更新（kbsasami / 既存 KPI の日付マージ）
 // ZIP: https://ppp.oohara.jp/download/Plugins.zip
 // DL 条件: kbsasami.kpi が無い、または ZIP Last-Modified が exe より新しい
-// 展開: kbsasami の kpi/txt は新規可。他は既存ファイルのみ。wav / リズム ROM は出さない。
+// 展開: kbsasami/kbfmmidi の kpi/txt/wopn は新規可。他は既存のみ。wav / リズム ROM は出さない。
 // 一式（リズム含む）はメニューから Plugins.zip を手動取得したときだけ。
 // ---------------------------------------------------------------------------
 
@@ -531,6 +536,8 @@ static BOOL KpiInstallHttpDownloadFile(LPCTSTR url, LPCTSTR destPath)
 }
 
 static void KpiInstallEnsureRhythmAssets(LPCTSTR exeDir);
+static BOOL KpiInstallEnsureFmMidiSidecars(LPCTSTR exeDir);
+static BOOL KpiInstallFmMidiSidecarsStillMissing(LPCTSTR exeDir);
 
 /* 起動1回だけ Plugins.zip を検討（kbsasami / fmpmd の二重 DL 防止） */
 static BOOL KpiInstallSilentMaybeFetchPluginsZip(LPCTSTR exeDir)
@@ -554,13 +561,15 @@ static BOOL KpiInstallSilentMaybeFetchPluginsZip(LPCTSTR exeDir)
 	_sntprintf_s(sasKpi64, _TRUNCATE, L"%sPlugins\\kbsasami\\x64\\kbsasami.kpi", exeDir);
 	const BOOL needSasami =
 		(!KpiInstallFileExists(sasKpi) && !KpiInstallFileExists(sasKpi64)) ? TRUE : FALSE;
+	/* KPI はあるが gs/xg.wopn や programs.txt が無い → 音色が壊れるので ZIP も試す */
+	const BOOL needSidecar = KpiInstallFmMidiSidecarsStillMissing(exeDir);
 
 	TCHAR exePath[MAX_PATH] = {};
 	GetModuleFileName(NULL, exePath, MAX_PATH);
 	const time_t exeMt = KpiInstallFileMtimeUtc(exePath);
 
 	BOOL doDownload = FALSE;
-	if (needSasami) {
+	if (needSasami || needSidecar) {
 		doDownload = TRUE;
 	} else {
 		const time_t serverMod = KpiInstallHttpLastModified(PLUGINS_ZIP_URL);
@@ -580,7 +589,7 @@ static BOOL KpiInstallSilentMaybeFetchPluginsZip(LPCTSTR exeDir)
 		return FALSE;
 
 	CString err;
-	/* 既存のみ更新。kbsasami の kpi/txt だけ新規。自前の新しい KPI/DLL は残す */
+	/* 既存のみ更新。kbsasami/kbfmmidi の kpi/txt/wopn は新規可。自前の新しい KPI/DLL は残す */
 	const BOOL ok = KpiInstallExtractZip(zipPath, exeDir, err, TRUE, TRUE);
 	DeleteFile(zipPath);
 	s_did = ok ? TRUE : FALSE;
@@ -591,8 +600,11 @@ BOOL KpiInstall_SilentUpdateKbsasami(LPCTSTR exeDir)
 {
 	if (!exeDir || !exeDir[0])
 		return FALSE;
-	/* kbsasami は kpi/txt のみ新規。リズム wav/bin は手動 Plugins.zip か自前配置 */
-	return KpiInstallSilentMaybeFetchPluginsZip(exeDir);
+	/* 手元の WOPN/programs.txt を先に埋める。足りなければ ZIP。リズム wav/bin は手動 */
+	BOOL did = KpiInstallEnsureFmMidiSidecars(exeDir);
+	did |= KpiInstallSilentMaybeFetchPluginsZip(exeDir);
+	did |= KpiInstallEnsureFmMidiSidecars(exeDir);
+	return did;
 }
 
 
@@ -644,6 +656,121 @@ static void KpiInstallCopyIfMissing(LPCTSTR src, LPCTSTR dst)
 		}
 	}
 	CopyFile(src, dst, TRUE);
+}
+
+static const TCHAR* const kFmMidiSidecarNames[] = {
+	L"gs.wopn", L"xg.wopn", L"programs.txt"
+};
+
+static BOOL KpiInstallDirHasKpi(LPCTSTR dir, LPCTSTR kpiName)
+{
+	if (!dir || !dir[0] || !kpiName || !kpiName[0])
+		return FALSE;
+	TCHAR p[MAX_PATH * 2] = {};
+	_sntprintf_s(p, _TRUNCATE, L"%s\\%s", dir, kpiName);
+	return KpiInstallFileExists(p);
+}
+
+static BOOL KpiInstallDirMissingSidecar(LPCTSTR dir, LPCTSTR kpiName)
+{
+	if (!KpiInstallDirHasKpi(dir, kpiName))
+		return FALSE;
+	for (int i = 0; i < (int)(sizeof(kFmMidiSidecarNames) / sizeof(kFmMidiSidecarNames[0])); ++i) {
+		TCHAR p[MAX_PATH * 2] = {};
+		_sntprintf_s(p, _TRUNCATE, L"%s\\%s", dir, kFmMidiSidecarNames[i]);
+		if (!KpiInstallFileExists(p))
+			return TRUE;
+	}
+	return FALSE;
+}
+
+static BOOL KpiInstallFmMidiSidecarsStillMissing(LPCTSTR exeDir)
+{
+	if (!exeDir || !exeDir[0])
+		return FALSE;
+	static const TCHAR* kRel[] = {
+		L"Plugins\\kbsasami",
+		L"Plugins\\kbsasami\\x64",
+		L"Plugins\\Kobarin\\kbfmmidi",
+		L"x64\\Plugins\\kbsasami",
+		L"x64\\Plugins\\kbsasami\\x64",
+		L"x64\\Plugins\\Kobarin\\kbfmmidi",
+	};
+	static const TCHAR* kKpi[] = {
+		L"kbsasami.kpi", L"kbsasami.kpi", L"kbfmmidi.kpi",
+		L"kbsasami.kpi", L"kbsasami.kpi", L"kbfmmidi.kpi",
+	};
+	for (int i = 0; i < (int)(sizeof(kRel) / sizeof(kRel[0])); ++i) {
+		TCHAR d[MAX_PATH * 2] = {};
+		_sntprintf_s(d, _TRUNCATE, L"%s%s", exeDir, kRel[i]);
+		if (KpiInstallDirMissingSidecar(d, kKpi[i]))
+			return TRUE;
+	}
+	return FALSE;
+}
+
+/* KPI があるフォルダへ、欠けている programs.txt / gs.wopn / xg.wopn を埋める */
+static BOOL KpiInstallEnsureFmMidiSidecars(LPCTSTR exeDir)
+{
+	if (!exeDir || !exeDir[0])
+		return FALSE;
+
+	static const TCHAR* kSrcRel[] = {
+		L"Plugins\\.ogg_kpi_fmmon\\x64",
+		L"Plugins\\.ogg_kpi_fmmon",
+		L"Plugins\\kbsasami",
+		L"Plugins\\kbsasami\\x64",
+		L"Plugins\\Kobarin\\kbfmmidi",
+		L"x64\\Plugins\\kbsasami",
+		L"x64\\Plugins\\kbsasami\\x64",
+		L"x64\\Plugins\\Kobarin\\kbfmmidi",
+	};
+	TCHAR srcAbs[8][MAX_PATH * 2] = {};
+	int nSrc = 0;
+	for (int i = 0; i < (int)(sizeof(kSrcRel) / sizeof(kSrcRel[0])); ++i) {
+		_sntprintf_s(srcAbs[nSrc], _TRUNCATE, L"%s%s", exeDir, kSrcRel[i]);
+		if (GetFileAttributes(srcAbs[nSrc]) != INVALID_FILE_ATTRIBUTES)
+			++nSrc;
+	}
+
+	static const TCHAR* kDstRel[] = {
+		L"Plugins\\kbsasami",
+		L"Plugins\\kbsasami\\x64",
+		L"Plugins\\Kobarin\\kbfmmidi",
+		L"x64\\Plugins\\kbsasami",
+		L"x64\\Plugins\\kbsasami\\x64",
+		L"x64\\Plugins\\Kobarin\\kbfmmidi",
+	};
+	static const TCHAR* kDstKpi[] = {
+		L"kbsasami.kpi", L"kbsasami.kpi", L"kbfmmidi.kpi",
+		L"kbsasami.kpi", L"kbsasami.kpi", L"kbfmmidi.kpi",
+	};
+
+	BOOL did = FALSE;
+	for (int d = 0; d < (int)(sizeof(kDstRel) / sizeof(kDstRel[0])); ++d) {
+		TCHAR destDir[MAX_PATH * 2] = {};
+		_sntprintf_s(destDir, _TRUNCATE, L"%s%s", exeDir, kDstRel[d]);
+		if (!KpiInstallDirHasKpi(destDir, kDstKpi[d]))
+			continue;
+		for (int sname = 0; sname < (int)(sizeof(kFmMidiSidecarNames) / sizeof(kFmMidiSidecarNames[0])); ++sname) {
+			TCHAR dst[MAX_PATH * 2] = {};
+			_sntprintf_s(dst, _TRUNCATE, L"%s\\%s", destDir, kFmMidiSidecarNames[sname]);
+			if (KpiInstallFileExists(dst))
+				continue;
+			for (int s = 0; s < nSrc; ++s) {
+				TCHAR src[MAX_PATH * 2] = {};
+				_sntprintf_s(src, _TRUNCATE, L"%s\\%s", srcAbs[s], kFmMidiSidecarNames[sname]);
+				if (!KpiInstallFileExists(src) || _tcsicmp(src, dst) == 0)
+					continue;
+				KpiInstallCopyIfMissing(src, dst);
+				if (KpiInstallFileExists(dst)) {
+					did = TRUE;
+					break;
+				}
+			}
+		}
+	}
+	return did;
 }
 
 /* 既にある rom/wav だけ揃える。ZIP から新規展開はしない */
@@ -1149,7 +1276,18 @@ BOOL KpiInstall_SilentUpdateFmMonKpis(LPCTSTR exeDir)
 	};
 	static const Entry kTab[] = {
 		/* --- FM/MIDI モニタ既存 --- */
+		{ L"kbsasami\\kbsasami.kpi", L"kbsasami.kpi", NULL },
+		{ L"kbsasami\\programs.txt", L"programs.txt", L"kbsasami\\kbsasami.kpi" },
+		{ L"kbsasami\\gs.wopn", L"gs.wopn", L"kbsasami\\kbsasami.kpi" },
+		{ L"kbsasami\\xg.wopn", L"xg.wopn", L"kbsasami\\kbsasami.kpi" },
+		{ L"kbsasami\\x64\\kbsasami.kpi", L"kbsasami.kpi", NULL },
+		{ L"kbsasami\\x64\\programs.txt", L"programs.txt", L"kbsasami\\x64\\kbsasami.kpi" },
+		{ L"kbsasami\\x64\\gs.wopn", L"gs.wopn", L"kbsasami\\x64\\kbsasami.kpi" },
+		{ L"kbsasami\\x64\\xg.wopn", L"xg.wopn", L"kbsasami\\x64\\kbsasami.kpi" },
 		{ L"Kobarin\\kbfmmidi\\kbfmmidi.kpi", L"kbfmmidi.kpi", NULL },
+		{ L"Kobarin\\kbfmmidi\\programs.txt", L"programs.txt", L"Kobarin\\kbfmmidi\\kbfmmidi.kpi" },
+		{ L"Kobarin\\kbfmmidi\\gs.wopn", L"gs.wopn", L"Kobarin\\kbfmmidi\\kbfmmidi.kpi" },
+		{ L"Kobarin\\kbfmmidi\\xg.wopn", L"xg.wopn", L"Kobarin\\kbfmmidi\\kbfmmidi.kpi" },
 		{ L"Kobarin\\fmpmd\\kbfmp.kpi", L"kbfmp.kpi", NULL },
 		{ L"Kobarin\\fmpmd\\kbpmd.kpi", L"kbpmd.kpi", NULL },
 		{ L"Kobarin\\fmpmd\\PMDWin.dll", L"PMDWin.dll", L"Kobarin\\fmpmd\\kbpmd.kpi" },
@@ -1222,7 +1360,14 @@ BOOL KpiInstall_SilentUpdateFmMonKpis(LPCTSTR exeDir)
 		{ L"Mamiya\\kbgym\\kbgym.kpi", L"kbgym.kpi", NULL },
 		{ L"OK\\kbgym\\kbgym.kpi", L"kbgym.kpi", NULL },
 		/* z_5 退避先 */
+		{ L"z_5_Plugins\\kbsasami\\kbsasami.kpi", L"kbsasami.kpi", NULL },
+		{ L"z_5_Plugins\\kbsasami\\programs.txt", L"programs.txt", L"z_5_Plugins\\kbsasami\\kbsasami.kpi" },
+		{ L"z_5_Plugins\\kbsasami\\gs.wopn", L"gs.wopn", L"z_5_Plugins\\kbsasami\\kbsasami.kpi" },
+		{ L"z_5_Plugins\\kbsasami\\xg.wopn", L"xg.wopn", L"z_5_Plugins\\kbsasami\\kbsasami.kpi" },
 		{ L"z_5_Plugins\\Kobarin\\kbfmmidi\\kbfmmidi.kpi", L"kbfmmidi.kpi", NULL },
+		{ L"z_5_Plugins\\Kobarin\\kbfmmidi\\programs.txt", L"programs.txt", L"z_5_Plugins\\Kobarin\\kbfmmidi\\kbfmmidi.kpi" },
+		{ L"z_5_Plugins\\Kobarin\\kbfmmidi\\gs.wopn", L"gs.wopn", L"z_5_Plugins\\Kobarin\\kbfmmidi\\kbfmmidi.kpi" },
+		{ L"z_5_Plugins\\Kobarin\\kbfmmidi\\xg.wopn", L"xg.wopn", L"z_5_Plugins\\Kobarin\\kbfmmidi\\kbfmmidi.kpi" },
 		{ L"z_5_Plugins\\Kobarin\\fmpmd\\kbfmp.kpi", L"kbfmp.kpi", NULL },
 		{ L"z_5_Plugins\\Kobarin\\fmpmd\\kbpmd.kpi", L"kbpmd.kpi", NULL },
 		{ L"z_5_Plugins\\Kobarin\\kbvgm\\kbvgm.kpi", L"kbvgm.kpi", NULL },
