@@ -108,15 +108,42 @@ static int __cdecl FWa_IsPlaying()
 	if (!g_waCur) return 0;
 	EnterCriticalSection(&g_waCur->cs);
 	int u = g_waCur->ringUsed;
+	int playing = g_waCur->playing;
 	LeaveCriticalSection(&g_waCur->cs);
-	return (g_waCur->playing || u > 0) ? 1 : 0;
+	// 出力デバイスが書き込み済み PCM を出し切るまで 1。リングが空なのに 1 のままだと
+	// in_vgmstream のデコードスレッドが WM_WA_MPEG_EOF を出さず曲終端にならない。
+	return (playing && u > 0) ? 1 : 0;
 }
 static int __cdecl FWa_Pause(int) { return 0; }
 static void __cdecl FWa_SetVolume(int) {}
 static void __cdecl FWa_SetPan(int) {}
-static void __cdecl FWa_Flush(int t) { InterlockedExchange(&g_waEof, 0); if (g_waCur) { EnterCriticalSection(&g_waCur->cs); g_waCur->ringR = g_waCur->ringW = g_waCur->ringUsed = 0; g_waCur->flushMs = t; LeaveCriticalSection(&g_waCur->cs); } }
-static int __cdecl FWa_GetOutputTime() { return g_waCur ? g_waCur->flushMs : 0; }
-static int __cdecl FWa_GetWrittenTime() { return 0; }
+static void __cdecl FWa_Flush(int t) { InterlockedExchange(&g_waEof, 0); if (g_waCur) { EnterCriticalSection(&g_waCur->cs); g_waCur->ringR = g_waCur->ringW = g_waCur->ringUsed = 0; g_waCur->flushMs = t; g_waCur->written = 0; LeaveCriticalSection(&g_waCur->cs); } }
+static int __cdecl FWa_GetOutputTime()
+{
+	if (!g_waCur) return 0;
+	ForeignSession* s = g_waCur;
+	EnterCriticalSection(&s->cs);
+	const int rate = s->rate, ch = s->ch, bits = s->bits, used = s->ringUsed, flush = s->flushMs;
+	const __int64 written = s->written;
+	LeaveCriticalSection(&s->cs);
+	const int bpf = (bits / 8) * ch;
+	if (rate <= 0 || bpf <= 0) return flush;
+	__int64 played = written - used;
+	if (played < 0) played = 0;
+	return flush + (int)((played * 1000) / ((__int64)rate * bpf));
+}
+static int __cdecl FWa_GetWrittenTime()
+{
+	if (!g_waCur) return 0;
+	ForeignSession* s = g_waCur;
+	EnterCriticalSection(&s->cs);
+	const int rate = s->rate, ch = s->ch, bits = s->bits, flush = s->flushMs;
+	const __int64 written = s->written;
+	LeaveCriticalSection(&s->cs);
+	const int bpf = (bits / 8) * ch;
+	if (rate <= 0 || bpf <= 0) return 0;
+	return flush + (int)((written * 1000) / ((__int64)rate * bpf));
+}
 static void __cdecl FWa_nop() {}
 static void __cdecl FWa_SAVSAInit(int, int) {}
 static void __cdecl FWa_SAAddPCM(void*, int, int, int) {}
@@ -219,17 +246,102 @@ static bool WaUsesOutput(const In_Module* in) { return in && (in->UsesOutputPlug
 
 // 曲終端は WM_WA_MPEG_EOF(WM_USER+2) の PostMessage で来る。
 // GetConsoleWindow() はホストが GUI 無しだと NULL になり通知を取りこぼすため専用窓を持つ。
-enum { WA_WM_IPC = WM_USER, WA_WM_MPEG_EOF = WM_USER + 2 };
+enum {
+	WA_WM_IPC = WM_USER,
+	WA_WM_MPEG_EOF = WM_USER + 2,
+	WA_IPC_GETVERSION = 0,
+	WA_IPC_ISPLAYING = 104,
+	WA_IPC_GETINIDIRECTORY = 335,
+	WA_IPC_GETPLUGINDIRECTORY = 336,
+	WA_IPC_GETINIFILE = 334,
+	WA_IPC_GETINIDIRECTORYW = 1335,
+	WA_IPC_GETPLUGINDIRECTORYW = 1336,
+	WA_IPC_GETINIFILEW = 1334
+};
 static HWND g_waWnd = NULL;
 static HANDLE g_waWndThread = NULL, g_waWndReady = NULL;
+// in_vgmstream の Init は IPC_GETVERSION>=0x5000 のとき IPC_GETINIDIRECTORY の
+// 戻りを strncpy する。NULL だと列挙中に落ちて拡張子が kpi 一覧に出ない。
+static char g_fwaIniDirA[MAX_PATH * 2];
+static char g_fwaIniFileA[MAX_PATH * 2];
+static wchar_t g_fwaIniDirW[MAX_PATH];
+static wchar_t g_fwaIniFileW[MAX_PATH];
+
+// Init で作った窓はこのスレッド所有。Play/Stop を同じスレッドでブロッキング待ちすると
+// デコードスレッドの SendMessage が戻らず、KPI との切替でパイプごと固まる。
+static void PumpForeignMsgs()
+{
+	MSG msg;
+	while (PeekMessageW(&msg, NULL, 0, 0, PM_REMOVE)) {
+		if (msg.message == WM_QUIT) {
+			PostQuitMessage((int)msg.wParam);
+			continue;
+		}
+		TranslateMessage(&msg);
+		DispatchMessageW(&msg);
+	}
+}
+
+enum { FWA_PLAY = 1, FWA_STOP = 2, FWA_SEEK = 3 };
+struct FWaJob {
+	int op;
+	In_Module* in;
+	const in_char* path;
+	int iarg;
+	int rc;
+};
+static DWORD WINAPI FWaJobThread(LPVOID p)
+{
+	FWaJob* j = (FWaJob*)p;
+	if (!j || !j->in) return 0;
+	if (j->op == FWA_PLAY)
+		j->rc = j->in->Play(j->path);
+	else if (j->op == FWA_STOP) {
+		if (j->in->Stop) j->in->Stop();
+		if (j->in->Quit) j->in->Quit();
+		j->rc = 0;
+	} else if (j->op == FWA_SEEK) {
+		if (j->in->SetOutputTime) j->in->SetOutputTime(j->iarg);
+		j->rc = 0;
+	}
+	return 0;
+}
+
+static int RunFWaJob(FWaJob& j)
+{
+	j.rc = -1;
+	HANDLE th = CreateThread(NULL, 0, FWaJobThread, &j, 0, NULL);
+	if (!th) return -1;
+	for (;;) {
+		const DWORD w = MsgWaitForMultipleObjects(1, &th, FALSE, INFINITE, QS_ALLINPUT);
+		if (w == WAIT_OBJECT_0)
+			break;
+		if (w == WAIT_OBJECT_0 + 1) {
+			PumpForeignMsgs();
+			continue;
+		}
+		break;
+	}
+	WaitForSingleObject(th, INFINITE);
+	CloseHandle(th);
+	return j.rc;
+}
 
 static LRESULT CALLBACK WaHostWndProc(HWND h, UINT m, WPARAM w, LPARAM l)
 {
 	if (m == WA_WM_MPEG_EOF) { InterlockedExchange(&g_waEof, 1); return 0; }
 	if (m == WA_WM_IPC) {
-		if (l == 0) return 0x5066;  // IPC_GETVERSION
-		if (l == 104) return 1;     // IPC_ISPLAYING
-		return 0;
+		switch (l) {
+		case WA_IPC_GETVERSION: return 0x5066;
+		case WA_IPC_ISPLAYING: return 1;
+		case WA_IPC_GETINIFILE: return (LRESULT)g_fwaIniFileA;
+		case WA_IPC_GETINIDIRECTORY: return (LRESULT)g_fwaIniDirA;
+		case WA_IPC_GETPLUGINDIRECTORY: return (LRESULT)g_fwaIniDirA;
+		case WA_IPC_GETINIFILEW: return (LRESULT)g_fwaIniFileW;
+		case WA_IPC_GETINIDIRECTORYW: return (LRESULT)g_fwaIniDirW;
+		case WA_IPC_GETPLUGINDIRECTORYW: return (LRESULT)g_fwaIniDirW;
+		default: return 0;
+		}
 	}
 	return DefWindowProcW(h, m, w, l);
 }
@@ -251,6 +363,14 @@ static DWORD WINAPI WaHostWndThread(LPVOID)
 
 static HWND WaEnsureWnd()
 {
+	if (g_fwaIniDirW[0] == 0) {
+		GetModuleFileNameW(NULL, g_fwaIniDirW, MAX_PATH);
+		wchar_t* sl = wcsrchr(g_fwaIniDirW, L'\\');
+		if (sl) *sl = 0;
+		_snwprintf_s(g_fwaIniFileW, MAX_PATH, _TRUNCATE, L"%s\\winamp.ini", g_fwaIniDirW);
+		WideCharToMultiByte(CP_ACP, 0, g_fwaIniDirW, -1, g_fwaIniDirA, (int)sizeof(g_fwaIniDirA), NULL, NULL);
+		WideCharToMultiByte(CP_ACP, 0, g_fwaIniFileW, -1, g_fwaIniFileA, (int)sizeof(g_fwaIniFileA), NULL, NULL);
+	}
 	if (g_waWnd) return g_waWnd;
 	if (!g_waWndReady) g_waWndReady = CreateEventW(NULL, TRUE, FALSE, NULL);
 	if (!g_waWndThread) g_waWndThread = CreateThread(NULL, 0, WaHostWndThread, NULL, 0, NULL);
@@ -317,24 +437,35 @@ uint32_t ForeignHost_Open(uint32_t kind, const std::wstring& dll, const std::wst
 			if (slash != std::wstring::npos)
 				SetCurrentDirectoryW(media.substr(0, slash).c_str());
 		}
-		int rc;
+		FWaJob job{};
+		job.op = FWA_PLAY;
+		job.in = s->waIn;
+		char pathA[MAX_PATH * 2];
 		if (WaIsUnicode(s->waIn)) {
 			// IN_UNICODE プラグインの Play は wchar_t*。ANSI 変換して渡すと開けない
-			rc = s->waIn->Play((const in_char*)media.c_str());
+			job.path = (const in_char*)media.c_str();
 		} else {
-			char pathA[MAX_PATH * 2];
+			pathA[0] = 0;
 			WideCharToMultiByte(CP_ACP, 0, media.c_str(), -1, pathA, (int)sizeof(pathA), NULL, NULL);
-			rc = s->waIn->Play((const in_char*)pathA);
+			job.path = (const in_char*)pathA;
 		}
+		const int rc = RunFWaJob(job);
 		if (rc != 0) {
-			if (s->waIn->Quit) s->waIn->Quit();
+			FWaJob stop{};
+			stop.op = FWA_STOP;
+			stop.in = s->waIn;
+			if (RunFWaJob(stop) < 0 && s->waIn->Quit) s->waIn->Quit();
 			if (s->cwdSaved) SetCurrentDirectoryW(s->prevCwd);
 			FreeLibrary(s->dll); delete[] s->ring; delete s; g_waCur = nullptr; return KPIHOST64_STATUS_FAIL;
 		}
 		// フォーマットはデコードスレッドが outMod->Open() を呼ぶまで確定しない。
 		// Play() 直後に読むと既定値(44100/2/16)を本体へ返してしまう。
-		for (int i = 0; i < 5000 && !s->playing && !InterlockedCompareExchange(&g_waEof, 0, 0); ++i)
-			Sleep(1);
+		// Sleep だとこのスレッドの窓へ来た SendMessage が止まり、Open 自体が戻らない。
+		for (int i = 0; i < 5000 && !s->playing && !InterlockedCompareExchange(&g_waEof, 0, 0); ++i) {
+			const DWORD w = MsgWaitForMultipleObjects(0, NULL, FALSE, 1, QS_ALLINPUT);
+			if (w == WAIT_OBJECT_0)
+				PumpForeignMsgs();
+		}
 		if (!s->playing) {
 			if (s->waIn->Stop) s->waIn->Stop();
 			if (s->waIn->Quit) s->waIn->Quit();
@@ -368,34 +499,29 @@ uint32_t ForeignHost_Render(uint32_t sessionId, uint32_t bytesWanted, uint8_t* d
 		if (!dest && bytesWanted) return KPIHOST64_STATUS_BAD_REQUEST;
 		uint32_t want = bytesWanted;
 		if (want > destCap) want = destCap;
-		int got = 0;
-		DWORD t0 = GetTickCount();
-		while (got < (int)want) {
-			EnterCriticalSection(&s->cs);
-			int avail = s->ringUsed;
-			int take = (int)want - got;
-			if (take > avail) take = avail;
-			int cap = s->ringCap;
-			if (take > 0 && s->ring && cap > 0) {
-				int first = cap - s->ringR;
-				if (first > take) first = take;
-				memcpy(dest + got, s->ring + s->ringR, (size_t)first);
-				if (take > first)
-					memcpy(dest + got + first, s->ring, (size_t)(take - first));
-				s->ringR = (s->ringR + take) % cap;
-				s->ringUsed -= take;
-			} else {
-				take = 0;
-			}
-			LeaveCriticalSection(&s->cs);
-			got += take;
-			if (got >= (int)want) break;
-			if (take > 0) { t0 = GetTickCount(); continue; }
-			// リングが空。WM_WA_MPEG_EOF 受信済み／出力クローズ済みなら本当に終端
-			if (InterlockedCompareExchange(&g_waEof, 0, 0)) { eof = 1; break; }
-			if (!s->playing) { eof = 1; break; }
-			if (GetTickCount() - t0 > 5000) break; // デコーダ無応答の保険
-			Sleep(1);
+		// ここで最大5秒待たない。パイプを占有したままだと Close/Open が届かず、
+		// 本体 UI はロック待ちになる。空なら 0 を返し、待ちはクライアント側（停止で即抜ける）。
+		EnterCriticalSection(&s->cs);
+		int avail = s->ringUsed;
+		int take = (int)want;
+		if (take > avail) take = avail;
+		int cap = s->ringCap;
+		if (take > 0 && s->ring && cap > 0) {
+			int first = cap - s->ringR;
+			if (first > take) first = take;
+			memcpy(dest, s->ring + s->ringR, (size_t)first);
+			if (take > first)
+				memcpy(dest + first, s->ring, (size_t)(take - first));
+			s->ringR = (s->ringR + take) % cap;
+			s->ringUsed -= take;
+		} else {
+			take = 0;
+		}
+		LeaveCriticalSection(&s->cs);
+		int got = take;
+		if (got <= 0) {
+			if (InterlockedCompareExchange(&g_waEof, 0, 0) || !s->playing)
+				eof = 1;
 		}
 		gotBytes = (uint32_t)got;
 		return KPIHOST64_STATUS_OK;
@@ -409,7 +535,12 @@ uint32_t ForeignHost_Seek(uint32_t sessionId, uint64_t posSample)
 	if (!s) return KPIHOST64_STATUS_NOT_FOUND;
 	if (s->kind == PLUGKIND_WINAMP && s->waIn && s->waIn->SetOutputTime && s->rate > 0) {
 		InterlockedExchange(&g_waEof, 0);
-		s->waIn->SetOutputTime((int)(posSample * 1000 / s->rate));
+		FWaJob job{};
+		job.op = FWA_SEEK;
+		job.in = s->waIn;
+		job.iarg = (int)(posSample * 1000 / s->rate);
+		if (RunFWaJob(job) < 0)
+			return KPIHOST64_STATUS_FAIL;
 		return KPIHOST64_STATUS_OK;
 	}
 	return KPIHOST64_STATUS_NOT_SUPPORTED;
@@ -421,8 +552,13 @@ uint32_t ForeignHost_Close(uint32_t sessionId)
 	if (it == g_foreign.end()) return KPIHOST64_STATUS_NOT_FOUND;
 	ForeignSession* s = it->second;
 	if (s->kind == PLUGKIND_WINAMP && s->waIn) {
-		if (s->waIn->Stop) s->waIn->Stop();
-		if (s->waIn->Quit) s->waIn->Quit();
+		FWaJob job{};
+		job.op = FWA_STOP;
+		job.in = s->waIn;
+		if (RunFWaJob(job) < 0) {
+			if (s->waIn->Stop) s->waIn->Stop();
+			if (s->waIn->Quit) s->waIn->Quit();
+		}
 	}
 	if (s->cwdSaved && s->prevCwd[0])
 		SetCurrentDirectoryW(s->prevCwd);

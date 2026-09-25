@@ -32708,6 +32708,27 @@ void COggDlg::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
 				CemuSeekToPlayb((__int64)srcCur);
 				m_time.SetPos(curpos);
 			}
+			else if (mode == MODE_PLUGIN_WINAMP) {
+				// Ogg の ov_pcm_seek に落とすと未オープンの vf で UI が戻らない
+				if (wavbit_sample_Hz > 0)
+					PluginWinamp_SeekMs((int)(((__int64)playb * 1000) / wavbit_sample_Hz));
+				m_time.SetPos(curpos);
+			}
+			else if (mode == MODE_PLUGIN_XMPLAY) {
+				if (wavbit_sample_Hz > 0)
+					PluginXmplay_SeekSec((double)playb / (double)wavbit_sample_Hz);
+				m_time.SetPos(curpos);
+			}
+			else if (mode == MODE_PLUGIN_AIMP) {
+				const int bpf = (wavsam_depth / 8) * wavchannel;
+				if (bpf > 0)
+					PluginAimp_SeekBytes((__int64)playb * bpf);
+				m_time.SetPos(curpos);
+			}
+			else if (mode == MODE_ZMUSIC) {
+				ZmusicSessionSeekFrames((int)playb);
+				m_time.SetPos(curpos);
+			}
 			else { // OGG / Others
 				SeekAndWarmupRubberBand((int)srcCur, false);
 				m_time.SetPos(curpos);

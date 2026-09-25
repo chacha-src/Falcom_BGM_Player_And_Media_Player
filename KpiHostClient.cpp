@@ -306,7 +306,19 @@ namespace {
 struct PipeLock
 {
 	CRITICAL_SECTION* cs;
-	explicit PipeLock(CRITICAL_SECTION& c) : cs(&c) { EnterCriticalSection(cs); }
+	// EnterCriticalSection は送られたメッセージを捌かない。KPI 解放スレッドが
+	// UI へ SendMessage したままパイプロックを握っていると、UI の Open が
+	// ロック待ちで固まり、解放側も戻らない。
+	explicit PipeLock(CRITICAL_SECTION& c) : cs(&c)
+	{
+		for (;;) {
+			if (TryEnterCriticalSection(cs))
+				return;
+			MsgWaitForMultipleObjectsEx(0, NULL, 15, QS_SENDMESSAGE, 0);
+			MSG msg;
+			PeekMessageW(&msg, NULL, 0, 0, PM_NOREMOVE);
+		}
+	}
 	~PipeLock() { LeaveCriticalSection(cs); }
 };
 
@@ -353,8 +365,10 @@ bool PipeXfer(HANDLE pipe, void* buf, uint32_t bytes, int writing, DWORD timeout
 				}
 				const DWORD slice = timeoutMs - elapsed2;
 				const DWORD waitMs = slice > 100 ? 100 : slice;
+				// QS_TIMER を捌くと、ロックを持ったまま timer→Open/Render に再入して戻らない。
+				// 送られたメッセージ（通知スレッドの GetCheck 等）と描画だけ通す。
 				const DWORD qs = InterlockedCompareExchange(&g_kpiPipeUiPump, 0, 0)
-					? (QS_ALLINPUT) : (QS_SENDMESSAGE | QS_PAINT | QS_TIMER | QS_POSTMESSAGE);
+					? (QS_ALLINPUT) : (QS_SENDMESSAGE | QS_PAINT);
 				const DWORD wr = MsgWaitForMultipleObjects(1, &ov.hEvent, FALSE, waitMs, qs);
 				if (wr == WAIT_OBJECT_0)
 					break;
@@ -374,8 +388,6 @@ bool PipeXfer(HANDLE pipe, void* buf, uint32_t bytes, int writing, DWORD timeout
 						}
 					} else {
 						while (PeekMessageW(&msg, NULL, WM_PAINT, WM_PAINT, PM_REMOVE))
-							DispatchMessageW(&msg);
-						while (PeekMessageW(&msg, NULL, WM_TIMER, WM_TIMER, PM_REMOVE))
 							DispatchMessageW(&msg);
 						while (PeekMessageW(&msg, NULL, WM_QUIT, WM_QUIT, PM_REMOVE)) {
 							PostQuitMessage((int)msg.wParam);

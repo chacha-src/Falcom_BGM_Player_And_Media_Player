@@ -464,6 +464,15 @@ void FmMonShadowSetOpmRegSnapshotEx(const unsigned char* regs256, int keyRegOrNe
 		memcpy(ayKeep, s_regs, sizeof(ayKeep));
 		memcpy(ayBitsKeep, s_bits, sizeof(ayBitsKeep));
 	}
+	/* 直前画像との差だけ書いた扱いにする。MDX 等はスナップショットしか来ないので
+	   印を消したままだと、値は更新されても hex が灰色のままになる。 */
+	uint8_t prevOpm[256];
+	const int hadOpm = s_opmRegsValid;
+	/* 初回はゼロとの差。ここを飛ばすと最初の音色ロードだけ色が付かない */
+	if (hadOpm)
+		memcpy(prevOpm, s_regs, 256);
+	else
+		memset(prevOpm, 0, sizeof(prevOpm));
 	memcpy(s_regs, regs256, 256);
 	memset(s_regs + 256, 0, 0x200 - 256);
 	memset(s_bits, 0, sizeof(s_bits));
@@ -474,6 +483,10 @@ void FmMonShadowSetOpmRegSnapshotEx(const unsigned char* regs256, int keyRegOrNe
 	if (keepAy) {
 		memcpy(s_regs, ayKeep, sizeof(ayKeep));
 		memcpy(s_bits, ayBitsKeep, sizeof(ayBitsKeep));
+	}
+	for (int i = 0; i < 256; i++) {
+		if (s_regs[i] != prevOpm[i])
+			MarkBit((unsigned)i);
 	}
 	s_opmRegsValid = 1;
 	s_opnaLayout = -1;
@@ -1308,6 +1321,11 @@ void FmMonShadowFlushKeysOnly(int force)
 	case SASAMI_FMMON_KEYS_OKI: pcmN = 4; break;
 	case SASAMI_FMMON_KEYS_QSOUND: pcmN = 16; break;
 	case SASAMI_FMMON_KEYS_C352: pcmN = 32; break;
+	case SASAMI_FMMON_KEYS_SAP: pcmN = 8; break;
+	case SASAMI_FMMON_KEYS_WS: pcmN = 4; break;
+	case SASAMI_FMMON_KEYS_SCSP:
+	case SASAMI_FMMON_KEYS_AICA:
+	case SASAMI_FMMON_KEYS_PXT: pcmN = 32; break;
 	case SASAMI_FMMON_KEYS_SEGAPCM:
 		pcmN = (s_pcmCount > 0 && s_pcmCount <= 8) ? (int)s_pcmCount : 16;
 		break;
@@ -1982,7 +2000,10 @@ static int ArcIsProfile(unsigned profile)
 		|| profile == SASAMI_FMMON_KEYS_MULTIPCM
 		|| profile == SASAMI_FMMON_KEYS_C352
 		|| profile == SASAMI_FMMON_KEYS_SEGAPCM
-		|| profile == SASAMI_FMMON_KEYS_OKI) ? 1 : 0;
+		|| profile == SASAMI_FMMON_KEYS_OKI
+		|| profile == SASAMI_FMMON_KEYS_SCSP
+		|| profile == SASAMI_FMMON_KEYS_AICA
+		|| profile == SASAMI_FMMON_KEYS_PXT) ? 1 : 0;
 }
 
 static void ArcMarkReg(unsigned idx, uint8_t data)

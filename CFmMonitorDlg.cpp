@@ -852,7 +852,14 @@ static int FmIsArcadePcmProfile(unsigned p)
 		|| p == SASAMI_FMMON_KEYS_OKI
 		|| p == SASAMI_FMMON_KEYS_NCSF
 		|| p == SASAMI_FMMON_KEYS_SPC
-		|| p == SASAMI_FMMON_KEYS_PSF) ? 1 : 0;
+		|| p == SASAMI_FMMON_KEYS_PSF
+		|| p == SASAMI_FMMON_KEYS_USF
+		|| p == SASAMI_FMMON_KEYS_SCSP
+		|| p == SASAMI_FMMON_KEYS_AICA
+		|| p == SASAMI_FMMON_KEYS_PXT
+		|| p == SASAMI_FMMON_KEYS_VAG
+		|| p == SASAMI_FMMON_KEYS_SAP
+		|| p == SASAMI_FMMON_KEYS_WS) ? 1 : 0;
 }
 
 static int FmArcadePcmChannels(unsigned p)
@@ -863,6 +870,10 @@ static int FmArcadePcmChannels(unsigned p)
 	if (p == SASAMI_FMMON_KEYS_MULTIPCM) return 32;
 	if (p == SASAMI_FMMON_KEYS_C352) return 32;
 	if (p == SASAMI_FMMON_KEYS_PSF) return 24;
+	if (p == SASAMI_FMMON_KEYS_VAG) return 2;
+	if (p == SASAMI_FMMON_KEYS_SAP) return 8;
+	if (p == SASAMI_FMMON_KEYS_WS) return 4;
+	if (p == SASAMI_FMMON_KEYS_SCSP || p == SASAMI_FMMON_KEYS_AICA || p == SASAMI_FMMON_KEYS_PXT) return 32;
 	return 16;
 }
 
@@ -878,6 +889,13 @@ static const wchar_t* FmArcadePcmName(unsigned p)
 	case SASAMI_FMMON_KEYS_NCSF: return L"Nitro SPU";
 	case SASAMI_FMMON_KEYS_SPC: return L"S-DSP";
 	case SASAMI_FMMON_KEYS_PSF: return L"PS1 SPU";
+	case SASAMI_FMMON_KEYS_USF: return L"N64 RSP";
+	case SASAMI_FMMON_KEYS_SAP: return L"POKEY";
+	case SASAMI_FMMON_KEYS_WS: return L"WonderSwan";
+	case SASAMI_FMMON_KEYS_SCSP: return L"SCSP";
+	case SASAMI_FMMON_KEYS_AICA: return L"AICA";
+	case SASAMI_FMMON_KEYS_PXT: return L"Pxtone";
+	case SASAMI_FMMON_KEYS_VAG: return L"PS ADPCM";
 	default: return L"ArcadePCM";
 	}
 }
@@ -894,6 +912,13 @@ static const wchar_t* FmArcadePcmShort(unsigned p)
 	case SASAMI_FMMON_KEYS_NCSF: return L"NDS";
 	case SASAMI_FMMON_KEYS_SPC: return L"DSP";
 	case SASAMI_FMMON_KEYS_PSF: return L"SPU";
+	case SASAMI_FMMON_KEYS_USF: return L"N64";
+	case SASAMI_FMMON_KEYS_SAP: return L"POK";
+	case SASAMI_FMMON_KEYS_WS: return L"WS";
+	case SASAMI_FMMON_KEYS_SCSP: return L"SCSP";
+	case SASAMI_FMMON_KEYS_AICA: return L"AICA";
+	case SASAMI_FMMON_KEYS_PXT: return L"PXT";
+	case SASAMI_FMMON_KEYS_VAG: return L"VAG";
 	default: return L"PCM";
 	}
 }
@@ -2221,8 +2246,8 @@ void CFmMonitorDlg::DrawHexBank(CDC& dc, int x, int y, int cellW, int cellH, int
 	const COLORREF baseDark = RGB(24, 28, 32);
 	const COLORREF baseGroup = RGB(36, 52, 44);   /* 薄緑系グループ */
 	const COLORREF baseTouched = RGB(48, 72, 58);
-	/* 値変化フラッシュは鍵盤と同じ緑系（白 hi だと常時振動で真っ白に見える） */
-	const COLORREF hi = RGB(80, 220, 120);
+	/* 値が動いたセルは白。緑のままだと「書いてない」に見える */
+	const COLORREF hi = RGB(245, 245, 245);
 
 	for (int row = 0; row < rowCount; row++) {
 		_snwprintf_s(hdr, _TRUNCATE, L"%X", row);
@@ -3238,6 +3263,13 @@ void CFmMonitorDlg::DrawChannelKeys(CDC& dc, int x, int y, int w, int rowH, int 
 			case SASAMI_FMMON_KEYS_SPC: bump(L"DSP"); break;
 			case SASAMI_FMMON_KEYS_PSF: bump(L"SPU"); break;
 			case SASAMI_FMMON_KEYS_NCSF: bump(L"NDS"); break;
+			case SASAMI_FMMON_KEYS_USF: bump(L"N64"); break;
+			case SASAMI_FMMON_KEYS_SAP: bump(L"POK"); break;
+			case SASAMI_FMMON_KEYS_WS: bump(L"WS"); break;
+			case SASAMI_FMMON_KEYS_SCSP: bump(L"SCSP"); break;
+			case SASAMI_FMMON_KEYS_AICA: bump(L"AICA"); break;
+			case SASAMI_FMMON_KEYS_PXT: bump(L"PXT"); break;
+			case SASAMI_FMMON_KEYS_VAG: bump(L"VAG"); break;
 			case SASAMI_FMMON_KEYS_MIDI: bump(L"CH"); break;
 			default: break;
 			}
@@ -3483,6 +3515,13 @@ void CFmMonitorDlg::DrawChannelKeys(CDC& dc, int x, int y, int w, int rowH, int 
 				break;
 			}
 			case SASAMI_FMMON_KEYS_NCSF: pref = L"NDS"; break;
+			case SASAMI_FMMON_KEYS_USF: pref = L"N64"; break;
+			case SASAMI_FMMON_KEYS_SAP: pref = L"POK"; break;
+			case SASAMI_FMMON_KEYS_WS: pref = L"WS"; break;
+			case SASAMI_FMMON_KEYS_SCSP: pref = L"SCSP"; break;
+			case SASAMI_FMMON_KEYS_AICA: pref = L"AICA"; break;
+			case SASAMI_FMMON_KEYS_PXT: pref = L"PXT"; break;
+			case SASAMI_FMMON_KEYS_VAG: pref = L"VAG"; break;
 			case SASAMI_FMMON_KEYS_MIDI: pref = L"CH"; break;
 			case SASAMI_FMMON_KEYS_QSOUND: pref = L"QS"; break;
 			case SASAMI_FMMON_KEYS_RF5C: pref = L"RF"; break;
@@ -3781,6 +3820,13 @@ void CFmMonitorDlg::DrawHead(CDC& dc)
 			case SASAMI_FMMON_KEYS_PSF: chip = L"PSF  SPU"; break;
 			case SASAMI_FMMON_KEYS_GSF: chip = L"GSF  GB APU×4"; break;
 			case SASAMI_FMMON_KEYS_NCSF: chip = L"NCSF  Nitro"; break;
+			case SASAMI_FMMON_KEYS_USF: chip = L"USF  N64 RSP×16"; break;
+			case SASAMI_FMMON_KEYS_SAP: chip = L"SAP  POKEY×8"; break;
+			case SASAMI_FMMON_KEYS_WS: chip = L"WSR  WonderSwan×4"; break;
+			case SASAMI_FMMON_KEYS_SCSP: chip = L"SSF  SCSP×32"; break;
+			case SASAMI_FMMON_KEYS_AICA: chip = L"DSF  AICA×32"; break;
+			case SASAMI_FMMON_KEYS_PXT: chip = L"PXT  unit×32"; break;
+			case SASAMI_FMMON_KEYS_VAG: chip = L"PS  VAG×2"; break;
 			case SASAMI_FMMON_KEYS_MIDI: {
 				static wchar_t midChip[96];
 				if (m_dump.titleSjis[0]) {
@@ -4936,7 +4982,8 @@ void CFmMonitorDlg::DrawArcadePcmChPanel(CDC& dc, const CRect& rc, int ch, unsig
 			pan = ch;
 			pitch = ((int)b(o + 1) << 8) | (int)b(o + 2);
 		}
-	} else if (profile == SASAMI_FMMON_KEYS_NCSF) {
+	} else if (profile == SASAMI_FMMON_KEYS_NCSF || profile == SASAMI_FMMON_KEYS_USF || profile == SASAMI_FMMON_KEYS_VAG) {
+		/* USF: on, vol>>8, pitch lo, pitch hi。未対応だと P/V/Ctl が常に 0000 */
 		const int base = ch * 4;
 		ctl = b(base + 0);
 		vol = b(base + 1);
@@ -5262,8 +5309,8 @@ void CFmMonitorDlg::ApplyDump(const SasamiFmMonDump& d)
 				continue;
 			const int wrote = FmRegWrote(d, i);
 			const int changed = (d.regs[i] != m_dump.regs[i]) ? 1 : 0;
-			/* 未書き込みのスナップショットゆれは点滅させない。書いた番地の値変化だけフェード */
-			if (wrote && changed) {
+			/* MDX 等は書き込みビットが来ない。値が変わった番地自体を白にする */
+			if (changed) {
 				FmBump(m_fade[i]);
 				m_touched[i] = 1;
 				chgHex = 1;
@@ -5278,7 +5325,7 @@ void CFmMonitorDlg::ApplyDump(const SasamiFmMonDump& d)
 				const int tidx = 0x200 + i;
 				const int wrote = FmBank2Wrote(d, i);
 				const int changed = (d.bank2[i] != m_dump.bank2[i]) ? 1 : 0;
-				if (wrote && changed) {
+				if (changed) {
 					FmBump(m_fade[tidx]);
 					m_touched[tidx] = 1;
 					chgHex = 1;
@@ -5522,9 +5569,13 @@ void CFmMonitorDlg::ApplyDump(const SasamiFmMonDump& d)
 			if (FmHexIsFmpAdpcmNoise(d, i))
 				continue;
 			const int wrote = FmRegWrote(d, i);
-			/* 非ゼロだけでは触った扱いにしない（未使用の初期値が全部白になる） */
-			if (wrote || (d.version < 5 && d.regs[i] != 0))
+			const int opm = (d.dumpFlags & SASAMI_FMMON_FLAG_OPM) ? 1 : 0;
+			/* 初回 OPM は書き込みビットが空のまま値だけ届く。ゼロ以外を書いた扱いにする */
+			if (wrote || (opm && d.regs[i] != 0) || (d.version < 5 && d.regs[i] != 0)) {
 				m_touched[i] = 1;
+				if (wrote || (opm && d.regs[i] != 0))
+					FmBump(m_fade[i]);
+			}
 		}
 		if (d.version >= 7) {
 			for (int i = 0; i < 0x100; i++)

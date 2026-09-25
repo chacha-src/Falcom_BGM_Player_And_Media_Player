@@ -12791,12 +12791,19 @@ void CPlayList::plugs(CString fff, playlistdata *p,TCHAR* kpi, BYTE& kv)
 		|| wantExt == L".psf2" || wantExt == L".minipsf2"
 		|| wantExt == L".gsf" || wantExt == L".minigsf"
 		|| wantExt == L".2sf" || wantExt == L".mini2sf"
-		|| wantExt == L".ncsf" || wantExt == L".minincsf") ? 1 : 0;
+		|| wantExt == L".ncsf" || wantExt == L".minincsf"
+		|| wantExt == L".usf" || wantExt == L".miniusf") ? 1 : 0;
 	auto pickKpi = [&](int nativeOnly, int dumpOnly) -> int {
 		for (int i = 0; i < kpicnt; i++) {
 			if (plugkind[i] != PLUGKIND_KPI) continue;
 			if (nativeOnly && kpiarch[i] && kpiarch[i] != nativeArch) continue;
 			if (wantExt == L".mpy" || wantExt == L".mpw2" || wantExt == L".mpsmv") continue;
+			if (wantExt == L".usf" || wantExt == L".miniusf") {
+				CString n = kpif[i];
+				n.MakeLower();
+				/* in_usf / Highly Experimental は Open で N64 起動して UI が固まる */
+				if (n.Find(L"in_usf") >= 0) continue;
+			}
 			if (dumpOnly && !kpiHasMonDump(i)) continue;
 			for (int j = 0;; j++) {
 				if (ext[i][j] == L"") break;
@@ -12813,11 +12820,12 @@ void CPlayList::plugs(CString fff, playlistdata *p,TCHAR* kpi, BYTE& kv)
 		return 0;
 	};
 	flg = 0;
-	auto preferDumpName = [&](const wchar_t* needle, const wchar_t* exclude) -> int {
+	auto preferDumpNameEx = [&](const wchar_t* needle, const wchar_t* exclude, int nativeOnly, int checkedOnly) -> int {
 		for (int i = 0; i < kpicnt; i++) {
 			if (plugkind[i] != PLUGKIND_KPI) continue;
-			if (kpiarch[i] && kpiarch[i] != nativeArch) continue;
-			if (!kpiHasMonDump(i) || kpichk[i] != 1) continue;
+			if (nativeOnly && kpiarch[i] && kpiarch[i] != nativeArch) continue;
+			if (!kpiHasMonDump(i)) continue;
+			if (checkedOnly && kpichk[i] != 1) continue;
 			CString low = kpif[i];
 			low.MakeLower();
 			if (low.Find(needle) < 0)
@@ -12834,6 +12842,9 @@ void CPlayList::plugs(CString fff, playlistdata *p,TCHAR* kpi, BYTE& kv)
 			}
 		}
 		return 0;
+	};
+	auto preferDumpName = [&](const wchar_t* needle, const wchar_t* exclude) -> int {
+		return preferDumpNameEx(needle, exclude, 1, 1);
 	};
 	if (chipWantMon && wantExt == L".spc")
 		flg = preferDumpName(L"snesapu", NULL);
@@ -12857,6 +12868,12 @@ void CPlayList::plugs(CString fff, playlistdata *p,TCHAR* kpi, BYTE& kv)
 		flg = preferDumpName(L"kb2sf", NULL);
 	if (chipWantMon && !flg && (wantExt == L".ncsf" || wantExt == L".minincsf"))
 		flg = preferDumpName(L"kbncsf", NULL);
+	if (chipWantMon && !flg && (wantExt == L".usf" || wantExt == L".miniusf")) {
+		/* kbusf は x86 dynarec。x64 本体でも Host32 dump を先に取る */
+		flg = preferDumpNameEx(L"kbusf", L"in_usf", 1, 1);
+		if (!flg) flg = preferDumpNameEx(L"kbusf", L"in_usf", 0, 1);
+		if (!flg) flg = preferDumpNameEx(L"kbusf", L"in_usf", 0, 0);
+	}
 	if (chipWantMon && !flg) {
 		flg = pickKpi(1, 1);
 		if (!flg) flg = pickKpi(0, 1);
@@ -12901,8 +12918,7 @@ void CPlayList::plugs(CString fff, playlistdata *p,TCHAR* kpi, BYTE& kv)
 		return;
 	if ((wantExt == L".gsf" || wantExt == L".minigsf") && preferWinampDll(L"in_gsf.dll"))
 		return;
-	if ((wantExt == L".usf" || wantExt == L".miniusf") && preferWinampDll(L"in_usf.dll"))
-		return;
+	/* USF は dump kbusf のみ。in_usf.dll は Open で UI が固まりモニタも出ない */
 	{
 		CString zx = fff;
 		zx.MakeLower();
@@ -12957,6 +12973,11 @@ void CPlayList::plugswinamp(CString fff, playlistdata *p, TCHAR* kpi, BYTE& kv)
 		for (int j = 0;; j++) {
 			if (ext[i][j] == L"") break;
 			ss = fff.Right(fff.GetLength() - fff.ReverseFind(L'.')); ss.MakeLower();
+			if (ss == L".usf" || ss == L".miniusf") {
+				CString n = kpif[i];
+				n.MakeLower();
+				if (n.Find(L"in_usf") >= 0) continue;
+			}
 			if (ext[i][j] == ss) {
 				_tcscpy(p->fol, fff);
 				p->sub = MODE_PLUGIN_WINAMP;

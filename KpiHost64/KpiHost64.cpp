@@ -715,31 +715,74 @@ struct Session
 static uint32_t g_nextSessionId = 1;
 static std::unordered_map<uint32_t, Session> g_sessions;
 
-// パイプはバイトモードなので、要求サイズまで繰り返して読む。途中で切れたらクライアント切断。
-static bool ReadExact(HANDLE h, void* buf, DWORD bytes)
+// プラグインがこのスレッドの窓へ SendMessage しているあいだ、パイプ待ちで
+// メッセージを捨てると Winamp デコード／KPI 解放と相互待ちになり UI が戻らない。
+static void PumpServeMsgs()
+{
+	MSG msg;
+	while (PeekMessageW(&msg, NULL, 0, 0, PM_REMOVE)) {
+		if (msg.message == WM_QUIT) {
+			PostQuitMessage((int)msg.wParam);
+			continue;
+		}
+		TranslateMessage(&msg);
+		DispatchMessageW(&msg);
+	}
+}
+
+// パイプは FILE_FLAG_OVERLAPPED。OVERLAPPED 無しの ReadFile/WriteFile は
+// 完了を誤報したり、切替のたびに読みが戻らなくなる。待ちのあいだはポンプする。
+static bool XferExact(HANDLE h, void* buf, DWORD bytes, int writing)
 {
 	uint8_t* p = (uint8_t*)buf;
 	DWORD remain = bytes;
 	while (remain) {
-		DWORD rd = 0;
-		if (!ReadFile(h, p, remain, &rd, NULL) || rd == 0) return false;
-		p += rd;
-		remain -= rd;
+		OVERLAPPED ov{};
+		ov.hEvent = CreateEventW(NULL, TRUE, FALSE, NULL);
+		if (!ov.hEvent) return false;
+		DWORD got = 0;
+		BOOL ok = writing
+			? WriteFile(h, p, remain, &got, &ov)
+			: ReadFile(h, p, remain, &got, &ov);
+		if (!ok && GetLastError() != ERROR_IO_PENDING) {
+			CloseHandle(ov.hEvent);
+			return false;
+		}
+		if (!ok) {
+			for (;;) {
+				const DWORD w = MsgWaitForMultipleObjects(1, &ov.hEvent, FALSE, INFINITE, QS_ALLINPUT);
+				if (w == WAIT_OBJECT_0)
+					break;
+				if (w == WAIT_OBJECT_0 + 1) {
+					PumpServeMsgs();
+					continue;
+				}
+				CancelIoEx(h, &ov);
+				WaitForSingleObject(ov.hEvent, INFINITE);
+				CloseHandle(ov.hEvent);
+				return false;
+			}
+			if (!GetOverlappedResult(h, &ov, &got, FALSE)) {
+				CloseHandle(ov.hEvent);
+				return false;
+			}
+		}
+		CloseHandle(ov.hEvent);
+		if (got == 0) return false;
+		p += got;
+		remain -= got;
 	}
 	return true;
 }
 
+static bool ReadExact(HANDLE h, void* buf, DWORD bytes)
+{
+	return XferExact(h, buf, bytes, 0);
+}
+
 static bool WriteExact(HANDLE h, const void* buf, DWORD bytes)
 {
-	const uint8_t* p = (const uint8_t*)buf;
-	DWORD remain = bytes;
-	while (remain) {
-		DWORD wr = 0;
-		if (!WriteFile(h, p, remain, &wr, NULL) || wr == 0) return false;
-		p += wr;
-		remain -= wr;
-	}
-	return true;
+	return XferExact(h, (void*)buf, bytes, 1);
 }
 
 // ペイロードから [u32 文字数][wchar_t[]] を読む。p を進める。
@@ -1166,6 +1209,8 @@ static uint32_t Cmd_Render(uint32_t sessionId, uint32_t bytesWanted, std::vector
 	}
 
 	while (remain > 0) {
+		// チャンクのあいだに、プラグインワーカーからの SendMessage を流す。
+		PumpServeMsgs();
 		const DWORD ask = (remain > kChunkSamples) ? kChunkSamples : remain;
 		uint8_t* part = s.pcmBuf + gotBytes;
 		const size_t partCap = (size_t)ask * (size_t)bytesPerFrame;
@@ -1308,6 +1353,44 @@ static uint32_t Cmd_Seek(uint32_t sessionId, uint64_t posSample, uint32_t flag, 
 	return KPIHOST64_STATUS_OK;
 }
 
+// Close/Release はプラグインワーカーがこのスレッドの窓へ SendMessage する。
+// 同じスレッドで待つと Winamp へ切り替える瞬間にパイプが止り、本体 UI が戻らない。
+static DWORD WINAPI KpiReleaseThread(LPVOID p)
+{
+	Session* s = (Session*)p;
+	if (!s) return 0;
+	if (s->kpiApi == 2) {
+		if (s->kmp && s->hkmp && s->kmp->Close) s->kmp->Close(s->hkmp);
+	} else {
+		if (s->dec) s->dec->Release();
+		if (s->file) s->file->Release();
+		if (s->folder) s->folder->Release();
+		if (s->mod) s->mod->Release();
+	}
+	s->dec = nullptr;
+	s->file = nullptr;
+	s->folder = nullptr;
+	s->mod = nullptr;
+	s->kmp = nullptr;
+	s->hkmp = nullptr;
+	return 0;
+}
+
+static void WaitThreadPump(HANDLE th)
+{
+	if (!th) return;
+	for (;;) {
+		const DWORD w = MsgWaitForMultipleObjects(1, &th, FALSE, INFINITE, QS_ALLINPUT);
+		if (w == WAIT_OBJECT_0)
+			return;
+		if (w == WAIT_OBJECT_0 + 1) {
+			PumpServeMsgs();
+			continue;
+		}
+		return;
+	}
+}
+
 // デコーダ・ファイル・DLL を解放してマップから消す。
 static uint32_t Cmd_Close(uint32_t sessionId)
 {
@@ -1316,13 +1399,13 @@ static uint32_t Cmd_Close(uint32_t sessionId)
 	Session s = it->second;
 	g_sessions.erase(it);
 
-	if (s.kpiApi == 2) {
-		if (s.kmp && s.hkmp && s.kmp->Close) s.kmp->Close(s.hkmp);
+	HANDLE th = CreateThread(NULL, 0, KpiReleaseThread, &s, 0, NULL);
+	if (th) {
+		WaitThreadPump(th);
+		WaitForSingleObject(th, INFINITE);
+		CloseHandle(th);
 	} else {
-		if (s.dec) s.dec->Release();
-		if (s.file) s.file->Release();
-		if (s.folder) s.folder->Release();
-		if (s.mod) s.mod->Release();
+		KpiReleaseThread(&s);
 	}
 	if (s.hDll) FreeLibrary(s.hDll);
 	delete[] s.pcmBuf;

@@ -22,6 +22,8 @@ extern BYTE plugkind[];
 extern BOOL kpichk[];
 extern int kpicnt;
 extern KpiHost64Client g_kpiHost;
+extern BOOL thn1;
+extern int stf;
 
 enum { WA_RING_BYTES = 2 * 1024 * 1024 };
 
@@ -382,15 +384,84 @@ static int WaUsesOutput(const In_Module* in)
 	return (in->UsesOutputPlug & IN_MODULE_FLAG_USES_OUTPUT_PLUGIN) ? 1 : 0;
 }
 
+// Init の窓は呼び出しスレッド所有。Play/Stop をそこでブロックすると
+// デコード側の SendMessage が戻らず、KPI 解放（別スレッド）と UI が相互待ちになる。
+static void WaPumpMsgs()
+{
+	MSG msg;
+	while (PeekMessageW(&msg, NULL, 0, 0, PM_REMOVE)) {
+		if (msg.message == WM_QUIT) {
+			PostQuitMessage((int)msg.wParam);
+			continue;
+		}
+		TranslateMessage(&msg);
+		DispatchMessageW(&msg);
+	}
+}
+
+enum { WA_OP_PLAY = 1, WA_OP_STOP = 2, WA_OP_SEEK = 3 };
+struct WaJob {
+	int op;
+	In_Module* in;
+	const in_char* path;
+	int iarg;
+	int rc;
+};
+static DWORD WINAPI WaJobThread(LPVOID p)
+{
+	WaJob* j = (WaJob*)p;
+	if (!j || !j->in) return 0;
+	if (j->op == WA_OP_PLAY)
+		j->rc = j->in->Play(j->path);
+	else if (j->op == WA_OP_STOP) {
+		if (j->in->Stop) j->in->Stop();
+		if (j->in->Quit) j->in->Quit();
+		j->rc = 0;
+	} else if (j->op == WA_OP_SEEK) {
+		if (j->in->SetOutputTime) j->in->SetOutputTime(j->iarg);
+		j->rc = 0;
+	}
+	return 0;
+}
+
+static int WaRunJob(WaJob& j)
+{
+	j.rc = -1;
+	HANDLE th = CreateThread(NULL, 0, WaJobThread, &j, 0, NULL);
+	if (!th) return -1;
+	for (;;) {
+		const DWORD w = MsgWaitForMultipleObjects(1, &th, FALSE, INFINITE, QS_ALLINPUT);
+		if (w == WAIT_OBJECT_0)
+			break;
+		if (w == WAIT_OBJECT_0 + 1) {
+			WaPumpMsgs();
+			continue;
+		}
+		break;
+	}
+	WaitForSingleObject(th, INFINITE);
+	CloseHandle(th);
+	return j.rc;
+}
+
 static int WaCallPlay(In_Module* in, const wchar_t* mediaPath)
 {
 	if (!in || !in->Play) return 1;
-	if (WaIsUnicode(in))
-		return in->Play((const in_char*)mediaPath);
+	WaJob job{};
+	job.op = WA_OP_PLAY;
+	job.in = in;
 	char pathA[MAX_PATH * 2];
-	pathA[0] = 0;
-	WideCharToMultiByte(CP_ACP, 0, mediaPath, -1, pathA, (int)sizeof(pathA), NULL, NULL);
-	return in->Play((const in_char*)pathA);
+	if (WaIsUnicode(in))
+		job.path = (const in_char*)mediaPath;
+	else {
+		pathA[0] = 0;
+		WideCharToMultiByte(CP_ACP, 0, mediaPath, -1, pathA, (int)sizeof(pathA), NULL, NULL);
+		job.path = (const in_char*)pathA;
+	}
+	const int rc = WaRunJob(job);
+	if (rc < 0)
+		return 1;
+	return rc;
 }
 
 static void WaAddExt(int& ei, const CStringA& tokA)
@@ -556,7 +627,9 @@ int PluginWinamp_Open(const wchar_t* dllPath, const wchar_t* mediaPath, HWND /*h
 	for (int i = 0; i < 5000; i++) {
 		if (InterlockedCompareExchange(&g_waFmtKnown, 0, 0)) break;
 		if (InterlockedCompareExchange(&g_waEof, 0, 0)) break;
-		Sleep(1);
+		const DWORD w = MsgWaitForMultipleObjects(0, NULL, FALSE, 1, QS_ALLINPUT);
+		if (w == WAIT_OBJECT_0)
+			WaPumpMsgs();
 	}
 	if (!InterlockedCompareExchange(&g_waFmtKnown, 0, 0)) {
 		PluginWinamp_Close();
@@ -581,6 +654,8 @@ int PluginWinamp_OpenRemote(const wchar_t* dllPath, const wchar_t* mediaPath)
 	g_waBps = fr.bitsPerSample > 0 ? fr.bitsPerSample : 16;
 	g_waLengthMs = (fr.lengthSamples > 0 && g_waRate > 0) ? (int)(fr.lengthSamples * 1000 / g_waRate) : 0;
 	g_waOpenOk = 1;
+	// Close() が立てた停止フラグのままだと Read が即 0 を返し、曲が終わった扱いで 0:00.00 のまま止まる。
+	InterlockedExchange(&g_waStopping, 0);
 	return 1;
 }
 
@@ -599,8 +674,13 @@ void PluginWinamp_Close()
 		In_Module* in = g_waIn;
 		g_waIn = NULL;
 		try {
-			if (in->Stop) in->Stop();
-			if (in->Quit) in->Quit();
+			WaJob job{};
+			job.op = WA_OP_STOP;
+			job.in = in;
+			if (WaRunJob(job) < 0) {
+				if (in->Stop) in->Stop();
+				if (in->Quit) in->Quit();
+			}
 		}
 		catch (...) {}
 	}
@@ -626,7 +706,12 @@ int PluginWinamp_SeekMs(int timeMs)
 	}
 	if (!g_waIn || !g_waIn->SetOutputTime) return 0;
 	InterlockedExchange(&g_waEof, 0);
-	g_waIn->SetOutputTime(timeMs);
+	WaJob job{};
+	job.op = WA_OP_SEEK;
+	job.in = g_waIn;
+	job.iarg = timeMs;
+	if (WaRunJob(job) < 0)
+		return 0;
 	return 1;
 }
 
@@ -645,19 +730,41 @@ int PluginWinamp_Read(BYTE* dst, int bytesWanted)
 {
 	if (!dst || bytesWanted <= 0 || !g_waOpenOk) return 0;
 	if (g_waRemote) {
-		std::vector<uint8_t> pcm;
-		bool eof = false;
-		if (!g_kpiHost.ForeignRender(g_waRemoteSid, (uint32_t)bytesWanted, pcm, eof))
-			return 0;
-		int n = (int)pcm.size();
-		if (n > bytesWanted) n = bytesWanted;
-		if (n > 0) memcpy(dst, pcm.data(), n);
-		return n;
+		// ホストは溜まっている分だけ返す。5秒待ちをパイプの中でやると
+		// 曲切替の Close が届かず UI が固まる（空読みが2回と窓待ちで約13秒）。
+		int got = 0;
+		DWORD tIdle = GetTickCount();
+		while (got < bytesWanted) {
+			if (thn1 || stf) break;
+			if (InterlockedCompareExchange(&g_waStopping, 0, 0)) break;
+			std::vector<uint8_t> pcm;
+			bool eof = false;
+			if (!g_kpiHost.ForeignRender(g_waRemoteSid, (uint32_t)(bytesWanted - got), pcm, eof))
+				break;
+			int n = (int)pcm.size();
+			if (n > bytesWanted - got) n = bytesWanted - got;
+			if (n > 0) {
+				memcpy(dst + got, pcm.data(), (size_t)n);
+				got += n;
+				tIdle = GetTickCount();
+				continue;
+			}
+			if (eof) break;
+			// 0 をすぐ返すと曲終端になる。UI は最初の PCM だけ短く待つ。
+			// 5 秒待ちは再生スレッドだけ（UI だとバナーが止まったままになる）。
+			extern DWORD g_oggUiThreadId;
+			const DWORD idleCap = (g_oggUiThreadId != 0 && GetCurrentThreadId() == g_oggUiThreadId)
+				? 800u : 5000u;
+			if (GetTickCount() - tIdle > idleCap) break;
+			Sleep(2);
+		}
+		return got;
 	}
 	WaEnsureCs();
 	int got = 0;
 	DWORD tIdle = GetTickCount();
 	while (got < bytesWanted) {
+		if (thn1 || stf) break;
 		if (InterlockedCompareExchange(&g_waStopping, 0, 0)) break;
 		EnterCriticalSection(&g_waCs);
 		int take = bytesWanted - got;
@@ -683,7 +790,11 @@ int PluginWinamp_Read(BYTE* dst, int bytesWanted)
 		if (InterlockedCompareExchange(&g_waEof, 0, 0)) break;
 		if (!g_waPlaying) break;
 		if (GetTickCount() - tIdle > 5000) break; // デコーダ無応答の保険
-		Sleep(1);
+		{
+			const DWORD w = MsgWaitForMultipleObjects(0, NULL, FALSE, 1, QS_ALLINPUT);
+			if (w == WAIT_OBJECT_0)
+				WaPumpMsgs();
+		}
 	}
 	return got;
 }

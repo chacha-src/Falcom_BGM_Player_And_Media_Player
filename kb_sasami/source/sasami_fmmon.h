@@ -105,7 +105,14 @@ enum {
 	SASAMI_FMMON_KEYS_C352 = 13,    /* Namco C352 ×32 */
 	SASAMI_FMMON_KEYS_SEGAPCM = 14, /* SegaPCM ×16 */
 	SASAMI_FMMON_KEYS_OKI = 15,     /* OKIM6295/6258 ×4 */
-	SASAMI_FMMON_KEYS_MULTIPCM = 16 /* YMW-258 MultiPCM ×32 (daytona dual) */
+	SASAMI_FMMON_KEYS_MULTIPCM = 16, /* YMW-258 MultiPCM ×32 (daytona dual) */
+	SASAMI_FMMON_KEYS_USF = 17,      /* N64 RSP HLE resample ×16 */
+	SASAMI_FMMON_KEYS_SAP = 18,      /* Atari POKEY ×8 */
+	SASAMI_FMMON_KEYS_WS = 19,       /* WonderSwan ×4 */
+	SASAMI_FMMON_KEYS_SCSP = 20,     /* Saturn SCSP ×32 */
+	SASAMI_FMMON_KEYS_AICA = 21,     /* Dreamcast AICA slots 0-31 */
+	SASAMI_FMMON_KEYS_PXT = 22,      /* Pxtone units ×32 */
+	SASAMI_FMMON_KEYS_VAG = 23       /* PS ADPCM VAG/SVAG/SFS ×2 */
 };
 /* pad6[2]: what this dump actually provides (grow keys → regs → panels) */
 enum {

@@ -53,25 +53,51 @@ bool KpiV5SetStr(const std::wstring& pluginName, const std::wstring& section, co
 	return ret == ERROR_SUCCESS;
 }
 
+/* kbspu は PATH が空だと Open が即失敗する。x86 の spuEternal.dll は x64 の kpi から
+   LoadLibrary できないので、同じフォルダに置いた x64 spuPeopsSound.dll を既定にする。 */
+static std::wstring KbspuDefaultSpuDll()
+{
+	wchar_t exe[MAX_PATH] = {};
+	const DWORD n = GetModuleFileNameW(NULL, exe, MAX_PATH);
+	if (!n || n >= MAX_PATH) return L"";
+	wchar_t* slash = wcsrchr(exe, L'\\');
+	if (!slash) return L"";
+	*slash = 0;
+	std::wstring p = exe;
+	p += L"\\Plugins\\Kobarin\\kbspu\\spuPeopsSound.dll";
+	if (GetFileAttributesW(p.c_str()) == INVALID_FILE_ATTRIBUTES) return L"";
+	return p;
+}
+
 std::wstring KpiV5GetStr(const std::wstring& pluginName, const std::wstring& section, const std::wstring& key, const std::wstring& defaultValue)
 {
-	if (pluginName.empty() || key.empty()) return defaultValue;
-	HKEY hKey = NULL;
-	LONG ret = RegOpenKeyExW(HKEY_CURRENT_USER, BuildKeyPath(pluginName, section).c_str(), 0, KEY_READ, &hKey);
-	if (ret != ERROR_SUCCESS) return defaultValue;
-	DWORD type = 0;
-	DWORD size = 0;
-	ret = RegQueryValueExW(hKey, key.c_str(), NULL, &type, NULL, &size);
-	if (ret != ERROR_SUCCESS || (type != REG_SZ && type != REG_EXPAND_SZ) || size < sizeof(wchar_t)) {
-		RegCloseKey(hKey);
-		return defaultValue;
+	std::wstring value = defaultValue;
+	if (!pluginName.empty() && !key.empty()) {
+		HKEY hKey = NULL;
+		LONG ret = RegOpenKeyExW(HKEY_CURRENT_USER, BuildKeyPath(pluginName, section).c_str(), 0, KEY_READ, &hKey);
+		if (ret == ERROR_SUCCESS) {
+			DWORD type = 0;
+			DWORD size = 0;
+			ret = RegQueryValueExW(hKey, key.c_str(), NULL, &type, NULL, &size);
+			if (ret == ERROR_SUCCESS && (type == REG_SZ || type == REG_EXPAND_SZ) && size >= sizeof(wchar_t)) {
+				std::vector<wchar_t> buf((size / sizeof(wchar_t)) + 1, 0);
+				ret = RegQueryValueExW(hKey, key.c_str(), NULL, &type, (LPBYTE)buf.data(), &size);
+				if (ret == ERROR_SUCCESS) {
+					buf.back() = 0;
+					value = buf.data();
+				}
+			}
+			RegCloseKey(hKey);
+		}
 	}
-	std::vector<wchar_t> buf((size / sizeof(wchar_t)) + 1, 0);
-	ret = RegQueryValueExW(hKey, key.c_str(), NULL, &type, (LPBYTE)buf.data(), &size);
-	RegCloseKey(hKey);
-	if (ret != ERROR_SUCCESS) return defaultValue;
-	buf.back() = 0;
-	return std::wstring(buf.data());
+	if (value.empty()
+		&& KpiV5NormalizePluginName(pluginName) == L"kbspu"
+		&& _wcsicmp(section.c_str(), L"General") == 0
+		&& _wcsicmp(key.c_str(), L"PATH") == 0) {
+		const std::wstring fb = KbspuDefaultSpuDll();
+		if (!fb.empty()) return fb;
+	}
+	return value;
 }
 
 bool KpiV5SetBin(const std::wstring& pluginName, const std::wstring& section, const std::wstring& key, const BYTE* data, DWORD size)

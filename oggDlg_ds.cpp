@@ -1282,7 +1282,16 @@ UINT HandleNotifications(LPVOID)
 
 		/* 動画 Run は DirectShow 側。fill スレッドへ移さない（COM アパート）。
 		   GetCheck は SendMessage。終了 Join 中に呼ばない。 */
-		if (!PlayAbortIsSet() && og && og->m_dou.GetCheck() == 1 && pGraphBuilder && pMediaControl) {
+		/* GetCheck は UI への SendMessage。UI がプラグイン読みで寝ていると
+		   通知スレッドが戻らず、UI 側の Join / DS 待ちと相互に固まる。 */
+		int douOn = 0;
+		if (!PlayAbortIsSet() && og && ::IsWindow(og->m_dou.GetSafeHwnd())) {
+			DWORD_PTR chk = 0;
+			if (::SendMessageTimeoutW(og->m_dou.GetSafeHwnd(), BM_GETCHECK, 0, 0,
+				SMTO_ABORTIFHUNG | SMTO_BLOCK, 15, &chk) != 0)
+				douOn = (chk == BST_CHECKED) ? 1 : 0;
+		}
+		if (douOn && pGraphBuilder && pMediaControl) {
 			if (timeee > 900 && dougainit == 0) {
 				pMediaControl->Run();
 				dougainit = 1;
