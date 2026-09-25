@@ -28,8 +28,8 @@ void CMpDupesDlg::DoDataExchange(CDataExchange* pDX)
 }
 
 BEGIN_MESSAGE_MAP(CMpDupesDlg, CCustomBlurDialogBase)
-	ON_BN_CLICKED(IDC_MPD_DELETE, &CMpDupesDlg::OnBnClickedDelete)
-	ON_BN_CLICKED(IDC_MPD_CLOSE, &CMpDupesDlg::OnBnClickedClose)
+	ON_BN_CLICKED(IDC_MPD_DELETE, OnBnClickedDelete)
+	ON_BN_CLICKED(IDC_MPD_CLOSE, OnBnClickedClose)
 	ON_WM_CLOSE()
 	ON_WM_CTLCOLOR()
 END_MESSAGE_MAP()

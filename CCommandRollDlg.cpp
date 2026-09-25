@@ -1,4 +1,4 @@
-﻿#include "stdafx.h"
+#include "stdafx.h"
 #include "CCommandRollDlg.h"
 #include "CPromptDlg.h"
 #include "CPromptEngine.h"
@@ -1378,16 +1378,16 @@ void CCommandRollDlg::DoDataExchange(CDataExchange* pDX)
 }
 
 BEGIN_MESSAGE_MAP(CCommandRollDlg, CCustomBlurDialogExBase)
-	ON_BN_CLICKED(IDC_MCR_CLOSE, &CCommandRollDlg::OnCloseBtn)
-	ON_BN_CLICKED(IDC_MCR_ZOOMIN, &CCommandRollDlg::OnZoomIn)
-	ON_BN_CLICKED(IDC_MCR_ZOOMOUT, &CCommandRollDlg::OnZoomOut)
-	ON_BN_CLICKED(IDC_MCR_HELP, &CCommandRollDlg::OnHelpBtn)
-	ON_BN_CLICKED(IDC_MCR_ANALYZE, &CCommandRollDlg::OnAnalyze)
-	ON_BN_CLICKED(IDC_MCR_RUN, &CCommandRollDlg::OnRun)
-	ON_BN_CLICKED(IDC_MCR_STOP, &CCommandRollDlg::OnStop)
-	ON_BN_CLICKED(IDC_MCR_RESET, &CCommandRollDlg::OnReset)
-	ON_BN_CLICKED(IDC_MCR_CLEAR, &CCommandRollDlg::OnClear)
-	ON_CBN_SELCHANGE(IDC_MCR_MODE, &CCommandRollDlg::OnModeSel)
+	ON_BN_CLICKED(IDC_MCR_CLOSE, OnCloseBtn)
+	ON_BN_CLICKED(IDC_MCR_ZOOMIN, OnZoomIn)
+	ON_BN_CLICKED(IDC_MCR_ZOOMOUT, OnZoomOut)
+	ON_BN_CLICKED(IDC_MCR_HELP, OnHelpBtn)
+	ON_BN_CLICKED(IDC_MCR_ANALYZE, OnAnalyze)
+	ON_BN_CLICKED(IDC_MCR_RUN, OnRun)
+	ON_BN_CLICKED(IDC_MCR_STOP, OnStop)
+	ON_BN_CLICKED(IDC_MCR_RESET, OnReset)
+	ON_BN_CLICKED(IDC_MCR_CLEAR, OnClear)
+	ON_CBN_SELCHANGE(IDC_MCR_MODE, OnModeSel)
 	ON_WM_SIZE()
 	ON_WM_ENTERSIZEMOVE()
 	ON_WM_EXITSIZEMOVE()
@@ -1856,7 +1856,7 @@ void CCommandRollDlg::OnAnalyze()
 	cur.Trim();
 	const BOOL hasText = !cur.IsEmpty() || m_view.m_evCount > 0;
 	CString ask = hasText
-		? LL14(L"選択中の曲を読込しながら解析します。\r\n再生中の曲は一時停止されます。\r\n現在のコマンドは解析結果で上書きされます。よろしいですか？",
+		? CString(LL14(L"選択中の曲を読込しながら解析します。\r\n再生中の曲は一時停止されます。\r\n現在のコマンドは解析結果で上書きされます。よろしいですか？",
 			L"Analyze the selected track while loading.\r\nPlayback will pause.\r\nCurrent commands will be replaced. Continue?",
 			L"Analyser la piste. Lecture interrompue. Commandes remplacees. Continuer ?",
 			L"Analizzare la traccia. Riproduzione interrotta. Comandi sostituiti. Continuare?",
@@ -1869,8 +1869,8 @@ void CCommandRollDlg::OnAnalyze()
 			L"Analisar a faixa. Reproducao pausada. Comandos substituidos. Continuar?",
 			L"Track analyseren. Afspelen pauzeert. Opdrachten worden vervangen. Doorgaan?",
 			L"Analiza utworu. Odtwarzanie wstrzymane. Komendy zostana zastapione. Kontynuowac?",
-			L"Parcayi analiz et. Calma duraklar. Komutlar degisir. Devam?")
-		: LL14(L"選択中の曲を読込しながら解析します。\r\n再生中の曲は一時停止されます。よろしいですか？",
+			L"Parcayi analiz et. Calma duraklar. Komutlar degisir. Devam?"))
+		: CString(LL14(L"選択中の曲を読込しながら解析します。\r\n再生中の曲は一時停止されます。よろしいですか？",
 			L"Analyze the selected track while loading.\r\nCurrent playback will pause. Continue?",
 			L"Analyser la piste. Lecture interrompue. Continuer ?",
 			L"Analizzare la traccia. Riproduzione interrotta. Continuare?",
@@ -1883,7 +1883,7 @@ void CCommandRollDlg::OnAnalyze()
 			L"Analisar a faixa. A reproducao sera pausada. Continuar?",
 			L"Track analyseren. Afspelen wordt gepauzeerd. Doorgaan?",
 			L"Analiza utworu. Odtwarzanie zostanie wstrzymane. Kontynuowac?",
-			L"Parcayi analiz et. Calma duraklar. Devam?");
+			L"Parcayi analiz et. Calma duraklar. Devam?"));
 	if (AfxMessageBox(ask, MB_YESNO | MB_ICONQUESTION) != IDYES)
 		return;
 
@@ -1908,7 +1908,7 @@ void CCommandRollDlg::OnAnalyze()
 
 	if (!ok) {
 		AfxMessageBox(err.IsEmpty()
-			? LL14(L"解析に失敗しました。", L"Analysis failed.", L"Echec analyse.", L"Analisi fallita.", L"Error de analisis.", L"분석 실패.", L"分析失败。", L"فشل التحليل.", L"Ошибка анализа.", L"Analyse fehlgeschlagen.", L"Falha na analise.", L"Analyse mislukt.", L"Blad analizy.", L"Analiz basarisiz.")
+			? CString(LL14(L"解析に失敗しました。", L"Analysis failed.", L"Echec analyse.", L"Analisi fallita.", L"Error de analisis.", L"분석 실패.", L"分析失败。", L"فشل التحليل.", L"Ошибка анализа.", L"Analyse fehlgeschlagen.", L"Falha na analise.", L"Analyse mislukt.", L"Blad analizy.", L"Analiz basarisiz."))
 			: err);
 		return;
 	}

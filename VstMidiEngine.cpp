@@ -1,4 +1,4 @@
-﻿// 本体と KpiHost64 が同じソースを使う。KpiHost64.exe は VstMidiEngine_k64.cpp 経由。
+// 本体と KpiHost64 が同じソースを使う。KpiHost64.exe は VstMidiEngine_k64.cpp 経由。
 // 以前はホスト側にコピーがあり、VST2 修正が ogg.exe にしか入らなかった。
 // KPIHOST64_BUILD 時は stdafx.h が MFC 無しヘッダへ切り替わる。
 #include "stdafx.h"
@@ -7848,10 +7848,14 @@ extern "C" void VstLiveUnloadPart(int part1to32)
 #endif
 }
 
+extern volatile LONG g_appExiting;
+
 extern "C" void VstLiveEditorCloseAllRemote(void)
 {
 #ifndef KPIHOST64_BUILD
 	if (InterlockedCompareExchange(&g_liveShuttingDown, 0, 0))
+		return;
+	if (InterlockedCompareExchange(&g_appExiting, 0, 0))
 		return;
 	if (!g_kpiHost.EnsureConnected())
 		return;
@@ -10133,7 +10137,6 @@ static unsigned __stdcall LiveMonitorThreadProc(void*)
 	float L[LIVE_MON_FRAMES], R[LIVE_MON_FRAMES];
 	while (WaitForSingleObject(g_liveMon.stop, 0) != WAIT_OBJECT_0) {
 		/* Yield when VST Host dialog owns playback. */
-		extern CVstHostDlg* g_vstHostDlg;
 		if (g_vstHostDlg && ::IsWindow(g_vstHostDlg->GetSafeHwnd()))
 			break;
 		if (!LiveAnyPartLoadedUnlocked() && !InterlockedCompareExchange(&g_liveMon.want, 0, 0))
@@ -10195,7 +10198,6 @@ extern "C" void VstLiveMonitorStop(void)
 extern "C" void VstLiveMonitorEnsure(void)
 {
 	InterlockedExchange(&g_liveMon.want, 1);
-	extern CVstHostDlg* g_vstHostDlg;
 	if (g_vstHostDlg && ::IsWindow(g_vstHostDlg->GetSafeHwnd()))
 		return; /* Host AudioThread already pumps. */
 	if (InterlockedCompareExchange(&g_liveMon.running, 0, 0))

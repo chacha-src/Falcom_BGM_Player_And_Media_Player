@@ -197,11 +197,11 @@ BEGIN_MESSAGE_MAP(CSasamiNotePropsDlg, CCustomBlurDialogExBase)
 	ON_WM_SIZE()
 	ON_WM_CLOSE()
 	ON_WM_TIMER()
-	ON_BN_CLICKED(IDC_SASAMI_NP_APPLY, &CSasamiNotePropsDlg::OnBnClickedApply)
-	ON_BN_CLICKED(IDC_SASAMI_NP_VST, &CSasamiNotePropsDlg::OnBnClickedVst)
-	ON_BN_CLICKED(IDC_SASAMI_NP_EQBTN, &CSasamiNotePropsDlg::OnBnClickedEq)
-	ON_BN_CLICKED(IDC_SASAMI_NP_CLOSE, &CSasamiNotePropsDlg::OnBnClickedClose)
-	ON_MESSAGE(WM_SASAMI_NP_OPEN_VST, &CSasamiNotePropsDlg::OnDeferredOpenVst)
+	ON_BN_CLICKED(IDC_SASAMI_NP_APPLY, OnBnClickedApply)
+	ON_BN_CLICKED(IDC_SASAMI_NP_VST, OnBnClickedVst)
+	ON_BN_CLICKED(IDC_SASAMI_NP_EQBTN, OnBnClickedEq)
+	ON_BN_CLICKED(IDC_SASAMI_NP_CLOSE, OnBnClickedClose)
+	ON_MESSAGE(WM_SASAMI_NP_OPEN_VST, OnDeferredOpenVst)
 END_MESSAGE_MAP()
 
 void CSasamiNotePropsDlg::ApplyLang()
@@ -212,8 +212,8 @@ void CSasamiNotePropsDlg::ApplyLang()
 		L"Propriedades da nota", L"Nooteigenschappen", L"Właściwości nuty", L"Nota özellikleri"));
 	m_btnApply.SetWindowText(LL14(L"適用", L"Apply", L"Appliquer", L"Applica", L"Aplicar", L"적용", L"应用", L"تطبيق", L"Применить", L"Übernehmen", L"Aplicar", L"Toepassen", L"Zastosuj", L"Uygula"));
 	m_btnVst.SetWindowText(m_isFm
-		? LL14(L"FM音色…", L"FM Voice…", L"Timbre FM…", L"Voce FM…", L"Voz FM…", L"FM 음색…", L"FM音色…", L"صوت FM…", L"Тембр FM…", L"FM-Klang…", L"Voz FM…", L"FM-klank…", L"Głos FM…", L"FM ses…")
-		: LL14(L"音色/VST…", L"Timbre/VST…", L"Timbre/VST…", L"Timbro/VST…", L"Timbre/VST…", L"음색/VST…", L"音色/VST…", L"طابع/VST…", L"Тембр/VST…", L"Klang/VST…", L"Timbre/VST…", L"Klank/VST…", L"Barwa/VST…", L"Tını/VST…"));
+		? CString(LL14(L"FM音色…", L"FM Voice…", L"Timbre FM…", L"Voce FM…", L"Voz FM…", L"FM 음색…", L"FM音色…", L"صوت FM…", L"Тембр FM…", L"FM-Klang…", L"Voz FM…", L"FM-klank…", L"Głos FM…", L"FM ses…"))
+		: CString(LL14(L"音色/VST…", L"Timbre/VST…", L"Timbre/VST…", L"Timbro/VST…", L"Timbre/VST…", L"음색/VST…", L"音色/VST…", L"طابع/VST…", L"Тембр/VST…", L"Klang/VST…", L"Timbre/VST…", L"Klank/VST…", L"Barwa/VST…", L"Tını/VST…")));
 	m_btnEq.SetWindowText(LL14(L"EQ→CmdRoll", L"EQ→CmdRoll", L"EQ→CmdRoll", L"EQ→CmdRoll", L"EQ→CmdRoll", L"EQ→CmdRoll", L"EQ→CmdRoll", L"EQ→CmdRoll", L"EQ→CmdRoll", L"EQ→CmdRoll", L"EQ→CmdRoll", L"EQ→CmdRoll", L"EQ→CmdRoll", L"EQ→CmdRoll"));
 	m_btnClose.SetWindowText(LL14(L"閉じる", L"Close", L"Fermer", L"Chiudi", L"Cerrar", L"닫기", L"关闭", L"إغلاق", L"Закрыть", L"Schließen", L"Fechar", L"Sluiten", L"Zamknij", L"Kapat"));
 	m_hint.SetWindowText(LL14(

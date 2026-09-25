@@ -199,58 +199,58 @@ BEGIN_MESSAGE_MAP(CSasamiMidiScoreDlg, CCustomBlurDialogExBase)
 	ON_WM_CONTEXTMENU()
 	ON_WM_TIMER()
 	ON_WM_KEYDOWN()
-	ON_BN_CLICKED(IDC_SASAMI_MIDI_OPEN, &CSasamiMidiScoreDlg::OnBnClickedOpen)
-	ON_BN_CLICKED(IDC_SASAMI_MIDI_SAVE, &CSasamiMidiScoreDlg::OnBnClickedSave)
-	ON_BN_CLICKED(IDC_SASAMI_MIDI_NEW, &CSasamiMidiScoreDlg::OnBnClickedNew)
-	ON_BN_CLICKED(IDC_SASAMI_MIDI_PLAY, &CSasamiMidiScoreDlg::OnBnClickedPlay)
-	ON_BN_CLICKED(IDC_SASAMI_MIDI_EXPORT, &CSasamiMidiScoreDlg::OnBnClickedExport)
-	ON_BN_CLICKED(IDC_SASAMI_MIDI_HELP, &CSasamiMidiScoreDlg::OnBnClickedHelp)
-	ON_BN_CLICKED(IDC_SASAMI_MIDI_TEMPO, &CSasamiMidiScoreDlg::OnBnClickedTempo)
-	ON_BN_CLICKED(IDC_SASAMI_MIDI_TOOL_PENCIL, &CSasamiMidiScoreDlg::OnBnClickedPencil)
-	ON_BN_CLICKED(IDC_SASAMI_MIDI_TOOL_ERASE, &CSasamiMidiScoreDlg::OnBnClickedErase)
-	ON_BN_CLICKED(IDC_SASAMI_MIDI_TOOL_SEL, &CSasamiMidiScoreDlg::OnBnClickedSel)
-	ON_BN_CLICKED(IDC_SASAMI_MIDI_PAL, &CSasamiMidiScoreDlg::OnBnClickedPal)
-	ON_BN_CLICKED(IDC_SASAMI_MIDI_PROP_UPD, &CSasamiMidiScoreDlg::OnBnClickedPropUpd)
-	ON_BN_CLICKED(IDC_SASAMI_MIDI_MARK, &CSasamiMidiScoreDlg::OnBnClickedMark)
-	ON_BN_CLICKED(IDC_SASAMI_MIDI_LOOPA, &CSasamiMidiScoreDlg::OnBnClickedLoopA)
-	ON_BN_CLICKED(IDC_SASAMI_MIDI_LOOPB, &CSasamiMidiScoreDlg::OnBnClickedLoopB)
-	ON_BN_CLICKED(IDC_SASAMI_MIDI_LOOPCLR, &CSasamiMidiScoreDlg::OnBnClickedLoopClr)
-	ON_BN_CLICKED(IDC_SASAMI_MIDI_SHOWALL, &CSasamiMidiScoreDlg::OnBnClickedShowAll)
-	ON_BN_CLICKED(IDC_SASAMI_MIDI_TEXT, &CSasamiMidiScoreDlg::OnBnClickedText)
-	ON_BN_CLICKED(IDC_SASAMI_MIDI_FX, &CSasamiMidiScoreDlg::OnBnClickedFx)
-	ON_BN_CLICKED(IDC_SASAMI_MIDI_ARR, &CSasamiMidiScoreDlg::OnBnClickedArr)
-	ON_BN_CLICKED(IDC_SASAMI_MIDI_LAYOUT, &CSasamiMidiScoreDlg::OnBnClickedLayout)
-	ON_BN_CLICKED(IDC_SASAMI_MIDI_CHORD, &CSasamiMidiScoreDlg::OnBnClickedChord)
-	ON_BN_CLICKED(IDC_SASAMI_MIDI_PATT, &CSasamiMidiScoreDlg::OnBnClickedPatt)
-	ON_BN_CLICKED(IDC_SASAMI_MIDI_ROLL, &CSasamiMidiScoreDlg::OnBnClickedRoll)
-	ON_CBN_SELCHANGE(IDC_SASAMI_MIDI_CH, &CSasamiMidiScoreDlg::OnCbnSelchangeCh)
-	ON_CBN_SELCHANGE(IDC_SASAMI_MIDI_INDEV, &CSasamiMidiScoreDlg::OnCbnMidiIn)
-	ON_CBN_SELCHANGE(IDC_SASAMI_MIDI_INCH, &CSasamiMidiScoreDlg::OnCbnMidiIn)
-	ON_CBN_SELCHANGE(IDC_SASAMI_MIDI_INMODE, &CSasamiMidiScoreDlg::OnCbnMidiIn)
-	ON_CBN_SELCHANGE(IDC_SASAMI_MIDI_FOLLOW, &CSasamiMidiScoreDlg::OnCbnFollow)
-	ON_CBN_SELCHANGE(IDC_SASAMI_STRIP_KIND0, &CSasamiMidiScoreDlg::OnCbnStrip)
-	ON_CBN_SELCHANGE(IDC_SASAMI_STRIP_KIND1, &CSasamiMidiScoreDlg::OnCbnStrip)
-	ON_CBN_SELCHANGE(IDC_SASAMI_STRIP_KIND2, &CSasamiMidiScoreDlg::OnCbnStrip)
-	ON_CBN_SELCHANGE(IDC_SASAMI_STRIP_HGT0, &CSasamiMidiScoreDlg::OnCbnStrip)
-	ON_CBN_SELCHANGE(IDC_SASAMI_STRIP_HGT1, &CSasamiMidiScoreDlg::OnCbnStrip)
-	ON_CBN_SELCHANGE(IDC_SASAMI_STRIP_HGT2, &CSasamiMidiScoreDlg::OnCbnStrip)
-	ON_CBN_SELCHANGE(IDC_SASAMI_STRIP_DRAW, &CSasamiMidiScoreDlg::OnCbnStrip)
-	ON_CBN_SELCHANGE(IDC_SASAMI_STRIP_LANES, &CSasamiMidiScoreDlg::OnCbnStrip)
-	ON_CBN_SELCHANGE(IDC_SASAMI_STRIP_STEP, &CSasamiMidiScoreDlg::OnCbnStrip)
-	ON_CBN_SELCHANGE(IDC_SASAMI_PASTE_MODE, &CSasamiMidiScoreDlg::OnCbnPasteMode)
-	ON_MESSAGE(WM_SASAMI_PAL_DUR, &CSasamiMidiScoreDlg::OnPalDur)
-	ON_MESSAGE(WM_SASAMI_PAL_QUERY_STATE, &CSasamiMidiScoreDlg::OnPalQueryState)
-	ON_MESSAGE(WM_SASAMI_PAL_LAYOUT, &CSasamiMidiScoreDlg::OnPalLayout)
-	ON_MESSAGE(WM_SASAMI_NOTE_PROPS, &CSasamiMidiScoreDlg::OnNoteProps)
-	ON_MESSAGE(WM_SASAMI_EXC_RPN_CHANGED, &CSasamiMidiScoreDlg::OnExcRpnChanged)
-	ON_MESSAGE(WM_SASAMI_INSERT_FX_CHANGED, &CSasamiMidiScoreDlg::OnInsertFxChanged)
-	ON_MESSAGE(WM_APP + 61, &CSasamiMidiScoreDlg::OnDeferredInit)
-	ON_MESSAGE(WM_APP + 62, &CSasamiMidiScoreDlg::OnDeferredPushText)
-	ON_MESSAGE(WM_APP + 7204, &CSasamiMidiScoreDlg::OnDeferredOpenVst)
-	ON_MESSAGE(WM_APP + 7206, &CSasamiMidiScoreDlg::OnDeferredProgLabels)
-	ON_MESSAGE(WM_VST_LIVE_EDITOR_CLOSED, &CSasamiMidiScoreDlg::OnVstEditorClosed)
-	ON_MESSAGE(WM_VST_LIVE_EDITOR_CLOSED_UI, &CSasamiMidiScoreDlg::OnVstEditorClosedUi)
-	ON_MESSAGE(WM_SASAMI_SCORE_MIDI, &CSasamiMidiScoreDlg::OnScoreMidi)
+	ON_BN_CLICKED(IDC_SASAMI_MIDI_OPEN, OnBnClickedOpen)
+	ON_BN_CLICKED(IDC_SASAMI_MIDI_SAVE, OnBnClickedSave)
+	ON_BN_CLICKED(IDC_SASAMI_MIDI_NEW, OnBnClickedNew)
+	ON_BN_CLICKED(IDC_SASAMI_MIDI_PLAY, OnBnClickedPlay)
+	ON_BN_CLICKED(IDC_SASAMI_MIDI_EXPORT, OnBnClickedExport)
+	ON_BN_CLICKED(IDC_SASAMI_MIDI_HELP, OnBnClickedHelp)
+	ON_BN_CLICKED(IDC_SASAMI_MIDI_TEMPO, OnBnClickedTempo)
+	ON_BN_CLICKED(IDC_SASAMI_MIDI_TOOL_PENCIL, OnBnClickedPencil)
+	ON_BN_CLICKED(IDC_SASAMI_MIDI_TOOL_ERASE, OnBnClickedErase)
+	ON_BN_CLICKED(IDC_SASAMI_MIDI_TOOL_SEL, OnBnClickedSel)
+	ON_BN_CLICKED(IDC_SASAMI_MIDI_PAL, OnBnClickedPal)
+	ON_BN_CLICKED(IDC_SASAMI_MIDI_PROP_UPD, OnBnClickedPropUpd)
+	ON_BN_CLICKED(IDC_SASAMI_MIDI_MARK, OnBnClickedMark)
+	ON_BN_CLICKED(IDC_SASAMI_MIDI_LOOPA, OnBnClickedLoopA)
+	ON_BN_CLICKED(IDC_SASAMI_MIDI_LOOPB, OnBnClickedLoopB)
+	ON_BN_CLICKED(IDC_SASAMI_MIDI_LOOPCLR, OnBnClickedLoopClr)
+	ON_BN_CLICKED(IDC_SASAMI_MIDI_SHOWALL, OnBnClickedShowAll)
+	ON_BN_CLICKED(IDC_SASAMI_MIDI_TEXT, OnBnClickedText)
+	ON_BN_CLICKED(IDC_SASAMI_MIDI_FX, OnBnClickedFx)
+	ON_BN_CLICKED(IDC_SASAMI_MIDI_ARR, OnBnClickedArr)
+	ON_BN_CLICKED(IDC_SASAMI_MIDI_LAYOUT, OnBnClickedLayout)
+	ON_BN_CLICKED(IDC_SASAMI_MIDI_CHORD, OnBnClickedChord)
+	ON_BN_CLICKED(IDC_SASAMI_MIDI_PATT, OnBnClickedPatt)
+	ON_BN_CLICKED(IDC_SASAMI_MIDI_ROLL, OnBnClickedRoll)
+	ON_CBN_SELCHANGE(IDC_SASAMI_MIDI_CH, OnCbnSelchangeCh)
+	ON_CBN_SELCHANGE(IDC_SASAMI_MIDI_INDEV, OnCbnMidiIn)
+	ON_CBN_SELCHANGE(IDC_SASAMI_MIDI_INCH, OnCbnMidiIn)
+	ON_CBN_SELCHANGE(IDC_SASAMI_MIDI_INMODE, OnCbnMidiIn)
+	ON_CBN_SELCHANGE(IDC_SASAMI_MIDI_FOLLOW, OnCbnFollow)
+	ON_CBN_SELCHANGE(IDC_SASAMI_STRIP_KIND0, OnCbnStrip)
+	ON_CBN_SELCHANGE(IDC_SASAMI_STRIP_KIND1, OnCbnStrip)
+	ON_CBN_SELCHANGE(IDC_SASAMI_STRIP_KIND2, OnCbnStrip)
+	ON_CBN_SELCHANGE(IDC_SASAMI_STRIP_HGT0, OnCbnStrip)
+	ON_CBN_SELCHANGE(IDC_SASAMI_STRIP_HGT1, OnCbnStrip)
+	ON_CBN_SELCHANGE(IDC_SASAMI_STRIP_HGT2, OnCbnStrip)
+	ON_CBN_SELCHANGE(IDC_SASAMI_STRIP_DRAW, OnCbnStrip)
+	ON_CBN_SELCHANGE(IDC_SASAMI_STRIP_LANES, OnCbnStrip)
+	ON_CBN_SELCHANGE(IDC_SASAMI_STRIP_STEP, OnCbnStrip)
+	ON_CBN_SELCHANGE(IDC_SASAMI_PASTE_MODE, OnCbnPasteMode)
+	ON_MESSAGE(WM_SASAMI_PAL_DUR, OnPalDur)
+	ON_MESSAGE(WM_SASAMI_PAL_QUERY_STATE, OnPalQueryState)
+	ON_MESSAGE(WM_SASAMI_PAL_LAYOUT, OnPalLayout)
+	ON_MESSAGE(WM_SASAMI_NOTE_PROPS, OnNoteProps)
+	ON_MESSAGE(WM_SASAMI_EXC_RPN_CHANGED, OnExcRpnChanged)
+	ON_MESSAGE(WM_SASAMI_INSERT_FX_CHANGED, OnInsertFxChanged)
+	ON_MESSAGE(WM_APP + 61, OnDeferredInit)
+	ON_MESSAGE(WM_APP + 62, OnDeferredPushText)
+	ON_MESSAGE(WM_APP + 7204, OnDeferredOpenVst)
+	ON_MESSAGE(WM_APP + 7206, OnDeferredProgLabels)
+	ON_MESSAGE(WM_VST_LIVE_EDITOR_CLOSED, OnVstEditorClosed)
+	ON_MESSAGE(WM_VST_LIVE_EDITOR_CLOSED_UI, OnVstEditorClosedUi)
+	ON_MESSAGE(WM_SASAMI_SCORE_MIDI, OnScoreMidi)
 END_MESSAGE_MAP()
 
 void CSasamiMidiScoreDlg::ApplyLang()
@@ -3146,10 +3146,10 @@ void CSasamiMidiScoreDlg::OnBnClickedShowAll()
 	UpdateScrollBars();
 	InvalidateRect(m_bodyRc, FALSE);
 	m_status.SetWindowText(ScStaffIsExtendedChannelView(&m_ui)
-		? LL14(L"全32 MIDIチャンネル表示", L"Showing all MIDI 1-32", L"Canaux MIDI 1-32", L"Canali MIDI 1-32", L"Canales MIDI 1-32",
-			L"MIDI 1-32 표시", L"显示全部 MIDI 1-32", L"MIDI 1-32", L"MIDI 1-32", L"Alle MIDI 1-32", L"MIDI 1-32", L"MIDI 1-32", L"MIDI 1-32", L"MIDI 1-32")
-		: LL14(L"MIDI 1-16 表示", L"Showing MIDI 1-16", L"MIDI 1-16", L"MIDI 1-16", L"MIDI 1-16",
-			L"MIDI 1-16", L"MIDI 1-16", L"MIDI 1-16", L"MIDI 1-16", L"MIDI 1-16", L"MIDI 1-16", L"MIDI 1-16", L"MIDI 1-16", L"MIDI 1-16"));
+		? CString(LL14(L"全32 MIDIチャンネル表示", L"Showing all MIDI 1-32", L"Canaux MIDI 1-32", L"Canali MIDI 1-32", L"Canales MIDI 1-32",
+			L"MIDI 1-32 표시", L"显示全部 MIDI 1-32", L"MIDI 1-32", L"MIDI 1-32", L"Alle MIDI 1-32", L"MIDI 1-32", L"MIDI 1-32", L"MIDI 1-32", L"MIDI 1-32"))
+		: CString(LL14(L"MIDI 1-16 表示", L"Showing MIDI 1-16", L"MIDI 1-16", L"MIDI 1-16", L"MIDI 1-16",
+			L"MIDI 1-16", L"MIDI 1-16", L"MIDI 1-16", L"MIDI 1-16", L"MIDI 1-16", L"MIDI 1-16", L"MIDI 1-16", L"MIDI 1-16", L"MIDI 1-16")));
 }
 
 void CSasamiMidiScoreDlg::OnBnClickedFx()
@@ -3497,11 +3497,11 @@ void CSasamiMidiScoreDlg::OnContextMenu(CWnd* pWnd, CPoint point)
 			L"Loop B de prévia aqui", L"Voorbeeld-lus B hier", L"Podgląd pętli B tutaj", L"Önizleme döngü B buraya"));
 		menu.AddSeparator();
 		menu.AddCommand(9001, m_ui.mute[tr]
-			? LL14(L"ミュート解除", L"Unmute", L"Réactiver", L"Riattiva", L"Activar", L"음소거 해제", L"取消静音", L"إلغاء كتم", L"Включить звук", L"Stummschaltung aus", L"Ativar som", L"Dempen uit", L"Włącz dźwięk", L"Sessizi aç")
-			: LL14(L"ミュート", L"Mute", L"Muet", L"Muto", L"Silenciar", L"음소거", L"静音", L"كتم", L"Выкл. звук", L"Stumm", L"Mudo", L"Dempen", L"Wycisz", L"Sessiz"));
+			? CString(LL14(L"ミュート解除", L"Unmute", L"Réactiver", L"Riattiva", L"Activar", L"음소거 해제", L"取消静音", L"إلغاء كتم", L"Включить звук", L"Stummschaltung aus", L"Ativar som", L"Dempen uit", L"Włącz dźwięk", L"Sessizi aç"))
+			: CString(LL14(L"ミュート", L"Mute", L"Muet", L"Muto", L"Silenciar", L"음소거", L"静音", L"كتم", L"Выкл. звук", L"Stumm", L"Mudo", L"Dempen", L"Wycisz", L"Sessiz")));
 		menu.AddCommand(9002, m_ui.solo[tr]
-			? LL14(L"ソロ解除", L"Unsolo", L"Désolo", L"Togli solo", L"Quitar solo", L"솔로 해제", L"取消独奏", L"إلغاء منفرد", L"Снять соло", L"Solo aus", L"Tirar solo", L"Solo uit", L"Wyłącz solo", L"Soloyu kapat")
-			: LL14(L"ソロ", L"Solo", L"Solo", L"Solo", L"Solo", L"솔로", L"独奏", L"منفرد", L"Соло", L"Solo", L"Solo", L"Solo", L"Solo", L"Solo"));
+			? CString(LL14(L"ソロ解除", L"Unsolo", L"Désolo", L"Togli solo", L"Quitar solo", L"솔로 해제", L"取消独奏", L"إلغاء منفرد", L"Снять соло", L"Solo aus", L"Tirar solo", L"Solo uit", L"Wyłącz solo", L"Soloyu kapat"))
+			: CString(LL14(L"ソロ", L"Solo", L"Solo", L"Solo", L"Solo", L"솔로", L"独奏", L"منفرد", L"Соло", L"Solo", L"Solo", L"Solo", L"Solo", L"Solo")));
 		if (VstLivePartIsLoaded(tr + 1)) {
 			menu.AddCommand(9003, LL14(
 				L"VST詳細…", L"VST details…", L"Détails VST…", L"Dettagli VST…", L"Detalles VST…",
@@ -3509,8 +3509,8 @@ void CSasamiMidiScoreDlg::OnContextMenu(CWnd* pWnd, CPoint point)
 				L"Detalhes VST…", L"VST-details…", L"Szczegóły VST…", L"VST ayrıntıları…"));
 		}
 		menu.AddCommand(9004, m_ui.visible[tr]
-			? LL14(L"パートを無効（譜面から外す）", L"Disable part (hide from score)", L"Désactiver la partie", L"Disattiva parte", L"Desactivar parte", L"Disable part", L"禁用声部", L"Disable part", L"Отключить парту", L"Part deaktivieren", L"Desativar parte", L"Part uitschakelen", L"Wyłącz part", L"Parti devre dışı")
-			: LL14(L"パートを有効（譜面に表示）", L"Enable part (show on score)", L"Activer la partie", L"Attiva parte", L"Activar parte", L"Enable part", L"启用声部", L"Enable part", L"Включить парту", L"Part aktivieren", L"Ativar parte", L"Part inschakelen", L"Włącz part", L"Parti etkinleştir"));
+			? CString(LL14(L"パートを無効（譜面から外す）", L"Disable part (hide from score)", L"Désactiver la partie", L"Disattiva parte", L"Desactivar parte", L"Disable part", L"禁用声部", L"Disable part", L"Отключить парту", L"Part deaktivieren", L"Desativar parte", L"Part uitschakelen", L"Wyłącz part", L"Parti devre dışı"))
+			: CString(LL14(L"パートを有効（譜面に表示）", L"Enable part (show on score)", L"Activer la partie", L"Attiva parte", L"Activar parte", L"Enable part", L"启用声部", L"Enable part", L"Включить парту", L"Part aktivieren", L"Ativar parte", L"Part inschakelen", L"Włącz part", L"Parti etkinleştir")));
 		menu.AddCommand(9005,
 			m_ui.clef[tr] == 0 ? L"譜表: ト音→ヘ音"
 			: (m_ui.clef[tr] == 1 ? L"譜表: ヘ音→大譜表"

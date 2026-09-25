@@ -25,12 +25,15 @@
     <Keyword>Win32Proj</Keyword>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <Import Project="$(MSBuildThisFileDirectory)..\ogg.compiler.props" />
   <PropertyGroup Label="Configuration">
     <ConfigurationType>DynamicLibrary</ConfigurationType>
     <PlatformToolset>v145</PlatformToolset>
     <CharacterSet>Unicode</CharacterSet>
     <UseOfMfc>false</UseOfMfc>
+    <WholeProgramOptimization>false</WholeProgramOptimization>
   </PropertyGroup>
+  <Import Project="$(MSBuildThisFileDirectory)..\ogg.compiler.clamp.props" />
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
   <ImportGroup Label="ExtensionSettings" />
   <PropertyGroup>
@@ -46,7 +49,7 @@
       <SDLCheck>false</SDLCheck>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
       <LanguageStandard>stdcpp17</LanguageStandard>
-      <AdditionalIncludeDirectories>$(ProjectDir)source;$(ProjectDir)source\ymfm;$(ProjectDir)source\fmmidi;C:\projects\APPLICATION3\kpi_sources_20240712\kpisdk;C:\projects\APPLICATION3\kpi_sources_20240712\kpi_decoder\fmmon_common;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)..;$(ProjectDir)source;$(ProjectDir)source\ymfm;$(ProjectDir)source\fmmidi;C:\projects\APPLICATION3\kpi_sources_20240712\kpisdk;C:\projects\APPLICATION3\kpi_sources_20240712\kpi_decoder\fmmon_common;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>WIN32;_WINDOWS;_CRT_SECURE_NO_WARNINGS;_HAS_AUTO_PTR_ETC=1;NOMINMAX;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
       <ExceptionHandling>Sync</ExceptionHandling>
@@ -132,6 +135,15 @@ if exist "C:\projects\APPLICATION3\ogg_binary\Plugins\Kobarin\fmpmd\Rhythm\2608_
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="..\cpu_isa.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\simd_audio.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\simd_audio_avx512.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
     <ClCompile Include="source\kbsasami_decoder.cpp" />
     <ClCompile Include="source\kbsasami_module.cpp" />
     <ClCompile Include="source\sasami_file.cpp" />
@@ -142,12 +154,24 @@ if exist "C:\projects\APPLICATION3\ogg_binary\Plugins\Kobarin\fmpmd\Rhythm\2608_
     <ClCompile Include="source\sasami_fm.cpp" />
     <ClCompile Include="source\fmmidi\sequencer.cpp" />
     <ClCompile Include="source\fmmidi\midisynth.cpp" />
-    <ClCompile Include="source\fmmidi\ym2612_pool.cpp" />
+    <ClCompile Include="source\fmmidi\ym2612_pool.cpp">
+      <UseMSVC Condition="'$(Platform)'=='x64'">true</UseMSVC>
+      <AdditionalOptions Condition="'$(Platform)'=='x64'">/utf-8 /std:c++17 /O2 /arch:AVX2</AdditionalOptions>
+    </ClCompile>
     <ClCompile Include="C:\projects\APPLICATION3\kpi_sources_20240712\kpi_decoder\fmmon_common\fmmon_write.cpp" />
     <ClCompile Include="C:\projects\APPLICATION3\kpi_sources_20240712\kpi_decoder\fmmon_common\fmmon_shadow.cpp" />
-    <ClCompile Include="source\ymfm\ymfm_opn.cpp" />
-    <ClCompile Include="source\ymfm\ymfm_adpcm.cpp" />
-    <ClCompile Include="source\ymfm\ymfm_ssg.cpp" />
+    <ClCompile Include="source\ymfm\ymfm_opn.cpp">
+      <UseMSVC Condition="'$(Platform)'=='x64'">true</UseMSVC>
+      <AdditionalOptions Condition="'$(Platform)'=='x64'">/utf-8 /std:c++17 /O2 /arch:AVX2</AdditionalOptions>
+    </ClCompile>
+    <ClCompile Include="source\ymfm\ymfm_adpcm.cpp">
+      <UseMSVC Condition="'$(Platform)'=='x64'">true</UseMSVC>
+      <AdditionalOptions Condition="'$(Platform)'=='x64'">/utf-8 /std:c++17 /O2 /arch:AVX2</AdditionalOptions>
+    </ClCompile>
+    <ClCompile Include="source\ymfm\ymfm_ssg.cpp">
+      <UseMSVC Condition="'$(Platform)'=='x64'">true</UseMSVC>
+      <AdditionalOptions Condition="'$(Platform)'=='x64'">/utf-8 /std:c++17 /O2 /arch:AVX2</AdditionalOptions>
+    </ClCompile>
     <ClCompile Include="C:\projects\APPLICATION3\kpi_sources_20240712\kpisdk\kpi.cpp" />
   </ItemGroup>
   <ItemGroup>
@@ -161,6 +185,7 @@ if exist "C:\projects\APPLICATION3\ogg_binary\Plugins\Kobarin\fmpmd\Rhythm\2608_
     <None Include="kbsasami.def" />
     <Text Include="kbsasami.txt" />
   </ItemGroup>
+  <Import Project="$(MSBuildThisFileDirectory)..\ogg.compiler.targets" />
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets" />
 </Project>

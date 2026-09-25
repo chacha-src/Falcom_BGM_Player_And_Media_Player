@@ -31,7 +31,7 @@
     <ConfigurationType>Application</ConfigurationType>
     <UseDebugLibraries>false</UseDebugLibraries>
     <PlatformToolset>v145</PlatformToolset>
-    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <WholeProgramOptimization>false</WholeProgramOptimization>
     <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)'=='uni_2026_de'" Label="Configuration">
@@ -68,7 +68,7 @@
       <Optimization Condition="'$(Configuration)'=='uni_2026_de'">MaxSpeed</Optimization>
       <DebugInformationFormat Condition="'$(Configuration)'=='uni_2026_de'">ProgramDatabase</DebugInformationFormat>
       <AdditionalOptions Condition="'$(Configuration)'=='uni_2026_de'">/utf-8 /Zo %(AdditionalOptions)</AdditionalOptions>
-      <OpenMPSupport Condition="'$(Configuration)'=='uni_avx2_vs2026' Or '$(Configuration)'=='uni_2026_de'">true</OpenMPSupport>
+      <OpenMPSupport>false</OpenMPSupport>
     </ClCompile>
     <ResourceCompile>
       <AdditionalIncludeDirectories>$(ProjectDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
@@ -83,6 +83,15 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="..\cpu_isa.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\simd_audio.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\simd_audio_avx512.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
     <ClCompile Include="KpiHost64.cpp" />
     <ClCompile Include="KpiHost64Foreign.cpp" />
     <ClCompile Include="KpiHost64Vst.cpp" />

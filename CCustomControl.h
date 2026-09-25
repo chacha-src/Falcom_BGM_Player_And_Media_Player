@@ -26,7 +26,7 @@
 //   非公開APIである SetWindowCompositionAttribute を使用して
 //   背景にアクリルぼかし効果（ACCENT_ENABLE_BLURBEHIND 等）を適用します。
 // ============================================================================
-#if _MSC_VER >= 1950
+#if _MSC_VER >= 1950 || defined(__INTEL_LLVM_COMPILER) || defined(OGG_AVX2_VS2026)
 #define CCUSTOM_AERO_SUPPORT 1
 #else
 #define CCUSTOM_AERO_SUPPORT 0

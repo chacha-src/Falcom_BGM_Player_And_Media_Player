@@ -30,6 +30,7 @@ public:
 	~KpiHost64Client();
 
 	bool EnsureConnected(); // 未接続なら ogghost32.exe を起動してパイプ接続
+	bool IsConnected() const;
 	void Disconnect();
 
 	bool Ping();

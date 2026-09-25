@@ -95,10 +95,16 @@ static void RefreshAdpcmMidi(void);
 static void RefreshOpmKeysFromRegs(void);
 static int ArcIsProfile(unsigned profile);
 
+static volatile LONG s_csReady = 0;
 static void EnsureCs(void)
 {
-	if (InterlockedCompareExchange(&s_once, 1, 0) == 0)
+	if (InterlockedCompareExchange(&s_once, 1, 0) == 0) {
 		InitializeCriticalSection(&s_cs);
+		InterlockedExchange(&s_csReady, 1);
+	} else {
+		while (InterlockedCompareExchange(&s_csReady, 1, 1) == 0)
+			Sleep(0);
+	}
 }
 
 /* SegaPCM freq (addr delta/tick) → ピアノ範囲 A0–C8 の MIDI。
@@ -780,7 +786,18 @@ void FmMonShadowMidiNote(int ch, int midiNote, int on)
 	int urgent = 0;
 	if (on && midiNote >= 0 && midiNote <= 127) {
 		const uint8_t n = (uint8_t)midiNote;
-		/* 同一ノートの NoteOn 再書き込みも発音フェード（キーホールド連打ではない） */
+		/* ホールド中の同一ノート再書き込みは seq を飛ばさない（SPC pitch ポーリング） */
+		if (s_midiChOn[ch] && s_midiChNote[ch] == n) {
+			LeaveCriticalSection(&s_cs);
+			return;
+		}
+		if (s_midiChOn[ch] && s_midiChNote[ch] != n) {
+			/* スライド: 鍵盤位置だけ更新。ヒット／即 Flush はしない */
+			s_midiChNote[ch] = n;
+			s_dirty = 1;
+			LeaveCriticalSection(&s_cs);
+			return;
+		}
 		s_midiHit[ch]++;
 		s_dirty = 1;
 		s_flushUrgent = 1;
@@ -1097,7 +1114,7 @@ void FmMonShadowFlush(int force)
 {
 	EnsureCs();
 	EnterCriticalSection(&s_cs);
-	if (s_keysOnly) {
+	if (s_keysOnly && !s_opmRegsValid) {
 		s_edgeN = 0;
 		LeaveCriticalSection(&s_cs);
 		FmMonShadowFlushKeysOnly(force);
@@ -1226,6 +1243,12 @@ void FmMonShadowFlush(int force)
 			if (s_pcmCount > 0 && s_pcmCount <= 8)
 				d.pcmCount = s_pcmCount;
 			else if (s_opnaLayout == 0 && d.pcmCount < 8)
+				d.pcmCount = 8;
+		} else if (s_keysProfile == SASAMI_FMMON_KEYS_RF5C) {
+			d.pad6[1] = (uint8_t)SASAMI_FMMON_KEYS_RF5C;
+			if (s_pcmCount > 0 && s_pcmCount <= 8)
+				d.pcmCount = s_pcmCount;
+			else if (d.pcmCount < 8)
 				d.pcmCount = 8;
 		} else if (s_keysProfile == SASAMI_FMMON_KEYS_MULTIPCM) {
 			/* YM3438 が regs[] を占有するので、MultiPCM パンは companion へ。 */

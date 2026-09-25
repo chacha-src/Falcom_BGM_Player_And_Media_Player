@@ -285,8 +285,8 @@ IMPLEMENT_DYNAMIC(CKpilist, CCustomBlurDialogBase)
 
 CKpilist::CKpilist(CWnd* pParent /*=NULL*/)
 	: CCustomBlurDialogBase(CKpilist::IDD, pParent)
+	, status(0)
 {
-
 }
 
 CKpilist::~CKpilist()
@@ -306,10 +306,10 @@ void CKpilist::DoDataExchange(CDataExchange* pDX)
 
 #include "CImageBase.h"
 BEGIN_MESSAGE_MAP(CKpilist, CCustomBlurDialogBase)
-	ON_NOTIFY(LVN_ITEMCHANGED, IDC_LIST1, &CKpilist::OnLvnItemchangedList1)
-	ON_EN_CHANGE(IDC_KPI_EXTFILTER, &CKpilist::OnEnChangeExtFilter)
-	ON_BN_CLICKED(IDOK, &CKpilist::OnBnClickedOk)
-	ON_BN_CLICKED(IDC_KPI_HELP, &CKpilist::OnBnClickedHelp)
+	ON_NOTIFY(LVN_ITEMCHANGED, IDC_LIST1, OnLvnItemchangedList1)
+	ON_EN_CHANGE(IDC_KPI_EXTFILTER, OnEnChangeExtFilter)
+	ON_BN_CLICKED(IDOK, OnBnClickedOk)
+	ON_BN_CLICKED(IDC_KPI_HELP, OnBnClickedHelp)
 	ON_WM_SIZE()
 	ON_WM_GETMINMAXINFO()
 	ON_WM_DESTROY()
@@ -423,6 +423,10 @@ BOOL CKpilist::OnInitDialog()
 	CCustomControlUtility::FinalizeDialogToolTip(m_tooltip, 512, 10000);
 
 	Init();
+	/* cmn() の色抜き WS_EX_LAYERED は Games オーバーレイ前提。ip1 が他窓と共有で
+	   オーバーレイが起きないと一覧が完全に透明になる。ぼかし基底に任せる。 */
+	KillTimer(500);
+	ModifyStyleEx(WS_EX_LAYERED, 0);
 	if (m_lc.GetSafeHwnd())
 	{
 		m_lc.EnableToolTips(TRUE);
@@ -659,6 +663,37 @@ BOOL kpichks[300];
 static CString KpiBaseName(const CString& path)
 {
 	return path.Right(path.GetLength() - path.ReverseFind('\\') - 1);
+}
+
+static int KpiArchOf(int idx)
+{
+	if (idx < 0 || idx >= 150) return 0;
+	return (int)kpiarch[idx];
+}
+
+// 64 TCHAR 枠向け。フルパス+Arch の FNV-1a 指紋。同名でも場所/Arch が違えば別キー。
+static CString KpiChkKey(const CString& path, int arch)
+{
+	CString p = path;
+	p.Trim();
+	p.MakeLower();
+	p.Replace(_T('/'), _T('\\'));
+	unsigned long long h = 14695981039346656037ull;
+	const int n = p.GetLength();
+	for (int i = 0; i < n; ++i) {
+		h ^= (unsigned long long)(unsigned short)p[i];
+		h *= 1099511628211ull;
+	}
+	h ^= (unsigned long long)(arch & 0xFF);
+	h *= 1099511628211ull;
+	CString k;
+	k.Format(_T("#%016I64X_%u"), h, (unsigned)(arch & 0xFF));
+	return k;
+}
+
+static BOOL KpiChkNameIsKey(LPCTSTR s)
+{
+	return (s && s[0] == _T('#')) ? TRUE : FALSE;
 }
 
 // 拡張子トークンの先頭 '.' を除いた比較用キー
@@ -910,17 +945,38 @@ void CKpilist::Init()
 	int cnt = savedata.kpiChkCnt;
 	if (cnt > 200) cnt = 200;
 
-	// 現在のプラグイン名 → 保存済み状態を突き合わせて runtime の kpichk[] を確定。
-	// 未保存の新規プラグインは既定で使用(チェックON)。並び順に依らずファイル名で復元。
-	for (int j = 0; j < kpicnt; j++) {
+	// 現在のプラグイン → 保存済み状態。新キー(#指紋_Arch)優先、旧ベース名は同名1件のときだけ。
+	const int nLive = (kpicnt > 200) ? 200 : kpicnt;
+	for (int j = 0; j < nLive; j++) {
 		BOOL chk = TRUE;
-		CString name = KpiBaseName(kpif[j]);
+		const CString key = KpiChkKey(kpif[j], KpiArchOf(j));
+		const CString base = KpiBaseName(kpif[j]);
+		int found = -1;
 		for (int i = 0; i < cnt; i++) {
-			if (name.CompareNoCase(savedata.kpiChkName[i]) == 0) {
-				chk = savedata.kpiChkState[i] ? TRUE : FALSE;
+			if (key.CompareNoCase(savedata.kpiChkName[i]) == 0) {
+				found = i;
 				break;
 			}
 		}
+		if (found < 0 && !base.IsEmpty()) {
+			int liveSame = 0;
+			for (int k = 0; k < nLive; k++) {
+				if (base.CompareNoCase(KpiBaseName(kpif[k])) == 0)
+					liveSame++;
+			}
+			int savedSame = 0, savedIdx = -1;
+			for (int i = 0; i < cnt; i++) {
+				if (KpiChkNameIsKey(savedata.kpiChkName[i])) continue;
+				if (base.CompareNoCase(savedata.kpiChkName[i]) == 0) {
+					savedSame++;
+					savedIdx = i;
+				}
+			}
+			if (liveSame == 1 && savedSame == 1)
+				found = savedIdx;
+		}
+		if (found >= 0)
+			chk = savedata.kpiChkState[found] ? TRUE : FALSE;
 		kpichk[j] = chk;
 	}
 
@@ -938,12 +994,6 @@ void CKpilist::Init()
 	m_lc.InsertColumn(4, LL14(L"拡張子", L"Extensions", L"Extensions", L"Estensioni", L"Extensiones", L"확장자", L"扩展名", L"الامتدادات", L"Расширения", L"Erweiterungen", L"Extensões", L"Extensies", L"Rozszerzenia", L"Uzantılar"), LVCFMT_LEFT, 280, 0);
 
 	FillKpiList();
-
-	RECT r;
-	GetWindowRect(&r);
-	r.top += 600;
-	r.bottom += 600;
-	MoveWindow(&r);
 }
 
 void CKpilist::Save()
@@ -960,8 +1010,8 @@ void CKpilist::Save()
 	TCHAR newName[200][64];
 	for (int i = 0; i < n; i++) {
 		newState[i] = kpichk[i] ? 1 : 0;
-		CString bn = KpiBaseName(kpif[i]);
-		_tcsncpy(newName[i], bn, 63);
+		CString kn = KpiChkKey(kpif[i], KpiArchOf(i));
+		_tcsncpy(newName[i], kn, 63);
 		newName[i][63] = 0;
 	}
 	/* 起動時など変更無しなら dat 再書込＋DatArc_Commit を避ける（毎回1秒級の停止になる） */

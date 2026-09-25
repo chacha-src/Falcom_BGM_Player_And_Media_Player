@@ -386,17 +386,17 @@ void CListSyosai::DoDataExchange(CDataExchange* pDX)
 }
 
 BEGIN_MESSAGE_MAP(CListSyosai, CCustomBlurDialogBase)
-	ON_BN_CLICKED(IDOK999, &CListSyosai::OnBnClickedExplorer)
-	ON_BN_CLICKED(ID_OK, &CListSyosai::OnBnClickedOk)
-	ON_BN_CLICKED(IDC_SYOSAI_BTN_BROWSE, &CListSyosai::OnBnClickedBrowse)
-	ON_BN_CLICKED(IDC_SYOSAI_BTN_TAG2PL, &CListSyosai::OnBnClickedTag2Pl)
-	ON_BN_CLICKED(IDC_SYOSAI_BTN_RELOADTAG, &CListSyosai::OnBnClickedReloadTag)
-	ON_BN_CLICKED(IDC_SYOSAI_BTN_WRITETAG, &CListSyosai::OnBnClickedWriteTag)
-	ON_BN_CLICKED(IDC_SYOSAI_BTN_COPYPATH, &CListSyosai::OnBnClickedCopyPath)
-	ON_BN_CLICKED(IDC_SYOSAI_BTN_COPYNAME, &CListSyosai::OnBnClickedCopyName)
-	ON_BN_CLICKED(IDC_SYOSAI_BTN_PROTOOLS, &CListSyosai::OnBnClickedProTools)
-	ON_BN_CLICKED(IDC_SYOSAI_BTN_CLEARPARAM, &CListSyosai::OnBnClickedClearParam)
-	ON_BN_CLICKED(IDC_SY_HELP, &CListSyosai::OnBnClickedHelp)
+	ON_BN_CLICKED(IDOK999, OnBnClickedExplorer)
+	ON_BN_CLICKED(ID_OK, OnBnClickedOk)
+	ON_BN_CLICKED(IDC_SYOSAI_BTN_BROWSE, OnBnClickedBrowse)
+	ON_BN_CLICKED(IDC_SYOSAI_BTN_TAG2PL, OnBnClickedTag2Pl)
+	ON_BN_CLICKED(IDC_SYOSAI_BTN_RELOADTAG, OnBnClickedReloadTag)
+	ON_BN_CLICKED(IDC_SYOSAI_BTN_WRITETAG, OnBnClickedWriteTag)
+	ON_BN_CLICKED(IDC_SYOSAI_BTN_COPYPATH, OnBnClickedCopyPath)
+	ON_BN_CLICKED(IDC_SYOSAI_BTN_COPYNAME, OnBnClickedCopyName)
+	ON_BN_CLICKED(IDC_SYOSAI_BTN_PROTOOLS, OnBnClickedProTools)
+	ON_BN_CLICKED(IDC_SYOSAI_BTN_CLEARPARAM, OnBnClickedClearParam)
+	ON_BN_CLICKED(IDC_SY_HELP, OnBnClickedHelp)
 	ON_WM_CLOSE()
 	ON_WM_DESTROY()
 	ON_WM_SIZE()
@@ -592,8 +592,8 @@ void CListSyosai::RefreshStatusLines()
 	}
 
 	CString existLabel = exists
-		? LL14(L"存在する", L"Exists", L"Existe", L"Esiste", L"Existe", L"존재", L"存在", L"موجود", L"Есть", L"Vorhanden", L"Existe", L"Bestaat", L"Istnieje", L"Var")
-		: LL14(L"欠損", L"Missing", L"Manquant", L"Mancante", L"Falta", L"없음", L"缺失", L"مفقود", L"Нет", L"Fehlt", L"Ausente", L"Ontbreekt", L"Brak", L"Yok");
+		? CString(LL14(L"存在する", L"Exists", L"Existe", L"Esiste", L"Existe", L"존재", L"存在", L"موجود", L"Есть", L"Vorhanden", L"Existe", L"Bestaat", L"Istnieje", L"Var"))
+		: CString(LL14(L"欠損", L"Missing", L"Manquant", L"Mancante", L"Falta", L"없음", L"缺失", L"مفقود", L"Нет", L"Fehlt", L"Ausente", L"Ontbreekt", L"Brak", L"Yok"));
 
 	CString status;
 	status.Format(_T("%s | %s | %s"),

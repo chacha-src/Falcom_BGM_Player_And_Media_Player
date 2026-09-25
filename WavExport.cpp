@@ -421,19 +421,19 @@ void CWavExport::DoDataExchange(CDataExchange* pDX)
 }
 
 BEGIN_MESSAGE_MAP(CWavExport, CCustomBlurDialogBase)
-	ON_BN_CLICKED(IDC_WAVEXPORT_EXEC, &CWavExport::OnBnClickedWavExportExec)
-	ON_BN_CLICKED(IDC_WAVEXPORT_BROWSE, &CWavExport::OnBnClickedWavExportBrowse)
-	ON_BN_CLICKED(IDC_WAVEXPORT_CLOSE, &CWavExport::OnBnClickedWavExportClose)
-	ON_BN_CLICKED(IDC_WAVEXPORT_COVER_CLEAR, &CWavExport::OnBnClickedCoverClear)
-	ON_BN_CLICKED(IDC_WE_HELP, &CWavExport::OnBnClickedHelp)
-	ON_BN_CLICKED(IDC_WAVEXPORT_FADE, &CWavExport::OnExportOptChanged)
-	ON_BN_CLICKED(IDC_WAVEXPORT_TRIM, &CWavExport::OnExportOptChanged)
-	ON_BN_CLICKED(IDC_WAVEXPORT_COPY_TAGS, &CWavExport::OnExportOptChanged)
-	ON_BN_CLICKED(IDC_WAVEXPORT_PROMPT, &CWavExport::OnExportOptChanged)
-	ON_EN_CHANGE(IDC_WAVEXPORT_FADE_SEC, &CWavExport::OnExportOptChanged)
-	ON_EN_CHANGE(IDC_WAVEXPORT_TRIM_SEC, &CWavExport::OnExportOptChanged)
-	ON_EN_KILLFOCUS(IDC_WAVEXPORT_FADE_SEC, &CWavExport::OnExportSecKillFocus)
-	ON_EN_KILLFOCUS(IDC_WAVEXPORT_TRIM_SEC, &CWavExport::OnExportSecKillFocus)
+	ON_BN_CLICKED(IDC_WAVEXPORT_EXEC, OnBnClickedWavExportExec)
+	ON_BN_CLICKED(IDC_WAVEXPORT_BROWSE, OnBnClickedWavExportBrowse)
+	ON_BN_CLICKED(IDC_WAVEXPORT_CLOSE, OnBnClickedWavExportClose)
+	ON_BN_CLICKED(IDC_WAVEXPORT_COVER_CLEAR, OnBnClickedCoverClear)
+	ON_BN_CLICKED(IDC_WE_HELP, OnBnClickedHelp)
+	ON_BN_CLICKED(IDC_WAVEXPORT_FADE, OnExportOptChanged)
+	ON_BN_CLICKED(IDC_WAVEXPORT_TRIM, OnExportOptChanged)
+	ON_BN_CLICKED(IDC_WAVEXPORT_COPY_TAGS, OnExportOptChanged)
+	ON_BN_CLICKED(IDC_WAVEXPORT_PROMPT, OnExportOptChanged)
+	ON_EN_CHANGE(IDC_WAVEXPORT_FADE_SEC, OnExportOptChanged)
+	ON_EN_CHANGE(IDC_WAVEXPORT_TRIM_SEC, OnExportOptChanged)
+	ON_EN_KILLFOCUS(IDC_WAVEXPORT_FADE_SEC, OnExportSecKillFocus)
+	ON_EN_KILLFOCUS(IDC_WAVEXPORT_TRIM_SEC, OnExportSecKillFocus)
 	ON_WM_DROPFILES()
 	ON_WM_SIZE()
 	ON_WM_DESTROY()
@@ -881,14 +881,14 @@ void CWavExport::OnBnClickedWavExportExec()
 
 	if (pathStr.IsEmpty()) {
 		m_status.SetWindowText(multiFile
-			? LL14(L"フォルダを指定してください", L"Please specify folder", L"Veuillez specifier le dossier", L"Specificare la cartella",
+			? CString(LL14(L"フォルダを指定してください", L"Please specify folder", L"Veuillez specifier le dossier", L"Specificare la cartella",
 				L"Especifique la carpeta", L"폴더를 지정하세요", L"请指定文件夹", L"يرجى تحديد المجلد",
 				L"Укажите папку", L"Bitte Ordner angeben", L"Especifique a pasta", L"Geef map op",
-				L"Podaj folder", L"Klasor belirtin")
-			: LL14(L"ファイル名を指定してください", L"Please specify file name", L"Veuillez specifier le nom du fichier",
+				L"Podaj folder", L"Klasor belirtin"))
+			: CString(LL14(L"ファイル名を指定してください", L"Please specify file name", L"Veuillez specifier le nom du fichier",
 				L"Specificare il nome del file", L"Especifique el nombre del archivo", L"파일 이름을 지정하세요", L"请指定文件名",
 				L"يرجى تحديد اسم الملف", L"Укажите имя файла", L"Bitte Dateinamen angeben", L"Especifique o nome do arquivo",
-				L"Geef bestandsnaam op", L"Podaj nazwę pliku", L"Dosya adini belirtin"));
+				L"Geef bestandsnaam op", L"Podaj nazwę pliku", L"Dosya adini belirtin")));
 		return;
 	}
 	// 再生中の状態が書き出しに混ざらないよう、先に停止する

@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003" DefaultTargets="Build" ToolsVersion="14.0">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="uni_2026_de|Win32">
@@ -50,8 +50,8 @@
     <CharacterSet>Unicode</CharacterSet>
     <CLRSupport>false</CLRSupport>
     <WholeProgramOptimization>false</WholeProgramOptimization>
-    <PlatformToolset>Intel C++ Compiler 2026</PlatformToolset>
-    <SpectreMitigation>Spectre</SpectreMitigation>
+    <PlatformToolset>v145</PlatformToolset>
+    <SpectreMitigation>false</SpectreMitigation>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='uni_2026_de|x64'" Label="Configuration">
     <ConfigurationType>Application</ConfigurationType>
@@ -179,8 +179,8 @@
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
       <DisableSpecificWarnings>4828;%(DisableSpecificWarnings)</DisableSpecificWarnings>
       <AdditionalIncludeDirectories>$(ProjectDir)CEmu;$(ProjectDir)..\kpi_sources_20240712\kpi_decoder\kbmdx\source\portable_mdx\include;..\kpi_sources_20240712\kpi_decoder\kbmdx\source\mdc;$(ProjectDir)..\kpi_sources_20240712\kpi_decoder\kbmdx\source\portable_mdx\src\mxdrv;$(ProjectDir)..\kpi_sources_20240712\kpi_decoder\kbmdx\source\portable_mdx\src\x68sound;$(ProjectDir)kb_sasami\source;$(ProjectDir)kb_sasami\source\ymfm;$(ProjectDir)CEmu\s98;$(ProjectDir)CEmu\s98\device;$(ProjectDir)CEmu\s98\device\fmgen;$(ProjectDir)CEmu\z80;$(ProjectDir)CEmu\fmmon;$(ProjectDir)CEmu\vendor\np2\glue;$(ProjectDir)CEmu\vendor\np2\include;$(ProjectDir)CEmu\vendor\np2\cpu;$(ProjectDir)CEmu\vendor\musashi;$(ProjectDir)CEmu\vendor\mc6809;$(ProjectDir)CEmu\vendor\m6502;$(ProjectDir)CEmu\vendor\h6280;$(ProjectDir)CEmu\vendor\h8;$(ProjectDir)CEmu\vendor\hd63701;$(ProjectDir)CEmu\vendor\m6803;$(ProjectDir)CEmu\vendor\multipcm;$(ProjectDir)CEmu\vendor\v35;$(ProjectDir)CEmu\vendor\m37710;$(ProjectDir)CEmu\vendor\np2;$(ProjectDir)..\kpi_sources_20240712\kpi_decoder\kbs98\source\device;$(ProjectDir)..\kpi_sources_20240712\kpi_decoder\kbs98\source\device\mame;$(ProjectDir)..\kpi_sources_20240712\kpi_decoder\kbs98\source\device\emu2413;$(ProjectDir)zstd;$(ProjectDir)third_party\signalsmith-stretch\include;$(ProjectDir)third_party\signalsmith-linear\include;$(ProjectDir)third_party\aimp;$(ProjectDir)third_party\vst3sdk;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <EnableParallelCodeGeneration>true</EnableParallelCodeGeneration>
-      <OpenMPSupport>true</OpenMPSupport>
+      <EnableParallelCodeGeneration>false</EnableParallelCodeGeneration>
+      <OpenMPSupport>false</OpenMPSupport>
     </ClCompile>
     <ResourceCompile>
       <PreprocessorDefinitions>NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
@@ -333,7 +333,7 @@ if errorlevel 1 exit /b 1</Command>
       <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
       <OmitFramePointers>true</OmitFramePointers>
       <EnableFiberSafeOptimizations>true</EnableFiberSafeOptimizations>
-      <PreprocessorDefinitions>TARGET_RT_LITTLE_ENDIAN;WIN32;DEBUG;_UNICODE;_WINDOWS;_CRT_SECURE_NO_WARNINGS;FPM_INTEL;_LIB;HAVE_CONFIG_H;ASO_ZEROCHECK;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>OGG_AVX2_VS2026;TARGET_RT_LITTLE_ENDIAN;WIN32;DEBUG;_UNICODE;_WINDOWS;_CRT_SECURE_NO_WARNINGS;FPM_INTEL;_LIB;HAVE_CONFIG_H;ASO_ZEROCHECK;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <StringPooling>true</StringPooling>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
       <FunctionLevelLinking>true</FunctionLevelLinking>
@@ -351,7 +351,7 @@ if errorlevel 1 exit /b 1</Command>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
       <FloatingPointModel>Precise</FloatingPointModel>
       <WholeProgramOptimization>false</WholeProgramOptimization>
-      <StructMemberAlignment>16Bytes</StructMemberAlignment>
+      <StructMemberAlignment>Default</StructMemberAlignment>
       <UndefinePreprocessorDefinitions>
       </UndefinePreprocessorDefinitions>
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
@@ -361,8 +361,8 @@ if errorlevel 1 exit /b 1</Command>
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
       <DisableSpecificWarnings>4828;%(DisableSpecificWarnings)</DisableSpecificWarnings>
       <AdditionalIncludeDirectories>$(ProjectDir)CEmu;$(ProjectDir)..\kpi_sources_20240712\kpi_decoder\kbmdx\source\portable_mdx\include;..\kpi_sources_20240712\kpi_decoder\kbmdx\source\mdc;$(ProjectDir)..\kpi_sources_20240712\kpi_decoder\kbmdx\source\portable_mdx\src\mxdrv;$(ProjectDir)..\kpi_sources_20240712\kpi_decoder\kbmdx\source\portable_mdx\src\x68sound;$(ProjectDir)kb_sasami\source;$(ProjectDir)kb_sasami\source\ymfm;$(ProjectDir)CEmu\s98;$(ProjectDir)CEmu\s98\device;$(ProjectDir)CEmu\s98\device\fmgen;$(ProjectDir)CEmu\z80;$(ProjectDir)CEmu\fmmon;$(ProjectDir)CEmu\vendor\np2\glue;$(ProjectDir)CEmu\vendor\np2\include;$(ProjectDir)CEmu\vendor\np2\cpu;$(ProjectDir)CEmu\vendor\musashi;$(ProjectDir)CEmu\vendor\mc6809;$(ProjectDir)CEmu\vendor\m6502;$(ProjectDir)CEmu\vendor\h6280;$(ProjectDir)CEmu\vendor\h8;$(ProjectDir)CEmu\vendor\hd63701;$(ProjectDir)CEmu\vendor\m6803;$(ProjectDir)CEmu\vendor\multipcm;$(ProjectDir)CEmu\vendor\v35;$(ProjectDir)CEmu\vendor\m37710;$(ProjectDir)CEmu\vendor\np2;$(ProjectDir)..\kpi_sources_20240712\kpi_decoder\kbs98\source\device;$(ProjectDir)..\kpi_sources_20240712\kpi_decoder\kbs98\source\device\mame;$(ProjectDir)..\kpi_sources_20240712\kpi_decoder\kbs98\source\device\emu2413;$(ProjectDir)zstd;$(ProjectDir)third_party\signalsmith-stretch\include;$(ProjectDir)third_party\signalsmith-linear\include;$(ProjectDir)third_party\aimp;$(ProjectDir)third_party\vst3sdk;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <EnableParallelCodeGeneration>true</EnableParallelCodeGeneration>
-      <OpenMPSupport>true</OpenMPSupport>
+      <EnableParallelCodeGeneration>false</EnableParallelCodeGeneration>
+      <OpenMPSupport>false</OpenMPSupport>
     </ClCompile>
     <ResourceCompile>
       <PreprocessorDefinitions>NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
@@ -377,8 +377,8 @@ if errorlevel 1 exit /b 1</Command>
       <OptimizeReferences>true</OptimizeReferences>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <TargetMachine>MachineX64</TargetMachine>
-      <LinkTimeCodeGeneration>UseLinkTimeCodeGeneration</LinkTimeCodeGeneration>
-      <IgnoreSpecificDefaultLibraries>uafxcw.lib</IgnoreSpecificDefaultLibraries>
+      <LinkTimeCodeGeneration>Default</LinkTimeCodeGeneration>
+      <IgnoreSpecificDefaultLibraries>uafxcw.lib;libircmt.lib;libirc.lib;svml_dispmt.lib;libmmt.lib;libiomp5md.lib</IgnoreSpecificDefaultLibraries>
       <GenerateDebugInformation>DebugFull</GenerateDebugInformation>
       <TurnOffAssemblyGeneration>false</TurnOffAssemblyGeneration>
       <HeapReserveSize>2097152</HeapReserveSize>
@@ -452,7 +452,7 @@ if errorlevel 1 exit /b 1</Command>
       <AdditionalOptions>/utf-8 /Zo %(AdditionalOptions)</AdditionalOptions>
       <DisableSpecificWarnings>4828;%(DisableSpecificWarnings)</DisableSpecificWarnings>
       <AdditionalIncludeDirectories>$(ProjectDir)CEmu;$(ProjectDir)..\kpi_sources_20240712\kpi_decoder\kbmdx\source\portable_mdx\include;..\kpi_sources_20240712\kpi_decoder\kbmdx\source\mdc;$(ProjectDir)..\kpi_sources_20240712\kpi_decoder\kbmdx\source\portable_mdx\src\mxdrv;$(ProjectDir)..\kpi_sources_20240712\kpi_decoder\kbmdx\source\portable_mdx\src\x68sound;$(ProjectDir)kb_sasami\source;$(ProjectDir)kb_sasami\source\ymfm;$(ProjectDir)CEmu\s98;$(ProjectDir)CEmu\s98\device;$(ProjectDir)CEmu\s98\device\fmgen;$(ProjectDir)CEmu\z80;$(ProjectDir)CEmu\fmmon;$(ProjectDir)CEmu\vendor\np2\glue;$(ProjectDir)CEmu\vendor\np2\include;$(ProjectDir)CEmu\vendor\np2\cpu;$(ProjectDir)CEmu\vendor\musashi;$(ProjectDir)CEmu\vendor\mc6809;$(ProjectDir)CEmu\vendor\m6502;$(ProjectDir)CEmu\vendor\h6280;$(ProjectDir)CEmu\vendor\h8;$(ProjectDir)CEmu\vendor\hd63701;$(ProjectDir)CEmu\vendor\m6803;$(ProjectDir)CEmu\vendor\multipcm;$(ProjectDir)CEmu\vendor\v35;$(ProjectDir)CEmu\vendor\m37710;$(ProjectDir)CEmu\vendor\np2;$(ProjectDir)..\kpi_sources_20240712\kpi_decoder\kbs98\source\device;$(ProjectDir)..\kpi_sources_20240712\kpi_decoder\kbs98\source\device\mame;$(ProjectDir)..\kpi_sources_20240712\kpi_decoder\kbs98\source\device\emu2413;$(ProjectDir)zstd;$(ProjectDir)third_party\signalsmith-stretch\include;$(ProjectDir)third_party\signalsmith-linear\include;$(ProjectDir)third_party\aimp;$(ProjectDir)third_party\vst3sdk;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <OpenMPSupport>true</OpenMPSupport>
+      <OpenMPSupport>false</OpenMPSupport>
     </ClCompile>
     <ResourceCompile>
       <PreprocessorDefinitions>NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
@@ -490,6 +490,16 @@ if errorlevel 1 exit /b 1</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="cpu_isa.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="simd_audio.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="simd_audio_avx512.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <EnableEnhancedInstructionSet Condition="'$(Platform)'=='x64'">AdvancedVectorExtensions512</EnableEnhancedInstructionSet>
+    </ClCompile>
     <ClCompile Include="Vst3Host.cpp" />
     <ClCompile Include="VstMidiEngine.cpp" />
     <ClCompile Include="VstHostDlg.cpp" />
@@ -1169,7 +1179,8 @@ if errorlevel 1 exit /b 1</Command>
     <ClCompile Include="ScWgcCapture.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <LanguageStandard>stdcpp17</LanguageStandard>
-      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+      <UseMSVC>true</UseMSVC>
+      <AdditionalOptions>/utf-8 /std:c++17 /O2 /arch:AVX2</AdditionalOptions>
     </ClCompile>
     <ClCompile Include="TagEditDlg.cpp" />
     <ClCompile Include="TagBatchEditDlg.cpp" />

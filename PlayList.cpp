@@ -19,6 +19,7 @@
 #include <algorithm>
 #include "Douga.h"
 #include "PluginKinds.h"
+#include "KpiPluginInstall.h"
 #include "CEmu/cemu_mgr.h"
 #include "CEmu/cemu_modepref.h"
 #include "CEmu/cemu_support.h"
@@ -642,51 +643,51 @@ BEGIN_MESSAGE_MAP(CPlayList, CCustomBlurDialogBase)
 	ON_WM_NCDESTROY()
 	ON_WM_CREATE()
 	ON_WM_CLOSE()
-	ON_BN_CLICKED(IDOK, &CPlayList::OnBnClickedOk)
-	ON_BN_CLICKED(IDC_BUTTON1, &CPlayList::OnUP)
-	ON_BN_CLICKED(IDC_BUTTON5, &CPlayList::OnSUP)
-	ON_BN_CLICKED(IDC_BUTTON10, &CPlayList::OnSDOWN)
-	ON_BN_CLICKED(IDC_BUTTON11, &CPlayList::OnDOWN)
-	ON_NOTIFY(LVN_KEYDOWN, IDC_LIST1, &CPlayList::OnLvnKeydownList1)
+	ON_BN_CLICKED(IDOK, OnBnClickedOk)
+	ON_BN_CLICKED(IDC_BUTTON1, OnUP)
+	ON_BN_CLICKED(IDC_BUTTON5, OnSUP)
+	ON_BN_CLICKED(IDC_BUTTON10, OnSDOWN)
+	ON_BN_CLICKED(IDC_BUTTON11, OnDOWN)
+	ON_NOTIFY(LVN_KEYDOWN, IDC_LIST1, OnLvnKeydownList1)
 	ON_WM_DROPFILES()
-	ON_NOTIFY(NM_DBLCLK, IDC_LIST1, &CPlayList::OnNMDblclkList1)
+	ON_NOTIFY(NM_DBLCLK, IDC_LIST1, OnNMDblclkList1)
 	ON_WM_SIZE()
 	ON_WM_TIMER()
 	ON_WM_KEYDOWN()
-	ON_BN_CLICKED(IDC_CHECK4, &CPlayList::OnBnClickedCheck4)
-	ON_BN_CLICKED(IDC_CHECK1, &CPlayList::OnBnClickedCheck1)
-	ON_NOTIFY(LVN_BEGINDRAG, IDC_LIST1, &CPlayList::OnLvnBegindragList1)
+	ON_BN_CLICKED(IDC_CHECK4, OnBnClickedCheck4)
+	ON_BN_CLICKED(IDC_CHECK1, OnBnClickedCheck1)
+	ON_NOTIFY(LVN_BEGINDRAG, IDC_LIST1, OnLvnBegindragList1)
 	ON_WM_MOUSEMOVE()
 	ON_WM_LBUTTONUP()
-	ON_NOTIFY(LVN_GETDISPINFO, IDC_LIST1, &CPlayList::OnLvnGetdispinfoList1)
-	ON_NOTIFY(NM_RCLICK, IDC_LIST1, &CPlayList::OnNMRclickList1)
+	ON_NOTIFY(LVN_GETDISPINFO, IDC_LIST1, OnLvnGetdispinfoList1)
+	ON_NOTIFY(NM_RCLICK, IDC_LIST1, OnNMRclickList1)
 	ON_COMMAND(ID_POP_32776, OnList)
 	ON_COMMAND(ID_POP_32777,Del)
-	ON_COMMAND(ID_POP_WAVEXPORT, &CPlayList::OnPopWavExport)
+	ON_COMMAND(ID_POP_WAVEXPORT, OnPopWavExport)
 	ON_WM_ACTIVATE()
-	ON_COMMAND(ID_POP_32787, &CPlayList::OnPop32787)
-	ON_BN_CLICKED(IDC_BUTTON16, &CPlayList::OnFindUp)
-	ON_BN_CLICKED(IDC_BUTTON20, &CPlayList::OnFindDown)
-	ON_BN_CLICKED(IDC_CHECK6, &CPlayList::OnBnClickedCheck6mp3)
-	ON_BN_CLICKED(IDC_CHECK7, &CPlayList::OnBnClickedCheck7dshow)
+	ON_COMMAND(ID_POP_32787, OnPop32787)
+	ON_BN_CLICKED(IDC_BUTTON16, OnFindUp)
+	ON_BN_CLICKED(IDC_BUTTON20, OnFindDown)
+	ON_BN_CLICKED(IDC_CHECK6, OnBnClickedCheck6mp3)
+	ON_BN_CLICKED(IDC_CHECK7, OnBnClickedCheck7dshow)
 	ON_WM_CTLCOLOR()
 	ON_WM_SHOWWINDOW()
 	ON_WM_MOVING()
 	ON_WM_SIZING()
 	ON_WM_SETFOCUS()
 	ON_WM_NCACTIVATE()
-	ON_CBN_SELCHANGE(IDC_COMBO1, &CPlayList::OnCbnSelchangeCombo1)
-	ON_CBN_SELCHANGE(IDC_PL_ENDMODE, &CPlayList::OnCbnSelchangeEndMode)
-	ON_BN_CLICKED(IDC_BUTTON3, &CPlayList::OnBnClickedButton3)
-	ON_BN_CLICKED(IDC_PLAYDELETE, &CPlayList::OnBnClickedPlaydelete)
-	ON_BN_CLICKED(IDC_PIANOROLL, &CPlayList::OnBnClickedPianoroll)
-	ON_BN_CLICKED(IDC_PL_HELP, &CPlayList::OnBnClickedHelp)
+	ON_CBN_SELCHANGE(IDC_COMBO1, OnCbnSelchangeCombo1)
+	ON_CBN_SELCHANGE(IDC_PL_ENDMODE, OnCbnSelchangeEndMode)
+	ON_BN_CLICKED(IDC_BUTTON3, OnBnClickedButton3)
+	ON_BN_CLICKED(IDC_PLAYDELETE, OnBnClickedPlaydelete)
+	ON_BN_CLICKED(IDC_PIANOROLL, OnBnClickedPianoroll)
+	ON_BN_CLICKED(IDC_PL_HELP, OnBnClickedHelp)
 	ON_WM_DESTROY()
 #if CCUSTOM_AERO_SUPPORT
 	ON_MESSAGE(CCC_MSG_REAPPLY_OPAQUE_FIXERS, OnReapplyOpaqueFixers)
 #endif
-	ON_MESSAGE(WM_PL_MISS_DONE, &CPlayList::OnPlMissDone)
-	ON_MESSAGE(WM_PL_JAK_DONE, &CPlayList::OnPlJakDone)
+	ON_MESSAGE(WM_PL_MISS_DONE, OnPlMissDone)
+	ON_MESSAGE(WM_PL_JAK_DONE, OnPlJakDone)
 END_MESSAGE_MAP()
 
 static const UINT_PTR kPlayListNavRefreshTimer = 4945;
@@ -8661,8 +8662,8 @@ void CPlayList::Fol(CString fname)
 						p.sub = sky2 ? 31 : 30;
 						p.loop1 = p.loop2 = 0;
 						_tcsncpy_s(p.art, sky2
-							? LL14(L"空の軌跡 The 2nd", L"Trails in the Sky The 2nd", L"Les Sentiers du Ciel The 2nd", L"Trails in the Sky The 2nd", L"Trails in the Sky The 2nd", L"하늘의 궤적 The 2nd", L"空之轨迹 The 2nd", L"Trails in the Sky The 2nd", L"Тропы в Небе The 2nd", L"Himmelsleitern The 2nd", L"Trails in the Sky The 2nd", L"Trails in the Sky The 2nd", L"Trails in the Sky The 2nd", L"Trails in the Sky The 2nd")
-							: LL14(L"空の軌跡 The 1st", L"Trails in the Sky The 1st", L"Les Sentiers du Ciel The 1st", L"Trails in the Sky The 1st", L"Trails in the Sky The 1st", L"하늘의 궤적 The 1st", L"空之轨迹 The 1st", L"Trails in the Sky The 1st", L"Тропы в Небе The 1st", L"Himmelsleitern The 1st", L"Trails in the Sky The 1st", L"Trails in the Sky The 1st", L"Trails in the Sky The 1st", L"Trails in the Sky The 1st"),
+							? CString(LL14(L"空の軌跡 The 2nd", L"Trails in the Sky The 2nd", L"Les Sentiers du Ciel The 2nd", L"Trails in the Sky The 2nd", L"Trails in the Sky The 2nd", L"하늘의 궤적 The 2nd", L"空之轨迹 The 2nd", L"Trails in the Sky The 2nd", L"Тропы в Небе The 2nd", L"Himmelsleitern The 2nd", L"Trails in the Sky The 2nd", L"Trails in the Sky The 2nd", L"Trails in the Sky The 2nd", L"Trails in the Sky The 2nd"))
+							: CString(LL14(L"空の軌跡 The 1st", L"Trails in the Sky The 1st", L"Les Sentiers du Ciel The 1st", L"Trails in the Sky The 1st", L"Trails in the Sky The 1st", L"하늘의 궤적 The 1st", L"空之轨迹 The 1st", L"Trails in the Sky The 1st", L"Тропы в Небе The 1st", L"Himmelsleitern The 1st", L"Trails in the Sky The 1st", L"Trails in the Sky The 1st", L"Trails in the Sky The 1st", L"Trails in the Sky The 1st")),
 							_TRUNCATE);
 						CString alb;
 						alb.Format(LL14(L"動画 %s", L"Movie %s", L"Vidéo %s", L"Video %s", L"Vídeo %s", L"동영상 %s", L"视频 %s", L"فيديو %s", L"Видео %s", L"Video %s", L"Vídeo %s", L"Video %s", L"Wideo %s", L"Video %s"), (LPCTSTR)pacFt);
@@ -12380,8 +12381,8 @@ public:
 			m_lc.SetItemText(row, 1, tag);
 			m_lc.SetItemText(row, 2, CString(m_modes[i].subtype));
 			m_lc.SetItemText(row, 3, m_modes[i].isMidi
-				? LL14(L"KPI/VST", L"KPI/VST", L"KPI/VST", L"KPI/VST", L"KPI/VST", L"KPI/VST", L"KPI/VST", L"KPI/VST",
-					L"KPI/VST", L"KPI/VST", L"KPI/VST", L"KPI/VST", L"KPI/VST", L"KPI/VST")
+				? CString(LL14(L"KPI/VST", L"KPI/VST", L"KPI/VST", L"KPI/VST", L"KPI/VST", L"KPI/VST", L"KPI/VST", L"KPI/VST",
+					L"KPI/VST", L"KPI/VST", L"KPI/VST", L"KPI/VST", L"KPI/VST", L"KPI/VST"))
 				: CString());
 			m_lc.SetItemData(row, (DWORD_PTR)i);
 		}
@@ -12404,9 +12405,9 @@ public:
 };
 
 BEGIN_MESSAGE_MAP(CPlCemuModePickDlg, CCustomBlurDialogBase)
-	ON_BN_CLICKED(IDC_MMP_APPLY, &CPlCemuModePickDlg::OnApply)
-	ON_BN_CLICKED(IDC_MMP_CANCEL, &CPlCemuModePickDlg::OnCancelBtn)
-	ON_NOTIFY(NM_DBLCLK, IDC_MMP_LIST, &CPlCemuModePickDlg::OnDblClk)
+	ON_BN_CLICKED(IDC_MMP_APPLY, OnApply)
+	ON_BN_CLICKED(IDC_MMP_CANCEL, OnCancelBtn)
+	ON_NOTIFY(NM_DBLCLK, IDC_MMP_LIST, OnDblClk)
 END_MESSAGE_MAP()
 
 /* 複数モードかつ未選択なら UI。1件は即 OK。キャンセルで false。 */
@@ -12771,51 +12772,97 @@ void CPlayList::plugs(CString fff, playlistdata *p,TCHAR* kpi, BYTE& kv)
 		return e;
 	};
 	const CString wantExt = fileExtOf(fff);
-	for(int i=0;i<kpicnt;i++){
-		if (plugkind[i] != PLUGKIND_KPI) continue;
-		if (wantExt == L".mpy" || wantExt == L".mpw2" || wantExt == L".mpsmv") continue;
-		for(int j=0;;j++){
-			if(ext[i][j]=="") break;
-			if(ext[i][j]==wantExt){
-				ss=kpif[i];
-				if (kpichk[i] == 1) {
-					flg = 1;
-					kv = kvar[i][j];
+#ifdef _WIN64
+	const BYTE nativeArch = 64;
+#else
+	const BYTE nativeArch = 32;
+#endif
+	auto kpiHasMonDump = [](int i) -> int {
+		BOOL fm = FALSE, mid = FALSE;
+		KpiPlugin_ProbeMonitorCaps(kpif[i], &fm, &mid);
+		return (fm || mid) ? 1 : 0;
+	};
+	const int chipWantMon = (
+		wantExt == L".kss" || wantExt == L".hes" || wantExt == L".nsf" || wantExt == L".nsfe"
+		|| wantExt == L".gbs" || wantExt == L".nes" || wantExt == L".spc"
+		|| wantExt == L".vgm" || wantExt == L".vgz" || wantExt == L".s98" || wantExt == L".gym"
+		|| wantExt == L".sid" || wantExt == L".ay"
+		|| wantExt == L".psf" || wantExt == L".minipsf"
+		|| wantExt == L".psf2" || wantExt == L".minipsf2"
+		|| wantExt == L".gsf" || wantExt == L".minigsf"
+		|| wantExt == L".2sf" || wantExt == L".mini2sf"
+		|| wantExt == L".ncsf" || wantExt == L".minincsf") ? 1 : 0;
+	auto pickKpi = [&](int nativeOnly, int dumpOnly) -> int {
+		for (int i = 0; i < kpicnt; i++) {
+			if (plugkind[i] != PLUGKIND_KPI) continue;
+			if (nativeOnly && kpiarch[i] && kpiarch[i] != nativeArch) continue;
+			if (wantExt == L".mpy" || wantExt == L".mpw2" || wantExt == L".mpsmv") continue;
+			if (dumpOnly && !kpiHasMonDump(i)) continue;
+			for (int j = 0;; j++) {
+				if (ext[i][j] == L"") break;
+				if (ext[i][j] == wantExt) {
+					if (kpichk[i] == 1) {
+						ss = kpif[i];
+						kv = kvar[i][j];
+						return 1;
+					}
 					break;
 				}
 			}
 		}
-		if(flg==1)break;
-	}
-	/* HES/KSS 等: チェック ON の KPI が無いと呼び出し側が動画(-2)に落とす。
-	   未チェックでも対応 KPI があれば拾う（nez OFF + kbgme HES 無効の事故防止）。 */
-	if (flg != 1 && !wantExt.IsEmpty()) {
-		static const LPCTSTR kChip[] = {
-			_T(".hes"), _T(".kss"), _T(".nsf"), _T(".nsfe"), _T(".gbs"), _T(".nes"),
-			_T(".spc"), _T(".vgm"), _T(".vgz"), _T(".s98"), _T(".gym"),
-			_T(".sid"), _T(".minigsf"), _T(".gsf"), _T(".ncsf"),
-			_T(".minipsf2"), _T(".psf2"), _T(".minipsf"), _T(".psf")
-		};
-		int isChip = 0;
-		for (int c = 0; c < _countof(kChip); ++c) {
-			if (wantExt == kChip[c]) { isChip = 1; break; }
-		}
-		if (isChip) {
-			for (int i = 0; i < kpicnt; i++) {
-				if (plugkind[i] != PLUGKIND_KPI) continue;
-				for (int j = 0;; j++) {
-					if (ext[i][j] == L"") break;
-					if (ext[i][j] == wantExt) {
-						ss = kpif[i];
-						flg = 1;
-						kv = kvar[i][j];
-						break;
-					}
+		return 0;
+	};
+	flg = 0;
+	auto preferDumpName = [&](const wchar_t* needle, const wchar_t* exclude) -> int {
+		for (int i = 0; i < kpicnt; i++) {
+			if (plugkind[i] != PLUGKIND_KPI) continue;
+			if (kpiarch[i] && kpiarch[i] != nativeArch) continue;
+			if (!kpiHasMonDump(i) || kpichk[i] != 1) continue;
+			CString low = kpif[i];
+			low.MakeLower();
+			if (low.Find(needle) < 0)
+				continue;
+			if (exclude && exclude[0] && low.Find(exclude) >= 0)
+				continue;
+			for (int j = 0;; j++) {
+				if (ext[i][j] == L"") break;
+				if (ext[i][j] == wantExt) {
+					ss = kpif[i];
+					kv = kvar[i][j];
+					return 1;
 				}
-				if (flg == 1) break;
 			}
 		}
+		return 0;
+	};
+	if (chipWantMon && wantExt == L".spc")
+		flg = preferDumpName(L"snesapu", NULL);
+	if (chipWantMon && !flg && (wantExt == L".nsf" || wantExt == L".nsfe"))
+		flg = preferDumpName(L"nsfplug", NULL);
+	if (chipWantMon && !flg && (wantExt == L".vgm" || wantExt == L".vgz"))
+		flg = preferDumpName(L"kbvgm", NULL);
+	if (chipWantMon && !flg && wantExt == L".gym")
+		flg = preferDumpName(L"kbgym", NULL);
+	if (chipWantMon && !flg && wantExt == L".s98")
+		flg = preferDumpName(L"kbs98", NULL);
+	if (chipWantMon && !flg && wantExt == L".sid")
+		flg = preferDumpName(L"kbsid", NULL);
+	if (chipWantMon && !flg && (wantExt == L".psf2" || wantExt == L".minipsf2"))
+		flg = preferDumpName(L"psf2", NULL);
+	if (chipWantMon && !flg && (wantExt == L".psf" || wantExt == L".minipsf"))
+		flg = preferDumpName(L"kbpsf", L"psf2");
+	if (chipWantMon && !flg && (wantExt == L".gsf" || wantExt == L".minigsf"))
+		flg = preferDumpName(L"kbgsf", NULL);
+	if (chipWantMon && !flg && (wantExt == L".2sf" || wantExt == L".mini2sf"))
+		flg = preferDumpName(L"kb2sf", NULL);
+	if (chipWantMon && !flg && (wantExt == L".ncsf" || wantExt == L".minincsf"))
+		flg = preferDumpName(L"kbncsf", NULL);
+	if (chipWantMon && !flg) {
+		flg = pickKpi(1, 1);
+		if (!flg) flg = pickKpi(0, 1);
 	}
+	if (!flg) flg = pickKpi(1, 0);
+	if (!flg) flg = pickKpi(0, 0);
 	if(flg==1){
 		_tcscpy(p->fol,fff);
 		p->sub=-3;
@@ -12825,6 +12872,37 @@ void CPlayList::plugs(CString fff, playlistdata *p,TCHAR* kpi, BYTE& kv)
 		_tcscpy(kpi,ss);
 		return;
 	}
+	/* dump KPI が無いときだけ Winamp Highly Experimental。モニタは KPI dump を先に取る */
+	auto preferWinampDll = [&](const wchar_t* needle) -> int {
+		for (int i = 0; i < kpicnt; i++) {
+			if (plugkind[i] != PLUGKIND_WINAMP || kpichk[i] != 1) continue;
+			CString n = kpif[i];
+			n.MakeLower();
+			if (n.Find(needle) < 0) continue;
+			int hit = 0;
+			for (int j = 0;; j++) {
+				if (ext[i][j] == L"") break;
+				if (ext[i][j] == wantExt) { hit = 1; break; }
+			}
+			if (!hit) continue;
+			_tcscpy(p->fol, fff);
+			p->sub = MODE_PLUGIN_WINAMP;
+			ft = fff.Right(fff.GetLength() - fff.ReverseFind(L'\\') - 1);
+			_tcscpy(p->name, ft);
+			p->alb[0] = NULL; p->art[0] = NULL; p->loop1 = p->loop2 = p->ret2 = 0;
+			_tcscpy(kpi, kpif[i]);
+			kv = 0;
+			return 1;
+		}
+		return 0;
+	};
+	if ((wantExt == L".psf2" || wantExt == L".minipsf2" || wantExt == L".psf" || wantExt == L".minipsf")
+		&& preferWinampDll(L"in_psf.dll"))
+		return;
+	if ((wantExt == L".gsf" || wantExt == L".minigsf") && preferWinampDll(L"in_gsf.dll"))
+		return;
+	if ((wantExt == L".usf" || wantExt == L".miniusf") && preferWinampDll(L"in_usf.dll"))
+		return;
 	{
 		CString zx = fff;
 		zx.MakeLower();

@@ -75,7 +75,7 @@ void MpFeatWriteNowPlaying()
 		line.Format(L"%s\r\n", (LPCTSTR)title);
 	CFile f;
 	if (f.Open(path, CFile::modeCreate | CFile::modeWrite | CFile::shareDenyWrite, NULL) == TRUE) {
-		const CStringA utf8 = CW2A(line, CP_UTF8);
+		const CStringA utf8((LPCSTR)CW2A(line, CP_UTF8));
 		f.Write((LPCSTR)utf8, utf8.GetLength());
 		f.Close();
 	}
@@ -98,8 +98,8 @@ CString MpFeatStatusLine()
 			L"전송AAC:off", L"推流AAC:off", L"AAC بث:off", L"AAC поток:off", L"Stream-AAC:off",
 			L"AAC stream:off", L"Stream-AAC:off", L"AAC stream:off", L"Yayın AAC:off");
 	CString mic = savedata.mic_device[0]
-		? LL14(L"Mic:設定済", L"Mic:set", L"Mic:ok", L"Mic:ok", L"Mic:ok", L"Mic:설정됨", L"Mic:已设", L"Mic:مضبوط", L"Mic:задан", L"Mic:gesetzt", L"Mic:ok", L"Mic:ok", L"Mic:ustaw", L"Mic:ayarlı")
-		: LL14(L"Mic:—", L"Mic:—", L"Mic:—", L"Mic:—", L"Mic:—", L"Mic:—", L"Mic:—", L"Mic:—", L"Mic:—", L"Mic:—", L"Mic:—", L"Mic:—", L"Mic:—", L"Mic:—");
+		? CString(LL14(L"Mic:設定済", L"Mic:set", L"Mic:ok", L"Mic:ok", L"Mic:ok", L"Mic:설정됨", L"Mic:已设", L"Mic:مضبوط", L"Mic:задан", L"Mic:gesetzt", L"Mic:ok", L"Mic:ok", L"Mic:ustaw", L"Mic:ayarlı"))
+		: CString(LL14(L"Mic:—", L"Mic:—", L"Mic:—", L"Mic:—", L"Mic:—", L"Mic:—", L"Mic:—", L"Mic:—", L"Mic:—", L"Mic:—", L"Mic:—", L"Mic:—", L"Mic:—", L"Mic:—"));
 	CString rate;
 	if (wavbit_sample_Hz > 0)
 		rate.Format(L"%dHz/%dch/%dbit", wavbit_sample_Hz, wavchannel, wavsam_depth);

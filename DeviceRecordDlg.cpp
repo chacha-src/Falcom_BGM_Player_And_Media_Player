@@ -597,14 +597,14 @@ void CDeviceRecordDlg::DoDataExchange(CDataExchange* pDX)
 }
 
 BEGIN_MESSAGE_MAP(CDeviceRecordDlg, CCustomBlurDialogBase)
-	ON_BN_CLICKED(IDC_DR_BROWSE, &CDeviceRecordDlg::OnBnClickedBrowse)
-	ON_BN_CLICKED(IDC_DR_START, &CDeviceRecordDlg::OnBnClickedStart)
-	ON_BN_CLICKED(IDC_DR_CLOSE, &CDeviceRecordDlg::OnBnClickedClose)
-	ON_BN_CLICKED(IDC_DR_HELP, &CDeviceRecordDlg::OnBnClickedHelp)
-	ON_CBN_SELCHANGE(IDC_DR_FMT, &CDeviceRecordDlg::OnCbnSelchangeFormat)
-	ON_CBN_SELCHANGE(IDC_DR_DEV, &CDeviceRecordDlg::OnCbnSelchangeDev)
-	ON_CBN_SELCHANGE(IDC_DR_MICDEV, &CDeviceRecordDlg::OnCbnSelchangeMicDev)
-	ON_BN_CLICKED(IDC_DR_MICDEV_REFRESH, &CDeviceRecordDlg::OnMicDevRefresh)
+	ON_BN_CLICKED(IDC_DR_BROWSE, OnBnClickedBrowse)
+	ON_BN_CLICKED(IDC_DR_START, OnBnClickedStart)
+	ON_BN_CLICKED(IDC_DR_CLOSE, OnBnClickedClose)
+	ON_BN_CLICKED(IDC_DR_HELP, OnBnClickedHelp)
+	ON_CBN_SELCHANGE(IDC_DR_FMT, OnCbnSelchangeFormat)
+	ON_CBN_SELCHANGE(IDC_DR_DEV, OnCbnSelchangeDev)
+	ON_CBN_SELCHANGE(IDC_DR_MICDEV, OnCbnSelchangeMicDev)
+	ON_BN_CLICKED(IDC_DR_MICDEV_REFRESH, OnMicDevRefresh)
 	ON_WM_TIMER()
 	ON_WM_SIZE()
 	ON_WM_DESTROY()
@@ -1048,14 +1048,14 @@ void CDeviceRecordDlg::SetRecordingUi(BOOL recording)
 	// EnableWindow(FALSE) はアクリル上で透過しやすいので使わない
 	if (m_start.GetSafeHwnd()) {
 		m_start.SetWindowText(recording
-			? LL14(L"録音停止", L"Stop recording", L"Arrêter", L"Ferma",
+			? CString(LL14(L"録音停止", L"Stop recording", L"Arrêter", L"Ferma",
 				L"Detener", L"녹음 중지", L"停止录音", L"إيقاف التسجيل",
 				L"Остановить", L"Aufnahme stoppen", L"Parar gravação", L"Opname stoppen",
-				L"Zatrzymaj nagrywanie", L"Kaydı durdur")
-			: LL14(L"録音開始", L"Start recording", L"Démarrer", L"Avvia",
+				L"Zatrzymaj nagrywanie", L"Kaydı durdur"))
+			: CString(LL14(L"録音開始", L"Start recording", L"Démarrer", L"Avvia",
 				L"Iniciar", L"녹음 시작", L"开始录音", L"بدء التسجيل",
 				L"Начать запись", L"Aufnahme starten", L"Iniciar gravação", L"Opname starten",
-				L"Rozpocznij nagrywanie", L"Kaydı başlat"));
+				L"Rozpocznij nagrywanie", L"Kaydı başlat")));
 	}
 	RefreshOpaqueUi();
 }

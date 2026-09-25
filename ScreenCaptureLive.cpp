@@ -1,4 +1,4 @@
-﻿// ScreenCaptureLive.cpp
+// ScreenCaptureLive.cpp
 // YouTube / Nico / Custom RTMP live UI + OAuth + Live Streaming API
 
 #include "stdafx.h"
@@ -1164,7 +1164,7 @@ static BOOL ScLiveExtractFfmpegFromZip(const TCHAR* zipPath, const TCHAR* destDi
 			if ((ZPOS64_T)(i + 1) < gi.number_entry) unzGoToNextFile(uf);
 			continue;
 		}
-		CString currentFileName = CA2T(fileNameOnly, CP_UTF8);
+		CString currentFileName((LPCTSTR)CA2T(fileNameOnly, CP_UTF8));
 		if (currentFileName.CompareNoCase(L"ffmpeg.exe") != 0) {
 			if ((ZPOS64_T)(i + 1) < gi.number_entry) unzGoToNextFile(uf);
 			continue;

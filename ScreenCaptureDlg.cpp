@@ -1,4 +1,4 @@
-﻿// ScreenCaptureDlg.cpp
+// ScreenCaptureDlg.cpp
 // 画面キャプチャ → MP4 (H.264 + AAC)
 // プライマリ / 全モニタ / ウィンドウ合成(配置・拡大縮小・Z順)
 
@@ -1526,25 +1526,25 @@ void CScPreviewCtrl::OnRButtonUp(UINT nFlags, CPoint point)
 				if (mgmtSub) {
 					mgmtSub->AddCommand(ID_SC_LAYER_HIDE,
 						hidden
-						? LL14(L"表示する", L"Show", L"Afficher", L"Mostra", L"Mostrar", L"표시", L"显示", L"إظهار",
-							L"Показать", L"Einblenden", L"Mostrar", L"Tonen", L"Pokaż", L"Göster")
-						: LL14(L"非表示にする", L"Hide", L"Masquer", L"Nascondi", L"Ocultar", L"숨기기", L"隐藏", L"إخفاء",
-							L"Скрыть", L"Ausblenden", L"Ocultar", L"Verbergen", L"Ukryj", L"Gizle"),
+						? CString(LL14(L"表示する", L"Show", L"Afficher", L"Mostra", L"Mostrar", L"표시", L"显示", L"إظهار",
+							L"Показать", L"Einblenden", L"Mostrar", L"Tonen", L"Pokaż", L"Göster"))
+						: CString(LL14(L"非表示にする", L"Hide", L"Masquer", L"Nascondi", L"Ocultar", L"숨기기", L"隐藏", L"إخفاء",
+							L"Скрыть", L"Ausblenden", L"Ocultar", L"Verbergen", L"Ukryj", L"Gizle")),
 						hidden
-						? LL14(L"このレイヤの映像を再表示（音はそのまま）", L"Show this layer's video again (audio unchanged)",
+						? CString(LL14(L"このレイヤの映像を再表示（音はそのまま）", L"Show this layer's video again (audio unchanged)",
 							L"Reafficher la video de ce calque (audio inchange)", L"Mostra di nuovo il video del livello (audio invariato)",
 							L"Volver a mostrar el video de esta capa (audio igual)", L"이 레이어 영상을 다시 표시(소리는 그대로)",
 							L"重新显示此层画面（音频不变）", L"إظهار فيديو هذه الطبقة مجدداً (الصوت كما هو)",
 							L"Снова показать видео слоя (звук без изменений)", L"Video dieser Ebene wieder einblenden (Audio gleich)",
 							L"Mostrar de novo o video desta camada (audio igual)", L"Video van deze laag weer tonen (audio ongewijzigd)",
-							L"Pokaz ponownie wideo warstwy (audio bez zmian)", L"Bu katmanin videosunu tekrar goster (ses ayni)")
-						: LL14(L"このレイヤの映像を隠す（音だけ載せたいときに）", L"Hide this layer's video (keep audio if needed)",
+							L"Pokaz ponownie wideo warstwy (audio bez zmian)", L"Bu katmanin videosunu tekrar goster (ses ayni)"))
+						: CString(LL14(L"このレイヤの映像を隠す（音だけ載せたいときに）", L"Hide this layer's video (keep audio if needed)",
 							L"Masquer la video de ce calque (garder l'audio)", L"Nascondi il video del livello (tieni l'audio)",
 							L"Ocultar el video de esta capa (mantener audio)", L"이 레이어 영상을 숨김(소리만 남길 때)",
 							L"隐藏此层画面（需要时可保留音频）", L"إخفاء فيديو هذه الطبقة (مع الإبقاء على الصوت)",
 							L"Скрыть видео слоя (звук можно оставить)", L"Video dieser Ebene ausblenden (Audio behalten)",
 							L"Ocultar o video desta camada (manter audio)", L"Video van deze laag verbergen (audio behouden)",
-							L"Ukryj wideo warstwy (audio mozna zostawic)", L"Bu katmanin videosunu gizle (sesi tut)"));
+							L"Ukryj wideo warstwy (audio mozna zostawic)", L"Bu katmanin videosunu gizle (sesi tut)")));
 					mgmtSub->AddCommand(ID_SC_LAYER_CROP_FULL,
 						LL14(L"切出を解除", L"Clear crop", L"Annuler le rognage", L"Annulla ritaglio",
 							L"Quitar recorte", L"잘라내기 해제", L"清除裁剪", L"إلغاء القص",
@@ -2938,44 +2938,44 @@ void CScreenCaptureDlg::DoDataExchange(CDataExchange* pDX)
 }
 
 BEGIN_MESSAGE_MAP(CScreenCaptureDlg, CCustomBlurDialogBase)
-	ON_BN_CLICKED(IDC_SC_BROWSE, &CScreenCaptureDlg::OnBnClickedBrowse)
-	ON_BN_CLICKED(IDC_SC_START, &CScreenCaptureDlg::OnBnClickedStart)
-	ON_BN_CLICKED(IDC_SC_CLOSE, &CScreenCaptureDlg::OnBnClickedClose)
-	ON_BN_CLICKED(IDC_SC_HELP, &CScreenCaptureDlg::OnBnClickedHelp)
-	ON_BN_CLICKED(IDC_SC_REFRESH, &CScreenCaptureDlg::OnBnClickedRefresh)
-	ON_BN_CLICKED(IDC_SC_ADD, &CScreenCaptureDlg::OnBnClickedAdd)
-	ON_BN_CLICKED(IDC_SC_REMOVE, &CScreenCaptureDlg::OnBnClickedRemove)
-	ON_BN_CLICKED(IDC_SC_ZUP, &CScreenCaptureDlg::OnBnClickedZUp)
-	ON_BN_CLICKED(IDC_SC_ZDOWN, &CScreenCaptureDlg::OnBnClickedZDown)
-	ON_BN_CLICKED(IDC_SC_PICK, &CScreenCaptureDlg::OnBnClickedPick)
-	ON_BN_CLICKED(IDC_SC_APPLYGEO, &CScreenCaptureDlg::OnBnClickedApplyGeo)
-	ON_BN_CLICKED(IDC_SC_FIT, &CScreenCaptureDlg::OnBnClickedFit)
-	ON_BN_CLICKED(IDC_SC_SCALE50, &CScreenCaptureDlg::OnBnClickedScale50)
-	ON_BN_CLICKED(IDC_SC_SCALE100, &CScreenCaptureDlg::OnBnClickedScale100)
-	ON_BN_CLICKED(IDC_SC_TILE, &CScreenCaptureDlg::OnBnClickedTile)
-	ON_BN_CLICKED(IDC_SC_INCMP, &CScreenCaptureDlg::OnBnClickedIncludeMp)
-	ON_BN_CLICKED(IDC_SC_CURSOR, &CScreenCaptureDlg::OnBnClickedShowCursor)
-	ON_BN_CLICKED(IDC_SC_LIVE, &CScreenCaptureDlg::OnBnClickedLive)
-	ON_BN_CLICKED(IDC_SC_LIVE_CFG, &CScreenCaptureDlg::OnBnClickedLiveCfg)
-	ON_BN_CLICKED(IDC_SC_MIC, &CScreenCaptureDlg::OnBnClickedMic)
-	ON_BN_CLICKED(IDC_SC_VC_APPLY, &CScreenCaptureDlg::OnBnClickedVcApply)
-	ON_BN_CLICKED(IDC_SC_VC_OPEN, &CScreenCaptureDlg::OnBnClickedVcOpen)
-	ON_CBN_SELCHANGE(IDC_SC_MICDEV, &CScreenCaptureDlg::OnCbnSelchangeMicDev)
-	ON_BN_CLICKED(IDC_SC_MICDEV_REFRESH, &CScreenCaptureDlg::OnMicDevRefresh)
-	ON_CBN_SELCHANGE(IDC_SC_LOOPDEV, &CScreenCaptureDlg::OnCbnSelchangeLoopDev)
-	ON_CBN_SELCHANGE(IDC_SC_MODE, &CScreenCaptureDlg::OnCbnSelchangeMode)
-	ON_CBN_SELCHANGE(IDC_SC_CANVAS, &CScreenCaptureDlg::OnCbnSelchangeCanvas)
-	ON_CBN_SELCHANGE(IDC_SC_FPS, &CScreenCaptureDlg::OnCbnSelchangeFps)
-	ON_CBN_SELCHANGE(IDC_SC_EFFECT, &CScreenCaptureDlg::OnCbnSelchangeEffect)
-	ON_BN_CLICKED(IDC_SC_FXPRE_LOAD, &CScreenCaptureDlg::OnBnClickedFxPreLoad)
-	ON_BN_CLICKED(IDC_SC_FXPRE_SAVE, &CScreenCaptureDlg::OnBnClickedFxPreSave)
-	ON_CBN_SELCHANGE(IDC_SC_FXPRE, &CScreenCaptureDlg::OnCbnSelchangeFxPre)
-	ON_BN_CLICKED(IDC_SC_CROP_FULL, &CScreenCaptureDlg::OnBnClickedCropFull)
-	ON_LBN_SELCHANGE(IDC_SC_LAYER, &CScreenCaptureDlg::OnLbnSelchangeLayer)
+	ON_BN_CLICKED(IDC_SC_BROWSE, OnBnClickedBrowse)
+	ON_BN_CLICKED(IDC_SC_START, OnBnClickedStart)
+	ON_BN_CLICKED(IDC_SC_CLOSE, OnBnClickedClose)
+	ON_BN_CLICKED(IDC_SC_HELP, OnBnClickedHelp)
+	ON_BN_CLICKED(IDC_SC_REFRESH, OnBnClickedRefresh)
+	ON_BN_CLICKED(IDC_SC_ADD, OnBnClickedAdd)
+	ON_BN_CLICKED(IDC_SC_REMOVE, OnBnClickedRemove)
+	ON_BN_CLICKED(IDC_SC_ZUP, OnBnClickedZUp)
+	ON_BN_CLICKED(IDC_SC_ZDOWN, OnBnClickedZDown)
+	ON_BN_CLICKED(IDC_SC_PICK, OnBnClickedPick)
+	ON_BN_CLICKED(IDC_SC_APPLYGEO, OnBnClickedApplyGeo)
+	ON_BN_CLICKED(IDC_SC_FIT, OnBnClickedFit)
+	ON_BN_CLICKED(IDC_SC_SCALE50, OnBnClickedScale50)
+	ON_BN_CLICKED(IDC_SC_SCALE100, OnBnClickedScale100)
+	ON_BN_CLICKED(IDC_SC_TILE, OnBnClickedTile)
+	ON_BN_CLICKED(IDC_SC_INCMP, OnBnClickedIncludeMp)
+	ON_BN_CLICKED(IDC_SC_CURSOR, OnBnClickedShowCursor)
+	ON_BN_CLICKED(IDC_SC_LIVE, OnBnClickedLive)
+	ON_BN_CLICKED(IDC_SC_LIVE_CFG, OnBnClickedLiveCfg)
+	ON_BN_CLICKED(IDC_SC_MIC, OnBnClickedMic)
+	ON_BN_CLICKED(IDC_SC_VC_APPLY, OnBnClickedVcApply)
+	ON_BN_CLICKED(IDC_SC_VC_OPEN, OnBnClickedVcOpen)
+	ON_CBN_SELCHANGE(IDC_SC_MICDEV, OnCbnSelchangeMicDev)
+	ON_BN_CLICKED(IDC_SC_MICDEV_REFRESH, OnMicDevRefresh)
+	ON_CBN_SELCHANGE(IDC_SC_LOOPDEV, OnCbnSelchangeLoopDev)
+	ON_CBN_SELCHANGE(IDC_SC_MODE, OnCbnSelchangeMode)
+	ON_CBN_SELCHANGE(IDC_SC_CANVAS, OnCbnSelchangeCanvas)
+	ON_CBN_SELCHANGE(IDC_SC_FPS, OnCbnSelchangeFps)
+	ON_CBN_SELCHANGE(IDC_SC_EFFECT, OnCbnSelchangeEffect)
+	ON_BN_CLICKED(IDC_SC_FXPRE_LOAD, OnBnClickedFxPreLoad)
+	ON_BN_CLICKED(IDC_SC_FXPRE_SAVE, OnBnClickedFxPreSave)
+	ON_CBN_SELCHANGE(IDC_SC_FXPRE, OnCbnSelchangeFxPre)
+	ON_BN_CLICKED(IDC_SC_CROP_FULL, OnBnClickedCropFull)
+	ON_LBN_SELCHANGE(IDC_SC_LAYER, OnLbnSelchangeLayer)
 	ON_WM_LBUTTONDOWN()
 	ON_WM_TIMER()
 	ON_WM_SIZE()
-	ON_MESSAGE(WM_DPICHANGED, &CScreenCaptureDlg::OnDpiChanged)
+	ON_MESSAGE(WM_DPICHANGED, OnDpiChanged)
 	ON_WM_DESTROY()
 END_MESSAGE_MAP()
 
@@ -4562,20 +4562,20 @@ void CScreenCaptureDlg::SetRecordingUi(BOOL recording)
 	const BOOL liveUi = m_liveMode || (m_live.GetSafeHwnd() && m_live.GetCheck());
 	if (recording) {
 		m_start.SetWindowText(liveUi
-			? LL14(L"配信停止", L"Stop live", L"Arrêter le live", L"Ferma diretta",
+			? CString(LL14(L"配信停止", L"Stop live", L"Arrêter le live", L"Ferma diretta",
 				L"Detener vivo", L"방송 중지", L"停止直播", L"إيقاف البث",
 				L"Стоп эфир", L"Live stoppen", L"Parar ao vivo", L"Live stoppen",
-				L"Zatrzymaj transmisję", L"Yayını durdur")
-			: LL14(L"録画停止", L"Stop", L"Arrêter", L"Stop", L"Detener", L"중지", L"停止", L"إيقاف",
-				L"Стоп", L"Stopp", L"Parar", L"Stop", L"Stop", L"Durdur"));
+				L"Zatrzymaj transmisję", L"Yayını durdur"))
+			: CString(LL14(L"録画停止", L"Stop", L"Arrêter", L"Stop", L"Detener", L"중지", L"停止", L"إيقاف",
+				L"Стоп", L"Stopp", L"Parar", L"Stop", L"Stop", L"Durdur")));
 	} else {
 		m_start.SetWindowText(liveUi
-			? LL14(L"配信開始", L"Go live", L"Diffuser", L"Vai in diretta",
+			? CString(LL14(L"配信開始", L"Go live", L"Diffuser", L"Vai in diretta",
 				L"Emitir", L"방송 시작", L"开始直播", L"بدء البث",
 				L"В эфир", L"Live starten", L"Entrar ao vivo", L"Live starten",
-				L"Rozpocznij transmisję", L"Yayına başla")
-			: LL14(L"録画開始", L"Start", L"Démarrer", L"Avvia", L"Iniciar", L"시작", L"开始", L"بدء",
-				L"Старт", L"Start", L"Iniciar", L"Start", L"Start", L"Başlat"));
+				L"Rozpocznij transmisję", L"Yayına başla"))
+			: CString(LL14(L"録画開始", L"Start", L"Démarrer", L"Avvia", L"Iniciar", L"시작", L"开始", L"بدء",
+				L"Старт", L"Start", L"Iniciar", L"Start", L"Start", L"Başlat")));
 	}
 	const BOOL compose = IsWindowComposeMode();
 	EnableComposeUi(compose);
@@ -4919,7 +4919,7 @@ void CScreenCaptureDlg::ToggleLayerHidden(int layerIdx)
 	SyncGeoEditsFromSel();
 	UpdatePreview(TRUE);
 	m_status.SetWindowText(hid
-		? LL14(
+		? CString(LL14(
 			L"レイヤを非表示にしました（音だけ載せたいときに）。もう一度右クリックで表示。",
 			L"Layer hidden (use for audio-only). Right-click again to show.",
 			L"Calque masqué (audio seul). Clic droit pour réafficher.",
@@ -4933,8 +4933,8 @@ void CScreenCaptureDlg::ToggleLayerHidden(int layerIdx)
 			L"Camada oculta (só áudio). Clique direito para mostrar.",
 			L"Laag verborgen (alleen audio). Rechtsklik om te tonen.",
 			L"Warstwa ukryta (tylko dźwięk). PPM — pokaż.",
-			L"Katman gizlendi (yalnızca ses). Sağ tık ile göster.")
-		: LL14(
+			L"Katman gizlendi (yalnızca ses). Sağ tık ile göster."))
+		: CString(LL14(
 			L"レイヤを再表示しました。",
 			L"Layer shown again.",
 			L"Calque réaffiché.",
@@ -4948,7 +4948,7 @@ void CScreenCaptureDlg::ToggleLayerHidden(int layerIdx)
 			L"Camada visível novamente.",
 			L"Laag weer zichtbaar.",
 			L"Warstwa znów widoczna.",
-			L"Katman tekrar görünür."));
+			L"Katman tekrar görünür.")));
 }
 
 void CScreenCaptureDlg::FitSelected(int scalePercent)
@@ -6390,13 +6390,13 @@ BOOL CScreenCaptureDlg::StartRecording()
 				CString ytErr;
 				if (!PrepareYouTubeLiveBeforeStart(ytErr)) {
 					m_status.SetWindowText(ytErr.IsEmpty()
-						? LL14(L"YouTube 配信の準備に失敗しました。", L"YouTube live prepare failed.",
+						? CString(LL14(L"YouTube 配信の準備に失敗しました。", L"YouTube live prepare failed.",
 							L"Préparation YouTube échouée.", L"Preparazione YouTube non riuscita.",
 							L"Falló la preparación de YouTube.", L"YouTube 방송 준비 실패.",
 							L"YouTube 直播准备失败。", L"فشل تجهيز بث YouTube.",
 							L"Не удалось подготовить эфир YouTube.", L"YouTube-Live-Vorbereitung fehlgeschlagen.",
 							L"Falha ao preparar YouTube ao vivo.", L"Voorbereiding YouTube-live mislukt.",
-							L"Przygotowanie YouTube nie powiodło się.", L"YouTube canlı hazırlığı başarısız.")
+							L"Przygotowanie YouTube nie powiodło się.", L"YouTube canlı hazırlığı başarısız."))
 						: ytErr);
 					return FALSE;
 				}
@@ -6511,7 +6511,7 @@ BOOL CScreenCaptureDlg::StartRecording()
 	SetRecordingUi(TRUE);
 	ApplyPreviewTimer();
 	m_status.SetWindowText(m_liveMode
-		? LL14(
+		? CString(LL14(
 			L"配信送信中…（Studioが「公開予約」のままなら RTMP 未到達。ffmpeg/URLを確認）",
 			L"Sending stream… (If Studio stays Scheduled, RTMP is not reaching YouTube)",
 			L"Envoi… (Si Studio reste planifie, RTMP n'arrive pas)",
@@ -6525,8 +6525,8 @@ BOOL CScreenCaptureDlg::StartRecording()
 			L"A enviar… (Se continuar agendado, RTMP nao chega)",
 			L"Verzenden… (Blijft Studio gepland, dan komt RTMP niet aan)",
 			L"Wysylanie… (Jesli nadal zaplanowane, RTMP nie dociera)",
-			L"Gonderiliyor… (Studio planli kalirsa RTMP ulasmıyor)")
-		: LL14(
+			L"Gonderiliyor… (Studio planli kalirsa RTMP ulasmıyor)"))
+		: CString(LL14(
 			L"録画中…",
 			L"Recording…",
 			L"Enregistrement…",
@@ -6540,7 +6540,7 @@ BOOL CScreenCaptureDlg::StartRecording()
 			L"A gravar…",
 			L"Opnemen…",
 			L"Nagrywanie…",
-			L"Kaydediliyor…"));
+			L"Kaydediliyor…")));
 	return TRUE;
 }
 
@@ -6602,7 +6602,7 @@ void CScreenCaptureDlg::StopRecording()
 			const LONG stage = InterlockedCompareExchange(&m_lastStage, 0, 0);
 			CString msg;
 			msg.Format(wasLive
-				? LL14(
+				? CString(LL14(
 					L"配信に失敗しました (HRESULT=0x%08X, stage=%ld)。ffmpeg / URL / 認証を確認。",
 					L"Live failed (HRESULT=0x%08X, stage=%ld). Check ffmpeg / URL / auth.",
 					L"Échec du live (HRESULT=0x%08X, stage=%ld). Vérifiez ffmpeg / URL / auth.",
@@ -6616,8 +6616,8 @@ void CScreenCaptureDlg::StopRecording()
 					L"Falha no ao vivo (HRESULT=0x%08X, stage=%ld). Verifique ffmpeg / URL / auth.",
 					L"Live mislukt (HRESULT=0x%08X, stage=%ld). Controleer ffmpeg / URL / auth.",
 					L"Transmisja nie powiodła się (HRESULT=0x%08X, stage=%ld). Sprawdź ffmpeg / URL / auth.",
-					L"Canlı başarısız (HRESULT=0x%08X, stage=%ld). ffmpeg / URL / auth kontrol edin.")
-				: LL14(
+					L"Canlı başarısız (HRESULT=0x%08X, stage=%ld). ffmpeg / URL / auth kontrol edin."))
+				: CString(LL14(
 					L"録画に失敗しました (HRESULT=0x%08X, stage=%ld)。音声オフで再試行も可。",
 					L"Capture failed (HRESULT=0x%08X, stage=%ld). Try with audio off.",
 					L"Échec de la capture (HRESULT=0x%08X, stage=%ld). Essayez sans audio.",
@@ -6631,7 +6631,7 @@ void CScreenCaptureDlg::StopRecording()
 					L"Falha na captura (HRESULT=0x%08X, stage=%ld). Tente sem áudio.",
 					L"Opname mislukt (HRESULT=0x%08X, stage=%ld). Probeer zonder audio.",
 					L"Przechwytywanie nie powiodło się (HRESULT=0x%08X, stage=%ld). Spróbuj bez dźwięku.",
-					L"Yakalama başarısız (HRESULT=0x%08X, stage=%ld). Ses kapalı deneyin."),
+					L"Yakalama başarısız (HRESULT=0x%08X, stage=%ld). Ses kapalı deneyin.")),
 				(unsigned)capHr, (long)stage);
 			m_status.SetWindowText(msg);
 		} else {

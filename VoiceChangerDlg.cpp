@@ -482,8 +482,8 @@ void CVoiceChangerDlg::SetRunningUi(BOOL b)
 	m_outRefresh.EnableWindow(!b);
 	m_qual.EnableWindow(!b); // quality needs RB recreate
 	m_start.SetWindowText(b
-		? LL14(L"停止", L"Stop", L"Arrêter", L"Ferma", L"Detener", L"중지", L"停止", L"إيقاف", L"Стоп", L"Stop", L"Parar", L"Stop", L"Stop", L"Durdur")
-		: LL14(L"開始", L"Start", L"Démarrer", L"Avvia", L"Iniciar", L"시작", L"开始", L"بدء", L"Старт", L"Start", L"Iniciar", L"Start", L"Start", L"Başlat"));
+		? CString(LL14(L"停止", L"Stop", L"Arrêter", L"Ferma", L"Detener", L"중지", L"停止", L"إيقاف", L"Стоп", L"Stop", L"Parar", L"Stop", L"Stop", L"Durdur"))
+		: CString(LL14(L"開始", L"Start", L"Démarrer", L"Avvia", L"Iniciar", L"시작", L"开始", L"بدء", L"Старт", L"Start", L"Iniciar", L"Start", L"Start", L"Başlat")));
 }
 
 BOOL CVoiceChangerDlg::StartAudio()

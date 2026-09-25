@@ -576,64 +576,64 @@ void CRender::DoDataExchange(CDataExchange* pDX)
 BEGIN_MESSAGE_MAP(CRender, CCustomBlurDialogExBase)
 	//{{AFX_MSG_MAP(CRender)
 	//}}AFX_MSG_MAP
-	ON_BN_CLICKED(IDC_RD_HELP, &CRender::OnBnClickedHelp)
+	ON_BN_CLICKED(IDC_RD_HELP, OnBnClickedHelp)
 	ON_WM_SIZE()
 	ON_WM_DESTROY()
-	ON_BN_CLICKED(IDCANCEL2, &CRender::OnBnClickedCancel2)	ON_BN_CLICKED(IDC_CHECK32, &CRender::Onspc2x)
-	ON_BN_CLICKED(IDC_CHECK33, &CRender::Onspc4x)
-	ON_BN_CLICKED(IDC_CHECK34, &CRender::Onspc8x)
-	ON_BN_CLICKED(IDC_CHECK35, &CRender::Onspc1x)
-	ON_BN_CLICKED(IDC_CHECK36, &CRender::Onspc16x)
-	ON_BN_CLICKED(IDC_CHECK40, &CRender::Onmp31)
-	ON_BN_CLICKED(IDC_CHECK37, &CRender::Onmp315)
-	ON_BN_CLICKED(IDC_CHECK38, &CRender::Onmp32)
-	ON_BN_CLICKED(IDC_CHECK39, &CRender::Onmp325)
-	ON_BN_CLICKED(IDC_CHECK41, &CRender::Onmp33)
-	ON_BN_CLICKED(IDC_CHECK45, &CRender::Onkpi10)
-	ON_BN_CLICKED(IDC_CHECK42, &CRender::Onkpi15)
-	ON_BN_CLICKED(IDC_CHECK43, &CRender::Onkpi20)
-	ON_BN_CLICKED(IDC_CHECK44, &CRender::Onkpi25)
-	ON_BN_CLICKED(IDC_CHECK46, &CRender::Onkpi30)
-	ON_BN_CLICKED(IDCANCEL3, &CRender::Onkpi)
-	ON_BN_CLICKED(IDC_KPI_PLUGIN_DL, &CRender::OnKpiPluginDl)
-	ON_BN_CLICKED(IDC_KPI_PLUGIN_RELOAD, &CRender::OnKpiPluginReload)
-	ON_BN_CLICKED(ID_EmuDL, &CRender::OnEmuArcdataDl)
-	ON_BN_CLICKED(IDC_FONT, &CRender::OnFontMain)
-	ON_BN_CLICKED(IDC_FONT2, &CRender::OnFontList)
+	ON_BN_CLICKED(IDCANCEL2, OnBnClickedCancel2)	ON_BN_CLICKED(IDC_CHECK32, Onspc2x)
+	ON_BN_CLICKED(IDC_CHECK33, Onspc4x)
+	ON_BN_CLICKED(IDC_CHECK34, Onspc8x)
+	ON_BN_CLICKED(IDC_CHECK35, Onspc1x)
+	ON_BN_CLICKED(IDC_CHECK36, Onspc16x)
+	ON_BN_CLICKED(IDC_CHECK40, Onmp31)
+	ON_BN_CLICKED(IDC_CHECK37, Onmp315)
+	ON_BN_CLICKED(IDC_CHECK38, Onmp32)
+	ON_BN_CLICKED(IDC_CHECK39, Onmp325)
+	ON_BN_CLICKED(IDC_CHECK41, Onmp33)
+	ON_BN_CLICKED(IDC_CHECK45, Onkpi10)
+	ON_BN_CLICKED(IDC_CHECK42, Onkpi15)
+	ON_BN_CLICKED(IDC_CHECK43, Onkpi20)
+	ON_BN_CLICKED(IDC_CHECK44, Onkpi25)
+	ON_BN_CLICKED(IDC_CHECK46, Onkpi30)
+	ON_BN_CLICKED(IDCANCEL3, Onkpi)
+	ON_BN_CLICKED(IDC_KPI_PLUGIN_DL, OnKpiPluginDl)
+	ON_BN_CLICKED(IDC_KPI_PLUGIN_RELOAD, OnKpiPluginReload)
+	ON_BN_CLICKED(ID_EmuDL, OnEmuArcdataDl)
+	ON_BN_CLICKED(IDC_FONT, OnFontMain)
+	ON_BN_CLICKED(IDC_FONT2, OnFontList)
 	ON_WM_CLOSE()
-	ON_BN_CLICKED(IDOK, &CRender::OnBnClickedOk)
-	ON_BN_CLICKED(IDC_CHECK49, &CRender::OnBnClicked24bit)
-	ON_BN_CLICKED(IDC_CHECK50, &CRender::OnBnClickedCheck50)
-	ON_BN_CLICKED(IDCANCEL4, &CRender::OnBnClickedCancel4)
+	ON_BN_CLICKED(IDOK, OnBnClickedOk)
+	ON_BN_CLICKED(IDC_CHECK49, OnBnClicked24bit)
+	ON_BN_CLICKED(IDC_CHECK50, OnBnClickedCheck50)
+	ON_BN_CLICKED(IDCANCEL4, OnBnClickedCancel4)
 	ON_WM_TIMER()
-	ON_CBN_SELCHANGE(IDC_COMBO2, &CRender::OnCbnSelchangeCombo2)
-	ON_CBN_SELCHANGE(IDC_COMBO_MICDEV, &CRender::OnCbnSelchangeMic)
-	ON_BN_CLICKED(IDC_COMBO_MICDEV_REFRESH, &CRender::OnMicDevRefresh)
-	ON_BN_CLICKED(IDC_BUTTON1, &CRender::OnBnClickedButton1)
-	ON_CBN_SELCHANGE(IDC_COMBO3, &CRender::OnCbnSelchangeCombo3)
-	ON_CBN_SELCHANGE(IDC_COMBO_SPEAKER, &CRender::OnCbnSelchangeSpeaker)
-	ON_BN_CLICKED(IDC_CHECK_UPSCALE, &CRender::OnBnClickedCheckUpscale)
-	ON_BN_CLICKED(IDC_MID_PREFER_KPI, &CRender::OnMidPreferKpi)
-	ON_BN_CLICKED(IDC_MID_PREFER_VST, &CRender::OnMidPreferVst)
-	ON_BN_CLICKED(IDC_VST_EXTRA_BROWSE, &CRender::OnVstExtraBrowse)
-	ON_BN_CLICKED(IDC_VST_MULTI_BROWSE, &CRender::OnVstMultiBrowse)
-	ON_BN_CLICKED(IDC_VST_SCAN_NOW, &CRender::OnVstScanNow)
-	ON_BN_CLICKED(IDC_CHECK51, &CRender::OnBnClicked32bit)
-	ON_BN_CLICKED(IDC_CHECK3, &CRender::OnBnClickedCheck3)
+	ON_CBN_SELCHANGE(IDC_COMBO2, OnCbnSelchangeCombo2)
+	ON_CBN_SELCHANGE(IDC_COMBO_MICDEV, OnCbnSelchangeMic)
+	ON_BN_CLICKED(IDC_COMBO_MICDEV_REFRESH, OnMicDevRefresh)
+	ON_BN_CLICKED(IDC_BUTTON1, OnBnClickedButton1)
+	ON_CBN_SELCHANGE(IDC_COMBO3, OnCbnSelchangeCombo3)
+	ON_CBN_SELCHANGE(IDC_COMBO_SPEAKER, OnCbnSelchangeSpeaker)
+	ON_BN_CLICKED(IDC_CHECK_UPSCALE, OnBnClickedCheckUpscale)
+	ON_BN_CLICKED(IDC_MID_PREFER_KPI, OnMidPreferKpi)
+	ON_BN_CLICKED(IDC_MID_PREFER_VST, OnMidPreferVst)
+	ON_BN_CLICKED(IDC_VST_EXTRA_BROWSE, OnVstExtraBrowse)
+	ON_BN_CLICKED(IDC_VST_MULTI_BROWSE, OnVstMultiBrowse)
+	ON_BN_CLICKED(IDC_VST_SCAN_NOW, OnVstScanNow)
+	ON_BN_CLICKED(IDC_CHECK51, OnBnClicked32bit)
+	ON_BN_CLICKED(IDC_CHECK3, OnBnClickedCheck3)
 	ON_WM_CTLCOLOR()
 	ON_WM_CREATE()
 	ON_WM_MOVING()
-	ON_BN_CLICKED(IDCANCEL, &CRender::OnBnClickedCancel)
-	ON_BN_CLICKED(IDC_CHECK52, &CRender::OnBnClickedCheck52)
-	ON_CBN_EDITCHANGE(IDC_COMBO4, &CRender::OnCbnEditchangeCombo4)
-	ON_CBN_SELCHANGE(IDC_COMBO4, &CRender::OnCbnSelchangeCombo4)
-	ON_BN_CLICKED(IDCANCEL5, &CRender::OnBnClickedCancel5)
-	ON_BN_CLICKED(IDC_UPD_DONTASK, &CRender::OnUpdDontAsk)
-	ON_BN_CLICKED(IDC_UPD_AUTO_YES, &CRender::OnUpdAutoYes)
-	ON_BN_CLICKED(IDC_UPD_AUTO_NO, &CRender::OnUpdAutoNo)
-	ON_BN_CLICKED(IDC_UPD_CHECKNOW, &CRender::OnUpdCheckNow)
-	ON_MESSAGE(WM_APP_UPDATE_PEEK, &CRender::OnUpdatePeek)
-	ON_MESSAGE(WM_APP_UPDATE_PREFS, &CRender::OnUpdatePrefs)
+	ON_BN_CLICKED(IDCANCEL, OnBnClickedCancel)
+	ON_BN_CLICKED(IDC_CHECK52, OnBnClickedCheck52)
+	ON_CBN_EDITCHANGE(IDC_COMBO4, OnCbnEditchangeCombo4)
+	ON_CBN_SELCHANGE(IDC_COMBO4, OnCbnSelchangeCombo4)
+	ON_BN_CLICKED(IDCANCEL5, OnBnClickedCancel5)
+	ON_BN_CLICKED(IDC_UPD_DONTASK, OnUpdDontAsk)
+	ON_BN_CLICKED(IDC_UPD_AUTO_YES, OnUpdAutoYes)
+	ON_BN_CLICKED(IDC_UPD_AUTO_NO, OnUpdAutoNo)
+	ON_BN_CLICKED(IDC_UPD_CHECKNOW, OnUpdCheckNow)
+	ON_MESSAGE(WM_APP_UPDATE_PEEK, OnUpdatePeek)
+	ON_MESSAGE(WM_APP_UPDATE_PREFS, OnUpdatePrefs)
 	ON_WM_CONTEXTMENU()
 END_MESSAGE_MAP()
 
@@ -1452,8 +1452,14 @@ void CRender::OnBnClickedCheck50()
 #include "Kpilist.h"
 void CRender::Onkpi()
 {
-	// TODO: ここにコントロール通知ハンドラ コードを追加します。
-	SetTimer(7000, 300, NULL);
+	/* タイマー経由のネスト DoModal は一覧が出ないことがある。ボタンから直接開く。 */
+	CKpilist k(this);
+	k.status = 0;
+	k.DoModal();
+	if (GetSafeHwnd())
+		::SetWindowPos(m_hWnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+	if (renderbase && renderbase->GetSafeHwnd())
+		::SetWindowPos(renderbase->m_hWnd, m_hWnd, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 }
 
 void CRender::OnKpiPluginDl()
@@ -2265,20 +2271,6 @@ void CRender::OnBnClickedCancel4()
 
 void CRender::OnTimer(UINT_PTR nIDEvent)
 {
-	// TODO: ここにメッセージ ハンドラー コードを追加するか、既定の処理を呼び出します。
-	if (nIDEvent == 7000) {
-		KillTimer(7000);
-		/* CRender を隠すとネストモーダルが操作不能になる。
-		   オーナーを CRender のまま一覧を前面に出す。 */
-		CKpilist k(this);
-		k.status = 0;
-		k.DoModal();
-		if (GetSafeHwnd())
-			::SetWindowPos(m_hWnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
-		if (renderbase && renderbase->GetSafeHwnd())
-			::SetWindowPos(renderbase->m_hWnd, m_hWnd, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-		return;
-	}
 	savedata.ms = m_ms.GetPos();
 	{
 		const wchar_t* msUnit = LL14(L"ms", L"ms", L"ms", L"ms", L"ms", L"ms", L"毫秒", L"ms", L"мс", L"ms", L"ms", L"ms", L"ms", L"ms");

@@ -1,4 +1,4 @@
-﻿#include "stdafx.h"
+#include "stdafx.h"
 #include "ogg.h"
 #include "oggDlg.h"
 #include "CdPlayerDlg.h"
@@ -40,7 +40,7 @@ void RestoreAppSessionVolumeToUnity();
 #pragma comment(lib, "mfplat.lib")
 #pragma comment(lib, "mfreadwrite.lib")
 #pragma comment(lib, "mfuuid.lib")
-#if _MSC_VER >= 1950
+#if _MSC_VER >= 1950 || defined(__INTEL_LLVM_COMPILER) || defined(OGG_AVX2_VS2026)
 #pragma comment(lib, "rubberband-library_2026")
 #else
 #pragma comment(lib, "rubberband-library")
@@ -3102,8 +3102,8 @@ void CCdPlayerDlg::SetAbAtPlayhead(BOOL isB)
 		SetStatus(LL14(L"A-B ループを開始しました", L"A-B loop started", L"Boucle A-B demarree", L"Loop A-B avviato", L"Bucle A-B iniciado", L"A-B 루프 시작", L"已开始 A-B 循环", L"بدأت حلقة A-B", L"Петля A-B начата", L"A-B-Schleife gestartet", L"Loop A-B iniciado", L"A-B-lus gestart", L"Petla A-B uruchomiona", L"A-B dongusu basladi"));
 	else
 		SetStatus(isB
-			? LL14(L"B 点を設定しました", L"B point set", L"Point B defini", L"Punto B impostato", L"Punto B fijado", L"B 지점 설정", L"已设置 B 点", L"تم تعيين النقطة B", L"Точка B задана", L"Punkt B gesetzt", L"Ponto B definido", L"Punt B gezet", L"Punkt B ustawiony", L"B noktasi ayarlandi")
-			: LL14(L"A 点を設定しました", L"A point set", L"Point A defini", L"Punto A impostato", L"Punto A fijado", L"A 지점 설정", L"已设置 A 点", L"تم تعيين النقطة A", L"Точка A задана", L"Punkt A gesetzt", L"Ponto A definido", L"Punt A gezet", L"Punkt A ustawiony", L"A noktasi ayarlandi"));
+			? CString(LL14(L"B 点を設定しました", L"B point set", L"Point B defini", L"Punto B impostato", L"Punto B fijado", L"B 지점 설정", L"已设置 B 点", L"تم تعيين النقطة B", L"Точка B задана", L"Punkt B gesetzt", L"Ponto B definido", L"Punt B gezet", L"Punkt B ustawiony", L"B noktasi ayarlandi"))
+			: CString(LL14(L"A 点を設定しました", L"A point set", L"Point A defini", L"Punto A impostato", L"Punto A fijado", L"A 지점 설정", L"已设置 A 点", L"تم تعيين النقطة A", L"Точка A задана", L"Punkt A gesetzt", L"Ponto A definido", L"Punt A gezet", L"Punkt A ustawiony", L"A noktasi ayarlandi")));
 }
 
 void CCdPlayerDlg::RefreshAbButtons()
@@ -3612,9 +3612,9 @@ public:
 };
 
 BEGIN_MESSAGE_MAP(CCdCandDlg, CCustomBlurDialogBase)
-	ON_BN_CLICKED(IDC_MMP_APPLY, &CCdCandDlg::OnUse)
-	ON_BN_CLICKED(IDC_MMP_CANCEL, &CCdCandDlg::OnNo)
-	ON_NOTIFY(NM_DBLCLK, IDC_MMP_LIST, &CCdCandDlg::OnDbl)
+	ON_BN_CLICKED(IDC_MMP_APPLY, OnUse)
+	ON_BN_CLICKED(IDC_MMP_CANCEL, OnNo)
+	ON_NOTIFY(NM_DBLCLK, IDC_MMP_LIST, OnDbl)
 END_MESSAGE_MAP()
 
 BOOL CCdPlayerDlg::LookupCachePath(TCHAR* path, int cch, LPCTSTR ext) const
@@ -4438,12 +4438,12 @@ LRESULT CCdPlayerDlg::OnBurnDoneMsg(WPARAM wParam, LPARAM)
 	if (m_burnTh) { CloseHandle(m_burnTh); m_burnTh = NULL; }
 	m_progress.SetPos(wParam ? 100 : 0);
 	SetStatus(wParam
-		? LL14(L"書き込み／消去が終わりました", L"Burn / erase finished", L"Gravure / effacement termine", L"Masterizzazione / cancellazione finita", L"Grabacion / borrado terminado",
+		? CString(LL14(L"書き込み／消去が終わりました", L"Burn / erase finished", L"Gravure / effacement termine", L"Masterizzazione / cancellazione finita", L"Grabacion / borrado terminado",
 			L"굽기/지우기 완료", L"刻录/擦除完成", L"انتهى النسخ/المسح", L"Запись / стирание готово", L"Brennen / Loschen fertig",
-			L"Gravacao / apagamento concluido", L"Branden / wissen klaar", L"Wypalanie / czyszczenie zakonczone", L"Yazma / silme bitti")
-		: LL14(L"書き込み／消去に失敗しました", L"Burn / erase failed", L"Echec gravure / effacement", L"Masterizzazione / cancellazione non riuscita", L"Fallo de grabacion / borrado",
+			L"Gravacao / apagamento concluido", L"Branden / wissen klaar", L"Wypalanie / czyszczenie zakonczone", L"Yazma / silme bitti"))
+		: CString(LL14(L"書き込み／消去に失敗しました", L"Burn / erase failed", L"Echec gravure / effacement", L"Masterizzazione / cancellazione non riuscita", L"Fallo de grabacion / borrado",
 			L"굽기/지우기 실패", L"刻录/擦除失败", L"فشل النسخ/المسح", L"Ошибка записи / стирания", L"Brennen / Loschen fehlgeschlagen",
-			L"Falha na gravacao / apagamento", L"Branden / wissen mislukt", L"Blad wypalania / czyszczenia", L"Yazma / silme basarisiz"));
+			L"Falha na gravacao / apagamento", L"Branden / wissen mislukt", L"Blad wypalania / czyszczenia", L"Yazma / silme basarisiz")));
 	return 0;
 }
 

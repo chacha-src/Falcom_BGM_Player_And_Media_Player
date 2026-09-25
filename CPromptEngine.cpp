@@ -239,8 +239,8 @@ static BOOL ParseOnePrompt(const CString& line, int startPos, CString* errMsg)
 	double t0 = 0, t1 = 0, period = 0;
 	if (!ParseTimeToken(line, pos, t0)) {
 		if (errMsg) *errMsg = isPct
-			? LL14(L"周期の解析に失敗しました。", L"Failed to parse period.", L"Echec analyse periode.", L"Analisi periodo fallita.", L"Error al analizar periodo.", L"주기 해석 실패.", L"周期解析失败。", L"Failed to parse period.", L"Ошибка разбора периода.", L"Periode parsen fehlgeschlagen.", L"Falha ao analisar periodo.", L"Periode parseren mislukt.", L"Blad parsowania okresu.", L"Donem ayristirilamadi.")
-			: LL14(L"時刻の解析に失敗しました。", L"Failed to parse time.", L"Echec analyse heure.", L"Analisi ora fallita.", L"Error al analizar tiempo.", L"시각 해석 실패.", L"时间解析失败。", L"Failed to parse time.", L"Ошибка разбора времени.", L"Zeit parsen fehlgeschlagen.", L"Falha ao analisar hora.", L"Tijd parseren mislukt.", L"Blad parsowania czasu.", L"Zaman ayristirilamadi.");
+			? CString(LL14(L"周期の解析に失敗しました。", L"Failed to parse period.", L"Echec analyse periode.", L"Analisi periodo fallita.", L"Error al analizar periodo.", L"주기 해석 실패.", L"周期解析失败。", L"Failed to parse period.", L"Ошибка разбора периода.", L"Periode parsen fehlgeschlagen.", L"Falha ao analisar periodo.", L"Periode parseren mislukt.", L"Blad parsowania okresu.", L"Donem ayristirilamadi."))
+			: CString(LL14(L"時刻の解析に失敗しました。", L"Failed to parse time.", L"Echec analyse heure.", L"Analisi ora fallita.", L"Error al analizar tiempo.", L"시각 해석 실패.", L"时间解析失败。", L"Failed to parse time.", L"Ошибка разбора времени.", L"Zeit parsen fehlgeschlagen.", L"Falha ao analisar hora.", L"Tijd parseren mislukt.", L"Blad parsowania czasu.", L"Zaman ayristirilamadi."));
 		return FALSE;
 	}
 	if (isPct) {

@@ -765,9 +765,11 @@ BOOL thn = TRUE;
 BOOL thn1 = FALSE;
 
 // stop/stop1 が thn1 を立て、デコーダ解放前に stf も立てる。再生スレッド内の while(true) は必ずこれを見る。
+extern volatile LONG g_appExiting;
 static inline bool IsPlaybackStopRequested()
 {
-	return thn1 != FALSE || stf != 0;
+	return thn1 != FALSE || stf != 0
+		|| InterlockedCompareExchange(&g_appExiting, 0, 0) != 0;
 }
 
 // play/stop/stop1 の DoEvent 再入でデコーダを二重解放しないためのガード（UI スレッド専用）
@@ -875,6 +877,7 @@ int readzmusic(BYTE* bw, int cnt);
 void EqualiserSetFormatVolContext(int mode, BOOL spcApplicable);
 int playwavflac(BYTE* bw, int old, int l1, int l2);
 int readflac(BYTE* bw, int cnt);
+#include "simd_audio.h"
 static double GetFloatToInt16Scale(double maxAbs, double meanAbs)
 {
 	// Base conversion for normalized float PCM.
@@ -923,32 +926,21 @@ static int ConvertFloatPcmBufferToInt16InPlace(BYTE* buffer, int inBytes, int bi
 	const int frames = inBytes / (srcBytesPerSample * channels);
 	if (frames <= 0) return 0;
 	short* dst = (short*)buffer;
-	double maxAbs = 0.0;
-	double sumAbs = 0.0;
-	int validCount = 0;
 	if (bitsPerSample == -32) {
 		const float* src = (const float*)buffer;
 		const int samples = frames * channels;
-		for (int i = 0; i < samples; ++i) {
-			double v = (double)src[i];
-			if (!_finite(v)) continue;
-			double a = fabs(v);
-			if (a > maxAbs) maxAbs = a;
-			sumAbs += a;
-			++validCount;
-		}
+		double maxAbs = 0.0;
+		double sumAbs = 0.0;
+		size_t validCount = 0;
+		SimdFloatPeakMean(src, (size_t)samples, &maxAbs, &sumAbs, &validCount);
 		const double meanAbs = (validCount > 0) ? (sumAbs / (double)validCount) : 0.0;
 		const double scale = GetFloatToInt16Scale(maxAbs, meanAbs);
-		for (int i = 0; i < samples; ++i) {
-			dst[i] = FloatSampleToInt16((double)src[i], scale);
-		}
+		SimdFloatToInt16(src, dst, (size_t)samples, scale);
 	}
 	else {
 		const double* src = (const double*)buffer;
 		const int samples = frames * channels;
-		for (int i = 0; i < samples; ++i) {
-			dst[i] = Kbpsf2ScaledDoubleToInt16(src[i]);
-		}
+		SimdDoubleToInt16Kbpsf2(src, dst, (size_t)samples);
 	}
 	return frames * channels * (int)sizeof(short);
 }
@@ -961,30 +953,18 @@ static DWORD ConvertFloatTypedToInt16Buffer(const void* src, DWORD samples, int 
 	const DWORD needBytes = totalSamples * (DWORD)sizeof(short);
 	if (needBytes > dstBytes) return 0;
 	short* out = (short*)dst;
-	double maxAbs = 0.0;
-	double sumAbs = 0.0;
-	DWORD validCount = 0;
 	if (bitsPerSample == -32) {
 		const float* p = (const float*)src;
-		for (DWORD i = 0; i < totalSamples; ++i) {
-			double v = (double)p[i];
-			if (!_finite(v)) continue;
-			double a = fabs(v);
-			if (a > maxAbs) maxAbs = a;
-			sumAbs += a;
-			++validCount;
-		}
+		double maxAbs = 0.0;
+		double sumAbs = 0.0;
+		size_t validCount = 0;
+		SimdFloatPeakMean(p, (size_t)totalSamples, &maxAbs, &sumAbs, &validCount);
 		const double meanAbs = (validCount > 0) ? (sumAbs / (double)validCount) : 0.0;
 		const double scale = GetFloatToInt16Scale(maxAbs, meanAbs);
-		for (DWORD i = 0; i < totalSamples; ++i) {
-			out[i] = FloatSampleToInt16((double)p[i], scale);
-		}
+		SimdFloatToInt16(p, out, (size_t)totalSamples, scale);
 	}
 	else {
-		const double* p = (const double*)src;
-		for (DWORD i = 0; i < totalSamples; ++i) {
-			out[i] = Kbpsf2ScaledDoubleToInt16(p[i]);
-		}
+		SimdDoubleToInt16Kbpsf2((const double*)src, out, (size_t)totalSamples);
 	}
 	return needBytes;
 }
@@ -1000,36 +980,19 @@ static DWORD ConvertFloatRawBytesToInt16Buffer(const BYTE* src, DWORD srcBytes, 
 	const DWORD outNeed = frames * (DWORD)channels * (DWORD)sizeof(short);
 	if (outNeed > dstBytes) return 0;
 	short* out = (short*)dst;
-	DWORD o = 0;
-	double maxAbs = 0.0;
-	double sumAbs = 0.0;
-	DWORD validCount = 0;
-
+	const DWORD total = frames * (DWORD)channels;
 	if (bitsPerSample == -32) {
-		for (DWORD i = 0; i < frames * (DWORD)channels; ++i) {
-			float v = 0.0f;
-			memcpy(&v, src + i * sizeof(float), sizeof(float));
-			if (!_finite((double)v)) continue;
-			double a = fabs((double)v);
-			if (a > maxAbs) maxAbs = a;
-			sumAbs += a;
-			++validCount;
-		}
+		const float* p = (const float*)src;
+		double maxAbs = 0.0;
+		double sumAbs = 0.0;
+		size_t validCount = 0;
+		SimdFloatPeakMean(p, (size_t)total, &maxAbs, &sumAbs, &validCount);
 		const double meanAbs = (validCount > 0) ? (sumAbs / (double)validCount) : 0.0;
 		const double scale = GetFloatToInt16Scale(maxAbs, meanAbs);
-		for (DWORD i = 0; i < frames * (DWORD)channels; ++i) {
-			float v = 0.0f;
-			memcpy(&v, src + i * sizeof(float), sizeof(float));
-			out[o++] = FloatSampleToInt16((double)v, scale);
-		}
+		SimdFloatToInt16(p, out, (size_t)total, scale);
 	}
 	else {
-		// kbpsf2: double is scaled int16, not generic IEEE float PCM (see kbpsf2_decoder.cpp Render).
-		for (DWORD i = 0; i < frames * (DWORD)channels; ++i) {
-			double v = 0.0;
-			memcpy(&v, src + i * sizeof(double), sizeof(double));
-			out[o++] = Kbpsf2ScaledDoubleToInt16(v);
-		}
+		SimdDoubleToInt16Kbpsf2((const double*)src, out, (size_t)total);
 	}
 	return outNeed;
 }
@@ -2027,36 +1990,36 @@ BEGIN_MESSAGE_MAP(COggDlg, CCustomBlurDialogBase)
 	ON_BN_CLICKED(IDC_BUTTON23, OnYsC1)
 	ON_BN_CLICKED(IDC_BUTTON24, OnYsC2)
 	//}}AFX_MSG_MAP
-	ON_BN_CLICKED(IDC_BUTTON25, &COggDlg::OnBnClickedButton25)
-	ON_BN_CLICKED(IDC_BUTTON27, &COggDlg::OnBnClickedButton27)
-	ON_BN_CLICKED(IDC_BUTTON28, &COggDlg::OnBnClickedButton28)
-	ON_BN_CLICKED(IDC_BUTTON31, &COggDlg::OnBnClickedButton31)
-	ON_BN_CLICKED(IDC_BUTTON33, &COggDlg::OnBnClickedButton33)
-	ON_BN_CLICKED(IDC_BUTTON35, &COggDlg::OnBnClickedButton35)
-	ON_BN_CLICKED(IDC_BUTTON37, &COggDlg::OnBnClickedButton37)
-	ON_NOTIFY(NM_RELEASEDCAPTURE, IDC_SLIDER2, &COggDlg::OnNMReleasedcaptureSlider2)
-	ON_BN_CLICKED(IDC_BUTTON39, &COggDlg::OnBnClickedButton39)
-	ON_BN_CLICKED(IDC_BUTTON44, &COggDlg::OnBnClickedButton44)
-	ON_BN_CLICKED(IDC_BUTTON45, &COggDlg::OnBnClickedButton45)
-	ON_BN_CLICKED(IDC_BUTTON46, &COggDlg::OnBnClickedButton46)
-	ON_BN_CLICKED(IDC_BUTTON47, &COggDlg::OnBnClickedButton47)
-	ON_BN_CLICKED(IDC_BUTTON48, &COggDlg::OnBnClickedButton48)
-	ON_BN_CLICKED(IDC_BUTTON51, &COggDlg::OnBnClickedButton51)
-	ON_BN_CLICKED(IDC_BUTTON53, &COggDlg::OnBnClickedButton53)
-	ON_BN_CLICKED(IDC_BUTTON54, &COggDlg::OnBnClickedButton54)
+	ON_BN_CLICKED(IDC_BUTTON25, OnBnClickedButton25)
+	ON_BN_CLICKED(IDC_BUTTON27, OnBnClickedButton27)
+	ON_BN_CLICKED(IDC_BUTTON28, OnBnClickedButton28)
+	ON_BN_CLICKED(IDC_BUTTON31, OnBnClickedButton31)
+	ON_BN_CLICKED(IDC_BUTTON33, OnBnClickedButton33)
+	ON_BN_CLICKED(IDC_BUTTON35, OnBnClickedButton35)
+	ON_BN_CLICKED(IDC_BUTTON37, OnBnClickedButton37)
+	ON_NOTIFY(NM_RELEASEDCAPTURE, IDC_SLIDER2, OnNMReleasedcaptureSlider2)
+	ON_BN_CLICKED(IDC_BUTTON39, OnBnClickedButton39)
+	ON_BN_CLICKED(IDC_BUTTON44, OnBnClickedButton44)
+	ON_BN_CLICKED(IDC_BUTTON45, OnBnClickedButton45)
+	ON_BN_CLICKED(IDC_BUTTON46, OnBnClickedButton46)
+	ON_BN_CLICKED(IDC_BUTTON47, OnBnClickedButton47)
+	ON_BN_CLICKED(IDC_BUTTON48, OnBnClickedButton48)
+	ON_BN_CLICKED(IDC_BUTTON51, OnBnClickedButton51)
+	ON_BN_CLICKED(IDC_BUTTON53, OnBnClickedButton53)
+	ON_BN_CLICKED(IDC_BUTTON54, OnBnClickedButton54)
 
 	ON_MESSAGE(WM_APP + 1, dp1)
 	ON_MESSAGE(WM_APP + 2, dp2)
 	ON_MESSAGE(WM_APP_KPI_PLUGIN, OnKpiPluginMsg)
 	ON_MESSAGE(WM_APP_CEMU_CATLIST, OnCemuCatListMsg)
-	ON_MESSAGE(WM_TIMERP_VSYNC_TICK, &COggDlg::OnTimerpVsyncTick)
-	ON_MESSAGE(WM_SPEANA_TICK, &COggDlg::OnSpeanaTick)
-	ON_MESSAGE(WM_ENDPOINT_VOLUME, &COggDlg::OnEndpointVolume)
-	ON_MESSAGE(WM_REFRESH_AERO_ALL, &COggDlg::OnRefreshAeroAll)
+	ON_MESSAGE(WM_TIMERP_VSYNC_TICK, OnTimerpVsyncTick)
+	ON_MESSAGE(WM_SPEANA_TICK, OnSpeanaTick)
+	ON_MESSAGE(WM_ENDPOINT_VOLUME, OnEndpointVolume)
+	ON_MESSAGE(WM_REFRESH_AERO_ALL, OnRefreshAeroAll)
 	ON_MESSAGE(WM_APP_UPDATE_AVAILABLE, OnUpdateAvailable)
 	ON_MESSAGE(WM_OGG_DEFERRED_HEAVY_INIT, OnDeferredHeavyStartup)
-	ON_MESSAGE(WM_OGG_ENTER_MP_MODE, &COggDlg::OnEnterMpModeMsg)
-	ON_MESSAGE(WM_OGG_TOGGLE_SUBUI, &COggDlg::OnToggleSubUiMsg)
+	ON_MESSAGE(WM_OGG_ENTER_MP_MODE, OnEnterMpModeMsg)
+	ON_MESSAGE(WM_OGG_TOGGLE_SUBUI, OnToggleSubUiMsg)
 	ON_MESSAGE(WM_PLAYBACK_AUTO_STOPPED, OnPlaybackAutoStopped)
 	ON_MESSAGE(WM_OGG_CLOSE_DOUGA, OnCloseDougaMsg)
 	ON_MESSAGE(WM_OGG_RESUME_PROMPT, OnResumePrompt)
@@ -2073,23 +2036,23 @@ BEGIN_MESSAGE_MAP(COggDlg, CCustomBlurDialogBase)
 	ON_WM_SHOWWINDOW()
 	ON_WM_ERASEBKGND()
 	ON_WM_CTLCOLOR()
-	ON_BN_CLICKED(IDC_BUTTON57, &COggDlg::OnPlayList)
-	ON_BN_CLICKED(IDC_OGG_SWITCHMODE, &COggDlg::OnSwitchMode)
-	ON_MESSAGE(WM_MP_ENTER_FALCOM, &COggDlg::OnEnterFalcomMsg)
-	ON_MESSAGE(WM_APP_SONGPARAM_RESTORE, &COggDlg::OnSongParamRestore)
-	ON_MESSAGE(WM_APP_SONGPARAM_MARKS, &COggDlg::OnSongParamMarks)
-	ON_MESSAGE(WM_APP_PROAUDIO_CUESEEK, &COggDlg::OnProAudioCueSeek)
-	ON_MESSAGE(WM_APP + 91, &COggDlg::OnXfadeStart)
-	ON_MESSAGE(WM_APP + 92, &COggDlg::OnXfadePromoted)
-	ON_MESSAGE(WM_APP + 93, &COggDlg::OnXfadePreloadJacket)
-	ON_MESSAGE(WM_APP + 94, &COggDlg::OnXfadePromoteUi)
+	ON_BN_CLICKED(IDC_BUTTON57, OnPlayList)
+	ON_BN_CLICKED(IDC_OGG_SWITCHMODE, OnSwitchMode)
+	ON_MESSAGE(WM_MP_ENTER_FALCOM, OnEnterFalcomMsg)
+	ON_MESSAGE(WM_APP_SONGPARAM_RESTORE, OnSongParamRestore)
+	ON_MESSAGE(WM_APP_SONGPARAM_MARKS, OnSongParamMarks)
+	ON_MESSAGE(WM_APP_PROAUDIO_CUESEEK, OnProAudioCueSeek)
+	ON_MESSAGE(WM_APP + 91, OnXfadeStart)
+	ON_MESSAGE(WM_APP + 92, OnXfadePromoted)
+	ON_MESSAGE(WM_APP + 93, OnXfadePreloadJacket)
+	ON_MESSAGE(WM_APP + 94, OnXfadePromoteUi)
 	ON_WM_WINDOWPOSCHANGING()
-	ON_BN_CLICKED(IDC_BUTTON58, &COggDlg::OnBnmp3jake)
-	ON_BN_CLICKED(IDC_CHECK_MICMIX, &COggDlg::OnMicMixCheck)
-	ON_CBN_SELCHANGE(IDC_OGG_MICDEV, &COggDlg::OnCbnSelchangeMicDev)
-	ON_BN_CLICKED(IDC_OGG_MICDEV_REFRESH, &COggDlg::OnMicDevRefresh)
-	ON_MESSAGE(WM_AUDIODEV_CHANGED, &COggDlg::OnAudioDevChanged)
-	ON_NOTIFY(NM_RELEASEDCAPTURE, IDC_SLIDER_MICLEV, &COggDlg::OnMicLevRelease)
+	ON_BN_CLICKED(IDC_BUTTON58, OnBnmp3jake)
+	ON_BN_CLICKED(IDC_CHECK_MICMIX, OnMicMixCheck)
+	ON_CBN_SELCHANGE(IDC_OGG_MICDEV, OnCbnSelchangeMicDev)
+	ON_BN_CLICKED(IDC_OGG_MICDEV_REFRESH, OnMicDevRefresh)
+	ON_MESSAGE(WM_AUDIODEV_CHANGED, OnAudioDevChanged)
+	ON_NOTIFY(NM_RELEASEDCAPTURE, IDC_SLIDER_MICLEV, OnMicLevRelease)
 	ON_WM_DESTROY()
 	ON_WM_CREATE()
 	ON_WM_MOVING()
@@ -2097,17 +2060,17 @@ BEGIN_MESSAGE_MAP(COggDlg, CCustomBlurDialogBase)
 	ON_WM_MOUSEACTIVATE()
 	ON_WM_ACTIVATEAPP()
 	ON_WM_NCACTIVATE()
-	ON_STN_CLICKED(IDC_STATIC_t, &COggDlg::OnTempoStatic)
-	ON_STN_CLICKED(IDC_STATIC_p, &COggDlg::OnPitchStatic)
+	ON_STN_CLICKED(IDC_STATIC_t, OnTempoStatic)
+	ON_STN_CLICKED(IDC_STATIC_p, OnPitchStatic)
 	ON_WM_MOUSEMOVE()
 	ON_WM_LBUTTONDOWN()
-	ON_STN_CLICKED(IDC_STATIC2, &COggDlg::OnStnClickedStatic2)
-	ON_STN_DBLCLK(IDC_STATIC2, &COggDlg::OnStnClickedStatic2)
-	ON_STN_DBLCLK(IDC_STATIC_p, &COggDlg::OnStnDblclickStaticp)
-	ON_STN_DBLCLK(IDC_STATIC_t, &COggDlg::OnStnDblclickStatict)
+	ON_STN_CLICKED(IDC_STATIC2, OnStnClickedStatic2)
+	ON_STN_DBLCLK(IDC_STATIC2, OnStnClickedStatic2)
+	ON_STN_DBLCLK(IDC_STATIC_p, OnStnDblclickStaticp)
+	ON_STN_DBLCLK(IDC_STATIC_t, OnStnDblclickStatict)
 
-	ON_BN_CLICKED(IDC_BUTTON59, &COggDlg::OnBnClickedButton59)
-	ON_BN_CLICKED(IDC_OGG_HELP, &COggDlg::OnBnClickedHelp)
+	ON_BN_CLICKED(IDC_BUTTON59, OnBnClickedButton59)
+	ON_BN_CLICKED(IDC_OGG_HELP, OnBnClickedHelp)
 END_MESSAGE_MAP()
 REFTIME aa1, aa2 = 0;
 
@@ -4328,13 +4291,44 @@ public:
 	virtual BOOL WINAPI Abort(void) { return FALSE; }
 };
 
-class CMyDummyFolder : public IKpiFolder // IKpiFolder を直接継承
+/* minipsf2 / minigsf 等は IKpiFolder::OpenFile で同梱 .psf2lib/.gsflib を開く。
+   空実装だと x64 本体の KPI 経路が Open 失敗する（x86 時代の Winamp/実フォルダと差が出る）。 */
+class CMyDummyFolder : public IKpiFolder
 {
 private:
 	long m_cRef;
+	wchar_t m_baseDir[MAX_PATH];
+
+	static void JoinUnderBase(const wchar_t* baseDir, const wchar_t* name, wchar_t* out, int outCch)
+	{
+		out[0] = 0;
+		if (!name || !name[0] || outCch < 2) return;
+		if ((name[0] && name[1] == L':') || (name[0] == L'\\' && name[1] == L'\\')) {
+			wcsncpy_s(out, outCch, name, _TRUNCATE);
+			return;
+		}
+		wcsncpy_s(out, outCch, baseDir ? baseDir : L"", _TRUNCATE);
+		const size_t n = wcslen(out);
+		if (n > 0 && out[n - 1] != L'\\' && out[n - 1] != L'/')
+			wcsncat_s(out, outCch, L"\\", _TRUNCATE);
+		wcsncat_s(out, outCch, name, _TRUNCATE);
+		for (wchar_t* p = out; *p; ++p)
+			if (*p == L'/') *p = L'\\';
+	}
 
 public:
-	CMyDummyFolder() : m_cRef(1) {} // 参照カウントを1で初期化
+	explicit CMyDummyFolder(const wchar_t* mediaPath = NULL) : m_cRef(1)
+	{
+		m_baseDir[0] = 0;
+		if (!mediaPath || !mediaPath[0]) return;
+		wcsncpy_s(m_baseDir, mediaPath, _TRUNCATE);
+		wchar_t* cut = wcsstr(m_baseDir, L"::");
+		if (cut) *cut = 0;
+		wchar_t* slash = wcsrchr(m_baseDir, L'\\');
+		if (!slash) slash = wcsrchr(m_baseDir, L'/');
+		if (slash) slash[1] = 0;
+		else m_baseDir[0] = 0;
+	}
 
 protected:
 	virtual ~CMyDummyFolder() {}
@@ -4371,29 +4365,54 @@ public:
 		return E_NOINTERFACE;
 	}
 
-	// --- IKpiFolder のダミー実装 (中身は空でよい) ---
-
 	virtual DWORD WINAPI GetFolderName(wchar_t* pszName, DWORD dwSize)
 	{
-		if (pszName && dwSize >= 2) *pszName = L'\0';
-		return 0; // 空文字列
+		const DWORD need = (DWORD)((wcslen(m_baseDir) + 1) * sizeof(wchar_t));
+		if (pszName && dwSize >= sizeof(wchar_t)) {
+			if (dwSize >= need) wcscpy_s(pszName, dwSize / sizeof(wchar_t), m_baseDir);
+			else pszName[0] = 0;
+		}
+		return need;
 	}
 
 	virtual DWORD WINAPI EnumFiles(DWORD dwIndex, wchar_t* pszName, DWORD dwSize, DWORD dwLevel)
 	{
-		return 0; // ファイルなし
+		(void)dwIndex; (void)dwLevel;
+		if (pszName && dwSize >= 2) pszName[0] = 0;
+		return 0;
 	}
 
 	virtual BOOL WINAPI OpenFile(const wchar_t* cszName, IKpiFile** ppFile)
 	{
 		if (ppFile) *ppFile = NULL;
-		return FALSE; // 開けない
+		if (!cszName || !cszName[0] || !ppFile) return FALSE;
+		wchar_t full[MAX_PATH];
+		JoinUnderBase(m_baseDir, cszName, full, MAX_PATH);
+		CMyHostFile* f = new (std::nothrow) CMyHostFile();
+		if (!f) return FALSE;
+		if (!f->Open(full)) {
+			f->Release();
+			return FALSE;
+		}
+		*ppFile = f;
+		return TRUE;
 	}
 
 	virtual BOOL WINAPI OpenFolder(const wchar_t* cszName, IKpiFolder** ppFolder)
 	{
 		if (ppFolder) *ppFolder = NULL;
-		return FALSE; // 開けない
+		if (!cszName || !cszName[0] || !ppFolder) return FALSE;
+		wchar_t full[MAX_PATH];
+		JoinUnderBase(m_baseDir, cszName, full, MAX_PATH);
+		const size_t n = wcslen(full);
+		if (n > 0 && full[n - 1] != L'\\' && n + 1 < MAX_PATH) {
+			full[n] = L'\\';
+			full[n + 1] = 0;
+		}
+		CMyDummyFolder* sub = new (std::nothrow) CMyDummyFolder(full);
+		if (!sub) return FALSE;
+		*ppFolder = sub;
+		return TRUE;
 	}
 };
 
@@ -4783,9 +4802,16 @@ int XfShouldPreloadNext()
 	return 0;
 }
 
+static volatile LONG g_xfPreloadBusy = 0;
+static volatile LONG g_xfPreloadCancel = 0;
+static HANDLE g_xfPreloadThread = NULL;
+
 static int XfOpenNextSlotForCrossfade(int* outCur, int* outNxt)
 {
 	if (!og || !pl || !XfEnabled())
+		return 0;
+	if (InterlockedCompareExchange(&g_xfPreloadCancel, 0, 0)
+		|| InterlockedCompareExchange(&g_appExiting, 0, 0))
 		return 0;
 	extern CString filen;
 	if (PlIsSasamiTempPreviewPath(filen))
@@ -4961,10 +4987,6 @@ static void XfDropPreloadedSlot(int slot)
 
 /* VST の Open は数秒〜十数秒かかる。UI スレッドで待つと A の再生が終わってしまうので
  * 専用スレッドで開き、B は再生せずに待機させる。 */
-static volatile LONG g_xfPreloadBusy = 0;
-static volatile LONG g_xfPreloadCancel = 0;
-static HANDLE g_xfPreloadThread = NULL;
-
 static unsigned __stdcall XfPreloadProc(void*)
 {
 	/* VST プラグインは COM を使うものがある（ホスト側で STA を用意する） */
@@ -5014,7 +5036,7 @@ int XfPreloadCancel(int waitMs)
 	}
 	InterlockedExchange(&g_xfPreloadCancel, 1);
 	if (waitMs > 0 && g_xfPreloadThread) {
-		if (WaitForSingleObject(g_xfPreloadThread, (DWORD)waitMs) == WAIT_OBJECT_0) {
+		if (UiWaitHandlePumpSent(g_xfPreloadThread, (DWORD)waitMs)) {
 			CloseHandle(g_xfPreloadThread);
 			g_xfPreloadThread = NULL;
 			InterlockedExchange(&g_xfPreloadBusy, 0);
@@ -5191,6 +5213,7 @@ DWORD g_oggUiThreadId = 0;
 static volatile LONG g_timerpPosted = 0;
 static volatile LONG g_gdiPaintPending = 0;
 static volatile LONG g_speanaPosted = 0;
+static volatile LONG g_inPlaybackUiTick = 0;
 static DWORD g_gdiPaintPendingSince = 0;
 
 // メディアプレイヤーモードでメイン画面(og)が非表示の間は OnPaint が呼ばれず
@@ -5239,10 +5262,12 @@ static int OggIsChromeAnimHwnd(HWND h)
 	return 0;
 }
 
-static int OggIsMouseChromeMsg(UINT m)
+/* ホバー／きらめき用。LBUTTON/NC クリックは含めない。
+   終了・タイトル× を timerp 内 Dispatch すると Join/DestroyWindow が
+   GDI/ULW/DWM と入れ子になり戻らない。クリックはメインループへ残す。 */
+static int OggIsMouseMoveChromeMsg(UINT m)
 {
-	if (m >= WM_MOUSEFIRST && m <= WM_MOUSELAST) return 1;
-	if (m >= WM_NCMOUSEMOVE && m <= WM_NCMBUTTONDBLCLK) return 1;
+	if (m == WM_MOUSEMOVE || m == WM_NCMOUSEMOVE) return 1;
 	if (m == WM_MOUSEHOVER || m == WM_MOUSELEAVE) return 1;
 	if (m == WM_NCMOUSEHOVER || m == WM_NCMOUSELEAVE) return 1;
 	return 0;
@@ -5365,13 +5390,17 @@ static void OggDispatchChromeMessages()
 	int n = 0;
 	while (n < 16) {
 		BOOL got = FALSE;
-		if (::PeekMessage(&msg, NULL, WM_MOUSEFIRST, WM_MOUSELAST, PM_REMOVE))
+		if (::PeekMessage(&msg, NULL, WM_MOUSEMOVE, WM_MOUSEMOVE, PM_REMOVE))
 			got = TRUE;
-		else if (::PeekMessage(&msg, NULL, WM_MOUSEHOVER, WM_MOUSELEAVE, PM_REMOVE))
+		else if (::PeekMessage(&msg, NULL, WM_NCMOUSEMOVE, WM_NCMOUSEMOVE, PM_REMOVE))
 			got = TRUE;
-		else if (::PeekMessage(&msg, NULL, WM_NCMOUSEMOVE, WM_NCMBUTTONDBLCLK, PM_REMOVE))
+		else if (::PeekMessage(&msg, NULL, WM_MOUSEHOVER, WM_MOUSEHOVER, PM_REMOVE))
 			got = TRUE;
-		else if (::PeekMessage(&msg, NULL, WM_NCMOUSEHOVER, WM_NCMOUSELEAVE, PM_REMOVE))
+		else if (::PeekMessage(&msg, NULL, WM_MOUSELEAVE, WM_MOUSELEAVE, PM_REMOVE))
+			got = TRUE;
+		else if (::PeekMessage(&msg, NULL, WM_NCMOUSEHOVER, WM_NCMOUSEHOVER, PM_REMOVE))
+			got = TRUE;
+		else if (::PeekMessage(&msg, NULL, WM_NCMOUSELEAVE, WM_NCMOUSELEAVE, PM_REMOVE))
 			got = TRUE;
 		if (!got)
 			break;
@@ -5379,11 +5408,10 @@ static void OggDispatchChromeMessages()
 			::PostQuitMessage((int)msg.wParam);
 			break;
 		}
-		if (!OggIsMouseChromeMsg(msg.message)) {
-			::TranslateMessage(&msg);
-			::DispatchMessage(&msg);
-			++n;
-			continue;
+		if (!OggIsMouseMoveChromeMsg(msg.message)) {
+			if (msg.hwnd)
+				::PostMessage(msg.hwnd, msg.message, msg.wParam, msg.lParam);
+			break;
 		}
 		/* PreTranslate 経由で CToolTipCtrl::RelayEvent が走る。Dispatch だけだと出が遅れる。 */
 		if (th && th->PreTranslateMessage(&msg)) {
@@ -5397,6 +5425,38 @@ static void OggDispatchChromeMessages()
 		++n;
 	}
 	InterlockedExchange(&s_inChromePump, 0);
+}
+
+static volatile LONG s_exitPostedFromUiTick = 0;
+
+static bool OggInPlaybackUiTick()
+{
+	return InterlockedCompareExchange(&g_inPlaybackUiTick, 0, 0) != 0
+		|| InterlockedCompareExchange(&s_inChromePump, 0, 0) != 0;
+}
+
+/* timerp / chrome Peek 上では停止要求だけ出す。Join と DestroyWindow は tick の外。 */
+static void OggDeferAppExitFromUiTick(COggDlg* dlg)
+{
+	InterlockedExchange(&g_appExiting, 1);
+	wavwait = 1;
+	thend = 1;
+	thend1 = TRUE;
+	SignalPlaybackNotifyThreadStop();
+	if (InterlockedCompareExchange(&s_exitPostedFromUiTick, 1, 0) != 0)
+		return;
+	if (dlg && ::IsWindow(dlg->GetSafeHwnd()))
+		dlg->PostMessage(WM_COMMAND, MAKEWPARAM(IDOK, BN_CLICKED), 0);
+	else
+		InterlockedExchange(&s_exitPostedFromUiTick, 0);
+}
+
+void COgg_DropPlaybackUiPostedMsg(UINT message)
+{
+	if (message == WM_TIMERP_VSYNC_TICK)
+		InterlockedExchange(&g_timerpPosted, 0);
+	else if (message == WM_SPEANA_TICK)
+		InterlockedExchange(&g_speanaPosted, 0);
 }
 
 static DWORD g_timerpLastPostTick = 0;
@@ -5451,6 +5511,10 @@ BOOL COggDlg::OnInitDialog()
 {
 	CCustomBlurDialogBase::OnInitDialog();
 	KpiV5SyncKbsasamiOptions(savedata.midPlayPrefer);
+	KpiV5SetInt(L"kbgme", L"SupportExt", L"EnableHES", 1);
+	KpiV5SetInt(L"kbgme", L"SupportExt", L"EnableKSS", 1);
+	KpiV5SetInt(L"kbgme", L"SupportExt", L"EnableSPC", 1);
+	KpiV5SetInt(L"kbgme", L"SupportExt", L"EnableNSF", 1);
 	// メディアプレイヤーモード起動時は OnInitDialog 中もメイン画面を出さない
 	if (savedata.playerMode == 1)
 		ShowWindow(SW_HIDE);
@@ -5879,7 +5943,7 @@ BOOL COggDlg::OnInitDialog()
 		L"Wczytywanie danych archiwum…",
 		L"Arsiv verileri yukleniyor…"
 	));
-	loadingWnd.SetStatusText(CEmuCatalogCacheIsCurrent(CEmuMgrGet()->dataRoot) ? LL14(
+	loadingWnd.SetStatusText(CEmuCatalogCacheIsCurrent(CEmuMgrGet()->dataRoot) ? CString(LL14(
 		L"アーカイブデータ読み込み中…\n（キャッシュから復元）",
 		L"Loading archive data…\n(Restoring from cache)",
 		L"Chargement des donnees archive…\n(Depuis le cache)",
@@ -5894,7 +5958,7 @@ BOOL COggDlg::OnInitDialog()
 		L"Archiefgegevens laden…\n(Uit cache)",
 		L"Wczytywanie danych archiwum…\n(Z cache)",
 		L"Arsiv verileri yukleniyor…\n(Onbellekten)"
-	) : LL14(
+	)) : CString(LL14(
 		L"アーカイブデータ読み込み中…\n（初回のみ時間がかかります）",
 		L"Loading archive data…\n(First time may take a while)",
 		L"Chargement des donnees archive…\n(La 1re fois peut etre longue)",
@@ -5909,7 +5973,7 @@ BOOL COggDlg::OnInitDialog()
 		L"Archiefgegevens laden…\n(De eerste keer kan langer duren)",
 		L"Wczytywanie danych archiwum…\n(Za pierwszym razem moze potrwac)",
 		L"Arsiv verileri yukleniyor…\n(Ilk seferde zaman alabilir)"
-	));
+	)));
 	loadingWnd.SetRange(0, 100);
 	loadingWnd.SetPos(0);
 	CEmuMgrEnsureCatalogEx(CEmuMgrGet(), &LoadProg::CB, &loadingWnd);
@@ -7373,6 +7437,9 @@ static int XfSoftOpenSlot(int slot, const CString& path, int openMode)
 {
 	if (slot < 0 || slot >= XF_SLOTS || path.IsEmpty())
 		return 0;
+	if (InterlockedCompareExchange(&g_xfPreloadCancel, 0, 0)
+		|| InterlockedCompareExchange(&g_appExiting, 0, 0))
+		return 0;
 	SOUNDINFO si;
 	XfFillSoundInfoDefaults(si);
 	HKMP kmpNew = NULL;
@@ -7653,7 +7720,7 @@ void WriteDebugLog(const CString& msg)
 	if (file.Open(path, CFile::modeCreate | CFile::modeNoTruncate | CFile::modeWrite | CFile::shareExclusive))
 	{
 		file.SeekToEnd();
-		CStringA utf8Msg = CW2A(msg, CP_UTF8);
+		CStringA utf8Msg((LPCSTR)CW2A(msg, CP_UTF8));
 		utf8Msg += "\r\n";
 		file.Write((LPCSTR)utf8Msg, utf8Msg.GetLength());
 		file.Close();
@@ -7667,8 +7734,8 @@ void WriteDebugLog(const CString& msg)
 // URLエンコード (UTF-8)
 CString UrlEncode(const CString& str)
 {
-	CStringW wideStr = CT2W(str);
-	CStringA utf8Str = CW2A(wideStr, CP_UTF8);
+	CStringW wideStr((LPCTSTR)CT2W(str));
+	CStringA utf8Str((LPCSTR)CW2A(wideStr, CP_UTF8));
 	int bufSize = utf8Str.GetLength() * 3 + 1;
 	char* buffer = new char[bufSize];
 	int pos = 0;
@@ -7678,7 +7745,7 @@ CString UrlEncode(const CString& str)
 		else { sprintf_s(buffer + pos, bufSize - pos, "%%%02X", c); pos += 3; }
 	}
 	buffer[pos] = '\0';
-	CString result = CA2T(buffer);
+	CString result((LPCTSTR)CA2T(buffer));
 	delete[] buffer;
 	return result;
 }
@@ -7830,7 +7897,7 @@ CStringA ExtractValueFromBlock(const CStringA& jsonObjectBlock, const CStringA& 
 // 簡体字 -> 日本語漢字変換
 CStringA ConvertSimplifiedToJapanese(const CStringA& utf8Str)
 {
-	CStringW wideStr = CA2W(utf8Str, CP_UTF8);
+	CStringW wideStr((LPCTSTR)CA2W(utf8Str, CP_UTF8));
 	int srcLen = wideStr.GetLength();
 	if (srcLen == 0) return "";
 
@@ -8507,7 +8574,7 @@ CString QueryMusicBrainzAPI(const CString& artistName)
 	if (nameValue.IsEmpty()) return _T("");
 
 	// UTF-8 -> Unicode
-	CString result = CA2T(nameValue, CP_UTF8);
+	CString result((LPCTSTR)CA2T(nameValue, CP_UTF8));
 
 	// 英数字のみの場合は採用（日本語名は除外）
 	bool hasNonAscii = false;
@@ -8749,7 +8816,7 @@ CString QueryEnglishTitleFromWikipediaLangLinks(const CString& pageTitle)
 		return _T("");
 	}
 
-	CString englishPageTitle = CA2T(englishTitleUtf8, CP_UTF8);
+	CString englishPageTitle((LPCTSTR)CA2T(englishTitleUtf8, CP_UTF8));
 
 	// クリーンアップ: "Julia Fordham" → "Julia Fordham"（変化なし）
 	// アーティストページの場合はそのまま返すのではなく、再度処理が必要だが、
@@ -8801,7 +8868,7 @@ CString QueryEnglishTitleFromWikipedia(const CString& japaneseTitle, const CStri
 		return _T("");
 	}
 
-	CString artistPageTitle = CA2T(artistPageTitleUtf8, CP_UTF8);
+	CString artistPageTitle((LPCTSTR)CA2T(artistPageTitleUtf8, CP_UTF8));
 	WriteDebugLog(_T("  アーティストページ発見: ") + artistPageTitle);
 
 	// Step 2: ページの本文を取得
@@ -8828,7 +8895,7 @@ CString QueryEnglishTitleFromWikipedia(const CString& japaneseTitle, const CStri
 		return _T("");
 	}
 
-	CString pageText = CA2T(extractTextUtf8, CP_UTF8);
+	CString pageText((LPCTSTR)CA2T(extractTextUtf8, CP_UTF8));
 
 	// ★ページテキストの正規化（改行・余分なスペースを除去）
 	CString normalizedPageText;
@@ -9249,7 +9316,7 @@ CString QueryEnglishTitleFromMusicBrainz(const CString& japaneseTitle, const CSt
 		CStringA titleUtf8 = ExtractJsonStringSimple(resultObj, "title");
 		if (titleUtf8.IsEmpty()) continue;
 
-		CString title = CA2T(titleUtf8, CP_UTF8);
+		CString title((LPCTSTR)CA2T(titleUtf8, CP_UTF8));
 		candidateCount++;
 
 		// ASCII文字の割合を計算
@@ -9496,7 +9563,7 @@ CStringA CorrectLRCLIBTimestamp(const CStringA& lrcData)
 CStringA RefineLrcData(CStringA rawLrc, const CString& trackName, const CString& artistName, bool isFromLRCLIB = false)
 {
 	std::string s = (LPCSTR)rawLrc;
-	CString tt = CA2W(rawLrc, CP_UTF8);
+	CString tt((LPCTSTR)CA2W(rawLrc, CP_UTF8));
 	size_t start_pos = 0;
 	while ((start_pos = s.find("\\n", start_pos)) != std::string::npos) {
 		s.replace(start_pos, 2, "\n");
@@ -9512,10 +9579,10 @@ CStringA RefineLrcData(CStringA rawLrc, const CString& trackName, const CString&
 		L"収録", L"プロデュース", L"演唱", L"提供", L"作成"
 	};
 
-	CStringW wTrack = CT2W(trackName); wTrack.Replace(L" ", L"");
-	CStringW wArtist = CT2W(artistName); wArtist.Replace(L" ", L"");
-	CStringA utf8Track = CW2A(wTrack, CP_UTF8);
-	CStringA utf8Artist = CW2A(wArtist, CP_UTF8);
+	CStringW wTrack((LPCTSTR)CT2W(trackName)); wTrack.Replace(L" ", L"");
+	CStringW wArtist((LPCTSTR)CT2W(artistName)); wArtist.Replace(L" ", L"");
+	CStringA utf8Track((LPCSTR)CW2A(wTrack, CP_UTF8));
+	CStringA utf8Artist((LPCSTR)CW2A(wArtist, CP_UTF8));
 
 	while (std::getline(ss, line)) {
 		if (!line.empty() && line.back() == '\r') line.pop_back();
@@ -9536,7 +9603,7 @@ CStringA RefineLrcData(CStringA rawLrc, const CString& trackName, const CString&
 
 		if (!isGarbage) {
 			for (const wchar_t* kw : ignoreKeywords) {
-				CStringA utf8Kw = CW2A(kw, CP_UTF8);
+				CStringA utf8Kw((LPCSTR)CW2A(kw, CP_UTF8));
 				if (line.find((LPCSTR)utf8Kw) != std::string::npos) {
 					isGarbage = true;
 					break;
@@ -9688,7 +9755,7 @@ CStringA GetLyricsFromNetEase_Multi(const std::vector<CString>& titleVariations,
 				if (!finalLyrics.IsEmpty() && finalLyrics.Find("[00:") != -1) {
 					// ★NetEaseの検索結果を検証（ログのみ）
 					if (!bestSongName.IsEmpty()) {
-						CString songName = CA2T(bestSongName, CP_UTF8);
+						CString songName((LPCTSTR)CA2T(bestSongName, CP_UTF8));
 						similarity = CalculateTitleSimilarity(title, songName);
 
 						WriteDebugLog(_T("  NetEase曲名: ") + songName +
@@ -9786,7 +9853,7 @@ CStringA GetLyricsFromLRCLIB_Multi(const std::vector<CString>& titleVariations,
 				CStringA trackNameUtf8 = ExtractJsonStringSimple(resultObj, "trackName");
 				if (trackNameUtf8.IsEmpty()) continue;
 
-				CString trackName = CA2T(trackNameUtf8, CP_UTF8);
+				CString trackName((LPCTSTR)CA2T(trackNameUtf8, CP_UTF8));
 
 				// ★タイトル類似度チェック
 				int similarity = CalculateTitleSimilarity(title, trackName);
@@ -9985,11 +10052,25 @@ void COggDlg::play()
 {
 	if (OggIsResumePromptActive())
 		return;
+	if (InterlockedCompareExchange(&g_inPlaybackJoinPump, 0, 0))
+		return;
+	if (InterlockedCompareExchange(&g_appExiting, 0, 0))
+		return;
 	// stop1/play 実行中の DoEvent 再入で形式切替が重なるとデコーダ UAF になる
 	if (s_inPlay)
 		return;
 	s_inPlay = true;
-	struct ClearInPlay { ~ClearInPlay() { s_inPlay = false; } } _clearInPlay;
+	struct ClearInPlay {
+		COggDlg* dlg;
+		~ClearInPlay() {
+			s_inPlay = false;
+			if (dlg && InterlockedCompareExchange(&g_appExiting, 0, 0)
+				&& ::IsWindow(dlg->GetSafeHwnd()))
+				dlg->PostMessage(WM_COMMAND, MAKEWPARAM(IDOK, BN_CLICKED), 0);
+		}
+	} _clearInPlay{ this };
+	if (InterlockedCompareExchange(&g_appExiting, 0, 0))
+		return;
 	const BOOL xfSoftOpen = (InterlockedCompareExchange(&g_xfOpening, 0, 0) != 0);
 	// 二重DS昇格: Open 中の無音を防ぐため、最初に B を再生し直す
 	muon = MUON;
@@ -10312,8 +10393,8 @@ void COggDlg::play()
 				m_saisai.EnableWindow(TRUE);
 				endflg = 0;
 				MessageBox(opened
-					? LL14(L"この動画は暗号化されていて再生できません。", L"This video is encrypted and cannot be played.", L"Cette vidéo est chiffrée.", L"Questo video è cifrato.", L"Este vídeo está cifrado.", L"이 동영상은 암호화되어 재생할 수 없습니다.", L"此视频已加密，无法播放。", L"هذا الفيديو مشفر.", L"Это видео зашифровано.", L"Dieses Video ist verschlüsselt.", L"Este vídeo está cifrado.", L"Deze video is versleuteld.", L"Ten film jest zaszyfrowany.", L"Bu video şifreli.")
-					: LL14(L"pac 内にこの動画がありません。", L"This video is not in the pac.", L"Cette vidéo n'est pas dans le pac.", L"Questo video non è nel pac.", L"Este vídeo no está en el pac.", L"pac 안에 이 동영상이 없습니다.", L"pac 内没有此视频。", L"هذا الفيديو غير موجود في pac.", L"Этого видео нет в pac.", L"Dieses Video ist nicht in der pac.", L"Este vídeo não está no pac.", L"Deze video zit niet in de pac.", L"Tego filmu nie ma w pac.", L"Bu video pac içinde yok."),
+					? CString(LL14(L"この動画は暗号化されていて再生できません。", L"This video is encrypted and cannot be played.", L"Cette vidéo est chiffrée.", L"Questo video è cifrato.", L"Este vídeo está cifrado.", L"이 동영상은 암호화되어 재생할 수 없습니다.", L"此视频已加密，无法播放。", L"هذا الفيديو مشفر.", L"Это видео зашифровано.", L"Dieses Video ist verschlüsselt.", L"Este vídeo está cifrado.", L"Deze video is versleuteld.", L"Ten film jest zaszyfrowany.", L"Bu video şifreli."))
+					: CString(LL14(L"pac 内にこの動画がありません。", L"This video is not in the pac.", L"Cette vidéo n'est pas dans le pac.", L"Questo video non è nel pac.", L"Este vídeo no está en el pac.", L"pac 안에 이 동영상이 없습니다.", L"pac 内没有此视频。", L"هذا الفيديو غير موجود في pac.", L"Этого видео нет в pac.", L"Dieses Video ist nicht in der pac.", L"Este vídeo não está no pac.", L"Deze video zit niet in de pac.", L"Tego filmu nie ma w pac.", L"Bu video pac içinde yok.")),
 					LL14(L"動画", L"Movie", L"Vidéo", L"Video", L"Vídeo", L"동영상", L"视频", L"فيديو", L"Видео", L"Video", L"Vídeo", L"Video", L"Wideo", L"Video"),
 					MB_ICONEXCLAMATION | MB_OK);
 				return;
@@ -10813,6 +10894,8 @@ void COggDlg::play()
 			// フリーズの主因）。成功するまでリトライしてデコード開始を保証する。
 			BOOL posted = FALSE;
 			for (int retry = 0; retry < 800 && !posted; ++retry) {
+				if (InterlockedCompareExchange(&g_appExiting, 0, 0))
+					break;
 				if (g_pThread->PostThreadMessage(WM_APP + 100, NULL, NULL))
 					posted = TRUE;
 				else
@@ -10825,8 +10908,11 @@ void COggDlg::play()
 			// スレッド生成自体に失敗した場合も永久待ちを防ぐ。
 			wavwait = 1; thend = 1;
 		}
-		for (int k = 0; k < 100; k++)
+		for (int k = 0; k < 100; k++) {
+			if (InterlockedCompareExchange(&g_appExiting, 0, 0))
+				break;
 			DoEvent();
+		}
 	}
 	else if (mode == -3 || mode == -10 || mode == -9 || mode == -8 || mode == -7 || mode == -6 || mode == 34 || mode == 35 || mode == 30 || mode == 31 || mode == 999
 		|| IsVstMidiPlayMode(mode) || mode == MODE_CEMU || IsForeignPluginMode(mode)) {
@@ -10908,6 +10994,8 @@ void COggDlg::play()
 	if (mode == 30 || mode == 31) {
 		const DWORD wavWaitT0 = GetTickCount();
 		for (; wavwait == 0;) {
+			if (InterlockedCompareExchange(&g_appExiting, 0, 0))
+				break;
 			DoEvent();
 			Sleep(10);
 			if (GetTickCount() - wavWaitT0 >= 60000u)
@@ -11386,6 +11474,8 @@ void COggDlg::play()
 			if (((mode >= 1 && mode <= 21) || mode == 30 || mode == 31 || mode == -11 || mode == -12 || mode == -13 || mode == -14 || mode == -15) && wavWaitLimitMs < 30000u)
 				wavWaitLimitMs = 30000u;
 			for (; wavwait == 0;) {
+				if (InterlockedCompareExchange(&g_appExiting, 0, 0))
+					break;
 				CWaitCursor rrr2;
 				DoEvent();
 				if (GetTickCount() - wavWaitT0 >= wavWaitLimitMs) break;
@@ -12206,6 +12296,13 @@ open_mode_kpi:
 				if (savedata.bit24 == 1)sikpi.dwBitsPerSample = 24;
 				if (savedata.bit32 == 1)sikpi.dwBitsPerSample = 32;
 				if (flg0 == 1) sikpi.dwSamplesPerSec = wavbit_sample_Hz;
+				wchar_t kpiPrevCwd[MAX_PATH] = {};
+				const int kpiCwdSaved = GetCurrentDirectoryW(MAX_PATH, kpiPrevCwd) ? 1 : 0;
+				{
+					CString mediaDir = (ss == L"") ? filen : ss;
+					const int sl = mediaDir.ReverseFind(L'\\');
+					if (sl > 0) SetCurrentDirectoryW(mediaDir.Left(sl));
+				}
 				if (mod) {
 					if (ss == L"") {
 						if (mod->Init) mod->Init();
@@ -12217,7 +12314,10 @@ open_mode_kpi:
 #else
 						if (mod->Open) kmp1 = mod->Open(filen, &sikpi);
 #endif
-						if (kmp1 == NULL) { m_saisai.EnableWindow(TRUE); endflg = 0; return; }
+						if (kmp1 == NULL) {
+							if (kpiCwdSaved) SetCurrentDirectoryW(kpiPrevCwd);
+							m_saisai.EnableWindow(TRUE); endflg = 0; return;
+						}
 					}
 					else {
 						if (mod->Init) mod->Init();
@@ -12229,10 +12329,14 @@ open_mode_kpi:
 #else
 						if (mod->Open) kmp1 = mod->Open(ss, &sikpi);
 #endif
-						if (kmp1 == NULL) { m_saisai.EnableWindow(TRUE); endflg = 0; return; }
+						if (kmp1 == NULL) {
+							if (kpiCwdSaved) SetCurrentDirectoryW(kpiPrevCwd);
+							m_saisai.EnableWindow(TRUE); endflg = 0; return;
+						}
 						if (mod->SetPosition) mod->SetPosition(kmp1, _tstoi(filen.Right(4)) * 1000);
 					}
 				}
+				if (kpiCwdSaved) SetCurrentDirectoryW(kpiPrevCwd);
 				wavbit_sample_Hz = sikpi.dwSamplesPerSec;	wavchannel = sikpi.dwChannels;	loop1 = 0; loop2 = (int)((double)sikpi.dwLength * (double)sikpi.dwSamplesPerSec / 1000.0);
 				wavsam_depth = sikpi.dwBitsPerSample;
 			}
@@ -12250,7 +12354,6 @@ open_mode_kpi:
 					if (savedata.bit32 == 1)sikpi.dwBitsPerSample = 32;
 					if (flg0 == 1) sikpi.dwSamplesPerSec = wavbit_sample_Hz;
 					IKpiFile* ik;
-					IKpiFolder* ik2 = new CMyDummyFolder();
 					CMyHostFile* pHostFile = new CMyHostFile();
 					{
 						uint32_t sel = 1;
@@ -12258,6 +12361,7 @@ open_mode_kpi:
 					}
 					CString openPath = (ss == L"") ? filen : ss;
 					KpiRewriteSeqAsMidi(openPath);
+					IKpiFolder* ik2 = new CMyDummyFolder(openPath);
 					if (ss == L"") {
 						if (!pHostFile->Open(openPath)) {
 							// ファイルが開けない
@@ -14220,7 +14324,11 @@ open_mode_vst_midi:
 	ULONG PlayCursor, WriteCursor = 0;
 	playb = 0;
 	g_oggPcmDecodePos = 0;
-	if (m_dsb)m_dsb->GetCurrentPosition(&PlayCursor, &WriteCursor);//再生位置取得
+	if (m_dsb) {
+		DsOpLock ds;
+		if (m_dsb)
+			m_dsb->GetCurrentPosition(&PlayCursor, &WriteCursor);//再生位置取得
+	}
 	len1 = (int)WriteCursor;//書き込み範囲取得
 	len2 = 0;
 	{
@@ -14248,8 +14356,9 @@ open_mode_vst_midi:
 				len2 = 0;
 			}
 			if (m_dsb && ring > 0 && bpf > 0) {
+				DsOpLock ds;
 				void* pZero = NULL; DWORD zlen = 0;
-				if (m_dsb->Lock(0, (DWORD)ring, &pZero, &zlen, NULL, NULL, 0) == DS_OK && pZero && zlen) {
+				if (m_dsb && m_dsb->Lock(0, (DWORD)ring, &pZero, &zlen, NULL, NULL, 0) == DS_OK && pZero && zlen) {
 					ZeroMemory(pZero, zlen);
 					m_dsb->Unlock(pZero, zlen, NULL, 0);
 				}
@@ -14285,13 +14394,18 @@ open_mode_vst_midi:
 
 	DispatchPlaywavFillPrefill(bufwav3, 0, len1, len2);
 	if (m_dsb && (len1 + len2) > 0) {
-		m_dsb->Lock(0, len1 + len2, (LPVOID*)&pdsb, (DWORD*)&len3, NULL, 0, 0);
-		memcpy(pdsb, bufwav3, len3);
-		m_dsb->Unlock(pdsb, len3, NULL, 0);
-		m_dsb->SetVolume((savedata.dsvol - 1) * 10);
+		DsOpLock ds;
+		if (m_dsb) {
+			m_dsb->Lock(0, len1 + len2, (LPVOID*)&pdsb, (DWORD*)&len3, NULL, 0, 0);
+			memcpy(pdsb, bufwav3, len3);
+			m_dsb->Unlock(pdsb, len3, NULL, 0);
+			m_dsb->SetVolume((savedata.dsvol - 1) * 10);
+		}
 	}
 	else if (m_dsb) {
-		m_dsb->SetVolume((savedata.dsvol - 1) * 10);
+		DsOpLock ds;
+		if (m_dsb)
+			m_dsb->SetVolume((savedata.dsvol - 1) * 10);
 	}
 	// DSD のみプリフィル位置を通知へ渡す。FLAC/MP3/KPI は 88c4b63 どおり触らない
 	// （FLAC で進めると通知の wrap 埋めが頭をリングに残して 2〜3 周する）。
@@ -14356,6 +14470,8 @@ open_mode_vst_midi:
 		}
 	}
 	// BeginPlayback 内 Wait が stf を立てる前に、再生中フラグを確定しておく
+	if (InterlockedCompareExchange(&g_appExiting, 0, 0))
+		return;
 	stf = 0;
 	thn1 = FALSE;
 	playf = 1;
@@ -14364,7 +14480,9 @@ open_mode_vst_midi:
 	if (g_openDecoderMode == -7 || mode == -7)
 		BeginPlaybackNotifyThread();
 	if (m_dsb) {
-		m_dsb->Play(0, 0, DSBPLAY_LOOPING);
+		DsOpLock ds;
+		if (m_dsb)
+			m_dsb->Play(0, 0, DSBPLAY_LOOPING);
 	}
 	if (!(g_openDecoderMode == -7 || mode == -7))
 		BeginPlaybackNotifyThread();
@@ -24016,6 +24134,8 @@ struct MidiSeekDsGuard {
 		extern BOOL thn;
 		extern LPDIRECTSOUNDBUFFER8 m_dsb;
 		if (!m_dsb) return;
+		DsOpLock ds;
+		if (!m_dsb) return;
 		active = TRUE;
 		DWORD st = 0;
 		if (m_dsb->GetStatus(&st) == DS_OK && (st & DSBSTATUS_PLAYING))
@@ -24043,6 +24163,8 @@ struct MidiSeekDsGuard {
 		extern BOOL thn;
 		extern LPDIRECTSOUNDBUFFER8 m_dsb;
 		if (!active || !m_dsb) return;
+		DsOpLock ds;
+		if (!m_dsb) return;
 		LONG vol = (LONG)(savedata.dsvol - 1) * 10;
 		if (vol < DSBVOLUME_MIN) vol = DSBVOLUME_MIN;
 		if (vol > DSBVOLUME_MAX) vol = DSBVOLUME_MAX;
@@ -24254,6 +24376,12 @@ static inline bool PlaybackNotifyThreadMayBeActive()
 
 void COggDlg::stop()
 {
+	if (InterlockedCompareExchange(&g_inPlaybackJoinPump, 0, 0)) {
+		playf = 0;
+		plf = 0;
+		SignalPlaybackNotifyThreadStop();
+		return;
+	}
 	// play/stop1 実行中の再入: 停止要求だけ出して本体は触らない
 	if (s_inPlay || s_inStop1) {
 		playf = 0;
@@ -24290,9 +24418,6 @@ void COggDlg::stop()
 	g_tpUiValid = 0;
 	InterlockedExchange(&g_tpLoopPending, 0);
 
-	if (!img.IsNull()) {
-		img.Destroy();
-	}
 	jx = -1;
 	lrc_backup = L"";
 	lrccur = 0;
@@ -24358,52 +24483,37 @@ void COggDlg::stop()
 	if (PlaybackNotifyThreadMayBeActive())
 	{
 		SignalPlaybackNotifyThreadStop();
-		if (m_dsb)m_dsb->SetVolume(DSBVOLUME_MIN);
 		ps = 0;
-		if (m_dsb)m_dsb->Stop();
-		if (pAudioClient) pAudioClient->Stop();
+		/* Lock 中のバッファへ Stop を掛けない。Join 後の Closeds が止める。 */
 		if (m_dou.GetCheck() == 1)
 			if (cc1 == 1) {
 				/* ユーザー停止: xfade チェックでも確定クローズ */
 				PlaybackCcCloseIfNeeded(true);
 			}
 		MicMixCaptureStop();
-		if (savedata.mic_mix)
+		if (savedata.mic_mix && !InterlockedCompareExchange(&g_appExiting, 0, 0))
 			MicMixCaptureStart();
 		CCriticalLock _ccl(&cs);
 		stf = 1;
 		_ccl.Leave();
-		// 曲切替中は上限付き。無限 Join は DS Lock 固着で UI 永久停止の原因になる。
-		// Join 中は DoEvent しない（再入 UAF 防止）
-		// Exit(OnOK) sets g_playbackNotifyJoinTimeoutMs — honor it even when
-		// g_interactiveTrackChange is false (playlist end → 終了 used to hang).
+		KillTimer(1250);
+		KillTimer(9000);
+		XfPreloadCancel(0);
+		// 終了は abort 済みスレッドが自分で抜けるまで待つ。Lock 中 Stop と
+		// TerminateThread はドライバ/cl2 を掴んだまま戻らなくする。
 		DWORD joinTimeout = 0;
-		if (InterlockedCompareExchange(&g_appExiting, 0, 0))
-			joinTimeout = 250u;
-		else if (g_playbackNotifyJoinTimeoutMs)
-			joinTimeout = g_playbackNotifyJoinTimeoutMs;
-		else if (g_interactiveTrackChange)
-			joinTimeout = 2500u;
-		if (!WaitForPlaybackNotifyThreadExit(joinTimeout)) {
-			// 終了中は残スレッドを切る。曲切替は生存のまま戻る。
-			if (joinTimeout == 8000 || InterlockedCompareExchange(&g_appExiting, 0, 0)) {
-				KillPlaybackNotifyThread();
-			} else {
-				thn1 = FALSE;
-				stf = 0;
-				SongParams_OnSongStopped();
-				/* The notify/prefetch threads outlived the join, so the normal
-				   teardown below is skipped. The live MPU must still go: it
-				   holds the global NP2 core the next CEmu title needs, and
-				   Pump turns into a no-op once the session is detached. */
-				if (CEmuMidiLiveActive()) {
-					g_cemuLiveKeepAcrossClose = 0;
-					CEmuMidiLiveStop();
-					VstLiveTapFlush();
-				}
-				return;
-			}
+		if (!InterlockedCompareExchange(&g_appExiting, 0, 0)) {
+			if (g_playbackNotifyJoinTimeoutMs)
+				joinTimeout = g_playbackNotifyJoinTimeoutMs;
+			else if (g_interactiveTrackChange)
+				joinTimeout = 2500u;
 		}
+		if (!WaitForPlaybackNotifyThreadExit(joinTimeout)) {
+			SongParams_OnSongStopped();
+			return;
+		}
+		if (InterlockedCompareExchange(&g_appExiting, 0, 0))
+			XfPreloadCancel(15000);
 		SongParams_OnSongStopped();
 
 		Closeds();
@@ -24442,6 +24552,8 @@ void COggDlg::stop()
 		thend = 1;
 		fadeadd = 0; fade = 1.0;
 	}
+	if (!img.IsNull())
+		img.Destroy();
 	if (pMainFrame1 != NULL)
 		pMainFrame1->stop();
 	else if ((mode == -2 || videoonly) && pMediaControl)
@@ -24486,10 +24598,11 @@ BOOL COggDlg::stop1()
 	// 再入（Join 後の旧 DoEvent や play 中のメッセージ）ではデコーダを触らない
 	if (s_inStop1) {
 		SignalPlaybackNotifyThreadStop();
-		// play() 側は戻り値を見ずに続行するため、再入でもフラグは下ろしておく
-		thn1 = FALSE;
-		stf = 0;
-		thend1 = FALSE;
+		if (!InterlockedCompareExchange(&g_appExiting, 0, 0)) {
+			thn1 = FALSE;
+			stf = 0;
+			thend1 = FALSE;
+		}
 		return TRUE;
 	}
 	s_inStop1 = true;
@@ -24538,9 +24651,6 @@ BOOL COggDlg::stop1()
 	fade1 = 0;
 	endflg = 0;
 
-	if (!img.IsNull()) {
-		img.Destroy();
-	}
 	jx = -1;
 	lrc_backup = L"";
 	lrccur = 0;
@@ -24550,16 +24660,13 @@ BOOL COggDlg::stop1()
 	if (ptl)ptl->SetProgressValue(m_hWnd, (LONGLONG)0, (LONGLONG)1);
 	if (ptl)ptl->SetProgressState(m_hWnd, TBPF_NOPROGRESS);
 
-	if (m_dsb)m_dsb->SetVolume(DSBVOLUME_MIN);
 	ps = 0;
-	if (m_dsb)m_dsb->Stop();
-	if (pAudioClient) pAudioClient->Stop();
 	if (m_dou.GetCheck() == 1)
 		if (cc1 == 1) {
 			PlaybackCcCloseIfNeeded(false);
 		}
 	MicMixCaptureStop();
-	if (savedata.mic_mix)
+	if (savedata.mic_mix && !InterlockedCompareExchange(&g_appExiting, 0, 0))
 		MicMixCaptureStart();
 	{
 		CCriticalLock _ccl(&cs);
@@ -24568,7 +24675,7 @@ BOOL COggDlg::stop1()
 	}
 	// play() 先頭の stop1 は Join 成否に関わらず続行する。
 	// FALSE で return すると CWread に入らず 0:00／古い loop のままになる。
-	// ただし対話的な曲切替では無限 Join 禁止(DS Lock / 旧 SaveFile 固着で UI 永久停止)。
+	// 対話的な曲切替では Join に上限。終了は abort 後に抜け切るまで待つ。
 	BOOL joined = TRUE;
 	{
 		const DWORD joinTimeout = g_interactiveTrackChange
@@ -24576,8 +24683,10 @@ BOOL COggDlg::stop1()
 			: 0u;
 		joined = WaitForPlaybackNotifyThreadExit(joinTimeout);
 	}
-	thn1 = FALSE;
-	stf = 0;
+	if (joined) {
+		thn1 = FALSE;
+		stf = 0;
+	}
 	thend1 = FALSE;
 	SongParams_OnSongStopped();
 
@@ -24589,6 +24698,8 @@ BOOL COggDlg::stop1()
 		return FALSE;
 	}
 
+	if (!img.IsNull())
+		img.Destroy();
 	Closeds();
 	//		FreeOutputBuffer();
 	plf = 0;
@@ -24662,16 +24773,20 @@ BOOL COggDlg::stop1()
 
 BOOL COggDlg::DestroyWindow()
 {
+	if (OggInPlaybackUiTick()) {
+		OggDeferAppExitFromUiTick(this);
+		return FALSE;
+	}
+	if (InterlockedCompareExchange(&g_inPlaybackJoinPump, 0, 0))
+		return FALSE;
 	InterlockedExchange(&g_appExiting, 1);
-	// TODO: この位置に固有の処理を追加するか、または基本クラスを呼び出してください
-	//	ReleaseOggVorbis(&ogg);
 	VstLiveEditorOpenCancelPending();
-	VstLiveEditorCloseAllRemote(); /* パイプ切断前に KpiHost64 の VST UI を閉じる */
-	// 終了経路（MPの×以外の「終了」含む）でも開状態を保存してから子を破棄する
-	DesktopLyricsPrepareAppExit();
+	DesktopLyricsAbortPaintForExit();
 	MpDjPadPrepareAppExit();
 	MpPromptOnAppShutdown();
 	stop();
+	VstLiveEditorCloseAllRemote();
+	DesktopLyricsPrepareAppExit();
 	waveOutReset(hwo);
 	waveOutClose(hwo);
 	if (deve) {
@@ -24747,8 +24862,6 @@ BOOL COggDlg::DestroyWindow()
 	if (m_pDlgColor)delete m_pDlgColor;
 	if (ptl) ptl->Release();
 	if (pcdl) pcdl->Release();
-	CoUninitialize();
-	//	timeKillEvent(uTimerId);
 	StopTimerpVsyncThread();
 	KillTimer(5656);
 	KillTimer(5657);
@@ -24759,6 +24872,7 @@ BOOL COggDlg::DestroyWindow()
 	UnregisterHotKey(GetSafeHwnd(), ID_HOTKEY2);
 	UnregisterHotKey(GetSafeHwnd(), ID_HOTKEY3);
 	ReleaseDXSound();
+	CoUninitialize();
 	CString s;
 	m_kaisuu.GetWindowText(s);
 	s.Trim();
@@ -25354,7 +25468,10 @@ static void OggRefreshDsQueuedSamplesCache()
 {
 	extern volatile LONG g_dsDeviceOpBusy;
 	extern LPDIRECTSOUNDBUFFER8 m_dsb;
-	if (!m_dsb || InterlockedCompareExchange(&g_dsDeviceOpBusy, 0, 0) != 0)
+	if (!m_dsb)
+		return;
+	DsOpTryLock ds;
+	if (!ds || !m_dsb)
 		return;
 	ULONG hp = 0, hw = 0;
 	const int bpf = OggDsOutputBytesPerFrame();
@@ -25382,7 +25499,9 @@ __int64 OggGetHeardPcmFrames()
 	OggRefreshDsQueuedSamplesCache();
 	__int64 pb = 0;
 	{
-		std::lock_guard<std::mutex> lk(cl2);
+		std::unique_lock<std::mutex> lk(cl2, std::try_to_lock);
+		if (!lk.owns_lock())
+			return 0;
 		pb = playb;
 	}
 	const long q = g_dsQueuedSamplesCache;
@@ -25510,6 +25629,10 @@ void OggResetRubberBandStretcher()
 
 void COggDlg::timerp()
 {
+	struct TickGuard {
+		TickGuard() { InterlockedIncrement(&g_inPlaybackUiTick); }
+		~TickGuard() { InterlockedDecrement(&g_inPlaybackUiTick); }
+	} tickGuard;
 	if (g_oggUiThreadId != 0 && GetCurrentThreadId() != g_oggUiThreadId) {
 		COgg_RequestTimerp(this);
 		return;
@@ -25517,6 +25640,8 @@ void COggDlg::timerp()
 	if (CCustomPopupMenu::GetTrackingRoot() != NULL)
 		return;
 	if (playy == 0)return;
+	if (InterlockedCompareExchange(&g_inPlaybackJoinPump, 0, 0))
+		return;
 	if (InterlockedCompareExchange(&g_appExiting, 0, 0))
 		return;
 
@@ -27307,10 +27432,13 @@ void COggDlg::timerp()
 	if (drawth == TRUE) return;
 	const int thruMute = VstLiveThruIsOn();
 	if (m_dsb && thn1 == FALSE) {
-		if (thruMute || savedata.dsvol == -498)
-			m_dsb->SetVolume(DSBVOLUME_MIN);
-		else
-			m_dsb->SetVolume((savedata.dsvol - 1) * 7);
+		DsOpTryLock ds;
+		if (ds && m_dsb && thn1 == FALSE) {
+			if (thruMute || savedata.dsvol == -498)
+				m_dsb->SetVolume(DSBVOLUME_MIN);
+			else
+				m_dsb->SetVolume((savedata.dsvol - 1) * 7);
+		}
 	}
 	// CD の waveOutSetVolume がプロセスのセッション音量まで下げたあと、
 	// WASAPI 主音量スライダーはエンドポイント側なので表示は元のまま小さくなる。
@@ -27423,6 +27551,10 @@ void COggDlg::StopTimerpVsyncThread()
 
 LRESULT COggDlg::OnTimerpVsyncTick(WPARAM, LPARAM)
 {
+	struct TickGuard {
+		TickGuard() { InterlockedIncrement(&g_inPlaybackUiTick); }
+		~TickGuard() { InterlockedDecrement(&g_inPlaybackUiTick); }
+	} tickGuard;
 	if (!IsWindow(GetSafeHwnd())) {
 		InterlockedExchange(&g_timerpPosted, 0);
 		return 0;
@@ -27440,7 +27572,8 @@ LRESULT COggDlg::OnTimerpVsyncTick(WPARAM, LPARAM)
 		return 0;
 	}
 	timerp();
-	if (InterlockedCompareExchange(&g_appExiting, 0, 0)) {
+	if (InterlockedCompareExchange(&g_appExiting, 0, 0)
+		|| InterlockedCompareExchange(&g_inPlaybackJoinPump, 0, 0)) {
 		/* ULW 直後の DestroyWindow を避ける。終了は IDOK 側で行う */
 		InterlockedExchange(&g_timerpPosted, 0);
 		return 0;
@@ -27724,6 +27857,9 @@ void timerog1(UINT nIDEvent)
 		}
 	}
 	if (nIDEvent == 9000) {
+		if (InterlockedCompareExchange(&g_appExiting, 0, 0)
+			|| InterlockedCompareExchange(&g_inPlaybackJoinPump, 0, 0))
+			return;
 		// WAV/解析書き出し中は次曲 Restart しない（DoEvent 再入対策）
 		if (wavExportPath.GetLength() > 0 || g_isWavExportRendering)
 			return;
@@ -27984,6 +28120,9 @@ void COggDlg::OnTimer(UINT_PTR nIDEvent)
 void COggDlg::OnTimer(UINT nIDEvent)
 #endif
 {
+	if (InterlockedCompareExchange(&g_appExiting, 0, 0)
+		|| InterlockedCompareExchange(&g_inPlaybackJoinPump, 0, 0))
+		return;
 	if (nIDEvent == IDT_OGG_RESUME_PROMPT) {
 		KillTimer(IDT_OGG_RESUME_PROMPT);
 		OggRunResumePrompt();
@@ -28244,12 +28383,6 @@ LRESULT COggDlg::OnPlaybackAutoStopped(WPARAM, LPARAM)
 	g_expectedDsBytes = 0;
 	eqflg = TRUE;
 	KillTimer(1250);
-	if (m_dsb) {
-		m_dsb->SetVolume(DSBVOLUME_MIN);
-		m_dsb->Stop();
-	}
-	if (pAudioClient)
-		pAudioClient->Stop();
 	Closeds();
 	if (ogg) {
 		ReleaseOggVorbis(&ogg);
@@ -29970,7 +30103,9 @@ void COggDlg::OnBnClickedButton54()
 
 void COggDlg::OnPause()
 {
-	// TODO: この位置にコントロール通知ハンドラ用のコードを追加してください
+	if (InterlockedCompareExchange(&g_inPlaybackJoinPump, 0, 0)
+		|| InterlockedCompareExchange(&g_appExiting, 0, 0))
+		return;
 	if (plf == 0) return;
 	if (ps == 0)
 	{
@@ -29978,10 +30113,13 @@ void COggDlg::OnPause()
 		{
 			pMainFrame1->pause(0);
 		}
-		if (ogg != NULL || adbuf2 != NULL || mod != NULL || wav != NULL || mode == -9)
+			if (ogg != NULL || adbuf2 != NULL || mod != NULL || wav != NULL || mode == -9)
 			if (m_dsb && thn == FALSE) {
-				m_dsb->GetCurrentPosition(&PlayCursora, &WriteCursora);
-				m_dsb->Stop();
+				DsOpLock ds;
+				if (m_dsb && thn == FALSE) {
+					m_dsb->GetCurrentPosition(&PlayCursora, &WriteCursora);
+					m_dsb->Stop();
+				}
 			}
 		//			waveOutPause(hwo);
 		m_ps.SetWindowText(LL14(
@@ -30016,8 +30154,13 @@ void COggDlg::OnPause()
 			//			dsn[y].hEventNotify = hNotifyEvent[1];
 			//			AfxBeginThread(HandleNotifications,(LPVOID)this);
 			//			dsnf1->SetNotificationPositions(10+1,dsn);
-			if (m_dsb && thn == FALSE)m_dsb->Play(0, 0, DSBPLAY_LOOPING);
-			if (m_dsb && thn == FALSE)m_dsb->SetCurrentPosition(PlayCursora);
+			if (m_dsb && thn == FALSE) {
+				DsOpLock ds;
+				if (m_dsb && thn == FALSE) {
+					m_dsb->Play(0, 0, DSBPLAY_LOOPING);
+					m_dsb->SetCurrentPosition(PlayCursora);
+				}
+			}
 		}
 		//			waveOutRestart(hwo);
 		ps = 0; m_ps.SetWindowText(LL14(
@@ -30086,9 +30229,33 @@ BOOL COggDlg::PreTranslateMessage(MSG* pMsg)
 
 void COggDlg::OnOK()
 {
+	if (OggInPlaybackUiTick()) {
+		OggDeferAppExitFromUiTick(this);
+		return;
+	}
+	if (InterlockedCompareExchange(&g_inPlaybackJoinPump, 0, 0))
+		return;
 	CCC_StopInwomanTimer();
 	InterlockedExchange(&g_appExiting, 1);
-	DesktopLyricsPrepareAppExit();
+	DesktopLyricsAbortPaintForExit();
+	wavwait = 1;
+	thend = 1;
+	thend1 = TRUE;
+	SignalPlaybackNotifyThreadStop();
+	XfPreloadCancel(0);
+	if (s_inPlay) {
+		/* play() の DoEvent 再入。破棄は play 復帰後の IDOK で行う。 */
+		return;
+	}
+	/* 終了ボタンの BN_CLICKED は SendMessage。この入れ子で Join すると
+	   decode 側の SendMessage が届かず、DS Lock と相互待ちになる。
+	   MP の終了と同じく一度 Post してから stop する。 */
+	if (PlaybackNotifyThreadMayBeActive()
+		&& InterlockedCompareExchange(&s_exitPostedFromUiTick, 1, 0) == 0) {
+		if (::IsWindow(GetSafeHwnd()))
+			PostMessage(WM_COMMAND, MAKEWPARAM(IDOK, BN_CLICKED), 0);
+		return;
+	}
 	stop();
 	CCustomBlurDialogBase::OnOK();
 }
@@ -31087,10 +31254,13 @@ void COggDlg::SyncAnalyzerFromPlayCursor()
 	if (bytesPerFrame <= 0 || ringBytes <= (ULONG)bytesPerFrame) return;
 
 	ULONG playCur = 0, writeCur = 0;
-	if (InterlockedCompareExchange(&g_dsDeviceOpBusy, 0, 0) != 0)
-		return;
-	if (m_dsb->GetCurrentPosition(&playCur, &writeCur) != DS_OK)
-		return;
+	{
+		DsOpTryLock ds;
+		if (!ds || !m_dsb)
+			return;
+		if (m_dsb->GetCurrentPosition(&playCur, &writeCur) != DS_OK)
+			return;
+	}
 
 	// endPos = PlayCursor + Speana latency。窓長はリングに収まるよう制限
 	// （高レート/多ch アップスケールで probe がリング超過して早期 return しない）
@@ -31224,10 +31394,13 @@ void COggDlg::SyncPianoRollFromPlayCursor()
 	m_PianoRollDlg->ResumePlaybackFeed();
 
 	ULONG playCur = 0, writeCur = 0;
-	if (InterlockedCompareExchange(&g_dsDeviceOpBusy, 0, 0) != 0)
-		return;
-	if (m_dsb->GetCurrentPosition(&playCur, &writeCur) != DS_OK)
-		return;
+	{
+		DsOpTryLock ds;
+		if (!ds || !m_dsb)
+			return;
+		if (m_dsb->GetCurrentPosition(&playCur, &writeCur) != DS_OK)
+			return;
+	}
 	PlayCursor2 = playCur;
 	WriteCursor = writeCur;
 
@@ -31571,8 +31744,11 @@ void COggDlg::Speana(BOOL bPaintBars, BOOL bFillLevels)
 	// データ読み込み (完全過去データ取得)
 	// ---------------------------------------------------------
 	HRESULT rett = E_FAIL;
-	if (m_dsb && InterlockedCompareExchange(&g_dsDeviceOpBusy, 0, 0) == 0)
-		rett = m_dsb->GetCurrentPosition(&PlayCursor, &WriteCursor);
+	{
+		DsOpTryLock ds;
+		if (ds && m_dsb)
+			rett = m_dsb->GetCurrentPosition(&PlayCursor, &WriteCursor);
+	}
 	if (rett == DS_OK) { PlayCursor2 = PlayCursor; }
 	else { PlayCursor = PlayCursor2; }
 
@@ -32319,6 +32495,8 @@ void COggDlg::OnMicLevRelease(NMHDR*, LRESULT* pResult)
 
 void COggDlg::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
 {
+	if (InterlockedCompareExchange(&g_inPlaybackJoinPump, 0, 0))
+		return;
 	if (pScrollBar && m_miclev.GetSafeHwnd() && pScrollBar->GetSafeHwnd() == m_miclev.GetSafeHwnd()) {
 		int lv = m_miclev.GetPos();
 		if (lv < 0) lv = 0;
@@ -32351,6 +32529,19 @@ void COggDlg::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
 	// SB_THUMBPOSITION: つまみを離した直後（環境によっては SB_ENDSCROLL が来ない）
 	if (nSBCode == SB_PAGELEFT || nSBCode == SB_PAGERIGHT || nSBCode == SB_ENDSCROLL || nSBCode == SB_THUMBPOSITION) {
 
+		struct Sek4Hold { Sek4Hold() { sek4 = TRUE; } ~Sek4Hold() { sek4 = FALSE; } } sek4Hold;
+		PlaybackFillWake();
+		{
+			const DWORD t0 = GetTickCount();
+			while (PlaybackFillInDecode()) {
+				if (thn1 || InterlockedCompareExchange(&g_appExiting, 0, 0)
+					|| InterlockedCompareExchange(&g_inPlaybackJoinPump, 0, 0))
+					return;
+				if (GetTickCount() - t0 >= 8000u)
+					break;
+				Sleep(1);
+			}
+		}
 		// ★排他制御開始：再生スレッドとの競合を防ぐ
 		std::unique_lock<std::mutex> hscroll_lock(cl2);
 
@@ -32535,8 +32726,9 @@ void COggDlg::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
 
 				/* 書込みヘッド直後の短い区間だけ無音（リング全体を消すと無音ギャップ＝もたつき） */
 				if (m_dsb) {
+					DsOpLock ds;
 					DWORD pc = 0, wc = 0;
-					if (m_dsb->GetCurrentPosition(&pc, &wc) == DS_OK) {
+					if (m_dsb && m_dsb->GetCurrentPosition(&pc, &wc) == DS_OK) {
 						const ULONG ring = (g_ds_buffer_bytes > 0) ? g_ds_buffer_bytes
 							: (ULONG)(OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM);
 						extern int g_outBytesPerFrame;
@@ -33459,6 +33651,9 @@ LRESULT COggDlg::OnXfadePreloadJacket(WPARAM wParam, LPARAM)
 
 LRESULT COggDlg::OnXfadePromoteUi(WPARAM wParam, LPARAM lParam)
 {
+	if (InterlockedCompareExchange(&g_inPlaybackJoinPump, 0, 0)
+		|| InterlockedCompareExchange(&g_appExiting, 0, 0))
+		return 0;
 	const int slot = (int)wParam;
 	const int pi = (int)lParam;
 	if (slot < 0 || slot >= XF_SLOTS)
@@ -33749,6 +33944,10 @@ static WORD GetPeMachine(const CString& path)
 
 void plus2(int& c)
 {
+	if (kpicnt >= 149) {
+		c = 0;
+		return;
+	}
 	CString ss = sswk;
 	const WORD machine = GetPeMachine(ss);
 	if (PeMachineNeedsRemote(machine)) {
@@ -35116,7 +35315,7 @@ void COggDlg::OnBnClickedHelp()
 
 void COggDlg::OnDestroy()
 {
-	XfPreloadCancel(20000); /* 先読みスレッドを残したまま終了するとプラグイン解放中に落ちる */
+	XfPreloadCancel(2000);
 	PcHwMidiInShutdown();
 	AudioDevWatchShutdown();
 	CEmuCatalogListDlg::CloseIfOpen();

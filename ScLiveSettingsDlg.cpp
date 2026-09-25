@@ -1,4 +1,4 @@
-﻿#include "stdafx.h"
+#include "stdafx.h"
 #include "ogg.h"
 #include "ScLiveSettingsDlg.h"
 #include "ScreenCaptureDlg.h"
@@ -12,17 +12,17 @@ IMPLEMENT_DYNAMIC(CScLiveSettingsDlg, CCustomBlurDialogBase)
 
 BEGIN_MESSAGE_MAP(CScLiveSettingsDlg, CCustomBlurDialogBase)
 	ON_WM_DESTROY()
-	ON_CBN_SELCHANGE(IDC_SC_LIVE_SVC, &CScLiveSettingsDlg::OnCbnSelchangeSvc)
-	ON_CBN_SELCHANGE(IDC_SC_LIVE_PRIV, &CScLiveSettingsDlg::OnCbnSelchangePriv)
-	ON_BN_CLICKED(IDC_SC_LIVE_AUTH, &CScLiveSettingsDlg::OnBnClickedAuth)
-	ON_BN_CLICKED(IDC_SC_LIVE_CREATE, &CScLiveSettingsDlg::OnBnClickedCreate)
-	ON_BN_CLICKED(IDC_SC_LIVE_ADV, &CScLiveSettingsDlg::OnBnClickedAdv)
-	ON_EN_CHANGE(IDC_SC_LIVE_TITLE, &CScLiveSettingsDlg::OnEnChangeField)
-	ON_EN_CHANGE(IDC_SC_LIVE_DESC, &CScLiveSettingsDlg::OnEnChangeField)
-	ON_EN_CHANGE(IDC_SC_LIVE_URL, &CScLiveSettingsDlg::OnEnChangeField)
-	ON_EN_CHANGE(IDC_SC_LIVE_KEY, &CScLiveSettingsDlg::OnEnChangeField)
-	ON_EN_CHANGE(IDC_SC_LIVE_CID, &CScLiveSettingsDlg::OnEnChangeField)
-	ON_EN_CHANGE(IDC_SC_LIVE_CSEC, &CScLiveSettingsDlg::OnEnChangeField)
+	ON_CBN_SELCHANGE(IDC_SC_LIVE_SVC, OnCbnSelchangeSvc)
+	ON_CBN_SELCHANGE(IDC_SC_LIVE_PRIV, OnCbnSelchangePriv)
+	ON_BN_CLICKED(IDC_SC_LIVE_AUTH, OnBnClickedAuth)
+	ON_BN_CLICKED(IDC_SC_LIVE_CREATE, OnBnClickedCreate)
+	ON_BN_CLICKED(IDC_SC_LIVE_ADV, OnBnClickedAdv)
+	ON_EN_CHANGE(IDC_SC_LIVE_TITLE, OnEnChangeField)
+	ON_EN_CHANGE(IDC_SC_LIVE_DESC, OnEnChangeField)
+	ON_EN_CHANGE(IDC_SC_LIVE_URL, OnEnChangeField)
+	ON_EN_CHANGE(IDC_SC_LIVE_KEY, OnEnChangeField)
+	ON_EN_CHANGE(IDC_SC_LIVE_CID, OnEnChangeField)
+	ON_EN_CHANGE(IDC_SC_LIVE_CSEC, OnEnChangeField)
 END_MESSAGE_MAP()
 
 CScLiveSettingsDlg::CScLiveSettingsDlg(CWnd* pParent)
@@ -399,14 +399,14 @@ void CScLiveSettingsDlg::OnBnClickedCreate()
 		if (!ScLiveHaveOAuthClientCreds())
 			ScLiveSettingsRevealAdvancedCreds();
 		::MessageBox(m_hWnd, err.IsEmpty()
-			? LL14(L"YouTube 配信の準備に失敗しました。", L"YouTube live prepare failed.",
+			? (LPCTSTR)CString(LL14(L"YouTube 配信の準備に失敗しました。", L"YouTube live prepare failed.",
 				L"Preparation YouTube echouee.", L"Preparazione YouTube non riuscita.",
 				L"Fallo la preparacion de YouTube.", L"YouTube 방송 준비 실패.",
 				L"YouTube 直播准备失败。", L"فشل تجهيز بث YouTube.",
 				L"Не удалось подготовить эфир YouTube.", L"YouTube-Live-Vorbereitung fehlgeschlagen.",
 				L"Falha ao preparar YouTube ao vivo.", L"Voorbereiding YouTube-live mislukt.",
-				L"Przygotowanie YouTube nie powiodlo sie.", L"YouTube canli hazirligi basarisiz.")
-			: err, cap, MB_OK | MB_ICONWARNING);
+				L"Przygotowanie YouTube nie powiodlo sie.", L"YouTube canli hazirligi basarisiz."))
+			: (LPCTSTR)err, cap, MB_OK | MB_ICONWARNING);
 		return;
 	}
 	ApplyFieldsFromSavedata();

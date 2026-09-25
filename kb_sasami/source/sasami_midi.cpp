@@ -647,7 +647,7 @@ bool SasamiConvertToSmf(const SasamiSong& song, SasamiMidiMap map, int gsBankLsb
 
 				switch (cmd) {
 				case 1: { // note: original always note-off previous then note-on
-					const int note = b1;
+					const int note = (int)(b1 & 0x7F);
 					if (tr[i].note) {
 						PushShort(tick, port, (uint8_t)(0x80 | ch), (uint8_t)tr[i].note, 0);
 						chOn[port ? 1 : 0][ch][tr[i].note & 127] = 0;
@@ -753,10 +753,11 @@ bool SasamiConvertToSmf(const SasamiSong& song, SasamiMidiMap map, int gsBankLsb
 						break;
 					}
 					if (dest < addr) {
+						/* 短い Q/J は展開して鳴らし続ける。長い曲ループは
+						   後段で gLoopEnd まで切り、dest ノートは残さない。 */
 						tr[i].everJump = 1;
 						tr[i].backJumps++;
 						if (tr[i].backJumps == 1) {
-							// LookupDestTick inlined
 							uint32_t destTick = 0xFFFFFFFFu;
 							{
 								const uint64_t lo = ((uint64_t)(unsigned)i) << 32;
@@ -802,8 +803,8 @@ bool SasamiConvertToSmf(const SasamiSong& song, SasamiMidiMap map, int gsBankLsb
 									}
 								}
 							}
-							/* Unknown land tick → 0 so loopStart marker still emits. */
-							if (destTick == 0xFFFFFFFFu)
+							if (destTick == 0xFFFFFFFFu
+								&& (dest == 0 || dest == song.tracks[i].fileOff))
 								destTick = 0;
 							tr[i].loopStartTick = destTick;
 							tr[i].loopEndTick = tick;
@@ -814,8 +815,18 @@ bool SasamiConvertToSmf(const SasamiSong& song, SasamiMidiMap map, int gsBankLsb
 							chOn[port ? 1 : 0][ch][tr[i].note & 127] = 0;
 							tr[i].note = 0;
 						}
+						{
+							int shared = 0;
+							for (int j = 0; j < song.trackCount && j < 64; j++) {
+								if (j == i || !tr[j].alive) continue;
+								if (tr[j].part == ch && tr[j].port == port && tr[j].note)
+									shared = 1;
+							}
+							if (!shared)
+								PushShort(tick, port, (uint8_t)(0xB0 | ch), 0x78, 0);
+						}
 						if (stopLoopers && gLoopEnd > 0 && tick >= gLoopEnd) {
-							tr[i].alive = 0;
+							killTrack(i);
 							again = 0;
 							break;
 						}
@@ -1243,29 +1254,46 @@ bool SasamiConvertToSmf(const SasamiSong& song, SasamiMidiMap map, int gsBankLsb
 			stopLoopers = 1;
 	}
 
-	gLoopStart = 0xFFFFFFFFu;
-	gLoopEnd = 0;
+	/* 曲ループは「最後に揃う長い J」の塊。途中の短い Q/J は展開のまま残す。
+	   塊の最も早い J で切るので、先に戻った ch の dest 音が最後音に重ならない。 */
+	uint32_t maxLe = 0;
+	uint32_t maxSpan = 0;
 	for (int i = 0; i < song.trackCount && i < 64; i++) {
 		if (!tr[i].everJump || tr[i].loopEndTick == 0) continue;
-		if (tr[i].loopEndTick > gLoopEnd) gLoopEnd = tr[i].loopEndTick;
+		if (tr[i].loopEndTick > maxLe) maxLe = tr[i].loopEndTick;
+		const uint32_t st0 = (tr[i].loopStartTick == 0xFFFFFFFFu) ? 0 : tr[i].loopStartTick;
+		const uint32_t sp = (tr[i].loopEndTick > st0) ? (tr[i].loopEndTick - st0) : 0;
+		if (sp > maxSpan) maxSpan = sp;
 	}
-	auto pickDest = [&](int longestOnly, int allowZero) -> uint32_t {
-		uint32_t best = 0xFFFFFFFFu;
+	const uint32_t clusterFrom = (maxLe > 192u) ? (maxLe - 192u) : 0;
+	gLoopEnd = 0xFFFFFFFFu;
+	gLoopStart = 0xFFFFFFFFu;
+	for (int i = 0; i < song.trackCount && i < 64; i++) {
+		if (!tr[i].everJump || tr[i].loopEndTick == 0) continue;
+		if (tr[i].loopEndTick < clusterFrom)
+			continue;
+		const uint32_t st = tr[i].loopStartTick;
+		const uint32_t st0 = (st == 0xFFFFFFFFu) ? 0 : st;
+		const uint32_t sp = (tr[i].loopEndTick > st0) ? (tr[i].loopEndTick - st0) : 0;
+		if (maxSpan > 0 && sp * 2 < maxSpan)
+			continue;
+		if (tr[i].loopEndTick < gLoopEnd)
+			gLoopEnd = tr[i].loopEndTick;
+		if (st != 0xFFFFFFFFu && st < gLoopStart)
+			gLoopStart = st;
+	}
+	if (gLoopEnd == 0xFFFFFFFFu)
+		gLoopEnd = maxLe;
+	if (gLoopStart == 0xFFFFFFFFu) {
 		for (int i = 0; i < song.trackCount && i < 64; i++) {
 			if (!tr[i].everJump || tr[i].loopEndTick == 0) continue;
-			if (longestOnly && tr[i].loopEndTick != gLoopEnd) continue;
+			if (tr[i].loopEndTick < clusterFrom)
+				continue;
 			const uint32_t st = tr[i].loopStartTick;
-			if (st == 0xFFFFFFFFu) continue;
-			if (!allowZero && st == 0) continue;
-			if (st < best) best = st;
+			if (st != 0xFFFFFFFFu && st < gLoopStart)
+				gLoopStart = st;
 		}
-		return best;
-	};
-	gLoopStart = pickDest(1, 0);
-	if (gLoopStart == 0xFFFFFFFFu)
-		gLoopStart = pickDest(0, 0);
-	if (gLoopStart == 0xFFFFFFFFu)
-		gLoopStart = pickDest(1, 1);
+	}
 
 	const int haveLoop = (gLoopStart != 0xFFFFFFFFu && gLoopEnd > gLoopStart) ? 1 : 0;
 	if (haveLoop) {
@@ -1323,6 +1351,7 @@ bool SasamiConvertToSmf(const SasamiSong& song, SasamiMidiMap map, int gsBankLsb
 				}
 				if (holdPed[p][ch])
 					PushShort(gLoopEnd, p, (uint8_t)(0xB0 | ch), 0x40, 0);
+				PushShort(gLoopEnd, p, (uint8_t)(0xB0 | ch), 0x78, 0);
 			}
 		}
 		{

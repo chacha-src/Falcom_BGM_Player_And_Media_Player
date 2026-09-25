@@ -1,4 +1,4 @@
-﻿// OfflineHelp.cpp - CHM オフラインヘルプの配置確保と表示
+// OfflineHelp.cpp - CHM オフラインヘルプの配置確保と表示
 #include "stdafx.h"
 #include "OfflineHelp.h"
 #include "UpdateCheck.h"
@@ -251,7 +251,7 @@ static bool OfflineHelpExtractChmFromZip(const CString& zipPath, const CString& 
 			continue;
 		}
 
-		CString currentFileName = CA2T(fileNameOnly, CP_UTF8);
+		CString currentFileName((LPCTSTR)CA2T(fileNameOnly, CP_UTF8));
 		if (currentFileName.CompareNoCase(OFFLINE_HELP_CHM_NAME) != 0)
 		{
 			if ((ZPOS64_T)(i + 1) < gi.number_entry)

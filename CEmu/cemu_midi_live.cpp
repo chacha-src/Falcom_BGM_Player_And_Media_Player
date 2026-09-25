@@ -1176,8 +1176,28 @@ void CEmuMidiLiveStop(void)
 	InterlockedExchange((LONG*)&g_live.overlayPend, 0);
 	g_live.injR = g_live.injW;
 	LeaveCriticalSection(&g_live.cs);
-	while (InterlockedCompareExchange(&g_live.inPump, 0, 0) != 0)
-		Sleep(1);
+	{
+		extern DWORD g_oggUiThreadId;
+		extern int PlaybackFillThreadAlive();
+#ifndef PM_QS_SENDMESSAGE
+#define PM_QS_SENDMESSAGE (QS_SENDMESSAGE << 16)
+#endif
+		while (InterlockedCompareExchange(&g_live.inPump, 0, 0) != 0) {
+			if (!PlaybackFillThreadAlive()) {
+				InterlockedExchange(&g_live.inPump, 0);
+				break;
+			}
+			if (g_oggUiThreadId != 0 && GetCurrentThreadId() == g_oggUiThreadId) {
+				MSG msg;
+				PeekMessage(&msg, NULL, WM_NULL, WM_NULL, PM_NOREMOVE);
+				while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE | PM_QS_SENDMESSAGE)) {
+					TranslateMessage(&msg);
+					DispatchMessage(&msg);
+				}
+			}
+			Sleep(1);
+		}
+	}
 	EnterCriticalSection(&g_live.cs);
 	mixBuf = g_live.mixBuf;
 	g_live.mixBuf = NULL;

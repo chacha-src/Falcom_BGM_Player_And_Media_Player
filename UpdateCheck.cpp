@@ -1,4 +1,4 @@
-﻿// UpdateCheck.cpp - 起動時更新チェック・ダウンロード・展開
+// UpdateCheck.cpp - 起動時更新チェック・ダウンロード・展開
 #include "stdafx.h"
 #include "UpdateCheck.h"
 #include "oggDlg.h"
@@ -558,7 +558,7 @@ static void NotifySiteDownloadCount(const CString& zipUrl)
 
 	CStringA enc;
 	{
-		const CStringA raw = CT2A(file, CP_UTF8);
+		const CStringA raw((LPCSTR)CT2A(file, CP_UTF8));
 		const int n = raw.GetLength();
 		for (int i = 0; i < n; ++i) {
 			const unsigned char c = (unsigned char)raw[i];
@@ -748,7 +748,7 @@ static bool ExtractZipToDir(const CString& zipPath, const CString& destDir, cons
 
 		if (*fileNameOnly == '\0') { unzGoToNextFile(uf); continue; } // ディレクトリはスキップ
 
-		CString currentFileName = CA2T(fileNameOnly, CP_UTF8);
+		CString currentFileName((LPCTSTR)CA2T(fileNameOnly, CP_UTF8));
 
 		// 目的のファイルかどうか確認
 		if (currentFileName.CompareNoCase(targetFileName) == 0)
@@ -1028,8 +1028,8 @@ void CUpdateAskDlg::DoDataExchange(CDataExchange* pDX)
 }
 
 BEGIN_MESSAGE_MAP(CUpdateAskDlg, CCustomBlurDialogExBase)
-	ON_BN_CLICKED(IDYES, &CUpdateAskDlg::OnYes)
-	ON_BN_CLICKED(IDNO, &CUpdateAskDlg::OnNo)
+	ON_BN_CLICKED(IDYES, OnYes)
+	ON_BN_CLICKED(IDNO, OnNo)
 	ON_WM_CONTEXTMENU()
 END_MESSAGE_MAP()
 

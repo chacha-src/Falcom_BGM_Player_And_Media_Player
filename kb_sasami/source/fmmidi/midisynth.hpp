@@ -400,6 +400,7 @@
         bool set_drum_program(int number, const DRUMPARAMETER& p);
         virtual note* note_on(int_least32_t program, int note, int velocity, double frequency_multiplier);
         void set_tone_color(const tone_color& c) { color = c; }
+        void reset_pool_frame();
     private:
         tone_color color;
         std::map<int, FMPARAMETER> programs;

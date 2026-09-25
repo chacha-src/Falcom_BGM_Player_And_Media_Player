@@ -1,4 +1,4 @@
-﻿// Id3tagv2.h: CId3tagv2 クラスのインターフェイス
+// Id3tagv2.h: CId3tagv2 クラスのインターフェイス
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -9,29 +9,11 @@
 #pragma once
 #endif // _MSC_VER > 1000
 
-static WORD ExtractI2(unsigned char buf[2])
-{
-	WORD x;
-	// big endian extract
-	x = buf[0];
-	x <<= 8;
-	x |= buf[1];
-	return x;
-}
-
-static DWORD ExtractI4(unsigned char buf[4])
-{
-	DWORD x;
-	// big endian extract
-	x = buf[0];
-	x <<= 8;
-	x |= buf[1];
-	x <<= 8;
-	x |= buf[2];
-	x <<= 8;
-	x |= buf[3];
-	return x;
-}
+// 実装は GlobalCommand.cpp のみ。ヘッダで static 定義すると
+// 先行する extern 宣言（GlobalCommand.h / mp3info.h）と組み合わさり
+// icx が複数 TU に強いシンボルを出して LNK2005 になる。
+DWORD ExtractI4(unsigned char buf[4]);
+WORD ExtractI2(unsigned char buf[2]);
 
 struct id3_v23v22table_t {
 	char *v23;

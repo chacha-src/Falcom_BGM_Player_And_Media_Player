@@ -40,10 +40,10 @@ void CAudioSelect::DoDataExchange(CDataExchange* pDX)
 }
 
 BEGIN_MESSAGE_MAP(CAudioSelect, CCustomBlurDialogBase)
-	ON_LBN_DBLCLK(IDC_LIST1, &CAudioSelect::OnLbnDblclkList1)
-	ON_LBN_DBLCLK(IDC_AS_SUBLIST, &CAudioSelect::OnLbnDblclkSubList)
-	ON_BN_CLICKED(IDOK, &CAudioSelect::OnBnClickedOk)
-	ON_BN_CLICKED(IDCANCEL, &CAudioSelect::OnBnClickedCancel)
+	ON_LBN_DBLCLK(IDC_LIST1, OnLbnDblclkList1)
+	ON_LBN_DBLCLK(IDC_AS_SUBLIST, OnLbnDblclkSubList)
+	ON_BN_CLICKED(IDOK, OnBnClickedOk)
+	ON_BN_CLICKED(IDCANCEL, OnBnClickedCancel)
 END_MESSAGE_MAP()
 
 static BOOL AudioNameMatchesLang(const CString& low, WORD prim)

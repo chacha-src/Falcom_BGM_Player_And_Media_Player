@@ -29,10 +29,10 @@ void CMissingFilesListCtrl::BuildToolTipText(int row, int col, CString& out)
 	const MissingFileItem& it = (*m_pItems)[row];
 	if (col == MF_COL_PATH || col < 0) {
 		out = it.path.IsEmpty()
-			? LL14(L"（パスなし）", L"(no path)", L"(aucun chemin)", L"(nessun percorso)",
+			? CString(LL14(L"（パスなし）", L"(no path)", L"(aucun chemin)", L"(nessun percorso)",
 				L"(sin ruta)", L"(경로 없음)", L"（无路径）", L"(بدون مسار)",
 				L"(нет пути)", L"(kein Pfad)", L"(sem caminho)", L"(geen pad)",
-				L"(brak sciezki)", L"(yol yok)")
+				L"(brak sciezki)", L"(yol yok)"))
 			: it.path;
 	} else if (col == MF_COL_NAME) {
 		out = it.name;
@@ -84,15 +84,15 @@ void CMissingFilesDlg::DoDataExchange(CDataExchange* pDX)
 }
 
 BEGIN_MESSAGE_MAP(CMissingFilesDlg, CCustomBlurDialogBase)
-	ON_BN_CLICKED(IDC_MF_BROWSE, &CMissingFilesDlg::OnBnClickedBrowse)
-	ON_BN_CLICKED(IDC_MF_APPLY, &CMissingFilesDlg::OnBnClickedApply)
-	ON_BN_CLICKED(IDC_MF_OPENFOL, &CMissingFilesDlg::OnBnClickedOpenFol)
-	ON_BN_CLICKED(IDC_MF_DELETE, &CMissingFilesDlg::OnBnClickedDelete)
-	ON_BN_CLICKED(IDC_MF_CLOSE, &CMissingFilesDlg::OnBnClickedClose)
-	ON_NOTIFY(LVN_ITEMCHANGED, IDC_MF_LIST, &CMissingFilesDlg::OnLvnItemchangedList)
-	ON_NOTIFY(NM_DBLCLK, IDC_MF_LIST, &CMissingFilesDlg::OnNMDblclkList)
-	ON_NOTIFY(NM_CLICK, IDC_MF_LIST, &CMissingFilesDlg::OnNMClickList)
-	ON_EN_KILLFOCUS(IDC_MF_INLINE_EDIT_DUMMY, &CMissingFilesDlg::OnInlineEditKillFocus)
+	ON_BN_CLICKED(IDC_MF_BROWSE, OnBnClickedBrowse)
+	ON_BN_CLICKED(IDC_MF_APPLY, OnBnClickedApply)
+	ON_BN_CLICKED(IDC_MF_OPENFOL, OnBnClickedOpenFol)
+	ON_BN_CLICKED(IDC_MF_DELETE, OnBnClickedDelete)
+	ON_BN_CLICKED(IDC_MF_CLOSE, OnBnClickedClose)
+	ON_NOTIFY(LVN_ITEMCHANGED, IDC_MF_LIST, OnLvnItemchangedList)
+	ON_NOTIFY(NM_DBLCLK, IDC_MF_LIST, OnNMDblclkList)
+	ON_NOTIFY(NM_CLICK, IDC_MF_LIST, OnNMClickList)
+	ON_EN_KILLFOCUS(IDC_MF_INLINE_EDIT_DUMMY, OnInlineEditKillFocus)
 	ON_WM_CLOSE()
 	ON_WM_CTLCOLOR()
 END_MESSAGE_MAP()

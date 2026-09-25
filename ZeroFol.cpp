@@ -32,8 +32,8 @@ void CZeroFol::DoDataExchange(CDataExchange* pDX)
 
 #include "CImageBase.h"
 BEGIN_MESSAGE_MAP(CZeroFol, CCustomBlurDialogBase)
-	ON_BN_CLICKED(IDC_FOL, &CZeroFol::OnBnClickedFol)
-	ON_BN_CLICKED(IDOK, &CZeroFol::OnBnClickedOk)
+	ON_BN_CLICKED(IDC_FOL, OnBnClickedFol)
+	ON_BN_CLICKED(IDOK, OnBnClickedOk)
 	cmn(CZeroFol);
 
 

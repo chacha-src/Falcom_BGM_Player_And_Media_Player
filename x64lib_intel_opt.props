@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <!--
+    ForceImportAfterCppTargets 用（x64lib / exe）。MSVC v145 + AVX2 既定。
+    KPI プラグインはこのファイルを使わない（x64lib_kpi_opt.props）。/MT を KPI に
+    押し付けると viopsf.bin 等の /MD 依存と食い違ってクラッシュする。
+    OpenMP は vcomp140.dll が要るので切る（exe 単体運用）。
+    AVX512 はファイル名に avx512 を含む専用 TU だけ。全 TU の /arch:AVX512 は使わない。
+    /GL は lib と exe の LTCG 揃えが崩れるとリンクが面倒なので切る。
+  -->
+  <PropertyGroup>
+    <WholeProgramOptimization>false</WholeProgramOptimization>
+  </PropertyGroup>
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <Optimization>MaxSpeed</Optimization>
+      <InlineFunctionExpansion>AnySuitable</InlineFunctionExpansion>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
+      <OmitFramePointers>true</OmitFramePointers>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <EnableEnhancedInstructionSet>AdvancedVectorExtensions2</EnableEnhancedInstructionSet>
+      <StringPooling>true</StringPooling>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <FloatingPointModel>Precise</FloatingPointModel>
+      <StructMemberAlignment>Default</StructMemberAlignment>
+      <BufferSecurityCheck>false</BufferSecurityCheck>
+      <EnableParallelCodeGeneration>false</EnableParallelCodeGeneration>
+      <OpenMPSupport>false</OpenMPSupport>
+      <SpectreMitigation>false</SpectreMitigation>
+      <WholeProgramOptimization>false</WholeProgramOptimization>
+    </ClCompile>
+    <Lib>
+      <LinkTimeCodeGeneration>false</LinkTimeCodeGeneration>
+    </Lib>
+  </ItemDefinitionGroup>
+  <!-- ファイル名に avx512 を含む TU だけ /arch:AVX512。Alder Lake 等では CPUID が false なので実行されない。 -->
+  <Target Name="X64libAvx512FileFlags" BeforeTargets="ClCompile">
+    <ItemGroup>
+      <ClCompile Condition="$([System.String]::Copy('%(Filename)').IndexOf('avx512')) != -1 AND '$(Platform)'=='x64'">
+        <EnableEnhancedInstructionSet>AdvancedVectorExtensions512</EnableEnhancedInstructionSet>
+      </ClCompile>
+    </ItemGroup>
+  </Target>
+</Project>

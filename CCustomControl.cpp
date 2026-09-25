@@ -6908,7 +6908,7 @@ BEGIN_MESSAGE_MAP(CCustomComboBox, CComboBox)
     ON_WM_PAINT()
     ON_MESSAGE(WM_PRINTCLIENT, OnPrintClient)
     ON_WM_ERASEBKGND()
-    ON_CONTROL_REFLECT(CBN_DROPDOWN, &CCustomComboBox::OnDropdown)
+    ON_CONTROL_REFLECT(CBN_DROPDOWN, OnDropdown)
 END_MESSAGE_MAP()
 
 // オーナードローコンボ。無効行は論理インデックスから除外する。
@@ -14938,8 +14938,8 @@ void CCustomSysPerfCtrl::ShowCtxMenu(CPoint screenPt)
 	menu.AddSeparator();
 	menu.AddCheck(kCmdPause,
 		m_bPaused
-		? LL14(L"更新を再開", L"Resume updates", L"Reprendre", L"Riprendi", L"Reanudar", L"업데이트 재개", L"恢复更新", L"استئناف التحديث", L"Возобновить", L"Fortsetzen", L"Retomar", L"Hervatten", L"Wznow", L"Devam et")
-		: LL14(L"更新を一時停止", L"Pause updates", L"Pause", L"Pausa", L"Pausar", L"업데이트 일시정지", L"暂停更新", L"إيقاف مؤقت", L"Пауза", L"Pausieren", L"Pausar", L"Pauzeren", L"Wstrzymaj", L"Duraklat"),
+		? CString(LL14(L"更新を再開", L"Resume updates", L"Reprendre", L"Riprendi", L"Reanudar", L"업데이트 재개", L"恢复更新", L"استئناف التحديث", L"Возобновить", L"Fortsetzen", L"Retomar", L"Hervatten", L"Wznow", L"Devam et"))
+		: CString(LL14(L"更新を一時停止", L"Pause updates", L"Pause", L"Pausa", L"Pausar", L"업데이트 일시정지", L"暂停更新", L"إيقاف مؤقت", L"Пауза", L"Pausieren", L"Pausar", L"Pauzeren", L"Wstrzymaj", L"Duraklat")),
 		m_bPaused,
 		LL14(L"モニタ表示のライブ更新を一時停止／再開", L"Pause or resume live monitor updates",
 			L"Mettre en pause / reprendre les maj live", L"Pausa o riprendi aggiornamenti live",

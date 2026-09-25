@@ -7,6 +7,7 @@
 #include "sasami_fm.h"
 #include "sequencer.hpp"
 #include "midisynth.hpp"
+#include <mutex>
 
 class KbSasamiDecoder : public KbKpiUnknownImpl<IKpiDecoder>, public output
 {
@@ -37,6 +38,7 @@ private:
 	double m_mix[MIX_FRAMES * 2];
 	uint8_t m_smf[SASAMI_MAX_SMF];
 	int m_smfSize;
+	std::mutex m_midiLock;
 
 	struct MemFile { const BYTE* p; DWORD size; DWORD pos; };
 	static int MemGetc(void* fp);

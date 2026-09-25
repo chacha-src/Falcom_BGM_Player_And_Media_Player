@@ -1,4 +1,4 @@
-﻿// ============================================================================
+// ============================================================================
 // KpiHost64.exe — 64bit KPI / VST / 外部プラグインのパイプサーバ
 // ----------------------------------------------------------------------------
 // 32bit 本体は x64 DLL を LoadLibrary できない。このプロセスが名前付きパイプ
@@ -30,6 +30,7 @@
 #include "KpiHost64Vst.h"
 #include "KpiHost64VstLive.h"
 #include "..\VstMidiEngine.h"
+#include "..\PluginKinds.h"
 
 // パスのディレクトリ部分（末尾に \\ または / を残す）。ファイル名だけなら空。
 static std::wstring DirNameOf(const std::wstring& path)
@@ -38,6 +39,24 @@ static std::wstring DirNameOf(const std::wstring& path)
 	if (p == std::wstring::npos) return L"";
 	return path.substr(0, p + 1);
 }
+
+/* PSF 系は _lib を CWD から探すことがある。Open 中は曲フォルダへ移し、失敗時は戻す。 */
+struct ScopedMediaCwd
+{
+	wchar_t prev[MAX_PATH]{};
+	int saved = 0;
+	int keep = 0;
+	explicit ScopedMediaCwd(const std::wstring& mediaPath)
+	{
+		if (GetCurrentDirectoryW(MAX_PATH, prev)) saved = 1;
+		std::wstring d = DirNameOf(mediaPath);
+		if (!d.empty()) SetCurrentDirectoryW(d.c_str());
+	}
+	~ScopedMediaCwd()
+	{
+		if (saved && !keep && prev[0]) SetCurrentDirectoryW(prev);
+	}
+};
 
 // 1 段上のディレクトリ。KPI の依存 DLL が親フォルダにあることがある。
 static std::wstring ParentDirOf(const std::wstring& path)
@@ -689,6 +708,8 @@ struct Session
 	std::wstring mediaPath;              // MIDI なら Seek を「先頭＋破棄再生」にする
 	uint8_t* pcmBuf = nullptr;           // Render/Seek 再利用。伸長のみ（vector 断片化回避）
 	size_t pcmCap = 0;
+	wchar_t prevCwd[MAX_PATH]{};
+	int cwdSaved = 0;
 };
 
 static uint32_t g_nextSessionId = 1;
@@ -892,6 +913,7 @@ static void FillSessionPcm(Session& s)
 static uint32_t Cmd_OpenKmp(HMODULE h, const std::wstring& kpiPath, const std::wstring& mediaPath,
 	const KPI_MEDIAINFO& request, uint32_t songNo, std::vector<uint8_t>& out)
 {
+	ScopedMediaCwd mediaCwd(mediaPath);
 	auto fn = (pfnGetKMPModule)GetProcAddress(h, SZ_KMP_GETMODULE);
 	if (!fn) {
 		AppendHostLogLine(L"[OPEN] no kpi_CreateInstance and no kmp_GetTestModule");
@@ -943,6 +965,11 @@ static uint32_t Cmd_OpenKmp(HMODULE h, const std::wstring& kpiPath, const std::w
 	s.selected.dwNumber = songNo ? songNo : 1;
 	FillSessionPcm(s);
 	s.mediaPath = mediaPath;
+	if (mediaCwd.saved) {
+		wcsncpy_s(s.prevCwd, mediaCwd.prev, _TRUNCATE);
+		s.cwdSaved = 1;
+		mediaCwd.keep = 1;
+	}
 
 	const uint32_t id = g_nextSessionId++;
 	g_sessions[id] = s;
@@ -990,6 +1017,7 @@ static uint32_t Cmd_Open(const std::wstring& kpiPath, const std::wstring& mediaP
 		return Cmd_OpenKmp(h, kpiPath, mediaPath, request, songNo, out);
 	}
 	AppendHostLogLine(L"[OPEN] kpi_CreateInstance ok");
+	ScopedMediaCwd mediaCwd(mediaPath);
 
 	auto* f = new HostFile();
 	if (!f->Open(mediaPath)) { f->Release(); mod->Release(); FreeLibrary(h); return KPIHOST64_STATUS_NOT_FOUND; }
@@ -1042,6 +1070,11 @@ static uint32_t Cmd_Open(const std::wstring& kpiPath, const std::wstring& mediaP
 	s.bps = (DWORD)(s.selected.nBitsPerSample ? (s.selected.nBitsPerSample < 0 ? -s.selected.nBitsPerSample : s.selected.nBitsPerSample) : 16);
 	if (s.bps == 0) s.bps = 16;
 	s.mediaPath = mediaPath;
+	if (mediaCwd.saved) {
+		wcsncpy_s(s.prevCwd, mediaCwd.prev, _TRUNCATE);
+		s.cwdSaved = 1;
+		mediaCwd.keep = 1;
+	}
 
 	const uint32_t id = g_nextSessionId++;
 	g_sessions[id] = s;
@@ -1295,6 +1328,8 @@ static uint32_t Cmd_Close(uint32_t sessionId)
 	delete[] s.pcmBuf;
 	s.pcmBuf = nullptr;
 	s.pcmCap = 0;
+	if (s.cwdSaved && s.prevCwd[0])
+		SetCurrentDirectoryW(s.prevCwd);
 	return KPIHOST64_STATUS_OK;
 }
 
@@ -1673,7 +1708,59 @@ int wmain(int argc, wchar_t** argv)
 {
 	/* CLI probe:
 	   KpiHost64.exe <kpiPath> <mediaPath>              → Open only
-	   KpiHost64.exe <kpiPath> <mediaPath> render [N]   → Open + Render N buffers, dump stats */
+	   KpiHost64.exe <kpiPath> <mediaPath> render [N]   → Open + Render N buffers, dump stats
+	   ogghost32.exe <in_*.dll> <mediaPath> render [N]  → Winamp in_ を同じ統計で試す */
+	if (argc >= 3 && argv[1] && argv[1][0] && argv[2] && argv[2][0]
+		&& (wcsstr(argv[1], L".dll") || wcsstr(argv[1], L".DLL"))) {
+		std::wstring exts;
+		const uint32_t lst = ForeignHost_ListExts(PLUGKIND_WINAMP, argv[1], exts);
+		wprintf(L"WinampListExts status=%u exts=%s\n", lst, exts.c_str());
+		fflush(stdout);
+		KPIHOST64_ForeignOpenReply fr{};
+		const uint32_t st = ForeignHost_Open(PLUGKIND_WINAMP, argv[1], argv[2], fr);
+		wprintf(L"WinampOpen status=%u sid=%u rate=%u ch=%u bps=%d len=%llu\n",
+			st, fr.sessionId, fr.sampleRate, fr.channels, fr.bitsPerSample,
+			(unsigned long long)fr.lengthSamples);
+		fflush(stdout);
+		if (st != KPIHOST64_STATUS_OK)
+			return 1;
+		const bool doRender = (argc >= 4 && _wcsicmp(argv[3], L"render") == 0);
+		if (doRender) {
+			const int loops = (argc >= 5) ? _wtoi(argv[4]) : 12;
+			const uint32_t rate = fr.sampleRate ? fr.sampleRate : 44100;
+			const uint32_t ch = fr.channels ? fr.channels : 2;
+			const uint32_t bytesWanted = rate / 10 * ch * 2;
+			int64_t totalSamples = 0, nonZero = 0, clipped = 0;
+			int peak = 0;
+			std::vector<uint8_t> pcm(bytesWanted + 16);
+			for (int i = 0; i < loops; i++) {
+				uint32_t got = 0, eof = 0;
+				const uint32_t rst = ForeignHost_Render(fr.sessionId, bytesWanted, pcm.data(), (uint32_t)pcm.size(), got, eof);
+				if (rst != KPIHOST64_STATUS_OK) {
+					wprintf(L"render fail i=%d status=%u\n", i, rst);
+					break;
+				}
+				wprintf(L"render[%d] bytes=%u eof=%u\n", i, got, eof);
+				if (got >= 2) {
+					const int16_t* s = (const int16_t*)pcm.data();
+					const size_t n = got / 2;
+					for (size_t k = 0; k < n; k++) {
+						int v = s[k] < 0 ? -s[k] : s[k];
+						if (v > peak) peak = v;
+						if (v >= 32767) clipped++;
+						if (s[k] != 0) nonZero++;
+					}
+					totalSamples += (int64_t)n;
+				}
+				if (eof || got == 0) break;
+			}
+			wprintf(L"PCM stats: totalSamples=%lld nonZero=%lld peak=%d clipped=%lld\n",
+				(long long)totalSamples, (long long)nonZero, peak, (long long)clipped);
+		}
+		ForeignHost_Close(fr.sessionId);
+		fflush(stdout);
+		return 0;
+	}
 	if (argc >= 3 && argv[1] && argv[1][0] && argv[2] && argv[2][0]
 		&& (wcsstr(argv[1], L".kpi") || wcsstr(argv[1], L".KPI"))) {
 		KPI_MEDIAINFO req{};

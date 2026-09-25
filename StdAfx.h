@@ -1,4 +1,4 @@
-// stdafx.h : 標準のシステム インクルード ファイルのインクルード ファイル、または
+﻿// stdafx.h : 標準のシステム インクルード ファイルのインクルード ファイル、または
 // 参照回数が多く、かつあまり変更されない、プロジェクト専用のインクルード ファイル
 // を記述します。
 
@@ -41,6 +41,90 @@
 #ifndef _AFX_NO_AFXCMN_SUPPORT
 #include <afxcmn.h>             // MFC の Windows コモン コントロール サポート
 #endif // _AFX_NO_AFXCMN_SUPPORT
+
+#if defined(__INTEL_LLVM_COMPILER)
+/* icx は ON_MESSAGE(id, OnFoo) の非修飾メンバを呼べない。ThisClass は BEGIN_MESSAGE_MAP 内。 */
+#undef ON_COMMAND
+#define ON_COMMAND(id, memberFxn) \
+	{ WM_COMMAND, CN_COMMAND, (WORD)id, (WORD)id, AfxSigCmd_v, \
+		static_cast<AFX_PMSG> (&ThisClass::memberFxn) },
+#undef ON_COMMAND_RANGE
+#define ON_COMMAND_RANGE(id, idLast, memberFxn) \
+	{ WM_COMMAND, CN_COMMAND, (WORD)id, (WORD)idLast, AfxSigCmd_RANGE, \
+		(AFX_PMSG)(static_cast< void (AFX_MSG_CALL CCmdTarget::*)(UINT) >(&ThisClass::memberFxn)) },
+#undef ON_COMMAND_EX
+#define ON_COMMAND_EX(id, memberFxn) \
+	{ WM_COMMAND, CN_COMMAND, (WORD)id, (WORD)id, AfxSigCmd_EX, \
+		(AFX_PMSG)(static_cast< BOOL (AFX_MSG_CALL CCmdTarget::*)(UINT) >(&ThisClass::memberFxn)) },
+#undef ON_COMMAND_EX_RANGE
+#define ON_COMMAND_EX_RANGE(id, idLast, memberFxn) \
+	{ WM_COMMAND, CN_COMMAND, (WORD)id, (WORD)idLast, AfxSigCmd_EX, \
+		(AFX_PMSG)(static_cast< BOOL (AFX_MSG_CALL CCmdTarget::*)(UINT) >(&ThisClass::memberFxn)) },
+#undef ON_UPDATE_COMMAND_UI
+#define ON_UPDATE_COMMAND_UI(id, memberFxn) \
+	{ WM_COMMAND, CN_UPDATE_COMMAND_UI, (WORD)id, (WORD)id, AfxSigCmdUI, \
+		(AFX_PMSG)(static_cast< void (AFX_MSG_CALL CCmdTarget::*)(CCmdUI*) >(&ThisClass::memberFxn)) },
+#undef ON_UPDATE_COMMAND_UI_RANGE
+#define ON_UPDATE_COMMAND_UI_RANGE(id, idLast, memberFxn) \
+	{ WM_COMMAND, CN_UPDATE_COMMAND_UI, (WORD)id, (WORD)idLast, AfxSigCmdUI, \
+		(AFX_PMSG)(static_cast< void (AFX_MSG_CALL CCmdTarget::*)(CCmdUI*) >(&ThisClass::memberFxn)) },
+#undef ON_NOTIFY
+#define ON_NOTIFY(wNotifyCode, id, memberFxn) \
+	{ WM_NOTIFY, (WORD)(int)wNotifyCode, (WORD)id, (WORD)id, AfxSigNotify_v, \
+		(AFX_PMSG)(static_cast< void (AFX_MSG_CALL CCmdTarget::*)(NMHDR*, LRESULT*) >(&ThisClass::memberFxn)) },
+#undef ON_NOTIFY_RANGE
+#define ON_NOTIFY_RANGE(wNotifyCode, id, idLast, memberFxn) \
+	{ WM_NOTIFY, (WORD)(int)wNotifyCode, (WORD)id, (WORD)idLast, AfxSigNotify_RANGE, \
+		(AFX_PMSG)(static_cast< void (AFX_MSG_CALL CCmdTarget::*)(UINT, NMHDR*, LRESULT*) >(&ThisClass::memberFxn)) },
+#undef ON_NOTIFY_EX
+#define ON_NOTIFY_EX(wNotifyCode, id, memberFxn) \
+	{ WM_NOTIFY, (WORD)(int)wNotifyCode, (WORD)id, (WORD)id, AfxSigNotify_EX, \
+		(AFX_PMSG)(static_cast< BOOL (AFX_MSG_CALL CCmdTarget::*)(UINT, NMHDR*, LRESULT*) >(&ThisClass::memberFxn)) },
+#undef ON_NOTIFY_EX_RANGE
+#define ON_NOTIFY_EX_RANGE(wNotifyCode, id, idLast, memberFxn) \
+	{ WM_NOTIFY, (WORD)(int)wNotifyCode, (WORD)id, (WORD)idLast, AfxSigNotify_EX, \
+		(AFX_PMSG)(static_cast< BOOL (AFX_MSG_CALL CCmdTarget::*)(UINT, NMHDR*, LRESULT*) >(&ThisClass::memberFxn)) },
+#undef ON_CONTROL
+#define ON_CONTROL(wNotifyCode, id, memberFxn) \
+	{ WM_COMMAND, (WORD)wNotifyCode, (WORD)id, (WORD)id, AfxSigCmd_v, \
+		(static_cast< AFX_PMSG > (&ThisClass::memberFxn)) },
+#undef ON_CONTROL_RANGE
+#define ON_CONTROL_RANGE(wNotifyCode, id, idLast, memberFxn) \
+	{ WM_COMMAND, (WORD)wNotifyCode, (WORD)id, (WORD)idLast, AfxSigCmd_RANGE, \
+		(AFX_PMSG)(static_cast< void (AFX_MSG_CALL CCmdTarget::*)(UINT) >(&ThisClass::memberFxn)) },
+#undef ON_CONTROL_REFLECT
+#define ON_CONTROL_REFLECT(wNotifyCode, memberFxn) \
+	{ WM_COMMAND+WM_REFLECT_BASE, (WORD)wNotifyCode, 0, 0, AfxSigCmd_v, \
+		(static_cast<AFX_PMSG> (&ThisClass::memberFxn)) },
+#undef ON_CONTROL_REFLECT_EX
+#define ON_CONTROL_REFLECT_EX(wNotifyCode, memberFxn) \
+	{ WM_COMMAND+WM_REFLECT_BASE, (WORD)wNotifyCode, 0, 0, AfxSigCmd_b, \
+		(AFX_PMSG)(static_cast<BOOL (AFX_MSG_CALL CCmdTarget::*)(void)>(&ThisClass::memberFxn)) },
+#undef ON_NOTIFY_REFLECT
+#define ON_NOTIFY_REFLECT(wNotifyCode, memberFxn) \
+	{ WM_NOTIFY+WM_REFLECT_BASE, (WORD)(int)wNotifyCode, 0, 0, AfxSigNotify_v, \
+		(AFX_PMSG)(static_cast<void (AFX_MSG_CALL CCmdTarget::*)(NMHDR*, LRESULT*) >(&ThisClass::memberFxn)) },
+#undef ON_NOTIFY_REFLECT_EX
+#define ON_NOTIFY_REFLECT_EX(wNotifyCode, memberFxn) \
+	{ WM_NOTIFY+WM_REFLECT_BASE, (WORD)(int)wNotifyCode, 0, 0, AfxSigNotify_b, \
+		(AFX_PMSG)(static_cast<BOOL (AFX_MSG_CALL CCmdTarget::*)(NMHDR*, LRESULT*) >(&ThisClass::memberFxn)) },
+#undef ON_UPDATE_COMMAND_UI_REFLECT
+#define ON_UPDATE_COMMAND_UI_REFLECT(memberFxn) \
+	{ WM_COMMAND+WM_REFLECT_BASE, (WORD)CN_UPDATE_COMMAND_UI, 0, 0, AfxSigCmdUI, \
+		(AFX_PMSG)(static_cast<void (AFX_MSG_CALL CCmdTarget::*)(CCmdUI*)>(&ThisClass::memberFxn)) },
+#undef ON_MESSAGE
+#define ON_MESSAGE(message, memberFxn) \
+	{ message, 0, 0, 0, AfxSig_lwl, \
+		(AFX_PMSG)(AFX_PMSGW)(static_cast< LRESULT (AFX_MSG_CALL CWnd::*)(WPARAM, LPARAM) >(&ThisClass::memberFxn)) },
+#undef ON_REGISTERED_MESSAGE
+#define ON_REGISTERED_MESSAGE(nMessageVariable, memberFxn) \
+	{ 0xC000, 0, 0, 0, (UINT_PTR)(UINT*)(&nMessageVariable), \
+		(AFX_PMSG)(AFX_PMSGW)(static_cast< LRESULT (AFX_MSG_CALL CWnd::*)(WPARAM, LPARAM) >(&ThisClass::memberFxn)) },
+#undef ON_THREAD_MESSAGE
+#define ON_THREAD_MESSAGE(message, memberFxn) \
+	{ message, 0, 0, 0, AfxSig_vwl, \
+		(AFX_PMSG)(AFX_PMSGT)(static_cast< void (AFX_MSG_CALL CWinThread::*)(WPARAM, LPARAM) >(&ThisClass::memberFxn)) },
+#endif
 
 #include <atlimage.h> // CImage / GDI+（oggDlg を PCH から外したためここで確保）
 #ifdef _OPENMP
@@ -352,9 +436,11 @@ struct save{
 
 	// --- KPIプラグイン チェック状態(末尾追記。旧 kpilist.dat から移行) ---
 	// kpi一覧でチェックを外したプラグインは再生に使用しない。
-	// 並び順が変わっても復元できるよう、プラグインのファイル名(ベース名)で突き合わせる。
+	// kpiChkName は 64 TCHAR 制限のためフルパスは入れない。
+	// 新形式: "#"+FNV1a64(小文字フルパス)+"_"+Arch (同名でもパス/Archが違えば別エントリ)
+	// 旧形式: ベース名のみ。復元時は同名が1件だけのときだけ使う。
 	int   kpiChkCnt;            // 保存済みエントリ数(0=未保存→旧 kpilist.dat から移行)
-	TCHAR kpiChkName[200][64];  // プラグインのファイル名(ベース名)
+	TCHAR kpiChkName[200][64];  // 新=#指紋_Arch / 旧=ベース名
 	int   kpiChkState[200];     // 1=使用する 0=使用しない
 
 	// --- KPI一覧ウィンドウのサイズ・位置(末尾追記) ---

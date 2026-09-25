@@ -30,7 +30,7 @@ void CZwei::DoDataExchange(CDataExchange* pDX)
 #include "CImageBase.h"
 BEGIN_MESSAGE_MAP(CZwei, CCustomBlurDialogBase)
 	ON_LBN_DBLCLK(IDC_LIST1, OnDblclkList1)
-	ON_BN_CLICKED(IDOK, &CZwei::OnBnClickedOk)
+	ON_BN_CLICKED(IDOK, OnBnClickedOk)
 cmn(CZwei);
 
 // CZwei メッセージ ハンドラ

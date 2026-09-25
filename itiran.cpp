@@ -38,7 +38,7 @@ BEGIN_MESSAGE_MAP(itiran, CCustomBlurDialogBase)
 	//{{AFX_MSG_MAP(itiran)
 	ON_LBN_DBLCLK(IDC_LIST1, OnDblclkList1)
 	//}}AFX_MSG_MAP
-	ON_BN_CLICKED(IDOK, &itiran::OnBnClickedOk)
+	ON_BN_CLICKED(IDOK, OnBnClickedOk)
 	cmn(itiran);
 
 /////////////////////////////////////////////////////////////////////////////

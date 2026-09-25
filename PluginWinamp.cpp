@@ -1,4 +1,4 @@
-﻿// Winamp input plugin host (In_Module + fake Out_Module ring → pull read)
+// Winamp input plugin host (In_Module + fake Out_Module ring → pull read)
 //
 // in2.h / out.h と Winamp 本体(In.cpp / InW.cpp)の実挙動に合わせた実装:
 //  - version は IN_UNICODE / IN_INIT_RET を落として 0x100(IN_VER_OLD) / 0x101(IN_VER) のみ受理
@@ -67,6 +67,32 @@ static int g_waVol = 255;
 static int g_waPan = 0;
 static int g_waFlushMs = 0;
 static __int64 g_waWrittenBytes = 0;
+static wchar_t g_waPrevCwd[MAX_PATH] = {};
+static int g_waCwdSaved = 0;
+
+static void WaPushMediaCwd(const wchar_t* mediaPath)
+{
+	if (g_waCwdSaved) return;
+	if (!GetCurrentDirectoryW(MAX_PATH, g_waPrevCwd)) return;
+	g_waCwdSaved = 1;
+	if (!mediaPath || !mediaPath[0]) return;
+	wchar_t dir[MAX_PATH];
+	wcsncpy_s(dir, mediaPath, _TRUNCATE);
+	wchar_t* slash = wcsrchr(dir, L'\\');
+	if (!slash) slash = wcsrchr(dir, L'/');
+	if (slash) {
+		*slash = 0;
+		SetCurrentDirectoryW(dir);
+	}
+}
+
+static void WaPopMediaCwd()
+{
+	if (!g_waCwdSaved) return;
+	if (g_waPrevCwd[0]) SetCurrentDirectoryW(g_waPrevCwd);
+	g_waCwdSaved = 0;
+	g_waPrevCwd[0] = 0;
+}
 
 // プラグインへ渡すメッセージ専用ウィンドウ（EOF 受信と最低限の IPC 応答）
 static HWND g_waMsgWnd = NULL;
@@ -417,9 +443,16 @@ typedef In_Module* (__cdecl* pfn_winampGetInModule2)();
 int PluginWinamp_TryEnum(const wchar_t* dllPath, int is64)
 {
 	if (!dllPath || !dllPath[0] || kpicnt >= 149) return 0;
-	if (is64) {
+	/* 本体と違うアーキの DLL は LoadLibrary できない。x64 本体の in_psf.dll (x86) は
+	   ogghost32 経由で拡張子を取る。逆（Win32 本体 + x64 DLL）も同様。 */
+#ifdef _WIN64
+	const int needRemote = !is64;
+#else
+	const int needRemote = is64;
+#endif
+	if (needRemote) {
 		plugkind[kpicnt] = PLUGKIND_WINAMP;
-		kpiarch[kpicnt] = 64;
+		kpiarch[kpicnt] = is64 ? 64 : 32;
 		kpif[kpicnt] = dllPath;
 		ext[kpicnt][0] = L"";
 		ext[kpicnt][299] = L"";
@@ -513,6 +546,7 @@ int PluginWinamp_Open(const wchar_t* dllPath, const wchar_t* mediaPath, HWND /*h
 	InterlockedExchange(&g_waEof, 0);
 	InterlockedExchange(&g_waStopping, 0);
 	InterlockedExchange(&g_waFmtKnown, 0);
+	WaPushMediaCwd(mediaPath);
 	if (WaCallPlay(in, mediaPath) != 0) {
 		PluginWinamp_Close();
 		return 0;
@@ -579,6 +613,7 @@ void PluginWinamp_Close()
 	InterlockedExchange(&g_waFmtKnown, 0);
 	InterlockedExchange(&g_waEof, 0);
 	WaRingReset();
+	WaPopMediaCwd();
 }
 
 int PluginWinamp_SeekMs(int timeMs)

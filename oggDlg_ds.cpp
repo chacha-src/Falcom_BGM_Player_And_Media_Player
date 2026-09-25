@@ -36,7 +36,7 @@
 #include "ProAudio.h"
 #include "DecodeProgress.h"
 #include "CPromptEngine.h"
-#if _MSC_VER >= 1950
+#if _MSC_VER >= 1950 || defined(__INTEL_LLVM_COMPILER) || defined(OGG_AVX2_VS2026)
 #pragma comment(lib,"rubberband-library_2026")
 #else
 #pragma comment(lib,"rubberband-library")
@@ -223,6 +223,7 @@ void COggDlg::Vol(int vol)
 
 void COggDlg::Closeds()
 {
+	DsOpLock ds;
 	if (m_dsb) {
 		m_dsb->Stop();
 		m_dsb->Release();
@@ -334,6 +335,32 @@ void equaliserResetBank(int bank);
 std::mutex cl2;  // OnHScroll(シーク)とHandleNotifications(再生)の排他用。一本で統一。
 // DS Lock/Unlock 実行中(cl2 外)。UI の GetCurrentPosition が同一デバイスで固まるのを避ける。
 volatile LONG g_dsDeviceOpBusy = 0;
+static CRITICAL_SECTION s_dsOpCs;
+static volatile LONG s_dsOpCsInit = 0;
+
+static void DsOpCsEnsure()
+{
+	if (InterlockedCompareExchange(&s_dsOpCsInit, 1, 0) == 0)
+		InitializeCriticalSectionAndSpinCount(&s_dsOpCs, 4000);
+}
+
+void DsOpEnter()
+{
+	DsOpCsEnsure();
+	EnterCriticalSection(&s_dsOpCs);
+}
+
+void DsOpLeave()
+{
+	LeaveCriticalSection(&s_dsOpCs);
+}
+
+BOOL DsOpTryEnter()
+{
+	DsOpCsEnsure();
+	return TryEnterCriticalSection(&s_dsOpCs) ? TRUE : FALSE;
+}
+
 BOOL syoriflg;
 
 // 再生通知スレッド: thn==TRUE は「ループが終了シグナルを出した」だけでスレッド本体はまだ動くことがある。
@@ -345,6 +372,129 @@ static CCriticalSection s_playNotifyThreadCs;
 DWORD g_playbackNotifyJoinTimeoutMs = 2500;
 volatile LONG g_interactiveTrackChange = 0;
 volatile LONG g_appExiting = 0;
+volatile LONG g_inPlaybackJoinPump = 0;
+extern DWORD g_oggUiThreadId;
+static void HandleFillWakeAll();
+
+#ifndef PM_QS_SENDMESSAGE
+#define PM_QS_SENDMESSAGE (QS_SENDMESSAGE << 16)
+#endif
+
+/* Join 中に og の WM_TIMER(9000=10ms 次曲) や PAINT/ULW を Dispatch すると
+   play() が入れ子になり、Fill の SendMessage と三者待ちで戻らない。
+   KPI/VST の hidden 宛 Post と sent だけ通す。 */
+static BOOL OggJoinIsAppUiHwnd(HWND h)
+{
+	if (!h || !og)
+		return FALSE;
+	HWND o = og->GetSafeHwnd();
+	if (!o)
+		return FALSE;
+	if (h == o || ::IsChild(o, h))
+		return TRUE;
+	HWND root = ::GetAncestor(h, GA_ROOT);
+	return (root == o);
+}
+
+static BOOL OggJoinDropPosted(const MSG& msg)
+{
+	switch (msg.message) {
+	case WM_TIMER:
+	case WM_PAINT:
+	case WM_ERASEBKGND:
+	case WM_NCPAINT:
+	case WM_SYNCPAINT:
+		return OggJoinIsAppUiHwnd(msg.hwnd);
+	case WM_TIMERP_VSYNC_TICK:
+	case WM_SPEANA_TICK:
+	case WM_ENDPOINT_VOLUME:
+	case WM_PLAYBACK_AUTO_STOPPED:
+	case WM_OGG_RESUME_PROMPT:
+	case WM_OGG_CLOSE_DOUGA:
+	case WM_OGG_ENTER_MP_MODE:
+	case WM_OGG_TOGGLE_SUBUI:
+	case WM_OGG_DEFERRED_HEAVY_INIT:
+	case WM_OGG_S3_PLAYBACK:
+	case WM_COMMAND:
+	case WM_SYSCOMMAND:
+	case WM_HSCROLL:
+	case WM_VSCROLL:
+	case WM_CLOSE:
+		return TRUE;
+	default:
+		break;
+	}
+	if (msg.message >= WM_MOUSEFIRST && msg.message <= WM_MOUSELAST)
+		return TRUE;
+	if (msg.message >= WM_NCMOUSEMOVE && msg.message <= WM_NCMBUTTONDBLCLK)
+		return TRUE;
+	if (msg.message >= WM_KEYFIRST && msg.message <= WM_KEYLAST)
+		return TRUE;
+	return FALSE;
+}
+
+/* WaitForSingleObject は SendMessage を捌かない。KPI/VST/COM は hidden window
+   への Post 待ちもあるので、Join 中の UI は sent + posted を回す。
+   WAIT_FAILED を成功扱いにすると生存スレッドのまま Closeds して固まる。 */
+BOOL UiWaitHandlePumpSent(HANDLE h, DWORD timeoutMs)
+{
+	if (!h)
+		return TRUE;
+	const BOOL onUi = (g_oggUiThreadId != 0 && GetCurrentThreadId() == g_oggUiThreadId);
+	if (!onUi) {
+		const DWORD t = (timeoutMs == 0) ? INFINITE : timeoutMs;
+		const DWORD wr = WaitForSingleObject(h, t);
+		return (wr == WAIT_OBJECT_0) ? TRUE : FALSE;
+	}
+
+	InterlockedIncrement(&g_inPlaybackJoinPump);
+	struct DecPump { ~DecPump() { InterlockedDecrement(&g_inPlaybackJoinPump); } } dec;
+
+	const DWORD t0 = GetTickCount();
+	for (;;) {
+		const DWORD wr0 = WaitForSingleObject(h, 0);
+		if (wr0 == WAIT_OBJECT_0)
+			return TRUE;
+		if (wr0 == WAIT_FAILED)
+			return FALSE;
+		DWORD slice = 15;
+		if (timeoutMs != 0) {
+			const DWORD el = GetTickCount() - t0;
+			if (el >= timeoutMs)
+				return FALSE;
+			const DWORD remain = timeoutMs - el;
+			if (slice > remain)
+				slice = remain;
+			if (slice < 1)
+				slice = 1;
+		}
+		const DWORD w = MsgWaitForMultipleObjectsEx(1, &h, slice,
+			QS_SENDMESSAGE | QS_POSTMESSAGE, 0);
+		if (w == WAIT_OBJECT_0)
+			return TRUE;
+		if (w == WAIT_FAILED)
+			return FALSE;
+		MSG msg;
+		PeekMessage(&msg, NULL, WM_NULL, WM_NULL, PM_NOREMOVE);
+		while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
+			if (msg.message == WM_QUIT) {
+				::PostQuitMessage((int)msg.wParam);
+				return (WaitForSingleObject(h, 0) == WAIT_OBJECT_0) ? TRUE : FALSE;
+			}
+			if (msg.message == WM_TIMERP_VSYNC_TICK || msg.message == WM_SPEANA_TICK)
+				COgg_DropPlaybackUiPostedMsg(msg.message);
+			if (OggJoinDropPosted(msg))
+				continue;
+			TranslateMessage(&msg);
+			DispatchMessage(&msg);
+			if (WaitForSingleObject(h, 0) == WAIT_OBJECT_0)
+				return TRUE;
+		}
+		HandleFillWakeAll();
+		if (og)
+			og->timer.SetEvent();
+	}
+}
 
 /* -------------------------------------------------------------------------
  * HandleFillNotifications
@@ -367,6 +517,7 @@ static HANDLE s_fillHasData = NULL; /* 1 塊積んだ */
 static LONG s_fillStop = 0;
 static LONG s_fillEpoch = 0;        /* シークで捨てる世代 */
 static LONG s_fillExitReq = 0;
+static LONG s_fillInDecode = 0;
 static CWinThread* s_fillThread = nullptr;
 
 static void HandleFillWakeAll()
@@ -375,6 +526,57 @@ static void HandleFillWakeAll()
 		SetEvent(s_fillWake);
 	if (s_fillHasData)
 		SetEvent(s_fillHasData);
+}
+
+/* HN 起動直後に thn1 を下ろすと、Resume と Exit の競合で停止要求が消える。
+   手動リセットの abort は BeginPlayback だけが下ろす。 */
+static HANDLE s_playAbortEvent = NULL;
+
+static void PlayAbortEnsure()
+{
+	if (!s_playAbortEvent)
+		s_playAbortEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
+}
+
+static BOOL PlayAbortIsSet()
+{
+	if (thn1 || stf != 0 || syukai == 2)
+		return TRUE;
+	if (InterlockedCompareExchange(&g_appExiting, 0, 0))
+		return TRUE;
+	if (s_playAbortEvent && WaitForSingleObject(s_playAbortEvent, 0) == WAIT_OBJECT_0)
+		return TRUE;
+	return FALSE;
+}
+
+static void PlayAbortSignal()
+{
+	PlayAbortEnsure();
+	if (s_playAbortEvent)
+		SetEvent(s_playAbortEvent);
+}
+
+static void PlayAbortArmForRun()
+{
+	PlayAbortEnsure();
+	if (s_playAbortEvent)
+		ResetEvent(s_playAbortEvent);
+}
+
+static void HandleFillWaitOne(HANDLE extra, DWORD ms)
+{
+	HANDLE h[2];
+	int n = 0;
+	if (extra)
+		h[n++] = extra;
+	PlayAbortEnsure();
+	if (s_playAbortEvent)
+		h[n++] = s_playAbortEvent;
+	if (n <= 0) {
+		Sleep(ms);
+		return;
+	}
+	WaitForMultipleObjects(n, h, FALSE, ms);
 }
 
 static void HandleFillQueueResetLocked()
@@ -421,7 +623,8 @@ static int HandleFillDecodeOne(BYTE* dest, int n, int* pReadme, bool* pExitNow)
 
 	static int s_fade2 = 0;
 
-	if (thn1) {
+	if (thn1 || InterlockedCompareExchange(&s_fillStop, 0, 0)
+		|| InterlockedCompareExchange(&g_appExiting, 0, 0)) {
 		if (pExitNow)
 			*pExitNow = true;
 		return 0;
@@ -460,6 +663,16 @@ static int HandleFillDecodeOne(BYTE* dest, int n, int* pReadme, bool* pExitNow)
 			DispatchPlaywavFill(s_xfA, 0, nn, 0);
 			XfSaveSlotDecodeState(aSlot);
 			XfCaptureGlobalsToSlot(aSlot);
+			if (thn1 || InterlockedCompareExchange(&s_fillStop, 0, 0)
+				|| InterlockedCompareExchange(&g_appExiting, 0, 0)) {
+				InterlockedExchange(&g_xfFillSlot, -1);
+				XfLoadSlotDecodeState(aSlot);
+				XfApplySlotFormatToGlobals(aSlot);
+				if (pExitNow)
+					*pExitNow = true;
+				sflg = FALSE;
+				return 0;
+			}
 			/* B */
 			InterlockedExchange(&g_xfFillSlot, bSlot);
 			XfLoadSlotDecodeState(bSlot);
@@ -545,17 +758,19 @@ UINT HandleFillNotifications(LPVOID)
 	BYTE tmp[kFillBlkCap];
 	for (;;) {
 		if (InterlockedCompareExchange(&s_fillStop, 0, 0)
-			|| thn1 || syukai == 2)
+			|| thn1 || syukai == 2
+			|| InterlockedCompareExchange(&g_appExiting, 0, 0)
+			|| PlayAbortIsSet())
 			break;
 		if (sek || sek4 || ps == 1) {
-			WaitForSingleObject(s_fillWake, 8);
+			HandleFillWaitOne(s_fillWake, 8);
 			continue;
 		}
 		const int chunk = HandleFillChunkBytes();
 		int queued = HandleFillQueuedBytes();
 		/* 先読みは 3 塊まで。DS 待ちの裏に乗る分だけで、シーク捨て量を抑える。 */
 		if (queued >= chunk * 3 || s_fillN >= kFillBlkMax - 1) {
-			WaitForSingleObject(s_fillWake, 8);
+			HandleFillWaitOne(s_fillWake, 8);
 			continue;
 		}
 
@@ -563,17 +778,17 @@ UINT HandleFillNotifications(LPVOID)
 		int readmeBlk = 0;
 		bool exitNow = false;
 		int got = 0;
-		{
-			std::lock_guard<std::mutex> guard(cl2);
-			got = HandleFillDecodeOne(tmp, chunk, &readmeBlk, &exitNow);
-		}
+		/* デコード中に cl2 を持つと、KPI/VST の SendMessage → UI Join が cl2 待ちで戻らない */
+		InterlockedExchange(&s_fillInDecode, 1);
+		got = HandleFillDecodeOne(tmp, chunk, &readmeBlk, &exitNow);
+		InterlockedExchange(&s_fillInDecode, 0);
 		if (exitNow) {
 			InterlockedExchange(&s_fillExitReq, 1);
 			HandleFillWakeAll();
 			break;
 		}
 		if (got <= 0) {
-			WaitForSingleObject(s_fillWake, 4);
+			HandleFillWaitOne(s_fillWake, 4);
 			continue;
 		}
 		if (InterlockedCompareExchange(&s_fillEpoch, 0, 0) != epoch) {
@@ -603,6 +818,25 @@ UINT HandleFillNotifications(LPVOID)
 	return 0;
 }
 
+int PlaybackFillThreadAlive()
+{
+	if (!s_fillThread || !s_fillThread->m_hThread)
+		return 0;
+	return (WaitForSingleObject(s_fillThread->m_hThread, 0) == WAIT_OBJECT_0) ? 0 : 1;
+}
+
+int PlaybackFillInDecode()
+{
+	return InterlockedCompareExchange(&s_fillInDecode, 0, 0) != 0 ? 1 : 0;
+}
+
+void PlaybackFillWake()
+{
+	HandleFillWakeAll();
+	if (og)
+		og->timer.SetEvent();
+}
+
 static int HandleFillTake(BYTE* dest, int need, int* pReadme, bool* pExitNow)
 {
 	if (pReadme)
@@ -616,7 +850,7 @@ static int HandleFillTake(BYTE* dest, int need, int* pReadme, bool* pExitNow)
 	int readmeOut = 0;
 	const DWORD t0 = GetTickCount();
 	while (copied < need) {
-		if (thn1 || sek || InterlockedCompareExchange(&s_fillStop, 0, 0))
+		if (thn1 || sek || InterlockedCompareExchange(&s_fillStop, 0, 0) || PlayAbortIsSet())
 			break;
 		if (InterlockedCompareExchange(&s_fillExitReq, 0, 0)) {
 			if (pExitNow)
@@ -661,7 +895,7 @@ static int HandleFillTake(BYTE* dest, int need, int* pReadme, bool* pExitNow)
 		}
 		if ((DWORD)(GetTickCount() - t0) > 5000u)
 			break;
-		WaitForSingleObject(s_fillHasData, 10);
+		HandleFillWaitOne(s_fillHasData, 10);
 	}
 	if (pReadme)
 		*pReadme = readmeOut;
@@ -673,22 +907,14 @@ static int HandleFillIsRunning()
 	return (s_fillThread != nullptr) ? 1 : 0;
 }
 
-static void HandleFillStop()
+static void HandleFillRequestStop()
 {
 	InterlockedExchange(&s_fillStop, 1);
 	HandleFillWakeAll();
-	if (s_fillThread) {
-		if (s_fillThread->m_hThread) {
-			const DWORD fillWait = InterlockedCompareExchange(&g_appExiting, 0, 0) ? 250u : 5000u;
-			::WaitForSingleObject(s_fillThread->m_hThread, fillWait);
-		}
-		delete s_fillThread;
-		s_fillThread = nullptr;
-	}
-	{
-		std::lock_guard<std::mutex> lk(s_fillCs);
-		HandleFillQueueResetLocked();
-	}
+}
+
+static void HandleFillCloseEvents()
+{
 	if (s_fillWake) {
 		CloseHandle(s_fillWake);
 		s_fillWake = NULL;
@@ -699,9 +925,49 @@ static void HandleFillStop()
 	}
 }
 
+static BOOL HandleFillThreadExited()
+{
+	if (!s_fillThread)
+		return TRUE;
+	HANDLE h = s_fillThread->m_hThread;
+	if (!h)
+		return TRUE;
+	const DWORD w = WaitForSingleObject(h, 0);
+	return (w == WAIT_OBJECT_0 || w == WAIT_FAILED) ? TRUE : FALSE;
+}
+
+static void HandleFillCleanupIfExited()
+{
+	if (!HandleFillThreadExited())
+		return;
+	if (s_fillThread) {
+		delete s_fillThread;
+		s_fillThread = nullptr;
+	}
+	{
+		std::lock_guard<std::mutex> lk(s_fillCs);
+		HandleFillQueueResetLocked();
+	}
+	HandleFillCloseEvents();
+}
+
+/* HN の FillGuard からは待たない。UI が Fill を待っている最中に HN が Fill を待つと、
+   Fill の SendMessage → UI Join → HN 待ち で三者が止まる。 */
+static void HandleFillStop()
+{
+	HandleFillRequestStop();
+	if (s_fillThread && s_fillThread->m_hThread)
+		WaitForSingleObject(s_fillThread->m_hThread, 30000);
+	HandleFillCleanupIfExited();
+}
+
 static void HandleFillStart()
 {
+	if (PlayAbortIsSet())
+		return;
 	HandleFillStop();
+	if (PlayAbortIsSet())
+		return;
 	InterlockedExchange(&s_fillStop, 0);
 	InterlockedExchange(&s_fillExitReq, 0);
 	InterlockedExchange(&s_fillEpoch, 1);
@@ -735,102 +1001,67 @@ void SignalPlaybackNotifyThreadStop()
 	// 再生スレッドは syukai2 を立てずに終了するため、ここで必ず解放する。
 	syukai2 = 1;
 	InterlockedExchange(&g_dsDeviceOpBusy, 0);
+	InterlockedExchange(&s_fillStop, 1);
+	PlayAbortSignal();
 	HandleFillWakeAll();
 	if (og)
 		og->timer.SetEvent();
 }
 
 // 戻り値: 再生スレッドが確実に終了したとき TRUE。FALSE のときデコーダを閉じてはならない。
-// Join 中は DoEvent しない（再入で stop1/play が走り、生存中スレッドのデコーダを
-// 二重解放したり、新スレッドのポインタを上書きして UAF になる）。
+// デコード側の SendMessage を捌く（WaitForSingleObject だけだと相互待ちで終了が戻らない）。
 BOOL WaitForPlaybackNotifyThreadExit(DWORD timeoutMs)
 {
+	HandleFillRequestStop();
+	thn1 = TRUE;
+	stf = 1;
+	syukai = 2;
+	PlayAbortSignal();
+	if (og)
+		og->timer.SetEvent();
+	HandleFillWakeAll();
+
+	HANDLE hFill = (s_fillThread && s_fillThread->m_hThread) ? s_fillThread->m_hThread : NULL;
 	HANDLE hThread = NULL;
 	{
 		CSingleLock lk(&s_playNotifyThreadCs, TRUE);
 		if (s_playNotifyThread && s_playNotifyThread->m_hThread)
 			hThread = s_playNotifyThread->m_hThread;
 	}
-	// スレッド未起動なら thn 待ちでブロックしない
-	if (!hThread) {
-		CSingleLock lk(&s_playNotifyThreadCs, TRUE);
-		if (s_playNotifyThread) {
-			delete s_playNotifyThread;
-			s_playNotifyThread = nullptr;
-		}
-		thn = TRUE;
-		syukai = 0;
-		syukai2 = 1;
-		// Signal 済みの thn1/stf は呼び出し側がデコーダ事情で維持したい場合もあるが、
-		// 「スレッド無し」なら停止待ちは完了しているのでここでは触らない。
-		return TRUE;
-	}
 
-	// 再生スレッドが終わるまで待つ。途中で破棄すると flac/m4a/dsd/wav 切替時に
-	// playwav* が解放済みデコーダ/adbuf2 を触ってクラッシュする。
-	// timeoutMs==0 のときは無限待ち。非0 は上限（通常は無限で呼ぶ）。
-	const DWORD pollMs = 10;
-	DWORD elapsed = 0;
-	BOOL exited = FALSE;
-	for (;;) {
-		// 停止要求を維持（Join 中に他経路で thn1/stf が落ちても再開させない）
-		thn1 = TRUE;
-		stf = 1;
-		syukai = 2;
-		if (og)
-			og->timer.SetEvent();
-		// DS Lock 中は Stop でドライバ待ちを解く（固まりの主因の一つ）
-		// ただし二重DS昇格中の B は止めない（keep 中 Stop が「数秒で無音」になる）
-		if (InterlockedCompareExchange(&g_dsDeviceOpBusy, 0, 0) != 0) {
-			if (m_dsb)
-				m_dsb->Stop();
-			if (pAudioClient)
-				pAudioClient->Stop();
-		}
-		const DWORD w = WaitForSingleObject(hThread, pollMs);
-		if (w == WAIT_OBJECT_0) {
-			exited = TRUE;
-			break;
-		}
-		// 無効/閉じ済みハンドルで無限ループしない（ダングリング時の連続固まり防止）
-		if (w == WAIT_FAILED) {
-			exited = TRUE;
-			break;
-		}
-		if (timeoutMs != 0) {
-			elapsed += pollMs;
-			if (elapsed >= timeoutMs)
-				break;
-		}
-	}
+	BOOL fillOk = TRUE;
+	if (hFill)
+		fillOk = UiWaitHandlePumpSent(hFill, timeoutMs);
+	if (fillOk)
+		HandleFillCleanupIfExited();
 
-	// スレッド生存中に CWinThread を delete しない（UAF）
+	BOOL exited = TRUE;
+	if (hThread)
+		exited = UiWaitHandlePumpSent(hThread, timeoutMs);
+
 	if (exited) {
 		CSingleLock lk(&s_playNotifyThreadCs, TRUE);
 		if (s_playNotifyThread) {
-			delete s_playNotifyThread;
-			s_playNotifyThread = nullptr;
+			HANDLE ht = s_playNotifyThread->m_hThread;
+			if (!hThread || !ht || WaitForSingleObject(ht, 0) == WAIT_OBJECT_0) {
+				delete s_playNotifyThread;
+				s_playNotifyThread = nullptr;
+			} else {
+				exited = FALSE;
+			}
 		}
-		thn = TRUE;
-		syukai = 0;
-		syukai2 = 1;
+		if (exited) {
+			thn = TRUE;
+			syukai = 0;
+			syukai2 = 1;
+		}
 	}
-	// thn1/stf は呼び出し側がデコーダ解放後に落とす（ここで落とすと解放前にデコード再開し得る）
-	return exited;
+	return (fillOk && exited) ? TRUE : FALSE;
 }
 
 void KillPlaybackNotifyThread()
 {
-	HandleFillStop();
-	CSingleLock lk(&s_playNotifyThreadCs, TRUE);
-	if (s_playNotifyThread && s_playNotifyThread->m_hThread) {
-		TerminateThread(s_playNotifyThread->m_hThread, 0);
-		delete s_playNotifyThread;
-		s_playNotifyThread = nullptr;
-	}
-	thn = TRUE;
-	syukai = 0;
-	syukai2 = 1;
+	WaitForPlaybackNotifyThreadExit(0);
 }
 
 extern int g_openDecoderMode;
@@ -848,6 +1079,7 @@ void BeginPlaybackNotifyThread()
 	// Wait/Signal や play 中 DoEvent 再入で残った停止フラグを下ろす。
 	// 残ったままだと通知スレッドが即終了し、CWread(adbuf) 系が無音になる
 	// （HandleNotifications_export と同じ理由）。
+	PlayAbortArmForRun();
 	thn1 = FALSE;
 	stf = 0;
 	syukai = 0;
@@ -879,19 +1111,23 @@ UINT HandleNotifications(LPVOID)
 	int fade2 = 0;
 	syoriflg = FALSE;
 	DWORD hr = DS_OK;
-	// stop1/Wait/Signal で残った停止フラグを必ず下ろす。
-	// stf!=0 のままだと IsPlaybackStopRequested() が真になり、
-	// DispatchPlaywavFill→readBuffwav が即 return して無音になる
-	// （HandleNotifications_export と同じ。CWread/adbuf 系で顕在化しやすい）。
+	/* 停止要求は BeginPlaybackNotifyThread が下ろす。ここで thn1/stf/syukai を
+	   下ろすと Resume 直後の終了が消え、Join が終わらない。 */
+	if (PlayAbortIsSet())
+		return 0;
 	thn = FALSE;
-	thn1 = FALSE;
-	stf = 0;
-	char* pdsb1; char* pdsb2;
-	syukai = 0;
 	syukai2 = 0;
+	char* pdsb1; char* pdsb2;
 	int dougainit = 0;
 	int timeee = 0;
-	HANDLE ev[] = { (HANDLE)og->timer };
+	PlayAbortEnsure();
+	HANDLE ev[2];
+	ev[0] = (HANDLE)og->timer;
+	int nev = 1;
+	if (s_playAbortEvent) {
+		ev[1] = s_playAbortEvent;
+		nev = 2;
+	}
 	ULONG PlayCursor, WriteCursor = 0, len3, len4;
 
 	auto isPlausibleDsb = [](LPDIRECTSOUNDBUFFER8 p) -> bool {
@@ -906,8 +1142,11 @@ UINT HandleNotifications(LPVOID)
 	ULONG prefillProtectUntil = 0;
 	int prefillRestFilled = 0;
 	oldw = 0;
-	if (isPlausibleDsb(m_dsb))
-		m_dsb->SetCurrentPosition(0);
+	if (isPlausibleDsb(m_dsb)) {
+		DsOpLock ds;
+		if (isPlausibleDsb(m_dsb))
+			m_dsb->SetCurrentPosition(0);
+	}
 	// mode ではなく Open 中の形式（曲切替で mode が先に変わる）
 	if (g_openDecoderMode == -10 || g_openDecoderMode == 999) {
 		oldw = OUTPUT_BUFFER_SIZE * 2;
@@ -924,22 +1163,15 @@ UINT HandleNotifications(LPVOID)
 	/* DS 待ちの裏で CEmu/KPI を回す。失敗時は従来どおり HN 内デコード。 */
 	HandleFillStart();
 	struct FillGuard {
-		~FillGuard() { HandleFillStop(); }
+		~FillGuard() { HandleFillRequestStop(); }
 	} fillGuard;
 
 	auto stopPlaybackAndExit = [&]() -> UINT {
-		playf = 1;
-		thn = FALSE;
-		LPDIRECTSOUNDBUFFER8 dsbStop = m_dsb;
-		if (isPlausibleDsb(dsbStop)) {
-			dsbStop->SetVolume(DSBVOLUME_MIN);
-			dsbStop->Stop();
-		}
+		/* Lock/Stop は UI の Closeds が Join 後にやる。ここで Stop すると
+		   Join pump 側の DsOp と相互待ちになる。 */
 		playf = 0;
 		thn = TRUE;
 		reset = TRUE;
-		// AfxEndThread はスタックを巻き戻さない。cl2 の lock_guard 保持中に呼ぶと
-		// mutex が解放されず、以降 timerp / 次の HandleNotifications が永久待ちになる。
 		return 0;
 	};
 
@@ -949,17 +1181,17 @@ UINT HandleNotifications(LPVOID)
 		// 曲ごとパラメータ: 曲頭で復元、再生中の変更をデバウンス保存
 		SongParams_Sync(false);
 
-		if (syukai == 2 || thn1) return stopPlaybackAndExit();
+		if (PlayAbortIsSet() || syukai == 2 || thn1) return stopPlaybackAndExit();
 		if (syukai == 1) { syukai2 = 1; Sleep(1); continue; }
 
 		// イベント待機（停止要求が来たら長く寝ない）
-		const DWORD waitMs = thn1 ? 10u : (DWORD)savedata.ms;
-		::WaitForMultipleObjects(1, ev, FALSE, waitMs);
+		const DWORD waitMs = PlayAbortIsSet() ? 10u : (DWORD)savedata.ms;
+		::WaitForMultipleObjects(nev, ev, FALSE, waitMs);
 
 		// FLAC等の重いシーク中（sek4）はロックせずに待機
 		while (sek4) {
-			if (syukai == 2 || thn1) return stopPlaybackAndExit();
-			::WaitForMultipleObjects(1, ev, FALSE, thn1 ? 10u : (DWORD)savedata.ms);
+			if (PlayAbortIsSet() || syukai == 2 || thn1) return stopPlaybackAndExit();
+			::WaitForMultipleObjects(nev, ev, FALSE, PlayAbortIsSet() ? 10u : (DWORD)savedata.ms);
 		}
 
 		if (sek == 1) {
@@ -968,7 +1200,7 @@ UINT HandleNotifications(LPVOID)
 			// シーク直後は書き込み位置を再調整する必要があるため continue
 			continue;
 		}
-		if (thn1) return stopPlaybackAndExit();
+		if (PlayAbortIsSet() || thn1) return stopPlaybackAndExit();
 		if (ps == 1) continue;
 
 		LPDIRECTSOUNDBUFFER8 dsb = m_dsb;
@@ -976,7 +1208,13 @@ UINT HandleNotifications(LPVOID)
 			continue;
 
 		// 書き込み位置の計算
-		dsb->GetCurrentPosition(&PlayCursor, &WriteCursor);
+		{
+			DsOpLock ds;
+			dsb = m_dsb;
+			if (!isPlausibleDsb(dsb))
+				continue;
+			dsb->GetCurrentPosition(&PlayCursor, &WriteCursor);
+		}
 		const ULONG ringBytes = (g_ds_buffer_bytes > 0) ? g_ds_buffer_bytes : (ULONG)(OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM);
 		if (prefillProtectUntil > 0 && PlayCursor >= prefillProtectUntil) {
 			prefillProtectUntil = 0;
@@ -1042,8 +1280,9 @@ UINT HandleNotifications(LPVOID)
 		const int writtenThisCycle = len1 + len2;
 		bool exitAfterCl2 = false;
 
-		/* 動画 Run は DirectShow 側。fill スレッドへ移さない（COM アパート）。 */
-		if (og && og->m_dou.GetCheck() == 1 && pGraphBuilder && pMediaControl) {
+		/* 動画 Run は DirectShow 側。fill スレッドへ移さない（COM アパート）。
+		   GetCheck は SendMessage。終了 Join 中に呼ばない。 */
+		if (!PlayAbortIsSet() && og && og->m_dou.GetCheck() == 1 && pGraphBuilder && pMediaControl) {
 			if (timeee > 900 && dougainit == 0) {
 				pMediaControl->Run();
 				dougainit = 1;
@@ -1064,7 +1303,7 @@ UINT HandleNotifications(LPVOID)
 				sflg = TRUE; flg3 = 3; sek = FALSE; sflg = FALSE;
 				continue;
 			}
-			if (fillExit || thn1)
+			if (fillExit || PlayAbortIsSet() || thn1)
 				return stopPlaybackAndExit();
 			if (got < stageBytes && stageBytes > 0)
 				ZeroMemory(s_dsStage.data() + got, (size_t)(stageBytes - got));
@@ -1072,13 +1311,14 @@ UINT HandleNotifications(LPVOID)
 				&& drainSilence) ? true : false;
 		}
 		else {
-			std::lock_guard<std::mutex> guard(cl2);
-			if (thn1) {
+			if (PlayAbortIsSet() || thn1) {
 				exitAfterCl2 = true;
 			}
 			else {
 				bool decExit = false;
+				InterlockedExchange(&s_fillInDecode, 1);
 				HandleFillDecodeOne(s_dsStage.data(), stageBytes, &readmeThisCycle, &decExit);
+				InterlockedExchange(&s_fillInDecode, 0);
 				if (decExit)
 					exitAfterCl2 = true;
 				else {
@@ -1087,7 +1327,7 @@ UINT HandleNotifications(LPVOID)
 					fade2 = fade1;
 				}
 			}
-		} // guard(cl2) — Lock 前に必ず解放
+		}
 		if (exitAfterCl2)
 			return stopPlaybackAndExit();
 
@@ -1102,11 +1342,18 @@ UINT HandleNotifications(LPVOID)
 		}
 
 		// DirectSound 転送（cl2 外。UI 側 Closeds で m_dsb が NULL でもローカル参照で安全）
+		if (PlayAbortIsSet() || thn1)
+			return stopPlaybackAndExit();
 		dsb = m_dsb;
-		if (stageBytes > 0 && isPlausibleDsb(dsb) && !thn1 && !sek) {
+		BOOL lockedOk = FALSE;
+		if (stageBytes > 0 && isPlausibleDsb(dsb) && !thn1 && !sek && !PlayAbortIsSet()) {
+			DsOpLock ds;
+			dsb = m_dsb;
+			if (isPlausibleDsb(dsb) && !thn1 && !sek && !PlayAbortIsSet()) {
 			InterlockedExchange(&g_dsDeviceOpBusy, 1);
 			hr = dsb->Lock(oldw, (DWORD)stageBytes, (LPVOID*)&pdsb1, &len3, (LPVOID*)&pdsb2, &len4, 0);
 			if (hr == DS_OK) {
+				lockedOk = TRUE;
 				thn = FALSE;
 				const int copy1 = (int)len3;
 				const int copy2 = (int)len4;
@@ -1126,21 +1373,19 @@ UINT HandleNotifications(LPVOID)
 				}
 				if (stageFade && copy2 > 0) ZeroMemory(pdsb2, (SIZE_T)copy2);
 				dsb->Unlock(pdsb1, len3, pdsb2, len4);
-				if (!stageFade)
-					MpMirrorWritePcm(s_dsStage.data(), stageBytes);
-				if (!stageFade)
-					MpRemoteWritePcm(s_dsStage.data(), stageBytes);
-				/* xfade チェック WAV: 聞こえている PCM を 96k/2ch/24 へ変換して追記 */
-				if (!stageFade && stageBytes > 0) {
-					extern int g_ds_pcm_rate, g_ds_pcm_ch, g_ds_pcm_bits;
-					extern UINT PlaybackCcWriteDsPcm(const void* p, UINT n, int rate, int ch, int bits);
-					const int r = (g_ds_pcm_rate >= 8000) ? g_ds_pcm_rate : wavbit_sample_Hz;
-					const int c = (g_ds_pcm_ch >= 1) ? g_ds_pcm_ch : 2;
-					const int b = (g_ds_pcm_bits == 16 || g_ds_pcm_bits == 24 || g_ds_pcm_bits == 32) ? g_ds_pcm_bits : 16;
-					PlaybackCcWriteDsPcm(s_dsStage.data(), (UINT)stageBytes, r, c, b);
-				}
 			}
 			InterlockedExchange(&g_dsDeviceOpBusy, 0);
+			}
+		}
+		if (lockedOk && !stageFade) {
+			MpMirrorWritePcm(s_dsStage.data(), stageBytes);
+			MpRemoteWritePcm(s_dsStage.data(), stageBytes);
+			extern int g_ds_pcm_rate, g_ds_pcm_ch, g_ds_pcm_bits;
+			extern UINT PlaybackCcWriteDsPcm(const void* p, UINT n, int rate, int ch, int bits);
+			const int r = (g_ds_pcm_rate >= 8000) ? g_ds_pcm_rate : wavbit_sample_Hz;
+			const int c = (g_ds_pcm_ch >= 1) ? g_ds_pcm_ch : 2;
+			const int b = (g_ds_pcm_bits == 16 || g_ds_pcm_bits == 24 || g_ds_pcm_bits == 32) ? g_ds_pcm_bits : 16;
+			PlaybackCcWriteDsPcm(s_dsStage.data(), (UINT)stageBytes, r, c, b);
 		}
 
 		{
@@ -1172,6 +1417,7 @@ UINT HandleNotifications(LPVOID)
 
 		// 再生カーソル基準の heard を毎サイクル更新（クロスフェード早期開始に必要）
 		{
+			DsOpLock ds;
 			LPDIRECTSOUNDBUFFER8 dsbb = m_dsb;
 			if (isPlausibleDsb(dsbb) && ringBytes > 0) {
 				ULONG pc = 0, wc = 0;
@@ -1209,20 +1455,27 @@ UINT HandleNotifications(LPVOID)
 					LONG vol = (LONG)((double)DSBVOLUME_MIN * (1.0 - (double)remain / (double)fadeBytes));
 					if (vol > 0) vol = 0;
 					if (vol < DSBVOLUME_MIN) vol = DSBVOLUME_MIN;
-					dsbb->SetVolume(vol);
+					{
+						DsOpLock dsVol;
+						if (isPlausibleDsb(m_dsb))
+							m_dsb->SetVolume(vol);
+					}
 				}
 			}
 
 			// fade1(=停止 / 連続でない) のときだけ DS スレッドで停止する。
 			// 連続再生(endflg)の次曲遷移は UI 側タイマー 9000 が同じ終端到達判定で行う。
 			if (fade1 && heard >= g_endWrittenBytes) {
-				if (thn1 || stf != 0 || syukai == 2)
+				if (PlayAbortIsSet() || thn1 || stf != 0 || syukai == 2)
 					return stopPlaybackAndExit();
 				playf = 0; thn = TRUE; reset = TRUE;
-				LPDIRECTSOUNDBUFFER8 dsbFade = m_dsb;
-				if (isPlausibleDsb(dsbFade)) {
-					dsbFade->SetVolume(DSBVOLUME_MIN);
-					dsbFade->Stop();
+				{
+					DsOpLock dsFade;
+					LPDIRECTSOUNDBUFFER8 dsbFade = m_dsb;
+					if (isPlausibleDsb(dsbFade)) {
+						dsbFade->SetVolume(DSBVOLUME_MIN);
+						dsbFade->Stop();
+					}
 				}
 				if (og && ::IsWindow(og->GetSafeHwnd()))
 					og->PostMessage(WM_PLAYBACK_AUTO_STOPPED, 0, 0);
@@ -1768,6 +2021,14 @@ int COggDlg::WASAPIInit()
 	deviceEnumerator->GetDefaultAudioEndpoint(eRender, eConsole, &pDevice);
 	pDevice->Activate(IID_IAudioClient, CLSCTX_ALL, NULL, (void**)&pAudioClient);
 	return 1;
+}
+
+__int64 OggGetAnalogAfterPlayFrames(int sr)
+{
+	/* 使わない。kbsasami の 900ms は DS キューで、再生カーソルが既に含んでいる。
+	   ここに周期や GetStreamLatency を足すと二重。sr は呼び出し互換。 */
+	(void)sr;
+	return 0;
 }
 
 template< typename T, class TFreePolicy >

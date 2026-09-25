@@ -927,17 +927,30 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 	{
 		uint32_t dest = w1;
 		if (dest >= 0x1000) dest -= 0x1000;
-		if (dest == 0xF0) {
+		if (dest == 0xF0 || dest == addr || !SasamiOffOk(song, dest, 1)) {
 			alive[ch] = 0;
 			return 0;
 		}
-		if (dest < addr)
+		if (dest < addr) {
 			KeyOff(ch);
-		if (measureLen && dest < addr) {
-			backJumps[ch]++;
-			if (backJumps[ch] >= 2) {
-				alive[ch] = 0;
-				return 0;
+			/* 2周目で |: ネストや soft が残ると cmd14 dest が壊れて落ちる */
+			loopSp[ch] = 0;
+			memset(loopCnt[ch], 0, sizeof(loopCnt[ch]));
+			softMode[ch] = -1;
+			softDepth[ch] = 0;
+			softDelay[ch] = 0;
+			softPhase[ch] = 0;
+			softPortaSemi[ch] = 0;
+			softPortaLeft[ch] = 0;
+			softPortaGlide[ch] = 0;
+			if (measureLen) {
+				backJumps[ch]++;
+				/* 短い Q/J は2回目まで残して展開。曲ループ(遅い J)は1回で切る。
+				   2回目まで測ると長さが 1.5 周になり、ホスト側の終端と重なる。 */
+				if (backJumps[ch] >= 2 || ticksPlayed >= 384u) {
+					alive[ch] = 0;
+					return 0;
+				}
 			}
 		}
 		pc[ch] = dest;
@@ -1123,7 +1136,11 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 				*cp = c;
 				uint32_t dest = w1;
 				if (dest >= 0x1000) dest -= 0x1000;
-				pc[ch] = dest;
+				if (!SasamiOffOk(song, dest, 1)) {
+					loopSp[ch]--;
+					pc[ch] = addr + 3;
+				} else
+					pc[ch] = dest;
 			}
 			return 1;
 		}
@@ -1477,6 +1494,7 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 		for (int ch = 0; ch < 12; ch++) {
 			waitb[ch] = 0;
 			loopSp[ch] = 0;
+			memset(loopCnt[ch], 0, sizeof(loopCnt[ch]));
 			vol[ch] = 127;
 			detune[ch] = 0;
 			backJumps[ch] = 0;
@@ -1484,6 +1502,13 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 			pc[ch] = 0;
 			voiceOff[ch] = 0;
 			voiceSrc[ch] = 0;
+			softMode[ch] = -1;
+			softDepth[ch] = 0;
+			softDelay[ch] = 0;
+			softPhase[ch] = 0;
+			softPortaSemi[ch] = 0;
+			softPortaLeft[ch] = 0;
+			softPortaGlide[ch] = 0;
 		}
 		for (int ch = 0; ch < chCount && ch < 10; ch++) {
 			pc[ch] = song.tracks[ch].fileOff;

@@ -36,7 +36,7 @@ void CArc::DoDataExchange(CDataExchange* pDX)
 BEGIN_MESSAGE_MAP(CArc, CCustomBlurDialogBase)
 	ON_LBN_DBLCLK(IDC_LIST1, OnDblclkList1)
 	ON_WM_PAINT()
-	ON_BN_CLICKED(IDOK, &CArc::OnBnClickedOk)
+	ON_BN_CLICKED(IDOK, OnBnClickedOk)
 	cmn(CArc);
 
 

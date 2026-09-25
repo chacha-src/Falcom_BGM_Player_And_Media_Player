@@ -32,7 +32,7 @@ void CPlayListNew::DoDataExchange(CDataExchange* pDX)
 
 
 BEGIN_MESSAGE_MAP(CPlayListNew, CCustomBlurDialogExBase)
-	ON_BN_CLICKED(IDOK, &CPlayListNew::OnBnClickedOk)
+	ON_BN_CLICKED(IDOK, OnBnClickedOk)
 END_MESSAGE_MAP()
 
 

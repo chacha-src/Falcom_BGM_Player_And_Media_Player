@@ -27,8 +27,8 @@ void CKpiV5ConfigDlg::DoDataExchange(CDataExchange* pDX)
 
 #include "CImageBase.h"
 BEGIN_MESSAGE_MAP(CKpiV5ConfigDlg, CCustomBlurDialogBase)
-	ON_BN_CLICKED(IDOK, &CKpiV5ConfigDlg::OnBnClickedOk)
-	ON_BN_CLICKED(IDCANCEL, &CKpiV5ConfigDlg::OnBnClickedCancel)
+	ON_BN_CLICKED(IDOK, OnBnClickedOk)
+	ON_BN_CLICKED(IDCANCEL, OnBnClickedCancel)
 	cmn(CKpiV5ConfigDlg);
 
 BOOL CKpiV5ConfigDlg::OnInitDialog()

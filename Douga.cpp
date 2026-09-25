@@ -17,7 +17,7 @@
 #include <cmath>
 #include <algorithm>
 #include <mmreg.h>
-#if _MSC_VER >= 1950
+#if _MSC_VER >= 1950 || defined(__INTEL_LLVM_COMPILER) || defined(OGG_AVX2_VS2026)
 #pragma comment(lib, "rubberband-library_2026")
 #else
 #pragma comment(lib, "rubberband-library")
@@ -1782,7 +1782,7 @@ BEGIN_MESSAGE_MAP(CDouga, CFrameWnd)
 	ON_WM_MOUSEWHEEL()
 	ON_WM_LBUTTONDBLCLK()
 	ON_WM_NCLBUTTONDBLCLK()
-	ON_COMMAND(32775, &CDouga::On32775)
+	ON_COMMAND(32775, On32775)
 	ON_WM_DROPFILES()
 	ON_WM_NCMOUSEMOVE()
 	ON_WM_NCDESTROY()

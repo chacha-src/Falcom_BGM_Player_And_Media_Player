@@ -1475,31 +1475,31 @@ void CTranscodeExport::DoDataExchange(CDataExchange* pDX)
 BEGIN_MESSAGE_MAP(CTranscodeExport, CCustomBlurDialogBase)
 	ON_WM_SHOWWINDOW()
 	ON_WM_LBUTTONDOWN()
-	ON_MESSAGE(WM_TC_LAYOUT_TABS, &CTranscodeExport::OnLayoutTabsMsg)
-	ON_BN_CLICKED(IDC_TC_EXEC, &CTranscodeExport::OnBnClickedExec)
-	ON_BN_CLICKED(IDC_TC_BROWSE, &CTranscodeExport::OnBnClickedBrowse)
-	ON_BN_CLICKED(IDC_TC_CLOSE, &CTranscodeExport::OnBnClickedClose)
-	ON_BN_CLICKED(IDC_TC_HELP, &CTranscodeExport::OnBnClickedHelp)
-	ON_BN_CLICKED(IDC_TC_COVER_CLEAR, &CTranscodeExport::OnBnClickedCoverClear)
-	ON_BN_CLICKED(IDC_TC_XFADE, &CTranscodeExport::OnBnClickedXfade)
-	ON_BN_CLICKED(IDC_TC_MIX, &CTranscodeExport::OnBnClickedMix)
-	ON_BN_CLICKED(IDC_TC_FADE, &CTranscodeExport::OnExportOptChanged)
-	ON_BN_CLICKED(IDC_TC_TRIM, &CTranscodeExport::OnExportOptChanged)
-	ON_BN_CLICKED(IDC_TC_COPY_TAGS, &CTranscodeExport::OnExportOptChanged)
-	ON_BN_CLICKED(IDC_TC_PROMPT, &CTranscodeExport::OnExportOptChanged)
-	ON_EN_CHANGE(IDC_TC_FADE_SEC, &CTranscodeExport::OnExportOptChanged)
-	ON_EN_CHANGE(IDC_TC_TRIM_SEC, &CTranscodeExport::OnExportOptChanged)
-	ON_EN_CHANGE(IDC_TC_XFADE_SEC, &CTranscodeExport::OnExportOptChanged)
-	ON_EN_CHANGE(IDC_TC_KPI_SEC, &CTranscodeExport::OnExportOptChanged)
-	ON_EN_KILLFOCUS(IDC_TC_FADE_SEC, &CTranscodeExport::OnExportSecKillFocus)
-	ON_EN_KILLFOCUS(IDC_TC_TRIM_SEC, &CTranscodeExport::OnExportSecKillFocus)
-	ON_EN_KILLFOCUS(IDC_TC_XFADE_SEC, &CTranscodeExport::OnExportSecKillFocus)
-	ON_EN_KILLFOCUS(IDC_TC_KPI_SEC, &CTranscodeExport::OnExportSecKillFocus)
-	ON_CBN_SELCHANGE(IDC_TC_FORMAT, &CTranscodeExport::OnCbnSelchangeFormat)
-	ON_CBN_SELCHANGE(IDC_TC_QUALITY, &CTranscodeExport::OnExportOptChanged)
-	ON_CBN_SELCHANGE(IDC_TC_SRATE, &CTranscodeExport::OnExportOptChanged)
-	ON_CBN_SELCHANGE(IDC_TC_MIX_N, &CTranscodeExport::OnCbnSelchangeMixN)
-	ON_NOTIFY(TCN_SELCHANGE, IDC_TC_TABS, &CTranscodeExport::OnTcnSelchangeTabs)
+	ON_MESSAGE(WM_TC_LAYOUT_TABS, OnLayoutTabsMsg)
+	ON_BN_CLICKED(IDC_TC_EXEC, OnBnClickedExec)
+	ON_BN_CLICKED(IDC_TC_BROWSE, OnBnClickedBrowse)
+	ON_BN_CLICKED(IDC_TC_CLOSE, OnBnClickedClose)
+	ON_BN_CLICKED(IDC_TC_HELP, OnBnClickedHelp)
+	ON_BN_CLICKED(IDC_TC_COVER_CLEAR, OnBnClickedCoverClear)
+	ON_BN_CLICKED(IDC_TC_XFADE, OnBnClickedXfade)
+	ON_BN_CLICKED(IDC_TC_MIX, OnBnClickedMix)
+	ON_BN_CLICKED(IDC_TC_FADE, OnExportOptChanged)
+	ON_BN_CLICKED(IDC_TC_TRIM, OnExportOptChanged)
+	ON_BN_CLICKED(IDC_TC_COPY_TAGS, OnExportOptChanged)
+	ON_BN_CLICKED(IDC_TC_PROMPT, OnExportOptChanged)
+	ON_EN_CHANGE(IDC_TC_FADE_SEC, OnExportOptChanged)
+	ON_EN_CHANGE(IDC_TC_TRIM_SEC, OnExportOptChanged)
+	ON_EN_CHANGE(IDC_TC_XFADE_SEC, OnExportOptChanged)
+	ON_EN_CHANGE(IDC_TC_KPI_SEC, OnExportOptChanged)
+	ON_EN_KILLFOCUS(IDC_TC_FADE_SEC, OnExportSecKillFocus)
+	ON_EN_KILLFOCUS(IDC_TC_TRIM_SEC, OnExportSecKillFocus)
+	ON_EN_KILLFOCUS(IDC_TC_XFADE_SEC, OnExportSecKillFocus)
+	ON_EN_KILLFOCUS(IDC_TC_KPI_SEC, OnExportSecKillFocus)
+	ON_CBN_SELCHANGE(IDC_TC_FORMAT, OnCbnSelchangeFormat)
+	ON_CBN_SELCHANGE(IDC_TC_QUALITY, OnExportOptChanged)
+	ON_CBN_SELCHANGE(IDC_TC_SRATE, OnExportOptChanged)
+	ON_CBN_SELCHANGE(IDC_TC_MIX_N, OnCbnSelchangeMixN)
+	ON_NOTIFY(TCN_SELCHANGE, IDC_TC_TABS, OnTcnSelchangeTabs)
 	ON_WM_DROPFILES()
 	ON_WM_SIZE()
 	ON_WM_DESTROY()
@@ -3273,14 +3273,14 @@ void CTranscodeExport::OnBnClickedExec()
 
 	if (pathStr.IsEmpty()) {
 		m_status.SetWindowText((multiFile && !xfade && !mix)
-			? LL14(L"フォルダを指定してください", L"Please specify folder", L"Veuillez specifier le dossier", L"Specificare la cartella",
+			? CString(LL14(L"フォルダを指定してください", L"Please specify folder", L"Veuillez specifier le dossier", L"Specificare la cartella",
 				L"Especifique la carpeta", L"폴더를 지정하세요", L"请指定文件夹", L"يرجى تحديد المجلد",
 				L"Укажите папку", L"Bitte Ordner angeben", L"Especifique a pasta", L"Geef map op",
-				L"Podaj folder", L"Klasor belirtin")
-			: LL14(L"ファイル名を指定してください", L"Please specify file name", L"Veuillez specifier le nom du fichier",
+				L"Podaj folder", L"Klasor belirtin"))
+			: CString(LL14(L"ファイル名を指定してください", L"Please specify file name", L"Veuillez specifier le nom du fichier",
 				L"Specificare il nome del file", L"Especifique el nombre del archivo", L"파일 이름을 지정하세요", L"请指定文件名",
 				L"يرجى تحديد اسم الملف", L"Укажите имя файла", L"Bitte Dateinamen angeben", L"Especifique o nome do arquivo",
-				L"Geef bestandsnaam op", L"Podaj nazwę pliku", L"Dosya adini belirtin"));
+				L"Geef bestandsnaam op", L"Podaj nazwę pliku", L"Dosya adini belirtin")));
 		return;
 	}
 

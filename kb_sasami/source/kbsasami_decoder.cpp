@@ -6,7 +6,6 @@
 #include <string>
 
 #include "kbsasami_decoder.h"
-#include "fmmon_shadow.h"
 
 extern HINSTANCE g_hKpi;
 
@@ -260,8 +259,11 @@ void KbSasamiDecoder::meta_event(int, const void*, std::size_t) {}
 
 void KbSasamiDecoder::reset()
 {
-	for (int i = 0; i < m_nPorts; i++)
-		m_synths[i]->reset();
+	for (int i = 0; i < m_nPorts; i++) {
+		if (m_synths[i])
+			m_synths[i]->reset();
+	}
+	m_note_factory.reset_pool_frame();
 }
 
 DWORD WINAPI KbSasamiDecoder::UpdateConfig(void*)
@@ -460,6 +462,7 @@ DWORD WINAPI KbSasamiDecoder::Render(BYTE* pBuffer, DWORD dwSizeSample)
 	if (m_fmMode)
 		return m_fm.Render((int16_t*)pBuffer, dwSizeSample);
 
+	std::lock_guard<std::mutex> lk(m_midiLock);
 	const double rate = (double)m_MediaInfo.dwSampleRate;
 	const int looping = (m_loopEnd > m_loopStart && m_loopStart >= 0.0) ? 1 : 0;
 	const UINT64 loopStartSamp = looping ? (UINT64)(m_loopStart * rate + 0.5) : 0;
@@ -467,8 +470,23 @@ DWORD WINAPI KbSasamiDecoder::Render(BYTE* pBuffer, DWORD dwSizeSample)
 
 	DWORD remain = dwSizeSample;
 	BYTE* p = pBuffer;
+	int didWrap = 0;
 	while (remain) {
-		if (looping && loopEndSamp > loopStartSamp && m_curSample > loopEndSamp) {
+		if (looping && loopEndSamp > loopStartSamp + 1 && m_curSample > loopEndSamp) {
+			if (didWrap) {
+				ZeroMemory(p, remain * 4);
+				break;
+			}
+			didWrap = 1;
+			/* loopEnd の CC120 で既に離している。即 delete は 2 周目で YM pool と競合する */
+			for (int i = 0; i < m_nPorts; i++) {
+				if (!m_synths[i]) continue;
+				for (int ch = 0; ch < 16; ch++)
+					m_synths[i]->control_change(ch, 0x40, 0);
+				m_synths[i]->all_note_off();
+				m_synths[i]->all_sound_off();
+			}
+			m_note_factory.reset_pool_frame();
 			m_sequencer.set_position(m_loopStart);
 			m_curSample = loopStartSamp;
 		}
@@ -477,12 +495,17 @@ DWORD WINAPI KbSasamiDecoder::Render(BYTE* pBuffer, DWORD dwSizeSample)
 		if (looping && loopEndSamp > loopStartSamp && m_curSample <= loopEndSamp
 			&& m_curSample + chunk > loopEndSamp + 1)
 			chunk = (DWORD)(loopEndSamp + 1 - m_curSample);
-		if (chunk == 0) break;
+		if (chunk == 0) {
+			ZeroMemory(p, remain * 4);
+			break;
+		}
 		const double tEnd = (double)(m_curSample + chunk) / rate;
 		m_sequencer.play_forward(tEnd, this);
 		for (DWORD i = 0; i < chunk * 2; i++) m_mix[i] = 0.0;
-		for (int i = 0; i < m_nPorts; i++)
+		for (int i = 0; i < m_nPorts; i++) {
+			if (!m_synths[i]) continue;
 			m_synths[i]->synthesize_mixing(m_mix, chunk, m_MediaInfo.dwSampleRate);
+		}
 		int16_t* out = (int16_t*)p;
 		for (DWORD i = 0; i < chunk * 2; i++) {
 			int v = (int)(m_mix[i] * 32767.0);
@@ -514,6 +537,7 @@ UINT64 WINAPI KbSasamiDecoder::Seek(UINT64 qwPosSample, DWORD)
 {
 	if (m_fmMode)
 		return m_fm.SeekSample(qwPosSample);
+	std::lock_guard<std::mutex> lk(m_midiLock);
 	m_seeking = true;
 	m_sequencer.play(0, this);
 	reset();

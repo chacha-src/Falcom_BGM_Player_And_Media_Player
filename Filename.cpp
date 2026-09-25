@@ -39,8 +39,8 @@ void CFilename::DoDataExchange(CDataExchange* pDX)
 
 #include "CImageBase.h"
 BEGIN_MESSAGE_MAP(CFilename, CCustomBlurDialogBase)
-	ON_BN_CLICKED(ID_OK, &CFilename::OnBnClickedOk)
-	ON_BN_CLICKED(IDOK, &CFilename::OnBnClickedOk2)
+	ON_BN_CLICKED(ID_OK, OnBnClickedOk)
+	ON_BN_CLICKED(IDOK, OnBnClickedOk2)
 	cmn(CFilename);
 
 

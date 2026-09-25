@@ -1,4 +1,4 @@
-﻿// KpiEnumCache.cpp — KPI/外部プラグイン列挙結果を LocalAppData にキャッシュ
+// KpiEnumCache.cpp — KPI/外部プラグイン列挙結果を LocalAppData にキャッシュ
 // 指紋: 全 .kpi + (名前 or PEエクスポート候補) .dll の path/size/mtime（LoadLibrary なし）
 // エントリ: path, size, mtime, arch(32/64), kind(KPI/Winamp/…), 拡張子ごとの kvar(v2/v5/0)
 // ※対応拡張子そのものはフル列挙で得た台帳のコピー。PE だけでは取れない。
@@ -18,7 +18,7 @@ extern CString ext[][300];
 extern BYTE kvar[][300];
 extern BYTE kpiarch[];
 
-enum { KE_MAX_PLUG = 150, KE_MAX_EXT = 299, KE_CACHE_VER = 3 };
+enum { KE_MAX_PLUG = 150, KE_MAX_EXT = 299, KE_CACHE_VER = 6 };
 
 struct KeFileFp {
 	ULONGLONG size;

@@ -16,6 +16,7 @@
 #include "CPianoRoll.h"
 #include "PcHwMidiIn.h"
 #include "kb_sasami/source/sasami_file.h"
+#include "kb_sasami/source/sasami_fmmon.h"
 #include <math.h>
 #include <mmsystem.h>
 
@@ -1600,28 +1601,136 @@ static int FmMidiEngineUp()
 	return (plf != 0 || playf != 0) ? 1 : 0;
 }
 
+/* kss::0001 のようなサブ曲サフィックスを落として拡張子比較する */
+static int FmMidiEqExt(const wchar_t* path, const wchar_t* ext)
+{
+	if (!path || !ext || !path[0] || !ext[0])
+		return 0;
+	wchar_t buf[MAX_PATH];
+	wcsncpy_s(buf, path, _TRUNCATE);
+	wchar_t* cut = wcsstr(buf, L"::");
+	if (cut)
+		*cut = 0;
+	const wchar_t* dot = wcsrchr(buf, L'.');
+	if (!dot)
+		return 0;
+	return _wcsicmp(dot, ext) == 0;
+}
+
+/* KPI/チップ曲は 16ch MIDI ミキサではなく FM 子（PSG/OPLL/鍵盤）へ */
+static int FmMidiPathLooksChip(const wchar_t* path)
+{
+	if (!path || !path[0])
+		return 0;
+	static const wchar_t* k[] = {
+		L".kss", L".mgs", L".bgm", L".bgr", L".opx", L".mpk", L".mbm",
+		L".nsf", L".nsfe", L".gbs", L".hes", L".spc", L".vgm", L".vgz",
+		L".s98", L".gym", L".ay", L".sid", L".sap",
+		L".mdx", L".m", L".m2", L".mz", L".mp", L".mml",
+		L".psf", L".minipsf", L".psf2", L".minipsf2",
+		L".gsf", L".minigsf", L".usf", L".miniusf",
+		L".2sf", L".mini2sf", L".ncsf", L".minincsf",
+		L".snsf", L".minisnsf", L".dsf", L".minidsf",
+		L".ssf", L".minissf", L".qsf", L".miniqsf",
+		L".spu", L".rsn", L".srm",
+	};
+	for (int i = 0; i < (int)(sizeof(k) / sizeof(k[0])); ++i) {
+		if (FmMidiEqExt(path, k[i]))
+			return 1;
+	}
+	return 0;
+}
+
+static int FmMidiPlayPathLooksChip()
+{
+	extern CString filen;
+	extern CString fnn;
+	extern CPlayList* pl;
+	extern int plcnt;
+	if (!filen.IsEmpty() && FmMidiPathLooksChip(filen))
+		return 1;
+	if (!fnn.IsEmpty() && FmMidiPathLooksChip(fnn))
+		return 1;
+	if (pl && plcnt >= 0 && pl->pc && FmMidiPathLooksChip(pl->pc[plcnt].fol))
+		return 1;
+	return 0;
+}
+
+/* kbmsxplug 等は既に live.opna を書いている。MIDI 16ch のまま読まない。
+   毎ティック CreateFile すると writer の MapView と取り合うので 200ms キャッシュ。 */
+static int FmMidiLiveDumpWantsFm()
+{
+	static ULONGLONG s_tick = 0;
+	static int s_want = 0;
+	const ULONGLONG now = GetTickCount64();
+	if (s_tick != 0 && now - s_tick < 200ull)
+		return s_want;
+	s_tick = now;
+	wchar_t tmp[MAX_PATH];
+	wchar_t path[MAX_PATH];
+	GetTempPathW(MAX_PATH, tmp);
+	_snwprintf_s(path, _TRUNCATE, L"%sogg_kbsasami\\fmmon_live.opna", tmp);
+	HANDLE h = CreateFileW(path, GENERIC_READ,
+		FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+		NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+	if (h == INVALID_HANDLE_VALUE) {
+		s_want = 0;
+		return 0;
+	}
+	SasamiFmMonDump d;
+	memset(&d, 0, sizeof(d));
+	DWORD rd = 0;
+	const BOOL ok = ReadFile(h, &d, sizeof(d), &rd, NULL);
+	CloseHandle(h);
+	int want = 0;
+	if (ok && rd >= offsetof(SasamiFmMonDump, dumpFlags) + 4
+		&& d.magic[0] == 'O' && d.magic[1] == 'P' && d.magic[2] == 'N' && d.magic[3] == 'A') {
+		if (d.dumpFlags & (SASAMI_FMMON_FLAG_MSX | SASAMI_FMMON_FLAG_OPM | SASAMI_FMMON_FLAG_FMP))
+			want = 1;
+		else if (d.padHit == 3)
+			want = 1;
+		else if ((d.dumpFlags & SASAMI_FMMON_FLAG_KEYSONLY)
+			&& d.pad6[1] != SASAMI_FMMON_KEYS_MIDI)
+			want = 1;
+	}
+	s_want = want;
+	return want;
+}
+
 static int FmMidiWantFmView(int sticky)
 {
 	extern int mode;
+	extern int g_openDecoderMode;
 	extern CString filen;
+	/* dump が MSX/OPM/チップなら、mode や sticky に関係なく FM 子へ。
+	   KSS は kbmsxplug が live.opna を書いていても MIDI 16ch「?」のまま見えていた。 */
+	if (FmMidiLiveDumpWantsFm() || FmMidiPlayPathLooksChip())
+		return 1;
 	/* 未演奏の初期は sticky=0 → MIDI。再生開始で種別を決める。
 	   完全停止後は最後のモードを維持（FM で止めたら FM のまま）。 */
 	if (!FmMidiEngineUp())
 		return sticky ? 1 : 0;
 	if (!filen.IsEmpty() && SasamiExtIsFm(filen))
 		return 1;
-	if (mode == MODE_CEMU || IsCemuMode(mode))
+	const int dm = (g_openDecoderMode != INT_MIN) ? g_openDecoderMode : mode;
+	if (mode == MODE_CEMU || IsCemuMode(mode) || IsCemuMode(dm))
 		return 1;
 	/* KPI の MIDI / MPY / RCP は 4op を複数積むので、6ch の FM モニタではなく
 	   パート鍵盤の MIDI モニタに残す。FPY は上の拡張子で FM。 */
-	if (mode == -3) {
+	if (dm == -3 || mode == -3
+		|| dm == MODE_PLUGIN_WINAMP || mode == MODE_PLUGIN_WINAMP
+		|| dm == MODE_PLUGIN_XMPLAY || mode == MODE_PLUGIN_XMPLAY
+		|| dm == MODE_PLUGIN_AIMP || mode == MODE_PLUGIN_AIMP) {
 		if (!filen.IsEmpty() && (VstIsMidiExt(filen) || VstIsProjectExt(filen)))
 			return 0;
-		return 1;
+		if (FmMidiPlayPathLooksChip())
+			return 1;
+		if (dm == -3 || mode == -3)
+			return 1;
 	}
 	if (CEmuMidiLiveActive())
 		return 0;
-	if (IsVstMidiPlayMode(mode))
+	if (IsVstMidiPlayMode(mode) || IsVstMidiPlayMode(dm))
 		return 0;
 	if (!filen.IsEmpty()) {
 		if (VstIsMidiExt(filen) || VstIsProjectExt(filen))
@@ -1739,15 +1848,15 @@ BEGIN_MESSAGE_MAP(CMidiMonitorDlg, CCustomBlurDialogExBase)
 	ON_WM_CLOSE()
 	ON_WM_DESTROY()
 	ON_WM_CONTEXTMENU()
-	ON_BN_CLICKED(IDC_MM_HELP, &CMidiMonitorDlg::OnBnClickedHelp)
-	ON_COMMAND(ID_HELP_SHOWSHEET, &CMidiMonitorDlg::OnBnClickedHelp)
+	ON_BN_CLICKED(IDC_MM_HELP, OnBnClickedHelp)
+	ON_COMMAND(ID_HELP_SHOWSHEET, OnBnClickedHelp)
 	ON_WM_LBUTTONDOWN()
 	ON_WM_MOUSEMOVE()
 	ON_WM_LBUTTONUP()
 	ON_WM_LBUTTONDBLCLK()
 	ON_WM_MOUSEWHEEL()
-	ON_NOTIFY_EX_RANGE(TTN_NEEDTEXTW, 0, 0xFFFF, &CMidiMonitorDlg::OnTtnNeedText)
-	ON_NOTIFY_EX_RANGE(TTN_NEEDTEXTA, 0, 0xFFFF, &CMidiMonitorDlg::OnTtnNeedText)
+	ON_NOTIFY_EX_RANGE(TTN_NEEDTEXTW, 0, 0xFFFF, OnTtnNeedText)
+	ON_NOTIFY_EX_RANGE(TTN_NEEDTEXTA, 0, 0xFFFF, OnTtnNeedText)
 END_MESSAGE_MAP()
 
 UINT CMidiMonitorDlg::WindowDpi() const
@@ -2160,8 +2269,8 @@ void CMidiMonitorDlg::ApplyShort(int port, DWORD msg, BOOL fromUser, BOOL liveEx
 	const int scan = (!fromUser && !liveExact && m_gs32) ? 1 : 0; // GS 32ch は Rx Channel で振り分け
 	const int iBegin = scan ? 0 : part0;
 	const int iEnd = scan ? PART_MAX : (part0 + 1);
-	const int d1 = (int)((msg >> 8) & 0xff);
-	const int d2 = (int)((msg >> 16) & 0xff);
+	const int d1 = (int)((msg >> 8) & 0x7f);
+	const int d2 = (int)((msg >> 16) & 0x7f);
 	for (int part = iBegin; part < iEnd; ++part) {
 		if (scan) {
 			if (m_part[part].rxCh != ch) continue;
@@ -5866,11 +5975,11 @@ void CMidiMonitorDlg::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
 		PcHwMidiInAppendToMenu(midiIn);
 	CCustomPopupMenu* map = menu.AddSubMenu(
 		(m_sourcePath[0] && SasamiPathIsMidi(m_sourcePath))
-			? LL14(L"ささみ☆ﾐ 音源モード", L"Sasami MIDI map", L"Carte Sasami MIDI", L"Mappa Sasami MIDI", L"Mapa Sasami MIDI", L"사사미 MIDI 맵", L"ささみ☆ﾐ 音源模式", L"خريطة Sasami MIDI", L"Карта Sasami MIDI", L"Sasami-Klangkarte", L"Mapa Sasami MIDI", L"Sasami MIDI-kaart", L"Mapa Sasami MIDI", L"Sasami MIDI haritasi")
-			: LL14(L"音色マップ", L"Tone map", L"Carte de timbres", L"Mappa timbri", L"Mapa de timbres", L"음색 맵", L"音色映射", L"خريطة الأصوات", L"Карта тембров", L"Klangkarte", L"Mapa de timbres", L"Klankkaart", L"Mapa barw", L"Timbir haritasi"),
+			? CString(LL14(L"ささみ☆ﾐ 音源モード", L"Sasami MIDI map", L"Carte Sasami MIDI", L"Mappa Sasami MIDI", L"Mapa Sasami MIDI", L"사사미 MIDI 맵", L"ささみ☆ﾐ 音源模式", L"خريطة Sasami MIDI", L"Карта Sasami MIDI", L"Sasami-Klangkarte", L"Mapa Sasami MIDI", L"Sasami MIDI-kaart", L"Mapa Sasami MIDI", L"Sasami MIDI haritasi"))
+			: CString(LL14(L"音色マップ", L"Tone map", L"Carte de timbres", L"Mappa timbri", L"Mapa de timbres", L"음색 맵", L"音色映射", L"خريطة الأصوات", L"Карта тембров", L"Klangkarte", L"Mapa de timbres", L"Klankkaart", L"Mapa barw", L"Timbir haritasi")),
 		(m_sourcePath[0] && SasamiPathIsMidi(m_sourcePath))
-			? LL14(L".mpy/.mpw2 の SMF 変換音源。55map / 88map / XG 等", L"Sound source for .mpy/.mpw2 SMF conversion (55map, 88map, XG…)", L"Source sonore pour conversion SMF .mpy/.mpw2", L"Sorgente per conversione SMF .mpy/.mpw2", L"Fuente sonora para conversion SMF .mpy/.mpw2", L".mpy/.mpw2 SMF 변환 음원", L".mpy/.mpw2 的 SMF 转换音源", L"مصدر صوت لتحويل SMF لـ .mpy/.mpw2", L"Источник звука для SMF из .mpy/.mpw2", L"Klangquelle fur .mpy/.mpw2-SMF", L"Fonte sonora para conversao SMF .mpy/.mpw2", L"Geluidbron voor .mpy/.mpw2 SMF", L"Zrodlo dzwieku konwersji SMF .mpy/.mpw2", L".mpy/.mpw2 SMF donusum ses kaynagi")
-			: LL14(L"名前引きに使う音色マップ（自動／GS／XG／55／88／LA など）", L"Tone map for names (Auto / GS / XG / 55 / 88 / LA…)", L"Carte de timbres pour les noms (Auto / GS / XG / 55 / 88 / LA…)", L"Mappa timbri per i nomi (Auto / GS / XG / 55 / 88 / LA…)", L"Mapa de timbres para nombres (Auto / GS / XG / 55 / 88 / LA…)", L"이름에 쓸 음색 맵 (자동 / GS / XG / 55 / 88 / LA…)", L"用于查名的音色映射（自动／GS／XG／55／88／LA 等）", L"خريطة الأصوات للأسماء (Auto / GS / XG / 55 / 88 / LA…)", L"Карта тембров для имён (Auto / GS / XG / 55 / 88 / LA…)", L"Klangkarte fuer Namen (Auto / GS / XG / 55 / 88 / LA…)", L"Mapa de timbres para nomes (Auto / GS / XG / 55 / 88 / LA…)", L"Klankkaart voor namen (Auto / GS / XG / 55 / 88 / LA…)", L"Mapa barw do nazw (Auto / GS / XG / 55 / 88 / LA…)", L"Isimler icin timbir haritasi (Auto / GS / XG / 55 / 88 / LA…)"));
+			? CString(LL14(L".mpy/.mpw2 の SMF 変換音源。55map / 88map / XG 等", L"Sound source for .mpy/.mpw2 SMF conversion (55map, 88map, XG…)", L"Source sonore pour conversion SMF .mpy/.mpw2", L"Sorgente per conversione SMF .mpy/.mpw2", L"Fuente sonora para conversion SMF .mpy/.mpw2", L".mpy/.mpw2 SMF 변환 음원", L".mpy/.mpw2 的 SMF 转换音源", L"مصدر صوت لتحويل SMF لـ .mpy/.mpw2", L"Источник звука для SMF из .mpy/.mpw2", L"Klangquelle fur .mpy/.mpw2-SMF", L"Fonte sonora para conversao SMF .mpy/.mpw2", L"Geluidbron voor .mpy/.mpw2 SMF", L"Zrodlo dzwieku konwersji SMF .mpy/.mpw2", L".mpy/.mpw2 SMF donusum ses kaynagi"))
+			: CString(LL14(L"名前引きに使う音色マップ（自動／GS／XG／55／88／LA など）", L"Tone map for names (Auto / GS / XG / 55 / 88 / LA…)", L"Carte de timbres pour les noms (Auto / GS / XG / 55 / 88 / LA…)", L"Mappa timbri per i nomi (Auto / GS / XG / 55 / 88 / LA…)", L"Mapa de timbres para nombres (Auto / GS / XG / 55 / 88 / LA…)", L"이름에 쓸 음색 맵 (자동 / GS / XG / 55 / 88 / LA…)", L"用于查名的音色映射（自动／GS／XG／55／88／LA 等）", L"خريطة الأصوات للأسماء (Auto / GS / XG / 55 / 88 / LA…)", L"Карта тембров для имён (Auto / GS / XG / 55 / 88 / LA…)", L"Klangkarte fuer Namen (Auto / GS / XG / 55 / 88 / LA…)", L"Mapa de timbres para nomes (Auto / GS / XG / 55 / 88 / LA…)", L"Klankkaart voor namen (Auto / GS / XG / 55 / 88 / LA…)", L"Mapa barw do nazw (Auto / GS / XG / 55 / 88 / LA…)", L"Isimler icin timbir haritasi (Auto / GS / XG / 55 / 88 / LA…)")));
 	if (map) {
 		map->AddCheck(IDM_MM_MAP_AUTO, LL14(L"自動 (SysEx / 曲名)", L"Auto (SysEx / title)", L"Auto (SysEx / titre)", L"Auto (SysEx / titolo)", L"Auto (SysEx / titulo)", L"자동 (SysEx / 제목)", L"自动 (SysEx / 曲名)", L"تلقائي (SysEx / عنوان)", L"Авто (SysEx / название)", L"Auto (SysEx / Titel)", L"Auto (SysEx / titulo)", L"Auto (SysEx / titel)", L"Auto (SysEx / tytul)", L"Otomatik (SysEx / baslik)"), m_mapForce == 0);
 		map->AddCheck(IDM_MM_MAP_GS, L"GS", m_mapForce == 1);

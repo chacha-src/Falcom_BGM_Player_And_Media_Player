@@ -274,6 +274,11 @@ bool KpiHost64Client::SyncHostLang()
 	return ok;
 }
 
+bool KpiHost64Client::IsConnected() const
+{
+	return m_hPipe != INVALID_HANDLE_VALUE;
+}
+
 // 未接続ならホスト起動→パイプ。接続済みなら言語だけ同期。
 bool KpiHost64Client::EnsureConnected()
 {
@@ -349,12 +354,13 @@ bool PipeXfer(HANDLE pipe, void* buf, uint32_t bytes, int writing, DWORD timeout
 				const DWORD slice = timeoutMs - elapsed2;
 				const DWORD waitMs = slice > 100 ? 100 : slice;
 				const DWORD qs = InterlockedCompareExchange(&g_kpiPipeUiPump, 0, 0)
-					? (QS_ALLINPUT) : (QS_PAINT | QS_TIMER | QS_POSTMESSAGE);
+					? (QS_ALLINPUT) : (QS_SENDMESSAGE | QS_PAINT | QS_TIMER | QS_POSTMESSAGE);
 				const DWORD wr = MsgWaitForMultipleObjects(1, &ov.hEvent, FALSE, waitMs, qs);
 				if (wr == WAIT_OBJECT_0)
 					break;
 				if (wr == WAIT_OBJECT_0 + 1) {
 					MSG msg;
+					PeekMessageW(&msg, NULL, WM_NULL, WM_NULL, PM_NOREMOVE);
 					if (InterlockedCompareExchange(&g_kpiPipeUiPump, 0, 0)) {
 						while (PeekMessageW(&msg, NULL, 0, 0, PM_REMOVE)) {
 							if (msg.message == WM_QUIT) {

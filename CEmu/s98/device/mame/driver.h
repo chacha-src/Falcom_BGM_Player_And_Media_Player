@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #ifndef __DRIVER_H__
 #define __DRIVER_H__
@@ -20,7 +20,7 @@
 #define INLINE static
 #endif
 
-#define logerror(x,y,z)
+#define logerror(...)
 typedef signed int stream_sample_t;
 
 #endif	/* __DRIVER_H__ */

@@ -426,6 +426,12 @@ Ym2612Pool::Ym2612Pool() : impl(new Impl()) {}
 Ym2612Pool::~Ym2612Pool() { delete impl; }
 bool Ym2612Pool::ready() const { return impl && !impl->banks.empty(); }
 
+void Ym2612Pool::reset_render_frame()
+{
+    if (impl)
+        impl->frame_left = -1;
+}
+
 bool Ym2612Pool::load(const wchar_t* path, int family, int append)
 {
     if (!impl) return false;

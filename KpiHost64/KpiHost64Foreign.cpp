@@ -1,4 +1,4 @@
-﻿// KpiHost64 外部入力プラグイン（Winamp in_ / XMPlay / AIMP）。MFC 無し。
+// KpiHost64 外部入力プラグイン（Winamp in_ / XMPlay / AIMP）。MFC 無し。
 #include <windows.h>
 #include <string>
 #include <vector>
@@ -31,6 +31,8 @@ struct ForeignSession
 	int playing = 0;
 	__int64 written = 0; // 書き込んだバイト累計
 	int flushMs = 0;     // Flush で渡された再生位置（ms）
+	wchar_t prevCwd[MAX_PATH] = {};
+	int cwdSaved = 0;    // Play 中は曲フォルダを CWD にして .psf2lib 等を拾う
 	// XMPlay
 	XMPIN* xmp = nullptr;
 	std::vector<float> fbuf;
@@ -308,6 +310,13 @@ uint32_t ForeignHost_Open(uint32_t kind, const std::wstring& dll, const std::wst
 		InterlockedExchange(&g_waEof, 0);
 		BindWa(s, WaEnsureWnd());
 		if (s->waIn->Init) s->waIn->Init();
+		if (GetCurrentDirectoryW(MAX_PATH, s->prevCwd))
+			s->cwdSaved = 1;
+		{
+			size_t slash = media.find_last_of(L"\\/");
+			if (slash != std::wstring::npos)
+				SetCurrentDirectoryW(media.substr(0, slash).c_str());
+		}
 		int rc;
 		if (WaIsUnicode(s->waIn)) {
 			// IN_UNICODE プラグインの Play は wchar_t*。ANSI 変換して渡すと開けない
@@ -319,6 +328,7 @@ uint32_t ForeignHost_Open(uint32_t kind, const std::wstring& dll, const std::wst
 		}
 		if (rc != 0) {
 			if (s->waIn->Quit) s->waIn->Quit();
+			if (s->cwdSaved) SetCurrentDirectoryW(s->prevCwd);
 			FreeLibrary(s->dll); delete[] s->ring; delete s; g_waCur = nullptr; return KPIHOST64_STATUS_FAIL;
 		}
 		// フォーマットはデコードスレッドが outMod->Open() を呼ぶまで確定しない。
@@ -328,6 +338,7 @@ uint32_t ForeignHost_Open(uint32_t kind, const std::wstring& dll, const std::wst
 		if (!s->playing) {
 			if (s->waIn->Stop) s->waIn->Stop();
 			if (s->waIn->Quit) s->waIn->Quit();
+			if (s->cwdSaved) SetCurrentDirectoryW(s->prevCwd);
 			FreeLibrary(s->dll); delete[] s->ring; delete s; g_waCur = nullptr; return KPIHOST64_STATUS_FAIL;
 		}
 		reply.sampleRate = (uint32_t)s->rate;
@@ -413,6 +424,8 @@ uint32_t ForeignHost_Close(uint32_t sessionId)
 		if (s->waIn->Stop) s->waIn->Stop();
 		if (s->waIn->Quit) s->waIn->Quit();
 	}
+	if (s->cwdSaved && s->prevCwd[0])
+		SetCurrentDirectoryW(s->prevCwd);
 	if (s->dll) FreeLibrary(s->dll);
 	if (s->csInit) DeleteCriticalSection(&s->cs);
 	if (g_waCur == s) g_waCur = nullptr;

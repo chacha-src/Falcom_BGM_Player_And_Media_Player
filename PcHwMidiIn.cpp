@@ -755,14 +755,14 @@ static void AddPortSub(CCustomPopupMenu* parent, int port)
 	if (!parent || port < 0 || port >= PCHW_PORT_N) return;
 	CCustomPopupMenu* sub = parent->AddSubMenu(
 		port == 0
-			? LL14(L"MIDI In 1", L"MIDI In 1", L"MIDI In 1", L"MIDI In 1", L"MIDI In 1",
+			? CString(LL14(L"MIDI In 1", L"MIDI In 1", L"MIDI In 1", L"MIDI In 1", L"MIDI In 1",
 				L"MIDI In 1", L"MIDI In 1", L"MIDI In 1", L"MIDI In 1", L"MIDI In 1",
-				L"MIDI In 1", L"MIDI In 1", L"MIDI In 1", L"MIDI In 1")
-			: LL14(L"MIDI In 2", L"MIDI In 2", L"MIDI In 2", L"MIDI In 2", L"MIDI In 2",
+				L"MIDI In 1", L"MIDI In 1", L"MIDI In 1", L"MIDI In 1"))
+			: CString(LL14(L"MIDI In 2", L"MIDI In 2", L"MIDI In 2", L"MIDI In 2", L"MIDI In 2",
 				L"MIDI In 2", L"MIDI In 2", L"MIDI In 2", L"MIDI In 2", L"MIDI In 2",
-				L"MIDI In 2", L"MIDI In 2", L"MIDI In 2", L"MIDI In 2"),
+				L"MIDI In 2", L"MIDI In 2", L"MIDI In 2", L"MIDI In 2")),
 		port == 0
-			? LL14(L"入力デバイスを選び、モニタ（パートA）へ送り SMF／MIDI Out します。",
+			? CString(LL14(L"入力デバイスを選び、モニタ（パートA）へ送り SMF／MIDI Out します。",
 				L"Pick an input device; send to the monitor (part A), SMF, and MIDI Out.",
 				L"Choisir l'entree. Envoyer au moniteur (partie A), SMF et MIDI Out.",
 				L"Scegli l'ingresso. Invia al monitor (parte A), SMF e MIDI Out.",
@@ -775,8 +775,8 @@ static void AddPortSub(CCustomPopupMenu* parent, int port)
 				L"Escolher entrada. Enviar ao monitor (parte A), SMF e MIDI Out.",
 				L"Kies invoer. Naar monitor (partij A), SMF en MIDI Out.",
 				L"Wybierz wejscie. Na monitor (partia A), SMF i MIDI Out.",
-				L"Giris aygitini sec. Izleyici (parti A), SMF ve MIDI Out.")
-			: LL14(L"入力デバイスを選び、モニタ（パートB）へ送り SMF／MIDI Out します。",
+				L"Giris aygitini sec. Izleyici (parti A), SMF ve MIDI Out."))
+			: CString(LL14(L"入力デバイスを選び、モニタ（パートB）へ送り SMF／MIDI Out します。",
 				L"Pick an input device; send to the monitor (part B), SMF, and MIDI Out.",
 				L"Choisir l'entree. Envoyer au moniteur (partie B), SMF et MIDI Out.",
 				L"Scegli l'ingresso. Invia al monitor (parte B), SMF e MIDI Out.",
@@ -789,7 +789,7 @@ static void AddPortSub(CCustomPopupMenu* parent, int port)
 				L"Escolher entrada. Enviar ao monitor (parte B), SMF e MIDI Out.",
 				L"Kies invoer. Naar monitor (partij B), SMF en MIDI Out.",
 				L"Wybierz wejscie. Na monitor (partia B), SMF i MIDI Out.",
-				L"Giris aygitini sec. Izleyici (parti B), SMF ve MIDI Out."));
+				L"Giris aygitini sec. Izleyici (parti B), SMF ve MIDI Out.")));
 	if (!sub) return;
 
 	RecycleSysexUi();
@@ -880,12 +880,12 @@ static void AddPortSub(CCustomPopupMenu* parent, int port)
 	sub->AddCheck(
 		(port == 0) ? IDM_PCHW_IN1_SMF : IDM_PCHW_IN2_SMF,
 		g_recOn[port]
-			? LL14(L"SMF保存を終了…", L"Stop SMF save…", L"Arreter SMF…", L"Termina SMF…", L"Detener SMF…",
+			? CString(LL14(L"SMF保存を終了…", L"Stop SMF save…", L"Arreter SMF…", L"Termina SMF…", L"Detener SMF…",
 				L"SMF 저장 끝내기…", L"结束 SMF 保存…", L"إيقاف حفظ SMF…", L"Закончить SMF…", L"SMF beenden…",
-				L"Parar SMF…", L"SMF stoppen…", L"Zakoncz SMF…", L"SMF kaydini bitir…")
-			: LL14(L"SMF保存を開始", L"Start SMF save", L"Demarrer SMF", L"Avvia SMF", L"Iniciar SMF",
+				L"Parar SMF…", L"SMF stoppen…", L"Zakoncz SMF…", L"SMF kaydini bitir…"))
+			: CString(LL14(L"SMF保存を開始", L"Start SMF save", L"Demarrer SMF", L"Avvia SMF", L"Iniciar SMF",
 				L"SMF 저장 시작", L"开始 SMF 保存", L"بدء حفظ SMF", L"Начать SMF", L"SMF starten",
-				L"Iniciar SMF", L"SMF starten", L"Rozpocznij SMF", L"SMF kaydini baslat"),
+				L"Iniciar SMF", L"SMF starten", L"Rozpocznij SMF", L"SMF kaydini baslat")),
 		g_recOn[port] != 0,
 		LL14(L"この口の MIDI In を SMF (.mid) として録ります。もう一度で保存終了。",
 			L"Record this port's MIDI In to SMF (.mid). Click again to finish and save.",

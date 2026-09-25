@@ -34,9 +34,9 @@ void CMpFolderSyncDlg::DoDataExchange(CDataExchange* pDX)
 }
 
 BEGIN_MESSAGE_MAP(CMpFolderSyncDlg, CCustomBlurDialogBase)
-	ON_BN_CLICKED(IDC_MPS_ADD, &CMpFolderSyncDlg::OnBnClickedAdd)
-	ON_BN_CLICKED(IDC_MPS_REMOVE, &CMpFolderSyncDlg::OnBnClickedRemove)
-	ON_BN_CLICKED(IDC_MPS_CLOSE, &CMpFolderSyncDlg::OnBnClickedClose)
+	ON_BN_CLICKED(IDC_MPS_ADD, OnBnClickedAdd)
+	ON_BN_CLICKED(IDC_MPS_REMOVE, OnBnClickedRemove)
+	ON_BN_CLICKED(IDC_MPS_CLOSE, OnBnClickedClose)
 	ON_WM_CLOSE()
 	ON_WM_CTLCOLOR()
 END_MESSAGE_MAP()

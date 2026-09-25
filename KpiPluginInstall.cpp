@@ -430,6 +430,15 @@ static time_t KpiInstallFileMtimeUtc(LPCTSTR path)
 	return (time_t)((ull.QuadPart - 116444736000000000ULL) / 10000000ULL);
 }
 
+static ULONGLONG KpiInstallFileSize(LPCTSTR path)
+{
+	if (!path || !path[0]) return 0;
+	WIN32_FILE_ATTRIBUTE_DATA fad = {};
+	if (!GetFileAttributesEx(path, GetFileExInfoStandard, &fad))
+		return 0;
+	return ((ULONGLONG)fad.nFileSizeHigh << 32) | fad.nFileSizeLow;
+}
+
 // Last-Modified（UTC）。失敗は 0。期限切れ証明書のサイト向けに DATE/CN 無視。
 static time_t KpiInstallHttpLastModified(LPCTSTR url)
 {
@@ -1261,7 +1270,48 @@ BOOL KpiInstall_SilentUpdateFmpmd(LPCTSTR exeDir)
 	return did;
 }
 
-/* バンドル → 既存 Plugins / x64\Plugins のみ更新（無いものは触らない）。供給は x64 のみ。 */
+/* dump 改造のしるし。SilentUpdate が新しいストックで上書きした先を bundle で戻すため */
+static BOOL KpiInstallLooksLikeDump(LPCTSTR path)
+{
+	if (!path || !path[0]) return FALSE;
+	HANDLE h = CreateFile(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+		NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+	if (h == INVALID_HANDLE_VALUE) return FALSE;
+	LARGE_INTEGER sz = {};
+	if (!GetFileSizeEx(h, &sz) || sz.QuadPart <= 0 || sz.QuadPart > (LONGLONG)(64 * 1024 * 1024)) {
+		CloseHandle(h);
+		return FALSE;
+	}
+	HANDLE map = CreateFileMapping(h, NULL, PAGE_READONLY, 0, 0, NULL);
+	if (!map) { CloseHandle(h); return FALSE; }
+	const BYTE* base = (const BYTE*)MapViewOfFile(map, FILE_MAP_READ, 0, 0, 0);
+	BOOL hit = FALSE;
+	if (base) {
+		const size_t n = (size_t)sz.QuadPart;
+		static const BYTE kLive[] = { 'f',0,'m',0,'m',0,'o',0,'n',0,'_',0,'l',0,'i',0,'v',0,'e',0 };
+		static const char kFm[] = "ogg.FMmon";
+		static const char kMid[] = "ogg.MIDmon";
+		for (size_t i = 0; i + sizeof(kLive) <= n; i++) {
+			if (memcmp(base + i, kLive, sizeof(kLive)) == 0) { hit = TRUE; break; }
+		}
+		if (!hit) {
+			for (size_t i = 0; i + sizeof(kFm) - 1 <= n; i++) {
+				if (memcmp(base + i, kFm, sizeof(kFm) - 1) == 0) { hit = TRUE; break; }
+			}
+		}
+		if (!hit) {
+			for (size_t i = 0; i + sizeof(kMid) - 1 <= n; i++) {
+				if (memcmp(base + i, kMid, sizeof(kMid) - 1) == 0) { hit = TRUE; break; }
+			}
+		}
+		UnmapViewOfFile(base);
+	}
+	CloseHandle(map);
+	CloseHandle(h);
+	return hit;
+}
+
+/* バンドル → 既存 Plugins / x64\Plugins のみ更新（無いものは触らない）。供給はアーキ別。 */
 BOOL KpiInstall_SilentUpdateFmMonKpis(LPCTSTR exeDir)
 {
 	if (!exeDir || !exeDir[0])
@@ -1312,6 +1362,8 @@ BOOL KpiInstall_SilentUpdateFmMonKpis(LPCTSTR exeDir)
 		{ L"Kobarin\\kbemidi\\kbemidi.kpi", L"kbemidi.kpi", NULL },
 		{ L"Kobarin\\kbgme\\kbgme.kpi", L"kbgme.kpi", NULL },
 		{ L"OK\\kbgme\\kbgme.kpi", L"kbgme.kpi", NULL },
+		{ L"Kobarin\\kbgme\\kbzlib.dll", L"kbzlib.dll", L"Kobarin\\kbgme\\kbgme.kpi" },
+		{ L"OK\\kbgme\\kbzlib.dll", L"kbzlib.dll", L"OK\\kbgme\\kbgme.kpi" },
 		/* --- keys-only / チップ拡張（引用リスト） --- */
 		{ L"Mamiya\\kbmdx\\kbmdx.kpi", L"kbmdx.kpi", NULL },
 		{ L"Kobarin\\kbfmoplmidi\\kbfmoplmidi.kpi", L"kbfmoplmidi.kpi", NULL },
@@ -1339,6 +1391,11 @@ BOOL KpiInstall_SilentUpdateFmMonKpis(LPCTSTR exeDir)
 		{ L"Kobarin\\kbmod\\kbmod.kpi", L"kbmod.kpi", NULL },
 		{ L"Kobarin\\kbpxtone\\kbpxtone.kpi", L"kbpxtone.kpi", NULL },
 		{ L"Kobarin\\kb2sf\\kb2sf.kpi", L"kb2sf.kpi", NULL },
+		{ L"Kobarin\\kbxsf\\kb2sf\\kb2sf.kpi", L"kb2sf.kpi", NULL },
+		{ L"Kobarin\\kbxsf\\kb2sf\\vio2sf.bin", L"vio2sf.bin", L"Kobarin\\kbxsf\\kb2sf\\kb2sf.kpi" },
+		{ L"Kobarin\\kb2sf\\vio2sf.bin", L"vio2sf.bin", L"Kobarin\\kb2sf\\kb2sf.kpi" },
+		{ L"Kobarin\\kbxsf\\kb2sf\\kbzlib.dll", L"kbzlib.dll", L"Kobarin\\kbxsf\\kb2sf\\kb2sf.kpi" },
+		{ L"Kobarin\\kb2sf\\kbzlib.dll", L"kbzlib.dll", L"Kobarin\\kb2sf\\kb2sf.kpi" },
 		{ L"kbvio2sf.kpi", L"kbvio2sf.kpi", NULL },
 		{ L"Kobarin\\kbvio2sf\\kbvio2sf.kpi", L"kbvio2sf.kpi", NULL },
 		{ L"Kobarin\\kbqsf\\kbqsf.kpi", L"kbqsf.kpi", NULL },
@@ -1355,6 +1412,7 @@ BOOL KpiInstall_SilentUpdateFmMonKpis(LPCTSTR exeDir)
 		{ L"Kobarin\\kbsap\\kbsap.kpi", L"kbsap.kpi", NULL },
 		{ L"Kobarin\\kbwsr\\kbwsr.kpi", L"kbwsr.kpi", NULL },
 		{ L"Kobarin\\kbnezplug\\kbnezplug.kpi", L"kbnezplug.kpi", NULL },
+		{ L"Mamiya\\kbnezplug\\kbnezplug.kpi", L"kbnezplug.kpi", NULL },
 		{ L"Audio\\nezplug\\nezplug.kpi", L"kbnezplug.kpi", NULL },
 		{ L"Mamiya\\nezplug\\nezplug.kpi", L"kbnezplug.kpi", NULL },
 		{ L"Mamiya\\kbgym\\kbgym.kpi", L"kbgym.kpi", NULL },
@@ -1420,14 +1478,33 @@ BOOL KpiInstall_SilentUpdateFmMonKpis(LPCTSTR exeDir)
 			TCHAR src[MAX_PATH * 2] = {};
 			_sntprintf_s(dst, _TRUNCATE, L"%s%s\\%s", exeDir, kRoots[r], kTab[i].relDst);
 
-			/* 常に x64: .ogg_kpi_fmmon\x64\ → 無ければ直下 */
+			/* 64bit プレイヤの Plugins は KpiHost64。x86 ストックで x64 dump を潰さない。
+			   kbsnesapu だけ Win32。kbgme/kbnezplug は x64 dump 固定。 */
 			{
+				const BOOL isKbsnes = (_tcsicmp(kTab[i].bundleName, L"kbsnesapu.kpi") == 0
+					|| _tcsicmp(kTab[i].bundleName, L"snesapu.dll") == 0);
+				const BOOL wantDump64 = (_tcsicmp(kTab[i].bundleName, L"kbgme.kpi") == 0
+					|| _tcsicmp(kTab[i].bundleName, L"kbnezplug.kpi") == 0);
+				const WORD dstMach = KpiInstallFileExists(dst) ? KpiInstallPeMachine(dst) : 0;
+				const TCHAR* sub = L"x64";
+				if (isKbsnes || dstMach == IMAGE_FILE_MACHINE_I386)
+					sub = L"x86";
 				TCHAR prefer[MAX_PATH * 2] = {};
-				_sntprintf_s(prefer, _TRUNCATE, L"%s\\x64\\%s", bundleDir, kTab[i].bundleName);
+				_sntprintf_s(prefer, _TRUNCATE, L"%s\\%s\\%s", bundleDir, sub, kTab[i].bundleName);
 				if (KpiInstallFileExists(prefer))
 					_tcscpy_s(src, prefer);
 				else
 					_sntprintf_s(src, _TRUNCATE, L"%s\\%s", bundleDir, kTab[i].bundleName);
+				if (wantDump64) {
+					TCHAR dump64[MAX_PATH * 2] = {};
+					TCHAR dumpRoot[MAX_PATH * 2] = {};
+					_sntprintf_s(dump64, _TRUNCATE, L"%s\\x64\\%s", bundleDir, kTab[i].bundleName);
+					_sntprintf_s(dumpRoot, _TRUNCATE, L"%s\\%s", bundleDir, kTab[i].bundleName);
+					if (KpiInstallFileExists(dump64) && KpiInstallLooksLikeDump(dump64))
+						_tcscpy_s(src, dump64);
+					else if (KpiInstallFileExists(dumpRoot) && KpiInstallLooksLikeDump(dumpRoot))
+						_tcscpy_s(src, dumpRoot);
+				}
 			}
 
 			if (kTab[i].gateRel) {
@@ -1443,7 +1520,26 @@ BOOL KpiInstall_SilentUpdateFmMonKpis(LPCTSTR exeDir)
 				continue;
 			const time_t tDst = KpiInstallFileExists(dst) ? KpiInstallFileMtimeUtc(dst) : 0;
 			const time_t tSrc = KpiInstallFileMtimeUtc(src);
-			if (tSrc != 0 && tDst != 0 && tSrc <= tDst + 2)
+			const BOOL dstDump = KpiInstallFileExists(dst) ? KpiInstallLooksLikeDump(dst) : FALSE;
+			const BOOL srcDump = KpiInstallLooksLikeDump(src);
+			const ULONGLONG szDst = KpiInstallFileExists(dst) ? KpiInstallFileSize(dst) : 0;
+			const ULONGLONG szSrc = KpiInstallFileSize(src);
+			/* ストック AVX2 の方が新しいと dump が戻らない。先に dump 無しなら bundle を強制。
+			   dump 同士でもサイズが違う＝AVX2 kbgme(252416) が日時勝ちで残るので上書き。
+			   ストックで dump を潰さない。kbgme は dump 以外を載せない（HES Open AV）。 */
+			if (!srcDump && dstDump)
+				continue;
+			if ((_tcsicmp(kTab[i].bundleName, L"kbgme.kpi") == 0
+				|| _tcsicmp(kTab[i].bundleName, L"kbnezplug.kpi") == 0) && !srcDump)
+				continue;
+			if (KpiInstallFileExists(dst) && KpiInstallPeMachine(dst) == IMAGE_FILE_MACHINE_AMD64
+				&& KpiInstallPeMachine(src) == IMAGE_FILE_MACHINE_I386)
+				continue; /* x86 ストックで x64 dump を潰さない */
+			if (srcDump && !dstDump) {
+				/* fall through copy */
+			} else if (srcDump && dstDump && szSrc != szDst && szSrc > 0 && szDst > 0) {
+				/* fall through copy */
+			} else if (tSrc != 0 && tDst != 0 && tSrc <= tDst + 2)
 				continue; /* 既に同等以上 */
 
 			{

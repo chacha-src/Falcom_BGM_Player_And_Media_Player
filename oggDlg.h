@@ -8,6 +8,26 @@
 // プレイリスト行の表示用メタデータを og 側へ反映(未再生時のバナー/情報パネル用)
 void ApplyPlaylistRowDisplay(const playlistdata0& row);
 void OggPersistSaveDatNow();
+/* IDirectSoundBuffer 操作の直列化。Lock 中に UI から Stop/Release するとドライバで戻らない。 */
+void DsOpEnter();
+void DsOpLeave();
+BOOL DsOpTryEnter();
+extern volatile LONG g_inPlaybackJoinPump;
+BOOL UiWaitHandlePumpSent(HANDLE h, DWORD timeoutMs);
+void COgg_DropPlaybackUiPostedMsg(UINT message);
+int PlaybackFillThreadAlive();
+int PlaybackFillInDecode();
+void PlaybackFillWake();
+struct DsOpLock {
+	DsOpLock() { DsOpEnter(); }
+	~DsOpLock() { DsOpLeave(); }
+};
+struct DsOpTryLock {
+	BOOL locked;
+	DsOpTryLock() : locked(DsOpTryEnter()) {}
+	~DsOpTryLock() { if (locked) DsOpLeave(); }
+	explicit operator bool() const { return locked != FALSE; }
+};
 /* 旧独立 FM モニタ旗 → MIDI モニタ旗。fmmonwindow=1 なら midimonwindow=1 にして FM 旗は落とす。 */
 void OggMigrateFmMonToMidiMonFlag();
 
@@ -516,6 +536,8 @@ double OggGetLyricsPlaySec();
 DWORD OggGetLyricsPlayCentis();
 /* バナーと同じ可聴 PCM フレーム（playb − DS 書込先行）。FM モニタ同期用 */
 __int64 OggGetHeardPcmFrames();
+/* DS 再生カーソルより後ろの analog。CLOCK_DUMP では使わない（900ms キューと二重） */
+__int64 OggGetAnalogAfterPlayFrames(int sr);
 /* DS に積んだが未再生のソースフレーム。-1 は未計測 */
 __int64 OggGetDsQueuedFrames();
 /* バナー経過(0:56.52)と同じソース PCM。VST MIDI の heard が 1/4 に落ちても WRD/@WAIT は壁時計に揃える */

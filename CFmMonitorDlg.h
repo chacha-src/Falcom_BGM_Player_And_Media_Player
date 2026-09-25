@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 // CFmMonitorDlg : SASAMI FPY / OPNA (YM2608) レジスタ・鍵盤モニタ
 // KPI/SASAMI: %TEMP%\ogg_kbsasami\*.opna
 // CEmu:       %TEMP%\ogg_cemu\*.opna （混ぜない）
@@ -51,9 +51,8 @@ protected:
 	afx_msg LRESULT OnComposeDone(WPARAM wParam, LPARAM lParam);
 
 private:
-	enum { HIST_MAX = 512 }; /* リング容量（keys-only 高解像度用） */
-	/* .fpy ~700ms / keys-only ~750ms。短すぎると可聴前 dump を捨てて無描画 */
-	enum { HIST_SOFT = 448 };
+	enum { HIST_MAX = 1024 }; /* SPC 等 ~1.5ms flush × DS キュー~900ms 分 */
+	enum { HIST_SOFT = 960 };
 
 	int PollDump(); /* live/ring を読み可聴位置の dump を Apply */
 	void ResetDumpSync(); /* 曲切替で履歴とハンドルを捨てる */

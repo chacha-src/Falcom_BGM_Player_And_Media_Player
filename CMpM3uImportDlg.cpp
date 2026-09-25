@@ -33,8 +33,8 @@ void CMpM3uImportDlg::DoDataExchange(CDataExchange* pDX)
 }
 
 BEGIN_MESSAGE_MAP(CMpM3uImportDlg, CCustomBlurDialogBase)
-	ON_BN_CLICKED(IDC_MPI_BROWSE, &CMpM3uImportDlg::OnBrowse)
-	ON_BN_CLICKED(IDC_MPI_IMPORT, &CMpM3uImportDlg::OnImport)
+	ON_BN_CLICKED(IDC_MPI_BROWSE, OnBrowse)
+	ON_BN_CLICKED(IDC_MPI_IMPORT, OnImport)
 	ON_WM_DROPFILES()
 	ON_WM_CTLCOLOR()
 END_MESSAGE_MAP()

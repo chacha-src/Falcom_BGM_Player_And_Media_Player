@@ -1,4 +1,4 @@
-﻿// ogg.cpp : アプリケーション用クラスの定義を行います。
+// ogg.cpp : アプリケーション用クラスの定義を行います。
 //
 
 #include "stdafx.h"
@@ -41,8 +41,6 @@ END_MESSAGE_MAP()
 
 COggApp::COggApp()
 {
-	// TODO: この位置に構築用のコードを追加してください。
-	// ここに InitInstance 中の重要な初期化処理をすべて記述してください。
 }
 
 void COggApp::OnAppOfflineHelp()

@@ -1,4 +1,4 @@
-﻿// �\�t�g�E�F�AMIDI�V���Z�T�C�U�B
+// �\�t�g�E�F�AMIDI�V���Z�T�C�U�B
 // Copyright(c)2003-2004 yuno
 //�ǉ� by Kobarin
 #pragma warning(disable:4305)
@@ -1586,7 +1586,7 @@ namespace std{
 
     // FM�m�[�g�̃R���X�g���N�^�B
     fm_note::fm_note(const FMPARAMETER& params, int note, int velocity_, int panpot, int assign, double frequency_multiplier):
-        note(assign, panpot),
+        ::note(assign, panpot),
         fm(params, note, frequency_multiplier),
         velocity(velocity_)
     {
@@ -1666,6 +1666,11 @@ namespace std{
     bool fm_note_factory::load_wopn(const wchar_t* path, int family, int append)
     {
         return ym && ym->load(path, family, append);
+    }
+    void fm_note_factory::reset_pool_frame()
+    {
+        if (ym)
+            ym->reset_render_frame();
     }
     // �N���A�B
     void fm_note_factory::clear()

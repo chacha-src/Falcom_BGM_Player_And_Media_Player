@@ -1,4 +1,4 @@
-﻿#include "stdafx.h"
+#include "stdafx.h"
 #include "CPromptDlg.h"
 #include "CPromptEngine.h"
 #include "CPromptAnalyze.h"
@@ -237,18 +237,18 @@ void CPromptDlg::DoDataExchange(CDataExchange* pDX)
 }
 
 BEGIN_MESSAGE_MAP(CPromptDlg, CCustomBlurDialogExBase)
-	ON_BN_CLICKED(IDC_MPP_RUN, &CPromptDlg::OnRun)
-	ON_BN_CLICKED(IDC_MPP_ANALYZE, &CPromptDlg::OnAnalyze)
-	ON_BN_CLICKED(IDC_MPP_ROLL, &CPromptDlg::OnRoll)
-	ON_BN_CLICKED(IDC_MPP_STOP, &CPromptDlg::OnStop)
-	ON_BN_CLICKED(IDC_MPP_RESET, &CPromptDlg::OnReset)
-	ON_BN_CLICKED(IDC_MPP_CLEAR, &CPromptDlg::OnClear)
-	ON_BN_CLICKED(IDC_MPP_CLOSE, &CPromptDlg::OnCloseBtn)
-	ON_BN_CLICKED(IDC_MPP_SAVEHIST, &CPromptDlg::OnSaveHist)
-	ON_BN_CLICKED(IDC_PRM_HELP, &CPromptDlg::OnHelpBtn)
-	ON_CBN_SELCHANGE(IDC_MPP_HIST, &CPromptDlg::OnHistSel)
-	ON_CBN_SELCHANGE(IDC_MPP_MODE, &CPromptDlg::OnModeSel)
-	ON_EN_CHANGE(IDC_MPP_TEXT, &CPromptDlg::OnTextChanged)
+	ON_BN_CLICKED(IDC_MPP_RUN, OnRun)
+	ON_BN_CLICKED(IDC_MPP_ANALYZE, OnAnalyze)
+	ON_BN_CLICKED(IDC_MPP_ROLL, OnRoll)
+	ON_BN_CLICKED(IDC_MPP_STOP, OnStop)
+	ON_BN_CLICKED(IDC_MPP_RESET, OnReset)
+	ON_BN_CLICKED(IDC_MPP_CLEAR, OnClear)
+	ON_BN_CLICKED(IDC_MPP_CLOSE, OnCloseBtn)
+	ON_BN_CLICKED(IDC_MPP_SAVEHIST, OnSaveHist)
+	ON_BN_CLICKED(IDC_PRM_HELP, OnHelpBtn)
+	ON_CBN_SELCHANGE(IDC_MPP_HIST, OnHistSel)
+	ON_CBN_SELCHANGE(IDC_MPP_MODE, OnModeSel)
+	ON_EN_CHANGE(IDC_MPP_TEXT, OnTextChanged)
 	ON_WM_CONTEXTMENU()
 	ON_WM_SIZE()
 	ON_WM_ENTERSIZEMOVE()
@@ -1397,7 +1397,7 @@ void CPromptDlg::OnRun()
 	SaveTextToSavedata();
 	if (!MpPromptExecute(text, &err)) {
 		AfxMessageBox(err.IsEmpty()
-			? LL14(L"プロンプトの解析に失敗しました。", L"Failed to parse prompt.", L"Echec analyse prompt.", L"Analisi prompt fallita.", L"Error al analizar prompt.", L"프롬프트 해석 실패.", L"提示解析失败。", L"فشل تحليل الموجه.", L"Ошибка разбора промпта.", L"Prompt parsen fehlgeschlagen.", L"Falha ao analisar prompt.", L"Prompt parseren mislukt.", L"Blad parsowania promptu.", L"Istem ayrıştırılamadı.")
+			? CString(LL14(L"プロンプトの解析に失敗しました。", L"Failed to parse prompt.", L"Echec analyse prompt.", L"Analisi prompt fallita.", L"Error al analizar prompt.", L"프롬프트 해석 실패.", L"提示解析失败。", L"فشل تحليل الموجه.", L"Ошибка разбора промпта.", L"Prompt parsen fehlgeschlagen.", L"Falha ao analisar prompt.", L"Prompt parseren mislukt.", L"Blad parsowania promptu.", L"Istem ayrıştırılamadı."))
 			: err);
 		return;
 	}
@@ -1474,7 +1474,7 @@ void CPromptDlg::OnAnalyze()
 	cur.Trim();
 	const BOOL hasText = !cur.IsEmpty();
 	CString ask = hasText
-		? LL14(L"選択中の曲を読込しながら解析します。\r\n再生中の曲は一時停止されます。\r\n入力欄の内容は解析結果で上書きされます。よろしいですか？",
+		? CString(LL14(L"選択中の曲を読込しながら解析します。\r\n再生中の曲は一時停止されます。\r\n入力欄の内容は解析結果で上書きされます。よろしいですか？",
 			L"Analyze the selected track while loading.\r\nCurrent playback will pause.\r\nThe input text will be replaced by the result. Continue?",
 			L"Analyser la piste.\r\nLecture interrompue.\r\nLe texte sera remplace. Continuer ?",
 			L"Analizzare la traccia.\r\nRiproduzione interrotta.\r\nIl testo sara sostituito. Continuare?",
@@ -1487,8 +1487,8 @@ void CPromptDlg::OnAnalyze()
 			L"Analisar a faixa.\r\nReproducao pausada.\r\nO texto sera substituido. Continuar?",
 			L"Track analyseren.\r\nAfspelen pauzeert.\r\nTekst wordt vervangen. Doorgaan?",
 			L"Analiza utworu.\r\nOdtwarzanie wstrzymane.\r\nTekst zostanie zastapiony. Kontynuowac?",
-			L"Parcayi analiz et.\r\nCalma duraklar.\r\nMetin degistirilir. Devam?")
-		: LL14(L"選択中の曲を読込しながら解析します。\r\n再生中の曲は一時停止されます。よろしいですか？",
+			L"Parcayi analiz et.\r\nCalma duraklar.\r\nMetin degistirilir. Devam?"))
+		: CString(LL14(L"選択中の曲を読込しながら解析します。\r\n再生中の曲は一時停止されます。よろしいですか？",
 			L"Analyze the selected track while loading.\r\nCurrent playback will pause. Continue?",
 			L"Analyser la piste selectionnee.\r\nLa lecture en cours sera interrompue. Continuer ?",
 			L"Analizzare la traccia selezionata.\r\nLa riproduzione verra interrotta. Continuare?",
@@ -1501,7 +1501,7 @@ void CPromptDlg::OnAnalyze()
 			L"Analisar a faixa selecionada.\r\nA reproducao sera pausada. Continuar?",
 			L"Geselecteerde track analyseren.\r\nAfspelen wordt gepauzeerd. Doorgaan?",
 			L"Analiza wybranego utworu.\r\nOdtwarzanie zostanie wstrzymane. Kontynuowac?",
-			L"Secili parcayi analiz et.\r\nCalma duraklar. Devam?");
+			L"Secili parcayi analiz et.\r\nCalma duraklar. Devam?"));
 	if (AfxMessageBox(ask, MB_YESNO | MB_ICONQUESTION) != IDYES)
 		return;
 
@@ -1524,7 +1524,7 @@ void CPromptDlg::OnAnalyze()
 
 	if (!ok) {
 		AfxMessageBox(err.IsEmpty()
-			? LL14(L"解析に失敗しました。", L"Analysis failed.", L"Echec analyse.", L"Analisi fallita.", L"Error de analisis.", L"분석 실패.", L"分析失败。", L"فشل التحليل.", L"Ошибка анализа.", L"Analyse fehlgeschlagen.", L"Falha na analise.", L"Analyse mislukt.", L"Blad analizy.", L"Analiz basarisiz.")
+			? CString(LL14(L"解析に失敗しました。", L"Analysis failed.", L"Echec analyse.", L"Analisi fallita.", L"Error de analisis.", L"분석 실패.", L"分析失败。", L"فشل التحليل.", L"Ошибка анализа.", L"Analyse fehlgeschlagen.", L"Falha na analise.", L"Analyse mislukt.", L"Blad analizy.", L"Analiz basarisiz."))
 			: err);
 		return;
 	}

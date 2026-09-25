@@ -45,8 +45,8 @@ void CSasamiSimpleInputDlg::DoDataExchange(CDataExchange* pDX)
 }
 
 BEGIN_MESSAGE_MAP(CSasamiSimpleInputDlg, CCustomBlurDialogExBase)
-	ON_BN_CLICKED(IDOK, &CSasamiSimpleInputDlg::OnBnClickedOk)
-	ON_BN_CLICKED(IDCANCEL, &CSasamiSimpleInputDlg::OnBnClickedCancel)
+	ON_BN_CLICKED(IDOK, OnBnClickedOk)
+	ON_BN_CLICKED(IDCANCEL, OnBnClickedCancel)
 	ON_WM_SIZE()
 	ON_WM_PAINT()
 	ON_WM_ERASEBKGND()

@@ -849,15 +849,20 @@ static int FmIsArcadePcmProfile(unsigned p)
 		|| p == SASAMI_FMMON_KEYS_MULTIPCM
 		|| p == SASAMI_FMMON_KEYS_C352
 		|| p == SASAMI_FMMON_KEYS_SEGAPCM
-		|| p == SASAMI_FMMON_KEYS_OKI) ? 1 : 0;
+		|| p == SASAMI_FMMON_KEYS_OKI
+		|| p == SASAMI_FMMON_KEYS_NCSF
+		|| p == SASAMI_FMMON_KEYS_SPC
+		|| p == SASAMI_FMMON_KEYS_PSF) ? 1 : 0;
 }
 
 static int FmArcadePcmChannels(unsigned p)
 {
 	if (p == SASAMI_FMMON_KEYS_OKI) return 4;
 	if (p == SASAMI_FMMON_KEYS_RF5C) return 8;
+	if (p == SASAMI_FMMON_KEYS_SPC) return 8;
 	if (p == SASAMI_FMMON_KEYS_MULTIPCM) return 32;
 	if (p == SASAMI_FMMON_KEYS_C352) return 32;
+	if (p == SASAMI_FMMON_KEYS_PSF) return 24;
 	return 16;
 }
 
@@ -870,6 +875,9 @@ static const wchar_t* FmArcadePcmName(unsigned p)
 	case SASAMI_FMMON_KEYS_C352: return L"C352";
 	case SASAMI_FMMON_KEYS_SEGAPCM: return L"SegaPCM";
 	case SASAMI_FMMON_KEYS_OKI: return L"OKI6295";
+	case SASAMI_FMMON_KEYS_NCSF: return L"Nitro SPU";
+	case SASAMI_FMMON_KEYS_SPC: return L"S-DSP";
+	case SASAMI_FMMON_KEYS_PSF: return L"PS1 SPU";
 	default: return L"ArcadePCM";
 	}
 }
@@ -883,6 +891,9 @@ static const wchar_t* FmArcadePcmShort(unsigned p)
 	case SASAMI_FMMON_KEYS_C352: return L"C352";
 	case SASAMI_FMMON_KEYS_SEGAPCM: return L"SPCM";
 	case SASAMI_FMMON_KEYS_OKI: return L"OKI";
+	case SASAMI_FMMON_KEYS_NCSF: return L"NDS";
+	case SASAMI_FMMON_KEYS_SPC: return L"DSP";
+	case SASAMI_FMMON_KEYS_PSF: return L"SPU";
 	default: return L"PCM";
 	}
 }
@@ -1034,7 +1045,7 @@ BEGIN_MESSAGE_MAP(CFmMonitorDlg, CCustomBlurDialogExBase)
 	ON_WM_TIMER()
 	ON_WM_SYSCOMMAND()
 	ON_WM_SHOWWINDOW()
-	ON_BN_CLICKED(IDC_FM_HELP, &CFmMonitorDlg::OnBnClickedHelp)
+	ON_BN_CLICKED(IDC_FM_HELP, OnBnClickedHelp)
 	ON_MESSAGE(WM_APP + 0x46, OnComposeDone)
 END_MESSAGE_MAP()
 
@@ -1587,8 +1598,8 @@ int CFmMonitorDlg::IsArcadePcmDump() const
 	wchar_t y[8];
 	/* xxxx+yyyy は FM パネルと PCM を連結するので、PCM 専用殻にしない */
 	if (FmIdentYyyy(m_dump.titleSjis, y, 8)) return 0;
-	/* YM3438+MultiPCM 混載は hex/パネルを OPN のまま（regs を PCM で上書きしない） */
-	if (!KeysOnly() && ChipProfile() == SASAMI_FMMON_KEYS_MULTIPCM)
+	/* YM2612+RF5C / YM3438+MultiPCM: KEYSONLY でなければ OPNA 殻 */
+	if (!KeysOnly())
 		return 0;
 	return 1;
 }
@@ -1846,13 +1857,13 @@ int CFmMonitorDlg::PreferOpnaShell() const
 	/* 停止中に最後の OPNA/OPM 等ダンプが残っている場合はそのまま */
 	if (!m_haveDump)
 		return 1;
-	if (FmIsArcadePcmProfile(ChipProfile()))
+	if (KeysOnly() && FmIsArcadePcmProfile(ChipProfile()))
 		return 0;
 	/* PC/AT の BEEP/CMS/MPU: 実 aux レジスタがあるので空の OPNA 殻を出さない */
 	if (KeysOnly() && HasViewRegs() && m_dump.titleSjis[0]
 		&& strstr(m_dump.titleSjis, "PC/AT"))
 		return 0;
-	/* MIDI / SPC 等 keys-only で専用 hex・パネルが無い → OPNA をデフォルト殻に */
+	/* MIDI 等 keys-only で専用 hex・パネルが無い → OPNA をデフォルト殻に */
 	if (KeysOnly() && !IsOpmDump() && !IsOplDump() && !IsMsxDump())
 		return 1;
 	return 0;
@@ -1903,7 +1914,8 @@ static int FmPlayCemuPlatLagMs(const char* id)
 	return -1;
 }
 
-/* 可聴ラグは dump 自己記述。mode/拡張子では分けない */
+/* CLOCK_DUMP は dump.curSample（デコード）−このラグ。kbsasami は 900ms（fix2–7）。
+   再生カーソルや WASAPI analog を足すと二重になる。 */
 static int FmPlayHeardLagMs(const SasamiFmMonDump* d)
 {
 	const unsigned dumpFlags = d ? d->dumpFlags : 0u;
@@ -1913,12 +1925,13 @@ static int FmPlayHeardLagMs(const SasamiFmMonDump* d)
 			return fromDump;
 		if (dumpFlags & SASAMI_FMMON_FLAG_FMP)
 			return 700;
-		if (dumpFlags & (SASAMI_FMMON_FLAG_MSX | SASAMI_FMMON_FLAG_OPM))
-			return 600;
-		if (dumpFlags & SASAMI_FMMON_FLAG_KEYSONLY)
-			return 750;
-		/* kbsasami などフラグ無し CLOCK_DUMP。550 だと鍵盤が 100-200ms 先行する */
+		/* CLOCK_DUMP: kbsasami 一致の 900ms。KEYSONLY/MSX/OPM を 820 にすると約 80ms ずれる */
 		return 900;
+	}
+	if (IsCemuMode(mode)) {
+		const int fromDump = FmPlayCemuPlatLagMs(d ? d->titleSjis : NULL);
+		if (fromDump >= 0)
+			return fromDump;
 	}
 	if (dumpFlags & SASAMI_FMMON_FLAG_FMP)
 		return 700;
@@ -1957,28 +1970,27 @@ uint64_t CFmMonitorDlg::AdvanceHeard(__int64 frames, uint32_t srDump)
 	return heard;
 }
 
-/* 今聞こえているサンプル位置。CLOCK_DUMP なら dump.curSample からラグを引く */
+/* 今聞こえているサンプル位置。CLOCK_DUMP は dump.curSample−ラグ（fix2–7 と同じ）。
+   可聴を再生カーソルに置き換えると kbsasami の 900ms 先読みと単位が食い違う。 */
 uint64_t CFmMonitorDlg::HeardSample(uint32_t sampleRate)
 {
-	extern int playy;
 	extern int wavbit_sample_Hz;
 	const uint32_t srDump = sampleRate > 0 ? sampleRate : 44100;
-
-	__int64 frames = 0;
 	const SasamiFmMonDump* lastD = (m_histN > 0)
 		? &m_hist[(m_histHead + m_histN - 1) % HIST_MAX] : NULL;
 	const int useDumpClock = (lastD && SasamiFmMonDumpClock(*lastD)) ? 1 : 0;
+	__int64 frames = 0;
 	if (useDumpClock) {
 		const int li = (m_histHead + m_histN - 1) % HIST_MAX;
 		const uint64_t latest = m_histSamp[li];
-		unsigned lagMs = (unsigned)FmPlayHeardLagMs(lastD);
+		const unsigned lagMs = (unsigned)FmPlayHeardLagMs(lastD);
 		const uint64_t lag = (uint64_t)srDump * lagMs / 1000u;
 		frames = (latest > lag) ? (__int64)(latest - lag) : 0;
 	} else {
 		const int srSrc = (wavbit_sample_Hz > 0) ? wavbit_sample_Hz : (int)srDump;
 		frames = OggGetHeardPcmFrames();
 		if (frames < 0) frames = 0;
-		if (srSrc != (int)srDump)
+		if (srSrc != (int)srDump && srSrc > 0)
 			frames = frames * (__int64)srDump / (__int64)srSrc;
 		frames -= (__int64)srDump * FmPlayHeardLagMs(lastD) / 1000;
 		if (frames < 0) frames = 0;
@@ -4924,6 +4936,24 @@ void CFmMonitorDlg::DrawArcadePcmChPanel(CDC& dc, const CRect& rc, int ch, unsig
 			pan = ch;
 			pitch = ((int)b(o + 1) << 8) | (int)b(o + 2);
 		}
+	} else if (profile == SASAMI_FMMON_KEYS_NCSF) {
+		const int base = ch * 4;
+		ctl = b(base + 0);
+		vol = b(base + 1);
+		pitch = (int)b(base + 2) | ((int)b(base + 3) << 8);
+		pan = ch;
+	} else if (profile == SASAMI_FMMON_KEYS_SPC) {
+		const int base = ch * 0x10;
+		vol = b(base + 0);
+		pan = b(base + 1);
+		pitch = (int)b(base + 2) | (((int)b(base + 3) & 0x3F) << 8);
+		ctl = b(base + 4);
+	} else if (profile == SASAMI_FMMON_KEYS_PSF) {
+		const int base = ch * 8;
+		ctl = b(base + 0);
+		vol = b(base + 1);
+		pitch = (int)b(base + 2) | ((int)b(base + 3) << 8);
+		pan = b(base + 4);
 	}
 
 	const int live = FmMonShowKeys();
@@ -5721,32 +5751,16 @@ int CFmMonitorDlg::PollDump()
 	TrimHistForHeard(heard, rate);
 	if (m_histN <= 0) return 0;
 
-	/* dump.curSample = その tick の PCM 開始位置 / heard = 可聴位置 */
+	/* dump.curSample = デコード書き込み位置 / heard = DS 再生カーソル。
+	   未来の dump を出さない。履歴が可聴まで届いていなければ待つ（先行表示しない）。 */
 	int bestN = -1;
 	for (int n = 0; n < m_histN; n++) {
 		const int i = (m_histHead + n) % HIST_MAX;
 		if (m_histSamp[i] <= heard)
 			bestN = n;
 	}
-	if (bestN < 0) {
-		if (!FmMonIsLive())
-			return m_haveDump ? 1 : 0;
-		/* dump 時計（CEmu / keys-only）は未来を出さない。レジスタ dump は最古で始動 */
-		const int li = (m_histHead + m_histN - 1) % HIST_MAX;
-		if (SasamiFmMonDumpClock(m_hist[li]))
-			return m_haveDump ? 1 : 0;
-		/* 可聴より先だけ（起動直後・ラグ中）→ 最古を出して始動。出さないと無描画 */
-		uint64_t minS = UINT64_MAX;
-		for (int n = 0; n < m_histN; n++) {
-			const int i = (m_histHead + n) % HIST_MAX;
-			if (m_histSamp[i] < minS) {
-				minS = m_histSamp[i];
-				bestN = n;
-			}
-		}
-		if (bestN < 0)
-			return m_haveDump ? 1 : 0;
-	}
+	if (bestN < 0)
+		return m_haveDump ? 1 : 0;
 
 	int curN = -1;
 	for (int n = 0; n < m_histN; n++) {
@@ -5774,6 +5788,23 @@ int CFmMonitorDlg::PollDump()
 		return 1;
 	const int fromN = (curN < 0) ? nextN : (curN + 1);
 	if (fromN > nextN) return 1;
+
+	const SasamiFmMonDump& bestDump = m_hist[(m_histHead + bestN) % HIST_MAX];
+	/* KEYSONLY（SPC/KSS）は seq が発音イベント。間を 12 枚 Apply すると
+	   ヘッダ seq が一気に飛ぶ。可聴位置の 1 枚だけ出す。FMP は 8分/16分用に間を残す。 */
+	if (bestDump.dumpFlags & SASAMI_FMMON_FLAG_KEYSONLY) {
+		int applied = 0;
+		if (!(m_haveDump && bestDump.seq == m_lastSeq
+			&& bestDump.curSample == m_lastCurSample)) {
+			ApplyDump(bestDump);
+			applied = 1;
+		}
+		if (bestN > 0 && bestN < m_histN) {
+			m_histHead = (m_histHead + bestN) % HIST_MAX;
+			m_histN -= bestN;
+		}
+		return applied || m_haveDump;
+	}
 
 	/* 間の dump は畳まない（8分/16分が消える）。ただし一回で全部 Apply すると
 	   UI が止まり、演奏中の終了が戻ってこない。残りは次のタイマーで続ける。 */
@@ -5922,7 +5953,13 @@ void CFmMonitorDlg::ApplyPcAudioKeys(const BYTE levels108[108])
 void CFmMonitorDlg::PumpSyncNow()
 {
 	if (m_inPrint || m_inPump) return;
-	if (!::IsWindow(GetSafeHwnd()) || !IsWindowVisible() || IsIconic())
+	if (!::IsWindow(GetSafeHwnd()))
+		return;
+	if (IsIconic())
+		return;
+	/* hosted 子は親の CLIPCHILDREN / アクリルで IsWindowVisible が 0 のことがある。
+	   そこで return すると PollDump 自体が止まり dump 待機のまま固まる。 */
+	if (!m_hosted && !IsWindowVisible())
 		return;
 	m_inPump = 1;
 	struct PumpDone { int* p; ~PumpDone() { *p = 0; } } done{ &m_inPump };
@@ -5936,6 +5973,10 @@ void CFmMonitorDlg::PumpSyncNow()
 
 	if (m_hosted) {
 		Invalidate(FALSE);
+		/* timerp が WM_TIMERP を積み続けると WM_PAINT が飢える。
+		   ファイル情報の入れ子ループだけが描いていた。即 Present する。 */
+		if (GetStyle() & WS_VISIBLE)
+			UpdateWindow();
 		return;
 	}
 

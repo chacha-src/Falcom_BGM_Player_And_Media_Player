@@ -1,4 +1,4 @@
-﻿#include "stdafx.h"
+#include "stdafx.h"
 #include "ogg.h"
 #include "CSasamiMidiScoreDlg.h"
 #include "CSasamiFmScoreDlg.h"
@@ -118,30 +118,30 @@ BEGIN_MESSAGE_MAP(CSasamiTextDlg, CCustomBlurDialogExBase)
 	ON_WM_CLOSE()
 	ON_WM_DESTROY()
 	ON_WM_CONTEXTMENU()
-	ON_BN_CLICKED(IDC_SASAMI_TEXT_COMPILE, &CSasamiTextDlg::OnBnClickedCompile)
-	ON_BN_CLICKED(IDC_SASAMI_TEXT_SAVE, &CSasamiTextDlg::OnBnClickedSave)
-	ON_BN_CLICKED(IDC_SASAMI_TEXT_OPEN, &CSasamiTextDlg::OnBnClickedOpen)
-	ON_BN_CLICKED(IDC_SASAMI_TEXT_NEW, &CSasamiTextDlg::OnBnClickedNew)
-	ON_BN_CLICKED(IDC_SASAMI_TEXT_PLAY, &CSasamiTextDlg::OnBnClickedPlay)
-	ON_BN_CLICKED(IDC_SASAMI_TEXT_HELP, &CSasamiTextDlg::OnBnClickedHelp)
-	ON_BN_CLICKED(IDC_SASAMI_TEXT_VST, &CSasamiTextDlg::OnBnClickedInsertVst)
-	ON_BN_CLICKED(IDC_SASAMI_TEXT_EXPORT, &CSasamiTextDlg::OnBnClickedExport)
-	ON_BN_CLICKED(IDC_SASAMI_TEXT_SCORE, &CSasamiTextDlg::OnBnClickedScore)
-	ON_BN_CLICKED(IDC_SASAMI_TEXT_MODE, &CSasamiTextDlg::OnBnClickedMode)
-	ON_BN_CLICKED(IDC_SASAMI_TEXT_B64FOLD, &CSasamiTextDlg::OnBnClickedB64Fold)
-	ON_EN_CHANGE(IDC_SASAMI_TEXT_EDIT, &CSasamiTextDlg::OnEnChange)
+	ON_BN_CLICKED(IDC_SASAMI_TEXT_COMPILE, OnBnClickedCompile)
+	ON_BN_CLICKED(IDC_SASAMI_TEXT_SAVE, OnBnClickedSave)
+	ON_BN_CLICKED(IDC_SASAMI_TEXT_OPEN, OnBnClickedOpen)
+	ON_BN_CLICKED(IDC_SASAMI_TEXT_NEW, OnBnClickedNew)
+	ON_BN_CLICKED(IDC_SASAMI_TEXT_PLAY, OnBnClickedPlay)
+	ON_BN_CLICKED(IDC_SASAMI_TEXT_HELP, OnBnClickedHelp)
+	ON_BN_CLICKED(IDC_SASAMI_TEXT_VST, OnBnClickedInsertVst)
+	ON_BN_CLICKED(IDC_SASAMI_TEXT_EXPORT, OnBnClickedExport)
+	ON_BN_CLICKED(IDC_SASAMI_TEXT_SCORE, OnBnClickedScore)
+	ON_BN_CLICKED(IDC_SASAMI_TEXT_MODE, OnBnClickedMode)
+	ON_BN_CLICKED(IDC_SASAMI_TEXT_B64FOLD, OnBnClickedB64Fold)
+	ON_EN_CHANGE(IDC_SASAMI_TEXT_EDIT, OnEnChange)
 	ON_WM_TIMER()
 END_MESSAGE_MAP()
 
 void CSasamiTextDlg::ApplyLang()
 {
 	CString title = m_modeFm
-		? LL14(L"SASAMI テキスト [FM/OPNA]", L"SASAMI Text [FM/OPNA]", L"Texte SASAMI [FM/OPNA]", L"Testo SASAMI [FM/OPNA]", L"Texto SASAMI [FM/OPNA]",
+		? CString(LL14(L"SASAMI テキスト [FM/OPNA]", L"SASAMI Text [FM/OPNA]", L"Texte SASAMI [FM/OPNA]", L"Testo SASAMI [FM/OPNA]", L"Texto SASAMI [FM/OPNA]",
 			L"SASAMI 텍스트 [FM/OPNA]", L"SASAMI 文本 [FM/OPNA]", L"نص SASAMI [FM/OPNA]", L"Текст SASAMI [FM/OPNA]", L"SASAMI Text [FM/OPNA]",
-			L"Texto SASAMI [FM/OPNA]", L"SASAMI-tekst [FM/OPNA]", L"Tekst SASAMI [FM/OPNA]", L"SASAMI Metin [FM/OPNA]")
-		: LL14(L"SASAMI テキスト [MIDI/MICP]", L"SASAMI Text [MIDI/MICP]", L"Texte SASAMI [MIDI/MICP]", L"Testo SASAMI [MIDI/MICP]", L"Texto SASAMI [MIDI/MICP]",
+			L"Texto SASAMI [FM/OPNA]", L"SASAMI-tekst [FM/OPNA]", L"Tekst SASAMI [FM/OPNA]", L"SASAMI Metin [FM/OPNA]"))
+		: CString(LL14(L"SASAMI テキスト [MIDI/MICP]", L"SASAMI Text [MIDI/MICP]", L"Texte SASAMI [MIDI/MICP]", L"Testo SASAMI [MIDI/MICP]", L"Texto SASAMI [MIDI/MICP]",
 			L"SASAMI 텍스트 [MIDI/MICP]", L"SASAMI 文本 [MIDI/MICP]", L"نص SASAMI [MIDI/MICP]", L"Текст SASAMI [MIDI/MICP]", L"SASAMI Text [MIDI/MICP]",
-			L"Texto SASAMI [MIDI/MICP]", L"SASAMI-tekst [MIDI/MICP]", L"Tekst SASAMI [MIDI/MICP]", L"SASAMI Metin [MIDI/MICP]");
+			L"Texto SASAMI [MIDI/MICP]", L"SASAMI-tekst [MIDI/MICP]", L"Tekst SASAMI [MIDI/MICP]", L"SASAMI Metin [MIDI/MICP]"));
 	SetWindowText(title);
 	m_btnCompile.SetWindowText(LL14(L"コンパイル", L"Compile", L"Compiler", L"Compila", L"Compilar", L"컴파일", L"编译", L"تجميع", L"Собрать", L"Kompilieren", L"Compilar", L"Compileren", L"Kompiluj", L"Derle"));
 	m_btnSave.SetWindowText(LL14(L"保存", L"Save", L"Enregistrer", L"Salva", L"Guardar", L"저장", L"保存", L"حفظ", L"Сохранить", L"Speichern", L"Salvar", L"Opslaan", L"Zapisz", L"Kaydet"));
@@ -153,8 +153,8 @@ void CSasamiTextDlg::ApplyLang()
 	if (m_btnMode.GetSafeHwnd()) m_btnMode.SetWindowText(m_modeFm ? L"->MIDI" : L"->FM");
 	m_btnHelp.SetWindowText(LL14(L"ヘルプ", L"Help", L"Aide", L"Guida", L"Ayuda", L"도움말", L"帮助", L"مساعدة", L"Справка", L"Hilfe", L"Ajuda", L"Help", L"Pomoc", L"Yardım"));
 	m_btnVst.SetWindowText(m_modeFm
-		? LL14(L"FM音色編集", L"FM voice edit", L"Note timbre FM", L"Nota voce FM", L"Nota voz FM", L"FM 음색 메모", L"FM音色备注", L"ملاحظة صوت FM", L"Заметка FM", L"FM-Klang-Notiz", L"Nota voz FM", L"FM-klanknotitie", L"Notatka FM", L"FM ses notu")
-		: LL14(L"VST音色挿入", L"Insert VST", L"Insérer VST", L"Inserisci VST", L"Insertar VST", L"VST 삽입", L"插入VST", L"إدراج VST", L"Вставить VST", L"VST einfügen", L"Inserir VST", L"VST invoegen", L"Wstaw VST", L"VST ekle"));
+		? CString(LL14(L"FM音色編集", L"FM voice edit", L"Note timbre FM", L"Nota voce FM", L"Nota voz FM", L"FM 음색 메모", L"FM音色备注", L"ملاحظة صوت FM", L"Заметка FM", L"FM-Klang-Notiz", L"Nota voz FM", L"FM-klanknotitie", L"Notatka FM", L"FM ses notu"))
+		: CString(LL14(L"VST音色挿入", L"Insert VST", L"Insérer VST", L"Inserisci VST", L"Insertar VST", L"VST 삽입", L"插入VST", L"إدراج VST", L"Вставить VST", L"VST einfügen", L"Inserir VST", L"VST invoegen", L"Wstaw VST", L"VST ekle")));
 	m_btnExport.SetWindowText(LL14(L"書き出し", L"Export", L"Exporter", L"Esporta", L"Exportar", L"내보내기", L"导出", L"تصدير", L"Экспорт", L"Export", L"Exportar", L"Exporteren", L"Eksport", L"Disa aktar"));
 }
 
@@ -368,8 +368,8 @@ void CSasamiTextDlg::UpdateB64FoldButton()
 	m_btnB64Fold.ShowWindow(show);
 	if (show == SW_HIDE) return;
 	m_btnB64Fold.SetWindowText(m_b64Expanded
-		? LL14(L"B64▼", L"B64 expand", L"B64 ouvrir", L"B64 apri", L"B64 abrir", L"B64 펼침", L"B64展开", L"B64 فتح", L"B64 раскрыть", L"B64 auf", L"B64 abrir", L"B64 open", L"B64 rozwin", L"B64 ac")
-		: LL14(L"B64▶", L"B64 fold", L"B64 plier", L"B64 piega", L"B64 plegar", L"B64 접기", L"B64折叠", L"B64 طي", L"B64 свернуть", L"B64 zu", L"B64 dobrar", L"B64 dicht", L"B64 zwin", L"B64 katla"));
+		? CString(LL14(L"B64▼", L"B64 expand", L"B64 ouvrir", L"B64 apri", L"B64 abrir", L"B64 펼침", L"B64展开", L"B64 فتح", L"B64 раскрыть", L"B64 auf", L"B64 abrir", L"B64 open", L"B64 rozwin", L"B64 ac"))
+		: CString(LL14(L"B64▶", L"B64 fold", L"B64 plier", L"B64 piega", L"B64 plegar", L"B64 접기", L"B64折叠", L"B64 طي", L"B64 свернуть", L"B64 zu", L"B64 dobrar", L"B64 dicht", L"B64 zwin", L"B64 katla")));
 }
 
 void CSasamiTextDlg::ReloadFullTextFromScore()
@@ -421,8 +421,8 @@ void CSasamiTextDlg::OnBnClickedB64Fold()
 	CString st;
 	st.Format(L"%s @VSTSTATEB64 / @VSTCTRLB64",
 		m_b64Expanded
-			? LL14(L"展開中 — 編集可", L"Expanded — editable", L"Ouvert", L"Aperto", L"Abierto", L"펼침", L"已展开", L"مفتوح", L"Развернуто", L"Aufgeklappt", L"Aberto", L"Open", L"Rozwiniete", L"Acik")
-			: LL14(L"折りたたみ中 — 展開で編集", L"Folded — expand to edit blobs", L"Replié", L"Ripiegato", L"Plegado", L"접힘", L"已折叠", L"مطوي", L"Свернуто", L"Eingeklappt", L"Dobrado", L"Ingeklapt", L"Zwiniete", L"Katli"));
+			? CString(LL14(L"展開中 — 編集可", L"Expanded — editable", L"Ouvert", L"Aperto", L"Abierto", L"펼침", L"已展开", L"مفتوح", L"Развернуто", L"Aufgeklappt", L"Aberto", L"Open", L"Rozwiniete", L"Acik"))
+			: CString(LL14(L"折りたたみ中 — 展開で編集", L"Folded — expand to edit blobs", L"Replié", L"Ripiegato", L"Plegado", L"접힘", L"已折叠", L"مطوي", L"Свернуто", L"Eingeklappt", L"Dobrado", L"Ingeklapt", L"Zwiniete", L"Katli")));
 	m_status.SetWindowText(st);
 	RefreshChromeOpaque();
 }
@@ -475,7 +475,7 @@ int CSasamiTextDlg::CompileAndBuild(wchar_t* outPath, int outCch, int* isFm)
 		if (!ScFmDocToWrite(&m_fm, w)) {
 			HeapFree(GetProcessHeap(), 0, w);
 			const wchar_t* why = ScGetLastWriteErr();
-			m_status.SetWindowText(why && why[0] ? why : LL14(L"FPY\u69cb\u7bc9\u5931\u6557", L"FPY build failed", L"Échec FPY", L"FPY fallito", L"FPY falló", L"FPY 실패", L"FPY失败", L"فشل FPY", L"Ошибка FPY", L"FPY fehlgeschlagen", L"Falha FPY", L"FPY mislukt", L"Błąd FPY", L"FPY başarısız"));
+			m_status.SetWindowText(why && why[0] ? CString(why) : CString(LL14(L"FPY\u69cb\u7bc9\u5931\u6557", L"FPY build failed", L"Échec FPY", L"FPY fallito", L"FPY falló", L"FPY 실패", L"FPY失败", L"فشل FPY", L"Ошибка FPY", L"FPY fehlgeschlagen", L"Falha FPY", L"FPY mislukt", L"Błąd FPY", L"FPY başarısız")));
 			HeapFree(GetProcessHeap(), 0, bin);
 			RefreshChromeOpaque();
 			return 0;
@@ -499,7 +499,7 @@ int CSasamiTextDlg::CompileAndBuild(wchar_t* outPath, int outCch, int* isFm)
 		if (!ScMidiDocToWrite(&m_midi, w)) {
 			HeapFree(GetProcessHeap(), 0, w);
 			const wchar_t* why = ScGetLastWriteErr();
-			m_status.SetWindowText(why && why[0] ? why : LL14(L"MPY\u69cb\u7bc9\u5931\u6557", L"MPY build failed", L"Échec MPY", L"MPY fallito", L"MPY falló", L"MPY 실패", L"MPY失败", L"فشل MPY", L"Ошибка MPY", L"MPY fehlgeschlagen", L"Falha MPY", L"MPY mislukt", L"Błąd MPY", L"MPY başarısız"));
+			m_status.SetWindowText(why && why[0] ? CString(why) : CString(LL14(L"MPY\u69cb\u7bc9\u5931\u6557", L"MPY build failed", L"Échec MPY", L"MPY fallito", L"MPY falló", L"MPY 실패", L"MPY失败", L"فشل MPY", L"Ошибка MPY", L"MPY fehlgeschlagen", L"Falha MPY", L"MPY mislukt", L"Błąd MPY", L"MPY başarısız")));
 			HeapFree(GetProcessHeap(), 0, bin);
 			RefreshChromeOpaque();
 			return 0;
