@@ -138,6 +138,8 @@ private:
 	BYTE m_fadeSsg[3];
 	BYTE m_fadePcm[SASAMI_FMMON_PCM_MAX];
 	BYTE m_fadeRzmPad[6];
+	uint8_t m_wavePrev[8 * 32];
+	BYTE m_waveFade[8 * 32];
 	wchar_t m_lastSong[260];
 	wchar_t m_playIdent[260]; /* 再生中 stem。曲切替で ring 位置を捨てる */
 	uint32_t m_lastSeq;

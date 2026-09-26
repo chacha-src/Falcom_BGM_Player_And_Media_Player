@@ -71,8 +71,11 @@ void FmMonShadowApplyOpllRegs(const unsigned char* reg64);
 /* Konami SCC: freq[5] 12bit, vol[5] 0..15, enableMask bits0-4 */
 void FmMonShadowApplyScc(const unsigned* freq12, const unsigned* vol4, unsigned enableMask);
 /* HuC6280 HES: 6ch。period[6] 12bit, vol[6] 0..31, control[6] (bit7=on)。
-   ch0-2 → SSG, ch3-5 → pcm (UI は SSG4-6)。DEV_PSG|DEV_HES を立てる。 */
-void FmMonShadowApplyHes(const unsigned* period12, const unsigned* vol5, const unsigned* control);
+   ch0-2 → SSG, ch3-5 → pcm (UI は SSG4-6)。DEV_PSG|DEV_HES を立てる。
+   balance6: 各ch 0xLR（上位L/下位R、NULL なら 0xFF）。
+   noise6: ch4-5 のみ有効（bit7=on、下位5bit=周期）。NULL なら 0。 */
+void FmMonShadowApplyHes(const unsigned* period12, const unsigned* vol5, const unsigned* control,
+	const unsigned* balance6, const unsigned* noise6);
 /* 波形パネル。kind: 1=SCC 5×32 符号付き, 2=HuC 6×32 符号付き, 3=CUS30 8×32 符号付き。
    nch<=8, bytesPerCh<=32。packed は nch*bytesPerCh。dump.pad7 と regs+$C0 へ載る。 */
 void FmMonShadowSetWaves(unsigned kind, unsigned nch, unsigned bytesPerCh, const void* packed);

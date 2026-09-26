@@ -1673,7 +1673,8 @@ void FmMonShadowApplyScc(const unsigned* freq12, const unsigned* vol4, unsigned 
 	LeaveCriticalSection(&s_cs);
 }
 
-void FmMonShadowApplyHes(const unsigned* period12, const unsigned* vol5, const unsigned* control)
+void FmMonShadowApplyHes(const unsigned* period12, const unsigned* vol5, const unsigned* control,
+	const unsigned* balance6, const unsigned* noise6)
 {
 	if (!period12 || !vol5 || !control) return;
 	EnsureCs();
@@ -1769,6 +1770,23 @@ void FmMonShadowApplyHes(const unsigned* period12, const unsigned* vol5, const u
 		if (s_pcmOn[i] || s_pcmNote[i] != 0xFF) changed = 1;
 		s_pcmOn[i] = 0;
 		s_pcmNote[i] = 0xFF;
+	}
+	for (int i = 0; i < 6; i++) {
+		const uint8_t bal = balance6 ? (uint8_t)(balance6[i] & 0xFFu) : (uint8_t)0xFFu;
+		const int dest = (i < 3) ? (0x0B + i) : (0x9C + (i - 3));
+		if (s_regs[dest] != bal) {
+			s_regs[dest] = bal;
+			MarkBit(dest);
+			changed = 1;
+		}
+	}
+	for (int i = 0; i < 2; i++) {
+		const uint8_t n = noise6 ? (uint8_t)(noise6[4 + i] & 0xFFu) : (uint8_t)0;
+		if (s_regs[0x0E + i] != n) {
+			s_regs[0x0E + i] = n;
+			MarkBit(0x0E + i);
+			changed = 1;
+		}
 	}
 	if (changed) s_dirty = 1;
 	LeaveCriticalSection(&s_cs);

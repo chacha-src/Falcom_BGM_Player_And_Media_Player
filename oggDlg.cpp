@@ -287,6 +287,7 @@ int g_mp3_decoder_bps = 16;
 int muon;
 int kpi_silence_bytes = 0;
 int kpi_heard_audio = 0;
+static int kpi_file_loop = 0;
 
 static bool DeserializeLogFont(const TCHAR* str, LOGFONT* lf)
 {
@@ -2239,6 +2240,36 @@ static bool ModeParksDurationInLoop2(int md)
 		|| IsForeignPluginMode(md) || IsVstMidiPlayMode(md) || md == MODE_CEMU;
 }
 
+static void ApplyKpiMediaLoop(const KPI_MEDIAINFO* mi)
+{
+	kpi_file_loop = 0;
+	loop1 = 0;
+	loop2 = 0;
+	if (!mi || mi->dwSampleRate < 1000)
+		return;
+	const UINT64 qlen = mi->qwLength;
+	const UINT64 qlp = mi->qwLoop;
+	if (qlen == (UINT64)-1) {
+		loop2 = 0;
+		return;
+	}
+	const int lenSamp = (int)kpi_100nsToSample(qlen, mi->dwSampleRate);
+	loop3 = (lenSamp > 0) ? lenSamp : 0;
+	if (qlp != 0 && qlp != (UINT64)-1) {
+		const int lpSamp = (int)kpi_100nsToSample(qlp, mi->dwSampleRate);
+		if (lpSamp > 0) {
+			loop1 = (lpSamp < lenSamp) ? (lenSamp - lpSamp) : 0;
+			loop2 = (lpSamp <= lenSamp) ? lpSamp : lenSamp;
+			if (loop2 < 1)
+				loop2 = lenSamp;
+			kpi_file_loop = 1;
+			return;
+		}
+	}
+	loop1 = 0;
+	loop2 = lenSamp;
+}
+
 static void FinalizePlaybackLoopFlags(int md)
 {
 	if (pl && plw) {
@@ -2260,7 +2291,7 @@ static void FinalizePlaybackLoopFlags(int md)
 			endf = 1;
 		}
 	}
-	if (endf == 0 && ModeParksDurationInLoop2(md) && loop1 == 0) {
+	if (endf == 0 && ModeParksDurationInLoop2(md) && loop1 == 0 && !(md == -3 && kpi_file_loop)) {
 		int total = (loop3 > 0) ? loop3 : 0;
 		if (total <= 0 && oggsize > 0)
 			total = (md == -10) ? oggsize : PcmFramesFromBytes(oggsize);
@@ -12212,11 +12243,12 @@ open_mode_kpi:
 			// DS生成/再生系は整数PCM前提。元フォーマットは wavsam_src 側で保持する。
 			wavsam_depth = (wavsam_src < 0) ? 16 : wavsam_src;
 			NormalizePlaybackWaveFormat();
-			loop1 = 0;
-			loop2 = (int)kpi_100nsToSample(g_kpiSession.mediaInfo.qwLength, g_kpiSession.mediaInfo.dwSampleRate);
-			if (g_kpiSession.mediaInfo.qwLength == (UINT64)-1) loop2 = 0;
-			SetPcmByteLengthFromSamples(loop2, wavsam_depth, wavchannel);
-			m_time.SetRange(0, (loop2 > 0) ? loop2 : 1, TRUE);
+			ApplyKpiMediaLoop(&g_kpiSession.mediaInfo);
+			{
+				const int dur = (loop3 > 0) ? loop3 : loop2;
+				SetPcmByteLengthFromSamples(dur, wavsam_depth, wavchannel);
+				m_time.SetRange(0, (dur > 0) ? dur : 1, TRUE);
+			}
 			uint64_t np = 0;
 			g_kpiHost.Seek(g_kpiSession.sessionId, 0, 0, np);
 			g_openDecoderMode = mode;
@@ -12430,9 +12462,8 @@ open_mode_kpi:
 						ik->Release();
 					}
 					if (pMediaInfo == NULL) return;
-					wavbit_sample_Hz = pMediaInfo->dwSampleRate;	wavchannel = pMediaInfo->dwChannels;	loop1 = 0;
-					loop2 = (int)kpi_100nsToSample(pMediaInfo->qwLength, pMediaInfo->dwSampleRate);
-					if (pMediaInfo->qwLength == (UINT64)-1) loop2 = 0;
+					wavbit_sample_Hz = pMediaInfo->dwSampleRate;	wavchannel = pMediaInfo->dwChannels;
+					ApplyKpiMediaLoop(pMediaInfo);
 					wavsam_src = pMediaInfo->nBitsPerSample;
 					g_kpiSourceBitsPerSample = wavsam_src;
 					// DS生成/再生系は整数PCM前提。元フォーマットは wavsam_src 側で保持する。
@@ -12443,8 +12474,11 @@ open_mode_kpi:
 
 			// kvver5 は pMediaInfo 由来の loop2 を残す（sikpi.dwLength は未更新の -1 のまま）
 			if (kvver != 5 && sikpi.dwLength == (DWORD)-1) loop2 = 0;
-			SetPcmByteLengthFromSamples(loop2, wavsam_depth, wavchannel);
-			m_time.SetRange(0, (loop2 > 0) ? loop2 : 1, TRUE);
+			{
+				const int dur = (loop3 > 0) ? loop3 : ((loop2 > 0) ? (loop1 + loop2) : 0);
+				SetPcmByteLengthFromSamples(dur, wavsam_depth, wavchannel);
+				m_time.SetRange(0, (dur > 0) ? dur : 1, TRUE);
+			}
 			if (kvver == 2 && mod && mod->SetPosition) mod->SetPosition(kmp1, 0);
 			if (kvver == 5 && kpidec) kpidec->Seek(0, 0);
 			// Open 失敗なのに共通処理へ進むと playwavkpi が空振りし、書き出しが2〜3%で終わる
@@ -19516,7 +19550,7 @@ static void AdvanceOutAndSrcPos(int outSamples)
 // ループ再生ON、またはゲームループ(endf==0)のとき true
 static bool WantPlaybackLoop()
 {
-	return (savedata.saveloop != 0) || (endf == 0);
+	return (savedata.saveloop != 0) || (endf == 0) || (kpi_file_loop != 0);
 }
 
 // ソース総PCMサンプル数（loop点 / loop3保存総長 / oggsize）。不明は 0。
@@ -20286,6 +20320,19 @@ int playwavkpi(BYTE* bw, int old, int l1, int l2)
 	// x64 KPI は別プロセス経由でデコードするため、この時点で kpidec==NULL になり得る
 	if (!g_kpiRemote && og->mod == NULL && kpidec == NULL) return 0;
 	const bool exporting = (wavExportPath.GetLength() > 0 || g_isWavExportRendering);
+	auto kpiSeekLoop = [&]() {
+		const UINT64 pos = (UINT64)((loop1 > 0) ? loop1 : 0);
+		if (g_kpiRemote && g_kpiSession.sessionId != 0) {
+			uint64_t np = 0;
+			g_kpiHost.Seek(g_kpiSession.sessionId, pos, KPI_MEDIAINFO::SEEK_FLAGS_SAMPLE, np);
+			ResetKpiRemoteCache();
+		}
+		else if (kvver == 2)
+			og->mod->SetPosition(og->kmp1, 0);
+		else if (kpidec) {
+			kpidec->Seek(pos, KPI_MEDIAINFO::SEEK_FLAGS_SAMPLE);
+		}
+	};
 	//データ読み込み（playb は実デコード後に進める。先に足すと秒数打ち切りだけ進んで空WAVになる）
 	int rrr = readkpi(bw + old, l1);
 	{
@@ -20314,16 +20361,7 @@ int playwavkpi(BYTE* bw, int old, int l1, int l2)
 		else if (WantPlaybackLoop() && !exporting && PlaybackShortMeansEof(rrr)) {
 			// endf は KPI/MIDI で常に 1 だが、ループ再生ONなら先頭へ戻す（FLAC/MP3 と同じ）
 			PlaybackNoteLoop(loop1);
-			if (g_kpiRemote && g_kpiSession.sessionId != 0) {
-				uint64_t np = 0;
-				g_kpiHost.Seek(g_kpiSession.sessionId, 0, 1, np);
-				ResetKpiRemoteCache();
-			}
-			else if (kvver == 2)
-				og->mod->SetPosition(og->kmp1, 0);
-			else if (kpidec) {
-				kpidec->Seek(0, 1);
-			}
+			kpiSeekLoop();
 			kpi_silence_bytes = 0; kpi_heard_audio = 0;
 			poss2 = poss3 = poss4 = poss6 = 0; poss5 = loop1;
 			cnt3 = 0;
@@ -20368,16 +20406,7 @@ int playwavkpi(BYTE* bw, int old, int l1, int l2)
 			}
 			else if (WantPlaybackLoop() && !exporting && PlaybackShortMeansEof(rrr)) {
 				PlaybackNoteLoop(loop1);
-				if (g_kpiRemote && g_kpiSession.sessionId != 0) {
-					uint64_t np = 0;
-					g_kpiHost.Seek(g_kpiSession.sessionId, 0, 1, np);
-					ResetKpiRemoteCache();
-				}
-				else if (kvver == 2)
-					og->mod->SetPosition(og->kmp1, 0);
-				else if (kpidec) {
-					kpidec->Seek(0, 1);
-				}
+				kpiSeekLoop();
 				kpi_silence_bytes = 0; kpi_heard_audio = 0;
 				poss2 = poss3 = poss4 = poss6 = 0; poss5 = loop1;
 				cnt3 = 0;
@@ -21675,8 +21704,9 @@ int readkpi(BYTE* bw, int cnt)
 						const bool midiLike = (sss == "mid" || sss == "midi" || sss == "kar" || sss == "rmi"
 							|| sss == "mpy" || sss == "mpw2" || sss == "mpsmv");
 						if (!(wavExportPath.GetLength() > 0 || g_isWavExportRendering)) {
+							const int fileLooping = (kpi_file_loop && loop2 > 0) ? 1 : 0;
 							if (IsBlockSilent((const BYTE*)bufkpi + cnt3, (int)r, abs(wavsam_depth))) {
-								if (kpi_heard_audio || loop2 == 0 || midiLike)
+								if (!fileLooping && (kpi_heard_audio || loop2 == 0 || midiLike))
 									kpi_silence_bytes += r;
 							} else {
 								kpi_silence_bytes = 0;
@@ -21684,7 +21714,7 @@ int readkpi(BYTE* bw, int cnt)
 							}
 							const double silentSec = (kpi_heard_audio && !midiLike) ? 2.0 : 4.0;
 							int maxSilentBytes = (int)((double)wavbit_sample_Hz * (double)wavchannel * (double)(abs(wavsam_depth) / 8) * silentSec);
-							if ((kpi_heard_audio || loop2 == 0 || midiLike)
+							if (!fileLooping && (kpi_heard_audio || loop2 == 0 || midiLike)
 								&& maxSilentBytes > 0 && kpi_silence_bytes >= maxSilentBytes) {
 								kpiDecEof = 1;
 							}

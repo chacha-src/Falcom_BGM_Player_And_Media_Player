@@ -1004,6 +1004,8 @@ CFmMonitorDlg::CFmMonitorDlg(CWnd* pParent)
 	memset(m_fadeSsg, 0, sizeof(m_fadeSsg));
 	memset(m_fadePcm, 0, sizeof(m_fadePcm));
 	memset(m_fadeRzmPad, 0, sizeof(m_fadeRzmPad));
+	memset(m_wavePrev, 0, sizeof(m_wavePrev));
+	memset(m_waveFade, 0, sizeof(m_waveFade));
 	memset(&m_lay, 0, sizeof(m_lay));
 	m_lastSong[0] = 0;
 	m_playIdent[0] = 0;
@@ -1464,6 +1466,30 @@ static int FmSsgNoiseOn(const SasamiFmMonDump& d, int ch)
 	if (ch < 0 || ch > 2) return 0;
 	/* R7 bit3-5: 0=noise enable */
 	return (((d.regs[7] >> (3 + ch)) & 1) == 0) ? 1 : 0;
+}
+
+/* HuC6280 バランス: 上位=L 下位=R（各 0..15）。ch0-2 @$0B、ch3-5 @$9C */
+static void FmLrFromHuc(const SasamiFmMonDump& d, int ch, int& lAmt, int& rAmt)
+{
+	uint8_t b = 0xFF;
+	if (ch >= 0 && ch < 3)
+		b = d.regs[0x0B + ch];
+	else if (ch >= 3 && ch < 6)
+		b = d.regs[0x9C + (ch - 3)];
+	lAmt = ((int)((b >> 4) & 15)) * 17;
+	rAmt = ((int)(b & 15)) * 17;
+}
+
+static int FmHucNoiseOn(const SasamiFmMonDump& d, int ch /* 4 or 5 */)
+{
+	if (ch != 4 && ch != 5) return 0;
+	return (d.regs[0x0E + (ch - 4)] & 0x80) ? 1 : 0;
+}
+
+static int FmHucNoisePeriod(const SasamiFmMonDump& d, int ch)
+{
+	if (ch != 4 && ch != 5) return 0;
+	return (int)(d.regs[0x0E + (ch - 4)] & 0x1F);
 }
 
 /* 鍵盤行の PCM 本数。PPZ/ADPCM/OPL3 の空きスロットも行として確保する */
@@ -2246,8 +2272,8 @@ void CFmMonitorDlg::DrawHexBank(CDC& dc, int x, int y, int cellW, int cellH, int
 	const COLORREF baseDark = RGB(24, 28, 32);
 	const COLORREF baseGroup = RGB(36, 52, 44);   /* 薄緑系グループ */
 	const COLORREF baseTouched = RGB(48, 72, 58);
-	/* 値が動いたセルは白。緑のままだと「書いてない」に見える */
-	const COLORREF hi = RGB(245, 245, 245);
+	/* 値が動いたセルは緑（鍵盤ランプと同系） */
+	const COLORREF hi = RGB(80, 220, 140);
 
 	for (int row = 0; row < rowCount; row++) {
 		_snwprintf_s(hdr, _TRUNCATE, L"%X", row);
@@ -3162,11 +3188,15 @@ void CFmMonitorDlg::DrawChannelKeys(CDC& dc, int x, int y, int w, int rowH, int 
 	const UINT dpi = FmUiDpi(GetSafeHwnd());
 	const int gaugeW = FmLrGaugeWidth(dpi);
 	const int gaugeGap = FmScale(4, dpi);
-	/* 等幅: 音名の右に N031 相当の LR ゲージ（SSG は N--- テキストのまま） */
+	const int noiseSlotW = dc.GetTextExtent(L"N031").cx;
+	/* HuC は全ch パン + ch5-6 ノイズ。N--- を鍵盤の下に重ねない */
+	const int hesKeys = IsMsxDump() && (MsxDevMask() & SASAMI_FMMON_DEV_HES);
+	/* 等幅: 音名の右に LR。HES はさらに N031 列を鍵盤の左へ確保する */
 	const int lampProbe = (keyH > 4) ? (keyH * 3 / 4) : 8;
 	const int needW = lampProbe + 4
 		+ dc.GetTextExtent(L"C352 32 O5C#").cx
 		+ gaugeGap + gaugeW
+		+ (hesKeys ? (gaugeGap + noiseSlotW) : 0)
 		+ FmScale(6, dpi);
 	if (labelW < needW) labelW = needW;
 	int pianoW = w - labelW;
@@ -3200,15 +3230,26 @@ void CFmMonitorDlg::DrawChannelKeys(CDC& dc, int x, int y, int w, int rowH, int 
 		FmDrawKeyVolBar(dc, tx, yy + rowH - volBarH - 1, after - tx, volBarH, volLevel);
 		return after;
 	};
-	auto drawLrAfter = [&](int yy, int afterX, int lAmt, int rAmt, int playing) {
+	auto drawLrAfter = [&](int yy, int afterX, int lAmt, int rAmt, int playing, int reserveRight = 0) -> int {
 		const int gy = yy + (std::max)(0, (rowH - keyH - volBarH) / 2);
 		int gx = afterX + gaugeGap;
-		if (gx + gaugeW > x + labelW)
-			gx = x + labelW - gaugeW;
+		const int right = x + labelW - reserveRight;
+		if (gx + gaugeW > right)
+			gx = right - gaugeW;
 		if (gx < afterX + 2)
 			gx = afterX + 2;
 		const int gh = (std::max)(6, keyH - volBarH);
 		FmDrawLrGauge(dc, labFont, gx, gy, gaugeW, gh, lAmt, rAmt, playing);
+		return gx;
+	};
+	auto drawNoiseSlot = [&](int yy, int nx, const wchar_t* noise) {
+		const int ty = yy + (std::max)(0, (rowH - keyH - volBarH) / 2);
+		if (nx + noiseSlotW > x + labelW)
+			nx = x + labelW - noiseSlotW;
+		if (nx < x)
+			return;
+		dc.SetTextColor(RGB(210, 215, 220));
+		dc.TextOut(nx, ty, noise);
 	};
 
 	const int fmN = FmRows();
@@ -3435,20 +3476,28 @@ void CFmMonitorDlg::DrawChannelKeys(CDC& dc, int x, int y, int w, int rowH, int 
 
 		wchar_t note[16];
 		FmFormatNoteName(midi, note, 16);
-		wchar_t noise[16];
-		/* 常に4文字: N031 / N--- （# 有無で N が横ずれしない） */
-		if (live && m_haveDump && FmSsgNoiseOn(m_dump, i))
-			_snwprintf_s(noise, _TRUNCATE, L"N%03d", FmSsgNoisePeriod(m_dump));
-		else
-			wcscpy_s(noise, L"N---");
+		const int hesSsg = msx && (MsxDevMask() & SASAMI_FMMON_DEV_HES);
+		const int snTone = m_haveDump && m_dump.padHit == 5;
 		wchar_t chNm[16];
 		FmFormatChNum(chNm, 16,
 			(msx && !(MsxDevMask() & SASAMI_FMMON_DEV_HES)) ? L"PSG" : L"SSG",
 			i + 1, colPad, colPrefW);
 		const int after = drawChHead(yy, chNm, note, fade, RGB(100, 180, 255),
 			litVol(m_haveDump ? FmSsgLevel(m_dump, i) : 0, gate, keyLit, fade));
-		dc.SetTextColor(RGB(210, 215, 220));
-		dc.TextOut(after + gaugeGap, yy + (std::max)(0, (rowH - keyH - volBarH) / 2), noise);
+		if (hesSsg) {
+			int lAmt = 255, rAmt = 255;
+			if (m_haveDump)
+				FmLrFromHuc(m_dump, i, lAmt, rAmt);
+			drawLrAfter(yy, after, lAmt, rAmt, keyLit, gaugeGap + noiseSlotW);
+		} else if (!snTone) {
+			wchar_t noise[16];
+			/* 常に4文字: N031 / N--- （# 有無で N が横ずれしない） */
+			if (live && m_haveDump && FmSsgNoiseOn(m_dump, i))
+				_snwprintf_s(noise, _TRUNCATE, L"N%03d", FmSsgNoisePeriod(m_dump));
+			else
+				wcscpy_s(noise, L"N---");
+			drawNoiseSlot(yy, after + gaugeGap, noise);
+		}
 
 		CRect krc(x + labelW, yy + (rowH - keyH) / 2, x + labelW + pianoW, yy + (rowH - keyH) / 2 + keyH);
 		DrawPiano108(dc, krc, midi, keyLit);
@@ -3554,21 +3603,46 @@ void CFmMonitorDlg::DrawChannelKeys(CDC& dc, int x, int y, int w, int rowH, int 
 		const int after = drawChHead(yy, chNm, note, fade, RGB(220, 160, 80),
 			litVol(pcmRaw, gate, keyLit, fade));
 		int lAmt = 255, rAmt = 255;
+		int showLr = 0;
 		if (m_haveDump) {
-			if (IsYm2610Dump()) {
+			if (hes) {
+				FmLrFromHuc(m_dump, i + 3, lAmt, rAmt);
+				showLr = 1;
+			} else if (IsYm2610Dump()) {
 				if (i < 6)
 					FmLrFromOpnB4(m_dump.regs[0x108 + i], lAmt, rAmt);
 				else
 					FmLrFromOpnB4(m_dump.regs[0x11], lAmt, rAmt);
+				showLr = 1;
 			} else if (adpcmRow && (m_dump.dumpFlags & SASAMI_FMMON_FLAG_ADPCM)) {
 				FmLrFromOpnB4(m_dump.regs[FmAdpcmCtrlReg(m_dump) + 1], lAmt, rAmt);
+				showLr = 1;
 			} else if (opl) {
 				FmLrFromOplCh(m_dump, i + 9, lAmt, rAmt);
+				showLr = 1;
 			} else if (FmIsArcadePcmProfile(prof)) {
 				FmLrFromArcadePcm(m_dump, prof, i, lAmt, rAmt);
+				showLr = 1;
+			} else if (msx || m_dump.padHit == 5
+				|| prof == SASAMI_FMMON_KEYS_NSF || prof == SASAMI_FMMON_KEYS_GSF
+				|| prof == SASAMI_FMMON_KEYS_SID || prof == SASAMI_FMMON_KEYS_SAP
+				|| prof == SASAMI_FMMON_KEYS_MIDI) {
+				showLr = 0;
 			}
 		}
-		drawLrAfter(yy, after, lAmt, rAmt, keyLit);
+		const int lrReserve = hes ? (gaugeGap + noiseSlotW) : 0;
+		int gx = after + gaugeGap;
+		if (showLr)
+			gx = drawLrAfter(yy, after, lAmt, rAmt, keyLit, lrReserve);
+		if (hes && i >= 1) {
+			wchar_t noise[16];
+			const int hch = i + 3;
+			if (live && m_haveDump && FmHucNoiseOn(m_dump, hch))
+				_snwprintf_s(noise, _TRUNCATE, L"N%03d", FmHucNoisePeriod(m_dump, hch));
+			else
+				wcscpy_s(noise, L"N---");
+			drawNoiseSlot(yy, gx + gaugeW + gaugeGap, noise);
+		}
 
 		CRect krc(x + labelW, yy + (rowH - keyH) / 2, x + labelW + pianoW, yy + (rowH - keyH) / 2 + keyH);
 		DrawPiano108(dc, krc, midi, keyLit);
@@ -3649,6 +3723,8 @@ void CFmMonitorDlg::ComputeLayout(int w, int h)
 	}
 	m_lay.keyH = (m_lay.rowH > 3) ? (m_lay.rowH - 2) : m_lay.rowH;
 	m_lay.labelW = FmScale(148, m_lay.dpi);
+	if (IsMsxDump() && (MsxDevMask() & SASAMI_FMMON_DEV_HES))
+		m_lay.labelW = FmScale(188, m_lay.dpi);
 	m_lay.topY = m_lay.pad + m_lay.headH;
 
 	/* bankTitle = タイトル行 + col ヘッダ行。DrawHexBank と一致させる */
@@ -3927,38 +4003,52 @@ void CFmMonitorDlg::DrawWaveStrips(CDC& dc, int x, int y)
 	int bpc = m_dump.pad7[2];
 	if (kind < 1 || kind > 3 || nch < 1 || nch > 8 || bpc < 1 || bpc > 32) return;
 	const wchar_t* title = L"wave";
-	if (kind == 1) title = L"SCC wave ×5 (32)";
-	else if (kind == 2) title = L"HuC wave ×6 (32)";
-	else title = L"CUS30 wave ×8 (32)";
+	if (kind == 1) title = L"SCC wave ×5 (32)  Δ=change";
+	else if (kind == 2) title = L"HuC wave ×6 (32)  Δ=change";
+	else title = L"CUS30 wave ×8 (32)  Δ=change";
 	CGdiObject* old = dc.SelectStockObject(DEFAULT_GUI_FONT);
 	dc.SetBkMode(TRANSPARENT);
 	dc.SetTextColor(RGB(180, 190, 200));
 	dc.TextOut(x, y, title);
 	y += 14;
-	const int rowH = 18;
-	CPen pen(PS_SOLID, 1, RGB(80, 220, 140));
-	CPen* oldPen = dc.SelectObject(&pen);
+	const int rowH = 28;
 	const uint8_t* base = m_dump.regs + 0xC0;
 	for (int ch = 0; ch < nch; ch++) {
 		const uint8_t* s = base + ch * bpc;
-		int prevx = x;
-		int prevy = y + rowH / 2;
+		int peak = 1;
 		for (int i = 0; i < bpc; i++) {
+			int v = (int)(int8_t)s[i];
+			const int a = (v < 0) ? -v : v;
+			if (a > peak) peak = a;
+		}
+		if (kind == 2 && peak < 16) peak = 16;
+		else if (kind != 2 && peak < 48) peak = 48;
+		const int amp = rowH / 2 - 2;
+		const int rowMid = y + rowH / 2;
+		dc.FillSolidRect(x, y, bpc * 4 + 2, rowH, RGB(22, 26, 30));
+		int prevx = x, prevy = rowMid;
+		for (int i = 0; i < bpc; i++) {
+			const int idx = ch * 32 + i;
 			const int v = (int)(int8_t)s[i];
-			int px = x + i * 3;
-			int py = y + rowH / 2 - (v * (rowH / 2 - 1)) / 128;
+			if (s[i] != m_wavePrev[idx])
+				FmBump(m_waveFade[idx]);
+			m_wavePrev[idx] = s[i];
+			int py = rowMid - (v * amp) / peak;
 			if (py < y) py = y;
 			if (py > y + rowH - 1) py = y + rowH - 1;
-			if (i) {
-				dc.MoveTo(prevx, prevy);
-				dc.LineTo(px, py);
-			}
+			const int px = x + i * 4;
+			const COLORREF col = FmMixFade(RGB(50, 140, 90), RGB(220, 255, 140), m_waveFade[idx]);
+			const int fy0 = (std::min)(rowMid, py);
+			const int fy1 = (std::max)(rowMid, py);
+			dc.FillSolidRect(px, fy0, 3, (fy1 > fy0) ? (fy1 - fy0 + 1) : 1, col);
+			if (i)
+				dc.FillSolidRect((std::min)(prevx, px), (std::min)(prevy, py),
+					(std::max)(1, abs(px - prevx)), (std::max)(1, abs(py - prevy) + 1), col);
 			prevx = px;
 			prevy = py;
 		}
-		y += rowH + 2;
+		y += rowH + 3;
 	}
-	dc.SelectObject(oldPen);
 	dc.SelectObject(old);
 }
 
@@ -5320,6 +5410,8 @@ void CFmMonitorDlg::ApplyDump(const SasamiFmMonDump& d)
 		memset(m_fadeSsg, 0, sizeof(m_fadeSsg));
 		memset(m_fadePcm, 0, sizeof(m_fadePcm));
 		memset(m_fadeRzmPad, 0, sizeof(m_fadeRzmPad));
+		memset(m_wavePrev, 0, sizeof(m_wavePrev));
+		memset(m_waveFade, 0, sizeof(m_waveFade));
 		wcsncpy_s(m_lastSong, d.sourcePath, _TRUNCATE);
 		m_fmEverOn = 0;
 		m_fmViewReady = 0;
@@ -5716,6 +5808,8 @@ void CFmMonitorDlg::ResetDumpSync()
 	/* m_playIdent は残す（同じ曲で毎フレ Reset し続けない） */
 	memset(&m_dump, 0, sizeof(m_dump));
 	memset(&m_prev, 0, sizeof(m_prev));
+	memset(m_wavePrev, 0, sizeof(m_wavePrev));
+	memset(m_waveFade, 0, sizeof(m_waveFade));
 	m_dirtyHead = m_dirtyHex = m_dirtyPanels = m_dirtyKeys = 1;
 	m_panelDirtyMask = 0x3F;
 }
@@ -5973,6 +6067,8 @@ void CFmMonitorDlg::TickFades()
 		if (tickQ(m_fadePcm[i])) { keys = 1; panels = 1; }
 	for (int i = 0; i < 6; i++)
 		if (tickQ(m_fadeRzmPad[i])) keys = 1;
+	for (int i = 0; i < (int)(sizeof(m_waveFade) / sizeof(m_waveFade[0])); i++)
+		if (tickQ(m_waveFade[i])) hex = 1;
 	if (hex) m_dirtyHex = 1;
 	if (keys) m_dirtyKeys = 1;
 	if (panels) m_dirtyPanels = 1;
