@@ -110,6 +110,7 @@ private:
 	void ComposeThreadLoop();
 	static UINT ComposeThreadProc(LPVOID p);
 	void DrawHexBank(CDC& dc, int x, int y, int cellW, int cellH, int gapExtra, int bankBase, const wchar_t* title, int rowCount = 16);
+	void DrawWaveStrips(CDC& dc, int x, int y);
 	void DrawFmChPanel(CDC& dc, const CRect& rc, int ch);
 	void DrawOpmChPanel(CDC& dc, const CRect& rc, int ch);
 	void DrawOplChPanel(CDC& dc, const CRect& rc, int ch, int packedCompanion = 0);

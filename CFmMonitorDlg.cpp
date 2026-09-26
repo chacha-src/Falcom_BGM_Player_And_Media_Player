@@ -3919,6 +3919,49 @@ void CFmMonitorDlg::DrawHead(CDC& dc)
 }
 
 /* Bank0/Bank1 の 16×16 hex。触れ色は m_fade */
+void CFmMonitorDlg::DrawWaveStrips(CDC& dc, int x, int y)
+{
+	if (!m_haveDump) return;
+	const int kind = m_dump.pad7[0];
+	int nch = m_dump.pad7[1];
+	int bpc = m_dump.pad7[2];
+	if (kind < 1 || kind > 3 || nch < 1 || nch > 8 || bpc < 1 || bpc > 32) return;
+	const wchar_t* title = L"wave";
+	if (kind == 1) title = L"SCC wave ×5 (32)";
+	else if (kind == 2) title = L"HuC wave ×6 (32)";
+	else title = L"CUS30 wave ×8 (32)";
+	CGdiObject* old = dc.SelectStockObject(DEFAULT_GUI_FONT);
+	dc.SetBkMode(TRANSPARENT);
+	dc.SetTextColor(RGB(180, 190, 200));
+	dc.TextOut(x, y, title);
+	y += 14;
+	const int rowH = 18;
+	CPen pen(PS_SOLID, 1, RGB(80, 220, 140));
+	CPen* oldPen = dc.SelectObject(&pen);
+	const uint8_t* base = m_dump.regs + 0xC0;
+	for (int ch = 0; ch < nch; ch++) {
+		const uint8_t* s = base + ch * bpc;
+		int prevx = x;
+		int prevy = y + rowH / 2;
+		for (int i = 0; i < bpc; i++) {
+			const int v = (int)(int8_t)s[i];
+			int px = x + i * 3;
+			int py = y + rowH / 2 - (v * (rowH / 2 - 1)) / 128;
+			if (py < y) py = y;
+			if (py > y + rowH - 1) py = y + rowH - 1;
+			if (i) {
+				dc.MoveTo(prevx, prevy);
+				dc.LineTo(px, py);
+			}
+			prevx = px;
+			prevy = py;
+		}
+		y += rowH + 2;
+	}
+	dc.SelectObject(oldPen);
+	dc.SelectObject(old);
+}
+
 void CFmMonitorDlg::DrawHexArea(CDC& dc)
 {
 	if (!m_layOk) return;
@@ -3931,6 +3974,10 @@ void CFmMonitorDlg::DrawHexArea(CDC& dc)
 	hexClip.p = &dc;
 	hexClip.id = dc.SaveDC();
 	dc.IntersectClipRect(m_lay.rcHex);
+	if (m_haveDump && m_dump.pad7[0] == 3) {
+		DrawWaveStrips(dc, m_lay.hexX, m_lay.gridY0);
+		return;
+	}
 	if (PrimarySilent() && HasViewRegs()) {
 		wchar_t yyyy[40];
 		wchar_t title[72];
@@ -4046,13 +4093,16 @@ void CFmMonitorDlg::DrawHexArea(CDC& dc)
 		}
 		if (m & SASAMI_FMMON_DEV_SCC) {
 			DrawHexBank(dc, m_lay.hexX, y, m_lay.cellW, cellH, m_lay.gapExtra, 0x080,
-				L"SCC ctrl $80-$8F (freq/vol/on; waves N/A)", 1);
+				L"SCC ctrl $80-$8F (freq/vol/on)", 1);
 			y += gapY + cellH;
 		}
 		if (m & SASAMI_FMMON_DEV_HES) {
 			DrawHexBank(dc, m_lay.hexX, y, m_lay.cellW, cellH, m_lay.gapExtra, 0x090,
 				L"HuC ch4-6 @+$90 (per/vol/ctl)", 1);
+			y += gapY + cellH;
 		}
+		if (m_dump.pad7[0] == 1 || m_dump.pad7[0] == 2)
+			DrawWaveStrips(dc, m_lay.hexX, y);
 		dc.SelectObject(old);
 		return;
 	}
@@ -5837,7 +5887,7 @@ int CFmMonitorDlg::PollDump()
 	int nextN = bestN;
 	if (curN >= 0 && bestN <= curN)
 		return 1;
-	const int fromN = (curN < 0) ? nextN : (curN + 1);
+	int fromN = (curN < 0) ? nextN : (curN + 1);
 	if (fromN > nextN) return 1;
 
 	const SasamiFmMonDump& bestDump = m_hist[(m_histHead + bestN) % HIST_MAX];
@@ -5855,6 +5905,26 @@ int CFmMonitorDlg::PollDump()
 			m_histN -= bestN;
 		}
 		return applied || m_haveDump;
+	}
+
+	/* 他ウィンドウで UI が止まると履歴が溜まり、12枚/tick だと音に戻るまで長い。
+	   200ms 以上遅れていたら直近だけ残して可聴位置へ飛ばす。 */
+	{
+		const uint64_t shown = (curN >= 0)
+			? m_histSamp[(m_histHead + curN) % HIST_MAX]
+			: (m_haveDump ? m_lastCurSample : 0);
+		const uint64_t target = m_histSamp[(m_histHead + bestN) % HIST_MAX];
+		const uint64_t gap = (target > shown) ? (target - shown) : 0;
+		const uint64_t jumpAt = (rate > 5u) ? ((uint64_t)rate / 5u) : 1u;
+		const int tail = 4;
+		if (gap > jumpAt && bestN > fromN + tail) {
+			const int skipTo = bestN - tail;
+			m_histHead = (m_histHead + skipTo) % HIST_MAX;
+			m_histN -= skipTo;
+			bestN -= skipTo;
+			nextN = bestN;
+			fromN = 0;
+		}
 	}
 
 	/* 間の dump は畳まない（8分/16分が消える）。ただし一回で全部 Apply すると

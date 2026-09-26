@@ -219,6 +219,19 @@ private:
 	void UpdateMon(int channel)
 	{
 		if (channel < 0 || channel >= kC30Voices) return;
+		{
+			uint8_t pack[kC30Voices * 32];
+			memset(pack, 0, sizeof(pack));
+			for (int i = 0; i < kC30Voices; i++) {
+				const uint8_t* w = ch_[i].wave;
+				if (!w) continue;
+				for (int s = 0; s < 32; s++) {
+					const int nib = (s & 1) ? (w[s >> 1] >> 4) : (w[s >> 1] & 0x0f);
+					pack[i * 32 + s] = (uint8_t)(int8_t)((nib - 8) * 8);
+				}
+			}
+			FmMonShadowSetWaves(3, kC30Voices, 32, pack);
+		}
 		const Channel& ch = ch_[channel];
 		const int hasVol = (ch.voll || ch.volr) ? 1 : 0;
 		const int on = ch.noise ? (hasVol && (ch.freq & 0xff))

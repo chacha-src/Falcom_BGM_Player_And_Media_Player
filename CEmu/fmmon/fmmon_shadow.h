@@ -73,6 +73,9 @@ void FmMonShadowApplyScc(const unsigned* freq12, const unsigned* vol4, unsigned 
 /* HuC6280 HES: 6ch。period[6] 12bit, vol[6] 0..31, control[6] (bit7=on)。
    ch0-2 → SSG, ch3-5 → pcm (UI は SSG4-6)。DEV_PSG|DEV_HES を立てる。 */
 void FmMonShadowApplyHes(const unsigned* period12, const unsigned* vol5, const unsigned* control);
+/* 波形パネル。kind: 1=SCC 5×32 符号付き, 2=HuC 6×32 符号付き, 3=CUS30 8×32 符号付き。
+   nch<=8, bytesPerCh<=32。packed は nch*bytesPerCh。dump.pad7 と regs+$C0 へ載る。 */
+void FmMonShadowSetWaves(unsigned kind, unsigned nch, unsigned bytesPerCh, const void* packed);
 
 /* SN76489 / SMS PSG: tonePeriod[3] 10bit, noisePeriod 10bit (または 0),
    vol[4] 0..15 (チップ尺度: 0=大音量), toneOnMask bits0-2 (+bit3 ノイズ) */

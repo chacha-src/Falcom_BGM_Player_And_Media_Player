@@ -286,6 +286,7 @@ int g_ysxS1LrOnly = 0;
 int g_mp3_decoder_bps = 16;
 int muon;
 int kpi_silence_bytes = 0;
+int kpi_heard_audio = 0;
 
 static bool DeserializeLogFont(const TCHAR* str, LOGFONT* lf)
 {
@@ -10074,7 +10075,7 @@ void COggDlg::play()
 	const BOOL xfSoftOpen = (InterlockedCompareExchange(&g_xfOpening, 0, 0) != 0);
 	// 二重DS昇格: Open 中の無音を防ぐため、最初に B を再生し直す
 	muon = MUON;
-	kpi_silence_bytes = 0;
+	kpi_silence_bytes = 0; kpi_heard_audio = 0;
 	rrr = 1;
 	CWaitCursor rrr;
 	if (!xfSoftOpen)
@@ -20323,7 +20324,7 @@ int playwavkpi(BYTE* bw, int old, int l1, int l2)
 			else if (kpidec) {
 				kpidec->Seek(0, 1);
 			}
-			kpi_silence_bytes = 0;
+			kpi_silence_bytes = 0; kpi_heard_audio = 0;
 			poss2 = poss3 = poss4 = poss6 = 0; poss5 = loop1;
 			cnt3 = 0;
 			RubberBand_DestroyBank(0);
@@ -20377,7 +20378,7 @@ int playwavkpi(BYTE* bw, int old, int l1, int l2)
 				else if (kpidec) {
 					kpidec->Seek(0, 1);
 				}
-				kpi_silence_bytes = 0;
+				kpi_silence_bytes = 0; kpi_heard_audio = 0;
 				poss2 = poss3 = poss4 = poss6 = 0; poss5 = loop1;
 				cnt3 = 0;
 				RubberBand_DestroyBank(0);
@@ -20433,7 +20434,7 @@ static int playwavForeignPull(BYTE* bw, int old, int l1, int l2, int (*readfn)(B
 		else if (WantPlaybackLoop() && !exporting && PlaybackShortMeansEof(rrr)) {
 			PlaybackNoteLoop(loop1);
 			if (seek0) seek0();
-			kpi_silence_bytes = 0;
+			kpi_silence_bytes = 0; kpi_heard_audio = 0;
 			poss2 = poss3 = poss4 = poss6 = 0; poss5 = loop1;
 			cnt3 = 0;
 			RubberBand_DestroyBank(0);
@@ -20484,7 +20485,7 @@ static int playwavForeignPull(BYTE* bw, int old, int l1, int l2, int (*readfn)(B
 			else if (WantPlaybackLoop() && !exporting && PlaybackShortMeansEof(rrr)) {
 				PlaybackNoteLoop(loop1);
 				if (seek0) seek0();
-				kpi_silence_bytes = 0;
+				kpi_silence_bytes = 0; kpi_heard_audio = 0;
 				poss2 = poss3 = poss4 = poss6 = 0; poss5 = loop1;
 				cnt3 = 0;
 				RubberBand_DestroyBank(0);
@@ -21067,17 +21068,17 @@ static int VstSilenceAccum(BYTE* pcm, int bytes)
 	if (exporting) return 0;
 	/* Live MPU stream: boot/idle before first notes must not trip the 4s cut. */
 	if (CEmuMidiLiveActive()) {
-		kpi_silence_bytes = 0;
+		kpi_silence_bytes = 0; kpi_heard_audio = 0;
 		return 0;
 	}
 	if (g_vstPcmHold) {
-		kpi_silence_bytes = 0;
+		kpi_silence_bytes = 0; kpi_heard_audio = 0;
 		return 0;
 	}
 	if (IsBlockSilent(pcm, bytes, abs(wavsam_depth)))
 		kpi_silence_bytes += bytes;
 	else
-		kpi_silence_bytes = 0;
+		kpi_silence_bytes = 0; kpi_heard_audio = 0;
 	const int hz = (wavbit_sample_Hz > 0) ? wavbit_sample_Hz : 44100;
 	const int ch = (wavchannel > 0) ? wavchannel : 2;
 	const int bps = abs(wavsam_depth) / 8;
@@ -21100,7 +21101,7 @@ static void VstMarkPlaybackEof()
 static void VstSeekLoopStart()
 {
 	PlaybackNoteLoop(loop1);
-	kpi_silence_bytes = 0;
+	kpi_silence_bytes = 0; kpi_heard_audio = 0;
 	if (VstRemoteNow()) {
 		const int slot = VstBindIoSlot();
 		VstPrefetchStop(slot);
@@ -21277,7 +21278,7 @@ int readcemu(BYTE* bw, int cnt)
 static void CEmuSeekLoopStart()
 {
 	PlaybackNoteLoop(loop1);
-	kpi_silence_bytes = 0;
+	kpi_silence_bytes = 0; kpi_heard_audio = 0;
 	/* ループは曲切替ではない。DS 可聴位置は 0 に戻らないので時計だけ引き継ぐ。 */
 	const uint64_t fmMonCur = FmMonShadowGetCurSample();
 	FmMonShadowReset();
@@ -21669,18 +21670,22 @@ int readkpi(BYTE* bw, int cnt)
 						}
 					}
 					if (r > 0 && !kpiDecEof) {
-						// 不定長（loop2==0）のゲーム系、および mid/midi（演奏後も無音が続く場合）。
-						// 総長が分かる非MIDIでは末尾の弱い音量を誤って切らない。
+						// 音が出たあとの無音は loop フラグに関係なく切る（短い効果音が無音のまま進むのを止める）。
+						// 音が出る前、および mid 系の休符は従来どおり 4 秒。書き出し中は切らない。
 						const bool midiLike = (sss == "mid" || sss == "midi" || sss == "kar" || sss == "rmi"
 							|| sss == "mpy" || sss == "mpw2" || sss == "mpsmv");
-						if ((loop2 == 0 || midiLike) && !(wavExportPath.GetLength() > 0 || g_isWavExportRendering)) {
+						if (!(wavExportPath.GetLength() > 0 || g_isWavExportRendering)) {
 							if (IsBlockSilent((const BYTE*)bufkpi + cnt3, (int)r, abs(wavsam_depth))) {
-								kpi_silence_bytes += r;
+								if (kpi_heard_audio || loop2 == 0 || midiLike)
+									kpi_silence_bytes += r;
 							} else {
 								kpi_silence_bytes = 0;
+								kpi_heard_audio = 1;
 							}
-							int maxSilentBytes = (int)((double)wavbit_sample_Hz * (double)wavchannel * (double)(abs(wavsam_depth) / 8) * 4.0);
-							if (maxSilentBytes > 0 && kpi_silence_bytes >= maxSilentBytes) {
+							const double silentSec = (kpi_heard_audio && !midiLike) ? 2.0 : 4.0;
+							int maxSilentBytes = (int)((double)wavbit_sample_Hz * (double)wavchannel * (double)(abs(wavsam_depth) / 8) * silentSec);
+							if ((kpi_heard_audio || loop2 == 0 || midiLike)
+								&& maxSilentBytes > 0 && kpi_silence_bytes >= maxSilentBytes) {
 								kpiDecEof = 1;
 							}
 						}
@@ -24182,7 +24187,7 @@ static void KpiMidiSeekAccurate(__int64 samplePos)
 {
 	MidiSeekDsGuard dsHold;
 	if (samplePos < 0) samplePos = 0;
-	kpi_silence_bytes = 0;
+	kpi_silence_bytes = 0; kpi_heard_audio = 0;
 	const int ch = (wavchannel > 0) ? wavchannel : 2;
 	const int srcBits = wavsam_src;
 	const int outBits = abs(wavsam_depth) > 0 ? abs(wavsam_depth) : 16;
@@ -24236,7 +24241,7 @@ static void KpiMidiSeekAccurate(__int64 samplePos)
 
 static void KpiSeekToPlayb(__int64 samplePos)
 {
-	kpi_silence_bytes = 0;
+	kpi_silence_bytes = 0; kpi_heard_audio = 0;
 	if (samplePos < 0) samplePos = 0;
 	if (loop2 > 0 && samplePos > (__int64)loop2)
 		samplePos = loop2;
@@ -24265,7 +24270,7 @@ static void KpiSeekToPlayb(__int64 samplePos)
 static void VstSeekToPlayb(__int64 samplePos)
 {
 	MidiSeekDsGuard dsHold;
-	kpi_silence_bytes = 0;
+	kpi_silence_bytes = 0; kpi_heard_audio = 0;
 	if (VstRemoteNow()) {
 		const int slot = VstBindIoSlot();
 		VstPrefetchStop(slot);

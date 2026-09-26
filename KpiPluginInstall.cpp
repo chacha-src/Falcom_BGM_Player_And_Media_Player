@@ -1392,7 +1392,7 @@ BOOL KpiInstall_SilentUpdateFmMonKpis(LPCTSTR exeDir)
 		{ L"Kobarin\\kbvio2sf\\kbvio2sf.kpi", L"kbvio2sf.kpi", NULL },
 		{ L"Kobarin\\kbqsf\\kbqsf.kpi", L"kbqsf.kpi", NULL },
 		{ L"Kobarin\\kbxsf\\kbusf\\kbusf.kpi", L"kbusf.kpi", NULL },
-		{ L"Kobarin\\kbvag\\kbvag.kpi", L"kbvag.kpi", NULL },
+		{ L"kbvag\\kbvag.kpi", L"kbvag.kpi", NULL },
 		{ L"Kobarin\\kbssf\\kbssf.kpi", L"kbssf.kpi", NULL },
 		{ L"Kobarin\\kbdsf\\kbdsf.kpi", L"kbdsf.kpi", NULL },
 		{ L"Mamiya\\kbsid\\kbsid.kpi", L"kbsid.kpi", NULL },

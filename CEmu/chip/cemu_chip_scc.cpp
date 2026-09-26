@@ -141,9 +141,13 @@ private:
 			freq[i] = Period(i) - 1u;
 			vol[i] = (unsigned)regs_[volBase + i] & 0x0fu;
 		}
-		/* SCC周波数/音量/オンマスクをFMモニタへ。 */
+		/* SCC周波数/音量/オンマスクと 32 サンプル波形をFMモニタへ。 */
+		uint8_t waves[5 * 32];
+		for (int i = 0; i < 5; i++)
+			memcpy(waves + i * 32, Wave(i), 32);
 		FmMonShadowSetMsxDevices(SASAMI_FMMON_DEV_PSG | SASAMI_FMMON_DEV_SCC);
 		FmMonShadowApplyScc(freq, vol, onMask & 0x1fu);
+		FmMonShadowSetWaves(1, 5, 32, waves);
 	}
 
 	uint32_t clockHz_;

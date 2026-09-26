@@ -20,6 +20,9 @@ static CRITICAL_SECTION s_cs;
 static LONG s_once = 0;
 static volatile LONG s_hold = 0;
 static uint8_t s_regs[0x200];
+/* pad7: kind 1=SCC 2=HuC 3=CUS30。波形本体は s_wave、公開時に regs+$C0 */
+static uint8_t s_waveKind, s_waveNch, s_waveBpc;
+static uint8_t s_wave[8 * 32];
 static uint8_t s_bits[64];     /* 直前 Flush 区間（フェード用にクリア） */
 static uint8_t s_written[64]; /* 曲開始以降に1回でも書いた番地（00→00 含む） */
 static uint8_t s_keyFm[6], s_hitFm[6], s_midiFm[6];
@@ -105,6 +108,40 @@ static void EnsureCs(void)
 		while (InterlockedCompareExchange(&s_csReady, 1, 1) == 0)
 			Sleep(0);
 	}
+}
+
+static void StampWaves(SasamiFmMonDump* d)
+{
+	unsigned n;
+	if (!d || !s_waveKind) return;
+	n = (unsigned)s_waveNch * (unsigned)s_waveBpc;
+	if (!n || n > sizeof(s_wave) || n > 0x140u) return;
+	memcpy(d->regs + 0xC0, s_wave, n);
+	d->pad7[0] = s_waveKind;
+	d->pad7[1] = s_waveNch;
+	d->pad7[2] = s_waveBpc;
+	d->pad6[2] = (uint8_t)(d->pad6[2] | SASAMI_FMMON_VIEW_REGS | SASAMI_FMMON_VIEW_PANELS);
+}
+
+void FmMonShadowSetWaves(unsigned kind, unsigned nch, unsigned bytesPerCh, const void* packed)
+{
+	unsigned n;
+	if (kind < 1 || kind > 3 || nch < 1 || nch > 8 || bytesPerCh < 1 || bytesPerCh > 32 || !packed)
+		return;
+	n = nch * bytesPerCh;
+	EnsureCs();
+	EnterCriticalSection(&s_cs);
+	if (s_waveKind != (uint8_t)kind || s_waveNch != (uint8_t)nch
+		|| s_waveBpc != (uint8_t)bytesPerCh || memcmp(s_wave, packed, n) != 0) {
+		memcpy(s_wave, packed, n);
+		if (n < sizeof(s_wave))
+			memset(s_wave + n, 0, sizeof(s_wave) - n);
+		s_waveKind = (uint8_t)kind;
+		s_waveNch = (uint8_t)nch;
+		s_waveBpc = (uint8_t)bytesPerCh;
+		s_dirty = 1;
+	}
+	LeaveCriticalSection(&s_cs);
 }
 
 /* SegaPCM freq (addr delta/tick) → ピアノ範囲 A0–C8 の MIDI。
@@ -305,6 +342,8 @@ void FmMonShadowReset(void)
 	EnsureCs();
 	EnterCriticalSection(&s_cs);
 	memset(s_regs, 0, sizeof(s_regs));
+	s_waveKind = s_waveNch = s_waveBpc = 0;
+	memset(s_wave, 0, sizeof(s_wave));
 	memset(s_bits, 0, sizeof(s_bits));
 	memset(s_written, 0, sizeof(s_written));
 	memset(s_keyFm, 0, sizeof(s_keyFm));
@@ -1289,6 +1328,7 @@ void FmMonShadowFlush(int force)
 	s_lastWrite = s_cur;
 	/* 区間内の書込ビットはダンプへ渡したらクリア。残すと UI が全レジスタ常時フェードになる */
 	memset(s_bits, 0, sizeof(s_bits));
+	StampWaves(&d);
 	const int nEdge = FmMonTakeEdges(&d);
 	LeaveCriticalSection(&s_cs);
 	for (int ei = 0; ei < nEdge; ei++)
@@ -1450,6 +1490,7 @@ void FmMonShadowFlushKeysOnly(int force)
 
 	FmMonKeepProbeTags();
 	FillCompanionDump(&d);
+	StampWaves(&d);
 	FillIdentityTitle(&d, "");
 	s_dirty = 0;
 	s_flushUrgent = 0;
@@ -1579,7 +1620,7 @@ void FmMonShadowApplyScc(const unsigned* freq12, const unsigned* vol4, unsigned 
 	s_keysOnly = 0;
 	s_pcmCount = 5;
 	int changed = 0;
-	/* Konami SCC control mirror @ dump+$80 (waveforms omitted; freq/vol/on only) */
+	/* Konami SCC control mirror @ dump+$80。波形は FmMonShadowSetWaves */
 	for (int i = 0; i < 5; i++) {
 		const unsigned per = freq12[i] & 0xFFFu;
 		const unsigned vol = vol4[i] & 0xFu;
