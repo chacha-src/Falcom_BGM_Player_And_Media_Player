@@ -1,4 +1,4 @@
-﻿#include "StdAfx.h"
+#include "StdAfx.h"
 #include "cemu_hard_msx.h"
 #include "../cemu_mgr.h"
 #include "../cemu_zipfs.h"
@@ -3353,7 +3353,7 @@ int CHardMsx::StartSong(unsigned titleCode)
 	return StartSongKss(titleCode);
 }
 
-int CHardMsx::ApplyCatalogToggle(unsigned titleCode)
+int CHardMsx::ApplyCatalogToggle(unsigned titleCode, int enabled)
 {
 	const unsigned lo = titleCode & 0xffu;
 	if (lo != 0xFFu)
@@ -3365,8 +3365,9 @@ int CHardMsx::ApplyCatalogToggle(unsigned titleCode)
 	if (!firehawkPack)
 		return 0;
 	/* TO BOSS: PATCH `IN A,(3); CP FF` は $1B0D フラグ。曲は変えない。 */
-	ioport_[0x03] = 0xFF;
-	mem_[0x1B0D] = 0xFF;
+	const uint8_t v = enabled ? 0xFF : 0;
+	ioport_[0x03] = v;
+	mem_[0x1B0D] = v;
 	return 1;
 }
 

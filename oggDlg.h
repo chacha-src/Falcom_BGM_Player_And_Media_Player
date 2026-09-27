@@ -1,4 +1,4 @@
-﻿// oggDlg.h : ヘッダー ファイル
+// oggDlg.h : ヘッダー ファイル
 //
 #include "afxmt.h"
 //#include "afxcmn.h"
@@ -554,6 +554,7 @@ float PitchScaleFromPos(int pitchPos);
 int TempoPosFromPercent(float percent); // 表示% → スライダー 0..400
 void OggResetRubberBandStretcher();
 void RequestPlaybackRestart(HWND hwnd = NULL);
+void OggNoteResumePromptDropped();
 void OggCancelPendingPlaybackRestart(); // 停止など: 積んだ再演奏を捨てる
 BOOL OggIsResumePromptActive();         // 途中再生のはい/いいえ/キャンセル表示中
 // 再生開始前に途中位置を確認。キャンセルなら FALSE（再生しない。.save は残す）

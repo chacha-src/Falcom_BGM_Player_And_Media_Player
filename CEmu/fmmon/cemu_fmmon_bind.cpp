@@ -38,7 +38,8 @@ static const FmMonChipInfo kFmMonChips[] = {
 	{ CEMU_CHIP_OPL3,     "OPL3",     18, -1, 0u,       SASAMI_FMMON_KEYS_OPL3,    0 },
 	{ CEMU_CHIP_OPL2,     "OPL2",      9, -1, 0u,       SASAMI_FMMON_KEYS_OPL2,    0 },
 	{ CEMU_CHIP_OPLL,     "OPLL",      9, -1, 0u,       SASAMI_FMMON_KEYS_OPL2,    0 },
-	{ CEMU_CHIP_AY,       "AY-3-8910", 3, -1, 1500000u, SASAMI_FMMON_KEYS_MDX,     0 },
+	/* AY は SSG 行で見る。MDX を付けると AY 単独のラベルで Flush が OPM の keys-only へ落ち SSG 行が消える */
+	{ CEMU_CHIP_AY,       "AY-3-8910", 3, -1, 1500000u, SASAMI_FMMON_KEYS_GENERIC, 0 },
 	{ CEMU_CHIP_SN76489,  "SN76496",   4, -1, 3579545u, SASAMI_FMMON_KEYS_MDX,     0 },
 	{ CEMU_CHIP_SAA1099,  "SAA1099",   6, -1, 0u,       SASAMI_FMMON_KEYS_MDX,     0 },
 	{ CEMU_CHIP_K051649,  "SCC",       5, -1, 0u,       SASAMI_FMMON_KEYS_MDX,     0 },
@@ -232,6 +233,8 @@ void CEmuFmMonBindFromGe(const CEmuGameEntry* ge)
 		|| (ge->archive[0] && (_stricmp(ge->archive, "lomakai") == 0
 			|| _stricmp(ge->archive, "makaiden") == 0)));
 	const int isMsx = (_stricmp(dd, "msx") == 0 || _stricmp(pf, "msx") == 0);
+	/* X1 subtype=opn（ishtar）: 実行時は E0/E1 の YM2203。カタログ名の "(OPM)" 由来の記載より優先 */
+	const int x1Opn = (_stricmp(pf, "x1") == 0 || _stricmp(dd, "x1") == 0) && _stricmp(sub, "opn") == 0;
 	const size_t archiveLen = strlen(ge->archive);
 	/* platform が勝つ。同じ *_fm7 zip に PSG (fm7) と OPN (fm77av) 行がある。
 	   カタログ chipIds が zip stem 由来の AY を残しても、fm77av セッションで
@@ -450,6 +453,11 @@ void CEmuFmMonBindFromGe(const CEmuGameEntry* ge)
 		layout = 0;
 		FmMonShadowSetSsgClock(3000000u);
 		FmMonShadowSetKeysProfile(SASAMI_FMMON_KEYS_MDX);
+	} else if (x1Opn) {
+		/* YM2203 は 4 MHz。OPM 分岐へ落とすと OPM 鍵盤の keys-only になり OPN の FM も SSG も出ない。 */
+		strncpy_s(chip, "YM2203", _TRUNCATE);
+		layout = 0;
+		FmMonShadowSetSsgClock(4000000u);
 	} else if (_stricmp(sub, "opm") == 0 || HasChip(ge, CEMU_CHIP_OPM)
 		|| _stricmp(dd, "x68k") == 0 || _stricmp(pf, "x68k") == 0
 		|| _stricmp(pf, "x1") == 0 || _stricmp(dd, "x1") == 0
@@ -458,11 +466,15 @@ void CEmuFmMonBindFromGe(const CEmuGameEntry* ge)
 		|| _stricmp(sub, "fullt") == 0 || _stricmp(sub, "rastan") == 0
 		|| _stricmp(sub, "asuka") == 0 || _stricmp(sub, "m72") == 0
 		|| _stricmp(sub, "m92") == 0 || _stricmp(sub, "megasys1") == 0) {
-		if (_stricmp(sub, "psg") == 0 || _stricmp(sub, "x1psg") == 0
-			|| (HasChip(ge, CEMU_CHIP_AY) && !HasChip(ge, CEMU_CHIP_OPM))) {
+		const int ayOnly = (_stricmp(sub, "psg") == 0 || _stricmp(sub, "x1psg") == 0
+			|| (HasChip(ge, CEMU_CHIP_AY) && !HasChip(ge, CEMU_CHIP_OPM)));
+		if (ayOnly) {
+			/* AY 単体は SSG 行で見る。OPM 鍵盤プロファイル（MDX）を付けると Flush が OPM の
+			   keys-only へ落ち SSG 行が消える。X1 の AY は OPM+AY と同じく分周後 1 MHz。 */
 			strncpy_s(chip, "AY-3-8910", _TRUNCATE);
 			layout = -1;
-			FmMonShadowSetSsgClock(2000000u);
+			FmMonShadowSetSsgClock((_stricmp(pf, "x1") == 0 || _stricmp(dd, "x1") == 0)
+				? 1000000u : 2000000u);
 		} else if (HasChip(ge, CEMU_CHIP_AY) || _stricmp(pf, "x1") == 0
 			|| _stricmp(dd, "x1") == 0) {
 			strncpy_s(chip, "OPM+AY", _TRUNCATE);
@@ -479,7 +491,8 @@ void CEmuFmMonBindFromGe(const CEmuGameEntry* ge)
 		/* X68000: OPM 鍵盤 + MSM6258 ADPCM PCM 行。 */
 		if (_stricmp(dd, "x68k") == 0 || _stricmp(pf, "x68k") == 0)
 			strncpy_s(chip, "OPM+ADPCM", _TRUNCATE);
-		FmMonShadowSetKeysProfile(SASAMI_FMMON_KEYS_MDX);
+		if (!ayOnly)
+			FmMonShadowSetKeysProfile(SASAMI_FMMON_KEYS_MDX);
 	} else if (HasChip(ge, CEMU_CHIP_SN76489) || _stricmp(sub, "sg1000") == 0
 		|| _stricmp(dd, "sc3000") == 0 || _stricmp(sub, "pico") == 0
 		|| _stricmp(dd, "pico") == 0
@@ -563,7 +576,7 @@ void CEmuFmMonBindFromGe(const CEmuGameEntry* ge)
 	   になっていた。カタログがチップ集合を書いて連鎖のラベルが欠けていれば
 	   カタログが勝つ — 実ハードの唯一の per-archive 記録。連鎖が認識した
 	   基板は調整済みラベルを残す。 */
-	if (!isFm7 && !isLomakai && !FmMonLabelCoversDocChips(ge, chip)) {
+	if (!isFm7 && !isLomakai && !x1Opn && !FmMonLabelCoversDocChips(ge, chip)) {
 		char docLabel[48];
 		int docLayout = layout;
 		unsigned docSsg = 0, docKeys = 0;
@@ -572,10 +585,13 @@ void CEmuFmMonBindFromGe(const CEmuGameEntry* ge)
 			strncpy_s(chip, docLabel, _TRUNCATE);
 			layout = docLayout;
 			if (docSsg) FmMonShadowSetSsgClock(docSsg);
+			/* 記載が AY 単独など OPM を含まないのに OPM 分岐の MDX が残ると、OPM の keys-only に
+			   落ちて SSG 行が消える（btime／calorie／gyruss）。記載のプロファイルへ戻す。 */
 			if (docKeys) FmMonShadowSetKeysProfile(docKeys);
+			else if (seedOpm) FmMonShadowSetKeysProfile(SASAMI_FMMON_KEYS_GENERIC);
 			/* 組み立てた集合はもう OPM 形とは限らないので、
 			   それを前提にした OPM snapshot 種まきを落とす。 */
-			if (docLayout != -1) seedOpm = 0;
+			if (docLayout != -1 || docKeys != SASAMI_FMMON_KEYS_MDX) seedOpm = 0;
 		}
 	}
 
@@ -602,11 +618,12 @@ void CEmuFmMonBindFromGe(const CEmuGameEntry* ge)
 
 void CEmuFmMonBeginOpen(const CEmuGameEntry* ge, const wchar_t* zipPath, int sampleRate)
 {
-	(void)ge;
 	if (FmMonShadowIsHeld())
 		return;
 	FmMonShadowReset();
 	if (zipPath && zipPath[0])
 		FmMonShadowSetSource(zipPath);
 	FmMonShadowSetSampleRate((uint32_t)(sampleRate > 0 ? sampleRate : 44100));
+	if (ge)
+		CEmuFmMonBindFromGe(ge);
 }

@@ -1092,8 +1092,8 @@ void CEmuCatalogListDlg::Show(CWnd* pParent)
 {
 	if (!CEmuHasExeArcdata()) {
 		AfxMessageBox(LL14(
-			L"exe と同じ場所に arcdata.zip がありません。",
-			L"arcdata.zip was not found next to the executable.",
+			L"exe と同じ場所に arcdata.7z / zip がありません。",
+			L"arcdata.7z/zip was not found next to the executable.",
 			L"arcdata.zip introuvable a cote de l'exe.",
 			L"arcdata.zip non trovato accanto all'exe.",
 			L"No hay arcdata.zip junto al exe.",

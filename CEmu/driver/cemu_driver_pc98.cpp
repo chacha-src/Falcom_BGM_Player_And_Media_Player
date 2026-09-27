@@ -86,6 +86,16 @@ int CDriverPc98::OverlayTitle(unsigned titleCode)
 	if (!hw_) return 0;
 	CEmuNp2Guard np2;
 	CEmuHardPc98SetActive(hw_);
+	const unsigned lo = titleCode & 0xffu;
+	const unsigned hi8 = (titleCode >> 8) & 0xffu;
+	uint8_t* mem = hw_->Mem();
+	if (mem && ((hi8 & 0xF0u) || (lo == 0xFFu && hw_->dummySndRom_))) {
+		mem[0x60a5] ^= 0xff;
+		return 1;
+	}
+	/* Falcom 00BIOS / xana2e: プレーヤ内だと INT7F を取りこぼす。糊アイドルへ戻す。 */
+	if (hw_->bootIp_ == 0x0600 && hw_->funcVect_ == 0x7f)
+		np2_set_cs_ip(0x0000, 0x063C);
 	titleCode_ = titleCode;
 	const int ok = hw_->TriggerPlay(titleCode_) ? 1 : 0;
 	if (ok) triggered_ = 1;

@@ -1,4 +1,4 @@
-﻿// Game_Music_Emu https://bitbucket.org/mpyne/game-music-emu/
+// Game_Music_Emu https://bitbucket.org/mpyne/game-music-emu/
 
 /*
 Last validated with zexall 2006.11.21 5:26 PM
@@ -56,8 +56,11 @@ enum {
 #define SZ28C( n )  (szpc [n] & ~P04)
 #define SZ28( n )   SZ28C( n )
 
-#define SET_R( n )  (void) (r.r = n)
-#define GET_R()     (r.r)
+/* R の下位 7 ビットは M1 ごとに進む。命令単位では数えず、約 4 クロックに 1 回として
+   サイクル数から出す。r.r は「時刻 0 での値」を持つ。Falcom xana2 の空腹処理は
+   `LD A,R` を乱数に使い、固定値だと音程が揺れない。 */
+#define SET_R( n )  (void) (r.r = (uint8_t)(((n) & 0x80) | (((n) - (unsigned)(TIME >> 2)) & 0x7F)))
+#define GET_R()     ((uint8_t)((r.r & 0x80) | ((r.r + (unsigned)(TIME >> 2)) & 0x7F)))
 
 Ay_Cpu::Ay_Cpu()
 {
@@ -1273,8 +1276,6 @@ possibly_out_of_time:
 		
 		case 0x4F: // LD R,A
 			SET_R( rg.a );
-			debug_printf( "LD R,A not supported\n" );
-			warning = true;
 			goto loop;
 		
 		case 0x57: // LD A,I
@@ -1283,8 +1284,6 @@ possibly_out_of_time:
 		
 		case 0x5F: // LD A,R
 			rg.a = GET_R();
-			debug_printf( "LD A,R not supported\n" );
-			warning = true;
 		ld_ai_common:
 			flags = (flags & C01) | SZ28( rg.a ) | (r.iff2 << 2 & V04);
 			goto loop;

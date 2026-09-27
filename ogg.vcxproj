@@ -114,23 +114,23 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">
     <!-- Windows SDK の d3dcompiler.lib(_47) を DirectX SDK 2010(_42) より優先。WindowsSDKLibVersion は空になることがあるので TargetPlatformVersion を使う -->
     <LibraryPath>$(WindowsSdkDir)Lib\$(TargetPlatformVersion)\um\x86;$(ProjectDir);C:\DirectX SDK (February 2010)\Lib\x86;C:\DXSDK\Lib;C:\Microsoft SDKs\Windows\v6.0\Samples\Multimedia\DirectShow\BaseClasses;$(LibraryPath)</LibraryPath>
-    <IncludePath>$(ProjectDir);$(ProjectDir)zstd;$(ProjectDir)third_party\aimp;$(ProjectDir)third_party\vst3sdk;$(ProjectDir)third_party\signalsmith-stretch\include;$(ProjectDir)third_party\signalsmith-linear\include;$(ProjectDir)minizip;C:\Microsoft SDKs\Windows\v6.0\Samples\Multimedia\DirectShow\BaseClasses;C:\ogg\include;C:\PROJECTS\APPLICATION3\faad2-2.7\common\mp4ff;C:\PROJECTS\APPLICATION3\faad2-2.7\include;$(VC_IncludePath);$(IncludePath)</IncludePath>
+    <IncludePath>$(ProjectDir);$(ProjectDir)zstd;$(ProjectDir)third_party\aimp;$(ProjectDir)third_party\vst3sdk;$(ProjectDir)third_party\signalsmith-stretch\include;$(ProjectDir)third_party\signalsmith-linear\include;$(ProjectDir)minizip;$(ProjectDir)lzma_sdk;C:\Microsoft SDKs\Windows\v6.0\Samples\Multimedia\DirectShow\BaseClasses;C:\ogg\include;C:\PROJECTS\APPLICATION3\faad2-2.7\common\mp4ff;C:\PROJECTS\APPLICATION3\faad2-2.7\include;$(VC_IncludePath);$(IncludePath)</IncludePath>
     <TargetName>oggYSEDbgm_uni_avx2</TargetName>
     <TargetPath>C:\PROJECTS\APPLICATION3\ogg_binary\oggYSEDbgm_uni_avx2.exe</TargetPath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">
     <LibraryPath>$(ProjectDir)x64lib;$(WindowsSdkDir)Lib\$(TargetPlatformVersion)\um\x64;C:\DirectX SDK (February 2010)\Lib\x64;C:\DXSDK\Lib\x64;$(LibraryPath)</LibraryPath>
-    <IncludePath>$(ProjectDir);$(ProjectDir)zstd;$(ProjectDir)third_party\aimp;$(ProjectDir)third_party\vst3sdk;$(ProjectDir)third_party\signalsmith-stretch\include;$(ProjectDir)third_party\signalsmith-linear\include;$(ProjectDir)minizip;C:\Microsoft SDKs\Windows\v6.0\Samples\Multimedia\DirectShow\BaseClasses;C:\ogg\include;C:\PROJECTS\APPLICATION3\faad2-2.7\common\mp4ff;C:\PROJECTS\APPLICATION3\faad2-2.7\include;$(VC_IncludePath);$(IncludePath)</IncludePath>
+    <IncludePath>$(ProjectDir);$(ProjectDir)zstd;$(ProjectDir)third_party\aimp;$(ProjectDir)third_party\vst3sdk;$(ProjectDir)third_party\signalsmith-stretch\include;$(ProjectDir)third_party\signalsmith-linear\include;$(ProjectDir)minizip;$(ProjectDir)lzma_sdk;C:\Microsoft SDKs\Windows\v6.0\Samples\Multimedia\DirectShow\BaseClasses;C:\ogg\include;C:\PROJECTS\APPLICATION3\faad2-2.7\common\mp4ff;C:\PROJECTS\APPLICATION3\faad2-2.7\include;$(VC_IncludePath);$(IncludePath)</IncludePath>
     <TargetName>oggYSEDbgm_uni_avx2</TargetName>
     <TargetPath>C:\PROJECTS\APPLICATION3\ogg_binary\oggYSEDbgm_uni_avx2.exe</TargetPath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='uni_2026_de|Win32'">
     <LibraryPath>$(WindowsSdkDir)Lib\$(TargetPlatformVersion)\um\x86;$(ProjectDir);C:\DirectX SDK (February 2010)\Lib\x86;C:\DXSDK\Lib;C:\Microsoft SDKs\Windows\v6.0\Samples\Multimedia\DirectShow\BaseClasses;$(LibraryPath)</LibraryPath>
-    <IncludePath>$(ProjectDir);$(ProjectDir)zstd;$(ProjectDir)third_party\aimp;$(ProjectDir)third_party\vst3sdk;$(ProjectDir)third_party\signalsmith-stretch\include;$(ProjectDir)third_party\signalsmith-linear\include;$(ProjectDir)minizip;C:\Microsoft SDKs\Windows\v6.0\Samples\Multimedia\DirectShow\BaseClasses;C:\ogg\include;C:\PROJECTS\APPLICATION3\faad2-2.7\common\mp4ff;C:\PROJECTS\APPLICATION3\faad2-2.7\include;$(VC_IncludePath);$(IncludePath)</IncludePath>
+    <IncludePath>$(ProjectDir);$(ProjectDir)zstd;$(ProjectDir)third_party\aimp;$(ProjectDir)third_party\vst3sdk;$(ProjectDir)third_party\signalsmith-stretch\include;$(ProjectDir)third_party\signalsmith-linear\include;$(ProjectDir)minizip;$(ProjectDir)lzma_sdk;C:\Microsoft SDKs\Windows\v6.0\Samples\Multimedia\DirectShow\BaseClasses;C:\ogg\include;C:\PROJECTS\APPLICATION3\faad2-2.7\common\mp4ff;C:\PROJECTS\APPLICATION3\faad2-2.7\include;$(VC_IncludePath);$(IncludePath)</IncludePath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='uni_2026_de|x64'">
     <LibraryPath>$(ProjectDir)x64lib;$(WindowsSdkDir)Lib\$(TargetPlatformVersion)\um\x64;C:\DirectX SDK (February 2010)\Lib\x64;C:\DXSDK\Lib\x64;$(LibraryPath)</LibraryPath>
-    <IncludePath>$(ProjectDir);$(ProjectDir)zstd;$(ProjectDir)third_party\aimp;$(ProjectDir)third_party\vst3sdk;$(ProjectDir)third_party\signalsmith-stretch\include;$(ProjectDir)third_party\signalsmith-linear\include;$(ProjectDir)minizip;C:\Microsoft SDKs\Windows\v6.0\Samples\Multimedia\DirectShow\BaseClasses;C:\ogg\include;C:\PROJECTS\APPLICATION3\faad2-2.7\common\mp4ff;C:\PROJECTS\APPLICATION3\faad2-2.7\include;$(VC_IncludePath);$(IncludePath)</IncludePath>
+    <IncludePath>$(ProjectDir);$(ProjectDir)zstd;$(ProjectDir)third_party\aimp;$(ProjectDir)third_party\vst3sdk;$(ProjectDir)third_party\signalsmith-stretch\include;$(ProjectDir)third_party\signalsmith-linear\include;$(ProjectDir)minizip;$(ProjectDir)lzma_sdk;C:\Microsoft SDKs\Windows\v6.0\Samples\Multimedia\DirectShow\BaseClasses;C:\ogg\include;C:\PROJECTS\APPLICATION3\faad2-2.7\common\mp4ff;C:\PROJECTS\APPLICATION3\faad2-2.7\include;$(VC_IncludePath);$(IncludePath)</IncludePath>
     <TargetName>oggYSEDbgm_uni_2026_de</TargetName>
     <TargetPath>C:\PROJECTS\APPLICATION3\ogg_binary\oggYSEDbgm_uni_2026_de.exe</TargetPath>
   </PropertyGroup>
@@ -921,6 +921,79 @@ if errorlevel 1 exit /b 1</Command>
     <ClCompile Include="minizip\ioapi.c" />
     <ClCompile Include="minizip\iowin32.c" />
     <ClCompile Include="KpiPluginInstall.cpp" />
+    <ClCompile Include="SevenZipDec.cpp" />
+    <ClCompile Include="lzma_sdk\7zAlloc.c">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <PreprocessorDefinitions>Z7_PPMD_SUPPORT;Z7_EXTRACT_ONLY;_7ZIP_ST;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+    <ClCompile Include="lzma_sdk\7zBuf.c">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <PreprocessorDefinitions>Z7_PPMD_SUPPORT;Z7_EXTRACT_ONLY;_7ZIP_ST;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+    <ClCompile Include="lzma_sdk\7zFile.c">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <PreprocessorDefinitions>Z7_PPMD_SUPPORT;Z7_EXTRACT_ONLY;_7ZIP_ST;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+    <ClCompile Include="lzma_sdk\7zDec.c">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <PreprocessorDefinitions>Z7_PPMD_SUPPORT;Z7_EXTRACT_ONLY;_7ZIP_ST;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+    <ClCompile Include="lzma_sdk\7zArcIn.c">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <PreprocessorDefinitions>Z7_PPMD_SUPPORT;Z7_EXTRACT_ONLY;_7ZIP_ST;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+    <ClCompile Include="lzma_sdk\7zStream.c">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <PreprocessorDefinitions>Z7_PPMD_SUPPORT;Z7_EXTRACT_ONLY;_7ZIP_ST;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+    <ClCompile Include="lzma_sdk\7zCrc.c">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <PreprocessorDefinitions>Z7_PPMD_SUPPORT;Z7_EXTRACT_ONLY;_7ZIP_ST;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+    <ClCompile Include="lzma_sdk\7zCrcOpt.c">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <PreprocessorDefinitions>Z7_PPMD_SUPPORT;Z7_EXTRACT_ONLY;_7ZIP_ST;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+    <ClCompile Include="lzma_sdk\Bcj2.c">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <PreprocessorDefinitions>Z7_PPMD_SUPPORT;Z7_EXTRACT_ONLY;_7ZIP_ST;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+    <ClCompile Include="lzma_sdk\Bra.c">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <PreprocessorDefinitions>Z7_PPMD_SUPPORT;Z7_EXTRACT_ONLY;_7ZIP_ST;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+    <ClCompile Include="lzma_sdk\Bra86.c">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <PreprocessorDefinitions>Z7_PPMD_SUPPORT;Z7_EXTRACT_ONLY;_7ZIP_ST;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+    <ClCompile Include="lzma_sdk\BraIA64.c">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <PreprocessorDefinitions>Z7_PPMD_SUPPORT;Z7_EXTRACT_ONLY;_7ZIP_ST;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+    <ClCompile Include="lzma_sdk\CpuArch.c">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <PreprocessorDefinitions>Z7_PPMD_SUPPORT;Z7_EXTRACT_ONLY;_7ZIP_ST;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+    <ClCompile Include="lzma_sdk\Delta.c">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <PreprocessorDefinitions>Z7_PPMD_SUPPORT;Z7_EXTRACT_ONLY;_7ZIP_ST;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+    <ClCompile Include="lzma_sdk\Lzma2Dec.c">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <PreprocessorDefinitions>Z7_PPMD_SUPPORT;Z7_EXTRACT_ONLY;_7ZIP_ST;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+    <ClCompile Include="lzma_sdk\LzmaDec.c">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <PreprocessorDefinitions>Z7_PPMD_SUPPORT;Z7_EXTRACT_ONLY;_7ZIP_ST;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+    <ClCompile Include="lzma_sdk\Ppmd7.c">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <PreprocessorDefinitions>Z7_PPMD_SUPPORT;Z7_EXTRACT_ONLY;_7ZIP_ST;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+    <ClCompile Include="lzma_sdk\Ppmd7Dec.c">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <PreprocessorDefinitions>Z7_PPMD_SUPPORT;Z7_EXTRACT_ONLY;_7ZIP_ST;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
     <ClCompile Include="KpiEnumCache.cpp" />
     <ClCompile Include="UpdateCheck.cpp">
       <PreprocessorDefinitions>NOUNCRYPT;USEWIN32IOAPI;%(PreprocessorDefinitions)</PreprocessorDefinitions>
@@ -947,6 +1020,7 @@ if errorlevel 1 exit /b 1</Command>
     <ClCompile Include="CPlayListNew.cpp" />
     <ClCompile Include="Dino.cpp" />
     <ClCompile Include="Douga.cpp" />
+    <ClInclude Include="SevenZipDec.h" />
     <ClInclude Include="HarmonicProfile.h" />
     <ClInclude Include="NoteEnvelopeModel.h" />
     <ClInclude Include="NoteFundamentalPick.h" />
@@ -2147,30 +2221,40 @@ if errorlevel 1 exit /b 1</Command>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_2026_de|x64'">NotUsing</PrecompiledHeader>
       <CompileAs Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">CompileAsC</CompileAs>
+      <CompileAs Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">CompileAsC</CompileAs>
+      <CompileAs Condition="'$(Configuration)|$(Platform)'=='uni_2026_de|x64'">CompileAsC</CompileAs>
     </ClCompile>
     <ClCompile Update="CEmu\vendor\musashi\m68kops.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_2026_de|x64'">NotUsing</PrecompiledHeader>
       <CompileAs Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">CompileAsC</CompileAs>
+      <CompileAs Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">CompileAsC</CompileAs>
+      <CompileAs Condition="'$(Configuration)|$(Platform)'=='uni_2026_de|x64'">CompileAsC</CompileAs>
     </ClCompile>
     <ClCompile Update="CEmu\vendor\musashi\m68kopac.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_2026_de|x64'">NotUsing</PrecompiledHeader>
       <CompileAs Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">CompileAsC</CompileAs>
+      <CompileAs Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">CompileAsC</CompileAs>
+      <CompileAs Condition="'$(Configuration)|$(Platform)'=='uni_2026_de|x64'">CompileAsC</CompileAs>
     </ClCompile>
     <ClCompile Update="CEmu\vendor\musashi\m68kopdm.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_2026_de|x64'">NotUsing</PrecompiledHeader>
       <CompileAs Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">CompileAsC</CompileAs>
+      <CompileAs Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">CompileAsC</CompileAs>
+      <CompileAs Condition="'$(Configuration)|$(Platform)'=='uni_2026_de|x64'">CompileAsC</CompileAs>
     </ClCompile>
     <ClCompile Update="CEmu\vendor\musashi\m68kopnz.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_2026_de|x64'">NotUsing</PrecompiledHeader>
       <CompileAs Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">CompileAsC</CompileAs>
+      <CompileAs Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">CompileAsC</CompileAs>
+      <CompileAs Condition="'$(Configuration)|$(Platform)'=='uni_2026_de|x64'">CompileAsC</CompileAs>
     </ClCompile>
     <ClCompile Update="CEmu\vendor\m37710\m37702core.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>

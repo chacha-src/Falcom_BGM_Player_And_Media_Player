@@ -1,4 +1,4 @@
-﻿#include "stdafx.h"
+#include "stdafx.h"
 #include "ogg.h"
 #include "VstHostDlg.h"
 #include "VstMidiEngine.h"
@@ -294,7 +294,7 @@ public:
 		dc.SetTextColor(RGB(48, 48, 64));
 		const CString lines[] = {
 			LL14(L"・左のプラグインを右の Part 1～32 へドラッグします。読み込み中は「VST初期化中です。お待ちください」が出ます。", L"· Drag a plug-in from the left to Parts 1–32. While it loads, “Initializing VST. Please wait…” is shown.", L"· Glissez un plug-in vers les parties 1–32. Pendant le chargement : « Initialisation VST. Veuillez patienter… ».", L"· Trascina un plug-in nelle parti 1–32. Durante il caricamento: “Inizializzazione VST. Attendere…”.", L"· Arrastre un plug-in a las partes 1–32. Mientras carga: “Inicializando VST. Espere…”.", L"· 왼쪽 플러그인을 파트 1~32로 드래그합니다. 읽는 동안 “VST 초기화 중입니다. 잠시 기다려 주세요”가 나옵니다.", L"· 将左侧插件拖到声部 1–32。加载时显示“正在初始化 VST，请稍候”。", L"· اسحب إضافة إلى الأجزاء 1–32. أثناء التحميل تظهر «جارٍ تهيئة VST».", L"· Перетащите плагин в партии 1–32. Пока грузится: «Инициализация VST. Подождите…».", L"· Plugin links auf Part 1–32 ziehen. Beim Laden: „VST wird initialisiert. Bitte warten…“.", L"· Arraste um plug-in para as partes 1–32. Ao carregar: “A inicializar VST. Aguarde…”.", L"· Sleep een plug-in naar partijen 1–32. Tijdens laden: “VST wordt gestart. Even geduld…”.", L"· Przeciągnij wtyczkę do partii 1–32. Podczas wczytywania: „Inicjalizacja VST. Proszę czekać…”.", L"· Eklentiyi Bölüm 1–32'ye sürükleyin. Yüklenirken “VST başlatılıyor. Lütfen bekleyin…” görünür."),
-			LL14(L"・Z列＝C4～、Q列＝C5～のPC鍵盤（コンボ／入力中は無効。Spaceで全ノートオフ）。", L"· PC keys: Z-row = C4…, Q-row = C5… (off while typing in a combo; Space = all notes off).", L"· Clavier PC: rangée Z = C4…, Q = C5… (inactif dans les listes; Espace = all notes off).", L"· Tastiera PC: fila Z = C4…, Q = C5… (disattiva nei combo; Spazio = all notes off).", L"· Teclado PC: fila Z = C4…, Q = C5… (inactivo en combos; Espacio = all notes off).", L"· PC 건반: Z열=C4~, Q열=C5~(콤보 입력 중 비활성, Space=올 노트 오프).", L"· PC 键盘：Z 行=C4…，Q 行=C5…（组合框输入时无效；空格全音符关闭）。", L"· لوحة PC: صف Z=C4… وصف Q=C5… (معطّل أثناء الكتابة؛ المسافة = إيقاف كل النغمات).", L"· ПК-клавиатура: ряд Z = C4…, Q = C5… (не в комбо; Пробел = all notes off).", L"· PC-Tastatur: Z-Reihe = C4…, Q = C5… (nicht in Combos; Leertaste = All Notes Off).", L"· Teclado PC: fila Z = C4…, Q = C5… (inativo em combos; Espaço = all notes off).", L"· PC-toetsenbord: Z-rij = C4…, Q = C5… (uit in combo's; Spatie = all notes off).", L"· Klawiatura PC: rząd Z = C4…, Q = C5… (wył. w combo; Spacja = all notes off).", L"· PC klavye: Z satırı = C4…, Q = C5… (kombo yazarken kapalı; Boşluk = all notes off)."),
+			LL14(L"・Z列＝C4～、Q列＝C5～のPC鍵盤（コンボ／入力中は無効。Spaceで全ノートオフ。左Shiftで1オクターブ下げ、右Shiftで1オクターブ上げ。同じキーを重ねると2オクターブ）。", L"· PC keys: Z-row = C4…, Q-row = C5… (off while typing in a combo; Space = all notes off; Left Shift = −1 octave, Right Shift = +1 octave, tap again to stack).", L"· Clavier PC: rangée Z = C4…, Q = C5… (inactif dans les listes; Espace = all notes off; Maj G = −1 oct., Maj D = +1 oct.).", L"· Tastiera PC: fila Z = C4…, Q = C5… (disattiva nei combo; Spazio = all notes off; Shift sx = −1 ott., Shift dx = +1 ott.).", L"· Teclado PC: fila Z = C4…, Q = C5… (inactivo en combos; Espacio = all notes off; Mayús izq. = −1 oct., Mayús der. = +1 oct.).", L"· PC 건반: Z열=C4~, Q열=C5~(콤보 입력 중 비활성, Space=올 노트 오프, 왼쪽 Shift=1옥타브 아래, 오른쪽 Shift=1옥타브 위).", L"· PC 键盘：Z 行=C4…，Q 行=C5…（组合框输入时无效；空格全音符关闭；左 Shift 降一八度，右 Shift 升一八度，连按叠加）。", L"· لوحة PC: صف Z=C4… وصف Q=C5… (معطّل أثناء الكتابة؛ المسافة = إيقاف كل النغمات؛ Shift أيسر −أوكتاف، أيمن +أوكتاف).", L"· ПК-клавиатура: ряд Z = C4…, Q = C5… (не в комбо; Пробел = all notes off; Левый Shift −1 окт., правый +1 окт.).", L"· PC-Tastatur: Z-Reihe = C4…, Q = C5… (nicht in Combos; Leertaste = All Notes Off; Umschalt links −1 Okt., rechts +1 Okt.).", L"· Teclado PC: fila Z = C4…, Q = C5… (inativo em combos; Espaço = all notes off; Shift esq. = −1 oit., dir. = +1 oit.).", L"· PC-toetsenbord: Z-rij = C4…, Q = C5… (uit in combo's; Spatie = all notes off; Shift links −1 oct., rechts +1 oct.).", L"· Klawiatura PC: rząd Z = C4…, Q = C5… (wył. w combo; Spacja = all notes off; Lewy Shift −1 okt., prawy +1 okt.).", L"· PC klavye: Z satırı = C4…, Q = C5… (kombo yazarken kapalı; Boşluk = all notes off; Sol Shift −1 oktav, sağ +1 oktav)."),
 			LL14(L"・一覧にはドロップで実際に載るものだけが出ます。LoopMash FX のようなエフェクトは出ません。確認が終わるまで載らないものは出しません。初回／再スキャンの D&D・発音確認が通ったものから左側へ順に出ます。同じ音源のコピーは1つにまとめます。<x86><x64>はビット数、<音色選択>はプラグイン側で音色を選ぶ音源、[M16ch]は16chマルチです。", L"· The list shows only plug-ins that actually drop onto a part. Effects such as LoopMash FX are omitted. Nothing that will be removed later is shown in passing. Each one that passes the drop and sound check is added on the left as it is confirmed (first open / rescan). Copies of the same module are merged. <x86><x64> is bitness, <patch> needs a sound picked in the plug-in, [M16ch] is 16-ch multi.", L"· La liste n'affiche que les plug-ins réellement déposables. Les effets (LoopMash FX…) sont omis. Rien n'apparaît pour disparaître ensuite. Chaque plug-in validé (glisser / son) apparaît à gauche au fur et à mesure. Les copies du même module sont fusionnées. <x86><x64> = bits, <timbre> = choisir dans le plug-in, [M16ch] = multi 16 ch.", L"· L'elenco mostra solo i plug-in che si possono trascinare. Gli effetti (LoopMash FX…) sono omessi. Nulla compare per poi sparire. Ogni plug-in confermato (trascina / suono) compare a sinistra man mano. Le copie dello stesso modulo sono unite. <x86><x64> = bit, <patch> = scegliere nel plug-in, [M16ch] = multi 16 ch.", L"· La lista solo muestra plug-ins que se pueden soltar. Los efectos (LoopMash FX…) se omiten. Nada aparece para luego desaparecer. Cada uno que pasa el arrastre y el sonido se añade a la izquierda al confirmarse. Las copias del mismo módulo se unen. <x86><x64> = bits, <timbre> = elegir en el plug-in, [M16ch] = multi 16 ch.", L"· 목록에는 실제로 드롭되는 플러그인만 표시됩니다. LoopMash FX 같은 이펙트는 나오지 않습니다. 나중에 사라질 항목은 잠깐도 올리지 않습니다. D&D·발음 확인이 된 것부터 왼쪽에 차례로 나옵니다. 같은 모듈의 복사본은 하나로 합칩니다. <x86><x64>는 비트, <음색선택>은 플러그인에서 고름, [M16ch]은 16ch 멀티.", L"· 列表只显示可拖放到声部的插件。LoopMash FX 一类效果器不列出。不会先显示再删掉。通过拖放和发音确认的会从左侧依次出现。同一模块的副本会合为一条。<x86><x64>为位数，<选音色>需在插件里选，[M16ch]为 16 声道多音色。", L"· تظهر القائمة فقط الإضافات القابلة للإفلات. تُستثنى المؤثرات مثل LoopMash FX. لا يظهر شيء ليُحذف لاحقًا. كل إضافة تجتاز الإفلات والصوت تُضاف إلى اليسار فور التأكيد. تُدمج نسخ نفس الوحدة. <x86><x64> البتات، <رقعة> اختيار في الإضافة، [M16ch] متعدد 16 قناة.", L"· В списке только плагины, которые реально ставятся на слот. Эффекты вроде LoopMash FX не показываются. Ничего не мелькает, чтобы потом исчезнуть. Прошедшие проверку D&D и звука появляются слева по мере подтверждения. Копии одного модуля сливаются. <x86><x64> — разрядность, <патч> — выбрать в плагине, [M16ch] — 16-канальный мульти.", L"· Die Liste zeigt nur Plug-ins, die sich ablegen lassen. Effekte wie LoopMash FX fehlen. Nichts erscheint nur, um danach zu verschwinden. Jedes nach D&D- und Klangprüfung Bestätigte erscheint links der Reihe nach. Kopien desselben Moduls werden zusammengefasst. <x86><x64> = Bits, <Patch> = im Plug-in wählen, [M16ch] = 16-ch Multi.", L"· A lista mostra só plug-ins que se podem largar. Efeitos como LoopMash FX ficam de fora. Nada aparece para depois desaparecer. Cada um que passa no largar e no som entra à esquerda à medida que é confirmado. Cópias do mesmo módulo juntam-se. <x86><x64> = bits, <timbre> = escolher no plug-in, [M16ch] = multi 16 ch.", L"· De lijst toont alleen plug-ins die echt te droppen zijn. Effecten zoals LoopMash FX ontbreken. Niets verschijnt even om daarna te verdwijnen. Elke plug-in die D&D en geluid haalt, komt links bij bevestiging. Kopieën van dezelfde module worden samengevoegd. <x86><x64> = bits, <patch> = kiezen in de plug-in, [M16ch] = 16ch multi.", L"· Lista pokazuje tylko wtyczki, które da się upuścić. Efekty jak LoopMash FX nie wchodzą. Nic nie miga, by zaraz zniknąć. Każda po teście D&D i dźwięku pojawia się po lewej w miarę potwierdzenia. Kopie tego samego modułu są scalane. <x86><x64> = bity, <barwa> = wybór w wtyczce, [M16ch] = multi 16 ch.", L"· Liste yalnızca gerçekten bırakılabilen eklentileri gösterir. LoopMash FX gibi efektler çıkmaz. Sonra silinecek öğeler ara ara gösterilmez. D&D ve ses kontrolünden geçenler solda sırayla çıkar. Aynı modülün kopyaları birleşir. <x86><x64> bit, <yama> eklentide seçim, [M16ch] 16ch multi."),
 			LL14(L"・MIDI入力は3台＋「メイン再生スルー」。プレイヤーで鳴っている音（形式不問）をホストへ回し、プレイヤー本体の出力は止まります。MIDIならSMFも鍵盤と合流します。各機器は「1-16ch」（パート1–16）と「17-32ch」（パート17–32）で選べます。",
 				L"· Three MIDI inputs plus Main-playback thru. Player audio (any format) is routed here and the player's own speakers go silent. MIDI SMF also merges with the keyboards. Each device is listed as 1-16ch (parts 1–16) and 17-32ch (parts 17–32).",
@@ -1173,7 +1173,8 @@ IMPLEMENT_DYNAMIC(CVstHostDlg, CCustomBlurDialogBase)
 CVstHostDlg::CVstHostDlg(CWnd* parent)
 	: CCustomBlurDialogBase(IDD, parent), m_presetCount(0), m_waveOut(NULL),
 	  m_audioEvent(NULL), m_audioStop(NULL), m_audioThread(NULL), m_audioRunning(0),
-	  m_wavFile(INVALID_HANDLE_VALUE), m_wavOn(0), m_wavBytes(0), m_volLevel(100)
+	  m_wavFile(INVALID_HANDLE_VALUE), m_wavOn(0), m_wavBytes(0), m_volLevel(100),
+	  m_volUiLock(0)
 {
 	memset(m_presets, 0, sizeof(m_presets));
 	memset(m_presetComp, 0, sizeof(m_presetComp));
@@ -1185,6 +1186,7 @@ CVstHostDlg::CVstHostDlg(CWnd* parent)
 	memset(m_midiDestMask, 0, sizeof(m_midiDestMask));
 	memset(m_midiF5Port, 0xFF, sizeof(m_midiF5Port));
 	memset(m_pcHeldNote, 0, sizeof(m_pcHeldNote));
+	m_pcOctaveShift = 0;
 	InitializeCriticalSection(&m_wavLock);
 }
 
@@ -1328,7 +1330,7 @@ BOOL CVstHostDlg::OnInitDialog()
 	m_vol.SetRange(0, 100);
 	{
 		int v = savedata.vstHostVol;
-		if (v < 0 || v > 100) v = 100;
+		if (v < 1 || v > 100) v = 100;
 		m_vol.SetPos(v);
 		InterlockedExchange(&m_volLevel, v);
 	}
@@ -1513,14 +1515,40 @@ BOOL CVstHostDlg::HandlePcKeyboardMidi(MSG* msg)
 	if (PcFocusBlocksKeys()) return FALSE;
 
 	const UINT vk = (UINT)msg->wParam;
+	if (vk == VK_SHIFT || vk == VK_LSHIFT || vk == VK_RSHIFT) {
+		if (msg->message == WM_KEYUP || msg->message == WM_SYSKEYUP)
+			return TRUE;
+		if (msg->lParam & (1 << 30)) return TRUE;
+		const UINT sc = (UINT)((msg->lParam >> 16) & 0xFF);
+		const UINT vkEx = MapVirtualKey(sc, MAPVK_VSC_TO_VK_EX);
+		int dir = 0;
+		if (vk == VK_LSHIFT || vkEx == VK_LSHIFT || sc == 0x2A) dir = -1;
+		else if (vk == VK_RSHIFT || vkEx == VK_RSHIFT || sc == 0x36) dir = 1;
+		else if (GetKeyState(VK_LSHIFT) & 0x8000) dir = -1;
+		else if (GetKeyState(VK_RSHIFT) & 0x8000) dir = 1;
+		if (!dir) return TRUE;
+		m_pcOctaveShift += dir * 12;
+		if (m_pcOctaveShift > 48) m_pcOctaveShift = 48;
+		if (m_pcOctaveShift < -48) m_pcOctaveShift = -48;
+		const int oct = m_pcOctaveShift / 12;
+		CString st;
+		st.Format(LL14(L"オクターブ %+d", L"Octave %+d", L"Octave %+d", L"Ottava %+d",
+			L"Octava %+d", L"옥타브 %+d", L"八度 %+d", L"أوكتاف %+d",
+			L"Октава %+d", L"Oktave %+d", L"Oitava %+d", L"Octaaf %+d",
+			L"Oktawa %+d", L"Oktav %+d"), oct);
+		SetStatus(st);
+		return TRUE;
+	}
 	if (vk == VK_SPACE && msg->message == WM_KEYDOWN && !(msg->lParam & (1 << 30))) {
 		PcKeyReleaseAll();
 		VstLiveAllNotesOff();
 		return TRUE;
 	}
 
-	const int note = PcKeyToNote(vk);
-	if (note < 0 || note > 127 || vk >= 256) return FALSE;
+	int note = PcKeyToNote(vk);
+	if (note < 0 || vk >= 256) return FALSE;
+	note += m_pcOctaveShift;
+	if (note < 0 || note > 127) return TRUE;
 
 	if (msg->message == WM_KEYDOWN || msg->message == WM_SYSKEYDOWN) {
 		if (msg->lParam & (1 << 30)) return TRUE; // auto-repeat
@@ -1530,8 +1558,9 @@ BOOL CVstHostDlg::HandlePcKeyboardMidi(MSG* msg)
 		return TRUE;
 	}
 	if (m_pcHeldNote[vk]) {
+		const int held = (int)m_pcHeldNote[vk] - 1;
 		m_pcHeldNote[vk] = 0;
-		PcSendShort((DWORD)(0x80 | (note << 8)));
+		PcSendShort((DWORD)(0x80 | (held << 8)));
 	}
 	return TRUE;
 }
@@ -1553,6 +1582,8 @@ void CVstHostDlg::LayoutHelpBtn() { CCC_CaptionPlaceHelpBtn(m_hWnd, &m_help); }
 void CVstHostDlg::LayoutChildren(int cx, int cy)
 {
 	if (!GetSafeHwnd() || !m_wire.GetSafeHwnd()) return;
+	const int keepVol = (int)InterlockedCompareExchange(&m_volLevel, 0, 0);
+	m_volUiLock = 1;
 	const int capH = GetCustomCaptionHeight();
 	const int pad = 8, rowH = 24, gap = 5, lblGap = 4;
 	// Sized from the real font metrics: a fixed height clipped the Japanese
@@ -1619,6 +1650,14 @@ void CVstHostDlg::LayoutChildren(int cx, int cy)
 	if (m_wav.GetSafeHwnd())
 		m_wav.SetWindowPos(NULL, cx - pad - closeW - gap - wavW, cy - bottomH, wavW, 22, SWP_NOZORDER);
 	m_close.SetWindowPos(NULL, cx - pad - closeW, cy - bottomH, closeW, 22, SWP_NOZORDER);
+	if (m_vol.GetSafeHwnd()) {
+		int v = keepVol;
+		if (v < 1 || v > 100) v = 100;
+		m_vol.SetPos(v);
+		InterlockedExchange(&m_volLevel, v);
+	}
+	m_volUiLock = 0;
+	ApplyVolUi();
 }
 
 void CVstHostDlg::OnSize(UINT type, int cx, int cy)
@@ -2621,8 +2660,10 @@ void CVstHostDlg::ApplyVolUi()
 
 void CVstHostDlg::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
 {
-	if (pScrollBar && pScrollBar->m_hWnd == m_vol.m_hWnd)
-		ApplyVolUi();
+	if (pScrollBar && pScrollBar->m_hWnd == m_vol.m_hWnd) {
+		if (!m_volUiLock)
+			ApplyVolUi();
+	}
 	CCustomBlurDialogBase::OnHScroll(nSBCode, nPos, pScrollBar);
 }
 

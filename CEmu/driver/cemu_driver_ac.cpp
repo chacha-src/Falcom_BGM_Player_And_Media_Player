@@ -1,5 +1,6 @@
 ﻿#include "StdAfx.h"
 #include "cemu_driver_ac.h"
+#include "../cemu_catalog.h"
 #include "../machine/cemu_m68k_bus.h"
 #include <stdio.h>
 #include "../machine/cemu_v35_bus.h"
@@ -105,6 +106,8 @@ static const uint8_t kFlstoryTryCmds[] = {
 	0x15, 0x16, 0x18, 0x05, 0x03, 0x06, 0x08, 0x0e, 0x0f, 0x01, 0x04
 };
 
+/* Sys16 / Deco 系で Open 時の既定トラックを選ぶためのラベル判定。
+   mix するかどうかの判断には使わない（それは音源ドライバに聞く）。 */
 static int CEmuAcSys16SeLabel(const wchar_t* s)
 {
 	if (!s || !s[0]) return 0;
@@ -266,6 +269,7 @@ CDriverAc::CDriverAc()
 	, cmdIndex_(0)
 	, nextCmdAt_(0)
 	, nextGngIrq_(0)
+	, irq0Hold_(0)
 	, irqPaceAcc_(0)
 	, irqPaceDue_(0)
 	, irqPaceLive_(0)
@@ -303,8 +307,11 @@ CDriverAc::CDriverAc()
 	, scratch_(NULL)
 	, scratchFrames_(0)
 	, heard_(0)
+	, c7xCodeN_(0)
 {
 	memset(extReserve_, 0, sizeof(extReserve_));
+	memset(c7xCode_, 0, sizeof(c7xCode_));
+	memset(c7xPrimary_, 0, sizeof(c7xPrimary_));
 }
 
 int16_t* CDriverAc::Scratch(int frames)
@@ -339,6 +346,7 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 	pinned_ = 0;
 	cmdIndex_ = 0;
 	nextGngIrq_ = 0;
+	irq0Hold_ = 0;
 	irqPaceAcc_ = 0;
 	irqPaceDue_ = 0;
 	irqPaceLive_ = 0;
@@ -2448,6 +2456,8 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 			/* 上の H8 経路と同じ: 要求後に走らせると曲全体で CPU が音声より先行したまま */
 			M37702RunCycles(cpuHz_);
 			M37702RunCycles(cpuHz_ / 2);
+			/* 起動済みのドライバに各コードの種別を聞き、共有 RAM を汚したので再ブート */
+			C7xProbeCatalog(ge);
 			TryInjectCommand();
 			booted_ = 1;
 			triggered_ = 1;
@@ -4475,9 +4485,94 @@ void CDriverAc::Close()
 	}
 }
 
+static void CEmuAcProbeRun(void* user, int cycles)
+{
+	((CDriverAc*)user)->ProbeRunCycles(cycles);
+}
+
+/* Namco C7x: 起動したドライバに、カタログの各コードが主シーケンサ（＝曲）を
+   取るかどうかを答えさせる。カタログ code にも hoot XML にもこの区別は無く、
+   ラベル文字列に頼らずに済む唯一の出所が音源ドライバ自身。
+   プローブは枠 0 へ要求を投げるので共有 RAM が汚れる。終わったら MCU をリセットし
+   呼び出し側が通常ブートをやり直す。 */
+void CDriverAc::C7xProbeCatalog(const CEmuGameEntry* ge)
+{
+	c7xCodeN_ = 0;
+	if (!hw_ || !ge || ge->titleCount <= 0 || !ge->title)
+		return;
+	if (hw_->board_ != CEMU_AC_BOARD_NAMCO_C352 || !hw_->M37702Active()
+		|| !hw_->M37702McuKind())
+		return;
+	for (int i = 0; i < ge->titleCount && c7xCodeN_ < kC7xCodeMax; i++) {
+		const unsigned c = ge->title[i].code;
+		int dup = 0;
+		for (int k = 0; k < c7xCodeN_ && !dup; k++)
+			dup = (c7xCode_[k] == c);
+		if (!dup)
+			c7xCode_[c7xCodeN_++] = c;
+	}
+	if (c7xCodeN_ <= 0)
+		return;
+	/* 実測: 5ms では曲でも副シーケンス枠を取り切らず、20ms で ridgerac / tekken の
+	   全コードが安定した。25ms は余裕分。 */
+	const int win = cpuHz_ / 40;
+	const int n = hw_->C7xProbePrimaryCodes(c7xCode_, c7xCodeN_, c7xPrimary_,
+		win, CEmuAcProbeRun, this);
+	int song = 0, overlay = 0;
+	for (int i = 0; i < n; i++) {
+		if (c7xPrimary_[i] == CHardAc::CEMU_C7X_SONG) song++;
+		else if (c7xPrimary_[i] == CHardAc::CEMU_C7X_OVERLAY) overlay++;
+	}
+	/* 曲と重ねものの両方が出て初めて読めたと見なす。Super System 22（alpinerd 等）は
+	   本物のシーケンサをメイン CPU が上げる構成なので C74 マスク ROM では答えが出ない。
+	   その場合は結果を捨て、従来のカタログ判定に任せる（全曲を重ねてしまわない）。 */
+	if (n != c7xCodeN_ || song <= 0 || overlay <= 0)
+		c7xCodeN_ = 0;
+	hw_->C7xResetSoundMcu();
+	M37702RunCycles(cpuHz_);
+	M37702RunCycles(cpuHz_ / 2);
+}
+
+int CDriverAc::CodeIsOverlay(unsigned titleCode) const
+{
+	for (int i = 0; i < c7xCodeN_; i++) {
+		if (c7xCode_[i] != titleCode)
+			continue;
+		if (c7xPrimary_[i] == CHardAc::CEMU_C7X_SONG) return 0;
+		if (c7xPrimary_[i] == CHardAc::CEMU_C7X_OVERLAY) return 1;
+		return -1; /* ドライバが反応しなかった — 分からない */
+	}
+	return -1;
+}
+
 int CDriverAc::OverlayTitle(unsigned titleCode)
 {
 	if (!hw_) return 0;
+	/* mix: BGM コマンドを残したまま載せる。C7x は BIOS が複数枠を poll するので
+	   空きスロットへ書く。C352 は 0x00 が有効コマンドなので 0 を 0x20 に落とさない。 */
+	if (overlayMix) {
+		const uint16_t w = (uint16_t)(titleCode & 0xffff);
+		if (hw_->board_ == CEMU_AC_BOARD_NAMCO_C352
+			&& (hw_->H8Active() || hw_->M37702Active() || hw_->M37702Soft())) {
+			hw_->SetSoundCommandWordMix(w);
+			return 1;
+		}
+		const uint8_t save = songCmd_;
+		const uint16_t saveW = songCmdWord_;
+		const unsigned saveD = songCmdDword_;
+		songCmd_ = (uint8_t)(titleCode & 0xff);
+		songCmdWord_ = w;
+		songCmdDword_ = titleCode;
+		cmdIndex_ = 0;
+		TryInjectCommand();
+		songCmd_ = save;
+		songCmdWord_ = saveW;
+		songCmdDword_ = saveD;
+		if (cmdIndex_ < 1)
+			cmdIndex_ = 1;
+		triggered_ = 1;
+		return 1;
+	}
 	songCmd_ = (uint8_t)(titleCode & 0xff);
 	songCmdWord_ = (uint16_t)(titleCode & 0xffff);
 	songCmdDword_ = titleCode;
@@ -4616,6 +4711,17 @@ int CDriverAc::OverlayTitle(unsigned titleCode)
 		triggered_ = 1;
 		heard_ = 0;
 		return 1;
+	}
+	/* mahoudai Type 1: 曲スロット表 C740+cmd。type 0 は加算するだけで旧スロットを消さない。
+	   走査は C741 から低い番号優先なので、最初に鳴らした曲が張り付く。type 1 が CALL 0103 で表とチャネルを掃く。 */
+	if (hw_->board_ == CEMU_AC_BOARD_RAIZING && hw_->RaizingType() == 1) {
+		if (uint8_t* m = hw_->Mem())
+			memset(m + 0xc740, 0, 0x53);
+		hw_->RaizingPostCommand(0x00, 0x01);
+		if (hw_->Cpu()) {
+			for (int i = 0; i < 40 && !hw_->RaizingMailboxIdle(); i++)
+				RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 400);
+		}
 	}
 	cmdIndex_ = 0;
 	triggered_ = 0;
@@ -5095,6 +5201,17 @@ void CDriverAc::TryInjectCommand()
 	triggered_ = 1;
 }
 
+/* 周期 IRQ0 の HOLD_LINE。マスク中（DI／EI 直後）の期限を捨てずに線を保持し、受理で下ろす */
+void CDriverAc::HoldIrq0(Ay_Cpu* cpu, uint64_t now, uint64_t period)
+{
+	if (period > 0 && now >= nextGngIrq_) {
+		irq0Hold_ = 1;
+		nextGngIrq_ += period * ((now - nextGngIrq_) / period + 1);
+	}
+	if (irq0Hold_ && Ay_CpuIm1Interrupt(cpu))
+		irq0Hold_ = 0;
+}
+
 void CDriverAc::DeliverIrqs()
 {
 	if (!hw_ || !hw_->Cpu()) return;
@@ -5109,29 +5226,34 @@ void CDriverAc::DeliverIrqs()
 			if (m && (m[0x9040] & 1u)) {
 				const uint64_t now = (uint64_t)cpu->time64();
 				const uint64_t period = (uint64_t)cpuHz_ / 60;
-				if (period > 0 && now >= nextGngIrq_) {
-					if (cpu->r.iff1)
-						Ay_CpuIm1Interrupt(cpu);
-					nextGngIrq_ = now + period;
-				}
+				HoldIrq0(cpu, now, period);
+			} else {
+				/* MAME irq_mask_w: マスクで CLEAR_LINE */
+				irq0Hold_ = 0;
 			}
 			return;
 		}
 		if (hw_->PacmanWsg()) {
-			/* MAME pacman: vblank irq0 HOLD、IM2。ベクタは OUT 00。5000 bit0 がマスク。 */
+			/* MAME pacman: vblank irq0 HOLD、IM2。ベクタは OUT 00。5000 bit0 がマスク（落とすと CLEAR_LINE）。
+			   EI 直後や DI 中の vblank も線を保持し、受理できた命令で届ける。 */
 			uint8_t* m = hw_->Mem();
 			if (m && (m[0x5000] & 1u)) {
 				const uint64_t now = (uint64_t)cpu->time64();
 				const uint64_t period = (uint64_t)cpuHz_ / 60;
 				const uint8_t vec = (uint8_t)hw_->SjNmiMask();
-				if (period > 0 && now >= nextGngIrq_ && vec != 0xfau) {
-					cpu->irqDelay = 0;
-					if (cpu->r.iff1 && cpu->r.im == 2)
-						Ay_CpuIm2Interrupt(cpu, vec);
-					else if (cpu->r.iff1)
-						Ay_CpuIm1Interrupt(cpu);
-					nextGngIrq_ = now + period;
+				if (period > 0 && now >= nextGngIrq_) {
+					if (vec != 0xfau)
+						irq0Hold_ = 1;
+					nextGngIrq_ += period * ((now - nextGngIrq_) / period + 1);
 				}
+				if (irq0Hold_) {
+					const int taken = (cpu->r.im == 2)
+						? (Ay_CpuIm2Interrupt(cpu, vec) ? 1 : 0)
+						: (Ay_CpuIm1Interrupt(cpu) ? 1 : 0);
+					if (taken)
+						irq0Hold_ = 0;				}
+			} else {
+				irq0Hold_ = 0;
 			}
 			return;
 		}
@@ -5180,11 +5302,7 @@ void CDriverAc::DeliverIrqs()
 			if (srum) {
 				const uint64_t now = (uint64_t)cpu->time64();
 				const uint64_t period = (uint64_t)cpuHz_ / 240;
-				if (period > 0 && now >= nextGngIrq_) {
-					if (cpu->r.iff1)
-						Ay_CpuIm1Interrupt(cpu);
-					nextGngIrq_ = now + period;
-				}
+				HoldIrq0(cpu, now, period);
 			} else if (chip && chip->Irq()) {
 				if (cpu->r.iff1)
 					Ay_CpuIm1Interrupt(cpu);
@@ -5219,11 +5337,7 @@ void CDriverAc::DeliverIrqs()
 		}
 		const uint64_t now = (uint64_t)cpu->time64();
 		const uint64_t period = (uint64_t)cpuHz_ / 240;
-		if (period > 0 && now >= nextGngIrq_) {
-			if (cpu->r.iff1)
-				Ay_CpuIm1Interrupt(cpu);
-			nextGngIrq_ = now + period;
-		}
+		HoldIrq0(cpu, now, period);
 		return;
 	}
 
@@ -5271,10 +5385,7 @@ void CDriverAc::DeliverIrqs()
 			/* MAME seage: VDP2 n_int → IRQ0 60Hz。NMI 無し。240Hz SYS1 タイマは使わない。 */
 			const uint64_t now = (uint64_t)cpu->time64();
 			const uint64_t period = (uint64_t)cpuHz_ / 60;
-			if (period > 0 && now >= nextGngIrq_ && cpu->r.iff1)
-				Ay_CpuIm1Interrupt(cpu);
-			if (period > 0 && now >= nextGngIrq_)
-				nextGngIrq_ = now + period;
+			HoldIrq0(cpu, now, period);
 			return;
 		}
 		if (hw_->TrackfldSn()) {
@@ -5292,11 +5403,7 @@ void CDriverAc::DeliverIrqs()
 		}
 		const uint64_t now = (uint64_t)cpu->time64();
 		const uint64_t period = (uint64_t)cpuHz_ / 240;
-		if (period > 0 && now >= nextGngIrq_) {
-			if (cpu->r.iff1)
-				Ay_CpuIm1Interrupt(cpu);
-			nextGngIrq_ = now + period;
-		}
+		HoldIrq0(cpu, now, period);
 		return;
 	}
 
@@ -5329,14 +5436,15 @@ void CDriverAc::DeliverIrqs()
 	if (hw_->board_ == CEMU_AC_BOARD_TAITO_YM2610
 		|| hw_->board_ == CEMU_AC_BOARD_TAITO_OPM) {
 		if (hw_->TaitoOpmMap() == 16) {
-			/* arkanoid: vblank IRQ0 HOLD。D010 が ACK。 */
+			/* arkanoid: vblank IRQ0 HOLD。D010 が ACK。IM 1 に入るまでは受理しない（線は保持） */
 			const uint64_t now = (uint64_t)cpu->time64();
 			const uint64_t period = (uint64_t)cpuHz_ / 60;
 			if (period > 0 && now >= nextGngIrq_) {
-				if (cpu->r.iff1 && cpu->r.im == 1)
-					Ay_CpuIm1Interrupt(cpu);
-				nextGngIrq_ = now + period;
+				irq0Hold_ = 1;
+				nextGngIrq_ += period * ((now - nextGngIrq_) / period + 1);
 			}
+			if (irq0Hold_ && cpu->r.im == 1 && Ay_CpuIm1Interrupt(cpu))
+				irq0Hold_ = 0;
 			return;
 		}
 		if (hw_->TaitoOpmMap() == 2) {
@@ -5345,11 +5453,7 @@ void CDriverAc::DeliverIrqs()
 				hw_->TakeIrqPulse();
 			const uint64_t now = (uint64_t)cpu->time64();
 			const uint64_t period = (uint64_t)cpuHz_ / 60;
-			if (period > 0 && now >= nextGngIrq_) {
-				if (cpu->r.iff1)
-					Ay_CpuIm1Interrupt(cpu);
-				nextGngIrq_ = now + period;
-			}
+			HoldIrq0(cpu, now, period);
 			return;
 		}
 		if (hw_->TaitoOpmMap() == 11) {
@@ -5374,11 +5478,7 @@ void CDriverAc::DeliverIrqs()
 			{
 				const uint64_t now = (uint64_t)cpu->time64();
 				const uint64_t period = (uint64_t)cpuHz_ / 60;
-				if (period > 0 && now >= nextGngIrq_) {
-					if (cpu->r.iff1)
-						Ay_CpuIm1Interrupt(cpu);
-					nextGngIrq_ = now + period;
-				}
+				HoldIrq0(cpu, now, period);
 			}
 			return;
 		}
@@ -5696,11 +5796,7 @@ void CDriverAc::DeliverIrqs()
 			/* MAME: audiocpu へ vblank IRQ0 HOLD。ラッチは C000 で poll */
 			const uint64_t now = (uint64_t)cpu->time64();
 			const uint64_t period = (uint64_t)cpuHz_ / 60;
-			if (period > 0 && now >= nextGngIrq_) {
-				if (cpu->r.iff1)
-					Ay_CpuIm1Interrupt(cpu);
-				nextGngIrq_ = now + period;
-			}
+			HoldIrq0(cpu, now, period);
 			return;
 		}
 		if (hw_->SolomonAy()) {
@@ -5711,11 +5807,7 @@ void CDriverAc::DeliverIrqs()
 			}
 			const uint64_t now = (uint64_t)cpu->time64();
 			const uint64_t period = (uint64_t)cpuHz_ / 120;
-			if (period > 0 && now >= nextGngIrq_) {
-				if (cpu->r.iff1)
-					Ay_CpuIm1Interrupt(cpu);
-				nextGngIrq_ = now + period;
-			}
+			HoldIrq0(cpu, now, period);
 			return;
 		}
 		if (hw_->HalleysAy()) {
@@ -5726,11 +5818,7 @@ void CDriverAc::DeliverIrqs()
 			}
 			const uint64_t now = (uint64_t)cpu->time64();
 			const uint64_t period = (uint64_t)cpuHz_ * 163840ull / 6000000ull;
-			if (period > 0 && now >= nextGngIrq_) {
-				if (cpu->r.iff1)
-					Ay_CpuIm1Interrupt(cpu);
-				nextGngIrq_ = now + period;
-			}
+			HoldIrq0(cpu, now, period);
 			return;
 		}
 		if (hw_->PbactionAy()) {
@@ -5753,22 +5841,14 @@ void CDriverAc::DeliverIrqs()
 			/* MAME: vblank IRQ0 HOLD。音源 tick は RST38 → A02F */
 			const uint64_t now = (uint64_t)cpu->time64();
 			const uint64_t period = (uint64_t)cpuHz_ / 60;
-			if (period > 0 && now >= nextGngIrq_) {
-				if (cpu->r.iff1)
-					Ay_CpuIm1Interrupt(cpu);
-				nextGngIrq_ = now + period;
-			}
+			HoldIrq0(cpu, now, period);
 			return;
 		}
 		if (hw_->Cap1942Ay()) {
 			/* MAME 1942: irqprom[scanline]&4 がフレームあたり 4 本 → HOLD_LINE IRQ0（240 Hz）。ラッチは NMI しない。 */
 			const uint64_t now = (uint64_t)cpu->time64();
 			const uint64_t period = (uint64_t)cpuHz_ / 240;
-			if (period > 0 && now >= nextGngIrq_) {
-				if (cpu->r.iff1)
-					Ay_CpuIm1Interrupt(cpu);
-				nextGngIrq_ = now + period;
-			}
+			HoldIrq0(cpu, now, period);
 			return;
 		}
 		if (hw_->SwimmerAy()) {
@@ -5795,22 +5875,14 @@ void CDriverAc::DeliverIrqs()
 			}
 			const uint64_t now = (uint64_t)cpu->time64();
 			const uint64_t period = (uint64_t)cpuHz_ / 60;
-			if (period > 0 && now >= nextGngIrq_) {
-				if (cpu->r.iff1)
-					Ay_CpuIm1Interrupt(cpu);
-				nextGngIrq_ = now + period;
-			}
+			HoldIrq0(cpu, now, period);
 			return;
 		}
 		if (hw_->TubepAy()) {
 			/* MAME tubep: スキャンライン 64 と 192 → IRQ0 HOLD（≈120 Hz）。ラッチは NMI しない。 */
 			const uint64_t now = (uint64_t)cpu->time64();
 			const uint64_t period = (uint64_t)cpuHz_ / 120;
-			if (period > 0 && now >= nextGngIrq_) {
-				if (cpu->r.iff1)
-					Ay_CpuIm1Interrupt(cpu);
-				nextGngIrq_ = now + period;
-			}
+			HoldIrq0(cpu, now, period);
 			return;
 		}
 		if (hw_->RetofinvSn()) {
@@ -5835,11 +5907,7 @@ void CDriverAc::DeliverIrqs()
 			if (mem) mem[0xced0] = 1;
 			const uint64_t now = (uint64_t)cpu->time64();
 			const uint64_t period = (uint64_t)cpuHz_ / 120;
-			if (period > 0 && now >= nextGngIrq_) {
-				if (cpu->r.iff1)
-					Ay_CpuIm1Interrupt(cpu);
-				nextGngIrq_ = now + period;
-			}
+			HoldIrq0(cpu, now, period);
 			return;
 		}
 		if (hw_->CircuscSn()) {
@@ -5851,7 +5919,8 @@ void CDriverAc::DeliverIrqs()
 			return;
 		}
 		if (hw_->StarforceSn()) {
-			/* MAME senjyo: PIO ラッチ → IM2 vec 00。CTC ch1 → IM2 vec 0A ≈ 120 Hz。 */
+			/* MAME senjyo: PIO ラッチ → IM2 vec 00。CTC ch1 → IM2 vec 0A ≈ 120 Hz。
+			   CTC の INT は受理されるまで保持（デイジーチェーン上は PIO が先）。 */
 			if (hw_->IrqPulsePending()) {
 				if (cpu->r.iff1 && Ay_CpuIm2Interrupt(cpu, 0x00))
 					hw_->TakeIrqPulse();
@@ -5860,10 +5929,11 @@ void CDriverAc::DeliverIrqs()
 				const uint64_t now = (uint64_t)cpu->time64();
 				const uint64_t period = (uint64_t)cpuHz_ / 120;
 				if (period > 0 && now >= nextGngIrq_) {
-					if (cpu->r.iff1)
-						Ay_CpuIm2Interrupt(cpu, 0x0a);
-					nextGngIrq_ = now + period;
+					irq0Hold_ = 1;
+					nextGngIrq_ += period * ((now - nextGngIrq_) / period + 1);
 				}
+				if (irq0Hold_ && !hw_->IrqPulsePending() && Ay_CpuIm2Interrupt(cpu, 0x0a))
+					irq0Hold_ = 0;
 			}
 			return;
 		}
@@ -5949,11 +6019,7 @@ void CDriverAc::DeliverIrqs()
 		}
 		const uint64_t now = (uint64_t)cpu->time64();
 		const uint64_t period = (uint64_t)cpuHz_ / 60;
-		if (period > 0 && now >= nextGngIrq_) {
-			if (cpu->r.iff1)
-				Ay_CpuIm1Interrupt(cpu);
-			nextGngIrq_ = now + period;
-		}
+		HoldIrq0(cpu, now, period);
 		return;
 	}
 
@@ -6083,12 +6149,8 @@ void CDriverAc::DeliverIrqs()
 			}
 			return;
 		}
-		if (hw_->board_ == CEMU_AC_BOARD_KONAMI_TIMEPLT && !hw_->IrqPulsePending()) {
-			if (period > 0 && now >= nextGngIrq_) {
-				Ay_CpuIm1Interrupt(cpu);
-				nextGngIrq_ = now + period;
-			}
-		}
+		if (hw_->board_ == CEMU_AC_BOARD_KONAMI_TIMEPLT && !hw_->IrqPulsePending())
+			HoldIrq0(cpu, now, period);
 		return;
 	}
 
@@ -6374,11 +6436,7 @@ void CDriverAc::DeliverIrqs()
 		}
 		const uint64_t now = (uint64_t)cpu->time64();
 		const uint64_t period = (uint64_t)cpuHz_ / 7812;
-		if (period > 0 && now >= nextGngIrq_) {
-			if (cpu->r.iff1)
-				Ay_CpuIm1Interrupt(cpu);
-			nextGngIrq_ = now + period;
-		}
+		HoldIrq0(cpu, now, period);
 		return;
 	}
 
@@ -6390,21 +6448,18 @@ void CDriverAc::DeliverIrqs()
 			const uint64_t period = (uint64_t)cpuHz_ / 120;
 			if (period > 0 && now >= nextGngIrq_) {
 				hw_->MitchellToggleIrqSource();
-				if (cpu->r.iff1)
-					Ay_CpuIm1Interrupt(cpu);
-				nextGngIrq_ = now + period;
+				irq0Hold_ = 1;
+				nextGngIrq_ += period * ((now - nextGngIrq_) / period + 1);
 			}
+			if (irq0Hold_ && Ay_CpuIm1Interrupt(cpu))
+				irq0Hold_ = 0;
 			return;
 		}
 		if (hw_->RobokidEmpcityMap()) {
 			/* MAME stfight: irq0_line_hold @ 120 Hz。ラッチは poll。YM irq 未接続。 */
 			const uint64_t now = (uint64_t)cpu->time64();
 			const uint64_t period = (uint64_t)cpuHz_ / 120;
-			if (period > 0 && now >= nextGngIrq_) {
-				if (cpu->r.iff1)
-					Ay_CpuIm1Interrupt(cpu);
-				nextGngIrq_ = now + period;
-			}
+			HoldIrq0(cpu, now, period);
 			return;
 		}
 		if (hw_->RobokidAirbustrMap() || hw_->RobokidDjboyMap() || hw_->RobokidBlazeonMap()

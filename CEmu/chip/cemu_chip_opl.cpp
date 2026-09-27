@@ -23,9 +23,6 @@ public:
 		chip_ = YM3812Init((int)clockHz_, sampleRate_);
 		if (chip_) {
 			YM3812ResetChip(chip_);
-			/* メロディモード（リズムではない）。 */
-			YM3812Write(chip_, 0, 0x01);
-			YM3812Write(chip_, 1, 0x00);
 			/* KOEI FMDRV の AdLib 検出（およびOPLタイマ利用者）は
 			   TimerHandler + AdvanceClocks → YM3812TimerOver が必要。
 			   無いと検出失敗、[0114] が0のまま、INT 66 が FFFF を返す。 */
@@ -51,8 +48,6 @@ public:
 		memset(regHist_, 0, sizeof(regHist_));
 		if (chip_) {
 			YM3812ResetChip(chip_);
-			YM3812Write(chip_, 0, 0x01);
-			YM3812Write(chip_, 1, 0x00);
 			YM3812SetTimerHandler(chip_, &CChipOpl2::OnTimer, this);
 		}
 	}
@@ -99,16 +94,14 @@ public:
 			memset(stereo, 0, (size_t)frames * 2 * sizeof(int16_t));
 			return;
 		}
-		/* IRQポンプ間もタイマを生かす（サンプル時間で進める）。 */
-		if (clockHz_ > 0 && sampleRate_ > 0) {
-			const uint64_t clocks =
-				(uint64_t)frames * (uint64_t)clockHz_ / (uint64_t)sampleRate_;
-			if (clocks) AdvanceClocks(clocks);
-		}
+		/* タイマは CPU ポンプ（PC/AT PumpCycles、アーケード Tick、MSX Render 前）が
+		   進める。ここでサンプル時間を足すとシーケンサが 2 倍速になりボコボコになる。 */
 		for (int i = 0; i < frames; i++) {
 			OPLSAMPLE s = 0;
 			YM3812UpdateOne(chip_, &s, 1);
 			int32_t v = (int32_t)s;
+			/* 9ch 合算は FINAL_SH=0 のまま ±32767 で硬クリップ → 潰れた FM */
+			v /= 2;
 			if (v > 32767) v = 32767;
 			if (v < -32768) v = -32768;
 			/* OPL2 はモノラル。L/R へ同じ値。 */

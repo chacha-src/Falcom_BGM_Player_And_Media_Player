@@ -1,4 +1,4 @@
-﻿// PlayList.cpp : 実装ファイル
+// PlayList.cpp : 実装ファイル
 //
 
 #include "stdafx.h"
@@ -3240,7 +3240,7 @@ static void PlApplyCemuToggleFlip(CPlayList* pl, unsigned code)
 		char dataDir[CEMU_DATA_DIR];
 		CEmuMgrResolveZip(CEmuMgrGet(), pl->pc[i].fol, zipOut,
 			(int)_countof(zipOut), dataDir, (int)sizeof(dataDir));
-		CEmuTogglePrefFlip(zipOut[0] ? zipOut : pl->pc[i].fol, code);
+		const wchar_t* zip = zipOut[0] ? zipOut : pl->pc[i].fol;
 		for (int pass = 0; pass < 2 && !touchPlaying; pass++) {
 			const CString& playing = pass ? tagfile : filen;
 			if (playing.GetLength() <= 0) continue;
@@ -3254,8 +3254,14 @@ static void PlApplyCemuToggleFlip(CPlayList* pl, unsigned code)
 				touchRow = i;
 			}
 		}
+		if (!touchPlaying)
+			CEmuTogglePrefFlip(zip, code);
 	}
 	if (touchPlaying) {
+		if (CEmuLiveOverlayToggle(code)) {
+			pl->m_lc.Invalidate();
+			return;
+		}
 		if (touchRow >= 0)
 			pl->Get(touchRow);
 		if (OggPrepareResumeBeforePlayback(filen) && og && ::IsWindow(og->GetSafeHwnd())) {

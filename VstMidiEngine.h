@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include <Windows.h>
 #include "PluginKinds.h"
@@ -42,6 +42,7 @@ int VstScanEnsure(HWND parentForWait);
 void VstScanVerifyLiveList(HWND parentForWait);
 void VstWaitShowLoad(HWND owner, const wchar_t* pluginName);
 void VstWaitHide(void);
+int VstScanPumpIsBusy(void);
 int VstScanGetCount(void);
 const VstPluginInfo* VstScanGet(int i);
 void VstScanInvalidate(void);

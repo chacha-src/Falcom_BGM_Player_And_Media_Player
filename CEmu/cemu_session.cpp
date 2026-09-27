@@ -1,6 +1,7 @@
 ﻿#include "StdAfx.h"
 #include "cemu_session.h"
 #include "cemu_mgr.h"
+#include "cemu_catalog.h"
 #include "cemu_zipfs.h"
 #include "cemu_mdx.h"
 #include "pmd/cemu_pmd.h"
@@ -12,6 +13,7 @@
 #include "machine/cemu_hard_x1.h"
 #include "machine/cemu_hard_msx.h"
 #include "fmmon/fmmon_shadow.h"
+#include "fmmon/cemu_fmmon_bind.h"
 #include <string.h>
 #include <stdlib.h>
 
@@ -533,27 +535,92 @@ static int CEmuSessionTryHardGe(CEmuSession* s, const CEmuGameEntry* ge,
 
 static void CEmuSessionApplyTogglePrefs(CEmuSession* s)
 {
-	if (!s || !s->path[0]) return;
-	unsigned codes[CEMU_TOGGLE_MAX];
-	const int n = CEmuTogglePrefGet(s->path, codes, CEMU_TOGGLE_MAX);
-	if (n <= 0) return;
+	if (!s || !s->path[0] || !s->game) return;
+	CEmuArchiveToggle list[CEMU_TOGGLE_MAX];
+	const int n = CEmuCatalogListArchiveToggles(s->game, list, CEMU_TOGGLE_MAX);
 	for (int i = 0; i < n; i++) {
+		const int on = CEmuTogglePrefHas(s->path, list[i].code);
 		if (s->kind == CEMU_KIND_X1 && s->x1.hard)
-			((CHardX1*)s->x1.hard)->ApplyCatalogToggle(codes[i]);
+			((CHardX1*)s->x1.hard)->ApplyCatalogToggle(list[i].code, on);
 		else if (s->kind == CEMU_KIND_MSX && s->msx.hard)
-			((CHardMsx*)s->msx.hard)->ApplyCatalogToggle(codes[i]);
+			((CHardMsx*)s->msx.hard)->ApplyCatalogToggle(list[i].code, on);
 	}
+}
+
+int CEmuSessionKindKeepsEngine(int kind)
+{
+	return (kind != 0
+		&& kind != CEMU_KIND_S98
+		&& kind != CEMU_KIND_MDX
+		&& kind != CEMU_KIND_PMD) ? 1 : 0;
+}
+
+int CEmuSessionSameZip(const CEmuSession* s, const wchar_t* path)
+{
+	if (!s || !s->path[0] || !path || !path[0])
+		return 0;
+	wchar_t physical[CEMU_ZIP_PATH];
+	unsigned titleIdx = 1;
+	CEmuParseVirtualPath(path, physical, (int)_countof(physical), &titleIdx);
+	const wchar_t* openPath = physical[0] ? physical : path;
+	return (_wcsicmp(s->path, openPath) == 0) ? 1 : 0;
+}
+
+static unsigned CEmuSessionFirstPlayableTitle(const CEmuGameEntry* ge)
+{
+	if (!ge || ge->titleCount <= 0 || !ge->title)
+		return 0;
+	for (int i = 0; i < ge->titleCount; i++) {
+		wchar_t lab[CEMU_GAME_NAME];
+		lab[0] = 0;
+		CEmuGameTitleAt(ge, i, NULL, lab, (int)_countof(lab));
+		if (CEmuTitleLooksLikeToggle(lab) || CEmuTitleLooksLikeSfx(lab))
+			continue;
+		int isStop = 0;
+		for (const wchar_t* p = lab; *p; p++) {
+			wchar_t c0 = p[0], c1 = p[1], c2 = p[2], c3 = p[3];
+			if (c0 >= L'a' && c0 <= L'z') c0 = (wchar_t)(c0 - L'a' + L'A');
+			if (c1 >= L'a' && c1 <= L'z') c1 = (wchar_t)(c1 - L'a' + L'A');
+			if (c2 >= L'a' && c2 <= L'z') c2 = (wchar_t)(c2 - L'a' + L'A');
+			if (c3 >= L'a' && c3 <= L'z') c3 = (wchar_t)(c3 - L'a' + L'A');
+			if (c0 == L'S' && c1 == L'T' && c2 == L'O' && c3 == L'P') {
+				isStop = 1;
+				break;
+			}
+		}
+		if (isStop)
+			continue;
+		return ge->title[i].code;
+	}
+	return CEmuGameTitleCodeForIndex(ge, 1);
 }
 
 /* zip / 仮想パスを開き、S98→MDX→hard の順で kind を決める */
 int CEmuSessionOpen(CEmuSession* s, const wchar_t* path, unsigned titleCode, DWORD sampleRate)
 {
 	if (!s || !path) return 0;
-	CEmuSessionClose(s);
 	wchar_t physical[CEMU_ZIP_PATH];
 	unsigned titleIdx = 1;
 	CEmuParseVirtualPath(path, physical, (int)_countof(physical), &titleIdx);
 	const wchar_t* openPath = physical[0] ? physical : path;
+	const DWORD rate = sampleRate ? sampleRate : 44100;
+
+	/* 同じ zip なら LoadRoms/boot しない。トグル／SE／曲切替は OverlayTitle。 */
+	if (CEmuSessionKindKeepsEngine(s->kind)
+		&& CEmuSessionSameZip(s, openPath)
+		&& (s->sampleRate == 0 || s->sampleRate == (int)rate)) {
+		const int tog = (s->game && CEmuGameTitleCodeIsToggle(s->game, titleCode)) ? 1 : 0;
+		int mix = 0;
+		if (tog)
+			CEmuTogglePrefFlip(s->path, titleCode);
+		else
+			mix = CEmuSessionCodeIsOverlay(s, titleCode);
+		if (!CEmuSessionOverlayTitle(s, titleCode, mix))
+			return 0;
+		return 1;
+	}
+
+	CEmuSessionClose(s);
 	wcsncpy_s(s->path, openPath, _TRUNCATE);
 	s->sampleRate = sampleRate ? sampleRate : 44100;
 	s->titleCode = titleCode;
@@ -563,6 +630,12 @@ int CEmuSessionOpen(CEmuSession* s, const wchar_t* path, unsigned titleCode, DWO
 	const CEmuGameEntry* ge = CEmuMgrResolveZip(CEmuMgrGet(), openPath, zipOut, (int)_countof(zipOut), dataDir, (int)sizeof(dataDir));
 	const wchar_t* zipPath = zipOut[0] ? zipOut : openPath;
 	s->game = ge;
+	if (ge && CEmuGameTitleCodeIsToggle(ge, titleCode)) {
+		if (!CEmuTogglePrefHas(zipPath, titleCode))
+			CEmuTogglePrefFlip(zipPath, titleCode);
+		titleCode = CEmuSessionFirstPlayableTitle(ge);
+		s->titleCode = titleCode;
+	}
 
 	CEmuZipFs fs;
 	memset(&fs, 0, sizeof(fs));
@@ -574,6 +647,8 @@ int CEmuSessionOpen(CEmuSession* s, const wchar_t* path, unsigned titleCode, DWO
 	}
 	if (CEmuSessionTryMdxInZip(s, &fs, zipPath, s->sampleRate, titleIdx)) {
 		CEmuZipFsClose(&fs);
+		if (s->game)
+			CEmuFmMonBindFromGe(s->game);
 		return 1;
 	}
 
@@ -633,7 +708,9 @@ int CEmuSessionOpen(CEmuSession* s, const wchar_t* path, unsigned titleCode, DWO
 			continue;
 		s->game = cands[i];
 		CEmuZipFsClose(&fs);
-		CEmuSessionApplyTogglePrefs(s);
+		s->togglePrefDelay = (s->sampleRate > 0 ? s->sampleRate : 44100) / 20;
+		if (s->togglePrefDelay < 1)
+			s->togglePrefDelay = 1;
 		return 1;
 	}
 
@@ -734,31 +811,47 @@ static void CEmuSessionWatchHardSilence(CEmuSession* s, short* stereo, int frame
 	}
 }
 
+static CDriver* CEmuSessionDriver(CEmuSession* s);
+
 /* kind に応じて描画。overlayPend があれば同一インスタンスへ OverlayTitle */
 int CEmuSessionRender(CEmuSession* s, short* stereo, int frames)
 {
 	if (!s || !stereo || frames <= 0) return 0;
 	if (InterlockedExchange((LONG*)&s->overlayPend, 0)) {
-		CDriver* drv = NULL;
-		switch (s->kind) {
-		case CEMU_KIND_PC88: drv = s->pc88.driver; break;
-		case CEMU_KIND_PC98: drv = s->pc98.driver; break;
-		case CEMU_KIND_AC: drv = s->ac.driver; break;
-		case CEMU_KIND_X68K: drv = s->x68k.driver; break;
-		case CEMU_KIND_SG1000: drv = s->sg1000.driver; break;
-		case CEMU_KIND_X1: drv = s->x1.driver; break;
-		case CEMU_KIND_PCAT: drv = s->pcat.driver; break;
-		case CEMU_KIND_F3: drv = s->f3.driver; break;
-		case CEMU_KIND_MSX: drv = s->msx.driver; break;
-		case CEMU_KIND_FM7: drv = s->fm7.driver; break;
-		case CEMU_KIND_PICO: drv = s->pico.driver; break;
-		default: break;
-		}
+		const int tog = (s->game && CEmuGameTitleCodeIsToggle(s->game, s->overlayCode)) ? 1 : 0;
+		CDriver* drv = CEmuSessionDriver(s);
 		if (drv) {
-			const int tog = (s->game && CEmuGameTitleCodeIsToggle(s->game, s->overlayCode)) ? 1 : 0;
+			drv->overlayMix = s->overlayMix ? 1 : 0;
 			drv->OverlayTitle(s->overlayCode);
-			if (!tog && s->overlayCode)
+			drv->overlayMix = 0;
+			if (!tog && !s->overlayMix && s->overlayCode)
 				s->titleCode = s->overlayCode;
+			if (!tog) {
+				s->endedBySilence = 0;
+				s->silenceHeard = 0;
+				s->silenceRun = 0;
+				s->silenceFrames = 0;
+				s->lengthSamples = 0;
+				s->curSample = 0;
+			}
+			if (tog) {
+				/* X1 は PATCH XOR。即 SET すると XOR と打ち消し合う。
+				   MSX TO BOSS は RAM/IO フラグなので pref を今載せる。 */
+				if (s->kind == CEMU_KIND_MSX)
+					CEmuSessionApplyTogglePrefs(s);
+			} else if (s->overlayMix) {
+				CEmuSessionApplyTogglePrefs(s);
+			} else {
+				s->togglePrefDelay = (s->sampleRate > 0 ? s->sampleRate : 44100) / 20;
+				if (s->togglePrefDelay < 1)
+					s->togglePrefDelay = 1;
+			}
+		}
+	}
+	if (s->togglePrefDelay > 0) {
+		s->togglePrefDelay -= frames;
+		if (s->togglePrefDelay <= 0) {
+			s->togglePrefDelay = 0;
 			CEmuSessionApplyTogglePrefs(s);
 		}
 	}
@@ -894,13 +987,27 @@ int CEmuSessionUsesGlobalNp2(const CEmuSession* s)
 	return (s->kind == CEMU_KIND_PC98 || s->kind == CEMU_KIND_PCAT) ? 1 : 0;
 }
 
+int CEmuSessionCodeIsOverlay(CEmuSession* s, unsigned titleCode)
+{
+	if (!s) return 0;
+	if (s->game && CEmuGameTitleCodeIsToggle(s->game, titleCode))
+		return 0;
+	if (CDriver* drv = CEmuSessionDriver(s)) {
+		const int r = drv->CodeIsOverlay(titleCode);
+		if (r >= 0)
+			return r;
+	}
+	return CEmuGameTitleCodeIsMixOverlay(s->game, titleCode);
+}
+
 /* 同一 zip SE: Render スレッドで OverlayTitle するようフラグを立てる */
-int CEmuSessionOverlayTitle(CEmuSession* s, unsigned titleCode)
+int CEmuSessionOverlayTitle(CEmuSession* s, unsigned titleCode, int mixSfx)
 {
 	if (!s || s->kind == 0) return 0;
 	if (s->kind == CEMU_KIND_S98 || s->kind == CEMU_KIND_MDX || s->kind == CEMU_KIND_PMD)
 		return 0;
 	s->overlayCode = titleCode;
+	s->overlayMix = mixSfx ? 1 : 0;
 	InterlockedExchange((LONG*)&s->overlayPend, 1);
 	return 1;
 }

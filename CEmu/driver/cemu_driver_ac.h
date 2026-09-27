@@ -13,8 +13,11 @@ public:
 	int Render(int16_t* stereo, int frames) override;
 	int Seek(uint64_t sample) override;
 	int OverlayTitle(unsigned titleCode) override;
+	int CodeIsOverlay(unsigned titleCode) const override;
 
 	unsigned OpmWrites() const;
+	/* C7xProbeCatalog から C7xProbePrimaryCodes へ渡すコールバック */
+	void ProbeRunCycles(int cycles) { M37702RunCycles(cycles); }
 
 private:
 	CHardAc* hw_;
@@ -33,6 +36,8 @@ private:
 	int cmdIndex_;
 	uint64_t nextCmdAt_;
 	uint64_t nextGngIrq_;
+	/* 周期 IRQ0（vblank／スキャンライン由来の MAME irq0_line_hold）の線。CPU が受理するまで 1 */
+	int irq0Hold_;
 	int irqPaceAcc_;       /* 再生中 250Hz をホストサンプルへロックする端数 */
 	int irqPaceDue_;       /* 取ってよい周期 IRQ 残 */
 	int irqPaceLive_;      /* Render 中は 1。Open のブートは CPU 時間のまま */
@@ -69,6 +74,13 @@ private:
 	int scratchFrames_;
 	int heard_;            /* 直前コマンド以降に非ゼロサンプルが出たか */
 	uint8_t extReserve_[64]; /* 迷路/モニタ/GPU Mix 拡張用リザーブ */
+	/* Namco C7x: 起動直後にドライバへ「このコードは主シーケンサを取るか」を
+	   聞いた結果。取る=曲（置き換え）、取らない=BGM に重なる SE／ボイス。 */
+	enum { kC7xCodeMax = 256 };
+	unsigned c7xCode_[kC7xCodeMax];
+	uint8_t c7xPrimary_[kC7xCodeMax];
+	int c7xCodeN_;
+	void C7xProbeCatalog(const CEmuGameEntry* ge);
 
 	/* Z80 ボード用 */
 	void RunUntil(uint64_t endCycle);
@@ -92,6 +104,9 @@ private:
 	int Sega68Render(int16_t* stereo, int frames);
 	void TickOpm(uint64_t cpuCycles);
 	void DeliverIrqs();
+	/* 周期 IRQ0 を HOLD_LINE で届ける。期限で irq0Hold_ を立て、IM1 で受理されるまで保持。
+	   期限は周期の格子で進め、受理の遅れで位相をずらさない。 */
+	void HoldIrq0(Ay_Cpu* cpu, uint64_t now, uint64_t period);
 	/* ラッチ／NMI へ曲コマンドを注入 */
 	void TryInjectCommand();
 	uint16_t m92NoteOffSeen_;

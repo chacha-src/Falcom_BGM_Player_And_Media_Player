@@ -175,7 +175,8 @@ static void CDriverX68kResume1040Hang(CHardX68k* hw, unsigned code)
 					m68k_set_reg(M68K_REG_PC, boot2 + 10u);
 					hw->SetPc(boot2 + 10u);
 				}
-				hw->SetSongCommand(code);
+				/* 2 回目以降は曲コマンドを撃たない。x64 で $1040 に戻ると
+				   フレーズ頭へ巻き戻る。 */
 				return;
 			}
 			s_stubOnce = 1;
@@ -203,7 +204,8 @@ static void CDriverX68kResume1040Hang(CHardX68k* hw, unsigned code)
 			return;
 		}
 	}
-	hw->SetSongCommand(code);
+	if (hw->OpmWrites() < 32u)
+		hw->SetSongCommand(code);
 	const unsigned boot = CDriverX68kFindZmusicBootJsr(hw);
 	if (boot) {
 		m68k_set_reg(M68K_REG_SR, 0x2500);
@@ -213,37 +215,41 @@ static void CDriverX68kResume1040Hang(CHardX68k* hw, unsigned code)
 }
 
 /* CDriverX68kSkipDmacScan の実装 */
-static void CDriverX68kSkipDmacScan(CHardX68k* hw)
+static void CDriverX68kSkipDmacScan(CHardX68k* hw, int* patched)
 {
 	if (!hw || hw->Read16(0x1040u) != 0x60FEu)
 		return;
-	if (hw->Read16(0x1556u) == 0x60FEu)
-		hw->Write16(0x1556u, 0x4E75u);
-	/* BOOT `move.l #$14E6,$2C / $F000 / rts` が LINE-F を $14E6 Human68k cmp 連鎖へ奪う（PC=$1ED2）。$2C は OS イメージのまま。 */
-	for (unsigned a = 0x1400u; a + 12u < 0x1600u; a += 2u) {
-		if (hw->Read16(a) != 0x23FCu)
-			continue;
-		if (hw->Read32(a + 6u) != 0x0000002cu)
-			continue;
-		if (hw->Read16(a) != 0x4E75u)
-			hw->Write16(a, 0x4E75u);
-		break;
-	}
-	const unsigned lf = hw->Read32(0x2cu) & 0xffffffu;
-	if (lf >= 0x1040u && lf < 0x1080u)
-		hw->Write32(0x2cu, CEMU_X68K_DOS_LINEF);
-	/* $1F16/$243C jsr $15B0/$15A0（Human68k/DMAC + trap #3 play）。その init は残す。$1D42 `cmpi.b #$6B,2(A5) / bne` は PSP を見ない。分岐を NOP し bring-up が play_cnv_data に届くようにする。 */
-	for (unsigned a = 0x1C00u; a + 8u < 0x1E80u; a += 2u) {
-		const unsigned op = hw->Read16(a);
-		if (op != 0x0C2Du && op != 0x0C6Du)
-			continue;
-		if (hw->Read16(a + 2u) != 0x006Bu)
-			continue;
-		if (hw->Read16(a + 4u) != 0x0002u)
-			continue;
-		if ((hw->Read16(a + 6u) & 0xFF00u) == 0x6600u)
-			hw->Write16(a + 6u, 0x4E71u);
-		break;
+	if (!patched || !*patched) {
+		if (hw->Read16(0x1556u) == 0x60FEu)
+			hw->Write16(0x1556u, 0x4E75u);
+		/* BOOT `move.l #$14E6,$2C / $F000 / rts` が LINE-F を $14E6 Human68k cmp 連鎖へ奪う（PC=$1ED2）。$2C は OS イメージのまま。 */
+		for (unsigned a = 0x1400u; a + 12u < 0x1600u; a += 2u) {
+			if (hw->Read16(a) != 0x23FCu)
+				continue;
+			if (hw->Read32(a + 6u) != 0x0000002cu)
+				continue;
+			if (hw->Read16(a) != 0x4E75u)
+				hw->Write16(a, 0x4E75u);
+			break;
+		}
+		const unsigned lf = hw->Read32(0x2cu) & 0xffffffu;
+		if (lf >= 0x1040u && lf < 0x1080u)
+			hw->Write32(0x2cu, CEMU_X68K_DOS_LINEF);
+		/* $1F16/$243C jsr $15B0/$15A0（Human68k/DMAC + trap #3 play）。その init は残す。$1D42 `cmpi.b #$6B,2(A5) / bne` は PSP を見ない。分岐を NOP し bring-up が play_cnv_data に届くようにする。 */
+		for (unsigned a = 0x1C00u; a + 8u < 0x1E80u; a += 2u) {
+			const unsigned op = hw->Read16(a);
+			if (op != 0x0C2Du && op != 0x0C6Du)
+				continue;
+			if (hw->Read16(a + 2u) != 0x006Bu)
+				continue;
+			if (hw->Read16(a + 4u) != 0x0002u)
+				continue;
+			if ((hw->Read16(a + 6u) & 0xFF00u) == 0x6600u)
+				hw->Write16(a + 6u, 0x4E71u);
+			break;
+		}
+		if (patched)
+			*patched = 1;
 	}
 	const unsigned pc = (unsigned)m68k_get_reg(NULL, M68K_REG_PC) & 0xffffffu;
 	if (pc < 0x15F0u || pc >= 0x1720u)
@@ -397,6 +403,10 @@ CDriverX68k::CDriverX68k()
 	, vdispAcc_(0)
 	, softTimerBusy_(0)
 	, opmSpinRescue_(0)
+	, mailboxPoll_(0)
+	, mailboxPollTried_(0)
+	, runKind_(0)
+	, dmacPatched_(0)
 {
 	memset(tryCodes_, 0, sizeof(tryCodes_));
 }
@@ -596,6 +606,10 @@ int CDriverX68k::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigne
 	tryCount_ = 0;
 	locked_ = 0;
 	pinned_ = 0;
+	mailboxPoll_ = 0;
+	mailboxPollTried_ = 0;
+	runKind_ = 0;
+	dmacPatched_ = 0;
 	irqWas_ = 0;
 	opmAtWindow_ = 0;
 	dwellExtendUsed_ = 0;
@@ -735,7 +749,7 @@ int CDriverX68k::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigne
 			CDriverX68kPlantCFrame(hw_);
 			const int n = left > slice ? slice : left;
 			RunCycles(n);
-			CDriverX68kSkipDmacScan(hw_);
+			CDriverX68kSkipDmacScan(hw_, &dmacPatched_);
 			left -= n;
 			slices++;
 			const int holdScan = (opmGlue && opmLandmark
@@ -916,7 +930,11 @@ int CDriverX68k::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigne
 			CDriverX68kResume1040Hang(hw_, songCode_);
 		hw_->SetPc((unsigned)m68k_get_reg(NULL, M68K_REG_PC) & 0xffffffu);
 	}
-	/* プレイリスト／カタログ選択をラウドネスハンターで置換しない。メールボックスコマンドは既に武装済み。ロックはフォールスルーを止めるだけ。 */
+	{
+		unsigned pc = (unsigned)m68k_get_reg(NULL, M68K_REG_PC) & 0xffffffu;
+		if (pc < 0x400u)
+			SnapToMailboxPoll();
+	}
 	if (pinned_)
 		locked_ = 1;
 	nextCmdAt_ = (uint64_t)cpuHz_ / 60;
@@ -932,6 +950,22 @@ int CDriverX68k::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigne
 	dwellLeft_ = dwellFrames_;
 	opmAtWindow_ = hw_->OpmWrites();
 	dwellExtendUsed_ = 0;
+	{
+		const unsigned pc = (unsigned)m68k_get_reg(NULL, M68K_REG_PC) & 0xffffffu;
+		const unsigned poll = FindMailboxPoll();
+		/* ベクタ表、または poll 直前（abtengu $4C4 → $4F2）だけ戻す。
+		   pc<$8000 全部を poll へ飛ばすと実行中の PC を巻き取りクラッシュする。 */
+		if (pc < 0x400u)
+			ResumeMailboxForSong(songCode_);
+		else if (poll && pc < poll && (poll - pc) <= 0x40u)
+			ResumeMailboxForSong(songCode_);
+	}
+	if (opmGlue)
+		runKind_ = 1;
+	else if (driverDoOpmdrv2Poll(hw_))
+		runKind_ = 2;
+	else
+		runKind_ = 3;
 	return 1;
 }
 
@@ -966,9 +1000,19 @@ void CDriverX68k::TickOpm(uint64_t cpuCycles)
 }
 
 /* CDriverX68k::FindMailboxPoll の実装 */
-unsigned CDriverX68k::FindMailboxPoll() const
+unsigned CDriverX68k::FindMailboxPoll()
 {
 	if (!hw_) return 0;
+	if (mailboxPoll_) {
+		if (hw_->Read16(mailboxPoll_) == 0x4a39u
+			&& hw_->Read32(mailboxPoll_ + 2u) == 0x00e00000u)
+			return mailboxPoll_;
+		mailboxPoll_ = 0;
+		mailboxPollTried_ = 0;
+	}
+	if (mailboxPollTried_)
+		return 0;
+	mailboxPollTried_ = 1;
 	/* 低い BOOT／早期 RAM を優先。EXDOS が poll を再配置していれば mid も */
 	static const unsigned kRanges[][2] = {
 		{ 0x0400u, 0x3000u },
@@ -981,10 +1025,26 @@ unsigned CDriverX68k::FindMailboxPoll() const
 		for (unsigned a = lo; a + 6u < hi; a += 2u) {
 			if (hw_->Read16(a) != 0x4a39u) continue;
 			if (hw_->Read32(a + 2u) != 0x00e00000u) continue;
+			mailboxPoll_ = a;
 			return a;
 		}
 	}
 	return 0;
+}
+
+/* 曲コマンドは撃たず poll へ戻す。鳴っている最中の TRAP#1/$94A 救済で
+   SetSongCommand するとフレーズ頭へ巻き戻る。 */
+void CDriverX68k::SnapToMailboxPoll()
+{
+	if (!hw_) return;
+	const unsigned poll = FindMailboxPoll();
+	if (!poll) return;
+	const unsigned pc = (unsigned)m68k_get_reg(NULL, M68K_REG_PC) & 0xffffffu;
+	if (pc >= poll && pc < poll + 0x40u)
+		return;
+	m68k_set_reg(M68K_REG_SR, 0x2500);
+	m68k_set_reg(M68K_REG_PC, poll);
+	hw_->SetPc(poll);
 }
 
 /* CDriverX68k::ResumeMailboxForSong の実装 */
@@ -992,16 +1052,7 @@ void CDriverX68k::ResumeMailboxForSong(unsigned code)
 {
 	if (!hw_) return;
 	hw_->SetSongCommand(code);
-	const unsigned poll = FindMailboxPoll();
-	if (!poll) return;
-	const unsigned pc = (unsigned)m68k_get_reg(NULL, M68K_REG_PC) & 0xffffffu;
-	/* 既に poll ループ内／直後 — メールボックス poke で足りる */
-	if (pc >= poll && pc < poll + 0x40u)
-		return;
-	/* 死んだ INTRO／EXDOS 固まりは PC を mid RAM に残す。曲待ちへ戻し次カタログコードを観測する（BOOT 植込なし — 既存 poll を再開）。 */
-	m68k_set_reg(M68K_REG_SR, 0x2500);
-	m68k_set_reg(M68K_REG_PC, poll);
-	hw_->SetPc(poll);
+	SnapToMailboxPoll();
 }
 
 /* CDriverX68k::CallUserHook の実装 */
@@ -1174,8 +1225,11 @@ void CDriverX68k::RunCycles(int cycles)
 	if (!hw_ || cycles <= 0) return;
 	CEmuHardX68kSetActive(hw_);
 	CDriverX68kFixMidiA4(hw_);
+	/* Open 後は runKind_ を使う。毎サンプル $400–$C00 を走査すると DS リングが間に合わず古い PCM が繰り返す。 */
+	const int glue = (runKind_ == 1) || (runKind_ == 0 && driverOpmGlue(hw_));
+	const int opm2 = (runKind_ == 2) || (runKind_ == 0 && driverDoOpmdrv2(hw_));
 	/* OPM は常に壁時間量子ぶん進める。m68k_execute は $E00800 idle / end_timeslice で早めに戻ることがあり、チップ時間を `got` に縛ると Timer B（と曲）が約半速、音声はリアルタイムのまま。Hoot は YM2151 を CPU ICount ではなくサウンド時基で駆動する。 */
-	if (driverOpmGlue(hw_)) {
+	if (glue) {
 		/* WRITE 解析＋ヘルパでは IRQ6 をマスク。$88B8 フラグ待ちは生きたまま */
 		int left = cycles;
 		while (left > 0) {
@@ -1188,7 +1242,7 @@ void CDriverX68k::RunCycles(int cycles)
 			left -= n;
 		}
 		TickOpm((uint64_t)cycles);
-	} else if (driverDoOpmdrv2(hw_) && hw_->SoundChip()) {
+	} else if (opm2 && hw_->SoundChip()) {
 		/* 1 量子内で $E00800 end_timeslice を越えて続ける（k4 cmd6log）。IRQ hold はこの系統のコンパイルスタックのみ — グローバルな深い SP hold ではない。poll は $F0FFxx にあり Timer-B を取る。 */
 		CChip* chip = hw_->SoundChip();
 		int left = cycles;
@@ -1268,13 +1322,23 @@ int CDriverX68k::Render(int16_t* stereo, int frames)
 		cpuAcc_ %= (int64_t)hostRate_;
 		if (cyclesPerSample < 1) cyclesPerSample = 1;
 		RunCycles(cyclesPerSample);
-		CDriverX68kSkipDmacScan(hw_);
+		CDriverX68kSkipDmacScan(hw_, &dmacPatched_);
 		{
 			/* OP.X/rougea: ネスト RTE が TRAP#1（$F08740）に着地し PC が stub で回る。本物フレームを完了し、だめならメールボックス poll を再開。 */
 			const unsigned pc = (unsigned)m68k_get_reg(NULL, M68K_REG_PC) & 0xffffffu;
-			if (pc >= CEMU_X68K_DOS_TRAP1 && pc < (CEMU_X68K_DOS_TRAP1 + 8u)) {
-				if (!driverRteIrq6(hw_, 0) && !driverDoOpmdrv2(hw_))
-					ResumeMailboxForSong(songCode_);
+			if (pc < 0x400u) {
+				/* ベクタ表を実行している — 一度だけ曲を再武装。以後は poll へ戻すだけ。 */
+				if (!opmSpinRescue_) {
+					opmSpinRescue_ = 1;
+					if (mailboxPoll_ || FindMailboxPoll())
+						ResumeMailboxForSong(songCode_);
+				} else if (mailboxPoll_) {
+					SnapToMailboxPoll();
+				}
+			} else if (pc >= CEMU_X68K_DOS_TRAP1 && pc < (CEMU_X68K_DOS_TRAP1 + 8u)) {
+				const int opm2 = (runKind_ == 2) || (runKind_ == 0 && driverDoOpmdrv2(hw_));
+				if (!driverRteIrq6(hw_, 0) && !opm2)
+					SnapToMailboxPoll();
 			}
 		}
 		if (!opmSpinRescue_) {
@@ -1284,7 +1348,7 @@ int CDriverX68k::Render(int16_t* stereo, int frames)
 			if (pc >= 0x94Au && pc < 0x95Au && h10 >= 0x8000u && h10 < 0xf00000u
 				&& hw_->Read16(0x94A) == 0x4e71u) {
 				opmSpinRescue_ = 1;
-				ResumeMailboxForSong(songCode_);
+				SnapToMailboxPoll();
 			} else if (CDriverX68kIs1040MailboxHang(hw_, pc)) {
 				CDriverX68kResume1040Hang(hw_, songCode_);
 			}
@@ -1293,8 +1357,10 @@ int CDriverX68k::Render(int16_t* stereo, int frames)
 		{
 			const unsigned pc = (unsigned)m68k_get_reg(NULL, M68K_REG_PC) & 0xffffffu;
 			const unsigned sp = (unsigned)m68k_get_reg(NULL, M68K_REG_SP) & 0xffffffu;
-			const int hold = (driverOpmGlue(hw_) && driverOpmHoldIrq(hw_, pc, sp))
-				|| (driverDoOpmdrv2(hw_)
+			const int glue = (runKind_ == 1) || (runKind_ == 0 && driverOpmGlue(hw_));
+			const int opm2 = (runKind_ == 2) || (runKind_ == 0 && driverDoOpmdrv2(hw_));
+			const int hold = (glue && driverOpmHoldIrq(hw_, pc, sp))
+				|| (opm2
 					&& !driverOpmFlagWait(hw_, pc)
 					&& sp >= 0x00F0F000u && sp < 0x00F0FEF0u);
 			CDriverX68kApplyIrq(hw_, chip, hold);

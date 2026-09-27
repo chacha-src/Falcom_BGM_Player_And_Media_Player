@@ -257,6 +257,7 @@ int CDriverPc88::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigne
 		/* lizard88 の (A572) は意図的に触らない。それを読む RET Z は A3A3、CALL A3B0 が既に曲を鳴らした A376 エピローグ。0 でもプレーヤは止まらない。ゲートするのは停止ルーチンで、0 の分岐が OPN 07-0E を書いてチップを mute する。CHardPc88::ArmLizardOpnTimer 参照。 */
 	}
 	booted_ = 1;
+	hw_->CaptureFalcomBoot();
 	return 1;
 }
 
@@ -278,7 +279,22 @@ void CDriverPc88::Close()
 int CDriverPc88::OverlayTitle(unsigned titleCode)
 {
 	if (!hw_) return 0;
+	const unsigned newHi = (titleCode >> 8) & 0xffu;
+	/* Falcom 食料トグル（title の 0x10 ニブル）はドライバを載せ替えない */
+	if (hw_->FalcomType() && (newHi & 0xF0u) && hw_->Mem()) {
+		hw_->Mem()[0x60a5] ^= 0xff;
+		return 1;
+	}
 	hw_->titleCode_ = titleCode;
+	if (hw_->FalcomType()) {
+		/* IPL が残した RAM／I／タイマを捨て、ブート直後からその曲を再生し直す。 */
+		if (hw_->SoundChip())
+			hw_->SoundChip()->Reset();
+		hw_->RestoreFalcomBoot();
+		triggered_ = 0;
+		TriggerPlay();
+		return 1;
+	}
 	triggered_ = 0;
 	TriggerPlay();
 	return 1;
@@ -528,6 +544,20 @@ void CDriverPc88::TriggerPlay()
 		if (hw_->ShouldRestageSong())
 			hw_->LoadSongData(hw_->titleCode_);
 		hw_->ApplyFalcomPlay();
+		if (hw_->EnterFalcomIpl()) {
+			/* PATCH `JP (E010)` は A=$19 のまま $0116 に入り LD SP で戻りを捨てる。
+			   ホストが I=01 / PC=$0116。RTC は Apply が止める。 */
+			for (int step = 0; step < 32; step++) {
+				RunUntil((uint64_t)cpu->time64() + (uint64_t)cpuHz_ / 200);
+				if (cpu->r.iff1)
+					break;
+			}
+			if (!cpu->r.iff1)
+				cpu->r.iff1 = 1;
+			EndLeadCapture();
+			triggered_ = 1;
+			return;
+		}
 		/* KOEI FMDRV: BGM は再生添字 0（パック CIM @4000）。PCM SE タイトル（valis2 PCM00.. = code>=0xE0）は生コードを渡し PATCH の CP E0 経路を走らせる — 0 強制は ADPCM を mute し UI 下のステータス待ちで回った。 */
 		if (hw_->PackedKoei()) {
 			hw_->song = hw_->PlaySongIndex();

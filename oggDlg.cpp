@@ -1,4 +1,4 @@
-﻿// oggDlg.cpp : インプリメンテーション ファイル
+// oggDlg.cpp : インプリメンテーション ファイル
 //
 //#define _DLL
 #include "stdafx.h"
@@ -530,6 +530,11 @@ void OggArmResumeFromStartKeepSave()
 
 static volatile LONG g_resumePromptPosted = 0;
 static CString g_resumePromptPath;
+
+void OggNoteResumePromptDropped()
+{
+	InterlockedExchange(&g_resumePromptPosted, 0);
+}
 
 static HWND ResumePromptTargetHwnd()
 {
@@ -3553,6 +3558,15 @@ static CEmuSession& CemuSess()
 {
 	return CemuSessSlot(XfDecSlot());
 }
+
+int CEmuLiveOverlayToggle(unsigned titleCode)
+{
+	CEmuSession* s = &CemuSess();
+	if (!s || !CEmuSessionKindKeepsEngine(s->kind) || !s->path[0])
+		return 0;
+	CEmuTogglePrefFlip(s->path, titleCode);
+	return CEmuSessionOverlayTitle(s, titleCode, 0);
+}
 static int CemuAnyKind()
 {
 	for (int i = 0; i < XF_SLOTS; i++) {
@@ -3632,6 +3646,9 @@ static int CEmuTryOverlayMidiSfxFromFilen(const wchar_t* openPhys, unsigned titl
 static int CEmuTryOverlaySfxFromFilen()
 {
 	extern CString filen;
+	extern CString fnn;
+	extern CString stitle;
+	extern int ret2;
 	if (InterlockedCompareExchange(&g_xfInProgress, 0, 0)
 		|| InterlockedCompareExchange(&g_xfOpening, 0, 0))
 		return 0;
@@ -3646,33 +3663,19 @@ static int CEmuTryOverlaySfxFromFilen()
 	if (CEmuTryOverlayMidiSfxFromFilen(openPhys, titleIdx))
 		return 1;
 
-	if (CemuSess().kind == 0)
-		return 0;
-	if (CemuSess().kind == CEMU_KIND_S98 || CemuSess().kind == CEMU_KIND_MDX
-		|| CemuSess().kind == CEMU_KIND_PMD)
+	if (!CEmuSessionKindKeepsEngine(CemuSess().kind))
 		return 0;
 	if (!IsCemuMode(mode) && mode != MODE_CEMU)
 		return 0;
 	if (playf == 0 && ActiveDecodeMode() != MODE_CEMU)
 		return 0;
-	if (CemuSess().endedBySilence)
-		return 0;
-	if (CemuSess().lengthSamples > 0
-		&& CemuSess().curSample >= CemuSess().lengthSamples)
-		return 0;
-
-	if (!CemuSess().path[0])
-		return 0;
-	if (_wcsicmp(openPhys, CemuSess().path) != 0)
+	if (!CEmuSessionSameZip(&CemuSess(), openPhys))
 		return 0;
 
 	wchar_t zipOut[CEMU_ZIP_PATH];
 	char dataDir[CEMU_DATA_DIR];
 	const CEmuGameEntry* ge = CEmuMgrResolveZip(CEmuMgrGet(), openPhys, zipOut,
 		(int)_countof(zipOut), dataDir, (int)sizeof(dataDir));
-	if (!CEmuGameTitleLooksLikeSfx(ge, titleIdx))
-		return 0;
-
 	char fromEntry[CEMU_MODE_TAG] = {};
 	char modeTag[CEMU_MODE_TAG] = {};
 	CEmuModeTagFromEntry(ge, fromEntry, (int)sizeof(fromEntry));
@@ -3682,8 +3685,26 @@ static int CEmuTryOverlaySfxFromFilen()
 		return 0;
 
 	const unsigned titleCode = CEmuGameTitleCodeForIndex(ge, titleIdx);
-	if (!CEmuSessionOverlayTitle(&CemuSess(), titleCode))
+	const int tog = CEmuGameTitleLooksLikeToggle(ge, titleIdx);
+	const int mix = tog ? 0 : CEmuSessionCodeIsOverlay(&CemuSess(), titleCode);
+	const int sfx = mix || CEmuGameTitleLooksLikeSfx(ge, titleIdx);
+	if (tog)
+		CEmuTogglePrefFlip(CemuSess().path, titleCode);
+	if (!CEmuSessionOverlayTitle(&CemuSess(), titleCode, mix))
 		return 0;
+	if (!tog && !sfx) {
+		wchar_t virt[1024];
+		CEmuFormatVirtualPath(openPhys, titleIdx, virt, (int)_countof(virt));
+		filen = virt;
+		wchar_t songLabel[CEMU_GAME_NAME];
+		songLabel[0] = 0;
+		CEmuGameTitleAt(ge, (int)titleIdx - 1, NULL, songLabel, (int)_countof(songLabel));
+		if (songLabel[0] && songLabel[0] != L'<') {
+			fnn = songLabel;
+			stitle = songLabel;
+		}
+		ret2 = (int)titleIdx;
+	}
 	return 1;
 }
 
@@ -5348,10 +5369,31 @@ static BOOL CALLBACK OggChromeTimerEnumTop(HWND h, LPARAM)
 	return TRUE;
 }
 
+/* クリック／キー／終了がキューに残っている。vsync の同期描画より先にメインループへ返す。 */
+static bool OggClickOrKeyQueued()
+{
+	MSG msg;
+	if (::PeekMessage(&msg, NULL, WM_KEYFIRST, WM_KEYLAST, PM_NOREMOVE))
+		return true;
+	if (::PeekMessage(&msg, NULL, WM_LBUTTONDOWN, WM_MBUTTONDBLCLK, PM_NOREMOVE))
+		return true;
+	if (::PeekMessage(&msg, NULL, WM_NCLBUTTONDOWN, WM_NCMBUTTONDBLCLK, PM_NOREMOVE))
+		return true;
+	if (::PeekMessage(&msg, NULL, WM_COMMAND, WM_COMMAND, PM_NOREMOVE))
+		return true;
+	return false;
+}
+
 static void OggUpdateVisibleHwnd(HWND h)
 {
-	if (h && ::IsWindow(h) && ::IsWindowVisible(h) && !::IsIconic(h))
-		::UpdateWindow(h);
+	if (!h || !::IsWindow(h) || !::IsWindowVisible(h) || ::IsIconic(h))
+		return;
+	/* UpdateWindow は tick の中でアナライザの LineTo を同期実行し、
+	   その間メインループがクリックを取れない。入力が既にあるときは塗るだけ予約する。 */
+	::InvalidateRect(h, NULL, FALSE);
+	if (OggClickOrKeyQueued())
+		return;
+	::UpdateWindow(h);
 }
 
 /* CPianoRoll / CAnalyzerDlg の WM_APP 番号と同じ。HWND 指定 Peek するだけ。 */
@@ -5475,12 +5517,14 @@ static void OggDeferAppExitFromUiTick(COggDlg* dlg)
 	thend = 1;
 	thend1 = TRUE;
 	SignalPlaybackNotifyThreadStop();
-	if (InterlockedCompareExchange(&s_exitPostedFromUiTick, 1, 0) != 0)
-		return;
-	if (dlg && ::IsWindow(dlg->GetSafeHwnd()))
-		dlg->PostMessage(WM_COMMAND, MAKEWPARAM(IDOK, BN_CLICKED), 0);
-	else
+	if (!dlg || !::IsWindow(dlg->GetSafeHwnd())) {
 		InterlockedExchange(&s_exitPostedFromUiTick, 0);
+		return;
+	}
+	/* 既に Post 済みでも、tick/Join の入れ子で消費されると二度と届かない。
+	   終わるまで IDOK を積み直す。 */
+	InterlockedExchange(&s_exitPostedFromUiTick, 1);
+	dlg->PostMessage(WM_COMMAND, MAKEWPARAM(IDOK, BN_CLICKED), 0);
 }
 
 void COgg_DropPlaybackUiPostedMsg(UINT message)
@@ -5502,6 +5546,8 @@ static void COgg_RequestTimerp(COggDlg* dlg)
 	if (CCustomPopupMenu::GetTrackingRoot() != NULL)
 		return;
 	if (CCC_ModalUiBusy())
+		return;
+	if (VstScanPumpIsBusy())
 		return;
 	if (InterlockedCompareExchange(&g_appExiting, 0, 0))
 		return;
@@ -7636,9 +7682,13 @@ static int XfSoftOpenSlot(int slot, const CString& path, int openMode)
 			return 0;
 		const unsigned titleCode = CEmuGameTitleCodeForIndex(ge, titleIdx);
 		CEmuSession* sess = &CemuSessSlot(slot);
-		CEmuSessionClose(sess);
-		CEmuSessionInit(sess);
 		const DWORD rate = savedata.samples ? savedata.samples : 44100;
+		if (!(CEmuSessionKindKeepsEngine(sess->kind)
+			&& CEmuSessionSameZip(sess, openPath)
+			&& (sess->sampleRate == 0 || sess->sampleRate == (int)rate))) {
+			CEmuSessionClose(sess);
+			CEmuSessionInit(sess);
+		}
 		if (!CEmuSessionOpen(sess, openPath, titleCode, rate))
 			return 0;
 		si.dwSamplesPerSec = (DWORD)(sess->sampleRate > 0 ? sess->sampleRate : rate);
@@ -12643,9 +12693,16 @@ open_mode_kpi:
 			CEmuMidiLiveStop();
 			VstLiveTapFlush();
 		}
-		CEmuSessionClose(&CemuSess());
-		CEmuSessionInit(&CemuSess());
-		if (!CEmuSessionOpen(&CemuSess(), openPath, titleCode, savedata.samples ? savedata.samples : 44100)) {
+		{
+			CEmuSession* sess = &CemuSess();
+			const DWORD rate = savedata.samples ? savedata.samples : 44100;
+			if (!(CEmuSessionKindKeepsEngine(sess->kind)
+				&& CEmuSessionSameZip(sess, openPath)
+				&& (sess->sampleRate == 0 || sess->sampleRate == (int)rate))) {
+				CEmuSessionClose(sess);
+				CEmuSessionInit(sess);
+			}
+			if (!CEmuSessionOpen(sess, openPath, titleCode, rate)) {
 			CString why;
 			if (ge) {
 				why.Format(
@@ -12668,6 +12725,7 @@ open_mode_kpi:
 			}
 			MessageBox(why, L"CEmu", MB_ICONERROR | MB_OK);
 			m_saisai.EnableWindow(TRUE); endflg = 0; return;
+		}
 		}
 		{
 			wchar_t virt[1024];
@@ -24572,8 +24630,17 @@ void COggDlg::stop()
 		if (IsVstMidiPlayMode(stoppingMode)) CloseVstMidiSession();
 		if (stoppingMode == MODE_CEMU
 			|| IsVstMidiPlayMode(stoppingMode)
-			|| CemuAnyKind())
-			CloseCemuPlaybackResources();
+			|| CemuAnyKind()) {
+			/* 同一 zip の次曲はエンジンを残す。別形式／終了は後段で閉じる。 */
+			int keep = 0;
+			if (stoppingMode == MODE_CEMU && CEmuSessionKindKeepsEngine(CemuSess().kind)) {
+				extern CString filen;
+				if (CEmuSessionSameZip(&CemuSess(), filen))
+					keep = 1;
+			}
+			if (!keep)
+				CloseCemuPlaybackResources();
+		}
 		if (stoppingMode == MODE_PLUGIN_WINAMP) PluginWinamp_Close();
 		if (stoppingMode == MODE_PLUGIN_XMPLAY) PluginXmplay_Close();
 		if (stoppingMode == MODE_PLUGIN_AIMP) PluginAimp_Close();
@@ -24812,8 +24879,10 @@ BOOL COggDlg::DestroyWindow()
 		OggDeferAppExitFromUiTick(this);
 		return FALSE;
 	}
-	if (InterlockedCompareExchange(&g_inPlaybackJoinPump, 0, 0))
+	if (InterlockedCompareExchange(&g_inPlaybackJoinPump, 0, 0)) {
+		OggDeferAppExitFromUiTick(this);
 		return FALSE;
+	}
 	InterlockedExchange(&g_appExiting, 1);
 	VstLiveEditorOpenCancelPending();
 	DesktopLyricsAbortPaintForExit();
@@ -27596,6 +27665,8 @@ LRESULT COggDlg::OnTimerpVsyncTick(WPARAM, LPARAM)
 	}
 	if (InterlockedCompareExchange(&g_appExiting, 0, 0)) {
 		InterlockedExchange(&g_timerpPosted, 0);
+		InterlockedExchange(&s_exitPostedFromUiTick, 0);
+		PostMessage(WM_COMMAND, MAKEWPARAM(IDOK, BN_CLICKED), 0);
 		return 0;
 	}
 	if (CCustomPopupMenu::GetTrackingRoot() != NULL) {
@@ -27603,6 +27674,17 @@ LRESULT COggDlg::OnTimerpVsyncTick(WPARAM, LPARAM)
 		return 0;
 	}
 	if (CCC_ModalUiBusy()) {
+		InterlockedExchange(&g_timerpPosted, 0);
+		return 0;
+	}
+	if (VstScanPumpIsBusy()) {
+		InterlockedExchange(&g_timerpPosted, 0);
+		return 0;
+	}
+	/* バナー BitBlt / アナライザ UpdateWindow の前にクリックを通す。
+	   未演奏のダブルクリックが演奏開始に届かないのも、tick や Join が
+	   マウスを先に抱えたままだと同じ症状になる。 */
+	if (OggClickOrKeyQueued()) {
 		InterlockedExchange(&g_timerpPosted, 0);
 		return 0;
 	}
@@ -27617,6 +27699,10 @@ LRESULT COggDlg::OnTimerpVsyncTick(WPARAM, LPARAM)
 	   tick 自体を打たないので、ここを常時呼んでもアイドルは食わない。 */
 	OggDispatchChromeMessages();
 	InterlockedExchange(&g_timerpPosted, 0);
+	if (InterlockedCompareExchange(&g_appExiting, 0, 0) && ::IsWindow(GetSafeHwnd())) {
+		InterlockedExchange(&s_exitPostedFromUiTick, 0);
+		PostMessage(WM_COMMAND, MAKEWPARAM(IDOK, BN_CLICKED), 0);
+	}
 	return 0;
 }
 
@@ -30264,12 +30350,11 @@ BOOL COggDlg::PreTranslateMessage(MSG* pMsg)
 
 void COggDlg::OnOK()
 {
-	if (OggInPlaybackUiTick()) {
+	if (OggInPlaybackUiTick()
+		|| InterlockedCompareExchange(&g_inPlaybackJoinPump, 0, 0)) {
 		OggDeferAppExitFromUiTick(this);
 		return;
 	}
-	if (InterlockedCompareExchange(&g_inPlaybackJoinPump, 0, 0))
-		return;
 	CCC_StopInwomanTimer();
 	InterlockedExchange(&g_appExiting, 1);
 	DesktopLyricsAbortPaintForExit();
@@ -30280,6 +30365,7 @@ void COggDlg::OnOK()
 	XfPreloadCancel(0);
 	if (s_inPlay) {
 		/* play() の DoEvent 再入。破棄は play 復帰後の IDOK で行う。 */
+		OggDeferAppExitFromUiTick(this);
 		return;
 	}
 	/* 終了ボタンの BN_CLICKED は SendMessage。この入れ子で Join すると
@@ -30289,6 +30375,8 @@ void COggDlg::OnOK()
 		&& InterlockedCompareExchange(&s_exitPostedFromUiTick, 1, 0) == 0) {
 		if (::IsWindow(GetSafeHwnd()))
 			PostMessage(WM_COMMAND, MAKEWPARAM(IDOK, BN_CLICKED), 0);
+		else
+			InterlockedExchange(&s_exitPostedFromUiTick, 0);
 		return;
 	}
 	stop();

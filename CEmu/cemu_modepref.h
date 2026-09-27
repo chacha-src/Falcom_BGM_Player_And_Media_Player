@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include "cemu_types.h"
 #include "cemu_catalog.h"
 #include "cemu_zipfs.h"
@@ -39,6 +39,8 @@ int CEmuTogglePrefGet(const wchar_t* zipPath, unsigned* codes, int cap);
 void CEmuTogglePrefSet(const wchar_t* zipPath, const unsigned* codes, int n);
 int CEmuTogglePrefHas(const wchar_t* zipPath, unsigned code);
 int CEmuTogglePrefFlip(const wchar_t* zipPath, unsigned code);
+/* 再生中にカタログトグルを Overlay。1=処理した */
+int CEmuLiveOverlayToggle(unsigned titleCode);
 
 /* zip 内の最初の .mid/.rmi/.smf → KPI/VST MIDI 再生用 temp */
 int CEmuZipExtractFirstMidi(const wchar_t* zipPath, wchar_t* outMidPath, int outCap);

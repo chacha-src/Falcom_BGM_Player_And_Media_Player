@@ -1,4 +1,4 @@
-﻿#include "StdAfx.h"
+#include "StdAfx.h"
 #include "cemu_driver_fm7.h"
 #include "../chip/cemu_chip_opna.h"
 #include "../chip/cemu_chip_ay.h"
@@ -25,6 +25,7 @@ CDriverFm7::CDriverFm7()
 	, irqPulses_(0)
 	, prevChipIrq_(0)
 	, chipIrqSeen_(0)
+	, vsyncReq_(0)
 	, lastFd03IrqVec_(0xFFFF)
 {
 }
@@ -350,6 +351,16 @@ void CDriverFm7::DeliverIrqs(uint64_t now)
 		raiseFromVsync = 0;
 	}
 
+	/* 6809 の IRQ/FIRQ はレベル線。マスク中（ISR 中の ORCC 等）に来た vsync を捨てず、線を立てられる
+	   命令まで要求を保持する（多重の vsync は 1 本にまとまる）。ホスト tick は即時に消費。チップ端は
+	   ここで毎回 Ack するのでその場限り（保持すると luxsor の OPN ISR がフラグ無しで走り無音）。 */
+	if (ranHostTick) {
+		vsyncReq_ = 0;
+	} else {
+		if (raiseFromVsync) vsyncReq_ = 1;
+		raiseFromVsync = vsyncReq_;
+	}
+	const unsigned pulsesBefore = irqPulses_;
 	if (!ranHostTick && (raiseFromChip || raiseFromVsync)) {
 		/* vsync 源は 6809 の 1 線だけ。ちょうど 1 ベクタが $FD03 ハンドラならその線。Ys で他ベクタを撃つと $FF00 の PATCH データへ飛び、MANPR 初ノート前に RTI フレームを壊す。 */
 		const int ysPsg = (!hw_->useOpn_ && hw_->patchTableBase_ == 0xFED0) ? 1 : 0;
@@ -382,6 +393,9 @@ void CDriverFm7::DeliverIrqs(uint64_t now)
 				}
 			}
 		}
+		/* 線を立てたら要求を下ろす。albatrss DRIVER 内は従来どおり捨てる（ネスト IRQ が Y を壊す） */
+		if (inAlbDrv || irqPulses_ != pulsesBefore)
+			vsyncReq_ = 0;
 	}
 
 	if (chipIrq && hw_->ChipOpn())
@@ -462,6 +476,7 @@ int CDriverFm7::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned
 	triggered_ = 0;
 	prevChipIrq_ = 0;
 	chipIrqSeen_ = 0;
+	vsyncReq_ = 0;
 	irqPulses_ = 0;
 	lastFd03IrqVec_ = 0xFFFF;
 
@@ -597,6 +612,20 @@ void CDriverFm7::Close()
 int CDriverFm7::OverlayTitle(unsigned titleCode)
 {
 	if (!hw_) return 0;
+	const unsigned oldProg = (titleCode_ >> 12) & 0xffu;
+	const unsigned newHi = (titleCode >> 8) & 0xffu;
+	const unsigned newProg = (titleCode >> 12) & 0xffu;
+	const unsigned lo = titleCode & 0xffu;
+	if (hw_->falcomMode_ && hw_->Mem()
+		&& ((newHi & 0xF0u) || lo == 0xFFu)) {
+		hw_->Mem()[0x60a5] ^= 0xff;
+		return 1;
+	}
+	if (hw_->falcomMode_) {
+		hw_->ParkFalcomWait();
+		if (oldProg != newProg && hw_->SoundChip())
+			hw_->SoundChip()->Reset();
+	}
 	titleCode_ = titleCode;
 	songCode_ = (uint8_t)(titleCode & 0xff);
 	chipIrqSeen_ = 0;

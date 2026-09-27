@@ -5,7 +5,9 @@
 #include <unordered_map>
 #include <cstring>
 #include <cstdlib>
+#include <cctype>
 #include <new>
+#include <float.h>
 
 #include "..\kpi_host_ipc.h"
 #include "..\PluginKinds.h"
@@ -33,17 +35,26 @@ struct ForeignSession
 	int flushMs = 0;     // Flush で渡された再生位置（ms）
 	wchar_t prevCwd[MAX_PATH] = {};
 	int cwdSaved = 0;    // Play 中は曲フォルダを CWD にして .psf2lib 等を拾う
-	// XMPlay
+	// XMPlay（Process は float。本体へは 16bit PCM）
 	XMPIN* xmp = nullptr;
+	void* xmpFile = nullptr; // XmpFileObj*
 	std::vector<float> fbuf;
 	std::vector<uint8_t> pending;
 	size_t pendOff = 0;
 	int eof = 0;
+	float xmpLen = 0.f;
+	__int64 xmpPlayed = 0;
+	XMPFORMAT xmpFmt{};
 	// AIMP
 	IAIMPPlugin* aimpPlug = nullptr;
 	IAIMPAudioDecoder* aimpDec = nullptr;
-	IAIMPExtensionAudioDecoderOld* aimpExt = nullptr;
-	IUnknown* aimpCore = nullptr;
+	IAIMPExtensionAudioDecoderOld* aimpExtOld = nullptr;
+	IAIMPExtensionAudioDecoder* aimpExtNew = nullptr;
+	IAIMPStream* aimpStream = nullptr;
+	class CAimpCore* aimpCore = nullptr;
+	int aimpFloat = 0;
+	INT64 aimpSize = 0;
+	std::wstring aimpExts;
 };
 
 static std::unordered_map<uint32_t, ForeignSession*> g_foreign;
@@ -378,6 +389,8 @@ static HWND WaEnsureWnd()
 	return g_waWnd;
 }
 
+#include "KpiHost64Foreign_xmpaimp.inc"
+
 typedef In_Module* (__cdecl* pfn_wa)();
 
 // DLL を一時ロードして拡張子文字列だけ取る。セッションは残さない。
@@ -402,13 +415,21 @@ uint32_t ForeignHost_ListExts(uint32_t kind, const std::wstring& path, std::wstr
 		FreeLibrary(h);
 		return outExts.empty() ? KPIHOST64_STATUS_FAIL : KPIHOST64_STATUS_OK;
 	}
-	// XMPlay / AIMP は x64 の再生系が無い。ここで拡張子を返すと本体台帳に載ってしまい、
-	// 再生時に必ず Open 失敗 → DirectShow(-2) に落ちるだけなので列挙自体を断る。
+	if (kind == PLUGKIND_XMPLAY) {
+		const uint32_t st = ForeignXmpListExts(h, outExts);
+		FreeLibrary(h);
+		return st;
+	}
+	if (kind == PLUGKIND_AIMP) {
+		const uint32_t st = ForeignAimpListExts(h, path, outExts);
+		FreeLibrary(h);
+		return st;
+	}
 	FreeLibrary(h);
 	return KPIHOST64_STATUS_NOT_SUPPORTED;
 }
 
-// いまは Winamp in_ のみ。XMPlay/AIMP x64 は列挙しない（再生経路が無い）。
+// Winamp in_ / XMPlay / AIMP。異アーキ DLL はここ（ogghost32）で LoadLibrary する。
 uint32_t ForeignHost_Open(uint32_t kind, const std::wstring& dll, const std::wstring& media, KPIHOST64_ForeignOpenReply& reply)
 {
 	ZeroMemory(&reply, sizeof(reply));
@@ -478,6 +499,34 @@ uint32_t ForeignHost_Open(uint32_t kind, const std::wstring& dll, const std::wst
 		int ms = s->waIn->GetLength ? s->waIn->GetLength() : 0;
 		reply.lengthSamples = (ms > 0 && s->rate > 0) ? (uint64_t)ms * s->rate / 1000 : 0;
 	}
+	else if (kind == PLUGKIND_XMPLAY) {
+		const uint32_t st = ForeignXmpOpen(s, media);
+		if (st != KPIHOST64_STATUS_OK) {
+			ForeignXmpCloseSession(s);
+			FreeLibrary(s->dll); delete[] s->ring; delete s;
+			return st;
+		}
+		reply.sampleRate = (uint32_t)s->rate;
+		reply.channels = (uint32_t)s->ch;
+		reply.bitsPerSample = s->bits;
+		reply.lengthSamples = (s->xmpLen > 0.f && s->rate > 0)
+			? (uint64_t)((double)s->xmpLen * (double)s->rate) : 0;
+	}
+	else if (kind == PLUGKIND_AIMP) {
+		const uint32_t st = ForeignAimpOpen(s, dll, media);
+		if (st != KPIHOST64_STATUS_OK) {
+			ForeignAimpCloseSession(s);
+			FreeLibrary(s->dll); delete[] s->ring; delete s;
+			return st;
+		}
+		reply.sampleRate = (uint32_t)s->rate;
+		reply.channels = (uint32_t)s->ch;
+		reply.bitsPerSample = s->bits;
+		{
+			int bpf = (s->bits / 8) * s->ch;
+			reply.lengthSamples = (s->aimpSize > 0 && bpf > 0) ? (uint64_t)(s->aimpSize / bpf) : 0;
+		}
+	}
 	else {
 		FreeLibrary(s->dll); delete s; return KPIHOST64_STATUS_NOT_SUPPORTED;
 	}
@@ -526,6 +575,10 @@ uint32_t ForeignHost_Render(uint32_t sessionId, uint32_t bytesWanted, uint8_t* d
 		gotBytes = (uint32_t)got;
 		return KPIHOST64_STATUS_OK;
 	}
+	if (s->kind == PLUGKIND_XMPLAY)
+		return ForeignXmpRender(s, bytesWanted, dest, destCap, gotBytes, eof);
+	if (s->kind == PLUGKIND_AIMP)
+		return ForeignAimpRender(s, bytesWanted, dest, destCap, gotBytes, eof);
 	return KPIHOST64_STATUS_NOT_SUPPORTED;
 }
 
@@ -543,6 +596,10 @@ uint32_t ForeignHost_Seek(uint32_t sessionId, uint64_t posSample)
 			return KPIHOST64_STATUS_FAIL;
 		return KPIHOST64_STATUS_OK;
 	}
+	if (s->kind == PLUGKIND_XMPLAY)
+		return ForeignXmpSeek(s, posSample);
+	if (s->kind == PLUGKIND_AIMP)
+		return ForeignAimpSeek(s, posSample);
 	return KPIHOST64_STATUS_NOT_SUPPORTED;
 }
 
@@ -560,6 +617,10 @@ uint32_t ForeignHost_Close(uint32_t sessionId)
 			if (s->waIn->Quit) s->waIn->Quit();
 		}
 	}
+	else if (s->kind == PLUGKIND_XMPLAY)
+		ForeignXmpCloseSession(s);
+	else if (s->kind == PLUGKIND_AIMP)
+		ForeignAimpCloseSession(s);
 	if (s->cwdSaved && s->prevCwd[0])
 		SetCurrentDirectoryW(s->prevCwd);
 	if (s->dll) FreeLibrary(s->dll);

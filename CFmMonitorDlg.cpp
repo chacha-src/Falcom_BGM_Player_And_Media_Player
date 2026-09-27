@@ -1592,19 +1592,20 @@ int CFmMonitorDlg::SsgRows() const
 {
 	if (!m_haveDump) return 3;
 	if (IsOplDump()) return 0;
-	/* FMP は WORKS に SSG がある。KEYSONLY のまま OPNAW を取れない OPI でも行を残す */
-	if (KeysOnly() && !(m_dump.dumpFlags & SASAMI_FMMON_FLAG_FMP)) return 0;
-	/* OPN2 / YM3438: padHit=2 かつ fm10=0。SSG ブロック無し */
-	if (m_dump.padHit == 2 && !m_dump.fm10 && !IsYm2610Dump() && !IsOpmDump())
-		return 0;
+	/* X1 の OPM+AY / デュアル: ゲート中か AY ラベルなら SSG を出す。OPM を書かず AY だけ鳴らす曲
+	   （gokudo OMAKE）は OPM の keys-only ダンプのままなので、keys-only 判定より先に見る。 */
 	if (IsOpmDump()) {
-		/* X1 の OPM+AY / デュアル: ゲート中か AY ラベルなら SSG を出す */
 		for (int i = 0; i < 3; i++)
 			if (m_dump.ssgOn[i]) return 3;
 		if (m_dump.titleSjis[0] && strstr(m_dump.titleSjis, "AY"))
 			return 3;
 		return 0;
 	}
+	/* FMP は WORKS に SSG がある。KEYSONLY のまま OPNAW を取れない OPI でも行を残す */
+	if (KeysOnly() && !(m_dump.dumpFlags & SASAMI_FMMON_FLAG_FMP)) return 0;
+	/* OPN2 / YM3438: padHit=2 かつ fm10=0。SSG ブロック無し */
+	if (m_dump.padHit == 2 && !m_dump.fm10 && !IsYm2610Dump())
+		return 0;
 	if (IsMsxDump())
 		return (MsxDevMask() & SASAMI_FMMON_DEV_PSG) ? 3 : 0;
 	if (m_dump.padHit == 5) return 3; /* SN76489 tones */
@@ -1841,6 +1842,9 @@ int CFmMonitorDlg::PanelGridPcmCompact() const
 int CFmMonitorDlg::PrimarySilent() const
 {
 	if (!m_haveDump || !m_fmViewReady) return 0;
+	/* X68000 OPM+ADPCM は PCM 先行でも OPM 行を残す。0 行のまま割ると落ちる。 */
+	if (IsOpmDump() || ChipProfile() == SASAMI_FMMON_KEYS_MDX)
+		return 0;
 	wchar_t y[8];
 	if (!FmIdentYyyy(m_dump.titleSjis, y, 8)) return 0;
 	if (IsMsxDump() || IsArcadePcmDump()) return 0;
@@ -3711,9 +3715,9 @@ void CFmMonitorDlg::ComputeLayout(int w, int h)
 	int avail = h - m_lay.pad - m_lay.headH - m_lay.gapHexKeys - m_lay.pad;
 	if (avail < 120) avail = 120;
 	const int topShare = 18;
-	const int botShare = keyBlockRows;
+	const int botShare = (std::max)(1, keyBlockRows);
 	m_lay.topH = avail * topShare / (topShare + botShare);
-	m_lay.rowH = (avail - m_lay.topH) / keyBlockRows;
+	m_lay.rowH = (avail - m_lay.topH) / botShare;
 	if (m_lay.rowH < 11) m_lay.rowH = 11;
 	if (m_lay.topH < 120) m_lay.topH = 120;
 	{

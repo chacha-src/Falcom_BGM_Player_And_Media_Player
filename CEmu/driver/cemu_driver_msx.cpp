@@ -22,6 +22,7 @@ CDriverMsx::CDriverMsx()
 	, sampleIndex_(0)
 	, nextIrqSample_(0)
 	, irqPulses_(0)
+	, vblankPending_(0)
 	, playing_(0)
 {
 }
@@ -39,21 +40,21 @@ void CDriverMsx::TickChips(uint64_t cpuCycles)
 	/* AY/OPLL は Render 側でサンプル駆動 */
 }
 
-/* 出力タイムライン上の VBlank。IM2 ベクタが空なら IM1 へ落とす */
-void CDriverMsx::PulseVblankIrq()
+/* 出力タイムライン上の VBlank。IM2 ベクタが空なら IM1 へ落とす。irqDelay/DI では届けない。 */
+int CDriverMsx::TryVblankIrq()
 {
-	if (!hw_ || !hw_->Cpu() || !playing_) return;
+	if (!hw_ || !hw_->Cpu() || !playing_) return 0;
 	Ay_Cpu* cpu = hw_->Cpu();
 	/* ran2 の play LDIR/WRTPSG が page0 を壊し IFF1 を落とす。IFF1 ゲート前に
 	   植え直し、次の VBlank が H.TIMI に届くようにする。 */
 	hw_->KeepCompileRan2Alive();
-	/* VBlank はサンプル軸のみ（RunUntil 内の CPU サイクル IRQ は使わない）。
-	   二重スケジュールは Quinpl の play を 1 フレーム 2 回走らせ、Z80 スタックを
-	   隣ヒープへ壊し、ドライバ破棄で落ちた。 */
-	if (!cpu->r.iff1) return;
+	if (!cpu->r.iff1)
+		return 0;
 	/* EI;HALT（yosikon play）: HALT は遅延命令なので IRQ を受け付ける */
 	if (cpu->get_mem() && cpu->get_mem()[cpu->r.pc] == 0x76)
 		cpu->irqDelay = 0;
+	if (cpu->irqDelay)
+		return 0;
 	/* hoot kss.cpp Interrupt: IM2 IPL 下で raise_IRQ(0xff)。IPL ISR は $0038。
 	   IM2 はゲームが (I<<8)|$FF に実ベクタを書いたときだけ有効。KSS StartSong は
 	   $0000-$3FFF を $C9 で埋めるため、I 未設定だと $C9C9 を踏み音源 ISR が
@@ -67,12 +68,16 @@ void CDriverMsx::PulseVblankIrq()
 			if (op == 0xC9 || op == 0x00 || op == 0xFF)
 				useIm2 = 0;
 		}
-		if (!useIm2 || !Ay_CpuIm2Interrupt(cpu, 0xff))
-			Ay_CpuIm1Interrupt(cpu);
+		if (!useIm2 || !Ay_CpuIm2Interrupt(cpu, 0xff)) {
+			if (!Ay_CpuIm1Interrupt(cpu))
+				return 0;
+		}
 	} else {
-		Ay_CpuIm1Interrupt(cpu);
+		if (!Ay_CpuIm1Interrupt(cpu))
+			return 0;
 	}
 	irqPulses_++;
+	return 1;
 }
 
 /* Z80 を endCycle まで進める。HALT はサンプル予算まで眠る */
@@ -128,6 +133,7 @@ int CDriverMsx::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned
 	nextIrqSample_ = (uint64_t)hostRate_ / 60u;
 	nextIrq_ = 0;
 	irqPulses_ = 0;
+	vblankPending_ = 0;
 	playing_ = 0;
 
 	if (!hw_->LoadKss(fs, ge, titleCode))
@@ -137,7 +143,14 @@ int CDriverMsx::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned
 		return 0;
 
 	Ay_Cpu* cpu = hw_->Cpu();
-	cpuTarget_ = cpu ? (uint64_t)cpu->time64() : 0;
+	if (cpu) {
+		cpuTarget_ = (uint64_t)cpu->time64();
+		/* settle で進んだ CPU 時刻に出力軸を合わせる。0 から始めると
+		   RunUntil が空回りし VBlank だけ先に飛ぶ。 */
+		if (cpuHz_ > 0 && hostRate_ > 0)
+			sampleIndex_ = (cpuTarget_ * (uint64_t)hostRate_) / (uint64_t)cpuHz_;
+		nextIrqSample_ = sampleIndex_ + ((uint64_t)hostRate_ / 60u);
+	}
 	playing_ = 1;
 	return 1;
 }
@@ -153,7 +166,7 @@ void CDriverMsx::Close()
 int CDriverMsx::OverlayTitle(unsigned titleCode)
 {
 	if (!hw_) return 0;
-	if (hw_->ApplyCatalogToggle(titleCode))
+	if (hw_->ApplyCatalogToggle(titleCode, 1))
 		return 1;
 	return hw_->StartSong(titleCode) ? 1 : 0;
 }
@@ -174,15 +187,18 @@ int CDriverMsx::Render(int16_t* stereo, int frames)
 		if (want > cpuTarget_)
 			cpuTarget_ = want;
 		RunUntil(cpuTarget_);
+		/* VDP ラッチは 1 段。グリッドで取れなければ次サンプルで 1 回だけ届け、
+		   同じサンプルで pending+grid を二発しない（リズムが跳ねる）。 */
 		if (sampleIndex_ >= nextIrqSample_) {
-			/* DI 中も 60Hz グリッドを進める。EI 時に取りこぼし端がまとめて来ないように
-			   （Quinpl が約 2 倍速になった）。 */
 			const uint64_t step = (uint64_t)hostRate_ / 60u;
 			nextIrqSample_ += step ? step : 1u;
-			PulseVblankIrq();
-			/* 帯域外の ISR 予算は足さない。次の出力サンプルが同じ絶対タイムラインで
-			   ハンドラを実行する。VBlank 毎 200us ボーナスは CPU をバーストさせて
-			   タイムライン待ちのアイドルを作り、Quinpl のテンポ揺れになった。 */
+			if (!TryVblankIrq())
+				vblankPending_ = 1;
+			else
+				vblankPending_ = 0;
+		} else if (vblankPending_) {
+			if (TryVblankIrq())
+				vblankPending_ = 0;
 		}
 
 		int16_t ayBuf[2] = { 0, 0 };
@@ -212,6 +228,11 @@ int CDriverMsx::Render(int16_t* stereo, int frames)
 		}
 		if (hw_->ChipOpl()) {
 			int16_t oplBuf[2] = { 0, 0 };
+			opllResidual_ += (uint64_t)opllHz_;
+			const uint64_t oc = opllResidual_ / (uint64_t)hostRate_;
+			opllResidual_ %= (uint64_t)hostRate_;
+			if (oc)
+				hw_->ChipOpl()->AdvanceClocks(oc);
 			hw_->ChipOpl()->Render(oplBuf, 1);
 			int32_t ol = (int32_t)opllS + (int32_t)oplBuf[0];
 			if (ol > 32767) ol = 32767;

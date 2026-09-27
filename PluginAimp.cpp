@@ -1,4 +1,4 @@
-﻿// AIMP decoder plugin host (AIMPPluginGetHeader + IAIMPExtensionAudioDecoder / ...Old)
+// AIMP decoder plugin host (AIMPPluginGetHeader + IAIMPExtensionAudioDecoder / ...Old)
 //
 // AIMP SDK の実装に合わせた点:
 //  - デコーダ系プラグインは Initialize(Core) の中で Core->RegisterExtension() を呼び、
@@ -11,6 +11,8 @@
 #include "stdafx.h"
 #include "PluginAimp.h"
 #include "PluginKinds.h"
+#include "PluginForeignEnum.h"
+#include "KpiHostClient.h"
 #include <float.h>
 
 // AIMP SDK headers live under third_party/aimp (AdditionalIncludeDirectories)
@@ -24,6 +26,10 @@ extern BYTE kpiarch[];
 extern BYTE plugkind[];
 extern BOOL kpichk[];
 extern int kpicnt;
+extern KpiHost64Client g_kpiHost;
+extern BOOL thn1;
+extern int stf;
+extern DWORD g_oggUiThreadId;
 
 static HMODULE g_aimpDll = NULL;
 static IAIMPPlugin* g_aimpPlugin = NULL;
@@ -35,6 +41,9 @@ static int g_aimpCh = 2;
 static int g_aimpBits = 16;
 static int g_aimpFloat = 0;   // デコーダのネイティブが 32bit float
 static INT64 g_aimpSize = 0;
+static int g_aimpRemote = 0;
+static uint32_t g_aimpRemoteSid = 0;
+static volatile LONG g_aimpStopping = 0;
 
 // ---- minimal IAIMPString ----
 class CAimpString : public IAIMPString
@@ -341,15 +350,50 @@ static void AimpParseExts(const CString& list)
 int PluginAimp_TryEnum(const wchar_t* dllPath, int is64)
 {
 	if (!dllPath || !dllPath[0] || kpicnt >= 149) return 0;
-	if (is64) {
-		// x64 は KpiHost64 側に AIMP 再生系が無いので台帳に載せない
-		return 0;
+#ifdef _WIN64
+	const int needRemote = !is64;
+#else
+	const int needRemote = is64;
+#endif
+	if (needRemote) {
+		plugkind[kpicnt] = PLUGKIND_AIMP;
+		kpiarch[kpicnt] = is64 ? 64 : 32;
+		kpif[kpicnt] = dllPath;
+		ext[kpicnt][0] = L"";
+		ext[kpicnt][299] = L"";
+		kvar[kpicnt][0] = 0;
+		std::wstring exts;
+		if (g_kpiHost.ForeignListExts(PLUGKIND_AIMP, dllPath, exts) && !exts.empty()) {
+			CString cs(exts.c_str());
+			int ei = 0, start = 0;
+			for (;;) {
+				int slash = cs.Find(L'/', start);
+				CString tok = (slash < 0) ? cs.Mid(start) : cs.Mid(start, slash - start);
+				tok.Trim(); tok.MakeLower();
+				int st = 0;
+				while (st < tok.GetLength() && (tok[st] == L'*' || tok[st] == L'.')) st++;
+				tok = tok.Mid(st);
+				if (!tok.IsEmpty() && ei < 298) {
+					tok = L"." + tok;
+					ext[kpicnt][ei] = tok;
+					kvar[kpicnt][ei] = 0;
+					ei++;
+				}
+				if (slash < 0) break;
+				start = slash + 1;
+			}
+			ext[kpicnt][ei] = L"";
+		}
+		if (ext[kpicnt][0] == L"") return 0;
+		kpichk[kpicnt] = TRUE;
+		kpicnt++;
+		return 1;
 	}
 	int ok = 0;
 	try {
 		if (AimpLoadPlugin(dllPath)) {
 			plugkind[kpicnt] = PLUGKIND_AIMP;
-			kpiarch[kpicnt] = 32;
+			kpiarch[kpicnt] = is64 ? 64 : 32;
 			kpif[kpicnt] = dllPath;
 			AimpParseExts(g_aimpCore ? g_aimpCore->m_exts : CString());
 			// 拡張子を公開しないプラグインは plugsaimp でマッチできないので載せない
@@ -367,8 +411,31 @@ int PluginAimp_TryEnum(const wchar_t* dllPath, int is64)
 	return ok;
 }
 
+int PluginAimp_OpenRemote(const wchar_t* dllPath, const wchar_t* mediaPath)
+{
+	PluginAimp_Close();
+	KPIHOST64_ForeignOpenReply fr{};
+	if (!g_kpiHost.ForeignOpen(PLUGKIND_AIMP, dllPath, mediaPath, fr))
+		return 0;
+	g_aimpRemote = 1;
+	g_aimpRemoteSid = fr.sessionId;
+	g_aimpRate = fr.sampleRate > 0 ? (int)fr.sampleRate : 44100;
+	g_aimpCh = fr.channels > 0 ? (int)fr.channels : 2;
+	g_aimpBits = fr.bitsPerSample > 0 ? fr.bitsPerSample : 16;
+	g_aimpFloat = 0;
+	{
+		int bpf = (g_aimpBits / 8) * (g_aimpCh > 0 ? g_aimpCh : 2);
+		g_aimpSize = (fr.lengthSamples > 0 && bpf > 0) ? (INT64)fr.lengthSamples * bpf : 0;
+	}
+	g_aimpOpen = 1;
+	InterlockedExchange(&g_aimpStopping, 0);
+	return 1;
+}
+
 int PluginAimp_Open(const wchar_t* dllPath, const wchar_t* mediaPath)
 {
+	if (!PluginForeign_MatchesHostArch(dllPath))
+		return PluginAimp_OpenRemote(dllPath, mediaPath);
 	PluginAimp_Close();
 	if (!AimpLoadPlugin(dllPath)) {
 		AimpUnloadPlugin();
@@ -419,12 +486,30 @@ int PluginAimp_Open(const wchar_t* dllPath, const wchar_t* mediaPath)
 
 void PluginAimp_Close()
 {
+	InterlockedExchange(&g_aimpStopping, 1);
+	if (g_aimpRemote) {
+		if (g_aimpRemoteSid)
+			g_kpiHost.ForeignClose(g_aimpRemoteSid);
+		g_aimpRemote = 0;
+		g_aimpRemoteSid = 0;
+		g_aimpOpen = 0;
+		g_aimpFloat = 0;
+		g_aimpSize = 0;
+		return;
+	}
 	AimpUnloadPlugin();
 }
 
 int PluginAimp_SeekBytes(INT64 pos)
 {
-	if (!g_aimpDec || !g_aimpOpen) return 0;
+	if (!g_aimpOpen) return 0;
+	if (g_aimpRemote) {
+		int bpf = (g_aimpBits / 8) * (g_aimpCh > 0 ? g_aimpCh : 2);
+		if (bpf <= 0) return 0;
+		uint64_t samp = (uint64_t)(pos / bpf);
+		return g_kpiHost.ForeignSeek(g_aimpRemoteSid, samp) ? 1 : 0;
+	}
+	if (!g_aimpDec) return 0;
 	return g_aimpDec->SetPosition(pos) ? 1 : 0;
 }
 
@@ -436,7 +521,34 @@ INT64 PluginAimp_SizeBytes() { return g_aimpSize; }
 
 int PluginAimp_Read(BYTE* dst, int bytesWanted)
 {
-	if (!dst || bytesWanted <= 0 || !g_aimpDec || !g_aimpOpen) return 0;
+	if (!dst || bytesWanted <= 0 || !g_aimpOpen) return 0;
+	if (g_aimpRemote) {
+		int got = 0;
+		DWORD tIdle = GetTickCount();
+		while (got < bytesWanted) {
+			if (thn1 || stf) break;
+			if (InterlockedCompareExchange(&g_aimpStopping, 0, 0)) break;
+			std::vector<uint8_t> pcm;
+			bool eof = false;
+			if (!g_kpiHost.ForeignRender(g_aimpRemoteSid, (uint32_t)(bytesWanted - got), pcm, eof))
+				break;
+			int n = (int)pcm.size();
+			if (n > bytesWanted - got) n = bytesWanted - got;
+			if (n > 0) {
+				memcpy(dst + got, pcm.data(), (size_t)n);
+				got += n;
+				tIdle = GetTickCount();
+				continue;
+			}
+			if (eof) break;
+			const DWORD idleCap = (g_oggUiThreadId != 0 && GetCurrentThreadId() == g_oggUiThreadId)
+				? 800u : 5000u;
+			if (GetTickCount() - tIdle > idleCap) break;
+			Sleep(2);
+		}
+		return got;
+	}
+	if (!g_aimpDec) return 0;
 	int n = 0;
 	try { n = g_aimpDec->Read(dst, bytesWanted); }
 	catch (...) { n = 0; }

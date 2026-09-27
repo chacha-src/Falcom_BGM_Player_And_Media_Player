@@ -1,0 +1,6 @@
+﻿LZMA SDK 26.03 — 7z decoder subset (C/)
+Source: https://github.com/ip7z/7zip/tree/26.03/C
+         https://www.7-zip.org/sdk.html
+These C decoder files are public domain (Igor Pavlov), as stated in each source header.
+License.txt is the upstream 7-Zip license notice for the full tree; this folder contains
+only the public-domain ANSI-C 7z/LZMA/LZMA2/PPMd/BCJ decoder used by SevenZipDec.cpp.

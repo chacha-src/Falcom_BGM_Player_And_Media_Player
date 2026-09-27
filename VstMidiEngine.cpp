@@ -507,6 +507,19 @@ extern "C" int VstMidiGsMapDropFromUsed(const unsigned short* pairs, int nPairs)
 	return kind;
 }
 
+#ifndef KPIHOST64_BUILD
+extern volatile LONG g_appExiting;
+extern void COgg_DropPlaybackUiPostedMsg(UINT message);
+#endif
+static volatile LONG g_vstWaitPump = 0;
+extern "C" int VstScanPumpIsBusy(void)
+{
+	return InterlockedCompareExchange(&g_vstWaitPump, 0, 0) != 0;
+}
+
+static int ResolveRolandScVaPath(const wchar_t* in, wchar_t* out, int outChars, int wantArch);
+static void ScVaPrepareLoadDir(const wchar_t* stubPath, wchar_t* plugDir, int plugDirChars);
+
 namespace {
 
 static void GsFixChecksum(BYTE* d, int n)
@@ -548,7 +561,7 @@ enum { SAMPLE_RATE = 44100, BLOCK_FRAMES = 512, MAX_MIDI_EVENTS = 500000 };
 // Load 成功だけでは足りない。未認証・インストール途中の音源は MIDI を受けても無音。
 // プローブ音を鳴らしてピークを見る。0.001 は無音フロア（~0.00002）より上、実音（~0.06）より下。
 enum { PROBE_AUDIBLE_MILLI = 1 }; // ピーク ×1000
-enum { CACHE_MAGIC = 0x43545356, CACHE_VERSION = 12 }; // 単体 .vst3（Kontakt）＋標準ルート
+enum { CACHE_MAGIC = 0x43545356, CACHE_VERSION = 13 }; // + 本体アーキ。x86 キャッシュを x64 本体が食わない
 
 // SMF をサンプル位置へ展開した 1 イベント。モニタの MmEv と同型に近い。
 struct MidiItem {
@@ -848,10 +861,64 @@ static int IdentityLooksLikeFx(const wchar_t* name, const wchar_t* path)
 	return 0;
 }
 
+#ifndef WM_TIMERP_VSYNC_TICK
+#define WM_TIMERP_VSYNC_TICK (WM_APP + 70)
+#endif
+#ifndef WM_SPEANA_TICK
+#define WM_SPEANA_TICK (WM_APP + 73)
+#endif
+
 static HWND g_waitWnd = NULL;
 static HFONT g_waitFont = NULL;
 static int g_scanIndex = 0;
 static int g_scanTotal = 0;
+
+static int VstScanAborted(void)
+{
+#ifndef KPIHOST64_BUILD
+	return InterlockedCompareExchange(&g_appExiting, 0, 0) != 0;
+#else
+	return 0;
+#endif
+}
+
+static void VstPumpWaitMessages(HWND wnd)
+{
+	MSG m;
+#ifndef KPIHOST64_BUILD
+	/* 検索中に本体の PAINT/timerp を Dispatch するとアナライザの LineTo から
+	   戻らず 0/N のまま固まる（x64 は Program Files 直下の DLL が多くて顕著）。 */
+	while (PeekMessage(&m, NULL, WM_TIMERP_VSYNC_TICK, WM_TIMERP_VSYNC_TICK, PM_REMOVE))
+		COgg_DropPlaybackUiPostedMsg(m.message);
+	while (PeekMessage(&m, NULL, WM_SPEANA_TICK, WM_SPEANA_TICK, PM_REMOVE))
+		COgg_DropPlaybackUiPostedMsg(m.message);
+	if (PeekMessage(&m, NULL, WM_COMMAND, WM_COMMAND, PM_NOREMOVE)) {
+		const WORD id = LOWORD(m.wParam);
+		if (id == IDOK || id == IDC_MP_EXIT) {
+			PeekMessage(&m, NULL, WM_COMMAND, WM_COMMAND, PM_REMOVE);
+			InterlockedExchange(&g_appExiting, 1);
+			if (m.hwnd)
+				::PostMessage(m.hwnd, m.message, m.wParam, m.lParam);
+		}
+	}
+#endif
+	if (!wnd)
+		return;
+	while (PeekMessage(&m, wnd, 0, 0, PM_REMOVE)) {
+		if (m.message == WM_QUIT) {
+			::PostQuitMessage((int)m.wParam);
+#ifndef KPIHOST64_BUILD
+			InterlockedExchange(&g_appExiting, 1);
+#endif
+			break;
+		}
+		TranslateMessage(&m);
+		DispatchMessage(&m);
+		if (VstScanAborted())
+			break;
+	}
+	UpdateWindow(wnd);
+}
 
 static UINT WaitDpi(HWND h)
 {
@@ -875,6 +942,7 @@ static UINT WaitDpi(HWND h)
 
 static void DestroyWait(HWND wnd)
 {
+	InterlockedExchange(&g_vstWaitPump, 0);
 	if (wnd) DestroyWindow(wnd);
 	if (g_waitWnd == wnd) g_waitWnd = NULL;
 	if (g_waitFont) {
@@ -887,12 +955,7 @@ static void SetWaitStatus(HWND wnd, const wchar_t* msg)
 {
 	if (!wnd || !msg) return;
 	SetWindowTextW(wnd, msg);
-	MSG m;
-	while (PeekMessage(&m, NULL, 0, 0, PM_REMOVE)) {
-		TranslateMessage(&m);
-		DispatchMessage(&m);
-	}
-	UpdateWindow(wnd);
+	VstPumpWaitMessages(wnd);
 }
 
 static void SetScanWait(HWND wnd, int cur, int total, int found, const wchar_t* name)
@@ -1010,6 +1073,7 @@ static HWND MakeWait(HWND owner)
 		UpdateWindow(wnd);
 	}
 	g_waitWnd = wnd;
+	InterlockedExchange(&g_vstWaitPump, 1);
 	return wnd;
 }
 
@@ -1045,12 +1109,7 @@ extern "C" void VstWaitHide(void)
 
 static void PumpWait(HWND wnd)
 {
-	MSG msg;
-	while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
-		TranslateMessage(&msg);
-		DispatchMessage(&msg);
-	}
-	if (wnd) UpdateWindow(wnd);
+	VstPumpWaitMessages(wnd);
 }
 
 static int PeArch(const wchar_t* path)
@@ -1140,7 +1199,8 @@ static int PeHasExportName(const wchar_t* path, const char* exportName)
 	const DWORD namesOff = PeRvaToOffset(f, exp.AddressOfNames, sec, nSec);
 	if (!namesOff) { CloseHandle(f); return 0; }
 	int found = 0;
-	for (DWORD i = 0; i < exp.NumberOfNames && !found; i++) {
+	const DWORD nNames = exp.NumberOfNames > 8192u ? 8192u : exp.NumberOfNames;
+	for (DWORD i = 0; i < nNames && !found; i++) {
 		DWORD nameRva = 0;
 		SetFilePointer(f, (LONG)(namesOff + i * sizeof(DWORD)), NULL, FILE_BEGIN);
 		if (!ReadFile(f, &nameRva, sizeof(nameRva), &got, NULL) || !nameRva) continue;
@@ -1349,58 +1409,13 @@ static void ProbeVst2(const wchar_t* path)
 	if (PathLooksLikeScVa(path) || PathLooksLikeScVa(base))
 		wcsncpy_s(base, VST_NAME_CHARS, L"SOUND Canvas VA", _TRUNCATE);
 	if (!arch) return;
-	if (arch != HostArch()) {
-		/* Never LoadLibrary a wrong-machine image; only list if PE exports VST entry. */
-		if (PeLooksLikeVst2Module(path))
-			AddPlugin(path, base, arch, 0, 0);
+	/* 検索中に LoadLibrary すると x64 の Kontakt/HALion 等が DllMain で止まり、
+	   カウンタが 0/N のまま終了も受け付けなくなる。PE の VST 入口だけ見る。
+	   名前と isLiveOk は VstScanVerifyLiveList がドロップと同じ開き方で埋める。 */
+	if (!PeLooksLikeVst2Module(path))
 		return;
-	}
-	HMODULE mod = NULL;
-	{
-		wchar_t plugDir[VST_PATH_CHARS];
-		SafeCopy(plugDir, VST_PATH_CHARS, path);
-		wchar_t* slash = wcsrchr(plugDir, L'\\');
-		if (slash) *slash = 0; else plugDir[0] = 0;
-		wchar_t savedDllDir[MAX_PATH] = {};
-		GetDllDirectoryW(MAX_PATH, savedDllDir);
-		if (plugDir[0]) SetDllDirectoryW(plugDir);
-		mod = LoadLibraryExW(path, NULL, LOAD_WITH_ALTERED_SEARCH_PATH);
-		SetDllDirectoryW(savedDllDir[0] ? savedDllDir : NULL);
-	}
-	if (!mod) return;
-	VSTPluginMainProc mainProc = (VSTPluginMainProc)GetProcAddress(mod, "VSTPluginMain");
-	if (!mainProc) mainProc = (VSTPluginMainProc)GetProcAddress(mod, "main");
-	if (!mainProc) { FreeLibrary(mod); return; }
-	AEffect* e = NULL;
-	VstPlugDirSet(path);
-	__try { e = mainProc(HostCallback); }
-	__except (EXCEPTION_EXECUTE_HANDLER) { e = NULL; }
-	if (!e || e->magic != kEffectMagic || !e->dispatcher) {
-		FreeLibrary(mod); return;
-	}
-	VstPlugDirBind(e);
-	char nm[128] = {};
-	int instrument = 0;
-	__try {
-		e->dispatcher(e, effOpen, 0, 0, NULL, 0);
-		e->dispatcher(e, effGetEffectName, 0, 0, nm, 0);
-		const VstIntPtr cat = e->dispatcher(e, effGetPlugCategory, 0, 0, NULL, 0);
-		const VstIntPtr can = e->dispatcher(e, effCanDo, 0, 0,
-			(void*)"receiveVstMidiEvent", 0);
-		instrument = (cat == kPlugCategSynth || can > 0 ||
-			(e->flags & effFlagsIsSynth)) ? 1 : 0;
-		e->dispatcher(e, effClose, 0, 0, NULL, 0);
-	}
-	__except (EXCEPTION_EXECUTE_HANDLER) { instrument = 0; }
-	VstPlugDirUnbind(e);
-	wchar_t wide[VST_NAME_CHARS] = {};
-	if (nm[0]) MultiByteToWideChar(CP_ACP, 0, nm, -1, wide, VST_NAME_CHARS);
-	if (PathLooksLikeScVa(path))
-		wcsncpy_s(wide, VST_NAME_CHARS, L"SOUND Canvas VA", _TRUNCATE);
-	if (IdentityLooksLikeFx(wide[0] ? wide : base, path))
-		instrument = 0;
-	AddPlugin(path, wide[0] ? wide : base, arch, 0, instrument);
-	FreeLibrary(mod);
+	const int instrument = IdentityLooksLikeFx(base, path) ? 0 : 1;
+	AddPlugin(path, base, arch, 0, instrument);
 }
 
 static int DirExists(const wchar_t* path)
@@ -1545,24 +1560,26 @@ static void ScanDir(const wchar_t* dir, int depth, HWND wait)
 	HANDLE h = FindFirstFileW(pat, &fd);
 	if (h == INVALID_HANDLE_VALUE) return;
 	do {
+		if (VstScanAborted())
+			break;
 		if (!wcscmp(fd.cFileName, L".") || !wcscmp(fd.cFileName, L"..")) continue;
 		wchar_t full[VST_PATH_CHARS];
 		JoinPath(full, dir, fd.cFileName);
-		int probed = 0;
 		if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
 			if (EqExt(fd.cFileName, L".vst3")) {
-				probed = ProbeVst3Bundle(full);
+				++g_scanIndex;
+				SetScanWait(wait, g_scanIndex, g_scanTotal, g_pluginCount, fd.cFileName);
+				ProbeVst3Bundle(full);
 			} else if (!SkipVstScanDir(full))
 				ScanDir(full, depth + 1, wait);
 		} else if (EqExt(fd.cFileName, L".vst3")) {
-			probed = ProbeVst3Bundle(full);
-		} else if (EqExt(fd.cFileName, L".dll")) {
-			ProbeVst2(full);
-			probed = 1;
-		}
-		if (probed) {
 			++g_scanIndex;
 			SetScanWait(wait, g_scanIndex, g_scanTotal, g_pluginCount, fd.cFileName);
+			ProbeVst3Bundle(full);
+		} else if (EqExt(fd.cFileName, L".dll")) {
+			++g_scanIndex;
+			SetScanWait(wait, g_scanIndex, g_scanTotal, g_pluginCount, fd.cFileName);
+			ProbeVst2(full);
 		}
 	} while (FindNextFileW(h, &fd) && g_pluginCount < VST_MAX_PLUGINS);
 	FindClose(h);
@@ -1699,13 +1716,14 @@ static int FillVstScanRoots(wchar_t roots[][VST_PATH_CHARS], int max)
 		L"C:\\Program Files\\Common Files\\VST3",
 		L"C:\\Program Files (x86)\\Common Files\\VST3",
 		L"C:\\Program Files\\Common Files\\VST2",
-		L"C:\\Program Files\\Steinberg",
 		L"C:\\Program Files\\Common Files\\Steinberg\\VST2",
 		L"C:\\Program Files\\Common Files\\Steinberg\\VST3",
 		L"C:\\Program Files\\Native Instruments\\VSTPlugins 64 bit",
 		L"C:\\Program Files\\Native Instruments\\VSTPlugins 32 bit",
 		L"C:\\Program Files\\Roland\\SOUND Canvas VA",
 		L"C:\\Program Files (x86)\\Roland\\SOUND Canvas VA",
+		L"C:\\Roland VS",
+		L"C:\\Roland VS\\64",
 		L"C:\\Yamaha\\S-YXG50",
 	};
 	for (int i = 0; i < (int)(sizeof(fixed) / sizeof(fixed[0])); ++i)
@@ -1770,10 +1788,11 @@ static int ReadCacheFile(const wchar_t* path)
 	HANDLE f = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ, NULL,
 		OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
 	if (f == INVALID_HANDLE_VALUE) return 0;
-	DWORD hdr[3] = {}, got = 0;
+	DWORD hdr[4] = {}, got = 0;
 	int ok = ReadFile(f, hdr, sizeof(hdr), &got, NULL) &&
 		got == sizeof(hdr) && hdr[0] == CACHE_MAGIC &&
-		hdr[1] == CACHE_VERSION && hdr[2] <= VST_MAX_PLUGINS;
+		hdr[1] == CACHE_VERSION && hdr[2] <= VST_MAX_PLUGINS &&
+		hdr[3] == (DWORD)HostArch();
 	if (ok && hdr[2]) {
 		DWORD bytes = hdr[2] * sizeof(VstPluginInfo);
 		ok = ReadFile(f, g_plugins, bytes, &got, NULL) && got == bytes;
@@ -1816,7 +1835,7 @@ static void SaveCache()
 	HANDLE f = CreateFileW(path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS,
 		FILE_ATTRIBUTE_NORMAL, NULL);
 	if (f == INVALID_HANDLE_VALUE) return;
-	DWORD hdr[3] = { CACHE_MAGIC, CACHE_VERSION, (DWORD)g_pluginCount }, put = 0;
+	DWORD hdr[4] = { CACHE_MAGIC, CACHE_VERSION, (DWORD)g_pluginCount, (DWORD)HostArch() }, put = 0;
 	WriteFile(f, hdr, sizeof(hdr), &put, NULL);
 	if (g_pluginCount)
 		WriteFile(f, g_plugins, g_pluginCount * sizeof(VstPluginInfo), &put, NULL);
@@ -4135,13 +4154,22 @@ static void RenderDrums(float* l, float* r, int frames)
 	}
 }
 
+static wchar_t g_liveDllDirW[MAX_PATH];
+
 static void LiveDllDirFromEffect(AEffect* e)
 {
 	const char* dirA = VstPlugDirFor(e);
 	if (!dirA || !dirA[0]) return;
 	wchar_t dirW[MAX_PATH];
-	if (MultiByteToWideChar(CP_ACP, 0, dirA, -1, dirW, MAX_PATH) > 0 && dirW[0])
+	if (MultiByteToWideChar(CP_ACP, 0, dirA, -1, dirW, MAX_PATH) <= 0 || !dirW[0])
+		return;
+	if (_wcsicmp(g_liveDllDirW, dirW) == 0) {
 		SetDllDirectoryW(dirW);
+		return;
+	}
+	wcsncpy_s(g_liveDllDirW, dirW, _TRUNCATE);
+	SetDllDirectoryW(dirW);
+	SetCurrentDirectoryW(dirW);
 }
 
 static void RenderEffect(AEffect* e, float* l, float* r, int frames)
@@ -4191,18 +4219,28 @@ static void RenderFxEffect(AEffect* e, float* l, float* r, int frames)
 
 static int LoadVst2(const wchar_t* path, HMODULE& module, AEffect*& effect)
 {
-	// SC-VA.dll is a tiny stub that LoadLibrary("SCCore.dll") at runtime.
-	// Without the plugin directory on the DLL search path, SCCore fails and
-	// the effect stays silent while still returning a valid AEffect*.
+	// SC-VA.dll is a 3KB stub: DllMain LoadLibrary's SOUND Canvas VA.bin from
+	// HKLM\SOFTWARE\Roland Cloud\SOUND Canvas VA, then R2RPluginMain. The .bin
+	// and SCCore live in C:\Roland VS\64 (x64) / C:\Roland VS (x86). Loading
+	// the VST3-folder copy without that engine dir on the search path yields
+	// a valid AEffect* that stays silent.
+	wchar_t loadPath[VST_PATH_CHARS];
+	SafeCopy(loadPath, VST_PATH_CHARS, path);
+	if (PathLooksLikeScVa(path)) {
+		wchar_t resolved[VST_PATH_CHARS];
+		if (ResolveRolandScVaPath(path, resolved, VST_PATH_CHARS, HostArch()) &&
+			resolved[0])
+			SafeCopy(loadPath, VST_PATH_CHARS, resolved);
+	}
 	wchar_t plugDir[VST_PATH_CHARS];
-	SafeCopy(plugDir, VST_PATH_CHARS, path);
+	SafeCopy(plugDir, VST_PATH_CHARS, loadPath);
 	wchar_t* slash = wcsrchr(plugDir, L'\\');
 	if (slash) *slash = 0; else plugDir[0] = 0;
+	ScVaPrepareLoadDir(loadPath, plugDir, VST_PATH_CHARS);
 	wchar_t oldCurDir[MAX_PATH] = {};
 	GetCurrentDirectoryW(MAX_PATH, oldCurDir);
-	// Two different lookups have to succeed: LoadLibrary("SCCore.dll") from
-	// inside the stub, which follows the DLL search path, and any relative
-	// file the plug-in opens during init, which follows the current directory.
+	// Two different lookups have to succeed: LoadLibrary of the .bin / SCCore
+	// (DLL search path) and any relative file during init (current directory).
 	wchar_t savedDllDir[MAX_PATH] = {};
 	GetDllDirectoryW(MAX_PATH, savedDllDir);
 	if (plugDir[0]) {
@@ -4210,10 +4248,10 @@ static int LoadVst2(const wchar_t* path, HMODULE& module, AEffect*& effect)
 		SetCurrentDirectoryW(plugDir);
 	}
 
-	module = LoadLibraryExW(path, NULL, LOAD_WITH_ALTERED_SEARCH_PATH);
+	module = LoadLibraryExW(loadPath, NULL, LOAD_WITH_ALTERED_SEARCH_PATH);
 	if (!module) {
 		EnsLog(L"LoadVst2 FAIL LoadLibrary err=%lu path=%s",
-			GetLastError(), path);
+			GetLastError(), loadPath);
 		if (oldCurDir[0]) SetCurrentDirectoryW(oldCurDir);
 		SetDllDirectoryW(savedDllDir[0] ? savedDllDir : NULL);
 		return 0;
@@ -4221,20 +4259,25 @@ static int LoadVst2(const wchar_t* path, HMODULE& module, AEffect*& effect)
 	VSTPluginMainProc proc = (VSTPluginMainProc)GetProcAddress(module, "VSTPluginMain");
 	if (!proc) proc = (VSTPluginMainProc)GetProcAddress(module, "main");
 	if (!proc) {
-		EnsLog(L"LoadVst2 FAIL no VSTPluginMain path=%s", path);
+		EnsLog(L"LoadVst2 FAIL no VSTPluginMain path=%s", loadPath);
 		FreeLibrary(module); module = NULL;
 		if (oldCurDir[0]) SetCurrentDirectoryW(oldCurDir);
 		SetDllDirectoryW(savedDllDir[0] ? savedDllDir : NULL);
 		return 0;
 	}
 	DWORD seh = 0;
-	VstPlugDirSet(path);
+	{
+		wchar_t bindAs[VST_PATH_CHARS];
+		if (plugDir[0]) JoinPath(bindAs, plugDir, L"SOUND Canvas VA.dll");
+		else SafeCopy(bindAs, VST_PATH_CHARS, loadPath);
+		VstPlugDirSet(bindAs);
+	}
 	__try { effect = proc(HostCallback); }
 	__except (seh = GetExceptionCode(), EXCEPTION_EXECUTE_HANDLER) { effect = NULL; }
 	if (!effect || effect->magic != kEffectMagic || !effect->dispatcher ||
 		!effect->processReplacing) {
 		EnsLog(L"LoadVst2 FAIL entry effect=%p seh=0x%08X path=%s",
-			(void*)effect, seh, path);
+			(void*)effect, seh, loadPath);
 		if (effect && effect->dispatcher)
 			__try { effect->dispatcher(effect, effClose, 0, 0, NULL, 0); }
 			__except (EXCEPTION_EXECUTE_HANDLER) {}
@@ -4257,7 +4300,7 @@ static int LoadVst2(const wchar_t* path, HMODULE& module, AEffect*& effect)
 		effect->dispatcher(effect, effStartProcess, 0, 0, NULL, 0);
 	}
 	__except (seh = GetExceptionCode(), EXCEPTION_EXECUTE_HANDLER) {
-		EnsLog(L"LoadVst2 FAIL init seh=0x%08X path=%s", seh, path);
+		EnsLog(L"LoadVst2 FAIL init seh=0x%08X path=%s", seh, loadPath);
 		VstPlugDirUnbind(effect);
 		FreeLibrary(module); module = NULL; effect = NULL;
 		if (oldCurDir[0]) SetCurrentDirectoryW(oldCurDir);
@@ -4267,7 +4310,7 @@ static int LoadVst2(const wchar_t* path, HMODULE& module, AEffect*& effect)
 	// Keep this plug's folder on the DLL search path. SC-VA delay-loads
 	// SCCore; CloseEffect must not clear it while any live instance remains.
 	EnsLog(L"LoadVst2 OK path=%s ins=%d outs=%d flags=0x%X uid=0x%08X",
-		path, effect->numInputs, effect->numOutputs, (unsigned)effect->flags,
+		loadPath, effect->numInputs, effect->numOutputs, (unsigned)effect->flags,
 		(unsigned)effect->uniqueID);
 	if (oldCurDir[0]) SetCurrentDirectoryW(oldCurDir);
 	return 1;
@@ -4358,11 +4401,22 @@ static void RescoreMultiFlags(void)
 		VstPluginInfo& p = g_plugins[i];
 		p.isMultiTimbral =
 			(DetectMultiTimbralName(p.name) || DetectMultiTimbralName(p.path)) ? 1 : 0;
-		// Cross-arch multi (x86 app + x64 SC-VA) stays pickable for KpiHost64.
-		// Do not revive a copy that verify already hid (failed drop / duplicate).
+		// Other-arch multi stays pickable only when no HostArch copy exists
+		// (x86 ogg + x64 SC-VA via KpiHost64, or x64 ogg + x86 via ogghost32).
 		if (p.isMultiTimbral && p.arch != HostArch() &&
-			!(p.isLiveOk && p.isAudible == 0))
-			p.isInstrument = 1;
+			!(p.isLiveOk && p.isAudible == 0)) {
+			int haveHost = 0;
+			for (int j = 0; j < g_pluginCount; ++j) {
+				if (g_plugins[j].arch != HostArch() || !g_plugins[j].isInstrument)
+					continue;
+				if (_wcsicmp(g_plugins[j].name, p.name) == 0) {
+					haveHost = 1;
+					break;
+				}
+			}
+			if (!haveHost)
+				p.isInstrument = 1;
+		}
 	}
 }
 
@@ -5641,12 +5695,16 @@ extern "C" int VstScanEnsure(HWND parentForWait)
 	{
 		SetScanWait(wait, 0, g_scanTotal, 0, L"");
 	}
-	ProbeUserSpecified(savedata.vstMultiDll, wait);
-	ProbeUserSpecified(savedata.vstExtraPath, wait);
-	for (int i = 0; i < count; ++i) ScanDir(roots[i], 0, wait);
+	if (!VstScanAborted())
+		ProbeUserSpecified(savedata.vstMultiDll, wait);
+	if (!VstScanAborted())
+		ProbeUserSpecified(savedata.vstExtraPath, wait);
+	for (int i = 0; i < count && !VstScanAborted(); ++i)
+		ScanDir(roots[i], 0, wait);
 	RescoreMultiFlags();
 	if (wait) DestroyWait(wait);
-	SaveCache();
+	if (!VstScanAborted())
+		SaveCache();
 	g_scanInvalid = 0; g_scanReady = 1;
 	return 0;
 }
@@ -5708,7 +5766,6 @@ extern "C" const VstPluginInfo* VstScanGetMulti(int multiIndex)
 	return NULL;
 }
 
-static int ResolveRolandScVaPath(const wchar_t* in, wchar_t* out, int outChars, int wantArch);
 extern "C" int VstPluginPeArch(const wchar_t* path)
 {
 	return PeArch(path);
@@ -5738,6 +5795,7 @@ static int ResolvePickedPluginArch(const wchar_t* src, wchar_t* outPath, int out
 	wchar_t resolved[VST_PATH_CHARS];
 	int want = PeArch(src);
 	if (!want) want = HostArch();
+	if (PathLooksLikeScVa(src)) want = HostArch();
 	if (ResolveRolandScVaPath(src, resolved, VST_PATH_CHARS, want))
 		SafeCopy(outPath, outChars, resolved);
 	int arch = PeArch(outPath);
@@ -6080,17 +6138,162 @@ static int PathFileExistsW2(const wchar_t* path)
 	return a != INVALID_FILE_ATTRIBUTES && !(a & FILE_ATTRIBUTE_DIRECTORY);
 }
 
-// SOUND Canvas VA.dll is the entry the user specifies (stub/wrapper).
-// LoadVst2 sets the DLL directory to its folder so SCCore.dll loads beside it.
-// Do not rewrite to ProgramData and do not require a separate Wrapper.dll.
+static int ScVaAcceptStub(const wchar_t* path, int wantArch, wchar_t* out, int outChars)
+{
+	if (!path || !*path || !PathFileExistsW2(path)) return 0;
+	if (SkipCompanionDll(path)) return 0;
+	const int a = PeArch(path);
+	if (wantArch && a && a != wantArch) return 0;
+	SafeCopy(out, outChars, path);
+	return 1;
+}
+
+static int RolandCloudEngineDir(int wantArch, wchar_t* dir, int dirChars)
+{
+	if (!dir || dirChars <= 0) return 0;
+	dir[0] = 0;
+	HKEY key = NULL;
+	REGSAM sam = KEY_READ;
+	if (wantArch == 64) sam |= KEY_WOW64_64KEY;
+	else if (wantArch == 32) sam |= KEY_WOW64_32KEY;
+	if (RegOpenKeyExA(HKEY_LOCAL_MACHINE, "SOFTWARE\\Roland Cloud\\SOUND Canvas VA",
+		0, sam, &key) != ERROR_SUCCESS &&
+		RegOpenKeyExA(HKEY_LOCAL_MACHINE, "SOFTWARE\\Roland Cloud\\SOUND Canvas VA",
+			0, KEY_READ, &key) != ERROR_SUCCESS)
+		return 0;
+	char val[MAX_PATH] = {};
+	DWORD type = 0, cb = (DWORD)sizeof(val);
+	const LONG q = RegQueryValueExA(key, "VST", NULL, &type, (BYTE*)val, &cb);
+	RegCloseKey(key);
+	if (q != ERROR_SUCCESS || !val[0]) return 0;
+	wchar_t wval[MAX_PATH] = {};
+	if (MultiByteToWideChar(CP_ACP, 0, val, -1, wval, MAX_PATH) <= 0)
+		return 0;
+	wchar_t* slash = wcsrchr(wval, L'\\');
+	if (slash) *slash = 0;
+	if (!wval[0] || !DirExists(wval)) return 0;
+	if (wantArch) {
+		wchar_t core[VST_PATH_CHARS];
+		JoinPath(core, wval, L"SCCore.dll");
+		const int ca = PathFileExistsW2(core) ? PeArch(core) : 0;
+		if (ca && ca != wantArch) return 0;
+	}
+	SafeCopy(dir, dirChars, wval);
+	return 1;
+}
+
+static int ScVaFlipProgramFiles(const wchar_t* in, wchar_t* out, int outChars)
+{
+	if (!in || !out || outChars <= 0) return 0;
+	out[0] = 0;
+	const wchar_t* x86 = L"\\Program Files (x86)\\";
+	const wchar_t* x64 = L"\\Program Files\\";
+	const wchar_t* hit = NULL;
+	const wchar_t* repl = NULL;
+	int hitLen = 0, replLen = 0;
+	for (const wchar_t* p = in; *p; ++p) {
+		if (_wcsnicmp(p, x86, 22) == 0) {
+			hit = p; hitLen = 22; repl = x64; replLen = 16;
+			break;
+		}
+		if (_wcsnicmp(p, x64, 16) == 0) {
+			hit = p; hitLen = 16; repl = x86; replLen = 22;
+			break;
+		}
+	}
+	if (!hit) return 0;
+	const int prefix = (int)(hit - in);
+	const wchar_t* rest = hit + hitLen;
+	if (prefix + replLen + (int)wcslen(rest) + 1 > outChars) return 0;
+	memcpy(out, in, (size_t)prefix * sizeof(wchar_t));
+	memcpy(out + prefix, repl, (size_t)replLen * sizeof(wchar_t));
+	wcscpy_s(out + prefix + replLen, outChars - prefix - replLen, rest);
+	return 1;
+}
+
+// SOUND Canvas VA.dll is a 3KB stub. The engine (.bin + SCCore) is next to
+// C:\Roland VS\64\SOUND Canvas VA.dll (x64) / C:\Roland VS\ (x86). Prefer the
+// HostArch stub so x64 ogg loads in-process instead of remoting the x86 copy.
 static int ResolveRolandScVaPath(const wchar_t* in, wchar_t* out, int outChars, int wantArch)
 {
-	(void)wantArch;
 	if (!out || outChars <= 0) return 0;
 	out[0] = 0;
 	if (!in || !*in) return 0;
+	if (!PathLooksLikeScVa(in)) {
+		SafeCopy(out, outChars, in);
+		return PathFileExistsW2(out);
+	}
+	if (ScVaAcceptStub(in, wantArch, out, outChars)) {
+		wchar_t eng[VST_PATH_CHARS];
+		if (RolandCloudEngineDir(wantArch, eng, VST_PATH_CHARS)) {
+			wchar_t stub[VST_PATH_CHARS];
+			JoinPath(stub, eng, L"SOUND Canvas VA.dll");
+			if (ScVaAcceptStub(stub, wantArch, out, outChars))
+				return 1;
+		}
+		return 1;
+	}
+	wchar_t cand[VST_PATH_CHARS];
+	if (RolandCloudEngineDir(wantArch, cand, VST_PATH_CHARS)) {
+		wchar_t stub[VST_PATH_CHARS];
+		JoinPath(stub, cand, L"SOUND Canvas VA.dll");
+		if (ScVaAcceptStub(stub, wantArch, out, outChars))
+			return 1;
+	}
+	if (wantArch == 64 || wantArch == 0) {
+		if (ScVaAcceptStub(L"C:\\Roland VS\\64\\SOUND Canvas VA.dll", wantArch, out, outChars))
+			return 1;
+		if (ScVaAcceptStub(L"C:\\Program Files\\Common Files\\VST3\\SOUND Canvas VA.dll",
+			wantArch, out, outChars))
+			return 1;
+	}
+	if (wantArch == 32 || wantArch == 0) {
+		if (ScVaAcceptStub(L"C:\\Roland VS\\SOUND Canvas VA.dll", wantArch, out, outChars))
+			return 1;
+	}
+	if (ScVaFlipProgramFiles(in, cand, VST_PATH_CHARS) &&
+		ScVaAcceptStub(cand, wantArch, out, outChars))
+		return 1;
 	SafeCopy(out, outChars, in);
 	return PathFileExistsW2(out);
+}
+
+static void ScVaPrepareLoadDir(const wchar_t* stubPath, wchar_t* plugDir, int plugDirChars)
+{
+	if (!plugDir || plugDirChars <= 0) return;
+	if (!PathLooksLikeScVa(stubPath) && !PathLooksLikeScVa(plugDir))
+		return;
+	wchar_t eng[VST_PATH_CHARS];
+	eng[0] = 0;
+	if (!RolandCloudEngineDir(HostArch(), eng, VST_PATH_CHARS) || !eng[0]) {
+		if (stubPath && *stubPath) {
+			SafeCopy(eng, VST_PATH_CHARS, stubPath);
+			wchar_t* slash = wcsrchr(eng, L'\\');
+			if (slash) *slash = 0;
+		}
+	}
+	if (!eng[0] || !DirExists(eng)) return;
+	SafeCopy(plugDir, plugDirChars, eng);
+	static DLL_DIRECTORY_COOKIE s_scVaCookie = 0;
+	typedef DLL_DIRECTORY_COOKIE (WINAPI* AddDllDirectoryFn)(PCWSTR);
+	static AddDllDirectoryFn pAdd = NULL;
+	static int resolvedAdd = 0;
+	if (!resolvedAdd) {
+		HMODULE k32 = GetModuleHandleW(L"kernel32.dll");
+		if (k32) pAdd = (AddDllDirectoryFn)GetProcAddress(k32, "AddDllDirectory");
+		resolvedAdd = 1;
+	}
+	if (pAdd) {
+		if (s_scVaCookie) {
+			typedef BOOL (WINAPI* RemoveDllDirectoryFn)(DLL_DIRECTORY_COOKIE);
+			RemoveDllDirectoryFn pRem = NULL;
+			HMODULE k32 = GetModuleHandleW(L"kernel32.dll");
+			if (k32) pRem = (RemoveDllDirectoryFn)GetProcAddress(k32, "RemoveDllDirectory");
+			if (pRem) pRem(s_scVaCookie);
+			s_scVaCookie = 0;
+		}
+		s_scVaCookie = pAdd(eng);
+	}
 }
 
 static int FindSiblingVst3(const wchar_t* anyPath, wchar_t* out, int outChars)
@@ -6992,10 +7195,10 @@ extern "C" int VstMidiGetLatencySamples(void)
 // ---------------------------------------------------------------------------
 // Cross-architecture live parts
 //
-// A 32-bit process cannot load SOUND Canvas VA (x64), so the plug-in lives in
-// KpiHost64. The pipe carries only load/unload/editor: notes go through a MIDI
-// ring and audio comes back through an audio ring, so neither the keyboard nor
-// the wave-out thread can be blocked by a pending request.
+// The plug-in lives in whichever process matches its PE: x64 ogg loads x64
+// SC-VA itself; a 32-bit copy goes to ogghost32 (and the reverse on an x86
+// player used KpiHost64). The pipe carries only load/unload/editor: notes go
+// through a MIDI ring and audio comes back through an audio ring.
 // ---------------------------------------------------------------------------
 
 extern KpiHost64Client g_kpiHost;
@@ -7363,29 +7566,43 @@ extern "C" int VstLiveLoadPart(int part1to32,
 	LeaveCriticalSection(&g_eng.cs);
 	if (wasRemote) LiveRemoteUnload(part1to32);
 
+	wchar_t loadPath[VST_PATH_CHARS];
+	SafeCopy(loadPath, VST_PATH_CHARS, pluginPath);
+	int loadVst3 = isVst3;
 #ifndef KPIHOST64_BUILD
-	// 32bit 本体に x64 プラグイン: KpiHost64 へ渡す。
+	// 本体と違うアーキは ogghost32 / 旧 KpiHost64 へ。
+	// SC-VA は HostArch のスタブ（C:\Roland VS\64 等）へ寄せてから判定する。
 	// パイプがホスト起動まで待つので、オーディオロックの外でスロット状態を更新する。
-	const int arch = PlugFileArch(pluginPath, isVst3);
+	if (!loadVst3 && PathLooksLikeScVa(pluginPath)) {
+		wchar_t resolved[VST_PATH_CHARS];
+		if (ResolveRolandScVaPath(pluginPath, resolved, VST_PATH_CHARS, HostArch()) &&
+			resolved[0])
+			SafeCopy(loadPath, VST_PATH_CHARS, resolved);
+	}
+	const int arch = PlugFileArch(loadPath, loadVst3);
 	if (arch != HostArch()) {
-		const int rc = LiveRemoteLoad(part1to32, pluginPath, isVst3);
+		const int rc = LiveRemoteLoad(part1to32, loadPath, loadVst3);
 		EnsLog(L"LiveLoad part=%d remote rc=%d arch=%d vst3=%d path=%s",
-			part1to32, rc, arch, isVst3, pluginPath);
+			part1to32, rc, arch, loadVst3, loadPath);
 		if (rc == 0) {
 			EnterCriticalSection(&g_eng.cs);
 			LivePart& rp = g_eng.live[part1to32 - 1];
 			rp.remote = 1;
-			rp.isMulti = LiveIsMultiPath(pluginPath);
+			rp.isMulti = LiveIsMultiPath(loadPath);
 			rp.sendCh = rp.isMulti ? -1 : 0;
 			rp.prog = -1;
-			wcsncpy_s(rp.path, pluginPath, _TRUNCATE);
+			wcsncpy_s(rp.path, loadPath, _TRUNCATE);
 			LeaveCriticalSection(&g_eng.cs);
 			return 0;
 		}
-		if (arch == 64) return rc;
-		// arch 0（Contents が見えなかったバンドル）はリモートを試済み。ローカルオープンへ。
+		/* x86 本体+x64 プラグインも、x64 本体+x86 プラグインも、失敗したら
+		   ローカル LoadLibrary しない（PE マシンが違うと DllMain で止まる）。 */
+		if (arch != 0)
+			return rc;
 	}
 #endif
+	pluginPath = loadPath;
+	isVst3 = loadVst3;
 
 	Vst3Inst* vst3 = NULL;
 	HMODULE module = NULL;
@@ -7848,8 +8065,6 @@ extern "C" void VstLiveUnloadPart(int part1to32)
 #endif
 }
 
-extern volatile LONG g_appExiting;
-
 extern "C" void VstLiveEditorCloseAllRemote(void)
 {
 #ifndef KPIHOST64_BUILD
@@ -8097,6 +8312,20 @@ static int CollapseLiveDuplicates(void)
 			++n;
 		}
 	}
+	// HostArch copy of the same name wins (x64 ogg + x64 SC-VA in-process).
+	for (int i = 0; i < g_pluginCount; ++i) {
+		if (!LivePaletteListed(g_plugins[i])) continue;
+		if (g_plugins[i].arch != HostArch()) continue;
+		for (int j = 0; j < g_pluginCount; ++j) {
+			if (i == j || !LivePaletteListed(g_plugins[j])) continue;
+			if (g_plugins[j].arch == HostArch()) continue;
+			if (_wcsicmp(g_plugins[i].name, g_plugins[j].name) != 0) continue;
+			g_plugins[j].isInstrument = 0;
+			g_plugins[j].isLiveOk = 1;
+			g_plugins[j].isAudible = 0;
+			++n;
+		}
+	}
 	return n;
 }
 
@@ -8175,6 +8404,8 @@ static int LivePaletteHideFx(void)
 // samplers, which LivePaletteReviveHiddenSamplers brings back as patch.
 extern "C" void VstScanVerifyLiveList(HWND parentForWait)
 {
+	if (VstScanAborted())
+		return;
 	const int hidFx = LivePaletteHideFx();
 	const int dropped = LivePaletteDropCompanionModules();
 	const int reclass = LivePaletteReclassWrongPatch();
@@ -8200,7 +8431,7 @@ extern "C" void VstScanVerifyLiveList(HWND parentForWait)
 
 	int done = 0;
 	int changed = 0;
-	for (int i = 0; i < g_pluginCount; ++i) {
+	for (int i = 0; i < g_pluginCount && !VstScanAborted(); ++i) {
 		VstPluginInfo& p = g_plugins[i];
 		if (!p.isInstrument || p.isLiveOk) continue;
 		++done;

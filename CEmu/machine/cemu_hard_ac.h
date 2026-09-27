@@ -190,6 +190,8 @@ public:
 	/* 「メイン CPU」からのサウンドコマンドラッチ */
 	void SetSoundCommand(uint8_t cmd);
 	void SetSoundCommandWord(uint16_t cmd);
+	/* C7x: BGM スロットを残し、空きメール枠へ mix コマンドを載せる */
+	void SetSoundCommandWordMix(uint16_t cmd);
 	/* System GX: 生 4 バイト K056800 ホストパケット + ドアベル */
 	void GxHostInject(uint8_t b0, uint8_t b1, uint8_t b2, uint8_t b3);
 	uint8_t SoundCommand() const { return soundCmd_; }
@@ -832,7 +834,17 @@ public:
 	uint8_t M37702Read8(uint32_t addr);
 	void M37702Write8(uint32_t addr, uint8_t v);
 	void H8InjectSong(uint16_t cmd);
-	void M37702InjectSong(uint16_t cmd);
+	void M37702InjectSong(uint16_t cmd, int mix = 0);
+	/* ---- Namco C7x 要求枠（C74 $5000 / C76 $4000 起点） ----
+	   枠 0 = 主シーケンサ（書くと今の曲が置き換わる）。枠 1 以降はドライバが
+	   曲の副シーケンス用に下から確保する。mix は上から空き枠を取る。 */
+	enum { CEMU_C7X_OVERLAY = 0, CEMU_C7X_SONG = 1, CEMU_C7X_UNKNOWN = 2 };
+	unsigned C7xSlotCount(unsigned base) const;
+	unsigned C7xTakeOverlaySlot(unsigned base);
+	void C7xResetSoundMcu();
+	int C7xProbePrimaryCodes(const unsigned* codes, int count,
+		uint8_t* outPrimary, int runCycles,
+		void (*run)(void* user, int cycles), void* user);
 	unsigned H8RomSize() const { return h8RomSize_; }
 	unsigned H8C352Writes() const { return h8C352Writes_; }
 	int H8MapKind() const { return h8MapKind_; } /* 種別 0=sys12、1=nd1 */
@@ -876,6 +888,9 @@ private:
 	int m37702MapKind_; /* 種別 0=sys11 C76＋C352、1=na/nb C69＋C140、2=sys22 */
 	int m37702MaskRom_; /* 内部 C74 付き sys22（Super System 22 ではない） */
 	int m37702McuKind_; /* Namco MCU ラベル: 0 不明、他は 69/70/74/75/76 */
+	uint8_t c7xOverlaySlot_[4]; /* mix 用に確保した要求枠 */
+	int c7xOverlaySlotN_;
+	int c7xOverlaySlotRr_;
 	int h8WordSwap_;
 	unsigned h8C352Writes_;
 	uint8_t h8C352Hi_;

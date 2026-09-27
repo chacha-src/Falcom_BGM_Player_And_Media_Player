@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include "cemu_types.h"
 #include "cemu_s98.h"
 #include "cemu_mdx.h"
@@ -65,6 +65,10 @@ struct CEmuSession {
 	unsigned overlayCode;
 	unsigned titleCode;
 	volatile long overlayPend;
+	/* OverlayTitle: 1=SE を現行 BGM に重ねる。0=曲切替（排他 SE 含む） */
+	uint8_t overlayMix;
+	/* PATCH が play で食料をリセットしたあとトグル pref を載せ直す */
+	int togglePrefDelay;
 };
 
 /* セッションをゼロ初期化 */
@@ -75,7 +79,12 @@ void CEmuSessionClose(CEmuSession* s);
 int CEmuSessionOpen(CEmuSession* s, const wchar_t* path, unsigned titleCode, DWORD sampleRate);
 int CEmuSessionRender(CEmuSession* s, short* stereo, int frames);
 int CEmuSessionSeek(CEmuSession* s, UINT64 sample);
-/* 同一 zip の SE: 実体は 1 つ。OverlayTitle をキューして混ぜない */
 int CEmuSessionUsesGlobalNp2(const CEmuSession* s);
-int CEmuSessionOverlayTitle(CEmuSession* s, unsigned titleCode);
+/* 同一 zip なら LoadRoms/boot せず OverlayTitle。S98/MDX/PMD は 0 */
+int CEmuSessionKindKeepsEngine(int kind);
+int CEmuSessionSameZip(const CEmuSession* s, const wchar_t* path);
+int CEmuSessionOverlayTitle(CEmuSession* s, unsigned titleCode, int mixSfx = 0);
+/* このコードを今の曲に重ねるか。音源ドライバに聞けるならそちらを使い、
+   聞けない基板だけカタログのラベル（[SE] 等）へ落とす。 */
+int CEmuSessionCodeIsOverlay(CEmuSession* s, unsigned titleCode);
 void CEmuSessionMixStereo(short* dst, const short* add, int frames);

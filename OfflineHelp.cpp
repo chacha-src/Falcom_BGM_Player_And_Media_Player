@@ -15,8 +15,11 @@
 #ifdef USEWIN32IOAPI
 #include "minizip/iowin32.h"
 #endif
+#include "SevenZipDec.h"
 
+static const TCHAR* kUpdateUrlPrimary7z = _T("https://ppp.oohara.jp/download/oggYSEDbgm09a_uni_avx2_VC2026.7z");
 static const TCHAR* kUpdateUrlPrimary = _T("https://ppp.oohara.jp/download/oggYSEDbgm09a_uni_avx2_VC2026.zip");
+static const TCHAR* kUpdateUrlFallback7z = _T("https://ppp.oohara.jp/download/oggYSEDbgm08g_uni_avx2_VC2026.7z");
 static const TCHAR* kUpdateUrlFallback = _T("https://ppp.oohara.jp/download/oggYSEDbgm08g_uni_avx2_VC2026.zip");
 static const ULONGLONG kChmMinBytes = 20000ULL;
 static const ULONGLONG kZipMinBytes = 200000ULL;
@@ -111,9 +114,9 @@ static CString OfflineHelpResolveZipUrl()
 	InternetSetOption(hInternet, INTERNET_OPTION_CONNECT_TIMEOUT, &timeout, sizeof(timeout));
 	InternetSetOption(hInternet, INTERNET_OPTION_RECEIVE_TIMEOUT, &timeout, sizeof(timeout));
 
-	const TCHAR* urls[2] = { kUpdateUrlPrimary, kUpdateUrlFallback };
+	const TCHAR* urls[4] = { kUpdateUrlPrimary7z, kUpdateUrlPrimary, kUpdateUrlFallback7z, kUpdateUrlFallback };
 	CString found;
-	for (int i = 0; i < 2; ++i)
+	for (int i = 0; i < 4; ++i)
 	{
 		CString noCache;
 		noCache.Format(_T("%s?t=%lld"), urls[i], (long long)time(NULL));
@@ -209,6 +212,64 @@ static bool OfflineHelpHttpDownload(const CString& url, const CString& localPath
 
 static bool OfflineHelpExtractChmFromZip(const CString& zipPath, const CString& destPath)
 {
+	if (SevenZipPathIs7zW(zipPath)) {
+		SevenZipArc a;
+		if (!SevenZipOpenW(&a, zipPath))
+			return false;
+		bool bFound = false;
+		for (UInt32 i = 0; i < a.db.NumFiles; i++) {
+			if (SzArEx_IsDir(&a.db, i))
+				continue;
+			wchar_t name[1024] = {};
+			if (!SevenZipFileNameW(&a, i, name, 1024) || !name[0])
+				continue;
+			const wchar_t* fileNameOnly = name;
+			for (const wchar_t* p = name; *p; ++p) {
+				if (*p == L'\\' || *p == L'/')
+					fileNameOnly = p + 1;
+			}
+			if (!fileNameOnly[0])
+				continue;
+			if (CString(fileNameOnly).CompareNoCase(OFFLINE_HELP_CHM_NAME) != 0)
+				continue;
+			const Byte* data = NULL;
+			size_t sz = 0;
+			if (!SevenZipExtractIndex(&a, i, &data, &sz))
+				break;
+			CString tmpPath = destPath + _T(".part");
+			DeleteFile(tmpPath);
+			CFile outFile;
+			bool writeOk = false;
+			ULONGLONG written = 0;
+			if (outFile.Open(tmpPath, CFile::modeCreate | CFile::modeWrite | CFile::shareExclusive)) {
+				writeOk = true;
+				try {
+					if (sz > 0 && data)
+						outFile.Write(data, (UINT)sz);
+					written = (ULONGLONG)sz;
+				}
+				catch (CFileException* e) {
+					e->Delete();
+					writeOk = false;
+				}
+				outFile.Close();
+			}
+			if (writeOk && written == (ULONGLONG)SzArEx_GetFileSize(&a.db, i) && written >= kChmMinBytes) {
+				DeleteFile(destPath);
+				if (MoveFile(tmpPath, destPath) && OfflineHelpFileLooksOk(destPath))
+					bFound = true;
+				else
+					DeleteFile(tmpPath);
+			}
+			else {
+				DeleteFile(tmpPath);
+			}
+			break;
+		}
+		SevenZipClose(&a);
+		return bFound;
+	}
+
 	zlib_filefunc64_def ffunc;
 #ifdef USEWIN32IOAPI
 	fill_win32_filefunc64W(&ffunc);
@@ -340,7 +401,8 @@ static unsigned __stdcall OfflineHelpEnsureThread(void*)
 	TCHAR tempPath[MAX_PATH] = { 0 };
 	GetTempPath(MAX_PATH, tempPath);
 	CString zipPath;
-	zipPath.Format(_T("%sogg_help_fetch.zip"), tempPath);
+	const BOOL is7z = (url.GetLength() >= 3 && url.Right(3).CompareNoCase(_T(".7z")) == 0);
+	zipPath.Format(is7z ? _T("%sogg_help_fetch.7z") : _T("%sogg_help_fetch.zip"), tempPath);
 	CString extractDir;
 	extractDir.Format(_T("%sogg_update_extract"), tempPath);
 	CreateDirectory(extractDir, NULL);

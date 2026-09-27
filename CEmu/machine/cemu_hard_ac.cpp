@@ -169,6 +169,8 @@ CHardAc::CHardAc()
 	, m37702LocalRam_(NULL)
 	, h8MapKind_(0)
 	, m37702MapKind_(0)
+	, c7xOverlaySlotN_(0)
+	, c7xOverlaySlotRr_(0)
 	, h8WordSwap_(0)
 	, h8C352Writes_(0)
 	, h8C352Hi_(0)
@@ -1559,7 +1561,7 @@ static int CEmuAcHasChip(const CEmuGameEntry* ge, int chipId)
 	return 0;
 }
 
-/* CEmuAcGxTitleIsVoice の実装 */
+/* CEmuAcGxTitleIsVoice の実装。System GX の既定トラック選びだけに使う */
 int CEmuAcGxTitleIsVoice(const CEmuTitleEntry* t)
 {
 	if (!t) return 0;
@@ -2193,6 +2195,9 @@ int CHardAc::Init(const CEmuGameEntry* ge, int sampleRate)
 	m37702MapKind_ = 0;
 	m37702MaskRom_ = 0;
 	m37702McuKind_ = 0;
+	memset(c7xOverlaySlot_, 0, sizeof(c7xOverlaySlot_));
+	c7xOverlaySlotN_ = 0;
+	c7xOverlaySlotRr_ = 0;
 	snkMapKind_ = 0;
 	snkStatus_ = 0;
 	terracreMap_ = 0;
@@ -5367,6 +5372,16 @@ void CHardAc::SetSoundCommandWord(uint16_t cmd)
 		return;
 	}
 	SetSoundCommand((uint8_t)(cmd & 0xff));
+}
+
+void CHardAc::SetSoundCommandWordMix(uint16_t cmd)
+{
+	/* C74/C76 は $5000/$4000 から偶数語を poll する。BGM は枠 0、mix は空き枠。 */
+	if (board_ == CEMU_AC_BOARD_NAMCO_C352 && (M37702Active() || m37702Soft_)) {
+		M37702InjectSong(cmd, 1);
+		return;
+	}
+	SetSoundCommandWord(cmd);
 }
 
 /* CHardAc::GxHostInject の実装 */
@@ -14283,8 +14298,108 @@ void CHardAc::H8Write8(uint32_t addr, uint8_t v)
 	}
 }
 
+/* ドライバが公開する要求枠数。範囲外なら実測値 32 を使う */
+unsigned CHardAc::C7xSlotCount(unsigned base) const
+{
+	if (!h8Shared_) return 32u;
+	const unsigned n = (unsigned)h8Shared_[base + 0x484u]
+		| ((unsigned)h8Shared_[base + 0x485u] << 8);
+	return (n >= 4u && n <= 64u) ? n : 32u;
+}
+
+/* mix を載せる枠。ドライバは下から取るので上から未使用枠を確保し、
+   確保済みの枠はラウンドロビンで再利用する（同じ枠へ次を書くと前の音を置き換える）。 */
+unsigned CHardAc::C7xTakeOverlaySlot(unsigned base)
+{
+	if (!h8Shared_) return 1u;
+	const unsigned n = C7xSlotCount(base);
+	const unsigned owned = (unsigned)(sizeof(c7xOverlaySlot_) / sizeof(c7xOverlaySlot_[0]));
+	if (c7xOverlaySlotN_ < (int)owned) {
+		for (unsigned i = n; i-- > 1; ) {
+			const unsigned o = base + i * 2u;
+			if (h8Shared_[o] || h8Shared_[o + 1u])
+				continue;
+			int mine = 0;
+			for (int k = 0; k < c7xOverlaySlotN_ && !mine; k++)
+				mine = (c7xOverlaySlot_[k] == i);
+			if (mine)
+				continue;
+			c7xOverlaySlot_[c7xOverlaySlotN_++] = (uint8_t)i;
+			return i;
+		}
+	}
+	if (c7xOverlaySlotN_ <= 0)
+		return (n > 1u) ? (n - 1u) : 1u;
+	const int k = c7xOverlaySlotRr_ % c7xOverlaySlotN_;
+	c7xOverlaySlotRr_ = (c7xOverlaySlotRr_ + 1) % c7xOverlaySlotN_;
+	return c7xOverlaySlot_[k];
+}
+
+/* 共有 RAM とチップを初期状態に戻し、MCU をリセットする（プローブ後の再ブート用）。 */
+void CHardAc::C7xResetSoundMcu()
+{
+	if (!m37702_) return;
+	if (h8Shared_) memset(h8Shared_, 0, 0x10000);
+	if (m37702LocalRam_) memset(m37702LocalRam_, 0, 0x8000);
+	memset(m37702Mailbox_, 0, sizeof(m37702Mailbox_));
+	memset(h8C352Shadow_, 0, sizeof(h8C352Shadow_));
+	h8C352HiValid_ = 0;
+	h8C352Writes_ = 0;
+	c7xOverlaySlotN_ = 0;
+	c7xOverlaySlotRr_ = 0;
+	soundCmd_ = 0;
+	soundCmdWord_ = 0;
+	soundCmdPending_ = 0;
+	if (chip_) chip_->Reset();
+	CEmuM37702BusSetAc(this);
+	CEmuM37702BusAttach(m37702_, this);
+	M37702SetPortIn(m37702_, 4, m37702MaskRom_ ? 0x10 : 0x00);
+	M37702SetPort5Mirror(m37702_, m37702MapKind_ == 1);
+	M37702Reset(m37702_);
+}
+
+/* 要求コードが「主シーケンサを占有する曲」かをドライバ自身に答えさせる。
+   枠 1 以降を 0 にしてから枠 0 へ要求を投げ、ドライバが副シーケンス枠を
+   取り直したら曲（CEMU_C7X_SONG）、取らなければ BGM の上に載る SE/ボイス
+   （CEMU_C7X_OVERLAY）。C352 を 1 度も触らなかったコードは駆動できていない
+   ので CEMU_C7X_UNKNOWN。Super System 22 はメイン CPU が本物のシーケンサを
+   上げる構成で、ここでは大半が UNKNOWN になる。
+   呼び出し側は事前にブート済みであること。戻ったあと C7xResetSoundMcu が要る。 */
+int CHardAc::C7xProbePrimaryCodes(const unsigned* codes, int count,
+	uint8_t* outPrimary, int runCycles,
+	void (*run)(void* user, int cycles), void* user)
+{
+	if (!h8Shared_ || !m37702_ || !m37702McuKind_ || !codes || !outPrimary || !run)
+		return 0;
+	const unsigned base = (m37702MapKind_ == 2) ? 0x1000u : 0x0000u;
+	const unsigned n = C7xSlotCount(base);
+	int done = 0;
+	for (int i = 0; i < count; i++) {
+		for (unsigned s = 1; s < n; s++) {
+			h8Shared_[base + s * 2u] = 0;
+			h8Shared_[base + s * 2u + 1u] = 0;
+		}
+		const unsigned wrBefore = h8C352Writes_;
+		const uint16_t w = (uint16_t)(0x4000u | (codes[i] & 0x3fffu));
+		h8Shared_[base + 0u] = (uint8_t)(w & 0xff);
+		h8Shared_[base + 1u] = (uint8_t)(w >> 8);
+		run(user, runCycles);
+		uint8_t claimed = 0;
+		for (unsigned s = 1; s < n && !claimed; s++)
+			claimed = (h8Shared_[base + s * 2u] || h8Shared_[base + s * 2u + 1u]);
+		if (claimed)
+			outPrimary[i] = CEMU_C7X_SONG;
+		else if (h8C352Writes_ != wrBefore)
+			outPrimary[i] = CEMU_C7X_OVERLAY;
+		else
+			outPrimary[i] = CEMU_C7X_UNKNOWN;
+		done++;
+	}
+	return done;
+}
+
 /* CHardAc::M37702InjectSong の実装 */
-void CHardAc::M37702InjectSong(uint16_t cmd)
+void CHardAc::M37702InjectSong(uint16_t cmd, int mix)
 {
 	/* 本物 M37702: NA1 メールボックス + IRQ0。Sys11 共有 RAM ストローブ + IRQ0 */
 	soundCmdWord_ = cmd;
@@ -14292,9 +14407,14 @@ void CHardAc::M37702InjectSong(uint16_t cmd)
 	soundCmdPending_ = 1;
 	if (m37702MapKind_ == 1) {
 		/* NA-1/NA-2: MCU $800 に 16bit メール枠 8 つ。実基板では 68000 が枠 4 を書いたときだけ MCU の IRQ0 が上がるので、コマンドはそこへ入る（MAME mcu_mailbox_w_68k）。 */
-		m37702Mailbox_[0] = cmd;
-		m37702Mailbox_[1] = (uint16_t)(0x4000u | (cmd & 0x3fffu));
-		m37702Mailbox_[4] = cmd;
+		if (mix) {
+			m37702Mailbox_[2] = cmd;
+			m37702Mailbox_[3] = (uint16_t)(0x4000u | (cmd & 0x3fffu));
+		} else {
+			m37702Mailbox_[0] = cmd;
+			m37702Mailbox_[1] = (uint16_t)(0x4000u | (cmd & 0x3fffu));
+			m37702Mailbox_[4] = cmd;
+		}
 		if (m37702_) M37702SetInputLine(m37702_, M37710_LINE_IRQ0, M37702_HOLD_LINE);
 		return;
 	}
@@ -14305,12 +14425,19 @@ void CHardAc::M37702InjectSong(uint16_t cmd)
 	     +$3FE  MCU 読添字
 	     +$400  （u16 先番地、u16 値）poke のキュー
 	     +$480  $5A = 「メイン CPU は生きている」
-	   マジックバイトは意図的にクリアのまま。セットすると全コマンドがメイン CPU からのキュー poke で来るモードになり、ここにはメイン CPU が無い。クリアのままドライバは +$000 の曲要求を自分で読む。それが CEmu の駆動。 */
+	     +$484  ドライバが公開する要求枠数（C74 $5484 / C76 $4484。実測 32）
+	   マジックバイトは意図的にクリアのまま。セットすると全コマンドがメイン CPU からのキュー poke で来るモードになり、ここにはメイン CPU が無い。クリアのままドライバは +$000 の曲要求を自分で読む。それが CEmu の駆動。
+
+	   枠数はドライバ自身が起動時に書く。ホストが小さい値で上書きすると BGM が壊れる（実測: 2 を書くと ridgerac のパートが落ちた）ので触らない。
+	   枠 0 が主シーケンサで、そこへ書くと今鳴っている曲が置き換わる。枠 1 以降はドライバが曲の副シーケンス用に下から取っていく（ridgerac 0x50 は枠 1,2 に 0x4E/0x4F を入れる）。mix は上から空き枠を取れば衝突しない（枠 28-31 で動作確認）。 */
 	const uint16_t w = (uint16_t)(0x4000u | (cmd & 0x3fffu));
 	if (m37702McuKind_) {
 		const unsigned base = (m37702MapKind_ == 2) ? 0x1000u : 0x0000u;
-		h8Shared_[base + 0x000u] = (uint8_t)(w & 0xff);
-		h8Shared_[base + 0x001u] = (uint8_t)(w >> 8);
+		unsigned slotOff = 0;
+		if (mix)
+			slotOff = C7xTakeOverlaySlot(base) * 2u;
+		h8Shared_[base + slotOff] = (uint8_t)(w & 0xff);
+		h8Shared_[base + slotOff + 1u] = (uint8_t)(w >> 8);
 	} else {
 		/* ND-1 と、ドライバが Namco C7x マスク ROM ではなくゲーム自身のデータ ROM に居る他の M37702 基板 */
 		h8Shared_[0x0100] = (uint8_t)(w & 0xff);

@@ -45,6 +45,10 @@ private:
 	int64_t vdispAcc_;
 	int softTimerBusy_;
 	int opmSpinRescue_; /* 初期化後 $94A → メールボックスの一回救済 */
+	unsigned mailboxPoll_; /* tst.b $E00000。Render で毎回スキャンしない */
+	int mailboxPollTried_; /* この Open で FindMailboxPoll を一度走らせた */
+	int runKind_; /* 0=未判定 1=OPM glue 2=OPMDRV2 3=通常 */
+	int dmacPatched_;
 
 	void TickOpm(uint64_t cpuCycles);
 	void RunCycles(int cycles);
@@ -54,6 +58,7 @@ private:
 	void CallUserSubroutine(unsigned hook);
 	/* BOOT の tst.b $E00000 ポーリングを探す。無音コードで PC が
 	   メールボックス外に残ったとき再開する（aquales INTRO）。 */
-	unsigned FindMailboxPoll() const;
+	unsigned FindMailboxPoll();
+	void SnapToMailboxPoll();
 	void ResumeMailboxForSong(unsigned code);
 };

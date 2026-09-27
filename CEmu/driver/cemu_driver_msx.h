@@ -31,12 +31,13 @@ private:
 	uint64_t sampleIndex_;
 	uint64_t nextIrqSample_;
 	unsigned irqPulses_;
+	int vblankPending_;
 	int playing_;
 
 	/* Z80 を endCycle まで進める */
 	void RunUntil(uint64_t endCycle);
 	/* AY/OPLL は Render 側でサンプル駆動 */
 	void TickChips(uint64_t cpuCycles);
-	/* 出力タイムライン上の VBlank（IM1/IM2） */
-	void PulseVblankIrq();
+	/* 出力タイムライン上の VBlank（IM1/IM2）。1=届けた */
+	int TryVblankIrq();
 };

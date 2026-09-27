@@ -250,6 +250,7 @@ typedef struct{
 	UINT8	vib;		/* LFO Phase Modulation enable flag (active high)*/
 
 	/* waveform select */
+	UINT8	wave;		/* latched WS (E0). applied when TEST.WS=1 */
 	unsigned int wavetable;
 } OPL_SLOT;
 
@@ -1484,8 +1485,17 @@ static void OPLWriteReg(FM_OPL *OPL, int r, int v)
 		case 0x01:	/* waveform select enable */
 			if(OPL->type&OPL_TYPE_WAVESEL)
 			{
-				OPL->wavesel = v&0x20;
-				/* do not change the waveform previously selected */
+				const UINT8 on = (UINT8)(v & 0x20);
+				/* E0 は WS ビットを常に保持。ここで初めて有効化すると正弦のまま残る。 */
+				if(on && !OPL->wavesel)
+				{
+					int c,s;
+					for(c = 0; c < 9; c++)
+						for(s = 0; s < 2; s++)
+							OPL->P_CH[c].SLOT[s].wavetable =
+								(unsigned int)OPL->P_CH[c].SLOT[s].wave * SIN_LEN;
+				}
+				OPL->wavesel = on;
 			}
 			break;
 		case 0x02:	/* Timer 1 */
@@ -1717,15 +1727,12 @@ static void OPLWriteReg(FM_OPL *OPL, int r, int v)
 		CH->SLOT[SLOT1].connect1 = CH->SLOT[SLOT1].CON ? &OPL->output[0] : &OPL->phase_modulation;
 		break;
 	case 0xe0: /* waveform select */
-		/* simply ignore write to the waveform select register if selecting not enabled in test register */
+		slot = slot_array[r&0x1f];
+		if(slot < 0) return;
+		CH = &OPL->P_CH[slot/2];
+		CH->SLOT[slot&1].wave = (UINT8)(v & 0x03);
 		if(OPL->wavesel)
-		{
-			slot = slot_array[r&0x1f];
-			if(slot < 0) return;
-			CH = &OPL->P_CH[slot/2];
-
-			CH->SLOT[slot&1].wavetable = (v&0x03)*SIN_LEN;
-		}
+			CH->SLOT[slot&1].wavetable = (unsigned int)CH->SLOT[slot&1].wave * SIN_LEN;
 		break;
 	}
 }
@@ -1810,6 +1817,7 @@ static void OPLResetChip(FM_OPL *OPL)
 		for(s = 0 ; s < 2 ; s++ )
 		{
 			/* wave table */
+			CH->SLOT[s].wave      = 0;
 			CH->SLOT[s].wavetable = 0;
 			CH->SLOT[s].state     = EG_OFF;
 			CH->SLOT[s].volume    = MAX_ATT_INDEX;

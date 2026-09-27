@@ -1792,17 +1792,26 @@ int wmain(int argc, wchar_t** argv)
 	/* CLI probe:
 	   KpiHost64.exe <kpiPath> <mediaPath>              → Open only
 	   KpiHost64.exe <kpiPath> <mediaPath> render [N]   → Open + Render N buffers, dump stats
-	   ogghost32.exe <in_*.dll> <mediaPath> render [N]  → Winamp in_ を同じ統計で試す */
+	   ogghost32.exe <in_*.dll|xmp-*.dll> <mediaPath> render [N]  → 外部プラグインを同じ統計で試す */
 	if (argc >= 3 && argv[1] && argv[1][0] && argv[2] && argv[2][0]
 		&& (wcsstr(argv[1], L".dll") || wcsstr(argv[1], L".DLL"))) {
+		const uint32_t kinds[3] = { PLUGKIND_WINAMP, PLUGKIND_XMPLAY, PLUGKIND_AIMP };
+		const wchar_t* knames[3] = { L"Winamp", L"XMPlay", L"AIMP" };
+		uint32_t kind = 0;
 		std::wstring exts;
-		const uint32_t lst = ForeignHost_ListExts(PLUGKIND_WINAMP, argv[1], exts);
-		wprintf(L"WinampListExts status=%u exts=%s\n", lst, exts.c_str());
-		fflush(stdout);
+		uint32_t lst = KPIHOST64_STATUS_FAIL;
+		for (int i = 0; i < 3; i++) {
+			exts.clear();
+			lst = ForeignHost_ListExts(kinds[i], argv[1], exts);
+			wprintf(L"%s ListExts status=%u exts=%s\n", knames[i], lst, exts.c_str());
+			fflush(stdout);
+			if (lst == KPIHOST64_STATUS_OK) { kind = kinds[i]; break; }
+		}
+		if (!kind) return 1;
 		KPIHOST64_ForeignOpenReply fr{};
-		const uint32_t st = ForeignHost_Open(PLUGKIND_WINAMP, argv[1], argv[2], fr);
-		wprintf(L"WinampOpen status=%u sid=%u rate=%u ch=%u bps=%d len=%llu\n",
-			st, fr.sessionId, fr.sampleRate, fr.channels, fr.bitsPerSample,
+		const uint32_t st = ForeignHost_Open(kind, argv[1], argv[2], fr);
+		wprintf(L"ForeignOpen kind=%u status=%u sid=%u rate=%u ch=%u bps=%d len=%llu\n",
+			kind, st, fr.sessionId, fr.sampleRate, fr.channels, fr.bitsPerSample,
 			(unsigned long long)fr.lengthSamples);
 		fflush(stdout);
 		if (st != KPIHOST64_STATUS_OK)

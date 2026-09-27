@@ -1,4 +1,4 @@
-﻿#include "StdAfx.h"
+#include "StdAfx.h"
 #include "cemu_hard_pc88.h"
 #include "../cemu_zipfs.h"
 #include "../cemu_rhythm.h"
@@ -100,6 +100,9 @@ CHardPc88::CHardPc88()
 	, hardrankSb2_(0)
 	, schemeMode_(0)
 	, falcomType_(0)
+	, falcomIpl_(0)
+	, falcomRtcKeep_(0)
+	, falcomPatchLen_(0)
 	, playKickBase_(0)
 	, playKickInitOff_(0)
 	, playKickEi_(1)
@@ -112,6 +115,7 @@ CHardPc88::CHardPc88()
 	memset(textWinShadow_, 0, sizeof(textWinShadow_));
 	memset(bgmBank_, 0, sizeof(bgmBank_));
 	memset(bgmBankSize_, 0, sizeof(bgmBankSize_));
+	falcomBootSnap_ = NULL;
 	memset(progBank_, 0, sizeof(progBank_));
 	memset(progBankSize_, 0, sizeof(progBankSize_));
 	memset(voiceBank_, 0, sizeof(voiceBank_));
@@ -797,6 +801,7 @@ void CHardPc88::Shutdown()
 	if (CEmuZ80BusGetActive() == this)
 		CEmuZ80BusSetActive(NULL);
 	FreeBanks();
+	if (falcomBootSnap_) { free(falcomBootSnap_); falcomBootSnap_ = NULL; }
 	if (cpu_) { delete cpu_; cpu_ = NULL; }
 	if (chip_) { CEmuChipYm2608Destroy(chip_); chip_ = NULL; }
 }
@@ -2876,7 +2881,7 @@ static const uint16_t kFalcomSndadr[][5] = {
 	{0x159c, 0x16e2, 0x1693, 0x6067, 0x0000}, /* 11 |       キングドラゴン */
 	{0x03d5, 0x05d6, 0xa000, 0x0000, 0x0000}, /* 12 |       エンディング */
 	{0xaeb7, 0xb103, 0xb05b, 0x7eec, 0x0000}, /* 13 ASTEKA2 APRG（プログラム） */
-	{0x029a, 0x0119, 0xa000, 0x0000, 0x0000}, /* 14 XANADU2 IPL（drv 6）。I=01 を残す */
+	{0x029a, 0x0116, 0xa000, 0x0000, 0x0000}, /* 14 XANADU2 IPL（drv 6）。DI / LD SP / LD I,01 @0116。0119 は LD SP の途中で I=A（PATCH が A=$19）になり倍速 */
 	{0xb02a, 0xb00c, 0xb02a, 0x0000, 0x0000}, /* 15 ASTEKA2 SOUND（drv 2、音源） */
 };
 
@@ -2923,10 +2928,55 @@ static int CEmuPc88DetectFalcom(const CEmuGameEntry* ge, const uint8_t* mem)
 }
 
 /* CHardPc88::ApplyFalcomPlay の実装 */
+struct Pc88FalcomBoot {
+	uint8_t ram[0x10000];
+	Ay_Cpu::registers_t regs;
+	int rtc;
+	uint8_t irq;
+};
+
+void CHardPc88::CaptureFalcomBoot()
+{
+	if (falcomBootSnap_ || !falcomType_ || !mem_ || !cpu_)
+		return;
+	Pc88FalcomBoot* s = (Pc88FalcomBoot*)malloc(sizeof(Pc88FalcomBoot));
+	if (!s)
+		return;
+	memcpy(s->ram, mem_, 0x10000);
+	s->regs = cpu_->r;
+	s->rtc = useRtc;
+	s->irq = ioPorts_[0x32];
+	falcomBootSnap_ = s;
+}
+
+void CHardPc88::RestoreFalcomBoot()
+{
+	Pc88FalcomBoot* s = (Pc88FalcomBoot*)falcomBootSnap_;
+	if (!s || !mem_ || !cpu_)
+		return;
+	memcpy(mem_, s->ram, 0x10000);
+	cpu_->r = s->regs;
+	cpu_->r.iff1 = 0;
+	cpu_->r.iff2 = 0;
+	useRtc = s->rtc;
+	falcomIpl_ = 0;
+	SetSoundIrqPort(s->irq);
+	if (chip_)
+		chip_->Reset();
+}
+
+void CHardPc88::RestoreFalcomPatch()
+{
+	if (!falcomPatchLen_ || !mem_)
+		return;
+	memcpy(mem_ + 0xE000, falcomPatch_, falcomPatchLen_);
+}
+
 void CHardPc88::ApplyFalcomPlay()
 {
 	if (!falcomType_)
 		return;
+	RestoreFalcomPatch();
 	/* タイトル 0x12xx / 0x13xx / 0x14xx: 0x02/03/04 と同じドライバ。food は空 */
 	const unsigned drvHi = (titleCode_ >> 8) & 0xffu;
 	const int foodEmpty = (drvHi & 0xF0) != 0;
@@ -2961,6 +3011,13 @@ void CHardPc88::ApplyFalcomPlay()
 		break;
 	default:
 		break;
+	}
+	/* 前の PR.NO / IPL の残骸を消す。IPL は 3KB しか無く、戻した Level が壊れたイメージを実行する。
+	   IPL は 5C00 より上（6067 など）にも停止フラグを残す。抜けるときそこも消してから BGM を載せる。 */
+	if (falcomType_ == FALCOM_XANADU || falcomType_ == FALCOM_XANADU2) {
+		if (falcomIpl_ && ind != 14)
+			memset(mem_ + 0x5C00, 0, 0xE000 - 0x5C00);
+		memset(mem_, 0, 0x5C00);
 	}
 	/* Prog を先に — volume/food は 0000..5FFF 窓の中 */
 	if (drv < 256 && progBank_[drv] && progBankSize_[drv] > 0) {
@@ -3013,6 +3070,46 @@ void CHardPc88::ApplyFalcomPlay()
 		if (drv != 5 && !foodEmpty)
 			mem_[0x60a5] = 0xff;
 	}
+	if (ind == 14) {
+		if (!falcomIpl_)
+			falcomRtcKeep_ = useRtc;
+		falcomIpl_ = 1;
+		useRtc = 0; /* OPN と RTC が両方 029A を叩くと倍速 */
+		if (cpu_) {
+			cpu_->r.i = 0x01;
+			cpu_->r.im = 2;
+			cpu_->r.iff1 = 0;
+			cpu_->r.sp = 0x00FC;
+			cpu_->r.pc = 0x0116;
+		}
+	} else {
+		if (falcomIpl_) {
+			useRtc = falcomRtcKeep_;
+			falcomIpl_ = 0;
+		}
+		if (cpu_ && falcomType_) {
+			cpu_->r.i = 0xE0;
+			cpu_->r.im = 2;
+			cpu_->r.iff1 = 0;
+			cpu_->r.sp = 0x0100;
+			cpu_->r.pc = 0xE027;
+		}
+		/* IPL はポート 32 の音源 IRQ をマスクしたまま戻ることがある */
+		SetSoundIrqPort((uint8_t)(ioPorts_[0x32] & 0x7F));
+	}
+}
+
+int CHardPc88::EnterFalcomIpl()
+{
+	if (!falcomIpl_ || !cpu_)
+		return 0;
+	cpu_->r.i = 0x01;
+	cpu_->r.im = 2;
+	cpu_->r.iff1 = 0;
+	cpu_->r.sp = 0x00FC;
+	cpu_->r.pc = 0x0116;
+	cmd = 0;
+	return 1;
 }
 
 /* PCM／コードバンク */
@@ -3069,6 +3166,11 @@ uint8_t CHardPc88::PortIn(uint16_t port)
 	switch (p) {
 	case 0x00: { uint8_t v = cmd; cmd = 0; return v; }
 	case 0x01: return param;
+	case 0x04:
+		/* IPL 編曲: IN A,(04); BIT 3; JR Z wait。未配線だと $0116 で固まる */
+		if (falcomIpl_)
+			return (uint8_t)(((cpuCycles_ / 64u) & 1u) ? 0x08 : 0x00);
+		return ioPorts_[0x04];
 	case 0x80:
 		/* Scheme bothtec PATCH: IN (80) のあと LD (C000),A。ライブ BGM ヘッダバイトをエコーし MS0A を壊さない（バンク番号を曲にすると mute）。 */
 		if (schemeMode_)
@@ -3283,6 +3385,11 @@ int CHardPc88::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCo
 			initPc_ = 0xE000;
 	}
 	falcomType_ = CEmuPc88DetectFalcom(ge, mem_);
+	falcomPatchLen_ = 0;
+	if (falcomType_ && mem_[0xE000] == 0x18) {
+		falcomPatchLen_ = 0x100;
+		memcpy(falcomPatch_, mem_ + 0xE000, falcomPatchLen_);
+	}
 	CEmuPc88MirrorDriverPage20(mem_);
 	/* robowr88: PROG2 はカタログ bgm@1。StageBanks が外したら再ステージ用コピーを残す — ブート中に PROG1 を重ねない（B545 ISR）。 */
 	if (CEmuPc88PatchRobowr(mem_) && (titleCode & 0xffu) == 1

@@ -1,4 +1,4 @@
-﻿#include "StdAfx.h"
+#include "StdAfx.h"
 #include "cemu_hard_x1.h"
 #include "../chip/cemu_chip_opm.h"
 #include "../chip/cemu_chip_opna.h"
@@ -445,17 +445,30 @@ CHardX1::CHardX1()
 	, bgmStageOff_(0)
 	, ctcVectorBase_(0)
 	, ctcVectorProgrammed_(0)
+	, ctcHootPreset_(0)
+	, ctcVsync60_(0)
 {	hardKind = KIND_X1;
+	bootSnap_ = NULL;
 	memset(mem_, 0, sizeof(mem_));
 	memset(ioport_, 0, sizeof(ioport_));
 	memset(bgmBank_, 0, sizeof(bgmBank_));
 	memset(bgmBankSize_, 0, sizeof(bgmBankSize_));
 	memset(bgmPresent_, 0, sizeof(bgmPresent_));
+	memset(voiceBank_, 0, sizeof(voiceBank_));
+	memset(voiceBankSize_, 0, sizeof(voiceBankSize_));
+	memset(voicePresent_, 0, sizeof(voicePresent_));
+	vdataAddr_ = -1;
+	vdataSize_ = 0;
+	memset(ctcPending_, 0, sizeof(ctcPending_));
 	memset(ctcIe_, 0, sizeof(ctcIe_));
 	memset(ctcExpectTc_, 0, sizeof(ctcExpectTc_));
 	memset(ctcControl_, 0, sizeof(ctcControl_));
 	memset(ctcTc_, 0, sizeof(ctcTc_));
 	memset(ctcTcValid_, 0, sizeof(ctcTcValid_));
+	memset(ctcRun_, 0, sizeof(ctcRun_));
+	memset(ctcNext_, 0, sizeof(ctcNext_));
+	memset(ctcCount_, 0, sizeof(ctcCount_));
+	memset(ctcWriteAt_, 0, sizeof(ctcWriteAt_));
 	for (int i = 0; i < 4; i++)
 		xmlCtcVec_[i] = -1;
 }
@@ -500,6 +513,12 @@ void CHardX1::FreeBanks()
 		}
 		bgmBankSize_[i] = 0;
 		bgmPresent_[i] = 0;
+		if (voiceBank_[i]) {
+			free(voiceBank_[i]);
+			voiceBank_[i] = NULL;
+		}
+		voiceBankSize_[i] = 0;
+		voicePresent_[i] = 0;
 	}
 }
 
@@ -509,6 +528,7 @@ void CHardX1::Shutdown()
 	if (CEmuZ80BusGetActive() == this)
 		CEmuZ80BusSetActive(NULL);
 	FreeBanks();
+	if (bootSnap_) { free(bootSnap_); bootSnap_ = NULL; }
 	if (cpu_) { delete cpu_; cpu_ = NULL; }
 	if (chipOpm_) {
 		CEmuChipYm2151Destroy(chipOpm_);
@@ -583,10 +603,61 @@ void CHardX1::StageBgm(uint8_t index)
 		if ((titleCode_ & 0xffu) == 0x20u)
 			memcpy(mem_ + 0x2800, src, n4);
 	}
-	mem_[LOAD_FLAG] = 0xff;
+	/* xana2 m.open は $C010 から DI / IM 2。$C012 は `ED 5E` の 5E で、FF にすると
+	   IM 2 が壊れてオープニングが無音になる。 */
+	if (!(mem_[0xC000] == 0xC3 && mem_[0xC001] == 0x10 && mem_[0xC002] == 0xC0))
+		mem_[LOAD_FLAG] = 0xff;
 }
 
-/* CEMU_X1_CTC_TRACE=1 はゲストの CTC 組み（メイン基板 1FA0 と CZ-8BS1 音源基板 0704）をダンプし、tick 源と分周を推測ではなく読む。 */
+void CHardX1::StageVoiceIndex(uint8_t index)
+{
+	if (vdataAddr_ < 0)
+		return;
+	if (index >= 128 || !voicePresent_[index] || !voiceBank_[index])
+		return;
+	unsigned n = voiceBankSize_[index];
+	if (vdataSize_ > 0 && (unsigned)vdataSize_ < n)
+		n = (unsigned)vdataSize_;
+	if (vdataAddr_ + (int)n > 0x10000)
+		n = (unsigned)(0x10000 - vdataAddr_);
+	if ((int)mdataAddr_ > vdataAddr_) {
+		unsigned cap = (unsigned)((int)mdataAddr_ - vdataAddr_);
+		if (n > cap) n = cap;
+	}
+	if (n == 0)
+		return;
+	memcpy(mem_ + vdataAddr_, voiceBank_[index], n);
+}
+
+void CHardX1::StageVoice(unsigned titleCode)
+{
+	const unsigned lo = titleCode & 0xffu;
+	if (initPc_ == 0xFA00 && mdataAddr_ == 0x5C00) {
+		if (lo == 0 || lo == 0xFFu)
+			return;
+		/* 短い PR.NO3/5 の後ろに前の PR.NO2 が残ると、戻りで CALL 5700 が壊れる。 */
+		if (vdataAddr_ >= 0 && vdataSize_ > 0) {
+			unsigned z = (unsigned)vdataSize_;
+			if ((unsigned)vdataAddr_ + z > 0x10000u)
+				z = 0x10000u - (unsigned)vdataAddr_;
+			memset(mem_ + vdataAddr_, 0, z);
+		}
+		/* カタログの voice は曲 lo に付いている（0x0C=PR.NO3、0x1B=PR.NO5）。
+		   hi を添字にするとボスもエンディングも PR.NO2 のまま CALL 1C00/1000 し、音が死ぬ。 */
+		if (lo < 128 && voicePresent_[lo])
+			StageVoiceIndex((uint8_t)lo);
+		return;
+	}
+	uint8_t song = 0, bank = 0;
+	UnpackTitle(titleCode, &song, &bank, ydosRom_);
+	if (bank < 128 && voicePresent_[bank])
+		StageVoiceIndex(bank);
+	else if (song < 128 && voicePresent_[song])
+		StageVoiceIndex(song);
+}
+
+/* CEMU_X1_CTC_TRACE=1 はゲストの CTC 組み（メイン基板 1FA0 と CZ-8BS1 音源基板 0704）をダンプし、tick 源と分周を推測ではなく読む。
+   値が 2 以上ならその行数まで出す（既定 64 行）。 */
 static void X1CtcTrace(CHardX1* hw, uint16_t port, uint8_t data)
 {
 	static int mode = -1;
@@ -594,7 +665,7 @@ static void X1CtcTrace(CHardX1* hw, uint16_t port, uint8_t data)
 	if (mode < 0) {
 		const char* e = getenv("CEMU_X1_CTC_TRACE");
 		mode = (e && *e && *e != '0') ? 1 : 0;
-		left = 64;
+		left = (e && atoi(e) > 1) ? atoi(e) : 64;
 	}
 	if (!mode || left <= 0) return;
 	left--;
@@ -609,38 +680,178 @@ void CHardX1::CtcReset()
 {
 	ctcVectorBase_ = 0;
 	ctcVectorProgrammed_ = 0;
+	memset(ctcPending_, 0, sizeof(ctcPending_));
 	memset(ctcIe_, 0, sizeof(ctcIe_));
 	memset(ctcExpectTc_, 0, sizeof(ctcExpectTc_));
 	memset(ctcControl_, 0, sizeof(ctcControl_));
 	memset(ctcTc_, 0, sizeof(ctcTc_));
 	memset(ctcTcValid_, 0, sizeof(ctcTcValid_));
+	memset(ctcRun_, 0, sizeof(ctcRun_));
+	memset(ctcNext_, 0, sizeof(ctcNext_));
+	memset(ctcCount_, 0, sizeof(ctcCount_));
+	memset(ctcWriteAt_, 0, sizeof(ctcWriteAt_));
+	ctcVsync60_ = 0;
+	/* hoot mucomx1 の TIMER（256×18 CPU クロック）は CTC ch0 の「IE・タイマ・/256・TC 18」と
+	   同じもの。VSYNC はベクタ 6（ch3）なので ch3 を IE のまま未起動にし、VSYNC 互換線で満了させる。 */
+	ctcHootPreset_ = 1;
+	ctcControl_[0] = 0xA5;
+	ctcIe_[0] = 1;
+	ctcTc_[0] = 18;
+	ctcTcValid_[0] = 1;
+	ctcRun_[0] = 1;
+	ctcControl_[3] = 0x81;
+	ctcIe_[3] = 1;
 }
 
 /* バス書込 */
 void CHardX1::CtcWrite(int channel, uint8_t data)
 {
 	if (channel < 0 || channel > 3) return;
+	ctcWriteAt_[channel] = cpu_ ? (uint64_t)cpu_->time64() : 0;
+	/* ゲストが CTC に触れたら hoot 互換プリセットを捨て、電源投入状態（全チャネル停止・IE 無し）
+	   から組ませる。プリセットの ch0/ch3 がゲストの組んでいないチャネルで鳴り続けないように。 */
+	if (ctcHootPreset_) {
+		ctcHootPreset_ = 0;
+		memset(ctcPending_, 0, sizeof(ctcPending_));
+		memset(ctcIe_, 0, sizeof(ctcIe_));
+		memset(ctcExpectTc_, 0, sizeof(ctcExpectTc_));
+		memset(ctcControl_, 0, sizeof(ctcControl_));
+		memset(ctcTc_, 0, sizeof(ctcTc_));
+		memset(ctcTcValid_, 0, sizeof(ctcTcValid_));
+		memset(ctcRun_, 0, sizeof(ctcRun_));
+		memset(ctcNext_, 0, sizeof(ctcNext_));
+		memset(ctcCount_, 0, sizeof(ctcCount_));
+	}
 	if (ctcExpectTc_[channel]) {
 		/* 時定数: 0 は 256（Zilog CTC） */
 		ctcTc_[channel] = data;
 		ctcTcValid_[channel] = 1;
 		ctcExpectTc_[channel] = 0;
+		/* 停止中のチャネルは時定数ロードで起動する。計数中（リセット無しの再設定）は今の周期を
+		   数え切ってから次のゼロカウントで新しい時定数に切り替わる。 */
+		if (!ctcRun_[channel]) {
+			ctcRun_[channel] = 1;
+			ctcNext_[channel] = 0;
+			ctcCount_[channel] = data ? (unsigned)data : 256u;
+		}
 		return;
 	}
 	if ((data & 0x01) == 0) {
 		/* 割り込みベクタロード（Zilog: チャネル 0 のみ。bits7-3 = 基点） */
 		if (channel == 0) {
+			/* hoot パックは 2 本目のドライバがベクタ基点を組み替えて CTC を引き継ぐことがある
+			   （xana2opm 系統 3/4: PR.NO3 の初期化が基点 $18 で ch1 を IE にし、m.open が基点 $58 で
+			   ch0/ch3 だけ組み直す。$5A のスロットは誰も書かずゴミ）。別の基点へ組み替えたら、それ
+			   以前に組まれたチャネルの IE を落とし、引き継いだ側が組み直したチャネルだけ届ける。 */
+			if (ctcVectorProgrammed_ && (uint8_t)(data & 0xf8) != ctcVectorBase_) {
+				memset(ctcIe_, 0, sizeof(ctcIe_));
+				memset(ctcPending_, 0, sizeof(ctcPending_));
+				for (int ch = 0; ch < 4; ch++)
+					ctcControl_[ch] &= 0x7f;
+			}
 			ctcVectorBase_ = (uint8_t)(data & 0xf8);
 			ctcVectorProgrammed_ = 1;
 		}
 		return;
 	}
-	/* 制御ワード: bit7=IE、bit6=カウンタ、bit5=プリスケール /256、bit2=続く TC */
+	/* 制御ワード: bit7=IE、bit6=カウンタ、bit5=プリスケール /256、bit2=続く TC、bit1=リセット */
+	const uint8_t prev = ctcControl_[channel];
 	ctcControl_[channel] = data;
 	ctcIe_[channel] = (data & 0x80) ? 1 : 0;
+	/* IE を落とすと保留中の要求も取り消す（ys2 は ch0 の IE を B5/35 で切り替える） */
+	if (!ctcIe_[channel])
+		ctcPending_[channel] = 0;
+	if (data & 0x02) {
+		/* ソフトウェアリセット: 次の時定数ロードまで停止 */
+		ctcRun_[channel] = 0;
+	} else if (ctcRun_[channel] && ((prev ^ data) & 0x40)) {
+		/* リセット無しでタイマ⇔カウンタを切り替えたら新しいモードで数え直す */
+		ctcNext_[channel] = 0;
+		ctcCount_[channel] = ctcTc_[channel] ? (unsigned)ctcTc_[channel] : 256u;
+	}
 	ctcExpectTc_[channel] = (data & 0x04) ? 1 : 0;
 	if (ctcExpectTc_[channel])
 		ctcTcValid_[channel] = 0;
+}
+
+/* CHardX1::CtcRun の実装 */
+unsigned CHardX1::CtcRun(uint64_t now)
+{
+	uint64_t zc[4] = { 0, 0, 0, 0 };
+	/* タイマモード: 各チャネルが自分の プリスケール×時定数 で数える。長い DI や HALT 早送りの後も
+	   経過した満了数をまとめて出し、周期の位相はずらさない。 */
+	for (int ch = 0; ch < 4; ch++) {
+		if (!ctcRun_[ch] || (ctcControl_[ch] & 0x40))
+			continue;
+		const uint64_t period = (uint64_t)(ctcTc_[ch] ? ctcTc_[ch] : 256u)
+			* ((ctcControl_[ch] & 0x20) ? 256u : 16u);
+		if (ctcNext_[ch] == 0) {
+			ctcNext_[ch] = now + period;
+			continue;
+		}
+		if (now < ctcNext_[ch])
+			continue;
+		const uint64_t k = (now - ctcNext_[ch]) / period + 1;
+		ctcNext_[ch] += k * period;
+		zc[ch] = k;
+	}
+	/* X1（と CZ-8BS1）は ZC0 を TRG3 へ配線。ch3 カウンタは ch0 のゼロカウントを分周する
+	   （IE0 とは無関係）。SORCERIAN: ch0 = /256×18（868Hz）、ch3 = カウンタ 15（57.9Hz）。
+	   TRG0-2 には何も繋がっていないので ch0-2 のカウンタモードは数えない。 */
+	if (zc[0] && ctcRun_[3] && (ctcControl_[3] & 0x40)) {
+		const uint64_t tc = ctcTc_[3] ? (uint64_t)ctcTc_[3] : 256u;
+		uint64_t n = zc[0];
+		if (n < (uint64_t)ctcCount_[3]) {
+			ctcCount_[3] -= (unsigned)n;
+		} else {
+			n -= (uint64_t)ctcCount_[3];
+			zc[3] = 1 + n / tc;
+			ctcCount_[3] = (unsigned)(tc - n % tc);
+		}
+	}
+	/* VSYNC 互換線: hoot の VSYNC 割り込み（ch3 ベクタへ 60Hz）を ch3 の入力として常時 60Hz で
+	   走らせ、ch3 が自分で計数していない間だけ ch3 の満了にする。自分で計数していない＝時定数
+	   未ロード／リセット停止、またはカウンタモードなのに TRG3 へ ZC0 が来ない（ch0 がタイマで
+	   回っていない）。PATCH が `D5` だけ書いて時定数を置かない PSG 系（gateof／mars 等）や、
+	   `0704 47 47` で ch0 をカウンタへ落とす u4 PATCH はこれで tick する。
+	   ch0/ch3 を書いてから 1/60 秒は注入しない — リセット→時定数の 2〜3 命令の隙間に VSYNC が
+	   重なると、u4 の ISR が途中の EI で入れ子になり自前スタック $F30B が壊れる。 */
+	const int trg3Live = ctcRun_[0] && !(ctcControl_[0] & 0x40);
+	const uint64_t lastWrite = ctcWriteAt_[0] > ctcWriteAt_[3] ? ctcWriteAt_[0] : ctcWriteAt_[3];
+	const int ch3Counts = (ctcRun_[3] && (!(ctcControl_[3] & 0x40) || trg3Live))
+		|| now < lastWrite + (uint64_t)cpuHz_ / 60u;
+	const uint64_t now60 = now * 60u;
+	uint64_t vsync = 0;
+	if (ctcVsync60_ == 0) {
+		ctcVsync60_ = now60 + (uint64_t)cpuHz_;
+	} else if (now60 >= ctcVsync60_) {
+		vsync = (now60 - ctcVsync60_) / (uint64_t)cpuHz_ + 1;
+		ctcVsync60_ += vsync * (uint64_t)cpuHz_;
+		if (!ch3Counts)
+			zc[3] += vsync;
+	}
+	for (int ch = 0; ch < 4; ch++)
+		if (zc[ch] && ctcIe_[ch])
+			ctcPending_[ch] = 1;
+	return vsync > 0xffffffffu ? 0xffffffffu : (unsigned)vsync;
+}
+
+/* CHardX1::CtcNextEvent の実装 */
+uint64_t CHardX1::CtcNextEvent(uint64_t now) const
+{
+	uint64_t best = ~(uint64_t)0;
+	for (int ch = 0; ch < 4; ch++) {
+		if (!ctcRun_[ch] || (ctcControl_[ch] & 0x40))
+			continue;
+		if (ctcNext_[ch] > now && ctcNext_[ch] < best)
+			best = ctcNext_[ch];
+	}
+	if (ctcVsync60_) {
+		const uint64_t v = (ctcVsync60_ + 59u) / 60u;
+		if (v > now && v < best)
+			best = v;
+	}
+	return best;
 }
 
 /* CHardX1::CtcTimerPeriodCycles の実装 */
@@ -648,7 +859,7 @@ unsigned CHardX1::CtcTimerPeriodCycles(int channel) const
 {
 	if (channel < 0 || channel > 3) return 0;
 	if (!ctcTcValid_[channel]) return 0;
-	/* カウンタモード（bit6）: ホストは vsync／既定のまま — フリータイマではない */
+	/* カウンタモード（bit6）は TRG 入力を数えるので固有周期を持たない */
 	if (ctcControl_[channel] & 0x40) return 0;
 	unsigned tc = ctcTc_[channel] ? (unsigned)ctcTc_[channel] : 256u;
 	const unsigned prescale = (ctcControl_[channel] & 0x20) ? 256u : 16u;
@@ -689,10 +900,17 @@ uint8_t CHardX1::PortIn(uint16_t port)
 		/* YDOS ポインタ構築 OUT0 のあと、hold 会計のためラッチは残すが 0 を返し、PATCH が 0x90 の前後で 0x91 に再入しないようにする */
 		if (ydosInhibitReentry_)
 			return 0;
-		if (playCmdLatch_ && X1IsYdos(this) && cpu_
-			&& cpu_->r.pc >= 0x0020 && cpu_->r.pc < 0x0070)
-			ydosCmdSeen_ = 1;
-		return playCmdLatch_;
+		if (playCmdLatch_ && X1IsYdos(this)) {
+			if (cpu_ && cpu_->r.pc >= 0x0020 && cpu_->r.pc < 0x0070)
+				ydosCmdSeen_ = 1;
+			return playCmdLatch_;
+		}
+		/* hoot 版 PATCH の待ちループは IN 0 を 1 回読み、1 なら play を CALL してまたループへ戻る
+		   （play 側は ack しない）。レベルのまま返すと保持の間 play を呼び直し、曲頭が何度も
+		   切れる。読まれた時点で消費する。YDOS は上のとおり OUT0 まで High を保つ。 */
+		const uint8_t cmd = playCmdLatch_;
+		playCmdLatch_ = 0;
+		return cmd;
 	}
 	if (p == 0x0001)
 		return playSongLatch_;
@@ -968,11 +1186,53 @@ void CHardX1::PrestageBgm(unsigned titleCode)
 	}
 }
 
+/* PATCH 待ちへ戻す。プレーヤ内に居ると cmd ラッチを見ない。
+   x1xana2opm は `LD BC,0; IN A,(C); OR A; JR Z`（ED 78）であり DB 00 では当たらない。 */
+static void X1ParkPatchWait(CHardX1* hw)
+{
+	if (!hw || !hw->Cpu() || !hw->Mem())
+		return;
+	uint8_t* mem = hw->Mem();
+	Ay_Cpu* cpu = hw->Cpu();
+	auto findWait = [mem](unsigned base) -> unsigned {
+		unsigned end = base + 0x100u;
+		if (end > 0x10000u)
+			end = 0x10000u;
+		for (unsigned i = base; i + 4u < end; i++) {
+			const int orAnd = (mem[i + 2] == 0xB7 || mem[i + 2] == 0xA7);
+			if (mem[i] == 0xDB && mem[i + 1] == 0x00 && orAnd && mem[i + 3] == 0x28)
+				return i;
+			if (mem[i] == 0xED && mem[i + 1] == 0x78 && orAnd && mem[i + 3] == 0x28) {
+				if (i >= 3u && mem[i - 3] == 0x01 && mem[i - 2] == 0x00 && mem[i - 1] == 0x00)
+					return i - 3u; /* LD BC,0000 */
+				return i;
+			}
+		}
+		return 0;
+	};
+	unsigned wait = findWait(hw->initPc_);
+	if (!wait && mem[hw->initPc_] == 0x18) {
+		const int rel = (int)(int8_t)mem[hw->initPc_ + 1];
+		const unsigned jr = (unsigned)((int)hw->initPc_ + 2 + rel);
+		if (jr < 0xFF80u)
+			wait = findWait(jr);
+	}
+	if (!wait)
+		wait = findWait(0xFA00);
+	if (wait) {
+		/* SP はブート／ドライバが決める。0000 に戻すと Level のテンポ割込みが倍になる。 */
+		cpu->r.iff1 = 0;
+		cpu->r.pc = (uint16_t)wait;
+	}
+}
+
 /* 曲再生をトリガする */
 void CHardX1::TriggerPlay(unsigned titleCode)
 {
 	uint8_t song = 0, bank = 0;
 	UnpackTitle(titleCode, &song, &bank, ydosRom_);
+	if (!skipTriggerStage_)
+		X1ParkPatchWait(this);
 	/* 二重メールボックス: ポートラッチ（Falcom）＋空きなら C010/C011（hoot Play）。IO@5000 は常に載せる。RAM ミラーは StageBgm が安全と見たときだけ。 */
 	playCmdLatch_ = 0x01;
 	/* Falcom xana2: 固定系統 hi=0x02、トラック ID は lo（ポート0F／CP 1Ah） */
@@ -1044,11 +1304,13 @@ void CHardX1::TriggerPlay(unsigned titleCode)
 			playSongLatchF_ = (uint8_t)hi;
 			playSongLatch_ = (hi && hi != 0xFFu) ? (uint8_t)hi : 1;
 		}
-		/* xana2 PSG/OPM: ポート F は PR.NOx 系統（hi）。SUB 2 が play/IRQ ベクタを添字。lo は載せた m.000x バンクだけ。 */
+		/* xana2: ポート 1 は曲 lo、ポート F は系統 hi。hi==2 だけ lo にすると
+		   ボスは全員ポート 1=3（オープニング側）になり、系統 5 は CALL $1000 に届かない。 */
 		if (falcomPortF_ && mid == 0 && hi && !wibarmPortF_ && !laplaceCtcF_
 			&& !ys2Mirror4000_ && !jesusSplitPorts_) {
 			playSongLatchF_ = (uint8_t)hi;
-			/* 系統 3/4/5（PR.NO3+）— 載せた m.000x は 1 曲。OPM xml はまだ PR.NO0 @ $1000。ポート1=0 を奪うと系統 3 タイトル全部が無音（c1 は鳴り同じラッチ）。 */
+			if (lo)
+				playSongLatch_ = (uint8_t)lo;
 			if (psgOnly_ && hi >= 3u)
 				playSongLatch_ = 0;
 		}
@@ -1172,16 +1434,10 @@ void CHardX1::TriggerPlay(unsigned titleCode)
 			mem_[0x60A5] = 0;
 			mem_[0x60A6] = 0;
 		}
-		/* x1xana2opm 000000FF: PATCH `CP FF` は食料トグル。Mapleford を載せる。
-		   指紋は init 後も FA41 が残るが、m.open があるので init_pc/mdata で鍵を掛ける。 */
+		/* x1xana2opm 000000FF: PATCH `CP FF` は食料トグル。曲は変えない。 */
 		if (initPc_ == 0xFA00 && mdataAddr_ == 0x5C00 && !psgOnly_
 			&& mid == 0 && lo == 0xFFu) {
-			song = 1;
-			bank = 1;
-			playSongLatch_ = 1;
-			playSongLatchF_ = 2;
-			mem_[0x60A5] = 0;
-			mem_[0x60A6] = 0;
+			playSongLatch_ = 0xFF;
 		}
 	}
 	if (xtalsoftPortF_) {
@@ -1221,6 +1477,9 @@ void CHardX1::TriggerPlay(unsigned titleCode)
 		}
 	}
 
+	if (!skipTriggerStage_)
+		StageVoice(titleCode);
+
 	uint8_t stage = bank;
 	if (!(stage < 128 && bgmPresent_[stage] && bgmBank_[stage])) {
 		if (song < 128 && bgmPresent_[song] && bgmBank_[song])
@@ -1229,14 +1488,6 @@ void CHardX1::TriggerPlay(unsigned titleCode)
 			stage = 0xff;
 	}
 	if (stage < 128 && bgmPresent_[stage] && bgmBank_[stage]) {
-		const unsigned tLo = titleCode & 0xffu;
-		/* xana2opm m.000Q: 系統 hi=5 の表は CALL $1000（PR.NO0 再初期化）で無音。
-		   PR.NO2 下地＋CALL $5700（hi=2）で Ending を鳴らす。 */
-		if (initPc_ == 0xFA00 && tLo == 0x1Bu
-			&& mem_[0xFA4B] == 0xFE && mem_[0xFA4C] == 0x1B) {
-			playSongLatch_ = 0x1B;
-			playSongLatchF_ = 2;
-		}
 		if ((mdataAddr_ == 0x4000 || mdataAddr_ == 0) && initPc_ != 0xFE00) {
 			unsigned n = bgmBankSize_[stage];
 			if (n > mdataSize_) n = mdataSize_;
@@ -1293,32 +1544,27 @@ void CHardX1::TriggerPlay(unsigned titleCode)
 	{
 		const unsigned lo = titleCode & 0xffu;
 		if (initPc_ == 0xFA00 && mdataAddr_ == 0x5C00 && !psgOnly_ && lo == 0xFFu) {
-			playSongLatch_ = 1;
-			playSongLatchF_ = 2;
-		}
-		if (initPc_ == 0xFA00 && lo == 0x1Bu
-			&& mem_[0xFA4B] == 0xFE && mem_[0xFA4C] == 0x1B) {
-			playSongLatch_ = 0x1B;
-			playSongLatchF_ = 2;
+			playSongLatch_ = 0xFF;
 		}
 	}
 	ArmTelenetPlayGate();
 }
 
-int CHardX1::ApplyCatalogToggle(unsigned titleCode)
+int CHardX1::ApplyCatalogToggle(unsigned titleCode, int enabled)
 {
 	const unsigned lo = titleCode & 0xffu;
 	const unsigned top = (titleCode >> 24) & 0xffu;
 	const int food = (lo == 0xFFu || top == 0xFFu) ? 1 : 0;
 	if (!food)
 		return 0;
-	/* x1xanadu: PATCH `CP FF` は ($60A5) を XOR。空にする。 */
+	const uint8_t on = enabled ? 0 : 0xFF;
+	/* x1xanadu: PATCH `CP FF` は ($60A5) を XOR。空=0、満タン=$FF */
 	if (initPc_ == 0xF000 && mdataAddr_ == 0
 		&& mem_[0xF04B] == 0xFE && mem_[0xF04C] == 0xFF
 		&& mem_[0xF09A] == 0xAF && mem_[0xF09B] == 0xD3
 		&& mem_[0xF09D] == 0x3A && mem_[0xF09E] == 0xA5
 		&& mem_[0xF09F] == 0x60) {
-		mem_[0x60A5] = 0;
+		mem_[0x60A5] = on;
 		mem_[0x60A6] = 0;
 		return 1;
 	}
@@ -1327,7 +1573,7 @@ int CHardX1::ApplyCatalogToggle(unsigned titleCode)
 		&& mem_[0xE024] == 0xFE && mem_[0xE025] == 0xFF
 		&& mem_[0xE00C] == 0x22 && mem_[0xE00D] == 0xA5
 		&& mem_[0xE00E] == 0x60) {
-		mem_[0x60A5] = 0;
+		mem_[0x60A5] = on;
 		mem_[0x60A6] = 0;
 		return 1;
 	}
@@ -1335,17 +1581,125 @@ int CHardX1::ApplyCatalogToggle(unsigned titleCode)
 	if (initPc_ == 0xF000
 		&& mem_[0xF041] == 0xFE && mem_[0xF042] == 0xFF
 		&& mem_[0xF05B] == 0xD6 && mem_[0xF05C] == 0x02) {
-		mem_[0x60A5] = 0;
+		mem_[0x60A5] = on;
 		mem_[0x60A6] = 0;
 		return 1;
 	}
-	/* x1xana2opm */
+	/* x1xana2opm: 食料は $60A5-$60A7 の 3 バイト。全部 0 で空腹 */
 	if (initPc_ == 0xFA00 && mdataAddr_ == 0x5C00 && !psgOnly_) {
-		mem_[0x60A5] = 0;
+		mem_[0x60A5] = on;
 		mem_[0x60A6] = 0;
+		mem_[0x60A7] = 0;
 		return 1;
 	}
 	return 0;
+}
+
+struct X1BootSnap {
+	uint8_t ram[0x10000];
+	Ay_Cpu::registers_t regs;
+	uint8_t vectorBase;
+	int vectorProgrammed;
+	uint8_t ie[4];
+	uint8_t expectTc[4];
+	uint8_t control[4];
+	uint8_t tc[4];
+	int tcValid[4];
+	uint8_t run[4];
+	unsigned count[4];
+	uint8_t hootPreset;
+};
+
+void CHardX1::CaptureBoot()
+{
+	if (bootSnap_ || !mem_ || !cpu_)
+		return;
+	if (initPc_ != 0xFA00 || mdataAddr_ != 0x5C00 || psgOnly_)
+		return;
+	X1BootSnap* s = (X1BootSnap*)malloc(sizeof(X1BootSnap));
+	if (!s)
+		return;
+	memcpy(s->ram, mem_, 0x10000);
+	s->regs = cpu_->r;
+	s->vectorBase = ctcVectorBase_;
+	s->vectorProgrammed = ctcVectorProgrammed_;
+	memcpy(s->ie, ctcIe_, 4);
+	memcpy(s->expectTc, ctcExpectTc_, 4);
+	memcpy(s->control, ctcControl_, 4);
+	memcpy(s->tc, ctcTc_, 4);
+	memcpy(s->tcValid, ctcTcValid_, sizeof(s->tcValid));
+	memcpy(s->run, ctcRun_, 4);
+	memcpy(s->count, ctcCount_, sizeof(s->count));
+	s->hootPreset = ctcHootPreset_;
+	bootSnap_ = s;
+}
+
+void CHardX1::RestoreBoot()
+{
+	X1BootSnap* s = (X1BootSnap*)bootSnap_;
+	if (!s || !mem_ || !cpu_)
+		return;
+	memcpy(mem_, s->ram, 0x10000);
+	cpu_->r = s->regs;
+	cpu_->r.iff1 = 0;
+	cpu_->r.iff2 = 0;
+	ctcVectorBase_ = s->vectorBase;
+	ctcVectorProgrammed_ = s->vectorProgrammed;
+	memcpy(ctcIe_, s->ie, 4);
+	memcpy(ctcExpectTc_, s->expectTc, 4);
+	memcpy(ctcControl_, s->control, 4);
+	memcpy(ctcTc_, s->tc, 4);
+	memcpy(ctcTcValid_, s->tcValid, sizeof(s->tcValid));
+	memcpy(ctcRun_, s->run, 4);
+	memcpy(ctcCount_, s->count, sizeof(s->count));
+	ctcHootPreset_ = s->hootPreset;
+	memset(ctcPending_, 0, sizeof(ctcPending_));
+	memset(ctcNext_, 0, sizeof(ctcNext_));
+	playCmdLatch_ = 0;
+	playSongLatch_ = 0;
+	playSongLatchF_ = 0;
+	playCmdHoldIrqs_ = 0;
+}
+
+int CHardX1::PulseCatalogToggle(unsigned titleCode)
+{
+	const unsigned lo = titleCode & 0xffu;
+	const unsigned top = (titleCode >> 24) & 0xffu;
+	if (lo != 0xFFu && top != 0xFFu)
+		return 0;
+	int known = 0;
+	if (initPc_ == 0xFA00 && mdataAddr_ == 0x5C00 && !psgOnly_)
+		known = 1;
+	else if (initPc_ == 0xF000 && mdataAddr_ == 0
+		&& mem_[0xF04B] == 0xFE && mem_[0xF04C] == 0xFF)
+		known = 1;
+	else if (initPc_ == 0xE000 && mdataAddr_ == 0
+		&& mem_[0xE024] == 0xFE && mem_[0xE025] == 0xFF)
+		known = 1;
+	else if (initPc_ == 0xF000
+		&& mem_[0xF041] == 0xFE && mem_[0xF042] == 0xFF
+		&& mem_[0xF05B] == 0xD6 && mem_[0xF05C] == 0x02)
+		known = 1;
+	if (!known)
+		return 0;
+	if (initPc_ == 0xFA00 && mdataAddr_ == 0x5C00 && !psgOnly_ && mem_) {
+		/* 演奏 ISR は ($60A5) を毎 tick 見る。残った play ラッチは PATCH が
+		   直後に ($60A5)=FF を書き戻してトグルを消す。 */
+		mem_[0x60A5] ^= 0xFF;
+		/* ISR は 60A5|60A6|60A7 が全部 0 のときだけ食料空。片方だけだと分岐が動かない。 */
+		mem_[0x60A6] = 0;
+		mem_[0x60A7] = 0;
+		playCmdLatch_ = 0;
+		playSongLatch_ = 0;
+		playCmdHoldIrqs_ = 0;
+		return 1;
+	}
+	X1ParkPatchWait(this);
+	/* PATCH wait の `IN A,(1); CP FF` に載せる。RAM 直書きは今の曲が読まない。 */
+	playCmdLatch_ = 0x01;
+	playSongLatch_ = 0xFF;
+	playCmdHoldIrqs_ = 90;
+	return 1;
 }
 
 /* CHardX1::OpmWrites の実装 */
@@ -1409,6 +1763,8 @@ int CHardX1::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode
 	int vdataAddr = CEmuParseOptHex(ge, "vdata_addr", -1);
 	int vdataSize = CEmuParseOptHex(ge, "vdata_size", 0);
 	if (vdataSize <= 0) vdataSize = CEmuParseOptHex(ge, "vfile_size", 0);
+	vdataAddr_ = vdataAddr;
+	vdataSize_ = vdataSize;
 	int hasMdataOpt = 0, hasBgmRom = 0;
 	for (int i = 0; i < ge->optCount; i++) {
 		if (_stricmp(ge->opt[i].name, "mdata_addr") == 0) {
@@ -1497,64 +1853,23 @@ int CHardX1::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode
 			bgmBankSize_[idx] = n;
 			bgmPresent_[idx] = 1;
 		} else if (isVoice) {
-			/* Falcom: 選択トラックだけ vdata_addr にボイス下地。コードパスがその上へ PR.NO0 等を載せる（xana2opm）。 */
-			int vaddr = vdataAddr;
-			int vsize = vdataSize;
-			if (vsize <= 0) vsize = CEmuParseOptHex(ge, "vfile_size", (int)sz);
-			if (vaddr < 0) continue;
-			uint8_t song = 0, bank = 0;
-			UnpackTitle(titleCode, &song, &bank, ydosRom_);
+			/* 全ボイスを保持。Load 時に vdata へ載せると PR.NO0 ブート stub を踏み、
+			   OverlayTitle で家族を切り替えられない。TriggerPlay が StageVoice する。 */
 			int idx = r->offset;
 			if (idx < 0) idx = 0;
-			/* Ending は PR.NO2（offset 1）を下地にする。PATCH は pass1 なのでここでは指紋を使わない。 */
-			if (initPc_ == 0xFA00 && mdataAddr_ == 0x5C00
-				&& ((titleCode & 0xffu) == 0x1Bu || (titleCode & 0xffu) == 0xFFu)) {
-				if (idx != 1)
-					continue;
-			} else if (idx != (int)song && idx != (int)bank)
-				continue;
-			int dest = vaddr;
-			if (dest < 0 || dest >= 0x10000) continue;
+			if (idx >= 128) continue;
 			unsigned n = sz;
-			if (vsize > 0 && (unsigned)vsize < n) n = (unsigned)vsize;
-			if (dest + (int)n > 0x10000) n = (unsigned)(0x10000 - dest);
-			if ((int)mdataAddr_ > dest) {
-				unsigned cap = (unsigned)((int)mdataAddr_ - dest);
-				if (n > cap) n = cap;
-			}
-			memcpy(mem_ + dest, data, n);
+			if (n > (unsigned)BGM_SIZE) n = (unsigned)BGM_SIZE;
+			unsigned char* buf = (unsigned char*)malloc(n ? n : 1);
+			if (!buf) continue;
+			memcpy(buf, data, n);
+			if (voiceBank_[idx]) free(voiceBank_[idx]);
+			voiceBank_[idx] = buf;
+			voiceBankSize_[idx] = n;
+			voicePresent_[idx] = 1;
 		}
 	}
 	} /* パス */
-
-	/* Falcom xana2 PSG: カタログコードは常に PR.NO2 @0。系統 hi>=3 は一致するボイス PR.NOx をプレーヤとして残す — pass1 が PR.NO2 を載せボス／エンディングが別エンジン（SILENT）。OPM xml は PR.NO0 @ $1000。$0000 へ PR.NO3 の 0x5c00 を載せるとその stub が消える（系統 3 タイトル全部 SILENT）。 */
-	if (psgOnly_ && vdataAddr == 0 && vdataSize > 0) {
-		const unsigned lo = titleCode & 0xffu;
-		const unsigned hi = (titleCode >> 24) & 0xffu;
-		const unsigned mid = (titleCode >> 8) & 0xffffu;
-		if (mid == 0 && hi >= 3u && hi <= 5u) {
-			for (int i = 0; i < ge->romCount; i++) {
-				const CEmuRomEntry* r = &ge->rom[i];
-				if (_stricmp(r->type, "voice") != 0 && _stricmp(r->type, "vdata") != 0)
-					continue;
-				if (r->offset != (int)lo)
-					continue;
-				unsigned sz = 0;
-				const unsigned char* data = CEmuZipFsFind(fs, r->name, &sz);
-				if (!data || !sz)
-					break;
-				unsigned n = sz;
-				if ((unsigned)vdataSize < n)
-					n = (unsigned)vdataSize;
-				if ((int)mdataAddr_ > 0 && (unsigned)mdataAddr_ < n)
-					n = (unsigned)mdataAddr_;
-				if (n > 0x10000u)
-					n = 0x10000u;
-				memcpy(mem_, data, n);
-				break;
-			}
-		}
-	}
 
 	if (!loadedCode) return 0;
 

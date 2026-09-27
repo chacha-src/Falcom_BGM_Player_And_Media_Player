@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "cemu_hard.h"
 
@@ -130,6 +130,15 @@ public:
 
 	/* hoot oldfalcom Play(): type=prog をコピーし E00E..E014 と RAM フラグを植える */
 	void ApplyFalcomPlay();
+	int FalcomType() const { return falcomType_; }
+	/* IPL が E000 を壊したあとも poll に戻れるよう、ロード直後の PATCH を戻す */
+	void RestoreFalcomPatch();
+	/* ブート完了（曲を載せる前）の RAM と CPU。曲ごとにここへ戻してから再生する */
+	void CaptureFalcomBoot();
+	void RestoreFalcomBoot();
+	/* Xanadu2 IPL（drv 6 mkII 編曲）。PATCH JP せず $0116 へ載せ RTC を止める */
+	int FalcomIpl() const { return falcomIpl_; }
+	int EnterFalcomIpl();
 
 	/* PATCH コマンド待ち PC（page0 stub または Falcom E027）。無ければ -1 */
 	int CmdPollPc() const;
@@ -278,6 +287,11 @@ private:
 
 	/* hoot OldFalcomDriver: 0 なし、1 XANADU、2 XANADU2、3 ASTEKA2 */
 	int falcomType_;
+	int falcomIpl_;
+	int falcomRtcKeep_;
+	unsigned falcomPatchLen_;
+	unsigned char falcomPatch_[256];
+	void* falcomBootSnap_;
 
 	/* 直接 CALL 再生: 基点（PLAY88/C000/PROG2）、任意の +init オフセット（Game Arts +6）、
 	   基点 CALL 後に EI するか */

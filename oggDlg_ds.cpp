@@ -433,6 +433,32 @@ static BOOL OggJoinDropPosted(const MSG& msg)
 	return FALSE;
 }
 
+/* Join 中に Dispatch すると play() が入れ子になるので今は処理しない。
+   捨てると、停止中のダブルクリックや途中再生の確認が二度と届かない。
+   待ちが終わってから同じ順で戻す。 */
+static BOOL OggJoinKeepForLater(const MSG& msg)
+{
+	switch (msg.message) {
+	case WM_COMMAND:
+	case WM_OGG_RESUME_PROMPT:
+		return TRUE;
+	default:
+		break;
+	}
+	if (msg.message == WM_LBUTTONDOWN || msg.message == WM_LBUTTONUP
+		|| msg.message == WM_LBUTTONDBLCLK
+		|| msg.message == WM_RBUTTONDOWN || msg.message == WM_RBUTTONUP
+		|| msg.message == WM_RBUTTONDBLCLK
+		|| msg.message == WM_MBUTTONDOWN || msg.message == WM_MBUTTONUP
+		|| msg.message == WM_MBUTTONDBLCLK)
+		return TRUE;
+	if (msg.message >= WM_NCLBUTTONDOWN && msg.message <= WM_NCMBUTTONDBLCLK)
+		return TRUE;
+	if (msg.message >= WM_KEYFIRST && msg.message <= WM_KEYLAST)
+		return TRUE;
+	return FALSE;
+}
+
 /* WaitForSingleObject は SendMessage を捌かない。KPI/VST/COM は hidden window
    への Post 待ちもあるので、Join 中の UI は sent + posted を回す。
    WAIT_FAILED を成功扱いにすると生存スレッドのまま Closeds して固まる。 */
@@ -449,6 +475,38 @@ BOOL UiWaitHandlePumpSent(HANDLE h, DWORD timeoutMs)
 
 	InterlockedIncrement(&g_inPlaybackJoinPump);
 	struct DecPump { ~DecPump() { InterlockedDecrement(&g_inPlaybackJoinPump); } } dec;
+	struct JoinKept {
+		HWND hwnd; UINT message; WPARAM wParam; LPARAM lParam;
+	};
+	struct JoinKeepInput {
+		JoinKept item[64];
+		int n;
+		JoinKeepInput() : n(0) {}
+		~JoinKeepInput() {
+			bool promptKept = false;
+			bool promptSent = false;
+			for (int i = 0; i < n; ++i) {
+				if (item[i].message == WM_OGG_RESUME_PROMPT)
+					promptKept = true;
+				if (!item[i].hwnd || !::IsWindow(item[i].hwnd))
+					continue;
+				if (::PostMessage(item[i].hwnd, item[i].message, item[i].wParam, item[i].lParam)
+					&& item[i].message == WM_OGG_RESUME_PROMPT)
+					promptSent = true;
+			}
+			if (promptKept && !promptSent)
+				OggNoteResumePromptDropped();
+		}
+		void push(const MSG& msg) {
+			if (n >= 64)
+				return;
+			item[n].hwnd = msg.hwnd;
+			item[n].message = msg.message;
+			item[n].wParam = msg.wParam;
+			item[n].lParam = msg.lParam;
+			++n;
+		}
+	} keep;
 
 	const DWORD t0 = GetTickCount();
 	for (;;) {
@@ -483,8 +541,11 @@ BOOL UiWaitHandlePumpSent(HANDLE h, DWORD timeoutMs)
 			}
 			if (msg.message == WM_TIMERP_VSYNC_TICK || msg.message == WM_SPEANA_TICK)
 				COgg_DropPlaybackUiPostedMsg(msg.message);
-			if (OggJoinDropPosted(msg))
+			if (OggJoinDropPosted(msg)) {
+				if (OggJoinKeepForLater(msg))
+					keep.push(msg);
 				continue;
+			}
 			TranslateMessage(&msg);
 			DispatchMessage(&msg);
 			if (WaitForSingleObject(h, 0) == WAIT_OBJECT_0)

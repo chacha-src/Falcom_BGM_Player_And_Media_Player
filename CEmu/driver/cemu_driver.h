@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include "../cemu_types.h"
 #include "../cemu_zipfs.h"
 
@@ -13,8 +13,12 @@ public:
 	virtual void Close() = 0;
 	virtual int Render(int16_t* stereo, int frames) = 0;
 	virtual int Seek(uint64_t sample) = 0;
-	/* 同一 zip の SE を BGM 再生中に重ねる。メールボックスへ poke。0=非対応 */
+	/* 同一 zip の曲切替／SE。mixSfx=1 なら BGM を降ろさず重ねる。0=非対応 */
 	virtual int OverlayTitle(unsigned titleCode) { (void)titleCode; return 0; }
+	/* このコードを BGM に重ねられるか音源ドライバに聞く。
+	   1=重ねる、0=曲なので置き換える、-1=この基板では分からない。 */
+	virtual int CodeIsOverlay(unsigned titleCode) const { (void)titleCode; return -1; }
+	int overlayMix = 0;
 };
 
 CHard* CEmuHardCreate(const CEmuGameEntry* ge, int sampleRate);

@@ -3,6 +3,7 @@
 #include "cemu_zipfs.h"
 #include "minizip/unzip.h"
 #include "minizip/iowin32.h"
+#include "SevenZipDec.h"
 #include <string.h>
 #include <shlobj.h>
 #include <zstd.h>
@@ -1452,6 +1453,9 @@ void CEmuCatalogGetExeArcdataPath(wchar_t* out, int outChars)
 	if (!GetModuleFileNameW(NULL, exe, MAX_PATH)) return;
 	wchar_t* slash = wcsrchr(exe, L'\\');
 	if (slash) *(slash + 1) = 0;
+	_snwprintf_s(out, (size_t)outChars, _TRUNCATE, L"%sarcdata.7z", exe);
+	if (out[0] && GetFileAttributesW(out) != INVALID_FILE_ATTRIBUTES)
+		return;
 	_snwprintf_s(out, (size_t)outChars, _TRUNCATE, L"%sarcdata.zip", exe);
 }
 
@@ -2350,6 +2354,156 @@ static int CEmuCatalogLoadArcdataZip(CEmuCatalog* cat, const wchar_t* zipPath,
 	return total;
 }
 
+static int CEmuCatalogParse7zIndex(CEmuCatalog* cat, SevenZipArc* a, UInt32 i, const char* fnHint)
+{
+	if (!cat || !a) return 0;
+	const UInt64 usz = SzArEx_GetFileSize(&a->db, i);
+	if (usz == 0 || usz > 16 * 1024 * 1024)
+		return 0;
+	const Byte* data = NULL;
+	size_t sz = 0;
+	if (!SevenZipExtractIndex(a, i, &data, &sz) || !data || sz != (size_t)usz)
+		return 0;
+	static char* s_xmlBuf7 = NULL;
+	static size_t s_xmlCap7 = 0;
+	const size_t need = sz + 4;
+	if (need > s_xmlCap7) {
+		size_t cap = s_xmlCap7 ? s_xmlCap7 : 65536;
+		while (cap < need) {
+			if (cap > (SIZE_MAX / 2)) { cap = need; break; }
+			cap *= 2;
+		}
+		char* neu = (char*)realloc(s_xmlBuf7, cap);
+		if (!neu)
+			return 0;
+		s_xmlBuf7 = neu;
+		s_xmlCap7 = cap;
+	}
+	memcpy(s_xmlBuf7, data, sz);
+	s_xmlBuf7[sz] = 0;
+	wchar_t nameW[512] = {};
+	SevenZipFileNameW(a, i, nameW, 512);
+	char fnUtf8[512] = {};
+	WideCharToMultiByte(CP_UTF8, 0, nameW, -1, fnUtf8, (int)sizeof(fnUtf8), NULL, NULL);
+	const char* dd = NULL;
+	CEmuCatalogXmlDataDirHint(fnHint && fnHint[0] ? fnHint : fnUtf8, &dd);
+	return CEmuCatalogParseBuffer(cat, s_xmlBuf7, dd);
+}
+
+static int CEmuCatalogLoadArcdata7z(CEmuCatalog* cat, const wchar_t* arcPath,
+	CEmuCatalogProgressFn progress, void* progressUser)
+{
+	if (!cat || !arcPath) return 0;
+	SevenZipArc a;
+	if (!SevenZipOpenW(&a, arcPath))
+		return 0;
+
+	struct CEmu7zXmlIx {
+		char norm[256];
+		UInt32 idx;
+	};
+	int ixCap = 256;
+	int ixN = 0;
+	CEmu7zXmlIx* ix = (CEmu7zXmlIx*)malloc(sizeof(CEmu7zXmlIx) * (size_t)ixCap);
+	if (!ix) {
+		SevenZipClose(&a);
+		return 0;
+	}
+	int hootIdx = -1;
+	for (UInt32 i = 0; i < a.db.NumFiles; i++) {
+		if (SzArEx_IsDir(&a.db, i))
+			continue;
+		wchar_t nameW[512] = {};
+		if (!SevenZipFileNameW(&a, i, nameW, 512) || !nameW[0])
+			continue;
+		char fn[512] = {};
+		if (!WideCharToMultiByte(CP_UTF8, 0, nameW, -1, fn, (int)sizeof(fn), NULL, NULL) || !fn[0])
+			continue;
+		const size_t fl = strlen(fn);
+		if (fl < 5 || _stricmp(fn + fl - 4, ".xml") != 0)
+			continue;
+		if (ixN >= ixCap) {
+			int nc = ixCap * 2;
+			if (nc < ixCap) break;
+			CEmu7zXmlIx* neu = (CEmu7zXmlIx*)realloc(ix, sizeof(CEmu7zXmlIx) * (size_t)nc);
+			if (!neu) break;
+			ix = neu;
+			ixCap = nc;
+		}
+		CEmuCatalogNormZipPath(fn, ix[ixN].norm, (int)sizeof(ix[ixN].norm));
+		ix[ixN].idx = i;
+		if (hootIdx < 0 && CEmuCatalogZipPathEq(ix[ixN].norm, "hoot.xml"))
+			hootIdx = ixN;
+		ixN++;
+	}
+
+	char (*hootLists)[256] = NULL;
+	int hootN = 0;
+	if (hootIdx >= 0) {
+		const UInt32 hi = ix[hootIdx].idx;
+		const UInt64 usz = SzArEx_GetFileSize(&a.db, hi);
+		const Byte* data = NULL;
+		size_t sz = 0;
+		if (usz > 0 && usz <= 4 * 1024 * 1024 && SevenZipExtractIndex(&a, hi, &data, &sz)
+			&& data && sz == (size_t)usz) {
+			char* hootBuf = (char*)malloc(sz + 4);
+			if (hootBuf) {
+				memcpy(hootBuf, data, sz);
+				hootBuf[sz] = 0;
+				hootLists = (char (*)[256])malloc(sizeof(*hootLists) * 1024);
+				if (hootLists)
+					hootN = CEmuCatalogParseHootLists(hootBuf, hootLists, 1024);
+				free(hootBuf);
+			}
+		}
+	}
+
+	int xmlN = hootN;
+	if (xmlN <= 0)
+		xmlN = ixN;
+
+	int total = 0, done = 0;
+	unsigned char* used = (unsigned char*)calloc((size_t)ixN + 1, 1);
+	if (!used) {
+		free(hootLists);
+		free(ix);
+		SevenZipClose(&a);
+		return 0;
+	}
+
+	for (int i = 0; i < hootN; i++) {
+		if (!hootLists[i][0]) continue;
+		if (_stricmp(hootLists[i], "hoot.xml") == 0) continue;
+		int found = -1;
+		for (int k = 0; k < ixN; k++) {
+			if (CEmuCatalogZipPathEq(ix[k].norm, hootLists[i])) {
+				found = k;
+				break;
+			}
+		}
+		if (found < 0) continue;
+		total += CEmuCatalogParse7zIndex(cat, &a, ix[found].idx, hootLists[i]);
+		used[found] = 1;
+		done++;
+		CEmuCatalogProgress(progress, progressUser, done, xmlN > 0 ? xmlN : 1);
+	}
+	free(hootLists);
+	hootLists = NULL;
+
+	for (int k = 0; k < ixN; k++) {
+		if (used[k]) continue;
+		if (CEmuCatalogZipPathEq(ix[k].norm, "hoot.xml"))
+			continue;
+		total += CEmuCatalogParse7zIndex(cat, &a, ix[k].idx, ix[k].norm);
+		done++;
+		CEmuCatalogProgress(progress, progressUser, done, xmlN > 0 ? xmlN : 1);
+	}
+	free(used);
+	free(ix);
+	SevenZipClose(&a);
+	return total;
+}
+
 int CEmuCatalogCacheIsCurrent(const wchar_t* dataRoot)
 {
 	wchar_t parent[MAX_PATH];
@@ -2409,8 +2563,12 @@ int CEmuCatalogLoadEx(CEmuCatalog* cat, const wchar_t* dataRoot,
 		return cat->count;
 	}
 
-	if (chosenArc[0])
-		CEmuCatalogLoadArcdataZip(cat, chosenArc, progress, progressUser);
+	if (chosenArc[0]) {
+		if (SevenZipPathIs7zW(chosenArc))
+			CEmuCatalogLoadArcdata7z(cat, chosenArc, progress, progressUser);
+		else
+			CEmuCatalogLoadArcdataZip(cat, chosenArc, progress, progressUser);
+	}
 
 	/* Any directory under dataRoot (and its parent) that contains *.xml —
 	   not only the historical "xml" / "xml2" names. Users add xml3/custom/…. */
@@ -2938,7 +3096,7 @@ int CEmuTitleLooksLikeSfx(const wchar_t* label)
 		s++;
 	if (!s[0])
 		return 0;
-	/* [SE] / [SFX] / 【SE】 */
+	/* [SE] / [SFX] / 【SE】 — Voice/EFX 文字列は見ない */
 	if (s[0] == L'[' || s[0] == 0x3010) {
 		const wchar_t a = CEmuTitleFoldAscii(s[1]);
 		const wchar_t b = CEmuTitleFoldAscii(s[2]);
@@ -2978,6 +3136,81 @@ int CEmuTitleLooksLikeSfx(const wchar_t* label)
 			return 1;
 	}
 	return 0;
+}
+
+int CEmuGameTitleCodeIsMixOverlay(const CEmuGameEntry* ge, unsigned code)
+{
+	if (!ge || !ge->title || ge->titleCount <= 0)
+		return 0;
+	for (int i = 0; i < ge->titleCount; i++) {
+		if (ge->title[i].code != code)
+			continue;
+		const wchar_t* lab = ge->title[i].label;
+		return (CEmuTitleLooksLikeSfx(lab) && !CEmuTitleLooksLikeExclusiveSfx(lab))
+			? 1 : 0;
+	}
+	return 0;
+}
+
+int CEmuTitleLooksLikeExclusiveSfx(const wchar_t* label)
+{
+	if (!CEmuTitleLooksLikeSfx(label))
+		return 0;
+	if (!label || !label[0])
+		return 0;
+	for (const wchar_t* p = label; *p; p++) {
+		if (CEmuTitleFoldAscii(p[0]) == L'J' && CEmuTitleFoldAscii(p[1]) == L'I'
+			&& CEmuTitleFoldAscii(p[2]) == L'N' && CEmuTitleFoldAscii(p[3]) == L'G'
+			&& CEmuTitleFoldAscii(p[4]) == L'L' && CEmuTitleFoldAscii(p[5]) == L'E')
+			return 1;
+		if (CEmuTitleFoldAscii(p[0]) == L'F' && CEmuTitleFoldAscii(p[1]) == L'A'
+			&& CEmuTitleFoldAscii(p[2]) == L'N' && CEmuTitleFoldAscii(p[3]) == L'F'
+			&& CEmuTitleFoldAscii(p[4]) == L'A' && CEmuTitleFoldAscii(p[5]) == L'R')
+			return 1;
+		if (CEmuTitleFoldAscii(p[0]) == L'S' && CEmuTitleFoldAscii(p[1]) == L'T'
+			&& CEmuTitleFoldAscii(p[2]) == L'I' && CEmuTitleFoldAscii(p[3]) == L'N'
+			&& CEmuTitleFoldAscii(p[4]) == L'G')
+			return 1;
+		if (CEmuTitleFoldAscii(p[0]) == L'R' && CEmuTitleFoldAscii(p[1]) == L'E'
+			&& CEmuTitleFoldAscii(p[2]) == L'P' && CEmuTitleFoldAscii(p[3]) == L'L'
+			&& CEmuTitleFoldAscii(p[4]) == L'A' && CEmuTitleFoldAscii(p[5]) == L'C')
+			return 1;
+		if (CEmuTitleFoldAscii(p[0]) == L'E' && CEmuTitleFoldAscii(p[1]) == L'X'
+			&& CEmuTitleFoldAscii(p[2]) == L'C' && CEmuTitleFoldAscii(p[3]) == L'L')
+			return 1;
+		/* ゲームオーバー */
+		if (p[0] == 0x30B2 && p[1] == 0x30FC && p[2] == 0x30E0
+			&& p[3] == 0x30AA && p[4] == 0x30FC && p[5] == 0x30D0)
+			return 1;
+		/* ジングル */
+		if (p[0] == 0x30B8 && p[1] == 0x30F3 && p[2] == 0x30B0 && p[3] == 0x30EB)
+			return 1;
+		/* ファンファーレ */
+		if (p[0] == 0x30D5 && p[1] == 0x30A1 && p[2] == 0x30F3 && p[3] == 0x30D5)
+			return 1;
+	}
+	for (const wchar_t* p = label; *p; p++) {
+		if (CEmuTitleFoldAscii(p[0]) == L'G' && CEmuTitleFoldAscii(p[1]) == L'A'
+			&& CEmuTitleFoldAscii(p[2]) == L'M' && CEmuTitleFoldAscii(p[3]) == L'E') {
+			const wchar_t* q = p + 4;
+			while (*q == L' ' || *q == L'\t' || *q == L'-')
+				q++;
+			if (CEmuTitleFoldAscii(q[0]) == L'O' && CEmuTitleFoldAscii(q[1]) == L'V'
+				&& CEmuTitleFoldAscii(q[2]) == L'E' && CEmuTitleFoldAscii(q[3]) == L'R')
+				return 1;
+		}
+	}
+	return 0;
+}
+
+int CEmuGameTitleLooksLikeExclusiveSfx(const CEmuGameEntry* ge, unsigned titleIndex1)
+{
+	wchar_t lab[CEMU_GAME_NAME];
+	lab[0] = 0;
+	if (titleIndex1 == 0)
+		titleIndex1 = 1;
+	CEmuGameTitleAt(ge, (int)titleIndex1 - 1, NULL, lab, (int)_countof(lab));
+	return CEmuTitleLooksLikeExclusiveSfx(lab);
 }
 
 int CEmuGameTitleLooksLikeSfx(const CEmuGameEntry* ge, unsigned titleIndex1)

@@ -322,7 +322,7 @@ int CEmuMdxRender(CEmuMdxPlayer* p, short* outStereo, int sampleFrames)
 			FmMonShadowPcmNote(i, sum ? 60 : 0, sum ? 1 : 0);
 		}
 	}
-	FmMonShadowFlushKeysOnly(0);
+	/* Flush は readcemu が一回だけ。ここで出すと seq が二重になりモニタが噛む。 */
 	return (int)want;
 }
 

@@ -1,4 +1,4 @@
-﻿// 外部プラグイン列挙（exe 配下を KPI と同じ再帰で走査）
+// 外部プラグイン列挙（exe 配下を KPI と同じ再帰で走査）
 // 候補: in_*.dll / xmp-*.dll / 名前に aimp / または PE に入力系エクスポートがある DLL
 #include "stdafx.h"
 #include "PluginKinds.h"
@@ -31,6 +31,17 @@ static int ForeignIs64(const CString& path)
 {
 	WORD m = ForeignGetPeMachine(path);
 	return (m == IMAGE_FILE_MACHINE_AMD64 || m == IMAGE_FILE_MACHINE_ARM64) ? 1 : 0;
+}
+
+int PluginForeign_MatchesHostArch(const wchar_t* path)
+{
+	if (!path || !path[0]) return 0;
+	WORD m = ForeignGetPeMachine(CString(path));
+#ifdef _WIN64
+	return (m == IMAGE_FILE_MACHINE_AMD64 || m == IMAGE_FILE_MACHINE_ARM64) ? 1 : 0;
+#else
+	return (m == IMAGE_FILE_MACHINE_I386) ? 1 : 0;
+#endif
 }
 
 static int ForeignLooksWinampName(const CString& name)

@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include <afx.h>
 
 // exe 配下（plug / plugloop と同じ再帰）の各ディレクトリ内候補 DLL を台帳へ追加。
@@ -14,3 +14,6 @@ int PluginForeign_IsCandidatePath(const CString& name, const CString& path);
 
 // 読み込み進捗 1 件分（oggDlg 側実装）
 void OggPluginLoadOnOneFileDone();
+
+/* 1=本体と同じ PE。異アーキは LoadLibrary しない（DllMain で止まる）。 */
+int PluginForeign_MatchesHostArch(const wchar_t* path);

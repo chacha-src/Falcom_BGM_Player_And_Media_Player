@@ -89,8 +89,8 @@ int CDriverPcat::Render(int16_t* stereo, int frames)
 	}
 	const int rate = hostRate_ > 0 ? hostRate_ : 44100;
 	if (cpuHz_ < 1 || rate < 1) return 0;
-	/* チャンク単位でポンプ＋混成。サンプル毎 PumpCycles は silp/AIL で実時間を超える */
-	const int chunk = 512;
+	/* レジスタ書きと音声を同じ時間軸へ。512 は ISR 数ティック分を先頭に固めてボコボコになる */
+	const int chunk = 32;
 	for (int i = 0; i < frames; ) {
 		const int n = (frames - i > chunk) ? chunk : (frames - i);
 		cpuAcc_ += (int64_t)cpuHz_ * (int64_t)n;

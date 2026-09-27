@@ -1,16 +1,9 @@
-﻿#include "StdAfx.h"
+#include "StdAfx.h"
 #include "cemu_driver_x1.h"
 #include "../chip/cemu_chip_opm.h"
 #include "../chip/cemu_chip_ay.h"
 #include "../z80/Ay_Cpu.h"
 #include <string.h>
-
-enum {
-	/* hoot mucomx1: TIMER = 256*18 CPU タイムライン。プリスケールは既にこの定数。
-   ここで CPU/2 を重ねると Sorcerian の割り込みと曲テンポが半減する。
-   IM2 ベクタは CTC（ch0/ch3）か XML ctcN。固定 RST ではない。 */
-	X1_TIMER_CYCLES = 256 * 18
-};
 
 /* IM2 先を解決。NCS gaia/hayato は I*256+N に JP <handler> を置く（コードであり表ではない）。
    ワードフェッチすると C3 xx をアドレス xxc3 と誤読する。 */
@@ -26,7 +19,7 @@ static uint16_t X1Im2Target(Ay_Cpu* cpu, uint8_t vector)
 	return Ay_CpuIm2Target(cpu, vector);
 }
 
-/* X1 ドライバ: CTC 周期は mucomx1 既定 */
+/* X1 ドライバ: 割り込み周期は CHardX1 の CTC が持つ */
 CDriverX1::CDriverX1()
 	: hw_(NULL)
 	, hostRate_(44100)
@@ -40,16 +33,10 @@ CDriverX1::CDriverX1()
 	, opmResidual_(0)
 	, ayResidual_(0)
 	, cpuAcc_(0)
-	, nextTimer_(0)
-	, nextVsync_(0)
-	, timerPeriod_(X1_TIMER_CYCLES)
-	, vsyncPeriod_(4000000 / 60)
-	, ctc3Div_(0)
 	, cpuDebt_(0)
 	, timerIrqs_(0)
 	, vsyncIrqs_(0)
 {
-	memset(ctcPending_, 0, sizeof(ctcPending_));
 }
 
 /* 後始末 */
@@ -90,60 +77,19 @@ void CDriverX1::TickChips(uint64_t cpuCycles)
 	}
 }
 
-/* CTC プログラム値からホストタイマ周期を同期 */
-void CDriverX1::SyncTimerPeriodFromCtc()
-{
-	if (!hw_) return;
-	for (int ch = 0; ch < 3; ch++) {
-		const unsigned p = hw_->CtcTimerPeriodCycles(ch);
-		if (p > 0) {
-			timerPeriod_ = (uint64_t)p;
-			return;
-		}
-	}
-}
-
-/* CTC ch と VSYNC を 1 本ずつ IM2 で届ける */
+/* CTC を now まで進め、保留中の INT を 1 本 IM2 で届ける */
 void CDriverX1::DeliverIrqs(uint64_t now)
 {
-	SyncTimerPeriodFromCtc();
 	if (!hw_ || !hw_->Cpu()) return;
 	hw_->ArmTelenetPlayGate();
 	Ay_Cpu* cpu = hw_->Cpu();
-	/* ここで tick 予定を進め、経過周期数を残す。長い DI/HALT で連射してはいけないが、
-	   下の ch3 カスケードは通過した ZC0 パルスを全部見る必要がある。 */
-	int timerDue = 0;
-	uint64_t timerTicks = 0;
-	if (timerPeriod_ > 0 && now >= nextTimer_) {
-		timerDue = 1;
-		timerTicks = 1;
-		while (nextTimer_ + timerPeriod_ <= now) {
-			nextTimer_ += timerPeriod_;
-			timerTicks++;
-		}
-		nextTimer_ += timerPeriod_;
-	}
-	const int vsyncDue = (vsyncPeriod_ > 0 && now >= nextVsync_) ? 1 : 0;
+	/* 割り込み源は CTC だけ。各チャネルは自分の周期で数え、IE 付きの満了は受理されるまで
+	   ctcPending_ に残る。DI 中や EI 直後の 1 命令窓に来た tick も捨てずに後で届くので、
+	   長い ISR の裏で ch0 が抜けたり、ch3 と同時の ch0 が落ちたりしない。 */
+	const unsigned vsyncTicks = hw_->CtcRun(now);
 
-	/* X1（と CZ-8BS1）は CTC ZC0 を TRG3 へ配線。ch3 カウンタは ch0 タイマ出力を分周し、
-	   独立ソースではない。SORCERIAN は ch0=プリスケール 256×TC 18（868Hz）、ch3=カウンタ TC 15。 */
-	const unsigned ctc3Count = hw_->CtcTimerPeriodCycles(0) > 0
-		? hw_->CtcCounterTc(3) : 0u;
-	if (ctc3Count > 0) {
-		ctc3Div_ += timerTicks;
-		if (ctc3Div_ >= ctc3Count) {
-			ctc3Div_ %= ctc3Count;
-			/* ch3 は常に ZC0 端（ch0 と同時）で満了。実機デイジーチェーンは ch3 INT を保持するので、捨てずにラッチする。 */
-			ctcPending_[3] = 1;
-		}
-	} else if (vsyncDue) {
-		/* ホスト VSYNC は周期あたり 1 発 */
-	}
-
-	const int ch3Due = (ctc3Count > 0) ? ctcPending_[3] : vsyncDue;
-
-	/* 再生コマンド保持を ch3/VSYNC 満了ごとに減衰（~60Hz → 90 ≈ 1.5s） */
-	if (ch3Due && hw_->playCmdHoldIrqs_ > 0) {
+	/* 再生コマンド保持を VSYNC 互換線（60Hz）で減衰（90 ≈ 1.5s）。ゲストの CTC 設定に依らない */
+	if (vsyncTicks && hw_->playCmdHoldIrqs_ > 0) {
 		hw_->playCmdHoldIrqs_--;
 		if (hw_->playCmdHoldIrqs_ == 0) {
 			hw_->playCmdLatch_ = 0;
@@ -154,49 +100,33 @@ void CDriverX1::DeliverIrqs(uint64_t now)
 		}
 	}
 
-	/* CTC が組んだ IM2 ベクタ（hoot mucomx1: ch0→TIMER、ch3→VSYNC）。ゲストが CTC を
-	   組んだら各チャネル IE を尊重。IE 無視で両ホスト源を入れると Falcom が倍速になる。 */
-	const int ctcProgrammed = hw_->CtcVectorProgrammed();
-	const int guestCtc = ctcProgrammed
-		|| hw_->CtcTimerPeriodCycles(0) > 0
-		|| hw_->CtcTimerPeriodCycles(1) > 0
-		|| hw_->CtcTimerPeriodCycles(2) > 0
-		|| hw_->CtcIe(1) || hw_->CtcIe(2);
-	const int extraCtc = guestCtc && !(hw_->CtcIe(0) && hw_->CtcIe(3));
-
-	/* ch0 はエッジ（sticky ではない）なので ch3 同時 tick でも Telenet/Falcom と同じく落とす。
-	   ch1/ch2 は sticky で、タイマ端を共有しても sc/crimson が飢えない。 */
-	if (timerDue && extraCtc) {
-		if (hw_->CtcIe(1)) ctcPending_[1] = 1;
-		if (hw_->CtcIe(2)) ctcPending_[2] = 1;
-	}
-
-	int irq[4];
-	irq[0] = timerDue && (guestCtc ? hw_->CtcIe(0) : 1);
-	irq[1] = extraCtc ? (ctcPending_[1] && hw_->CtcIe(1)) : 0;
-	irq[2] = extraCtc ? (ctcPending_[2] && hw_->CtcIe(2)) : 0;
-	irq[3] = guestCtc ? (ch3Due && hw_->CtcIe(3)) : ch3Due;
-
-	/* euphory は IM 2 前に $112 で EI。page0 は JP $100 再起動スタブ。ホストが IM0 RST 38 で
-	   tick すると初期化を抜けない。キュー済み tick も捨て、後で IM2 がそのスタブへ飛ばないようにする。 */
+	/* euphory は IM 2 前に $112 で EI。page0 は JP $100 再起動スタブ。IM0 の間に RST 38 で
+	   tick すると初期化を抜けない。保留中の要求も捨て、後で IM2 がそのスタブへ飛ばないようにする。 */
 	if (cpu->r.im == 0) {
-		memset(ctcPending_, 0, sizeof(ctcPending_));
-		irq[0] = irq[1] = irq[2] = irq[3] = 0;
-	} else if (!cpu->r.iff1) {
-		irq[0] = irq[1] = irq[2] = irq[3] = 0;
-	} else if (cpu->r.im == 2) {
+		memset(hw_->ctcPending_, 0, sizeof(hw_->ctcPending_));
+		return;
+	}
+	/* hoot 互換プリセット中（ゲストが CTC 未設定）の要求は hoot の raise→lower と同じパルス。
+	   この命令で受理されなければ捨てる。 */
+	const int pulse = hw_->CtcHootPreset();
+	if (!cpu->r.iff1) {
+		if (pulse)
+			memset(hw_->ctcPending_, 0, sizeof(hw_->ctcPending_));
+		return;
+	}
+	if (cpu->r.im == 2) {
 		for (int ch = 0; ch < 4; ch++) {
-			if (!irq[ch]) continue;
+			if (!hw_->ctcPending_[ch]) continue;
 			const uint16_t tgt = X1Im2Target(cpu, hw_->CtcVector(ch));
 			/* euphory の page0 IM2 は JP $100（PROG00 再起動）に続く。<$200 全体は飛ばさない — JESUS は ISR を置く。 */
 			if (tgt == 0 || tgt == 0x0100)
-				irq[ch] = 0;
+				hw_->ctcPending_[ch] = 0;
 		}
 	}
 
 	/* Laplace 初期化は $9BC4 の duration を 0 のまま。DEC が $FF に回り、最初の F0 が 256 tick 待つ。
 	   アクティブチャネルをプライムして初回 ISR がフェッチできるようにする。 */
-	if (hw_->laplaceCtcF_ && cpu->r.iff1) {
+	if (hw_->laplaceCtcF_) {
 		uint8_t* mem = hw_->Mem();
 		if (mem && mem[0x8709] && mem[0x80A2] == 0 && mem[0x80A3] == 0) {
 			const uint8_t mask = mem[0x8709];
@@ -208,7 +138,7 @@ void CDriverX1::DeliverIrqs(uint64_t now)
 	}
 
 	/* mars: ブートが EI してメールボックスを待つ。PATCH が PROG の play を CALL して戻るまで tick を止め、
-	   最初の vsync が $4A6B 内から $41FF に入り RETI しないのを防ぐ。 */
+	   最初の ch3 が $4A6B 内から $41FF に入り RETI しないのを防ぐ。 */
 	if (hw_->marsHoldIrq_) {
 		const uint16_t pc = cpu->r.pc;
 		if (triggered_ && pc >= 0x4100u && pc < 0x6000u)
@@ -216,37 +146,31 @@ void CDriverX1::DeliverIrqs(uint64_t now)
 		if (hw_->marsSeenProg_ && pc < 0x100u)
 			hw_->marsPlayReady_ = 1;
 		if (!hw_->marsPlayReady_) {
-			memset(ctcPending_, 0, sizeof(ctcPending_));
-			irq[0] = irq[1] = irq[2] = irq[3] = 0;
+			memset(hw_->ctcPending_, 0, sizeof(hw_->ctcPending_));
+			return;
 		}
 	}
 
-	/* 先に ZC0→TRG3（Telenet ch3 シーケンサ）、次に ch2（sc）、ch0（Falcom ys2 $2713）、最後に ch1。
-	   ys2 は ch0+ch1 を許可。ch1 を先に取ると $2704 カウントダウンだけ走り曲が飢える。 */
+	/* Zilog CTC のデイジーチェーン優先は ch0 > ch1 > ch2 > ch3。同時に満了した低位チャネルは
+	   保留のまま、上位 ISR の RETI／EI の後で届く（ys2: ch0 の $2713 が ch1 の $2704 より先）。 */
 	int take = -1;
-	if (irq[3]) take = 3;
-	else if (irq[2]) take = 2;
-	else if (irq[0]) take = 0;
-	else if (irq[1]) take = 1;
-	if (take >= 0) {
-		ctcPending_[take] = 0;
-		if (take == 3) vsyncIrqs_++;
-		else timerIrqs_++;
-		if (cpu->r.im == 2) {
-			/* Laplace 待ちループの EI は irqDelay を残す。その 1 命令窓の vsync は唯一の tick 源を落とす。 */
-			if (hw_->laplaceCtcF_ && take == 3)
-				cpu->irqDelay = 0;
-			Ay_CpuIm2InterruptTo(cpu, X1Im2Target(cpu, hw_->CtcVector(take)));
-		}
-		else
-			Ay_CpuIm1Interrupt(cpu);
-	}
-
-	if (vsyncDue && vsyncPeriod_ > 0) {
-		while (nextVsync_ + vsyncPeriod_ <= now)
-			nextVsync_ += vsyncPeriod_;
-		nextVsync_ += vsyncPeriod_;
-	}
+	for (int ch = 0; ch < 4 && take < 0; ch++)
+		if (hw_->ctcPending_[ch]) take = ch;
+	if (take < 0)
+		return;
+	/* EI 直後（irqDelay）は CPU が受理しないので、要求は残して次の命令で再試行 */
+	int taken;
+	if (cpu->r.im == 2)
+		taken = Ay_CpuIm2InterruptTo(cpu, X1Im2Target(cpu, hw_->CtcVector(take))) ? 1 : 0;
+	else
+		taken = Ay_CpuIm1Interrupt(cpu) ? 1 : 0;
+	if (pulse)
+		memset(hw_->ctcPending_, 0, sizeof(hw_->ctcPending_));
+	if (!taken)
+		return;
+	hw_->ctcPending_[take] = 0;
+	if (take == 3) vsyncIrqs_++;
+	else timerIrqs_++;
 }
 
 /* Z80 を endCycle まで進める。HALT は次 IRQ まで飛ばす */
@@ -259,13 +183,12 @@ void CDriverX1::RunUntil(uint64_t endCycle)
 	while ((uint64_t)cpu->time64() < endCycle && guard++ < 4000000) {
 		const uint64_t now = (uint64_t)cpu->time64();
 		DeliverIrqs(now);
-		/* HALT: 次のタイマ/vsync/サンプルへ時刻を飛ばし、IRQ を実時間に保つ */
+		/* HALT: 次の CTC 満了かサンプル期限へ時刻を飛ばし、IRQ を実時間に保つ */
 		if (cpu->get_mem() && cpu->get_mem()[cpu->r.pc] == 0x76) {
 			uint64_t wake = endCycle;
-			if (timerPeriod_ > 0 && nextTimer_ > now && nextTimer_ < wake)
-				wake = nextTimer_;
-			if (vsyncPeriod_ > 0 && nextVsync_ > now && nextVsync_ < wake)
-				wake = nextVsync_;
+			const uint64_t ctcWake = hw_->CtcNextEvent(now);
+			if (ctcWake < wake)
+				wake = ctcWake;
 			uint64_t delta = (wake > now) ? (wake - now) : 4;
 			if (delta < 4) delta = 4;
 			if (delta > 0x7fffffff) delta = 0x7fffffff;
@@ -301,15 +224,11 @@ int CDriverX1::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 	cpuHz_ = hw_->cpuHz_ > 0 ? hw_->cpuHz_ : 4000000;
 	opmHz_ = hw_->opmHz_ > 0 ? hw_->opmHz_ : 4000000;
 	ayHz_ = hw_->ayHz_ > 0 ? hw_->ayHz_ : 2000000;
-	timerPeriod_ = (uint64_t)X1_TIMER_CYCLES;
-	vsyncPeriod_ = (uint64_t)cpuHz_ / 60;
 	opmResidual_ = 0;
 	ayResidual_ = 0;
 	cpuAcc_ = 0;
 	booted_ = 0;
 	triggered_ = 0;
-	ctc3Div_ = 0;
-	memset(ctcPending_, 0, sizeof(ctcPending_));
 	cpuDebt_ = 0;
 	timerIrqs_ = 0;
 	vsyncIrqs_ = 0;
@@ -332,16 +251,15 @@ int CDriverX1::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 	/* ブート前に BGM を載せる。DRIVER 初期化（gaia/hayato CALL DRV）が mdata のヘッダを歩ける。
 	   再生メールボックスは TriggerSong まで空。 */
 	hw_->PrestageBgm(titleCode_);
-	/* PATCH ポーリングまでブート（CALL 040D CTC/IM2 の後）。Play 受付にタイマ/vsync 約 0.5s が要るドライバがある */
+	/* PATCH ポーリングまでブート（CALL 040D CTC/IM2 の後）。Play 受付に CTC tick 約 0.5s が要るドライバがある。
+	   CTC は LoadRoms の CtcReset で hoot 互換プリセットになり、最初の CtcRun で今の時刻から数え始める。 */
 	{
 		Ay_Cpu* cpu = hw_->Cpu();
-		if (cpu) {
-			nextTimer_ = (uint64_t)cpu->time64() + timerPeriod_;
-			nextVsync_ = (uint64_t)cpu->time64() + vsyncPeriod_;
+		if (cpu)
 			RunUntil((uint64_t)cpu->time64() + (uint64_t)cpuHz_); /* 約 1.0s ブート */
-		}
 	}
 	booted_ = 1;
+	hw_->CaptureBoot();
 	TriggerSong();
 	return 1;
 }
@@ -358,11 +276,19 @@ void CDriverX1::Close()
 int CDriverX1::OverlayTitle(unsigned titleCode)
 {
 	if (!hw_) return 0;
-	if (hw_->ApplyCatalogToggle(titleCode))
+	if (hw_->PulseCatalogToggle(titleCode))
 		return 1;
+	/* 別系統が CTC とベクタを書き換えたまま Level へ戻すとテンポが倍になる。
+	   ブート直後へ戻してから、その曲の再生コマンドだけ通す。 */
+	hw_->RestoreBoot();
 	titleCode_ = titleCode;
 	songCode_ = (uint8_t)(titleCode & 0xff);
+	const uint8_t saveSkip = hw_->skipTriggerStage_;
+	if (overlayMix)
+		hw_->skipTriggerStage_ = 1;
 	hw_->TriggerPlay(titleCode_ ? titleCode_ : (unsigned)songCode_);
+	if (overlayMix)
+		hw_->skipTriggerStage_ = saveSkip;
 	triggered_ = 1;
 	return 1;
 }
@@ -387,12 +313,6 @@ int CDriverX1::Render(int16_t* stereo, int frames)
 			RunUntil(start + (uint64_t)cpuDebt_);
 			cpuDebt_ -= (int64_t)((uint64_t)cpu->time64() - start);
 		}
-		/* DI で停滞しても予定を進める */
-		const uint64_t now = (uint64_t)cpu->time64();
-		if (now >= nextTimer_ + timerPeriod_ * 4)
-			nextTimer_ = now + timerPeriod_;
-		if (now >= nextVsync_ + vsyncPeriod_ * 4)
-			nextVsync_ = now + vsyncPeriod_;
 
 		int16_t opmBuf[2] = { 0, 0 };
 		int16_t ayBuf[2] = { 0, 0 };

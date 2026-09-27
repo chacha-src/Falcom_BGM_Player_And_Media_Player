@@ -39,6 +39,8 @@ private:
 	unsigned irqPulses_;
 	int prevChipIrq_;
 	int chipIrqSeen_;
+	/* IRQ/FIRQ 線を立てられるまで保持する vsync 要求（マスク中の tick を捨てない） */
+	uint8_t vsyncReq_;
 	uint16_t lastFd03IrqVec_;
 
 	void RunUntil(uint64_t endCycle);

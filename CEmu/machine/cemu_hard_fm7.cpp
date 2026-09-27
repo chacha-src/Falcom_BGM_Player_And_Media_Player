@@ -1,4 +1,4 @@
-﻿#include "StdAfx.h"
+#include "StdAfx.h"
 #include "cemu_hard_fm7.h"
 #include "../chip/cemu_chip_opna.h"
 #include "../chip/cemu_chip_ay.h"
@@ -1899,6 +1899,37 @@ void CHardFm7::UnwindStuckBootJsr()
 		}
 	}
 	cpu_.pc.w = (uint16_t)land;
+	cpu_.cc.i = false;
+	cpu_.cc.f = true;
+	cpu_.cwai = false;
+	cpu_.sync = false;
+}
+
+void CHardFm7::ParkFalcomWait()
+{
+	if (!falcomMode_)
+		return;
+	unsigned found = 0;
+	for (unsigned a = 0xE000u; a + 5u < 0x10000u; a++) {
+		if (mem_[a] == 0xB6 && mem_[a + 1] == 0xFD && mem_[a + 2] == 0x80
+			&& mem_[a + 3] == 0x27) {
+			found = a;
+			break;
+		}
+	}
+	if (!found && initPc_ >= 0xE000) {
+		const unsigned lim = (unsigned)initPc_ + 80u;
+		for (unsigned a = (unsigned)initPc_; a + 4u <= 0x10000u && a < lim; a++) {
+			if (mem_[a] == 0x10 && mem_[a + 1] == 0xCE
+				&& mem_[a + 2] == 0xFC && mem_[a + 3] == 0x80) {
+				found = a;
+				break;
+			}
+		}
+	}
+	if (!found)
+		return;
+	cpu_.pc.w = (uint16_t)found;
 	cpu_.cc.i = false;
 	cpu_.cc.f = true;
 	cpu_.cwai = false;

@@ -18,7 +18,8 @@ typedef void (*CEmuCatalogProgressFn)(int pos, int max, void* user);
 void CEmuCatalogInit(CEmuCatalog* cat);
 void CEmuCatalogClear(CEmuCatalog* cat);
 
-/* xml は data ルートからも読む。arcdata.zip は exe 隣。キャッシュ鍵は zip サイズのみ。
+/* xml は data ルートからも読む。arcdata.7z があれば優先、なければ arcdata.zip。exe 隣。
+   キャッシュ鍵はアーカイブサイズのみ。
    ディスクキャッシュは zstd+可変長（v3）。exe 差し替えでは無効化しない。 */
 int CEmuCatalogLoad(CEmuCatalog* cat, const wchar_t* dataRoot);
 int CEmuCatalogLoadEx(CEmuCatalog* cat, const wchar_t* dataRoot,
@@ -27,10 +28,10 @@ int CEmuCatalogLoadEx(CEmuCatalog* cat, const wchar_t* dataRoot,
 /* %LOCALAPPDATA%\oggYSED\cemucatalog\ のキャッシュを破棄 */
 void CEmuCatalogInvalidateCache(void);
 
-/* arcdata.zip が未更新なら 1（起動 UI 用。サイズ+parse ver。フォルダ配置は見ない） */
+/* arcdata.7z / zip が未更新なら 1（起動 UI 用。サイズ+parse ver。フォルダ配置は見ない） */
 int CEmuCatalogCacheIsCurrent(const wchar_t* dataRoot);
 
-/* exe 隣の arcdata.zip パス（存在しなくてもパスを返す） */
+/* exe 隣の arcdata.7z（あれば）または arcdata.zip パス（存在しなくても zip パスを返す） */
 void CEmuCatalogGetExeArcdataPath(wchar_t* out, int outChars);
 
 const CEmuGameEntry* CEmuCatalogFindArchive(const CEmuCatalog* cat,
@@ -61,9 +62,18 @@ int CEmuGameTitleCount(const CEmuGameEntry* ge);
 int CEmuGameTitleAt(const CEmuGameEntry* ge, int index0, unsigned* outCode,
 	wchar_t* outLabel, int outLabelChars);
 unsigned CEmuGameTitleCodeForIndex(const CEmuGameEntry* ge, unsigned titleIndex1);
-/* hoot titlelist: SE / 効果音 / SFX / Sound Effect. STOP は含めない。 */
+/* hoot titlelist: [SE] / 効果音 / SFX / Sound Effect. STOP は含めない。
+   Voice/EFX 文字列では判定しない。 */
 int CEmuTitleLooksLikeSfx(const wchar_t* label);
 int CEmuGameTitleLooksLikeSfx(const CEmuGameEntry* ge, unsigned titleIndex1);
+/* SE のうち BGM を止めるもの（ジングル／ファンファーレ／ゲームオーバー等）。 */
+int CEmuTitleLooksLikeExclusiveSfx(const wchar_t* label);
+int CEmuGameTitleLooksLikeExclusiveSfx(const CEmuGameEntry* ge, unsigned titleIndex1);
+/* 同一 zip 上に載せる mix（BGM を止めない SE）のフォールバック判定。
+   カタログの code には BGM/SE の区別が無い（実測: 二山ギャップも bit6 も
+   一般則にならない）。音源ドライバに問い合わせられる基板では
+   CEmuSessionCodeIsOverlay がそちらを使い、ここへは来ない。 */
+int CEmuGameTitleCodeIsMixOverlay(const CEmuGameEntry* ge, unsigned code);
 
 /* Food empty (Toggle) / in battle (toggle) / TO BOSS BGM — 曲ではなくフラグ。 */
 enum { CEMU_TOGGLE_MAX = 8 };

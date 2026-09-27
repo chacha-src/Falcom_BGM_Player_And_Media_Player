@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include "cemu_hard.h"
 #include "../chip/cemu_chip.h"
 #include "../cemu_zipfs.h"
@@ -52,6 +52,8 @@ public:
 	void RunSubroutine(uint16_t addr, int maxSteps = 200000, int clockChips = 0);
 
 	void TriggerPlay(unsigned titleCode);
+	/* OverlayTitle: Falcom PATCH 待ちへ戻してから prog を載せ替える */
+	void ParkFalcomWait();
 	/* PATCH のブート JSR が戻らないとき（albatrss DRIVER / ishtar MUSIC.P）、
 	   IRQ マスクを外して $FD58 ポーリングへ戻す。 */
 	void UnwindStuckBootJsr();

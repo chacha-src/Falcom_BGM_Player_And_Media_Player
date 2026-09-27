@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "afxwin.h"
 #include "CCustomControl.h"
@@ -179,6 +179,7 @@ protected:
 	CStatic m_volPct;
 	CCustomSliderCtrl m_vol;
 	volatile LONG m_volLevel;
+	int m_volUiLock;
 	CString m_monitorText;
 
 	Preset m_presets[100];
@@ -204,6 +205,7 @@ protected:
 	CRITICAL_SECTION m_wavLock;
 	// vk -> held MIDI note+1 (0 = not held). Same path as MIDI In port 0.
 	BYTE m_pcHeldNote[256];
+	int m_pcOctaveShift;
 };
 
 extern CVstHostDlg* g_vstHostDlg;

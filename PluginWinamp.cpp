@@ -11,6 +11,7 @@
 #include "stdafx.h"
 #include "PluginWinamp.h"
 #include "PluginKinds.h"
+#include "PluginForeignEnum.h"
 #include "third_party/winamp/in2.h"
 #include "KpiHostClient.h"
 
@@ -568,7 +569,7 @@ int PluginWinamp_TryEnum(const wchar_t* dllPath, int is64)
 			WaBindInHost(in, g_waMsgWnd, h);
 			if (in->Init) in->Init();
 			plugkind[kpicnt] = PLUGKIND_WINAMP;
-			kpiarch[kpicnt] = 32;
+			kpiarch[kpicnt] = is64 ? 64 : 32;
 			kpif[kpicnt] = dllPath;
 			WaParseExts(in->FileExtensions);
 			if (in->Quit) in->Quit();
@@ -587,11 +588,14 @@ int PluginWinamp_TryEnum(const wchar_t* dllPath, int is64)
 	return ok;
 }
 
-int PluginWinamp_Open(const wchar_t* dllPath, const wchar_t* mediaPath, HWND /*hwndMain*/)
+int PluginWinamp_Open(const wchar_t* dllPath, const wchar_t* mediaPath, HWND hwndMain)
 {
+	if (!PluginForeign_MatchesHostArch(dllPath))
+		return PluginWinamp_OpenRemote(dllPath, mediaPath);
 	PluginWinamp_Close();
 	WaEnsureCs();
 	HWND host = WaEnsureMsgWindow();
+	(void)hwndMain;
 	HMODULE h = LoadLibraryExW(dllPath, NULL, LOAD_WITH_ALTERED_SEARCH_PATH);
 	if (!h) return 0;
 	pfn_winampGetInModule2 getIn = (pfn_winampGetInModule2)GetProcAddress(h, "winampGetInModule2");

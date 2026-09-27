@@ -880,7 +880,7 @@ BOOL COggApp::InitInstance()
 	}
 	if (datFileSize < (int)(offsetof(save, vstHostVol) + sizeof(savedata.vstHostVol)))
 		savedata.vstHostVol = 100;
-	else if (savedata.vstHostVol < 0 || savedata.vstHostVol > 100)
+	else if (savedata.vstHostVol < 1 || savedata.vstHostVol > 100)
 		savedata.vstHostVol = 100;
 	if (datFileSize < (int)(offsetof(save, updateDlCountTime) + sizeof(savedata.updateDlCountTime)))
 		savedata.updateDlCountTime = 0;

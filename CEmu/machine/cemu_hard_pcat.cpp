@@ -2807,9 +2807,8 @@ uint8_t CHardPcat::PortIn(uint16_t port)
 	/* SB DSP 書きステータス: bit7=0 → 書いてよい */
 	auto oplStatus = [this]() -> uint8_t {
 		if (!chip_) return 0x00;
-		if (oplHz_ > 0)
-			chip_->AdvanceClocks(80);
-		/* SB DSP 読みデータ */
+		/* ここで AdvanceClocks しない。PumpCycles が CPU 時間ぶんタイマを進める。
+		   IN 388h 遅延のたびに 80clk 足すとシーケンサが音声より先に走りボコボコになる。 */
 		return (uint8_t)(chip_->ReadStatus() & (uint8_t)~0x06);
 	};
 	switch (port) {

@@ -1,4 +1,4 @@
-﻿// XMPlay input plugin host (XMPIN pull Process)
+// XMPlay input plugin host (XMPIN pull Process)
 //
 // xmpin.h / xmpfunc.h と実プラグイン(xmp-vgmstream 等)の実装に合わせた点:
 //  - faceproc は MISC(0) / REGISTRY(1) / FILE(2) / TEXT(3) / STATUS(4) / IN(11) を全部返す。
@@ -12,6 +12,8 @@
 #include "stdafx.h"
 #include "PluginXmplay.h"
 #include "PluginKinds.h"
+#include "PluginForeignEnum.h"
+#include "KpiHostClient.h"
 #include "third_party/xmplay/xmpin.h"
 #include <float.h>
 
@@ -22,6 +24,10 @@ extern BYTE kpiarch[];
 extern BYTE plugkind[];
 extern BOOL kpichk[];
 extern int kpicnt;
+extern KpiHost64Client g_kpiHost;
+extern BOOL thn1;
+extern int stf;
+extern DWORD g_oggUiThreadId;
 
 enum { XMP_MAX_FLOATS = 8192 * 8 };
 
@@ -49,6 +55,9 @@ static int g_xmpEof = 0;
 static XmpFileObj* g_xmpCurFile = NULL;   // Open に渡した XMPFILE（戻り値2ならここで閉じる）
 static __int64 g_xmpPlayedFloats = 0;
 static XMPFORMAT g_xmpFmt = { 44100, 2, 2 };
+static int g_xmpRemote = 0;
+static uint32_t g_xmpRemoteSid = 0;
+static volatile LONG g_xmpStopping = 0;
 
 static XMPFUNC_IN g_xmpFuncIn;
 static XMPFUNC_MISC g_xmpFuncMisc;
@@ -374,9 +383,41 @@ typedef XMPIN* (WINAPI* pfn_XMPIN_GetInterface)(UINT32 face, InterfaceProc facep
 int PluginXmplay_TryEnum(const wchar_t* dllPath, int is64)
 {
 	if (!dllPath || !dllPath[0] || kpicnt >= 149) return 0;
-	if (is64) {
-		// x64 は KpiHost64 側に XMPlay 再生系が無いので台帳に載せない（載せると -2 に落ちるだけ）
-		return 0;
+#ifdef _WIN64
+	const int needRemote = !is64;
+#else
+	const int needRemote = is64;
+#endif
+	if (needRemote) {
+		plugkind[kpicnt] = PLUGKIND_XMPLAY;
+		kpiarch[kpicnt] = is64 ? 64 : 32;
+		kpif[kpicnt] = dllPath;
+		ext[kpicnt][0] = L"";
+		ext[kpicnt][299] = L"";
+		kvar[kpicnt][0] = 0;
+		std::wstring exts;
+		if (g_kpiHost.ForeignListExts(PLUGKIND_XMPLAY, dllPath, exts) && !exts.empty()) {
+			CString cs(exts.c_str());
+			int ei = 0, start = 0;
+			for (;;) {
+				int slash = cs.Find(L'/', start);
+				CString tok = (slash < 0) ? cs.Mid(start) : cs.Mid(start, slash - start);
+				tok.MakeLower();
+				if (!tok.IsEmpty() && ei < 298) {
+					if (tok[0] != L'.') tok = L"." + tok;
+					ext[kpicnt][ei] = tok;
+					kvar[kpicnt][ei] = 0;
+					ei++;
+				}
+				if (slash < 0) break;
+				start = slash + 1;
+			}
+			ext[kpicnt][ei] = L"";
+		}
+		if (ext[kpicnt][0] == L"") return 0;
+		kpichk[kpicnt] = TRUE;
+		kpicnt++;
+		return 1;
 	}
 	XmpInitHostTables();
 	HMODULE h = LoadLibraryExW(dllPath, NULL, LOAD_WITH_ALTERED_SEARCH_PATH);
@@ -391,7 +432,7 @@ int PluginXmplay_TryEnum(const wchar_t* dllPath, int is64)
 		XMPIN* in = getIf(XMPIN_FACE, XmpFaceProc);
 		if (in && in->Open && in->Process) {
 			plugkind[kpicnt] = PLUGKIND_XMPLAY;
-			kpiarch[kpicnt] = 32;
+			kpiarch[kpicnt] = is64 ? 64 : 32;
 			kpif[kpicnt] = dllPath;
 			XmpParseExts(in->exts);
 			if (ext[kpicnt][0] != L"") {
@@ -408,8 +449,28 @@ int PluginXmplay_TryEnum(const wchar_t* dllPath, int is64)
 	return ok;
 }
 
+int PluginXmplay_OpenRemote(const wchar_t* dllPath, const wchar_t* mediaPath)
+{
+	PluginXmplay_Close();
+	KPIHOST64_ForeignOpenReply fr{};
+	if (!g_kpiHost.ForeignOpen(PLUGKIND_XMPLAY, dllPath, mediaPath, fr))
+		return 0;
+	g_xmpRemote = 1;
+	g_xmpRemoteSid = fr.sessionId;
+	g_xmpRate = fr.sampleRate > 0 ? (int)fr.sampleRate : 44100;
+	g_xmpCh = fr.channels > 0 ? (int)fr.channels : 2;
+	g_xmpBits = fr.bitsPerSample > 0 ? fr.bitsPerSample : 16;
+	g_xmpLen = (fr.lengthSamples > 0 && g_xmpRate > 0)
+		? (float)((double)fr.lengthSamples / (double)g_xmpRate) : 0.f;
+	g_xmpOpen = 1;
+	InterlockedExchange(&g_xmpStopping, 0);
+	return 1;
+}
+
 int PluginXmplay_Open(const wchar_t* dllPath, const wchar_t* mediaPath)
 {
+	if (!PluginForeign_MatchesHostArch(dllPath))
+		return PluginXmplay_OpenRemote(dllPath, mediaPath);
 	PluginXmplay_Close();
 	XmpInitHostTables();
 	HMODULE h = LoadLibraryExW(dllPath, NULL, LOAD_WITH_ALTERED_SEARCH_PATH);
@@ -480,6 +541,19 @@ int PluginXmplay_Open(const wchar_t* dllPath, const wchar_t* mediaPath)
 
 void PluginXmplay_Close()
 {
+	InterlockedExchange(&g_xmpStopping, 1);
+	if (g_xmpRemote) {
+		if (g_xmpRemoteSid)
+			g_kpiHost.ForeignClose(g_xmpRemoteSid);
+		g_xmpRemote = 0;
+		g_xmpRemoteSid = 0;
+		g_xmpOpen = 0;
+		g_xmpPendingBytes = 0;
+		g_xmpPendingOff = 0;
+		g_xmpEof = 0;
+		g_xmpPlayedFloats = 0;
+		return;
+	}
 	if (g_xmpIn && g_xmpIn->Close) {
 		try { g_xmpIn->Close(); }
 		catch (...) {}
@@ -502,7 +576,13 @@ void PluginXmplay_Close()
 
 int PluginXmplay_SeekSec(double sec)
 {
-	if (!g_xmpIn || !g_xmpOpen || !g_xmpIn->SetPosition) return 0;
+	if (!g_xmpOpen) return 0;
+	if (g_xmpRemote) {
+		if (g_xmpRate <= 0) return 0;
+		uint64_t samp = (uint64_t)(sec * (double)g_xmpRate);
+		return g_kpiHost.ForeignSeek(g_xmpRemoteSid, samp) ? 1 : 0;
+	}
+	if (!g_xmpIn || !g_xmpIn->SetPosition) return 0;
 	// 既定の粒度はミリ秒（GetGranularity があればそれが1単位の秒数）
 	double gran = 0.001;
 	if (g_xmpIn->GetGranularity) {
@@ -541,7 +621,34 @@ static void XmpFloatToS16(const float* src, int count, BYTE* dst)
 
 int PluginXmplay_Read(BYTE* dst, int bytesWanted)
 {
-	if (!dst || bytesWanted <= 0 || !g_xmpOpen || !g_xmpIn) return 0;
+	if (!dst || bytesWanted <= 0 || !g_xmpOpen) return 0;
+	if (g_xmpRemote) {
+		int got = 0;
+		DWORD tIdle = GetTickCount();
+		while (got < bytesWanted) {
+			if (thn1 || stf) break;
+			if (InterlockedCompareExchange(&g_xmpStopping, 0, 0)) break;
+			std::vector<uint8_t> pcm;
+			bool eof = false;
+			if (!g_kpiHost.ForeignRender(g_xmpRemoteSid, (uint32_t)(bytesWanted - got), pcm, eof))
+				break;
+			int n = (int)pcm.size();
+			if (n > bytesWanted - got) n = bytesWanted - got;
+			if (n > 0) {
+				memcpy(dst + got, pcm.data(), (size_t)n);
+				got += n;
+				tIdle = GetTickCount();
+				continue;
+			}
+			if (eof) break;
+			const DWORD idleCap = (g_oggUiThreadId != 0 && GetCurrentThreadId() == g_oggUiThreadId)
+				? 800u : 5000u;
+			if (GetTickCount() - tIdle > idleCap) break;
+			Sleep(2);
+		}
+		return got;
+	}
+	if (!g_xmpIn) return 0;
 	int got = 0;
 	while (got < bytesWanted) {
 		if (g_xmpPendingOff < g_xmpPendingBytes) {

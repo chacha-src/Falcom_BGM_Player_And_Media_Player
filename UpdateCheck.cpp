@@ -17,9 +17,12 @@
 #ifdef USEWIN32IOAPI
 #include "minizip/iowin32.h"
 #endif
+#include "SevenZipDec.h"
 
-// 09a があれば優先。なければ 08g。08g 適用後に 09a が公開されれば、次回チェックで 09a へ進む。
+// 09a があれば優先。なければ 08g。各版は .7z があればそれを使い、なければ .zip。
+static const TCHAR* UPDATE_URL_PRIMARY_7Z = _T("https://ppp.oohara.jp/download/oggYSEDbgm09a_uni_avx2_VC2026.7z");
 static const TCHAR* UPDATE_URL_PRIMARY = _T("https://ppp.oohara.jp/download/oggYSEDbgm09a_uni_avx2_VC2026.zip");
+static const TCHAR* UPDATE_URL_FALLBACK_7Z = _T("https://ppp.oohara.jp/download/oggYSEDbgm08g_uni_avx2_VC2026.7z");
 static const TCHAR* UPDATE_URL_FALLBACK = _T("https://ppp.oohara.jp/download/oggYSEDbgm08g_uni_avx2_VC2026.zip");
 static const TCHAR* TARGET_EXE_NAME = _T("oggYSEDbgm_uni_avx2.exe");
 static const TCHAR* TARGET_HOST_EXE_NAME = _T("ogghost32.exe");
@@ -506,26 +509,28 @@ static time_t HttpGetLastModified(const CString& url)
 	return result;
 }
 
-// 利用可能な更新 ZIP を決定する（09a 優先、なければ 08g）。見つからなければ空文字、*outModified は 0。
+static BOOL UpdateUrlIs7z(const CString& url)
+{
+	return (url.GetLength() >= 3 && url.Right(3).CompareNoCase(_T(".7z")) == 0) ? TRUE : FALSE;
+}
+
+// 利用可能な更新アーカイブを決定する（09a.7z → 09a.zip → 08g.7z → 08g.zip）。
 static CString ResolveUpdateUrl(time_t* outModified)
 {
 	if (outModified)
 		*outModified = 0;
 
-	const time_t primaryModified = HttpGetLastModified(UPDATE_URL_PRIMARY);
-	if (primaryModified != 0)
-	{
-		if (outModified)
-			*outModified = primaryModified;
-		return UPDATE_URL_PRIMARY;
-	}
-
-	const time_t fallbackModified = HttpGetLastModified(UPDATE_URL_FALLBACK);
-	if (fallbackModified != 0)
-	{
-		if (outModified)
-			*outModified = fallbackModified;
-		return UPDATE_URL_FALLBACK;
+	static const TCHAR* cands[] = {
+		UPDATE_URL_PRIMARY_7Z, UPDATE_URL_PRIMARY,
+		UPDATE_URL_FALLBACK_7Z, UPDATE_URL_FALLBACK
+	};
+	for (int i = 0; i < 4; ++i) {
+		const time_t t = HttpGetLastModified(cands[i]);
+		if (t != 0) {
+			if (outModified)
+				*outModified = t;
+			return cands[i];
+		}
 	}
 
 	return CString();
@@ -711,6 +716,66 @@ static bool HttpDownloadToFile(const CString& url, const CString& localPath)
 static bool ExtractZipToDir(const CString& zipPath, const CString& destDir, const CString& targetFileName,
 	ULONGLONG minBytes, bool requirePe = true)
 {
+	if (SevenZipPathIs7zW(zipPath)) {
+		SevenZipArc a;
+		if (!SevenZipOpenW(&a, zipPath))
+			return false;
+		bool bFound = false;
+		for (UInt32 i = 0; i < a.db.NumFiles; i++) {
+			if (SzArEx_IsDir(&a.db, i))
+				continue;
+			wchar_t name[1024] = {};
+			if (!SevenZipFileNameW(&a, i, name, 1024) || !name[0])
+				continue;
+			const wchar_t* fileNameOnly = name;
+			for (const wchar_t* p = name; *p; ++p) {
+				if (*p == L'\\' || *p == L'/')
+					fileNameOnly = p + 1;
+			}
+			if (!fileNameOnly[0])
+				continue;
+			if (CString(fileNameOnly).CompareNoCase(targetFileName) != 0)
+				continue;
+			const Byte* data = NULL;
+			size_t sz = 0;
+			if (!SevenZipExtractIndex(&a, i, &data, &sz))
+				break;
+			CString outPath = destDir + _T("\\") + CString(fileNameOnly);
+			DeleteFile(outPath);
+			CFile outFile;
+			bool writeOk = false;
+			ULONGLONG written = 0;
+			if (outFile.Open(outPath, CFile::modeCreate | CFile::modeWrite | CFile::shareExclusive)) {
+				writeOk = true;
+				try {
+					if (sz > 0 && data)
+						outFile.Write(data, (UINT)sz);
+					written = (ULONGLONG)sz;
+				}
+				catch (CFileException* e) {
+					e->Delete();
+					writeOk = false;
+				}
+				outFile.Close();
+			}
+			const bool peOk = !requirePe || IsLikelyPeExe(outPath, minBytes);
+			if (writeOk
+				&& written == (ULONGLONG)SzArEx_GetFileSize(&a.db, i)
+				&& written >= minBytes
+				&& peOk)
+			{
+				bFound = true;
+			}
+			else
+			{
+				DeleteFile(outPath);
+			}
+			break;
+		}
+		SevenZipClose(&a);
+		return bFound;
+	}
+
 	zlib_filefunc64_def ffunc;
 #ifdef USEWIN32IOAPI
 	fill_win32_filefunc64W(&ffunc);
@@ -845,7 +910,7 @@ static bool DoManualUpdateToDownloads(const CString& updateUrl, time_t serverTim
 	CreateDirectory(destDir, NULL);
 
 	TCHAR zipPath[MAX_PATH];
-	_stprintf_s(zipPath, _T("%s\\ogg_update.zip"), destDir);
+	_stprintf_s(zipPath, UpdateUrlIs7z(updateUrl) ? _T("%s\\ogg_update.7z") : _T("%s\\ogg_update.zip"), destDir);
 
 	if (!HttpDownloadToFile(updateUrl, zipPath))
 	{
@@ -1476,7 +1541,7 @@ bool DoUpdateAndRestart()
 
 	TCHAR tempPath[MAX_PATH], zipPath[MAX_PATH], extractDir[MAX_PATH], batPath[MAX_PATH];
 	GetTempPath(MAX_PATH, tempPath);
-	_stprintf_s(zipPath, _T("%sogg_update.zip"), tempPath);
+	_stprintf_s(zipPath, UpdateUrlIs7z(updateUrl) ? _T("%sogg_update.7z") : _T("%sogg_update.zip"), tempPath);
 	_stprintf_s(extractDir, _T("%sogg_update_extract"), tempPath);
 	_stprintf_s(batPath, _T("%sogg_updater.bat"), tempPath);
 
@@ -1813,7 +1878,7 @@ void EnsureD3dCompilerAvailable()
 		if (updateUrl.IsEmpty())
 			return;
 		CString zipPath;
-		zipPath.Format(_T("%sogg_d3d_fetch.zip"), tempPath);
+		zipPath.Format(UpdateUrlIs7z(updateUrl) ? _T("%sogg_d3d_fetch.7z") : _T("%sogg_d3d_fetch.zip"), tempPath);
 		CreateDirectory(extractDir, NULL);
 		if (!HttpDownloadToFile(updateUrl, zipPath))
 			return;
@@ -1956,6 +2021,11 @@ void EnsureOggHost32Available()
 	extracted.Format(_T("%s\\%s"), (LPCTSTR)extractDir, TARGET_HOST_EXE_NAME);
 
 	if (!HostExeFileLooksOk(extracted)) {
+		CString leftover7z;
+		leftover7z.Format(_T("%sogg_update.7z"), tempPath);
+		ExtractHostFromZipIfNeeded(leftover7z, extractDir);
+	}
+	if (!HostExeFileLooksOk(extracted)) {
 		CString leftoverZip;
 		leftoverZip.Format(_T("%sogg_update.zip"), tempPath);
 		ExtractHostFromZipIfNeeded(leftoverZip, extractDir);
@@ -1968,10 +2038,16 @@ void EnsureOggHost32Available()
 			if (HostExeFileLooksOk(dlHost))
 				extracted = dlHost;
 			else {
-				CString dlZip;
-				dlZip.Format(_T("%s\\ogg_update.zip"), (LPCTSTR)dlDir);
-				if (ExtractHostFromZipIfNeeded(dlZip, extractDir))
+				CString dl7z;
+				dl7z.Format(_T("%s\\ogg_update.7z"), (LPCTSTR)dlDir);
+				if (ExtractHostFromZipIfNeeded(dl7z, extractDir))
 					extracted.Format(_T("%s\\%s"), (LPCTSTR)extractDir, TARGET_HOST_EXE_NAME);
+				if (!HostExeFileLooksOk(extracted)) {
+					CString dlZip;
+					dlZip.Format(_T("%s\\ogg_update.zip"), (LPCTSTR)dlDir);
+					if (ExtractHostFromZipIfNeeded(dlZip, extractDir))
+						extracted.Format(_T("%s\\%s"), (LPCTSTR)extractDir, TARGET_HOST_EXE_NAME);
+				}
 			}
 		}
 	}
@@ -1984,7 +2060,7 @@ void EnsureOggHost32Available()
 		if (updateUrl.IsEmpty())
 			return;
 		CString zipPath;
-		zipPath.Format(_T("%sogg_host_fetch.zip"), tempPath);
+		zipPath.Format(UpdateUrlIs7z(updateUrl) ? _T("%sogg_host_fetch.7z") : _T("%sogg_host_fetch.zip"), tempPath);
 		CreateDirectory(extractDir, NULL);
 		if (!HttpDownloadToFile(updateUrl, zipPath))
 			return;
