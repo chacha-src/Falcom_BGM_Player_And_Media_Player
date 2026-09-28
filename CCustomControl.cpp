@@ -16578,7 +16578,7 @@ static void CCC_FinishBlurDlg(CWnd* pDlg, BOOL bAero, BOOL& bBlurApplied,
 
     pDlg->SetWindowPos(NULL, 0, 0, 0, 0,
         SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED | SWP_DRAWFRAME);
-    pDlg->RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_FRAME);
+    pDlg->RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_FRAME | RDW_ALLCHILDREN);
     // REAPPLY は直後の CaptionApplyGlassAndFixers / 初回 OnShowWindow が fixer を載せる。
     // ここで Post すると ALLCHILDREN 不透明化がもう一周する。
 }
@@ -16735,6 +16735,58 @@ void CCC_RefreshKids(HWND hWnd)
     ::EnumChildWindows(hWnd, CCC_RefreshChildProcNoAero, 0);
 }
 #endif
+
+// Explorer / DWM は親 HWND だけ Invalidate することがある。
+// ガラス上の CCustom 子は α=0 のまま valid 扱いになり、ホバー Invalidate まで消える。
+static LPCTSTR CCC_RefreshKidsPropName()
+{
+    return _T("CCC_RFK");
+}
+
+void CCC_PostRefreshKids(HWND hWnd)
+{
+    if (!hWnd || !::IsWindow(hWnd))
+        return;
+    if (::GetProp(hWnd, CCC_RefreshKidsPropName()))
+        return;
+    ::SetProp(hWnd, CCC_RefreshKidsPropName(), (HANDLE)1);
+    if (!::PostMessage(hWnd, CCC_MSG_REFRESH_CHILDREN, 0, 0))
+        ::RemoveProp(hWnd, CCC_RefreshKidsPropName());
+}
+
+void CCC_InvalidateKidsIfHostFullPaint(CWnd* pWnd)
+{
+    if (!pWnd || !pWnd->m_hWnd)
+        return;
+    RECT rcUpd = {};
+    if (!::GetUpdateRect(pWnd->m_hWnd, &rcUpd, FALSE))
+        return;
+    RECT rcCli = {};
+    ::GetClientRect(pWnd->m_hWnd, &rcCli);
+    const int uw = rcUpd.right - rcUpd.left;
+    const int uh = rcUpd.bottom - rcUpd.top;
+    const int cw = rcCli.right - rcCli.left;
+    const int ch = rcCli.bottom - rcCli.top;
+    if (cw <= 0 || ch <= 0 || uw < cw - 4 || uh < ch - 4)
+        return;
+    for (HWND h = ::GetWindow(pWnd->m_hWnd, GW_CHILD); h; h = ::GetWindow(h, GW_HWNDNEXT)) {
+        if (::IsWindowVisible(h))
+            ::InvalidateRect(h, NULL, FALSE);
+    }
+}
+
+static void CCC_ExecRefreshKids(HWND hWnd)
+{
+    if (hWnd)
+        ::RemoveProp(hWnd, CCC_RefreshKidsPropName());
+    if (!hWnd || !::IsWindow(hWnd))
+        return;
+    const LONG_PTR st = ::GetWindowLongPtr(hWnd, GWL_STYLE);
+    if ((st & WS_CLIPCHILDREN) == 0)
+        ::SetWindowLongPtr(hWnd, GWL_STYLE, st | WS_CLIPCHILDREN | WS_CLIPSIBLINGS);
+    ::RedrawWindow(hWnd, NULL, NULL, RDW_INVALIDATE | RDW_ALLCHILDREN | RDW_ERASE | RDW_FRAME);
+    CCC_RefreshKids(hWnd);
+}
 
 // ============================================================================
 // カスタムキャプション (CCustomBlurDialog* 共通・アクリル有無に関係なく常時)
@@ -20392,6 +20444,15 @@ BEGIN_MESSAGE_MAP(CCustomBlurDialogBase, CCustomDialog)
     ON_WM_SHOWWINDOW()
     ON_WM_WINDOWPOSCHANGED()
     ON_WM_DWMCOMPOSITIONCHANGED()
+    ON_WM_SETTINGCHANGE()
+    ON_WM_SYSCOLORCHANGE()
+    ON_WM_DISPLAYCHANGE()
+    ON_WM_THEMECHANGED()
+    ON_WM_ACTIVATE()
+    ON_WM_ACTIVATEAPP()
+    ON_MESSAGE(CCC_MSG_REFRESH_CHILDREN, OnRefreshChildren)
+    ON_MESSAGE(0x0320, OnDwmColorizationChanged) // WM_DWMCOLORIZATIONCOLORCHANGED
+    ON_MESSAGE(0x031F, OnDwmColorizationChanged) // WM_DWMNCRENDERINGCHANGED
     ON_WM_DESTROY()
     ON_WM_MOVING()
     ON_COMMAND(IDC_MAINWIN_LOCK, OnMainLockClicked)
@@ -20629,8 +20690,10 @@ void CCustomBlurDialogBase::OnPaint()
 {
     if (s_cccPrintDepth > 0) {
         ValidateRect(NULL);
+        CCC_PostRefreshKids(m_hWnd);
         return;
     }
+    CCC_InvalidateKidsIfHostFullPaint(this);
     CPaintDC dc(this);
 #if CCUSTOM_AERO_SUPPORT
     if (m_bAeroEnabled && CCC_IsWin11())
@@ -20673,6 +20736,8 @@ LRESULT CCustomBlurDialogBase::OnPrintClient(WPARAM wParam, LPARAM lParam)
 // 基底 OnDestroy の前に登録を外す。
 void CCustomBlurDialogBase::OnDestroy()
 {
+    if (m_hWnd)
+        ::RemoveProp(m_hWnd, CCC_RefreshKidsPropName());
     CCC_CaptionUnregister(m_hWnd);
     CCC_MainLockUnregister(m_hWnd);
 #if CCUSTOM_AERO_SUPPORT
@@ -20722,6 +20787,59 @@ void CCustomBlurDialogBase::OnCompositionChanged()
 #if CCUSTOM_AERO_SUPPORT
     ApplyDwmBlurCore(TRUE);
 #endif
+    CCC_PostRefreshKids(m_hWnd);
+}
+
+void CCustomBlurDialogBase::OnSettingChange(UINT uFlags, LPCTSTR lpszSection)
+{
+    CCustomDialog::OnSettingChange(uFlags, lpszSection);
+    CCC_PostRefreshKids(m_hWnd);
+}
+
+void CCustomBlurDialogBase::OnSysColorChange()
+{
+    CCustomDialog::OnSysColorChange();
+    CCC_PostRefreshKids(m_hWnd);
+}
+
+void CCustomBlurDialogBase::OnDisplayChange(UINT nImageDepth, int cxScreen, int cyScreen)
+{
+    CCustomDialog::OnDisplayChange(nImageDepth, cxScreen, cyScreen);
+    CCC_PostRefreshKids(m_hWnd);
+}
+
+LRESULT CCustomBlurDialogBase::OnThemeChanged()
+{
+    CCC_PostRefreshKids(m_hWnd);
+    return Default();
+}
+
+void CCustomBlurDialogBase::OnActivate(UINT nState, CWnd* pWndOther, BOOL bMinimized)
+{
+    CCustomDialog::OnActivate(nState, pWndOther, bMinimized);
+    if (nState != WA_INACTIVE && !bMinimized)
+        CCC_PostRefreshKids(m_hWnd);
+}
+
+void CCustomBlurDialogBase::OnActivateApp(BOOL bActive, DWORD dwThreadID)
+{
+    CCustomDialog::OnActivateApp(bActive, dwThreadID);
+    if (bActive)
+        CCC_PostRefreshKids(m_hWnd);
+}
+
+LRESULT CCustomBlurDialogBase::OnRefreshChildren(WPARAM, LPARAM)
+{
+    CCC_ExecRefreshKids(m_hWnd);
+    if (m_pMainLockSave)
+        CCC_MainLockBringToFront(m_hWnd);
+    return 0;
+}
+
+LRESULT CCustomBlurDialogBase::OnDwmColorizationChanged(WPARAM, LPARAM)
+{
+    CCC_PostRefreshKids(m_hWnd);
+    return 0;
 }
 
 // 子が増えたあと fixer を張り直す。追従ボタンを前面へ。
@@ -21265,6 +21383,15 @@ BEGIN_MESSAGE_MAP(CCustomBlurDialogExBase, CCustomDialogEx)
     ON_WM_SHOWWINDOW()
     ON_WM_WINDOWPOSCHANGED()
     ON_WM_DWMCOMPOSITIONCHANGED()
+    ON_WM_SETTINGCHANGE()
+    ON_WM_SYSCOLORCHANGE()
+    ON_WM_DISPLAYCHANGE()
+    ON_WM_THEMECHANGED()
+    ON_WM_ACTIVATE()
+    ON_WM_ACTIVATEAPP()
+    ON_MESSAGE(CCC_MSG_REFRESH_CHILDREN, OnRefreshChildren)
+    ON_MESSAGE(0x0320, OnDwmColorizationChanged) // WM_DWMCOLORIZATIONCOLORCHANGED
+    ON_MESSAGE(0x031F, OnDwmColorizationChanged) // WM_DWMNCRENDERINGCHANGED
     ON_WM_DESTROY()
     ON_WM_MOVING()
     ON_COMMAND(IDC_MAINWIN_LOCK, OnMainLockClicked)
@@ -21485,8 +21612,10 @@ void CCustomBlurDialogExBase::OnPaint()
 {
     if (s_cccPrintDepth > 0) {
         ValidateRect(NULL);
+        CCC_PostRefreshKids(m_hWnd);
         return;
     }
+    CCC_InvalidateKidsIfHostFullPaint(this);
     CPaintDC dc(this);
 #if CCUSTOM_AERO_SUPPORT
     if (m_bAeroEnabled && CCC_IsWin11())
@@ -21528,6 +21657,8 @@ LRESULT CCustomBlurDialogExBase::OnPrintClient(WPARAM wParam, LPARAM lParam)
 // 基底 OnDestroy の前に登録を外す。
 void CCustomBlurDialogExBase::OnDestroy()
 {
+    if (m_hWnd)
+        ::RemoveProp(m_hWnd, CCC_RefreshKidsPropName());
     CCC_CaptionUnregister(m_hWnd);
     CCC_MainLockUnregister(m_hWnd);
 #if CCUSTOM_AERO_SUPPORT
@@ -21583,6 +21714,60 @@ void CCustomBlurDialogExBase::OnCompositionChanged()
         CCC_PrepareDialogSurface(m_hWnd, FALSE);
     }
 #endif
+    CCC_PostRefreshKids(m_hWnd);
+}
+
+void CCustomBlurDialogExBase::OnSettingChange(UINT uFlags, LPCTSTR lpszSection)
+{
+    CCustomDialogEx::OnSettingChange(uFlags, lpszSection);
+    CCC_PostRefreshKids(m_hWnd);
+}
+
+void CCustomBlurDialogExBase::OnSysColorChange()
+{
+    CCustomDialogEx::OnSysColorChange();
+    CCC_PostRefreshKids(m_hWnd);
+}
+
+void CCustomBlurDialogExBase::OnDisplayChange(UINT nImageDepth, int cxScreen, int cyScreen)
+{
+    CCustomDialogEx::OnDisplayChange(nImageDepth, cxScreen, cyScreen);
+    CCC_PostRefreshKids(m_hWnd);
+}
+
+LRESULT CCustomBlurDialogExBase::OnThemeChanged()
+{
+    CCC_PostRefreshKids(m_hWnd);
+    return Default();
+}
+
+void CCustomBlurDialogExBase::OnActivate(UINT nState, CWnd* pWndOther, BOOL bMinimized)
+{
+    CCustomDialogEx::OnActivate(nState, pWndOther, bMinimized);
+    if (nState != WA_INACTIVE && !bMinimized)
+        CCC_PostRefreshKids(m_hWnd);
+}
+
+void CCustomBlurDialogExBase::OnActivateApp(BOOL bActive, DWORD dwThreadID)
+{
+    CCustomDialogEx::OnActivateApp(bActive, dwThreadID);
+    if (bActive)
+        CCC_PostRefreshKids(m_hWnd);
+}
+
+LRESULT CCustomBlurDialogExBase::OnRefreshChildren(WPARAM, LPARAM)
+{
+    CCC_ExecRefreshKids(m_hWnd);
+    if (m_pMainLockSave)
+        CCC_MainLockBringToFront(m_hWnd);
+    CCC_CaptionLayout(m_hWnd);
+    return 0;
+}
+
+LRESULT CCustomBlurDialogExBase::OnDwmColorizationChanged(WPARAM, LPARAM)
+{
+    CCC_PostRefreshKids(m_hWnd);
+    return 0;
 }
 
 // 子が増えたあと fixer を張り直す。追従ボタンを前面へ。

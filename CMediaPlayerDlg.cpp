@@ -6314,8 +6314,10 @@ void CMediaPlayerDlg::OnPaint()
 	/* PrintWindow / スクショ再入で CPaintDC・BeginBufferedPaint すると EXECUTE AV になる */
 	if (CCC_PrintBusy()) {
 		ValidateRect(NULL);
+		CCC_PostRefreshKids(m_hWnd);
 		return;
 	}
+	CCC_InvalidateKidsIfHostFullPaint(this);
 	extern void COgg_ClearGdiPaintPending();
 #if CCUSTOM_AERO_SUPPORT
 	// アクリル(Win11) パス

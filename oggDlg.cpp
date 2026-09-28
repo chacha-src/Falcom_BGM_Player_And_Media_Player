@@ -6241,6 +6241,7 @@ BOOL COggDlg::OnInitDialog()
 //////////////////////////////////////////////////////////////////////////////
 void COggDlg::OnPaint()
 {
+	CCC_InvalidateKidsIfHostFullPaint(this);
 	CPaintDC dcc(this); // 描画用のデバイス コンテキスト
 	if (IsIconic())
 	{

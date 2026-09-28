@@ -43,12 +43,38 @@ int WrdWantSampleRate()
 	return 44100;
 }
 
-	/* 歌詞窓・バナーと同じ可聴位置。MIDI モニタの 700ms は DS 書込カーソル用で、
-	   壁時計に重ねて引くと WRD だけノートより遅れる */
+	/* MIDI: モニタと同じ再生カーソルから 900ms（DS 書込 700 + analog 200）。
+	   歌詞壁時計に 200ms だけ足すと符号が逆になる。VST はプラグイン遅延を別に足す。 */
 	__int64 WrdPlaybackSamples(int sr)
 	{
 		int useSr = (sr >= 8000) ? sr : WrdWantSampleRate();
 		if (useSr < 8000) useSr = 44100;
+
+		const int dm = mode;
+		if (IsVstMidiPlayMode(dm) || dm == -3) {
+			__int64 ui = 0;
+			const double sec = OggGetGdiPlaybackTimeSec();
+			if (sec > 0.0)
+				ui = (__int64)(sec * (double)useSr + 0.5);
+			if (ui <= 0) {
+				__int64 pb = playb;
+				if (playy == 0 && pb < 0) pb = 0;
+				if (pb < 0) pb = 0;
+				ui = pb;
+			}
+			__int64 pad = (__int64)useSr * 900 / 1000;
+			if (IsVstMidiPlayMode(dm)) {
+				MmBindVstActiveSlot();
+				const int lat = VstMidiGetLatencySamples();
+				if (lat > 0)
+					pad += lat;
+			}
+			if (ui > pad)
+				ui -= pad;
+			else
+				ui = 0;
+			return ui;
+		}
 
 		__int64 ui = 0;
 		const double lrcSec = OggGetLyricsPlaySec();

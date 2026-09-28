@@ -41,11 +41,11 @@
 //   ガラス子の α=255 化: CCustomOpaqueFixer（cpp 内クラス。ヘッダは前方宣言のみ）
 
 #define CCC_MSG_INSTALL_CAPTION       (WM_APP + 314) // キャプション帯を後付け（Show 前に Post）
+#define CCC_MSG_REFRESH_CHILDREN      (WM_APP + 313) // Explorer/DWM 再描画後の子 Invalidate 一括
 
 #if CCUSTOM_AERO_SUPPORT
 #define CCC_MSG_REAPPLY_OPAQUE_FIXERS (WM_APP + 311) // 子 HWND 増減後に fixer を張り直し
 #define CCC_WM_POST_OPAQUE_PAINT      (WM_APP + 312) // 1 フレーム遅延の不透明再描画（再入回避）
-#define CCC_MSG_REFRESH_CHILDREN      (WM_APP + 313) // 子の Invalidate 一括
 // 透過合成のクロマキー（黒文字 RGB(0,0,0) と区別するため 1,1,1 を使用）
 #define CCC_AERO_CHROMA_KEY RGB(1, 1, 1)
 
@@ -167,6 +167,8 @@ inline void CCC_BringDialogToForeground(CWnd* dlg)
 // 最小化復帰・再表示時: オーナードロー子が親 Invalidate だけでは再描画されないため明示的に更新
 void CCC_ForceRepaintHwnd(HWND hWnd);
 void CCC_RefreshKids(HWND hWnd);
+void CCC_PostRefreshKids(HWND hWnd);
+void CCC_InvalidateKidsIfHostFullPaint(CWnd* pWnd);
 void CCC_GroupBoxesBack(HWND hDlg);
 
 // ============================================================================
@@ -1911,6 +1913,14 @@ protected:
     afx_msg void OnShowWindow(BOOL bShow, UINT nStatus);
     afx_msg void OnWindowPosChanged(WINDOWPOS* lpwndpos);
     afx_msg void OnCompositionChanged();
+    afx_msg void OnSettingChange(UINT uFlags, LPCTSTR lpszSection);
+    afx_msg void OnSysColorChange();
+    afx_msg void OnDisplayChange(UINT nImageDepth, int cxScreen, int cyScreen);
+    afx_msg LRESULT OnThemeChanged();
+    afx_msg void OnActivate(UINT nState, CWnd* pWndOther, BOOL bMinimized);
+    afx_msg void OnActivateApp(BOOL bActive, DWORD dwThreadID);
+    afx_msg LRESULT OnRefreshChildren(WPARAM wParam, LPARAM lParam);
+    afx_msg LRESULT OnDwmColorizationChanged(WPARAM wParam, LPARAM lParam);
     afx_msg void OnDestroy();
     afx_msg LRESULT OnReapplyOpaqueFixers(WPARAM wParam, LPARAM lParam);
     afx_msg LRESULT OnInstallCustomCaption(WPARAM wParam, LPARAM lParam);
@@ -2021,6 +2031,14 @@ protected:
     afx_msg void OnShowWindow(BOOL bShow, UINT nStatus);
     afx_msg void OnWindowPosChanged(WINDOWPOS* lpwndpos);
     afx_msg void OnCompositionChanged();
+    afx_msg void OnSettingChange(UINT uFlags, LPCTSTR lpszSection);
+    afx_msg void OnSysColorChange();
+    afx_msg void OnDisplayChange(UINT nImageDepth, int cxScreen, int cyScreen);
+    afx_msg LRESULT OnThemeChanged();
+    afx_msg void OnActivate(UINT nState, CWnd* pWndOther, BOOL bMinimized);
+    afx_msg void OnActivateApp(BOOL bActive, DWORD dwThreadID);
+    afx_msg LRESULT OnRefreshChildren(WPARAM wParam, LPARAM lParam);
+    afx_msg LRESULT OnDwmColorizationChanged(WPARAM wParam, LPARAM lParam);
     afx_msg void OnDestroy();
     afx_msg LRESULT OnReapplyOpaqueFixers(WPARAM wParam, LPARAM lParam);
     afx_msg LRESULT OnInstallCustomCaption(WPARAM wParam, LPARAM lParam);
