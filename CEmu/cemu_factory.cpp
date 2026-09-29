@@ -26,6 +26,18 @@
 #include "machine/cemu_hard_pico.h"
 #include <string.h>
 
+static int s_nextOpenLoadOnly = 0;
+
+void CEmuDriverSetNextOpenLoadOnly(int on)
+{
+	s_nextOpenLoadOnly = on ? 1 : 0;
+}
+
+int CEmuDriverIsNextOpenLoadOnly(void)
+{
+	return s_nextOpenLoadOnly;
+}
+
 /* PC-98 系 (VA/VA-DOS 含む)。Z80 PC-88 ではない */
 static int IsPc98Platform(const CEmuGameEntry* ge)
 {
@@ -425,31 +437,34 @@ void CEmuHardDestroy(CHard* hw)
 CDriver* CEmuDriverCreate(const CEmuGameEntry* ge)
 {
 	if (!ge) return NULL;
+	CDriver* drv = NULL;
 	if (IsF3Platform(ge))
-		return CDriverF3Create();
-	if (IsNeoPlatform(ge))
-		return CDriverNeoCreate();
-	if (IsPcatAdlibPlatform(ge))
-		return new CDriverPcat();
-	if (IsPc88Z80Platform(ge))
-		return new CDriverPc88();
-	if (IsPc98Platform(ge))
-		return new CDriverPc98();
-	if (IsSg1000Platform(ge))
-		return new CDriverSg1000();
-	if (IsPicoPlatform(ge))
-		return new CDriverPico();
-	if (IsAcPlatform(ge))
-		return new CDriverAc();
-	if (IsX68kPlatform(ge))
-		return new CDriverX68k();
-	if (IsX1Platform(ge))
-		return new CDriverX1();
-	if (IsFm7Platform(ge))
-		return new CDriverFm7();
-	if (IsMsxPlatform(ge))
-		return new CDriverMsx();
-	return NULL;
+		drv = CDriverF3Create();
+	else if (IsNeoPlatform(ge))
+		drv = CDriverNeoCreate();
+	else if (IsPcatAdlibPlatform(ge))
+		drv = new CDriverPcat();
+	else if (IsPc88Z80Platform(ge))
+		drv = new CDriverPc88();
+	else if (IsPc98Platform(ge))
+		drv = new CDriverPc98();
+	else if (IsSg1000Platform(ge))
+		drv = new CDriverSg1000();
+	else if (IsPicoPlatform(ge))
+		drv = new CDriverPico();
+	else if (IsAcPlatform(ge))
+		drv = new CDriverAc();
+	else if (IsX68kPlatform(ge))
+		drv = new CDriverX68k();
+	else if (IsX1Platform(ge))
+		drv = new CDriverX1();
+	else if (IsFm7Platform(ge))
+		drv = new CDriverFm7();
+	else if (IsMsxPlatform(ge))
+		drv = new CDriverMsx();
+	if (drv)
+		drv->loadOnly = s_nextOpenLoadOnly;
+	return drv;
 }
 
 /* ドライバを delete するだけ (Shutdown は hard 側) */

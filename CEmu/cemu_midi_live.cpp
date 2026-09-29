@@ -8,6 +8,7 @@
 #include "machine/cemu_hard.h"
 #include "machine/cemu_hard_pcat.h"
 #include "machine/cemu_hard_pc98.h"
+#include "machine/cemu_hard_x68k.h"
 #include "VstMidiEngine.h"
 #include <string.h>
 #include <stdlib.h>
@@ -59,6 +60,7 @@ struct CEmuMidiLive {
 	int cc111StartSent;
 	int sawNotes;
 	int noteOns;
+	int bootReplay; /* ロード: 起動キャプチャを先に再生。終わるまで CPU を止める */
 	uint8_t pc[16];
 	uint8_t cc[16][128];
 	uint8_t havePc[16];
@@ -96,6 +98,7 @@ struct CEmuMidiLive {
 	int16_t* mixBuf;
 	int mixCap;
 	volatile LONG inPump;
+	int kpiSink;
 	/* SysEx は Pump をまたいで F7 まで保持。途中で打ち切るとダンプが
 	   running-status ノートになり、起動直後のゴミ音と鍵盤の往復になる。 */
 	int inSysex;
@@ -112,6 +115,33 @@ struct CEmuMidiLive {
 
 static CEmuMidiLive g_live;
 static int g_liveBootAsSfx;
+static CEmuMidiLiveKpiSysexFn g_liveKpiSysex;
+
+static void LiveSinkSysex(const uint8_t* d, int n)
+{
+	if (!d || n < 2) return;
+	if (g_live.kpiSink && g_liveKpiSysex && g_liveKpiSysex(d, n)) {
+		VstLiveTapPushSysexAt(0, d, n, g_live.midiSample);
+		return;
+	}
+	VstMidiInjectSysex(0, d, n);
+	VstLiveTapPushSysexAt(0, d, n, g_live.midiSample);
+}
+
+void CEmuMidiLiveSetKpiSysexHook(CEmuMidiLiveKpiSysexFn fn)
+{
+	g_liveKpiSysex = fn;
+}
+
+void CEmuMidiLiveSetKpiSink(int enable)
+{
+	g_live.kpiSink = enable ? 1 : 0;
+}
+
+int CEmuMidiLiveKpiSink(void)
+{
+	return g_live.kpiSink ? 1 : 0;
+}
 
 /* カタログ行が midiout 経路か */
 static int LiveModeEntryIsMidi(const CEmuGameEntry* e)
@@ -641,8 +671,7 @@ static void LiveFlushResetGate(int frames)
 		const int mode = LiveSysexIsModeChange(d, n);
 		if (LiveSysexIsRhythmUse(d, n))
 			sawRhythm = 1;
-		VstMidiInjectSysex(0, d, n);
-		VstLiveTapPushSysexAt(0, d, n, g_live.midiSample);
+		LiveSinkSysex(d, n);
 		drop = i + 1;
 		if (mode) {
 			rearm = 1;
@@ -754,8 +783,7 @@ static void LiveEmitSysex(const uint8_t* d, int n, int frames)
 			LiveQueueSysex(d, n);
 			return;
 		}
-		VstMidiInjectSysex(0, d, n);
-		VstLiveTapPushSysexAt(0, d, n, g_live.midiSample);
+		LiveSinkSysex(d, n);
 		LiveArmResetHold(frames);
 		return;
 	}
@@ -765,15 +793,13 @@ static void LiveEmitSysex(const uint8_t* d, int n, int frames)
 	}
 	if (LiveSysexIsRhythmUse(d, n)) {
 		/* A11 MAP2 が POWER PC と同じ process() に入るとキットが STANDARD に戻る。 */
-		VstMidiInjectSysex(0, d, n);
-		VstLiveTapPushSysexAt(0, d, n, g_live.midiSample);
+		LiveSinkSysex(d, n);
 		if (g_live.initPcBurst)
 			g_live.drumPcRetrig = 1;
 		LiveArmRhythmPcWait(frames);
 		return;
 	}
-	VstMidiInjectSysex(0, d, n);
-	VstLiveTapPushSysexAt(0, d, n, g_live.midiSample);
+	LiveSinkSysex(d, n);
 }
 
 static void LiveEmitLaBanks(int frames)
@@ -929,11 +955,9 @@ static void LiveConsumeUart(CHardPcat* hw, int frames)
 	/* ここで pendingTicks を進めない — 未完メッセージは完了までギャップを保持
 	   (進めないと音符長が二重計上になる)。 */
 
-	if (n >= (unsigned)CEMU_PCAT_MIDI_CAP - 64) {
-		hw->MidiCaptureReset();
+	if (g_live.midiCursor > 0) {
+		hw->MidiCaptureCompact(g_live.midiCursor);
 		g_live.midiCursor = 0;
-		g_live.pendingTicks = 0;
-		LiveSysexAbort();
 	}
 	LiveFlushProgramGate(frames);
 	LiveFlushHolds(frames);
@@ -1003,11 +1027,81 @@ static void LiveConsumeUartPc98(CHardPc98* hw, int frames)
 		LiveFinishShort(msg, frames);
 	}
 
-	if (n >= (unsigned)CEMU_PC98_MIDI_CAP - 64) {
-		hw->MidiCaptureReset();
+	if (g_live.midiCursor > 0) {
+		hw->MidiCaptureCompact(g_live.midiCursor);
 		g_live.midiCursor = 0;
-		g_live.pendingTicks = 0;
-		LiveSysexAbort();
+	}
+	LiveFlushProgramGate(frames);
+	LiveFlushHolds(frames);
+}
+
+static void LiveConsumeUartX68k(CHardX68k* hw, int frames)
+{
+	if (!hw) return;
+	LiveFlushResetGate(frames);
+	LiveEmitMapSetup(frames);
+
+	const unsigned n = hw->MidiByteCount();
+	while (g_live.midiCursor < n) {
+		const unsigned i = g_live.midiCursor++;
+		g_live.pendingTicks += hw->MidiDeltaAt(i);
+		const uint8_t v = hw->MidiByteAt(i);
+		if (v >= 0xf8) continue;
+
+		if (g_live.inSysex || v == 0xf0) {
+			if (LiveSysexFeed(v, frames)) {
+				g_live.run = 0;
+				g_live.need = 0;
+				g_live.haveD0 = 0;
+				continue;
+			}
+		}
+
+		if (v & 0x80) {
+			g_live.haveD0 = 0;
+			if ((v & 0xf0) == 0xf0) {
+				g_live.run = 0;
+				g_live.need = 0;
+				continue;
+			}
+			g_live.run = v;
+			g_live.need = ((v & 0xf0) == 0xc0 || (v & 0xf0) == 0xd0) ? 1 : 2;
+			continue;
+		}
+
+		if (!g_live.run || g_live.need <= 0) continue;
+
+		uint8_t data[2];
+		int nData = 0;
+		if (g_live.need == 1) {
+			data[0] = (uint8_t)(v & 0x7f);
+			nData = 1;
+		} else if (!g_live.haveD0) {
+			g_live.d0 = (uint8_t)(v & 0x7f);
+			g_live.haveD0 = 1;
+			continue;
+		} else {
+			data[0] = g_live.d0;
+			data[1] = (uint8_t)(v & 0x7f);
+			nData = 2;
+			g_live.haveD0 = 0;
+		}
+
+		const uint8_t hi = (uint8_t)(g_live.run & 0xf0);
+		if (!g_live.cc111StartSent && (hi == 0x90 || hi == 0x80)) {
+			LiveEmitTimed((DWORD)0xb0 | (111u << 8) | (0u << 16), frames);
+			g_live.cc111StartSent = 1;
+		}
+
+		DWORD msg = (DWORD)g_live.run | ((DWORD)data[0] << 8);
+		if (nData > 1)
+			msg |= ((DWORD)data[1] << 16);
+		LiveFinishShort(msg, frames);
+	}
+
+	if (g_live.midiCursor > 0) {
+		hw->MidiCaptureCompact(g_live.midiCursor);
+		g_live.midiCursor = 0;
 	}
 	LiveFlushProgramGate(frames);
 	LiveFlushHolds(frames);
@@ -1023,6 +1117,11 @@ int CEmuMidiLiveActive(void)
 int CEmuMidiLiveHasNotes(void)
 {
 	return g_live.sawNotes ? 1 : 0;
+}
+
+int CEmuMidiLiveIsLoadOnly(void)
+{
+	return (g_live.active && g_live.drv && g_live.drv->loadOnly) ? 1 : 0;
 }
 
 /* キャプチャバッファを UART ストリームとして辿る (ランニングステータス、SysEx は飛ばす)。 */
@@ -1083,6 +1182,8 @@ int CEmuMidiLiveGetDiag(CEmuMidiLiveDiag* out)
 			LiveScanCapture((const CHardPc98*)g_live.hard, out);
 		else if (g_live.hard->hardKind == CHard::KIND_PCAT)
 			LiveScanCapture((const CHardPcat*)g_live.hard, out);
+		else if (g_live.hard->hardKind == CHard::KIND_X68K)
+			LiveScanCapture((const CHardX68k*)g_live.hard, out);
 	}
 	LeaveCriticalSection(&g_live.cs);
 	return ok;
@@ -1150,6 +1251,7 @@ void CEmuMidiLiveStop(void)
 	g_live.cc111StartSent = 0;
 	g_live.sawNotes = 0;
 	g_live.noteOns = 0;
+	g_live.bootReplay = 0;
 	g_live.initPcBurst = 0;
 	g_live.drumPcRetrig = 0;
 	g_live.holdNotesUntil = 0;
@@ -1171,6 +1273,7 @@ void CEmuMidiLiveStop(void)
 	g_live.holdDropped = 0;
 	g_live.injPeak = 0;
 	g_live.holdPeak = 0;
+	g_live.kpiSink = 0;
 	LiveSysexAbort();
 	memset(g_live.seBits, 0, sizeof(g_live.seBits));
 	InterlockedExchange((LONG*)&g_live.overlayPend, 0);
@@ -1314,7 +1417,8 @@ int CEmuMidiLiveStartPcat(const wchar_t* zipPath, unsigned titleCode,
 	CHard* hard = CEmuHardCreate(ge, rate);
 	CDriver* drv = CEmuDriverCreate(ge);
 	const int okKind = hard && (hard->hardKind == CHard::KIND_PCAT
-		|| hard->hardKind == CHard::KIND_PC98);
+		|| hard->hardKind == CHard::KIND_PC98
+		|| hard->hardKind == CHard::KIND_X68K);
 	if (!hard || !drv || !okKind
 		|| !drv->Open(hard, ge, fs, titleCode ? titleCode : 0x10)) {
 		if (drv) { drv->Close(); CEmuDriverDestroy(drv); }
@@ -1329,6 +1433,7 @@ int CEmuMidiLiveStartPcat(const wchar_t* zipPath, unsigned titleCode,
 	   は GMmap/GSmap のまま。ラベル無し行は PCAT では MT-32、PC98 では
 	   SC-55 (当時のドライバが相手にしていた音源)。 */
 	const int isPc98 = (hard->hardKind == CHard::KIND_PC98) ? 1 : 0;
+	const int isX68k = (hard->hardKind == CHard::KIND_X68K) ? 1 : 0;
 	int midiType = MidiOutTypeFromGe(ge);
 	{
 		char geTag[CEMU_MODE_TAG] = {};
@@ -1360,11 +1465,15 @@ int CEmuMidiLiveStartPcat(const wchar_t* zipPath, unsigned titleCode,
 		CHardPc98* hw = (CHardPc98*)hard;
 		/* FMP3 -m は UART。Falcom FMD / MMD インテリジェントは 3Fh を送らない。
 		   Open 後に UART を強制すると ACK/CTH が壊れ MIDI が無音になる。 */
-		if (hw->MidiIsUart())
-			hw->MidiCaptureReset();
-		else
+		if (hw->MidiIsUart()) {
+			if (!(drv && drv->loadOnly))
+				hw->MidiCaptureReset();
+		} else
 			hw->MidiArmCapture();
 		song = hw->DosSongName();
+	} else if (isX68k) {
+		CHardX68k* hw = (CHardX68k*)hard;
+		hw->MidiCaptureReset();
 	} else {
 		CHardPcat* hw = (CHardPcat*)hard;
 		hw->MidiCaptureReset();
@@ -1417,6 +1526,18 @@ int CEmuMidiLiveStartPcat(const wchar_t* zipPath, unsigned titleCode,
 	g_live.cc111StartSent = 1;
 	g_live.sawNotes = 0;
 	g_live.noteOns = 0;
+	g_live.bootReplay = 0;
+	if (drv->loadOnly) {
+		unsigned capN = 0;
+		if (isPc98)
+			capN = ((CHardPc98*)hard)->MidiByteCount();
+		else if (isX68k)
+			capN = ((CHardX68k*)hard)->MidiByteCount();
+		else
+			capN = ((CHardPcat*)hard)->MidiByteCount();
+		if (capN)
+			g_live.bootReplay = 1;
+	}
 	g_live.initPcBurst = 0;
 	g_live.drumPcRetrig = 0;
 	g_live.holdNotesUntil = 0;
@@ -1470,7 +1591,8 @@ int CEmuMidiLivePump(int frames)
 		return 0;
 	}
 	const int kind = g_live.hard->hardKind;
-	if (kind != CHard::KIND_PCAT && kind != CHard::KIND_PC98) {
+	if (kind != CHard::KIND_PCAT && kind != CHard::KIND_PC98
+		&& kind != CHard::KIND_X68K) {
 		LeaveCriticalSection(&g_live.cs);
 		return 0;
 	}
@@ -1488,6 +1610,7 @@ int CEmuMidiLivePump(int frames)
 	int16_t* mix = g_live.mixBuf;
 	int doOvl = 0;
 	unsigned ovlCode = 0;
+	const int skipCpu = g_live.bootReplay;
 	if (InterlockedExchange((LONG*)&g_live.overlayPend, 0)) {
 		LiveArmSfxCapture();
 		doOvl = 1;
@@ -1496,9 +1619,11 @@ int CEmuMidiLivePump(int frames)
 	InterlockedExchange(&g_live.inPump, 1);
 	LeaveCriticalSection(&g_live.cs);
 
-	if (doOvl && drv)
-		drv->OverlayTitle(ovlCode);
-	drv->Render(mix, frames);
+	if (!skipCpu) {
+		if (doOvl && drv)
+			drv->OverlayTitle(ovlCode);
+		drv->Render(mix, frames);
+	}
 
 	EnterCriticalSection(&g_live.cs);
 	InterlockedExchange(&g_live.inPump, 0);
@@ -1508,8 +1633,12 @@ int CEmuMidiLivePump(int frames)
 	}
 	if (kind == CHard::KIND_PC98)
 		LiveConsumeUartPc98((CHardPc98*)hard, frames);
+	else if (kind == CHard::KIND_X68K)
+		LiveConsumeUartX68k((CHardX68k*)hard, frames);
 	else
 		LiveConsumeUart((CHardPcat*)hard, frames);
+	if (g_live.bootReplay && g_live.holdN <= 0 && g_live.sxHoldN <= 0)
+		g_live.bootReplay = 0;
 	g_live.audioSample += (__int64)frames;
 	LiveOvlTick();
 	LeaveCriticalSection(&g_live.cs);

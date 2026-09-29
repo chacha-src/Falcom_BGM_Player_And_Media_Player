@@ -260,7 +260,10 @@ int CDriverX1::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 	}
 	booted_ = 1;
 	hw_->CaptureBoot();
-	TriggerSong();
+	if (!loadOnly)
+		TriggerSong();
+	else
+		triggered_ = 1;
 	return 1;
 }
 

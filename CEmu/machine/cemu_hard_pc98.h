@@ -25,12 +25,19 @@ public:
 	int LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode);
 	int TriggerPlay(unsigned titleCode);
 	int TriggerStop();
+	/* INT funcvect を IRQ0 ISR の外で撃つ（hoot コマンドは IRQ0 より低優先） */
+	void RaiseFuncVect();
 	/* 割り込みがブートアイドルへ戻るまで（または予算まで）CPU を回す */
 	void DrainInterrupt(uint64_t budgetCycles);
 	/* DOS／汎用ポンプ: IRQ 配送、トランポリン DOS、アイドル HLT 量子 */
 	void PumpCycles(uint64_t endCycle);
 	/* この CPU サイクル分のマスタクロックを OPN(A) へ。cpuCycles_ を進める経路は必ず呼ぶ。呼ばないとチップタイマが遅れる。 */
 	void AdvanceOpnClocks(uint64_t cpuCycles);
+	/* ロード専用: DS 生成前の BootDos/RunUntil で出た FM をバッファし、最初の Render で流す */
+	void BootPcmBegin();
+	void BootPcmStopCapture();
+	void BootPcmTick(uint64_t cpuCycles);
+	int BootPcmDrain(int16_t* stereo, int frames);
 
 	Ay_Cpu* Cpu() override { return NULL; }
 	uint8_t* Mem() override;
@@ -94,7 +101,7 @@ public:
 	int packCmd1_; /* 1 なら Glodia 系パック糊（emdr/zavas/vd）INT7F cmd0=停止、cmd1=再生 */
 	int musicComKeepalive_; /* 1: fakecall/music/46 — 再生中 MUSIC.COM [0294]=0 を維持 */
 	int synthIfKeepalive_; /* 1: SYNTH_98/S20 は INT60 後 IF=0。ホスト STI で OPN IRQ を通す */
-	int modeMidi_; /* カタログ midiout — MPU-401 UART @ E0D0/E0D2（FMP -m 等） */
+	int modeMidi_; /* カタログ midiout — MPU-401 @ E0D0 と RS-MIDI 8251 @ 30h */
 	int fmpSeq_; /* FMP3 / TGLFMP。FM も MIDI も Timer B シーケンサ */
 	unsigned fmpTScaleN_;
 	unsigned fmpTScaleD_;
@@ -181,6 +188,9 @@ public:
 	unsigned PitClockHz() const { return pitClockHz_; }
 	void MidiArmCapture() { midiCapArmed_ = 1; }
 	void MidiCaptureReset();
+	void MidiCaptureCompact(unsigned consumed);
+	/* RS-MIDI（内蔵 8251 @ 30h/32h、CH2 @ B0h/B2h、BIOS INT 19h）。MPU コマンド解釈はしない。 */
+	void RsMidiTx(uint8_t data);
 	/* Wolfteam E0D0 コマンドストリームキャプチャ（E0D0 へ書いた生バイト） */
 	uint8_t wolfCmdLog_[2048];
 	unsigned wolfCmdLogCount_;
@@ -315,6 +325,13 @@ private:
 	unsigned pumpMusicMidi0_;
 	unsigned pumpMusicTimer0_;
 	uint64_t pumpMusicCycle0_;
+	int bootPcmOn_;
+	int16_t* bootPcm_;
+	int bootPcmCap_;
+	int bootPcmLen_;
+	int bootPcmPos_;
+	int64_t bootPcmAcc_;
+	void BootPcmFree();
 
 	/* ホストサービスラッチ（0x7D0 族） */
 	uint8_t hostFunc_;

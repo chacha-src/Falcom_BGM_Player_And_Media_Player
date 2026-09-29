@@ -13,11 +13,19 @@
 #ifndef WM_SPEANA_TICK
 #define WM_SPEANA_TICK (WM_APP + 73)
 #endif
+#ifndef CREATE_WAITABLE_TIMER_HIGH_RESOLUTION
+#define CREATE_WAITABLE_TIMER_HIGH_RESOLUTION 0x00000002
+#endif
 #include <uxtheme.h>
+#include <dxgi.h>
+#include <dwmapi.h>
 #include <math.h>
 #include <algorithm>
 #include <stdlib.h>
 #pragma comment(lib, "uxtheme.lib")
+#pragma comment(lib, "msimg32.lib")
+#pragma comment(lib, "dxgi.lib")
+#pragma comment(lib, "dwmapi.lib")
 
 // ============================================================================
 // CCustomPopupMenu.cpp — 自前コンテキストメニュー実装
@@ -83,6 +91,220 @@ namespace {
 	enum { kTipTimer = 7701, kInwomanTimer = 7702, kAnimTimer = 7703, kBounceTimer = 7704, kSettleTimer = 7705 };
 	// BigBang内部マーカー（画面には出さない。ULWでα=0へ変換）
 	static const COLORREF kChipChromaKey = RGB(255, 0, 255);
+	enum { kStripeTile = 56 };
+
+	static IDXGIOutput* s_popDxgiOut = NULL;
+	static HANDLE s_popWaitTimer = NULL;
+	static HMONITOR s_popBoundMon = NULL;
+	static LARGE_INTEGER s_popQpcFreq = {};
+	static LONGLONG s_popPeriod = 0;
+	static int s_popDxgiInstant = 0;
+
+	static void PopupDxgiRelease()
+	{
+		if (s_popDxgiOut) {
+			s_popDxgiOut->Release();
+			s_popDxgiOut = NULL;
+		}
+		s_popBoundMon = NULL;
+	}
+
+	static bool PopupDxgiInit(HWND hwnd)
+	{
+		PopupDxgiRelease();
+		HMODULE dxgi = GetModuleHandleW(L"dxgi.dll");
+		if (!dxgi)
+			dxgi = LoadLibraryW(L"dxgi.dll");
+		if (!dxgi)
+			return false;
+		typedef HRESULT(WINAPI* PFN_CreateFactory1)(REFIID, void**);
+		PFN_CreateFactory1 create1 = (PFN_CreateFactory1)GetProcAddress(dxgi, "CreateDXGIFactory1");
+		if (!create1)
+			return false;
+		IDXGIFactory1* fac = NULL;
+		if (FAILED(create1(__uuidof(IDXGIFactory1), (void**)&fac)) || !fac)
+			return false;
+		HMONITOR want = MonitorFromWindow(
+			(hwnd && ::IsWindow(hwnd)) ? hwnd : GetDesktopWindow(), MONITOR_DEFAULTTONEAREST);
+		IDXGIOutput* pick = NULL;
+		IDXGIOutput* fallback = NULL;
+		for (UINT a = 0; a < 8 && !pick; ++a) {
+			IDXGIAdapter1* ad = NULL;
+			const HRESULT er = fac->EnumAdapters1(a, &ad);
+			if (er == DXGI_ERROR_NOT_FOUND)
+				break;
+			if (FAILED(er) || !ad)
+				continue;
+			for (UINT o = 0; o < 8 && !pick; ++o) {
+				IDXGIOutput* out = NULL;
+				const HRESULT eo = ad->EnumOutputs(o, &out);
+				if (eo == DXGI_ERROR_NOT_FOUND)
+					break;
+				if (FAILED(eo) || !out)
+					continue;
+				DXGI_OUTPUT_DESC od;
+				ZeroMemory(&od, sizeof(od));
+				if (SUCCEEDED(out->GetDesc(&od)) && od.AttachedToDesktop) {
+					if (!fallback) {
+						fallback = out;
+						fallback->AddRef();
+					}
+					if (od.Monitor == want) {
+						pick = out;
+						pick->AddRef();
+					}
+				}
+				out->Release();
+			}
+			ad->Release();
+		}
+		fac->Release();
+		if (!pick) {
+			pick = fallback;
+			fallback = NULL;
+		}
+		if (fallback)
+			fallback->Release();
+		s_popDxgiOut = pick;
+		s_popBoundMon = want;
+		s_popDxgiInstant = 0;
+		return s_popDxgiOut != NULL;
+	}
+
+	static bool PopupDwmTiming(LONGLONG* lastVb, LONGLONG* period)
+	{
+		if (!lastVb || !period)
+			return false;
+		HMODULE dwm = GetModuleHandleW(L"dwmapi.dll");
+		if (!dwm)
+			dwm = LoadLibraryW(L"dwmapi.dll");
+		if (!dwm)
+			return false;
+		typedef HRESULT(WINAPI* PFN_GetTi)(HWND, DWM_TIMING_INFO*);
+		typedef HRESULT(WINAPI* PFN_IsComp)(BOOL*);
+		PFN_GetTi getTi = (PFN_GetTi)GetProcAddress(dwm, "DwmGetCompositionTimingInfo");
+		PFN_IsComp isComp = (PFN_IsComp)GetProcAddress(dwm, "DwmIsCompositionEnabled");
+		BOOL comp = FALSE;
+		if (!isComp || !getTi || FAILED(isComp(&comp)) || !comp)
+			return false;
+		DWM_TIMING_INFO ti;
+		ZeroMemory(&ti, sizeof(ti));
+		ti.cbSize = sizeof(ti);
+		if (FAILED(getTi(NULL, &ti)) || ti.qpcRefreshPeriod < 1000 || ti.qpcVBlank == 0)
+			return false;
+		*lastVb = (LONGLONG)ti.qpcVBlank;
+		*period = (LONGLONG)ti.qpcRefreshPeriod;
+		return true;
+	}
+
+	static void PopupWaitTimer(LONGLONG waitTicks)
+	{
+		if (waitTicks < 1)
+			return;
+		if (s_popQpcFreq.QuadPart < 1)
+			QueryPerformanceFrequency(&s_popQpcFreq);
+		if (s_popPeriod > 0 && waitTicks > s_popPeriod * 2)
+			waitTicks = s_popPeriod * 2;
+		if (!s_popWaitTimer) {
+			s_popWaitTimer = CreateWaitableTimerExW(NULL, NULL,
+				CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS);
+			if (!s_popWaitTimer)
+				s_popWaitTimer = CreateWaitableTimerW(NULL, TRUE, NULL);
+		}
+		if (s_popWaitTimer && s_popQpcFreq.QuadPart > 0) {
+			LARGE_INTEGER due;
+			due.QuadPart = -(LONGLONG)((waitTicks * 10000000ULL + (ULONGLONG)s_popQpcFreq.QuadPart / 2)
+				/ (ULONGLONG)s_popQpcFreq.QuadPart);
+			if (due.QuadPart >= 0)
+				due.QuadPart = -10000;
+			if (SetWaitableTimer(s_popWaitTimer, &due, 0, NULL, NULL, FALSE)) {
+				DWORD cap = 36;
+				if (s_popPeriod > 0 && s_popQpcFreq.QuadPart > 0)
+					cap = (DWORD)((s_popPeriod * 2 * 1000) / s_popQpcFreq.QuadPart) + 4;
+				WaitForSingleObject(s_popWaitTimer, cap);
+				return;
+			}
+		}
+		DWORD ms = 1;
+		if (s_popQpcFreq.QuadPart > 0)
+			ms = (DWORD)((waitTicks * 1000 + s_popQpcFreq.QuadPart / 2) / s_popQpcFreq.QuadPart);
+		if (ms < 1) ms = 1;
+		if (ms > 32) ms = 32;
+		Sleep(ms);
+	}
+
+	static void PopupWaitVblank(HWND hwnd)
+	{
+		if (s_popQpcFreq.QuadPart < 1)
+			QueryPerformanceFrequency(&s_popQpcFreq);
+		const HMONITOR want = MonitorFromWindow(
+			(hwnd && ::IsWindow(hwnd)) ? hwnd : GetDesktopWindow(), MONITOR_DEFAULTTONEAREST);
+		if (!s_popDxgiOut || want != s_popBoundMon)
+			PopupDxgiInit(hwnd);
+
+		if (s_popDxgiOut) {
+			LARGE_INTEGER t0, t1;
+			QueryPerformanceCounter(&t0);
+			const HRESULT hr = s_popDxgiOut->WaitForVBlank();
+			QueryPerformanceCounter(&t1);
+			if (SUCCEEDED(hr)) {
+				const LONGLONG elapsed = t1.QuadPart - t0.QuadPart;
+				const LONGLONG inst = (s_popQpcFreq.QuadPart > 0) ? (s_popQpcFreq.QuadPart / 5000) : 2000;
+				if (elapsed >= inst) {
+					s_popDxgiInstant = 0;
+					return;
+				}
+				if (++s_popDxgiInstant >= 3)
+					PopupDxgiRelease();
+			}
+			else {
+				PopupDxgiRelease();
+			}
+		}
+
+		LARGE_INTEGER now;
+		QueryPerformanceCounter(&now);
+		LONGLONG lastVb = 0, period = 0;
+		if (!PopupDwmTiming(&lastVb, &period)) {
+			period = (s_popQpcFreq.QuadPart > 0) ? (s_popQpcFreq.QuadPart / 60) : 1;
+			lastVb = now.QuadPart - (now.QuadPart % period);
+		}
+		s_popPeriod = (period > 0) ? period : 1;
+		LONGLONG next = lastVb + s_popPeriod;
+		while (next <= now.QuadPart)
+			next += s_popPeriod;
+		const LONGLONG slop = (s_popQpcFreq.QuadPart > 0) ? (s_popQpcFreq.QuadPart / 2500) : 1;
+		if (next - now.QuadPart < slop)
+			next += s_popPeriod;
+		PopupWaitTimer(next - now.QuadPart);
+	}
+
+	static int PopupStripeShift()
+	{
+		static LARGE_INTEGER s_last = {};
+		static double s_acc = 0.0;
+		static int s_shift = 0;
+		if (s_popQpcFreq.QuadPart < 1)
+			QueryPerformanceFrequency(&s_popQpcFreq);
+		LARGE_INTEGER now;
+		QueryPerformanceCounter(&now);
+		if (s_last.QuadPart == 0 || s_popQpcFreq.QuadPart < 1) {
+			s_last = now;
+			return s_shift;
+		}
+		double dt = (double)(now.QuadPart - s_last.QuadPart) / (double)s_popQpcFreq.QuadPart;
+		s_last = now;
+		if (dt < 0.0) dt = 0.0;
+		if (dt > 0.08) dt = 0.08;
+		s_acc += dt * (1000.0 / 66.0);
+		int n = (int)s_acc;
+		if (n < 0) n = 0;
+		if (n > 4) n = 4;
+		s_acc -= n;
+		s_shift += n;
+		while (s_shift >= kStripeTile) s_shift -= kStripeTile;
+		return s_shift;
+	}
 
 	static wchar_t s_faces[CCUSTOM_POPUP_MAX_FACES][LF_FACESIZE];
 	static int s_faceCount = 0;
@@ -475,21 +697,49 @@ static COLORREF BlendRGB(COLORREF a, COLORREF b, int t)
 
 	static void FillVGrad(CDC& dc, const CRect& r, COLORREF c0, COLORREF c1)
 	{
-		const int h = r.Height();
-		if (h <= 0 || r.Width() <= 0) return;
-		for (int y = 0; y < h; ++y) {
-			const int t = (h <= 1) ? 0 : (y * 256) / (h - 1);
-			dc.FillSolidRect(r.left, r.top + y, r.Width(), 1, BlendRGB(c0, c1, t));
+		if (r.Height() <= 0 || r.Width() <= 0) return;
+		TRIVERTEX v[2];
+		v[0].x = r.left; v[0].y = r.top;
+		v[0].Red = (COLOR16)(GetRValue(c0) << 8);
+		v[0].Green = (COLOR16)(GetGValue(c0) << 8);
+		v[0].Blue = (COLOR16)(GetBValue(c0) << 8);
+		v[0].Alpha = 0;
+		v[1].x = r.right; v[1].y = r.bottom;
+		v[1].Red = (COLOR16)(GetRValue(c1) << 8);
+		v[1].Green = (COLOR16)(GetGValue(c1) << 8);
+		v[1].Blue = (COLOR16)(GetBValue(c1) << 8);
+		v[1].Alpha = 0;
+		GRADIENT_RECT gr = { 0, 1 };
+		if (!::GradientFill(dc.GetSafeHdc(), v, 2, &gr, 1, GRADIENT_FILL_RECT_V)) {
+			const int h = r.Height();
+			for (int y = 0; y < h; ++y) {
+				const int t = (h <= 1) ? 0 : (y * 256) / (h - 1);
+				dc.FillSolidRect(r.left, r.top + y, r.Width(), 1, BlendRGB(c0, c1, t));
+			}
 		}
 	}
 
 	static void FillHGrad(CDC& dc, const CRect& r, COLORREF c0, COLORREF c1)
 	{
-		const int w = r.Width();
-		if (w <= 0 || r.Height() <= 0) return;
-		for (int x = 0; x < w; ++x) {
-			const int t = (w <= 1) ? 0 : (x * 256) / (w - 1);
-			dc.FillSolidRect(r.left + x, r.top, 1, r.Height(), BlendRGB(c0, c1, t));
+		if (r.Width() <= 0 || r.Height() <= 0) return;
+		TRIVERTEX v[2];
+		v[0].x = r.left; v[0].y = r.top;
+		v[0].Red = (COLOR16)(GetRValue(c0) << 8);
+		v[0].Green = (COLOR16)(GetGValue(c0) << 8);
+		v[0].Blue = (COLOR16)(GetBValue(c0) << 8);
+		v[0].Alpha = 0;
+		v[1].x = r.right; v[1].y = r.bottom;
+		v[1].Red = (COLOR16)(GetRValue(c1) << 8);
+		v[1].Green = (COLOR16)(GetGValue(c1) << 8);
+		v[1].Blue = (COLOR16)(GetBValue(c1) << 8);
+		v[1].Alpha = 0;
+		GRADIENT_RECT gr = { 0, 1 };
+		if (!::GradientFill(dc.GetSafeHdc(), v, 2, &gr, 1, GRADIENT_FILL_RECT_H)) {
+			const int w = r.Width();
+			for (int x = 0; x < w; ++x) {
+				const int t = (w <= 1) ? 0 : (x * 256) / (w - 1);
+				dc.FillSolidRect(r.left + x, r.top, 1, r.Height(), BlendRGB(c0, c1, t));
+			}
 		}
 	}
 
@@ -632,7 +882,8 @@ static COLORREF BlendRGB(COLORREF a, COLORREF b, int t)
 	{
 		const COLORREF c0 = CCC_IsInwoman() ? RGB(255, 220, 236) : RGB(255, 232, 244);
 		const COLORREF c1 = CCC_IsInwoman() ? RGB(255, 192, 224) : RGB(232, 214, 255);
-		FillVGrad(dc, rc, c0, c1);
+		// タイルとリボンが全面を覆う。走査線グラデは捨て描画だった。
+		dc.FillSolidRect(&rc, c0);
 
 		const int L = rc.left + CCUSTOM_POPUP_RIBBON_W;
 		const int R = rc.right;
@@ -641,7 +892,7 @@ static COLORREF BlendRGB(COLORREF a, COLORREF b, int t)
 		if (R <= L || B <= T) return;
 
 		// 斜め模様タイル（一度だけ生成）を BitBlt で流す → 滑らか＆軽い
-		enum { kTile = 56 };
+		enum { kTile = kStripeTile };
 		static CBitmap s_tile;
 		static COLORREF s_key0 = 0, s_key1 = 0;
 		if (!s_tile.GetSafeHandle() || s_key0 != c0 || s_key1 != c1) {
@@ -675,7 +926,7 @@ static COLORREF BlendRGB(COLORREF a, COLORREF b, int t)
 		}
 
 		// 半分速：66ms で 1px（時間ベースでフレーム落ちても連続）
-		const int shift = (int)((::GetTickCount64() / 66) % (ULONGLONG)kTile);
+		const int shift = PopupStripeShift();
 		CDC tileDC; tileDC.CreateCompatibleDC(&dc);
 		CBitmap* ob = tileDC.SelectObject(&s_tile);
 		for (int y = T - shift; y < B; y += kTile) {
@@ -989,7 +1240,8 @@ CCustomPopupMenu::CCustomPopupMenu()
 	, m_menuW(0), m_menuH(0), m_contentH(0), m_scrollY(0), m_scrollMax(0)
 	, m_stickyCount(0), m_stickyH(0)
 	, m_asSubmenu(FALSE), m_animTick(0), m_lineAnimPhase(0), m_lineAnimStart(0)
-	, m_lineAnimOrigin(0), m_lineAnimOriginY(0), m_flightPad(0), m_bridgePanel(FALSE)
+	, m_lineAnimOrigin(0), m_lineAnimOriginY(0), m_flightPad(0), m_chipPresentedAnimTick(-1)
+	, m_bridgePanel(FALSE)
 	, m_skipChrome(FALSE), m_chromeInjected(FALSE), m_previewing(FALSE)
 	, m_bounceIdx(-1), m_nBounce(0), m_suppressEditNotify(FALSE)
 {
@@ -2253,7 +2505,6 @@ void CCustomPopupMenu::AnimateIn()
 		UpdateWindow();
 		RefreshEmbeddedChildren();
 		PostMessage(WM_APP + 0x51C, 0, 0);
-		SetTimer(kAnimTimer, 50, NULL);
 		m_lineAnimPhase = 0;
 		return;
 	}
@@ -2278,14 +2529,13 @@ void CCustomPopupMenu::AnimateIn()
 	// phase 1=enter（CalcLineAnim / ForceChipPresent）。0=idle 2=exit
 	m_lineAnimPhase = 1;
 	m_lineAnimStart = GetTickCount64();
+	m_chipPresentedAnimTick = -1;
 	if (UsesRowChipFlight(style))
 		ForceChipPresent();
 	else {
 		InvalidateBgOnly();
 		UpdateWindow();
 	}
-	SetTimer(kAnimTimer, 16, NULL);
-	// WM_TIMER(16ms) だけに頼らず、所要時間後に必ず定着（マウス未移動でも子が出る）
 	SetTimer(kSettleTimer, (UINT)max(50, ChipEnterTotalMs(style, m_asSubmenu, m_itemCount, m_lineAnimOrigin) + 30), NULL);
 }
 
@@ -2813,15 +3063,24 @@ BOOL CCustomPopupMenu::PresentChipLayered(HDC hdcSrc, int w, int h, const POINT*
 	GetWindowRect(&wr);
 	POINT ptDst = { wr.left, wr.top };
 	if (optDst) ptDst = *optDst;
-	// optDst 指定時は最終サイズそのもの。通常飛行は窓に合わせて余白を透明埋め
 	const int outW = optDst ? w : max(w, wr.Width());
 	const int outH = optDst ? h : max(h, wr.Height());
+	POINT ptSrc = { 0, 0 };
+	SIZE size = { outW, outH };
+	const BYTE a = opacity ? opacity : (BYTE)255;
+
+	// 飛行コマの本体: キー抜きは ULW_COLORKEY。毎フレ DIB 生成＋全画素スキャンは不要。
+	if (a >= 255 && w == outW && h == outH) {
+		if (::UpdateLayeredWindow(m_hWnd, NULL, &ptDst, &size, hdcSrc, &ptSrc,
+			kChipChromaKey, NULL, ULW_COLORKEY))
+			return TRUE;
+	}
 
 	BITMAPINFO bmi;
 	ZeroMemory(&bmi, sizeof(bmi));
 	bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
 	bmi.bmiHeader.biWidth = outW;
-	bmi.bmiHeader.biHeight = -outH; // top-down
+	bmi.bmiHeader.biHeight = -outH;
 	bmi.bmiHeader.biPlanes = 1;
 	bmi.bmiHeader.biBitCount = 32;
 	bmi.bmiHeader.biCompression = BI_RGB;
@@ -2856,11 +3115,9 @@ BOOL CCustomPopupMenu::PresentChipLayered(HDC hdcSrc, int w, int h, const POINT*
 		}
 	}
 
-	POINT ptSrc = { 0, 0 };
-	SIZE size = { outW, outH };
 	BLENDFUNCTION bf = {};
 	bf.BlendOp = AC_SRC_OVER;
-	bf.SourceConstantAlpha = opacity ? opacity : (BYTE)255;
+	bf.SourceConstantAlpha = a;
 	bf.AlphaFormat = AC_SRC_ALPHA;
 	const BOOL ok = ::UpdateLayeredWindow(m_hWnd, NULL, &ptDst, &size, hdcDib, &ptSrc, 0, &bf, ULW_ALPHA);
 
@@ -2895,18 +3152,24 @@ void CCustomPopupMenu::BlitOpaqueToWindow(HDC hdcSrc, int w, int h)
 void CCustomPopupMenu::ForceChipPresent()
 {
 	if (!GetSafeHwnd()) return;
+	if (m_chipPresentedAnimTick == m_animTick)
+		return;
 	if (!(GetExStyle() & WS_EX_LAYERED))
 		ModifyStyleEx(0, WS_EX_LAYERED);
 	CRect rc; GetClientRect(&rc);
 	if (rc.Width() <= 0 || rc.Height() <= 0) return;
 	CClientDC dc(this);
 	CDC mDC; mDC.CreateCompatibleDC(&dc);
-	CBitmap bmp;
-	if (!bmp.CreateCompatibleBitmap(&dc, rc.Width(), rc.Height())) return;
-	CBitmap* ob = mDC.SelectObject(&bmp);
+	if (!m_memBmp.GetSafeHandle() || m_memW != rc.Width() || m_memH != rc.Height()) {
+		if (m_memBmp.GetSafeHandle()) m_memBmp.DeleteObject();
+		if (!m_memBmp.CreateCompatibleBitmap(&dc, rc.Width(), rc.Height())) return;
+		m_memW = rc.Width(); m_memH = rc.Height();
+	}
+	CBitmap* ob = mDC.SelectObject(&m_memBmp);
 	mDC.FillSolidRect(&rc, (m_lineAnimPhase != 0) ? kChipChromaKey : PopupBg());
 	PaintToDC(mDC);
 	PresentChipLayered(mDC.GetSafeHdc(), rc.Width(), rc.Height());
+	m_chipPresentedAnimTick = m_animTick;
 	mDC.SelectObject(ob);
 }
 
@@ -3050,12 +3313,13 @@ void CCustomPopupMenu::StartCheckBounce(int idx)
 
 // 出現アニメ中断→一枚状態。サブ遷移・クリック・所要超過で使う。
 // 行チップ中は CommitChipFlightSettle。マウス未移動でも HitTest で hot 同期。
-// その後 idle 背景用に kAnimTimer 33ms。
+// idle のストライプは Track モーダルの vblank（PulseVsyncFrame）。
 void CCustomPopupMenu::SnapAnimToIdle()
 {
 	if (!GetSafeHwnd() || m_lineAnimPhase == 0) return;
 	KillTimer(kAnimTimer);
 	KillTimer(kSettleTimer);
+	m_chipPresentedAnimTick = -1;
 	if (UsesRowChipFlight(PopupAnimStyle())
 		&& (m_flightPad > 0 || (GetExStyle() & WS_EX_LAYERED))) {
 		CommitChipFlightSettle();
@@ -3079,8 +3343,62 @@ void CCustomPopupMenu::SnapAnimToIdle()
 				SetHot(idx);
 		}
 	}
-	// idle 背景アニメ用（ストライプ周期 ~66ms に合わせてやや速め）
-	SetTimer(kAnimTimer, 33, NULL);
+}
+
+void CCustomPopupMenu::PulseVsyncFrame()
+{
+	if (!GetSafeHwnd())
+		return;
+	++m_animTick;
+	const int styleNow = PopupAnimStyle();
+	if (GetSafeHwnd()
+		&& styleNow == POPUP_ANIM_EXPAND && !m_asSubmenu
+		&& (m_lineAnimPhase == 1 || m_lineAnimPhase == 2)) {
+		CRect rc; GetClientRect(&rc);
+		CRect hull(0, 0, 0, 0);
+		BOOL any = FALSE;
+		for (int i = 0; i < m_itemCount; ++i) {
+			int ox = 0, oy = 0, fade = 256;
+			if (!CalcLineAnim(i, &ox, &oy, &fade) || fade < 4)
+				continue;
+			CRect vr = ItemViewRect(i);
+			CRect band(rc.left, vr.top, rc.right, vr.bottom);
+			band.InflateRect(0, 2);
+			if (!band.IntersectRect(&band, &rc) || band.Height() <= 0)
+				continue;
+			if (!any) { hull = band; any = TRUE; }
+			else hull.UnionRect(&hull, &band);
+		}
+		if (!any) {
+			int y0 = m_lineAnimOriginY - 4, y1 = m_lineAnimOriginY + 4;
+			if (y0 < 0) y0 = 0;
+			if (y1 > rc.bottom) y1 = rc.bottom;
+			hull.SetRect(rc.left, y0, rc.right, max(y1, y0 + 2));
+		} else {
+			if (m_lineAnimOriginY < hull.top) hull.top = max(rc.top, m_lineAnimOriginY - 4);
+			if (m_lineAnimOriginY > hull.bottom) hull.bottom = min(rc.bottom, m_lineAnimOriginY + 4);
+			hull.left = rc.left;
+			hull.right = rc.right;
+			hull.InflateRect(0, 1);
+			hull.IntersectRect(&hull, &rc);
+		}
+		HRGN hUnion = ::CreateRectRgn(hull.left, hull.top, hull.right, hull.bottom);
+		::SetWindowRgn(m_hWnd, hUnion, TRUE);
+	}
+	if (m_lineAnimPhase == 1 || m_lineAnimPhase == 2) {
+		if (UsesRowChipFlight(styleNow))
+			ForceChipPresent();
+		else
+			InvalidateBgOnly();
+	}
+	else {
+		InvalidateBgOnly();
+	}
+	if (m_openSub >= 0 && m_openSub < m_itemCount) {
+		const int si = m_items[m_openSub].subIndex;
+		if (si >= 0 && si < m_subCount && m_subs[si])
+			m_subs[si]->PulseVsyncFrame();
+	}
 }
 
 // 指定行のサブを開く。出現中なら先に SnapAnimToIdle（飛行余白だと座標が狂う）。
@@ -3246,12 +3564,44 @@ void CCustomPopupMenu::PaintToDC(CDC& dc)
 	const int labelBand = PopupSx(dpi, 18);
 	const int labelTop = PopupSx(dpi, 2);
 
+	int snapOx[CCUSTOM_POPUP_MAX_ITEMS];
+	int snapOy[CCUSTOM_POPUP_MAX_ITEMS];
+	int snapFade[CCUSTOM_POPUP_MAX_ITEMS];
+	float snapT[CCUSTOM_POPUP_MAX_ITEMS];
+	BOOL snapVis[CCUSTOM_POPUP_MAX_ITEMS];
+	BOOL useSnap = FALSE;
+	BOOL snapAtRest = (m_lineAnimPhase == 0);
+	if (m_lineAnimPhase != 0 && m_itemCount > 0) {
+		useSnap = TRUE;
+		snapAtRest = TRUE;
+		BOOL anyRow = FALSE;
+		const int n = (m_itemCount < CCUSTOM_POPUP_MAX_ITEMS) ? m_itemCount : CCUSTOM_POPUP_MAX_ITEMS;
+		for (int i = 0; i < n; ++i) {
+			snapOx[i] = snapOy[i] = 0;
+			snapFade[i] = 256;
+			snapT[i] = 1.f;
+			snapVis[i] = CalcLineAnim(i, &snapOx[i], &snapOy[i], &snapFade[i], &snapT[i]);
+			if (m_items[i].kind == CCUSTOM_POPUP_SEP)
+				continue;
+			anyRow = TRUE;
+			if (!snapVis[i] || snapFade[i] < 250
+				|| snapOx[i] > 2 || snapOx[i] < -2 || snapOy[i] > 2 || snapOy[i] < -2)
+				snapAtRest = FALSE;
+		}
+		if (!anyRow)
+			snapAtRest = FALSE;
+	}
+
 	auto paintItem = [&](int i) {
 		const CCustomPopupItem& it = m_items[i];
 		int ox = 0, oy = 0, fade = 256;
 		// 橋渡し一枚パネル中はオフセット禁止（easeOutBackの行き過ぎが点滅に見える）
 		if (!m_bridgePanel) {
-			if (!CalcLineAnim(i, &ox, &oy, &fade))
+			if (useSnap) {
+				if (!snapVis[i])
+					return;
+				ox = snapOx[i]; oy = snapOy[i]; fade = snapFade[i];
+			} else if (!CalcLineAnim(i, &ox, &oy, &fade))
 				return;
 		}
 		if (fade < 20)
@@ -3267,7 +3617,7 @@ void CCustomPopupMenu::PaintToDC(CDC& dc)
 
 		const BOOL interactive = IsInteractiveKind(it.kind);
 		const BOOL hot = (i == m_hot && it.enabled && !interactive
-			&& (m_lineAnimPhase == 0 || ChipFlightRowsAtRest()));
+			&& (m_lineAnimPhase == 0 || snapAtRest));
 		if (hot) DrawHotPill(dc, vr);
 
 		const COLORREF bgRef = PopupBg();
@@ -3361,7 +3711,7 @@ void CCustomPopupMenu::PaintToDC(CDC& dc)
 		if (UsesRowChipFlight(animStyle)) {
 			dc.FillSolidRect(&rc, kChipChromaKey);
 			// 全行が定位置にいる／橋渡し中は一枚パネル（行枠のまま放置しない）
-			const BOOL paintAsPanel = m_bridgePanel || ChipFlightRowsAtRest();
+			const BOOL paintAsPanel = m_bridgePanel || snapAtRest;
 			if (paintAsPanel) {
 				CRect content(m_flightPad, m_flightPad, m_flightPad + m_menuW, m_flightPad + m_menuH);
 				if (content.Width() <= 1 || content.Height() <= 1)
@@ -3379,7 +3729,11 @@ void CCustomPopupMenu::PaintToDC(CDC& dc)
 				for (int i = 0; i < m_itemCount; ++i) {
 					int ox = 0, oy = 0, fade = 0;
 					float flightT = 1.f;
-					if (!CalcLineAnim(i, &ox, &oy, &fade, &flightT) || fade < 8)
+					if (useSnap) {
+						if (!snapVis[i] || snapFade[i] < 8)
+							continue;
+						ox = snapOx[i]; oy = snapOy[i]; fade = snapFade[i]; flightT = snapT[i];
+					} else if (!CalcLineAnim(i, &ox, &oy, &fade, &flightT) || fade < 8)
 						continue;
 					CRect vr = ItemViewRect(i);
 					CRect chip(m_flightPad, vr.top, m_flightPad + m_menuW, vr.bottom);
@@ -3400,7 +3754,11 @@ void CCustomPopupMenu::PaintToDC(CDC& dc)
 		if (animStyle == POPUP_ANIM_EXPAND && !m_asSubmenu) {
 			for (int i = 0; i < m_itemCount; ++i) {
 				int ox = 0, oy = 0, fade = 0;
-				if (!CalcLineAnim(i, &ox, &oy, &fade) || fade < 8)
+				if (useSnap) {
+					if (!snapVis[i] || snapFade[i] < 8)
+						continue;
+					ox = snapOx[i]; oy = snapOy[i]; fade = snapFade[i];
+				} else if (!CalcLineAnim(i, &ox, &oy, &fade) || fade < 8)
 					continue;
 				CRect vr = ItemViewRect(i);
 				CRect band(rc.left, vr.top, rc.right, vr.bottom);
@@ -3429,7 +3787,10 @@ void CCustomPopupMenu::PaintToDC(CDC& dc)
 			float doorT = 1.f;
 			if (animStyle == POPUP_ANIM_EXPAND && !m_asSubmenu) {
 				int ox0 = 0, oy0 = 0, fade0 = 0;
-				CalcLineAnim(m_lineAnimOrigin, &ox0, &oy0, &fade0, &doorT);
+				if (useSnap && m_lineAnimOrigin >= 0 && m_lineAnimOrigin < m_itemCount)
+					doorT = snapT[m_lineAnimOrigin];
+				else
+					CalcLineAnim(m_lineAnimOrigin, &ox0, &oy0, &fade0, &doorT);
 			}
 			DrawJkBackdrop(dc, rc, m_animTick, (animStyle == POPUP_ANIM_EXPAND) ? doorT : -1.f);
 			DrawTornRibbon(dc, rc, m_animTick);
@@ -3463,7 +3824,14 @@ void CCustomPopupMenu::PaintToDC(CDC& dc)
 
 		if (m_stickyCount > 0 && m_stickyH > 0) {
 			int ox0 = 0, oy0 = 0, fade0 = 0;
-			if (CalcLineAnim(0, &ox0, &oy0, &fade0) && fade0 > 180) {
+			BOOL stickyOk = FALSE;
+			if (useSnap && m_itemCount > 0) {
+				stickyOk = snapVis[0] && snapFade[0] > 180;
+				ox0 = snapOx[0]; oy0 = snapOy[0]; fade0 = snapFade[0];
+			} else {
+				stickyOk = CalcLineAnim(0, &ox0, &oy0, &fade0) && fade0 > 180;
+			}
+			if (stickyOk) {
 				dc.FillSolidRect(rc.left + CCUSTOM_POPUP_RIBBON_W + 6 + ox0, m_stickyH - 2 + oy0,
 					rc.Width() - CCUSTOM_POPUP_RIBBON_W - 14, 1, RGB(255, 255, 255));
 				dc.FillSolidRect(rc.left + CCUSTOM_POPUP_RIBBON_W + 6 + ox0, m_stickyH - 1 + oy0,
@@ -3527,6 +3895,10 @@ void CCustomPopupMenu::OnPaint()
 	CPaintDC dc(this);
 	CRect r; GetClientRect(&r);
 	if (r.Width() <= 0 || r.Height() <= 0) return;
+	const BOOL chipFlight = (m_lineAnimPhase != 0 && UsesRowChipFlight(PopupAnimStyle()));
+	// タイマの ForceChipPresent が同じコマを既に ULW している。二重 PaintToDC しない。
+	if (chipFlight && m_chipPresentedAnimTick == m_animTick)
+		return;
 
 	// 子 HWND をクリップから除外（rcPaint は外接矩形なので InvalidateRgn だけでは足りない）
 	CRgn exclude;
@@ -3552,12 +3924,12 @@ void CCustomPopupMenu::OnPaint()
 		m_memW = r.Width(); m_memH = r.Height();
 	}
 	CBitmap* ob = mDC.SelectObject(&m_memBmp);
-	const BOOL chipFlight = (m_lineAnimPhase != 0 && UsesRowChipFlight(PopupAnimStyle()));
 	mDC.FillSolidRect(&r, chipFlight ? kChipChromaKey : PopupBg());
 	PaintToDC(mDC);
 
 	if (chipFlight) {
 		PresentChipLayered(mDC.GetSafeHdc(), r.Width(), r.Height());
+		m_chipPresentedAnimTick = m_animTick;
 		mDC.SelectObject(ob);
 		return;
 	}
@@ -3754,6 +4126,8 @@ BOOL CCustomPopupMenu::HandleChromeClick(int idx)
 			// ファイル先頭の extern と同じ。PlayList.h は IDD_PLAYLIST 欠落のため include しない
 			extern void PlRefreshMidiPlayModes();
 			PlRefreshMidiPlayModes();
+			extern void CEmuRequestMidiEngineReplay();
+			CEmuRequestMidiEngineReplay();
 		}
 		InvalidateBgOnly();
 		return TRUE;
@@ -4196,9 +4570,15 @@ void CCustomPopupMenu::RunModalLoop()
 			dismissForForeignFocus();
 			return TRUE;
 		}
-		/* banner/FM 同期は Track 後に KickTimerp。ここで Dispatch すると 16ms アニメが止まる */
-		if (m.message == WM_TIMERP_VSYNC_TICK || m.message == WM_SPEANA_TICK)
-			return TRUE;
+		/* 出現/退場アニメ中だけ banner tick を食う。定着後は Dispatch してメインバナーを動かす。
+		   chrome Peek（マウス奪取）は timerp 側が Track 中スキップする。 */
+		if (m.message == WM_TIMERP_VSYNC_TICK || m.message == WM_SPEANA_TICK) {
+			if (m_lineAnimPhase == 1 || m_lineAnimPhase == 2) {
+				extern void COgg_DropPlaybackUiPostedMsg(UINT message);
+				COgg_DropPlaybackUiPostedMsg(m.message);
+				return TRUE;
+			}
+		}
 		if (m.message == WM_KEYDOWN && m.wParam == VK_ESCAPE) {
 			CWnd* f = GetFocus();
 			if (!(f && IsChild(f) && f->IsKindOf(RUNTIME_CLASS(CCustomEdit)))) {
@@ -4241,46 +4621,22 @@ void CCustomPopupMenu::RunModalLoop()
 	};
 
 	while (!m_done) {
-		// 出現／退場アニメ中は長待ち禁止。
-		// MsgWait の長い timeout だと Peek されず WM_TIMER(16ms) が合成されず、
-		// 背景チップがマウス移動まで止まる。
-		if (m_lineAnimPhase == 1 || m_lineAnimPhase == 2) {
-			::MsgWaitForMultipleObjects(0, NULL, FALSE, 16, QS_ALLINPUT);
-			while (!m_done && ::PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
-				if (!dispatchOne(msg))
-					break;
-			}
-			if (m_lineAnimPhase == 1) {
-				const int style = PopupAnimStyle();
-				const int total = ChipEnterTotalMs(style, m_asSubmenu, m_itemCount, m_lineAnimOrigin);
-				const int elapsed = (int)(GetTickCount64() - m_lineAnimStart);
-				const BOOL atRest = (UsesRowChipFlight(style) && ChipFlightRowsAtRest());
-				if (elapsed >= total || atRest)
-					SnapAnimToIdle();
-			}
-			if (!m_done && !IsForegroundOurs())
-				dismissForForeignFocus();
-			continue;
-		}
-
-		// 定着後: GetMessage 無限待ちだと他アプリ切替を検知できない。
-		// WM_ACTIVATEAPP は SendMessage 経由でキューに乗らないため、短周期で
-		// IsForegroundOurs を見る。スペアナ／EQ コード用 WM_TIMER・PostMessage も
-		// ここで起こすため、待ちは ~33ms（旧 100ms だと描画・コードが間延びする）。
-		const DWORD wake = ::MsgWaitForMultipleObjects(0, NULL, FALSE, 33, QS_ALLINPUT);
-		if (wake == WAIT_TIMEOUT) {
-			if (!IsForegroundOurs())
-				dismissForForeignFocus();
-			continue;
-		}
+		// 入場／idle ともメニュー内で vblank 待ち（UiTickPump は使わない）。
+		// MsgWait(16/33) は Sleep 相当でストライプが 30fps 相当に落ちる。
+		PopupWaitVblank(GetSafeHwnd());
+		if (m_done)
+			break;
+		PulseVsyncFrame();
 		while (!m_done && ::PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
-			if (msg.message == WM_QUIT) {
-				m_done = TRUE; m_result = 0;
-				::PostQuitMessage((int)msg.wParam);
-				break;
-			}
 			if (!dispatchOne(msg))
 				break;
+		}
+		if (m_lineAnimPhase == 1) {
+			const int style = PopupAnimStyle();
+			const int total = ChipEnterTotalMs(style, m_asSubmenu, m_itemCount, m_lineAnimOrigin);
+			const int elapsed = (int)(GetTickCount64() - m_lineAnimStart);
+			if (elapsed >= total)
+				SnapAnimToIdle();
 		}
 		if (!m_done && !IsForegroundOurs())
 			dismissForForeignFocus();

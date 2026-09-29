@@ -1,4 +1,4 @@
-#include "stdafx.h"
+﻿#include "stdafx.h"
 #include "CPromptDlg.h"
 #include "CPromptEngine.h"
 #include "CPromptAnalyze.h"
@@ -258,6 +258,8 @@ BEGIN_MESSAGE_MAP(CPromptDlg, CCustomBlurDialogExBase)
 	ON_WM_MOUSEWHEEL()
 	ON_WM_CTLCOLOR()
 	ON_WM_CLOSE()
+	ON_WM_DESTROY()
+	ON_MESSAGE(WM_UITICK_VSYNC, OnUiTick)
 #if CCUSTOM_AERO_SUPPORT
 	ON_MESSAGE(CCC_MSG_REAPPLY_OPAQUE_FIXERS, OnReapplyOpaqueFixers)
 #endif
@@ -1429,6 +1431,10 @@ void CPromptDlg::OnModeSel()
 void CPromptDlg::SetAnalyzeUiBusy(BOOL busy)
 {
 	m_analyzing = busy;
+	if (busy)
+		m_tickPump.Start(m_hWnd);
+	else
+		m_tickPump.Stop();
 	if (m_analyze.GetSafeHwnd()) m_analyze.EnableWindow(!busy);
 	if (m_roll.GetSafeHwnd()) m_roll.EnableWindow(!busy);
 	if (m_mode.GetSafeHwnd()) m_mode.EnableWindow(!busy);
@@ -1654,8 +1660,23 @@ void CPromptDlg::OnHelpBtn()
 	ShowHelpSheet();
 }
 
+LRESULT CPromptDlg::OnUiTick(WPARAM, LPARAM)
+{
+	if (m_analyzing && m_progress.GetSafeHwnd())
+		m_progress.Invalidate(FALSE);
+	m_tickPump.Ack();
+	return 0;
+}
+
+void CPromptDlg::OnDestroy()
+{
+	m_tickPump.Stop();
+	CCustomBlurDialogExBase::OnDestroy();
+}
+
 void CPromptDlg::OnCloseBtn()
 {
+	m_tickPump.Stop();
 	SaveTextToSavedata();
 	SavePosToSavedata();
 	savedata.mpPromptwindow = 0;
@@ -1665,6 +1686,7 @@ void CPromptDlg::OnCloseBtn()
 
 void CPromptDlg::OnClose()
 {
+	m_tickPump.Stop();
 	SaveTextToSavedata();
 	SavePosToSavedata();
 	savedata.mpPromptwindow = 0;

@@ -970,8 +970,18 @@ struct save{
 	TCHAR pcMidiIn2Name[32];
 	TCHAR pcMidiOutName[32]; /* 空=なし。MIDI Mapper は pcMidiOutMode=1 */
 	int pcMidiOutMode;       /* 0=なし 1=Mapper 2=名前指定 */
+
+	// --- フォーマット別音量(末尾追記。旧.datは0→起動時1)。SPC/HES は spc のみ ---
+	int winampvol; /* Winamp/XMPlay/AIMP 1..5 */
+	int cemuvol;   /* CEmu PCM 1..5 */
 };
 extern save savedata;
+
+#define EQ_FMT_VOL_NONE   0
+#define EQ_FMT_VOL_KPI    1
+#define EQ_FMT_VOL_MP3    2
+#define EQ_FMT_VOL_WINAMP 3
+#define EQ_FMT_VOL_CEMU   4
 
 /* MIDI/FM 系ダイアログの位置・サイズ保存／復元（savedata 末尾フィールド用） */
 inline void ScSaveWndGeom(CWnd* w, int* x, int* y, int* ww, int* hh)

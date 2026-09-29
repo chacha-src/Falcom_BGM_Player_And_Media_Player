@@ -902,7 +902,8 @@ int CDriverX68k::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigne
 	booted_ = 1;
 	songCode_ = tryCodes_[0];
 	cmdIndex_ = 1;
-	hw_->SetSongCommand(songCode_);
+	if (!loadOnly)
+		hw_->SetSongCommand(songCode_);
 	opmSpinRescue_ = 0;
 	/* D.O. 星の砂物語: settle can land on the IRQ6 trampoline. Snap to the
 	   $E00000 poll. Do not pump play here — compiling FM.OPM with IRQ live

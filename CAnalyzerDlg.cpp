@@ -914,6 +914,7 @@ BEGIN_MESSAGE_MAP(CAnalyzerDlg, CCustomBlurDialogExBase)
 	ON_MESSAGE(WM_ANALYZER_SPEC_DONE, OnSpecAnalysisDone)
 	ON_MESSAGE(WM_ANALYZER_PRESENT, OnPresentRequest)
 	ON_MESSAGE(WM_ANALYZER_SYNC, OnSyncRequest)
+	ON_MESSAGE(WM_UITICK_VSYNC, OnUiTick)
 END_MESSAGE_MAP()
 
 BOOL CAnalyzerDlg::OnInitDialog()
@@ -997,7 +998,8 @@ BOOL CAnalyzerDlg::OnInitDialog()
 
 	m_feedEnabled = true;
 	StartSpecWorker();
-	// タイマーは座標保存のみ。描画は解析/音声完了の PostMessage で自由走行(ピアノロール方式)。
+	m_tickPump.Start(m_hWnd);
+	// タイマーは座標保存のみ。描画は解析完了 Post と UiTickPump。
 	SetTimer(1, 500, nullptr);
 	EnableMainWindowLock(&savedata.analyzerMainLock, TRUE);
 	CCC_CaptionLayout(m_hWnd);
@@ -1080,6 +1082,7 @@ void CAnalyzerDlg::ResetPlaybackState()
 void CAnalyzerDlg::DetachForDestroy()
 {
 	m_feedEnabled = false;
+	m_tickPump.Stop();
 	KillTimer(1);
 	KillTimer(2);
 	StopSpecWorker();
@@ -1090,6 +1093,8 @@ void CAnalyzerDlg::DetachForDestroy()
 		while (PeekMessage(&msg, m_hWnd, WM_ANALYZER_SPEC_DONE, WM_ANALYZER_SPEC_DONE, PM_REMOVE)) {}
 		while (PeekMessage(&msg, m_hWnd, WM_ANALYZER_PRESENT, WM_ANALYZER_PRESENT, PM_REMOVE)) {}
 		while (PeekMessage(&msg, m_hWnd, WM_ANALYZER_SYNC, WM_ANALYZER_SYNC, PM_REMOVE)) {}
+		while (PeekMessage(&msg, m_hWnd, WM_UITICK_VSYNC, WM_UITICK_VSYNC, PM_REMOVE)) {}
+		m_tickPump.Ack();
 	}
 	ReleaseBuffers();
 }
@@ -1219,22 +1224,11 @@ void CAnalyzerDlg::RequestSyncFromMainUi()
 void CAnalyzerDlg::PumpSyncNow()
 {
 	if (!::IsWindow(m_hWnd) || !IsWindowVisible() || IsIconic()) return;
-	int minMs = savedata.ms2;
-	if (minMs < 16) minMs = 16;
-	if (minMs > 960) minMs = 960;
-	if (tempo != 200 || pitch != 200) {
-		minMs *= 2;
-		if (minMs < 32) minMs = 32;
-	}
-	const DWORD now = GetTickCount();
-	if (m_lastSyncPostTick != 0 && (now - m_lastSyncPostTick) < (DWORD)minMs)
-		return;
 	if (InterlockedCompareExchange(&m_syncPosted, 0, 0) != 0) {
 		MSG msg;
 		while (::PeekMessage(&msg, m_hWnd, WM_ANALYZER_SYNC, WM_ANALYZER_SYNC, PM_REMOVE)) {}
 		InterlockedExchange(&m_syncPosted, 0);
 	}
-	m_lastSyncPostTick = now;
 	COggDlg_SyncAnalyzerFast();
 }
 
@@ -1244,6 +1238,14 @@ LRESULT CAnalyzerDlg::OnSyncRequest(WPARAM, LPARAM)
 	if (!::IsWindow(m_hWnd) || !IsWindowVisible() || IsIconic())
 		return 0;
 	COggDlg_SyncAnalyzerFast();
+	return 0;
+}
+
+LRESULT CAnalyzerDlg::OnUiTick(WPARAM, LPARAM)
+{
+	if (::IsWindow(m_hWnd) && IsWindowVisible() && !IsIconic())
+		PumpSyncNow();
+	m_tickPump.Ack();
 	return 0;
 }
 
@@ -5095,8 +5097,29 @@ void CAnalyzerDlg::OnPaint()
 	pending = m_pendingScroll;
 	LeaveCriticalSection(&m_cs);
 
-	// 1フレームで大きく飛ぶとカクつくが、追いつき不足も精度を落とす。
-	const int scrollCap = (std::max)(8, (std::min)(48, m_waveW > 0 ? m_waveW / 20 : 24));
+	// 1フレームで大きく飛ぶとカクつく。VSYNC 1回分(+1 の追いつき)だけ進める。
+	int scrollCap = 2;
+	{
+		static LARGE_INTEGER s_lastQ = {}, s_freq = {};
+		if (s_freq.QuadPart == 0)
+			QueryPerformanceFrequency(&s_freq);
+		LARGE_INTEGER nowQ;
+		QueryPerformanceCounter(&nowQ);
+		double dt = 1.0 / 60.0;
+		if (s_lastQ.QuadPart != 0 && s_freq.QuadPart > 0)
+			dt = (double)(nowQ.QuadPart - s_lastQ.QuadPart) / (double)s_freq.QuadPart;
+		s_lastQ = nowQ;
+		if (dt < 0.0) dt = 0.0;
+		if (dt > 0.08) dt = 0.08;
+		int spc = m_samplesPerCol;
+		if (spc < 4) spc = 4;
+		int sr = m_sampleRate;
+		if (sr < 8000) sr = 44100;
+		const int fair = (int)(sr * dt / (double)spc + 0.5);
+		scrollCap = fair + 1;
+		if (scrollCap < 1) scrollCap = 1;
+		if (scrollCap > 12) scrollCap = 12;
+	}
 
 	bool didWaveFull = false;
 	bool didWaveScroll = false;
@@ -5400,6 +5423,7 @@ void CAnalyzerDlg::OnClose()
 
 void CAnalyzerDlg::OnDestroy()
 {
+	m_tickPump.Stop();
 	if (g_anHelpDlg && ::IsWindow(g_anHelpDlg->GetSafeHwnd()))
 		g_anHelpDlg->DestroyWindow();
 	CCustomBlurDialogExBase::OnDestroy();

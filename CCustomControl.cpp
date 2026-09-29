@@ -1,4 +1,4 @@
-#include "stdafx.h"
+﻿#include "stdafx.h"
 #include "CCustomControl.h"
 #include "resource.h"
 #include "CImageBase.h"
@@ -4553,6 +4553,14 @@ static void DoSubclassChildControls(DlgBase* pDlg)
             const UINT st = (UINT)(ls & SS_TYPEMASK);
             // アイコン/ビットマップ Static は CCustomStatic 化すると描画されなくなる
             if (st == SS_ICON || st == SS_BITMAP)
+            {
+                hc = ::GetWindow(hc, GW_HWNDNEXT);
+                continue;
+            }
+            // 穴プレースホルダ。CCustomStatic 化すると COLOR_DIALOG_BG で全面を覆い兄弟を消す
+            if (st == SS_BLACKFRAME || st == SS_GRAYFRAME
+                || st == SS_BLACKRECT || st == SS_WHITERECT
+                || ::GetDlgCtrlID(hc) == IDC_MCR_HOST)
             {
                 hc = ::GetWindow(hc, GW_HWNDNEXT);
                 continue;
@@ -16208,7 +16216,7 @@ static BOOL CCC_ShouldOpaqueFix(HWND hWnd)
         if (CWnd* pwSelf = CWnd::FromHandlePermanent(hWnd)) {
             if (CRuntimeClass* rc = pwSelf->GetRuntimeClass()) {
                 const char* cn = rc->m_lpszClassName;
-                if (cn && (strcmp(cn, "CCommandRollView") == 0 || strcmp(cn, "CLyricsViewWnd") == 0
+                if (cn && (strcmp(cn, "CLyricsViewWnd") == 0
                     || strcmp(cn, "CCustomDjVinylCtrl") == 0
                     || strcmp(cn, "CFmMonitorDlg") == 0
                     || strcmp(cn, "CMidiMonitorDlg") == 0
@@ -16394,6 +16402,14 @@ static BOOL CCC_PaintChildDirect(HWND hWnd, HDC hdcBuf)
     else if (auto* pSt = dynamic_cast<CCustomStatic*>(pw))
     {
         if (pSt->PaintCustomOpaque(dc)) {
+            dc.Detach();
+            return TRUE;
+        }
+    }
+    else if (CRuntimeClass* rc = pw->GetRuntimeClass())
+    {
+        if (rc->m_lpszClassName && strcmp(rc->m_lpszClassName, "CCommandRollView") == 0) {
+            ::SendMessage(hWnd, WM_PRINTCLIENT, (WPARAM)hdcBuf, PRF_CLIENT | PRF_ERASEBKGND);
             dc.Detach();
             return TRUE;
         }

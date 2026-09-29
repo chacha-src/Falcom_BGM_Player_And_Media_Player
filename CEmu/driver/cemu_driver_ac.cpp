@@ -2,6 +2,7 @@
 #include "cemu_driver_ac.h"
 #include "../cemu_catalog.h"
 #include "../machine/cemu_m68k_bus.h"
+#include <mutex>
 #include <stdio.h>
 #include "../machine/cemu_v35_bus.h"
 #include "../machine/cemu_h6280_bus.h"
@@ -4490,11 +4491,66 @@ static void CEmuAcProbeRun(void* user, int cycles)
 	((CDriverAc*)user)->ProbeRunCycles(cycles);
 }
 
+/* プローブ結果はアーカイブ単位で覚える。クロスフェードの先読みは同じ zip の別トラックを
+   何度も開くので、そのたびに追加のブートとプローブを走らせると Open が 1 秒近く伸びる。
+   キャッシュに当たれば共有 RAM を汚さないので再ブートも要らない。 */
+namespace {
+
+struct CEmuAcC7xProbeCache {
+	char archive[CEMU_ARCHIVE_NAME];
+	int count;
+	unsigned code[CDriverAc::kC7xCodeMax];
+	uint8_t cls[CDriverAc::kC7xCodeMax];
+};
+
+CEmuAcC7xProbeCache g_c7xCache[4];
+int g_c7xCacheNext = 0;
+
+/* Open はクロスフェードの先読みスレッドからも来る */
+std::mutex& C7xCacheMutex()
+{
+	static std::mutex m;
+	return m;
+}
+
+int C7xCacheGet(const char* archive, const unsigned* codes, int n, uint8_t* out)
+{
+	if (!archive || !archive[0] || n <= 0)
+		return 0;
+	std::lock_guard<std::mutex> lk(C7xCacheMutex());
+	for (int i = 0; i < (int)(sizeof(g_c7xCache) / sizeof(g_c7xCache[0])); i++) {
+		const CEmuAcC7xProbeCache& e = g_c7xCache[i];
+		if (e.count != n || _stricmp(e.archive, archive) != 0)
+			continue;
+		if (memcmp(e.code, codes, sizeof(unsigned) * (size_t)n) != 0)
+			continue;
+		memcpy(out, e.cls, (size_t)n);
+		return 1;
+	}
+	return 0;
+}
+
+void C7xCachePut(const char* archive, const unsigned* codes, int n, const uint8_t* cls)
+{
+	if (!archive || !archive[0] || n <= 0 || n > CDriverAc::kC7xCodeMax)
+		return;
+	std::lock_guard<std::mutex> lk(C7xCacheMutex());
+	CEmuAcC7xProbeCache& e = g_c7xCache[g_c7xCacheNext];
+	g_c7xCacheNext = (g_c7xCacheNext + 1)
+		% (int)(sizeof(g_c7xCache) / sizeof(g_c7xCache[0]));
+	strncpy_s(e.archive, archive, _TRUNCATE);
+	e.count = n;
+	memcpy(e.code, codes, sizeof(unsigned) * (size_t)n);
+	memcpy(e.cls, cls, (size_t)n);
+}
+
+} /* namespace */
+
 /* Namco C7x: 起動したドライバに、カタログの各コードが主シーケンサ（＝曲）を
    取るかどうかを答えさせる。カタログ code にも hoot XML にもこの区別は無く、
    ラベル文字列に頼らずに済む唯一の出所が音源ドライバ自身。
-   プローブは枠 0 へ要求を投げるので共有 RAM が汚れる。終わったら MCU をリセットし
-   呼び出し側が通常ブートをやり直す。 */
+   プローブは枠 0 へ要求を投げるので共有 RAM が汚れる。実際に走らせた場合だけ
+   最後に MCU をリセットしてブートし直す（キャッシュに当たった場合は何も汚していない）。 */
 void CDriverAc::C7xProbeCatalog(const CEmuGameEntry* ge)
 {
 	c7xCodeN_ = 0;
@@ -4513,6 +4569,9 @@ void CDriverAc::C7xProbeCatalog(const CEmuGameEntry* ge)
 	}
 	if (c7xCodeN_ <= 0)
 		return;
+	/* 同じアーカイブを開き直しただけなら、追加のブートもプローブも要らない */
+	if (C7xCacheGet(ge->archive, c7xCode_, c7xCodeN_, c7xPrimary_))
+		return;
 	/* 実測: 5ms では曲でも副シーケンス枠を取り切らず、20ms で ridgerac / tekken の
 	   全コードが安定した。25ms は余裕分。 */
 	const int win = cpuHz_ / 40;
@@ -4525,9 +4584,11 @@ void CDriverAc::C7xProbeCatalog(const CEmuGameEntry* ge)
 	}
 	/* 曲と重ねものの両方が出て初めて読めたと見なす。Super System 22（alpinerd 等）は
 	   本物のシーケンサをメイン CPU が上げる構成なので C74 マスク ROM では答えが出ない。
-	   その場合は結果を捨て、従来のカタログ判定に任せる（全曲を重ねてしまわない）。 */
+	   その場合は全コードを UNKNOWN にして従来のカタログ判定へ渡す（全曲を重ねてしまわない）。
+	   読めなかったことも覚える — さもないと開くたびに無駄なプローブを繰り返す。 */
 	if (n != c7xCodeN_ || song <= 0 || overlay <= 0)
-		c7xCodeN_ = 0;
+		memset(c7xPrimary_, CHardAc::CEMU_C7X_UNKNOWN, (size_t)c7xCodeN_);
+	C7xCachePut(ge->archive, c7xCode_, c7xCodeN_, c7xPrimary_);
 	hw_->C7xResetSoundMcu();
 	M37702RunCycles(cpuHz_);
 	M37702RunCycles(cpuHz_ / 2);
@@ -4838,6 +4899,7 @@ void CDriverAc::TickOpm(uint64_t cpuCycles)
 
 void CDriverAc::TryInjectCommand()
 {
+	if (loadOnly) return;
 	if (!hw_) return;
 	if ((hw_->board_ == CEMU_AC_BOARD_TAITO_OPM
 		&& (hw_->TaitoOpmMap() == 2 || hw_->TaitoOpmMap() == 3

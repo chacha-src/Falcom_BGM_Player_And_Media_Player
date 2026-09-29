@@ -521,6 +521,16 @@ void CRender::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDC_CHECK43, m_kpi20);
 	DDX_Control(pDX, IDC_CHECK44, m_kpi25);
 	DDX_Control(pDX, IDC_CHECK46, m_kpi30);
+	DDX_Control(pDX, IDC_CHECK_WA1, m_wa1x);
+	DDX_Control(pDX, IDC_CHECK_WA2, m_wa2x);
+	DDX_Control(pDX, IDC_CHECK_WA3, m_wa3x);
+	DDX_Control(pDX, IDC_CHECK_WA4, m_wa4x);
+	DDX_Control(pDX, IDC_CHECK_WA5, m_wa5x);
+	DDX_Control(pDX, IDC_CHECK_CE1, m_ce1x);
+	DDX_Control(pDX, IDC_CHECK_CE2, m_ce2x);
+	DDX_Control(pDX, IDC_CHECK_CE3, m_ce3x);
+	DDX_Control(pDX, IDC_CHECK_CE4, m_ce4x);
+	DDX_Control(pDX, IDC_CHECK_CE5, m_ce5x);
 	DDX_Control(pDX, IDCANCEL3, m_kpi);
 	DDX_Control(pDX, IDC_KPI_PLUGIN_DL, m_kpiPluginDl);
 	DDX_Control(pDX, IDC_KPI_PLUGIN_RELOAD, m_kpiPluginReload);
@@ -594,6 +604,16 @@ BEGIN_MESSAGE_MAP(CRender, CCustomBlurDialogExBase)
 	ON_BN_CLICKED(IDC_CHECK43, Onkpi20)
 	ON_BN_CLICKED(IDC_CHECK44, Onkpi25)
 	ON_BN_CLICKED(IDC_CHECK46, Onkpi30)
+	ON_BN_CLICKED(IDC_CHECK_WA1, Onwa1x)
+	ON_BN_CLICKED(IDC_CHECK_WA2, Onwa2x)
+	ON_BN_CLICKED(IDC_CHECK_WA3, Onwa3x)
+	ON_BN_CLICKED(IDC_CHECK_WA4, Onwa4x)
+	ON_BN_CLICKED(IDC_CHECK_WA5, Onwa5x)
+	ON_BN_CLICKED(IDC_CHECK_CE1, Once1x)
+	ON_BN_CLICKED(IDC_CHECK_CE2, Once2x)
+	ON_BN_CLICKED(IDC_CHECK_CE3, Once3x)
+	ON_BN_CLICKED(IDC_CHECK_CE4, Once4x)
+	ON_BN_CLICKED(IDC_CHECK_CE5, Once5x)
 	ON_BN_CLICKED(IDCANCEL3, Onkpi)
 	ON_BN_CLICKED(IDC_KPI_PLUGIN_DL, OnKpiPluginDl)
 	ON_BN_CLICKED(IDC_KPI_PLUGIN_RELOAD, OnKpiPluginReload)
@@ -700,6 +720,8 @@ BOOL CRender::OnInitDialog()
 	SetDlgItemText(IDC_STATIC_R_BUF, LL14(L"割込間隔", L"Interrupt interval", L"Intervalle d'interruption", L"Intervallo di interruzione", L"Intervalo de interrupción", L"인터럽트 간격", L"中断间隔", L"فاصل المقاطعة", L"Интервал прерывания", L"Interrupt-Intervall", L"Intervalo de interrupção", L"Interrupt-interval", L"Interwał przerwania", L"Kesme aralığı"));
 	SetDlgItemText(IDC_STATIC_R_MP3, LL14(L"mp3音量", L"mp3 volume", L"Volume mp3", L"Volume mp3", L"Volumen mp3", L"mp3 볼륨", L"mp3 音量", L"حجم mp3", L"Громкость mp3", L"MP3-Lautstärke", L"Volume mp3", L"mp3-volume", L"Głośność mp3", L"mp3 sesi"));
 	SetDlgItemText(IDC_STATIC_R_KPI, LL14(L"その他のkpi", L"Other kpi", L"Autres kpi", L"Altri kpi", L"Otros kpi", L"기타 kpi", L"其他 kpi", L"kpi أخرى", L"Другие kpi", L"Andere kpi", L"Outros kpi", L"Andere kpi", L"Inne kpi", L"Diğer kpi"));
+	SetDlgItemText(IDC_STATIC_R_WINAMP, LL14(L"Winamp/XMPlay/AIMPプラグイン", L"Winamp/XMPlay/AIMP plugin", L"Plugin Winamp/XMPlay/AIMP", L"Plugin Winamp/XMPlay/AIMP", L"Complemento Winamp/XMPlay/AIMP", L"Winamp/XMPlay/AIMP 플러그인", L"Winamp/XMPlay/AIMP 插件", L"إضافة Winamp/XMPlay/AIMP", L"Плагин Winamp/XMPlay/AIMP", L"Winamp/XMPlay/AIMP-Plugin", L"Plugin Winamp/XMPlay/AIMP", L"Winamp/XMPlay/AIMP-plug-in", L"Wtyczka Winamp/XMPlay/AIMP", L"Winamp/XMPlay/AIMP eklentisi"));
+	SetDlgItemText(IDC_STATIC_R_CEMUVOL, LL14(L"CEmu音量", L"CEmu volume", L"Volume CEmu", L"Volume CEmu", L"Volumen CEmu", L"CEmu 볼륨", L"CEmu 音量", L"حجم CEmu", L"Громкость CEmu", L"CEmu-Lautstärke", L"Volume CEmu", L"CEmu-volume", L"Głośność CEmu", L"CEmu sesi"));
 	SetDlgItemText(IDC_STATIC_R_DISP, LL14(L"表示間隔", L"Display interval", L"Intervalle d'affichage", L"Intervallo display", L"Intervalo de pantalla", L"표시 간격", L"显示间隔", L"فاصل العرض", L"Интервал отображения", L"Anzeigeintervall", L"Intervalo de exibição", L"Weergave-interval", L"Interwał wyświetlania", L"Görüntüleme aralığı"));
 	SetDlgItemText(IDC_STATIC_R_CODE, LL14(L"コード間隔", L"Chord interval", L"Intervalle accords", L"Intervallo accordi", L"Intervalo de acordes", L"코드 간격", L"和弦间隔", L"فاصل الأكورد", L"Интервал аккордов", L"Akkordintervall", L"Intervalo de acordes", L"Akkoordinterval", L"Interwał akordów", L"Akor aralığı"));
 	SetDlgItemText(IDC_STATIC_R_DEV, LL14(L"再生デバイス", L"Playback device", L"Périphérique lecture", L"Dispositivo riproduzione", L"Dispositivo reproducción", L"재생 장치", L"播放设备", L"جهاز التشغيل", L"Устройство воспроизведения", L"Wiedergabegerät", L"Dispositivo reprodução", L"Afspeelapparaat", L"Urządzenie odtwarzania", L"Oynatma cihazı"));
@@ -729,6 +751,16 @@ BOOL CRender::OnInitDialog()
 	SetDlgItemText(IDC_CHECK43, LL14(L"3倍", L"3x", L"3x", L"3x", L"3x", L"3x", L"3倍", L"3x", L"3x", L"3x", L"3x", L"3x", L"3x", L"3x"));
 	SetDlgItemText(IDC_CHECK44, LL14(L"4倍", L"4x", L"4x", L"4x", L"4x", L"4x", L"4倍", L"4x", L"4x", L"4x", L"4x", L"4x", L"4x", L"4x"));
 	SetDlgItemText(IDC_CHECK46, LL14(L"5倍", L"5x", L"5x", L"5x", L"5x", L"5x", L"5倍", L"5x", L"5x", L"5x", L"5x", L"5x", L"5x", L"5x"));
+	SetDlgItemText(IDC_CHECK_WA1, LL14(L"等倍", L"1x", L"1x", L"1x", L"1x", L"1x", L"1倍", L"1x", L"1x", L"1x", L"1x", L"1x", L"1x", L"1x"));
+	SetDlgItemText(IDC_CHECK_WA2, LL14(L"2倍", L"2x", L"2x", L"2x", L"2x", L"2x", L"2倍", L"2x", L"2x", L"2x", L"2x", L"2x", L"2x", L"2x"));
+	SetDlgItemText(IDC_CHECK_WA3, LL14(L"3倍", L"3x", L"3x", L"3x", L"3x", L"3x", L"3倍", L"3x", L"3x", L"3x", L"3x", L"3x", L"3x", L"3x"));
+	SetDlgItemText(IDC_CHECK_WA4, LL14(L"4倍", L"4x", L"4x", L"4x", L"4x", L"4x", L"4倍", L"4x", L"4x", L"4x", L"4x", L"4x", L"4x", L"4x"));
+	SetDlgItemText(IDC_CHECK_WA5, LL14(L"5倍", L"5x", L"5x", L"5x", L"5x", L"5x", L"5倍", L"5x", L"5x", L"5x", L"5x", L"5x", L"5x", L"5x"));
+	SetDlgItemText(IDC_CHECK_CE1, LL14(L"等倍", L"1x", L"1x", L"1x", L"1x", L"1x", L"1倍", L"1x", L"1x", L"1x", L"1x", L"1x", L"1x", L"1x"));
+	SetDlgItemText(IDC_CHECK_CE2, LL14(L"2倍", L"2x", L"2x", L"2x", L"2x", L"2x", L"2倍", L"2x", L"2x", L"2x", L"2x", L"2x", L"2x", L"2x"));
+	SetDlgItemText(IDC_CHECK_CE3, LL14(L"3倍", L"3x", L"3x", L"3x", L"3x", L"3x", L"3倍", L"3x", L"3x", L"3x", L"3x", L"3x", L"3x", L"3x"));
+	SetDlgItemText(IDC_CHECK_CE4, LL14(L"4倍", L"4x", L"4x", L"4x", L"4x", L"4x", L"4倍", L"4x", L"4x", L"4x", L"4x", L"4x", L"4x", L"4x"));
+	SetDlgItemText(IDC_CHECK_CE5, LL14(L"5倍", L"5x", L"5x", L"5x", L"5x", L"5x", L"5倍", L"5x", L"5x", L"5x", L"5x", L"5x", L"5x", L"5x"));
 	m_comboLang.AddString(LL14(L"日本語", L"Japanese", L"Japonais", L"Giapponese", L"Japonés", L"일본어", L"日语", L"اليابانية", L"Японский", L"Japanisch", L"Japonês", L"Japans", L"Japoński", L"Japonca"));
 	m_comboLang.AddString(L"English");
 	m_comboLang.AddString(L"Français");
@@ -773,6 +805,8 @@ BOOL CRender::OnInitDialog()
 	case 4:m_kpi25.SetCheck(TRUE); break;
 	case 5:m_kpi30.SetCheck(TRUE); break;
 	}
+	ApplyWinampVolChecks(savedata.winampvol);
+	ApplyCemuVolChecks(savedata.cemuvol);
 	if (in.dwMajorVersion <= 5) {
 		m_evr.EnableWindow(FALSE);
 		m_con.EnableWindow(FALSE);
@@ -944,6 +978,16 @@ BOOL CRender::OnInitDialog()
 	m_tooltip.AddTool(GetDlgItem(IDC_CHECK43), LL14(L"kpiの出力倍率を3倍にします。\nイコライザー処理で音割れを抑えます。", L"Set KPI output to 3x.\nThe equalizer prevents clipping.", L"Multiplicateur kpi : 3x.\nL'egaliseur evite la saturation.", L"Moltiplicatore kpi : 3x.\nL'equalizzatore evita il clipping.", L"Multiplicador kpi : 3x.\nEl ecualizador evita el recorte.", L"kpi 출력 배율 3배.\n이퀄라이저가 클리핑 방지.", L"kpi 输出倍率3倍。\n均衡器防止削波。", L"مضاعف kpi : 3×.\nالمعادل يمنع القص.", L"Множитель kpi : 3x.\nЭквалайзер предотвращает клиппинг.", L"kpi-Ausgang : 3x.\nEqualizer verhindert Clipping.", L"Multiplicador kpi : 3x.\nEqualizador evita clipping.", L"kpi-vermenigvuldiger : 3x.\nEqualizer voorkomt clipping.", L"Mnoznik kpi : 3x.\nKorektor zapobiega przesterowaniu.", L"kpi cikis carpani 3 kat.\nEkolayzer kirpilmayi onler"));
 	m_tooltip.AddTool(GetDlgItem(IDC_CHECK44), LL14(L"kpiの出力倍率を4倍にします。\nイコライザー処理で音割れを抑えます。", L"Set KPI output to 4x.\nThe equalizer prevents clipping.", L"Multiplicateur kpi : 4x.\nL'egaliseur evite la saturation.", L"Moltiplicatore kpi : 4x.\nL'equalizzatore evita il clipping.", L"Multiplicador kpi : 4x.\nEl ecualizador evita el recorte.", L"kpi 출력 배율 4배.\n이퀄라이저가 클리핑 방지.", L"kpi 输出倍率4倍。\n均衡器防止削波。", L"مضاعف kpi : 4×.\nالمعادل يمنع القص.", L"Множитель kpi : 4x.\nЭквалайзер предотвращает клиппинг.", L"kpi-Ausgang : 4x.\nEqualizer verhindert Clipping.", L"Multiplicador kpi : 4x.\nEqualizador evita clipping.", L"kpi-vermenigvuldiger : 4x.\nEqualizer voorkomt clipping.", L"Mnoznik kpi : 4x.\nKorektor zapobiega przesterowaniu.", L"kpi cikis carpani 4 kat.\nEkolayzer kirpilmayi onler"));
 	m_tooltip.AddTool(GetDlgItem(IDC_CHECK46), LL14(L"kpiの出力倍率を5倍にします。\nイコライザー処理で音割れを抑えます。", L"Set KPI output to 5x.\nThe equalizer prevents clipping.", L"Multiplicateur kpi : 5x.\nL'egaliseur evite la saturation.", L"Moltiplicatore kpi : 5x.\nL'equalizzatore evita il clipping.", L"Multiplicador kpi : 5x.\nEl ecualizador evita el recorte.", L"kpi 출력 배율 5배.\n이퀄라이저가 클리핑 방지.", L"kpi 输出倍率5倍。\n均衡器防止削波。", L"مضاعف kpi : 5×.\nالمعادل يمنع القص.", L"Множитель kpi : 5x.\nЭквалайзер предотвращает клиппинг.", L"kpi-Ausgang : 5x.\nEqualizer verhindert Clipping.", L"Multiplicador kpi : 5x.\nEqualizador evita clipping.", L"kpi-vermenigvuldiger : 5x.\nEqualizer voorkomt clipping.", L"Mnoznik kpi : 5x.\nKorektor zapobiega przesterowaniu.", L"kpi cikis carpani 5 kat.\nEkolayzer kirpilmayi onler"));
+	m_tooltip.AddTool(GetDlgItem(IDC_CHECK_WA1), LL14(L"Winamp/XMPlay/AIMPの出力倍率を等倍にします。\nイコライザー処理で音割れを抑えます。", L"Set Winamp/XMPlay/AIMP output to 1x.\nThe equalizer prevents clipping.", L"Multiplicateur Winamp/XMPlay/AIMP : 1x.\nL'egaliseur evite la saturation.", L"Moltiplicatore Winamp/XMPlay/AIMP : 1x.\nL'equalizzatore evita il clipping.", L"Multiplicador Winamp/XMPlay/AIMP : 1x.\nEl ecualizador evita el recorte.", L"Winamp/XMPlay/AIMP 출력 배율 1배.\n이퀄라이저가 클리핑 방지.", L"Winamp/XMPlay/AIMP 输出倍率1倍。\n均衡器防止削波。", L"مضاعف Winamp/XMPlay/AIMP : 1×.\nالمعادل يمنع القص.", L"Множитель Winamp/XMPlay/AIMP : 1x.\nЭквалайзер предотвращает клиппинг.", L"Winamp/XMPlay/AIMP-Ausgang : 1x.\nEqualizer verhindert Clipping.", L"Multiplicador Winamp/XMPlay/AIMP : 1x.\nEqualizador evita clipping.", L"Winamp/XMPlay/AIMP-vermenigvuldiger : 1x.\nEqualizer voorkomt clipping.", L"Mnoznik Winamp/XMPlay/AIMP : 1x.\nKorektor zapobiega przesterowaniu.", L"Winamp/XMPlay/AIMP cikis carpani 1 kat.\nEkolayzer kirpilmayi onler"));
+	m_tooltip.AddTool(GetDlgItem(IDC_CHECK_WA2), LL14(L"Winamp/XMPlay/AIMPの出力倍率を2倍にします。\nイコライザー処理で音割れを抑えます。", L"Set Winamp/XMPlay/AIMP output to 2x.\nThe equalizer prevents clipping.", L"Multiplicateur Winamp/XMPlay/AIMP : 2x.\nL'egaliseur evite la saturation.", L"Moltiplicatore Winamp/XMPlay/AIMP : 2x.\nL'equalizzatore evita il clipping.", L"Multiplicador Winamp/XMPlay/AIMP : 2x.\nEl ecualizador evita el recorte.", L"Winamp/XMPlay/AIMP 출력 배율 2배.\n이퀄라이저가 클리핑 방지.", L"Winamp/XMPlay/AIMP 输出倍率2倍。\n均衡器防止削波。", L"مضاعف Winamp/XMPlay/AIMP : 2×.\nالمعادل يمنع القص.", L"Множитель Winamp/XMPlay/AIMP : 2x.\nЭквалайзер предотвращает клиппинг.", L"Winamp/XMPlay/AIMP-Ausgang : 2x.\nEqualizer verhindert Clipping.", L"Multiplicador Winamp/XMPlay/AIMP : 2x.\nEqualizador evita clipping.", L"Winamp/XMPlay/AIMP-vermenigvuldiger : 2x.\nEqualizer voorkomt clipping.", L"Mnoznik Winamp/XMPlay/AIMP : 2x.\nKorektor zapobiega przesterowaniu.", L"Winamp/XMPlay/AIMP cikis carpani 2 kat.\nEkolayzer kirpilmayi onler"));
+	m_tooltip.AddTool(GetDlgItem(IDC_CHECK_WA3), LL14(L"Winamp/XMPlay/AIMPの出力倍率を3倍にします。\nイコライザー処理で音割れを抑えます。", L"Set Winamp/XMPlay/AIMP output to 3x.\nThe equalizer prevents clipping.", L"Multiplicateur Winamp/XMPlay/AIMP : 3x.\nL'egaliseur evite la saturation.", L"Moltiplicatore Winamp/XMPlay/AIMP : 3x.\nL'equalizzatore evita il clipping.", L"Multiplicador Winamp/XMPlay/AIMP : 3x.\nEl ecualizador evita el recorte.", L"Winamp/XMPlay/AIMP 출력 배율 3배.\n이퀄라이저가 클리핑 방지.", L"Winamp/XMPlay/AIMP 输出倍率3倍。\n均衡器防止削波。", L"مضاعف Winamp/XMPlay/AIMP : 3×.\nالمعادل يمنع القص.", L"Множитель Winamp/XMPlay/AIMP : 3x.\nЭквалайзер предотвращает клиппинг.", L"Winamp/XMPlay/AIMP-Ausgang : 3x.\nEqualizer verhindert Clipping.", L"Multiplicador Winamp/XMPlay/AIMP : 3x.\nEqualizador evita clipping.", L"Winamp/XMPlay/AIMP-vermenigvuldiger : 3x.\nEqualizer voorkomt clipping.", L"Mnoznik Winamp/XMPlay/AIMP : 3x.\nKorektor zapobiega przesterowaniu.", L"Winamp/XMPlay/AIMP cikis carpani 3 kat.\nEkolayzer kirpilmayi onler"));
+	m_tooltip.AddTool(GetDlgItem(IDC_CHECK_WA4), LL14(L"Winamp/XMPlay/AIMPの出力倍率を4倍にします。\nイコライザー処理で音割れを抑えます。", L"Set Winamp/XMPlay/AIMP output to 4x.\nThe equalizer prevents clipping.", L"Multiplicateur Winamp/XMPlay/AIMP : 4x.\nL'egaliseur evite la saturation.", L"Moltiplicatore Winamp/XMPlay/AIMP : 4x.\nL'equalizzatore evita il clipping.", L"Multiplicador Winamp/XMPlay/AIMP : 4x.\nEl ecualizador evita el recorte.", L"Winamp/XMPlay/AIMP 출력 배율 4배.\n이퀄라이저가 클리핑 방지.", L"Winamp/XMPlay/AIMP 输出倍率4倍。\n均衡器防止削波。", L"مضاعف Winamp/XMPlay/AIMP : 4×.\nالمعادل يمنع القص.", L"Множитель Winamp/XMPlay/AIMP : 4x.\nЭквалайзер предотвращает клиппинг.", L"Winamp/XMPlay/AIMP-Ausgang : 4x.\nEqualizer verhindert Clipping.", L"Multiplicador Winamp/XMPlay/AIMP : 4x.\nEqualizador evita clipping.", L"Winamp/XMPlay/AIMP-vermenigvuldiger : 4x.\nEqualizer voorkomt clipping.", L"Mnoznik Winamp/XMPlay/AIMP : 4x.\nKorektor zapobiega przesterowaniu.", L"Winamp/XMPlay/AIMP cikis carpani 4 kat.\nEkolayzer kirpilmayi onler"));
+	m_tooltip.AddTool(GetDlgItem(IDC_CHECK_WA5), LL14(L"Winamp/XMPlay/AIMPの出力倍率を5倍にします。\nイコライザー処理で音割れを抑えます。", L"Set Winamp/XMPlay/AIMP output to 5x.\nThe equalizer prevents clipping.", L"Multiplicateur Winamp/XMPlay/AIMP : 5x.\nL'egaliseur evite la saturation.", L"Moltiplicatore Winamp/XMPlay/AIMP : 5x.\nL'equalizzatore evita il clipping.", L"Multiplicador Winamp/XMPlay/AIMP : 5x.\nEl ecualizador evita el recorte.", L"Winamp/XMPlay/AIMP 출력 배율 5배.\n이퀄라이저가 클리핑 방지.", L"Winamp/XMPlay/AIMP 输出倍率5倍。\n均衡器防止削波。", L"مضاعف Winamp/XMPlay/AIMP : 5×.\nالمعادل يمنع القص.", L"Множитель Winamp/XMPlay/AIMP : 5x.\nЭквалайзер предотвращает клиппинг.", L"Winamp/XMPlay/AIMP-Ausgang : 5x.\nEqualizer verhindert Clipping.", L"Multiplicador Winamp/XMPlay/AIMP : 5x.\nEqualizador evita clipping.", L"Winamp/XMPlay/AIMP-vermenigvuldiger : 5x.\nEqualizer voorkomt clipping.", L"Mnoznik Winamp/XMPlay/AIMP : 5x.\nKorektor zapobiega przesterowaniu.", L"Winamp/XMPlay/AIMP cikis carpani 5 kat.\nEkolayzer kirpilmayi onler"));
+	m_tooltip.AddTool(GetDlgItem(IDC_CHECK_CE1), LL14(L"CEmuの出力倍率を等倍にします。\nイコライザー処理で音割れを抑えます。", L"Set CEmu output to 1x.\nThe equalizer prevents clipping.", L"Multiplicateur CEmu : 1x.\nL'egaliseur evite la saturation.", L"Moltiplicatore CEmu : 1x.\nL'equalizzatore evita il clipping.", L"Multiplicador CEmu : 1x.\nEl ecualizador evita el recorte.", L"CEmu 출력 배율 1배.\n이퀄라이저가 클리핑 방지.", L"CEmu 输出倍率1倍。\n均衡器防止削波。", L"مضاعف CEmu : 1×.\nالمعادل يمنع القص.", L"Множитель CEmu : 1x.\nЭквалайзер предотвращает клиппинг.", L"CEmu-Ausgang : 1x.\nEqualizer verhindert Clipping.", L"Multiplicador CEmu : 1x.\nEqualizador evita clipping.", L"CEmu-vermenigvuldiger : 1x.\nEqualizer voorkomt clipping.", L"Mnoznik CEmu : 1x.\nKorektor zapobiega przesterowaniu.", L"CEmu cikis carpani 1 kat.\nEkolayzer kirpilmayi onler"));
+	m_tooltip.AddTool(GetDlgItem(IDC_CHECK_CE2), LL14(L"CEmuの出力倍率を2倍にします。\nイコライザー処理で音割れを抑えます。", L"Set CEmu output to 2x.\nThe equalizer prevents clipping.", L"Multiplicateur CEmu : 2x.\nL'egaliseur evite la saturation.", L"Moltiplicatore CEmu : 2x.\nL'equalizzatore evita il clipping.", L"Multiplicador CEmu : 2x.\nEl ecualizador evita el recorte.", L"CEmu 출력 배율 2배.\n이퀄라이저가 클리핑 방지.", L"CEmu 输出倍率2倍。\n均衡器防止削波。", L"مضاعف CEmu : 2×.\nالمعادل يمنع القص.", L"Множитель CEmu : 2x.\nЭквалайзер предотвращает клиппинг.", L"CEmu-Ausgang : 2x.\nEqualizer verhindert Clipping.", L"Multiplicador CEmu : 2x.\nEqualizador evita clipping.", L"CEmu-vermenigvuldiger : 2x.\nEqualizer voorkomt clipping.", L"Mnoznik CEmu : 2x.\nKorektor zapobiega przesterowaniu.", L"CEmu cikis carpani 2 kat.\nEkolayzer kirpilmayi onler"));
+	m_tooltip.AddTool(GetDlgItem(IDC_CHECK_CE3), LL14(L"CEmuの出力倍率を3倍にします。\nイコライザー処理で音割れを抑えます。", L"Set CEmu output to 3x.\nThe equalizer prevents clipping.", L"Multiplicateur CEmu : 3x.\nL'egaliseur evite la saturation.", L"Moltiplicatore CEmu : 3x.\nL'equalizzatore evita il clipping.", L"Multiplicador CEmu : 3x.\nEl ecualizador evita el recorte.", L"CEmu 출력 배율 3배.\n이퀄라이저가 클리핑 방지.", L"CEmu 输出倍率3倍。\n均衡器防止削波。", L"مضاعف CEmu : 3×.\nالمعادل يمنع القص.", L"Множитель CEmu : 3x.\nЭквалайзер предотвращает клиппинг.", L"CEmu-Ausgang : 3x.\nEqualizer verhindert Clipping.", L"Multiplicador CEmu : 3x.\nEqualizador evita clipping.", L"CEmu-vermenigvuldiger : 3x.\nEqualizer voorkomt clipping.", L"Mnoznik CEmu : 3x.\nKorektor zapobiega przesterowaniu.", L"CEmu cikis carpani 3 kat.\nEkolayzer kirpilmayi onler"));
+	m_tooltip.AddTool(GetDlgItem(IDC_CHECK_CE4), LL14(L"CEmuの出力倍率を4倍にします。\nイコライザー処理で音割れを抑えます。", L"Set CEmu output to 4x.\nThe equalizer prevents clipping.", L"Multiplicateur CEmu : 4x.\nL'egaliseur evite la saturation.", L"Moltiplicatore CEmu : 4x.\nL'equalizzatore evita il clipping.", L"Multiplicador CEmu : 4x.\nEl ecualizador evita el recorte.", L"CEmu 출력 배율 4배.\n이퀄라이저가 클리핑 방지.", L"CEmu 输出倍率4倍。\n均衡器防止削波。", L"مضاعف CEmu : 4×.\nالمعادل يمنع القص.", L"Множитель CEmu : 4x.\nЭквалайзер предотвращает клиппинг.", L"CEmu-Ausgang : 4x.\nEqualizer verhindert Clipping.", L"Multiplicador CEmu : 4x.\nEqualizador evita clipping.", L"CEmu-vermenigvuldiger : 4x.\nEqualizer voorkomt clipping.", L"Mnoznik CEmu : 4x.\nKorektor zapobiega przesterowaniu.", L"CEmu cikis carpani 4 kat.\nEkolayzer kirpilmayi onler"));
+	m_tooltip.AddTool(GetDlgItem(IDC_CHECK_CE5), LL14(L"CEmuの出力倍率を5倍にします。\nイコライザー処理で音割れを抑えます。", L"Set CEmu output to 5x.\nThe equalizer prevents clipping.", L"Multiplicateur CEmu : 5x.\nL'egaliseur evite la saturation.", L"Moltiplicatore CEmu : 5x.\nL'equalizzatore evita il clipping.", L"Multiplicador CEmu : 5x.\nEl ecualizador evita el recorte.", L"CEmu 출력 배율 5배.\n이퀄라이저가 클리핑 방지.", L"CEmu 输出倍率5倍。\n均衡器防止削波。", L"مضاعف CEmu : 5×.\nالمعادل يمنع القص.", L"Множитель CEmu : 5x.\nЭквалайзер предотвращает клиппинг.", L"CEmu-Ausgang : 5x.\nEqualizer verhindert Clipping.", L"Multiplicador CEmu : 5x.\nEqualizador evita clipping.", L"CEmu-vermenigvuldiger : 5x.\nEqualizer voorkomt clipping.", L"Mnoznik CEmu : 5x.\nKorektor zapobiega przesterowaniu.", L"CEmu cikis carpani 5 kat.\nEkolayzer kirpilmayi onler"));
 	m_tooltip.AddTool(GetDlgItem(IDC_CHECK47), LL14(L"mp3のデコーダをオリジナルのデコーダを使わずに、独自で使ったデコーダを使う。\nエラーなどで演奏できないときにチェック入れて下さい。\nまた独自で正常にならない時ははずして下さい。", L"Use custom mp3 decoder instead of original.\nCheck if playback fails.\nUncheck if custom causes issues.", L"Utiliser le decodeur mp3 personnalise.\nCochez si la lecture echoue.\nDecochez s'il pose probleme.", L"Usa decodificatore mp3 personalizzato.\nSpunta se la riproduzione fallisce.\nTogli se causa problemi.", L"Usar decodificador mp3 personalizado.\nMarca si falla la reproduccion.\nDesmarca si causa problemas.", L"mp3를 원본이 아닌 자체 디코더로 재생합니다.\n오류로 재생되지 않을 때 체크하세요.\n자체 디코더가 정상이 아니면 해제하세요.", L"不使用原始解码器，改用自定义 mp3 解码器。\n因错误无法播放时请勾选。\n自定义解码器异常时请取消勾选。", L"استخدام فك mp3 مخصص.\nحدّد عند فشل التشغيل.\nألغِ إن سبب مشاكل.", L"Использовать свой mp3-декодер.\nОтметьте при сбое воспроизведения.\nСнимите, если мешает.", L"Eigenen mp3-Decoder nutzen.\nAnhaken bei Fehlern.\nAb wenn Probleme.", L"Usar decodificador mp3 proprio.\nMarque se falhar.\nDesmarque se der problema.", L"Eigen mp3-decoder gebruiken.\nAanvinken bij fouten.\nUit bij problemen.", L"Uzyj wlasnego dekodera mp3.\nZaznacz przy bledach.\nOdznacz gdy szkodzi.", L"Ozel mp3 kod cozucu kullan.\nCalma hatasinda isaretle.\nSorun cikarirsa kaldir."));
 	m_tooltip.AddTool(GetDlgItem(IDC_CHECK48), LL14(L"複数音声のある動画を再生する時に、再生前に\n音声ストリームの選択画面を表示します。\n通常ストリーム1がメインとして使われ、ストリーム2以降はコメンタリや英語音声などに使われています。", L"When playing a video with multiple audio tracks,\nthe audio stream selection screen is shown before playback.\nStream 1 is usually the main one; stream 2 onward are for commentary, English audio, etc.", L"Lors de la lecture d'une video a plusieurs pistes audio,\nl'ecran de selection de piste s'affiche avant la lecture.\nLa piste 1 est generalement la principale ; les pistes 2 et suivantes servent au commentaire, a l'anglais, etc.", L"Quando riproduci un video con piu tracce audio,\nprima della riproduzione appare la schermata di scelta della traccia.\nLa traccia 1 e di solito la principale; dalla 2 in poi per commento, inglese, ecc.", L"Al reproducir un video con varias pistas de audio,\nse muestra la pantalla de seleccion de pista antes de reproducir.\nLa pista 1 suele ser la principal; de la 2 en adelante para comentario, ingles, etc.", L"다중 음성 동영상 재생 전\n음성 스트림 선택 화면을 표시합니다.\n보통 스트림 1이 메인, 스트림 2 이후는 해설이나 영어 음성 등에 사용됩니다.", L"播放多音轨视频前\n显示音轨选择界面。\n通常音轨1为主音轨，音轨2及以后用于解说或英语音频等。", L"عند تشغيل فيديو متعدد المسارات الصوتية،\nتظهر شاشة اختيار مسار الصوت قبل التشغيل.\nالمسار 1 عادةً هو الرئيسي؛ والمسار 2 وما بعده للتعليق والصوت الإنجليزي وغيره.", L"При воспроизведении видео с несколькими аудиодорожками\nперед началом показывается экран выбора аудиодорожки.\nДорожка 1 обычно основная; дорожка 2 и далее — для комментариев, английской озвучки и т. п.", L"Beim Abspielen eines Videos mit mehreren Audiospuren\nwird vor der Wiedergabe die Spurauswahl angezeigt.\nSpur 1 ist meist die Hauptspur; Spur 2 und weitere fur Kommentar, englischen Ton usw.", L"Ao reproduzir um video com varias faixas de audio,\na tela de selecao de faixa aparece antes da reproducao.\nA faixa 1 costuma ser a principal; da 2 em diante para comentario, ingles, etc.", L"Bij het afspelen van een video met meerdere audiosporen\nverschijnt voor het afspelen het spoorkeuzescherm.\nSpoor 1 is meestal het hoofdspoor; spoor 2 en verder voor commentaar, Engels, enz.", L"Podczas odtwarzania wideo z wieloma sciezkami audio\nprzed odtwarzaniem pojawia sie ekran wyboru sciezki.\nSciezka 1 to zwykle glowna; sciezka 2 i dalsze do komentarza, angielskiego itp.", L"Coklu sesli videoda calmadan once\nses akisi secimini goster.\n1 genelde ana; 2+ yorum/Ingilizce."));
 	m_tooltip.AddTool(GetDlgItem(IDC_CHECK49), LL14(L"対応しているkpiを24bit(ハイレゾ)で再生します。\n通常は16bitですが、まれに対応しているものがあります。\n音割れについては考慮されていないため、spcなど倍率を上げないといけないものは気をつけて下さい。", L"Play supported kpi at 24bit (hi-res).\nUsually 16bit, but some rarely support it.\nClipping is not considered, so be careful with formats needing higher gain such as spc.", L"Lire les kpi compatibles en 24 bits (haute resolution).\nHabituellement 16 bits, mais certains le prennent en charge.\nLe clipping n'est pas gere : attention aux formats a fort gain comme spc.", L"Riproduci i kpi supportati a 24 bit (alta risoluzione).\nDi solito 16 bit, ma alcuni lo supportano.\nIl clipping non e gestito: attenzione ai formati con gain alto come spc.", L"Reproducir los kpi compatibles a 24 bits (alta resolucion).\nNormalmente 16 bits, pero algunos lo admiten.\nNo hay proteccion contra clipping: cuidado con formatos de mayor ganancia como spc.", L"지원하는 kpi를 24bit(하이레조)로 재생합니다.\n보통은 16bit이지만 드물게 지원하는 것이 있습니다.\n음 깨짐은 고려되지 않으므로 spc 등 배율을 올려야 하는 것은 주의하세요.", L"以24bit（高解析度）播放支持的kpi。\n通常为16bit，偶尔有支持的。\n未考虑削波，spc等需要提高倍率的请注意。", L"تشغيل ملفات kpi المدعومة بدقة 24 بت (فائقة الدقة).\nعادةً تكون 16 بت، لكن بعضها يدعمها.\nلا يُراعى تقطيع الصوت، فانتبه للأنواع التي تحتاج رفع المضاعف مثل spc.", L"Воспроизведение поддерживаемых kpi в 24 бита (Hi-Res).\nОбычно 16 бит, но некоторые поддерживают.\nКлиппинг не учитывается — осторожно с форматами, требующими усиления, например spc.", L"Unterstutzte kpi in 24 Bit (Hi-Res) abspielen.\nUblich sind 16 Bit, manche unterstutzen mehr.\nClipping wird nicht berucksichtigt: Vorsicht bei Formaten mit hoher Verstarkung wie spc.", L"Reproduzir os kpi suportados em 24 bits (alta resolucao).\nNormalmente 16 bits, mas alguns suportam.\nO clipping nao e tratado: cuidado com formatos de ganho alto como spc.", L"Ondersteunde kpi in 24 bit (hi-res) afspelen.\nMeestal 16 bit, maar sommige ondersteunen het.\nClipping wordt niet meegerekend: let op formaten met hoge versterking zoals spc.", L"Odtwarzaj obslugiwane kpi w 24 bitach (hi-res).\nZwykle 16 bitow, ale niektore to obsluguja.\nPrzesterowanie nie jest uwzgledniane: uwaga na formaty o wysokim wzmocnieniu jak spc.", L"Desteklenen kpi'yi 24 bit (yuksek cozunurluk) calar.\nGenelde 16 bittir, nadiren destekleyenler var.\nKirpilma dikkate alinmaz; spc gibi carpani artirmak gerekenlere dikkat edin."));
@@ -1420,7 +1464,6 @@ void CRender::Onkpi25()
 
 void CRender::Onkpi30()
 {
-	// TODO: ここにコントロール通知ハンドラ コードを追加します。
 	m_kpi10.SetCheck(FALSE);
 	m_kpi15.SetCheck(FALSE);
 	m_kpi20.SetCheck(FALSE);
@@ -1428,6 +1471,40 @@ void CRender::Onkpi30()
 	m_kpi30.SetCheck(TRUE);
 	savedata.kpivol=5;
 }
+
+void CRender::ApplyWinampVolChecks(int v)
+{
+	if (v < 1 || v > 5) v = 1;
+	savedata.winampvol = v;
+	m_wa1x.SetCheck(v == 1);
+	m_wa2x.SetCheck(v == 2);
+	m_wa3x.SetCheck(v == 3);
+	m_wa4x.SetCheck(v == 4);
+	m_wa5x.SetCheck(v == 5);
+}
+
+void CRender::Onwa1x() { ApplyWinampVolChecks(1); }
+void CRender::Onwa2x() { ApplyWinampVolChecks(2); }
+void CRender::Onwa3x() { ApplyWinampVolChecks(3); }
+void CRender::Onwa4x() { ApplyWinampVolChecks(4); }
+void CRender::Onwa5x() { ApplyWinampVolChecks(5); }
+
+void CRender::ApplyCemuVolChecks(int v)
+{
+	if (v < 1 || v > 5) v = 1;
+	savedata.cemuvol = v;
+	m_ce1x.SetCheck(v == 1);
+	m_ce2x.SetCheck(v == 2);
+	m_ce3x.SetCheck(v == 3);
+	m_ce4x.SetCheck(v == 4);
+	m_ce5x.SetCheck(v == 5);
+}
+
+void CRender::Once1x() { ApplyCemuVolChecks(1); }
+void CRender::Once2x() { ApplyCemuVolChecks(2); }
+void CRender::Once3x() { ApplyCemuVolChecks(3); }
+void CRender::Once4x() { ApplyCemuVolChecks(4); }
+void CRender::Once5x() { ApplyCemuVolChecks(5); }
 
 void CRender::OnBnClicked24bit()
 {
@@ -1794,7 +1871,7 @@ void CRender::OnEmuArcdataDl()
 extern HFONT	hFont;
 #include "afxdlgs.h"
 
-// チェックは midPlayPrefer。リスト表示は即 Refresh。今鳴っている曲のエンジンは次の再生までそのまま。
+// チェックは midPlayPrefer。リスト表示は即 Refresh。CEmu MIDI 再生中は zip を閉じて開き直す。
 void CRender::OnMidPreferKpi()
 {
 	savedata.midPlayPrefer = 0;
@@ -1803,6 +1880,8 @@ void CRender::OnMidPreferKpi()
 	KpiV5SyncKbsasamiOptions(savedata.midPlayPrefer);
 	extern CPlayList* pl;
 	if (pl) pl->RefreshMidiPlayModes();
+	extern void CEmuRequestMidiEngineReplay();
+	CEmuRequestMidiEngineReplay();
 }
 
 void CRender::OnMidPreferVst()
@@ -1813,6 +1892,8 @@ void CRender::OnMidPreferVst()
 	KpiV5SyncKbsasamiOptions(savedata.midPlayPrefer);
 	extern CPlayList* pl;
 	if (pl) pl->RefreshMidiPlayModes();
+	extern void CEmuRequestMidiEngineReplay();
+	CEmuRequestMidiEngineReplay();
 }
 
 void CRender::LayoutMidiVstRows()
@@ -2035,9 +2116,14 @@ void CRender::OnBnClickedOk()
 		/* CEmu は zip ドロップ＋ exe\\data 固定。旧カスタムパスは破棄 */
 		savedata.cemuDataPath[0] = 0;
 		{
-			wchar_t root[MAX_PATH];
-			CEmuMgrGetEffectiveDataRoot(NULL, root, MAX_PATH);
-			CEmuMgrReload(CEmuMgrGet(), root);
+			extern int CEmuMidiLiveActive(void);
+			extern int OggPlaybackBusy();
+			/* 再生中に catalog を組み替えると live.ge / zip がダングリングして落ちる */
+			if (!CEmuMidiLiveActive() && !OggPlaybackBusy()) {
+				wchar_t root[MAX_PATH];
+				CEmuMgrGetEffectiveDataRoot(NULL, root, MAX_PATH);
+				CEmuMgrReload(CEmuMgrGet(), root);
+			}
 		}
 		savedata.vstMultiName[0] = 0;
 		savedata.midiOutName[0] = 0;

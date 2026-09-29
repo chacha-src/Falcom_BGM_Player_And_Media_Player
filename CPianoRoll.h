@@ -20,6 +20,7 @@
 #include "CCustomControl.h"
 #include "NoteEnvelopeModel.h"
 #include "GdiSoft3D.h"
+#include "UiTickPump.h"
 
 class CPianoRoll : public CCustomBlurDialogExBase
 {
@@ -30,7 +31,6 @@ public:
     virtual ~CPianoRoll();
 
     void RequestSyncFromMainUi();
-    // timerp から Speana より前に呼ぶ。Post だと Speana/Soft3D 終了まで届かず間隔だけ伸びる。
     void PumpSyncNow();
 
 #ifdef AFX_DESIGN_TIME
@@ -144,6 +144,7 @@ protected:
     afx_msg void OnBnClickedHelp();
     afx_msg LRESULT OnSyncRequest(WPARAM wParam, LPARAM lParam);
     afx_msg LRESULT OnAnalysisDone(WPARAM wParam, LPARAM lParam);
+    afx_msg LRESULT OnUiTick(WPARAM wParam, LPARAM lParam);
     afx_msg void OnContextMenu(CWnd* pWnd, CPoint point);
     afx_msg void OnRollSpeedCmd(UINT nID);
     afx_msg void OnToggleFreeze();
@@ -501,7 +502,7 @@ private:
     DWORD m_lastSyncPostTick = 0;
     DWORD m_lastAnalysisDonePostTick = 0;
     int   m_rollSpeedPct = 100;       // 表示スクロール速度(%) 25..200
-    int   m_rollSpeedCredit = 0;      // PushFrame 用アキュムレータ(壁時計×速度%)
+    double m_rollSpeedCredit = 0;     // PushFrame 用アキュムレータ(QPC×速度%。整数だと 16ms×100 が 1667 に届かず半速)
     LONGLONG m_lastRollPushQpc = 0;   // PushDisplayFrames の前回 QPC（GetTickCount は 15ms 粒度でガクつく）
     bool  m_frozen = false;           // 表示スクロール停止(解析は継続、ライブ行は更新)
     bool  m_showExprLegend = true;    // 記号凡例パネル
@@ -673,4 +674,5 @@ private:
 
     CCustomStandardButton m_help;
     CToolTipCtrl m_tooltip;
+    UiTickPump m_tickPump;
 };

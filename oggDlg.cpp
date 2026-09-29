@@ -27,6 +27,7 @@ int flacmode = 0;
 #include "AudioDevSync.h"
 #include "CEqualizer.h"
 #include "CPianoRoll.h"
+#include "UiTickPump.h"
 #include "CPianoRollTuneDlg.h"
 #include "CAnalyzerDlg.h"
 #include "CMidiMonitorDlg.h"
@@ -71,6 +72,7 @@ int flacmode = 0;
 #include "CEmu/cemu_modepref.h"
 #include "CEmu/cemu_midi_live.h"
 #include "CEmu/cemu_support.h"
+#include "CEmu/driver/cemu_driver.h"
 #include "CEmu/fmmon/fmmon_shadow.h"
 #include "CEmu/fmmon/cemu_fmmon_bind.h"
 #include "VstMidiEngine.h"
@@ -591,6 +593,22 @@ static int OggPathIsEphemeralCemuMidi(LPCTSTR path)
 
 /* LiveStart runs before goto open_mode_vst_midi; Close must not kill the emu. */
 static int g_cemuLiveKeepAcrossClose = 0;
+
+static int OggSasamiLiveInjectShort(unsigned int msg)
+{
+	if (!og || !og->hDLLk) return 0;
+	typedef int (*Fn)(unsigned int);
+	Fn fn = (Fn)GetProcAddress(og->hDLLk, "SasamiKpiLiveInjectShort");
+	return (fn && fn(msg)) ? 1 : 0;
+}
+
+static int OggSasamiLiveInjectSysex(const unsigned char* d, int n)
+{
+	if (!og || !og->hDLLk || !d || n < 2) return 0;
+	typedef int (*Fn)(const unsigned char*, int);
+	Fn fn = (Fn)GetProcAddress(og->hDLLk, "SasamiKpiLiveInjectSysex");
+	return (fn && fn(d, n)) ? 1 : 0;
+}
 
 /* CC#111 (RPG Maker / common SMF loop) — Host64 path cannot see local VstMidiSongHasLoop. */
 static int OggMidiFileHasCc111Loop(LPCTSTR path)
@@ -2275,8 +2293,19 @@ static void ApplyKpiMediaLoop(const KPI_MEDIAINFO* mi)
 	loop2 = lenSamp;
 }
 
+static void SetPcmByteLengthFromSamples(int samples, int bits, int channels);
+
 static void FinalizePlaybackLoopFlags(int md)
 {
+	if (CEmuMidiLiveActive() && md == -3) {
+		loop1 = 0;
+		loop2 = 0;
+		loop3 = 0;
+		kpi_file_loop = 0;
+		endf = 1;
+		SetPcmByteLengthFromSamples(0, wavsam_depth, wavchannel);
+		return;
+	}
 	if (pl && plw) {
 		if (pl->m_loop.GetCheck() == TRUE) {
 			if (loop2 == 0)
@@ -2836,6 +2865,114 @@ void MpPushPlayHistory(LPCTSTR path, LPCTSTR displayName)
 static volatile LONG s_restartMsgQueued = 0;
 static volatile LONG s_restartWanted = 0;
 static volatile LONG s_onRestartBusy = 0;
+static int s_cemuPendingLoadRow = -1;
+static wchar_t s_cemuPendingLoadPath[CEMU_ZIP_PATH] = {};
+
+static int CEmuPendingLoadActive()
+{
+	return (s_cemuPendingLoadRow >= 0 || s_cemuPendingLoadPath[0]) ? 1 : 0;
+}
+
+static void CEmuPendingLoadClear()
+{
+	s_cemuPendingLoadRow = -1;
+	s_cemuPendingLoadPath[0] = 0;
+}
+
+void CEmuPendingLoadSetPlaylistRow(int row)
+{
+	extern CPlayList* pl;
+	s_cemuPendingLoadRow = row;
+	s_cemuPendingLoadPath[0] = 0;
+	if (row < 0 || !pl || !pl->pc || row >= pl->playcnt || !pl->pc[row].fol[0])
+		return;
+	wchar_t a[CEMU_ZIP_PATH] = {};
+	unsigned t = 1;
+	CEmuParseVirtualPath(pl->pc[row].fol, a, (int)_countof(a), &t);
+	wcsncpy_s(s_cemuPendingLoadPath, a[0] ? a : pl->pc[row].fol, _TRUNCATE);
+}
+
+static void CEmuPendingLoadApplyToPlaylist()
+{
+	extern CPlayList* pl;
+	extern int plcnt;
+	if (!pl || !pl->pc || s_cemuPendingLoadRow < 0 || s_cemuPendingLoadRow >= pl->playcnt)
+		return;
+	plcnt = s_cemuPendingLoadRow;
+	pl->Get(plcnt);
+	pl->SIcon(plcnt);
+	if (::IsWindow(pl->m_lc.GetSafeHwnd())) {
+		pl->m_lc.SetItemState(plcnt, LVIS_FOCUSED, LVIS_FOCUSED);
+		pl->m_lc.SetSelectionMark(plcnt);
+		pl->m_lc.EnsureVisible(plcnt, FALSE);
+	}
+}
+
+static const wchar_t* CEmuPendingLoadSourcePath()
+{
+	extern CPlayList* pl;
+	if (s_cemuPendingLoadRow >= 0 && pl && pl->pc
+		&& s_cemuPendingLoadRow < pl->playcnt && pl->pc[s_cemuPendingLoadRow].fol[0])
+		return pl->pc[s_cemuPendingLoadRow].fol;
+	if (s_cemuPendingLoadPath[0])
+		return s_cemuPendingLoadPath;
+	return NULL;
+}
+
+static void CEmuPendingLoadBindFilen()
+{
+	extern CString filen;
+	CEmuDriverSetNextOpenLoadOnly(1);
+	if (s_cemuPendingLoadRow >= 0)
+		CEmuPendingLoadApplyToPlaylist();
+	const wchar_t* src = CEmuPendingLoadSourcePath();
+	if (src && src[0])
+		filen = src;
+}
+
+static int CEmuPendingLoadSameZip(const wchar_t* openPath)
+{
+	if (!openPath || !openPath[0])
+		return 0;
+	const wchar_t* src = CEmuPendingLoadSourcePath();
+	if (!src || !src[0])
+		return 0;
+	wchar_t a[CEMU_ZIP_PATH] = {}, b[CEMU_ZIP_PATH] = {};
+	unsigned t1 = 1, t2 = 1;
+	CEmuParseVirtualPath(src, a, (int)_countof(a), &t1);
+	CEmuParseVirtualPath(openPath, b, (int)_countof(b), &t2);
+	const wchar_t* pa = a[0] ? a : src;
+	const wchar_t* pb = b[0] ? b : openPath;
+	return (pa[0] && pb[0] && _wcsicmp(pa, pb) == 0) ? 1 : 0;
+}
+
+static void CEmuPendingLoadFinishOpen(const wchar_t* openPath)
+{
+	if (!CEmuPendingLoadActive()) {
+		CEmuDriverSetNextOpenLoadOnly(0);
+		return;
+	}
+	if (CEmuPendingLoadSameZip(openPath)) {
+		CEmuPendingLoadClear();
+		CEmuDriverSetNextOpenLoadOnly(0);
+	}
+}
+
+/* 1=この再演奏はロードそのもの。0=別曲なのでロード待ちを捨てた */
+static int CEmuPendingLoadKeepForRestart()
+{
+	extern int plcnt;
+	extern CString filen;
+	if (!CEmuPendingLoadActive())
+		return 0;
+	if (s_cemuPendingLoadRow >= 0 && plcnt == s_cemuPendingLoadRow)
+		return 1;
+	if (CEmuPendingLoadSameZip(filen))
+		return 1;
+	CEmuPendingLoadClear();
+	CEmuDriverSetNextOpenLoadOnly(0);
+	return 0;
+}
 // 二重DS昇格の soft play() 実行中。この間の Restart 再キューは頭出しデグレの原因なので捨てる。
 // Promote で確定したスキップ。atomic が消えても play() で頭出ししない。
 
@@ -2847,6 +2984,7 @@ BOOL OggIsResumePromptActive()
 void OggCancelPendingPlaybackRestart()
 {
 	InterlockedExchange(&s_restartWanted, 0);
+	CEmuPendingLoadClear();
 	InterlockedExchange(&s_restartMsgQueued, 0);
 	if (og && ::IsWindow(og->GetSafeHwnd())) {
 		MSG m;
@@ -2858,8 +2996,10 @@ void OggCancelPendingPlaybackRestart()
 // 何十回も走らないようにする(キュー溜めによる UI 固まり対策)。
 void RequestPlaybackRestart(HWND hwnd)
 {
-	if (OggIsResumePromptActive())
+	if (OggIsResumePromptActive() && !CEmuPendingLoadActive())
 		return;
+	/* busy 中でも wanted は立てる。捨てると CEmu ロード A→B が消える。 */
+	InterlockedExchange(&s_restartWanted, 1);
 	if (InterlockedCompareExchange(&s_onRestartBusy, 0, 0) != 0)
 		return;
 	if (!hwnd) {
@@ -2871,6 +3011,114 @@ void RequestPlaybackRestart(HWND hwnd)
 	InterlockedExchange(&s_restartWanted, 1);
 	if (InterlockedCompareExchange(&s_restartMsgQueued, 1, 0) == 0)
 		::PostMessage(hwnd, WM_APP + 2, 0, 0);
+}
+
+static int CemuAnyKind();
+static void CloseCemuPlaybackResources();
+
+void CEmuPendingLoadPlayNow()
+{
+	extern COggDlg* og;
+	extern int mode, modesub, gameon;
+	if (!og || !::IsWindow(og->GetSafeHwnd()))
+		return;
+	CEmuDriverSetNextOpenLoadOnly(1);
+	CEmuPendingLoadBindFilen();
+	mode = modesub = MODE_CEMU;
+	gameon = 0;
+	/* 演奏中だけ再演奏キューへ送る。busy/join フラグが残っているだけで
+	   play() を捨てると、停止中の「ロード」が永久に走らない。 */
+	if (s_inPlay || s_inStop1) {
+		RequestPlaybackRestart(og->GetSafeHwnd());
+		return;
+	}
+	XfPreloadCancel(0);
+	og->stop();
+	CEmuPendingLoadBindFilen();
+	mode = modesub = MODE_CEMU;
+	gameon = 0;
+	CEmuDriverSetNextOpenLoadOnly(1);
+	if (CemuAnyKind() || CEmuMidiLiveActive())
+		CloseCemuPlaybackResources();
+	og->play();
+}
+
+static int CEmuZipPathIsMidiMode(const wchar_t* zipPath)
+{
+	if (!zipPath || !zipPath[0]) return 0;
+	wchar_t zipOut[CEMU_ZIP_PATH];
+	char dataDir[CEMU_DATA_DIR];
+	const CEmuGameEntry* ge = CEmuMgrResolveZip(CEmuMgrGet(), zipPath, zipOut,
+		(int)_countof(zipOut), dataDir, (int)sizeof(dataDir));
+	const wchar_t* zip = zipOut[0] ? zipOut : zipPath;
+	char modeTag[CEMU_MODE_TAG] = {};
+	char fromEntry[CEMU_MODE_TAG] = {};
+	CEmuModeTagFromEntry(ge, fromEntry, (int)sizeof(fromEntry));
+	if (CEmuModeIsMidiTag(fromEntry))
+		strncpy_s(modeTag, fromEntry, _TRUNCATE);
+	else if (!CEmuModePrefGet(zip, modeTag, (int)sizeof(modeTag)))
+		strncpy_s(modeTag, fromEntry, _TRUNCATE);
+	return CEmuModeIsMidiTag(modeTag) ? 1 : 0;
+}
+
+static int CEmuRestoreMidiZipPlayPath()
+{
+	extern CString filen, fnn, tagfile;
+	extern int ret2;
+	/* ロード MIDI は tagfile に zip を残す。別形式（flac/ogg 等）へ切替えたのに
+	   ここで zip へ戻すとジングルが再発火する。CEmu MIDI 行か、一時 SMF の再Openだけ戻す。 */
+	if (pl && plcnt >= 0 && plcnt < pl->playcnt) {
+		if (pl->pc[plcnt].sub != MODE_CEMU)
+			return 0;
+		if (!CEmuZipPathIsMidiMode(pl->pc[plcnt].fol))
+			return 0;
+		filen = pl->pc[plcnt].fol;
+		if (pl->pc[plcnt].name[0]) fnn = pl->pc[plcnt].name;
+		ret2 = pl->pc[plcnt].ret2;
+		return 1;
+	}
+	if (!OggPathIsEphemeralCemuMidi(filen))
+		return 0;
+	if (tagfile.IsEmpty()) return 0;
+	if (!CEmuZipPathIsMidiMode(tagfile)) return 0;
+	wchar_t zipOut[CEMU_ZIP_PATH];
+	char dataDir[CEMU_DATA_DIR];
+	CEmuMgrResolveZip(CEmuMgrGet(), tagfile, zipOut,
+		(int)_countof(zipOut), dataDir, (int)sizeof(dataDir));
+	const wchar_t* zip = zipOut[0] ? zipOut : (LPCTSTR)tagfile;
+	unsigned titleIdx = (ret2 > 0) ? (unsigned)ret2 : 1u;
+	wchar_t virt[1024];
+	CEmuFormatVirtualPath(zip, titleIdx, virt, (int)_countof(virt));
+	if (!virt[0]) return 0;
+	filen = virt;
+	return 1;
+}
+
+static int CEmuMidiPreferReplayNeeded()
+{
+	extern CString filen, tagfile;
+	extern int mode;
+	if (playf == 0) return 0;
+	if (CEmuMidiLiveActive()) return 1;
+	if (OggPathIsEphemeralCemuMidi(filen)) return 1;
+	if (pl && plcnt >= 0 && plcnt < pl->playcnt && pl->pc[plcnt].sub == MODE_CEMU)
+		return CEmuZipPathIsMidiMode(pl->pc[plcnt].fol);
+	if (!tagfile.IsEmpty() && (IsVstMidiPlayMode(mode) || mode == -3))
+		return CEmuZipPathIsMidiMode(tagfile);
+	return 0;
+}
+
+void CEmuRequestMidiEngineReplay()
+{
+	if (!CEmuMidiPreferReplayNeeded()) return;
+	RequestPlaybackRestart(og ? og->GetSafeHwnd() : NULL);
+}
+
+int OggPlaybackBusy()
+{
+	if (s_inPlay || s_inStop1) return 1;
+	if (InterlockedCompareExchange(&s_onRestartBusy, 0, 0)) return 1;
+	return 0;
 }
 
 // タグ書込前: 現位置をメモリに残し、次の play() で確認なしシークする。
@@ -3649,6 +3897,10 @@ static int CEmuTryOverlaySfxFromFilen()
 	extern CString fnn;
 	extern CString stitle;
 	extern int ret2;
+	if (CEmuDriverIsNextOpenLoadOnly() || CEmuPendingLoadActive())
+		return 0;
+	if (pl && plcnt >= 0 && plcnt < pl->playcnt && pl->pc[plcnt].sub != MODE_CEMU)
+		return 0;
 	if (InterlockedCompareExchange(&g_xfInProgress, 0, 0)
 		|| InterlockedCompareExchange(&g_xfOpening, 0, 0))
 		return 0;
@@ -5100,6 +5352,32 @@ int XfPreloadCancel(int waitMs)
 	return 0;
 }
 
+/* MIDI 再生エンジンの優先を変えると、先読み済み B は古い優先で開いたエンジンのまま残る。
+   プレイリストの pc[].sub を書き換える前にここで先読みを捨てる。
+   先読みスレッドは pc[].sub を読んで B のエンジンを選ぶので、開いている最中や
+   混合中に書き換えると、VST で開いたスロットを KPI として掴むことになる。
+   捨てられたら 1。混合中／同期 Open 中は捨てられないので 0（呼び側は後回しにする）。 */
+int XfDropPreparedForEngineChange()
+{
+	if (!og)
+		return 1;
+	if (InterlockedCompareExchange(&g_xfInProgress, 0, 0))
+		return 0;
+	if (InterlockedCompareExchange(&g_xfOpening, 0, 0))
+		return 0;
+	if (!XfPreloadCancel(3000))
+		return 0;
+	/* 開き切っていれば先読みスレッドではなくこちらが落とす。間に合わなかった場合は
+	   XfPreloadProc 自身が破棄して prepared を立てない。 */
+	if (InterlockedCompareExchange(&g_xfPrepared, 0, 0)) {
+		const int oth = XfOtherSlot(XfActiveSlot());
+		if (oth >= 0 && oth < XF_SLOTS && g_openDecoderModeSlot[oth] != INT_MIN)
+			XfDropPreloadedSlot(oth);
+		InterlockedExchange(&g_xfPrepared, 0);
+	}
+	return 1;
+}
+
 int XfStartCrossfadeFromNotify()
 {
 	if (!og || !pl || !XfEnabled())
@@ -5426,20 +5704,18 @@ static void OggDispatchVizWindows()
 		HWND h = og->m_PianoRollDlg->GetSafeHwnd();
 		if (h && ::IsWindow(h) && ::IsWindowVisible(h) && !::IsIconic(h)) {
 			OggDispatchHwndTimers(h, 2);
-			const int nPost = OggDispatchHwndRange(h,
-				OGG_WM_PIANOROLL_SYNC, OGG_WM_PIANOROLL_ANALYSIS_DONE, 8);
-			if (nPost > 0)
-				OggUpdateVisibleHwnd(h);
+			/* SYNC は UiTickPump。ここで Dispatch+UpdateWindow するとバナーが飢える。 */
+			OggDispatchHwndRange(h,
+				OGG_WM_PIANOROLL_ANALYSIS_DONE, OGG_WM_PIANOROLL_ANALYSIS_DONE, 8);
 		}
 	}
 	if (og->m_AnalyzerDlg) {
 		HWND h = og->m_AnalyzerDlg->GetSafeHwnd();
 		if (h && ::IsWindow(h) && ::IsWindowVisible(h) && !::IsIconic(h)) {
-			const int nT = OggDispatchHwndTimers(h, 2);
-			const int nPost = OggDispatchHwndRange(h,
-				OGG_WM_ANALYZER_SPEC_DONE, OGG_WM_ANALYZER_SYNC, 8);
-			if (nT > 0 || nPost > 0)
-				OggUpdateVisibleHwnd(h);
+			OggDispatchHwndTimers(h, 2);
+			/* SYNC は UiTickPump。PRESENT までを Dispatch し、UpdateWindow はしない。 */
+			OggDispatchHwndRange(h,
+				OGG_WM_ANALYZER_SPEC_DONE, OGG_WM_ANALYZER_PRESENT, 8);
 		}
 	}
 }
@@ -5540,10 +5816,6 @@ static DWORD g_timerpLastPostTick = 0;
 static void COgg_RequestTimerp(COggDlg* dlg)
 {
 	if (!dlg)
-		return;
-	/* コンテキストメニュー Track 中に banner/FM/MIDI 同期を積むと
-	   出現アニメとサブメニューホバーが止まる */
-	if (CCustomPopupMenu::GetTrackingRoot() != NULL)
 		return;
 	if (CCC_ModalUiBusy())
 		return;
@@ -7684,13 +7956,19 @@ static int XfSoftOpenSlot(int slot, const CString& path, int openMode)
 		const unsigned titleCode = CEmuGameTitleCodeForIndex(ge, titleIdx);
 		CEmuSession* sess = &CemuSessSlot(slot);
 		const DWORD rate = savedata.samples ? savedata.samples : 44100;
-		if (!(CEmuSessionKindKeepsEngine(sess->kind)
+		if (CEmuDriverIsNextOpenLoadOnly()
+			|| !(CEmuSessionKindKeepsEngine(sess->kind)
 			&& CEmuSessionSameZip(sess, openPath)
 			&& (sess->sampleRate == 0 || sess->sampleRate == (int)rate))) {
 			CEmuSessionClose(sess);
 			CEmuSessionInit(sess);
 		}
-		if (!CEmuSessionOpen(sess, openPath, titleCode, rate))
+		const int opened = CEmuSessionOpen(sess, openPath, titleCode, rate);
+		if (opened)
+			CEmuPendingLoadFinishOpen(openPath);
+		else if (!CEmuPendingLoadActive() || CEmuPendingLoadSameZip(openPath))
+			CEmuDriverSetNextOpenLoadOnly(0);
+		if (!opened)
 			return 0;
 		si.dwSamplesPerSec = (DWORD)(sess->sampleRate > 0 ? sess->sampleRate : rate);
 		si.dwChannels = 2;
@@ -10133,9 +10411,9 @@ extern BOOL reset;
 
 void COggDlg::play()
 {
-	if (OggIsResumePromptActive())
+	if (OggIsResumePromptActive() && !CEmuPendingLoadActive())
 		return;
-	if (InterlockedCompareExchange(&g_inPlaybackJoinPump, 0, 0))
+	if (InterlockedCompareExchange(&g_inPlaybackJoinPump, 0, 0) && !CEmuPendingLoadActive())
 		return;
 	if (InterlockedCompareExchange(&g_appExiting, 0, 0))
 		return;
@@ -10154,7 +10432,8 @@ void COggDlg::play()
 	} _clearInPlay{ this };
 	if (InterlockedCompareExchange(&g_appExiting, 0, 0))
 		return;
-	const BOOL xfSoftOpen = (InterlockedCompareExchange(&g_xfOpening, 0, 0) != 0);
+	const BOOL xfSoftOpen = CEmuPendingLoadActive() ? FALSE
+		: (InterlockedCompareExchange(&g_xfOpening, 0, 0) != 0);
 	// 二重DS昇格: Open 中の無音を防ぐため、最初に B を再生し直す
 	muon = MUON;
 	kpi_silence_bytes = 0; kpi_heard_audio = 0;
@@ -10900,7 +11179,7 @@ void COggDlg::play()
 	if (cor != -1) {
 		ss = filen.Left(filen.Find(L":", 6));
 	}
-	if (!aaa_1.Open(ss, CFile::modeRead | CFile::shareDenyWrite) && !(mode > 0 && mode <= 21 || mode == -6 || mode == 34 || mode == 35 || mode == -11 || mode == -12 || mode == -13 || mode == -14 || mode == -15 || mode == 30 || mode == 31)) {
+	if (!aaa_1.Open(ss, CFile::modeRead | CFile::shareDenyWrite) && !(mode > 0 && mode <= 21 || mode == -6 || mode == 34 || mode == 35 || mode == -11 || mode == -12 || mode == -13 || mode == -14 || mode == -15 || mode == 30 || mode == 31 || mode == MODE_CEMU || IsCemuMode(mode))) {
 		if (xfSoftOpen) { endflg = 0; return; }
 		MessageBox(LL14(
 			L"ファイルが開けませんでした。\n削除されたか移動した可能性があります。", /* 日本語 */
@@ -10946,6 +11225,14 @@ void COggDlg::play()
 	wavsam_depth = 16;
 	if (!xfSoftOpen)
 		ZeroMemory(bufwav3, sizeof(bufwav3));
+	/* flac/ogg 等へ切替わったのにロードの MPU/ハードが残るとジングルが混ざる */
+	if (!xfSoftOpen
+		&& mode != MODE_CEMU && !IsCemuMode(mode)
+		&& !IsVstMidiPlayMode(mode) && mode != -3
+		&& (CemuAnyKind() || CEmuMidiLiveActive())) {
+		g_cemuLiveKeepAcrossClose = 0;
+		CloseCemuPlaybackResources();
+	}
 	if (((mode >= 10 && mode <= 21) || IsBuffwavNegMode(mode)) && mode != -10 || mode == -6 || mode == 34 || mode == 35 || mode == 30 || mode == 31) {
 		thend1 = FALSE;
 		wavwait = 0;
@@ -12188,14 +12475,20 @@ void COggDlg::play()
 	}
 	else if (mode == -3) { // kpi
 open_mode_kpi:
-		ret2 = 0;
+		{
+			const int cemuMidiRet2 = CEmuZipPathIsMidiMode(tagfile) ? ret2 : 0;
+			ret2 = 0;
+			if (cemuMidiRet2)
+				ret2 = cemuMidiRet2;
+		}
 		g_kpiRemote = false;
-		/* CEmu→KPI: xfade の副スロットだけ閉じる（A の CEmu を殺さない） */
+		/* CEmu→KPI: xfade の副スロットだけ閉じる（A の CEmu を殺さない）
+		   ライブ MPU を KPI FM に流すときは emu を残す。 */
 		if (xfSoftOpen)
 			CloseCemuSlot(XfDecSlot());
-		else if (CemuAnyKind() || CEmuMidiLiveActive())
+		else if (!g_cemuLiveKeepAcrossClose && (CemuAnyKind() || CEmuMidiLiveActive()))
 			CloseCemuPlaybackResources();
-		else
+		else if (!g_cemuLiveKeepAcrossClose)
 			FmMonShadowReset();
 		/* KPI の dump はプラグインが ogg_kbsasami へ書く。CEmu shadow には載せない */
 		g_kpiPlaybackArch = ResolveKpiArchBits(CString(kpi), filen);
@@ -12303,6 +12596,18 @@ open_mode_kpi:
 			uint64_t np = 0;
 			g_kpiHost.Seek(g_kpiSession.sessionId, 0, 0, np);
 			g_openDecoderMode = mode;
+			if (CEmuMidiLiveActive()) {
+				CEmuMidiLiveSetKpiSysexHook(OggSasamiLiveInjectSysex);
+				CEmuMidiLiveSetKpiSink(1);
+				g_cemuLiveKeepAcrossClose = 0;
+				loop1 = 0;
+				loop2 = 0;
+				loop3 = 0;
+				kpi_file_loop = 0;
+				endf = 1;
+				SetPcmByteLengthFromSamples(0, wavsam_depth, wavchannel);
+				m_time.SetRange(0, 1, TRUE);
+			}
 			wav_start();
 			// 以降の共通処理(UI更新/画像抽出など)も実行させる
 		}
@@ -12536,9 +12841,23 @@ open_mode_kpi:
 			if ((kvver == 2 && (mod == NULL || kmp1 == NULL))
 				|| (kvver == 5 && !g_kpiRemote && kpidec == NULL)
 				|| (kvver != 2 && kvver != 5 && !g_kpiRemote)) {
+				g_cemuLiveKeepAcrossClose = 0;
+				CEmuMidiLiveStop();
 				m_saisai.EnableWindow(TRUE); endflg = 0; return;
 			}
 			g_openDecoderMode = mode;
+			if (CEmuMidiLiveActive()) {
+				CEmuMidiLiveSetKpiSysexHook(OggSasamiLiveInjectSysex);
+				CEmuMidiLiveSetKpiSink(1);
+				g_cemuLiveKeepAcrossClose = 0;
+				loop1 = 0;
+				loop2 = 0;
+				loop3 = 0;
+				kpi_file_loop = 0;
+				endf = 1;
+				SetPcmByteLengthFromSamples(0, wavsam_depth, wavchannel);
+				m_time.SetRange(0, 1, TRUE);
+			}
 			wav_start();
 		}
 		CFile ff;
@@ -12579,7 +12898,9 @@ open_mode_kpi:
 			}ff.Close();
 		}
 	}
-	else if (mode == MODE_CEMU) {
+	else if (mode == MODE_CEMU || IsCemuMode(mode)) {
+		if (CEmuPendingLoadActive())
+			CEmuPendingLoadBindFilen();
 		CString zipPath = filen;
 		uint32_t titleIdx = (ret2 > 0) ? (unsigned)ret2 : 1u;
 		SplitKpiSubsongPath(filen, zipPath, titleIdx);
@@ -12588,7 +12909,9 @@ open_mode_kpi:
 		const CEmuGameEntry* ge = CEmuMgrResolveZip(CEmuMgrGet(), zipPath, zipOut, (int)_countof(zipOut), dataDir, (int)sizeof(dataDir));
 		const wchar_t* openPath = zipOut[0] ? zipOut : (LPCTSTR)zipPath;
 		const CString cemuPlZipPath = openPath;
-		/* MIDI mode: extract .mid from zip and play via CRender midPlayPrefer (KPI/VST). */
+		const int cemuLoadOnly = CEmuDriverIsNextOpenLoadOnly();
+		/* MIDI mode: extract .mid from zip and play via CRender midPlayPrefer (KPI/VST).
+		   ロード専用は曲 SMF を出さず、起動ジングルをライブ MPU で鳴らす。 */
 		{
 			char modeTag[CEMU_MODE_TAG] = {};
 			char fromEntry[CEMU_MODE_TAG] = {};
@@ -12614,8 +12937,9 @@ open_mode_kpi:
 				const unsigned capTitle = CEmuGameTitleCodeForIndex(
 					midGe ? midGe : ge, titleIdx);
 				/* Catalog SMF for this title → MIDI monitor (GM/GS/LA maps).
-				   Do not extract "first/largest" .mid — that ignores song select. */
-				if (CEmuZipExtractCatalogMidi(openPath, midGe ? midGe : ge,
+				   Do not extract "first/largest" .mid — that ignores song select.
+				   ロードは曲を鳴らさない。 */
+				if (!cemuLoadOnly && CEmuZipExtractCatalogMidi(openPath, midGe ? midGe : ge,
 					capTitle, midPath, MAX_PATH) && midPath[0]) {
 					filen = midPath;
 					kpi[0] = 0;
@@ -12626,20 +12950,19 @@ open_mode_kpi:
 					}
 					if (pl) {
 						playlistdata row = {};
-						BYTE kv = 0;
+						kvver = 0;
 						_tcscpy_s(row.fol, midPath);
-						pl->plugs(CString(midPath), &row, kpi, kv);
-						if (row.sub == MODE_VST_MIDI || !kpi[0]) {
-							mode = modesub = MODE_VST_MIDI;
-							goto open_mode_vst_midi;
+						pl->plugs(CString(midPath), &row, kpi, kvver);
+						if (row.sub != MODE_VST_MIDI && kpi[0]) {
+							mode = modesub = -3;
+							goto open_mode_kpi;
 						}
-						mode = modesub = -3;
-						goto open_mode_kpi;
 					}
 					mode = modesub = MODE_VST_MIDI;
 					goto open_mode_vst_midi;
 				}
-				/* XMI / packed MIDI — live MPU-401 UART into the MIDI monitor. */
+				/* XMI / packed MIDI — live MPU-401 UART into the MIDI monitor.
+				   ロード時の MIDI ジングルもここ。 */
 				{
 					/* LiveStart binds the process-global NP2 core, so an FM
 					   title left open in the other slot would keep swapping 2MB
@@ -12656,23 +12979,34 @@ open_mode_kpi:
 						filen = midPath;
 						kpi[0] = 0;
 						tagfile = cemuPlZipPath;
-						/* CloseVstMidiSession must not LiveStop this session. */
+						/* ライブ MPU は CemuSess を開かない。ロード待ちを残すと
+						   次の flac/ogg 再演奏がまたロード扱いでジングルになる。 */
+						CEmuPendingLoadFinishOpen(openPath);
+						/* CloseVstMidiSession / open_mode_kpi must not LiveStop. */
 						g_cemuLiveKeepAcrossClose = 1;
 						if (savedata.midPlayPrefer == 1) {
 							mode = modesub = MODE_VST_MIDI;
 							goto open_mode_vst_midi;
 						}
+						int useKpi = 0;
 						if (pl) {
 							playlistdata row = {};
-							BYTE kv = 0;
+							kvver = 0;
 							_tcscpy_s(row.fol, midPath);
-							pl->plugs(CString(midPath), &row, kpi, kv);
-							if (row.sub == MODE_VST_MIDI || !kpi[0]) {
-								mode = modesub = MODE_VST_MIDI;
-								goto open_mode_vst_midi;
+							pl->plugs(CString(midPath), &row, kpi, kvver);
+							if (row.sub != MODE_VST_MIDI && kpi[0]) {
+								const WORD kmLive = GetPeMachine(kpi);
+								int remoteLive = PeMachineNeedsRemote(kmLive) ? 1 : 0;
+#ifdef _WIN64
+								if (!remoteLive && !kmLive
+									&& ResolveKpiArchBits(CString(kpi), CString(midPath)) == 32)
+									remoteLive = 1;
+#endif
+								if (!remoteLive)
+									useKpi = 1;
 							}
-							g_cemuLiveKeepAcrossClose = 0;
-							CEmuMidiLiveStop();
+						}
+						if (useKpi) {
 							mode = modesub = -3;
 							goto open_mode_kpi;
 						}
@@ -12697,13 +13031,20 @@ open_mode_kpi:
 		{
 			CEmuSession* sess = &CemuSess();
 			const DWORD rate = savedata.samples ? savedata.samples : 44100;
-			if (!(CEmuSessionKindKeepsEngine(sess->kind)
+			if (cemuLoadOnly
+				|| CEmuPendingLoadActive()
+				|| !(CEmuSessionKindKeepsEngine(sess->kind)
 				&& CEmuSessionSameZip(sess, openPath)
 				&& (sess->sampleRate == 0 || sess->sampleRate == (int)rate))) {
 				CEmuSessionClose(sess);
 				CEmuSessionInit(sess);
 			}
-			if (!CEmuSessionOpen(sess, openPath, titleCode, rate)) {
+			const int opened = CEmuSessionOpen(sess, openPath, titleCode, rate);
+			if (opened)
+				CEmuPendingLoadFinishOpen(openPath);
+			else if (!CEmuPendingLoadActive() || CEmuPendingLoadSameZip(openPath))
+				CEmuDriverSetNextOpenLoadOnly(0);
+			if (!opened) {
 			CString why;
 			if (ge) {
 				why.Format(
@@ -12734,17 +13075,18 @@ open_mode_kpi:
 			filen = virt;
 		}
 		if (ge) {
+			const CEmuGameEntry* gePlay = CemuSess().game ? CemuSess().game : ge;
 			wchar_t songLabel[CEMU_GAME_NAME];
 			songLabel[0] = 0;
-			CEmuGameTitleAt(ge, (int)titleIdx - 1, NULL, songLabel, (int)_countof(songLabel));
+			CEmuGameTitleAt(gePlay, (int)titleIdx - 1, NULL, songLabel, (int)_countof(songLabel));
 			if (songLabel[0] == L'<' || wcsncmp(songLabel, L"<title", 6) == 0)
 				songLabel[0] = 0;
 			if (songLabel[0]) {
 				fnn = songLabel;
 				stitle = songLabel;
 			}
-			else if (ge->name[0])
-				fnn = ge->name;
+			else if (gePlay->name[0])
+				fnn = gePlay->name;
 		}
 		ret2 = (int)titleIdx;
 		wavbit_sample_Hz = CemuSess().sampleRate;
@@ -12755,7 +13097,7 @@ open_mode_kpi:
 		loop2 = (CemuSess().lengthSamples > 0) ? (int)CemuSess().lengthSamples : 0;
 		SetPcmByteLengthFromSamples(loop2, wavsam_depth, wavchannel);
 		m_time.SetRange(0, (loop2 > 0) ? loop2 : 1, TRUE);
-		EqualiserSetFormatVolContext(1, FALSE);
+		EqualiserSetFormatVolContext(EQ_FMT_VOL_CEMU, FALSE);
 		g_openDecoderMode = mode;
 		/* 仮想パスだけ付け替える。Reset すると Open 中にチップへ書いた音色が消える。 */
 		FmMonShadowSetSource(filen);
@@ -12767,7 +13109,7 @@ open_mode_kpi:
 	else if (IsVstMidiPlayMode(mode)) {
 open_mode_vst_midi:
 		ret2 = 0;
-		EqualiserSetFormatVolContext(1, FALSE); // その他のkpi（x86 直読み / KpiHost64 経由とも本体 equaliser）
+		EqualiserSetFormatVolContext(EQ_FMT_VOL_KPI, FALSE); // その他のkpi（x86 直読み / KpiHost64 経由とも本体 equaliser）
 		wchar_t mid[VST_PATH_CHARS]; mid[0] = 0;
 		wchar_t hints[32][128]; int hc = 0;
 		CString src = filen;
@@ -12918,7 +13260,7 @@ open_mode_vst_midi:
 	}
 	else if (mode == MODE_PLUGIN_WINAMP) {
 		ret2 = 0;
-		EqualiserSetFormatVolContext(1, FALSE); // その他のkpi
+		EqualiserSetFormatVolContext(EQ_FMT_VOL_WINAMP, FALSE); // Winamp/XMPlay/AIMP
 		const WORD km = GetPeMachine(kpi);
 		int ok = 0;
 		if (PeMachineNeedsRemote(km))
@@ -12962,7 +13304,7 @@ open_mode_vst_midi:
 	}
 	else if (mode == MODE_PLUGIN_XMPLAY) {
 		ret2 = 0;
-		EqualiserSetFormatVolContext(1, FALSE); // その他のkpi
+		EqualiserSetFormatVolContext(EQ_FMT_VOL_WINAMP, FALSE); // Winamp/XMPlay/AIMP
 		if (!PluginXmplay_Open(kpi, filen)) {
 			MessageBox(LL14(
 				L"XMPlayプラグインを開けませんでした。",
@@ -13000,7 +13342,7 @@ open_mode_vst_midi:
 	}
 	else if (mode == MODE_PLUGIN_AIMP) {
 		ret2 = 0;
-		EqualiserSetFormatVolContext(1, FALSE); // その他のkpi
+		EqualiserSetFormatVolContext(EQ_FMT_VOL_WINAMP, FALSE); // Winamp/XMPlay/AIMP
 		if (!PluginAimp_Open(kpi, filen)) {
 			MessageBox(LL14(
 				L"AIMPプラグインを開けませんでした。",
@@ -14633,7 +14975,7 @@ open_mode_vst_midi:
 			if (plc >= 0 && plc < pl->playcnt) {
 				pl->pc[plc].loop1 = loop1;
 				pl->pc[plc].loop2 = loop2;
-				const int midLoop = (IsVstMidiPlayMode(mode))
+				const int midLoop = (IsVstMidiPlayMode(mode) || (mode == -3 && CEmuMidiLiveActive()))
 					&& (VstMidiSongHasLoop() || OggMidiFileHasCc111Loop(filen)
 						|| CEmuMidiLiveActive());
 				if (midLoop)
@@ -14695,7 +15037,10 @@ open_mode_vst_midi:
 				}
 			}
 
-			if (plc == -1) {
+			if (s_cemuPendingLoadRow >= 0 && s_cemuPendingLoadRow < pl->playcnt) {
+				CEmuPendingLoadApplyToPlaylist();
+			}
+			else if (plc == -1) {
 				int i = pl->m_lc.GetItemCount() - 1;
 				plcnt = i;
 				pl->SIcon(i);
@@ -20490,13 +20835,11 @@ int playwavkpi(BYTE* bw, int old, int l1, int l2)
 	return l1 + l2;
 }
 
-static int playwavForeignPull(BYTE* bw, int old, int l1, int l2, int (*readfn)(BYTE*, int), int (*seek0)())
+static int playwavForeignPull(BYTE* bw, int old, int l1, int l2, int (*readfn)(BYTE*, int), int (*seek0)(), int fmtVolMode)
 {
 	if (!readfn) return 0;
-	// 生PCM（プラグイン出力そのまま）を equaliser に渡し、倍率は「その他のkpi」(kpivol) のみ。
-	// SPC 倍率は掛けない。KPI の readkpi と同じ equaliser 経路に載せる。
-	// （以前は equaliser 未呼び出しで生のまま DS へ → フルスケール源で割れ、倍率も効かない）
-	EqualiserSetFormatVolContext(1, FALSE);
+	// 生PCMを equaliser へ。Winamp/XMPlay/AIMP は winampvol、ZMUSIC 等は kpivol。SPC は掛けない。
+	EqualiserSetFormatVolContext(fmtVolMode, FALSE);
 	const bool exporting = (wavExportPath.GetLength() > 0 || g_isWavExportRendering);
 	int rrr = readfn(bw + old, l1);
 	{
@@ -20543,7 +20886,7 @@ static int playwavForeignPull(BYTE* bw, int old, int l1, int l2, int (*readfn)(B
 		}
 	}
 	if (l1 > 0) {
-		EqualiserSetFormatVolContext(1, FALSE);
+		EqualiserSetFormatVolContext(fmtVolMode, FALSE);
 		equaliser(bw + old, l1, reset);
 		if (og) og->FeedPianoRoll(bw + old, l1);
 		reset = FALSE;
@@ -20594,7 +20937,7 @@ static int playwavForeignPull(BYTE* bw, int old, int l1, int l2, int (*readfn)(B
 			}
 		}
 		if (l2 > 0) {
-			EqualiserSetFormatVolContext(1, FALSE);
+			EqualiserSetFormatVolContext(fmtVolMode, FALSE);
 			equaliser(bw, l2, reset);
 			if (og) og->FeedPianoRoll(bw, l2);
 			reset = FALSE;
@@ -20610,17 +20953,17 @@ static int ForeignSeekAimp0() { return PluginAimp_SeekBytes(0); }
 int playwavwinamp(BYTE* bw, int old, int l1, int l2)
 {
 	if (!PluginWinamp_IsOpen()) return 0;
-	return playwavForeignPull(bw, old, l1, l2, readwinamp, ForeignSeekWinamp0);
+	return playwavForeignPull(bw, old, l1, l2, readwinamp, ForeignSeekWinamp0, EQ_FMT_VOL_WINAMP);
 }
 int playwavxmplay(BYTE* bw, int old, int l1, int l2)
 {
 	if (!PluginXmplay_IsOpen()) return 0;
-	return playwavForeignPull(bw, old, l1, l2, readxmplay, ForeignSeekXmplay0);
+	return playwavForeignPull(bw, old, l1, l2, readxmplay, ForeignSeekXmplay0, EQ_FMT_VOL_WINAMP);
 }
 int playwavaimp(BYTE* bw, int old, int l1, int l2)
 {
 	if (!PluginAimp_IsOpen()) return 0;
-	return playwavForeignPull(bw, old, l1, l2, readaimp, ForeignSeekAimp0);
+	return playwavForeignPull(bw, old, l1, l2, readaimp, ForeignSeekAimp0, EQ_FMT_VOL_WINAMP);
 }
 static int ForeignSeekZmusic0()
 {
@@ -20634,7 +20977,7 @@ int readzmusic(BYTE* bw, int cnt)
 int playwavzmusic(BYTE* bw, int old, int l1, int l2)
 {
 	if (!ZmusicSessionIsOpen()) return 0;
-	return playwavForeignPull(bw, old, l1, l2, readzmusic, ForeignSeekZmusic0);
+	return playwavForeignPull(bw, old, l1, l2, readzmusic, ForeignSeekZmusic0, EQ_FMT_VOL_KPI);
 }
 
 
@@ -20793,26 +21136,36 @@ __int64 OggGetCemuLiveHeardFrames()
 {
 	extern __int64 OggGetDsQueuedFrames();
 	__int64 lag = 0;
-	int slot = XfActiveSlot();
-	if (slot < 0 || slot >= XF_SLOTS) slot = 0;
-	VstPrefetch& pf = g_vstPf[slot];
-	if (pf.csReady) {
-		EnterCriticalSection(&pf.cs);
-		const size_t used = pf.used;
-		const int bpf = (pf.bpf > 0) ? pf.bpf : 4;
-		LeaveCriticalSection(&pf.cs);
-		lag += (__int64)(used / (size_t)bpf);
+	const int kpiSink = CEmuMidiLiveKpiSink();
+	const int liveHz = CEmuMidiLiveSampleRate();
+	const int srcHz = (wavbit_sample_Hz > 0) ? wavbit_sample_Hz : liveHz;
+	/* VST 先読みとプラグイン遅延は KPI FM には無い。残っているとモニタが秒単位で遅れる。 */
+	if (!kpiSink) {
+		int slot = XfActiveSlot();
+		if (slot < 0 || slot >= XF_SLOTS) slot = 0;
+		VstPrefetch& pf = g_vstPf[slot];
+		if (pf.csReady) {
+			EnterCriticalSection(&pf.cs);
+			const size_t used = pf.used;
+			const int bpf = (pf.bpf > 0) ? pf.bpf : 4;
+			LeaveCriticalSection(&pf.cs);
+			lag += (__int64)(used / (size_t)bpf);
+		}
+		const int plug = VstMidiGetLatencySamples();
+		if (plug > 0)
+			lag += plug;
 	}
 	const __int64 q = OggGetDsQueuedFrames();
-	if (q > 0)
-		lag += q;
-	/* Injecting at frame N does not sound at frame N: the plug-in reports its own
-	 * latency, and DS reaches the analog output ~700ms before it is audible. Same
-	 * two terms CMidiMonitorDlg::SyncFromPlayback applies to a plain SMF. */
-	const int sr = (wavbit_sample_Hz > 0) ? wavbit_sample_Hz : 44100;
-	const int plug = VstMidiGetLatencySamples();
-	if (plug > 0)
-		lag += plug;
+	if (q > 0) {
+		if (kpiSink && liveHz > 0 && srcHz > 0 && liveHz != srcHz)
+			lag += q * (__int64)liveHz / (__int64)srcHz;
+		else
+			lag += q;
+	}
+	/* アナログまでの約 700ms。ライブ時計は emu レートなので KPI の wavbit で引かない。 */
+	const int sr = kpiSink
+		? ((liveHz > 0) ? liveHz : 44100)
+		: ((wavbit_sample_Hz > 0) ? wavbit_sample_Hz : 44100);
 	lag += (__int64)sr * 700 / 1000;
 	__int64 heard = CEmuMidiLiveAudioFrames() - lag;
 	if (heard < 0) heard = 0;
@@ -20832,6 +21185,43 @@ static int CEmuMidiLiveFramesFromBytes(uint32_t bytes)
 	bpf = ch * (bits / 8);
 	if (bpf < 1) bpf = 4;
 	return (int)(bytes / (uint32_t)bpf);
+}
+
+static void CEmuMidiLivePumpIntoKpi(int frames)
+{
+	if (!CEmuMidiLiveActive() || frames <= 0) return;
+	const int liveHz = CEmuMidiLiveSampleRate();
+	const int kpiHz = (wavbit_sample_Hz > 0) ? wavbit_sample_Hz : liveHz;
+	int liveFrames = frames;
+	if (liveHz > 0 && kpiHz > 0 && liveHz != kpiHz)
+		liveFrames = (int)(((__int64)frames * liveHz + (kpiHz / 2)) / kpiHz);
+	if (liveFrames < 1) liveFrames = 1;
+	enum { kStep = 512 };
+	int base = 0;
+	CEmuMidiLiveShort sh[2048];
+	const __int64 winStart = CEmuMidiLiveAudioFrames();
+	while (base < liveFrames) {
+		int n = liveFrames - base;
+		if (n > kStep) n = kStep;
+		CEmuMidiLivePump(n);
+		for (;;) {
+			const int got = CEmuMidiLiveStealShorts(sh, 2048);
+			if (got <= 0) break;
+			for (int i = 0; i < got; ++i) {
+				OggSasamiLiveInjectShort((unsigned int)sh[i].msg);
+				VstLiveTapPushShortAt(0, sh[i].msg, winStart + base + sh[i].sampleOfs);
+			}
+		}
+		base += n;
+	}
+}
+
+static DWORD KpiDecoderRenderLive(IKpiDecoder* dec, BYTE* p, DWORD ask)
+{
+	if (!dec) return 0;
+	if (CEmuMidiLiveActive() && CEmuMidiLiveKpiSink())
+		CEmuMidiLivePumpIntoKpi((int)ask);
+	return dec->Render(p, ask);
 }
 
 static void CEmuMidiLivePumpAndInject(int frames)
@@ -21154,10 +21544,37 @@ static int VstSilenceAccum(BYTE* pcm, int bytes)
 	if (bytes <= 0) return 0;
 	const bool exporting = (wavExportPath.GetLength() > 0 || g_isWavExportRendering);
 	if (exporting) return 0;
-	/* Live MPU stream: boot/idle before first notes must not trip the 4s cut. */
+	const int hz = (wavbit_sample_Hz > 0) ? wavbit_sample_Hz : 44100;
+	const int ch = (wavchannel > 0) ? wavchannel : 2;
+	const int bps = abs(wavsam_depth) / 8;
+	if (bps <= 0) return 0;
+	/* Live MPU: 通常曲は無音で切らない（スタブ SMF が数日）。ロードジングルは
+	   ノート後に音が乗ってから 2 秒無音、ノート無しは 20 秒で止める。 */
 	if (CEmuMidiLiveActive()) {
-		kpi_silence_bytes = 0; kpi_heard_audio = 0;
-		return 0;
+		if (!CEmuMidiLiveIsLoadOnly()) {
+			kpi_silence_bytes = 0; kpi_heard_audio = 0;
+			return 0;
+		}
+		if (!CEmuMidiLiveHasNotes()) {
+			kpi_silence_bytes += bytes;
+			const int waitBytes = (int)((double)hz * (double)ch * (double)bps * 20.0);
+			return (waitBytes > 0 && kpi_silence_bytes >= waitBytes) ? 1 : 0;
+		}
+		if (!kpi_heard_audio) {
+			if (IsBlockSilent(pcm, bytes, abs(wavsam_depth))) {
+				kpi_silence_bytes = 0;
+				return 0;
+			}
+			kpi_heard_audio = 1;
+			kpi_silence_bytes = 0;
+			return 0;
+		}
+		if (IsBlockSilent(pcm, bytes, abs(wavsam_depth)))
+			kpi_silence_bytes += bytes;
+		else
+			kpi_silence_bytes = 0;
+		const int maxSilentBytes = (int)((double)hz * (double)ch * (double)bps * 2.0);
+		return (maxSilentBytes > 0 && kpi_silence_bytes >= maxSilentBytes) ? 1 : 0;
 	}
 	if (g_vstPcmHold) {
 		kpi_silence_bytes = 0; kpi_heard_audio = 0;
@@ -21165,12 +21582,10 @@ static int VstSilenceAccum(BYTE* pcm, int bytes)
 	}
 	if (IsBlockSilent(pcm, bytes, abs(wavsam_depth)))
 		kpi_silence_bytes += bytes;
-	else
-		kpi_silence_bytes = 0; kpi_heard_audio = 0;
-	const int hz = (wavbit_sample_Hz > 0) ? wavbit_sample_Hz : 44100;
-	const int ch = (wavchannel > 0) ? wavchannel : 2;
-	const int bps = abs(wavsam_depth) / 8;
-	if (bps <= 0) return 0;
+	else {
+		kpi_silence_bytes = 0;
+		kpi_heard_audio = 1;
+	}
 	const int maxSilentBytes = (int)((double)hz * (double)ch * (double)bps * 4.0);
 	if (maxSilentBytes > 0 && kpi_silence_bytes >= maxSilentBytes)
 		return 1;
@@ -21179,7 +21594,7 @@ static int VstSilenceAccum(BYTE* pcm, int bytes)
 
 static void VstMarkPlaybackEof()
 {
-	if (savedata.saverenzoku == 0)
+	if (CEmuMidiLiveIsLoadOnly() || savedata.saverenzoku == 0)
 		fade1 = 1;
 	else
 		endflg = 1;
@@ -21391,7 +21806,8 @@ static void CemuSeekToPlayb(__int64 samplePos)
 
 static void CEmuMarkPlaybackEof()
 {
-	if (savedata.saverenzoku == 0)
+	/* ロード専用は連続再生オンでも次曲へ進まない。ロゴが終わったら止める。 */
+	if (CemuSess().loadOnly || savedata.saverenzoku == 0)
 		fade1 = 1;
 	else
 		endflg = 1;
@@ -21401,7 +21817,7 @@ int playwavcemu(BYTE* bw, int old, int l1, int l2)
 {
 	/* Render 本体。再生中は HandleFillNotifications から呼ばれる
 	   （HandleNotifications の DS 待ちと並走）。ここ自体は従来どおり同期。 */
-	EqualiserSetFormatVolContext(1, FALSE);
+	EqualiserSetFormatVolContext(EQ_FMT_VOL_CEMU, FALSE);
 	const bool exporting = (wavExportPath.GetLength() > 0 || g_isWavExportRendering);
 	const bool doLoop = WantPlaybackLoop() && !exporting
 		&& !CemuSess().endedBySilence; /* 無音終端の非ループ曲は Seek しても再開できない */
@@ -21446,7 +21862,7 @@ int playwavcemu(BYTE* bw, int old, int l1, int l2)
 		}
 	}
 	if (rrr > 0) {
-		EqualiserSetFormatVolContext(1, FALSE);
+		EqualiserSetFormatVolContext(EQ_FMT_VOL_CEMU, FALSE);
 		equaliser(bw + old, rrr, reset);
 		if (og) og->FeedPianoRoll(bw + old, rrr);
 		reset = FALSE;
@@ -21484,7 +21900,7 @@ int playwavcemu(BYTE* bw, int old, int l1, int l2)
 			}
 		}
 		if (r2 > 0) {
-			EqualiserSetFormatVolContext(1, FALSE);
+			EqualiserSetFormatVolContext(EQ_FMT_VOL_CEMU, FALSE);
 			equaliser(bw, r2, reset);
 			if (og) og->FeedPianoRoll(bw, r2);
 			reset = FALSE;
@@ -21678,9 +22094,9 @@ int readkpi(BYTE* bw, int cnt)
 										BYTE* p = (BYTE*)srcD.data();
 										while (left > 0) {
 											const DWORD ask = s_kpiSliceWhole ? left : ((left > slice) ? slice : left);
-											DWORD g = kpidec->Render(p, ask);
+											DWORD g = KpiDecoderRenderLive(kpidec,p, ask);
 											if (g == 0 && gotSamples == 0 && ask < requestSamples) {
-												g = kpidec->Render((BYTE*)srcD.data(), requestSamples);
+												g = KpiDecoderRenderLive(kpidec,(BYTE*)srcD.data(), requestSamples);
 												s_kpiSliceWhole = 1;
 												p = (BYTE*)srcD.data();
 												if (g > requestSamples) g = requestSamples;
@@ -21701,9 +22117,9 @@ int readkpi(BYTE* bw, int cnt)
 										BYTE* p = (BYTE*)srcF.data();
 										while (left > 0) {
 											const DWORD ask = s_kpiSliceWhole ? left : ((left > slice) ? slice : left);
-											DWORD g = kpidec->Render(p, ask);
+											DWORD g = KpiDecoderRenderLive(kpidec,p, ask);
 											if (g == 0 && gotSamples == 0 && ask < requestSamples) {
-												g = kpidec->Render((BYTE*)srcF.data(), requestSamples);
+												g = KpiDecoderRenderLive(kpidec,(BYTE*)srcF.data(), requestSamples);
 												s_kpiSliceWhole = 1;
 												p = (BYTE*)srcF.data();
 												if (g > requestSamples) g = requestSamples;
@@ -21731,9 +22147,9 @@ int readkpi(BYTE* bw, int cnt)
 									BYTE* p = (BYTE*)bufkpi + cnt3;
 									while (left > 0) {
 										const DWORD ask = s_kpiSliceWhole ? left : ((left > slice) ? slice : left);
-										DWORD g = kpidec->Render(p, ask);
+										DWORD g = KpiDecoderRenderLive(kpidec,p, ask);
 										if (g == 0 && done == 0 && ask < requestSamples) {
-											g = kpidec->Render((BYTE*)bufkpi + cnt3, requestSamples);
+											g = KpiDecoderRenderLive(kpidec,(BYTE*)bufkpi + cnt3, requestSamples);
 											s_kpiSliceWhole = 1;
 											p = (BYTE*)bufkpi + cnt3;
 											if (g > requestSamples) g = requestSamples;
@@ -21757,12 +22173,44 @@ int readkpi(BYTE* bw, int cnt)
 							r = (DWORD)(r * dstBytesPerFrame);
 						}
 					}
-					if (r > 0 && !kpiDecEof) {
-						// 音が出たあとの無音は loop フラグに関係なく切る（短い効果音が無音のまま進むのを止める）。
-						// 音が出る前、および mid 系の休符は従来どおり 4 秒。書き出し中は切らない。
+						if (r > 0 && !kpiDecEof) {
+						const bool liveLoad = CEmuMidiLiveIsLoadOnly() ? true : false;
+						const bool liveLoadNotes = liveLoad && CEmuMidiLiveHasNotes();
+						if (CEmuMidiLiveActive() && !liveLoad) {
+							kpi_silence_bytes = 0;
+							kpi_heard_audio = 0;
+						}
 						const bool midiLike = (sss == "mid" || sss == "midi" || sss == "kar" || sss == "rmi"
 							|| sss == "mpy" || sss == "mpw2" || sss == "mpsmv");
-						if (!(wavExportPath.GetLength() > 0 || g_isWavExportRendering)) {
+						const bool kpiExporting = (wavExportPath.GetLength() > 0 || g_isWavExportRendering);
+						if (liveLoad && !kpiExporting) {
+							const int hz = (wavbit_sample_Hz > 0) ? wavbit_sample_Hz : 44100;
+							const int ch = (wavchannel > 0) ? wavchannel : 2;
+							const int bps = abs(wavsam_depth) / 8;
+							if (bps > 0) {
+								if (!liveLoadNotes) {
+									kpi_silence_bytes += r;
+									const int waitBytes = (int)((double)hz * (double)ch * (double)bps * 20.0);
+									if (waitBytes > 0 && kpi_silence_bytes >= waitBytes)
+										kpiDecEof = 1;
+								} else if (!kpi_heard_audio) {
+									if (IsBlockSilent((const BYTE*)bufkpi + cnt3, (int)r, abs(wavsam_depth)))
+										kpi_silence_bytes = 0;
+									else {
+										kpi_heard_audio = 1;
+										kpi_silence_bytes = 0;
+									}
+								} else {
+									if (IsBlockSilent((const BYTE*)bufkpi + cnt3, (int)r, abs(wavsam_depth)))
+										kpi_silence_bytes += r;
+									else
+										kpi_silence_bytes = 0;
+									const int maxSilentBytes = (int)((double)hz * (double)ch * (double)bps * 2.0);
+									if (maxSilentBytes > 0 && kpi_silence_bytes >= maxSilentBytes)
+										kpiDecEof = 1;
+								}
+							}
+						} else if (!CEmuMidiLiveActive() && !kpiExporting) {
 							const int fileLooping = (kpi_file_loop && loop2 > 0) ? 1 : 0;
 							if (IsBlockSilent((const BYTE*)bufkpi + cnt3, (int)r, abs(wavsam_depth))) {
 								if (!fileLooping && (kpi_heard_audio || loop2 == 0 || midiLike))
@@ -21783,7 +22231,7 @@ int readkpi(BYTE* bw, int cnt)
 
 					if (kpiDecEof) {
 						if (muon != 0) {
-							if (savedata.saverenzoku == 0) {
+							if (CEmuMidiLiveIsLoadOnly() || savedata.saverenzoku == 0) {
 								int fill_size = (int)requestBytes;
 								if (cnt3 + fill_size > cnt) fill_size = cnt - cnt3;
 								if (fill_size > 0) {
@@ -24302,7 +24750,7 @@ static void KpiMidiSeekAccurate(__int64 samplePos)
 				junk.resize((size_t)ask * (size_t)ch * sizeof(double));
 			else
 				junk.resize((size_t)ask * (size_t)ch * (size_t)(outBits / 8));
-			DWORD got = kpidec->Render(junk.data(), ask);
+			DWORD got = KpiDecoderRenderLive(kpidec,junk.data(), ask);
 			if (got == 0) break;
 			if ((__int64)got > left) got = (DWORD)left;
 			left -= got;
@@ -24465,6 +24913,7 @@ static inline bool PlaybackNotifyThreadMayBeActive()
 		|| mode == MODE_PLUGIN_WINAMP || mode == MODE_PLUGIN_XMPLAY || mode == MODE_PLUGIN_AIMP
 		|| mode == MODE_ZMUSIC
 		|| IsVstMidiPlayMode(mode)
+		|| CemuAnyKind() || CEmuMidiLiveActive()
 		|| (mode > 0 && mode <= 21);
 }
 
@@ -25461,30 +25910,54 @@ static void BannerBlitGlyphs(CDC& dst, CDC& src, int dx, int dy, int w, int h, i
 	dst.BitBlt(dx, dy, w, h, &src, sx, sy, SRCINVERT);
 }
 
+static int BannerMarqueeSrcStep()
+{
+	static LARGE_INTEGER s_last = {};
+	static double s_acc = 0.0;
+	LARGE_INTEGER now = {}, freq = {};
+	QueryPerformanceCounter(&now);
+	QueryPerformanceFrequency(&freq);
+	if (s_last.QuadPart == 0 || freq.QuadPart < 1) {
+		s_last = now;
+		return 4;
+	}
+	double dt = (double)(now.QuadPart - s_last.QuadPart) / (double)freq.QuadPart;
+	s_last = now;
+	if (dt < 0.0) dt = 0.0;
+	if (dt > 0.08) dt = 0.08;
+	s_acc += dt * 60.0; // 画面 60px/s。vblank が 144Hz でも速度は変えない
+	int n = (int)s_acc; // floor。四捨五入は 0/2 交互でギクつく
+	if (n < 0) n = 0;
+	if (n > 2) n = 2;
+	s_acc -= n;
+	return n * 4;
+}
+
 // スクロール開始と描画幅は同じ。相違メーター手前、無ければバナー右端。
 static void BannerBlitScrollValue(CDC& dst, CDC& src, int valueX_px, int viewW_px,
-	int y_px, int blitH_px, int& mcnt_scroll, int& mcnt_wrap, int si_px)
+	int y_px, int blitH_px, int& mcnt_scroll, int& mcnt_wrap, int si_px, int srcStep)
 {
 	if (viewW_px < 1) return;
 	int xorW = viewW_px;
 	if (xorW < 8 * 4) xorW = 8 * 4;
+	if (srcStep < 0) srcStep = 0;
 
 	if (si_px > viewW_px) {
 		BannerBlitGlyphs(dst, src, valueX_px, y_px, xorW, blitH_px, mcnt_scroll, 0);
-		// 内部バッファは 4x。+4 ソース px = 等倍 1px。60fps なら 60px/s。
-		const int srcStep = 4;
-		if (si_px - mcnt_scroll < viewW_px) {
-			mcnt_wrap += srcStep;
-			const int x2 = viewW_px - mcnt_wrap + valueX_px;
-			const int w2 = valueX_px + xorW - x2;
-			if (w2 > 0)
-				BannerBlitGlyphs(dst, src, x2, y_px, w2, blitH_px, 0, 0);
-			if (viewW_px - mcnt_wrap <= 0) { mcnt_wrap = 0; mcnt_scroll = 0; }
+		if (srcStep > 0) {
+			if (si_px - mcnt_scroll < viewW_px) {
+				mcnt_wrap += srcStep;
+				const int x2 = viewW_px - mcnt_wrap + valueX_px;
+				const int w2 = valueX_px + xorW - x2;
+				if (w2 > 0)
+					BannerBlitGlyphs(dst, src, x2, y_px, w2, blitH_px, 0, 0);
+				if (viewW_px - mcnt_wrap <= 0) { mcnt_wrap = 0; mcnt_scroll = 0; }
+			}
+			else {
+				mcnt_wrap = 0;
+			}
+			mcnt_scroll += srcStep;
 		}
-		else {
-			mcnt_wrap = 0;
-		}
-		mcnt_scroll += srcStep;
 	}
 	else {
 		BannerBlitGlyphs(dst, src, valueX_px, y_px, xorW, blitH_px, 0, 0);
@@ -25742,21 +26215,23 @@ void COggDlg::timerp()
 		COgg_RequestTimerp(this);
 		return;
 	}
-	if (CCustomPopupMenu::GetTrackingRoot() != NULL)
-		return;
+	const bool menuTrack = (CCustomPopupMenu::GetTrackingRoot() != NULL);
 	if (playy == 0)return;
 	if (InterlockedCompareExchange(&g_inPlaybackJoinPump, 0, 0))
 		return;
 	if (InterlockedCompareExchange(&g_appExiting, 0, 0))
 		return;
 
-	OggDispatchChromeMessages();
+	/* Track 中にマウスを Peek するとサブメニューホバーが死ぬ。バナー合成は続ける。 */
+	if (!menuTrack)
+		OggDispatchChromeMessages();
 	/* chrome Peek が終了クリックをここで処理し得る。以降の ULW/GDI を走らせない */
 	if (InterlockedCompareExchange(&g_appExiting, 0, 0))
 		return;
 	/* 歌詞カラオケは SetTimer だと WM_TIMER が低優先で飢える。
 	   banner と同じ VSYNC Post（timerp）で TickFrame する。 */
-	LyricsOnTimerp();
+	if (!menuTrack)
+		LyricsOnTimerp();
 
 	if (s_lastMs2DrawMs != savedata.ms2) {
 		s_lastMs2DrawMs = savedata.ms2;
@@ -26225,6 +26700,7 @@ void COggDlg::timerp()
 
 	if (bGdiFrame)
 	{
+	const int bannerStep = BannerMarqueeSrcStep();
 	extern int g_mpSideJacket;   // 1=ジャケットを mp 左余白へ分離表示中(内蔵ジャケ抑止)
 	// バナー実寸のみクリア(旧 3000x2000 はビットマップ外まで塗り GDI を食う)
 	// ジャケ領域は黒塗りしない（差し替え中の1フレ空白＝点滅の主因）
@@ -26265,10 +26741,10 @@ void COggDlg::timerp()
 		img.AlphaBlend(dc.m_hDC, x_dest, y_dest, w_dest, h_dest, 0, 0, jx, jy, alpha);
 	}
 
-	OggDispatchChromeMessages();
+	if (!menuTrack)
+		OggDispatchChromeMessages();
 
 	// スペアナは不透明で先に描く。バナー文字は後から XOR でバーの上を通す。
-	// Track 中は timerp 自体を止める（メニューアニメ／サブホバー優先）。
 	{
 		extern BOOL MpSsVizIsOpen();
 		extern CMediaPlayerDlg* mp;
@@ -26340,7 +26816,7 @@ void COggDlg::timerp()
 			DrawScrollSepDeco(dcsub, 4 + sss_w, 16 * 4, si - sss_w);
 	}
 	//枠はみ出し時スクロール処理（値 X / 枠幅はラベル実測に追従）
-	BannerBlitScrollValue(dc, dcsub, nameValueX, nameViewW, 0, (24 * 4) * 4, mcnt, mcnt2, si);
+	BannerBlitScrollValue(dc, dcsub, nameValueX, nameViewW, 0, (24 * 4) * 4, mcnt, mcnt2, si, bannerStep);
 
 	//mcnt1++;
 	if (g_pActiveLoadingWnd != NULL) {
@@ -26526,7 +27002,7 @@ void COggDlg::timerp()
 			if (Ms2DrawDue(ms2))
 				DrawScrollSepDeco(dcsub, 4 + bodyW, 16 * 4, fileSi - bodyW);
 		}
-		BannerBlitScrollValue(dc, dcsub, fileValueX, fileViewW, 16 * 4, 24 * 4, mcnt1, mcnt7, fileSi);
+		BannerBlitScrollValue(dc, dcsub, fileValueX, fileViewW, 16 * 4, 24 * 4, mcnt1, mcnt7, fileSi, bannerStep);
 	}
 	if (tc1 < 50)
 		s.Format(_T("time:%2d:%02d.%02d/%2d:%02d.%02d"), ta1, tb1, tc1, ta, tb, tc);
@@ -26687,7 +27163,7 @@ void COggDlg::timerp()
 			if (Ms2DrawDue(ms2))
 				DrawScrollSepDeco(dcsub, 4 + sss_w, 16 * 4, si - sss_w, RGB(200, 240, 255));
 		}
-		BannerBlitScrollValue(dc, dcsub, artiValueX, artiViewW, 0 + 64 * 4, (16 + 64) * 4, mcnt4, mcnt3, si);
+		BannerBlitScrollValue(dc, dcsub, artiValueX, artiViewW, 0 + 64 * 4, (16 + 64) * 4, mcnt4, mcnt3, si, bannerStep);
 	}
 	else if (mode == -10 || mode == -9) {
 		const CString hzPlay = g_pcm_upscale_active ? wavbit1_disp : wavb(si1.dwSamplesPerSec);
@@ -26719,7 +27195,7 @@ void COggDlg::timerp()
 			if (Ms2DrawDue(ms2))
 				DrawScrollSepDeco(dcsub, 4 + sss_w, 16 * 4, si - sss_w, RGB(200, 240, 255));
 		}
-		BannerBlitScrollValue(dc, dcsub, artiValueX, artiViewW, 0 + 64 * 4, (16 + 64) * 4, mcnt4, mcnt3, si);
+		BannerBlitScrollValue(dc, dcsub, artiValueX, artiViewW, 0 + 64 * 4, (16 + 64) * 4, mcnt4, mcnt3, si, bannerStep);
 	}
 	else {
 		s.Format(_T("Loop:%2d:%02d.%02d %2d:%02d.%02d"), tal1, tbl1, tcl1, tal2, tbl2, tcl2);
@@ -26751,7 +27227,7 @@ void COggDlg::timerp()
 			if (Ms2DrawDue(ms2))
 				DrawScrollSepDeco(dcsub, 4 + sss_w, 16 * 4, si - sss_w, RGB(200, 240, 255));
 		}
-		BannerBlitScrollValue(dc, dcsub, albuValueX, albuViewW, 0 + 80 * 4, (16 + 80) * 4, mcnt6, mcnt5, si);
+		BannerBlitScrollValue(dc, dcsub, albuValueX, albuViewW, 0 + 80 * 4, (16 + 80) * 4, mcnt6, mcnt5, si, bannerStep);
 	}
 	else {
 		if (tcg < 50)
@@ -26870,15 +27346,7 @@ void COggDlg::timerp()
 		}
 	}
 
-	// バナーを出したあとで可視化同期。インライン Sync は info の 30fps まで止めるので Post する。
-	if (plf == 1 && m_PianoRollDlg && ::IsWindow(m_PianoRollDlg->GetSafeHwnd()))
-		m_PianoRollDlg->RequestSyncFromMainUi();
-	if (plf == 1 && m_AnalyzerDlg && ::IsWindow(m_AnalyzerDlg->GetSafeHwnd()))
-		m_AnalyzerDlg->RequestSyncFromMainUi();
-	if (plf == 1 && m_MidiMonitorDlg && ::IsWindow(m_MidiMonitorDlg->GetSafeHwnd()))
-		m_MidiMonitorDlg->PumpSyncNow();
-	if (plf == 1 && m_WrdViewDlg && ::IsWindow(m_WrdViewDlg->GetSafeHwnd()))
-		m_WrdViewDlg->PumpSyncNow();
+	// 可視化は各窓の UiTickPump。timerp に直列するとバナー/ホイールが飢える。
 	//音量
 	//	if(tt>=4){
 	float vol = (float)m_sl.GetPos();
@@ -27670,10 +28138,6 @@ LRESULT COggDlg::OnTimerpVsyncTick(WPARAM, LPARAM)
 		PostMessage(WM_COMMAND, MAKEWPARAM(IDOK, BN_CLICKED), 0);
 		return 0;
 	}
-	if (CCustomPopupMenu::GetTrackingRoot() != NULL) {
-		InterlockedExchange(&g_timerpPosted, 0);
-		return 0;
-	}
 	if (CCC_ModalUiBusy()) {
 		InterlockedExchange(&g_timerpPosted, 0);
 		return 0;
@@ -27697,8 +28161,10 @@ LRESULT COggDlg::OnTimerpVsyncTick(WPARAM, LPARAM)
 		return 0;
 	}
 	/* EQ/ピアノ/アナライザの PostMessage を Peek する。停止中は TheadLoop が
-	   tick 自体を打たないので、ここを常時呼んでもアイドルは食わない。 */
-	OggDispatchChromeMessages();
+	   tick 自体を打たないので、ここを常時呼んでもアイドルは食わない。
+	   Track 中はマウス Peek がサブホバーを奪うのでやらない。 */
+	if (CCustomPopupMenu::GetTrackingRoot() == NULL)
+		OggDispatchChromeMessages();
 	InterlockedExchange(&g_timerpPosted, 0);
 	if (InterlockedCompareExchange(&g_appExiting, 0, 0) && ::IsWindow(GetSafeHwnd())) {
 		InterlockedExchange(&s_exitPostedFromUiTick, 0);
@@ -27833,54 +28299,44 @@ DWORD f1 = 0, f2 = 0;
 
 UINT TheadLoop(LPVOID)
 {
-	int infoScrollDiv = 0;   // 60fps÷2 = 30fps で info パネルスクロール tick を投げる
-	int idleSkip = 0;
 	for (;;) {
 		if (drawth == TRUE) return TRUE;
 
-		/* 再生中 / Soft3D 表示中は従来の 60fps。
-		   停止中は UI コアを空ける（timerp は playy==0 で Soft3D 以外 return）。 */
+		/* 再生中 / Soft3D 表示中は vblank 待ち。停止中は UI コアを空ける。 */
 		extern BOOL IsSoft3DMazeOpen();
 		extern BOOL IsSoft3DRaceOpen();
 		const int needFast = (playy != 0
 			|| IsSoft3DMazeOpen() || IsSoft3DRaceOpen()) ? 1 : 0;
 
+		extern CMediaPlayerDlg* mp;
+		CMediaPlayerDlg* pMp = mp;
+		HWND hmp = (pMp ? pMp->GetSafeHwnd() : NULL);
+		const int infoLive = (hmp && ::IsWindow(hmp) && pMp == mp && pMp->m_iscActive) ? 1 : 0;
+		if (hmp && ::IsWindow(hmp))
+			UiTickPump::BindWindow(hmp);
+		else if (og && og->GetSafeHwnd())
+			UiTickPump::BindWindow(og->GetSafeHwnd());
+
+		if (needFast || infoLive)
+			UiTickPump::WaitVblank(NULL);
+		else
+			Sleep(16);
 		Timing64(f2, FALSE);
+
 		if (needFast)
 			COgg_RequestTimerp(og);
-		else if (++idleSkip >= 4) {
-			/* 停止中もたまには起こす（自己修復・info 用）。約 1 秒に 1 回程度にはしない */
-			idleSkip = 0;
-		}
 
-		// info パネルスクロール: バナーは 60fps、こちらは 1 フレームおきで ~30fps。
-		// 多重 Post は CAS で合流。進み幅は 2px（60px/s でバナーの 1px@60fps と同じ速さ）。
-		if (++infoScrollDiv >= 2) {
-			infoScrollDiv = 0;
-			extern CMediaPlayerDlg* mp;
-			// mp 破棄と競合しうるため、ポインタをスナップショットしてから HWND のみ検証する。
-			// Create 完了前や破棄中にメンバを触らないよう、IsWindow 後も PostMessage だけにする。
-			CMediaPlayerDlg* pMp = mp;
-			HWND hmp = (pMp ? pMp->GetSafeHwnd() : NULL);
-			if (hmp && ::IsWindow(hmp) && pMp == mp) {
-				if (pMp->m_iscActive
-					&& InterlockedCompareExchange(&pMp->m_iscScrollPosted, 1, 0) == 0) {
-					if (!::PostMessage(hmp, WM_MP_INFO_SCROLL, 0, 0))
-						InterlockedExchange(&pMp->m_iscScrollPosted, 0);
-				}
+		// 情報バナー: 再生中も毎 vblank。クリップがバナーだけの OnPaint では
+		// DrawSidePanels が情報を塗らない（CMediaPlayerDlg のコメントどおり）。
+		if (hmp && ::IsWindow(hmp) && pMp == mp) {
+			if (pMp->m_iscActive
+				&& InterlockedCompareExchange(&pMp->m_iscScrollPosted, 1, 0) == 0) {
+				if (!::PostMessage(hmp, WM_MP_INFO_SCROLL, 0, 0))
+					InterlockedExchange(&pMp->m_iscScrollPosted, 0);
 			}
 		}
 
-		if (needFast) {
-			timing1(1, FALSE, FALSE);
-			Timing64(fpstiming, FALSE);
-			// 到達後の Sleep(1) は周期を 17ms 超に伸ばし、バナーが 60fps から外れる。
-		}
-		else {
-			/* 停止中は 60fps スピンしない。バナーは MP タイマ、CPU メータは 1 秒タイマ。 */
-			Sleep(16);
-			Timing64(fpstiming, FALSE);
-		}
+		Timing64(fpstiming, FALSE);
 	}
 }
 
@@ -28467,14 +28923,17 @@ LRESULT COggDlg::OnS3Playback(WPARAM wParam, LPARAM lParam)
 LRESULT COggDlg::dp2(WPARAM, LPARAM)
 {
 	InterlockedExchange(&s_restartMsgQueued, 0);
-	InterlockedExchange(&s_restartWanted, 0);
 	// KPI 読み込み中は再生も始まっていないので再開要求は破棄してよい
-	if (g_pActiveLoadingWnd != NULL)
+	if (g_pActiveLoadingWnd != NULL && !CEmuPendingLoadActive())
 		return 0;
-	if (OggIsResumePromptActive())
+	if (OggIsResumePromptActive() && !CEmuPendingLoadActive())
 		return 0;
-	if (InterlockedCompareExchange(&s_onRestartBusy, 0, 0) != 0)
+	if (InterlockedCompareExchange(&s_onRestartBusy, 0, 0) != 0) {
+		if (CEmuPendingLoadActive())
+			InterlockedExchange(&s_restartWanted, 1);
 		return 0;
+	}
+	InterlockedExchange(&s_restartWanted, 0);
 	OnRestart();
 	return 0;
 }
@@ -30941,7 +31400,7 @@ void Ogg_FeedPianoRoll(const void* p, int n)
 
 void COggDlg::OnRestart()
 {
-	if (OggIsResumePromptActive())
+	if (OggIsResumePromptActive() && !CEmuPendingLoadActive())
 		return;
 	const bool softBusy = false;
 	if (InterlockedCompareExchange(&s_onRestartBusy, 1, 0) != 0)
@@ -30967,7 +31426,10 @@ void COggDlg::OnRestart()
 		~InteractiveTrackGuard() { InterlockedExchange(&g_interactiveTrackChange, 0); }
 	} interactiveTrackGuard;
 
-	if (CEmuTryOverlaySfxFromFilen())
+	if (CEmuPendingLoadKeepForRestart())
+		CEmuPendingLoadBindFilen();
+
+	if (!CEmuPendingLoadActive() && CEmuTryOverlaySfxFromFilen())
 		return;
 
 	// TODO: この位置にコントロール通知ハンドラ用のコードを追加してください
@@ -30983,7 +31445,22 @@ void COggDlg::OnRestart()
 		m_dsb->SetVolume(v);
 		m_dsb->Play(0, 0, DSBPLAY_LOOPING);
 	}
-	if (filen == _T("") && pl && pl->playcnt > 0)
+	if (CEmuPendingLoadActive()) {
+		CEmuPendingLoadBindFilen();
+		if (CemuAnyKind() || CEmuMidiLiveActive())
+			CloseCemuPlaybackResources();
+		mode = modesub = MODE_CEMU;
+		extern int gameon;
+		gameon = 0;
+		play();
+		return;
+	}
+	if (!CEmuPendingLoadActive() && CEmuRestoreMidiZipPlayPath()) {
+		mode = modesub = MODE_CEMU;
+		play();
+		return;
+	}
+	if (filen == _T("") && pl && pl->playcnt > 0 && !CEmuPendingLoadActive())
 		pl->RestoreSavedPlaybackRow();
 	if (filen != "") {
 		ti = filen.Right(filen.GetLength() - filen.ReverseFind('\\') - 1);
@@ -30999,33 +31476,33 @@ void COggDlg::OnRestart()
 			mode == -11 || mode == -12 || mode == -13 || mode == -14 || mode == -15;
 		// ネイティブ音声形式は拡張子のみで判定（game形式等からの切り替えも可能に）
 		if (!isGameMode && filen.Right(5).MakeLower() == ".opus") {
-			modesub = -6;
+			mode = modesub = -6;
 			playb = 0;
 			play();
 		}
 		else if (!isGameMode && (filen.Right(4).MakeLower() == ".ogg" || filen.Right(4) == ".OGG" || filen.Right(6).MakeLower() == ".qull3")) {
-			modesub = -1;
+			mode = modesub = -1;
 			play();
 		}
 		else if (!isGameMode && (filen.Right(4).MakeLower() == ".dsf" || filen.Right(5) == ".DSF" || filen.Right(4).MakeLower() == ".dff" || filen.Right(4) == ".DFF" || filen.Right(4).MakeLower() == ".wsd" || filen.Right(4) == ".WSD")) {
-			modesub = -7;
+			mode = modesub = -7;
 			play();
 		}
 		else if (!isGameMode && (filen.Right(5).MakeLower() == ".flac" || filen.Right(5) == ".FLAC" || filen.Right(7).MakeLower() == L".qull3h")) {
-			modesub = -8;
+			mode = modesub = -8;
 			play();
 		}
 		else if (!isGameMode && (filen.Right(4).MakeLower() == ".m4a" || filen.Right(4) == ".M4A" || filen.Right(4).MakeLower() == ".aac" || filen.Right(4) == ".AAC")) {
-			modesub = -9;
+			mode = modesub = -9;
 			play();
 		}
 		else if (!isGameMode && (filen.Right(4).MakeLower() == ".mp3" || filen.Right(4) == ".MP3" || filen.Right(4).MakeLower() == ".mp2" || filen.Right(4) == ".MP2" ||
 			filen.Right(4).MakeLower() == ".mp1" || filen.Right(4) == ".MP1" || filen.Right(4).MakeLower() == ".rmp" || filen.Right(4) == ".RMP")) {
-			modesub = -10;
+			mode = modesub = -10;
 			play();
 		}
 		else if (!isGameMode && (filen.Right(4).MakeLower() == ".wav" || filen.Right(4) == ".WAV")) {
-			modesub = 999;
+			mode = modesub = 999;
 			play();
 		}
 		else if (isGameMode) {
@@ -35851,6 +36328,8 @@ void COggDlg::ToggleMidiMonitor()
 		m_MidiMonitorDlg->DestroyWindow();
 		savedata.midimonwindow = 0;
 		savedata.fmmonwindow = 0;
+		FmMonGeomPersistOpen(0);
+		OggPersistSaveDatNow();
 	}
 
 	if (::IsWindow(m_MidiMonitorDlg->GetSafeHwnd())) {

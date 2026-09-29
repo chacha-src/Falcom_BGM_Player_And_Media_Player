@@ -94,7 +94,8 @@ int CDriverPico::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigne
 	/* VDP 初期化と SMPS コピー待ち */
 	RunCycles(cpuHz_);
 	UnmaskIfStuck();
-	TriggerSong();
+	if (!loadOnly)
+		TriggerSong();
 	booted_ = 1;
 	return 1;
 }

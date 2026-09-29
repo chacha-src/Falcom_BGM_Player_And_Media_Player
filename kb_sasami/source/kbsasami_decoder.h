@@ -28,6 +28,7 @@ private:
 	DWORD m_silentSample;
 	bool m_seeking;
 	bool m_fmMode;
+	bool m_liveStream; /* CEmu MPU stub: qwLength 不定、sequencer 終端で切らない */
 	int m_raira; // 1=このアプリ専用経路
 	int m_vst;   // 解釈後: 0=FM MIDI(fmmidi), 1=VST側に任せる
 	int m_mapDefault; // kbsasami.midimode (0..19)
@@ -48,10 +49,14 @@ private:
 	void sysex_message(int port, const void* data, std::size_t size) override;
 	void meta_event(int type, const void* data, std::size_t size) override;
 	void reset() override;
+	void LiveBind();
+	void LiveUnbind();
 
 public:
 	explicit KbSasamiDecoder(IKpiConfig* pConfig);
 	~KbSasamiDecoder();
+	void LiveInjectShort(unsigned int msg);
+	void LiveInjectSysex(const void* data, size_t size);
 	DWORD __fastcall Open(const KPI_MEDIAINFO* cpRequest, IKpiFile* pFile, IKpiFolder* pFolder);
 	DWORD WINAPI Select(DWORD dwNumber, const KPI_MEDIAINFO** ppMediaInfo, IKpiTagInfo* pTagInfo, DWORD dwTagGetFlags);
 	UINT64 WINAPI Seek(UINT64 qwPosSample, DWORD dwFlag);

@@ -6,6 +6,10 @@
 #include "CCustomControl.h"
 #include "kb_sasami/source/sasami_fmmon.h"
 #include "gpu/GpuDx11.h"
+#include "UiTickPump.h"
+
+/* MIDI/FM モニタの開閉を sidecar に書く。open=0 で次回起動の復活を防ぐ。 */
+void FmMonGeomPersistOpen(int open);
 
 class CFmMonitorDlg : public CCustomBlurDialogExBase
 {
@@ -20,7 +24,7 @@ public:
 #endif
 
 	void IdlePulse();
-	void PumpSyncNow(); /* timerp: 可聴位置へ dump 同期（UpdateWindow は呼び出し側） */
+	void PumpSyncNow(); /* 自前 60Hz tick: dump 同期。描画は Invalidate */
 	void DetachForDestroy();
 	void LayoutHelpBtn();
 	void PersistGeom();
@@ -45,6 +49,7 @@ protected:
 	afx_msg void OnClose();
 	afx_msg void OnDestroy();
 	afx_msg void OnTimer(UINT_PTR nIDEvent);
+	afx_msg LRESULT OnUiTick(WPARAM wParam, LPARAM lParam);
 	afx_msg void OnBnClickedHelp();
 	afx_msg void OnSysCommand(UINT nID, LPARAM lParam);
 	afx_msg void OnShowWindow(BOOL bShow, UINT nStatus);
@@ -214,4 +219,5 @@ private:
 	volatile LONG m_composeCsReady;
 	int m_composeReqW;
 	int m_composeReqH;
+	UiTickPump m_tickPump;
 };

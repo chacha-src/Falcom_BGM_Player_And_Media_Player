@@ -139,8 +139,10 @@ int CDriverMsx::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned
 	if (!hw_->LoadKss(fs, ge, titleCode))
 		return 0;
 	/* コード 0 も通す（fmpac sample 00、ds4 track 0）。0→1 強制は 2 曲が潰れた */
-	if (!hw_->StartSong(titleCode))
-		return 0;
+	if (!loadOnly) {
+		if (!hw_->StartSong(titleCode))
+			return 0;
+	}
 
 	Ay_Cpu* cpu = hw_->Cpu();
 	if (cpu) {

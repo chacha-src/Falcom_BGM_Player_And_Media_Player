@@ -555,6 +555,7 @@ BEGIN_MESSAGE_MAP(CEqualizer, CCustomBlurDialogExBase)
 	ON_WM_CLOSE()
 	ON_WM_SIZE()
 	ON_MESSAGE(WM_EQ_KEY_UPDATE, OnEqKeyUpdate)
+	ON_MESSAGE(WM_UITICK_VSYNC, OnUiTick)
 	ON_BN_CLICKED(IDOK3, OnBnClickedOk3)
 	ON_BN_CLICKED(IDOK, OnBnClickedOk)
 	ON_BN_CLICKED(IDOK4, OnBnClickedOk4)
@@ -1232,27 +1233,18 @@ LRESULT CEqualizer::OnEqKeyUpdate(WPARAM, LPARAM)
 		}
 	}
 	AckEqKeyUiNotify();
-#if 0
-	{
-		static DWORD s_last = 0, s_count = 0;
-		const DWORD now = GetTickCount();
-		++s_count;
-		if (s_last == 0) s_last = now;
-		if (now - s_last >= 1000) {
-			CString line;
-			line.Format(L"[EQ-KEY] updates/sec=%u\n", s_count);
-			OutputDebugString(line);
-			s_count = 0;
-			s_last = now;
-		}
-	}
-#endif
 	return 0;
 }
 
+LRESULT CEqualizer::OnUiTick(WPARAM, LPARAM)
+{
+	m_tickPump.Ack();
+	return 0;
+}
 
 void CEqualizer::OnDestroy()
 {
+	m_tickPump.Stop();
 	UnregisterEqKeyUiHwnd(m_hWnd);
 	KillTimer(1);
 	if (g_eqHelpDlg && ::IsWindow(g_eqHelpDlg->GetSafeHwnd()))

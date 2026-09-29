@@ -5724,18 +5724,18 @@ static void ApplyLookaheadLimiterStereo(float* L, float* R, int n, int rate, flo
 
 // ============================================================
 // 拡張音量 / フォーマット別音量ブースト (マスター音量とは独立)
-// COggDlg 拡張音量 + CRender SPC/KPI/MP3 倍率をここで1本化
+// COggDlg 拡張音量 + CRender SPC/KPI/MP3/Winamp/CEmu 倍率をここで1本化
 //
 // mode:
-//   NONE(0) … ネイティブ音声等。kpivol・mp3 倍率は掛けない
-//   KPI (1) … readkpi / Winamp/XMPlay/AIMP / mid VST（その他のkpi = savedata.kpivol）。SPC は別フラグ
+//   NONE(0) … ネイティブ音声等。フォーマット倍率は掛けない
+//   KPI (1) … readkpi / mid VST（その他のkpi = savedata.kpivol）
+//             SPC/HES は spcApplicable のとき savedata.spc のみ（kpivol と二重掛けしない）
 //   MP3 (2) … readmp3/m4a 専用。savedata.mp3
+//   WINAMP(3) … Winamp/XMPlay/AIMP。savedata.winampvol
+//   CEMU (4) … CEmu PCM。savedata.cemuvol
 // sticky なので、デコード側で毎回正しい mode を立てること。
 // mid VST の x64 は KpiHost64 が生PCMを返し、本体(x86) playwavvst で equaliser を掛ける。
 // ============================================================
-#define EQ_FMT_VOL_NONE 0
-#define EQ_FMT_VOL_KPI  1
-#define EQ_FMT_VOL_MP3  2
 
 static int  g_eqFormatVolMode = EQ_FMT_VOL_NONE;
 static BOOL g_eqFormatVolSpc = FALSE;
@@ -5795,12 +5795,14 @@ static float EqCalcMp3VolumeGain(int mp3Val, int bitDepth)
 static float GetFormatVolumeGain(void)
 {
 	switch (g_eqFormatVolMode) {
-	case EQ_FMT_VOL_KPI: {
-		float g = EqCalcKpiVolumeGain(savedata.kpivol, wavsam_depth);
+	case EQ_FMT_VOL_KPI:
 		if (g_eqFormatVolSpc)
-			g *= EqCalcSpcVolumeGain(savedata.spc);
-		return g;
-	}
+			return EqCalcSpcVolumeGain(savedata.spc);
+		return EqCalcKpiVolumeGain(savedata.kpivol, wavsam_depth);
+	case EQ_FMT_VOL_WINAMP:
+		return EqCalcKpiVolumeGain(savedata.winampvol, wavsam_depth);
+	case EQ_FMT_VOL_CEMU:
+		return EqCalcKpiVolumeGain(savedata.cemuvol, wavsam_depth);
 	case EQ_FMT_VOL_MP3:
 		return EqCalcMp3VolumeGain(savedata.mp3, wavsam_depth);
 	default:

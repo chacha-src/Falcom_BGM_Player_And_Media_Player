@@ -4,6 +4,7 @@
 #include "../chip/cemu_chip_opl.h"
 #include "../vendor/np2/np2ffi.h"
 #include "../machine/cemu_np2ctx.h"
+#include <string.h>
 
 /* PC/AT ドライバ: メンバを安全な既定値へ */
 CDriverPcat::CDriverPcat()
@@ -84,7 +85,8 @@ int CDriverPcat::Render(int16_t* stereo, int frames)
 	CEmuNp2Guard np2;
 	CEmuHardPcatSetActive(hw_);
 	if (!triggered_) {
-		hw_->TriggerPlay(titleCode_);
+		if (!loadOnly)
+			hw_->TriggerPlay(titleCode_);
 		triggered_ = 1;
 	}
 	const int rate = hostRate_ > 0 ? hostRate_ : 44100;
@@ -98,7 +100,11 @@ int CDriverPcat::Render(int16_t* stereo, int frames)
 		cpuAcc_ %= (int64_t)rate;
 		if (cycles < n) cycles = n;
 		hw_->PumpCycles(hw_->cpuCycles_ + (uint64_t)cycles);
-		chip->Render(stereo + i * 2, n);
+		/* CMS/BEEP は OPL プローブが残っても AdLib を混ぜない。SAA／スピーカは MixExtra。 */
+		if (hw_->modeCms_ || hw_->modeBeep_)
+			memset(stereo + i * 2, 0, (size_t)n * 2u * sizeof(int16_t));
+		else
+			chip->Render(stereo + i * 2, n);
 		hw_->MixExtra(stereo + i * 2, n);
 		i += n;
 	}

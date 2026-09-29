@@ -5178,7 +5178,7 @@ void CMediaPlayerDlg::OnTimer(UINT nIDEvent)
 			// ホバー演出(タイトル減光・ジャケ前面化)は無効化する。
 			g_mpBannerHover = (!g_mpSideJacket && m_bannerRect.PtInRect(pt)) ? 1 : 0;
 
-			// info パネルスクロールは TheadLoop から WM_MP_INFO_SCROLL で駆動（~30fps・2px）
+			// info パネルスクロールは TheadLoop から vblank で駆動（60fps・1px）
 			// Timer3 では行わない（精度不足のため TheadLoop ベースに移植済み）
 		}
 		else g_mpBannerHover = 0;
@@ -5761,8 +5761,8 @@ void CMediaPlayerDlg::ApplyListTooltipState()
 	}
 }
 
-// WM_MP_INFO_SCROLL ハンドラ。TheadLoop から ~30fps で PostMessage される。
-// 2px/tick（60px/s）。バナーは 60fps・画面1px、こちらは半分の更新で同じ速さ。
+// WM_MP_INFO_SCROLL ハンドラ。TheadLoop から vblank で PostMessage される。
+// 1px/tick（60px/s）。バナーと同じ位相。
 // m_iscActive が true なら右曲情報パネルを無効化 → DrawSidePanels がスクロールを1段進めて
 // 再び true にセットする(→次 tick でまた無効化)。スクロール不要なら m_iscActive は
 // false のままで再描画は発生しない。
@@ -5776,9 +5776,8 @@ LRESULT CMediaPlayerDlg::OnInfoScrollTick(WPARAM, LPARAM)
 		RedrawWindow(&m_infoPanelRect, NULL,
 			RDW_INVALIDATE | RDW_UPDATENOW | RDW_NOERASE);
 	}
-	else {
-		InterlockedExchange(&m_iscScrollPosted, 0);
-	}
+	// DrawSidePanels が走らなくても次の vblank で再ポストできるように必ず解放する。
+	InterlockedExchange(&m_iscScrollPosted, 0);
 	return 0;
 }
 
@@ -5838,8 +5837,31 @@ void CMediaPlayerDlg::ResetInfoScroll()
 // （旧実装は毎フレーム CreateCompatibleBitmap/CreatePen → 長時間で GDI が死ぬ）
 //
 // rowIdx: m_isc/m_iscW のインデックス(0=タイトル行, 1〜5=サブ行)
+static int InfoMarqueeScreenStep()
+{
+	static LARGE_INTEGER s_last = {};
+	static double s_acc = 0.0;
+	LARGE_INTEGER now = {}, freq = {};
+	QueryPerformanceCounter(&now);
+	QueryPerformanceFrequency(&freq);
+	if (s_last.QuadPart == 0 || freq.QuadPart < 1) {
+		s_last = now;
+		return 1;
+	}
+	double dt = (double)(now.QuadPart - s_last.QuadPart) / (double)freq.QuadPart;
+	s_last = now;
+	if (dt < 0.0) dt = 0.0;
+	if (dt > 0.08) dt = 0.08;
+	s_acc += dt * 60.0;
+	int n = (int)s_acc;
+	if (n < 0) n = 0;
+	if (n > 2) n = 2;
+	s_acc -= n;
+	return n;
+}
+
 bool CMediaPlayerDlg::DrawInfoScrollRow(CDC& mem, int tx, int y, int tw, int lineH,
-	const CString& text, COLORREF clr, int rowIdx, COLORREF kBg, CFont* font)
+	const CString& text, COLORREF clr, int rowIdx, COLORREF kBg, CFont* font, int scrollPx)
 {
 	if (text.IsEmpty() || tw <= 0 || lineH <= 0) return false;
 	if (rowIdx < 0 || rowIdx >= kInfoRows) return false;
@@ -5969,7 +5991,7 @@ bool CMediaPlayerDlg::DrawInfoScrollRow(CDC& mem, int tx, int y, int tw, int lin
 	mem.BitBlt(tx + szFull.cx - off, y, tw, lineH, &wdc, szFull.cx, 0, SRCCOPY);
 	mem.RestoreDC(saved);
 
-	m_isc[rowIdx] += 2;
+	m_isc[rowIdx] += (scrollPx > 0) ? scrollPx : 0;
 	if (m_isc[rowIdx] >= szFull.cx) m_isc[rowIdx] -= szFull.cx;
 
 	return true;
@@ -6257,13 +6279,14 @@ void CMediaPlayerDlg::DrawSidePanels(CDC* pDC)
 			if (!trackLine.IsEmpty()) totalH += lineH;
 			if (!techLine.IsEmpty())  totalH += techH;
 			int y = (h - totalH) / 2; if (y < 0) y = 0;
+			const int infoStep = InfoMarqueeScreenStep();
 
 			// ---- タイトル行(スクロール対応) ----
 			CFont* of = mem.SelectObject(&m_fontTitle);
 			mem.SetBkMode(TRANSPARENT);
 			bool titleScrolled = DrawInfoScrollRow(mem, tx, y, tw, titleH,
 				title.IsEmpty() ? CString(_T("‐")) : title,
-				RGB(255, 255, 255), 0, kBg, &m_fontTitle);
+				RGB(255, 255, 255), 0, kBg, &m_fontTitle, infoStep);
 			if (titleScrolled) m_iscActive = true;
 			y += titleH;
 			mem.SelectObject(of);
@@ -6283,7 +6306,7 @@ void CMediaPlayerDlg::DrawSidePanels(CDC* pDC)
 			mem.SetBkMode(TRANSPARENT);
 			for (int i = 0; i < n; i++) {
 				bool scrolled = DrawInfoScrollRow(mem, tx, y, tw, items[i].h,
-					items[i].s, items[i].c, items[i].idx, kBg, items[i].font);
+					items[i].s, items[i].c, items[i].idx, kBg, items[i].font, infoStep);
 				if (scrolled) m_iscActive = true;
 				y += items[i].h;
 			}
@@ -7669,6 +7692,8 @@ void CMediaPlayerDlg::OnRclickList(NMHDR* pNMHDR, LRESULT* pResult)
 		m_list.SetItemState(hit, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
 	}
 	SyncSelectionToPlaylist();
+	if (hit >= 0)
+		pl->m_ctxHit = MpDispToPc(this, hit);
 	const int cmd = pl->ShowTrackContextMenu(pt, this);
 	if (cmd == 0) return;
 	if (IsSeekExtrasCommand((UINT)cmd)) {
@@ -10822,10 +10847,26 @@ void MpShowSettingsExtrasMenu(CWnd* owner, CPoint screenPt)
 		CCustomPopupMenu* kpiSub = menu.AddSubMenu(LL14(L"その他 kpi 音量", L"Other kpi volume", L"Volume kpi autres", L"Volume kpi altri", L"Volumen kpi otros", L"기타 kpi 볼륨", L"其他 kpi 音量", L"مستوى kpi أخرى", L"Громкость прочих kpi", L"Sonstige kpi-Lautstarke", L"Volume kpi outros", L"Overig kpi-volume", L"Glosnosc innych kpi", L"Diger kpi ses"), LL14(L"その他 kpi 再生時の内部ゲイン倍率を選びます", L"Choose internal gain multiplier for other kpi formats", L"Choisir le gain interne pour les autres kpi", L"Scegli il gain interno per altri kpi", L"Elegir la ganancia interna para otros kpi", L"기타 kpi 재생 내부 게인 배율을 선택", L"选择其他 kpi 播放的内部增益倍率", L"اختيار مضاعف الكسب الداخلي لـ kpi الأخرى", L"Выбрать внутренний коэффициент для прочих kpi", L"Internen Gain-Faktor fur sonstige kpi wahlen", L"Escolher o ganho interno para outros kpi", L"Interne gain-factor voor overige kpi kiezen", L"Wybierz wewnetrzny wspolczynnik gain dla innych kpi", L"Diger kpi calma dahili kazanc carpanini sec"));
 		if (kpiSub) {
 			kpiSub->AddCheck(ID_MP_SET_KPI_1, L"1.0x", savedata.kpivol == 1);
-			kpiSub->AddCheck(ID_MP_SET_KPI_2, L"1.5x", savedata.kpivol == 2);
-			kpiSub->AddCheck(ID_MP_SET_KPI_3, L"2.0x", savedata.kpivol == 3);
-			kpiSub->AddCheck(ID_MP_SET_KPI_4, L"2.5x", savedata.kpivol == 4);
-			kpiSub->AddCheck(ID_MP_SET_KPI_5, L"3.0x", savedata.kpivol == 5);
+			kpiSub->AddCheck(ID_MP_SET_KPI_2, L"2.0x", savedata.kpivol == 2);
+			kpiSub->AddCheck(ID_MP_SET_KPI_3, L"3.0x", savedata.kpivol == 3);
+			kpiSub->AddCheck(ID_MP_SET_KPI_4, L"4.0x", savedata.kpivol == 4);
+			kpiSub->AddCheck(ID_MP_SET_KPI_5, L"5.0x", savedata.kpivol == 5);
+		}
+		CCustomPopupMenu* waSub = menu.AddSubMenu(LL14(L"Winamp/XMPlay/AIMP 音量", L"Winamp/XMPlay/AIMP volume", L"Volume Winamp/XMPlay/AIMP", L"Volume Winamp/XMPlay/AIMP", L"Volumen Winamp/XMPlay/AIMP", L"Winamp/XMPlay/AIMP 볼륨", L"Winamp/XMPlay/AIMP 音量", L"مستوى Winamp/XMPlay/AIMP", L"Громкость Winamp/XMPlay/AIMP", L"Winamp/XMPlay/AIMP-Lautstarke", L"Volume Winamp/XMPlay/AIMP", L"Winamp/XMPlay/AIMP-volume", L"Glosnosc Winamp/XMPlay/AIMP", L"Winamp/XMPlay/AIMP ses"), LL14(L"Winamp/XMPlay/AIMP 再生時の内部ゲイン倍率を選びます", L"Choose internal gain multiplier for Winamp/XMPlay/AIMP", L"Choisir le gain interne pour Winamp/XMPlay/AIMP", L"Scegli il gain interno per Winamp/XMPlay/AIMP", L"Elegir la ganancia interna para Winamp/XMPlay/AIMP", L"Winamp/XMPlay/AIMP 재생 내부 게인 배율을 선택", L"选择 Winamp/XMPlay/AIMP 播放的内部增益倍率", L"اختيار مضاعف الكسب الداخلي لـ Winamp/XMPlay/AIMP", L"Выбрать внутренний коэффициент для Winamp/XMPlay/AIMP", L"Internen Gain-Faktor fur Winamp/XMPlay/AIMP wahlen", L"Escolher o ganho interno para Winamp/XMPlay/AIMP", L"Interne gain-factor voor Winamp/XMPlay/AIMP kiezen", L"Wybierz wewnetrzny wspolczynnik gain dla Winamp/XMPlay/AIMP", L"Winamp/XMPlay/AIMP calma dahili kazanc carpanini sec"));
+		if (waSub) {
+			waSub->AddCheck(ID_MP_SET_WA_1, L"1.0x", savedata.winampvol == 1);
+			waSub->AddCheck(ID_MP_SET_WA_2, L"2.0x", savedata.winampvol == 2);
+			waSub->AddCheck(ID_MP_SET_WA_3, L"3.0x", savedata.winampvol == 3);
+			waSub->AddCheck(ID_MP_SET_WA_4, L"4.0x", savedata.winampvol == 4);
+			waSub->AddCheck(ID_MP_SET_WA_5, L"5.0x", savedata.winampvol == 5);
+		}
+		CCustomPopupMenu* cemuSub = menu.AddSubMenu(LL14(L"CEmu 音量", L"CEmu volume", L"Volume CEmu", L"Volume CEmu", L"Volumen CEmu", L"CEmu 볼륨", L"CEmu 音量", L"مستوى CEmu", L"Громкость CEmu", L"CEmu-Lautstarke", L"Volume CEmu", L"CEmu-volume", L"Glosnosc CEmu", L"CEmu ses"), LL14(L"CEmu 再生時の内部ゲイン倍率を選びます", L"Choose internal gain multiplier for CEmu", L"Choisir le gain interne pour CEmu", L"Scegli il gain interno per CEmu", L"Elegir la ganancia interna para CEmu", L"CEmu 재생 내부 게인 배율을 선택", L"选择 CEmu 播放的内部增益倍率", L"اختيار مضاعف الكسب الداخلي لـ CEmu", L"Выбрать внутренний коэффициент для CEmu", L"Internen Gain-Faktor fur CEmu wahlen", L"Escolher o ganho interno para CEmu", L"Interne gain-factor voor CEmu kiezen", L"Wybierz wewnetrzny wspolczynnik gain dla CEmu", L"CEmu calma dahili kazanc carpanini sec"));
+		if (cemuSub) {
+			cemuSub->AddCheck(ID_MP_SET_CEMU_1, L"1.0x", savedata.cemuvol == 1);
+			cemuSub->AddCheck(ID_MP_SET_CEMU_2, L"2.0x", savedata.cemuvol == 2);
+			cemuSub->AddCheck(ID_MP_SET_CEMU_3, L"3.0x", savedata.cemuvol == 3);
+			cemuSub->AddCheck(ID_MP_SET_CEMU_4, L"4.0x", savedata.cemuvol == 4);
+			cemuSub->AddCheck(ID_MP_SET_CEMU_5, L"5.0x", savedata.cemuvol == 5);
 		}
 	}
 	menu.AddCheck(ID_MP_SET_M4A,
@@ -10897,6 +10938,10 @@ void MpShowSettingsExtrasMenu(CWnd* owner, CPoint screenPt)
 	else if (cmd == ID_MP_SET_SPC_16) savedata.spc = 16;
 	else if (cmd >= ID_MP_SET_KPI_1 && cmd <= ID_MP_SET_KPI_5) {
 		savedata.kpivol = (int)(cmd - ID_MP_SET_KPI_1) + 1;
+	} else if (cmd >= ID_MP_SET_WA_1 && cmd <= ID_MP_SET_WA_5) {
+		savedata.winampvol = (int)(cmd - ID_MP_SET_WA_1) + 1;
+	} else if (cmd >= ID_MP_SET_CEMU_1 && cmd <= ID_MP_SET_CEMU_5) {
+		savedata.cemuvol = (int)(cmd - ID_MP_SET_CEMU_1) + 1;
 	} else {
 		needPersist = FALSE;
 	}

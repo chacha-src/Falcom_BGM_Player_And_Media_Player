@@ -23,6 +23,7 @@
 #include "CEmu/cemu_mgr.h"
 #include "CEmu/cemu_modepref.h"
 #include "CEmu/cemu_support.h"
+#include "CEmu/driver/cemu_driver.h"
 #include "VstMidiEngine.h"
 #include "PluginAimp.h"
 #include "kb_sasami/source/sasami_midi.h"
@@ -599,6 +600,7 @@ CPlayList::CPlayList(CWnd* pParent /*=NULL*/)
 	plw=0;
 	playcnt=0;
 	m_tempMode = 0;
+	m_ctxHit = -1;
 //	pc = new playlistdata0[60000];
 }
 
@@ -691,6 +693,8 @@ BEGIN_MESSAGE_MAP(CPlayList, CCustomBlurDialogBase)
 END_MESSAGE_MAP()
 
 static const UINT_PTR kPlayListNavRefreshTimer = 4945;
+/* MIDI 優先切替の引き直しを、先読み／混合が終わるまで待って再試行する一発タイマ */
+static const UINT_PTR kPlayListMidiRefreshTimer = 4946;
 
 static void ClampPlaylistSelectionIndices(CPlayList* pl)
 {
@@ -2778,12 +2782,11 @@ static void PlSelectItemAtScreenPoint(CListCtrl& lc, CPoint screenPt)
 	lc.ScreenToClient(&pt);
 	const int hit = lc.HitTest(pt, NULL);
 	if (hit < 0) return;
-	if (!(lc.GetItemState(hit, LVIS_SELECTED) & LVIS_SELECTED)) {
-		const int n = lc.GetItemCount();
-		for (int i = 0; i < n; ++i)
-			lc.SetItemState(i, 0, LVIS_SELECTED);
-		lc.SetItemState(hit, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
-	}
+	const int n = lc.GetItemCount();
+	for (int i = 0; i < n; ++i)
+		lc.SetItemState(i, 0, LVIS_SELECTED | LVIS_FOCUSED);
+	lc.SetItemState(hit, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
+	lc.SetSelectionMark(hit);
 }
 
 int CPlayList::FindByPath(LPCTSTR fol)
@@ -3165,6 +3168,10 @@ static void PlApplyCemuModeTag(CPlayList* pl, const char* tag)
 		if (zipOut[0])
 			CEmuModePrefSet(zipOut, tag);
 		if (ge) {
+			if (ge->driverAlias[0])
+				wcsncpy_s(pl->pc[i].art, ge->driverAlias, _TRUNCATE);
+			else if (ge->name[0])
+				wcsncpy_s(pl->pc[i].art, ge->name, _TRUNCATE);
 			if (ge->platform[0] && tag[0])
 				_snwprintf_s(pl->pc[i].alb, _TRUNCATE, L"%hs (%hs)", ge->platform, tag);
 			else if (ge->platform[0] && ge->subtype[0])
@@ -3278,8 +3285,22 @@ static void PlApplyCemuToggleFlip(CPlayList* pl, unsigned code)
 
 int CPlayList::ShowTrackContextMenu(CPoint pt, CWnd* pOwner)
 {
-	int Lindex = -1;
-	Lindex = m_lc.GetNextItem(Lindex, LVNI_ALL | LVNI_SELECTED);
+	CPoint client = pt;
+	m_lc.ScreenToClient(&client);
+	const int listHit = m_lc.HitTest(client, NULL);
+	if (listHit >= 0 && listHit < playcnt)
+		m_ctxHit = listHit;
+	else if (m_ctxHit < 0 || m_ctxHit >= playcnt) {
+		int hit = m_lc.GetSelectionMark();
+		if (hit < 0 || hit >= playcnt)
+			hit = m_lc.GetNextItem(-1, LVNI_FOCUSED);
+		if (hit < 0 || hit >= playcnt)
+			hit = m_lc.GetNextItem(-1, LVNI_SELECTED);
+		m_ctxHit = (hit >= 0 && hit < playcnt) ? hit : -1;
+	}
+	int Lindex = m_ctxHit;
+	if (Lindex < 0)
+		Lindex = m_lc.GetNextItem(-1, LVNI_ALL | LVNI_SELECTED);
 	if (Lindex < 0) return 0;
 
 	extern CMediaPlayerDlg* mp;
@@ -3304,6 +3325,27 @@ int CPlayList::ShowTrackContextMenu(CPoint pt, CWnd* pOwner)
 				L"Quitar de la lista", L"목록에서 선택 곡 삭제(파일 유지)", L"从列表删除所选（保留文件）", L"إزالة من القائمة",
 				L"Удалить из списка", L"Aus Liste entfernen", L"Remover da lista", L"Uit lijst verwijderen",
 				L"Usun z listy", L"Listeden kaldir (dosya kalir)"));
+	if (pc && Lindex >= 0 && Lindex < playcnt && IsCemuMode(pc[Lindex].sub)) {
+		menu.AddCommand(PL_CTX_CEMULOAD,
+			LL14(L"CEmuロード", L"CEmu Load", L"CEmu Charger", L"CEmu Carica",
+				L"CEmu Cargar", L"CEmu 로드", L"CEmu 加载", L"CEmu تحميل",
+				L"CEmu Загрузить", L"CEmu Laden", L"CEmu Carregar", L"CEmu Laden",
+				L"CEmu Wczytaj", L"CEmu Yukle"),
+			LL14(L"この zip を配置してドライバ初期化（ロゴ）だけ行う。曲は開始しない",
+				L"Place this zip and run driver init (logo). Does not start a song",
+				L"Place ce zip et init du driver (logo). Ne lance pas de morceau",
+				L"Posiziona lo zip e init driver (logo). Non avvia un brano",
+				L"Coloca el zip e init del driver (logo). No inicia una pista",
+				L"이 zip을 배치해 드라이버 초기화(로고)만. 곡은 시작하지 않음",
+				L"放置此 zip 并只做驱动初始化（标志音）。不开始曲目",
+				L"يضع هذا الـ zip ويهيئ المشغّل (الشعار) دون بدء مقطع",
+				L"Размещает zip, инициализация (лого). Не запускает трек",
+				L"Legt das Zip, Treiber-Init (Logo). Startet keinen Titel",
+				L"Coloca o zip, init do driver (logo). Nao inicia faixa",
+				L"Plaatst de zip, driver-init (logo). Start geen nummer",
+				L"Umieszcza zip, init sterownika (logo). Nie startuje utworu",
+				L"Zip'i yerlestirir, surucu baslatir (logo). Parca baslatmaz"));
+	}
 	menu.AddSeparator();
 	CCustomPopupMenu* subEdit = menu.AddSubMenu(
 		LL14(L"編集", L"Edit", L"Edition", L"Modifica",
@@ -3406,7 +3448,7 @@ int CPlayList::ShowTrackContextMenu(CPoint pt, CWnd* pOwner)
 		int i = -1;
 		while ((i = m_lc.GetNextItem(i, LVNI_ALL | LVNI_SELECTED)) >= 0) {
 			if (!pc || i >= playcnt || !pc[i].fol[0]) continue;
-			if (pc[i].sub == MODE_CEMU) {
+			if (IsCemuMode(pc[i].sub)) {
 				anyCemu = TRUE;
 				if (cemuFol.IsEmpty()) cemuFol = pc[i].fol;
 			}
@@ -3557,85 +3599,123 @@ int CPlayList::ShowTrackContextMenu(CPoint pt, CWnd* pOwner)
 				modeN = CEmuCatalogListArchiveModes(&mgr->catalog, stem,
 					NULL, NULL, modes, CEMU_MODE_MAX);
 		}
-		if (modeN > 1) {
-			char curTag[CEMU_MODE_TAG] = {};
-			if (!CEmuModePrefGet(cemuFol, curTag, (int)sizeof(curTag)))
-				CEmuModeTagFromEntry(ge, curTag, (int)sizeof(curTag));
-			menu.AddSeparator();
-			CCustomPopupMenu* cm = menu.AddSubMenu(
-				LL14(L"CEmu 音源モード", L"CEmu sound mode", L"Mode son CEmu", L"Modo audio CEmu",
-					L"Modo audio CEmu", L"CEmu 음원 모드", L"CEmu 音源模式", L"وضع صوت CEmu",
-					L"Режим звука CEmu", L"CEmu-Klangmodus", L"Modo de som CEmu", L"CEmu-geluidsmodus",
-					L"Tryb dźwięku CEmu", L"CEmu ses modu"),
-				LL14(L"XML に書かれた OPN/OPNA/OPL/OPM/MIDI 等。既定は MIDI 以外の最良。MIDI は CRender の KPI/VST 優先で再生",
-					L"OPN/OPNA/OPL/OPM/MIDI from XML. Default=best non-MIDI; MIDI uses CRender KPI/VST prefer",
-					L"OPN/OPNA/OPL/OPM/MIDI depuis XML. Defaut=meilleur non-MIDI; MIDI via KPI/VST CRender",
-					L"OPN/OPNA/OPL/OPM/MIDI da XML. Predef=miglior non-MIDI; MIDI via KPI/VST CRender",
-					L"OPN/OPNA/OPL/OPM/MIDI del XML. Predet=mejor no-MIDI; MIDI via KPI/VST CRender",
-					L"XML의 OPN/OPNA/OPL/OPM/MIDI. 기본=비MIDI 최선; MIDI는 CRender KPI/VST",
-					L"来自 XML 的 OPN/OPNA/OPL/OPM/MIDI。默认非 MIDI 最优；MIDI 用 CRender KPI/VST",
-					L"OPN/OPNA/OPL/OPM/MIDI من XML. الافتراضي=أفضل غير MIDI؛ MIDI عبر KPI/VST",
-					L"OPN/OPNA/OPL/OPM/MIDI из XML. По умолчанию лучший не-MIDI; MIDI через KPI/VST",
-					L"OPN/OPNA/OPL/OPM/MIDI aus XML. Standard=bester Nicht-MIDI; MIDI via KPI/VST",
-					L"OPN/OPNA/OPL/OPM/MIDI do XML. Padrao=melhor nao-MIDI; MIDI via KPI/VST",
-					L"OPN/OPNA/OPL/OPM/MIDI uit XML. Standaard=beste non-MIDI; MIDI via KPI/VST",
-					L"OPN/OPNA/OPL/OPM/MIDI z XML. Domyslnie najlepszy non-MIDI; MIDI przez KPI/VST",
-					L"XML OPN/OPNA/OPL/OPM/MIDI. Varsayilan=en iyi non-MIDI; MIDI CRender KPI/VST"));
-			if (cm) {
-				for (int mi = 0; mi < modeN && mi < CEMU_MODE_MAX; mi++) {
-					CString lab(modes[mi].tag);
-					if (modes[mi].isMidi)
-						lab += LL14(L" (KPI/VST)", L" (KPI/VST)", L" (KPI/VST)", L" (KPI/VST)",
-							L" (KPI/VST)", L" (KPI/VST)", L" (KPI/VST)", L" (KPI/VST)",
-							L" (KPI/VST)", L" (KPI/VST)", L" (KPI/VST)", L" (KPI/VST)",
-							L" (KPI/VST)", L" (KPI/VST)");
-					cm->AddCheck(PL_CTX_CEMUMODE_BASE + mi, lab,
-						curTag[0] && _stricmp(curTag, modes[mi].tag) == 0);
-				}
-			}
-		}
 		CEmuArchiveToggle toggles[CEMU_TOGGLE_MAX];
 		const int togN = CEmuCatalogListArchiveToggles(ge, toggles, CEMU_TOGGLE_MAX);
-		if (togN > 0) {
-			if (modeN <= 1)
-				menu.AddSeparator();
-			CCustomPopupMenu* tg = menu.AddSubMenu(
-				LL14(L"CEmu トグル", L"CEmu toggles", L"Bascules CEmu", L"Toggle CEmu",
-					L"Conmutadores CEmu", L"CEmu 토글", L"CEmu 开关", L"مفاتيح CEmu",
-					L"Переключатели CEmu", L"CEmu-Schalter", L"Alternadores CEmu", L"CEmu-schakelaars",
-					L"Przelaczniki CEmu", L"CEmu anahtarlar"),
-				LL14(L"XML の (Toggle) / TO BOSS など。今の曲の上にフラグを載せます",
-					L"XML (Toggle) / TO BOSS flags. Applied on the current song",
-					L"Drapeaux XML (Toggle) / TO BOSS. Appliques a la piste actuelle",
-					L"Flag XML (Toggle) / TO BOSS. Applicati al brano corrente",
-					L"Flags XML (Toggle) / TO BOSS. Se aplican a la pista actual",
-					L"XML (Toggle) / TO BOSS 플래그. 현재 곡 위에 적용",
-					L"XML 的 (Toggle) / TO BOSS 标志。叠在当前曲上",
-					L"أعلام XML (Toggle) / TO BOSS. تُطبَّق على المقطع الحالي",
-					L"Флаги XML (Toggle) / TO BOSS. Накладываются на текущий трек",
-					L"XML-(Toggle)/TO-BOSS-Flags. Liegen auf dem aktuellen Titel",
-					L"Flags XML (Toggle) / TO BOSS. Aplicados na faixa atual",
-					L"XML (Toggle) / TO BOSS-vlaggen. Op het huidige nummer",
-					L"Flagi XML (Toggle) / TO BOSS. Nakladane na biezacy utwor",
-					L"XML (Toggle) / TO BOSS bayraklari. Gecerli parcaya uygulanir"));
-			if (tg) {
-				for (int ti = 0; ti < togN && ti < CEMU_TOGGLE_MAX; ti++) {
-					const BOOL on = CEmuTogglePrefHas(cemuFol, toggles[ti].code) ? TRUE : FALSE;
-					tg->AddCheck(PL_CTX_CEMUTOGGLE_BASE + ti, toggles[ti].label, on,
-						LL14(L"今の曲を再生したままこのフラグを切替",
-							L"Toggle this flag while keeping the current song",
-							L"Basculer ce drapeau sans changer de piste",
-							L"Commuta questo flag restando sul brano",
-							L"Cambiar este flag sin cambiar de pista",
-							L"현재 곡을 유지한 채 이 플래그를 전환",
-							L"保持当前曲目并切换此标志",
-							L"تبديل هذا العلم مع الإبقاء على المقطع",
-							L"Переключить флаг, не меняя трек",
-							L"Dieses Flag umschalten, Titel bleibt",
-							L"Alternar este flag sem mudar a faixa",
-							L"Deze vlag wisselen zonder van nummer te veranderen",
-							L"Przelacz te flage bez zmiany utworu",
-							L"Parcayi degistirmeden bu bayragi ac/kapa"));
+		menu.AddSeparator();
+		CCustomPopupMenu* cemu = menu.AddSubMenu(
+			LL14(L"CEmu", L"CEmu", L"CEmu", L"CEmu",
+				L"CEmu", L"CEmu", L"CEmu", L"CEmu",
+				L"CEmu", L"CEmu", L"CEmu", L"CEmu",
+				L"CEmu", L"CEmu"),
+			LL14(L"CEmu zip のロード・音源モード・トグル",
+				L"CEmu zip load, sound mode, and toggles",
+				L"Chargement CEmu, mode son et bascules",
+				L"Caricamento CEmu, modo audio e toggle",
+				L"Carga CEmu, modo de sonido y conmutadores",
+				L"CEmu zip 로드·음원 모드·토글",
+				L"CEmu zip 加载、音源模式和开关",
+				L"تحميل CEmu ووضع الصوت والمفاتيح",
+				L"Загрузка CEmu, режим звука и переключатели",
+				L"CEmu-Laden, Klangmodus und Schalter",
+				L"Carga CEmu, modo de som e alternadores",
+				L"CEmu-laden, geluidsmodus en schakelaars",
+				L"Ladowanie CEmu, tryb dzwieku i przelaczniki",
+				L"CEmu yukleme, ses modu ve anahtarlar"));
+		if (cemu) {
+			cemu->AddCommand(PL_CTX_CEMULOAD,
+				LL14(L"ロード", L"Load", L"Charger", L"Carica",
+					L"Cargar", L"로드", L"加载", L"تحميل",
+					L"Загрузить", L"Laden", L"Carregar", L"Laden",
+					L"Wczytaj", L"Yukle"),
+				LL14(L"この位置を再生中にして zip を配置し、ドライバ初期化（ロゴ）だけ行う。曲は開始しない",
+					L"Make this row current, place the zip, run driver init (logo). Does not start a song",
+					L"Active cette ligne, place le zip, init du driver (logo). Ne lance pas de morceau",
+					L"Rende questa riga corrente, posiziona lo zip, init driver (logo). Non avvia un brano",
+					L"Hace esta fila actual, coloca el zip, init del driver (logo). No inicia una pista",
+					L"이 행을 현재로 만들고 zip을 배치해 드라이버 초기화(로고)만. 곡은 시작하지 않음",
+					L"将此行设为当前并放置 zip，只做驱动初始化（标志音）。不开始曲目",
+					L"يجعل هذا الصف الحالي ويضع الـ zip ويهيئ المشغّل (الشعار) دون بدء مقطع",
+					L"Делает эту строку текущей, размещает zip, инициализация (лого). Не запускает трек",
+					L"Macht diese Zeile aktuell, legt das Zip, Treiber-Init (Logo). Startet keinen Titel",
+					L"Torna esta linha atual, coloca o zip, init do driver (logo). Nao inicia faixa",
+					L"Maakt deze rij actief, plaatst de zip, driver-init (logo). Start geen nummer",
+					L"Ustawia ten wiersz jako biezacy, umieszcza zip, init sterownika (logo). Nie startuje utworu",
+					L"Bu satiri etkin yapar, zip'i yerlestirir, surucu baslatir (logo). Parca baslatmaz"));
+			if (modeN > 1) {
+				char curTag[CEMU_MODE_TAG] = {};
+				if (!CEmuModePrefGet(cemuFol, curTag, (int)sizeof(curTag)))
+					CEmuModeTagFromEntry(ge, curTag, (int)sizeof(curTag));
+				CCustomPopupMenu* cm = cemu->AddSubMenu(
+					LL14(L"音源モード", L"Sound mode", L"Mode son", L"Modo audio",
+						L"Modo de audio", L"음원 모드", L"音源模式", L"وضع الصوت",
+						L"Режим звука", L"Klangmodus", L"Modo de som", L"Geluidsmodus",
+						L"Tryb dźwięku", L"Ses modu"),
+					LL14(L"XML に書かれた OPN/OPNA/OPL/OPM/MIDI 等。既定は MIDI 以外の最良。MIDI は CRender の KPI/VST 優先で再生",
+						L"OPN/OPNA/OPL/OPM/MIDI from XML. Default=best non-MIDI; MIDI uses CRender KPI/VST prefer",
+						L"OPN/OPNA/OPL/OPM/MIDI depuis XML. Defaut=meilleur non-MIDI; MIDI via KPI/VST CRender",
+						L"OPN/OPNA/OPL/OPM/MIDI da XML. Predef=miglior non-MIDI; MIDI via KPI/VST CRender",
+						L"OPN/OPNA/OPL/OPM/MIDI del XML. Predet=mejor no-MIDI; MIDI via KPI/VST CRender",
+						L"XML의 OPN/OPNA/OPL/OPM/MIDI. 기본=비MIDI 최선; MIDI는 CRender KPI/VST",
+						L"来自 XML 的 OPN/OPNA/OPL/OPM/MIDI。默认非 MIDI 最优；MIDI 用 CRender KPI/VST",
+						L"OPN/OPNA/OPL/OPM/MIDI من XML. الافتراضي=أفضل غير MIDI؛ MIDI عبر KPI/VST",
+						L"OPN/OPNA/OPL/OPM/MIDI из XML. По умолчанию лучший не-MIDI; MIDI через KPI/VST",
+						L"OPN/OPNA/OPL/OPM/MIDI aus XML. Standard=bester Nicht-MIDI; MIDI via KPI/VST",
+						L"OPN/OPNA/OPL/OPM/MIDI do XML. Padrao=melhor nao-MIDI; MIDI via KPI/VST",
+						L"OPN/OPNA/OPL/OPM/MIDI uit XML. Standaard=beste non-MIDI; MIDI via KPI/VST",
+						L"OPN/OPNA/OPL/OPM/MIDI z XML. Domyslnie najlepszy non-MIDI; MIDI przez KPI/VST",
+						L"XML OPN/OPNA/OPL/OPM/MIDI. Varsayilan=en iyi non-MIDI; MIDI CRender KPI/VST"));
+				if (cm) {
+					for (int mi = 0; mi < modeN && mi < CEMU_MODE_MAX; mi++) {
+						CString lab(modes[mi].tag);
+						if (modes[mi].isMidi)
+							lab += LL14(L" (KPI/VST)", L" (KPI/VST)", L" (KPI/VST)", L" (KPI/VST)",
+								L" (KPI/VST)", L" (KPI/VST)", L" (KPI/VST)", L" (KPI/VST)",
+								L" (KPI/VST)", L" (KPI/VST)", L" (KPI/VST)", L" (KPI/VST)",
+								L" (KPI/VST)", L" (KPI/VST)");
+						cm->AddCheck(PL_CTX_CEMUMODE_BASE + mi, lab,
+							curTag[0] && CEmuModeTagsEqual(curTag, modes[mi].tag));
+					}
+				}
+			}
+			if (togN > 0) {
+				CCustomPopupMenu* tg = cemu->AddSubMenu(
+					LL14(L"トグル", L"Toggles", L"Bascules", L"Toggle",
+						L"Conmutadores", L"토글", L"开关", L"مفاتيح",
+						L"Переключатели", L"Schalter", L"Alternadores", L"Schakelaars",
+						L"Przelaczniki", L"Anahtarlar"),
+					LL14(L"XML の (Toggle) / TO BOSS など。今の曲の上にフラグを載せます",
+						L"XML (Toggle) / TO BOSS flags. Applied on the current song",
+						L"Drapeaux XML (Toggle) / TO BOSS. Appliques a la piste actuelle",
+						L"Flag XML (Toggle) / TO BOSS. Applicati al brano corrente",
+						L"Flags XML (Toggle) / TO BOSS. Se aplican a la pista actual",
+						L"XML (Toggle) / TO BOSS 플래그. 현재 곡 위에 적용",
+						L"XML 的 (Toggle) / TO BOSS 标志。叠在当前曲上",
+						L"أعلام XML (Toggle) / TO BOSS. تُطبَّق على المقطع الحالي",
+						L"Флаги XML (Toggle) / TO BOSS. Накладываются на текущий трек",
+						L"XML-(Toggle)/TO-BOSS-Flags. Liegen auf dem aktuellen Titel",
+						L"Flags XML (Toggle) / TO BOSS. Aplicados na faixa atual",
+						L"XML (Toggle) / TO BOSS-vlaggen. Op het huidige nummer",
+						L"Flagi XML (Toggle) / TO BOSS. Nakladane na biezacy utwor",
+						L"XML (Toggle) / TO BOSS bayraklari. Gecerli parcaya uygulanir"));
+				if (tg) {
+					for (int ti = 0; ti < togN && ti < CEMU_TOGGLE_MAX; ti++) {
+						const BOOL on = CEmuTogglePrefHas(cemuFol, toggles[ti].code) ? TRUE : FALSE;
+						tg->AddCheck(PL_CTX_CEMUTOGGLE_BASE + ti, toggles[ti].label, on,
+							LL14(L"今の曲を再生したままこのフラグを切替",
+								L"Toggle this flag while keeping the current song",
+								L"Basculer ce drapeau sans changer de piste",
+								L"Commuta questo flag restando sul brano",
+								L"Cambiar este flag sin cambiar de pista",
+								L"현재 곡을 유지한 채 이 플래그를 전환",
+								L"保持当前曲目并切换此标志",
+								L"تبديل هذا العلم مع الإبقاء على المقطع",
+								L"Переключить флаг, не меняя трек",
+								L"Dieses Flag umschalten, Titel bleibt",
+								L"Alternar este flag sem mudar a faixa",
+								L"Deze vlag wisselen zonder van nummer te veranderen",
+								L"Przelacz te flage bez zmiany utworu",
+								L"Parcayi degistirmeden bu bayragi ac/kapa"));
+					}
 				}
 			}
 		}
@@ -4556,6 +4636,41 @@ void CPlayList::HandleTrackContextCmd(int cmd)
 			const int togN = CEmuCatalogListArchiveToggles(ge, toggles, CEMU_TOGGLE_MAX);
 			if (ti >= 0 && ti < togN)
 				PlApplyCemuToggleFlip(this, toggles[ti].code);
+		}
+	}
+	else if (cmd == PL_CTX_CEMULOAD) {
+		extern int plcnt;
+		extern CString filen, fnn;
+		extern int modesub, mode, loop1, loop2, ret2;
+		int idx = m_ctxHit;
+		if (idx < 0 || idx >= playcnt)
+			idx = m_lc.GetSelectionMark();
+		if (idx < 0 || idx >= playcnt || !pc || !IsCemuMode(pc[idx].sub))
+			idx = -1;
+		if (idx >= 0) {
+			extern int gameon;
+			FixMidiMode(pc[idx]);
+			fnn = pc[idx].name;
+			filen = pc[idx].fol;
+			modesub = MODE_CEMU;
+			mode = MODE_CEMU;
+			loop1 = pc[idx].loop1;
+			loop2 = pc[idx].loop2;
+			ret2 = pc[idx].ret2;
+			plcnt = idx;
+			gameon = 0;
+			Get(idx);
+			mode = modesub = MODE_CEMU;
+			m_lc.SetItemState(idx, LVIS_FOCUSED, LVIS_FOCUSED);
+			m_lc.SetSelectionMark(idx);
+			CEmuPendingLoadSetPlaylistRow(idx);
+			CEmuDriverSetNextOpenLoadOnly(1);
+			if (og && ::IsWindow(og->GetSafeHwnd())) {
+				CEmuPendingLoadPlayNow();
+			} else {
+				CEmuDriverSetNextOpenLoadOnly(0);
+				CEmuPendingLoadSetPlaylistRow(-1);
+			}
 		}
 	}
 	else if (cmd >= PL_CTX_SASAMIM_BASE && cmd <= PL_CTX_SASAMIM_LAST) {
@@ -12278,6 +12393,17 @@ void CPlayList::FixMidiMode(playlistdata0& item)
 void CPlayList::RefreshMidiPlayModes()
 {
 	if (!pc || playcnt <= 0) return;
+	/* pc[].sub はクロスフェードの先読みスレッドが読んで B のエンジンを決める。
+	   優先切替でここが書き換わると、VST で開いたスロットを KPI として掴む。
+	   先読みを捨ててから触り、混合中は捨てられないので表示を後回しにして再試行する。 */
+	{
+		extern int XfDropPreparedForEngineChange();
+		if (!XfDropPreparedForEngineChange()) {
+			if (GetSafeHwnd())
+				SetTimer(kPlayListMidiRefreshTimer, 250, NULL);
+			return;
+		}
+	}
 	int any = 0;
 	for (int i = 0; i < playcnt; ++i) {
 		if (!VstIsMidiExt(pc[i].fol) && !VstIsProjectExt(pc[i].fol)) continue;
@@ -12662,9 +12788,9 @@ void CPlayList::plugs(CString fff, playlistdata *p,TCHAR* kpi, BYTE& kv)
 	// MIDI/プロジェクト: 動画(-2)にはしない。VST優先なら -30。でなければ KPI、最後に VST へフォールバック。
 	const int isMidiOrProj = (VstIsMidiExt(fff) || VstIsProjectExt(fff)) ? 1 : 0;
 	if (p && isMidiOrProj) {
-		wchar_t mid[VST_PATH_CHARS]; mid[0] = 0;
-		wchar_t hints[32][128]; int hc = 0;
-		const int resolved = VstResolvePlayPath(fff, mid, VST_PATH_CHARS, hints, 32, &hc);
+		/* VstResolvePlayPath は書庫の展開やシーケンス／MusicXML → SMF 変換までやる。
+		   KPI 優先では結果を使わないので呼ばない。以前は無条件に呼んでいたため、
+		   MIDI 優先を切り替えると全 MIDI 行の引き直しで UI スレッドが数秒止まっていた。 */
 		if (savedata.midPlayPrefer != 1 && ComposerIsSeqExt(fff)) {
 			int pick = -1;
 			BYTE kvS = 0;
@@ -12693,15 +12819,19 @@ void CPlayList::plugs(CString fff, playlistdata *p,TCHAR* kpi, BYTE& kv)
 				return;
 			}
 		}
-		if (savedata.midPlayPrefer == 1 && resolved) {
-			_tcscpy(p->fol, fff);
-			p->sub = MODE_VST_MIDI;
-			CString ft = fff.Right(fff.GetLength() - fff.ReverseFind(L'\\') - 1);
-			_tcscpy(p->name, ft);
-			p->alb[0] = 0; p->art[0] = 0; p->loop1 = p->loop2 = p->ret2 = 0;
-			if (kpi) { _tcscpy(kpi, mid); }
-			kv = 0;
-			return;
+		if (savedata.midPlayPrefer == 1) {
+			wchar_t mid[VST_PATH_CHARS]; mid[0] = 0;
+			wchar_t hints[32][128]; int hc = 0;
+			if (VstResolvePlayPath(fff, mid, VST_PATH_CHARS, hints, 32, &hc)) {
+				_tcscpy(p->fol, fff);
+				p->sub = MODE_VST_MIDI;
+				CString ft = fff.Right(fff.GetLength() - fff.ReverseFind(L'\\') - 1);
+				_tcscpy(p->name, ft);
+				p->alb[0] = 0; p->art[0] = 0; p->loop1 = p->loop2 = p->ret2 = 0;
+				if (kpi) { _tcscpy(kpi, mid); }
+				kv = 0;
+				return;
+			}
 		}
 	}
 	if (p && SasamiPathIsMidi(fff)) {
@@ -13518,6 +13648,11 @@ void CPlayList::OnTimer(UINT nIDEvent)
 		RefreshNavControls();
 		return;
 	}
+	if (nIDEvent == kPlayListMidiRefreshTimer) {
+		KillTimer(kPlayListMidiRefreshTimer);
+		RefreshMidiPlayModes();
+		return;
+	}
 	if (nIDEvent == 41) {
 		PlMissTickScan(this);
 		PlRestoreCemuModeSelection(this);
@@ -13965,7 +14100,27 @@ void CPlayList::OnNMRclickList1(NMHDR *pNMHDR, LRESULT *pResult)
 
 	CPoint point;
 	GetCursorPos(&point);
-	PlSelectItemAtScreenPoint(m_lc, point);
+	int hit = -1;
+	if (pNMHDR) {
+		LPNMITEMACTIVATE pNM = (LPNMITEMACTIVATE)pNMHDR;
+		if (pNM->iItem >= 0)
+			hit = pNM->iItem;
+	}
+	if (hit < 0) {
+		CPoint client = point;
+		m_lc.ScreenToClient(&client);
+		hit = m_lc.HitTest(client, NULL);
+	}
+	m_ctxHit = hit;
+	if (hit >= 0) {
+		const int n = m_lc.GetItemCount();
+		for (int i = 0; i < n; ++i)
+			m_lc.SetItemState(i, 0, LVIS_SELECTED | LVIS_FOCUSED);
+		m_lc.SetItemState(hit, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
+		m_lc.SetSelectionMark(hit);
+	} else {
+		PlSelectItemAtScreenPoint(m_lc, point);
+	}
 
 	CWnd* pWndPopupOwner = this;
 	while (pWndPopupOwner->GetStyle() & WS_CHILD)

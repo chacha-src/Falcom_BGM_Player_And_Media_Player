@@ -88,7 +88,7 @@
                   + _k2_syn2_report.txt
                   + _k2_ac48_plays.txt
                   + _k2_crush15_report.txt
-   Archives probed: 5085, supported: 4443; MSX +replcart_msx/shiryo_msx/msxfan_msx (_k2_x1msx8full_0.txt _k2_x1msx8fan_0.txt) + x1alba (_k2_x1msx8alba_0.txt)
+   Archives probed: 5085, supported: 4504; MSX +replcart_msx/shiryo_msx/msxfan_msx (_k2_x1msx8full_0.txt _k2_x1msx8fan_0.txt) + x1alba (_k2_x1msx8alba_0.txt)
                   + _k2_ac2s86_report.txt (genpeitd/rthunder/skykiddx/wndrmomo Sys86)
                   + _k2_ac2wsgo_report.txt (pacland/skykid/drgnbstr wsg63701)
                   + bosco wsgz80 (0289 BGM via $8A14 + $0139 id)
@@ -2408,7 +2408,6 @@ static const char* const kSupported[] = {
 	"mai_msx",
 	"mainsnk",
 	"maisok98",
-	"majokko_98",
 	"maison",
 	"maison68snd",
 	"maison_msx",
@@ -2416,6 +2415,7 @@ static const char* const kSupported[] = {
 	"maisonk_msx",
 	"majinkyu_msx",
 	"majogari_98",
+	"majokko_98",
 	"majoriko_98",
 	"majtitl2",
 	"majtitle",
@@ -2455,8 +2455,8 @@ static const char* const kSupported[] = {
 	"marvlandj",
 	"masaikoj_98",
 	"masao",
-	"masyo_k_98",
 	"mastrs98",
+	"masyo_k_98",
 	"matchit",
 	"matchit2",
 	"matmania",
@@ -2656,8 +2656,8 @@ static const char* const kSupported[] = {
 	"mpatrol",
 	"mps_98",
 	"mr68snd",
-	"mrdrillr",
 	"mrdo",
+	"mrdrillr",
 	"mrgoemon",
 	"mrprop98",
 	"mrproyk",
@@ -3429,6 +3429,7 @@ static const char* const kSupported[] = {
 	"sap68snd",
 	"sarakon_at",
 	"sargon5_at",
+	"sasami",
 	"satyr_98",
 	"savagere",
 	"sayaka_98",

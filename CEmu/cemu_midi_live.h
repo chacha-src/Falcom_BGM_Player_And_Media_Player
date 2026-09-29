@@ -1,7 +1,8 @@
 ﻿#pragma once
 
-/* リアルタイム MPU UART → 伸長 SMF + ショートメッセージ列 (VST inject)。
-   先に PC/AT (SC-55/MT-32/SC-88 を midiout glue)。PC98 MIDI zip も Pump/Stop を共有。 */
+/* リアルタイム MPU UART / RS-MIDI → 伸長 SMF + ショートメッセージ列 (VST inject)。
+   先に PC/AT (SC-55/MT-32/SC-88 を midiout glue)。PC98 は MPU-401 と 8251 RS-MIDI、
+   X68k は CZ-6BM1 と SCC シリアル MIDI。Pump/Stop を共有。 */
 
 struct CEmuMidiLiveShort {
 	DWORD msg;
@@ -36,6 +37,15 @@ int CEmuMidiLiveSampleRate(void);
 
 /* 最初の NoteOn を見たあと 1（プレイリスト time=-1 / ループヒント用） */
 int CEmuMidiLiveHasNotes(void);
+
+/* ロード専用ライブ（ロゴ MIDI）。曲 SMF ではなく起動ジングルを無音で止める */
+int CEmuMidiLiveIsLoadOnly(void);
+
+/* KPI FM (kbsasami) がライブ UART を受けるとき 1。SysEx は VST ではなく hook へ。 */
+void CEmuMidiLiveSetKpiSink(int enable);
+int CEmuMidiLiveKpiSink(void);
+typedef int (*CEmuMidiLiveKpiSysexFn)(const unsigned char* data, int bytes);
+void CEmuMidiLiveSetKpiSysexHook(CEmuMidiLiveKpiSysexFn fn);
 
 /* UART 捕捉が持っていたものと、inject/defer リングが運べたものの差。
    hw* はマシン側キャプチャからパースするので、ドライバが PC を出さなかったのか

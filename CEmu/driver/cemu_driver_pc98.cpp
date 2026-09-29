@@ -111,6 +111,7 @@ void CDriverPc98::TickOpn(uint64_t cpuCycles)
 	opnResidual_ %= (uint64_t)cpuHz_;
 	if (opnTicks)
 		hw_->SoundChip()->AdvanceClocks(opnTicks);
+	hw_->BootPcmTick(cpuCycles);
 }
 
 /* i286 を endCycle まで進める。DOS は PumpCycles */
@@ -162,6 +163,8 @@ void CDriverPc98::WatchdogTick()
 	   直そうとした無音より耳障りになる。 */
 	if (wdEverActive_ || wdReplays_ >= 4)
 		return;
+	if (loadOnly)
+		return;
 	wdReplays_++;
 	hw_->TriggerPlay(titleCode_);
 }
@@ -183,12 +186,22 @@ int CDriverPc98::Render(int16_t* stereo, int frames)
 	CEmuNp2Guard np2;
 	CChip* const opl = hw_->OplChip();
 	CEmuHardPc98SetActive(hw_);
+	hw_->BootPcmStopCapture();
+	const int want = frames;
+	const int drained = hw_->BootPcmDrain(stereo, frames);
+	if (drained >= want)
+		return want;
+	if (drained > 0) {
+		stereo += drained * 2;
+		frames -= drained;
+	}
 	if (!triggered_) {
-		hw_->TriggerPlay(titleCode_);
+		if (!loadOnly)
+			hw_->TriggerPlay(titleCode_);
 		triggered_ = 1;
 	}
 	const int rate = hostRate_ > 0 ? hostRate_ : 44100;
-	if (cpuHz_ < 1 || rate < 1) return 0;
+	if (cpuHz_ < 1 || rate < 1) return drained;
 	for (int i = 0; i < frames; i++) {
 		cpuAcc_ += (int64_t)cpuHz_;
 		int cyclesPerSample = (int)(cpuAcc_ / (int64_t)rate);
@@ -229,7 +242,7 @@ int CDriverPc98::Render(int16_t* stereo, int frames)
 		if ((++wdSamples_ & 511) == 0)
 			WatchdogTick();
 	}
-	return frames;
+	return drained + frames;
 }
 
 /* Seek は未対応 */

@@ -605,8 +605,22 @@ int CEmuSessionOpen(CEmuSession* s, const wchar_t* path, unsigned titleCode, DWO
 	const wchar_t* openPath = physical[0] ? physical : path;
 	const DWORD rate = sampleRate ? sampleRate : 44100;
 
-	/* 同じ zip なら LoadRoms/boot しない。トグル／SE／曲切替は OverlayTitle。 */
-	if (CEmuSessionKindKeepsEngine(s->kind)
+	const int loadOnly = CEmuDriverIsNextOpenLoadOnly();
+	if (loadOnly)
+		s->loadOnly = 1;
+
+	/* 同じ zip なら LoadRoms/boot しない。トグル／SE／曲切替は OverlayTitle。
+	   ロード専用はブートし直してロゴを出すので Overlay しない。
+	   音源モード (GAMEBLASTER vs AdLib 等) が変わったら Overlay せず boot し直す。 */
+	char overlayPref[CEMU_MODE_TAG] = {};
+	int overlaySameMode = 1;
+	if (CEmuModePrefGet(openPath, overlayPref, (int)sizeof(overlayPref)) && overlayPref[0]) {
+		char curTag[CEMU_MODE_TAG] = {};
+		if (!s->game || !CEmuModeTagFromEntry(s->game, curTag, (int)sizeof(curTag))
+			|| !CEmuModeTagsEqual(curTag, overlayPref))
+			overlaySameMode = 0;
+	}
+	if (!loadOnly && overlaySameMode && CEmuSessionKindKeepsEngine(s->kind)
 		&& CEmuSessionSameZip(s, openPath)
 		&& (s->sampleRate == 0 || s->sampleRate == (int)rate)) {
 		const int tog = (s->game && CEmuGameTitleCodeIsToggle(s->game, titleCode)) ? 1 : 0;
@@ -621,6 +635,8 @@ int CEmuSessionOpen(CEmuSession* s, const wchar_t* path, unsigned titleCode, DWO
 	}
 
 	CEmuSessionClose(s);
+	if (loadOnly)
+		s->loadOnly = 1;
 	wcsncpy_s(s->path, openPath, _TRUNCATE);
 	s->sampleRate = sampleRate ? sampleRate : 44100;
 	s->titleCode = titleCode;
@@ -631,7 +647,7 @@ int CEmuSessionOpen(CEmuSession* s, const wchar_t* path, unsigned titleCode, DWO
 	const wchar_t* zipPath = zipOut[0] ? zipOut : openPath;
 	s->game = ge;
 	if (ge && CEmuGameTitleCodeIsToggle(ge, titleCode)) {
-		if (!CEmuTogglePrefHas(zipPath, titleCode))
+		if (!loadOnly && !CEmuTogglePrefHas(zipPath, titleCode))
 			CEmuTogglePrefFlip(zipPath, titleCode);
 		titleCode = CEmuSessionFirstPlayableTitle(ge);
 		s->titleCode = titleCode;
@@ -693,7 +709,7 @@ int CEmuSessionOpen(CEmuSession* s, const wchar_t* path, unsigned titleCode, DWO
 			char tag[CEMU_MODE_TAG];
 			if (!cands[i] || !CEmuModeTagFromEntry(cands[i], tag, (int)sizeof(tag)))
 				continue;
-			if (_stricmp(tag, preferTag) != 0) continue;
+			if (!CEmuModeTagsEqual(tag, preferTag)) continue;
 			filtered[nf++] = cands[i];
 		}
 		if (nf > 0) {
@@ -735,14 +751,17 @@ static void CEmuSessionWatchHardSilence(CEmuSession* s, short* stereo, int frame
 		return;
 
 	const int rate = s->sampleRate > 0 ? s->sampleRate : 44100;
+	const int loadOnly = s->loadOnly ? 1 : 0;
 	/* 起動・曲頭の無音を誤判定しない。鳴った後 5 秒無音で終了。
 	   一度も鳴らない壊れたタイトルは 25 秒で打ち切り。
 	   クロスフェードは終端が先に要るので、2 秒無音が続いた時点で
-	   残り無音分を length として公開する（曲が戻れば取り消す）。 */
-	const uint32_t settleNeed = (uint32_t)rate * 4u;
-	const uint32_t silenceNeed = (uint32_t)rate * 5u;
-	const uint32_t neverHeardNeed = (uint32_t)rate * 25u;
-	const uint32_t xfadeArmNeed = (uint32_t)rate * 2u;
+	   残り無音分を length として公開する（曲が戻れば取り消す）。
+	   ロード専用はロゴだけ。固定秒数では切らず、鳴ったあと 2 秒無音で止める。
+	   一度も鳴らない起動は 20 秒で打ち切り。 */
+	const uint32_t settleNeed = loadOnly ? 0u : (uint32_t)rate * 4u;
+	const uint32_t silenceNeed = loadOnly ? (uint32_t)rate * 2u : (uint32_t)rate * 5u;
+	const uint32_t neverHeardNeed = loadOnly ? (uint32_t)rate * 20u : (uint32_t)rate * 25u;
+	const uint32_t xfadeArmNeed = loadOnly ? (uint32_t)rate / 2u : (uint32_t)rate * 2u;
 	const int heardThresh = 500; /* 実曲。超低音ハミングはこれ未満 */
 	const int noiseFloor = 80;
 
@@ -818,9 +837,11 @@ int CEmuSessionRender(CEmuSession* s, short* stereo, int frames)
 {
 	if (!s || !stereo || frames <= 0) return 0;
 	if (InterlockedExchange((LONG*)&s->overlayPend, 0)) {
+		s->loadOnly = 0;
 		const int tog = (s->game && CEmuGameTitleCodeIsToggle(s->game, s->overlayCode)) ? 1 : 0;
 		CDriver* drv = CEmuSessionDriver(s);
 		if (drv) {
+			drv->loadOnly = 0;
 			drv->overlayMix = s->overlayMix ? 1 : 0;
 			drv->OverlayTitle(s->overlayCode);
 			drv->overlayMix = 0;

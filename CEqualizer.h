@@ -1,6 +1,7 @@
 ﻿#pragma once
 #include "afxdialogex.h"
 #include "CCustomControl.h"
+#include "UiTickPump.h"
 
 // EqKey ワーカー解析完了 → UI スレッドでコード表示更新（WM_TIMER 飢餓回避）
 #ifndef WM_EQ_KEY_UPDATE
@@ -138,6 +139,7 @@ public:
 	void ApplyKeyCodesUi();
 	void SyncSlidersFromSavedata();
 	afx_msg LRESULT OnEqKeyUpdate(WPARAM wParam, LPARAM lParam);
+	afx_msg LRESULT OnUiTick(WPARAM wParam, LPARAM lParam);
 	afx_msg void OnDestroy();
 	afx_msg void OnClose();
 	afx_msg void OnSize(UINT nType, int cx, int cy);
@@ -158,4 +160,5 @@ public:
 	afx_msg void OnContextMenu(CWnd* pWnd, CPoint point);
 	afx_msg void OnSuggestEqFromKey();
 	afx_msg void OnToggleKeyEqAuto();
+	UiTickPump m_tickPump;
 };

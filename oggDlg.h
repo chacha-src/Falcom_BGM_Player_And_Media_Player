@@ -30,6 +30,7 @@ struct DsOpTryLock {
 };
 /* 旧独立 FM モニタ旗 → MIDI モニタ旗。fmmonwindow=1 なら midimonwindow=1 にして FM 旗は落とす。 */
 void OggMigrateFmMonToMidiMonFlag();
+void FmMonGeomPersistOpen(int open);
 
 #ifndef WM_TIMERP_VSYNC_TICK
 #define WM_TIMERP_VSYNC_TICK (WM_APP + 70)
@@ -554,6 +555,8 @@ float PitchScaleFromPos(int pitchPos);
 int TempoPosFromPercent(float percent); // 表示% → スライダー 0..400
 void OggResetRubberBandStretcher();
 void RequestPlaybackRestart(HWND hwnd = NULL);
+void CEmuPendingLoadSetPlaylistRow(int row);
+void CEmuPendingLoadPlayNow();
 void OggNoteResumePromptDropped();
 void OggCancelPendingPlaybackRestart(); // 停止など: 積んだ再演奏を捨てる
 BOOL OggIsResumePromptActive();         // 途中再生のはい/いいえ/キャンセル表示中

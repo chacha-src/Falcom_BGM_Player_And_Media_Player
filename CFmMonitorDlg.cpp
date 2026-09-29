@@ -1074,6 +1074,7 @@ BEGIN_MESSAGE_MAP(CFmMonitorDlg, CCustomBlurDialogExBase)
 	ON_WM_SHOWWINDOW()
 	ON_BN_CLICKED(IDC_FM_HELP, OnBnClickedHelp)
 	ON_MESSAGE(WM_APP + 0x46, OnComposeDone)
+	ON_MESSAGE(WM_UITICK_VSYNC, OnUiTick)
 END_MESSAGE_MAP()
 
 BOOL CFmMonitorDlg::PreCreateWindow(CREATESTRUCT& cs)
@@ -1094,7 +1095,6 @@ BOOL CFmMonitorDlg::OnInitDialog()
 		CCC_CaptionUnregister(m_hWnd);
 		FmHideDialogButtons(this);
 		GpuDx11_Startup();
-		SetTimer(1, 16, NULL);
 		m_fullDraw = 1;
 		m_dirtyHead = m_dirtyHex = m_dirtyPanels = m_dirtyKeys = 1;
 		return TRUE;
@@ -1125,7 +1125,8 @@ BOOL CFmMonitorDlg::OnInitDialog()
 	LayoutHelpBtn();
 	ModifyStyle(0, WS_CLIPCHILDREN);
 	GpuDx11_Startup();
-	SetTimer(1, 16, NULL);
+	SetTimer(1, 500, NULL);
+	m_tickPump.Start(m_hWnd);
 	m_fullDraw = 1;
 	m_dirtyHead = m_dirtyHex = m_dirtyPanels = m_dirtyKeys = 1;
 	StartComposeThread();
@@ -1174,6 +1175,7 @@ bool CFmMonitorDlg::EnsureFrameBuffer(CDC& refDC, int w, int h)
 
 void CFmMonitorDlg::OnDestroy()
 {
+	m_tickPump.Stop();
 	StopComposeThread();
 	if (!m_hosted)
 		PersistGeom();
@@ -1326,15 +1328,18 @@ BOOL CFmMonitorDlg::OnEraseBkgnd(CDC* pDC)
 	return TRUE;
 }
 
+LRESULT CFmMonitorDlg::OnUiTick(WPARAM, LPARAM)
+{
+	if (!m_hosted)
+		PumpSyncNow();
+	m_tickPump.Ack();
+	return 0;
+}
+
 void CFmMonitorDlg::OnTimer(UINT_PTR nIDEvent)
 {
 	if (nIDEvent == 1) {
 		if (m_hosted) {
-			extern int playy;
-			extern int plf;
-			extern int playf;
-			if (playy != 0 || plf == 1 || playf == 1)
-				PumpSyncNow();
 			CDialogEx::OnTimer(nIDEvent);
 			return;
 		}
@@ -1348,11 +1353,6 @@ void CFmMonitorDlg::OnTimer(UINT_PTR nIDEvent)
 		/* 再生中は timerp が PumpSyncNow する。MIDI モニタ同時表示では
 		   こちらの 16ms パルスを重ねると鍵盤が遅れる。
 		   停止中は IdlePulse しない（モニタを開いたままのアイドル負荷）。 */
-		extern int playy;
-		extern int plf;
-		extern COggDlg* og;
-		if (playy != 0 && !(plf == 1 && og && og->MidiMonitorIsVisible()))
-			IdlePulse();
 	}
 	CCustomBlurDialogExBase::OnTimer(nIDEvent);
 }
@@ -2150,16 +2150,13 @@ void CFmMonitorDlg::PersistGeom()
 void CFmMonitorDlg::DetachForDestroy()
 {
 	if (m_hosted) {
+		m_tickPump.Stop();
 		KillTimer(1);
 		return;
 	}
-	m_userClosing = 0;
-	savedata.midimonwindow = 1;
-	savedata.fmmonwindow = 0;
-	PersistGeom();
+	m_tickPump.Stop();
 	KillTimer(1);
-	DatArc_InvalidateLeaf(L"oggYSEDbgmu.dat");
-	OggPersistSaveDatNow();
+	PersistGeom();
 }
 
 void CFmMonitorDlg::OnClose()
@@ -6194,10 +6191,6 @@ void CFmMonitorDlg::PumpSyncNow()
 
 	if (m_hosted) {
 		Invalidate(FALSE);
-		/* timerp が WM_TIMERP を積み続けると WM_PAINT が飢える。
-		   ファイル情報の入れ子ループだけが描いていた。即 Present する。 */
-		if (GetStyle() & WS_VISIBLE)
-			UpdateWindow();
 		return;
 	}
 

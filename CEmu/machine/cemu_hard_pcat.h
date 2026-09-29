@@ -58,6 +58,7 @@ public:
 	void MidiForceUart(int on) { mpuUart_ = on ? 1 : 0; }
 	unsigned SilpSongBytes() const { return silpSongBytes_; }
 	void MidiCaptureReset();
+	void MidiCaptureCompact(unsigned consumed);
 
 	CEmuDos98* Dos() { return &dos_; }
 

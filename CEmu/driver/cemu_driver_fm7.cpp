@@ -522,7 +522,10 @@ int CDriverFm7::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned
 	}
 	booted_ = 1;
 	hw_->RefreshFd03Polarity();
-	TriggerSong();
+	if (!loadOnly)
+		TriggerSong();
+	else
+		triggered_ = 1;
 	/* PATCH に $FD58/$FD80 再生を消費させ、IRQ ベクタを再マウントさせる */
 	{
 		mc6809__t* cpu = hw_->Mc6809();

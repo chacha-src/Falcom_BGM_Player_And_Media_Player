@@ -1,5 +1,6 @@
 ﻿#include "StdAfx.h"
 #include "cemu_hard_pc98.h"
+#include "../driver/cemu_driver.h"
 #include "../cemu_rhythm.h"
 #include "../chip/cemu_chip_opna.h"
 #include "../chip/cemu_chip_opl.h"
@@ -1641,6 +1642,12 @@ CHardPc98::CHardPc98()
 	, pumpMusicMidi0_(0)
 	, pumpMusicTimer0_(0)
 	, pumpMusicCycle0_(0)
+	, bootPcmOn_(0)
+	, bootPcm_(NULL)
+	, bootPcmCap_(0)
+	, bootPcmLen_(0)
+	, bootPcmPos_(0)
+	, bootPcmAcc_(0)
 {
 	hardKind = KIND_PC98;
 	dosSong_[0] = 0;
@@ -1873,8 +1880,14 @@ int CHardPc98::Init(const CEmuGameEntry* ge, int sampleRate)
 	int clockmul = CEmuParseOptHex(ge, "clockmul", 0);
 	if (clockmul <= 0) clockmul = CEmuParseOptHex(ge, "clock_mul", 1);
 	if (clockmul < 1) clockmul = 1;
-	/* hootrip は CPU を 8 MHz に保つ。clockmul は報告のみ。8 MHz のまま。 */
-	(void)clockmul;
+	/* hootrip は CPU を 8 MHz に保つ。clockmul は報告のみ。8 MHz のまま。
+	   SASAMI.EXE は例外: INT08 を PIT ch0 カウント「テンポ/16」前後（20〜40 kHz）で回し、
+	   32 回に 1 回シーケンサを進める。8 MHz 系では CLK_H3 が TEMPO>>5（45）を書く。
+	   8 MHz では ISR だけで CPU を使い切り、常駐（AH=31）前の待ちが終わらず
+	   次の hoot 糊 COM がロードできない。カタログ clockmul（386 以上の実機相当）に従う。 */
+	static const char* kSasami[] = { "sasami", NULL };
+	if (DosShellStarts(ge, kSasami))
+		cpuHz_ = PC98_CPU_HZ * (unsigned)clockmul;
 
 	bootCs_ = CEmuParseOptHex(ge, "bootcs", 0);
 	bootIp_ = CEmuParseOptHex(ge, "bootip", 0);
@@ -2040,6 +2053,7 @@ void CHardPc98::Shutdown()
 	}
 	np2HaveCpu_ = 0;
 	FreeBanks();
+	BootPcmFree();
 	if (chip_) { CEmuChipYm2608Destroy(chip_); chip_ = NULL; }
 	if (opl_) { CEmuChipYm3812Destroy(opl_); opl_ = NULL; }
 	delete[] midiBytes_; midiBytes_ = NULL;
@@ -3736,6 +3750,20 @@ void CHardPc98::MidiCaptureReset()
 	g_mpuLastSt = 0xff;
 }
 
+void CHardPc98::MidiCaptureCompact(unsigned consumed)
+{
+	if (!midiBytes_ || !midiDelta_ || consumed == 0)
+		return;
+	if (consumed >= midiCount_) {
+		midiCount_ = 0;
+		return;
+	}
+	const unsigned left = midiCount_ - consumed;
+	memmove(midiBytes_, midiBytes_ + consumed, left);
+	memmove(midiDelta_, midiDelta_ + consumed, left * sizeof(uint32_t));
+	midiCount_ = left;
+}
+
 /* CHardPc98::MidiPushAck の実装 */
 void CHardPc98::MidiPushAck(uint8_t v)
 {
@@ -3748,6 +3776,9 @@ void CHardPc98::MidiCaptureByte(uint8_t v)
 {
 	if (!midiBytes_ || !midiDelta_) return;
 	if (midiCount_ >= (unsigned)CEMU_PC98_MIDI_CAP) return;
+	/* 空バッファ先頭の 00 洪水（FMP プローブ / 未武装時のバス）は捨てる */
+	if (midiCount_ == 0 && v == 0 && s_pc98MidiRun == 0)
+		return;
 	uint32_t delta = 0;
 	if (cpuHz_ > 0) {
 		const uint64_t dc = cpuCycles_ - midiLastCycle_;
@@ -3816,6 +3847,23 @@ void CHardPc98::MidiCaptureByte(uint8_t v)
 				s_pc98MidiNeed = 2;
 		}
 	}
+}
+
+/* 8251 TX / INT 19h 送信 → 既存 UART キャプチャ（MPU コマンド／WSD は通さない） */
+void CHardPc98::RsMidiTx(uint8_t data)
+{
+	if (!midiBytes_ || !midiDelta_)
+		MidiCaptureReset();
+	midiPortOutCount_++;
+	/* FMP /R の GS 初期化はシェル中に 30h へ出る。E0D0 の 00h 洪水ゲートはここには掛けない。 */
+	if (modeMidi_ || midiCapArmed_ || mpuUart_)
+		MidiCaptureByte(data);
+}
+
+extern "C" void CEmuPc98RsMidiTx(uint8_t data)
+{
+	if (g_pc98Active)
+		g_pc98Active->RsMidiTx(data);
 }
 
 /* CHardPc98::MidiDataOut の実装 */
@@ -4365,11 +4413,14 @@ uint8_t CHardPc98::PortIn(uint16_t port)
 		/* 8251 status（TxRDY|TxEMPTY）／システムポート: プリンタ非ビジー */
 		return 0x06;
 	case 0x30:
+	case 0xB0:
+		/* RS-MIDI 8251 データ。Rx は無し（ゲストが MIDI IN と誤読しない）。 */
+		return 0x00;
 	case 0x32:
-		/* FMX MIDI 8251 データ 30h／ステータス 32h。33h は PPI_B なので触らない。 */
-		if (modeMidi_ || mpuUart_)
-			return 0x05;
-		return 0xff;
+	case 0xB2:
+		/* RS-MIDI 8251 ステータス: TxRDY|TxEMPTY|DSR。0x05 は DSR 無しで
+		   FMP /R 等が「基板無し」と判定していた。33h は PPI_B。 */
+		return 0x85;
 	case WOLF_SYNC0:
 		if (modeMidi_ || mpuUart_)
 			return MidiDataIn();
@@ -4591,9 +4642,12 @@ void CHardPc98::PortOut(uint16_t port, uint8_t data)
 	case HOST_P3: hostParam3_ = (hostParam3_ & 0xff00) | data; break;
 	case HOST_P3 + 1: hostParam3_ = (hostParam3_ & 0x00ff) | ((uint16_t)data << 8); break;
 	case 0x30:
-		/* FMX MIDI 8251 データ。コマンド 32h（40/4E/31）は MIDI ではない。 */
-		if (modeMidi_ || mpuUart_)
-			MidiDataOut(data);
+	case 0xB0:
+		/* RS-MIDI 8251 データ。32h/B2h の 40/4E/31 はモード／コマンド。 */
+		RsMidiTx(data);
+		break;
+	case 0x32:
+	case 0xB2:
 		break;
 	case WOLF_SYNC0:
 		/* midiout / FMP -m: UART MIDI をキャプチャ。Wolfteam FM: コマンドブリッジ */
@@ -4742,6 +4796,9 @@ int CHardPc98::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCo
 	/* DOS 分岐前のリズム ROM: 空 ROM の ADPCM-A 読はラップするアキュムレータランプに復号され、FMP/PMD ドラムが全 pc98dos タイトルでのこぎりノイズになった。 */
 	if (opnaMode && chip_)
 		CEmuLoadExternalYm2608Adpcm(chip_);
+
+	if (CEmuDriverIsNextOpenLoadOnly() && !modeMidi_)
+		BootPcmBegin();
 
 	if (isDos_)
 		return BootDos(fs, ge, titleCode);
@@ -9292,6 +9349,9 @@ int CHardPc98::BootDos(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCod
 	pmdOpnIrq_ = CEmuPc98GeIsPmd(ge);
 	uint8_t* mem = np2_mem();
 	if (!mem) return 0;
+	/* ロード専用 MIDI ジングルはシェル中に UART へ出る。0x00 洪水は空キャプチャの先頭 00 を捨てる。 */
+	if (CEmuDriverIsNextOpenLoadOnly() && modeMidi_)
+		midiCapArmed_ = 1;
 
 	np2_reset();
 	np2_set_adrsmask(0x000FFFFFu);
@@ -9994,7 +10054,11 @@ int CHardPc98::BootDos(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCod
 				WolfBridgeReset();
 			} else
 				FmpPatchMidiRetrigger(np2_mem());
-			MidiCaptureReset();
+			if (CEmuDriverIsNextOpenLoadOnly()) {
+				if (midiCount_ > 0 && midiDelta_)
+					midiDelta_[0] = 0;
+			} else
+				MidiCaptureReset();
 		} else {
 			mpuUart_ = 0;
 			midiCapArmed_ = 1;
@@ -10022,6 +10086,95 @@ int CHardPc98::BootDos(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCod
 	return 1;
 }
 
+enum { BOOT_PCM_MAX_SECONDS = 16 };
+
+static int BootPcmClamp16(int v)
+{
+	if (v > 32767) return 32767;
+	if (v < -32768) return -32768;
+	return v;
+}
+
+void CHardPc98::BootPcmFree()
+{
+	bootPcmOn_ = 0;
+	if (bootPcm_) {
+		free(bootPcm_);
+		bootPcm_ = NULL;
+	}
+	bootPcmCap_ = 0;
+	bootPcmLen_ = 0;
+	bootPcmPos_ = 0;
+	bootPcmAcc_ = 0;
+}
+
+void CHardPc98::BootPcmBegin()
+{
+	bootPcmOn_ = 1;
+	bootPcmLen_ = 0;
+	bootPcmPos_ = 0;
+	bootPcmAcc_ = 0;
+}
+
+void CHardPc98::BootPcmStopCapture()
+{
+	bootPcmOn_ = 0;
+}
+
+void CHardPc98::BootPcmTick(uint64_t cpuCycles)
+{
+	if (!bootPcmOn_ || !chip_ || cpuCycles == 0) return;
+	const int rate = sampleRate_ > 0 ? sampleRate_ : 44100;
+	if (cpuHz_ < 1 || rate < 1) return;
+	const int limit = rate * 2 * BOOT_PCM_MAX_SECONDS;
+	bootPcmAcc_ += (int64_t)cpuCycles * (int64_t)rate;
+	while (bootPcmAcc_ >= (int64_t)cpuHz_) {
+		bootPcmAcc_ -= (int64_t)cpuHz_;
+		if (bootPcmLen_ + 2 > bootPcmCap_) {
+			if (bootPcmCap_ >= limit) {
+				bootPcmOn_ = 0;
+				return;
+			}
+			int want = bootPcmCap_ ? bootPcmCap_ * 2 : rate * 2 / 4;
+			if (want > limit) want = limit;
+			int16_t* grown = (int16_t*)realloc(bootPcm_, (size_t)want * sizeof(int16_t));
+			if (!grown) {
+				bootPcmOn_ = 0;
+				return;
+			}
+			bootPcm_ = grown;
+			bootPcmCap_ = want;
+		}
+		int16_t* p = bootPcm_ + bootPcmLen_;
+		chip_->Render(p, 1);
+		MixBeep(p, 1);
+		if (opl_) {
+			int16_t o[2] = { 0, 0 };
+			opl_->Render(o, 1);
+			const int oL = o[0], pL = p[0], pR = p[1];
+			p[0] = (int16_t)BootPcmClamp16(pL / 4 + oL);
+			p[1] = (int16_t)BootPcmClamp16(pR - pR / 4 + o[1] / 4);
+		}
+		bootPcmLen_ += 2;
+	}
+}
+
+int CHardPc98::BootPcmDrain(int16_t* stereo, int frames)
+{
+	if (!stereo || frames <= 0 || !bootPcm_ || bootPcmPos_ >= bootPcmLen_)
+		return 0;
+	const int avail = (bootPcmLen_ - bootPcmPos_) / 2;
+	int n = frames;
+	if (n > avail) n = avail;
+	memcpy(stereo, bootPcm_ + bootPcmPos_, (size_t)n * 2u * sizeof(int16_t));
+	bootPcmPos_ += n * 2;
+	if (bootPcmPos_ >= bootPcmLen_) {
+		bootPcmLen_ = 0;
+		bootPcmPos_ = 0;
+	}
+	return n;
+}
+
 /* CHardPc98::AdvanceOpnClocks の実装 */
 void CHardPc98::AdvanceOpnClocks(uint64_t cpuCycles)
 {
@@ -10031,6 +10184,7 @@ void CHardPc98::AdvanceOpnClocks(uint64_t cpuCycles)
 	const uint64_t ot = opnPumpResidual_ / (uint64_t)cpuHz_;
 	opnPumpResidual_ %= (uint64_t)cpuHz_;
 	if (ot) chip_->AdvanceClocks(ot);
+	BootPcmTick(cpuCycles);
 }
 
 /* IRQ 配送付きで CPU を endCycle まで進める */
@@ -10551,6 +10705,30 @@ void CHardPc98::PumpCycles(uint64_t endCycle)
 	}
 }
 
+/* hoot の再生コマンド（INT funcvect）は IRQ0 より低い優先度。実 8259 は IRQ0 の
+   in-service 中に届けない。SASAMI の INT08 は STI 後 EOI 前が長く、その間に
+   INT 7F → AH=9 停止待ち（MODE_F が 0 に戻るのを待つ）へ入ると、IRQ0 が
+   二度と来ず固まる（BOSSSYS / MS003SYS が無音）。ISR が戻るまで進めてから撃つ。
+   IRET しない ISR でも止まらないよう 5ms で打ち切る。
+   ソフト PIC の in-service は SS:SP 一致でしか解けないので、ISR が別スタックへ
+   戻るドライバ（beep 系 BGM 等）では待ちが 5ms 丸ごと入りタイミングが変わる。
+   全 pc98 の A/B で悪化したため SASAMI だけに掛ける。 */
+void CHardPc98::RaiseFuncVect()
+{
+	static const char* kSasami[] = { "sasami", NULL };
+	const int waitIsr = DosShellStarts(dosGe_, kSasami);
+	const uint64_t isrEnd = cpuCycles_ + (uint64_t)cpuHz_ / 200ull;
+	while (waitIsr && g_pitInService && cpuCycles_ < isrEnd) {
+		const int32_t cyc = np2_step();
+		const uint64_t u = (cyc > 0) ? (uint64_t)cyc : 1ull;
+		cpuCycles_ += u;
+		TickSide(u);
+		AdvanceOpnClocks(u);
+		DeliverIrqs();
+	}
+	np2_interrupt((uint8_t)funcVect_);
+}
+
 /* 曲再生をトリガする */
 int CHardPc98::TriggerPlay(unsigned titleCode)
 {
@@ -10838,7 +11016,7 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 		MdrHostBindSong(np2_mem(), &dos_, dosGe_,
 			dosGe_ ? SelectedDosSong(dosGe_, titleCode) : NULL);
 		np2_reg_set(NP2_R_FLAGS, (uint16_t)(np2_reg_get(NP2_R_FLAGS) | 0x0200));
-		np2_interrupt((uint8_t)funcVect_);
+		RaiseFuncVect();
 		MmdSoundArmLoop(np2_mem(), dos_,
 			dosSong_[0] ? dosSong_
 			: (dosGe_ ? SelectedDosSong(dosGe_, titleCode) : NULL));
@@ -11223,7 +11401,7 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 				(uint16_t)(np2_reg_get(NP2_R_FLAGS) | 0x0200));
 			MdrHostBindSong(np2_mem(), &dos_, dosGe_,
 				dosGe_ ? SelectedDosSong(dosGe_, titleCode) : NULL);
-			np2_interrupt((uint8_t)funcVect_);
+			RaiseFuncVect();
 			MdrPlantChannels(np2_mem());
 			PumpCycles(cpuCycles_ + (drainBudget / 2ull));
 		}
@@ -11974,7 +12152,7 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 				const uint8_t tmrBefore = g_lastTimerCtrl;
 				extCmd_ = 2;
 				np2_reg_set(NP2_R_FLAGS, (uint16_t)(np2_reg_get(NP2_R_FLAGS) | 0x0200));
-				np2_interrupt((uint8_t)funcVect_);
+				RaiseFuncVect();
 				PumpCycles(cpuCycles_ + (drainBudget / 2ull));
 				const int wasRunning = (tmrBefore & 0x0c) != 0;
 				const int nowStopped = (g_lastTimerCtrl & 0x0c) == 0;
@@ -11984,7 +12162,7 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 						BindDosTriggerSong(dosGe_, titleCode);
 					np2_reg_set(NP2_R_FLAGS,
 						(uint16_t)(np2_reg_get(NP2_R_FLAGS) | 0x0200));
-					np2_interrupt((uint8_t)funcVect_);
+					RaiseFuncVect();
 					PumpCycles(cpuCycles_ + (drainBudget / 2ull));
 				}
 			}
@@ -12570,7 +12748,7 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 		extParam_ = 0;
 		extSong_ = (uint16_t)(titleCode & 0xffff);
 		np2_reg_set(NP2_R_FLAGS, (uint16_t)(np2_reg_get(NP2_R_FLAGS) | 0x0200));
-		np2_interrupt((uint8_t)funcVect_);
+		RaiseFuncVect();
 		DrainInterrupt(drainBudget);
 		(void)loaded;
 		return 1;
@@ -12599,7 +12777,7 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 		extParam_ = (uint16_t)(song & 0xff);
 		extSong_ = (uint16_t)(titleCode & 0xffff);
 		np2_reg_set(NP2_R_FLAGS, (uint16_t)(np2_reg_get(NP2_R_FLAGS) | 0x0200));
-		np2_interrupt((uint8_t)funcVect_);
+		RaiseFuncVect();
 		DrainInterrupt(drainBudget);
 		/* INT14/INT08 は再生 far がテーブルを組んだあと。先に植えると vd PIT ISR が [347E] 未初期化のまま 12k 書きする。 */
 		PatchGlodiaOpnIsr(np2_mem(), dataAddr_, bootCs_, &picMask_);
@@ -12682,7 +12860,7 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 			extCmd_ = 1;
 			extSong_ = (uint16_t)(titleCode & 0xffff);
 			WolfReplantGlueInt7f(mem);
-			np2_interrupt((uint8_t)funcVect_);
+			RaiseFuncVect();
 			DrainInterrupt(drainBudget);
 			/* 糊 cmd1 が INT4A に届かない 000_BOOT（apros INT7F=IRET）向け。フック済みなら AX=曲で再生 API を直接撃つ。 */
 			if (IvtHooked(0x4A, 0)) {
@@ -12743,7 +12921,7 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 	/* KOEI98 糊（funcvect INT 40h）: cmd0=再生、cmd2=停止。タイトル上位語は音楽バンクセグメント（EXT 0x7E4）。下位語は曲（0x7E2）。曲データは既にパック済みコード ROM に居る — dataaddr 先読み無し。 */
 	if (koei98_ || funcVect_ == 0x40) {
 		extCmd_ = 0;
-		np2_interrupt((uint8_t)funcVect_);
+		RaiseFuncVect();
 		DrainInterrupt(drainBudget);
 		return 1;
 	}
@@ -12785,7 +12963,7 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 		np2_reg_set(NP2_R_FLAGS,
 			(uint16_t)(np2_reg_get(NP2_R_FLAGS) | 0x0200));
 		picMask_ = (uint8_t)(picMask_ & 0xfeu);
-		np2_interrupt((uint8_t)funcVect_);
+		RaiseFuncVect();
 		DrainInterrupt(drainBudget);
 		np2_reg_set(NP2_R_FLAGS,
 			(uint16_t)(np2_reg_get(NP2_R_FLAGS) | 0x0200));
@@ -12847,11 +13025,11 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 
 			np2_reg_set(NP2_R_FLAGS, 0x0202);
 			extCmd_ = 0;
-			np2_interrupt((uint8_t)funcVect_);
+			RaiseFuncVect();
 			DrainInterrupt(drainBudget / 4);
 			if (loaded || dataAddr_ == 0) {
 				extCmd_ = 1;
-				np2_interrupt((uint8_t)funcVect_);
+				RaiseFuncVect();
 				DrainInterrupt(drainBudget);
 			}
 			return 1;
@@ -12873,13 +13051,13 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 			extCmd_ = 0;
 			np2_reg_set(NP2_R_FLAGS,
 				(uint16_t)(np2_reg_get(NP2_R_FLAGS) | 0x0200));
-			np2_interrupt((uint8_t)funcVect_);
+			RaiseFuncVect();
 			DrainInterrupt(drainBudget);
 			extSong_ = 0; /* コマンド = 再生 */
 			extCmd_ = 1;  /* セレクタ = INT7E + INT41 AH=2 */
 			np2_reg_set(NP2_R_FLAGS,
 				(uint16_t)(np2_reg_get(NP2_R_FLAGS) | 0x0200));
-			np2_interrupt((uint8_t)funcVect_);
+			RaiseFuncVect();
 			DrainInterrupt(drainBudget);
 			if (!IvtHooked(PC98_OPN_IRQ_VEC, 0)) {
 				for (int v = 0; v < 2; v++) {
@@ -12914,7 +13092,7 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 
 	/* INT 1C ドライバは BIOS が既に IRQ0 を進めていることを期待。こちらは代わりに PIT を組まないので、待っている tick を与える。OPN タイマを持たないときだけ — チップ駆動ドライバには不要で、余分な tick は二重駆動になる。 */
 	extCmd_ = 0;
-	np2_interrupt((uint8_t)funcVect_);
+	RaiseFuncVect();
 	DrainInterrupt(drainBudget);
 	if (g_sddLoadSeg) {
 		uint8_t* smem = np2_mem();
@@ -12957,7 +13135,7 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 	}
 	if (loaded || lastSongLoadOk_) {
 		extCmd_ = 1;
-		np2_interrupt((uint8_t)funcVect_);
+		RaiseFuncVect();
 		DrainInterrupt(drainBudget);
 		/* cmd1 後、一部糊（Ys MANPRG、Beast3、Wolf SS）は YM ISR を INT14/15 だけに残す。DeliverIrqs 用に INT0B へミラー。単独 IRET stub は飛ばす（DOFMD/BRANM はシリアル INT14 を 0000:0500 にパーク — それを INT0B へコピーすると MSC の OPN ISR を消す）。 */
 		uint8_t* mem = np2_mem();
@@ -12994,7 +13172,7 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 	/* SORC98 糊のみ（boot CS=0、曲 @3000/VA@11800、wstimer）: INT 7Fh は cmd0→INT D2 AL=3（開始）、cmd1→AL=0（チャネル init）。既定の cmd0 のち cmd1 は開始を消す — cmd0 を再発行し再生を定着。 [085A].7 を強制クリアしない（旧 TickSide ハンマー）: 毎量子 CALL 1CEE が走り SSG3 R0A が 0x0F で固まった。ネイティブ BIOS は .7 をセットのまま OPN Timer B で音楽を進める（hoot 正しい SSG ゲート）。他 wstimer ゲーム（Ys CS=0160 等）には適用しない。 */
 	if (sorcGlue_) {
 		extCmd_ = 0;
-		np2_interrupt((uint8_t)funcVect_);
+		RaiseFuncVect();
 		DrainInterrupt(drainBudget / 2);
 		/* ここで、または TickSide で [085A] bit7 をクリアしない。BIOS は bit7 で INT08→CALL 1CEE をゲート。強制クリアは FM を進めたが SSG3 音量を 0x0F で固めた（hoot 正しいゲートはネイティブスキップが要る）。[085A].7 がセットのまま音楽は OPN Timer B で続く。 */
 		/* ブートが IRQ0 をマスクしたままでも PIT tick が使えるようにする */
@@ -13047,7 +13225,7 @@ void CHardPc98::DrainInterrupt(uint64_t budgetCycles)
 int CHardPc98::TriggerStop()
 {
 	extCmd_ = 2;
-	np2_interrupt((uint8_t)funcVect_);
+	RaiseFuncVect();
 	return 1;
 }
 

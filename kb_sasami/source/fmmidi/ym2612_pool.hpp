@@ -2,8 +2,9 @@
 #include <stdint.h>
 
 class note;
+struct tone_color;
 
-/* YM2612 x4 (24 voices). WOPN instruments stay in chip register form. */
+/* YM2612 x10 (60 voices). WOPN instruments stay in chip register form. */
 class Ym2612Pool {
 public:
     Ym2612Pool();
@@ -12,7 +13,7 @@ public:
     struct Impl;
     bool ready() const;
     void reset_render_frame();
-    note* note_on(int program, int key, int velocity, double freq_mul, int chorus_send);
+    note* note_on(int program, int key, int velocity, double freq_mul, const tone_color& color);
 private:
     Impl* impl;
 };

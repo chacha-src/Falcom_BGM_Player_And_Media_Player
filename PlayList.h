@@ -36,6 +36,7 @@ public:
 	int nnn;
 	int pnt,pnt1;
 	int playcnt;
+	int m_ctxHit; // 右クリックした行。メニュー後の FOCUSED は再生中行に戻ることがある
 	int m_tempMode; // 1=一時PL(Saveしない)。savedata.mpTempOpen と同期して使う
 
 	void SIcon(int i);
@@ -318,6 +319,7 @@ enum {
 	PL_CTX_WRD_WIN = 123, // ウィンドウメニュー: WRD画面トグル
 	PL_CTX_CEMUTOGGLE_BASE = 124, // CEmu zip カタログトグル (Food empty / TO BOSS…)
 	PL_CTX_CEMUTOGGLE_LAST = PL_CTX_CEMUTOGGLE_BASE + 7, // up to 8 toggles
+	PL_CTX_CEMULOAD = 42490, // CEmu zip を配置してドライバ初期化のみ（演奏しない）
 	PL_CTX_MOVE_BASE = 42500,
 	PL_CTX_COPY_BASE = 43500,
 	PL_CTX_MOVE_MAX = PL_CTX_MOVE_BASE + 999,

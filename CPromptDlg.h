@@ -1,6 +1,7 @@
 ﻿#pragma once
 
 #include "CCustomControl.h"
+#include "UiTickPump.h"
 #include "resource.h"
 
 class CPromptDlg : public CCustomBlurDialogExBase
@@ -35,6 +36,7 @@ protected:
 	BOOL m_posRestored = FALSE;
 	BOOL m_inSizeMove = FALSE;
 	BOOL m_analyzing = FALSE;
+	UiTickPump m_tickPump;
 	UINT m_syncGen = 0;
 	BOOL m_applyingFromRoll = FALSE;
 	static const int kMaxChars = 14000;
@@ -60,6 +62,7 @@ protected:
 	virtual BOOL PreTranslateMessage(MSG* pMsg);
 	virtual void PostNcDestroy();
 	virtual void OnClose();
+	afx_msg void OnDestroy();
 	afx_msg void OnRun();
 	afx_msg void OnAnalyze();
 	afx_msg void OnRoll();
@@ -79,6 +82,7 @@ protected:
 	afx_msg void OnMoving(UINT fwSide, LPRECT pRect);
 	afx_msg void OnGetMinMaxInfo(MINMAXINFO* lpMMI);
 	afx_msg BOOL OnMouseWheel(UINT nFlags, short zDelta, CPoint pt);
+	afx_msg LRESULT OnUiTick(WPARAM wParam, LPARAM lParam);
 	afx_msg HBRUSH OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor);
 #if CCUSTOM_AERO_SUPPORT
 	afx_msg LRESULT OnReapplyOpaqueFixers(WPARAM wParam, LPARAM lParam);

@@ -888,10 +888,13 @@ int CDriverPc88::Render(int16_t* stereo, int frames)
 		hw_->GuardN88RtcVector();
 	if (replayPending_) {
 		replayPending_ = 0;
-		triggered_ = 0;
+		if (!loadOnly)
+			triggered_ = 0;
 	}
-	if (!triggered_)
+	if (!triggered_ && !loadOnly)
 		TriggerPlay();
+	if (loadOnly)
+		triggered_ = 1;
 	if (hostRate_ < 1 || cpuHz_ < 1) return 0;
 	/* play キックが既に出したオープニング小節（BeginLeadCapture） */
 	const int lead = DrainLead(stereo, frames);
@@ -939,8 +942,10 @@ int CDriverPc88::Render(int16_t* stereo, int frames)
 			/* その場で再キック。次 Render() へ先送りすると、そのコールのバッファ全体がループ間ギャップに足される。 */
 			if (replayPending_) {
 				replayPending_ = 0;
-				triggered_ = 0;
-				TriggerPlay();
+				if (!loadOnly) {
+					triggered_ = 0;
+					TriggerPlay();
+				}
 			}
 		}
 	}

@@ -61,6 +61,51 @@ extern COggDlg *og;
 save savedata;
 TCHAR karento2[1024];
 CString ndd;
+
+void FmMonGeomPersistOpen(int open)
+{
+	struct { char magic[4]; int version; int isOpen; int x, y, w, h; } g = {};
+	g.magic[0] = 'F'; g.magic[1] = 'M'; g.magic[2] = 'M'; g.magic[3] = 'G';
+	g.version = 1;
+	g.isOpen = open ? 1 : 0;
+	g.x = savedata.midimonx;
+	g.y = savedata.midimony;
+	g.w = savedata.midimonw;
+	g.h = savedata.midimonh;
+	if (g.w < 200 || g.h < 160) {
+		g.x = savedata.fmmonx;
+		g.y = savedata.fmmony;
+		g.w = savedata.fmmonw;
+		g.h = savedata.fmmonh;
+	}
+	wchar_t path[MAX_PATH] = {};
+	LPCTSTR stage = DatArc_StageDir();
+	if (stage && stage[0])
+		_snwprintf_s(path, _TRUNCATE, L"%sfmmon_geom.dat", stage);
+	else {
+		wchar_t tmp[MAX_PATH];
+		GetTempPathW(MAX_PATH, tmp);
+		_snwprintf_s(path, _TRUNCATE, L"%sogg_kbsasami\\fmmon_geom.dat", tmp);
+	}
+	{
+		wchar_t dir[MAX_PATH];
+		wcsncpy_s(dir, path, _TRUNCATE);
+		wchar_t* sl = wcsrchr(dir, L'\\');
+		if (sl) {
+			*sl = 0;
+			CreateDirectoryW(dir, NULL);
+		}
+	}
+	HANDLE hf = CreateFileW(path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+	if (hf == INVALID_HANDLE_VALUE) return;
+	DWORD wr = 0;
+	WriteFile(hf, &g, sizeof(g), &wr, NULL);
+	FlushFileBuffers(hf);
+	CloseHandle(hf);
+	DatArc_InvalidateLeaf(L"fmmon_geom.dat");
+	DatArc_Commit(L"fmmon_geom.dat");
+}
+
 void *Mutex;
 TCHAR* nd;
 // 既存インスタンスの窓か。MP（らいら）か本編タイトルか。二重起動 mutex 用。
@@ -191,23 +236,12 @@ LRESULT COggApp::ProcessWndProcException(CException* e, const MSG* pMsg)
 }
 
 // MIDI/FM モニタの追加同期。TRUE は返さない（メッセージループを独占する）。
-// 再生中に両方開いているときは timerp が PumpSyncNow するので、ここでの
-// IdlePulse は鍵盤描画を二重に走らせて遅らせるだけになる。
+// 窓ごとの UiTickPump が PumpSyncNow するので、ここでの IdlePulse は
+// ticker 未起動のときだけ（二重描画で鍵盤を遅らせない）。
 BOOL COggApp::OnIdle(LONG lCount)
 {
-	extern COggDlg* og;
-	extern int playy;
-	extern int plf;
-	/* 停止中は IdlePulse を回さない。OnIdle が空キューで連打されると 1 コアを食う。 */
-	if (playy != 0) {
-		const int timerpOwns = (playy != 0 && plf == 1
-			&& og && og->MidiMonitorIsVisible() && og->FmMonitorIsVisible()) ? 1 : 0;
-		if (!timerpOwns) {
-			if (og && og->m_MidiMonitorDlg && ::IsWindow(og->m_MidiMonitorDlg->GetSafeHwnd()))
-				og->m_MidiMonitorDlg->IdlePulse();
-		}
-	}
-	return CWinApp::OnIdle(lCount); // TRUE を返すと OnIdle が回り続けて他の UI を食う
+	/* MIDI/FM は窓ごとの UiTickPump。OnIdle 連打はしない。 */
+	return CWinApp::OnIdle(lCount);
 }
 
 BOOL COggApp::ExitInstance()
@@ -339,6 +373,8 @@ BOOL COggApp::InitInstance()
 	savedata.mp3=1;
 	savedata.savecheck=0;
 	savedata.kpivol=1;
+	savedata.winampvol=1;
+	savedata.cemuvol=1;
 	_tcscpy(savedata.font1,_T("Consolas"));
 	_tcscpy(savedata.font2,_T("メイリオ"));
 	savedata.savecheck_mp3 = 1;
@@ -2172,6 +2208,12 @@ BOOL COggApp::InitInstance()
 		if (savedata.pcMidiOutMode != 1 && savedata.pcMidiOutMode != 2)
 			savedata.pcMidiOutMode = 0;
 	}
+	if (datFileSize < (int)(offsetof(save, winampvol) + sizeof(savedata.winampvol))
+		|| savedata.winampvol < 1 || savedata.winampvol > 5)
+		savedata.winampvol = 1;
+	if (datFileSize < (int)(offsetof(save, cemuvol) + sizeof(savedata.cemuvol))
+		|| savedata.cemuvol < 1 || savedata.cemuvol > 5)
+		savedata.cemuvol = 1;
 	/* UI パス欄は廃止。常に exe\\data（なければ hoot）。
 	   ルートは InitInstance 冒頭の CEmuMgrInit 済み。ここで Reload すると
 	   arcdata 全読込が起動を再度ブロックするため呼ばない。 */
@@ -2203,7 +2245,8 @@ BOOL COggApp::InitInstance()
 			if (ReadFile(hf, &g, sizeof(g), &rd, NULL) && rd == sizeof(g)
 				&& g.magic[0] == 'F' && g.magic[1] == 'M' && g.magic[2] == 'M' && g.magic[3] == 'G'
 				&& g.version == 1) {
-				if (g.open == 0 || g.open == 1) savedata.fmmonwindow = g.open;
+				/* 位置だけ。open は旧独立 FM の残骸で、読むと閉じた MIDI/FM モニタが
+				   OggMigrateFmMonToMidiMonFlag で毎起動復活する。開閉は midimonwindow。 */
 				if (g.w >= 280 && g.w <= 4000) savedata.fmmonw = g.w;
 				if (g.h >= 180 && g.h <= 3000) savedata.fmmonh = g.h;
 				if (g.x > -30000 && g.y > -30000) {

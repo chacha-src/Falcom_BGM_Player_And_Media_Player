@@ -19,6 +19,8 @@ struct CEmuArchiveMode {
 int CEmuModeTagFromEntry(const CEmuGameEntry* e, char* tag, int tagCap);
 
 int CEmuModeIsMidiTag(const char* tag);
+/* GAMEBLASTER↔CMS、ADLIB↔OPL/OPL2 など表示ゆれを同一視 */
+int CEmuModeTagsEqual(const char* a, const char* b);
 
 /* アーカイブのユニークモード（tag で重複排除）。既定順は非 MIDI 優先 */
 int CEmuCatalogListArchiveModes(const CEmuCatalog* cat, const char* archive,

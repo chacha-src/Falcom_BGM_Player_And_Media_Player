@@ -154,7 +154,8 @@ int CDriverF3::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 	cmdIndex_ = tryCount_;
 	locked_ = 1;
 	songCode_ = MapSongCode(songCode_);
-	hw_->SetSongCommand(songCode_);
+	if (!loadOnly)
+		hw_->SetSongCommand(songCode_);
 	/* C15702（C15538 内のボイスチェイン）は D4C0 が立つまで即 return。実機は task0 がフラグを ST。
 	   D4F9 は C15702 のキーオン許可で、カタログの bset #4 前に見る。 */
 	hw_->Write8(0xD4F9u, 1);

@@ -301,6 +301,7 @@ protected:
 	int m_lineAnimOrigin; // クリック位置に近い行（上下に広がる起点）
 	int m_lineAnimOriginY; // クライアントY（起点）
 	int m_flightPad; // 行チップ飛行余白（0=通常。コンテンツは (pad,pad) 起点）
+	int m_chipPresentedAnimTick; // この tick で ULW 済み（OnPaint と ForceChipPresent の二重を防ぐ）
 	BOOL m_bridgePanel; // 飛行⇔定着の橋渡しで一枚パネルを強制（点滅防止）
 	BOOL m_skipChrome;      // TRUE なら骨格を付けない（フォント／KPI サブ等）
 	BOOL m_chromeInjected;  // EnsureChromePrefix 済み
@@ -369,6 +370,7 @@ protected:
 	BOOL OnWheelDelta(int delta);
 	BOOL HandleWheelInChain(CPoint screenPt, int delta); // 開サブ優先
 	void InvalidateBgOnly(); // 背景アニメ用：子コントロールを巻き込まない
+	void PulseVsyncFrame(); // Track モーダルの vblank 1コマ（入場 ULW / idle ストライプ）
 	int FindItemIndexById(UINT id) const;
 
 	virtual BOOL OnCommand(WPARAM wParam, LPARAM lParam); // 内包 BN_CLICKED / CBN_SELCHANGE

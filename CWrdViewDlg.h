@@ -2,6 +2,7 @@
 #include "afxdialogex.h"
 #include "CCustomControl.h"
 #include "WrdEngine.h"
+#include "UiTickPump.h"
 
 class CWrdViewDlg : public CCustomBlurDialogExBase
 {
@@ -27,6 +28,7 @@ protected:
 	afx_msg void OnPaint();
 	afx_msg BOOL OnEraseBkgnd(CDC* pDC);
 	afx_msg void OnTimer(UINT_PTR nIDEvent);
+	afx_msg LRESULT OnUiTick(WPARAM wParam, LPARAM lParam);
 	afx_msg void OnSize(UINT nType, int cx, int cy);
 	afx_msg void OnMove(int x, int y);
 	afx_msg void OnClose();
@@ -57,4 +59,5 @@ private:
 	CBitmap* m_frameOld;
 	int m_frameW, m_frameH;
 	int m_lastTickDrawn;
+	UiTickPump m_tickPump;
 };

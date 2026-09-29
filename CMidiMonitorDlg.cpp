@@ -1857,6 +1857,7 @@ BEGIN_MESSAGE_MAP(CMidiMonitorDlg, CCustomBlurDialogExBase)
 	ON_WM_MOUSEWHEEL()
 	ON_NOTIFY_EX_RANGE(TTN_NEEDTEXTW, 0, 0xFFFF, OnTtnNeedText)
 	ON_NOTIFY_EX_RANGE(TTN_NEEDTEXTA, 0, 0xFFFF, OnTtnNeedText)
+	ON_MESSAGE(WM_UITICK_VSYNC, OnUiTick)
 END_MESSAGE_MAP()
 
 UINT CMidiMonitorDlg::WindowDpi() const
@@ -3369,8 +3370,9 @@ void CMidiMonitorDlg::ApplyDueEvents(int lastDue)
 	m_burstApply = savedBurst;
 }
 
-// playb を鍵盤・CC 表示へ進める。VST/KPI は DS カーソルより先なので 700ms 引く。
-// ExtrapolateHeard でサンプルが止まっている間も QPC で少し先読みする。
+// playb を鍵盤・CC 表示へ進める。
+// VST: GDI 可聴 − プラグイン遅延 − 700ms。
+// KPI MIDI: playb（RB 後の出力）− 700ms。FPY の dump−900 はデコード位置で RB 分を含む。
 void CMidiMonitorDlg::SyncFromPlayback()
 {
 	if (m_frozen) return;
@@ -3396,13 +3398,14 @@ void CMidiMonitorDlg::SyncFromPlayback()
 			if (pbHeard < 0) pbHeard = 0;
 		}
 	} else if (mode == -3) {
-		// mid(kpi): playb はデコード書き込み位置で、DS 再生カーソルより先。
-		// イベント時刻は KPI の実レート。VST プラグイン遅延は無い。
+		/* mid(kpi): playb は KPI 出力（RB 後）。FPY の dump−900 はデコード位置で
+		   RB 約 200ms を含む。同じ 900 を playb から引くとモニタが 200ms 遅れる。 */
 		const int sr = (m_sampleRate > 0) ? m_sampleRate : 44100;
-		const double sec = OggGetGdiPlaybackTimeSec();
-		pbRaw = (__int64)(sec * (double)sr + 0.5);
-		pbHeard = pbRaw - (__int64)sr * 700 / 1000;
-		if (pbRaw < 0) pbRaw = 0;
+		__int64 pb = playb;
+		if (playy == 0 && pb < 0) pb = 0;
+		if (pb < 0) pb = 0;
+		pbRaw = pb;
+		pbHeard = pb - (__int64)sr * 700 / 1000;
 		if (pbHeard < 0) pbHeard = 0;
 	}
 	if (m_loopEndSample > m_loopStartSample) {
@@ -5308,8 +5311,8 @@ BOOL CMidiMonitorDlg::OnInitDialog()
 	EnableMainWindowLock(&savedata.midimonMainLock, TRUE);
 	CCC_CaptionLayout(m_hWnd);
 	LayoutHelpBtn();
-	SetTimer(1, 16, nullptr); // 本体。PersistPos もここ
-	SetTimer(2, 16, nullptr);  // IdlePulse。再生中かつ timerp 非所有のときだけ。停止中は止める
+	SetTimer(1, 500, nullptr); // PersistPos / 種別 sticky。描画は UiTickPump
+	m_tickPump.Start(m_hWnd);
 	LoadCurrentMidi();
 	m_fmView = 0;
 	SyncFmMidiView();
@@ -5539,29 +5542,23 @@ BOOL CMidiMonitorDlg::OnEraseBkgnd(CDC* pDC)
 	return TRUE;
 }
 
-// 1=16ms 本体。2=4ms 追加パルス（OnIdle と同じ IdlePulse）。
+// 1=座標保存。描画は UiTickPump（WM_UITICK_VSYNC）。
 void CMidiMonitorDlg::OnTimer(UINT_PTR nIDEvent)
 {
 	if (nIDEvent == 1) {
-		if (++m_persistAge >= 32) {
-			PersistPos();
-			m_persistAge = 0;
-		}
-		/* 再生中の描画は timerp / IdlePulse。停止中も種別 sticky を追従する。 */
+		PersistPos();
+		m_persistAge = 0;
 		SyncFmMidiView();
-		extern int plf;
-		extern int playy;
-		if (playy != 0 && !(plf == 1) && !FmShowing())
-			PumpIdle();
-	} else if (nIDEvent == 2) {
-		/* 再生中は timerp が PumpSyncNow する。追加パルスは UI コアを二重に食う。
-		   停止中は何もしない（なにも演奏してないときの 70% コア対策）。 */
-		extern int playy;
-		extern int plf;
-		if (playy != 0 && !(plf == 1))
-			IdlePulse();
 	}
 	CCustomBlurDialogExBase::OnTimer(nIDEvent);
+}
+
+LRESULT CMidiMonitorDlg::OnUiTick(WPARAM, LPARAM)
+{
+	if (!m_paintDisabled && ::IsWindow(m_hWnd) && !IsIconic())
+		PumpSyncNow();
+	m_tickPump.Ack();
+	return 0;
 }
 
 void CMidiMonitorDlg::OnSize(UINT nType, int cx, int cy)
@@ -5624,6 +5621,8 @@ void CMidiMonitorDlg::OnClose()
 	DetachForDestroy();
 	savedata.midimonwindow = 0;
 	savedata.fmmonwindow = 0;
+	FmMonGeomPersistOpen(0);
+	OggPersistSaveDatNow();
 	DestroyWindow();
 	extern CMediaPlayerDlg* mp;
 	if (mp && ::IsWindow(mp->GetSafeHwnd()))
@@ -5632,6 +5631,7 @@ void CMidiMonitorDlg::OnClose()
 
 void CMidiMonitorDlg::OnDestroy()
 {
+	m_tickPump.Stop();
 	KillTimer(1);
 	KillTimer(2);
 	ReleasePlayNote();
@@ -5644,6 +5644,7 @@ void CMidiMonitorDlg::OnDestroy()
 void CMidiMonitorDlg::DetachForDestroy()
 {
 	m_paintDisabled = true;
+	m_tickPump.Stop();
 	KillTimer(1);
 	KillTimer(2);
 	PersistPos();

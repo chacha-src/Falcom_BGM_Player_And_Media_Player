@@ -1,10 +1,15 @@
-#include "stdafx.h"
+﻿#include "stdafx.h"
 #include "CCommandRollDlg.h"
 #include "CPromptDlg.h"
 #include "CPromptEngine.h"
 #include "CPromptAnalyze.h"
 #include "CMediaPlayerDlg.h"
 #include <cmath>
+#include <uxtheme.h>
+
+#ifdef SubclassWindow
+#undef SubclassWindow
+#endif
 
 extern void MpPersistSavedataQuick();
 
@@ -83,11 +88,17 @@ CCommandRollView::CCommandRollView() {}
 BEGIN_MESSAGE_MAP(CCommandRollView, CWnd)
 	ON_WM_CREATE()
 	ON_WM_PAINT()
+	ON_MESSAGE(WM_PRINTCLIENT, OnPrintClient)
 	ON_WM_ERASEBKGND()
 	ON_WM_SIZE()
 	ON_WM_HSCROLL()
 	ON_WM_VSCROLL()
 	ON_WM_MOUSEWHEEL()
+	ON_WM_NCHITTEST()
+	ON_WM_NCCALCSIZE()
+	ON_WM_NCLBUTTONDOWN()
+	ON_WM_NCLBUTTONDBLCLK()
+	ON_WM_MOUSEACTIVATE()
 	ON_WM_LBUTTONDOWN()
 	ON_WM_LBUTTONUP()
 	ON_WM_LBUTTONDBLCLK()
@@ -98,10 +109,27 @@ BEGIN_MESSAGE_MAP(CCommandRollView, CWnd)
 	ON_WM_RBUTTONUP()
 END_MESSAGE_MAP()
 
-BOOL CCommandRollView::CreateRoll(CWnd* pParent, const CRect& rc, UINT nId)
+BOOL CCommandRollView::CreateRoll(CWnd* pParent, const CRect& rc, UINT /*nId*/)
 {
-	const DWORD style = WS_CHILD | WS_VISIBLE | WS_HSCROLL | WS_VSCROLL | WS_TABSTOP | WS_CLIPCHILDREN | WS_CLIPSIBLINGS;
-	return Create(nullptr, nullptr, style, rc, pParent, nId);
+	if (!pParent || !pParent->GetSafeHwnd())
+		return FALSE;
+	HWND hwnd = ::GetDlgItem(pParent->m_hWnd, IDC_MCR_HOST);
+	if (!hwnd)
+		return FALSE;
+	if (CWnd* owned = CWnd::FromHandlePermanent(hwnd)) {
+		if (owned != this)
+			return FALSE;
+	}
+	if (!CWnd::SubclassWindow(hwnd))
+		return FALSE;
+	ModifyStyle(SS_TYPEMASK, WS_VISIBLE | WS_HSCROLL | WS_VSCROLL | WS_TABSTOP | WS_CLIPSIBLINGS | SS_NOTIFY);
+	ModifyStyleEx(0, WS_EX_CLIENTEDGE);
+	SetWindowPos(NULL, 0, 0, 0, 0,
+		SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+	MoveWindow(rc);
+	SyncSoft3DCamFromSave();
+	SyncScrollBars();
+	return TRUE;
 }
 
 int CCommandRollView::OnCreate(LPCREATESTRUCT lp)
@@ -545,19 +573,56 @@ void CCommandRollView::EnsureMemDC(int w, int h)
 {
 	if (w < 1) w = 1;
 	if (h < 1) h = 1;
-	if (m_memDC.GetSafeHdc() && m_memW == w && m_memH == h) return;
+	if (m_memDC.GetSafeHdc() && m_memW == w && m_memH == h && m_memBmp.GetSafeHandle())
+		return;
 	if (m_memDC.GetSafeHdc()) {
 		if (m_oldBmp) m_memDC.SelectObject(m_oldBmp);
 		m_oldBmp = nullptr;
 		m_memDC.DeleteDC();
 	}
 	if (m_memBmp.GetSafeHandle()) m_memBmp.DeleteObject();
+	m_memBits = nullptr;
 	CClientDC dc(this);
 	m_memDC.CreateCompatibleDC(&dc);
-	m_memBmp.CreateCompatibleBitmap(&dc, w, h);
+	BITMAPINFO bmi = {};
+	bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+	bmi.bmiHeader.biWidth = w;
+	bmi.bmiHeader.biHeight = -h;
+	bmi.bmiHeader.biPlanes = 1;
+	bmi.bmiHeader.biBitCount = 32;
+	bmi.bmiHeader.biCompression = BI_RGB;
+	void* bits = nullptr;
+	HBITMAP hDib = ::CreateDIBSection(dc.GetSafeHdc(), &bmi, DIB_RGB_COLORS, &bits, NULL, 0);
+	if (hDib && bits) {
+		m_memBmp.Attach(hDib);
+		m_memBits = bits;
+		UINT32* p = (UINT32*)bits;
+		const int n = w * h;
+		for (int i = 0; i < n; ++i)
+			p[i] = 0xFFFAF6F5u;
+	} else {
+		if (hDib) ::DeleteObject(hDib);
+		m_memBmp.CreateCompatibleBitmap(&dc, w, h);
+	}
 	m_oldBmp = m_memDC.SelectObject(&m_memBmp);
 	m_memW = w;
 	m_memH = h;
+}
+
+void CCommandRollView::ForceMemOpaque()
+{
+	if (!m_memBits || m_memW <= 0 || m_memH <= 0) return;
+	UINT32* p = (UINT32*)m_memBits;
+	const int n = m_memW * m_memH;
+	int i = 0;
+	for (; i + 3 < n; i += 4) {
+		p[i] |= 0xFF000000u;
+		p[i + 1] |= 0xFF000000u;
+		p[i + 2] |= 0xFF000000u;
+		p[i + 3] |= 0xFF000000u;
+	}
+	for (; i < n; ++i)
+		p[i] |= 0xFF000000u;
 }
 
 void CCommandRollView::InvalidateRoll()
@@ -989,15 +1054,31 @@ void CCommandRollView::ZoomOut()
 void CCommandRollView::OnPaint()
 {
 	CPaintDC pdc(this);
-	CRect rc = ClientRoll();
+	CRect rc;
+	GetClientRect(&rc);
 	const int w = rc.Width();
 	const int h = rc.Height();
 	if (w <= 0 || h <= 0) return;
+
 	EnsureMemDC(w, h);
 	PaintRoll(m_memDC, CRect(0, 0, w, h));
-	// ホスト REDIRECTIONBITMAP_ALPHA 時は素 BitBlt が α=0 で全透明になる
+	ForceMemOpaque();
+
 #if CCUSTOM_AERO_SUPPORT
-	if (CCC_AcrylicCaption(::GetParent(m_hWnd)) || CCC_IsAeroEnabled()) {
+	if (CCC_IsAeroEnabled() || CCC_IsWin11()) {
+		if (!CCC_AvoidBufferedPaint()) {
+			BP_PAINTPARAMS params = { sizeof(BP_PAINTPARAMS) };
+			HDC hdcBuf = NULL;
+			RECT pr = { 0, 0, w, h };
+			HPAINTBUFFER hBP = ::BeginBufferedPaint(pdc.GetSafeHdc(), &pr, BPBF_TOPDOWNDIB, &params, &hdcBuf);
+			if (hdcBuf && hBP) {
+				::BitBlt(hdcBuf, 0, 0, w, h, m_memDC.GetSafeHdc(), 0, 0, SRCCOPY);
+				::BufferedPaintMakeOpaque(hBP, &pr);
+				::EndBufferedPaint(hBP, TRUE);
+				CCC_DrawInwomanOnClient(&pdc, m_hWnd);
+				return;
+			}
+		}
 		CCC_BlitStretchOpaque(pdc.GetSafeHdc(), 0, 0, w, h,
 			m_memDC.GetSafeHdc(), 0, 0, w, h);
 		CCC_DrawInwomanOnClient(&pdc, m_hWnd);
@@ -1006,6 +1087,22 @@ void CCommandRollView::OnPaint()
 #endif
 	pdc.BitBlt(0, 0, w, h, &m_memDC, 0, 0, SRCCOPY);
 	CCC_DrawInwomanOnClient(&pdc, m_hWnd);
+}
+
+LRESULT CCommandRollView::OnPrintClient(WPARAM wParam, LPARAM)
+{
+	HDC hdc = (HDC)wParam;
+	if (!hdc) return 0;
+	CRect rc;
+	GetClientRect(&rc);
+	const int w = rc.Width();
+	const int h = rc.Height();
+	if (w <= 0 || h <= 0) return 0;
+	EnsureMemDC(w, h);
+	PaintRoll(m_memDC, CRect(0, 0, w, h));
+	ForceMemOpaque();
+	::BitBlt(hdc, 0, 0, w, h, m_memDC.GetSafeHdc(), 0, 0, SRCCOPY);
+	return 0;
 }
 
 BOOL CCommandRollView::OnEraseBkgnd(CDC* /*pDC*/)
@@ -1101,6 +1198,61 @@ BOOL CCommandRollView::OnMouseWheel(UINT nFlags, short zDelta, CPoint pt)
 	SyncScrollBars();
 	InvalidateRoll();
 	return TRUE;
+}
+
+LRESULT CCommandRollView::OnNcHitTest(CPoint point)
+{
+	CRect wr;
+	GetWindowRect(&wr);
+	if (!wr.PtInRect(point))
+		return HTNOWHERE;
+	CRect cr;
+	GetClientRect(&cr);
+	ClientToScreen(&cr);
+	if (cr.PtInRect(point))
+		return HTCLIENT;
+	const DWORD style = GetStyle();
+	if ((style & WS_VSCROLL) && point.x >= cr.right && point.x <= wr.right
+		&& point.y >= cr.top && point.y <= cr.bottom)
+		return HTVSCROLL;
+	if ((style & WS_HSCROLL) && point.y >= cr.bottom && point.y <= wr.bottom
+		&& point.x >= cr.left && point.x <= cr.right)
+		return HTHSCROLL;
+	return HTBORDER;
+}
+
+void CCommandRollView::OnNcCalcSize(BOOL bCalcValidRects, NCCALCSIZE_PARAMS* lpncsp)
+{
+	::DefWindowProc(m_hWnd, WM_NCCALCSIZE, (WPARAM)bCalcValidRects, (LPARAM)lpncsp);
+}
+
+void CCommandRollView::OnNcLButtonDown(UINT nHitTest, CPoint point)
+{
+	if (nHitTest == HTHSCROLL || nHitTest == HTVSCROLL) {
+		::DefWindowProc(m_hWnd, WM_NCLBUTTONDOWN, nHitTest,
+			MAKELPARAM((SHORT)point.x, (SHORT)point.y));
+		return;
+	}
+	CWnd::OnNcLButtonDown(nHitTest, point);
+}
+
+void CCommandRollView::OnNcLButtonDblClk(UINT nHitTest, CPoint point)
+{
+	if (nHitTest == HTHSCROLL || nHitTest == HTVSCROLL) {
+		::DefWindowProc(m_hWnd, WM_NCLBUTTONDBLCLK, nHitTest,
+			MAKELPARAM((SHORT)point.x, (SHORT)point.y));
+		return;
+	}
+	CWnd::OnNcLButtonDblClk(nHitTest, point);
+}
+
+int CCommandRollView::OnMouseActivate(CWnd* pDesktopWnd, UINT nHitTest, UINT message)
+{
+	UNREFERENCED_PARAMETER(pDesktopWnd);
+	UNREFERENCED_PARAMETER(nHitTest);
+	UNREFERENCED_PARAMETER(message);
+	SetFocus();
+	return MA_ACTIVATE;
 }
 
 void CCommandRollView::OnLButtonDown(UINT nFlags, CPoint point)
@@ -1394,9 +1546,12 @@ BEGIN_MESSAGE_MAP(CCommandRollDlg, CCustomBlurDialogExBase)
 	ON_WM_MOVING()
 	ON_WM_GETMINMAXINFO()
 	ON_WM_TIMER()
+	ON_MESSAGE(WM_UITICK_VSYNC, OnUiTick)
+	ON_WM_SHOWWINDOW()
 	ON_WM_ERASEBKGND()
 	ON_WM_CTLCOLOR()
 	ON_WM_CLOSE()
+	ON_WM_DESTROY()
 END_MESSAGE_MAP()
 
 void CCommandRollDlg::PaletteApplySoft3D()
@@ -1531,7 +1686,6 @@ void CCommandRollDlg::LayoutControls()
 	if (m_progress.GetSafeHwnd())
 		m_progress.MoveWindow(M, progY, max(40, rc.right - M - M), progH);
 
-	if (CWnd* host = GetDlgItem(IDC_MCR_HOST)) host->ShowWindow(SW_HIDE);
 	const int viewTop = topY + btnH + 4;
 	CRect viewRc(M, viewTop, rc.right - M, progY - 4);
 	// 高さが潰れたら本文側を優先して最低高を確保（ボタン帯より上に収める）
@@ -1541,10 +1695,17 @@ void CCommandRollDlg::LayoutControls()
 		if (viewRc.Height() < 20)
 			viewRc.bottom = viewRc.top + 20;
 	}
-	if (m_view.GetSafeHwnd())
+	if (m_view.GetSafeHwnd()) {
 		m_view.MoveWindow(viewRc);
+		m_view.InvalidateRoll();
+	}
 	CCC_CaptionLayout(m_hWnd);
 	CCC_MainLockBringToFront(m_hWnd);
+	if (m_view.GetSafeHwnd()) {
+		m_view.SetWindowPos(&CWnd::wndTop, 0, 0, 0, 0,
+			SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+		m_view.UpdateWindow();
+	}
 }
 
 void CCommandRollDlg::SetupTooltips()
@@ -1607,7 +1768,7 @@ BOOL CCommandRollDlg::OnInitDialog()
 
 	CRect rc; GetClientRect(&rc);
 	CRect viewRc(8, 28, rc.right - 8, rc.bottom - 8);
-	if (!m_view.CreateRoll(this, viewRc, IDC_MCR_HOST + 1))
+	if (!m_view.CreateRoll(this, viewRc, IDC_MCR_HOST))
 		return FALSE;
 	m_view.SetPeer(m_peer);
 	m_view.SetSyncGen(&m_syncGen);
@@ -1628,7 +1789,10 @@ BOOL CCommandRollDlg::OnInitDialog()
 	else if (m_peer)
 		ReloadFromText(m_peer->GetPromptText(), 0);
 
-	SetTimer(kTimerId, 50, nullptr);
+	m_tickPump.Start(m_hWnd);
+	if (m_view.GetSafeHwnd()) {
+		m_view.InvalidateRoll();
+	}
 	m_view.SetFocus();
 	return TRUE;
 }
@@ -1662,22 +1826,37 @@ BOOL CCommandRollDlg::OnEraseBkgnd(CDC* pDC)
 
 void CCommandRollDlg::OnTimer(UINT_PTR nIDEvent)
 {
-	if (nIDEvent != kTimerId) return;
+	(void)nIDEvent;
+}
+
+LRESULT CCommandRollDlg::OnUiTick(WPARAM, LPARAM)
+{
 	const double t = MpGetPerformanceTimeSec();
 	CString s;
 	s.Format(LL14(L"再生ヘッド %.1f秒  (ホイール=横 / Shift+ホイール=縦 / Ctrl=ズーム)",
 		L"Playhead %.1fs  (Wheel=H / Shift+Wheel=V / Ctrl=Zoom)",
 		L"Tete %.1fs", L"Playhead %.1fs", L"Playhead %.1fs", L"재생헤드 %.1fs", L"播放头 %.1fs",
 		L"Playhead %.1fs", L"Playhead %.1fs", L"Playhead %.1fs", L"Playhead %.1fs", L"Playhead %.1fs", L"Playhead %.1fs", L"Playhead %.1fs"), t);
-	// 文字列が変わったときだけスタティック更新（ちらつき防止）
 	if (s != m_lastTimeText) {
 		m_lastTimeText = s;
 		if (m_timeLbl.GetSafeHwnd())
 			m_timeLbl.SetWindowText(s);
 	}
-	// 親ダイアログは Invalidate しない。ビューだけ更新。
 	if (m_view.GetSafeHwnd())
 		m_view.TickPlayhead();
+	m_tickPump.Ack();
+	return 0;
+}
+
+void CCommandRollDlg::OnShowWindow(BOOL bShow, UINT nStatus)
+{
+	CCustomBlurDialogExBase::OnShowWindow(bShow, nStatus);
+	if (bShow && m_view.GetSafeHwnd()) {
+		m_view.SetWindowPos(&CWnd::wndTop, 0, 0, 0, 0,
+			SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+		m_view.InvalidateRoll();
+		m_view.UpdateWindow();
+	}
 }
 
 void CCommandRollDlg::OnGetMinMaxInfo(MINMAXINFO* lpMMI)
@@ -2191,10 +2370,17 @@ void CCommandRollDlg::ShowHelpSheet()
 
 void CCommandRollDlg::OnClose()
 {
+	m_tickPump.Stop();
 	KillTimer(kTimerId);
 	SavePosToSavedata();
 	savedata.mpCmdRollwindow = 0;
 	DestroyWindow();
+}
+
+void CCommandRollDlg::OnDestroy()
+{
+	m_tickPump.Stop();
+	CCustomBlurDialogExBase::OnDestroy();
 }
 
 void CCommandRollDlg::PostNcDestroy()

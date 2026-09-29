@@ -43,15 +43,24 @@ int WrdWantSampleRate()
 	return 44100;
 }
 
-	/* MIDI: モニタと同じ再生カーソルから 900ms（DS 書込 700 + analog 200）。
-	   歌詞壁時計に 200ms だけ足すと符号が逆になる。VST はプラグイン遅延を別に足す。 */
+	/* MIDI: KPI はモニタと同じ playb − 700ms（FPY dump−900 から RB 約 200ms を除く）。
+	   VST は GDI 可聴 − 900 − プラグイン遅延。歌詞壁時計に 200ms だけ足すと符号が逆。 */
 	__int64 WrdPlaybackSamples(int sr)
 	{
 		int useSr = (sr >= 8000) ? sr : WrdWantSampleRate();
 		if (useSr < 8000) useSr = 44100;
 
 		const int dm = mode;
-		if (IsVstMidiPlayMode(dm) || dm == -3) {
+		if (dm == -3) {
+			__int64 pb = playb;
+			if (playy == 0 && pb < 0) pb = 0;
+			if (pb < 0) pb = 0;
+			const __int64 pad = (__int64)useSr * 700 / 1000;
+			if (pb > pad)
+				return pb - pad;
+			return 0;
+		}
+		if (IsVstMidiPlayMode(dm)) {
 			__int64 ui = 0;
 			const double sec = OggGetGdiPlaybackTimeSec();
 			if (sec > 0.0)
@@ -63,12 +72,10 @@ int WrdWantSampleRate()
 				ui = pb;
 			}
 			__int64 pad = (__int64)useSr * 900 / 1000;
-			if (IsVstMidiPlayMode(dm)) {
-				MmBindVstActiveSlot();
-				const int lat = VstMidiGetLatencySamples();
-				if (lat > 0)
-					pad += lat;
-			}
+			MmBindVstActiveSlot();
+			const int lat = VstMidiGetLatencySamples();
+			if (lat > 0)
+				pad += lat;
 			if (ui > pad)
 				ui -= pad;
 			else
@@ -179,6 +186,7 @@ BEGIN_MESSAGE_MAP(CWrdViewDlg, CCustomBlurDialogExBase)
 	ON_WM_SYSCOMMAND()
 	ON_BN_CLICKED(IDC_WRD_HELP, OnBnClickedHelp)
 	ON_COMMAND(ID_HELP_SHOWSHEET, OnBnClickedHelp)
+	ON_MESSAGE(WM_UITICK_VSYNC, OnUiTick)
 END_MESSAGE_MAP()
 
 UINT CWrdViewDlg::WindowDpi() const
@@ -256,6 +264,7 @@ void CWrdViewDlg::PersistPos()
 void CWrdViewDlg::DetachForDestroy()
 {
 	m_paintDisabled = true;
+	m_tickPump.Stop();
 	KillTimer(1);
 	PersistPos();
 }
@@ -297,7 +306,8 @@ BOOL CWrdViewDlg::OnInitDialog()
 	EnableMainWindowLock(&savedata.wrdMainLock, TRUE);
 	CCC_CaptionLayout(m_hWnd);
 	LayoutHelpBtn();
-	SetTimer(1, 16, nullptr);
+	SetTimer(1, 500, nullptr);
+	m_tickPump.Start(m_hWnd);
 	ReloadCurrent();
 	return TRUE;
 }
@@ -466,13 +476,17 @@ void CWrdViewDlg::OnPaint()
 
 void CWrdViewDlg::OnTimer(UINT_PTR nIDEvent)
 {
-	if (nIDEvent == 1) {
+	if (nIDEvent == 1)
 		PersistPos();
-		SyncFromPlayback();
-		if (IsWindowVisible() && !IsIconic())
-			Invalidate(FALSE);
-	}
 	CCustomBlurDialogExBase::OnTimer(nIDEvent);
+}
+
+LRESULT CWrdViewDlg::OnUiTick(WPARAM, LPARAM)
+{
+	if (!m_paintDisabled)
+		PumpSyncNow();
+	m_tickPump.Ack();
+	return 0;
 }
 
 void CWrdViewDlg::OnSize(UINT nType, int cx, int cy)
@@ -501,6 +515,7 @@ void CWrdViewDlg::OnClose()
 
 void CWrdViewDlg::OnDestroy()
 {
+	m_tickPump.Stop();
 	PersistPos();
 	CCustomBlurDialogExBase::OnDestroy();
 }

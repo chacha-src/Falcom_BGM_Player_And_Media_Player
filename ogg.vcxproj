@@ -511,6 +511,7 @@ if errorlevel 1 exit /b 1</Command>
     <ClCompile Include="CFmMonitorDlg.cpp" />
     <ClCompile Include="gpu\GpuDx11.cpp" />
     <ClCompile Include="CWrdViewDlg.cpp" />
+    <ClCompile Include="UiTickPump.cpp" />
     <ClCompile Include="WrdEngine.cpp" />
     <ClCompile Include="MagImage.cpp" />
     <ClCompile Include="ComposerConvert.cpp" />
@@ -1033,6 +1034,7 @@ if errorlevel 1 exit /b 1</Command>
     <ClInclude Include="gpu\GpuDx11.h" />
     <ClInclude Include="CEmu\cemu_align.h" />
     <ClInclude Include="CWrdViewDlg.h" />
+    <ClInclude Include="UiTickPump.h" />
     <ClInclude Include="WrdEngine.h" />
     <ClInclude Include="MagImage.h" />
     <ClInclude Include="ComposerConvert.h" />

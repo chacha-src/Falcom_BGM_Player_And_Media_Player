@@ -838,7 +838,7 @@ CPianoRoll::CPianoRoll(CWnd* pParent)
     }
     m_historyCount = 0;
     m_historyHead = 0;
-    m_rollSpeedCredit = 0;
+    m_rollSpeedCredit = 0.0;
     m_lastRollPushQpc = 0;
     for (int hi = 0; hi < (int)MAX_HISTORY; ++hi) {
         auto& f = m_historyRing[hi];
@@ -995,6 +995,8 @@ void CPianoRoll::ResetPlaybackState()
         MSG msg;
         while (PeekMessage(&msg, m_hWnd, WM_PIANOROLL_ANALYSIS_DONE, WM_PIANOROLL_ANALYSIS_DONE, PM_REMOVE)) {}
         while (PeekMessage(&msg, m_hWnd, WM_PIANOROLL_SYNC, WM_PIANOROLL_SYNC, PM_REMOVE)) {}
+        while (PeekMessage(&msg, m_hWnd, WM_UITICK_VSYNC, WM_UITICK_VSYNC, PM_REMOVE)) {}
+        m_tickPump.Ack();
     }
     // Peek 後も必ずクリア（捨てたメッセージのフラグが残ると2曲目以降描画停止）
     InterlockedExchange(&m_syncPosted, 0);
@@ -1056,7 +1058,7 @@ void CPianoRoll::ResetPlaybackState()
         m_historyCount = 0;
         m_historyHead = 0;
         m_framesPending = 0;
-        m_rollSpeedCredit = 0;
+        m_rollSpeedCredit = 0.0;
         m_lastRollPushQpc = 0;
         m_rollScrollValid = false;
         m_rollReady = false;
@@ -1188,6 +1190,7 @@ BEGIN_MESSAGE_MAP(CPianoRoll, CCustomBlurDialogExBase)
     ON_WM_MOUSEWHEEL()
     ON_MESSAGE(WM_PIANOROLL_SYNC, OnSyncRequest)
     ON_MESSAGE(WM_PIANOROLL_ANALYSIS_DONE, OnAnalysisDone)
+    ON_MESSAGE(WM_UITICK_VSYNC, OnUiTick)
 END_MESSAGE_MAP()
 
 BOOL CPianoRoll::OnInitDialog()
@@ -1217,7 +1220,7 @@ BOOL CPianoRoll::OnInitDialog()
         int sp = savedata.pianorollscrollspeed;
         if (sp < 25 || sp > 200) sp = 100;
         m_rollSpeedPct = sp;
-        m_rollSpeedCredit = 0;
+        m_rollSpeedCredit = 0.0;
         m_lastRollPushQpc = 0;
     }
     m_showExprLegend = (savedata.pianorollexprlegend != 0);
@@ -1271,6 +1274,7 @@ BOOL CPianoRoll::OnInitDialog()
     EnsureAnalysisTables(m_inputSampleRate);
     StartAnalysisWorker();
     UpdatePianoRollTimer();
+    m_tickPump.Start(m_hWnd);
     // 無条件 true にすると停止中でもループバック更新を受け付ける
     m_feedEnabled = false;
     {
@@ -2360,9 +2364,7 @@ void CPianoRoll::PushDisplayFrames()
         return;
     }
     // 表示速度: 解析ホップとは独立に、壁時計で約60行/秒×速度% を目標にする。
-    // （旧: 解析1回=1行 → ANALYZE_MIN_MS=3 のとき理論333行/秒でワーカーだけ過負荷）
-    // GetTickCount は timeBeginPeriod(1) でも ~15.6ms 粒度のことがあり、
-    // dt=0 と dt=16 が交互になって行送りがガクガクする。QPC で測る。
+    // 整数 credit だと dt=16ms×pct=100 が 1600 < 1667 になり、2フレに1行＝半速になる。
     int pct = m_rollSpeedPct;
     if (pct < 25) pct = 25;
     if (pct > 200) pct = 200;
@@ -2381,11 +2383,11 @@ void CPianoRoll::PushDisplayFrames()
     if (dtMs > 80.0) dtMs = 80.0;
     if (dtMs < 0.0) dtMs = 0.0;
 
-    // credit = Σ(dt_ms * pct)。100%・16.67ms で約 1667 → 1行。
-    m_rollSpeedCredit += (int)(dtMs * (double)pct + 0.5);
-    static constexpr int kCreditPerRow = 1667;
+    // 100%・16.667ms → ちょうど1行。四捨五入で落とさない。
+    m_rollSpeedCredit += dtMs * (double)pct;
+    static constexpr double kCreditPerRow = 1000.0 / 60.0 * 100.0;
     int pushed = 0;
-    while (m_rollSpeedCredit >= kCreditPerRow && pushed < 4) {
+    while (m_rollSpeedCredit + 1e-9 >= kCreditPerRow && pushed < 4) {
         m_rollSpeedCredit -= kCreditPerRow;
         PushFrame(false);
         ++pushed;
@@ -2399,7 +2401,7 @@ void CPianoRoll::SetRollSpeedPct(int pct)
     if (m_rollSpeedPct == pct) return;
     m_rollSpeedPct = pct;
     savedata.pianorollscrollspeed = pct;
-    m_rollSpeedCredit = 0;
+    m_rollSpeedCredit = 0.0;
     m_lastRollPushQpc = 0;
 }
 
@@ -2493,7 +2495,7 @@ void CPianoRoll::ClearRollHistory()
 {
     m_historyCount = 0;
     m_historyHead = 0;
-    m_rollSpeedCredit = 0;
+    m_rollSpeedCredit = 0.0;
     m_lastRollPushQpc = 0;
     m_framesPending = 0;
     for (int hi = 0; hi < (int)MAX_HISTORY; ++hi) {
@@ -4014,6 +4016,7 @@ void CPianoRoll::DrawChannelDbBars(CDC& dc, const CRect& rc, const float* chFill
 
 void CPianoRoll::DetachForDestroy()
 {
+    m_tickPump.Stop();
     KillTimer(1);
     m_feedEnabled = false;
     m_paintDisabled = true;
@@ -4735,10 +4738,7 @@ bool CPianoRoll::TryAdvanceRollBuffer(int width, int rollH, int histCount, const
 void CPianoRoll::UpdatePianoRollTimer()
 {
     KillTimer(1);
-    int ms = savedata.ms2;
-    if (ms < 16) ms = 16;
-    if (ms > 960) ms = 960;
-    SetTimer(1, (UINT)ms, nullptr);
+    SetTimer(1, 500, nullptr);
 }
 
 void CPianoRoll::RequestSyncFromMainUi()
@@ -4771,25 +4771,12 @@ void CPianoRoll::RequestSyncFromMainUi()
 
 void CPianoRoll::PumpSyncNow()
 {
-    // Speana より前の同期。PostMessage を挟まないので timerp 内でメーター/解析供給が完了する。
+    // VSYNC ティックが周期。GetTickCount 間引きは 16ms 粒度で半速/欠フレームになる。
     if (!::IsWindow(m_hWnd) || m_paintDisabled) return;
-    const DWORD now = GetTickCount();
-    int minMs = savedata.ms2;
-    if (minMs < 16) minMs = 16;
-    if (minMs > 960) minMs = 960;
-    if (m_lastSyncPostTick != 0 && (now - m_lastSyncPostTick) < (DWORD)minMs)
-        return;
-    // 滞留している Post 同期は破棄（この直後にインライン実行する）
-    if (InterlockedCompareExchange(&m_syncPosted, 0, 0) != 0) {
-        MSG msg;
-        while (::PeekMessage(&msg, m_hWnd, WM_PIANOROLL_SYNC, WM_PIANOROLL_SYNC, PM_REMOVE)) {}
-        InterlockedExchange(&m_syncPosted, 0);
-    }
-    m_lastSyncPostTick = now;
     COggDlg_SyncPianoRollFast();
-    int pending = 0;
     EnterCriticalSection(&m_cs);
-    pending = m_framesPending;
+    PushDisplayFrames();
+    int pending = m_framesPending;
     LeaveCriticalSection(&m_cs);
     if (pending > 0 || m_meterDirty || m_historyDirty || m_keyDirty
         || InterlockedCompareExchange(&m_analysisPresentDirty, 0, 0) != 0)
@@ -4824,6 +4811,15 @@ LRESULT CPianoRoll::OnSyncRequest(WPARAM, LPARAM)
     }
     COggDlg_SyncPianoRollFast();
     InterlockedExchange(&m_syncPosted, 0);
+    return 0;
+}
+
+LRESULT CPianoRoll::OnUiTick(WPARAM, LPARAM)
+{
+    // MIDI/WRD/FM と同じ。Post SYNC だと chrome pump が拾わず再生中に解析が止まる。
+    if (!m_paintDisabled && ::IsWindow(m_hWnd) && IsWindowVisible() && !IsIconic())
+        PumpSyncNow();
+    m_tickPump.Ack();
     return 0;
 }
 
@@ -5061,12 +5057,10 @@ void CPianoRoll::PublishDetectResults()
             m_exprFlags[i] = 0;
         }
         AppendScoreCaptureLocked();
-        PushFrame(false);
         return;
     }
     UpdateNoteStates();
     AppendScoreCaptureLocked();
-    PushDisplayFrames();
 }
 
 bool CPianoRoll::RunAnalysisJob(const double* mono, int frameCount, int sampleRate, LONG epochAtStart)
@@ -6431,11 +6425,7 @@ void CPianoRoll::OnTimer(UINT_PTR nIDEvent)
             savedata.pianorollx = rc.left; savedata.pianorolly = rc.top;
             savedata.pianorollw = rc.Width(); savedata.pianorollh = rc.Height();
         }
-        // 自前 ms2 周期で同期＋提示。メイン timerp 経由だけだと Speana/他 Post に
-        // 挟まれて「描画は軽いのに間隔だけ長い」状態になる。
-        if (!IsIconic() && IsWindowVisible() && !m_paintDisabled) {
-            PumpSyncNow();
-        }
+        // 描画は UiTickPump。タイマーは座標保存のみ。
     }
     CCustomBlurDialogExBase::OnTimer(nIDEvent);
 }
@@ -6495,6 +6485,7 @@ void CPianoRoll::OnClose()
 
 void CPianoRoll::OnDestroy()
 {
+    m_tickPump.Stop();
     if (g_prHelpDlg && ::IsWindow(g_prHelpDlg->GetSafeHwnd()))
         g_prHelpDlg->DestroyWindow();
     CCustomBlurDialogExBase::OnDestroy();

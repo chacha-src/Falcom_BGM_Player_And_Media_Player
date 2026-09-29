@@ -3150,8 +3150,10 @@ void CHardPcat::MaterializeDosFiles(CEmuZipFs* fs, const CEmuGameEntry* ge)
 		/* zip 余分はシェル解決 COM／曲が解決するため。アーカイブの全 .ADV もダンプしない: hanse/bchess OPL カタログは ADLIB.ADV を列挙するが同じ zip に SC-55 兄弟用 MIDI.ADV があり、HOOT が OPL 機に MPU ドライバを登録する（irq0 が数十、keys=0）。romlist が ADV を名指したら DOS ディスクに置くのはそれらの ADV だけ。 */
 		{
 			const char* ext = strrchr(base, '.');
-			if (ext && _stricmp(ext, ".ADV") == 0) {
-				int romHasAdv = 0, inRom = 0;
+			const int isAdv = (ext && _stricmp(ext, ".ADV") == 0) ? 1 : 0;
+			const int isDrv = (ext && _stricmp(ext, ".DRV") == 0) ? 1 : 0;
+			if (isAdv || isDrv) {
+				int romHasKind = 0, inRom = 0;
 				for (int j = 0; j < ge->romCount; j++) {
 					const CEmuRomEntry* r = &ge->rom[j];
 					if (_stricmp(r->type, "file") != 0) continue;
@@ -3161,12 +3163,13 @@ void CHardPcat::MaterializeDosFiles(CEmuZipFs* fs, const CEmuGameEntry* ge)
 							b = p + 1;
 					}
 					const char* e = strrchr(b, '.');
-					if (e && _stricmp(e, ".ADV") == 0)
-						romHasAdv = 1;
+					if (e && ((isAdv && _stricmp(e, ".ADV") == 0)
+						|| (isDrv && _stricmp(e, ".DRV") == 0)))
+						romHasKind = 1;
 					if (_stricmp(b, base) == 0)
 						inRom = 1;
 				}
-				if (romHasAdv && !inRom)
+				if (romHasKind && !inRom)
 					continue;
 			}
 		}
@@ -3325,6 +3328,24 @@ int CHardPcat::RunDosCommand(const char* cmdline, uint64_t budgetCycles, int sto
 	char tail[160];
 	DosStripHash(cmdline, stripped, (int)sizeof(stripped));
 	DosSplitCmd(stripped, name, (int)sizeof(name), tail, (int)sizeof(tail));
+	/* Sierra silp_at.com は引数無しだと zip 内の ADL.DRV を先に拾う。
+	   カタログ行が CMS.DRV を名指ししていればそれを argv にする。 */
+	if (_strnicmp(name, "SILP", 4) == 0 && !tail[0] && dosGe_) {
+		for (int i = 0; i < dosGe_->romCount; i++) {
+			const CEmuRomEntry* r = &dosGe_->rom[i];
+			if (_stricmp(r->type, "file") != 0) continue;
+			const char* b = r->name;
+			for (const char* p = r->name; *p; p++) {
+				if (*p == '\\' || *p == '/' || *p == ':')
+					b = p + 1;
+			}
+			const char* e = strrchr(b, '.');
+			if (e && _stricmp(e, ".DRV") == 0) {
+				strncpy_s(tail, (size_t)sizeof(tail), b, _TRUNCATE);
+				break;
+			}
+		}
+	}
 	/* カタログ ABI: HOOT の no-GTL トークンは NULL（NONE ではない）。まだ NONE と書くキャッシュカタログがゲストバイナリと合うようここで argv を正規化。 */
 	if (_stricmp(name, "HOOT.EXE") == 0 && tail[0]) {
 		char fixed[160];
@@ -3575,7 +3596,8 @@ int CHardPcat::BootDos(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCod
 		if (_stricmp(ge->subtype, "adlib") == 0 || _stricmp(ge->subtype, "opl") == 0)
 			blaster = NULL;
 		else if (_stricmp(ge->subtype, "gameblaster") == 0 || _stricmp(ge->subtype, "cms") == 0)
-			blaster = "BLASTER=A220 I5 D1 H5 T6";
+			/* CMS は 0x220 の SAA。BLASTER=A220 T6 は SB16 なので ADL/SB 経路を選ばせる。 */
+			blaster = NULL;
 		else if (modeMidi_)
 			blaster = "BLASTER=A220 I5 D1 H5 T6";
 		for (int oi = 0; oi < ge->optCount; oi++) {
@@ -4538,6 +4560,20 @@ void CHardPcat::MidiCaptureReset()
 	/* まだ UART でないときだけパワーオン／リセット ACK — MT32.DRV は最初のコマンド前に 0x331 の bit6 クリア（データ ready）を待つ。 */
 	if (!mpuUart_)
 		MidiPushAck(0xfe);
+}
+
+void CHardPcat::MidiCaptureCompact(unsigned consumed)
+{
+	if (!midiBytes_ || !midiDelta_ || consumed == 0)
+		return;
+	if (consumed >= midiCount_) {
+		midiCount_ = 0;
+		return;
+	}
+	const unsigned left = midiCount_ - consumed;
+	memmove(midiBytes_, midiBytes_ + consumed, left);
+	memmove(midiDelta_, midiDelta_ + consumed, left * sizeof(uint32_t));
+	midiCount_ = left;
 }
 
 /* CHardPcat::MidiPushAck の実装 */

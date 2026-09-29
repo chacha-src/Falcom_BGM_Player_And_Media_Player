@@ -18,6 +18,7 @@ public:
 	unsigned OpmWrites() const;
 	/* C7xProbeCatalog から C7xProbePrimaryCodes へ渡すコールバック */
 	void ProbeRunCycles(int cycles) { M37702RunCycles(cycles); }
+	enum { kC7xCodeMax = 256 };
 
 private:
 	CHardAc* hw_;
@@ -76,7 +77,6 @@ private:
 	uint8_t extReserve_[64]; /* 迷路/モニタ/GPU Mix 拡張用リザーブ */
 	/* Namco C7x: 起動直後にドライバへ「このコードは主シーケンサを取るか」を
 	   聞いた結果。取る=曲（置き換え）、取らない=BGM に重なる SE／ボイス。 */
-	enum { kC7xCodeMax = 256 };
 	unsigned c7xCode_[kC7xCodeMax];
 	uint8_t c7xPrimary_[kC7xCodeMax];
 	int c7xCodeN_;

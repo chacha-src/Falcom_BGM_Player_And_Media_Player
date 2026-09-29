@@ -101,6 +101,28 @@ public:
 	afx_msg void Onkpi20();
 	afx_msg void Onkpi25();
 	afx_msg void Onkpi30();
+	CCustomCheckBox m_wa1x;
+	CCustomCheckBox m_wa2x;
+	CCustomCheckBox m_wa3x;
+	CCustomCheckBox m_wa4x;
+	CCustomCheckBox m_wa5x;
+	afx_msg void Onwa1x();
+	afx_msg void Onwa2x();
+	afx_msg void Onwa3x();
+	afx_msg void Onwa4x();
+	afx_msg void Onwa5x();
+	CCustomCheckBox m_ce1x;
+	CCustomCheckBox m_ce2x;
+	CCustomCheckBox m_ce3x;
+	CCustomCheckBox m_ce4x;
+	CCustomCheckBox m_ce5x;
+	afx_msg void Once1x();
+	afx_msg void Once2x();
+	afx_msg void Once3x();
+	afx_msg void Once4x();
+	afx_msg void Once5x();
+	void ApplyWinampVolChecks(int v);
+	void ApplyCemuVolChecks(int v);
 	afx_msg void Onkpi();
 	CCustomStandardButton m_kpi;
 	CCustomStandardButton m_kpiPluginDl;
@@ -167,7 +189,7 @@ public:
 	CCustomStandardButton m_vstExtraBrowse;
 	CCustomStandardButton m_vstMultiBrowse;
 	CCustomStandardButton m_vstScanNow;
-	afx_msg void OnMidPreferKpi(); // midPlayPrefer=0。リストの MID(KPI) を即更新。再生中は次曲から
+	afx_msg void OnMidPreferKpi(); // midPlayPrefer=0。リスト即更新。CEmu MIDI 再生中は zip を開き直す
 	afx_msg void OnMidPreferVst();
 	afx_msg void OnVstExtraBrowse();
 	afx_msg void OnVstMultiBrowse();

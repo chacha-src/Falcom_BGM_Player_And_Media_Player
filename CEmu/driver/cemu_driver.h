@@ -19,7 +19,13 @@ public:
 	   1=重ねる、0=曲なので置き換える、-1=この基板では分からない。 */
 	virtual int CodeIsOverlay(unsigned titleCode) const { (void)titleCode; return -1; }
 	int overlayMix = 0;
+	/* 1=zip 配置＋ドライバ初期化のみ。TriggerPlay / 曲コマンドはしない（ロゴはブート側） */
+	int loadOnly = 0;
 };
+
+/* 次の CEmuDriverCreate/Open をロード専用にする。Open 後に 0 へ戻す */
+void CEmuDriverSetNextOpenLoadOnly(int on);
+int CEmuDriverIsNextOpenLoadOnly(void);
 
 CHard* CEmuHardCreate(const CEmuGameEntry* ge, int sampleRate);
 void CEmuHardDestroy(CHard* hw);

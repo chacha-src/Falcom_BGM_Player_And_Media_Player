@@ -55,6 +55,22 @@ int CEmuModeIsMidiTag(const char* tag)
 	return 0;
 }
 
+int CEmuModeTagsEqual(const char* a, const char* b)
+{
+	if (!a || !b) return 0;
+	if (_stricmp(a, b) == 0) return 1;
+	auto canon = [](const char* t) -> const char* {
+		if (!t || !t[0]) return "";
+		if (_stricmp(t, "CMS") == 0 || _stricmp(t, "GAMEBLASTER") == 0)
+			return "GAMEBLASTER";
+		if (_stricmp(t, "ADLIB") == 0 || _stricmp(t, "OPL") == 0
+			|| _stricmp(t, "OPL2") == 0)
+			return "ADLIB";
+		return t;
+	};
+	return _stricmp(canon(a), canon(b)) == 0;
+}
+
 static const char* CEmuModeMidiTagFromName(const CEmuGameEntry* e)
 {
 	if (!e) return NULL;
@@ -216,7 +232,7 @@ int CEmuCatalogListArchiveModes(const CEmuCatalog* cat, const char* archive,
 		if (!CEmuModeTagFromEntry(e, tag, (int)sizeof(tag))) continue;
 		int found = -1;
 		for (int j = 0; j < n; j++) {
-			if (_stricmp(out[j].tag, tag) == 0) { found = j; break; }
+			if (CEmuModeTagsEqual(out[j].tag, tag)) { found = j; break; }
 		}
 		if (found >= 0) {
 			/* 同じ tag ならチップが多い行の index を残す (曲数が多い)。 */
@@ -258,7 +274,7 @@ const CEmuGameEntry* CEmuCatalogFindArchiveForZipMode(const CEmuCatalog* cat,
 	CEmuArchiveMode modes[CEMU_MODE_MAX];
 	const int n = CEmuCatalogListArchiveModes(cat, archive, dataDirHint, zipFs, modes, CEMU_MODE_MAX);
 	for (int i = 0; i < n; i++) {
-		if (_stricmp(modes[i].tag, preferTag) != 0) continue;
+		if (!CEmuModeTagsEqual(modes[i].tag, preferTag)) continue;
 		if (modes[i].entryIndex < 0 || modes[i].entryIndex >= cat->count) continue;
 		const CEmuGameEntry* pick = cat->entry[modes[i].entryIndex];
 		return pick;

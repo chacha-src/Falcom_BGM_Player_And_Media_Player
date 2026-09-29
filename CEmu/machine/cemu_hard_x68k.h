@@ -8,6 +8,9 @@
    romlist に trap_f があれば LoadRoms がその IPL を一度走らせる（PlantDos ではない実コード）。
    メイン RAM は 4MB ($000000..$3FFFFF)。$E00000..$E7FFFF は ADPCM 用拡張 RAM。
    MFP Timer C/D @ $E88000 がベクタ付き IRQ2（VR=$40 なら $110/$114）。 */
+
+enum { CEMU_X68_MIDI_CAP = 65536 };
+
 class CHardX68k : public CHard {
 public:
 	CHardX68k();
@@ -41,6 +44,13 @@ public:
 	int AckMfpIrq();
 	/* IERB+IMRB で Timer D 武装済み — ドライバは $110 をソフトパルスしない */
 	int MfpTimerDIrqArmed() const;
+
+	/* CZ-6BM1 / SCC RS-MIDI キャプチャ（midiout ライブへリレー） */
+	unsigned MidiByteCount() const;
+	uint8_t MidiByteAt(unsigned i) const;
+	uint32_t MidiDeltaAt(unsigned i) const;
+	void MidiCaptureReset();
+	void MidiCaptureCompact(unsigned consumed);
 
 	/* Human68k OPEN/READ 用に XML が置いたファイル（ZMUSIC 等） */
 	enum { kDosFiles = 64, kDosHandles = 8 };

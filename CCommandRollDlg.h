@@ -3,6 +3,7 @@
 #include "CCustomControl.h"
 #include "CPromptEngine.h"
 #include "GdiSoft3D.h"
+#include "UiTickPump.h"
 #include "resource.h"
 
 class CPromptDlg;
@@ -73,7 +74,9 @@ protected:
 	CDC m_memDC;
 	CBitmap m_memBmp;
 	CBitmap* m_oldBmp = nullptr;
+	void* m_memBits = nullptr;
 	int m_memW = 0, m_memH = 0;
+	void ForceMemOpaque();
 
 	int LaneFromEvent(const MpPromptSnapshotEvent& ev) const;
 	void LettersForLane(int lane, TCHAR& c1, TCHAR& c2, BOOL& preset) const;
@@ -107,11 +110,17 @@ protected:
 
 	afx_msg int OnCreate(LPCREATESTRUCT lp);
 	afx_msg void OnPaint();
+	afx_msg LRESULT OnPrintClient(WPARAM wParam, LPARAM lParam);
 	afx_msg BOOL OnEraseBkgnd(CDC* pDC);
 	afx_msg void OnSize(UINT nType, int cx, int cy);
 	afx_msg void OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar);
 	afx_msg void OnVScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar);
 	afx_msg BOOL OnMouseWheel(UINT nFlags, short zDelta, CPoint pt);
+	afx_msg LRESULT OnNcHitTest(CPoint point);
+	afx_msg void OnNcCalcSize(BOOL bCalcValidRects, NCCALCSIZE_PARAMS* lpncsp);
+	afx_msg void OnNcLButtonDown(UINT nHitTest, CPoint point);
+	afx_msg void OnNcLButtonDblClk(UINT nHitTest, CPoint point);
+	afx_msg int OnMouseActivate(CWnd* pDesktopWnd, UINT nHitTest, UINT message);
 	afx_msg void OnLButtonDown(UINT nFlags, CPoint point);
 	afx_msg void OnLButtonUp(UINT nFlags, CPoint point);
 	afx_msg void OnLButtonDblClk(UINT nFlags, CPoint point);
@@ -158,6 +167,7 @@ protected:
 	CString m_lastTimeText;
 	CBrush m_brDlg;
 	CToolTipCtrl m_tooltip;
+	UiTickPump m_tickPump;
 	BOOL m_posRestored = FALSE;
 	BOOL m_inSizeMove = FALSE;
 	BOOL m_analyzing = FALSE;
@@ -195,8 +205,11 @@ protected:
 	afx_msg void OnMoving(UINT fwSide, LPRECT pRect);
 	afx_msg void OnGetMinMaxInfo(MINMAXINFO* lpMMI);
 	afx_msg void OnTimer(UINT_PTR nIDEvent);
+	afx_msg LRESULT OnUiTick(WPARAM wParam, LPARAM lParam);
+	afx_msg void OnShowWindow(BOOL bShow, UINT nStatus);
 	afx_msg BOOL OnEraseBkgnd(CDC* pDC);
 	afx_msg HBRUSH OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor);
+	afx_msg void OnDestroy();
 	DECLARE_MESSAGE_MAP()
 };
 

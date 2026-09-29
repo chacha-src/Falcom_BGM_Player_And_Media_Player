@@ -39,6 +39,7 @@ KbSasamiDecoder::KbSasamiDecoder(IKpiConfig* pConfig)
 	m_silentSample = 0;
 	m_seeking = false;
 	m_fmMode = false;
+	m_liveStream = false;
 	m_raira = 0;
 	m_vst = 0;
 	m_mapDefault = 4;
@@ -51,8 +52,53 @@ KbSasamiDecoder::KbSasamiDecoder(IKpiConfig* pConfig)
 	for (int i = 1; i < MAX_PORTS; i++) m_synths[i] = NULL;
 }
 
+static KbSasamiDecoder* g_sasamiLive;
+
+void KbSasamiDecoder::LiveBind()
+{
+	InterlockedExchangePointer((PVOID*)&g_sasamiLive, this);
+}
+
+void KbSasamiDecoder::LiveUnbind()
+{
+	InterlockedCompareExchangePointer((PVOID*)&g_sasamiLive, NULL, this);
+}
+
+void KbSasamiDecoder::LiveInjectShort(unsigned int msg)
+{
+	if (m_fmMode) return;
+	std::lock_guard<std::mutex> lk(m_midiLock);
+	midi_message(0, (uint_least32_t)msg);
+}
+
+void KbSasamiDecoder::LiveInjectSysex(const void* data, size_t size)
+{
+	if (m_fmMode || !data || size < 2) return;
+	std::lock_guard<std::mutex> lk(m_midiLock);
+	sysex_message(0, data, size);
+}
+
+extern "C" int SasamiKpiLiveInjectShort(unsigned int msg)
+{
+	KbSasamiDecoder* d = (KbSasamiDecoder*)InterlockedCompareExchangePointer(
+		(PVOID*)&g_sasamiLive, NULL, NULL);
+	if (!d) return 0;
+	d->LiveInjectShort(msg);
+	return 1;
+}
+
+extern "C" int SasamiKpiLiveInjectSysex(const unsigned char* data, int bytes)
+{
+	KbSasamiDecoder* d = (KbSasamiDecoder*)InterlockedCompareExchangePointer(
+		(PVOID*)&g_sasamiLive, NULL, NULL);
+	if (!d || !data || bytes < 2) return 0;
+	d->LiveInjectSysex(data, (size_t)bytes);
+	return 1;
+}
+
 KbSasamiDecoder::~KbSasamiDecoder()
 {
+	LiveUnbind();
 	for (int i = 1; i < MAX_PORTS; i++) {
 		delete m_synths[i];
 		m_synths[i] = NULL;
@@ -82,6 +128,17 @@ void KbSasamiDecoder::ReadOptions()
 	if (m_fmModeDefault < 0 || m_fmModeDefault > 2) m_fmModeDefault = 2;
 	if (m_raira)
 		m_vst = m_vst ? 0 : 1;
+}
+
+static int PathIsCemuLiveMid(const wchar_t* path)
+{
+	if (!path || !path[0]) return 0;
+	const wchar_t* base = path;
+	for (const wchar_t* p = path; *p; ++p)
+		if (*p == L'\\' || *p == L'/') base = p + 1;
+	if (_wcsnicmp(base, L"cemu_mpu_", 9) == 0) return 1;
+	if (wcsstr(base, L"cemu-live")) return 1;
+	return 0;
 }
 
 static int ReadLineInts(const char** pp, int* dst, int maxn)
@@ -324,16 +381,24 @@ DWORD __fastcall KbSasamiDecoder::Open(const KPI_MEDIAINFO* cpRequest, IKpiFile*
 		m_MediaInfo.dwChannels = 2;
 		m_MediaInfo.nBitsPerSample = 16;
 		m_MediaInfo.dwSeekableFlags = KPI_MEDIAINFO::SEEK_FLAGS_SAMPLE;
-		m_MediaInfo.dwUnitSample = rate / 100;
-		double totalSec = m_sequencer.get_total_time();
-		if (m_loopEnd > m_loopStart && m_loopStart >= 0.0)
-			totalSec = m_loopEnd;
-		if (totalSec < 0.01) totalSec = 0.01;
-		m_MediaInfo.qwLength = (UINT64)(totalSec * 1000.0 * 10000.0);
+		m_liveStream = PathIsCemuLiveMid(pathForKind) ? true : false;
+		if (m_liveStream) {
+			m_MediaInfo.dwUnitSample = 0;
+			m_MediaInfo.qwLength = (UINT64)-1;
+			m_lastSample = 0;
+		} else {
+			m_MediaInfo.dwUnitSample = rate / 100;
+			double totalSec = m_sequencer.get_total_time();
+			if (m_loopEnd > m_loopStart && m_loopStart >= 0.0)
+				totalSec = m_loopEnd;
+			if (totalSec < 0.01) totalSec = 0.01;
+			m_MediaInfo.qwLength = (UINT64)(totalSec * 1000.0 * 10000.0);
+			m_lastSample = kpi_100nsToSample(m_MediaInfo.qwLength, rate);
+		}
 		m_MediaInfo.dwCount = 1;
 		m_MediaInfo.dwNumber = 1;
-		m_lastSample = kpi_100nsToSample(m_MediaInfo.qwLength, rate);
 		m_curSample = 0;
+		LiveBind();
 		return 1;
 	}
 
@@ -442,6 +507,7 @@ DWORD __fastcall KbSasamiDecoder::Open(const KPI_MEDIAINFO* cpRequest, IKpiFile*
 	m_MediaInfo.dwNumber = 1;
 	m_lastSample = kpi_100nsToSample(m_MediaInfo.qwLength, rate);
 	m_curSample = 0;
+	LiveBind();
 	return 1;
 }
 
@@ -518,7 +584,7 @@ DWORD WINAPI KbSasamiDecoder::Render(BYTE* pBuffer, DWORD dwSizeSample)
 		p += chunk * 4;
 	}
 
-	if (!looping && m_sequencer.is_play_end()) {
+	if (!m_liveStream && !looping && m_sequencer.is_play_end()) {
 		const double limit = 0.001;
 		int16_t* out = (int16_t*)pBuffer;
 		for (DWORD i = 0; i < dwSizeSample; i++) {

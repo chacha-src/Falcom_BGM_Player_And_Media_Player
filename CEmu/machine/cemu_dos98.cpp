@@ -7,6 +7,7 @@
 extern int CEmuPc98ValkyKeepIrq0();
 extern int CEmuPc98ValkyInt50(uint8_t* mem);
 extern int CEmuPc98ValkyIntB0(uint8_t* mem);
+extern "C" void CEmuPc98RsMidiTx(uint8_t data);
 
 enum {
 	FLAG_CF = 0x0001,
@@ -168,6 +169,35 @@ const CEmuDos98File* CEmuDos98::FindFile(const char* name) const
 				return &files_[i];
 		}
 	}
+	/* DOS は 8.3。hoot もカタログのロングネームを切り詰めて載せる — sasami98m.com /
+	   sasami98_88.com はシェル「sasami98」「sasami98_88」から SASAMI98.COM として開く。
+	   完全一致が全部外れたときだけ、両側を本体 8／拡張子 3 に切って比べる。
+	   拡張子無しの要求は上の .COM/.EXE 候補（ResolveProgram）側で付く。 */
+	{
+		char want[16];
+		int w = 0;
+		const char* dot = strrchr(base, '.');
+		for (const char* p = base; *p && p != dot && w < 8; p++) want[w++] = *p;
+		if (dot) {
+			want[w++] = '.';
+			for (int k = 1; dot[k] && k <= 3; k++) want[w++] = dot[k];
+		}
+		want[w] = 0;
+		for (int i = 0; i < fileCount_; i++) {
+			const char* fn = files_[i].name;
+			const char* fdot = strrchr(fn, '.');
+			char have[16];
+			int h = 0;
+			for (const char* p = fn; *p && p != fdot && h < 8; p++) have[h++] = *p;
+			if (fdot) {
+				have[h++] = '.';
+				for (int k = 1; fdot[k] && k <= 3; k++) have[h++] = fdot[k];
+			}
+			have[h] = 0;
+			if (_stricmp(have, want) == 0)
+				return &files_[i];
+		}
+	}
 	return NULL;
 }
 
@@ -190,7 +220,13 @@ void CEmuDos98::AddFile(const char* name, const unsigned char* data, unsigned si
 		if (*p == '\\' || *p == '/' || *p == ':')
 			base = p + 1;
 	}
-	CEmuDos98File* f = FindFileMut(base);
+	/* 同名上書きは完全一致だけ。FindFile の 8.3 切り詰め一致で別ファイルを潰さない。 */
+	CEmuDos98File* f = NULL;
+	for (int i = 0; i < fileCount_ && !f; i++)
+		if (_stricmp(files_[i].name, base) == 0)
+			f = &files_[i];
+	if (!f && !strchr(base, '.'))
+		f = FindFileMut(base);
 	if (!f) {
 		f = &files_[fileCount_++];
 		memset(f, 0, sizeof(*f));
@@ -1867,7 +1903,34 @@ CEmuDos98Result CEmuDos98::ServiceIntInner(uint8_t* mem, uint8_t vec)
 		SetCf(0);
 		return DOS98_CONTINUE;
 	case 0x19:
-		/* ブートストラップ。IPL ディスクは無い。no-op 戻りとして扱う */
+		if (!pcAtBios_) {
+			/* PC-98 BIOS INT 19h = RS-232C。IBM のブートストラップではない。
+			   AH=01/04 送信を RS-MIDI キャプチャへリレー。 */
+			switch (Ah()) {
+			case 0x01:
+			case 0x04:
+				CEmuPc98RsMidiTx(Al());
+				SetAh(0);
+				SetCf(0);
+				break;
+			case 0x02:
+			case 0x05:
+				SetAh(0x80); /* 受信タイムアウト */
+				SetCf(1);
+				break;
+			case 0x03:
+				SetAh(0x85); /* 8251 TxRDY|TxEMPTY|DSR */
+				SetAl(0x00);
+				SetCf(0);
+				break;
+			default:
+				SetAh(0);
+				SetCf(0);
+				break;
+			}
+			return DOS98_CONTINUE;
+		}
+		/* IBM ブートストラップ。IPL ディスクは無い。no-op 戻りとして扱う */
 		SetCf(0);
 		return DOS98_CONTINUE;
 	case 0x1D: case 0x1E: case 0x1F:

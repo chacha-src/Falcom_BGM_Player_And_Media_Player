@@ -16,7 +16,6 @@ static uint8_t g_x68MidiIer;
 static uint8_t g_x68MidiRun, g_x68MidiNeed, g_x68MidiD0;
 static unsigned g_x68MidiN, g_x68MidiNotes, g_x68MidiWr, g_x68MidiRd;
 static unsigned g_x68GpipPhase;
-enum { CEMU_X68_MIDI_CAP = 65536 };
 static uint8_t g_x68MidiBuf[CEMU_X68_MIDI_CAP];
 
 static unsigned g_x68MidiOff[16];
@@ -63,6 +62,31 @@ static void X68MidiCapture(uint8_t v)
 extern "C" unsigned CEmuX68kMidiByteCount() { return g_x68MidiN; }
 extern "C" unsigned CEmuX68kMidiNoteOnCount() { return g_x68MidiNotes; }
 extern "C" unsigned CEmuX68kMidiPortWrites() { return g_x68MidiWr; }
+
+unsigned CHardX68k::MidiByteCount() const { return g_x68MidiN; }
+uint8_t CHardX68k::MidiByteAt(unsigned i) const
+{
+	return (i < g_x68MidiN) ? g_x68MidiBuf[i] : (uint8_t)0;
+}
+uint32_t CHardX68k::MidiDeltaAt(unsigned i) const
+{
+	(void)i;
+	return 0;
+}
+void CHardX68k::MidiCaptureReset() { X68MidiReset(); }
+
+void CHardX68k::MidiCaptureCompact(unsigned consumed)
+{
+	if (consumed == 0)
+		return;
+	if (consumed >= g_x68MidiN) {
+		g_x68MidiN = 0;
+		return;
+	}
+	const unsigned left = g_x68MidiN - consumed;
+	memmove(g_x68MidiBuf, g_x68MidiBuf + consumed, left);
+	g_x68MidiN = left;
+}
 /* CEmuX68kMidiDump の実装 */
 extern "C" void CEmuX68kMidiDump(FILE* f)
 {
@@ -301,6 +325,9 @@ uint8_t CHardX68k::Read8(unsigned addr)
 		(void)softMfp_;
 		return v;
 	}
+	/* SCC Z85C30: Ch.B が RS-232C／RS-MIDI。RR0 bit2=Tx空。オープンバス $FF は RxRDY も立つ。 */
+	if (addr >= 0xe98000u && addr <= 0xe98007u)
+		return 0x2C;
 	/* CZ-6BM1 / YM3802 MIDI。オープンバス $FF は永久 busy。DSR（$EAFA09）: bit7 IRQ、bit6 TxRDY（ZMUSIC `btst #6,(a4)` / zmusic2 macro.mac の set_a3a4）、bit2 TxEMPTY、bit1 TxRDY。MIDI_DRV は A4=$EAFA09 で `tst.b (a4) / bpl` 待ち、+4 に Tx データを書く。 */
 	if ((addr >= 0xeafa00u && addr <= 0xeafa0fu)
 		|| (addr >= 0xefa000u && addr <= 0xefa00fu)) {
@@ -501,6 +528,14 @@ void CHardX68k::Write8(unsigned addr, uint8_t data)
 		}
 		return;
 	}
+	/* SCC Ch.B/A データ ($E98005/$E98007)。コマンドポートはモード設定のみ。 */
+	if (addr == 0xe98005u || addr == 0xe98007u) {
+		g_x68MidiWr++;
+		X68MidiCapture(data);
+		return;
+	}
+	if (addr >= 0xe98000u && addr <= 0xe98007u)
+		return;
 	if ((addr >= 0xeafa00u && addr <= 0xeafa0fu)
 		|| (addr >= 0xefa000u && addr <= 0xefa00fu)) {
 		const unsigned r = addr & 0x0fu;

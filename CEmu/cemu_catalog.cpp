@@ -872,6 +872,8 @@ static void CEmuCatalogAssignHwIdsFromDoc(CEmuGameEntry* ge)
 			|| _stricmp(sub, "sb") == 0)
 			/* SB16 in this emu is YM3812 (SBP2FM/AdLib ports); not YMF262. */
 			ge->chipIds[ge->chipCount++] = CEMU_CHIP_OPL2;
+		else if (_stricmp(sub, "gameblaster") == 0 || _stricmp(sub, "cms") == 0)
+			ge->chipIds[ge->chipCount++] = CEMU_CHIP_SAA1099;
 	}
 	else if (_stricmp(plat, "x1") == 0
 		|| _stricmp(ge->dataDir, "x1") == 0

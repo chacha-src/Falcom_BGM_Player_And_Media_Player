@@ -303,7 +303,7 @@ public:
 	CString m_uxChipText;
 
 	// ---- 右曲情報パネルのテキスト marquee スクロール ----
-	// WM_MP_INFO_SCROLL(TheadLoop ~30fps・2px)で進行。収まる行は静止したまま。
+	// WM_MP_INFO_SCROLL(TheadLoop vblank・60px/s)で進行。収まる行は静止したまま。
 	// [0]=タイトル, [1]=アーティスト, [2]=アルバム, [3]=曲番号, [4]=オーディオ情報, [5]=フォーマット
 	static const int kInfoRows = 6;
 	int  m_isc[kInfoRows];   // 各行の現在スクロールオフセット(px)。0=静止
@@ -484,7 +484,7 @@ public:
 	// 1行分のテキストを mem DC へ描画する。収まれば静止描画(false)、はみ出せば
 	// 行キャッシュのワイド DC から marquee オフセットで BitBlt する(true)。
 	bool DrawInfoScrollRow(CDC& mem, int tx, int y, int tw, int lineH,
-		const CString& text, COLORREF clr, int rowIdx, COLORREF kBg, CFont* font);
+		const CString& text, COLORREF clr, int rowIdx, COLORREF kBg, CFont* font, int scrollPx);
 
 	virtual BOOL DestroyWindow();
 

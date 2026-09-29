@@ -185,7 +185,10 @@ int CDriverSg1000::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsig
 	/* リセットベクタが乗る程度に短く settle。ゲーム本体は走らせない */
 	RunUntil((uint64_t)cpuHz_ / 120);
 	booted_ = 1;
-	TriggerSong();
+	if (!loadOnly)
+		TriggerSong();
+	else
+		triggered_ = 1;
 	nextTickAt_ = (uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 60;
 	return 1;
 }

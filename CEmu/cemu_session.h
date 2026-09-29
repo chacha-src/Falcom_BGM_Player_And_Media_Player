@@ -69,6 +69,8 @@ struct CEmuSession {
 	uint8_t overlayMix;
 	/* PATCH が play で食料をリセットしたあとトグル pref を載せ直す */
 	int togglePrefDelay;
+	/* 1=曲を撃たずブート／ロゴだけ。無音終端しない */
+	uint8_t loadOnly;
 };
 
 /* セッションをゼロ初期化 */

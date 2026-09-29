@@ -6,6 +6,7 @@
 #include "GdiSoft3D.h"
 #include "gpu/GpuDx11.h"
 #include "CMidiHwPanel.h"
+#include "UiTickPump.h"
 
 class CFmMonitorDlg;
 
@@ -35,7 +36,7 @@ public:
 		int sysexOff;          // m_sx へのオフセット。SysEx でなければ -1
 	};
 
-	void PumpSyncNow(); // timerp から。同期は毎ティック、UpdateWindow は Ms2DrawDue 側
+	void PumpSyncNow(); // 自前 60Hz tick。同期は毎ティック、描画は Invalidate
 	void IdlePulse();   // OnIdle / タイマ2。CPU 余裕があるときだけ PumpIdle
 	void ResetPlaybackState(); /* 再生停止・曲切替でパートとカーソルを初期化 */
 	void DetachForDestroy();
@@ -74,6 +75,7 @@ protected:
 	afx_msg void OnLButtonDblClk(UINT nFlags, CPoint point);
 	afx_msg BOOL OnMouseWheel(UINT nFlags, short zDelta, CPoint pt);
 	afx_msg BOOL OnTtnNeedText(UINT id, NMHDR* pNMHDR, LRESULT* pResult);
+	afx_msg LRESULT OnUiTick(WPARAM wParam, LPARAM lParam);
 	virtual BOOL PreTranslateMessage(MSG* pMsg);
 
 private:
@@ -310,6 +312,7 @@ private:
 	bool m_frozen;
 	bool m_alwaysOnTop;
 	bool m_paintDisabled;
+	UiTickPump m_tickPump;
 	bool m_rotDragging;
 	CPoint m_rotDragOrigin;
 	float m_rotDragYaw0;

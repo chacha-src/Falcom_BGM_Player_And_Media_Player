@@ -9,6 +9,7 @@
 #include "afxdialogex.h"
 #include "CCustomControl.h"
 #include "GdiSoft3D.h"
+#include "UiTickPump.h"
 #include <vector>
 
 class CAnalyzerDlg : public CCustomBlurDialogExBase
@@ -88,7 +89,6 @@ public:
 	void ResetPlaybackState();
 	void DetachForDestroy();
 	void RequestSyncFromMainUi();
-	// timerp から Speana より前に呼ぶ（Post 滞留で間隔が伸びるのを防ぐ）
 	void PumpSyncNow();
 	// 曲ごと保存パラメータからの周波数表示モード適用(外部から)
 	void ApplySpecStyleExternal(int style) { SetSpecStyle(style); }
@@ -112,6 +112,7 @@ protected:
 	afx_msg void OnDestroy();
 	afx_msg void OnShowWindow(BOOL bShow, UINT nStatus);
 	afx_msg BOOL OnEraseBkgnd(CDC* pDC);
+	afx_msg LRESULT OnUiTick(WPARAM wParam, LPARAM lParam);
 	afx_msg void OnBnClickedHelp();
 	afx_msg void OnContextMenu(CWnd* pWnd, CPoint point);
 	afx_msg void OnMouseMove(UINT nFlags, CPoint point);
@@ -356,6 +357,7 @@ private:
 	HANDLE m_hSpecWake = nullptr;
 	volatile LONG m_specStop = 0;
 	volatile LONG m_specNeed = 0;
+	UiTickPump m_tickPump;
 
 #if CCUSTOM_AERO_SUPPORT
 	CCC_ChromaBlitCache m_chromaCache;

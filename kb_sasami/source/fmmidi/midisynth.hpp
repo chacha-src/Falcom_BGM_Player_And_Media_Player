@@ -25,6 +25,9 @@
     };
 */
     // m[gB­¹Ì¹B
+    struct tone_color;
+
+    // m[gB­¹Ì¹B
     class note{//:uncopyable{//C³ by Kobarin
     public:
         note(int assign_, int panpot_):assign(assign_), panpot(panpot_){}
@@ -40,6 +43,7 @@
         virtual void set_damper(int value) = 0;
         virtual void set_sostenute(int value) = 0;
         virtual void set_freeze(int value) = 0;
+        virtual void apply_tone(const tone_color&) {}
     private:
         int assign;
         int panpot;
@@ -49,14 +53,16 @@
     // m[gIbZ[WÉÎµÄKØÈm[gðìèo·B
     struct tone_color{
         int revSend, choSend, dlySend;
-        int revMode, choMode, dlyMode, insMode;
-        int cutoff, reso, attack, decay, release;
-        int vibRate, vibDepth;
+        int revMode, choMode, dlyMode, insMode, ins2;
+        int cutoff, reso, hpf, attack, decay, release;
+        int vibRate, vibDepth, vibDelay;
+        int eqLo, eqHi;
         tone_color():
             revSend(0), choSend(0), dlySend(0),
-            revMode(0), choMode(0), dlyMode(0), insMode(0),
-            cutoff(64), reso(64), attack(64), decay(64), release(64),
-            vibRate(64), vibDepth(64) {}
+            revMode(0), choMode(0), dlyMode(0), insMode(0), ins2(0),
+            cutoff(64), reso(64), hpf(64), attack(64), decay(64), release(64),
+            vibRate(64), vibDepth(64), vibDelay(64),
+            eqLo(64), eqHi(64) {}
     };
 
     class note_factory{//:uncopyable{//C³ by Kobarin
@@ -122,6 +128,11 @@
         void set_mute(bool mute_){ mute = mute_; }
         void set_system_mode(system_mode_t mode){ system_mode = mode; }
         void set_effect_mode(int kind, int value);
+        void set_sys_fx_level(int kind, int value);
+        void set_efx_on(int slot, int on);
+        void apply_xg_part(int addr, int value);
+        void apply_gs_tone(int addr, int value);
+        void apply_gs_part_mix(int addr, int value);
         tone_color effect_color() const;
         void mono_mode_on(){ all_note_off(); mono = true; }
         void poly_mode_on(){ all_note_off(); mono = false; }
@@ -185,15 +196,19 @@
         double master_frequency_multiplier;
         system_mode_t system_mode;
         int fxRevSend, fxChoSend, fxDlySend;
-        int fxRevMode, fxChoMode, fxDlyMode, fxInsMode;
-        int nrpnCutoff, nrpnReso, nrpnAtk, nrpnDec, nrpnRel;
-        int nrpnVibRate, nrpnVibDepth;
+        int fxRevMode, fxChoMode, fxDlyMode, fxInsMode, fxIns2;
+        int fxInsOn, fxInsOn2, fxInsSys1, fxInsSys2;
+        int sysRevLevel, sysChoLevel, sysDlyLevel;
+        int nrpnCutoff, nrpnReso, nrpnHpf, nrpnAtk, nrpnDec, nrpnRel;
+        int nrpnVibRate, nrpnVibDepth, nrpnVibDelay;
+        int eqLoGain, eqHiGain;
 
         int get_registered_parameter();
         void set_registered_parameter(int value);
         void update_frequency_multiplier();
         void update_modulation();
         void update_fx_vibrato();
+        void touch_tone();
         void apply_nrpn_data(int value);
     };
 

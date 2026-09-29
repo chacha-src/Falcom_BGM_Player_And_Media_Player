@@ -10,7 +10,7 @@
 
 namespace ympool {
 
-const int kChips = 4;
+const int kChips = 10;
 const int kChPerChip = 6;
 const int kVoices = kChips * kChPerChip;
 const int kKeyChan[6] = { 0, 1, 2, 4, 5, 6 };
@@ -59,13 +59,22 @@ struct Bank {
 struct Slot {
     bool used;
     bool held;
+    bool drum;
+    bool want_off;
     int gen;
     int order;
     int chip;
     int ch;
+    int damper;
+    int sostenute;
     Inst inst;
+    Inst base;
     double midi;
     double mul;
+    double vib_depth;
+    double vib_freq;
+    double vib_phase;
+    int vib_delay_left;
     int rel_left;
     std::vector<float> pcm;
 };
@@ -78,11 +87,12 @@ public:
     void note_off(int velocity);
     void sound_off();
     void set_frequency_multiplier(double value);
-    void set_tremolo(int, double) {}
-    void set_vibrato(double, double) {}
-    void set_damper(int) {}
-    void set_sostenute(int) {}
+    void set_tremolo(int depth, double freq);
+    void set_vibrato(double depth, double freq);
+    void set_damper(int value);
+    void set_sostenute(int value);
     void set_freeze(int) {}
+    void apply_tone(const tone_color& c);
     struct Ym2612Pool::Impl* pool;
     int slot;
     int gen;
@@ -110,12 +120,20 @@ struct Ym2612Pool::Impl {
         for (int i = 0; i < kVoices; i++) {
             slots[i].used = false;
             slots[i].held = false;
+            slots[i].drum = false;
+            slots[i].want_off = false;
             slots[i].gen = 1;
             slots[i].order = 0;
             slots[i].chip = i / kChPerChip;
             slots[i].ch = i % kChPerChip;
+            slots[i].damper = 0;
+            slots[i].sostenute = 0;
             slots[i].midi = 60;
             slots[i].mul = 1;
+            slots[i].vib_depth = 0;
+            slots[i].vib_freq = 3;
+            slots[i].vib_phase = 0;
+            slots[i].vib_delay_left = 0;
             slots[i].rel_left = 0;
         }
     }
@@ -172,11 +190,20 @@ struct Ym2612Pool::Impl {
         fnum = (int)(fn + 0.5);
     }
 
+    void clock_chip(int chip)
+    {
+        if (chip < 0 || chip >= kChips || !chips[chip]) return;
+        int32_t ch[6][2];
+        chips[chip]->chip.clock_split(ch);
+    }
+
     void write_pitch(Slot& s)
     {
         double midi = s.midi;
         if (s.mul > 0 && s.mul != 1.0)
             midi += 12.0 * std::log(s.mul) / std::log(2.0);
+        if (s.vib_depth > 0)
+            midi += s.vib_depth * 6.0 * std::sin(s.vib_phase);
         int block = 0, fnum = 0;
         fnum_of(midi, rate, block, fnum);
         int cc = s.ch % 3;
@@ -185,7 +212,83 @@ struct Ym2612Pool::Impl {
         wr(s.chip, s.ch, 0xA0 + cc, fnum & 0xFF);
     }
 
-    void write_inst(Slot& s, int chorus)
+    static int clampi(int v, int lo, int hi)
+    {
+        if (v < lo) return lo;
+        if (v > hi) return hi;
+        return v;
+    }
+
+    void paint_wopn(Inst& in, const tone_color& c, int velocity, bool drum)
+    {
+        static const int carrier[8][4] = {
+            {0,0,0,1}, {0,0,0,1}, {0,0,0,1}, {0,0,0,1},
+            {0,0,1,1}, {0,1,1,1}, {0,1,1,1}, {1,1,1,1}
+        };
+        const int cut = (c.cutoff - 64) / 10;
+        const int res = c.reso - 64;
+        int fbDelta = res / 32;
+        if (fbDelta > 2) fbDelta = 2;
+        if (fbDelta < -2) fbDelta = -2;
+        const int hpf = c.hpf - 64;
+        if (hpf > 0) fbDelta -= hpf / 48;
+        const int arD = (c.attack - 64) / 16;
+        const int drD = (c.decay - 64) / 20;
+        int rrD = (c.release - 64) / 16;
+        if (c.revSend > 48)
+            rrD -= (c.revSend * (c.revMode >= 3 ? 2 : 1)) / 96;
+        if (c.dlySend > 48 && c.dlyMode != 1)
+            rrD -= (c.dlySend - 48) / 80;
+        if (rrD < -3) rrD = -3;
+        const int eqL = c.eqLo - 64;
+        const int eqH = c.eqHi - 64;
+        int carTl = -(eqL / 16) + ((hpf > 0) ? hpf / 16 : 0);
+        int modTl = cut - eqH / 12;
+        auto ins_char = [&](int t) {
+            if (t == 2) { carTl -= 3; fbDelta += 1; }
+            else if (t == 3) { carTl -= 5; modTl += 2; fbDelta += 1; }
+            else if (t == 6) { modTl += 2; }
+        };
+        ins_char(c.insMode);
+        ins_char(c.ins2);
+        if (fbDelta > 2) fbDelta = 2;
+        int fb = (in.fbalg >> 3) & 7;
+        int alg = in.fbalg & 7;
+        fb = clampi(fb + fbDelta, 0, 7);
+        in.fbalg = (uint8_t)((fb << 3) | alg);
+        const int amsOn = (c.insMode == 4 || c.ins2 == 4) ? 1 : 0;
+        const int velTl = (127 - velocity) * 12 / 127;
+        for (int op = 0; op < 4; op++) {
+            uint8_t* r = in.op[op].raw;
+            int ar = r[2] & 31;
+            int ks = r[2] >> 6;
+            int dr = r[3] & 31;
+            int am = r[3] & 0x80;
+            int sl = r[5] >> 4;
+            int rr = r[5] & 15;
+            int tl = r[1] & 127;
+            const int isCar = carrier[alg][op];
+            if (isCar) {
+                ar = clampi(ar + arD, 0, 31);
+                dr = clampi(dr + drD, 0, 31);
+                rr = clampi(rr + rrD, 0, 15);
+                tl = clampi(tl + velTl + carTl, 0, 127);
+                if (drum) {
+                    if (ar < 28) ar = 28;
+                    tl = clampi(tl - 8, 0, 127);
+                }
+            } else {
+                tl = clampi(tl - modTl, 0, 127);
+                if (amsOn) am = 0x80;
+            }
+            r[1] = (uint8_t)(tl & 127);
+            r[2] = (uint8_t)((ks << 6) | (ar & 31));
+            r[3] = (uint8_t)(am | (dr & 31));
+            r[5] = (uint8_t)((sl << 4) | (rr & 15));
+        }
+    }
+
+    void write_inst(Slot& s)
     {
         int cc = s.ch % 3;
         const Inst& in = s.inst;
@@ -194,13 +297,45 @@ struct Ym2612Pool::Impl {
                 wr(s.chip, s.ch, 0x30 + 0x10 * d + op * 4 + cc, in.op[op].raw[d]);
         }
         wr(s.chip, s.ch, 0xB0 + cc, in.fbalg);
-        int sens = in.lfosens & 0x3F;
-        if (chorus > 64) {
-            int fms = sens & 7;
-            if (fms < 7) fms++;
-            sens = (sens & ~7) | fms;
+        wr(s.chip, s.ch, 0xB4 + cc, 0xC0 | (in.lfosens & 0x3F));
+    }
+
+    void start_key(Slot& s)
+    {
+        key(s.chip, s.ch, 0);
+        clock_chip(s.chip);
+        write_inst(s);
+        write_pitch(s);
+        key(s.chip, s.ch, 1);
+    }
+
+    void release_key(Slot& s)
+    {
+        s.held = false;
+        key(s.chip, s.ch, 0);
+        int rr = carrier_rr(s.inst);
+        double sec = 1.2;
+        if (rr >= 13) sec = 0.12;
+        else if (rr >= 8) sec = 0.35;
+        else if (rr >= 4) sec = 0.7;
+        s.rel_left = (int)(rate * sec);
+        if (s.rel_left < 64) s.rel_left = 64;
+    }
+
+    void apply_lfo(size_t n)
+    {
+        if (n == 0) return;
+        const double dt = (double)n / (rate > 1 ? rate : 44100.0);
+        for (int i = 0; i < kVoices; i++) {
+            if (!slots[i].used || slots[i].vib_depth <= 0) continue;
+            if (slots[i].vib_delay_left > 0) {
+                slots[i].vib_delay_left -= (int)n;
+                continue;
+            }
+            double f = slots[i].vib_freq > 0.25 ? slots[i].vib_freq : 3.0;
+            slots[i].vib_phase += 6.283185307179586 * f * dt;
+            write_pitch(slots[i]);
         }
-        wr(s.chip, s.ch, 0xB4 + cc, 0xC0 | sens);
     }
 
     int carrier_rr(const Inst& in)
@@ -298,8 +433,14 @@ struct Ym2612Pool::Impl {
             slots[i].pcm.assign(n * 2, 0.f);
         }
         std::vector<int32_t> mix(kChips * 6 * 2);
+        bool need[kChips];
+        for (int c = 0; c < kChips; c++) need[c] = false;
+        for (int i = 0; i < kVoices; i++) {
+            if (slots[i].used) need[slots[i].chip] = true;
+        }
         for (size_t s = 0; s < n; s++) {
             for (int c = 0; c < kChips; c++) {
+                if (!need[c]) continue;
                 int32_t ch[6][2];
                 chips[c]->chip.clock_split(ch);
                 for (int k = 0; k < 6; k++) {
@@ -328,6 +469,7 @@ struct Ym2612Pool::Impl {
         }
         init_chips();
         render(n);
+        apply_lfo(n);
         frame_left = live > 0 ? live : 1;
     }
 
@@ -374,6 +516,7 @@ bool YmNote::synthesize(sample_t* buf, std::size_t samples, double rate, sample_
     if (stay) {
         Slot& s = pool->slots[slot];
         double v = velocity / 128.0;
+        if (s.drum) v *= 1.85;
         const float* pcm = s.pcm.empty() ? 0 : &s.pcm[0];
         size_t n = s.pcm.size() / 2;
         if (n > samples) n = samples;
@@ -394,15 +537,10 @@ void YmNote::note_off(int)
 {
     if (!pool->owns(slot, gen)) return;
     Slot& s = pool->slots[slot];
-    s.held = false;
-    pool->key(s.chip, s.ch, 0);
-    int rr = pool->carrier_rr(s.inst);
-    double sec = 1.2;
-    if (rr >= 13) sec = 0.12;
-    else if (rr >= 8) sec = 0.35;
-    else if (rr >= 4) sec = 0.7;
-    s.rel_left = (int)(pool->rate * sec);
-    if (s.rel_left < 64) s.rel_left = 64;
+    s.want_off = true;
+    if (s.damper >= 64 || s.sostenute >= 64)
+        return;
+    pool->release_key(s);
 }
 
 void YmNote::sound_off()
@@ -418,6 +556,53 @@ void YmNote::set_frequency_multiplier(double value)
     pool->slots[slot].mul = value;
     pool->init_chips();
     pool->write_pitch(pool->slots[slot]);
+}
+
+void YmNote::set_vibrato(double depth, double freq)
+{
+    if (!pool->owns(slot, gen)) return;
+    Slot& s = pool->slots[slot];
+    s.vib_depth = depth;
+    s.vib_freq = freq > 0.25 ? freq : 3.0;
+}
+
+void YmNote::set_tremolo(int depth, double)
+{
+    if (!pool->owns(slot, gen) || depth <= 0) return;
+    Slot& s = pool->slots[slot];
+    int ams = (s.inst.lfosens >> 4) & 3;
+    if (ams < 2) {
+        ams = 2;
+        s.inst.lfosens = (uint8_t)((ams << 4) | (s.inst.lfosens & 7));
+        pool->write_inst(s);
+    }
+}
+
+void YmNote::set_damper(int value)
+{
+    if (!pool->owns(slot, gen)) return;
+    Slot& s = pool->slots[slot];
+    s.damper = value;
+    if (s.want_off && s.damper < 64 && s.sostenute < 64)
+        pool->release_key(s);
+}
+
+void YmNote::set_sostenute(int value)
+{
+    if (!pool->owns(slot, gen)) return;
+    Slot& s = pool->slots[slot];
+    s.sostenute = value;
+    if (s.want_off && s.damper < 64 && s.sostenute < 64)
+        pool->release_key(s);
+}
+
+void YmNote::apply_tone(const tone_color& c)
+{
+    if (!pool->owns(slot, gen)) return;
+    Slot& s = pool->slots[slot];
+    s.inst = s.base;
+    pool->paint_wopn(s.inst, c, velocity, s.drum);
+    pool->write_inst(s);
 }
 
 } // namespace ympool
@@ -498,7 +683,7 @@ bool Ym2612Pool::load(const wchar_t* path, int family, int append)
     return !impl->banks.empty();
 }
 
-note* Ym2612Pool::note_on(int program, int key, int velocity, double freq_mul, int chorus_send)
+note* Ym2612Pool::note_on(int program, int key, int velocity, double freq_mul, const tone_color& color)
 {
     if (!ready() || velocity <= 0) return 0;
     impl->init_chips();
@@ -515,13 +700,28 @@ note* Ym2612Pool::note_on(int program, int key, int velocity, double freq_mul, i
     if (!in || !in->alive) return 0;
 
     int s = impl->pick();
-    if (impl->slots[s].used)
+    if (impl->slots[s].used) {
+        impl->key(impl->slots[s].chip, impl->slots[s].ch, 0);
+        impl->clock_chip(impl->slots[s].chip);
         impl->slots[s].gen++;
+    }
     Slot& slot = impl->slots[s];
     slot.used = true;
     slot.held = true;
+    slot.drum = drum;
+    slot.want_off = false;
+    slot.damper = 0;
+    slot.sostenute = 0;
+    slot.vib_depth = 0;
+    slot.vib_freq = 3;
+    slot.vib_phase = 0;
     slot.order = ++impl->order;
-    slot.inst = *in;
+    slot.base = *in;
+    slot.inst = slot.base;
+    impl->paint_wopn(slot.inst, color, velocity, drum);
+    int dly = color.vibDelay - 64;
+    if (dly < 0) dly = 0;
+    slot.vib_delay_left = (int)(impl->rate * dly / 80.0);
     slot.mul = freq_mul > 0 ? freq_mul : 1;
     double midi = (double)key + (double)in->note_off;
     if (drum && in->perc_key > 0)
@@ -529,9 +729,6 @@ note* Ym2612Pool::note_on(int program, int key, int velocity, double freq_mul, i
     if (midi < 0) midi = 0;
     if (midi > 127) midi = 127;
     slot.midi = midi;
-    impl->key(slot.chip, slot.ch, 0);
-    impl->write_inst(slot, chorus_send);
-    impl->write_pitch(slot);
-    impl->key(slot.chip, slot.ch, 1);
+    impl->start_key(slot);
     return new ympool::YmNote(impl, s, slot.gen, velocity);
 }

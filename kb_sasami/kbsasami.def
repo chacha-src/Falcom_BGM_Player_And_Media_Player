@@ -1,2 +1,4 @@
 EXPORTS
 	kpi_CreateInstance
+	SasamiKpiLiveInjectShort
+	SasamiKpiLiveInjectSysex

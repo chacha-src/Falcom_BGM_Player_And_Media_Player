@@ -236,7 +236,7 @@ static void __cdecl WaOut_Close()
 static int __cdecl WaOut_Write(char* buf, int len)
 {
 	// 生PCMをリングへそのまま格納。ここで g_waVol を掛けない。
-	// 音量は本体 equaliser の「その他のkpi」(kpivol) と DS 主音量だけが担当する。
+	// 音量は本体 equaliser の Winamp/XMPlay/AIMP 倍率 (winampvol) と DS 主音量だけが担当する。
 	if (!buf || len <= 0) return 0;
 	WaEnsureCs();
 	EnterCriticalSection(&g_waCs);
