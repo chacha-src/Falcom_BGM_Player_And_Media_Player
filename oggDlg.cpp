@@ -25934,33 +25934,49 @@ static int BannerMarqueeSrcStep()
 }
 
 // スクロール開始と描画幅は同じ。相違メーター手前、無ければバナー右端。
+// mojisub は TextOut(x=4)。期間 si を origin=4 から切ると「-*-」直後が黒隙間＋二重 XOR でチラつく。
 static void BannerBlitScrollValue(CDC& dst, CDC& src, int valueX_px, int viewW_px,
 	int y_px, int blitH_px, int& mcnt_scroll, int& mcnt_wrap, int si_px, int srcStep)
 {
 	if (viewW_px < 1) return;
-	int xorW = viewW_px;
-	if (xorW < 8 * 4) xorW = 8 * 4;
 	if (srcStep < 0) srcStep = 0;
+	const int srcOrigin = 4;
+	const int visW = viewW_px;
 
 	if (si_px > viewW_px) {
-		BannerBlitGlyphs(dst, src, valueX_px, y_px, xorW, blitH_px, mcnt_scroll, 0);
+		if (mcnt_scroll < 0)
+			mcnt_scroll = 0;
+		if (si_px > 0) {
+			while (mcnt_scroll >= si_px)
+				mcnt_scroll -= si_px;
+		}
+		const int remain = si_px - mcnt_scroll;
+		if (remain >= visW) {
+			BannerBlitGlyphs(dst, src, valueX_px, y_px, visW, blitH_px,
+				srcOrigin + mcnt_scroll, 0);
+			mcnt_wrap = 0;
+		}
+		else {
+			if (remain > 0)
+				BannerBlitGlyphs(dst, src, valueX_px, y_px, remain, blitH_px,
+					srcOrigin + mcnt_scroll, 0);
+			const int wrapW = visW - remain;
+			if (wrapW > 0)
+				BannerBlitGlyphs(dst, src, valueX_px + remain, y_px, wrapW, blitH_px,
+					srcOrigin, 0);
+			mcnt_wrap = wrapW;
+		}
 		if (srcStep > 0) {
-			if (si_px - mcnt_scroll < viewW_px) {
-				mcnt_wrap += srcStep;
-				const int x2 = viewW_px - mcnt_wrap + valueX_px;
-				const int w2 = valueX_px + xorW - x2;
-				if (w2 > 0)
-					BannerBlitGlyphs(dst, src, x2, y_px, w2, blitH_px, 0, 0);
-				if (viewW_px - mcnt_wrap <= 0) { mcnt_wrap = 0; mcnt_scroll = 0; }
-			}
-			else {
-				mcnt_wrap = 0;
-			}
 			mcnt_scroll += srcStep;
+			if (si_px > 0) {
+				while (mcnt_scroll >= si_px)
+					mcnt_scroll -= si_px;
+			}
 		}
 	}
 	else {
-		BannerBlitGlyphs(dst, src, valueX_px, y_px, xorW, blitH_px, 0, 0);
+		BannerBlitGlyphs(dst, src, valueX_px, y_px, visW, blitH_px, srcOrigin, 0);
+		mcnt_wrap = 0;
 	}
 }
 
