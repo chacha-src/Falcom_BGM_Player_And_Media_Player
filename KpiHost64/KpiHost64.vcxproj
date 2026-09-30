@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" ToolsVersion="14.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="uni_avx2_vs2026|Win32">
@@ -54,6 +54,7 @@
       <WarningLevel>Level3</WarningLevel>
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>WIN32_LEAN_AND_MEAN;NOMINMAX;KPIHOST64_BUILD;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions Condition="'$(Configuration)'=='uni_avx2_vs2026'">WIN32_LEAN_AND_MEAN;NOMINMAX;KPIHOST64_BUILD;NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <AdditionalIncludeDirectories>$(ProjectDir);$(ProjectDir)..\;$(ProjectDir)..\third_party\aimp;$(ProjectDir)..\third_party\vst3sdk;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpp17</LanguageStandard>
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
@@ -68,6 +69,10 @@
       <Optimization Condition="'$(Configuration)'=='uni_2026_de'">MaxSpeed</Optimization>
       <DebugInformationFormat Condition="'$(Configuration)'=='uni_2026_de'">ProgramDatabase</DebugInformationFormat>
       <AdditionalOptions Condition="'$(Configuration)'=='uni_2026_de'">/utf-8 /Zo %(AdditionalOptions)</AdditionalOptions>
+      <Optimization Condition="'$(Configuration)'=='uni_avx2_vs2026'">MaxSpeed</Optimization>
+      <FunctionLevelLinking Condition="'$(Configuration)'=='uni_avx2_vs2026'">true</FunctionLevelLinking>
+      <StringPooling Condition="'$(Configuration)'=='uni_avx2_vs2026'">true</StringPooling>
+      <WholeProgramOptimization Condition="'$(Configuration)'=='uni_avx2_vs2026'">true</WholeProgramOptimization>
       <OpenMPSupport>false</OpenMPSupport>
     </ClCompile>
     <ResourceCompile>
@@ -80,6 +85,10 @@
       <TargetMachine Condition="'$(Platform)'=='x64'">MachineX64</TargetMachine>
       <LargeAddressAware Condition="'$(Platform)'=='Win32'">true</LargeAddressAware>
       <GenerateDebugInformation Condition="'$(Configuration)'=='uni_2026_de'">DebugFull</GenerateDebugInformation>
+      <GenerateDebugInformation Condition="'$(Configuration)'=='uni_avx2_vs2026'">true</GenerateDebugInformation>
+      <OptimizeReferences Condition="'$(Configuration)'=='uni_avx2_vs2026'">true</OptimizeReferences>
+      <EnableCOMDATFolding Condition="'$(Configuration)'=='uni_avx2_vs2026'">true</EnableCOMDATFolding>
+      <LinkTimeCodeGeneration Condition="'$(Configuration)'=='uni_avx2_vs2026'">UseLinkTimeCodeGeneration</LinkTimeCodeGeneration>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>

@@ -1,4 +1,4 @@
-#include "simd_audio.h"
+﻿#include "simd_audio.h"
 #include "cpu_isa.h"
 #include <math.h>
 #include <float.h>
@@ -89,8 +89,8 @@ static void PeakMean_AVX2(const float* src, size_t n, double* maxAbs, double* su
 	size_t i = 0;
 	__m256 vmax = _mm256_setzero_ps();
 	__m256 vsum = _mm256_setzero_ps();
-	const __m256 inf = _mm256_set1_ps(HUGE_VALF);
-	const __m256 ninf = _mm256_set1_ps(-HUGE_VALF);
+	const __m256 inf = _mm256_castsi256_ps(_mm256_set1_epi32(0x7f800000));
+	const __m256 ninf = _mm256_castsi256_ps(_mm256_set1_epi32((int)0xff800000));
 	const __m256 absmask = _mm256_castsi256_ps(_mm256_set1_epi32(0x7fffffff));
 	size_t valid = 0;
 	for (; i + 8 <= n; i += 8) {
