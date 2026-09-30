@@ -738,6 +738,9 @@
     <ClCompile Include="VstMidiEngine.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="Sf2Vst2.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="VstHostDlg.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>

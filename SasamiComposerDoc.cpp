@@ -689,6 +689,41 @@ int ScMidiAddClef(ScMidiDoc* d, uint32_t tick, int ch, int clef)
 	return ScPush(d->ev, &d->evCount, tick, (uint8_t)ch, SC_EV_CLEF, (uint8_t)clef, 0, 0, 0);
 }
 
+int ScMidiPartDefaultDrum(int ch0)
+{
+	return (ch0 == 9 || ch0 == 25) ? 1 : 0;
+}
+
+int ScMidiPartIsDrum(const ScEvent* ev, int n, int ch0, uint32_t tick)
+{
+	int d = ScMidiPartDefaultDrum(ch0);
+	if (!ev || n <= 0 || ch0 < 0 || ch0 >= SC_MIDI_CH) return d;
+	for (int i = 0; i < n; i++) {
+		if (ev[i].kind != SC_EV_DRUM) continue;
+		if ((int)ev[i].ch != ch0) continue;
+		if (ev[i].tick > tick) continue;
+		d = ev[i].a ? 1 : 0;
+	}
+	return d;
+}
+
+int ScMidiAddDrum(ScMidiDoc* d, uint32_t tick, int ch, int drum)
+{
+	if (!d || ch < 0 || ch >= SC_MIDI_CH) return 0;
+	drum = drum ? 1 : 0;
+	for (int i = d->evCount - 1; i >= 0; i--) {
+		if (d->ev[i].kind != SC_EV_DRUM || d->ev[i].ch != (uint8_t)ch) continue;
+		for (int j = i; j + 1 < d->evCount; j++)
+			d->ev[j] = d->ev[j + 1];
+		d->evCount--;
+	}
+	/* GM default (ch10/26 drum) needs no event. */
+	if (tick == 0 && drum == ScMidiPartDefaultDrum(ch))
+		return 1;
+	if (d->evCount >= SC_EV_MAX) return 0;
+	return ScPush(d->ev, &d->evCount, tick, (uint8_t)ch, SC_EV_DRUM, (uint8_t)drum, 0, 0, 0);
+}
+
 int ScMidiAddKey(ScMidiDoc* d, uint32_t tick, int keySig)
 {
 	if (!d || d->evCount >= SC_EV_MAX) return 0;
@@ -1161,7 +1196,10 @@ int ScCompileMidiMml(const wchar_t* text, ScMidiDoc* out, int* errLine, wchar_t*
 
 	int ch = 0;
 	uint32_t tick[SC_MIDI_CH];
+	int drumPart[SC_MIDI_CH];
 	memset(tick, 0, sizeof(tick));
+	for (int i = 0; i < SC_MIDI_CH; i++)
+		drumPart[i] = ScMidiPartDefaultDrum(i);
 	int oct = 4, defLen = 4, vel = 105, pan = 64, gatePct = 100;
 	int line = 1;
 	const wchar_t* p = text;
@@ -1621,6 +1659,16 @@ int ScCompileMidiMml(const wchar_t* text, ScMidiDoc* out, int* errLine, wchar_t*
 				ScPush(out->ev, &out->evCount, tick[ch], (uint8_t)ch, SC_EV_BANK, (uint8_t)msb, (uint8_t)lsb, 0, 0);
 				continue;
 			}
+			if (_wcsnicmp(p, L"DRUM", 4) == 0 || _wcsnicmp(p, L"KAKU", 4) == 0) {
+				p += 4;
+				while (IsWs(*p)) p++;
+				int n = ParseInt(&p);
+				if (n < 0) n = 1;
+				drumPart[ch] = n ? 1 : 0;
+				ScMidiAddDrum(out, tick[ch], ch, drumPart[ch]);
+				ScMidiAddClef(out, tick[ch], ch, drumPart[ch] ? 3 : 2);
+				continue;
+			}
 			/* @METER 4/4 or @TS 7/8 — MPW3 time signature (measure grid). */
 			if (_wcsnicmp(p, L"METER", 5) == 0) {
 				p += 5;
@@ -1897,7 +1945,7 @@ int ScCompileMidiMml(const wchar_t* text, ScMidiDoc* out, int* errLine, wchar_t*
 			   Heuristic: if ch==9 (MIDI10) and next is letter not digit/dot, treat as drum later. */
 			const wchar_t rc = *p;
 			p++;
-			if (rc == L'r' && ch == 9 && *p && !IsDigit(*p) && *p != L'.' && NoteIndex(*p) < 0 && *p != L'^') {
+			if (rc == L'r' && drumPart[ch] && *p && !IsDigit(*p) && *p != L'.' && NoteIndex(*p) < 0 && *p != L'^') {
 				/* fall through — actually already consumed; treat as ride drum note 51 */
 				int len, dots;
 				parseLenDots(&len, &dots);
@@ -2747,7 +2795,8 @@ static int CmpEv(const void* a, const void* b)
 			|| k == SC_EV_FM_PITCH || k == SC_EV_PCM_SAMPLE
 			|| k == SC_EV_CC || k == SC_EV_FM_EX || k == SC_EV_FM_LFO || k == SC_EV_FM_DETUNE
 			|| k == SC_EV_FM_FLR || k == SC_EV_SOFT_VIB || k == SC_EV_SOFT_PORTA
-			|| k == SC_EV_FM_LEGATO || k == SC_EV_METER)
+			|| k == SC_EV_FM_LEGATO || k == SC_EV_METER || k == SC_EV_DRUM
+			|| k == SC_EV_CLEF || k == SC_EV_KEY)
 			return 3;
 		if (k == SC_EV_NOTE || k == SC_EV_REST || k == SC_EV_TIE
 			|| k == SC_EV_FM_NOTE || k == SC_EV_FM_REST || k == SC_EV_FM_FSLR)
@@ -3518,6 +3567,14 @@ int ScMidiDocToWrite(const ScMidiDoc* d, SasamiWriteMidi* w)
 			lastTick[ch] = preWait;
 			preambleDone[ch] = 1;
 			vel[ch] = 105;
+			/* KAKU1: GS USE FOR RHYTHM PART / XG CC0=127. Default ch10 already drum. */
+			{
+				const int defD = ((s->part & 15) == 9) ? 1 : 0;
+				const int drum0 = ScMidiPartIsDrum(sorted, n, ch, 0);
+				if (drum0 != defD) {
+					if (!SasamiStreamPut3(s, 29, (uint8_t)drum0, 0)) return 0;
+				}
+			}
 		}
 		/* Advance stream to this event's score tick — Q/J/|: / CC must not fire early. */
 		const int needsTime =
@@ -3529,7 +3586,8 @@ int ScMidiDocToWrite(const ScMidiDoc* d, SasamiWriteMidi* w)
 			|| e->kind == SC_EV_VOL || e->kind == SC_EV_PAN || e->kind == SC_EV_VELO
 			|| e->kind == SC_EV_PITCH || e->kind == SC_EV_RPN || e->kind == SC_EV_NRPN
 			|| e->kind == SC_EV_SYSEX || e->kind == SC_EV_COMMENT
-			|| e->kind == SC_EV_CC || e->kind == SC_EV_SOFT_VIB || e->kind == SC_EV_SOFT_PORTA;
+			|| e->kind == SC_EV_CC || e->kind == SC_EV_SOFT_VIB || e->kind == SC_EV_SOFT_PORTA
+			|| e->kind == SC_EV_DRUM;
 		if (needsTime && e->tick > lastTick[ch]) {
 			uint32_t gap = e->tick - lastTick[ch];
 			while (gap > 0) {
@@ -3607,6 +3665,12 @@ int ScMidiDocToWrite(const ScMidiDoc* d, SasamiWriteMidi* w)
 			}
 			break;
 		}
+		case SC_EV_DRUM:
+			/* Tick 0 already emitted after preamble. Mid-score KAKU still writes. */
+			if (e->tick > 0) {
+				if (!SasamiStreamPut3(s, 29, e->a ? 1 : 0, 0)) return 0;
+			}
+			break;
 		case SC_EV_JUMP_MARK: {
 			/* Q always wins as soft-J land (overrides an earlier |:). */
 			chStreamJump[ch] = s->size;
@@ -3729,6 +3793,13 @@ int ScMidiDocToWrite(const ScMidiDoc* d, SasamiWriteMidi* w)
 			w->tr[ch].part = ch & 15;
 		uint32_t preWait = 0;
 		if (!putPreamble(&w->tr[ch], &preWait)) return 0;
+		{
+			const int defD = ((w->tr[ch].part & 15) == 9) ? 1 : 0;
+			const int drum0 = ScMidiPartIsDrum(d->ev, d->evCount, ch, 0);
+			if (drum0 != defD) {
+				if (!SasamiStreamPut3(&w->tr[ch], 29, (uint8_t)drum0, 0)) return 0;
+			}
+		}
 		if (!SasamiStreamPut3(&w->tr[ch], 8, 0, 1)) return 0;
 	}
 	for (int ch = 0; ch < SC_MIDI_CH; ch++) {
@@ -4729,6 +4800,11 @@ static int ScMidiDocToMmlImpl(const ScMidiDoc* d, wchar_t* out, int outCch, int 
 			if (e.kind == SC_EV_BANK) {
 				emitGap(e.tick);
 				ScAppendF(out, outCch, &len, L"@BANK %d,%d ", (int)e.a, (int)e.b);
+				continue;
+			}
+			if (e.kind == SC_EV_DRUM) {
+				emitGap(e.tick);
+				ScAppendF(out, outCch, &len, L"@DRUM %d ", e.a ? 1 : 0);
 				continue;
 			}
 			if (e.kind == SC_EV_RPN) {

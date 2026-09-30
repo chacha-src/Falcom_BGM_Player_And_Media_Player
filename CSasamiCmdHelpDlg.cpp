@@ -498,14 +498,16 @@ void CSasamiCmdHelpDlg::PaintChapter(CDC& dc, int chapter, int maxTextW, int& ou
 		y = SchDrawCmd(dc, accentFont, L, y, lh, L"(3cde", L"… 3連符（譜面パレット「3」）。5/6/8 も同様。");
 		y = SchDrawCmd(dc, accentFont, L, y, lh, L"T120 / t120", L"… テンポ（大文字 T も可）。譜面 Tempo と同期。");
 		y = SchDrawCmd(dc, accentFont, L, y, lh, L"P64", L"… パン（0=左 64=中央 127=右）。P64:85 副値は無視。");
-		y = SchTitle(dc, boldFont, L, titleLh, y, L"ドラム（#10 推奨）");
+		y = SchTitle(dc, boldFont, L, titleLh, y, L"ドラム（#10 既定。右クリックで他chも可）");
 		{
 			const wchar_t* ln[] = {
+				L"  既定は MIDI 10（と 26）がドラム。譜面/ロール右クリックで任意chを GS/XG リズム化。",
+				L"  @DRUM 1 / @DRUM 0 … KAKU1（GS 40 1n 15 / XG CC0=127）。マルチティンバー用。",
 				L"  s / b / h … スネア(38) / バス(36) / ハイハット(42)。",
-				L"  r … チャンネル10 ではライド(51)。それ以外は休符。",
+				L"  r … ドラムパートではライド(51)。それ以外は休符。",
 				L"  通常の c d e … も GM ドラムノート番号として解釈。"
 			};
-			y = SchLines(dc, L, maxTextW, lh, y, ln, 3);
+			y = SchLines(dc, L, maxTextW, lh, y, ln, 5);
 		}
 		y = SchTitle(dc, boldFont, L, titleLh, y, L"MIDI1 で続き");
 		y = SchMuted(dc, L, maxTextW, lh, y, L"音色・VST・RPN・ループ詳細は MIDI2 タブ。FM 専用の基本は FM1 タブ（内容重複）。");
@@ -515,6 +517,7 @@ void CSasamiCmdHelpDlg::PaintChapter(CDC& dc, int chapter, int maxTextW, int& ou
 		y = SchDrawCmd(dc, accentFont, L, y, lh, L"@63:85", L"… プログラム:バンク（DO-- / MICP 形式）。");
 		y = SchDrawCmd(dc, accentFont, L, y, lh, L"@PROG n", L"… VST プログラム変更。");
 		y = SchDrawCmd(dc, accentFont, L, y, lh, L"@BANK msb,lsb", L"… バンクセレクト MSB/LSB。");
+		y = SchDrawCmd(dc, accentFont, L, y, lh, L"@DRUM 1", L"… このパートをドラム（GS/XGリズム）。@DRUM 0 でメロディ。#10 以外のマルチティンバー用。@KAKU も同義。");
 		y = SchDrawCmd(dc, accentFont, L, y, lh, L"@V100", L"… トラック音量 cmd5（譜面 Vol ストリップ）。");
 		y = SchDrawCmd(dc, accentFont, L, y, lh, L"@P8192", L"… 14bit ピッチ（8192=中央。譜面 Pitch ストリップ）。");
 		y = SchDrawCmd(dc, accentFont, L, y, lh, L"@METER 4/4", L"… 拍子。小節頭に縦配置表示。曲途中の変更も可（@TS 別名）。");

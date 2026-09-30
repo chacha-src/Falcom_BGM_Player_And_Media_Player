@@ -27,6 +27,7 @@ public:
 	void NotifyEdited();
 	void RefreshBoundRoll();
 	void HistPush(); /* public for piano-roll / shared undo */
+	void SetPartDrum(int tr, int drum); /* GS/XG rhythm part (any MIDI ch) */
 	void LoadFromDoc(const ScMidiDoc& src);
 	void SyncMeterFromDoc();
 	void PushDocToText();

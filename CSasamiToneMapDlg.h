@@ -14,7 +14,7 @@ public:
 
 	/* Modal. Writes bind prog/bank on OK (GS/XG). VST3 pick also returns IDOK
 	   after loading dedicated plugin into the part. */
-	static int PickForPart(CWnd* owner, int part1to32, ScMidiVstBind* bind);
+	static int PickForPart(CWnd* owner, int part1to32, ScMidiVstBind* bind, int isDrum = -1);
 
 	int m_part;
 	int m_prog;
@@ -22,6 +22,7 @@ public:
 	int m_bankLsb;
 	int m_mapSel;
 	int m_pickedVst3; /* 1 if user left via VST3 pick */
+	int m_isDrum;     /* 1 = kit / rhythm part (any MIDI ch, not only 10) */
 
 protected:
 	virtual void DoDataExchange(CDataExchange* pDX);

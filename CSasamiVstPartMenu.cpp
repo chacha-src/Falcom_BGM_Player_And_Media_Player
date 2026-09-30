@@ -256,7 +256,7 @@ int ScVstShowPartMenu(CWnd* owner, int part1to32, CPoint screenPt, ScMidiVstBind
 	return changed;
 }
 
-int ScVstAssignToneForPart(CWnd* owner, int part1to32, ScMidiVstBind* bind)
+int ScVstAssignToneForPart(CWnd* owner, int part1to32, ScMidiVstBind* bind, int isDrum)
 {
 	if (!owner || part1to32 < 1 || part1to32 > 32) return 0;
 
@@ -297,7 +297,9 @@ int ScVstAssignToneForPart(CWnd* owner, int part1to32, ScMidiVstBind* bind)
 
 	if (multi) {
 		/* SC-VA / GS/XG multi → tone map; VST3… inside can switch to dedicated. */
-		const int r = CSasamiToneMapDlg::PickForPart(owner, part1to32, bind);
+		const int drum = (isDrum >= 0) ? (isDrum ? 1 : 0)
+			: ((part1to32 == 10 || part1to32 == 26) ? 1 : 0);
+		const int r = CSasamiToneMapDlg::PickForPart(owner, part1to32, bind, drum);
 		if (r != IDOK)
 			return 0;
 		path[0] = 0;

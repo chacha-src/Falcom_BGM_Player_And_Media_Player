@@ -64,7 +64,8 @@ enum ScEvKind : uint8_t {
 	SC_EV_SOFT_PORTA = 42,    /* a=semitone delta+64, b=delayLen, c=glideLen */
 	SC_EV_METER = 43,         /* time signature change: a=numer, b=denom (global, ch=0) */
 	SC_EV_CLEF = 44,          /* clef change (display): ch=part, a=0G 1F 2grand 3drum */
-	SC_EV_KEY = 45            /* key signature (display): a=signed sharps -7..+7, ch=0 */
+	SC_EV_KEY = 45,           /* key signature (display): a=signed sharps -7..+7, ch=0 */
+	SC_EV_DRUM = 46           /* GS/XG rhythm part: a=0 melodic 1 drum (KAKU1). Default ch10/26=drum */
 };
 
 enum { SC_MACRO_MAX = 32 };
@@ -222,6 +223,10 @@ int ScMidiAddMeter(ScMidiDoc* d, uint32_t tick, int numer, int denom);
 int ScFmAddMeter(ScFmDoc* d, uint32_t tick, int numer, int denom);
 int ScMidiAddClef(ScMidiDoc* d, uint32_t tick, int ch, int clef);
 int ScFmAddClef(ScFmDoc* d, uint32_t tick, int ch, int clef);
+/* GM default: MIDI 10 / 26 (track 9 / 25). Explicit @DRUM / menu overrides. */
+int ScMidiPartDefaultDrum(int ch0);
+int ScMidiPartIsDrum(const ScEvent* ev, int n, int ch0, uint32_t tick);
+int ScMidiAddDrum(ScMidiDoc* d, uint32_t tick, int ch, int drum);
 int ScMidiAddKey(ScMidiDoc* d, uint32_t tick, int keySig);
 int ScFmAddKey(ScFmDoc* d, uint32_t tick, int keySig);
 int ScFmAddEx(ScFmDoc* d, uint32_t tick, int ch, int exN, int data);

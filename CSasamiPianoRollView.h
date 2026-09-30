@@ -43,6 +43,7 @@ int ScPianoRollYToNote(const ScPianoRollView* v, const CRect& rc, int y);
 int ScPianoRollPtInKeys(const CRect& rc, CPoint pt);
 int ScPianoRollPtInMarkLane(const CRect& rc, CPoint pt);
 void ScPianoRollNoteName(int note, wchar_t* buf, int cch);
+void ScPianoRollNoteNameEx(int note, int isDrum, wchar_t* buf, int cch);
 int ScPianoRollContentWidthPx(const ScStaffUi* u, const ScEvent* ev, int evCount);
 int ScPianoRollContentHeightPx(const ScPianoRollView* v);
 int ScPianoRollMaxScrollY(const ScPianoRollView* v, int keysH);

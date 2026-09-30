@@ -35,9 +35,28 @@ void ScPianoRollFit(ScPianoRollView* v, int keysH)
 
 void ScPianoRollNoteName(int note, wchar_t* buf, int cch)
 {
+	ScPianoRollNoteNameEx(note, 0, buf, cch);
+}
+
+void ScPianoRollNoteNameEx(int note, int isDrum, wchar_t* buf, int cch)
+{
 	if (!buf || cch < 4) return;
 	if (note < 0) note = 0;
 	if (note > 127) note = 127;
+	if (isDrum) {
+		static const wchar_t* kPerc[] = {
+			/* 35-42 */ L"BD2", L"BD", L"Rim", L"SD", L"Clap", L"SD2", L"FTom", L"CHH",
+			/* 43-50 */ L"HFTom", L"PHH", L"LTom", L"OHH", L"LMTom", L"HMTom", L"Cr1", L"HTom",
+			/* 51-58 */ L"Ride", L"Chin", L"RidB", L"Tamb", L"SpCr", L"Cow", L"Cr2", L"VibS",
+			/* 59-66 */ L"Rid2", L"HbH", L"HbL", L"CgMH", L"CgH", L"CgL", L"TmH", L"TmL",
+			/* 67-74 */ L"AgH", L"AgL", L"Caba", L"Mara", L"WhS", L"WhL", L"GuiS", L"GuiL",
+			/* 75-81 */ L"Clav", L"WdH", L"WdL", L"CuH", L"CuL", L"TrM", L"TrO"
+		};
+		if (note >= 35 && note <= 81) {
+			wcsncpy_s(buf, cch, kPerc[note - 35], _TRUNCATE);
+			return;
+		}
+	}
 	static const wchar_t* kN[12] = {
 		L"C", L"C#", L"D", L"D#", L"E", L"F", L"F#", L"G", L"G#", L"A", L"A#", L"B"
 	};
@@ -167,6 +186,12 @@ static void ScPianoRollPaintInner(CDC& dc, const CRect& rc, ScPianoRollView* v,
 	const int pxBeat = v->pxBeat;
 	const int vis = max(1, keys.Height() / max(1, v->rowH) + 1);
 	const int topNote = v->noteTop - (v->scrollY / max(1, v->rowH));
+	int isDrum = 0;
+	if (u && !u->isFmScore) {
+		isDrum = ScMidiPartIsDrum(ev, evCount, curPart, 0);
+		if (!isDrum && curPart >= 0 && curPart < 32 && u->clef[curPart] == 3)
+			isDrum = 1;
+	}
 	dc.SetBkMode(TRANSPARENT);
 	CFont keyFont;
 	keyFont.CreateFont(max(11, min(16, v->rowH - 2)), 0, 0, 0, FW_NORMAL, 0, 0, 0,
@@ -190,11 +215,14 @@ static void ScPianoRollPaintInner(CDC& dc, const CRect& rc, ScPianoRollView* v,
 		dc.FillSolidRect(grid.left, y + v->rowH - 1, grid.Width(), 1,
 			octaveLine ? RGB(80, 88, 110) : RGB(50, 52, 60));
 		dc.FillSolidRect(keys.left, y + v->rowH - 1, keys.Width(), 1, RGB(60, 60, 70));
-		if (!black && (note % 12) == 0 && v->rowH >= 13) {
+		const int showName = isDrum
+			? (v->rowH >= 12 && note >= 35 && note <= 81)
+			: (!black && (note % 12) == 0 && v->rowH >= 13);
+		if (showName) {
 			wchar_t nm[16];
-			ScPianoRollNoteName(note, nm, 16);
-			dc.SetTextColor(hover ? RGB(40, 40, 20) : RGB(40, 44, 60));
-			dc.TextOut(keys.left + 6, y + max(0, (v->rowH - 14) / 2), nm);
+			ScPianoRollNoteNameEx(note, isDrum, nm, 16);
+			dc.SetTextColor(hover ? RGB(40, 40, 20) : (black ? RGB(200, 200, 210) : RGB(40, 44, 60)));
+			dc.TextOut(keys.left + 4, y + max(0, (v->rowH - 14) / 2), nm);
 		}
 	}
 	dc.SelectObject(oldF);

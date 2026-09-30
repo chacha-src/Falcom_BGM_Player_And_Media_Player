@@ -10,7 +10,7 @@ enum {
 };
 
 struct VstPluginInfo {
-	wchar_t path[VST_PATH_CHARS];  // DLL または .vst3 バンドルのフルパス
+	wchar_t path[VST_PATH_CHARS];  // DLL / .vst3 / .sf2（内蔵 TinySoundFont）
 	wchar_t name[VST_NAME_CHARS];  // 表示名（ファイル名や effGetEffectName）
 	int arch;          // 32 or 64。読めなければ 0
 	int isVst3;        // 0=VST2 DLL、1=VST3 バンドル

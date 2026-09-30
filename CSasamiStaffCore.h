@@ -252,6 +252,8 @@ uint32_t ScStaffSnapToBarTick(const ScEvent* ev, int evCount, uint32_t tick,
 	int defNumer, int defDenom);
 void ScStaffDrawTimeSignature(CDC& dc, int cx, int staffTop, int gap, int numer, int denom, COLORREF col);
 void ScStaffSetMeter(ScStaffUi* u, int numer, int denom);
+/* Apply tick-0 clef / drum-part from the score into u->clef[]. MIDI only. */
+void ScStaffApplyDocClef(ScStaffUi* u, const ScEvent* ev, int n);
 
 int ScStaffLineGap(const ScStaffUi* u);
 int ScStaffH(const ScStaffUi* u); /* one 5-line staff height */

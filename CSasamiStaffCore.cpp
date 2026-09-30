@@ -359,6 +359,8 @@ void ScStaffUiInit(ScStaffUi* u, int trackCount, int isFm)
 				_snwprintf_s(u->names[i], _TRUNCATE, L"Misao %d", i - SC_FM_CH + 1);
 		} else {
 			_snwprintf_s(u->names[i], _TRUNCATE, L"MIDI %d", i + 1);
+			if (i == 9 || i == 25)
+				u->clef[i] = 3; /* GM ch10 (and port2 ch10) drum staff */
 		}
 		/* FM SSG: single staff by default (phase 6). */
 		if (isFm && i >= 3 && i <= 5) u->clef[i] = 0;
@@ -488,6 +490,28 @@ void ScStaffSetMeter(ScStaffUi* u, int numer, int denom)
 	if (denom > 32) denom = 32;
 	u->meterNumer = numer;
 	u->meterDenom = denom;
+}
+
+void ScStaffApplyDocClef(ScStaffUi* u, const ScEvent* ev, int n)
+{
+	if (!u || u->isFmScore) return;
+	for (int i = 0; i < u->trackCount && i < 32; i++) {
+		int found = 0, c = u->clef[i];
+		if (ev) {
+			for (int k = 0; k < n; k++) {
+				if (ev[k].kind != SC_EV_CLEF || (int)ev[k].ch != i) continue;
+				if (ev[k].tick != 0) continue;
+				c = (int)ev[k].a;
+				found = 1;
+			}
+		}
+		if (found) {
+			if (c < 0) c = 0;
+			if (c > 3) c = 3;
+			u->clef[i] = c;
+		} else if (ScMidiPartIsDrum(ev, n, i, 0))
+			u->clef[i] = 3;
+	}
 }
 
 int ScStaffBpmFromTempoT(int tempoT)
@@ -3437,7 +3461,7 @@ static void ScStaffProgLabel(const ScEvent& e, const ScEvent* ev, int evCount, i
 		}
 	}
 
-	const int isDrum = (tr == 9 || tr == 25);
+	const int isDrum = ScMidiPartIsDrum(ev, evCount, tr, e.tick);
 	SasamiToneLookupAuto(msb, lsb, pc, isDrum, name, 48);
 	if (!name[0])
 		_snwprintf_s(name, _TRUNCATE, L"PC%u", (unsigned)(pc + 1));

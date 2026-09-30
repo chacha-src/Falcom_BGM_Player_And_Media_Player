@@ -1043,7 +1043,12 @@ void CSasamiPianoRollDlg::AuditionKey(int note)
 	if (part > 32) part = 32;
 	VstLiveAuditionNote(part, note, 100, 280);
 	wchar_t nm[16];
-	ScPianoRollNoteName(note, nm, 16);
+	int isDrum = 0;
+	if (m_ui && !m_isFm && m_curPart)
+		isDrum = ScMidiPartIsDrum(m_ev, m_evCount ? *m_evCount : 0, *m_curPart, 0);
+	if (!isDrum && m_ui && m_curPart && *m_curPart >= 0 && *m_curPart < 32 && m_ui->clef[*m_curPart] == 3)
+		isDrum = 1;
+	ScPianoRollNoteNameEx(note, isDrum, nm, 16);
 	if (m_status.GetSafeHwnd()) {
 		CString s;
 		s.Format(L"%s  (%d)", nm, note);
@@ -1421,6 +1426,21 @@ void CSasamiPianoRollDlg::OnContextMenu(CWnd* pWnd, CPoint point)
 	menu.AddCommand(9112, LL14(L"@SPAN パンLFO…", L"@SPAN pan LFO…", L"@SPAN pan LFO…", L"@SPAN pan LFO…", L"@SPAN pan LFO…", L"@SPAN 팬 LFO…", L"@SPAN 声像LFO…", L"@SPAN", L"@SPAN", L"@SPAN Pan-LFO…", L"@SPAN pan LFO…", L"@SPAN pan-LFO…", L"@SPAN pan LFO…", L"@SPAN pan LFO…"));
 	menu.AddCommand(9113, LL14(L"@SPORTA ポルタメント…", L"@SPORTA portamento…", L"@SPORTA portamento…", L"@SPORTA portamento…", L"@SPORTA portamento…", L"@SPORTA 포르타멘토…", L"@SPORTA 滑音…", L"@SPORTA", L"@SPORTA", L"@SPORTA Portamento…", L"@SPORTA portamento…", L"@SPORTA portamento…", L"@SPORTA portamento…", L"@SPORTA portamento…"));
 	menu.AddCommand(9114, LL14(L"ソフトFXオフ", L"Soft FX off", L"FX off", L"FX off", L"FX off", L"소프트 FX 끔", L"软效果关", L"FX off", L"FX выкл", L"FX aus", L"FX off", L"FX uit", L"FX wył", L"FX kapalı"));
+	if (!m_isFm && m_midiScore && m_curPart) {
+		menu.AddSeparator();
+		const int tr = *m_curPart;
+		if (ScMidiPartIsDrum(m_ev, m_evCount ? *m_evCount : 0, tr, 0)) {
+			menu.AddCommand(9120, LL14(
+				L"メロディパートにする（リズム解除）", L"Make melodic (clear rhythm)", L"Partie mélodique", L"Parti melodica", L"Parte melódica",
+				L"멜로디 파트로", L"改为旋律", L"جزء لحني", L"Мелодическая партия", L"Melodisch",
+				L"Parte melódica", L"Melodisch", L"Partia melodyczna", L"Melodik parti"));
+		} else {
+			menu.AddCommand(9120, LL14(
+				L"ドラムパートにする（GS/XGリズム）", L"Make drum part (GS/XG rhythm)", L"Partie batterie", L"Parti batteria", L"Parte batería",
+				L"드럼 파트로", L"改为鼓组", L"جزء طبول", L"Ударная партия", L"Drum-Part",
+				L"Parte bateria", L"Drum-partij", L"Partia perkusji", L"Davul parti"));
+		}
+	}
 	const UINT cmd = menu.Track(pt, this);
 	if (!cmd || !m_ev || !m_evCount) return;
 	ScEvent* clip = ClipBuf();
@@ -1462,6 +1482,12 @@ void CSasamiPianoRollDlg::OnContextMenu(CWnd* pWnd, CPoint point)
 	else if (cmd == 9112) HandlePalCmd(SASAMI_PAL_CMD_SPAN);
 	else if (cmd == 9113) HandlePalCmd(SASAMI_PAL_CMD_SPORTA);
 	else if (cmd == 9114) HandlePalCmd(SASAMI_PAL_CMD_SVIB_OFF);
+	else if (cmd == 9120 && m_midiScore && m_curPart) {
+		const int tr = *m_curPart;
+		const int cur = ScMidiPartIsDrum(m_ev, m_evCount ? *m_evCount : 0, tr, 0);
+		m_midiScore->SetPartDrum(tr, cur ? 0 : 1);
+		AfterEdit();
+	}
 }
 
 void CSasamiPianoRollDlg::OnKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags)

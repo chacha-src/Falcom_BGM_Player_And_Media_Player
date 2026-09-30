@@ -2,6 +2,7 @@
 #include "ogg.h"
 #include "CSasamiNotePropsDlg.h"
 #include "CSasamiVstPartMenu.h"
+#include "CSasamiMidiScoreDlg.h"
 #include "SasamiComposerDoc.h"
 #include "SasamiToneNames.h"
 #include "CSasamiStaffCore.h"
@@ -91,8 +92,12 @@ void CSasamiNotePropsDlg::RefreshVstHint()
 	const int prog = (loaded && !multi) ? VstLiveProgramCurrent(m_part) : -1;
 	if (prog >= 0)
 		VstLiveProgramName(m_part, prog, progName, 128);
-	if (!progName[0] && prog >= 0)
-		SasamiToneLookupAuto(0, 0, prog, m_part == 10 ? 1 : 0, progName, 128);
+	if (!progName[0] && prog >= 0) {
+		int isDrum = (m_part == 10 || m_part == 26) ? 1 : 0;
+		if (CSasamiMidiScoreDlg* sc = CSasamiMidiScoreDlg::Instance())
+			isDrum = ScMidiPartIsDrum(sc->Doc()->ev, sc->Doc()->evCount, m_part - 1, 0);
+		SasamiToneLookupAuto(0, 0, prog, isDrum, progName, 128);
+	}
 
 	CString h;
 	if (loaded) {

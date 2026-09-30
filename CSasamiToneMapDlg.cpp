@@ -31,16 +31,18 @@ static const int kMapCount = (int)(sizeof(kMaps) / sizeof(kMaps[0]));
 CSasamiToneMapDlg::CSasamiToneMapDlg(CWnd* pParent)
 	: CCustomBlurDialogExBase(IDD_SASAMI_TONE_MAP, pParent)
 	, m_part(1), m_prog(0), m_bankMsb(0), m_bankLsb(0), m_mapSel(0)
-	, m_pickedVst3(0), m_bind(NULL), m_scroll(0), m_cellH(18), m_auditionHold(0)
+	, m_pickedVst3(0), m_isDrum(0), m_bind(NULL), m_scroll(0), m_cellH(18), m_auditionHold(0)
 {
 	memset(m_names, 0, sizeof(m_names));
 }
 
-int CSasamiToneMapDlg::PickForPart(CWnd* owner, int part1to32, ScMidiVstBind* bind)
+int CSasamiToneMapDlg::PickForPart(CWnd* owner, int part1to32, ScMidiVstBind* bind, int isDrum)
 {
 	CSasamiToneMapDlg dlg(owner);
 	dlg.m_part = part1to32;
 	dlg.m_bind = bind;
+	dlg.m_isDrum = (isDrum >= 0) ? (isDrum ? 1 : 0)
+		: ((part1to32 == 10 || part1to32 == 26) ? 1 : 0);
 	if (bind) {
 		if (bind->vstProg[part1to32 - 1] >= 0)
 			dlg.m_prog = bind->vstProg[part1to32 - 1] & 127;
@@ -174,7 +176,9 @@ BOOL CSasamiToneMapDlg::OnInitDialog()
 	LayoutChrome();
 	RebuildGrid();
 	CString h;
-	h.Format(L"パート %d — クリック試聴 / ダブルクリック決定。VST3…で専用音源へ", m_part);
+	h.Format(m_isDrum
+		? L"パート %d（ドラム/キット）— クリック試聴 / ダブルクリック決定。VST3…で専用音源へ"
+		: L"パート %d — クリック試聴 / ダブルクリック決定。VST3…で専用音源へ", m_part);
 	m_hint.SetWindowText(h);
 	CCC_BringDialogToForeground(this);
 	return TRUE;
@@ -217,7 +221,7 @@ void CSasamiToneMapDlg::LayoutChrome()
 void CSasamiToneMapDlg::RebuildBankCombos()
 {
 	const ScToneMapInfo& m = kMaps[m_mapSel < 0 ? 0 : (m_mapSel >= kMapCount ? 0 : m_mapSel)];
-	const int isDrum = (m_part == 10) ? 1 : 0;
+	const int isDrum = m_isDrum;
 	m_bankM.ResetContent();
 	m_bankL.ResetContent();
 	for (int i = 0; i < 128; ++i) {
@@ -263,7 +267,7 @@ void CSasamiToneMapDlg::RebuildBankCombos()
 void CSasamiToneMapDlg::RebuildGrid()
 {
 	const ScToneMapInfo& m = kMaps[m_mapSel < 0 ? 0 : (m_mapSel >= kMapCount ? 0 : m_mapSel)];
-	const int isDrum = (m_part == 10) ? 1 : 0;
+	const int isDrum = m_isDrum;
 	for (int pc = 0; pc < 128; ++pc) {
 		m_names[pc][0] = 0;
 		SasamiToneLookupStrict(m.isXg, m.mapId, m_bankMsb, m_bankLsb, pc, isDrum,
@@ -294,7 +298,7 @@ void CSasamiToneMapDlg::ApplyTone(int pc, int audition)
 	if (audition && VstLivePartIsLoaded(m_part)) {
 		/* Still send bank+PC once for audition hearing, then note — SHM only. */
 		VstLiveSendBankProgram(m_part, m_bankMsb, m_bankLsb, m_prog);
-		VstLiveAuditionNote(m_part, (m_part == 10 || m_part == 26) ? 36 : 60, 100, 280);
+		VstLiveAuditionNote(m_part, m_isDrum ? 36 : 60, 100, 280);
 	}
 }
 
@@ -360,7 +364,7 @@ void CSasamiToneMapDlg::OnLButtonDown(UINT nFlags, CPoint point)
 		ApplyTone(pc, 0);
 		if (VstLivePartIsLoaded(m_part)) {
 			VstLiveSendBankProgram(m_part, m_bankMsb, m_bankLsb, m_prog);
-			VstLiveAuditionNote(m_part, (m_part == 10 || m_part == 26) ? 36 : 60, 100, 60000);
+			VstLiveAuditionNote(m_part, m_isDrum ? 36 : 60, 100, 60000);
 			m_auditionHold = 1;
 		}
 	}

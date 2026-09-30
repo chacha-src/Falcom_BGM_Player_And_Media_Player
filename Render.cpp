@@ -891,35 +891,35 @@ BOOL CRender::OnInitDialog()
 		L"Ponownie wykryj wyjscia MIDI",
 		L"Bagli MIDI cikislarini yeniden tara"));
 	m_tooltip.AddTool(&m_vstMultiDll, LL14(
-		L"GS用 VST音源（SC-VA 等）。XGリセットが無いSMFで使います。空ならXG側、両方空ならMIDIマッパー。",
-		L"GS VSTi (SC-VA etc.). Used when the SMF has no XG reset. Empty falls back to XG; both empty uses MIDI Mapper.",
-		L"VSTi GS (SC-VA etc.). Utilise si le SMF n'a pas de reset XG. Vide = XG; les deux vides = MIDI Mapper.",
-		L"VSTi GS (SC-VA ecc.). Usato se lo SMF non ha reset XG. Vuoto = XG; entrambi vuoti = MIDI Mapper.",
-		L"VSTi GS (SC-VA etc.). Se usa si el SMF no tiene reset XG. Vacio = XG; ambos vacios = MIDI Mapper.",
-		L"GS용 VSTi(SC-VA 등). XG 리셋이 없는 SMF에서 사용. 비면 XG, 둘 다 비면 MIDI Mapper.",
-		L"GS用 VSTi（SC-VA 等）。SMF 无 XG 复位时使用。空则用 XG，都空则 MIDI Mapper。",
-		L"VSTi لـ GS. يُستخدم إن لم يكن في SMF إعادة XG. فارغ=XG؛ كلاهما فارغ=MIDI Mapper.",
-		L"VSTi GS (SC-VA и т.д.). Если в SMF нет XG reset. Пусто = XG; оба пусты = MIDI Mapper.",
-		L"GS-VSTi (SC-VA usw.). Bei SMF ohne XG-Reset. Leer = XG; beide leer = MIDI Mapper.",
-		L"VSTi GS (SC-VA etc.). Usado se o SMF nao tiver reset XG. Vazio = XG; ambos vazios = MIDI Mapper.",
-		L"GS-VSTi (SC-VA enz.). Bij SMF zonder XG-reset. Leeg = XG; beide leeg = MIDI Mapper.",
-		L"VSTi GS (SC-VA itd.). Gdy SMF nie ma resetu XG. Puste = XG; oba puste = MIDI Mapper.",
-		L"GS VSTi (SC-VA vb.). SMF'de XG reset yoksa. Bos = XG; ikisi de bos = MIDI Mapper."));
+		L"GS用 VST/SoundFont（SC-VA・SGM-V2.01.sf2 等）。XGリセットが無いSMFで使います。空ならXG側、両方空ならMIDIマッパー。",
+		L"GS VSTi / SoundFont (SC-VA, SGM-V2.01.sf2, etc.). Used when the SMF has no XG reset. Empty falls back to XG; both empty uses MIDI Mapper.",
+		L"VSTi/SoundFont GS (SC-VA, SGM-V2.01.sf2). Utilise si le SMF n'a pas de reset XG. Vide = XG; les deux vides = MIDI Mapper.",
+		L"VSTi/SoundFont GS (SC-VA, SGM-V2.01.sf2). Usato se lo SMF non ha reset XG. Vuoto = XG; entrambi vuoti = MIDI Mapper.",
+		L"VSTi/SoundFont GS (SC-VA, SGM-V2.01.sf2). Se usa si el SMF no tiene reset XG. Vacio = XG; ambos vacios = MIDI Mapper.",
+		L"GS용 VSTi/SoundFont(SC-VA, SGM-V2.01.sf2 등). XG 리셋이 없는 SMF에서 사용. 비면 XG, 둘 다 비면 MIDI Mapper.",
+		L"GS用 VSTi/SoundFont（SC-VA、SGM-V2.01.sf2 等）。SMF 无 XG 复位时使用。空则用 XG，都空则 MIDI Mapper。",
+		L"VSTi/SoundFont لـ GS. يُستخدم إن لم يكن في SMF إعادة XG. فارغ=XG؛ كلاهما فارغ=MIDI Mapper.",
+		L"VSTi/SoundFont GS (SC-VA, SGM-V2.01.sf2). Если в SMF нет XG reset. Пусто = XG; оба пусты = MIDI Mapper.",
+		L"GS-VSTi/SoundFont (SC-VA, SGM-V2.01.sf2). Bei SMF ohne XG-Reset. Leer = XG; beide leer = MIDI Mapper.",
+		L"VSTi/SoundFont GS (SC-VA, SGM-V2.01.sf2). Usado se o SMF nao tiver reset XG. Vazio = XG; ambos vazios = MIDI Mapper.",
+		L"GS-VSTi/SoundFont (SC-VA, SGM-V2.01.sf2). Bij SMF zonder XG-reset. Leeg = XG; beide leeg = MIDI Mapper.",
+		L"VSTi/SoundFont GS (SC-VA, SGM-V2.01.sf2). Gdy SMF nie ma resetu XG. Puste = XG; oba puste = MIDI Mapper.",
+		L"GS VSTi/SoundFont (SC-VA, SGM-V2.01.sf2). SMF'de XG reset yoksa. Bos = XG; ikisi de bos = MIDI Mapper."));
 	m_tooltip.AddTool(&m_vstExtraPath, LL14(
-		L"XG用 VST音源（S-YXG50 等）。XG System On があるSMFで使います。空ならGS側。",
-		L"XG VSTi (S-YXG50 etc.). Used when the SMF has XG System On. Empty falls back to GS.",
-		L"VSTi XG (S-YXG50 etc.). Utilise si le SMF a XG System On. Vide = GS.",
-		L"VSTi XG (S-YXG50 ecc.). Usato se lo SMF ha XG System On. Vuoto = GS.",
-		L"VSTi XG (S-YXG50 etc.). Se usa si el SMF tiene XG System On. Vacio = GS.",
-		L"XG용 VSTi(S-YXG50 등). XG System On이 있는 SMF에서 사용. 비면 GS.",
-		L"XG用 VSTi（S-YXG50 等）。SMF 含 XG System On 时使用。空则用 GS。",
-		L"VSTi لـ XG. يُستخدم عند وجود XG System On. فارغ=GS.",
-		L"VSTi XG (S-YXG50 и т.д.). Если в SMF есть XG System On. Пусто = GS.",
-		L"XG-VSTi (S-YXG50 usw.). Bei SMF mit XG System On. Leer = GS.",
-		L"VSTi XG (S-YXG50 etc.). Usado se o SMF tiver XG System On. Vazio = GS.",
-		L"XG-VSTi (S-YXG50 enz.). Bij SMF met XG System On. Leeg = GS.",
-		L"VSTi XG (S-YXG50 itd.). Gdy SMF ma XG System On. Puste = GS.",
-		L"XG VSTi (S-YXG50 vb.). SMF'de XG System On varsa. Bos = GS."));
+		L"XG用 VST/SoundFont（S-YXG50・SGM-V2.01.sf2 等）。XG System On があるSMFで使います。空ならGS側。",
+		L"XG VSTi / SoundFont (S-YXG50, SGM-V2.01.sf2, etc.). Used when the SMF has XG System On. Empty falls back to GS.",
+		L"VSTi/SoundFont XG (S-YXG50, SGM-V2.01.sf2). Utilise si le SMF a XG System On. Vide = GS.",
+		L"VSTi/SoundFont XG (S-YXG50, SGM-V2.01.sf2). Usato se lo SMF ha XG System On. Vuoto = GS.",
+		L"VSTi/SoundFont XG (S-YXG50, SGM-V2.01.sf2). Se usa si el SMF tiene XG System On. Vacio = GS.",
+		L"XG용 VSTi/SoundFont(S-YXG50, SGM-V2.01.sf2 등). XG System On이 있는 SMF에서 사용. 비면 GS.",
+		L"XG用 VSTi/SoundFont（S-YXG50、SGM-V2.01.sf2 等）。SMF 含 XG System On 时使用。空则用 GS。",
+		L"VSTi/SoundFont لـ XG. يُستخدم عند وجود XG System On. فارغ=GS.",
+		L"VSTi/SoundFont XG (S-YXG50, SGM-V2.01.sf2). Если в SMF есть XG System On. Пусто = GS.",
+		L"XG-VSTi/SoundFont (S-YXG50, SGM-V2.01.sf2). Bei SMF mit XG System On. Leer = GS.",
+		L"VSTi/SoundFont XG (S-YXG50, SGM-V2.01.sf2). Usado se o SMF tiver XG System On. Vazio = GS.",
+		L"XG-VSTi/SoundFont (S-YXG50, SGM-V2.01.sf2). Bij SMF met XG System On. Leeg = GS.",
+		L"VSTi/SoundFont XG (S-YXG50, SGM-V2.01.sf2). Gdy SMF ma XG System On. Puste = GS.",
+		L"XG VSTi/SoundFont (S-YXG50, SGM-V2.01.sf2). SMF'de XG System On varsa. Bos = GS."));
 	m_tooltip.AddTool(GetDlgItem(IDOK), LL14(L"設定を保存して閉じます", L"Save settings and close", L"Enregistrer les parametres et fermer", L"Salva impostazioni e chiudi", L"Guardar ajustes y cerrar", L"설정 저장 후 닫기", L"保存设置并关闭", L"حفظ الإعدادات وإغلاق", L"Сохранить настройки и закрыть", L"Einstellungen speichern und schließen", L"Salvar configuracoes e fechar", L"Instellingen opslaan en sluiten", L"Zapisz ustawienia i zamknij", L"Ayarları kaydet ve kapat"));	m_tooltip.AddTool(GetDlgItem(IDCANCEL), LL14(L"保存せずに閉じます", L"Close without saving", L"Fermer sans enregistrer", L"Chiudi senza salvare", L"Cerrar sin guardar", L"저장하지 않고 닫기", L"不保存并关闭", L"إغلاق دون حفظ", L"Закрыть без сохранения", L"Ohne Speichern schließen", L"Fechar sem salvar", L"Sluiten zonder opslaan", L"Zamknij bez zapisywania", L"Kaydetmeden kapat"));
 	m_tooltip.AddTool(GetDlgItem(IDC_COMBO2), LL14(L"DirectSoundの出力デバイスを選択します", L"Select DirectSound output device", L"Choisir le peripherique de sortie DirectSound", L"Seleziona dispositivo di uscita DirectSound", L"Seleccionar dispositivo de salida DirectSound", L"DirectSound 출력 장치 선택", L"选择 DirectSound 输出设备", L"اختر جهاز إخراج DirectSound", L"Выбрать устройство вывода DirectSound", L"DirectSound-Ausgabegerat wahlen", L"Selecionar dispositivo de saida DirectSound", L"DirectSound-uitvoerapparaat kiezen", L"Wybierz urzadzenie wyjsciowe DirectSound", L"DirectSound cikis aygitini sec"));
 	m_tooltip.AddTool(GetDlgItem(IDC_COMBO_MICDEV), LL14(L"WAV保存時のマイクミックス／録音に使うマイク端末を選びます", L"Select microphone for WAV mic-mix / recording", L"Choisir le micro pour le mix WAV / enregistrement", L"Scegli il microfono per mix WAV / registrazione", L"Elegir microfono para mix WAV / grabacion", L"WAV 마이크 믹스/녹음에 쓸 마이크 선택", L"选择用于WAV麦克风混音/录音的麦克风", L"اختر الميكروفون لمزج/تسجيل WAV", L"Выберите микрофон для микса/записи WAV", L"Mikrofon fur WAV-Mix / Aufnahme wahlen", L"Escolher microfone para mix WAV / gravacao", L"Kies microfoon voor WAV-mix / opname", L"Wybierz mikrofon do miksu/nagrania WAV", L"WAV miks/kayit icin mikrofon secin"));
@@ -1961,7 +1961,7 @@ void CRender::FillVstMultiCombo()
 void CRender::OnVstExtraBrowse()
 {
 	CFileDialog dlg(TRUE, L"dll", NULL, OFN_FILEMUSTEXIST | OFN_HIDEREADONLY,
-		L"VST (*.dll;*.vst3)|*.dll;*.vst3|All (*.*)|*.*||", this);
+		L"VST / SoundFont (*.dll;*.vst3;*.sf2)|*.dll;*.vst3;*.sf2|SoundFont (*.sf2)|*.sf2|All (*.*)|*.*||", this);
 	if (dlg.DoModal() != IDOK) return;
 	m_vstExtraPath.SetWindowText(dlg.GetPathName());
 }
@@ -1969,7 +1969,7 @@ void CRender::OnVstExtraBrowse()
 void CRender::OnVstMultiBrowse()
 {
 	CFileDialog dlg(TRUE, L"dll", NULL, OFN_FILEMUSTEXIST | OFN_HIDEREADONLY,
-		L"VST (*.dll;*.vst3)|*.dll;*.vst3|All (*.*)|*.*||", this);
+		L"VST / SoundFont (*.dll;*.vst3;*.sf2)|*.dll;*.vst3;*.sf2|SoundFont (*.sf2)|*.sf2|All (*.*)|*.*||", this);
 	if (dlg.DoModal() != IDOK) return;
 	m_vstMultiDll.SetWindowText(dlg.GetPathName());
 }

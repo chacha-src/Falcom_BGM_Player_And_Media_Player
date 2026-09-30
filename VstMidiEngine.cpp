@@ -5,6 +5,7 @@
 #include "VstMidiEngine.h"
 #include "Vst3Host.h"
 #include "third_party/vst2/aeffect.h"
+#include "Sf2Vst2.h"
 #include "kb_sasami/source/sasami_midi.h"
 #include "kb_sasami/source/sasami_file.h"
 #include <vector>
@@ -574,27 +575,6 @@ struct MidiItem {
 	int seq; // パース順。同時 tick の qsort を安定させる
 };
 
-struct Voice {
-	double phase;
-	double step;
-	float env;
-	float velocity;
-	BYTE note;
-	BYTE channel;
-	BYTE stage; // 0 空き, 1 attack, 2 sustain, 3 release
-};
-
-struct DrumV {
-	int stage;
-	int kind;
-	int note;
-	float env;
-	float vel;
-	double phase;
-	double step;
-	unsigned rng;
-};
-
 enum { LIVE_PEND_EVENTS = 512, LIVE_PEND_SYSEX_BYTES = 4096 };
 
 struct LivePendEv {
@@ -680,16 +660,12 @@ struct EngineState {
 	int sysexBytes;
 	int maxMidiPort; // 見た FF 21 の最大（0=16ch のみ）
 	int mirrorToB;   // GS/XG 32 パートで FF 21 無し: ch MIDI を unit B へコピー
-	int usingBuiltin;
 	int useEnsemble;
-	int useDrums;
 	int useMapper;
 	HMIDIOUT midiOut;
 	MixSlot mix[MIX_SLOTS];
 	int mixCount;
 	int chSlot[16]; // -1=無音、それ以外は mix インデックス
-	Voice voices[32];
-	DrumV drums[16];
 	BYTE noteState[16][128];
 	short ring[16384];
 	int ringRead;
@@ -712,15 +688,13 @@ struct EngineState {
 		eventCount(0), eventPos(0), playSample(0), lengthSamples(0),
 		module(NULL), effect(NULL), vst3(NULL),
 		moduleB(NULL), effectB(NULL), moduleC(NULL), effectC(NULL), vst3C(NULL),
-		sysexData(NULL), sysexBytes(0), maxMidiPort(0), mirrorToB(0), usingBuiltin(1),
-		useEnsemble(0), useDrums(0), useMapper(0), midiOut(NULL), mixCount(0),
+		sysexData(NULL), sysexBytes(0), maxMidiPort(0), mirrorToB(0),
+		useEnsemble(0), useMapper(0), midiOut(NULL), mixCount(0),
 		ringRead(0), ringCount(0), gmResetMode(0), gsMapLsb(0), songGm(0), songLa(0),
 		loopStartSample(0), loopEndSample(0)
 	{
 		InitializeCriticalSection(&cs);
 		csReady = 1;
-		ZeroMemory(voices, sizeof(voices));
-		ZeroMemory(drums, sizeof(drums));
 		ZeroMemory(noteState, sizeof(noteState));
 		ZeroMemory(live, sizeof(live));
 		ZeroMemory(zero, sizeof(zero));
@@ -807,6 +781,11 @@ static const wchar_t* ExtOf(const wchar_t* path)
 static int EqExt(const wchar_t* path, const wchar_t* ext)
 {
 	return _wcsicmp(ExtOf(path), ext) == 0;
+}
+
+static int PathIsSoundFont(const wchar_t* path)
+{
+	return Sf2PathIsSoundFont(path);
 }
 
 static void ExeDir(wchar_t out[VST_PATH_CHARS])
@@ -1418,6 +1397,14 @@ static void ProbeVst2(const wchar_t* path)
 	AddPlugin(path, base, arch, 0, instrument);
 }
 
+static void ProbeSf2(const wchar_t* path)
+{
+	if (!Sf2ProbeHeader(path)) return;
+	wchar_t base[VST_NAME_CHARS];
+	BaseNameNoExt(path, base);
+	AddPlugin(path, base, HostArch(), 0, 1);
+}
+
 static int DirExists(const wchar_t* path)
 {
 	DWORD a = GetFileAttributesW(path);
@@ -1544,6 +1531,8 @@ static int CountDir(const wchar_t* dir, int depth)
 			if (!Vst3IsInternalModule(full)) ++n;
 		} else if (EqExt(fd.cFileName, L".dll")) {
 			++n;
+		} else if (EqExt(fd.cFileName, L".sf2")) {
+			++n;
 		}
 	} while (FindNextFileW(h, &fd) && n < VST_MAX_PLUGINS);
 	FindClose(h);
@@ -1580,6 +1569,10 @@ static void ScanDir(const wchar_t* dir, int depth, HWND wait)
 			++g_scanIndex;
 			SetScanWait(wait, g_scanIndex, g_scanTotal, g_pluginCount, fd.cFileName);
 			ProbeVst2(full);
+		} else if (EqExt(fd.cFileName, L".sf2")) {
+			++g_scanIndex;
+			SetScanWait(wait, g_scanIndex, g_scanTotal, g_pluginCount, fd.cFileName);
+			ProbeSf2(full);
 		}
 	} while (FindNextFileW(h, &fd) && g_pluginCount < VST_MAX_PLUGINS);
 	FindClose(h);
@@ -1602,6 +1595,7 @@ static void ProbeUserSpecified(const wchar_t* src, HWND wait)
 		return;
 	}
 	if (EqExt(src, L".vst3")) ProbeVst3Bundle(src);
+	else if (PathIsSoundFont(src)) ProbeSf2(src);
 	else ProbeVst2(src);
 }
 
@@ -4004,156 +3998,6 @@ static void RenderSongUnits(int frames)
 	g_songN[sl][0] = g_songN[sl][1] = g_songN[sl][2] = 0;
 }
 
-static void VoiceMidi(DWORD msg)
-{
-	BYTE st = (BYTE)(msg & 0xff), type = st & 0xf0, ch = st & 15;
-	BYTE note = (BYTE)((msg >> 8) & 0x7f);
-	BYTE vel = (BYTE)((msg >> 16) & 0x7f);
-	if (type == 0x90 && vel) {
-		int pick = -1;
-		float quiet = 2.0f;
-		for (int i = 0; i < 32; ++i) {
-			if (!g_eng.voices[i].stage) { pick = i; break; }
-			if (g_eng.voices[i].env < quiet) { quiet = g_eng.voices[i].env; pick = i; }
-		}
-		Voice& v = g_eng.voices[pick];
-		v.phase = 0;
-		v.step = 6.283185307179586 * 440.0 *
-			pow(2.0, ((int)note - 69) / 12.0) / SAMPLE_RATE;
-		v.env = 0.001f;
-		v.velocity = vel / 127.0f;
-		v.note = note; v.channel = ch; v.stage = 1;
-		g_eng.noteState[ch][note] = 1;
-	} else if (type == 0x80 || (type == 0x90 && !vel)) {
-		for (int i = 0; i < 32; ++i)
-			if (g_eng.voices[i].stage && g_eng.voices[i].note == note &&
-				g_eng.voices[i].channel == ch) g_eng.voices[i].stage = 3;
-		g_eng.noteState[ch][note] = 0;
-	} else if (type == 0xb0 && (note == 120 || note == 123)) {
-		for (int i = 0; i < 32; ++i)
-			if (g_eng.voices[i].channel == ch) g_eng.voices[i].stage = 3;
-	}
-}
-
-// 内蔵簡易シンセ: 32 voice sine oscillator with attack/release envelope.
-static void RenderBuiltin(float* l, float* r, int frames)
-{
-	for (int n = 0; n < frames; ++n) {
-		double s = 0;
-		for (int i = 0; i < 32; ++i) {
-			Voice& v = g_eng.voices[i];
-			if (!v.stage) continue;
-			if (v.stage == 1) {
-				v.env += 1.0f / 220.0f;
-				if (v.env >= 1.0f) { v.env = 1.0f; v.stage = 2; }
-			} else if (v.stage == 3) {
-				v.env *= 0.9972f;
-				if (v.env < 0.0005f) { v.stage = 0; continue; }
-			}
-			s += sin(v.phase) * v.env * v.velocity;
-			v.phase += v.step;
-			if (v.phase > 6.283185307179586) v.phase -= 6.283185307179586;
-		}
-		float x = (float)(s * 0.10);
-		// Gentle saturation prevents integer wrap with dense MIDI.
-		x = x / (1.0f + (float)fabs(x));
-		l[n] = r[n] = x;
-	}
-}
-
-static int DrumKind(int note)
-{
-	if (note == 35 || note == 36) return 0;
-	if (note == 37 || note == 38 || note == 39 || note == 40) return 1;
-	if (note == 42 || note == 44 || note == 46) return 2;
-	if (note >= 41 && note <= 50) return 3;
-	if (note == 49 || note == 51 || note == 52 || note == 55 || note == 57 || note == 59)
-		return 4;
-	return 5;
-}
-
-static void DrumMidi(DWORD msg)
-{
-	BYTE st = (BYTE)(msg & 0xff), type = st & 0xf0;
-	BYTE note = (BYTE)((msg >> 8) & 0x7f);
-	BYTE vel = (BYTE)((msg >> 16) & 0x7f);
-	if (type == 0x90 && vel) {
-		if (note == 42) {
-			for (int i = 0; i < 16; ++i)
-				if (g_eng.drums[i].stage && g_eng.drums[i].kind == 2)
-					g_eng.drums[i].env *= 0.15f;
-		}
-		int pick = 0;
-		float quiet = 2.0f;
-		for (int i = 0; i < 16; ++i) {
-			if (!g_eng.drums[i].stage) { pick = i; break; }
-			if (g_eng.drums[i].env < quiet) { quiet = g_eng.drums[i].env; pick = i; }
-		}
-		DrumV& d = g_eng.drums[pick];
-		d.stage = 1;
-		d.kind = DrumKind(note);
-		d.note = note;
-		d.env = 1.0f;
-		d.vel = vel / 127.0f;
-		d.phase = 0;
-		d.rng = 0x1234u + (unsigned)note * 17u + (unsigned)vel;
-		if (d.kind == 0) d.step = 6.283185307179586 * 58.0 / SAMPLE_RATE;
-		else if (d.kind == 1) d.step = 6.283185307179586 * 185.0 / SAMPLE_RATE;
-		else if (d.kind == 3) {
-			double hz = 90.0 + (note - 41) * 18.0;
-			d.step = 6.283185307179586 * hz / SAMPLE_RATE;
-		} else d.step = 6.283185307179586 * 800.0 / SAMPLE_RATE;
-	} else if (type == 0xb0 && (note == 120 || note == 123)) {
-		ZeroMemory(g_eng.drums, sizeof(g_eng.drums));
-	}
-}
-
-static float DrumNoise(DrumV& d)
-{
-	d.rng = d.rng * 1103515245u + 12345u;
-	return ((int)((d.rng >> 16) & 0x7fff) / 16384.0f) - 1.0f;
-}
-
-static void RenderDrums(float* l, float* r, int frames)
-{
-	for (int n = 0; n < frames; ++n) {
-		double s = 0;
-		for (int i = 0; i < 16; ++i) {
-			DrumV& d = g_eng.drums[i];
-			if (!d.stage) continue;
-			float nse = DrumNoise(d);
-			float tone = (float)sin(d.phase);
-			d.phase += d.step;
-			if (d.phase > 6.283185307179586) d.phase -= 6.283185307179586;
-			float x = 0;
-			if (d.kind == 0) {
-				x = tone * d.env + nse * 0.18f * d.env;
-				d.env *= 0.9992f;
-			} else if (d.kind == 1) {
-				x = nse * d.env * 0.85f + tone * d.env * 0.25f;
-				d.env *= 0.9984f;
-			} else if (d.kind == 2) {
-				x = nse * d.env * ((d.note == 46) ? 0.55f : 0.40f);
-				d.env *= (d.note == 46) ? 0.9978f : 0.9920f;
-			} else if (d.kind == 3) {
-				x = tone * d.env * 0.85f + nse * 0.08f * d.env;
-				d.env *= 0.9988f;
-			} else if (d.kind == 4) {
-				x = nse * d.env * 0.70f;
-				d.env *= 0.9994f;
-			} else {
-				x = nse * d.env * 0.50f;
-				d.env *= 0.9965f;
-			}
-			s += x * d.vel;
-			if (d.env < 0.0015f) d.stage = 0;
-		}
-		float y = (float)(s * 0.22);
-		y = y / (1.0f + fabsf(y));
-		l[n] = r[n] = y;
-	}
-}
-
 static wchar_t g_liveDllDirW[MAX_PATH];
 
 static void LiveDllDirFromEffect(AEffect* e)
@@ -4219,12 +4063,50 @@ static void RenderFxEffect(AEffect* e, float* l, float* r, int frames)
 
 static int LoadVst2(const wchar_t* path, HMODULE& module, AEffect*& effect)
 {
+	wchar_t loadPath[VST_PATH_CHARS];
+	SafeCopy(loadPath, VST_PATH_CHARS, path);
+	if (PathIsSoundFont(loadPath)) {
+		module = NULL;
+		effect = Sf2Vst2Open(loadPath, HostCallback);
+		if (!effect || effect->magic != kEffectMagic || !effect->dispatcher ||
+			!effect->processReplacing) {
+			EnsLog(L"LoadVst2 FAIL sf2 path=%s", loadPath);
+			if (effect && effect->dispatcher)
+				__try { effect->dispatcher(effect, effClose, 0, 0, NULL, 0); }
+				__except (EXCEPTION_EXECUTE_HANDLER) {}
+			effect = NULL;
+			return 0;
+		}
+		VstPlugDirSet(loadPath);
+		VstPlugDirBind(effect);
+		DWORD seh = 0;
+		__try {
+			effect->dispatcher(effect, effOpen, 0, 0, NULL, 0);
+			effect->dispatcher(effect, effSetSampleRate, 0, 0, NULL, (float)SAMPLE_RATE);
+			effect->dispatcher(effect, effSetBlockSize, 0, BLOCK_FRAMES, NULL, 0);
+			if (effect->numOutputs > 0)
+				effect->dispatcher(effect, effConnectOutput, 0, 1, NULL, 0);
+			if (effect->numOutputs > 1)
+				effect->dispatcher(effect, effConnectOutput, 1, 1, NULL, 0);
+			effect->dispatcher(effect, effMainsChanged, 0, 1, NULL, 0);
+			effect->dispatcher(effect, effStartProcess, 0, 0, NULL, 0);
+		}
+		__except (seh = GetExceptionCode(), EXCEPTION_EXECUTE_HANDLER) {
+			EnsLog(L"LoadVst2 FAIL sf2 init seh=0x%08X path=%s", seh, loadPath);
+			VstPlugDirUnbind(effect);
+			effect = NULL;
+			return 0;
+		}
+		EnsLog(L"LoadVst2 OK sf2 path=%s ins=%d outs=%d flags=0x%X uid=0x%08X",
+			loadPath, effect->numInputs, effect->numOutputs, (unsigned)effect->flags,
+			(unsigned)effect->uniqueID);
+		return 1;
+	}
 	// SC-VA.dll is a 3KB stub: DllMain LoadLibrary's SOUND Canvas VA.bin from
 	// HKLM\SOFTWARE\Roland Cloud\SOUND Canvas VA, then R2RPluginMain. The .bin
 	// and SCCore live in C:\Roland VS\64 (x64) / C:\Roland VS (x86). Loading
 	// the VST3-folder copy without that engine dir on the search path yields
 	// a valid AEffect* that stays silent.
-	wchar_t loadPath[VST_PATH_CHARS];
 	SafeCopy(loadPath, VST_PATH_CHARS, path);
 	if (PathLooksLikeScVa(path)) {
 		wchar_t resolved[VST_PATH_CHARS];
@@ -4372,13 +4254,17 @@ static int PathLooksLikeScVa(const wchar_t* path)
 static int DetectMultiTimbralName(const wchar_t* text)
 {
 	if (!text || !*text) return 0;
+	if (ContainsI(text, L".sf2") || ContainsI(text, L"SoundFont") ||
+		ContainsI(text, L"SGM-V") || ContainsI(text, L"SGM_V"))
+		return 1;
 	static const wchar_t* keys[] = {
 		L"SOUND Canvas VA", L"SOUNDCanvas VA", L"SoundCanvas VA",
 		L"SC-VA", L"SCVA", L"SC8820", L"SC-8820", L"SC-88", L"SC88",
 		L"SGP2", L"MidRadio", L"S-YXG50", L"SYXG50", L"S-YXG", L"YXG50",
 		L"VSTSynthFont", L"SynthFont", L"VirtualMIDISynth",
 		L"MultiTimbral", L"Multi-Timbral", L"multitimbral",
-		L"GS SoftSynth", L"Roland SC", L"Canvas VA"
+		L"GS SoftSynth", L"Roland SC", L"Canvas VA",
+		L"TinySoundFont", L"GeneralUser", L"FluidR3"
 	};
 	for (int i = 0; i < (int)(sizeof(keys) / sizeof(keys[0])); ++i)
 		if (ContainsI(text, keys[i])) return 1;
@@ -4586,6 +4472,7 @@ static int IsDrumPlugName(const wchar_t* name, const wchar_t* path)
 // to hide them from the palette.
 static int NeedsUserPatch(const wchar_t* name, const wchar_t* path)
 {
+	if (PathIsSoundFont(path)) return 0;
 	static const wchar_t* keys[] = {
 		L"Groove Agent", L"Battery", L"BFD", L"Addictive Drums",
 		L"Superior Drummer", L"EZdrummer", L"MT-PowerDrumKit"
@@ -4840,8 +4727,6 @@ static void CloseMixSlots()
 	}
 	g_eng.mixCount = 0;
 	g_eng.useEnsemble = 0;
-	g_eng.useDrums = 0;
-	g_eng.usingBuiltin = 0;
 	for (int c = 0; c < 16; ++c) g_eng.chSlot[c] = -1;
 }
 
@@ -4881,7 +4766,7 @@ static int TryOpenMixPath(MixSlot& slot, const wchar_t* path, int isVst3,
 		wcsncpy_s(slot.path, path, _TRUNCATE);
 		return 1;
 	}
-	if (PeArch(path) != HostArch()) return 0;
+	if (PeArch(path) != HostArch() && !PathIsSoundFont(path)) return 0;
 	if (!LoadVst2(path, slot.module, slot.effect)) return 0;
 	if (!ProbeLoadedEffectAudible(slot.effect)) {
 		EnsLog(L"ensemble silent VST2 drop %s", path);
@@ -4946,8 +4831,6 @@ static int FinishEnsembleOk(const int* usedCh, const int* prog)
 {
 	if (g_eng.mixCount <= 0) return 0;
 	g_eng.useEnsemble = 1;
-	g_eng.usingBuiltin = 0;
-	g_eng.useDrums = 0;
 	g_ensLogBlocks = 0;
 	EnsLog(L"BuildEnsemble OK mixCount=%d", g_eng.mixCount);
 	for (int ch = 0; ch < 16; ++ch) {
@@ -5388,11 +5271,7 @@ static void FreeSong()
 	g_eng.smfDiv = 0;
 	g_eng.playSample = g_eng.lengthSamples = 0;
 	g_eng.ringRead = g_eng.ringCount = 0;
-	ZeroMemory(g_eng.voices, sizeof(g_eng.voices));
-	ZeroMemory(g_eng.drums, sizeof(g_eng.drums));
 	ZeroMemory(g_eng.noteState, sizeof(g_eng.noteState));
-	g_eng.usingBuiltin = 1;
-	g_eng.useDrums = 0;
 	g_eng.gsMapLsb = 0;
 	g_eng.songGm = 0;
 	g_eng.songLa = 0;
@@ -5405,8 +5284,6 @@ static void ResetSequence()
 	g_eng.eventPos = 0;
 	g_eng.playSample = 0;
 	g_eng.ringRead = g_eng.ringCount = 0;
-	ZeroMemory(g_eng.voices, sizeof(g_eng.voices));
-	ZeroMemory(g_eng.drums, sizeof(g_eng.drums));
 	ZeroMemory(g_eng.noteState, sizeof(g_eng.noteState));
 	SongOvClear();
 	RxChReset();
@@ -6341,7 +6218,8 @@ static int ResolveVst2PathForPortB(const wchar_t* primary, wchar_t* out, int out
 		wchar_t resolved[VST_PATH_CHARS];
 		SafeCopy(resolved, VST_PATH_CHARS, primary);
 		ResolveRolandScVaPath(primary, resolved, VST_PATH_CHARS, HostArch());
-		if (PathFileExistsW2(resolved) && PeArch(resolved) == HostArch()) {
+		if (PathFileExistsW2(resolved) &&
+			(PathIsSoundFont(resolved) || PeArch(resolved) == HostArch())) {
 			SafeCopy(out, outChars, resolved);
 			return 1;
 		}
@@ -6350,7 +6228,8 @@ static int ResolveVst2PathForPortB(const wchar_t* primary, wchar_t* out, int out
 		wchar_t resolved[VST_PATH_CHARS];
 		SafeCopy(resolved, VST_PATH_CHARS, savedata.vstMultiDll);
 		ResolveRolandScVaPath(savedata.vstMultiDll, resolved, VST_PATH_CHARS, HostArch());
-		if (PathFileExistsW2(resolved) && PeArch(resolved) == HostArch()) {
+		if (PathFileExistsW2(resolved) &&
+			(PathIsSoundFont(resolved) || PeArch(resolved) == HostArch())) {
 			SafeCopy(out, outChars, resolved);
 			return 1;
 		}
@@ -6449,67 +6328,19 @@ static int TryLoadPluginPath(const wchar_t* path, int isVst3)
 	if (isVst3 || EqExt(path, L".vst3")) {
 		g_eng.vst3 = Vst3Open(path);
 		if (!Vst3IsOk(g_eng.vst3)) {
-			Vst3Close(g_eng.vst3); g_eng.vst3 = NULL;
+			Vst3Close(g_eng.vst3); 		g_eng.vst3 = NULL;
 			EnsLog(L"TryLoad VST3 FAIL %s (%s)", path,
 				Vst3LastError() ? Vst3LastError() : L"?");
 			return 0;
 		}
-		g_eng.usingBuiltin = 0;
 		return 1;
 	}
 	// Wrong-arch DLL must go through KpiHost64 (x86 app + x64 SC-VA).
-	if (PeArch(path) != HostArch()) return 0;
+	if (!PathIsSoundFont(path) && PeArch(path) != HostArch()) return 0;
 	if (!PathFileExistsW2(path)) return 0;
-	if (LoadVst2(path, g_eng.module, g_eng.effect)) {
-		g_eng.usingBuiltin = 0; return 1;
-	}
+	if (LoadVst2(path, g_eng.module, g_eng.effect))
+		return 1;
 	return 0;
-}
-
-// Same idea as the scan probe, but against the plug-in already loaded into the
-// song engine, where rendering is synchronous and therefore cheap.
-static double ProbeEngineStage(int channel0, int note, int velocity)
-{
-	AEffect* e = g_eng.effect;
-	Vst3Inst* v = g_eng.vst3;
-	if (!e && !v) return 0.0;
-
-	const DWORD noteOn = (DWORD)(0x90 | (channel0 & 15)) |
-		((DWORD)note << 8) | ((DWORD)velocity << 16);
-	const DWORD noteOff = (DWORD)(0x80 | (channel0 & 15)) | ((DWORD)note << 8);
-
-	if (v) Vst3MidiShort(v, noteOn, 0);
-	if (e) { MidiItem on = {}; on.msg = noteOn; SendVstEvents(e, &on, 1, 0); }
-
-	static __declspec(align(32)) float l[BLOCK_FRAMES];
-	static __declspec(align(32)) float r[BLOCK_FRAMES];
-	double peak = 0.0;
-	const int blocks = SAMPLE_RATE / BLOCK_FRAMES; // one second at most
-	for (int b = 0; b < blocks; ++b) {
-		if (v) Vst3Process(v, l, r, BLOCK_FRAMES);
-		else RenderEffect(e, l, r, BLOCK_FRAMES);
-		for (int i = 0; i < BLOCK_FRAMES; ++i) {
-			const double a = fabs((double)l[i]), c = fabs((double)r[i]);
-			if (a > peak) peak = a;
-			if (c > peak) peak = c;
-		}
-		if (peak * 1000.0 >= (double)PROBE_AUDIBLE_MILLI) break;
-	}
-	if (v) Vst3MidiShort(v, noteOff, 0);
-	if (e) { MidiItem off = {}; off.msg = noteOff; SendVstEvents(e, &off, 1, 0); }
-	return peak;
-}
-
-static int ProbeEngineAudible(int* outMilli)
-{
-	double peak = ProbeEngineStage(0, 60, 100);
-	if (peak * 1000.0 < (double)PROBE_AUDIBLE_MILLI) {
-		const double drum = ProbeEngineStage(9, 36, 110);
-		if (drum > peak) peak = drum;
-	}
-	const int milli = (int)(peak * 1000.0 + 0.5);
-	if (outMilli) *outMilli = milli;
-	return milli >= PROBE_AUDIBLE_MILLI ? 1 : 0;
 }
 
 static int ResetModeForPath(const wchar_t* p)
@@ -6524,161 +6355,6 @@ static int ResetModeForPath(const wchar_t* p)
 		ContainsI(p, L"SCVA") || ContainsI(p, L"8820") ||
 		ContainsI(p, L"SC88") || ContainsI(p, L"SGP"))
 		return 1;
-	return 0;
-}
-
-static void UnloadSongPlugin()
-{
-	if (g_eng.vst3) { Vst3Close(g_eng.vst3); g_eng.vst3 = NULL; }
-	if (g_eng.effect || g_eng.module) CloseEffect(g_eng.module, g_eng.effect);
-}
-
-// Load a candidate under real playing conditions (reset sent first) and keep it
-// only if it actually makes a sound. Leaves nothing loaded when it fails, so the
-// caller can simply try the next one.
-static int TryLoadAudible(const wchar_t* path, int* outReset, int* outMilli)
-{
-	if (!TryLoadPluginPath(path, 0)) return 0;
-	const int reset = ResetModeForPath(path);
-	SendGmGsReset(g_eng.effect, g_eng.vst3, reset);
-
-	/* プラグインがリセット処理を終えるのを待つ */
-	if (g_eng.effect || g_eng.vst3) {
-		for (int i = 0; i < 12; ++i) {
-			__declspec(align(32)) float l[BLOCK_FRAMES] = {};
-			__declspec(align(32)) float r[BLOCK_FRAMES] = {};
-			if (g_eng.vst3) Vst3Process(g_eng.vst3, l, r, BLOCK_FRAMES);
-			else if (g_eng.effect) RenderEffect(g_eng.effect, l, r, BLOCK_FRAMES);
-		}
-	}
-
-	int milli = 0;
-	const int ok = ProbeEngineAudible(&milli);
-	EnsLog(L"song probe %s peak=%d/1000 path=%s",
-		ok ? L"SOUND" : L"SILENT", milli, path);
-	if (outMilli) *outMilli = milli;
-	if (!ok) { UnloadSongPlugin(); return 0; }
-	// The probe advanced the instrument by up to a second; start the song clean.
-	SendGmGsReset(g_eng.effect, g_eng.vst3, reset);
-	if (outReset) *outReset = reset;
-	return 1;
-}
-
-// When the song engine runs inside KpiHost64 there is no plug-in list: scanning
-// belongs to ogg.exe. Both read %LOCALAPPDATA%\oggYSED\vstscan.cache, which
-// already carries the audible verdicts.
-static void EnsureCandidateList()
-{
-	if (!g_pluginCount) LoadCache();
-}
-
-static int AlreadyListed(const wchar_t* path)
-{
-	for (int i = 0; i < g_pluginCount; ++i)
-		if (_wcsicmp(g_plugins[i].path, path) == 0) return 1;
-	return 0;
-}
-
-static void SweepDirForMulti(const wchar_t* dir, int depth,
-	wchar_t out[][VST_PATH_CHARS], int& count, int max)
-{
-	if (!dir || !*dir || depth > 3 || count >= max || !DirExists(dir)) return;
-	wchar_t pat[VST_PATH_CHARS];
-	JoinPath(pat, dir, L"*");
-	WIN32_FIND_DATAW fd = {};
-	HANDLE h = FindFirstFileW(pat, &fd);
-	if (h == INVALID_HANDLE_VALUE) return;
-	do {
-		if (fd.cFileName[0] == L'.') continue;
-		wchar_t full[VST_PATH_CHARS];
-		JoinPath(full, dir, fd.cFileName);
-		if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
-			SweepDirForMulti(full, depth + 1, out, count, max);
-			continue;
-		}
-		if (count >= max) break;
-		if (!EqExt(full, L".dll")) continue;
-		if (!DetectMultiTimbralName(full) && !PathLooksLikeScVa(full)) continue;
-		if (PeArch(full) != HostArch()) continue;
-		int dup = 0;
-		for (int i = 0; i < count; ++i)
-			if (_wcsicmp(out[i], full) == 0) { dup = 1; break; }
-		if (!dup) SafeCopy(out[count++], VST_PATH_CHARS, full);
-	} while (FindNextFileW(h, &fd) && count < max);
-	FindClose(h);
-}
-
-// Last resort when no scan has ever run. The same product is routinely
-// installed in several places at once and only some copies work, so sweeping
-// the usual locations is what turns "silent song" into "it found the good one".
-static int CollectMultiCandidates(wchar_t out[][VST_PATH_CHARS], int max)
-{
-	wchar_t roots[VST_SCAN_ROOTS][VST_PATH_CHARS];
-	int nroots = FillVstScanRoots(roots, VST_SCAN_ROOTS);
-	if (savedata.vstExtraPath[0])
-		AddScanRoot(roots, nroots, VST_SCAN_ROOTS, savedata.vstExtraPath);
-	if (savedata.vstMultiDll[0] && DirExists(savedata.vstMultiDll))
-		AddScanRoot(roots, nroots, VST_SCAN_ROOTS, savedata.vstMultiDll);
-
-	int count = 0;
-	if (savedata.vstMultiDll[0] && count < max) {
-		DWORD a = GetFileAttributesW(savedata.vstMultiDll);
-		if (a != INVALID_FILE_ATTRIBUTES && !(a & FILE_ATTRIBUTE_DIRECTORY) &&
-			EqExt(savedata.vstMultiDll, L".dll") &&
-			PeArch(savedata.vstMultiDll) == HostArch())
-			SafeCopy(out[count++], VST_PATH_CHARS, savedata.vstMultiDll);
-	}
-	for (int i = 0; i < nroots && count < max; ++i)
-		SweepDirForMulti(roots[i], 0, out, count, max);
-	return count;
-}
-
-// The configured instrument first, then every other multi-timbral one the scan
-// found, so a dud install degrades into "a different synth plays the song"
-// instead of "the song is silent".
-static int LoadFirstAudibleCandidate(const wchar_t* preferred, wchar_t* outPath,
-	int outChars, int* outReset, int* outMilli)
-{
-	if (preferred && *preferred && TryLoadAudible(preferred, outReset, outMilli)) {
-		SafeCopy(outPath, outChars, preferred);
-		return 1;
-	}
-	EnsureCandidateList();
-	// Proven-audible entries first, then untested ones. A sampler waiting for a
-	// patch is no use for unattended song playback, so isAudible == 2 is not a
-	// candidate here even though the host palette still lists it.
-	for (int pass = 0; pass < 2; ++pass) {
-		for (int i = 0; i < g_pluginCount; ++i) {
-			const VstPluginInfo& p = g_plugins[i];
-			if (!p.isInstrument || !p.isMultiTimbral) continue;
-			if (p.isAudible == 2) continue;
-			if (pass == 0 && p.isAudible != 1) continue;
-			if (pass == 1 && p.isAudible == 1) continue;
-			if (preferred && *preferred &&
-				_wcsicmp(p.path, preferred) == 0) continue;
-			if (!p.isVst3 && PeArch(p.path) != HostArch()) continue;
-			if (!TryLoadAudible(p.path, outReset, outMilli)) continue;
-			SafeCopy(outPath, outChars, p.path);
-			EnsLog(L"song fallback picked [%s] after [%s] was silent",
-				p.path, preferred ? preferred : L"(none)");
-			return 1;
-		}
-	}
-
-	// Nothing in the list worked, or there was no list to walk.
-	enum { SWEEP_MAX = 12 };
-	wchar_t cand[SWEEP_MAX][VST_PATH_CHARS];
-	const int n = CollectMultiCandidates(cand, SWEEP_MAX);
-	EnsLog(L"song sweep found %d candidate(s)", n);
-	for (int i = 0; i < n; ++i) {
-		if (preferred && *preferred && _wcsicmp(cand[i], preferred) == 0) continue;
-		if (AlreadyListed(cand[i])) continue; // already tried above
-		if (!TryLoadAudible(cand[i], outReset, outMilli)) continue;
-		SafeCopy(outPath, outChars, cand[i]);
-		EnsLog(L"song sweep picked [%s] after [%s] was silent",
-			cand[i], preferred ? preferred : L"(none)");
-		return 1;
-	}
 	return 0;
 }
 
@@ -6701,13 +6377,10 @@ extern "C" int VstMidiOpen(const wchar_t* midPath,
 			if (p.effect || p.vst3 || p.remote) { anyLive = 1; break; }
 		}
 		g_eng.gmResetMode = 0;
-		g_eng.usingBuiltin = 0;
 		g_eng.useEnsemble = 0;
 		g_eng.eventPos = 0;
 		g_eng.playSample = 0;
 		g_eng.ringRead = g_eng.ringCount = 0;
-		ZeroMemory(g_eng.voices, sizeof(g_eng.voices));
-		ZeroMemory(g_eng.drums, sizeof(g_eng.drums));
 		ZeroMemory(g_eng.noteState, sizeof(g_eng.noteState));
 		LeaveCriticalSection(&g_eng.cs);
 		return anyLive ? 0 : -5;
@@ -6715,11 +6388,8 @@ extern "C" int VstMidiOpen(const wchar_t* midPath,
 
 	int loaded = 0;
 	int resetMode = 0;
-	int probeMilli = 0;
 	wchar_t pickDll[VST_PATH_CHARS];
-	wchar_t usedDll[VST_PATH_CHARS];
 	pickDll[0] = 0;
-	usedDll[0] = 0;
 	const wchar_t* loadedPath = NULL;
 	if (!PickGsXgDll(midPath, pickDll, VST_PATH_CHARS)) {
 		if (!MapperOpen()) {
@@ -6727,19 +6397,14 @@ extern "C" int VstMidiOpen(const wchar_t* midPath,
 			return -5;
 		}
 		loaded = 1;
+	} else if (!TryLoadPluginPath(pickDll, 0)) {
+		EnsLog(L"VstMidiOpen FAIL specified plugin [%s]", pickDll);
+		LeaveCriticalSection(&g_eng.cs);
+		return -5;
 	} else {
-		loaded = LoadFirstAudibleCandidate(pickDll, usedDll, VST_PATH_CHARS,
-			&resetMode, &probeMilli);
-		if (loaded) loadedPath = usedDll;
-		else if (TryLoadPluginPath(pickDll, 0)) {
-			// Nothing on this machine passed the sound check. Play through the
-			// configured instrument anyway rather than refusing to open: the
-			// user gets the same result as before plus a log line saying why.
-			loaded = 1;
-			loadedPath = pickDll;
-			resetMode = ResetModeForPath(pickDll);
-			EnsLog(L"song NO AUDIBLE CANDIDATE, using [%s] as-is", pickDll);
-		}
+		loaded = 1;
+		loadedPath = pickDll;
+		resetMode = ResetModeForPath(pickDll);
 	}
 	if (loadedPath) {
 		g_eng.gmResetMode = resetMode;
@@ -6750,13 +6415,10 @@ extern "C" int VstMidiOpen(const wchar_t* midPath,
 	}
 	const int hasOut = (g_eng.useMapper || g_eng.effect || g_eng.vst3 ||
 		g_eng.effectB || g_eng.effectC || g_eng.vst3C) ? 1 : 0;
-	g_eng.usingBuiltin = 0;
 	g_eng.useEnsemble = 0;
 	g_eng.eventPos = 0;
 	g_eng.playSample = 0;
 	g_eng.ringRead = g_eng.ringCount = 0;
-	ZeroMemory(g_eng.voices, sizeof(g_eng.voices));
-	ZeroMemory(g_eng.drums, sizeof(g_eng.drums));
 	ZeroMemory(g_eng.noteState, sizeof(g_eng.noteState));
 	if (!g_eng.useMapper)
 		ResetSequence();
@@ -6772,10 +6434,10 @@ extern "C" int VstMidiOpen(const wchar_t* midPath,
 				RenderSongUnits(BLOCK_FRAMES);
 		}
 	}
-	EnsLog(L"VstMidiOpen pick=[%s] used=[%s] peak=%d/1000 loaded=%d effect=%p "
+	EnsLog(L"VstMidiOpen pick=[%s] used=[%s] loaded=%d effect=%p "
 		L"vst3=%p mapper=%d hasOut=%d reset=%d gs=[%s] xg=[%s]",
 		pickDll[0] ? pickDll : L"(none)",
-		loadedPath ? loadedPath : L"(none)", probeMilli, loaded,
+		loadedPath ? loadedPath : L"(none)", loaded,
 		(void*)g_eng.effect, (void*)g_eng.vst3, g_eng.useMapper,
 		hasOut, resetMode,
 		savedata.vstMultiDll[0] ? savedata.vstMultiDll : L"(empty)",
@@ -7517,6 +7179,7 @@ extern "C" void VstLivePollRemoteEditorClosed(void) {}
 static int PlugFileArch(const wchar_t* path, int isVst3)
 {
 	if (!path || !*path) return 0;
+	if (PathIsSoundFont(path)) return HostArch();
 	const DWORD attr = GetFileAttributesW(path);
 	if (attr == INVALID_FILE_ATTRIBUTES) return 0;
 	if (!(attr & FILE_ATTRIBUTE_DIRECTORY))
@@ -8531,7 +8194,7 @@ extern "C" void VstScanVerifyLiveList(HWND parentForWait)
 		int milli = 0, base = 0, prog = -1;
 		const int wasRemote = g_eng.live[part - 1].remote;
 		int needsPatch = 0;
-		if (!factory) {
+		if (!factory && !PathIsSoundFont(p.path)) {
 			const int nprog = VstLiveProgramCount(part);
 			if (nprog > LIVE_FACTORY_PROG_MAX) needsPatch = 1;
 		}

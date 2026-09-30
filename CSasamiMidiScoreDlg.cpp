@@ -1349,7 +1349,7 @@ void CSasamiMidiScoreDlg::RefreshProgLabels()
 		if (m_ui.vstLabel[i][0] && prog < 0)
 			wcsncpy_s(name, m_ui.vstLabel[i], _TRUNCATE);
 		if (!name[0]) {
-			const int isDrum = (i == 9 || i == 25);
+			const int isDrum = ScMidiPartIsDrum(m_doc.ev, m_doc.evCount, i, 0);
 			SasamiToneLookupAuto(msb, lsb, pc, isDrum, name, 48);
 		}
 		if (name[0])
@@ -1503,7 +1503,8 @@ void CSasamiMidiScoreDlg::OpenVstForPart(int part1to32, int editorOnly)
 	   Right-click track uses ScVstShowPartMenu separately. */
 	(void)editorOnly;
 
-	const int assignRc = ScVstAssignToneForPart(this, part1to32, &m_doc.bind);
+	const int assignRc = ScVstAssignToneForPart(this, part1to32, &m_doc.bind,
+		ScMidiPartIsDrum(m_doc.ev, m_doc.evCount, part1to32 - 1, m_ui.markerTick));
 	const int ok = (assignRc != 0) ? 1 : 0;
 
 	wchar_t path[520];
@@ -2879,6 +2880,7 @@ void CSasamiMidiScoreDlg::LoadFromDoc(const ScMidiDoc& src)
 	}
 	SyncFxBindsToLive();
 	SyncMeterFromDoc();
+	ScStaffApplyDocClef(&m_ui, m_doc.ev, m_doc.evCount);
 	RefreshProgLabels();
 	RefreshPartEnabled();
 	ScStaffEnsureStripFromDoc(&m_ui, m_doc.ev, m_doc.evCount, m_curCh);
@@ -3516,6 +3518,17 @@ void CSasamiMidiScoreDlg::OnContextMenu(CWnd* pWnd, CPoint point)
 			: (m_ui.clef[tr] == 1 ? L"譜表: ヘ音→大譜表"
 			: (m_ui.clef[tr] == 2 ? L"譜表: 大譜表→ドラム"
 			: L"譜表: ドラム→ト音")));
+		if (ScMidiPartIsDrum(m_doc.ev, m_doc.evCount, tr, 0)) {
+			menu.AddCommand(9013, LL14(
+				L"メロディパートにする（リズム解除）", L"Make melodic (clear rhythm)", L"Partie mélodique (ôter rythme)", L"Parti melodica (togli ritmo)", L"Parte melódica (quitar ritmo)",
+				L"멜로디 파트로 (리듬 해제)", L"改为旋律（解除节奏）", L"جزء لحني (إلغاء الإيقاع)", L"Мелодическая партия (снять ритм)", L"Melodisch (Rhythmus aus)",
+				L"Parte melódica (tirar ritmo)", L"Melodisch (ritme uit)", L"Partia melodyczna (wyłącz rytm)", L"Melodik parti (ritmi kapat)"));
+		} else {
+			menu.AddCommand(9013, LL14(
+				L"ドラムパートにする（GS/XGリズム）", L"Make drum part (GS/XG rhythm)", L"Partie batterie (rythme GS/XG)", L"Parti batteria (ritmo GS/XG)", L"Parte batería (ritmo GS/XG)",
+				L"드럼 파트로 (GS/XG 리듬)", L"改为鼓组（GS/XG节奏）", L"جزء طبول (إيقاع GS/XG)", L"Ударная партия (ритм GS/XG)", L"Drum-Part (GS/XG-Rhythmus)",
+				L"Parte bateria (ritmo GS/XG)", L"Drum-partij (GS/XG-ritme)", L"Partia perkusji (rytm GS/XG)", L"Davul parti (GS/XG ritim)"));
+		}
 		menu.AddCommand(9007, LL14(
 			L"全トラックを大譜表に", L"All tracks → grand staff", L"Toutes les pistes → grande portée", L"Tutte le tracce → pentagramma grande", L"Todas las pistas → gran pentagrama",
 			L"모든 트랙 → 대보표", L"全部轨道→大谱表", L"كل المسارات → مدرج كبير", L"Все дорожки → большой стан", L"Alle Spuren → Akkolade",
@@ -3706,6 +3719,10 @@ void CSasamiMidiScoreDlg::OnContextMenu(CWnd* pWnd, CPoint point)
 		m_ui.clef[tr] = (m_ui.clef[tr] + 1) % 4;
 		UpdateScrollBars();
 		InvalidateRect(m_bodyRc, FALSE);
+	}
+	else if (tr >= 0 && cmd == 9013) {
+		const int cur = ScMidiPartIsDrum(m_doc.ev, m_doc.evCount, tr, 0);
+		SetPartDrum(tr, cur ? 0 : 1);
 	}
 	else if (cmd == 9007 || cmd == 9008 || cmd == 9009) {
 		const int c = (cmd == 9009) ? 3 : ((cmd == 9007) ? 2 : 0);
@@ -4005,6 +4022,25 @@ void CSasamiMidiScoreDlg::OnBnClickedText()
 void CSasamiMidiScoreDlg::HistPush()
 {
 	ScScoreHistPush(&m_hist, m_doc.ev, m_doc.evCount);
+}
+
+void CSasamiMidiScoreDlg::SetPartDrum(int tr, int drum)
+{
+	if (tr < 0 || tr >= SC_MIDI_CH) return;
+	drum = drum ? 1 : 0;
+	HistPush();
+	ScMidiAddDrum(&m_doc, 0, tr, drum);
+	m_ui.clef[tr] = drum ? 3 : 2;
+	m_ui.visible[tr] = 1;
+	m_curCh = tr;
+	if (m_ch.GetSafeHwnd()) m_ch.SetCurSel(m_curCh);
+	RefreshProgLabels();
+	NotifyEdited();
+	CString st;
+	st.Format(drum
+		? L"MIDI %d → drum / GS-XG rhythm (KAKU1)"
+		: L"MIDI %d → melodic (rhythm off)", tr + 1);
+	m_status.SetWindowText(st);
 }
 
 void CSasamiMidiScoreDlg::NotifyEdited()
