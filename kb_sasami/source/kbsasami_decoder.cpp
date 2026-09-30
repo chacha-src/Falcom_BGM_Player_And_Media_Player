@@ -16,6 +16,9 @@ static const wchar_t KEY_MIDIMODE[] = L"midimode";
 static const wchar_t KEY_MAP_LEGACY[] = L"map";
 static const wchar_t KEY_FMMODE[] = L"fmmode";
 
+/* fmmidi/ymfm の正規化が小さく、mpy/mpw2/rcp/mid が実聴で約 1/6。 */
+static const double kFmMidiOutGain = 6.0;
+
 static uint8_t s_fileBuf[SASAMI_MAX_FILE];
 
 int KbSasamiDecoder::MemGetc(void* fp)
@@ -577,7 +580,7 @@ DWORD WINAPI KbSasamiDecoder::Render(BYTE* pBuffer, DWORD dwSizeSample)
 		}
 		int16_t* out = (int16_t*)p;
 		for (DWORD i = 0; i < chunk * 2; i++) {
-			int v = (int)(m_mix[i] * 32767.0);
+			int v = (int)(m_mix[i] * 32767.0 * kFmMidiOutGain);
 			if (v > 32767) v = 32767;
 			if (v < -32768) v = -32768;
 			out[i] = (int16_t)v;

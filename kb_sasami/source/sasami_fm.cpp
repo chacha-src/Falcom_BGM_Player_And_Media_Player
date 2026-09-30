@@ -30,7 +30,8 @@ static const int32_t kFmVolume = 49152; // 32768 * 1.5
 static const int32_t kPsgVolume = 32768; // 65536 * 50/100
 static const int kRhythmWavNum = 1;
 static const int kRhythmWavDen = 2;
-static const int kMasterPct = 60;
+/* 最終出力。60 は実聴が小さいので 3 倍。クリップは Clamp16。 */
+static const int kMasterPct = 180;
 
 static const uint16_t kFmHz[16] = {
 	0x026A, 0x028F, 0x02B6, 0x02DF,

@@ -3024,6 +3024,28 @@ static void PlMicLevSliderCb(void* /*ctx*/, int value)
 
 void MpSurroundAmountSliderCb(void* /*ctx*/, int value);
 
+/* メディアプレーヤ側は選択同期が空でも m_ctxHit に右クリック行がある。 */
+static int PlCtxCollectRows(CPlayList* pl, int* out, int cap, int extraHit)
+{
+	int n = 0;
+	if (!pl || !out || cap <= 0) return 0;
+	int i = -1;
+	if (::IsWindow(pl->m_lc.GetSafeHwnd())) {
+		while ((i = pl->m_lc.GetNextItem(i, LVNI_ALL | LVNI_SELECTED)) >= 0) {
+			if (n < cap) out[n++] = i;
+		}
+	}
+	if (extraHit >= 0 && extraHit < pl->playcnt) {
+		int have = 0;
+		for (int k = 0; k < n; k++) {
+			if (out[k] == extraHit) { have = 1; break; }
+		}
+		if (!have && n < cap)
+			out[n++] = extraHit;
+	}
+	return n;
+}
+
 static void PlAddMapForceItems(CCustomPopupMenu* map, int baseId, int midiForce)
 {
 	if (!map) return;
@@ -3059,18 +3081,28 @@ static void PlApplySasamiMapForce(CPlayList* pl, int force)
 {
 	extern COggDlg* og;
 	extern CString filen;
-	int i = -1;
-	while ((i = pl->m_lc.GetNextItem(i, LVNI_ALL | LVNI_SELECTED)) >= 0) {
+	if (!pl) return;
+	int rows[256];
+	const int n = PlCtxCollectRows(pl, rows, 256, pl->m_ctxHit);
+	int touchPlaying = 0;
+	int touchRow = -1;
+	for (int k = 0; k < n; k++) {
+		const int i = rows[k];
 		if (!pl->pc || i >= pl->playcnt || !pl->pc[i].fol[0]) continue;
 #ifndef _UNICODE
 		if (!SasamiExtIsMidi(CStringW(pl->pc[i].fol))) continue;
-		const wchar_t* folW = CStringW(pl->pc[i].fol);
+		CStringW folWbuf(pl->pc[i].fol);
+		const wchar_t* folW = folWbuf;
 #else
 		if (!SasamiExtIsMidi(pl->pc[i].fol)) continue;
 		const wchar_t* folW = pl->pc[i].fol;
 #endif
 		PlMidForceSet(pl->pc[i].fol, force);
 		SasamiInvalidateTempMidi(folW);
+		if (filen.GetLength() > 0 && _wcsicmp(filen, folW) == 0) {
+			touchPlaying = 1;
+			touchRow = i;
+		}
 		if (og && og->m_MidiMonitorDlg && ::IsWindow(og->m_MidiMonitorDlg->GetSafeHwnd())) {
 			if (filen.GetLength() > 0 && _wcsicmp(filen, folW) == 0)
 				og->m_MidiMonitorDlg->ReloadCurrentMidi();
@@ -3082,6 +3114,12 @@ static void PlApplySasamiMapForce(CPlayList* pl, int force)
 		}
 	}
 	PlMidNotifyMarkViews();
+	if (touchPlaying && og && ::IsWindow(og->GetSafeHwnd())) {
+		if (touchRow >= 0)
+			pl->Get(touchRow);
+		if (OggPrepareResumeBeforePlayback(filen))
+			RequestPlaybackRestart(og->GetSafeHwnd());
+	}
 }
 
 static void PlApplySasamiFmForce(CPlayList* pl, int fmMode)
@@ -3445,8 +3483,10 @@ int CPlayList::ShowTrackContextMenu(CPoint pt, CWnd* pOwner)
 	BOOL anyWrd = FALSE;
 	CString cemuFol;
 	{
-		int i = -1;
-		while ((i = m_lc.GetNextItem(i, LVNI_ALL | LVNI_SELECTED)) >= 0) {
+		int rows[256];
+		const int n = PlCtxCollectRows(this, rows, 256, Lindex);
+		for (int k = 0; k < n; k++) {
+			const int i = rows[k];
 			if (!pc || i >= playcnt || !pc[i].fol[0]) continue;
 			if (IsCemuMode(pc[i].sub)) {
 				anyCemu = TRUE;
@@ -3466,17 +3506,17 @@ int CPlayList::ShowTrackContextMenu(CPoint pt, CWnd* pOwner)
 			const int isMid = VstIsMidiExt(pc[i].fol) ? 1 : 0;
 #endif
 			if (isFm) anySasamiFm = TRUE;
-			if (!isMid) continue;
 			if (isSas) anySasamiMidi = TRUE;
-			else anyOtherMidi = TRUE;
-			if (!anyMidi) {
+			if (!isMid && !isSas) continue;
+			if (isMid && !isSas) anyOtherMidi = TRUE;
+			if (!anyMidi && (isMid || isSas)) {
 				int f = 0;
 				if (PlMidDiskGet(pc[i].fol, NULL, NULL, NULL, &f) < 0)
 					PlMidProbe(pc[i].fol);
 				PlMidDiskGet(pc[i].fol, NULL, NULL, NULL, &f);
 				midiForce = f;
 			}
-			anyMidi = TRUE;
+			if (isMid || isSas) anyMidi = TRUE;
 		}
 	}
 	if (anySasamiFm) {
@@ -3504,8 +3544,10 @@ int CPlayList::ShowTrackContextMenu(CPoint pt, CWnd* pOwner)
 				L".fpy/PMD/FMP icin FM izleyici. Yalniz eski fmpmd.kpi yetmez (Plugins guncelleyin)"));
 		int fmForce = -1;
 		{
-			int i = -1;
-			while ((i = m_lc.GetNextItem(i, LVNI_ALL | LVNI_SELECTED)) >= 0) {
+			int rows[256];
+			const int n = PlCtxCollectRows(this, rows, 256, Lindex);
+			for (int k = 0; k < n; k++) {
+				const int i = rows[k];
 				if (!pc || i >= playcnt || !pc[i].fol[0]) continue;
 #ifndef _UNICODE
 				if (!SasamiExtIsFm(CStringW(pc[i].fol))) continue;
@@ -4679,12 +4721,15 @@ void CPlayList::HandleTrackContextCmd(int cmd)
 	else if (cmd >= PL_CTX_MIDMAP_BASE && cmd <= PL_CTX_MIDMAP_LAST) {
 		const int force = (int)(cmd - PL_CTX_MIDMAP_BASE);
 		extern COggDlg* og;
-		int i = -1;
-		while ((i = m_lc.GetNextItem(i, LVNI_ALL | LVNI_SELECTED)) >= 0) {
+		int rows[256];
+		const int n = PlCtxCollectRows(this, rows, 256, m_ctxHit);
+		for (int k = 0; k < n; k++) {
+			const int i = rows[k];
 			if (!pc || i >= playcnt || !pc[i].fol[0]) continue;
 #ifndef _UNICODE
 			if (!VstIsMidiExt(CStringW(pc[i].fol))) continue;
-			CStringW folW(pc[i].fol);
+			CStringW folWbuf(pc[i].fol);
+			const wchar_t* folW = folWbuf;
 #else
 			if (!VstIsMidiExt(pc[i].fol)) continue;
 			const wchar_t* folW = pc[i].fol;

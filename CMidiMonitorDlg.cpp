@@ -6247,6 +6247,12 @@ void CMidiMonitorDlg::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
 			if (m_sourcePath[0] && SasamiPathIsMidi(m_sourcePath)) {
 				SasamiInvalidateTempMidi(m_sourcePath);
 				ReloadCurrentMidi();
+				extern CString filen;
+				if (filen.GetLength() > 0 && _wcsicmp(filen, m_sourcePath) == 0
+					&& og && ::IsWindow(og->GetSafeHwnd())) {
+					if (OggPrepareResumeBeforePlayback(filen))
+						RequestPlaybackRestart(og->GetSafeHwnd());
+				}
 			} else {
 				PlMidNotifyMarkViews();
 			}

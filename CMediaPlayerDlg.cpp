@@ -2112,6 +2112,9 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 	m_kvolL.SetFont(&m_fontInfo, TRUE);
 	m_tempoL.SetFont(&m_fontInfo, TRUE);
 	m_pitchL.SetFont(&m_fontInfo, TRUE);
+	// テンポ/ピッチ%はクリックで100%。SS_NOTIFY が無いと STN_CLICKED もツールチップも届かない。
+	if (m_tempoL.GetSafeHwnd()) m_tempoL.ModifyStyle(0, SS_NOTIFY);
+	if (m_pitchL.GetSafeHwnd()) m_pitchL.ModifyStyle(0, SS_NOTIFY);
 	m_vollabel.SetFont(&m_fontInfo, TRUE);
 	m_volval.SetFont(&m_fontInfo, TRUE);
 	m_time.SetFont(&m_fontInfo, TRUE);
@@ -2214,6 +2217,8 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 	addTip(m_kvol, LL14(L"拡張音量(ブースト)を調整します。", L"Adjust extended (boost) volume.", L"Volume etendu (boost).", L"Volume esteso (boost).", L"Volumen extendido (boost).", L"확장(부스트) 음량 조절.", L"调整扩展(增益)音量。", L"ضبط الصوت الموسع (التعزيز).", L"Расширенная громкость (буст).", L"Erweiterte Lautstarke (Boost).", L"Volume estendido (boost).", L"Uitgebreid (boost) volume.", L"Rozszerzona głośność.", L"Genişletilmiş ses."));
 	addTip(m_tempo, LL14(L"再生テンポを調整します(ラベルをクリックで100%に戻す)。", L"Adjust playback tempo (click label to reset to 100%).", L"Tempo de lecture (clic sur le label = 100%).", L"Tempo (clic sull'etichetta = 100%).", L"Tempo (clic en etiqueta = 100%).", L"재생 템포 조절(라벨 클릭 시 100%).", L"调整播放速度(点击标签恢复100%)。", L"ضبط الإيقاع (انقر التسمية لإعادة 100%).", L"Темп (клик по метке = 100%).", L"Tempo (Label klicken = 100%).", L"Tempo (clique no rotulo = 100%).", L"Tempo (klik label = 100%).", L"Tempo (etykieta = 100%).", L"Tempo (etikete tıkla = %100)."));
 	addTip(m_pitch, LL14(L"再生ピッチ(音程)を調整します(ラベルをクリックで100%に戻す)。", L"Adjust playback pitch (click label to reset to 100%).", L"Hauteur (clic sur le label = 100%).", L"Altezza (clic sull'etichetta = 100%).", L"Tono (clic en etiqueta = 100%).", L"재생 피치 조절(라벨 클릭 시 100%).", L"调整音高(点击标签恢复100%)。", L"ضبط طبقة الصوت (انقر التسمية لإعادة 100%).", L"Высота (клик по метке = 100%).", L"Tonhohe (Label klicken = 100%).", L"Tom (clique no rotulo = 100%).", L"Toonhoogte (klik label = 100%).", L"Wysokosc (klik = 100%).", L"Perde (etikete tıkla = %100)."));
+	addTip(m_tempoL, LL14(L"クリックでテンポを100%に戻します。", L"Click to reset tempo to 100%.", L"Clic pour remettre le tempo a 100%.", L"Clic per riportare il tempo al 100%.", L"Clic para restablecer el tempo al 100%.", L"클릭하면 템포를 100%로 되돌립니다.", L"点击将速度恢复为100%。", L"انقر لإعادة الإيقاع إلى 100%.", L"Клик — темп 100%.", L"Klick setzt Tempo auf 100%.", L"Clique para repor o tempo em 100%.", L"Klik zet tempo op 100%.", L"Klik przywraca tempo 100%.", L"Tikla tempo %100 olsun."));
+	addTip(m_pitchL, LL14(L"クリックでピッチを100%に戻します。", L"Click to reset pitch to 100%.", L"Clic pour remettre la hauteur a 100%.", L"Clic per riportare l'altezza al 100%.", L"Clic para restablecer el tono al 100%.", L"클릭하면 피치를 100%로 되돌립니다.", L"点击将音高恢复为100%。", L"انقر لإعادة طبقة الصوت إلى 100%.", L"Клик — высота 100%.", L"Klick setzt Tonhohe auf 100%.", L"Clique para repor o tom em 100%.", L"Klik zet toonhoogte op 100%.", L"Klik przywraca wysokosc 100%.", L"Tikla perde %100 olsun."));
 	addTip(m_plsel, LL14(L"プレイリストを切り替え/新規追加します。", L"Switch / add a playlist.", L"Changer / ajouter une liste.", L"Cambia / aggiungi playlist.", L"Cambiar / anadir lista.", L"재생목록 전환/추가.", L"切换/新建播放列表。", L"تبديل / إضافة قائمة.", L"Сменить / добавить плейлист.", L"Playlist wechseln / hinzufugen.", L"Trocar / adicionar lista.", L"Playlist wisselen/toevoegen.", L"Zmień/dodaj listę.", L"Liste değiştir/ekle."));
 	if (m_endMode.GetSafeHwnd())
 		addTip(m_endMode, LL14(L"リストの最後まで行ったときの動作。停止／同じリストを繰返し／次のリストへ／全リスト循環。", L"When the list ends: stop, repeat this list, go to the next list, or cycle all lists.", L"En fin de liste: arret, repetter, liste suivante, ou toutes en boucle.", L"A fine lista: stop, ripeti, lista successiva, o cicla tutte.", L"Al final: parar, repetir, lista siguiente, o ciclar todas.", L"목록 끝에서: 정지 / 같은 목록 반복 / 다음 목록 / 전체 순환.", L"列表结束时：停止／重复本列表／下一列表／循环全部。", L"عند نهاية القائمة: توقف / تكرار / التالية / تدوير الكل.", L"В конце списка: стоп / повтор / следующий / цикл всех.", L"Am Listenende: Stopp / wiederholen / naechste / alle zyklisch.", L"No fim da lista: parar, repetir, proxima, ou ciclar todas.", L"Aan het einde: stoppen, herhalen, volgende, of alle cyclisch.", L"Na koncu listy: stop / powtorz / nastepna / cykl wszystkich.", L"Liste sonunda: dur / tekrarla / sonraki / tumunu dongule."));
@@ -2473,6 +2478,24 @@ BOOL CMediaPlayerDlg::RelayPreTranslateMessage(MSG* pMsg)
 	if (OggIsResumePromptActive() && pMsg
 		&& pMsg->message >= WM_KEYFIRST && pMsg->message <= WM_KEYLAST)
 		return TRUE;
+	if (pMsg) {
+		const HWND hw = pMsg->hwnd;
+		if (pMsg->message == WM_MOUSEMOVE || pMsg->message == WM_SETCURSOR) {
+			if ((m_tempoL.GetSafeHwnd() && hw == m_tempoL.GetSafeHwnd())
+				|| (m_pitchL.GetSafeHwnd() && hw == m_pitchL.GetSafeHwnd()))
+				::SetCursor(::LoadCursor(NULL, IDC_HAND));
+		}
+		if (pMsg->message == WM_LBUTTONDOWN || pMsg->message == WM_LBUTTONDBLCLK) {
+			if (m_tempoL.GetSafeHwnd() && hw == m_tempoL.GetSafeHwnd()) {
+				OnTempoReset();
+				return TRUE;
+			}
+			if (m_pitchL.GetSafeHwnd() && hw == m_pitchL.GetSafeHwnd()) {
+				OnPitchReset();
+				return TRUE;
+			}
+		}
+	}
 	if (HandlePlaylistItemDragMsg(pMsg))
 		return TRUE;
 	// 子ボタン上の右クリックは親 OnRButtonUp に届かない → ここでクイックメニュー。
@@ -4550,6 +4573,43 @@ void CMediaPlayerDlg::TickLyricsView()
 	m_lrcView.TickFrame();
 }
 
+// DS/拡張/テンポ/ピッチの%は見える MP スライダーの GetPos から作る。
+// 主音量(m_volval)と同じくドラッグ中も即更新する。og 隠れスライダーは timerp 側で追従。
+void CMediaPlayerDlg::UpdateSoundAdjLabels()
+{
+	if (!::IsWindow(GetSafeHwnd())) return;
+	CString l, s2;
+	const int dsPos = m_dsvol.GetSafeHwnd() ? m_dsvol.GetPos()
+		: (og && og->m_dsval.GetSafeHwnd() ? og->m_dsval.GetPos() : -200);
+	const double dsp = (dsPos + 499) * 2.0 / 10.0;
+	CString dsLbl = (m_dsvolSlW >= (int)(92 * hD2))
+		? CString(LL14(L"DirectSound音量", L"DirectSound volume", L"Volume DirectSound", L"Volume DirectSound", L"Volumen DirectSound", L"DirectSound 음량", L"DirectSound音量", L"صوت DirectSound", L"DirectSound", L"DirectSound-Lautstarke", L"Volume DirectSound", L"DirectSound-volume", L"Głośność DirectSound", L"DirectSound sesi"))
+		: CString(LL14(L"DS音量", L"DS volume", L"Volume DS", L"Volume DS", L"Volumen DS", L"DS 음량", L"DS音量", L"مستوى DS", L"Громкость DS", L"DS-Lautstarke", L"Volume DS", L"DS-volume", L"Głośność DS", L"DS sesi"));
+	l.Format(_T("!@C606868%s!@C206088 %.1f%%"), (LPCTSTR)dsLbl, dsp);
+	m_dsvolL.GetWindowText(s2); if (l != s2) m_dsvolL.SetWindowText(l);
+	{
+		const int kPos = m_kvol.GetSafeHwnd() ? m_kvol.GetPos()
+			: (og && og->m_kakuVol.GetSafeHwnd() ? og->m_kakuVol.GetPos() : 100);
+		CString lbl = LL14(L"拡張音量", L"Extended volume", L"Volume etendu", L"Volume esteso", L"Volumen extendido", L"확장 음량", L"扩展音量", L"الصوت الموسع", L"Расшир. громкость", L"Erweiterte Lautstarke", L"Volume estendido", L"Uitgebreid volume", L"Rozszerzona głośność", L"Genisletilmis ses");
+		l.Format(_T("!@C606868%s!@C904820 %.1f%%"), (LPCTSTR)lbl, (double)kPos);
+	}
+	m_kvolL.GetWindowText(s2); if (l != s2) m_kvolL.SetWindowText(l);
+	{
+		const int tPos = m_tempo.GetSafeHwnd() ? m_tempo.GetPos()
+			: (og && og->m_tempo_sl.GetSafeHwnd() ? og->m_tempo_sl.GetPos() : 200);
+		CString lbl = LL14(L"テンポ", L"Tempo", L"Tempo", L"Tempo", L"Tempo", L"템포", L"速度", L"الإيقاع", L"Темп", L"Tempo", L"Tempo", L"Tempo", L"Tempo", L"Tempo");
+		l.Format(_T("!@C606868%s!@C186878 %d%%"), (LPCTSTR)lbl, (int)TempoPercentFromPos(tPos));
+	}
+	m_tempoL.GetWindowText(s2); if (l != s2) m_tempoL.SetWindowText(l);
+	{
+		const int pPos = m_pitch.GetSafeHwnd() ? m_pitch.GetPos()
+			: (og && og->m_pitch_sl.GetSafeHwnd() ? og->m_pitch_sl.GetPos() : 200);
+		CString lbl = LL14(L"ピッチ", L"Pitch", L"Hauteur", L"Altezza", L"Tono", L"피치", L"音高", L"طبقة الصوت", L"Высота", L"Tonhohe", L"Tom", L"Toonhoogte", L"Wysokość", L"Perde");
+		l.Format(_T("!@C606868%s!@C704878 %d%%"), (LPCTSTR)lbl, (int)TempoPercentFromPos(pPos));
+	}
+	m_pitchL.GetWindowText(s2); if (l != s2) m_pitchL.SetWindowText(l);
+}
+
 // og/pl の UI 状態(歌詞・スライダー位置・チェック状態・コンボ選択)をこの画面へ反映する。
 // 差分のみ SetWindowText / SetCheck するのはちらつき防止のため。
 // Timer1(250ms)から定期呼び出しされるほか、コントロール操作直後にも都度呼ぶ。
@@ -4627,6 +4687,8 @@ void CMediaPlayerDlg::SyncFromMain()
 		// シーク/音量は timerp → MirrorSeekVol が駆動。ここは二重になるので呼ばない。
 
 		// サウンド調整(DS音量/拡張/テンポ/ピッチ)を og からミラー。ドラッグ中のものは触らない。
+		// %ラベルは MP スライダー位置を見る(UpdateSoundAdjLabels)。og 隠れスライダーは
+		// ドラッグ中に追いつかないことがあり、数字だけ止まる原因だった。
 		CWnd* pf2 = GetFocus();
 		HWND hf = pf2 ? pf2->GetSafeHwnd() : NULL;
 		if (hf != m_dsvol.GetSafeHwnd() && m_dsvol.GetPos() != og->m_dsval.GetPos())
@@ -4637,27 +4699,7 @@ void CMediaPlayerDlg::SyncFromMain()
 			m_tempo.SetPos(og->m_tempo_sl.GetPos(), FALSE);
 		if (hf != m_pitch.GetSafeHwnd() && m_pitch.GetPos() != og->m_pitch_sl.GetPos())
 			m_pitch.SetPos(og->m_pitch_sl.GetPos(), FALSE);
-		CString l;
-		double dsp = (og->m_dsval.GetPos() + 499) * 2.0 / 10.0;
-		CString dsLbl = (m_dsvolSlW >= (int)(92 * hD2))
-			? CString(LL14(L"DirectSound音量", L"DirectSound volume", L"Volume DirectSound", L"Volume DirectSound", L"Volumen DirectSound", L"DirectSound 음량", L"DirectSound音量", L"صوت DirectSound", L"DirectSound", L"DirectSound-Lautstarke", L"Volume DirectSound", L"DirectSound-volume", L"Głośność DirectSound", L"DirectSound sesi"))
-			: CString(LL14(L"DS音量", L"DS volume", L"Volume DS", L"Volume DS", L"Volumen DS", L"DS 음량", L"DS音量", L"مستوى DS", L"Громкость DS", L"DS-Lautstarke", L"Volume DS", L"DS-volume", L"Głośność DS", L"DS sesi"));
-		l.Format(_T("!@C606868%s!@C206088 %.1f%%"), (LPCTSTR)dsLbl, dsp); m_dsvolL.GetWindowText(s2); if (l != s2) m_dsvolL.SetWindowText(l);
-		{
-			CString lbl = LL14(L"拡張音量", L"Extended volume", L"Volume etendu", L"Volume esteso", L"Volumen extendido", L"확장 음량", L"扩展音量", L"الصوت الموسع", L"Расшир. громкость", L"Erweiterte Lautstarke", L"Volume estendido", L"Uitgebreid volume", L"Rozszerzona głośność", L"Genisletilmis ses");
-			l.Format(_T("!@C606868%s!@C904820 %.1f%%"), (LPCTSTR)lbl, (double)og->m_kakuVol.GetPos());
-		}
-		m_kvolL.GetWindowText(s2); if (l != s2) m_kvolL.SetWindowText(l);
-		{
-			CString lbl = LL14(L"テンポ", L"Tempo", L"Tempo", L"Tempo", L"Tempo", L"템포", L"速度", L"الإيقاع", L"Темп", L"Tempo", L"Tempo", L"Tempo", L"Tempo", L"Tempo");
-			l.Format(_T("!@C606868%s!@C186878 %d%%"), (LPCTSTR)lbl, (int)TempoPercentFromPos(og->m_tempo_sl.GetPos()));
-		}
-		m_tempoL.GetWindowText(s2); if (l != s2) m_tempoL.SetWindowText(l);
-		{
-			CString lbl = LL14(L"ピッチ", L"Pitch", L"Hauteur", L"Altezza", L"Tono", L"피치", L"音高", L"طبقة الصوت", L"Высота", L"Tonhohe", L"Tom", L"Toonhoogte", L"Wysokość", L"Perde");
-			l.Format(_T("!@C606868%s!@C704878 %d%%"), (LPCTSTR)lbl, (int)TempoPercentFromPos(og->m_pitch_sl.GetPos()));
-		}
-		m_pitchL.GetWindowText(s2); if (l != s2) m_pitchL.SetWindowText(l);
+		UpdateSoundAdjLabels();
 
 		// 乱数/順次・スペアナ/ステレオ/EQ/簡易ピアノロールの押下見た目
 		int v1;
@@ -4920,6 +4962,7 @@ void CMediaPlayerDlg::MirrorSeekVol()
 	double vpct = (double)og->m_sl.GetPos() / 1000.0;
 	if (!og->deve) vpct *= 100.0;
 	CString vs; vs.Format(_T("!@C206830%.1f%%"), vpct); m_volval.GetWindowText(s2); if (vs != s2) m_volval.SetWindowText(vs);
+	UpdateSoundAdjLabels();
 }
 
 void CMediaPlayerDlg::SavePos()
@@ -6712,6 +6755,9 @@ void CMediaPlayerDlg::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
 			og->m_pitch_sl.SetPos(p);
 			pitch = p;
 		}
+		if (h == m_dsvol.GetSafeHwnd() || h == m_kvol.GetSafeHwnd()
+			|| h == m_tempo.GetSafeHwnd() || h == m_pitch.GetSafeHwnd())
+			UpdateSoundAdjLabels();
 	}
 	CCustomBlurDialogExBase::OnHScroll(nSBCode, nPos, pScrollBar);
 }
@@ -6866,6 +6912,8 @@ void CMediaPlayerDlg::OnTempoReset()
 	if (og && ::IsWindow(og->GetSafeHwnd())) {
 		og->OnTempoStatic();
 		m_tempo.SetPos(og->m_tempo_sl.GetPos());
+		tempo = 200;
+		UpdateSoundAdjLabels();
 	}
 }
 
@@ -6874,6 +6922,8 @@ void CMediaPlayerDlg::OnPitchReset()
 	if (og && ::IsWindow(og->GetSafeHwnd())) {
 		og->OnPitchStatic();
 		m_pitch.SetPos(og->m_pitch_sl.GetPos());
+		pitch = 200;
+		UpdateSoundAdjLabels();
 	}
 }
 
@@ -8489,6 +8539,7 @@ void CMediaPlayerDlg::ApplyPracticeTempoPercent(int pct)
 		m_tempo.SetPos(pos, FALSE);
 	tempo = pos;
 	DougaApplyTempoToVideoRate();
+	UpdateSoundAdjLabels();
 }
 
 void CMediaPlayerDlg::OnPracticeTempo50() { ApplyPracticeTempoPercent(50); }

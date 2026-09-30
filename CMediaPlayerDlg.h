@@ -110,6 +110,7 @@ public:
 	void UpdateDeskLrcBtnChrome(); // 歌詞窓ボタンの文言・色を開閉状態に合わせる
 	void ApplyPauseButtonLabel(); // m_mpBtnShort と ps に応じた一時停止/再開ラベル
 	void MirrorSeekVol();        // 再生位置(playb追従)/時間/音量を高速ミラー
+	void UpdateSoundAdjLabels(); // DS/拡張/テンポ/ピッチの%ラベルを MP スライダーから更新
 	void SavePos();              // 座標を savedata に保存
 	void EnforceFalcomHidden();  // メディアモード中に裏画面が出ていたら隠す(監視)
 	void ReloadPlaylistCombo();  // pl のプレイリスト一覧コンボをミラー

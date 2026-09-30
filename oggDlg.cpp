@@ -27503,9 +27503,38 @@ void COggDlg::timerp()
 	}
 
 	tempo = m_tempo_sl.GetPos();
+	pitch = m_pitch_sl.GetPos();
+	if (savedata.playerMode == 1) {
+		extern CMediaPlayerDlg* mp;
+		if (mp && ::IsWindow(mp->GetSafeHwnd())) {
+			if (mp->m_tempo.GetSafeHwnd()) {
+				const int mpTempo = mp->m_tempo.GetPos();
+				if (mpTempo != tempo) {
+					tempo = mpTempo;
+					m_tempo_sl.SetPos(tempo, FALSE);
+				}
+			}
+			if (mp->m_pitch.GetSafeHwnd()) {
+				const int mpPitch = mp->m_pitch.GetPos();
+				if (mpPitch != pitch) {
+					pitch = mpPitch;
+					m_pitch_sl.SetPos(pitch, FALSE);
+				}
+			}
+			if (mp->m_kvol.GetSafeHwnd()) {
+				const int kp = mp->m_kvol.GetPos();
+				if (m_kakuVol.GetSafeHwnd() && kp != m_kakuVol.GetPos())
+					m_kakuVol.SetPos(kp, FALSE);
+			}
+			if (mp->m_dsvol.GetSafeHwnd()) {
+				const int dp = mp->m_dsvol.GetPos();
+				if (m_dsval.GetSafeHwnd() && dp != m_dsval.GetPos())
+					m_dsval.SetPos(dp, FALSE);
+			}
+		}
+	}
 	s.Format(L"%3d%%", (int)TempoPercentFromPos(tempo));
 	m_temp_num.SetWindowText(s);
-	pitch = m_pitch_sl.GetPos();
 	s.Format(L"%3d%%", (int)TempoPercentFromPos(pitch));
 	m_pitch.SetWindowText(s);
 
