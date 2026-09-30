@@ -4252,9 +4252,9 @@ void CMediaPlayerDlg::RefreshList(BOOL bForce)
 
 	FollowPlayingRow();   // ♪ 行へカーソル追従(曲変化時のみ)
 	UpdateEmptyStateUi();
-	// ディスク済ジャケは PL 変更/初回で一括メモリ化。未抽出のみ OnTimer で1件ずつ。
+	// ジャケはパスキーのメモリキャッシュ。切替で捨てると同じ曲が毎回ディスクになる。
 	if (bForce || cnt != prevCount)
-		MpJacketLoadVisible(this, FALSE, TRUE);
+		MpJacketLoadVisible(this, FALSE, FALSE);
 	// 歌詞フラグ / チャンネル印はジャケTimerから外したので、ここ(低頻度)で可視分だけ Probe
 	if (::IsWindow(m_list.GetSafeHwnd()) && pl && pl->pc) {
 		const int nDisp = m_list.GetItemCount();
@@ -4375,7 +4375,10 @@ void CMediaPlayerDlg::OnGetdispinfoList(NMHDR* pNMHDR, LRESULT* pResult)
 			_tcscat_s(buf, d.name);
 			_tcsncpy_s(di->item.pszText, di->item.cchTextMax, buf, _TRUNCATE);
 		} break;
-		case 2: _tcscpy_s(di->item.pszText, di->item.cchTextMax, d.game); break;
+		case 2:
+			PlEnsureGameName(pl->pc[i]);
+			_tcscpy_s(di->item.pszText, di->item.cchTextMax, pl->pc[i].game);
+			break;
 		case 3: {
 			CString s;
 			if (d.time == 0) s = _T("");
@@ -7051,9 +7054,7 @@ void CMediaPlayerDlg::OnPlSel()
 	changeflg = TRUE;
 	pl->m_listchange.SetCurSel(sel);
 	changeflg = FALSE;
-	pl->OnCbnSelchangeCombo1();   // プレイリスト切替/新規作成(既存処理)
-	ReloadPlaylistCombo();
-	RefreshList(TRUE);
+	pl->OnCbnSelchangeCombo1();
 }
 
 void CMediaPlayerDlg::OnPlRename()

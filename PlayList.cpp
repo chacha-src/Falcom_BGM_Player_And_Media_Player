@@ -1,4 +1,4 @@
-// PlayList.cpp : 実装ファイル
+﻿// PlayList.cpp : 実装ファイル
 //
 
 #include "stdafx.h"
@@ -2983,7 +2983,7 @@ int CPlayList::GetPlaylistFileCount()
 {
 	int lcnt = 0;
 	for (;; ++lcnt) {
-		if (!PathFileExists(GetModulePath() + PlPlaylistFileName(lcnt)))
+		if (!DatArc_Exists(PlPlaylistFileName(lcnt)))
 			break;
 		if (lcnt >= 999) break;
 	}
@@ -5699,20 +5699,13 @@ static void PlSasamiMaybeTags(CString& name, CString& art, CString& alb, const C
 	}
 }
 
-int CPlayList::Add(CString name,int sub,int loop1,int loop2,CString art,CString alb,CString fol,int ret,int time,BOOL f,BOOL ff)
+void PlEnsureGameName(playlistdata0& d)
 {
-	if (PlIsSasamiTempPreviewPath(fol))
-		return -1;
-	if (MidiPackIsTempExtractPath(fol))
-		return -1;
-	// 旧プレイリストに KPI 再生として保存された動画も CDouga 再生へ移行する。
-	if (sub == -3 && IsDougaVideoFile(fol))
-		sub = -2;
-	/* 旧 MIDI パック -31 → -40。空の軌跡 pac:: が -31 になっていた行は 30/31 に戻す。 */
-	sub = RemapLegacyPlaySub(sub, fol);
-
-	int cnt1;
-	CString s,ss;
+	if (d.game[0])
+		return;
+	CString s, ss;
+	const int sub = d.sub;
+	const CString fol = d.fol;
 	switch(sub){
 		case 1:s=LL14(L"空の軌跡SC", L"Trails in the Sky SC", L"Les Sentiers du Ciel SC", L"Trails in the Sky SC", L"Trails in the Sky SC", L"하늘의 궤적 SC", L"空之轨迹SC", L"Trails in the Sky SC", L"Тропы в Небе SC", L"Himmelsleitern SC", L"Trails in the Sky SC", L"Trails in the Sky SC", L"Trails in the Sky SC", L"Trails in the Sky SC");break;
 		case 2:s=LL14(L"空の軌跡FC", L"Trails in the Sky FC", L"Les Sentiers du Ciel FC", L"Trails in the Sky FC", L"Trails in the Sky FC", L"하늘의 궤적 FC", L"空之轨迹FC", L"Trails in the Sky FC", L"Тропы в Небе FC", L"Himmelsleitern FC", L"Trails in the Sky FC", L"Trails in the Sky FC", L"Trails in the Sky FC", L"Trails in the Sky FC");break;
@@ -5847,6 +5840,24 @@ int CPlayList::Add(CString name,int sub,int loop1,int loop2,CString art,CString 
 			break;
 	}
 
+	if (!s.IsEmpty())
+		_tcsncpy(d.game, s, _countof(d.game) - 1);
+	d.game[_countof(d.game) - 1] = 0;
+}
+
+int CPlayList::Add(CString name,int sub,int loop1,int loop2,CString art,CString alb,CString fol,int ret,int time,BOOL f,BOOL ff)
+{
+	if (PlIsSasamiTempPreviewPath(fol))
+		return -1;
+	if (MidiPackIsTempExtractPath(fol))
+		return -1;
+	// 旧プレイリストに KPI 再生として保存された動画も CDouga 再生へ移行する。
+	if (sub == -3 && IsDougaVideoFile(fol))
+		sub = -2;
+	/* 旧 MIDI パック -31 → -40。空の軌跡 pac:: が -31 になっていた行は 30/31 に戻す。 */
+	sub = RemapLegacyPlaySub(sub, fol);
+
+	int cnt1;
 	const CString folNorm = PlStorePlaylistFol(fol, sub);
 
 	if(f) {
@@ -5914,10 +5925,11 @@ int CPlayList::Add(CString name,int sub,int loop1,int loop2,CString art,CString 
 		_tcscpy(pc[playcnt].art,art);
 		_tcscpy(pc[playcnt].alb,alb);
 		_tcscpy(pc[playcnt].fol, folNorm);
-		_tcscpy(pc[playcnt].game,s);
+		pc[playcnt].sub = sub;
+		pc[playcnt].game[0] = 0;
+		PlEnsureGameName(pc[playcnt]);
 		pc[playcnt].loop1=loop1;
 		pc[playcnt].loop2=loop2;
-		pc[playcnt].sub=sub;
 		pc[playcnt].ret2=ret;
 		pc[playcnt].icon=1;
 		pc[playcnt].time=time;
@@ -13289,8 +13301,10 @@ void CPlayList::Load(BOOL restoreSavedRow)
 		s.Format(L"playlistu.dat");
 	else
 		s.Format(L"playlistu%d.dat", lcnt);
+	DatArc_Path(s);
 	CFile f;if(f.Open(s,CFile::modeRead | CFile::shareDenyWrite,NULL)==TRUE){
 #else
+	DatArc_Path(_T("playlist.dat"));
 	CFile f;if(f.Open(_T("playlist.dat"),CFile::modeRead | CFile::shareDenyWrite,NULL)==TRUE){
 #endif
 		// 件数はファイル長で必ず検算する。0バイト/途中までしか書けていない .dat を
@@ -13329,8 +13343,8 @@ void CPlayList::Load(BOOL restoreSavedRow)
 			m_lc.SetColumnWidth(1, c);
 		}
 		playlistdata pld;
-		m_lc.SetItemCount(cnt);
 		const int recBytes = PlPlaylistRecordBytes(f.GetLength(), 4 + 4 * 4 + 5 * 4, cnt);
+		int got = 0;
 		for(int i=0;i<cnt;i++){
 			if (!PlReadPlaylistRecord(f, recBytes, pld))
 				break;
@@ -13338,8 +13352,13 @@ void CPlayList::Load(BOOL restoreSavedRow)
 			pld.art[_countof(pld.art) - 1] = 0;
 			pld.alb[_countof(pld.alb) - 1] = 0;
 			pld.fol[_countof(pld.fol) - 1] = 0;
-			Add(pld.name,pld.sub,pld.loop1,pld.loop2,pld.art,pld.alb,pld.fol,pld.ret2,pld.time,FALSE,FALSE);			
+			if (!pc) break;
+			PlPcFromPld(pld, pc[got]);
+			if (pc[got].sub == -3 && IsDougaVideoFile(pc[got].fol))
+				pc[got].sub = -2;
+			got++;
 		}
+		playcnt = got;
 		c=0;f.Read(&c,4);m_loop.SetCheck(c);
 		c=0;f.Read(&c,4);m_renzoku.SetCheck(c);
 		c=1;f.Read(&c,4);m_tool.SetCheck(c);
@@ -14051,6 +14070,7 @@ void CPlayList::OnLvnGetdispinfoList1(NMHDR* pNMHDR, LRESULT* pResult)
 				_tcsncpy_s(lpDInfo->item.pszText, lpDInfo->item.cchTextMax, marks, _TRUNCATE);
 			} break;
 			case 2:
+				PlEnsureGameName(pc[nTargetIndex]);
 				_tcscpy(lpDInfo->item.pszText, pc[nTargetIndex].game);
 				break;
 			case 3: {
@@ -14139,6 +14159,8 @@ void CPlayList::OnList()
 		if (Lindex >= 0 && Lindex < playcnt)
 			sel.push_back(Lindex);
 	}
+	if (sel.empty() && m_ctxHit >= 0 && m_ctxHit < playcnt)
+		sel.push_back(m_ctxHit);
 	if (sel.empty())
 		return;
 
@@ -14784,6 +14806,7 @@ void CPlayList::OnCbnSelchangeEndMode()
 
 void CPlayList::OnCbnSelchangeCombo1()
 {
+	extern COggDlg* og;
 	if (m_tempMode) return;
 	if (changeflg == TRUE) return;
 	int num = m_listchange.GetCurSel();
@@ -14831,7 +14854,10 @@ void CPlayList::OnCbnSelchangeCombo1()
 			ClampPlaylistSelectionIndices(this);
 			RefreshListViews();
 			loadplaylistname();
-			DatArc_FlushSuspend(FALSE);
+			if (og && og->GetSafeHwnd())
+				og->PostMessage(WM_OGG_DATARC_FLUSH, 0, 0);
+			else
+				DatArc_FlushSuspend(FALSE);
 			return;
 		}
 		Load(FALSE);
@@ -14845,7 +14871,10 @@ void CPlayList::OnCbnSelchangeCombo1()
 		if (mp && ::IsWindow(mp->GetSafeHwnd()))
 			mp->ReloadPlaylistCombo();
 		MpPersistSavedataQuick();
-		DatArc_FlushSuspend(FALSE);
+		if (og && og->GetSafeHwnd())
+			og->PostMessage(WM_OGG_DATARC_FLUSH, 0, 0);
+		else
+			DatArc_FlushSuspend(FALSE);
 		return;
 	}
 
@@ -14889,7 +14918,10 @@ void CPlayList::OnCbnSelchangeCombo1()
 	ClampPlaylistSelectionIndices(this);
 	RefreshListViews();
 	MpPersistSavedataQuick();
-	DatArc_FlushSuspend(FALSE);
+	if (og && og->GetSafeHwnd())
+		og->PostMessage(WM_OGG_DATARC_FLUSH, 0, 0);
+	else
+		DatArc_FlushSuspend(FALSE);
 }
 
 void CPlayList::RefreshListViews()
@@ -14920,7 +14952,7 @@ void CPlayList::loadplaylistname()
 			s.Format(L"playlistu.dat");
 		else
 			s.Format(L"playlistu%d.dat", lcnt);
-		if (!PathFileExists(GetModulePath() + s))
+		if (!DatArc_Exists(s))
 			break;
 	}
 	if (lcnt >= 999) lcnt = 999;

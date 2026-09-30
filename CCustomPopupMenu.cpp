@@ -44,8 +44,8 @@
 //   強制してから ULW 解除（行き過ぎ整列の点滅防止）。
 //
 // 【Track / モーダル / z】
-//   Track → CreatePopupAt（WS_EX_TOPMOST|NOACTIVATE）→ RunModalLoop。
-//   入場中 16ms MsgWait。定着後 33ms で前面監視。
+//   Track → CCC_ModalUiGuard → CreatePopupAt（WS_EX_TOPMOST|NOACTIVATE）→ RunModalLoop。
+//   再生 ULW と DXGI WaitForVBlank を取り合わない（8ms MsgWait + Pulse）。
 //   CCUSTOM_POPUP_RELAX_DISMISS_PROP で FG/KillFocus 自動閉じを抑止
 //   （外側クリック・Esc・アプリ非アクティブは有効）。
 //
@@ -2801,6 +2801,9 @@ void CCustomPopupMenu::CloseChain(UINT result)
 {
 	CCustomPopupMenu* root = RootMenu();
 	if (!root) return;
+	// 項目クリックで決めた ID を KillFocus / 外側判定の 0 で潰さない
+	if (root->m_done && root->m_result != 0 && result == 0)
+		return;
 	root->m_result = result;
 	root->m_done = TRUE;
 }
@@ -2896,19 +2899,32 @@ BOOL CCustomPopupMenu::ScreenPtOnOpenSubBody(CPoint screenPt) const
 
 // 自分／子／owner トップレベル／コンボリスト／開サブなら関連。
 // Track(子コントロール) 時 FG はトップレベルになる点に注意。
+// mp の GW_OWNER は隠れ og。timerp が og を前面化してもメニューを落とさない。
 BOOL CCustomPopupMenu::IsHwndRelated(HWND h) const
 {
 	if (!h || !::IsWindow(h)) return FALSE;
 	if (GetSafeHwnd() && (h == m_hWnd || ::IsChild(m_hWnd, h)))
 		return TRUE;
+
+	auto inTree = [](HWND root, HWND wnd) -> BOOL {
+		if (!root || !wnd) return FALSE;
+		if (wnd == root || ::IsChild(root, wnd))
+			return TRUE;
+		HWND r = ::GetAncestor(root, GA_ROOT);
+		if (r && r != root && (wnd == r || ::IsChild(r, wnd)))
+			return TRUE;
+		return FALSE;
+	};
+
 	if (m_owner && m_owner->GetSafeHwnd()) {
-		HWND ow = m_owner->GetSafeHwnd();
-		if (h == ow || ::IsChild(ow, h))
-			return TRUE;
-		// Track(子コントロール) 時、フォアグラウンドはトップレベルになる
-		HWND root = ::GetAncestor(ow, GA_ROOT);
-		if (root && root != ow && (h == root || ::IsChild(root, h)))
-			return TRUE;
+		for (HWND ow = m_owner->GetSafeHwnd(); ow; ow = ::GetWindow(ow, GW_OWNER)) {
+			if (inTree(ow, h))
+				return TRUE;
+		}
+		for (HWND w = h; w; w = ::GetWindow(w, GW_OWNER)) {
+			if (inTree(m_owner->GetSafeHwnd(), w))
+				return TRUE;
+		}
 	}
 	for (int i = 0; i < m_comboCount; ++i) {
 		if (!m_combos[i].GetSafeHwnd()) continue;
@@ -2942,8 +2958,15 @@ BOOL CCustomPopupMenu::IsForegroundOurs() const
 {
 	HWND fg = ::GetForegroundWindow();
 	if (!fg) return TRUE;
+	// メディアプレイヤー中の隠れ og が timerp / SetPos で FG になっても閉じない
+	if (!::IsWindowVisible(fg))
+		return TRUE;
 	DWORD pid = 0;
-	::GetWindowThreadProcessId(fg, &pid);
+	const DWORD tid = ::GetWindowThreadProcessId(fg, &pid);
+	// 再生中の speana / Soft3D 等も同一 UI スレッド。ここを FALSE にすると
+	// 出現アニメの途中で閉じる／操作不能になる。
+	if (tid && tid == ::GetCurrentThreadId())
+		return TRUE;
 	if (pid && pid != ::GetCurrentProcessId())
 		return FALSE;
 	const CCustomPopupMenu* root = m_root ? m_root : this;
@@ -3526,13 +3549,19 @@ void CCustomPopupMenu::UpdateTip()
 // sticky 帯（+flightPad）より上は先頭固定行のみ。セパレータはヒットしない。
 int CCustomPopupMenu::HitTest(CPoint pt) const
 {
-	// ホバー／クリックは常に定着レイアウト座標で判定。
-	// 飛行中の見た目矩形は重なるため、非サブ上でも SUB と誤判定→Snap 誤爆になる。
+	// 飛行中は見た目のチップ（ox,oy）で判定。定着座標だけだとクリックが外れて
+	// メニューだけ閉じる。
 	auto hitRow = [&](int i) -> BOOL {
 		if (m_items[i].kind == CCUSTOM_POPUP_SEP) return FALSE;
 		CRect hit = ItemViewRect(i);
 		if (m_flightPad > 0)
 			hit.SetRect(m_flightPad, hit.top, m_flightPad + m_menuW, hit.bottom);
+		if (m_lineAnimPhase != 0) {
+			int ox = 0, oy = 0, fade = 256;
+			if (!CalcLineAnim(i, &ox, &oy, &fade) || fade < 20)
+				return FALSE;
+			hit.OffsetRect(ox, oy);
+		}
 		return hit.PtInRect(pt) ? TRUE : FALSE;
 	};
 	if (m_stickyCount > 0 && pt.y < m_stickyH + m_flightPad) {
@@ -3998,25 +4027,24 @@ LRESULT CCustomPopupMenu::OnPrintClient(WPARAM wParam, LPARAM)
 }
 
 // 飛行余白が親を覆うときだけ HTTRANSPARENT。左折り返しで本体が親に重なるときは取る。
-// パッドの穴（チップも定着行も無い）も下へ通す。
+// パッドの穴（チップも定着行も無い）も下へ通す。本体上は必ず HTCLIENT（選択不能防止）。
 LRESULT CCustomPopupMenu::OnNcHitTest(CPoint point)
 {
+	// 見た目の本体（行／コンテンツ）は必ず取る。透過だと選択が握りつぶされる。
+	if (ScreenPtOnMenuBody(point))
+		return HTCLIENT;
 	// 飛行余白が親を覆うときだけ透過。左折り返しで本体が親に重なるときは
 	// こちらがヒットを取る（透過すると選択不能／親がサブを閉じる）。
-	if (!ScreenPtOnMenuBody(point)) {
-		for (CCustomPopupMenu* p = m_parentMenu; p; p = p->m_parentMenu) {
-			if (!p->GetSafeHwnd()) continue;
-			CRect wr; p->GetWindowRect(&wr);
-			if (wr.PtInRect(point))
-				return HTTRANSPARENT;
-		}
+	for (CCustomPopupMenu* p = m_parentMenu; p; p = p->m_parentMenu) {
+		if (!p->GetSafeHwnd()) continue;
+		CRect wr; p->GetWindowRect(&wr);
+		if (wr.PtInRect(point))
+			return HTTRANSPARENT;
 	}
 	// 飛行パッドの穴（チップも定着行も無い）も下へ通す
 	if (m_flightPad > 0 && m_lineAnimPhase != 0 && UsesRowChipFlight(PopupAnimStyle())) {
 		CPoint c = point;
 		ScreenToClient(&c);
-		if (HitTest(c) >= 0)
-			return HTCLIENT;
 		for (int i = 0; i < m_itemCount; ++i) {
 			if (m_items[i].kind == CCUSTOM_POPUP_SEP) continue;
 			int ox = 0, oy = 0, fade = 256;
@@ -4180,19 +4208,23 @@ BOOL CCustomPopupMenu::HandleChromeClick(int idx)
 // 骨格は HandleChromeClick。CMD/CHECK は CloseChain(id)。
 void CCustomPopupMenu::OnLButtonDown(UINT nFlags, CPoint point)
 {
-	// アニメ中も見た目ヒットで行決定。定着スナップはサブを開くときだけ（OpenSubAt内）。
-	// 通常項目で毎回 Snap すると「一枚化」が誤爆アニメになる。
+	// 行は Snap 前に決める。先に一枚化すると座標がずれ、KillFocus が result=0 で閉じる。
 	const int idx = HitTest(point);
 	if (idx < 0) return;
-	const CCustomPopupItem& it = m_items[idx];
-	if (!it.enabled) return;
-	if (IsInteractiveKind(it.kind)) return;
+	const UINT id = m_items[idx].id;
+	const int kind = m_items[idx].kind;
+	const BOOL enabled = m_items[idx].enabled;
+	const BOOL checked = m_items[idx].checked;
+	if (!enabled) return;
+	if (IsInteractiveKind(kind)) return;
+	if (m_lineAnimPhase != 0)
+		SnapAnimToIdle();
 	if (HandleChromeClick(idx)) return;
-	if (it.kind == CCUSTOM_POPUP_SUB) { OpenSubAt(idx); return; }
-	if (it.kind == CCUSTOM_POPUP_CHECK && !it.checked)
-		StartCheckBounce(idx); // CloseChain 前の一瞬でも起動（描画フレームがあれば見える）
-	if (it.kind == CCUSTOM_POPUP_CMD || it.kind == CCUSTOM_POPUP_CHECK)
-		CloseChain(it.id);
+	if (kind == CCUSTOM_POPUP_SUB) { OpenSubAt(idx); return; }
+	if (kind == CCUSTOM_POPUP_CHECK && !checked)
+		StartCheckBounce(idx);
+	if (kind == CCUSTOM_POPUP_CMD || kind == CCUSTOM_POPUP_CHECK)
+		CloseChain(id);
 	CWnd::OnLButtonDown(nFlags, point);
 }
 
@@ -4253,6 +4285,10 @@ void CCustomPopupMenu::OnKillFocus(CWnd* pNewWnd)
 	CCustomPopupMenu* root = RootMenu();
 	// 画面キャプチャ等: 合成副作用の偽 KillFocus では閉じない（外側クリック/Esc で閉じる）
 	if (root && PopupOwnerRelaxesDismiss(root->m_owner))
+		return;
+	if (root && root->m_done)
+		return;
+	if (::GetKeyState(VK_LBUTTON) < 0)
 		return;
 	if (root && root->m_tracking)
 		root->CloseChain(0);
@@ -4570,14 +4606,12 @@ void CCustomPopupMenu::RunModalLoop()
 			dismissForForeignFocus();
 			return TRUE;
 		}
-		/* 出現/退場アニメ中だけ banner tick を食う。定着後は Dispatch してメインバナーを動かす。
-		   chrome Peek（マウス奪取）は timerp 側が Track 中スキップする。 */
+		/* Track 中は再生 tick を食う。Dispatch すると ULW がモーダルを飢えさせ、
+		   出現アニメが途中で止まる／クリックが届かない。 */
 		if (m.message == WM_TIMERP_VSYNC_TICK || m.message == WM_SPEANA_TICK) {
-			if (m_lineAnimPhase == 1 || m_lineAnimPhase == 2) {
-				extern void COgg_DropPlaybackUiPostedMsg(UINT message);
-				COgg_DropPlaybackUiPostedMsg(m.message);
-				return TRUE;
-			}
+			extern void COgg_DropPlaybackUiPostedMsg(UINT message);
+			COgg_DropPlaybackUiPostedMsg(m.message);
+			return TRUE;
 		}
 		if (m.message == WM_KEYDOWN && m.wParam == VK_ESCAPE) {
 			CWnd* f = GetFocus();
@@ -4597,18 +4631,46 @@ void CCustomPopupMenu::RunModalLoop()
 			|| m.message == WM_LBUTTONDBLCLK) {
 			DWORD pos = ::GetMessagePos();
 			CPoint sp(GET_X_LPARAM(pos), GET_Y_LPARAM(pos));
-			if (!IsPointInChain(sp)) {
-				m_done = TRUE;
-				m_result = 0;
-				// 右クリック外は「閉じて同じクリックで開き直す」。左は閉じるだけ。
+			CCustomPopupMenu* hit = this;
+			for (;;) {
+				if (hit->m_openSub >= 0 && hit->m_openSub < hit->m_itemCount) {
+					const int si = hit->m_items[hit->m_openSub].subIndex;
+					if (si >= 0 && si < hit->m_subCount && hit->m_subs[si]
+						&& hit->m_subs[si]->GetSafeHwnd()) {
+						CRect wr; hit->m_subs[si]->GetWindowRect(&wr);
+						if (wr.PtInRect(sp)) {
+							hit = hit->m_subs[si];
+							continue;
+						}
+					}
+				}
+				break;
+			}
+			int row = -1;
+			if (hit->GetSafeHwnd()) {
+				CPoint c = sp;
+				hit->ScreenToClient(&c);
+				row = hit->HitTest(c);
+			}
+			if (row < 0 && !IsPointInChain(sp)) {
+				CloseChain(0);
 				if (m.message == WM_RBUTTONDOWN || m.message == WM_NCRBUTTONDOWN)
 					PopupArmReopenAt(sp, m.message == WM_NCRBUTTONDOWN);
 				else
 					s_reopenRClick = FALSE;
 				PopupEatOpenMenuMessages();
-				// DOWN だけ食って UP をメインへ流すと押下状態だけ残る
 				PopupEatDismissClickTail();
 				return TRUE;
+			}
+			if (m.message == WM_LBUTTONDOWN || m.message == WM_LBUTTONDBLCLK
+				|| m.message == WM_NCLBUTTONDOWN) {
+				HWND hw = m.hwnd;
+				if (hit->GetSafeHwnd() && !(hw && ::IsChild(hit->m_hWnd, hw))) {
+					CPoint c = sp;
+					hit->ScreenToClient(&c);
+					hit->OnLButtonDown(MK_LBUTTON, c);
+					return TRUE;
+				}
 			}
 		}
 		// ホスト WM_PAINT は Dispatch する（validate のみだと g_gdiPaintPending /
@@ -4621,13 +4683,12 @@ void CCustomPopupMenu::RunModalLoop()
 	};
 
 	while (!m_done) {
-		// 入場／idle ともメニュー内で vblank 待ち（UiTickPump は使わない）。
-		// MsgWait(16/33) は Sleep 相当でストライプが 30fps 相当に落ちる。
-		PopupWaitVblank(GetSafeHwnd());
-		if (m_done)
-			break;
+		// DXGI WaitForVBlank は再生 ULW と取り合うとスレッドが止まり、
+		// 出現アニメが途中で凍る。ここは短い MsgWait + Pulse にする。
 		PulseVsyncFrame();
-		while (!m_done && ::PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
+		int nPeek = 0;
+		while (!m_done && nPeek < 64 && ::PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
+			++nPeek;
 			if (!dispatchOne(msg))
 				break;
 		}
@@ -4640,6 +4701,8 @@ void CCustomPopupMenu::RunModalLoop()
 		}
 		if (!m_done && !IsForegroundOurs())
 			dismissForForeignFocus();
+		if (!m_done && nPeek == 0)
+			::MsgWaitForMultipleObjects(0, NULL, FALSE, 8, QS_ALLINPUT);
 	}
 	m_tracking = FALSE;
 	// 破棄前に残クリック／キャプチャを掃除（AnimateOut 中の入力は別途捨てる）
@@ -4665,6 +4728,7 @@ UINT CCustomPopupMenu::Track(CPoint screenPt, CWnd* pOwner)
 	// AnimateOut 中などにネストして呼ばれると二重メニューになる
 	if (GetTrackingRoot() != NULL)
 		return 0;
+	CCC_ModalUiGuard modalUi;
 	m_owner = pOwner;
 	m_root = this;
 	m_parentMenu = NULL;

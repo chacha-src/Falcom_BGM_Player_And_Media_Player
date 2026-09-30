@@ -15689,27 +15689,53 @@ private:
         PaintOpaque(hWnd, hDestDC);
     }
 
+    // PrintClient を DIB へだけ。画面へは出さない（Frozen の Unlock 後 Blit 用）。
+    BOOL BuildOpaqueCache(HWND hWnd)
+    {
+        if (m_bChroma) return FALSE;
+        RECT rect = {};
+        ::GetClientRect(hWnd, &rect);
+        const int width = rect.right - rect.left;
+        const int height = rect.bottom - rect.top;
+        if (width <= 0 || height <= 0) return FALSE;
+        HDC hdcRef = ::GetDC(hWnd);
+        if (!hdcRef) return FALSE;
+        BOOL ok = FALSE;
+        if (m_dib.Ensure(hdcRef, width, height) && m_dib.pBits && m_dib.hdcDib) {
+            CBrush brush(m_clrBg);
+            RECT zr = { 0, 0, width, height };
+            ::FillRect(m_dib.hdcDib, &zr, (HBRUSH)brush.GetSafeHandle());
+            PaintClientIntoBuffer(hWnd, m_dib.hdcDib);
+            m_dib.MakeRectOpaque(0, 0, width, height);
+            ok = TRUE;
+        }
+        ::ReleaseDC(hWnd, hdcRef);
+        return ok;
+    }
+
     // SETREDRAW 禁止: FALSE はアクリル下で子が穴になり親ガラスが一瞬見える。
     // 先に Lock して最後の良いフレームを残し、Def の α=0 はクリップ。
-    // 重い PrintClient は Lock 中に DIB へ描き、Unlock 直後は Blit だけにする。
+    // PrintClient は Lock 中に DIB だけ。Unlock 直後は Blit 1 回（画面へは二重に出さない）。
     LRESULT FrozenDefThenPaint(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
     {
-        const BOOL locked = ::LockWindowUpdate(hWnd);
+        // ポップアップ Track 中の LockWindowUpdate はメニュー HWND の描画領域を空にし、
+        // 項目クリックが下のリストへ抜ける／演奏中にメニューが出ない原因になる。
+        const BOOL menuTrack = (CCustomPopupMenu::GetTrackingRoot() != NULL);
+        const BOOL locked = menuTrack ? FALSE : ::LockWindowUpdate(hWnd);
         m_bDeferPaint = TRUE;
         LRESULT lRes = ::DefSubclassProc(hWnd, uMsg, wParam, lParam);
         m_bDeferPaint = FALSE;
-        HDC hDC = GetOpaqueDestDC(hWnd);
-        if (hDC) {
-            PaintOpaque(hWnd, hDC);
-            ::ReleaseDC(hWnd, hDC);
-        }
+        const BOOL cached = BuildOpaqueCache(hWnd);
         m_bDeferPaint = TRUE;
         if (locked)
             ::LockWindowUpdate(NULL);
         m_bDeferPaint = FALSE;
-        hDC = ::GetDC(hWnd);
+        HDC hDC = menuTrack ? GetOpaqueDestDC(hWnd) : ::GetDC(hWnd);
         if (hDC) {
-            PresentCachedOpaque(hWnd, hDC);
+            if (cached)
+                PresentCachedOpaque(hWnd, hDC);
+            else
+                PaintOpaque(hWnd, hDC);
             ::ReleaseDC(hWnd, hDC);
         }
         ::ValidateRect(hWnd, NULL);
@@ -15935,8 +15961,20 @@ private:
             // Lock で最後のフレームを残し、PrintClient は凍っているあいだ DIB へ。
             // Unlock 直後は Blit だけなので「消えてから描く」隙間が無い。
             const BOOL bListLike = (pThis->m_clsKind == 2 || pThis->m_clsKind == 4 || pThis->m_clsKind == 5);
-            if (bListLike)
-                return pThis->FrozenDefThenPaint(hWnd, uMsg, wParam, lParam);
+            if (bListLike) {
+                WPARAM wp = wParam;
+                if (uMsg == WM_MOUSEWHEEL || uMsg == WM_MOUSEHWHEEL) {
+                    const UINT drainMsg = uMsg;
+                    MSG extra = {};
+                    short z = GET_WHEEL_DELTA_WPARAM(wParam);
+                    while (::PeekMessage(&extra, hWnd, drainMsg, drainMsg, PM_REMOVE)) {
+                        z = (short)(z + GET_WHEEL_DELTA_WPARAM(extra.wParam));
+                        wp = extra.wParam;
+                    }
+                    wp = MAKEWPARAM(GET_KEYSTATE_WPARAM(wp), z);
+                }
+                return pThis->FrozenDefThenPaint(hWnd, uMsg, wp, lParam);
+            }
             LRESULT lRes = ::DefSubclassProc(hWnd, uMsg, wParam, lParam);
             ::ValidateRect(hWnd, NULL);
             HDC hDC = pThis->GetOpaqueDestDC(hWnd);

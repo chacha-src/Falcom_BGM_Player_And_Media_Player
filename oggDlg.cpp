@@ -2045,6 +2045,7 @@ BEGIN_MESSAGE_MAP(COggDlg, CCustomBlurDialogBase)
 	ON_MESSAGE(WM_OGG_DEFERRED_HEAVY_INIT, OnDeferredHeavyStartup)
 	ON_MESSAGE(WM_OGG_ENTER_MP_MODE, OnEnterMpModeMsg)
 	ON_MESSAGE(WM_OGG_TOGGLE_SUBUI, OnToggleSubUiMsg)
+	ON_MESSAGE(WM_OGG_DATARC_FLUSH, OnDatArcFlush)
 	ON_MESSAGE(WM_PLAYBACK_AUTO_STOPPED, OnPlaybackAutoStopped)
 	ON_MESSAGE(WM_OGG_CLOSE_DOUGA, OnCloseDougaMsg)
 	ON_MESSAGE(WM_OGG_RESUME_PROMPT, OnResumePrompt)
@@ -5818,6 +5819,8 @@ static void COgg_RequestTimerp(COggDlg* dlg)
 	if (!dlg)
 		return;
 	if (CCC_ModalUiBusy())
+		return;
+	if (CCustomPopupMenu::GetTrackingRoot() != NULL)
 		return;
 	if (VstScanPumpIsBusy())
 		return;
@@ -28375,7 +28378,7 @@ void timerog1(UINT nIDEvent)
 				return;
 			}
 		}
-		// 同期一括 Create はしない。1窓ずつ WM_OGG_TOGGLE_SUBUI(10..18) で復元。
+		// MP 画面（またはファルコム本画面）が出たあと、保存されていたサブUIを一気に出す。
 		og->PostMessage(WM_OGG_TOGGLE_SUBUI, 10, 0);
 	}
 
@@ -33975,13 +33978,16 @@ LRESULT COggDlg::OnToggleSubUiMsg(WPARAM wParam, LPARAM)
 	else if (wParam == 5)
 		ToggleWrdView();
 	else if (wParam >= 10 && wParam <= 19) {
-		// 起動時サブUI復元: 開くだけ(トグルしない)。1メッセージ=最大1 Create。
-		// 10=EQ .. 17=MIDIモニタ 18=FMモニタ 19=WRD
+		// 起動時サブUI復元: 開くだけ(トグルしない)。
+		// 10 で 10..19 を一気に Create/Show（負荷分散後は順次 Post しない）。
 		// SW_SHOWNOACTIVATE でフォーカス奪取・ちらつきを抑える。
 		g_oggSubUiRestoring = 1;
 		try {
 		OggMigrateFmMonToMidiMonFlag();
-		if (wParam == 10) {
+		const WPARAM id0 = wParam;
+		const WPARAM id1 = (wParam == 10) ? 19 : wParam;
+		for (WPARAM id = id0; id <= id1; ++id) {
+		if (id == 10) {
 			if (savedata.eqwindow == 1 && m_EqualizerDlg) {
 				if (!::IsWindow(m_EqualizerDlg->GetSafeHwnd())) {
 					if (!m_EqualizerDlg->Create(IDD_EQUALIZER, this))
@@ -33991,7 +33997,7 @@ LRESULT COggDlg::OnToggleSubUiMsg(WPARAM wParam, LPARAM)
 					m_EqualizerDlg->ShowWindow(SW_SHOWNOACTIVATE);
 			}
 		}
-		else if (wParam == 11) {
+		else if (id == 11) {
 			if (savedata.pianorollwindow == 1 && m_PianoRollDlg) {
 				if (!::IsWindow(m_PianoRollDlg->GetSafeHwnd())) {
 					if (!m_PianoRollDlg->Create(IDD_PIANOROLL, this))
@@ -34001,7 +34007,7 @@ LRESULT COggDlg::OnToggleSubUiMsg(WPARAM wParam, LPARAM)
 					m_PianoRollDlg->ShowWindow(SW_SHOWNOACTIVATE);
 			}
 		}
-		else if (wParam == 12) {
+		else if (id == 12) {
 			if (savedata.prTunewindow == 1 && m_PianoRollTuneDlg) {
 				if (!::IsWindow(m_PianoRollTuneDlg->GetSafeHwnd())) {
 					if (!m_PianoRollTuneDlg->Create(IDD_PIANOROLL_TUNE, this))
@@ -34011,7 +34017,7 @@ LRESULT COggDlg::OnToggleSubUiMsg(WPARAM wParam, LPARAM)
 					m_PianoRollTuneDlg->ShowWindow(SW_SHOWNOACTIVATE);
 			}
 		}
-		else if (wParam == 13) {
+		else if (id == 13) {
 			if (savedata.analyzerwindow == 1 && m_AnalyzerDlg) {
 				if (!::IsWindow(m_AnalyzerDlg->GetSafeHwnd())) {
 					if (!m_AnalyzerDlg->Create(IDD_ANALYZER, this))
@@ -34021,7 +34027,7 @@ LRESULT COggDlg::OnToggleSubUiMsg(WPARAM wParam, LPARAM)
 					m_AnalyzerDlg->ShowWindow(SW_SHOWNOACTIVATE);
 			}
 		}
-		else if (wParam == 14) {
+		else if (id == 14) {
 			if (savedata.mpPromptwindow == 1) {
 				extern CMediaPlayerDlg* mp;
 				CWnd* pParent = (savedata.playerMode == 1 && mp && ::IsWindow(mp->GetSafeHwnd()))
@@ -34029,7 +34035,7 @@ LRESULT COggDlg::OnToggleSubUiMsg(WPARAM wParam, LPARAM)
 				MpShowPromptDialog(pParent, FALSE);
 			}
 		}
-		else if (wParam == 15) {
+		else if (id == 15) {
 			if (savedata.mpCmdRollwindow == 1) {
 				extern CMediaPlayerDlg* mp;
 				CWnd* pParent = (savedata.playerMode == 1 && mp && ::IsWindow(mp->GetSafeHwnd()))
@@ -34037,7 +34043,7 @@ LRESULT COggDlg::OnToggleSubUiMsg(WPARAM wParam, LPARAM)
 				MpShowCommandRollDialog(pParent, FALSE);
 			}
 		}
-		else if (wParam == 16) {
+		else if (id == 16) {
 			if (savedata.mpDjPadwindow == 1) {
 				extern CMediaPlayerDlg* mp;
 				CWnd* pParent = (savedata.playerMode == 1 && mp && ::IsWindow(mp->GetSafeHwnd()))
@@ -34045,7 +34051,7 @@ LRESULT COggDlg::OnToggleSubUiMsg(WPARAM wParam, LPARAM)
 				OpenMpDjPadModeless(pParent);
 			}
 		}
-		else if (wParam == 17) {
+		else if (id == 17) {
 			OggMigrateFmMonToMidiMonFlag();
 			if (savedata.midimonwindow == 1 && m_MidiMonitorDlg) {
 				if (!::IsWindow(m_MidiMonitorDlg->GetSafeHwnd())) {
@@ -34059,10 +34065,10 @@ LRESULT COggDlg::OnToggleSubUiMsg(WPARAM wParam, LPARAM)
 				}
 			}
 		}
-		else if (wParam == 18) {
+		else if (id == 18) {
 			/* FM は MIDI ホストに統合。17 で復元済み。 */
 		}
-		else if (wParam == 19) {
+		else if (id == 19) {
 			if (savedata.wrdwindow == 1 && m_WrdViewDlg) {
 				if (!::IsWindow(m_WrdViewDlg->GetSafeHwnd())) {
 					if (!m_WrdViewDlg->Create(IDD_WRDVIEW, this))
@@ -34073,46 +34079,23 @@ LRESULT COggDlg::OnToggleSubUiMsg(WPARAM wParam, LPARAM)
 			}
 		}
 		}
+		}
 		catch (CException* e) {
 			e->Delete();
 		}
 		g_oggSubUiRestoring = 0;
-		// 閉じている窓の空メッセージを飛ばし、次に復元が要る番号へ
-		WPARAM next = wParam + 1;
-		while (next <= 19) {
-			BOOL need = FALSE;
-			if (next == 10)
-				need = (savedata.eqwindow == 1 && m_EqualizerDlg);
-			else if (next == 11)
-				need = (savedata.pianorollwindow == 1 && m_PianoRollDlg);
-			else if (next == 12)
-				need = (savedata.prTunewindow == 1 && m_PianoRollTuneDlg);
-			else if (next == 13)
-				need = (savedata.analyzerwindow == 1 && m_AnalyzerDlg);
-			else if (next == 14)
-				need = (savedata.mpPromptwindow == 1);
-			else if (next == 15)
-				need = (savedata.mpCmdRollwindow == 1);
-			else if (next == 16)
-				need = (savedata.mpDjPadwindow == 1);
-			else if (next == 17)
-				need = (savedata.midimonwindow == 1 && m_MidiMonitorDlg);
-			else if (next == 18)
-				need = FALSE;
-			else if (next == 19)
-				need = (savedata.wrdwindow == 1 && m_WrdViewDlg);
-			if (need) break;
-			++next;
-		}
-		if (next <= 19)
-			PostMessage(WM_OGG_TOGGLE_SUBUI, next, 0);
-		else {
-			// 復元完了: 押下見た目を一度だけ同期(復元中は抑止していた)
+		{
 			extern CMediaPlayerDlg* mp;
 			if (mp && ::IsWindow(mp->GetSafeHwnd()))
 				mp->SyncPushToggleButtons();
 		}
 	}
+	return 0;
+}
+
+LRESULT COggDlg::OnDatArcFlush(WPARAM, LPARAM)
+{
+	DatArc_FlushSuspend(FALSE);
 	return 0;
 }
 

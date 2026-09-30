@@ -1,4 +1,4 @@
-// Microsoft Visual C++ generated resource script.
+﻿// Microsoft Visual C++ generated resource script.
 //
 #pragma code_page(65001)
 
@@ -2532,7 +2532,7 @@ BEGIN
     LTEXT           "630",IDC_EQ_FREQ_630,181,35,13,8
     LTEXT           "1000",IDC_EQ_FREQ_1000,203,35,17,8
     LTEXT           "1600",IDC_EQ_FREQ_1600,227,35,17,8
-    LTEXT           "Hz",IDC_EQ_UNIT_HZ,367,35,9,8
+    LTEXT           "Hz",IDC_EQ_UNIT_HZ,354,35,16,10
     LTEXT           "100",IDC_STATIC_e0,13,151,13,8
     LTEXT           "100",IDC_STATIC_e1,37,151,13,8
     LTEXT           "100",IDC_STATIC_e2,62,151,13,8
@@ -2581,11 +2581,11 @@ BEGIN
     LTEXT           "100",IDC_STATIC_e18,452,151,13,8
     CONTROL         "",IDC_SLIDER27,"msctls_trackbar32",TBS_VERT | TBS_BOTH | TBS_NOTICKS | WS_TABSTOP,473,43,16,106
     LTEXT           "100",IDC_STATIC_e19,475,151,13,8
-    CTEXT           "マスター",IDC_STATIC_EQ_SPECTRUM,371,35,30,8
-    CTEXT           "明瞭",IDC_STATIC_EQ_FREQ,399,35,26,8
-    CTEXT           "バランス",IDC_STATIC_EQ_BAND,420,35,30,8
-    CTEXT           "密度",IDC_STATIC_EQ_LOUDNESS,445,35,26,8
-    CTEXT           "立体",IDC_STATIC_EQ_WARMTH,468,35,26,8
+    CTEXT           "マスター",IDC_STATIC_EQ_SPECTRUM,372,33,38,12
+    CTEXT           "明瞭",IDC_STATIC_EQ_FREQ,399,33,28,12
+    CTEXT           "バランス",IDC_STATIC_EQ_BAND,420,33,32,12
+    CTEXT           "密度",IDC_STATIC_EQ_LOUDNESS,445,33,28,12
+    CTEXT           "立体",IDC_STATIC_EQ_WARMTH,468,33,28,12
     DEFPUSHBUTTON   "グローバルリセット",IDOK4,453,164,96,14
     LTEXT           "",IDC_STATIC_key,230,5,130,8
     LTEXT           "",IDC_STATIC_key2,386,5,130,8
@@ -2593,13 +2593,13 @@ BEGIN
     LTEXT           "",IDC_STATIC_key4,386,20,130,8
     CONTROL         "",IDC_SLIDER28,"msctls_trackbar32",TBS_VERT | TBS_BOTH | TBS_NOTICKS | WS_TABSTOP,494,43,16,106
     LTEXT           "100",IDC_STATIC_e20,496,151,13,8
-    CTEXT           "リバーブ",IDC_STATIC_EQ_REVERB,487,35,30,8
+    CTEXT           "リバーブ",IDC_STATIC_EQ_REVERB,487,33,32,12
     CONTROL         "",IDC_SLIDER29,"msctls_trackbar32",TBS_VERT | TBS_BOTH | TBS_NOTICKS | WS_TABSTOP,515,43,16,106
     LTEXT           "100",IDC_STATIC_e21,517,151,13,8
-    CTEXT           "コーラス",IDC_STATIC_EQ_CHORUS,508,35,30,8
+    CTEXT           "コーラス",IDC_STATIC_EQ_CHORUS,508,33,32,12
     CONTROL         "",IDC_SLIDER30,"msctls_trackbar32",TBS_VERT | TBS_BOTH | TBS_NOTICKS | WS_TABSTOP,535,43,16,106
     LTEXT           "100",IDC_STATIC_e22,537,151,13,8
-    CTEXT           "ディレイ",IDC_STATIC_EQ_DELAY,528,35,30,8
+    CTEXT           "ディレイ",IDC_STATIC_EQ_DELAY,528,33,32,12
 END
 
 IDD_PIANOROLL DIALOGEX 0, 0, 400, 200

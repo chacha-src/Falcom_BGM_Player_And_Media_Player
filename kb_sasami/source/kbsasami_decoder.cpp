@@ -536,21 +536,20 @@ DWORD WINAPI KbSasamiDecoder::Render(BYTE* pBuffer, DWORD dwSizeSample)
 
 	DWORD remain = dwSizeSample;
 	BYTE* p = pBuffer;
-	int didWrap = 0;
+	int wrapGuard = 0;
 	while (remain) {
 		if (looping && loopEndSamp > loopStartSamp + 1 && m_curSample > loopEndSamp) {
-			if (didWrap) {
+			if (++wrapGuard > 64) {
 				ZeroMemory(p, remain * 4);
 				break;
 			}
-			didWrap = 1;
-			/* loopEnd の CC120 で既に離している。即 delete は 2 周目で YM pool と競合する */
+			/* ハング中の NoteOff は SMF の loopEnd で済んでいる。
+			   all_sound_off は 2 周目の A01 が欠ける。 */
 			for (int i = 0; i < m_nPorts; i++) {
 				if (!m_synths[i]) continue;
 				for (int ch = 0; ch < 16; ch++)
 					m_synths[i]->control_change(ch, 0x40, 0);
 				m_synths[i]->all_note_off();
-				m_synths[i]->all_sound_off();
 			}
 			m_note_factory.reset_pool_frame();
 			m_sequencer.set_position(m_loopStart);
@@ -562,6 +561,10 @@ DWORD WINAPI KbSasamiDecoder::Render(BYTE* pBuffer, DWORD dwSizeSample)
 			&& m_curSample + chunk > loopEndSamp + 1)
 			chunk = (DWORD)(loopEndSamp + 1 - m_curSample);
 		if (chunk == 0) {
+			if (looping && loopEndSamp > loopStartSamp) {
+				m_curSample = loopEndSamp + 1;
+				continue;
+			}
 			ZeroMemory(p, remain * 4);
 			break;
 		}

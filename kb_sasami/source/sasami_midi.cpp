@@ -446,8 +446,10 @@ struct SasamiTempCache {
 	FILETIME srcWrite;
 	DWORD srcSize;
 	int mapForce;
+	int convVer;
 };
 static SasamiTempCache s_tempCache;
+enum { SASAMI_SMF_CACHE_VER = 7 };
 
 static int SasamiReadSourceStamp(const wchar_t* src, FILETIME* writeTime, DWORD* size)
 {
@@ -474,6 +476,7 @@ static int SasamiReadSourceStamp(const wchar_t* src, FILETIME* writeTime, DWORD*
 static int SasamiTempCacheValid(const wchar_t* src, int mapForce, const wchar_t* dest)
 {
 	if (!src || !src[0] || !dest || !dest[0] || !s_tempCache.src[0]) return 0;
+	if (s_tempCache.convVer != SASAMI_SMF_CACHE_VER) return 0;
 	if (_wcsicmp(s_tempCache.src, src) != 0 || s_tempCache.mapForce != mapForce) return 0;
 	FILETIME wt;
 	DWORD sz = 0;
@@ -651,8 +654,10 @@ bool SasamiConvertToSmf(const SasamiSong& song, SasamiMidiMap map, int gsBankLsb
 					if (tr[i].note) {
 						PushShort(tick, port, (uint8_t)(0x80 | ch), (uint8_t)tr[i].note, 0);
 						chOn[port ? 1 : 0][ch][tr[i].note & 127] = 0;
-					} else if (note < 128 && chOn[port ? 1 : 0][ch][note])
-						PushShort(tick, port, (uint8_t)(0x80 | ch), (uint8_t)note, 0);
+					}
+					/* 同じ MIDI ch の別トラックが同じ音高を持っているとき
+					   先に NoteOff すると A01 の片方が欠ける。fmmidi 側で
+					   同pitch は note_on 時に離す。 */
 					PushShort(tick, port, (uint8_t)(0x90 | ch), (uint8_t)note, (uint8_t)tr[i].vel);
 					if (note < 128)
 						chOn[port ? 1 : 0][ch][note] = 1;
@@ -815,16 +820,8 @@ bool SasamiConvertToSmf(const SasamiSong& song, SasamiMidiMap map, int gsBankLsb
 							chOn[port ? 1 : 0][ch][tr[i].note & 127] = 0;
 							tr[i].note = 0;
 						}
-						{
-							int shared = 0;
-							for (int j = 0; j < song.trackCount && j < 64; j++) {
-								if (j == i || !tr[j].alive) continue;
-								if (tr[j].part == ch && tr[j].port == port && tr[j].note)
-									shared = 1;
-							}
-							if (!shared)
-								PushShort(tick, port, (uint8_t)(0xB0 | ch), 0x78, 0);
-						}
+						/* J は PC だけ戻す。CC120 は同じ ch の他トラック
+						   （S00003 は A01 が 2 本）の発音まで落とす。 */
 						if (stopLoopers && gLoopEnd > 0 && tick >= gLoopEnd) {
 							killTrack(i);
 							again = 0;
@@ -1192,8 +1189,10 @@ bool SasamiConvertToSmf(const SasamiSong& song, SasamiMidiMap map, int gsBankLsb
 				}
 				default:
 					if (cmd == 0) {
-						killTrack(i);
-						again = 0;
+						/* COV.C case 0 は addr++（;non）。MEIREI [00] 未使用。
+						   S00005 A03 は :| の直後に 00 を挟んで次の |: が続く。
+						   終了は 0xF0 / J→0x10F0。00 を kill するとフレーズ1回で死ぬ。 */
+						tr[i].addr = addr + 1;
 					} else {
 						tr[i].addr = addr + 3;
 					}
@@ -1252,10 +1251,13 @@ bool SasamiConvertToSmf(const SasamiSong& song, SasamiMidiMap map, int gsBankLsb
 		}
 		if (finiteAlive == 0 && loopAlive > 0)
 			stopLoopers = 1;
+		if (s_evCount >= SASAMI_MAX_EV - 256)
+			break;
 	}
 
-	/* 曲ループは「最後に揃う長い J」の塊。途中の短い Q/J は展開のまま残す。
-	   塊の最も早い J で切るので、先に戻った ch の dest 音が最後音に重ならない。 */
+	/* 曲ループは長い J の塊。SMF の loopEnd は「同じ拍に揃った多数派」の
+	   最も早い J。最も遅い J に合わせるとドラム(A10)が 1 小節余計に鳴ってから Q に戻る。
+	   先に J した ch の dest（Q の再演奏）は tick>=loopEnd で捨てる。 */
 	uint32_t maxLe = 0;
 	uint32_t maxSpan = 0;
 	for (int i = 0; i < song.trackCount && i < 64; i++) {
@@ -1266,8 +1268,9 @@ bool SasamiConvertToSmf(const SasamiSong& song, SasamiMidiMap map, int gsBankLsb
 		if (sp > maxSpan) maxSpan = sp;
 	}
 	const uint32_t clusterFrom = (maxLe > 192u) ? (maxLe - 192u) : 0;
-	gLoopEnd = 0xFFFFFFFFu;
-	gLoopStart = 0xFFFFFFFFu;
+	uint32_t clEnd[64];
+	uint32_t clStart[64];
+	int nCl = 0;
 	for (int i = 0; i < song.trackCount && i < 64; i++) {
 		if (!tr[i].everJump || tr[i].loopEndTick == 0) continue;
 		if (tr[i].loopEndTick < clusterFrom)
@@ -1277,12 +1280,41 @@ bool SasamiConvertToSmf(const SasamiSong& song, SasamiMidiMap map, int gsBankLsb
 		const uint32_t sp = (tr[i].loopEndTick > st0) ? (tr[i].loopEndTick - st0) : 0;
 		if (maxSpan > 0 && sp * 2 < maxSpan)
 			continue;
-		if (tr[i].loopEndTick < gLoopEnd)
-			gLoopEnd = tr[i].loopEndTick;
-		if (st != 0xFFFFFFFFu && st < gLoopStart)
-			gLoopStart = st;
+		if (nCl < 64) {
+			clEnd[nCl] = tr[i].loopEndTick;
+			clStart[nCl] = st;
+			nCl++;
+		}
 	}
-	if (gLoopEnd == 0xFFFFFFFFu)
+	gLoopEnd = 0;
+	gLoopStart = 0xFFFFFFFFu;
+	if (nCl > 0) {
+		int bestCnt = 0;
+		uint32_t bestMin = 0;
+		for (int i = 0; i < nCl; i++) {
+			int cnt = 0;
+			uint32_t gmin = clEnd[i];
+			for (int j = 0; j < nCl; j++) {
+				const uint32_t d = (clEnd[i] > clEnd[j]) ? (clEnd[i] - clEnd[j]) : (clEnd[j] - clEnd[i]);
+				if (d <= 48u) {
+					cnt++;
+					if (clEnd[j] < gmin) gmin = clEnd[j];
+				}
+			}
+			if (cnt > bestCnt || (cnt == bestCnt && (bestCnt == 0 || gmin < bestMin))) {
+				bestCnt = cnt;
+				bestMin = gmin;
+			}
+		}
+		gLoopEnd = bestMin;
+		for (int j = 0; j < nCl; j++) {
+			const uint32_t d = (clEnd[j] > bestMin) ? (clEnd[j] - bestMin) : (bestMin - clEnd[j]);
+			if (d > 48u) continue;
+			if (clStart[j] != 0xFFFFFFFFu && clStart[j] < gLoopStart)
+				gLoopStart = clStart[j];
+		}
+	}
+	if (gLoopEnd == 0)
 		gLoopEnd = maxLe;
 	if (gLoopStart == 0xFFFFFFFFu) {
 		for (int i = 0; i < song.trackCount && i < 64; i++) {
@@ -1295,15 +1327,21 @@ bool SasamiConvertToSmf(const SasamiSong& song, SasamiMidiMap map, int gsBankLsb
 		}
 	}
 
+	if (gLoopEnd > 0 && gLoopStart == 0xFFFFFFFFu)
+		gLoopStart = 0;
 	const int haveLoop = (gLoopStart != 0xFFFFFFFFu && gLoopEnd > gLoopStart) ? 1 : 0;
-	if (haveLoop) {
+	/* |: :| だけ伸びるパートの 2 周目以降は gLoopEnd で切る。SMF ループを
+	   付けないと MAX_EV まで展開したあと再生が止まる。 */
+	const int useSmfLoop = haveLoop ? 1 : 0;
+	if (useSmfLoop) {
 		int keepN = 0;
 		for (int i = 0; i < s_evCount; i++) {
 			const MidiEv& e = s_evs[i];
+			const uint32_t cut = gLoopEnd;
 			int take = 0;
-			if (e.tick < gLoopEnd)
+			if (e.tick < cut)
 				take = 1;
-			else if (e.tick == gLoopEnd && e.len > 0) {
+			else if (e.tick == cut && e.len > 0) {
 				const uint8_t st = e.bytes[0];
 				const int type = st & 0xF0;
 				if (type == 0x90) {
@@ -1351,7 +1389,6 @@ bool SasamiConvertToSmf(const SasamiSong& song, SasamiMidiMap map, int gsBankLsb
 				}
 				if (holdPed[p][ch])
 					PushShort(gLoopEnd, p, (uint8_t)(0xB0 | ch), 0x40, 0);
-				PushShort(gLoopEnd, p, (uint8_t)(0xB0 | ch), 0x78, 0);
 			}
 		}
 		{
@@ -1467,6 +1504,7 @@ int SasamiConvertPathToMidiFile(const wchar_t* src, wchar_t* dest, int destChars
 			s_tempCache.srcWrite = wt;
 			s_tempCache.srcSize = fsz;
 			s_tempCache.mapForce = force;
+			s_tempCache.convVer = SASAMI_SMF_CACHE_VER;
 		} else {
 			memset(&s_tempCache, 0, sizeof(s_tempCache));
 		}

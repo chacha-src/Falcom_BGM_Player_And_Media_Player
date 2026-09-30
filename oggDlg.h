@@ -1,4 +1,4 @@
-// oggDlg.h : ヘッダー ファイル
+﻿// oggDlg.h : ヘッダー ファイル
 //
 #include "afxmt.h"
 //#include "afxcmn.h"
@@ -52,7 +52,7 @@ void FmMonGeomPersistOpen(int open);
 #endif
 // MP から EQ/ピアノ/アナの開閉を遅延実行(ボタンハンドラ内 Create/Destroy 回避)
 // wParam: 1=piano toggle, 2=analyzer toggle, 3=MIDI monitor toggle, 4=FM monitor toggle, 5=WRD toggle
-//         10..19=起動時サブUI復元(1メッセージ=1 Create、次を PostMessage)
+//         10..19=起動時サブUI復元(10 で 10..19 を一括 Create/Show)
 //         10=EQ 11=ピアノ 12=Tune 13=アナライザ 14=プロンプト 15=ロール 16=DJパッド 17=MIDIモニタ 18=FMモニタ 19=WRD
 #ifndef WM_OGG_TOGGLE_SUBUI
 #define WM_OGG_TOGGLE_SUBUI (WM_APP + 102)
@@ -70,6 +70,9 @@ void FmMonGeomPersistOpen(int open);
 #endif
 #ifndef WM_OGG_S3_PLAYBACK
 #define WM_OGG_S3_PLAYBACK (WM_APP + 105)
+#endif
+#ifndef WM_OGG_DATARC_FLUSH
+#define WM_OGG_DATARC_FLUSH (WM_APP + 106)
 #endif
 #ifndef IDT_OGG_RESUME_PROMPT
 #define IDT_OGG_RESUME_PROMPT 10404
@@ -494,6 +497,7 @@ public:
 	afx_msg void OnSwitchMode();   // メディアプレイヤーモードへ切替
 	afx_msg LRESULT OnEnterFalcomMsg(WPARAM, LPARAM);  // mp→ファルコム特化型 復帰(遅延実行)
 	afx_msg LRESULT OnToggleSubUiMsg(WPARAM wParam, LPARAM lParam);  // mp→ピアノ/アナ開閉・起動復元(遅延)
+	afx_msg LRESULT OnDatArcFlush(WPARAM, LPARAM);
 	afx_msg void OnWindowPosChanging(WINDOWPOS* lpwndpos);
 	virtual BOOL PreCreateWindow(CREATESTRUCT& cs);
 	void StartTimerpVsyncThread();

@@ -3782,6 +3782,75 @@ static void MmChordFromMask(int mask, int bass, int keySf, wchar_t* out, int out
 		_snwprintf_s(out, outN, _TRUNCATE, L"%s%s", MmPcSpell(bestRoot, flats), bestSuf);
 }
 
+/* EQ コード部と同じ色分け。ヘッダ背景 RGB(196,196,200) でも読めるよう少し落とした色。 */
+static COLORREF MmChordQualColor(const wchar_t* suf)
+{
+	if (!suf || !suf[0]) return RGB(28, 28, 36);
+	if (wcsncmp(suf, L"Power", 5) == 0) return RGB(176, 28, 28);
+	if (wcsncmp(suf, L"sus", 3) == 0 || wcsstr(suf, L"sus")) return RGB(104, 40, 168);
+	if (wcsncmp(suf, L"dim", 3) == 0) return RGB(138, 82, 28);
+	if (wcsncmp(suf, L"aug", 3) == 0) return RGB(180, 52, 0);
+	if (wcsncmp(suf, L"add", 3) == 0) return RGB(138, 86, 28);
+	if (wcsncmp(suf, L"maj", 3) == 0) return RGB(0, 122, 88);
+	if (suf[0] == L'm') return RGB(0, 82, 168);
+	if (suf[0] == L'7' || suf[0] == L'9' || suf[0] == L'6' || suf[0] == L'5')
+		return RGB(196, 72, 0);
+	return RGB(28, 28, 36);
+}
+
+static const wchar_t* MmChordRootEnd(const wchar_t* chord)
+{
+	if (!chord || !chord[0]) return chord;
+	if (chord[0] == 0x2014 /* — */) return chord + wcslen(chord);
+	const wchar_t* p = chord;
+	if ((*p >= L'A' && *p <= L'G') || (*p >= L'a' && *p <= L'g')) {
+		++p;
+		if (*p == L'#' || *p == L'b') ++p;
+	}
+	return p;
+}
+
+static void MmDrawColoredChord(CDC& dc, int x, int y, const wchar_t* chord)
+{
+	if (!chord || !chord[0]) return;
+	const COLORREF defC = RGB(28, 28, 36);
+	if (chord[0] == 0x2014) {
+		dc.SetTextColor(RGB(96, 96, 104));
+		dc.TextOut(x, y, chord);
+		return;
+	}
+	const wchar_t* suf = MmChordRootEnd(chord);
+	const int rootN = (int)(suf - chord);
+	if (rootN > 0) {
+		wchar_t root[8];
+		int n = rootN;
+		if (n > 7) n = 7;
+		wcsncpy_s(root, chord, n);
+		root[n] = 0;
+		dc.SetTextColor(defC);
+		dc.TextOut(x, y, root);
+		x += dc.GetTextExtent(root).cx;
+	}
+	const wchar_t* slash = wcschr(suf, L'/');
+	if (slash) {
+		wchar_t q[24];
+		int n = (int)(slash - suf);
+		if (n > 23) n = 23;
+		if (n > 0) {
+			wcsncpy_s(q, suf, n);
+			q[n] = 0;
+			dc.SetTextColor(MmChordQualColor(q));
+			dc.TextOut(x, y, q);
+			x += dc.GetTextExtent(q).cx;
+		}
+		dc.SetTextColor(RGB(64, 64, 76));
+		dc.TextOut(x, y, slash);
+	} else if (suf[0]) {
+		dc.SetTextColor(MmChordQualColor(suf));
+		dc.TextOut(x, y, suf);
+	}
+}
+
 void CMidiMonitorDlg::DrawHeader(CDC& dc, int w, int headH, UINT dpi)
 {
 	dc.FillSolidRect(0, 0, w, headH, MM_HEAD_BG);
@@ -3978,41 +4047,65 @@ void CMidiMonitorDlg::DrawHeader(CDC& dc, int w, int headH, UINT dpi)
 		dc.DrawText(line4, t4, DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
 	}
 
-	wchar_t line5[520];
-	line5[0] = 0;
-	if (m_liveText[0]) {
+	/* コードはタイトル有無に関係なく出す。曲名は1行目にあるのでここでは出さない。
+	   コード幅は最長形を予約して C→Csus4/A でも左の Reset/FF21 が動かないようにする。 */
+	wchar_t chord[48];
+	int chordMask = 0;
+	int chordBass = 128;
+	for (int i = 0; i < PART_MAX; ++i) {
+		if (m_part[i].isDrum) continue;
+		for (int n = 0; n < NOTE_MAX; ++n) {
+			if (!m_part[i].noteOn[n]) continue;
+			chordMask |= 1 << (n % 12);
+			if (n < chordBass) chordBass = n;
+		}
+	}
+	MmChordFromMask(chordMask, chordBass, m_keySf, chord, 48);
+
+	wchar_t loopBuf[80] = {};
+	if (m_loopEndSample > m_loopStartSample && m_sampleRate > 0) {
+		const double a = (double)m_loopStartSample / (double)m_sampleRate;
+		const double b = (double)m_loopEndSample / (double)m_sampleRate;
+		_snwprintf_s(loopBuf, _TRUNCATE, L"     Loop  %.1f-%.1f", a, b);
+	}
+
+	int skipLive = 0;
+	if (m_liveText[0] && (m_liveTextKind == 0 || m_liveTextKind == 1 || m_liveTextKind == 3)) {
+		if (m_titleBuf[0] && _wcsicmp(m_liveText, m_titleBuf) == 0) skipLive = 1;
+		if (base[0] && _wcsicmp(m_liveText, base) == 0) skipLive = 1;
+	}
+
+	wchar_t info[400];
+	info[0] = 0;
+	if (!skipLive && m_liveText[0] && m_liveTextKind != 3) {
 		const wchar_t* lab = MmLiveKindLabel(m_liveTextKind);
 		if (lab[0])
-			_snwprintf_s(line5, _TRUNCATE, L"%s  %s", lab, m_liveText);
+			_snwprintf_s(info, _TRUNCATE, L"%s  %s", lab, m_liveText);
 		else
-			MmCopyW(line5, 520, m_liveText);
+			MmCopyW(info, 400, m_liveText);
 	} else if (m_copyBuf[0]) {
-		_snwprintf_s(line5, _TRUNCATE, L"©  %s", m_copyBuf);
-	} else {
-		wchar_t loopBuf[80] = {};
-		if (m_loopEndSample > m_loopStartSample && m_sampleRate > 0) {
-			const double a = (double)m_loopStartSample / (double)m_sampleRate;
-			const double b = (double)m_loopEndSample / (double)m_sampleRate;
-			_snwprintf_s(loopBuf, _TRUNCATE, L"     Loop  %.1f-%.1f", a, b);
-		}
-		wchar_t chord[48];
-		int chordMask = 0;
-		int chordBass = 128;
-		for (int i = 0; i < PART_MAX; ++i) {
-			if (m_part[i].isDrum) continue;
-			for (int n = 0; n < NOTE_MAX; ++n) {
-				if (!m_part[i].noteOn[n]) continue;
-				chordMask |= 1 << (n % 12);
-				if (n < chordBass) chordBass = n;
-			}
-		}
-		MmChordFromMask(chordMask, chordBass, m_keySf, chord, 48);
-		_snwprintf_s(line5, _TRUNCATE, L"Chord %s     Reset %s     FF21 %s%s",
-			chord, sysN, m_mirrorToB ? L"mirror" : (m_gs32 ? L"yes" : L"—"), loopBuf);
+		_snwprintf_s(info, _TRUNCATE, L"©  %s", m_copyBuf);
 	}
+
+	wchar_t line5[520];
+	if (info[0])
+		_snwprintf_s(line5, _TRUNCATE, L"%s     Reset %s     FF21 %s%s",
+			info, sysN, m_mirrorToB ? L"mirror" : (m_gs32 ? L"yes" : L"—"), loopBuf);
+	else
+		_snwprintf_s(line5, _TRUNCATE, L"Reset %s     FF21 %s%s",
+			sysN, m_mirrorToB ? L"mirror" : (m_gs32 ? L"yes" : L"—"), loopBuf);
+
 	{
 		CRect t5(Scale(8, dpi), Scale(68, dpi), max(Scale(48, dpi), textR), Scale(84, dpi));
-		dc.DrawText(line5, t5, DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
+		const CSize maxCh = dc.GetTextExtent(L"G#7sus4/F#");
+		const int chordSlot = maxCh.cx + Scale(10, dpi);
+		const int chordLeft = t5.right - chordSlot;
+		CRect infoR = t5;
+		infoR.right = max(t5.left + Scale(40, dpi), chordLeft - Scale(8, dpi));
+		dc.SetTextColor(MM_HEAD_TX);
+		dc.DrawText(line5, infoR, DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
+		MmDrawColoredChord(dc, chordLeft, Scale(68, dpi), chord);
+		dc.SetTextColor(MM_HEAD_TX);
 	}
 
 	dc.SelectObject(&m_fontTiny);

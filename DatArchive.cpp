@@ -234,8 +234,20 @@ static BOOL DatArc_ExtractOne(int i)
 	if (i < 0 || i >= g_n) return FALSE;
 	DatArcMemEnt& e = g_ent[i];
 	const CString path = DatArc_StagePath(e.nameW);
-	if (::PathFileExists(path))
+	if (::PathFileExists(path)) {
+		if (!e.stageFpValid) {
+			WIN32_FILE_ATTRIBUTE_DATA fad = {};
+			if (::GetFileAttributesEx(path, GetFileExInfoStandard, &fad)) {
+				ULARGE_INTEGER sz;
+				sz.LowPart = fad.nFileSizeLow;
+				sz.HighPart = fad.nFileSizeHigh;
+				e.stageSize = sz.QuadPart;
+				e.stageMtime = fad.ftLastWriteTime;
+				e.stageFpValid = 1;
+			}
+		}
 		return TRUE;
+	}
 	if (!g_arcMap || e.cmpSize == 0) {
 		// 空メンバー
 		return DatArc_WriteWholeFile(path, "", 0);
@@ -252,7 +264,42 @@ static BOOL DatArc_ExtractOne(int i)
 	}
 	const BOOL ok = DatArc_WriteWholeFile(path, dst, e.uncSize);
 	free(dst);
-	return ok;
+	if (!ok)
+		return FALSE;
+	{
+		WIN32_FILE_ATTRIBUTE_DATA fad = {};
+		if (::GetFileAttributesEx(path, GetFileExInfoStandard, &fad)) {
+			ULARGE_INTEGER sz;
+			sz.LowPart = fad.nFileSizeLow;
+			sz.HighPart = fad.nFileSizeHigh;
+			e.stageSize = sz.QuadPart;
+			e.stageMtime = fad.ftLastWriteTime;
+			e.stageFpValid = 1;
+		}
+	}
+	return TRUE;
+}
+
+static BOOL DatArc_IsPlaylistLeaf(LPCTSTR leaf)
+{
+	if (!leaf || !leaf[0]) return FALSE;
+	if (_tcsnicmp(leaf, _T("playlistu"), 9) == 0) return TRUE;
+	if (_tcsicmp(leaf, _T("playlist.dat")) == 0) return TRUE;
+	if (_tcsnicmp(leaf, _T("playlist"), 8) == 0 && leaf[8] >= _T('0') && leaf[8] <= _T('9'))
+		return TRUE;
+	return FALSE;
+}
+
+static BOOL DatArc_ExtractStartupLeaves()
+{
+	if (!DatArc_EnsureStageDir()) return FALSE;
+	for (int i = 0; i < g_n; ++i) {
+		if (DatArc_IsPlaylistLeaf(g_ent[i].nameW))
+			continue;
+		if (!DatArc_ExtractOne(i))
+			return FALSE;
+	}
+	return TRUE;
 }
 
 static BOOL DatArc_ExtractAll()
@@ -306,9 +353,17 @@ static BOOL DatArc_RebuildFromStage()
 {
 	if (!DatArc_EnsureStageDir()) return FALSE;
 
-	// ステージ上の packable を列挙
+	// 既存アーカイブメンバはステージ未展開でも落とさない。
+	// その後ステージ上の新規 .dat を足す。
 	TCHAR names[DATARC_MAX][DATARC_NAME];
 	int nNames = 0;
+	for (int i = 0; i < g_n && nNames < DATARC_MAX; ++i) {
+		if (!g_ent[i].nameW[0]) continue;
+		if (!DatArc_IsPackableLeaf(g_ent[i].nameW)) continue;
+		_tcsncpy(names[nNames], g_ent[i].nameW, DATARC_NAME - 1);
+		names[nNames][DATARC_NAME - 1] = 0;
+		++nNames;
+	}
 	CString pattern = g_stageDir;
 	pattern += _T("*.dat");
 	WIN32_FIND_DATA fd;
@@ -317,6 +372,11 @@ static BOOL DatArc_RebuildFromStage()
 		do {
 			if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
 			if (!DatArc_IsPackableLeaf(fd.cFileName)) continue;
+			BOOL already = FALSE;
+			for (int k = 0; k < nNames; ++k) {
+				if (_tcsicmp(names[k], fd.cFileName) == 0) { already = TRUE; break; }
+			}
+			if (already) continue;
 			if (nNames >= DATARC_MAX) break;
 			_tcsncpy(names[nNames], fd.cFileName, DATARC_NAME - 1);
 			names[nNames][DATARC_NAME - 1] = 0;
@@ -332,8 +392,9 @@ static BOOL DatArc_RebuildFromStage()
 			const int oi = DatArc_FindIndex(names[i]);
 			if (oi < 0) { allSame = FALSE; break; }
 			WIN32_FILE_ATTRIBUTE_DATA fad = {};
-			if (!::GetFileAttributesEx(DatArc_StagePath(names[i]), GetFileExInfoStandard, &fad)
-				|| !DatArc_StageMatchesEnt(oi, fad)) {
+			if (!::GetFileAttributesEx(DatArc_StagePath(names[i]), GetFileExInfoStandard, &fad))
+				continue; /* 未展開: 既存塊を維持 */
+			if (!DatArc_StageMatchesEnt(oi, fad)) {
 				allSame = FALSE;
 				break;
 			}
@@ -368,6 +429,19 @@ static BOOL DatArc_RebuildFromStage()
 			cmpOwned[i] = 0;
 			continue;
 		}
+		if (!gotFad) {
+			if (oi >= 0 && g_arcMap &&
+				g_ent[oi].offset + g_ent[oi].cmpSize <= g_arcMapSize) {
+				uncSz[i] = g_ent[oi].uncSize;
+				cmpSz[i] = g_ent[oi].cmpSize;
+				if (cmpSz[i] > 0)
+					cmp[i] = g_arcMap + (size_t)g_ent[oi].offset;
+				cmpOwned[i] = 0;
+				continue;
+			}
+			ok = FALSE;
+			break;
+		}
 		if (!DatArc_ReadWholeFile(path, &unc[i], &uncSz[i])) {
 			ok = FALSE;
 			break;
@@ -376,7 +450,10 @@ static BOOL DatArc_RebuildFromStage()
 		cmp[i] = (BYTE*)malloc(bound ? bound : 1);
 		if (!cmp[i]) { ok = FALSE; break; }
 		cmpOwned[i] = 1;
-		const size_t csz = ZSTD_compress(cmp[i], bound, unc[i], (size_t)uncSz[i], DATARC_ZSTD_LEVEL);
+		int zlev = DATARC_ZSTD_LEVEL;
+		if (uncSz[i] > (512ull * 1024ull))
+			zlev = 1;
+		const size_t csz = ZSTD_compress(cmp[i], bound, unc[i], (size_t)uncSz[i], zlev);
 		if (ZSTD_isError(csz)) { ok = FALSE; break; }
 		cmpSz[i] = (ULONGLONG)csz;
 	}
@@ -549,7 +626,7 @@ BOOL DatArc_Init(LPCTSTR exeDirWithSlash)
 	if (hasArc) {
 		if (!DatArc_LoadArcIntoMemory() || !DatArc_ParseIndexFromMap())
 			return FALSE;
-		if (!DatArc_ExtractAll())
+		if (!DatArc_ExtractStartupLeaves())
 			return FALSE;
 		DatArc_RefreshStageFingerprints();
 	} else {
@@ -573,6 +650,7 @@ BOOL DatArc_Init(LPCTSTR exeDirWithSlash)
 
 void DatArc_Shutdown()
 {
+	g_flushSuspend = 0;
 	if (g_ready)
 		DatArc_FlushAll();
 	DatArc_FreeMap();

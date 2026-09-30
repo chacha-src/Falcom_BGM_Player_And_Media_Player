@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include "afxwin.h"
 #include "afxcmn.h"
 // CPlayList ダイアログ
@@ -203,6 +203,7 @@ CString NormalizePlaylistPath(LPCTSTR fol);
 int PlIsSasamiTempPreviewPath(LPCTSTR path);
 CString PlPhysicalMediaPath(LPCTSTR fol);
 CString PlStorePlaylistFol(LPCTSTR fol, int sub);
+void PlEnsureGameName(playlistdata0& d);
 // Falcom ゲームBGM等: fol は basename のみで play() 時に解決するため、パス存在では欠損判定しない。
 BOOL PlIsFalcomGameBgmMode(int sub);
 // リスト欠損バッジ用。TRUE=実ファイルとして欠落していると判断できる場合のみ。

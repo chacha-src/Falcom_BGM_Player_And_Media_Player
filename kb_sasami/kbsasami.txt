@@ -187,7 +187,7 @@ fmpmd / kpis98）:
 
 [.mpy コマンド全部]
 
-  0      終了（トラック先頭に置かない）
+  0      1B 未使用（COV は addr++。終了は J→0xF0 / 0x10F0）
   1  3B  NOTE      前音オフ→オン。音符
   2  3B  PROG      プログラム。88=b1、55/GM=b2。@n @PROG
   3  3B  TIE       伸ばす。^
