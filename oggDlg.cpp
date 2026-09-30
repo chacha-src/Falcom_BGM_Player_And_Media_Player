@@ -24661,7 +24661,8 @@ static bool IsMidiLikePath(const CString& path)
 	return e == _T(".mid") || e == _T(".midi") || e == _T(".kar") || e == _T(".rmi")
 		|| e == _T(".rcp") || e == _T(".r36") || e == _T(".g36") || e == _T(".g18")
 		|| e == _T(".mcp") || e == _T(".mtd") || e == _T(".mff")
-		|| e == _T(".seq");
+		|| e == _T(".seq") || e == _T(".smf") || e == _T(".eup")
+		|| e == _T(".sng") || e == _T(".zms");
 }
 
 // MIDI KPI: Seek だけでは音色/CC/ノートが復元されない。先頭→目標まで Render 破棄。

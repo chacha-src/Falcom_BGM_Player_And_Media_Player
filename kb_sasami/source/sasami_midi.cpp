@@ -134,14 +134,14 @@ static void PushMmodeChannelInit(uint32_t tick, int port, int ch, SasamiMidiMap 
 	PushShort(tick, port, (uint8_t)(0xB0 | ch), 0x01, 0);
 	PushShort(tick, port, (uint8_t)(0xB0 | ch), 0x00, 0);
 	if (flg88 != 2) {
+		/* Roland CC32: 1=SC-55, 2=SC-88, 3=88Pro, 4=8820 */
 		uint8_t cc32 = 0;
-		if (map == SASAMI_MAP_GS55)
+		if (gsBankLsb >= 1 && gsBankLsb <= 4)
+			cc32 = (uint8_t)gsBankLsb;
+		else if (map == SASAMI_MAP_GS55)
+			cc32 = 1;
+		else if (map == SASAMI_MAP_GS88)
 			cc32 = 2;
-		else if (map == SASAMI_MAP_GS88) {
-			if (gsBankLsb == 3) cc32 = 3;
-			else if (gsBankLsb == 4) cc32 = 4;
-			else cc32 = 1;
-		}
 		if (cc32)
 			PushShort(tick, port, (uint8_t)(0xB0 | ch), 32, cc32);
 	}
@@ -194,6 +194,23 @@ static int GsPartIdx(int ch)
 	if (ch == 9) return 0;
 	if (ch < 9) return ch + 1;
 	return ch;
+}
+
+/* SC-55/SC-88 に無い 88Pro EFX（40 03 / 40 4n 22）。55map の排他に混ざる。 */
+static int MidiIsGsEfxDt1(const uint8_t* d, int n)
+{
+	int i = 0;
+	if (!d || n < 8) return 0;
+	if (d[0] == 0xF0) i = 1;
+	if (n - i < 7) return 0;
+	if (d[i] != 0x41) return 0;
+	if (d[i + 2] != 0x42 || d[i + 3] != 0x12) return 0;
+	if (d[i + 4] != 0x40) return 0;
+	const unsigned bb = d[i + 5];
+	const unsigned cc = (n - i > 6) ? d[i + 6] : 0;
+	if (bb == 0x03) return 1;
+	if ((bb & 0xF0) == 0x40 && cc == 0x22) return 1;
+	return 0;
 }
 
 static uint32_t ReadJump(const SasamiSong& s, uint32_t addr, int ver, uint32_t* nextOff)
@@ -329,6 +346,494 @@ static uint64_t SasamiCacheHashPathW(const wchar_t* path)
 	return h;
 }
 
+namespace {
+
+static int DetIsAlnumW(wchar_t c)
+{
+	return (c >= L'0' && c <= L'9') || (c >= L'A' && c <= L'Z') || (c >= L'a' && c <= L'z');
+}
+
+static void DetCompactKey(const wchar_t* s, wchar_t* out, int outN)
+{
+	int j = 0;
+	if (!out || outN <= 0) return;
+	out[0] = 0;
+	if (!s) return;
+	for (; *s && j < outN - 1; ++s) {
+		wchar_t c = *s;
+		if (c >= L'a' && c <= L'z') c = (wchar_t)(c - 32);
+		if (c == L'-' || c == L'_' || c == L' ' || c == L'\t' || c == L'.')
+			continue;
+		out[j++] = c;
+	}
+	out[j] = 0;
+}
+
+static int DetHasToken(const wchar_t* s, const wchar_t* tok)
+{
+	if (!s || !tok || !tok[0]) return 0;
+	const int tn = (int)wcslen(tok);
+	for (int i = 0; s[i]; ++i) {
+		int j = 0;
+		for (; tok[j] && s[i + j]; ++j) {
+			wchar_t a = s[i + j];
+			wchar_t b = tok[j];
+			if (a >= L'a' && a <= L'z') a = (wchar_t)(a - 32);
+			if (b >= L'a' && b <= L'z') b = (wchar_t)(b - 32);
+			if (a != b) break;
+		}
+		if (tok[j]) continue;
+		const wchar_t prev = (i > 0) ? s[i - 1] : 0;
+		const wchar_t next = s[i + tn];
+		if (!DetIsAlnumW(prev) && !DetIsAlnumW(next)) return 1;
+		i += tn - 1;
+	}
+	return 0;
+}
+
+static int DetIsolated55(const wchar_t* s)
+{
+	if (!s || !s[0]) return 0;
+	for (int i = 0; s[i]; ++i) {
+		if (s[i] != L'5' || s[i + 1] != L'5') continue;
+		const wchar_t prev = (i > 0) ? s[i - 1] : 0;
+		const wchar_t next = s[i + 2];
+		const int prevDig = (prev >= L'0' && prev <= L'9');
+		const int nextDig = (next >= L'0' && next <= L'9');
+		if (!prevDig && !nextDig) return 1;
+		++i;
+	}
+	return 0;
+}
+
+static int DetKindFromCompact(const wchar_t* k)
+{
+	if (!k || !k[0]) return 0;
+	if (wcsstr(k, L"8850") || wcsstr(k, L"SC8850") ||
+		wcsstr(k, L"8820") || wcsstr(k, L"SC8820"))
+		return 4;
+	if (wcsstr(k, L"88PRO") || wcsstr(k, L"SC88PRO") || wcsstr(k, L"88PMAP"))
+		return 3;
+	if (wcsstr(k, L"88P"))
+		return 3;
+	if (wcsstr(k, L"88VL") || wcsstr(k, L"SC88VL") || wcsstr(k, L"88VALUE"))
+		return 2;
+	if (wcsstr(k, L"SC88") || wcsstr(k, L"88MAP"))
+		return 2;
+	if (wcsstr(k, L"LAMAP") || wcsstr(k, L"MT32") || wcsstr(k, L"CM32L") ||
+		wcsstr(k, L"CM64") || wcsstr(k, L"LAPC") || wcsstr(k, L"LASYNTH") ||
+		wcsstr(k, L"ROLANDLA") || wcsstr(k, L"CM32"))
+		return 8;
+	if (wcsstr(k, L"GM2") || wcsstr(k, L"GENERALMIDI2") || wcsstr(k, L"GMLEVEL2"))
+		return 9;
+	if (wcsstr(k, L"SC55") || wcsstr(k, L"55MAP") || wcsstr(k, L"SC55MK") ||
+		wcsstr(k, L"GS55"))
+		return 1;
+	if (wcsstr(k, L"SD90") || wcsstr(k, L"SD80") || wcsstr(k, L"SD20") ||
+		wcsstr(k, L"SDMAP") || wcsstr(k, L"STUDIOCANVAS"))
+		return 6;
+	if (wcsstr(k, L"GENERALMIDI") || wcsstr(k, L"GMMAP") || wcsstr(k, L"GM1"))
+		return 5;
+	if (wcsstr(k, L"XGMAP") || wcsstr(k, L"SOFTXG") || wcsstr(k, L"SYXG") ||
+		wcsstr(k, L"MU50") || wcsstr(k, L"MU10") || wcsstr(k, L"MU15") ||
+		wcsstr(k, L"MU80") || wcsstr(k, L"MU90") || wcsstr(k, L"MU100") ||
+		wcsstr(k, L"MU128") || wcsstr(k, L"MU500") || wcsstr(k, L"MU1000") ||
+		wcsstr(k, L"MU2000") || wcsstr(k, L"YAMAHAXG") || wcsstr(k, L"XG50"))
+		return 7;
+	return 0;
+}
+
+static int DetKindFromText(const wchar_t* s)
+{
+	if (!s || !s[0]) return 0;
+	wchar_t k[280];
+	DetCompactKey(s, k, 280);
+	int kind = DetKindFromCompact(k);
+	if (!kind && DetHasToken(s, L"VL") && !wcsstr(k, L"VL1") && !wcsstr(k, L"VL70"))
+		kind = 2;
+	if (!kind && DetIsolated55(s)) kind = 1;
+	if (!kind && DetHasToken(s, L"GM2")) kind = 9;
+	if (!kind && DetHasToken(s, L"GM")) kind = 5;
+	if (!kind && DetHasToken(s, L"XG")) kind = 7;
+	if (!kind && (DetHasToken(s, L"LA") || DetHasToken(s, L"MT32") || DetHasToken(s, L"MT-32")))
+		kind = 8;
+	return kind;
+}
+
+static int DetFoldHint(int cur, int kind)
+{
+	if (kind == 4) return 4;
+	if (kind == 3 && cur != 4) return 3;
+	if (kind == 2 && cur != 4 && cur != 3) return 2;
+	if (kind == 8 && cur != 4 && cur != 3 && cur != 2) return 8;
+	if (kind >= 9 && kind <= 18 && cur == 0) return kind;
+	if (kind == 1 && cur == 0) return 1;
+	if ((kind == 5 || kind == 6 || kind == 7) && cur == 0) return kind;
+	return cur;
+}
+
+static int DetGuessPathTitle(const wchar_t* title, const wchar_t* path)
+{
+	int kind = DetKindFromText(title);
+	const wchar_t* base = path;
+	if (base && base[0]) {
+		const wchar_t* sl = wcsrchr(base, L'\\');
+		if (sl) base = sl + 1;
+		const wchar_t* sl2 = wcsrchr(base, L'/');
+		if (sl2) base = sl2 + 1;
+		kind = DetFoldHint(kind, DetKindFromText(base));
+		kind = DetFoldHint(kind, DetKindFromText(path));
+	}
+	return kind;
+}
+
+static int DetKindToForce(int kind)
+{
+	switch (kind) {
+	case 1: return 3;
+	case 2: return 4;
+	case 3: return 5;
+	case 4: return 6;
+	case 5: return 7;
+	case 6: return 8;
+	case 7: return 2;
+	case 8: return 9;
+	default:
+		if (kind >= 9 && kind <= 18) return kind + 1;
+		return 0;
+	}
+}
+
+static int DetSysexXgOn(const uint8_t* d, int n)
+{
+	if (!d || n < 7) return 0;
+	int i = (n > 0 && d[0] == 0xf0) ? 1 : 0;
+	if (i + 6 > n) return 0;
+	return (d[i] == 0x43 && d[i + 2] == 0x4c && d[i + 3] == 0x00 && d[i + 4] == 0x00 && d[i + 5] == 0x7e) ? 1 : 0;
+}
+
+static int DetSysexGmOn(const uint8_t* d, int n)
+{
+	if (!d || n < 5) return 0;
+	int i = (n > 0 && d[0] == 0xf0) ? 1 : 0;
+	if (i + 4 > n) return 0;
+	if (d[i] != 0x7e || d[i + 2] != 0x09) return 0;
+	return (d[i + 3] == 0x01 || d[i + 3] == 0x03) ? 1 : 0;
+}
+
+static int DetSysexGm2(const uint8_t* d, int n)
+{
+	if (!d || n < 5) return 0;
+	int i = (n > 0 && d[0] == 0xf0) ? 1 : 0;
+	if (i + 4 > n) return 0;
+	return (d[i] == 0x7e && d[i + 2] == 0x09 && d[i + 3] == 0x03) ? 1 : 0;
+}
+
+static int DetSysexGsReset(const uint8_t* d, int n)
+{
+	if (!d || n < 8) return 0;
+	int i = (n > 0 && d[0] == 0xf0) ? 1 : 0;
+	if (i + 7 > n) return 0;
+	if (d[i] != 0x41 || d[i + 2] != 0x42 || d[i + 3] != 0x12) return 0;
+	return (d[i + 4] == 0x40 && d[i + 5] == 0x00 && d[i + 6] == 0x7f) ? 1 : 0;
+}
+
+static int DetSysexGsSysMode(const uint8_t* d, int n)
+{
+	if (!d || n < 8) return 0;
+	int i = (n > 0 && d[0] == 0xf0) ? 1 : 0;
+	if (i + 7 > n) return 0;
+	if (d[i] != 0x41 || d[i + 2] != 0x42 || d[i + 3] != 0x12) return 0;
+	return (d[i + 4] == 0x00 && d[i + 5] == 0x00 && d[i + 6] == 0x7f) ? 1 : 0;
+}
+
+static int DetSysexGsSysModeKind(const uint8_t* d, int n)
+{
+	if (!DetSysexGsSysMode(d, n)) return 0;
+	int i = (n > 0 && d[0] == 0xf0) ? 1 : 0;
+	const int data = (i + 7 < n) ? (int)(d[i + 7] & 0x7f) : 0;
+	if (data <= 0) return 1;
+	if (data == 1) return 2;
+	if (data == 2) return 3;
+	return 4;
+}
+
+static int DetSysexMt32(const uint8_t* d, int n)
+{
+	if (!d || n < 4) return 0;
+	int i = (n > 0 && d[0] == 0xf0) ? 1 : 0;
+	if (i + 3 > n) return 0;
+	return (d[i] == 0x41 && d[i + 2] == 0x16) ? 1 : 0;
+}
+
+static int DetBankMsbSd(int msb)
+{
+	return (msb == 80 || msb == 81 ||
+		msb == 96 || msb == 97 || msb == 98 || msb == 99 ||
+		msb == 104 || msb == 105 || msb == 106 || msb == 107) ? 1 : 0;
+}
+
+static void DetEatSysex(const uint8_t* d, int n, int* hasXg, int* hasGs, int* hasGm, int* hasGm2, int* hasSd, int* mapHint)
+{
+	if (DetSysexXgOn(d, n)) *hasXg = 1;
+	if (DetSysexGsReset(d, n)) *hasGs = 1;
+	if (DetSysexGmOn(d, n)) *hasGm = 1;
+	if (DetSysexGm2(d, n)) *hasGm2 = 1;
+	if (DetSysexMt32(d, n)) *mapHint = DetFoldHint(*mapHint, 8);
+	const int sys = DetSysexGsSysModeKind(d, n);
+	if (sys) *mapHint = DetFoldHint(*mapHint, sys);
+	(void)hasSd;
+}
+
+static int DetResolveKind(int mapHint, int hasXg, int hasGs, int hasGm, int hasGm2, int hasSd, int cc32Max)
+{
+	if (mapHint == 7) hasXg = 1;
+	int resolved = 0;
+	if (hasXg) resolved = 7;
+	else if (mapHint == 8) resolved = 8;
+	else if (mapHint >= 9 && mapHint <= 18) resolved = mapHint;
+	else if (mapHint >= 1 && mapHint <= 4) resolved = mapHint;
+	else if (hasGm2 && !hasGs) resolved = 9;
+	else if ((mapHint == 5 || hasGm) && !hasGs) resolved = 5;
+	else if (mapHint == 6 || hasSd) resolved = 6;
+	else if (cc32Max >= 1 && cc32Max <= 4) resolved = cc32Max;
+	return resolved;
+}
+
+static int DetReadBE(const uint8_t* p, int n)
+{
+	unsigned v = 0;
+	for (int i = 0; i < n; i++) v = (v << 8) | p[i];
+	return (int)v;
+}
+
+static int DetReadVar(const uint8_t*& q, const uint8_t* end, unsigned& v)
+{
+	v = 0;
+	for (int i = 0; i < 4; i++) {
+		if (q >= end) return 0;
+		unsigned b = *q++;
+		v = (v << 7) | (b & 0x7f);
+		if (!(b & 0x80)) return 1;
+	}
+	return 0;
+}
+
+static const uint8_t* DetSmfStart(const uint8_t* data, int n, int* outN)
+{
+	if (!data || n < 14) return NULL;
+	if (data[0] == 'M' && data[1] == 'T' && data[2] == 'h' && data[3] == 'd') {
+		*outN = n;
+		return data;
+	}
+	const int lim = (n < 4096) ? n : 4096;
+	for (int i = 0; i + 14 <= lim; i++) {
+		if (data[i] == 'M' && data[i + 1] == 'T' && data[i + 2] == 'h' && data[i + 3] == 'd') {
+			*outN = n - i;
+			return data + i;
+		}
+	}
+	return NULL;
+}
+
+static int DetFromSmf(const uint8_t* data, int n, const wchar_t* path, const wchar_t* titleW)
+{
+	int smfN = 0;
+	const uint8_t* smf = DetSmfStart(data, n, &smfN);
+	if (!smf || smfN < 14) return 0;
+	if (DetReadBE(smf + 4, 4) < 6) return 0;
+	const int tracks = DetReadBE(smf + 10, 2);
+	const uint8_t* p = smf + 8 + DetReadBE(smf + 4, 4);
+	const uint8_t* fileEnd = smf + smfN;
+	int hasXg = 0, hasGs = 0, hasGm = 0, hasGm2 = 0, hasSd = 0;
+	int mapHint = 0, cc32Max = 0;
+	uint8_t msb[32];
+	memset(msb, 0, sizeof(msb));
+	wchar_t titleBuf[280];
+	titleBuf[0] = 0;
+	if (titleW && titleW[0]) {
+		wcsncpy_s(titleBuf, titleW, _TRUNCATE);
+		mapHint = DetFoldHint(mapHint, DetKindFromText(titleBuf));
+	}
+	for (int tr = 0; tr < tracks && p + 8 <= fileEnd; ++tr) {
+		if (memcmp(p, "MTrk", 4)) break;
+		const int len = DetReadBE(p + 4, 4);
+		const uint8_t* q = p + 8;
+		const uint8_t* end = (q + len <= fileEnd) ? q + len : fileEnd;
+		uint8_t running = 0;
+		int curPort = 0;
+		while (q < end) {
+			unsigned delta = 0;
+			if (!DetReadVar(q, end, delta)) break;
+			if (q >= end) break;
+			uint8_t st = *q;
+			if (st & 0x80) { ++q; if (st < 0xf0) running = st; }
+			else if (running) st = running;
+			else break;
+			if (st == 0xff) {
+				if (q >= end) break;
+				const uint8_t type = *q++;
+				unsigned ml = 0;
+				if (!DetReadVar(q, end, ml) || q + ml > end) break;
+				if (type == 0x21 && ml >= 1)
+					curPort = (q[0] > 1) ? 1 : (int)q[0];
+				else if ((type == 0x01 || type == 0x02 || type == 0x03) && ml > 0) {
+					char tmp[256];
+					unsigned tn = ml;
+					if (tn > 255) tn = 255;
+					memcpy(tmp, q, tn);
+					tmp[tn] = 0;
+					wchar_t w[256];
+					w[0] = 0;
+					if (!MultiByteToWideChar(932, 0, tmp, -1, w, 256))
+						MultiByteToWideChar(CP_ACP, 0, tmp, -1, w, 256);
+					w[255] = 0;
+					if (w[0]) {
+						mapHint = DetFoldHint(mapHint, DetKindFromText(w));
+						if (type == 0x03 || !titleBuf[0])
+							wcsncpy_s(titleBuf, w, _TRUNCATE);
+					}
+				}
+				q += ml;
+			} else if (st == 0xf0 || st == 0xf7) {
+				unsigned sl = 0;
+				if (!DetReadVar(q, end, sl) || q + sl > end) break;
+				const int need = (st == 0xf0) ? (1 + (int)sl) : (int)sl;
+				if (need >= 6 && need <= 1024) {
+					uint8_t sx[1024];
+					int off = 0;
+					if (st == 0xf0) sx[off++] = 0xf0;
+					memcpy(sx + off, q, sl);
+					off += (int)sl;
+					DetEatSysex(sx, off, &hasXg, &hasGs, &hasGm, &hasGm2, &hasSd, &mapHint);
+				}
+				q += sl;
+			} else {
+				const int kind = st & 0xf0;
+				const int need = (kind == 0xc0 || kind == 0xd0) ? 1 : 2;
+				if (q + need > end) break;
+				const uint8_t d1 = q[0], d2 = (need == 2) ? q[1] : 0;
+				q += need;
+				if (kind >= 0x80 && kind <= 0xe0) {
+					const int ch = st & 0x0f;
+					int idx = curPort * 16 + ch;
+					if (idx < 0) idx = ch;
+					if (idx > 31) idx = 31;
+					const int drum = (ch == 9) ? 1 : 0;
+					if (kind == 0xb0 && d1 == 0) {
+						msb[idx] = (uint8_t)(d2 & 0x7f);
+						if (DetBankMsbSd(d2 & 0x7f)) hasSd = 1;
+						if ((d2 & 0x7f) == 121) hasGm2 = 1;
+					} else if (kind == 0xb0 && d1 == 32) {
+						const int v = d2 & 0x7f;
+						if (!drum && v >= 1 && v <= 4 && v > cc32Max) cc32Max = v;
+					}
+				}
+			}
+		}
+		p = end;
+	}
+	if (!mapHint)
+		mapHint = DetGuessPathTitle(titleBuf, path);
+	else
+		mapHint = DetFoldHint(mapHint, DetGuessPathTitle(NULL, path));
+	return DetKindToForce(DetResolveKind(mapHint, hasXg, hasGs, hasGm, hasGm2, hasSd, cc32Max));
+}
+
+static uint32_t DetSkipToFf(const SasamiSong& song, uint32_t addr)
+{
+	uint32_t p = addr + 1;
+	int guard = 0;
+	while (SasamiOffOk(song, p, 1) && SasamiGet(song, p) != 0xFF && guard++ < 256)
+		p++;
+	if (SasamiOffOk(song, p, 1) && SasamiGet(song, p) == 0xFF) p++;
+	return p;
+}
+
+static int DetFromSong(const SasamiSong& song, const wchar_t* path)
+{
+	int hasXg = 0, hasGs = 0, hasGm = 0, hasGm2 = 0, hasSd = 0;
+	int mapHint = 0, cc32Max = 0;
+	int tag0 = 0, tag1 = 0, tag2 = 0, tag3 = 0;
+	wchar_t titleW[280];
+	titleW[0] = 0;
+	if (song.titleSjis[0]) {
+		if (!MultiByteToWideChar(932, 0, song.titleSjis, -1, titleW, 280))
+			MultiByteToWideChar(CP_ACP, 0, song.titleSjis, -1, titleW, 280);
+		titleW[279] = 0;
+	}
+	mapHint = DetGuessPathTitle(titleW, path);
+	for (int i = 0; i < song.trackCount && i < 64; i++) {
+		if (song.tracks[i].unused) continue;
+		uint32_t addr = song.tracks[i].fileOff;
+		int guard = 0;
+		while (SasamiOffOk(song, addr, 1) && addr != 0xF0 && guard++ < 8192) {
+			const int cmd = SasamiGet(song, addr);
+			if (cmd == 0xF0) break;
+			if (cmd == 0) {
+				addr += 1;
+				continue;
+			}
+			if (cmd == 40) {
+				uint32_t p = addr + 1;
+				while (SasamiOffOk(song, p, 1) && SasamiGet(song, p) != 0xFE) {
+					const uint8_t tag = SasamiGet(song, p);
+					if (tag == 0) tag0 = 1;
+					else if (tag == 1) tag1 = 1;
+					else if (tag == 2) tag2 = 1;
+					else if (tag == 3) tag3 = 1;
+					p++;
+					if (p - addr > 64) break;
+				}
+				if (SasamiOffOk(song, p, 1) && SasamiGet(song, p) == 0xFE) p++;
+				uint8_t body[128];
+				int nb = 0;
+				while (SasamiOffOk(song, p, 1) && SasamiGet(song, p) != 0xFF && nb < 120) {
+					body[nb++] = SasamiGet(song, p);
+					p++;
+				}
+				if (SasamiOffOk(song, p, 1) && SasamiGet(song, p) == 0xFF) p++;
+				if (nb > 0)
+					DetEatSysex(body, nb, &hasXg, &hasGs, &hasGm, &hasGm2, &hasSd, &mapHint);
+				addr = p;
+				continue;
+			}
+			if (cmd == 36) {
+				uint8_t body[128];
+				int nb = 0;
+				uint32_t p = addr + 1;
+				if (SasamiOffOk(song, p, 1) && SasamiGet(song, p) == 0xF0) {
+					while (SasamiOffOk(song, p, 1) && SasamiGet(song, p) != 0xFF && nb < 127) {
+						body[nb++] = SasamiGet(song, p++);
+						if (body[nb - 1] == 0xF7) break;
+					}
+				} else {
+					body[nb++] = 0xF0; body[nb++] = 0x41; body[nb++] = 0x10;
+					body[nb++] = 0x42; body[nb++] = 0x12;
+					while (SasamiOffOk(song, p, 1) && SasamiGet(song, p) != 0xFF && nb < 120)
+						body[nb++] = SasamiGet(song, p++);
+				}
+				if (nb > 0)
+					DetEatSysex(body, nb, &hasXg, &hasGs, &hasGm, &hasGm2, &hasSd, &mapHint);
+				addr = DetSkipToFf(song, addr);
+				continue;
+			}
+			if (cmd == 13 || cmd == 14 || cmd == 15 || cmd == 37 || cmd == 46 || cmd == 47)
+				addr += 4;
+			else
+				addr += 3;
+		}
+	}
+	if (tag2 && !tag0 && !tag1) mapHint = DetFoldHint(mapHint, 7);
+	else if (tag0 && !tag1 && !tag2) mapHint = DetFoldHint(mapHint, 1);
+	else if (tag1 && !tag0) mapHint = DetFoldHint(mapHint, 2);
+	else if (tag3 && !tag0 && !tag1 && !tag2) mapHint = DetFoldHint(mapHint, 5);
+	(void)cc32Max;
+	return DetKindToForce(DetResolveKind(mapHint, hasXg, hasGs, hasGm, hasGm2, hasSd, cc32Max));
+}
+
+} // namespace
+
 void SasamiMapForceToSel(int mapForce, SasamiMidiMap* map, int* gsBankLsb)
 {
 	SasamiMidiMap m = SASAMI_MAP_GS88;
@@ -399,10 +904,43 @@ int SasamiReadFmForceW(const wchar_t* fol, int* outForce)
 int SasamiResolveMapForceW(const wchar_t* fol, int globalDefault)
 {
 	int pf = 0;
-	if (SasamiReadMidMapForceW(fol, &pf) && pf > 0)
+	if (SasamiReadMidMapForceW(fol, &pf))
 		return pf;
-	if (globalDefault > 0)
+	if (globalDefault >= 0 && globalDefault <= 19)
 		return globalDefault;
+	return 0;
+}
+
+int SasamiDetectMapForceFromMem(const uint8_t* data, int n, const wchar_t* path, const char* titleSjis)
+{
+	wchar_t titleW[280];
+	titleW[0] = 0;
+	if (titleSjis && titleSjis[0]) {
+		if (!MultiByteToWideChar(932, 0, titleSjis, -1, titleW, 280))
+			MultiByteToWideChar(CP_ACP, 0, titleSjis, -1, titleW, 280);
+		titleW[279] = 0;
+	}
+	int force = 0;
+	if (data && n >= 14)
+		force = DetFromSmf(data, n, path, titleW[0] ? titleW : NULL);
+	if (force > 0) return force;
+	return DetKindToForce(DetGuessPathTitle(titleW[0] ? titleW : NULL, path));
+}
+
+int SasamiDetectMapForceFromSong(const SasamiSong& song, const wchar_t* path)
+{
+	return DetFromSong(song, path);
+}
+
+int SasamiAutoMapForce(int resolved, const SasamiSong* song, const uint8_t* smf, int smfN, const wchar_t* path, const char* titleSjis)
+{
+	if (resolved > 0) return resolved;
+	int d = 0;
+	if (song)
+		d = SasamiDetectMapForceFromSong(*song, path);
+	else
+		d = SasamiDetectMapForceFromMem(smf, smfN, path, titleSjis);
+	if (d > 0) return d;
 	return 4;
 }
 
@@ -422,7 +960,7 @@ static int SasamiRegistryMapDefault()
 	if (RegOpenKeyExW(HKEY_CURRENT_USER,
 		L"Software\\Kobarin's Soft\\oggYSEDbgm\\KpiV5Config\\kbsasami\\kbsasami",
 		0, KEY_READ, &hKey) != ERROR_SUCCESS)
-		return 4;
+		return 0;
 	wchar_t buf[32] = {};
 	DWORD sz = sizeof(buf);
 	DWORD type = 0;
@@ -436,7 +974,7 @@ static int SasamiRegistryMapDefault()
 			v = _wtoi(buf);
 	}
 	RegCloseKey(hKey);
-	return (v >= 0 && v <= 19) ? v : 4;
+	return (v >= 0 && v <= 19) ? v : 0;
 }
 
 static void SasamiTempMidiPath(const wchar_t* src, wchar_t* dest, int destChars);
@@ -449,7 +987,7 @@ struct SasamiTempCache {
 	int convVer;
 };
 static SasamiTempCache s_tempCache;
-enum { SASAMI_SMF_CACHE_VER = 7 };
+enum { SASAMI_SMF_CACHE_VER = 9 };
 
 static int SasamiReadSourceStamp(const wchar_t* src, FILETIME* writeTime, DWORD* size)
 {
@@ -507,6 +1045,7 @@ bool SasamiConvertToSmf(const SasamiSong& song, SasamiMidiMap map, int gsBankLsb
 	const int ver = song.mpyVersion;
 	const int flg88 = (map == SASAMI_MAP_GS88) ? 1 : ((map == SASAMI_MAP_XG) ? 2 : 0);
 	const int isGm = (map == SASAMI_MAP_GM) ? 1 : 0;
+	const int allowGsEfx = (gsBankLsb >= 3 && gsBankLsb <= 4) ? 1 : 0;
 
 	s_evSeq = 0;
 	s_evCount = 0;
@@ -1121,6 +1660,10 @@ bool SasamiConvertToSmf(const SasamiSong& song, SasamiMidiMap map, int gsBankLsb
 					if (flg88 != 2)
 						buf[n++] = (uint8_t)((128 - (sum % 128)) & 0x7F);
 					buf[n++] = 0xF7;
+					if (!allowGsEfx && MidiIsGsEfxDt1(buf, n)) {
+						tr[i].addr = p + 1;
+						break;
+					}
 					if (n > 0 && buf[0] != 0xF0) {
 						uint8_t withF0[130];
 						withF0[0] = 0xF0;
@@ -1480,11 +2023,19 @@ int SasamiConvertPathToMidiFile(const wchar_t* src, wchar_t* dest, int destChars
 	if (!SasamiExtIsMidi(src)) return 0;
 	if (!EnsureMidiWork()) return 0;
 	SasamiTempMidiPath(src, dest, destChars);
-	const int force = SasamiResolveMapForceW(src, SasamiRegistryMapDefault());
+	int force = SasamiResolveMapForceW(src, SasamiRegistryMapDefault());
+	static SasamiSong s_song;
+	int songLoaded = 0;
+	if (force <= 0) {
+		if (!SasamiLoadFileW(src, &s_song)) return 0;
+		songLoaded = 1;
+		force = SasamiAutoMapForce(0, &s_song, NULL, 0, src, s_song.titleSjis);
+	}
 	if (SasamiTempCacheValid(src, force, dest))
 		return 1;
-	static SasamiSong s_song;
-	if (!SasamiLoadFileW(src, &s_song)) return 0;
+	if (!songLoaded) {
+		if (!SasamiLoadFileW(src, &s_song)) return 0;
+	}
 	SasamiMidiMap map = SASAMI_MAP_GS88;
 	int gsLsb = 2;
 	SasamiMapForceToSel(force, &map, &gsLsb);

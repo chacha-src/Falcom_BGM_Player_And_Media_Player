@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include <stdint.h>
 
 class note;
@@ -12,6 +12,7 @@ public:
     bool load(const wchar_t* path, int family = 0, int append = 0);
     struct Impl;
     bool ready() const;
+    void set_raira(int raira);
     void reset_render_frame();
     note* note_on(int program, int key, int velocity, double freq_mul, const tone_color& color);
 private:

@@ -31,8 +31,9 @@ private:
 	bool m_liveStream; /* CEmu MPU stub: qwLength 不定、sequencer 終端で切らない */
 	int m_raira; // 1=このアプリ専用経路
 	int m_vst;   // 解釈後: 0=FM MIDI(fmmidi), 1=VST側に任せる
-	int m_mapDefault; // kbsasami.midimode (0..19)
+	int m_mapDefault; // kbsasami.midimode (0=auto .. 19)
 	int m_fmModeDefault; // kbsasami.fmmode 0=BEEP 1=OPN 2=OPNA
+	int m_gsMapLsb; // 自動/指定マップの CC32 (1..4)。0=付けない
 	char m_titleSjis[65];
 	double m_loopStart;
 	double m_loopEnd;
@@ -45,6 +46,7 @@ private:
 	static int MemGetc(void* fp);
 	void LoadProgramsTxt();
 	void ReadOptions();
+	void ApplyGsBankLsb();
 	void midi_message(int port, uint_least32_t message) override;
 	void sysex_message(int port, const void* data, std::size_t size) override;
 	void meta_event(int type, const void* data, std::size_t size) override;

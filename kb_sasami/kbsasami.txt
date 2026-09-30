@@ -2,7 +2,7 @@
 [ 名称 ]     SASAMI FM / MIDI Decoder
 [ファイル名] kbsasami.kpi
 [バージョン] 1.00
-[対応拡張子] fpy / fpy2 / mpy / mpw2 / mpsmv
+[対応拡張子] fpy / fpy2 / mpy / mpw2 / mpsmv / mid / rcp / r36 / g36 / eup / sng / zms …
 [ Platform ] x86(32bit) / x64(64bit)
 -------------------------------------------------------------------------------
 [概要]
@@ -97,12 +97,18 @@ PC-98 ささみ (SASAMI) の曲データを再生します。
   kbsasami.vst
     本家 KbMedia Player: 0 = FM MIDI (プラグイン内 fmmidi / programs.txt)
                          1 = VST 側を想定 (本家では通常 0)
-  kbsasami.raira
-    0 = 本家互換 (vst をそのまま解釈)
+	kbsasami.raira
+    0 = 本家互換 (vst をそのまま解釈、ドラム音量は上げない、MIDI 音量は /2)
     1 = このアプリ専用。vst の 0 と 1 を内部で入れ替え、
+        FM MIDI のドラムを少し大きくし、
         FPY 再生時は %TEMP%\ogg_kbsasami\ に OPN/OPNA レジスタ dump
         （fmmon_live.opna / fmmon_ring.opna / <曲名>.opna）を出して FM モニタと同期する
         ※ dump は fmmode=OPN/OPNA（BEEP は対象外）
+    シーケンサ系（RCP/R36/G36/G18/MCP/MTD/EUP/SNG/ZMS/KAR/RMI/MFF/SEQ）は
+    ファイルがまだ SMF でなければプラグイン内で翻訳する。
+    raira の値では翻訳を止めない（らいらが書いた raira=1 が本家の ini に
+    残っていても RCP 等が鳴るようにするため）。
+    このアプリ自身は開く前に KpiRewriteSeqAsMidi で SMF 化する。
 
   このアプリは常に raira=1 を書き込み、midPlayPrefer に合わせて
   vst に逆値を自動代入します。結果として:
@@ -112,13 +118,19 @@ PC-98 ささみ (SASAMI) の曲データを再生します。
 
 [設定] kbsasami.midimode
 
-  .mpy / .mpw2 / .mpsmv の SMF 変換音源 (MIDI モニタの mapForce と同じ番号):
+  .mpy / .mpw2 / .mpsmv / .mid / シーケンサ翻訳後 SMF の音源
+  (MIDI モニタの mapForce と同じ番号):
 
-    0=自動(この値を既定として使用)  1=GS  2=XG  3=55map  4=88map
+    0=自動  SysEx / CC32 / 曲名・パス / .mpy 排他タグから
+            SC-55 / 88 / 88Pro / 8820・8850 / XG / GM / LA / SD を判定。
+            判定できないときは 88map。ogg 本体モニタと同じ優先順。
+            SMF 直読みでも GS Reset 後に CC32 を載せる。
+    1=GS  2=XG  3=55map  4=88map
     5=88Promap  6=8820map  7=GMmap  8=SDmap  9=LAmap  10..19=ETC
 
   旧キー kbsasami.map があれば midimode 未設定時に引き継ぎます。
   プレイリストの「ささみ☆ﾐ 音源モード」で曲ごとに上書き可能。
+  曲ごとの「自動」(midflag=0) はグローバル既定を使わず中身を見る。
 
 [設定] kbsasami.fmmode
 

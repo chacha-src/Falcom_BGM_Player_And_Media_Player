@@ -13,18 +13,21 @@ static const DWORD kPluginVersion = 1;
 #define KBSASAMI_VERSION_STR L"1.00"
 #endif
 
-static const wchar_t kDescription[] = L"SASAMI FM/MIDI Decoder v" KBSASAMI_VERSION_STR L" (FPY / MPY / MPW2 / MPSMV)";
+static const wchar_t kDescription[] = L"SASAMI FM/MIDI Decoder v" KBSASAMI_VERSION_STR L" (FPY / MPY / RCP / EUP / SNG / ZMS)";
 static const wchar_t kCopyright[] =
 	L"kbsasami.kpi SASAMI player\n"
 	L"FM: ymfm YM2608 (OPNA / OPN=SCH-off) + soft BEEP\n"
 	L"MIDI PCM path: fmmidi (yuno) via SMF conversion\n"
+	L"RCP/EUP/SNG/ZMS/SMF: convert inside the plugin if the file is not already SMF\n"
+	L"raira=1: vst 0/1 swapped, louder FM drums. raira=0: stock drums, MIDI vol/2\n"
+	L"raira does not skip conversion\n"
 	L"Commands ported from SASAMI / SASAMI11 / SASAMIM";
 
 // {A7C3E91F-4B2D-4E6A-9C18-8F5D2A1B7E03}
 static const GUID kGuid =
 { 0xa7c3e91f, 0x4b2d, 0x4e6a, { 0x9c, 0x18, 0x8f, 0x5d, 0x2a, 0x1b, 0x7e, 0x03 } };
 
-static const wchar_t kExts[] = L".fpy/.fpy2/.mpy/.mpw2/.mpsmv/.mid/.midi/.rcp/.r36/.g36/.g18/.mcp/.mtd/.mff/.seq";
+static const wchar_t kExts[] = L".fpy/.fpy2/.mpy/.mpw2/.mpsmv/.mid/.midi/.kar/.rmi/.smf/.rcp/.r36/.g36/.g18/.mcp/.mtd/.mff/.seq/.eup/.sng/.zms";
 
 static const wchar_t SEC_KBSASAMI[] = L"kbsasami";
 static const wchar_t KEY_VST[] = L"vst";
@@ -101,13 +104,13 @@ BOOL WINAPI KbSasamiDecoderModule::EnumConfig(IKpiConfigEnumerator* pEnumerator)
 			L"Default for original player is false (FM MIDI)." },
 		{ KPI_CFG_TYPE_BOOL, SEC_KBSASAMI, KEY_RAIRA, L"kbsasami.raira",
 			L"0", NULL, NULL, NULL, NULL,
-			L"false(0): original KbMedia Player (interpret vst as-is)\r\n"
-			L"true(1): this app. Swaps vst 0/1 internally.\r\n"
+			L"false(0): original KbMedia Player (interpret vst as-is, stock drums, MIDI vol/2)\r\n"
+			L"true(1): this app. Swaps vst 0/1 internally, louder FM drums.\r\n"
 			L"This app always writes raira=1." },
 		{ KPI_CFG_TYPE_INT, SEC_KBSASAMI, KEY_MIDIMODE, L"kbsasami.midimode",
-			L"4", NULL, NULL, NULL, NULL,
-			L"MIDI map for .mpy/.mpw2 SMF conversion (same as monitor mapForce).\r\n"
-			L"0=Auto(use this default) 1=GS 2=XG 3=55map 4=88map 5=88Promap 6=8820map\r\n"
+			L"0", NULL, NULL, NULL, NULL,
+			L"MIDI map for .mpy/.mpw2/.mid SMF (same as monitor mapForce).\r\n"
+			L"0=Auto(SysEx/CC32/title) 1=GS 2=XG 3=55map 4=88map 5=88Promap 6=8820map\r\n"
 			L"7=GMmap 8=SDmap 9=LAmap 10..19=ETC maps. Per-file override in playlist." },
 		{ KPI_CFG_TYPE_INT, SEC_KBSASAMI, KEY_FMMODE, L"kbsasami.fmmode",
 			L"2", NULL, NULL, NULL, NULL,

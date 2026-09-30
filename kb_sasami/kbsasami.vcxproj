@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" ToolsVersion="14.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="uni_2026_de|Win32">
@@ -144,6 +144,10 @@ if exist "C:\projects\APPLICATION3\ogg_binary\Plugins\Kobarin\fmpmd\Rhythm\2608_
     <ClCompile Include="..\simd_audio_avx512.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
     </ClCompile>
+    <ClCompile Include="..\ComposerConvert.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <PreprocessorDefinitions>KBSASAMI_PLUGIN;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
     <ClCompile Include="source\kbsasami_decoder.cpp" />
     <ClCompile Include="source\kbsasami_module.cpp" />
     <ClCompile Include="source\sasami_file.cpp" />
@@ -175,6 +179,7 @@ if exist "C:\projects\APPLICATION3\ogg_binary\Plugins\Kobarin\fmpmd\Rhythm\2608_
     <ClCompile Include="C:\projects\APPLICATION3\kpi_sources_20240712\kpisdk\kpi.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="..\ComposerConvert.h" />
     <ClInclude Include="source\kbsasami_decoder.h" />
     <ClInclude Include="source\kbsasami_module.h" />
     <ClInclude Include="source\sasami_file.h" />

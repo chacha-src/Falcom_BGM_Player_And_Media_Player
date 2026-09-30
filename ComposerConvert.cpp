@@ -1,6 +1,14 @@
-﻿#include "stdafx.h"
-#include "ComposerConvert.h"
+#ifdef KBSASAMI_PLUGIN
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#include <string.h>
+#include <stdio.h>
+#include <stdlib.h>
+#else
+#include "stdafx.h"
 #include "MidiPack.h"
+#endif
+#include "ComposerConvert.h"
 #include <vector>
 #include <algorithm>
 #include <string>
@@ -30,7 +38,8 @@ int ComposerIsSeqExt(const wchar_t* path)
 		|| ComposerEqExt(path, L".mcp") || ComposerEqExt(path, L".mtd")
 		|| ComposerEqExt(path, L".mff") || ComposerEqExt(path, L".seq")
 		|| ComposerEqExt(path, L".smf") || ComposerEqExt(path, L".sng")
-		|| ComposerEqExt(path, L".zms");
+		|| ComposerEqExt(path, L".zms") || ComposerEqExt(path, L".eup")
+		|| ComposerEqExt(path, L".kar") || ComposerEqExt(path, L".rmi");
 }
 
 static int StartsWith(const unsigned char* d, unsigned n, const char* s)
@@ -46,7 +55,7 @@ int ComposerKindOfMem(const unsigned char* data, unsigned size)
 	if (size >= 8 && memcmp(data, "MThd", 4) == 0) return COMPOSER_KIND_SMF;
 	if (size >= 20 && memcmp(data, "RIFF", 4) == 0 && memcmp(data + 8, "RMID", 4) == 0)
 		return COMPOSER_KIND_SMF;
-	if (StartsWith(data, size, "RCM-PC98V2.0(C)COME ON MUSIC"))
+	if (StartsWith(data, size, "RCM-PC98V2") || StartsWith(data, size, "RCM-PC88"))
 		return COMPOSER_KIND_RCP;
 	if (StartsWith(data, size, "COME ON MUSIC RECOMPOSER RCP3.0"))
 		return COMPOSER_KIND_G36;
@@ -110,7 +119,8 @@ int ComposerKindOf(const wchar_t* path)
 		return COMPOSER_KIND_MCP;
 	if (ComposerEqExt(path, L".eup"))
 		return COMPOSER_KIND_EUP;
-	if (ComposerEqExt(path, L".mff") || ComposerEqExt(path, L".smf"))
+	if (ComposerEqExt(path, L".mff") || ComposerEqExt(path, L".smf")
+		|| ComposerEqExt(path, L".kar") || ComposerEqExt(path, L".rmi"))
 		return COMPOSER_KIND_SMF;
 	if (ComposerEqExt(path, L".sng"))
 		return COMPOSER_KIND_SNG;
@@ -188,8 +198,10 @@ int ComposerFindSidecar(const wchar_t* src, const wchar_t* ext, wchar_t* out, in
 
 int ComposerFindSidecarWrd(const wchar_t* src, wchar_t* out, int outChars)
 {
+#ifndef KBSASAMI_PLUGIN
 	if (MidiPackIsVirtualPath(src))
 		return MidiPackFindSidecarWrd(src, out, outChars);
+#endif
 	return ComposerFindSidecar(src, L".wrd", out, outChars)
 		|| ComposerFindSidecar(src, L".WRD", out, outChars)
 		|| ComposerFindSidecar(src, L".kok", out, outChars)
@@ -198,8 +210,10 @@ int ComposerFindSidecarWrd(const wchar_t* src, wchar_t* out, int outChars)
 
 int ComposerHasSidecarWrd(const wchar_t* src)
 {
+#ifndef KBSASAMI_PLUGIN
 	if (MidiPackIsVirtualPath(src))
 		return MidiPackHasSidecarWrd(src);
+#endif
 	wchar_t tmp[MAX_PATH];
 	return ComposerFindSidecarWrd(src, tmp, MAX_PATH);
 }
@@ -1330,13 +1344,55 @@ static int ConvertSngMem(const unsigned char* d, unsigned size, std::vector<unsi
 	return mid.size() > 22 ? 1 : 0;
 }
 
+int ComposerConvertMemToMidi(const unsigned char* data, unsigned size, const wchar_t* pathHint, std::vector<unsigned char>& mid)
+{
+	mid.clear();
+	if (!data || size < 16) return 0;
+	int kind = ComposerKindOfMem(data, size);
+	if (kind == COMPOSER_KIND_NONE && pathHint) {
+		if (ComposerEqExt(pathHint, L".rcp") || ComposerEqExt(pathHint, L".r36"))
+			kind = COMPOSER_KIND_RCP;
+		else if (ComposerEqExt(pathHint, L".g36") || ComposerEqExt(pathHint, L".g18"))
+			kind = COMPOSER_KIND_G36;
+		else if (ComposerEqExt(pathHint, L".mcp") || ComposerEqExt(pathHint, L".mtd"))
+			kind = COMPOSER_KIND_MCP;
+		else if (ComposerEqExt(pathHint, L".eup"))
+			kind = COMPOSER_KIND_EUP;
+		else if (ComposerEqExt(pathHint, L".mff") || ComposerEqExt(pathHint, L".seq")
+			|| ComposerEqExt(pathHint, L".smf") || ComposerEqExt(pathHint, L".kar")
+			|| ComposerEqExt(pathHint, L".rmi"))
+			kind = COMPOSER_KIND_SMF;
+		else if (ComposerEqExt(pathHint, L".sng"))
+			kind = COMPOSER_KIND_SNG;
+		else if (ComposerEqExt(pathHint, L".zms"))
+			kind = COMPOSER_KIND_ZMS;
+	}
+	if (kind == COMPOSER_KIND_NONE || kind == COMPOSER_KIND_GSD || kind == COMPOSER_KIND_CM6)
+		return 0;
+	int ok = 0;
+	if (kind == COMPOSER_KIND_SMF)
+		ok = CopySmfMem(data, size, mid);
+	else if (kind == COMPOSER_KIND_EUP)
+		ok = ConvertEupMem(data, size, mid);
+	else if (kind == COMPOSER_KIND_RCP || kind == COMPOSER_KIND_G36 || kind == COMPOSER_KIND_MCP)
+		ok = ConvertRcpMem(data, size,
+			(kind == COMPOSER_KIND_G36) ? COMPOSER_KIND_G36 : COMPOSER_KIND_RCP, mid);
+	else if (kind == COMPOSER_KIND_SNG)
+		ok = ConvertSngMem(data, size, mid);
+	else if (kind == COMPOSER_KIND_ZMS)
+		ok = ConvertZmsMem(data, size, mid);
+	return (ok && mid.size() >= 22) ? 1 : 0;
+}
+
 int ComposerConvertToMidi(const wchar_t* src, wchar_t* dest, int destChars)
 {
 	if (!src || !dest || destChars < 8) return 0;
 	dest[0] = 0;
+#ifndef KBSASAMI_PLUGIN
 	wchar_t pack[MIDIPACK_PATH];
 	if (MidiPackMaterialize(src, pack, MIDIPACK_PATH))
 		src = pack;
+#endif
 	ComposerTempMidiPath(src, dest, destChars);
 	if (!dest[0]) return 0;
 	if (CacheValid(src, dest))
@@ -1344,41 +1400,8 @@ int ComposerConvertToMidi(const wchar_t* src, wchar_t* dest, int destChars)
 
 	std::vector<unsigned char> buf;
 	if (!ReadAll(src, buf)) return 0;
-	int kind = ComposerKindOfMem(buf.data(), (unsigned)buf.size());
-	if (kind == COMPOSER_KIND_NONE) {
-		if (ComposerEqExt(src, L".rcp") || ComposerEqExt(src, L".r36"))
-			kind = COMPOSER_KIND_RCP;
-		else if (ComposerEqExt(src, L".g36") || ComposerEqExt(src, L".g18"))
-			kind = COMPOSER_KIND_G36;
-		else if (ComposerEqExt(src, L".mcp") || ComposerEqExt(src, L".mtd"))
-			kind = COMPOSER_KIND_MCP;
-		else if (ComposerEqExt(src, L".eup"))
-			kind = COMPOSER_KIND_EUP;
-		else if (ComposerEqExt(src, L".mff") || ComposerEqExt(src, L".seq")
-			|| ComposerEqExt(src, L".smf"))
-			kind = COMPOSER_KIND_SMF;
-		else if (ComposerEqExt(src, L".sng"))
-			kind = COMPOSER_KIND_SNG;
-		else if (ComposerEqExt(src, L".zms"))
-			kind = COMPOSER_KIND_ZMS;
-	}
-	if (kind == COMPOSER_KIND_GSD || kind == COMPOSER_KIND_CM6)
-		return 0;
-
 	std::vector<unsigned char> mid;
-	int ok = 0;
-	if (kind == COMPOSER_KIND_SMF)
-		ok = CopySmfMem(buf.data(), (unsigned)buf.size(), mid);
-	else if (kind == COMPOSER_KIND_EUP)
-		ok = ConvertEupMem(buf.data(), (unsigned)buf.size(), mid);
-	else if (kind == COMPOSER_KIND_RCP || kind == COMPOSER_KIND_G36 || kind == COMPOSER_KIND_MCP)
-		ok = ConvertRcpMem(buf.data(), (unsigned)buf.size(),
-			(kind == COMPOSER_KIND_G36) ? COMPOSER_KIND_G36 : COMPOSER_KIND_RCP, mid);
-	else if (kind == COMPOSER_KIND_SNG)
-		ok = ConvertSngMem(buf.data(), (unsigned)buf.size(), mid);
-	else if (kind == COMPOSER_KIND_ZMS)
-		ok = ConvertZmsMem(buf.data(), (unsigned)buf.size(), mid);
-	if (!ok || mid.size() < 22) return 0;
+	if (!ComposerConvertMemToMidi(buf.data(), (unsigned)buf.size(), src, mid)) return 0;
 	if (!WriteAll(dest, mid.data(), (unsigned)mid.size())) return 0;
 	CopyComposerSidecars(src, dest);
 	return 1;

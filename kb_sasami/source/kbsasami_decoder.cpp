@@ -6,6 +6,7 @@
 #include <string>
 
 #include "kbsasami_decoder.h"
+#include "ComposerConvert.h"
 
 extern HINSTANCE g_hKpi;
 
@@ -16,7 +17,8 @@ static const wchar_t KEY_MIDIMODE[] = L"midimode";
 static const wchar_t KEY_MAP_LEGACY[] = L"map";
 static const wchar_t KEY_FMMODE[] = L"fmmode";
 
-/* fmmidi/ymfm の正規化が小さく、mpy/mpw2/rcp/mid が実聴で約 1/6。 */
+/* fmmidi/ymfm の正規化が小さく、mpy/mpw2/rcp/mid が実聴で約 1/6。
+   raira=0（本家）はさらに /2 のうえ 1.5 倍下げる。 */
 static const double kFmMidiOutGain = 6.0;
 
 static uint8_t s_fileBuf[SASAMI_MAX_FILE];
@@ -45,8 +47,9 @@ KbSasamiDecoder::KbSasamiDecoder(IKpiConfig* pConfig)
 	m_liveStream = false;
 	m_raira = 0;
 	m_vst = 0;
-	m_mapDefault = 4;
+	m_mapDefault = 0;
 	m_fmModeDefault = 2;
+	m_gsMapLsb = 0;
 	m_titleSjis[0] = 0;
 	m_loopStart = -1.0;
 	m_loopEnd = -1.0;
@@ -117,20 +120,21 @@ void KbSasamiDecoder::ReadOptions()
 {
 	m_raira = 0;
 	m_vst = 0;
-	m_mapDefault = 4;
+	m_mapDefault = 0;
 	m_fmModeDefault = 2;
 	if (m_pConfig) {
 		m_raira = (int)m_pConfig->GetInt(SEC_KBSASAMI, KEY_RAIRA, 0);
 		m_vst = (int)m_pConfig->GetInt(SEC_KBSASAMI, KEY_VST, 0);
 		m_mapDefault = (int)m_pConfig->GetInt(SEC_KBSASAMI, KEY_MIDIMODE, -1);
 		if (m_mapDefault < 0)
-			m_mapDefault = (int)m_pConfig->GetInt(SEC_KBSASAMI, KEY_MAP_LEGACY, 4);
+			m_mapDefault = (int)m_pConfig->GetInt(SEC_KBSASAMI, KEY_MAP_LEGACY, 0);
 		m_fmModeDefault = (int)m_pConfig->GetInt(SEC_KBSASAMI, KEY_FMMODE, 2);
 	}
-	if (m_mapDefault < 0 || m_mapDefault > 19) m_mapDefault = 4;
+	if (m_mapDefault < 0 || m_mapDefault > 19) m_mapDefault = 0;
 	if (m_fmModeDefault < 0 || m_fmModeDefault > 2) m_fmModeDefault = 2;
 	if (m_raira)
 		m_vst = m_vst ? 0 : 1;
+	m_note_factory.set_raira(m_raira);
 }
 
 static int PathIsCemuLiveMid(const wchar_t* path)
@@ -313,9 +317,27 @@ void KbSasamiDecoder::sysex_message(int port, const void* data, std::size_t size
 	if (m_seeking) return;
 	if (port < 0 || port >= m_nPorts) port = 0;
 	m_synths[port]->sysex_message(data, size);
+	const unsigned char* d = (const unsigned char*)data;
+	if (m_gsMapLsb >= 1 && m_gsMapLsb <= 4 && d && size >= 11 &&
+		d[0] == 0xf0 && d[1] == 0x41 && d[3] == 0x42 && d[4] == 0x12 &&
+		d[5] == 0x40 && d[6] == 0x00 && d[7] == 0x7f) {
+		ApplyGsBankLsb();
+	}
 }
 
 void KbSasamiDecoder::meta_event(int, const void*, std::size_t) {}
+
+void KbSasamiDecoder::ApplyGsBankLsb()
+{
+	if (m_gsMapLsb < 1 || m_gsMapLsb > 4) return;
+	for (int i = 0; i < m_nPorts; i++) {
+		if (!m_synths[i]) continue;
+		for (int ch = 0; ch < 16; ch++) {
+			if (ch == 9) continue;
+			m_synths[i]->control_change(ch, 32, m_gsMapLsb);
+		}
+	}
+}
 
 void KbSasamiDecoder::reset()
 {
@@ -324,6 +346,7 @@ void KbSasamiDecoder::reset()
 			m_synths[i]->reset();
 	}
 	m_note_factory.reset_pool_frame();
+	ApplyGsBankLsb();
 }
 
 DWORD WINAPI KbSasamiDecoder::UpdateConfig(void*)
@@ -352,10 +375,24 @@ DWORD __fastcall KbSasamiDecoder::Open(const KPI_MEDIAINFO* cpRequest, IKpiFile*
 	pFile->GetRealFileW(&real);
 	pFile->Release();
 	if (n == 0) return 0;
+	m_gsMapLsb = 0;
 
-	const int smfDirect = (n >= 4 && s_fileBuf[0] == 'M' && s_fileBuf[1] == 'T'
+	const int smfMagic = (n >= 4 && s_fileBuf[0] == 'M' && s_fileBuf[1] == 'T'
 		&& s_fileBuf[2] == 'h' && s_fileBuf[3] == 'd') ? 1 : 0;
 	const wchar_t* pathForKind = (real && real[0]) ? real : name;
+	/* ホストが既に SMF 化したファイルは MThd でここに来る。
+	   本家は変換しない。らいらが書いた raira=1 が ini に残っていても、
+	   生 RCP/EUP 等ならここで翻訳する（raira は vst 入れ替え専用）。 */
+	std::vector<unsigned char> composerMid;
+	const uint8_t* smfPtr = s_fileBuf;
+	DWORD smfLen = n;
+	int smfDirect = smfMagic;
+	if (!smfDirect && ComposerConvertMemToMidi(s_fileBuf, n, pathForKind, composerMid)
+		&& composerMid.size() >= 22) {
+		smfPtr = composerMid.data();
+		smfLen = (DWORD)composerMid.size();
+		smfDirect = 1;
+	}
 	if (smfDirect) {
 		if (m_vst != 0) return 0;
 		DWORD rate = 44100;
@@ -366,8 +403,8 @@ DWORD __fastcall KbSasamiDecoder::Open(const KPI_MEDIAINFO* cpRequest, IKpiFile*
 		m_titleSjis[0] = 0;
 		LoadProgramsTxt();
 		MemFile mfSmf;
-		mfSmf.p = s_fileBuf;
-		mfSmf.size = n;
+		mfSmf.p = smfPtr;
+		mfSmf.size = smfLen;
 		mfSmf.pos = 0;
 		if (!m_sequencer.load(&mfSmf, MemGetc)) return 0;
 		m_nPorts = m_sequencer.get_num_ports();
@@ -376,6 +413,14 @@ DWORD __fastcall KbSasamiDecoder::Open(const KPI_MEDIAINFO* cpRequest, IKpiFile*
 		for (int i = 1; i < m_nPorts; i++) {
 			if (!m_synths[i])
 				m_synths[i] = new synthesizer(&m_note_factory);
+		}
+		{
+			int mapForce = SasamiResolveMapForceW(pathForKind, m_mapDefault);
+			mapForce = SasamiAutoMapForce(mapForce, NULL, smfPtr, (int)smfLen, pathForKind, NULL);
+			SasamiMidiMap map = SASAMI_MAP_GS88;
+			int gsLsb = 0;
+			SasamiMapForceToSel(mapForce, &map, &gsLsb);
+			m_gsMapLsb = (gsLsb >= 1 && gsLsb <= 4) ? gsLsb : 0;
 		}
 		reset();
 		m_loopStart = m_sequencer.find_marker("loopStart");
@@ -478,10 +523,12 @@ DWORD __fastcall KbSasamiDecoder::Open(const KPI_MEDIAINFO* cpRequest, IKpiFile*
 	m_fmMode = false;
 	m_smfSize = 0;
 	const wchar_t* pathForMap = (real && real[0]) ? real : name;
-	const int mapForce = SasamiResolveMapForceW(pathForMap, m_mapDefault);
+	int mapForce = SasamiResolveMapForceW(pathForMap, m_mapDefault);
+	mapForce = SasamiAutoMapForce(mapForce, &s_song, NULL, 0, pathForMap, s_song.titleSjis);
 	SasamiMidiMap map = SASAMI_MAP_GS88;
 	int gsLsb = 2;
 	SasamiMapForceToSel(mapForce, &map, &gsLsb);
+	m_gsMapLsb = (gsLsb >= 1 && gsLsb <= 4) ? gsLsb : 0;
 	if (!SasamiConvertToSmf(s_song, map, gsLsb, m_smf, SASAMI_MAX_SMF, &m_smfSize)) return 0;
 	LoadProgramsTxt();
 	MemFile mf;
@@ -579,8 +626,9 @@ DWORD WINAPI KbSasamiDecoder::Render(BYTE* pBuffer, DWORD dwSizeSample)
 			m_synths[i]->synthesize_mixing(m_mix, chunk, m_MediaInfo.dwSampleRate);
 		}
 		int16_t* out = (int16_t*)p;
+		const double gain = m_raira ? kFmMidiOutGain : (kFmMidiOutGain * 0.5 / 1.5);
 		for (DWORD i = 0; i < chunk * 2; i++) {
-			int v = (int)(m_mix[i] * 32767.0 * kFmMidiOutGain);
+			int v = (int)(m_mix[i] * 32767.0 * gain);
 			if (v > 32767) v = 32767;
 			if (v < -32768) v = -32768;
 			out[i] = (int16_t)v;

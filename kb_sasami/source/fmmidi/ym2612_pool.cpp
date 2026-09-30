@@ -61,6 +61,7 @@ struct Slot {
     bool held;
     bool drum;
     bool want_off;
+    bool bankExact;
     int gen;
     int order;
     int chip;
@@ -112,9 +113,10 @@ struct Ym2612Pool::Impl {
     int frame_left;
     int order;
     bool inited;
+    int raira;
     double rate;
 
-    Impl() : live(0), frame_left(-1), order(0), inited(false), rate(44100)
+    Impl() : live(0), frame_left(-1), order(0), inited(false), raira(0), rate(44100)
     {
         for (int i = 0; i < kChips; i++) chips[i] = 0;
         for (int i = 0; i < kVoices; i++) {
@@ -202,8 +204,8 @@ struct Ym2612Pool::Impl {
         double midi = s.midi;
         if (s.mul > 0 && s.mul != 1.0)
             midi += 12.0 * std::log(s.mul) / std::log(2.0);
-        if (s.vib_depth > 0)
-            midi += s.vib_depth * 6.0 * std::sin(s.vib_phase);
+        if (s.vib_depth != 0)
+            midi += s.vib_depth * std::sin(s.vib_phase);
         int block = 0, fnum = 0;
         fnum_of(midi, rate, block, fnum);
         int cc = s.ch % 3;
@@ -225,38 +227,11 @@ struct Ym2612Pool::Impl {
             {0,0,0,1}, {0,0,0,1}, {0,0,0,1}, {0,0,0,1},
             {0,0,1,1}, {0,1,1,1}, {0,1,1,1}, {1,1,1,1}
         };
-        const int cut = (c.cutoff - 64) / 10;
-        const int res = c.reso - 64;
-        int fbDelta = res / 32;
-        if (fbDelta > 2) fbDelta = 2;
-        if (fbDelta < -2) fbDelta = -2;
-        const int hpf = c.hpf - 64;
-        if (hpf > 0) fbDelta -= hpf / 48;
-        const int arD = (c.attack - 64) / 16;
-        const int drD = (c.decay - 64) / 20;
-        int rrD = (c.release - 64) / 16;
-        if (c.revSend > 48)
-            rrD -= (c.revSend * (c.revMode >= 3 ? 2 : 1)) / 96;
-        if (c.dlySend > 48 && c.dlyMode != 1)
-            rrD -= (c.dlySend - 48) / 80;
-        if (rrD < -3) rrD = -3;
-        const int eqL = c.eqLo - 64;
-        const int eqH = c.eqHi - 64;
-        int carTl = -(eqL / 16) + ((hpf > 0) ? hpf / 16 : 0);
-        int modTl = cut - eqH / 12;
-        auto ins_char = [&](int t) {
-            if (t == 2) { carTl -= 3; fbDelta += 1; }
-            else if (t == 3) { carTl -= 5; modTl += 2; fbDelta += 1; }
-            else if (t == 6) { modTl += 2; }
-        };
-        ins_char(c.insMode);
-        ins_char(c.ins2);
-        if (fbDelta > 2) fbDelta = 2;
+        const tone_paint t = make_tone_paint(c);
         int fb = (in.fbalg >> 3) & 7;
         int alg = in.fbalg & 7;
-        fb = clampi(fb + fbDelta, 0, 7);
+        fb = clampi(fb + t.fbDelta, 0, 7);
         in.fbalg = (uint8_t)((fb << 3) | alg);
-        const int amsOn = (c.insMode == 4 || c.ins2 == 4) ? 1 : 0;
         const int velTl = (127 - velocity) * 12 / 127;
         for (int op = 0; op < 4; op++) {
             uint8_t* r = in.op[op].raw;
@@ -267,20 +242,26 @@ struct Ym2612Pool::Impl {
             int sl = r[5] >> 4;
             int rr = r[5] & 15;
             int tl = r[1] & 127;
+            int dt = (r[0] >> 4) & 7;
+            int mul = r[0] & 15;
             const int isCar = carrier[alg][op];
             if (isCar) {
-                ar = clampi(ar + arD, 0, 31);
-                dr = clampi(dr + drD, 0, 31);
-                rr = clampi(rr + rrD, 0, 15);
-                tl = clampi(tl + velTl + carTl, 0, 127);
-                if (drum) {
+                ar = clampi(ar + t.arD, 0, 31);
+                dr = clampi(dr + t.drD, 0, 31);
+                rr = clampi(rr + t.rrD, 0, 15);
+                sl = clampi(sl + t.slD, 0, 15);
+                tl = clampi(tl + velTl + t.carTl, 0, 127);
+                if (drum && raira) {
                     if (ar < 28) ar = 28;
                     tl = clampi(tl - 8, 0, 127);
                 }
             } else {
-                tl = clampi(tl - modTl, 0, 127);
-                if (amsOn) am = 0x80;
+                tl = clampi(tl - t.modTl, 0, 127);
+                if (t.amsOn) am = 0x80;
+                dt = clampi(dt + t.dtD, 0, 7);
+                mul = clampi(mul + t.mulD, 0, 15);
             }
+            r[0] = (uint8_t)((dt << 4) | (mul & 15));
             r[1] = (uint8_t)(tl & 127);
             r[2] = (uint8_t)((ks << 6) | (ar & 31));
             r[3] = (uint8_t)(am | (dr & 31));
@@ -354,13 +335,17 @@ struct Ym2612Pool::Impl {
         return rr;
     }
 
-    const Inst* find_exact(bool perc, int msb, int lsb, int pc, int family)
+    const Inst* find_exact(bool perc, int msb, int lsb, int pc, int family, int* gotM = 0, int* gotL = 0)
     {
         pc &= 127;
         for (size_t i = 0; i < banks.size(); i++) {
             const Bank& b = banks[i];
             if (b.family != family || b.perc != perc || b.msb != msb || b.lsb != lsb) continue;
-            if (b.ins[pc].alive) return &b.ins[pc];
+            if (b.ins[pc].alive) {
+                if (gotM) *gotM = b.msb;
+                if (gotL) *gotL = b.lsb;
+                return &b.ins[pc];
+            }
         }
         return 0;
     }
@@ -374,23 +359,37 @@ struct Ym2612Pool::Impl {
         return 0;
     }
 
-    const Inst* find_melodic(int mode, int msb, int lsb, int pc)
+    const Inst* find_melodic(int mode, int msb, int lsb, int pc, int* exact)
     {
         const Inst* in = 0;
+        int gotM = -1, gotL = -1;
         int gs = (mode == 3) || (mode == 0 && msb > 0 && msb < 64 && lsb <= 4);
         if (gs) {
             int mapLsb = gs_file_lsb(lsb);
             int var = msb;
-            in = find_exact(false, var, mapLsb, pc, 1);
-            if (!in && mapLsb) in = find_exact(false, var, 0, pc, 1);
-            if (!in) in = find_exact(false, 0, 0, pc, 1);
-            if (in) return in;
+            in = find_exact(false, var, mapLsb, pc, 1, &gotM, &gotL);
+            if (in && gotM == var && gotL == mapLsb) {
+                if (exact) *exact = 1;
+                return in;
+            }
+            if (!in && mapLsb) in = find_exact(false, var, 0, pc, 1, &gotM, &gotL);
+            if (!in) in = find_exact(false, 0, 0, pc, 1, &gotM, &gotL);
+            if (in) {
+                if (exact) *exact = 0;
+                return in;
+            }
         }
-        if (msb == 64) in = find_exact(false, 64, lsb, pc, 0);
-        if (!in && msb == 0) in = find_exact(false, 0, lsb, pc, 0);
-        if (!in && msb) in = find_exact(false, msb, lsb, pc, 0);
-        if (!in) in = find_exact(false, 0, 0, pc, 0);
-        if (!in) in = find_exact(false, 0, 0, pc, 1);
+        in = 0;
+        if (msb == 64) in = find_exact(false, 64, lsb, pc, 0, &gotM, &gotL);
+        if (!in && msb == 0) in = find_exact(false, 0, lsb, pc, 0, &gotM, &gotL);
+        if (!in && msb) in = find_exact(false, msb, lsb, pc, 0, &gotM, &gotL);
+        if (in && gotM == msb && gotL == lsb) {
+            if (exact) *exact = 1;
+            return in;
+        }
+        if (!in) in = find_exact(false, 0, 0, pc, 0, &gotM, &gotL);
+        if (!in) in = find_exact(false, 0, 0, pc, 1, &gotM, &gotL);
+        if (exact) *exact = 0;
         return in;
     }
 
@@ -516,7 +515,7 @@ bool YmNote::synthesize(sample_t* buf, std::size_t samples, double rate, sample_
     if (stay) {
         Slot& s = pool->slots[slot];
         double v = velocity / 128.0;
-        if (s.drum) v *= 1.85;
+        if (s.drum && pool->raira) v *= 1.85;
         const float* pcm = s.pcm.empty() ? 0 : &s.pcm[0];
         size_t n = s.pcm.size() / 2;
         if (n > samples) n = samples;
@@ -601,7 +600,9 @@ void YmNote::apply_tone(const tone_color& c)
     if (!pool->owns(slot, gen)) return;
     Slot& s = pool->slots[slot];
     s.inst = s.base;
-    pool->paint_wopn(s.inst, c, velocity, s.drum);
+    tone_color col = c;
+    col.bankExact = s.bankExact ? 1 : 0;
+    pool->paint_wopn(s.inst, col, velocity, s.drum);
     pool->write_inst(s);
 }
 
@@ -610,6 +611,12 @@ void YmNote::apply_tone(const tone_color& c)
 Ym2612Pool::Ym2612Pool() : impl(new Impl()) {}
 Ym2612Pool::~Ym2612Pool() { delete impl; }
 bool Ym2612Pool::ready() const { return impl && !impl->banks.empty(); }
+
+void Ym2612Pool::set_raira(int raira)
+{
+    if (impl)
+        impl->raira = raira ? 1 : 0;
+}
 
 void Ym2612Pool::reset_render_frame()
 {
@@ -695,8 +702,9 @@ note* Ym2612Pool::note_on(int program, int key, int velocity, double freq_mul, c
     if (msb >= 120 && msb < 126) msb = 0;
     if (key < 0) key = 0;
     if (key > 127) key = 127;
+    int exact = 0;
     const Inst* in = drum ? impl->find_drum(mode, msb, lsb, pc, key)
-                          : impl->find_melodic(mode, msb, lsb, pc);
+                          : impl->find_melodic(mode, msb, lsb, pc, &exact);
     if (!in || !in->alive) return 0;
 
     int s = impl->pick();
@@ -710,6 +718,7 @@ note* Ym2612Pool::note_on(int program, int key, int velocity, double freq_mul, c
     slot.held = true;
     slot.drum = drum;
     slot.want_off = false;
+    slot.bankExact = drum ? true : (exact != 0);
     slot.damper = 0;
     slot.sostenute = 0;
     slot.vib_depth = 0;
@@ -718,10 +727,14 @@ note* Ym2612Pool::note_on(int program, int key, int velocity, double freq_mul, c
     slot.order = ++impl->order;
     slot.base = *in;
     slot.inst = slot.base;
-    impl->paint_wopn(slot.inst, color, velocity, drum);
-    int dly = color.vibDelay - 64;
-    if (dly < 0) dly = 0;
-    slot.vib_delay_left = (int)(impl->rate * dly / 80.0);
+    tone_color col = color;
+    col.mapLsb = lsb;
+    col.varMsb = msb;
+    col.pc = pc;
+    col.sysMode = mode;
+    col.bankExact = drum ? 1 : exact;
+    impl->paint_wopn(slot.inst, col, velocity, drum);
+    slot.vib_delay_left = (int)(impl->rate * tone_vib_delay_sec(color.vibDelay));
     slot.mul = freq_mul > 0 ? freq_mul : 1;
     double midi = (double)key + (double)in->note_off;
     if (drum && in->perc_key > 0)

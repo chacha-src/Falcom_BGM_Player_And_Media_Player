@@ -1,4 +1,4 @@
-// �\�t�g�E�F�AMIDI�V���Z�T�C�U�B
+﻿// �\�t�g�E�F�AMIDI�V���Z�T�C�U�B
 // Copyright(c)2003-2004 yuno
 //�ǉ� by Kobarin
 #pragma warning(disable:4305)
@@ -43,8 +43,8 @@ namespace std{
 
 //namespace midisynth{//�폜 by Kobarin
     // �`�����l���R���X�g���N�^�B
-    channel::channel(note_factory* factory_, int bank):
-        factory(factory_), default_bank(bank)
+    channel::channel(note_factory* factory_, int bank, int chIndex_):
+        factory(factory_), default_bank(bank), chIndex(chIndex_)
     {
         //�ǉ� by Kobarin
         //�O�̂��ߊe��ϐ���������
@@ -133,6 +133,14 @@ namespace std{
         fxChoSend = fxDlySend = 0;
         fxRevMode = fxChoMode = fxDlyMode = fxInsMode = fxIns2 = 0;
         fxInsOn = fxInsOn2 = fxInsSys1 = fxInsSys2 = 0;
+        fxInsFam = 0;
+        fxInsPacked = fxIns2Packed = 0;
+        fxInsDrive = -1;
+        fxInsLo = fxInsHi = 64;
+        for (int i = 0; i < 32; i++) fxInsP[i] = -1;
+        fxVarPacked = 0;
+        fxVarConn = 1;
+        fxVarPart = 127;
         sysRevLevel = sysChoLevel = sysDlyLevel = 64;
         nrpnCutoff = nrpnReso = nrpnHpf = nrpnAtk = nrpnDec = nrpnRel = 64;
         nrpnVibRate = nrpnVibDepth = nrpnVibDelay = 64;
@@ -198,58 +206,38 @@ namespace std{
             if(v > hi) return hi;
             return v;
         }
-        void paint_op(int& AR, int& DR, int& RR, int& TL, int& AMS,
-            int arD, int drD, int rrD, int cut, int amsOn, bool modulator)
+        void paint_op(int& AR, int& DR, int& RR, int& TL, int& AMS, int& DT, int& ML, int& SL,
+            int arD, int drD, int rrD, int cut, int amsOn, int dtD, int mulD, int slD, bool modulator)
         {
             if(modulator){
                 TL = clampi(TL - cut, 0, 127);
                 if(amsOn && AMS == 0)
                     AMS = 1;
+                DT = clampi(DT + dtD, 0, 7);
+                ML = clampi(ML + mulD, 0, 15);
             }else{
                 AR = clampi(AR + arD, 0, 31);
                 DR = clampi(DR + drD, 0, 31);
                 RR = clampi(RR + rrD, 0, 15);
+                SL = clampi(SL + slD, 0, 15);
             }
         }
         void paint_fm(FMPARAMETER& p, const tone_color& c)
         {
-            const int cut = (c.cutoff - 64) / 10;
-            const int res = c.reso - 64;
-            int fbDelta = res / 32;
-            if(fbDelta > 2) fbDelta = 2;
-            if(fbDelta < -2) fbDelta = -2;
-            const int hpf = c.hpf - 64;
-            if(hpf > 0) fbDelta -= hpf / 48;
-            const int arD = (c.attack - 64) / 16;
-            const int drD = (c.decay - 64) / 20;
-            int rrD = (c.release - 64) / 16;
-            if(c.revSend > 48)
-                rrD -= (c.revSend * (c.revMode >= 3 ? 2 : 1)) / 96;
-            if(c.dlySend > 48 && c.dlyMode != 1)
-                rrD -= (c.dlySend - 48) / 80;
-            if(rrD < -3) rrD = -3;
-            const int eqL = c.eqLo - 64;
-            const int eqH = c.eqHi - 64;
-            int carTl = -(eqL / 16) + ((hpf > 0) ? hpf / 16 : 0);
-            int modTl = cut - eqH / 12;
-            auto ins_char = [&](int t) {
-                if(t == 2){ carTl -= 3; fbDelta += 1; }
-                else if(t == 3){ carTl -= 5; modTl += 2; fbDelta += 1; }
-                else if(t == 6){ modTl += 2; }
-            };
-            ins_char(c.insMode);
-            ins_char(c.ins2);
-            if(fbDelta > 2) fbDelta = 2;
-            p.FB = clampi(p.FB + fbDelta, 0, 7);
-            const int amsOn = (c.insMode == 4 || c.ins2 == 4) ? 1 : 0;
-            paint_op(p.op1.AR, p.op1.DR, p.op1.RR, p.op1.TL, p.op1.AMS, arD, drD, rrD, modTl, amsOn, true);
-            paint_op(p.op2.AR, p.op2.DR, p.op2.RR, p.op2.TL, p.op2.AMS, arD, drD, rrD, modTl, amsOn, p.ALG < 4);
-            paint_op(p.op3.AR, p.op3.DR, p.op3.RR, p.op3.TL, p.op3.AMS, arD, drD, rrD, modTl, amsOn, p.ALG < 5);
-            paint_op(p.op4.AR, p.op4.DR, p.op4.RR, p.op4.TL, p.op4.AMS, arD, drD, rrD, 0, 0, false);
-            p.op4.TL = clampi(p.op4.TL + carTl, 0, 127);
-            if(p.ALG >= 4) p.op3.TL = clampi(p.op3.TL + carTl, 0, 127);
-            if(p.ALG >= 5) p.op2.TL = clampi(p.op2.TL + carTl, 0, 127);
-            if(p.ALG >= 7) p.op1.TL = clampi(p.op1.TL + carTl, 0, 127);
+            const tone_paint t = make_tone_paint(c);
+            p.FB = clampi(p.FB + t.fbDelta, 0, 7);
+            paint_op(p.op1.AR, p.op1.DR, p.op1.RR, p.op1.TL, p.op1.AMS, p.op1.DT, p.op1.ML, p.op1.SL,
+                t.arD, t.drD, t.rrD, t.modTl, t.amsOn, t.dtD, t.mulD, t.slD, true);
+            paint_op(p.op2.AR, p.op2.DR, p.op2.RR, p.op2.TL, p.op2.AMS, p.op2.DT, p.op2.ML, p.op2.SL,
+                t.arD, t.drD, t.rrD, t.modTl, t.amsOn, t.dtD, t.mulD, t.slD, p.ALG < 4);
+            paint_op(p.op3.AR, p.op3.DR, p.op3.RR, p.op3.TL, p.op3.AMS, p.op3.DT, p.op3.ML, p.op3.SL,
+                t.arD, t.drD, t.rrD, t.modTl, t.amsOn, t.dtD, t.mulD, t.slD, p.ALG < 5);
+            paint_op(p.op4.AR, p.op4.DR, p.op4.RR, p.op4.TL, p.op4.AMS, p.op4.DT, p.op4.ML, p.op4.SL,
+                t.arD, t.drD, t.rrD, 0, 0, t.dtD, t.mulD, t.slD, false);
+            p.op4.TL = clampi(p.op4.TL + t.carTl, 0, 127);
+            if(p.ALG >= 4) p.op3.TL = clampi(p.op3.TL + t.carTl, 0, 127);
+            if(p.ALG >= 5) p.op2.TL = clampi(p.op2.TL + t.carTl, 0, 127);
+            if(p.ALG >= 7) p.op1.TL = clampi(p.op1.TL + t.carTl, 0, 127);
         }
     }
     void channel::set_effect_mode(int kind, int value)
@@ -349,6 +337,71 @@ namespace std{
         else return;
         touch_tone();
     }
+    void channel::set_system_mode(system_mode_t mode)
+    {
+        system_mode = mode;
+        if (mode == system_mode_xg) fxInsFam = 3;
+        else if (mode == system_mode_gs) fxInsFam = 0;
+    }
+    void channel::apply_gs_efx_byte(int addr, int val)
+    {
+        val &= 127;
+        if (addr < 0 || addr >= 32) return;
+        fxInsP[addr] = val;
+        if (addr == 0) {
+            fxInsPacked = (val << 8) | (fxInsPacked & 0x7F);
+            fxInsSys1 = val;
+            fxInsMode = val;
+            if (fxInsFam < 1) fxInsFam = 1;
+        } else if (addr == 1) {
+            fxInsPacked = (fxInsPacked & 0x7F00) | val;
+            fxInsFam = 2;
+        } else if (addr == 2) {
+            fxInsDrive = val;
+        } else if (addr == 3 || addr == 0x13) {
+            fxInsLo = val;
+        } else if (addr == 5 || addr == 0x14) {
+            fxInsHi = val;
+        }
+        touch_tone();
+    }
+    void channel::apply_xg_ins_byte(int slot, int addr, int val)
+    {
+        val &= 127;
+        fxInsFam = 3;
+        int* packed = (slot == 1) ? &fxIns2Packed : &fxInsPacked;
+        if (addr == 0) {
+            *packed = (val << 8) | (*packed & 0x7F);
+            if (slot == 0) { fxInsSys1 = val; fxInsMode = val; }
+            else fxInsSys2 = val;
+        } else if (addr == 1) {
+            *packed = (*packed & 0x7F00) | val;
+        } else if (addr == 0x0C) {
+            if (val >= 127) set_efx_on(slot, 0);
+            else set_efx_on(slot, (chIndex == (val & 15)) ? 1 : 0);
+            return;
+        }
+        if (slot == 0 && addr < 32) {
+            fxInsP[addr] = val;
+            if (addr == 2) fxInsDrive = val;
+        }
+        touch_tone();
+    }
+    void channel::apply_xg_sysfx_byte(int addr, int val)
+    {
+        val &= 127;
+        if (addr == 0x00) fxRevMode = val & 7;
+        else if (addr == 0x20) fxChoMode = val & 7;
+        else if (addr == 0x40) fxVarPacked = (val << 8) | (fxVarPacked & 0x7F);
+        else if (addr == 0x41) fxVarPacked = (fxVarPacked & 0x7F00) | val;
+        else if (addr == 0x5A) fxVarConn = val ? 1 : 0;
+        else if (addr == 0x5B) fxVarPart = val;
+        else if (addr == 0x0C) { set_sys_fx_level(0, val); return; }
+        else if (addr == 0x2C) { set_sys_fx_level(1, val); return; }
+        else if (addr == 0x4C) { set_sys_fx_level(2, val); return; }
+        else return;
+        touch_tone();
+    }
     tone_color channel::effect_color() const
     {
         tone_color c;
@@ -364,8 +417,25 @@ namespace std{
         c.revMode = fxRevMode;
         c.choMode = fxChoMode;
         c.dlyMode = fxDlyMode;
-        c.insMode = fxInsOn ? fxInsSys1 : 0;
-        c.ins2 = fxInsOn2 ? fxInsSys2 : 0;
+        int packed = 0;
+        if (fxInsOn)
+            packed = fxInsPacked ? fxInsPacked : (fxInsSys1 << 8);
+        else if (fxInsOn2)
+            packed = fxIns2Packed ? fxIns2Packed : (fxInsSys2 << 8);
+        else if (fxVarConn == 0 && fxVarPacked && fxVarPart == chIndex)
+            packed = fxVarPacked;
+        c.insMode = (packed >> 8) & 0x7F;
+        c.ins2 = packed & 0x7F;
+        c.insFam = packed ? fxInsFam : 0;
+        c.insPacked = packed;
+        c.insDrive = fxInsDrive;
+        c.insLo = fxInsLo;
+        c.insHi = fxInsHi;
+        c.mapLsb = bank & 0x7F;
+        c.varMsb = (bank >> 7) & 0x7F;
+        c.pc = program & 0x7F;
+        c.sysMode = (int)system_mode;
+        c.bankExact = 0;
         c.cutoff = nrpnCutoff;
         c.reso = nrpnReso;
         c.hpf = nrpnHpf;
@@ -398,21 +468,24 @@ namespace std{
     void channel::update_fx_vibrato()
     {
         tone_color c = effect_color();
-        int mode = c.choMode;
-        static const double rateT[8] = { 0, 0.7, 1.2, 1.8, 2.8, 1.0, 3.6, 4.2 };
-        static const double depT[8] = { 0, 0.03, 0.05, 0.08, 0.04, 0.06, 0.04, 0.02 };
+        const int mode = c.choMode & 7;
+        /* GS chorus type → slow pitch LFO (peak semitones). fmmidi depth 1.0 = ±1 semitone. */
+        static const double rateT[8] = { 0, 0.55, 0.85, 1.15, 0.40, 1.35, 1.80, 0.22 };
+        static const double depT[8] = { 0, 0.14, 0.20, 0.28, 0.16, 0.24, 0.12, 0.08 };
         double depth = 0;
-        double freq = 3;
+        double freq = vibrato_frequency > 0.25 ? vibrato_frequency : 3.0;
+        const int haveVib = (c.vibDepth != 64) || (modulation_depth != 0);
         if(mode > 0 && c.choSend > 8){
-            depth = depT[mode & 7] * c.choSend / 127.0;
-            freq = rateT[mode & 7];
+            depth += depT[mode] * (c.choSend / 127.0);
+            if(!haveVib)
+                freq = rateT[mode];
         }
-        if(c.vibDepth > 64)
-            depth += (c.vibDepth - 64) / 220.0;
+        depth += (c.vibDepth - 64) / 64.0;
         if(depth < 0) depth = 0;
         if(c.vibRate != 64 && depth > 0)
-            freq *= 0.55 + c.vibRate / 160.0;
-        if(freq < 0.25) freq = 0.25;
+            freq *= std::pow(2.0, (c.vibRate - 64) / 64.0);
+        if(freq < 0.2) freq = 0.2;
+        if(freq > 12.0) freq = 12.0;
         if(modulation_depth)
             depth += static_cast<double>(modulation_depth) * modulation_depth_range / (16383.0 * 128.0);
         for(std::vector<NOTE>::iterator i = notes.begin(); i != notes.end(); ++i){
@@ -750,10 +823,7 @@ namespace std{
     // ���W�����[�V�����f�v�X���ʂ̍X�V�B
     void channel::update_modulation()
     {
-        double depth = static_cast<double>(modulation_depth) * modulation_depth_range / (16383.0 * 128.0);
-        for(std::vector<NOTE>::iterator i = notes.begin(); i != notes.end(); ++i){
-            i->note->set_vibrato(depth, vibrato_frequency);
-        }
+        update_fx_vibrato();
     }
 
     // �V���Z�T�C�U�R���X�g���N�^�B
@@ -761,7 +831,7 @@ namespace std{
     {
         for(int i = 0; i < 16; ++i){
             //channels[i].reset(new channel(factory, i == 9 ? 0x3C00 : 0x3C80));//�폜 by Kobarin
-            channels[i]= std::auto_ptr<channel>(new channel(factory, i == 9 ? 0x3C00 : 0x3C80));//�ǉ� by Kobarin
+            channels[i]= std::auto_ptr<channel>(new channel(factory, i == 9 ? 0x3C00 : 0x3C80, i));//�ǉ� by Kobarin
         }
         reset_all_parameters();
     }
@@ -909,91 +979,88 @@ namespace std{
             int map = data[8];
             channels[channel]->set_rhythm_part(map != 0);
             channels[channel]->program_change(0);
-        }else if(size >= 10 && data[0] == 0xF0 && data[1] == 0x43 && (data[2] & 0xF0) == 0x10
-            && data[3] == 0x4C && data[4] == 0x08 && (data[6] == 0x06 || data[6] == 0x07) && data[size - 1] == 0xF7){
-            /* XG part mode: 08 nn 06/07. 0=通常, 1/2=ドラム。nn はパート1-16 */
-            int part = data[5] & 0x0F;
-            int mode = data[7] & 0x7F;
-            channels[part]->set_rhythm_part(mode != 0);
         }else if(size >= 9 && data[0] == 0xF0 && data[1] == 0x43 && (data[2] & 0xF0) == 0x10
-            && data[3] == 0x4C && data[4] == 0x08 && data[size - 1] == 0xF7){
-            /* XG Multi Part 08: cho/rev/var, vib, TVF, EG, EQ */
-            int part = data[5] & 0x0F;
-            channels[part]->apply_xg_part(data[6], data[7] & 0x7F);
+            && data[3] == 0x4C && data[size - 1] == 0xF7){
+            const int ah = data[4] & 0x7F;
+            const int am = data[5] & 0x7F;
+            const int al = data[6] & 0x7F;
+            const int nd = (int)size - 8;
+            for (int i = 0; i < nd; ++i) {
+                const int a = al + i;
+                if (a > 127) break;
+                const int v = data[7 + i] & 0x7F;
+                if (ah == 0x02 && am == 0x01) {
+                    for (int ch = 0; ch < NUM_CHANNELS; ++ch)
+                        channels[ch]->apply_xg_sysfx_byte(a, v);
+                } else if (ah == 0x03) {
+                    int slot = 0;
+                    if (am == 0x01 || am == 0x10) slot = 1;
+                    for (int ch = 0; ch < NUM_CHANNELS; ++ch)
+                        channels[ch]->apply_xg_ins_byte(slot, a, v);
+                } else if (ah == 0x08 || ah == 0x09) {
+                    const int part = am & 0x0F;
+                    if (a == 0x06 || a == 0x07)
+                        channels[part]->set_rhythm_part(v != 0);
+                    else
+                        channels[part]->apply_xg_part(a, v);
+                }
+            }
         }else if(size >= 11 && data[0] == 0xF0 && data[1] == 0x41 && data[3] == 0x42 && data[4] == 0x12
             && data[5] == 0x40 && data[size - 1] == 0xF7){
-            /* GS: 40 01 30 reverb, 38 chorus, 50 delay。40 03 00/10 insertion 1/2。
-               40 01 33/3A/52 はシステム戻りレベル */
-            int kind = -1;
-            int val = data[8] & 0x7F;
-            if(data[6] == 0x01 && data[7] == 0x30) kind = 0;
-            else if(data[6] == 0x01 && data[7] == 0x38) kind = 1;
-            else if(data[6] == 0x01 && data[7] == 0x50) kind = 2;
-            else if(data[6] == 0x03 && data[7] == 0x00) kind = 3;
-            else if(data[6] == 0x03 && data[7] == 0x10) kind = 4;
-            if(kind >= 0){
-                for(int i = 0; i < NUM_CHANNELS; ++i)
-                    channels[i]->set_effect_mode(kind, val);
-            }else if(data[6] == 0x01 && (data[7] == 0x33 || data[7] == 0x3A || data[7] == 0x52)){
-                int lv = 0;
-                if(data[7] == 0x3A) lv = 1;
-                else if(data[7] == 0x52) lv = 2;
-                for(int i = 0; i < NUM_CHANNELS; ++i)
-                    channels[i]->set_sys_fx_level(lv, val);
-            }else if((data[6] & 0xF0) == 0x10){
-                int n = data[6] & 0x0F;
-                int ch = (n == 0) ? 9 : (n < 10 ? n - 1 : n);
-                if(ch >= 0 && ch < NUM_CHANNELS)
-                    channels[ch]->apply_gs_part_mix(data[7], val);
-            }else if((data[6] & 0xF0) == 0x20){
-                int n = data[6] & 0x0F;
-                int ch = (n == 0) ? 9 : (n < 10 ? n - 1 : n);
-                if(ch >= 0 && ch < NUM_CHANNELS)
-                    channels[ch]->apply_gs_tone(data[7], val);
-            }else if((data[6] & 0xF0) == 0x40 && data[7] == 0x22){
-                int n = data[6] & 0x0F;
-                int ch = (n == 0) ? 9 : (n < 10 ? n - 1 : n);
-                if(ch >= 0 && ch < NUM_CHANNELS)
-                    channels[ch]->set_efx_on(0, val != 0);
+            const int hasF7 = 1;
+            int nval = (int)size - 8 - hasF7 - 1;
+            if (nval < 1) nval = 1;
+            const int bb = data[6];
+            const int cc = data[7];
+            int mapLsb = 0;
+            for (int ch = 0; ch < NUM_CHANNELS; ++ch) {
+                int v = channels[ch]->get_bank() & 0x7F;
+                if (v > mapLsb && v <= 4) mapLsb = v;
             }
-        }else if(size >= 9 && data[0] == 0xF0 && data[1] == 0x43 && (data[2] & 0xF0) == 0x10
-            && data[3] == 0x4C && data[4] == 0x02 && data[5] == 0x01 && data[size - 1] == 0xF7){
-            /* XG: 02 01 00 reverb, 20 chorus, 40 variation。0C/2C/4C は return */
-            int kind = -1;
-            int val = data[7] & 7;
-            if(data[6] == 0x00) kind = 0;
-            else if(data[6] == 0x20) kind = 1;
-            else if(data[6] == 0x40) kind = 2;
-            if(kind >= 0){
-                for(int i = 0; i < NUM_CHANNELS; ++i)
-                    channels[i]->set_effect_mode(kind, val);
-            }else if(data[6] == 0x0C || data[6] == 0x2C || data[6] == 0x4C){
-                int lv = 0;
-                if(data[6] == 0x2C) lv = 1;
-                else if(data[6] == 0x4C) lv = 2;
-                const int ret = data[7] & 0x7F;
-                for(int i = 0; i < NUM_CHANNELS; ++i)
-                    channels[i]->set_sys_fx_level(lv, ret);
-            }
-        }else if(size >= 9 && data[0] == 0xF0 && data[1] == 0x43 && (data[2] & 0xF0) == 0x10
-            && data[3] == 0x4C && data[4] == 0x03 && data[size - 1] == 0xF7){
-            /* XG Insertion 03 00 00 / 03 01 00 */
-            int kind = -1;
-            if(data[5] == 0x00 && data[6] == 0x00) kind = 3;
-            else if(data[5] == 0x01 && data[6] == 0x00) kind = 4;
-            if(kind >= 0){
-                const int val = data[7] & 0x3F;
-                for(int i = 0; i < NUM_CHANNELS; ++i)
-                    channels[i]->set_effect_mode(kind, val);
-            }else if(data[6] == 0x0C){
-                int slot = (data[5] == 0x01) ? 1 : 0;
-                int part = data[7] & 0x7F;
-                for(int i = 0; i < NUM_CHANNELS; ++i)
-                    channels[i]->set_efx_on(slot, i == part);
+            const int allowEfx = (mapLsb >= 3) ? 1 : 0;
+            for (int i = 0; i < nval; ++i) {
+                const int a = cc + i;
+                const int val = data[8 + i] & 0x7F;
+                if (bb == 0x01) {
+                    int kind = -1;
+                    if (a == 0x30) kind = 0;
+                    else if (a == 0x38) kind = 1;
+                    else if (a == 0x50) kind = 2;
+                    if (kind >= 0) {
+                        for (int ch = 0; ch < NUM_CHANNELS; ++ch)
+                            channels[ch]->set_effect_mode(kind, val);
+                    } else if (a == 0x33 || a == 0x3A || a == 0x52) {
+                        int lv = 0;
+                        if (a == 0x3A) lv = 1;
+                        else if (a == 0x52) lv = 2;
+                        for (int ch = 0; ch < NUM_CHANNELS; ++ch)
+                            channels[ch]->set_sys_fx_level(lv, val);
+                    }
+                } else if (bb == 0x03 && a < 32) {
+                    /* 88Pro EFX. SC-55/SC-88 ignore 40 03. */
+                    if (allowEfx) {
+                        for (int ch = 0; ch < NUM_CHANNELS; ++ch)
+                            channels[ch]->apply_gs_efx_byte(a, val);
+                    }
+                } else if ((bb & 0xF0) == 0x10) {
+                    int n = bb & 0x0F;
+                    int ch = (n == 0) ? 9 : (n < 10 ? n - 1 : n);
+                    if (ch >= 0 && ch < NUM_CHANNELS)
+                        channels[ch]->apply_gs_part_mix(a, val);
+                } else if ((bb & 0xF0) == 0x20) {
+                    int n = bb & 0x0F;
+                    int ch = (n == 0) ? 9 : (n < 10 ? n - 1 : n);
+                    if (ch >= 0 && ch < NUM_CHANNELS)
+                        channels[ch]->apply_gs_tone(a, val);
+                } else if ((bb & 0xF0) == 0x40 && a == 0x22) {
+                    int n = bb & 0x0F;
+                    int ch = (n == 0) ? 9 : (n < 10 ? n - 1 : n);
+                    if (ch >= 0 && ch < NUM_CHANNELS && allowEfx)
+                        channels[ch]->set_efx_on(0, val != 0);
+                }
             }
         }
     }
-    // MIDI�C�x���g�̉��ߎ��s�B
     void synthesizer::midi_event(int event, int param1, int param2)
     {
         switch(event & 0xF0){
@@ -1845,6 +1912,11 @@ namespace std{
     {
         if (ym)
             ym->reset_render_frame();
+    }
+    void fm_note_factory::set_raira(int raira)
+    {
+        if (ym)
+            ym->set_raira(raira);
     }
     // �N���A�B
     void fm_note_factory::clear()

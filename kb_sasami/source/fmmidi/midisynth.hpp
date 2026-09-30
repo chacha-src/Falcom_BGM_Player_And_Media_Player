@@ -57,13 +57,208 @@
         int cutoff, reso, hpf, attack, decay, release;
         int vibRate, vibDepth, vibDelay;
         int eqLo, eqHi;
+        int insFam;
+        int insPacked;
+        int insDrive;
+        int insLo, insHi;
+        int mapLsb, varMsb, pc, sysMode, bankExact;
         tone_color():
             revSend(0), choSend(0), dlySend(0),
             revMode(0), choMode(0), dlyMode(0), insMode(0), ins2(0),
             cutoff(64), reso(64), hpf(64), attack(64), decay(64), release(64),
             vibRate(64), vibDepth(64), vibDelay(64),
-            eqLo(64), eqHi(64) {}
+            eqLo(64), eqHi(64),
+            insFam(0), insPacked(0), insDrive(-1), insLo(64), insHi(64),
+            mapLsb(0), varMsb(0), pc(0), sysMode(0), bankExact(0) {}
     };
+
+    /* GS/XG: 64 = no change. Time (atk/dec/rel) は大きいほど遅く、YM の AR/DR/RR は逆。 */
+    struct tone_paint {
+        int arD, drD, rrD, fbDelta, carTl, modTl, amsOn;
+        int dtD, mulD, slD;
+    };
+    inline int tone_clmpi(int v, int lo, int hi)
+    {
+        if (v < lo) return lo;
+        if (v > hi) return hi;
+        return v;
+    }
+    inline void apply_insertion_paint(tone_paint& p, const tone_color& c)
+    {
+        if (c.insFam <= 0) return;
+        const int packed = c.insPacked ? c.insPacked : (c.insMode << 8);
+        if (packed == 0) return;
+        const int msb = (packed >> 8) & 0x7F;
+        const int lsb = packed & 0x7F;
+        if (c.insLo != 64) p.carTl -= (c.insLo - 64) * 4 / 63;
+        if (c.insHi != 64) p.modTl -= (c.insHi - 64) * 3 / 63;
+        int kind = 0;
+        if (c.insFam == 1) {
+            switch (msb) {
+            case 0x01: kind = 1; break;
+            case 0x02: kind = 2; break;
+            case 0x03: kind = 3; break;
+            case 0x04: kind = 5; break;
+            case 0x05: kind = 1; break;
+            case 0x06: kind = 14; break;
+            case 0x07: kind = 6; break;
+            case 0x08: kind = 7; break;
+            case 0x09: case 0x0A: kind = 13; break;
+            case 0x0B: case 0x0C: case 0x0D: case 0x0E: kind = 8; break;
+            case 0x0F: case 0x10: kind = 9; break;
+            case 0x11: case 0x12: case 0x13: case 0x14: case 0x15: kind = 10; break;
+            case 0x16: case 0x17: case 0x18: kind = 11; break;
+            case 0x19: case 0x1A: kind = 12; break;
+            case 0x1B: case 0x1C: kind = 10; break;
+            case 0x1D: kind = 4; break;
+            default: break;
+            }
+        } else if (c.insFam == 2) {
+            if (msb == 0x01) {
+                if (lsb == 0x00 || lsb == 0x01) kind = 1;
+                else if (lsb == 0x02) kind = 14;
+                else if (lsb == 0x03) kind = 16;
+                else if (lsb == 0x10) kind = 2;
+                else if (lsb == 0x11) kind = 3;
+                else if (lsb == 0x20) kind = 5;
+                else if (lsb == 0x21) kind = 6;
+                else if (lsb == 0x22) kind = 7;
+                else if (lsb == 0x23 || lsb == 0x24) kind = 9;
+                else if (lsb == 0x25 || lsb == 0x26) kind = 8;
+                else if (lsb == 0x30 || lsb == 0x31) kind = 13;
+                else if (lsb >= 0x40 && lsb <= 0x44) kind = 8;
+                else if (lsb == 0x55 || lsb == 0x56) kind = 11;
+                else if (lsb >= 0x50 && lsb <= 0x57) kind = 10;
+                else if (lsb == 0x60 || lsb == 0x61) kind = 12;
+            }
+        } else if (c.insFam == 3) {
+            if (msb >= 0x01 && msb <= 0x14) kind = 11;
+            else if (msb == 0x41 || msb == 0x42 || msb == 0x44 || msb == 0x57) kind = 8;
+            else if (msb == 0x43) kind = 9;
+            else if (msb == 0x45 || msb == 0x56) kind = 7;
+            else if (msb == 0x46 || msb == 0x47) kind = 8;
+            else if (msb == 0x48) kind = 5;
+            else if (msb == 0x49 || msb == 0x60 || (msb == 0x5F && lsb == 0)) kind = 3;
+            else if (msb == 0x4A || (msb == 0x5F && lsb == 1)) kind = 2;
+            else if (msb == 0x4B) kind = 4;
+            else if (msb == 0x4C || msb == 0x4D) kind = 1;
+            else if (msb == 0x4E || msb == 0x52 || msb == 0x61) kind = 6;
+            else if (msb == 0x51) kind = 14;
+            else if (msb == 0x53 || msb == 0x54) kind = 13;
+            else if (msb == 0x5E) kind = 15;
+            else if (msb == 0x50) kind = 12;
+        }
+        const int drv = (c.insDrive < 0) ? ((kind == 2 || kind == 3 || kind == 4) ? 80 : 64) : c.insDrive;
+        if (kind == 2 || kind == 3 || kind == 4) {
+            const int dist = (kind != 2) ? 1 : 0;
+            const int k = dist ? (2 + drv * 5 / 127) : (1 + drv * 3 / 127);
+            p.fbDelta += dist ? 2 : 1;
+            if (kind == 4) p.fbDelta += 1;
+            p.carTl -= k;
+            p.modTl += dist ? 2 : 1;
+            if (kind == 4) p.modTl += 1;
+            p.slD -= dist ? 2 : 1;
+            if (dist) p.arD += 1;
+        } else if (kind == 5) {
+            p.amsOn = 1; p.fbDelta += 1; p.dtD += 1;
+        } else if (kind == 6) {
+            p.amsOn = 1; p.modTl += 2;
+        } else if (kind == 7) {
+            p.amsOn = 1; p.fbDelta += 1; p.carTl -= 1;
+        } else if (kind == 8) {
+            p.amsOn = 1; p.dtD += 1; p.rrD -= 1;
+        } else if (kind == 9) {
+            p.amsOn = 1; p.fbDelta += 1; p.dtD += 2;
+        } else if (kind == 10) {
+            p.rrD -= 2; p.carTl -= 1;
+        } else if (kind == 11) {
+            p.rrD -= 2; p.drD -= 1;
+        } else if (kind == 12) {
+            p.dtD += 2; p.mulD += 1;
+        } else if (kind == 13) {
+            p.carTl += 1; p.arD += 1; p.slD += 1;
+        } else if (kind == 14) {
+            p.modTl += 2; p.carTl -= 1; p.fbDelta += 1;
+        } else if (kind == 15) {
+            p.carTl += 2; p.fbDelta += 1; p.arD -= 1; p.rrD -= 1; p.modTl += 1;
+        } else if (kind == 16) {
+            p.modTl += 3; p.fbDelta += 1; p.amsOn = 1;
+        }
+    }
+    inline void apply_bank_fallback_paint(tone_paint& p, const tone_color& c)
+    {
+        if (c.bankExact) return;
+        const int lsb = c.mapLsb & 0x7F;
+        const int msb = c.varMsb & 0x7F;
+        const int gs = (c.sysMode == system_mode_gs)
+            || (c.sysMode == system_mode_default && lsb <= 4 && msb < 64);
+        if (gs) {
+            if (lsb == 1) { p.carTl += 2; p.modTl -= 1; p.fbDelta -= 1; p.arD -= 1; }
+            else if (lsb == 2) { p.carTl -= 2; p.modTl += 1; p.fbDelta += 1; }
+            else if (lsb == 3) { p.carTl -= 1; p.modTl += 2; p.fbDelta += 1; p.amsOn = 1; p.dtD += 1; }
+            else if (lsb == 4) { p.carTl -= 2; p.modTl += 1; p.dtD += 1; p.fbDelta += 1; }
+            if (msb > 0 && msb < 64) {
+                const int g = (msb / 8) & 7;
+                static const int car[8] = { 0, -2, -1, 2, -3, 1, 0, -2 };
+                static const int mod[8] = { 0, 2, 1, -1, 2, 0, 3, 1 };
+                static const int fb[8] = { 0, 1, 0, -1, 1, 2, 0, 1 };
+                p.carTl += car[g]; p.modTl += mod[g]; p.fbDelta += fb[g];
+                if (g == 4 || g == 6) p.dtD += 1;
+            }
+        }
+        if (c.sysMode == system_mode_xg || c.sysMode == system_mode_gm2) {
+            if (lsb != 0) {
+                const int v = (lsb + (c.pc & 7)) & 7;
+                static const int car[8] = { -2, 2, -1, 1, -3, 0, 2, -1 };
+                static const int mod[8] = { 1, -1, 2, 0, 2, 1, -2, 3 };
+                static const int fb[8] = { 1, -1, 1, 0, 2, -1, 1, 0 };
+                p.carTl += car[v]; p.modTl += mod[v]; p.fbDelta += fb[v];
+                if (v & 1) p.dtD += 1;
+                if (v == 5) p.arD += 1;
+                else if (v == 6) p.arD -= 1;
+            }
+            if (msb == 64) { p.fbDelta += 1; p.modTl += 2; p.arD += 1; }
+        }
+    }
+    inline tone_paint make_tone_paint(const tone_color& c)
+    {
+        tone_paint p = {};
+        p.arD = (64 - c.attack) * 4 / 63;
+        p.drD = (64 - c.decay) * 3 / 63;
+        p.rrD = (64 - c.release) * 3 / 63;
+        if (c.revSend > 24)
+            p.rrD -= (c.revSend * (c.revMode >= 3 ? 2 : 1)) / 127;
+        if (c.dlySend > 24 && c.dlyMode != 1)
+            p.rrD -= c.dlySend / 96;
+        p.rrD = tone_clmpi(p.rrD, -4, 4);
+        p.fbDelta = (c.reso - 64) * 2 / 63;
+        const int hpf = c.hpf - 64;
+        if (hpf > 0)
+            p.fbDelta -= hpf * 2 / 63;
+        const int eqL = (c.eqLo - 64) * 4 / 63;
+        const int eqH = (c.eqHi - 64) * 4 / 63;
+        const int cut = (c.cutoff - 64) * 8 / 63;
+        p.carTl = -eqL;
+        if (hpf > 0)
+            p.carTl += hpf * 3 / 63;
+        p.modTl = cut - eqH / 2;
+        p.amsOn = 0;
+        apply_insertion_paint(p, c);
+        apply_bank_fallback_paint(p, c);
+        p.fbDelta = tone_clmpi(p.fbDelta, -2, 3);
+        p.carTl = tone_clmpi(p.carTl, -16, 12);
+        p.modTl = tone_clmpi(p.modTl, -16, 16);
+        p.dtD = tone_clmpi(p.dtD, -3, 3);
+        p.mulD = tone_clmpi(p.mulD, -2, 2);
+        p.slD = tone_clmpi(p.slD, -4, 4);
+        return p;
+    }
+    inline double tone_vib_delay_sec(int vibDelay)
+    {
+        int dly = vibDelay - 64;
+        if (dly < 0) dly = 0;
+        return dly * (1.5 / 63.0);
+    }
 
     class note_factory{//:uncopyable{//C³ by Kobarin
     public:
@@ -77,7 +272,7 @@
     class channel{//:uncopyable{//C³ by Kobarin
         enum{ NUM_NOTES = 128 };
     public:
-        channel(note_factory* factory, int bank);
+        channel(note_factory* factory, int bank, int chIndex = 0);
         ~channel();
 
         int synthesize(sample_t* out, std::size_t samples, double rate, int_least32_t master_volume, int master_balance);
@@ -126,13 +321,16 @@
         void set_vibrato_frequency(double value){ vibrato_frequency = value; }
         void set_master_frequency_multiplier(double value){ master_frequency_multiplier = value; update_frequency_multiplier(); }
         void set_mute(bool mute_){ mute = mute_; }
-        void set_system_mode(system_mode_t mode){ system_mode = mode; }
+        void set_system_mode(system_mode_t mode);
         void set_effect_mode(int kind, int value);
         void set_sys_fx_level(int kind, int value);
         void set_efx_on(int slot, int on);
         void apply_xg_part(int addr, int value);
         void apply_gs_tone(int addr, int value);
         void apply_gs_part_mix(int addr, int value);
+        void apply_gs_efx_byte(int addr, int val);
+        void apply_xg_ins_byte(int slot, int addr, int val);
+        void apply_xg_sysfx_byte(int addr, int val);
         tone_color effect_color() const;
         void mono_mode_on(){ all_note_off(); mono = true; }
         void poly_mode_on(){ all_note_off(); mono = false; }
@@ -202,6 +400,11 @@
         int nrpnCutoff, nrpnReso, nrpnHpf, nrpnAtk, nrpnDec, nrpnRel;
         int nrpnVibRate, nrpnVibDepth, nrpnVibDelay;
         int eqLoGain, eqHiGain;
+        int chIndex;
+        int fxInsFam, fxInsPacked, fxIns2Packed;
+        int fxInsDrive, fxInsLo, fxInsHi;
+        int fxInsP[32];
+        int fxVarPacked, fxVarConn, fxVarPart;
 
         int get_registered_parameter();
         void set_registered_parameter(int value);
@@ -415,6 +618,7 @@
         bool set_drum_program(int number, const DRUMPARAMETER& p);
         virtual note* note_on(int_least32_t program, int note, int velocity, double frequency_multiplier);
         void set_tone_color(const tone_color& c) { color = c; }
+        void set_raira(int raira);
         void reset_pool_frame();
     private:
         tone_color color;
