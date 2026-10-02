@@ -46,6 +46,8 @@ public:
 	void UndoLastDelete(); // 直近の編集を戻す(削除/貼り付け/行移動。Ctrl+Z)
 	void RedoLastEdit();   // Ctrl+Y / Ctrl+Shift+Z
 	void MoveTrack(int src, int dst, BOOL recordUndo = TRUE); // pc[] を src→dst へ回転移動
+	// 可視リスト(MP m_list / Falcom m_lc)の選択 pc インデックス。空なら m_ctxHit。
+	void CollectSelectedIndices(std::vector<int>& out) const;
 	BOOL CopySelectionToClipboard();
 	void PasteFromClipboard();
 	void SelectAllTracks(); // Ctrl+A

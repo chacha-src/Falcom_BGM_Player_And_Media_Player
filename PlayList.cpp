@@ -62,6 +62,27 @@ static CWnd* GetPlaylistModalOwner(CPlayList* plDlg)
 	return AfxGetMainWnd();
 }
 
+/* AfxMessageBox は AfxGetMainWnd(隠れ og/pl) を親にするので、MP の裏に回る。 */
+static int PlMessageBox(CPlayList* plDlg, LPCTSTR text, UINT type)
+{
+	extern CMediaPlayerDlg* mp;
+	HWND h = NULL;
+	if (savedata.playerMode == 1 && mp && ::IsWindow(mp->GetSafeHwnd()))
+		h = mp->GetSafeHwnd();
+	else {
+		CWnd* owner = GetPlaylistModalOwner(plDlg);
+		h = (owner && ::IsWindow(owner->GetSafeHwnd())) ? owner->GetSafeHwnd() : NULL;
+	}
+	if (h) {
+		::EnableWindow(h, TRUE);
+		::SetForegroundWindow(h);
+	}
+	LPCTSTR cap = AfxGetAppName();
+	if (!cap || !cap[0])
+		cap = _T("ogg");
+	return (int)::MessageBox(h, text, cap, type | MB_SETFOREGROUND);
+}
+
 enum { kPlJakN = 48, kPlJakPx = 24 };
 #ifndef WM_PL_MISS_DONE
 #define WM_PL_MISS_DONE (WM_APP + 67)
@@ -3024,16 +3045,17 @@ static void PlMicLevSliderCb(void* /*ctx*/, int value)
 
 void MpSurroundAmountSliderCb(void* /*ctx*/, int value);
 
-/* メディアプレーヤ側は選択同期が空でも m_ctxHit に右クリック行がある。 */
+/* メディアプレーヤ側は隠し m_lc の選択が空でも、可視リスト / m_ctxHit がある。 */
 static int PlCtxCollectRows(CPlayList* pl, int* out, int cap, int extraHit)
 {
 	int n = 0;
 	if (!pl || !out || cap <= 0) return 0;
-	int i = -1;
-	if (::IsWindow(pl->m_lc.GetSafeHwnd())) {
-		while ((i = pl->m_lc.GetNextItem(i, LVNI_ALL | LVNI_SELECTED)) >= 0) {
-			if (n < cap) out[n++] = i;
-		}
+	std::vector<int> sel;
+	pl->CollectSelectedIndices(sel);
+	for (int i : sel) {
+		if (n >= cap) break;
+		if (i >= 0 && i < pl->playcnt)
+			out[n++] = i;
 	}
 	if (extraHit >= 0 && extraHit < pl->playcnt) {
 		int have = 0;
@@ -3124,8 +3146,10 @@ static void PlApplySasamiMapForce(CPlayList* pl, int force)
 
 static void PlApplySasamiFmForce(CPlayList* pl, int fmMode)
 {
-	int i = -1;
-	while ((i = pl->m_lc.GetNextItem(i, LVNI_ALL | LVNI_SELECTED)) >= 0) {
+	if (!pl) return;
+	std::vector<int> sel;
+	pl->CollectSelectedIndices(sel);
+	for (int i : sel) {
 		if (!pl->pc || i >= pl->playcnt || !pl->pc[i].fol[0]) continue;
 #ifndef _UNICODE
 		if (!SasamiExtIsFm(CStringW(pl->pc[i].fol))) continue;
@@ -3192,9 +3216,8 @@ static void PlApplyCemuModeTag(CPlayList* pl, const char* tag)
 	RECT topRect = {};
 	if (top >= 0 && pl->m_lc.GetItemRect(top, &topRect, LVIR_BOUNDS))
 		topY = topRect.top;
-	int i = -1;
-	while ((i = pl->m_lc.GetNextItem(i, LVNI_ALL | LVNI_SELECTED)) >= 0) {
-		selected.push_back(i);
+	pl->CollectSelectedIndices(selected);
+	for (int i : selected) {
 		if (!pl->pc || i >= pl->playcnt || !pl->pc[i].fol[0]) continue;
 		if (pl->pc[i].sub != MODE_CEMU) continue;
 		CEmuModePrefSet(pl->pc[i].fol, tag);
@@ -3276,9 +3299,8 @@ static void PlApplyCemuToggleFlip(CPlayList* pl, unsigned code)
 	RECT topRect = {};
 	if (top >= 0 && pl->m_lc.GetItemRect(top, &topRect, LVIR_BOUNDS))
 		topY = topRect.top;
-	int i = -1;
-	while ((i = pl->m_lc.GetNextItem(i, LVNI_ALL | LVNI_SELECTED)) >= 0) {
-		selected.push_back(i);
+	pl->CollectSelectedIndices(selected);
+	for (int i : selected) {
 		if (!pl->pc || i >= pl->playcnt || !pl->pc[i].fol[0]) continue;
 		if (pl->pc[i].sub != MODE_CEMU) continue;
 		wchar_t zipOut[CEMU_ZIP_PATH];
@@ -3323,25 +3345,34 @@ static void PlApplyCemuToggleFlip(CPlayList* pl, unsigned code)
 
 int CPlayList::ShowTrackContextMenu(CPoint pt, CWnd* pOwner)
 {
-	CPoint client = pt;
-	m_lc.ScreenToClient(&client);
-	const int listHit = m_lc.HitTest(client, NULL);
-	if (listHit >= 0 && listHit < playcnt)
-		m_ctxHit = listHit;
-	else if (m_ctxHit < 0 || m_ctxHit >= playcnt) {
-		int hit = m_lc.GetSelectionMark();
-		if (hit < 0 || hit >= playcnt)
-			hit = m_lc.GetNextItem(-1, LVNI_FOCUSED);
-		if (hit < 0 || hit >= playcnt)
-			hit = m_lc.GetNextItem(-1, LVNI_SELECTED);
+	extern CMediaPlayerDlg* mp;
+	const BOOL fromMp = (pOwner && mp && pOwner == mp);
+	if (!fromMp && ::IsWindow(m_lc.GetSafeHwnd())) {
+		CPoint client = pt;
+		m_lc.ScreenToClient(&client);
+		const int listHit = m_lc.HitTest(client, NULL);
+		if (listHit >= 0 && listHit < playcnt)
+			m_ctxHit = listHit;
+	}
+	if (m_ctxHit < 0 || m_ctxHit >= playcnt) {
+		int hit = -1;
+		if (!fromMp && ::IsWindow(m_lc.GetSafeHwnd())) {
+			hit = m_lc.GetSelectionMark();
+			if (hit < 0 || hit >= playcnt)
+				hit = m_lc.GetNextItem(-1, LVNI_FOCUSED);
+			if (hit < 0 || hit >= playcnt)
+				hit = m_lc.GetNextItem(-1, LVNI_SELECTED);
+		}
 		m_ctxHit = (hit >= 0 && hit < playcnt) ? hit : -1;
 	}
+	std::vector<int> ctxSel;
+	CollectSelectedIndices(ctxSel);
 	int Lindex = m_ctxHit;
-	if (Lindex < 0)
-		Lindex = m_lc.GetNextItem(-1, LVNI_ALL | LVNI_SELECTED);
+	if (Lindex < 0 && !ctxSel.empty())
+		Lindex = ctxSel[0];
 	if (Lindex < 0) return 0;
+	const int ctxSelCount = (int)ctxSel.size();
 
-	extern CMediaPlayerDlg* mp;
 	const BOOL hasMp = (mp && ::IsWindow(mp->GetSafeHwnd())) ? TRUE : FALSE;
 
 	CCustomPopupMenu menu;
@@ -3826,12 +3857,7 @@ int CPlayList::ShowTrackContextMenu(CPoint pt, CWnd* pOwner)
 					L"Nivel do mix de microfone 0–200 (ao vivo)", L"Mic-mixniveau 0–200 (live)", L"Poziom mixu mikrofonu 0–200 (na zywo)", L"Mikrofon mix seviyesi 0–200 (anlik)"));
 		}
 		{
-			int selCount = 0;
-			int idx = -1;
-			while ((idx = m_lc.GetNextItem(idx, LVNI_ALL | LVNI_SELECTED)) >= 0) {
-				if (idx < playcnt) ++selCount;
-			}
-			if (selCount >= 2) {
+			if (ctxSelCount >= 2) {
 				subExport->AddCommand(PL_CTX_XFADE,
 					LL14(L"クロスフェード書き出し…", L"Crossfade export...", L"Export fondu enchaine...", L"Esporta con crossfade...",
 						L"Exportar con fundido cruzado...", L"크로스페이드 내보내기...", L"交叉淡入淡出导出…", L"تصدير بتلاشي متقاطع...",
@@ -3879,12 +3905,7 @@ int CPlayList::ShowTrackContextMenu(CPoint pt, CWnd* pOwner)
 					L"Редактирует название, исполнителя и другие теги", L"Bearbeitet Titel, Interpret und andere Tags der Auswahl", L"Edita titulo, artista e outras tags da selecao", L"Bewerkt titel, artiest en andere tags van de selectie",
 					L"Edytuje tytul, artyste i inne tagi zaznaczenia", L"Secimin baslik, sanatci ve diger etiketlerini duzenler"));
 		{
-			int tagSel = 0;
-			int tidx = -1;
-			while ((tidx = m_lc.GetNextItem(tidx, LVNI_ALL | LVNI_SELECTED)) >= 0) {
-				if (tidx < playcnt) ++tagSel;
-			}
-			if (tagSel >= 2) {
+			if (ctxSelCount >= 2) {
 				subTag->AddCommand(PL_CTX_TAG_BATCH,
 					LL14(L"まとめて編集…", L"Batch edit...", L"Edition groupée...", L"Modifica in blocco...",
 						L"Edición por lote...", L"일괄 편집...", L"批量编辑…", L"تحرير دفعي...",
@@ -4450,11 +4471,9 @@ void CPlayList::HandleTrackContextCmd(int cmd)
 	else if (cmd == PL_CTX_TAG_EDIT) OnPopTagEdit();
 	else if (cmd == PL_CTX_TAG_BATCH) OnPopTagBatch();
 	else if (cmd == PL_CTX_DEL) {
-		int selCount = 0;
-		int idx = -1;
-		while ((idx = m_lc.GetNextItem(idx, LVNI_ALL | LVNI_SELECTED)) >= 0) {
-			if (idx < playcnt) ++selCount;
-		}
+		std::vector<int> sel;
+		CollectSelectedIndices(sel);
+		const int selCount = (int)sel.size();
 		if (selCount <= 0) return;
 		CString msg;
 		if (playcnt > 0 && selCount >= playcnt)
@@ -4472,9 +4491,9 @@ void CPlayList::HandleTrackContextCmd(int cmd)
 				L"¿Eliminar %d?", L"%d개 삭제할까요?", L"要删除 %d 项吗？", L"حذف %d؟",
 				L"Удалить %d?", L"%d loeschen?", L"Excluir %d?", L"%d verwijderen?",
 				L"Usunac %d?", L"%d sil?"), selCount);
-		if (AfxMessageBox(msg, MB_YESNO | MB_ICONQUESTION) != IDYES)
+		if (PlMessageBox(this, msg, MB_YESNO | MB_ICONQUESTION) != IDYES)
 			return;
-		Del();
+		DelByIndices(sel);
 	}
 	else if (cmd == PL_CTX_EDIT_SELALL) SelectAllTracks();
 	else if (cmd == PL_CTX_EDIT_COPY) CopySelectionToClipboard();
@@ -4526,8 +4545,9 @@ void CPlayList::HandleTrackContextCmd(int cmd)
 	}
 	else if (cmd == PL_CTX_REFRESH_JAK) {
 		extern CMediaPlayerDlg* mp;
-		int idx = -1;
-		while ((idx = m_lc.GetNextItem(idx, LVNI_ALL | LVNI_SELECTED)) >= 0) {
+		std::vector<int> sel;
+		CollectSelectedIndices(sel);
+		for (int idx : sel) {
 			if (!pc || idx < 0 || idx >= playcnt) continue;
 			PlJakDiskForget(pc[idx].fol);
 			PlJakMemInit();
@@ -4576,8 +4596,9 @@ void CPlayList::HandleTrackContextCmd(int cmd)
 	}
 	else if (cmd == PL_CTX_CLEAR_SONGPARAM) {
 		std::vector<playlistdata0> items;
-		int idx = -1;
-		while ((idx = m_lc.GetNextItem(idx, LVNI_ALL | LVNI_SELECTED)) >= 0) {
+		std::vector<int> sel;
+		CollectSelectedIndices(sel);
+		for (int idx : sel) {
 			if (idx >= 0 && idx < playcnt && pc)
 				items.push_back(pc[idx]);
 		}
@@ -4597,7 +4618,7 @@ void CPlayList::HandleTrackContextCmd(int cmd)
 				L"Opgeslagen parameters (volume, EQ enz.) van selectie wissen?",
 				L"Usunąć zapisane parametry (głośność, EQ itd.) zaznaczonych utworów?",
 				L"Seçili parçaların kayıtlı parametreleri (ses, EQ vb.) silinsin mi?");
-			if (AfxMessageBox(msg, MB_YESNO | MB_ICONQUESTION) == IDYES) {
+			if (PlMessageBox(this, msg, MB_YESNO | MB_ICONQUESTION) == IDYES) {
 				CString listKey = SongParams_CurrentListName();
 				SongParams_RebindEntries(listKey, NULL, items.data(), (int)items.size(), false);
 			}
@@ -4616,7 +4637,9 @@ void CPlayList::HandleTrackContextCmd(int cmd)
 		if (og && ::IsWindow(og->GetSafeHwnd())) og->ToggleWrdView();
 	}
 	else if (cmd == PL_CTX_WRD) {
-		int Lindex = m_lc.GetNextItem(-1, LVNI_ALL | LVNI_SELECTED);
+		std::vector<int> sel;
+		CollectSelectedIndices(sel);
+		const int Lindex = sel.empty() ? -1 : sel[0];
 		if (Lindex >= 0 && Lindex < playcnt) {
 			wchar_t wrd[MAX_PATH];
 			wrd[0] = 0;
@@ -4640,8 +4663,9 @@ void CPlayList::HandleTrackContextCmd(int cmd)
 	else if (cmd >= PL_CTX_CEMUMODE_BASE && cmd <= PL_CTX_CEMUMODE_LAST) {
 		const int mi = (int)(cmd - PL_CTX_CEMUMODE_BASE);
 		CString cemuFol;
-		int i = -1;
-		while ((i = m_lc.GetNextItem(i, LVNI_ALL | LVNI_SELECTED)) >= 0) {
+		std::vector<int> sel;
+		CollectSelectedIndices(sel);
+		for (int i : sel) {
 			if (!pc || i >= playcnt || !pc[i].fol[0]) continue;
 			if (pc[i].sub == MODE_CEMU) { cemuFol = pc[i].fol; break; }
 		}
@@ -4663,8 +4687,9 @@ void CPlayList::HandleTrackContextCmd(int cmd)
 	else if (cmd >= PL_CTX_CEMUTOGGLE_BASE && cmd <= PL_CTX_CEMUTOGGLE_LAST) {
 		const int ti = (int)(cmd - PL_CTX_CEMUTOGGLE_BASE);
 		CString cemuFol;
-		int i = -1;
-		while ((i = m_lc.GetNextItem(i, LVNI_ALL | LVNI_SELECTED)) >= 0) {
+		std::vector<int> sel;
+		CollectSelectedIndices(sel);
+		for (int i : sel) {
 			if (!pc || i >= playcnt || !pc[i].fol[0]) continue;
 			if (pc[i].sub == MODE_CEMU) { cemuFol = pc[i].fol; break; }
 		}
@@ -4685,8 +4710,11 @@ void CPlayList::HandleTrackContextCmd(int cmd)
 		extern CString filen, fnn;
 		extern int modesub, mode, loop1, loop2, ret2;
 		int idx = m_ctxHit;
-		if (idx < 0 || idx >= playcnt)
-			idx = m_lc.GetSelectionMark();
+		if (idx < 0 || idx >= playcnt) {
+			std::vector<int> sel;
+			CollectSelectedIndices(sel);
+			if (!sel.empty()) idx = sel[0];
+		}
 		if (idx < 0 || idx >= playcnt || !pc || !IsCemuMode(pc[idx].sub))
 			idx = -1;
 		if (idx >= 0) {
@@ -4744,7 +4772,9 @@ void CPlayList::HandleTrackContextCmd(int cmd)
 		PlMidNotifyMarkViews();
 	}
 	else if (cmd == PL_CTX_COPY_TITLEART) {
-		const int idx = m_lc.GetNextItem(-1, LVNI_ALL | LVNI_SELECTED);
+		std::vector<int> sel;
+		CollectSelectedIndices(sel);
+		const int idx = sel.empty() ? -1 : sel[0];
 		if (pc && idx >= 0 && idx < playcnt) {
 			CString s;
 			s.Format(_T("%s - %s"), pc[idx].name, pc[idx].art);
@@ -4898,7 +4928,9 @@ void CPlayList::HandleTrackContextCmd(int cmd)
 			mp->SendMessage(WM_COMMAND, ID_MP_FOLDER_SYNC, 0);
 	}
 	else if (cmd == PL_CTX_OPEN_FOLDER || cmd == PL_CTX_ADD_SAME_FOLDER) {
-		const int idx = m_lc.GetNextItem(-1, LVNI_ALL | LVNI_SELECTED);
+		std::vector<int> sel;
+		CollectSelectedIndices(sel);
+		const int idx = sel.empty() ? -1 : sel[0];
 		CString path;
 		if (pc && idx >= 0 && idx < playcnt)
 			path = PlPhysicalMediaPath(pc[idx].fol);
@@ -4939,10 +4971,7 @@ void CPlayList::TransferSelectedToPlaylist(int targetIdx, bool moveNotCopy)
 	if (targetIdx < 0 || targetIdx >= GetPlaylistFileCount()) return;
 
 	std::vector<int> sel;
-	int idx = -1;
-	while ((idx = m_lc.GetNextItem(idx, LVNI_ALL | LVNI_SELECTED)) >= 0) {
-		if (idx < playcnt) sel.push_back(idx);
-	}
+	CollectSelectedIndices(sel);
 	if (sel.empty()) return;
 
 	std::vector<playlistdata0> toXfer;
@@ -6189,14 +6218,35 @@ static void PlRemoveTracksRaw(CPlayList* pl, const std::vector<int>& indices)
 	}
 }
 
+void CPlayList::CollectSelectedIndices(std::vector<int>& out) const
+{
+	out.clear();
+	extern CMediaPlayerDlg* mp;
+	CPlayList* self = const_cast<CPlayList*>(this);
+	if (savedata.playerMode == 1 && mp && ::IsWindow(mp->GetSafeHwnd())
+		&& ::IsWindow(mp->m_list.GetSafeHwnd())) {
+		mp->CollectSelectedPcIndices(out);
+		if (!out.empty())
+			return;
+	}
+	if (::IsWindow(m_lc.GetSafeHwnd())) {
+		int idx = -1;
+		while ((idx = self->m_lc.GetNextItem(idx, LVNI_ALL | LVNI_SELECTED)) >= 0) {
+			if (idx >= 0 && idx < playcnt)
+				out.push_back(idx);
+		}
+		if (!out.empty())
+			return;
+	}
+	if (m_ctxHit >= 0 && m_ctxHit < playcnt)
+		out.push_back(m_ctxHit);
+}
+
 void CPlayList::Del()
 {
 	if (!pc || playcnt <= 0) return;
 	std::vector<int> sel;
-	int Lindex = -1;
-	while ((Lindex = m_lc.GetNextItem(Lindex, LVNI_ALL | LVNI_SELECTED)) >= 0) {
-		if (Lindex < playcnt) sel.push_back(Lindex);
-	}
+	CollectSelectedIndices(sel);
 	if (sel.empty()) return;
 	DelByIndices(sel);
 }
@@ -6332,15 +6382,12 @@ static void PlClipLeave()
 BOOL CPlayList::CopySelectionToClipboard()
 {
 	if (!PlClipEnter()) return FALSE;
-	if (!pc || playcnt <= 0 || !::IsWindow(m_lc.GetSafeHwnd())) {
+	if (!pc || playcnt <= 0) {
 		PlClipLeave();
 		return FALSE;
 	}
 	std::vector<int> sel;
-	int idx = -1;
-	while ((idx = m_lc.GetNextItem(idx, LVNI_ALL | LVNI_SELECTED)) >= 0) {
-		if (idx >= 0 && idx < playcnt) sel.push_back(idx);
-	}
+	CollectSelectedIndices(sel);
 	if (sel.empty()) {
 		PlClipLeave();
 		return FALSE;
@@ -6452,13 +6499,16 @@ void CPlayList::PasteFromClipboard()
 	}
 
 	int at = playcnt;
-	if (::IsWindow(m_lc.GetSafeHwnd())) {
-		int lastSel = -1, i = -1;
-		while ((i = m_lc.GetNextItem(i, LVNI_SELECTED)) >= 0)
-			lastSel = i;
-		const int foc = m_lc.GetNextItem(-1, LVNI_FOCUSED);
-		if (lastSel >= 0) at = lastSel + 1;
-		else if (foc >= 0) at = foc + 1;
+	{
+		std::vector<int> sel;
+		CollectSelectedIndices(sel);
+		if (!sel.empty()) {
+			int lastSel = sel[0];
+			for (int i : sel) {
+				if (i > lastSel) lastSel = i;
+			}
+			at = lastSel + 1;
+		}
 	}
 	if (at < 0) at = 0;
 	if (at > playcnt) at = playcnt;
@@ -6550,12 +6600,23 @@ BOOL CPlayList::HandleListEditKeys(MSG* pMsg)
 
 void CPlayList::SelectAllTracks()
 {
-	if (!::IsWindow(m_lc.GetSafeHwnd()) || playcnt <= 0) return;
-	m_lc.SetRedraw(FALSE);
-	for (int i = 0; i < playcnt; ++i)
-		m_lc.SetItemState(i, LVIS_SELECTED, LVIS_SELECTED);
-	m_lc.SetRedraw(TRUE);
-	m_lc.Invalidate(FALSE);
+	if (playcnt <= 0) return;
+	if (::IsWindow(m_lc.GetSafeHwnd())) {
+		m_lc.SetRedraw(FALSE);
+		for (int i = 0; i < playcnt; ++i)
+			m_lc.SetItemState(i, LVIS_SELECTED, LVIS_SELECTED);
+		m_lc.SetRedraw(TRUE);
+		m_lc.Invalidate(FALSE);
+	}
+	extern CMediaPlayerDlg* mp;
+	if (savedata.playerMode == 1 && mp && ::IsWindow(mp->m_list.GetSafeHwnd())) {
+		const int n = mp->m_list.GetItemCount();
+		mp->m_list.SetRedraw(FALSE);
+		for (int i = 0; i < n; ++i)
+			mp->m_list.SetItemState(i, LVIS_SELECTED, LVIS_SELECTED);
+		mp->m_list.SetRedraw(TRUE);
+		mp->m_list.Invalidate(FALSE);
+	}
 }
 
 void CPlayList::OnSUP()
@@ -12372,8 +12433,12 @@ static void PlApplyMidiGameLabel(playlistdata0& item)
 	const int dot = ss.ReverseFind(_T('.'));
 	if (dot >= 0) ss = ss.Mid(dot + 1);
 	CString game;
-	if (item.sub == MODE_VST_MIDI || item.sub == MODE_MIDI_PACK)
-		game.Format(LL14(L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)"), ss);
+	if (item.sub == MODE_VST_MIDI || item.sub == MODE_MIDI_PACK) {
+		if (savedata.midPlayPrefer == 2)
+			game.Format(LL14(L"%s(HOST)", L"%s(HOST)", L"%s(HOST)", L"%s(HOST)", L"%s(HOST)", L"%s(HOST)", L"%s(HOST)", L"%s(HOST)", L"%s(HOST)", L"%s(HOST)", L"%s(HOST)", L"%s(HOST)", L"%s(HOST)", L"%s(HOST)"), ss);
+		else
+			game.Format(LL14(L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)", L"%s(VST)"), ss);
+	}
 	else if (item.sub == -3)
 		game.Format(LL14(L"%s(KPI)", L"%s(KPI)", L"%s(KPI)", L"%s(KPI)", L"%s(KPI)", L"%s(KPI)", L"%s(KPI)", L"%s(KPI)", L"%s(KPI)", L"%s(KPI)", L"%s(KPI)", L"%s(KPI)", L"%s(KPI)", L"%s(KPI)"), ss);
 	else
@@ -12397,7 +12462,7 @@ void CPlayList::FixMidiMode(playlistdata0& item)
 		return;
 	}
 	if (VstIsMidiExt(item.fol) || VstIsProjectExt(item.fol)) {
-		const int preferVst = (savedata.midPlayPrefer == 1) ? 1 : 0;
+		const int preferVst = (savedata.midPlayPrefer != 0) ? 1 : 0;
 		// VST優先で既に -30、KPI優先で既に -3 → そのまま（表示だけ揃える）。
 		if (preferVst && item.sub == MODE_VST_MIDI) {
 			PlApplyMidiGameLabel(item);
@@ -12848,7 +12913,7 @@ void CPlayList::plugs(CString fff, playlistdata *p,TCHAR* kpi, BYTE& kv)
 		/* VstResolvePlayPath は書庫の展開やシーケンス／MusicXML → SMF 変換までやる。
 		   KPI 優先では結果を使わないので呼ばない。以前は無条件に呼んでいたため、
 		   MIDI 優先を切り替えると全 MIDI 行の引き直しで UI スレッドが数秒止まっていた。 */
-		if (savedata.midPlayPrefer != 1 && ComposerIsSeqExt(fff)) {
+		if (savedata.midPlayPrefer == 0 && ComposerIsSeqExt(fff)) {
 			int pick = -1;
 			BYTE kvS = 0;
 			for (int i = 0; i < kpicnt; i++) {
@@ -12876,7 +12941,7 @@ void CPlayList::plugs(CString fff, playlistdata *p,TCHAR* kpi, BYTE& kv)
 				return;
 			}
 		}
-		if (savedata.midPlayPrefer == 1) {
+		if (savedata.midPlayPrefer != 0) {
 			wchar_t mid[VST_PATH_CHARS]; mid[0] = 0;
 			wchar_t hints[32][128]; int hc = 0;
 			if (VstResolvePlayPath(fff, mid, VST_PATH_CHARS, hints, 32, &hc)) {
@@ -14199,13 +14264,7 @@ void CPlayList::OnNMRclickList1(NMHDR *pNMHDR, LRESULT *pResult)
 void CPlayList::OnList()
 {
 	std::vector<int> sel;
-	int Lindex = -1;
-	while ((Lindex = m_lc.GetNextItem(Lindex, LVNI_ALL | LVNI_SELECTED)) >= 0) {
-		if (Lindex >= 0 && Lindex < playcnt)
-			sel.push_back(Lindex);
-	}
-	if (sel.empty() && m_ctxHit >= 0 && m_ctxHit < playcnt)
-		sel.push_back(m_ctxHit);
+	CollectSelectedIndices(sel);
 	if (sel.empty())
 		return;
 
@@ -14293,10 +14352,7 @@ void CPlayList::OnPop32787()//ファイル名変更（統合画面へ）
 void CPlayList::OnPopWavExport()
 {
 	std::vector<int> indices;
-	int Lindex = -1;
-	while ((Lindex = m_lc.GetNextItem(Lindex, LVNI_ALL | LVNI_SELECTED)) >= 0) {
-		if (Lindex < playcnt) indices.push_back(Lindex);
-	}
+	CollectSelectedIndices(indices);
 	if (indices.empty()) return;
 	CTranscodeExport* a = new CTranscodeExport(GetPlaylistModalOwner(this));
 	a->m_initialTab = -1; // 前回形式(mp3/FLAC)。WAVはタブで切替
@@ -14323,10 +14379,7 @@ void CPlayList::OnPopWavExport()
 void CPlayList::OnPopXfadeExport()
 {
 	std::vector<int> indices;
-	int Lindex = -1;
-	while ((Lindex = m_lc.GetNextItem(Lindex, LVNI_ALL | LVNI_SELECTED)) >= 0) {
-		if (Lindex < playcnt) indices.push_back(Lindex);
-	}
+	CollectSelectedIndices(indices);
 	if (indices.size() < 2) return;
 	CTranscodeExport* a = new CTranscodeExport(GetPlaylistModalOwner(this));
 	a->m_initialTab = -1;
@@ -14346,10 +14399,7 @@ void CPlayList::OnPopXfadeExport()
 void CPlayList::OnPopTranscode()
 {
 	std::vector<int> indices;
-	int Lindex = -1;
-	while ((Lindex = m_lc.GetNextItem(Lindex, LVNI_ALL | LVNI_SELECTED)) >= 0) {
-		if (Lindex < playcnt) indices.push_back(Lindex);
-	}
+	CollectSelectedIndices(indices);
 	if (indices.empty()) return;
 	CTranscodeExport* a = new CTranscodeExport(GetPlaylistModalOwner(this));
 	a->m_initialTab = (savedata.tc_format == 1) ? 2 : 1; // FLAC or mp3
@@ -14376,10 +14426,7 @@ void CPlayList::OnPopTranscode()
 void CPlayList::OnPopTagEdit()
 {
 	std::vector<int> indices;
-	int Lindex = -1;
-	while ((Lindex = m_lc.GetNextItem(Lindex, LVNI_ALL | LVNI_SELECTED)) >= 0) {
-		if (Lindex < playcnt) indices.push_back(Lindex);
-	}
+	CollectSelectedIndices(indices);
 	if (indices.empty()) return;
 	CTagEditDlg* a = new CTagEditDlg(GetPlaylistModalOwner(this));
 	w_flg = FALSE;
@@ -14455,21 +14502,18 @@ void CPlayList::OnPopTagEdit()
 
 void CPlayList::OnPopTagBatch()
 {
-	int cap = 0;
-	int Lindex = -1;
-	while ((Lindex = m_lc.GetNextItem(Lindex, LVNI_ALL | LVNI_SELECTED)) >= 0) {
-		if (Lindex < playcnt) ++cap;
-	}
+	std::vector<int> sel;
+	CollectSelectedIndices(sel);
+	const int cap = (int)sel.size();
 	if (cap < 2)
 		return;
 	int* idx = (int*)malloc(sizeof(int) * (size_t)cap);
 	if (!idx)
 		return;
 	int n = 0;
-	Lindex = -1;
-	while ((Lindex = m_lc.GetNextItem(Lindex, LVNI_ALL | LVNI_SELECTED)) >= 0) {
-		if (Lindex < playcnt)
-			idx[n++] = Lindex;
+	for (int i : sel) {
+		if (i >= 0 && i < playcnt)
+			idx[n++] = i;
 	}
 	if (n < 2) {
 		free(idx);

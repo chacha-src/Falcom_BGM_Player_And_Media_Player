@@ -1338,7 +1338,9 @@ void CProToolsDlg::LoadTrackFromSelection()
 	extern CPlayList* pl;
 	extern int plcnt;
 	if (pl) {
-		int idx = pl->m_lc.GetNextItem(-1, LVNI_ALL | LVNI_SELECTED);
+		std::vector<int> sel;
+		pl->CollectSelectedIndices(sel);
+		int idx = sel.empty() ? -1 : sel[0];
 		if (idx < 0 && plcnt >= 0 && plcnt < pl->playcnt)
 			idx = plcnt;
 		if (idx >= 0 && idx < pl->playcnt) {

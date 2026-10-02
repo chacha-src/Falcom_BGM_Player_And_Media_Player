@@ -13,6 +13,7 @@
 #include "GdiSoft3D.h"
 #include "resource.h"
 #include <atlimage.h>
+#include <vector>
 
 class COggDlg;
 class CPlayList;
@@ -478,6 +479,7 @@ public:
 	void ApplyListTooltipState();
 	int  GetListScrollAnchor() const;
 	int  GetSelectedPcIndex() const;
+	void CollectSelectedPcIndices(std::vector<int>& out) const;
 	void RestoreListScrollAnchor(int anchor);
 	// og の timerp で使う sss 決定ロジックと同じ規則でタイトルを解決する。
 	// mode 値により tagfile / stitle / fnn のどれを使うかが変わる。

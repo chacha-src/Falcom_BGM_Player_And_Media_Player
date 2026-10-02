@@ -300,7 +300,7 @@ const std::vector<KpiV5ConfigEntry>& GetKpiV5KnownEntries()
 		{ L"kbfmoplmidi", L"General", L"DrumChannel16", L"0" },
 		{ L"kbfmoplmidi", L"General", L"EmuCore", L"0" },
 		{ L"kbsasami", L"kbsasami", L"raira", L"1" },
-		// midPlayPrefer=0(KPI/FM) → 保存1、raira で反転して実効0。VST優先時は保存0→実効1
+		// midPlayPrefer=0(KPI/FM) → 保存1、raira で反転して実効0。VST/ホスト優先時は保存0→実効1
 		{ L"kbsasami", L"kbsasami", L"vst", L"1" },
 		{ L"kbsasami", L"kbsasami", L"midimode", L"0" },
 		{ L"kbsasami", L"kbsasami", L"fmmode", L"2" },
@@ -312,5 +312,5 @@ void KpiV5SyncKbsasamiOptions(int midPlayPrefer)
 {
 	KpiV5SetInt(L"kbsasami", L"kbsasami", L"raira", 1);
 	// 本家: vst=0 が FM MIDI。raira=1 で入れ替えるので、希望の逆を書く
-	KpiV5SetInt(L"kbsasami", L"kbsasami", L"vst", (midPlayPrefer == 1) ? 0 : 1);
+	KpiV5SetInt(L"kbsasami", L"kbsasami", L"vst", (midPlayPrefer != 0) ? 0 : 1);
 }

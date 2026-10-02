@@ -97,7 +97,8 @@ enum {
 	// extern PlRefreshMidiPlayModes() でプレイリストの MID(VST)/MID(KPI) を即更新。
 	// PlayList.h は IDD_PLAYLIST 欠落のため CCustomPopupMenu.cpp から include しない。
 	CCUSTOM_POPUP_ID_MID_KPI = 0x00E0012D,    // KPI 優先（midPlayPrefer=0）
-	CCUSTOM_POPUP_ID_MID_VST = 0x00E0012E,    // 自前 VST ホスト優先（midPlayPrefer=1）
+	CCUSTOM_POPUP_ID_MID_VST = 0x00E0012E,    // CRender GS/XG VST 優先（midPlayPrefer=1）
+	CCUSTOM_POPUP_ID_MID_HOST = 0x00E00130,   // VSTホストプリセット優先（midPlayPrefer=2）
 	CCUSTOM_POPUP_ID_CEMU_LIST = 0x00E0012F   // Cemu対応一覧（arcdata.zip があるときのみ）
 };
 
@@ -341,6 +342,9 @@ protected:
 	BOOL IsInteractiveKind(int kind) const;
 	BOOL IsChromeCommand(UINT id) const; // Track が 0 を返す骨格 ID
 	CCustomPopupMenu* RootMenu();
+	CCustomPopupMenu* FindMenuByHwnd(HWND h); // 開閉問わず、この木の HWND
+	CCustomPopupMenu* FindDeepestMenuAtScreen(CPoint screenPt); // 開サブ優先。本体ヒット
+	void SettleOpenChainIfDue(); // ルートだけでなく開サブも入場タイムアウトで定着
 	void RunModalLoop();
 	void AnimateIn();
 	void AnimateOut();

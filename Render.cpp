@@ -16,6 +16,7 @@
 #include "XfadePlayback.h"
 #include "AudioDevSync.h"
 #include "VstMidiEngine.h"
+#include "VstHostDlg.h"
 #include "KpiV5ConfigStore.h"
 #include "CEmu/cemu_mgr.h"
 #include <mutex>
@@ -285,20 +286,20 @@ void CRdHelpDlg::OnPaint()
 		L"· Связь файлов …… аудио + видео (avi/mp4/mkv…) и плейлисты", L"· Dateizuordnung …… Audio + Video (avi/mp4/mkv…) und Playlists", L"· Associação …… áudio + vídeo (avi/mp4/mkv…) e playlists", L"· Koppeling …… audio + video (avi/mp4/mkv…) en playlists",
 		L"· Powiązanie …… audio + wideo (avi/mp4/mkv…) i playlisty", L"· İlişkilendirme …… ses + video (avi/mp4/mkv…) ve listeler")); y += lh;
 	body(L, y, LL14(
-		L"・MIDI再生 …… KPI優先／VST優先。明示DLLが空なら MIDI出力コンボの機器（未指定はWindows MIDIマッパー）。",
-		L"· MIDI play …… Prefer KPI/VST. Empty DLL uses the MIDI out combo (default: Windows MIDI Mapper).",
-		L"· MIDI …… KPI/VST. DLL vide = combo MIDI out (défaut: MIDI Mapper).",
-		L"· MIDI …… KPI/VST. DLL vuota = combo MIDI out (predef.: MIDI Mapper).",
-		L"· MIDI …… KPI/VST. DLL vacía = combo MIDI out (predet.: MIDI Mapper).",
-		L"· MIDI …… KPI/VST. DLL이 비면 MIDI 출력 콤보(기본: MIDI Mapper).",
-		L"· MIDI …… KPI/VST。DLL为空则用MIDI输出组合框（默认 Windows MIDI Mapper）。",
-		L"· MIDI …… KPI/VST. DLL فارغ = قائمة MIDI (الافتراضي: MIDI Mapper).",
-		L"· MIDI …… KPI/VST. Пустой DLL = комбо MIDI out (по умолч. MIDI Mapper).",
-		L"· MIDI …… KPI/VST. Leere DLL = MIDI-Out-Combo (Standard: MIDI Mapper).",
-		L"· MIDI …… KPI/VST. DLL vazia = combo MIDI out (padrao: MIDI Mapper).",
-		L"· MIDI …… KPI/VST. Lege DLL = MIDI-outcombo (standaard: MIDI Mapper).",
-		L"· MIDI …… KPI/VST. Pusty DLL = combo MIDI out (domyslnie MIDI Mapper).",
-		L"· MIDI …… KPI/VST. Bos DLL = MIDI cikis combo (varsayilan: MIDI Mapper).")); y += lh;
+		L"・MIDI再生 …… KPI優先／VST優先／VSTホスト優先。ホストは事前保存したVSTホストプリセット（音色キャッシュ）で再生。明示DLLが空なら MIDI出力コンボの機器（未指定はWindows MIDIマッパー）。",
+		L"· MIDI play …… Prefer KPI / VST / VST Host. Host uses a saved VST Host preset (tone cache). Empty DLL uses the MIDI out combo (default: Windows MIDI Mapper).",
+		L"· MIDI …… KPI / VST / hote VST. L'hote utilise un prereglage enregistre. DLL vide = combo MIDI out (defaut: MIDI Mapper).",
+		L"· MIDI …… KPI / VST / host VST. L'host usa un preset salvato. DLL vuota = combo MIDI out (predef.: MIDI Mapper).",
+		L"· MIDI …… KPI / VST / host VST. El host usa un preset guardado. DLL vacia = combo MIDI out (predet.: MIDI Mapper).",
+		L"· MIDI …… KPI / VST / VST 호스트. 호스트는 저장한 프리셋(음색 캐시)으로 재생. DLL이 비면 MIDI 출력 콤보(기본: MIDI Mapper).",
+		L"· MIDI …… KPI / VST / VST主机。主机用已保存的预设（音色缓存）播放。DLL为空则用MIDI输出组合框（默认 Windows MIDI Mapper）。",
+		L"· MIDI …… KPI / VST / مضيف VST. المضيف يستخدم إعدادًا محفوظًا. DLL فارغ = قائمة MIDI (الافتراضي: MIDI Mapper).",
+		L"· MIDI …… KPI / VST / VST-хост. Хост играет сохранённым пресетом. Пустой DLL = комбо MIDI out (по умолч. MIDI Mapper).",
+		L"· MIDI …… KPI / VST / VST-Host. Host nutzt gespeichertes Preset. Leere DLL = MIDI-Out-Combo (Standard: MIDI Mapper).",
+		L"· MIDI …… KPI / VST / host VST. O host usa um preset gravado. DLL vazia = combo MIDI out (padrao: MIDI Mapper).",
+		L"· MIDI …… KPI / VST / VST-host. Host speelt een opgeslagen preset. Lege DLL = MIDI-outcombo (standaard: MIDI Mapper).",
+		L"· MIDI …… KPI / VST / host VST. Host uzywa zapisanego presetu. Pusty DLL = combo MIDI out (domyslnie MIDI Mapper).",
+		L"· MIDI …… KPI / VST / VST host. Host kayitli on ayari kullanir. Bos DLL = MIDI cikis combo (varsayilan: MIDI Mapper).")); y += lh;
 	body(L, y, LL14(
 		L"・自動アップデート …… 次回から尋ねない／はい・いいえ。確認ボタンは今すぐ公式ZIPを見る",
 		L"· Auto-update …… Don't ask / Yes·No. Check button looks at the official ZIP now",
@@ -485,6 +486,7 @@ IMPLEMENT_DYNAMIC(CRender, CCustomBlurDialogExBase)
 CRender::CRender(CWnd* pParent /*=NULL*/)
 	: CCustomBlurDialogExBase(CRender::IDD, pParent)
 	, m_modeless(0)
+	, m_acceptPos(0)
 {
 	//{{AFX_DATA_INIT(CRender)
 		// メモ - ClassWizard はこの位置にマッピング用のマクロを追加または削除します。
@@ -567,11 +569,17 @@ void CRender::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDC_STATIC_R_SURROUND, m_surroundLabel);
 	DDX_Control(pDX, IDC_MID_PREFER_KPI, m_midPreferKpi);
 	DDX_Control(pDX, IDC_MID_PREFER_VST, m_midPreferVst);
+	DDX_Control(pDX, IDC_MID_PREFER_HOST, m_midPreferHost);
+	DDX_Control(pDX, IDC_VST_HOST_PRESET, m_vstHostPreset);
 	DDX_Control(pDX, IDC_VST_MULTI_COMBO, m_vstMultiCombo);
 	DDX_Control(pDX, IDC_VST_EXTRA_PATH, m_vstExtraPath);
 	DDX_Control(pDX, IDC_VST_MULTI_DLL, m_vstMultiDll);
+	DDX_Control(pDX, IDC_VST_GS_SF2, m_vstGsSf2);
+	DDX_Control(pDX, IDC_VST_XG_SF2, m_vstXgSf2);
 	DDX_Control(pDX, IDC_VST_EXTRA_BROWSE, m_vstExtraBrowse);
 	DDX_Control(pDX, IDC_VST_MULTI_BROWSE, m_vstMultiBrowse);
+	DDX_Control(pDX, IDC_VST_GS_SF2_BROWSE, m_vstGsSf2Browse);
+	DDX_Control(pDX, IDC_VST_XG_SF2_BROWSE, m_vstXgSf2Browse);
 	DDX_Control(pDX, IDC_VST_SCAN_NOW, m_vstScanNow);
 	DDX_Control(pDX, IDC_COMBO_SPEAKER, m_speaker);
 	DDX_Control(pDX, IDC_UPD_DONTASK, m_updDontAsk);
@@ -635,14 +643,22 @@ BEGIN_MESSAGE_MAP(CRender, CCustomBlurDialogExBase)
 	ON_BN_CLICKED(IDC_CHECK_UPSCALE, OnBnClickedCheckUpscale)
 	ON_BN_CLICKED(IDC_MID_PREFER_KPI, OnMidPreferKpi)
 	ON_BN_CLICKED(IDC_MID_PREFER_VST, OnMidPreferVst)
+	ON_BN_CLICKED(IDC_MID_PREFER_HOST, OnMidPreferHost)
+	ON_CBN_SELCHANGE(IDC_VST_HOST_PRESET, OnVstHostPresetChange)
 	ON_BN_CLICKED(IDC_VST_EXTRA_BROWSE, OnVstExtraBrowse)
 	ON_BN_CLICKED(IDC_VST_MULTI_BROWSE, OnVstMultiBrowse)
+	ON_BN_CLICKED(IDC_VST_GS_SF2_BROWSE, OnVstGsSf2Browse)
+	ON_BN_CLICKED(IDC_VST_XG_SF2_BROWSE, OnVstXgSf2Browse)
+	ON_EN_CHANGE(IDC_VST_MULTI_DLL, OnVstGsPathChange)
+	ON_EN_CHANGE(IDC_VST_EXTRA_PATH, OnVstXgPathChange)
 	ON_BN_CLICKED(IDC_VST_SCAN_NOW, OnVstScanNow)
 	ON_BN_CLICKED(IDC_CHECK51, OnBnClicked32bit)
 	ON_BN_CLICKED(IDC_CHECK3, OnBnClickedCheck3)
 	ON_WM_CTLCOLOR()
 	ON_WM_CREATE()
 	ON_WM_MOVING()
+	ON_WM_EXITSIZEMOVE()
+	ON_WM_WINDOWPOSCHANGED()
 	ON_BN_CLICKED(IDCANCEL, OnBnClickedCancel)
 	ON_BN_CLICKED(IDC_CHECK52, OnBnClickedCheck52)
 	ON_CBN_EDITCHANGE(IDC_COMBO4, OnCbnEditchangeCombo4)
@@ -669,7 +685,12 @@ extern COggDlg* og;
 
 BOOL CRender::OnInitDialog()
 {
-	CCustomBlurDialogExBase::OnInitDialog();
+	// DDX 失敗時は UpdateData が例外を表示して FALSE。続けて未接続コントロールを触ると
+	// 「引数が正しくありません」のあとクラッシュする。
+	if (!CCustomBlurDialogExBase::OnInitDialog())
+		return FALSE;
+	if (!GetSafeHwnd() || !m_help.GetSafeHwnd())
+		return TRUE;
 	m_help.SetWindowText(L"?");
 	m_help.SetFlat(TRUE);
 	m_help.SetGradation(RGB(255, 245, 220), RGB(240, 210, 160), 0, TRUE);
@@ -830,18 +851,35 @@ BOOL CRender::OnInitDialog()
 		CString ss; ss.Format(L"%d", sv);
 		m_surroundVal.SetWindowText(ss);
 	}
-	m_midPreferKpi.SetCheck(savedata.midPlayPrefer == 0 ? BST_CHECKED : BST_UNCHECKED);
-	m_midPreferVst.SetCheck(savedata.midPlayPrefer == 1 ? BST_CHECKED : BST_UNCHECKED);
+	if (m_midPreferKpi.GetSafeHwnd())
+		m_midPreferKpi.SetCheck(savedata.midPlayPrefer == 0 ? BST_CHECKED : BST_UNCHECKED);
+	if (m_midPreferVst.GetSafeHwnd())
+		m_midPreferVst.SetCheck(savedata.midPlayPrefer == 1 ? BST_CHECKED : BST_UNCHECKED);
+	if (m_midPreferHost.GetSafeHwnd())
+		m_midPreferHost.SetCheck(savedata.midPlayPrefer == 2 ? BST_CHECKED : BST_UNCHECKED);
 	SetDlgItemText(IDC_STATIC_MID_PREFER, LL14(L"MIDI再生", L"MIDI play", L"Lecture MIDI", L"Riproduzione MIDI", L"Reproduccion MIDI", L"MIDI 재생", L"MIDI播放", L"تشغيل MIDI", L"Воспроизведение MIDI", L"MIDI-Wiedergabe", L"Reproducao MIDI", L"MIDI-weergave", L"Odtwarzanie MIDI", L"MIDI oynatma"));
+	SetDlgItemText(IDC_STATIC_VST_HOST, LL14(L"プリセット", L"Preset", L"Préréglage", L"Preset", L"Preajuste", L"프리셋", L"预设", L"إعداد مسبق", L"Пресет", L"Preset", L"Predefinição", L"Preset", L"Ustawienie", L"Ön ayar"));
 	SetDlgItemText(IDC_MID_PREFER_KPI, LL14(L"KPI優先", L"Prefer KPI", L"Preferer KPI", L"Preferisci KPI", L"Preferir KPI", L"KPI 우선", L"优先KPI", L"تفضيل KPI", L"Предпочитать KPI", L"KPI bevorzugen", L"Preferir KPI", L"KPI verkiezen", L"Preferuj KPI", L"KPI tercih"));
 	SetDlgItemText(IDC_MID_PREFER_VST, LL14(L"VST優先", L"Prefer VST", L"Preferer VST", L"Preferisci VST", L"Preferir VST", L"VST 우선", L"优先VST", L"تفضيل VST", L"Предпочитать VST", L"VST bevorzugen", L"Preferir VST", L"VST verkiezen", L"Preferuj VST", L"VST tercih"));
+	SetDlgItemText(IDC_MID_PREFER_HOST, LL14(L"ホスト", L"Host", L"Hote", L"Host", L"Host", L"호스트", L"主机", L"مضيف", L"Хост", L"Host", L"Host", L"Host", L"Host", L"Host"));
 	SetDlgItemText(IDC_STATIC_VST_MULTI, LL14(L"MIDI出力", L"MIDI out", L"Sortie MIDI", L"Uscita MIDI", L"Salida MIDI", L"MIDI 출력", L"MIDI输出", L"خرج MIDI", L"MIDI-выход", L"MIDI-Out", L"Saida MIDI", L"MIDI-uit", L"Wyjscie MIDI", L"MIDI cikis"));
 	SetDlgItemText(IDC_STATIC_VST_DLL, LL14(L"GS VST", L"GS VST", L"GS VST", L"GS VST", L"GS VST", L"GS VST", L"GS VST", L"GS VST", L"GS VST", L"GS VST", L"GS VST", L"GS VST", L"GS VST", L"GS VST"));
 	SetDlgItemText(IDC_STATIC_VST_EXTRA, LL14(L"XG VST", L"XG VST", L"XG VST", L"XG VST", L"XG VST", L"XG VST", L"XG VST", L"XG VST", L"XG VST", L"XG VST", L"XG VST", L"XG VST", L"XG VST", L"XG VST"));
+	SetDlgItemText(IDC_STATIC_VST_GS_SF2, LL14(L"GS SF2", L"GS SF2", L"GS SF2", L"GS SF2", L"GS SF2", L"GS SF2", L"GS SF2", L"GS SF2", L"GS SF2", L"GS SF2", L"GS SF2", L"GS SF2", L"GS SF2", L"GS SF2"));
+	SetDlgItemText(IDC_STATIC_VST_XG_SF2, LL14(L"XG SF2", L"XG SF2", L"XG SF2", L"XG SF2", L"XG SF2", L"XG SF2", L"XG SF2", L"XG SF2", L"XG SF2", L"XG SF2", L"XG SF2", L"XG SF2", L"XG SF2", L"XG SF2"));
 	SetDlgItemText(IDC_VST_SCAN_NOW, LL14(L"再", L"Scan", L"Scan", L"Scan", L"Scan", L"재", L"再", L"مسح", L"Скан", L"Scan", L"Scan", L"Scan", L"Skan", L"Tara"));
+	if (m_vstGsSf2.GetSafeHwnd())
+		m_vstGsSf2.SetWindowText(savedata.vstGsSoundFont);
+	if (m_vstXgSf2.GetSafeHwnd())
+		m_vstXgSf2.SetWindowText(savedata.vstXgSoundFont);
 	m_vstExtraPath.SetWindowText(savedata.vstExtraPath);
 	m_vstMultiDll.SetWindowText(savedata.vstMultiDll);
+	SuggestCompanionSf2(m_vstMultiDll, m_vstGsSf2);
+	SuggestCompanionSf2(m_vstExtraPath, m_vstXgSf2);
+	EnableGsXgSf2Fields();
 	FillVstMultiCombo();
+	FillVstHostPresetCombo();
+	ApplyMidPreferUi();
 	LayoutMidiVstRows();
 	m_speaker.ResetContent();
 	m_speaker.AddString(LL14(L"ステレオ (2ch)", L"Stereo (2ch)", L"Stéréo (2ch)", L"Stereo (2ch)", L"Estéreo (2ch)", L"스테레오 (2ch)", L"立体声 (2ch)", L"ستيريو (2ch)", L"Стерео (2ch)", L"Stereo (2ch)", L"Estéreo (2ch)", L"Stereo (2ch)", L"Stereo (2ch)", L"Stereo (2ch)"));
@@ -860,6 +898,22 @@ BOOL CRender::OnInitDialog()
 	CCustomControlUtility::BeginDialogToolTip(m_tooltip, this);
 	if (m_help.GetSafeHwnd())
 		m_tooltip.AddTool(&m_help, LL14(L"操作ガイドを表示", L"Show operation guide", L"Afficher le guide", L"Mostra guida", L"Mostrar guía", L"조작 가이드 표시", L"显示操作指南", L"إظهار الدليل", L"Показать руководство", L"Bedienungsanleitung", L"Mostrar guia", L"Handleiding tonen", L"Pokaż przewodnik", L"İşlem kılavuzunu göster"));
+	if (m_vstHostPreset.GetSafeHwnd())
+		m_tooltip.AddTool(&m_vstHostPreset, LL14(
+		L"VSTホストで保存したプリセット。VSTホスト優先のときこの音色配線でMIDIを鳴らします。",
+		L"Preset saved in VST Host. Used for MIDI when Prefer Host is selected.",
+		L"Prereglage de l'hote VST. Utilise en MIDI si Hote est choisi.",
+		L"Preset dell'host VST. Usato in MIDI se Host e selezionato.",
+		L"Preset del host VST. Se usa en MIDI si se elige Host.",
+		L"VST 호스트에 저장한 프리셋. 호스트 우선일 때 이 배선으로 MIDI를 재생합니다.",
+		L"VST主机中保存的预设。选择主机优先时用此音色连线播放MIDI。",
+		L"إعداد مضيف VST. يُستخدم لـ MIDI عند اختيار المضيف.",
+		L"Пресет VST-хоста. Играет MIDI при выборе «Хост».",
+		L"Im VST-Host gespeichertes Preset. Für MIDI bei Host-Vorrang.",
+		L"Preset do host VST. Usado no MIDI se Host estiver selecionado.",
+		L"Preset van de VST-host. Voor MIDI als Host is gekozen.",
+		L"Preset hosta VST. Do MIDI gdy wybrano Host.",
+		L"VST host on ayari. Host tercihinde MIDI bu baglantiyla calar."));
 	m_tooltip.AddTool(&m_vstMultiCombo, LL14(
 		L"接続中のMIDI出力機器。GS/XG の明示VSTが両方空のときに使います。先頭はWindows MIDIマッパー。",
 		L"Connected MIDI outputs. Used when both GS and XG VSTs are empty. First item is Windows MIDI Mapper.",
@@ -920,6 +974,38 @@ BOOL CRender::OnInitDialog()
 		L"XG-VSTi/SoundFont (S-YXG50, SGM-V2.01.sf2). Bij SMF met XG System On. Leeg = GS.",
 		L"VSTi/SoundFont XG (S-YXG50, SGM-V2.01.sf2). Gdy SMF ma XG System On. Puste = GS.",
 		L"XG VSTi/SoundFont (S-YXG50, SGM-V2.01.sf2). SMF'de XG System On varsa. Bos = GS."));
+	if (m_vstGsSf2.GetSafeHwnd())
+		m_tooltip.AddTool(&m_vstGsSf2, LL14(
+		L"GS側 juicySF 等へ読み込む SoundFont。空ならプラグインと同じフォルダの SGM*.sf2 を自動。GS欄が .sf2 直指定なら不要（読み取り専用）。",
+		L"SoundFont for the GS juicySF-style plugin. Empty auto-picks SGM*.sf2 beside the plugin. Read-only if the GS slot is already a .sf2.",
+		L"SoundFont pour le plugin GS (juicySF). Vide = SGM*.sf2 a cote du plugin. Lecture seule si GS est deja un .sf2.",
+		L"SoundFont per il plugin GS (juicySF). Vuoto = SGM*.sf2 accanto al plugin. Sola lettura se GS e gia .sf2.",
+		L"SoundFont del plugin GS (juicySF). Vacio = SGM*.sf2 junto al plugin. Solo lectura si GS ya es .sf2.",
+		L"GS juicySF 등에 넣을 SoundFont. 비면 플러그인 폴더의 SGM*.sf2. GS가 .sf2면 읽기 전용.",
+		L"注入 GS 侧 juicySF 等的 SoundFont。空则自动用插件同目录 SGM*.sf2。GS 已是 .sf2 时只读。",
+		L"SoundFont لإضافة GS مثل juicySF. فارغ=SGM بجانب الإضافة. للقراءة فقط إن كان GS ملف .sf2.",
+		L"SoundFont для GS (juicySF). Пусто = SGM*.sf2 рядом с плагином. Только чтение, если GS уже .sf2.",
+		L"SoundFont fuer GS-juicySF. Leer = SGM*.sf2 neben dem Plugin. Schreibgeschuetzt, wenn GS schon .sf2 ist.",
+		L"SoundFont para o plugin GS (juicySF). Vazio = SGM*.sf2 ao lado do plugin. So leitura se GS ja for .sf2.",
+		L"SoundFont voor GS-juicySF. Leeg = SGM*.sf2 naast de plugin. Alleen-lezen als GS al .sf2 is.",
+		L"SoundFont dla GS (juicySF). Puste = SGM*.sf2 obok wtyczki. Tylko odczyt, gdy GS to juz .sf2.",
+		L"GS juicySF SoundFont. Bos = eklenti klasorundeki SGM*.sf2. GS zaten .sf2 ise salt okunur."));
+	if (m_vstXgSf2.GetSafeHwnd())
+		m_tooltip.AddTool(&m_vstXgSf2, LL14(
+		L"XG側 juicySF 等へ読み込む SoundFont。空ならプラグインと同じフォルダの SGM*.sf2 を自動。XG欄が .sf2 直指定なら不要（読み取り専用）。",
+		L"SoundFont for the XG juicySF-style plugin. Empty auto-picks SGM*.sf2 beside the plugin. Read-only if the XG slot is already a .sf2.",
+		L"SoundFont pour le plugin XG (juicySF). Vide = SGM*.sf2 a cote du plugin. Lecture seule si XG est deja un .sf2.",
+		L"SoundFont per il plugin XG (juicySF). Vuoto = SGM*.sf2 accanto al plugin. Sola lettura se XG e gia .sf2.",
+		L"SoundFont del plugin XG (juicySF). Vacio = SGM*.sf2 junto al plugin. Solo lectura si XG ya es .sf2.",
+		L"XG juicySF 등에 넣을 SoundFont. 비면 플러그인 폴더의 SGM*.sf2. XG가 .sf2면 읽기 전용.",
+		L"注入 XG 侧 juicySF 等的 SoundFont。空则自动用插件同目录 SGM*.sf2。XG 已是 .sf2 时只读。",
+		L"SoundFont لإضافة XG مثل juicySF. فارغ=SGM بجانب الإضافة. للقراءة فقط إن كان XG ملف .sf2.",
+		L"SoundFont для XG (juicySF). Пусто = SGM*.sf2 рядом с плагином. Только чтение, если XG уже .sf2.",
+		L"SoundFont fuer XG-juicySF. Leer = SGM*.sf2 neben dem Plugin. Schreibgeschuetzt, wenn XG schon .sf2 ist.",
+		L"SoundFont para o plugin XG (juicySF). Vazio = SGM*.sf2 ao lado do plugin. So leitura se XG ja for .sf2.",
+		L"SoundFont voor XG-juicySF. Leeg = SGM*.sf2 naast de plugin. Alleen-lezen als XG al .sf2 is.",
+		L"SoundFont dla XG (juicySF). Puste = SGM*.sf2 obok wtyczki. Tylko odczyt, gdy XG to juz .sf2.",
+		L"XG juicySF SoundFont. Bos = eklenti klasorundeki SGM*.sf2. XG zaten .sf2 ise salt okunur."));
 	m_tooltip.AddTool(GetDlgItem(IDOK), LL14(L"設定を保存して閉じます", L"Save settings and close", L"Enregistrer les parametres et fermer", L"Salva impostazioni e chiudi", L"Guardar ajustes y cerrar", L"설정 저장 후 닫기", L"保存设置并关闭", L"حفظ الإعدادات وإغلاق", L"Сохранить настройки и закрыть", L"Einstellungen speichern und schließen", L"Salvar configuracoes e fechar", L"Instellingen opslaan en sluiten", L"Zapisz ustawienia i zamknij", L"Ayarları kaydet ve kapat"));	m_tooltip.AddTool(GetDlgItem(IDCANCEL), LL14(L"保存せずに閉じます", L"Close without saving", L"Fermer sans enregistrer", L"Chiudi senza salvare", L"Cerrar sin guardar", L"저장하지 않고 닫기", L"不保存并关闭", L"إغلاق دون حفظ", L"Закрыть без сохранения", L"Ohne Speichern schließen", L"Fechar sem salvar", L"Sluiten zonder opslaan", L"Zamknij bez zapisywania", L"Kaydetmeden kapat"));
 	m_tooltip.AddTool(GetDlgItem(IDC_COMBO2), LL14(L"DirectSoundの出力デバイスを選択します", L"Select DirectSound output device", L"Choisir le peripherique de sortie DirectSound", L"Seleziona dispositivo di uscita DirectSound", L"Seleccionar dispositivo de salida DirectSound", L"DirectSound 출력 장치 선택", L"选择 DirectSound 输出设备", L"اختر جهاز إخراج DirectSound", L"Выбрать устройство вывода DirectSound", L"DirectSound-Ausgabegerat wahlen", L"Selecionar dispositivo de saida DirectSound", L"DirectSound-uitvoerapparaat kiezen", L"Wybierz urzadzenie wyjsciowe DirectSound", L"DirectSound cikis aygitini sec"));
 	m_tooltip.AddTool(GetDlgItem(IDC_COMBO_MICDEV), LL14(L"WAV保存時のマイクミックス／録音に使うマイク端末を選びます", L"Select microphone for WAV mic-mix / recording", L"Choisir le micro pour le mix WAV / enregistrement", L"Scegli il microfono per mix WAV / registrazione", L"Elegir microfono para mix WAV / grabacion", L"WAV 마이크 믹스/녹음에 쓸 마이크 선택", L"选择用于WAV麦克风混音/录音的麦克风", L"اختر الميكروفون لمزج/تسجيل WAV", L"Выберите микрофон для микса/записи WAV", L"Mikrofon fur WAV-Mix / Aufnahme wahlen", L"Escolher microfone para mix WAV / gravacao", L"Kies microfoon voor WAV-mix / opname", L"Wybierz mikrofon do miksu/nagrania WAV", L"WAV miks/kayit icin mikrofon secin"));
@@ -1203,10 +1289,9 @@ BOOL CRender::OnInitDialog()
 	else {
 		ReleaseRenderGrassBackdrop();
 	}
-	CRect r;
-	GetWindowRect(&r);
-	if (renderbase && renderbase->GetSafeHwnd())
-		renderbase->MoveWindow(&r);
+	// テンプレート 0,0 は親クライアント原点（キャプション分だけ下）に出る。
+	// 保存座標があればそこ、未設定(-1)ならオーナーのモニタ中央。
+	ApplySavedPosition();
 	// TOPMOST 禁止: 他UIがメインになったとき下に回せる。グラスはダイアログの直下へ。
 	::SetWindowPos(m_hWnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
 	if (renderbase && renderbase->GetSafeHwnd())
@@ -1258,8 +1343,73 @@ void CRender::OnSize(UINT nType, int cx, int cy)
 	}
 }
 
+void CRender::ApplySavedPosition()
+{
+	if (!GetSafeHwnd())
+		return;
+	CRect rc;
+	GetWindowRect(&rc);
+	int x = savedata.renderX;
+	int y = savedata.renderY;
+	if (x == -1 || y == -1) {
+		RECT work = {};
+		HWND hint = (m_pParent && ::IsWindow(m_pParent->GetSafeHwnd()))
+			? m_pParent->GetSafeHwnd() : m_hWnd;
+		HMONITOR mon = ::MonitorFromWindow(hint, MONITOR_DEFAULTTONEAREST);
+		MONITORINFO mi = {};
+		mi.cbSize = sizeof(mi);
+		if (mon && ::GetMonitorInfo(mon, &mi))
+			work = mi.rcWork;
+		else if (!::SystemParametersInfo(SPI_GETWORKAREA, 0, &work, 0)) {
+			m_acceptPos = 1;
+			return;
+		}
+		x = work.left + ((work.right - work.left) - rc.Width()) / 2;
+		y = work.top + ((work.bottom - work.top) - rc.Height()) / 2;
+	}
+	CCC_ClampWindowPos(x, y, rc.Width(), rc.Height());
+	m_acceptPos = 1;
+	SetWindowPos(NULL, x, y, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+	if (renderbase && renderbase->GetSafeHwnd()) {
+		CRect placed;
+		GetWindowRect(&placed);
+		renderbase->MoveWindow(&placed);
+	}
+}
+
+void CRender::RememberPos()
+{
+	if (!GetSafeHwnd() || ::IsIconic(m_hWnd))
+		return;
+	CRect rc;
+	GetWindowRect(&rc);
+	savedata.renderX = rc.left;
+	savedata.renderY = rc.top;
+	MpPersistSavedataQuick();
+}
+
+void CRender::OnExitSizeMove()
+{
+	CWnd::OnExitSizeMove();
+	RememberPos();
+}
+
+void CRender::OnWindowPosChanged(WINDOWPOS* lpwndpos)
+{
+	CCustomBlurDialogExBase::OnWindowPosChanged(lpwndpos);
+	if (!m_acceptPos)
+		return;
+	if (!lpwndpos || (lpwndpos->flags & (SWP_NOMOVE | SWP_HIDEWINDOW)))
+		return;
+	if (!GetSafeHwnd() || ::IsIconic(m_hWnd))
+		return;
+	savedata.renderX = lpwndpos->x;
+	savedata.renderY = lpwndpos->y;
+}
+
 void CRender::OnDestroy()
 {
+	RememberPos();
 	AudioMicDevUnregisterCombo(&m_miclist);
 	if (g_rdHelpDlg && ::IsWindow(g_rdHelpDlg->GetSafeHwnd()))
 		g_rdHelpDlg->DestroyWindow();
@@ -1872,11 +2022,43 @@ extern HFONT	hFont;
 #include "afxdlgs.h"
 
 // チェックは midPlayPrefer。リスト表示は即 Refresh。CEmu MIDI 再生中は zip を閉じて開き直す。
-void CRender::OnMidPreferKpi()
+void CRender::ApplyMidPreferUi()
 {
-	savedata.midPlayPrefer = 0;
-	m_midPreferKpi.SetCheck(BST_CHECKED);
-	m_midPreferVst.SetCheck(BST_UNCHECKED);
+	if (m_midPreferKpi.GetSafeHwnd())
+		m_midPreferKpi.SetCheck(savedata.midPlayPrefer == 0 ? BST_CHECKED : BST_UNCHECKED);
+	if (m_midPreferVst.GetSafeHwnd())
+		m_midPreferVst.SetCheck(savedata.midPlayPrefer == 1 ? BST_CHECKED : BST_UNCHECKED);
+	if (m_midPreferHost.GetSafeHwnd())
+		m_midPreferHost.SetCheck(savedata.midPlayPrefer == 2 ? BST_CHECKED : BST_UNCHECKED);
+	if (m_vstHostPreset.GetSafeHwnd())
+		m_vstHostPreset.EnableWindow(savedata.midPlayPrefer == 2);
+}
+
+void CRender::FillVstHostPresetCombo()
+{
+	if (!m_vstHostPreset.GetSafeHwnd()) return;
+	m_vstHostPreset.ResetContent();
+	const int n = VstHostPresetCount();
+	if (n <= 0) {
+		m_vstHostPreset.AddString(LL14(L"(なし)", L"(none)", L"(aucun)", L"(nessuno)", L"(ninguno)",
+			L"(없음)", L"(无)", L"(لا شيء)", L"(нет)", L"(keine)",
+			L"(nenhum)", L"(geen)", L"(brak)", L"(yok)"));
+		m_vstHostPreset.SetCurSel(0);
+		return;
+	}
+	for (int i = 0; i < n; ++i) {
+		wchar_t name[64] = {};
+		if (!VstHostPresetName(i, name, 64) || !name[0])
+			_snwprintf_s(name, _TRUNCATE, L"%d", i + 1);
+		m_vstHostPreset.AddString(name);
+	}
+	int sel = savedata.vstHostPlayPreset;
+	if (sel < 0 || sel >= n) sel = 0;
+	m_vstHostPreset.SetCurSel(sel);
+}
+
+static void RenderNotifyMidiPrefer()
+{
 	KpiV5SyncKbsasamiOptions(savedata.midPlayPrefer);
 	extern CPlayList* pl;
 	if (pl) pl->RefreshMidiPlayModes();
@@ -1884,16 +2066,32 @@ void CRender::OnMidPreferKpi()
 	CEmuRequestMidiEngineReplay();
 }
 
+void CRender::OnMidPreferKpi()
+{
+	savedata.midPlayPrefer = 0;
+	ApplyMidPreferUi();
+	RenderNotifyMidiPrefer();
+}
+
 void CRender::OnMidPreferVst()
 {
-	savedata.midPlayPrefer = 1; // 1=VST。リストは MID(VST) へ。再生中は次曲から
-	m_midPreferKpi.SetCheck(BST_UNCHECKED);
-	m_midPreferVst.SetCheck(BST_CHECKED);
-	KpiV5SyncKbsasamiOptions(savedata.midPlayPrefer);
-	extern CPlayList* pl;
-	if (pl) pl->RefreshMidiPlayModes();
-	extern void CEmuRequestMidiEngineReplay();
-	CEmuRequestMidiEngineReplay();
+	savedata.midPlayPrefer = 1;
+	ApplyMidPreferUi();
+	RenderNotifyMidiPrefer();
+}
+
+void CRender::OnMidPreferHost()
+{
+	savedata.midPlayPrefer = 2;
+	ApplyMidPreferUi();
+	RenderNotifyMidiPrefer();
+}
+
+void CRender::OnVstHostPresetChange()
+{
+	const int i = m_vstHostPreset.GetCurSel();
+	if (i >= 0 && i < 100)
+		savedata.vstHostPlayPreset = i;
 }
 
 void CRender::LayoutMidiVstRows()
@@ -1919,9 +2117,9 @@ void CRender::LayoutMidiVstRows()
 	m_vstScanNow.SetWindowPos(NULL, btnL, combo.top, btnW, comboH,
 		SWP_NOZORDER | SWP_NOACTIVATE);
 
-	CWnd* fields[2] = { &m_vstExtraPath, &m_vstMultiDll };
-	CWnd* btns[2] = { &m_vstExtraBrowse, &m_vstMultiBrowse };
-	for (int i = 0; i < 2; ++i) {
+	CWnd* fields[4] = { &m_vstMultiDll, &m_vstGsSf2, &m_vstExtraPath, &m_vstXgSf2 };
+	CWnd* btns[4] = { &m_vstMultiBrowse, &m_vstGsSf2Browse, &m_vstExtraBrowse, &m_vstXgSf2Browse };
+	for (int i = 0; i < 4; ++i) {
 		if (!fields[i]->GetSafeHwnd() || !btns[i]->GetSafeHwnd())
 			continue;
 		CRect fr;
@@ -1964,6 +2162,8 @@ void CRender::OnVstExtraBrowse()
 		L"VST / SoundFont (*.dll;*.vst3;*.sf2)|*.dll;*.vst3;*.sf2|SoundFont (*.sf2)|*.sf2|All (*.*)|*.*||", this);
 	if (dlg.DoModal() != IDOK) return;
 	m_vstExtraPath.SetWindowText(dlg.GetPathName());
+	SuggestCompanionSf2(m_vstExtraPath, m_vstXgSf2);
+	EnableGsXgSf2Fields();
 }
 
 void CRender::OnVstMultiBrowse()
@@ -1972,6 +2172,70 @@ void CRender::OnVstMultiBrowse()
 		L"VST / SoundFont (*.dll;*.vst3;*.sf2)|*.dll;*.vst3;*.sf2|SoundFont (*.sf2)|*.sf2|All (*.*)|*.*||", this);
 	if (dlg.DoModal() != IDOK) return;
 	m_vstMultiDll.SetWindowText(dlg.GetPathName());
+	SuggestCompanionSf2(m_vstMultiDll, m_vstGsSf2);
+	EnableGsXgSf2Fields();
+}
+
+void CRender::OnVstGsSf2Browse()
+{
+	CFileDialog dlg(TRUE, L"sf2", NULL, OFN_FILEMUSTEXIST | OFN_HIDEREADONLY,
+		L"SoundFont (*.sf2)|*.sf2|All (*.*)|*.*||", this);
+	if (dlg.DoModal() != IDOK) return;
+	m_vstGsSf2.SetWindowText(dlg.GetPathName());
+}
+
+void CRender::OnVstXgSf2Browse()
+{
+	CFileDialog dlg(TRUE, L"sf2", NULL, OFN_FILEMUSTEXIST | OFN_HIDEREADONLY,
+		L"SoundFont (*.sf2)|*.sf2|All (*.*)|*.*||", this);
+	if (dlg.DoModal() != IDOK) return;
+	m_vstXgSf2.SetWindowText(dlg.GetPathName());
+}
+
+void CRender::OnVstGsPathChange()
+{
+	SuggestCompanionSf2(m_vstMultiDll, m_vstGsSf2);
+	EnableGsXgSf2Fields();
+}
+
+void CRender::OnVstXgPathChange()
+{
+	SuggestCompanionSf2(m_vstExtraPath, m_vstXgSf2);
+	EnableGsXgSf2Fields();
+}
+
+void CRender::SuggestCompanionSf2(CCustomEdit& plugin, CCustomEdit& sf2)
+{
+	if (!plugin.GetSafeHwnd() || !sf2.GetSafeHwnd()) return;
+	CString plug, cur;
+	plugin.GetWindowText(plug);
+	sf2.GetWindowText(cur);
+	if (cur.GetLength() > 0) return;
+	if (!VstPluginUsesSoundFontFile(plug)) return;
+	wchar_t found[VST_PATH_CHARS] = {};
+	if (!VstFindCompanionSoundFont(plug, found, VST_PATH_CHARS) || !found[0])
+		return;
+	sf2.SetWindowText(found);
+}
+
+void CRender::EnableGsXgSf2Fields()
+{
+	if (!m_vstGsSf2.GetSafeHwnd() || !m_vstXgSf2.GetSafeHwnd()) return;
+	CString gs, xg;
+	m_vstMultiDll.GetWindowText(gs);
+	m_vstExtraPath.GetWindowText(xg);
+	const BOOL gsOn = VstPluginUsesSoundFontFile(gs) ? TRUE : FALSE;
+	const BOOL xgOn = VstPluginUsesSoundFontFile(xg) ? TRUE : FALSE;
+	m_vstGsSf2.SetReadOnly(!gsOn);
+	m_vstXgSf2.SetReadOnly(!xgOn);
+	if (m_vstGsSf2Browse.GetSafeHwnd())
+		m_vstGsSf2Browse.EnableWindow(gsOn);
+	if (m_vstXgSf2Browse.GetSafeHwnd())
+		m_vstXgSf2Browse.EnableWindow(xgOn);
+	CWnd* gsLab = GetDlgItem(IDC_STATIC_VST_GS_SF2);
+	CWnd* xgLab = GetDlgItem(IDC_STATIC_VST_XG_SF2);
+	if (gsLab) gsLab->EnableWindow(gsOn);
+	if (xgLab) xgLab->EnableWindow(xgOn);
 }
 
 void CRender::OnVstScanNow()
@@ -2108,11 +2372,15 @@ void CRender::OnBnClickedOk()
 	}
 	AudioMicDevApplyFromCombo(m_miclist);
 	{
-		CString extra, dll;
+		CString extra, dll, gsSf, xgSf;
 		m_vstExtraPath.GetWindowText(extra);
 		m_vstMultiDll.GetWindowText(dll);
+		m_vstGsSf2.GetWindowText(gsSf);
+		m_vstXgSf2.GetWindowText(xgSf);
 		_tcsncpy_s(savedata.vstExtraPath, extra, _TRUNCATE);
 		_tcsncpy_s(savedata.vstMultiDll, dll, _TRUNCATE);
+		_tcsncpy_s(savedata.vstGsSoundFont, gsSf, _TRUNCATE);
+		_tcsncpy_s(savedata.vstXgSoundFont, xgSf, _TRUNCATE);
 		/* CEmu は zip ドロップ＋ exe\\data 固定。旧カスタムパスは破棄 */
 		savedata.cemuDataPath[0] = 0;
 		{
@@ -2132,6 +2400,11 @@ void CRender::OnBnClickedOk()
 			CString name;
 			m_vstMultiCombo.GetLBText(i, name);
 			_tcsncpy_s(savedata.midiOutName, name, _TRUNCATE);
+		}
+		{
+			int hp = m_vstHostPreset.GetCurSel();
+			if (hp >= 0 && hp < 100)
+				savedata.vstHostPlayPreset = hp;
 		}
 		if (dll.GetLength() > 0) {
 			const TCHAR* leaf = dll;

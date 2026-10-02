@@ -26,6 +26,8 @@ struct save {
 	wchar_t vstMultiDll[520];  // GS 明示 VSTi。両方空なら MIDI マッパー
 	wchar_t vstMultiName[128];
 	wchar_t midiOutName[32];
+	wchar_t vstGsSoundFont[520];
+	wchar_t vstXgSoundFont[520];
 };
 extern save savedata;
 

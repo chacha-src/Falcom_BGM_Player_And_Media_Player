@@ -1321,6 +1321,7 @@ BOOL CCustomPopupMenu::IsChromeCommand(UINT id) const
 		|| id == CCUSTOM_POPUP_ID_KPI_RELOAD
 		|| id == CCUSTOM_POPUP_ID_MID_KPI
 		|| id == CCUSTOM_POPUP_ID_MID_VST
+		|| id == CCUSTOM_POPUP_ID_MID_HOST
 		|| id == CCUSTOM_POPUP_ID_CEMU_LIST
 		|| (id >= CCUSTOM_POPUP_ID_ANIM0
 			&& id < CCUSTOM_POPUP_ID_ANIM0 + (UINT)POPUP_ANIM_COUNT);
@@ -1853,9 +1854,17 @@ void CCustomPopupMenu::EnsureChromePrefix()
 				L"MIDI 재생: VST 우선", L"MIDI播放: 优先VST", L"MIDI: تفضيل VST", L"MIDI: предпочитать VST", L"MIDI: VST bevorzugen",
 				L"MIDI: Preferir VST", L"MIDI: VST verkiezen", L"MIDI: Preferuj VST", L"MIDI: VST tercih"),
 			savedata.midPlayPrefer == 1,
-			LL14(L".mid / プロジェクトを自前 VST ホストで再生します", L"Play .mid/projects via built-in VST host", L"Lire .mid/projets via hote VST integre", L"Riproduci .mid/progetti via host VST", L"Reproducir .mid/proyectos vía host VST",
-				L".mid/프로젝트를 내장 VST 호스트로 재생", L"通过内置 VST 主机播放 .mid/项目", L"تشغيل .mid/المشاريع عبر مضيف VST", L"Воспроизводить .mid/проекты через встроенный VST-хост", L".mid/Projekte über eingebauten VST-Host",
-				L"Tocar .mid/projetos via host VST", L".mid/projecten via ingebouwde VST-host", L"Odtwarzaj .mid/projekty przez wbudowany host VST", L".mid/projeleri dahili VST host ile cal"));
+			LL14(L".mid / プロジェクトを CRender の GS/XG VST または SF2 で再生します", L"Play .mid/projects via CRender GS/XG VST or SF2", L"Lire .mid/projets via VST GS/XG de CRender", L"Riproduci .mid/progetti via VST GS/XG di CRender", L"Reproducir .mid/proyectos vía VST GS/XG de CRender",
+				L".mid/프로젝트를 CRender GS/XG VST 또는 SF2로 재생", L"通过 CRender 的 GS/XG VST 或 SF2 播放 .mid/项目", L"تشغيل .mid/المشاريع عبر VST GS/XG في CRender", L"Воспроизводить .mid/проекты через GS/XG VST CRender", L".mid/Projekte über CRender-GS/XG-VST",
+				L"Tocar .mid/projetos via VST GS/XG do CRender", L".mid/projecten via CRender GS/XG VST", L"Odtwarzaj .mid/projekty przez VST GS/XG CRender", L".mid/projeleri CRender GS/XG VST ile cal"));
+		kpiSub->AddCheck(CCUSTOM_POPUP_ID_MID_HOST,
+			LL14(L"MIDI再生: VSTホスト優先", L"MIDI play: Prefer VST Host", L"MIDI: Preferer hote VST", L"MIDI: Preferisci host VST", L"MIDI: Preferir host VST",
+				L"MIDI 재생: VST 호스트 우선", L"MIDI播放: 优先VST主机", L"MIDI: تفضيل مضيف VST", L"MIDI: предпочитать VST-хост", L"MIDI: VST-Host bevorzugen",
+				L"MIDI: Preferir host VST", L"MIDI: VST-host verkiezen", L"MIDI: Preferuj host VST", L"MIDI: VST host tercih"),
+			savedata.midPlayPrefer == 2,
+			LL14(L".mid を VSTホストで保存したプリセット（32パート）で再生します", L"Play .mid via a VST Host preset (32 parts)", L"Lire .mid via un prereglage hote VST (32 parties)", L"Riproduci .mid via preset host VST (32 parti)", L"Reproducir .mid vía preset de host VST (32 partes)",
+				L".mid를 VST 호스트 프리셋(32파트)으로 재생", L"用 VST 主机保存的预设（32声部）播放 .mid", L"تشغيل .mid بإعداد مضيف VST (32 جزءًا)", L"Воспроизводить .mid пресетом VST-хоста (32 партии)", L".mid über VST-Host-Preset (32 Parts)",
+				L"Tocar .mid via preset do host VST (32 partes)", L".mid via VST-hostpreset (32 partijen)", L"Odtwarzaj .mid presetem hosta VST (32 partie)", L".mid dosyalarini VST host on ayariyla cal (32 part)"));
 	}
 
 	/* exe 隣に arcdata.zip があるときだけ Cemu対応一覧 */
@@ -2812,6 +2821,56 @@ void CCustomPopupMenu::CloseChain(UINT result)
 // フォント／閉じる／モーダルフラグは根で共有する。
 CCustomPopupMenu* CCustomPopupMenu::RootMenu()
 { return m_root ? m_root : this; }
+
+// 可視 HWND をこの木から探す。m_openSub がずれてもクリック先を失わない。
+CCustomPopupMenu* CCustomPopupMenu::FindMenuByHwnd(HWND h)
+{
+	if (!h) return NULL;
+	if (GetSafeHwnd() == h) return this;
+	for (int i = 0; i < m_subCount; ++i) {
+		if (!m_subs[i]) continue;
+		CCustomPopupMenu* f = m_subs[i]->FindMenuByHwnd(h);
+		if (f) return f;
+	}
+	return NULL;
+}
+
+// 開いている子孫を先に見る。飛行パッドの穴は親へ返す（GetWindowRect だけでは親をクリック不能にする）。
+CCustomPopupMenu* CCustomPopupMenu::FindDeepestMenuAtScreen(CPoint screenPt)
+{
+	if (m_openSub >= 0 && m_openSub < m_itemCount) {
+		const int si = m_items[m_openSub].subIndex;
+		if (si >= 0 && si < m_subCount && m_subs[si]) {
+			CCustomPopupMenu* d = m_subs[si]->FindDeepestMenuAtScreen(screenPt);
+			if (d) return d;
+		}
+	}
+	if (!GetSafeHwnd()) return NULL;
+	if (ScreenPtOnMenuBody(screenPt))
+		return this;
+	CPoint c = screenPt;
+	ScreenToClient(&c);
+	if (HitTest(c) >= 0)
+		return this;
+	return NULL;
+}
+
+// ルートだけ定着すると、開いたサブ／サブサブが phase=1 のまま HitTest を外す。
+void CCustomPopupMenu::SettleOpenChainIfDue()
+{
+	if (m_lineAnimPhase == 1) {
+		const int style = PopupAnimStyle();
+		const int total = ChipEnterTotalMs(style, m_asSubmenu, m_itemCount, m_lineAnimOrigin);
+		const int elapsed = (int)(GetTickCount64() - m_lineAnimStart);
+		if (elapsed >= total)
+			SnapAnimToIdle();
+	}
+	if (m_openSub >= 0 && m_openSub < m_itemCount) {
+		const int si = m_items[m_openSub].subIndex;
+		if (si >= 0 && si < m_subCount && m_subs[si])
+			m_subs[si]->SettleOpenChainIfDue();
+	}
+}
 
 // 自分・開サブ・コンボリスト・親↔サブ隙間がヒットなら TRUE。
 // 飛行余白の穴（RGN 外）は中身／チップのみ。外側クリック閉じ判定に使う。
@@ -4140,13 +4199,18 @@ BOOL CCustomPopupMenu::HandleChromeClick(int idx)
 	// MIDI再生 KPI/VST 優先。savedata.midPlayPrefer を書き、レ点を排他。
 	// PlayList.h は IDD_PLAYLIST 欠落のため include せず、extern PlRefreshMidiPlayModes()
 	// でプレイリストの MID(VST)/MID(KPI) 表示を即更新する。
-	if (it.id == CCUSTOM_POPUP_ID_MID_KPI || it.id == CCUSTOM_POPUP_ID_MID_VST) {
-		savedata.midPlayPrefer = (it.id == CCUSTOM_POPUP_ID_MID_VST) ? 1 : 0;
+	if (it.id == CCUSTOM_POPUP_ID_MID_KPI || it.id == CCUSTOM_POPUP_ID_MID_VST
+		|| it.id == CCUSTOM_POPUP_ID_MID_HOST) {
+		if (it.id == CCUSTOM_POPUP_ID_MID_HOST)
+			savedata.midPlayPrefer = 2;
+		else
+			savedata.midPlayPrefer = (it.id == CCUSTOM_POPUP_ID_MID_VST) ? 1 : 0;
 		KpiV5SyncKbsasamiOptions(savedata.midPlayPrefer);
 		for (int i = 0; i < m_itemCount; ++i) {
 			CCustomPopupItem& x = m_items[i];
 			if (x.id == CCUSTOM_POPUP_ID_MID_KPI) x.checked = (savedata.midPlayPrefer == 0) ? TRUE : FALSE;
 			if (x.id == CCUSTOM_POPUP_ID_MID_VST) x.checked = (savedata.midPlayPrefer == 1) ? TRUE : FALSE;
+			if (x.id == CCUSTOM_POPUP_ID_MID_HOST) x.checked = (savedata.midPlayPrefer == 2) ? TRUE : FALSE;
 		}
 		StartCheckBounce(idx);
 		MpPersistSavedataQuick();
@@ -4204,12 +4268,21 @@ BOOL CCustomPopupMenu::HandleChromeClick(int idx)
 	return FALSE;
 }
 
-// アニメ中も定着 HitTest で行決定。Snap はサブを開くときだけ（誤爆一枚化防止）。
+// アニメ中も行決定。外したら Snap して再判定（サブ入場中の握りつぶし防止）。
 // 骨格は HandleChromeClick。CMD/CHECK は CloseChain(id)。
 void CCustomPopupMenu::OnLButtonDown(UINT nFlags, CPoint point)
 {
 	// 行は Snap 前に決める。先に一枚化すると座標がずれ、KillFocus が result=0 で閉じる。
-	const int idx = HitTest(point);
+	int idx = HitTest(point);
+	if (idx < 0 && m_lineAnimPhase != 0) {
+		// サブ入場中は定着座標と見た目がずれ、クリックが握りつぶされる
+		SnapAnimToIdle();
+		CPoint sp;
+		::GetCursorPos(&sp);
+		ScreenToClient(&sp);
+		point = sp;
+		idx = HitTest(point);
+	}
 	if (idx < 0) return;
 	const UINT id = m_items[idx].id;
 	const int kind = m_items[idx].kind;
@@ -4631,28 +4704,46 @@ void CCustomPopupMenu::RunModalLoop()
 			|| m.message == WM_LBUTTONDBLCLK) {
 			DWORD pos = ::GetMessagePos();
 			CPoint sp(GET_X_LPARAM(pos), GET_Y_LPARAM(pos));
-			CCustomPopupMenu* hit = this;
-			for (;;) {
-				if (hit->m_openSub >= 0 && hit->m_openSub < hit->m_itemCount) {
-					const int si = hit->m_items[hit->m_openSub].subIndex;
-					if (si >= 0 && si < hit->m_subCount && hit->m_subs[si]
-						&& hit->m_subs[si]->GetSafeHwnd()) {
-						CRect wr; hit->m_subs[si]->GetWindowRect(&wr);
-						if (wr.PtInRect(sp)) {
-							hit = hit->m_subs[si];
-							continue;
-						}
+			HWND hw = m.hwnd;
+			CCustomPopupMenu* byHwnd = FindMenuByHwnd(hw);
+			if (!byHwnd && hw)
+				byHwnd = FindMenuByHwnd(::GetParent(hw));
+			CCustomPopupMenu* byPt = FindDeepestMenuAtScreen(sp);
+			CCustomPopupMenu* hit = byHwnd;
+			if (byPt) {
+				if (!hit)
+					hit = byPt;
+				else {
+					// 透過で hwnd が親でも、画面上の子孫サブを優先
+					for (CCustomPopupMenu* p = byPt; p; p = p->m_parentMenu) {
+						if (p == hit) { hit = byPt; break; }
 					}
 				}
-				break;
 			}
+			if (!hit) hit = this;
+
 			int row = -1;
+			CPoint clientPt(0, 0);
 			if (hit->GetSafeHwnd()) {
-				CPoint c = sp;
-				hit->ScreenToClient(&c);
-				row = hit->HitTest(c);
+				// HWND がヒット窓なら lParam（ホバーと同じクライアント座標）。
+				// GetMessagePos→ScreenToClient はサブの ULW/所有関係でずれる。
+				if ((m.message == WM_LBUTTONDOWN || m.message == WM_LBUTTONDBLCLK)
+					&& hw && (hw == hit->m_hWnd || ::IsChild(hit->m_hWnd, hw))) {
+					clientPt.x = GET_X_LPARAM(m.lParam);
+					clientPt.y = GET_Y_LPARAM(m.lParam);
+					if (hw != hit->m_hWnd) {
+						CPoint scr = clientPt;
+						::ClientToScreen(hw, &scr);
+						hit->ScreenToClient(&scr);
+						clientPt = scr;
+					}
+				} else {
+					clientPt = sp;
+					hit->ScreenToClient(&clientPt);
+				}
+				row = hit->HitTest(clientPt);
 			}
-			if (row < 0 && !IsPointInChain(sp)) {
+			if (row < 0 && !IsPointInChain(sp) && !byHwnd) {
 				CloseChain(0);
 				if (m.message == WM_RBUTTONDOWN || m.message == WM_NCRBUTTONDOWN)
 					PopupArmReopenAt(sp, m.message == WM_NCRBUTTONDOWN);
@@ -4664,11 +4755,19 @@ void CCustomPopupMenu::RunModalLoop()
 			}
 			if (m.message == WM_LBUTTONDOWN || m.message == WM_LBUTTONDBLCLK
 				|| m.message == WM_NCLBUTTONDOWN) {
-				HWND hw = m.hwnd;
-				if (hit->GetSafeHwnd() && !(hw && ::IsChild(hit->m_hWnd, hw))) {
-					CPoint c = sp;
-					hit->ScreenToClient(&c);
-					hit->OnLButtonDown(MK_LBUTTON, c);
+				// 内包コントロールは Dispatch して子へ。
+				if (hw && hit->GetSafeHwnd() && hw != hit->m_hWnd
+					&& ::IsChild(hit->m_hWnd, hw)) {
+					// fall through
+				} else if (hit->GetSafeHwnd()) {
+					// 旧実装は GetWindowRect 歩き＋GetMessagePos→ScreenToClient を合成し、
+					// サブの lParam（ホバーと同じ座標）を捨てていた。ヒット窓へ正しい client で渡す。
+					if (row < 0 && hit->m_lineAnimPhase != 0) {
+						hit->SnapAnimToIdle();
+						clientPt = sp;
+						hit->ScreenToClient(&clientPt);
+					}
+					hit->OnLButtonDown(MK_LBUTTON, clientPt);
 					return TRUE;
 				}
 			}
@@ -4692,13 +4791,7 @@ void CCustomPopupMenu::RunModalLoop()
 			if (!dispatchOne(msg))
 				break;
 		}
-		if (m_lineAnimPhase == 1) {
-			const int style = PopupAnimStyle();
-			const int total = ChipEnterTotalMs(style, m_asSubmenu, m_itemCount, m_lineAnimOrigin);
-			const int elapsed = (int)(GetTickCount64() - m_lineAnimStart);
-			if (elapsed >= total)
-				SnapAnimToIdle();
-		}
+		SettleOpenChainIfDue();
 		if (!m_done && !IsForegroundOurs())
 			dismissForForeignFocus();
 		if (!m_done && nPeek == 0)

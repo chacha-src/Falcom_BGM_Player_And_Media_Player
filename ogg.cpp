@@ -1,4 +1,4 @@
-// ogg.cpp : アプリケーション用クラスの定義を行います。
+﻿// ogg.cpp : アプリケーション用クラスの定義を行います。
 //
 
 #include "stdafx.h"
@@ -454,6 +454,11 @@ BOOL COggApp::InitInstance()
 	savedata.vstHostMainLock = 0;
 	savedata.vstHostWinW = 0;
 	savedata.vstMultiDll[0] = 0;
+	savedata.vstGsSoundFont[0] = 0;
+	savedata.vstXgSoundFont[0] = 0;
+	savedata.vstHostPlayPreset = 0;
+	savedata.renderX = -1;
+	savedata.renderY = -1;
 	savedata.vstMultiName[0] = 0;
 	savedata.midiOutName[0] = 0;
 	savedata.midimonwindow = 0;
@@ -2214,6 +2219,25 @@ BOOL COggApp::InitInstance()
 	if (datFileSize < (int)(offsetof(save, cemuvol) + sizeof(savedata.cemuvol))
 		|| savedata.cemuvol < 1 || savedata.cemuvol > 5)
 		savedata.cemuvol = 1;
+	if (datFileSize < (int)(offsetof(save, vstGsSoundFont) + sizeof(savedata.vstGsSoundFont))) {
+		savedata.vstGsSoundFont[0] = 0;
+		savedata.vstXgSoundFont[0] = 0;
+	} else {
+		savedata.vstGsSoundFont[_countof(savedata.vstGsSoundFont) - 1] = 0;
+		if (datFileSize < (int)(offsetof(save, vstXgSoundFont) + sizeof(savedata.vstXgSoundFont)))
+			savedata.vstXgSoundFont[0] = 0;
+		else
+			savedata.vstXgSoundFont[_countof(savedata.vstXgSoundFont) - 1] = 0;
+	}
+	if (datFileSize < (int)(offsetof(save, vstHostPlayPreset) + sizeof(savedata.vstHostPlayPreset))
+		|| savedata.vstHostPlayPreset < 0 || savedata.vstHostPlayPreset > 99)
+		savedata.vstHostPlayPreset = 0;
+	if (datFileSize < (int)(offsetof(save, renderY) + sizeof(savedata.renderY))) {
+		savedata.renderX = -1;
+		savedata.renderY = -1;
+	}
+	if (savedata.midPlayPrefer < 0 || savedata.midPlayPrefer > 2)
+		savedata.midPlayPrefer = 0;
 	/* UI パス欄は廃止。常に exe\\data（なければ hoot）。
 	   ルートは InitInstance 冒頭の CEmuMgrInit 済み。ここで Reload すると
 	   arcdata 全読込が起動を再度ブロックするため呼ばない。 */

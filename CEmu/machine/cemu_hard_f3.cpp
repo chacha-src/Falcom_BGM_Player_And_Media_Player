@@ -89,6 +89,19 @@ CHardF3::CHardF3()
 	duartIpcr_ = 0x03;
 	duartIpAcc_ = 0;
 	esWrites_ = 0;
+	esWordWrites_ = 0;
+	esByteWrites_ = 0;
+	memset(esRegHits_, 0, sizeof(esRegHits_));
+	memset(esRegLast_, 0, sizeof(esRegLast_));
+}
+
+void CHardF3::NoteEsWrite(unsigned reg, uint16_t data, int isWord)
+{
+	reg &= 15u;
+	esRegHits_[reg]++;
+	esRegLast_[reg] = data;
+	if (isWord) esWordWrites_++;
+	else esByteWrites_++;
 }
 
 CHardF3::~CHardF3()
@@ -349,6 +362,7 @@ void CHardF3::Write8(unsigned addr, uint8_t data)
 		else cur = (uint16_t)((cur & 0x00ff) | (data << 8));
 		chip_->Write(reg, cur);
 		esWrites_++;
+		NoteEsWrite(reg, cur, 0);
 		return;
 	}
 	if (addr >= 0x260000u && addr <= 0x2601ffu) {
@@ -408,6 +422,7 @@ void CHardF3::Write16(unsigned addr, uint16_t data)
 	if (addr >= 0x200000u && addr <= 0x20001fu && !(addr & 1) && chip_) {
 		chip_->Write((addr - 0x200000u) >> 1, data);
 		esWrites_++;
+		NoteEsWrite((addr - 0x200000u) >> 1, data, 1);
 		return;
 	}
 	if (addr >= 0x300000u && addr <= 0x30003fu && !(addr & 1)) {
@@ -641,6 +656,10 @@ int CHardF3::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode
 	duartIpcr_ = 0x03;
 	duartIpAcc_ = 0;
 	esWrites_ = 0;
+	esWordWrites_ = 0;
+	esByteWrites_ = 0;
+	memset(esRegHits_, 0, sizeof(esRegHits_));
+	memset(esRegLast_, 0, sizeof(esRegLast_));
 
 	struct Cand { int idx; int score; unsigned size; int fromGe; char name[CEMU_ROM_NAME]; };
 	Cand cpuC[64]; int cpuN = 0;
@@ -963,6 +982,7 @@ int CHardF3::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode
 			}
 			for (unsigned i = nop0; i + 6u <= nop1 && i + 6u <= win1; i += 2) {
 				if (memcmp(audioCpu_ + i, kAlineUser, 6) == 0) {
+					/* C14AE6 の A-line は RTE が SSP を壊してヒープ破壊になる。ホスト側で IPL を落とす。 */
 					audioCpu_[i] = 0x4e; audioCpu_[i + 1] = 0x71;
 					audioCpu_[i + 2] = 0x4e; audioCpu_[i + 3] = 0x71;
 					audioCpu_[i + 4] = 0x4e; audioCpu_[i + 5] = 0x71;

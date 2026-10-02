@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include <Windows.h>
 #include "PluginKinds.h"
@@ -47,6 +47,9 @@ int VstScanGetCount(void);
 const VstPluginInfo* VstScanGet(int i);
 void VstScanInvalidate(void);
 int VstDetectMultiTimbral(const wchar_t* nameOrPath); // 0/1
+/* 1 = juicySF 等。GS/XG が .sf2 直指定なら 0（別欄不要） */
+int VstPluginUsesSoundFontFile(const wchar_t* pluginPath);
+int VstFindCompanionSoundFont(const wchar_t* pluginPath, wchar_t* out, int outChars);
 int VstScanGetMultiCount(void); // isMultiTimbral の件数（ホストと同じアーキ）
 const VstPluginInfo* VstScanGetMulti(int multiIndex); // 0..GetMultiCount-1
 int VstPluginPeArch(const wchar_t* path); // 32/64/0
@@ -222,7 +225,7 @@ int VstLiveProgramName(int part1to32, int index, wchar_t* out, int outChars);
 int VstLiveProgramNames(int part1to32, int first, int count, wchar_t* out,
 	int stride);
 int VstLiveSetProgram(int part1to32, int index);
-/* VST3 state chunk: which 0=component, 1=controller. Get*: malloc; caller free. */
+/* VST3 component/controller, or VST2 effGetChunk/effSetChunk (which=0). Get*: malloc; caller free. */
 int VstLiveGetState(int part1to32, int which, unsigned char** outBytes, int* outLen);
 int VstLiveSetState(int part1to32, int which, const unsigned char* bytes, int len);
 int VstLiveApplyStates(int part1to32,

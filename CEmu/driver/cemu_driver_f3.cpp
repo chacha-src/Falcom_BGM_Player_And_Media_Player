@@ -392,6 +392,8 @@ void CDriverF3::RestoreMailboxSleep()
 /* 頭の巨大スタート待ちだけ、メールボックス C14A10 が生きてから 1 へ。以降の量子は type-E。 */
 void CDriverF3::ExpireHeadWaitOnce()
 {
+	/* 待ちを 1 に潰すと曲が頭の 2 秒で終わる。減算は音源 CPU の D4A6 に任せる。 */
+	return;
 	if (!hw_ || expiredHead_) return;
 	const unsigned cpuPc = (unsigned)m68k_get_reg(NULL, M68K_REG_PC);
 	if (cpuPc >= 0xC10F00u && cpuPc < 0xC11100u)
@@ -413,6 +415,8 @@ void CDriverF3::ExpireHeadWaitOnce()
 /* 2s ごと。中休符は常に、巨大待ちは頭を落とした曲だけ。 */
 void CDriverF3::PunchMediumWaits()
 {
+	/* 中休符を 1 にするとテンポが実機の数十倍になり、短い曲は STOPS になる。 */
+	return;
 	if (!hw_) return;
 	unsigned n = hw_->Read16(0xD0F4u);
 	int hops = 0;
@@ -478,28 +482,7 @@ void CDriverF3::TickSeqHost()
 		if (head >= 0xD000u && head < 0xEE00u) {
 			if (seqCalls_ <= 8u)
 				ArmKeyOnGates();
-			ExpireHeadWaitOnce();
-			if (seqCalls_ >= 60u && (seqCalls_ % 120u) == 0u)
-				PunchMediumWaits();
-			if (expiredHead_ && seqCalls_ >= 60u && seqCalls_ <= 720u
-				&& (seqCalls_ % 60u) == 0u) {
-				const unsigned n = hw_->Read16(0xD0F4u);
-				if (n >= 0xD000u && n < 0xEE00u) {
-					const unsigned wait = hw_->Read16(n + 4u);
-					if (wait >= 0x10u)
-						hw_->Write16(n + 4u, 1);
-				}
-			}
-			if (expiredHead_ && seqCalls_ < 480u && hw_->SoundChip()) {
-				CChip* chip = hw_->SoundChip();
-				for (int v = 0; v < 8; v++) {
-					const uint16_t cr = CEmuChipEs5505PeekCr(chip, v);
-					if ((cr & 3u) == 0)
-						continue;
-					chip->Write(0x0f, (uint32_t)v);
-					chip->Write(0x00, (uint32_t)(cr & (uint16_t)~3u));
-				}
-			}
+			/* 待ちを 1 に潰すと音符がクリックになる。arabianm はファームの減算に任せる。 */
 			if (chainLoopEvery_ && chainSnapN_ == 0 && seqCalls_ >= 8u) {
 				SnapChainOnce();
 				if (chainSnapN_ >= 6)
@@ -516,8 +499,36 @@ void CDriverF3::TickSeqHost()
 				&& seqCalls_ >= restartEvery_
 				&& (seqCalls_ % restartEvery_) == 0u)
 				hw_->SetSongCommand(songCode_);
-			if (!expiredHead_ || (seqCalls_ & 1u) == 0u)
-				hw_->Write16(0xD4A6u, 1);
+			/* トランポリンは D4A6 が非 0 のときだけシーケンサを 1 回呼んでクリアする。30Hz で 1 を立てる。 */
+			hw_->Write16(0xD4A6u, 1);
+			/* ループ変位が曲バンクを外へ出るとストリームが 0xFE**** になり旋律が死ぬ。最初の正常オフセットへ戻してフレーズを回す。 */
+			{
+				static unsigned snapSong = 0xffffffffu;
+				static uint16_t snapNode[12];
+				static uint32_t snapStrm[12];
+				static int snapN = 0;
+				if (snapSong != songCode_) {
+					snapSong = songCode_;
+					snapN = 0;
+				}
+				if (snapN == 0 && seqCalls_ >= 4u) {
+					unsigned hp = hw_->Read16(0xD0F4u);
+					while (hp >= 0xD000u && hp < 0xEE00u && snapN < 12) {
+						const uint32_t s = hw_->Read32(hp + 6u);
+						if (s >= 0x40u && s < 0x40000u) {
+							snapNode[snapN] = (uint16_t)hp;
+							snapStrm[snapN] = s;
+							snapN++;
+						}
+						hp = hw_->Read16(hp);
+					}
+				}
+				for (int i = 0; i < snapN; i++) {
+					const uint32_t s = hw_->Read32(snapNode[i] + 6u);
+					if (s >= 0x40000u)
+						hw_->Write32(snapNode[i] + 6u, snapStrm[i]);
+				}
+			}
 			{
 				const unsigned ssp = (unsigned)m68k_get_reg(NULL, M68K_REG_ISP);
 				if (ssp < 0x400u || ssp >= 0xFFFF00u)
@@ -676,8 +687,7 @@ void CDriverF3::TickSeqHost()
 				}
 			}
 		}
-		if (!expiredHead_ || (seqCalls_ & 1u) == 0u)
-			hw_->Write16(0xD4A6u, 1);
+		hw_->Write16(0xD4A6u, 1);
 		if (demoRestart_ && restartEvery_
 			&& (expiredHead_ || chainPark_)
 			&& seqCalls_ >= restartEvery_
@@ -1051,9 +1061,23 @@ void CDriverF3::LogState(const char* tag)
 		CEmuChipEs5505PeekCr(hw_->SoundChip(), 2),
 		CEmuChipEs5505PeekCr(hw_->SoundChip(), 3),
 		seqCalls_, typeEPosts_, waitDecs_, expiredHead_, delayGated_);
+	fprintf(log, "  eswr word=%u byte=%u", hw_->EsWordWrites(), hw_->EsByteWrites());
+	for (int r = 0; r < 16; r++)
+		fprintf(log, " r%X=%u:%04X", r, hw_->EsRegHits(r), hw_->EsRegLast(r));
+	fprintf(log, "\n");
 	{
 		const unsigned obj = hw_->Read16(0x6DFCu);
-		fprintf(log, "  list 6DFC=%04X %04X %04X %04X ch=%04X obj=%04X w0=%04X w2=%04X w4=%04X w6=%04X w1c=%04X d40e=%04X d4c0=%02X d0f4=%04X d414=%08X d408=%08X loop=%04X %04X hole=%04X %04X\n",
+		unsigned hops = 0, hp = hw_->Read16(0xD0F4u);
+		fprintf(log, "  trk");
+		while (hp >= 0xD000u && hp < 0xEE00u && hops < 12u) {
+			fprintf(log, " %04X:w%04X:f%02X:s%06X", hp,
+				hw_->Read16(hp + 4u), hw_->Read8(hp + 2u),
+				hw_->Read32(hp + 6u) & 0xffffffu);
+			hp = hw_->Read16(hp);
+			hops++;
+		}
+		fprintf(log, "\n");
+		fprintf(log, "  list 6DFC=%04X %04X %04X %04X ch=%04X obj=%04X w0=%04X w2=%04X w4=%04X w6=%04X w1c=%04X d40e=%04X d4c0=%02X d0f4=%04X d414=%08X d408=%08X loop=%04X %04X hole=%04X %04X wait=%04X fl=%02X d410=%04X hops=%u\n",
 			hw_->Read16(0x6DFCu), hw_->Read16(0x6DFEu), hw_->Read16(0x6E00u), hw_->Read16(0x6E02u),
 			0x5E5Cu + (songCode_ & 0xffu) * 0x28u, obj,
 			obj ? hw_->Read16(obj) : 0u, obj ? hw_->Read16(obj + 2u) : 0u,
@@ -1061,7 +1085,10 @@ void CDriverF3::LogState(const char* tag)
 			obj ? hw_->Read16(obj + 0x1Cu) : 0u,
 			hw_->Read16(0xD40Eu),
 			hw_->Read8(0xD4C0u), hw_->Read16(0xD0F4u), hw_->Read32(0xD414u), hw_->Read32(0xD408u),
-			hw_->Read16(0xC14A74u), hw_->Read16(0xC14A76u), hw_->Read16(0xC14A78u), hw_->Read16(0xC14A7Cu));
+			hw_->Read16(0xC14A74u), hw_->Read16(0xC14A76u), hw_->Read16(0xC14A78u), hw_->Read16(0xC14A7Cu),
+			hw_->Read16(0xD0F4u) ? hw_->Read16(hw_->Read16(0xD0F4u) + 4u) : 0u,
+			hw_->Read16(0xD0F4u) ? hw_->Read8(hw_->Read16(0xD0F4u) + 2u) : 0u,
+			hw_->Read16(0xD410u), hops);
 	}
 	{
 		unsigned best = 0, besta = 0, run = 0, runa = 0;
@@ -1111,23 +1138,26 @@ void CDriverF3::LogState(const char* tag)
 		CChip* chip = hw_->SoundChip();
 		if (chip) {
 			fprintf(log, "  vox");
-			for (int v = 0; v < 4; v++) {
+			int shown = 0;
+			for (int v = 0; v < 32; v++) {
 				chip->Write(0x0f, (uint32_t)v);
-				fprintf(log, " %d:cr=%04X fc=%04X st=%04X%04X en=%04X%04X k2=%04X k1=%04X lv=%04X rv=%04X ac=%04X%04X",
-					v,
-					CEmuChipEs5505Read(chip, 0x00),
+				const unsigned stHi = CEmuChipEs5505Read(chip, 0x02);
+				const unsigned stLo = CEmuChipEs5505Read(chip, 0x03);
+				const unsigned lv = CEmuChipEs5505Read(chip, 0x08);
+				const unsigned rv = CEmuChipEs5505Read(chip, 0x09);
+				const unsigned cr = CEmuChipEs5505Read(chip, 0x00);
+				const int interesting = (lv || rv || (stHi < 0x1000u && stHi != 0));
+				if (!interesting) continue;
+				fprintf(log, " %d:cr=%04X fc=%04X st=%04X%04X en=%04X%04X lv=%04X rv=%04X",
+					v, cr,
 					CEmuChipEs5505Read(chip, 0x01),
-					CEmuChipEs5505Read(chip, 0x02),
-					CEmuChipEs5505Read(chip, 0x03),
+					stHi, stLo,
 					CEmuChipEs5505Read(chip, 0x04),
 					CEmuChipEs5505Read(chip, 0x05),
-					CEmuChipEs5505Read(chip, 0x06),
-					CEmuChipEs5505Read(chip, 0x07),
-					CEmuChipEs5505Read(chip, 0x08),
-					CEmuChipEs5505Read(chip, 0x09),
-					CEmuChipEs5505Read(chip, 0x0a),
-					CEmuChipEs5505Read(chip, 0x0b));
+					lv, rv);
+				if (++shown >= 8) break;
 			}
+			if (!shown) fprintf(log, " none");
 			fprintf(log, "\n");
 		}
 	}
@@ -1193,7 +1223,8 @@ void CDriverF3::RunCycles(int cycles)
 			const int inSeq = f3Arabianm_
 				? ((pc >= 0xC14884u && pc < 0xC14A60u) ? 1 : 0)
 				: ((pc >= 0xC14884u && pc < 0xC15480u) ? 1 : 0);
-			const int inIrq = (!f3Arabianm_ && pc >= 0xC10E00u && pc < 0xC11080u) ? 1 : 0;
+			/* arabianm も IRQ ハンドラ中に IPL を落とすと IRQ6 がネストして SSP が一周する。 */
+			const int inIrq = (pc >= 0xC10E00u && pc < 0xC11200u) ? 1 : 0;
 			if (ipl >= 6u && !inSeq && !inIrq && (stuck || ran < 256))
 				m68k_set_reg(M68K_REG_SR, (sr | 0x2000u) & ~0x0700u);
 		}

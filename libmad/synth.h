@@ -36,8 +36,9 @@ struct mad_pcm {
 };
 
 struct mad_synth {
-  mad_fixed_t filter[2][2][2][16][8];	/* polyphase filterbank outputs */
+  mad_fixed64_t filter[2][2][2][16][8];	/* polyphase filterbank outputs */
   					/* [ch][eo][peo][s][v] */
+					/* 64-bit: DCT bins can exceed ±8 */
 
   unsigned int phase;			/* current processing phase */
 

@@ -7162,6 +7162,7 @@ void CSoft3DRaceDlg::RenderScene()
 			return S3rSaturate(f);
 		};
 		S3RInst ci[S3R_MAX_CRAFT];
+		// VSSI は pitch を +X 回転（+Z 機首が -Y へ）するので、物理の機首上げ (+pitch) と逆。描画だけ符号を反転する。
 		if (m_phase == PHASE_PODIUM) {
 			for (int s = 0; s < 3 && craftDrawN < (UINT)S3R_MAX_CRAFT; s++) {
 				int idx = m_podiumOrder[s];
@@ -7169,7 +7170,7 @@ void CSoft3DRaceDlg::RenderScene()
 				S3rCraft& c = m_crafts[idx];
 				float cr = kCraftColors[c.colorIdx][0], cg = kCraftColors[c.colorIdx][1], cb = kCraftColors[c.colorIdx][2];
 				craftMeshOf[craftDrawN] = c.colorIdx % S3R_MAX_CRAFT;
-				ci[craftDrawN++] = {c.x, c.y, c.z, c.yaw, 1.25f, 1.25f, 1.25f, c.pitch, cr, cg, cb, 1.f, c.roll, 0.48f, c.isPlayer?1.f:0.f, 0.f};
+				ci[craftDrawN++] = {c.x, c.y, c.z, c.yaw, 1.25f, 1.25f, 1.25f, -c.pitch, cr, cg, cb, 1.f, c.roll, 0.48f, c.isPlayer?1.f:0.f, 0.f};
 			}
 		} else {
 			for (int i = 0; i < m_craftN && craftDrawN < (UINT)S3R_MAX_CRAFT; i++) {
@@ -7200,7 +7201,7 @@ void CSoft3DRaceDlg::RenderScene()
 					cg *= 1.f - 0.52f * soot;
 					cb *= 1.f - 0.50f * soot;
 				}
-				ci[craftDrawN++] = {c.x, c.y, c.z, c.yaw, sc, sc, sc, c.pitch, cr, cg, cb, a, c.roll, craftFlap(c), c.isPlayer?1.f:0.f, 0.f};
+				ci[craftDrawN++] = {c.x, c.y, c.z, c.yaw, sc, sc, sc, -c.pitch, cr, cg, cb, a, c.roll, craftFlap(c), c.isPlayer?1.f:0.f, 0.f};
 				craftMeshOf[craftDrawN-1] = c.colorIdx % S3R_MAX_CRAFT;
 			}
 		}

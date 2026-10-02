@@ -1,4 +1,4 @@
-#include "stdafx.h"
+﻿#include "stdafx.h"
 #include "NoteFundamentalPick.h"
 #include "ogg.h"
 #include "oggDlg.h"
@@ -2696,6 +2696,8 @@ static int g_eqDelay = 0;
 static BOOL g_initialized[EQ_BANKS] = { FALSE, FALSE };
 
 /*
+■ 再生経路の天井は EqCeiling（-0.20 dBTP）。ここから下は旧サンプルリミッターのメモ。
+
 ■ リミッターの動作を調整したい場合
 
 1. threshold（圧縮開始レベル）
@@ -4968,12 +4970,9 @@ static inline float ProfessionalSoftSaturate(float x)
 //   通常音楽  : CF ≈ 4-8  → 標準処理
 //   音声のみ  : CF > 9    → isVoice=TRUE
 //
-// 【FIX-COMP: stageTarget 変更】
-//   旧: isChiptune=0.65 / 通常=0.60
-//   新: isChiptune=0.82 / 通常=0.90
-//   理由: 旧値では通常音楽(ピーク0.7-0.9)が常に圧縮対象となり
-//         籠もり感の原因だった。最終保護は ProfessionalSoftSaturate
-//         (knee=0.78) に完全委譲するため、staging閾値を大幅緩和。
+//  stagingGain は常に 1。ピーク制御は EqCeiling（-0.20 dBTP）だけが行う。
+//  入力ピークでバッファ全体を下げると、EQ 後の実ピークとずれて
+//  静部まで痩せ、それでも割れが残っていた。
 // ============================================================
 typedef struct {
 	float peak;
@@ -5023,25 +5022,223 @@ static BlockAnalysis AnalyzeBlock(
 	ba.isChiptune = (ba.crestFactor < 3.5f && ba.peak > 0.04f);
 	ba.isVoice = (ba.crestFactor > 9.0f && ba.peak > 0.02f);
 
-	// 音割れ寸前だけ。0.90 だとピーク 0.9 超の普通の曲まで常時コンプされる。
-	const float stageTarget = ba.isChiptune ? 0.98f : 0.995f;
-
-	float postGainPeak = ba.peak * masterGain;
-	if (postGainPeak > stageTarget && postGainPeak > 0.001f)
-		ba.stagingGain = stageTarget / postGainPeak;
+	// バッファ全体の先制ダッキングはしない。入力ピークは EQ 後のピークと
+	// 一致せず、静部まで下げる。割れ止めは最終段の天井リミッターだけ。
+	(void)masterGain;
+	ba.stagingGain = 1.0f;
 
 	return ba;
 }
 
 
 // ============================================================
-// グローバル状態: ブロック間ゲイン平滑値 [FIX-COMP]
+// 天井は、超えているサンプルだけを -0.20 dB に揃える。
+// 前後のサンプルのゲインは変えない。キック全体を一緒に下げると、
+// ドンドンの上にぐちゃノイズが乗る。
+// サンプル位置は動かさない。
 // ============================================================
-// InitEngine でリセット。attack/release 非対称で自然な圧縮感を実現。
-// attack =0.08: 1ブロックで最大8%圧縮 → 急激な大音量でも緩やかに追従
-// release=0.30: 3〜4ブロックで元のゲインに復帰 → 不自然な揺り戻しなし
-static float g_stagingGainSmooth[EQ_BANKS] = { 1.0f, 1.0f };
-static float g_laLimEnv[EQ_BANKS] = { 1.0f, 1.0f };
+static const float kEqCeiling = 0.97723722f; // -0.20 dBTP
+
+struct EqCeilingState {
+	int la;
+	int rate;
+	float gain;
+	float gAtk;
+	float gRel;
+};
+
+static EqCeilingState g_ceil[EQ_BANKS];
+static float* g_ceilWork = NULL;
+static int g_ceilWorkCap = 0;
+static float* g_ceilAudio = NULL;
+static int g_ceilAudioCap = 0;
+
+static float EqCatmullPeak(float y0, float y1, float y2, float y3)
+{
+	float peak = fabsf(y1);
+	const float a2 = fabsf(y2);
+	if (a2 > peak) peak = a2;
+	for (int k = 1; k <= 3; ++k) {
+		const float t = 0.25f * (float)k;
+		const float t2 = t * t;
+		const float t3 = t2 * t;
+		const float v = 0.5f * (
+			(2.0f * y1) +
+			(-y0 + y2) * t +
+			(2.0f * y0 - 5.0f * y1 + 4.0f * y2 - y3) * t2 +
+			(-y0 + 3.0f * y1 - 3.0f * y2 + y3) * t3);
+		const float a = fabsf(v);
+		if (a > peak) peak = a;
+	}
+	return peak;
+}
+
+static float* EqCeilAlloc(float** slot, int* cap, int nFloats)
+{
+	if (nFloats <= 0) return NULL;
+	if (*slot && *cap >= nFloats) return *slot;
+	if (*slot) {
+		VirtualFree(*slot, 0, MEM_RELEASE);
+		*slot = NULL;
+		*cap = 0;
+	}
+	float* p = (float*)VirtualAlloc(NULL, (SIZE_T)nFloats * sizeof(float), MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+	if (!p) return NULL;
+	*slot = p;
+	*cap = nFloats;
+	return p;
+}
+
+static void EqCeilingPrepare(EqCeilingState* st, int rate)
+{
+	if (rate < 8000) rate = 8000;
+	if (st->rate == rate && st->la > 0)
+		return;
+	int la = (int)(0.005f * (float)rate + 0.5f);
+	if (la < 8) la = 8;
+	if (la > 480) la = 480;
+	st->la = la;
+	st->rate = rate;
+	st->gain = 1.0f;
+	st->gAtk = expf(-1.0f / (0.005f * (float)rate));
+	st->gRel = expf(-1.0f / (0.080f * (float)rate));
+}
+
+static void EqCeilingReset(int bank, int rate)
+{
+	if (bank < 0 || bank >= EQ_BANKS) bank = 0;
+	g_ceil[bank].rate = 0;
+	g_ceil[bank].gain = 1.0f;
+	EqCeilingPrepare(&g_ceil[bank], rate > 0 ? rate : 44100);
+}
+
+// peak[i] はサンプルピーク。中身を必要ゲインに変えてから、同じインデックスの
+// 適用ゲインを gainOut へ書く。音そのものはここを通らない。
+static void EqCeilingFillGains(float* peak, float* gainOut, int n, int rate)
+{
+	EqCeilingState* st = &g_ceil[g_eqCur];
+	EqCeilingPrepare(st, rate);
+	if (n <= 0) return;
+
+	for (int i = 0; i < n; ++i) {
+		const float p = peak[i];
+		const float need = (p > kEqCeiling) ? (kEqCeiling / p) : 1.0f;
+		peak[i] = need;
+		gainOut[i] = need;
+	}
+	st->gain = 1.0f;
+}
+
+static void EqCeilingNotePeaks(float* peak, int n, int nCh, float* const* planar, const float* interleaved)
+{
+	for (int ch = 0; ch < nCh; ++ch) {
+		for (int i = 0; i < n - 1; ++i) {
+			auto at = [&](int idx) -> float {
+				if (idx < 0) idx = 0;
+				if (idx >= n) idx = n - 1;
+				if (planar) return planar[ch][idx];
+				return interleaved[(size_t)idx * (size_t)nCh + (size_t)ch];
+			};
+			const float seg = EqCatmullPeak(at(i - 1), at(i), at(i + 1), at(i + 2));
+			if (seg > peak[i]) peak[i] = seg;
+			if (seg > peak[i + 1]) peak[i + 1] = seg;
+		}
+	}
+}
+
+static void EqCeilingApplyPlanar(float** ch, int nCh, int n, int rate)
+{
+	if (!ch || nCh < 1 || n <= 0 || rate <= 0) return;
+	if (nCh > MAX_CH) nCh = MAX_CH;
+	float* work = EqCeilAlloc(&g_ceilWork, &g_ceilWorkCap, n * 2);
+	if (!work) {
+		for (int i = 0; i < n; ++i) {
+			float p = 0.0f;
+			for (int c = 0; c < nCh; ++c) {
+				float x = ch[c][i];
+				if (!isfinite(x)) { x = 0.0f; ch[c][i] = 0.0f; }
+				const float a = fabsf(x);
+				if (a > p) p = a;
+			}
+			if (p > kEqCeiling) {
+				const float g = kEqCeiling / p;
+				for (int c = 0; c < nCh; ++c) ch[c][i] *= g;
+			}
+		}
+		return;
+	}
+	float* peak = work;
+	float* gain = work + n;
+	for (int i = 0; i < n; ++i) {
+		float p = 0.0f;
+		for (int c = 0; c < nCh; ++c) {
+			float x = ch[c][i];
+			if (!isfinite(x)) { x = 0.0f; ch[c][i] = 0.0f; }
+			const float a = fabsf(x);
+			if (a > p) p = a;
+		}
+		peak[i] = p;
+	}
+	EqCeilingNotePeaks(peak, n, nCh, ch, NULL);
+	EqCeilingFillGains(peak, gain, n, rate);
+	for (int i = 0; i < n; ++i) {
+		const float g = gain[i];
+		if (g == 1.0f) continue;
+		for (int c = 0; c < nCh; ++c) ch[c][i] *= g;
+	}
+}
+
+static void EqCeilingApplyInterleaved(float* frames, int nCh, int n, int rate)
+{
+	if (!frames || nCh < 1 || n <= 0 || rate <= 0) return;
+	if (nCh > MAX_CH) nCh = MAX_CH;
+	float* work = EqCeilAlloc(&g_ceilWork, &g_ceilWorkCap, n * 2);
+	if (!work) {
+		for (int i = 0; i < n; ++i) {
+			float p = 0.0f;
+			float* fr = frames + (size_t)i * (size_t)nCh;
+			for (int c = 0; c < nCh; ++c) {
+				if (!isfinite(fr[c])) fr[c] = 0.0f;
+				const float a = fabsf(fr[c]);
+				if (a > p) p = a;
+			}
+			if (p > kEqCeiling) {
+				const float g = kEqCeiling / p;
+				for (int c = 0; c < nCh; ++c) fr[c] *= g;
+			}
+		}
+		return;
+	}
+	float* peak = work;
+	float* gain = work + n;
+	for (int i = 0; i < n; ++i) {
+		float p = 0.0f;
+		float* fr = frames + (size_t)i * (size_t)nCh;
+		for (int c = 0; c < nCh; ++c) {
+			if (!isfinite(fr[c])) fr[c] = 0.0f;
+			const float a = fabsf(fr[c]);
+			if (a > p) p = a;
+		}
+		peak[i] = p;
+	}
+	EqCeilingNotePeaks(peak, n, nCh, NULL, frames);
+	EqCeilingFillGains(peak, gain, n, rate);
+	for (int i = 0; i < n; ++i) {
+		const float g = gain[i];
+		if (g == 1.0f) continue;
+		float* fr = frames + (size_t)i * (size_t)nCh;
+		for (int c = 0; c < nCh; ++c) fr[c] *= g;
+	}
+}
+
+static void ApplyLookaheadLimiterStereo(float* L, float* R, int n, int rate)
+{
+	if (!L || !R || n <= 0 || rate <= 0) return;
+	float* ch[2];
+	ch[0] = L;
+	ch[1] = R;
+	EqCeilingApplyPlanar(ch, 2, n, rate);
+}
 // 銀行あたり ~1.25MB x2。静的 BSS を避けて必要時確保。
 static float* g_eqLeftSamples[EQ_BANKS] = {};
 static float* g_eqRightSamples[EQ_BANKS] = {};
@@ -5586,9 +5783,7 @@ static void InitEngine(int rate, int bank = 0) {
 	FxChorusReset(rate);
 	FxDelayReset(rate);
 
-	// [FIX-COMP] ブロック間平滑ゲインをリセット
-	g_stagingGainSmooth[g_eqCur] = 1.0f;
-	g_laLimEnv[g_eqCur] = 1.0f;
+	EqCeilingReset(g_eqCur, rate);
 	SurroundResetBank(g_eqCur, rate);
 	g_eqCur = prevBank;
 }
@@ -5618,6 +5813,16 @@ void FreeEngine(void) {
 			VirtualFree(g_eqRightSamples[b], 0, MEM_RELEASE);
 			g_eqRightSamples[b] = NULL;
 		}
+	}
+	if (g_ceilWork) {
+		VirtualFree(g_ceilWork, 0, MEM_RELEASE);
+		g_ceilWork = NULL;
+		g_ceilWorkCap = 0;
+	}
+	if (g_ceilAudio) {
+		VirtualFree(g_ceilAudio, 0, MEM_RELEASE);
+		g_ceilAudio = NULL;
+		g_ceilAudioCap = 0;
 	}
 }
 
@@ -5670,59 +5875,6 @@ static float ProcessDynamicLimiter(DynamicLimiter* lim, float input) {
 	return input * lim->envelope;
 }
 
-// ============================================================
-// ★ ルックアヘッド・ピークリミッター（最終段・ステレオリンク）
-// ============================================================
-//  ブロック全体がバッファ済みなので「先読み」が可能。各サンプルで
-//  今後 La サンプル以内の最大ピークを見て、ピーク到達前にゲインを下げる。
-//  → オーバーシュートが出ないので tanh サチュレーションが不要になり、
-//    0.78〜0.97 域の高調波歪み(音割れ感/濁り)が乗らない。
-//  → 静部は無処理・ピークのみ動的減衰なので音量(ラウドネス)は維持。
-//  L/R 同一ゲインで処理しステレオ像を保つ。遅延はバッファ内先読みのため0。
-
-static void ApplyLookaheadLimiterStereo(float* L, float* R, int n, int rate, float ceiling)
-{
-	if (!L || !R || n <= 0 || rate <= 0) return;
-	static const int CAP = 8192 * 40;
-	if (n > CAP) n = CAP;
-
-	int La = rate / 700;            // 先読み ≈ 1.4ms
-	if (La < 8)    La = 8;
-	if (La > 1024) La = 1024;
-
-	static float req[CAP];          // 各サンプルの必要ゲイン(<=1)
-	static int   dq[CAP];           // 単調デック(スライディング最小)
-
-	for (int i = 0; i < n; ++i) {
-		const float p = fmaxf(fabsf(L[i]), fabsf(R[i]));
-		req[i] = (p > ceiling) ? (ceiling / p) : 1.0f;
-	}
-
-	int dqHead = 0, dqTail = 0;
-	auto pushBack = [&](int k) {
-		while (dqTail > dqHead && req[dq[dqTail - 1]] >= req[k]) --dqTail;
-		dq[dqTail++] = k;
-	};
-	for (int k = 0; k <= La && k < n; ++k) pushBack(k);
-
-	const float atkCoeff = expf(-1.0f / (0.0003f * (float)rate)); // ~0.3ms (La内で収束)
-	const float relCoeff = expf(-1.0f / (0.012f * (float)rate));  // ~12ms。ピーク以外を引きずらない
-
-	for (int i = 0; i < n; ++i) {
-		const float laMin = req[dq[dqHead]];      // [i, i+La] の最小必要ゲイン
-		const int add = i + La + 1;
-		if (add < n) pushBack(add);
-		if (dq[dqHead] == i) ++dqHead;
-
-		const float coeff = (laMin < g_laLimEnv[g_eqCur]) ? atkCoeff : relCoeff;
-		g_laLimEnv[g_eqCur] = laMin + coeff * (g_laLimEnv[g_eqCur] - laMin);
-		if (g_laLimEnv[g_eqCur] > 1.0f) g_laLimEnv[g_eqCur] = 1.0f;
-		if (g_laLimEnv[g_eqCur] < 0.0f) g_laLimEnv[g_eqCur] = 0.0f;
-
-		L[i] *= g_laLimEnv[g_eqCur];
-		R[i] *= g_laLimEnv[g_eqCur];
-	}
-}
 
 // ============================================================
 // 拡張音量 / フォーマット別音量ブースト (マスター音量とは独立)
@@ -5854,24 +6006,63 @@ static inline void FloatToPcmSample(unsigned char* pRaw, int offset, int wavsam,
 		pRaw[offset] = (unsigned char)(finalOut * 127.0f + 128.0f);
 }
 
-static float ApplyExternalBoostSample(float sample, int ch, float extGain)
-{
-	const int limCh = (ch < 2) ? ch : (ch & 1);
-	sample *= extGain;
-	sample = ProcessDynamicLimiter(&g_extBoostLimiter[g_eqCur][limCh], sample);
-	return ProfessionalSoftSaturate(sample);
-}
-
 static void ApplyExternalBoostOnlyToBuffer(
 	unsigned char* pRaw, int numSamples, int wavch, int wavsam, int bytesPerSample)
 {
 	const float extGain = GetExternalBoostGain();
+	const int rate = wavbitbackup > 0 ? wavbitbackup : 44100;
+	const int nCh = (wavch > MAX_CH) ? MAX_CH : wavch;
+	if (nCh < 1 || numSamples <= 0) return;
+	// ゲイン 1 かつ天井未満なら PCM を書き換えない。割れがあるバッファだけ下げる。
+	const float heldGain = g_ceil[g_eqCur].gain;
+	if (extGain <= 1.0001f && (!(heldGain > 0.0f) || heldGain >= 0.9999f)) {
+		bool hot = false;
+		for (int i = 0; i < numSamples && !hot; ++i) {
+			for (int ch = 0; ch < nCh; ++ch) {
+				const int offset = (i * wavch + ch) * bytesPerSample;
+				if (fabsf(PcmSampleToFloat(pRaw, offset, wavsam)) > kEqCeiling) {
+					hot = true;
+					break;
+				}
+			}
+		}
+		if (!hot) return;
+	}
+	float* audio = (numSamples <= (INT_MAX / nCh))
+		? EqCeilAlloc(&g_ceilAudio, &g_ceilAudioCap, numSamples * nCh) : NULL;
+	if (!audio) {
+		for (int i = 0; i < numSamples; i++) {
+			float frame[MAX_CH];
+			float p = 0.0f;
+			for (int ch = 0; ch < nCh; ch++) {
+				const int offset = (i * wavch + ch) * bytesPerSample;
+				frame[ch] = PcmSampleToFloat(pRaw, offset, wavsam) * extGain;
+				const float a = fabsf(frame[ch]);
+				if (a > p) p = a;
+			}
+			if (p > kEqCeiling) {
+				const float g = kEqCeiling / p;
+				for (int ch = 0; ch < nCh; ch++) frame[ch] *= g;
+			}
+			for (int ch = 0; ch < nCh; ch++) {
+				const int offset = (i * wavch + ch) * bytesPerSample;
+				FloatToPcmSample(pRaw, offset, wavsam, frame[ch]);
+			}
+		}
+		return;
+	}
 	for (int i = 0; i < numSamples; i++) {
-		for (int ch = 0; ch < wavch; ch++) {
-			int offset = (i * wavch + ch) * bytesPerSample;
-			float s = PcmSampleToFloat(pRaw, offset, wavsam);
-			s = ApplyExternalBoostSample(s, ch, extGain);
-			FloatToPcmSample(pRaw, offset, wavsam, s);
+		for (int ch = 0; ch < nCh; ch++) {
+			const int offset = (i * wavch + ch) * bytesPerSample;
+			audio[(size_t)i * (size_t)nCh + (size_t)ch] =
+				PcmSampleToFloat(pRaw, offset, wavsam) * extGain;
+		}
+	}
+	EqCeilingApplyInterleaved(audio, nCh, numSamples, rate);
+	for (int i = 0; i < numSamples; i++) {
+		for (int ch = 0; ch < nCh; ch++) {
+			const int offset = (i * wavch + ch) * bytesPerSample;
+			FloatToPcmSample(pRaw, offset, wavsam, audio[(size_t)i * (size_t)nCh + (size_t)ch]);
 		}
 	}
 }
@@ -6279,8 +6470,7 @@ static void equaliserBankUnlocked(void* data, int len, BOOL reset) {
 	//   ・EQ帯域 eq[0-14] がすべて100 (フラット)
 	//   ・追加エフェクト(リバーブ/コーラス/ディレイ)がすべて0 (オフ)
 	//   ・サラウンド == 0（サラウンド ON 時はリミッター経路へ）
-	// 上記すべて満たす場合は一切の処理をせず即返す。
-	// リサンプリングが不要な場合(≥44100Hz)はそのまま、
+	// フラットでも量子化済み PCM の天井だけは通す。位置は動かさない。
 	// リサンプリングが走っていた場合は tempBuffer を解放して返す。
 	// ============================================================
 	if (currentEnvPre == 0 &&
@@ -6296,7 +6486,6 @@ static void equaliserBankUnlocked(void* data, int len, BOOL reset) {
 			if (savedata.eq[i] != 100) { allFlat = false; break; }
 		}
 		if (allFlat) {
-			const float extBoostGain = GetExternalBoostGain();
 			auto finishOutNoMeter = [&]() {
 				void* outPtr = data;
 				int outLen = originalLen;
@@ -6316,6 +6505,7 @@ static void equaliserBankUnlocked(void* data, int len, BOOL reset) {
 				needsResampling ? processLen : originalLen,
 				needsResampling ? 44100 : originalRate,
 				wavsam_depth, wavchannel);
+			const float extBoostGain = GetExternalBoostGain();
 			if (extBoostGain <= 1.0001f) {
 				if (needsResampling && tempBuffer) {
 					free(tempBuffer);
@@ -6480,33 +6670,8 @@ static void equaliserBankUnlocked(void* data, int len, BOOL reset) {
 
 	BlockAnalysis ba = AnalyzeBlock(pRaw, numSamples, wavchannel, wavsam_depth, bytesPerSample, masterGain);
 
-	// ============================================================
-	// [FIX-COMP] ブロック間ゲイン平滑化
-	//
-	// attack=0.08 : 急激な大音量に対しては「ゆっくり」追従
-	//               → 圧縮が一気にかかって音が籠もるのを防ぐ
-	// release=0.30: ゲインが戻るときは「素早く」追従
-	//               → 静音部への戻りが遅れず自然
-	//
-	// 旧: ブロック単位で瞬時にgain変化 → 切れ目が不連続で籠もり感
-	// 新: 指数平滑でフレーム間をなめらかにつなぐ
-	// ============================================================
-	{
-		const float kAttack = 0.08f;   // 1ブロック最大8%圧縮
-		const float kRelease = 0.30f;   // 3〜4ブロックで復帰
-
-		if (ba.stagingGain < g_stagingGainSmooth[g_eqCur])
-			// 大音量側: 緩やかに追従 (attack)
-			g_stagingGainSmooth[g_eqCur] += (ba.stagingGain - g_stagingGainSmooth[g_eqCur]) * kAttack;
-		else
-			// 静音側: 素早く復帰 (release)
-			g_stagingGainSmooth[g_eqCur] += (ba.stagingGain - g_stagingGainSmooth[g_eqCur]) * kRelease;
-
-		g_stagingGainSmooth[g_eqCur] = ClampFloat(g_stagingGainSmooth[g_eqCur], 0.10f, 1.0f);
-	}
-
-	// 実効マスターゲイン = ユーザー設定 × 平滑化済みstagingGain
-	float effectiveMasterGain = masterGain * g_stagingGainSmooth[g_eqCur];
+	// マスターはユーザー設定のまま通す。ピークだけ最終段が -0.20 dBTP へ揃える。
+	float effectiveMasterGain = masterGain;
 
 	// [FIX-4 改] チップチューン/FM音源検出時のスケーリング係数
 	//
@@ -6532,10 +6697,13 @@ static void equaliserBankUnlocked(void* data, int len, BOOL reset) {
 		const int numSamples = processLen / (bytesPerSample * wavchannel);
 		float harmonicAmount = (density - 100.0f) / 100.0f;
 
+		const int nCh = (wavchannel > MAX_CH) ? MAX_CH : wavchannel;
+		const float extBoostGain = GetExternalBoostGain();
+		float* audio = (numSamples > 0 && nCh > 0 && numSamples <= (INT_MAX / nCh))
+			? EqCeilAlloc(&g_ceilAudio, &g_ceilAudioCap, numSamples * nCh) : NULL;
 		for (int i = 0; i < numSamples; i++) {
-			for (int ch = 0; ch < wavchannel; ch++) {
-				if (ch >= MAX_CH) continue;
-
+			float frame[MAX_CH];
+			for (int ch = 0; ch < nCh; ch++) {
 				float inSample = 0.0f;
 				int offset = (i * wavchannel + ch) * bytesPerSample;
 				if (wavsam_depth == 16)
@@ -6564,28 +6732,69 @@ static void equaliserBankUnlocked(void* data, int len, BOOL reset) {
 					signal += cs->harmonicState;
 				}
 				signal *= eqMakeupGain;
-				const float extBoostGain = GetExternalBoostGain();
 				if (extBoostGain != 1.0f)
 					signal *= extBoostGain;
-				if (signal > 0.97f) signal = 0.97f;
-				if (signal < -0.97f) signal = -0.97f;
-
-				if (wavsam_depth == 16) {
-					int32_t v = (int32_t)roundf(signal * 32768.0f);
-					if (v > 32767) v = 32767; if (v < -32768) v = -32768;
-					*((short*)(pRaw + offset)) = (short)v;
+				frame[ch] = signal;
+			}
+			if (audio) {
+				for (int ch = 0; ch < nCh; ch++)
+					audio[(size_t)i * (size_t)nCh + (size_t)ch] = frame[ch];
+			}
+			else {
+				float p = 0.0f;
+				for (int ch = 0; ch < nCh; ch++) {
+					const float a = fabsf(frame[ch]);
+					if (a > p) p = a;
 				}
-				else if (wavsam_depth == 24) {
-					int32_t v = (int32_t)roundf(signal * 8388608.0f);
-					if (v > 8388607) v = 8388607; if (v < -8388608) v = -8388608;
-					pRaw[offset] = v & 0xFF;
-					pRaw[offset + 1] = (v >> 8) & 0xFF;
-					pRaw[offset + 2] = (v >> 16) & 0xFF;
+				if (p > kEqCeiling) {
+					const float g = kEqCeiling / p;
+					for (int ch = 0; ch < nCh; ch++) frame[ch] *= g;
 				}
-				else if (wavsam_depth == 32)
-					*((int*)(pRaw + offset)) = (int)(signal * 2147483647.0f);
-				else
-					pRaw[offset] = (unsigned char)(signal * 127.0f + 128.0f);
+				for (int ch = 0; ch < nCh; ch++) {
+					const float signal = frame[ch];
+					int offset = (i * wavchannel + ch) * bytesPerSample;
+					if (wavsam_depth == 16) {
+						int32_t v = (int32_t)roundf(signal * 32768.0f);
+						if (v > 32767) v = 32767; if (v < -32768) v = -32768;
+						*((short*)(pRaw + offset)) = (short)v;
+					}
+					else if (wavsam_depth == 24) {
+						int32_t v = (int32_t)roundf(signal * 8388608.0f);
+						if (v > 8388607) v = 8388607; if (v < -8388608) v = -8388608;
+						pRaw[offset] = v & 0xFF;
+						pRaw[offset + 1] = (v >> 8) & 0xFF;
+						pRaw[offset + 2] = (v >> 16) & 0xFF;
+					}
+					else if (wavsam_depth == 32)
+						*((int*)(pRaw + offset)) = (int)(signal * 2147483647.0f);
+					else
+						pRaw[offset] = (unsigned char)(signal * 127.0f + 128.0f);
+				}
+			}
+		}
+		if (audio) {
+			EqCeilingApplyInterleaved(audio, nCh, numSamples, wavbitbackup);
+			for (int i = 0; i < numSamples; i++) {
+				for (int ch = 0; ch < nCh; ch++) {
+					const float signal = audio[(size_t)i * (size_t)nCh + (size_t)ch];
+					int offset = (i * wavchannel + ch) * bytesPerSample;
+					if (wavsam_depth == 16) {
+						int32_t v = (int32_t)roundf(signal * 32768.0f);
+						if (v > 32767) v = 32767; if (v < -32768) v = -32768;
+						*((short*)(pRaw + offset)) = (short)v;
+					}
+					else if (wavsam_depth == 24) {
+						int32_t v = (int32_t)roundf(signal * 8388608.0f);
+						if (v > 8388607) v = 8388607; if (v < -8388608) v = -8388608;
+						pRaw[offset] = v & 0xFF;
+						pRaw[offset + 1] = (v >> 8) & 0xFF;
+						pRaw[offset + 2] = (v >> 16) & 0xFF;
+					}
+					else if (wavsam_depth == 32)
+						*((int*)(pRaw + offset)) = (int)(signal * 2147483647.0f);
+					else
+						pRaw[offset] = (unsigned char)(signal * 127.0f + 128.0f);
+				}
 			}
 		}
 
@@ -6928,12 +7137,9 @@ static void equaliserBankUnlocked(void* data, int len, BOOL reset) {
 	}
 
 	// ===================================================
-	// 【最終段】拡張音量 + フォーマット別ブースト → ルックアヘッド・ピークリミッター
-	// マスター音量(eq[15])とは独立。ピークのみ動的に抑え、静部は減衰しない。
-	// 以前は tanh サチュレーション(knee0.78)で 0.78〜0.97 域に高調波歪みが常時乗り、
-	// それが「音割れ感/濁り」の主因だった。先読みリミッターでオーバーシュートを出さず
-	// 上限へ収めるため、サチュレーションを使わずクリア＆音量維持を両立する。
-	// (最終の整数化で ±1.0 ハードクランプが究極の安全装置として残る)
+	// 【最終段】拡張音量のあと、天井リミッター（-0.20 dBTP）
+	// サンプル位置は変えない。閾値未満はゲイン 1。
+	// ===================================================
 	{
 		const float extBoostGain = GetExternalBoostGain();
 		if (extBoostGain != 1.0f) {
@@ -6942,8 +7148,7 @@ static void equaliserBankUnlocked(void* data, int len, BOOL reset) {
 				rightSamples[i] *= extBoostGain;
 			}
 		}
-		/* 0.97 は普通のマスターでも常時かかる。フルスケール直前だけ掴む。 */
-		ApplyLookaheadLimiterStereo(leftSamples, rightSamples, bufferIndex, wavbitbackup, 0.998f);
+		ApplyLookaheadLimiterStereo(leftSamples, rightSamples, bufferIndex, wavbitbackup);
 	}
 
 	// ===== 最終出力: float → 整数PCM 書き戻し =====
@@ -6955,7 +7160,7 @@ static void equaliserBankUnlocked(void* data, int len, BOOL reset) {
 
 				float finalOut = (ch == 0) ? leftSamples[bi] : rightSamples[bi];
 
-				// ハードクリップ安全装置: ProfessionalSoftSaturate 正常動作時は到達しない
+				// 天井リミッター通過後も、整数化の直前で ±1 に収める
 				if (finalOut > 1.0f)  finalOut = 1.0f;
 				if (finalOut < -1.0f) finalOut = -1.0f;
 

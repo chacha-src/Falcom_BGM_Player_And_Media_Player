@@ -12,6 +12,10 @@
     <ClCompile Include="..\kb_sasami\source\sasami_file.cpp" />
     <ClCompile Include="..\kb_sasami\source\sasami_midi.cpp" />
     <ClCompile Include="..\kb_sasami\source\sasami_misao.cpp" />
+    <ClCompile Include="..\cpu_isa.cpp" />
+    <ClCompile Include="..\simd_audio.cpp" />
+    <ClCompile Include="..\simd_audio_avx512.cpp" />
+    <ClCompile Include="..\Sf2Vst2.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="KpiHost64.rc">

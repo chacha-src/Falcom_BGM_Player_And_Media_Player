@@ -32,7 +32,7 @@
     <CharacterSet>Unicode</CharacterSet>
     <CLRSupport>false</CLRSupport>
     <WholeProgramOptimization>false</WholeProgramOptimization>
-    <PlatformToolset>v145</PlatformToolset>
+    <PlatformToolset>x86ではなくx64でビルド(ogg)</PlatformToolset>
     <SpectreMitigation>Spectre</SpectreMitigation>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='uni_2026_de|Win32'" Label="Configuration">
@@ -379,14 +379,11 @@ if errorlevel 1 exit /b 1</Command>
       <IgnoreSpecificDefaultLibraries>uafxcw.lib;libircmt.lib;libirc.lib;svml_dispmt.lib;libmmt.lib;libiomp5md.lib</IgnoreSpecificDefaultLibraries>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <TurnOffAssemblyGeneration>false</TurnOffAssemblyGeneration>
-      <HeapReserveSize>
-      </HeapReserveSize>
+      <HeapReserveSize>20971520</HeapReserveSize>
       <HeapCommitSize>
       </HeapCommitSize>
-      <StackReserveSize>
-      </StackReserveSize>
-      <StackCommitSize>
-      </StackCommitSize>
+      <StackReserveSize>70000000</StackReserveSize>
+      <StackCommitSize>2048576</StackCommitSize>
       <LargeAddressAware>true</LargeAddressAware>
       <ModuleDefinitionFile>
       </ModuleDefinitionFile>

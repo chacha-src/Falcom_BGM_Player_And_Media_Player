@@ -49,6 +49,10 @@ public:
 	}
 	unsigned DuartFires() const { return duartFires_; }
 	unsigned EsWrites() const { return esWrites_; }
+	unsigned EsRegHits(int reg) const { return (reg >= 0 && reg < 16) ? esRegHits_[reg] : 0; }
+	uint16_t EsRegLast(int reg) const { return (reg >= 0 && reg < 16) ? esRegLast_[reg] : 0; }
+	unsigned EsWordWrites() const { return esWordWrites_; }
+	unsigned EsByteWrites() const { return esByteWrites_; }
 	unsigned AudioCpuSize() const { return audioCpuSize_; }
 	unsigned EnsoniqSize() const { return ensoniqSize_; }
 	int DpramTraceCount() const { return dpramTraceN_; }
@@ -115,6 +119,11 @@ private:
 	uint8_t duartIpcr_;
 	int64_t duartIpAcc_;
 	unsigned esWrites_;
+	unsigned esRegHits_[16];
+	uint16_t esRegLast_[16];
+	unsigned esWordWrites_;
+	unsigned esByteWrites_;
+	void NoteEsWrite(unsigned reg, uint16_t data, int isWord);
 };
 
 void CEmuHardF3SetActive(CHardF3* hw);

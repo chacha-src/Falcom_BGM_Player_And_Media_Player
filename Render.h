@@ -29,7 +29,10 @@ public:
 
 	CWnd* m_pParent;
 	int m_modeless;
+	int m_acceptPos;
 	int Create(CWnd* pWnd);
+	void ApplySavedPosition();
+	void RememberPos();
 	void CloseModeless();
 	CBrush m_brDlg;
 	
@@ -165,6 +168,8 @@ public:
 	afx_msg HBRUSH OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor);
 	afx_msg int OnCreate(LPCREATESTRUCT lpCreateStruct);
 	afx_msg void OnMoving(UINT fwSide, LPRECT pRect);
+	afx_msg void OnExitSizeMove();
+	afx_msg void OnWindowPosChanged(WINDOWPOS* lpwndpos);
 	afx_msg void OnBnClickedCancel();
 	afx_msg void OnBnClickedCheck52();
 	CCustomCheckBox m_speana;
@@ -183,19 +188,35 @@ public:
 	CCustomStatic m_surroundLabel;
 	CCustomCheckBox m_midPreferKpi;
 	CCustomCheckBox m_midPreferVst;
+	CCustomCheckBox m_midPreferHost;
+	CCustomComboBox m_vstHostPreset;
 	CCustomComboBox m_vstMultiCombo;
 	CCustomEdit m_vstExtraPath;
 	CCustomEdit m_vstMultiDll;
+	CCustomEdit m_vstGsSf2;
+	CCustomEdit m_vstXgSf2;
 	CCustomStandardButton m_vstExtraBrowse;
 	CCustomStandardButton m_vstMultiBrowse;
+	CCustomStandardButton m_vstGsSf2Browse;
+	CCustomStandardButton m_vstXgSf2Browse;
 	CCustomStandardButton m_vstScanNow;
 	afx_msg void OnMidPreferKpi(); // midPlayPrefer=0。リスト即更新。CEmu MIDI 再生中は zip を開き直す
 	afx_msg void OnMidPreferVst();
+	afx_msg void OnMidPreferHost();
+	afx_msg void OnVstHostPresetChange();
+	void FillVstHostPresetCombo();
+	void ApplyMidPreferUi();
 	afx_msg void OnVstExtraBrowse();
 	afx_msg void OnVstMultiBrowse();
+	afx_msg void OnVstGsSf2Browse();
+	afx_msg void OnVstXgSf2Browse();
+	afx_msg void OnVstGsPathChange();
+	afx_msg void OnVstXgPathChange();
 	afx_msg void OnVstScanNow();
 	void FillVstMultiCombo();
 	void LayoutMidiVstRows();
+	void EnableGsXgSf2Fields();
+	void SuggestCompanionSf2(CCustomEdit& plugin, CCustomEdit& sf2);
 	CCustomComboBox m_speaker;
 	afx_msg void OnCbnSelchangeSpeaker();
 	afx_msg void OnBnClickedCheckUpscale();

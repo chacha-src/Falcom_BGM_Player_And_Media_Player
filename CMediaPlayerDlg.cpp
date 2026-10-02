@@ -1,4 +1,4 @@
-// CMediaPlayerDlg.cpp : メディアプレイヤーモード画面(張りぼて)とモード選択ダイアログ
+﻿// CMediaPlayerDlg.cpp : メディアプレイヤーモード画面(張りぼて)とモード選択ダイアログ
 //
 // 実体は COggDlg(og->) と CPlayList(pl->)。ここは表示と操作の取り次ぎだけを行う。
 // メディアプレイヤーモード中は og / pl のウィンドウを非表示にして裏で生かしておく。
@@ -2559,22 +2559,10 @@ BOOL CMediaPlayerDlg::RelayPreTranslateMessage(MSG* pMsg)
 				OnEditSelAll();
 				return TRUE;
 			}
-			SyncSelectionToPlaylist();
 			if (pl->HandleListEditKeys(pMsg)) {
-				if (::IsWindow(m_list.GetSafeHwnd()) && ::IsWindow(pl->m_lc.GetSafeHwnd())) {
-					const int n = m_list.GetItemCount();
-					m_list.SetRedraw(FALSE);
-					for (int i = 0; i < n; i++) {
-						const int pcIdx = MpDispToPc(this, i);
-						UINT on = 0;
-						if (pcIdx >= 0
-							&& (pl->m_lc.GetItemState(pcIdx, LVIS_SELECTED) & LVIS_SELECTED))
-							on = LVIS_SELECTED;
-						m_list.SetItemState(i, on, LVIS_SELECTED);
-					}
-					m_list.SetRedraw(TRUE);
-					m_list.Invalidate(FALSE);
-				}
+				if (k == 'X' || k == 'x' || k == 'V' || k == 'v'
+					|| k == 'Z' || k == 'z' || k == 'Y' || k == 'y')
+					RefreshList(TRUE);
 				return TRUE;
 			}
 		}
@@ -4470,6 +4458,20 @@ int CMediaPlayerDlg::GetSelectedPcIndex() const
 	if (plcnt >= 0 && plcnt < pl->playcnt) return plcnt;
 	if (pl->pnt >= 0 && pl->pnt < pl->playcnt) return pl->pnt;
 	return 0;
+}
+
+void CMediaPlayerDlg::CollectSelectedPcIndices(std::vector<int>& out) const
+{
+	out.clear();
+	if (!pl || pl->playcnt <= 0) return;
+	if (!::IsWindow(m_list.GetSafeHwnd())) return;
+	CMediaPlayerDlg* self = const_cast<CMediaPlayerDlg*>(this);
+	int k = -1;
+	while ((k = self->m_list.GetNextItem(k, LVNI_SELECTED)) != -1) {
+		const int pcIdx = MpDispToPc(self, k);
+		if (pcIdx >= 0 && pcIdx < pl->playcnt)
+			out.push_back(pcIdx);
+	}
 }
 
 void CMediaPlayerDlg::RestoreListScrollAnchor(int anchor)
@@ -7234,12 +7236,9 @@ void CMediaPlayerDlg::OnMoveBottom()
 void CMediaPlayerDlg::OnItemDel()
 {
 	if (!pl) return;
-	SyncSelectionToPlaylist();
-	int selCount = 0;
-	int idx = -1;
-	while ((idx = pl->m_lc.GetNextItem(idx, LVNI_ALL | LVNI_SELECTED)) >= 0) {
-		if (idx < pl->playcnt) ++selCount;
-	}
+	std::vector<int> sel;
+	pl->CollectSelectedIndices(sel);
+	const int selCount = (int)sel.size();
 	if (selCount <= 0) return;
 	CString msg;
 	if (selCount >= pl->playcnt && pl->playcnt > 0)
@@ -7248,9 +7247,12 @@ void CMediaPlayerDlg::OnItemDel()
 		msg = LL14(L"削除しますか？", L"Delete?", L"Supprimer ?", L"Eliminare?", L"¿Eliminar?", L"삭제할까요?", L"要删除吗？", L"حذف؟", L"Удалить?", L"Loeschen?", L"Excluir?", L"Verwijderen?", L"Usunac?", L"Sil?");
 	else
 		msg.Format(LL14(L"%d件削除しますか？", L"Delete %d items?", L"Supprimer %d ?", L"Eliminare %d?", L"¿Eliminar %d?", L"%d개 삭제할까요?", L"要删除 %d 项吗？", L"حذف %d؟", L"Удалить %d?", L"%d loeschen?", L"Excluir %d?", L"%d verwijderen?", L"Usunac %d?", L"%d ogeyi sil?"), selCount);
-	if (AfxMessageBox(msg, MB_YESNO | MB_ICONQUESTION) != IDYES)
+	LPCTSTR cap = AfxGetAppName();
+	if (!cap || !cap[0])
+		cap = _T("ogg");
+	if (MessageBox(msg, cap, MB_YESNO | MB_ICONQUESTION | MB_SETFOREGROUND) != IDYES)
 		return;
-	pl->Del();
+	pl->DelByIndices(sel);
 	RefreshList(TRUE);
 }
 
@@ -7836,7 +7838,6 @@ void CMediaPlayerDlg::OnKeydownList(NMHDR* pNMHDR, LRESULT* pResult)
 	*pResult = 0;
 	if (!pl) return;
 	if (pLVKeyDown && pLVKeyDown->wVKey == VK_DELETE) {
-		SyncSelectionToPlaylist();
 		pl->Del();
 		RefreshList(TRUE);
 	}
@@ -8833,14 +8834,12 @@ void CMediaPlayerDlg::OnEditSelAll()
 void CMediaPlayerDlg::OnEditCopy()
 {
 	if (!pl || !::IsWindow(pl->GetSafeHwnd())) return;
-	SyncSelectionToPlaylist();
 	pl->CopySelectionToClipboard();
 }
 
 void CMediaPlayerDlg::OnEditCut()
 {
 	if (!pl || !::IsWindow(pl->GetSafeHwnd())) return;
-	SyncSelectionToPlaylist();
 	if (pl->CopySelectionToClipboard())
 		pl->Del();
 }
@@ -8848,7 +8847,6 @@ void CMediaPlayerDlg::OnEditCut()
 void CMediaPlayerDlg::OnEditPaste()
 {
 	if (!pl || !::IsWindow(pl->GetSafeHwnd())) return;
-	SyncSelectionToPlaylist();
 	pl->PasteFromClipboard();
 }
 

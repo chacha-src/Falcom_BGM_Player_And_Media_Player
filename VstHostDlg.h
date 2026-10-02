@@ -88,6 +88,12 @@ public:
 	BOOL PluginIsMulti(int scanIndex) const;
 	void PartPluginName(int part0to31, wchar_t* out, int outChars) const;
 	void RestartIo();
+	void ApplyPreset(int index);
+	int PresetCount() const { return m_presetCount; }
+	int PresetCacheBytes(int index) const;
+	int CopyPresetName(int index, wchar_t* out, int outChars) const;
+	int PresetHasAnyPath(int index) const;
+	void PauseAudioForSong(int pause);
 
 	struct Preset {
 		wchar_t name[64];
@@ -113,7 +119,6 @@ protected:
 	void RebuildPluginList();
 	void RefreshPresetCombo(int select);
 	void CaptureCurrent(Preset& p, LPCTSTR name);
-	void ApplyPreset(int index);
 	void LoadPresets();
 	BOOL SavePresets();
 	void ClearPresetStates(int presetIndex);
@@ -212,4 +217,10 @@ extern CVstHostDlg* g_vstHostDlg;
 void OpenVstHostModeless(CWnd* parent);
 /* HWND of open VST Host, or NULL. Used by live monitor to yield waveOut. */
 HWND VstHostDlgGetHwnd(void);
+int VstHostPresetCount(void);
+int VstHostPresetName(int index, wchar_t* out, int outChars);
+int VstHostPresetHasCache(int index);
+int VstHostApplyPresetForPlay(int index, HWND waitOwner);
+int VstHostAskCacheMissing(CWnd* owner);
+void VstHostPauseForSong(int pause);
 

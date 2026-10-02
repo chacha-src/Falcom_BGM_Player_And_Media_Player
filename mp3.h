@@ -1349,6 +1349,7 @@ public:
 		m_bWatchDither = TRUE;
 		m_hNotification = INVALID_HANDLE_VALUE;
 		CloseHandle(m_hFile);
+		ResetMp3Guard();
 	}
 
 	// pack_pcm / リングは m_dwBitsPerSample 基準。グローバル wavsam_depth と混在させると 16/24 でフレーム数が 1.5 倍ずれる。
@@ -1410,6 +1411,7 @@ public:
 		m_ringbuf.Reset();
 		m_clipped = 0;
 		m_clipping = 0;
+		ResetMp3Guard();
 		m_dwBufLen = 0;
 		mad_header_finish(&m_header);
 		mad_stream_finish(&m_stream);
@@ -1437,6 +1439,7 @@ public:
 			m_ringbuf.Reset();
 			m_clipped = 0;
 			m_clipping = 0;
+			ResetMp3Guard();
 			m_dwBufLen = 0;
 			if (m_hFile != INVALID_HANDLE_VALUE) {
 				CloseHandle(m_hFile);
@@ -1458,6 +1461,7 @@ public:
 				ZeroMemory(&m_right_dither, sizeof(m_right_dither));
 				m_clipped = 0;
 				m_clipping = 0;
+				ResetMp3Guard();
 			}
 			//		if(m_hNotification != INVALID_HANDLE_VALUE){
 			//			FindCloseChangeNotification(m_hNotification);
@@ -1502,6 +1506,7 @@ public:
 
 	DWORD seek(DWORD dwPos, int ch)
 	{//シーク（戻り値はシーク後の再生位置）
+		ResetMp3Guard();
 		if (m_mp3info.hasVbrtag == TRUE) {
 			return seek2(dwPos, ch);
 		}
@@ -1512,6 +1517,7 @@ public:
 		}
 		m_clipped = 0;
 		m_clipping = 0;
+		ResetMp3Guard();
 		m_dwBufLen = 0;
 		mad_header_finish(&m_header);
 		mad_stream_finish(&m_stream);
@@ -1738,6 +1744,10 @@ public:
 			m_dwBufLen -= m_stream.next_frame - m_buffer;
 		}
 		return dwRet;
+	}
+
+	void ResetMp3Guard()
+	{
 	}
 
 	//static

@@ -1,4 +1,4 @@
-// oggDlg.cpp : インプリメンテーション ファイル
+﻿// oggDlg.cpp : インプリメンテーション ファイル
 //
 //#define _DLL
 #include "stdafx.h"
@@ -3715,6 +3715,18 @@ static int VstBannerArchBits()
 	return a;
 }
 
+static int TryVstHostPlayBinds(HWND waitOwner)
+{
+	if (savedata.midPlayPrefer != 2) return 0;
+	int idx = savedata.vstHostPlayPreset;
+	if (idx < 0) idx = 0;
+	if (!VstHostPresetHasCache(idx))
+		return -1;
+	VstHostPauseForSong(1);
+	const int n = VstHostApplyPresetForPlay(idx, waitOwner);
+	return n > 0 ? n : 0;
+}
+
 static void CloseVstMidiSessionSlot(int slot)
 {
 	if (slot < 0 || slot >= XF_SLOTS) slot = 0;
@@ -3748,6 +3760,7 @@ static void CloseVstMidiSession()
 	   while Host64 waits in Pump / UI waits on Host64). */
 	CloseVstMidiSessionSlot(0);
 	CloseVstMidiSessionSlot(1);
+	VstHostPauseForSong(0);
 	if (!keepLive) {
 		CEmuMidiLiveStop();
 		VstLiveTapFlush();
@@ -4770,7 +4783,7 @@ public:
 			if (_wcsicmp(key, L"raira") == 0)
 				return 1;
 			if (_wcsicmp(key, L"vst") == 0)
-				return (savedata.midPlayPrefer == 1) ? 0 : 1;
+				return (savedata.midPlayPrefer != 0) ? 0 : 1;
 		}
 		return KpiV5GetInt(m_pluginName, sec ? sec : L"", key ? key : L"", def);
 	}
@@ -7884,6 +7897,13 @@ static int XfSoftOpenSlot(int slot, const CString& path, int openMode)
 			pe.MakeLower();
 			if (pe.GetLength() >= 6 && pe.Right(6) == L".mpsmv")
 				liveBinds = VstApplyMpw3Binds(path, 0);
+		}
+		if (liveBinds <= 0) {
+			const int hostN = TryVstHostPlayBinds(NULL);
+			if (hostN > 0)
+				liveBinds = hostN;
+			else if (savedata.midPlayPrefer == 2)
+				return 0;
 		}
 		VstSongUseLiveBindsSet(liveBinds > 0 ? 1 : 0);
 		int remote = 0;
@@ -12947,7 +12967,7 @@ open_mode_kpi:
 					filen = midPath;
 					kpi[0] = 0;
 					tagfile = cemuPlZipPath;
-					if (savedata.midPlayPrefer == 1) {
+					if (savedata.midPlayPrefer != 0) {
 						mode = modesub = MODE_VST_MIDI;
 						goto open_mode_vst_midi;
 					}
@@ -12987,7 +13007,7 @@ open_mode_kpi:
 						CEmuPendingLoadFinishOpen(openPath);
 						/* CloseVstMidiSession / open_mode_kpi must not LiveStop. */
 						g_cemuLiveKeepAcrossClose = 1;
-						if (savedata.midPlayPrefer == 1) {
+						if (savedata.midPlayPrefer != 0) {
 							mode = modesub = MODE_VST_MIDI;
 							goto open_mode_vst_midi;
 						}
@@ -13149,6 +13169,19 @@ open_mode_vst_midi:
 			pe.MakeLower();
 			if (pe.GetLength() >= 6 && pe.Right(6) == L".mpsmv")
 				liveBinds = VstApplyMpw3Binds(filen, 0);
+		}
+		if (liveBinds <= 0) {
+			const int hostN = TryVstHostPlayBinds(m_hWnd);
+			if (hostN < 0) {
+				if (VstHostAskCacheMissing(this) == IDYES)
+					OpenVstHostModeless(this);
+				m_saisai.EnableWindow(TRUE); endflg = 0; return;
+			}
+			if (hostN > 0)
+				liveBinds = hostN;
+			else if (savedata.midPlayPrefer == 2) {
+				m_saisai.EnableWindow(TRUE); endflg = 0; return;
+			}
 		}
 		VstSongUseLiveBindsSet(liveBinds > 0 ? 1 : 0);
 		wchar_t vstPlug[VST_PATH_CHARS]; vstPlug[0] = 0;

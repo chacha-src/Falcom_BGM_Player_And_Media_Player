@@ -763,6 +763,12 @@ static void EnsLog(const wchar_t* fmt, ...)
 	(void)fmt;
 }
 
+static int g_juicySong[2] = { 0, 0 };
+static AEffect* g_sfPart[2][3][16];
+static int g_sfPartN[2][3];
+static BYTE g_sfDrum[2][3][16];
+static BYTE g_sfDrumMsb[2][3][16];
+
 
 static void SafeCopy(wchar_t* dst, int chars, const wchar_t* src)
 {
@@ -787,6 +793,16 @@ static int PathIsSoundFont(const wchar_t* path)
 {
 	return Sf2PathIsSoundFont(path);
 }
+
+static int PathLooksLikeSfPlayer(const wchar_t* path);
+static int FindCompanionSoundFont(const wchar_t* pluginPath, wchar_t* out, int outN);
+static int ResolveSoundFontForPlugin(const wchar_t* pluginPath, wchar_t* out, int outN);
+static void TryBindSoundFont(const wchar_t* pluginPath, AEffect* effect);
+static void JuicySpawnParts(int unit, AEffect* primary, HMODULE mod, const wchar_t* path);
+static void JuicyCloseParts(void);
+static void JuicyResetRack(int unit, int preferGs);
+static void JuicyAllOff(int unit);
+static void JuicyRackSlice(int unit, __int64 t0, int done, int nfr, float* l, float* r);
 
 static void ExeDir(wchar_t out[VST_PATH_CHARS])
 {
@@ -3964,21 +3980,43 @@ static void RenderSongUnits(int frames)
 	for (int done = 0; done < frames; ) {
 		int nfr = frames - done;
 		if (nfr > VST_SLICE) nfr = VST_SLICE;
-		VstFeedSlice(0, g_eng.effect, g_eng.vst3, t0, done, nfr);
-		VstFeedSlice(1, g_eng.effectB, NULL, t0, done, nfr);
-		VstFeedSlice(2, g_eng.effectC, g_eng.vst3C, t0, done, nfr);
-		if (g_eng.vst3)
-			Vst3Process(g_eng.vst3, g_eng.outL + done, g_eng.outR + done, nfr);
-		else if (g_eng.effect)
-			RenderEffect(g_eng.effect, g_eng.outL + done, g_eng.outR + done, nfr);
-		if (g_eng.effectB) {
+		const int juicy0 = (g_sfPartN[sl][0] > 1) ? 1 : 0;
+		const int juicy1 = (g_sfPartN[sl][1] > 1) ? 1 : 0;
+		const int juicy2 = (g_sfPartN[sl][2] > 1) ? 1 : 0;
+		if (juicy0)
+			JuicyRackSlice(0, t0, done, nfr, g_eng.outL + done, g_eng.outR + done);
+		else
+			VstFeedSlice(0, g_eng.effect, g_eng.vst3, t0, done, nfr);
+		if (!juicy1)
+			VstFeedSlice(1, g_eng.effectB, NULL, t0, done, nfr);
+		if (!juicy2)
+			VstFeedSlice(2, g_eng.effectC, g_eng.vst3C, t0, done, nfr);
+		if (!juicy0) {
+			if (g_eng.vst3)
+				Vst3Process(g_eng.vst3, g_eng.outL + done, g_eng.outR + done, nfr);
+			else if (g_eng.effect)
+				RenderEffect(g_eng.effect, g_eng.outL + done, g_eng.outR + done, nfr);
+		}
+		if (juicy1) {
+			JuicyRackSlice(1, t0, done, nfr, g_eng.mixL, g_eng.mixR);
+			for (int i = 0; i < nfr; ++i) {
+				g_eng.outL[done + i] += g_eng.mixL[i];
+				g_eng.outR[done + i] += g_eng.mixR[i];
+			}
+		} else if (g_eng.effectB) {
 			RenderEffect(g_eng.effectB, g_eng.mixL, g_eng.mixR, nfr);
 			for (int i = 0; i < nfr; ++i) {
 				g_eng.outL[done + i] += g_eng.mixL[i];
 				g_eng.outR[done + i] += g_eng.mixR[i];
 			}
 		}
-		if (g_eng.effectC) {
+		if (juicy2) {
+			JuicyRackSlice(2, t0, done, nfr, g_eng.mixL, g_eng.mixR);
+			for (int i = 0; i < nfr; ++i) {
+				g_eng.outL[done + i] += g_eng.mixL[i];
+				g_eng.outR[done + i] += g_eng.mixR[i];
+			}
+		} else if (g_eng.effectC) {
 			RenderEffect(g_eng.effectC, g_eng.mixL, g_eng.mixR, nfr);
 			for (int i = 0; i < nfr; ++i) {
 				g_eng.outL[done + i] += g_eng.mixL[i];
@@ -4154,6 +4192,11 @@ static int LoadVst2(const wchar_t* path, HMODULE& module, AEffect*& effect)
 		else SafeCopy(bindAs, VST_PATH_CHARS, loadPath);
 		VstPlugDirSet(bindAs);
 	}
+	{
+		wchar_t sfEarly[VST_PATH_CHARS];
+		if (ResolveSoundFontForPlugin(loadPath, sfEarly, VST_PATH_CHARS))
+			SetEnvironmentVariableW(L"JUICY_SOUNDFONT_PATH", sfEarly);
+	}
 	__try { effect = proc(HostCallback); }
 	__except (seh = GetExceptionCode(), EXCEPTION_EXECUTE_HANDLER) { effect = NULL; }
 	if (!effect || effect->magic != kEffectMagic || !effect->dispatcher ||
@@ -4194,6 +4237,7 @@ static int LoadVst2(const wchar_t* path, HMODULE& module, AEffect*& effect)
 	EnsLog(L"LoadVst2 OK path=%s ins=%d outs=%d flags=0x%X uid=0x%08X",
 		loadPath, effect->numInputs, effect->numOutputs, (unsigned)effect->flags,
 		(unsigned)effect->uniqueID);
+	TryBindSoundFont(loadPath, effect);
 	if (oldCurDir[0]) SetCurrentDirectoryW(oldCurDir);
 	return 1;
 }
@@ -4245,6 +4289,677 @@ static int ContainsI(const wchar_t* text, const wchar_t* needle)
 	return 0;
 }
 
+static int PathLooksLikeSfPlayer(const wchar_t* path)
+{
+	if (!path || !path[0] || PathIsSoundFont(path)) return 0;
+	return (ContainsI(path, L"juicy") || ContainsI(path, L"sfplugin")
+		|| ContainsI(path, L"fluidsynth")) ? 1 : 0;
+}
+
+static int FileExistsW(const wchar_t* path)
+{
+	if (!path || !path[0]) return 0;
+	const DWORD a = GetFileAttributesW(path);
+	return (a != INVALID_FILE_ATTRIBUTES && !(a & FILE_ATTRIBUTE_DIRECTORY)) ? 1 : 0;
+}
+
+static int FindCompanionSoundFont(const wchar_t* pluginPath, wchar_t* out, int outN)
+{
+	if (!pluginPath || !out || outN <= 0) return 0;
+	out[0] = 0;
+	wchar_t dir[VST_PATH_CHARS];
+	SafeCopy(dir, VST_PATH_CHARS, pluginPath);
+	wchar_t* slash = wcsrchr(dir, L'\\');
+	if (slash) *slash = 0;
+	else return 0;
+	static const wchar_t* prefer[] = {
+		L"SGM-V2.01.sf2", L"SGM-V2.sf2", L"SGM_V2.01.sf2", L"FluidR3_GM.sf2"
+	};
+	for (int i = 0; i < (int)(sizeof(prefer) / sizeof(prefer[0])); ++i) {
+		wchar_t cand[VST_PATH_CHARS];
+		JoinPath(cand, dir, prefer[i]);
+		if (FileExistsW(cand)) { SafeCopy(out, outN, cand); return 1; }
+	}
+	wchar_t glob[VST_PATH_CHARS];
+	JoinPath(glob, dir, L"*.sf2");
+	WIN32_FIND_DATAW fd = {};
+	HANDLE h = FindFirstFileW(glob, &fd);
+	if (h == INVALID_HANDLE_VALUE) return 0;
+	int ok = 0;
+	do {
+		if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
+		JoinPath(out, dir, fd.cFileName);
+		ok = 1;
+		break;
+	} while (FindNextFileW(h, &fd));
+	FindClose(h);
+	return ok;
+}
+
+static int SamePluginFile(const wchar_t* a, const wchar_t* b)
+{
+	if (!a || !b || !a[0] || !b[0]) return 0;
+	if (_wcsicmp(a, b) == 0) return 1;
+	const wchar_t* fa = wcsrchr(a, L'\\');
+	const wchar_t* fb = wcsrchr(b, L'\\');
+	fa = fa ? fa + 1 : a;
+	fb = fb ? fb + 1 : b;
+	return _wcsicmp(fa, fb) == 0;
+}
+
+static const wchar_t* ExplicitSoundFontForPlugin(const wchar_t* pluginPath)
+{
+	if (!pluginPath || !pluginPath[0]) return NULL;
+	if (savedata.vstGsSoundFont[0] && savedata.vstMultiDll[0]
+		&& SamePluginFile(pluginPath, savedata.vstMultiDll))
+		return savedata.vstGsSoundFont;
+	if (savedata.vstXgSoundFont[0] && savedata.vstExtraPath[0]
+		&& SamePluginFile(pluginPath, savedata.vstExtraPath))
+		return savedata.vstXgSoundFont;
+	return NULL;
+}
+
+static int ResolveSoundFontForPlugin(const wchar_t* pluginPath, wchar_t* out, int outN)
+{
+	if (!out || outN <= 0) return 0;
+	out[0] = 0;
+	if (!PathLooksLikeSfPlayer(pluginPath)) return 0;
+	const wchar_t* expl = ExplicitSoundFontForPlugin(pluginPath);
+	if (expl && FileExistsW(expl)) { SafeCopy(out, outN, expl); return 1; }
+	return FindCompanionSoundFont(pluginPath, out, outN);
+}
+
+static int XmlEscapeUtf8(char* dst, int dstN, const char* src)
+{
+	int o = 0;
+	for (; src && *src && o + 8 < dstN; ++src) {
+		const unsigned char c = (unsigned char)*src;
+		const char* e = NULL;
+		if (c == '&') e = "&amp;";
+		else if (c == '<') e = "&lt;";
+		else if (c == '>') e = "&gt;";
+		else if (c == '"') e = "&quot;";
+		if (e) {
+			while (*e && o < dstN - 1) dst[o++] = *e++;
+		} else
+			dst[o++] = (char)c;
+	}
+	if (o < dstN) dst[o] = 0;
+	return o;
+}
+
+static unsigned JuicyXmlDMagic(void)
+{
+	/* JUCE 6+ copyXmlToBinary。旧 "XmlD" ではない。 */
+	return 0x21324356u;
+}
+
+static int JuicyIsStateMagic(unsigned m)
+{
+	if (m == 0x21324356u) return 1;
+	const unsigned xmlD = (unsigned)'X' | ((unsigned)'m' << 8)
+		| ((unsigned)'l' << 16) | ((unsigned)'D' << 24);
+	return (m == xmlD) ? 1 : 0;
+}
+
+static int JuicyXmlSetPathAttr(char* xml, int cap, const char* pathEsc)
+{
+	if (!xml || cap < 64 || !pathEsc) return 0;
+	char* sf = strstr(xml, "<soundFont");
+	if (!sf) {
+		char* end = strstr(xml, "</MYPLUGINSETTINGS>");
+		if (!end) return 0;
+		char ins[1400];
+		const int nins = sprintf_s(ins, "<soundFont path=\"%s\" bookmark=\"\"/>", pathEsc);
+		if (nins <= 0) return 0;
+		const int tail = (int)strlen(end);
+		if ((int)(end - xml) + nins + tail + 1 > cap) return 0;
+		memmove(end + nins, end, (size_t)tail + 1);
+		memcpy(end, ins, (size_t)nins);
+		return 1;
+	}
+	char* p = strstr(sf, "path=\"");
+	char* tagEnd = strchr(sf, '>');
+	if (!p || (tagEnd && p > tagEnd)) {
+		char* insAt = tagEnd ? tagEnd : sf + 10;
+		if (tagEnd && tagEnd > sf && tagEnd[-1] == '/')
+			insAt = tagEnd - 1;
+		char ins[1300];
+		const int nins = sprintf_s(ins, " path=\"%s\"", pathEsc);
+		if (nins <= 0) return 0;
+		const int tail = (int)strlen(insAt);
+		if ((int)(insAt - xml) + nins + tail + 1 > cap) return 0;
+		memmove(insAt + nins, insAt, (size_t)tail + 1);
+		memcpy(insAt, ins, (size_t)nins);
+		return 1;
+	}
+	p += 6;
+	char* q = strchr(p, '"');
+	if (!q) return 0;
+	const int nval = (int)strlen(pathEsc);
+	const int old = (int)(q - p);
+	const int tail = (int)strlen(q);
+	if ((int)(p - xml) + nval + tail + 1 > cap) return 0;
+	if (nval != old)
+		memmove(p + nval, q, (size_t)tail + 1);
+	memcpy(p, pathEsc, (size_t)nval);
+	return 1;
+}
+
+static int JuicyDispatchSetChunk(AEffect* e, void* blob, int bytes)
+{
+	if (!e || !e->dispatcher || !blob || bytes <= 0) return 0;
+	/* VST2 は value=size。古い JUCE ラッパは opt（float）を size に使う。 */
+	__try { e->dispatcher(e, effSetChunk, 0, bytes, blob, (float)bytes); }
+	__except (EXCEPTION_EXECUTE_HANDLER) { return 0; }
+	return 1;
+}
+
+static int JuicySendXmlD(AEffect* e, const char* xml)
+{
+	if (!e || !xml) return 0;
+	const int nxml = (int)strlen(xml);
+	if (nxml <= 0) return 0;
+	const int bytes = 8 + nxml + 1;
+	unsigned char* blob = (unsigned char*)malloc((size_t)bytes);
+	if (!blob) return 0;
+	const unsigned magic = JuicyXmlDMagic();
+	memcpy(blob, &magic, 4);
+	const unsigned slen = (unsigned)nxml;
+	memcpy(blob + 4, &slen, 4);
+	memcpy(blob + 8, xml, (size_t)nxml);
+	blob[8 + nxml] = 0;
+	const int ok = JuicyDispatchSetChunk(e, blob, bytes);
+	free(blob);
+	return ok;
+}
+
+static void JuicyFillDefaultXml(char* xml, int cap, const char* pathEsc)
+{
+	sprintf_s(xml, (size_t)cap,
+		"<MYPLUGINSETTINGS>"
+		"<params bank=\"0\" preset=\"0\" attack=\"0\" decay=\"0\" "
+		"sustain=\"0\" release=\"0\" filterCutOff=\"0\" filterResonance=\"0\"/>"
+		"<uiState width=\"800\" height=\"600\"/>"
+		"<soundFont path=\"%s\" bookmark=\"\"/>"
+		"</MYPLUGINSETTINGS>", pathEsc);
+}
+
+static void JuicySetSoundFontChunk(AEffect* e, const wchar_t* sf2)
+{
+	if (!e || !e->dispatcher || !sf2 || !sf2[0]) return;
+	char pathU8[1024] = {};
+	if (!WideCharToMultiByte(CP_UTF8, 0, sf2, -1, pathU8, (int)sizeof(pathU8), NULL, NULL))
+		return;
+	char esc[1280] = {};
+	XmlEscapeUtf8(esc, (int)sizeof(esc), pathU8);
+
+	char xml[8192] = {};
+	int have = 0;
+	void* ptr = NULL;
+	VstIntPtr sz = 0;
+	__try { sz = e->dispatcher(e, effGetChunk, 0, 0, &ptr, 0); }
+	__except (EXCEPTION_EXECUTE_HANDLER) { sz = 0; ptr = NULL; }
+	if (sz > 8 && ptr) {
+		unsigned magic = 0, slen = 0;
+		memcpy(&magic, ptr, 4);
+		memcpy(&slen, (char*)ptr + 4, 4);
+		if (JuicyIsStateMagic(magic) && slen > 0 && slen < sizeof(xml) - 1
+			&& (VstIntPtr)(8 + slen) <= sz) {
+			memcpy(xml, (char*)ptr + 8, slen);
+			xml[slen] = 0;
+			have = 1;
+		} else if (sz < (VstIntPtr)sizeof(xml) && ((char*)ptr)[0] == '<') {
+			memcpy(xml, ptr, (size_t)sz);
+			xml[sz] = 0;
+			have = 1;
+		}
+	}
+	if (!have)
+		JuicyFillDefaultXml(xml, (int)sizeof(xml), esc);
+	else if (!JuicyXmlSetPathAttr(xml, (int)sizeof(xml), esc))
+		JuicyFillDefaultXml(xml, (int)sizeof(xml), esc);
+
+	/* path 変化で valueTreePropertyChanged → fluid_synth_sfload。
+	   同じ path だと通知されないので一度ダミーを書いてから本命。 */
+	char dummy[8192];
+	memcpy(dummy, xml, sizeof(dummy));
+	if (JuicyXmlSetPathAttr(dummy, (int)sizeof(dummy), "."))
+		JuicySendXmlD(e, dummy);
+	JuicySendXmlD(e, xml);
+}
+
+static void TryBindSoundFont(const wchar_t* pluginPath, AEffect* effect)
+{
+	if (!effect || PathIsSoundFont(pluginPath) || !PathLooksLikeSfPlayer(pluginPath))
+		return;
+	wchar_t sf2[VST_PATH_CHARS];
+	if (!ResolveSoundFontForPlugin(pluginPath, sf2, VST_PATH_CHARS)) {
+		EnsLog(L"SF2 bind skip (no font) plugin=%s", pluginPath ? pluginPath : L"");
+		return;
+	}
+	SetEnvironmentVariableW(L"JUICY_SOUNDFONT_PATH", sf2);
+	JuicySetSoundFontChunk(effect, sf2);
+	EnsLog(L"SF2 bind plugin=%s font=%s", pluginPath, sf2);
+}
+
+/* juicySF processBlock は MIDI チャンネルを無視して常に ch0 へ送る。
+   DLL をパッチせず、ch ごとにインスタンスを 16（32ch なら 2 ポートで 32）作る。 */
+static int JuicyInitClone(AEffect* effect)
+{
+	if (!effect || !effect->dispatcher) return 0;
+	DWORD seh = 0;
+	__try {
+		effect->dispatcher(effect, effOpen, 0, 0, NULL, 0);
+		effect->dispatcher(effect, effSetSampleRate, 0, 0, NULL, (float)SAMPLE_RATE);
+		effect->dispatcher(effect, effSetBlockSize, 0, BLOCK_FRAMES, NULL, 0);
+		if (effect->numOutputs > 0)
+			effect->dispatcher(effect, effConnectOutput, 0, 1, NULL, 0);
+		if (effect->numOutputs > 1)
+			effect->dispatcher(effect, effConnectOutput, 1, 1, NULL, 0);
+		effect->dispatcher(effect, effMainsChanged, 0, 1, NULL, 0);
+		effect->dispatcher(effect, effStartProcess, 0, 0, NULL, 0);
+	}
+	__except (seh = GetExceptionCode(), EXCEPTION_EXECUTE_HANDLER) {
+		EnsLog(L"juicy clone init seh=0x%08X", seh);
+		return 0;
+	}
+	return 1;
+}
+
+static void JuicyCloseClone(AEffect* effect)
+{
+	if (!effect || !effect->dispatcher) return;
+	__try {
+		effect->dispatcher(effect, effStopProcess, 0, 0, NULL, 0);
+		effect->dispatcher(effect, effMainsChanged, 0, 0, NULL, 0);
+		effect->dispatcher(effect, effClose, 0, 0, NULL, 0);
+	}
+	__except (EXCEPTION_EXECUTE_HANDLER) {}
+	VstPlugDirUnbind(effect);
+}
+
+static void JuicyGsRhythmCh0(BYTE* d, int on)
+{
+	if (!d) return;
+	d[0] = 0xf0; d[1] = 0x41; d[2] = 0x10; d[3] = 0x42; d[4] = 0x12;
+	d[5] = 0x40; d[6] = 0x11; d[7] = 0x15;
+	d[8] = on ? 1 : 0; d[9] = 0; d[10] = 0xf7;
+	GsFixChecksum(d, 11);
+}
+
+static int JuicyFindParam(AEffect* e, const char* name)
+{
+	if (!e || !e->dispatcher || !name || !*name) return -1;
+	const int n = e->numParams;
+	for (int i = 0; i < n && i < 128; ++i) {
+		char nm[64] = {};
+		__try { e->dispatcher(e, effGetParamName, i, 0, nm, 0); }
+		__except (EXCEPTION_EXECUTE_HANDLER) { continue; }
+		if (nm[0] && _stricmp(nm, name) == 0) return i;
+	}
+	return -1;
+}
+
+static void JuicySetIntParam(AEffect* e, int index, int lo, int hi, int val)
+{
+	if (!e || !e->setParameter || index < 0 || hi <= lo) return;
+	if (index >= e->numParams) return;
+	if (val < lo) val = lo;
+	if (val > hi) val = hi;
+	e->setParameter(e, index, (float)(val - lo) / (float)(hi - lo));
+}
+
+static void JuicySetDrumParams(AEffect* e, int bank, int preset)
+{
+	if (!e) return;
+	if (bank < 0) bank = 0;
+	if (bank > 128) bank = 128;
+	int bi = JuicyFindParam(e, "Bank");
+	if (bi < 0) bi = JuicyFindParam(e, "bank");
+	if (bi < 0 && e->numParams > 0) bi = 0;
+	JuicySetIntParam(e, bi, 0, 128, bank);
+	if (preset < 0) return;
+	preset &= 127;
+	int pi = JuicyFindParam(e, "Preset");
+	if (pi < 0) pi = JuicyFindParam(e, "preset");
+	if (pi < 0 && e->numParams > 1) pi = 1;
+	JuicySetIntParam(e, pi, 0, 127, preset);
+}
+
+static void JuicyArmPart(AEffect* e, int drum, int bankMsb)
+{
+	if (!e) return;
+	const int xg = (drum && bankMsb >= 127) ? 1 : 0;
+	if (!xg) {
+		BYTE gs[11];
+		JuicyGsRhythmCh0(gs, drum);
+		SendVstSysex(e, gs, 11, 0);
+	}
+	BYTE xgSx[9] = { 0xf0, 0x43, 0x10, 0x4c, 0x08, 0x00, 0x07,
+		(BYTE)(drum ? 1 : 0), 0xf7 };
+	SendVstSysex(e, xgSx, 9, 0);
+	if (!drum) {
+		JuicySetDrumParams(e, 0, -1);
+		MidiItem cc[10] = {};
+		cc[0].msg = 0xb0u | (0u << 8);
+		cc[1].msg = 0xb0u | (32u << 8);
+		cc[2].msg = 0xb0u | (7u << 8) | (100u << 16);
+		cc[3].msg = 0xb0u | (11u << 8) | (127u << 16);
+		cc[4].msg = 0xb0u | (71u << 8);
+		cc[5].msg = 0xb0u | (72u << 8);
+		cc[6].msg = 0xb0u | (73u << 8);
+		cc[7].msg = 0xb0u | (74u << 8);
+		cc[8].msg = 0xb0u | (75u << 8);
+		cc[9].msg = 0xb0u | (79u << 8);
+		SendVstEvents(e, cc, 10, 0);
+		return;
+	}
+	const int bank = xg ? 127 : 128;
+	JuicySetDrumParams(e, bank, 0);
+	MidiItem cc[3] = {};
+	cc[0].msg = 0xb0u | (0u << 8) | ((DWORD)(xg ? 127 : 0) << 16);
+	cc[1].msg = 0xb0u | (32u << 8);
+	cc[2].msg = 0xc0u;
+	SendVstEvents(e, cc, 3, 0);
+}
+
+static int JuicyPartMsb(int sl, int unit, int p)
+{
+	if (g_sfDrumMsb[sl][unit][p]) return (int)g_sfDrumMsb[sl][unit][p];
+	if (g_eng.gmResetMode == 2) return 127;
+	return 128;
+}
+
+static void JuicyCloseParts(void)
+{
+	const int sl = VstIoSlot();
+	for (int u = 0; u < 3; ++u) {
+		const int n = g_sfPartN[sl][u];
+		for (int p = 1; p < n && p < 16; ++p) {
+			JuicyCloseClone(g_sfPart[sl][u][p]);
+			g_sfPart[sl][u][p] = NULL;
+		}
+		g_sfPart[sl][u][0] = NULL;
+		g_sfPartN[sl][u] = 0;
+		ZeroMemory(g_sfDrum[sl][u], 16);
+		ZeroMemory(g_sfDrumMsb[sl][u], 16);
+	}
+}
+
+static void JuicySpawnParts(int unit, AEffect* primary, HMODULE mod, const wchar_t* path)
+{
+	const int sl = VstIoSlot();
+	if (unit < 0 || unit > 2 || !primary || !mod || !PathLooksLikeSfPlayer(path))
+		return;
+	if (g_sfPartN[sl][unit] > 1) return;
+	g_sfPart[sl][unit][0] = primary;
+	g_sfPartN[sl][unit] = 1;
+	for (int i = 0; i < 16; ++i) {
+		g_sfDrum[sl][unit][i] = (i == 9) ? 1 : 0;
+		g_sfDrumMsb[sl][unit][i] = 0;
+	}
+	VSTPluginMainProc proc = (VSTPluginMainProc)GetProcAddress(mod, "VSTPluginMain");
+	if (!proc) proc = (VSTPluginMainProc)GetProcAddress(mod, "main");
+	if (!proc) return;
+	for (int p = 1; p < 16; ++p) {
+		AEffect* e = NULL;
+		DWORD seh = 0;
+		__try { e = proc(HostCallback); }
+		__except (seh = GetExceptionCode(), EXCEPTION_EXECUTE_HANDLER) { e = NULL; }
+		if (!e || e->magic != kEffectMagic || !e->dispatcher || !e->processReplacing) {
+			EnsLog(L"juicy clone %d fail seh=0x%08X", p, seh);
+			continue;
+		}
+		VstPlugDirBind(e);
+		if (!JuicyInitClone(e)) {
+			JuicyCloseClone(e);
+			EnsLog(L"juicy clone %d init fail", p);
+			continue;
+		}
+		TryBindSoundFont(path, e);
+		g_sfPart[sl][unit][p] = e;
+	}
+	g_sfPartN[sl][unit] = 16;
+	int live = 0;
+	for (int p = 0; p < 16; ++p)
+		if (g_sfPart[sl][unit][p]) ++live;
+	EnsLog(L"juicy rack unit=%d live=%d/16 (ch0-fixed instances, no DLL patch)",
+		unit, live);
+}
+
+static void JuicyResetRack(int unit, int preferGs)
+{
+	const int sl = VstIoSlot();
+	const int n = g_sfPartN[sl][unit];
+	if (n <= 1) return;
+	static const BYTE gmOn[] = { 0xf0, 0x7e, 0x7f, 0x09, 0x01, 0xf7 };
+	static const BYTE gsReset[] = {
+		0xf0, 0x41, 0x10, 0x42, 0x12, 0x40, 0x00, 0x7f, 0x00, 0x41, 0xf7
+	};
+	static const BYTE xgOn[] = {
+		0xf0, 0x43, 0x10, 0x4c, 0x00, 0x00, 0x7e, 0x00, 0xf7
+	};
+	for (int p = 0; p < n; ++p) {
+		AEffect* e = g_sfPart[sl][unit][p];
+		if (!e) continue;
+		if (preferGs == 2)
+			SendVstSysex(e, xgOn, (int)sizeof(xgOn), 0);
+		else if (g_eng.songGm)
+			SendVstSysex(e, gmOn, (int)sizeof(gmOn), 0);
+		else if (preferGs == 1)
+			SendVstSysex(e, gsReset, (int)sizeof(gsReset), 0);
+		else {
+			SendVstSysex(e, gmOn, (int)sizeof(gmOn), 0);
+			SendVstSysex(e, gsReset, (int)sizeof(gsReset), 0);
+		}
+		if (!g_sfDrum[sl][unit][p] && g_eng.songLa) {
+			MidiItem la[2] = {};
+			la[0].msg = 0xb0u | (0u << 8) | (127u << 16);
+			la[1].msg = 0xb0u | (32u << 8);
+			SendVstEvents(e, la, 2, 0);
+		} else if (!g_sfDrum[sl][unit][p] && preferGs == 1 &&
+			g_eng.gsMapLsb >= 1 && g_eng.gsMapLsb <= 4) {
+			MidiItem cc = {};
+			cc.msg = 0xb0u | (32u << 8) | ((DWORD)g_eng.gsMapLsb << 16);
+			SendVstEvents(e, &cc, 1, 0);
+		}
+		if (g_sfDrum[sl][unit][p] && preferGs == 2)
+			g_sfDrumMsb[sl][unit][p] = 127;
+		JuicyArmPart(e, g_sfDrum[sl][unit][p],
+			g_sfDrumMsb[sl][unit][p] ? g_sfDrumMsb[sl][unit][p] : (preferGs == 2 ? 127 : 128));
+		{
+			__declspec(align(32)) float pl[BLOCK_FRAMES];
+			__declspec(align(32)) float pr[BLOCK_FRAMES];
+			RenderEffect(e, pl, pr, BLOCK_FRAMES);
+		}
+	}
+}
+
+static void JuicyAllOff(int unit)
+{
+	const int sl = VstIoSlot();
+	const int n = g_sfPartN[sl][unit];
+	if (n <= 1) return;
+	MidiItem it = {};
+	it.msg = 0xb0u | (123u << 8);
+	it.sysexOff = -1;
+	for (int p = 1; p < n; ++p) {
+		if (g_sfPart[sl][unit][p])
+			SendVstEvents(g_sfPart[sl][unit][p], &it, 1, 0);
+	}
+}
+
+static void JuicyRackSysex(int unit, const BYTE* d, int n)
+{
+	const int sl = VstIoSlot();
+	const int np = g_sfPartN[sl][unit];
+	if (!d || n < 2 || np <= 1) return;
+	if (VstMidiSysexIsGmOn(d, n) || VstMidiSysexIsGsReset(d, n) ||
+		VstMidiSysexIsXgOn(d, n)) {
+		const int xg = VstMidiSysexIsXgOn(d, n);
+		for (int p = 0; p < np; ++p) {
+			if (g_sfPart[sl][unit][p])
+				SendVstSysex(g_sfPart[sl][unit][p], d, n, 0);
+			if (xg && g_sfDrum[sl][unit][p])
+				g_sfDrumMsb[sl][unit][p] = 127;
+		}
+		for (int p = 0; p < np; ++p) {
+			if (g_sfPart[sl][unit][p])
+				JuicyArmPart(g_sfPart[sl][unit][p], g_sfDrum[sl][unit][p],
+					JuicyPartMsb(sl, unit, p));
+		}
+		return;
+	}
+	if (n >= 11 && d[0] == 0xf0 && d[1] == 0x41 && d[3] == 0x42 && d[4] == 0x12
+		&& (d[5] & 0xf0) == 0x40 && (d[6] & 0xf0) == 0x10) {
+		const int p = GsPartXToCh(d[6]);
+		const int cc = d[7];
+		if (cc == 0x15) {
+			const int on = (n > 8) ? (d[8] ? 1 : 0) : 0;
+			if (p == 9)
+				g_sfDrum[sl][unit][p] = 1;
+			else
+				g_sfDrum[sl][unit][p] = (BYTE)on;
+			if (on) g_sfDrumMsb[sl][unit][p] = 128;
+			if (p >= 0 && p < np && g_sfPart[sl][unit][p])
+				JuicyArmPart(g_sfPart[sl][unit][p], g_sfDrum[sl][unit][p],
+					JuicyPartMsb(sl, unit, p));
+			return;
+		}
+		if (cc == 0x02)
+			return;
+		if (p < 0 || p >= np || !g_sfPart[sl][unit][p] || n > 2048)
+			return;
+		BYTE tmp[2048];
+		memcpy(tmp, d, (size_t)n);
+		tmp[6] = 0x11;
+		GsFixChecksum(tmp, n);
+		SendVstSysex(g_sfPart[sl][unit][p], tmp, n, 0);
+		return;
+	}
+	if (n >= 8 && d[0] == 0xf0 && d[1] == 0x43 && d[3] == 0x4c && d[4] == 0x08) {
+		const int p = d[5] & 0x0f;
+		if (n >= 9 && d[6] == 0x07) {
+			const int on = d[7] ? 1 : 0;
+			if (p == 9)
+				g_sfDrum[sl][unit][p] = 1;
+			else
+				g_sfDrum[sl][unit][p] = (BYTE)on;
+			if (on) g_sfDrumMsb[sl][unit][p] = 127;
+			if (p >= 0 && p < np && g_sfPart[sl][unit][p])
+				JuicyArmPart(g_sfPart[sl][unit][p], g_sfDrum[sl][unit][p],
+					JuicyPartMsb(sl, unit, p));
+			return;
+		}
+		if (p < 0 || p >= np || !g_sfPart[sl][unit][p] || n > 2048)
+			return;
+		BYTE tmp[2048];
+		memcpy(tmp, d, (size_t)n);
+		tmp[5] = 0x00;
+		SendVstSysex(g_sfPart[sl][unit][p], tmp, n, 0);
+		return;
+	}
+	if (n >= 7 && d[0] == 0xf0 && d[1] == 0x43 && d[3] == 0x4c
+		&& (d[4] == 0x09 || d[4] == 0x0a)) {
+		for (int p = 0; p < np; ++p) {
+			if (g_sfDrum[sl][unit][p] && g_sfPart[sl][unit][p])
+				SendVstSysex(g_sfPart[sl][unit][p], d, n, 0);
+		}
+		return;
+	}
+	for (int p = 0; p < np; ++p) {
+		if (g_sfPart[sl][unit][p])
+			SendVstSysex(g_sfPart[sl][unit][p], d, n, 0);
+	}
+}
+
+static DWORD JuicyRemapCh0(DWORD msg)
+{
+	const int st = (int)(msg & 0xf0);
+	if (st < 0x80 || st > 0xe0) return msg;
+	return (msg & ~0x0fu);
+}
+
+static void JuicyMixAdd(float* dl, float* dr, const float* sl, const float* sr, int n)
+{
+	for (int i = 0; i < n; ++i) {
+		dl[i] += sl[i];
+		dr[i] += sr[i];
+	}
+}
+
+static void JuicyRackSlice(int unit, __int64 t0, int done, int nfr, float* l, float* r)
+{
+	if (!l || nfr <= 0) return;
+	if (nfr > VST_SLICE) nfr = VST_SLICE;
+	ZeroMemory(l, (size_t)nfr * sizeof(float));
+	if (r && r != l)
+		ZeroMemory(r, (size_t)nfr * sizeof(float));
+	const int sl = VstIoSlot();
+	const int np = g_sfPartN[sl][unit];
+	if (np <= 1) return;
+	const MidiItem* src = g_songEv[sl][unit];
+	const int n = g_songN[sl][unit];
+	const BYTE* sx = g_songSx[sl][unit];
+	const __int64 a = t0 + done;
+	const __int64 b = a + nfr;
+	for (int i = 0; i < n; ++i) {
+		if (src[i].sample < a || src[i].sample >= b) continue;
+		if ((src[i].msg & 0xff) == 0xf0 && src[i].sysexOff >= 0 && sx)
+			JuicyRackSysex(unit, sx + src[i].sysexOff, (int)src[i].aux);
+	}
+	__declspec(align(32)) float tl[VST_SLICE];
+	__declspec(align(32)) float tr[VST_SLICE];
+	MidiItem tmp[VST_PEND_N];
+	for (int p = 0; p < np; ++p) {
+		AEffect* e = g_sfPart[sl][unit][p];
+		if (!e) continue;
+		int nt = 0;
+		int kit = -1;
+		for (int i = 0; i < n && nt < VST_PEND_N; ++i) {
+			if (src[i].sample < a || src[i].sample >= b) continue;
+			if ((src[i].msg & 0xff) == 0xf0) continue;
+			if ((int)(src[i].msg & 0x0f) != p) continue;
+			tmp[nt] = src[i];
+			tmp[nt].msg = JuicyRemapCh0(src[i].msg);
+			const int st = (int)(src[i].msg & 0xf0);
+			const int d1 = (int)((src[i].msg >> 8) & 0x7f);
+			const int d2 = (int)((src[i].msg >> 16) & 0x7f);
+			if (st == 0xb0 && d1 == 0 && (d2 == 120 || d2 == 127)) {
+				const int was = g_sfDrum[sl][unit][p];
+				g_sfDrum[sl][unit][p] = 1;
+				g_sfDrumMsb[sl][unit][p] = 127;
+				if (!was)
+					JuicyArmPart(e, 1, 127);
+			}
+			if (st == 0xc0)
+				kit = d1;
+			++nt;
+		}
+		if (g_sfDrum[sl][unit][p])
+			JuicySetDrumParams(e, JuicyPartMsb(sl, unit, p), kit);
+		else if (kit >= 0)
+			JuicySetDrumParams(e, 0, kit);
+		int pos = 0;
+		for (int i = 0; i < nt; ++i) {
+			int off = (int)(tmp[i].sample - a);
+			if (off < pos) off = pos;
+			if (off > nfr) off = nfr;
+			if (off > pos) {
+				RenderEffect(e, tl, tr, off - pos);
+				JuicyMixAdd(l + pos, r ? r + pos : l + pos, tl, tr, off - pos);
+				pos = off;
+			}
+			SendVstEvents(e, &tmp[i], 1, tmp[i].sample, NULL, 1, unit);
+		}
+		if (pos < nfr) {
+			RenderEffect(e, tl, tr, nfr - pos);
+			JuicyMixAdd(l + pos, r ? r + pos : l + pos, tl, tr, nfr - pos);
+		}
+	}
+}
+
 static int PathLooksLikeScVa(const wchar_t* path)
 {
 	return ContainsI(path, L"SOUND Canvas") || ContainsI(path, L"SC-VA") ||
@@ -4264,7 +4979,8 @@ static int DetectMultiTimbralName(const wchar_t* text)
 		L"VSTSynthFont", L"SynthFont", L"VirtualMIDISynth",
 		L"MultiTimbral", L"Multi-Timbral", L"multitimbral",
 		L"GS SoftSynth", L"Roland SC", L"Canvas VA",
-		L"TinySoundFont", L"GeneralUser", L"FluidR3"
+		L"TinySoundFont", L"GeneralUser", L"FluidR3",
+		L"juicy", L"juicysf", L"FluidSynth"
 	};
 	for (int i = 0; i < (int)(sizeof(keys) / sizeof(keys[0])); ++i)
 		if (ContainsI(text, keys[i])) return 1;
@@ -5254,6 +5970,7 @@ static int MapperOpen()
 static void FreeSong()
 {
 	MapperClose();
+	JuicyCloseParts();
 	CloseEffect(g_eng.module, g_eng.effect);
 	Vst3Close(g_eng.vst3); g_eng.vst3 = NULL;
 	CloseEffect(g_eng.moduleB, g_eng.effectB);
@@ -5277,6 +5994,7 @@ static void FreeSong()
 	g_eng.songLa = 0;
 	g_eng.loopStartSample = 0;
 	g_eng.loopEndSample = 0;
+	g_juicySong[VstIoSlot()] = 0;
 }
 
 static void ResetSequence()
@@ -5305,6 +6023,9 @@ static void ResetSequence()
 	allOff(g_eng.effect, g_eng.vst3);
 	allOff(g_eng.effectB, NULL);
 	allOff(g_eng.effectC, g_eng.vst3C);
+	JuicyAllOff(0);
+	JuicyAllOff(1);
+	JuicyAllOff(2);
 	if (g_eng.midiOut) {
 		midiOutReset(g_eng.midiOut);
 		for (int ch = 0; ch < 16; ++ch) {
@@ -5620,6 +6341,16 @@ extern "C" int VstDetectMultiTimbral(const wchar_t* nameOrPath)
 	return DetectMultiTimbralName(nameOrPath);
 }
 
+extern "C" int VstPluginUsesSoundFontFile(const wchar_t* pluginPath)
+{
+	return PathLooksLikeSfPlayer(pluginPath);
+}
+
+extern "C" int VstFindCompanionSoundFont(const wchar_t* pluginPath, wchar_t* out, int outChars)
+{
+	return FindCompanionSoundFont(pluginPath, out, outChars);
+}
+
 extern "C" int VstScanGetMultiCount(void)
 {
 	int n = 0;
@@ -5809,46 +6540,16 @@ static void SendGmGsReset(AEffect* effect, Vst3Inst* vst3, int preferGs)
 		0xf0, 0x43, 0x10, 0x4c, 0x00, 0x00, 0x7e, 0x00, 0xf7
 	};
 	if (effect && effect->dispatcher) {
-		VstMidiSysexEvent sx[2] = {};
-		struct EventBlock {
-			VstInt32 numEvents;
-			VstIntPtr reserved;
-			VstEvent* events[2];
-		} block = {};
-		int n = 0;
-		if (preferGs == 2) {
-			sx[0].type = kVstSysExType;
-			sx[0].byteSize = sizeof(VstMidiSysexEvent);
-			sx[0].dumpBytes = (VstInt32)sizeof(xgOn);
-			sx[0].sysexDump = (char*)xgOn;
-			block.events[n++] = (VstEvent*)&sx[0];
-		} else if (g_eng.songGm) {
-			sx[0].type = kVstSysExType;
-			sx[0].byteSize = sizeof(VstMidiSysexEvent);
-			sx[0].dumpBytes = (VstInt32)sizeof(gmOn);
-			sx[0].sysexDump = (char*)gmOn;
-			block.events[n++] = (VstEvent*)&sx[0];
-		} else if (preferGs == 1) {
-			sx[0].type = kVstSysExType;
-			sx[0].byteSize = sizeof(VstMidiSysexEvent);
-			sx[0].dumpBytes = (VstInt32)sizeof(gsReset);
-			sx[0].sysexDump = (char*)gsReset;
-			block.events[n++] = (VstEvent*)&sx[0];
-		} else {
-			sx[0].type = kVstSysExType;
-			sx[0].byteSize = sizeof(VstMidiSysexEvent);
-			sx[0].dumpBytes = (VstInt32)sizeof(gmOn);
-			sx[0].sysexDump = (char*)gmOn;
-			sx[1].type = kVstSysExType;
-			sx[1].byteSize = sizeof(VstMidiSysexEvent);
-			sx[1].dumpBytes = (VstInt32)sizeof(gsReset);
-			sx[1].sysexDump = (char*)gsReset;
-			block.events[n++] = (VstEvent*)&sx[0];
-			block.events[n++] = (VstEvent*)&sx[1];
+		if (preferGs == 2)
+			SendVstSysex(effect, xgOn, (int)sizeof(xgOn), 0);
+		else if (g_eng.songGm)
+			SendVstSysex(effect, gmOn, (int)sizeof(gmOn), 0);
+		else if (preferGs == 1)
+			SendVstSysex(effect, gsReset, (int)sizeof(gsReset), 0);
+		else {
+			SendVstSysex(effect, gmOn, (int)sizeof(gmOn), 0);
+			SendVstSysex(effect, gsReset, (int)sizeof(gsReset), 0);
 		}
-		block.numEvents = n;
-		__try { effect->dispatcher(effect, effProcessEvents, 0, 0, &block, 0); }
-		__except (EXCEPTION_EXECUTE_HANDLER) {}
 		PumpSilent(effect, NULL, 2);
 	}
 	if (vst3) {
@@ -6289,7 +6990,12 @@ static void LoadPortExtraUnits(const wchar_t* primaryPath, int resetMode)
 		EnsLog(L"portB VST2 FAIL %s", vst2Path);
 		return;
 	}
-	SendGmGsReset(g_eng.effectB, NULL, resetMode);
+	if (PathLooksLikeSfPlayer(vst2Path))
+		JuicySpawnParts(1, g_eng.effectB, g_eng.moduleB, vst2Path);
+	if (g_sfPartN[VstIoSlot()][1] > 1)
+		JuicyResetRack(1, resetMode);
+	else
+		SendGmGsReset(g_eng.effectB, NULL, resetMode);
 	EnsLog(L"portB VST2 OK (ch17-32) %s", vst2Path);
 
 	if (g_eng.maxMidiPort < 2) return;
@@ -6310,7 +7016,12 @@ static void LoadPortExtraUnits(const wchar_t* primaryPath, int resetMode)
 	}
 	// No usable VST3: third VST2 instance keeps 33+ from going silent.
 	if (LoadVst2(vst2Path, g_eng.moduleC, g_eng.effectC)) {
-		SendGmGsReset(g_eng.effectC, NULL, resetMode);
+		if (PathLooksLikeSfPlayer(vst2Path))
+			JuicySpawnParts(2, g_eng.effectC, g_eng.moduleC, vst2Path);
+		if (g_sfPartN[VstIoSlot()][2] > 1)
+			JuicyResetRack(2, resetMode);
+		else
+			SendGmGsReset(g_eng.effectC, NULL, resetMode);
 		EnsLog(L"portC VST2 fallback OK %s", vst2Path);
 	} else {
 		EnsLog(L"portC: no unit for maxPort=%d", g_eng.maxMidiPort);
@@ -6405,10 +7116,17 @@ extern "C" int VstMidiOpen(const wchar_t* midPath,
 		loaded = 1;
 		loadedPath = pickDll;
 		resetMode = ResetModeForPath(pickDll);
+		if (PathLooksLikeSfPlayer(pickDll)) {
+			g_juicySong[VstIoSlot()] = 1;
+			JuicySpawnParts(0, g_eng.effect, g_eng.module, pickDll);
+		}
 	}
 	if (loadedPath) {
 		g_eng.gmResetMode = resetMode;
-		SendGmGsReset(g_eng.effect, g_eng.vst3, resetMode);
+		if (g_sfPartN[VstIoSlot()][0] > 1)
+			JuicyResetRack(0, resetMode);
+		else
+			SendGmGsReset(g_eng.effect, g_eng.vst3, resetMode);
 		LoadPortExtraUnits(loadedPath, resetMode);
 	} else {
 		g_eng.gmResetMode = 0;
@@ -9497,6 +10215,38 @@ static int LivePathSoftState(const wchar_t* path)
 		ContainsI(path, L"Kontakt") ? 1 : 0;
 }
 
+/* Isolated from VstLiveGetState/SetState: those use C++ objects (std::vector)
+   and MSVC C2712 forbids __try in the same function. */
+static int LiveVst2GetChunk(AEffect* e, unsigned char** outBytes, int* outLen)
+{
+	if (!e || !e->dispatcher || !outBytes || !outLen) return 0;
+	void* ptr = NULL;
+	VstIntPtr sz = 0;
+	__try { sz = e->dispatcher(e, effGetChunk, 0, 0, &ptr, 0); }
+	__except (EXCEPTION_EXECUTE_HANDLER) { sz = 0; ptr = NULL; }
+	if (sz > 0 && ptr && sz < (VstIntPtr)(64 * 1024 * 1024)) {
+		unsigned char* mem = (unsigned char*)malloc((size_t)sz);
+		if (mem) {
+			memcpy(mem, ptr, (size_t)sz);
+			*outBytes = mem;
+			*outLen = (int)sz;
+			return 1;
+		}
+	}
+	return 0;
+}
+
+static int LiveVst2SetChunk(AEffect* e, const unsigned char* bytes, int len)
+{
+	if (!e || !e->dispatcher || !bytes || len <= 0) return 0;
+	VstIntPtr r = 0;
+	__try {
+		r = e->dispatcher(e, effSetChunk, 0, len, (void*)bytes, 0);
+	} __except (EXCEPTION_EXECUTE_HANDLER) { r = 0; }
+	(void)r;
+	return 1;
+}
+
 extern "C" int VstLiveGetState(int part1to32, int which, unsigned char** outBytes, int* outLen)
 {
 	if (outBytes) *outBytes = NULL;
@@ -9547,6 +10297,8 @@ extern "C" int VstLiveGetState(int part1to32, int which, unsigned char** outByte
 			ok = Vst3GetComponentState(p.vst3, outBytes, outLen);
 		else
 			ok = Vst3GetControllerState(p.vst3, outBytes, outLen);
+	} else if (p.effect && which == 0) {
+		ok = LiveVst2GetChunk(p.effect, outBytes, outLen);
 	}
 	LeaveCriticalSection(&g_eng.cs);
 	return ok;
@@ -9578,6 +10330,8 @@ extern "C" int VstLiveSetState(int part1to32, int which, const unsigned char* by
 			ok = Vst3SetComponentState(p.vst3, bytes, len);
 		else
 			ok = Vst3SetControllerState(p.vst3, bytes, len);
+	} else if (p.effect && which == 0) {
+		ok = LiveVst2SetChunk(p.effect, bytes, len);
 	}
 	LeaveCriticalSection(&g_eng.cs);
 	if (ok)
@@ -9604,6 +10358,9 @@ extern "C" int VstLiveApplyStates(int part1to32,
 	EnterCriticalSection(&g_eng.cs);
 	if (p.vst3)
 		ok = Vst3ApplyStates(p.vst3, comp, compLen, ctrl, ctrlLen);
+	else if (p.effect) {
+		ok = LiveVst2SetChunk(p.effect, comp, compLen);
+	}
 	LeaveCriticalSection(&g_eng.cs);
 	return ok;
 }

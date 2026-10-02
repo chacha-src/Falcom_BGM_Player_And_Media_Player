@@ -866,7 +866,7 @@ struct save{
 	int teBatchMainLock;        // 1=メインに追随
 
 	// --- MIDI再生: KPI優先 / VST優先(末尾追記。旧.datは0=KPI) ---
-	int midPlayPrefer;          // 0=KPIプラグイン優先 1=自前VST2/3ホスト優先
+	int midPlayPrefer;          // 0=KPIプラグイン優先 1=CRender GS/XG VST 2=VSTホストプリセット
 	TCHAR vstExtraPath[520];    // XG用 明示VST DLL（空可。フォルダだった旧値は無視）
 	int vstHostMainLock;        // 1=VSTホスト画面をメインに追随
 	int vstHostWinX, vstHostWinY, vstHostWinW, vstHostWinH; // 0幅=未保存
@@ -974,6 +974,15 @@ struct save{
 	// --- フォーマット別音量(末尾追記。旧.datは0→起動時1)。SPC/HES は spc のみ ---
 	int winampvol; /* Winamp/XMPlay/AIMP 1..5 */
 	int cemuvol;   /* CEmu PCM 1..5 */
+
+	/* juicySF 等へ注入する SoundFont。空=プラグインと同じフォルダの SGM*.sf2 を自動探索。
+	   GS/XG 欄が .sf2 直指定のときは使わない。 */
+	TCHAR vstGsSoundFont[520];
+	TCHAR vstXgSoundFont[520];
+	int vstHostPlayPreset; /* VSTホスト優先で使う vstwire.dat プリセット番号。旧.datは0 */
+	/* CRender のスクリーン座標。-1 は未設定（画面中央）。末尾追記。 */
+	int renderX;
+	int renderY;
 };
 extern save savedata;
 

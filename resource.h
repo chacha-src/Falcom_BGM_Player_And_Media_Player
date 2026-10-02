@@ -147,6 +147,7 @@
 #define IDD_VSTHOST                     274
 #define IDD_VST_HELP                    275
 #define IDD_VST_WAIT                    276
+#define IDD_VSTHOST_CACHE_ASK            371
 #define IDD_MIDIMONITOR                 277
 #define IDD_MM_HELP                     278
 #define IDR_SASAMI_GS                   279
@@ -1500,6 +1501,10 @@
 #define IDC_VST_WAIT_TXT                4313
 #define IDC_MID_PREFER_KPI              4314
 #define IDC_MID_PREFER_VST              4315
+#define IDC_MID_PREFER_HOST             4556
+#define IDC_VST_HOST_PRESET             4557
+#define IDC_STATIC_VST_HOST             4559
+#define IDC_VSTHOST_CACHE_MSG           4558
 #define IDC_STATIC_MID_PREFER           4316
 #define IDC_STATIC_VST_MULTI            4317
 #define IDC_VST_MULTI_COMBO             4318
@@ -1510,6 +1515,12 @@
 #define IDC_VST_MULTI_DLL               4323
 #define IDC_VST_MULTI_BROWSE            4324
 #define IDC_VST_SCAN_NOW                4325
+#define IDC_STATIC_VST_GS_SF2           4550
+#define IDC_VST_GS_SF2                  4551
+#define IDC_VST_GS_SF2_BROWSE           4552
+#define IDC_STATIC_VST_XG_SF2           4553
+#define IDC_VST_XG_SF2                  4554
+#define IDC_VST_XG_SF2_BROWSE           4555
 #define IDC_MM_HELP                     4326
 #define IDC_FM_HELP                     4327
 #define IDC_SLIDER_SURROUND             4548
@@ -2248,9 +2259,9 @@
 // 
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
-#define _APS_NEXT_RESOURCE_VALUE        357
+#define _APS_NEXT_RESOURCE_VALUE        372
 #define _APS_NEXT_COMMAND_VALUE         33310
-#define _APS_NEXT_CONTROL_VALUE         4549
+#define _APS_NEXT_CONTROL_VALUE         4560
 #define _APS_NEXT_SYMED_VALUE           104
 #endif
 #endif

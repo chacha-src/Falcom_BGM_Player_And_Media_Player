@@ -207,7 +207,7 @@ void MidiSysexRecycle()
 
 const DWORD VST_WIRE_MAGIC1 = 0x31525756; // "VWR1"
 const DWORD VST_WIRE_MAGIC2 = 0x32525756; // "VWR2" midiThru + MIDI In 3 hardware
-const DWORD VST_WIRE_MAGIC3 = 0x33525756; // "VWR3" + per-part VST3 state blobs
+const DWORD VST_WIRE_MAGIC3 = 0x33525756; // "VWR3" + per-part VST state blobs (VST2 chunk / VST3)
 
 struct VstWireFile {
 	DWORD magic;
@@ -2689,6 +2689,356 @@ void CVstHostDlg::PostNcDestroy()
 	CCustomBlurDialogBase::PostNcDestroy();
 	if (g_vstHostDlg == this) g_vstHostDlg = NULL;
 	delete this;
+}
+
+int CVstHostDlg::CopyPresetName(int index, wchar_t* out, int outChars) const
+{
+	if (!out || outChars < 2) return 0;
+	out[0] = 0;
+	if (index < 0 || index >= m_presetCount) return 0;
+	wcsncpy_s(out, outChars, m_presets[index].name, _TRUNCATE);
+	return 1;
+}
+
+int CVstHostDlg::PresetHasAnyPath(int index) const
+{
+	if (index < 0 || index >= m_presetCount) return 0;
+	for (int p = 0; p < 32; ++p)
+		if (m_presets[index].path[p][0]) return 1;
+	return 0;
+}
+
+int CVstHostDlg::PresetCacheBytes(int index) const
+{
+	if (index < 0 || index >= m_presetCount) return 0;
+	int n = 0;
+	for (int p = 0; p < 32; ++p)
+		n += (int)m_presetCompLen[index][p] + (int)m_presetCtrlLen[index][p];
+	return n;
+}
+
+void CVstHostDlg::PauseAudioForSong(int pause)
+{
+	if (pause)
+		StopAudio();
+	else if (!m_audioThread)
+		StartAudio();
+}
+
+static CString VstHostWirePath()
+{
+	wchar_t path[MAX_PATH] = {};
+	GetModuleFileName(NULL, path, _countof(path));
+	wchar_t* slash = wcsrchr(path, L'\\');
+	if (slash) slash[1] = 0;
+	return CString(path) + L"vstwire.dat";
+}
+
+static int VstHostWireReadHeader(CFile& f, DWORD* magic, DWORD* count)
+{
+	DWORD m = 0, c = 0;
+	if (f.Read(&m, 4) != 4 || f.Read(&c, 4) != 4) return 0;
+	if (m != VST_WIRE_MAGIC1 && m != VST_WIRE_MAGIC2 && m != VST_WIRE_MAGIC3)
+		return 0;
+	if (c > 100) c = 100;
+	*magic = m;
+	*count = c;
+	return 1;
+}
+
+int VstHostPresetCount(void)
+{
+	if (g_vstHostDlg && ::IsWindow(g_vstHostDlg->GetSafeHwnd()))
+		return g_vstHostDlg->PresetCount();
+	CFile f;
+	if (!f.Open(VstHostWirePath(), CFile::modeRead | CFile::shareDenyWrite))
+		return 0;
+	DWORD magic = 0, count = 0;
+	const int ok = VstHostWireReadHeader(f, &magic, &count);
+	f.Close();
+	return ok ? (int)count : 0;
+}
+
+int VstHostPresetName(int index, wchar_t* out, int outChars)
+{
+	if (out && outChars > 0) out[0] = 0;
+	if (!out || outChars < 2 || index < 0) return 0;
+	if (g_vstHostDlg && ::IsWindow(g_vstHostDlg->GetSafeHwnd())) {
+		return g_vstHostDlg->CopyPresetName(index, out, outChars);
+	}
+	CFile f;
+	if (!f.Open(VstHostWirePath(), CFile::modeRead | CFile::shareDenyWrite))
+		return 0;
+	DWORD magic = 0, count = 0;
+	if (!VstHostWireReadHeader(f, &magic, &count) || (DWORD)index >= count) {
+		f.Close();
+		return 0;
+	}
+	CVstHostDlg::Preset p = {};
+	if (magic == VST_WIRE_MAGIC2 || magic == VST_WIRE_MAGIC3) {
+		for (DWORD i = 0; i <= (DWORD)index; ++i) {
+			if (f.Read(&p, sizeof(p)) != sizeof(p)) {
+				f.Close();
+				return 0;
+			}
+		}
+	} else {
+		const UINT oldSz = (UINT)offsetof(CVstHostDlg::Preset, midiThru);
+		for (DWORD i = 0; i <= (DWORD)index; ++i) {
+			ZeroMemory(&p, sizeof(p));
+			if (f.Read(&p, oldSz) != oldSz) {
+				f.Close();
+				return 0;
+			}
+		}
+	}
+	f.Close();
+	wcsncpy_s(out, outChars, p.name, _TRUNCATE);
+	return 1;
+}
+
+int VstHostPresetHasCache(int index)
+{
+	if (index < 0) return 0;
+	if (g_vstHostDlg && ::IsWindow(g_vstHostDlg->GetSafeHwnd())) {
+		if (index >= g_vstHostDlg->PresetCount()) return 0;
+		return (g_vstHostDlg->PresetHasAnyPath(index) &&
+			g_vstHostDlg->PresetCacheBytes(index) > 0) ? 1 : 0;
+	}
+	CFile f;
+	if (!f.Open(VstHostWirePath(), CFile::modeRead | CFile::shareDenyWrite))
+		return 0;
+	DWORD magic = 0, count = 0;
+	if (!VstHostWireReadHeader(f, &magic, &count) || (DWORD)index >= count) {
+		f.Close();
+		return 0;
+	}
+	CVstHostDlg::Preset p = {};
+	int paths = 0;
+	if (magic == VST_WIRE_MAGIC2 || magic == VST_WIRE_MAGIC3) {
+		for (DWORD i = 0; i < count; ++i) {
+			CVstHostDlg::Preset row = {};
+			if (f.Read(&row, sizeof(row)) != sizeof(row)) {
+				f.Close();
+				return 0;
+			}
+			if ((int)i == index) p = row;
+		}
+	} else {
+		const UINT oldSz = (UINT)offsetof(CVstHostDlg::Preset, midiThru);
+		for (DWORD i = 0; i < count; ++i) {
+			CVstHostDlg::Preset row = {};
+			if (f.Read(&row, oldSz) != oldSz) {
+				f.Close();
+				return 0;
+			}
+			if ((int)i == index) p = row;
+		}
+	}
+	for (int part = 0; part < 32; ++part)
+		if (p.path[part][0]) ++paths;
+	int blob = 0;
+	if (magic == VST_WIRE_MAGIC3) {
+		for (DWORD i = 0; i < count; ++i) {
+			for (int part = 0; part < 32; ++part) {
+				DWORD cLen = 0, tLen = 0;
+				if (f.Read(&cLen, 4) != 4 || f.Read(&tLen, 4) != 4) {
+					f.Close();
+					return 0;
+				}
+				if (cLen > 0 && cLen < 64 * 1024 * 1024)
+					f.Seek(cLen, CFile::current);
+				if (tLen > 0 && tLen < 64 * 1024 * 1024)
+					f.Seek(tLen, CFile::current);
+				if ((int)i == index)
+					blob += (int)cLen + (int)tLen;
+			}
+		}
+	}
+	f.Close();
+	return (paths > 0 && blob > 0) ? 1 : 0;
+}
+
+static int VstHostWireApplyFromFile(int index, HWND waitOwner)
+{
+	CFile f;
+	if (!f.Open(VstHostWirePath(), CFile::modeRead | CFile::shareDenyWrite))
+		return 0;
+	DWORD magic = 0, count = 0;
+	if (!VstHostWireReadHeader(f, &magic, &count) || (DWORD)index >= count) {
+		f.Close();
+		return 0;
+	}
+	CVstHostDlg::Preset p = {};
+	if (magic == VST_WIRE_MAGIC2 || magic == VST_WIRE_MAGIC3) {
+		for (DWORD i = 0; i < count; ++i) {
+			CVstHostDlg::Preset row = {};
+			if (f.Read(&row, sizeof(row)) != sizeof(row)) {
+				f.Close();
+				return 0;
+			}
+			if ((int)i == index) p = row;
+		}
+	} else {
+		const UINT oldSz = (UINT)offsetof(CVstHostDlg::Preset, midiThru);
+		for (DWORD i = 0; i < count; ++i) {
+			CVstHostDlg::Preset row = {};
+			if (f.Read(&row, oldSz) != oldSz) {
+				f.Close();
+				return 0;
+			}
+			if ((int)i == index) p = row;
+		}
+	}
+	BYTE* comp[32] = {};
+	BYTE* ctrl[32] = {};
+	DWORD compLen[32] = {};
+	DWORD ctrlLen[32] = {};
+	if (magic == VST_WIRE_MAGIC3) {
+		for (DWORD i = 0; i < count; ++i) {
+			for (int part = 0; part < 32; ++part) {
+				DWORD cLen = 0, tLen = 0;
+				if (f.Read(&cLen, 4) != 4 || f.Read(&tLen, 4) != 4)
+					goto fail;
+				BYTE* cb = NULL;
+				BYTE* tb = NULL;
+				if (cLen > 0 && cLen < 64 * 1024 * 1024) {
+					cb = (BYTE*)malloc(cLen);
+					if (!cb || f.Read(cb, cLen) != cLen) { free(cb); goto fail; }
+				}
+				if (tLen > 0 && tLen < 64 * 1024 * 1024) {
+					tb = (BYTE*)malloc(tLen);
+					if (!tb || f.Read(tb, tLen) != tLen) { free(cb); free(tb); goto fail; }
+				}
+				if ((int)i == index) {
+					comp[part] = cb; compLen[part] = cLen;
+					ctrl[part] = tb; ctrlLen[part] = tLen;
+					cb = NULL; tb = NULL;
+				}
+				free(cb);
+				free(tb);
+			}
+		}
+	}
+	f.Close();
+	{
+		int n = 0;
+		int anyLoad = 0;
+		for (int part = 0; part < 32; ++part) {
+			VstLiveUnloadPart(part + 1);
+			if (!p.path[part][0]) continue;
+			const wchar_t* waitName = p.path[part];
+			if (const wchar_t* slash = wcsrchr(p.path[part], L'\\'))
+				waitName = slash + 1;
+			VstWaitShowLoad(waitOwner, waitName);
+			anyLoad = 1;
+			if (VstLiveLoadPart(part + 1, p.path[part], p.isVst3[part]) == 0) {
+				++n;
+				if (compLen[part] > 0 && comp[part])
+					VstLiveApplyStates(part + 1, comp[part], (int)compLen[part],
+						ctrl[part], (int)ctrlLen[part]);
+			}
+		}
+		if (anyLoad) VstWaitHide();
+		for (int part = 0; part < 32; ++part) {
+			free(comp[part]);
+			free(ctrl[part]);
+		}
+		return n;
+	}
+fail:
+	f.Close();
+	for (int part = 0; part < 32; ++part) {
+		free(comp[part]);
+		free(ctrl[part]);
+	}
+	return 0;
+}
+
+int VstHostApplyPresetForPlay(int index, HWND waitOwner)
+{
+	if (index < 0) return 0;
+	if (g_vstHostDlg && ::IsWindow(g_vstHostDlg->GetSafeHwnd())) {
+		g_vstHostDlg->ApplyPreset(index);
+		g_vstHostDlg->PauseAudioForSong(1);
+		int n = 0;
+		for (int p = 1; p <= 32; ++p)
+			if (VstLivePartIsLoaded(p)) ++n;
+		return n;
+	}
+	return VstHostWireApplyFromFile(index, waitOwner);
+}
+
+void VstHostPauseForSong(int pause)
+{
+	if (!g_vstHostDlg || !::IsWindow(g_vstHostDlg->GetSafeHwnd()))
+		return;
+	g_vstHostDlg->PauseAudioForSong(pause ? 1 : 0);
+}
+
+class CVstHostCacheAskDlg : public CCustomBlurDialogExBase
+{
+	DECLARE_DYNAMIC(CVstHostCacheAskDlg)
+public:
+	enum { IDD = IDD_VSTHOST_CACHE_ASK };
+	explicit CVstHostCacheAskDlg(CWnd* parent)
+		: CCustomBlurDialogExBase(IDD, parent) {}
+	CCustomStatic m_msg;
+	CCustomStandardButton m_yes;
+	CCustomStandardButton m_no;
+protected:
+	virtual void DoDataExchange(CDataExchange* dx)
+	{
+		CCustomBlurDialogExBase::DoDataExchange(dx);
+		DDX_Control(dx, IDC_VSTHOST_CACHE_MSG, m_msg);
+		DDX_Control(dx, IDYES, m_yes);
+		DDX_Control(dx, IDNO, m_no);
+	}
+	virtual BOOL OnInitDialog()
+	{
+		CCustomBlurDialogExBase::OnInitDialog();
+		SetWindowText(LL14(L"VSTホスト", L"VST Host", L"Hôte VST", L"Host VST", L"Host VST",
+			L"VST 호스트", L"VST主机", L"مضيف VST", L"VST-хост", L"VST-Host",
+			L"Host VST", L"VST-host", L"Host VST", L"VST host"));
+		m_msg.SetWindowText(LL14(
+			L"VSTホストの音色キャッシュがありません。\nVSTホストを開いてプリセットを保存し直しますか？",
+			L"VST Host tone cache is missing.\nOpen VST Host and save the preset again?",
+			L"Cache de timbre VST Host manquant.\nOuvrir l'hôte VST et réenregistrer le préréglage ?",
+			L"Cache timbro VST Host assente.\nAprire l'host VST e salvare di nuovo il preset?",
+			L"Falta la caché de timbre del host VST.\n¿Abrir el host VST y volver a guardar el preset?",
+			L"VST 호스트 음색 캐시가 없습니다.\nVST 호스트를 열고 프리셋을 다시 저장할까요?",
+			L"没有 VST 主机音色缓存。\n是否打开 VST 主机并重新保存预设？",
+			L"ذاكرة طابع مضيف VST مفقودة.\nفتح مضيف VST وحفظ الإعداد من جديد؟",
+			L"Нет кэша тембра VST-хоста.\nОткрыть хост и сохранить пресет заново?",
+			L"VST-Host-Klangcache fehlt.\nVST-Host öffnen und Preset erneut speichern?",
+			L"Cache de timbre do host VST em falta.\nAbrir o host VST e gravar o preset de novo?",
+			L"VST-host klankcache ontbreekt.\nVST-host openen en preset opnieuw opslaan?",
+			L"Brak pamięci podręcznej barwy hosta VST.\nOtworzyć host VST i zapisać preset ponownie?",
+			L"VST host tını önbelleği yok.\nVST host açılsın ve ön ayar yeniden kaydedilsin mi?"));
+		m_yes.SetWindowText(LL14(L"再設定", L"Reconfigure", L"Reconfigurer", L"Riconfigura", L"Reconfigurar",
+			L"다시 설정", L"重新设置", L"إعادة الضبط", L"Настроить снова", L"Neu einrichten",
+			L"Reconfigurar", L"Opnieuw instellen", L"Ustaw ponownie", L"Yeniden ayarla"));
+		m_no.SetWindowText(LL14(L"キャンセル", L"Cancel", L"Annuler", L"Annulla", L"Cancelar",
+			L"취소", L"取消", L"إلغاء", L"Отмена", L"Abbrechen",
+			L"Cancelar", L"Annuleren", L"Anuluj", L"İptal"));
+		return TRUE;
+	}
+	afx_msg void OnYes() { EndDialog(IDYES); }
+	afx_msg void OnNo() { EndDialog(IDNO); }
+	virtual void OnCancel() { EndDialog(IDNO); }
+	DECLARE_MESSAGE_MAP()
+};
+
+IMPLEMENT_DYNAMIC(CVstHostCacheAskDlg, CCustomBlurDialogExBase)
+BEGIN_MESSAGE_MAP(CVstHostCacheAskDlg, CCustomBlurDialogExBase)
+	ON_BN_CLICKED(IDYES, OnYes)
+	ON_BN_CLICKED(IDNO, OnNo)
+END_MESSAGE_MAP()
+
+int VstHostAskCacheMissing(CWnd* owner)
+{
+	CVstHostCacheAskDlg dlg(owner);
+	return (int)dlg.DoModal();
 }
 
 void OpenVstHostModeless(CWnd* parent)

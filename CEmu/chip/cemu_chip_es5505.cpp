@@ -332,11 +332,8 @@ private:
 	{
 		uint32_t idx = (uint32_t)CEmuEsRshiftU(volume, volumeShift_);
 		if (idx > 255) idx = 255;
-		uint32_t v = volLut_[idx];
-		/* 指数 0（0x01–0x0F）は LUT が 0。Taito のリリース 0x0F が F60C ループを無音にする。 */
-		if (v == 0 && idx)
-			v = volLut_[0x90];
-		return v;
+		/* 指数 0 はほぼ無音。0x90 へ持ち上げるとリリースがフルスケールになりクリップする。 */
+		return volLut_[idx];
 	}
 
 	int64_t GetSample(int32_t sample, uint32_t volume) const
@@ -459,9 +456,9 @@ private:
 		const uint32_t freqcount = (uint32_t)voice->freqcount;
 		uint64_t accum = voice->accum & addrAccMask_;
 		if (!(voice->control & kControlStopMask)) {
-			/* OTIS のボイス毎音量は0のままが多い。基板ゲインは MB87078（リセット0dB）。 */
-			uint32_t lv = voice->lvol ? voice->lvol : 0xffu;
-			uint32_t rv = voice->rvol ? voice->rvol : 0xffu;
+			/* 音量 0 は無音。0xFF へ差し替えると止まっている声が 32767 で鳴り続ける。 */
+			const uint32_t lv = voice->lvol;
+			const uint32_t rv = voice->rvol;
 			uint64_t lvm = GetVolume(lv);
 			uint64_t rvm = GetVolume(rv);
 			if (voice->control & kControlLpe) {

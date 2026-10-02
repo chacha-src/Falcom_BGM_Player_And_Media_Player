@@ -79,6 +79,13 @@ done:
 #define S3CSO_RELEASE(p) do { if (p) { (p)->Release(); (p) = NULL; } } while (0)
 #endif
 
+static BOOL S3BlobLooksLikeDxbc(ID3DBlob* b)
+{
+	if (!b || b->GetBufferSize() < 4) return FALSE;
+	const BYTE* p = (const BYTE*)b->GetBufferPointer();
+	return p[0] == 'D' && p[1] == 'X' && p[2] == 'B' && p[3] == 'C';
+}
+
 static HRESULT S3LoadCsoFile(const wchar_t* path, ID3DBlob** out)
 {
 	HANDLE h = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
@@ -93,6 +100,7 @@ static HRESULT S3LoadCsoFile(const wchar_t* path, ID3DBlob** out)
 		CloseHandle(h); S3CSO_RELEASE(b); return E_FAIL;
 	}
 	CloseHandle(h);
+	if (!S3BlobLooksLikeDxbc(b)) { S3CSO_RELEASE(b); return E_FAIL; }
 	*out = b;
 	return S_OK;
 }
@@ -113,6 +121,7 @@ static HRESULT S3LoadCsoResource(int id, ID3DBlob** out)
 	HRESULT hr = D3DCreateBlob(sz, &b);
 	if (FAILED(hr) || !b) return hr;
 	memcpy(b->GetBufferPointer(), p, sz);
+	if (!S3BlobLooksLikeDxbc(b)) { S3CSO_RELEASE(b); return E_FAIL; }
 	*out = b;
 	return S_OK;
 }
