@@ -3003,8 +3003,7 @@ void CMidiMonitorDlg::LoadCurrentMidi()
 		else if (hasGm2 && !hasGs) resolved = 9;
 		else if ((mapHint == 5 || hasGm) && !hasGs) resolved = 5;
 		else if (mapHint == 6 || hasSd) resolved = 6;
-		else if (cc32Max >= 1 && cc32Max <= 4) resolved = cc32Max;
-		else resolved = VstMidiGsMapDropFromUsed(pairs, nPairs);
+		else resolved = VstMidiGsMapDropFromUsed(pairs, nPairs, cc32Max);
 		m_fileHasXg = hasXg;
 		m_fileHasGm = (resolved == 5) ? 1 : 0;
 		m_fileHasSd = (resolved == 6) ? 1 : 0;

@@ -119,9 +119,9 @@ int VstMidiSysexIsMt32(const unsigned char* d, int n);
 // 00 01 10 の 16 バイト Voice Reserve は普通の 16 パート GS なので 32ch ではない。
 int VstMidiSysexMarksGs32(const unsigned char* d, int n);
 int VstMidiBankMsbIsSdNative(int msb);
-// 使われている (bankMSB<<8|PC) が SASAMI_GS.DAT のどのマップに収まるか。
-// 8820 から 88Pro→88→55 へ落とす。0=判定不能。
-int VstMidiGsMapDropFromUsed(const unsigned short* pairs, int nPairs);
+// タイトル等が無いとき。SC-8850 から、使っている CC32 と CC0+PC で
+// 8820 → 88Pro → 88 → 55 へ落とす。音が無ければ 55。
+int VstMidiGsMapDropFromUsed(const unsigned short* pairs, int nPairs, int cc32Max);
 // プレイリスト印用。ファイルを走査して 16/32ch と GM/GS/XG・マップ種別を返す。
 struct VstMidiListPeek {
 	int ch32;    // 0=16ch 1=32ch

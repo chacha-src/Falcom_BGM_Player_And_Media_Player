@@ -1,4 +1,5 @@
 #pragma once
+#include <stddef.h>
 #include <stdint.h>
 
 class note;
@@ -14,6 +15,9 @@ public:
     bool ready() const;
     void set_raira(int raira);
     void reset_render_frame();
+    /* 1 ブロックを 1 回だけ描く。発音数では区切らない。 */
+    void begin_frame(size_t samples, double rate);
+    void end_frame();
     note* note_on(int program, int key, int velocity, double freq_mul, const tone_color& color);
 private:
     Impl* impl;

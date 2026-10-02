@@ -50,6 +50,7 @@ KbSasamiDecoder::KbSasamiDecoder(IKpiConfig* pConfig)
 	m_mapDefault = 0;
 	m_fmModeDefault = 2;
 	m_gsMapLsb = 0;
+	m_laBankMsb = 0;
 	m_titleSjis[0] = 0;
 	m_loopStart = -1.0;
 	m_loopEnd = -1.0;
@@ -309,6 +310,14 @@ void KbSasamiDecoder::midi_message(int port, uint_least32_t message)
 {
 	if (m_seeking) return;
 	if (port < 0 || port >= m_nPorts) port = 0;
+	if (m_laBankMsb == 127 && m_synths[port]) {
+		const int st = (int)(message & 0xf0);
+		const int ch = (int)(message & 0x0f);
+		if (st == 0xc0 && ch != 9) {
+			m_synths[port]->control_change(ch, 0, 127);
+			m_synths[port]->control_change(ch, 32, 1);
+		}
+	}
 	m_synths[port]->midi_event(message);
 }
 
@@ -329,12 +338,16 @@ void KbSasamiDecoder::meta_event(int, const void*, std::size_t) {}
 
 void KbSasamiDecoder::ApplyGsBankLsb()
 {
-	if (m_gsMapLsb < 1 || m_gsMapLsb > 4) return;
 	for (int i = 0; i < m_nPorts; i++) {
 		if (!m_synths[i]) continue;
 		for (int ch = 0; ch < 16; ch++) {
 			if (ch == 9) continue;
-			m_synths[i]->control_change(ch, 32, m_gsMapLsb);
+			if (m_laBankMsb == 127) {
+				m_synths[i]->control_change(ch, 0, 127);
+				m_synths[i]->control_change(ch, 32, 1);
+			} else if (m_gsMapLsb >= 1 && m_gsMapLsb <= 4) {
+				m_synths[i]->control_change(ch, 32, m_gsMapLsb);
+			}
 		}
 	}
 }
@@ -376,6 +389,7 @@ DWORD __fastcall KbSasamiDecoder::Open(const KPI_MEDIAINFO* cpRequest, IKpiFile*
 	pFile->Release();
 	if (n == 0) return 0;
 	m_gsMapLsb = 0;
+	m_laBankMsb = 0;
 
 	const int smfMagic = (n >= 4 && s_fileBuf[0] == 'M' && s_fileBuf[1] == 'T'
 		&& s_fileBuf[2] == 'h' && s_fileBuf[3] == 'd') ? 1 : 0;
@@ -419,8 +433,10 @@ DWORD __fastcall KbSasamiDecoder::Open(const KPI_MEDIAINFO* cpRequest, IKpiFile*
 			mapForce = SasamiAutoMapForce(mapForce, NULL, smfPtr, (int)smfLen, pathForKind, NULL);
 			SasamiMidiMap map = SASAMI_MAP_GS88;
 			int gsLsb = 0;
-			SasamiMapForceToSel(mapForce, &map, &gsLsb);
+			int laBank = 0;
+			SasamiMapForceToSel(mapForce, &map, &gsLsb, &laBank);
 			m_gsMapLsb = (gsLsb >= 1 && gsLsb <= 4) ? gsLsb : 0;
+			m_laBankMsb = (laBank == 127) ? 127 : 0;
 		}
 		reset();
 		m_loopStart = m_sequencer.find_marker("loopStart");
@@ -527,9 +543,11 @@ DWORD __fastcall KbSasamiDecoder::Open(const KPI_MEDIAINFO* cpRequest, IKpiFile*
 	mapForce = SasamiAutoMapForce(mapForce, &s_song, NULL, 0, pathForMap, s_song.titleSjis);
 	SasamiMidiMap map = SASAMI_MAP_GS88;
 	int gsLsb = 2;
-	SasamiMapForceToSel(mapForce, &map, &gsLsb);
+	int laBank = 0;
+	SasamiMapForceToSel(mapForce, &map, &gsLsb, &laBank);
 	m_gsMapLsb = (gsLsb >= 1 && gsLsb <= 4) ? gsLsb : 0;
-	if (!SasamiConvertToSmf(s_song, map, gsLsb, m_smf, SASAMI_MAX_SMF, &m_smfSize)) return 0;
+	m_laBankMsb = (laBank == 127) ? 127 : 0;
+	if (!SasamiConvertToSmf(s_song, map, gsLsb, m_smf, SASAMI_MAX_SMF, &m_smfSize, laBank)) return 0;
 	LoadProgramsTxt();
 	MemFile mf;
 	mf.p = m_smf;
@@ -621,10 +639,13 @@ DWORD WINAPI KbSasamiDecoder::Render(BYTE* pBuffer, DWORD dwSizeSample)
 		const double tEnd = (double)(m_curSample + chunk) / rate;
 		m_sequencer.play_forward(tEnd, this);
 		for (DWORD i = 0; i < chunk * 2; i++) m_mix[i] = 0.0;
+		/* ノート増減の前に 1 回だけ描く。発音数で閉じると次ブロックが同じ PCM を再生する。 */
+		m_note_factory.begin_pool_frame(chunk, rate);
 		for (int i = 0; i < m_nPorts; i++) {
 			if (!m_synths[i]) continue;
 			m_synths[i]->synthesize_mixing(m_mix, chunk, m_MediaInfo.dwSampleRate);
 		}
+		m_note_factory.end_pool_frame();
 		int16_t* out = (int16_t*)p;
 		const double gain = m_raira ? kFmMidiOutGain : (kFmMidiOutGain * 0.5 / 1.5);
 		for (DWORD i = 0; i < chunk * 2; i++) {

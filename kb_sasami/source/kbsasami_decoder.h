@@ -34,6 +34,7 @@ private:
 	int m_mapDefault; // kbsasami.midimode (0=auto .. 19)
 	int m_fmModeDefault; // kbsasami.fmmode 0=BEEP 1=OPN 2=OPNA
 	int m_gsMapLsb; // 自動/指定マップの CC32 (1..4)。0=付けない
+	int m_laBankMsb; // 127=LA/MT-32 を SC-55 バンク 127 で鳴らす。0=付けない
 	char m_titleSjis[65];
 	double m_loopStart;
 	double m_loopEnd;

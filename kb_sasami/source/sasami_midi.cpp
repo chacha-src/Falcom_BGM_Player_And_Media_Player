@@ -6,6 +6,8 @@
 #include <string.h>
 #include <stdio.h>
 
+extern HINSTANCE g_hKpi;
+
 namespace {
 
 struct MidiEv {
@@ -126,25 +128,22 @@ static void PushShort(uint32_t tick, int port, uint8_t st, uint8_t a, uint8_t b)
 }
 
 // MMODE1J / MMJ4: per-channel init (pitch bend range ±2 octaves, GS bank, volumes).
-static void PushMmodeChannelInit(uint32_t tick, int port, int ch, SasamiMidiMap map, int gsBankLsb, int flg88)
+static void PushMmodeChannelInit(uint32_t tick, int port, int ch, SasamiMidiMap map, int gsBankLsb, int flg88, int laBankMsb)
 {
 	PushShort(tick, port, (uint8_t)(0xB0 | ch), 0x65, 0);
 	PushShort(tick, port, (uint8_t)(0xB0 | ch), 0x64, 0);
 	PushShort(tick, port, (uint8_t)(0xB0 | ch), 0x06, 0x18);
 	PushShort(tick, port, (uint8_t)(0xB0 | ch), 0x01, 0);
-	PushShort(tick, port, (uint8_t)(0xB0 | ch), 0x00, 0);
-	if (flg88 != 2) {
-		/* Roland CC32: 1=SC-55, 2=SC-88, 3=88Pro, 4=8820 */
-		uint8_t cc32 = 0;
-		if (gsBankLsb >= 1 && gsBankLsb <= 4)
-			cc32 = (uint8_t)gsBankLsb;
-		else if (map == SASAMI_MAP_GS55)
-			cc32 = 1;
-		else if (map == SASAMI_MAP_GS88)
-			cc32 = 2;
-		if (cc32)
-			PushShort(tick, port, (uint8_t)(0xB0 | ch), 32, cc32);
+	/* LA / MT-32 は SC-55 のバンク MSB 127。チャンネル 10 はリズムのまま。 */
+	if (laBankMsb == 127 && ch != 9)
+		PushShort(tick, port, (uint8_t)(0xB0 | ch), 0x00, 127);
+	else
+		PushShort(tick, port, (uint8_t)(0xB0 | ch), 0x00, 0);
+	if (flg88 != 2 && gsBankLsb >= 1 && gsBankLsb <= 4) {
+		/* 判定できたときだけ。未判定を SC-88 の CC32=2 にしない。 */
+		PushShort(tick, port, (uint8_t)(0xB0 | ch), 32, (uint8_t)gsBankLsb);
 	}
+	(void)map;
 	PushShort(tick, port, (uint8_t)(0xB0 | ch), 7, 100);
 	PushShort(tick, port, (uint8_t)(0xB0 | ch), 10, 64);
 	PushShort(tick, port, (uint8_t)(0xB0 | ch), 11, 127);
@@ -573,7 +572,7 @@ static int DetBankMsbSd(int msb)
 		msb == 104 || msb == 105 || msb == 106 || msb == 107) ? 1 : 0;
 }
 
-static void DetEatSysex(const uint8_t* d, int n, int* hasXg, int* hasGs, int* hasGm, int* hasGm2, int* hasSd, int* mapHint)
+static void DetEatSysex(const uint8_t* d, int n, int* hasXg, int* hasGs, int* hasGm, int* hasGm2, int* hasSd, int* mapHint, int* lastSys)
 {
 	if (DetSysexXgOn(d, n)) *hasXg = 1;
 	if (DetSysexGsReset(d, n)) *hasGs = 1;
@@ -581,7 +580,10 @@ static void DetEatSysex(const uint8_t* d, int n, int* hasXg, int* hasGs, int* ha
 	if (DetSysexGm2(d, n)) *hasGm2 = 1;
 	if (DetSysexMt32(d, n)) *mapHint = DetFoldHint(*mapHint, 8);
 	const int sys = DetSysexGsSysModeKind(d, n);
-	if (sys) *mapHint = DetFoldHint(*mapHint, sys);
+	if (sys) {
+		*mapHint = DetFoldHint(*mapHint, sys);
+		if (lastSys) *lastSys = sys;
+	}
 	(void)hasSd;
 }
 
@@ -636,6 +638,307 @@ static const uint8_t* DetSmfStart(const uint8_t* data, int n, int* outN)
 	return NULL;
 }
 
+static int DetReadDocWide(const wchar_t* path, wchar_t* out, int outChars)
+{
+	if (!path || !out || outChars < 8) return 0;
+	out[0] = 0;
+	HANDLE f = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ, NULL,
+		OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN, NULL);
+	if (f == INVALID_HANDLE_VALUE) return 0;
+	DWORD sz = GetFileSize(f, NULL), got = 0;
+	if (sz == INVALID_FILE_SIZE || sz < 8 || sz > 256 * 1024) {
+		CloseHandle(f);
+		return 0;
+	}
+	char* raw = new char[(size_t)sz + 1];
+	if (!ReadFile(f, raw, sz, &got, NULL)) {
+		CloseHandle(f);
+		delete[] raw;
+		return 0;
+	}
+	CloseHandle(f);
+	raw[got] = 0;
+	if (MultiByteToWideChar(932, 0, raw, -1, out, outChars) <= 0)
+		MultiByteToWideChar(CP_ACP, 0, raw, -1, out, outChars);
+	delete[] raw;
+	out[outChars - 1] = 0;
+	return out[0] ? 1 : 0;
+}
+
+static int DetKindFromDocText(const wchar_t* w, const wchar_t* leaf, const wchar_t* leafStem)
+{
+	if (!w || !w[0]) return 0;
+	if (leaf && leaf[0] && wcschr(w, L'[')) {
+		wchar_t tag[280];
+		const wchar_t* sec = NULL;
+		_snwprintf_s(tag, _TRUNCATE, L"[%s]", leaf);
+		sec = wcsstr(w, tag);
+		if (!sec && leafStem && leafStem[0]) {
+			_snwprintf_s(tag, _TRUNCATE, L"[%s]", leafStem);
+			sec = wcsstr(w, tag);
+		}
+		if (sec) {
+			wchar_t chunk[1200];
+			const wchar_t* end = wcschr(sec + 1, L'[');
+			size_t n = end ? (size_t)(end - sec) : wcslen(sec);
+			if (n > 1199) n = 1199;
+			wcsncpy_s(chunk, sec, n);
+			chunk[n] = 0;
+			const int sk = DetKindFromDocText(chunk, NULL, NULL);
+			if (sk) return sk;
+		}
+	}
+	if (wcsstr(w, L"55MAP") || wcsstr(w, L"55map") || wcsstr(w, L"55Map"))
+		return 1;
+	if (wcsstr(w, L"88PROMAP") || wcsstr(w, L"88Promap") || wcsstr(w, L"88ProMAP"))
+		return 3;
+	if (wcsstr(w, L"8820MAP") || wcsstr(w, L"8820map"))
+		return 4;
+	if (wcsstr(w, L"88MAP") || wcsstr(w, L"88map"))
+		return 2;
+	int lineKind = 0;
+	const wchar_t* p = w;
+	while (*p) {
+		const wchar_t* nl = wcschr(p, L'\n');
+		wchar_t line[512];
+		size_t n = nl ? (size_t)(nl - p) : wcslen(p);
+		if (n >= 511) n = 511;
+		wcsncpy_s(line, p, n);
+		line[n] = 0;
+		if (wcsstr(line, L"音源") || wcsstr(line, L"対応") || wcsstr(line, L"使用ハード")
+			|| wcsstr(line, L"対応ハード") || wcsstr(line, L"MAP") || wcsstr(line, L"map")
+			|| wcsstr(line, L"ModuleName")) {
+			const int k = DetKindFromText(line);
+			if (k) lineKind = DetFoldHint(lineKind, k);
+		}
+		p = nl ? nl + 1 : p + n;
+		if (!nl) break;
+	}
+	if (lineKind) return lineKind;
+	return DetKindFromText(w);
+}
+
+/* 隣の .doc/.txt/.hed/.tdf。ogg 本体の VstMidiGuessGsMapFromSidecar と同じ。 */
+static int DetGuessSidecar(const wchar_t* midPath)
+{
+	if (!midPath || !midPath[0]) return 0;
+	wchar_t stem[MAX_PATH];
+	wcsncpy_s(stem, midPath, _TRUNCATE);
+	wchar_t* colon = wcsstr(stem, L"::");
+	if (colon) *colon = 0;
+	wchar_t* gt = wcschr(stem, L'>');
+	if (gt) *gt = 0;
+	wchar_t* dot = wcsrchr(stem, L'.');
+	wchar_t* sl = wcsrchr(stem, L'\\');
+	if (!sl) sl = wcsrchr(stem, L'/');
+	if (dot && (!sl || dot > sl)) *dot = 0;
+	const wchar_t* leaf = midPath;
+	for (const wchar_t* s = midPath; *s; ++s) {
+		if (*s == L'\\' || *s == L'/' || *s == L'>')
+			leaf = s + 1;
+	}
+	wchar_t leafStem[260];
+	wcsncpy_s(leafStem, leaf, _TRUNCATE);
+	wchar_t* ld = wcsrchr(leafStem, L'.');
+	if (ld) *ld = 0;
+	static const wchar_t* kExt[] = {
+		L".doc", L".txt", L".hed", L".tdf",
+		L".DOC", L".TXT", L".HED", L".TDF"
+	};
+	wchar_t* text = new wchar_t[8192];
+	int kind = 0;
+	for (int i = 0; i < 8; i++) {
+		wchar_t pth[MAX_PATH];
+		_snwprintf_s(pth, _TRUNCATE, L"%s%s", stem, kExt[i]);
+		if (!DetReadDocWide(pth, text, 8192)) continue;
+		const int k = DetKindFromDocText(text, leaf, leafStem);
+		if (k) kind = DetFoldHint(kind, k);
+	}
+	if (kind) { delete[] text; return kind; }
+	wchar_t dir[MAX_PATH];
+	wcsncpy_s(dir, stem, _TRUNCATE);
+	wchar_t* dslash = wcsrchr(dir, L'\\');
+	if (!dslash) dslash = wcsrchr(dir, L'/');
+	if (!dslash) { delete[] text; return 0; }
+	dslash[1] = 0;
+	wchar_t pat[MAX_PATH];
+	_snwprintf_s(pat, _TRUNCATE, L"%s*.*", dir);
+	WIN32_FIND_DATAW fd;
+	HANDLE h = FindFirstFileW(pat, &fd);
+	if (h == INVALID_HANDLE_VALUE) { delete[] text; return 0; }
+	do {
+		if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
+		const wchar_t* ext = wcsrchr(fd.cFileName, L'.');
+		if (!ext) continue;
+		if (_wcsicmp(ext, L".doc") != 0 && _wcsicmp(ext, L".txt") != 0
+			&& _wcsicmp(ext, L".hed") != 0 && _wcsicmp(ext, L".tdf") != 0) continue;
+		wchar_t pth[MAX_PATH];
+		_snwprintf_s(pth, _TRUNCATE, L"%s%s", dir, fd.cFileName);
+		if (!DetReadDocWide(pth, text, 8192)) continue;
+		if (leafStem[0] && !wcsstr(text, leafStem) && !wcsstr(text, leaf))
+			continue;
+		const int k = DetKindFromDocText(text, leaf, leafStem);
+		if (k) kind = DetFoldHint(kind, k);
+	} while (FindNextFileW(h, &fd));
+	FindClose(h);
+	delete[] text;
+	return kind;
+}
+
+static int DetTitleJunk(const wchar_t* w)
+{
+	if (!w || !w[0]) return 1;
+	int junk = 1;
+	for (const wchar_t* p = w; *p; ++p) {
+		const wchar_t c = *p;
+		if (c == L' ' || c == L'\t' || c == L'\r' || c == L'\n') continue;
+		if (c != L'?' && c != L'*' && c != L'.' && c != L'-' && c != L'_' && c != L'!') {
+			junk = 0;
+			break;
+		}
+	}
+	if (!junk && (wcsstr(w, L"GM版") || wcscmp(w, L"GM曲") == 0))
+		junk = 1;
+	return junk;
+}
+
+static unsigned char g_gsBits[5][2048];
+static int g_gsBitsReady;
+
+static int DetGsHas(int map, int bank, int pc)
+{
+	if (map < 1 || map > 4 || bank < 0 || bank > 127 || pc < 0 || pc > 127) return 0;
+	const int bit = bank * 128 + pc;
+	return (g_gsBits[map][bit >> 3] >> (bit & 7)) & 1;
+}
+
+static void DetGsAddBuf(const unsigned char* d, int n)
+{
+	if (!d || n < 20) return;
+	const int rec = n / 20;
+	for (int i = 0; i < rec; i++) {
+		const unsigned char* r = d + i * 20;
+		const int map = r[0], bank = r[1], pc = r[2];
+		if (map < 1 || map > 4 || bank > 127 || pc > 127) continue;
+		const int bit = bank * 128 + pc;
+		g_gsBits[map][bit >> 3] = (unsigned char)(g_gsBits[map][bit >> 3] | (unsigned char)(1u << (bit & 7)));
+	}
+}
+
+static int DetGsLoadFile(const wchar_t* path)
+{
+	HANDLE f = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ, NULL,
+		OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+	if (f == INVALID_HANDLE_VALUE) return 0;
+	DWORD sz = GetFileSize(f, NULL), got = 0;
+	if (sz < 20 || sz > 8 * 1024 * 1024) { CloseHandle(f); return 0; }
+	unsigned char* buf = new unsigned char[sz];
+	if (!ReadFile(f, buf, sz, &got, NULL) || got != sz) {
+		CloseHandle(f);
+		delete[] buf;
+		return 0;
+	}
+	CloseHandle(f);
+	DetGsAddBuf(buf, (int)sz);
+	delete[] buf;
+	return 1;
+}
+
+static int DetGsEnsure()
+{
+	if (g_gsBitsReady) return g_gsBitsReady > 0;
+	g_gsBitsReady = -1;
+	if (g_hKpi) {
+		HRSRC hr = FindResourceW(g_hKpi, MAKEINTRESOURCEW(101), RT_RCDATA);
+		if (hr) {
+			HGLOBAL hg = LoadResource(g_hKpi, hr);
+			DWORD sz = SizeofResource(g_hKpi, hr);
+			const unsigned char* p = (const unsigned char*)LockResource(hg);
+			if (p && sz >= 20) {
+				DetGsAddBuf(p, (int)sz);
+				g_gsBitsReady = 1;
+				return 1;
+			}
+		}
+	}
+	if (DetGsLoadFile(L"C:\\Windows\\SASAMI_GS.DAT")) {
+		g_gsBitsReady = 1;
+		return 1;
+	}
+	wchar_t mods[2][MAX_PATH];
+	mods[0][0] = mods[1][0] = 0;
+	if (g_hKpi) GetModuleFileNameW(g_hKpi, mods[0], MAX_PATH);
+	GetModuleFileNameW(NULL, mods[1], MAX_PATH);
+	for (int m = 0; m < 2; m++) {
+		wchar_t dir[MAX_PATH];
+		wcsncpy_s(dir, mods[m], _TRUNCATE);
+		for (int up = 0; up < 8 && dir[0]; up++) {
+			wchar_t* sl = wcsrchr(dir, L'\\');
+			if (!sl) break;
+			*sl = 0;
+			wchar_t cand[MAX_PATH];
+			_snwprintf_s(cand, _TRUNCATE, L"%s\\SASAMI_GS.DAT", dir);
+			if (DetGsLoadFile(cand)) { g_gsBitsReady = 1; return 1; }
+			_snwprintf_s(cand, _TRUNCATE, L"%s\\res\\SASAMI_GS.DAT", dir);
+			if (DetGsLoadFile(cand)) { g_gsBitsReady = 1; return 1; }
+		}
+	}
+	return 0;
+}
+
+/* 8850 から落とす。CC32=4 または 8850 にしか無い CC0+PC なら 8820。
+   使っていなければ 88Pro → 88 → 55。何も無ければ 55。 */
+static int DetDropFromUsed(const unsigned short* pairs, int nPairs, int cc32Max)
+{
+	int kind = 1;
+	if (cc32Max >= 1 && cc32Max <= 4)
+		kind = cc32Max;
+	if (!pairs || nPairs <= 0 || !DetGsEnsure())
+		return kind;
+	for (int i = 0; i < nPairs; i++) {
+		const int bank = (pairs[i] >> 8) & 0x7f;
+		const int pc = pairs[i] & 0x7f;
+		int tm = 1;
+		if (!DetGsHas(1, bank, pc)) tm = 2;
+		if (!DetGsHas(2, bank, pc)) tm = 3;
+		if (!DetGsHas(3, bank, pc)) tm = 4;
+		if (tm > kind) kind = tm;
+	}
+	return kind;
+}
+
+static int DetFinish(int mapHint, int hasXg, int hasGs, int hasGm, int hasGm2, int hasSd,
+	int cc32Max, int lastSys, const wchar_t* path, const wchar_t* titleBuf,
+	const unsigned short* pairs, int nPairs)
+{
+	/* タイトルタグ（FF 03 優先）とファイル名。タイトルが音源名ならファイル名より先に畳む。 */
+	if (titleBuf && titleBuf[0])
+		mapHint = DetFoldHint(mapHint, DetKindFromText(titleBuf));
+	if (!mapHint)
+		mapHint = DetGuessPathTitle(titleBuf, path);
+	else
+		mapHint = DetFoldHint(mapHint, DetGuessPathTitle(NULL, path));
+	const int side = DetGuessSidecar(path);
+	if (side) {
+		if (!titleBuf || !titleBuf[0] || !DetKindFromText(titleBuf))
+			mapHint = side;
+		else
+			mapHint = DetFoldHint(mapHint, side);
+	}
+	if (mapHint == 7) hasXg = 1;
+	int resolved = 0;
+	if (hasXg) resolved = 7;
+	else if (lastSys >= 1 && lastSys <= 4) resolved = lastSys;
+	else if (mapHint == 8) resolved = 8;
+	else if (mapHint >= 9 && mapHint <= 18) resolved = mapHint;
+	else if (mapHint >= 1 && mapHint <= 4) resolved = mapHint;
+	else if (hasGm2 && !hasGs) resolved = 9;
+	else if ((mapHint == 5 || hasGm) && !hasGs) resolved = 5;
+	else if (mapHint == 6 || hasSd) resolved = 6;
+	else resolved = DetDropFromUsed(pairs, nPairs, cc32Max);
+	return DetKindToForce(resolved);
+}
+
 static int DetFromSmf(const uint8_t* data, int n, const wchar_t* path, const wchar_t* titleW)
 {
 	int smfN = 0;
@@ -646,15 +949,17 @@ static int DetFromSmf(const uint8_t* data, int n, const wchar_t* path, const wch
 	const uint8_t* p = smf + 8 + DetReadBE(smf + 4, 4);
 	const uint8_t* fileEnd = smf + smfN;
 	int hasXg = 0, hasGs = 0, hasGm = 0, hasGm2 = 0, hasSd = 0;
-	int mapHint = 0, cc32Max = 0;
+	int mapHint = 0, cc32Max = 0, lastSys = 0;
+	unsigned short pairs[256];
+	int nPairs = 0;
+	unsigned char have[2048];
 	uint8_t msb[32];
+	memset(have, 0, sizeof(have));
 	memset(msb, 0, sizeof(msb));
 	wchar_t titleBuf[280];
 	titleBuf[0] = 0;
-	if (titleW && titleW[0]) {
+	if (titleW && titleW[0] && !DetTitleJunk(titleW))
 		wcsncpy_s(titleBuf, titleW, _TRUNCATE);
-		mapHint = DetFoldHint(mapHint, DetKindFromText(titleBuf));
-	}
 	for (int tr = 0; tr < tracks && p + 8 <= fileEnd; ++tr) {
 		if (memcmp(p, "MTrk", 4)) break;
 		const int len = DetReadBE(p + 4, 4);
@@ -690,7 +995,8 @@ static int DetFromSmf(const uint8_t* data, int n, const wchar_t* path, const wch
 					w[255] = 0;
 					if (w[0]) {
 						mapHint = DetFoldHint(mapHint, DetKindFromText(w));
-						if (type == 0x03 || !titleBuf[0])
+						/* FF 03 Sequence Name をタイトルにする。無いときだけ Text。 */
+						if (!DetTitleJunk(w) && (type == 0x03 || !titleBuf[0]))
 							wcsncpy_s(titleBuf, w, _TRUNCATE);
 					}
 				}
@@ -705,7 +1011,7 @@ static int DetFromSmf(const uint8_t* data, int n, const wchar_t* path, const wch
 					if (st == 0xf0) sx[off++] = 0xf0;
 					memcpy(sx + off, q, sl);
 					off += (int)sl;
-					DetEatSysex(sx, off, &hasXg, &hasGs, &hasGm, &hasGm2, &hasSd, &mapHint);
+					DetEatSysex(sx, off, &hasXg, &hasGs, &hasGm, &hasGm2, &hasSd, &mapHint, &lastSys);
 				}
 				q += sl;
 			} else {
@@ -727,17 +1033,25 @@ static int DetFromSmf(const uint8_t* data, int n, const wchar_t* path, const wch
 					} else if (kind == 0xb0 && d1 == 32) {
 						const int v = d2 & 0x7f;
 						if (!drum && v >= 1 && v <= 4 && v > cc32Max) cc32Max = v;
+					} else if (kind == 0xc0 && !drum && nPairs < 256) {
+						const int bank = (int)msb[idx];
+						const int pc = d1 & 0x7f;
+						const int bit = bank * 128 + pc;
+						if (bit >= 0 && bit < 16384) {
+							const int bi = bit >> 3;
+							const unsigned char mask = (unsigned char)(1u << (bit & 7));
+							if (!(have[bi] & mask)) {
+								have[bi] = (unsigned char)(have[bi] | mask);
+								pairs[nPairs++] = (unsigned short)((bank << 8) | pc);
+							}
+						}
 					}
 				}
 			}
 		}
 		p = end;
 	}
-	if (!mapHint)
-		mapHint = DetGuessPathTitle(titleBuf, path);
-	else
-		mapHint = DetFoldHint(mapHint, DetGuessPathTitle(NULL, path));
-	return DetKindToForce(DetResolveKind(mapHint, hasXg, hasGs, hasGm, hasGm2, hasSd, cc32Max));
+	return DetFinish(mapHint, hasXg, hasGs, hasGm, hasGm2, hasSd, cc32Max, lastSys, path, titleBuf, pairs, nPairs);
 }
 
 static uint32_t DetSkipToFf(const SasamiSong& song, uint32_t addr)
@@ -753,7 +1067,7 @@ static uint32_t DetSkipToFf(const SasamiSong& song, uint32_t addr)
 static int DetFromSong(const SasamiSong& song, const wchar_t* path)
 {
 	int hasXg = 0, hasGs = 0, hasGm = 0, hasGm2 = 0, hasSd = 0;
-	int mapHint = 0, cc32Max = 0;
+	int mapHint = 0, cc32Max = 0, lastSys = 0;
 	int tag0 = 0, tag1 = 0, tag2 = 0, tag3 = 0;
 	wchar_t titleW[280];
 	titleW[0] = 0;
@@ -794,7 +1108,7 @@ static int DetFromSong(const SasamiSong& song, const wchar_t* path)
 				}
 				if (SasamiOffOk(song, p, 1) && SasamiGet(song, p) == 0xFF) p++;
 				if (nb > 0)
-					DetEatSysex(body, nb, &hasXg, &hasGs, &hasGm, &hasGm2, &hasSd, &mapHint);
+					DetEatSysex(body, nb, &hasXg, &hasGs, &hasGm, &hasGm2, &hasSd, &mapHint, &lastSys);
 				addr = p;
 				continue;
 			}
@@ -814,7 +1128,7 @@ static int DetFromSong(const SasamiSong& song, const wchar_t* path)
 						body[nb++] = SasamiGet(song, p++);
 				}
 				if (nb > 0)
-					DetEatSysex(body, nb, &hasXg, &hasGs, &hasGm, &hasGm2, &hasSd, &mapHint);
+					DetEatSysex(body, nb, &hasXg, &hasGs, &hasGm, &hasGm2, &hasSd, &mapHint, &lastSys);
 				addr = DetSkipToFf(song, addr);
 				continue;
 			}
@@ -828,17 +1142,18 @@ static int DetFromSong(const SasamiSong& song, const wchar_t* path)
 	else if (tag0 && !tag1 && !tag2) mapHint = DetFoldHint(mapHint, 1);
 	else if (tag1 && !tag0) mapHint = DetFoldHint(mapHint, 2);
 	else if (tag3 && !tag0 && !tag1 && !tag2) mapHint = DetFoldHint(mapHint, 5);
-	(void)cc32Max;
-	return DetKindToForce(DetResolveKind(mapHint, hasXg, hasGs, hasGm, hasGm2, hasSd, cc32Max));
+	return DetFinish(mapHint, hasXg, hasGs, hasGm, hasGm2, hasSd, cc32Max, lastSys, path, titleW, NULL, 0);
 }
 
 } // namespace
 
-void SasamiMapForceToSel(int mapForce, SasamiMidiMap* map, int* gsBankLsb)
+void SasamiMapForceToSel(int mapForce, SasamiMidiMap* map, int* gsBankLsb, int* laBankMsb)
 {
 	SasamiMidiMap m = SASAMI_MAP_GS88;
 	int lsb = 2;
+	int la = 0;
 	switch (mapForce) {
+	case 0: lsb = 0; break;
 	case 1: m = SASAMI_MAP_GS88; lsb = 2; break;
 	case 2: m = SASAMI_MAP_XG; lsb = 0; break;
 	case 3: m = SASAMI_MAP_GS55; lsb = 1; break;
@@ -847,13 +1162,14 @@ void SasamiMapForceToSel(int mapForce, SasamiMidiMap* map, int* gsBankLsb)
 	case 6: m = SASAMI_MAP_GS88; lsb = 4; break;
 	case 7: m = SASAMI_MAP_GM; lsb = 0; break;
 	case 8: m = SASAMI_MAP_GM; lsb = 0; break;
-	case 9: m = SASAMI_MAP_GM; lsb = 0; break;
+	case 9: m = SASAMI_MAP_GS55; lsb = 1; la = 127; break;
 	default:
 		if (mapForce >= 10) { m = SASAMI_MAP_GM; lsb = 0; }
 		break;
 	}
 	if (map) *map = m;
 	if (gsBankLsb) *gsBankLsb = lsb;
+	if (laBankMsb) *laBankMsb = la;
 }
 
 int SasamiReadMidMapForceW(const wchar_t* fol, int* outForce)
@@ -941,7 +1257,7 @@ int SasamiAutoMapForce(int resolved, const SasamiSong* song, const uint8_t* smf,
 	else
 		d = SasamiDetectMapForceFromMem(smf, smfN, path, titleSjis);
 	if (d > 0) return d;
-	return 4;
+	return 0;
 }
 
 int SasamiResolveFmModeW(const wchar_t* fol, int globalDefault)
@@ -1034,7 +1350,7 @@ void SasamiInvalidateTempMidi(const wchar_t* src)
 		memset(&s_tempCache, 0, sizeof(s_tempCache));
 }
 
-bool SasamiConvertToSmf(const SasamiSong& song, SasamiMidiMap map, int gsBankLsb, uint8_t* out, int outCap, int* outSize)
+bool SasamiConvertToSmf(const SasamiSong& song, SasamiMidiMap map, int gsBankLsb, uint8_t* out, int outCap, int* outSize, int laBankMsb)
 {
 	if (!out || !outSize || outCap <= 0) return false;
 	*outSize = 0;
@@ -1114,7 +1430,7 @@ bool SasamiConvertToSmf(const SasamiSong& song, SasamiMidiMap map, int gsBankLsb
 		else if (map == SASAMI_MAP_GM) PushEv(0, p, kGmOn, 6);
 		else PushEv(0, p, kGsReset, 11);
 		for (int ch = 0; ch < 16; ch++)
-			PushMmodeChannelInit(0, p, ch, map, gsBankLsb, flg88);
+			PushMmodeChannelInit(0, p, ch, map, gsBankLsb, flg88, laBankMsb);
 	}
 
 	uint32_t tick = 0;
@@ -1152,7 +1468,7 @@ bool SasamiConvertToSmf(const SasamiSong& song, SasamiMidiMap map, int gsBankLsb
 		else if (map == SASAMI_MAP_GM) PushEv(tick, 1, kGmOn, 6);
 		else PushEv(tick, 1, kGsReset, 11);
 		for (int ch = 0; ch < 16; ch++)
-			PushMmodeChannelInit(tick, 1, ch, map, gsBankLsb, flg88);
+			PushMmodeChannelInit(tick, 1, ch, map, gsBankLsb, flg88, laBankMsb);
 	};
 
 	while (tick < SASAMI_MAX_TICKS) {
@@ -1250,9 +1566,11 @@ bool SasamiConvertToSmf(const SasamiSong& song, SasamiMidiMap map, int gsBankLsb
 					break;
 				case 7: // bank
 					if (!(flg88 == 2 && song.versionWord >= 36000)) {
-						if (flg88 == 0 && (!isGm || song.versionWord < 50000))
+						if (laBankMsb == 127 && ch != 9)
+							PushShort(tick, port, (uint8_t)(0xB0 | ch), 0, 127);
+						else if (flg88 == 0 && (!isGm || song.versionWord < 50000))
 							PushShort(tick, port, (uint8_t)(0xB0 | ch), 0, b2);
-						if (flg88 == 1)
+						else if (flg88 == 1)
 							PushShort(tick, port, (uint8_t)(0xB0 | ch), 0, b1);
 						if (flg88 == 2)
 							PushShort(tick, port, (uint8_t)(0xB0 | ch), 32, b1);
@@ -2038,9 +2356,10 @@ int SasamiConvertPathToMidiFile(const wchar_t* src, wchar_t* dest, int destChars
 	}
 	SasamiMidiMap map = SASAMI_MAP_GS88;
 	int gsLsb = 2;
-	SasamiMapForceToSel(force, &map, &gsLsb);
+	int laBank = 0;
+	SasamiMapForceToSel(force, &map, &gsLsb, &laBank);
 	int sz = 0;
-	if (!SasamiConvertToSmf(s_song, map, gsLsb, s_smfWork, SASAMI_MAX_SMF, &sz)) return 0;
+	if (!SasamiConvertToSmf(s_song, map, gsLsb, s_smfWork, SASAMI_MAX_SMF, &sz, laBank)) return 0;
 	HANDLE h = CreateFileW(dest, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
 	if (h == INVALID_HANDLE_VALUE) return 0;
 	DWORD w = 0;

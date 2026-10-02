@@ -9,8 +9,8 @@
 #include <vector>
 
 namespace ympool {
-
-const int kChips = 10;
+    // midiの同時発音数(SC8850)が128音なので合わせる = 6 * 22 = 132音。
+const int kChips = 22;
 const int kChPerChip = 6;
 const int kVoices = kChips * kChPerChip;
 const int kKeyChan[6] = { 0, 1, 2, 4, 5, 6 };
@@ -18,10 +18,15 @@ const int kKeyChan[6] = { 0, 1, 2, 4, 5, 6 };
 class Ym2612Split : public ymfm::ym2612 {
 public:
     explicit Ym2612Split(ymfm::ymfm_interface& intf) : ymfm::ym2612(intf) {}
-    void clock_split(int32_t out[6][2])
+    void clock_split(int32_t out[6][2], uint32_t chanmask = 0x3fu)
     {
-        m_fm.clock(fm_engine::ALL_CHANNELS);
+        if (chanmask == 0) chanmask = 0x3fu;
+        m_fm.clock(chanmask);
         for (int c = 0; c < 6; c++) {
+            if ((chanmask & (1u << c)) == 0) {
+                out[c][0] = out[c][1] = 0;
+                continue;
+            }
             output_data temp;
             m_fm.output(temp.clear(), 5, 256, 1u << c);
             out[c][0] = dac_discontinuity(temp.data[0]);
@@ -112,13 +117,13 @@ struct Ym2612Pool::Impl {
     ChipBox* chips[kChips];
     Slot slots[kVoices];
     int live;
-    int frame_left;
+    int block_open; /* 1 = このブロックの PCM は描き済み。発音数では閉じない */
     int order;
     bool inited;
     int raira;
     double rate;
 
-    Impl() : live(0), frame_left(-1), order(0), inited(false), raira(0), rate(44100)
+    Impl() : live(0), block_open(0), order(0), inited(false), raira(0), rate(44100)
     {
         for (int i = 0; i < kChips; i++) chips[i] = 0;
         for (int i = 0; i < kVoices; i++) {
@@ -366,6 +371,15 @@ struct Ym2612Pool::Impl {
     {
         const Inst* in = 0;
         int gotM = -1, gotL = -1;
+        if (msb == 127 && lsb <= 4) {
+            int mapLsb = gs_file_lsb(lsb ? lsb : 1);
+            in = find_exact(false, 127, mapLsb, pc, 1, &gotM, &gotL);
+            if (!in) in = find_exact(false, 0, 0, pc, 1, &gotM, &gotL);
+            if (in) {
+                if (exact) *exact = (gotM == 127 && gotL == mapLsb) ? 1 : 0;
+                return in;
+            }
+        }
         int gs = (mode == 3) || (mode == 0 && msb > 0 && msb < 64 && lsb <= 4);
         if (gs) {
             int mapLsb = gs_file_lsb(lsb);
@@ -431,39 +445,43 @@ struct Ym2612Pool::Impl {
     void render(size_t n)
     {
         if (n > (size_t)Slot::kPcmFrames) n = (size_t)Slot::kPcmFrames;
+        uint32_t mask[kChips];
+        int slotOf[kChips][6];
+        int nslot[kChips];
+        for (int c = 0; c < kChips; c++) {
+            mask[c] = 0;
+            nslot[c] = 0;
+        }
         for (int i = 0; i < kVoices; i++) {
+            slots[i].pcmN = 0;
             if (!slots[i].used) continue;
+            int c = slots[i].chip;
+            int ch = slots[i].ch;
+            if (c < 0 || c >= kChips || ch < 0 || ch >= 6) continue;
+            mask[c] |= 1u << ch;
+            if (nslot[c] < 6)
+                slotOf[c][nslot[c]++] = i;
             slots[i].pcmN = (int)n;
         }
-        int32_t mix[kChips * 6 * 2];
-        bool need[kChips];
-        for (int c = 0; c < kChips; c++) need[c] = false;
-        for (int i = 0; i < kVoices; i++) {
-            if (slots[i].used) need[slots[i].chip] = true;
-        }
-        for (size_t s = 0; s < n; s++) {
-            for (int c = 0; c < kChips; c++) {
-                if (!need[c]) continue;
+        const double scale = (128.0 * 64.0 / 65.0) / 32768.0 / 3.0;
+        /* チップをサンプル横断で回す。サンプル毎に 22 チップを渡り歩くと
+           32 パートで Render が再生期限を超え、リングが古い音を繰り返す。 */
+        for (int c = 0; c < kChips; c++) {
+            if (!mask[c] || !chips[c]) continue;
+            for (size_t s = 0; s < n; s++) {
                 int32_t ch[6][2];
-                chips[c]->chip.clock_split(ch);
-                for (int k = 0; k < 6; k++) {
-                    mix[(c * 6 + k) * 2] = ch[k][0];
-                    mix[(c * 6 + k) * 2 + 1] = ch[k][1];
+                chips[c]->chip.clock_split(ch, mask[c]);
+                for (int k = 0; k < nslot[c]; k++) {
+                    Slot& sl = slots[slotOf[c][k]];
+                    sl.pcm[s * 2] = (float)(ch[sl.ch][0] * scale);
+                    sl.pcm[s * 2 + 1] = (float)(ch[sl.ch][1] * scale);
                 }
-            }
-            for (int i = 0; i < kVoices; i++) {
-                if (!slots[i].used) continue;
-                int id = slots[i].chip * 6 + slots[i].ch;
-                const double scale = (128.0 * 64.0 / 65.0) / 32768.0 / 3.0;
-                slots[i].pcm[s * 2] = (float)(mix[id * 2] * scale);
-                slots[i].pcm[s * 2 + 1] = (float)(mix[id * 2 + 1] * scale);
             }
         }
     }
 
-    void ensure(size_t n, double rate_)
+    void render_block(size_t n, double rate_)
     {
-        if (frame_left >= 0) return;
         if (rate_ > 1 && rate_ != rate) {
             rate = rate_;
             init_chips();
@@ -473,13 +491,18 @@ struct Ym2612Pool::Impl {
         init_chips();
         render(n);
         apply_lfo(n);
-        frame_left = live > 0 ? live : 1;
+        block_open = 1;
     }
 
-    void end_voice()
+    void ensure(size_t n, double rate_)
     {
-        if (frame_left > 0) frame_left--;
-        if (frame_left == 0) frame_left = -1;
+        if (block_open) return;
+        render_block(n, rate_);
+    }
+
+    void close_frame()
+    {
+        block_open = 0;
     }
 
     bool owns(int slot, int gen) const
@@ -532,7 +555,6 @@ bool YmNote::synthesize(sample_t* buf, std::size_t samples, double rate, sample_
             if (s.rel_left <= 0) stay = false;
         }
     }
-    pool->end_voice();
     return stay;
 }
 
@@ -625,7 +647,19 @@ void Ym2612Pool::set_raira(int raira)
 void Ym2612Pool::reset_render_frame()
 {
     if (impl)
-        impl->frame_left = -1;
+        impl->close_frame();
+}
+
+void Ym2612Pool::begin_frame(size_t samples, double rate)
+{
+    if (!impl || samples == 0) return;
+    impl->render_block(samples, rate);
+}
+
+void Ym2612Pool::end_frame()
+{
+    if (impl)
+        impl->close_frame();
 }
 
 bool Ym2612Pool::load(const wchar_t* path, int family, int append)

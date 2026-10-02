@@ -486,25 +486,24 @@ static int GsBitsEnsure()
 	return 0;
 }
 
-extern "C" int VstMidiGsMapDropFromUsed(const unsigned short* pairs, int nPairs)
+extern "C" int VstMidiGsMapDropFromUsed(const unsigned short* pairs, int nPairs, int cc32Max)
 {
-	if (!pairs || nPairs <= 0) return 0;
-	if (!GsBitsEnsure()) return 0;
-	int all[5] = { 1, 1, 1, 1, 1 };
-	int any = 0;
+	/* CC32=4 は 8850/8820、3=88Pro、2=88、1=55。無いときは 55 から始め、
+	   そのマップに無い CC0+PC があれば上のマップへ上げる。 */
+	int kind = 1;
+	if (cc32Max >= 1 && cc32Max <= 4)
+		kind = cc32Max;
+	if (!pairs || nPairs <= 0 || !GsBitsEnsure())
+		return kind;
 	for (int i = 0; i < nPairs; ++i) {
 		const int bank = (pairs[i] >> 8) & 0x7f;
 		const int pc = pairs[i] & 0x7f;
-		any = 1;
-		for (int m = 1; m <= 4; ++m) {
-			if (!GsBitsHas(m, bank, pc)) all[m] = 0;
-		}
+		int tm = 1;
+		if (!GsBitsHas(1, bank, pc)) tm = 2;
+		if (!GsBitsHas(2, bank, pc)) tm = 3;
+		if (!GsBitsHas(3, bank, pc)) tm = 4;
+		if (tm > kind) kind = tm;
 	}
-	if (!any) return 0;
-	int kind = 4;
-	if (all[3]) kind = 3;
-	if (all[2]) kind = 2;
-	if (all[1]) kind = 1;
 	return kind;
 }
 
@@ -2167,8 +2166,7 @@ static int SmfBytesPeekListMarks(const BYTE* data, DWORD size, const wchar_t* pa
 	else if (hasGm2 && !hasGs) resolved = 9;
 	else if ((mapHint == 5 || hasGm) && !hasGs) resolved = 5;
 	else if (mapHint == 6 || hasSd) resolved = 6;
-	else if (cc32Max >= 1 && cc32Max <= 4) resolved = cc32Max;
-	else resolved = VstMidiGsMapDropFromUsed(pairs, nPairs);
+	else resolved = VstMidiGsMapDropFromUsed(pairs, nPairs, cc32Max);
 	out->ch32 = (gs32 || maxPort >= 1) ? 1 : 0;
 	out->mapKind = (resolved == 8 || (resolved >= 1 && resolved <= 6) ||
 		(resolved >= 9 && resolved <= 18)) ? resolved : (hasXg ? 7 : 0);
@@ -2554,8 +2552,7 @@ static int LoadSmf(const wchar_t* path)
 		else if (hasGm2 && !hasGs) resolved = 9;
 		else if ((mapHint == 5 || hasGm) && !hasGs) resolved = 5;
 		else if (mapHint == 6 || hasSd) resolved = 6;
-		else if (cc32Max >= 1 && cc32Max <= 4) resolved = cc32Max;
-		else resolved = VstMidiGsMapDropFromUsed(pairs, nPairs);
+		else resolved = VstMidiGsMapDropFromUsed(pairs, nPairs, cc32Max);
 		g_eng.songGm = (resolved == 9) ? 2 : ((resolved == 5) ? 1 : 0);
 		g_eng.songLa = (resolved == 8) ? 1 : 0;
 		g_eng.gsMapLsb = (resolved >= 1 && resolved <= 4) ? resolved : 0;

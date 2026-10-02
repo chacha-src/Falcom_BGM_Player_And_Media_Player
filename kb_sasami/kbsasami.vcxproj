@@ -194,6 +194,9 @@ if exist "C:\projects\APPLICATION3\ogg_binary\Plugins\Kobarin\fmpmd\Rhythm\2608_
     <ClCompile Include="C:\projects\APPLICATION3\kpi_sources_20240712\kpisdk\kpi.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ResourceCompile Include="kbsasami.rc" />
+  </ItemGroup>
+  <ItemGroup>
     <ClInclude Include="..\ComposerConvert.h" />
     <ClInclude Include="source\kbsasami_decoder.h" />
     <ClInclude Include="source\kbsasami_module.h" />

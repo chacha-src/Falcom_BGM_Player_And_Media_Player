@@ -620,6 +620,8 @@
         void set_tone_color(const tone_color& c) { color = c; }
         void set_raira(int raira);
         void reset_pool_frame();
+        void begin_pool_frame(std::size_t samples, double rate);
+        void end_pool_frame();
     private:
         tone_color color;
         std::map<int, FMPARAMETER> programs;

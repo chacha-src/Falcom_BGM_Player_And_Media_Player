@@ -513,7 +513,10 @@ namespace std{
             int pc = program & 0x7F;
             int lsb = (program >> 7) & 0x7F;
             int msb = (program >> 14) & 0x7F;
-            int drum = ((bank & 0x3F80) == 0x3C00) || msb == 126 || msb == 127;
+            int rhythm = (default_bank == 0x3C00);
+            int drum = rhythm || ((bank & 0x3F80) == 0x3C00) || msb == 126;
+            /* MSB 127 は XG ドラムと、LA/MT-32 の SC-55 バンク 127。リズム以外はメロディ。 */
+            if (msb == 127 && (rhythm || lsb > 4)) drum = 1;
             int prog = pc | (lsb << 7) | (msb << 14) | ((system_mode & 7) << 21) | (drum ? (1 << 24) : 0);
             class note* p = factory->note_on(prog, note, velocity, frequency_multiplier);
             if(p){
@@ -1896,6 +1899,16 @@ namespace std{
     {
         if (ym)
             ym->reset_render_frame();
+    }
+    void fm_note_factory::begin_pool_frame(std::size_t samples, double rate)
+    {
+        if (ym)
+            ym->begin_frame(samples, rate);
+    }
+    void fm_note_factory::end_pool_frame()
+    {
+        if (ym)
+            ym->end_frame();
     }
     void fm_note_factory::set_raira(int raira)
     {
