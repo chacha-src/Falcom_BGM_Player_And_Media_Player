@@ -473,40 +473,23 @@ uint32_t VstHost64_LiveSysex(uint32_t port, const uint8_t* data, uint32_t len)
 	return KPIHOST64_STATUS_OK;
 }
 
-uint32_t VstHost64_LiveRender(uint32_t frames, std::vector<uint8_t>& reply)
+uint32_t VstHost64_LiveRender(uint32_t frames, uint8_t* outPcm, uint32_t outCap, uint32_t& outN)
 {
-	if (!frames || frames > 4096) return KPIHOST64_STATUS_BAD_REQUEST;
-	static float* s_l = nullptr;
-	static float* s_r = nullptr;
-	static uint32_t s_cap = 0;
-	if (frames > s_cap) {
-		uint32_t cap = s_cap ? s_cap : 256;
-		while (cap < frames) {
-			if (cap > (0x7FFFFFFFu / 2)) { cap = frames; break; }
-			cap *= 2;
-		}
-		float* nl = new (std::nothrow) float[cap];
-		float* nr = new (std::nothrow) float[cap];
-		if (!nl || !nr) {
-			delete[] nl;
-			delete[] nr;
-			return KPIHOST64_STATUS_FAIL;
-		}
-		delete[] s_l;
-		delete[] s_r;
-		s_l = nl;
-		s_r = nr;
-		s_cap = cap;
-	}
+	outN = 0;
+	if (!frames || frames > 4096 || !outPcm) return KPIHOST64_STATUS_BAD_REQUEST;
+	const uint32_t need = (uint32_t)(sizeof(KPIHOST64_VstLiveRenderReply) + frames * 2u * sizeof(float));
+	if (need > outCap) return KPIHOST64_STATUS_FAIL;
+	static float s_l[4096];
+	static float s_r[4096];
 	VstLiveRender(s_l, s_r, (int)frames);
-	reply.resize(sizeof(KPIHOST64_VstLiveRenderReply) + frames * 2 * sizeof(float));
-	auto* hdr = (KPIHOST64_VstLiveRenderReply*)reply.data();
+	auto* hdr = (KPIHOST64_VstLiveRenderReply*)outPcm;
 	hdr->frames = frames;
-	float* out = (float*)(reply.data() + sizeof(*hdr));
+	float* out = (float*)(outPcm + sizeof(*hdr));
 	for (uint32_t i = 0; i < frames; ++i) {
 		out[i * 2] = s_l[i];
 		out[i * 2 + 1] = s_r[i];
 	}
+	outN = need;
 	return KPIHOST64_STATUS_OK;
 }
 

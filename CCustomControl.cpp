@@ -20563,6 +20563,10 @@ BOOL CCustomBlurDialogBase::PreCreateWindow(CREATESTRUCT& cs)
 {
     if (!CCustomDialog::PreCreateWindow(cs))
         return FALSE;
+    /* 起動復元中は WS_VISIBLE で途中表示しない。全部作ってからまとめて出す。 */
+    extern int g_oggSubUiRestoring;
+    if (g_oggSubUiRestoring)
+        cs.style &= ~WS_VISIBLE;
 #if CCUSTOM_AERO_SUPPORT
     // AcrylicCaption 常時のため、save.aero に関係なく null brush 専用クラスを使う。
     // #32770 のままだとクラスブラシが残り、αクリアが黒帯になる。
@@ -21486,6 +21490,10 @@ BOOL CCustomBlurDialogExBase::PreCreateWindow(CREATESTRUCT& cs)
 {
     if (!CCustomDialogEx::PreCreateWindow(cs))
         return FALSE;
+    /* 起動復元中は WS_VISIBLE で途中表示しない。全部作ってからまとめて出す。 */
+    extern int g_oggSubUiRestoring;
+    if (g_oggSubUiRestoring)
+        cs.style &= ~WS_VISIBLE;
 #if CCUSTOM_AERO_SUPPORT
     // AcrylicCaption 常時のため save.aero 不問で null brush 専用クラス
     RegisterBlurDialogWndClass(cs.lpszClass, _T("CCustomBlurDlgEx"));

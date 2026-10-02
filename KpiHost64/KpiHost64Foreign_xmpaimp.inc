@@ -363,7 +363,7 @@ static uint32_t ForeignXmpOpen(ForeignSession* s, const std::wstring& media)
 	pathA[0] = 0;
 	WideCharToMultiByte(CP_UTF8, 0, media.c_str(), -1, pathA, (int)sizeof(pathA), NULL, NULL);
 	s->xmpLen = 0.f;
-	s->pending.clear();
+	s->pendN = 0;
 	s->pendOff = 0;
 	s->eof = 0;
 	s->xmpPlayed = 0;
@@ -428,10 +428,10 @@ static uint32_t ForeignXmpRender(ForeignSession* s, uint32_t want, uint8_t* dest
 	g_xmpCur = s;
 	uint32_t got = 0;
 	while (got < want) {
-		if (s->pendOff < s->pending.size()) {
-			uint32_t take = (uint32_t)(s->pending.size() - s->pendOff);
+		if (s->pendOff < s->pendN) {
+			uint32_t take = (uint32_t)(s->pendN - s->pendOff);
 			if (take > want - got) take = want - got;
-			memcpy(dest + got, s->pending.data() + s->pendOff, take);
+			memcpy(dest + got, s->pending + s->pendOff, take);
 			s->pendOff += take;
 			got += take;
 			continue;
@@ -441,16 +441,15 @@ static uint32_t ForeignXmpRender(ForeignSession* s, uint32_t want, uint8_t* dest
 		if (wantFloats > FXMP_MAX_FLOATS) wantFloats = FXMP_MAX_FLOATS;
 		if (s->ch > 0) wantFloats -= wantFloats % s->ch;
 		if (wantFloats <= 0) wantFloats = s->ch > 0 ? s->ch : 1;
-		if ((int)s->fbuf.size() < wantFloats) s->fbuf.resize((size_t)wantFloats);
 		DWORD n = 0;
-		try { n = s->xmp->Process(s->fbuf.data(), (DWORD)wantFloats); }
+		try { n = s->xmp->Process(s->fbuf, (DWORD)wantFloats); }
 		catch (...) { n = 0; }
 		if (n == 0 || n > (DWORD)wantFloats) {
 			s->eof = 1;
 			break;
 		}
-		s->pending.resize((size_t)n * 2);
-		FxFloatToS16(s->fbuf.data(), (int)n, s->pending.data());
+		s->pendN = (uint32_t)n * 2u;
+		FxFloatToS16(s->fbuf, (int)n, s->pending);
 		s->pendOff = 0;
 		s->xmpPlayed += (__int64)n;
 	}
@@ -470,7 +469,7 @@ static uint32_t ForeignXmpSeek(ForeignSession* s, uint64_t posSample)
 	}
 	double sec = (double)posSample / (double)s->rate;
 	s->xmp->SetPosition((DWORD)(sec / gran));
-	s->pending.clear();
+	s->pendN = 0;
 	s->pendOff = 0;
 	s->eof = 0;
 	s->xmpPlayed = (__int64)(sec * s->rate * s->ch);

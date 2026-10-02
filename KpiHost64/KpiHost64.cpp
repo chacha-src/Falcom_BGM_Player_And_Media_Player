@@ -32,6 +32,23 @@
 #include "..\VstMidiEngine.h"
 #include "..\PluginKinds.h"
 
+// パイプ応答。再生中の Render ごとに vector を伸ばさない（8MB、クライアント側の受信上限と同じ）。
+struct HostReplyBuf {
+	enum : uint32_t { kCap = 8u * 1024u * 1024u };
+	uint8_t b[kCap];
+	uint32_t n;
+	void clear() { n = 0; }
+	size_t size() const { return n; }
+	uint8_t* data() { return b; }
+	const uint8_t* data() const { return b; }
+	void resize(size_t sz)
+	{
+		if (sz > kCap) sz = kCap;
+		n = (uint32_t)sz;
+	}
+};
+static HostReplyBuf g_hostReply;
+
 // パスのディレクトリ部分（末尾に \\ または / を残す）。ファイル名だけなら空。
 static std::wstring DirNameOf(const std::wstring& path)
 {
@@ -809,7 +826,7 @@ static void SendReply(HANDLE pipe, uint32_t cmd, uint32_t reqId, uint32_t status
 }
 
 // KPI DLL を一時ロードして supportExts を取る。セッションは残さない。
-static uint32_t Cmd_ListExts(const std::wstring& kpiPath, std::vector<uint8_t>& out)
+static uint32_t Cmd_ListExts(const std::wstring& kpiPath, HostReplyBuf& out)
 {
 	out.clear();
 	const std::wstring kpiDir = DirNameOf(kpiPath);
@@ -870,6 +887,8 @@ static uint32_t Cmd_ListExts(const std::wstring& kpiPath, std::vector<uint8_t>& 
 	KPIHOST64_ListExtsReply rep{};
 	rep.kpiVer = ver;
 	uint32_t chars = (uint32_t)exts.size();
+	const size_t maxChars = (HostReplyBuf::kCap - sizeof(rep) - 4) / sizeof(wchar_t);
+	if ((size_t)chars > maxChars) chars = (uint32_t)maxChars;
 	out.resize(sizeof(rep) + 4 + chars * sizeof(wchar_t));
 	memcpy(out.data(), &rep, sizeof(rep));
 	memcpy(out.data() + sizeof(rep), &chars, 4);
@@ -954,7 +973,7 @@ static void FillSessionPcm(Session& s)
 }
 
 static uint32_t Cmd_OpenKmp(HMODULE h, const std::wstring& kpiPath, const std::wstring& mediaPath,
-	const KPI_MEDIAINFO& request, uint32_t songNo, std::vector<uint8_t>& out)
+	const KPI_MEDIAINFO& request, uint32_t songNo, HostReplyBuf& out)
 {
 	ScopedMediaCwd mediaCwd(mediaPath);
 	auto fn = (pfnGetKMPModule)GetProcAddress(h, SZ_KMP_GETMODULE);
@@ -1030,7 +1049,7 @@ static uint32_t Cmd_OpenKmp(HMODULE h, const std::wstring& kpiPath, const std::w
 }
 
 // メディアを開き Session をマップへ入れる。成功時 out は OpenReply + KPI_MEDIAINFO。
-static uint32_t Cmd_Open(const std::wstring& kpiPath, const std::wstring& mediaPath, const KPI_MEDIAINFO& request, uint32_t songNo, std::vector<uint8_t>& out)
+static uint32_t Cmd_Open(const std::wstring& kpiPath, const std::wstring& mediaPath, const KPI_MEDIAINFO& request, uint32_t songNo, HostReplyBuf& out)
 {
 	out.clear();
 	AppendHostLogLine((L"[OPEN] begin kpi=" + kpiPath + L" media=" + mediaPath + L" songNo=" + std::to_wstring(songNo)).c_str());
@@ -1134,7 +1153,7 @@ static uint32_t Cmd_Open(const std::wstring& kpiPath, const std::wstring& mediaP
 }
 
 // PCM を samplesWanted まで読む。KPI は 576 サンプルずつ。out は RenderReply + PCM。
-static uint32_t Cmd_Render(uint32_t sessionId, uint32_t bytesWanted, std::vector<uint8_t>& out)
+static uint32_t Cmd_Render(uint32_t sessionId, uint32_t bytesWanted, HostReplyBuf& out)
 {
 	out.clear();
 	auto it = g_sessions.find(sessionId);
@@ -1161,6 +1180,8 @@ static uint32_t Cmd_Render(uint32_t sessionId, uint32_t bytesWanted, std::vector
 		}
 		DWORD got = SafeKmpRender(s.kmp, s.hkmp, s.pcmBuf, want);
 		if (got > want) got = want;
+		if (sizeof(KPIHOST64_RenderReply) + (size_t)got > HostReplyBuf::kCap)
+			got = (DWORD)(HostReplyBuf::kCap - sizeof(KPIHOST64_RenderReply));
 		if (got == 0) s.zeroRenderStreak++; else s.zeroRenderStreak = 0;
 		KPIHOST64_RenderReply rep{};
 		rep.sessionId = sessionId;
@@ -1246,6 +1267,8 @@ static uint32_t Cmd_Render(uint32_t sessionId, uint32_t bytesWanted, std::vector
 	}
 
 	KPIHOST64_RenderReply rep{};
+	if (sizeof(KPIHOST64_RenderReply) + (size_t)gotBytes > HostReplyBuf::kCap)
+		gotBytes = (uint32_t)(HostReplyBuf::kCap - sizeof(KPIHOST64_RenderReply));
 	rep.sessionId = sessionId;
 	rep.bytesReturned = gotBytes;
 	if (gotSamples == 0) s.zeroRenderStreak++; else s.zeroRenderStreak = 0;
@@ -1272,7 +1295,7 @@ static bool IsMidiLikePathW(const std::wstring& path)
 }
 
 // MIDI は破棄 Render でシーク。それ以外はデコーダの Seek。
-static uint32_t Cmd_Seek(uint32_t sessionId, uint64_t posSample, uint32_t flag, std::vector<uint8_t>& out)
+static uint32_t Cmd_Seek(uint32_t sessionId, uint64_t posSample, uint32_t flag, HostReplyBuf& out)
 {
 	out.clear();
 	auto it = g_sessions.find(sessionId);
@@ -1422,7 +1445,7 @@ static void ServeOnce(HANDLE pipe)
 	// 接続中は payload/reply を伸長のみ再利用（毎リクエスト vector new/delete しない）
 	static uint8_t* s_payload = nullptr;
 	static size_t s_payloadCap = 0;
-	static std::vector<uint8_t> reply;
+	HostReplyBuf& reply = g_hostReply;
 	for (;;) {
 		KPIHOST64_MsgHeader h{};
 		// バイトモードなのでヘッダが分割到着する。短い読みで切ると曲の途中で落ちる。
@@ -1515,6 +1538,8 @@ static void ServeOnce(HANDLE pipe)
 				memcpy(reply.data(), &lr, sizeof(lr));
 				uint32_t n = (uint32_t)exts.size();
 				size_t off = reply.size();
+				const size_t maxChars = (HostReplyBuf::kCap - off - 4) / sizeof(wchar_t);
+				if ((size_t)n > maxChars) n = (uint32_t)maxChars;
 				reply.resize(off + 4 + n * sizeof(wchar_t));
 				memcpy(reply.data() + off, &n, 4);
 				if (n) memcpy(reply.data() + off + 4, exts.data(), n * sizeof(wchar_t));
@@ -1540,10 +1565,14 @@ static void ServeOnce(HANDLE pipe)
 			auto* rr = (const KPIHOST64_RenderReq*)p;
 			uint32_t eof = 0;
 			uint32_t gotBytes = 0;
-			reply.resize(sizeof(KPIHOST64_RenderReply) + rr->bytesWanted);
-			status = ForeignHost_Render(rr->sessionId, rr->bytesWanted,
-				reply.data() + sizeof(KPIHOST64_RenderReply), rr->bytesWanted, gotBytes, eof);
+			uint32_t want = rr->bytesWanted;
+			if (sizeof(KPIHOST64_RenderReply) + (size_t)want > HostReplyBuf::kCap)
+				want = (uint32_t)(HostReplyBuf::kCap - sizeof(KPIHOST64_RenderReply));
+			reply.resize(sizeof(KPIHOST64_RenderReply) + want);
+			status = ForeignHost_Render(rr->sessionId, want,
+				reply.data() + sizeof(KPIHOST64_RenderReply), want, gotBytes, eof);
 			if (status == KPIHOST64_STATUS_OK) {
+				if (gotBytes > want) gotBytes = want;
 				KPIHOST64_RenderReply rrep{};
 				rrep.sessionId = rr->sessionId;
 				rrep.bytesReturned = gotBytes;
@@ -1643,10 +1672,14 @@ static void ServeOnce(HANDLE pipe)
 			}
 			uint32_t eof = 0;
 			uint32_t gotBytes = 0;
-			reply.resize(sizeof(KPIHOST64_RenderReply) + rr->bytesWanted);
-			status = VstHost64_Render(slot, rr->bytesWanted,
-				reply.data() + sizeof(KPIHOST64_RenderReply), rr->bytesWanted, gotBytes, eof);
+			uint32_t want = rr->bytesWanted;
+			if (sizeof(KPIHOST64_RenderReply) + (size_t)want > HostReplyBuf::kCap)
+				want = (uint32_t)(HostReplyBuf::kCap - sizeof(KPIHOST64_RenderReply));
+			reply.resize(sizeof(KPIHOST64_RenderReply) + want);
+			status = VstHost64_Render(slot, want,
+				reply.data() + sizeof(KPIHOST64_RenderReply), want, gotBytes, eof);
 			if (status == KPIHOST64_STATUS_OK) {
+				if (gotBytes > want) gotBytes = want;
 				KPIHOST64_RenderReply rrep{};
 				rrep.sessionId = rr->sessionId;
 				rrep.bytesReturned = gotBytes;
@@ -1721,7 +1754,12 @@ static void ServeOnce(HANDLE pipe)
 		case KPIHOST64_CMD_VST_LIVE_RENDER: {
 			if ((size_t)(end - p) < sizeof(KPIHOST64_VstLiveRenderReq)) { status = KPIHOST64_STATUS_BAD_REQUEST; break; }
 			auto* rr = (const KPIHOST64_VstLiveRenderReq*)p;
-			status = VstHost64_LiveRender(rr->frames, reply);
+			uint32_t liveN = 0;
+			status = VstHost64_LiveRender(rr->frames, reply.data(), HostReplyBuf::kCap, liveN);
+			if (status == KPIHOST64_STATUS_OK)
+				reply.resize(liveN);
+			else
+				reply.clear();
 			break;
 		}
 		case KPIHOST64_CMD_VST_LIVE_AUDIO_START: {
@@ -1755,7 +1793,15 @@ static void ServeOnce(HANDLE pipe)
 		case KPIHOST64_CMD_VST_LIVE_PROGRAMS: {
 			if ((size_t)(end - p) < sizeof(KPIHOST64_VstLiveProgramsReq)) { status = KPIHOST64_STATUS_BAD_REQUEST; break; }
 			auto* pr = (const KPIHOST64_VstLiveProgramsReq*)p;
-			status = VstHost64_LivePrograms(pr->part, pr->first, pr->count, reply);
+			std::vector<uint8_t> tmp;
+			status = VstHost64_LivePrograms(pr->part, pr->first, pr->count, tmp);
+			reply.clear();
+			if (status == KPIHOST64_STATUS_OK && tmp.size() <= HostReplyBuf::kCap) {
+				reply.resize(tmp.size());
+				if (!tmp.empty()) memcpy(reply.data(), tmp.data(), tmp.size());
+			} else if (tmp.size() > HostReplyBuf::kCap) {
+				status = KPIHOST64_STATUS_FAIL;
+			}
 			break;
 		}
 		case KPIHOST64_CMD_VST_LIVE_SET_PROGRAM: {
@@ -1767,7 +1813,15 @@ static void ServeOnce(HANDLE pipe)
 		case KPIHOST64_CMD_VST_LIVE_GET_STATE: {
 			if ((size_t)(end - p) < sizeof(KPIHOST64_VstLiveStateReq)) { status = KPIHOST64_STATUS_BAD_REQUEST; break; }
 			auto* gs = (const KPIHOST64_VstLiveStateReq*)p;
-			status = VstHost64_LiveGetState(gs->part, gs->which, reply);
+			std::vector<uint8_t> tmp;
+			status = VstHost64_LiveGetState(gs->part, gs->which, tmp);
+			reply.clear();
+			if (status == KPIHOST64_STATUS_OK && tmp.size() <= HostReplyBuf::kCap) {
+				reply.resize(tmp.size());
+				if (!tmp.empty()) memcpy(reply.data(), tmp.data(), tmp.size());
+			} else if (tmp.size() > HostReplyBuf::kCap) {
+				status = KPIHOST64_STATUS_FAIL;
+			}
 			break;
 		}
 		case KPIHOST64_CMD_VST_LIVE_SET_STATE: {
@@ -1860,7 +1914,7 @@ int wmain(int argc, wchar_t** argv)
 		req.dwSampleRate = 0;
 		req.dwChannels = 2;
 		req.nBitsPerSample = 16;
-		std::vector<uint8_t> out;
+		HostReplyBuf& out = g_hostReply;
 		const uint32_t st = Cmd_Open(argv[1], argv[2], req, 1, out);
 		wprintf(L"KpiOpenProbe status=%u kpi=%s media=%s outBytes=%zu\n",
 			st, argv[1], argv[2], out.size());
@@ -1889,7 +1943,7 @@ int wmain(int argc, wchar_t** argv)
 			int peak = 0;
 			std::vector<int16_t> wavPcm;
 			for (int i = 0; i < loops; i++) {
-				std::vector<uint8_t> rout;
+				HostReplyBuf& rout = g_hostReply;
 				const uint32_t rst = Cmd_Render(rep.sessionId, bytesWanted, rout);
 				if (rst != KPIHOST64_STATUS_OK || rout.size() < sizeof(KPIHOST64_RenderReply)) {
 					wprintf(L"render fail i=%d status=%u size=%zu\n", i, rst, rout.size());

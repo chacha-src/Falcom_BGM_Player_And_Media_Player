@@ -173,18 +173,22 @@ UINT PlaybackCcWriteFromFormat(const void* p, UINT n, int srcRate, int srcCh, in
 #include "SpeanaNoteDetector.h"
 
 bool ProcessAudioWithRubberBand(float tempoRate, bool t);
-void ConvertRawBytesToFloat(const std::vector<uint8_t>& raw_data,
+void ConvertRawBytesToFloat(const uint8_t* raw_data, int rawN,
 	uint16_t bits_per_sample, uint16_t channels,
-	std::vector<float>& out_float_data);
-void ConvertFloatToRawBytes(const std::vector<float>& float_data,
+	float* out_float_data, int outCap, int& outN);
+void ConvertFloatToRawBytes(const float* float_data, int nFloat,
 	uint16_t target_bits_per_sample, uint16_t channels,
-	std::vector<uint8_t>& out_raw_data);
-extern std::vector<float> m_convertedPcmFloatData;
-extern std::vector<float> inputFloatData;
-extern std::vector<uint8_t> m_bufwav3_1;
-std::vector<uint8_t> m_bufwav3_2;
+	uint8_t* out_raw_data, int outCap, int& outN);
+extern float m_convertedPcmFloatData[];
+extern int m_convertedPcmN;
+extern float inputFloatData[];
+extern int inputFloatN;
+extern uint8_t m_bufwav3_1[];
+extern int m_bufwav3_1_n;
+uint8_t m_bufwav3_2[4];
 
-extern std::vector<float> g_loopTailBuffer;
+extern float g_loopTailBuffer[];
+extern int g_loopTailN;
 extern size_t g_loopTailPos;
 
 extern std::mutex cl2;
@@ -1053,6 +1057,25 @@ extern void DoEvent();
 static CString BuildGpuInfoString()
 {
 	return S3GpuBuildInfoString();
+}
+
+static void OggAppendStartupGpuLine(COggDlg* dlg)
+{
+	if (!dlg || !dlg->m_os3.GetSafeHwnd())
+		return;
+	CString cur;
+	dlg->m_os3.GetWindowText(cur);
+	if (cur.Find(L" / GPU: ") >= 0)
+		return;
+	const CString gpu = BuildGpuInfoString();
+	if (gpu.IsEmpty())
+		return;
+	cur += L" / GPU: ";
+	cur += gpu;
+	dlg->m_os3.SetWindowText(cur);
+	extern CMediaPlayerDlg* mp;
+	if (mp && ::IsWindow(mp->GetSafeHwnd()) && mp->m_os3.GetSafeHwnd())
+		mp->m_os3.SetWindowText(cur);
 }
 
 static CString BuildCpuInstructionListString()
@@ -2133,7 +2156,8 @@ HFONT	hFont;
 int mode, modesub;
 int wav999_use_adbuf = 0;
 
-std::vector<uint8_t> g_srcScratchUpscale;
+enum { kRouteCap = (10240 * 6 / 2) * 5 * 8 };
+static uint8_t g_srcScratchUpscale[kRouteCap];
 
 // MP3: pack_pcm は常に m_dwBitsPerSample。グローバル g_mp3_decoder_bps / wavsam だけだと 24bit 時に 16 とずれ playb が 1.5 倍になる。
 static int Mp3DecoderBitsClampedFromObject(void)
@@ -2597,16 +2621,22 @@ void DispatchPlaywavFill(BYTE* bufwav3, ULONG oldw, int len1, int len2)
 			playwavds2(bufwav3, oldw, len1, len2);
 		return;
 	}
-	const int total = len1 + len2;
-	std::vector<uint8_t> linear((size_t)total);
+	int total = len1 + len2;
+	if (total > kRouteCap)
+		total = kRouteCap;
+	static uint8_t linear[kRouteCap];
 	int wp = 0;
 	int guard = 0;
+	int srcBits = abs(wavsam_depth);
+	if (!(srcBits == 8 || srcBits == 16 || srcBits == 24 || srcBits == 32)) srcBits = 16;
+	int srcFrame = (wavchannel > 0 ? wavchannel : 2) * (srcBits / 8);
+	if (srcFrame < 1) srcFrame = 1;
 	while (wp < total && guard < 512) {
 		if (IsPlaybackStopRequested())
 			break;
 		++guard;
 		int chunk = total - wp;
-		int got = ActiveAudioUpscaler().PullInterleaved(linear.data() + wp, chunk);
+		int got = ActiveAudioUpscaler().PullInterleaved(linear + wp, chunk);
 		if (got > 0) {
 			wp += got;
 			continue;
@@ -2614,21 +2644,22 @@ void DispatchPlaywavFill(BYTE* bufwav3, ULONG oldw, int len1, int len2)
 		int sb = ActiveAudioUpscaler().SuggestInputBytes(chunk);
 		if (sb < 2048)
 			sb = 8192;
-		if (sb > (int)g_srcScratchUpscale.capacity())
-			g_srcScratchUpscale.reserve((size_t)sb * 2);
-		g_srcScratchUpscale.resize((size_t)sb);
-		ZeroMemory(g_srcScratchUpscale.data(), sb);
-		DecodeSourceIntoScratch(g_srcScratchUpscale.data(), sb);
-		ActiveAudioUpscaler().PushInterleaved(g_srcScratchUpscale.data(), sb);
+		if (sb > kRouteCap)
+			sb = kRouteCap - (kRouteCap % srcFrame);
+		if (sb < srcFrame)
+			sb = srcFrame;
+		ZeroMemory(g_srcScratchUpscale, (size_t)sb);
+		DecodeSourceIntoScratch(g_srcScratchUpscale, sb);
+		ActiveAudioUpscaler().PushInterleaved(g_srcScratchUpscale, sb);
 	}
 	if (wp < total)
-		ZeroMemory(linear.data() + wp, (size_t)(total - wp));
+		ZeroMemory(linear + wp, (size_t)(total - wp));
 	// アップスケール時も DecodeSourceIntoScratch→playwav* が playb を進める。
 	// ここで wp から再度加算すると二重になり時間表示が速くなる（例: MP3 で約2倍）。
 	if (len1 > 0)
-		memcpy(bufwav3 + oldw, linear.data(), (size_t)len1);
-	if (len2 > 0)
-		memcpy(bufwav3, linear.data() + len1, (size_t)len2);
+		memcpy(bufwav3 + oldw, linear, (size_t)((len1 < total) ? len1 : total));
+	if (len2 > 0 && total > len1)
+		memcpy(bufwav3, linear + len1, (size_t)(total - len1));
 }
 
 int voldsf;
@@ -3806,7 +3837,8 @@ static HWND ShowVstWaitPopup(HWND owner)
 }
 static KpiHost64Session g_kpiSession;
 static CEmuSession g_cemuSessionSlot[XF_SLOTS];
-static std::vector<uint8_t> g_kpiRemoteCache;
+static uint8_t g_kpiRemoteCache[kRouteCap];
+static size_t g_kpiRemoteCacheLen = 0;
 static size_t g_kpiRemoteCachePos = 0;
 static bool g_kpiRemoteEof = false;
 
@@ -3976,7 +4008,7 @@ static int CEmuTryOverlaySfxFromFilen()
 
 static void ResetKpiRemoteCache()
 {
-	g_kpiRemoteCache.clear();
+	g_kpiRemoteCacheLen = 0;
 	g_kpiRemoteCachePos = 0;
 	g_kpiRemoteEof = false;
 }
@@ -6500,7 +6532,11 @@ BOOL COggDlg::OnInitDialog()
 	// cb7e594 以降の PostMessage/SetTimer 遅延は DeferredHeavy(更新チェック)より
 	// 後回しになり、KPI〜MP 間で CInvalidArgException が出る順序に変わっていた。
 	if (savedata.playerMode == 1)
-		EnterMediaPlayerMode();
+		EnterMediaPlayerMode(); // 保存済みトグル画面を作ってから MP と同時に表示
+	else {
+		SendMessage(WM_OGG_TOGGLE_SUBUI, 10, 0);
+		SendMessage(WM_OGG_TOGGLE_SUBUI, 20, 0);
+	}
 
 	/* MP/本画面の Create が終わってから読込窓を閉じる（空白を出さない） */
 	if (haveLoadingWnd) {
@@ -6512,10 +6548,6 @@ BOOL COggDlg::OnInitDialog()
 
 	/* 本画面表示後に HTTP サイレント更新・GPU列挙など（カタログは読込窓で完了済み） */
 	PostMessage(WM_OGG_DEFERRED_HEAVY_INIT, 0, 0);
-
-	// サブUI復元(EQ/ピアノ等): OnInitDialog 内で即 Post すると Create ネストの恐れがあるため
-	// タイマ経由。MP は直前で同期完了済みなので旧 500ms 待ちは不要 → 1ms で武装。
-	SetTimer(59877, 1, NULL);
 
 	m_help.SetWindowText(L"?");
 	m_help.SetFlat(TRUE);
@@ -19883,7 +19915,8 @@ BOOL playwavBuffwav(BYTE* bw, int old, int l1, int l2)
 	return FALSE;
 }
 
-std::vector<uint8_t> outputRawBytesData;
+extern uint8_t outputRawBytesData[];
+extern int outputRawN;
 // スライダー内部値 0..400（中央 200 = 再生 100%）。
 // 表示用パーセントへ写す（旧 MP の GetPos()/2 とは別。400→300% が仕様）。
 float TempoPercentFromPos(int tempoPos)
@@ -20144,25 +20177,27 @@ int readtempo(BYTE* data, int len,bool t = false)
 			RubberBand_DestroyBank(0);
 			s_rbBypassActive = true;
 		}
-		m_convertedPcmFloatData.clear();
+		m_convertedPcmN = 0;
 		if (doFinalFlush || len <= 0) {
-			outputRawBytesData.clear();
+			outputRawN = 0;
 			return 0;
 		}
 		if (!data) {
-			outputRawBytesData.clear();
+			outputRawN = 0;
 			return 0;
 		}
-		outputRawBytesData.resize((size_t)len);
-		memcpy(outputRawBytesData.data(), data, (size_t)len);
+		if (len > kRouteCap * 4) len = kRouteCap * 4;
+		outputRawN = len;
+		memcpy(outputRawBytesData, data, (size_t)len);
 		return len;
 	}
 
 	s_rbBypassActive = false;
-	m_bufwav3_1.clear();
-	if (len > 0) {
-		m_bufwav3_1.resize(len);
-		memcpy(m_bufwav3_1.data(), (data), len);
+	m_bufwav3_1_n = 0;
+	if (len > 0 && data) {
+		if (len > kRouteCap) len = kRouteCap;
+		m_bufwav3_1_n = len;
+		memcpy(m_bufwav3_1, data, (size_t)len);
 	}
 	const float te = TempoTimeRatioFromPos(tempo);
 	// len<=0 のときは常に final 相当で吐き出す（fade1 中も同様）。
@@ -20171,8 +20206,8 @@ int readtempo(BYTE* data, int len,bool t = false)
 	if (!ProcessAudioWithRubberBand(te, doFinalFlush)) {
 		// 空入力で process されなかったとき、前回の m_converted を再エンコードすると
 		// 同じフレームがもう一度出力され末尾が「たぶる」（二重になる）
-		m_convertedPcmFloatData.clear();
-		outputRawBytesData.clear();
+		m_convertedPcmN = 0;
+		outputRawN = 0;
 		return 0;
 	}
 //	ProcessAudioWithSoundTouch(te,t);
@@ -20186,8 +20221,8 @@ int readtempo(BYTE* data, int len,bool t = false)
 		if (!(bits == 8 || bits == 16 || bits == 24 || bits == 32)) bits = 16;
 	}
 	uint16_t outBps = (uint16_t)bits;
-	ConvertFloatToRawBytes(m_convertedPcmFloatData, outBps, wavchannel, outputRawBytesData);
-	return outputRawBytesData.size();
+	ConvertFloatToRawBytes(m_convertedPcmFloatData, m_convertedPcmN, outBps, (uint16_t)wavchannel, outputRawBytesData, kRouteCap * 4, outputRawN);
+	return (size_t)outputRawN;
 }
 using namespace std;
 void equaliser(void* data, int len, BOOL reset = FALSE);
@@ -20246,7 +20281,7 @@ int readBuffwav(char* bw, int cnt)
 
 			if (len2 > 0) {
 				buffRbStallIters = 0;
-				RingBufWrite(bufkpi3, max_buffer_size, poss2, outputRawBytesData.data(), len2);
+				RingBufWrite(bufkpi3, max_buffer_size, poss2, outputRawBytesData, len2);
 				poss4 += len2;
 			}
 			if (poss4 > cnt) break;
@@ -21136,8 +21171,10 @@ enum : int { VST_PF_CHUNK = 64 * 1024, VST_PF_SECONDS = 4 };
 
 struct VstPrefetch
 {
-	std::vector<uint8_t> ring;
-	std::vector<uint8_t> hold; // 1=このバイトは SysEx/CC 中 or まだ曲イベントが残っている
+	enum { kCap = 8 * 1024 * 1024 };
+	uint8_t ring[kCap];
+	uint8_t hold[kCap];
+	size_t cap = 0;
 	size_t head = 0;
 	size_t used = 0;
 	int bpf = 4;
@@ -21287,10 +21324,12 @@ static void CEmuMidiLivePumpAndInject(int frames)
 	}
 }
 
-static bool VstRemoteRenderSlot(int slot, uint32_t bytesWanted, std::vector<uint8_t>& pcm, bool& eof,
+static bool VstRemoteRenderSlot(int slot, uint32_t bytesWanted, uint8_t* pcm, uint32_t pcmCap, uint32_t& pcmBytes, bool& eof,
 	uint32_t* outMidiFlags = nullptr)
 {
+	pcmBytes = 0;
 	if (slot < 0 || slot >= XF_SLOTS) slot = 0;
+	if (!pcm || pcmCap == 0) return false;
 	/* Live MPU follows the audible slot only (avoid 2× emu during crossfade). */
 	if (slot == XfActiveSlot())
 		CEmuMidiLivePumpAndInject(CEmuMidiLiveFramesFromBytes(bytesWanted));
@@ -21301,10 +21340,10 @@ static bool VstRemoteRenderSlot(int slot, uint32_t bytesWanted, std::vector<uint
 	const int n = (slot == XfActiveSlot()) ? VstMidiStealInjects(ports, msgs, ofs, 8192) : 0;
 	BYTE sxPorts[1024];
 	int sxLens[1024];
-	std::vector<BYTE> sxPacked((size_t)1024 * 2048);
+	static BYTE sxPacked[XF_SLOTS][1024 * 2048];
 	int nSx = 0;
 	if (slot == XfActiveSlot())
-		nSx = VstMidiStealSysex(sxPorts, sxPacked.data(), sxLens, 1024, (int)sxPacked.size());
+		nSx = VstMidiStealSysex(sxPorts, sxPacked[slot], sxLens, 1024, 1024 * 2048);
 	if (n > 0 && !CEmuMidiLiveActive()) {
 		int rewind = 0;
 		for (int i = 0; i < n; ++i) {
@@ -21326,18 +21365,18 @@ static bool VstRemoteRenderSlot(int slot, uint32_t bytesWanted, std::vector<uint
 	}
 	VstMidiSetIoSlot(slot);
 	uint32_t midiFlags = 0;
-	const bool ok = g_kpiHost.VstRender(bytesWanted, pcm, eof, ports,
+	const bool ok = g_kpiHost.VstRender(bytesWanted, pcm, pcmCap, pcmBytes, eof, ports,
 		reinterpret_cast<const uint32_t*>(msgs), ofs, (uint32_t)n, (uint32_t)slot, &midiFlags,
-		sxPorts, nSx > 0 ? sxPacked.data() : nullptr,
+		sxPorts, nSx > 0 ? sxPacked[slot] : nullptr,
 		nSx > 0 ? reinterpret_cast<const int32_t*>(sxLens) : nullptr,
 		(uint32_t)nSx);
 	if (outMidiFlags) *outMidiFlags = midiFlags;
 	return ok;
 }
 
-static bool VstRemoteRender(uint32_t bytesWanted, std::vector<uint8_t>& pcm, bool& eof)
+static bool VstRemoteRender(uint32_t bytesWanted, uint8_t* pcm, uint32_t pcmCap, uint32_t& pcmBytes, bool& eof)
 {
-	return VstRemoteRenderSlot(VstBindIoSlot(), bytesWanted, pcm, eof);
+	return VstRemoteRenderSlot(VstBindIoSlot(), bytesWanted, pcm, pcmCap, pcmBytes, eof);
 }
 
 static unsigned __stdcall VstPrefetchProc(void* arg)
@@ -21347,7 +21386,7 @@ static unsigned __stdcall VstPrefetchProc(void* arg)
 	for (;;) {
 		if (WaitForSingleObject(pf.stop, 0) == WAIT_OBJECT_0) break;
 		EnterCriticalSection(&pf.cs);
-		const size_t room = pf.ring.size() - pf.used;
+		const size_t room = pf.cap - pf.used;
 		const bool done = pf.eof;
 		LeaveCriticalSection(&pf.cs);
 		if (done || room < (size_t)VST_PF_CHUNK) {
@@ -21355,25 +21394,26 @@ static unsigned __stdcall VstPrefetchProc(void* arg)
 			if (WaitForMultipleObjects(2, h, FALSE, 20) == WAIT_OBJECT_0) break;
 			continue;
 		}
-		std::vector<uint8_t> pcm;
+		static uint8_t pcm[XF_SLOTS][VST_PF_CHUNK];
 		bool eof = false;
 		uint32_t midiFlags = 0;
+		uint32_t pcmN = 0;
 		EnterCriticalSection(&pf.rcs);
-		const bool ok = VstRemoteRenderSlot(slot, (uint32_t)VST_PF_CHUNK, pcm, eof, &midiFlags);
+		const bool ok = VstRemoteRenderSlot(slot, (uint32_t)VST_PF_CHUNK, pcm[slot], (uint32_t)VST_PF_CHUNK, pcmN, eof, &midiFlags);
 		if (ok) {
 			const uint8_t holdB = (uint8_t)VstMidiHoldFromFlags(midiFlags);
 			EnterCriticalSection(&pf.cs);
-			const size_t cap = pf.ring.size();
-			size_t left = pcm.size();
-			if (left > cap - pf.used) left = cap - pf.used;
-			const uint8_t* src = pcm.data();
+			const size_t cap = pf.cap;
+			size_t left = pcmN;
+			if (cap == 0) left = 0;
+			else if (left > cap - pf.used) left = cap - pf.used;
+			const uint8_t* src = pcm[slot];
 			while (left) {
 				const size_t at = (pf.head + pf.used) % cap;
 				size_t run = cap - at;
 				if (run > left) run = left;
-				memcpy(pf.ring.data() + at, src, run);
-				if (pf.hold.size() == cap)
-					memset(pf.hold.data() + at, holdB, run);
+				memcpy(pf.ring + at, src, run);
+				memset(pf.hold + at, holdB, run);
 				src += run; left -= run;
 				pf.used += run;
 			}
@@ -21409,8 +21449,7 @@ void VstPrefetchStop(int slot)
 	if (pf.room) { CloseHandle(pf.room); pf.room = NULL; }
 	if (pf.csReady) {
 		EnterCriticalSection(&pf.cs);
-		pf.ring.clear();
-		pf.hold.clear();
+		pf.cap = 0;
 		pf.head = pf.used = 0;
 		pf.eof = false;
 		LeaveCriticalSection(&pf.cs);
@@ -21443,8 +21482,10 @@ void VstPrefetchStart(int slot, int rate, int channels, int bits, int prefill, d
 		pf.csReady = true;
 	}
 	EnterCriticalSection(&pf.cs);
-	pf.ring.assign(bytes, 0);
-	pf.hold.assign(bytes, 0);
+	if (bytes > (size_t)VstPrefetch::kCap) bytes = (size_t)VstPrefetch::kCap;
+	memset(pf.ring, 0, bytes);
+	memset(pf.hold, 0, bytes);
+	pf.cap = bytes;
 	pf.head = pf.used = 0;
 	pf.eof = false;
 	pf.bpf = (bpf > 0) ? bpf : 4;
@@ -21477,14 +21518,14 @@ static int VstPrefetchRead(int slot, BYTE* dst, int cnt, int* outHold)
 	int copied = 0;
 	int hold = 0;
 	EnterCriticalSection(&pf.cs);
-	const size_t cap = pf.ring.size();
+	const size_t cap = pf.cap;
 	while (cap && copied < cnt && pf.used) {
 		size_t run = (size_t)(cnt - copied);
 		if (run > pf.used) run = pf.used;
 		if (run > cap - pf.head) run = cap - pf.head;
-		memcpy(dst + copied, pf.ring.data() + pf.head, run);
-		if (!hold && pf.hold.size() == cap) {
-			const uint8_t* h = pf.hold.data() + pf.head;
+		memcpy(dst + copied, pf.ring + pf.head, run);
+		if (!hold && cap) {
+			const uint8_t* h = pf.hold + pf.head;
 			for (size_t i = 0; i < run; ++i) {
 				if (h[i]) { hold = 1; break; }
 			}
@@ -21529,7 +21570,7 @@ int readvst(BYTE* bw, int cnt)
 		 * ゼロ埋めし、その分だけ音が空く（クロス開始の一瞬の無音がこれ）。
 		 * rcs の中では「レンダ済みでリング未反映」の PCM は存在しない（先読みは
 		 * rcs を持ったまま追記する）ので、ここで作るブロックが追い越すことはない。 */
-		std::vector<uint8_t> pcm;
+		static uint8_t pcm[XF_SLOTS][kRouteCap];
 		bool eof = false;
 		if (pf.csReady) {
 			EnterCriticalSection(&pf.rcs);
@@ -21537,30 +21578,35 @@ int readvst(BYTE* bw, int cnt)
 				hold = 0;
 				const int add = VstPrefetchRead(slot, bw + got, cnt - got, &hold);
 				if (add > 0) { g_vstPcmHold |= hold; got += add; continue; }
-				pcm.clear();
 				uint32_t midiFlags = 0;
-				if (!VstRemoteRenderSlot(slot, (uint32_t)(cnt - got), pcm, eof, &midiFlags))
+				uint32_t pcmN = 0;
+				uint32_t ask = (uint32_t)(cnt - got);
+				if (ask > (uint32_t)kRouteCap) ask = (uint32_t)kRouteCap;
+				if (!VstRemoteRenderSlot(slot, ask, pcm[slot], ask, pcmN, eof, &midiFlags))
 					break;
 				g_vstPcmHold |= VstMidiHoldFromFlags(midiFlags);
-				int n = (int)pcm.size();
+				int n = (int)pcmN;
 				if (n <= 0)
 					break;
 				if (n > cnt - got) n = cnt - got;
-				memcpy(bw + got, pcm.data(), (size_t)n);
+				memcpy(bw + got, pcm[slot], (size_t)n);
 				got += n;
 			}
 			LeaveCriticalSection(&pf.rcs);
 			return got;
 		}
 		uint32_t midiFlags = 0;
-		if (!VstRemoteRenderSlot(slot, (uint32_t)(cnt - got), pcm, eof, &midiFlags)
-			&& !VstRemoteRenderSlot(slot, (uint32_t)(cnt - got), pcm, eof, &midiFlags))
+		uint32_t pcmN = 0;
+		uint32_t ask = (uint32_t)(cnt - got);
+		if (ask > (uint32_t)kRouteCap) ask = (uint32_t)kRouteCap;
+		if (!VstRemoteRenderSlot(slot, ask, pcm[slot], ask, pcmN, eof, &midiFlags)
+			&& !VstRemoteRenderSlot(slot, ask, pcm[slot], ask, pcmN, eof, &midiFlags))
 			return got;
 		g_vstPcmHold |= VstMidiHoldFromFlags(midiFlags);
-		int n = (int)pcm.size();
+		int n = (int)pcmN;
 		if (n > cnt - got) n = cnt - got;
 		if (n > 0) {
-			memcpy(bw + got, pcm.data(), (size_t)n);
+			memcpy(bw + got, pcm[slot], (size_t)n);
 			got += n;
 		}
 		return got;
@@ -22033,7 +22079,7 @@ int readkpi(BYTE* bw, int cnt)
 							if (srcBytesPerFrame > 1) requestBytesLocal -= (requestBytesLocal % srcBytesPerFrame);
 
 							const size_t need = (size_t)requestBytesLocal;
-							const size_t remain = (g_kpiRemoteCache.size() > g_kpiRemoteCachePos) ? (g_kpiRemoteCache.size() - g_kpiRemoteCachePos) : 0;
+							const size_t remain = (g_kpiRemoteCacheLen > g_kpiRemoteCachePos) ? (g_kpiRemoteCacheLen - g_kpiRemoteCachePos) : 0;
 
 							if (remain < need && !g_kpiRemoteEof) {
 								/* 旧: max(need, 256KB) → 約0.7〜1秒分を一括 Render。
@@ -22047,23 +22093,32 @@ int readkpi(BYTE* bw, int cnt)
 									if (lead > prefetch) prefetch = lead;
 									if (prefetch < 4096u) prefetch = 4096u;
 								}
-								const uint32_t want = (uint32_t)prefetch;
-								std::vector<uint8_t> pcm;
+								uint32_t want = (uint32_t)prefetch;
+								if (want > (uint32_t)kRouteCap) want = (uint32_t)kRouteCap;
+								static uint8_t pcm[kRouteCap];
+								uint32_t pcmN = 0;
 								bool eof = false;
-								if (!g_kpiHost.RenderBytes(g_kpiSession.sessionId, want, pcm, eof)) {
+								if (!g_kpiHost.RenderBytes(g_kpiSession.sessionId, want, pcm, want, pcmN, eof)) {
 									r = 0;
 								}
 								else {
-									if (g_kpiRemoteCachePos > 0) {
-										g_kpiRemoteCache.erase(g_kpiRemoteCache.begin(), g_kpiRemoteCache.begin() + (ptrdiff_t)g_kpiRemoteCachePos);
+									if (g_kpiRemoteCachePos > 0 && g_kpiRemoteCachePos <= g_kpiRemoteCacheLen) {
+										memmove(g_kpiRemoteCache, g_kpiRemoteCache + g_kpiRemoteCachePos, g_kpiRemoteCacheLen - g_kpiRemoteCachePos);
+										g_kpiRemoteCacheLen -= g_kpiRemoteCachePos;
 										g_kpiRemoteCachePos = 0;
 									}
-									g_kpiRemoteCache.insert(g_kpiRemoteCache.end(), pcm.begin(), pcm.end());
+									size_t room = (g_kpiRemoteCacheLen < (size_t)kRouteCap) ? ((size_t)kRouteCap - g_kpiRemoteCacheLen) : 0;
+									size_t take = pcmN;
+									if (take > room) take = room;
+									if (take) {
+										memcpy(g_kpiRemoteCache + g_kpiRemoteCacheLen, pcm, take);
+										g_kpiRemoteCacheLen += take;
+									}
 									if (eof) g_kpiRemoteEof = true;
 								}
 							}
 
-							const size_t avail = (g_kpiRemoteCache.size() > g_kpiRemoteCachePos) ? (g_kpiRemoteCache.size() - g_kpiRemoteCachePos) : 0;
+							const size_t avail = (g_kpiRemoteCacheLen > g_kpiRemoteCachePos) ? (g_kpiRemoteCacheLen - g_kpiRemoteCachePos) : 0;
 							DWORD copyBytes = (DWORD)min((size_t)requestBytesLocal, avail);
 							if (srcBytesPerFrame > 1) copyBytes -= (copyBytes % srcBytesPerFrame);
 
@@ -22071,7 +22126,7 @@ int readkpi(BYTE* bw, int cnt)
 								if (srcFloat) {
 									DWORD gotSamples = copyBytes / srcBytesPerFrame;
 									const DWORD outBytes = ConvertFloatTypedToIntBuffer(
-										g_kpiRemoteCache.data() + g_kpiRemoteCachePos,
+										g_kpiRemoteCache + g_kpiRemoteCachePos,
 										gotSamples,
 										wavsam_src,
 										wavchannel,
@@ -22083,7 +22138,7 @@ int readkpi(BYTE* bw, int cnt)
 									requestBytes = outBytes;
 								}
 								else {
-									memcpy((BYTE*)bufkpi + cnt3, g_kpiRemoteCache.data() + g_kpiRemoteCachePos, copyBytes);
+									memcpy((BYTE*)bufkpi + cnt3, g_kpiRemoteCache + g_kpiRemoteCachePos, copyBytes);
 									g_kpiRemoteCachePos += copyBytes;
 									r = copyBytes;
 									requestBytes = copyBytes;
@@ -22123,53 +22178,36 @@ int readkpi(BYTE* bw, int cnt)
 							if (wavsam_src == -32 || wavsam_src == -64) {
 								DWORD gotSamples = 0;
 								if (requestSamples > 0) {
-									DWORD left = requestSamples;
-									if (wavsam_src == -64) {
-										std::vector<double> srcD;
-										srcD.resize((size_t)requestSamples * wavchannel);
-										BYTE* p = (BYTE*)srcD.data();
-										while (left > 0) {
-											const DWORD ask = s_kpiSliceWhole ? left : ((left > slice) ? slice : left);
-											DWORD g = KpiDecoderRenderLive(kpidec,p, ask);
-											if (g == 0 && gotSamples == 0 && ask < requestSamples) {
-												g = KpiDecoderRenderLive(kpidec,(BYTE*)srcD.data(), requestSamples);
-												s_kpiSliceWhole = 1;
-												p = (BYTE*)srcD.data();
-												if (g > requestSamples) g = requestSamples;
-											}
-											if (g == 0) break;
-											if (g > ask && !s_kpiSliceWhole) g = ask;
-											if (g > left) g = left;
-											p += (size_t)g * (size_t)wavchannel * sizeof(double);
-											gotSamples += g;
-											left -= g;
-											if (s_kpiSliceWhole) break;
+									const int chSrc = (wavchannel > 0) ? wavchannel : 1;
+									const bool dbl = (wavsam_src == -64);
+									const size_t elem = dbl ? sizeof(double) : sizeof(float);
+									static uint8_t s_kpiSrc[kRouteCap * 4];
+									size_t capSamp = (sizeof(s_kpiSrc) / elem) / (size_t)chSrc;
+									if (capSamp < 1) capSamp = 1;
+									DWORD useSamples = requestSamples;
+									if (useSamples > (DWORD)capSamp) useSamples = (DWORD)capSamp;
+									if (slice > useSamples) slice = useSamples;
+									DWORD left = useSamples;
+									BYTE* base = s_kpiSrc;
+									BYTE* p = base;
+									while (left > 0) {
+										const DWORD ask = s_kpiSliceWhole ? left : ((left > slice) ? slice : left);
+										DWORD g = KpiDecoderRenderLive(kpidec, p, ask);
+										if (g == 0 && gotSamples == 0 && ask < useSamples) {
+											g = KpiDecoderRenderLive(kpidec, base, useSamples);
+											s_kpiSliceWhole = 1;
+											p = base;
+											if (g > useSamples) g = useSamples;
 										}
-										r = ConvertFloatTypedToIntBuffer(srcD.data(), gotSamples, -64, wavchannel, (BYTE*)bufkpi + cnt3, (DWORD)remainBytes, dstBitsPerSample);
+										if (g == 0) break;
+										if (g > ask && !s_kpiSliceWhole) g = ask;
+										if (g > left) g = left;
+										p += (size_t)g * (size_t)chSrc * elem;
+										gotSamples += g;
+										left -= g;
+										if (s_kpiSliceWhole) break;
 									}
-									else {
-										std::vector<float> srcF;
-										srcF.resize((size_t)requestSamples * wavchannel);
-										BYTE* p = (BYTE*)srcF.data();
-										while (left > 0) {
-											const DWORD ask = s_kpiSliceWhole ? left : ((left > slice) ? slice : left);
-											DWORD g = KpiDecoderRenderLive(kpidec,p, ask);
-											if (g == 0 && gotSamples == 0 && ask < requestSamples) {
-												g = KpiDecoderRenderLive(kpidec,(BYTE*)srcF.data(), requestSamples);
-												s_kpiSliceWhole = 1;
-												p = (BYTE*)srcF.data();
-												if (g > requestSamples) g = requestSamples;
-											}
-											if (g == 0) break;
-											if (g > ask && !s_kpiSliceWhole) g = ask;
-											if (g > left) g = left;
-											p += (size_t)g * (size_t)wavchannel * sizeof(float);
-											gotSamples += g;
-											left -= g;
-											if (s_kpiSliceWhole) break;
-										}
-										r = ConvertFloatTypedToIntBuffer(srcF.data(), gotSamples, -32, wavchannel, (BYTE*)bufkpi + cnt3, (DWORD)remainBytes, dstBitsPerSample);
-									}
+									r = ConvertFloatTypedToIntBuffer(base, gotSamples, wavsam_src, wavchannel, (BYTE*)bufkpi + cnt3, (DWORD)remainBytes, dstBitsPerSample);
 								}
 								else {
 									r = 0;
@@ -22303,7 +22341,7 @@ int readkpi(BYTE* bw, int cnt)
 
 				if (len2 > 0) {
 					kpiRbStallIters = 0;
-					RingBufWrite(bufkpi3, max_buffer_size, poss2, outputRawBytesData.data(), len2);
+					RingBufWrite(bufkpi3, max_buffer_size, poss2, outputRawBytesData, len2);
 					poss4 += len2;
 					// cnt3 < cnt のとき 0 を返すと playwavkpi が EOF 扱いし、
 					// 書き出しが PCM 未出力のまま終わる。リングに溜まった分は下で読む。
@@ -22324,7 +22362,7 @@ int readkpi(BYTE* bw, int cnt)
 						int tailLen = readtempo(bufkpi, 0);
 						if (tailLen <= 0)
 							break;
-						RingBufWrite(bufkpi3, max_buffer_size, poss2, outputRawBytesData.data(), tailLen);
+						RingBufWrite(bufkpi3, max_buffer_size, poss2, outputRawBytesData, tailLen);
 						poss4 += tailLen;
 					}
 				}
@@ -22579,7 +22617,7 @@ int readm4a(BYTE* bw, int cnt)
 					int len2 = (tempoIn > 0) ? readtempo(bufkpi, tempoIn) : 0;
 
 					if (len2 > 0) {
-						RingBufWrite(bufkpi3, max_buffer_size, poss2, outputRawBytesData.data(), len2);
+						RingBufWrite(bufkpi3, max_buffer_size, poss2, outputRawBytesData, len2);
 						poss4 += len2;
 						if (cnt2 <= cnt3) {
 							cnt3 -= cnt2;
@@ -22843,7 +22881,7 @@ int readflac(BYTE* bw, int cnt)
 					// デコード EOF: readtempo(0) が RB 尻尾を常に吐く（fade1 含む）
 					int tailLen = readtempo(bufkpi, 0);
 					if (tailLen > 0) {
-						RingBufWrite(bufkpi3, max_buffer_size, poss2, outputRawBytesData.data(), tailLen);
+						RingBufWrite(bufkpi3, max_buffer_size, poss2, outputRawBytesData, tailLen);
 						poss4 += tailLen;
 					}
 					break;
@@ -22853,7 +22891,7 @@ int readflac(BYTE* bw, int cnt)
 				int len2 = readtempo(bufkpi, (int)r);
 				if (len2 > 0) {
 					flacRbStallIters = 0;
-					RingBufWrite(bufkpi3, max_buffer_size, poss2, outputRawBytesData.data(), len2);
+					RingBufWrite(bufkpi3, max_buffer_size, poss2, outputRawBytesData, len2);
 					poss4 += len2;
 					if (poss4 > lenl) break;
 				}
@@ -23060,10 +23098,10 @@ int readopus(BYTE* bw, int cnt)
 
 					int len2 = readtempo(bufkpi, r);
 					cnt4 = r;
-					wl += PlaybackCcWrite(outputRawBytesData.data(), len2);
+					wl += PlaybackCcWrite(outputRawBytesData, len2);
 
 					if (len2 > 0) {
-						RingBufWrite(bufkpi3, max_buffer_size, poss2, outputRawBytesData.data(), len2);
+						RingBufWrite(bufkpi3, max_buffer_size, poss2, outputRawBytesData, len2);
 						poss4 += len2;
 						if (poss4 > cnt)
 							break;
@@ -23294,7 +23332,7 @@ int readdsd(BYTE* bw, int cnt)
 				// FLAC 同様: EOF なら RB 尻尾だけ出して抜ける（連続 0 待ちで fade 誤爆しない）
 				int tailLen = readtempo(bufkpi, 0);
 				if (tailLen > 0) {
-					RingBufWrite(bufkpi3, max_buffer_size, poss2, outputRawBytesData.data(), tailLen);
+					RingBufWrite(bufkpi3, max_buffer_size, poss2, outputRawBytesData, tailLen);
 					poss4 += tailLen;
 				}
 				break;
@@ -23304,7 +23342,7 @@ int readdsd(BYTE* bw, int cnt)
 			int len2 = readtempo(bufkpi, (int)r);
 			if (len2 > 0) {
 				dsdRbStallIters = 0;
-				RingBufWrite(bufkpi3, max_buffer_size, poss2, outputRawBytesData.data(), len2);
+				RingBufWrite(bufkpi3, max_buffer_size, poss2, outputRawBytesData, len2);
 				poss4 += len2;
 				if (poss4 >= lenl)
 					break;
@@ -23624,7 +23662,7 @@ int readwav(BYTE* bw, int cnt)
 			}
 			if (len2 > 0) {
 				wavRbStallIters = 0;
-				RingBufWrite(bufkpi3, max_buffer_size, poss2, outputRawBytesData.data(), len2);
+				RingBufWrite(bufkpi3, max_buffer_size, poss2, outputRawBytesData, len2);
 				poss4 += len2;
 				if (rr > r || poss4 > cnt) break;
 			}
@@ -23713,7 +23751,7 @@ int readmp3(BYTE* bw, int cnt)
 			if (len2 > 0) {
 				mp3RbStallIters = 0;
 				// 書き込み
-				RingBufWrite(bufkpi3, max_buffer_size, poss2, outputRawBytesData.data(), len2);
+				RingBufWrite(bufkpi3, max_buffer_size, poss2, outputRawBytesData, len2);
 				poss4 += len2;
 				// playb はここでは進めない。len2 を積むと「今回 bw に渡す cnt バイト」より多く数えてしまい（例: ~1.5 倍）、表示時間が実長より長くなる。
 				// ここで return r すると bw へ未コピーのまま戻り、r はデコードバイトで伸縮後バイトと単位が違う → playwavmp3 が早 EOF・fade1 誤発火・ポコ音
@@ -23793,9 +23831,12 @@ int readmp3(BYTE* bw, int cnt)
 BOOL oggyomikomi = FALSE;
 
 
-extern std::vector<float> inputFloatData;
-extern std::vector<uint8_t> m_bufwav3_1;
-extern std::vector<float> m_convertedPcmFloatData;
+extern float inputFloatData[];
+extern int inputFloatN;
+extern uint8_t m_bufwav3_1[];
+extern int m_bufwav3_1_n;
+extern float m_convertedPcmFloatData[];
+extern int m_convertedPcmN;
 extern int pitch;
 extern int tempo; // tempo変数を参照します
 float tempoRate2;
@@ -23814,7 +23855,7 @@ void SeekAndWarmupRubberBand(int targetPos, bool loopJump)
 
 	// 44.1kHz ループ: playwavds 互換（RB/リングを触らず seek のみ）
 	if (loopJump && !OggUseLowRateLoopExtras()) {
-		g_loopTailBuffer.clear();
+		g_loopTailN = 0;
 		g_loopTailPos = 0;
 		ov_pcm_seek_lap(&vf, (ogg_int64_t)targetPos);
 		playb = targetPos;
@@ -23829,7 +23870,7 @@ void SeekAndWarmupRubberBand(int targetPos, bool loopJump)
 	}
 
 	ResetAudioUpscalerPipeline();
-	g_loopTailBuffer.clear();
+	g_loopTailN = 0;
 	g_loopTailPos = 0;
 	OggFlushKpi3Ring();
 	poss = 0;
@@ -23867,12 +23908,15 @@ void SeekAndWarmupRubberBand(int targetPos, bool loopJump)
 	ov_pcm_seek_lap(&vf, (ogg_int64_t)startPos);
 
 	uint16_t bps = (uint16_t)((wavsam_depth <= 0 || wavsam_depth > 32) ? 16 : abs(wavsam_depth));
-	std::vector<uint8_t> tempRawBuf((size_t)ovChunkBytes);
+	uint8_t tempRawBuf[4096];
 	const size_t pullSize = 4096;
-	std::vector<std::vector<float>> outBuf(wavchannel, std::vector<float>(pullSize));
-	std::vector<float*> outPtrs(wavchannel);
-	for (int ch = 0; ch < wavchannel; ++ch)
-		outPtrs[ch] = outBuf[ch].data();
+	int chUse = wavchannel;
+	if (chUse < 1) chUse = 2;
+	if (chUse > 32) chUse = 32;
+	static float outFlat[4096 * 32];
+	static float* outPtrs[32];
+	for (int ch = 0; ch < chUse; ++ch)
+		outPtrs[ch] = outFlat + (size_t)ch * pullSize;
 
 	int inputFed = 0;
 	while (inputFed < preRollInputSamples) {
@@ -23888,7 +23932,7 @@ void SeekAndWarmupRubberBand(int targetPos, bool loopJump)
 			readBytes = maxChunkBytes;
 
 		int current_section;
-		long bytesRead = ov_read(&vf, (char*)tempRawBuf.data(), readBytes, 0, 2, 1, &current_section);
+		long bytesRead = ov_read(&vf, (char*)tempRawBuf, readBytes, 0, 2, 1, &current_section);
 		if (bytesRead <= 0)
 			break;
 
@@ -23898,27 +23942,29 @@ void SeekAndWarmupRubberBand(int targetPos, bool loopJump)
 		if (samplesRead <= 0)
 			break;
 
-		std::vector<uint8_t> chunk(tempRawBuf.begin(), tempRawBuf.begin() + samplesRead * bpfWarm);
-		std::vector<float> inFloat;
-		ConvertRawBytesToFloat(chunk, bps, wavchannel, inFloat);
+		int rawN = samplesRead * bpfWarm;
+		if (rawN > 4096) rawN = 4096;
+		static float inFloat[4096 * 32];
+		int inN = 0;
+		ConvertRawBytesToFloat(tempRawBuf, rawN, bps, (uint16_t)chUse, inFloat, 4096 * 32, inN);
 
-		std::vector<std::vector<float>> chData(wavchannel, std::vector<float>((size_t)samplesRead));
+		static float chFlat[4096 * 32];
+		static float* chPtrs[32];
+		for (int ch = 0; ch < chUse; ++ch)
+			chPtrs[ch] = chFlat + (size_t)ch * (size_t)samplesRead;
 		for (int i = 0; i < samplesRead; ++i) {
-			for (int ch = 0; ch < wavchannel; ++ch)
-				chData[ch][i] = inFloat[(size_t)i * (size_t)wavchannel + (size_t)ch];
+			for (int ch = 0; ch < chUse; ++ch)
+				chPtrs[ch][i] = inFloat[(size_t)i * (size_t)chUse + (size_t)ch];
 		}
-		std::vector<float*> chPtrs(wavchannel);
-		for (int ch = 0; ch < wavchannel; ++ch)
-			chPtrs[ch] = chData[ch].data();
 
-		g_rubberBandStretcher[0]->process(chPtrs.data(), (size_t)samplesRead, false);
+		g_rubberBandStretcher[0]->process(chPtrs, (size_t)samplesRead, false);
 		inputFed += samplesRead;
 
 		while (g_rubberBandStretcher[0]->available() > 0) {
 			if (IsPlaybackStopRequested())
 				break;
 			size_t toGet = (std::min)((size_t)g_rubberBandStretcher[0]->available(), pullSize);
-			if (g_rubberBandStretcher[0]->retrieve(outPtrs.data(), toGet) == 0)
+			if (g_rubberBandStretcher[0]->retrieve(outPtrs, toGet) == 0)
 				break;
 		}
 	}
@@ -23991,7 +24037,7 @@ void SeekAndWarmupRubberBand(int targetPos, bool loopJump)
 
 			if (len2 > 0) {
 				prefillStall = 0;
-				RingBufWrite(bufkpi3, max_buffer_size, poss2, outputRawBytesData.data(), len2);
+				RingBufWrite(bufkpi3, max_buffer_size, poss2, outputRawBytesData, len2);
 				poss4 += len2;
 				g_warmupRBOutputBytes += len2;
 				SanitizeKpi3RingState(max_buffer_size);
@@ -24778,16 +24824,19 @@ static void KpiMidiSeekAccurate(__int64 samplePos)
 	if (kvver == 5 && kpidec) {
 		kpidec->Seek(0, KPI_MEDIAINFO::SEEK_FLAGS_SAMPLE);
 		__int64 left = samplePos;
-		std::vector<BYTE> junk;
+		static BYTE junk[8192 * 32 * (int)sizeof(double)];
 		while (left > 0) {
 			DWORD ask = (DWORD)((left > (__int64)chunk) ? chunk : left);
+			size_t need = (size_t)ask * (size_t)ch * sizeof(double);
 			if (srcBits == -32)
-				junk.resize((size_t)ask * (size_t)ch * sizeof(float));
-			else if (srcBits == -64)
-				junk.resize((size_t)ask * (size_t)ch * sizeof(double));
-			else
-				junk.resize((size_t)ask * (size_t)ch * (size_t)(outBits / 8));
-			DWORD got = KpiDecoderRenderLive(kpidec,junk.data(), ask);
+				need = (size_t)ask * (size_t)ch * sizeof(float);
+			else if (srcBits != -64)
+				need = (size_t)ask * (size_t)ch * (size_t)(outBits / 8);
+			if (need > sizeof(junk)) {
+				ask = (DWORD)(sizeof(junk) / (ch * ((srcBits == -64) ? (int)sizeof(double) : (srcBits == -32) ? (int)sizeof(float) : (outBits / 8 > 0 ? outBits / 8 : 1))));
+				if (ask == 0) break;
+			}
+			DWORD got = KpiDecoderRenderLive(kpidec, junk, ask);
 			if (got == 0) break;
 			if ((__int64)got > left) got = (DWORD)left;
 			left -= got;
@@ -24802,10 +24851,13 @@ static void KpiMidiSeekAccurate(__int64 samplePos)
 		const int bpf = (outBits / 8) * ch;
 		if (bpf <= 0) return;
 		__int64 leftBytes = samplePos * bpf;
-		std::vector<BYTE> junk((size_t)chunk * (size_t)bpf);
+		static BYTE junk[8192 * 32 * 4];
+		const size_t junkCap = sizeof(junk);
 		while (leftBytes > 0) {
-			DWORD ask = (DWORD)((leftBytes > (__int64)junk.size()) ? junk.size() : leftBytes);
-			DWORD got = og->mod->Render(hk, junk.data(), ask);
+			DWORD ask = (DWORD)((leftBytes > (__int64)junkCap) ? junkCap : leftBytes);
+			if (bpf > 1) ask -= ask % (DWORD)bpf;
+			if (ask == 0) break;
+			DWORD got = og->mod->Render(hk, junk, ask);
 			if (got == 0) break;
 			if ((__int64)got > leftBytes) got = (DWORD)leftBytes;
 			leftBytes -= got;
@@ -25698,7 +25750,7 @@ int mcopy(char* a, int len)
 
 			if (len2 > 0) {
 				oggRbStallIters = 0;
-				RingBufWrite(bufkpi3, max_buffer_size, poss2, outputRawBytesData.data(), len2);
+				RingBufWrite(bufkpi3, max_buffer_size, poss2, outputRawBytesData, len2);
 				poss4 += len2;
 				if (poss4 > max_buffer_size)
 					poss4 = max_buffer_size;
@@ -28441,8 +28493,9 @@ void timerog1(UINT nIDEvent)
 				return;
 			}
 		}
-		// MP 画面（またはファルコム本画面）が出たあと、保存されていたサブUIを一気に出す。
+		// 予備。通常起動は OnInitDialog / EnterMediaPlayerMode で同期に出す。
 		og->PostMessage(WM_OGG_TOGGLE_SUBUI, 10, 0);
+		og->PostMessage(WM_OGG_TOGGLE_SUBUI, 20, 0);
 	}
 
 	if (nIDEvent == 4923) {
@@ -31417,16 +31470,14 @@ UINT PlaybackCcWriteFromFormat(const void* p, UINT n, int srcRate, int srcCh, in
 		s_ccCfgDstBits = g_ccFmtBits;
 	}
 	s_ccUpscaler.PushInterleaved((const uint8_t*)p, (int)n);
-	std::vector<uint8_t> out;
-	// アップ時は増える。ダウン時は減るが余裕を持つ
-	out.resize((size_t)n * 4 + 65536);
+	static uint8_t out[kRouteCap * 4];
+	const int outCap = (int)sizeof(out);
 	int got = 0;
 	int guard = 0;
 	while (guard < 256) {
 		++guard;
-		if ((int)out.size() - got < 8192)
-			out.resize(out.size() * 2);
-		int pulled = s_ccUpscaler.PullInterleaved(out.data() + got, (int)out.size() - got);
+		if (outCap - got < 8192) break;
+		int pulled = s_ccUpscaler.PullInterleaved(out + got, outCap - got);
 		if (pulled <= 0) break;
 		got += pulled;
 	}
@@ -31436,11 +31487,11 @@ UINT PlaybackCcWriteFromFormat(const void* p, UINT n, int srcRate, int srcCh, in
 			while (off < (UINT)got) {
 				UINT chunk = (UINT)got - off;
 				if (chunk > MIC_MIX_SCRATCH) chunk = MIC_MIX_SCRATCH;
-				MicMixIntoPcm(out.data() + off, chunk, g_ccFmtRate, g_ccFmtCh, g_ccFmtBits);
+				MicMixIntoPcm(out + off, chunk, g_ccFmtRate, g_ccFmtCh, g_ccFmtBits);
 				off += chunk;
 			}
 		}
-		cc.Write(out.data(), (UINT)got);
+		cc.Write(out, (UINT)got);
 		if (g_isWavExportRendering)
 			MpDecodeProgressOnPcm((UINT)got, g_ccFmtRate, g_ccFmtCh, g_ccFmtBits);
 	}
@@ -31743,10 +31794,7 @@ static inline void ResampleDouble(const double* source, size_t src_len, double* 
 #define BUFSZ1_2 (BUFSZ1 * 4)
 //スペアナ表示
 ULONG PlayCursor = 0, WriteCursor = 0, PlayCursor2 = 0;
-void AnalyzeMusicKey(
-	const std::vector<double>& bufChordL, const std::vector<double>& bufChordR,
-	int sampleRate)
-	;
+void AnalyzeMusicKey(const double* bufferL, const double* bufferR, int sampleCount, int sampleRate);
 void PublishEqKeyPcm(const double* bufferL, const double* bufferR, int sampleCount, int sampleRate);
 void GetCurrentNoteStrengths(float* output108);
 
@@ -34040,10 +34088,35 @@ LRESULT COggDlg::OnToggleSubUiMsg(WPARAM wParam, LPARAM)
 		ToggleMidiMonitor();
 	else if (wParam == 5)
 		ToggleWrdView();
+	else if (wParam == 20) {
+		/* 生成済みのトグル画面を一気に出す。UpdateWindow はしない（1枚ずつ描き終わる）。 */
+		if (savedata.eqwindow == 1 && m_EqualizerDlg && ::IsWindow(m_EqualizerDlg->GetSafeHwnd()))
+			m_EqualizerDlg->ShowWindow(SW_SHOWNOACTIVATE);
+		if (savedata.pianorollwindow == 1 && m_PianoRollDlg && ::IsWindow(m_PianoRollDlg->GetSafeHwnd()))
+			m_PianoRollDlg->ShowWindow(SW_SHOWNOACTIVATE);
+		if (savedata.prTunewindow == 1 && m_PianoRollTuneDlg && ::IsWindow(m_PianoRollTuneDlg->GetSafeHwnd()))
+			m_PianoRollTuneDlg->ShowWindow(SW_SHOWNOACTIVATE);
+		if (savedata.analyzerwindow == 1 && m_AnalyzerDlg && ::IsWindow(m_AnalyzerDlg->GetSafeHwnd()))
+			m_AnalyzerDlg->ShowWindow(SW_SHOWNOACTIVATE);
+		if (savedata.mpPromptwindow == 1)
+			MpShowPromptDialog(this, FALSE);
+		if (savedata.mpCmdRollwindow == 1)
+			MpShowCommandRollDialog(this, FALSE);
+		if (savedata.mpDjPadwindow == 1)
+			MpDjPadShowNoActivate();
+		if (savedata.midimonwindow == 1 && m_MidiMonitorDlg && ::IsWindow(m_MidiMonitorDlg->GetSafeHwnd()))
+			m_MidiMonitorDlg->ShowWindow(SW_SHOWNOACTIVATE);
+		if (savedata.wrdwindow == 1 && m_WrdViewDlg && ::IsWindow(m_WrdViewDlg->GetSafeHwnd()))
+			m_WrdViewDlg->ShowWindow(SW_SHOWNOACTIVATE);
+		{
+			extern CMediaPlayerDlg* mp;
+			if (mp && ::IsWindow(mp->GetSafeHwnd()))
+				mp->SyncPushToggleButtons();
+		}
+	}
 	else if (wParam >= 10 && wParam <= 19) {
-		// 起動時サブUI復元: 開くだけ(トグルしない)。
-		// 10 で 10..19 を一気に Create/Show（負荷分散後は順次 Post しない）。
-		// SW_SHOWNOACTIVATE でフォーカス奪取・ちらつきを抑える。
+		// 起動時サブUI復元: 開くだけ(トグルしない)。ここでは Create のみ。
+		// 表示は wParam 20。途中で Show すると MP より先に1枚ずつ出る。
 		g_oggSubUiRestoring = 1;
 		try {
 		OggMigrateFmMonToMidiMonFlag();
@@ -34056,8 +34129,6 @@ LRESULT COggDlg::OnToggleSubUiMsg(WPARAM wParam, LPARAM)
 					if (!m_EqualizerDlg->Create(IDD_EQUALIZER, this))
 						savedata.eqwindow = 0;
 				}
-				if (savedata.eqwindow == 1 && ::IsWindow(m_EqualizerDlg->GetSafeHwnd()))
-					m_EqualizerDlg->ShowWindow(SW_SHOWNOACTIVATE);
 			}
 		}
 		else if (id == 11) {
@@ -34066,8 +34137,6 @@ LRESULT COggDlg::OnToggleSubUiMsg(WPARAM wParam, LPARAM)
 					if (!m_PianoRollDlg->Create(IDD_PIANOROLL, this))
 						savedata.pianorollwindow = 0;
 				}
-				if (savedata.pianorollwindow == 1 && ::IsWindow(m_PianoRollDlg->GetSafeHwnd()))
-					m_PianoRollDlg->ShowWindow(SW_SHOWNOACTIVATE);
 			}
 		}
 		else if (id == 12) {
@@ -34076,8 +34145,6 @@ LRESULT COggDlg::OnToggleSubUiMsg(WPARAM wParam, LPARAM)
 					if (!m_PianoRollTuneDlg->Create(IDD_PIANOROLL_TUNE, this))
 						savedata.prTunewindow = 0;
 				}
-				if (savedata.prTunewindow == 1 && ::IsWindow(m_PianoRollTuneDlg->GetSafeHwnd()))
-					m_PianoRollTuneDlg->ShowWindow(SW_SHOWNOACTIVATE);
 			}
 		}
 		else if (id == 13) {
@@ -34086,8 +34153,6 @@ LRESULT COggDlg::OnToggleSubUiMsg(WPARAM wParam, LPARAM)
 					if (!m_AnalyzerDlg->Create(IDD_ANALYZER, this))
 						savedata.analyzerwindow = 0;
 				}
-				if (savedata.analyzerwindow == 1 && ::IsWindow(m_AnalyzerDlg->GetSafeHwnd()))
-					m_AnalyzerDlg->ShowWindow(SW_SHOWNOACTIVATE);
 			}
 		}
 		else if (id == 14) {
@@ -34122,10 +34187,8 @@ LRESULT COggDlg::OnToggleSubUiMsg(WPARAM wParam, LPARAM)
 						savedata.midimonwindow = 0;
 				}
 				if (savedata.midimonwindow == 1
-					&& ::IsWindow(m_MidiMonitorDlg->GetSafeHwnd())) {
+					&& ::IsWindow(m_MidiMonitorDlg->GetSafeHwnd()))
 					savedata.fmmonwindow = 0;
-					m_MidiMonitorDlg->ShowWindow(SW_SHOWNOACTIVATE);
-				}
 			}
 		}
 		else if (id == 18) {
@@ -34137,8 +34200,6 @@ LRESULT COggDlg::OnToggleSubUiMsg(WPARAM wParam, LPARAM)
 					if (!m_WrdViewDlg->Create(IDD_WRDVIEW, this))
 						savedata.wrdwindow = 0;
 				}
-				if (savedata.wrdwindow == 1 && ::IsWindow(m_WrdViewDlg->GetSafeHwnd()))
-					m_WrdViewDlg->ShowWindow(SW_SHOWNOACTIVATE);
 			}
 		}
 		}
@@ -36573,18 +36634,15 @@ LRESULT COggDlg::OnDeferredHeavyStartup(WPARAM, LPARAM)
 		if (th) CloseHandle((HANDLE)th);
 		else InterlockedExchange(&g_silentPluginUpdateStarted, 0);
 	}
-	/* GPU 文字列は起動同期から外した分をここで付与 */
-	if (m_os3.GetSafeHwnd()) {
-		CString cur;
-		m_os3.GetWindowText(cur);
-		if (cur.Find(L" / GPU: ") < 0) {
-			CString gpu = BuildGpuInfoString();
-			if (!gpu.IsEmpty()) {
-				cur += L" / GPU: ";
-				cur += gpu;
-				m_os3.SetWindowText(cur);
-			}
-		}
+	/* SetTimer は vblank の投稿が続くと届かない（キーやフォーカスで列が空くまで出ない）。
+	   名前取得は出力列挙をやめたのでここで足し、描いてからツールチップ初期化へ進む。 */
+	OggAppendStartupGpuLine(this);
+	{
+		extern CMediaPlayerDlg* mp;
+		if (mp && ::IsWindow(mp->GetSafeHwnd()) && ::IsWindowVisible(mp->GetSafeHwnd()))
+			mp->UpdateWindow();
+		else if (::IsWindowVisible(m_hWnd))
+			UpdateWindow();
 	}
 	StartUpdateCheckThread(m_hWnd);
 	DeferredHeavyStartupImpl();

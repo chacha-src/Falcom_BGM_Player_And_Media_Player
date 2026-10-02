@@ -10,7 +10,6 @@
 #include <Functiondiscoverykeys_devpkey.h>
 #include <process.h>
 #include <math.h>
-#include <vector>
 
 #pragma comment(lib,"Ole32.lib")
 extern void MpPersistSavedataQuick();
@@ -590,8 +589,8 @@ UINT __stdcall CVoiceChangerDlg::AudioThread(void* q)
 	InterlockedExchange(&s->m_run, 1);
 
 	{
-		std::vector<float> inMono, outMono;
-		inMono.reserve(4096); outMono.reserve(4096);
+		enum { kVcFrames = 16384 };
+		float inMono[kVcFrames], outMono[kVcFrames];
 		short pcm[4096 * 2];
 		int lastQ = hq;
 		double outPhase = 0.0;
@@ -624,45 +623,47 @@ UINT __stdcall CVoiceChangerDlg::AudioThread(void* q)
 			vp.style = style;
 			vp.quality = quality;
 
-			inMono.resize(n);
-			outMono.resize(n);
-			for (UINT32 i = 0; i < n; ++i) {
-				float L, R;
-				if (fl & AUDCLNT_BUFFERFLAGS_SILENT) L = R = 0;
-				else VcRead(d + (SIZE_T)i * f->nBlockAlign, f, L, R);
-				inMono[i] = (L + R) * 0.5f;
+			UINT32 base = 0;
+			UINT32 left = n;
+			while (left) {
+				UINT32 chunk = left > (UINT32)kVcFrames ? (UINT32)kVcFrames : left;
+				for (UINT32 i = 0; i < chunk; ++i) {
+					float L, R;
+					if (fl & AUDCLNT_BUFFERFLAGS_SILENT) L = R = 0;
+					else VcRead(d + (SIZE_T)(base + i) * f->nBlockAlign, f, L, R);
+					inMono[i] = (L + R) * 0.5f;
+				}
+				const bool nearUnity = (fabsf(vp.pitch - 1.f) < 0.008f && fabsf(vp.formant - 1.f) < 0.008f
+					&& style == 0 && breathPct == 0 && brightPct == 100 && fabsf(vp.gain - 1.f) < 0.008f);
+				if (nearUnity) {
+					memcpy(outMono, inMono, sizeof(float) * chunk);
+				} else {
+					tract.Process(inMono, outMono, (int)chunk, vp);
+				}
+				for (UINT32 i = 0; i < chunk; ++i) {
+					float x = outMono[i];
+					LONG pk = (LONG)(fabsf(x) * 1000.f);
+					LONG old = InterlockedCompareExchange(&s->m_peak, 0, 0);
+					if (pk > old) InterlockedExchange(&s->m_peak, pk);
+				}
+				int made = 0;
+				double phase = outPhase;
+				while ((int)phase < (int)chunk && made < 4096) {
+					int ix = (int)phase;
+					float x = outMono[(UINT32)ix];
+					pcm[made * 2] = pcm[made * 2 + 1] = (short)(x * 32767.f);
+					made++;
+					phase += (double)rate / 48000.0;
+				}
+				outPhase = phase - (double)chunk;
+				if (made > 0) {
+					VcWrite(oc, renOut, ob, pcm, made);
+					VcWrite(mc, mr, mb, pcm, made);
+				}
+				base += chunk;
+				left -= chunk;
 			}
 			cp->ReleaseBuffer(n);
-
-			const bool nearUnity = (fabsf(vp.pitch - 1.f) < 0.008f && fabsf(vp.formant - 1.f) < 0.008f
-				&& style == 0 && breathPct == 0 && brightPct == 100 && fabsf(vp.gain - 1.f) < 0.008f);
-			if (nearUnity) {
-				outMono = inMono;
-			} else {
-				tract.Process(inMono.data(), outMono.data(), (int)n, vp);
-			}
-
-			for (UINT32 i = 0; i < n; ++i) {
-				float x = outMono[i];
-				LONG pk = (LONG)(fabsf(x) * 1000.f);
-				LONG old = InterlockedCompareExchange(&s->m_peak, 0, 0);
-				if (pk > old) InterlockedExchange(&s->m_peak, pk);
-			}
-
-			int made = 0;
-			double phase = outPhase;
-			while ((int)phase < (int)n && made < 4096) {
-				int ix = (int)phase;
-				float x = outMono[(UINT32)ix];
-				pcm[made * 2] = pcm[made * 2 + 1] = (short)(x * 32767.f);
-				made++;
-				phase += (double)rate / 48000.0;
-			}
-			outPhase = phase - (double)n;
-			if (made > 0) {
-				VcWrite(oc, renOut, ob, pcm, made);
-				VcWrite(mc, mr, mb, pcm, made);
-			}
 		}
 	}
 

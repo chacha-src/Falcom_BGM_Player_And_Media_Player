@@ -13,7 +13,6 @@
 #include "dsound.h"
 #include "rubberband/RubberBandStretcher.h"
 #include <vector>
-#include <deque>
 #include <cmath>
 #include <algorithm>
 #include <mmreg.h>
@@ -7147,10 +7146,7 @@ static const DWORD kDougaPcMaxAheadMsMulti = 2500;
 static const DWORD kDougaPcGapFlushMs = 350;   // PCM 途切れ → flush＋ドレイン開始
 static const DWORD kDougaPcStartGraceMs = 4000; // 字幕/ffd 起動直後のギャップで DS を止めない
 static const size_t kDougaPcQMax = 96;
-
-struct DougaPcQItem {
-	std::vector<BYTE> data;
-};
+enum { kPcRing = 4 * 1024 * 1024, kPcCh = 32, kPcFrames = 16384 };
 
 struct DougaPcState {
 	LONG refCb;
@@ -7194,14 +7190,20 @@ struct DougaPcState {
 	volatile LONG shuttingDown; // Shutdown 中は CB を即抜ける（SetCallback 待ち回避）
 	BOOL cbArmed;        // SetCallback 済み
 	DWORD lastWriteTick;
-	std::deque<DougaPcQItem> pcmQ;
-	std::vector<float> inFlat;
-	std::vector<float> outFlat;
-	std::vector<float> interleavedTmp;
-	std::vector<float*> inPtrs;
-	std::vector<float*> outPtrs;
-	std::vector<BYTE> pcmOut;
-	std::vector<BYTE> downmixBuf;
+	struct { uint32_t off; uint32_t len; } pcmSlot[kDougaPcQMax];
+	int pcmQHead;
+	int pcmQCount;
+	uint32_t pcmRingW;
+	uint32_t pcmRingUsed;
+	uint8_t pcmRing[kPcRing];
+	uint8_t pcmDrain[kPcFrames * kPcCh * 2];
+	float inFlat[kPcFrames * kPcCh];
+	float outFlat[kPcFrames * kPcCh];
+	float interleavedTmp[kPcFrames * kPcCh];
+	float* inPtrs[kPcCh];
+	float* outPtrs[kPcCh];
+	uint8_t pcmOut[kPcFrames * kPcCh * 2];
+	uint8_t downmixBuf[kPcFrames * 4];
 	volatile LONG eqNeedReset; // シーク後の次PCM1回だけ equaliser reset
 };
 
@@ -7209,6 +7211,26 @@ static DougaPcState g_pc = {};
 
 // プロセス寿命で 1 回だけ作る。Install/Shutdown ごとに作り直すと、
 // 取り残された Grabber スレッドが待っている最中に破棄してしまう。
+static void DougaPcQReset()
+{
+	g_pc.pcmQHead = 0;
+	g_pc.pcmQCount = 0;
+	g_pc.pcmRingW = 0;
+	g_pc.pcmRingUsed = 0;
+}
+
+static void DougaPcQPop_NoLock()
+{
+	if (g_pc.pcmQCount <= 0) return;
+	g_pc.pcmRingUsed -= g_pc.pcmSlot[g_pc.pcmQHead].len;
+	g_pc.pcmQHead = (g_pc.pcmQHead + 1) % (int)kDougaPcQMax;
+	g_pc.pcmQCount--;
+	if (g_pc.pcmQCount == 0) {
+		g_pc.pcmRingW = 0;
+		g_pc.pcmRingUsed = 0;
+	}
+}
+
 static void DougaPcEnsureCs()
 {
 	if (g_pc.csInit) return;
@@ -7327,7 +7349,7 @@ static void DougaPcStopDsOutsideCallback()
 		LeaveCriticalSection(&g_pc.dsCs);
 	if (g_pc.csInit) {
 		EnterCriticalSection(&g_pc.cs);
-		g_pc.pcmQ.clear();
+		DougaPcQReset();
 		LeaveCriticalSection(&g_pc.cs);
 	}
 }
@@ -7464,8 +7486,6 @@ static void DougaPcEnsureShifter_NoLock()
 			1.0);
 		g_pc.shifter->setDebugLevel(0);
 		g_pc.shifter->setMaxProcessSize(8192);
-		g_pc.inPtrs.resize((size_t)g_pc.channels);
-		g_pc.outPtrs.resize((size_t)g_pc.channels);
 	}
 	catch (...) {
 		g_pc.shifter = NULL;
@@ -7643,29 +7663,29 @@ static void DougaPcRetrieveAndWrite_NoLock()
 
 		size_t frames = (size_t)(std::min)(avail, g_pc.sampleRate / 25);
 		if (frames == 0) break;
+		if (frames > (size_t)kPcFrames) frames = (size_t)kPcFrames;
 		if (wroteFrames + frames > maxFramesTotal)
 			frames = maxFramesTotal - wroteFrames;
 		if (frames == 0) break;
+		const int ch = g_pc.channels;
+		if (ch < 1 || ch > kPcCh) break;
 
-		g_pc.outFlat.resize(frames * (size_t)g_pc.channels);
-		for (int c = 0; c < g_pc.channels; ++c)
-			g_pc.outPtrs[c] = g_pc.outFlat.data() + (size_t)c * frames;
-		const size_t got = g_pc.shifter->retrieve(g_pc.outPtrs.data(), frames);
+		for (int c = 0; c < ch; ++c)
+			g_pc.outPtrs[c] = g_pc.outFlat + (size_t)c * frames;
+		const size_t got = g_pc.shifter->retrieve(g_pc.outPtrs, frames);
 		if (got == 0) break;
-		g_pc.interleavedTmp.resize(got * (size_t)g_pc.channels);
 		for (size_t i = 0; i < got; ++i) {
-			for (int c = 0; c < g_pc.channels; ++c)
-				g_pc.interleavedTmp[i * (size_t)g_pc.channels + (size_t)c] = g_pc.outPtrs[c][i];
+			for (int c = 0; c < ch; ++c)
+				g_pc.interleavedTmp[i * (size_t)ch + (size_t)c] = g_pc.outPtrs[c][i];
 		}
 		if (g_pc.bits == 16) {
-			g_pc.pcmOut.resize(got * (size_t)g_pc.blockAlign);
-			DougaPcFloatToPcm16(g_pc.interleavedTmp.data(), got, g_pc.channels, g_pc.pcmOut.data());
-			DougaPcEqAndRemote(g_pc.pcmOut.data(), (DWORD)(got * (size_t)g_pc.blockAlign));
+			DougaPcFloatToPcm16(g_pc.interleavedTmp, got, ch, g_pc.pcmOut);
+			DougaPcEqAndRemote(g_pc.pcmOut, (DWORD)(got * (size_t)g_pc.blockAlign));
 			if (VstLiveThruIsOn())
-				ZeroMemory(g_pc.pcmOut.data(), got * (size_t)g_pc.blockAlign);
+				ZeroMemory(g_pc.pcmOut, got * (size_t)g_pc.blockAlign);
 			if (g_pc.dsCsInit)
 				EnterCriticalSection(&g_pc.dsCs);
-			const BOOL ok = DougaPcWritePcm_NoLock(g_pc.pcmOut.data(), (DWORD)(got * (size_t)g_pc.blockAlign));
+			const BOOL ok = DougaPcWritePcm_NoLock(g_pc.pcmOut, (DWORD)(got * (size_t)g_pc.blockAlign));
 			if (g_pc.dsCsInit)
 				LeaveCriticalSection(&g_pc.dsCs);
 			if (!ok) break;
@@ -7690,8 +7710,8 @@ static void DougaPcDrainQueue()
 		DWORD bytes = 0;
 		if (g_pc.csInit)
 			EnterCriticalSection(&g_pc.cs);
-		if (g_pc.playing && !g_pc.pcmQ.empty())
-			bytes = (DWORD)g_pc.pcmQ.front().data.size();
+		if (g_pc.playing && g_pc.pcmQCount > 0)
+			bytes = g_pc.pcmSlot[g_pc.pcmQHead].len;
 		if (g_pc.csInit)
 			LeaveCriticalSection(&g_pc.cs);
 		if (bytes == 0) break;
@@ -7705,26 +7725,28 @@ static void DougaPcDrainQueue()
 			LeaveCriticalSection(&g_pc.dsCs);
 		if (!room) break;
 
-		DougaPcQItem item;
+		DWORD nCopy = 0;
 		if (g_pc.csInit)
 			EnterCriticalSection(&g_pc.cs);
-		if (!g_pc.playing || g_pc.pcmQ.empty()) {
+		if (!g_pc.playing || g_pc.pcmQCount <= 0) {
 			if (g_pc.csInit)
 				LeaveCriticalSection(&g_pc.cs);
 			break;
 		}
-		item = std::move(g_pc.pcmQ.front());
-		g_pc.pcmQ.pop_front();
+		nCopy = g_pc.pcmSlot[g_pc.pcmQHead].len;
+		if (nCopy > sizeof(g_pc.pcmDrain)) nCopy = (DWORD)sizeof(g_pc.pcmDrain);
+		memcpy(g_pc.pcmDrain, g_pc.pcmRing + g_pc.pcmSlot[g_pc.pcmQHead].off, nCopy);
+		DougaPcQPop_NoLock();
 		if (g_pc.csInit)
 			LeaveCriticalSection(&g_pc.cs);
 
-		DougaPcEqAndRemote(item.data.data(), (DWORD)item.data.size());
-		if (VstLiveThruIsOn() && !item.data.empty())
-			ZeroMemory(item.data.data(), item.data.size());
+		DougaPcEqAndRemote(g_pc.pcmDrain, nCopy);
+		if (VstLiveThruIsOn() && nCopy)
+			ZeroMemory(g_pc.pcmDrain, nCopy);
 		if (g_pc.dsCsInit)
 			EnterCriticalSection(&g_pc.dsCs);
 		if (g_pc.playing)
-			DougaPcWritePcm_NoLock(item.data.data(), (DWORD)item.data.size());
+			DougaPcWritePcm_NoLock(g_pc.pcmDrain, nCopy);
 		if (g_pc.dsCsInit)
 			LeaveCriticalSection(&g_pc.dsCs);
 	}
@@ -7742,11 +7764,38 @@ static void DougaPcQueuePcm(const BYTE* data, DWORD bytes)
 	}
 	// 溢れは捨てるだけ。ここから DS 書き／GetCurrentPosition すると
 	// SampleGrabber スレッドとグラフがデッドロックし、映像も止まる。
-	while (g_pc.pcmQ.size() >= kDougaPcQMax)
-		g_pc.pcmQ.pop_front();
-	DougaPcQItem it;
-	it.data.assign(data, data + bytes);
-	g_pc.pcmQ.push_back(std::move(it));
+	if (bytes <= kPcRing) {
+		for (;;) {
+			while (g_pc.pcmQCount > 0 && ((size_t)g_pc.pcmQCount >= kDougaPcQMax || g_pc.pcmRingUsed + bytes > (uint32_t)kPcRing))
+				DougaPcQPop_NoLock();
+			if (g_pc.pcmRingUsed + bytes > (uint32_t)kPcRing || (size_t)g_pc.pcmQCount >= kDougaPcQMax)
+				break;
+			const uint32_t oldest = g_pc.pcmQCount ? g_pc.pcmSlot[g_pc.pcmQHead].off : 0;
+			BOOL place = FALSE;
+			if (g_pc.pcmQCount == 0) {
+				g_pc.pcmRingW = 0;
+				place = TRUE;
+			} else if (g_pc.pcmRingW >= oldest) {
+				if (g_pc.pcmRingW + bytes <= (uint32_t)kPcRing) place = TRUE;
+				else if (oldest >= bytes) { g_pc.pcmRingW = 0; place = TRUE; }
+			} else if (g_pc.pcmRingW + bytes <= oldest) {
+				place = TRUE;
+			}
+			if (!place) {
+				if (g_pc.pcmQCount <= 0) break;
+				DougaPcQPop_NoLock();
+				continue;
+			}
+			memcpy(g_pc.pcmRing + g_pc.pcmRingW, data, bytes);
+			const int ix = (g_pc.pcmQHead + g_pc.pcmQCount) % (int)kDougaPcQMax;
+			g_pc.pcmSlot[ix].off = g_pc.pcmRingW;
+			g_pc.pcmSlot[ix].len = bytes;
+			g_pc.pcmRingW += bytes;
+			g_pc.pcmRingUsed += bytes;
+			g_pc.pcmQCount++;
+			break;
+		}
+	}
 	if (g_pc.csInit)
 		LeaveCriticalSection(&g_pc.cs);
 }
@@ -7789,93 +7838,108 @@ static void DougaPcOnPcm(const BYTE* p, long len)
 		return;
 	}
 
-	const long frames = len / srcBpf;
-	g_pc.pcmOut.resize((size_t)frames * (size_t)srcCh * 2);
-	BOOL converted = DougaPcSrcToPcm16(p, frames, srcCh, srcBits, srcFloat, (INT16*)g_pc.pcmOut.data());
-	if (!converted && srcBits != 16) {
-		converted = DougaPcSrcToPcm16(p, frames, srcCh, 16, FALSE, (INT16*)g_pc.pcmOut.data());
-	}
-	if (!converted) {
+	if (srcCh < 1 || srcCh > kPcCh || channels < 1 || channels > kPcCh) {
 		InterlockedExchange(&g_pc.inCallback, 0);
 		return;
 	}
-	const INT16* pcm16 = (const INT16*)g_pc.pcmOut.data();
-	long pcmBytes = frames * srcCh * 2;
-
-	if (downmix && srcCh > 2 && channels == 2) {
-		g_pc.downmixBuf.resize((size_t)frames * 4);
-		DougaPcDownmixToStereo16(pcm16, frames, srcCh, (INT16*)g_pc.downmixBuf.data());
-		pcm16 = (const INT16*)g_pc.downmixBuf.data();
-		pcmBytes = frames * 4;
-	}
-
-	// rate≈1: DS 書きは Grabber スレッドでやらない（グラフとデッドロックする）
-	if (fabs(rate - 1.0) < kDougaPitchEps) {
-		DougaPcQueuePcm((const BYTE*)pcm16, (DWORD)pcmBytes);
-		InterlockedExchange(&g_pc.inCallback, 0);
-		return;
-	}
-
-	if (g_pc.csInit)
-		EnterCriticalSection(&g_pc.cs);
-	if (!g_pc.playing) {
-		if (g_pc.csInit)
-			LeaveCriticalSection(&g_pc.cs);
-		InterlockedExchange(&g_pc.inCallback, 0);
-		return;
-	}
-	DougaPcEnsureShifter_NoLock();
-	shifter = g_pc.shifter;
-	if (!shifter) {
-		if (g_pc.csInit)
-			LeaveCriticalSection(&g_pc.cs);
-		InterlockedExchange(&g_pc.inCallback, 0);
-		return;
-	}
-	if (g_pc.csInit)
-		LeaveCriticalSection(&g_pc.cs);
-
-	const size_t samplesIn = (size_t)frames;
-	g_pc.inFlat.resize(samplesIn * (size_t)channels);
-	g_pc.inPtrs.resize((size_t)channels);
-	for (int c = 0; c < channels; ++c)
-		g_pc.inPtrs[c] = g_pc.inFlat.data() + (size_t)c * samplesIn;
-	for (long i = 0; i < frames; ++i) {
-		for (int c = 0; c < channels; ++c)
-			g_pc.inPtrs[c][i] = (float)pcm16[i * channels + c] / 32768.f;
-	}
-
-	const size_t maxChunk = 8192;
-	size_t done = 0;
-	while (done < samplesIn) {
-		if (!g_pc.playing || !g_pc.installed)
-			break;
-		const size_t n = (std::min)(maxChunk, samplesIn - done);
-		float* ptrs[32];
-		const int chUse = (std::min)(channels, 32);
-
+	const BOOL identity = fabs(rate - 1.0) < kDougaPitchEps;
+	if (!identity) {
 		if (g_pc.csInit)
 			EnterCriticalSection(&g_pc.cs);
-		if (!g_pc.shifter || g_pc.shifter != shifter || !g_pc.playing) {
+		if (!g_pc.playing) {
 			if (g_pc.csInit)
 				LeaveCriticalSection(&g_pc.cs);
-			break;
+			InterlockedExchange(&g_pc.inCallback, 0);
+			return;
 		}
-		for (int c = 0; c < chUse; ++c)
-			ptrs[c] = g_pc.inPtrs[c] + done;
-		RubberBand::RubberBandStretcher* sh = g_pc.shifter;
+		DougaPcEnsureShifter_NoLock();
+		shifter = g_pc.shifter;
 		if (g_pc.csInit)
 			LeaveCriticalSection(&g_pc.cs);
+		if (!shifter) {
+			InterlockedExchange(&g_pc.inCallback, 0);
+			return;
+		}
+	}
 
-		try {
-			sh->process(ptrs, n, false);
-		} catch (...) {
-			break;
+	long maxF = kPcFrames;
+	{
+		const long by = (long)(sizeof(g_pc.pcmOut) / ((size_t)srcCh * 2));
+		if (by < maxF) maxF = by;
+	}
+	if (maxF < 1) {
+		InterlockedExchange(&g_pc.inCallback, 0);
+		return;
+	}
+
+	for (long pos = 0; pos + srcBpf <= len; ) {
+		long frames = (len - pos) / srcBpf;
+		if (frames > maxF) frames = maxF;
+		if (frames <= 0) break;
+		const BYTE* src = p + pos;
+		pos += frames * srcBpf;
+
+		BOOL converted = DougaPcSrcToPcm16(src, frames, srcCh, srcBits, srcFloat, (INT16*)g_pc.pcmOut);
+		if (!converted && srcBits != 16)
+			converted = DougaPcSrcToPcm16(src, frames, srcCh, 16, FALSE, (INT16*)g_pc.pcmOut);
+		if (!converted) break;
+		const INT16* pcm16 = (const INT16*)g_pc.pcmOut;
+		long pcmBytes = frames * srcCh * 2;
+
+		if (downmix && srcCh > 2 && channels == 2) {
+			DougaPcDownmixToStereo16(pcm16, frames, srcCh, (INT16*)g_pc.downmixBuf);
+			pcm16 = (const INT16*)g_pc.downmixBuf;
+			pcmBytes = frames * 4;
 		}
 
-		if (g_pc.playing && g_pc.shifter == sh)
-			DougaPcRetrieveAndWrite_NoLock();
-		done += n;
+		// rate≈1: DS 書きは Grabber スレッドでやらない（グラフとデッドロックする）
+		if (identity) {
+			DougaPcQueuePcm((const BYTE*)pcm16, (DWORD)pcmBytes);
+			continue;
+		}
+
+		const size_t samplesIn = (size_t)frames;
+		for (int c = 0; c < channels; ++c)
+			g_pc.inPtrs[c] = g_pc.inFlat + (size_t)c * samplesIn;
+		for (long i = 0; i < frames; ++i) {
+			for (int c = 0; c < channels; ++c)
+				g_pc.inPtrs[c][i] = (float)pcm16[i * channels + c] / 32768.f;
+		}
+
+		const size_t maxChunk = 8192;
+		size_t done = 0;
+		BOOL stop = FALSE;
+		while (done < samplesIn) {
+			if (!g_pc.playing || !g_pc.installed) { stop = TRUE; break; }
+			const size_t n = (std::min)(maxChunk, samplesIn - done);
+			float* ptrs[kPcCh];
+
+			if (g_pc.csInit)
+				EnterCriticalSection(&g_pc.cs);
+			if (!g_pc.shifter || g_pc.shifter != shifter || !g_pc.playing) {
+				if (g_pc.csInit)
+					LeaveCriticalSection(&g_pc.cs);
+				stop = TRUE;
+				break;
+			}
+			for (int c = 0; c < channels; ++c)
+				ptrs[c] = g_pc.inPtrs[c] + done;
+			RubberBand::RubberBandStretcher* sh = g_pc.shifter;
+			if (g_pc.csInit)
+				LeaveCriticalSection(&g_pc.cs);
+
+			try {
+				sh->process(ptrs, n, false);
+			} catch (...) {
+				stop = TRUE;
+				break;
+			}
+
+			if (g_pc.playing && g_pc.shifter == sh)
+				DougaPcRetrieveAndWrite_NoLock();
+			done += n;
+		}
+		if (stop) break;
 	}
 	InterlockedExchange(&g_pc.inCallback, 0);
 }
@@ -8220,7 +8284,7 @@ void DougaPitchCorrect_OnSeek(double)
 	EnterCriticalSection(&g_pc.cs);
 	if (g_pc.shifter)
 		g_pc.shifter->reset();
-	g_pc.pcmQ.clear();
+	DougaPcQReset();
 	g_pc.endFlushed = FALSE;
 	g_pc.draining = FALSE;
 	g_pc.drainAheadBytes = 0;
@@ -8341,9 +8405,7 @@ void DougaPitchCorrect_Shutdown()
 	nullF = g_pc.nullF; g_pc.nullF = NULL;
 	oldRenderer = g_pc.oldRenderer; g_pc.oldRenderer = NULL;
 	g_pc.graph = NULL;
-	g_pc.inFlat.clear();
-	g_pc.outFlat.clear();
-	g_pc.pcmQ.clear();
+	DougaPcQReset();
 	g_pc.rate = 1.0;
 	g_pc.writePosValid = FALSE;
 	g_pc.downmix = FALSE;
@@ -8354,7 +8416,6 @@ void DougaPitchCorrect_Shutdown()
 	g_pc.channelMask = 0;
 	g_pc.startTick = 0;
 	g_pc.lastWriteTick = 0;
-	g_pc.downmixBuf.clear();
 	if (g_pc.csInit)
 		LeaveCriticalSection(&g_pc.cs);
 
@@ -8654,7 +8715,7 @@ BOOL DougaPitchCorrect_Install(IGraphBuilder* graph, HWND hwndOwner)
 	g_pc.endFlushed = FALSE;
 	g_pc.draining = FALSE;
 	g_pc.drainAheadBytes = 0;
-	g_pc.pcmQ.clear();
+	DougaPcQReset();
 	g_pc.startTick = GetTickCount();
 	g_pc.lastPcmTick = 0;
 	g_pc.lastWriteTick = 0;

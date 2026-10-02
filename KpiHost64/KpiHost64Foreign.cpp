@@ -1,7 +1,6 @@
 // KpiHost64 外部入力プラグイン（Winamp in_ / XMPlay / AIMP）。MFC 無し。
 #include <windows.h>
 #include <string>
-#include <vector>
 #include <unordered_map>
 #include <cstring>
 #include <cstdlib>
@@ -38,8 +37,10 @@ struct ForeignSession
 	// XMPlay（Process は float。本体へは 16bit PCM）
 	XMPIN* xmp = nullptr;
 	void* xmpFile = nullptr; // XmpFileObj*
-	std::vector<float> fbuf;
-	std::vector<uint8_t> pending;
+	enum { kXmpFloats = 8192 * 8 };
+	float fbuf[kXmpFloats];
+	uint8_t pending[kXmpFloats * 2];
+	uint32_t pendN = 0;
 	size_t pendOff = 0;
 	int eof = 0;
 	float xmpLen = 0.f;

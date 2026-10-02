@@ -3,6 +3,11 @@
 #include "KpiHostClient.h"
 #include <tlhelp32.h>
 
+enum : uint32_t { kIpcReplyCap = 8u * 1024u * 1024u };
+static thread_local uint8_t g_ipcReply[kIpcReplyCap];
+enum : uint32_t { kVstReqCap = 1024u * 2048u + 8192u * 16u + 4096u };
+static thread_local uint8_t s_vstReq[kVstReqCap];
+
 // %TEMP%\ogg_kpi64_client.log。ホスト側の ogg_kpi64_host.log と対。
 static void AppendLogLine(const wchar_t* line)
 {
@@ -265,9 +270,9 @@ bool KpiHost64Client::SyncHostLang()
 	m_syncingLang = 1;
 	m_sentLang = lang;
 	uint32_t v = (uint32_t)lang;
-	std::vector<uint8_t> reply;
+	uint32_t replyN = 0;
 	uint32_t st = 0;
-	const bool ok = SendRequest(KPIHOST64_CMD_PING, &v, sizeof(v), reply, st) &&
+	const bool ok = SendRequest(KPIHOST64_CMD_PING, &v, sizeof(v), g_ipcReply, kIpcReplyCap, replyN, st) &&
 		st == KPIHOST64_STATUS_OK;
 	m_syncingLang = 0;
 	if (!ok) m_sentLang = -1;
@@ -445,11 +450,12 @@ bool PipeSkip(HANDLE pipe, uint32_t bytes, DWORD timeoutMs)
 
 // ヘッダ＋ペイロードを送り、同じ requestId の応答を待つ。古い応答は捨てて再同期。
 bool KpiHost64Client::SendRequest(uint32_t cmd, const void* payload, uint32_t payloadBytes,
-	std::vector<uint8_t>& outReplyPayload, uint32_t& outStatus, DWORD timeoutMs)
+	uint8_t* outReply, uint32_t outCap, uint32_t& outReplyBytes, uint32_t& outStatus, DWORD timeoutMs)
 {
 	PipeLock lock(m_cs);
-	outReplyPayload.clear();
+	outReplyBytes = 0;
 	outStatus = KPIHOST64_STATUS_FAIL;
+	if (!outReply || outCap == 0) return false;
 	if (!EnsureConnected()) return false;
 
 	KPIHOST64_MsgHeader h{};
@@ -493,13 +499,18 @@ bool KpiHost64Client::SendRequest(uint32_t cmd, const void* payload, uint32_t pa
 			continue;
 		}
 		if (rh.payloadBytes) {
-			outReplyPayload.resize(rh.payloadBytes);
-			if (!PipeReadAll(m_hPipe, outReplyPayload.data(), rh.payloadBytes, timeoutMs)) {
-				AppendLogLine(L"[SendRequest] read reply payload failed");
-				outReplyPayload.clear();
+			if (rh.payloadBytes > outCap) {
+				AppendLogLine(L"[SendRequest] reply exceeds fixed buffer");
+				PipeSkip(m_hPipe, rh.payloadBytes, timeoutMs);
 				Disconnect();
 				return false;
 			}
+			if (!PipeReadAll(m_hPipe, outReply, rh.payloadBytes, timeoutMs)) {
+				AppendLogLine(L"[SendRequest] read reply payload failed");
+				Disconnect();
+				return false;
+			}
+			outReplyBytes = rh.payloadBytes;
 		}
 		outStatus = rh.status;
 		return true;
@@ -512,18 +523,18 @@ bool KpiHost64Client::SendRequest(uint32_t cmd, const void* payload, uint32_t pa
 bool KpiHost64Client::SendSimple(uint32_t cmd, const void* payload, uint32_t payloadBytes,
 	DWORD timeoutMs)
 {
-	std::vector<uint8_t> reply;
+	uint32_t replyN = 0;
 	uint32_t st = 0;
-	if (!SendRequest(cmd, payload, payloadBytes, reply, st, timeoutMs)) return false;
+	if (!SendRequest(cmd, payload, payloadBytes, g_ipcReply, kIpcReplyCap, replyN, st, timeoutMs)) return false;
 	return st == KPIHOST64_STATUS_OK;
 }
 
 bool KpiHost64Client::Ping()
 {
-	std::vector<uint8_t> reply;
+	uint32_t replyN = 0;
 	uint32_t st = 0;
 	uint32_t lang = (uint32_t)HostLangCode();
-	if (!SendRequest(KPIHOST64_CMD_PING, &lang, sizeof(lang), reply, st)) return false;
+	if (!SendRequest(KPIHOST64_CMD_PING, &lang, sizeof(lang), g_ipcReply, kIpcReplyCap, replyN, st)) return false;
 	if (st == KPIHOST64_STATUS_OK) m_sentLang = (int)lang;
 	return st == KPIHOST64_STATUS_OK;
 }
@@ -534,19 +545,19 @@ bool KpiHost64Client::ListExts(const std::wstring& kpiPath, uint32_t& outKpiVer,
 	outSupportExts.clear();
 	std::vector<uint8_t> req;
 	AppendWString(req, kpiPath);
-	std::vector<uint8_t> reply;
+	uint32_t replyN = 0;
 	uint32_t st = 0;
-	if (!SendRequest(KPIHOST64_CMD_LIST_EXTS, req.data(), (uint32_t)req.size(), reply, st)) return false;
+	if (!SendRequest(KPIHOST64_CMD_LIST_EXTS, req.data(), (uint32_t)req.size(), g_ipcReply, kIpcReplyCap, replyN, st)) return false;
 	if (st != KPIHOST64_STATUS_OK) return false;
-	if (reply.size() < sizeof(KPIHOST64_ListExtsReply) + sizeof(uint32_t)) return false;
-	const uint8_t* p = reply.data();
+	if (replyN < sizeof(KPIHOST64_ListExtsReply) + sizeof(uint32_t)) return false;
+	const uint8_t* p = g_ipcReply;
 	const KPIHOST64_ListExtsReply* lr = (const KPIHOST64_ListExtsReply*)p;
 	outKpiVer = lr->kpiVer;
 	p += sizeof(KPIHOST64_ListExtsReply);
 	uint32_t chars = *(const uint32_t*)p;
 	p += sizeof(uint32_t);
 	size_t bytes = (size_t)chars * sizeof(wchar_t);
-	if (reply.size() < sizeof(KPIHOST64_ListExtsReply) + sizeof(uint32_t) + bytes) return false;
+	if (replyN < sizeof(KPIHOST64_ListExtsReply) + sizeof(uint32_t) + bytes) return false;
 	outSupportExts.assign((const wchar_t*)p, (const wchar_t*)p + chars);
 	return true;
 }
@@ -561,41 +572,45 @@ bool KpiHost64Client::Open(const std::wstring& kpiPath, const std::wstring& medi
 	const uint8_t* pr = (const uint8_t*)&request;
 	req.insert(req.end(), pr, pr + sizeof(KPI_MEDIAINFO));
 
-	std::vector<uint8_t> reply;
+	uint32_t replyN = 0;
 	uint32_t st = 0;
-	if (!SendRequest(KPIHOST64_CMD_OPEN, req.data(), (uint32_t)req.size(), reply, st)) return false;
+	if (!SendRequest(KPIHOST64_CMD_OPEN, req.data(), (uint32_t)req.size(), g_ipcReply, kIpcReplyCap, replyN, st)) return false;
 	if (st != KPIHOST64_STATUS_OK) {
 		AppendLogLine((L"[Open] host status=" + std::to_wstring(st)
 			+ L" reqBytes=" + std::to_wstring((uint32_t)req.size())
 			+ L" mediaInfo=" + std::to_wstring(sizeof(KPI_MEDIAINFO))).c_str());
 		return false;
 	}
-	if (reply.size() < sizeof(KPIHOST64_OpenReply) + sizeof(KPI_MEDIAINFO)) return false;
+	if (replyN < sizeof(KPIHOST64_OpenReply) + sizeof(KPI_MEDIAINFO)) return false;
 
-	const KPIHOST64_OpenReply* orp = (const KPIHOST64_OpenReply*)reply.data();
+	const KPIHOST64_OpenReply* orp = (const KPIHOST64_OpenReply*)g_ipcReply;
 	outSession.sessionId = orp->sessionId;
 	outSession.openedSongCount = orp->openedSongCount;
-	memcpy(&outSession.mediaInfo, reply.data() + sizeof(KPIHOST64_OpenReply), sizeof(KPI_MEDIAINFO));
+	memcpy(&outSession.mediaInfo, g_ipcReply + sizeof(KPIHOST64_OpenReply), sizeof(KPI_MEDIAINFO));
 	return true;
 }
 
-bool KpiHost64Client::RenderBytes(uint32_t sessionId, uint32_t bytesWanted, std::vector<uint8_t>& outPcm, bool& outEof)
+bool KpiHost64Client::RenderBytes(uint32_t sessionId, uint32_t bytesWanted, uint8_t* outPcm, uint32_t outCap, uint32_t& outBytes, bool& outEof)
 {
-	outPcm.clear();
+	outBytes = 0;
 	outEof = false;
+	if (!outPcm || outCap == 0) return false;
 	KPIHOST64_RenderReq rr{};
 	rr.sessionId = sessionId;
 	rr.bytesWanted = bytesWanted;
-	std::vector<uint8_t> reply;
+	uint32_t replyN = 0;
 	uint32_t st = 0;
-	if (!SendRequest(KPIHOST64_CMD_RENDER, &rr, sizeof(rr), reply, st)) return false;
+	if (!SendRequest(KPIHOST64_CMD_RENDER, &rr, sizeof(rr), g_ipcReply, kIpcReplyCap, replyN, st)) return false;
 	if (st != KPIHOST64_STATUS_OK) return false;
-	if (reply.size() < sizeof(KPIHOST64_RenderReply)) return false;
-	const KPIHOST64_RenderReply* rep = (const KPIHOST64_RenderReply*)reply.data();
+	if (replyN < sizeof(KPIHOST64_RenderReply)) return false;
+	const KPIHOST64_RenderReply* rep = (const KPIHOST64_RenderReply*)g_ipcReply;
 	if (rep->sessionId != sessionId) return false;
 	outEof = rep->eof ? true : false;
-	if (reply.size() < sizeof(KPIHOST64_RenderReply) + rep->bytesReturned) return false;
-	outPcm.assign(reply.begin() + sizeof(KPIHOST64_RenderReply), reply.begin() + sizeof(KPIHOST64_RenderReply) + rep->bytesReturned);
+	if (replyN < sizeof(KPIHOST64_RenderReply) + rep->bytesReturned) return false;
+	uint32_t n = rep->bytesReturned;
+	if (n > outCap) n = outCap;
+	if (n) memcpy(outPcm, g_ipcReply + sizeof(KPIHOST64_RenderReply), n);
+	outBytes = n;
 	return true;
 }
 
@@ -606,12 +621,12 @@ bool KpiHost64Client::Seek(uint32_t sessionId, uint64_t posSample, uint32_t flag
 	sr.sessionId = sessionId;
 	sr.posSample = posSample;
 	sr.flag = flag;
-	std::vector<uint8_t> reply;
+	uint32_t replyN = 0;
 	uint32_t st = 0;
-	if (!SendRequest(KPIHOST64_CMD_SEEK, &sr, sizeof(sr), reply, st)) return false;
+	if (!SendRequest(KPIHOST64_CMD_SEEK, &sr, sizeof(sr), g_ipcReply, kIpcReplyCap, replyN, st)) return false;
 	if (st != KPIHOST64_STATUS_OK) return false;
-	if (reply.size() < sizeof(KPIHOST64_SeekReply)) return false;
-	const KPIHOST64_SeekReply* rep = (const KPIHOST64_SeekReply*)reply.data();
+	if (replyN < sizeof(KPIHOST64_SeekReply)) return false;
+	const KPIHOST64_SeekReply* rep = (const KPIHOST64_SeekReply*)g_ipcReply;
 	if (rep->sessionId != sessionId) return false;
 	outNewPosSample = rep->newPosSample;
 	return true;
@@ -621,9 +636,9 @@ bool KpiHost64Client::Close(uint32_t sessionId)
 {
 	KPIHOST64_U32 u{};
 	u.v = sessionId;
-	std::vector<uint8_t> reply;
+	uint32_t replyN = 0;
 	uint32_t st = 0;
-	if (!SendRequest(KPIHOST64_CMD_CLOSE, &u, sizeof(u), reply, st)) return false;
+	if (!SendRequest(KPIHOST64_CMD_CLOSE, &u, sizeof(u), g_ipcReply, kIpcReplyCap, replyN, st)) return false;
 	return st == KPIHOST64_STATUS_OK;
 }
 
@@ -633,15 +648,15 @@ bool KpiHost64Client::ForeignListExts(uint32_t pluginKind, const std::wstring& d
 	std::vector<uint8_t> req;
 	AppendU32(req, pluginKind);
 	AppendWString(req, dllPath);
-	std::vector<uint8_t> reply;
+	uint32_t replyN = 0;
 	uint32_t st = 0;
-	if (!SendRequest(KPIHOST64_CMD_FOREIGN_LIST_EXTS, req.data(), (uint32_t)req.size(), reply, st)) return false;
+	if (!SendRequest(KPIHOST64_CMD_FOREIGN_LIST_EXTS, req.data(), (uint32_t)req.size(), g_ipcReply, kIpcReplyCap, replyN, st)) return false;
 	if (st != KPIHOST64_STATUS_OK) return false;
-	if (reply.size() < sizeof(KPIHOST64_ListExtsReply) + sizeof(uint32_t)) return false;
-	const uint8_t* p = reply.data() + sizeof(KPIHOST64_ListExtsReply);
+	if (replyN < sizeof(KPIHOST64_ListExtsReply) + sizeof(uint32_t)) return false;
+	const uint8_t* p = g_ipcReply + sizeof(KPIHOST64_ListExtsReply);
 	uint32_t chars = *(const uint32_t*)p;
 	p += sizeof(uint32_t);
-	if (reply.size() < sizeof(KPIHOST64_ListExtsReply) + sizeof(uint32_t) + chars * sizeof(wchar_t)) return false;
+	if (replyN < sizeof(KPIHOST64_ListExtsReply) + sizeof(uint32_t) + chars * sizeof(wchar_t)) return false;
 	outSupportExts.assign((const wchar_t*)p, (const wchar_t*)p + chars);
 	return true;
 }
@@ -653,31 +668,35 @@ bool KpiHost64Client::ForeignOpen(uint32_t pluginKind, const std::wstring& dllPa
 	AppendU32(req, pluginKind);
 	AppendWString(req, dllPath);
 	AppendWString(req, mediaPath);
-	std::vector<uint8_t> reply;
+	uint32_t replyN = 0;
 	uint32_t st = 0;
-	if (!SendRequest(KPIHOST64_CMD_FOREIGN_OPEN, req.data(), (uint32_t)req.size(), reply, st)) return false;
+	if (!SendRequest(KPIHOST64_CMD_FOREIGN_OPEN, req.data(), (uint32_t)req.size(), g_ipcReply, kIpcReplyCap, replyN, st)) return false;
 	if (st != KPIHOST64_STATUS_OK) return false;
-	if (reply.size() < sizeof(KPIHOST64_ForeignOpenReply)) return false;
-	memcpy(&out, reply.data(), sizeof(out));
+	if (replyN < sizeof(KPIHOST64_ForeignOpenReply)) return false;
+	memcpy(&out, g_ipcReply, sizeof(out));
 	return true;
 }
 
-bool KpiHost64Client::ForeignRender(uint32_t sessionId, uint32_t bytesWanted, std::vector<uint8_t>& outPcm, bool& outEof)
+bool KpiHost64Client::ForeignRender(uint32_t sessionId, uint32_t bytesWanted, uint8_t* outPcm, uint32_t outCap, uint32_t& outBytes, bool& outEof)
 {
-	outPcm.clear();
+	outBytes = 0;
 	outEof = false;
+	if (!outPcm || outCap == 0) return false;
 	KPIHOST64_RenderReq rr{};
 	rr.sessionId = sessionId;
 	rr.bytesWanted = bytesWanted;
-	std::vector<uint8_t> reply;
+	uint32_t replyN = 0;
 	uint32_t st = 0;
-	if (!SendRequest(KPIHOST64_CMD_FOREIGN_RENDER, &rr, sizeof(rr), reply, st)) return false;
+	if (!SendRequest(KPIHOST64_CMD_FOREIGN_RENDER, &rr, sizeof(rr), g_ipcReply, kIpcReplyCap, replyN, st)) return false;
 	if (st != KPIHOST64_STATUS_OK) return false;
-	if (reply.size() < sizeof(KPIHOST64_RenderReply)) return false;
-	const KPIHOST64_RenderReply* rep = (const KPIHOST64_RenderReply*)reply.data();
+	if (replyN < sizeof(KPIHOST64_RenderReply)) return false;
+	const KPIHOST64_RenderReply* rep = (const KPIHOST64_RenderReply*)g_ipcReply;
 	outEof = rep->eof ? true : false;
-	if (reply.size() < sizeof(KPIHOST64_RenderReply) + rep->bytesReturned) return false;
-	outPcm.assign(reply.begin() + sizeof(KPIHOST64_RenderReply), reply.begin() + sizeof(KPIHOST64_RenderReply) + rep->bytesReturned);
+	if (replyN < sizeof(KPIHOST64_RenderReply) + rep->bytesReturned) return false;
+	uint32_t n = rep->bytesReturned;
+	if (n > outCap) n = outCap;
+	if (n) memcpy(outPcm, g_ipcReply + sizeof(KPIHOST64_RenderReply), n);
+	outBytes = n;
 	return true;
 }
 
@@ -687,9 +706,9 @@ bool KpiHost64Client::ForeignSeek(uint32_t sessionId, uint64_t posSample)
 	sr.sessionId = sessionId;
 	sr.posSample = posSample;
 	sr.flag = 0;
-	std::vector<uint8_t> reply;
+	uint32_t replyN = 0;
 	uint32_t st = 0;
-	if (!SendRequest(KPIHOST64_CMD_FOREIGN_SEEK, &sr, sizeof(sr), reply, st)) return false;
+	if (!SendRequest(KPIHOST64_CMD_FOREIGN_SEEK, &sr, sizeof(sr), g_ipcReply, kIpcReplyCap, replyN, st)) return false;
 	return st == KPIHOST64_STATUS_OK;
 }
 
@@ -697,9 +716,9 @@ bool KpiHost64Client::ForeignClose(uint32_t sessionId)
 {
 	KPIHOST64_U32 u{};
 	u.v = sessionId;
-	std::vector<uint8_t> reply;
+	uint32_t replyN = 0;
 	uint32_t st = 0;
-	if (!SendRequest(KPIHOST64_CMD_FOREIGN_CLOSE, &u, sizeof(u), reply, st)) return false;
+	if (!SendRequest(KPIHOST64_CMD_FOREIGN_CLOSE, &u, sizeof(u), g_ipcReply, kIpcReplyCap, replyN, st)) return false;
 	return st == KPIHOST64_STATUS_OK;
 }
 
@@ -721,20 +740,22 @@ bool KpiHost64Client::VstOpen(const std::wstring& midPath, const std::wstring& v
 	if (nDll) { memcpy(p, vstDllPath.c_str(), nDll * sizeof(wchar_t)); p += nDll * sizeof(wchar_t); }
 	memcpy(p, &nEx, sizeof(nEx)); p += sizeof(nEx);
 	if (nEx) { memcpy(p, extraScanPath.c_str(), nEx * sizeof(wchar_t)); p += nEx * sizeof(wchar_t); }
-	std::vector<uint8_t> reply;
+	uint32_t replyN = 0;
 	uint32_t st = 0;
-	if (!SendRequest(KPIHOST64_CMD_VST_OPEN, req.data(), (uint32_t)req.size(), reply, st)) return false;
-	if (st != KPIHOST64_STATUS_OK || reply.size() < sizeof(KPIHOST64_ForeignOpenReply)) return false;
-	memcpy(&out, reply.data(), sizeof(out));
+	if (!SendRequest(KPIHOST64_CMD_VST_OPEN, req.data(), (uint32_t)req.size(), g_ipcReply, kIpcReplyCap, replyN, st)) return false;
+	if (st != KPIHOST64_STATUS_OK || replyN < sizeof(KPIHOST64_ForeignOpenReply)) return false;
+	memcpy(&out, g_ipcReply, sizeof(out));
 	return true;
 }
 
 // inj* はモニタ／鍵盤からのショート。ホストが次ブロックで VSTi へ注入する。
-bool KpiHost64Client::VstRender(uint32_t bytesWanted, std::vector<uint8_t>& outPcm, bool& outEof,
+bool KpiHost64Client::VstRender(uint32_t bytesWanted, uint8_t* outPcm, uint32_t outCap, uint32_t& outBytes, bool& outEof,
 	const uint8_t* injPorts, const uint32_t* injMsgs, const int32_t* injOfs, uint32_t injCount, uint32_t slot,
 	uint32_t* outMidiFlags,
 	const uint8_t* sxPorts, const uint8_t* sxPacked, const int32_t* sxLens, uint32_t sxCount)
 {
+	outBytes = 0;
+	if (!outPcm || outCap == 0) return false;
 	if (slot > 1) slot = 0;
 	if (outMidiFlags) *outMidiFlags = 0;
 	KPIHOST64_RenderReq rr{};
@@ -750,10 +771,11 @@ bool KpiHost64Client::VstRender(uint32_t bytesWanted, std::vector<uint8_t>& outP
 		if (n < 2) n = 0;
 		sxBytes += sizeof(uint32_t) * 2 + (size_t)n;
 	}
-	std::vector<uint8_t> req(sizeof(rr) + sizeof(uint32_t) +
+	const size_t reqNeed = sizeof(rr) + sizeof(uint32_t) +
 		(size_t)injCount * sizeof(KPIHOST64_VstLiveMidiReq) +
-		sizeof(uint32_t) + sxBytes);
-	uint8_t* p = req.data();
+		sizeof(uint32_t) + sxBytes;
+	if (reqNeed > kVstReqCap) return false;
+	uint8_t* p = s_vstReq;
 	memcpy(p, &rr, sizeof(rr)); p += sizeof(rr);
 	memcpy(p, &injCount, sizeof(injCount)); p += sizeof(injCount);
 	for (uint32_t i = 0; i < injCount; ++i) {
@@ -777,17 +799,18 @@ bool KpiHost64Client::VstRender(uint32_t bytesWanted, std::vector<uint8_t>& outP
 			sxOff += nb;
 		}
 	}
-	std::vector<uint8_t> reply;
+	uint32_t replyN = 0;
 	uint32_t st = 0;
-	if (!SendRequest(KPIHOST64_CMD_VST_RENDER, req.data(), (uint32_t)req.size(), reply, st)) return false;
-	if (st != KPIHOST64_STATUS_OK || reply.size() < sizeof(KPIHOST64_RenderReply)) return false;
-	const KPIHOST64_RenderReply* r = (const KPIHOST64_RenderReply*)reply.data();
+	if (!SendRequest(KPIHOST64_CMD_VST_RENDER, s_vstReq, (uint32_t)reqNeed, g_ipcReply, kIpcReplyCap, replyN, st)) return false;
+	if (st != KPIHOST64_STATUS_OK || replyN < sizeof(KPIHOST64_RenderReply)) return false;
+	const KPIHOST64_RenderReply* r = (const KPIHOST64_RenderReply*)g_ipcReply;
 	if (outMidiFlags) *outMidiFlags = r->eof;
 	outEof = (r->eof & KPIHOST64_EOF_SHORT) != 0;
-	outPcm.clear();
-	if (r->bytesReturned > 0 && reply.size() >= sizeof(KPIHOST64_RenderReply) + r->bytesReturned) {
-		outPcm.resize(r->bytesReturned);
-		memcpy(outPcm.data(), reply.data() + sizeof(KPIHOST64_RenderReply), r->bytesReturned);
+	if (r->bytesReturned > 0 && replyN >= sizeof(KPIHOST64_RenderReply) + r->bytesReturned) {
+		uint32_t n = r->bytesReturned;
+		if (n > outCap) n = outCap;
+		memcpy(outPcm, g_ipcReply + sizeof(KPIHOST64_RenderReply), n);
+		outBytes = n;
 	}
 	return true;
 }
@@ -799,9 +822,9 @@ bool KpiHost64Client::VstSeek(uint64_t posSample, uint32_t slot)
 	sr.sessionId = slot;
 	sr.posSample = posSample;
 	sr.flag = 0;
-	std::vector<uint8_t> reply;
+	uint32_t replyN = 0;
 	uint32_t st = 0;
-	if (!SendRequest(KPIHOST64_CMD_VST_SEEK, &sr, sizeof(sr), reply, st)) return false;
+	if (!SendRequest(KPIHOST64_CMD_VST_SEEK, &sr, sizeof(sr), g_ipcReply, kIpcReplyCap, replyN, st)) return false;
 	return st == KPIHOST64_STATUS_OK;
 }
 
@@ -810,17 +833,17 @@ bool KpiHost64Client::VstClose(uint32_t slot)
 	if (slot > 1) slot = 0;
 	KPIHOST64_U32 u{};
 	u.v = slot;
-	std::vector<uint8_t> reply;
+	uint32_t replyN = 0;
 	uint32_t st = 0;
-	if (!SendRequest(KPIHOST64_CMD_VST_CLOSE, &u, sizeof(u), reply, st)) return false;
+	if (!SendRequest(KPIHOST64_CMD_VST_CLOSE, &u, sizeof(u), g_ipcReply, kIpcReplyCap, replyN, st)) return false;
 	return st == KPIHOST64_STATUS_OK;
 }
 
 bool KpiHost64Client::VstCloseAll()
 {
-	std::vector<uint8_t> reply;
+	uint32_t replyN = 0;
 	uint32_t st = 0;
-	if (!SendRequest(KPIHOST64_CMD_VST_CLOSE, NULL, 0, reply, st)) return false;
+	if (!SendRequest(KPIHOST64_CMD_VST_CLOSE, NULL, 0, g_ipcReply, kIpcReplyCap, replyN, st)) return false;
 	return st == KPIHOST64_STATUS_OK;
 }
 
@@ -920,17 +943,17 @@ bool KpiHost64Client::VstLivePrograms(uint32_t part1to32, uint32_t first, uint32
 	r.part = part1to32;
 	r.first = first;
 	r.count = count;
-	std::vector<uint8_t> reply;
+	uint32_t replyN = 0;
 	uint32_t st = 0;
-	if (!SendRequest(KPIHOST64_CMD_VST_LIVE_PROGRAMS, &r, sizeof(r), reply, st)) return false;
-	if (st != KPIHOST64_STATUS_OK || reply.size() < sizeof(KPIHOST64_VstLiveProgramsReply))
+	if (!SendRequest(KPIHOST64_CMD_VST_LIVE_PROGRAMS, &r, sizeof(r), g_ipcReply, kIpcReplyCap, replyN, st)) return false;
+	if (st != KPIHOST64_STATUS_OK || replyN < sizeof(KPIHOST64_VstLiveProgramsReply))
 		return false;
 	const KPIHOST64_VstLiveProgramsReply* rep =
-		(const KPIHOST64_VstLiveProgramsReply*)reply.data();
+		(const KPIHOST64_VstLiveProgramsReply*)g_ipcReply;
 	outTotal = rep->total;
 	outCurrent = rep->current;
-	const uint8_t* p = reply.data() + sizeof(*rep);
-	const uint8_t* end = reply.data() + reply.size();
+	const uint8_t* p = g_ipcReply + sizeof(*rep);
+	const uint8_t* end = g_ipcReply + replyN;
 	for (uint32_t i = 0; i < rep->got; ++i) {
 		if ((size_t)(end - p) < sizeof(uint32_t)) break;
 		const uint32_t chars = *(const uint32_t*)p;
@@ -959,16 +982,18 @@ bool KpiHost64Client::VstLiveGetState(uint32_t part1to32, uint32_t which,
 	r.part = part1to32;
 	r.which = which;
 	r.bytes = 0;
-	std::vector<uint8_t> reply;
+	uint32_t replyN = 0;
 	uint32_t st = 0;
-	if (!SendRequest(KPIHOST64_CMD_VST_LIVE_GET_STATE, &r, sizeof(r), reply, st, 10000))
+	if (!SendRequest(KPIHOST64_CMD_VST_LIVE_GET_STATE, &r, sizeof(r), g_ipcReply, kIpcReplyCap, replyN, st, 10000))
 		return false;
-	if (st != KPIHOST64_STATUS_OK || reply.size() < sizeof(KPIHOST64_VstLiveStateReply))
+	if (st != KPIHOST64_STATUS_OK || replyN < sizeof(KPIHOST64_VstLiveStateReply))
 		return false;
-	auto* head = (const KPIHOST64_VstLiveStateReply*)reply.data();
-	if (reply.size() < sizeof(*head) + head->bytes) return false;
-	if (head->bytes)
-		outBytes.assign(reply.begin() + sizeof(*head), reply.begin() + sizeof(*head) + head->bytes);
+	auto* head = (const KPIHOST64_VstLiveStateReply*)g_ipcReply;
+	if (replyN < sizeof(*head) + head->bytes) return false;
+	if (head->bytes) {
+		outBytes.resize(head->bytes);
+		memcpy(outBytes.data(), g_ipcReply + sizeof(*head), head->bytes);
+	}
 	return true;
 }
 

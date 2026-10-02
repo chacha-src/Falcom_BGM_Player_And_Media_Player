@@ -7556,6 +7556,12 @@ BOOL IsMpDjPadOpen()
 	return (g_mpDjPad && ::IsWindow(g_mpDjPad->GetSafeHwnd())) ? TRUE : FALSE;
 }
 
+void MpDjPadShowNoActivate()
+{
+	if (g_mpDjPad && ::IsWindow(g_mpDjPad->GetSafeHwnd()))
+		g_mpDjPad->ShowWindow(SW_SHOWNOACTIVATE);
+}
+
 void MpDjPadPrepareAppExit()
 {
 	if (!IsMpDjPadOpen())
@@ -7580,9 +7586,10 @@ void CloseMpDjPadIfOpen()
 void OpenMpDjPadModeless(CWnd* parent)
 {
 	if (g_mpDjPad && ::IsWindow(g_mpDjPad->GetSafeHwnd())) {
-		g_mpDjPad->ShowWindow(g_oggSubUiRestoring ? SW_SHOWNOACTIVATE : SW_SHOW);
-		if (!g_oggSubUiRestoring)
+		if (!g_oggSubUiRestoring) {
+			g_mpDjPad->ShowWindow(SW_SHOW);
 			g_mpDjPad->SetForegroundWindow();
+		}
 		return;
 	}
 	g_mpDjPad = new CMpDjPadDlg(parent);
@@ -7593,7 +7600,8 @@ void OpenMpDjPadModeless(CWnd* parent)
 	}
 	savedata.mpDjPadwindow = 1;
 	MpPersistSavedataQuick();
-	g_mpDjPad->ShowWindow(g_oggSubUiRestoring ? SW_SHOWNOACTIVATE : SW_SHOW);
+	if (!g_oggSubUiRestoring)
+		g_mpDjPad->ShowWindow(SW_SHOW);
 }
 
 // ---- BPM measure dialog (acrylic caption) ----

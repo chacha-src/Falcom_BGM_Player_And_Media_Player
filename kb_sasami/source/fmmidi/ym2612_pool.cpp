@@ -77,7 +77,9 @@ struct Slot {
     double vib_phase;
     int vib_delay_left;
     int rel_left;
-    std::vector<float> pcm;
+    enum { kPcmFrames = 8192 };
+    float pcm[kPcmFrames * 2];
+    int pcmN;
 };
 
 class YmNote : public note {
@@ -137,6 +139,7 @@ struct Ym2612Pool::Impl {
             slots[i].vib_phase = 0;
             slots[i].vib_delay_left = 0;
             slots[i].rel_left = 0;
+            slots[i].pcmN = 0;
         }
     }
     ~Impl()
@@ -427,11 +430,12 @@ struct Ym2612Pool::Impl {
 
     void render(size_t n)
     {
+        if (n > (size_t)Slot::kPcmFrames) n = (size_t)Slot::kPcmFrames;
         for (int i = 0; i < kVoices; i++) {
             if (!slots[i].used) continue;
-            slots[i].pcm.assign(n * 2, 0.f);
+            slots[i].pcmN = (int)n;
         }
-        std::vector<int32_t> mix(kChips * 6 * 2);
+        int32_t mix[kChips * 6 * 2];
         bool need[kChips];
         for (int c = 0; c < kChips; c++) need[c] = false;
         for (int i = 0; i < kVoices; i++) {
@@ -516,8 +520,8 @@ bool YmNote::synthesize(sample_t* buf, std::size_t samples, double rate, sample_
         Slot& s = pool->slots[slot];
         double v = velocity / 128.0;
         if (s.drum && pool->raira) v *= 1.85;
-        const float* pcm = s.pcm.empty() ? 0 : &s.pcm[0];
-        size_t n = s.pcm.size() / 2;
+        const float* pcm = s.pcmN > 0 ? s.pcm : 0;
+        size_t n = (size_t)s.pcmN;
         if (n > samples) n = samples;
         for (size_t i = 0; i < n; i++) {
             buf[i * 2] += pcm[i * 2] * left * v / 16384.0;

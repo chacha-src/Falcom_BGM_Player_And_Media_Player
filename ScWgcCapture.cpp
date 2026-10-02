@@ -890,16 +890,31 @@ static void ScFxCpuMirror(BYTE* bgra, int w, int h, int stride)
 	}
 }
 
+static BYTE* ScFxScratch(size_t n)
+{
+	static BYTE* p = nullptr;
+	static size_t cap = 0;
+	if (n <= cap && p) return p;
+	BYTE* nb = (BYTE*)malloc(n ? n : 1);
+	if (!nb) return nullptr;
+	free(p);
+	p = nb;
+	cap = n ? n : 1;
+	return p;
+}
+
 static void ScFxCpuSharpen(BYTE* bgra, int w, int h, int stride)
 {
 	// 4K では重いので薄い 3x3 のみ（GPU失敗時の保険）
 	if ((size_t)w * (size_t)h > (size_t)1920 * 1200) return;
-	std::vector<BYTE> tmp((size_t)stride * (size_t)h);
-	memcpy(tmp.data(), bgra, (size_t)stride * (size_t)h);
+	const size_t bytes = (size_t)stride * (size_t)h;
+	BYTE* tmp = ScFxScratch(bytes);
+	if (!tmp) return;
+	memcpy(tmp, bgra, bytes);
 	for (int y = 1; y < h - 1; ++y) {
 		BYTE* drow = bgra + (size_t)y * (size_t)stride;
 		for (int x = 1; x < w - 1; ++x) {
-			const BYTE* c = tmp.data() + (size_t)y * (size_t)stride + (size_t)x * 4;
+			const BYTE* c = tmp + (size_t)y * (size_t)stride + (size_t)x * 4;
 			const BYTE* u = c - stride, *dn = c + stride, *l = c - 4, *r = c + 4;
 			for (int k = 0; k < 3; ++k) {
 				int v = (int)c[k] * 5 - (int)u[k] - (int)dn[k] - (int)l[k] - (int)r[k];
@@ -964,8 +979,10 @@ static void ScFxCpuWaveLike(BYTE* bgra, int w, int h, int stride, float timeSec,
 		if (underwater) ScFxCpuTint(bgra, w, h, stride, -20, 10, 35, 90);
 		return;
 	}
-	std::vector<BYTE> tmp((size_t)stride * (size_t)h);
-	memcpy(tmp.data(), bgra, (size_t)stride * (size_t)h);
+	const size_t bytes = (size_t)stride * (size_t)h;
+	BYTE* tmp = ScFxScratch(bytes);
+	if (!tmp) return;
+	memcpy(tmp, bgra, bytes);
 	const float ampX = underwater ? 0.012f : 0.008f;
 	const float ampY = underwater ? 0.010f : 0.006f;
 	for (int y = 0; y < h; ++y) {
@@ -981,7 +998,7 @@ static void ScFxCpuWaveLike(BYTE* bgra, int w, int h, int stride, float timeSec,
 			int sy = (int)(v * (h - 1) + 0.5f);
 			if (sx < 0) sx = 0; if (sx >= w) sx = w - 1;
 			if (sy < 0) sy = 0; if (sy >= h) sy = h - 1;
-			const BYTE* s = tmp.data() + (size_t)sy * (size_t)stride + (size_t)sx * 4;
+			const BYTE* s = tmp + (size_t)sy * (size_t)stride + (size_t)sx * 4;
 			BYTE* d = drow + (size_t)x * 4;
 			d[0] = s[0]; d[1] = s[1]; d[2] = s[2]; d[3] = s[3];
 		}
@@ -1016,15 +1033,17 @@ static void ScFxCpuPixelate(BYTE* bgra, int w, int h, int stride)
 {
 	const int bs = 12;
 	if (w < bs * 2 || h < bs * 2) return;
-	std::vector<BYTE> tmp((size_t)stride * (size_t)h);
-	memcpy(tmp.data(), bgra, (size_t)stride * (size_t)h);
+	const size_t bytes = (size_t)stride * (size_t)h;
+	BYTE* tmp = ScFxScratch(bytes);
+	if (!tmp) return;
+	memcpy(tmp, bgra, bytes);
 	for (int by = 0; by < h; by += bs) {
 		for (int bx = 0; bx < w; bx += bs) {
 			int r = 0, g = 0, b = 0, n = 0;
 			const int x1 = (bx + bs < w) ? bx + bs : w;
 			const int y1 = (by + bs < h) ? by + bs : h;
 			for (int y = by; y < y1; ++y) {
-				const BYTE* row = tmp.data() + (size_t)y * (size_t)stride;
+				const BYTE* row = tmp + (size_t)y * (size_t)stride;
 				for (int x = bx; x < x1; ++x) {
 					const BYTE* p = row + (size_t)x * 4;
 					b += p[0]; g += p[1]; r += p[2]; ++n;
@@ -1045,13 +1064,14 @@ static void ScFxCpuPixelate(BYTE* bgra, int w, int h, int stride)
 
 static void ScFxCpuFlipV(BYTE* bgra, int w, int h, int stride)
 {
-	std::vector<BYTE> row((size_t)w * 4);
+	BYTE* row = ScFxScratch((size_t)w * 4);
+	if (!row) return;
 	for (int y = 0; y < h / 2; ++y) {
 		BYTE* a = bgra + (size_t)y * (size_t)stride;
 		BYTE* b = bgra + (size_t)(h - 1 - y) * (size_t)stride;
-		memcpy(row.data(), a, (size_t)w * 4);
+		memcpy(row, a, (size_t)w * 4);
 		memcpy(a, b, (size_t)w * 4);
-		memcpy(b, row.data(), (size_t)w * 4);
+		memcpy(b, row, (size_t)w * 4);
 	}
 }
 

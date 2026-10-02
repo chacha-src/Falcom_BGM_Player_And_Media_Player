@@ -845,24 +845,8 @@ namespace std{
     int synthesizer::synthesize(sample_t* output, std::size_t samples, double rate)
     {
         std::size_t n = samples * 2;
-        std::vector<sample_t> buf(n);
-        int num_notes = synthesize_mixing(&buf[0], samples, rate);
-        if(num_notes){
-            for(std::size_t i = 0; i < n; ++i){
-                /*int_least32_t x = buf[i];
-                if(x < -32767){
-                    output[i] = -32767;
-                }else if(x > 32767){
-                    output[i] = 32767;
-                }else{
-                    output[i] = static_cast<int_least16_t>(x);
-                }*/
-                output[i] = buf[i];
-            }
-        }else{
-            memset(output, 0, sizeof(int_least16_t) * n);
-        }
-        return num_notes;
+        memset(output, 0, sizeof(sample_t) * n);
+        return synthesize_mixing(output, samples, rate);
     }
     int synthesizer::synthesize_mixing(sample_t* output, std::size_t samples, double rate)
     {

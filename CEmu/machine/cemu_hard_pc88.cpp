@@ -2935,9 +2935,29 @@ struct Pc88FalcomBoot {
 	uint8_t irq;
 };
 
+/* ys3_88 PATCH: LD SP,0100 / IM 2 のあと LD (52EC),A でバンク内曲を渡す */
+static int CEmuPc88PatchYs3(const uint8_t* mem)
+{
+	if (!mem)
+		return 0;
+	if (mem[0] != 0xF3 || mem[1] != 0x31 || mem[2] != 0x00 || mem[3] != 0x01)
+		return 0;
+	if (mem[4] != 0xED || mem[5] != 0x5E)
+		return 0;
+	for (int i = 0; i + 2 < 63; i++) {
+		if (mem[i] == 0x32 && mem[i + 1] == 0xEC && mem[i + 2] == 0x52)
+			return 1;
+	}
+	return 0;
+}
+
 void CHardPc88::CaptureFalcomBoot()
 {
-	if (falcomBootSnap_ || !falcomType_ || !mem_ || !cpu_)
+	if (falcomBootSnap_ || !mem_ || !cpu_)
+		return;
+	/* Xanadu 系に加え、Ys の AND F0/CP 10 と ys3 PATCH も曲切替でブートへ戻す。
+	   生きたプレーヤへ play を重ねるとワークが壊れ、連続切替がノイズになる。 */
+	if (!falcomType_ && !CEmuPc88PatchFalcomAndF0Cp10(mem_) && !CEmuPc88PatchYs3(mem_))
 		return;
 	Pc88FalcomBoot* s = (Pc88FalcomBoot*)malloc(sizeof(Pc88FalcomBoot));
 	if (!s)
@@ -3342,7 +3362,12 @@ void CHardPc88::PortOut(uint16_t port, uint8_t data)
 	case 0x70: SetTextWindow(data); break;
 	case 0x78: SetTextWindow((uint8_t)(textWinHi_ + 1)); break;
 	/* 5Ch-5Fh（C000-FFFF 上の GVRAM プレーン選択）は意図的に未実装: 237 リップがストローブし 89 がそこにコードを置く。従うとドライバが自分の下から入れ替わる。hoot はポートを無視。これらリップは hoot 向けパッチ。実マップをエミュしても測定差なし（arka88、84 ストローブ、バイト一致）。 */
-	case 0xE4: if (chip_) chip_->AckIrq(); break;
+	case 0xE4:
+		/* ここは CPU の割り込み応答であって YM のタイマフラグではない。
+		   DeliverIrqs が音源 IRQ を受けた時点で線は既に下げてある。
+		   RTC など別 ISR の OUT E4 で、その最中に立ったタイマ IRQ まで消すと
+		   音源ハンドラが呼ばれず YS のテンポが遅れ、拍が飛ぶ。 */
+		break;
 	case 0xE6: break; /* PC-88 IRQ レベル — hoot は無視 */
 	default: ioPorts_[p] = data; break;
 	}

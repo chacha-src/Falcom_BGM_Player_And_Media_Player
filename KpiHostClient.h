@@ -36,19 +36,19 @@ public:
 	bool Ping();
 	bool ListExts(const std::wstring& kpiPath, uint32_t& outKpiVer, std::wstring& outSupportExts);
 	bool Open(const std::wstring& kpiPath, const std::wstring& mediaPath, const KPI_MEDIAINFO& request, uint32_t songNo, KpiHost64Session& outSession);
-	bool RenderBytes(uint32_t sessionId, uint32_t bytesWanted, std::vector<uint8_t>& outPcm, bool& outEof);
+	bool RenderBytes(uint32_t sessionId, uint32_t bytesWanted, uint8_t* outPcm, uint32_t outCap, uint32_t& outBytes, bool& outEof);
 	bool Seek(uint32_t sessionId, uint64_t posSample, uint32_t flag, uint64_t& outNewPosSample);
 	bool Close(uint32_t sessionId);
 
 	bool ForeignListExts(uint32_t pluginKind, const std::wstring& dllPath, std::wstring& outSupportExts);
 	bool ForeignOpen(uint32_t pluginKind, const std::wstring& dllPath, const std::wstring& mediaPath, KPIHOST64_ForeignOpenReply& out);
-	bool ForeignRender(uint32_t sessionId, uint32_t bytesWanted, std::vector<uint8_t>& outPcm, bool& outEof);
+	bool ForeignRender(uint32_t sessionId, uint32_t bytesWanted, uint8_t* outPcm, uint32_t outCap, uint32_t& outBytes, bool& outEof);
 	bool ForeignSeek(uint32_t sessionId, uint64_t posSample);
 	bool ForeignClose(uint32_t sessionId);
 
 	bool VstOpen(const std::wstring& midPath, const std::wstring& vstDllPath,
 		const std::wstring& extraScanPath, KPIHOST64_ForeignOpenReply& out, uint32_t slot = 0);
-	bool VstRender(uint32_t bytesWanted, std::vector<uint8_t>& outPcm, bool& outEof,
+	bool VstRender(uint32_t bytesWanted, uint8_t* outPcm, uint32_t outCap, uint32_t& outBytes, bool& outEof,
 		const uint8_t* injPorts = nullptr, const uint32_t* injMsgs = nullptr,
 		const int32_t* injOfs = nullptr, uint32_t injCount = 0,
 		uint32_t slot = 0, uint32_t* outMidiFlags = nullptr,
@@ -87,7 +87,7 @@ private:
 	bool StartHostProcess();
 
 	bool SendRequest(uint32_t cmd, const void* payload, uint32_t payloadBytes,
-		std::vector<uint8_t>& outReplyPayload, uint32_t& outStatus,
+		uint8_t* outReply, uint32_t outCap, uint32_t& outReplyBytes, uint32_t& outStatus,
 		DWORD timeoutMs = 120000);
 	bool SendSimple(uint32_t cmd, const void* payload, uint32_t payloadBytes,
 		DWORD timeoutMs = 120000);

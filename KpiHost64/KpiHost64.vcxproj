@@ -30,7 +30,7 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'!='Debug|x64' and '$(Configuration)|$(Platform)'!='Release|x64'" Label="Configuration">
     <ConfigurationType>Application</ConfigurationType>
     <UseDebugLibraries>false</UseDebugLibraries>
-    <PlatformToolset>x64ではなくx86でビルド</PlatformToolset>
+    <PlatformToolset>v145</PlatformToolset>
     <WholeProgramOptimization>false</WholeProgramOptimization>
     <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
@@ -47,7 +47,7 @@
     <OutDir>C:\projects\APPLICATION3\ogg_binary\</OutDir>
     <IntDir>$(SolutionDir)$(Platform)\$(Configuration)\$(TargetName)\</IntDir>
     <TargetName Condition="'$(Platform)'=='Win32'">ogghost32</TargetName>
-    <TargetName Condition="'$(Platform)'=='x64'">KpiHost64</TargetName>
+    <TargetName Condition="'$(Platform)'=='x64'">KpiHost64@→x64ではなくx86でogghost32が正解。けしてx64でビルドするな？</TargetName>
   </PropertyGroup>
   <ItemDefinitionGroup>
     <ClCompile>

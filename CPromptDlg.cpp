@@ -1745,10 +1745,14 @@ CString MpPromptSourceText()
 void MpShowPromptDialog(CWnd* pParent, BOOL bActivate)
 {
 	UNREFERENCED_PARAMETER(pParent);
+	extern int g_oggSubUiRestoring;
 	if (g_promptDlg && ::IsWindow(g_promptDlg->GetSafeHwnd())) {
-		g_promptDlg->ShowWindow(bActivate ? SW_SHOW : SW_SHOWNOACTIVATE);
-		if (bActivate)
-			g_promptDlg->SetForegroundWindow();
+		/* 起動復元の Create 相では出さない。表示はまとめて行う。 */
+		if (!g_oggSubUiRestoring) {
+			g_promptDlg->ShowWindow(bActivate ? SW_SHOW : SW_SHOWNOACTIVATE);
+			if (bActivate)
+				g_promptDlg->SetForegroundWindow();
+		}
 		MpMakeIndependentZOrder(g_promptDlg);
 		savedata.mpPromptwindow = 1;
 		return;
@@ -1762,11 +1766,13 @@ void MpShowPromptDialog(CWnd* pParent, BOOL bActivate)
 		return;
 	}
 	MpMakeIndependentZOrder(dlg);
-	dlg->ShowWindow(bActivate ? SW_SHOW : SW_SHOWNOACTIVATE);
-	if (bActivate)
-		dlg->SetForegroundWindow();
 	g_promptDlg = dlg;
 	savedata.mpPromptwindow = 1;
+	if (!g_oggSubUiRestoring) {
+		dlg->ShowWindow(bActivate ? SW_SHOW : SW_SHOWNOACTIVATE);
+		if (bActivate)
+			dlg->SetForegroundWindow();
+	}
 }
 
 void MpTogglePromptDialog(CWnd* pParent)

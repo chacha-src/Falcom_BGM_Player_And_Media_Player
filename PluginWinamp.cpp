@@ -1,4 +1,4 @@
-// Winamp input plugin host (In_Module + fake Out_Module ring → pull read)
+﻿// Winamp input plugin host (In_Module + fake Out_Module ring → pull read)
 //
 // in2.h / out.h と Winamp 本体(In.cpp / InW.cpp)の実挙動に合わせた実装:
 //  - version は IN_UNICODE / IN_INIT_RET を落として 0x100(IN_VER_OLD) / 0x101(IN_VER) のみ受理
@@ -741,15 +741,12 @@ int PluginWinamp_Read(BYTE* dst, int bytesWanted)
 		while (got < bytesWanted) {
 			if (thn1 || stf) break;
 			if (InterlockedCompareExchange(&g_waStopping, 0, 0)) break;
-			std::vector<uint8_t> pcm;
 			bool eof = false;
-			if (!g_kpiHost.ForeignRender(g_waRemoteSid, (uint32_t)(bytesWanted - got), pcm, eof))
+			uint32_t n = 0;
+			if (!g_kpiHost.ForeignRender(g_waRemoteSid, (uint32_t)(bytesWanted - got), dst + got, (uint32_t)(bytesWanted - got), n, eof))
 				break;
-			int n = (int)pcm.size();
-			if (n > bytesWanted - got) n = bytesWanted - got;
 			if (n > 0) {
-				memcpy(dst + got, pcm.data(), (size_t)n);
-				got += n;
+				got += (int)n;
 				tIdle = GetTickCount();
 				continue;
 			}

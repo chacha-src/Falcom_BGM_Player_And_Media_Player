@@ -1,4 +1,4 @@
-#include "StdAfx.h"
+﻿#include "StdAfx.h"
 #include "cemu_driver_fm7.h"
 #include "../chip/cemu_chip_opna.h"
 #include "../chip/cemu_chip_ay.h"
@@ -615,9 +615,7 @@ void CDriverFm7::Close()
 int CDriverFm7::OverlayTitle(unsigned titleCode)
 {
 	if (!hw_) return 0;
-	const unsigned oldProg = (titleCode_ >> 12) & 0xffu;
 	const unsigned newHi = (titleCode >> 8) & 0xffu;
-	const unsigned newProg = (titleCode >> 12) & 0xffu;
 	const unsigned lo = titleCode & 0xffu;
 	if (hw_->falcomMode_ && hw_->Mem()
 		&& ((newHi & 0xF0u) || lo == 0xFFu)) {
@@ -626,8 +624,11 @@ int CDriverFm7::OverlayTitle(unsigned titleCode)
 	}
 	if (hw_->falcomMode_) {
 		hw_->ParkFalcomWait();
-		if (oldProg != newProg && hw_->SoundChip())
+		/* 同じ prog の別フレーズでも前の発音を残さない。 */
+		if (hw_->SoundChip())
 			hw_->SoundChip()->Reset();
+		if (hw_->ChipAy())
+			hw_->ChipAy()->Reset();
 	}
 	titleCode_ = titleCode;
 	songCode_ = (uint8_t)(titleCode & 0xff);

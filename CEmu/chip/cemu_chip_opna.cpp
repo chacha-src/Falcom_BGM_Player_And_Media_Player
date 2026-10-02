@@ -21,6 +21,11 @@ struct CEmuChipOpnaImpl : ymfm::ymfm_interface {
 	int irqAsserted;
 	int64_t timerLeft[2];
 	int64_t dbgLastDur[2];
+	/* ExpireTimers が進めたクロック。dbgClockSum はスケール前なので使わない。 */
+	uint64_t timerNow;
+	uint64_t timerExpiryAt[2];
+	int64_t timerExpiryDur[2];
+	uint8_t timerExpiryValid[2];
 	uint8_t mode27;
 	unsigned timerClockScale;
 	unsigned timerClockScaleDen;
@@ -128,6 +133,10 @@ struct CEmuChipOpnaImpl : ymfm::ymfm_interface {
 		memset(fadePatch, 0, sizeof(fadePatch));
 		timerLeft[0] = timerLeft[1] = -1;
 		dbgLastDur[0] = dbgLastDur[1] = 0;
+		timerNow = 0;
+		timerExpiryAt[0] = timerExpiryAt[1] = 0;
+		timerExpiryDur[0] = timerExpiryDur[1] = 0;
+		timerExpiryValid[0] = timerExpiryValid[1] = 0;
 	}
 
 	~CEmuChipOpnaImpl()
@@ -191,8 +200,49 @@ struct CEmuChipOpnaImpl : ymfm::ymfm_interface {
 		}
 	}
 
+	/* load が 0→1 で、直前まで止まっていたタイマを同じ定数で再始動したとき、
+	   期限からこの OUT までに進んだクロックを周期から引く。
+	   YM2203 は期限で自動リロードするが、ISR が 0x27 の load を落として
+	   立て直すと（YS の 0x38→0x3A）その自動リロードが捨てられ、
+	   ハンドラの待ち時間が毎拍に足される。一定なら遅く、RTC の DI と
+	   重なると拍ごとに揺れる。load を立てたままフラグだけ消す曲は
+	   立ち上がりではないので触らない。 */
+	void BackdateTimerLoad(uint8_t prev, const int64_t before[2])
+	{
+		for (int t = 0; t < 2; t++) {
+			const uint8_t bit = (uint8_t)(1u << t);
+			if ((mode27 & bit) == 0 || (prev & bit) != 0)
+				continue;
+			if (!timerExpiryValid[t])
+				continue;
+			timerExpiryValid[t] = 0;
+			if (before[t] >= 0)
+				continue;
+			if (timerLeft[t] <= 1 || dbgLastDur[t] <= 0 || timerExpiryDur[t] <= 0)
+				continue;
+			/* 位相補正は最大 15 クロック ×12×プリスケール。タイマ B の 1 カウント
+			   （16×12×6=1152）未満なら同じ定数の ack 再始動。 */
+			int64_t same = dbgLastDur[t] - timerExpiryDur[t];
+			if (same < 0) same = -same;
+			if (same >= 1152)
+				continue;
+			int64_t fresh = timerLeft[t] - dbgLastDur[t];
+			if (fresh < 0) fresh = -fresh;
+			if (fresh > 2)
+				continue;
+			if (timerNow < timerExpiryAt[t])
+				continue;
+			const uint64_t elapsed = timerNow - timerExpiryAt[t];
+			if (elapsed == 0 || elapsed * 2 >= (uint64_t)timerLeft[t])
+				continue;
+			timerLeft[t] -= (int64_t)elapsed;
+		}
+	}
+
 	void ExpireTimers(int64_t clocks)
 	{
+		if (clocks <= 0) return;
+		timerNow += (uint64_t)clocks;
 		for (int t = 0; t < 2; t++) {
 			if (timerLeft[t] < 0) continue;
 			timerLeft[t] -= clocks;
@@ -203,6 +253,12 @@ struct CEmuChipOpnaImpl : ymfm::ymfm_interface {
 				timerLeft[t] = -1;
 				if (m_engine)
 					m_engine->engine_timer_expired((uint32_t)t);
+				if ((uint64_t)over <= timerNow)
+					timerExpiryAt[t] = timerNow - (uint64_t)over;
+				else
+					timerExpiryAt[t] = timerNow;
+				timerExpiryDur[t] = dbgLastDur[t];
+				timerExpiryValid[t] = 1;
 				if (t == 0) dbgFireA++;
 				else dbgFireB++;
 				/* hoot ssFMTimer と同じ: load-enable と irq-enable の両方が必要。
@@ -377,6 +433,25 @@ static int32_t CEmuClamp16(int32_t v)
 	return v;
 }
 
+/* YM2203 は FM（最大 32767）と SSG（3ch 合計の 1/3、最大約 16382）を足してから 16bit にする。
+   大きいほうだけで既にレール付近だと合計が 32767 に張り付く。30000 以下はそのまま、
+   それより上だけを 32767 へ漸近させて平らな頭を残さない。 */
+static int32_t CEmuSoftKnee16(int32_t v)
+{
+	const int32_t knee = 30000;
+	const int32_t lim = 32767;
+	const int neg = v < 0;
+	int32_t a = neg ? -v : v;
+	if (a <= knee)
+		return v;
+	const int32_t span = lim - knee;
+	const int32_t over = a - knee;
+	int32_t y = knee + (int32_t)(((int64_t)span * over) / (over + span));
+	if (y > lim)
+		y = lim;
+	return neg ? -y : y;
+}
+
 /* YM2608/YM2203 初期化。opnaMode≠0 なら OPNA、0 なら OPN。 */
 void CEmuChipOpnaInit(CEmuChipOpna* c, uint32_t clockHz, int opnaMode, int sampleRate)
 {
@@ -413,6 +488,8 @@ void CEmuChipOpnaReset(CEmuChipOpna* c)
 	impl->curL = impl->curR = 0;
 	memset(impl->lastAddr, 0, sizeof(impl->lastAddr));
 	impl->timerLeft[0] = impl->timerLeft[1] = -1;
+	impl->timerNow = 0;
+	impl->timerExpiryValid[0] = impl->timerExpiryValid[1] = 0;
 	impl->irqAsserted = 0;
 	impl->playWrites = 0;
 	impl->playKeyOns = 0;
@@ -475,10 +552,19 @@ void CEmuChipOpnaWrite(CEmuChipOpna* c, uint32_t addr, uint32_t data)
 			if (block > 7) block = 7;
 			chipData = (uint8_t)((chipData & ~0x38u) | ((unsigned)block << 3));
 		}
+		int64_t timerBefore[2] = { -1, -1 };
+		const int timerSnap = (p == 0 && reg == 0x27);
+		if (timerSnap) {
+			timerBefore[0] = impl->timerLeft[0];
+			timerBefore[1] = impl->timerLeft[1];
+		}
 		impl->WritePort((uint32_t)(p * 2 + 1), chipData);
 		const unsigned shadowAddr = (p ? 0x100u : 0u) | impl->lastAddr[p];
-		if (p == 0 && impl->lastAddr[0] == 0x27)
+		if (timerSnap) {
+			const uint8_t prevMode = impl->mode27;
 			impl->mode27 = (uint8_t)data;
+			impl->BackdateTimerLoad(prevMode, timerBefore);
+		}
 		/* YM2203: キーオンはFMクロックまでラッチ。フラッシュは ChipSample へ延期 —
 		   Z80 IRQ/PortOut 内から clock_fm を呼ぶとネストが壊れた。 */
 		if (impl->opn && p == 0 && impl->lastAddr[0] == 0x28)
@@ -626,9 +712,14 @@ void CEmuChipOpnaRender(CEmuChipOpna* c, int16_t* stereo, int frames)
 			impl->curL = (int32_t)(sumL / nGen);
 			impl->curR = (int32_t)(sumR / nGen);
 		}
-		/* ステレオMix: 生成済み L/R を 16bit へ飽和。 */
-		stereo[i * 2] = (int16_t)CEmuClamp16(impl->curL);
-		stereo[i * 2 + 1] = (int16_t)CEmuClamp16(impl->curR);
+		/* OPNA は従来の飽和。OPN は FM+SSG の超過分だけ膝で畳む（レール以下は不変）。 */
+		if (impl->opnaMode) {
+			stereo[i * 2] = (int16_t)CEmuClamp16(impl->curL);
+			stereo[i * 2 + 1] = (int16_t)CEmuClamp16(impl->curR);
+		} else {
+			stereo[i * 2] = (int16_t)CEmuSoftKnee16(impl->curL);
+			stereo[i * 2 + 1] = (int16_t)CEmuSoftKnee16(impl->curR);
+		}
 	}
 }
 

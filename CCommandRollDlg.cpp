@@ -2406,10 +2406,13 @@ HBRUSH CCommandRollDlg::OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor)
 void MpShowCommandRollDialog(CWnd* pParent, BOOL bActivate)
 {
 	UNREFERENCED_PARAMETER(pParent);
+	extern int g_oggSubUiRestoring;
 	if (g_rollDlg && ::IsWindow(g_rollDlg->GetSafeHwnd())) {
-		g_rollDlg->ShowWindow(bActivate ? SW_SHOW : SW_SHOWNOACTIVATE);
-		if (bActivate)
-			g_rollDlg->SetForegroundWindow();
+		if (!g_oggSubUiRestoring) {
+			g_rollDlg->ShowWindow(bActivate ? SW_SHOW : SW_SHOWNOACTIVATE);
+			if (bActivate)
+				g_rollDlg->SetForegroundWindow();
+		}
 		MpMakeIndependentZOrder(g_rollDlg);
 		savedata.mpCmdRollwindow = 1;
 		const CString src = MpPromptSourceText();
@@ -2422,11 +2425,13 @@ void MpShowCommandRollDialog(CWnd* pParent, BOOL bActivate)
 	dlg->SetPromptPeer(MpPromptDlgInstance());
 	if (!dlg->Create(IDD_MP_CMDROLL, nullptr)) { delete dlg; return; }
 	MpMakeIndependentZOrder(dlg);
-	dlg->ShowWindow(bActivate ? SW_SHOW : SW_SHOWNOACTIVATE);
-	if (bActivate)
-		dlg->SetForegroundWindow();
 	g_rollDlg = dlg;
 	savedata.mpCmdRollwindow = 1;
+	if (!g_oggSubUiRestoring) {
+		dlg->ShowWindow(bActivate ? SW_SHOW : SW_SHOWNOACTIVATE);
+		if (bActivate)
+			dlg->SetForegroundWindow();
+	}
 	const CString src = MpPromptSourceText();
 	if (!src.IsEmpty())
 		dlg->ReloadFromText(src, 0);

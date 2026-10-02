@@ -25,7 +25,6 @@
 #include <process.h>
 #include <math.h>
 #include <ShlObj.h>
-#include <vector>
 #include <mmsystem.h>
 
 #pragma comment(lib, "Ole32.lib")
@@ -1078,7 +1077,8 @@ static void ScBgraToNv12(const BYTE* bgra, int w, int h, int bgraStride, BYTE* n
 	}
 }
 
-static thread_local std::vector<BYTE> s_scNv12Scratch;
+static thread_local BYTE* s_scScratch = NULL;
+static thread_local size_t s_scScratchCap = 0;
 static thread_local IMFMediaBuffer* s_scReuseBuf = NULL;
 static thread_local DWORD s_scReuseBufCb = 0;
 
@@ -1096,21 +1096,32 @@ static HRESULT ScWriteVideoSample(IMFSinkWriter* writer, DWORD stream, const ScF
 {
 	DWORD cb = 0;
 	const BYTE* srcPtr = NULL;
-	std::vector<BYTE> flipScratch;
 	if (asNv12) {
 		cb = (DWORD)((size_t)fb.w * (size_t)fb.h * 3 / 2);
-		s_scNv12Scratch.resize(cb);
-		ScBgraToNv12(fb.bits, fb.w, fb.h, fb.stride, s_scNv12Scratch.data());
-		srcPtr = s_scNv12Scratch.data();
+		if (cb > s_scScratchCap) {
+			BYTE* nb = (BYTE*)malloc(cb);
+			if (!nb) return E_OUTOFMEMORY;
+			free(s_scScratch);
+			s_scScratch = nb;
+			s_scScratchCap = cb;
+		}
+		ScBgraToNv12(fb.bits, fb.w, fb.h, fb.stride, s_scScratch);
+		srcPtr = s_scScratch;
 	} else if (rgbBottomUp) {
 		const int rowBytes = fb.w * 4;
 		cb = (DWORD)((size_t)rowBytes * (size_t)fb.h);
-		flipScratch.resize(cb);
+		if (cb > s_scScratchCap) {
+			BYTE* nb = (BYTE*)malloc(cb);
+			if (!nb) return E_OUTOFMEMORY;
+			free(s_scScratch);
+			s_scScratch = nb;
+			s_scScratchCap = cb;
+		}
 		for (int y = 0; y < fb.h; ++y) {
-			memcpy(flipScratch.data() + (size_t)(fb.h - 1 - y) * (size_t)rowBytes,
+			memcpy(s_scScratch + (size_t)(fb.h - 1 - y) * (size_t)rowBytes,
 				fb.bits + (size_t)y * (size_t)fb.stride, (size_t)rowBytes);
 		}
-		srcPtr = flipScratch.data();
+		srcPtr = s_scScratch;
 	} else {
 		cb = (DWORD)(fb.stride * fb.h);
 		srcPtr = fb.bits;

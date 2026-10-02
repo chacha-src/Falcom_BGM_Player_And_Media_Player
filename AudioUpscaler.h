@@ -1,7 +1,6 @@
 ﻿#pragma once
 
 #include <cstdint>
-#include <vector>
 #include <cstring>
 
 // ストリーミング用 PCM アップスケール（レート変換・チャンネル展開・ビット拡張）
@@ -32,7 +31,6 @@ public:
 
 private:
 	void EnsureConfigured() const;
-	static void PcmToFloat(const uint8_t* p, int nFrames, int ch, int bits, std::vector<float>& out);
 	static int FloatToPcm(const float* interleaved, int nFrames, int ch, int srcBits, int dstBits, uint8_t* dst, uint32_t& rng);
 
 	float SampleInputLanczos(int ch, double posFrames) const;
@@ -50,10 +48,14 @@ private:
 	bool m_bitDepthEnhance = false; // 同一レートでビット深度のみ拡張
 	uint32_t m_ditherRng = 0xC0FFEE01u;
 
-	std::vector<float> m_fifo; // インターリーブ float, サイズ = m_srcCh * frames
+	// 2秒×8ch×192kHz。毎 Push/Pull の vector 伸長をしない（長時間のヒープ断片化防止）
+	enum { kUpChMax = 32, kUpFifoCap = 8 * 192000 * 2, kUpPullCap = 8192 };
+	float m_fifo[kUpFifoCap];
+	int m_fifoHead = 0;
+	int m_fifoCount = 0;
 	double m_readPos = 0.0;    // fifo 先頭からのフレーム位置（小数）
-
-	std::vector<float> m_scratchFrame;
+	float m_scratchFrame[kUpChMax];
+	float m_pullTmp[kUpPullCap];
 };
 
 // グローバル（oggDlg / oggDlg_ds から参照）— スロット別。アクセスは g_audioUpscalerArr[XfDecSlot()]

@@ -286,12 +286,26 @@ int CDriverPc88::OverlayTitle(unsigned titleCode)
 		return 1;
 	}
 	hw_->titleCode_ = titleCode;
-	if (hw_->FalcomType()) {
-		/* IPL が残した RAM／I／タイマを捨て、ブート直後からその曲を再生し直す。 */
+	if (hw_->FalcomType() || hw_->HasFalcomBoot()) {
+		/* IPL が残した RAM／I／タイマを捨て、ブート直後からその曲を再生し直す。
+		   Ys も同じ。止めずに曲だけ渡すと、前曲のチャネルが残ってノイズになる。 */
 		if (hw_->SoundChip())
 			hw_->SoundChip()->Reset();
 		hw_->RestoreFalcomBoot();
 		triggered_ = 0;
+		leadLen_ = 0;
+		leadPos_ = 0;
+		capturing_ = 0;
+		capAcc_ = 0;
+		cpuAcc_ = 0;
+		cpuCycleBudget_ = 0;
+		opnResidual_ = 0;
+		Ay_Cpu* cpu = hw_->Cpu();
+		if (cpu) {
+			const uint64_t now = (uint64_t)cpu->time64();
+			nextRtc_ = now + (rtcPeriod_ ? rtcPeriod_ : 1);
+			nextVrtc_ = now + (vrtcPeriod_ ? vrtcPeriod_ : 1);
+		}
 		TriggerPlay();
 		return 1;
 	}
@@ -351,7 +365,7 @@ void CDriverPc88::DeliverIrqs(uint64_t now)
 						nextRtc_ += late * rtcPeriod_;
 				}
 			} else if (vector == VEC_SOUND && chip) {
-				/* hoot: ほぼ全 PC88 ドライバは raise_IRQ の直後に lower_IRQ（エッジ）。線を OUT E4 まで High に保つと EI 後に ISR 再入し mucom テンポが走る。YM ステータスは KOEI 用に sticky。E4 も ack。 */
+				/* hoot: ほぼ全 PC88 ドライバは raise_IRQ の直後に lower_IRQ（エッジ）。線を OUT E4 まで High に保つと EI 後に ISR 再入し mucom テンポが走る。YM ステータスは KOEI 用に sticky。E4 では消さない（別 ISR の ack が次のタイマを落とす）。 */
 				chip->AckIrq();
 				s_soundIrqs++;
 			}

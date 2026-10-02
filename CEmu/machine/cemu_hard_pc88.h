@@ -136,6 +136,7 @@ public:
 	/* ブート完了（曲を載せる前）の RAM と CPU。曲ごとにここへ戻してから再生する */
 	void CaptureFalcomBoot();
 	void RestoreFalcomBoot();
+	int HasFalcomBoot() const { return falcomBootSnap_ != 0; }
 	/* Xanadu2 IPL（drv 6 mkII 編曲）。PATCH JP せず $0116 へ載せ RTC を止める */
 	int FalcomIpl() const { return falcomIpl_; }
 	int EnterFalcomIpl();

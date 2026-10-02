@@ -528,15 +528,12 @@ int PluginAimp_Read(BYTE* dst, int bytesWanted)
 		while (got < bytesWanted) {
 			if (thn1 || stf) break;
 			if (InterlockedCompareExchange(&g_aimpStopping, 0, 0)) break;
-			std::vector<uint8_t> pcm;
 			bool eof = false;
-			if (!g_kpiHost.ForeignRender(g_aimpRemoteSid, (uint32_t)(bytesWanted - got), pcm, eof))
+			uint32_t n = 0;
+			if (!g_kpiHost.ForeignRender(g_aimpRemoteSid, (uint32_t)(bytesWanted - got), dst + got, (uint32_t)(bytesWanted - got), n, eof))
 				break;
-			int n = (int)pcm.size();
-			if (n > bytesWanted - got) n = bytesWanted - got;
 			if (n > 0) {
-				memcpy(dst + got, pcm.data(), (size_t)n);
-				got += n;
+				got += (int)n;
 				tIdle = GetTickCount();
 				continue;
 			}

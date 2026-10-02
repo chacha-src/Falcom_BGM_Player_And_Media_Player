@@ -148,7 +148,6 @@ CString FormatAudioPlaybackDisplay(int srcRate, int srcCh, int srcBits)
 
 AudioUpscaler::AudioUpscaler()
 {
-	m_scratchFrame.resize(16);
 }
 
 void AudioUpscaler::Configure(int srcRate, int srcCh, int srcBits,
@@ -172,8 +171,11 @@ void AudioUpscaler::Configure(int srcRate, int srcCh, int srcBits,
 
 	m_bitDepthEnhance = (srcRate == dstRate && srcCh == dstCh && dstBits > srcBits);
 	m_active = (srcRate != dstRate || srcCh != dstCh || srcBits != dstBits);
+	if (srcCh > kUpChMax || dstCh > kUpChMax)
+		m_active = false;
 	if (!m_active) {
-		m_fifo.clear();
+		m_fifoHead = 0;
+		m_fifoCount = 0;
 		m_readPos = 0.0;
 	}
 	else {
@@ -184,7 +186,8 @@ void AudioUpscaler::Configure(int srcRate, int srcCh, int srcBits,
 
 void AudioUpscaler::Reset()
 {
-	m_fifo.clear();
+	m_fifoHead = 0;
+	m_fifoCount = 0;
 	m_readPos = 0.0;
 	m_ditherRng = 0xC0FFEE01u;
 }
@@ -217,36 +220,6 @@ namespace {
 
 void AudioUpscaler::EnsureConfigured() const
 {
-}
-
-void AudioUpscaler::PcmToFloat(const uint8_t* p, int nFrames, int ch, int bits, std::vector<float>& out)
-{
-	const int n = nFrames * ch;
-	out.resize((size_t)n);
-	if (bits == 8) {
-		for (int i = 0; i < n; ++i) {
-			float v = (float)((int)p[i] - 128) / 128.0f;
-			out[(size_t)i] = (std::max)(-1.0f, (std::min)(1.0f, v));
-		}
-	}
-	else if (bits == 16) {
-		const int16_t* s = (const int16_t*)p;
-		for (int i = 0; i < n; ++i)
-			out[(size_t)i] = (float)s[i] / 32768.0f;
-	}
-	else if (bits == 24) {
-		for (int i = 0; i < n; ++i) {
-			const uint8_t* b = p + i * 3;
-			int32_t v = (int32_t)((uint32_t)b[0] | ((uint32_t)b[1] << 8) | ((uint32_t)b[2] << 16));
-			if (v & 0x800000) v |= ~0xFFFFFF;
-			out[(size_t)i] = (float)v / 8388608.0f;
-		}
-	}
-	else { // 32
-		const int32_t* s = (const int32_t*)p;
-		for (int i = 0; i < n; ++i)
-			out[(size_t)i] = (float)((double)s[i] / 2147483648.0);
-	}
 }
 
 int AudioUpscaler::FloatToPcm(const float* interleaved, int nFrames, int ch, int srcBits, int dstBits, uint8_t* dst, uint32_t& rng)
@@ -302,7 +275,7 @@ int AudioUpscaler::FloatToPcm(const float* interleaved, int nFrames, int ch, int
 
 float AudioUpscaler::SampleInputLanczos(int ch, double posFrames) const
 {
-	const int64_t totalFrames = (int64_t)(m_fifo.size() / (size_t)m_srcCh);
+	const int64_t totalFrames = (m_srcCh > 0) ? (int64_t)(m_fifoCount / m_srcCh) : 0;
 	if (totalFrames <= 0) return 0.0f;
 	double x = posFrames;
 	if (x < 0.0) x = 0.0;
@@ -312,7 +285,8 @@ float AudioUpscaler::SampleInputLanczos(int ch, double posFrames) const
 	auto getS = [&](int frameIdx, int c) -> float {
 		if (frameIdx < 0) frameIdx = 0;
 		if (frameIdx >= (int)totalFrames) frameIdx = (int)totalFrames - 1;
-		return m_fifo[(size_t)frameIdx * (size_t)m_srcCh + (size_t)c];
+		const int sample = frameIdx * m_srcCh + c;
+		return m_fifo[(m_fifoHead + sample) % kUpFifoCap];
 	};
 	double sum = 0.0;
 	double wsum = 0.0;
@@ -421,9 +395,15 @@ static void UpmixStereoToSurround(float L, float R, int dstCh, float* dstChOut, 
 void AudioUpscaler::BuildOutputFrame(double posInSrcFrames, float* dstCh) const
 {
 	// ソースは FLAC/WAV 系の並び想定: FL,FR,FC,LFE,BL,BR[,SL,SR]
-	std::vector<float> srcSamp((size_t)m_srcCh);
+	if (m_srcCh < 1 || m_srcCh > kUpChMax || m_dstCh < 1 || m_dstCh > kUpChMax) {
+		const int n = (m_dstCh > 0 && m_dstCh <= kUpChMax) ? m_dstCh : 0;
+		for (int d = 0; d < n; ++d)
+			dstCh[d] = 0.0f;
+		return;
+	}
+	float srcSamp[kUpChMax];
 	for (int c = 0; c < m_srcCh; ++c)
-		srcSamp[(size_t)c] = SampleInput(c, posInSrcFrames);
+		srcSamp[c] = SampleInput(c, posInSrcFrames);
 
 	for (int d = 0; d < m_dstCh; ++d)
 		dstCh[d] = 0.0f;
@@ -437,7 +417,7 @@ void AudioUpscaler::BuildOutputFrame(double posInSrcFrames, float* dstCh) const
 
 	if (m_srcCh == m_dstCh) {
 		for (int d = 0; d < m_dstCh; ++d)
-			dstCh[d] = clip1(srcSamp[(size_t)d]);
+			dstCh[d] = clip1(srcSamp[d]);
 		return;
 	}
 
@@ -514,7 +494,7 @@ void AudioUpscaler::BuildOutputFrame(double posInSrcFrames, float* dstCh) const
 	// 7.1 -> 5.1（サイドをバックへマッピング）
 	if (m_srcCh == 8 && m_dstCh == 6) {
 		for (int i = 0; i < 4; ++i)
-			dstCh[i] = clip1(srcSamp[(size_t)i]);
+			dstCh[i] = clip1(srcSamp[i]);
 		dstCh[4] = clip1(s2 * (srcSamp[4] + srcSamp[6]));
 		dstCh[5] = clip1(s2 * (srcSamp[5] + srcSamp[7]));
 		return;
@@ -523,7 +503,7 @@ void AudioUpscaler::BuildOutputFrame(double posInSrcFrames, float* dstCh) const
 	// 5.1 -> 7.1（サイドにバックを割当）
 	if (m_srcCh == 6 && m_dstCh == 8) {
 		for (int i = 0; i < 6; ++i)
-			dstCh[i] = clip1(srcSamp[(size_t)i]);
+			dstCh[i] = clip1(srcSamp[i]);
 		dstCh[6] = srcSamp[4];
 		dstCh[7] = srcSamp[5];
 		return;
@@ -628,45 +608,81 @@ void AudioUpscaler::BuildOutputFrame(double posInSrcFrames, float* dstCh) const
 
 	if (m_dstCh < m_srcCh) {
 		for (int d = 0; d < m_dstCh; ++d)
-			dstCh[d] = clip1(srcSamp[(size_t)d]);
+			dstCh[d] = clip1(srcSamp[d]);
 		return;
 	}
 
 	for (int d = 0; d < m_srcCh; ++d)
-		dstCh[d] = clip1(srcSamp[(size_t)d]);
+		dstCh[d] = clip1(srcSamp[d]);
 	for (int d = m_srcCh; d < m_dstCh; ++d)
-		dstCh[d] = clip1(srcSamp[(size_t)m_srcCh - 1]);
+		dstCh[d] = clip1(srcSamp[m_srcCh - 1]);
 }
 
 void AudioUpscaler::PushInterleaved(const uint8_t* pcm, int byteCount)
 {
 	if (!m_active || byteCount <= 0 || !pcm) return;
+	if (m_srcCh < 1 || m_srcCh > kUpChMax) return;
 	const int bps = m_srcBits / 8;
 	const int frameBytes = m_srcCh * bps;
 	if (frameBytes <= 0) return;
 	int nFrames = byteCount / frameBytes;
 	if (nFrames <= 0) return;
-	std::vector<float> block;
-	PcmToFloat(pcm, nFrames, m_srcCh, m_srcBits, block);
-	const size_t old = m_fifo.size();
-	m_fifo.resize(old + block.size());
-	memcpy(m_fifo.data() + old, block.data(), block.size() * sizeof(float));
-	// 上限超過分を先頭から破棄（滞留防止）。2秒分を超えたら古い入力を捨てる。
-	const size_t maxFifo = (size_t)m_srcCh * (size_t)(std::max)(m_srcRate, 1) * 2u;
-	if (m_fifo.size() > maxFifo) {
-		size_t excess = m_fifo.size() - maxFifo;
-		excess -= excess % (size_t)m_srcCh;
-		if (excess > 0) {
-			m_fifo.erase(m_fifo.begin(), m_fifo.begin() + (std::ptrdiff_t)excess);
-			m_readPos = (std::max)(0.0, m_readPos - (double)(excess / (size_t)m_srcCh));
+
+	int maxFifo = m_srcCh * ((m_srcRate > 1) ? m_srcRate : 1) * 2;
+	if (maxFifo > kUpFifoCap)
+		maxFifo = kUpFifoCap - (kUpFifoCap % m_srcCh);
+	if (maxFifo < m_srcCh)
+		maxFifo = m_srcCh;
+
+	const uint8_t* p = pcm;
+	for (int f = 0; f < nFrames; ++f) {
+		float tmp[kUpChMax];
+		if (m_srcBits == 8) {
+			for (int c = 0; c < m_srcCh; ++c) {
+				float v = (float)((int)p[c] - 128) / 128.0f;
+				if (v > 1.0f) v = 1.0f;
+				else if (v < -1.0f) v = -1.0f;
+				tmp[c] = v;
+			}
 		}
+		else if (m_srcBits == 16) {
+			const int16_t* s = (const int16_t*)p;
+			for (int c = 0; c < m_srcCh; ++c)
+				tmp[c] = (float)s[c] / 32768.0f;
+		}
+		else if (m_srcBits == 24) {
+			for (int c = 0; c < m_srcCh; ++c) {
+				const uint8_t* b = p + c * 3;
+				int32_t v = (int32_t)((uint32_t)b[0] | ((uint32_t)b[1] << 8) | ((uint32_t)b[2] << 16));
+				if (v & 0x800000) v |= ~0xFFFFFF;
+				tmp[c] = (float)v / 8388608.0f;
+			}
+		}
+		else {
+			const int32_t* s = (const int32_t*)p;
+			for (int c = 0; c < m_srcCh; ++c)
+				tmp[c] = (float)((double)s[c] / 2147483648.0);
+		}
+		p += frameBytes;
+
+		while (m_fifoCount + m_srcCh > maxFifo && m_fifoCount >= m_srcCh) {
+			m_fifoHead += m_srcCh;
+			if (m_fifoHead >= kUpFifoCap) m_fifoHead %= kUpFifoCap;
+			m_fifoCount -= m_srcCh;
+			m_readPos -= 1.0;
+			if (m_readPos < 0.0) m_readPos = 0.0;
+		}
+		if (m_fifoCount + m_srcCh > kUpFifoCap)
+			break;
+		for (int c = 0; c < m_srcCh; ++c)
+			m_fifo[(m_fifoHead + m_fifoCount++) % kUpFifoCap] = tmp[c];
 	}
 }
 
 bool AudioUpscaler::NeedsMoreInput() const
 {
 	if (!m_active) return false;
-	const int64_t nIn = (int64_t)(m_fifo.size() / (size_t)m_srcCh);
+	const int64_t nIn = (m_srcCh > 0) ? (int64_t)(m_fifoCount / m_srcCh) : 0;
 	double need = m_readPos + 4.0 + (double)m_dstRate / (double)m_srcRate * 2.0;
 	return (double)nIn < need;
 }
@@ -690,31 +706,40 @@ int AudioUpscaler::PullInterleaved(uint8_t* dst, int dstCapacity)
 	const int outFrameBytes = m_dstCh * (m_dstBits / 8);
 	int outFramesCap = dstCapacity / outFrameBytes;
 	if (outFramesCap <= 0) return 0;
+	if (m_srcCh < 1 || m_dstCh < 1 || m_dstCh > kUpChMax) return 0;
+	int batchFrames = kUpPullCap / m_dstCh;
+	if (batchFrames < 1) return 0;
 
-	std::vector<float> inter((size_t)m_dstCh * (size_t)outFramesCap);
-	int produced = 0;
+	int outBytes = 0;
 	const double step = (double)m_srcRate / (double)m_dstRate;
-	while (produced < outFramesCap) {
-		const int64_t nIn = (int64_t)(m_fifo.size() / (size_t)m_srcCh);
-		if ((double)nIn < m_readPos + step + 5.0)
-			break;
-		BuildOutputFrame(m_readPos, m_scratchFrame.data());
-		for (int c = 0; c < m_dstCh; ++c)
-			inter[(size_t)produced * (size_t)m_dstCh + (size_t)c] = m_scratchFrame[(size_t)c];
-		m_readPos += step;
-		produced++;
+	int producedTotal = 0;
+	while (producedTotal < outFramesCap) {
+		int want = outFramesCap - producedTotal;
+		if (want > batchFrames) want = batchFrames;
+		int produced = 0;
+		while (produced < want) {
+			const int64_t nIn = (int64_t)(m_fifoCount / m_srcCh);
+			if ((double)nIn < m_readPos + step + 5.0)
+				break;
+			BuildOutputFrame(m_readPos, m_scratchFrame);
+			for (int c = 0; c < m_dstCh; ++c)
+				m_pullTmp[produced * m_dstCh + c] = m_scratchFrame[c];
+			m_readPos += step;
+			produced++;
+		}
+		if (produced == 0) break;
+		outBytes += FloatToPcm(m_pullTmp, produced, m_dstCh, m_srcBits, m_dstBits, dst + outBytes, m_ditherRng);
+		producedTotal += produced;
 	}
 
-	// 消費済み入力を FIFO からまとめて捨てる（1フレームずつの erase は O(n^2) で滞留する）
 	const int64_t dropFrames = (int64_t)m_readPos;
 	if (dropFrames > 0 && m_srcCh > 0) {
-		const size_t dropSamp = (size_t)dropFrames * (size_t)m_srcCh;
-		if (dropSamp <= m_fifo.size()) {
-			m_fifo.erase(m_fifo.begin(), m_fifo.begin() + (std::ptrdiff_t)dropSamp);
+		const int dropSamp = (int)dropFrames * m_srcCh;
+		if (dropSamp > 0 && dropSamp <= m_fifoCount) {
+			m_fifoHead = (m_fifoHead + dropSamp) % kUpFifoCap;
+			m_fifoCount -= dropSamp;
 			m_readPos -= (double)dropFrames;
 		}
 	}
-
-	if (produced == 0) return 0;
-	return FloatToPcm(inter.data(), produced, m_dstCh, m_srcBits, m_dstBits, dst, m_ditherRng);
+	return outBytes;
 }

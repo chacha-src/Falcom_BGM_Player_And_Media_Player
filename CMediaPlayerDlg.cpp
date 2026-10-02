@@ -1466,12 +1466,6 @@ static void MpSetPushToggle(CCustomStandardButton& btn, BOOL on,
 int CMediaPlayerDlg::Create(CWnd* pParent)
 {
 	BOOL bret = CCustomBlurDialogExBase::Create(CMediaPlayerDlg::IDD, pParent);
-	if (bret == TRUE) {
-		ShowWindow(SW_SHOW);
-		// OnInitDialog 時点では EnsureVisible が効かないことがあるため、
-		// 表示確定後にプレイリスト側の選択位置へ復元する。
-		InitListScrollPosition();
-	}
 	return bret;
 }
 
@@ -2469,6 +2463,9 @@ BOOL CMediaPlayerDlg::PreCreateWindow(CREATESTRUCT& cs)
 		return FALSE;
 	cs.dwExStyle |= WS_EX_APPWINDOW;
 	cs.style |= WS_MAXIMIZEBOX;
+	/* テンプレートの WS_VISIBLE だと Create 完了前に MP だけ先に出る。
+	   表示は EnterMediaPlayerMode が、保存済みサブ画面の生成後に行う。 */
+	cs.style &= ~WS_VISIBLE;
 	return TRUE;
 }
 
@@ -14356,6 +14353,10 @@ void EnterMediaPlayerMode(BOOL bConvertCoords)
 		return;
 	}
 	mp = creating;
+	/* MP を出す前に、savedata で開いていたトグル画面を作る。
+	   ここではまだ MP は非表示。戻り後にまとめて表示する。 */
+	if (og && ::IsWindow(og->GetSafeHwnd()))
+		og->SendMessage(WM_OGG_TOGGLE_SUBUI, 10, 0);
 #if CCUSTOM_AERO_SUPPORT
 	if (savedata.aero == 1)
 		mp->RefreshAeroMode();
@@ -14374,6 +14375,12 @@ void EnterMediaPlayerMode(BOOL bConvertCoords)
 	::ShowWindow(og->m_hWnd, SW_HIDE);
 
 	if (mp && ::IsWindow(mp->GetSafeHwnd())) {
+		mp->ShowWindow(SW_SHOW);
+		// 生成は手前の SendMessage(10) で済んでいる。ここでは MP と続けて出す。
+		if (og && ::IsWindow(og->GetSafeHwnd()))
+			og->SendMessage(WM_OGG_TOGGLE_SUBUI, 20, 0);
+		// 非表示のままでは EnsureVisible が効かない。表示後に選択行へ戻す。
+		mp->InitListScrollPosition();
 		::SetForegroundWindow(mp->m_hWnd);
 		mp->SetFocus();
 		SetupTaskbarThumbButtons(mp->m_hWnd, TRUE);

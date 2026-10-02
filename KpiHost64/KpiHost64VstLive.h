@@ -17,7 +17,7 @@ uint32_t VstHost64_LiveUnload(uint32_t part1to32);
 uint32_t VstHost64_LiveUnloadAll();
 uint32_t VstHost64_LiveMidi(uint32_t port, uint32_t msg); // フォールバック。通常は MIDI SHM
 uint32_t VstHost64_LiveSysex(uint32_t port, const uint8_t* data, uint32_t len);
-uint32_t VstHost64_LiveRender(uint32_t frames, std::vector<uint8_t>& reply); // フォールバック。通常は音声 SHM
+uint32_t VstHost64_LiveRender(uint32_t frames, uint8_t* out, uint32_t outCap, uint32_t& outN); // フォールバック。通常は音声 SHM
 uint32_t VstHost64_LiveAudioStart(); // 共有メモリ＋レンダースレッド開始
 uint32_t VstHost64_LiveAudioStop();
 uint32_t VstHost64_LiveEditorOpen(uint32_t part1to32);

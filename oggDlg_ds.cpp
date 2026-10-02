@@ -97,7 +97,7 @@ bool InitializeRubberBandStretcher();
 bool ProcessAudioWithRubberBand(float tempoRate, bool t = false);
 bool ProcessAudioWithRubberBandBank(int bank, float tempoRate, bool t,
 	const uint8_t* inData, int inBytes, int bits, int ch, int rate,
-	std::vector<float>& outFloat);
+	float* outFloat, int& outN, int outCap);
 
 #define REFTIMES_PER_SEC  10000000
 #define REFTIMES_PER_MILLISEC  10000
@@ -296,17 +296,19 @@ extern int tempo;
 
 
 ULONG oldw = OUTPUT_BUFFER_SIZE * 2;
-extern std::vector<float> m_convertedPcmFloatData;
-extern std::vector<uint8_t> outputRawBytesData;
+extern float m_convertedPcmFloatData[];
+extern int m_convertedPcmN;
+extern uint8_t outputRawBytesData[];
+extern int outputRawN;
 
 //bool ProcessAudioWithSoundTouch(float tempoRate);
 bool ProcessAudioWithRubberBand(float tempoRate, bool t);
-void ConvertRawBytesToFloat(const std::vector<uint8_t>& raw_data,
+void ConvertRawBytesToFloat(const uint8_t* raw_data, int rawN,
 	uint16_t bits_per_sample, uint16_t channels,
-	std::vector<float>& out_float_data);
-void ConvertFloatToRawBytes(const std::vector<float>& float_data,
+	float* out_float_data, int outCap, int& outN);
+void ConvertFloatToRawBytes(const float* float_data, int nFloat,
 	uint16_t target_bits_per_sample, uint16_t channels,
-	std::vector<uint8_t>& out_raw_data);
+	uint8_t* out_raw_data, int outCap, int& outN);
 
 BYTE bufkpil[OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 3];
 BYTE bufkpim[OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 3];
@@ -1334,7 +1336,7 @@ UINT HandleNotifications(LPVOID)
 
 		// cl2 はデコード＋状態更新のみ。dsb->Lock はドライバ待ちで数秒固まることがあり、
 		// その間 UI(timerp) が同じ cl2 で止まるのを避けるため、PCM をステージしてから Lock する。
-		static std::vector<BYTE> s_dsStage;
+		static BYTE s_dsStage[(10240 * 6 / 2) * 5 * 8];
 		int stageBytes = 0;
 		bool stageFade = false;
 		int readmeThisCycle = 0;
@@ -1361,13 +1363,13 @@ UINT HandleNotifications(LPVOID)
 		timeee += savedata.ms;
 
 		stageBytes = writtenThisCycle;
-		if (stageBytes > 0 && (int)s_dsStage.size() < stageBytes)
-			s_dsStage.resize((size_t)stageBytes);
+		if (stageBytes > (int)sizeof(s_dsStage))
+			stageBytes = (int)sizeof(s_dsStage);
 
 		if (HandleFillIsRunning()) {
 			/* デコードは Fill 側。ここは DS 空きに合わせて取り出すだけ。 */
 			bool fillExit = false;
-			int got = HandleFillTake(s_dsStage.data(), stageBytes, &readmeThisCycle, &fillExit);
+			int got = HandleFillTake(s_dsStage, stageBytes, &readmeThisCycle, &fillExit);
 			if (sek == 1) {
 				HandleFillFlush();
 				sflg = TRUE; flg3 = 3; sek = FALSE; sflg = FALSE;
@@ -1376,7 +1378,7 @@ UINT HandleNotifications(LPVOID)
 			if (fillExit || PlayAbortIsSet() || thn1)
 				return stopPlaybackAndExit();
 			if (got < stageBytes && stageBytes > 0)
-				ZeroMemory(s_dsStage.data() + got, (size_t)(stageBytes - got));
+				ZeroMemory(s_dsStage + got, (size_t)(stageBytes - got));
 			stageFade = (!InterlockedCompareExchange(&g_xfInProgress, 0, 0)
 				&& drainSilence) ? true : false;
 		}
@@ -1387,7 +1389,7 @@ UINT HandleNotifications(LPVOID)
 			else {
 				bool decExit = false;
 				InterlockedExchange(&s_fillInDecode, 1);
-				HandleFillDecodeOne(s_dsStage.data(), stageBytes, &readmeThisCycle, &decExit);
+				HandleFillDecodeOne(s_dsStage, stageBytes, &readmeThisCycle, &decExit);
 				InterlockedExchange(&s_fillInDecode, 0);
 				if (decExit)
 					exitAfterCl2 = true;
@@ -1404,11 +1406,11 @@ UINT HandleNotifications(LPVOID)
 		/* Speana / アナライザ / ピアノロール / EQコードは bufwav3 を
 		   DS リングの鏡として PlayCursor から読む。Fill は線形ステージなので、
 		   Lock 前に従来どおりラップして戻す。ここが空だと棒もコードも止まる。 */
-		if (stageBytes > 0 && (int)s_dsStage.size() >= stageBytes) {
+		if (stageBytes > 0 && stageBytes <= (int)sizeof(s_dsStage)) {
 			if (len1 > 0)
-				memcpy(bufwav3 + oldw, s_dsStage.data(), (size_t)len1);
+				memcpy(bufwav3 + oldw, s_dsStage, (size_t)len1);
 			if (len2 > 0)
-				memcpy(bufwav3, s_dsStage.data() + len1, (size_t)len2);
+				memcpy(bufwav3, s_dsStage + len1, (size_t)len2);
 		}
 
 		// DirectSound 転送（cl2 外。UI 側 Closeds で m_dsb が NULL でもローカル参照で安全）
@@ -1432,14 +1434,14 @@ UINT HandleNotifications(LPVOID)
 					if (thruMute)
 						ZeroMemory(pdsb1, (SIZE_T)copy1);
 					else
-						memcpy(pdsb1, s_dsStage.data(), (size_t)copy1);
+						memcpy(pdsb1, s_dsStage, (size_t)copy1);
 				}
 				if (stageFade && copy1 > 0) ZeroMemory(pdsb1, (SIZE_T)copy1);
 				if (copy2 > 0 && copy1 + copy2 <= stageBytes) {
 					if (thruMute)
 						ZeroMemory(pdsb2, (SIZE_T)copy2);
 					else
-						memcpy(pdsb2, s_dsStage.data() + copy1, (size_t)copy2);
+						memcpy(pdsb2, s_dsStage + copy1, (size_t)copy2);
 				}
 				if (stageFade && copy2 > 0) ZeroMemory(pdsb2, (SIZE_T)copy2);
 				dsb->Unlock(pdsb1, len3, pdsb2, len4);
@@ -1448,14 +1450,14 @@ UINT HandleNotifications(LPVOID)
 			}
 		}
 		if (lockedOk && !stageFade) {
-			MpMirrorWritePcm(s_dsStage.data(), stageBytes);
-			MpRemoteWritePcm(s_dsStage.data(), stageBytes);
+			MpMirrorWritePcm(s_dsStage, stageBytes);
+			MpRemoteWritePcm(s_dsStage, stageBytes);
 			extern int g_ds_pcm_rate, g_ds_pcm_ch, g_ds_pcm_bits;
 			extern UINT PlaybackCcWriteDsPcm(const void* p, UINT n, int rate, int ch, int bits);
 			const int r = (g_ds_pcm_rate >= 8000) ? g_ds_pcm_rate : wavbit_sample_Hz;
 			const int c = (g_ds_pcm_ch >= 1) ? g_ds_pcm_ch : 2;
 			const int b = (g_ds_pcm_bits == 16 || g_ds_pcm_bits == 24 || g_ds_pcm_bits == 32) ? g_ds_pcm_bits : 16;
-			PlaybackCcWriteDsPcm(s_dsStage.data(), (UINT)stageBytes, r, c, b);
+			PlaybackCcWriteDsPcm(s_dsStage, (UINT)stageBytes, r, c, b);
 		}
 
 		{
@@ -1713,36 +1715,40 @@ void HandleNotifications_export()
 	}
 }
 
-extern std::vector<float> inputFloatData;
-extern std::vector<uint8_t> m_bufwav3_1;
+extern float inputFloatData[];
+extern int inputFloatN;
+extern uint8_t m_bufwav3_1[];
+extern int m_bufwav3_1_n;
 extern int pitch;
 extern float tempoRate2;
 extern float PitchScaleFromPos(int pitchPos);
-std::vector<float> g_loopTailBuffer;
+enum { kRbBytes = (10240 * 6 / 2) * 5 * 8, kRbCh = 32, kRbPull = 4096 };
+float g_loopTailBuffer[kRbBytes];
+int g_loopTailN = 0;
 size_t g_loopTailPos = 0;
 enum { RB_BANKS = 2 };
 static bool g_rubberBandFinalFlushed[RB_BANKS] = { false, false };
 static int g_rbInitRate[RB_BANKS] = { 0, 0 };
 static int g_rbInitCh[RB_BANKS] = { 0, 0 };
 static std::mutex g_rbMu[RB_BANKS];
-// 毎バッファ vector 新規確保を避け、容量は伸ばすのみ（断片化抑制）
 struct RbProcessScratch {
-	std::vector<uint8_t> raw;
-	std::vector<float> inputFloat;
-	std::vector<float> channelFlat;
-	std::vector<float*> channelPointers;
-	std::vector<float> outputFlat;
-	std::vector<float*> outputPointers;
+	uint8_t raw[kRbBytes];
+	float inputFloat[kRbBytes];
+	int inputN = 0;
+	float channelFlat[kRbBytes];
+	float* channelPointers[kRbCh];
+	float outputFlat[kRbPull * kRbCh];
+	float* outputPointers[kRbCh];
 	float dummyZero = 0.0f;
 };
 static RbProcessScratch g_rbScratch[RB_BANKS];
 
-void ConvertRawBytesToFloat(const std::vector<uint8_t>& raw_data,
+void ConvertRawBytesToFloat(const uint8_t* raw_data, int rawN,
 	uint16_t bits_per_sample, uint16_t channels,
-	std::vector<float>& out_float_data);
-void ConvertFloatToRawBytes(const std::vector<float>& float_data,
+	float* out_float_data, int outCap, int& outN);
+void ConvertFloatToRawBytes(const float* float_data, int nFloat,
 	uint16_t target_bits_per_sample, uint16_t channels,
-	std::vector<uint8_t>& out_raw_data);
+	uint8_t* out_raw_data, int outCap, int& outN);
 
 static void RubberBand_DestroyBankUnlocked(int bank)
 {
@@ -1832,11 +1838,14 @@ bool InitializeRubberBandStretcher()
 
 bool ProcessAudioWithRubberBandBank(int bank, float tempoRate, bool t,
 	const uint8_t* inData, int inBytes, int bits, int ch, int rate,
-	std::vector<float>& outFloat)
+	float* outFloat, int& outN, int outCap)
 {
 	try {
+		outN = 0;
+		if (!outFloat || outCap <= 0) return false;
 		if (bank < 0 || bank >= RB_BANKS) bank = 0;
 		if (ch < 1) ch = 2;
+		if (ch > kRbCh) ch = kRbCh;
 		if (rate < 8000) rate = 44100;
 		if (bits <= 0 || bits > 32) bits = 16;
 
@@ -1853,7 +1862,7 @@ bool ProcessAudioWithRubberBandBank(int bank, float tempoRate, bool t,
 			if (!InitializeRubberBandStretcherExUnlocked(bank, rate, ch)) return false;
 		}
 		else if (t && g_rubberBandFinalFlushed[bank]) {
-			outFloat.clear();
+			outN = 0;
 			return true;
 		}
 
@@ -1861,55 +1870,55 @@ bool ProcessAudioWithRubberBandBank(int bank, float tempoRate, bool t,
 		g_rubberBandStretcher[bank]->setPitchScale(PitchScaleFromPos(pitch));
 
 		if (!t) {
-			scr.raw.resize((size_t)inBytes);
-			memcpy(scr.raw.data(), inData, (size_t)inBytes);
-			ConvertRawBytesToFloat(scr.raw, (uint16_t)bits, (uint16_t)ch, scr.inputFloat);
-			if (scr.inputFloat.empty()) return false;
+			if (inBytes > kRbBytes) inBytes = kRbBytes;
+			memcpy(scr.raw, inData, (size_t)inBytes);
+			ConvertRawBytesToFloat(scr.raw, inBytes, (uint16_t)bits, (uint16_t)ch, scr.inputFloat, kRbBytes, scr.inputN);
+			if (scr.inputN <= 0) return false;
 
-			const size_t samplesIn = scr.inputFloat.size() / (size_t)ch;
+			const size_t samplesIn = (size_t)scr.inputN / (size_t)ch;
 			if (samplesIn == 0) return false;
-			scr.channelFlat.resize(samplesIn * (size_t)ch);
-			scr.channelPointers.resize((size_t)ch);
 			for (int c = 0; c < ch; ++c)
-				scr.channelPointers[c] = scr.channelFlat.data() + (size_t)c * samplesIn;
+				scr.channelPointers[c] = scr.channelFlat + (size_t)c * samplesIn;
 			for (size_t i = 0; i < samplesIn; ++i) {
 				for (int c = 0; c < ch; ++c)
 					scr.channelPointers[c][i] = scr.inputFloat[i * (size_t)ch + (size_t)c];
 			}
 
-			g_rubberBandStretcher[bank]->process(scr.channelPointers.data(), samplesIn, false);
+			g_rubberBandStretcher[bank]->process(scr.channelPointers, samplesIn, false);
 			g_rubberBandFinalFlushed[bank] = false;
 		}
 		else {
-			scr.channelPointers.resize((size_t)ch);
 			for (int c = 0; c < ch; ++c)
 				scr.channelPointers[c] = &scr.dummyZero;
-			g_rubberBandStretcher[bank]->process(scr.channelPointers.data(), 0, true);
+			g_rubberBandStretcher[bank]->process(scr.channelPointers, 0, true);
 			g_rubberBandFinalFlushed[bank] = true;
 		}
 
-		outFloat.clear();
-		const size_t pullSize = 4096;
-		scr.outputFlat.resize(pullSize * (size_t)ch);
-		scr.outputPointers.resize((size_t)ch);
+		outN = 0;
+		const size_t pullSize = kRbPull;
 		for (int c = 0; c < ch; ++c)
-			scr.outputPointers[c] = scr.outputFlat.data() + (size_t)c * pullSize;
+			scr.outputPointers[c] = scr.outputFlat + (size_t)c * pullSize;
 
 		while (g_rubberBandStretcher[bank]->available() > 0) {
+			if (outN >= outCap) break;
+			int room = (outCap - outN) / ch;
+			if (room <= 0) break;
 			size_t toGet = (std::min)((size_t)g_rubberBandStretcher[bank]->available(), pullSize);
-			size_t retrieved = g_rubberBandStretcher[bank]->retrieve(scr.outputPointers.data(), toGet);
+			if (toGet > (size_t)room) toGet = (size_t)room;
+			size_t retrieved = g_rubberBandStretcher[bank]->retrieve(scr.outputPointers, toGet);
 			if (retrieved == 0) break;
-			const size_t base = outFloat.size();
-			outFloat.resize(base + retrieved * (size_t)ch);
+			const int add = (int)(retrieved * (size_t)ch);
+			const int base = outN;
+			outN += add;
 			for (size_t i = 0; i < retrieved; ++i) {
 				for (int c = 0; c < ch; ++c)
-					outFloat[base + i * (size_t)ch + (size_t)c] = scr.outputPointers[c][i];
+					outFloat[base + (int)i * ch + c] = scr.outputPointers[c][i];
 			}
 		}
 
-		if (bank == 0 && g_loopTailPos < g_loopTailBuffer.size()) {
-			size_t tailTotal = g_loopTailBuffer.size();
-			for (size_t i = 0; i < outFloat.size(); ++i) {
+		if (bank == 0 && g_loopTailPos < (size_t)g_loopTailN) {
+			size_t tailTotal = (size_t)g_loopTailN;
+			for (int i = 0; i < outN; ++i) {
 				if (g_loopTailPos >= tailTotal) break;
 				float ratio = 1.0f - ((float)g_loopTailPos / (float)tailTotal);
 				float fadeFactor = ratio * ratio;
@@ -1917,7 +1926,7 @@ bool ProcessAudioWithRubberBandBank(int bank, float tempoRate, bool t,
 				g_loopTailPos++;
 			}
 			if (g_loopTailPos >= tailTotal) {
-				g_loopTailBuffer.clear();
+				g_loopTailN = 0;
 				g_loopTailPos = 0;
 			}
 		}
@@ -1932,7 +1941,7 @@ bool ProcessAudioWithRubberBandBank(int bank, float tempoRate, bool t,
 bool ProcessAudioWithRubberBand(float tempoRate, bool t)
 {
 	try {
-		if (m_bufwav3_1.empty() && !t) return false;
+		if (m_bufwav3_1_n <= 0 && !t) return false;
 
 		int bits;
 		if (mode == -10)
@@ -1940,12 +1949,12 @@ bool ProcessAudioWithRubberBand(float tempoRate, bool t)
 		else
 			bits = (wavsam_depth <= 0 || wavsam_depth > 32) ? 16 : abs(wavsam_depth);
 
-		const uint8_t* p = m_bufwav3_1.empty() ? NULL : m_bufwav3_1.data();
-		const int n = (int)m_bufwav3_1.size();
+		const uint8_t* p = (m_bufwav3_1_n <= 0) ? NULL : m_bufwav3_1;
+		const int n = m_bufwav3_1_n;
 		const int ch = (wavchannel > 0) ? wavchannel : 2;
 		const int rate = (wavbit_sample_Hz >= 8000) ? wavbit_sample_Hz : 44100;
 		return ProcessAudioWithRubberBandBank(XfDecSlot(), tempoRate, t, p, n, bits, ch, rate,
-			m_convertedPcmFloatData);
+			m_convertedPcmFloatData, m_convertedPcmN, kRbBytes);
 	}
 	catch (...) {
 		return false;
@@ -1958,27 +1967,27 @@ bool ProcessAudioWithRubberBand(float tempoRate, bool t)
 // 8bit, 16bit, 24bit, 32bit PCM (int/float) に対応
 // rawバイトデータからfloatデータへの変換
 // 8bit, 16bit, 24bit, 32bit PCM (int/float) に対応
-void ConvertRawBytesToFloat(const std::vector<uint8_t>& raw_data,
+void ConvertRawBytesToFloat(const uint8_t* raw_data, int rawN,
 	uint16_t bits_per_sample, uint16_t channels,
-	std::vector<float>& out_float_data)
+	float* out_float_data, int outCap, int& outN)
 {
-	if (raw_data.empty() || channels == 0 || bits_per_sample == 0) {
-		out_float_data.clear();
+	outN = 0;
+	if (!raw_data || rawN <= 0 || !out_float_data || channels == 0 || bits_per_sample == 0) {
 		return;
 	}
 
 	size_t bytes_per_sample = bits_per_sample / 8;
 	if (bytes_per_sample == 0) {
-		out_float_data.clear();
 		return;
 	}
-	size_t total_samples_count = raw_data.size() / bytes_per_sample;
-	out_float_data.clear();
-	out_float_data.resize(total_samples_count);
+	size_t total_samples_count = (size_t)rawN / bytes_per_sample;
+	if ((int)total_samples_count > outCap)
+		total_samples_count = (size_t)outCap;
+	outN = (int)total_samples_count;
 
 	for (size_t i = 0; i < total_samples_count; ++i) {
 		size_t current_byte_pos = i * bytes_per_sample;
-		if (current_byte_pos + bytes_per_sample > raw_data.size()) {
+		if (current_byte_pos + bytes_per_sample > (size_t)rawN) {
 			out_float_data[i] = 0.0f;
 			continue;
 		}
@@ -2007,7 +2016,7 @@ void ConvertRawBytesToFloat(const std::vector<uint8_t>& raw_data,
 		}
 		else {
 			// 未対応ビット深度
-			out_float_data.clear();
+			outN = 0;
 			return;
 		}
 	}
@@ -2017,20 +2026,23 @@ void ConvertRawBytesToFloat(const std::vector<uint8_t>& raw_data,
 // 8bit, 16bit, 24bit, 32bit PCM (int/float) に対応
 // floatデータからrawバイトデータへの変換
 // 8bit, 16bit, 24bit, 32bit PCM (int/float) に対応
-void ConvertFloatToRawBytes(const std::vector<float>& float_data,
+void ConvertFloatToRawBytes(const float* float_data, int nFloat,
 	uint16_t target_bits_per_sample, uint16_t channels,
-	std::vector<uint8_t>& out_raw_data)
+	uint8_t* out_raw_data, int outCap, int& outN)
 {
-	if (float_data.empty() || channels == 0 || target_bits_per_sample == 0) {
-		out_raw_data.clear();
+	outN = 0;
+	if (!float_data || nFloat <= 0 || !out_raw_data || channels == 0 || target_bits_per_sample == 0) {
 		return;
 	}
 
 	size_t bytes_per_sample = target_bits_per_sample / 8;
-	out_raw_data.clear();
-	out_raw_data.resize(float_data.size() * bytes_per_sample);
+	if (bytes_per_sample == 0) return;
+	int n = nFloat;
+	if ((size_t)n * bytes_per_sample > (size_t)outCap)
+		n = (int)((size_t)outCap / bytes_per_sample);
+	outN = (int)((size_t)n * bytes_per_sample);
 
-	for (size_t i = 0; i < float_data.size(); ++i) {
+	for (int i = 0; i < n; ++i) {
 		float sample_float = float_data[i];
 		// クリップ (-1.0から1.0の範囲に収めることでオーバーフロー防止)
 		if (sample_float > 1.0f) sample_float = 1.0f;
@@ -2069,7 +2081,7 @@ void ConvertFloatToRawBytes(const std::vector<float>& float_data,
 		}
 		else {
 			// 未対応ビット深度
-			out_raw_data.clear();
+			outN = 0;
 			return;
 		}
 	}

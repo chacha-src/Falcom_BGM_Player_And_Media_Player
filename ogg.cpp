@@ -2752,6 +2752,12 @@ void COggApp::convert()
 
 // RubberBand関連のグローバル変数の定義（0=レガシー/スロット0、1=スロット1）
 RubberBand::RubberBandStretcher* g_rubberBandStretcher[2] = { NULL, NULL };
-std::vector<float> m_convertedPcmFloatData;
-std::vector<uint8_t> m_bufwav3_1;
-std::vector<float> inputFloatData;
+enum { kPcmRouteCap = (10240 * 6 / 2) * 5 * 8 };
+float m_convertedPcmFloatData[kPcmRouteCap];
+int m_convertedPcmN = 0;
+uint8_t m_bufwav3_1[kPcmRouteCap];
+int m_bufwav3_1_n = 0;
+float inputFloatData[kPcmRouteCap];
+int inputFloatN = 0;
+uint8_t outputRawBytesData[kPcmRouteCap * 4];
+int outputRawN = 0;
