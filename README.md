@@ -282,7 +282,7 @@ flowchart TB
 - Steam版 Ys X (Ys10)
 
 ### 軌跡 (Trails) シリーズ
-- 英雄伝説6 空の軌跡 FC / SC / The 3rd (Steam版 The 1st含む)
+- 英雄伝説6 空の軌跡 FC / SC / The 3rd (Steam版 The 1st / The 2nd含む)
 - 英雄伝説 零の軌跡
 - 英雄伝説 碧の軌跡
 - Steam版 閃の軌跡 I / II / III / IV
@@ -694,7 +694,7 @@ The player supports seamless BGM looping for the following titles:
 - Ys X: Nordics (Steam)
 
 ### Trails Series
-- The Legend of Heroes: Trails in the Sky FC / SC / the 3rd (Including Steam 1st)
+- The Legend of Heroes: Trails in the Sky FC / SC / the 3rd (Including Steam The 1st / The 2nd)
 - The Legend of Heroes: Trails from Zero
 - The Legend of Heroes: Trails to Azure
 - The Legend of Heroes: Trails of Cold Steel I / II / III / IV (Steam)
