@@ -31,7 +31,7 @@
 表示は通常の2Dに加え **簡易3D**（視点ドラッグ・ホイールズーム）も選べます。
 
 ### MIDIモニタ
-再生中の SMF（.mid / .midi / .kar / .rmi）を **32パート**（A01–A16 / B01–B16）で見守る画面です。オーディオから音程を推定するのではなく、ファイルに書かれた MIDI イベントそのものを出します。ピアノロールが「どの音が鳴ったか」を時間軸で見せるのに対し、こちらは各チャンネルの音色・音量・GS/XG の状態を一覧します。バナー／プレイリスト／コマンドパレットから開けます。
+再生中の SMF（.mid / .midi / .kar / .rmi）を **32パート**（A01–A16 / B01–B16）で見守る画面です。オーディオから音程を推定するのではなく、ファイルに書かれた MIDI イベントそのものを出します。ピアノロールが「どの音が鳴ったか」を時間軸で見せるのに対し、こちらは各チャンネルの音色・音量・GS/XG の状態を一覧します。同じ窓で FM 側（SASAMI FPY / OPNA・YM2608 のレジスタと鍵盤）へ切り替えられます。表示は通常の2Dに加え **簡易3D** も選べます。バナー／プレイリスト／コマンドパレットから開けます。
 
 ### 波形・周波数アナライザー
 Ozone風のリアルタイムアナライザーを追加しました。
@@ -57,7 +57,7 @@ Ozone風のリアルタイムアナライザーを追加しました。
 - **波形オーバービュー:** シークバー上に波形を表示（再生しながらリアルタイムで埋まり、WAVはファイル全体の概観に差し替え）。右クリックでON/OFF
 - **ループとA-Bの分離:** ピンク帯／つまみがループ範囲、青がA-B。ロックチェックでループつまみを固定（既定ロック）
 - **キュー / フレーズA-B / 練習テンポ:** キュー追加・1〜8でジャンプ、Rで現在±秒をA-B、テンポは 50/75/100% プリセットに加え **50〜200%** の連続調整
-- **ジャケット残時間リング**、バナー（バー／ミラー／波形）と位相相関メーター（φ/LR）、シーク上の細いスペアナリボン
+- **ジャケット残時間リング**、バナー（バー／ミラー／波形／簡易3D）と位相相関メーター（φ/LR）、シーク上の細いスペアナリボン
 - **シーク右クリック:** シーク／ループ／A-B の調整、A/B 点セット、キュー追加など
 - **拍グリッド位相:** シーク上で **Alt+ドラッグ** すると拍線の位相（オフセット）をずらせます。BPM／キーと一緒に曲ごとに記憶されます
 - **LRCマーカー:** シーク波形下に水色の時刻線。クリックでその位置へシーク（A-B候補にも使えます）。ホバーで局所拡大ルーペ
@@ -97,6 +97,7 @@ Ozone風のリアルタイムアナライザーを追加しました。
 アルバムジャケットの表示と、プレイリスト機能（m3u / m3u8 / pls / xspf の取り込みなど）があります。曲ごとの音量やEQなどの設定も覚えます。
 「曲ごとに設定保存」のチェックを入れると、★付きの曲は保存済みパラメータを読み直して反映します。チェックを外すときは、その時点の設定をその曲へ保存してから無効化します。
 フォルダの `cover.jpg` や代替ジャケットの再読込・画像保存にも対応しています。
+曲名の色印で、曲ごと保存（橙）・歌詞（青）・WRD（桃）・チャンネル数・MIDI などを見分けられます。
 
 ### 連続再生クロスフェード
 **連続再生 ON** のとき、メイン／メディプレのチェックと秒数（小数可・既定 5.00 秒）で、曲末から指定秒だけ次曲と等パワーで重ねてシームレスに切り替えます（書き出し用のクロスフェードとは別系統）。
@@ -115,7 +116,7 @@ Windows 11のアクリル風ぼかし表示に対応しています。コンテ�
 - クラシック（フェード）／上下に伸びる／カーテン（上から）／ワイプ（横）／リップル（起点）
 - ビッグバン／ブラックホール／螺旋（スパイラル）／花びら／ジッパー（左右交互）／オーロラ（波・既定）
 
-メニュー用フォント（8–24pt、太字／斜体）もホバープレビュー付きで変更できます。
+メニュー用フォント（8–24pt、太字／斜体）もホバープレビュー付きで変更できます。**立体アクセント強め** で、区切りや行の立体表現を強くできます。
 
 ### 操作ガイド
 メディアプレイヤーの「？」に加え、EQ・プレイリスト・動画・レンダリング・キャプチャ・アナライザ・ピアノロール・メイン画面など、各 UI から **操作ガイド**（GDIヘルプ）を開けます。コンテキストメニューの「操作ガイド」からも到達できます。
@@ -127,7 +128,7 @@ Windows 11のアクリル風ぼかし表示に対応しています。コンテ�
 操作ガイドには、画面ミニマップに加え、**シーク層（波形／拍グリッド／LRC／ループ・A-B）**、**Camelot相性**、**セット章**、**Remote/OBS** などの図解も入っています。追加機能の位置づけが分かりにくいときは、まずここを開くと把握しやすいです。
 
 ### PCMアップスケール
-サンプリングレートやビット深度のアップスケール、マルチチャンネル出力に対応しています。
+サンプリングレートやビット深度のアップスケール、マルチチャンネル出力に対応しています。スピーカーはステレオ／2.1／4ch／5.1／7.1／オリジナル（マッピングなし）から選べ、サラウンド量は 0〜100 です。
 
 ### 演奏プロンプト
 再生中にピッチやテンポ、エフェクトなどを時間指定で動かすプロンプト機能があります。テキスト編集のほか、曲を読みながらの解析・履歴の保存／読込、雰囲気モードにも対応しています。
@@ -138,7 +139,16 @@ Windows 11のアクリル風ぼかし表示に対応しています。コンテ�
 ### VSTホスト
 メディアプレイヤー下段の **VST** から、手持ちの VST 音源を読み込んで鍵盤で鳴らせます。プラグインを Part 1〜32 へドラッグして配線し、MIDI入力（最大3系統）と音声出力を選べます。プリセットの保存・切替、名前での絞り込み、再スキャンに対応。MIDI機器が無くてもパソコンのキーボードで簡易演奏できます（Space で全音停止）。SOUND Canvas VA のようなマルチティンバーは1スロットで16chを受け持ちます。64bit プラグインは KpiHost64 経由です（KpiHost64.exe は実行ファイルと同じ場所）。
 
-プレイリストの **.mid / .midi / .kar / .rmi** は、レンダリング設定の「MIDI再生」を **VST優先** にし、GS／XG 用の VST を指定すると、その音源で曲ファイルを演奏できます（XG System On があれば XG、無ければ GS。両方空なら Windows の MIDI マッパーになります）。
+プレイリストの **.mid / .midi / .kar / .rmi** は、レンダリング設定の「MIDI再生」で鳴らします。**KPI優先** は kpi、**VST優先** は GS／XG 用の VST または SoundFont（.sf2。XG System On があれば XG、無ければ GS）、**VSTホスト優先** は VSTホストで保存したプリセットです。明示の DLL が空なら MIDI出力の機器（未指定は Windows MIDI マッパー）になります。
+
+### WRD画面
+PC-98 の MIMPI / TMIDI 用 .wrd を、テキストと16色グラフィックで再生する画面です。ウィンドウメニューやコマンドパレットから開けます。
+
+### SASAMI Composer
+ツールから開ける作曲画面です。テキスト（MML）、MIDIスコア、FMスコアと、それぞれのピアノロールを使えます。
+
+### CDプレイヤー
+下段の **CD** から、CDの再生・取り込み・曲目検索・書き込みができます。
 
 ### 再生詳細
 ギャップレス、ReplayGain、Mid/Side、相関メーター、書き出しリミッター、ループ区間、ループ境界フェード、キュー、タグ書き込み、簡易波形プレビューなどをまとめた設定です。メディアプレイヤー画面の「詳細」ボタン、またはプレイリストの右クリックから開けます。
@@ -222,7 +232,8 @@ Windows 11のアクリル風ぼかし表示に対応しています。コンテ�
 - **フォーカスモード／危険操作確認／レイアウト1–3／週次サマリ／練習ログ** …… ツールメニューから
 - **アラーム:** 指定時刻に再生開始（スリープタイマーは従来どおり）
 - **ゲーム録画プリセット:** 画面キャプチャ＋デバイス録音を所定設定でまとめて開く（ネット配信ではない）
-- **リスト削除の1段Undo:** 右クリック「削除を元に戻す」（フル履歴Undoではありません）
+- **Cemu対応一覧:** 実行ファイルと同じ場所に arcdata.zip（または .7z）があるとき、対応タイトルを一覧します
+- **リスト編集の1段Undo:** 直前の削除／貼り付けを戻せます（Ctrl+Z。フル履歴Undoではありません）
 
 Remote / OBS の関係:
 
@@ -346,7 +357,7 @@ avi, mpg, mp4, mkv などのDirectShow対応動画を再生可能です。Window
 - 並べ替え、他プレイリストへの移動・コピー、選択曲のジャケ再取得、一時プレイリスト
 - 欠損ファイル確認（パス修正・適用・インライン編集）と欠損マークの再スキャン
 - プレイリスト取り込み（m3u / m3u8 / pls / xspf。UTF-8、相対パス、欠損／重複スキップなど）
-- レンダリング設定（デバイス、バッファ、ビット深度、フォント、ファイル関連付け、**言語（14言語）**、スペアナ音階モードなど）
+- レンダリング設定（デバイス、バッファ、ビット深度、スピーカー／サラウンド、フォント、ファイル関連付け、**言語（14言語）**、スペアナ音階モード、MIDI再生の優先など）
 - ファイル関連付けは音声に加え動画（avi/mp4/mkv/wmv/mov/webm 等）とプレイリスト（m3u 等）にも対応
 - タスクバーのジャンプリスト（最近再生した曲、再演奏／停止／前後曲、EQ、ジャケット、レンダ、フォルダなど）
 - タスクバーサムネイルツールバー（再演奏／一時停止／停止／次曲など）
@@ -361,8 +372,9 @@ avi, mpg, mp4, mkv などのDirectShow対応動画を再生可能です。Window
 - 拡張音量（主音量／EQマスターとは別系統）
 - Soft3D迷路（おまけ・下段ボタンから。地下階層・曲連動アイテムあり）
 - Soft3D空中レース（おまけ・下段の「レース」。光帯コース・AI対戦・テーマ地形）
-- VSTホスト（下段「VST」。パート配線・鍵盤演奏）と、.mid の VST優先再生（GS/XG）
-- MIDIモニタ（SMF 32パート／GS・XG）
+- VSTホスト（下段「VST」。パート配線・鍵盤演奏）と、.mid の再生（KPI優先／VST優先／VSTホストのプリセット。GS/XG は VST または SoundFont）
+- MIDIモニタ（SMF 32パート／GS・XG、FM側は OPNA。簡易3D）
+- WRD画面（PC-98 MIMPI の .wrd）、SASAMI Composer（テキスト／MIDI・FMスコア／ピアノロール）、CDプレイヤー（再生・取り込み・曲目検索・書き込み）
 - アナログ起こし台（ライン入力＋HPF/Gate）
 - ボイスチェンジャー、チューナー道場、騒音計、フォトフレーム
 - コマンドパレット、オフラインヘルプ（CHM／F1）
@@ -431,7 +443,7 @@ A simplified piano roll with an **88 / 108-key** display range has been implemen
 Besides flat 2D, a **simple 3D** view (drag to orbit, wheel to zoom) is available.
 
 ### MIDI Monitor
-A window that watches the playing SMF (`.mid` / `.midi` / `.kar` / `.rmi`) as **32 parts** (A01–A16 / B01–B16). It shows MIDI events written in the file, not pitches estimated from audio. Where the piano roll plots *which notes sounded* over time, this lists each channel’s program, volume, and GS/XG state. Open it from the banner, playlist, or command palette.
+A window that watches the playing SMF (`.mid` / `.midi` / `.kar` / `.rmi`) as **32 parts** (A01–A16 / B01–B16). It shows MIDI events written in the file, not pitches estimated from audio. Where the piano roll plots *which notes sounded* over time, this lists each channel’s program, volume, and GS/XG state. The same window can switch to the FM side (SASAMI FPY / OPNA·YM2608 registers and keys). Besides flat 2D, a **simple 3D** view is available. Open it from the banner, playlist, or command palette.
 
 ### Waveform & Spectrum Analyzer
 An Ozone-inspired real-time analyzer has been added.
@@ -457,7 +469,7 @@ The seek bar area has been expanded:
 - **Waveform overview:** Waveform on the seek bar (fills in real time during playback; WAV can be replaced by a full-file overview). Toggle via right-click
 - **Separate loop vs A-B:** Pink band/thumbs are the loop range; blue is A-B. A lock checkbox freezes the loop thumbs (locked by default)
 - **Cues / phrase A-B / practice tempo:** Add cues and jump with 1–8, R sets A-B around now ±seconds; tempo presets 50/75/100% plus continuous **50–200%**
-- **Jacket remaining-time ring**, banner modes (bars / mirror / wave) with phase correlation (φ/LR), and a thin spectrum ribbon on the seek bar
+- **Jacket remaining-time ring**, banner modes (bars / mirror / wave / simple 3D) with phase correlation (φ/LR), and a thin spectrum ribbon on the seek bar
 - **Seek right-click menu:** adjust seek / loop / A-B, set A/B points, add cues, and more
 - **Beat-grid phase:** **Alt+drag** on the seek bar to shift grid phase (offset). Stored per track with BPM / key
 - **LRC markers:** light-blue time ticks under the seek waveform; click to seek (also usable as A-B candidates). Hover for a local-zoom loupe
@@ -497,6 +509,7 @@ Supports .lrc lyrics display, including optional online lyric lookup (LRCLib / N
 Album jacket display and playlists are supported (import m3u / m3u8 / pls / xspf, among other features). Per-track settings such as volume and EQ are remembered.
 Turning **Save per-song** on reloads and applies saved parameters for tracks marked with ★. Turning it off saves the current settings for that track before disabling the feature.
 Folder `cover.jpg`, alternate jacket reload, and saving jacket images are also supported.
+Colored marks on the title distinguish per-song save (amber), lyrics (blue), WRD (pink), channel count, MIDI, and similar.
 
 ### Continuous-Play Crossfade
 With **continuous play ON**, use the main / media-player checkbox and duration (decimals allowed; default **5.00** seconds) to equal-power blend into the next track for that many seconds at the end—seamless handoff (separate from export crossfade).
@@ -515,7 +528,7 @@ Custom context menus offer **menu animation** styles for show/hide. The choice i
 - Classic (fade) / Expand up-down / Curtain (from top) / Wipe (horizontal) / Ripple (from click)
 - Big Bang / Black Hole / Spiral / Petals / Zipper (L/R) / Aurora (wave, default)
 
-Menu font (8–24 pt, bold/italic) can be changed with hover preview.
+Menu font (8–24 pt, bold/italic) can be changed with hover preview. **Stronger 3D accent** thickens the depth on separators and rows.
 
 ### Operation Guides
 Besides the media player **?**, GDI operation guides are available from EQ, playlist, video, rendering, capture, analyzer, piano roll, main window, and more—also via each window’s context-menu **Operation guide** item.
@@ -527,7 +540,7 @@ The **command palette** jumps to a window by typing part of its name (handy when
 Guides include a screen minimap plus diagrams for **seek layers (waveform / beat grid / LRC / loop·A-B)**, **Camelot compatibility**, **set chapters**, **Remote/OBS**, and more. When extra features are hard to place, opening a guide first is the fastest way to get oriented.
 
 ### PCM Upscaling
-Supports sample-rate / bit-depth upscaling and multi-channel output.
+Supports sample-rate / bit-depth upscaling and multi-channel output. Speaker layout is stereo / 2.1 / 4ch / 5.1 / 7.1 / original (no mapping), and the surround amount runs 0–100.
 
 ### Performance Prompt
 A timed prompt feature can change pitch, tempo, effects, and more during playback. Besides text editing, it supports analyze-while-listening, history save/load, and atmosphere modes.
@@ -538,7 +551,16 @@ Edit and place prompt commands on a time-based roll (multiple lanes). Open it fr
 ### VST Host
 From the media player’s bottom-bar **VST** button, load your own VST instruments and play them from a keyboard. Drag plugins onto Parts 1–32, pick MIDI inputs (up to 3) and an audio output. Preset save/switch, name filter, and rescan are supported. With no MIDI hardware, the PC keyboard can play a simple map (Space all-notes-off). Multi-timbral hosts such as SOUND Canvas VA take 16 channels in one slot. 64-bit plugins go through KpiHost64 (place KpiHost64.exe in the same location as the executable).
 
-Playlist **.mid / .midi / .kar / .rmi** can be rendered through a GS/XG VST when Rendering → MIDI playback is set to **Prefer VST** (XG System On → XG VST; otherwise GS; if both slots are empty, Windows MIDI Mapper).
+Playlist **.mid / .midi / .kar / .rmi** play from Rendering → **MIDI play**. **Prefer KPI** uses a kpi plugin, **Prefer VST** uses the GS/XG VST or SoundFont (.sf2; XG System On selects XG, otherwise GS), and **Prefer VST Host** uses a preset saved in the VST host. If the explicit DLL is empty, the MIDI-out device is used (Windows MIDI Mapper when unset).
+
+### WRD Screen
+Plays PC-98 MIMPI / TMIDI `.wrd` scripts as text plus 16-color graphics. Open it from the Window menu or the command palette.
+
+### SASAMI Composer
+A composing desk opened from Tools. It has a text view (MML), a MIDI score, an FM score, and a piano roll for each.
+
+### CD Player
+From the bottom-bar **CD** button: play a CD, rip tracks, look up the disc, and burn.
 
 ### Playback Details
 Gapless playback, ReplayGain, Mid/Side, correlation meter, export limiter, loop points, loop-boundary fade, cues, tag writing, and a simple waveform preview are grouped in one window. Open it from the media player **Extra** button or the playlist context menu.
@@ -622,7 +644,8 @@ Handy media-player add-ons from the Tools right-click menu and each window’s c
 - **Focus mode / confirm destructive actions / layouts 1–3 / weekly summary / practice log** — from the Tools menu
 - **Alarm:** Start playback at a set time (sleep timer remains as before)
 - **Game-capture preset:** Open screen capture + device record with preset settings (local recording, not internet streaming)
-- **Playlist delete one-step Undo:** context **Undo delete** (not a full history undo)
+- **Cemu supported list:** when `arcdata.zip` (or `.7z`) sits next to the executable, lists the titles it covers
+- **One-step list edit Undo:** undoes the last delete or paste (Ctrl+Z; not a full history undo)
 
 Remote / OBS:
 
@@ -746,7 +769,7 @@ Plays avi, mpg, mp4, mkv, and other DirectShow-compatible formats. On Windows Vi
 - Sort, move/copy to another playlist, refresh jacket for selection, temporary playlists
 - Missing-file review (path fix / apply / inline edit) and missing-mark rescan
 - Playlist import (m3u / m3u8 / pls / xspf; UTF-8, relative paths, skip missing/duplicates)
-- Rendering options (device, buffer, bit depth, fonts, file associations, **language (14 locales)**, spectrum scale mode, etc.)
+- Rendering options (device, buffer, bit depth, speaker / surround, fonts, file associations, **language (14 locales)**, spectrum scale mode, MIDI-play preference, and more)
 - File associations cover audio plus video (avi/mp4/mkv/wmv/mov/webm, etc.) and playlists (m3u, etc.)
 - Taskbar jump list (recent tracks, replay/stop/prev/next, EQ, jacket, render, folder, and more)
 - Taskbar thumbnail toolbar (replay / pause / stop / next, etc.)
@@ -761,8 +784,9 @@ Plays avi, mpg, mp4, mkv, and other DirectShow-compatible formats. On Windows Vi
 - Extended volume (separate from main volume / EQ master)
 - Soft3D maze (bonus; bottom-bar button; basements and track-linked items)
 - Soft3D aerial race (bonus; bottom-bar **Race**; light-band course, AI, themed terrain)
-- VST host (bottom-bar **VST**; part routing and keyboard play) and Prefer-VST .mid playback (GS/XG)
-- MIDI monitor (SMF 32 parts / GS·XG)
+- VST host (bottom-bar **VST**; part routing and keyboard play) and .mid playback (Prefer KPI / Prefer VST / VST Host preset; GS/XG via VST or SoundFont)
+- MIDI monitor (SMF 32 parts / GS·XG; FM side is OPNA; simple 3D)
+- WRD screen (PC-98 MIMPI `.wrd`), SASAMI Composer (text / MIDI·FM score / piano roll), CD player (play / rip / lookup / burn)
 - Analog digitize deck (line-in + HPF/Gate)
 - Voice changer, tuner dojo, sound meter, photo frame
 - Command palette, offline help (CHM / F1)
@@ -770,12 +794,12 @@ Plays avi, mpg, mp4, mkv, and other DirectShow-compatible formats. On Windows Vi
 ## Extra: Soft3D Maze
 A first-person DirectX 11 maze opened from the media player’s bottom-bar **Maze** button. It’s a light distraction while BGM plays—separate from the core playback features.
 
-- **Controls:** WASD / arrows to move, Q·E (or ←→) to turn. Right-click for regenerate size, minimap, item types, and more
+- **Controls:** WASD / arrows to move, Q·E (or ←→) to turn. Right-click for regenerate size, minimap, item types, and more. The ? help includes a Soft3D / legend table
 - **Maps:** Top-right minimap. SPACE or middle-click toggles the full overview (Esc closes). While open: wheel zooms, drag scrolls, Shift+wheel / ←→ change floor. Unvisited=black, visited=light blue
-- **Track links:** Floating orbs adjust tempo↑ / pitch↑↓ / next track / EQ. Windows are decorative and block movement
-- **Basements:** The basement combo adds 0–3 underground floors. Orange stairs go down, cyan stairs go up. You move diagonally between floors and can glimpse adjacent levels through stair shafts (basements have ceilings). The goal sits on a floor chosen by difficulty
-- **Difficulty:** Very easy–very hard. Affects corridor width, stair count, and 3D path length to the goal
-- **Look:** Ground floor uses greenery; B1–B3 use stone / metal / dark rock motifs for walls and floors. Progress autosaves and resumes when you reopen the maze
+- **Track links:** Floating orbs adjust tempo up/down, pitch up/down, previous/next track, volume, EQ or flat, reverb, crossfade, and random. They appear on every floor. Windows are decorative and cannot be walked through
+- **Basements:** The basement combo adds 0–3 underground floors. Wall and floor motifs change by level (ground = brick, B1 = damp stone, B2 = rusted metal, B3 = volcanic rock). Orange stairs go down, cyan stairs go up (a two-cell diagonal). Semi-transparent traps (slime, thorns, ice, dark; no warp) appear. Old saves whose stairs shared a cell are regenerated. The goal sits on a floor chosen by difficulty
+- **Difficulty:** Very easy–very hard. Harder maps use thinner corridors, more stairs that go up and down, and more traps
+- **Look:** The ground floor is brick with greenery; basements use that floor’s walls, floors, and fog. Progress autosaves and resumes when you reopen the maze
 
 ## Extra: Soft3D Aerial Race
 An aerial race opened from the media player’s bottom-bar **Race** button. You fly along a ribbon of light (the power band) while BGM plays—same “bonus, not core playback” slot as the maze.
