@@ -15,9 +15,41 @@
         public:
             load_error(const std::string& s):std::runtime_error(s){}
         };
+        /* ogg の MidiStatusRank と同じ。同じ tick では SysEx / CC / PC をノートより前。
+           バンクが別トラックだと、ノートが先に鳴って PC 固定（programs.txt と同じ）になる。 */
+        static int midi_setup_rank(uint_least32_t msg)
+        {
+            const unsigned st = msg & 0xFFu;
+            if (st == 0xFFu) return 0;
+            if (st == 0xF0u) return 5;
+            const unsigned type = st & 0xF0u;
+            if (type == 0xB0u) {
+                const unsigned cc = (msg >> 8) & 0x7Fu;
+                if (cc == 0) return 10;
+                if (cc == 32) return 11;
+                return 20;
+            }
+            if (type == 0xC0u) return 30;
+            if (type == 0xE0u) return 40;
+            if (type == 0xD0u) return 45;
+            if (type == 0x80u) return 50;
+            if (type == 0x90u) {
+                const unsigned vel = (msg >> 16) & 0x7Fu;
+                return vel ? 60 : 50;
+            }
+            return 70;
+        }
         inline bool operator<(const midi_message& a, const midi_message& b)
         {
-            return a.time < b.time;
+            if (a.time < b.time) return true;
+            if (a.time > b.time) return false;
+            const int ra = midi_setup_rank(a.message);
+            const int rb = midi_setup_rank(b.message);
+            const int ga = ra < 50 ? 0 : 1;
+            const int gb = rb < 50 ? 0 : 1;
+            if (ga != gb) return ga < gb;
+            if (ga == 0 && ra != rb) return ra < rb;
+            return false;
         }
         uint_least32_t read_variable_value(void* fp, int(*fgetc)(void*), uint_least32_t* track_length, const char* errtext)
         {

@@ -35,6 +35,7 @@ private:
 	int m_fmModeDefault; // kbsasami.fmmode 0=BEEP 1=OPN 2=OPNA
 	int m_gsMapLsb; // 自動/指定マップの CC32 (1..4)。0=付けない
 	int m_laBankMsb; // 127=LA/MT-32 を SC-55 バンク 127 で鳴らす。0=付けない
+	int m_wopnMode; // 判定が GS/XG の system_mode。0=曲の SysEx 任せ。GM On でもバンクを残す
 	char m_titleSjis[65];
 	double m_loopStart;
 	double m_loopEnd;
@@ -47,6 +48,8 @@ private:
 	static int MemGetc(void* fp);
 	void LoadProgramsTxt();
 	void ReadOptions();
+	void ApplyMapForce(int mapForce, SasamiMidiMap* map);
+	void ApplyWopnMode();
 	void ApplyGsBankLsb();
 	void midi_message(int port, uint_least32_t message) override;
 	void sysex_message(int port, const void* data, std::size_t size) override;

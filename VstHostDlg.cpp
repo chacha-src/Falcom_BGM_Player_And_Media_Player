@@ -2125,6 +2125,25 @@ void CVstHostDlg::OnSave()
 
 void CVstHostDlg::OnRescan()
 {
+	/* 曲再生が live パートの process 中だと、Unload が同じ CS を待って UI が固まる。 */
+	if (!VstLiveScanTryHold()) {
+		SetStatus(LL14(
+			L"再生中はスキャンできません。曲を止めてから再スキャンしてください。",
+			L"Cannot scan while playing. Stop the song, then rescan.",
+			L"Analyse impossible pendant la lecture. Arrêtez le morceau.",
+			L"Scansione impossibile durante la riproduzione. Ferma il brano.",
+			L"No se puede escanear durante la reproducción. Detén la pista.",
+			L"재생 중에는 검색할 수 없습니다. 곡을 멈춘 뒤 다시 검색하세요.",
+			L"播放中无法扫描。请先停止曲目再重新扫描。",
+			L"لا يمكن المسح أثناء التشغيل. أوقف المقطوعة ثم أعد المسح.",
+			L"Сканирование во время воспроизведения невозможно. Остановите трек.",
+			L"Scan während der Wiedergabe nicht möglich. Titel stoppen, dann erneut scannen.",
+			L"Não é possível procurar durante a reprodução. Pare a faixa e tente de novo.",
+			L"Scannen tijdens afspelen kan niet. Stop het nummer en scan opnieuw.",
+			L"Skanowanie w trakcie odtwarzania niemożliwe. Zatrzymaj utwór.",
+			L"Çalma sırasında tarama yapılamaz. Parçayı durdurup yeniden tarayın."));
+		return;
+	}
 	SetStatus(LL14(L"スキャン中…", L"Scanning…", L"Analyse…", L"Scansione…", L"Escaneando…", L"검색 중…", L"扫描中…",
 		L"جارٍ المسح…", L"Сканирование…", L"Scannen…", L"A procurar…", L"Scannen…", L"Skanowanie…", L"Taranıyor…"));
 	StopAudio();
@@ -2142,6 +2161,7 @@ void CVstHostDlg::OnRescan()
 	VstScanVerifyLiveList(m_hWnd);
 	RebuildPluginList();
 	StartAudio();
+	VstLiveScanRelease();
 	SetStatus(LL14(L"スキャン完了", L"Scan complete", L"Analyse terminée", L"Scansione completata", L"Escaneo completo",
 		L"검색 완료", L"扫描完成", L"اكتمل المسح", L"Сканирование завершено", L"Scan abgeschlossen", L"Procura concluída",
 		L"Scan voltooid", L"Skanowanie zakończone", L"Tarama tamamlandı"));
@@ -2517,7 +2537,26 @@ void CVstHostDlg::StopAudio()
 	if (m_audioStop) SetEvent(m_audioStop);
 	if (m_audioEvent) SetEvent(m_audioEvent);
 	if (m_audioThread) {
-		DWORD w = WaitForSingleObject(m_audioThread, 8000);
+		/* process 中のプラグインが UI へ SendMessage すると、素の Wait では固まる。 */
+		DWORD w = WAIT_TIMEOUT;
+		const DWORD t0 = GetTickCount();
+		for (;;) {
+			const DWORD elapsed = GetTickCount() - t0;
+			if (elapsed >= 8000) break;
+			w = MsgWaitForMultipleObjects(1, &m_audioThread, FALSE, 8000 - elapsed, QS_ALLINPUT);
+			if (w == WAIT_OBJECT_0 || w == WAIT_FAILED) break;
+			if (w == WAIT_OBJECT_0 + 1) {
+				MSG msg;
+				while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
+					if (msg.message == WM_QUIT) {
+						PostQuitMessage((int)msg.wParam);
+						break;
+					}
+					TranslateMessage(&msg);
+					DispatchMessage(&msg);
+				}
+			}
+		}
 		if (w != WAIT_OBJECT_0 && m_waveOut) {
 			// Thread is still inside waveOutWrite; Reset is the only nudge
 			// that is safe once the loop has already been asked to exit.

@@ -7,6 +7,7 @@
 #include <memory>
 #include <vector>
 #include <stdint.h>
+#include <stddef.h>
 
     typedef double sample_t;//added by Kobarin
     class channel;
@@ -613,6 +614,7 @@
         ~fm_note_factory();
         void clear();
         bool load_wopn(const wchar_t* path, int family = 0, int append = 0);
+        bool load_wopn_mem(const void* data, size_t size, int family = 0, int append = 0);
         void get_program(int number, FMPARAMETER& p);
         bool set_program(int number, const FMPARAMETER& p);
         bool set_drum_program(int number, const DRUMPARAMETER& p);

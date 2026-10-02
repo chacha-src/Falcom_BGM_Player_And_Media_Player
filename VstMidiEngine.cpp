@@ -3560,6 +3560,63 @@ extern "C" int VstMidiStealSysex(BYTE* ports, BYTE* packed, int* lens, int maxMs
 	return n;
 }
 
+static INIT_ONCE g_liveScanOnce = INIT_ONCE_STATIC_INIT;
+static CRITICAL_SECTION g_liveScanCs;
+static volatile LONG g_liveSongRendering = 0;
+static volatile LONG g_liveScanHold = 0;
+
+static BOOL CALLBACK LiveScanCsInit(PINIT_ONCE, PVOID, PVOID*)
+{
+	InitializeCriticalSection(&g_liveScanCs);
+	return TRUE;
+}
+
+static void LiveScanCsEnsure()
+{
+	InitOnceExecuteOnce(&g_liveScanOnce, LiveScanCsInit, NULL, NULL);
+}
+
+/* 1 = このブロックはプラグインを叩いてよい。スキャン側が掴んでいたら無音で返す。 */
+static int LiveSongRenderEnter()
+{
+	LiveScanCsEnsure();
+	EnterCriticalSection(&g_liveScanCs);
+	if (g_liveScanHold) {
+		LeaveCriticalSection(&g_liveScanCs);
+		return 0;
+	}
+	InterlockedIncrement(&g_liveSongRendering);
+	LeaveCriticalSection(&g_liveScanCs);
+	return 1;
+}
+
+static void LiveSongRenderLeave()
+{
+	InterlockedDecrement(&g_liveSongRendering);
+}
+
+/* 無名名前空間の外。中だと extern "C" でもシンボルが出ない。 */
+extern "C" int VstLiveScanTryHold(void)
+{
+	LiveScanCsEnsure();
+	EnterCriticalSection(&g_liveScanCs);
+	if (g_liveSongRendering) {
+		LeaveCriticalSection(&g_liveScanCs);
+		return 0;
+	}
+	g_liveScanHold = 1;
+	LeaveCriticalSection(&g_liveScanCs);
+	return 1;
+}
+
+extern "C" void VstLiveScanRelease(void)
+{
+	LiveScanCsEnsure();
+	EnterCriticalSection(&g_liveScanCs);
+	g_liveScanHold = 0;
+	LeaveCriticalSection(&g_liveScanCs);
+}
+
 namespace {
 
 static void EmitSongShort(int port, DWORD msg, __int64 start, int frames, int ofs)
@@ -3967,7 +4024,11 @@ static void RenderSongUnits(int frames)
 	ZeroMemory(g_eng.outR, frames * sizeof(float));
 	/* .mpsmv with HALion etc.: mix live parts (local + KpiHost64 SHM), not GS/mapper. */
 	if (InterlockedCompareExchange(&g_songUseLiveBinds, 0, 0)) {
+		/* スキャンがプラグインを開閉しているあいだは描画しない。UI と process の待ちで固まる。 */
+		if (!LiveSongRenderEnter())
+			return;
 		VstLiveRender(g_eng.outL, g_eng.outR, frames);
+		LiveSongRenderLeave();
 		return;
 	}
 	const int sl = VstIoSlot();

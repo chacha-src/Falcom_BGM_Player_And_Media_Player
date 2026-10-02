@@ -51,6 +51,7 @@ KbSasamiDecoder::KbSasamiDecoder(IKpiConfig* pConfig)
 	m_fmModeDefault = 2;
 	m_gsMapLsb = 0;
 	m_laBankMsb = 0;
+	m_wopnMode = 0;
 	m_titleSjis[0] = 0;
 	m_loopStart = -1.0;
 	m_loopEnd = -1.0;
@@ -298,12 +299,22 @@ void KbSasamiDecoder::LoadProgramsTxt()
 	if (slash) slash[1] = 0;
 	wcsncat_s(sz, L"programs.txt", _TRUNCATE);
 	LoadProgramsFile(m_note_factory, sz);
-	if (slash) slash[1] = 0;
-	wcsncat_s(sz, L"gs.wopn", _TRUNCATE);
-	m_note_factory.load_wopn(sz, 1, 0);
-	if (slash) slash[1] = 0;
-	wcsncat_s(sz, L"xg.wopn", _TRUNCATE);
-	m_note_factory.load_wopn(sz, 0, 1);
+	auto loadBank = [&](const wchar_t* name, int resId, int family, int append) {
+		if (slash) slash[1] = 0;
+		wcsncat_s(sz, name, _TRUNCATE);
+		if (m_note_factory.load_wopn(sz, family, append)) return;
+		if (!g_hKpi) return;
+		HRSRC hr = FindResourceW(g_hKpi, MAKEINTRESOURCEW(resId), RT_RCDATA);
+		if (!hr) return;
+		HGLOBAL hg = LoadResource(g_hKpi, hr);
+		DWORD n = SizeofResource(g_hKpi, hr);
+		const void* p = LockResource(hg);
+		if (p && n >= 32)
+			m_note_factory.load_wopn_mem(p, n, family, append);
+	};
+	/* 隣に無い本家でも GS/XG バンクを使う。無いと programs.txt の GM 番号だけになる。 */
+	loadBank(L"gs.wopn", 102, 1, 0);
+	loadBank(L"xg.wopn", 103, 0, 1);
 }
 
 void KbSasamiDecoder::midi_message(int port, uint_least32_t message)
@@ -327,6 +338,15 @@ void KbSasamiDecoder::sysex_message(int port, const void* data, std::size_t size
 	if (port < 0 || port >= m_nPorts) port = 0;
 	m_synths[port]->sysex_message(data, size);
 	const unsigned char* d = (const unsigned char*)data;
+	/* GM/GM2 On はバンクを捨てて PC だけになる。判定が GS/XG なら wopn のモードへ戻す。 */
+	int gmReset = (d && size == 6 && d[0] == 0xf0 && d[1] == 0x7e && d[2] == 0x7f &&
+		d[3] == 0x09 && (d[4] == 0x01 || d[4] == 0x02 || d[4] == 0x03) && d[5] == 0xf7) ? 1 : 0;
+	if (gmReset && (m_wopnMode == (int)system_mode_gs || m_wopnMode == (int)system_mode_xg)) {
+		if (m_synths[port])
+			m_synths[port]->set_system_mode((system_mode_t)m_wopnMode);
+		ApplyGsBankLsb();
+		return;
+	}
 	if (m_gsMapLsb >= 1 && m_gsMapLsb <= 4 && d && size >= 11 &&
 		d[0] == 0xf0 && d[1] == 0x41 && d[3] == 0x42 && d[4] == 0x12 &&
 		d[5] == 0x40 && d[6] == 0x00 && d[7] == 0x7f) {
@@ -335,6 +355,32 @@ void KbSasamiDecoder::sysex_message(int port, const void* data, std::size_t size
 }
 
 void KbSasamiDecoder::meta_event(int, const void*, std::size_t) {}
+
+void KbSasamiDecoder::ApplyMapForce(int mapForce, SasamiMidiMap* map)
+{
+	int gsLsb = 0;
+	int laBank = 0;
+	SasamiMapForceToSel(mapForce, map, &gsLsb, &laBank);
+	m_gsMapLsb = (gsLsb >= 1 && gsLsb <= 4) ? gsLsb : 0;
+	m_laBankMsb = (laBank == 127) ? 127 : 0;
+	/* 1=GS 2=XG 3=55 4=88 5=88Pro 6=8820 9=LA。これ以外は曲の SysEx 任せ。 */
+	if (mapForce == 2)
+		m_wopnMode = (int)system_mode_xg;
+	else if (mapForce == 1 || (mapForce >= 3 && mapForce <= 6) || mapForce == 9)
+		m_wopnMode = (int)system_mode_gs;
+	else
+		m_wopnMode = 0;
+}
+
+void KbSasamiDecoder::ApplyWopnMode()
+{
+	if (m_wopnMode != (int)system_mode_gs && m_wopnMode != (int)system_mode_xg)
+		return;
+	for (int i = 0; i < m_nPorts; i++) {
+		if (m_synths[i])
+			m_synths[i]->set_system_mode((system_mode_t)m_wopnMode);
+	}
+}
 
 void KbSasamiDecoder::ApplyGsBankLsb()
 {
@@ -346,6 +392,8 @@ void KbSasamiDecoder::ApplyGsBankLsb()
 				m_synths[i]->control_change(ch, 0, 127);
 				m_synths[i]->control_change(ch, 32, 1);
 			} else if (m_gsMapLsb >= 1 && m_gsMapLsb <= 4) {
+				/* 初期バンク 0x3C80 のままだと MSB が 121 扱いで gs.wopn を外す。 */
+				m_synths[i]->control_change(ch, 0, 0);
 				m_synths[i]->control_change(ch, 32, m_gsMapLsb);
 			}
 		}
@@ -359,6 +407,7 @@ void KbSasamiDecoder::reset()
 			m_synths[i]->reset();
 	}
 	m_note_factory.reset_pool_frame();
+	ApplyWopnMode();
 	ApplyGsBankLsb();
 }
 
@@ -390,6 +439,7 @@ DWORD __fastcall KbSasamiDecoder::Open(const KPI_MEDIAINFO* cpRequest, IKpiFile*
 	if (n == 0) return 0;
 	m_gsMapLsb = 0;
 	m_laBankMsb = 0;
+	m_wopnMode = 0;
 
 	const int smfMagic = (n >= 4 && s_fileBuf[0] == 'M' && s_fileBuf[1] == 'T'
 		&& s_fileBuf[2] == 'h' && s_fileBuf[3] == 'd') ? 1 : 0;
@@ -432,11 +482,8 @@ DWORD __fastcall KbSasamiDecoder::Open(const KPI_MEDIAINFO* cpRequest, IKpiFile*
 			int mapForce = SasamiResolveMapForceW(pathForKind, m_mapDefault);
 			mapForce = SasamiAutoMapForce(mapForce, NULL, smfPtr, (int)smfLen, pathForKind, NULL);
 			SasamiMidiMap map = SASAMI_MAP_GS88;
-			int gsLsb = 0;
-			int laBank = 0;
-			SasamiMapForceToSel(mapForce, &map, &gsLsb, &laBank);
-			m_gsMapLsb = (gsLsb >= 1 && gsLsb <= 4) ? gsLsb : 0;
-			m_laBankMsb = (laBank == 127) ? 127 : 0;
+			ApplyMapForce(mapForce, &map);
+			(void)map;
 		}
 		reset();
 		m_loopStart = m_sequencer.find_marker("loopStart");
@@ -542,12 +589,8 @@ DWORD __fastcall KbSasamiDecoder::Open(const KPI_MEDIAINFO* cpRequest, IKpiFile*
 	int mapForce = SasamiResolveMapForceW(pathForMap, m_mapDefault);
 	mapForce = SasamiAutoMapForce(mapForce, &s_song, NULL, 0, pathForMap, s_song.titleSjis);
 	SasamiMidiMap map = SASAMI_MAP_GS88;
-	int gsLsb = 2;
-	int laBank = 0;
-	SasamiMapForceToSel(mapForce, &map, &gsLsb, &laBank);
-	m_gsMapLsb = (gsLsb >= 1 && gsLsb <= 4) ? gsLsb : 0;
-	m_laBankMsb = (laBank == 127) ? 127 : 0;
-	if (!SasamiConvertToSmf(s_song, map, gsLsb, m_smf, SASAMI_MAX_SMF, &m_smfSize, laBank)) return 0;
+	ApplyMapForce(mapForce, &map);
+	if (!SasamiConvertToSmf(s_song, map, m_gsMapLsb, m_smf, SASAMI_MAX_SMF, &m_smfSize, m_laBankMsb)) return 0;
 	LoadProgramsTxt();
 	MemFile mf;
 	mf.p = m_smf;

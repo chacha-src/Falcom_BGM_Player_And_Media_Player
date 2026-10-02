@@ -159,6 +159,9 @@ int VstApplyMpw3Binds(const wchar_t* mpw3Path, int openEditor);
 /* .mpsmv preview: route SMF notes to live VST parts (HALion) instead of GM mapper. */
 void VstSongUseLiveBindsSet(int enable);
 int VstSongUseLiveBinds(void);
+/* 1=曲の live 描画がプラグイン内。このとき UI からスキャンすると固まる。 */
+int VstLiveScanTryHold(void);
+void VstLiveScanRelease(void);
 void VstLiveUnloadPart(int part1to32);
 // ホスト窓が閉じるとき: 先にリモート音声を止め、全部のパートを降ろす。
 void VstLiveShutdown(void);

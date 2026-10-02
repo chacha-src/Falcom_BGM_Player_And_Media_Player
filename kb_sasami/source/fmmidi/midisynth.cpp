@@ -588,7 +588,13 @@ namespace std{
         assert(value >= 0 && value <= 0x7F);
         switch(control){
         case 0x00:
-            bank_select((bank & 0x7F) | (value << 7));
+            {
+                /* 初期値 0x3C80 が残っていると MSB が 121 になり、変動バンクが落ちる。 */
+                int cur = bank;
+                if ((cur & 0x3F80) == 0x3C80)
+                    cur &= 0x7F;
+                bank_select((cur & 0x7F) | (value << 7));
+            }
             break;
         case 0x01:
             set_modulation_depth((modulation_depth & 0x7F) | (value << 7));
@@ -608,7 +614,12 @@ namespace std{
             break;
         case 0x20:
             /* LSB。CC0 と同じ式だと SC-55/88 のマップ（1=55, 2=88, 3=88Pro, 4=8820）が選べない */
-            bank_select((bank & 0x3F80) | value);
+            {
+                int cur = bank;
+                if ((cur & 0x3F80) == 0x3C80)
+                    cur &= 0x7F;
+                bank_select((cur & 0x3F80) | value);
+            }
             break;
         case 0x21:
             set_modulation_depth((modulation_depth & ~0x7F) | value);
@@ -720,9 +731,20 @@ namespace std{
     {
         switch(system_mode){
         case system_mode_gm:
+            /* GM On でバンクを捨てると、途中の CC0/CC32 が効かず PC だけになる。 */
+            if(default_bank == 0x3C00){
+                set_bank(0x3C00 | (value & 0x7F));
+            }else{
+                set_bank(value);
+            }
             break;
         case system_mode_gs:
-            if(((bank & 0x3F80) == 0x3C00) == ((value & 0x3F80) == 0x3C00)){
+            if(default_bank == 0x3C00){
+                if((value & 0x3F80) == 0x3C00)
+                    set_bank(value);
+                else
+                    set_bank(0x3C00 | (value & 0x7F));
+            }else{
                 set_bank(value);
             }
             break;
@@ -1895,6 +1917,10 @@ namespace std{
     {
         return ym && ym->load(path, family, append);
     }
+    bool fm_note_factory::load_wopn_mem(const void* data, size_t size, int family, int append)
+    {
+        return ym && ym->load_mem(data, size, family, append);
+    }
     void fm_note_factory::reset_pool_frame()
     {
         if (ym)
@@ -2054,7 +2080,7 @@ namespace std{
         }else{
             struct FMPARAMETER* p = NULL;
             const int pc = program & 0x7F;
-            /* バンクで別楽器を引くと番号と実音がずれる。GM 番号の定義を使う。 */
+            /* wopn が空のときだけ。バンクは見ず GM の PC だけ。wopn が載っていればここには来ない。 */
             if(programs.find(pc) != programs.end())
                 p = &programs[pc];
             else if(programs.find(program) != programs.end())

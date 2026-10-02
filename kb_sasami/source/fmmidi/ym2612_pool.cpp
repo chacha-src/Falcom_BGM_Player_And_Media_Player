@@ -259,10 +259,9 @@ struct Ym2612Pool::Impl {
                 rr = clampi(rr + t.rrD, 0, 15);
                 sl = clampi(sl + t.slD, 0, 15);
                 tl = clampi(tl + velTl + t.carTl, 0, 127);
-                if (drum && raira) {
-                    if (ar < 28) ar = 28;
+                /* raira はドラム音量だけ。AR を上げるとリリースが短くなり、かかり具合が本家とずれる。 */
+                if (drum && raira)
                     tl = clampi(tl - 8, 0, 127);
-                }
             } else {
                 tl = clampi(tl - t.modTl, 0, 127);
                 if (t.amsOn) am = 0x80;
@@ -380,7 +379,8 @@ struct Ym2612Pool::Impl {
                 return in;
             }
         }
-        int gs = (mode == 3) || (mode == 0 && msb > 0 && msb < 64 && lsb <= 4);
+        /* CC32=1..4 は gs.wopn。MSB 0 のキャピタルも含む。XG モードだけは family 0。 */
+        int gs = (mode == 3) || (mode != 4 && msb < 64 && lsb >= 1 && lsb <= 4);
         if (gs) {
             int mapLsb = gs_file_lsb(lsb);
             int var = msb;
@@ -662,40 +662,30 @@ void Ym2612Pool::end_frame()
         impl->close_frame();
 }
 
-bool Ym2612Pool::load(const wchar_t* path, int family, int append)
+bool Ym2612Pool::load_mem(const void* data, size_t sz, int family, int append)
 {
-    if (!impl) return false;
-    if (!append) impl->banks.clear();
-    if (!path) return !impl->banks.empty();
-    FILE* fp = 0;
-    if (_wfopen_s(&fp, path, L"rb") != 0 || !fp) return !impl->banks.empty();
-    if (fseek(fp, 0, SEEK_END) != 0) { fclose(fp); return false; }
-    long sz = ftell(fp);
-    if (sz < 32 || sz > 8 * 1024 * 1024) { fclose(fp); return false; }
-    std::vector<uint8_t> b((size_t)sz);
-    fseek(fp, 0, SEEK_SET);
-    if (fread(&b[0], 1, (size_t)sz, fp) != (size_t)sz) { fclose(fp); return false; }
-    fclose(fp);
-
+    if (!impl || !data || sz < 32 || sz > 8 * 1024 * 1024) return false;
+    const uint8_t* b = (const uint8_t*)data;
     int ver = 0;
     size_t o = 0;
-    if (sz >= 13 && memcmp(&b[0], "WOPN2-B2NK", 11) == 0) {
+    if (sz >= 13 && memcmp(b, "WOPN2-B2NK", 11) == 0) {
         ver = b[11] | (b[12] << 8);
         o = 13;
-    } else if (sz >= 11 && memcmp(&b[0], "WOPN2-BANK", 11) == 0) {
+    } else if (sz >= 11 && memcmp(b, "WOPN2-BANK", 11) == 0) {
         ver = 1;
         o = 11;
     } else {
         return false;
     }
-    if (o + 5 > b.size()) return false;
+    if (o + 5 > sz) return false;
     int mb = (b[o] << 8) | b[o + 1];
     int pb = (b[o + 2] << 8) | b[o + 3];
     o += 5;
     if (mb < 1 || mb > 128 || pb < 0 || pb > 128) return false;
     int stride = (ver >= 2) ? 69 : 65;
     size_t need = o + (size_t)(mb + pb) * 34 + (size_t)(mb + pb) * 128 * stride;
-    if (need > b.size()) return false;
+    if (need > sz) return false;
+    if (!append) impl->banks.clear();
 
     std::vector<Bank> banks;
     banks.resize((size_t)mb + (size_t)pb);
@@ -708,7 +698,7 @@ bool Ym2612Pool::load(const wchar_t* path, int family, int append)
     }
     for (int i = 0; i < mb + pb; i++) {
         for (int pc = 0; pc < 128; pc++) {
-            const uint8_t* p = &b[o];
+            const uint8_t* p = b + o;
             Inst& in = banks[i].ins[pc];
             in.note_off = (int16_t)((p[32] << 8) | p[33]);
             in.perc_key = p[34];
@@ -726,6 +716,21 @@ bool Ym2612Pool::load(const wchar_t* path, int family, int append)
     }
     impl->banks.insert(impl->banks.end(), banks.begin(), banks.end());
     return !impl->banks.empty();
+}
+
+bool Ym2612Pool::load(const wchar_t* path, int family, int append)
+{
+    if (!impl || !path || !path[0]) return false;
+    FILE* fp = 0;
+    if (_wfopen_s(&fp, path, L"rb") != 0 || !fp) return false;
+    if (fseek(fp, 0, SEEK_END) != 0) { fclose(fp); return false; }
+    long sz = ftell(fp);
+    if (sz < 32 || sz > 8 * 1024 * 1024) { fclose(fp); return false; }
+    std::vector<uint8_t> b((size_t)sz);
+    fseek(fp, 0, SEEK_SET);
+    if (fread(&b[0], 1, (size_t)sz, fp) != (size_t)sz) { fclose(fp); return false; }
+    fclose(fp);
+    return load_mem(&b[0], b.size(), family, append);
 }
 
 note* Ym2612Pool::note_on(int program, int key, int velocity, double freq_mul, const tone_color& color)

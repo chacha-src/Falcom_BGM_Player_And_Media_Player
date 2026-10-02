@@ -11,6 +11,7 @@ public:
     Ym2612Pool();
     ~Ym2612Pool();
     bool load(const wchar_t* path, int family = 0, int append = 0);
+    bool load_mem(const void* data, size_t size, int family = 0, int append = 0);
     struct Impl;
     bool ready() const;
     void set_raira(int raira);
