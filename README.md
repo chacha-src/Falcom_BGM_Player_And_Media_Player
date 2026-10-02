@@ -137,7 +137,7 @@ Windows 11のアクリル風ぼかし表示に対応しています。コンテ�
 プロンプトを時間軸のロール上で編集・配置できます（複数レーン）。メディアプレイヤー側から開けます。メイン画面に追随するロックや表示倍率の保存にも対応しています。簡易3D表示もあります。
 
 ### VSTホスト
-メディアプレイヤー下段の **VST** から、手持ちの VST 音源を読み込んで鍵盤で鳴らせます。プラグインを Part 1〜32 へドラッグして配線し、MIDI入力（最大3系統）と音声出力を選べます。プリセットの保存・切替、名前での絞り込み、再スキャンに対応。MIDI機器が無くてもパソコンのキーボードで簡易演奏できます（Space で全音停止）。SOUND Canvas VA のようなマルチティンバーは1スロットで16chを受け持ちます。32bit プラグインは ogghost32 経由です（ogghost32.exe は実行ファイルと同じ場所の x86）。
+メディアプレイヤー下段の **VST** から、手持ちの VST 音源を読み込んで鍵盤で鳴らせます。プラグインを Part 1〜32 へドラッグして配線し、MIDI入力（最大3系統）と音声出力を選べます。プリセットの保存・切替、名前での絞り込み、再スキャンに対応。MIDI機器が無くてもパソコンのキーボードで簡易演奏できます（Space で全音停止）。SOUND Canvas VA のようなマルチティンバーは1スロットで16chを受け持ちます。32bit プラグインは ogghost32 経由です（ogghost32.exe は実行ファイルと同じフォルダ階層の x86）。
 
 プレイリストの **.mid / .midi / .kar / .rmi** は、レンダリング設定の「MIDI再生」で鳴らします。**KPI優先** は kpi、**VST優先** は GS／XG 用の VST または SoundFont（.sf2。XG System On があれば XG、無ければ GS）、**VSTホスト優先** は VSTホストで保存したプリセットです。明示の DLL が空なら MIDI出力の機器（未指定は Windows MIDI マッパー）になります。
 
@@ -319,7 +319,7 @@ flowchart TB
 - mp3, m4a, aac, alac, flac, tta, ape
 - DSD (dsf, dff)
 - OggOpus (48k)
-- Kb Media Playerの旧kpiプラグインと新kpiの一部に対応（実行ファイルと同じ場所の Plugins フォルダに入れて使用。本体は x64。32bit の kpi は同じ場所の ogghost32.exe（x86）経由）
+- Kb Media Playerの旧kpiと新kpi（ほぼ網羅）、Winamp / XMPlay / AIMP の入力プラグインに対応しています。実行ファイルと同じフォルダ階層に置いて使います。本体は x64。32bit のプラグインは、同じフォルダ階層の ogghost32.exe（x86）経由です
   - kpi一覧では拡張子テキストで絞り込みできます（入力すると即座に反映。チェック状態は曲単位で保持）
 
 ### 3. 動画再生 (DirectShow)
@@ -549,7 +549,7 @@ A timed prompt feature can change pitch, tempo, effects, and more during playbac
 Edit and place prompt commands on a time-based roll (multiple lanes). Open it from the media player. Follow-main lock and zoom level can be remembered. A simple 3D view is also available.
 
 ### VST Host
-From the media player’s bottom-bar **VST** button, load your own VST instruments and play them from a keyboard. Drag plugins onto Parts 1–32, pick MIDI inputs (up to 3) and an audio output. Preset save/switch, name filter, and rescan are supported. With no MIDI hardware, the PC keyboard can play a simple map (Space all-notes-off). Multi-timbral hosts such as SOUND Canvas VA take 16 channels in one slot. 32-bit plugins go through ogghost32 (place ogghost32.exe, the x86 host, in the same location as the executable).
+From the media player’s bottom-bar **VST** button, load your own VST instruments and play them from a keyboard. Drag plugins onto Parts 1–32, pick MIDI inputs (up to 3) and an audio output. Preset save/switch, name filter, and rescan are supported. With no MIDI hardware, the PC keyboard can play a simple map (Space all-notes-off). Multi-timbral hosts such as SOUND Canvas VA take 16 channels in one slot. 32-bit plugins go through ogghost32 (ogghost32.exe, the x86 host, in the same folder tree as the executable).
 
 Playlist **.mid / .midi / .kar / .rmi** play from Rendering → **MIDI play**. **Prefer KPI** uses a kpi plugin, **Prefer VST** uses the GS/XG VST or SoundFont (.sf2; XG System On selects XG, otherwise GS), and **Prefer VST Host** uses a preset saved in the VST host. If the explicit DLL is empty, the MIDI-out device is used (Windows MIDI Mapper when unset).
 
@@ -731,7 +731,7 @@ Supports the following formats:
 - mp3, m4a, aac, alac, flac, tta, ape
 - DSD (dsf, dff)
 - OggOpus (48k)
-- Legacy and modern **kpi plugins** (Kb Media Player) are supported (place in the `Plugins` folder in the same location as the executable; the player itself is x64, and 32-bit kpi plugins go through ogghost32.exe (x86) in that same location).
+- Legacy and current **kpi plugins** (Kb Media Player; current kpi is largely covered), plus Winamp / XMPlay / AIMP input plugins, are supported. Place them in the same folder tree as the executable. The player itself is x64; 32-bit plugins go through ogghost32.exe (x86) in that same folder tree.
   - The kpi list can be filtered by extension text (updates as you type; checkbox state is kept per plugin)
 
 ### 3. Video Playback (DirectShow)
