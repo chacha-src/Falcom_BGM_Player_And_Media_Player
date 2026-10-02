@@ -1867,8 +1867,8 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 	// サウンド調整スライダー(og の各スライダーと同じ範囲に合わせる)
 	m_dsvol.SetRange(-498, 1); 
 	m_kvol.SetRange(100, 900);
-	m_tempo.SetRange(0, 400);   m_tempo.SetMode(1);
-	m_pitch.SetRange(0, 400);   m_pitch.SetMode(1);
+	m_tempo.SetRange(0, 400);   m_tempo.SetMode(4);
+	m_pitch.SetRange(0, 400);   m_pitch.SetMode(4);
 
 	// シークスライダーに選択範囲(緑)を有効化。リソースでは付いていないため
 	// ここで付与しないと MirrorSeekVol の SetSelection(ループ範囲/緑追随)が描画されない。
@@ -10401,8 +10401,19 @@ void CMediaPlayerDlg::OnRButtonUp(UINT nFlags, CPoint point)
 			PostMessage(WM_COMMAND, cmd);
 		return;
 	}
-	// キャプション帯(アイコン含む)のシステムメニューは Base 側
-	CCustomBlurDialogExBase::OnRButtonUp(nFlags, point);
+	// キャプション帯はシステムメニュー。地の右クリックは共通カスタムメニュー。
+	const int capH = GetCustomCaptionHeight();
+	if (capH > 0 && point.y >= 0 && point.y < capH) {
+		CCustomBlurDialogExBase::OnRButtonUp(nFlags, point);
+		return;
+	}
+	{
+		CCustomPopupMenu menu;
+		menu.SetAeroMode(FALSE);
+		CPoint sp = point;
+		ClientToScreen(&sp);
+		menu.Track(sp, this);
+	}
 }
 
 void CMediaPlayerDlg::OnSpeanaStyleBar()

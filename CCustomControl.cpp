@@ -1917,6 +1917,388 @@ static void DrawDiamond(CDC* pDC, CRect rc, COLORREF c)
     pDC->SelectObject(op);
 }
 
+static void DrawSnowflake(CDC* pDC, const CRect& rc, COLORREF c)
+{
+    const int cx = rc.CenterPoint().x, cy = rc.CenterPoint().y;
+    int s = min(rc.Width(), rc.Height()) / 2;
+    if (s < 3) s = 3;
+    CPen pen(PS_SOLID, max(1, s / 5), c);
+    CPen* op = pDC->SelectObject(&pen);
+    for (int i = 0; i < 6; ++i) {
+        const double a = i * 3.14159265 / 3.0 - 1.5708;
+        const int x = cx + (int)(s * cos(a));
+        const int y = cy + (int)(s * sin(a));
+        pDC->MoveTo(cx, cy);
+        pDC->LineTo(x, y);
+        const int bx = cx + (int)(s * 0.55 * cos(a));
+        const int by = cy + (int)(s * 0.55 * sin(a));
+        pDC->MoveTo(bx, by);
+        pDC->LineTo(bx + (int)(s * 0.32 * cos(a + 0.55)), by + (int)(s * 0.32 * sin(a + 0.55)));
+        pDC->MoveTo(bx, by);
+        pDC->LineTo(bx + (int)(s * 0.32 * cos(a - 0.55)), by + (int)(s * 0.32 * sin(a - 0.55)));
+    }
+    pDC->SelectObject(op);
+}
+
+static void DrawCrest(CDC* pDC, const CRect& rc, COLORREF c)
+{
+    const int cx = rc.CenterPoint().x, cy = rc.CenterPoint().y;
+    int s = min(rc.Width(), rc.Height()) / 2;
+    if (s < 3) s = 3;
+    CBrush br(c);
+    CPen pen(PS_SOLID, 1, CCC_Darken(c, 50));
+    CBrush* ob = pDC->SelectObject(&br);
+    CPen* op = pDC->SelectObject(&pen);
+    POINT v[4] = { {cx - s / 5, cy - s}, {cx + s / 5, cy - s}, {cx + s / 3, cy + s}, {cx - s / 3, cy + s} };
+    POINT h[4] = { {cx - s, cy - s / 5}, {cx + s, cy - s / 5}, {cx + s, cy + s / 4}, {cx - s, cy + s / 4} };
+    pDC->Polygon(v, 4);
+    pDC->Polygon(h, 4);
+    CBrush gem(CCC_UiTheme().accent2);
+    pDC->SelectObject(&gem);
+    pDC->Ellipse(cx - s / 4, cy - s / 4, cx + s / 4, cy + s / 4);
+    pDC->SelectObject(ob);
+    pDC->SelectObject(op);
+}
+
+static void DrawNeonHex(CDC* pDC, const CRect& rc, COLORREF c)
+{
+    const int cx = rc.CenterPoint().x, cy = rc.CenterPoint().y;
+    int s = min(rc.Width(), rc.Height()) / 2;
+    if (s < 3) s = 3;
+    POINT pts[6];
+    for (int i = 0; i < 6; ++i) {
+        const double a = i * 3.14159265 / 3.0 - 1.5708;
+        pts[i].x = cx + (int)(s * cos(a));
+        pts[i].y = cy + (int)(s * sin(a));
+    }
+    CPen pen(PS_SOLID, max(2, s / 4), c);
+    CBrush* ob = (CBrush*)pDC->SelectStockObject(NULL_BRUSH);
+    CPen* op = pDC->SelectObject(&pen);
+    pDC->Polygon(pts, 6);
+    CPen inner(PS_SOLID, 1, CCC_UiTheme().accent2);
+    pDC->SelectObject(&inner);
+    POINT in[6];
+    for (int i = 0; i < 6; ++i) {
+        in[i].x = cx + (pts[i].x - cx) / 2;
+        in[i].y = cy + (pts[i].y - cy) / 2;
+    }
+    pDC->Polygon(in, 6);
+    pDC->SelectObject(ob);
+    pDC->SelectObject(op);
+}
+
+static void DrawEnso(CDC* pDC, const CRect& rc, COLORREF c)
+{
+    const int cx = rc.CenterPoint().x, cy = rc.CenterPoint().y;
+    int s = min(rc.Width(), rc.Height()) / 2;
+    if (s < 3) s = 3;
+    CPen pen(PS_SOLID, max(2, s / 3), c);
+    CPen* op = pDC->SelectObject(&pen);
+    pDC->Arc(cx - s, cy - s, cx + s, cy + s, cx + s, cy - s / 3, cx - s / 2, cy - s);
+    CBrush seal(CCC_UiTheme().accent2);
+    CBrush* ob = pDC->SelectObject(&seal);
+    CPen* np = (CPen*)pDC->SelectStockObject(NULL_PEN);
+    const int q = max(2, s / 3);
+    pDC->Rectangle(cx + s / 5, cy + s / 5, cx + s / 5 + q, cy + s / 5 + q);
+    pDC->SelectObject(ob);
+    pDC->SelectObject(np);
+    pDC->SelectObject(op);
+}
+
+static void DrawLeaf(CDC* pDC, const CRect& rc, COLORREF c)
+{
+    const int cx = rc.CenterPoint().x, cy = rc.CenterPoint().y;
+    int s = min(rc.Width(), rc.Height()) / 2;
+    if (s < 3) s = 3;
+    CBrush br(c);
+    CPen pen(PS_SOLID, 1, CCC_Darken(c, 40));
+    CBrush* ob = pDC->SelectObject(&br);
+    CPen* op = pDC->SelectObject(&pen);
+    POINT pts[4] = {
+        {cx, cy - s}, {cx + s, cy}, {cx, cy + s}, {cx - s / 2, cy}
+    };
+    pDC->Polygon(pts, 4);
+    CPen vein(PS_SOLID, 1, CCC_UiTheme().accent2);
+    pDC->SelectObject(&vein);
+    pDC->MoveTo(cx, cy - s + 1);
+    pDC->LineTo(cx, cy + s - 1);
+    pDC->SelectObject(ob);
+    pDC->SelectObject(op);
+}
+
+static void DrawCandy(CDC* pDC, const CRect& rc, COLORREF c)
+{
+    const int cx = rc.CenterPoint().x, cy = rc.CenterPoint().y;
+    int w = rc.Width() / 2, h = rc.Height() / 2;
+    if (w < 3) w = 3;
+    if (h < 2) h = 2;
+    CBrush br(c);
+    CPen pen(PS_SOLID, 1, CCC_Darken(c, 40));
+    CBrush* ob = pDC->SelectObject(&br);
+    CPen* op = pDC->SelectObject(&pen);
+    POINT L[3] = { {cx - w / 3, cy}, {cx - w, cy - h}, {cx - w, cy + h} };
+    POINT R[3] = { {cx + w / 3, cy}, {cx + w, cy - h}, {cx + w, cy + h} };
+    pDC->Polygon(L, 3);
+    pDC->Polygon(R, 3);
+    CBrush body(CCC_UiTheme().accent2);
+    pDC->SelectObject(&body);
+    pDC->Ellipse(cx - w / 2, cy - h, cx + w / 2, cy + h);
+    pDC->SelectObject(ob);
+    pDC->SelectObject(op);
+}
+
+static void DrawGear(CDC* pDC, const CRect& rc, COLORREF c)
+{
+    const int cx = rc.CenterPoint().x, cy = rc.CenterPoint().y;
+    int s = min(rc.Width(), rc.Height()) / 2;
+    if (s < 3) s = 3;
+    CBrush br(c);
+    CPen pen(PS_SOLID, 1, CCC_Darken(c, 40));
+    CBrush* ob = pDC->SelectObject(&br);
+    CPen* op = pDC->SelectObject(&pen);
+    pDC->Ellipse(cx - s * 2 / 3, cy - s * 2 / 3, cx + s * 2 / 3, cy + s * 2 / 3);
+    const int tw = max(2, s / 4), th = max(2, s / 3);
+    for (int i = 0; i < 8; ++i) {
+        const double a = i * 3.14159265 / 4.0;
+        const int x = cx + (int)((s - th / 2) * cos(a));
+        const int y = cy + (int)((s - th / 2) * sin(a));
+        pDC->Rectangle(x - tw / 2, y - tw / 2, x + tw / 2, y + tw / 2);
+    }
+    CBrush hole(CCC_UiTheme().face);
+    pDC->SelectObject(&hole);
+    pDC->Ellipse(cx - s / 4, cy - s / 4, cx + s / 4, cy + s / 4);
+    pDC->SelectObject(ob);
+    pDC->SelectObject(op);
+}
+
+static void DrawGlitterStar(CDC* pDC, const CRect& rc, COLORREF c)
+{
+    const int cx = (rc.left + rc.right) / 2;
+    const int cy = (rc.top + rc.bottom) / 2;
+    const int r = max(2, min(rc.Width(), rc.Height()) / 2);
+    DrawStar(pDC, cx, cy, r, c);
+    CPen pen(PS_SOLID, 1, RGB(255, 236, 140));
+    CPen* op = pDC->SelectObject(&pen);
+    pDC->MoveTo(cx - r, cy); pDC->LineTo(cx + r, cy);
+    pDC->MoveTo(cx, cy - r); pDC->LineTo(cx, cy + r);
+    pDC->SelectObject(op);
+}
+
+static void DrawTie(CDC* pDC, const CRect& rc, COLORREF c)
+{
+    const int cx = (rc.left + rc.right) / 2;
+    const int top = rc.top + 1;
+    const int bot = rc.bottom - 1;
+    const int w = max(2, rc.Width() / 2);
+    const int yoke = top + max(2, (bot - top) / 3);
+    POINT pt[5] = {
+        { cx - w / 4, top },
+        { cx + w / 4, top },
+        { cx + w / 2, yoke },
+        { cx, bot },
+        { cx - w / 2, yoke }
+    };
+    CBrush br(c);
+    CPen pen(PS_SOLID, 1, c);
+    CBrush* ob = pDC->SelectObject(&br);
+    CPen* op = pDC->SelectObject(&pen);
+    pDC->Polygon(pt, 5);
+    pDC->SelectObject(op);
+    pDC->SelectObject(ob);
+}
+
+static void DrawLapel(CDC* pDC, const CRect& rc, COLORREF c)
+{
+    const int l = rc.left + 1;
+    const int r = rc.right - 1;
+    const int t = rc.top + 1;
+    const int b = rc.bottom - 1;
+    const int cx = (l + r) / 2;
+    const int span = max(2, (r - l) / 4);
+    POINT pt[5] = {
+        { l, b },
+        { l + span, t },
+        { cx, t + max(2, (b - t) / 2) },
+        { r - span, t },
+        { r, b }
+    };
+    CBrush br(c);
+    CPen pen(PS_SOLID, 1, RGB(230, 230, 234));
+    CBrush* ob = pDC->SelectObject(&br);
+    CPen* op = pDC->SelectObject(&pen);
+    pDC->Polygon(pt, 5);
+    pDC->SelectObject(op);
+    pDC->SelectObject(ob);
+}
+
+static void DrawSakura(CDC* pDC, const CRect& rc, COLORREF c)
+{
+    const int cx = (rc.left + rc.right) / 2;
+    const int cy = (rc.top + rc.bottom) / 2;
+    const int rad = max(2, min(rc.Width(), rc.Height()) / 2);
+    CBrush br(c);
+    CBrush* ob = pDC->SelectObject(&br);
+    CPen pen(PS_SOLID, 1, c);
+    CPen* op = pDC->SelectObject(&pen);
+    for (int i = 0; i < 5; i++) {
+        const double a = -1.5708 + i * 6.2831853 / 5.0;
+        const int px = cx + (int)(cos(a) * rad * 0.55);
+        const int py = cy + (int)(sin(a) * rad * 0.55);
+        const int pr = max(2, rad / 3);
+        pDC->Ellipse(px - pr, py - pr, px + pr, py + pr);
+    }
+    CBrush core(RGB(255, 214, 90));
+    pDC->SelectObject(&core);
+    pDC->Ellipse(cx - 2, cy - 2, cx + 2, cy + 2);
+    pDC->SelectObject(op);
+    pDC->SelectObject(ob);
+}
+
+static void DrawSun(CDC* pDC, const CRect& rc, COLORREF c)
+{
+    const int cx = (rc.left + rc.right) / 2;
+    const int cy = (rc.top + rc.bottom) / 2;
+    const int rad = max(3, min(rc.Width(), rc.Height()) / 3);
+    CBrush br(c);
+    CBrush* ob = pDC->SelectObject(&br);
+    CPen pen(PS_SOLID, 1, c);
+    CPen* op = pDC->SelectObject(&pen);
+    pDC->Ellipse(cx - rad, cy - rad, cx + rad, cy + rad);
+    const int ray = rad + max(2, rad / 2);
+    for (int i = 0; i < 8; i++) {
+        const double a = i * 6.2831853 / 8.0;
+        pDC->MoveTo(cx + (int)(cos(a) * (rad + 1)), cy + (int)(sin(a) * (rad + 1)));
+        pDC->LineTo(cx + (int)(cos(a) * ray), cy + (int)(sin(a) * ray));
+    }
+    pDC->SelectObject(op);
+    pDC->SelectObject(ob);
+}
+
+static void DrawMaple(CDC* pDC, const CRect& rc, COLORREF c)
+{
+    const int cx = (rc.left + rc.right) / 2;
+    const int cy = (rc.top + rc.bottom) / 2;
+    const int rad = max(3, min(rc.Width(), rc.Height()) / 2);
+    POINT pt[10];
+    for (int i = 0; i < 5; i++) {
+        const double a0 = -1.5708 + i * 6.2831853 / 5.0;
+        const double a1 = a0 + 6.2831853 / 10.0;
+        pt[i * 2].x = cx + (int)(cos(a0) * rad);
+        pt[i * 2].y = cy + (int)(sin(a0) * rad);
+        pt[i * 2 + 1].x = cx + (int)(cos(a1) * rad * 0.38);
+        pt[i * 2 + 1].y = cy + (int)(sin(a1) * rad * 0.38);
+    }
+    CBrush br(c);
+    CBrush* ob = pDC->SelectObject(&br);
+    CPen pen(PS_SOLID, 1, c);
+    CPen* op = pDC->SelectObject(&pen);
+    pDC->Polygon(pt, 10);
+    pDC->MoveTo(cx, cy);
+    pDC->LineTo(cx, rc.bottom - 1);
+    pDC->SelectObject(op);
+    pDC->SelectObject(ob);
+}
+
+static void DrawHorizonSun(CDC* pDC, const CRect& rc, COLORREF c)
+{
+    const int cx = (rc.left + rc.right) / 2;
+    const int y = rc.top + rc.Height() * 2 / 3;
+    const int rad = max(3, min(rc.Width(), rc.Height()) / 3);
+    CBrush br(c);
+    CBrush* ob = pDC->SelectObject(&br);
+    CPen pen(PS_SOLID, 1, c);
+    CPen* op = pDC->SelectObject(&pen);
+    pDC->Pie(cx - rad, y - rad, cx + rad, y + rad, cx + rad, y, cx - rad, y);
+    CPen line(PS_SOLID, 1, CCC_UiTheme().textDim);
+    pDC->SelectObject(&line);
+    pDC->MoveTo(rc.left + 1, y);
+    pDC->LineTo(rc.right - 1, y);
+    pDC->SelectObject(op);
+    pDC->SelectObject(ob);
+}
+
+static void DrawDawn(CDC* pDC, const CRect& rc, COLORREF c)
+{
+    const int cx = (rc.left + rc.right) / 2;
+    const int y = rc.bottom - 3;
+    const int rad = max(3, min(rc.Width(), rc.Height()) / 4);
+    CBrush br(c);
+    CBrush* ob = pDC->SelectObject(&br);
+    CPen pen(PS_SOLID, 1, c);
+    CPen* op = pDC->SelectObject(&pen);
+    pDC->Pie(cx - rad, y - rad, cx + rad, y + rad, cx + rad, y, cx - rad, y);
+    pDC->MoveTo(cx, y - rad - 1);
+    pDC->LineTo(cx, rc.top + 1);
+    pDC->MoveTo(cx - rad, y - 1);
+    pDC->LineTo(rc.left + 1, rc.top + rc.Height() / 3);
+    pDC->MoveTo(cx + rad, y - 1);
+    pDC->LineTo(rc.right - 1, rc.top + rc.Height() / 3);
+    pDC->SelectObject(op);
+    pDC->SelectObject(ob);
+}
+
+static void DrawRaindrop(CDC* pDC, const CRect& rc, COLORREF c)
+{
+    const int cx = (rc.left + rc.right) / 2;
+    const int rad = max(2, min(rc.Width(), rc.Height()) / 3);
+    const int by = rc.bottom - rad;
+    POINT pt[3] = { { cx, rc.top + 1 }, { cx - rad, by }, { cx + rad, by } };
+    CBrush br(c);
+    CBrush* ob = pDC->SelectObject(&br);
+    CPen pen(PS_SOLID, 1, c);
+    CPen* op = pDC->SelectObject(&pen);
+    pDC->Polygon(pt, 3);
+    pDC->Ellipse(cx - rad, by - rad, cx + rad, by + rad);
+    pDC->SelectObject(op);
+    pDC->SelectObject(ob);
+}
+
+static void DrawWave(CDC* pDC, const CRect& rc, COLORREF c)
+{
+    CPen pen(PS_SOLID, 2, c);
+    CPen* op = pDC->SelectObject(&pen);
+    const int y0 = rc.top + rc.Height() / 3;
+    const int y1 = rc.top + rc.Height() * 2 / 3;
+    const int mid = (rc.left + rc.right) / 2;
+    pDC->MoveTo(rc.left, y0);
+    pDC->LineTo(rc.left + rc.Width() / 4, y0 - rc.Height() / 5);
+    pDC->LineTo(mid, y0);
+    pDC->LineTo(rc.right - rc.Width() / 4, y0 + rc.Height() / 5);
+    pDC->LineTo(rc.right, y0);
+    pDC->MoveTo(rc.left, y1);
+    pDC->LineTo(rc.left + rc.Width() / 4, y1 - rc.Height() / 6);
+    pDC->LineTo(mid, y1);
+    pDC->LineTo(rc.right - rc.Width() / 4, y1 + rc.Height() / 6);
+    pDC->LineTo(rc.right, y1);
+    pDC->SelectObject(op);
+}
+
+static void DrawThemeMotif(CDC* pDC, const CRect& rc, COLORREF c)
+{
+    if (!pDC || rc.Width() < 3 || rc.Height() < 3) return;
+    switch (CCC_UiThemeId()) {
+    case CCC_UI_THEME_CUTE: DrawHeart(pDC, rc, c); break;
+    case CCC_UI_THEME_COOL: DrawTie(pDC, rc, c); break;
+    case CCC_UI_THEME_DRAMATIC: DrawCrest(pDC, rc, c); break;
+    case CCC_UI_THEME_NEON: DrawNeonHex(pDC, rc, c); break;
+    case CCC_UI_THEME_INK: DrawEnso(pDC, rc, c); break;
+    case CCC_UI_THEME_FOREST: DrawLeaf(pDC, rc, c); break;
+    case CCC_UI_THEME_CANDY: DrawCandy(pDC, rc, c); break;
+    case CCC_UI_THEME_STEEL: DrawGear(pDC, rc, c); break;
+    case CCC_UI_THEME_GAL: DrawGlitterStar(pDC, rc, c); break;
+    case CCC_UI_THEME_ULTRA: DrawLapel(pDC, rc, c); break;
+    case CCC_UI_THEME_SPRING: DrawSakura(pDC, rc, c); break;
+    case CCC_UI_THEME_SUMMER: DrawSun(pDC, rc, c); break;
+    case CCC_UI_THEME_AUTUMN: DrawMaple(pDC, rc, c); break;
+    case CCC_UI_THEME_WINTER: DrawSnowflake(pDC, rc, c); break;
+    case CCC_UI_THEME_DUSK: DrawHorizonSun(pDC, rc, c); break;
+    case CCC_UI_THEME_DAWN: DrawDawn(pDC, rc, c); break;
+    case CCC_UI_THEME_RAIN: DrawRaindrop(pDC, rc, c); break;
+    case CCC_UI_THEME_SEA: DrawWave(pDC, rc, c); break;
+    default: DrawGear(pDC, rc, c); break;
+    }
+}
+
 // 王冠（7頂点+3宝石）。選択強調用。
 static void DrawCrown(CDC* pDC, int cx, int cy, int sz, COLORREF c)
 {
@@ -2111,10 +2493,195 @@ static void DrawHanamaru(CDC* pDC, CRect rc, COLORREF cC, COLORREF cP)
 static void DrawSoftJkChip(CDC* pDC, const CRect& rc, int animTick, BOOL hot);
 
 // ボタン角のつる+小さな花。bPA=対角ペアの向き。押下時は 1px オフセット。
+// 見た目テーマ。0=可愛い（従来のローズ／リボン）。旧.dat の 0 がその既定。
+int CCC_UiThemeId()
+{
+    int t = savedata.popupMenuTheme;
+    if (t < 0 || t >= CCC_UI_THEME_COUNT) t = 0;
+    return t;
+}
+
+const CCC_UiThemePal& CCC_UiTheme()
+{
+    static const CCC_UiThemePal k[CCC_UI_THEME_COUNT] = {
+        { RGB(255,232,244), RGB(232,214,255), RGB(158,140,228), RGB(208,198,255), RGB(130,70,120),
+          RGB(255,86,150), RGB(240,170,200), RGB(216,132,176),
+          RGB(255,248,252), RGB(220,160,190), RGB(230,200,215),
+          RGB(52,34,58), RGB(170,158,170), RGB(228,234,255), RGB(186,204,248),
+          RGB(255,250,253), RGB(176,118,152), 0 },
+        { RGB(226,229,234), RGB(198,204,214), RGB(36,48,72), RGB(168,176,190), RGB(24,28,36),
+          RGB(32,44,78), RGB(108,116,132), RGB(140,148,162),
+          RGB(246,247,249), RGB(150,156,168), RGB(196,200,208),
+          RGB(22,26,34), RGB(120,126,138), RGB(220,224,232), RGB(168,174,186),
+          RGB(252,252,253), RGB(70,76,88), 1 },
+        { RGB(28,18,36), RGB(48,22,40), RGB(140,24,48), RGB(212,170,64), RGB(80,10,20),
+          RGB(196,32,56), RGB(212,170,64), RGB(160,48,64),
+          RGB(42,28,48), RGB(120,40,56), RGB(60,36,52),
+          RGB(245,230,210), RGB(170,150,150), RGB(80,28,44), RGB(120,36,52),
+          RGB(90,50,60), RGB(20,8,12), 2 },
+        { RGB(12,18,40), RGB(20,36,72), RGB(40,200,220), RGB(120,90,255), RGB(10,40,70),
+          RGB(80,230,255), RGB(160,120,255), RGB(70,160,200),
+          RGB(18,28,52), RGB(50,90,120), RGB(30,50,80),
+          RGB(220,245,255), RGB(140,160,180), RGB(20,60,90), RGB(30,40,100),
+          RGB(80,140,170), RGB(8,16,36), 3 },
+        { RGB(245,240,228), RGB(232,224,206), RGB(160,36,36), RGB(40,36,32), RGB(80,20,20),
+          RGB(176,32,32), RGB(40,36,32), RGB(120,90,70),
+          RGB(250,246,236), RGB(160,130,100), RGB(210,196,170),
+          RGB(32,28,24), RGB(140,130,118), RGB(255,236,220), RGB(230,180,160),
+          RGB(255,250,242), RGB(90,60,48), 3 },
+        { RGB(236,246,232), RGB(210,230,206), RGB(56,120,72), RGB(168,196,120), RGB(30,70,40),
+          RGB(46,130,70), RGB(140,180,90), RGB(90,140,80),
+          RGB(246,252,244), RGB(140,170,130), RGB(200,220,190),
+          RGB(28,48,32), RGB(130,150,130), RGB(220,240,210), RGB(160,200,150),
+          RGB(248,255,246), RGB(70,110,70), 4 },
+        { RGB(255,248,230), RGB(255,230,246), RGB(255,140,180), RGB(255,210,80), RGB(180,80,110),
+          RGB(255,120,160), RGB(255,196,64), RGB(240,160,190),
+          RGB(255,252,246), RGB(230,170,190), RGB(255,220,200),
+          RGB(72,40,56), RGB(170,140,150), RGB(255,236,210), RGB(255,190,210),
+          RGB(255,252,248), RGB(200,120,140), 1 },
+        { RGB(228,230,234), RGB(200,204,210), RGB(90,96,104), RGB(210,150,48), RGB(40,44,50),
+          RGB(196,120,32), RGB(160,168,176), RGB(120,126,134),
+          RGB(244,246,248), RGB(150,156,164), RGB(190,194,200),
+          RGB(32,34,38), RGB(140,144,150), RGB(236,238,242), RGB(190,196,204),
+          RGB(255,255,255), RGB(80,84,90), 5 },
+        { RGB(255,214,232), RGB(255,236,168), RGB(255,80,150), RGB(255,210,70), RGB(120,20,60),
+          RGB(255,45,140), RGB(255,196,40), RGB(255,120,170),
+          RGB(255,248,252), RGB(230,80,140), RGB(255,200,220),
+          RGB(40,16,28), RGB(170,90,120), RGB(255,228,120), RGB(255,160,200),
+          RGB(255,252,248), RGB(160,40,90), 8 },
+        { RGB(18,18,20), RGB(32,34,38), RGB(48,50,56), RGB(180,182,188), RGB(8,8,10),
+          RGB(230,230,234), RGB(88,92,104), RGB(70,72,78),
+          RGB(28,28,32), RGB(64,66,72), RGB(42,44,50),
+          RGB(236,236,238), RGB(150,152,158), RGB(64,70,92), RGB(36,38,44),
+          RGB(70,72,78), RGB(10,10,12), 9 },
+        { RGB(255,236,242), RGB(220,242,214), RGB(255,170,190), RGB(150,200,140), RGB(180,80,110),
+          RGB(240,120,160), RGB(120,180,90), RGB(220,160,180),
+          RGB(255,250,248), RGB(210,160,180), RGB(230,210,200),
+          RGB(60,40,48), RGB(160,130,140), RGB(255,220,228), RGB(200,230,190),
+          RGB(255,252,250), RGB(170,110,130), 10 },
+        { RGB(210,236,255), RGB(255,236,170), RGB(40,150,220), RGB(255,196,40), RGB(20,80,140),
+          RGB(255,176,20), RGB(40,160,230), RGB(120,190,230),
+          RGB(248,252,255), RGB(120,180,220), RGB(190,220,240),
+          RGB(20,50,80), RGB(120,150,170), RGB(255,230,140), RGB(160,210,245),
+          RGB(255,255,250), RGB(40,110,160), 11 },
+        { RGB(248,228,200), RGB(230,200,150), RGB(180,70,30), RGB(200,140,40), RGB(100,40,16),
+          RGB(196,64,28), RGB(210,150,40), RGB(180,120,70),
+          RGB(255,248,236), RGB(190,140,90), RGB(220,180,130),
+          RGB(60,32,16), RGB(150,120,90), RGB(255,210,160), RGB(220,150,90),
+          RGB(255,246,232), RGB(120,70,36), 12 },
+        { RGB(236,244,250), RGB(210,226,238), RGB(140,180,210), RGB(230,240,248), RGB(80,110,140),
+          RGB(90,150,200), RGB(180,210,230), RGB(160,190,210),
+          RGB(250,252,255), RGB(170,196,214), RGB(210,224,234),
+          RGB(28,44,64), RGB(140,160,176), RGB(220,236,248), RGB(170,200,220),
+          RGB(255,255,255), RGB(100,130,156), 13 },
+        { RGB(255,214,170), RGB(214,150,170), RGB(220,90,50), RGB(140,60,100), RGB(80,30,40),
+          RGB(230,100,40), RGB(160,60,100), RGB(200,120,80),
+          RGB(255,236,214), RGB(180,100,80), RGB(230,170,130),
+          RGB(48,24,36), RGB(150,110,100), RGB(255,180,120), RGB(200,100,90),
+          RGB(255,240,220), RGB(100,50,50), 14 },
+        { RGB(255,228,210), RGB(255,210,230), RGB(255,160,120), RGB(255,220,160), RGB(180,90,80),
+          RGB(255,140,90), RGB(255,200,120), RGB(230,160,150),
+          RGB(255,248,242), RGB(220,160,140), RGB(240,200,180),
+          RGB(70,40,36), RGB(170,130,120), RGB(255,220,190), RGB(255,180,160),
+          RGB(255,250,246), RGB(160,90,80), 15 },
+        { RGB(210,216,224), RGB(180,190,204), RGB(70,90,120), RGB(140,160,180), RGB(40,50,70),
+          RGB(60,100,150), RGB(120,150,180), RGB(130,145,165),
+          RGB(240,242,246), RGB(140,155,175), RGB(190,198,210),
+          RGB(28,36,48), RGB(120,130,145), RGB(200,214,230), RGB(150,170,190),
+          RGB(248,249,252), RGB(70,84,104), 16 },
+        { RGB(200,230,228), RGB(150,200,206), RGB(20,120,140), RGB(230,250,248), RGB(10,70,80),
+          RGB(16,140,160), RGB(240,250,248), RGB(80,160,170),
+          RGB(244,252,252), RGB(100,170,175), RGB(180,220,218),
+          RGB(16,48,52), RGB(110,150,150), RGB(180,230,226), RGB(120,190,196),
+          RGB(250,255,255), RGB(30,100,110), 17 },
+    };
+    return k[CCC_UiThemeId()];
+}
+
+LPCTSTR CCC_UiThemeName(int id)
+{
+    switch (id) {
+    case CCC_UI_THEME_COOL:
+        return LL14(L"クール", L"Cool", L"Classe", L"Figo", L"Estilo",
+            L"쿨", L"酷", L"أنيق", L"Стильный", L"Schick",
+            L"Estiloso", L"Stoer", L"Stylowy", L"Havalı");
+    case CCC_UI_THEME_DRAMATIC:
+        return LL14(L"中二", L"Dramatic", L"Dramatique", L"Drammatico", L"Dramatico",
+            L"중2", L"中二", L"درامي", L"Драма", L"Dramatisch",
+            L"Dramatico", L"Dramatisch", L"Dramat", L"Dramatik");
+    case CCC_UI_THEME_NEON:
+        return LL14(L"夜光", L"Neon", L"Neon", L"Neon", L"Neon",
+            L"네온", L"夜光", L"نيون", L"Неон", L"Neon",
+            L"Neon", L"Neon", L"Neon", L"Neon");
+    case CCC_UI_THEME_INK:
+        return LL14(L"墨", L"Ink", L"Encre", L"Inchiostro", L"Tinta",
+            L"먹", L"墨", L"حبر", L"Тушь", L"Tusche",
+            L"Tinta", L"Inkt", L"Tusz", L"Mürekkep");
+    case CCC_UI_THEME_FOREST:
+        return LL14(L"森", L"Forest", L"Foret", L"Foresta", L"Bosque",
+            L"숲", L"森", L"غابة", L"Лес", L"Wald",
+            L"Floresta", L"Bos", L"Las", L"Orman");
+    case CCC_UI_THEME_CANDY:
+        return LL14(L"キャンディ", L"Candy", L"Bonbon", L"Caramella", L"Dulce",
+            L"캔디", L"糖果", L"حلوى", L"Конфета", L"Bonbon",
+            L"Doce", L"Snoep", L"Cukierek", L"Şeker");
+    case CCC_UI_THEME_STEEL:
+        return LL14(L"鋼", L"Steel", L"Acier", L"Acciaio", L"Acero",
+            L"강철", L"钢", L"فولاذ", L"Сталь", L"Stahl",
+            L"Aco", L"Staal", L"Stal", L"Celik");
+    case CCC_UI_THEME_GAL:
+        return LL14(L"超可愛い", L"Super Cute", L"Super mignon", L"Super carino", L"Super tierno",
+            L"초귀여움", L"超可爱", L"فائق اللطف", L"Супермилый", L"Superniedlich",
+            L"Superfofo", L"Superschattig", L"Supersłodki", L"Süper sevimli");
+    case CCC_UI_THEME_ULTRA:
+        return LL14(L"超クール", L"Super Cool", L"Super classe", L"Super figo", L"Super estilo",
+            L"초쿨", L"超酷", L"فائق الأناقة", L"Суперстиль", L"Supercool",
+            L"Superestilo", L"Superstoer", L"Superstyl", L"Süper havalı");
+    case CCC_UI_THEME_SPRING:
+        return LL14(L"春", L"Spring", L"Printemps", L"Primavera", L"Primavera",
+            L"봄", L"春", L"ربيع", L"Весна", L"Frühling",
+            L"Primavera", L"Lente", L"Wiosna", L"İlkbahar");
+    case CCC_UI_THEME_SUMMER:
+        return LL14(L"夏", L"Summer", L"Ete", L"Estate", L"Verano",
+            L"여름", L"夏", L"صيف", L"Лето", L"Sommer",
+            L"Verao", L"Zomer", L"Lato", L"Yaz");
+    case CCC_UI_THEME_AUTUMN:
+        return LL14(L"秋", L"Autumn", L"Automne", L"Autunno", L"Otono",
+            L"가을", L"秋", L"خريف", L"Осень", L"Herbst",
+            L"Outono", L"Herfst", L"Jesien", L"Sonbahar");
+    case CCC_UI_THEME_WINTER:
+        return LL14(L"冬", L"Winter", L"Hiver", L"Inverno", L"Invierno",
+            L"겨울", L"冬", L"شتاء", L"Зима", L"Winter",
+            L"Inverno", L"Winter", L"Zima", L"Kış");
+    case CCC_UI_THEME_DUSK:
+        return LL14(L"夕暮れ", L"Dusk", L"Crepuscule", L"Crepuscolo", L"Atardecer",
+            L"해질녘", L"黄昏", L"غسق", L"Закат", L"Dämmerung",
+            L"Crepusculo", L"Schemer", L"Zmierzch", L"Alacakaranlık");
+    case CCC_UI_THEME_DAWN:
+        return LL14(L"朝", L"Dawn", L"Aube", L"Alba", L"Amanecer",
+            L"새벽", L"黎明", L"فجر", L"Рассвет", L"Morgendämmerung",
+            L"Amanhecer", L"Dageraad", L"Świt", L"Şafak");
+    case CCC_UI_THEME_RAIN:
+        return LL14(L"雨", L"Rain", L"Pluie", L"Pioggia", L"Lluvia",
+            L"비", L"雨", L"مطر", L"Дождь", L"Regen",
+            L"Chuva", L"Regen", L"Deszcz", L"Yağmur");
+    case CCC_UI_THEME_SEA:
+        return LL14(L"海", L"Sea", L"Mer", L"Mare", L"Mar",
+            L"바다", L"海", L"بحر", L"Море", L"Meer",
+            L"Mar", L"Zee", L"Morze", L"Deniz");
+    case CCC_UI_THEME_CUTE:
+    default:
+        return LL14(L"可愛い", L"Cute", L"Mignon", L"Carino", L"Tierno",
+            L"귀여움", L"可爱", L"لطيف", L"Милый", L"Niedlich",
+            L"Fofo", L"Schattig", L"Słodki", L"Sevimli");
+    }
+}
+
 static void DrawDecorations(CDC* pDC, CRect rect, BOOL bPA, BOOL bPushed)
 {
-    CPen pV(PS_SOLID, 1, COLOR_VINE_DECO);
-    CBrush bF(COLOR_HEART);
+    const CCC_UiThemePal& th = CCC_UiTheme();
+    CPen pV(PS_SOLID, 1, th.sep);
+    CBrush bF(th.accent);
     CBrush bC(RGB(255, 255, 0));
     CPen* op = pDC->SelectObject(&pV);
     CBrush* ob = pDC->SelectObject(&bF);
@@ -3425,6 +3992,46 @@ static void DrawLooseRibbon(CDC* pDC, const CRect& rc, COLORREF c, float angleDe
     if (saved) pDC->RestoreDC(saved);
 }
 
+// 可愛いだけほどけリボン。超可愛いを含む他テーマはそれぞれのモチーフ。
+static void DrawThemeOrnament(CDC* pDC, const CRect& rc, COLORREF c, float angleDeg = 0.f)
+{
+    if (CCC_UiThemeId() == CCC_UI_THEME_CUTE) DrawLooseRibbon(pDC, rc, c, angleDeg);
+    else DrawThemeMotif(pDC, rc, c);
+}
+
+static void DrawThemeBow(CDC* pDC, const CRect& rc, COLORREF c)
+{
+    if (CCC_ThemeSilk()) DrawBow(pDC, rc, c);
+    else DrawThemeMotif(pDC, rc, c);
+}
+
+static void DrawThemeRibbon(CDC* pDC, const CRect& rc, COLORREF c)
+{
+    if (CCC_ThemeSilk()) DrawRibbon(pDC, rc, c);
+    else DrawThemeMotif(pDC, rc, c);
+}
+
+// リスト／コンボ左端。可愛いは花・星・ハート・リボンの循環。他はテーマモチーフ。
+static void DrawRowDeco(CDC* pDC, int ix, int iy, int is, int kind, BOOL selected)
+{
+    const CCC_UiThemePal& th = CCC_UiTheme();
+    if (CCC_UiThemeId() != CCC_UI_THEME_CUTE) {
+        DrawThemeMotif(pDC, CRect(ix, iy, ix + is, iy + is), (kind & 1) ? th.accent : th.accent2);
+        return;
+    }
+    switch (kind & 3) {
+    case 0: DrawFlower(pDC, ix + is / 2, iy + is / 2, is / 2, th.accent2); break;
+    case 1: DrawStar(pDC, ix + is / 2, iy + is / 2, is / 3, th.accent); break;
+    case 2:
+        if (selected)
+            DrawSoftJkHeart(pDC, CRect(ix, iy, ix + is, iy + is), (int)(::GetTickCount64() / 160), TRUE, th.accent);
+        else
+            DrawHeart(pDC, CRect(ix, iy, ix + is, iy + is), th.accent);
+        break;
+    default: DrawRibbon(pDC, CRect(ix, iy, ix + is, iy + is), th.accent2); break;
+    }
+}
+
 // ============================================================================
 // 【隠し機能 / イースターエッグ】inwoman / CCC_Iw*
 // ユーザー向けヘルプ・操作説明には載せない。入口/出口の手順は CCC_InwomanHotkey のみ。
@@ -4663,6 +5270,42 @@ static void DoSubclassChildControls(DlgBase* pDlg)
 // ダイアログ共通処理
 // ============================================================================
 
+static void CCC_SyncBrush(CBrush& br, COLORREF c)
+{
+    LOGBRUSH lb = {};
+    if (br.GetSafeHandle() && ::GetObject(br.GetSafeHandle(), sizeof(lb), &lb) == sizeof(lb) && lb.lbColor == c)
+        return;
+    if (br.GetSafeHandle()) br.DeleteObject();
+    br.CreateSolidBrush(c);
+}
+
+static HBRUSH CCC_LiveBrush(int slot, COLORREF c)
+{
+    struct S { COLORREF c; HBRUSH h; };
+    static S s[6] = {};
+    if (slot < 0 || slot > 5) slot = 0;
+    if (s[slot].h && s[slot].c == c) return s[slot].h;
+    if (s[slot].h) ::DeleteObject(s[slot].h);
+    s[slot].c = c;
+    s[slot].h = ::CreateSolidBrush(c);
+    return s[slot].h;
+}
+
+static BOOL CALLBACK CCC_RefreshThemedEnum(HWND hwnd, LPARAM pid)
+{
+    DWORD wpid = 0;
+    ::GetWindowThreadProcessId(hwnd, &wpid);
+    if (wpid != (DWORD)pid || !::IsWindowVisible(hwnd)) return TRUE;
+    ::RedrawWindow(hwnd, NULL, NULL, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_FRAME);
+    CCC_RefreshKids(hwnd);
+    return TRUE;
+}
+
+void CCC_RefreshThemedUi()
+{
+    ::EnumWindows(CCC_RefreshThemedEnum, (LPARAM)::GetCurrentProcessId());
+}
+
 // WM_CTLCOLOR 共通。Win11 アクリルは DLG/STATIC/BTN を NULL_BRUSH（ガラス残し）。
 // EDIT/LISTBOX は不透明ブラシ（文字可読）。コンボ内 Edit は COMBO_BG。
 static HBRUSH DlgOnCtlColor(CDC* pDC, CWnd* pWnd, UINT nC, CBrush& brDlg, BOOL bAeroEnabled)
@@ -4670,8 +5313,6 @@ static HBRUSH DlgOnCtlColor(CDC* pDC, CWnd* pWnd, UINT nC, CBrush& brDlg, BOOL b
 #if CCUSTOM_AERO_SUPPORT
     if (bAeroEnabled && CCC_IsWin11())
     {
-        static CBrush brushEdit(COLOR_EDIT_BG);
-        static CBrush brushList(COLOR_LIST_BG);
         if (nC == CTLCOLOR_DLG)
         {
             pDC->SetBkMode(TRANSPARENT);
@@ -4682,19 +5323,19 @@ static HBRUSH DlgOnCtlColor(CDC* pDC, CWnd* pWnd, UINT nC, CBrush& brDlg, BOOL b
             pDC->SetBkMode(OPAQUE);
             pDC->SetBkColor(COLOR_EDIT_BG);
             pDC->SetTextColor(COLOR_EDIT_TEXT);
-            return (HBRUSH)brushEdit.GetSafeHandle();
+            return CCC_LiveBrush(0, COLOR_EDIT_BG);
         }
         if (nC == CTLCOLOR_LISTBOX)
         {
             pDC->SetBkMode(OPAQUE);
             pDC->SetBkColor(COLOR_LIST_BG);
             pDC->SetTextColor(COLOR_EDIT_TEXT);
-            return (HBRUSH)brushList.GetSafeHandle();
+            return CCC_LiveBrush(1, COLOR_LIST_BG);
         }
         if (nC == CTLCOLOR_STATIC || nC == CTLCOLOR_BTN)
         {
             pDC->SetBkMode(TRANSPARENT);
-            pDC->SetTextColor(RGB(0, 0, 0));
+            pDC->SetTextColor(COLOR_EDIT_TEXT);
             return (HBRUSH)GetStockObject(NULL_BRUSH);
         }
     }
@@ -4704,18 +5345,19 @@ static HBRUSH DlgOnCtlColor(CDC* pDC, CWnd* pWnd, UINT nC, CBrush& brDlg, BOOL b
         if (nC == CTLCOLOR_DLG || nC == CTLCOLOR_STATIC || nC == CTLCOLOR_BTN)
         {
             pDC->SetBkMode(TRANSPARENT);
-            pDC->SetTextColor(RGB(0, 0, 0));
+            pDC->SetTextColor(COLOR_EDIT_TEXT);
             return (HBRUSH)brushBg.GetSafeHandle();
         }
         if (nC == CTLCOLOR_LISTBOX || nC == CTLCOLOR_EDIT)
         {
             pDC->SetBkMode(OPAQUE);
-            pDC->SetTextColor(RGB(0, 0, 0));
+            pDC->SetTextColor(COLOR_EDIT_TEXT);
             pDC->SetBkColor(RGB(255, 255, 255));
             return (HBRUSH)GetStockObject(WHITE_BRUSH);
         }
     }
 #endif
+    CCC_SyncBrush(brDlg, COLOR_DIALOG_BG);
     if (nC == CTLCOLOR_DLG) return (HBRUSH)brDlg.GetSafeHandle();
 
     if (nC == CTLCOLOR_EDIT)
@@ -4728,29 +5370,26 @@ static HBRUSH DlgOnCtlColor(CDC* pDC, CWnd* pWnd, UINT nC, CBrush& brDlg, BOOL b
             if (_tcsicmp(sz, _T("ComboBox")) == 0)
             {
                 pDC->SetBkColor(COLOR_COMBO_BG);
-                pDC->SetTextColor(RGB(0, 0, 0));
-                static CBrush bC(COLOR_COMBO_BG);
-                return (HBRUSH)bC.GetSafeHandle();
+                pDC->SetTextColor(COLOR_EDIT_TEXT);
+                return CCC_LiveBrush(2, COLOR_COMBO_BG);
             }
         }
         pDC->SetBkColor(COLOR_EDIT_BG);
-        pDC->SetTextColor(RGB(0, 0, 0));
-        static CBrush bE(COLOR_EDIT_BG);
-        return (HBRUSH)bE.GetSafeHandle();
+        pDC->SetTextColor(COLOR_EDIT_TEXT);
+        return CCC_LiveBrush(3, COLOR_EDIT_BG);
     }
 
     if (nC == CTLCOLOR_LISTBOX)
     {
         pDC->SetBkColor(COLOR_COMBO_BG);
-        pDC->SetTextColor(RGB(0, 0, 0));
-        static CBrush bL(COLOR_COMBO_BG);
-        return (HBRUSH)bL.GetSafeHandle();
+        pDC->SetTextColor(COLOR_EDIT_TEXT);
+        return CCC_LiveBrush(4, COLOR_LIST_BG);
     }
 
     if (nC == CTLCOLOR_STATIC || nC == CTLCOLOR_BTN)
     {
         pDC->SetBkColor(COLOR_DIALOG_BG);
-        pDC->SetTextColor(RGB(0, 0, 0));
+        pDC->SetTextColor(COLOR_EDIT_TEXT);
         pDC->SetBkMode(TRANSPARENT);
         return (HBRUSH)brDlg.GetSafeHandle();
     }
@@ -4852,6 +5491,7 @@ HBRUSH CCustomEdit::CtlColor(CDC* pDC, UINT)
 {
     pDC->SetBkColor(COLOR_EDIT_BG);
     pDC->SetTextColor(COLOR_EDIT_TEXT);
+    CCC_SyncBrush(m_brBackground, COLOR_EDIT_BG);
     return (HBRUSH)m_brBackground.GetSafeHandle();
 }
 
@@ -5591,7 +6231,7 @@ BOOL CCustomEdit::OnEraseBkgnd(CDC* pDC)
 // 角丸枠+フォーカス時キラキラ。top-1 のデコは親アクリルを抉るので禁止。
 void CCustomEdit::DrawEditFrame(CDC& dc, const CRect& r)
 {
-    CPen p(PS_SOLID, 2, m_bHasFocus ? RGB(255, 140, 180) : RGB(255, 182, 193));
+    CPen p(PS_SOLID, 2, m_bHasFocus ? CCC_UiTheme().accent : CCC_UiTheme().accent2);
     CPen* op = dc.SelectObject(&p);
     dc.SelectStockObject(NULL_BRUSH);
     CRect rr = r;
@@ -5605,15 +6245,15 @@ void CCustomEdit::DrawEditFrame(CDC& dc, const CRect& r)
         DrawSparkle(&dc, r.left + 8, r.top + 8, 2, COLOR_SPARKLE);
         DrawSparkle(&dc, r.right - 8, r.bottom - 8, 2, COLOR_SPARKLE);
         // 窓外へはみ出さない(top-1 は親アクリルを抉る)
-        DrawBow(&dc, CRect(r.CenterPoint().x - 8, r.top + 0, r.CenterPoint().x + 8, r.top + 9), COLOR_BOW);
+        DrawThemeBow(&dc, CRect(r.CenterPoint().x - 8, r.top + 0, r.CenterPoint().x + 8, r.top + 9), COLOR_BOW);
         DrawSoftJkThumb(&dc, CRect(r.right - 18, r.top + 2, r.right - 4, r.top + 16),
             (int)(::GetTickCount64() / 80), TRUE, 8.f);
     }
 
     CRect rL(r.left + 2, r.CenterPoint().y - 3, r.left + 8, r.CenterPoint().y + 3);
     CRect rR(r.right - 8, r.CenterPoint().y - 3, r.right - 2, r.CenterPoint().y + 3);
-    DrawRibbon(&dc, rL, RGB(255, 200, 220));
-    DrawRibbon(&dc, rR, RGB(255, 200, 220));
+    DrawThemeRibbon(&dc, rL, CCC_UiTheme().accent2);
+    DrawThemeRibbon(&dc, rR, CCC_UiTheme().accent2);
 }
 
 // NC 枠を WindowDC で不透明化。ガラス透過で枠が消えるのを防ぐ。
@@ -6758,7 +7398,8 @@ void CCustomListBox::PreSubclassWindow()
 HBRUSH CCustomListBox::CtlColor(CDC* pDC, UINT)
 {
     pDC->SetBkColor(COLOR_LIST_BG);
-    pDC->SetTextColor(RGB(0, 0, 0));
+    pDC->SetTextColor(COLOR_EDIT_TEXT);
+    CCC_SyncBrush(m_brBackground, COLOR_LIST_BG);
     return (HBRUSH)m_brBackground.GetSafeHandle();
 }
 
@@ -6852,19 +7493,8 @@ void CCustomListBox::DrawItem(LPDRAWITEMSTRUCT lp)
             CCC_DrawLoveFluid(pDC, CRect(ix, iy, ix + is, iy + is + is / 2), breath, twitch, climax, FALSE);
             break;
         }
-    } else switch (it)
-    {
-    case 0: DrawFlower(pDC, ix + is / 2, iy + is / 2, is / 2, RGB(255, 200, 220)); break;
-    case 1: DrawStar(pDC, ix + is / 2, iy + is / 2, is / 3, RGB(255, 215, 0)); break;
-    case 2:
-        if (lp->itemState & ODS_SELECTED)
-            DrawSoftJkHeart(pDC, CRect(ix, iy, ix + is, iy + is),
-                (int)(::GetTickCount64() / 160), TRUE, COLOR_HEART);
-        else
-            DrawHeart(pDC, CRect(ix, iy, ix + is, iy + is), COLOR_HEART);
-        break;
-    case 3: DrawRibbon(pDC, CRect(ix, iy, ix + is, iy + is), RGB(255, 182, 193)); break;
-    }
+    } else
+        DrawRowDeco(pDC, ix, iy, is, it, (lp->itemState & ODS_SELECTED) != 0);
 
     if (lp->itemState & ODS_SELECTED) {
         if (CCC_IsInwoman()) {
@@ -6873,7 +7503,7 @@ void CCustomListBox::DrawItem(LPDRAWITEMSTRUCT lp)
             CCC_DrawVibrator(pDC, r.right - max(10, is + 4), r.top + r.Height() / 2,
                 max(8, is * 2 / 3), (double)::GetTickCount(), twitch, breath, climax, FALSE);
         } else {
-            DrawStar(pDC, r.right - max(10, is + 4), r.top + r.Height() / 2, max(3, is / 3), RGB(255, 215, 0));
+            DrawThemeMotif(pDC, CRect(r.right - max(16, is + 6), r.top + 2, r.right - 3, r.bottom - 2), CCC_UiTheme().accent);
         }
     }
 
@@ -6884,8 +7514,9 @@ void CCustomListBox::DrawItem(LPDRAWITEMSTRUCT lp)
     rt.DeflateRect(1, 1);
 
     const BOOL bSel = (lp->itemState & ODS_SELECTED) != 0;
-    // aero 時の非選択文字は (1,1,1)=キーそのもの → 抜ける。意図は「ほぼ黒」。キーと衝突。
-    COLORREF tc = bSel ? COLOR_LIST_SEL_TEXT : (m_bAeroMode ? RGB(1, 1, 1) : COLOR_EDIT_TEXT);
+    COLORREF tc = bSel ? COLOR_LIST_SEL_TEXT : COLOR_EDIT_TEXT;
+    if (m_bAeroMode && GetRValue(tc) + GetGValue(tc) + GetBValue(tc) < 48)
+        tc = RGB(1, 1, 1);
     pDC->SetTextColor(tc);
     pDC->SetBkMode(TRANSPARENT);
 
@@ -7081,7 +7712,8 @@ HBRUSH CCustomComboBox::CtlColor(CDC* pDC, UINT nC)
     if (nC == CTLCOLOR_LISTBOX)
     {
         pDC->SetBkColor(COLOR_COMBO_BG);
-        pDC->SetTextColor(RGB(0, 0, 0));
+        pDC->SetTextColor(COLOR_EDIT_TEXT);
+        CCC_SyncBrush(m_brBackground, COLOR_COMBO_BG);
         return (HBRUSH)m_brBackground.GetSafeHandle();
     }
     return NULL;
@@ -7176,11 +7808,11 @@ void CCustomComboBox::PaintClient(CDC& dc)
     int nb = ::GetSystemMetricsForDpi(SM_CXVSCROLL, dpi);
     const int btnPad = CCC_ScaleDpi(4, dpi);
     CRect rB(r.right - nb - btnPad, r.top + btnPad, r.right - btnPad, r.bottom - btnPad);
-    mDC.FillSolidRect(&rB, RGB(255, 200, 220));
+    mDC.FillSolidRect(&rB, CCC_UiTheme().accent2);
     DrawGlossHighlight(&mDC, rB, 6);
 
     {
-        CPen pb(PS_SOLID, 1, RGB(200, 150, 180));
+        CPen pb(PS_SOLID, 1, CCC_UiTheme().accent);
         mDC.SelectObject(&pb);
         mDC.SelectStockObject(NULL_BRUSH);
         const int br = CCC_ScaleDpi(6, dpi);
@@ -7200,8 +7832,8 @@ void CCustomComboBox::PaintClient(CDC& dc)
             const int vs = max(10, rB.Height() - 2);
             CCC_DrawVibrator(&mDC, cxB, cy2, vs, (double)::GetTickCount(), twitch, breath, climax, bTrans);
         } else {
-            DrawBow(&mDC, CRect(cxB - bw / 2, cy2 - bh, cxB + bw / 2, cy2 + bh), COLOR_BOW);
-            if (GetDroppedState())
+            DrawThemeBow(&mDC, CRect(cxB - bw / 2, cy2 - bh, cxB + bw / 2, cy2 + bh), COLOR_BOW);
+            if (GetDroppedState() && CCC_ThemeSilk())
                 DrawSoftJkKnot(&mDC, CRect(cxB - 8, cy2 - 8, cxB + 8, cy2 + 8),
                     (int)(::GetTickCount64() / 40));
         }
@@ -7231,7 +7863,9 @@ void CCustomComboBox::PaintClient(CDC& dc)
         }
     }
 
-    COLORREF tc = bTrans ? RGB(1, 1, 1) : RGB(0, 0, 0);
+    COLORREF tc = COLOR_EDIT_TEXT;
+    if (bTrans && GetRValue(tc) + GetGValue(tc) + GetBValue(tc) < 48)
+        tc = RGB(1, 1, 1);
     mDC.SetTextColor(tc);
 
     CFont* pOF = mDC.SelectObject(GetFont());
@@ -7381,19 +8015,8 @@ void CCustomComboBox::DrawItem(LPDRAWITEMSTRUCT lp)
                 CCC_DrawVibrator(pDC, cx, cy, is, (double)::GetTickCount(), twitch, breath, climax, FALSE);
             else
                 CCC_DrawLoveFluid(pDC, CRect(ix, iy, ix + is, iy + is + is / 2), breath, twitch, climax, FALSE);
-        } else switch (it)
-        {
-        case 0: DrawFlower(pDC, ix + is / 2, iy + is / 2, is / 2, RGB(255, 200, 220)); break;
-        case 1: DrawStar(pDC, ix + is / 2, iy + is / 2, is / 3, RGB(255, 215, 0)); break;
-        case 2:
-            if (lp->itemState & ODS_SELECTED)
-                DrawSoftJkHeart(pDC, CRect(ix, iy, ix + is, iy + is),
-                    (int)(::GetTickCount64() / 160), TRUE, COLOR_HEART);
-            else
-                DrawHeart(pDC, CRect(ix, iy, ix + is, iy + is), COLOR_HEART);
-            break;
-        case 3: DrawRibbon(pDC, CRect(ix, iy, ix + is, iy + is), RGB(255, 182, 193)); break;
-        }
+        } else
+            DrawRowDeco(pDC, ix, iy, is, it, (lp->itemState & ODS_SELECTED) != 0);
     }
 
     CString st;
@@ -7423,7 +8046,12 @@ void CCustomComboBox::DrawItem(LPDRAWITEMSTRUCT lp)
     }
     else
     {
-        pDC->SetTextColor(bS ? COLOR_LIST_SEL_TEXT : (m_bAeroMode ? RGB(1, 1, 1) : RGB(0, 0, 0)));
+        {
+            COLORREF tc = bS ? COLOR_LIST_SEL_TEXT : COLOR_EDIT_TEXT;
+            if (m_bAeroMode && GetRValue(tc) + GetGValue(tc) + GetBValue(tc) < 48)
+                tc = RGB(1, 1, 1);
+            pDC->SetTextColor(tc);
+        }
         lf.lfWeight = FW_BOLD;
     }
     fc.CreateFontIndirect(&lf);
@@ -7662,7 +8290,7 @@ void CCustomSliderCtrl::PostNcDestroy()
     if (m_bAutoDelete) delete this;
 }
 
-// 0=音符バー / 1=紫ダイヤ / 2=緑ダイヤ。未知値は DrawSlider が mode1 扱い。
+// 0=音符バー / 1=紫ダイヤ / 2=ボリューム緑ダイヤ / 3=カプセル / 4=メーター。未知は mode1。
 void CCustomSliderCtrl::SetMode(int m)
 {
     m_nMode = m;
@@ -7939,6 +8567,8 @@ void CCustomSliderCtrl::DrawSlider(CDC* pDC)
     if (m_nMode == 0) DrawMode0(pDC, r, mn, mx, np);
     else if (m_nMode == 1) DrawMode1(pDC, r, mn, mx, np);
     else if (m_nMode == 2) DrawMode2(pDC, r, mn, mx, np);
+    else if (m_nMode == 3) DrawMode3(pDC, r, mn, mx, np);
+    else if (m_nMode == 4) DrawMode4(pDC, r, mn, mx, np);
     else DrawMode1(pDC, r, mn, mx, np);
 
     // ホバー中＋残点の慣性: 通ってきたトラック上をきらめきがスーッと流れる
@@ -8234,6 +8864,168 @@ void CCustomSliderCtrl::DrawMode2(CDC* pDC, const CRect& rect, int nMin, int nMa
         if (oldPen) pDC->SelectObject(oldPen);
         if (oldBrush) pDC->SelectObject(oldBrush);
     }
+}
+
+// 描画モード3: 丸いつまみのカプセル。中央に基準線。EQ帯など両方向の量向け。
+void CCustomSliderCtrl::DrawMode3(CDC* pDC, const CRect& rect, int nMin, int nMax, int nPos)
+{
+    int nR = nMax - nMin;
+    if (nR <= 0) return;
+    const BOOL bV = (GetStyle() & TBS_VERT);
+    const COLORREF cTrack = RGB(214, 220, 232);
+    const COLORREF cFill = RGB(70, 132, 210);
+    const COLORREF cRim = RGB(36, 78, 150);
+    auto selPen = [&](int w, COLORREF c) {
+        CPen* p = CCC_GetPooledPen(w, c);
+        if (p) pDC->SelectObject(p);
+    };
+    auto selBrush = [&](COLORREF c) {
+        CBrush* b = CCC_GetPooledBrush(c);
+        if (b) pDC->SelectObject(b);
+    };
+    CPen* oldPen = pDC->GetCurrentPen();
+    CBrush* oldBrush = pDC->GetCurrentBrush();
+    if (!bV)
+    {
+        const int cY = rect.Height() / 2;
+        const int tL = 14;
+        const int tR = rect.Width() - 14;
+        const int tW = tR - tL;
+        if (tW <= 0) {
+            if (oldPen) pDC->SelectObject(oldPen);
+            if (oldBrush) pDC->SelectObject(oldBrush);
+            return;
+        }
+        const int tP = tL + (int)((double)(nPos - nMin) * tW / nR);
+        const int th = 8;
+        selPen(1, RGB(160, 170, 190));
+        selBrush(cTrack);
+        pDC->RoundRect(CRect(tL, cY - th / 2, tR, cY + th / 2 + 1), CPoint(th, th));
+        if (tP > tL + 2)
+        {
+            selPen(1, cFill);
+            selBrush(cFill);
+            pDC->RoundRect(CRect(tL, cY - th / 2, tP, cY + th / 2 + 1), CPoint(th, th));
+        }
+        const int mid = tL + tW / 2;
+        selPen(1, RGB(90, 100, 120));
+        pDC->MoveTo(mid, cY - th - 3);
+        pDC->LineTo(mid, cY + th + 4);
+        selPen(1, cRim);
+        selBrush(RGB(255, 255, 255));
+        pDC->Ellipse(tP - 7, cY - 7, tP + 7, cY + 7);
+        selBrush(cFill);
+        pDC->Ellipse(tP - 3, cY - 3, tP + 3, cY + 3);
+    }
+    else
+    {
+        const int cX = rect.Width() / 2;
+        const int tT = 14;
+        const int tB = rect.Height() - 14;
+        const int tH = tB - tT;
+        if (tH <= 0) {
+            if (oldPen) pDC->SelectObject(oldPen);
+            if (oldBrush) pDC->SelectObject(oldBrush);
+            return;
+        }
+        const int tP = tT + (int)((double)(nPos - nMin) * tH / nR);
+        const int tw = 8;
+        selPen(1, RGB(160, 170, 190));
+        selBrush(cTrack);
+        pDC->RoundRect(CRect(cX - tw / 2, tT, cX + tw / 2 + 1, tB), CPoint(tw, tw));
+        if (tB > tP + 2)
+        {
+            selPen(1, cFill);
+            selBrush(cFill);
+            pDC->RoundRect(CRect(cX - tw / 2, tP, cX + tw / 2 + 1, tB), CPoint(tw, tw));
+        }
+        const int mid = tT + tH / 2;
+        selPen(1, RGB(90, 100, 120));
+        pDC->MoveTo(cX - tw - 3, mid);
+        pDC->LineTo(cX + tw + 4, mid);
+        selPen(1, cRim);
+        selBrush(RGB(255, 255, 255));
+        pDC->Ellipse(cX - 7, tP - 7, cX + 7, tP + 7);
+        selBrush(cFill);
+        pDC->Ellipse(cX - 3, tP - 3, cX + 3, tP + 3);
+    }
+    if (oldPen) pDC->SelectObject(oldPen);
+    if (oldBrush) pDC->SelectObject(oldBrush);
+}
+
+// 描画モード4: 区切られたメーター。テンポや表示間隔など、量の階段向け。
+void CCustomSliderCtrl::DrawMode4(CDC* pDC, const CRect& rect, int nMin, int nMax, int nPos)
+{
+    int nR = nMax - nMin;
+    if (nR <= 0) return;
+    const BOOL bV = (GetStyle() & TBS_VERT);
+    const int segs = 12;
+    const COLORREF cOn = RGB(255, 168, 48);
+    const COLORREF cOff = RGB(78, 82, 92);
+    auto selPen = [&](COLORREF c) {
+        CPen* p = CCC_GetPooledPen(1, c);
+        if (p) pDC->SelectObject(p);
+    };
+    auto selBrush = [&](COLORREF c) {
+        CBrush* b = CCC_GetPooledBrush(c);
+        if (b) pDC->SelectObject(b);
+    };
+    CPen* oldPen = pDC->GetCurrentPen();
+    CBrush* oldBrush = pDC->GetCurrentBrush();
+    if (!bV)
+    {
+        const int cY = rect.Height() / 2;
+        const int tL = 10;
+        const int tR = rect.Width() - 10;
+        const int tW = tR - tL;
+        if (tW <= 0) {
+            if (oldPen) pDC->SelectObject(oldPen);
+            if (oldBrush) pDC->SelectObject(oldBrush);
+            return;
+        }
+        const int tP = tL + (int)((double)(nPos - nMin) * tW / nR);
+        const int gap = 2;
+        const int segW = max(2, (tW - gap * (segs - 1)) / segs);
+        for (int i = 0; i < segs; ++i)
+        {
+            const int x = tL + i * (segW + gap);
+            const BOOL on = (x + segW / 2) <= tP;
+            selPen(on ? cOn : cOff);
+            selBrush(on ? cOn : cOff);
+            pDC->Rectangle(x, cY - 5, x + segW, cY + 6);
+        }
+        selPen(RGB(255, 255, 255));
+        selBrush(RGB(255, 244, 220));
+        pDC->Rectangle(tP - 2, cY - 9, tP + 3, cY + 10);
+    }
+    else
+    {
+        const int cX = rect.Width() / 2;
+        const int tT = 10;
+        const int tB = rect.Height() - 10;
+        const int tH = tB - tT;
+        if (tH <= 0) {
+            if (oldPen) pDC->SelectObject(oldPen);
+            if (oldBrush) pDC->SelectObject(oldBrush);
+            return;
+        }
+        const int tP = tT + (int)((double)(nPos - nMin) * tH / nR);
+        const int gap = 2;
+        const int segH = max(2, (tH - gap * (segs - 1)) / segs);
+        for (int i = 0; i < segs; ++i)
+        {
+            const int y = tB - (i + 1) * segH - i * gap;
+            const BOOL on = (y + segH / 2) >= tP;
+            selPen(on ? cOn : cOff);
+            selBrush(on ? cOn : cOff);
+            pDC->Rectangle(cX - 5, y, cX + 6, y + segH);
+        }
+        selPen(RGB(255, 255, 255));
+        selBrush(RGB(255, 244, 220));
+        pDC->Rectangle(cX - 9, tP - 2, cX + 10, tP + 3);
+    }
+    if (oldPen) pDC->SelectObject(oldPen);
+    if (oldBrush) pDC->SelectObject(oldBrush);
 }
 
 // ============================================================================
@@ -9170,10 +9962,10 @@ void CCustomRangeSliderCtrl::DrawRangeSlider(CDC* pDC)
     // 現在位置（Soft3D ハート + きらめき）— 波形時は XOR で波形を潰さない
     {
         CRect rh(xP - 9, cy - 12, xP + 9, cy + 6);
-        if (m_bDragging || m_bHoverTracking)
+        if (CCC_ThemeSilk() && (m_bDragging || m_bHoverTracking))
             DrawSoftJkHeart(pDC, rh, (int)(::GetTickCount64() / 80), TRUE, COLOR_SLIDER_THUMB);
         else
-            DrawHeart(pDC, rh, COLOR_SLIDER_THUMB);
+            DrawThemeMotif(pDC, rh, COLOR_SLIDER_THUMB);
     }
     DrawSparkle(pDC, xP + 7, cy - 12, 3, COLOR_SPARKLE);
     // 再生位置の縦ガイド（波形全体で位置が追える）
@@ -9523,7 +10315,11 @@ BOOL CCustomListCtrl::PreTranslateMessage(MSG* pMsg)
 HBRUSH CCustomListCtrl::CtlColor(CDC* pDC, UINT)
 {
     pDC->SetBkColor(COLOR_LIST_BG);
-    pDC->SetTextColor(RGB(0, 0, 0));
+    pDC->SetTextColor(COLOR_EDIT_TEXT);
+    CCC_SyncBrush(m_brBackground, COLOR_LIST_BG);
+    ::SendMessage(m_hWnd, LVM_SETBKCOLOR, 0, (LPARAM)COLOR_LIST_BG);
+    ::SendMessage(m_hWnd, LVM_SETTEXTCOLOR, 0, (LPARAM)COLOR_EDIT_TEXT);
+    ::SendMessage(m_hWnd, LVM_SETTEXTBKCOLOR, 0, (LPARAM)COLOR_LIST_BG);
     return (HBRUSH)m_brBackground.GetSafeHandle();
 }
 
@@ -10267,8 +11063,8 @@ void CCustomListCtrl::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
             }
         }
         if (bPlay && !bS)
-            bg = RGB(214, 186, 232); // 再生行(非選択): 選択紫より少し明るい下地
-        if (bH && !bS && !bPlay) bg = RGB(210, 228, 248);
+            bg = CCC_UiTheme().accent2;
+        if (bH && !bS && !bPlay) bg = CCC_UiTheme().hotBot;
         if (!bS && !bPlay && m_mpRowMissGet && m_mpRowMissGet(m_mpJacketCtx, ni))
             bg = RGB(255, 214, 214); // 欠損行: 薄い赤
 
@@ -10418,11 +11214,13 @@ void CCustomListCtrl::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
             else
                 noteX = r.left + CCC_ScaleDpi(2, dpiNote);
             if (bS || bH) {
-                // Soft3D 回転♡（選択行 + ホバー行）。GDI ハートは載せない。
                 CRect rh(noteX, noteY + CCC_ScaleDpi(2, dpiNote),
                     noteX + CCC_ScaleDpi(14, dpiNote), noteY + ih);
-                DrawSoftJkHeart(pDC, rh, (int)(::GetTickCount64() / kListHeartStepMs),
-                    TRUE, RGB(255, 140, 188));
+                if (CCC_ThemeSilk())
+                    DrawSoftJkHeart(pDC, rh, (int)(::GetTickCount64() / kListHeartStepMs),
+                        TRUE, CCC_UiTheme().accent);
+                else
+                    DrawThemeMotif(pDC, rh, CCC_UiTheme().accent);
                 // リスト全体の周期 Invalidate は再生中のピアノ提示を遅らせる。
                 // ♡ の矩形だけ回して、なめらかさと軽さを両立させる。
                 if (bS) m_heartRcSel = rh; else m_heartRcHot = rh;
@@ -10443,10 +11241,10 @@ void CCustomListCtrl::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
 #if CCUSTOM_AERO_SUPPORT
                 if (bCapGlass)
                     CCC_FillRectOpaqueBits(pDC->GetSafeHdc(),
-                        CRect(r.left, r.top, r.left + CCC_ScaleDpi(3, dpiNote), r.bottom), RGB(90, 150, 220));
+                        CRect(r.left, r.top, r.left + CCC_ScaleDpi(3, dpiNote), r.bottom), CCC_UiTheme().accent);
                 else
 #endif
-                    pDC->FillSolidRect(r.left, r.top, CCC_ScaleDpi(3, dpiNote), r.Height(), RGB(90, 150, 220));
+                    pDC->FillSolidRect(r.left, r.top, CCC_ScaleDpi(3, dpiNote), r.Height(), CCC_UiTheme().accent);
             }
         }
 
@@ -10456,7 +11254,12 @@ void CCustomListCtrl::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
         int extraN = 0;
         CCC_ExtractSavLrc(st, bSav, bLrc, extra, kCccExtraChips, extraN);
         const BOOL bOpaqueChips = bCapGlass;
-        pDC->SetTextColor(bS ? COLOR_LIST_SEL_TEXT : (m_bAeroMode ? RGB(1, 1, 1) : RGB(0, 0, 0)));
+        {
+            COLORREF tc = bS ? COLOR_LIST_SEL_TEXT : COLOR_EDIT_TEXT;
+            if (m_bAeroMode && GetRValue(tc) + GetGValue(tc) + GetBValue(tc) < 48)
+                tc = RGB(1, 1, 1);
+            pDC->SetTextColor(tc);
+        }
         pDC->SetBkMode(TRANSPARENT);
 
         CRect rt = r;
@@ -10666,6 +11469,11 @@ void CCustomTreeCtrl::PaintOpaqueIntoBuffer(HDC hdcBuf)
 	CRect r;
 	GetClientRect(&r);
 	if (r.Width() <= 0 || r.Height() <= 0) return;
+	if (m_clrBk != COLOR_LIST_BG) {
+		m_clrBk = COLOR_LIST_BG;
+		CCC_SyncBrush(m_brBackground, m_clrBk);
+		if (m_hWnd) TreeView_SetBkColor(m_hWnd, m_clrBk);
+	}
 	::FillRect(hdcBuf, &r, (HBRUSH)m_brBackground.GetSafeHandle());
 	s_cccInternalPrintClient++;
 	::SendMessage(m_hWnd, WM_PRINTCLIENT, (WPARAM)hdcBuf, PRF_CLIENT | PRF_ERASEBKGND);
@@ -11135,7 +11943,7 @@ void CCustomTreeCtrl::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
 		CRect   rcText(nIconRight + 4, rcRow.top, rcRow.right - 22, rcRow.bottom);
 
 		pDC->SetBkMode(TRANSPARENT);
-		pDC->SetTextColor(bSel ? COLOR_LIST_SEL_TEXT : RGB(0, 0, 0));
+		pDC->SetTextColor(bSel ? COLOR_LIST_SEL_TEXT : COLOR_EDIT_TEXT);
 		{
 			CFont* pOldFont = pDC->SelectObject(GetFont());
 			DrawFitControlText(pDC, rcText, strText, DT_LEFT | DT_VCENTER | DT_NOPREFIX, 0.50f);
@@ -11145,12 +11953,15 @@ void CCustomTreeCtrl::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
 		if (bSel)
 		{
 			CRect rcH(rcRow.left + 2, nCenterY - 7, rcRow.left + 16, nCenterY + 7);
-			DrawSoftJkHeart(pDC, rcH, (int)(::GetTickCount64() / 160), TRUE, COLOR_HEART);
-			DrawStar(pDC, rcRow.right - 12, nCenterY, 3, RGB(255, 215, 0));
+			if (CCC_ThemeSilk())
+				DrawSoftJkHeart(pDC, rcH, (int)(::GetTickCount64() / 160), TRUE, COLOR_HEART);
+			else
+				DrawThemeMotif(pDC, rcH, CCC_UiTheme().accent);
+			DrawThemeMotif(pDC, CRect(rcRow.right - 18, nCenterY - 7, rcRow.right - 4, nCenterY + 7), CCC_UiTheme().accent);
 		}
 		else if (bHot)
 		{
-			DrawStar(pDC, rcRow.right - 12, nCenterY, 2, RGB(255, 215, 0));
+			DrawThemeMotif(pDC, CRect(rcRow.right - 16, nCenterY - 6, rcRow.right - 4, nCenterY + 6), CCC_UiTheme().accent2);
 		}
 
 		if (bFocused)
@@ -12067,6 +12878,7 @@ void CCustomStandardButton::PreSubclassWindow()
 // 背景ブラシ。テキスト色は OnPaint 側。
 HBRUSH CCustomStandardButton::CtlColor(CDC*, UINT)
 {
+    CCC_SyncBrush(m_brBackground, COLOR_BUTTON_BG);
     return (HBRUSH)m_brBackground.GetSafeHandle();
 }
 
@@ -12106,9 +12918,9 @@ void CCustomStandardButton::PaintClient(CDC& dc, const CRect& r)
     {
         mDC.FillSolidRect(&r, CCC_AERO_CHROMA_KEY);
         if (bP)
-            mDC.FillSolidRect(&r, bD ? CCC_Desaturate(RGB(255, 210, 230), 68) : RGB(255, 210, 230));
+            mDC.FillSolidRect(&r, bD ? CCC_Desaturate(CCC_UiTheme().hotBot, 68) : CCC_UiTheme().hotBot);
         else if (m_bMouseOver)
-            mDC.FillSolidRect(&r, bD ? CCC_Desaturate(RGB(255, 235, 245), 68) : RGB(255, 235, 245));
+            mDC.FillSolidRect(&r, bD ? CCC_Desaturate(CCC_UiTheme().hotTop, 68) : CCC_UiTheme().hotTop);
     }
     else
     {
@@ -12130,7 +12942,7 @@ void CCustomStandardButton::PaintClient(CDC& dc, const CRect& r)
         if (bP) rg.OffsetRect(1, 1);
         DrawGlossHighlight(&mDC, rg, m_bFlat ? 4 : 8);
         if (!m_bFlat)
-            DrawJellyEdges(&mDC, rg, 8, RGB(120, 40, 80));
+            DrawJellyEdges(&mDC, rg, 8, CCC_UiTheme().ribbonEdge);
         // Soft3D: flat ボタンはチップも禁止（αブレンドがアクリル透過に見える）
         if (!m_bFlat && !CCC_IsCaptionChromeCtrl(m_hWnd) && r.Width() >= 24 && r.Height() >= 16)
         {
@@ -12147,7 +12959,8 @@ void CCustomStandardButton::PaintClient(CDC& dc, const CRect& r)
 
         // 大きめのボタンは裾に透けレースの色気を(アイコン平坦ボタンは省略=はみ出し防止)
         if (!m_bFlat && !m_hIconIn && r.Width() >= 64 && r.Height() >= 26)
-            DrawLaceScallop(&mDC, r.left + 8, r.bottom - 6, r.right - 8, 3, COLOR_LACE);
+            if (CCC_ThemeSilk())
+                DrawLaceScallop(&mDC, r.left + 8, r.bottom - 6, r.right - 8, 3, COLOR_LACE);
 
         // ホバー時: とろみハイライトがスーッと流れる(押下トグル上でもホバー中は表示)
         // 点はホバー終了後も残点が消えるまで描画
@@ -12190,39 +13003,60 @@ void CCustomStandardButton::PaintClient(CDC& dc, const CRect& r)
 
         if (!m_bFlat && !m_hIconIn)
         {
-            DrawDecorations(&mDC, r, 0, bP);
-            // 四隅にさりげないキラキラ
-            DrawSparkle(&mDC, r.left + 9, r.top + 9, 3, COLOR_SPARKLE);
-            DrawSparkle(&mDC, r.right - 9, r.bottom - 9, 3, COLOR_SPARKLE);
-            // ほんのり頬染めで色っぽく
-            {
+            if (CCC_ThemeSilk()) {
+                DrawDecorations(&mDC, r, 0, bP);
+                DrawSparkle(&mDC, r.left + 9, r.top + 9, 3, COLOR_SPARKLE);
+                DrawSparkle(&mDC, r.right - 9, r.bottom - 9, 3, COLOR_SPARKLE);
                 const int by = r.top + r.Height() * 64 / 100;
                 const int bx = max(10, r.Width() / 6);
                 DrawBlush(&mDC, r.left + bx, by, max(6, r.Width() / 10), max(3, r.Height() / 7));
                 DrawBlush(&mDC, r.right - bx, by, max(6, r.Width() / 10), max(3, r.Height() / 7));
+                if (CCC_UiThemeId() == CCC_UI_THEME_GAL) {
+                    const int gs = min(12, min(r.Width(), r.Height()) / 4);
+                    if (gs >= 6)
+                        DrawThemeMotif(&mDC, CRect(r.right - 2 - gs, r.top + 2, r.right - 2, r.top + 2 + gs), CCC_UiTheme().accent2);
+                }
+            } else {
+                const int ms = min(14, min(r.Width(), r.Height()) / 3);
+                if (ms >= 6) {
+                    DrawThemeMotif(&mDC, CRect(r.left + 2, r.top + 2, r.left + 2 + ms, r.top + 2 + ms), CCC_UiTheme().accent);
+                    DrawThemeMotif(&mDC, CRect(r.right - 2 - ms, r.bottom - 2 - ms, r.right - 2, r.bottom - 2), CCC_UiTheme().accent2);
+                }
             }
             if (m_bMouseOver && !bP)
             {
-                // ホバーでリボンがゆっくり回転 + Soft3D 結び
                 const float ang = sinf((float)m_nAnimTick * 0.08f) * 14.f;
-                DrawLooseRibbon(&mDC, CRect(r.Width() / 2 - 11, r.top + 2, r.Width() / 2 + 11, r.top + 16), COLOR_BOW, ang);
-                DrawSoftJkKnot(&mDC, CRect(r.Width() / 2 - 10, r.top + 1, r.Width() / 2 + 10, r.top + 18), (int)m_nAnimTick);
-                DrawSparkle(&mDC, r.right - 10, r.top + 10, 4, COLOR_SPARKLE);
-                DrawSparkle(&mDC, r.left + 12, r.bottom - 10, 3, COLOR_SPARKLE);
+                DrawThemeOrnament(&mDC, CRect(r.Width() / 2 - 11, r.top + 2, r.Width() / 2 + 11, r.top + 16), CCC_UiTheme().accent2, ang);
+                if (CCC_ThemeSilk())
+                    DrawSoftJkKnot(&mDC, CRect(r.Width() / 2 - 10, r.top + 1, r.Width() / 2 + 10, r.top + 18), (int)m_nAnimTick);
+                DrawSparkle(&mDC, r.right - 10, r.top + 10, 4, CCC_UiTheme().accent2);
+                DrawSparkle(&mDC, r.left + 12, r.bottom - 10, 3, CCC_UiTheme().accent);
             }
             if (bP)
             {
-                DrawSparkle(&mDC, r.Width() / 2, r.top + 8, 4, COLOR_SPARKLE);
-                DrawStar(&mDC, r.left + 15, r.Height() / 2, 2, RGB(255, 240, 150));
-                DrawStar(&mDC, r.right - 15, r.Height() / 2, 2, RGB(255, 240, 150));
+                DrawSparkle(&mDC, r.Width() / 2, r.top + 8, 4, CCC_UiTheme().accent2);
+                DrawThemeMotif(&mDC, CRect(r.left + 8, r.Height() / 2 - 6, r.left + 20, r.Height() / 2 + 6), CCC_UiTheme().accent);
+                DrawThemeMotif(&mDC, CRect(r.right - 20, r.Height() / 2 - 6, r.right - 8, r.Height() / 2 + 6), CCC_UiTheme().accent);
                 const float ang = sinf((float)m_nAnimTick * 0.1f) * 10.f;
-                DrawLooseRibbon(&mDC, CRect(r.Width() / 2 - 10, r.bottom - 15, r.Width() / 2 + 10, r.bottom - 2), COLOR_BOW, ang);
+                DrawThemeOrnament(&mDC, CRect(r.Width() / 2 - 10, r.bottom - 15, r.Width() / 2 + 10, r.bottom - 2), CCC_UiTheme().accent2, ang);
             }
         }
-        else if (m_bMouseOver && m_hIconIn)
+        else
         {
-            // アイコンボタンは控えめなハイライトだけ
-            FillRectAlpha(&mDC, r, RGB(255, 255, 255), 36);
+            if (m_bMouseOver && m_hIconIn)
+                FillRectAlpha(&mDC, r, RGB(255, 255, 255), 36);
+            // アイコン／平坦ボタンにも隅のアクセント。中央の絵は潰さない
+            if (r.Width() >= 16 && r.Height() >= 14)
+            {
+                const CCC_UiThemePal& th = CCC_UiTheme();
+                const int s = min(8, min(r.Width(), r.Height()) / 4);
+                if (s >= 4)
+                {
+                    const int x = r.right - s - 2;
+                    const int y = r.top + 2;
+                    DrawThemeMotif(&mDC, CRect(x, y, x + s, y + s), th.accent);
+                }
+            }
         }
     }
 
@@ -12954,7 +13788,8 @@ void CCustomCheckBox::OnDrawLayer(CDC* pDC, CRect rect)
             if (rcB.bottom + 5 < rh)
             {
                 DrawLaceLine(&dc, rcB.left + 1, rcB.bottom + 2, rcB.right - 1, rcB.bottom + 2, RGB(60, 40, 55));
-                DrawLaceScallop(&dc, rcB.left, rcB.bottom + 4, rcB.right, 3, COLOR_LACE);
+                if (CCC_ThemeSilk())
+                    DrawLaceScallop(&dc, rcB.left, rcB.bottom + 4, rcB.right, 3, COLOR_LACE);
             }
             // 先にテキストを描く(チェック✓はこの上に乗せる)。
             // 文字高さは箱(最大18)ではなくコントロール全体を使い、意図したフォントが縮小されないようにする。
@@ -13001,7 +13836,7 @@ void CCustomCheckBox::OnDrawLayer(CDC* pDC, CRect rect)
                 {
                     int bL = max(0, rcB.right - 10);
                     const float ang = m_bIsHot ? sinf((float)::GetTickCount64() * 0.0035f) * 12.f : 0.f;
-                    DrawLooseRibbon(&dc, CRect(bL, rcB.top - 6, min(rw, bL + 14), rcB.top + 4), COLOR_BOW, ang);
+                    DrawThemeOrnament(&dc, CRect(bL, rcB.top - 6, min(rw, bL + 14), rcB.top + 4), COLOR_BOW, ang);
                 }
             }
         }
@@ -13121,7 +13956,8 @@ void CCustomRadioButton::OnDrawLayer(CDC* pDC, CRect rect)
             if (rcB.bottom + 5 < rh)
             {
                 DrawLaceLine(&dc, rcB.left + 1, rcB.bottom + 2, rcB.right - 1, rcB.bottom + 2, RGB(60, 40, 55));
-                DrawLaceScallop(&dc, rcB.left, rcB.bottom + 4, rcB.right, 3, COLOR_LACE);
+                if (CCC_ThemeSilk())
+                    DrawLaceScallop(&dc, rcB.left, rcB.bottom + 4, rcB.right, 3, COLOR_LACE);
             }
             CString t;
             GetWindowText(t);
@@ -16539,8 +17375,8 @@ static void CCC_DrawGroupBoxFrame(CDC& dc, const CRect& r, const CString& t, BOO
 
     int nT = r.top + (s.cy > 0 ? s.cy / 2 : 8);
 
-    CPen pO(PS_SOLID, 2, RGB(255, 140, 180));
-    CPen pI(PS_SOLID, 1, RGB(255, 200, 220));
+    CPen pO(PS_SOLID, 2, CCC_UiTheme().accent);
+    CPen pI(PS_SOLID, 1, CCC_UiTheme().accent2);
     dc.SelectObject(&pO);
     dc.SelectStockObject(NULL_BRUSH);
     dc.MoveTo(r.left + 1, nT);
@@ -16567,13 +17403,12 @@ static void CCC_DrawGroupBoxFrame(CDC& dc, const CRect& r, const CString& t, BOO
     dc.LineTo(r.left + off, r.bottom - off);
     dc.LineTo(r.left + off, nT + off);
 
-    DrawRibbon(&dc, CRect(r.left + 2, r.bottom - 12, r.left + 14, r.bottom), RGB(255, 182, 193));
-    DrawRibbon(&dc, CRect(r.right - 14, r.bottom - 12, r.right - 2, r.bottom), RGB(255, 182, 193));
+    DrawThemeRibbon(&dc, CRect(r.left + 2, r.bottom - 12, r.left + 14, r.bottom), CCC_UiTheme().accent2);
+    DrawThemeRibbon(&dc, CRect(r.right - 14, r.bottom - 12, r.right - 2, r.bottom), CCC_UiTheme().accent2);
 
-    // 右上の角はしどけないリボンで色っぽく（左上はタイトルと重なるため省略）
-    DrawLooseRibbon(&dc, CRect(r.right - 19, nT - 8, r.right - 1, nT + 8), COLOR_BOW);
+    DrawThemeOrnament(&dc, CRect(r.right - 19, nT - 8, r.right - 1, nT + 8), CCC_UiTheme().accent);
     if (title.IsEmpty())
-        DrawLooseRibbon(&dc, CRect(r.left + 1, nT - 8, r.left + 19, nT + 8), COLOR_BOW);
+        DrawThemeOrnament(&dc, CRect(r.left + 1, nT - 8, r.left + 19, nT + 8), CCC_UiTheme().accent);
     // Soft3D ゆらゆら（疎タイマーで Invalidate される前提）
     {
         const int tick = (int)(::GetTickCount64() / 500);
@@ -16584,8 +17419,10 @@ static void CCC_DrawGroupBoxFrame(CDC& dc, const CRect& r, const CString& t, BOO
     DrawSparkle(&dc, r.right - 9, r.bottom - 9, 3, COLOR_SPARKLE);
     DrawSparkle(&dc, r.left + 9, r.bottom - 9, 3, COLOR_SPARKLE);
     // 下辺に黒の細レース + 透けレースのスカラップでランジェリー風の色気
-    DrawLaceLine(&dc, r.left + 18, r.bottom - 7, r.right - 18, r.bottom - 7, RGB(60, 40, 55));
-    DrawLaceScallop(&dc, r.left + 16, r.bottom - 5, r.right - 16, 3, COLOR_LACE);
+    if (CCC_ThemeSilk()) {
+        DrawLaceLine(&dc, r.left + 18, r.bottom - 7, r.right - 18, r.bottom - 7, CCC_UiTheme().textDim);
+        DrawLaceScallop(&dc, r.left + 16, r.bottom - 5, r.right - 16, 3, COLOR_LACE);
+    }
 
     if (!title.IsEmpty())
     {
@@ -16600,7 +17437,7 @@ static void CCC_DrawGroupBoxFrame(CDC& dc, const CRect& r, const CString& t, BOO
 #endif
         dc.SetBkMode(TRANSPARENT);
         // クロマキー RGB(1,1,1) と区別するため、透過時の黒文字は 2,2,2 にずらす
-        dc.SetTextColor(bTrans ? RGB(2, 2, 2) : RGB(0, 0, 0));
+        dc.SetTextColor(bTrans ? RGB(2, 2, 2) : COLOR_EDIT_TEXT);
         DrawFitControlText(&dc, rt, title, DT_LEFT | DT_VCENTER | DT_NOPREFIX, 0.50f);
     }
     dc.SelectObject(pOF);

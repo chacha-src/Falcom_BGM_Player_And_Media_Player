@@ -1,4 +1,4 @@
-#include "stdafx.h"
+﻿#include "stdafx.h"
 #include "SevenZipDec.h"
 #include "lzma_sdk/7zAlloc.h"
 #include "lzma_sdk/7zCrc.h"

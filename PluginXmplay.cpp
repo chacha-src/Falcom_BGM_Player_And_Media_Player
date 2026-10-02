@@ -1,4 +1,4 @@
-// XMPlay input plugin host (XMPIN pull Process)
+﻿// XMPlay input plugin host (XMPIN pull Process)
 //
 // xmpin.h / xmpfunc.h と実プラグイン(xmp-vgmstream 等)の実装に合わせた点:
 //  - faceproc は MISC(0) / REGISTRY(1) / FILE(2) / TEXT(3) / STATUS(4) / IN(11) を全部返す。

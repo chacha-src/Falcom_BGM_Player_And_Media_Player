@@ -1,4 +1,4 @@
-// KpiHost64 外部入力プラグイン（Winamp in_ / XMPlay / AIMP）。MFC 無し。
+﻿// KpiHost64 外部入力プラグイン（Winamp in_ / XMPlay / AIMP）。MFC 無し。
 #include <windows.h>
 #include <string>
 #include <unordered_map>

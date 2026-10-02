@@ -756,21 +756,21 @@ BOOL CEqualizer::OnInitDialog()
 	addTip(IDC_EQ_ABTOG, LL14(L"スロットA/Bを切り替え", L"Toggle between slots A and B", L"Basculer entre A et B", L"Alterna tra A e B", L"Alternar entre A y B", L"A/B 슬롯 전환", L"在A/B槽间切换", L"التبديل بين A و B", L"Переключить A/B", L"Zwischen A und B umschalten", L"Alternar entre A e B", L"Wissel tussen A en B", L"Przelacz A/B", L"A/B arasinda gec"));
 	addTip(IDC_EQ_HELP, LL14(L"操作ガイドを表示", L"Show operation guide", L"Afficher le guide", L"Mostra guida", L"Mostrar guía", L"조작 가이드 표시", L"显示操作指南", L"إظهار الدليل", L"Показать руководство", L"Bedienungsanleitung", L"Mostrar guia", L"Handleiding tonen", L"Pokaż przewodnik", L"İşlem kılavuzunu göster"));
 	CCustomControlUtility::FinalizeDialogToolTip(m_tooltip, 512, 10000);
-	m_s0.SetMode(1);
-	m_s1.SetMode(1);
-	m_s2.SetMode(1);
-	m_s3.SetMode(1);
-	m_s4.SetMode(1);
-	m_s5.SetMode(1);
-	m_s6.SetMode(1);
-	m_s7.SetMode(1);
-	m_s8.SetMode(1);
-	m_s9.SetMode(1);
-	m_s10.SetMode(1);
-	m_s11.SetMode(1);
-	m_s12.SetMode(1);
-	m_s13.SetMode(1);
-	m_s14.SetMode(1);
+	m_s0.SetMode(3);
+	m_s1.SetMode(3);
+	m_s2.SetMode(3);
+	m_s3.SetMode(3);
+	m_s4.SetMode(3);
+	m_s5.SetMode(3);
+	m_s6.SetMode(3);
+	m_s7.SetMode(3);
+	m_s8.SetMode(3);
+	m_s9.SetMode(3);
+	m_s10.SetMode(3);
+	m_s11.SetMode(3);
+	m_s12.SetMode(3);
+	m_s13.SetMode(3);
+	m_s14.SetMode(3);
 
 
 	m_smaster.SetMode(2);
@@ -782,6 +782,8 @@ BOOL CEqualizer::OnInitDialog()
 	m_reverb.SetMode(2);
 	m_chorus.SetMode(2);
 	m_delay.SetMode(2);
+	m_surround.SetMode(2);
+	m_eff.SetMode(2);
 
 
 	ApplyTitleFont();

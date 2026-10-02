@@ -214,6 +214,101 @@ void CCC_GroupBoxesBack(HWND hDlg);
 #define COLOR_LACE              RGB(255, 196, 220) // レース(縁飾り)の色
 #define COLOR_CHECK             RGB(226,  64, 124) // チェック(レ点)の色(深めローズ)
 
+// コンテキストメニュー共通テーマ。0=可愛いが既定。既存番号は動かさない。
+enum {
+    CCC_UI_THEME_CUTE = 0,
+    CCC_UI_THEME_COOL,
+    CCC_UI_THEME_DRAMATIC,
+    CCC_UI_THEME_NEON,
+    CCC_UI_THEME_INK,
+    CCC_UI_THEME_FOREST,
+    CCC_UI_THEME_CANDY,
+    CCC_UI_THEME_STEEL,
+    CCC_UI_THEME_GAL,
+    CCC_UI_THEME_ULTRA,
+    CCC_UI_THEME_SPRING,
+    CCC_UI_THEME_SUMMER,
+    CCC_UI_THEME_AUTUMN,
+    CCC_UI_THEME_WINTER,
+    CCC_UI_THEME_DUSK,
+    CCC_UI_THEME_DAWN,
+    CCC_UI_THEME_RAIN,
+    CCC_UI_THEME_SEA,
+    CCC_UI_THEME_COUNT
+};
+struct CCC_UiThemePal {
+    COLORREF bg0, bg1;
+    COLORREF ribbon0, ribbon1, ribbonEdge;
+    COLORREF accent, accent2, sep;
+    COLORREF face, edge, track;
+    COLORREF text, textDim;
+    COLORREF hotTop, hotBot;
+    COLORREF borderLite, borderDark;
+    int motif; // 描画はテーマ番号側。この値は旧パレット互換の印
+};
+int CCC_UiThemeId();
+const CCC_UiThemePal& CCC_UiTheme();
+LPCTSTR CCC_UiThemeName(int id);
+void CCC_RefreshThemedUi();
+inline BOOL CCC_ThemeSilk()
+{
+    const int id = CCC_UiThemeId();
+    return id == CCC_UI_THEME_CUTE || id == CCC_UI_THEME_GAL;
+}
+
+inline COLORREF CCC_ClrDialogBg() { return CCC_UiTheme().bg0; }
+inline COLORREF CCC_ClrEditBg() { return CCC_UiTheme().face; }
+inline COLORREF CCC_ClrListBg() { return CCC_UiTheme().face; }
+inline COLORREF CCC_ClrListAlt() { return CCC_UiTheme().bg1; }
+inline COLORREF CCC_ClrComboBg() { return CCC_UiTheme().face; }
+inline COLORREF CCC_ClrSelBg() { return CCC_UiTheme().hotTop; }
+inline COLORREF CCC_ClrText() { return CCC_UiTheme().text; }
+inline COLORREF CCC_ClrButtonBg() { return CCC_UiTheme().bg1; }
+inline COLORREF CCC_ClrButtonHover() { return CCC_UiTheme().hotTop; }
+inline COLORREF CCC_ClrButtonPushed() { return CCC_UiTheme().hotBot; }
+inline COLORREF CCC_ClrAccent() { return CCC_UiTheme().accent; }
+inline COLORREF CCC_ClrAccent2() { return CCC_UiTheme().accent2; }
+inline COLORREF CCC_ClrSep() { return CCC_UiTheme().sep; }
+
+#undef COLOR_DIALOG_BG
+#undef COLOR_EDIT_BG
+#undef COLOR_EDIT_TEXT
+#undef COLOR_LIST_BG
+#undef COLOR_LIST_ALT
+#undef COLOR_COMBO_BG
+#undef COLOR_BUTTON_BG
+#undef COLOR_BUTTON_PUSHED
+#undef COLOR_BUTTON_HOVER
+#undef COLOR_SLIDER_THUMB
+#undef COLOR_SEL_BG
+#undef COLOR_LIST_SEL_TEXT
+#undef COLOR_VINE_DECO
+#undef COLOR_HEART
+#undef COLOR_BOW
+#undef COLOR_BLUSH
+#undef COLOR_HEART_DEEP
+#undef COLOR_LACE
+#undef COLOR_CHECK
+#define COLOR_DIALOG_BG         CCC_ClrDialogBg()
+#define COLOR_EDIT_BG           CCC_ClrEditBg()
+#define COLOR_EDIT_TEXT         CCC_ClrText()
+#define COLOR_LIST_BG           CCC_ClrListBg()
+#define COLOR_LIST_ALT          CCC_ClrListAlt()
+#define COLOR_COMBO_BG          CCC_ClrComboBg()
+#define COLOR_BUTTON_BG         CCC_ClrButtonBg()
+#define COLOR_BUTTON_PUSHED     CCC_ClrButtonPushed()
+#define COLOR_BUTTON_HOVER      CCC_ClrButtonHover()
+#define COLOR_SLIDER_THUMB      CCC_ClrAccent()
+#define COLOR_SEL_BG            CCC_ClrSelBg()
+#define COLOR_LIST_SEL_TEXT     CCC_ClrText()
+#define COLOR_VINE_DECO         CCC_ClrSep()
+#define COLOR_HEART             CCC_ClrAccent()
+#define COLOR_BOW               CCC_ClrAccent2()
+#define COLOR_BLUSH             CCC_ClrAccent2()
+#define COLOR_HEART_DEEP        CCC_ClrAccent()
+#define COLOR_LACE              CCC_ClrAccent2()
+#define COLOR_CHECK             CCC_ClrAccent()
+
 // アクリル半透明オーバーレイ用アルファ値
 #define AERO_ALPHA_SEMI 160
 
@@ -1260,7 +1355,7 @@ public:
     void EnableAutoDelete(BOOL b = TRUE) { m_bAutoDelete = b; }
     BOOL m_bAutoDelete;
 
-    // 描画モードの設定・取得（0=楔＋音符、1=紫ダイヤ、2=緑ダイヤ）
+    // 描画モード（0=楔バー、1=紫ダイヤ、2=ボリューム緑ダイヤ、3=カプセル、4=メーター）
     void SetMode(int m);
     int GetMode() const { return m_nMode; }
 
@@ -1313,7 +1408,9 @@ private:
     void DrawSlider(CDC* pDC); // TBS_VERT は各 Mode 内で分岐
     void DrawMode0(CDC* pDC, const CRect& r, int mn, int mx, int pos); // 楔形バー＋音符つまみ
     void DrawMode1(CDC* pDC, const CRect& r, int mn, int mx, int pos); // 紫グラデ線＋ダイヤ
-    void DrawMode2(CDC* pDC, const CRect& r, int mn, int mx, int pos); // 緑グラデ線＋ダイヤ（mode1 と同型）
+    void DrawMode2(CDC* pDC, const CRect& r, int mn, int mx, int pos); // 緑グラデ線＋ダイヤ（ボリューム）
+    void DrawMode3(CDC* pDC, const CRect& r, int mn, int mx, int pos); // カプセル＋中央目盛り
+    void DrawMode4(CDC* pDC, const CRect& r, int mn, int mx, int pos); // セグメントメーター
 };
 
 // ============================================================================

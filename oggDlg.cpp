@@ -5951,8 +5951,8 @@ BOOL COggDlg::OnInitDialog()
 	mp3_.mp3init();
 
 
-	m_tempo_sl.SetMode(1);
-	m_pitch_sl.SetMode(1);
+	m_tempo_sl.SetMode(4);
+	m_pitch_sl.SetMode(4);
 
 	// "バージョン情報..." メニュー項目をシステム メニューへ追加します。
 	fnn = "";
@@ -21953,6 +21953,8 @@ int playwavcemu(BYTE* bw, int old, int l1, int l2)
 		if (doLoop) CEmuSeekLoopStart();
 		else CEmuMarkPlaybackEof();
 	}
+	/* G: は wl。CEmu はループが無くても再生バイト分だけ進める */
+	const int cemuBytes1 = (rrr > 0) ? rrr : 0;
 	if (l2 > 0) {
 		int r2 = readcemu(bw, l2);
 		if (r2 < 0) r2 = 0;
@@ -21991,8 +21993,12 @@ int playwavcemu(BYTE* bw, int old, int l1, int l2)
 			if (doLoop) CEmuSeekLoopStart();
 			else CEmuMarkPlaybackEof();
 		}
+		if (r2 > 0)
+			wl += PlaybackCcWrite(bw, (UINT)r2);
 		rrr += r2;
 	}
+	if (cemuBytes1 > 0)
+		wl += PlaybackCcWrite(bw + old, (UINT)cemuBytes1);
 	{
 		CEmuSession& s = CemuSess();
 		if (s.lengthSamples > 0 && s.lengthSamples <= (UINT64)0x7fffffff) {
@@ -27301,6 +27307,34 @@ void COggDlg::timerp()
 				DrawScrollSepDeco(dcsub, 4 + sss_w, 16 * 4, si - sss_w, RGB(200, 240, 255));
 		}
 		BannerBlitScrollValue(dc, dcsub, artiValueX, artiViewW, 0 + 64 * 4, (16 + 64) * 4, mcnt4, mcnt3, si, bannerStep);
+	}
+	else if (mode == MODE_CEMU) {
+		/* CEmu にループ区間は無い。data と機種（例 pc88(OPN)）。Loop数は 0 のまま */
+		s = FormatBannerDataAudioLine();
+		if (s.IsEmpty())
+			s = _T("data:");
+		moji(s, 1, 48, 0x7fffff);
+		CString cemuMach;
+		{
+			const CEmuGameEntry* ge = CemuSess().game;
+			char modeTag[CEMU_MODE_TAG] = {};
+			if (ge) {
+				char fromEntry[CEMU_MODE_TAG] = {};
+				CEmuModeTagFromEntry(ge, fromEntry, (int)sizeof(fromEntry));
+				if (CEmuModeIsMidiTag(fromEntry))
+					strncpy_s(modeTag, fromEntry, _TRUNCATE);
+				else if (!CEmuModePrefGet(CemuSess().path, modeTag, (int)sizeof(modeTag)))
+					strncpy_s(modeTag, fromEntry, _TRUNCATE);
+			}
+			if (ge && ge->platform[0] && modeTag[0])
+				cemuMach.Format(_T("%hs(%hs)"), ge->platform, modeTag);
+			else if (ge && ge->platform[0] && ge->subtype[0])
+				cemuMach.Format(_T("%hs(%hs)"), ge->platform, ge->subtype);
+			else if (ge && ge->platform[0])
+				cemuMach = CString(ge->platform);
+		}
+		s.Format(_T("Cemu:%s"), (LPCTSTR)cemuMach);
+		moji(s, 1, 64, 0x7fffff);
 	}
 	else {
 		s.Format(_T("Loop:%2d:%02d.%02d %2d:%02d.%02d"), tal1, tbl1, tcl1, tal2, tbl2, tcl2);

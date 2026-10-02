@@ -1,4 +1,4 @@
-#include "stdafx.h"
+﻿#include "stdafx.h"
 #include "ogg.h"
 #include "ScLiveSettingsDlg.h"
 #include "ScreenCaptureDlg.h"

@@ -1,4 +1,4 @@
-// ScreenCaptureDlg.cpp
+﻿// ScreenCaptureDlg.cpp
 // 画面キャプチャ → MP4 (H.264 + AAC)
 // プライマリ / 全モニタ / ウィンドウ合成(配置・拡大縮小・Z順)
 

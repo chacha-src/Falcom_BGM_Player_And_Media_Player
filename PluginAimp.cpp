@@ -1,4 +1,4 @@
-// AIMP decoder plugin host (AIMPPluginGetHeader + IAIMPExtensionAudioDecoder / ...Old)
+﻿// AIMP decoder plugin host (AIMPPluginGetHeader + IAIMPExtensionAudioDecoder / ...Old)
 //
 // AIMP SDK の実装に合わせた点:
 //  - デコーダ系プラグインは Initialize(Core) の中で Core->RegisterExtension() を呼び、

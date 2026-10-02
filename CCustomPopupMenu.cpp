@@ -472,21 +472,38 @@ namespace {
 		s_reg = TRUE;
 	}
 
-	static COLORREF PopupBg() { return COLOR_DIALOG_BG; }
+	static COLORREF PopupBg()
+	{
+		if (CCC_UiThemeId() == 0 && CCC_IsInwoman()) return RGB(255, 220, 236);
+		return CCC_UiTheme().bg0;
+	}
 	static COLORREF PopupHotTop()
 	{
-		return CCC_IsInwoman() ? RGB(255, 198, 220) : RGB(228, 234, 255);
+		if (CCC_UiThemeId() == 0 && CCC_IsInwoman()) return RGB(255, 198, 220);
+		return CCC_UiTheme().hotTop;
 	}
 	static COLORREF PopupHotBot()
 	{
-		return CCC_IsInwoman() ? RGB(255, 152, 192) : RGB(186, 204, 248);
+		if (CCC_UiThemeId() == 0 && CCC_IsInwoman()) return RGB(255, 152, 192);
+		return CCC_UiTheme().hotBot;
 	}
 	static COLORREF PopupText(BOOL enabled)
 	{
-		return enabled ? RGB(52, 34, 58) : RGB(170, 158, 170);
+		if (CCC_UiThemeId() == 0 && CCC_IsInwoman())
+			return enabled ? RGB(52, 34, 58) : RGB(170, 158, 170);
+		const CCC_UiThemePal& th = CCC_UiTheme();
+		return enabled ? th.text : th.textDim;
 	}
-	static COLORREF PopupBorderLite() { return RGB(255, 250, 253); }
-	static COLORREF PopupBorderDark() { return RGB(176, 118, 152); }
+	static COLORREF PopupBorderLite()
+	{
+		if (CCC_UiThemeId() == 0 && CCC_IsInwoman()) return RGB(255, 250, 253);
+		return CCC_UiTheme().borderLite;
+	}
+	static COLORREF PopupBorderDark()
+	{
+		if (CCC_UiThemeId() == 0 && CCC_IsInwoman()) return RGB(176, 118, 152);
+		return CCC_UiTheme().borderDark;
+	}
 
 	// メニュー外クリック／退場中に積まれた「新しいメニューを開く」系を捨てる
 	static BOOL s_reopenRClick = FALSE;
@@ -787,13 +804,14 @@ static COLORREF BlendRGB(COLORREF a, COLORREF b, int t)
 			box.DeflateRect(padX + checkW, PopupSx(dpi, 20), padR, PopupSx(dpi, 5));
 		if (box.Width() < 8 || box.Height() < 4) return;
 
-		const COLORREF face = faded(RGB(255, 248, 252));
-		const COLORREF edge = faded(RGB(220, 160, 190));
-		const COLORREF accent = faded(RGB(236, 130, 178));
-		const COLORREF track = faded(RGB(230, 200, 215));
+		const CCC_UiThemePal& th = CCC_UiTheme();
+		const COLORREF face = faded(th.face);
+		const COLORREF edge = faded(th.edge);
+		const COLORREF accent = faded(th.accent);
+		const COLORREF track = faded(th.track);
 
 		if (it.kind == CCUSTOM_POPUP_BUTTON) {
-			FillVGrad(dc, box, face, faded(RGB(255, 230, 242)));
+			FillVGrad(dc, box, face, faded(th.bg1));
 			dc.Draw3dRect(&box, RGB(255, 255, 255), edge);
 			DrawPopupItemText(dc, it.text, box, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS,
 				faded(PopupText(TRUE)), TRUE, fade);
@@ -805,7 +823,7 @@ static COLORREF BlendRGB(COLORREF a, COLORREF b, int t)
 			if (it.kind == CCUSTOM_POPUP_COMBO) {
 				CRect ar = box;
 				ar.left = max(box.left + PopupSx(dpi, 4), box.right - PopupSx(dpi, 18));
-				dc.FillSolidRect(&ar, faded(RGB(255, 236, 245)));
+				dc.FillSolidRect(&ar, faded(CCC_UiTheme().face));
 				DrawPopupItemText(dc, L"▾", ar, DT_CENTER | DT_VCENTER | DT_SINGLELINE,
 					faded(PopupText(TRUE)), TRUE, fade);
 			}
@@ -820,7 +838,7 @@ static COLORREF BlendRGB(COLORREF a, COLORREF b, int t)
 					CRect fr(box.left, box.top, box.left + w, box.bottom);
 					fr.DeflateRect(1, 1);
 					if (fr.Width() > 0)
-						FillVGrad(dc, fr, faded(RGB(255, 180, 210)), accent);
+						FillVGrad(dc, fr, faded(CCC_UiTheme().accent2), accent);
 				}
 			}
 			return;
@@ -836,7 +854,7 @@ static COLORREF BlendRGB(COLORREF a, COLORREF b, int t)
 			int x0 = box.left + MulDiv(it.rangeSelMin - it.sliderMin, box.Width(), it.sliderMax - it.sliderMin);
 			int x1 = box.left + MulDiv(it.rangeSelMax - it.sliderMin, box.Width(), it.sliderMax - it.sliderMin);
 			if (x1 < x0) { const int tmp = x0; x0 = x1; x1 = tmp; }
-			dc.FillSolidRect(x0, cy - trackH / 2, max(1, x1 - x0), trackH, faded(RGB(255, 190, 215)));
+			dc.FillSolidRect(x0, cy - trackH / 2, max(1, x1 - x0), trackH, faded(CCC_UiTheme().accent2));
 		}
 		if (it.sliderMax > it.sliderMin) {
 			const int x = box.left + MulDiv(it.sliderPos - it.sliderMin, box.Width(), it.sliderMax - it.sliderMin);
@@ -858,12 +876,12 @@ static COLORREF BlendRGB(COLORREF a, COLORREF b, int t)
 		const int R = rc.right - PopupSx(dpi, CCUSTOM_POPUP_PAD_RIGHT);
 		const int mid = (L + R) / 2;
 		const int gap = PopupSx(dpi, 14);
-		FillHGrad(dc, CRect(L, y, mid - gap, y + 1), RGB(255, 246, 250), RGB(228, 150, 186));
-		FillHGrad(dc, CRect(mid + gap, y, R, y + 1), RGB(228, 150, 186), RGB(255, 246, 250));
+		FillHGrad(dc, CRect(L, y, mid - gap, y + 1), CCC_UiTheme().face, CCC_UiTheme().sep);
+		FillHGrad(dc, CRect(mid + gap, y, R, y + 1), CCC_UiTheme().sep, CCC_UiTheme().face);
 		dc.FillSolidRect(L, y + 1, mid - gap - L, 1, RGB(255, 255, 255));
 		dc.FillSolidRect(mid + gap, y + 1, R - (mid + gap), 1, RGB(255, 255, 255));
-		CBrush brA(RGB(240, 180, 210));
-		CBrush brB(RGB(236, 130, 178));
+		CBrush brA(CCC_UiTheme().accent2);
+		CBrush brB(CCC_UiTheme().accent);
 		CPen pen(PS_SOLID, 1, RGB(255, 240, 248));
 		CPen* op = dc.SelectObject(&pen);
 		CBrush* ob = dc.SelectObject(&brA);
@@ -880,8 +898,8 @@ static COLORREF BlendRGB(COLORREF a, COLORREF b, int t)
 
 	static void DrawJkBackdrop(CDC& dc, const CRect& rc, int /*animTick*/, float doorT = -1.f, BOOL softOn = TRUE)
 	{
-		const COLORREF c0 = CCC_IsInwoman() ? RGB(255, 220, 236) : RGB(255, 232, 244);
-		const COLORREF c1 = CCC_IsInwoman() ? RGB(255, 192, 224) : RGB(232, 214, 255);
+		const COLORREF c0 = (CCC_UiThemeId() == 0 && CCC_IsInwoman()) ? RGB(255, 220, 236) : CCC_UiTheme().bg0;
+		const COLORREF c1 = (CCC_UiThemeId() == 0 && CCC_IsInwoman()) ? RGB(255, 192, 224) : CCC_UiTheme().bg1;
 		// タイルとリボンが全面を覆う。走査線グラデは捨て描画だった。
 		dc.FillSolidRect(&rc, c0);
 
@@ -956,8 +974,8 @@ static COLORREF BlendRGB(COLORREF a, COLORREF b, int t)
 	static void DrawTornRibbon(CDC& dc, const CRect& rcClient, int animTick)
 	{
 		const int w = CCUSTOM_POPUP_RIBBON_W;
-		const COLORREF c0 = CCC_IsInwoman() ? RGB(255, 108, 168) : RGB(158, 140, 228);
-		const COLORREF c1 = CCC_IsInwoman() ? RGB(255, 186, 214) : RGB(208, 198, 255);
+		const COLORREF c0 = (CCC_UiThemeId() == 0 && CCC_IsInwoman()) ? RGB(255, 108, 168) : CCC_UiTheme().ribbon0;
+		const COLORREF c1 = (CCC_UiThemeId() == 0 && CCC_IsInwoman()) ? RGB(255, 186, 214) : CCC_UiTheme().ribbon1;
 		POINT pts[14];
 		pts[0].x = rcClient.left; pts[0].y = rcClient.top;
 		pts[1].x = rcClient.left + w - 1; pts[1].y = rcClient.top;
@@ -974,6 +992,11 @@ static COLORREF BlendRGB(COLORREF a, COLORREF b, int t)
 			out = !out;
 		}
 		pts[pi].x = rcClient.left; pts[pi].y = rcClient.bottom; ++pi;
+		if (!CCC_ThemeSilk()) {
+			FillVGrad(dc, CRect(rcClient.left, rcClient.top, rcClient.left + w, rcClient.bottom), c0, c1);
+			dc.FillSolidRect(rcClient.left + w - 2, rcClient.top, 2, rcClient.Height(), CCC_UiTheme().ribbonEdge);
+			return;
+		}
 		CRgn rgn;
 		if (rgn.CreatePolygonRgn(pts, pi, WINDING)) {
 			CBrush br(c0);
@@ -989,7 +1012,7 @@ static COLORREF BlendRGB(COLORREF a, COLORREF b, int t)
 		} else {
 			FillVGrad(dc, CRect(rcClient.left, rcClient.top, rcClient.left + w, rcClient.bottom), c0, c1);
 		}
-		dc.FillSolidRect(rcClient.left, rcClient.top, 1, rcClient.Height(), RGB(130, 70, 120));
+		dc.FillSolidRect(rcClient.left, rcClient.top, 1, rcClient.Height(), CCC_UiTheme().ribbonEdge);
 		const int band = max(12, rcClient.Height() / 6);
 		for (int i = 0; i < band; ++i) {
 			const int a = 110 - (i * 110) / max(1, band);
@@ -1199,11 +1222,11 @@ static COLORREF BlendRGB(COLORREF a, COLORREF b, int t)
 			DrawJkBackdrop(dc, chip, animTick);
 			DrawTornRibbon(dc, chip, animTick);
 		} else {
-			const COLORREF c0 = CCC_IsInwoman() ? RGB(255, 220, 236) : RGB(255, 232, 244);
-			const COLORREF c1 = CCC_IsInwoman() ? RGB(255, 192, 224) : RGB(232, 214, 255);
+			const COLORREF c0 = (CCC_UiThemeId() == 0 && CCC_IsInwoman()) ? RGB(255, 220, 236) : CCC_UiTheme().bg0;
+			const COLORREF c1 = (CCC_UiThemeId() == 0 && CCC_IsInwoman()) ? RGB(255, 192, 224) : CCC_UiTheme().bg1;
 			FillVGrad(dc, chip, BlendRGB(PopupBg(), c0, fade), BlendRGB(PopupBg(), c1, fade));
 			CRect rib(chip.left, chip.top, chip.left + CCUSTOM_POPUP_RIBBON_W, chip.bottom);
-			const COLORREF r0 = CCC_IsInwoman() ? RGB(255, 108, 168) : RGB(158, 140, 228);
+			const COLORREF r0 = (CCC_UiThemeId() == 0 && CCC_IsInwoman()) ? RGB(255, 108, 168) : CCC_UiTheme().ribbon0;
 			dc.FillSolidRect(&rib, BlendRGB(PopupBg(), r0, fade));
 			if (!flying && fade >= 180)
 				DrawTornRibbon(dc, chip, animTick);
@@ -1324,7 +1347,9 @@ BOOL CCustomPopupMenu::IsChromeCommand(UINT id) const
 		|| id == CCUSTOM_POPUP_ID_MID_HOST
 		|| id == CCUSTOM_POPUP_ID_CEMU_LIST
 		|| (id >= CCUSTOM_POPUP_ID_ANIM0
-			&& id < CCUSTOM_POPUP_ID_ANIM0 + (UINT)POPUP_ANIM_COUNT);
+			&& id < CCUSTOM_POPUP_ID_ANIM0 + (UINT)POPUP_ANIM_COUNT)
+		|| (id >= CCUSTOM_POPUP_ID_THEME0
+			&& id < CCUSTOM_POPUP_ID_THEME0 + (UINT)CCC_UI_THEME_COUNT);
 }
 
 // 全 Add* の共通登録。添字類は -1、A-B は未設定 -1。
@@ -1787,6 +1812,48 @@ void CCustomPopupMenu::EnsureChromePrefix()
 			L"Reforcar caixas Soft translucidas/glow", L"Soft doorschijnende dozen/glow versterken",
 			L"Wzmocnij polprzezroczyste Soft boxy/glow", L"Soft yari saydam kutu/glow guclendir"));
 
+	{
+		int theme = savedata.popupMenuTheme;
+		if (theme < 0 || theme >= CCC_UI_THEME_COUNT) theme = 0;
+		CCustomPopupMenu* themeSub = AddSubMenu(
+			LL14(L"テーマ", L"Theme", L"Theme", L"Tema", L"Tema",
+				L"테마", L"主题", L"سمة", L"Тема", L"Thema",
+				L"Tema", L"Thema", L"Motyw", L"Tema"),
+			LL14(L"メニューの色とリボン／アクセントの見た目。全カスタムメニュー共通",
+				L"Menu colors and ribbon/accent look. Shared by every custom menu",
+				L"Couleurs et ruban du menu. Commun a tous les menus",
+				L"Colori e nastro del menu. Comune a tutti i menu",
+				L"Colores y cinta del menu. Comun a todos",
+				L"메뉴 색과 리본/액센트. 모든 커스텀 메뉴 공통",
+				L"菜单颜色与丝带/强调。全部自定义菜单共用",
+				L"ألوان القائمة والشريط. مشتركة لكل القوائم",
+				L"Цвета и лента меню. Общие для всех меню",
+				L"Menüfarben und Band. Für alle Menüs",
+				L"Cores e fita do menu. Comum a todos",
+				L"Menukleuren en lint. Voor alle menu's",
+				L"Kolory i wstazka menu. Wspolne",
+				L"Menu renkleri ve kurdele. Tum menuler"));
+		if (themeSub) {
+			LPCTSTR themeTip = LL14(
+				L"この見た目に切り替えます（全カスタムメニュー共通・保存されます）",
+				L"Switch to this look (all custom menus; saved)",
+				L"Passer a cet aspect (tous les menus; enregistre)",
+				L"Passa a questo aspetto (tutti i menu; salvato)",
+				L"Cambiar a este aspecto (todos; guardado)",
+				L"이 모양으로 전환 (모든 커스텀 메뉴, 저장)",
+				L"切换到此外观（全部自定义菜单，会保存）",
+				L"التبديل إلى هذا المظهر (كل القوائم، يُحفظ)",
+				L"Переключить вид (все меню, сохраняется)",
+				L"Auf dieses Aussehen (alle Menüs, gespeichert)",
+				L"Mudar para este visual (todos; salvo)",
+				L"Naar deze look (alle menu's; opgeslagen)",
+				L"Przelacz na ten wyglad (wszystkie; zapis)",
+				L"Bu gorunume gec (tum menuler; kaydedilir)");
+			for (int ti = 0; ti < CCC_UI_THEME_COUNT; ++ti)
+				themeSub->AddCheck(CCUSTOM_POPUP_ID_THEME0 + (UINT)ti, CCC_UiThemeName(ti), theme == ti ? TRUE : FALSE, themeTip);
+		}
+	}
+
 	CCustomPopupMenu* kpiSub = AddSubMenu(
 		LL14(L"プラグイン", L"Plugins", L"Plugins", L"Plugin", L"Plugins",
 			L"플러그인", L"插件", L"الإضافات", L"Плагины", L"Plugins",
@@ -1952,7 +2019,8 @@ void CCustomPopupMenu::EnsureChromePrefix()
 					L"Zapisuje i od kolejnego otwarcia", L"Kaydedilir, sonraki actmadan itibaren"));
 		}
 	}
-	AddSeparator();
+	if (savedN > 0)
+		AddSeparator();
 
 	for (int i = 0; i < savedN && m_itemCount < CCUSTOM_POPUP_MAX_ITEMS; ++i)
 		m_items[m_itemCount++] = savedItems[i];
@@ -2688,6 +2756,15 @@ BOOL CCustomPopupMenu::CreatePopupAt(CPoint screenPt, CCustomPopupMenu* parentMe
 			continue;
 		m_items[i].checked =
 			((int)(m_items[i].id - CCUSTOM_POPUP_ID_ANIM0) == savedata.popupMenuAnim) ? TRUE : FALSE;
+	}
+	if (savedata.popupMenuTheme < 0 || savedata.popupMenuTheme >= CCC_UI_THEME_COUNT)
+		savedata.popupMenuTheme = 0;
+	for (int i = 0; i < m_itemCount; ++i) {
+		if (m_items[i].id < CCUSTOM_POPUP_ID_THEME0
+			|| m_items[i].id >= CCUSTOM_POPUP_ID_THEME0 + (UINT)CCC_UI_THEME_COUNT)
+			continue;
+		m_items[i].checked =
+			((int)(m_items[i].id - CCUSTOM_POPUP_ID_THEME0) == savedata.popupMenuTheme) ? TRUE : FALSE;
 	}
 
 	// クリック位置に最も近い行を起点に（上下へ広がる）
@@ -3782,7 +3859,7 @@ void CCustomPopupMenu::PaintToDC(CDC& dc)
 			ar.left = vr.right - padR - arrowW;
 			ar.right = vr.right - padR;
 			DrawPopupItemText(dc, hot ? L"▹" : L"▸", ar, DT_CENTER | DT_VCENTER | DT_SINGLELINE,
-				faded(hot ? RGB(130, 70, 160) : PopupText(it.enabled)), it.enabled, fade);
+				faded(hot ? CCC_UiTheme().ribbonEdge : PopupText(it.enabled)), it.enabled, fade);
 		}
 
 		if (rowFont) {
@@ -3883,7 +3960,7 @@ void CCustomPopupMenu::PaintToDC(CDC& dc)
 			DrawJkBackdrop(dc, rc, m_animTick, (animStyle == POPUP_ANIM_EXPAND) ? doorT : -1.f);
 			DrawTornRibbon(dc, rc, m_animTick);
 			if (animStyle == POPUP_ANIM_EXPAND && !m_asSubmenu) {
-				const COLORREF tip = CCC_IsInwoman() ? RGB(255, 190, 220) : RGB(210, 200, 255);
+				const COLORREF tip = (CCC_UiThemeId() == 0 && CCC_IsInwoman()) ? RGB(255, 190, 220) : CCC_UiTheme().ribbon1;
 				dc.FillSolidRect(hull.left + CCUSTOM_POPUP_RIBBON_W + 2, hull.top, hull.Width() - CCUSTOM_POPUP_RIBBON_W - 4, 1,
 					BlendRGB(PopupBg(), tip, 140));
 				dc.FillSolidRect(hull.left + CCUSTOM_POPUP_RIBBON_W + 2, hull.bottom - 1, hull.Width() - CCUSTOM_POPUP_RIBBON_W - 4, 1,
@@ -3923,7 +4000,7 @@ void CCustomPopupMenu::PaintToDC(CDC& dc)
 				dc.FillSolidRect(rc.left + CCUSTOM_POPUP_RIBBON_W + 6 + ox0, m_stickyH - 2 + oy0,
 					rc.Width() - CCUSTOM_POPUP_RIBBON_W - 14, 1, RGB(255, 255, 255));
 				dc.FillSolidRect(rc.left + CCUSTOM_POPUP_RIBBON_W + 6 + ox0, m_stickyH - 1 + oy0,
-					rc.Width() - CCUSTOM_POPUP_RIBBON_W - 14, 1, RGB(240, 170, 200));
+					rc.Width() - CCUSTOM_POPUP_RIBBON_W - 14, 1, CCC_UiTheme().accent2);
 			}
 		}
 		if (hasHull) {
@@ -3944,7 +4021,7 @@ void CCustomPopupMenu::PaintToDC(CDC& dc)
 		for (int i = 0; i < m_stickyCount; ++i)
 			paintItem(i);
 		dc.FillSolidRect(rc.left + CCUSTOM_POPUP_RIBBON_W + 6, m_stickyH - 2, rc.Width() - CCUSTOM_POPUP_RIBBON_W - 14, 1, RGB(255, 255, 255));
-		dc.FillSolidRect(rc.left + CCUSTOM_POPUP_RIBBON_W + 6, m_stickyH - 1, rc.Width() - CCUSTOM_POPUP_RIBBON_W - 14, 1, RGB(240, 170, 200));
+		dc.FillSolidRect(rc.left + CCUSTOM_POPUP_RIBBON_W + 6, m_stickyH - 1, rc.Width() - CCUSTOM_POPUP_RIBBON_W - 14, 1, CCC_UiTheme().accent2);
 	}
 
 	{
@@ -4263,6 +4340,24 @@ BOOL CCustomPopupMenu::HandleChromeClick(int idx)
 				((int)(m_items[i].id - CCUSTOM_POPUP_ID_ANIM0) == savedata.popupMenuAnim) ? TRUE : FALSE;
 		}
 		CloseChain(0);
+		return TRUE;
+	}
+	if (it.id >= CCUSTOM_POPUP_ID_THEME0
+		&& it.id < CCUSTOM_POPUP_ID_THEME0 + (UINT)CCC_UI_THEME_COUNT) {
+		savedata.popupMenuTheme = (int)(it.id - CCUSTOM_POPUP_ID_THEME0);
+		if (savedata.popupMenuTheme < 0 || savedata.popupMenuTheme >= CCC_UI_THEME_COUNT)
+			savedata.popupMenuTheme = 0;
+		MpPersistSavedataQuick();
+		for (int i = 0; i < m_itemCount; ++i) {
+			if (m_items[i].id < CCUSTOM_POPUP_ID_THEME0
+				|| m_items[i].id >= CCUSTOM_POPUP_ID_THEME0 + (UINT)CCC_UI_THEME_COUNT)
+				continue;
+			m_items[i].checked =
+				((int)(m_items[i].id - CCUSTOM_POPUP_ID_THEME0) == savedata.popupMenuTheme) ? TRUE : FALSE;
+		}
+		InvalidateBgOnly();
+		CloseChain(0);
+		CCC_RefreshThemedUi();
 		return TRUE;
 	}
 	return FALSE;

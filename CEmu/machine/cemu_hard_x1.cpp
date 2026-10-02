@@ -1,4 +1,4 @@
-#include "StdAfx.h"
+﻿#include "StdAfx.h"
 #include "cemu_hard_x1.h"
 #include "../chip/cemu_chip_opm.h"
 #include "../chip/cemu_chip_opna.h"

@@ -840,7 +840,7 @@ BOOL CRender::OnInitDialog()
 	m_m4a.SetCheck(savedata.m4a);
 	m_upscale.SetCheck(savedata.upscale_enable ? BST_CHECKED : BST_UNCHECKED);
 	SetDlgItemText(IDC_STATIC_R_SURROUND, LL14(L"サラウンド", L"Surround", L"Surround", L"Surround", L"Surround", L"서라운드", L"环绕声", L"محيطي", L"Объём", L"Surround", L"Surround", L"Surround", L"Surround", L"Surround"));
-	m_surround.SetMode(1);
+	m_surround.SetMode(2);
 	m_surround.SetRange(0, 100);
 	{
 		int sv = savedata.surround;
@@ -1177,9 +1177,9 @@ BOOL CRender::OnInitDialog()
 			CloseHandle(th);
 	}
 
-	m_ms.SetMode(1);	m_hyouji2.SetMode(1);
-	m_eqCode.SetMode(1);
-	w_wups.SetMode(1);
+	m_ms.SetMode(4);	m_hyouji2.SetMode(4);
+	m_eqCode.SetMode(4);
+	w_wups.SetMode(4);
 	m_evr.SetCheck(savedata.evr);
 	m_con.SetCheck(savedata.con);
 	m_a.SetCheck(savedata.aero);

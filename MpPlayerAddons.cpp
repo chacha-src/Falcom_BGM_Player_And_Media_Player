@@ -6641,9 +6641,9 @@ protected:
 			m_fx.SetRange(0, 200); m_fx.SetPos(fx);
 			m_spd.SetRange(0, 200); m_spd.SetPos(spd);
 			m_filter.SetRange(0, 200); m_filter.SetPos(filt);
-			m_eqLow.SetRange(0, 200); m_eqLow.SetPos(200 - low); m_eqLow.SetMode(1);
-			m_eqMid.SetRange(0, 200); m_eqMid.SetPos(200 - mid); m_eqMid.SetMode(1);
-			m_eqHigh.SetRange(0, 200); m_eqHigh.SetPos(200 - high); m_eqHigh.SetMode(1);
+			m_eqLow.SetRange(0, 200); m_eqLow.SetPos(200 - low); m_eqLow.SetMode(3);
+			m_eqMid.SetRange(0, 200); m_eqMid.SetPos(200 - mid); m_eqMid.SetMode(3);
+			m_eqHigh.SetRange(0, 200); m_eqHigh.SetPos(200 - high); m_eqHigh.SetMode(3);
 			int vol = 50;
 			if (mp && ::IsWindow(mp->GetSafeHwnd()) && mp->m_vol.GetSafeHwnd())
 				vol = mp->m_vol.GetPos();

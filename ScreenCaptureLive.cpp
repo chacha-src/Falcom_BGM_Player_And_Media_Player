@@ -1,4 +1,4 @@
-// ScreenCaptureLive.cpp
+﻿// ScreenCaptureLive.cpp
 // YouTube / Nico / Custom RTMP live UI + OAuth + Live Streaming API
 
 #include "stdafx.h"

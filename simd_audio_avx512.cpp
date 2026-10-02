@@ -1,4 +1,4 @@
-#include "simd_audio.h"
+﻿#include "simd_audio.h"
 #include <math.h>
 #include <float.h>
 

@@ -1,4 +1,4 @@
-// Game_Music_Emu https://bitbucket.org/mpyne/game-music-emu/
+﻿// Game_Music_Emu https://bitbucket.org/mpyne/game-music-emu/
 
 /*
 Last validated with zexall 2006.11.21 5:26 PM

@@ -716,7 +716,7 @@ void CPianoRollTuneDlg::StyleRows()
 		if (m_val[i].GetSafeHwnd())
 			PrTuneInitStatic(m_val[i], &m_fontRow, bAero);
 		if (m_slider[i].GetSafeHwnd()) {
-			m_slider[i].SetMode(1);
+			m_slider[i].SetMode(3);
 			m_slider[i].SetAeroMode(bAero);
 		}
 	}

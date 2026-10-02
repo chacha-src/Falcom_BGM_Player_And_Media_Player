@@ -983,6 +983,10 @@ struct save{
 	/* CRender のスクリーン座標。-1 は未設定（画面中央）。末尾追記。 */
 	int renderX;
 	int renderY;
+
+	// --- メニュー／アクセントの見た目テーマ(末尾追記。旧.datは0=可愛い) ---
+	// 0=可愛い 1=クール 2=中二 3=夜光 4=墨 5=森 6=キャンディ 7=鋼
+	int popupMenuTheme;
 };
 extern save savedata;
 

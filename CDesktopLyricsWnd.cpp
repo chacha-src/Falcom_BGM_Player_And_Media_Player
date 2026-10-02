@@ -181,7 +181,7 @@ BOOL CDesktopLyricsWnd::OnInitDialog()
 
 	m_alpha.SetRange(40, 255, TRUE);
 	m_alpha.SetTicFreq(16);
-	m_alpha.SetMode(1);
+	m_alpha.SetMode(4);
 	m_alpha.SetAeroMode(FALSE);
 	m_alphaL.SetAeroMode(FALSE);
 	m_close.SetAeroMode(FALSE);

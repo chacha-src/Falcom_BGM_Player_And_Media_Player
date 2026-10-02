@@ -99,7 +99,9 @@ enum {
 	CCUSTOM_POPUP_ID_MID_KPI = 0x00E0012D,    // KPI 優先（midPlayPrefer=0）
 	CCUSTOM_POPUP_ID_MID_VST = 0x00E0012E,    // CRender GS/XG VST 優先（midPlayPrefer=1）
 	CCUSTOM_POPUP_ID_MID_HOST = 0x00E00130,   // VSTホストプリセット優先（midPlayPrefer=2）
-	CCUSTOM_POPUP_ID_CEMU_LIST = 0x00E0012F   // Cemu対応一覧（arcdata.zip があるときのみ）
+	CCUSTOM_POPUP_ID_CEMU_LIST = 0x00E0012F,  // Cemu対応一覧（arcdata.zip があるときのみ）
+	// 見た目テーマ。HandleChromeClick が savedata.popupMenuTheme を書く。
+	CCUSTOM_POPUP_ID_THEME0 = 0x00E00140
 };
 
 enum {
