@@ -2507,92 +2507,92 @@ const CCC_UiThemePal& CCC_UiTheme()
         { RGB(255,232,244), RGB(232,214,255), RGB(158,140,228), RGB(208,198,255), RGB(130,70,120),
           RGB(255,86,150), RGB(240,170,200), RGB(216,132,176),
           RGB(255,248,252), RGB(220,160,190), RGB(230,200,215),
-          RGB(52,34,58), RGB(170,158,170), RGB(228,234,255), RGB(186,204,248),
+          RGB(52,34,58), RGB(108,88,108), RGB(228,234,255), RGB(186,204,248),
           RGB(255,250,253), RGB(176,118,152), 0 },
         { RGB(226,229,234), RGB(198,204,214), RGB(36,48,72), RGB(168,176,190), RGB(24,28,36),
           RGB(32,44,78), RGB(108,116,132), RGB(140,148,162),
           RGB(246,247,249), RGB(150,156,168), RGB(196,200,208),
-          RGB(22,26,34), RGB(120,126,138), RGB(220,224,232), RGB(168,174,186),
+          RGB(22,26,34), RGB(78,82,94), RGB(220,224,232), RGB(168,174,186),
           RGB(252,252,253), RGB(70,76,88), 1 },
         { RGB(28,18,36), RGB(48,22,40), RGB(140,24,48), RGB(212,170,64), RGB(80,10,20),
           RGB(196,32,56), RGB(212,170,64), RGB(160,48,64),
           RGB(42,28,48), RGB(120,40,56), RGB(60,36,52),
-          RGB(245,230,210), RGB(170,150,150), RGB(80,28,44), RGB(120,36,52),
+          RGB(245,230,210), RGB(196,176,166), RGB(80,28,44), RGB(120,36,52),
           RGB(90,50,60), RGB(20,8,12), 2 },
         { RGB(12,18,40), RGB(20,36,72), RGB(40,200,220), RGB(120,90,255), RGB(10,40,70),
           RGB(80,230,255), RGB(160,120,255), RGB(70,160,200),
           RGB(18,28,52), RGB(50,90,120), RGB(30,50,80),
-          RGB(220,245,255), RGB(140,160,180), RGB(20,60,90), RGB(30,40,100),
+          RGB(186,236,214), RGB(150,196,186), RGB(20,60,90), RGB(30,40,100),
           RGB(80,140,170), RGB(8,16,36), 3 },
         { RGB(245,240,228), RGB(232,224,206), RGB(160,36,36), RGB(40,36,32), RGB(80,20,20),
           RGB(176,32,32), RGB(40,36,32), RGB(120,90,70),
           RGB(250,246,236), RGB(160,130,100), RGB(210,196,170),
-          RGB(32,28,24), RGB(140,130,118), RGB(255,236,220), RGB(230,180,160),
+          RGB(32,28,24), RGB(96,84,72), RGB(255,236,220), RGB(230,180,160),
           RGB(255,250,242), RGB(90,60,48), 3 },
         { RGB(236,246,232), RGB(210,230,206), RGB(56,120,72), RGB(168,196,120), RGB(30,70,40),
           RGB(46,130,70), RGB(140,180,90), RGB(90,140,80),
           RGB(246,252,244), RGB(140,170,130), RGB(200,220,190),
-          RGB(28,48,32), RGB(130,150,130), RGB(220,240,210), RGB(160,200,150),
+          RGB(28,48,32), RGB(64,96,68), RGB(220,240,210), RGB(160,200,150),
           RGB(248,255,246), RGB(70,110,70), 4 },
         { RGB(255,248,230), RGB(255,230,246), RGB(255,140,180), RGB(255,210,80), RGB(180,80,110),
           RGB(255,120,160), RGB(255,196,64), RGB(240,160,190),
           RGB(255,252,246), RGB(230,170,190), RGB(255,220,200),
-          RGB(72,40,56), RGB(170,140,150), RGB(255,236,210), RGB(255,190,210),
+          RGB(72,40,56), RGB(112,72,88), RGB(255,236,210), RGB(255,190,210),
           RGB(255,252,248), RGB(200,120,140), 1 },
         { RGB(228,230,234), RGB(200,204,210), RGB(90,96,104), RGB(210,150,48), RGB(40,44,50),
           RGB(196,120,32), RGB(160,168,176), RGB(120,126,134),
           RGB(244,246,248), RGB(150,156,164), RGB(190,194,200),
-          RGB(32,34,38), RGB(140,144,150), RGB(236,238,242), RGB(190,196,204),
+          RGB(32,34,38), RGB(78,82,90), RGB(236,238,242), RGB(190,196,204),
           RGB(255,255,255), RGB(80,84,90), 5 },
         { RGB(255,214,232), RGB(255,236,168), RGB(255,80,150), RGB(255,210,70), RGB(120,20,60),
           RGB(255,45,140), RGB(255,196,40), RGB(255,120,170),
           RGB(255,248,252), RGB(230,80,140), RGB(255,200,220),
-          RGB(40,16,28), RGB(170,90,120), RGB(255,228,120), RGB(255,160,200),
+          RGB(40,16,28), RGB(112,48,76), RGB(255,228,120), RGB(255,160,200),
           RGB(255,252,248), RGB(160,40,90), 8 },
         { RGB(18,18,20), RGB(32,34,38), RGB(48,50,56), RGB(180,182,188), RGB(8,8,10),
           RGB(230,230,234), RGB(88,92,104), RGB(70,72,78),
           RGB(28,28,32), RGB(64,66,72), RGB(42,44,50),
-          RGB(236,236,238), RGB(150,152,158), RGB(64,70,92), RGB(36,38,44),
+          RGB(214,216,224), RGB(168,172,182), RGB(48,52,68), RGB(28,30,36),
           RGB(70,72,78), RGB(10,10,12), 9 },
         { RGB(255,236,242), RGB(220,242,214), RGB(255,170,190), RGB(150,200,140), RGB(180,80,110),
           RGB(240,120,160), RGB(120,180,90), RGB(220,160,180),
           RGB(255,250,248), RGB(210,160,180), RGB(230,210,200),
-          RGB(60,40,48), RGB(160,130,140), RGB(255,220,228), RGB(200,230,190),
+          RGB(60,40,48), RGB(104,76,90), RGB(255,220,228), RGB(200,230,190),
           RGB(255,252,250), RGB(170,110,130), 10 },
         { RGB(210,236,255), RGB(255,236,170), RGB(40,150,220), RGB(255,196,40), RGB(20,80,140),
           RGB(255,176,20), RGB(40,160,230), RGB(120,190,230),
           RGB(248,252,255), RGB(120,180,220), RGB(190,220,240),
-          RGB(20,50,80), RGB(120,150,170), RGB(255,230,140), RGB(160,210,245),
+          RGB(20,50,80), RGB(36,84,112), RGB(255,230,140), RGB(160,210,245),
           RGB(255,255,250), RGB(40,110,160), 11 },
         { RGB(248,228,200), RGB(230,200,150), RGB(180,70,30), RGB(200,140,40), RGB(100,40,16),
           RGB(196,64,28), RGB(210,150,40), RGB(180,120,70),
           RGB(255,248,236), RGB(190,140,90), RGB(220,180,130),
-          RGB(60,32,16), RGB(150,120,90), RGB(255,210,160), RGB(220,150,90),
+          RGB(60,32,16), RGB(104,68,40), RGB(255,210,160), RGB(220,150,90),
           RGB(255,246,232), RGB(120,70,36), 12 },
         { RGB(236,244,250), RGB(210,226,238), RGB(140,180,210), RGB(230,240,248), RGB(80,110,140),
           RGB(90,150,200), RGB(180,210,230), RGB(160,190,210),
           RGB(250,252,255), RGB(170,196,214), RGB(210,224,234),
-          RGB(28,44,64), RGB(140,160,176), RGB(220,236,248), RGB(170,200,220),
+          RGB(28,44,64), RGB(64,96,116), RGB(220,236,248), RGB(170,200,220),
           RGB(255,255,255), RGB(100,130,156), 13 },
         { RGB(255,214,170), RGB(214,150,170), RGB(220,90,50), RGB(140,60,100), RGB(80,30,40),
           RGB(230,100,40), RGB(160,60,100), RGB(200,120,80),
           RGB(255,236,214), RGB(180,100,80), RGB(230,170,130),
-          RGB(48,24,36), RGB(150,110,100), RGB(255,180,120), RGB(200,100,90),
+          RGB(36,16,26), RGB(96,64,58), RGB(255,180,120), RGB(214,130,110),
           RGB(255,240,220), RGB(100,50,50), 14 },
         { RGB(255,228,210), RGB(255,210,230), RGB(255,160,120), RGB(255,220,160), RGB(180,90,80),
           RGB(255,140,90), RGB(255,200,120), RGB(230,160,150),
           RGB(255,248,242), RGB(220,160,140), RGB(240,200,180),
-          RGB(70,40,36), RGB(170,130,120), RGB(255,220,190), RGB(255,180,160),
+          RGB(70,40,36), RGB(112,76,68), RGB(255,220,190), RGB(255,180,160),
           RGB(255,250,246), RGB(160,90,80), 15 },
         { RGB(210,216,224), RGB(180,190,204), RGB(70,90,120), RGB(140,160,180), RGB(40,50,70),
           RGB(60,100,150), RGB(120,150,180), RGB(130,145,165),
           RGB(240,242,246), RGB(140,155,175), RGB(190,198,210),
-          RGB(28,36,48), RGB(120,130,145), RGB(200,214,230), RGB(150,170,190),
+          RGB(28,36,48), RGB(68,78,94), RGB(200,214,230), RGB(150,170,190),
           RGB(248,249,252), RGB(70,84,104), 16 },
         { RGB(200,230,228), RGB(150,200,206), RGB(20,120,140), RGB(230,250,248), RGB(10,70,80),
           RGB(16,140,160), RGB(240,250,248), RGB(80,160,170),
           RGB(244,252,252), RGB(100,170,175), RGB(180,220,218),
-          RGB(16,48,52), RGB(110,150,150), RGB(180,230,226), RGB(120,190,196),
+          RGB(16,48,52), RGB(36,96,100), RGB(180,230,226), RGB(120,190,196),
           RGB(250,255,255), RGB(30,100,110), 17 },
     };
     return k[CCC_UiThemeId()];
@@ -2873,12 +2873,12 @@ static void DrawFitControlText(CDC* pDC, CRect rc, const CString& str, UINT fmt,
 }
 
 // ボタン中央テキスト。無効は灰、押下は 1px ずらしてフィット縮小（下限 0.50）。
-static void DrawSmartText(CDC* pDC, CRect rect, CString str, BOOL bDis, BOOL bPushed)
+static void DrawSmartText(CDC* pDC, CRect rect, CString str, BOOL bDis, BOOL bPushed, COLORREF bg)
 {
     if (str.IsEmpty()) return;
 
     pDC->SetBkMode(TRANSPARENT);
-    pDC->SetTextColor(bDis ? RGB(128, 128, 128) : COLOR_EDIT_TEXT);
+    pDC->SetTextColor(CCC_ButtonInk(bg, bDis));
 
     CRect rt = rect;
     rt.DeflateRect(1, 1);
@@ -3304,12 +3304,12 @@ static void DrawListSubitemCellText(CDC* pDC, const CString& str, const CRect& r
 }
 
 // DrawSmartText の fmt 指定版（左寄せチェック等）。フィット下限 0.50。
-static void DrawSmartText2(CDC* pDC, CRect rect, CString str, UINT fmt, BOOL bDis, BOOL bPushed)
+static void DrawSmartText2(CDC* pDC, CRect rect, CString str, UINT fmt, BOOL bDis, BOOL bPushed, COLORREF bg)
 {
     if (str.IsEmpty()) return;
 
     pDC->SetBkMode(TRANSPARENT);
-    pDC->SetTextColor(bDis ? RGB(128, 128, 128) : COLOR_EDIT_TEXT);
+    pDC->SetTextColor(CCC_ButtonInk(bg, bDis));
 
     CRect rl = rect;
     rl.DeflateRect(2, 0);
@@ -13175,13 +13175,15 @@ void CCustomStandardButton::PaintClient(CDC& dc, const CRect& r)
     }
 
     if (!s.IsEmpty() && !hDraw)
-        DrawSmartText(&mDC, r, s, bD, bP);
+        DrawSmartText(&mDC, r, s, bD, bP,
+            bP ? COLOR_BUTTON_PUSHED : (m_bMouseOver ? COLOR_BUTTON_HOVER : COLOR_BUTTON_BG));
     else if (drawLabel)
     {
         CRect tr = r;
         tr.left = iconRight + 3;
         tr.DeflateRect(2, 1);
-        DrawSmartText2(&mDC, tr, s, DT_LEFT | DT_VCENTER | DT_NOPREFIX, bD, bP);
+        DrawSmartText2(&mDC, tr, s, DT_LEFT | DT_VCENTER | DT_NOPREFIX, bD, bP,
+            bP ? COLOR_BUTTON_PUSHED : (m_bMouseOver ? COLOR_BUTTON_HOVER : COLOR_BUTTON_BG));
     }
     mDC.SelectObject(pOF);
 
@@ -13753,7 +13755,7 @@ void CCustomCheckBox::OnDrawLayer(CDC* pDC, CRect rect)
             if (bD) FillRectAlpha(&dc, CRect(0, 0, rw, rh), RGB(232, 232, 232), 122);
             dc.Draw3dRect(CRect(0, 0, rw, rh), s ? RGB(100, 100, 100) : RGB(255, 255, 255), s ? RGB(255, 255, 255) : RGB(100, 100, 100));
             CString t; GetWindowText(t);
-            DrawSmartText(&dc, CRect(0, 0, rw, rh), t, bD, s);
+            DrawSmartText(&dc, CRect(0, 0, rw, rh), t, bD, s, bg);
         }
         else
         {
@@ -13807,7 +13809,7 @@ void CCustomCheckBox::OnDrawLayer(CDC* pDC, CRect rect)
                     CCC_DrawTextBlackEdge(dc, t, rt, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX, fill);
                 }
                 else {
-                    DrawSmartText2(&dc, rt, t, DT_LEFT | DT_VCENTER | DT_NOPREFIX, bD, FALSE);
+                    DrawSmartText2(&dc, rt, t, DT_LEFT | DT_VCENTER | DT_NOPREFIX, bD, FALSE, COLOR_DIALOG_BG);
                 }
             }
             if (bC)
@@ -13923,7 +13925,7 @@ void CCustomRadioButton::OnDrawLayer(CDC* pDC, CRect rect)
             if (bD) FillRectAlpha(&dc, CRect(0, 0, rw, rh), RGB(232, 232, 232), 122);
             dc.Draw3dRect(CRect(0, 0, rw, rh), s ? RGB(100, 100, 100) : RGB(255, 255, 255), s ? RGB(255, 255, 255) : RGB(100, 100, 100));
             CString t; GetWindowText(t);
-            DrawSmartText(&dc, CRect(0, 0, rw, rh), t, bD, s);
+            DrawSmartText(&dc, CRect(0, 0, rw, rh), t, bD, s, bg);
         }
         else
         {
@@ -13964,7 +13966,7 @@ void CCustomRadioButton::OnDrawLayer(CDC* pDC, CRect rect)
             if (!t.IsEmpty())
             {
                 CRect rt(rcB.right + 8, 0, rw, rh);
-                DrawSmartText2(&dc, rt, t, DT_LEFT | DT_VCENTER | DT_NOPREFIX, bD, FALSE);
+                DrawSmartText2(&dc, rt, t, DT_LEFT | DT_VCENTER | DT_NOPREFIX, bD, FALSE, COLOR_DIALOG_BG);
             }
             if (bC)
             {

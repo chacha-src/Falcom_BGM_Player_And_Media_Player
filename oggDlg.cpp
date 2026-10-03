@@ -28514,8 +28514,15 @@ int aaaa = 0, aaaa1 = 0;
 
 void timerog(UINT nIDEvent);
 void timerog1(UINT nIDEvent);
+static void OggPresentStartupSubUi();
 void timerog1(UINT nIDEvent)
 {
+	if (nIDEvent == 59878) {
+		og->KillTimer(59878);
+		OggPresentStartupSubUi();
+		return;
+	}
+
 	if (nIDEvent == 59877) {
 		og->KillTimer(59877);
 		if (!og) return;
@@ -34109,6 +34116,29 @@ LRESULT COggDlg::OnEnterMpModeMsg(WPARAM, LPARAM)
 	return 0;
 }
 
+/* 起動の Show 中に WM_PAINT が走ると、窓が未確定のまま更新領域だけ消える。
+   その後はクリックまで真っ白。表示後にここから描き切る。 */
+static void OggPresentStartupSubUi()
+{
+	if (!og || !::IsWindow(og->GetSafeHwnd()))
+		return;
+	CWnd* ws[] = {
+		og->m_EqualizerDlg,
+		og->m_PianoRollDlg,
+		og->m_PianoRollTuneDlg,
+		og->m_AnalyzerDlg,
+		og->m_MidiMonitorDlg,
+		og->m_WrdViewDlg
+	};
+	for (int i = 0; i < 6; ++i) {
+		HWND h = (ws[i] ? ws[i]->GetSafeHwnd() : NULL);
+		if (!h || !::IsWindow(h) || !::IsWindowVisible(h) || ::IsIconic(h))
+			continue;
+		::RedrawWindow(h, NULL, NULL,
+			RDW_INVALIDATE | RDW_ALLCHILDREN | RDW_FRAME | RDW_UPDATENOW | RDW_NOERASE);
+	}
+}
+
 LRESULT COggDlg::OnToggleSubUiMsg(WPARAM wParam, LPARAM)
 {
 	// MP ボタン / 起動復元から PostMessage 経由。Create/Destroy をネストさせない。
@@ -34123,7 +34153,8 @@ LRESULT COggDlg::OnToggleSubUiMsg(WPARAM wParam, LPARAM)
 	else if (wParam == 5)
 		ToggleWrdView();
 	else if (wParam == 20) {
-		/* 生成済みのトグル画面を一気に出す。UpdateWindow はしない（1枚ずつ描き終わる）。 */
+		/* 生成済みのトグル画面を一気に出す。ここでの UpdateWindow は
+		   OnInitDialog 中で空の WM_PAINT を消化し、その後真っ白のままになる。 */
 		if (savedata.eqwindow == 1 && m_EqualizerDlg && ::IsWindow(m_EqualizerDlg->GetSafeHwnd()))
 			m_EqualizerDlg->ShowWindow(SW_SHOWNOACTIVATE);
 		if (savedata.pianorollwindow == 1 && m_PianoRollDlg && ::IsWindow(m_PianoRollDlg->GetSafeHwnd()))
@@ -34142,6 +34173,17 @@ LRESULT COggDlg::OnToggleSubUiMsg(WPARAM wParam, LPARAM)
 			m_MidiMonitorDlg->ShowWindow(SW_SHOWNOACTIVATE);
 		if (savedata.wrdwindow == 1 && m_WrdViewDlg && ::IsWindow(m_WrdViewDlg->GetSafeHwnd()))
 			m_WrdViewDlg->ShowWindow(SW_SHOWNOACTIVATE);
+		{
+			extern CMediaPlayerDlg* mp;
+			if (mp && ::IsWindow(mp->GetSafeHwnd()))
+				mp->SyncPushToggleButtons();
+		}
+		/* 起動処理が抜けてから描く。Post が初期化中に消化されても 250ms でもう一度。 */
+		PostMessage(WM_OGG_TOGGLE_SUBUI, 21, 0);
+		SetTimer(59878, 250, NULL);
+	}
+	else if (wParam == 21) {
+		OggPresentStartupSubUi();
 		{
 			extern CMediaPlayerDlg* mp;
 			if (mp && ::IsWindow(mp->GetSafeHwnd()))

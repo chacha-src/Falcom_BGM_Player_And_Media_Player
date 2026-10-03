@@ -269,6 +269,27 @@ inline COLORREF CCC_ClrButtonPushed() { return CCC_UiTheme().hotBot; }
 inline COLORREF CCC_ClrAccent() { return CCC_UiTheme().accent; }
 inline COLORREF CCC_ClrAccent2() { return CCC_UiTheme().accent2; }
 inline COLORREF CCC_ClrSep() { return CCC_UiTheme().sep; }
+/* 明るい地に白文字を載せない。暗い地だけ明色。 */
+inline int CCC_Luma(COLORREF c)
+{
+    return (GetRValue(c) * 30 + GetGValue(c) * 59 + GetBValue(c) * 11) / 100;
+}
+inline COLORREF CCC_InkOn(COLORREF bg)
+{
+    if (CCC_Luma(bg) >= 148)
+        return RGB(32, 26, 36);
+    return RGB(248, 244, 236);
+}
+inline COLORREF CCC_ButtonInk(COLORREF bg, BOOL disabled)
+{
+    const COLORREF ink = CCC_InkOn(bg);
+    if (!disabled)
+        return ink;
+    return RGB(
+        (GetRValue(ink) * 2 + GetRValue(bg)) / 3,
+        (GetGValue(ink) * 2 + GetGValue(bg)) / 3,
+        (GetBValue(ink) * 2 + GetBValue(bg)) / 3);
+}
 
 #undef COLOR_DIALOG_BG
 #undef COLOR_EDIT_BG

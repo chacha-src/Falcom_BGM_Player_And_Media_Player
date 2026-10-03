@@ -494,6 +494,16 @@ namespace {
 		const CCC_UiThemePal& th = CCC_UiTheme();
 		return enabled ? th.text : th.textDim;
 	}
+	/* テーマ文字が地と近いときは地側のインクに替える。白がボタンに溶けない。 */
+	static COLORREF PopupInk(COLORREF bg, BOOL enabled)
+	{
+		const COLORREF ink = PopupText(enabled);
+		const int d = CCC_Luma(ink) - CCC_Luma(bg);
+		if (d < 0) {
+			if (-d >= 70) return ink;
+		} else if (d >= 70) return ink;
+		return CCC_InkOn(bg);
+	}
 	static COLORREF PopupBorderLite()
 	{
 		if (CCC_UiThemeId() == 0 && CCC_IsInwoman()) return RGB(255, 250, 253);
@@ -764,11 +774,9 @@ static COLORREF BlendRGB(COLORREF a, COLORREF b, int t)
 	{
 		if (!text || !text[0]) return;
 		if (enabled) {
-			CRect d = tr; d.OffsetRect(1, 1);
-			dc.SetTextColor(RGB(210, 170, 190));
-			dc.DrawText(text, -1, &d, dt);
-			CRect w = tr; w.OffsetRect(-1, -1);
-			dc.SetTextColor(RGB(255, 255, 255));
+			const COLORREF edge = (CCC_Luma(main) >= 160) ? RGB(20, 14, 24) : RGB(255, 250, 252);
+			CRect w = tr; w.OffsetRect(CCC_Luma(main) >= 160 ? 1 : -1, 1);
+			dc.SetTextColor(edge);
 			dc.DrawText(text, -1, &w, dt);
 		}
 		dc.SetTextColor(main);
@@ -814,7 +822,7 @@ static COLORREF BlendRGB(COLORREF a, COLORREF b, int t)
 			FillVGrad(dc, box, face, faded(th.bg1));
 			dc.Draw3dRect(&box, RGB(255, 255, 255), edge);
 			DrawPopupItemText(dc, it.text, box, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS,
-				faded(PopupText(TRUE)), TRUE, fade);
+				faded(PopupInk(face, TRUE)), TRUE, fade);
 			return;
 		}
 		if (it.kind == CCUSTOM_POPUP_EDIT || it.kind == CCUSTOM_POPUP_COMBO || it.kind == CCUSTOM_POPUP_LIST) {
@@ -825,7 +833,7 @@ static COLORREF BlendRGB(COLORREF a, COLORREF b, int t)
 				ar.left = max(box.left + PopupSx(dpi, 4), box.right - PopupSx(dpi, 18));
 				dc.FillSolidRect(&ar, faded(CCC_UiTheme().face));
 				DrawPopupItemText(dc, L"▾", ar, DT_CENTER | DT_VCENTER | DT_SINGLELINE,
-					faded(PopupText(TRUE)), TRUE, fade);
+					faded(PopupInk(face, TRUE)), TRUE, fade);
 			}
 			return;
 		}
@@ -3827,7 +3835,7 @@ void CCustomPopupMenu::PaintToDC(CDC& dc)
 				else
 					_snwprintf_s(line, _TRUNCATE, L"%s", it.text);
 				DrawPopupItemText(dc, line, lr, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS,
-					faded(PopupText(TRUE)), TRUE, fade);
+					faded(PopupInk(PopupBg(), TRUE)), TRUE, fade);
 			}
 			// 飛行／退場中は子HWNDを隠すので、チップ内にコントロール外形を描く
 			if (m_lineAnimPhase != 0)
@@ -3853,13 +3861,14 @@ void CCustomPopupMenu::PaintToDC(CDC& dc)
 		UINT dt = DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS;
 		if (it.kind == CCUSTOM_POPUP_SUB)
 			tr.right -= arrowW;
-		DrawPopupItemText(dc, it.text, tr, dt, faded(PopupText(it.enabled)), it.enabled, fade);
+		const COLORREF rowBg = hot ? PopupHotTop() : PopupBg();
+		DrawPopupItemText(dc, it.text, tr, dt, faded(PopupInk(rowBg, it.enabled)), it.enabled, fade);
 		if (it.kind == CCUSTOM_POPUP_SUB) {
 			CRect ar = vr;
 			ar.left = vr.right - padR - arrowW;
 			ar.right = vr.right - padR;
 			DrawPopupItemText(dc, hot ? L"▹" : L"▸", ar, DT_CENTER | DT_VCENTER | DT_SINGLELINE,
-				faded(hot ? CCC_UiTheme().ribbonEdge : PopupText(it.enabled)), it.enabled, fade);
+				faded(PopupInk(rowBg, it.enabled)), it.enabled, fade);
 		}
 
 		if (rowFont) {
