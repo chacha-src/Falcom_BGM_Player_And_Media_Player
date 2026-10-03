@@ -2773,6 +2773,15 @@ void CScHelpDlg::OnPaint()
 
 CScreenCaptureDlg* g_screenCaptureDlg = NULL;
 
+HWND ScLivePreviewHwnd()
+{
+	if (!g_screenCaptureDlg) return NULL;
+	HWND h = g_screenCaptureDlg->GetSafeHwnd();
+	if (!h || !::IsWindow(h) || !::IsWindowVisible(h) || ::IsIconic(h))
+		return NULL;
+	return h;
+}
+
 IMPLEMENT_DYNAMIC(CScreenCaptureDlg, CCustomBlurDialogBase)
 
 CScreenCaptureDlg::CScreenCaptureDlg(CWnd* pParent)

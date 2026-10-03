@@ -110,7 +110,10 @@ BOOL WINAPI KbSasamiDecoderModule::EnumConfig(IKpiConfigEnumerator* pEnumerator)
 		{ KPI_CFG_TYPE_INT, SEC_KBSASAMI, KEY_MIDIMODE, L"kbsasami.midimode",
 			L"0", NULL, NULL, NULL, NULL,
 			L"MIDI map for .mpy/.mpw2/.mid SMF (same as monitor mapForce).\r\n"
-			L"0=Auto(SysEx/CC32/title) 1=GS 2=XG 3=55map 4=88map 5=88Promap 6=8820map\r\n"
+			L"0=Auto. .mpy defaults to 88, .mpw2/.mpsmv to 88Pro.\r\n"
+			L"A file may hold 4 modes; Auto picks the best one present.\r\n"
+			L"If CRender GS VST is empty, Auto uses XG.\r\n"
+			L"1=GS 2=XG 3=55map 4=88map 5=88Promap 6=8820map\r\n"
 			L"7=GMmap 8=SDmap 9=LAmap 10..19=ETC maps. Per-file override in playlist." },
 		{ KPI_CFG_TYPE_INT, SEC_KBSASAMI, KEY_FMMODE, L"kbsasami.fmmode",
 			L"2", NULL, NULL, NULL, NULL,

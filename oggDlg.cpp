@@ -34,6 +34,7 @@ int flacmode = 0;
 #include "CFmMonitorDlg.h"
 #include "PcHwMidiIn.h"
 #include "CWrdViewDlg.h"
+#include "ScreenCaptureDlg.h"
 #include "MidiPack.h"
 #include "ComposerConvert.h"
 #include "CSasamiMidiScoreDlg.h"
@@ -5625,6 +5626,8 @@ DWORD COgg_GetGdiPaintPendingAgeMs()
    NULL 宛 Peek(WM_TIMER) は EQ/ピアノ/アナライザのタイマーを奪って末尾へ回し
    飢餓させるので使わない。chrome / viz は HWND 指定 Peek でのみ取り出す。 */
 static volatile LONG s_inChromePump = 0;
+/* バナー描画の途中でキャプチャ GDI を回すと、描画中の窓を PrintWindow する */
+static int s_oggSkipScPump = 0;
 
 static int OggIsChromeAnimHwnd(HWND h)
 {
@@ -5763,6 +5766,14 @@ static void OggDispatchVizWindows()
 			OggDispatchHwndRange(h,
 				OGG_WM_ANALYZER_SPEC_DONE, OGG_WM_ANALYZER_PRESENT, 8);
 		}
+	}
+	/* 画面キャプチャのプレビュー GDI。NULL 宛 Peek をやめたあと、
+	   この HWND の WM_TIMER だけキューに残って Prev が 0fps で止まる。
+	   取り込み中に再入すると PrintWindow が自分を待つので、その間は触らない。 */
+	if (!s_oggSkipScPump && !CCC_CaptureBusy()) {
+		HWND hSc = ScLivePreviewHwnd();
+		if (hSc)
+			OggDispatchHwndTimers(hSc, 2);
 	}
 }
 
@@ -26852,8 +26863,11 @@ void COggDlg::timerp()
 		img.AlphaBlend(dc.m_hDC, x_dest, y_dest, w_dest, h_dest, 0, 0, jx, jy, alpha);
 	}
 
-	if (!menuTrack)
+	if (!menuTrack) {
+		s_oggSkipScPump = 1;
 		OggDispatchChromeMessages();
+		s_oggSkipScPump = 0;
+	}
 
 	// スペアナは不透明で先に描く。バナー文字は後から XOR でバーの上を通す。
 	{

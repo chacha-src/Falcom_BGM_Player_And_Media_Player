@@ -2236,6 +2236,9 @@ BOOL COggApp::InitInstance()
 		savedata.renderX = -1;
 		savedata.renderY = -1;
 	}
+	if (datFileSize < (int)(offsetof(save, laMapperMt32) + sizeof(savedata.laMapperMt32))
+		|| (savedata.laMapperMt32 != 0 && savedata.laMapperMt32 != 1))
+		savedata.laMapperMt32 = 0;
 	if (savedata.midPlayPrefer < 0 || savedata.midPlayPrefer > 2)
 		savedata.midPlayPrefer = 0;
 	/* UI パス欄は廃止。常に exe\\data（なければ hoot）。

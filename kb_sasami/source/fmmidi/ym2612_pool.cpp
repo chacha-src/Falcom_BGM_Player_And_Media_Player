@@ -67,6 +67,8 @@ struct Slot {
     bool drum;
     bool want_off;
     bool bankExact;
+    bool isEcho;
+    int echoKind;
     int gen;
     int order;
     int chip;
@@ -101,11 +103,21 @@ public:
     void set_sostenute(int value);
     void set_freeze(int) {}
     void apply_tone(const tone_color& c);
+    bool echo_owns() const;
+    void tick_echo(int samples);
+    void drop_echo();
     struct Ym2612Pool::Impl* pool;
     int slot;
     int gen;
     int velocity;
     bool force_end;
+    int echoSlot;
+    int echoGen;
+    int echoAge;
+    int dryOffAge;
+    int echoDelaySamp;
+    int echoKeyed;
+    float echoGain;
 };
 
 } // namespace ympool
@@ -131,6 +143,8 @@ struct Ym2612Pool::Impl {
             slots[i].held = false;
             slots[i].drum = false;
             slots[i].want_off = false;
+            slots[i].isEcho = false;
+            slots[i].echoKind = 0;
             slots[i].gen = 1;
             slots[i].order = 0;
             slots[i].chip = i / kChPerChip;
@@ -306,6 +320,7 @@ struct Ym2612Pool::Impl {
         if (rr >= 13) sec = 0.12;
         else if (rr >= 8) sec = 0.35;
         else if (rr >= 4) sec = 0.7;
+        if (s.echoKind == 2 && sec < 1.5) sec = 1.5;
         s.rel_left = (int)(rate * sec);
         if (s.rel_left < 64) s.rel_left = 64;
     }
@@ -430,16 +445,39 @@ struct Ym2612Pool::Impl {
 
     int pick()
     {
-        int free_s = -1, rel_s = -1, on_s = -1;
-        int rel_ord = 0x7fffffff, on_ord = 0x7fffffff;
+        int free_s = -1, rel_s = -1, echo_s = -1, on_s = -1;
+        int rel_ord = 0x7fffffff, echo_ord = 0x7fffffff, on_ord = 0x7fffffff;
         for (int i = 0; i < kVoices; i++) {
             if (!slots[i].used) { free_s = i; break; }
-            if (!slots[i].held && slots[i].order < rel_ord) { rel_ord = slots[i].order; rel_s = i; }
-            if (slots[i].held && slots[i].order < on_ord) { on_ord = slots[i].order; on_s = i; }
+            if (slots[i].isEcho) {
+                if (slots[i].order < echo_ord) { echo_ord = slots[i].order; echo_s = i; }
+            } else if (!slots[i].held && slots[i].order < rel_ord) {
+                rel_ord = slots[i].order; rel_s = i;
+            } else if (slots[i].held && slots[i].order < on_ord) {
+                on_ord = slots[i].order; on_s = i;
+            }
         }
         if (free_s >= 0) return free_s;
         if (rel_s >= 0) return rel_s;
+        if (echo_s >= 0) return echo_s;
         return on_s >= 0 ? on_s : 0;
+    }
+
+    int pick_free()
+    {
+        for (int i = 0; i < kVoices; i++)
+            if (!slots[i].used) return i;
+        return -1;
+    }
+
+    void count_room(int& freeN, int& echoN)
+    {
+        freeN = 0;
+        echoN = 0;
+        for (int i = 0; i < kVoices; i++) {
+            if (!slots[i].used) freeN++;
+            else if (slots[i].isEcho) echoN++;
+        }
     }
 
     void render(size_t n)
@@ -516,6 +554,8 @@ struct Ym2612Pool::Impl {
         if (slots[slot].used) key(slots[slot].chip, slots[slot].ch, 0);
         slots[slot].used = false;
         slots[slot].held = false;
+        slots[slot].isEcho = false;
+        slots[slot].echoKind = 0;
         slots[slot].gen++;
     }
 };
@@ -523,13 +563,45 @@ struct Ym2612Pool::Impl {
 namespace ympool {
 
 YmNote::YmNote(Ym2612Pool::Impl* pool, int slot, int gen, int velocity)
-    : note(0, 8192), pool(pool), slot(slot), gen(gen), velocity(velocity), force_end(false)
+    : note(0, 8192), pool(pool), slot(slot), gen(gen), velocity(velocity), force_end(false),
+      echoSlot(-1), echoGen(0), echoAge(0), dryOffAge(-1), echoDelaySamp(0), echoKeyed(0), echoGain(0)
 {
     pool->live++;
 }
 
+bool YmNote::echo_owns() const
+{
+    return echoSlot >= 0 && pool->owns(echoSlot, echoGen) && pool->slots[echoSlot].isEcho;
+}
+
+void YmNote::drop_echo()
+{
+    if (echo_owns())
+        pool->drop(echoSlot);
+    echoSlot = -1;
+    echoKeyed = 0;
+}
+
+void YmNote::tick_echo(int samples)
+{
+    if (echoSlot < 0 || samples <= 0) return;
+    if (!echo_owns()) { echoSlot = -1; return; }
+    echoAge += samples;
+    Slot& e = pool->slots[echoSlot];
+    if (!echoKeyed && echoAge >= echoDelaySamp) {
+        pool->start_key(e);
+        e.held = true;
+        echoKeyed = 1;
+    }
+    if (echoKeyed == 1 && dryOffAge >= 0 && echoAge >= dryOffAge + echoDelaySamp) {
+        pool->release_key(e);
+        echoKeyed = 2;
+    }
+}
+
 YmNote::~YmNote()
 {
+    drop_echo();
     if (pool->owns(slot, gen))
         pool->drop(slot);
     pool->live--;
@@ -555,11 +627,35 @@ bool YmNote::synthesize(sample_t* buf, std::size_t samples, double rate, sample_
             if (s.rel_left <= 0) stay = false;
         }
     }
+    if (echo_owns() && echoKeyed) {
+        Slot& e = pool->slots[echoSlot];
+        double v = (velocity / 128.0) * (double)echoGain;
+        if (e.drum && pool->raira) v *= 1.85;
+        const float* pcm = e.pcmN > 0 ? e.pcm : 0;
+        size_t n = (size_t)e.pcmN;
+        if (n > samples) n = samples;
+        if (pcm) {
+            for (size_t i = 0; i < n; i++) {
+                buf[i * 2] += pcm[i * 2] * left * v / 16384.0;
+                buf[i * 2 + 1] += pcm[i * 2 + 1] * right * v / 16384.0;
+            }
+        }
+    }
+    tick_echo((int)samples);
+    if (echoKeyed == 2 && echo_owns()) {
+        Slot& e = pool->slots[echoSlot];
+        e.rel_left -= (int)samples;
+        if (e.rel_left <= 0)
+            drop_echo();
+    }
+    if (echoSlot >= 0) stay = true;
     return stay;
 }
 
 void YmNote::note_off(int)
 {
+    if (echoSlot >= 0 && dryOffAge < 0)
+        dryOffAge = echoAge;
     if (!pool->owns(slot, gen)) return;
     Slot& s = pool->slots[slot];
     s.want_off = true;
@@ -571,16 +667,23 @@ void YmNote::note_off(int)
 void YmNote::sound_off()
 {
     force_end = true;
+    drop_echo();
     if (pool->owns(slot, gen))
         pool->drop(slot);
 }
 
 void YmNote::set_frequency_multiplier(double value)
 {
-    if (!pool->owns(slot, gen)) return;
-    pool->slots[slot].mul = value;
     pool->init_chips();
-    pool->write_pitch(pool->slots[slot]);
+    if (pool->owns(slot, gen)) {
+        pool->slots[slot].mul = value;
+        pool->write_pitch(pool->slots[slot]);
+    }
+    if (echo_owns()) {
+        pool->slots[echoSlot].mul = value;
+        if (echoKeyed)
+            pool->write_pitch(pool->slots[echoSlot]);
+    }
 }
 
 void YmNote::set_vibrato(double depth, double freq)
@@ -608,8 +711,10 @@ void YmNote::set_damper(int value)
     if (!pool->owns(slot, gen)) return;
     Slot& s = pool->slots[slot];
     s.damper = value;
-    if (s.want_off && s.damper < 64 && s.sostenute < 64)
+    if (s.want_off && s.damper < 64 && s.sostenute < 64) {
+        if (dryOffAge < 0) dryOffAge = echoAge;
         pool->release_key(s);
+    }
 }
 
 void YmNote::set_sostenute(int value)
@@ -617,19 +722,36 @@ void YmNote::set_sostenute(int value)
     if (!pool->owns(slot, gen)) return;
     Slot& s = pool->slots[slot];
     s.sostenute = value;
-    if (s.want_off && s.damper < 64 && s.sostenute < 64)
+    if (s.want_off && s.damper < 64 && s.sostenute < 64) {
+        if (dryOffAge < 0) dryOffAge = echoAge;
         pool->release_key(s);
+    }
 }
 
 void YmNote::apply_tone(const tone_color& c)
 {
-    if (!pool->owns(slot, gen)) return;
-    Slot& s = pool->slots[slot];
-    s.inst = s.base;
-    tone_color col = c;
-    col.bankExact = s.bankExact ? 1 : 0;
-    pool->paint_wopn(s.inst, col, velocity, s.drum);
-    pool->write_inst(s);
+    const int wet = echo_owns() ? 1 : 0;
+    if (pool->owns(slot, gen)) {
+        Slot& s = pool->slots[slot];
+        s.inst = s.base;
+        tone_color col = c;
+        col.bankExact = s.bankExact ? 1 : 0;
+        if (wet) col.spatPass = 1;
+        pool->paint_wopn(s.inst, col, velocity, s.drum);
+        pool->write_inst(s);
+    }
+    if (wet) {
+        Slot& e = pool->slots[echoSlot];
+        double det = e.midi;
+        e.inst = e.base;
+        tone_color col = c;
+        col.bankExact = e.bankExact ? 1 : 0;
+        col.spatPass = 0;
+        pool->paint_wopn(e.inst, col, velocity, e.drum);
+        e.midi = det;
+        if (echoKeyed)
+            pool->write_inst(e);
+    }
 }
 
 } // namespace ympool
@@ -761,6 +883,8 @@ note* Ym2612Pool::note_on(int program, int key, int velocity, double freq_mul, c
     slot.held = true;
     slot.drum = drum;
     slot.want_off = false;
+    slot.isEcho = false;
+    slot.echoKind = 0;
     slot.bankExact = drum ? true : (exact != 0);
     slot.damper = 0;
     slot.sostenute = 0;
@@ -776,7 +900,17 @@ note* Ym2612Pool::note_on(int program, int key, int velocity, double freq_mul, c
     col.pc = pc;
     col.sysMode = mode;
     col.bankExact = drum ? 1 : exact;
-    impl->paint_wopn(slot.inst, col, velocity, drum);
+    echo_plan ep = plan_echo(col);
+    int es = -1;
+    if (ep.mode) {
+        int freeN = 0, echoN = 0;
+        impl->count_room(freeN, echoN);
+        if (freeN >= 11 && echoN < 16)
+            es = impl->pick_free();
+    }
+    tone_color dryCol = col;
+    if (es >= 0) dryCol.spatPass = 1;
+    impl->paint_wopn(slot.inst, dryCol, velocity, drum);
     slot.vib_delay_left = (int)(impl->rate * tone_vib_delay_sec(color.vibDelay));
     slot.mul = freq_mul > 0 ? freq_mul : 1;
     double midi = (double)key + (double)in->note_off;
@@ -786,5 +920,41 @@ note* Ym2612Pool::note_on(int program, int key, int velocity, double freq_mul, c
     if (midi > 127) midi = 127;
     slot.midi = midi;
     impl->start_key(slot);
-    return new ympool::YmNote(impl, s, slot.gen, velocity);
+    ympool::YmNote* nn = new ympool::YmNote(impl, s, slot.gen, velocity);
+    if (es >= 0) {
+        Slot& e = impl->slots[es];
+        e.used = true;
+        e.held = false;
+        e.drum = drum;
+        e.want_off = false;
+        e.isEcho = true;
+        e.echoKind = ep.mode;
+        e.bankExact = slot.bankExact;
+        e.damper = 0;
+        e.sostenute = 0;
+        e.vib_depth = 0;
+        e.vib_freq = 3;
+        e.vib_phase = 0;
+        e.order = ++impl->order;
+        e.base = slot.base;
+        e.inst = e.base;
+        tone_color wet = col;
+        wet.spatPass = 0;
+        impl->paint_wopn(e.inst, wet, velocity, drum);
+        e.mul = slot.mul;
+        e.midi = slot.midi;
+        if (ep.mode == 2)
+            e.midi += (es & 1) ? 0.16 : -0.14;
+        double sr = impl->rate > 1 ? impl->rate : 44100.0;
+        int delaySamp = (int)(sr * (ep.ms / 1000.0));
+        if (delaySamp < 1) delaySamp = 1;
+        nn->echoSlot = es;
+        nn->echoGen = e.gen;
+        nn->echoAge = 0;
+        nn->dryOffAge = -1;
+        nn->echoDelaySamp = delaySamp;
+        nn->echoKeyed = 0;
+        nn->echoGain = ep.gain;
+    }
+    return nn;
 }

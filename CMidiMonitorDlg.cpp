@@ -3170,6 +3170,9 @@ void CMidiMonitorDlg::LoadCurrentMidi()
 		}
 	}
 	m_lastPlayb = -1;
+	m_hearPlayb = -1;
+	m_pbAnchor = 0;
+	m_pbQpc = 0;
 	m_evPos = 0;
 	m_hadNote = 0;
 	{
@@ -3418,11 +3421,10 @@ void CMidiMonitorDlg::SyncFromPlayback()
 		};
 		pbRaw = wrapFwd(pbRaw);
 		pbHeard = wrapFwd(pbHeard);
-		if (pbRaw >= ls && pbHeard < ls) {
-			const __int64 behind = ls - pbHeard;
-			pbHeard = le - ((behind - 1) % span);
-			if (pbHeard < ls) pbHeard = ls;
-		}
+		/* heard だけ前の周の終端に残ると、dump が 1 小節止まったあと
+		   頭へ跳ねる。エンジンが既に次の周なら、表示もそちらへ進める。 */
+		if (pbHeard > pbRaw)
+			pbHeard = pbRaw;
 	}
 	ExtrapolateHeard(pbHeard);
 	if (m_loopEndSample > m_loopStartSample && pbHeard > m_loopEndSample) {
@@ -3432,11 +3434,52 @@ void CMidiMonitorDlg::SyncFromPlayback()
 	}
 	if (pbRaw < m_lastPlayb || (m_hearPlayb >= 0 && pbHeard < m_hearPlayb)) {
 		/* ライブ MPU はプログラムと CC がタップに一度しか来ず、スタブ SMF には無い。
-		   ここでパートを消すと曲の残り全部が初期ピアノに戻る。巻き戻すのは SMF カーソルだけ。 */
+		   ここでパートを消すと曲の残り全部が初期ピアノに戻る。巻き戻すのは SMF カーソルだけ。
+		   ループ折り返しで ResetParts すると GS リセットから再適用され、モニタ全体が点滅する。 */
 		if (!CEmuMidiLiveActive()) {
-			ResetParts();
-			m_evPos = 0;
-			m_hadNote = 0;
+			const int rawBack = (m_lastPlayb >= 0 && pbRaw < m_lastPlayb) ? 1 : 0;
+			const int heardBack = (m_hearPlayb >= 0 && pbHeard < m_hearPlayb) ? 1 : 0;
+			int loopWrap = 0;
+			if (m_loopEndSample > m_loopStartSample) {
+				const __int64 span = m_loopEndSample - m_loopStartSample;
+				__int64 slack = span / 16;
+				const int sr = (m_sampleRate > 0) ? m_sampleRate : 44100;
+				if (slack < sr / 20) slack = sr / 20;
+				const int rawFromEnd = (m_lastPlayb >= 0 && m_lastPlayb + slack >= m_loopEndSample
+					&& pbRaw <= m_loopStartSample + slack) ? 1 : 0;
+				const int heardFromEnd = (m_hearPlayb + slack >= m_loopEndSample
+					&& pbHeard <= m_loopStartSample + slack) ? 1 : 0;
+				/* 終端から頭へ戻ったフレームで表示を進める。heard が遅れたまま
+				   終端に置くと、1 小節分 dump が止まってから跳ねる。 */
+				if ((heardBack && heardFromEnd) || (rawBack && rawFromEnd))
+					loopWrap = 1;
+				else if (heardBack && pbHeard >= m_loopStartSample && pbHeard <= m_loopEndSample
+					&& m_hearPlayb >= m_loopStartSample && m_hearPlayb <= m_loopEndSample
+					&& (m_hearPlayb - pbHeard) > (__int64)sr / 10)
+					loopWrap = 1;
+			}
+			if (loopWrap) {
+				for (int pi = 0; pi < PART_MAX; ++pi) {
+					memset(m_part[pi].noteOn, 0, sizeof(m_part[pi].noteOn));
+					memset(m_part[pi].noteFlash, 0, sizeof(m_part[pi].noteFlash));
+					m_part[pi].held = 0;
+				}
+				m_noteCount = 0;
+				m_evPos = 0;
+				while (m_evPos < m_evCount && m_ev[m_evPos].sample < m_loopStartSample)
+					++m_evPos;
+				m_dirtyRows = 0xFFFFFFFFu;
+			} else if (rawBack) {
+				/* 数サンプルの揺らぎで曲頭から再適用すると、通り道の
+				   NoteOn が全部 flash に残り、NOTES の MAX が 80 まで跳ねる。 */
+				const int srJ = (m_sampleRate > 0) ? m_sampleRate : 44100;
+				const __int64 back = m_lastPlayb - pbRaw;
+				if (back > srJ / 50) {
+					ResetParts();
+					m_evPos = 0;
+					m_hadNote = 0;
+				}
+			}
 		}
 		m_pbAnchor = 0;
 		m_pbQpc = 0;
@@ -3452,6 +3495,8 @@ void CMidiMonitorDlg::SyncFromPlayback()
 		return;
 	}
 
+	if (m_evPos < 0) m_evPos = 0;
+	if (m_evPos > m_evCount) m_evPos = m_evCount;
 	m_burstApply = 0;
 	if (!m_hadNote) {
 		int lastDump = m_evPos - 1;
@@ -3548,6 +3593,14 @@ void CMidiMonitorDlg::UpdatePlayPos()
 	int bars = 1;
 	fold(tick, &bar, &beat, &tickIn, &tpm, &num);
 	fold(m_maxTick, &bars, NULL, NULL, NULL, NULL);
+	/* 終端マーカーが小節線ちょうど（ささみは 192tick）のとき、次の小節を総数に足さない。 */
+	if (m_maxTick > 0) {
+		int endBar = 1, endTick = 0;
+		fold(m_maxTick, &endBar, NULL, &endTick, NULL, NULL);
+		if (endTick == 0 && endBar > 1)
+			bars = endBar - 1;
+	}
+	if (bar > bars) bar = bars;
 	if (bar < 1) bar = 1;
 	if (bars < 1) bars = 1;
 	if (beat < 1) beat = 1;
@@ -4762,7 +4815,9 @@ void CMidiMonitorDlg::UpdateNoteMeter()
 	for (int i = 0; i < PART_MAX; ++i) {
 		const Part& p = m_part[i];
 		for (int n = 0; n < 128; ++n) {
-			if (p.noteOn[n] || p.noteFlash[n])
+			/* flash は短い音の鍵盤表示だけ。数に入れると追いつきの
+			   1 フレームで曲中の全音高が MAX に残る。 */
+			if (p.noteOn[n])
 				notes++;
 		}
 	}

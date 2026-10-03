@@ -141,6 +141,15 @@ namespace std{
         fxVarPacked = 0;
         fxVarConn = 1;
         fxVarPart = 127;
+        for (int i = 0; i < 10; i++) fxVarP[i] = -1;
+        fxRevTime = 64; fxRevChar = 4; fxRevLpf = 0; fxRevFb = 0; fxRevPre = 0;
+        fxRevMsb = fxRevLsb = 0;
+        fxChoRate = 3; fxChoDepth = 19; fxChoFb = 8; fxChoDly = 80; fxChoLpf = 0;
+        fxChoToRev = fxChoToDly = 0;
+        fxChoMsb = fxChoLsb = 0;
+        fxDlyTime = 0x61; fxDlyFb = 80; fxDlyLpf = 0; fxDlyToRev = 0;
+        fxDlyLvlC = fxDlyLvlL = fxDlyLvlR = 127;
+        fxDlyMsb = fxDlyLsb = 0;
         sysRevLevel = sysChoLevel = sysDlyLevel = 64;
         nrpnCutoff = nrpnReso = nrpnHpf = nrpnAtk = nrpnDec = nrpnRel = 64;
         nrpnVibRate = nrpnVibDepth = nrpnVibDelay = 64;
@@ -250,7 +259,8 @@ namespace std{
             if(value > 63) value = 63;
             fxInsSys2 = value;
         }else{
-            if(value > 7) value = 7;
+            int lim = (kind == 2) ? 9 : 7;
+            if(value > lim) value = lim;
             if(kind == 0) fxRevMode = value;
             else if(kind == 1) fxChoMode = value;
             else if(kind == 2) fxDlyMode = value;
@@ -340,8 +350,103 @@ namespace std{
     void channel::set_system_mode(system_mode_t mode)
     {
         system_mode = mode;
-        if (mode == system_mode_xg) fxInsFam = 3;
-        else if (mode == system_mode_gs) fxInsFam = 0;
+        if (mode == system_mode_xg) {
+            fxInsFam = 3;
+            fxVarConn = 0;
+            fxVarPart = 0;
+            fxRevMsb = 0x01; fxRevLsb = 0x00;
+            fxRevTime = 64; fxRevChar = 4; fxRevLpf = 0; fxRevFb = 0; fxRevPre = 0;
+            fxChoMsb = 0x41; fxChoLsb = 0x00;
+            fxChoRate = 8; fxChoDepth = 20; fxChoFb = 8; fxChoDly = 64;
+            fxChoLpf = 0; fxChoToRev = 0; fxChoToDly = 0;
+            fxDlyMsb = 0; fxDlyLsb = 0;
+            fxDlyTime = 0x61; fxDlyFb = 64; fxDlyLpf = 0; fxDlyToRev = 0;
+            sysRevLevel = 64; sysChoLevel = 64; sysDlyLevel = 64;
+        } else if (mode == system_mode_gs) {
+            /* 電源投入 / GS リセット: Hall 2, Chorus 3, Delay 1 */
+            fxInsFam = 0;
+            fxRevMsb = 0; fxRevLsb = 0;
+            fxRevMode = 4;
+            fxRevTime = 64; fxRevChar = 4; fxRevLpf = 0; fxRevFb = 0; fxRevPre = 0;
+            fxChoMsb = 0; fxChoLsb = 0;
+            fxChoMode = 2;
+            fxChoRate = 3; fxChoDepth = 19; fxChoFb = 8; fxChoDly = 80;
+            fxChoLpf = 0; fxChoToRev = 0; fxChoToDly = 0;
+            fxDlyMsb = 0; fxDlyLsb = 0;
+            fxDlyMode = 0;
+            fxDlyTime = 0x61; fxDlyFb = 80; fxDlyLpf = 0; fxDlyToRev = 0;
+            fxDlyLvlC = fxDlyLvlL = fxDlyLvlR = 127;
+            sysRevLevel = 64; sysChoLevel = 64; sysDlyLevel = 64;
+        }
+        touch_tone();
+    }
+    void channel::set_eq_band(int hi, int val)
+    {
+        val &= 127;
+        if (hi) eqHiGain = val;
+        else eqLoGain = val;
+        touch_tone();
+    }
+    void channel::apply_gs_sysfx_byte(int addr, int val)
+    {
+        val &= 127;
+        if (addr == 0x30) {
+            fxRevMode = val & 7;
+            fxRevMsb = 0;
+            static const int tim[8] = { 42, 50, 56, 60, 64, 58, 48, 60 };
+            static const int rfb[8] = { 0, 0, 0, 0, 0, 0, 36, 52 };
+            fxRevTime = tim[fxRevMode];
+            fxRevChar = fxRevMode;
+            fxRevLpf = 0;
+            fxRevFb = rfb[fxRevMode];
+            fxRevPre = 0;
+        }
+        else if (addr == 0x31) fxRevChar = val & 7;
+        else if (addr == 0x32) fxRevLpf = val & 7;
+        else if (addr == 0x33) { set_sys_fx_level(0, val); return; }
+        else if (addr == 0x34) fxRevTime = val;
+        else if (addr == 0x35) fxRevFb = val;
+        else if (addr == 0x37) fxRevPre = val;
+        else if (addr == 0x38) {
+            fxChoMode = val & 7;
+            fxChoMsb = 0;
+            static const int rat[8] = { 2, 3, 3, 4, 2, 2, 1, 1 };
+            static const int dep[8] = { 12, 16, 19, 24, 16, 10, 0, 0 };
+            static const int cfb[8] = { 0, 4, 8, 8, 36, 44, 0, 52 };
+            static const int cdy[8] = { 60, 72, 80, 88, 48, 36, 24, 32 };
+            fxChoRate = rat[fxChoMode];
+            fxChoDepth = dep[fxChoMode];
+            fxChoFb = cfb[fxChoMode];
+            fxChoDly = cdy[fxChoMode];
+            fxChoLpf = 0;
+        }
+        else if (addr == 0x39) fxChoLpf = val & 7;
+        else if (addr == 0x3A) { set_sys_fx_level(1, val); return; }
+        else if (addr == 0x3B) fxChoFb = val;
+        else if (addr == 0x3C) fxChoDly = val;
+        else if (addr == 0x3D) fxChoRate = val;
+        else if (addr == 0x3E) fxChoDepth = val;
+        else if (addr == 0x3F) fxChoToRev = val;
+        else if (addr == 0x40) fxChoToDly = val;
+        else if (addr == 0x50) {
+            fxDlyMode = (val > 9) ? 9 : val;
+            fxDlyMsb = 0;
+            static const int tim[10] = { 0x61, 0x64, 0x68, 0x6C, 0x58, 0x60, 0x66, 0x6C, 0x61, 0x66 };
+            static const int dfb[10] = { 72, 78, 84, 92, 64, 72, 80, 88, 64, 100 };
+            fxDlyTime = tim[fxDlyMode];
+            fxDlyFb = dfb[fxDlyMode];
+            fxDlyLpf = 0;
+        }
+        else if (addr == 0x51) fxDlyLpf = val & 7;
+        else if (addr == 0x52) fxDlyTime = val;
+        else if (addr == 0x55) fxDlyLvlC = val;
+        else if (addr == 0x56) fxDlyLvlL = val;
+        else if (addr == 0x57) fxDlyLvlR = val;
+        else if (addr == 0x58) { set_sys_fx_level(2, val); return; }
+        else if (addr == 0x59) fxDlyFb = val;
+        else if (addr == 0x5A) fxDlyToRev = val;
+        else return;
+        touch_tone();
     }
     void channel::apply_gs_efx_byte(int addr, int val)
     {
@@ -390,15 +495,26 @@ namespace std{
     void channel::apply_xg_sysfx_byte(int addr, int val)
     {
         val &= 127;
-        if (addr == 0x00) fxRevMode = val & 7;
-        else if (addr == 0x20) fxChoMode = val & 7;
+        if (addr == 0x00) fxRevMsb = val;
+        else if (addr == 0x01) fxRevLsb = val;
+        else if (addr == 0x02) fxRevTime = val;
+        else if (addr == 0x04) fxRevPre = val;
+        else if (addr == 0x0C) { set_sys_fx_level(0, val); return; }
+        else if (addr == 0x20) fxChoMsb = val;
+        else if (addr == 0x21) fxChoLsb = val;
+        else if (addr == 0x22) fxChoRate = val;
+        else if (addr == 0x23) fxChoDepth = val;
+        else if (addr == 0x24) fxChoFb = val;
+        else if (addr == 0x25) fxChoDly = val;
+        else if (addr == 0x2C) { set_sys_fx_level(1, val); return; }
+        else if (addr == 0x2E) fxChoToRev = val;
         else if (addr == 0x40) fxVarPacked = (val << 8) | (fxVarPacked & 0x7F);
         else if (addr == 0x41) fxVarPacked = (fxVarPacked & 0x7F00) | val;
+        else if (addr >= 0x42 && addr <= 0x4B) fxVarP[addr - 0x42] = val;
+        else if (addr == 0x4C) { set_sys_fx_level(2, val); return; }
+        else if (addr == 0x4E) fxDlyToRev = val;
         else if (addr == 0x5A) fxVarConn = val ? 1 : 0;
         else if (addr == 0x5B) fxVarPart = val;
-        else if (addr == 0x0C) { set_sys_fx_level(0, val); return; }
-        else if (addr == 0x2C) { set_sys_fx_level(1, val); return; }
-        else if (addr == 0x4C) { set_sys_fx_level(2, val); return; }
         else return;
         touch_tone();
     }
@@ -417,6 +533,54 @@ namespace std{
         c.revMode = fxRevMode;
         c.choMode = fxChoMode;
         c.dlyMode = fxDlyMode;
+        c.revTime = fxRevTime; c.revChar = fxRevChar; c.revLpf = fxRevLpf;
+        c.revFb = fxRevFb; c.revPre = fxRevPre;
+        c.revMsb = fxRevMsb; c.revLsb = fxRevLsb;
+        c.choRate = fxChoRate; c.choDepth = fxChoDepth; c.choFb = fxChoFb;
+        c.choDly = fxChoDly; c.choLpf = fxChoLpf;
+        c.choToRev = fxChoToRev; c.choToDly = fxChoToDly;
+        c.choMsb = fxChoMsb; c.choLsb = fxChoLsb;
+        c.dlyTime = fxDlyTime; c.dlyFb = fxDlyFb; c.dlyLpf = fxDlyLpf;
+        c.dlyToRev = fxDlyToRev;
+        c.dlyMsb = fxDlyMsb; c.dlyLsb = fxDlyLsb;
+        {
+            int trim = (fxDlyLvlC + fxDlyLvlL + fxDlyLvlR) / 3;
+            if (trim < 0) trim = 0;
+            if (trim > 127) trim = 127;
+            c.dlyTrim = trim;
+        }
+        c.spatXg = (system_mode == system_mode_xg) ? 1 : 0;
+        if (c.spatXg && fxVarConn == 0) {
+            c.dlySend = 0;
+            c.dlyMsb = 0;
+        } else if (c.spatXg && fxVarConn != 0 && fxVarPacked) {
+            c.dlyMsb = (fxVarPacked >> 8) & 0x7F;
+            c.dlyLsb = fxVarPacked & 0x7F;
+            const int vm = c.dlyMsb;
+            int timeP = -1;
+            int fbP = -1;
+            if ((vm >= 5 && vm <= 8) || vm == 0x14) {
+                timeP = fxVarP[0];
+                fbP = (vm == 0x14) ? fxVarP[3] : fxVarP[4];
+            } else if ((vm >= 1 && vm <= 4) || (vm >= 0x10 && vm <= 0x13) || vm == 9) {
+                timeP = fxVarP[0];
+            }
+            if (timeP >= 0)
+                c.dlyTime = 0x10 + (timeP * (0x73 - 0x10)) / 127;
+            if (fbP >= 0)
+                c.dlyFb = fbP;
+        }
+        if (c.spatXg && c.dlyToRev > 0 && c.dlySend > 0) {
+            int extra = (c.dlySend * c.dlyToRev) / 254;
+            int v = c.revSend + extra;
+            if (v > 127) v = 127;
+            c.revSend = v;
+        } else if (!c.spatXg && fxDlyToRev > 0 && c.dlySend > 0) {
+            int extra = (c.dlySend * fxDlyToRev) / 254;
+            int v = c.revSend + extra;
+            if (v > 127) v = 127;
+            c.revSend = v;
+        }
         int packed = 0;
         if (fxInsOn)
             packed = fxInsPacked ? fxInsPacked : (fxInsSys1 << 8);
@@ -468,17 +632,52 @@ namespace std{
     void channel::update_fx_vibrato()
     {
         tone_color c = effect_color();
-        const int mode = c.choMode & 7;
-        /* GS chorus type → slow pitch LFO (peak semitones). fmmidi depth 1.0 = ±1 semitone. */
-        static const double rateT[8] = { 0, 0.55, 0.85, 1.15, 0.40, 1.35, 1.80, 0.22 };
-        static const double depT[8] = { 0, 0.14, 0.20, 0.28, 0.16, 0.24, 0.12, 0.08 };
+        /* コーラスはピッチ LFO。1.0 = ±1 半音。ショートディレイは LFO にしない。 */
+        double baseHz = 0;
+        double baseDep = 0;
+        double rateRef = 3.0;
+        double depRef = 19.0;
+        int choShort = 0;
+        if (c.spatXg) {
+            const int m = c.choMsb & 0x7F;
+            const int l = c.choLsb & 7;
+            rateRef = 8.0;
+            depRef = 20.0;
+            if (m == 0x41) {
+                static const double hz[4] = { 0.38, 0.55, 0.78, 1.00 };
+                static const double dep[4] = { 0.09, 0.12, 0.15, 0.18 };
+                int i = l; if (i > 3) i = 3;
+                baseHz = hz[i];
+                baseDep = dep[i];
+            } else if (m == 0x42) { baseHz = 0.32; baseDep = 0.14; }
+            else if (m == 0x43) { baseHz = 0.26; baseDep = 0.06; }
+            else if (m == 0x44) { baseHz = 0.20; baseDep = 0.08; }
+            else if (m == 0x45 || m == 0x56) { baseHz = 0.65; baseDep = 0.08; }
+            else if (m == 0x48) { baseHz = 0.36; baseDep = 0.05; }
+        } else {
+            const int mode = c.choMode & 7;
+            if (mode >= 6) choShort = 1;
+            else {
+                static const double hz[6] = { 0.36, 0.52, 0.78, 1.00, 0.44, 0.28 };
+                static const double dep[6] = { 0.10, 0.13, 0.16, 0.19, 0.14, 0.07 };
+                baseHz = hz[mode];
+                baseDep = dep[mode];
+            }
+        }
         double depth = 0;
         double freq = vibrato_frequency > 0.25 ? vibrato_frequency : 3.0;
         const int haveVib = (c.vibDepth != 64) || (modulation_depth != 0);
-        if(mode > 0 && c.choSend > 8){
-            depth += depT[mode] * (c.choSend / 127.0);
-            if(!haveVib)
-                freq = rateT[mode];
+        if(!choShort && baseDep > 0 && c.choSend > 8){
+            double sc = (depRef > 0) ? ((double)c.choDepth / depRef) : 1.0;
+            if(sc < 0) sc = 0;
+            if(sc > 1.45) sc = 1.45;
+            depth += baseDep * sc * (c.choSend / 127.0);
+            if(!haveVib){
+                double rs = (c.choRate <= 0) ? 0.4 : ((double)c.choRate / rateRef);
+                if(rs < 0.35) rs = 0.35;
+                if(rs > 2.2) rs = 2.2;
+                freq = baseHz * rs;
+            }
         }
         depth += (c.vibDepth - 64) / 64.0;
         if(depth < 0) depth = 0;
@@ -1015,7 +1214,7 @@ namespace std{
                 }
             }
         }else if(size >= 11 && data[0] == 0xF0 && data[1] == 0x41 && data[3] == 0x42 && data[4] == 0x12
-            && data[5] == 0x40 && data[size - 1] == 0xF7){
+            && (data[5] == 0x40 || data[5] == 0x50) && data[size - 1] == 0xF7){
             const int hasF7 = 1;
             int nval = (int)size - 8 - hasF7 - 1;
             if (nval < 1) nval = 1;
@@ -1027,24 +1226,18 @@ namespace std{
                 if (v > mapLsb && v <= 4) mapLsb = v;
             }
             const int allowEfx = (mapLsb >= 3) ? 1 : 0;
+            const int blockB = (data[5] == 0x50);
             for (int i = 0; i < nval; ++i) {
                 const int a = cc + i;
                 const int val = data[8 + i] & 0x7F;
+                if (blockB && bb != 0x01 && bb != 0x02)
+                    continue;
                 if (bb == 0x01) {
-                    int kind = -1;
-                    if (a == 0x30) kind = 0;
-                    else if (a == 0x38) kind = 1;
-                    else if (a == 0x50) kind = 2;
-                    if (kind >= 0) {
-                        for (int ch = 0; ch < NUM_CHANNELS; ++ch)
-                            channels[ch]->set_effect_mode(kind, val);
-                    } else if (a == 0x33 || a == 0x3A || a == 0x52) {
-                        int lv = 0;
-                        if (a == 0x3A) lv = 1;
-                        else if (a == 0x52) lv = 2;
-                        for (int ch = 0; ch < NUM_CHANNELS; ++ch)
-                            channels[ch]->set_sys_fx_level(lv, val);
-                    }
+                    for (int ch = 0; ch < NUM_CHANNELS; ++ch)
+                        channels[ch]->apply_gs_sysfx_byte(a, val);
+                } else if (bb == 0x02 && (a == 0x01 || a == 0x03)) {
+                    for (int ch = 0; ch < NUM_CHANNELS; ++ch)
+                        channels[ch]->set_eq_band(a == 0x03, val);
                 } else if (bb == 0x03 && a < 32) {
                     /* 88Pro EFX. SC-55/SC-88 ignore 40 03. */
                     if (allowEfx) {

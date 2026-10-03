@@ -121,9 +121,12 @@ PC-98 ささみ (SASAMI) の曲データを再生します。
   .mpy / .mpw2 / .mpsmv / .mid / シーケンサ翻訳後 SMF の音源
   (MIDI モニタの mapForce と同じ番号):
 
-    0=自動  SysEx / CC32 / 曲名・パス / .mpy 排他タグから
-            SC-55 / 88 / 88Pro / 8820・8850 / XG / GM / LA / SD を判定。
-            判定できないときは 88map。ogg 本体モニタと同じ優先順。
+    0=自動  SysEx / CC32 / 曲名・パス / cmd40 のモードタグから判定。
+            .mpy の既定は 88（この形式の上限）。.mpw2 / .mpsmv の既定は 88Pro。
+            .mpy は 88 / 55 / XG / LA、.mpw2 は 88Pro / 88 / XG / GM。
+            入っているうち一番上を使う。
+            CRender の GS VST が空欄のときは XG。
+            判定できない .mid は従来どおり中身を見る。
             SMF 直読みでも GS Reset 後に CC32 を載せる。
     1=GS  2=XG  3=55map  4=88map
     5=88Promap  6=8820map  7=GMmap  8=SDmap  9=LAmap  10..19=ETC

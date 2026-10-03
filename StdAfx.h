@@ -987,6 +987,11 @@ struct save{
 	// --- メニュー／アクセントの見た目テーマ(末尾追記。旧.datは0=可愛い) ---
 	// 0=可愛い 1=クール 2=中二 3=夜光 4=墨 5=森 6=キャンディ 7=鋼
 	int popupMenuTheme;
+
+	/* LA を MIDI マッパー／MIDI 出力へ出すとき。VST（SC-VA 等）は常にバンク 127。
+	   0=SC モジュール（MSB 127 / LSB 0） 1=実機 MT-32（バンクを出さない）。
+	   繋がっている実機は判定できないので、ここはユーザーの想定。末尾追記。 */
+	int laMapperMt32;
 };
 extern save savedata;
 

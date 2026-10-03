@@ -20,6 +20,8 @@ struct MidiEv {
 	int port;
 	int seq;
 	uint8_t len;
+	uint8_t trk;
+	uint8_t pass;
 	uint8_t bytes[128];
 };
 
@@ -39,8 +41,11 @@ struct MidiTrackState {
 	int alive;
 	int everJump;
 	int pedal;
+	int pass;
 	uint32_t loopStartTick;
 	uint32_t loopEndTick;
+	uint32_t loopDest; /* 直近の戻り先。変わったら変異ループ */
+	uint32_t period;   /* その戻り先の 1 周 */
 	/* Wave3 soft FX (cmd 46/47) — expand into SMF curves while note is held */
 	int softMode;   /* -1 off, 0=vib, 1=trem */
 	int softDelay;
@@ -66,6 +71,8 @@ static int s_trkLen[3];
 static uint8_t* s_smfWork;
 static int s_evSeq;
 static int s_midiReady;
+static int s_pushTrk;
+static int s_pushPass;
 
 static int EnsureMidiWork()
 {
@@ -122,6 +129,8 @@ static void PushEv(uint32_t tick, int port, const uint8_t* d, int n)
 	e.port = port;
 	e.seq = s_evSeq++;
 	e.len = (uint8_t)n;
+	e.trk = (uint8_t)((s_pushTrk >= 0 && s_pushTrk < 64) ? s_pushTrk : 255);
+	e.pass = (uint8_t)((s_pushPass > 0) ? s_pushPass : 0);
 	memcpy(e.bytes, d, (size_t)n);
 }
 
@@ -139,14 +148,18 @@ static void PushMmodeChannelInit(uint32_t tick, int port, int ch, SasamiMidiMap 
 	PushShort(tick, port, (uint8_t)(0xB0 | ch), 0x64, 0);
 	PushShort(tick, port, (uint8_t)(0xB0 | ch), 0x06, 0x18);
 	PushShort(tick, port, (uint8_t)(0xB0 | ch), 0x01, 0);
-	/* LA / MT-32 は SC-55 のバンク MSB 127。チャンネル 10 はリズムのまま。 */
-	if (laBankMsb == 127 && ch != 9)
+	/* LA / MT-32 を SC-VA 等で鳴らすときは Capital（MSB 127, LSB 0）。
+	   チャンネル 10 はリズムのまま。実機 MT-32 へバンクを出さない判断は
+	   変換後、MIDI 出力側で行う。 */
+	if (laBankMsb == 127 && ch != 9) {
 		PushShort(tick, port, (uint8_t)(0xB0 | ch), 0x00, 127);
-	else
+		PushShort(tick, port, (uint8_t)(0xB0 | ch), 32, 0);
+	} else {
 		PushShort(tick, port, (uint8_t)(0xB0 | ch), 0x00, 0);
-	if (flg88 != 2 && gsBankLsb >= 1 && gsBankLsb <= 4) {
-		/* 判定できたときだけ。未判定を SC-88 の CC32=2 にしない。 */
-		PushShort(tick, port, (uint8_t)(0xB0 | ch), 32, (uint8_t)gsBankLsb);
+		if (flg88 != 2 && gsBankLsb >= 1 && gsBankLsb <= 4) {
+			/* 判定できたときだけ。未判定を SC-88 の CC32=2 にしない。 */
+			PushShort(tick, port, (uint8_t)(0xB0 | ch), 32, (uint8_t)gsBankLsb);
+		}
 	}
 	(void)map;
 	PushShort(tick, port, (uint8_t)(0xB0 | ch), 7, 100);
@@ -219,15 +232,107 @@ static int MidiIsGsEfxDt1(const uint8_t* d, int n)
 
 static uint32_t ReadJump(const SasamiSong& s, uint32_t addr, int ver, uint32_t* nextOff)
 {
-	/* MPY and MPW2/3 track *streams* always use 3-byte cmd 10/24 with a 16-bit
-	   absolute (0x1xxx). mpyVersion==2 only widens the track pointer TABLE at
-	   0x200 to 24-bit — it must not change in-stream jump encoding. Reading
-	   24-bit here made every J/:| on .mpw2 land on garbage (Space preview
-	   died in ~3s, Loop数=0). */
-	(void)ver;
-	const uint16_t a = SasamiGet16(s, addr + 1);
+	/* Composer の .mpw2 はストリーム内 J/:| が 16bit のまま。
+	   本家 SASAMI11 はヘッダ EE EE EE のとき 24bit（cmd + 3byte、:| 抜けは +4）。
+	   常に 24bit にすると次命令の 1byte を上位に読んで全部の J が外れる。
+	   16bit 先が命令境界でなく、24bit 先が命令境界のときだけ 24bit。 */
+	const uint16_t a16 = SasamiGet16(s, addr + 1);
+	uint32_t d16 = (a16 >= 0x1000) ? (uint32_t)(a16 - 0x1000) : (uint32_t)a16;
 	*nextOff = addr + 3;
-	return (a >= 0x1000) ? (uint32_t)(a - 0x1000) : a;
+	if (d16 == 0xF0 || d16 == 0)
+		return d16;
+	if (ver >= 2 && SasamiOffOk(s, addr, 4)) {
+		const uint32_t a24 = SasamiGet24(s, addr + 1);
+		const uint32_t d24 = (a24 >= 0x1000) ? (a24 - 0x1000) : a24;
+		if (d24 != d16 && SasamiOffOk(s, d24, 1)) {
+			const int ok16 = SasamiOffOk(s, d16, 1) && SasamiGet(s, d16) <= 47;
+			const int ok24 = SasamiGet(s, d24) <= 47;
+			if (ok24 && !ok16) {
+				*nextOff = addr + 4;
+				return d24;
+			}
+		}
+	}
+	return d16;
+}
+
+/* Q の tick は、そのアドレスの命令。±16 で次の音符へ寄せると J の戻りが Q より後ろになる。 */
+static uint32_t DestFirstTick(int track, uint32_t dest, uint32_t fileOff)
+{
+	uint32_t exact = 0xFFFFFFFFu;
+	uint32_t nearA = 0xFFFFFFFFu;
+	uint32_t nearT = 0xFFFFFFFFu;
+	uint32_t nearD = 4;
+	for (int fi = 0; fi < s_firstCount; fi++) {
+		if ((s_first[fi].key >> 32) != (uint64_t)(unsigned)track) continue;
+		const uint32_t a = (uint32_t)s_first[fi].key;
+		if (a == dest) {
+			exact = s_first[fi].tick;
+			break;
+		}
+		const uint32_t d = (a > dest) ? (a - dest) : (dest - a);
+		if (d < nearD || (d == nearD && a < nearA)) {
+			nearD = d;
+			nearA = a;
+			nearT = s_first[fi].tick;
+		}
+	}
+	if (exact != 0xFFFFFFFFu) return exact;
+	if (nearD <= 3 && nearT != 0xFFFFFFFFu) return nearT;
+	if (dest == 0 || dest == fileOff) return 0;
+	return 0xFFFFFFFFu;
+}
+
+static uint32_t GcdU32(uint32_t a, uint32_t b)
+{
+	while (b) {
+		const uint32_t t = a % b;
+		a = b;
+		b = t;
+	}
+	return a;
+}
+
+/* 各トラックの Q/J は長さが揃わない。一番長い1本ではなく、周期の公倍数で
+   全員が同じ位相に戻る長さにする。戻り先が変わる変異は、その後に取り直す。 */
+static uint32_t LcmU32(uint32_t a, uint32_t b)
+{
+	if (!a) return b;
+	if (!b) return a;
+	const uint32_t g = GcdU32(a, b);
+	if (!g) return 0;
+	if (a / g > 0xFFFFFFFFu / b) return 0xFFFFFFFFu;
+	return (a / g) * b;
+}
+
+/* 最長周期の J が 1 小節（192tick）以内に散らばるとき、多数派の J で曲ループを切る。
+   いちばん遅い Q に合わせると、先に戻ったトラックがその 1 小節だけ Q を再演奏し、
+   遅い J と重なる。 */
+static uint32_t MajorityLongEnd(const MidiTrackState* tr, int ntr, uint32_t lcm)
+{
+	uint32_t jmin = 0xFFFFFFFFu, jmax = 0, best = 0;
+	int bestN = 0;
+	if (!tr || lcm == 0 || lcm == 0xFFFFFFFFu) return 0;
+	for (int i = 0; i < ntr && i < 64; i++) {
+		if (tr[i].period != lcm || tr[i].loopEndTick == 0) continue;
+		if (tr[i].loopEndTick < jmin) jmin = tr[i].loopEndTick;
+		if (tr[i].loopEndTick > jmax) jmax = tr[i].loopEndTick;
+	}
+	if (jmin == 0xFFFFFFFFu || jmax < jmin || jmax - jmin > 192) return 0;
+	for (int i = 0; i < ntr && i < 64; i++) {
+		if (tr[i].period != lcm || tr[i].loopEndTick == 0) continue;
+		const uint32_t t = tr[i].loopEndTick;
+		int c = 0;
+		for (int k = 0; k < ntr && k < 64; k++) {
+			if (tr[k].period == lcm && tr[k].loopEndTick == t) c++;
+		}
+		if (c > bestN || (c == bestN && (best == 0 || t < best))) {
+			bestN = c;
+			best = t;
+		}
+	}
+	if (best < lcm) return 0;
+	return best;
 }
 
 static uint8_t* TrkPtr(int t)
@@ -1069,11 +1174,37 @@ static uint32_t DetSkipToFf(const SasamiSong& song, uint32_t addr)
 	return p;
 }
 
+/* cmd40/39 のタグ。0=そのモードは曲に無い。kind は 1=55 2=88 3=88Pro 5=GM 7=XG 8=LA。 */
+static int DetBestTagKind(int lv2, int tag0, int tag1, int tag2, int tag3)
+{
+	if (!tag0 && !tag1 && !tag2 && !tag3) return 0;
+	if (!lv2) {
+		/* mpy: 88 > 55 > XG > LA */
+		if (tag1) return 2;
+		if (tag0) return 1;
+		if (tag2) return 7;
+		return 8;
+	}
+	if (tag0) return 3;
+	if (tag1) return 2;
+	if (tag2) return 7;
+	return 5;
+}
+
+static void DetNoteModeTag(uint8_t tag, int* tag0, int* tag1, int* tag2, int* tag3)
+{
+	if (tag == 0) *tag0 = 1;
+	else if (tag == 1) *tag1 = 1;
+	else if (tag == 2) *tag2 = 1;
+	else if (tag == 3) *tag3 = 1;
+}
+
 static int DetFromSong(const SasamiSong& song, const wchar_t* path)
 {
 	int hasXg = 0, hasGs = 0, hasGm = 0, hasGm2 = 0, hasSd = 0;
 	int mapHint = 0, cc32Max = 0, lastSys = 0;
 	int tag0 = 0, tag1 = 0, tag2 = 0, tag3 = 0;
+	int prog88 = 0, progAlt = 0;
 	wchar_t titleW[280];
 	titleW[0] = 0;
 	if (song.titleSjis[0]) {
@@ -1093,14 +1224,17 @@ static int DetFromSong(const SasamiSong& song, const wchar_t* path)
 				addr += 1;
 				continue;
 			}
+			if (cmd == 2 && SasamiOffOk(song, addr, 3)) {
+				/* cmd2: b1=88 列、b2=55（mpy）または 88Pro（mpw2）。0 は未記入。 */
+				if (SasamiGet(song, addr + 1)) prog88 = 1;
+				if (SasamiGet(song, addr + 2)) progAlt = 1;
+			} else if (cmd == 39 && SasamiOffOk(song, addr, 2)) {
+				DetNoteModeTag(SasamiGet(song, addr + 1), &tag0, &tag1, &tag2, &tag3);
+			}
 			if (cmd == 40) {
 				uint32_t p = addr + 1;
 				while (SasamiOffOk(song, p, 1) && SasamiGet(song, p) != 0xFE) {
-					const uint8_t tag = SasamiGet(song, p);
-					if (tag == 0) tag0 = 1;
-					else if (tag == 1) tag1 = 1;
-					else if (tag == 2) tag2 = 1;
-					else if (tag == 3) tag3 = 1;
+					DetNoteModeTag(SasamiGet(song, p), &tag0, &tag1, &tag2, &tag3);
 					p++;
 					if (p - addr > 64) break;
 				}
@@ -1143,10 +1277,24 @@ static int DetFromSong(const SasamiSong& song, const wchar_t* path)
 				addr += 3;
 		}
 	}
-	if (tag2 && !tag0 && !tag1) mapHint = DetFoldHint(mapHint, 7);
-	else if (tag0 && !tag1 && !tag2) mapHint = DetFoldHint(mapHint, 1);
-	else if (tag1 && !tag0) mapHint = DetFoldHint(mapHint, 2);
-	else if (tag3 && !tag0 && !tag1 && !tag2) mapHint = DetFoldHint(mapHint, 5);
+	/* 1 ファイルに最大 4 モード。入っているうち一番上。
+	   mpy: 1=88 > 0=55 > 2=XG > 3=LA。上限は 88。
+	   mpw2 (SASAMI2): 0=88Pro > 1=88 > 2=XG > 3=GM。 */
+	const int lv2 = (song.kind == SASAMI_KIND_MPW2 || song.kind == SASAMI_KIND_MPW3) ? 1 : 0;
+	const int tagKind = DetBestTagKind(lv2, tag0, tag1, tag2, tag3);
+	if (tagKind)
+		return DetKindToForce(tagKind);
+	if (!hasXg && !hasGs && !hasGm && !hasGm2 && !hasSd && !lastSys
+		&& !DetGuessPathTitle(titleW, path)) {
+		if (lv2) {
+			if (progAlt) return DetKindToForce(3);
+			if (prog88) return DetKindToForce(2);
+		} else if (song.kind == SASAMI_KIND_MPY) {
+			if (prog88) return DetKindToForce(2);
+			if (progAlt) return DetKindToForce(1);
+		}
+		return 0;
+	}
 	return DetFinish(mapHint, hasXg, hasGs, hasGm, hasGm2, hasSd, cc32Max, lastSys, path, titleW, NULL, 0);
 }
 
@@ -1253,6 +1401,44 @@ int SasamiDetectMapForceFromSong(const SasamiSong& song, const wchar_t* path)
 	return DetFromSong(song, path);
 }
 
+#ifndef KBSASAMI_PLUGIN
+extern "C" int SasamiHostGsVstReady(void);
+#endif
+
+static int SasamiGsVstReady()
+{
+#ifdef KBSASAMI_PLUGIN
+	/* fmmidi は GS バンクを持つ。CRender の欄はここでは見ない。 */
+	return 1;
+#else
+	return SasamiHostGsVstReady() ? 1 : 0;
+#endif
+}
+
+static int SasamiPathIsMpyFamily(const wchar_t* path)
+{
+	const SasamiKind k = SasamiKindFromPath(path);
+	return (k == SASAMI_KIND_MPY || k == SASAMI_KIND_MPW2 || k == SASAMI_KIND_MPW3) ? 1 : 0;
+}
+
+static int SasamiSongIsMpyFamily(const SasamiSong* song, const wchar_t* path)
+{
+	if (song && (song->kind == SASAMI_KIND_MPY || song->kind == SASAMI_KIND_MPW2
+		|| song->kind == SASAMI_KIND_MPW3))
+		return 1;
+	return SasamiPathIsMpyFamily(path);
+}
+
+static int SasamiSongLv2(const SasamiSong* song, const wchar_t* path)
+{
+	if (song && (song->kind == SASAMI_KIND_MPW2 || song->kind == SASAMI_KIND_MPW3))
+		return 1;
+	if (song && song->kind == SASAMI_KIND_MPY)
+		return 0;
+	const SasamiKind k = SasamiKindFromPath(path);
+	return (k == SASAMI_KIND_MPW2 || k == SASAMI_KIND_MPW3) ? 1 : 0;
+}
+
 int SasamiAutoMapForce(int resolved, const SasamiSong* song, const uint8_t* smf, int smfN, const wchar_t* path, const char* titleSjis)
 {
 	if (resolved > 0) return resolved;
@@ -1261,8 +1447,18 @@ int SasamiAutoMapForce(int resolved, const SasamiSong* song, const uint8_t* smf,
 		d = SasamiDetectMapForceFromSong(*song, path);
 	else
 		d = SasamiDetectMapForceFromMem(smf, smfN, path, titleSjis);
+	if (!SasamiSongIsMpyFamily(song, path))
+		return d > 0 ? d : 0;
+	/* CRender の GS VST が空なら GS マップは鳴らないので XG。明示の midimode は上で返す。 */
+	if (!SasamiGsVstReady())
+		return 2;
+	if (d == 5 || d == 6) {
+		const int mpy = (song && song->kind == SASAMI_KIND_MPY)
+			|| (!song && SasamiKindFromPath(path) == SASAMI_KIND_MPY);
+		if (mpy) d = 4;
+	}
 	if (d > 0) return d;
-	return 0;
+	return SasamiSongLv2(song, path) ? 5 : 4;
 }
 
 int SasamiResolveFmModeW(const wchar_t* fol, int globalDefault)
@@ -1308,7 +1504,7 @@ struct SasamiTempCache {
 	int convVer;
 };
 static SasamiTempCache s_tempCache;
-enum { SASAMI_SMF_CACHE_VER = 9 };
+enum { SASAMI_SMF_CACHE_VER = 16 };
 
 static int SasamiReadSourceStamp(const wchar_t* src, FILETIME* writeTime, DWORD* size)
 {
@@ -1364,13 +1560,28 @@ bool SasamiConvertToSmf(const SasamiSong& song, SasamiMidiMap map, int gsBankLsb
 	if (song.trackCount <= 0) return false;
 
 	const int ver = song.mpyVersion;
-	const int flg88 = (map == SASAMI_MAP_GS88) ? 1 : ((map == SASAMI_MAP_XG) ? 2 : 0);
+	const int lv2 = (song.kind == SASAMI_KIND_MPW2 || song.kind == SASAMI_KIND_MPW3) ? 1 : 0;
+	/* SASAMI_MAIN: flg 0=55, 1=88, 2=XG。
+	   SASAMI2 (mpw2): flg 0=88Pro（音色 b2、EFX）、1=88、2=XG。CC32=3 が Pro。 */
+	int flg88;
+	if (map == SASAMI_MAP_XG)
+		flg88 = 2;
+	else if (map == SASAMI_MAP_GM)
+		flg88 = 0;
+	else if (lv2 && gsBankLsb >= 3)
+		flg88 = 0;
+	else if (map == SASAMI_MAP_GS88)
+		flg88 = 1;
+	else
+		flg88 = 0;
 	const int isGm = (map == SASAMI_MAP_GM) ? 1 : 0;
 	const int allowGsEfx = (gsBankLsb >= 3 && gsBankLsb <= 4) ? 1 : 0;
 
 	s_evSeq = 0;
 	s_evCount = 0;
 	s_firstCount = 0;
+	s_pushTrk = 255;
+	s_pushPass = 0;
 	MidiTrackState tr[64];
 	memset(tr, 0, sizeof(tr));
 	int nAlive = 0;
@@ -1390,6 +1601,8 @@ bool SasamiConvertToSmf(const SasamiSong& song, SasamiMidiMap map, int gsBankLsb
 		tr[i].pedal = 0;
 		tr[i].loopStartTick = 0xFFFFFFFFu;
 		tr[i].loopEndTick = 0;
+		tr[i].loopDest = 0xFFFFFFFFu;
+		tr[i].period = 0;
 		tr[i].softMode = -1;
 		tr[i].softDelay = tr[i].softDepth = tr[i].softPhase = 0;
 		tr[i].portaSemi = tr[i].portaDelay = tr[i].portaGlide = tr[i].portaLeft = 0;
@@ -1439,19 +1652,27 @@ bool SasamiConvertToSmf(const SasamiSong& song, SasamiMidiMap map, int gsBankLsb
 	}
 
 	uint32_t tick = 0;
+	/* 同じ MIDI ch の複数トラックが同じ音高を持つ。先に終わった方の
+	   NoteOff で残っている方まで切ると、その ch が途中で無音になる。
+	   最後の 1 本が離すときだけ NoteOff を出す。 */
+	auto releasePitch = [&](int port, int ch, int note) {
+		if (note <= 0 || note >= 128 || ch < 0 || ch > 15) return;
+		if (port < 0) port = 0;
+		uint8_t& c = chOn[port ? 1 : 0][ch][note];
+		if (c > 0) c--;
+		if (c == 0)
+			PushShort(tick, port, (uint8_t)(0x80 | ch), (uint8_t)note, 0);
+	};
 	unsigned curT = SASAMI_DEFAULT_T;
 	(void)curT;
 	uint32_t gLoopStart = 0xFFFFFFFFu;
 	uint32_t gLoopEnd = 0;
-	int stopLoopers = 0;
 
 	auto releaseTrack = [&](int i) {
 		const int ch = tr[i].part;
 		const int port = tr[i].port;
-		if (tr[i].note) {
-			PushShort(tick, port, (uint8_t)(0x80 | ch), (uint8_t)tr[i].note, 0);
-			chOn[port ? 1 : 0][ch][tr[i].note & 127] = 0;
-		}
+		if (tr[i].note)
+			releasePitch(port, ch, tr[i].note);
 		tr[i].note = 0;
 		if (tr[i].pedal) {
 			PushShort(tick, port, (uint8_t)(0xB0 | ch), 0x40, 0);
@@ -1481,6 +1702,8 @@ bool SasamiConvertToSmf(const SasamiSong& song, SasamiMidiMap map, int gsBankLsb
 		for (int i = 0; i < song.trackCount && i < 64; i++) {
 			if (!tr[i].alive) continue;
 			any = 1;
+			s_pushTrk = i;
+			s_pushPass = tr[i].pass;
 			int guard = 0;
 			while (tr[i].alive && tr[i].count < 1 && guard++ < 4096) {
 				const uint32_t addr = tr[i].addr;
@@ -1511,16 +1734,13 @@ bool SasamiConvertToSmf(const SasamiSong& song, SasamiMidiMap map, int gsBankLsb
 				switch (cmd) {
 				case 1: { // note: original always note-off previous then note-on
 					const int note = (int)(b1 & 0x7F);
-					if (tr[i].note) {
-						PushShort(tick, port, (uint8_t)(0x80 | ch), (uint8_t)tr[i].note, 0);
-						chOn[port ? 1 : 0][ch][tr[i].note & 127] = 0;
-					}
-					/* 同じ MIDI ch の別トラックが同じ音高を持っているとき
-					   先に NoteOff すると A01 の片方が欠ける。fmmidi 側で
-					   同pitch は note_on 時に離す。 */
+					if (tr[i].note)
+						releasePitch(port, ch, tr[i].note);
 					PushShort(tick, port, (uint8_t)(0x90 | ch), (uint8_t)note, (uint8_t)tr[i].vel);
-					if (note < 128)
-						chOn[port ? 1 : 0][ch][note] = 1;
+					if (note > 0 && note < 128 && ch >= 0 && ch <= 15) {
+						uint8_t& c = chOn[port ? 1 : 0][ch][note];
+						if (c < 255) c++;
+					}
 					tr[i].note = note;
 					tr[i].count = b2;
 					tr[i].addr = addr + 3;
@@ -1583,10 +1803,8 @@ bool SasamiConvertToSmf(const SasamiSong& song, SasamiMidiMap map, int gsBankLsb
 					tr[i].addr = addr + 3;
 					break;
 				case 8: // rest
-					if (tr[i].note) {
-						PushShort(tick, port, (uint8_t)(0x80 | ch), (uint8_t)tr[i].note, 0);
-						chOn[port ? 1 : 0][ch][tr[i].note & 127] = 0;
-					}
+					if (tr[i].note)
+						releasePitch(port, ch, tr[i].note);
 					tr[i].note = 0;
 					tr[i].count = b2;
 					tr[i].addr = addr + 3;
@@ -1620,75 +1838,45 @@ bool SasamiConvertToSmf(const SasamiSong& song, SasamiMidiMap map, int gsBankLsb
 						break;
 					}
 					if (dest < addr) {
-						/* 短い Q/J は展開して鳴らし続ける。長い曲ループは
-						   後段で gLoopEnd まで切り、dest ノートは残さない。 */
+						/* トラックごとの Q/J。長さは揃わない。同じ戻り先の 2 周目は
+						   1 周分だけ測る。戻り先が変わったときだけ周期を取り直す（変異）。
+						   ここで短い方を殺すと、他の Q/J の途中で伴奏が終わる。 */
 						tr[i].everJump = 1;
 						tr[i].backJumps++;
-						if (tr[i].backJumps == 1) {
-							uint32_t destTick = 0xFFFFFFFFu;
-							{
-								const uint64_t lo = ((uint64_t)(unsigned)i) << 32;
-								for (int fi = 0; fi < s_firstCount; fi++) {
-									if (s_first[fi].key == (lo | dest)) {
-										destTick = s_first[fi].tick;
-										break;
-									}
-								}
-								if (destTick == 0xFFFFFFFFu) {
-									uint32_t bestA = 0xFFFFFFFFu, bestT = 0xFFFFFFFFu;
-									for (int fi = 0; fi < s_firstCount; fi++) {
-										if ((s_first[fi].key >> 32) != (uint64_t)(unsigned)i) continue;
-										const uint32_t a = (uint32_t)s_first[fi].key;
-										if (a >= dest && (a - dest) < 16 && a < bestA) {
-											bestA = a;
-											bestT = s_first[fi].tick;
-										}
-									}
-									if (bestT != 0xFFFFFFFFu)
-										destTick = bestT;
-								}
-								if (destTick == 0xFFFFFFFFu) {
-									for (int d = 1; d <= 3; d++) {
-										const uint64_t kPlus = lo | (dest + (uint32_t)d);
-										for (int fi = 0; fi < s_firstCount; fi++) {
-											if (s_first[fi].key == kPlus) {
-												destTick = s_first[fi].tick;
-												break;
-											}
-										}
-										if (destTick != 0xFFFFFFFFu) break;
-										if (dest >= (uint32_t)d) {
-											const uint64_t kMinus = lo | (dest - (uint32_t)d);
-											for (int fi = 0; fi < s_firstCount; fi++) {
-												if (s_first[fi].key == kMinus) {
-													destTick = s_first[fi].tick;
-													break;
-												}
-											}
-											if (destTick != 0xFFFFFFFFu) break;
-										}
-									}
-								}
-							}
-							if (destTick == 0xFFFFFFFFu
-								&& (dest == 0 || dest == song.tracks[i].fileOff))
-								destTick = 0;
+						const uint32_t destTick = DestFirstTick(i, dest, song.tracks[i].fileOff);
+						const uint32_t prevSt = tr[i].loopStartTick;
+						const uint32_t prevEn = tr[i].loopEndTick;
+						const int sameDest = (tr[i].loopDest == dest) ? 1 : 0;
+						uint32_t cycleOrigin = destTick;
+						if (sameDest && prevEn > 0 && prevSt == destTick && tick > prevEn)
+							cycleOrigin = prevEn;
+						uint32_t span = 0;
+						if (cycleOrigin != 0xFFFFFFFFu && tick > cycleOrigin)
+							span = tick - cycleOrigin;
+						if (span > 0 && destTick != 0xFFFFFFFFu && (!sameDest || tr[i].period == 0)) {
+							tr[i].loopDest = dest;
+							tr[i].period = span;
 							tr[i].loopStartTick = destTick;
-							tr[i].loopEndTick = tick;
-							if (tick > gLoopEnd) gLoopEnd = tick;
+							tr[i].loopEndTick = destTick + span;
 						}
-						if (tr[i].note) {
-							PushShort(tick, port, (uint8_t)(0x80 | ch), (uint8_t)tr[i].note, 0);
-							chOn[port ? 1 : 0][ch][tr[i].note & 127] = 0;
-							tr[i].note = 0;
+						/* SASAMI11 case 10: 戻る J では NoteOff しない。
+						   同じ tick で Q を実行し、そこのノート/休符が
+						   前の音を切ってから新しい音を出す。ここで切って
+						   note を捨てると、Q の NoteOn だけが残って重なる。 */
+						/* 曲として揃う tick を過ぎた J は、次の周を始めない。 */
+						if (gLoopEnd > 0 && tick >= gLoopEnd) {
+							int pending = 0;
+							for (int k = 0; k < song.trackCount && k < 64; k++) {
+								if (tr[k].alive && !tr[k].everJump) { pending = 1; break; }
+							}
+							if (!pending) {
+								killTrack(i);
+								again = 0;
+								break;
+							}
 						}
-						/* J は PC だけ戻す。CC120 は同じ ch の他トラック
-						   （S00003 は A01 が 2 本）の発音まで落とす。 */
-						if (stopLoopers && gLoopEnd > 0 && tick >= gLoopEnd) {
-							killTrack(i);
-							again = 0;
-							break;
-						}
+						if (tr[i].pass < 255) tr[i].pass++;
+						s_pushPass = tr[i].pass;
 					}
 					tr[i].addr = dest;
 					break;
@@ -1724,11 +1912,11 @@ bool SasamiConvertToSmf(const SasamiSong& song, SasamiMidiMap map, int gsBankLsb
 							PushEv(tick, port, sx, 10);
 						}
 						{
-							uint8_t sx[9] = { 0xF0, 0x43, 0x10, 0x4C, 0x02, 0x01, 0x02, b2, 0xF7 };
+							uint8_t sx[9] = { 0xF0, 0x43, 0x10, 0x4C, 0x02, 0x01, 0x0C, b2, 0xF7 };
 							PushEv(tick, port, sx, 9);
 						}
 						{
-							uint8_t sx[9] = { 0xF0, 0x43, 0x10, 0x4C, 0x02, 0x01, 0x04, b3, 0xF7 };
+							uint8_t sx[9] = { 0xF0, 0x43, 0x10, 0x4C, 0x02, 0x01, 0x02, b3, 0xF7 };
 							PushEv(tick, port, sx, 9);
 						}
 					} else if (!isGm) {
@@ -1757,11 +1945,11 @@ bool SasamiConvertToSmf(const SasamiSong& song, SasamiMidiMap map, int gsBankLsb
 							PushEv(tick, port, sx, 10);
 						}
 						{
-							uint8_t sx[9] = { 0xF0, 0x43, 0x10, 0x4C, 0x02, 0x01, 0x22, b2, 0xF7 };
+							uint8_t sx[9] = { 0xF0, 0x43, 0x10, 0x4C, 0x02, 0x01, 0x2C, b2, 0xF7 };
 							PushEv(tick, port, sx, 9);
 						}
 						{
-							uint8_t sx[9] = { 0xF0, 0x43, 0x10, 0x4C, 0x02, 0x01, 0x25, b3, 0xF7 };
+							uint8_t sx[9] = { 0xF0, 0x43, 0x10, 0x4C, 0x02, 0x01, 0x23, b3, 0xF7 };
 							PushEv(tick, port, sx, 9);
 						}
 					} else if (!isGm) {
@@ -1772,7 +1960,9 @@ bool SasamiConvertToSmf(const SasamiSong& song, SasamiMidiMap map, int gsBankLsb
 					tr[i].addr = addr + 4;
 					break;
 				}
-				case 16: // WHAT1: 原版は内部用スタブ（MIDI 出力なし）
+				case 16: // EFX。SASAMI2 は flg==0（88Pro）のときだけ 40 4n 22
+					if (lv2 && flg88 == 0 && !isGm && gsBankLsb >= 3)
+						PushGs(tick, port, 0x40, (uint8_t)(0x40 + GsPartIdx(ch)), 0x22, b1);
 					tr[i].addr = addr + 3;
 					break;
 				case 17:
@@ -1797,7 +1987,13 @@ bool SasamiConvertToSmf(const SasamiSong& song, SasamiMidiMap map, int gsBankLsb
 					tr[i].pedal = 0;
 					tr[i].addr = addr + 3;
 					break;
-				case 22: // WHAT2: 原版は内部ワーク書き込みのみ（MIDI 出力なし）
+				case 22: // Pro の CC16/CC17。SASAMI2 は flg==0 のときだけ
+					if (lv2 && flg88 == 0 && !isGm) {
+						if (b1 < 128)
+							PushShort(tick, port, (uint8_t)(0xB0 | ch), 0x10, b1);
+						if (b2 < 128)
+							PushShort(tick, port, (uint8_t)(0xB0 | ch), 0x11, b2);
+					}
 					tr[i].addr = addr + 3;
 					break;
 				case 23:
@@ -1854,10 +2050,13 @@ bool SasamiConvertToSmf(const SasamiSong& song, SasamiMidiMap map, int gsBankLsb
 					tr[i].addr = addr + 3;
 					break;
 				}
-				case 29: // KAKU1
+				case 29: // KAKU1  本家: XG は b1>5 なら CC0=b1、それ以外は 127/0
 					tr[i].drum = b1;
 					if (flg88 == 2) {
-						PushShort(tick, port, (uint8_t)(0xB0 | ch), 0, (uint8_t)((b1 != 0) ? 127 : 0));
+						if (b1 > 5)
+							PushShort(tick, port, (uint8_t)(0xB0 | ch), 0, b1);
+						else
+							PushShort(tick, port, (uint8_t)(0xB0 | ch), 0, (uint8_t)((b1 != 0) ? 127 : 0));
 						tr[i].drum = 0;
 					} else if (!isGm) {
 						PushGs(tick, port, 0x40, (uint8_t)(0x10 + GsPartIdx(ch)), 0x15, b1);
@@ -1942,7 +2141,8 @@ bool SasamiConvertToSmf(const SasamiSong& song, SasamiMidiMap map, int gsBankLsb
 					tr[i].addr = addr + 3;
 					break;
 				case 39:
-					if (b1 == flg88 || (b1 == 3 && flg88 == 0 && isGm)) {
+					if (b1 == flg88 || (b1 == 3 && flg88 == 0 && isGm)
+						|| (b1 == 3 && laBankMsb == 127)) {
 						killTrack(i);
 						again = 0;
 					} else {
@@ -1956,6 +2156,7 @@ bool SasamiConvertToSmf(const SasamiSong& song, SasamiMidiMap map, int gsBankLsb
 						const uint8_t tag = SasamiGet(song, p);
 						if (tag == (uint8_t)flg88) match = 1;
 						else if (tag == 3 && flg88 == 0 && isGm) match = 1;
+						else if (tag == 3 && laBankMsb == 127) match = 1;
 						p++;
 					}
 					if (!match) {
@@ -2109,87 +2310,51 @@ bool SasamiConvertToSmf(const SasamiSong& song, SasamiMidiMap map, int gsBankLsb
 			}
 		}
 		tick++;
-		int finiteAlive = 0, loopAlive = 0;
-		for (int i = 0; i < song.trackCount && i < 64; i++) {
-			if (!tr[i].alive) continue;
-			if (tr[i].everJump) loopAlive++;
-			else finiteAlive++;
+		{
+			/* まだ J していないトラックがいる間は終端を決めない。
+			   揃ったら、各周期の公倍数。一番長い 1 本にはしない。
+			   戻り先が変わって周期が更新されたら、次の tick で取り直す。 */
+			int pending = 0;
+			int nper = 0;
+			uint32_t lcm = 0;
+			uint32_t latestQ = 0;
+			for (int i = 0; i < song.trackCount && i < 64; i++) {
+				if (tr[i].alive && !tr[i].everJump) pending = 1;
+				if (!tr[i].period || tr[i].loopStartTick == 0xFFFFFFFFu) continue;
+				nper++;
+				lcm = lcm ? LcmU32(lcm, tr[i].period) : tr[i].period;
+				if (tr[i].loopStartTick > latestQ) latestQ = tr[i].loopStartTick;
+			}
+			enum { kLoopCap = 96000 };
+			if (!pending && nper > 0 && lcm > 0 && lcm <= (uint32_t)kLoopCap) {
+				gLoopStart = latestQ;
+				gLoopEnd = latestQ + lcm;
+			}
+			if (!pending && gLoopEnd > 0 && tick >= gLoopEnd)
+				break;
 		}
-		if (finiteAlive == 0 && loopAlive > 0)
-			stopLoopers = 1;
 		if (s_evCount >= SASAMI_MAX_EV - 256)
 			break;
 	}
 
-	/* 曲ループは長い J の塊。SMF の loopEnd は「同じ拍に揃った多数派」の
-	   最も早い J。最も遅い J に合わせるとドラム(A10)が 1 小節余計に鳴ってから Q に戻る。
-	   先に J した ch の dest（Q の再演奏）は tick>=loopEnd で捨てる。 */
-	uint32_t maxLe = 0;
-	uint32_t maxSpan = 0;
-	for (int i = 0; i < song.trackCount && i < 64; i++) {
-		if (!tr[i].everJump || tr[i].loopEndTick == 0) continue;
-		if (tr[i].loopEndTick > maxLe) maxLe = tr[i].loopEndTick;
-		const uint32_t st0 = (tr[i].loopStartTick == 0xFFFFFFFFu) ? 0 : tr[i].loopStartTick;
-		const uint32_t sp = (tr[i].loopEndTick > st0) ? (tr[i].loopEndTick - st0) : 0;
-		if (sp > maxSpan) maxSpan = sp;
+	/* 終端はシミュレーション中に決めた公倍数。ここでは一番長い Q/J に差し替えない。
+	   展開がイベント上限で先に止まったときは、届いていない終端を採用しない。 */
+	if (gLoopEnd > 0 && tick < gLoopEnd) {
+		gLoopEnd = 0;
+		gLoopStart = 0xFFFFFFFFu;
 	}
-	const uint32_t clusterFrom = (maxLe > 192u) ? (maxLe - 192u) : 0;
-	uint32_t clEnd[64];
-	uint32_t clStart[64];
-	int nCl = 0;
-	for (int i = 0; i < song.trackCount && i < 64; i++) {
-		if (!tr[i].everJump || tr[i].loopEndTick == 0) continue;
-		if (tr[i].loopEndTick < clusterFrom)
-			continue;
-		const uint32_t st = tr[i].loopStartTick;
-		const uint32_t st0 = (st == 0xFFFFFFFFu) ? 0 : st;
-		const uint32_t sp = (tr[i].loopEndTick > st0) ? (tr[i].loopEndTick - st0) : 0;
-		if (maxSpan > 0 && sp * 2 < maxSpan)
-			continue;
-		if (nCl < 64) {
-			clEnd[nCl] = tr[i].loopEndTick;
-			clStart[nCl] = st;
-			nCl++;
-		}
-	}
-	gLoopEnd = 0;
-	gLoopStart = 0xFFFFFFFFu;
-	if (nCl > 0) {
-		int bestCnt = 0;
-		uint32_t bestMin = 0;
-		for (int i = 0; i < nCl; i++) {
-			int cnt = 0;
-			uint32_t gmin = clEnd[i];
-			for (int j = 0; j < nCl; j++) {
-				const uint32_t d = (clEnd[i] > clEnd[j]) ? (clEnd[i] - clEnd[j]) : (clEnd[j] - clEnd[i]);
-				if (d <= 48u) {
-					cnt++;
-					if (clEnd[j] < gmin) gmin = clEnd[j];
-				}
-			}
-			if (cnt > bestCnt || (cnt == bestCnt && (bestCnt == 0 || gmin < bestMin))) {
-				bestCnt = cnt;
-				bestMin = gmin;
-			}
-		}
-		gLoopEnd = bestMin;
-		for (int j = 0; j < nCl; j++) {
-			const uint32_t d = (clEnd[j] > bestMin) ? (clEnd[j] - bestMin) : (bestMin - clEnd[j]);
-			if (d > 48u) continue;
-			if (clStart[j] != 0xFFFFFFFFu && clStart[j] < gLoopStart)
-				gLoopStart = clStart[j];
-		}
-	}
-	if (gLoopEnd == 0)
-		gLoopEnd = maxLe;
-	if (gLoopStart == 0xFFFFFFFFu) {
+	/* 最長 J 同士のずれが 1 小節以内なら、遅い方へ伸ばさず多数派の J で閉じる。
+	   長さは公倍数のままなので 192tick の倍数（4/4 の小節）から外れない。 */
+	if (gLoopEnd > gLoopStart) {
+		uint32_t lcm = 0;
 		for (int i = 0; i < song.trackCount && i < 64; i++) {
-			if (!tr[i].everJump || tr[i].loopEndTick == 0) continue;
-			if (tr[i].loopEndTick < clusterFrom)
-				continue;
-			const uint32_t st = tr[i].loopStartTick;
-			if (st != 0xFFFFFFFFu && st < gLoopStart)
-				gLoopStart = st;
+			if (!tr[i].period) continue;
+			lcm = lcm ? LcmU32(lcm, tr[i].period) : tr[i].period;
+		}
+		const uint32_t maj = MajorityLongEnd(tr, song.trackCount, lcm);
+		if (maj > 0) {
+			gLoopEnd = maj;
+			gLoopStart = maj - lcm;
 		}
 	}
 
@@ -2210,11 +2375,19 @@ bool SasamiConvertToSmf(const SasamiSong& song, SasamiMidiMap map, int gsBankLsb
 			else if (e.tick == cut && e.len > 0) {
 				const uint8_t st = e.bytes[0];
 				const int type = st & 0xF0;
+				/* J と同じ tick で Q を再実行した NoteOn だけ捨てる。
+				   拍頭のドラム（pass 0）まで捨てるとモニタにも乗らない。 */
+				int replay = 0;
 				if (type == 0x90) {
 					const uint8_t v = (e.len > 2) ? e.bytes[2] : 0;
-					if (!v) take = 1;
-				} else
-					take = 1;
+					/* この tick がそのトラックの Q なら、J で巻き戻した再発音。
+					   位相が Q でないトラックの音は、短い Q/J の途中なので残す。 */
+					if (v && e.pass > 0 && e.trk < 64 && tr[e.trk].period > 0
+						&& tr[e.trk].loopStartTick != 0xFFFFFFFFu && cut >= tr[e.trk].loopStartTick
+						&& ((cut - tr[e.trk].loopStartTick) % tr[e.trk].period) == 0)
+						replay = 1;
+				}
+				if (!replay) take = 1;
 			}
 			if (take) {
 				if (keepN != i) s_evs[keepN] = e;
@@ -2222,40 +2395,12 @@ bool SasamiConvertToSmf(const SasamiSong& song, SasamiMidiMap map, int gsBankLsb
 			}
 		}
 		s_evCount = keepN;
-
-		uint8_t holdNote[2][16][128];
-		int holdPed[2][16];
-		memset(holdNote, 0, sizeof(holdNote));
-		memset(holdPed, 0, sizeof(holdPed));
-		for (int i = 0; i < s_evCount; i++) {
-			const MidiEv& e = s_evs[i];
-			if (e.len == 0) continue;
-			const uint8_t st = e.bytes[0];
-			const int p = e.port ? 1 : 0;
-			const int ch = st & 0x0F;
-			const int type = st & 0xF0;
-			if (type == 0x90 || type == 0x80) {
-				const uint8_t n = (e.len > 1) ? e.bytes[1] : 0;
-				if (n >= 128) continue;
-				if (type == 0x80)
-					holdNote[p][ch][n] = 0;
-				else {
-					const uint8_t v = (e.len > 2) ? e.bytes[2] : 0;
-					holdNote[p][ch][n] = v ? 1 : 0;
-				}
-			} else if (type == 0xB0 && e.len >= 3 && e.bytes[1] == 0x40) {
-				holdPed[p][ch] = e.bytes[2];
-			}
-		}
-		for (int p = 0; p < 2; p++) {
-			for (int ch = 0; ch < 16; ch++) {
-				for (int n = 0; n < 128; n++) {
-					if (holdNote[p][ch][n])
-						PushShort(gLoopEnd, p, (uint8_t)(0x80 | ch), (uint8_t)n, 0);
-				}
-				if (holdPed[p][ch])
-					PushShort(gLoopEnd, p, (uint8_t)(0xB0 | ch), 0x40, 0);
-			}
+		{
+			/* mpy/mpw2 に拍子は無い。1 小節 = 192 tick（PPQN 48 の 4/4）。
+			   小節線はループ頭と同じ位相に置く。 */
+			const uint32_t phase = (gLoopStart == 0xFFFFFFFFu) ? 0 : (gLoopStart % 192u);
+			uint8_t ts[7] = { 0xFF, 0x58, 0x04, 0x04, 0x02, 0x18, 0x08 };
+			PushEv(phase, 0, ts, 7);
 		}
 		{
 			static const char kLoopStart[] = "loopStart";
@@ -2301,6 +2446,118 @@ bool SasamiConvertToSmf(const SasamiSong& song, SasamiMidiMap map, int gsBankLsb
 			if (me.port + 1 > nports) nports = me.port + 1;
 		}
 		(void)misaoTicks;
+	}
+
+	if (useSmfLoop) {
+		std::stable_sort(s_evs, s_evs + s_evCount, [](const MidiEv& a, const MidiEv& b) {
+			if (a.tick != b.tick) return a.tick < b.tick;
+			return a.seq < b.seq;
+		});
+		uint8_t holdNote[2][16][128];
+		int holdPed[2][16];
+		memset(holdNote, 0, sizeof(holdNote));
+		memset(holdPed, 0, sizeof(holdPed));
+		for (int i = 0; i < s_evCount; i++) {
+			const MidiEv& e = s_evs[i];
+			if (e.tick > gLoopEnd || e.len == 0) continue;
+			const uint8_t st = e.bytes[0];
+			const int p = e.port ? 1 : 0;
+			const int ch = st & 0x0F;
+			const int type = st & 0xF0;
+			if (type == 0x90 || type == 0x80) {
+				const uint8_t n = (e.len > 1) ? e.bytes[1] : 0;
+				if (n >= 128) continue;
+				if (type == 0x80)
+					holdNote[p][ch][n] = 0;
+				else {
+					const uint8_t v = (e.len > 2) ? e.bytes[2] : 0;
+					holdNote[p][ch][n] = v ? 1 : 0;
+				}
+			} else if (type == 0xB0 && e.len >= 3 && e.bytes[1] == 0x40) {
+				holdPed[p][ch] = e.bytes[2];
+			}
+		}
+		for (int p = 0; p < 2; p++) {
+			for (int ch = 0; ch < 16; ch++) {
+				for (int n = 0; n < 128; n++) {
+					if (holdNote[p][ch][n])
+						PushShort(gLoopEnd, p, (uint8_t)(0x80 | ch), (uint8_t)n, 0);
+				}
+				if (holdPed[p][ch])
+					PushShort(gLoopEnd, p, (uint8_t)(0xB0 | ch), 0x40, 0);
+				if (p < nports)
+					PushShort(gLoopEnd, p, (uint8_t)(0xB0 | ch), 0x7B, 0);
+			}
+		}
+		/* 終端の NoteOff はループ終了サンプルにあり、再生がそこを飛ばすと
+		   J の音が残ったまま Q の NoteOn が重なる。Q の tick で、まだ鳴って
+		   いる音を NoteOn より前に切る。SASAMI は同じ tick で off してから on。 */
+		{
+			uint8_t boundary[2][16][128];
+			int boundaryPed[2][16];
+			memset(boundary, 0, sizeof(boundary));
+			memset(boundaryPed, 0, sizeof(boundaryPed));
+			for (int i = 0; i < s_evCount; i++) {
+				const MidiEv& e = s_evs[i];
+				if (e.tick >= gLoopEnd || e.len == 0) continue;
+				const uint8_t st = e.bytes[0];
+				const int p = e.port ? 1 : 0;
+				const int ch = st & 0x0F;
+				const int type = st & 0xF0;
+				if (type == 0x90 || type == 0x80) {
+					const uint8_t n = (e.len > 1) ? e.bytes[1] : 0;
+					if (n >= 128) continue;
+					if (type == 0x80)
+						boundary[p][ch][n] = 0;
+					else {
+						const uint8_t v = (e.len > 2) ? e.bytes[2] : 0;
+						boundary[p][ch][n] = v ? 1 : 0;
+					}
+				} else if (type == 0xB0 && e.len >= 3 && e.bytes[1] == 0x40)
+					boundaryPed[p][ch] = e.bytes[2] ? 1 : 0;
+			}
+			for (int i = 0; i < s_evCount; i++) {
+				const MidiEv& e = s_evs[i];
+				if (e.tick != gLoopEnd || e.len == 0) continue;
+				const uint8_t st = e.bytes[0];
+				const int type = st & 0xF0;
+				if (type != 0x90) continue;
+				const uint8_t v = (e.len > 2) ? e.bytes[2] : 0;
+				const uint8_t n = (e.len > 1) ? e.bytes[1] : 0;
+				if (!v || n >= 128) continue;
+				boundary[e.port ? 1 : 0][st & 0x0F][n] = 1;
+			}
+			int minSeq = 0x7fffffff;
+			for (int i = 0; i < s_evCount; i++) {
+				if (s_evs[i].tick == gLoopStart && s_evs[i].seq < minSeq)
+					minSeq = s_evs[i].seq;
+			}
+			if (minSeq == 0x7fffffff) minSeq = 0;
+			const int firstNew = s_evCount;
+			const int savedTrk = s_pushTrk;
+			const int savedPass = s_pushPass;
+			s_pushTrk = -1;
+			s_pushPass = 0;
+			for (int p = 0; p < 2; p++) {
+				for (int ch = 0; ch < 16; ch++) {
+					if (boundaryPed[p][ch])
+						PushShort(gLoopStart, p, (uint8_t)(0xB0 | ch), 0x40, 0);
+				}
+			}
+			for (int p = 0; p < 2; p++) {
+				for (int ch = 0; ch < 16; ch++) {
+					for (int n = 0; n < 128; n++) {
+						if (boundary[p][ch][n])
+							PushShort(gLoopStart, p, (uint8_t)(0x80 | ch), (uint8_t)n, 0);
+					}
+				}
+			}
+			s_pushTrk = savedTrk;
+			s_pushPass = savedPass;
+			const int nNew = s_evCount - firstNew;
+			for (int k = 0; k < nNew; k++)
+				s_evs[firstNew + k].seq = minSeq - nNew + k;
+		}
 	}
 
 	WriteSmf(nports, out, outCap, outSize);

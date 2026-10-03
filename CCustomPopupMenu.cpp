@@ -1353,6 +1353,8 @@ BOOL CCustomPopupMenu::IsChromeCommand(UINT id) const
 		|| id == CCUSTOM_POPUP_ID_MID_KPI
 		|| id == CCUSTOM_POPUP_ID_MID_VST
 		|| id == CCUSTOM_POPUP_ID_MID_HOST
+		|| id == CCUSTOM_POPUP_ID_LA_SC
+		|| id == CCUSTOM_POPUP_ID_LA_MT32
 		|| id == CCUSTOM_POPUP_ID_CEMU_LIST
 		|| (id >= CCUSTOM_POPUP_ID_ANIM0
 			&& id < CCUSTOM_POPUP_ID_ANIM0 + (UINT)POPUP_ANIM_COUNT)
@@ -1940,6 +1942,45 @@ void CCustomPopupMenu::EnsureChromePrefix()
 			LL14(L".mid を VSTホストで保存したプリセット（32パート）で再生します", L"Play .mid via a VST Host preset (32 parts)", L"Lire .mid via un prereglage hote VST (32 parties)", L"Riproduci .mid via preset host VST (32 parti)", L"Reproducir .mid vía preset de host VST (32 partes)",
 				L".mid를 VST 호스트 프리셋(32파트)으로 재생", L"用 VST 主机保存的预设（32声部）播放 .mid", L"تشغيل .mid بإعداد مضيف VST (32 جزءًا)", L"Воспроизводить .mid пресетом VST-хоста (32 партии)", L".mid über VST-Host-Preset (32 Parts)",
 				L"Tocar .mid via preset do host VST (32 partes)", L".mid via VST-hostpreset (32 partijen)", L"Odtwarzaj .mid presetem hosta VST (32 partie)", L".mid dosyalarini VST host on ayariyla cal (32 part)"));
+		kpiSub->AddSeparator();
+		kpiSub->AddCheck(CCUSTOM_POPUP_ID_LA_SC,
+			LL14(L"LAをMIDI出力: SCのバンク127", L"LA on MIDI out: SC bank 127", L"LA vers MIDI: banque SC 127", L"LA su MIDI: banco SC 127", L"LA a MIDI: banco SC 127",
+				L"LA MIDI 출력: SC 뱅크 127", L"LA 到 MIDI 输出: SC 库 127", L"LA إلى MIDI: بنك SC 127", L"LA на MIDI: банк SC 127", L"LA an MIDI: SC-Bank 127",
+				L"LA no MIDI: banco SC 127", L"LA naar MIDI: SC-bank 127", L"LA na MIDI: bank SC 127", L"LA MIDI cikis: SC banka 127"),
+			savedata.laMapperMt32 == 0,
+			LL14(L"GS/XG の VST が空で MIDI マッパーへ出すとき、LA を SC-55/SC-VA と同じ MSB 127 / LSB 0 で送ります。VST 再生は常にバンク 127 です。",
+				L"When GS/XG VSTs are empty and output is the MIDI mapper, send LA as MSB 127 / LSB 0 (SC-55/SC-VA). VST playback always uses bank 127.",
+				L"Si les VST GS/XG sont vides, envoyer LA en MSB 127 / LSB 0. La lecture VST utilise toujours la banque 127.",
+				L"Se i VST GS/XG sono vuoti, invia LA come MSB 127 / LSB 0. La riproduzione VST usa sempre la banca 127.",
+				L"Si los VST GS/XG estan vacios, envia LA como MSB 127 / LSB 0. La reproduccion VST siempre usa el banco 127.",
+				L"GS/XG VST가 비어 MIDI 매퍼로 낼 때 LA를 MSB 127 / LSB 0으로 보냅니다. VST 재생은 항상 뱅크 127입니다.",
+				L"GS/XG VST 为空、走 MIDI 映射器时，LA 用 MSB 127 / LSB 0。VST 播放始终用库 127。",
+				L"عند فراغ VST GS/XG يُرسل LA كـ MSB 127 / LSB 0. تشغيل VST يستخدم دائمًا البنك 127.",
+				L"Если VST GS/XG пусты, LA идёт как MSB 127 / LSB 0. VST всегда использует банк 127.",
+				L"Wenn GS/XG-VSTs leer sind, LA als MSB 127 / LSB 0. VST-Wiedergabe nutzt immer Bank 127.",
+				L"Se os VST GS/XG estiverem vazios, envia LA como MSB 127 / LSB 0. A reproducao VST usa sempre o banco 127.",
+				L"Als GS/XG-VST leeg is, LA als MSB 127 / LSB 0. VST-weergave gebruikt altijd bank 127.",
+				L"Gdy VST GS/XG sa puste, LA jako MSB 127 / LSB 0. Odtwarzanie VST zawsze uzywa banku 127.",
+				L"GS/XG VST bosken LA MSB 127 / LSB 0 gider. VST calma her zaman banka 127 kullanir."));
+		kpiSub->AddCheck(CCUSTOM_POPUP_ID_LA_MT32,
+			LL14(L"LAをMIDI出力: 実機MT-32", L"LA on MIDI out: real MT-32", L"LA vers MIDI: vrai MT-32", L"LA su MIDI: MT-32 reale", L"LA a MIDI: MT-32 real",
+				L"LA MIDI 출력: 실제 MT-32", L"LA 到 MIDI 输出: 真 MT-32", L"LA إلى MIDI: MT-32 حقيقي", L"LA на MIDI: настоящий MT-32", L"LA an MIDI: echtes MT-32",
+				L"LA no MIDI: MT-32 real", L"LA naar MIDI: echte MT-32", L"LA na MIDI: prawdziwy MT-32", L"LA MIDI cikis: gercek MT-32"),
+			savedata.laMapperMt32 != 0,
+			LL14(L"MIDI マッパー先が実機 MT-32 のとき。バンクセレクトを出さずプログラムだけ送ります。SC モジュールか MT-32 かは自動では分かりません。",
+				L"When the MIDI mapper goes to a real MT-32. Program changes only, no bank select. SC module vs MT-32 cannot be detected.",
+				L"Si le mapper MIDI va vers un vrai MT-32. Pas de bank select. Impossible de distinguer un module SC.",
+				L"Se il mapper MIDI va a un MT-32 reale. Nessun bank select. Non si distingue un modulo SC.",
+				L"Si el mapper MIDI va a un MT-32 real. Sin bank select. No se distingue un modulo SC.",
+				L"MIDI 매퍼가 실제 MT-32일 때. 뱅크 셀렉트 없이 프로그램만 보냅니다. SC 모듈과 구별할 수 없습니다.",
+				L"MIDI 映射器接到真 MT-32 时。不发库选择，只发程序。无法自动分辨 SC 模块。",
+				L"عندما يذهب المُعيِّن إلى MT-32 حقيقي. بدون اختيار بنك. لا يمكن تمييز وحدة SC.",
+				L"Если маппер идёт на настоящий MT-32. Без выбора банка. Модуль SC не отличить.",
+				L"Wenn der Mapper an ein echtes MT-32 geht. Kein Bank Select. SC-Modul ist nicht erkennbar.",
+				L"Se o mapper MIDI for para um MT-32 real. Sem bank select. Nao da para distinguir um modulo SC.",
+				L"Als de MIDI-mapper naar een echte MT-32 gaat. Geen bank select. Een SC-module is niet te zien.",
+				L"Gdy mapper MIDI idzie do prawdziwego MT-32. Bez bank select. Modulu SC nie da sie rozpoznac.",
+				L"MIDI esleyici gercek MT-32 ise. Banka secimi yok. SC modul ayirt edilemez."));
 	}
 
 	/* exe 隣に arcdata.zip があるときだけ Cemu対応一覧 */
@@ -4307,6 +4348,18 @@ BOOL CCustomPopupMenu::HandleChromeClick(int idx)
 			extern void CEmuRequestMidiEngineReplay();
 			CEmuRequestMidiEngineReplay();
 		}
+		InvalidateBgOnly();
+		return TRUE;
+	}
+	if (it.id == CCUSTOM_POPUP_ID_LA_SC || it.id == CCUSTOM_POPUP_ID_LA_MT32) {
+		savedata.laMapperMt32 = (it.id == CCUSTOM_POPUP_ID_LA_MT32) ? 1 : 0;
+		for (int i = 0; i < m_itemCount; ++i) {
+			CCustomPopupItem& x = m_items[i];
+			if (x.id == CCUSTOM_POPUP_ID_LA_SC) x.checked = (savedata.laMapperMt32 == 0) ? TRUE : FALSE;
+			if (x.id == CCUSTOM_POPUP_ID_LA_MT32) x.checked = (savedata.laMapperMt32 != 0) ? TRUE : FALSE;
+		}
+		StartCheckBounce(idx);
+		MpPersistSavedataQuick();
 		InvalidateBgOnly();
 		return TRUE;
 	}

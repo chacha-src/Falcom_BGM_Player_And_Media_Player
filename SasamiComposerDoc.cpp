@@ -1172,6 +1172,379 @@ static int LenToTicks(int len, int defLen, int dots)
 	return ticks;
 }
 
+/* MICP $ / ( ) — GS DT1 and XG parameter sysex. Checksum is Roland 128-(sum&7F). */
+static int ScClamp127(int v)
+{
+	if (v < 0) return 0;
+	if (v > 127) return 127;
+	return v;
+}
+
+static int ScIsAz(wchar_t c)
+{
+	return (c >= L'A' && c <= L'Z') || (c >= L'a' && c <= L'z');
+}
+
+static int ScEqI(wchar_t c, wchar_t up)
+{
+	return c == up || c == (wchar_t)(up + (L'a' - L'A'));
+}
+
+static void ScSkipSp(const wchar_t** pp, int* line)
+{
+	const wchar_t* p = *pp;
+	while (*p == L' ' || *p == L'\t' || *p == L'\r' || *p == L'\n') {
+		if (*p == L'\n' && line) (*line)++;
+		p++;
+	}
+	*pp = p;
+}
+
+static int ScParseHexByte(const wchar_t** pp)
+{
+	const wchar_t* p = *pp;
+	if (!IsHexDigit(*p)) return -1;
+	int v = HexVal(*p++);
+	if (IsHexDigit(*p)) v = v * 16 + HexVal(*p++);
+	*pp = p;
+	return v;
+}
+
+/* Decimal, or a hex byte when the token contains A–F (old $(I examples use 7f). */
+static int ScParseDecOrHex(const wchar_t** pp)
+{
+	const wchar_t* p = *pp;
+	int hexish = 0, n = 0;
+	while (IsHexDigit(p[n]) && n < 4) {
+		wchar_t c = p[n];
+		if ((c >= L'a' && c <= L'f') || (c >= L'A' && c <= L'F')) hexish = 1;
+		n++;
+	}
+	if (n <= 0) return -1;
+	if (hexish) {
+		if (n > 2) n = 2;
+		int v = 0;
+		for (int i = 0; i < n; i++) v = v * 16 + HexVal(p[i]);
+		*pp = p + n;
+		return v;
+	}
+	return ParseInt(pp);
+}
+
+struct ScFld { int on; int v; };
+
+/* Read comma fields until ')'. Empty ,, keeps the default (on=0). */
+static int ScParseFieldRun(const wchar_t** pp, int* line, ScFld* f, int max, int hexOnly)
+{
+	const wchar_t* p = *pp;
+	int n = 0;
+	while (*p) {
+		ScSkipSp(&p, line);
+		if (*p == L')') { p++; *pp = p; return n; }
+		if (n >= max) return -1;
+		if (*p == L',') {
+			f[n].on = 0;
+			f[n].v = 0;
+			n++;
+			p++;
+			continue;
+		}
+		int v = hexOnly ? ScParseHexByte(&p) : ScParseDecOrHex(&p);
+		if (v < 0) return -1;
+		f[n].on = 1;
+		f[n].v = ScClamp127(v);
+		n++;
+		ScSkipSp(&p, line);
+		if (*p == L',') p++;
+	}
+	return -1;
+}
+
+static int ScParseParenFields(const wchar_t** pp, int* line, ScFld* f, int max, int hexOnly)
+{
+	const wchar_t* p = *pp;
+	ScSkipSp(&p, line);
+	if (*p != L'(') return -1;
+	p++;
+	*pp = p;
+	return ScParseFieldRun(pp, line, f, max, hexOnly);
+}
+
+static int ScEmitGs(ScMidiDoc* out, uint32_t tick, int ch, int hi, int bb, int addr, const uint8_t* data, int n)
+{
+	if (n <= 0) return 1;
+	if (n > 32) n = 32;
+	uint8_t msg[48];
+	msg[0] = 0xF0;
+	msg[1] = 0x41;
+	msg[2] = 0x10;
+	msg[3] = 0x42;
+	msg[4] = 0x12;
+	msg[5] = (uint8_t)(hi & 0x7F);
+	msg[6] = (uint8_t)(bb & 0x7F);
+	msg[7] = (uint8_t)(addr & 0x7F);
+	int sum = msg[5] + msg[6] + msg[7];
+	for (int i = 0; i < n; i++) {
+		msg[8 + i] = (uint8_t)(data[i] & 0x7F);
+		sum += msg[8 + i];
+	}
+	msg[8 + n] = (uint8_t)((128 - (sum & 0x7F)) & 0x7F);
+	msg[9 + n] = 0xF7;
+	return ScMidiAddSysex(out, tick, ch, msg, 10 + n);
+}
+
+static int ScEmitXg(ScMidiDoc* out, uint32_t tick, int ch, int addr, const uint8_t* data, int n)
+{
+	if (n <= 0) return 1;
+	if (n > 32) n = 32;
+	uint8_t msg[48];
+	msg[0] = 0xF0;
+	msg[1] = 0x43;
+	msg[2] = 0x10;
+	msg[3] = 0x4C;
+	msg[4] = 0x02;
+	msg[5] = 0x01;
+	msg[6] = (uint8_t)(addr & 0x7F);
+	for (int i = 0; i < n; i++)
+		msg[7 + i] = (uint8_t)(data[i] & 0x7F);
+	msg[7 + n] = 0xF7;
+	return ScMidiAddSysex(out, tick, ch, msg, 8 + n);
+}
+
+static int ScEmitRuns(ScMidiDoc* out, uint32_t tick, int ch, int xg, int hi, int bb,
+	const int* ad, const int* vl, int n)
+{
+	int i = 0;
+	while (i < n) {
+		const int a0 = ad[i];
+		uint8_t buf[32];
+		int run = 0;
+		while (i < n && run < 32 && ad[i] == a0 + run) {
+			buf[run++] = (uint8_t)(vl[i] & 0x7F);
+			i++;
+		}
+		if (run <= 0) { i++; continue; }
+		int ok = xg ? ScEmitXg(out, tick, ch, a0, buf, run)
+			: ScEmitGs(out, tick, ch, hi, bb, a0, buf, run);
+		if (!ok) return 0;
+	}
+	return 1;
+}
+
+static int ScFieldsToPairs(const int* map, int mapN, const ScFld* f, int fn, int* ad, int* vl)
+{
+	int n = 0;
+	int lim = (fn < mapN) ? fn : mapN;
+	for (int i = 0; i < lim; i++) {
+		if (map[i] < 0 || !f[i].on) continue;
+		ad[n] = map[i];
+		vl[n] = f[i].v;
+		n++;
+	}
+	return n;
+}
+
+/* GS part block: n==0 is part 10, 1–9 are parts 1–9, 10–15 are parts 11–16. */
+static int ScGsPartBb(int ch)
+{
+	int c = ch & 15;
+	int n = (c == 9) ? 0 : (c < 9 ? c + 1 : c);
+	return 0x40 + n;
+}
+
+static const wchar_t* ScDollarVel(const wchar_t** pp, int* line, ScMidiDoc* out, uint32_t tick, int ch, int* vel, int sign)
+{
+	const wchar_t* p = *pp;
+	ScSkipSp(&p, line);
+	int n = ParseInt(&p);
+	if (n < 0) return sign < 0 ? L"$( velocity" : L"$) velocity";
+	*vel += sign * n;
+	if (*vel < 0) *vel = 0;
+	if (*vel > 127) *vel = 127;
+	*pp = p;
+	if (!ScPush(out->ev, &out->evCount, tick, (uint8_t)ch, SC_EV_VELO, (uint8_t)(*vel), 0, 0, 0))
+		return L"overflow";
+	return NULL;
+}
+
+static const wchar_t* ScDollarCc(const wchar_t** pp, int* line, ScMidiDoc* out, uint32_t tick, int ch, int cc)
+{
+	const wchar_t* p = *pp;
+	ScSkipSp(&p, line);
+	int n = ParseInt(&p);
+	if (n < 0) return L"$ value";
+	*pp = p;
+	/* Classic CC: do not force .mpsmv. Stream cmd 41 still plays. */
+	if (!ScPush(out->ev, &out->evCount, tick, (uint8_t)ch, SC_EV_CC,
+		(uint8_t)cc, (uint8_t)ScClamp127(n), 0, 0))
+		return L"overflow";
+	return NULL;
+}
+
+static const wchar_t* ScDollarGsFx(const wchar_t** pp, int* line, ScMidiDoc* out, uint32_t tick, int ch,
+	const int* map, int mapN)
+{
+	ScFld f[16];
+	int n = ScParseParenFields(pp, line, f, mapN, 0);
+	if (n < 0) return L"$GS";
+	int ad[16], vl[16];
+	int np = ScFieldsToPairs(map, mapN, f, n, ad, vl);
+	if (np > 0 && !ScEmitRuns(out, tick, ch, 0, 0x40, 0x01, ad, vl, np)) return L"overflow";
+	return NULL;
+}
+
+static const wchar_t* ScDollarXgFx(const wchar_t** pp, int* line, ScMidiDoc* out, uint32_t tick, int ch,
+	int typeAddr, int maxParam)
+{
+	ScFld f[20];
+	int n = ScParseParenFields(pp, line, f, 1 + maxParam, 1);
+	if (n < 0) return L"$XG";
+	if (n < 1 || !f[0].on || f[0].v == 0) return L"$XG type";
+	int ad[20], vl[20];
+	int np = 0;
+	ad[np] = typeAddr; vl[np] = f[0].v; np++;
+	ad[np] = typeAddr + 1; vl[np] = 0; np++;
+	for (int i = 1; i < n && (i - 1) < maxParam; i++) {
+		if (!f[i].on) continue;
+		ad[np] = (typeAddr + 2) + (i - 1);
+		vl[np] = f[i].v;
+		np++;
+	}
+	if (!ScEmitRuns(out, tick, ch, 1, 0, 0, ad, vl, np)) return L"overflow";
+	return NULL;
+}
+
+/* Returns NULL when *pp is advanced. A lone '$' that is not a command is consumed as a separator. */
+static const wchar_t* ScParseMicpDollar(const wchar_t** pp, int* line, ScMidiDoc* out, uint32_t tick, int ch, int* vel)
+{
+	const wchar_t* p = *pp;
+	if (*p != L'$') return L"$";
+	p++;
+	while (*p == L' ' || *p == L'\t') p++;
+
+	if (*p == L'(') {
+		p++;
+		while (*p == L' ' || *p == L'\t') p++;
+		if (*p == L'I' || *p == L'i') {
+			p++;
+			while (*p == L' ' || *p == L'\t') p++;
+			int typ = ScParseDecOrHex(&p);
+			if (typ < 0) return L"$(I";
+			ScFld f[24];
+			int fn = 0;
+			while (*p == L' ' || *p == L'\t') p++;
+			if (*p == L':') {
+				p++;
+				*pp = p;
+				fn = ScParseFieldRun(pp, line, f, 24, 0);
+				if (fn < 0) return L"$(I";
+				p = *pp;
+			} else if (*p == L')') {
+				p++;
+			} else {
+				return L"$(I";
+			}
+			int ad[25], vl[25];
+			int np = 0;
+			ad[np] = 0; vl[np] = ScClamp127(typ); np++;
+			for (int i = 0; i < fn && i < 23; i++) {
+				if (!f[i].on) continue;
+				ad[np] = 1 + i;
+				vl[np] = f[i].v;
+				np++;
+			}
+			*pp = p;
+			if (!ScEmitRuns(out, tick, ch, 0, 0x40, 0x03, ad, vl, np)) return L"overflow";
+			return NULL;
+		}
+		*pp = p;
+		return ScDollarVel(pp, line, out, tick, ch, vel, -1);
+	}
+	if (*p == L')') {
+		p++;
+		*pp = p;
+		return ScDollarVel(pp, line, out, tick, ch, vel, +1);
+	}
+	if (*p == L'+') {
+		p++;
+		*pp = p;
+		return ScDollarCc(pp, line, out, tick, ch, 16);
+	}
+	if (*p == L'#') {
+		p++;
+		*pp = p;
+		return ScDollarCc(pp, line, out, tick, ch, 17);
+	}
+	if (*p == L'L') {
+		p++;
+		*pp = p;
+		if (!ScPush(out->ev, &out->evCount, tick, (uint8_t)ch, SC_EV_CC, 68, 127, 0, 0))
+			return L"overflow";
+		return NULL;
+	}
+	if (*p == L'l') {
+		p++;
+		*pp = p;
+		if (!ScPush(out->ev, &out->evCount, tick, (uint8_t)ch, SC_EV_CC, 68, 0, 0, 0))
+			return L"overflow";
+		return NULL;
+	}
+	if (ScEqI(*p, L'M') && (IsDigit(p[1]) || p[1] == L' ' || p[1] == L'\t')) {
+		p++;
+		*pp = p;
+		ScSkipSp(pp, line);
+		int n = ParseInt(pp);
+		if (n < 0) return L"$M";
+		if (n > 127) n = 127;
+		/* MPY cmd 39: player drops the rest of the track when the map matches. */
+		if (!ScPush(out->ev, &out->evCount, tick, (uint8_t)ch, SC_EV_COMMENT, (uint8_t)n, 0, 0, 39))
+			return L"overflow";
+		return NULL;
+	}
+	if (ScEqI(*p, L'I') && !ScIsAz(p[1])) {
+		p++;
+		*pp = p;
+		ScSkipSp(pp, line);
+		int n = ParseInt(pp);
+		if (n < 0) return L"$I";
+		uint8_t v = (uint8_t)(n ? 1 : 0);
+		int hi = (ch >= 16) ? 0x50 : 0x40;
+		if (!ScEmitGs(out, tick, ch, hi, ScGsPartBb(ch), 0x22, &v, 1)) return L"overflow";
+		return NULL;
+	}
+	if (p[0] && p[1]) {
+		int rg = ScEqI(p[0], L'R') && ScEqI(p[1], L'G');
+		int cg = ScEqI(p[0], L'C') && ScEqI(p[1], L'G');
+		int vg = ScEqI(p[0], L'V') && ScEqI(p[1], L'G');
+		int rx = ScEqI(p[0], L'R') && ScEqI(p[1], L'X');
+		int cx = ScEqI(p[0], L'C') && ScEqI(p[1], L'X');
+		int vx = ScEqI(p[0], L'V') && ScEqI(p[1], L'X');
+		if (rg || cg || vg || rx || cx || vx) {
+			p += 2;
+			*pp = p;
+			if (rg) {
+				static const int map[] = { 0x30, 0x32, 0x33, 0x34, 0x35, 0x37 };
+				return ScDollarGsFx(pp, line, out, tick, ch, map, 6);
+			}
+			if (cg) {
+				/* Help lists TIME as field 4. GS chorus has no TIME address, so that slot is not sent. */
+				static const int map[] = { 0x38, 0x39, 0x3A, -1, 0x3B, 0x3C, 0x3D, 0x3E, 0x3F, 0x40 };
+				return ScDollarGsFx(pp, line, out, tick, ch, map, 10);
+			}
+			if (vg) {
+				static const int map[] = { 0x50, 0x51, 0x52, 0x53, 0x54, 0x55, 0x56, 0x57, 0x58, 0x59, 0x5A };
+				return ScDollarGsFx(pp, line, out, tick, ch, map, 11);
+			}
+			if (rx) return ScDollarXgFx(pp, line, out, tick, ch, 0x00, 13);
+			if (cx) return ScDollarXgFx(pp, line, out, tick, ch, 0x20, 10);
+			return ScDollarXgFx(pp, line, out, tick, ch, 0x40, 16);
+		}
+	}
+	/* Not a $ command (bar mark in a dump). Leave the next character. */
+	*pp = p;
+	return NULL;
+}
+
 /* SASAMI tempo: T ≈ 13000 at 120BPM → T = 13000 * 120 / bpm */
 static int BpmToT(int bpm)
 {
@@ -1280,8 +1653,13 @@ int ScCompileMidiMml(const wchar_t* text, ScMidiDoc* out, int* errLine, wchar_t*
 				0, 0, 0, 0)) return fail(L"overflow");
 			continue;
 		}
-		/* bar / visual separators in MICP dumps */
-		if (*p == L'|' || *p == L'~' || *p == L'$') { p++; continue; }
+		/* bar / visual separators in MICP dumps. '$' is a command unless it is not one of the MICP forms. */
+		if (*p == L'|' || *p == L'~') { p++; continue; }
+		if (*p == L'$') {
+			const wchar_t* derr = ScParseMicpDollar(&p, &line, out, tick[ch], ch, &vel);
+			if (derr) return fail(derr);
+			continue;
+		}
 
 		/* title TIT"..." */
 		if ((p[0] == L'T' || p[0] == L't') && (p[1] == L'I' || p[1] == L'i') && (p[2] == L'T' || p[2] == L't')
@@ -1780,6 +2158,17 @@ int ScCompileMidiMml(const wchar_t* text, ScMidiDoc* out, int* errLine, wchar_t*
 					continue;
 				}
 			}
+			/* @N n — MICP note velocity. @NRPN is handled above. */
+			if ((*p == L'N' || *p == L'n') && !ScIsAz(p[1])) {
+				p++;
+				int n = ParseInt(&p);
+				if (n < 0) n = 100;
+				if (n > 127) n = 127;
+				vel = n;
+				if (!ScPush(out->ev, &out->evCount, tick[ch], (uint8_t)ch, SC_EV_VELO,
+					(uint8_t)vel, 0, 0, 0)) return fail(L"overflow");
+				continue;
+			}
 			/* other @letter — skip args + optional {...} */
 			if ((*p >= L'A' && *p <= L'Z') || (*p >= L'a' && *p <= L'z')) {
 				p++;
@@ -2008,9 +2397,19 @@ int ScCompileMidiMml(const wchar_t* text, ScMidiDoc* out, int* errLine, wchar_t*
 			continue;
 		}
 
-		/* skip parenthetical / underscore / MICP separators lightly.
-		   Do NOT skip ':' alone before digits — that made {:N become bare digits. */
-		if (*p == L'(' || *p == L')' || *p == L'_' || *p == L'!' || *p == L'=' || *p == L'"' || *p == L'`') {
+		/* MICP sustain. ( opens, ) closes. $( and $) are velocity and already consumed. */
+		if (*p == L'(') {
+			p++;
+			if (!ScMidiAddPedalOn(out, tick[ch], ch, 1)) return fail(L"overflow");
+			continue;
+		}
+		if (*p == L')') {
+			p++;
+			if (!ScMidiAddPedalOff(out, tick[ch], ch, 1)) return fail(L"overflow");
+			continue;
+		}
+		/* underscore / MICP separators. Do NOT skip ':' alone — that made {:N become bare digits. */
+		if (*p == L'_' || *p == L'!' || *p == L'=' || *p == L'"' || *p == L'`') {
 			p++;
 			continue;
 		}
@@ -3618,7 +4017,8 @@ int ScMidiDocToWrite(const ScMidiDoc* d, SasamiWriteMidi* w)
 			if (cmd == 13 || cmd == 14) {
 				uint8_t t[4] = { (uint8_t)cmd, e->a, e->b, (uint8_t)(e->c & 0x7F) };
 				if (!SasamiStreamPut(s, t, 4)) return 0;
-			} else if (cmd == 16 || cmd == 17) {
+			} else if (cmd == 16 || cmd == 17 || cmd == 39) {
+				/* 39 = MICP $M: player kills the track when the map matches. */
 				if (!SasamiStreamPut3(s, (uint8_t)cmd, e->a, 0)) return 0;
 			}
 			break;
@@ -4742,7 +5142,10 @@ static int ScMidiDocToMmlImpl(const ScMidiDoc* d, wchar_t* out, int outCch, int 
 				case 1: ScAppendF(out, outCch, &len, L"@MOD %d ", (int)e.b); break;
 				case 5: ScAppendF(out, outCch, &len, L"@PORT %d ", (int)e.b); break;
 				case 11: ScAppendF(out, outCch, &len, L"@EXP %d ", (int)e.b); break;
+				case 16: ScAppendF(out, outCch, &len, L"$+%d ", (int)e.b); break;
+				case 17: ScAppendF(out, outCch, &len, L"$#%d ", (int)e.b); break;
 				case 65: ScAppendF(out, outCch, &len, L"@PORTA %d ", (int)e.b); break;
+				case 68: ScAppend(out, outCch, &len, ((int)e.b >= 64) ? L"$L " : L"$l "); break;
 				case 66: ScAppendF(out, outCch, &len, L"@SOST %d ", (int)e.b); break;
 				case 67: ScAppendF(out, outCch, &len, L"@SOFT %d ", (int)e.b); break;
 				case 91: ScAppendF(out, outCch, &len, L"@REV %d ", (int)e.b); break;
@@ -4815,6 +5218,11 @@ static int ScMidiDocToMmlImpl(const ScMidiDoc* d, wchar_t* out, int outCch, int 
 			if (e.kind == SC_EV_NRPN) {
 				emitGap(e.tick);
 				ScAppendF(out, outCch, &len, L"@NRPN %u,%u,%u ", (unsigned)e.a, (unsigned)e.b, (unsigned)e.c);
+				continue;
+			}
+			if (e.kind == SC_EV_COMMENT && e.dur == 39) {
+				emitGap(e.tick);
+				ScAppendF(out, outCch, &len, L"$M%d ", (int)e.a);
 				continue;
 			}
 			if (e.kind == SC_EV_SYSEX) {
@@ -5125,7 +5533,10 @@ int ScFmDocToMml(const ScFmDoc* d, wchar_t* out, int outCch)
 				case 1: ScAppendF(out, outCch, &len, L"@MOD %d ", (int)e.b); break;
 				case 5: ScAppendF(out, outCch, &len, L"@PORT %d ", (int)e.b); break;
 				case 11: ScAppendF(out, outCch, &len, L"@EXP %d ", (int)e.b); break;
+				case 16: ScAppendF(out, outCch, &len, L"$+%d ", (int)e.b); break;
+				case 17: ScAppendF(out, outCch, &len, L"$#%d ", (int)e.b); break;
 				case 65: ScAppendF(out, outCch, &len, L"@PORTA %d ", (int)e.b); break;
+				case 68: ScAppend(out, outCch, &len, ((int)e.b >= 64) ? L"$L " : L"$l "); break;
 				case 66: ScAppendF(out, outCch, &len, L"@SOST %d ", (int)e.b); break;
 				case 67: ScAppendF(out, outCch, &len, L"@SOFT %d ", (int)e.b); break;
 				case 91: ScAppendF(out, outCch, &len, L"@REV %d ", (int)e.b); break;

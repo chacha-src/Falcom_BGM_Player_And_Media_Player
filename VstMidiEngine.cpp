@@ -8,6 +8,12 @@
 #include "Sf2Vst2.h"
 #include "kb_sasami/source/sasami_midi.h"
 #include "kb_sasami/source/sasami_file.h"
+
+/* CRender の GS VST 欄。空なら .mpy/.mpw2 の自動マップは XG。 */
+extern "C" int SasamiHostGsVstReady(void)
+{
+	return (savedata.vstMultiDll[0] != 0) ? 1 : 0;
+}
 #include <vector>
 #include <string>
 
@@ -2498,8 +2504,11 @@ static int LoadSmf(const wchar_t* path)
 		BYTE have[2048];
 		unsigned short pairs[256];
 		int nPairs = 0, hasGm = 0, hasGs = 0, hasSd = 0, hasGm2 = 0, cc32Max = 0;
+		int laMsbCh = 0;
+		BYTE laSeen[32];
 		memset(msb, 0, sizeof(msb));
 		memset(have, 0, sizeof(have));
+		memset(laSeen, 0, sizeof(laSeen));
 		for (int i = 0; i < count; ++i) {
 			if ((ev[i].msg & 0xff) == 0xf0 && ev[i].sysexOff >= 0) {
 				const int n = (int)ev[i].aux;
@@ -2528,6 +2537,10 @@ static int LoadSmf(const wchar_t* path)
 				msb[idx] = (BYTE)d2;
 				if (VstMidiBankMsbIsSdNative(d2)) hasSd = 1;
 				if (d2 == 121) hasGm2 = 1;
+				if (!drum && d2 == 127 && !laSeen[idx]) {
+					laSeen[idx] = 1;
+					laMsbCh++;
+				}
 			} else if (st == 0xb0 && d1 == 32) {
 				if (!drum && d2 >= 1 && d2 <= 4 && d2 > cc32Max) cc32Max = d2;
 			} else if (st == 0xc0 && !drum) {
@@ -2553,6 +2566,11 @@ static int LoadSmf(const wchar_t* path)
 		else if ((mapHint == 5 || hasGm) && !hasGs) resolved = 5;
 		else if (mapHint == 6 || hasSd) resolved = 6;
 		else resolved = VstMidiGsMapDropFromUsed(pairs, nPairs, cc32Max);
+		/* ささみ LA 変換は MT-32 SysEx を出さず MSB 127 を全メロディに載せる。
+		   それで songLa を立て、再生開始の GS Reset のあとにもバンク 127 を出す。 */
+		if (!hasXg && laMsbCh >= 8 && resolved != 8 &&
+			!(resolved >= 1 && resolved <= 4))
+			resolved = 8;
 		g_eng.songGm = (resolved == 9) ? 2 : ((resolved == 5) ? 1 : 0);
 		g_eng.songLa = (resolved == 8) ? 1 : 0;
 		g_eng.gsMapLsb = (resolved >= 1 && resolved <= 4) ? resolved : 0;
@@ -2945,6 +2963,14 @@ static BYTE g_rxPort[2][3][16];
 static BYTE g_rxExplicit[2][3][16];
 static BYTE g_vstOn[2][3][16][128];
 static BYTE g_vstHeldFlushed[2];
+/* ループ折り返しの NoteOff は、次の Dispatch の先頭（Q の NoteOn と同じ
+   processEvents）に載せる。ここで先に processEvents すると VST2 は
+   最後の 1 回しか残さず、J が切れる前に Q が鳴る。 */
+static int g_loopReleasePending[2];
+/* 直近の CC0 / CC32。変動バンクを LSB 付きの 14bit にして空スロットへ
+   落とす音源向けに、PC の直前だけ LSB を 0 に戻す。 */
+static BYTE g_vstCc0[2][3][16];
+static BYTE g_vstCc32[2][3][16];
 
 static int GsPartXToCh(int bb)
 {
@@ -2965,7 +2991,10 @@ static void RxListenInit()
 			g_rxExplicit[s][u][p] = 0;
 		}
 		ZeroMemory(g_vstOn[s][u], sizeof(g_vstOn[s][u]));
+		ZeroMemory(g_vstCc0[s][u], sizeof(g_vstCc0[s][u]));
+		ZeroMemory(g_vstCc32[s][u], sizeof(g_vstCc32[s][u]));
 	}
+	g_loopReleasePending[s] = 0;
 }
 
 static void RxChReset()
@@ -2979,7 +3008,10 @@ static void RxChReset()
 			g_rxExplicit[s][u][p] = 0;
 		}
 		ZeroMemory(g_vstOn[s][u], sizeof(g_vstOn[s][u]));
+		ZeroMemory(g_vstCc0[s][u], sizeof(g_vstCc0[s][u]));
+		ZeroMemory(g_vstCc32[s][u], sizeof(g_vstCc32[s][u]));
 	}
+	g_loopReleasePending[s] = 0;
 }
 
 static void RxListenSet(int unit, int bb, BYTE v)
@@ -3617,6 +3649,8 @@ extern "C" void VstLiveScanRelease(void)
 	LeaveCriticalSection(&g_liveScanCs);
 }
 
+static void MapperShort(DWORD msg);
+
 namespace {
 
 static void EmitSongShort(int port, DWORD msg, __int64 start, int frames, int ofs)
@@ -3745,16 +3779,7 @@ static void DispatchDueEvents(__int64 start, int frames)
 		*used += srcLen;
 		batch[(*n)++] = it;
 	};
-	auto routeShort = [&](MidiItem e) {
-		if ((e.msg & 0xff) == 0xff) return;
-		if (liveBinds) {
-			int port = e.port < 0 ? 0 : e.port;
-			if (port > 1) port = 1;
-			VstLiveMidiSongShort(port, e.msg);
-			return;
-		}
-		if (g_eng.midiOut && (e.port <= 0 || !g_eng.effectB))
-			midiOutShortMsg(g_eng.midiOut, e.msg);
+	auto pushUnit = [&](MidiItem e) {
 		const int port = e.port < 0 ? 0 : e.port;
 		if (port <= 0) {
 			if (UnitHasPlug(0)) n0 = VstTrackPush(batch0, n0, SONG_BATCH, 0, e);
@@ -3765,6 +3790,43 @@ static void DispatchDueEvents(__int64 start, int frames)
 		} else {
 			if (UnitHasPlug(2)) n2 = VstTrackPush(batch2, n2, SONG_BATCH, 2, e);
 		}
+	};
+	auto routeShort = [&](MidiItem e) {
+		if ((e.msg & 0xff) == 0xff) return;
+		if (liveBinds) {
+			int port = e.port < 0 ? 0 : e.port;
+			if (port > 1) port = 1;
+			VstLiveMidiSongShort(port, e.msg);
+			return;
+		}
+		if (g_eng.midiOut && (e.port <= 0 || !g_eng.effectB))
+			MapperShort(e.msg);
+		const int st = (int)(e.msg & 0xf0);
+		const int ch = (int)(e.msg & 0x0f);
+		int unit = e.port < 0 ? 0 : e.port;
+		if (unit < 0) unit = 0;
+		if (unit > 2) unit = 2;
+		const int slot = VstIoSlot();
+		if (st == 0xb0 && ch >= 0 && ch < 16) {
+			const int cc = (int)((e.msg >> 8) & 0x7f);
+			const int v = (int)((e.msg >> 16) & 0x7f);
+			if (cc == 0) g_vstCc0[slot][unit][ch] = (BYTE)v;
+			else if (cc == 32) g_vstCc32[slot][unit][ch] = (BYTE)v;
+		} else if (st == 0xc0 && ch >= 0 && ch < 16) {
+			/* SC-55 マップは CC32=1。変動 (CC0=1..125) をその LSB のまま
+			   PC すると、LSB を 14bit バンクに畳む音源は空スロットで無音。
+			   キャピタル (CC0=0) と LA/CM (126/127) はそのまま。
+			   マッパーへはファイルの CC32 を出す。VST の PC 直前だけ LSB 0。 */
+			const int msb = g_vstCc0[slot][unit][ch];
+			const int lsb = g_vstCc32[slot][unit][ch];
+			if (msb >= 1 && msb <= 125 && lsb == 1) {
+				MidiItem z = e;
+				z.msg = (DWORD)(0xb0 | ch) | (32u << 8);
+				g_vstCc32[slot][unit][ch] = 0;
+				pushUnit(z);
+			}
+		}
+		pushUnit(e);
 	};
 	SongOvExpire();
 	{
@@ -3878,6 +3940,30 @@ static void DispatchDueEvents(__int64 start, int frames)
 			++r;
 		}
 		g_injR = r;
+	}
+	if (g_loopReleasePending[VstIoSlot()]) {
+		/* Q の NoteOn より前。同じ processEvents で切ってから鳴らす。 */
+		g_loopReleasePending[VstIoSlot()] = 0;
+		const int slot = VstIoSlot();
+		for (int unit = 0; unit < 3; ++unit) {
+			for (int ch = 0; ch < 16; ++ch) {
+				for (int n = 0; n < 128; ++n) {
+					if (!g_vstOn[slot][unit][ch][n]) continue;
+					MidiItem it = {};
+					it.msg = (DWORD)(0x80 | ch) | ((DWORD)n << 8) | (64u << 16);
+					it.sample = start;
+					it.port = unit;
+					it.sysexOff = -1;
+					routeShort(it);
+				}
+				MidiItem cc = {};
+				cc.msg = (DWORD)(0xb0 | ch) | (123u << 8);
+				cc.sample = start;
+				cc.port = unit;
+				cc.sysexOff = -1;
+				routeShort(cc);
+			}
+		}
 	}
 	while (g_eng.eventPos < g_eng.eventCount &&
 		g_eng.events[g_eng.eventPos].sample < end) {
@@ -6572,6 +6658,30 @@ extern "C" int VstResolvePlayPath(const wchar_t* inPath, wchar_t* outMid,
 	return FindSidecar(inPath, outMid, outMidChars);
 }
 
+/* 1 = MIDI 出力先を実機 MT-32 とみなす。バンクを出さない。
+   VST（SC-VA 等）は常に MSB 127 / LSB 0。繋がっている実機は判定できない。 */
+static int LaMapperIsNativeMt32(void)
+{
+	return savedata.laMapperMt32 ? 1 : 0;
+}
+
+static int MapperDropLaBank(DWORD msg)
+{
+	if (!g_eng.songLa || !LaMapperIsNativeMt32()) return 0;
+	const int st = (int)(msg & 0xf0);
+	if (st != 0xb0) return 0;
+	const int ch = (int)(msg & 0x0f);
+	if (ch == 9) return 0;
+	const int cc = (int)((msg >> 8) & 0x7f);
+	return (cc == 0 || cc == 32) ? 1 : 0;
+}
+
+static void MapperShort(DWORD msg)
+{
+	if (!g_eng.midiOut || MapperDropLaBank(msg)) return;
+	midiOutShortMsg(g_eng.midiOut, msg);
+}
+
 static void PumpSilent(AEffect* effect, Vst3Inst* vst3, int blocks)
 {
 	__declspec(align(32)) float z[BLOCK_FRAMES];
@@ -6687,7 +6797,7 @@ static void SendGmGsReset(AEffect* effect, Vst3Inst* vst3, int preferGs)
 			for (int i = 0; i < nla; ++i)
 				Vst3MidiShort(vst3, la[i].msg, 0);
 		}
-		if (g_eng.midiOut && effect == g_eng.effect) {
+		if (g_eng.midiOut && effect == g_eng.effect && !LaMapperIsNativeMt32()) {
 			for (int i = 0; i < nla; ++i)
 				midiOutShortMsg(g_eng.midiOut, la[i].msg);
 		}
@@ -7270,24 +7380,11 @@ static int EventIsResetSysex(const MidiItem& e)
 
 static void WrapSongLoop(void)
 {
-	/* Kill hanging notes from the previous pass before seeking. */
-	for (int unit = 0; unit < 3; ++unit) {
-		AEffect* fx = (unit == 0) ? g_eng.effect : (unit == 1) ? g_eng.effectB : g_eng.effectC;
-		Vst3Inst* v3 = (unit == 0) ? g_eng.vst3 : (unit == 2) ? g_eng.vst3C : NULL;
-		if (!fx && !v3 && !(unit == 0 && g_eng.midiOut)) continue;
-		MidiItem off[16] = {};
-		for (int ch = 0; ch < 16; ++ch)
-			off[ch].msg = (0xb0 | ch) | (123 << 8);
-		if (fx) SendVstEvents(fx, off, 16, 0);
-		if (v3) {
-			for (int ch = 0; ch < 16; ++ch)
-				Vst3MidiShort(v3, off[ch].msg, 0);
-		}
-		if (unit == 0 && g_eng.midiOut) {
-			for (int ch = 0; ch < 16; ++ch)
-				midiOutShortMsg(g_eng.midiOut, off[ch].msg);
-		}
-	}
+	/* NoteOff はここでは出さない。VST2 は processReplacing の直前の
+	   processEvents しか残さないので、先に切ると Q の NoteOn に上書きされ、
+	   前の周の音が残る。次の DispatchDueEvents の先頭で同じバッチに載せる。
+	   g_vstOn はそこまで残す。 */
+	g_loopReleasePending[VstIoSlot()] = 1;
 	ZeroMemory(g_eng.noteState, sizeof(g_eng.noteState));
 	g_eng.playSample = g_eng.loopStartSample;
 	g_eng.eventPos = 0;
@@ -7319,6 +7416,12 @@ extern "C" int VstMidiRead(BYTE* dst, int bytesWanted)
 			if (SongHasLoop() && g_eng.playSample > g_eng.loopEndSample)
 				WrapSongLoop();
 			const int looping = SongHasLoop();
+			/* ループ無しで長さちょうどで止めると、終端サンプルの NoteOff が
+			   sample < end に入らず J が鳴り続ける。 */
+			if (!looping && g_eng.events && g_eng.playSample >= g_eng.lengthSamples &&
+				g_eng.eventPos < g_eng.eventCount &&
+				g_eng.events[g_eng.eventPos].sample <= g_eng.lengthSamples)
+				DispatchDueEvents(g_eng.lengthSamples, 1);
 			const int past = (!g_eng.events || (!looping && g_eng.playSample >= g_eng.lengthSamples)) ? 1 : 0;
 			if (past && (g_injW == g_injR) && g_liveTailFrames <= 0)
 				break;
@@ -7430,7 +7533,7 @@ static void SeekFastForwardEvents(__int64 ffEnd)
 			continue;
 		}
 		if (g_eng.midiOut && (e.port <= 0 || !g_eng.effectB))
-			midiOutShortMsg(g_eng.midiOut, e.msg);
+			MapperShort(e.msg);
 		if (g_eng.useEnsemble) {
 			const int ch = (int)(e.msg & 15);
 			const int s = g_eng.chSlot[ch];

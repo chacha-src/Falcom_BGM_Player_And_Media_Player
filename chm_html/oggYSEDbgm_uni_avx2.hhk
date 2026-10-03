@@ -1261,6 +1261,17 @@
 		<param name="Local" value="en\bpm.htm">
 		</OBJECT>
 	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="MICP">
+		<param name="Name" value="日本語: SASAMI MML（MICP 標準）">
+		<param name="Local" value="ja\sasami-mml.htm">
+		<param name="Name" value="日本語: SASAMI Composer（曲を作る）">
+		<param name="Local" value="ja\sasami-composer.htm">
+		<param name="Name" value="English: SASAMI MML (MICP standard)">
+		<param name="Local" value="en\sasami-mml.htm">
+		<param name="Name" value="English: SASAMI Composer (create songs)">
+		<param name="Local" value="en\sasami-composer.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
 		<param name="Name" value="microphone mix">
 		<param name="Name" value="English: Saving to WAV">
 		<param name="Local" value="en\wav-save.htm">
@@ -1350,6 +1361,19 @@
 		<param name="Local" value="en\smart-lib.htm">
 		<param name="Name" value="English: Small things worth knowing">
 		<param name="Local" value="en\tips.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="MML">
+		<param name="Name" value="日本語: SASAMI MML（MICP 標準）">
+		<param name="Local" value="ja\sasami-mml.htm">
+		<param name="Name" value="日本語: SASAMI MML 拡張命令">
+		<param name="Local" value="ja\sasami-mml-ext.htm">
+		<param name="Name" value="日本語: SASAMI Composer（曲を作る）">
+		<param name="Local" value="ja\sasami-composer.htm">
+		<param name="Name" value="English: SASAMI MML (MICP standard)">
+		<param name="Local" value="en\sasami-mml.htm">
+		<param name="Name" value="English: SASAMI MML extended commands">
+		<param name="Local" value="en\sasami-mml-ext.htm">
 		</OBJECT>
 	<LI> <OBJECT type="text/sitemap">
 		<param name="Name" value="mp3">
@@ -1967,6 +1991,26 @@
 		<param name="Name" value="SASAMI Composer（曲を作る）">
 		<param name="Name" value="日本語: SASAMI Composer（曲を作る）">
 		<param name="Local" value="ja\sasami-composer.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="SASAMI MML (MICP standard)">
+		<param name="Name" value="English: SASAMI MML (MICP standard)">
+		<param name="Local" value="en\sasami-mml.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="SASAMI MML extended commands">
+		<param name="Name" value="English: SASAMI MML extended commands">
+		<param name="Local" value="en\sasami-mml-ext.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="SASAMI MML 拡張命令">
+		<param name="Name" value="日本語: SASAMI MML 拡張命令">
+		<param name="Local" value="ja\sasami-mml-ext.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="SASAMI MML（MICP 標準）">
+		<param name="Name" value="日本語: SASAMI MML（MICP 標準）">
+		<param name="Local" value="ja\sasami-mml.htm">
 		</OBJECT>
 	<LI> <OBJECT type="text/sitemap">
 		<param name="Name" value="SASAMI opcode">
@@ -3544,6 +3588,11 @@
 		<param name="Local" value="ja\bpm.htm">
 		</OBJECT>
 	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="拡張命令">
+		<param name="Name" value="日本語: SASAMI MML 拡張命令">
+		<param name="Local" value="ja\sasami-mml-ext.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
 		<param name="Name" value="操作ガイド">
 		<param name="Name" value="日本語: 各画面の「？」操作ガイド">
 		<param name="Local" value="ja\help-buttons.htm">
@@ -3583,6 +3632,11 @@
 		<param name="Name" value="書庫">
 		<param name="Name" value="日本語: スマートプレイリストと書庫ツリー">
 		<param name="Local" value="ja\smart-lib.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="標準命令">
+		<param name="Name" value="日本語: SASAMI MML（MICP 標準）">
+		<param name="Local" value="ja\sasami-mml.htm">
 		</OBJECT>
 	<LI> <OBJECT type="text/sitemap">
 		<param name="Name" value="欠損ファイル">

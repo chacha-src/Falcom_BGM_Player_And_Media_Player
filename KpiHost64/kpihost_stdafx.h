@@ -28,6 +28,7 @@ struct save {
 	wchar_t midiOutName[32];
 	wchar_t vstGsSoundFont[520];
 	wchar_t vstXgSoundFont[520];
+	int laMapperMt32; /* 0=SC bank127 1=実機MT-32。ホストの VST 経路では使わない */
 };
 extern save savedata;
 

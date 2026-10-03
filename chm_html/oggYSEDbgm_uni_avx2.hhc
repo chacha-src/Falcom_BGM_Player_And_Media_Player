@@ -263,6 +263,14 @@
 			    <param name="Local" value="ja\sasami-composer.htm">
 			    </OBJECT>
 			<LI> <OBJECT type="text/sitemap">
+			    <param name="Name" value="SASAMI MML（MICP 標準）">
+			    <param name="Local" value="ja\sasami-mml.htm">
+			    </OBJECT>
+			<LI> <OBJECT type="text/sitemap">
+			    <param name="Name" value="SASAMI MML 拡張命令">
+			    <param name="Local" value="ja\sasami-mml-ext.htm">
+			    </OBJECT>
+			<LI> <OBJECT type="text/sitemap">
 			    <param name="Name" value="SASAMI .fpy コマンド（全部）">
 			    <param name="Local" value="ja\sasami-fpy.htm">
 			    </OBJECT>
@@ -643,6 +651,14 @@
 			<LI> <OBJECT type="text/sitemap">
 			    <param name="Name" value="SASAMI Composer (create songs)">
 			    <param name="Local" value="en\sasami-composer.htm">
+			    </OBJECT>
+			<LI> <OBJECT type="text/sitemap">
+			    <param name="Name" value="SASAMI MML (MICP standard)">
+			    <param name="Local" value="en\sasami-mml.htm">
+			    </OBJECT>
+			<LI> <OBJECT type="text/sitemap">
+			    <param name="Name" value="SASAMI MML extended commands">
+			    <param name="Local" value="en\sasami-mml-ext.htm">
 			    </OBJECT>
 			<LI> <OBJECT type="text/sitemap">
 			    <param name="Name" value="SASAMI .fpy commands (complete)">

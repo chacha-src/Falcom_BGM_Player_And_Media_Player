@@ -345,12 +345,17 @@ static int SchPaintMmlBasics(CDC& dc, CFont& boldFont, CFont& accentFont, int lh
 	}
 	y = SchTitle(dc, boldFont, L, titleLh, y, L"記号・コメント");
 	{
-		const wchar_t* ln[] = {
+		const wchar_t* lnFm[] = {
 			L"  ; または // … 行末コメント（コンパイル時除去）。",
 			L"  | ~ $ & … 小節区切り・無視記号（レイアウト用）。",
 			L"  数字のみ行 … 旧 MML 残骸等はスキップされます。"
 		};
-		y = SchLines(dc, L, maxTextW, lh, y, ln, 3);
+		const wchar_t* lnMidi[] = {
+			L"  ; または // … 行末コメント（コンパイル時除去）。",
+			L"  | ~ & … 小節区切り。( ) はペダル。$ は MICP（ベロシティ・CC・GS/XG）。",
+			L"  数字のみ行 … 旧 MML 残骸等はスキップされます。"
+		};
+		y = SchLines(dc, L, maxTextW, lh, y, fmMode ? lnFm : lnMidi, 3);
 	}
 	return y;
 }
@@ -495,7 +500,7 @@ void CSasamiCmdHelpDlg::PaintChapter(CDC& dc, int chapter, int maxTextW, int& ou
 		y = SchPaintMmlBasics(dc, boldFont, accentFont, lh, titleLh, L, maxTextW, false, y);
 		y = SchTitle(dc, boldFont, L, titleLh, y, L"音長・付点・3連符");
 		y = SchDrawCmd(dc, accentFont, L, y, lh, L"c4 / d8. / e16..", L"… 数字=音長、. = 付点、.. = 二重付点。");
-		y = SchDrawCmd(dc, accentFont, L, y, lh, L"(3cde", L"… 3連符（譜面パレット「3」）。5/6/8 も同様。");
+		y = SchDrawCmd(dc, accentFont, L, y, lh, L"( )", L"… ペダル on / off（CC64）。連符は譜面パレットの 3 / 5 / 6 / 8。");
 		y = SchDrawCmd(dc, accentFont, L, y, lh, L"T120 / t120", L"… テンポ（大文字 T も可）。譜面 Tempo と同期。");
 		y = SchDrawCmd(dc, accentFont, L, y, lh, L"P64", L"… パン（0=左 64=中央 127=右）。P64:85 副値は無視。");
 		y = SchTitle(dc, boldFont, L, titleLh, y, L"ドラム（#10 既定。右クリックで他chも可）");
@@ -624,7 +629,7 @@ void CSasamiCmdHelpDlg::PaintChapter(CDC& dc, int chapter, int maxTextW, int& ou
 		{
 			const wchar_t* ln[] = {
 				L"  @~ @# @! 等 … MICP 拡張（引数スキップして通過）。",
-				L"  | ~ $ & … 区切り。^ タイ。; // コメント。"
+				L"  | ~ & … 区切り。^ タイ。( ) ペダル。$ は出す。; // コメント。"
 			};
 			y = SchLines(dc, L, maxTextW, lh, y, ln, 2);
 		}

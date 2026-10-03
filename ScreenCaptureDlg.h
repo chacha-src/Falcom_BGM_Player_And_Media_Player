@@ -399,6 +399,9 @@ public:
 
 extern CScreenCaptureDlg* g_screenCaptureDlg;
 
+/* 再生中の VSYNC 洪水で WM_TIMER が飢える。プレビュー更新用の HWND。無ければ NULL。 */
+HWND ScLivePreviewHwnd();
+
 void OpenScreenCaptureModeless(CWnd* parent);
 void CloseScreenCaptureIfOpen();
 // 開いていれば savedata を UI へ同期。未開なら何もしない。
