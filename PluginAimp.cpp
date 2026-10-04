@@ -26,7 +26,7 @@ extern BYTE kpiarch[];
 extern BYTE plugkind[];
 extern BOOL kpichk[];
 extern int kpicnt;
-extern KpiHost64Client g_kpiHost;
+extern KpiHost32Client g_kpiHost;
 extern BOOL thn1;
 extern int stf;
 extern DWORD g_oggUiThreadId;
@@ -414,7 +414,7 @@ int PluginAimp_TryEnum(const wchar_t* dllPath, int is64)
 int PluginAimp_OpenRemote(const wchar_t* dllPath, const wchar_t* mediaPath)
 {
 	PluginAimp_Close();
-	KPIHOST64_ForeignOpenReply fr{};
+	KPIHOST32_ForeignOpenReply fr{};
 	if (!g_kpiHost.ForeignOpen(PLUGKIND_AIMP, dllPath, mediaPath, fr))
 		return 0;
 	g_aimpRemote = 1;

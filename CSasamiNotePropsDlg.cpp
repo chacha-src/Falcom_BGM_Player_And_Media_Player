@@ -88,7 +88,7 @@ void CSasamiNotePropsDlg::RefreshVstHint()
 	progName[0] = 0;
 	const int multi = loaded && (VstLivePartIsMulti(m_part) ||
 		(path[0] && VstDetectMultiTimbral(path)));
-	/* Multi/remote SC-VA: never Program* IPC — freezes Host64. */
+	/* Multi/remote SC-VA: never Program* IPC — freezes Host32. */
 	const int prog = (loaded && !multi) ? VstLiveProgramCurrent(m_part) : -1;
 	if (prog >= 0)
 		VstLiveProgramName(m_part, prog, progName, 128);
@@ -434,7 +434,7 @@ void CSasamiNotePropsDlg::OnBnClickedVst()
 		bind.vstForceCh[i] = -1;
 	}
 	if (ScVstAssignToneForPart(this, m_part, &bind)) {
-		/* Program IPC after Assign races Host64 createView — hint from path only. */
+		/* Program IPC after Assign races Host32 createView — hint from path only. */
 		wchar_t path[520];
 		path[0] = 0;
 		if (VstLivePartIsLoaded(m_part))

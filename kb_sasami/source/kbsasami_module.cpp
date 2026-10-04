@@ -10,12 +10,12 @@ static const DWORD kPluginVersion = 0x7FFFFFFF;
 #define KBSASAMI_VERSION_STR L"0x7FFFFFFF(Debug)"
 #else
 static const DWORD kPluginVersion = 1;
-#define KBSASAMI_VERSION_STR L"1.00"
+#define KBSASAMI_VERSION_STR L"1.20"
 #endif
 
-static const wchar_t kDescription[] = L"SASAMI FM/MIDI Decoder v" KBSASAMI_VERSION_STR L" (FPY / MPY / RCP / EUP / SNG / ZMS)";
+static const wchar_t kDescription[] = L"SASAMI and MIDI Decoder v" KBSASAMI_VERSION_STR L" (FPY / MPY / RCP / EUP / SNG / ZMS)";
 static const wchar_t kCopyright[] =
-	L"kbsasami.kpi SASAMI player\n"
+	L"kbsasami.kpi SASAMI(「ささみ☆ミ」) player\n"
 	L"FM: ymfm YM2608 (OPNA / OPN=SCH-off) + soft BEEP\n"
 	L"MIDI PCM path: fmmidi (yuno) via SMF conversion\n"
 	L"RCP/EUP/SNG/ZMS/SMF: convert inside the plugin if the file is not already SMF\n"
@@ -98,7 +98,8 @@ BOOL WINAPI KbSasamiDecoderModule::EnumConfig(IKpiConfigEnumerator* pEnumerator)
 		{ KPI_CFG_TYPE_BOOL, SEC_KBSASAMI, KEY_VST, L"kbsasami.vst",
 			L"0", NULL, NULL, NULL, NULL,
 			L"false(0): FM MIDI mode (fmmidi / programs.txt inside plugin)\r\n"
-			L"true(1): expect VST-side playback\r\n"
+			L"true(1): VST. raira=1 leaves it to this app.\r\n"
+			L"raira=0 plays kbsasami.vstfullpath_gs / _xg via kbsasami_host32/64.\r\n"
 			L"\r\n"
 			L"With kbsasami.raira=1, 0 and 1 meanings are swapped.\r\n"
 			L"Default for original player is false (FM MIDI)." },
@@ -115,6 +116,16 @@ BOOL WINAPI KbSasamiDecoderModule::EnumConfig(IKpiConfigEnumerator* pEnumerator)
 			L"If CRender GS VST is empty, Auto uses XG.\r\n"
 			L"1=GS 2=XG 3=55map 4=88map 5=88Promap 6=8820map\r\n"
 			L"7=GMmap 8=SDmap 9=LAmap 10..19=ETC maps. Per-file override in playlist." },
+		{ KPI_CFG_TYPE_STR, SEC_KBSASAMI, L"vstfullpath_gs", L"kbsasami.vstfullpath_gs",
+			L"", NULL, L"520", NULL, NULL,
+			L"Full path of the GS VST2/VST3 DLL. Used only when raira=0 and vst=1.\r\n"
+			L"kbsasami.kpi starts kbsasami_host32.exe or kbsasami_host64.exe to match the DLL.\r\n"
+			L"This app (raira=1) ignores the path and uses its own VST host." },
+		{ KPI_CFG_TYPE_STR, SEC_KBSASAMI, L"vstfullpath_xg", L"kbsasami.vstfullpath_xg",
+			L"", NULL, L"520", NULL, NULL,
+			L"Full path of the XG VST2/VST3 DLL. Used only when raira=0 and vst=1.\r\n"
+			L"An XG song does not fall back to the GS DLL. juicysf / sfplugin paths work\r\n"
+			L"the same way as this app's VST MIDI engine." },
 		{ KPI_CFG_TYPE_INT, SEC_KBSASAMI, KEY_FMMODE, L"kbsasami.fmmode",
 			L"2", NULL, NULL, NULL, NULL,
 			L"FM sound source for .fpy (like SASAMI /B /N).\r\n"
@@ -140,7 +151,9 @@ DWORD WINAPI KbSasamiDecoderModule::ApplyConfig(const wchar_t* cszSection, const
 			m_pConfig->SetStr(cszSection, cszKey, cszValue);
 		else
 			m_pConfig->SetInt(cszSection, cszKey, nValue);
-		return KPI_CFGRET_NOTIFY;
+		/* NOTIFY だと本体は UpdateConfig だけで済ませ、開いた曲の VST パスや
+		   midimode を持ち続ける。演奏のたびに Open で読み直させる。 */
+		return KPI_CFGRET_RELOAD_DATA;
 	}
 	return KPI_CFGRET_OK;
 }

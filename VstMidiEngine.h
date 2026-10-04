@@ -30,7 +30,7 @@ struct VstPluginInfo {
 
 /*
  * VST2 音源: 同じアーキテクチャならプロセス内で Load。
- * 異アーキ（x86 本体 + x64 SC-VA）は KpiHost64 の IPC（VstOpen/Render/…）。
+ * 異アーキは KpiHost32（x86、exe は ogghost32.exe）の IPC。本体 ogg.exe は x64。
  */
 #ifdef __cplusplus
 extern "C" {
@@ -92,7 +92,7 @@ __int64 VstMidiGetPlaySample(void);
 double VstMidiTailPadSec(void);
 // プラグイン遅延（VST2 initialDelay / VST3 getLatencySamples）。0=マッパー／不明。
 int VstMidiGetLatencySamples(void);
-// x86 app: KpiHost64 Open の戻りを覚えさせる（ローカルにプラグが無いとき用）。
+// x64 本体が x86 の KpiHost32 を開いた戻りを覚えさせる（ローカルにプラグが無いとき用）。
 void VstMidiSetReportedLatencySamples(int samples);
 
 // ライブ交差用に曲エンジンを2本。スロットはスレッドローカル（A再生中にBを開ける）。
@@ -133,9 +133,9 @@ int VstMidiPeekListMarks(const wchar_t* path, struct VstMidiListPeek* out);
 // Live MIDI を曲エンジンへ差し込む（モニタの CC / 鍵盤）。キューして次のブロックで送る。
 void VstMidiInjectShort(int portIndex0to2, DWORD shortMsg, int sampleOfs);
 void VstMidiInjectSysex(int portIndex0to2, const unsigned char* data, int bytes);
-// x86→KpiHost64: 曲レンダーに乗せるためキューを奪う。ローカル再生では呼ばない。
+// x86→KpiHost32: 曲レンダーに乗せるためキューを奪う。ローカル再生では呼ばない。
 int VstMidiStealInjects(BYTE* ports, DWORD* msgs, int* sampleOfs, int maxCount);
-/* x86→KpiHost64: 曲レンダーに載せる SysEx を奪う。ローカル再生では呼ばない。 */
+/* x86→KpiHost32: 曲レンダーに載せる SysEx を奪う。ローカル再生では呼ばない。 */
 int VstMidiStealSysex(BYTE* ports, BYTE* packed, int* lens, int maxMsgs, int packedCap);
 
 int VstLiveLoadPart(int part1to32, const wchar_t* pluginPath, int isVst3);
@@ -165,7 +165,7 @@ void VstLiveScanRelease(void);
 void VstLiveUnloadPart(int part1to32);
 // ホスト窓が閉じるとき: 先にリモート音声を止め、全部のパートを降ろす。
 void VstLiveShutdown(void);
-// KpiHost64 専用: 固まったプラグインがパイプを掴んだままにしないよう effClose/FreeLibrary を飛ばす。
+// KpiHost32 専用: 固まったプラグインがパイプを掴んだままにしないよう effClose/FreeLibrary を飛ばす。
 void VstLiveAbandonHostPlugins(int on);
 void VstLiveAllNotesOff();
 void VstLiveMidiShort(int portIndex0to2, DWORD shortMsg);
@@ -185,7 +185,7 @@ int VstLiveEditorOpenAsync(int part1to32);
 /* Drop pending async opens (call when closing score / exiting). */
 void VstLiveEditorOpenCancelPending(void);
 void VstLiveEditorClose(int part1to32);
-/* ogg 終了時: KpiHost64 上の VST 設定画面をすべて閉じる（プラグインは載せたまま）。 */
+/* ogg 終了時: KpiHost32 上の VST 設定画面をすべて閉じる（プラグインは載せたまま）。 */
 void VstLiveEditorCloseAllRemote(void);
 /* Score / note-props HWND receives WM_VST_LIVE_EDITOR_CLOSED (w=part, l=prog). */
 #ifndef WM_VST_LIVE_EDITOR_CLOSED
@@ -204,13 +204,13 @@ void VstLiveEditorClearClosingQuiet(void);
    Required for HALion MediaBay keyboard / editor notes when score is open. */
 void VstLiveMonitorEnsure(void);
 void VstLiveMonitorStop(void);
-/* Poll Host64 editorClosedSeq without needing the audio mix thread. */
+/* Poll Host32 editorClosedSeq without needing the audio mix thread. */
 void VstLivePollRemoteEditorClosed(void);
 /* 1 = part loaded. outPath may be NULL. */
 int VstLivePartIsLoaded(int part1to32);
-/* 1 = any live part is hosted in KpiHost64 (x64). */
+/* 1 = any live part is hosted in KpiHost32 (x86 / ogghost32.exe). ogg.exe is x64. */
 int VstLiveAnyRemotePart(void);
-/* 1 = editor HWND alive (Host64: HALion Home/MediaBay up — do not PROG/STATE IPC). */
+/* 1 = editor HWND alive (Host32: HALion Home/MediaBay up — do not PROG/STATE IPC). */
 int VstLivePartEditorIsOpen(int part1to32);
 /* Copy live plugin path for part; returns 1 if non-empty. */
 int VstLivePartGetPath(int part1to32, wchar_t* outPath, int outCch);
@@ -256,6 +256,9 @@ struct VstLiveActInfo {
 	unsigned mask[4];    // mask[n/32] の bit n = ノート n が押されている
 };
 int VstLiveActivity(int part1to32, struct VstLiveActInfo* out);
+/* 鍵盤を押した瞬間に点灯する。オーディオ糸の排出と二重に数えないときは Suppress(1)。 */
+void VstLiveActObserve(int portIndex0to2, DWORD shortMsg);
+void VstLiveActSuppress(int on);
 // 最後に見た SysEx。表示用に要約済み。
 int VstLiveSysexInfo(wchar_t* out, int chars, int* ageMs);
 

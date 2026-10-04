@@ -10991,6 +10991,83 @@ static void CCC_DrawListCheckBox(CDC* pDC, const CRect& rc, bool checked)
         CCC_FillRectOpaqueBits(hdcDst, rc, RGB(255, 255, 255));
 }
 
+static int CccColorDist2(COLORREF a, COLORREF b)
+{
+	int dr = (int)GetRValue(a) - (int)GetRValue(b);
+	int dg = (int)GetGValue(a) - (int)GetGValue(b);
+	int db = (int)GetBValue(a) - (int)GetBValue(b);
+	return dr * dr + dg * dg + db * db;
+}
+
+static COLORREF CccMix256(COLORREF a, COLORREF b, int t)
+{
+	if (t < 0) t = 0;
+	if (t > 256) t = 256;
+	const int u = 256 - t;
+	return RGB(
+		(GetRValue(a) * u + GetRValue(b) * t) / 256,
+		(GetGValue(a) * u + GetGValue(b) * t) / 256,
+		(GetBValue(a) * u + GetBValue(b) * t) / 256);
+}
+
+static int CccIsqrt(int n)
+{
+	if (n <= 0) return 0;
+	int x = n;
+	int y = (x + 1) / 2;
+	while (y < x) {
+		x = y;
+		y = (x + n / x) / 2;
+	}
+	return x;
+}
+
+/* 選択行(hotTop)が地(face)からどれだけ離れているか、と同じ強さで accent を乗せる。
+   accent ベタ塗りはリボン色なので、行の地色としてはテーマから浮く。 */
+static int CccPlayWashT(const CCC_UiThemePal& th)
+{
+	const int dInk = CccColorDist2(th.face, th.accent);
+	const int dSel = CccColorDist2(th.face, th.hotTop);
+	int t = 80;
+	if (dInk > 16) {
+		const int distInk = CccIsqrt(dInk);
+		const int distSel = CccIsqrt(dSel);
+		if (distInk > 0)
+			t = distSel * 256 / distInk;
+	}
+	if (t < 64) t = 64;
+	if (t > 144) t = 144;
+	return t;
+}
+
+static COLORREF CccApart(COLORREF c, COLORREF avoid, COLORREF nudge, int minDist2)
+{
+	if (CccColorDist2(c, avoid) >= minDist2)
+		return c;
+	return CccMix256(c, nudge, 80);
+}
+
+/* 再生行。地に accent を、選択行と同じ濃さで溶かす。選択・ホバーと色が近いテーマは accent2 へずらす。 */
+static COLORREF CccPlayRowBg()
+{
+	const CCC_UiThemePal& th = CCC_UiTheme();
+	COLORREF c = CccMix256(th.face, th.accent, CccPlayWashT(th));
+	c = CccApart(c, th.hotTop, th.accent2, 26 * 26);
+	c = CccApart(c, th.hotBot, th.accent, 26 * 26);
+	return c;
+}
+
+/* 再生行の上にホバー。ホバー地(hotBot)へ、再生行と同じ割合で accent を足す。 */
+static COLORREF CccPlayHoverBg()
+{
+	const CCC_UiThemePal& th = CCC_UiTheme();
+	const int t = CccPlayWashT(th);
+	COLORREF c = CccMix256(th.hotBot, th.accent, t);
+	c = CccApart(c, CccPlayRowBg(), th.accent, 22 * 22);
+	c = CccApart(c, th.hotBot, th.accent2, 18 * 18);
+	return c;
+}
+
 // SUBITEM でセル全面を自前描画し CDRF_SKIPDEFAULT。
 // PREPAINT で FillEmpty しない（名前列と二重→黒ちらつき）。
 // ガラス: OpaqueBits。Aero: 黒+α。通常: FillSolid。
@@ -11050,7 +11127,7 @@ void CCustomListCtrl::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
         if (m_mpNoteIconGet)
             noteImg = m_mpNoteIconGet(m_mpJacketCtx, ni);
         const BOOL bPlay = (noteImg == 0 || noteImg == 2);
-        COLORREF bg = bS ? COLOR_SEL_BG : (ni % 2 == 0 ? COLOR_LIST_BG : COLOR_LIST_ALT);
+        COLORREF bg = (ni % 2 == 0 ? COLOR_LIST_BG : COLOR_LIST_ALT);
         COLORREF rowAccent = CLR_NONE;
         if (!bS && !bPlay) {
             COLORREF tintBg = 0;
@@ -11062,9 +11139,14 @@ void CCustomListCtrl::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
                     (GetBValue(bg) * (255 - amt) + GetBValue(tintBg) * amt) / 255);
             }
         }
-        if (bPlay && !bS)
-            bg = CCC_UiTheme().accent2;
-        if (bH && !bS && !bPlay) bg = CCC_UiTheme().hotBot;
+        if (bPlay && bH)
+            bg = CccPlayHoverBg();
+        else if (bPlay)
+            bg = CccPlayRowBg();
+        else if (bS)
+            bg = COLOR_SEL_BG;
+        else if (bH)
+            bg = CCC_UiTheme().hotBot;
         if (!bS && !bPlay && m_mpRowMissGet && m_mpRowMissGet(m_mpJacketCtx, ni))
             bg = RGB(255, 214, 214); // 欠損行: 薄い赤
 
@@ -11237,14 +11319,15 @@ void CCustomListCtrl::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
             }
             // ホバー印: DrawStar(ペン線)はアクリル上で α=0→黒線/透けになるので使わない。
             // 行背景の淡色(上で塗済)だけで十分。左端に不透明の細いアクセントのみ。
-            if (bH && !bS) {
+            if (bH) {
+                const COLORREF stripe = bPlay ? CCC_UiTheme().accent2 : CCC_UiTheme().accent;
 #if CCUSTOM_AERO_SUPPORT
                 if (bCapGlass)
                     CCC_FillRectOpaqueBits(pDC->GetSafeHdc(),
-                        CRect(r.left, r.top, r.left + CCC_ScaleDpi(3, dpiNote), r.bottom), CCC_UiTheme().accent);
+                        CRect(r.left, r.top, r.left + CCC_ScaleDpi(3, dpiNote), r.bottom), stripe);
                 else
 #endif
-                    pDC->FillSolidRect(r.left, r.top, CCC_ScaleDpi(3, dpiNote), r.Height(), CCC_UiTheme().accent);
+                    pDC->FillSolidRect(r.left, r.top, CCC_ScaleDpi(3, dpiNote), r.Height(), stripe);
             }
         }
 
@@ -11255,7 +11338,7 @@ void CCustomListCtrl::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
         CCC_ExtractSavLrc(st, bSav, bLrc, extra, kCccExtraChips, extraN);
         const BOOL bOpaqueChips = bCapGlass;
         {
-            COLORREF tc = bS ? COLOR_LIST_SEL_TEXT : COLOR_EDIT_TEXT;
+            COLORREF tc = bPlay ? CCC_InkOn(bg) : (bS ? COLOR_LIST_SEL_TEXT : COLOR_EDIT_TEXT);
             if (m_bAeroMode && GetRValue(tc) + GetGValue(tc) + GetBValue(tc) < 48)
                 tc = RGB(1, 1, 1);
             pDC->SetTextColor(tc);

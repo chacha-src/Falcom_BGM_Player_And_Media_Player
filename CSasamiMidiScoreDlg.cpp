@@ -1344,7 +1344,7 @@ void CSasamiMidiScoreDlg::RefreshProgLabels()
 		const int lsb = m_doc.bind.vstBankLsb[i] >= 0 ? m_doc.bind.vstBankLsb[i] : 0;
 		const int pc = prog >= 0 ? (prog & 127) : 0;
 
-		/* Never VstLiveProgramName/Current here — Host64 PROGRAMS IPC freezes
+		/* Never VstLiveProgramName/Current here — Host32 PROGRAMS IPC freezes
 		   the UI on tone-map return (and after preview). GS/XG table + tip only. */
 		if (m_ui.vstLabel[i][0] && prog < 0)
 			wcsncpy_s(name, m_ui.vstLabel[i], _TRUNCATE);
@@ -1540,7 +1540,7 @@ void CSasamiMidiScoreDlg::OpenVstForPart(int part1to32, int editorOnly)
 	m_status.SetWindowText(st);
 	InvalidateRect(m_trackRc, FALSE);
 	/* Auto-open editor ONLY for dedicated VST3 (return 2). Tone-map / SC-VA VST2
-	   (return 1) must never open editor — effEditOpen / Host64 freezes on 入力. */
+	   (return 1) must never open editor — effEditOpen / Host32 freezes on 入力. */
 	if (assignRc == 2 && VstLivePartIsLoaded(part1to32) && path[0]) {
 		const size_t n = wcslen(path);
 		const int isVst3 = (n >= 5 && _wcsicmp(path + n - 5, L".vst3") == 0) ? 1 : 0;
@@ -1555,7 +1555,7 @@ void CSasamiMidiScoreDlg::OpenVstForPart(int part1to32, int editorOnly)
 LRESULT CSasamiMidiScoreDlg::OnDeferredProgLabels(WPARAM w, LPARAM)
 {
 	const int part = (int)w;
-	/* Never PROGRAMS IPC from UI timers — freezes Host64 (tone map / preview). */
+	/* Never PROGRAMS IPC from UI timers — freezes Host32 (tone map / preview). */
 	(void)part;
 	RefreshProgLabels();
 	if (m_trackRc.Width() > 0)
@@ -1593,7 +1593,7 @@ LRESULT CSasamiMidiScoreDlg::OnVstEditorClosed(WPARAM w, LPARAM l)
 	}
 	if (prog >= 0)
 		m_doc.bind.vstProg[part - 1] = prog;
-	/* Capture via close-snap / GET (SampleTank: Host64 snap only, no live getState). */
+	/* Capture via close-snap / GET (SampleTank: Host32 snap only, no live getState). */
 	KillTimer(9121);
 	m_pendingEdClosePart = part;
 	m_pendingEdCloseProg = prog;
@@ -1610,7 +1610,7 @@ LRESULT CSasamiMidiScoreDlg::OnVstEditorClosedUi(WPARAM w, LPARAM l)
 	const int part = (int)w;
 	SetTimer(9122, 250, NULL);
 	VstLiveEditorClearClosingQuiet();
-	/* Do not drain SHM while song preview owns Host64 audio. */
+	/* Do not drain SHM while song preview owns Host32 audio. */
 	if (!m_ui.previewActive)
 		VstLiveMonitorEnsure();
 	RefreshProgLabels();
@@ -2731,7 +2731,7 @@ int CSasamiMidiScoreDlg::BuildToTemp(wchar_t* outPath, int outCch, uint32_t from
 		}
 	}
 
-	/* Do NOT VstLiveCaptureStates here — pipe GET_STATE while Host64 is busy
+	/* Do NOT VstLiveCaptureStates here — pipe GET_STATE while Host32 is busy
 	   (SampleTank soft-hide / multi-load) crashes on 再生確認/保存. States must
 	   already be in m_doc.bind from editor-close snap. */
 
@@ -3281,7 +3281,7 @@ LRESULT CSasamiMidiScoreDlg::OnNoteProps(WPARAM w, LPARAM l)
 		m_doc.bind.isMpw3 = 1;
 		if (VstLivePartIsLoaded((int)l)) {
 			m_doc.bind.vstForceCh[(int)l - 1] = VstLiveSendChannel((int)l);
-			/* Multi/remote (SC-VA VST2): never ProgramCurrent — Host64 PROGRAMS
+			/* Multi/remote (SC-VA VST2): never ProgramCurrent — Host32 PROGRAMS
 			   IPC freezes. Keep bind prog from tone map / score. */
 			if (!VstLivePartIsMulti((int)l) && path[0] &&
 				!VstDetectMultiTimbral(path)) {
@@ -3977,7 +3977,7 @@ void CSasamiMidiScoreDlg::OnKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags)
 
 void CSasamiMidiScoreDlg::OnClose()
 {
-	/* Drop notify first so Host64 SHM close posts cannot hit a dying HWND. */
+	/* Drop notify first so Host32 SHM close posts cannot hit a dying HWND. */
 	VstLiveEditorSetNotifyHwnd(NULL);
 	VstLiveEditorOpenCancelPending();
 	VstLiveMonitorStop();

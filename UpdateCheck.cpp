@@ -30,7 +30,7 @@ static const TCHAR* TARGET_CHM_NAME = _T("oggYSEDbgm_uni_avx2.chm");
 static const TCHAR* TARGET_D3D_NAME = _T("d3dcompiler_47.dll");
 
 // 配布 ZIP / 展開 EXE の下限（空・404 HTML・途中切断を弾く）
-// 本体は数MB級、KpiHost64 は ~100KB 未満もあり得るので別閾値
+// 本体は数MB級、KpiHost32 は ~100KB 未満もあり得るので別閾値
 static const ULONGLONG UPDATE_ZIP_MIN_BYTES = 200000ULL;
 static const ULONGLONG UPDATE_MAIN_EXE_MIN_BYTES = 1000000ULL; // oggYSEDbgm_uni_avx2.exe
 static const ULONGLONG UPDATE_HOST_EXE_MIN_BYTES = 20000ULL;   // ogghost32.exe
@@ -2009,7 +2009,7 @@ void EnsureOggHost32Available()
 {
 	const CString destPath = HostExeBesidePath();
 	if (HostExeFileLooksOk(destPath)) {
-		OggPurgeObsoleteKpiHost64();
+		OggPurgeObsoleteKpiHost32();
 		return;
 	}
 
@@ -2115,7 +2115,7 @@ void EnsureOggHost32Available()
 	bat.Write(batContentA, batContentA.GetLength());
 	bat.Close();
 
-	OggPurgeObsoleteKpiHost64();
+	OggPurgeObsoleteKpiHost32();
 
 	const HINSTANCE hShell = ShellExecute(NULL, _T("open"), batPath, NULL, tempPath, SW_HIDE);
 	if ((INT_PTR)hShell <= 32)

@@ -7,6 +7,7 @@
 #include "sasami_fm.h"
 #include "sequencer.hpp"
 #include "midisynth.hpp"
+#include "kbsasami_vst.h"
 #include <mutex>
 
 class KbSasamiDecoder : public KbKpiUnknownImpl<IKpiDecoder>, public output
@@ -31,6 +32,10 @@ private:
 	bool m_liveStream; /* CEmu MPU stub: qwLength 不定、sequencer 終端で切らない */
 	int m_raira; // 1=このアプリ専用経路
 	int m_vst;   // 解釈後: 0=FM MIDI(fmmidi), 1=VST側に任せる
+	int m_foreignVst; // raira=0 かつ vst=1。専用ホストが PCM を返す
+	wchar_t m_vstGs[520];
+	wchar_t m_vstXg[520];
+	KbVstSession m_vstSess;
 	int m_mapDefault; // kbsasami.midimode (0=auto .. 19)
 	int m_fmModeDefault; // kbsasami.fmmode 0=BEEP 1=OPN 2=OPNA
 	int m_gsMapLsb; // 自動/指定マップの CC32 (1..4)。0=付けない
@@ -51,6 +56,7 @@ private:
 	void ApplyMapForce(int mapForce, SasamiMidiMap* map);
 	void ApplyWopnMode();
 	void ApplyGsBankLsb();
+	int OpenForeignVst(const uint8_t* smf, DWORD smfLen);
 	void midi_message(int port, uint_least32_t message) override;
 	void sysex_message(int port, const void* data, std::size_t size) override;
 	void meta_event(int type, const void* data, std::size_t size) override;

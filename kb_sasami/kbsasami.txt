@@ -116,6 +116,15 @@ PC-98 ささみ (SASAMI) の曲データを再生します。
     midPlayPrefer=VST → 実効 vst=1 (KPI は MIDI を開かずホストが VST)
     .mpsmv はトレイラの VST をホストが直接開く（HALion 等）
 
+  kbsasami.vstfullpath_gs / kbsasami.vstfullpath_xg
+    raira=0 かつ vst=1 のときだけ。GS / XG の VST DLL のフルパス。
+    kbsasami.kpi は DLL の 32/64 に合わせて kbsasami_host32.exe /
+    kbsasami_host64.exe を起こし、専用パイプで PCM を受け取る。
+    ogg の ogghost32 / \\.\pipe\ogg_kpi32 は使わない。
+    らいら（raira=1）はこの経路に入らない。
+    XG の曲に XG パスが無いときは GS へ落とさない。juicysf も同じホストが鳴らす。
+    ホスト exe は kbsasami.kpi と同じフォルダ（またはその x64）に置く。
+
 [設定] kbsasami.midimode
 
   .mpy / .mpw2 / .mpsmv / .mid / シーケンサ翻訳後 SMF の音源

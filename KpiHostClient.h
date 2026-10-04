@@ -16,18 +16,18 @@
 // ============================================================================
 
 // KPI Open 成功時。以降の Render/Seek/Close はこの sessionId。
-struct KpiHost64Session
+struct KpiHost32Session
 {
 	uint32_t sessionId = 0;      // ホスト側 g_sessions のキー
 	KPI_MEDIAINFO mediaInfo{};   // 実際に開いたフォーマット
 	DWORD openedSongCount = 0;   // マルチソング形式の曲数
 };
 
-class KpiHost64Client
+class KpiHost32Client
 {
 public:
-	KpiHost64Client();
-	~KpiHost64Client();
+	KpiHost32Client();
+	~KpiHost32Client();
 
 	bool EnsureConnected(); // 未接続なら ogghost32.exe を起動してパイプ接続
 	bool IsConnected() const;
@@ -35,19 +35,19 @@ public:
 
 	bool Ping();
 	bool ListExts(const std::wstring& kpiPath, uint32_t& outKpiVer, std::wstring& outSupportExts);
-	bool Open(const std::wstring& kpiPath, const std::wstring& mediaPath, const KPI_MEDIAINFO& request, uint32_t songNo, KpiHost64Session& outSession);
+	bool Open(const std::wstring& kpiPath, const std::wstring& mediaPath, const KPI_MEDIAINFO& request, uint32_t songNo, KpiHost32Session& outSession);
 	bool RenderBytes(uint32_t sessionId, uint32_t bytesWanted, uint8_t* outPcm, uint32_t outCap, uint32_t& outBytes, bool& outEof);
 	bool Seek(uint32_t sessionId, uint64_t posSample, uint32_t flag, uint64_t& outNewPosSample);
 	bool Close(uint32_t sessionId);
 
 	bool ForeignListExts(uint32_t pluginKind, const std::wstring& dllPath, std::wstring& outSupportExts);
-	bool ForeignOpen(uint32_t pluginKind, const std::wstring& dllPath, const std::wstring& mediaPath, KPIHOST64_ForeignOpenReply& out);
+	bool ForeignOpen(uint32_t pluginKind, const std::wstring& dllPath, const std::wstring& mediaPath, KPIHOST32_ForeignOpenReply& out);
 	bool ForeignRender(uint32_t sessionId, uint32_t bytesWanted, uint8_t* outPcm, uint32_t outCap, uint32_t& outBytes, bool& outEof);
 	bool ForeignSeek(uint32_t sessionId, uint64_t posSample);
 	bool ForeignClose(uint32_t sessionId);
 
 	bool VstOpen(const std::wstring& midPath, const std::wstring& vstDllPath,
-		const std::wstring& extraScanPath, KPIHOST64_ForeignOpenReply& out, uint32_t slot = 0);
+		const std::wstring& extraScanPath, KPIHOST32_ForeignOpenReply& out, uint32_t slot = 0);
 	bool VstRender(uint32_t bytesWanted, uint8_t* outPcm, uint32_t outCap, uint32_t& outBytes, bool& outEof,
 		const uint8_t* injPorts = nullptr, const uint32_t* injMsgs = nullptr,
 		const int32_t* injOfs = nullptr, uint32_t injCount = 0,
@@ -97,5 +97,6 @@ private:
 	int m_syncingLang = 0; // 再入防止（PING 中に EnsureConnected が来てもループしない）
 };
 
-// 旧名 KpiHost64.exe は起動しない。残っていればプロセス停止のうえファイル削除。
-void OggPurgeObsoleteKpiHost64();
+// 旧ファイル名 KpiHost64.exe は起動しない。残っていれば停止して消す。
+// いまの IPC は x86 の KpiHost32（出荷 exe は ogghost32.exe）。本体 ogg.exe は x64。
+void OggPurgeObsoleteKpiHost32();

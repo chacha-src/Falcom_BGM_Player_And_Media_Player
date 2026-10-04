@@ -73,7 +73,7 @@ static int ScVstLoadPicked(CWnd* owner, int part1to32, ScMidiVstBind* bind)
 	if (!waitOwner) {
 		if (CWnd* main = AfxGetMainWnd()) waitOwner = main->GetSafeHwnd();
 	}
-	/* Preview/monitor must not hold Host64 SHM while SC-VA loads. */
+	/* Preview/monitor must not hold Host32 SHM while SC-VA loads. */
 	VstLiveMonitorStop();
 	VstWaitShowLoad(waitOwner, waitName);
 	const int rc = VstLiveLoadPart(part1to32, path, is3);
@@ -315,7 +315,7 @@ int ScVstAssignToneForPart(CWnd* owner, int part1to32, ScMidiVstBind* bind, int 
 	}
 
 	/* Dedicated: load only. No MonitorEnsure here — waveOut+Render during HALion
-	   Home crashes ogg (probe: Host64 alone OK; Host dialog skips MonitorEnsure). */
+	   Home crashes ogg (probe: Host32 alone OK; Host dialog skips MonitorEnsure). */
 	if (bind)
 		bind->isMpw3 = 1;
 	(void)owner;

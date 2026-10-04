@@ -1,12 +1,13 @@
 ﻿// ============================================================================
-// KpiHost64.exe — 64bit KPI / VST / 外部プラグインのパイプサーバ
+// KpiHost32 — x86 の IPC ホスト。出荷ファイル名は ogghost32.exe（Win32）。
+// 本体 ogg.exe は x64。64bit プラグインは本体が直接読み、32bit だけここへ渡す。
 // ----------------------------------------------------------------------------
-// 32bit 本体は x64 DLL を LoadLibrary できない。このプロセスが名前付きパイプ
-// \\.\pipe\ogg_kpi64 を待ち、Open/Render/Seek/Close を実行する。
+// x64 の本体は x86 DLL を LoadLibrary できない。このプロセスが名前付きパイプ
+// \\.\pipe\ogg_kpi32 を待ち、Open/Render/Seek/Close を実行する。
 //
 // スレッド:
 //   wmain / ServeOnce … パイプ 1 本を直列処理（本体側も同時リクエストしない）
-//   VST ライブ音声   … 別スレッド＋共有メモリ（KpiHost64VstLive.cpp）
+//   VST ライブ音声   … 別スレッド＋共有メモリ（KpiHost32VstLive.cpp）
 //   VST ライブ GUI   … 専用 UI スレッド（SC-VA エディタ用）
 //
 // アイドル 30 秒で接続が来なければ、KPI セッションもライブパートも無ければ終了。
@@ -26,9 +27,9 @@
 #include "..\kmp_pi.h"
 #include "..\kpi_host_ipc.h"
 #include "..\KpiV5ConfigStore.h"
-#include "KpiHost64Foreign.h"
-#include "KpiHost64Vst.h"
-#include "KpiHost64VstLive.h"
+#include "KpiHost32Foreign.h"
+#include "KpiHost32Vst.h"
+#include "KpiHost32VstLive.h"
 #include "..\VstMidiEngine.h"
 #include "..\PluginKinds.h"
 
@@ -111,7 +112,7 @@ static void CollectSubDirsRecursive(const std::wstring& baseDir, int depth, std:
 	FindClose(h);
 }
 
-// KpiHost64.exe のあるフォルダとその配下（深さ 3）。AddDllDirectory 用。
+// ogghost32.exe（このプロジェクト）のあるフォルダとその配下（深さ 3）。AddDllDirectory 用。
 static std::vector<std::wstring> GetExeRelatedDllDirs()
 {
 	std::vector<std::wstring> dirs;
@@ -157,14 +158,14 @@ struct ScopedDllDirectory
 	}
 };
 
-// %TEMP%\ogg_kpi64_host.log へ 1 行追記。失敗しても再生は続ける（デバッグ用）。
+// %TEMP%\ogg_kpi32_host.log へ 1 行追記。失敗しても再生は続ける（デバッグ用）。
 static void AppendHostLogLine(const wchar_t* line)
 {
 	if (!line) return;
 	wchar_t tempDir[MAX_PATH]{};
 	if (!GetTempPathW(MAX_PATH, tempDir)) return;
 	std::wstring path = tempDir;
-	path += L"ogg_kpi64_host.log";
+	path += L"ogg_kpi32_host.log";
 	HANDLE h = CreateFileW(path.c_str(), FILE_APPEND_DATA, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
 	if (h == INVALID_HANDLE_VALUE) return;
 	DWORD bytes = (DWORD)(wcslen(line) * sizeof(wchar_t));
@@ -211,7 +212,7 @@ public:
 			sec && key && _wcsicmp(sec, L"kbsasami") == 0) {
 			if (_wcsicmp(key, L"raira") == 0)
 				return 1;
-			// KpiHost64 は midPlayPrefer を持たないのでレジストリ値 (本体が Sync 済み)
+			// KpiHost32 は midPlayPrefer を持たないのでレジストリ値 (本体が Sync 済み)
 			if (_wcsicmp(key, L"vst") == 0)
 				return KpiV5GetInt(m_pluginName, L"kbsasami", L"vst", 1);
 		}
@@ -816,7 +817,7 @@ static bool ReadWString(const uint8_t*& p, const uint8_t* end, std::wstring& out
 
 static void SendReply(HANDLE pipe, uint32_t cmd, uint32_t reqId, uint32_t status, const void* payload, uint32_t payloadBytes)
 {
-	KPIHOST64_ReplyHeader rh{};
+	KPIHOST32_ReplyHeader rh{};
 	rh.cmd = cmd;
 	rh.requestId = reqId;
 	rh.status = status;
@@ -840,7 +841,7 @@ static uint32_t Cmd_ListExts(const std::wstring& kpiPath, HostReplyBuf& out)
 	);
 	if (!h) {
 		AppendHostLogLine((L"[LIST_EXTS] LoadLibraryExW failed err=" + std::to_wstring(GetLastError()) + L" path=" + kpiPath).c_str());
-		return KPIHOST64_STATUS_FAIL;
+		return KPIHOST32_STATUS_FAIL;
 	}
 	std::wstring exts;
 	uint32_t ver = 0;
@@ -884,7 +885,7 @@ static uint32_t Cmd_ListExts(const std::wstring& kpiPath, HostReplyBuf& out)
 
 	FreeLibrary(h);
 
-	KPIHOST64_ListExtsReply rep{};
+	KPIHOST32_ListExtsReply rep{};
 	rep.kpiVer = ver;
 	uint32_t chars = (uint32_t)exts.size();
 	const size_t maxChars = (HostReplyBuf::kCap - sizeof(rep) - 4) / sizeof(wchar_t);
@@ -893,7 +894,7 @@ static uint32_t Cmd_ListExts(const std::wstring& kpiPath, HostReplyBuf& out)
 	memcpy(out.data(), &rep, sizeof(rep));
 	memcpy(out.data() + sizeof(rep), &chars, 4);
 	if (chars) memcpy(out.data() + sizeof(rep) + 4, exts.data(), chars * sizeof(wchar_t));
-	return KPIHOST64_STATUS_OK;
+	return KPIHOST32_STATUS_OK;
 }
 
 static void SoundInfoToMediaInfo(const SOUNDINFO& si, KPI_MEDIAINFO& mi)
@@ -980,13 +981,13 @@ static uint32_t Cmd_OpenKmp(HMODULE h, const std::wstring& kpiPath, const std::w
 	if (!fn) {
 		AppendHostLogLine(L"[OPEN] no kpi_CreateInstance and no kmp_GetTestModule");
 		FreeLibrary(h);
-		return KPIHOST64_STATUS_NOT_SUPPORTED;
+		return KPIHOST32_STATUS_NOT_SUPPORTED;
 	}
 	KMPMODULE* kmp = fn();
 	if (!kmp || !kmp->Open) {
 		AppendHostLogLine(L"[OPEN] kmp_GetTestModule returned null/no Open");
 		FreeLibrary(h);
-		return KPIHOST64_STATUS_FAIL;
+		return KPIHOST32_STATUS_FAIL;
 	}
 	if (kmp->Init) kmp->Init();
 
@@ -1001,13 +1002,13 @@ static uint32_t Cmd_OpenKmp(HMODULE h, const std::wstring& kpiPath, const std::w
 	if (!WideToAcp(mediaPath, mediaA)) {
 		AppendHostLogLine(L"[OPEN] v2 path ACP convert failed");
 		FreeLibrary(h);
-		return KPIHOST64_STATUS_FAIL;
+		return KPIHOST32_STATUS_FAIL;
 	}
 	HKMP hk = SafeKmpOpen(kmp, mediaA.c_str(), &si);
 	if (!hk) {
 		AppendHostLogLine((L"[OPEN] KMP Open failed kpi=" + kpiPath + L" media=" + mediaPath).c_str());
 		FreeLibrary(h);
-		return KPIHOST64_STATUS_FAIL;
+		return KPIHOST32_STATUS_FAIL;
 	}
 	if (songNo > 1 && si.dwReserved2 == 1 && kmp->SetPosition)
 		kmp->SetPosition(hk, songNo * 1000);
@@ -1036,7 +1037,7 @@ static uint32_t Cmd_OpenKmp(HMODULE h, const std::wstring& kpiPath, const std::w
 	const uint32_t id = g_nextSessionId++;
 	g_sessions[id] = s;
 
-	KPIHOST64_OpenReply rep{};
+	KPIHOST32_OpenReply rep{};
 	rep.sessionId = id;
 	rep.openedSongCount = s.openedSongCount;
 	out.resize(sizeof(rep) + sizeof(KPI_MEDIAINFO));
@@ -1045,7 +1046,7 @@ static uint32_t Cmd_OpenKmp(HMODULE h, const std::wstring& kpiPath, const std::w
 	AppendHostLogLine((L"[OPEN] v2 success sessionId=" + std::to_wstring(id) +
 		L" rate=" + std::to_wstring(s.selected.dwSampleRate) +
 		L" ch=" + std::to_wstring(s.selected.dwChannels)).c_str());
-	return KPIHOST64_STATUS_OK;
+	return KPIHOST32_STATUS_OK;
 }
 
 // メディアを開き Session をマップへ入れる。成功時 out は OpenReply + KPI_MEDIAINFO。
@@ -1064,7 +1065,7 @@ static uint32_t Cmd_Open(const std::wstring& kpiPath, const std::wstring& mediaP
 	);
 	if (!h) {
 		AppendHostLogLine((L"[OPEN] LoadLibraryExW failed err=" + std::to_wstring(GetLastError()) + L" kpi=" + kpiPath).c_str());
-		return KPIHOST64_STATUS_FAIL;
+		return KPIHOST32_STATUS_FAIL;
 	}
 	AppendHostLogLine(L"[OPEN] LoadLibraryExW ok");
 	auto cr = (pfn_kpiCreateInstance)GetProcAddress(h, "kpi_CreateInstance");
@@ -1082,7 +1083,7 @@ static uint32_t Cmd_Open(const std::wstring& kpiPath, const std::wstring& mediaP
 	ScopedMediaCwd mediaCwd(mediaPath);
 
 	auto* f = new HostFile();
-	if (!f->Open(mediaPath)) { f->Release(); mod->Release(); FreeLibrary(h); return KPIHOST64_STATUS_NOT_FOUND; }
+	if (!f->Open(mediaPath)) { f->Release(); mod->Release(); FreeLibrary(h); return KPIHOST32_STATUS_NOT_FOUND; }
 	auto* folder = new HostFolder(DirNameOf(mediaPath));
 	AppendHostLogLine((L"[OPEN] media folder=" + DirNameOf(mediaPath)).c_str());
 
@@ -1095,7 +1096,7 @@ static uint32_t Cmd_Open(const std::wstring& kpiPath, const std::wstring& mediaP
 		folder->Release();
 		mod->Release();
 		FreeLibrary(h);
-		return KPIHOST64_STATUS_FAIL;
+		return KPIHOST32_STATUS_FAIL;
 	}
 	AppendHostLogLine((L"[OPEN] mod->Open ok count=" + std::to_wstring(count)).c_str());
 
@@ -1109,7 +1110,7 @@ static uint32_t Cmd_Open(const std::wstring& kpiPath, const std::wstring& mediaP
 		folder->Release();
 		mod->Release();
 		FreeLibrary(h);
-		return KPIHOST64_STATUS_FAIL;
+		return KPIHOST32_STATUS_FAIL;
 	}
 	AppendHostLogLine(L"[OPEN] dec->Select ok");
 	AppendHostLogLine((L"[OPEN] mediaInfo rate=" + std::to_wstring(sel->dwSampleRate) +
@@ -1141,7 +1142,7 @@ static uint32_t Cmd_Open(const std::wstring& kpiPath, const std::wstring& mediaP
 	const uint32_t id = g_nextSessionId++;
 	g_sessions[id] = s;
 
-	KPIHOST64_OpenReply rep{};
+	KPIHOST32_OpenReply rep{};
 	rep.sessionId = id;
 	rep.openedSongCount = count;
 
@@ -1149,7 +1150,7 @@ static uint32_t Cmd_Open(const std::wstring& kpiPath, const std::wstring& mediaP
 	memcpy(out.data(), &rep, sizeof(rep));
 	memcpy(out.data() + sizeof(rep), &s.selected, sizeof(KPI_MEDIAINFO));
 	AppendHostLogLine((L"[OPEN] success sessionId=" + std::to_wstring(id)).c_str());
-	return KPIHOST64_STATUS_OK;
+	return KPIHOST32_STATUS_OK;
 }
 
 // PCM を samplesWanted まで読む。KPI は 576 サンプルずつ。out は RenderReply + PCM。
@@ -1157,12 +1158,12 @@ static uint32_t Cmd_Render(uint32_t sessionId, uint32_t bytesWanted, HostReplyBu
 {
 	out.clear();
 	auto it = g_sessions.find(sessionId);
-	if (it == g_sessions.end()) return KPIHOST64_STATUS_NOT_FOUND;
+	if (it == g_sessions.end()) return KPIHOST32_STATUS_NOT_FOUND;
 	Session& s = it->second;
 	if (s.kpiApi == 2) {
-		if (!s.kmp || !s.hkmp || !s.kmp->Render) return KPIHOST64_STATUS_FAIL;
+		if (!s.kmp || !s.hkmp || !s.kmp->Render) return KPIHOST32_STATUS_FAIL;
 		const uint32_t bytesPerFrame = s.channels * (s.bps / 8);
-		if (bytesPerFrame == 0) return KPIHOST64_STATUS_BAD_REQUEST;
+		if (bytesPerFrame == 0) return KPIHOST32_STATUS_BAD_REQUEST;
 		uint32_t want = bytesWanted;
 		if (s.kmpUnitRender > 0 && want > s.kmpUnitRender) want = s.kmpUnitRender;
 		if (want < bytesPerFrame) want = bytesPerFrame;
@@ -1173,17 +1174,17 @@ static uint32_t Cmd_Render(uint32_t sessionId, uint32_t bytesWanted, HostReplyBu
 				cap *= 2;
 			}
 			uint8_t* nb = new (std::nothrow) uint8_t[cap];
-			if (!nb) return KPIHOST64_STATUS_FAIL;
+			if (!nb) return KPIHOST32_STATUS_FAIL;
 			delete[] s.pcmBuf;
 			s.pcmBuf = nb;
 			s.pcmCap = cap;
 		}
 		DWORD got = SafeKmpRender(s.kmp, s.hkmp, s.pcmBuf, want);
 		if (got > want) got = want;
-		if (sizeof(KPIHOST64_RenderReply) + (size_t)got > HostReplyBuf::kCap)
-			got = (DWORD)(HostReplyBuf::kCap - sizeof(KPIHOST64_RenderReply));
+		if (sizeof(KPIHOST32_RenderReply) + (size_t)got > HostReplyBuf::kCap)
+			got = (DWORD)(HostReplyBuf::kCap - sizeof(KPIHOST32_RenderReply));
 		if (got == 0) s.zeroRenderStreak++; else s.zeroRenderStreak = 0;
-		KPIHOST64_RenderReply rep{};
+		KPIHOST32_RenderReply rep{};
 		rep.sessionId = sessionId;
 		rep.bytesReturned = got;
 		if (s.selected.qwLoop == (UINT64)-1) rep.eof = 0;
@@ -1191,14 +1192,14 @@ static uint32_t Cmd_Render(uint32_t sessionId, uint32_t bytesWanted, HostReplyBu
 		out.resize(sizeof(rep) + got);
 		memcpy(out.data(), &rep, sizeof(rep));
 		if (got) memcpy(out.data() + sizeof(rep), s.pcmBuf, got);
-		return KPIHOST64_STATUS_OK;
+		return KPIHOST32_STATUS_OK;
 	}
-	if (!s.dec) return KPIHOST64_STATUS_FAIL;
+	if (!s.dec) return KPIHOST32_STATUS_FAIL;
 
 	const uint32_t bytesPerFrame = s.channels * (s.bps / 8);
-	if (bytesPerFrame == 0) return KPIHOST64_STATUS_BAD_REQUEST;
+	if (bytesPerFrame == 0) return KPIHOST32_STATUS_BAD_REQUEST;
 	uint32_t samplesWanted = bytesWanted / bytesPerFrame;
-	if (samplesWanted == 0) return KPIHOST64_STATUS_BAD_REQUEST;
+	if (samplesWanted == 0) return KPIHOST32_STATUS_BAD_REQUEST;
 	if (samplesWanted > 65536) samplesWanted = 65536;
 
 	const size_t pcmNeed = (size_t)samplesWanted * (size_t)bytesPerFrame;
@@ -1209,7 +1210,7 @@ static uint32_t Cmd_Render(uint32_t sessionId, uint32_t bytesWanted, HostReplyBu
 			cap *= 2;
 		}
 		uint8_t* nb = new (std::nothrow) uint8_t[cap];
-		if (!nb) return KPIHOST64_STATUS_FAIL;
+		if (!nb) return KPIHOST32_STATUS_FAIL;
 		delete[] s.pcmBuf;
 		s.pcmBuf = nb;
 		s.pcmCap = cap;
@@ -1266,9 +1267,9 @@ static uint32_t Cmd_Render(uint32_t sessionId, uint32_t bytesWanted, HostReplyBu
 		remain -= got;
 	}
 
-	KPIHOST64_RenderReply rep{};
-	if (sizeof(KPIHOST64_RenderReply) + (size_t)gotBytes > HostReplyBuf::kCap)
-		gotBytes = (uint32_t)(HostReplyBuf::kCap - sizeof(KPIHOST64_RenderReply));
+	KPIHOST32_RenderReply rep{};
+	if (sizeof(KPIHOST32_RenderReply) + (size_t)gotBytes > HostReplyBuf::kCap)
+		gotBytes = (uint32_t)(HostReplyBuf::kCap - sizeof(KPIHOST32_RenderReply));
 	rep.sessionId = sessionId;
 	rep.bytesReturned = gotBytes;
 	if (gotSamples == 0) s.zeroRenderStreak++; else s.zeroRenderStreak = 0;
@@ -1278,7 +1279,7 @@ static uint32_t Cmd_Render(uint32_t sessionId, uint32_t bytesWanted, HostReplyBu
 	out.resize(sizeof(rep) + gotBytes);
 	memcpy(out.data(), &rep, sizeof(rep));
 	if (gotBytes) memcpy(out.data() + sizeof(rep), s.pcmBuf, gotBytes);
-	return KPIHOST64_STATUS_OK;
+	return KPIHOST32_STATUS_OK;
 }
 
 // MIDI KPI は Seek が音色を戻さないので、この拡張子だけ破棄再生でシークする。
@@ -1299,10 +1300,10 @@ static uint32_t Cmd_Seek(uint32_t sessionId, uint64_t posSample, uint32_t flag, 
 {
 	out.clear();
 	auto it = g_sessions.find(sessionId);
-	if (it == g_sessions.end()) return KPIHOST64_STATUS_NOT_FOUND;
+	if (it == g_sessions.end()) return KPIHOST32_STATUS_NOT_FOUND;
 	Session& s = it->second;
 	if (s.kpiApi == 2) {
-		if (!s.kmp || !s.hkmp || !s.kmp->SetPosition) return KPIHOST64_STATUS_FAIL;
+		if (!s.kmp || !s.hkmp || !s.kmp->SetPosition) return KPIHOST32_STATUS_FAIL;
 		DWORD ms = 0;
 		if (s.selected.dwSampleRate)
 			ms = (DWORD)((posSample * 1000ull) / (uint64_t)s.selected.dwSampleRate);
@@ -1311,15 +1312,15 @@ static uint32_t Cmd_Seek(uint32_t sessionId, uint64_t posSample, uint32_t flag, 
 		UINT64 newPosK = 0;
 		if (s.selected.dwSampleRate)
 			newPosK = ((UINT64)gotMs * (UINT64)s.selected.dwSampleRate) / 1000ull;
-		KPIHOST64_SeekReply r2{};
+		KPIHOST32_SeekReply r2{};
 		r2.sessionId = sessionId;
 		r2.newPosSample = newPosK;
 		out.resize(sizeof(r2));
 		memcpy(out.data(), &r2, sizeof(r2));
 		(void)flag;
-		return KPIHOST64_STATUS_OK;
+		return KPIHOST32_STATUS_OK;
 	}
-	if (!s.dec) return KPIHOST64_STATUS_FAIL;
+	if (!s.dec) return KPIHOST32_STATUS_FAIL;
 
 	UINT64 newPos = 0;
 	if (IsMidiLikePathW(s.mediaPath)) {
@@ -1368,12 +1369,12 @@ static uint32_t Cmd_Seek(uint32_t sessionId, uint64_t posSample, uint32_t flag, 
 		newPos = s.dec->Seek(posSample, flag);
 	}
 
-	KPIHOST64_SeekReply rep{};
+	KPIHOST32_SeekReply rep{};
 	rep.sessionId = sessionId;
 	rep.newPosSample = newPos;
 	out.resize(sizeof(rep));
 	memcpy(out.data(), &rep, sizeof(rep));
-	return KPIHOST64_STATUS_OK;
+	return KPIHOST32_STATUS_OK;
 }
 
 // Close/Release はプラグインワーカーがこのスレッドの窓へ SendMessage する。
@@ -1418,7 +1419,7 @@ static void WaitThreadPump(HANDLE th)
 static uint32_t Cmd_Close(uint32_t sessionId)
 {
 	auto it = g_sessions.find(sessionId);
-	if (it == g_sessions.end()) return KPIHOST64_STATUS_NOT_FOUND;
+	if (it == g_sessions.end()) return KPIHOST32_STATUS_NOT_FOUND;
 	Session s = it->second;
 	g_sessions.erase(it);
 
@@ -1436,7 +1437,7 @@ static uint32_t Cmd_Close(uint32_t sessionId)
 	s.pcmCap = 0;
 	if (s.cwdSaved && s.prevCwd[0])
 		SetCurrentDirectoryW(s.prevCwd);
-	return KPIHOST64_STATUS_OK;
+	return KPIHOST32_STATUS_OK;
 }
 
 // 1 クライアント接続のあいだ、ヘッダ＋ペイロードを読んで応答する。切断で抜ける。
@@ -1447,7 +1448,7 @@ static void ServeOnce(HANDLE pipe)
 	static size_t s_payloadCap = 0;
 	HostReplyBuf& reply = g_hostReply;
 	for (;;) {
-		KPIHOST64_MsgHeader h{};
+		KPIHOST32_MsgHeader h{};
 		// バイトモードなのでヘッダが分割到着する。短い読みで切ると曲の途中で落ちる。
 		if (!ReadExact(pipe, &h, sizeof(h))) break;
 
@@ -1468,37 +1469,37 @@ static void ServeOnce(HANDLE pipe)
 		}
 
 		reply.clear();
-		uint32_t status = KPIHOST64_STATUS_FAIL;
+		uint32_t status = KPIHOST32_STATUS_FAIL;
 
 		const uint8_t* p = s_payload;
 		const uint8_t* end = s_payload + h.payloadBytes;
 
 		switch (h.cmd) {
-		case KPIHOST64_CMD_PING:
+		case KPIHOST32_CMD_PING:
 			// 任意ペイロード: u32 lang。ホスト側 VST メッセージの言語に使う。
 			if (h.payloadBytes >= sizeof(uint32_t) && s_payload) {
 				int lang = (int)*(const uint32_t*)s_payload;
 				if (lang < 0 || lang > 13) lang = 1;
 				savedata.lang = lang;
 			}
-			status = KPIHOST64_STATUS_OK;
+			status = KPIHOST32_STATUS_OK;
 			break;
-		case KPIHOST64_CMD_LIST_EXTS: {
+		case KPIHOST32_CMD_LIST_EXTS: {
 			std::wstring kpiPath;
-			if (!ReadWString(p, end, kpiPath) || p != end) { status = KPIHOST64_STATUS_BAD_REQUEST; break; }
+			if (!ReadWString(p, end, kpiPath) || p != end) { status = KPIHOST32_STATUS_BAD_REQUEST; break; }
 			status = Cmd_ListExts(kpiPath, reply);
 			break;
 		}
-		case KPIHOST64_CMD_OPEN: {
-			if (end - p < 4) { status = KPIHOST64_STATUS_BAD_REQUEST; break; }
+		case KPIHOST32_CMD_OPEN: {
+			if (end - p < 4) { status = KPIHOST32_STATUS_BAD_REQUEST; break; }
 			uint32_t songNo = *(const uint32_t*)p; p += 4;
 			std::wstring kpiPath, mediaPath;
-			if (!ReadWString(p, end, kpiPath)) { status = KPIHOST64_STATUS_BAD_REQUEST; break; }
-			if (!ReadWString(p, end, mediaPath)) { status = KPIHOST64_STATUS_BAD_REQUEST; break; }
+			if (!ReadWString(p, end, kpiPath)) { status = KPIHOST32_STATUS_BAD_REQUEST; break; }
+			if (!ReadWString(p, end, mediaPath)) { status = KPIHOST32_STATUS_BAD_REQUEST; break; }
 			if ((size_t)(end - p) != sizeof(KPI_MEDIAINFO)) {
 				AppendHostLogLine((L"[OPEN] BAD_REQUEST remain=" + std::to_wstring((size_t)(end - p))
 					+ L" sizeof(KPI_MEDIAINFO)=" + std::to_wstring(sizeof(KPI_MEDIAINFO))).c_str());
-				status = KPIHOST64_STATUS_BAD_REQUEST;
+				status = KPIHOST32_STATUS_BAD_REQUEST;
 				break;
 			}
 			KPI_MEDIAINFO req{};
@@ -1506,33 +1507,33 @@ static void ServeOnce(HANDLE pipe)
 			status = Cmd_Open(kpiPath, mediaPath, req, songNo, reply);
 			break;
 		}
-		case KPIHOST64_CMD_RENDER: {
-			if ((size_t)(end - p) != sizeof(KPIHOST64_RenderReq)) { status = KPIHOST64_STATUS_BAD_REQUEST; break; }
-			auto* rr = (const KPIHOST64_RenderReq*)p;
+		case KPIHOST32_CMD_RENDER: {
+			if ((size_t)(end - p) != sizeof(KPIHOST32_RenderReq)) { status = KPIHOST32_STATUS_BAD_REQUEST; break; }
+			auto* rr = (const KPIHOST32_RenderReq*)p;
 			status = Cmd_Render(rr->sessionId, rr->bytesWanted, reply);
 			break;
 		}
-		case KPIHOST64_CMD_SEEK: {
-			if ((size_t)(end - p) != sizeof(KPIHOST64_SeekReq)) { status = KPIHOST64_STATUS_BAD_REQUEST; break; }
-			auto* sr = (const KPIHOST64_SeekReq*)p;
+		case KPIHOST32_CMD_SEEK: {
+			if ((size_t)(end - p) != sizeof(KPIHOST32_SeekReq)) { status = KPIHOST32_STATUS_BAD_REQUEST; break; }
+			auto* sr = (const KPIHOST32_SeekReq*)p;
 			status = Cmd_Seek(sr->sessionId, sr->posSample, sr->flag, reply);
 			break;
 		}
-		case KPIHOST64_CMD_CLOSE: {
-			if ((size_t)(end - p) != sizeof(KPIHOST64_U32)) { status = KPIHOST64_STATUS_BAD_REQUEST; break; }
-			auto* u = (const KPIHOST64_U32*)p;
+		case KPIHOST32_CMD_CLOSE: {
+			if ((size_t)(end - p) != sizeof(KPIHOST32_U32)) { status = KPIHOST32_STATUS_BAD_REQUEST; break; }
+			auto* u = (const KPIHOST32_U32*)p;
 			status = Cmd_Close(u->v);
 			break;
 		}
-		case KPIHOST64_CMD_FOREIGN_LIST_EXTS: {
-			if (end - p < 4) { status = KPIHOST64_STATUS_BAD_REQUEST; break; }
+		case KPIHOST32_CMD_FOREIGN_LIST_EXTS: {
+			if (end - p < 4) { status = KPIHOST32_STATUS_BAD_REQUEST; break; }
 			uint32_t kind = *(const uint32_t*)p; p += 4;
 			std::wstring path;
-			if (!ReadWString(p, end, path) || p != end) { status = KPIHOST64_STATUS_BAD_REQUEST; break; }
+			if (!ReadWString(p, end, path) || p != end) { status = KPIHOST32_STATUS_BAD_REQUEST; break; }
 			std::wstring exts;
 			status = ForeignHost_ListExts(kind, path, exts);
-			if (status == KPIHOST64_STATUS_OK) {
-				KPIHOST64_ListExtsReply lr{};
+			if (status == KPIHOST32_STATUS_OK) {
+				KPIHOST32_ListExtsReply lr{};
 				lr.kpiVer = 0;
 				reply.resize(sizeof(lr));
 				memcpy(reply.data(), &lr, sizeof(lr));
@@ -1546,34 +1547,34 @@ static void ServeOnce(HANDLE pipe)
 			}
 			break;
 		}
-		case KPIHOST64_CMD_FOREIGN_OPEN: {
-			if (end - p < 4) { status = KPIHOST64_STATUS_BAD_REQUEST; break; }
+		case KPIHOST32_CMD_FOREIGN_OPEN: {
+			if (end - p < 4) { status = KPIHOST32_STATUS_BAD_REQUEST; break; }
 			uint32_t kind = *(const uint32_t*)p; p += 4;
 			std::wstring dll, media;
-			if (!ReadWString(p, end, dll)) { status = KPIHOST64_STATUS_BAD_REQUEST; break; }
-			if (!ReadWString(p, end, media) || p != end) { status = KPIHOST64_STATUS_BAD_REQUEST; break; }
-			KPIHOST64_ForeignOpenReply fr{};
+			if (!ReadWString(p, end, dll)) { status = KPIHOST32_STATUS_BAD_REQUEST; break; }
+			if (!ReadWString(p, end, media) || p != end) { status = KPIHOST32_STATUS_BAD_REQUEST; break; }
+			KPIHOST32_ForeignOpenReply fr{};
 			status = ForeignHost_Open(kind, dll, media, fr);
-			if (status == KPIHOST64_STATUS_OK) {
+			if (status == KPIHOST32_STATUS_OK) {
 				reply.resize(sizeof(fr));
 				memcpy(reply.data(), &fr, sizeof(fr));
 			}
 			break;
 		}
-		case KPIHOST64_CMD_FOREIGN_RENDER: {
-			if ((size_t)(end - p) != sizeof(KPIHOST64_RenderReq)) { status = KPIHOST64_STATUS_BAD_REQUEST; break; }
-			auto* rr = (const KPIHOST64_RenderReq*)p;
+		case KPIHOST32_CMD_FOREIGN_RENDER: {
+			if ((size_t)(end - p) != sizeof(KPIHOST32_RenderReq)) { status = KPIHOST32_STATUS_BAD_REQUEST; break; }
+			auto* rr = (const KPIHOST32_RenderReq*)p;
 			uint32_t eof = 0;
 			uint32_t gotBytes = 0;
 			uint32_t want = rr->bytesWanted;
-			if (sizeof(KPIHOST64_RenderReply) + (size_t)want > HostReplyBuf::kCap)
-				want = (uint32_t)(HostReplyBuf::kCap - sizeof(KPIHOST64_RenderReply));
-			reply.resize(sizeof(KPIHOST64_RenderReply) + want);
+			if (sizeof(KPIHOST32_RenderReply) + (size_t)want > HostReplyBuf::kCap)
+				want = (uint32_t)(HostReplyBuf::kCap - sizeof(KPIHOST32_RenderReply));
+			reply.resize(sizeof(KPIHOST32_RenderReply) + want);
 			status = ForeignHost_Render(rr->sessionId, want,
-				reply.data() + sizeof(KPIHOST64_RenderReply), want, gotBytes, eof);
-			if (status == KPIHOST64_STATUS_OK) {
+				reply.data() + sizeof(KPIHOST32_RenderReply), want, gotBytes, eof);
+			if (status == KPIHOST32_STATUS_OK) {
 				if (gotBytes > want) gotBytes = want;
-				KPIHOST64_RenderReply rrep{};
+				KPIHOST32_RenderReply rrep{};
 				rrep.sessionId = rr->sessionId;
 				rrep.bytesReturned = gotBytes;
 				rrep.eof = eof;
@@ -1584,12 +1585,12 @@ static void ServeOnce(HANDLE pipe)
 			}
 			break;
 		}
-		case KPIHOST64_CMD_FOREIGN_SEEK: {
-			if ((size_t)(end - p) != sizeof(KPIHOST64_SeekReq)) { status = KPIHOST64_STATUS_BAD_REQUEST; break; }
-			auto* sr = (const KPIHOST64_SeekReq*)p;
+		case KPIHOST32_CMD_FOREIGN_SEEK: {
+			if ((size_t)(end - p) != sizeof(KPIHOST32_SeekReq)) { status = KPIHOST32_STATUS_BAD_REQUEST; break; }
+			auto* sr = (const KPIHOST32_SeekReq*)p;
 			status = ForeignHost_Seek(sr->sessionId, sr->posSample);
-			if (status == KPIHOST64_STATUS_OK) {
-				KPIHOST64_SeekReply srep{};
+			if (status == KPIHOST32_STATUS_OK) {
+				KPIHOST32_SeekReply srep{};
 				srep.sessionId = sr->sessionId;
 				srep.newPosSample = sr->posSample;
 				reply.resize(sizeof(srep));
@@ -1597,64 +1598,64 @@ static void ServeOnce(HANDLE pipe)
 			}
 			break;
 		}
-		case KPIHOST64_CMD_FOREIGN_CLOSE: {
-			if ((size_t)(end - p) != sizeof(KPIHOST64_U32)) { status = KPIHOST64_STATUS_BAD_REQUEST; break; }
-			auto* u = (const KPIHOST64_U32*)p;
+		case KPIHOST32_CMD_FOREIGN_CLOSE: {
+			if ((size_t)(end - p) != sizeof(KPIHOST32_U32)) { status = KPIHOST32_STATUS_BAD_REQUEST; break; }
+			auto* u = (const KPIHOST32_U32*)p;
 			status = ForeignHost_Close(u->v);
 			break;
 		}
-		case KPIHOST64_CMD_VST_OPEN: {
+		case KPIHOST32_CMD_VST_OPEN: {
 			// payload: [u32 slot][u32 midChars][mid][u32 dllChars][dll][u32 extraChars][extra]
-			if ((size_t)(end - p) < sizeof(uint32_t) * 2) { status = KPIHOST64_STATUS_BAD_REQUEST; break; }
+			if ((size_t)(end - p) < sizeof(uint32_t) * 2) { status = KPIHOST32_STATUS_BAD_REQUEST; break; }
 			uint32_t slot = *(const uint32_t*)p; p += sizeof(uint32_t);
 			if (slot > 1) slot = 0;
 			uint32_t nMid = *(const uint32_t*)p; p += sizeof(uint32_t);
-			if ((size_t)(end - p) < nMid * sizeof(wchar_t)) { status = KPIHOST64_STATUS_BAD_REQUEST; break; }
+			if ((size_t)(end - p) < nMid * sizeof(wchar_t)) { status = KPIHOST32_STATUS_BAD_REQUEST; break; }
 			std::wstring mid((const wchar_t*)p, (const wchar_t*)p + nMid);
 			p += nMid * sizeof(wchar_t);
 			std::wstring dll, extra;
 			if ((size_t)(end - p) >= sizeof(uint32_t)) {
 				uint32_t nDll = *(const uint32_t*)p; p += sizeof(uint32_t);
-				if ((size_t)(end - p) < nDll * sizeof(wchar_t)) { status = KPIHOST64_STATUS_BAD_REQUEST; break; }
+				if ((size_t)(end - p) < nDll * sizeof(wchar_t)) { status = KPIHOST32_STATUS_BAD_REQUEST; break; }
 				dll.assign((const wchar_t*)p, (const wchar_t*)p + nDll);
 				p += nDll * sizeof(wchar_t);
 			}
 			if ((size_t)(end - p) >= sizeof(uint32_t)) {
 				uint32_t nEx = *(const uint32_t*)p; p += sizeof(uint32_t);
-				if ((size_t)(end - p) < nEx * sizeof(wchar_t)) { status = KPIHOST64_STATUS_BAD_REQUEST; break; }
+				if ((size_t)(end - p) < nEx * sizeof(wchar_t)) { status = KPIHOST32_STATUS_BAD_REQUEST; break; }
 				extra.assign((const wchar_t*)p, (const wchar_t*)p + nEx);
 			}
-			status = VstHost64_Open((int)slot, mid.c_str(),
+			status = VstHost32_Open((int)slot, mid.c_str(),
 				dll.empty() ? nullptr : dll.c_str(),
 				extra.empty() ? nullptr : extra.c_str());
-			if (status == KPIHOST64_STATUS_OK) {
-				KPIHOST64_ForeignOpenReply orp{};
+			if (status == KPIHOST32_STATUS_OK) {
+				KPIHOST32_ForeignOpenReply orp{};
 				orp.sessionId = slot;
-				orp.sampleRate = (uint32_t)VstHost64_Rate((int)slot);
-				orp.channels = (uint32_t)VstHost64_Channels((int)slot);
-				orp.bitsPerSample = VstHost64_Bits((int)slot);
-				orp.lengthSamples = VstHost64_Length((int)slot);
-				orp.latencySamples = (uint32_t)VstHost64_Latency((int)slot);
+				orp.sampleRate = (uint32_t)VstHost32_Rate((int)slot);
+				orp.channels = (uint32_t)VstHost32_Channels((int)slot);
+				orp.bitsPerSample = VstHost32_Bits((int)slot);
+				orp.lengthSamples = VstHost32_Length((int)slot);
+				orp.latencySamples = (uint32_t)VstHost32_Latency((int)slot);
 				reply.resize(sizeof(orp));
 				memcpy(reply.data(), &orp, sizeof(orp));
 			}
 			break;
 		}
-		case KPIHOST64_CMD_VST_RENDER: {
+		case KPIHOST32_CMD_VST_RENDER: {
 			// RenderReq の後ろに任意で注入ショート（モニタ／鍵盤からの CC）。次ブロックで送る。
-			if ((size_t)(end - p) < sizeof(KPIHOST64_RenderReq)) { status = KPIHOST64_STATUS_BAD_REQUEST; break; }
-			auto* rr = (const KPIHOST64_RenderReq*)p;
+			if ((size_t)(end - p) < sizeof(KPIHOST32_RenderReq)) { status = KPIHOST32_STATUS_BAD_REQUEST; break; }
+			auto* rr = (const KPIHOST32_RenderReq*)p;
 			int slot = (rr->sessionId == 1) ? 1 : 0;
-			const uint8_t* q = p + sizeof(KPIHOST64_RenderReq);
+			const uint8_t* q = p + sizeof(KPIHOST32_RenderReq);
 			if ((size_t)(end - q) >= sizeof(uint32_t)) {
 				uint32_t nInj = *(const uint32_t*)q; q += sizeof(uint32_t);
 				if (nInj > 8192) nInj = 8192;
 				VstMidiSetIoSlot(slot);
 				for (uint32_t i = 0; i < nInj; ++i) {
-					if ((size_t)(end - q) < sizeof(KPIHOST64_VstLiveMidiReq)) break;
-					auto* mr = (const KPIHOST64_VstLiveMidiReq*)q;
+					if ((size_t)(end - q) < sizeof(KPIHOST32_VstLiveMidiReq)) break;
+					auto* mr = (const KPIHOST32_VstLiveMidiReq*)q;
 					VstMidiInjectShort((int)mr->port, mr->msg, (int)mr->sampleOfs);
-					q += sizeof(KPIHOST64_VstLiveMidiReq);
+					q += sizeof(KPIHOST32_VstLiveMidiReq);
 				}
 				if ((size_t)(end - q) >= sizeof(uint32_t)) {
 					uint32_t nSx = *(const uint32_t*)q; q += sizeof(uint32_t);
@@ -1673,14 +1674,14 @@ static void ServeOnce(HANDLE pipe)
 			uint32_t eof = 0;
 			uint32_t gotBytes = 0;
 			uint32_t want = rr->bytesWanted;
-			if (sizeof(KPIHOST64_RenderReply) + (size_t)want > HostReplyBuf::kCap)
-				want = (uint32_t)(HostReplyBuf::kCap - sizeof(KPIHOST64_RenderReply));
-			reply.resize(sizeof(KPIHOST64_RenderReply) + want);
-			status = VstHost64_Render(slot, want,
-				reply.data() + sizeof(KPIHOST64_RenderReply), want, gotBytes, eof);
-			if (status == KPIHOST64_STATUS_OK) {
+			if (sizeof(KPIHOST32_RenderReply) + (size_t)want > HostReplyBuf::kCap)
+				want = (uint32_t)(HostReplyBuf::kCap - sizeof(KPIHOST32_RenderReply));
+			reply.resize(sizeof(KPIHOST32_RenderReply) + want);
+			status = VstHost32_Render(slot, want,
+				reply.data() + sizeof(KPIHOST32_RenderReply), want, gotBytes, eof);
+			if (status == KPIHOST32_STATUS_OK) {
 				if (gotBytes > want) gotBytes = want;
-				KPIHOST64_RenderReply rrep{};
+				KPIHOST32_RenderReply rrep{};
 				rrep.sessionId = rr->sessionId;
 				rrep.bytesReturned = gotBytes;
 				rrep.eof = eof;
@@ -1691,13 +1692,13 @@ static void ServeOnce(HANDLE pipe)
 			}
 			break;
 		}
-		case KPIHOST64_CMD_VST_SEEK: {
-			if ((size_t)(end - p) < sizeof(KPIHOST64_SeekReq)) { status = KPIHOST64_STATUS_BAD_REQUEST; break; }
-			auto* sr = (const KPIHOST64_SeekReq*)p;
+		case KPIHOST32_CMD_VST_SEEK: {
+			if ((size_t)(end - p) < sizeof(KPIHOST32_SeekReq)) { status = KPIHOST32_STATUS_BAD_REQUEST; break; }
+			auto* sr = (const KPIHOST32_SeekReq*)p;
 			int slot = (sr->sessionId == 1) ? 1 : 0;
-			status = VstHost64_Seek(slot, sr->posSample);
-			if (status == KPIHOST64_STATUS_OK) {
-				KPIHOST64_SeekReply srep{};
+			status = VstHost32_Seek(slot, sr->posSample);
+			if (status == KPIHOST32_STATUS_OK) {
+				KPIHOST32_SeekReply srep{};
 				srep.sessionId = sr->sessionId;
 				srep.newPosSample = sr->posSample;
 				reply.resize(sizeof(srep));
@@ -1705,135 +1706,135 @@ static void ServeOnce(HANDLE pipe)
 			}
 			break;
 		}
-		case KPIHOST64_CMD_VST_CLOSE: {
-			if ((size_t)(end - p) >= sizeof(KPIHOST64_U32)) {
-				auto* u = (const KPIHOST64_U32*)p;
-				status = VstHost64_Close((int)u->v);
+		case KPIHOST32_CMD_VST_CLOSE: {
+			if ((size_t)(end - p) >= sizeof(KPIHOST32_U32)) {
+				auto* u = (const KPIHOST32_U32*)p;
+				status = VstHost32_Close((int)u->v);
 			} else {
-				status = VstHost64_CloseAll();
+				status = VstHost32_CloseAll();
 			}
 			break;
 		}
-		case KPIHOST64_CMD_VST_LIVE_LOAD: {
-			if ((size_t)(end - p) < sizeof(KPIHOST64_VstLiveLoadReq) + sizeof(uint32_t)) {
-				status = KPIHOST64_STATUS_BAD_REQUEST; break;
+		case KPIHOST32_CMD_VST_LIVE_LOAD: {
+			if ((size_t)(end - p) < sizeof(KPIHOST32_VstLiveLoadReq) + sizeof(uint32_t)) {
+				status = KPIHOST32_STATUS_BAD_REQUEST; break;
 			}
-			auto* lr = (const KPIHOST64_VstLiveLoadReq*)p;
-			p += sizeof(KPIHOST64_VstLiveLoadReq);
+			auto* lr = (const KPIHOST32_VstLiveLoadReq*)p;
+			p += sizeof(KPIHOST32_VstLiveLoadReq);
 			uint32_t nPath = *(const uint32_t*)p; p += sizeof(uint32_t);
 			if ((size_t)(end - p) < nPath * sizeof(wchar_t) || !nPath) {
-				status = KPIHOST64_STATUS_BAD_REQUEST; break;
+				status = KPIHOST32_STATUS_BAD_REQUEST; break;
 			}
 			std::wstring path((const wchar_t*)p, (const wchar_t*)p + nPath);
-			status = VstHost64_LiveLoad(lr->part, path.c_str(), lr->isVst3);
+			status = VstHost32_LiveLoad(lr->part, path.c_str(), lr->isVst3);
 			break;
 		}
-		case KPIHOST64_CMD_VST_LIVE_UNLOAD: {
-			if ((size_t)(end - p) < sizeof(KPIHOST64_U32)) { status = KPIHOST64_STATUS_BAD_REQUEST; break; }
-			status = VstHost64_LiveUnload(((const KPIHOST64_U32*)p)->v);
+		case KPIHOST32_CMD_VST_LIVE_UNLOAD: {
+			if ((size_t)(end - p) < sizeof(KPIHOST32_U32)) { status = KPIHOST32_STATUS_BAD_REQUEST; break; }
+			status = VstHost32_LiveUnload(((const KPIHOST32_U32*)p)->v);
 			break;
 		}
-		case KPIHOST64_CMD_VST_LIVE_UNLOAD_ALL: {
-			status = VstHost64_LiveUnloadAll();
+		case KPIHOST32_CMD_VST_LIVE_UNLOAD_ALL: {
+			status = VstHost32_LiveUnloadAll();
 			break;
 		}
-		case KPIHOST64_CMD_VST_LIVE_MIDI: {
-			if ((size_t)(end - p) < sizeof(KPIHOST64_VstLiveMidiReq)) { status = KPIHOST64_STATUS_BAD_REQUEST; break; }
-			auto* mr = (const KPIHOST64_VstLiveMidiReq*)p;
-			status = VstHost64_LiveMidi(mr->port, mr->msg);
+		case KPIHOST32_CMD_VST_LIVE_MIDI: {
+			if ((size_t)(end - p) < sizeof(KPIHOST32_VstLiveMidiReq)) { status = KPIHOST32_STATUS_BAD_REQUEST; break; }
+			auto* mr = (const KPIHOST32_VstLiveMidiReq*)p;
+			status = VstHost32_LiveMidi(mr->port, mr->msg);
 			break;
 		}
-		case KPIHOST64_CMD_VST_LIVE_SYSEX: {
-			if ((size_t)(end - p) < sizeof(KPIHOST64_VstLiveSysexReq)) { status = KPIHOST64_STATUS_BAD_REQUEST; break; }
-			auto* sr = (const KPIHOST64_VstLiveSysexReq*)p;
-			p += sizeof(KPIHOST64_VstLiveSysexReq);
-			if ((size_t)(end - p) < sr->bytes) { status = KPIHOST64_STATUS_BAD_REQUEST; break; }
-			status = VstHost64_LiveSysex(sr->port, (const uint8_t*)p, sr->bytes);
+		case KPIHOST32_CMD_VST_LIVE_SYSEX: {
+			if ((size_t)(end - p) < sizeof(KPIHOST32_VstLiveSysexReq)) { status = KPIHOST32_STATUS_BAD_REQUEST; break; }
+			auto* sr = (const KPIHOST32_VstLiveSysexReq*)p;
+			p += sizeof(KPIHOST32_VstLiveSysexReq);
+			if ((size_t)(end - p) < sr->bytes) { status = KPIHOST32_STATUS_BAD_REQUEST; break; }
+			status = VstHost32_LiveSysex(sr->port, (const uint8_t*)p, sr->bytes);
 			break;
 		}
-		case KPIHOST64_CMD_VST_LIVE_RENDER: {
-			if ((size_t)(end - p) < sizeof(KPIHOST64_VstLiveRenderReq)) { status = KPIHOST64_STATUS_BAD_REQUEST; break; }
-			auto* rr = (const KPIHOST64_VstLiveRenderReq*)p;
+		case KPIHOST32_CMD_VST_LIVE_RENDER: {
+			if ((size_t)(end - p) < sizeof(KPIHOST32_VstLiveRenderReq)) { status = KPIHOST32_STATUS_BAD_REQUEST; break; }
+			auto* rr = (const KPIHOST32_VstLiveRenderReq*)p;
 			uint32_t liveN = 0;
-			status = VstHost64_LiveRender(rr->frames, reply.data(), HostReplyBuf::kCap, liveN);
-			if (status == KPIHOST64_STATUS_OK)
+			status = VstHost32_LiveRender(rr->frames, reply.data(), HostReplyBuf::kCap, liveN);
+			if (status == KPIHOST32_STATUS_OK)
 				reply.resize(liveN);
 			else
 				reply.clear();
 			break;
 		}
-		case KPIHOST64_CMD_VST_LIVE_AUDIO_START: {
-			status = VstHost64_LiveAudioStart();
+		case KPIHOST32_CMD_VST_LIVE_AUDIO_START: {
+			status = VstHost32_LiveAudioStart();
 			break;
 		}
-		case KPIHOST64_CMD_VST_LIVE_AUDIO_STOP: {
-			status = VstHost64_LiveAudioStop();
+		case KPIHOST32_CMD_VST_LIVE_AUDIO_STOP: {
+			status = VstHost32_LiveAudioStop();
 			break;
 		}
-		case KPIHOST64_CMD_VST_LIVE_EDITOR_OPEN: {
-			if ((size_t)(end - p) < sizeof(KPIHOST64_U32)) { status = KPIHOST64_STATUS_BAD_REQUEST; break; }
-			status = VstHost64_LiveEditorOpen(((const KPIHOST64_U32*)p)->v);
+		case KPIHOST32_CMD_VST_LIVE_EDITOR_OPEN: {
+			if ((size_t)(end - p) < sizeof(KPIHOST32_U32)) { status = KPIHOST32_STATUS_BAD_REQUEST; break; }
+			status = VstHost32_LiveEditorOpen(((const KPIHOST32_U32*)p)->v);
 			break;
 		}
-		case KPIHOST64_CMD_VST_LIVE_EDITOR_CLOSE: {
-			if ((size_t)(end - p) < sizeof(KPIHOST64_U32)) { status = KPIHOST64_STATUS_BAD_REQUEST; break; }
-			status = VstHost64_LiveEditorClose(((const KPIHOST64_U32*)p)->v);
+		case KPIHOST32_CMD_VST_LIVE_EDITOR_CLOSE: {
+			if ((size_t)(end - p) < sizeof(KPIHOST32_U32)) { status = KPIHOST32_STATUS_BAD_REQUEST; break; }
+			status = VstHost32_LiveEditorClose(((const KPIHOST32_U32*)p)->v);
 			break;
 		}
-		case KPIHOST64_CMD_VST_LIVE_EDITOR_CLOSE_ALL: {
-			status = VstHost64_LiveEditorCloseAll();
+		case KPIHOST32_CMD_VST_LIVE_EDITOR_CLOSE_ALL: {
+			status = VstHost32_LiveEditorCloseAll();
 			break;
 		}
-		case KPIHOST64_CMD_VST_LIVE_SEND_CH: {
-			if ((size_t)(end - p) < sizeof(KPIHOST64_VstLiveSendChReq)) { status = KPIHOST64_STATUS_BAD_REQUEST; break; }
-			auto* sc = (const KPIHOST64_VstLiveSendChReq*)p;
-			status = VstHost64_LiveSetSendChannel(sc->part, sc->sendCh);
+		case KPIHOST32_CMD_VST_LIVE_SEND_CH: {
+			if ((size_t)(end - p) < sizeof(KPIHOST32_VstLiveSendChReq)) { status = KPIHOST32_STATUS_BAD_REQUEST; break; }
+			auto* sc = (const KPIHOST32_VstLiveSendChReq*)p;
+			status = VstHost32_LiveSetSendChannel(sc->part, sc->sendCh);
 			break;
 		}
-		case KPIHOST64_CMD_VST_LIVE_PROGRAMS: {
-			if ((size_t)(end - p) < sizeof(KPIHOST64_VstLiveProgramsReq)) { status = KPIHOST64_STATUS_BAD_REQUEST; break; }
-			auto* pr = (const KPIHOST64_VstLiveProgramsReq*)p;
+		case KPIHOST32_CMD_VST_LIVE_PROGRAMS: {
+			if ((size_t)(end - p) < sizeof(KPIHOST32_VstLiveProgramsReq)) { status = KPIHOST32_STATUS_BAD_REQUEST; break; }
+			auto* pr = (const KPIHOST32_VstLiveProgramsReq*)p;
 			std::vector<uint8_t> tmp;
-			status = VstHost64_LivePrograms(pr->part, pr->first, pr->count, tmp);
+			status = VstHost32_LivePrograms(pr->part, pr->first, pr->count, tmp);
 			reply.clear();
-			if (status == KPIHOST64_STATUS_OK && tmp.size() <= HostReplyBuf::kCap) {
+			if (status == KPIHOST32_STATUS_OK && tmp.size() <= HostReplyBuf::kCap) {
 				reply.resize(tmp.size());
 				if (!tmp.empty()) memcpy(reply.data(), tmp.data(), tmp.size());
 			} else if (tmp.size() > HostReplyBuf::kCap) {
-				status = KPIHOST64_STATUS_FAIL;
+				status = KPIHOST32_STATUS_FAIL;
 			}
 			break;
 		}
-		case KPIHOST64_CMD_VST_LIVE_SET_PROGRAM: {
-			if ((size_t)(end - p) < sizeof(KPIHOST64_VstLiveSetProgramReq)) { status = KPIHOST64_STATUS_BAD_REQUEST; break; }
-			auto* sp = (const KPIHOST64_VstLiveSetProgramReq*)p;
-			status = VstHost64_LiveSetProgram(sp->part, sp->index);
+		case KPIHOST32_CMD_VST_LIVE_SET_PROGRAM: {
+			if ((size_t)(end - p) < sizeof(KPIHOST32_VstLiveSetProgramReq)) { status = KPIHOST32_STATUS_BAD_REQUEST; break; }
+			auto* sp = (const KPIHOST32_VstLiveSetProgramReq*)p;
+			status = VstHost32_LiveSetProgram(sp->part, sp->index);
 			break;
 		}
-		case KPIHOST64_CMD_VST_LIVE_GET_STATE: {
-			if ((size_t)(end - p) < sizeof(KPIHOST64_VstLiveStateReq)) { status = KPIHOST64_STATUS_BAD_REQUEST; break; }
-			auto* gs = (const KPIHOST64_VstLiveStateReq*)p;
+		case KPIHOST32_CMD_VST_LIVE_GET_STATE: {
+			if ((size_t)(end - p) < sizeof(KPIHOST32_VstLiveStateReq)) { status = KPIHOST32_STATUS_BAD_REQUEST; break; }
+			auto* gs = (const KPIHOST32_VstLiveStateReq*)p;
 			std::vector<uint8_t> tmp;
-			status = VstHost64_LiveGetState(gs->part, gs->which, tmp);
+			status = VstHost32_LiveGetState(gs->part, gs->which, tmp);
 			reply.clear();
-			if (status == KPIHOST64_STATUS_OK && tmp.size() <= HostReplyBuf::kCap) {
+			if (status == KPIHOST32_STATUS_OK && tmp.size() <= HostReplyBuf::kCap) {
 				reply.resize(tmp.size());
 				if (!tmp.empty()) memcpy(reply.data(), tmp.data(), tmp.size());
 			} else if (tmp.size() > HostReplyBuf::kCap) {
-				status = KPIHOST64_STATUS_FAIL;
+				status = KPIHOST32_STATUS_FAIL;
 			}
 			break;
 		}
-		case KPIHOST64_CMD_VST_LIVE_SET_STATE: {
-			if ((size_t)(end - p) < sizeof(KPIHOST64_VstLiveStateReq)) { status = KPIHOST64_STATUS_BAD_REQUEST; break; }
-			auto* ss = (const KPIHOST64_VstLiveStateReq*)p;
+		case KPIHOST32_CMD_VST_LIVE_SET_STATE: {
+			if ((size_t)(end - p) < sizeof(KPIHOST32_VstLiveStateReq)) { status = KPIHOST32_STATUS_BAD_REQUEST; break; }
+			auto* ss = (const KPIHOST32_VstLiveStateReq*)p;
 			const uint8_t* blob = p + sizeof(*ss);
-			if ((size_t)(end - p) < sizeof(*ss) + ss->bytes) { status = KPIHOST64_STATUS_BAD_REQUEST; break; }
-			status = VstHost64_LiveSetState(ss->part, ss->which, blob, ss->bytes);
+			if ((size_t)(end - p) < sizeof(*ss) + ss->bytes) { status = KPIHOST32_STATUS_BAD_REQUEST; break; }
+			status = VstHost32_LiveSetState(ss->part, ss->which, blob, ss->bytes);
 			break;
 		}
 		default:
-			status = KPIHOST64_STATUS_BAD_REQUEST;
+			status = KPIHOST32_STATUS_BAD_REQUEST;
 			break;
 		}
 
@@ -1844,8 +1845,8 @@ static void ServeOnce(HANDLE pipe)
 int wmain(int argc, wchar_t** argv)
 {
 	/* CLI probe:
-	   KpiHost64.exe <kpiPath> <mediaPath>              → Open only
-	   KpiHost64.exe <kpiPath> <mediaPath> render [N]   → Open + Render N buffers, dump stats
+	   ogghost32.exe <kpiPath> <mediaPath>              → Open only
+	   ogghost32.exe <kpiPath> <mediaPath> render [N]   → Open + Render N buffers, dump stats
 	   ogghost32.exe <in_*.dll|xmp-*.dll> <mediaPath> render [N]  → 外部プラグインを同じ統計で試す */
 	if (argc >= 3 && argv[1] && argv[1][0] && argv[2] && argv[2][0]
 		&& (wcsstr(argv[1], L".dll") || wcsstr(argv[1], L".DLL"))) {
@@ -1853,22 +1854,22 @@ int wmain(int argc, wchar_t** argv)
 		const wchar_t* knames[3] = { L"Winamp", L"XMPlay", L"AIMP" };
 		uint32_t kind = 0;
 		std::wstring exts;
-		uint32_t lst = KPIHOST64_STATUS_FAIL;
+		uint32_t lst = KPIHOST32_STATUS_FAIL;
 		for (int i = 0; i < 3; i++) {
 			exts.clear();
 			lst = ForeignHost_ListExts(kinds[i], argv[1], exts);
 			wprintf(L"%s ListExts status=%u exts=%s\n", knames[i], lst, exts.c_str());
 			fflush(stdout);
-			if (lst == KPIHOST64_STATUS_OK) { kind = kinds[i]; break; }
+			if (lst == KPIHOST32_STATUS_OK) { kind = kinds[i]; break; }
 		}
 		if (!kind) return 1;
-		KPIHOST64_ForeignOpenReply fr{};
+		KPIHOST32_ForeignOpenReply fr{};
 		const uint32_t st = ForeignHost_Open(kind, argv[1], argv[2], fr);
 		wprintf(L"ForeignOpen kind=%u status=%u sid=%u rate=%u ch=%u bps=%d len=%llu\n",
 			kind, st, fr.sessionId, fr.sampleRate, fr.channels, fr.bitsPerSample,
 			(unsigned long long)fr.lengthSamples);
 		fflush(stdout);
-		if (st != KPIHOST64_STATUS_OK)
+		if (st != KPIHOST32_STATUS_OK)
 			return 1;
 		const bool doRender = (argc >= 4 && _wcsicmp(argv[3], L"render") == 0);
 		if (doRender) {
@@ -1882,7 +1883,7 @@ int wmain(int argc, wchar_t** argv)
 			for (int i = 0; i < loops; i++) {
 				uint32_t got = 0, eof = 0;
 				const uint32_t rst = ForeignHost_Render(fr.sessionId, bytesWanted, pcm.data(), (uint32_t)pcm.size(), got, eof);
-				if (rst != KPIHOST64_STATUS_OK) {
+				if (rst != KPIHOST32_STATUS_OK) {
 					wprintf(L"render fail i=%d status=%u\n", i, rst);
 					break;
 				}
@@ -1919,10 +1920,10 @@ int wmain(int argc, wchar_t** argv)
 		wprintf(L"KpiOpenProbe status=%u kpi=%s media=%s outBytes=%zu\n",
 			st, argv[1], argv[2], out.size());
 		fflush(stdout);
-		if (st != KPIHOST64_STATUS_OK || out.size() < sizeof(KPIHOST64_OpenReply) + sizeof(KPI_MEDIAINFO))
+		if (st != KPIHOST32_STATUS_OK || out.size() < sizeof(KPIHOST32_OpenReply) + sizeof(KPI_MEDIAINFO))
 			return 1;
 
-		KPIHOST64_OpenReply rep{};
+		KPIHOST32_OpenReply rep{};
 		KPI_MEDIAINFO info{};
 		memcpy(&rep, out.data(), sizeof(rep));
 		memcpy(&info, out.data() + sizeof(rep), sizeof(info));
@@ -1945,11 +1946,11 @@ int wmain(int argc, wchar_t** argv)
 			for (int i = 0; i < loops; i++) {
 				HostReplyBuf& rout = g_hostReply;
 				const uint32_t rst = Cmd_Render(rep.sessionId, bytesWanted, rout);
-				if (rst != KPIHOST64_STATUS_OK || rout.size() < sizeof(KPIHOST64_RenderReply)) {
+				if (rst != KPIHOST32_STATUS_OK || rout.size() < sizeof(KPIHOST32_RenderReply)) {
 					wprintf(L"render fail i=%d status=%u size=%zu\n", i, rst, rout.size());
 					break;
 				}
-				KPIHOST64_RenderReply rr{};
+				KPIHOST32_RenderReply rr{};
 				memcpy(&rr, rout.data(), sizeof(rr));
 				const uint8_t* pcm = rout.data() + sizeof(rr);
 				const size_t pcmBytes = rout.size() - sizeof(rr);
@@ -2034,7 +2035,7 @@ int wmain(int argc, wchar_t** argv)
 		wchar_t ud[MAX_PATH];
 		ud[0] = 0;
 		GetTempPathW(MAX_PATH, ud);
-		wcsncat_s(ud, L"ogg_kpi64_webview2", _TRUNCATE);
+		wcsncat_s(ud, L"ogg_kpi32_webview2", _TRUNCATE);
 		CreateDirectoryW(ud, NULL);
 		SetEnvironmentVariableW(L"WEBVIEW2_USER_DATA_FOLDER", ud);
 		SetEnvironmentVariableW(L"WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
@@ -2042,7 +2043,7 @@ int wmain(int argc, wchar_t** argv)
 	}
 
 	HANDLE pipe = CreateNamedPipeW(
-		KPIHOST64_PIPE_NAME,
+		KPIHOST32_PIPE_NAME,
 		PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED,
 		PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
 		1,                 // インスタンス 1。本体はパイプを直列利用
@@ -2075,10 +2076,10 @@ int wmain(int argc, wchar_t** argv)
 		if (wr == WAIT_TIMEOUT) {
 			CancelIoEx(pipe, &ov);
 			CloseHandle(ov.hEvent);
-			if (g_sessions.empty() && !VstHost64_LiveActive()) {
+			if (g_sessions.empty() && !VstHost32_LiveActive()) {
 				// アイドル窓のあいだ本体が戻ってこない＝ストリーミング中の曲も戻らない。
-				if (VstHost64_SongActive())
-					(void)VstHost64_CloseAll();
+				if (VstHost32_SongActive())
+					(void)VstHost32_CloseAll();
 				break;
 			}
 			continue;
@@ -2089,8 +2090,8 @@ int wmain(int argc, wchar_t** argv)
 		DisconnectNamedPipe(pipe);
 		// ライブパートは本体が所有する。本体が切れたあとも載せると、
 		// LiveActive がアイドル終了を止めてホスト（とプラグイン）が残る。
-		if (VstHost64_LiveActive())
-			(void)VstHost64_LiveUnloadAll();
+		if (VstHost32_LiveActive())
+			(void)VstHost32_LiveUnloadAll();
 	}
 
 	for (auto& kv : g_sessions) {

@@ -1,6 +1,6 @@
 ﻿//{{NO_DEPENDENCIES}}
 // Microsoft Visual C++ で生成されたインクルード ファイル。
-// KpiHost64.rc で使用
+// KpiHost32.rc で使用
 //
 #define VS_VERSION_INFO                 1
 

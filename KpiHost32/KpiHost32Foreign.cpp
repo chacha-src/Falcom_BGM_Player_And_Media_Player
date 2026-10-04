@@ -1,4 +1,4 @@
-﻿// KpiHost64 外部入力プラグイン（Winamp in_ / XMPlay / AIMP）。MFC 無し。
+﻿// KpiHost32 外部入力プラグイン（Winamp in_ / XMPlay / AIMP）。MFC 無し。
 #include <windows.h>
 #include <string>
 #include <unordered_map>
@@ -363,9 +363,9 @@ static DWORD WINAPI WaHostWndThread(LPVOID)
 	HINSTANCE hi = GetModuleHandleW(NULL);
 	WNDCLASSEXW wc; ZeroMemory(&wc, sizeof(wc));
 	wc.cbSize = sizeof(wc); wc.lpfnWndProc = WaHostWndProc;
-	wc.hInstance = hi; wc.lpszClassName = L"KpiHost64WinampHost";
+	wc.hInstance = hi; wc.lpszClassName = L"KpiHost32WinampHost";
 	RegisterClassExW(&wc);
-	g_waWnd = CreateWindowExW(0, L"KpiHost64WinampHost", L"", 0, 0, 0, 0, 0, HWND_MESSAGE, NULL, hi, NULL);
+	g_waWnd = CreateWindowExW(0, L"KpiHost32WinampHost", L"", 0, 0, 0, 0, 0, HWND_MESSAGE, NULL, hi, NULL);
 	SetEvent(g_waWndReady);
 	if (!g_waWnd) return 0;
 	MSG m;
@@ -390,7 +390,7 @@ static HWND WaEnsureWnd()
 	return g_waWnd;
 }
 
-#include "KpiHost64Foreign_xmpaimp.inc"
+#include "KpiHost32Foreign_xmpaimp.inc"
 
 typedef In_Module* (__cdecl* pfn_wa)();
 
@@ -399,12 +399,12 @@ uint32_t ForeignHost_ListExts(uint32_t kind, const std::wstring& path, std::wstr
 {
 	outExts.clear();
 	HMODULE h = LoadLibraryExW(path.c_str(), NULL, LOAD_WITH_ALTERED_SEARCH_PATH);
-	if (!h) return KPIHOST64_STATUS_FAIL;
+	if (!h) return KPIHOST32_STATUS_FAIL;
 	if (kind == PLUGKIND_WINAMP) {
 		pfn_wa getIn = (pfn_wa)GetProcAddress(h, "winampGetInModule2");
-		if (!getIn) { FreeLibrary(h); return KPIHOST64_STATUS_FAIL; }
+		if (!getIn) { FreeLibrary(h); return KPIHOST32_STATUS_FAIL; }
 		In_Module* in = getIn();
-		if (!WaVersionOk(in) || !WaUsesOutput(in)) { FreeLibrary(h); return KPIHOST64_STATUS_FAIL; }
+		if (!WaVersionOk(in) || !WaUsesOutput(in)) { FreeLibrary(h); return KPIHOST32_STATUS_FAIL; }
 		// vgmstream 系は Init() を通すまで FileExtensions が空。列挙前に必ず初期化する。
 		ForeignSession probe;
 		probe.dll = h;
@@ -414,7 +414,7 @@ uint32_t ForeignHost_ListExts(uint32_t kind, const std::wstring& path, std::wstr
 		outExts = ParseWaExts(in->FileExtensions);
 		if (in->Quit) in->Quit();
 		FreeLibrary(h);
-		return outExts.empty() ? KPIHOST64_STATUS_FAIL : KPIHOST64_STATUS_OK;
+		return outExts.empty() ? KPIHOST32_STATUS_FAIL : KPIHOST32_STATUS_OK;
 	}
 	if (kind == PLUGKIND_XMPLAY) {
 		const uint32_t st = ForeignXmpListExts(h, outExts);
@@ -427,11 +427,11 @@ uint32_t ForeignHost_ListExts(uint32_t kind, const std::wstring& path, std::wstr
 		return st;
 	}
 	FreeLibrary(h);
-	return KPIHOST64_STATUS_NOT_SUPPORTED;
+	return KPIHOST32_STATUS_NOT_SUPPORTED;
 }
 
 // Winamp in_ / XMPlay / AIMP。異アーキ DLL はここ（ogghost32）で LoadLibrary する。
-uint32_t ForeignHost_Open(uint32_t kind, const std::wstring& dll, const std::wstring& media, KPIHOST64_ForeignOpenReply& reply)
+uint32_t ForeignHost_Open(uint32_t kind, const std::wstring& dll, const std::wstring& media, KPIHOST32_ForeignOpenReply& reply)
 {
 	ZeroMemory(&reply, sizeof(reply));
 	ForeignSession* s = new ForeignSession();
@@ -439,14 +439,14 @@ uint32_t ForeignHost_Open(uint32_t kind, const std::wstring& dll, const std::wst
 	InitializeCriticalSection(&s->cs);
 	s->csInit = true;
 	s->dll = LoadLibraryExW(dll.c_str(), NULL, LOAD_WITH_ALTERED_SEARCH_PATH);
-	if (!s->dll) { delete s; return KPIHOST64_STATUS_FAIL; }
+	if (!s->dll) { delete s; return KPIHOST32_STATUS_FAIL; }
 
 	if (kind == PLUGKIND_WINAMP) {
 		pfn_wa getIn = (pfn_wa)GetProcAddress(s->dll, "winampGetInModule2");
-		if (!getIn) { FreeLibrary(s->dll); delete s; return KPIHOST64_STATUS_FAIL; }
+		if (!getIn) { FreeLibrary(s->dll); delete s; return KPIHOST32_STATUS_FAIL; }
 		s->waIn = getIn();
 		if (!s->waIn || !s->waIn->Play || !WaVersionOk(s->waIn) || !WaUsesOutput(s->waIn)) {
-			FreeLibrary(s->dll); delete s; return KPIHOST64_STATUS_FAIL;
+			FreeLibrary(s->dll); delete s; return KPIHOST32_STATUS_FAIL;
 		}
 		g_waCur = s;
 		InterlockedExchange(&g_waEof, 0);
@@ -478,7 +478,7 @@ uint32_t ForeignHost_Open(uint32_t kind, const std::wstring& dll, const std::wst
 			stop.in = s->waIn;
 			if (RunFWaJob(stop) < 0 && s->waIn->Quit) s->waIn->Quit();
 			if (s->cwdSaved) SetCurrentDirectoryW(s->prevCwd);
-			FreeLibrary(s->dll); delete[] s->ring; delete s; g_waCur = nullptr; return KPIHOST64_STATUS_FAIL;
+			FreeLibrary(s->dll); delete[] s->ring; delete s; g_waCur = nullptr; return KPIHOST32_STATUS_FAIL;
 		}
 		// フォーマットはデコードスレッドが outMod->Open() を呼ぶまで確定しない。
 		// Play() 直後に読むと既定値(44100/2/16)を本体へ返してしまう。
@@ -492,7 +492,7 @@ uint32_t ForeignHost_Open(uint32_t kind, const std::wstring& dll, const std::wst
 			if (s->waIn->Stop) s->waIn->Stop();
 			if (s->waIn->Quit) s->waIn->Quit();
 			if (s->cwdSaved) SetCurrentDirectoryW(s->prevCwd);
-			FreeLibrary(s->dll); delete[] s->ring; delete s; g_waCur = nullptr; return KPIHOST64_STATUS_FAIL;
+			FreeLibrary(s->dll); delete[] s->ring; delete s; g_waCur = nullptr; return KPIHOST32_STATUS_FAIL;
 		}
 		reply.sampleRate = (uint32_t)s->rate;
 		reply.channels = (uint32_t)s->ch;
@@ -502,7 +502,7 @@ uint32_t ForeignHost_Open(uint32_t kind, const std::wstring& dll, const std::wst
 	}
 	else if (kind == PLUGKIND_XMPLAY) {
 		const uint32_t st = ForeignXmpOpen(s, media);
-		if (st != KPIHOST64_STATUS_OK) {
+		if (st != KPIHOST32_STATUS_OK) {
 			ForeignXmpCloseSession(s);
 			FreeLibrary(s->dll); delete[] s->ring; delete s;
 			return st;
@@ -515,7 +515,7 @@ uint32_t ForeignHost_Open(uint32_t kind, const std::wstring& dll, const std::wst
 	}
 	else if (kind == PLUGKIND_AIMP) {
 		const uint32_t st = ForeignAimpOpen(s, dll, media);
-		if (st != KPIHOST64_STATUS_OK) {
+		if (st != KPIHOST32_STATUS_OK) {
 			ForeignAimpCloseSession(s);
 			FreeLibrary(s->dll); delete[] s->ring; delete s;
 			return st;
@@ -529,14 +529,14 @@ uint32_t ForeignHost_Open(uint32_t kind, const std::wstring& dll, const std::wst
 		}
 	}
 	else {
-		FreeLibrary(s->dll); delete s; return KPIHOST64_STATUS_NOT_SUPPORTED;
+		FreeLibrary(s->dll); delete s; return KPIHOST32_STATUS_NOT_SUPPORTED;
 	}
 
 	uint32_t id = g_nextForeignId++;
 	if (id == 0) id = g_nextForeignId++;
 	reply.sessionId = id;
 	g_foreign[id] = s;
-	return KPIHOST64_STATUS_OK;
+	return KPIHOST32_STATUS_OK;
 }
 
 uint32_t ForeignHost_Render(uint32_t sessionId, uint32_t bytesWanted, uint8_t* dest, uint32_t destCap, uint32_t& gotBytes, uint32_t& eof)
@@ -544,9 +544,9 @@ uint32_t ForeignHost_Render(uint32_t sessionId, uint32_t bytesWanted, uint8_t* d
 	eof = 0;
 	gotBytes = 0;
 	ForeignSession* s = ForeignGet(sessionId);
-	if (!s) return KPIHOST64_STATUS_NOT_FOUND;
+	if (!s) return KPIHOST32_STATUS_NOT_FOUND;
 	if (s->kind == PLUGKIND_WINAMP) {
-		if (!dest && bytesWanted) return KPIHOST64_STATUS_BAD_REQUEST;
+		if (!dest && bytesWanted) return KPIHOST32_STATUS_BAD_REQUEST;
 		uint32_t want = bytesWanted;
 		if (want > destCap) want = destCap;
 		// ここで最大5秒待たない。パイプを占有したままだと Close/Open が届かず、
@@ -574,19 +574,19 @@ uint32_t ForeignHost_Render(uint32_t sessionId, uint32_t bytesWanted, uint8_t* d
 				eof = 1;
 		}
 		gotBytes = (uint32_t)got;
-		return KPIHOST64_STATUS_OK;
+		return KPIHOST32_STATUS_OK;
 	}
 	if (s->kind == PLUGKIND_XMPLAY)
 		return ForeignXmpRender(s, bytesWanted, dest, destCap, gotBytes, eof);
 	if (s->kind == PLUGKIND_AIMP)
 		return ForeignAimpRender(s, bytesWanted, dest, destCap, gotBytes, eof);
-	return KPIHOST64_STATUS_NOT_SUPPORTED;
+	return KPIHOST32_STATUS_NOT_SUPPORTED;
 }
 
 uint32_t ForeignHost_Seek(uint32_t sessionId, uint64_t posSample)
 {
 	ForeignSession* s = ForeignGet(sessionId);
-	if (!s) return KPIHOST64_STATUS_NOT_FOUND;
+	if (!s) return KPIHOST32_STATUS_NOT_FOUND;
 	if (s->kind == PLUGKIND_WINAMP && s->waIn && s->waIn->SetOutputTime && s->rate > 0) {
 		InterlockedExchange(&g_waEof, 0);
 		FWaJob job{};
@@ -594,20 +594,20 @@ uint32_t ForeignHost_Seek(uint32_t sessionId, uint64_t posSample)
 		job.in = s->waIn;
 		job.iarg = (int)(posSample * 1000 / s->rate);
 		if (RunFWaJob(job) < 0)
-			return KPIHOST64_STATUS_FAIL;
-		return KPIHOST64_STATUS_OK;
+			return KPIHOST32_STATUS_FAIL;
+		return KPIHOST32_STATUS_OK;
 	}
 	if (s->kind == PLUGKIND_XMPLAY)
 		return ForeignXmpSeek(s, posSample);
 	if (s->kind == PLUGKIND_AIMP)
 		return ForeignAimpSeek(s, posSample);
-	return KPIHOST64_STATUS_NOT_SUPPORTED;
+	return KPIHOST32_STATUS_NOT_SUPPORTED;
 }
 
 uint32_t ForeignHost_Close(uint32_t sessionId)
 {
 	auto it = g_foreign.find(sessionId);
-	if (it == g_foreign.end()) return KPIHOST64_STATUS_NOT_FOUND;
+	if (it == g_foreign.end()) return KPIHOST32_STATUS_NOT_FOUND;
 	ForeignSession* s = it->second;
 	if (s->kind == PLUGKIND_WINAMP && s->waIn) {
 		FWaJob job{};
@@ -631,5 +631,5 @@ uint32_t ForeignHost_Close(uint32_t sessionId)
 	s->ring = nullptr;
 	delete s;
 	g_foreign.erase(it);
-	return KPIHOST64_STATUS_OK;
+	return KPIHOST32_STATUS_OK;
 }

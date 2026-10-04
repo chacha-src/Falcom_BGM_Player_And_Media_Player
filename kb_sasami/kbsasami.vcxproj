@@ -164,6 +164,7 @@ if exist "C:\projects\APPLICATION3\ogg_binary\Plugins\Kobarin\fmpmd\Rhythm\2608_
       <PreprocessorDefinitions>KBSASAMI_PLUGIN;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <ClCompile Include="source\kbsasami_decoder.cpp" />
+    <ClCompile Include="source\kbsasami_vst.cpp" />
     <ClCompile Include="source\kbsasami_module.cpp" />
     <ClCompile Include="source\sasami_file.cpp" />
     <ClCompile Include="source\sasami_write.cpp" />

@@ -290,7 +290,7 @@ void CSasamiToneMapDlg::ApplyTone(int pc, int audition)
 	if (ToneIsEmpty(pc)) return;
 	m_prog = pc;
 	/* UI only while picking. Live bank/PC is applied on preview / score play —
-	   SendBankProgram on every click (and on 入力) froze Host64 return path. */
+	   SendBankProgram on every click (and on 入力) froze Host32 return path. */
 	CString h;
 	h.Format(L"PC#%d  %s  (Bank %d/%d)", m_prog + 1, m_names[m_prog], m_bankMsb, m_bankLsb);
 	m_hint.SetWindowText(h);
@@ -447,7 +447,7 @@ void CSasamiToneMapDlg::OnBnClickedOk()
 {
 	ScSaveWndGeom(this, &savedata.sasamiToneMapX, &savedata.sasamiToneMapY,
 		&savedata.sasamiToneMapW, &savedata.sasamiToneMapH);
-	/* Cut audition only — do NOT SendBankProgram here (Host64/SHM race freezes
+	/* Cut audition only — do NOT SendBankProgram here (Host32/SHM race freezes
 	   on 入力). PickForPart writes bind; score/MML update happens after DoModal. */
 	VstLiveAuditionStop();
 	if (ToneIsEmpty(m_prog)) {
@@ -465,7 +465,7 @@ void CSasamiToneMapDlg::OnBnClickedCancel() {
 }
 void CSasamiToneMapDlg::OnBnClickedEditor()
 {
-	/* Do not call ProgramCount here — Host64 PROGRAMS IPC freezes after preview. */
+	/* Do not call ProgramCount here — Host32 PROGRAMS IPC freezes after preview. */
 	VstLiveAuditionStop();
 	VstLiveEditorOpenAsync(m_part);
 	if (m_hint.GetSafeHwnd())

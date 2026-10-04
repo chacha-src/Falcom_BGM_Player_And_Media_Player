@@ -13,7 +13,7 @@
 
 <p class="lead">One page for which game soundtracks loop the way they do in game, and which engine reads everyday audio. CEmu (CPU emulation) is not in this table — see <a href="cemu-pc98.htm">PC-98</a>, <a href="cemu-pc88.htm">PC-88</a>, <a href="cemu-x68k.htm">X68000</a>, <a href="cemu-x1.htm">X1</a>, <a href="cemu-msx.htm">MSX</a>, <a href="cemu-fm7.htm">FM-7</a>, <a href="cemu-pcat.htm">PC/AT</a>, and <a href="cemu-arcade.htm">Arcade</a>.</p>
 <h2>The player, and the process beside it</h2>
-<p>The player itself is <b>x64</b>. It used to be x86 (32-bit). The helper that loads the other bitness is now the <b>x86</b> program <code>ogghost32.exe</code>. That job used to belong to the x64 <code>KpiHost64.exe</code>.</p>
+<p>The player itself is <b>x64</b>. The IPC host that loads the other bitness is <b>x86</b>. The project is KpiHost32 and the shipped file is <code>ogghost32.exe</code>.</p>
 <ul>
 <li>64-bit VST and KPI plug-ins load directly in the player.</li>
 <li>32-bit VST and KPI plug-ins, and Winamp / XMPlay / AIMP input plug-ins, start <code>ogghost32.exe</code> and talk to it over a named pipe. Keep that exe next to the player.</li>

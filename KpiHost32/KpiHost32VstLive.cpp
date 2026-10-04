@@ -1,7 +1,7 @@
 ﻿#include "kpihost_stdafx.h"
 #include "../kpi_host_ipc.h"
 #include "../VstMidiEngine.h"
-#include "KpiHost64VstLive.h"
+#include "KpiHost32VstLive.h"
 
 #include <process.h>
 #include <string>
@@ -18,9 +18,9 @@ volatile LONG g_liveParts = 0; // 載っているパート数。アイドル終�
 
 struct LiveAudioState {
 	HANDLE hMap = NULL;                         // 音声共有メモリのファイルマッピング
-	KPIHOST64_VstLiveAudioShm* shm = NULL;      // 本体が読む PCM リング
+	KPIHOST32_VstLiveAudioShm* shm = NULL;      // 本体が読む PCM リング
 	HANDLE hMidiMap = NULL;
-	KPIHOST64_VstLiveMidiShm* midiShm = NULL;   // 本体が書くノートリング
+	KPIHOST32_VstLiveMidiShm* midiShm = NULL;   // 本体が書くノートリング
 	HANDLE stopEvent = NULL;                    // レンダースレッド終了
 	HANDLE wakeEvent = NULL;                    // 本体がノートを置いた合図
 	HANDLE thread = NULL;
@@ -31,16 +31,16 @@ struct LiveAudioState {
 LiveAudioState g_liveAudio;
 
 static HANDLE g_edNotifyMap = NULL;
-static KPIHOST64_VstLiveEdNotifyShm* g_edNotify = NULL;
+static KPIHOST32_VstLiveEdNotifyShm* g_edNotify = NULL;
 
 static void EnsureEdNotifyShm(void)
 {
 	if (g_edNotify) return;
 	g_edNotifyMap = CreateFileMappingW(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE,
-		0, (DWORD)sizeof(KPIHOST64_VstLiveEdNotifyShm), KPIHOST64_VST_LIVE_EDNOTIFY_NAME);
+		0, (DWORD)sizeof(KPIHOST32_VstLiveEdNotifyShm), KPIHOST32_VST_LIVE_EDNOTIFY_NAME);
 	if (!g_edNotifyMap) return;
-	g_edNotify = (KPIHOST64_VstLiveEdNotifyShm*)MapViewOfFile(
-		g_edNotifyMap, FILE_MAP_ALL_ACCESS, 0, 0, sizeof(KPIHOST64_VstLiveEdNotifyShm));
+	g_edNotify = (KPIHOST32_VstLiveEdNotifyShm*)MapViewOfFile(
+		g_edNotifyMap, FILE_MAP_ALL_ACCESS, 0, 0, sizeof(KPIHOST32_VstLiveEdNotifyShm));
 	if (!g_edNotify) {
 		CloseHandle(g_edNotifyMap);
 		g_edNotifyMap = NULL;
@@ -51,11 +51,11 @@ static void EnsureEdNotifyShm(void)
 		ZeroMemory((void*)g_edNotify, sizeof(*g_edNotify));
 }
 
-static float* ShmL(KPIHOST64_VstLiveAudioShm* s) { return (float*)(s + 1); } // ヘッダ直後が L 平面
-static float* ShmR(KPIHOST64_VstLiveAudioShm* s) { return ShmL(s) + s->capacity; }
-static KPIHOST64_VstLiveMidiEvent* ShmMidiEvents(KPIHOST64_VstLiveMidiShm* s)
+static float* ShmL(KPIHOST32_VstLiveAudioShm* s) { return (float*)(s + 1); } // ヘッダ直後が L 平面
+static float* ShmR(KPIHOST32_VstLiveAudioShm* s) { return ShmL(s) + s->capacity; }
+static KPIHOST32_VstLiveMidiEvent* ShmMidiEvents(KPIHOST32_VstLiveMidiShm* s)
 {
-	return (KPIHOST64_VstLiveMidiEvent*)(s + 1);
+	return (KPIHOST32_VstLiveMidiEvent*)(s + 1);
 }
 
 static void LiveAudioCloseMapping()
@@ -80,9 +80,9 @@ static void LiveAudioCloseMapping()
 
 static void LiveAudioDrainMidi()
 {
-	KPIHOST64_VstLiveMidiShm* m = g_liveAudio.midiShm;
+	KPIHOST32_VstLiveMidiShm* m = g_liveAudio.midiShm;
 	if (!m || !m->capacity) return;
-	KPIHOST64_VstLiveMidiEvent* ev = ShmMidiEvents(m);
+	KPIHOST32_VstLiveMidiEvent* ev = ShmMidiEvents(m);
 	const uint32_t cap = m->capacity;
 	uint32_t r = m->readPos;
 	const uint32_t w = m->writePos;
@@ -116,7 +116,7 @@ static unsigned __stdcall LiveAudioThreadProc(void*)
 	for (;;) {
 		DWORD w = WaitForMultipleObjects(2, waits, FALSE, 50);
 		if (w == WAIT_OBJECT_0 || LiveAudioStopSignalled()) break;
-		KPIHOST64_VstLiveAudioShm* s = g_liveAudio.shm;
+		KPIHOST32_VstLiveAudioShm* s = g_liveAudio.shm;
 		if (!s) continue;
 		const uint32_t cap = s->capacity;
 		for (;;) {
@@ -217,12 +217,12 @@ HWND g_uiWnd = NULL;
 HANDLE g_uiThread = NULL;
 volatile LONG g_uiStarted = 0;
 /* Bitmask of parts whose UIMSG_EDITOR_OPEN is on the UI stack (createView).
-   PROG_* must not reenter HALion mid-open — that crashes Host64 (and then ogg). */
+   PROG_* must not reenter HALion mid-open — that crashes Host32 (and then ogg). */
 volatile LONG g_editorOpeningMask = 0;
 
 extern "C" void VstLiveSoftTeardownPart(int part1to32, void* hwnd);
 
-const wchar_t* UiWndClass() { return L"OggKpiHost64VstUi"; }
+const wchar_t* UiWndClass() { return L"OggKpiHost32VstUi"; }
 
 static LRESULT CALLBACK UiWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 {
@@ -258,9 +258,9 @@ static LRESULT CALLBACK UiWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 		InterlockedOr(&g_editorOpeningMask, (LONG)(1u << (part - 1)));
 		/* Pause render during createView/attached (HALion WebView2). Do not
 		   LiveAudioStop — that remapped SHM and crashed ogg. */
-		VstHost64_EditorCloseBegin();
+		VstHost32_EditorCloseBegin();
 		const LRESULT rc = VstLiveEditorOpen(part);
-		VstHost64_EditorCloseEnd();
+		VstHost32_EditorCloseEnd();
 		InterlockedAnd(&g_editorOpeningMask, (LONG)~(1u << (part - 1)));
 		return rc;
 	}
@@ -310,7 +310,7 @@ static LRESULT CALLBACK UiWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 	case UIMSG_STATE_GET: {
 		auto* req = (UiStateRequest*)lp;
 		if (!req) return 0;
-		/* Pipe GET while HALion Home/WebView is up AVs Host64 (score false-close
+		/* Pipe GET while HALion Home/WebView is up AVs Host32 (score false-close
 		   / deferred labels). Close-path snapshot uses in-process getState. */
 		if (req->part >= 1 && req->part <= 32 &&
 			((InterlockedCompareExchange(&g_editorOpeningMask, 0, 0) & (1u << (req->part - 1))) ||
@@ -318,11 +318,11 @@ static LRESULT CALLBACK UiWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 			return 0;
 		/* Soft-hidden SampleTank still has a view; live getState on siblings is OK
 		   under editPause. Soft part itself: snap-only (VstLiveGetState). */
-		VstHost64_EditorCloseBegin();
+		VstHost32_EditorCloseBegin();
 		unsigned char* bytes = NULL;
 		int len = 0;
 		const int ok = VstLiveGetState(req->part, req->which, &bytes, &len);
-		VstHost64_EditorCloseEnd();
+		VstHost32_EditorCloseEnd();
 		if (!ok) return 0;
 		req->outBytes = bytes;
 		req->outLen = len;
@@ -335,9 +335,9 @@ static LRESULT CALLBACK UiWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 			((InterlockedCompareExchange(&g_editorOpeningMask, 0, 0) & (1u << (req->part - 1))) ||
 			 VstLivePartEditorIsOpen(req->part)))
 			return 0;
-		VstHost64_EditorCloseBegin();
+		VstHost32_EditorCloseBegin();
 		const int ok = VstLiveSetState(req->part, req->which, req->inBytes, req->inLen);
-		VstHost64_EditorCloseEnd();
+		VstHost32_EditorCloseEnd();
 		return ok;
 	}
 	default:
@@ -391,18 +391,18 @@ static bool EnsureUiThread()
 
 static void LiveEditorCloseAllOnUiThread(void);
 
-uint32_t VstHost64_LiveLoad(uint32_t part1to32, const wchar_t* path, uint32_t isVst3)
+uint32_t VstHost32_LiveLoad(uint32_t part1to32, const wchar_t* path, uint32_t isVst3)
 {
 	if (!path || !*path || part1to32 < 1 || part1to32 > 32)
-		return KPIHOST64_STATUS_BAD_REQUEST;
-	if (!EnsureUiThread()) return KPIHOST64_STATUS_FAIL;
+		return KPIHOST32_STATUS_BAD_REQUEST;
+	if (!EnsureUiThread()) return KPIHOST32_STATUS_FAIL;
 	// オーディオスレッドが processReplacing 内でエンジンロックを持つ。
 	// Load は UI スレッドで同じロックを取るので、先にレンダーを止める。
 	// ここでは音声を再開しない。本体が VstLiveAudioStart でリングを開く。
 	const LONG hadParts = InterlockedCompareExchange(&g_liveParts, 0, 0);
 	if (hadParts > 0) {
 		/* Pause process only — full LiveAudioStop remaps SHM and kills siblings. */
-		VstHost64_EditorCloseBegin();
+		VstHost32_EditorCloseBegin();
 	}
 	UiLoadRequest req = { (int)part1to32, path, (int)isVst3 };
 	/* Timeout: HALion can sit behind a MediaBay dialog; do not block the pipe forever. */
@@ -410,37 +410,37 @@ uint32_t VstHost64_LiveLoad(uint32_t part1to32, const wchar_t* path, uint32_t is
 	const DWORD timeoutMs = 300000; /* 5 min — MediaBay pick on first load */
 	if (!SendMessageTimeoutW(g_uiWnd, UIMSG_LOAD, 0, (LPARAM)&req,
 		SMTO_ABORTIFHUNG, timeoutMs, &result)) {
-		if (hadParts > 0) VstHost64_EditorCloseEnd();
-		return KPIHOST64_STATUS_FAIL;
+		if (hadParts > 0) VstHost32_EditorCloseEnd();
+		return KPIHOST32_STATUS_FAIL;
 	}
 	if ((LRESULT)result != 0) {
-		if (hadParts > 0) VstHost64_EditorCloseEnd();
-		return KPIHOST64_STATUS_FAIL;
+		if (hadParts > 0) VstHost32_EditorCloseEnd();
+		return KPIHOST32_STATUS_FAIL;
 	}
 	InterlockedIncrement(&g_liveParts);
-	if (hadParts > 0) VstHost64_EditorCloseEnd();
-	return KPIHOST64_STATUS_OK;
+	if (hadParts > 0) VstHost32_EditorCloseEnd();
+	return KPIHOST32_STATUS_OK;
 }
 
-uint32_t VstHost64_LiveUnload(uint32_t part1to32)
+uint32_t VstHost32_LiveUnload(uint32_t part1to32)
 {
-	if (part1to32 < 1 || part1to32 > 32) return KPIHOST64_STATUS_BAD_REQUEST;
-	if (!EnsureUiThread()) return KPIHOST64_STATUS_FAIL;
+	if (part1to32 < 1 || part1to32 > 32) return KPIHOST32_STATUS_BAD_REQUEST;
+	if (!EnsureUiThread()) return KPIHOST32_STATUS_FAIL;
 	const LONG left = InterlockedCompareExchange(&g_liveParts, 0, 0);
-	VstHost64_LiveAudioStop();
+	VstHost32_LiveAudioStop();
 	DWORD_PTR dummy = 0;
 	SendMessageTimeoutW(g_uiWnd, UIMSG_UNLOAD, (WPARAM)part1to32, 0,
 		SMTO_ABORTIFHUNG, 4000, &dummy);
 	if (InterlockedCompareExchange(&g_liveParts, 0, 0) > 0)
 		InterlockedDecrement(&g_liveParts);
 	if (left > 1 && InterlockedCompareExchange(&g_liveParts, 0, 0) > 0)
-		VstHost64_LiveAudioStart();
-	return KPIHOST64_STATUS_OK;
+		VstHost32_LiveAudioStart();
+	return KPIHOST32_STATUS_OK;
 }
 
-uint32_t VstHost64_LiveUnloadAll()
+uint32_t VstHost32_LiveUnloadAll()
 {
-	VstHost64_LiveAudioStop();
+	VstHost32_LiveAudioStop();
 	/* abandon 中の UnloadPart は effEditClose を飛ばす — 先に UI を閉じる */
 	LiveEditorCloseAllOnUiThread();
 	VstLiveAbandonHostPlugins(1);
@@ -451,38 +451,38 @@ uint32_t VstHost64_LiveUnloadAll()
 	}
 	VstLiveAbandonHostPlugins(0);
 	InterlockedExchange(&g_liveParts, 0);
-	return KPIHOST64_STATUS_OK;
+	return KPIHOST32_STATUS_OK;
 }
 
-int VstHost64_LiveActive()
+int VstHost32_LiveActive()
 {
 	return InterlockedCompareExchange(&g_liveParts, 0, 0) > 0 ? 1 : 0;
 }
 
-uint32_t VstHost64_LiveMidi(uint32_t port, uint32_t msg)
+uint32_t VstHost32_LiveMidi(uint32_t port, uint32_t msg)
 {
-	if (port > 2) return KPIHOST64_STATUS_BAD_REQUEST;
+	if (port > 2) return KPIHOST32_STATUS_BAD_REQUEST;
 	VstLiveMidiShort((int)port, (DWORD)msg);
-	return KPIHOST64_STATUS_OK;
+	return KPIHOST32_STATUS_OK;
 }
 
-uint32_t VstHost64_LiveSysex(uint32_t port, const uint8_t* data, uint32_t len)
+uint32_t VstHost32_LiveSysex(uint32_t port, const uint8_t* data, uint32_t len)
 {
-	if (port > 2 || !data || !len) return KPIHOST64_STATUS_BAD_REQUEST;
+	if (port > 2 || !data || !len) return KPIHOST32_STATUS_BAD_REQUEST;
 	VstLiveMidiSysex((int)port, data, (int)len);
-	return KPIHOST64_STATUS_OK;
+	return KPIHOST32_STATUS_OK;
 }
 
-uint32_t VstHost64_LiveRender(uint32_t frames, uint8_t* outPcm, uint32_t outCap, uint32_t& outN)
+uint32_t VstHost32_LiveRender(uint32_t frames, uint8_t* outPcm, uint32_t outCap, uint32_t& outN)
 {
 	outN = 0;
-	if (!frames || frames > 4096 || !outPcm) return KPIHOST64_STATUS_BAD_REQUEST;
-	const uint32_t need = (uint32_t)(sizeof(KPIHOST64_VstLiveRenderReply) + frames * 2u * sizeof(float));
-	if (need > outCap) return KPIHOST64_STATUS_FAIL;
+	if (!frames || frames > 4096 || !outPcm) return KPIHOST32_STATUS_BAD_REQUEST;
+	const uint32_t need = (uint32_t)(sizeof(KPIHOST32_VstLiveRenderReply) + frames * 2u * sizeof(float));
+	if (need > outCap) return KPIHOST32_STATUS_FAIL;
 	static float s_l[4096];
 	static float s_r[4096];
 	VstLiveRender(s_l, s_r, (int)frames);
-	auto* hdr = (KPIHOST64_VstLiveRenderReply*)outPcm;
+	auto* hdr = (KPIHOST32_VstLiveRenderReply*)outPcm;
 	hdr->frames = frames;
 	float* out = (float*)(outPcm + sizeof(*hdr));
 	for (uint32_t i = 0; i < frames; ++i) {
@@ -490,60 +490,60 @@ uint32_t VstHost64_LiveRender(uint32_t frames, uint8_t* outPcm, uint32_t outCap,
 		out[i * 2 + 1] = s_r[i];
 	}
 	outN = need;
-	return KPIHOST64_STATUS_OK;
+	return KPIHOST32_STATUS_OK;
 }
 
 // 音声・MIDI 共有メモリを作り、優先度高めのレンダースレッドを起こす。
-uint32_t VstHost64_LiveAudioStart()
+uint32_t VstHost32_LiveAudioStart()
 {
 	if (g_liveAudio.thread) {
 		if (WaitForSingleObject(g_liveAudio.thread, 0) != WAIT_OBJECT_0) {
 			if (g_liveAudio.shm && g_liveAudio.midiShm)
-				return KPIHOST64_STATUS_OK;
-			return KPIHOST64_STATUS_FAIL;
+				return KPIHOST32_STATUS_OK;
+			return KPIHOST32_STATUS_FAIL;
 		}
 		CloseHandle(g_liveAudio.thread);
 		g_liveAudio.thread = NULL;
 	}
 	if (InterlockedCompareExchange(&g_liveAudio.running, 1, 0) != 0) {
-		if (g_liveAudio.shm && g_liveAudio.midiShm) return KPIHOST64_STATUS_OK;
-		VstHost64_LiveAudioStop();
+		if (g_liveAudio.shm && g_liveAudio.midiShm) return KPIHOST32_STATUS_OK;
+		VstHost32_LiveAudioStop();
 		if (InterlockedCompareExchange(&g_liveAudio.running, 1, 0) != 0)
-			return KPIHOST64_STATUS_FAIL;
+			return KPIHOST32_STATUS_FAIL;
 	}
-	const SIZE_T audioBytes = sizeof(KPIHOST64_VstLiveAudioShm) +
-		(SIZE_T)KPIHOST64_VST_LIVE_SHM_CAP * 2 * sizeof(float);
-	const SIZE_T midiBytes = sizeof(KPIHOST64_VstLiveMidiShm) +
-		(SIZE_T)KPIHOST64_VST_LIVE_MIDI_CAP * sizeof(KPIHOST64_VstLiveMidiEvent);
+	const SIZE_T audioBytes = sizeof(KPIHOST32_VstLiveAudioShm) +
+		(SIZE_T)KPIHOST32_VST_LIVE_SHM_CAP * 2 * sizeof(float);
+	const SIZE_T midiBytes = sizeof(KPIHOST32_VstLiveMidiShm) +
+		(SIZE_T)KPIHOST32_VST_LIVE_MIDI_CAP * sizeof(KPIHOST32_VstLiveMidiEvent);
 	g_liveAudio.hMap = CreateFileMappingW(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE,
-		0, (DWORD)audioBytes, KPIHOST64_VST_LIVE_SHM_NAME);
+		0, (DWORD)audioBytes, KPIHOST32_VST_LIVE_SHM_NAME);
 	g_liveAudio.hMidiMap = CreateFileMappingW(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE,
-		0, (DWORD)midiBytes, KPIHOST64_VST_LIVE_MIDI_SHM_NAME);
+		0, (DWORD)midiBytes, KPIHOST32_VST_LIVE_MIDI_SHM_NAME);
 	if (!g_liveAudio.hMap || !g_liveAudio.hMidiMap) {
 		LiveAudioCloseMapping();
 		InterlockedExchange(&g_liveAudio.running, 0);
-		return KPIHOST64_STATUS_FAIL;
+		return KPIHOST32_STATUS_FAIL;
 	}
-	g_liveAudio.shm = (KPIHOST64_VstLiveAudioShm*)MapViewOfFile(g_liveAudio.hMap,
+	g_liveAudio.shm = (KPIHOST32_VstLiveAudioShm*)MapViewOfFile(g_liveAudio.hMap,
 		FILE_MAP_ALL_ACCESS, 0, 0, audioBytes);
-	g_liveAudio.midiShm = (KPIHOST64_VstLiveMidiShm*)MapViewOfFile(g_liveAudio.hMidiMap,
+	g_liveAudio.midiShm = (KPIHOST32_VstLiveMidiShm*)MapViewOfFile(g_liveAudio.hMidiMap,
 		FILE_MAP_ALL_ACCESS, 0, 0, midiBytes);
 	if (!g_liveAudio.shm || !g_liveAudio.midiShm) {
 		LiveAudioCloseMapping();
 		InterlockedExchange(&g_liveAudio.running, 0);
-		return KPIHOST64_STATUS_FAIL;
+		return KPIHOST32_STATUS_FAIL;
 	}
 	ZeroMemory(g_liveAudio.shm, audioBytes);
 	ZeroMemory(g_liveAudio.midiShm, midiBytes);
-	g_liveAudio.shm->capacity = KPIHOST64_VST_LIVE_SHM_CAP;
+	g_liveAudio.shm->capacity = KPIHOST32_VST_LIVE_SHM_CAP;
 	g_liveAudio.shm->sampleRate = 44100;
-	g_liveAudio.midiShm->capacity = KPIHOST64_VST_LIVE_MIDI_CAP;
+	g_liveAudio.midiShm->capacity = KPIHOST32_VST_LIVE_MIDI_CAP;
 	g_liveAudio.stopEvent = CreateEventW(NULL, TRUE, FALSE, NULL);
-	g_liveAudio.wakeEvent = CreateEventW(NULL, FALSE, FALSE, KPIHOST64_VST_LIVE_EVENT_NAME);
+	g_liveAudio.wakeEvent = CreateEventW(NULL, FALSE, FALSE, KPIHOST32_VST_LIVE_EVENT_NAME);
 	if (!g_liveAudio.stopEvent || !g_liveAudio.wakeEvent) {
 		LiveAudioCloseMapping();
 		InterlockedExchange(&g_liveAudio.running, 0);
-		return KPIHOST64_STATUS_FAIL;
+		return KPIHOST32_STATUS_FAIL;
 	}
 	unsigned tid = 0;
 	g_liveAudio.thread = (HANDLE)_beginthreadex(NULL, 0, LiveAudioThreadProc, NULL, 0, &tid);
@@ -554,16 +554,16 @@ uint32_t VstHost64_LiveAudioStart()
 		g_liveAudio.stopEvent = NULL;
 		LiveAudioCloseMapping();
 		InterlockedExchange(&g_liveAudio.running, 0);
-		return KPIHOST64_STATUS_FAIL;
+		return KPIHOST32_STATUS_FAIL;
 	}
 	SetThreadPriority(g_liveAudio.thread, THREAD_PRIORITY_TIME_CRITICAL);
-	return KPIHOST64_STATUS_OK;
+	return KPIHOST32_STATUS_OK;
 }
 
-uint32_t VstHost64_LiveAudioStop()
+uint32_t VstHost32_LiveAudioStop()
 {
 	if (!LiveAudioStopThread())
-		return KPIHOST64_STATUS_FAIL;
+		return KPIHOST32_STATUS_FAIL;
 	LiveAudioCloseMapping();
 	if (g_liveAudio.stopEvent) {
 		CloseHandle(g_liveAudio.stopEvent);
@@ -573,57 +573,57 @@ uint32_t VstHost64_LiveAudioStop()
 		CloseHandle(g_liveAudio.wakeEvent);
 		g_liveAudio.wakeEvent = NULL;
 	}
-	return KPIHOST64_STATUS_OK;
+	return KPIHOST32_STATUS_OK;
 }
 
-uint32_t VstHost64_LiveEditorOpen(uint32_t part1to32)
+uint32_t VstHost32_LiveEditorOpen(uint32_t part1to32)
 {
-	if (part1to32 < 1 || part1to32 > 32) return KPIHOST64_STATUS_BAD_REQUEST;
-	if (!EnsureUiThread()) return KPIHOST64_STATUS_FAIL;
+	if (part1to32 < 1 || part1to32 > 32) return KPIHOST32_STATUS_BAD_REQUEST;
+	if (!EnsureUiThread()) return KPIHOST32_STATUS_FAIL;
 	/* Async: SendMessage blocked the pipe (and ogg UI) for the whole effEditOpen /
 	   VST3 open — often minutes / forever. Post and ack immediately. */
 	if (!PostMessageW(g_uiWnd, UIMSG_EDITOR_OPEN, (WPARAM)part1to32, 0))
-		return KPIHOST64_STATUS_FAIL;
-	return KPIHOST64_STATUS_OK;
+		return KPIHOST32_STATUS_FAIL;
+	return KPIHOST32_STATUS_OK;
 }
 
 static void LiveEditorCloseAllOnUiThread(void)
 {
 	if (!g_uiWnd) return;
-	VstHost64_EditorCloseBegin();
+	VstHost32_EditorCloseBegin();
 	for (int i = 1; i <= 32; ++i) {
 		DWORD_PTR dummy = 0;
 		SendMessageTimeoutW(g_uiWnd, UIMSG_EDITOR_CLOSE, (WPARAM)i, 0,
 			SMTO_ABORTIFHUNG, 30000, &dummy);
 	}
-	VstHost64_EditorCloseEnd();
+	VstHost32_EditorCloseEnd();
 }
 
-uint32_t VstHost64_LiveEditorClose(uint32_t part1to32)
+uint32_t VstHost32_LiveEditorClose(uint32_t part1to32)
 {
-	if (part1to32 < 1 || part1to32 > 32) return KPIHOST64_STATUS_BAD_REQUEST;
-	if (!EnsureUiThread()) return KPIHOST64_STATUS_FAIL;
+	if (part1to32 < 1 || part1to32 > 32) return KPIHOST32_STATUS_BAD_REQUEST;
+	if (!EnsureUiThread()) return KPIHOST32_STATUS_FAIL;
 	/* Async like EDITOR_OPEN — SendMessage blocked the pipe while Vst3EditorClose
 	   ran under concurrent process() (ogg UI freeze). */
 	if (!PostMessageW(g_uiWnd, UIMSG_EDITOR_CLOSE, (WPARAM)part1to32, 0))
-		return KPIHOST64_STATUS_FAIL;
-	return KPIHOST64_STATUS_OK;
+		return KPIHOST32_STATUS_FAIL;
+	return KPIHOST32_STATUS_OK;
 }
 
-uint32_t VstHost64_LiveEditorCloseAll(void)
+uint32_t VstHost32_LiveEditorCloseAll(void)
 {
-	if (!EnsureUiThread()) return KPIHOST64_STATUS_FAIL;
+	if (!EnsureUiThread()) return KPIHOST32_STATUS_FAIL;
 	LiveEditorCloseAllOnUiThread();
-	return KPIHOST64_STATUS_OK;
+	return KPIHOST32_STATUS_OK;
 }
 
-void VstHost64_PostSoftTeardown(uint32_t part1to32, void* hwnd)
+void VstHost32_PostSoftTeardown(uint32_t part1to32, void* hwnd)
 {
 	if (!g_uiWnd || part1to32 < 1 || part1to32 > 32) return;
 	PostMessageW(g_uiWnd, UIMSG_SOFT_TEARDOWN, (WPARAM)part1to32, (LPARAM)hwnd);
 }
 
-void VstHost64_NotifyEditorOpened(int part1to32)
+void VstHost32_NotifyEditorOpened(int part1to32)
 {
 	if (part1to32 < 1 || part1to32 > 32) return;
 	EnsureEdNotifyShm();
@@ -631,7 +631,7 @@ void VstHost64_NotifyEditorOpened(int part1to32)
 	InterlockedOr((LONG*)&g_edNotify->openMask, (LONG)(1u << (part1to32 - 1)));
 }
 
-void VstHost64_NotifyEditorSnapLens(int part1to32, uint32_t compLen, uint32_t ctrlLen)
+void VstHost32_NotifyEditorSnapLens(int part1to32, uint32_t compLen, uint32_t ctrlLen)
 {
 	if (part1to32 < 1 || part1to32 > 32) return;
 	EnsureEdNotifyShm();
@@ -640,12 +640,12 @@ void VstHost64_NotifyEditorSnapLens(int part1to32, uint32_t compLen, uint32_t ct
 	g_edNotify->snapCtrlLen = ctrlLen;
 }
 
-void VstHost64_NotifyEditorClosed(int part1to32, int prog)
+void VstHost32_NotifyEditorClosed(int part1to32, int prog)
 {
-	VstHost64_NotifyEditorClosedEx(part1to32, prog, 1);
+	VstHost32_NotifyEditorClosedEx(part1to32, prog, 1);
 }
 
-void VstHost64_NotifyEditorClosedEx(int part1to32, int prog, int clearOpenMask)
+void VstHost32_NotifyEditorClosedEx(int part1to32, int prog, int clearOpenMask)
 {
 	if (part1to32 < 1 || part1to32 > 32) return;
 	EnsureEdNotifyShm();
@@ -658,7 +658,7 @@ void VstHost64_NotifyEditorClosedEx(int part1to32, int prog, int clearOpenMask)
 		InterlockedIncrement((LONG*)&g_edNotify->seq);
 	}
 	/* Legacy path (audio ring may be null if monitor never started). */
-	KPIHOST64_VstLiveAudioShm* s = g_liveAudio.shm;
+	KPIHOST32_VstLiveAudioShm* s = g_liveAudio.shm;
 	if (!s) return;
 	s->editorClosedPart = part1to32;
 	s->editorClosedProg = prog;
@@ -666,7 +666,7 @@ void VstHost64_NotifyEditorClosedEx(int part1to32, int prog, int clearOpenMask)
 	InterlockedIncrement((LONG*)&s->editorClosedSeq);
 }
 
-void VstHost64_ClearEditorOpenMask(int part1to32)
+void VstHost32_ClearEditorOpenMask(int part1to32)
 {
 	if (part1to32 < 1 || part1to32 > 32) return;
 	EnsureEdNotifyShm();
@@ -674,7 +674,7 @@ void VstHost64_ClearEditorOpenMask(int part1to32)
 	InterlockedAnd((LONG*)&g_edNotify->openMask, (LONG)~(1u << (part1to32 - 1)));
 }
 
-void VstHost64_EditorCloseBegin(void)
+void VstHost32_EditorCloseBegin(void)
 {
 	/* Nested pause (deferred editor open + GET/SET_STATE). */
 	if (InterlockedIncrement(&g_liveAudio.editPause) == 1) {
@@ -683,36 +683,36 @@ void VstHost64_EditorCloseBegin(void)
 	}
 }
 
-void VstHost64_EditorCloseEnd(void)
+void VstHost32_EditorCloseEnd(void)
 {
 	const LONG v = InterlockedDecrement(&g_liveAudio.editPause);
 	if (v < 0) InterlockedExchange(&g_liveAudio.editPause, 0);
 	if (g_liveAudio.wakeEvent) SetEvent(g_liveAudio.wakeEvent);
 }
 
-uint32_t VstHost64_LiveSetSendChannel(uint32_t part1to32, int32_t sendCh)
+uint32_t VstHost32_LiveSetSendChannel(uint32_t part1to32, int32_t sendCh)
 {
-	if (part1to32 < 1 || part1to32 > 32) return KPIHOST64_STATUS_BAD_REQUEST;
-	if (!EnsureUiThread()) return KPIHOST64_STATUS_FAIL;
+	if (part1to32 < 1 || part1to32 > 32) return KPIHOST32_STATUS_BAD_REQUEST;
+	if (!EnsureUiThread()) return KPIHOST32_STATUS_FAIL;
 	SendMessageW(g_uiWnd, UIMSG_SEND_CH, (WPARAM)part1to32, (LPARAM)sendCh);
-	return KPIHOST64_STATUS_OK;
+	return KPIHOST32_STATUS_OK;
 }
 
 // プログラム名はコントローラ側＝プラグイン UI スレッドの所有物なので、問い合わせもそちらへ。
-uint32_t VstHost64_LivePrograms(uint32_t part1to32, uint32_t first, uint32_t count,
+uint32_t VstHost32_LivePrograms(uint32_t part1to32, uint32_t first, uint32_t count,
 	std::vector<uint8_t>& reply)
 {
-	if (part1to32 < 1 || part1to32 > 32) return KPIHOST64_STATUS_BAD_REQUEST;
-	if (!EnsureUiThread()) return KPIHOST64_STATUS_FAIL;
+	if (part1to32 < 1 || part1to32 > 32) return KPIHOST32_STATUS_BAD_REQUEST;
+	if (!EnsureUiThread()) return KPIHOST32_STATUS_FAIL;
 	/* Timeout: SampleTank DestroyWindow can hang UI; plain SendMessage freezes ogg. */
 	DWORD_PTR result = 0;
 	if (!SendMessageTimeoutW(g_uiWnd, UIMSG_PROG_COUNT, (WPARAM)part1to32, 0,
 		SMTO_ABORTIFHUNG, 1500, &result))
-		return KPIHOST64_STATUS_FAIL;
+		return KPIHOST32_STATUS_FAIL;
 	const int total = (int)result;
 	if (!SendMessageTimeoutW(g_uiWnd, UIMSG_PROG_CURRENT, (WPARAM)part1to32, 0,
 		SMTO_ABORTIFHUNG, 1500, &result))
-		return KPIHOST64_STATUS_FAIL;
+		return KPIHOST32_STATUS_FAIL;
 	const int current = (int)result;
 
 	std::vector<std::wstring> names;
@@ -730,7 +730,7 @@ uint32_t VstHost64_LivePrograms(uint32_t part1to32, uint32_t first, uint32_t cou
 		}
 	}
 
-	KPIHOST64_VstLiveProgramsReply head{};
+	KPIHOST32_VstLiveProgramsReply head{};
 	head.total = (uint32_t)(total > 0 ? total : 0);
 	head.current = (current >= 0) ? (uint32_t)current : 0xFFFFFFFFu;
 	head.got = (uint32_t)names.size();
@@ -743,22 +743,22 @@ uint32_t VstHost64_LivePrograms(uint32_t part1to32, uint32_t first, uint32_t cou
 		const uint8_t* t = (const uint8_t*)names[i].c_str();
 		reply.insert(reply.end(), t, t + (size_t)chars * sizeof(wchar_t));
 	}
-	return KPIHOST64_STATUS_OK;
+	return KPIHOST32_STATUS_OK;
 }
 
-uint32_t VstHost64_LiveSetProgram(uint32_t part1to32, uint32_t index)
+uint32_t VstHost32_LiveSetProgram(uint32_t part1to32, uint32_t index)
 {
-	if (part1to32 < 1 || part1to32 > 32) return KPIHOST64_STATUS_BAD_REQUEST;
-	if (!EnsureUiThread()) return KPIHOST64_STATUS_FAIL;
+	if (part1to32 < 1 || part1to32 > 32) return KPIHOST32_STATUS_BAD_REQUEST;
+	if (!EnsureUiThread()) return KPIHOST32_STATUS_FAIL;
 	const LRESULT rc = SendMessageW(g_uiWnd, UIMSG_PROG_SET, (WPARAM)part1to32,
 		(LPARAM)index);
-	return rc ? KPIHOST64_STATUS_OK : KPIHOST64_STATUS_FAIL;
+	return rc ? KPIHOST32_STATUS_OK : KPIHOST32_STATUS_FAIL;
 }
 
-uint32_t VstHost64_LiveGetState(uint32_t part1to32, uint32_t which, std::vector<uint8_t>& reply)
+uint32_t VstHost32_LiveGetState(uint32_t part1to32, uint32_t which, std::vector<uint8_t>& reply)
 {
-	if (part1to32 < 1 || part1to32 > 32 || which > 1) return KPIHOST64_STATUS_BAD_REQUEST;
-	if (!EnsureUiThread()) return KPIHOST64_STATUS_FAIL;
+	if (part1to32 < 1 || part1to32 > 32 || which > 1) return KPIHOST32_STATUS_BAD_REQUEST;
+	if (!EnsureUiThread()) return KPIHOST32_STATUS_FAIL;
 	UiStateRequest req = {};
 	req.part = (int)part1to32;
 	req.which = (int)which;
@@ -766,16 +766,16 @@ uint32_t VstHost64_LiveGetState(uint32_t part1to32, uint32_t which, std::vector<
 	DWORD_PTR result = 0;
 	if (!SendMessageTimeoutW(g_uiWnd, UIMSG_STATE_GET, 0, (LPARAM)&req,
 		SMTO_ABORTIFHUNG, 8000, &result)) {
-		KPIHOST64_VstLiveStateReply head{};
+		KPIHOST32_VstLiveStateReply head{};
 		head.part = part1to32;
 		head.which = which;
 		head.bytes = 0;
 		const uint8_t* h = (const uint8_t*)&head;
 		reply.assign(h, h + sizeof(head));
-		return KPIHOST64_STATUS_FAIL;
+		return KPIHOST32_STATUS_FAIL;
 	}
 	const LRESULT rc = (LRESULT)result;
-	KPIHOST64_VstLiveStateReply head{};
+	KPIHOST32_VstLiveStateReply head{};
 	head.part = part1to32;
 	head.which = which;
 	head.bytes = 0;
@@ -783,27 +783,27 @@ uint32_t VstHost64_LiveGetState(uint32_t part1to32, uint32_t which, std::vector<
 	if (!rc || !req.outBytes || req.outLen <= 0) {
 		const uint8_t* h = (const uint8_t*)&head;
 		reply.assign(h, h + sizeof(head));
-		return rc ? KPIHOST64_STATUS_OK : KPIHOST64_STATUS_FAIL;
+		return rc ? KPIHOST32_STATUS_OK : KPIHOST32_STATUS_FAIL;
 	}
 	head.bytes = (uint32_t)req.outLen;
 	const uint8_t* h = (const uint8_t*)&head;
 	reply.assign(h, h + sizeof(head));
 	reply.insert(reply.end(), req.outBytes, req.outBytes + req.outLen);
 	free(req.outBytes);
-	return KPIHOST64_STATUS_OK;
+	return KPIHOST32_STATUS_OK;
 }
 
-uint32_t VstHost64_LiveSetState(uint32_t part1to32, uint32_t which,
+uint32_t VstHost32_LiveSetState(uint32_t part1to32, uint32_t which,
 	const uint8_t* bytes, uint32_t len)
 {
-	if (part1to32 < 1 || part1to32 > 32 || which > 1) return KPIHOST64_STATUS_BAD_REQUEST;
-	if (!bytes || !len) return KPIHOST64_STATUS_BAD_REQUEST;
-	if (!EnsureUiThread()) return KPIHOST64_STATUS_FAIL;
+	if (part1to32 < 1 || part1to32 > 32 || which > 1) return KPIHOST32_STATUS_BAD_REQUEST;
+	if (!bytes || !len) return KPIHOST32_STATUS_BAD_REQUEST;
+	if (!EnsureUiThread()) return KPIHOST32_STATUS_FAIL;
 	UiStateRequest req = {};
 	req.part = (int)part1to32;
 	req.which = (int)which;
 	req.inBytes = bytes;
 	req.inLen = (int)len;
 	const LRESULT rc = SendMessageW(g_uiWnd, UIMSG_STATE_SET, 0, (LPARAM)&req);
-	return rc ? KPIHOST64_STATUS_OK : KPIHOST64_STATUS_FAIL;
+	return rc ? KPIHOST32_STATUS_OK : KPIHOST32_STATUS_FAIL;
 }

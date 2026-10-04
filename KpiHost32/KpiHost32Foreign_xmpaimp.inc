@@ -1,4 +1,4 @@
-// XMPlay / AIMP を ogghost32 内でホストする。MFC 無し。KpiHost64Foreign.cpp から include。
+﻿// XMPlay / AIMP を ogghost32 内でホストする。MFC 無し。KpiHost32Foreign.cpp から include。
 // PluginXmplay.cpp / PluginAimp.cpp と同じ手順（faceproc 全部返す、XMPFILE、AIMP Core 登録）。
 
 enum { FXMP_MAX_FLOATS = 8192 * 8 };
@@ -326,13 +326,13 @@ static uint32_t ForeignXmpListExts(HMODULE h, std::wstring& outExts)
 {
 	FxInitTables();
 	pfn_XMPIN_GetInterface getIf = (pfn_XMPIN_GetInterface)GetProcAddress(h, "XMPIN_GetInterface");
-	if (!getIf) return KPIHOST64_STATUS_FAIL;
+	if (!getIf) return KPIHOST32_STATUS_FAIL;
 	XMPIN* in = NULL;
 	try { in = getIf(XMPIN_FACE, FxFaceProc); }
 	catch (...) { in = NULL; }
-	if (!in || !in->Open || !in->Process) return KPIHOST64_STATUS_FAIL;
+	if (!in || !in->Open || !in->Process) return KPIHOST32_STATUS_FAIL;
 	outExts = ParseXmpExts(in->exts);
-	return outExts.empty() ? KPIHOST64_STATUS_FAIL : KPIHOST64_STATUS_OK;
+	return outExts.empty() ? KPIHOST32_STATUS_FAIL : KPIHOST32_STATUS_OK;
 }
 
 static void ForeignXmpCloseSession(ForeignSession* s)
@@ -354,11 +354,11 @@ static uint32_t ForeignXmpOpen(ForeignSession* s, const std::wstring& media)
 {
 	FxInitTables();
 	pfn_XMPIN_GetInterface getIf = (pfn_XMPIN_GetInterface)GetProcAddress(s->dll, "XMPIN_GetInterface");
-	if (!getIf) return KPIHOST64_STATUS_FAIL;
+	if (!getIf) return KPIHOST32_STATUS_FAIL;
 	XMPIN* in = NULL;
 	try { in = getIf(XMPIN_FACE, FxFaceProc); }
 	catch (...) { in = NULL; }
-	if (!in || !in->Open || !in->Process) return KPIHOST64_STATUS_FAIL;
+	if (!in || !in->Open || !in->Process) return KPIHOST32_STATUS_FAIL;
 	char pathA[MAX_PATH * 2];
 	pathA[0] = 0;
 	WideCharToMultiByte(CP_UTF8, 0, media.c_str(), -1, pathA, (int)sizeof(pathA), NULL, NULL);
@@ -374,7 +374,7 @@ static uint32_t ForeignXmpOpen(ForeignSession* s, const std::wstring& media)
 	if (in->CheckFile && !in->CheckFile(pathA, (XMPFILE)file)) {
 		if (file) FxFileClose((XMPFILE)file);
 		g_xmpCur = nullptr;
-		return KPIHOST64_STATUS_FAIL;
+		return KPIHOST32_STATUS_FAIL;
 	}
 	if (file) FxFileSeek((XMPFILE)file, 0);
 	DWORD orc = 0;
@@ -383,7 +383,7 @@ static uint32_t ForeignXmpOpen(ForeignSession* s, const std::wstring& media)
 	if (orc == 0) {
 		if (file) FxFileClose((XMPFILE)file);
 		g_xmpCur = nullptr;
-		return KPIHOST64_STATUS_FAIL;
+		return KPIHOST32_STATUS_FAIL;
 	}
 	if (orc == 2) {
 		if (file) FxFileClose((XMPFILE)file);
@@ -402,7 +402,7 @@ static uint32_t ForeignXmpOpen(ForeignSession* s, const std::wstring& media)
 	s->xmpFmt.chan = (DWORD)s->ch;
 	s->xmpFmt.res = 2;
 	s->playing = 1;
-	return KPIHOST64_STATUS_OK;
+	return KPIHOST32_STATUS_OK;
 }
 
 static void FxFloatToS16(const float* src, int count, BYTE* dst)
@@ -423,7 +423,7 @@ static uint32_t ForeignXmpRender(ForeignSession* s, uint32_t want, uint8_t* dest
 {
 	gotBytes = 0;
 	eof = 0;
-	if (!s || !s->xmp || !s->xmp->Process) return KPIHOST64_STATUS_FAIL;
+	if (!s || !s->xmp || !s->xmp->Process) return KPIHOST32_STATUS_FAIL;
 	if (want > destCap) want = destCap;
 	g_xmpCur = s;
 	uint32_t got = 0;
@@ -455,12 +455,12 @@ static uint32_t ForeignXmpRender(ForeignSession* s, uint32_t want, uint8_t* dest
 	}
 	gotBytes = got;
 	if (got == 0 && s->eof) eof = 1;
-	return KPIHOST64_STATUS_OK;
+	return KPIHOST32_STATUS_OK;
 }
 
 static uint32_t ForeignXmpSeek(ForeignSession* s, uint64_t posSample)
 {
-	if (!s || !s->xmp || !s->xmp->SetPosition || s->rate <= 0) return KPIHOST64_STATUS_FAIL;
+	if (!s || !s->xmp || !s->xmp->SetPosition || s->rate <= 0) return KPIHOST32_STATUS_FAIL;
 	g_xmpCur = s;
 	double gran = 0.001;
 	if (s->xmp->GetGranularity) {
@@ -473,7 +473,7 @@ static uint32_t ForeignXmpSeek(ForeignSession* s, uint64_t posSample)
 	s->pendOff = 0;
 	s->eof = 0;
 	s->xmpPlayed = (__int64)(sec * s->rate * s->ch);
-	return KPIHOST64_STATUS_OK;
+	return KPIHOST32_STATUS_OK;
 }
 
 // ---- AIMP (PluginAimp.cpp と同じ Core / Stream / Decoder) ----
@@ -773,19 +773,19 @@ static uint32_t ForeignAimpListExts(HMODULE h, const std::wstring& path, std::ws
 	if (!ForeignAimpInitPlugin(&probe, path)) {
 		ForeignAimpCloseSession(&probe);
 		probe.dll = NULL;
-		return KPIHOST64_STATUS_FAIL;
+		return KPIHOST32_STATUS_FAIL;
 	}
 	outExts = ParseAimpExts(probe.aimpExts);
 	ForeignAimpCloseSession(&probe);
 	probe.dll = NULL;
-	return outExts.empty() ? KPIHOST64_STATUS_FAIL : KPIHOST64_STATUS_OK;
+	return outExts.empty() ? KPIHOST32_STATUS_FAIL : KPIHOST32_STATUS_OK;
 }
 
 static uint32_t ForeignAimpOpen(ForeignSession* s, const std::wstring& dll, const std::wstring& media)
 {
 	if (!ForeignAimpInitPlugin(s, dll)) {
 		ForeignAimpCloseSession(s);
-		return KPIHOST64_STATUS_FAIL;
+		return KPIHOST32_STATUS_FAIL;
 	}
 	IAIMPAudioDecoder* dec = NULL;
 	CAimpErrorInfo* err = new CAimpErrorInfo();
@@ -807,13 +807,13 @@ static uint32_t ForeignAimpOpen(ForeignSession* s, const std::wstring& dll, cons
 	err->Release();
 	if (!dec) {
 		ForeignAimpCloseSession(s);
-		return KPIHOST64_STATUS_FAIL;
+		return KPIHOST32_STATUS_FAIL;
 	}
 	int sr = 0, ch = 0, fmt = 0;
 	if (!dec->GetStreamInfo(&sr, &ch, &fmt)) {
 		dec->Release();
 		ForeignAimpCloseSession(s);
-		return KPIHOST64_STATUS_FAIL;
+		return KPIHOST32_STATUS_FAIL;
 	}
 	s->aimpDec = dec;
 	s->rate = sr > 0 ? sr : 44100;
@@ -827,21 +827,21 @@ static uint32_t ForeignAimpOpen(ForeignSession* s, const std::wstring& dll, cons
 	else s->bits = 16;
 	s->aimpSize = dec->GetSize();
 	s->playing = 1;
-	return KPIHOST64_STATUS_OK;
+	return KPIHOST32_STATUS_OK;
 }
 
 static uint32_t ForeignAimpRender(ForeignSession* s, uint32_t want, uint8_t* dest, uint32_t destCap, uint32_t& gotBytes, uint32_t& eof)
 {
 	gotBytes = 0;
 	eof = 0;
-	if (!s || !s->aimpDec) return KPIHOST64_STATUS_FAIL;
+	if (!s || !s->aimpDec) return KPIHOST32_STATUS_FAIL;
 	if (want > destCap) want = destCap;
 	int n = 0;
 	try { n = s->aimpDec->Read(dest, want); }
 	catch (...) { n = 0; }
 	if (n <= 0) {
 		eof = 1;
-		return KPIHOST64_STATUS_OK;
+		return KPIHOST32_STATUS_OK;
 	}
 	if (s->aimpFloat) {
 		float* f = (float*)dest;
@@ -857,14 +857,14 @@ static uint32_t ForeignAimpRender(ForeignSession* s, uint32_t want, uint8_t* des
 		}
 	}
 	gotBytes = (uint32_t)n;
-	return KPIHOST64_STATUS_OK;
+	return KPIHOST32_STATUS_OK;
 }
 
 static uint32_t ForeignAimpSeek(ForeignSession* s, uint64_t posSample)
 {
-	if (!s || !s->aimpDec || s->ch <= 0) return KPIHOST64_STATUS_FAIL;
+	if (!s || !s->aimpDec || s->ch <= 0) return KPIHOST32_STATUS_FAIL;
 	int bpf = (s->bits / 8) * s->ch;
-	if (bpf <= 0) return KPIHOST64_STATUS_FAIL;
+	if (bpf <= 0) return KPIHOST32_STATUS_FAIL;
 	INT64 pos = (INT64)posSample * bpf;
-	return s->aimpDec->SetPosition(pos) ? KPIHOST64_STATUS_OK : KPIHOST64_STATUS_FAIL;
+	return s->aimpDec->SetPosition(pos) ? KPIHOST32_STATUS_OK : KPIHOST32_STATUS_FAIL;
 }

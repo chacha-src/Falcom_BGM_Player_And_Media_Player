@@ -3398,7 +3398,7 @@ static void ScStaffBankAt(const ScEvent* ev, int evCount, int tr, uint32_t tick,
 	}
 }
 
-/* Live program list IPC must NEVER run from paint — Host64 PROGRAMS freezes the
+/* Live program list IPC must NEVER run from paint — Host32 PROGRAMS freezes the
    UI after tone-map OK (SC-VA VST2). Multi → 0 so caller uses GS/XG names.
    Dedicated VST3 → path hash only (HALion rarely has a usable list anyway). */
 static int ScStaffVstProgName(int part1to32, int progIdx, const wchar_t* tipStem,

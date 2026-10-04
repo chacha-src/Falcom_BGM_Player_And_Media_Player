@@ -5900,7 +5900,7 @@ static float ProcessDynamicLimiter(DynamicLimiter* lim, float input) {
 //   WINAMP(3) … Winamp/XMPlay/AIMP。savedata.winampvol
 //   CEMU (4) … CEmu PCM。savedata.cemuvol
 // sticky なので、デコード側で毎回正しい mode を立てること。
-// mid VST の x64 は KpiHost64 が生PCMを返し、本体(x86) playwavvst で equaliser を掛ける。
+// mid VST の x64 は KpiHost32 が生PCMを返し、本体(x86) playwavvst で equaliser を掛ける。
 // ============================================================
 
 static int  g_eqFormatVolMode = EQ_FMT_VOL_NONE;

@@ -1,14 +1,14 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
-    <ClCompile Include="KpiHost64.cpp" />
+    <ClCompile Include="KpiHost32.cpp" />
     <ClCompile Include="..\KpiV5ConfigStore.cpp" />
-    <ClCompile Include="KpiHost64Foreign.cpp" />
-    <ClCompile Include="KpiHost64Vst.cpp" />
-    <ClCompile Include="KpiHost64VstLive.cpp" />
+    <ClCompile Include="KpiHost32Foreign.cpp" />
+    <ClCompile Include="KpiHost32Vst.cpp" />
+    <ClCompile Include="KpiHost32VstLive.cpp" />
     <ClCompile Include="kpihost_savedata.cpp" />
-    <ClCompile Include="VstMidiEngine_k64.cpp" />
-    <ClCompile Include="Vst3Host_k64.cpp" />
+    <ClCompile Include="VstMidiEngine_k32.cpp" />
+    <ClCompile Include="Vst3Host_k32.cpp" />
     <ClCompile Include="..\kb_sasami\source\sasami_file.cpp" />
     <ClCompile Include="..\kb_sasami\source\sasami_midi.cpp" />
     <ClCompile Include="..\kb_sasami\source\sasami_misao.cpp" />
@@ -18,7 +18,7 @@
     <ClCompile Include="..\Sf2Vst2.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ResourceCompile Include="KpiHost64.rc">
+    <ResourceCompile Include="KpiHost32.rc">
       <Filter>Resource Files</Filter>
     </ResourceCompile>
   </ItemGroup>

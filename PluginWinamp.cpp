@@ -22,7 +22,7 @@ extern BYTE kpiarch[];
 extern BYTE plugkind[];
 extern BOOL kpichk[];
 extern int kpicnt;
-extern KpiHost64Client g_kpiHost;
+extern KpiHost32Client g_kpiHost;
 extern BOOL thn1;
 extern int stf;
 
@@ -648,7 +648,7 @@ int PluginWinamp_Open(const wchar_t* dllPath, const wchar_t* mediaPath, HWND hwn
 int PluginWinamp_OpenRemote(const wchar_t* dllPath, const wchar_t* mediaPath)
 {
 	PluginWinamp_Close();
-	KPIHOST64_ForeignOpenReply fr{};
+	KPIHOST32_ForeignOpenReply fr{};
 	if (!g_kpiHost.ForeignOpen(PLUGKIND_WINAMP, dllPath, mediaPath, fr))
 		return 0;
 	g_waRemote = 1;

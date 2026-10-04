@@ -43,7 +43,7 @@
 <h2>Watch while it plays</h2>
 <p>Open the <a href="midi-monitor.htm">MIDI monitor</a> to see all 32 parts live. Side by side with the <a href="pianoroll.htm">piano roll</a>, you get both notes and channel state.</p>
 <h2>The player is x64; the other bitness is ogghost32</h2>
-<p>The player is x64. It used to be x86, and 64-bit VSTs were handed to another process. That is reversed: a 64-bit VST such as SC-VA x64 loads in the player, and only 32-bit VSTs start <code>ogghost32.exe</code>. That exe took over the old KpiHost64.exe job on the x86 side. Keep it next to the executable. If the host will not open, check that it is there. Same idea as <a href="kpi.htm">Adding formats with KPI plug-ins</a>.</p>
+<p>The player is x64. A 64-bit VST such as SC-VA x64 loads in the player, and only 32-bit VSTs start the x86 IPC host. The project is KpiHost32 and the file is <code>ogghost32.exe</code>. Keep it next to the executable. If the host will not open, check that it is there. Same idea as <a href="kpi.htm">Adding formats with KPI plug-ins</a>.</p>
 <h2>Vs the VST host</h2>
 <table class="grid">
 <tr><th></th><th>This page (.mid playback)</th><th>VST host</th></tr>

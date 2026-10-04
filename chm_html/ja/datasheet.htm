@@ -13,7 +13,7 @@
 
 <p class="lead">どの作品のBGMがゲーム中と同じループで聴けるか、そして CEmu（CPUエミュレーション）以外の音をどのエンジンが読んでいるかを、1枚にまとめたページです。昔マシンの zip はここには含めず、<a href="cemu-pc98.htm">PC-98</a>、<a href="cemu-pc88.htm">PC-88</a>、<a href="cemu-x68k.htm">X68000</a>、<a href="cemu-x1.htm">X1</a>、<a href="cemu-msx.htm">MSX</a>、<a href="cemu-fm7.htm">FM-7</a>、<a href="cemu-pcat.htm">PC/AT</a>、<a href="cemu-arcade.htm">アーケード</a> に分けてあります。</p>
 <h2>本体と、横にいるプロセス</h2>
-<p>プレイヤー本体は <b>x64</b> です。以前の本体は x86（32bit）でした。反対に、ビット数が違うプラグインを預かる側は <b>x86</b> の <code>ogghost32.exe</code> になりました。以前その役目だったのは x64 の <code>KpiHost64.exe</code> です。</p>
+<p>プレイヤー本体は <b>x64</b> です。ビット数が違うプラグインを預かる IPC は <b>x86</b> です。プロジェクト名は KpiHost32、出荷ファイルは <code>ogghost32.exe</code> です。</p>
 <ul>
 <li>64bit の VST や KPI は、本体が直接読みます。</li>
 <li>32bit の VST や KPI、Winamp / XMPlay / AIMP の入力プラグインは、<code>ogghost32.exe</code> を起こして名前付きパイプで開きます。実行ファイルと同じ場所に置いてください。</li>

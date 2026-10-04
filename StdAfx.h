@@ -2,15 +2,14 @@
 // 参照回数が多く、かつあまり変更されない、プロジェクト専用のインクルード ファイル
 // を記述します。
 
-// uni_avx2_vs2026|x86(oggのみ)でビルドすること。
+// 本体 ogg.exe は x64（uni_avx2_vs2026 の x64）。IPC は別プロジェクト KpiHost32 を Win32 でビルドする（exe は ogghost32.exe、x86）。
 // 関数名命名規則：分かりやすい短い関数とすること。
 #pragma once
-// KpiHost64.exe compiles VstMidiEngine.cpp / Vst3Host.cpp straight from this
-// folder so the x64 plug-in host and ogg.exe share one implementation. It has
-// no MFC, and the precompiled header rules require the engine sources to open
-// with a plain #include "stdafx.h", so the fork happens here instead.
-#ifdef KPIHOST64_BUILD
-#include "KpiHost64/kpihost_stdafx.h"
+// KpiHost32（x86）は VstMidiEngine.cpp / Vst3Host.cpp をこのフォルダからそのままコンパイルする。
+// 本体 ogg.exe（x64）と実装を共有する。ホストに MFC は無く、プリコンパイルヘッダの都合で
+// エンジンソースは #include "stdafx.h" で始まるので、切り替えはここ。
+#ifdef KPIHOST32_BUILD
+#include "KpiHost32/kpihost_stdafx.h"
 #include "PluginKinds.h"
 #else
 #pragma warning( disable : 4142 4091 )
@@ -1371,7 +1370,7 @@ inline CString GameTrackTitle(LPCTSTR wide)
 
 #include "DatArchive.h"
 
-#endif // KPIHOST64_BUILD
+#endif // KPIHOST32_BUILD
 
 //{{AFX_INSERT_LOCATION}}
 // Microsoft Visual C++ は前行の直前に追加の宣言を挿入します。

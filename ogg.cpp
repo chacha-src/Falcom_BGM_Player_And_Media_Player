@@ -323,7 +323,7 @@ BOOL COggApp::InitInstance()
 			}
 	}
 	_tchdir(karento2);
-	OggPurgeObsoleteKpiHost64();
+	OggPurgeObsoleteKpiHost32();
 	{
 		wchar_t cemuData[MAX_PATH];
 		_snwprintf_s(cemuData, _TRUNCATE, L"%sdata", karento2);

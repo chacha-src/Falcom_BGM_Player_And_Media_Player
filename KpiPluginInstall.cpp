@@ -1683,7 +1683,7 @@ BOOL KpiInstall_SilentUpdateFmMonKpis(LPCTSTR exeDir)
 			TCHAR src[MAX_PATH * 2] = {};
 			_sntprintf_s(dst, _TRUNCATE, L"%s%s\\%s", exeDir, kRoots[r], kTab[i].relDst);
 
-			/* 64bit プレイヤの Plugins は KpiHost64。x86 ストックで x64 dump を潰さない。
+			/* 64bit プレイヤの Plugins は KpiHost32。x86 ストックで x64 dump を潰さない。
 			   kbsnesapu だけ Win32。kbgme/kbnezplug は x64 dump 固定。 */
 			{
 				const BOOL isKbsnes = (_tcsicmp(kTab[i].bundleName, L"kbsnesapu.kpi") == 0

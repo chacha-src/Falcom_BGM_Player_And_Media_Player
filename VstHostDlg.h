@@ -136,9 +136,13 @@ protected:
 	// PC keyboard as a one-row MIDI keyboard (Z=C4…). Skips Edit/Combo focus.
 	int PcKeyToNote(UINT vk) const;
 	void PcSendShort(DWORD msg);
+	void RequestActivityRefresh();
 	void PcKeyReleaseAll();
 	BOOL PcFocusBlocksKeys() const;
 	BOOL HandlePcKeyboardMidi(MSG* msg);
+	int PlayChIndex();
+	void PlaySendAt(int ch0to31, DWORD msg);
+	void SetPlayCh(int ch0to31, int fromUi);
 	static void CALLBACK MidiInProc(HMIDIIN hmi, UINT msg, DWORD_PTR instance,
 		DWORD_PTR param1, DWORD_PTR param2);
 	static UINT __stdcall AudioThreadProc(void* p);
@@ -154,6 +158,7 @@ protected:
 	afx_msg void OnHelp();
 	afx_msg void OnCloseButton();
 	afx_msg void OnDeviceChange();
+	afx_msg void OnPlayChChange();
 	afx_msg void OnSize(UINT nType, int cx, int cy);
 	afx_msg void OnDestroy();
 	afx_msg void OnTimer(UINT_PTR id);
@@ -161,6 +166,7 @@ protected:
 	afx_msg void OnLButtonDown(UINT nFlags, CPoint point);
 	afx_msg void OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar);
 	afx_msg LRESULT OnVstEditorClosed(WPARAM w, LPARAM l);
+	afx_msg LRESULT OnActRefresh(WPARAM w, LPARAM l);
 	void ApplyVolUi();
 	void CapturePartStateToCurrentPreset(int part1to32);
 
@@ -169,6 +175,8 @@ protected:
 	CCustomComboBox m_thru;
 	CCustomComboBox m_speakerOut;
 	CCustomComboBox m_pluginFilter;
+	CCustomComboBox m_playCh;
+	CStatic m_playChLabel;
 	CCustomStandardButton m_help;
 	CCustomStandardButton m_close;
 	CCustomStandardButton m_rescan;
@@ -208,10 +216,18 @@ protected:
 	volatile LONG m_wavOn;
 	LONG m_wavBytes;
 	CRITICAL_SECTION m_wavLock;
-	// vk -> held MIDI note+1 (0 = not held). Same path as MIDI In port 0.
+	// vk -> held MIDI note+1 (0 = not held). m_pcHeldCh is the part (0..31) that note-on used.
 	BYTE m_pcHeldNote[256];
+	volatile LONG m_actPosted;
+	BYTE m_pcHeldCh[256];
 	int m_pcOctaveShift;
+	// 0 = ch1 and MIDI keeps the device bank. 1..31 force soft keys and MIDI onto that part.
+	volatile LONG m_keyCh;
 };
+
+#ifndef WM_VST_ACT_REFRESH
+#define WM_VST_ACT_REFRESH (WM_APP + 9122)
+#endif
 
 extern CVstHostDlg* g_vstHostDlg;
 void OpenVstHostModeless(CWnd* parent);

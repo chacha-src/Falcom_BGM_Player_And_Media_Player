@@ -4313,6 +4313,43 @@ void CMediaPlayerDlg::RefreshList(BOOL bForce)
 	}
 }
 
+void CMediaPlayerDlg::PresentPlayingRowNow()
+{
+	if (!::IsWindow(m_list.GetSafeHwnd()) || !pl)
+		return;
+	HWND h = m_list.GetSafeHwnd();
+	if (!::IsWindowVisible(h))
+		return;
+	HWND root = ::GetAncestor(h, GA_ROOT);
+	if (root && ::IsIconic(root))
+		return;
+	MSG msg;
+	if (::PeekMessage(&msg, h, WM_VSCROLL, WM_VSCROLL, PM_NOREMOVE))
+		return;
+	if (::PeekMessage(&msg, h, WM_MOUSEWHEEL, WM_MOUSEWHEEL, PM_NOREMOVE))
+		return;
+	static int s_lastDisp = -2;
+	const int disp = MpPcToDisp(this, pl->pnt);
+	const int changed = (disp != s_lastDisp);
+	auto paint = [&](int d, int force) {
+		if (d < 0 || d >= m_list.GetItemCount())
+			return;
+		CRect row;
+		if (!m_list.GetItemRect(d, &row, LVIR_BOUNDS))
+			return;
+		if (!force) {
+			RECT upd, hit;
+			if (!::GetUpdateRect(h, &upd, FALSE) || !::IntersectRect(&hit, &upd, &row))
+				return;
+		}
+		m_list.RedrawWindow(&row, NULL, RDW_INVALIDATE | RDW_UPDATENOW | RDW_NOERASE);
+	};
+	if (changed && s_lastDisp >= 0)
+		paint(s_lastDisp, 1);
+	paint(disp, changed ? 1 : 0);
+	s_lastDisp = disp;
+}
+
 void CMediaPlayerDlg::NotifyPlayIconChanged()
 {
 	// PlayList::SIconTimer から呼ばれる。Timer1(250ms)待ちだと点滅が間引かれて飛び飛びに見える。

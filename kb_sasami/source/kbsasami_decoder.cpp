@@ -7,6 +7,7 @@
 
 #include "kbsasami_decoder.h"
 #include "ComposerConvert.h"
+#include "../../kpi_host_ipc.h"
 
 extern HINSTANCE g_hKpi;
 
@@ -16,6 +17,8 @@ static const wchar_t KEY_RAIRA[] = L"raira";
 static const wchar_t KEY_MIDIMODE[] = L"midimode";
 static const wchar_t KEY_MAP_LEGACY[] = L"map";
 static const wchar_t KEY_FMMODE[] = L"fmmode";
+static const wchar_t KEY_VST_GS[] = L"vstfullpath_gs";
+static const wchar_t KEY_VST_XG[] = L"vstfullpath_xg";
 
 /* fmmidi/ymfm の正規化が小さく、mpy/mpw2/rcp/mid が実聴で約 1/6。
    raira=0（本家）はさらに /2 のうえ 1.5 倍下げる。 */
@@ -47,6 +50,10 @@ KbSasamiDecoder::KbSasamiDecoder(IKpiConfig* pConfig)
 	m_liveStream = false;
 	m_raira = 0;
 	m_vst = 0;
+	m_foreignVst = 0;
+	m_vstGs[0] = 0;
+	m_vstXg[0] = 0;
+	memset(&m_vstSess, 0, sizeof(m_vstSess));
 	m_mapDefault = 0;
 	m_fmModeDefault = 2;
 	m_gsMapLsb = 0;
@@ -112,6 +119,7 @@ KbSasamiDecoder::~KbSasamiDecoder()
 		m_synths[i] = NULL;
 	}
 	m_fm.Close();
+	KbVstSessionClose(&m_vstSess);
 	if (m_pConfig) {
 		m_pConfig->Release();
 		m_pConfig = NULL;
@@ -131,6 +139,8 @@ void KbSasamiDecoder::ReadOptions()
 		if (m_mapDefault < 0)
 			m_mapDefault = (int)m_pConfig->GetInt(SEC_KBSASAMI, KEY_MAP_LEGACY, 0);
 		m_fmModeDefault = (int)m_pConfig->GetInt(SEC_KBSASAMI, KEY_FMMODE, 2);
+		m_pConfig->GetStr(SEC_KBSASAMI, KEY_VST_GS, m_vstGs, (DWORD)(sizeof(m_vstGs)), L"");
+		m_pConfig->GetStr(SEC_KBSASAMI, KEY_VST_XG, m_vstXg, (DWORD)(sizeof(m_vstXg)), L"");
 	}
 	if (m_mapDefault < 0 || m_mapDefault > 19) m_mapDefault = 0;
 	if (m_fmModeDefault < 0 || m_fmModeDefault > 2) m_fmModeDefault = 2;
@@ -458,7 +468,11 @@ DWORD __fastcall KbSasamiDecoder::Open(const KPI_MEDIAINFO* cpRequest, IKpiFile*
 		smfDirect = 1;
 	}
 	if (smfDirect) {
-		if (m_vst != 0) return 0;
+		if (m_vst != 0) {
+			int vr = OpenForeignVst(smfPtr, smfLen);
+			if (vr <= 0) return 0;
+			return 1;
+		}
 		DWORD rate = 44100;
 		if (cpRequest && cpRequest->dwSampleRate >= 8000 && cpRequest->dwSampleRate <= 192000)
 			rate = cpRequest->dwSampleRate;
@@ -579,9 +593,12 @@ DWORD __fastcall KbSasamiDecoder::Open(const KPI_MEDIAINFO* cpRequest, IKpiFile*
 		return 1;
 	}
 
-	// MIDI: 解釈後 vst=1 なら fmmidi を起動せず失敗 (ホストが VST 経路へ)
-	if (m_vst != 0)
-		return 0;
+	// MIDI: raira=1 の vst=1 はらいら本体の VST。raira=0 は専用ホスト。
+	if (m_vst != 0) {
+		int vr = OpenForeignVst(m_smf, (DWORD)m_smfSize);
+		if (vr <= 0) return 0;
+		return 1;
+	}
 
 	m_fmMode = false;
 	m_smfSize = 0;
@@ -633,9 +650,49 @@ DWORD WINAPI KbSasamiDecoder::Select(DWORD dwNumber, const KPI_MEDIAINFO** ppMed
 	return 1;
 }
 
+int KbSasamiDecoder::OpenForeignVst(const uint8_t* smf, DWORD smfLen)
+{
+	/* raira=1 は本体が VST を持つ。このルートは他アプリだけ。 */
+	if (m_raira) return 0;
+	if (!KbVstSessionOpen(smf, smfLen, m_vstGs, m_vstXg, &m_vstSess))
+		return -1;
+	m_foreignVst = 1;
+	m_fmMode = false;
+	const DWORD rate = m_vstSess.rate ? m_vstSess.rate : 44100;
+	m_MediaInfo.dwSampleRate = rate;
+	m_MediaInfo.dwChannels = 2;
+	m_MediaInfo.nBitsPerSample = 16;
+	m_MediaInfo.dwSeekableFlags = KPI_MEDIAINFO::SEEK_FLAGS_SAMPLE;
+	m_MediaInfo.dwUnitSample = 0;
+	UINT64 ns = 0;
+	if (rate && m_vstSess.lengthSamples)
+		ns = (m_vstSess.lengthSamples * 10000000ull + (UINT64)rate - 1ull) / (UINT64)rate;
+	m_MediaInfo.qwLength = ns;
+	m_MediaInfo.dwCount = 1;
+	m_MediaInfo.dwNumber = 1;
+	m_lastSample = m_vstSess.lengthSamples;
+	m_curSample = 0;
+	return 1;
+}
+
 DWORD WINAPI KbSasamiDecoder::Render(BYTE* pBuffer, DWORD dwSizeSample)
 {
 	if (!pBuffer || dwSizeSample == 0) return 0;
+	if (m_foreignVst) {
+		const uint32_t bytes = dwSizeSample * 4u;
+		uint32_t got = 0, eof = 0;
+		if (!KbVstSessionRender(&m_vstSess, pBuffer, bytes, &got, &eof))
+			return 0;
+		DWORD frames = got / 4u;
+		if (frames > dwSizeSample) frames = dwSizeSample;
+		if (frames < dwSizeSample && (eof & (KPIHOST32_EOF_MIDI_PENDING | KPIHOST32_EOF_MIDI_KEEPALIVE))) {
+			ZeroMemory(pBuffer + frames * 4, (dwSizeSample - frames) * 4u);
+			m_curSample += dwSizeSample;
+			return dwSizeSample;
+		}
+		m_curSample += frames;
+		return frames;
+	}
 	if (m_fmMode)
 		return m_fm.Render((int16_t*)pBuffer, dwSizeSample);
 
@@ -719,6 +776,12 @@ DWORD WINAPI KbSasamiDecoder::Render(BYTE* pBuffer, DWORD dwSizeSample)
 
 UINT64 WINAPI KbSasamiDecoder::Seek(UINT64 qwPosSample, DWORD)
 {
+	if (m_foreignVst) {
+		if (!KbVstSessionSeek(&m_vstSess, qwPosSample))
+			return m_curSample;
+		m_curSample = qwPosSample;
+		return qwPosSample;
+	}
 	if (m_fmMode)
 		return m_fm.SeekSample(qwPosSample);
 	std::lock_guard<std::mutex> lk(m_midiLock);

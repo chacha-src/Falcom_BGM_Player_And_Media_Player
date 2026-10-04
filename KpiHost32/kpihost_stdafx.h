@@ -1,12 +1,12 @@
 ﻿#pragma once
 // ============================================================================
-// KpiHost64 用の最小 stdafx
+// KpiHost32 用の最小 stdafx
 // ----------------------------------------------------------------------------
 // 本体の VstMidiEngine.cpp は MFC の save 構造体を参照する。ホストには MFC が
 // 無いので、再生に必要なフィールドだけここに置く。言語は本体が PING で送る。
 // ============================================================================
-#ifndef KPIHOST64_STDAFX_H
-#define KPIHOST64_STDAFX_H
+#ifndef KPIHOST32_STDAFX_H
+#define KPIHOST32_STDAFX_H
 #include <windows.h>
 #include <stdio.h>
 #include <stdlib.h>

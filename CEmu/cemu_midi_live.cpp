@@ -52,7 +52,7 @@ struct CEmuMidiLive {
 	/* 時計は連続。Pump ごとに midiSample をリセットしない
 	   (defer した NoteOff と新しい NoteOn の順が入れ替わり長さが崩れる)。 */
 	__int64 midiSample;  /* UART delta タイムライン → ストリーム開始からのサンプル */
-	__int64 audioSample; /* 既に Pump したサンプル (= Host64 チャンク基準) */
+	__int64 audioSample; /* 既に Pump したサンプル (= Host32 チャンク基準) */
 	int isMt32;
 	int midiType; /* hoot midiout_type: 1/2 LA, 4/6 GS, 7 SC-88, 8 GM */
 	int laBanksSent;
@@ -233,7 +233,7 @@ static int WriteLiveStubSmf(const wchar_t* path, const char* seqName, int midiTy
 	/* GS Reset / CC#111 はスタブに書かない。DispatchDueEvents はライブ注入の
 	   あと SMF を歩くので、同じブロックで FMP の POWER/PC を消す。 */
 
-	/* 数日分の本体。Host64/local の lengthSamples がライブ inject 用に開いたまま。
+	/* 数日分の本体。Host32/local の lengthSamples がライブ inject 用に開いたまま。
 	   ここで CC#111 終端を書かない — 空の 4 日 SMF を VST がループしてしまう。 */
 	SmfPutVar(track, &tp, (uint32_t)kStubTicks);
 	track[tp++] = 0xb0; track[tp++] = 7; track[tp++] = 100;
@@ -1682,7 +1682,7 @@ int CEmuMidiLiveStealShorts(CEmuMidiLiveShort* out, int maxCount)
 	}
 	g_live.injR = r;
 	LeaveCriticalSection(&g_live.cs);
-	/* Host64/VST は sampleOfs で置く — 時系列を崩さない。 */
+	/* Host32/VST は sampleOfs で置く — 時系列を崩さない。 */
 	for (int i = 1; i < n; i++) {
 		CEmuMidiLiveShort t = out[i];
 		int j = i;

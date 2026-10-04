@@ -615,7 +615,7 @@ static int OggSasamiLiveInjectSysex(const unsigned char* d, int n)
 	return (fn && fn(d, n)) ? 1 : 0;
 }
 
-/* CC#111 (RPG Maker / common SMF loop) — Host64 path cannot see local VstMidiSongHasLoop. */
+/* CC#111 (RPG Maker / common SMF loop) — Host32 path cannot see local VstMidiSongHasLoop. */
 static int OggMidiFileHasCc111Loop(LPCTSTR path)
 {
 	if (!path || !path[0]) return 0;
@@ -3707,7 +3707,7 @@ KPI_MEDIAINFO me5;
 IKpiDecoder* kpidec = NULL;
 bool g_kpiRemote = false;
 int g_kpiPlaybackArch = 0;   // 0=不明 32=x86 64=x64（再生中の KPI arch 表示用）
-KpiHost64Client g_kpiHost;
+KpiHost32Client g_kpiHost;
 static int g_vstRemote64Slot[2] = { 0, 0 }; // 1=他アーキ VST MIDI via ogghost32
 
 void VstPrefetchStart(int slot, int rate, int channels, int bits, int prefill, double seconds = 0.0);
@@ -3726,7 +3726,7 @@ static int VstRemoteNow()
 {
 	const int s = VstBindIoSlot();
 	if (g_vstRemote64Slot[s]) return 1;
-	/* .mpsmv live HALion etc. uses Host64 without Foreign VstOpen. */
+	/* .mpsmv live HALion etc. uses Host32 without Foreign VstOpen. */
 	return VstLiveAnyRemotePart() ? 1 : 0;
 }
 
@@ -3787,9 +3787,9 @@ static void CloseVstMidiSession()
 	const int keepLive = g_cemuLiveKeepAcrossClose;
 	if (keepLive)
 		g_cemuLiveKeepAcrossClose = 0;
-	/* Close VST/Host64 first so Pump/Steal no longer touch live hard, then
+	/* Close VST/Host32 first so Pump/Steal no longer touch live hard, then
 	   tear down emu. LiveStop-before-VST could deadlock (UI holds live CS
-	   while Host64 waits in Pump / UI waits on Host64). */
+	   while Host32 waits in Pump / UI waits on Host32). */
 	CloseVstMidiSessionSlot(0);
 	CloseVstMidiSessionSlot(1);
 	VstHostPauseForSong(0);
@@ -3836,7 +3836,7 @@ static HWND ShowVstWaitPopup(HWND owner)
 	}
 	return wnd;
 }
-static KpiHost64Session g_kpiSession;
+static KpiHost32Session g_kpiSession;
 static CEmuSession g_cemuSessionSlot[XF_SLOTS];
 static uint8_t g_kpiRemoteCache[kRouteCap];
 static size_t g_kpiRemoteCacheLen = 0;
@@ -5723,6 +5723,56 @@ static void OggUpdateVisibleHwnd(HWND h)
 	::UpdateWindow(h);
 }
 
+/* 再生行の地色。♪帯だけの Invalidate だと他列が後回しになり、各UI/GPUの後に色が付く。
+   行が変わったときと、その行に更新領域があるときだけ全面を即描画する。
+   スクロール中の UPDATENOW は名前列の Opaque と競合するので触らない。 */
+static void OggPaintListRowNow(HWND h, int idx, int force)
+{
+	if (!h || !::IsWindow(h) || !::IsWindowVisible(h))
+		return;
+	HWND root = ::GetAncestor(h, GA_ROOT);
+	if (root && ::IsIconic(root))
+		return;
+	const int n = (int)::SendMessage(h, LVM_GETITEMCOUNT, 0, 0);
+	if (idx < 0 || idx >= n)
+		return;
+	MSG msg;
+	if (::PeekMessage(&msg, h, WM_VSCROLL, WM_VSCROLL, PM_NOREMOVE))
+		return;
+	if (::PeekMessage(&msg, h, WM_MOUSEWHEEL, WM_MOUSEWHEEL, PM_NOREMOVE))
+		return;
+	RECT row;
+	if (!ListView_GetItemRect(h, idx, &row, LVIR_BOUNDS))
+		return;
+	if (!force) {
+		RECT upd, hit;
+		if (!::GetUpdateRect(h, &upd, FALSE) || !::IntersectRect(&hit, &upd, &row))
+			return;
+	}
+	::RedrawWindow(h, &row, NULL, RDW_INVALIDATE | RDW_UPDATENOW | RDW_NOERASE);
+}
+
+static void OggPresentPlayingRowNow()
+{
+	if (OggClickOrKeyQueued())
+		return;
+	if (!pl)
+		return;
+	const int pnt = pl->pnt;
+	extern CMediaPlayerDlg* mp;
+	if (mp && ::IsWindow(mp->GetSafeHwnd()))
+		mp->PresentPlayingRowNow();
+	static int s_plPnt = -2;
+	HWND hpl = (pl->m_lc.GetSafeHwnd());
+	if (hpl && ::IsWindow(hpl) && ::IsWindowVisible(hpl)) {
+		const int changed = (pnt != s_plPnt);
+		if (changed && s_plPnt >= 0)
+			OggPaintListRowNow(hpl, s_plPnt, 1);
+		OggPaintListRowNow(hpl, pnt, changed ? 1 : 0);
+		s_plPnt = pnt;
+	}
+}
+
 /* CPianoRoll / CAnalyzerDlg の WM_APP 番号と同じ。HWND 指定 Peek するだけ。 */
 enum {
 	OGG_WM_PIANOROLL_SYNC = WM_APP + 420,
@@ -5775,9 +5825,17 @@ static void OggDispatchVizWindows()
 		if (hSc)
 			OggDispatchHwndTimers(hSc, 2);
 	}
+	/* 再生中は VSYNC が WM_TIMER を飢やす。ホストの音キーはここで描く。 */
+	if (g_vstHostDlg) {
+		HWND hVst = g_vstHostDlg->GetSafeHwnd();
+		if (hVst && ::IsWindow(hVst) && ::IsWindowVisible(hVst) && !::IsIconic(hVst)) {
+			OggDispatchHwndTimers(hVst, 2);
+			OggDispatchHwndRange(hVst, WM_VST_ACT_REFRESH, WM_VST_ACT_REFRESH, 4);
+		}
+	}
 }
 
-static void OggDispatchChromeMessages()
+static void OggDispatchChromeMessages(int includeViz = 1)
 {
 	if (g_oggUiThreadId != 0 && GetCurrentThreadId() != g_oggUiThreadId)
 		return;
@@ -5790,7 +5848,10 @@ static void OggDispatchChromeMessages()
 		return;
 
 	::EnumThreadWindows(GetCurrentThreadId(), OggChromeTimerEnumTop, 0);
-	OggDispatchVizWindows();
+	/* 再生 tick の前半ではマウス/終了だけ。EQ・ピアノ・アナライザは
+	   MP 画面と再生行のあと（timerp 戻り）に回す。 */
+	if (includeViz)
+		OggDispatchVizWindows();
 
 	CWinThread* th = AfxGetThread();
 	MSG msg;
@@ -7956,7 +8017,7 @@ static int XfSoftOpenSlot(int slot, const CString& path, int openMode)
 		if (liveBinds <= 0) {
 			wchar_t vstPlug[VST_PATH_CHARS]; vstPlug[0] = 0;
 			if (VstShouldOpenRemote64(mid, vstPlug, VST_PATH_CHARS)) {
-				KPIHOST64_ForeignOpenReply orp{};
+				KPIHOST32_ForeignOpenReply orp{};
 				if (!g_kpiHost.VstOpen(std::wstring(mid), std::wstring(savedata.vstMultiDll),
 					std::wstring(savedata.vstExtraPath), orp, (uint32_t)slot))
 					return 0;
@@ -12607,20 +12668,20 @@ open_mode_kpi:
 						L"Dosya 0 bayt, muzik verisi yok.\r\n\r\n%s"),
 						(const wchar_t*)ssMedia);
 				} else depMsg.Format(LL14(
-					L"KPIのOpenに失敗しました。\r\n依存DLL不足、または曲データ／PCM(PPC・P86・PPZ等)の読込失敗の可能性があります。\r\n\r\nKPI: %s\r\nログ: %%TEMP%%\\ogg_kpi64_host.log\r\n詳細: %%TEMP%%\\ogg_kbpmd_open.log （PMD時）", /* 日本語 */
-					L"KPI Open failed.\r\nA dependent DLL may be missing, or music/PCM (PPC/P86/PPZ) load may have failed.\r\n\r\nKPI: %s\r\nLog: %%TEMP%%\\ogg_kpi64_host.log\r\nDetail: %%TEMP%%\\ogg_kbpmd_open.log (PMD)", /* 英語 */
-					L"Echec Open KPI.\r\nDLL manquante ou echec chargement musique/PCM possible.\r\n\r\nKPI : %s\r\nJournal : %%TEMP%%\\ogg_kpi64_host.log", /* フランス語 */
-					L"Open KPI non riuscito.\r\nPossibile DLL mancante o fallimento caricamento musica/PCM.\r\n\r\nKPI: %s\r\nLog: %%TEMP%%\\ogg_kpi64_host.log", /* イタリア語 */
-					L"Fallo al Open del KPI.\r\nPuede faltar una DLL o fallar la carga de musica/PCM.\r\n\r\nKPI: %s\r\nRegistro: %%TEMP%%\\ogg_kpi64_host.log", /* スペイン語 */
-					L"KPI Open 실패.\r\n종속 DLL 부족 또는 곡/PCM 로드 실패 가능.\r\n\r\nKPI: %s\r\n로그: %%TEMP%%\\ogg_kpi64_host.log", /* 韓国語 */
-					L"KPI Open 失败。\r\n可能缺少依赖 DLL，或曲目/PCM 加载失败。\r\n\r\nKPI: %s\r\n日志: %%TEMP%%\\ogg_kpi64_host.log", /* 中国語 */
-					L"فشل Open لـ KPI.\r\nقد يكون DLL ناقصًا أو فشل تحميل الموسيقى/PCM.\r\n\r\nKPI: %s\r\nالسجل: %%TEMP%%\\ogg_kpi64_host.log", /* アラビア語 */
-					L"Сбой Open KPI.\r\nВозможно нет DLL или ошибка загрузки музыки/PCM.\r\n\r\nKPI: %s\r\nЛог: %%TEMP%%\\ogg_kpi64_host.log", /* ロシア語 */
-					L"KPI-Open fehlgeschlagen.\r\nFehlende DLL oder Musik/PCM-Ladefehler moeglich.\r\n\r\nKPI: %s\r\nLog: %%TEMP%%\\ogg_kpi64_host.log", /* ドイツ語 */
-					L"Falha no Open do KPI.\r\nDLL ausente ou falha ao carregar musica/PCM.\r\n\r\nKPI: %s\r\nLog: %%TEMP%%\\ogg_kpi64_host.log", /* ポルトガル語 */
-					L"KPI Open mislukt.\r\nOntbrekende DLL of mislukte muziek/PCM-lading.\r\n\r\nKPI: %s\r\nLog: %%TEMP%%\\ogg_kpi64_host.log", /* オランダ語 */
-					L"Open KPI nie powiodlo sie.\r\nBrak DLL lub blad ladowania muzyki/PCM.\r\n\r\nKPI: %s\r\nDziennik: %%TEMP%%\\ogg_kpi64_host.log", /* ポーランド語 */
-					L"KPI Open basarisiz.\r\nEksik DLL veya muzik/PCM yukleme hatasi olabilir.\r\n\r\nKPI: %s\r\nGunluk: %%TEMP%%\\ogg_kpi64_host.log"), /* トルコ語 */
+					L"KPIのOpenに失敗しました。\r\n依存DLL不足、または曲データ／PCM(PPC・P86・PPZ等)の読込失敗の可能性があります。\r\n\r\nKPI: %s\r\nログ: %%TEMP%%\\ogg_kpi32_host.log\r\n詳細: %%TEMP%%\\ogg_kbpmd_open.log （PMD時）", /* 日本語 */
+					L"KPI Open failed.\r\nA dependent DLL may be missing, or music/PCM (PPC/P86/PPZ) load may have failed.\r\n\r\nKPI: %s\r\nLog: %%TEMP%%\\ogg_kpi32_host.log\r\nDetail: %%TEMP%%\\ogg_kbpmd_open.log (PMD)", /* 英語 */
+					L"Echec Open KPI.\r\nDLL manquante ou echec chargement musique/PCM possible.\r\n\r\nKPI : %s\r\nJournal : %%TEMP%%\\ogg_kpi32_host.log", /* フランス語 */
+					L"Open KPI non riuscito.\r\nPossibile DLL mancante o fallimento caricamento musica/PCM.\r\n\r\nKPI: %s\r\nLog: %%TEMP%%\\ogg_kpi32_host.log", /* イタリア語 */
+					L"Fallo al Open del KPI.\r\nPuede faltar una DLL o fallar la carga de musica/PCM.\r\n\r\nKPI: %s\r\nRegistro: %%TEMP%%\\ogg_kpi32_host.log", /* スペイン語 */
+					L"KPI Open 실패.\r\n종속 DLL 부족 또는 곡/PCM 로드 실패 가능.\r\n\r\nKPI: %s\r\n로그: %%TEMP%%\\ogg_kpi32_host.log", /* 韓国語 */
+					L"KPI Open 失败。\r\n可能缺少依赖 DLL，或曲目/PCM 加载失败。\r\n\r\nKPI: %s\r\n日志: %%TEMP%%\\ogg_kpi32_host.log", /* 中国語 */
+					L"فشل Open لـ KPI.\r\nقد يكون DLL ناقصًا أو فشل تحميل الموسيقى/PCM.\r\n\r\nKPI: %s\r\nالسجل: %%TEMP%%\\ogg_kpi32_host.log", /* アラビア語 */
+					L"Сбой Open KPI.\r\nВозможно нет DLL или ошибка загрузки музыки/PCM.\r\n\r\nKPI: %s\r\nЛог: %%TEMP%%\\ogg_kpi32_host.log", /* ロシア語 */
+					L"KPI-Open fehlgeschlagen.\r\nFehlende DLL oder Musik/PCM-Ladefehler moeglich.\r\n\r\nKPI: %s\r\nLog: %%TEMP%%\\ogg_kpi32_host.log", /* ドイツ語 */
+					L"Falha no Open do KPI.\r\nDLL ausente ou falha ao carregar musica/PCM.\r\n\r\nKPI: %s\r\nLog: %%TEMP%%\\ogg_kpi32_host.log", /* ポルトガル語 */
+					L"KPI Open mislukt.\r\nOntbrekende DLL of mislukte muziek/PCM-lading.\r\n\r\nKPI: %s\r\nLog: %%TEMP%%\\ogg_kpi32_host.log", /* オランダ語 */
+					L"Open KPI nie powiodlo sie.\r\nBrak DLL lub blad ladowania muzyki/PCM.\r\n\r\nKPI: %s\r\nDziennik: %%TEMP%%\\ogg_kpi32_host.log", /* ポーランド語 */
+					L"KPI Open basarisiz.\r\nEksik DLL veya muzik/PCM yukleme hatasi olabilir.\r\n\r\nKPI: %s\r\nGunluk: %%TEMP%%\\ogg_kpi32_host.log"), /* トルコ語 */
 					(const wchar_t*)kpi);
 				MessageBox(depMsg, LL14(
 					L"KPI読み込みエラー",
@@ -13175,7 +13236,7 @@ open_mode_kpi:
 	else if (IsVstMidiPlayMode(mode)) {
 open_mode_vst_midi:
 		ret2 = 0;
-		EqualiserSetFormatVolContext(EQ_FMT_VOL_KPI, FALSE); // その他のkpi（x86 直読み / KpiHost64 経由とも本体 equaliser）
+		EqualiserSetFormatVolContext(EQ_FMT_VOL_KPI, FALSE); // その他のkpi（x86 直読み / KpiHost32 経由とも本体 equaliser）
 		wchar_t mid[VST_PATH_CHARS]; mid[0] = 0;
 		wchar_t hints[32][128]; int hc = 0;
 		CString src = filen;
@@ -13234,7 +13295,7 @@ open_mode_vst_midi:
 		const int useRemote = (liveBinds <= 0) && VstShouldOpenRemote64(mid, vstPlug, VST_PATH_CHARS);
 		if (useRemote) {
 			triedRemote = 1;
-			KPIHOST64_ForeignOpenReply orp{};
+			KPIHOST32_ForeignOpenReply orp{};
 			if (g_kpiHost.VstOpen(std::wstring(mid), std::wstring(savedata.vstMultiDll),
 				std::wstring(savedata.vstExtraPath), orp, (uint32_t)vstSlot)) {
 				g_vstRemote64Slot[vstSlot] = 1;
@@ -13289,7 +13350,7 @@ open_mode_vst_midi:
 		if (!vstOk) {
 			if (liveBinds > 0) {
 				VstLiveMonitorStop();
-				/* Re-open Host64 live SHM if monitor teardown dropped the map. */
+				/* Re-open Host32 live SHM if monitor teardown dropped the map. */
 				VstLivePollRemoteEditorClosed();
 			}
 			if (VstMidiOpen(mid, hints, hc, m_hWnd) != 0) {
@@ -21207,7 +21268,7 @@ static int g_vstPcmHold = 0;
 
 static int VstMidiHoldFromFlags(uint32_t f)
 {
-	return (f & (KPIHOST64_EOF_MIDI_PENDING | KPIHOST64_EOF_MIDI_KEEPALIVE)) ? 1 : 0;
+	return (f & (KPIHOST32_EOF_MIDI_PENDING | KPIHOST32_EOF_MIDI_KEEPALIVE)) ? 1 : 0;
 }
 
 /* Frames the engine has rendered but the speakers have not reached yet: what is
@@ -21257,7 +21318,7 @@ __int64 OggGetCemuLiveHeardFrames()
 }
 
 /* CEmu MPU live: advance emu in lockstep with VST PCM, inject shorts + monitor tap.
-   Host64 の PCM バイト（16/24/32bit）をそのままフレームに直し、ライブ emu の
+   Host32 の PCM バイト（16/24/32bit）をそのままフレームに直し、ライブ emu の
    サンプルレートへ換算する。wavsam_depth の残り物で半分にしない。 */
 static int CEmuMidiLiveFramesFromBytes(uint32_t bytes)
 {
@@ -21311,8 +21372,8 @@ static DWORD KpiDecoderRenderLive(IKpiDecoder* dec, BYTE* p, DWORD ask)
 static void CEmuMidiLivePumpAndInject(int frames)
 {
 	if (!CEmuMidiLiveActive() || frames <= 0) return;
-	/* Pump in Host64 BLOCK_FRAMES (512) steps. sampleOfs from each step is
-	 * 0..511 relative to that step; add base so Host64 sees ofs across the
+	/* Pump in Host32 BLOCK_FRAMES (512) steps. sampleOfs from each step is
+	 * 0..511 relative to that step; add base so Host32 sees ofs across the
 	 * full VstRender window (deferral peels them 512 at a time). */
 	enum { kStep = 512 };
 	int base = 0;
@@ -21435,7 +21496,7 @@ static unsigned __stdcall VstPrefetchProc(void* arg)
 		if (!ok) {
 			Sleep(2);
 		} else {
-			/* KpiHost64 はプロセスあたり 1 つのパイプ（シングルスレッド）で要求をさばく。
+			/* KpiHost32 はプロセスあたり 1 つのパイプ（シングルスレッド）で要求をさばく。
 			 * B の先読みがパイプを占有すると A の先読みや音声出力（同期フォールバック）が
 			 * ブロックされ、A の再生にノイズ・音途切れが生じる。短く Sleep して
 			 * 現行曲（A）のレンダ要求を通す隙間を作る。 */
@@ -21630,7 +21691,7 @@ int readvst(BYTE* bw, int cnt)
 }
 
 // mid VST: 演奏後も VST が無音/残響を出し続ける／length 超過後に 0 埋めが続くのを
-// KPI と同様の無音連続で打ち切る（約4秒）。x86 直読み・KpiHost64 経由ともここで見る。
+// KPI と同様の無音連続で打ち切る（約4秒）。x86 直読み・KpiHost32 経由ともここで見る。
 // 初期化 SysEx/CC や曲の残りイベントがある塊では 4 秒を進めない。
 static int VstSilenceAccum(BYTE* pcm, int bytes)
 {
@@ -21714,7 +21775,7 @@ static void VstSeekLoopStart()
 
 int playwavvst(BYTE* bw, int old, int l1, int l2)
 {
-	// x86 直読み(VstMidiRead)・x64 リモート(KpiHost64 VstRender→readvst)とも
+	// x86 直読み(VstMidiRead)・x64 リモート(KpiHost32 VstRender→readvst)とも
 	// 生PCMをここで受け、KPI と同じ equaliser + その他のkpi(kpivol) + 無音終端。
 	EqualiserSetFormatVolContext(1, FALSE);
 	const bool exporting = (wavExportPath.GetLength() > 0 || g_isWavExportRendering);
@@ -24831,7 +24892,7 @@ static void KpiMidiSeekAccurate(__int64 samplePos)
 	const DWORD chunk = 8192;
 
 	if (g_kpiRemote && g_kpiSession.sessionId != 0) {
-		// KpiHost64 側 Cmd_Seek が MIDI なら Render 破棄する
+		// KpiHost32 側 Cmd_Seek が MIDI なら Render 破棄する
 		uint64_t np = 0;
 		g_kpiHost.Seek(g_kpiSession.sessionId, (uint64_t)samplePos, KPI_MEDIAINFO::SEEK_FLAGS_SAMPLE, np);
 		ResetKpiRemoteCache();
@@ -26344,9 +26405,10 @@ void COggDlg::timerp()
 	if (InterlockedCompareExchange(&g_appExiting, 0, 0))
 		return;
 
-	/* Track 中にマウスを Peek するとサブメニューホバーが死ぬ。バナー合成は続ける。 */
+	/* Track 中にマウスを Peek するとサブメニューホバーが死ぬ。バナー合成は続ける。
+	   ここはマウス/終了だけ。各UIの描画は MP 画面と再生行のあと。 */
 	if (!menuTrack)
-		OggDispatchChromeMessages();
+		OggDispatchChromeMessages(0);
 	/* chrome Peek が終了クリックをここで処理し得る。以降の ULW/GDI を走らせない */
 	if (InterlockedCompareExchange(&g_appExiting, 0, 0))
 		return;
@@ -26865,7 +26927,7 @@ void COggDlg::timerp()
 
 	if (!menuTrack) {
 		s_oggSkipScPump = 1;
-		OggDispatchChromeMessages();
+		OggDispatchChromeMessages(0);
 		s_oggSkipScPump = 0;
 	}
 
@@ -27495,9 +27557,16 @@ void COggDlg::timerp()
 			rect.bottom = capH + (LONG)((101) * hD * 4);
 			rect.right = (LONG)((180 + 88 * 2 + 50) * hD * 4);
 			InvalidateRect(&rect, FALSE);
-			InterlockedExchange(&g_gdiPaintPending, 1);
+			if (!OggClickOrKeyQueued())
+				UpdateWindow();
+			else
+				InterlockedExchange(&g_gdiPaintPending, 1);
 		}
 	}
+
+	/* MP 画面の直後。再生行の地色を各UI（戻り後の viz）より前に出す。
+	   GPU（迷路/レース）は別スレッドなのでこの行と同時に進む。 */
+	OggPresentPlayingRowNow();
 
 	// 可視化は各窓の UiTickPump。timerp に直列するとバナー/ホイールが飢える。
 	//音量
@@ -34597,6 +34666,8 @@ LRESULT COggDlg::OnXfadePromoteUi(WPARAM wParam, LPARAM lParam)
 			row.loop2 = loop2;
 		}
 		pl->SIcon(plcnt);
+		/* ジャケットは前メッセージで出済み。地色を EQ/アナライザより前に出す。 */
+		OggPresentPlayingRowNow();
 		if (::IsWindow(pl->m_lc.GetSafeHwnd()))
 			pl->m_lc.RedrawItems(pi, pi);
 		extern CMediaPlayerDlg* mp;

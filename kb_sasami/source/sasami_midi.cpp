@@ -6,7 +6,7 @@
 #include <string.h>
 #include <stdio.h>
 
-/* kpi 本体は kbsasami_module.cpp が持つ。ogg / KpiHost64 はここ。NULL ならリソースを見ずファイルを探す。 */
+/* kpi 本体は kbsasami_module.cpp が持つ。ogg / KpiHost32 はここ。NULL ならリソースを見ずファイルを探す。 */
 #ifdef KBSASAMI_PLUGIN
 extern HINSTANCE g_hKpi;
 #else

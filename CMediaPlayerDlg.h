@@ -103,6 +103,7 @@ public:
 	void RefreshList(BOOL bForce = FALSE);  // pl->pc をそのまま反映
 	void SyncSortModeButtons(); // 名前/Art/Alb/時間の押下状態と↑↓表示
 	void FollowPlayingRow();                // 再生中(♪)の行へカーソル追従(項目挿入後に呼ぶ)
+	void PresentPlayingRowNow();            // 再生行の地色をこの場で出す（各UIより前）
 	void HistRebuildList();                 // 再生履歴リストを再構築(og からも呼ぶ)
 	void NotifyPlayIconChanged();          // SIconTimer 直後に♪点滅を即反映(250ms待ちしない)
 	void InitListScrollPosition();          // 起動/表示確定時にリスト位置を復元

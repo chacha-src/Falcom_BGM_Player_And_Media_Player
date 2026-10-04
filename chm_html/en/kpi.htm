@@ -25,7 +25,7 @@
 <li>Checkbox state is kept per plug-in, so you can say "read this track with this plug-in".</li>
 </ul>
 <h2>The player is x64. 32-bit plug-ins use ogghost32</h2>
-<p>The player is x64. It used to be x86, and 64-bit plug-ins were handed to KpiHost64.exe. That is reversed: the other bitness (32-bit KPI and VST plug-ins, plus Winamp / XMPlay / AIMP input plug-ins) is hosted by the x86 <code>ogghost32.exe</code>. Place it next to the executable. 64-bit plug-ins load in the player itself. <a href="vst.htm">Playing instruments with the VST host</a> uses the same split. The short version is also on <a href="datasheet.htm">Support datasheet</a>.</p>
+<p>The player is x64. The other bitness (32-bit KPI and VST plug-ins, plus Winamp / XMPlay / AIMP input plug-ins) is hosted by the x86 IPC (project KpiHost32, file <code>ogghost32.exe</code>). Place it next to the executable. 64-bit plug-ins load in the player itself. <a href="vst.htm">Playing instruments with the VST host</a> uses the same split. The short version is also on <a href="datasheet.htm">Support datasheet</a>.</p>
 <h2>Plug-ins that need extra setup</h2>
 <ul>
 <li><b>KPI ver5 parameters</b> — detailed settings for the newer plug-in type.</li>

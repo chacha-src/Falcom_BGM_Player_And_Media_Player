@@ -12958,7 +12958,7 @@ void CPlayList::plugs(CString fff, playlistdata *p,TCHAR* kpi, BYTE& kv)
 	}
 	if (p && SasamiPathIsMidi(fff)) {
 		// KPI MIDI: SMF 化して kbfmmidi に渡さない。kbsasami が programs.txt の fmmidi 音色で鳴らす。
-		// 同梱の 64bit kbfmmidi は依存 DLL 不足で KpiHost64 が開けない。
+		// 同梱の 64bit kbfmmidi は依存 DLL 不足で KpiHost32 が開けない。
 		CString wantExt = fff.Right(fff.GetLength() - fff.ReverseFind(L'.'));
 		wantExt.MakeLower();
 		int pick = -1;
