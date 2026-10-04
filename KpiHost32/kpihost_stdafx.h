@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 // ============================================================================
 // KpiHost32 用の最小 stdafx
 // ----------------------------------------------------------------------------
@@ -29,6 +29,40 @@ struct save {
 	wchar_t vstGsSoundFont[520];
 	wchar_t vstXgSoundFont[520];
 	int laMapperMt32; /* 0=SC bank127 1=実機MT-32。ホストの VST 経路では使わない */
+#ifdef KBSASAMI_HOST_BUILD
+	/* 本体の save と同じ名前。モニタ dlg が読む分だけ。末尾追加。 */
+	DWORD samples;
+	int aero;
+	int inwoman;
+	int popupMenuTheme;
+	int popupMenuAnim;
+	TCHAR popupMenuFace[32];
+	int popupMenuPoint;
+	int popupMenuBold;
+	int popupMenuItalic;
+	int popupMenuSoftBoost;
+	int dsvol;
+	int mpDetectedBpm;
+	int mpLoopbackScore;
+	int soft3dTourSeen;
+	int soft3dPerfHintDismiss;
+	int midimonviewmode;
+	int midimontopmost;
+	int midimonx, midimony, midimonw, midimonh;
+	int fmmonx, fmmony, fmmonw, fmmonh;
+	int midimonwindow;
+	int fmmonwindow;
+	int midimonMainLock;
+	int midimon3dyaw, midimon3dpitch, midimon3dzoom;
+	int eqMainLock, eqx, eqy;
+	int pianorollMainLock, pianorollx, pianorolly, pianorollw, pianorollh;
+	int analyzerMainLock, analyzerx, analyzery;
+	int playlistMainLock;
+	RECT p;
+	int mpPromptMainLock, mpPromptX, mpPromptY, mpPromptW, mpPromptH, mpPromptHasPos;
+	int prTuneMainLock, prTunex, prTuney;
+	int mpCmdRollMainLock, mpCmdRollX, mpCmdRollY, mpCmdRollW, mpCmdRollH, mpCmdRollHasPos;
+#endif
 };
 extern save savedata;
 

@@ -1,13 +1,17 @@
-﻿#include "stdafx.h"
+#include "stdafx.h"
+#include "CFmMonitorDlg.h"
+#ifdef KBSASAMI_HOST_BUILD
+#include "kb_sasami/source/kbsasami_monhost.h"
+#else
 #include "ogg.h"
 #include "oggDlg.h"
-#include "CFmMonitorDlg.h"
 #include "CPianoRoll.h"
 #include "CMediaPlayerDlg.h"
 #include "PlayList.h"
+#include "DatArchive.h"
+#endif
 #include "PluginKinds.h"
 #include "resource.h"
-#include "DatArchive.h"
 #include "CEmu/fmmon/fmmon_shadow.h"
 #include "gpu/GpuDx11.h"
 #include "kb_sasami/source/sasami_fmmon_map.h"
@@ -2031,6 +2035,24 @@ uint64_t CFmMonitorDlg::HeardSample(uint32_t sampleRate)
 {
 	extern int wavbit_sample_Hz;
 	const uint32_t srDump = sampleRate > 0 ? sampleRate : 44100;
+	const SasamiFmMonDump* liveD = (m_histN > 0)
+		? &m_hist[(m_histHead + m_histN - 1) % HIST_MAX] : NULL;
+	/* kpi のタイマが壁時計で出した枚。curSample が可聴位置なので 900ms は引かない。 */
+	if (liveD && SasamiFmMonDumpLive(*liveD)) {
+		const int li = (m_histHead + m_histN - 1) % HIST_MAX;
+		return AdvanceHeard((__int64)m_histSamp[li], srDump);
+	}
+#ifdef KBSASAMI_HOST_BUILD
+	/* playb はすでに KbMedia リング分だけ戻した可聴位置。dump 先頭から 900ms 引くと二重になる。 */
+	{
+		__int64 frames = OggGetHeardPcmFrames();
+		if (frames < 0) frames = 0;
+		const int srSrc = (wavbit_sample_Hz > 0) ? wavbit_sample_Hz : (int)srDump;
+		if (srSrc != (int)srDump && srSrc > 0)
+			frames = frames * (__int64)srDump / (__int64)srSrc;
+		return AdvanceHeard(frames, srDump);
+	}
+#else
 	const SasamiFmMonDump* lastD = (m_histN > 0)
 		? &m_hist[(m_histHead + m_histN - 1) % HIST_MAX] : NULL;
 	const int useDumpClock = (lastD && SasamiFmMonDumpClock(*lastD)) ? 1 : 0;
@@ -2051,6 +2073,7 @@ uint64_t CFmMonitorDlg::HeardSample(uint32_t sampleRate)
 		if (frames < 0) frames = 0;
 	}
 	return AdvanceHeard(frames, srDump);
+#endif
 }
 
 int CFmMonitorDlg::ContentHeight(int dpi, int pcmRows) const
@@ -6170,6 +6193,9 @@ void CFmMonitorDlg::ApplyPcAudioKeys(const BYTE levels108[108])
 /* timerp から。dump 同期のあと dirty 矩形だけ Invalidate */
 void CFmMonitorDlg::PumpSyncNow()
 {
+#ifdef KBSASAMI_HOST_BUILD
+	KbsHostMonPull();
+#endif
 	if (m_inPrint || m_inPump) return;
 	if (!::IsWindow(GetSafeHwnd()))
 		return;

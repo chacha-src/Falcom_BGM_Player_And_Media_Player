@@ -202,6 +202,11 @@
             }
         }
     }
+    double sequencer::peek_time() const
+    {
+        if(position == messages.end()) return 1.0e300;
+        return position->time;
+    }
     void sequencer::play_forward(double time, output* out)
     {
         while(position != messages.end() && position->time < time){
@@ -254,23 +259,38 @@
     }
     void sequencer::load_smf(void* fp, int(*fgetc)(void*))
     {
-        if(fgetc(fp) != 0
-        || fgetc(fp) != 0
-        || fgetc(fp) != 0
-        || fgetc(fp) != 6
-        || fgetc(fp) != 0){
+        int hl0 = fgetc(fp);
+        int hl1 = fgetc(fp);
+        int hl2 = fgetc(fp);
+        int hl3 = fgetc(fp);
+        if(hl0 == EOF || hl1 == EOF || hl2 == EOF || hl3 == EOF){
             throw load_error("invalid file header");
         }
-        int format = fgetc(fp);
-        if(format != 0 && format != 1){
+        unsigned header_len = (static_cast<unsigned>(hl0) << 24)
+                            | (static_cast<unsigned>(hl1) << 16)
+                            | (static_cast<unsigned>(hl2) << 8)
+                            | static_cast<unsigned>(hl3);
+        if(header_len < 6){
+            throw load_error("invalid file header");
+        }
+        int format = (fgetc(fp) << 8) | fgetc(fp);
+        if(format != 0 && format != 1 && format != 2){
             throw load_error("unsupported format type");
         }
+        header_len -= 2;
         int t0 = fgetc(fp);
         int t1 = fgetc(fp);
         unsigned num_tracks = (t0 << 8) | t1;
         int d0 = fgetc(fp);
         int d1 = fgetc(fp);
         unsigned division = (d0 << 8) | d1;
+        header_len -= 4;
+        while(header_len > 0){
+            if(fgetc(fp) == EOF){
+                throw load_error("invalid file header");
+            }
+            --header_len;
+        }
         for(unsigned track = 0; track < num_tracks; ++track){
             if(fgetc(fp) != 0x4D || fgetc(fp) != 0x54 || fgetc(fp) != 0x72 || fgetc(fp) != 0x6B){
                 throw load_error("invalid track header");
@@ -289,6 +309,8 @@
             midi_message msg;
             msg.port = 0;
             msg.track = track;
+            /* F0 が F7 で終わらないときは、続く F7 パケットを足して 1 本の SysEx にする。 */
+            std::string sxOpen;
             for(;;){
                 if(track_length < 4){
                     throw load_error("unexpected EOF (track_length)");
@@ -306,37 +328,76 @@
                 --track_length;
                 switch(param){
                 case 0xF0:
+                case 0xF7:
                     {
                         int n = read_variable_value(fp, fgetc, &track_length, "unexpected EOF (sysex length)");
-                        std::string s(n + 1, '\0');
-                        s[0] = 0xF0;
-                        for(int i = 1; i <= n; ++i){
-                            s[i] = static_cast<char>(fgetc(fp));
-                        }
-                        if(s[n] != '\xF7'){
-                            throw load_error("missing sysex terminator");
+                        std::string chunk;
+                        if(param == 0xF0){
+                            chunk.assign(static_cast<size_t>(n) + 1, '\0');
+                            chunk[0] = static_cast<char>(0xF0);
+                            for(int i = 1; i <= n; ++i){
+                                chunk[i] = static_cast<char>(fgetc(fp));
+                            }
+                        }else{
+                            chunk.assign(static_cast<size_t>(n), '\0');
+                            for(int i = 0; i < n; ++i){
+                                chunk[i] = static_cast<char>(fgetc(fp));
+                            }
                         }
                         track_length -= n;
-                        msg.message = 0xF0 | (long_messages.size() << 8);
-                        messages.push_back(msg);
-                        long_messages.push_back(s);
+                        if(param == 0xF7 && !sxOpen.empty())
+                            sxOpen.append(chunk);
+                        else
+                            sxOpen.swap(chunk);
+                        const bool done = !sxOpen.empty()
+                            && static_cast<unsigned char>(sxOpen[sxOpen.size() - 1]) == 0xF7;
+                        if(done){
+                            if(static_cast<unsigned char>(sxOpen[0]) != 0xF0)
+                                sxOpen.insert(sxOpen.begin(), static_cast<char>(0xF0));
+                            msg.message = 0xF0 | (long_messages.size() << 8);
+                            messages.push_back(msg);
+                            long_messages.push_back(sxOpen);
+                            sxOpen.clear();
+                        }
+                        running_status = 0;
                     }
                     break;
-                case 0xF7:
-                    /* unsupported */
-                    /*
+                case 0xF1:
+                case 0xF3:
                     {
-                        int n = read_variable_value(fp, fgetc, &track_length, "unexpected EOF (sysex-F7 length)");
-                        std::string s(n, '\0');
-                        for(int i = 0; i < n; ++i){
-                            s[i] = fgetc(fp);
-                        }
-                        track_length -= n;
-                        msg.message = 0xF0 | (long_messages.size() << 8);
+                        int d = fgetc(fp);
+                        --track_length;
+                        msg.message = static_cast<uint_least32_t>(param) | (static_cast<uint_least32_t>(d & 0x7F) << 8);
                         messages.push_back(msg);
-                        long_messages.push_back(s);
+                        running_status = 0;
                     }
-                    */
+                    break;
+                case 0xF2:
+                    {
+                        int d0 = fgetc(fp);
+                        int d1 = fgetc(fp);
+                        track_length -= 2;
+                        msg.message = static_cast<uint_least32_t>(param)
+                            | (static_cast<uint_least32_t>(d0 & 0x7F) << 8)
+                            | (static_cast<uint_least32_t>(d1 & 0x7F) << 16);
+                        messages.push_back(msg);
+                        running_status = 0;
+                    }
+                    break;
+                case 0xF4:
+                case 0xF5:
+                case 0xF6:
+                case 0xF8:
+                case 0xF9:
+                case 0xFA:
+                case 0xFB:
+                case 0xFC:
+                case 0xFD:
+                case 0xFE:
+                    msg.message = static_cast<uint_least32_t>(param);
+                    messages.push_back(msg);
+                    if(param < 0xF8)
+                        running_status = 0;
                     break;
                 case 0xFF:
                     {
@@ -412,13 +473,25 @@
                         --track_length;
                         break;
                     default:
-                        throw load_error("invalid midi message");
+                        /* チャンネルメッセージでないバイトはここで消費済み。トラックは続ける。 */
+                        running_status = 0;
+                        continue;
                     }
                     messages.push_back(msg);
                     break;
                 }
             }
         next_track:
+            if(!sxOpen.empty()){
+                if(static_cast<unsigned char>(sxOpen[0]) != 0xF0)
+                    sxOpen.insert(sxOpen.begin(), static_cast<char>(0xF0));
+                if(sxOpen.empty() || static_cast<unsigned char>(sxOpen[sxOpen.size() - 1]) != 0xF7)
+                    sxOpen.push_back(static_cast<char>(0xF7));
+                msg.message = 0xF0 | (long_messages.size() << 8);
+                messages.push_back(msg);
+                long_messages.push_back(sxOpen);
+                sxOpen.clear();
+            }
             if(track_length < 0){
                 throw load_error("unexpected EOF (over track_length)");
             }

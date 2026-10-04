@@ -674,6 +674,7 @@
         void apply_xg_part(int addr, int value);
         void apply_gs_tone(int addr, int value);
         void apply_gs_part_mix(int addr, int value);
+        void apply_drum_param(int note, int param, int value);
         void apply_gs_sysfx_byte(int addr, int val);
         void set_eq_band(int hi, int val);
         void apply_gs_efx_byte(int addr, int val);
@@ -761,6 +762,15 @@
         int fxDlyTime, fxDlyFb, fxDlyLpf, fxDlyToRev;
         int fxDlyLvlC, fxDlyLvlL, fxDlyLvlR;
         int fxDlyMsb, fxDlyLsb;
+        int keyShift, fineCents;
+        int keyLo, keyHi;
+        int velSens, velOff;
+        int softPedal, breath, foot, balance, phaser, tremDepth;
+        int portaOn, portaTime, portaFrom, lastKey, portaKey;
+        int portaMs, portaSpan, portaLeft;
+        int dataMsb;
+        int drumKey[128], drumLv[128], drumPan[128], drumRev[128], drumCho[128], drumDly[128];
+        int ccMem[128];
 
         int get_registered_parameter();
         void set_registered_parameter(int value);

@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "kpi_decoder.h"
 #include "kpi_impl.h"
@@ -9,6 +9,8 @@
 #include "midisynth.hpp"
 #include "kbsasami_vst.h"
 #include <mutex>
+
+void KbSasamiRequestRestartHead();
 
 class KbSasamiDecoder : public KbKpiUnknownImpl<IKpiDecoder>, public output
 {
@@ -30,7 +32,7 @@ private:
 	bool m_seeking;
 	bool m_fmMode;
 	bool m_liveStream; /* CEmu MPU stub: qwLength 不定、sequencer 終端で切らない */
-	int m_raira; // 1=このアプリ専用経路
+	int m_raira; // 1=このアプリ専用経路。モニタは出さない
 	int m_vst;   // 解釈後: 0=FM MIDI(fmmidi), 1=VST側に任せる
 	int m_foreignVst; // raira=0 かつ vst=1。専用ホストが PCM を返す
 	wchar_t m_vstGs[520];
@@ -47,6 +49,9 @@ private:
 	double m_mix[MIX_FRAMES * 2];
 	uint8_t m_smf[SASAMI_MAX_SMF];
 	int m_smfSize;
+	wchar_t m_openPath[520];
+	int m_monHold;
+	int m_forceHead;
 	std::mutex m_midiLock;
 
 	struct MemFile { const BYTE* p; DWORD size; DWORD pos; };
@@ -57,12 +62,17 @@ private:
 	void ApplyWopnMode();
 	void ApplyGsBankLsb();
 	int OpenForeignVst(const uint8_t* smf, DWORD smfLen);
+	int LoadFmMidiSequencer(DWORD rate);
+	int SwitchMidiEngine();
+	UINT64 SeekFmMidiLocked(UINT64 qwPosSample);
+	void KeepSmf(const uint8_t* smf, DWORD smfLen);
 	void midi_message(int port, uint_least32_t message) override;
 	void sysex_message(int port, const void* data, std::size_t size) override;
 	void meta_event(int type, const void* data, std::size_t size) override;
 	void reset() override;
 	void LiveBind();
 	void LiveUnbind();
+	void MonShow(int fm, const wchar_t* path);
 
 public:
 	explicit KbSasamiDecoder(IKpiConfig* pConfig);

@@ -85,7 +85,30 @@ namespace std{
     // �������̉�����������B
     int channel::synthesize(sample_t* out, std::size_t samples, double rate, int_least32_t master_volume, int master_balance)
     {
-        double volume = mute ? 0.0 : std::pow(static_cast<double>(master_volume) * this->volume * expression / (16383.0 * 16383.0 * 16383.0), 2) * 16383.0;
+        int expr = expression;
+        if(breath < 127) expr = expr * breath / 127;
+        if(foot < 127) expr = expr * foot / 127;
+        if(expr < 0) expr = 0;
+        double volume = mute ? 0.0 : std::pow(static_cast<double>(master_volume) * this->volume * expr / (16383.0 * 16383.0 * 16383.0), 2) * 16383.0;
+        if(portaLeft > 0 && portaKey >= 0){
+            if(portaSpan <= 0){
+                portaSpan = static_cast<int>(rate * static_cast<double>(portaMs) / 1000.0);
+                if(portaSpan < 1) portaSpan = 1;
+                portaLeft = portaSpan;
+            }
+            int step = static_cast<int>(samples);
+            if(step > portaLeft) step = portaLeft;
+            double u = 1.0 - static_cast<double>(portaLeft - step) / static_cast<double>(portaSpan);
+            if(u < 0) u = 0;
+            if(u > 1) u = 1;
+            double fromMul = frequency_multiplier * std::pow(2.0, static_cast<double>(portaFrom - portaKey) / 12.0);
+            double now = fromMul + (frequency_multiplier - fromMul) * u;
+            for(std::vector<NOTE>::iterator i = notes.begin(); i != notes.end(); ++i){
+                if(i->key == portaKey && i->status == NOTE::NOTEON)
+                    i->note->set_frequency_multiplier(now);
+            }
+            portaLeft -= step;
+        }
         int num_notes = 0;
         std::vector<NOTE>::iterator i = notes.begin();
         while(i != notes.end()){
@@ -100,6 +123,18 @@ namespace std{
                 panpot = panpot * master_balance / 8192;
             }else{
                 panpot = panpot * (16384 - master_balance) / 8192 + (master_balance - 8192) * 2;
+            }
+            {
+                int pan = static_cast<int>(panpot) + (balance - 64) * 64;
+                if(pan < 0) pan = 0;
+                if(pan > 16383) pan = 16383;
+                panpot = static_cast<uint_least32_t>(pan);
+            }
+            if(default_bank == 0x3C00 && i->key >= 0 && i->key < 128 && drumPan[i->key] >= 0){
+                int pan = static_cast<int>(panpot) + (drumPan[i->key] - 64) * 64;
+                if(pan < 0) pan = 0;
+                if(pan > 16383) pan = 16383;
+                panpot = static_cast<uint_least32_t>(pan);
             }
             sample_t left = static_cast<sample_t>(volume * std::cos(__max(0, panpot - 1) * (M_PI / 2 / 16382)));
             sample_t right = static_cast<sample_t>(volume * std::sin(__max(0, panpot - 1) * (M_PI / 2 / 16382)));
@@ -154,6 +189,36 @@ namespace std{
         nrpnCutoff = nrpnReso = nrpnHpf = nrpnAtk = nrpnDec = nrpnRel = 64;
         nrpnVibRate = nrpnVibDepth = nrpnVibDelay = 64;
         eqLoGain = eqHiGain = 64;
+        keyShift = 0;
+        fineCents = 0;
+        keyLo = 0;
+        keyHi = 127;
+        velSens = 64;
+        velOff = 64;
+        softPedal = 0;
+        breath = 127;
+        foot = 127;
+        balance = 64;
+        phaser = 0;
+        tremDepth = 0;
+        portaOn = 0;
+        portaTime = 0;
+        portaFrom = -1;
+        lastKey = -1;
+        portaKey = -1;
+        portaMs = 0;
+        portaSpan = 0;
+        portaLeft = 0;
+        dataMsb = 64;
+        for(int i = 0; i < 128; ++i){
+            drumKey[i] = -1;
+            drumLv[i] = -1;
+            drumPan[i] = -1;
+            drumRev[i] = -1;
+            drumCho[i] = -1;
+            drumDly[i] = -1;
+            ccMem[i] = -1;
+        }
         reset_all_controller();
     }
     // �p�����[�^��������Ԃɖ߂��B
@@ -175,6 +240,16 @@ namespace std{
         set_freeze(0);
         RPN = 0x3FFF;
         NRPN = 0x3FFF;
+        softPedal = 0;
+        breath = 127;
+        foot = 127;
+        balance = 64;
+        phaser = 0;
+        tremDepth = 0;
+        portaOn = 0;
+        portaTime = 0;
+        portaLeft = 0;
+        dataMsb = 64;
         nrpnCutoff = nrpnReso = nrpnHpf = nrpnAtk = nrpnDec = nrpnRel = 64;
         nrpnVibRate = nrpnVibDepth = nrpnVibDelay = 64;
         eqLoGain = eqHiGain = 64;
@@ -326,6 +401,9 @@ namespace std{
         case 0x05: nrpnAtk = value; break;
         case 0x06: nrpnDec = value; break;
         case 0x07: nrpnRel = value; break;
+        case 0x08: keyShift = value - 64; update_frequency_multiplier(); return;
+        case 0x09: fineCents = (value - 64) * 100 / 64; update_frequency_multiplier(); return;
+        case 0x10: nrpnCutoff = value; break;
         default: return;
         }
         touch_tone();
@@ -333,10 +411,24 @@ namespace std{
     void channel::apply_gs_part_mix(int addr, int value)
     {
         value &= 127;
+        if(addr == 0x16){
+            keyShift = value - 64;
+            update_frequency_multiplier();
+            return;
+        }
+        if(addr == 0x17){
+            fineCents = (value - 64) * 100 / 64;
+            update_frequency_multiplier();
+            return;
+        }
         if(addr == 0x19){
             set_volume((value << 7) | (volume & 0x7F));
             return;
         }
+        if(addr == 0x1B){ velSens = value; return; }
+        if(addr == 0x1C){ velOff = value; return; }
+        if(addr == 0x1D){ keyLo = value; return; }
+        if(addr == 0x1E){ keyHi = value; return; }
         if(addr == 0x1A){
             set_panpot((value << 7) | (panpot & 0x7F));
             return;
@@ -528,7 +620,11 @@ namespace std{
             return v;
         };
         c.revSend = mix_send(fxRevSend, sysRevLevel);
-        c.choSend = mix_send(fxChoSend, sysChoLevel);
+        {
+            int cho = fxChoSend + phaser / 2 + tremDepth / 4;
+            if(cho > 127) cho = 127;
+            c.choSend = mix_send(cho, sysChoLevel);
+        }
         c.dlySend = mix_send(fxDlySend, sysDlyLevel);
         c.revMode = fxRevMode;
         c.choMode = fxChoMode;
@@ -626,6 +722,36 @@ namespace std{
         case 0x0163: nrpnAtk = value; touch_tone(); break;
         case 0x0164: nrpnDec = value; touch_tone(); break;
         case 0x0166: nrpnRel = value; touch_tone(); break;
+        default:
+            {
+                const int msb = (NRPN >> 7) & 0x7F;
+                const int nn = NRPN & 0x7F;
+                if(nn >= 0 && nn < 128){
+                    int pitched = nn + (value - 64);
+                    if(pitched < 0) pitched = 0;
+                    if(pitched > 127) pitched = 127;
+                    if(msb == 0x18) drumKey[nn] = pitched;
+                    else if(msb == 0x1A) drumLv[nn] = value & 127;
+                    else if(msb == 0x1C) drumPan[nn] = value & 127;
+                    else if(msb == 0x1D) drumRev[nn] = value & 127;
+                    else if(msb == 0x1E) drumCho[nn] = value & 127;
+                    else if(msb == 0x1F) drumDly[nn] = value & 127;
+                }
+            }
+            break;
+        }
+    }
+    void channel::apply_drum_param(int note, int param, int value)
+    {
+        if(note < 0 || note > 127) return;
+        value &= 127;
+        switch(param){
+        case 0: drumKey[note] = value; break;
+        case 1: drumLv[note] = value; break;
+        case 3: drumPan[note] = value; break;
+        case 4: drumRev[note] = value; break;
+        case 5: drumCho[note] = value; break;
+        case 6: drumDly[note] = value; break;
         default: break;
         }
     }
@@ -705,19 +831,54 @@ namespace std{
 
         note_off(note, 64);
         if(velocity){
+            int key = note;
+            int vel = velocity;
+            const int rhythm = (default_bank == 0x3C00);
+            if(key < keyLo || key > keyHi) return;
+            if(softPedal >= 64) vel = vel * 3 / 4;
+            if(velSens != 64){
+                vel = 64 + (vel - 64) * velSens / 64;
+            }
+            vel += velOff - 64;
+            if(rhythm && note >= 0 && note < 128){
+                if(drumKey[note] >= 0) key = drumKey[note];
+                if(drumLv[note] >= 0) vel = vel * drumLv[note] / 127;
+            }
+            if(vel > 127) vel = 127;
+            if(vel < 1) return;
             if(mono){
                 all_sound_off();
             }
+            int savedRev = fxRevSend, savedCho = fxChoSend, savedDly = fxDlySend;
+            if(rhythm && note >= 0 && note < 128){
+                if(drumRev[note] >= 0) fxRevSend = drumRev[note];
+                if(drumCho[note] >= 0) fxChoSend = drumCho[note];
+                if(drumDly[note] >= 0) fxDlySend = drumDly[note];
+            }
             factory->set_tone_color(effect_color());
+            fxRevSend = savedRev;
+            fxChoSend = savedCho;
+            fxDlySend = savedDly;
+            if(portaOn >= 64 && portaTime > 0 && lastKey >= 0 && lastKey != key && !rhythm){
+                portaFrom = lastKey;
+                portaKey = key;
+                portaMs = 20 + (portaTime * portaTime) / 8;
+                portaSpan = 0;
+                portaLeft = 1;
+            }
+            lastKey = note;
+            velocity = vel;
             int pc = program & 0x7F;
             int lsb = (program >> 7) & 0x7F;
             int msb = (program >> 14) & 0x7F;
-            int rhythm = (default_bank == 0x3C00);
             int drum = rhythm || ((bank & 0x3F80) == 0x3C00) || msb == 126;
             /* MSB 127 は XG ドラムと、LA/MT-32 の SC-55 バンク 127。リズム以外はメロディ。 */
             if (msb == 127 && (rhythm || lsb > 4)) drum = 1;
             int prog = pc | (lsb << 7) | (msb << 14) | ((system_mode & 7) << 21) | (drum ? (1 << 24) : 0);
-            class note* p = factory->note_on(prog, note, velocity, frequency_multiplier);
+            double mul = frequency_multiplier;
+            if(rhythm && drumKey[note] >= 0)
+                mul *= std::pow(2.0, static_cast<double>(drumKey[note] - note) / 12.0);
+            class note* p = factory->note_on(prog, note, velocity, mul);
             if(p){
                 int assign = p->get_assign();
                 if(assign){
@@ -798,9 +959,30 @@ namespace std{
         case 0x01:
             set_modulation_depth((modulation_depth & 0x7F) | (value << 7));
             break;
+        case 0x02:
+            breath = value;
+            break;
+        case 0x04:
+            foot = value;
+            break;
+        case 0x05:
+            portaTime = value;
+            break;
         case 0x06:
+            dataMsb = value;
             set_registered_parameter((get_registered_parameter() & 0x7F) | (value << 7));
             apply_nrpn_data(value);
+            break;
+        case 0x08:
+            balance = value;
+            break;
+        case 0x0C:
+            fxRevChar = value & 7;
+            touch_tone();
+            break;
+        case 0x0D:
+            fxChoDepth = value;
+            touch_tone();
             break;
         case 0x07:
             volume = (volume & 0x7F) | (value << 7);
@@ -837,6 +1019,9 @@ namespace std{
             break;
         case 0x40:
             set_damper(value);
+            break;
+        case 0x41:
+            portaOn = value;
             break;
         case 0x47:
             nrpnReso = value;
@@ -882,17 +1067,57 @@ namespace std{
             fxDlySend = value;
             touch_tone();
             break;
+        case 0x54:
+            portaFrom = value;
+            lastKey = value;
+            break;
+        case 0x5C:
+            tremDepth = value;
+            for(std::vector<NOTE>::iterator i = notes.begin(); i != notes.end(); ++i){
+                if(i->status == NOTE::NOTEON)
+                    i->note->set_tremolo(value, tremolo_frequency);
+            }
+            break;
+        case 0x5F:
+            phaser = value;
+            touch_tone();
+            break;
         case 0x42:
             set_sostenute(value);
+            break;
+        case 0x43:
+            softPedal = value;
+            break;
+        case 0x44:
+            /* レガート。オンのあいだは同じ音の打ち直しを残す。 */
+            if(value >= 64) set_damper(127);
+            else set_damper(0);
             break;
         case 0x45:
             set_freeze(value);
             break;
+        case 0x46:
+            /* サウンドバリエーション。明るさと同じく音色を動かす。 */
+            nrpnCutoff = value;
+            touch_tone();
+            break;
         case 0x60:
-            set_registered_parameter(__max(0x3FFF, get_registered_parameter() + 1));
+            {
+                int v = dataMsb + 1;
+                if(v > 127) v = 127;
+                dataMsb = v;
+                set_registered_parameter((get_registered_parameter() & 0x7F) | (v << 7));
+                apply_nrpn_data(v);
+            }
             break;
         case 0x61:
-            set_registered_parameter(__min(0, get_registered_parameter() - 1));
+            {
+                int v = dataMsb - 1;
+                if(v < 0) v = 0;
+                dataMsb = v;
+                set_registered_parameter((get_registered_parameter() & 0x7F) | (v << 7));
+                apply_nrpn_data(v);
+            }
             break;
         case 0x62:
             set_NRPN((NRPN & ~0x7F) | value);
@@ -917,13 +1142,20 @@ namespace std{
         case 0x7D:
             all_note_off();
             break;
+        case 0x7A:
+            /* ローカルコントロール。鍵盤が無いので音は変えない。値は残す。 */
+            break;
         case 0x7E:
             mono_mode_on();
             break;
         case 0x7F:
             poly_mode_on();
             break;
+        default:
+            break;
         }
+        if(control >= 0 && control < 128)
+            ccMem[control] = value;
     }
     // �o���N�Z���N�g
     void channel::bank_select(int value)
@@ -1036,7 +1268,9 @@ namespace std{
         double value = master_frequency_multiplier
                     * std::pow(2.0, (coarse_tuning - 8192) / (128.0 * 100.0 * 12.0)
                                 + (fine_tuning - 8192) / (8192.0 * 100.0 * 12.0)
-                                + static_cast<double>(pitch_bend - 8192) * pitch_bend_sensitivity / (8192.0 * 128.0 * 12.0));
+                                + static_cast<double>(pitch_bend - 8192) * pitch_bend_sensitivity / (8192.0 * 128.0 * 12.0)
+                                + static_cast<double>(keyShift) / 12.0
+                                + static_cast<double>(fineCents) / 1200.0);
         if(frequency_multiplier != value){
             frequency_multiplier = value;
             for(std::vector<NOTE>::iterator i = notes.begin(); i != notes.end(); ++i){
@@ -1149,6 +1383,24 @@ namespace std{
         }else if(size == 6 && memcmp(data, "\xF0\x7E\x7F\x09\x03\xF7", 6) == 0){
             /* GM2 system on */
             set_system_mode(system_mode_gm2);
+        }else if(size >= 10 && data[0] == 0xF0 && data[1] == 0x41 && data[3] == 0x16 && data[4] == 0x12 && data[size - 1] == 0xF7){
+            /* MT-32。システム域 10 00 00 のリバーブを FM に反映する。 */
+            const int addr = ((data[5] & 0x7F) << 14) | ((data[6] & 0x7F) << 7) | (data[7] & 0x7F);
+            const int n = (int)size - 10;
+            for(int i = 0; i < n; ++i){
+                const int rel = addr + i - 0x100000;
+                const int v = data[8 + i] & 0x7F;
+                if(rel == 0x03){
+                    for(int ch = 0; ch < NUM_CHANNELS; ++ch)
+                        channels[ch]->set_effect_mode(0, v & 7);
+                }else if(rel == 0x04){
+                    for(int ch = 0; ch < NUM_CHANNELS; ++ch)
+                        channels[ch]->apply_gs_sysfx_byte(0x02, v);
+                }else if(rel == 0x05){
+                    for(int ch = 0; ch < NUM_CHANNELS; ++ch)
+                        channels[ch]->set_sys_fx_level(0, v);
+                }
+            }
         }else if(size == 11 && memcmp(data, "\xF0\x41", 2) == 0 && memcmp(data + 3, "\x42\x12\x40\x00\x7F\x00\x41\xF7", 8) == 0){
             /* GS reset */
             set_system_mode(system_mode_gs);
@@ -1214,7 +1466,7 @@ namespace std{
                 }
             }
         }else if(size >= 11 && data[0] == 0xF0 && data[1] == 0x41 && data[3] == 0x42 && data[4] == 0x12
-            && (data[5] == 0x40 || data[5] == 0x50) && data[size - 1] == 0xF7){
+            && (data[5] == 0x00 || data[5] == 0x40 || data[5] == 0x41 || data[5] == 0x50) && data[size - 1] == 0xF7){
             const int hasF7 = 1;
             int nval = (int)size - 8 - hasF7 - 1;
             if (nval < 1) nval = 1;
@@ -1230,8 +1482,42 @@ namespace std{
             for (int i = 0; i < nval; ++i) {
                 const int a = cc + i;
                 const int val = data[8 + i] & 0x7F;
+                if (data[5] == 0x00 && bb == 0x00 && a == 0x7F && i == 0) {
+                    /* SC システムモード。00=55, 01=88, 02=88Pro, 03=8820。音のマップが変わる。 */
+                    int mode = val & 0x7F;
+                    int lsb = (mode >= 0 && mode <= 3) ? (mode + 1) : 1;
+                    set_system_mode(system_mode_gs);
+                    for (int ch = 0; ch < NUM_CHANNELS; ++ch) {
+                        channels[ch]->control_change(0, 0);
+                        channels[ch]->control_change(32, lsb);
+                    }
+                    continue;
+                }
+                if (data[5] == 0x41) {
+                    int note = data[7] & 0x7F;
+                    for (int ch = 0; ch < NUM_CHANNELS; ++ch)
+                        channels[ch]->apply_drum_param(note, i, val);
+                    continue;
+                }
+                if (data[5] != 0x40 && data[5] != 0x50)
+                    continue;
                 if (blockB && bb != 0x01 && bb != 0x02)
                     continue;
+                if (!blockB && bb == 0x00) {
+                    /* 40 00 システム。マスター音量・パン・キーシフト。 */
+                    if (a == 0x04)
+                        set_master_volume((val & 0x7f) << 7);
+                    else if (a == 0x05)
+                        set_master_balance((val & 0x7f) << 7);
+                    else if (a == 0x06) {
+                        for (int ch = 0; ch < NUM_CHANNELS; ++ch)
+                            channels[ch]->apply_gs_part_mix(0x16, val);
+                    } else if (a <= 0x02) {
+                        for (int ch = 0; ch < NUM_CHANNELS; ++ch)
+                            channels[ch]->apply_gs_part_mix(0x17, val);
+                    }
+                    continue;
+                }
                 if (bb == 0x01) {
                     for (int ch = 0; ch < NUM_CHANNELS; ++ch)
                         channels[ch]->apply_gs_sysfx_byte(a, val);
@@ -2265,8 +2551,18 @@ namespace std{
                     break;
                 }
             }
-            if(!p)
-                return NULL;
+            if(!p){
+                struct FMPARAMETER* fb = NULL;
+                if(programs.find(-1) != programs.end()) fb = &programs[-1];
+                else if(programs.find(0) != programs.end()) fb = &programs[0];
+                if(!fb) return NULL;
+                FMPARAMETER painted = *fb;
+                paint_fm(painted, color);
+                int sounded = note;
+                if(sounded < 0) sounded = 0;
+                if(sounded > 127) sounded = 127;
+                return new fm_note(painted, sounded, velocity, 8192, 0, frequency_multiplier);
+            }
             DRUMPARAMETER painted = *p;
             paint_fm(painted, color);
             return new fm_note(painted, p->key, velocity, p->panpot, p->assign, 1);

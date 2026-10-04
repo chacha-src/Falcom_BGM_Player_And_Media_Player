@@ -1955,6 +1955,10 @@ static int SmfBytesHasXgReset(const BYTE* data, DWORD size)
 						return 1;
 				}
 				q += sl;
+			} else if (st >= 0xf1 && st <= 0xfe) {
+				int extra = (st == 0xf2) ? 2 : (st == 0xf1 || st == 0xf3) ? 1 : 0;
+				if (q + extra > end) break;
+				q += extra;
 			} else {
 				const int kind = st & 0xf0;
 				const int need = (kind == 0xc0 || kind == 0xd0) ? 1 : 2;
@@ -2111,6 +2115,10 @@ static int SmfBytesPeekListMarks(const BYTE* data, DWORD size, const wchar_t* pa
 					if (VstMidiSysexMarksGs32(sx, off)) gs32 = 1;
 				}
 				q += sl;
+			} else if (st >= 0xf1 && st <= 0xfe) {
+				int extra = (st == 0xf2) ? 2 : (st == 0xf1 || st == 0xf3) ? 1 : 0;
+				if (q + extra > end) break;
+				q += extra;
 			} else {
 				const int kind = st & 0xf0;
 				const int need = (kind == 0xc0 || kind == 0xd0) ? 1 : 2;
@@ -2441,15 +2449,30 @@ static int LoadSmf(const wchar_t* path)
 						if (VstMidiSysexIsXgOn(sx, need)) hasXg = 1;
 						if (VstMidiSysexIsMt32(sx, need)) {
 							mapHint = VstMidiFoldGsMapHint(mapHint, 8);
-							/* Drop from event list — do not feed MT-32 SysEx to GS VST. */
-							sxUsed = off;
-							count--;
+							/* VST へはそのまま渡す。マップ判定だけ LA にする。 */
 						} else if (VstMidiSysexMarksGs32(sx, need)) {
 							gs32 = 1;
 						}
 					}
 				}
 				q += sl;
+			} else if (st >= 0xf1 && st <= 0xfe) {
+				/* システムコモン / リアルタイム。バイト数を合わせて VST へ渡す。 */
+				int extra = 0;
+				if (st == 0xf2) extra = 2;
+				else if (st == 0xf1 || st == 0xf3) extra = 1;
+				if (q + extra > end) break;
+				BYTE d1 = extra ? q[0] : 0;
+				BYTE d2 = extra > 1 ? q[1] : 0;
+				q += extra;
+				ev[count].tick = tick;
+				ev[count].sample = 0;
+				ev[count].msg = st | ((DWORD)d1 << 8) | ((DWORD)d2 << 16);
+				ev[count].aux = 0;
+				ev[count].port = curPort;
+				ev[count].sysexOff = -1;
+				ev[count].seq = count;
+				++count;
 			} else {
 				const int kind = st & 0xf0;
 				const int need = (kind == 0xc0 || kind == 0xd0) ? 1 : 2;

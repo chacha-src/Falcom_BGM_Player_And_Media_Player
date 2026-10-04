@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include <stdint.h>
 
@@ -62,7 +62,10 @@ enum KPIHOST32_CMD : uint32_t
 	KPIHOST32_CMD_VST_LIVE_GET_STATE = 43,
 	KPIHOST32_CMD_VST_LIVE_SET_STATE = 44,
 	/* ogg 終了時: 開いているライブ VST エディタをすべて同期で閉じる */
-	KPIHOST32_CMD_VST_LIVE_EDITOR_CLOSE_ALL = 45
+	KPIHOST32_CMD_VST_LIVE_EDITOR_CLOSE_ALL = 45,
+	/* raira=0 の FM/MIDI モニタ。再生位置は共有メモリ。ここは開閉だけ。 */
+	KPIHOST32_CMD_MON_SHOW = 70,
+	KPIHOST32_CMD_MON_HIDE = 71
 };
 
 // ホスト → 本体の結果コード。KPIHOST32_ReplyHeader.status。

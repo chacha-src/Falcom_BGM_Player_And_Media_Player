@@ -1867,8 +1867,8 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 	// サウンド調整スライダー(og の各スライダーと同じ範囲に合わせる)
 	m_dsvol.SetRange(-498, 1); 
 	m_kvol.SetRange(100, 900);
-	m_tempo.SetRange(0, 400);   m_tempo.SetMode(4);
-	m_pitch.SetRange(0, 400);   m_pitch.SetMode(4);
+	m_tempo.SetRange(0, 400);   m_tempo.SetMode(1);
+	m_pitch.SetRange(0, 400);   m_pitch.SetMode(1);
 
 	// シークスライダーに選択範囲(緑)を有効化。リソースでは付いていないため
 	// ここで付与しないと MirrorSeekVol の SetSelection(ループ範囲/緑追随)が描画されない。

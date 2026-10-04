@@ -1002,7 +1002,24 @@ static COLORREF BlendRGB(COLORREF a, COLORREF b, int t)
 		pts[pi].x = rcClient.left; pts[pi].y = rcClient.bottom; ++pi;
 		if (!CCC_ThemeSilk()) {
 			FillVGrad(dc, CRect(rcClient.left, rcClient.top, rcClient.left + w, rcClient.bottom), c0, c1);
-			dc.FillSolidRect(rcClient.left + w - 2, rcClient.top, 2, rcClient.Height(), CCC_UiTheme().ribbonEdge);
+			const CCC_ThemeFace& f = CCC_ThemeFaceOf();
+			const int ew = (f.edge == CCC_FACE_EDGE_GLOW || f.edge == CCC_FACE_EDGE_DOUBLE || f.edge == CCC_FACE_EDGE_PILL) ? 3 : 1;
+			if (f.edge == CCC_FACE_EDGE_WAVE) {
+				CPen p(PS_SOLID, 1, CCC_UiTheme().accent);
+				CPen* op = dc.SelectObject(&p);
+				dc.MoveTo(rcClient.left + w - 2, rcClient.top);
+				for (int y = rcClient.top; y < rcClient.bottom; y += 6)
+					dc.LineTo(rcClient.left + w - (((y / 6) & 1) ? 1 : 4), y + 6);
+				dc.SelectObject(op);
+			} else if (f.edge == CCC_FACE_EDGE_BRUSH) {
+				CPen p(PS_DASH, 1, CCC_UiTheme().accent);
+				CPen* op = dc.SelectObject(&p);
+				dc.MoveTo(rcClient.left + w - 2, rcClient.top);
+				dc.LineTo(rcClient.left + w - 2, rcClient.bottom);
+				dc.SelectObject(op);
+			} else {
+				dc.FillSolidRect(rcClient.left + w - ew, rcClient.top, ew, rcClient.Height(), CCC_UiTheme().ribbonEdge);
+			}
 			return;
 		}
 		CRgn rgn;
@@ -1062,13 +1079,37 @@ static COLORREF BlendRGB(COLORREF a, COLORREF b, int t)
 
 	static void DrawHotPill(CDC& dc, const CRect& itemRc)
 	{
+		const CCC_ThemeFace& f = CCC_ThemeFaceOf();
 		CRect hr = itemRc;
 		hr.DeflateRect(4, 2, 6, 2);
+		if (f.sel == CCC_FACE_SEL_BAR) {
+			dc.FillSolidRect(itemRc.left + 2, itemRc.top + 2, 3, max(1, itemRc.Height() - 4), CCC_UiTheme().accent);
+			FillVGrad(dc, hr, PopupHotTop(), PopupHotBot());
+			return;
+		}
+		if (f.sel == CCC_FACE_SEL_UNDER) {
+			FillVGrad(dc, hr, PopupHotTop(), PopupHotBot());
+			dc.FillSolidRect(hr.left, hr.bottom - 2, max(1, hr.Width()), 2, CCC_UiTheme().accent);
+			return;
+		}
+		if (f.sel == CCC_FACE_SEL_FRAME) {
+			FillVGrad(dc, hr, PopupHotTop(), PopupHotBot());
+			dc.Draw3dRect(&hr, CCC_UiTheme().accent, CCC_UiTheme().accent2);
+			return;
+		}
 		FillVGrad(dc, hr, PopupHotTop(), PopupHotBot());
-		dc.Draw3dRect(&hr, RGB(255, 255, 255), BlendRGB(PopupHotBot(), RGB(120, 90, 150), 100));
-		CRect inn = hr; inn.DeflateRect(1, 1);
-		dc.Draw3dRect(&inn, BlendRGB(PopupHotTop(), RGB(255, 255, 255), 80),
-			BlendRGB(PopupHotBot(), RGB(160, 120, 160), 40));
+		if (f.sel == CCC_FACE_SEL_PILL || f.edge == CCC_FACE_EDGE_PILL) {
+			CPen p(PS_SOLID, 1, CCC_UiTheme().accent);
+			CPen* op = dc.SelectObject(&p);
+			CGdiObject* ob = dc.SelectStockObject(NULL_BRUSH);
+			dc.RoundRect(&hr, CPoint(max(4, hr.Height()), max(4, hr.Height())));
+			if (ob) dc.SelectObject(ob);
+			dc.SelectObject(op);
+		} else {
+			dc.Draw3dRect(&hr, PopupBorderLite(), PopupBorderDark());
+		}
+		if (!CCC_ThemeSilk())
+			return;
 		const int cy = (hr.top + hr.bottom) / 2;
 		CBrush br(CCC_IsInwoman() ? RGB(255, 80, 150) : RGB(120, 110, 210));
 		CBrush* ob = dc.SelectObject(&br);
@@ -1083,10 +1124,7 @@ static COLORREF BlendRGB(COLORREF a, COLORREF b, int t)
 
 	static void DrawPanelChrome(CDC& dc, const CRect& rc)
 	{
-		// 枠のみ（背景の一枚感を壊さない）
-		dc.Draw3dRect(&rc, PopupBorderLite(), PopupBorderDark());
-		CRect inn = rc; inn.DeflateRect(1, 1);
-		dc.Draw3dRect(&inn, RGB(255, 255, 255), BlendRGB(PopupBorderDark(), PopupBg(), 150));
+		CCC_StrokeThemedPlate(&dc, rc, FALSE, FALSE);
 	}
 
 	static void PopupSoftFlightAccent(CDC& dc, const CRect& chip, int style, float flightT, int fade, int animTick, int rowIdx)

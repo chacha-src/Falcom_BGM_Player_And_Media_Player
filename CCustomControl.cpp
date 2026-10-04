@@ -1,4 +1,4 @@
-﻿#include "stdafx.h"
+#include "stdafx.h"
 #include "CCustomControl.h"
 #include "resource.h"
 #include "CImageBase.h"
@@ -2509,11 +2509,11 @@ const CCC_UiThemePal& CCC_UiTheme()
           RGB(255,248,252), RGB(220,160,190), RGB(230,200,215),
           RGB(52,34,58), RGB(108,88,108), RGB(228,234,255), RGB(186,204,248),
           RGB(255,250,253), RGB(176,118,152), 0 },
-        { RGB(226,229,234), RGB(198,204,214), RGB(36,48,72), RGB(168,176,190), RGB(24,28,36),
-          RGB(32,44,78), RGB(108,116,132), RGB(140,148,162),
-          RGB(246,247,249), RGB(150,156,168), RGB(196,200,208),
-          RGB(22,26,34), RGB(78,82,94), RGB(220,224,232), RGB(168,174,186),
-          RGB(252,252,253), RGB(70,76,88), 1 },
+        { RGB(242,236,226), RGB(214,196,168), RGB(28,40,72), RGB(168,132,72), RGB(18,22,36),
+          RGB(176,132,48), RGB(128,42,56), RGB(160,140,110),
+          RGB(252,248,240), RGB(36,44,68), RGB(210,196,170),
+          RGB(28,24,20), RGB(96,80,64), RGB(255,244,220), RGB(196,168,120),
+          RGB(255,250,240), RGB(120,96,64), 1 },
         { RGB(28,18,36), RGB(48,22,40), RGB(140,24,48), RGB(212,170,64), RGB(80,10,20),
           RGB(196,32,56), RGB(212,170,64), RGB(160,48,64),
           RGB(42,28,48), RGB(120,40,56), RGB(60,36,52),
@@ -2549,11 +2549,11 @@ const CCC_UiThemePal& CCC_UiTheme()
           RGB(255,248,252), RGB(230,80,140), RGB(255,200,220),
           RGB(40,16,28), RGB(112,48,76), RGB(255,228,120), RGB(255,160,200),
           RGB(255,252,248), RGB(160,40,90), 8 },
-        { RGB(18,18,20), RGB(32,34,38), RGB(48,50,56), RGB(180,182,188), RGB(8,8,10),
-          RGB(230,230,234), RGB(88,92,104), RGB(70,72,78),
-          RGB(28,28,32), RGB(64,66,72), RGB(42,44,50),
-          RGB(214,216,224), RGB(168,172,182), RGB(48,52,68), RGB(28,30,36),
-          RGB(70,72,78), RGB(10,10,12), 9 },
+        { RGB(12,12,14), RGB(28,26,24), RGB(20,18,16), RGB(196,160,72), RGB(8,8,8),
+          RGB(212,170,64), RGB(140,32,48), RGB(80,72,56),
+          RGB(36,34,32), RGB(180,146,64), RGB(48,44,40),
+          RGB(236,228,210), RGB(168,156,132), RGB(64,52,36), RGB(24,20,18),
+          RGB(212,176,96), RGB(12,10,8), 9 },
         { RGB(255,236,242), RGB(220,242,214), RGB(255,170,190), RGB(150,200,140), RGB(180,80,110),
           RGB(240,120,160), RGB(120,180,90), RGB(220,160,180),
           RGB(255,250,248), RGB(210,160,180), RGB(230,210,200),
@@ -2598,13 +2598,53 @@ const CCC_UiThemePal& CCC_UiTheme()
     return k[CCC_UiThemeId()];
 }
 
+const CCC_ThemeFace& CCC_ThemeFaceOf()
+{
+    /* radius fill edge gloss jelly lace sep sel */
+    static const CCC_ThemeFace k[CCC_UI_THEME_COUNT] = {
+        { 10, CCC_FACE_FILL_SATIN,  CCC_FACE_EDGE_BEVEL,   8, 1, 1, CCC_FACE_SEP_LACE,   CCC_FACE_SEL_WASH },
+        {  0, CCC_FACE_FILL_FLAT,   CCC_FACE_EDGE_HAIR,    0, 0, 0, CCC_FACE_SEP_HAIR,   CCC_FACE_SEL_BAR },
+        {  0, CCC_FACE_FILL_VGRAD,  CCC_FACE_EDGE_DOUBLE,  0, 0, 0, CCC_FACE_SEP_DOUBLE, CCC_FACE_SEL_FRAME },
+        {  2, CCC_FACE_FILL_NEON,   CCC_FACE_EDGE_GLOW,    0, 0, 0, CCC_FACE_SEP_HAIR,   CCC_FACE_SEL_FRAME },
+        {  0, CCC_FACE_FILL_WASH,   CCC_FACE_EDGE_BRUSH,   0, 0, 0, CCC_FACE_SEP_DASH,   CCC_FACE_SEL_UNDER },
+        { 12, CCC_FACE_FILL_VGRAD,  CCC_FACE_EDGE_HAIR,    0, 0, 0, CCC_FACE_SEP_HAIR,   CCC_FACE_SEL_BAR },
+        { 16, CCC_FACE_FILL_STRIPE, CCC_FACE_EDGE_PILL,    0, 0, 0, CCC_FACE_SEP_NONE,   CCC_FACE_SEL_PILL },
+        {  6, CCC_FACE_FILL_METAL,  CCC_FACE_EDGE_CHAMFER, 0, 0, 0, CCC_FACE_SEP_HAIR,   CCC_FACE_SEL_BAR },
+        {  0, CCC_FACE_FILL_STRIPE, CCC_FACE_EDGE_HAIR,    0, 0, 0, CCC_FACE_SEP_NONE,   CCC_FACE_SEL_PILL },
+        {  0, CCC_FACE_FILL_FLAT,   CCC_FACE_EDGE_HAIR,    0, 0, 0, CCC_FACE_SEP_NONE,   CCC_FACE_SEL_UNDER },
+        {  0, CCC_FACE_FILL_WASH,   CCC_FACE_EDGE_HAIR,    0, 0, 0, CCC_FACE_SEP_DASH,   CCC_FACE_SEL_WASH },
+        {  8, CCC_FACE_FILL_HGRAD,  CCC_FACE_EDGE_WAVE,    0, 0, 0, CCC_FACE_SEP_HAIR,   CCC_FACE_SEL_WASH },
+        {  4, CCC_FACE_FILL_VGRAD,  CCC_FACE_EDGE_CHAMFER, 0, 0, 0, CCC_FACE_SEP_DASH,   CCC_FACE_SEL_UNDER },
+        {  5, CCC_FACE_FILL_METAL,  CCC_FACE_EDGE_CHAMFER, 0, 0, 0, CCC_FACE_SEP_HAIR,   CCC_FACE_SEL_FRAME },
+        {  2, CCC_FACE_FILL_HGRAD,  CCC_FACE_EDGE_HAIR,    0, 0, 0, CCC_FACE_SEP_HAIR,   CCC_FACE_SEL_UNDER },
+        {  0, CCC_FACE_FILL_VGRAD,  CCC_FACE_EDGE_HAIR,    0, 0, 0, CCC_FACE_SEP_HAIR,   CCC_FACE_SEL_WASH },
+        {  6, CCC_FACE_FILL_STREAK, CCC_FACE_EDGE_HAIR,    0, 0, 0, CCC_FACE_SEP_DASH,   CCC_FACE_SEL_UNDER },
+        {  8, CCC_FACE_FILL_HGRAD,  CCC_FACE_EDGE_WAVE,    0, 0, 0, CCC_FACE_SEP_HAIR,   CCC_FACE_SEL_BAR },
+    };
+    int id = CCC_UiThemeId();
+    if (id < 0 || id >= CCC_UI_THEME_COUNT) id = 0;
+    return k[id];
+}
+
+int CCC_ThemedCorner(const CRect& rc)
+{
+    const CCC_ThemeFace& f = CCC_ThemeFaceOf();
+    int rad = f.radius;
+    if (f.edge == CCC_FACE_EDGE_PILL)
+        rad = (std::max)(rad, (std::min)(rc.Width(), rc.Height()) / 2);
+    const int cap = (std::max)(0, (std::min)(rc.Width(), rc.Height()) / 2);
+    if (rad > cap) rad = cap;
+    if (rad < 0) rad = 0;
+    return rad;
+}
+
 LPCTSTR CCC_UiThemeName(int id)
 {
     switch (id) {
     case CCC_UI_THEME_COOL:
-        return LL14(L"クール", L"Cool", L"Classe", L"Figo", L"Estilo",
-            L"쿨", L"酷", L"أنيق", L"Стильный", L"Schick",
-            L"Estiloso", L"Stoer", L"Stylowy", L"Havalı");
+        return LL14(L"格好いい", L"Stylish", L"Chic", L"Elegante", L"Elegante",
+            L"멋짐", L"帅气", L"أنيق", L"Стильный", L"Schick",
+            L"Elegante", L"Stoer", L"Szykowny", L"Şık");
     case CCC_UI_THEME_DRAMATIC:
         return LL14(L"中二", L"Dramatic", L"Dramatique", L"Drammatico", L"Dramatico",
             L"중2", L"中二", L"درامي", L"Драма", L"Dramatisch",
@@ -2634,9 +2674,9 @@ LPCTSTR CCC_UiThemeName(int id)
             L"초귀여움", L"超可爱", L"فائق اللطف", L"Супермилый", L"Superniedlich",
             L"Superfofo", L"Superschattig", L"Supersłodki", L"Süper sevimli");
     case CCC_UI_THEME_ULTRA:
-        return LL14(L"超クール", L"Super Cool", L"Super classe", L"Super figo", L"Super estilo",
-            L"초쿨", L"超酷", L"فائق الأناقة", L"Суперстиль", L"Supercool",
-            L"Superestilo", L"Superstoer", L"Superstyl", L"Süper havalı");
+        return LL14(L"超格好いい", L"Super Stylish", L"Super chic", L"Super elegante", L"Super elegante",
+            L"초멋짐", L"超帅", L"فائق الأناقة", L"Суперстиль", L"Superschick",
+            L"Superelegante", L"Superstoer", L"Superszyk", L"Süper şık");
     case CCC_UI_THEME_SPRING:
         return LL14(L"春", L"Spring", L"Printemps", L"Primavera", L"Primavera",
             L"봄", L"春", L"ربيع", L"Весна", L"Frühling",
@@ -3937,6 +3977,669 @@ static void DrawLaceScallop(CDC* pDC, int x1, int y, int x2, int r, COLORREF c)
     }
     if (ob) pDC->SelectObject(ob);
     pDC->SelectObject(op);
+}
+
+/* テーマごとの輪郭。0 点なら roundDiam の角丸（0 は直角）。可愛い以外は別シルエット。 */
+static int CCC_ThemeOutline(const CRect& rc, POINT* p, int cap, int* roundDiam)
+{
+    if (roundDiam) *roundDiam = 0;
+    if (!p || cap < 8) return 0;
+    const int w = rc.Width();
+    const int h = rc.Height();
+    int c = (std::max)(4, (std::min)(w, h) / 4);
+    switch (CCC_UiThemeId()) {
+    case CCC_UI_THEME_CUTE:
+        if (roundDiam) *roundDiam = (std::min)(20, (std::min)(w, h));
+        return 0;
+    case CCC_UI_THEME_CANDY:
+        if (roundDiam) *roundDiam = (std::min)(w, h);
+        return 0;
+    case CCC_UI_THEME_GAL: {
+        int k = 0;
+        const int bumps = 5;
+        for (int i = 0; i <= bumps && k < cap - 8; ++i) {
+            p[k].x = rc.left + w * i / bumps;
+            p[k].y = rc.top + ((i & 1) ? 0 : 4);
+            ++k;
+        }
+        for (int i = bumps; i >= 0 && k < cap - 1; --i) {
+            p[k].x = rc.left + w * i / bumps;
+            p[k].y = rc.bottom - ((i & 1) ? 1 : 5);
+            ++k;
+        }
+        return k;
+    }
+    case CCC_UI_THEME_FOREST: {
+        p[0] = { rc.left, rc.top + h / 2 };
+        p[1] = { rc.left + w / 3, rc.top };
+        p[2] = { rc.right - 1, rc.top + h / 5 };
+        p[3] = { rc.right - 1, rc.bottom - h / 5 };
+        p[4] = { rc.left + w / 3, rc.bottom - 1 };
+        return 5;
+    }
+    case CCC_UI_THEME_SPRING: {
+        const int cx = rc.left + w / 2;
+        p[0] = { cx, rc.top };
+        p[1] = { rc.right - 1, rc.top + h / 3 };
+        p[2] = { rc.right - (std::max)(1, w / 8), rc.top + h / 2 };
+        p[3] = { rc.right - 1, rc.bottom - h / 3 };
+        p[4] = { cx, rc.bottom - 1 };
+        p[5] = { rc.left, rc.bottom - h / 3 };
+        p[6] = { rc.left + (std::max)(1, w / 8), rc.top + h / 2 };
+        p[7] = { rc.left, rc.top + h / 3 };
+        return 8;
+    }
+    case CCC_UI_THEME_DAWN: {
+        const int mid = rc.top + h / 2;
+        p[0] = { rc.left, rc.bottom - 1 };
+        p[1] = { rc.left, mid };
+        p[2] = { rc.left + w / 6, rc.top + h / 5 };
+        p[3] = { rc.left + w / 3, rc.top };
+        p[4] = { rc.left + w / 2, rc.top };
+        p[5] = { rc.right - w / 3, rc.top };
+        p[6] = { rc.right - w / 6, rc.top + h / 5 };
+        p[7] = { rc.right - 1, mid };
+        p[8] = { rc.right - 1, rc.bottom - 1 };
+        return 9;
+    }
+    case CCC_UI_THEME_COOL:
+        c = (std::max)(6, (std::min)(w, h) / 3);
+        p[0] = { rc.left, rc.top };
+        p[1] = { rc.right - c, rc.top };
+        p[2] = { rc.right - 1, rc.top + c };
+        p[3] = { rc.right - 1, rc.bottom - 1 };
+        p[4] = { rc.left + c, rc.bottom - 1 };
+        p[5] = { rc.left, rc.bottom - c };
+        return 6;
+    case CCC_UI_THEME_ULTRA:
+    case CCC_UI_THEME_INK:
+    case CCC_UI_THEME_DUSK:
+    case CCC_UI_THEME_RAIN:
+        p[0] = { rc.left, rc.top };
+        p[1] = { rc.right - 1, rc.top };
+        p[2] = { rc.right - 1, rc.bottom - 1 };
+        p[3] = { rc.left, rc.bottom - 1 };
+        return 4;
+    case CCC_UI_THEME_DRAMATIC:
+        c = (std::max)(5, (std::min)(w, h) / 4);
+        p[0] = { rc.left + c, rc.top };
+        p[1] = { rc.right - c, rc.top };
+        p[2] = { rc.right - 1, rc.top + c };
+        p[3] = { rc.right - c / 2, rc.bottom - c };
+        p[4] = { rc.left + w / 2, rc.bottom - 1 };
+        p[5] = { rc.left + c / 2, rc.bottom - c };
+        p[6] = { rc.left, rc.top + c };
+        return 7;
+    case CCC_UI_THEME_NEON:
+        c = (std::max)(4, (std::min)(w, h) / 3);
+        p[0] = { rc.left + c, rc.top };
+        p[1] = { rc.right - c, rc.top };
+        p[2] = { rc.right - 1, rc.top + h / 2 };
+        p[3] = { rc.right - c, rc.bottom - 1 };
+        p[4] = { rc.left + c, rc.bottom - 1 };
+        p[5] = { rc.left, rc.top + h / 2 };
+        return 6;
+    case CCC_UI_THEME_STEEL:
+        c = (std::max)(4, (std::min)(w, h) / 4);
+        break;
+    case CCC_UI_THEME_AUTUMN:
+        c = (std::max)(3, (std::min)(w, h) / 5);
+        break;
+    case CCC_UI_THEME_WINTER:
+        c = (std::max)(6, (std::min)(w, h) / 2 - 1);
+        break;
+    case CCC_UI_THEME_SUMMER:
+        p[0] = { rc.left, rc.bottom - 1 };
+        p[1] = { rc.left, rc.top + h / 3 };
+        p[2] = { rc.left + w / 6, rc.top };
+        p[3] = { rc.right - w / 6, rc.top };
+        p[4] = { rc.right - 1, rc.top + h / 3 };
+        p[5] = { rc.right - 1, rc.bottom - 1 };
+        return 6;
+    case CCC_UI_THEME_SEA: {
+        p[0] = { rc.left, rc.top };
+        p[1] = { rc.right - 1, rc.top };
+        p[2] = { rc.right - 1, rc.bottom - 4 };
+        int k = 3;
+        const int n = 6;
+        for (int i = n; i >= 0 && k < cap - 1; --i) {
+            p[k].x = rc.left + w * i / n;
+            p[k].y = rc.bottom - ((i & 1) ? 1 : 5);
+            ++k;
+        }
+        return k;
+    }
+    default:
+        if (roundDiam) *roundDiam = 8;
+        return 0;
+    }
+    if (c * 2 >= w) c = (std::max)(1, w / 3);
+    if (c * 2 >= h) c = (std::max)(1, h / 3);
+    p[0] = { rc.left + c, rc.top };
+    p[1] = { rc.right - c, rc.top };
+    p[2] = { rc.right - 1, rc.top + c };
+    p[3] = { rc.right - 1, rc.bottom - c };
+    p[4] = { rc.right - c, rc.bottom - 1 };
+    p[5] = { rc.left + c, rc.bottom - 1 };
+    p[6] = { rc.left, rc.bottom - c };
+    p[7] = { rc.left, rc.top + c };
+    return 8;
+}
+
+static void CCC_StrokeThemeOutline(CDC* pDC, const CRect& rc, BOOL pushed)
+{
+    POINT pts[24];
+    int diam = 0;
+    const int n = CCC_ThemeOutline(rc, pts, 24, &diam);
+    const CCC_UiThemePal& th = CCC_UiTheme();
+    const int id = CCC_UiThemeId();
+    COLORREF col = th.edge;
+    int width = 1;
+    if (id == CCC_UI_THEME_COOL || id == CCC_UI_THEME_ULTRA || id == CCC_UI_THEME_NEON
+        || id == CCC_UI_THEME_DRAMATIC || id == CCC_UI_THEME_CANDY || id == CCC_UI_THEME_GAL)
+    {
+        col = th.accent;
+        width = (id == CCC_UI_THEME_NEON || id == CCC_UI_THEME_DRAMATIC || id == CCC_UI_THEME_CANDY) ? 2 : 1;
+    }
+    if (pushed) col = th.accent2;
+    int style = PS_SOLID;
+    if (id == CCC_UI_THEME_INK) style = PS_DASH;
+    else if (id == CCC_UI_THEME_RAIN) style = PS_DOT;
+    CPen pen(style, width, col);
+    CPen* old = pDC->SelectObject(&pen);
+    pDC->SelectStockObject(NULL_BRUSH);
+    if (n >= 3) {
+        pDC->MoveTo(pts[0].x, pts[0].y);
+        for (int i = 1; i < n; ++i)
+            pDC->LineTo(pts[i].x, pts[i].y);
+        pDC->LineTo(pts[0].x, pts[0].y);
+    } else if (diam > 1) {
+        pDC->RoundRect(&rc, CPoint(diam, diam));
+    } else {
+        pDC->Rectangle(&rc);
+    }
+    if (id == CCC_UI_THEME_COOL || id == CCC_UI_THEME_ULTRA) {
+        CPen gold(PS_SOLID, 1, th.accent);
+        pDC->SelectObject(&gold);
+        const int y = rc.top + (id == CCC_UI_THEME_ULTRA ? 3 : 2);
+        pDC->MoveTo(rc.left + 4, y);
+        pDC->LineTo(rc.right - 4, y);
+    }
+    pDC->SelectObject(old);
+}
+
+static BOOL CCC_CreatePlateRgn(CRgn& rgn, const CRect& rc, int rad, int edge)
+{
+    POINT pts[24];
+    int diam = 0;
+    const int n = CCC_ThemeOutline(rc, pts, 24, &diam);
+    if (n >= 3)
+        return rgn.CreatePolygonRgn(pts, n, WINDING);
+    if (diam > 1)
+        return rgn.CreateRoundRectRgn(rc.left, rc.top, rc.right + 1, rc.bottom + 1, diam, diam);
+    if (diam == 0 && n == 0 && (CCC_UiThemeId() == CCC_UI_THEME_ULTRA || CCC_UiThemeId() == CCC_UI_THEME_INK
+        || CCC_UiThemeId() == CCC_UI_THEME_DUSK || CCC_UiThemeId() == CCC_UI_THEME_RAIN))
+        return rgn.CreateRectRgnIndirect(&rc);
+    if (edge == CCC_FACE_EDGE_CHAMFER) {
+        int c = (std::max)(3, rad > 0 ? rad : 6);
+        if (c * 2 >= rc.Width()) c = (std::max)(1, rc.Width() / 3);
+        if (c * 2 >= rc.Height()) c = (std::max)(1, rc.Height() / 3);
+        POINT p[8] = {
+            { rc.left + c, rc.top }, { rc.right - c, rc.top },
+            { rc.right, rc.top + c }, { rc.right, rc.bottom - c },
+            { rc.right - c, rc.bottom }, { rc.left + c, rc.bottom },
+            { rc.left, rc.bottom - c }, { rc.left, rc.top + c }
+        };
+        return rgn.CreatePolygonRgn(p, 8, WINDING);
+    }
+    if (edge == CCC_FACE_EDGE_WAVE) {
+        POINT p[20];
+        int k = 0;
+        p[k++] = { rc.left, rc.top };
+        p[k++] = { rc.right, rc.top };
+        p[k++] = { rc.right, rc.bottom - 4 };
+        const int n = 8;
+        const int span = (std::max)(1, (int)(rc.right - rc.left));
+        for (int i = n; i >= 0 && k < 18; --i) {
+            p[k].x = rc.left + span * i / n;
+            p[k].y = rc.bottom - ((i & 1) ? 1 : 4);
+            ++k;
+        }
+        p[k++] = { rc.left, rc.bottom - 4 };
+        return rgn.CreatePolygonRgn(p, k, WINDING);
+    }
+    if (rad <= 1)
+        return rgn.CreateRectRgnIndirect(&rc);
+    return rgn.CreateRoundRectRgn(rc.left, rc.top, rc.right + 1, rc.bottom + 1, rad * 2, rad * 2);
+}
+
+static void CCC_PolylineChamfer(CDC* pDC, const CRect& rc, int c)
+{
+    if (c < 2) c = 2;
+    if (c * 2 >= rc.Width()) c = (std::max)(1, rc.Width() / 3);
+    if (c * 2 >= rc.Height()) c = (std::max)(1, rc.Height() / 3);
+    pDC->MoveTo(rc.left + c, rc.top);
+    pDC->LineTo(rc.right - c, rc.top);
+    pDC->LineTo(rc.right - 1, rc.top + c);
+    pDC->LineTo(rc.right - 1, rc.bottom - c);
+    pDC->LineTo(rc.right - c, rc.bottom - 1);
+    pDC->LineTo(rc.left + c, rc.bottom - 1);
+    pDC->LineTo(rc.left, rc.bottom - c);
+    pDC->LineTo(rc.left, rc.top + c);
+    pDC->LineTo(rc.left + c, rc.top);
+}
+
+static void CCC_PolylineWave(CDC* pDC, const CRect& rc)
+{
+    pDC->MoveTo(rc.left, rc.top + 2);
+    pDC->LineTo(rc.right - 1, rc.top + 2);
+    pDC->LineTo(rc.right - 1, rc.bottom - 5);
+    const int n = 8;
+    const int w = (std::max)(1, rc.Width());
+    for (int i = n; i >= 0; --i) {
+        const int x = rc.left + w * i / n;
+        const int y = rc.bottom - ((i & 1) ? 1 : 5);
+        pDC->LineTo(x, y);
+    }
+    pDC->LineTo(rc.left, rc.top + 2);
+}
+
+static void CCC_StrokeBox(CDC* pDC, const CRect& rc, int rad, int edge)
+{
+    if (edge == CCC_FACE_EDGE_CHAMFER)
+        CCC_PolylineChamfer(pDC, rc, (std::max)(3, rad > 0 ? rad : 6));
+    else if (edge == CCC_FACE_EDGE_WAVE)
+        CCC_PolylineWave(pDC, rc);
+    else if (rad <= 1)
+        pDC->Rectangle(&rc);
+    else
+        pDC->RoundRect(&rc, CPoint(rad * 2, rad * 2));
+}
+
+void CCC_FillThemedPlate(CDC* pDC, const CRect& rc, COLORREF base, BOOL pushed)
+{
+    if (!pDC || rc.Width() <= 2 || rc.Height() <= 2) return;
+    const CCC_ThemeFace& f = CCC_ThemeFaceOf();
+    const CCC_UiThemePal& th = CCC_UiTheme();
+    COLORREF c = pushed ? CCC_Darken(base, 18) : base;
+
+    CRgn rgn;
+    const int rad = CCC_ThemedCorner(rc);
+    if (!CCC_CreatePlateRgn(rgn, rc, rad, f.edge))
+        return;
+    pDC->SelectClipRgn(&rgn);
+    switch (f.fill) {
+    case CCC_FACE_FILL_FLAT:
+        pDC->FillSolidRect(&rc, c);
+        break;
+    case CCC_FACE_FILL_VGRAD:
+        DrawGradientBackground(pDC, rc, CCC_Lighten(c, 28), CCC_Darken(c, 46), 0);
+        break;
+    case CCC_FACE_FILL_HGRAD:
+        DrawGradientBackground(pDC, rc, CCC_Lighten(c, 16), th.accent2, 90);
+        break;
+    case CCC_FACE_FILL_METAL:
+        DrawGradientBackground(pDC, rc, CCC_Lighten(c, 36), CCC_Darken(c, 28), 0);
+        {
+            CRect mid = rc;
+            mid.top = rc.top + rc.Height() / 3;
+            mid.bottom = mid.top + (std::max)(1, rc.Height() / 5);
+            FillRectAlpha(pDC, mid, RGB(255, 255, 255), 48);
+        }
+        break;
+    case CCC_FACE_FILL_NEON:
+        pDC->FillSolidRect(&rc, CCC_Darken(c, 36));
+        {
+            CRect bar = rc;
+            bar.bottom = bar.top + (std::max)(2, rc.Height() / 8);
+            pDC->FillSolidRect(&bar, th.accent);
+        }
+        break;
+    case CCC_FACE_FILL_STRIPE:
+        pDC->FillSolidRect(&rc, c);
+        for (int y = rc.top; y < rc.bottom; y += 4) {
+            CRect b(rc.left, y, rc.right, (std::min)((int)rc.bottom, y + 2));
+            FillRectAlpha(pDC, b, th.accent2, 42);
+        }
+        break;
+    case CCC_FACE_FILL_WASH:
+        pDC->FillSolidRect(&rc, c);
+        {
+            CRect bot = rc;
+            bot.top = rc.top + rc.Height() * 3 / 4;
+            FillRectAlpha(pDC, bot, th.accent, 40);
+        }
+        break;
+    case CCC_FACE_FILL_STREAK:
+        pDC->FillSolidRect(&rc, c);
+        for (int x = rc.left + 2; x < rc.right; x += 5)
+            FillRectAlpha(pDC, CRect(x, rc.top, x + 1, rc.bottom), th.accent, 30);
+        break;
+    case CCC_FACE_FILL_SATIN:
+    default:
+        DrawSatinFill(pDC, rc, c);
+        break;
+    }
+    pDC->SelectClipRgn(NULL);
+    if (CCC_UiThemeId() == CCC_UI_THEME_CUTE) {
+        if (f.gloss > 0)
+            DrawGlossHighlight(pDC, rc, (std::max)(2, rad));
+        if (f.jelly)
+            DrawJellyEdges(pDC, rc, (std::max)(2, rad), th.ribbonEdge);
+    }
+}
+
+void CCC_StrokeThemedPlate(CDC* pDC, const CRect& rc, BOOL pushed, BOOL /*focus*/)
+{
+    if (!pDC || rc.Width() <= 2 || rc.Height() <= 2) return;
+    if (CCC_UiThemeId() != CCC_UI_THEME_CUTE) {
+        CCC_StrokeThemeOutline(pDC, rc, pushed);
+        return;
+    }
+    const CCC_ThemeFace& f = CCC_ThemeFaceOf();
+    const CCC_UiThemePal& th = CCC_UiTheme();
+    const int rad = CCC_ThemedCorner(rc);
+    pDC->SelectStockObject(NULL_BRUSH);
+    CPen* old = NULL;
+    switch (f.edge) {
+    case CCC_FACE_EDGE_HAIR: {
+        CPen p(PS_SOLID, 1, pushed ? th.accent : th.edge);
+        old = pDC->SelectObject(&p);
+        CCC_StrokeBox(pDC, rc, rad, f.edge);
+        pDC->SelectObject(old);
+        break;
+    }
+    case CCC_FACE_EDGE_DOUBLE: {
+        CPen p(PS_SOLID, 2, th.accent);
+        old = pDC->SelectObject(&p);
+        CCC_StrokeBox(pDC, rc, rad, f.edge);
+        CRect inn = rc;
+        inn.DeflateRect(3, 3);
+        if (inn.Width() > 4 && inn.Height() > 4) {
+            CPen p2(PS_SOLID, 1, th.accent2);
+            pDC->SelectObject(&p2);
+            CCC_StrokeBox(pDC, inn, (std::max)(0, rad - 3), f.edge);
+        }
+        pDC->SelectObject(old);
+        break;
+    }
+    case CCC_FACE_EDGE_GLOW: {
+        CPen p(PS_SOLID, 2, th.accent);
+        old = pDC->SelectObject(&p);
+        CCC_StrokeBox(pDC, rc, rad, f.edge);
+        CRect inn = rc;
+        inn.DeflateRect(2, 2);
+        if (inn.Width() > 4 && inn.Height() > 4) {
+            CPen p2(PS_SOLID, 1, th.accent2);
+            pDC->SelectObject(&p2);
+            CCC_StrokeBox(pDC, inn, (std::max)(0, rad - 2), f.edge);
+        }
+        pDC->SelectObject(old);
+        break;
+    }
+    case CCC_FACE_EDGE_BRUSH: {
+        CPen p(PS_SOLID, 1, th.text);
+        old = pDC->SelectObject(&p);
+        CCC_StrokeBox(pDC, rc, 0, CCC_FACE_EDGE_HAIR);
+        CPen p2(PS_DASH, 1, th.accent);
+        pDC->SelectObject(&p2);
+        pDC->MoveTo(rc.left, rc.bottom - 1);
+        pDC->LineTo(rc.right - 1, rc.bottom - 1);
+        pDC->SelectObject(old);
+        break;
+    }
+    case CCC_FACE_EDGE_CHAMFER: {
+        CPen p(PS_SOLID, pushed ? 2 : 1, th.edge);
+        old = pDC->SelectObject(&p);
+        CCC_PolylineChamfer(pDC, rc, (std::max)(4, rad));
+        pDC->SelectObject(old);
+        break;
+    }
+    case CCC_FACE_EDGE_WAVE: {
+        CPen p(PS_SOLID, 2, th.accent);
+        old = pDC->SelectObject(&p);
+        CCC_PolylineWave(pDC, rc);
+        pDC->SelectObject(old);
+        break;
+    }
+    case CCC_FACE_EDGE_PILL: {
+        CPen p(PS_SOLID, 2, pushed ? th.accent : th.accent2);
+        old = pDC->SelectObject(&p);
+        const int pr = (std::max)(2, (std::min)(rc.Width(), rc.Height()) / 2);
+        pDC->RoundRect(&rc, CPoint(pr * 2, pr * 2));
+        pDC->SelectObject(old);
+        break;
+    }
+    case CCC_FACE_EDGE_BEVEL:
+    default: {
+        const COLORREF lite = pushed ? th.borderDark : th.borderLite;
+        const COLORREF dark = pushed ? th.borderLite : th.borderDark;
+        CPen pL(PS_SOLID, 1, lite);
+        CPen pD(PS_SOLID, 1, dark);
+        old = pDC->SelectObject(&pL);
+        if (rad <= 1) {
+            pDC->MoveTo(rc.left, rc.bottom - 1);
+            pDC->LineTo(rc.left, rc.top);
+            pDC->LineTo(rc.right - 1, rc.top);
+            pDC->SelectObject(&pD);
+            pDC->LineTo(rc.right - 1, rc.bottom - 1);
+            pDC->LineTo(rc.left, rc.bottom - 1);
+        } else {
+            pDC->RoundRect(&rc, CPoint(rad * 2, rad * 2));
+            CRect inn = rc;
+            inn.DeflateRect(1, 1);
+            pDC->SelectObject(&pD);
+            if (inn.Width() > 4 && inn.Height() > 4)
+                pDC->RoundRect(&inn, CPoint((std::max)(2, (rad - 1) * 2), (std::max)(2, (rad - 1) * 2)));
+        }
+        pDC->SelectObject(old);
+        break;
+    }
+    }
+}
+
+void CCC_DrawThemedSep(CDC* pDC, int x1, int y, int x2)
+{
+    if (!pDC || x2 <= x1) return;
+    const CCC_ThemeFace& f = CCC_ThemeFaceOf();
+    const CCC_UiThemePal& th = CCC_UiTheme();
+    switch (f.sep) {
+    case CCC_FACE_SEP_NONE:
+        return;
+    case CCC_FACE_SEP_LACE:
+        DrawLaceLine(pDC, x1, y, x2, y, th.sep);
+        return;
+    case CCC_FACE_SEP_DASH: {
+        CPen p(PS_DASH, 1, th.sep);
+        CPen* op = pDC->SelectObject(&p);
+        pDC->MoveTo(x1, y);
+        pDC->LineTo(x2, y);
+        pDC->SelectObject(op);
+        return;
+    }
+    case CCC_FACE_SEP_DOUBLE:
+        pDC->FillSolidRect(x1, y - 1, x2 - x1, 1, th.accent);
+        pDC->FillSolidRect(x1, y + 1, x2 - x1, 1, th.accent2);
+        return;
+    case CCC_FACE_SEP_HAIR:
+    default:
+        pDC->FillSolidRect(x1, y, x2 - x1, 1, th.sep);
+        return;
+    }
+}
+
+void CCC_MarkThemedSelection(CDC* pDC, const CRect& rc, BOOL opaqueHost)
+{
+    if (!pDC || rc.Width() <= 2 || rc.Height() <= 2) return;
+    const CCC_ThemeFace& f = CCC_ThemeFaceOf();
+    const COLORREF a = CCC_UiTheme().accent;
+    auto fill = [&](const CRect& s) {
+        if (s.Width() <= 0 || s.Height() <= 0) return;
+        if (opaqueHost)
+            CCC_FillRectOpaqueBits(pDC->GetSafeHdc(), s, a);
+        else
+            pDC->FillSolidRect(&s, a);
+    };
+    switch (f.sel) {
+    case CCC_FACE_SEL_BAR:
+        fill(CRect(rc.left, rc.top, rc.left + 3, rc.bottom));
+        break;
+    case CCC_FACE_SEL_UNDER:
+        fill(CRect(rc.left, rc.bottom - 2, rc.right, rc.bottom));
+        break;
+    case CCC_FACE_SEL_FRAME:
+        fill(CRect(rc.left, rc.top, rc.right, rc.top + 1));
+        fill(CRect(rc.left, rc.bottom - 1, rc.right, rc.bottom));
+        fill(CRect(rc.left, rc.top, rc.left + 1, rc.bottom));
+        fill(CRect(rc.right - 1, rc.top, rc.right, rc.bottom));
+        break;
+    case CCC_FACE_SEL_PILL: {
+        CRect p = rc;
+        p.DeflateRect(2, 1);
+        CPen pen(PS_SOLID, 1, a);
+        CPen* op = pDC->SelectObject(&pen);
+        pDC->SelectStockObject(NULL_BRUSH);
+        const int rad = (std::max)(4, p.Height());
+        pDC->RoundRect(&p, CPoint(rad, rad));
+        pDC->SelectObject(op);
+        break;
+    }
+    case CCC_FACE_SEL_WASH:
+    default:
+        if (f.gloss > 0 && !opaqueHost)
+            DrawGlossHighlight(pDC, rc, 6);
+        break;
+    }
+}
+
+static void CCC_GapLine(CDC& dc, int x1, int y1, int x2, int y2, COLORREF c, int w, int style)
+{
+    if (x2 < x1) { int t = x1; x1 = x2; x2 = t; }
+    if (x2 == x1 && y2 == y1) return;
+    CPen p(style, w, c);
+    CPen* op = dc.SelectObject(&p);
+    dc.MoveTo(x1, y1);
+    dc.LineTo(x2, y2);
+    dc.SelectObject(op);
+}
+
+static void CCC_StrokeGapFrame(CDC& dc, const CRect& r, int y, int gapL, int gapR)
+{
+    const CCC_ThemeFace& f = CCC_ThemeFaceOf();
+    const CCC_UiThemePal& th = CCC_UiTheme();
+    const int L = r.left + 1;
+    const int R = r.right - 2;
+    const int B = r.bottom - 2;
+    int c = (std::max)(4, f.radius);
+    if (c * 2 > r.Width()) c = (std::max)(2, r.Width() / 4);
+    auto box = [&](int yy, COLORREF col, int w, int style) {
+        CCC_GapLine(dc, L, yy, gapL, yy, col, w, style);
+        CCC_GapLine(dc, gapR, yy, R, yy, col, w, style);
+        CPen p(style, w, col);
+        CPen* op = dc.SelectObject(&p);
+        dc.MoveTo(R, yy);
+        dc.LineTo(R, B);
+        dc.LineTo(L, B);
+        dc.LineTo(L, yy);
+        dc.SelectObject(op);
+    };
+    switch (CCC_UiThemeId()) {
+    case CCC_UI_THEME_CUTE:
+        box(y, th.accent, 2, PS_SOLID);
+        box(y + 3, th.accent2, 1, PS_SOLID);
+        break;
+    case CCC_UI_THEME_GAL:
+        box(y, th.accent, 3, PS_SOLID);
+        break;
+    case CCC_UI_THEME_DRAMATIC:
+        box(y, th.accent, 2, PS_SOLID);
+        break;
+    case CCC_UI_THEME_COOL:
+        box(y, th.edge, 1, PS_SOLID);
+        box(y + 3, th.accent, 1, PS_SOLID);
+        break;
+    case CCC_UI_THEME_ULTRA:
+        box(y, th.accent, 1, PS_SOLID);
+        break;
+    case CCC_UI_THEME_FOREST:
+        box(y, th.accent, 2, PS_SOLID);
+        break;
+    case CCC_UI_THEME_SPRING:
+        box(y, th.accent, 1, PS_DOT);
+        break;
+    case CCC_UI_THEME_DAWN:
+        box(y, th.accent, 1, PS_SOLID);
+        box(y + 4, th.edge, 1, PS_SOLID);
+        break;
+    case CCC_UI_THEME_DUSK:
+        box(y, th.edge, 1, PS_SOLID);
+        break;
+    case CCC_UI_THEME_RAIN:
+        box(y, th.edge, 1, PS_DASH);
+        break;
+    default:
+        break;
+    }
+    if (CCC_UiThemeId() == CCC_UI_THEME_CUTE || CCC_UiThemeId() == CCC_UI_THEME_GAL
+        || CCC_UiThemeId() == CCC_UI_THEME_DRAMATIC
+        || CCC_UiThemeId() == CCC_UI_THEME_COOL || CCC_UiThemeId() == CCC_UI_THEME_ULTRA
+        || CCC_UiThemeId() == CCC_UI_THEME_FOREST || CCC_UiThemeId() == CCC_UI_THEME_SPRING
+        || CCC_UiThemeId() == CCC_UI_THEME_DAWN
+        || CCC_UiThemeId() == CCC_UI_THEME_DUSK || CCC_UiThemeId() == CCC_UI_THEME_RAIN)
+        return;
+    switch (f.edge) {
+    case CCC_FACE_EDGE_HAIR:
+        box(y, th.edge, 1, PS_SOLID);
+        break;
+    case CCC_FACE_EDGE_GLOW:
+        box(y, th.accent, 2, PS_SOLID);
+        box(y + 3, th.accent2, 1, PS_SOLID);
+        break;
+    case CCC_FACE_EDGE_BRUSH:
+        box(y, th.text, 1, PS_DASH);
+        CCC_GapLine(dc, L, B + 1, R, B + 1, th.accent, 1, PS_SOLID);
+        break;
+    case CCC_FACE_EDGE_CHAMFER: {
+        CPen p(PS_SOLID, 1, th.edge);
+        CPen* op = dc.SelectObject(&p);
+        dc.MoveTo(L + c, y);
+        dc.LineTo(gapL, y);
+        dc.MoveTo(gapR, y);
+        dc.LineTo(R - c, y);
+        dc.LineTo(R, y + c);
+        dc.LineTo(R, B - c);
+        dc.LineTo(R - c, B);
+        dc.LineTo(L + c, B);
+        dc.LineTo(L, B - c);
+        dc.LineTo(L, y + c);
+        dc.LineTo(L + c, y);
+        dc.SelectObject(op);
+        break;
+    }
+    case CCC_FACE_EDGE_WAVE: {
+        CPen p(PS_SOLID, 2, th.accent);
+        CPen* op = dc.SelectObject(&p);
+        dc.MoveTo(L, y);
+        dc.LineTo(gapL, y);
+        dc.MoveTo(gapR, y);
+        dc.LineTo(R, y);
+        dc.LineTo(R, B - 4);
+        for (int x = R; x > L; x -= 8)
+            dc.LineTo((std::max)(L, x - 8), B - ((((R - x) / 8) & 1) ? 1 : 5));
+        dc.LineTo(L, y);
+        dc.SelectObject(op);
+        break;
+    }
+    case CCC_FACE_EDGE_PILL:
+        box(y, th.accent, 3, PS_SOLID);
+        break;
+    case CCC_FACE_EDGE_DOUBLE:
+    case CCC_FACE_EDGE_BEVEL:
+    default:
+        box(y, th.accent, 2, PS_SOLID);
+        box(y + 3, th.accent2, 1, PS_SOLID);
+        break;
+    }
 }
 
 // ほどけかけリボン: 左右非対称のループ + だらりと垂れた2本のテール。色っぽいしどけなさ。
@@ -6231,29 +6934,28 @@ BOOL CCustomEdit::OnEraseBkgnd(CDC* pDC)
 // 角丸枠+フォーカス時キラキラ。top-1 のデコは親アクリルを抉るので禁止。
 void CCustomEdit::DrawEditFrame(CDC& dc, const CRect& r)
 {
-    CPen p(PS_SOLID, 2, m_bHasFocus ? CCC_UiTheme().accent : CCC_UiTheme().accent2);
-    CPen* op = dc.SelectObject(&p);
-    dc.SelectStockObject(NULL_BRUSH);
     CRect rr = r;
     rr.DeflateRect(1, 1);
-    dc.RoundRect(&rr, CPoint(6, 6));
-    dc.SelectObject(op);
+    CCC_StrokeThemedPlate(&dc, rr, FALSE, m_bHasFocus);
 
-    if (m_bHasFocus)
+    const CCC_ThemeFace& face = CCC_ThemeFaceOf();
+    if (m_bHasFocus && face.gloss > 0)
     {
-        DrawSparkle(&dc, r.right - 8, r.top + 8, 3, COLOR_SPARKLE);
-        DrawSparkle(&dc, r.left + 8, r.top + 8, 2, COLOR_SPARKLE);
-        DrawSparkle(&dc, r.right - 8, r.bottom - 8, 2, COLOR_SPARKLE);
-        // 窓外へはみ出さない(top-1 は親アクリルを抉る)
-        DrawThemeBow(&dc, CRect(r.CenterPoint().x - 8, r.top + 0, r.CenterPoint().x + 8, r.top + 9), COLOR_BOW);
-        DrawSoftJkThumb(&dc, CRect(r.right - 18, r.top + 2, r.right - 4, r.top + 16),
-            (int)(::GetTickCount64() / 80), TRUE, 8.f);
+        DrawSparkle(&dc, r.right - 8, r.top + 8, 3, CCC_UiTheme().accent2);
+        DrawSparkle(&dc, r.left + 8, r.top + 8, 2, CCC_UiTheme().accent);
+        if (face.gloss >= 6) {
+            DrawThemeBow(&dc, CRect(r.CenterPoint().x - 8, r.top + 0, r.CenterPoint().x + 8, r.top + 9), CCC_UiTheme().accent2);
+            DrawSoftJkThumb(&dc, CRect(r.right - 18, r.top + 2, r.right - 4, r.top + 16),
+                (int)(::GetTickCount64() / 80), TRUE, 8.f);
+        }
     }
 
-    CRect rL(r.left + 2, r.CenterPoint().y - 3, r.left + 8, r.CenterPoint().y + 3);
-    CRect rR(r.right - 8, r.CenterPoint().y - 3, r.right - 2, r.CenterPoint().y + 3);
-    DrawThemeRibbon(&dc, rL, CCC_UiTheme().accent2);
-    DrawThemeRibbon(&dc, rR, CCC_UiTheme().accent2);
+    if (face.lace || face.edge == CCC_FACE_EDGE_BEVEL || face.edge == CCC_FACE_EDGE_PILL) {
+        CRect rL(r.left + 2, r.CenterPoint().y - 3, r.left + 8, r.CenterPoint().y + 3);
+        CRect rR(r.right - 8, r.CenterPoint().y - 3, r.right - 2, r.CenterPoint().y + 3);
+        DrawThemeRibbon(&dc, rL, CCC_UiTheme().accent2);
+        DrawThemeRibbon(&dc, rR, CCC_UiTheme().accent2);
+    }
 }
 
 // NC 枠を WindowDC で不透明化。ガラス透過で枠が消えるのを防ぐ。
@@ -7471,7 +8173,7 @@ void CCustomListBox::DrawItem(LPDRAWITEMSTRUCT lp)
         pDC->FillSolidRect(&r, bg);
 
     if ((lp->itemState & ODS_SELECTED) && !bListAero)
-        DrawGlossHighlight(pDC, r, 6);
+        CCC_MarkThemedSelection(pDC, r, CCC_HostNeedsChildOpaque(m_hWnd));
 
     int it = lp->itemID % 4;
     int is = max(8, r.Height() / 3);
@@ -7524,7 +8226,8 @@ void CCustomListBox::DrawItem(LPDRAWITEMSTRUCT lp)
     DrawListSubitemCellText(pDC, st, rt);
     pDC->SelectObject(po);
 
-    if (lp->itemID < (UINT)(GetCount() - 1)) DrawLaceLine(pDC, r.left + 15, r.bottom - 1, r.right - 15, r.bottom - 1, RGB(200, 180, 220));
+    if (lp->itemID < (UINT)(GetCount() - 1))
+        CCC_DrawThemedSep(pDC, r.left + 15, r.bottom - 1, r.right - 15);
 }
 
 // 行高。DPI スケールの 24px 相当。フォント実測は PreSubclass の SetItemHeight 側。
@@ -7798,27 +8501,17 @@ void CCustomComboBox::PaintClient(CDC& dc)
     }
     else mDC.FillSolidRect(&r, COLOR_COMBO_BG);
 
-    CPen pF(PS_SOLID, 2, COLOR_VINE_DECO);
-    CPen* op = mDC.SelectObject(&pF);
-    mDC.SelectStockObject(NULL_BRUSH);
     const UINT dpi = CCC_GetControlDpi(m_hWnd);
-    const int roundR = CCC_ScaleDpi(10, dpi);
-    mDC.RoundRect(&r, CPoint(roundR, roundR));
+    CRect plate = r;
+    plate.DeflateRect(1, 1);
+    CCC_FillThemedPlate(&mDC, plate, COLOR_COMBO_BG, FALSE);
+    CCC_StrokeThemedPlate(&mDC, plate, FALSE, FALSE);
 
     int nb = ::GetSystemMetricsForDpi(SM_CXVSCROLL, dpi);
     const int btnPad = CCC_ScaleDpi(4, dpi);
     CRect rB(r.right - nb - btnPad, r.top + btnPad, r.right - btnPad, r.bottom - btnPad);
-    mDC.FillSolidRect(&rB, CCC_UiTheme().accent2);
-    DrawGlossHighlight(&mDC, rB, 6);
-
-    {
-        CPen pb(PS_SOLID, 1, CCC_UiTheme().accent);
-        mDC.SelectObject(&pb);
-        mDC.SelectStockObject(NULL_BRUSH);
-        const int br = CCC_ScaleDpi(6, dpi);
-        mDC.RoundRect(&rB, CPoint(br, br));
-        mDC.SelectObject(op);
-    }
+    CCC_FillThemedPlate(&mDC, rB, CCC_UiTheme().accent2, FALSE);
+    CCC_StrokeThemedPlate(&mDC, rB, FALSE, FALSE);
 
     // 淫女: リボンごまかし→震えるバイブ。通常: 上品リボン
     {
@@ -7843,8 +8536,8 @@ void CCustomComboBox::PaintClient(CDC& dc)
         double breath = 0, twitch = 0, climax = 0;
         CCC_InwomanPulse(::GetTickCount(), breath, twitch, climax);
         CCC_DrawLoveFluid(&mDC, r, breath, twitch, climax, bTrans);
-    } else {
-        DrawSparkle(&mDC, r.right - CCC_ScaleDpi(8, dpi), r.top + CCC_ScaleDpi(8, dpi), CCC_ScaleDpi(4, dpi), COLOR_SPARKLE);
+    } else if (CCC_ThemeFaceOf().gloss > 0) {
+        DrawSparkle(&mDC, r.right - CCC_ScaleDpi(8, dpi), r.top + CCC_ScaleDpi(8, dpi), CCC_ScaleDpi(4, dpi), CCC_UiTheme().accent2);
     }
 
     int nPS = CComboBox::GetCurSel();
@@ -7883,7 +8576,10 @@ void CCustomComboBox::PaintClient(CDC& dc)
         if (cs > csCap) cs = csCap;
         // 文字の余地が無ければ王冠は省略（狭いコンボで名前が消えるのを防ぐ）
         if (rt.Width() - (cs * 2 + CCC_ScaleDpi(4, dpi)) >= CCC_ScaleDpi(24, dpi)) {
-            DrawCrown(&mDC, rt.left + cs, rt.Height() / 2, cs, RGB(255, 215, 0));
+            if (CCC_ThemeSilk())
+                DrawCrown(&mDC, rt.left + cs, rt.Height() / 2, cs, CCC_UiTheme().accent2);
+            else
+                DrawThemeMotif(&mDC, CRect(rt.left, rt.Height() / 2 - cs, rt.left + cs * 2, rt.Height() / 2 + cs), CCC_UiTheme().accent);
             rt.left += cs * 2 + CCC_ScaleDpi(4, dpi);
         }
     }
@@ -8181,8 +8877,12 @@ CCustomSliderCtrl::~CCustomSliderCtrl()
 #endif
 }
 
+static void CccSliderAxis(BOOL bV, const CRect& r, int margin,
+    int nMin, int nMax, int nPos,
+    int& axis, int& t0, int& t1, int& tP, int& tMid);
+
 // きらめき軌跡の長さ（px）。横は左端〜つまみ、縦はつまみ〜下端（アクティブ側）。
-// 範囲が潰れていると 0。DrawSlider の座標計算と一致させること。
+// mode1 だけ中央からつまみまで。範囲が潰れていると 0。
 int CCustomSliderCtrl::SparkleSpan(BOOL* pbVert)
 {
     CRect r;
@@ -8193,15 +8893,208 @@ int CCustomSliderCtrl::SparkleSpan(BOOL* pbVert)
     const BOOL bV = (GetStyle() & TBS_VERT) ? TRUE : FALSE;
     if (pbVert) *pbVert = bV;
     if (mx <= mn) return 0;
-    if (!bV)
-    {
-        const int tL = 12, tR = r.Width() - 12;
-        const int tP = tL + (int)((double)(np - mn) * (tR - tL) / (mx - mn));
-        return tP - tL;
+    int axis, t0, t1, tP, tMid;
+    CccSliderAxis(bV, r, 12, mn, mx, np, axis, t0, t1, tP, tMid);
+    if (m_nMode == 1)
+        return (tP >= tMid) ? (tP - tMid) : (tMid - tP);
+    if (!bV) return tP - t0;
+    return t1 - tP;
+}
+
+// 角張ったテーマは直角、それ以外は丸。モードの骨格（楔／中央／量バー／カプセル／メーター）は変えない。
+static BOOL CccSliderSquare()
+{
+    switch (CCC_UiThemeId()) {
+    case CCC_UI_THEME_COOL:
+    case CCC_UI_THEME_ULTRA:
+    case CCC_UI_THEME_STEEL:
+    case CCC_UI_THEME_INK:
+        return TRUE;
+    default:
+        return FALSE;
     }
-    const int tT = 12, tB = r.Height() - 12;
-    const int tP = tT + (int)((double)(np - mn) * (tB - tT) / (mx - mn));
-    return tB - tP;
+}
+
+// クライアント座標。t0=最小側、t1=最大側。縦は上が最小（既存の tP 写像と同じ）。
+// tMid は数値の中央。テンポ／ピッチは 0..400 の 200 が 100%。
+static void CccSliderAxis(BOOL bV, const CRect& r, int margin,
+    int nMin, int nMax, int nPos,
+    int& axis, int& t0, int& t1, int& tP, int& tMid)
+{
+    const int nR = nMax - nMin;
+    const int midV = nMin + (nR > 0 ? nR / 2 : 0);
+    if (!bV) {
+        axis = r.Height() / 2;
+        t0 = r.left + margin;
+        t1 = r.right - margin;
+    }
+    else {
+        axis = r.Width() / 2;
+        t0 = r.top + margin;
+        t1 = r.bottom - margin;
+    }
+    if (t1 < t0) t1 = t0;
+    const int span = t1 - t0;
+    if (nR <= 0 || span <= 0) {
+        tP = tMid = t0;
+        return;
+    }
+    tP = t0 + (int)((double)(nPos - nMin) * span / nR);
+    tMid = t0 + (int)((double)(midV - nMin) * span / nR);
+}
+
+static int CccThumbRad(const CRect& rect, BOOL bV)
+{
+    const int room = bV ? rect.Width() : rect.Height();
+    if (room >= 22) return 7;
+    if (room >= 16) return 5;
+    return max(3, room / 2 - 2);
+}
+
+// 下地の円または角板＋テーマのモチーフ。塗りと同色でも輪郭が残る。
+static void CccSliderThumb(CDC* pDC, int x, int y, int rad, BOOL square, COLORREF plate, COLORREF mark)
+{
+    UNREFERENCED_PARAMETER(square);
+    if (rad < 3) rad = 3;
+    const int id = CCC_UiThemeId();
+    COLORREF body = plate;
+    if (id == CCC_UI_THEME_COOL || id == CCC_UI_THEME_STEEL || id == CCC_UI_THEME_AUTUMN)
+        body = mark;
+    if (id == CCC_UI_THEME_ULTRA)
+        body = CCC_UiTheme().bg1;
+    auto pen = [&](COLORREF c, int w) {
+        if (CPen* p = CCC_GetPooledPen(w, c)) pDC->SelectObject(p);
+    };
+    auto br = [&](COLORREF c) {
+        if (CBrush* b = CCC_GetPooledBrush(c)) pDC->SelectObject(b);
+    };
+    pen(CCC_Darken(body, 50), 1);
+    br(body);
+    switch (id) {
+    case CCC_UI_THEME_COOL: {
+        const int hw = rad + 3, hh = max(3, rad - 1);
+        pDC->Rectangle(x - hw, y - hh, x + hw + 1, y + hh + 1);
+        pen(CCC_UiTheme().bg0, 1);
+        pDC->MoveTo(x - hw + 2, y);
+        pDC->LineTo(x + hw - 1, y);
+        break;
+    }
+    case CCC_UI_THEME_ULTRA:
+        pDC->Rectangle(x - max(2, rad / 2), y - rad, x + max(2, rad / 2) + 1, y + rad + 1);
+        pen(mark, 1);
+        pDC->MoveTo(x - 1, y - rad + 2);
+        pDC->LineTo(x - 1, y + rad - 1);
+        break;
+    case CCC_UI_THEME_DRAMATIC:
+    case CCC_UI_THEME_AUTUMN:
+    case CCC_UI_THEME_WINTER: {
+        POINT d[4] = {
+            { x, y - rad }, { x + rad, y }, { x, y + rad }, { x - rad, y }
+        };
+        pDC->Polygon(d, 4);
+        break;
+    }
+    case CCC_UI_THEME_NEON: {
+        POINT h[6] = {
+            { x, y - rad }, { x + rad, y - rad / 2 }, { x + rad, y + rad / 2 },
+            { x, y + rad }, { x - rad, y + rad / 2 }, { x - rad, y - rad / 2 }
+        };
+        pen(mark, 2);
+        pDC->Polygon(h, 6);
+        break;
+    }
+    case CCC_UI_THEME_INK:
+        pDC->SelectStockObject(NULL_BRUSH);
+        pen(mark, 1);
+        pDC->Ellipse(x - rad, y - rad, x + rad + 1, y + rad + 1);
+        pDC->Ellipse(x - rad + 2, y - rad + 2, x + rad - 1, y + rad - 1);
+        break;
+    case CCC_UI_THEME_STEEL: {
+        const int c = max(2, rad / 2);
+        POINT o[8] = {
+            { x - rad + c, y - rad }, { x + rad - c, y - rad },
+            { x + rad, y - rad + c }, { x + rad, y + rad - c },
+            { x + rad - c, y + rad }, { x - rad + c, y + rad },
+            { x - rad, y + rad - c }, { x - rad, y - rad + c }
+        };
+        pDC->Polygon(o, 8);
+        break;
+    }
+    case CCC_UI_THEME_FOREST: {
+        POINT leaf[5] = {
+            { x - rad, y }, { x - rad / 3, y - rad }, { x + rad, y - rad / 3 },
+            { x + rad, y + rad / 3 }, { x - rad / 3, y + rad }
+        };
+        pDC->Polygon(leaf, 5);
+        break;
+    }
+    case CCC_UI_THEME_SUMMER:
+        pDC->Ellipse(x - rad, y - rad, x + rad + 1, y + rad + 1);
+        pen(mark, 1);
+        pDC->MoveTo(x, y - rad - 2); pDC->LineTo(x, y - rad + 2);
+        pDC->MoveTo(x - rad - 2, y); pDC->LineTo(x - rad + 2, y);
+        pDC->MoveTo(x + rad - 2, y); pDC->LineTo(x + rad + 2, y);
+        break;
+    case CCC_UI_THEME_SEA:
+        pDC->Ellipse(x - rad - 2, y - max(2, rad / 2), x + rad + 3, y + max(2, rad / 2) + 1);
+        break;
+    case CCC_UI_THEME_RAIN:
+        pDC->Rectangle(x - 2, y - rad, x + 3, y + rad + 1);
+        break;
+    case CCC_UI_THEME_DUSK:
+        pDC->Rectangle(x - rad - 1, y - 2, x + rad + 2, y + 3);
+        break;
+    case CCC_UI_THEME_CANDY:
+        pDC->RoundRect(CRect(x - rad - 2, y - max(2, rad / 2), x + rad + 3, y + max(2, rad / 2) + 1), CPoint(rad, rad));
+        pen(mark, 1);
+        pDC->MoveTo(x, y - max(2, rad / 2));
+        pDC->LineTo(x, y + max(2, rad / 2));
+        break;
+    case CCC_UI_THEME_GAL: {
+        POINT st[8] = {
+            { x, y - rad }, { x + rad / 3, y - rad / 3 }, { x + rad, y },
+            { x + rad / 3, y + rad / 3 }, { x, y + rad },
+            { x - rad / 3, y + rad / 3 }, { x - rad, y },
+            { x - rad / 3, y - rad / 3 }
+        };
+        pDC->Polygon(st, 8);
+        break;
+    }
+    case CCC_UI_THEME_SPRING: {
+        POINT pe[5] = {
+            { x, y - rad }, { x + rad, y - rad / 4 }, { x + rad / 2, y + rad },
+            { x - rad / 2, y + rad }, { x - rad, y - rad / 4 }
+        };
+        pDC->Polygon(pe, 5);
+        break;
+    }
+    case CCC_UI_THEME_DAWN:
+        pDC->Pie(x - rad, y - rad, x + rad + 1, y + rad + 1, x + rad, y, x - rad, y);
+        break;
+    case CCC_UI_THEME_CUTE:
+    default:
+        pDC->Ellipse(x - rad, y - rad, x + rad + 1, y + rad + 1);
+        {
+            const int m = max(3, rad - 1);
+            DrawThemeMotif(pDC, CRect(x - m, y - m, x + m + 1, y + m + 1), mark);
+        }
+        break;
+    }
+}
+
+static void CccSliderBar(CDC* pDC, int l, int t, int r, int b, BOOL square)
+{
+    UNREFERENCED_PARAMETER(square);
+    if (r - l < 2 || b - t < 2) return;
+    const int id = CCC_UiThemeId();
+    const BOOL round = (id == CCC_UI_THEME_CUTE || id == CCC_UI_THEME_GAL || id == CCC_UI_THEME_CANDY
+        || id == CCC_UI_THEME_SPRING || id == CCC_UI_THEME_DAWN || id == CCC_UI_THEME_SEA
+        || id == CCC_UI_THEME_FOREST || id == CCC_UI_THEME_SUMMER);
+    const int rad = min(r - l, b - t);
+    if (!round || rad < 4)
+        pDC->Rectangle(l, t, r, b);
+    else
+        pDC->RoundRect(CRect(l, t, r, b), CPoint(rad, rad));
 }
 
 // 40ms タイマから呼ぶ。生存点を進め、span 到達で消滅。
@@ -8290,7 +9183,7 @@ void CCustomSliderCtrl::PostNcDestroy()
     if (m_bAutoDelete) delete this;
 }
 
-// 0=音符バー / 1=紫ダイヤ / 2=ボリューム緑ダイヤ / 3=カプセル / 4=メーター。未知は mode1。
+// 0=楔 / 1=中央基準（テンポ・ピッチ） / 2=量バー / 3=カプセル / 4=メーター。未知は mode1。
 void CCustomSliderCtrl::SetMode(int m)
 {
     m_nMode = m;
@@ -8572,57 +9465,63 @@ void CCustomSliderCtrl::DrawSlider(CDC* pDC)
     else DrawMode1(pDC, r, mn, mx, np);
 
     // ホバー中＋残点の慣性: 通ってきたトラック上をきらめきがスーッと流れる
-    if ((m_bHover || m_nSparkleN > 0) && mx > mn)
+    if (CCC_ThemeSilk() && (m_bHover || m_nSparkleN > 0) && mx > mn)
     {
         const BOOL bV = (GetStyle() & TBS_VERT);
-        if (!bV)
+        int axis, t0, t1, tP, tMid;
+        CccSliderAxis(bV, r, 12, mn, mx, np, axis, t0, t1, tP, tMid);
+        int span, origin, dir;
+        if (m_nMode == 1)
         {
-            const int tL = 12, tR = r.Width() - 12;
-            const int cY = r.Height() / 2;
-            const int tP = tL + (int)((double)(np - mn) * (tR - tL) / (mx - mn));
-            const int span = tP - tL;
-            if (span > 8)
-            {
-                for (int di = 0; di < m_nSparkleN; ++di)
-                {
-                    const int pos = m_sparklePos[di];
-                    if (pos < 0 || pos >= span) continue;
-                    const int gx = tL + pos;
-                    const int sz = (di == 0) ? 3 : 2;
-                    DrawShine(pDC, gx, cY, sz, sz);
-                    DrawSparkle(pDC, gx, cY, max(1, sz - 1), COLOR_SPARKLE);
-                }
-            }
+            span = (tP >= tMid) ? (tP - tMid) : (tMid - tP);
+            origin = tMid;
+            dir = (tP >= tMid) ? 1 : -1;
+        }
+        else if (!bV)
+        {
+            span = tP - t0;
+            origin = t0;
+            dir = 1;
         }
         else
         {
             // 縦は「つまみ〜下端」がアクティブ部分。シマーは下から上へ流す。
-            const int tT = 12, tB = r.Height() - 12;
-            const int cX = r.Width() / 2;
-            const int tP = tT + (int)((double)(np - mn) * (tB - tT) / (mx - mn));
-            const int span = tB - tP;
-            if (span > 8)
+            span = t1 - tP;
+            origin = t1;
+            dir = -1;
+        }
+        if (span > 8)
+        {
+            for (int di = 0; di < m_nSparkleN; ++di)
             {
-                for (int di = 0; di < m_nSparkleN; ++di)
+                const int pos = m_sparklePos[di];
+                if (pos < 0 || pos >= span) continue;
+                const int sz = (di == 0) ? 3 : 2;
+                if (!bV)
                 {
-                    const int pos = m_sparklePos[di];
-                    if (pos < 0 || pos >= span) continue;
-                    const int gy = tB - pos;
-                    const int sz = (di == 0) ? 3 : 2;
-                    DrawShine(pDC, cX, gy, sz, sz);
-                    DrawSparkle(pDC, cX, gy, max(1, sz - 1), COLOR_SPARKLE);
+                    const int gx = origin + dir * pos;
+                    DrawShine(pDC, gx, axis, sz, sz);
+                    DrawSparkle(pDC, gx, axis, max(1, sz - 1), COLOR_SPARKLE);
+                }
+                else
+                {
+                    const int gy = origin + dir * pos;
+                    DrawShine(pDC, axis, gy, sz, sz);
+                    DrawSparkle(pDC, axis, gy, max(1, sz - 1), COLOR_SPARKLE);
                 }
             }
         }
     }
 }
 
-// 描画モード0: 楔形バー＋音符つまみ。ホバー時は SoftJkHeart ではなく SoftJkThumb を重ねる。
-// リージョン AND で進捗色を乗せる。縦は下端がアクティブ。
+// 描画モード0: 楔形バー。最小側から塗る。つまみはテーマのモチーフ。
+// ホバー時は SoftJkThumb を重ねる。縦は下端がアクティブ。
 void CCustomSliderCtrl::DrawMode0(CDC* pDC, const CRect& rect, int nMin, int nMax, int nPos)
 {
     int nR = nMax - nMin;
     BOOL bV = (GetStyle() & TBS_VERT);
+    const CCC_UiThemePal& th = CCC_UiTheme();
+    const BOOL square = CccSliderSquare();
 
     if (!bV) // 横向き
     {
@@ -8632,9 +9531,9 @@ void CCustomSliderCtrl::DrawMode0(CDC* pDC, const CRect& rect, int nMin, int nMa
         int cY = rect.Height() / 2, bY = rect.bottom - 8;
 
         CPoint pts[4] = { {tL, bY}, {tL, bY - 2}, {tR, rect.top + 4}, {tR, bY} };
-        CBrush bB(COLOR_RANGE_SELECTION);
+        CBrush bB(th.track);
         pDC->SelectObject(&bB);
-        CPen pV(PS_SOLID, 1, COLOR_VINE_DECO);
+        CPen pV(PS_SOLID, 1, th.sep);
         pDC->SelectObject(&pV);
         pDC->Polygon(pts, 4);
 
@@ -8644,18 +9543,15 @@ void CCustomSliderCtrl::DrawMode0(CDC* pDC, const CRect& rect, int nMin, int nMa
             rP.CreatePolygonRgn(pts, 4, WINDING);
             rL.CreateRectRgn(rect.left, rect.top, tX, rect.bottom);
             rP.CombineRgn(&rP, &rL, RGN_AND);
-            CBrush bA(RGB(180, 200, 255));
+            CBrush bA(th.accent);
             pDC->FillRgn(&rP, &bA);
         }
-        CRect rN(tX - 10, cY - 12, tX + 10, cY + 12);
-        DrawMusicNote(pDC, rN, RGB(138, 43, 226));
-        if (m_bHover || m_nSparkleN > 0) {
+        CccSliderThumb(pDC, tX, cY, CccThumbRad(rect, FALSE), square, th.face, th.accent);
+        if (CCC_UiThemeId() == CCC_UI_THEME_CUTE && (m_bHover || m_nSparkleN > 0)) {
             const float tilt = (nR > 0) ? ((float)(nPos - nMin) / (float)nR * 24.f - 12.f) : 0.f;
             DrawSoftJkThumb(pDC, CRect(tX - 8, cY - 8, tX + 8, cY + 8),
                 (int)(m_nShimmer + ::GetTickCount64() / 40), TRUE, tilt);
         }
-        DrawStar(pDC, tX - 12, cY - 14, 2, RGB(255, 215, 0));
-        DrawStar(pDC, tX + 12, cY - 14, 2, RGB(255, 215, 0));
     }
     else // 縦向き
     {
@@ -8663,9 +9559,9 @@ void CCustomSliderCtrl::DrawMode0(CDC* pDC, const CRect& rect, int nMin, int nMa
         if (tH <= 0) return;
         int tY = tT + (int)((double)(nPos - nMin) * tH / nR), cX = rect.Width() / 2;
         CPoint pts[4] = { {cX - 8, tB}, {cX - 2, tT}, {cX + 2, tT}, {cX + 8, tB} };
-        CBrush bB(COLOR_RANGE_SELECTION);
+        CBrush bB(th.track);
         pDC->SelectObject(&bB);
-        CPen pV2(PS_SOLID, 1, COLOR_VINE_DECO);
+        CPen pV2(PS_SOLID, 1, th.sep);
         pDC->SelectObject(&pV2);
         pDC->Polygon(pts, 4);
 
@@ -8675,354 +9571,229 @@ void CCustomSliderCtrl::DrawMode0(CDC* pDC, const CRect& rect, int nMin, int nMa
             rP.CreatePolygonRgn(pts, 4, WINDING);
             rB2.CreateRectRgn(rect.left, tY, rect.right, rect.bottom);
             rP.CombineRgn(&rP, &rB2, RGN_AND);
-            CBrush bA(RGB(180, 200, 255));
+            CBrush bA(th.accent);
             pDC->FillRgn(&rP, &bA);
         }
-        CRect rN(cX - 10, tY - 12, cX + 10, tY + 12);
-        DrawMusicNote(pDC, rN, RGB(138, 43, 226));
-        DrawStar(pDC, cX + 14, tY, 2, RGB(255, 215, 0));
+        CccSliderThumb(pDC, cX, tY, CccThumbRad(rect, TRUE), square, th.face, th.accent);
     }
 }
 
-// 描画モード1: 紫グラデ線＋ダイヤ。ペン/ブラシはプール（毎描画 CreatePen 禁止）。
+// 描画モード1: 中央基準の細いレール。テンポ／ピッチ用。100% では塗りが増えない。
+// 基準より大きい側は accent、小さい側は accent2。つまみは丸＋テーマのモチーフ。
 void CCustomSliderCtrl::DrawMode1(CDC* pDC, const CRect& rect, int nMin, int nMax, int nPos)
 {
-    int nR = nMax - nMin;
-    BOOL bV = (GetStyle() & TBS_VERT);
-    auto selPen = [&](int w, COLORREF c) {
-        CPen* p = CCC_GetPooledPen(w, c);
-        if (p) pDC->SelectObject(p);
-    };
-    auto selBrush = [&](COLORREF c) -> CBrush* {
-        CBrush* b = CCC_GetPooledBrush(c);
-        if (b) { pDC->SelectObject(b); return b; }
-        return nullptr;
-    };
-    if (!bV)
-    {
-        int cY = rect.Height() / 2;
-        int tL = 12;
-        int tR = rect.Width() - 12;
-        int tW = tR - tL;
-        if (tW <= 0) return;
-        int tP = tL + (int)((double)(nPos - nMin) * tW / nR);
-        CPen* oldPen = pDC->GetCurrentPen();
-        CBrush* oldBrush = pDC->GetCurrentBrush();
-        selPen(5, RGB(200, 150, 255));
-        pDC->MoveTo(tL, cY);
-        pDC->LineTo(tP, cY);
-        selPen(3, RGB(220, 220, 230));
-        pDC->LineTo(tR, cY);
-        selPen(2, RGB(150, 100, 200));
-        for (int i = 0; i <= 10; i++)
-        {
-            int nx = tL + tW * i / 10;
-            int nh = (i % 5 == 0) ? 10 : 5;
-            pDC->MoveTo(nx, cY - nh);
-            pDC->LineTo(nx, cY + nh);
-            if (i % 5 == 0)
-            {
-                selBrush(RGB(200, 180, 255));
-                pDC->Ellipse(nx - 3, cY - nh - 5, nx + 3, cY - nh + 1);
-            }
-        }
-        CRect rD(tP - 9, cY - 12, tP + 9, cY + 12);
-        DrawDiamond(pDC, rD, RGB(200, 180, 255));
-        DrawSparkle(pDC, tP, cY - 16, 3, COLOR_SPARKLE);
-        selPen(1, RGB(255, 240, 200));
-        for (int a = 0; a < 360; a += 45)
-        {
-            double r = a * 3.14159 / 180.0;
-            pDC->MoveTo(tP + (int)(12 * cos(r)), cY + (int)(12 * sin(r)));
-            pDC->LineTo(tP + (int)(18 * cos(r)), cY + (int)(18 * sin(r)));
-        }
-        if (oldPen) pDC->SelectObject(oldPen);
-        if (oldBrush) pDC->SelectObject(oldBrush);
-    }
-    else
-    {
-        int cX = rect.Width() / 2;
-        int tT = 12;
-        int tB = rect.Height() - 12;
-        int tH = tB - tT;
-        if (tH <= 0) return;
-        int tP = tT + (int)((double)(nPos - nMin) * tH / nR);
-        CPen* oldPen = pDC->GetCurrentPen();
-        CBrush* oldBrush = pDC->GetCurrentBrush();
-        selPen(5, RGB(200, 150, 255));
-        pDC->MoveTo(cX, tP);
-        pDC->LineTo(cX, tB);
-        selPen(3, RGB(220, 220, 230));
-        pDC->MoveTo(cX, tT);
-        pDC->LineTo(cX, tP);
-        selPen(2, RGB(150, 100, 200));
-        for (int i = 0; i <= 10; i++)
-        {
-            int ny = tT + tH * i / 10;
-            int nw = (i % 5 == 0) ? 10 : 5;
-            pDC->MoveTo(cX - nw, ny);
-            pDC->LineTo(cX + nw, ny);
-            if (i % 5 == 0)
-            {
-                selBrush(RGB(200, 180, 255));
-                pDC->Ellipse(cX + nw + 1, ny - 3, cX + nw + 7, ny + 3);
-            }
-        }
-        CRect rD(cX - 9, tP - 12, cX + 9, tP + 12);
-        DrawDiamond(pDC, rD, RGB(200, 180, 255));
-        if (oldPen) pDC->SelectObject(oldPen);
-        if (oldBrush) pDC->SelectObject(oldBrush);
-    }
-}
-
-// 描画モード2: 緑グラデ線＋ダイヤ。mode1 と同構造、色だけ差し替え。
-void CCustomSliderCtrl::DrawMode2(CDC* pDC, const CRect& rect, int nMin, int nMax, int nPos)
-{
-    int nR = nMax - nMin;
-    BOOL bV = (GetStyle() & TBS_VERT);
-    auto selPen = [&](int w, COLORREF c) {
-        CPen* p = CCC_GetPooledPen(w, c);
-        if (p) pDC->SelectObject(p);
-    };
-    auto selBrush = [&](COLORREF c) -> CBrush* {
-        CBrush* b = CCC_GetPooledBrush(c);
-        if (b) { pDC->SelectObject(b); return b; }
-        return nullptr;
-    };
-    if (!bV)
-    {
-        int cY = rect.Height() / 2;
-        int tL = 12;
-        int tR = rect.Width() - 12;
-        int tW = tR - tL;
-        if (tW <= 0) return;
-        int tP = tL + (int)((double)(nPos - nMin) * tW / nR);
-        CPen* oldPen = pDC->GetCurrentPen();
-        CBrush* oldBrush = pDC->GetCurrentBrush();
-        selPen(5, RGB(100, 200, 150));
-        pDC->MoveTo(tL, cY);
-        pDC->LineTo(tP, cY);
-        selPen(3, RGB(220, 220, 230));
-        pDC->LineTo(tR, cY);
-        selPen(2, RGB(80, 160, 120));
-        for (int i = 0; i <= 10; i++)
-        {
-            int nx = tL + tW * i / 10;
-            int nh = (i % 5 == 0) ? 10 : 5;
-            pDC->MoveTo(nx, cY - nh);
-            pDC->LineTo(nx, cY + nh);
-            if (i % 5 == 0)
-            {
-                selBrush(RGB(150, 220, 180));
-                pDC->Ellipse(nx - 3, cY - nh - 5, nx + 3, cY - nh + 1);
-            }
-        }
-        CRect rD(tP - 9, cY - 12, tP + 9, cY + 12);
-        DrawDiamond(pDC, rD, RGB(100, 220, 160));
-        DrawSparkle(pDC, tP, cY - 16, 3, COLOR_SPARKLE);
-        selPen(1, RGB(200, 255, 220));
-        for (int a = 0; a < 360; a += 45)
-        {
-            double r = a * 3.14159 / 180.0;
-            pDC->MoveTo(tP + (int)(12 * cos(r)), cY + (int)(12 * sin(r)));
-            pDC->LineTo(tP + (int)(18 * cos(r)), cY + (int)(18 * sin(r)));
-        }
-        if (oldPen) pDC->SelectObject(oldPen);
-        if (oldBrush) pDC->SelectObject(oldBrush);
-    }
-    else
-    {
-        int cX = rect.Width() / 2;
-        int tT = 12;
-        int tB = rect.Height() - 12;
-        int tH = tB - tT;
-        if (tH <= 0) return;
-        int tP = tT + (int)((double)(nPos - nMin) * tH / nR);
-        CPen* oldPen = pDC->GetCurrentPen();
-        CBrush* oldBrush = pDC->GetCurrentBrush();
-        selPen(5, RGB(100, 200, 150));
-        pDC->MoveTo(cX, tP);
-        pDC->LineTo(cX, tB);
-        selPen(3, RGB(220, 220, 230));
-        pDC->MoveTo(cX, tT);
-        pDC->LineTo(cX, tP);
-        selPen(2, RGB(80, 160, 120));
-        for (int i = 0; i <= 10; i++)
-        {
-            int ny = tT + tH * i / 10;
-            int nw = (i % 5 == 0) ? 10 : 5;
-            pDC->MoveTo(cX - nw, ny);
-            pDC->LineTo(cX + nw, ny);
-            if (i % 5 == 0)
-            {
-                selBrush(RGB(150, 220, 180));
-                pDC->Ellipse(cX + nw + 1, ny - 3, cX + nw + 7, ny + 3);
-            }
-        }
-        CRect rD(cX - 9, tP - 12, cX + 9, tP + 12);
-        DrawDiamond(pDC, rD, RGB(100, 220, 160));
-        if (oldPen) pDC->SelectObject(oldPen);
-        if (oldBrush) pDC->SelectObject(oldBrush);
-    }
-}
-
-// 描画モード3: 丸いつまみのカプセル。中央に基準線。EQ帯など両方向の量向け。
-void CCustomSliderCtrl::DrawMode3(CDC* pDC, const CRect& rect, int nMin, int nMax, int nPos)
-{
-    int nR = nMax - nMin;
+    const int nR = nMax - nMin;
     if (nR <= 0) return;
-    const BOOL bV = (GetStyle() & TBS_VERT);
-    const COLORREF cTrack = RGB(214, 220, 232);
-    const COLORREF cFill = RGB(70, 132, 210);
-    const COLORREF cRim = RGB(36, 78, 150);
-    auto selPen = [&](int w, COLORREF c) {
-        CPen* p = CCC_GetPooledPen(w, c);
-        if (p) pDC->SelectObject(p);
-    };
-    auto selBrush = [&](COLORREF c) {
-        CBrush* b = CCC_GetPooledBrush(c);
-        if (b) pDC->SelectObject(b);
-    };
+    const BOOL bV = (GetStyle() & TBS_VERT) ? TRUE : FALSE;
+    const CCC_UiThemePal& th = CCC_UiTheme();
+    const BOOL above = nPos >= (nMin + nR / 2);
+    const COLORREF cFill = above ? th.accent : th.accent2;
     CPen* oldPen = pDC->GetCurrentPen();
     CBrush* oldBrush = pDC->GetCurrentBrush();
+    int axis, t0, t1, tP, tMid;
+    CccSliderAxis(bV, rect, 12, nMin, nMax, nPos, axis, t0, t1, tP, tMid);
+    if (t1 <= t0) {
+        if (oldPen) pDC->SelectObject(oldPen);
+        if (oldBrush) pDC->SelectObject(oldBrush);
+        return;
+    }
+    const int rad = CccThumbRad(rect, bV);
+    auto ink = [&](COLORREF c) {
+        if (CPen* p = CCC_GetPooledPen(1, c)) pDC->SelectObject(p);
+        if (CBrush* b = CCC_GetPooledBrush(c)) pDC->SelectObject(b);
+    };
     if (!bV)
     {
-        const int cY = rect.Height() / 2;
-        const int tL = 14;
-        const int tR = rect.Width() - 14;
-        const int tW = tR - tL;
-        if (tW <= 0) {
-            if (oldPen) pDC->SelectObject(oldPen);
-            if (oldBrush) pDC->SelectObject(oldBrush);
-            return;
-        }
-        const int tP = tL + (int)((double)(nPos - nMin) * tW / nR);
-        const int th = 8;
-        selPen(1, RGB(160, 170, 190));
-        selBrush(cTrack);
-        pDC->RoundRect(CRect(tL, cY - th / 2, tR, cY + th / 2 + 1), CPoint(th, th));
-        if (tP > tL + 2)
-        {
-            selPen(1, cFill);
-            selBrush(cFill);
-            pDC->RoundRect(CRect(tL, cY - th / 2, tP, cY + th / 2 + 1), CPoint(th, th));
-        }
-        const int mid = tL + tW / 2;
-        selPen(1, RGB(90, 100, 120));
-        pDC->MoveTo(mid, cY - th - 3);
-        pDC->LineTo(mid, cY + th + 4);
-        selPen(1, cRim);
-        selBrush(RGB(255, 255, 255));
-        pDC->Ellipse(tP - 7, cY - 7, tP + 7, cY + 7);
-        selBrush(cFill);
-        pDC->Ellipse(tP - 3, cY - 3, tP + 3, cY + 3);
+        const int cY = axis;
+        ink(th.track);
+        if (CPen* p = CCC_GetPooledPen(1, th.sep)) pDC->SelectObject(p);
+        CccSliderBar(pDC, t0, cY - 2, t1, cY + 3, FALSE);
+        ink(cFill);
+        CccSliderBar(pDC, min(tMid, tP), cY - 2, max(tMid, tP), cY + 3, FALSE);
+        if (CPen* p = CCC_GetPooledPen(1, th.text)) pDC->SelectObject(p);
+        const int tick = min(rad + 4, max(4, rect.Height() / 2 - 1));
+        pDC->MoveTo(tMid, cY - tick);
+        pDC->LineTo(tMid, cY + tick + 1);
+        CccSliderThumb(pDC, tP, cY, rad, FALSE, th.face, cFill);
     }
     else
     {
-        const int cX = rect.Width() / 2;
-        const int tT = 14;
-        const int tB = rect.Height() - 14;
-        const int tH = tB - tT;
-        if (tH <= 0) {
-            if (oldPen) pDC->SelectObject(oldPen);
-            if (oldBrush) pDC->SelectObject(oldBrush);
-            return;
-        }
-        const int tP = tT + (int)((double)(nPos - nMin) * tH / nR);
-        const int tw = 8;
-        selPen(1, RGB(160, 170, 190));
-        selBrush(cTrack);
-        pDC->RoundRect(CRect(cX - tw / 2, tT, cX + tw / 2 + 1, tB), CPoint(tw, tw));
-        if (tB > tP + 2)
-        {
-            selPen(1, cFill);
-            selBrush(cFill);
-            pDC->RoundRect(CRect(cX - tw / 2, tP, cX + tw / 2 + 1, tB), CPoint(tw, tw));
-        }
-        const int mid = tT + tH / 2;
-        selPen(1, RGB(90, 100, 120));
-        pDC->MoveTo(cX - tw - 3, mid);
-        pDC->LineTo(cX + tw + 4, mid);
-        selPen(1, cRim);
-        selBrush(RGB(255, 255, 255));
-        pDC->Ellipse(cX - 7, tP - 7, cX + 7, tP + 7);
-        selBrush(cFill);
-        pDC->Ellipse(cX - 3, tP - 3, cX + 3, tP + 3);
+        const int cX = axis;
+        ink(th.track);
+        if (CPen* p = CCC_GetPooledPen(1, th.sep)) pDC->SelectObject(p);
+        CccSliderBar(pDC, cX - 2, t0, cX + 3, t1, FALSE);
+        ink(cFill);
+        CccSliderBar(pDC, cX - 2, min(tMid, tP), cX + 3, max(tMid, tP), FALSE);
+        if (CPen* p = CCC_GetPooledPen(1, th.text)) pDC->SelectObject(p);
+        const int tick = min(rad + 4, max(4, rect.Width() / 2 - 1));
+        pDC->MoveTo(cX - tick, tMid);
+        pDC->LineTo(cX + tick + 1, tMid);
+        CccSliderThumb(pDC, cX, tP, rad, FALSE, th.face, cFill);
     }
     if (oldPen) pDC->SelectObject(oldPen);
     if (oldBrush) pDC->SelectObject(oldBrush);
 }
 
-// 描画モード4: 区切られたメーター。テンポや表示間隔など、量の階段向け。
-void CCustomSliderCtrl::DrawMode4(CDC* pDC, const CRect& rect, int nMin, int nMax, int nPos)
+// 描画モード2: 最小側から伸びる太いバー。ボリュームや効果量。中央線は無い。
+// クール／鋼／墨／超クールは角、それ以外は丸。つまみの絵はテーマのモチーフ。
+void CCustomSliderCtrl::DrawMode2(CDC* pDC, const CRect& rect, int nMin, int nMax, int nPos)
 {
-    int nR = nMax - nMin;
+    const int nR = nMax - nMin;
     if (nR <= 0) return;
-    const BOOL bV = (GetStyle() & TBS_VERT);
-    const int segs = 12;
-    const COLORREF cOn = RGB(255, 168, 48);
-    const COLORREF cOff = RGB(78, 82, 92);
-    auto selPen = [&](COLORREF c) {
-        CPen* p = CCC_GetPooledPen(1, c);
-        if (p) pDC->SelectObject(p);
-    };
-    auto selBrush = [&](COLORREF c) {
-        CBrush* b = CCC_GetPooledBrush(c);
-        if (b) pDC->SelectObject(b);
-    };
+    const BOOL bV = (GetStyle() & TBS_VERT) ? TRUE : FALSE;
+    const BOOL square = CccSliderSquare();
+    const CCC_UiThemePal& th = CCC_UiTheme();
     CPen* oldPen = pDC->GetCurrentPen();
     CBrush* oldBrush = pDC->GetCurrentBrush();
+    int axis, t0, t1, tP, tMid;
+    CccSliderAxis(bV, rect, 12, nMin, nMax, nPos, axis, t0, t1, tP, tMid);
+    if (t1 <= t0) {
+        if (oldPen) pDC->SelectObject(oldPen);
+        if (oldBrush) pDC->SelectObject(oldBrush);
+        return;
+    }
+    const int rad = CccThumbRad(rect, bV);
+    auto ink = [&](COLORREF edge, COLORREF fill) {
+        if (CPen* p = CCC_GetPooledPen(1, edge)) pDC->SelectObject(p);
+        if (CBrush* b = CCC_GetPooledBrush(fill)) pDC->SelectObject(b);
+    };
     if (!bV)
     {
-        const int cY = rect.Height() / 2;
-        const int tL = 10;
-        const int tR = rect.Width() - 10;
-        const int tW = tR - tL;
-        if (tW <= 0) {
-            if (oldPen) pDC->SelectObject(oldPen);
-            if (oldBrush) pDC->SelectObject(oldBrush);
-            return;
-        }
-        const int tP = tL + (int)((double)(nPos - nMin) * tW / nR);
-        const int gap = 2;
-        const int segW = max(2, (tW - gap * (segs - 1)) / segs);
-        for (int i = 0; i < segs; ++i)
-        {
-            const int x = tL + i * (segW + gap);
-            const BOOL on = (x + segW / 2) <= tP;
-            selPen(on ? cOn : cOff);
-            selBrush(on ? cOn : cOff);
-            pDC->Rectangle(x, cY - 5, x + segW, cY + 6);
-        }
-        selPen(RGB(255, 255, 255));
-        selBrush(RGB(255, 244, 220));
-        pDC->Rectangle(tP - 2, cY - 9, tP + 3, cY + 10);
+        const int cY = axis;
+        const int half = min(5, max(3, rect.Height() / 5));
+        ink(th.sep, th.track);
+        CccSliderBar(pDC, t0, cY - half, t1, cY + half + 1, square);
+        ink(th.accent, th.accent);
+        CccSliderBar(pDC, t0, cY - half, tP, cY + half + 1, square);
+        CccSliderThumb(pDC, tP, cY, rad, square, th.face, th.accent);
     }
     else
     {
-        const int cX = rect.Width() / 2;
-        const int tT = 10;
-        const int tB = rect.Height() - 10;
-        const int tH = tB - tT;
-        if (tH <= 0) {
-            if (oldPen) pDC->SelectObject(oldPen);
-            if (oldBrush) pDC->SelectObject(oldBrush);
-            return;
+        // 縦は下端がアクティブ（従来の tP→下 と同じ）。
+        const int cX = axis;
+        const int half = min(5, max(3, rect.Width() / 5));
+        ink(th.sep, th.track);
+        CccSliderBar(pDC, cX - half, t0, cX + half + 1, t1, square);
+        ink(th.accent, th.accent);
+        CccSliderBar(pDC, cX - half, tP, cX + half + 1, t1, square);
+        CccSliderThumb(pDC, cX, tP, rad, square, th.face, th.accent);
+    }
+    if (oldPen) pDC->SelectObject(oldPen);
+    if (oldBrush) pDC->SelectObject(oldBrush);
+}
+
+// 描画モード3: カプセル＋中央の基準線。EQ など、端から塗って中央を見る量。
+// 塗りは accent。つまみはリングの中にテーマのモチーフ。
+void CCustomSliderCtrl::DrawMode3(CDC* pDC, const CRect& rect, int nMin, int nMax, int nPos)
+{
+    const int nR = nMax - nMin;
+    if (nR <= 0) return;
+    const BOOL bV = (GetStyle() & TBS_VERT) ? TRUE : FALSE;
+    const CCC_UiThemePal& th = CCC_UiTheme();
+    CPen* oldPen = pDC->GetCurrentPen();
+    CBrush* oldBrush = pDC->GetCurrentBrush();
+    int axis, t0, t1, tP, tMid;
+    CccSliderAxis(bV, rect, 14, nMin, nMax, nPos, axis, t0, t1, tP, tMid);
+    if (t1 <= t0) {
+        if (oldPen) pDC->SelectObject(oldPen);
+        if (oldBrush) pDC->SelectObject(oldBrush);
+        return;
+    }
+    auto ink = [&](COLORREF edge, COLORREF fill) {
+        if (CPen* p = CCC_GetPooledPen(1, edge)) pDC->SelectObject(p);
+        if (CBrush* b = CCC_GetPooledBrush(fill)) pDC->SelectObject(b);
+    };
+    auto knob = [&](int x, int y) {
+        CccSliderThumb(pDC, x, y, 7, FALSE, th.face, th.accent);
+    };
+    if (!bV)
+    {
+        const int cY = axis;
+        const int thick = min(8, max(4, rect.Height() / 3));
+        ink(th.sep, th.track);
+        CccSliderBar(pDC, t0, cY - thick / 2, t1, cY + thick / 2 + 1, FALSE);
+        if (tP > t0 + 2)
+        {
+            ink(th.accent, th.accent);
+            CccSliderBar(pDC, t0, cY - thick / 2, tP, cY + thick / 2 + 1, FALSE);
         }
-        const int tP = tT + (int)((double)(nPos - nMin) * tH / nR);
+        if (CPen* p = CCC_GetPooledPen(1, th.text)) pDC->SelectObject(p);
+        pDC->MoveTo(tMid, cY - thick / 2 - 3);
+        pDC->LineTo(tMid, cY + thick / 2 + 4);
+        knob(tP, cY);
+    }
+    else
+    {
+        const int cX = axis;
+        const int thick = min(8, max(4, rect.Width() / 3));
+        ink(th.sep, th.track);
+        CccSliderBar(pDC, cX - thick / 2, t0, cX + thick / 2 + 1, t1, FALSE);
+        if (t1 > tP + 2)
+        {
+            ink(th.accent, th.accent);
+            CccSliderBar(pDC, cX - thick / 2, tP, cX + thick / 2 + 1, t1, FALSE);
+        }
+        if (CPen* p = CCC_GetPooledPen(1, th.text)) pDC->SelectObject(p);
+        pDC->MoveTo(cX - thick / 2 - 3, tMid);
+        pDC->LineTo(cX + thick / 2 + 4, tMid);
+        knob(cX, tP);
+    }
+    if (oldPen) pDC->SelectObject(oldPen);
+    if (oldBrush) pDC->SelectObject(oldBrush);
+}
+
+// 描画モード4: 区切られたメーター。表示間隔など、端から増える階段。
+// 点灯は accent、消灯は textDim。角テーマは四角、ほかは丸い駒。位置はテーマのモチーフ。
+void CCustomSliderCtrl::DrawMode4(CDC* pDC, const CRect& rect, int nMin, int nMax, int nPos)
+{
+    const int nR = nMax - nMin;
+    if (nR <= 0) return;
+    const BOOL bV = (GetStyle() & TBS_VERT) ? TRUE : FALSE;
+    const BOOL square = CccSliderSquare();
+    const CCC_UiThemePal& th = CCC_UiTheme();
+    const int segs = 12;
+    CPen* oldPen = pDC->GetCurrentPen();
+    CBrush* oldBrush = pDC->GetCurrentBrush();
+    int axis, t0, t1, tP, tMid;
+    CccSliderAxis(bV, rect, 10, nMin, nMax, nPos, axis, t0, t1, tP, tMid);
+    if (t1 <= t0) {
+        if (oldPen) pDC->SelectObject(oldPen);
+        if (oldBrush) pDC->SelectObject(oldBrush);
+        return;
+    }
+    auto block = [&](int l, int t, int r, int b, BOOL on) {
+        const COLORREF c = on ? th.accent : th.textDim;
+        if (CPen* p = CCC_GetPooledPen(1, c)) pDC->SelectObject(p);
+        if (CBrush* bsh = CCC_GetPooledBrush(c)) pDC->SelectObject(bsh);
+        CccSliderBar(pDC, l, t, r, b, square);
+    };
+    if (!bV)
+    {
+        const int cY = axis;
         const int gap = 2;
-        const int segH = max(2, (tH - gap * (segs - 1)) / segs);
+        const int tW = t1 - t0;
+        const int segW = max(2, (tW - gap * (segs - 1)) / segs);
+        const int bar = min(5, max(2, rect.Height() / 4));
         for (int i = 0; i < segs; ++i)
         {
-            const int y = tB - (i + 1) * segH - i * gap;
-            const BOOL on = (y + segH / 2) >= tP;
-            selPen(on ? cOn : cOff);
-            selBrush(on ? cOn : cOff);
-            pDC->Rectangle(cX - 5, y, cX + 6, y + segH);
+            const int x = t0 + i * (segW + gap);
+            block(x, cY - bar, x + segW, cY + bar + 1, (x + segW / 2) <= tP);
         }
-        selPen(RGB(255, 255, 255));
-        selBrush(RGB(255, 244, 220));
-        pDC->Rectangle(cX - 9, tP - 2, cX + 10, tP + 3);
+        CccSliderThumb(pDC, tP, cY, min(5, CccThumbRad(rect, FALSE)), square, th.face, th.accent);
+    }
+    else
+    {
+        const int cX = axis;
+        const int gap = 2;
+        const int tH = t1 - t0;
+        const int segH = max(2, (tH - gap * (segs - 1)) / segs);
+        const int bar = min(5, max(2, rect.Width() / 4));
+        for (int i = 0; i < segs; ++i)
+        {
+            const int y = t1 - (i + 1) * segH - i * gap;
+            block(cX - bar, y, cX + bar + 1, y + segH, (y + segH / 2) >= tP);
+        }
+        CccSliderThumb(pDC, cX, tP, min(5, CccThumbRad(rect, TRUE)), square, th.face, th.accent);
     }
     if (oldPen) pDC->SelectObject(oldPen);
     if (oldBrush) pDC->SelectObject(oldBrush);
@@ -10913,8 +11684,10 @@ static void CCC_DrawListCheckBox(CDC* pDC, const CRect& rc, bool checked)
     static HDC s_mem[2] = {};
     static HGDIOBJ s_old[2] = {};
     static int s_w = 0, s_h = 0;
+    static int s_theme = -1;
+    const int themeNow = CCC_UiThemeId();
     const int slot = checked ? 1 : 0;
-    if (s_w != w || s_h != h) {
+    if (s_w != w || s_h != h || s_theme != themeNow) {
         for (int i = 0; i < 2; ++i) {
             if (s_mem[i]) {
                 if (s_old[i]) ::SelectObject(s_mem[i], s_old[i]);
@@ -10926,6 +11699,7 @@ static void CCC_DrawListCheckBox(CDC* pDC, const CRect& rc, bool checked)
             s_bits[i] = NULL;
         }
         s_w = s_h = 0;
+        s_theme = themeNow;
     }
     if (!s_dib[slot] || !s_bits[slot] || !s_mem[slot]) {
         BITMAPINFO bi;
@@ -10951,20 +11725,29 @@ static void CCC_DrawListCheckBox(CDC* pDC, const CRect& rc, bool checked)
         }
         s_old[slot] = ::SelectObject(s_mem[slot], s_dib[slot]);
         RECT zr = { 0, 0, w, h };
-        HBRUSH brFill = ::CreateSolidBrush(RGB(255, 255, 255));
+        const CCC_UiThemePal& thBox = CCC_UiTheme();
+        HBRUSH brFill = ::CreateSolidBrush(thBox.face);
         ::FillRect(s_mem[slot], &zr, brFill);
         ::DeleteObject(brFill);
 
-        HPEN penBorder = ::CreatePen(PS_SOLID, 1, RGB(70, 70, 78));
+        POINT boxPts[24];
+        int boxDiam = 0;
+        const int boxN = CCC_ThemeOutline(CRect(0, 0, w, h), boxPts, 24, &boxDiam);
+        HPEN penBorder = ::CreatePen(PS_SOLID, 1, thBox.edge);
         HGDIOBJ oldPen = ::SelectObject(s_mem[slot], penBorder);
         HGDIOBJ oldBr = ::SelectObject(s_mem[slot], ::GetStockObject(NULL_BRUSH));
-        ::Rectangle(s_mem[slot], 0, 0, w, h);
+        if (boxN >= 3)
+            ::Polygon(s_mem[slot], boxPts, boxN);
+        else if (boxDiam > 1)
+            ::RoundRect(s_mem[slot], 0, 0, w, h, boxDiam, boxDiam);
+        else
+            ::Rectangle(s_mem[slot], 0, 0, w, h);
         ::SelectObject(s_mem[slot], oldBr);
 
         if (checked)
         {
             const int penW = (std::max)(2, w / 7);
-            HPEN penChk = ::CreatePen(PS_SOLID, penW, RGB(0, 140, 40));
+            HPEN penChk = ::CreatePen(PS_SOLID, penW, thBox.accent);
             ::SelectObject(s_mem[slot], penChk);
             ::MoveToEx(s_mem[slot], w * 22 / 100, h * 52 / 100, NULL);
             ::LineTo(s_mem[slot], w * 42 / 100, h * 72 / 100);
@@ -11163,10 +11946,12 @@ void CCustomListCtrl::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
         if (bOpaqueHost)
         {
 #if CCUSTOM_AERO_SUPPORT
-            if (bHi)
+            if (bHi && CCC_ThemeFaceOf().sel == CCC_FACE_SEL_WASH && CCC_ThemeFaceOf().gloss > 0)
                 DrawGlossHighlight(pDC, r, 6, bg);
             else
                 CCC_FillRectOpaqueBits(pDC->GetSafeHdc(), r, bg);
+            if (bHi && CCC_ThemeFaceOf().sel != CCC_FACE_SEL_WASH)
+                CCC_MarkThemedSelection(pDC, r, TRUE);
 #endif
         }
         else if (bLvAero)
@@ -11196,7 +11981,7 @@ void CCustomListCtrl::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
         }
 
         if (bHi && !bLvAero && !bOpaqueHost)
-            DrawGlossHighlight(pDC, r, 6);
+            CCC_MarkThemedSelection(pDC, r, FALSE);
 
         // プレイリスト系は m_mpNoteIconGet で実♪を取得(GetDispInfo の iImage は空のまま)。
         // テキスト左余白計算でも同じ値を使う。
@@ -11942,9 +12727,9 @@ void CCustomTreeCtrl::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
 
 		COLORREF clrBg;
 		if (bSel)                           clrBg = COLOR_SEL_BG;
-		else if (bHot)                      clrBg = RGB(255, 210, 230);
+		else if (bHot)                      clrBg = CCC_UiTheme().hotBot;
 		else if (m_nItemDrawIndex % 2 == 0) clrBg = COLOR_LIST_BG;
-		else                                clrBg = RGB(255, 236, 246);
+		else                                clrBg = COLOR_LIST_ALT;
 
 #if CCUSTOM_AERO_SUPPORT
 		if (CCC_HostNeedsChildOpaque(m_hWnd))
@@ -11952,6 +12737,8 @@ void CCustomTreeCtrl::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
 		else
 #endif
 			pDC->FillSolidRect(&rcRow, clrBg);
+		if (bSel || bHot)
+			CCC_MarkThemedSelection(pDC, rcRow, CCC_HostNeedsChildOpaque(m_hWnd));
 
 		int nLevel = GetItemLevel(hItem);
 		int nIndent = GetIndent();
@@ -11962,11 +12749,13 @@ void CCustomTreeCtrl::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
 
 		if (bHasLines && nLevel > 0)
 		{
-			DrawLaceLine(pDC,
+			CCC_DrawThemedSep(pDC,
 				rcClient.left + nIndent * nLevel - nIndent / 2, nCenterY,
-				nConnX - 2, nCenterY,
-				RGB(180, 150, 200));
-			DrawFlower(pDC, nConnX - 2, nCenterY, 3, RGB(255, 200, 220));
+				nConnX - 2);
+			if (CCC_ThemeSilk())
+				DrawFlower(pDC, nConnX - 2, nCenterY, 3, CCC_UiTheme().accent2);
+			else
+				DrawThemeMotif(pDC, CRect(nConnX - 6, nCenterY - 4, nConnX + 2, nCenterY + 4), CCC_UiTheme().accent);
 		}
 
 		BOOL bHasChild = ItemHasChildren(hItem) != FALSE;
@@ -11977,29 +12766,47 @@ void CCustomTreeCtrl::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
 			int  btnR = 7;
 			CRect rcBtn(bx - btnR, by - btnR, bx + btnR, by + btnR);
 
-			CPen   penBtn(PS_SOLID, 1, RGB(200, 150, 200));
-			CBrush brBtn(bExpanded ? RGB(255, 230, 240) : RGB(240, 230, 255));
+			CPen   penBtn(PS_SOLID, 1, CCC_UiTheme().edge);
+			CBrush brBtn(bExpanded ? CCC_UiTheme().hotTop : CCC_UiTheme().face);
 			CPen* pOldPen = pDC->SelectObject(&penBtn);
 			CBrush* pOldBr = pDC->SelectObject(&brBtn);
-			pDC->RoundRect(&rcBtn, CPoint(4, 4));
+			{
+				POINT pts[24];
+				int diam = 0;
+				const int n = CCC_ThemeOutline(rcBtn, pts, 24, &diam);
+				if (n >= 3)
+					pDC->Polygon(pts, n);
+				else if (diam > 1)
+					pDC->RoundRect(&rcBtn, CPoint(diam, diam));
+				else
+					pDC->Rectangle(&rcBtn);
+			}
 			pDC->SelectObject(pOldPen);
 			pDC->SelectObject(pOldBr);
 
 			if (bExpanded)
 			{
-				DrawStar(pDC, bx, by, 4, RGB(255, 100, 150));
-				DrawFlower(pDC, bx, by, 3, RGB(255, 200, 220));
-				CPen penMinus(PS_SOLID, 2, RGB(180, 60, 130));
+				if (CCC_ThemeSilk()) {
+					DrawStar(pDC, bx, by, 4, CCC_UiTheme().accent);
+					DrawFlower(pDC, bx, by, 3, CCC_UiTheme().accent2);
+				} else {
+					DrawThemeMotif(pDC, CRect(bx - 5, by - 5, bx + 5, by + 5), CCC_UiTheme().accent);
+				}
+				CPen penMinus(PS_SOLID, 2, CCC_UiTheme().text);
 				CPen* pOP = pDC->SelectObject(&penMinus);
 				pDC->MoveTo(bx - 3, by); pDC->LineTo(bx + 4, by);
 				pDC->SelectObject(pOP);
 			}
 			else
 			{
-				DrawFlower(pDC, bx, by, 3, RGB(180, 130, 230));
-				CRect rcDiamond(bx - 5, by - 5, bx + 5, by + 5);
-				DrawDiamond(pDC, rcDiamond, RGB(200, 180, 255));
-				CPen penPlus(PS_SOLID, 2, RGB(120, 60, 200));
+				if (CCC_ThemeSilk()) {
+					DrawFlower(pDC, bx, by, 3, CCC_UiTheme().accent2);
+					CRect rcDiamond(bx - 5, by - 5, bx + 5, by + 5);
+					DrawDiamond(pDC, rcDiamond, CCC_UiTheme().accent);
+				} else {
+					DrawThemeMotif(pDC, CRect(bx - 5, by - 5, bx + 5, by + 5), CCC_UiTheme().accent2);
+				}
+				CPen penPlus(PS_SOLID, 2, CCC_UiTheme().text);
 				CPen* pOP = pDC->SelectObject(&penPlus);
 				pDC->MoveTo(bx - 3, by); pDC->LineTo(bx + 4, by);
 				pDC->MoveTo(bx, by - 3); pDC->LineTo(bx, by + 4);
@@ -12263,13 +13070,8 @@ void CCustomTabCtrl::DrawPagePanel(CDC* pDC, const CRect& rcClient)
 	CRect rcClip;
 	rcClip.IntersectRect(&rcPanel, &rcClient);
 	if (rcClip.IsRectEmpty()) return;
-	DrawGradientBackground(pDC, rcClip, CCC_Lighten(COLOR_DIALOG_BG, 25), COLOR_DIALOG_BG, 0);
-	CPen pen(PS_SOLID, 1, CCC_Darken(COLOR_DIALOG_BG, 30));
-	CPen* pOldPen = pDC->SelectObject(&pen);
-	CBrush* pOldBr = (CBrush*)pDC->SelectStockObject(NULL_BRUSH);
-	pDC->RoundRect(&rcClip, CPoint(6, 6));
-	pDC->SelectObject(pOldBr);
-	pDC->SelectObject(pOldPen);
+	DrawGradientBackground(pDC, rcClip, CCC_Lighten(COLOR_DIALOG_BG, 18), COLOR_DIALOG_BG, CCC_ThemeFaceOf().fill == CCC_FACE_FILL_HGRAD ? 90 : 0);
+	CCC_StrokeThemedPlate(pDC, rcClip, FALSE, FALSE);
 }
 
 // 角丸グラデ。選択横タブは Soft 立体。常時 Soft タイマは張らない（UI スレッドを食う）。
@@ -12280,48 +13082,23 @@ void CCustomTabCtrl::DrawTabItem(CDC* pDC, int nItem, CRect rc, BOOL bSelected, 
 	if (bSelected) rc.InflateRect(1, 1);
 	else rc.DeflateRect(1, 1);
 
-	COLORREF clrTop, clrBottom, clrEdge, clrText;
-	if (bSelected) {
-		clrTop = CCC_Lighten(COLOR_BUTTON_BG, 45);
+	COLORREF clrBottom, clrText;
+	if (bSelected)
 		clrBottom = COLOR_BUTTON_BG;
-		clrEdge = CCC_Darken(COLOR_BUTTON_BG, 45);
-		clrText = RGB(20, 60, 20);
-	}
-	else if (bHot) {
-		clrTop = CCC_Lighten(COLOR_BUTTON_HOVER, 35);
+	else if (bHot)
 		clrBottom = COLOR_BUTTON_HOVER;
-		clrEdge = CCC_Darken(COLOR_BUTTON_HOVER, 35);
-		clrText = RGB(25, 55, 25);
-	}
-	else {
-		clrTop = RGB(255, 236, 244);
-		clrBottom = RGB(255, 210, 228);
-		clrEdge = RGB(220, 140, 170);
-		clrText = RGB(40, 40, 40);
-	}
+	else
+		clrBottom = CCC_UiTheme().bg1;
+	clrText = CCC_InkOn(clrBottom);
 
-	CRgn rgn;
-	rgn.CreateRoundRectRgn(rc.left, rc.top, rc.right + 1, rc.bottom + 1, 8, 8);
-	pDC->SelectClipRgn(&rgn);
-	DrawGradientBackground(pDC, rc, clrTop, clrBottom, IsVertical() ? 90 : 0);
-	if (bSelected && !IsVertical()) {
-		DrawGlossHighlight(pDC, rc, 6);
+	CCC_FillThemedPlate(pDC, rc, clrBottom, FALSE);
+	CCC_StrokeThemedPlate(pDC, rc, FALSE, bSelected);
+	if (bSelected && !IsVertical() && CCC_ThemeFaceOf().gloss >= 6) {
 		if (rc.Width() >= 36 && rc.Height() >= 18)
 			DrawSoftJkBackdrop(pDC, rc, (int)(::GetTickCount64() / 80), bHot);
-		DrawSoftJkThumb(pDC, CRect(rc.right - 16, rc.top + 2, rc.right - 2, rc.top + 16),
-			(int)(::GetTickCount64() / 220), bHot, bHot ? 10.f : 0.f);
-		// 常時 Soft タイマーは UI スレッドを食うので張らない（描画は上で済む）
 		if (GetSafeHwnd())
 			KillTimer(kTabSoftTimerId);
 	}
-	pDC->SelectClipRgn(NULL);
-
-	CPen pen(PS_SOLID, 1, clrEdge);
-	CPen* pOldPen = pDC->SelectObject(&pen);
-	CBrush* pOldBr = (CBrush*)pDC->SelectStockObject(NULL_BRUSH);
-	pDC->RoundRect(&rc, CPoint(8, 8));
-	pDC->SelectObject(pOldBr);
-	pDC->SelectObject(pOldPen);
 
 	TCHAR szText[256] = {};
 	TCITEM ti = {};
@@ -13009,13 +13786,40 @@ void CCustomStandardButton::PaintClient(CDC& dc, const CRect& r)
     {
     COLORREF bg = bP ? COLOR_BUTTON_PUSHED : (m_bMouseOver ? COLOR_BUTTON_HOVER : COLOR_BUTTON_BG);
     if (bD) bg = CCC_Desaturate(bg, 68);
-    if (m_bGradEnable)
-        DrawGradientBackground(&mDC, r,
+    if (m_bFlat)
+        mDC.FillSolidRect(&r, bg);
+    else if (m_bGradEnable) {
+        mDC.FillSolidRect(&r, CCC_ClrDialogBg());
+        CRect plate = r;
+        plate.DeflateRect(1, 1);
+        CRgn clip;
+        POINT shp[24];
+        int diam = 0;
+        const int nn = CCC_ThemeOutline(plate, shp, 24, &diam);
+        BOOL have = FALSE;
+        if (nn >= 3)
+            have = clip.CreatePolygonRgn(shp, nn, WINDING);
+        else if (diam > 1)
+            have = clip.CreateRoundRectRgn(plate.left, plate.top, plate.right + 1, plate.bottom + 1, diam, diam);
+        else
+            have = clip.CreateRectRgnIndirect(&plate);
+        if (have)
+            mDC.SelectClipRgn(&clip);
+        DrawGradientBackground(&mDC, plate,
             bD ? CCC_Desaturate(m_clrGradStart, 68) : m_clrGradStart,
             bD ? CCC_Desaturate(m_clrGradEnd, 68) : m_clrGradEnd,
             m_nGradDirection);
-    else
-        DrawSatinFill(&mDC, r, bg);          // サテン/シルク質感
+        if (have)
+            mDC.SelectClipRgn(NULL);
+        CCC_StrokeThemedPlate(&mDC, plate, bP, FALSE);
+    }
+    else {
+        mDC.FillSolidRect(&r, CCC_ClrDialogBg());
+        CRect plate = r;
+        plate.DeflateRect(1, 1);
+        CCC_FillThemedPlate(&mDC, plate, bg, bP);
+        CCC_StrokeThemedPlate(&mDC, plate, bP, FALSE);
+    }
     }
 
     if (!bAeroTrans)
@@ -13023,11 +13827,13 @@ void CCustomStandardButton::PaintClient(CDC& dc, const CRect& r)
         // ぷるんとした濡れツヤ + ジェリー感(リムライト&インナーシャドウ)
         CRect rg = r;
         if (bP) rg.OffsetRect(1, 1);
-        DrawGlossHighlight(&mDC, rg, m_bFlat ? 4 : 8);
-        if (!m_bFlat)
+        const BOOL bPlate = !m_bFlat && !m_bGradEnable;
+        if (!bPlate && CCC_ThemeFaceOf().gloss > 0)
+            DrawGlossHighlight(&mDC, rg, m_bFlat ? 4 : 8);
+        if (!bPlate && !m_bFlat && CCC_ThemeFaceOf().jelly)
             DrawJellyEdges(&mDC, rg, 8, CCC_UiTheme().ribbonEdge);
-        // Soft3D: flat ボタンはチップも禁止（αブレンドがアクリル透過に見える）
-        if (!m_bFlat && !CCC_IsCaptionChromeCtrl(m_hWnd) && r.Width() >= 24 && r.Height() >= 16)
+        // Soft3D: つやのあるテーマだけ。平坦ボタンとキャプション帯は載せない。
+        if (!m_bFlat && CCC_ThemeFaceOf().gloss >= 6 && !CCC_IsCaptionChromeCtrl(m_hWnd) && r.Width() >= 24 && r.Height() >= 16)
         {
             const int tick = (int)(::GetTickCount64() / 80) + (int)(m_nAnimTick / 2);
             if (r.Width() >= 36 && r.Height() >= 20)
@@ -13042,12 +13848,12 @@ void CCustomStandardButton::PaintClient(CDC& dc, const CRect& r)
 
         // 大きめのボタンは裾に透けレースの色気を(アイコン平坦ボタンは省略=はみ出し防止)
         if (!m_bFlat && !m_hIconIn && r.Width() >= 64 && r.Height() >= 26)
-            if (CCC_ThemeSilk())
-                DrawLaceScallop(&mDC, r.left + 8, r.bottom - 6, r.right - 8, 3, COLOR_LACE);
+            if (CCC_ThemeFaceOf().lace)
+                DrawLaceScallop(&mDC, r.left + 8, r.bottom - 6, r.right - 8, 3, CCC_UiTheme().accent2);
 
         // ホバー時: とろみハイライトがスーッと流れる(押下トグル上でもホバー中は表示)
         // 点はホバー終了後も残点が消えるまで描画
-        if (!m_bFlat && (bShowFlow || m_nSparkleN > 0))
+        if (!m_bFlat && CCC_ThemeFaceOf().gloss > 0 && (bShowFlow || m_nSparkleN > 0))
         {
             const int W = r.Width();
             const int H = r.Height();
@@ -13149,42 +13955,15 @@ void CCustomStandardButton::PaintClient(CDC& dc, const CRect& r)
 
     if (!bAeroTrans)
     {
-    CPen pL(PS_SOLID, m_bFlat ? 1 : 2, RGB(255, 255, 255));
-    CPen pD(PS_SOLID, m_bFlat ? 1 : 2, RGB(128, 128, 128));
-    CPen* op;
-    if (bP)
-    {
-        op = mDC.SelectObject(&pD);
-        mDC.MoveTo(r.left, r.bottom - 1);
-        mDC.LineTo(r.left, r.top);
-        mDC.LineTo(r.right - 1, r.top);
-        mDC.SelectObject(&pL);
-        mDC.LineTo(r.right - 1, r.bottom - 1);
-        mDC.LineTo(r.left, r.bottom - 1);
-        CRect ri = r;
-        ri.DeflateRect(m_bFlat ? 1 : 2, m_bFlat ? 1 : 2);
-        mDC.SelectObject(&pD);
-        mDC.MoveTo(ri.left, ri.bottom - 1);
-        mDC.LineTo(ri.left, ri.top);
-        mDC.LineTo(ri.right - 1, ri.top);
+    if (m_bFlat) {
+        CPen pEdge(PS_SOLID, 1, CCC_UiTheme().edge);
+        CPen* op = mDC.SelectObject(&pEdge);
+        mDC.SelectStockObject(NULL_BRUSH);
+        mDC.Rectangle(&r);
+        mDC.SelectObject(op);
+    } else if (m_bGradEnable) {
+        CCC_StrokeThemedPlate(&mDC, r, bP, FALSE);
     }
-    else
-    {
-        op = mDC.SelectObject(&pL);
-        mDC.MoveTo(r.left, r.bottom - 1);
-        mDC.LineTo(r.left, r.top);
-        mDC.LineTo(r.right - 1, r.top);
-        mDC.SelectObject(&pD);
-        mDC.LineTo(r.right - 1, r.bottom - 1);
-        mDC.LineTo(r.left, r.bottom - 1);
-        CRect ri = r;
-        ri.DeflateRect(m_bFlat ? 1 : 2, m_bFlat ? 1 : 2);
-        mDC.SelectObject(&pL);
-        mDC.MoveTo(ri.left, ri.bottom - 1);
-        mDC.LineTo(ri.left, ri.top);
-        mDC.LineTo(ri.right - 1, ri.top);
-    }
-    mDC.SelectObject(op);
 
     if (bF && !bD)
     {
@@ -13257,16 +14036,21 @@ void CCustomStandardButton::PaintClient(CDC& dc, const CRect& r)
         ::DrawIconEx(mDC.GetSafeHdc(), ix, iy, hDraw, iw, ih, 0, NULL, DI_NORMAL);
     }
 
+    COLORREF inkBg = bP ? COLOR_BUTTON_PUSHED : (m_bMouseOver ? COLOR_BUTTON_HOVER : COLOR_BUTTON_BG);
+    if (m_bGradEnable) {
+        const COLORREF a = m_clrGradStart, bcol = m_clrGradEnd;
+        inkBg = RGB((GetRValue(a) + GetRValue(bcol)) / 2,
+            (GetGValue(a) + GetGValue(bcol)) / 2,
+            (GetBValue(a) + GetBValue(bcol)) / 2);
+    }
     if (!s.IsEmpty() && !hDraw)
-        DrawSmartText(&mDC, r, s, bD, bP,
-            bP ? COLOR_BUTTON_PUSHED : (m_bMouseOver ? COLOR_BUTTON_HOVER : COLOR_BUTTON_BG));
+        DrawSmartText(&mDC, r, s, bD, bP, inkBg);
     else if (drawLabel)
     {
         CRect tr = r;
         tr.left = iconRight + 3;
         tr.DeflateRect(2, 1);
-        DrawSmartText2(&mDC, tr, s, DT_LEFT | DT_VCENTER | DT_NOPREFIX, bD, bP,
-            bP ? COLOR_BUTTON_PUSHED : (m_bMouseOver ? COLOR_BUTTON_HOVER : COLOR_BUTTON_BG));
+        DrawSmartText2(&mDC, tr, s, DT_LEFT | DT_VCENTER | DT_NOPREFIX, bD, bP, inkBg);
     }
     mDC.SelectObject(pOF);
 
@@ -13849,17 +14633,23 @@ void CCustomCheckBox::OnDrawLayer(CDC* pDC, CRect rect)
             if (s < 14) s = 14;
             int cy2 = rh / 2;
             CRect rcB(0, cy2 - s / 2, s, cy2 + s / 2);
-            // チェック枠はやわらかいローズで(無効時は彩度を落として「無効」を伝える)
-            COLORREF clrFrame = bC ? RGB(255, 120, 165) : RGB(255, 156, 184);
-            COLORREF clrBox = RGB(255, 249, 252);
+            const CCC_ThemeFace& face = CCC_ThemeFaceOf();
+            const CCC_UiThemePal& th = CCC_UiTheme();
+            COLORREF clrFrame = bC ? th.accent : th.accent2;
+            COLORREF clrBox = th.face;
             if (bD) { clrFrame = CCC_Desaturate(clrFrame, 62); clrBox = CCC_Desaturate(clrBox, 62); }
-            CPen p2(PS_SOLID, 2, clrFrame);
-            CBrush b2(clrBox);
-            dc.SelectObject(&p2); dc.SelectObject(&b2);
-            dc.RoundRect(&rcB, CPoint(6, 6));
-            DrawGlossHighlight(&dc, rcB, 4);
-            DrawJellyEdges(&dc, rcB, 4, RGB(120, 40, 80));   // ぷっくりジェリー感
-            // 枠内にさりげない Soft3D（ホバー／ON で NeonBox ヨー。レ点 sway は別）
+            if (CCC_UiThemeId() == CCC_UI_THEME_CUTE) {
+                CPen p2(PS_SOLID, 2, clrFrame);
+                CBrush b2(clrBox);
+                dc.SelectObject(&p2); dc.SelectObject(&b2);
+                dc.RoundRect(&rcB, CPoint(6, 6));
+                DrawGlossHighlight(&dc, rcB, 4);
+                DrawJellyEdges(&dc, rcB, 4, th.ribbonEdge);
+            } else {
+                CCC_FillThemedPlate(&dc, rcB, clrBox, bC);
+                CCC_StrokeThemedPlate(&dc, rcB, bC, FALSE);
+            }
+            if (face.gloss >= 6)
             {
                 CRect chip = rcB;
                 chip.DeflateRect(1, 1);
@@ -13869,13 +14659,8 @@ void CCustomCheckBox::OnDrawLayer(CDC* pDC, CRect rect)
                 else
                     DrawSoftJkChip(&dc, chip, tick / 4, FALSE);
             }
-            // 箱の下に透けレース + 黒の細レースでランジェリー風の色気
-            if (rcB.bottom + 5 < rh)
-            {
-                DrawLaceLine(&dc, rcB.left + 1, rcB.bottom + 2, rcB.right - 1, rcB.bottom + 2, RGB(60, 40, 55));
-                if (CCC_ThemeSilk())
-                    DrawLaceScallop(&dc, rcB.left, rcB.bottom + 4, rcB.right, 3, COLOR_LACE);
-            }
+            if (face.lace && rcB.bottom + 5 < rh)
+                DrawLaceScallop(&dc, rcB.left, rcB.bottom + 4, rcB.right, 3, th.accent2);
             // 先にテキストを描く(チェック✓はこの上に乗せる)。
             // 文字高さは箱(最大18)ではなくコントロール全体を使い、意図したフォントが縮小されないようにする。
             CString t;
@@ -14019,16 +14804,24 @@ void CCustomRadioButton::OnDrawLayer(CDC* pDC, CRect rect)
             if (s < 14) s = 14;
             int cy2 = rh / 2;
             CRect rcB(0, cy2 - s / 2, s, cy2 + s / 2);
-            COLORREF clrFrame = bC ? RGB(255, 120, 165) : RGB(255, 156, 184);
-            COLORREF clrBox = RGB(255, 249, 252);
+            const CCC_ThemeFace& face = CCC_ThemeFaceOf();
+            const CCC_UiThemePal& th = CCC_UiTheme();
+            COLORREF clrFrame = bC ? th.accent : th.accent2;
+            COLORREF clrBox = th.face;
             if (bD) { clrFrame = CCC_Desaturate(clrFrame, 62); clrBox = CCC_Desaturate(clrBox, 62); }
-            CPen p2(PS_SOLID, 2, clrFrame);
-            CBrush b2(clrBox);
-            CPen* op = dc.SelectObject(&p2); CBrush* ob = dc.SelectObject(&b2);
-            dc.Ellipse(&rcB);
-            dc.SelectObject(op); dc.SelectObject(ob);
-            DrawGlossHighlight(&dc, rcB, 4);
-            DrawJellyEdges(&dc, rcB, 4, RGB(120, 40, 80));
+            if (CCC_UiThemeId() == CCC_UI_THEME_CUTE) {
+                CPen p2(PS_SOLID, 2, clrFrame);
+                CBrush b2(clrBox);
+                CPen* op = dc.SelectObject(&p2); CBrush* ob = dc.SelectObject(&b2);
+                dc.Ellipse(&rcB);
+                dc.SelectObject(op); dc.SelectObject(ob);
+                DrawGlossHighlight(&dc, rcB, 4);
+                DrawJellyEdges(&dc, rcB, 4, th.ribbonEdge);
+            } else {
+                CCC_FillThemedPlate(&dc, rcB, clrBox, bC);
+                CCC_StrokeThemedPlate(&dc, rcB, bC, FALSE);
+            }
+            if (face.gloss >= 6)
             {
                 CRect chip = rcB;
                 chip.DeflateRect(1, 1);
@@ -14038,12 +14831,8 @@ void CCustomRadioButton::OnDrawLayer(CDC* pDC, CRect rect)
                 else
                     DrawSoftJkChip(&dc, chip, tick / 4, FALSE);
             }
-            if (rcB.bottom + 5 < rh)
-            {
-                DrawLaceLine(&dc, rcB.left + 1, rcB.bottom + 2, rcB.right - 1, rcB.bottom + 2, RGB(60, 40, 55));
-                if (CCC_ThemeSilk())
-                    DrawLaceScallop(&dc, rcB.left, rcB.bottom + 4, rcB.right, 3, COLOR_LACE);
-            }
+            if (face.lace && rcB.bottom + 5 < rh)
+                DrawLaceScallop(&dc, rcB.left, rcB.bottom + 4, rcB.right, 3, th.accent2);
             CString t;
             GetWindowText(t);
             if (!t.IsEmpty())
@@ -14070,7 +14859,8 @@ void CCustomRadioButton::OnDrawLayer(CDC* pDC, CRect rect)
                 CPen* op2 = dc.SelectObject(&pDot); CBrush* ob2 = dc.SelectObject(&bDot);
                 dc.Ellipse(&rk);
                 dc.SelectObject(op2); dc.SelectObject(ob2);
-                DrawSparkle(&dc, rk.left + 2, rk.top + 1, 2, COLOR_SPARKLE);
+                if (face.gloss > 0)
+                    DrawSparkle(&dc, rk.left + 2, rk.top + 1, 2, th.accent2);
             }
         }
         if (GetFocus() == this)
@@ -14430,27 +15220,43 @@ void CCustomProgressCtrl::DrawProgressLayer(CDC& dc, const CRect& r, BOOL bAeroT
 		CCC_DrawInwoman(&dc, r, bAeroTrans);
 		return;
 	}
-	const int rr = (std::max)(4, track.Height() / 2);
+	const CCC_ThemeFace& face = CCC_ThemeFaceOf();
+	int rr = CCC_ThemedCorner(track);
+	if (face.edge == CCC_FACE_EDGE_HAIR || face.edge == CCC_FACE_EDGE_BRUSH
+		|| face.edge == CCC_FACE_EDGE_DOUBLE)
+		rr = 0;
+	const int ell = (rr <= 1) ? 0 : rr * 2;
+	auto drawTrackShape = [&](const CRect& box, int) {
+		POINT pts[24];
+		int diam = 0;
+		const int n = CCC_ThemeOutline(box, pts, 24, &diam);
+		if (n >= 3)
+			dc.Polygon(pts, n);
+		else if (diam > 1)
+			dc.RoundRect(&box, CPoint(diam, diam));
+		else
+			dc.Rectangle(&box);
+	};
+	const COLORREF edgeCol = (face.edge == CCC_FACE_EDGE_GLOW) ? CCC_UiTheme().accent : CCC_UiTheme().edge;
 
-	// うっすら影（透過時は半透明塗りを避けて枠の下だけ薄く）
-	if (!bAeroTrans)
+	if (!bAeroTrans && face.gloss > 0)
 	{
 		CRect sh = track;
 		sh.OffsetRect(0, 1);
-		CBrush brSh(RGB(230, 200, 214));
+		CBrush brSh(CCC_UiTheme().sep);
 		CPen penNull(PS_NULL, 0, RGB(0, 0, 0));
 		CPen* op = dc.SelectObject(&penNull);
 		CBrush* ob = dc.SelectObject(&brSh);
-		dc.RoundRect(&sh, CPoint(rr, rr));
+		drawTrackShape(sh, ell);
 		dc.SelectObject(op);
 		dc.SelectObject(ob);
 	}
 
-	CPen penEdge(PS_SOLID, 1, RGB(232, 170, 198));
-	CBrush brTrack(m_clrTrack);
+	CPen penEdge(PS_SOLID, face.edge == CCC_FACE_EDGE_GLOW ? 2 : 1, edgeCol);
+	CBrush brTrack(CCC_UiTheme().track);
 	CPen* oldPen = dc.SelectObject(&penEdge);
 	CBrush* oldBr = dc.SelectObject(&brTrack);
-	dc.RoundRect(&track, CPoint(rr, rr));
+	drawTrackShape(track, ell);
 
 	const int span = (std::max)(1, m_nMax - m_nMin);
 	const double ratio = (double)(m_nPos - m_nMin) / (double)span;
@@ -14465,13 +15271,25 @@ void CCustomProgressCtrl::DrawProgressLayer(CDC& dc, const CRect& r, BOOL bAeroT
 		fill.right = fill.left + fillW;
 
 		CRgn clip;
-		clip.CreateRoundRectRgn(track.left, track.top, track.right + 1, track.bottom + 1, rr * 2, rr * 2);
+		{
+			POINT pts[24];
+			int diam = 0;
+			const int n = CCC_ThemeOutline(track, pts, 24, &diam);
+			if (n >= 3)
+				clip.CreatePolygonRgn(pts, n, WINDING);
+			else if (diam > 1)
+				clip.CreateRoundRectRgn(track.left, track.top, track.right + 1, track.bottom + 1, diam, diam);
+			else
+				clip.CreateRectRgnIndirect(&track);
+		}
 		const int oldClip = dc.SelectClipRgn(&clip);
 
 	// 列ごとに 3 帯。縞は 7px 周期。クリップは丸角リージョン。
 		// 3色キャンディグラデ (peach → pink → lilac) + 縦方向の陰影 + 斜め縞
-		const COLORREF midCol = ProgLerp(m_clrFill0, m_clrFill1, 0.45);
-		const COLORREF peach = ProgLighten(m_clrFill0, 18);
+		const COLORREF fill0 = CccMix256(m_clrFill0, CCC_UiTheme().accent, 160);
+		const COLORREF fill1 = CccMix256(m_clrFill1, CCC_UiTheme().accent2, 160);
+		const COLORREF midCol = ProgLerp(fill0, fill1, 0.45);
+		const COLORREF peach = ProgLighten(fill0, 18);
 		const int h = fill.Height();
 		const int yTop = fill.top;
 		const int yMid1 = fill.top + (std::max)(1, h / 3);
@@ -14484,16 +15302,15 @@ void CCustomProgressCtrl::DrawProgressLayer(CDC& dc, const CRect& r, BOOL bAeroT
 			if (tx < 0.5)
 				base = ProgLerp(peach, midCol, tx * 2.0);
 			else
-				base = ProgLerp(midCol, m_clrFill1, (tx - 0.5) * 2.0);
-			if ((((x - fill.left) + (fill.top)) / 7) & 1)
+				base = ProgLerp(midCol, fill1, (tx - 0.5) * 2.0);
+			if (face.fill == CCC_FACE_FILL_STRIPE && ((((x - fill.left) + (fill.top)) / 7) & 1))
 				base = ProgLighten(base, 12);
 			dc.FillSolidRect(x, yTop, 1, yMid1 - yTop, ProgLighten(base, 28));
 			dc.FillSolidRect(x, yMid1, 1, yMid2 - yMid1, base);
 			dc.FillSolidRect(x, yMid2, 1, yBot - yMid2, ProgDarken(base, 22));
 		}
 
-		// 大きめツヤ（上半分の楕円ハイライト）
-		{
+		if (face.gloss >= 6) {
 			CRect gloss = fill;
 			gloss.DeflateRect(2, 1);
 			gloss.bottom = gloss.top + (std::max)(3, gloss.Height() * 2 / 5);
@@ -14506,8 +15323,7 @@ void CCustomProgressCtrl::DrawProgressLayer(CDC& dc, const CRect& r, BOOL bAeroT
 			dc.SelectObject(ob);
 		}
 
-		// 先端のキャンディ玉
-		if (fillW >= track.Height()) {
+		if (CCC_UiThemeId() == CCC_UI_THEME_CANDY && fillW >= track.Height()) {
 			const int rad = track.Height() / 2;
 			const int cx = fill.right - rad;
 			const int cy = track.top + rad;
@@ -14535,16 +15351,17 @@ void CCustomProgressCtrl::DrawProgressLayer(CDC& dc, const CRect& r, BOOL bAeroT
 		// 枠を描き直し
 		dc.SelectObject(&penEdge);
 		dc.SelectStockObject(NULL_BRUSH);
-		dc.RoundRect(&track, CPoint(rr, rr));
-		// 内側の白い縁取り
-		CRect inner = track;
-		inner.DeflateRect(1, 1);
-		CPen penIn(PS_SOLID, 1, RGB(255, 245, 250));
-		dc.SelectObject(&penIn);
-		dc.RoundRect(&inner, CPoint((std::max)(2, rr - 1), (std::max)(2, rr - 1)));
+		drawTrackShape(track, ell);
+		if (face.edge == CCC_FACE_EDGE_DOUBLE || face.gloss > 0) {
+			CRect inner = track;
+			inner.DeflateRect(2, 2);
+			CPen penIn(PS_SOLID, 1, face.edge == CCC_FACE_EDGE_DOUBLE ? CCC_UiTheme().accent2 : CCC_UiTheme().borderLite);
+			dc.SelectObject(&penIn);
+			const int inn = (ell <= 2) ? 0 : ell - 2;
+			drawTrackShape(inner, inn);
+		}
 
-		// ホバー時のみ Soft3D 先端ジェム（クリップ解除後）
-		if (fillW >= track.Height()) {
+		if (face.gloss >= 6 && fillW >= track.Height()) {
 			const int rad = track.Height() / 2;
 			const int cx = fill.right - rad;
 			const int cy = track.top + rad;
@@ -14577,20 +15394,20 @@ void CCustomProgressCtrl::DrawProgressLayer(CDC& dc, const CRect& r, BOOL bAeroT
 		textRc.DeflateRect(4, 0);
 		// はみ出し防止: クリップ
 		CRgn textClip;
-		textClip.CreateRoundRectRgn(track.left, track.top, track.right + 1, track.bottom + 1, rr * 2, rr * 2);
+		{
+			POINT pts[24];
+			int diam = 0;
+			const int n = CCC_ThemeOutline(track, pts, 24, &diam);
+			if (n >= 3)
+				textClip.CreatePolygonRgn(pts, n, WINDING);
+			else if (diam > 1)
+				textClip.CreateRoundRectRgn(track.left, track.top, track.right + 1, track.bottom + 1, diam, diam);
+			else
+				textClip.CreateRectRgnIndirect(&track);
+		}
 		dc.SelectClipRgn(&textClip);
 		const UINT dt = DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX;
-		// 薄い縁取り → 白文字 (グラデ上でも読める)
-		dc.SetTextColor(RGB(170, 80, 120));
-		for (int dy = -1; dy <= 1; ++dy) {
-			for (int dx = -1; dx <= 1; ++dx) {
-				if (dx == 0 && dy == 0) continue;
-				CRect o = textRc;
-				o.OffsetRect(dx, dy);
-				dc.DrawText(s, &o, dt);
-			}
-		}
-		dc.SetTextColor(RGB(255, 255, 255));
+		dc.SetTextColor(CCC_ButtonInk(CccMix256(m_clrFill0, CCC_UiTheme().accent, 160), FALSE));
 		dc.DrawText(s, &textRc, dt);
 		dc.SelectClipRgn(NULL);
 		dc.SelectObject(oldFont);
@@ -15600,7 +16417,7 @@ void CCustomSysPerfCtrl::DrawPerfLayer(CDC& dc, const CRect& r, BOOL bAeroTrans)
 		POINT pt = {};
 		::GetCursorPos(&pt);
 		::ScreenToClient(m_hWnd, &pt);
-		if (r.PtInRect(pt) && !bAeroTrans)
+		if (r.PtInRect(pt) && !bAeroTrans && CCC_UiThemeId() == CCC_UI_THEME_CUTE)
 			DrawSoftJkThumb(&dc, CRect(r.right - 18, r.top + 4, r.right - 4, r.top + 18),
 				(int)(::GetTickCount64() / 80), TRUE, 5.f);
 	}
@@ -17460,53 +18277,29 @@ static void CCC_DrawGroupBoxFrame(CDC& dc, const CRect& r, const CString& t, BOO
 
     int nT = r.top + (s.cy > 0 ? s.cy / 2 : 8);
 
-    CPen pO(PS_SOLID, 2, CCC_UiTheme().accent);
-    CPen pI(PS_SOLID, 1, CCC_UiTheme().accent2);
-    dc.SelectObject(&pO);
-    dc.SelectStockObject(NULL_BRUSH);
-    dc.MoveTo(r.left + 1, nT);
-    if (s.cx > 0)
-    {
-        dc.LineTo(r.left + 6, nT);
-        dc.MoveTo(r.left + s.cx + 16, nT);
-    }
-    dc.LineTo(r.right - 2, nT);
-    dc.LineTo(r.right - 2, r.bottom - 2);
-    dc.LineTo(r.left + 1, r.bottom - 2);
-    dc.LineTo(r.left + 1, nT);
+    const int gapL = (s.cx > 0) ? r.left + 6 : r.left + 1;
+    const int gapR = (s.cx > 0) ? r.left + s.cx + 16 : r.left + 1;
+    CCC_StrokeGapFrame(dc, r, nT, gapL, gapR);
 
-    dc.SelectObject(&pI);
-    const int off = 3;
-    dc.MoveTo(r.left + off, nT + off);
-    if (s.cx > 0)
-    {
-        dc.LineTo(r.left + 6 + off, nT + off);
-        dc.MoveTo(r.left + s.cx + 16, nT + off);
+    if (CCC_ThemeFaceOf().lace || CCC_ThemeFaceOf().edge == CCC_FACE_EDGE_BEVEL) {
+        DrawThemeRibbon(&dc, CRect(r.left + 2, r.bottom - 12, r.left + 14, r.bottom), CCC_UiTheme().accent2);
+        DrawThemeRibbon(&dc, CRect(r.right - 14, r.bottom - 12, r.right - 2, r.bottom), CCC_UiTheme().accent2);
     }
-    dc.LineTo(r.right - off, nT + off);
-    dc.LineTo(r.right - off, r.bottom - off);
-    dc.LineTo(r.left + off, r.bottom - off);
-    dc.LineTo(r.left + off, nT + off);
-
-    DrawThemeRibbon(&dc, CRect(r.left + 2, r.bottom - 12, r.left + 14, r.bottom), CCC_UiTheme().accent2);
-    DrawThemeRibbon(&dc, CRect(r.right - 14, r.bottom - 12, r.right - 2, r.bottom), CCC_UiTheme().accent2);
 
     DrawThemeOrnament(&dc, CRect(r.right - 19, nT - 8, r.right - 1, nT + 8), CCC_UiTheme().accent);
     if (title.IsEmpty())
         DrawThemeOrnament(&dc, CRect(r.left + 1, nT - 8, r.left + 19, nT + 8), CCC_UiTheme().accent);
-    // Soft3D ゆらゆら（疎タイマーで Invalidate される前提）
-    {
+    if (CCC_ThemeFaceOf().gloss >= 6) {
         const int tick = (int)(::GetTickCount64() / 500);
         DrawSoftJkSwayCorner(&dc, CRect(r.right - 16, nT - 6, r.right - 2, nT + 8), tick, 8.f);
         DrawSoftJkSwayCorner(&dc, CRect(r.left + 2, r.bottom - 16, r.left + 16, r.bottom - 2), tick + 3, 6.f);
         DrawSoftJkChip(&dc, CRect(r.right - 14, r.bottom - 14, r.right - 2, r.bottom - 2), tick, FALSE);
+        DrawSparkle(&dc, r.right - 9, r.bottom - 9, 3, CCC_UiTheme().accent2);
+        DrawSparkle(&dc, r.left + 9, r.bottom - 9, 3, CCC_UiTheme().accent2);
     }
-    DrawSparkle(&dc, r.right - 9, r.bottom - 9, 3, COLOR_SPARKLE);
-    DrawSparkle(&dc, r.left + 9, r.bottom - 9, 3, COLOR_SPARKLE);
-    // 下辺に黒の細レース + 透けレースのスカラップでランジェリー風の色気
-    if (CCC_ThemeSilk()) {
+    if (CCC_ThemeFaceOf().lace) {
         DrawLaceLine(&dc, r.left + 18, r.bottom - 7, r.right - 18, r.bottom - 7, CCC_UiTheme().textDim);
-        DrawLaceScallop(&dc, r.left + 16, r.bottom - 5, r.right - 16, 3, COLOR_LACE);
+        DrawLaceScallop(&dc, r.left + 16, r.bottom - 5, r.right - 16, 3, CCC_UiTheme().accent2);
     }
 
     if (!title.IsEmpty())
@@ -20552,6 +21345,13 @@ int CCC_MainLockGetReserveWidth(HWND hDlg)
 // キャプション導入後は Layout が右端 chrome の左へ置く。
 void CCC_MainLockSetup(CWnd* pDlg, int* pSavedLockFlag, BOOL bOverlayPaint)
 {
+#ifdef KBSASAMI_HOST_BUILD
+    /* 追従先のメイン窓が無い。チェックは出さない。 */
+    (void)pDlg;
+    (void)pSavedLockFlag;
+    (void)bOverlayPaint;
+    return;
+#endif
     if (!pDlg || !::IsWindow(pDlg->GetSafeHwnd()) || !pSavedLockFlag)
         return;
     CCC_MainLockEntry* e = CCC_GetOrCreateMainLockEntry(pDlg->GetSafeHwnd());

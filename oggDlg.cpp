@@ -6023,8 +6023,8 @@ BOOL COggDlg::OnInitDialog()
 	mp3_.mp3init();
 
 
-	m_tempo_sl.SetMode(4);
-	m_pitch_sl.SetMode(4);
+	m_tempo_sl.SetMode(1);
+	m_pitch_sl.SetMode(1);
 
 	// "バージョン情報..." メニュー項目をシステム メニューへ追加します。
 	fnn = "";

@@ -1,4 +1,4 @@
-﻿#include <windows.h>
+#include <windows.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
@@ -6,6 +6,7 @@
 #include <string>
 
 #include "kbsasami_decoder.h"
+#include "kbsasami_monitor.h"
 #include "ComposerConvert.h"
 #include "../../kpi_host_ipc.h"
 
@@ -14,6 +15,7 @@ extern HINSTANCE g_hKpi;
 static const wchar_t SEC_KBSASAMI[] = L"kbsasami";
 static const wchar_t KEY_VST[] = L"vst";
 static const wchar_t KEY_RAIRA[] = L"raira";
+static const wchar_t KEY_FMMIDIMONITOR[] = L"fmmidimonitor";
 static const wchar_t KEY_MIDIMODE[] = L"midimode";
 static const wchar_t KEY_MAP_LEGACY[] = L"map";
 static const wchar_t KEY_FMMODE[] = L"fmmode";
@@ -63,6 +65,9 @@ KbSasamiDecoder::KbSasamiDecoder(IKpiConfig* pConfig)
 	m_loopStart = -1.0;
 	m_loopEnd = -1.0;
 	m_smfSize = 0;
+	m_openPath[0] = 0;
+	m_monHold = 0;
+	m_forceHead = 0;
 	m_synths[0] = &m_synthesizer;
 	for (int i = 1; i < MAX_PORTS; i++) m_synths[i] = NULL;
 }
@@ -111,15 +116,25 @@ extern "C" int SasamiKpiLiveInjectSysex(const unsigned char* data, int bytes)
 	return 1;
 }
 
+static volatile LONG s_restartHead = 0;
+
+void KbSasamiRequestRestartHead()
+{
+	InterlockedExchange(&s_restartHead, 1);
+}
+
 KbSasamiDecoder::~KbSasamiDecoder()
 {
+	/* 8ms dump タイマを先に止める。End より後だと Close まで回り続ける。 */
+	m_fm.Close();
+	KbsMonEnd(this);
 	LiveUnbind();
 	for (int i = 1; i < MAX_PORTS; i++) {
 		delete m_synths[i];
 		m_synths[i] = NULL;
 	}
-	m_fm.Close();
 	KbVstSessionClose(&m_vstSess);
+	KbVstDisconnect();
 	if (m_pConfig) {
 		m_pConfig->Release();
 		m_pConfig = NULL;
@@ -147,6 +162,15 @@ void KbSasamiDecoder::ReadOptions()
 	if (m_raira)
 		m_vst = m_vst ? 0 : 1;
 	m_note_factory.set_raira(m_raira);
+	/* raira=1 は ogg のモニタ。fmmidimonitor は見に行かない。
+	   raira=0（本家）だけ読む。無い人は 0 にすれば kbsasami_host の窓を出さない。既定は 1。 */
+	int mon = 0;
+	if (!m_raira) {
+		mon = 1;
+		if (m_pConfig)
+			mon = (int)m_pConfig->GetInt(SEC_KBSASAMI, KEY_FMMIDIMONITOR, 1) ? 1 : 0;
+	}
+	KbsMonConfigure(mon);
 }
 
 static int PathIsCemuLiveMid(const wchar_t* path)
@@ -329,10 +353,14 @@ void KbSasamiDecoder::LoadProgramsTxt()
 
 void KbSasamiDecoder::midi_message(int port, uint_least32_t message)
 {
-	if (m_seeking) return;
+	if (!m_seeking)
+		KbsMonMidi(port, (unsigned int)message);
+	const int st = (int)(message & 0xf0);
+	/* Seek の早送りでも CC/PC は載せる。ノートだけ飛ばす（一斉発音しない）。 */
+	if (m_seeking && (st == 0x80 || st == 0x90 || st == 0xa0))
+		return;
 	if (port < 0 || port >= m_nPorts) port = 0;
 	if (m_laBankMsb == 127 && m_synths[port]) {
-		const int st = (int)(message & 0xf0);
 		const int ch = (int)(message & 0x0f);
 		if (st == 0xc0 && ch != 9) {
 			m_synths[port]->control_change(ch, 0, 127);
@@ -344,7 +372,6 @@ void KbSasamiDecoder::midi_message(int port, uint_least32_t message)
 
 void KbSasamiDecoder::sysex_message(int port, const void* data, std::size_t size)
 {
-	if (m_seeking) return;
 	if (port < 0 || port >= m_nPorts) port = 0;
 	m_synths[port]->sysex_message(data, size);
 	const unsigned char* d = (const unsigned char*)data;
@@ -419,12 +446,225 @@ void KbSasamiDecoder::reset()
 	m_note_factory.reset_pool_frame();
 	ApplyWopnMode();
 	ApplyGsBankLsb();
+	KbsMonNotesOff();
 }
 
 DWORD WINAPI KbSasamiDecoder::UpdateConfig(void*)
 {
+	const int wasVst = m_foreignVst ? 1 : 0;
 	ReadOptions();
+	if (m_raira) {
+		KbsMonEnd(this);
+		return 0;
+	}
+	if (m_kind == SASAMI_KIND_FPY || m_kind == SASAMI_KIND_FPY2)
+		return 0;
+	const int wantVst = m_vst ? 1 : 0;
+	if (wantVst != wasVst)
+		SwitchMidiEngine();
 	return 0;
+}
+
+static DWORD SmfBe32(const uint8_t* p)
+{
+	return ((DWORD)p[0] << 24) | ((DWORD)p[1] << 16) | ((DWORD)p[2] << 8) | (DWORD)p[3];
+}
+
+static void SmfPutBe32(uint8_t* p, DWORD v)
+{
+	p[0] = (uint8_t)(v >> 24);
+	p[1] = (uint8_t)(v >> 16);
+	p[2] = (uint8_t)(v >> 8);
+	p[3] = (uint8_t)v;
+}
+
+/* fmmidi は ApplyGsBankLsb でマップを載せる。VST は SMF に無いと GM ピアノになる。 */
+static int SmfPatchMapBanks(uint8_t* smf, int* pSize, int cap, int gsLsb, int laMsb)
+{
+	if (!smf || !pSize || *pSize < 22 || cap < *pSize) return 0;
+	if (laMsb != 127 && (gsLsb < 1 || gsLsb > 4)) return 0;
+	if (memcmp(smf, "MThd", 4) != 0) return 0;
+	const DWORD hdrLen = SmfBe32(smf + 4);
+	uint8_t* tr = smf + 8 + hdrLen;
+	if (tr + 8 > smf + *pSize) return 0;
+	if (memcmp(tr, "MTrk", 4) != 0) return 0;
+	const DWORD trLen = SmfBe32(tr + 4);
+	uint8_t* body = tr + 8;
+	if (body + trLen > smf + *pSize) return 0;
+	uint8_t init[16 * 8];
+	int n = 0;
+	for (int ch = 0; ch < 16; ch++) {
+		if (ch == 9) continue;
+		init[n++] = 0;
+		init[n++] = (uint8_t)(0xB0 | ch);
+		init[n++] = 0;
+		init[n++] = (laMsb == 127) ? 127 : 0;
+		init[n++] = 0;
+		init[n++] = (uint8_t)(0xB0 | ch);
+		init[n++] = 32;
+		init[n++] = (laMsb == 127) ? 0 : (uint8_t)gsLsb;
+	}
+	if (*pSize + n > cap) return 0;
+	const int tail = (int)((smf + *pSize) - body);
+	memmove(body + n, body, (size_t)tail);
+	memcpy(body, init, (size_t)n);
+	SmfPutBe32(tr + 4, trLen + (DWORD)n);
+	*pSize += n;
+	return 1;
+}
+
+void KbSasamiDecoder::KeepSmf(const uint8_t* smf, DWORD smfLen)
+{
+	if (!smf || smfLen < 22 || smfLen > (DWORD)SASAMI_MAX_SMF) return;
+	if (smf != m_smf)
+		memcpy(m_smf, smf, (size_t)smfLen);
+	m_smfSize = (int)smfLen;
+}
+
+int KbSasamiDecoder::LoadFmMidiSequencer(DWORD rate)
+{
+	if (m_smfSize < 22) return 0;
+	if (rate < 8000 || rate > 192000) rate = 44100;
+	m_fmMode = false;
+	m_foreignVst = 0;
+	LoadProgramsTxt();
+	for (int i = 1; i < MAX_PORTS; i++) {
+		if (m_synths[i] && m_synths[i] != &m_synthesizer) {
+			delete m_synths[i];
+			m_synths[i] = NULL;
+		}
+	}
+	MemFile mf;
+	mf.p = m_smf;
+	mf.size = (DWORD)m_smfSize;
+	mf.pos = 0;
+	if (!m_sequencer.load(&mf, MemGetc)) return 0;
+	m_nPorts = m_sequencer.get_num_ports();
+	if (m_nPorts < 1) m_nPorts = 1;
+	if (m_nPorts > MAX_PORTS) m_nPorts = MAX_PORTS;
+	for (int i = 1; i < m_nPorts; i++) {
+		if (!m_synths[i])
+			m_synths[i] = new synthesizer(&m_note_factory);
+	}
+	reset();
+	m_loopStart = m_sequencer.find_marker("loopStart");
+	m_loopEnd = m_sequencer.find_marker("loopEnd");
+	m_MediaInfo.dwSampleRate = rate;
+	m_MediaInfo.dwChannels = 2;
+	m_MediaInfo.nBitsPerSample = 16;
+	m_MediaInfo.dwSeekableFlags = KPI_MEDIAINFO::SEEK_FLAGS_SAMPLE;
+	m_liveStream = PathIsCemuLiveMid(m_openPath) ? true : false;
+	if (m_liveStream) {
+		m_MediaInfo.dwUnitSample = 0;
+		m_MediaInfo.qwLength = (UINT64)-1;
+		m_lastSample = 0;
+	} else {
+		m_MediaInfo.dwUnitSample = rate / 100;
+		double totalSec = m_sequencer.get_total_time();
+		if (m_loopEnd > m_loopStart && m_loopStart >= 0.0)
+			totalSec = m_loopEnd;
+		if (totalSec < 0.01) totalSec = 0.01;
+		m_MediaInfo.qwLength = (UINT64)(totalSec * 1000.0 * 10000.0);
+		m_lastSample = kpi_100nsToSample(m_MediaInfo.qwLength, rate);
+	}
+	m_MediaInfo.dwCount = 1;
+	m_MediaInfo.dwNumber = 1;
+	m_curSample = 0;
+	LiveBind();
+	return 1;
+}
+
+int KbSasamiDecoder::SwitchMidiEngine()
+{
+	if (m_smfSize < 22) return 0;
+	const DWORD oldRate = m_MediaInfo.dwSampleRate ? m_MediaInfo.dwSampleRate : 44100;
+	m_monHold = 1;
+	KbsMonHold(1);
+	int ok = 0;
+	UINT64 pos = 0;
+	{
+		std::lock_guard<std::mutex> lk(m_midiLock);
+		if (m_foreignVst) {
+			KbVstSessionClose(&m_vstSess);
+			memset(&m_vstSess, 0, sizeof(m_vstSess));
+			m_foreignVst = 0;
+		}
+		if (m_vst != 0)
+			ok = (OpenForeignVst(m_smf, (DWORD)m_smfSize) > 0) ? 1 : 0;
+		else
+			ok = LoadFmMidiSequencer(oldRate);
+		if (!ok) {
+			m_monHold = 0;
+			KbsMonHold(0);
+			return 0;
+		}
+		if (m_foreignVst) {
+			if (KbVstSessionSeek(&m_vstSess, 0))
+				m_curSample = 0;
+			pos = m_curSample;
+		} else
+			pos = SeekFmMidiLocked(0);
+	}
+	if (!m_raira)
+		KbsMonSeek((__int64)pos, (int)m_MediaInfo.dwSampleRate);
+	m_monHold = 0;
+	return 1;
+}
+
+static int PathIsStandardSmfW(const wchar_t* path)
+{
+	if (!path || !path[0]) return 0;
+	const wchar_t* dot = wcsrchr(path, L'.');
+	if (!dot) return 0;
+	return (_wcsicmp(dot, L".mid") == 0 || _wcsicmp(dot, L".midi") == 0
+		|| _wcsicmp(dot, L".kar") == 0 || _wcsicmp(dot, L".rmi") == 0) ? 1 : 0;
+}
+
+static int WriteMonMid(const void* p, int n, wchar_t* out, int cap)
+{
+	if (!p || n < 22 || !out || cap < 16) return 0;
+	wchar_t tmp[MAX_PATH];
+	if (!GetTempPathW(MAX_PATH, tmp)) return 0;
+	wchar_t dir[MAX_PATH];
+	_snwprintf_s(dir, _TRUNCATE, L"%sogg_kbsasami", tmp);
+	CreateDirectoryW(dir, NULL);
+	_snwprintf_s(out, cap, _TRUNCATE, L"%s\\kbsmon_play.mid", dir);
+	HANDLE h = CreateFileW(out, GENERIC_WRITE, FILE_SHARE_READ, NULL,
+		CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+	if (h == INVALID_HANDLE_VALUE) return 0;
+	DWORD wr = 0;
+	const BOOL ok = WriteFile(h, p, (DWORD)n, &wr, NULL);
+	CloseHandle(h);
+	return (ok && wr == (DWORD)n) ? 1 : 0;
+}
+
+void KbSasamiDecoder::MonShow(int fm, const wchar_t* path)
+{
+	if (m_raira) {
+		KbsMonEnd(this);
+		return;
+	}
+	/* raira=0 で fmmidimonitor=0。ホストへ MON_SHOW を送らない。 */
+	if (!KbsMonIsOn())
+		return;
+	const wchar_t* use = path;
+	wchar_t written[MAX_PATH];
+	written[0] = 0;
+	if (!fm) {
+		/* モニタは kpi が読んだ SMF を出す。ksv は VST 用コピーで、ホストが触ると
+		   TB がソースと不一致になる。元 .mid が読めるならそれを、だめなら m_smf。 */
+		int have = 0;
+		if (PathIsStandardSmfW(path)) {
+			const DWORD a = GetFileAttributesW(path);
+			if (a != INVALID_FILE_ATTRIBUTES && !(a & FILE_ATTRIBUTE_DIRECTORY))
+				have = 1;
+		}
+		if (!have && m_smfSize >= 22 && WriteMonMid(m_smf, m_smfSize, written, MAX_PATH)) {
+			use = written;
+			have = 1;
+		}
+	}
+	KbsMonBegin(this, fm, use, m_titleSjis);
 }
 
 DWORD __fastcall KbSasamiDecoder::Open(const KPI_MEDIAINFO* cpRequest, IKpiFile* pFile, IKpiFolder* pFolder)
@@ -432,6 +672,12 @@ DWORD __fastcall KbSasamiDecoder::Open(const KPI_MEDIAINFO* cpRequest, IKpiFile*
 	(void)pFolder;
 	if (!pFile) return 0;
 	ReadOptions();
+	if (InterlockedExchange(&s_restartHead, 0)) {
+		m_forceHead = 1;
+		KbsMonForgetPos();
+	}
+	m_monHold = 1;
+	KbsMonHold(1);
 	pFile->AddRef();
 	UINT64 sz = pFile->GetSize();
 	if (sz == 0 || sz == (UINT64)-1 || sz > SASAMI_MAX_FILE) {
@@ -450,10 +696,14 @@ DWORD __fastcall KbSasamiDecoder::Open(const KPI_MEDIAINFO* cpRequest, IKpiFile*
 	m_gsMapLsb = 0;
 	m_laBankMsb = 0;
 	m_wopnMode = 0;
+	m_smfSize = 0;
+	m_openPath[0] = 0;
 
 	const int smfMagic = (n >= 4 && s_fileBuf[0] == 'M' && s_fileBuf[1] == 'T'
 		&& s_fileBuf[2] == 'h' && s_fileBuf[3] == 'd') ? 1 : 0;
 	const wchar_t* pathForKind = (real && real[0]) ? real : name;
+	if (pathForKind && pathForKind[0])
+		wcsncpy_s(m_openPath, pathForKind, _TRUNCATE);
 	/* ホストが既に SMF 化したファイルは MThd でここに来る。
 	   本家は変換しない。らいらが書いた raira=1 が ini に残っていても、
 	   生 RCP/EUP 等ならここで翻訳する（raira は vst 入れ替え専用）。 */
@@ -468,62 +718,28 @@ DWORD __fastcall KbSasamiDecoder::Open(const KPI_MEDIAINFO* cpRequest, IKpiFile*
 		smfDirect = 1;
 	}
 	if (smfDirect) {
+		KeepSmf(smfPtr, smfLen);
+		{
+			int mapForce = SasamiResolveMapForceW(pathForKind, m_mapDefault);
+			mapForce = SasamiAutoMapForce(mapForce, NULL, m_smf, m_smfSize, pathForKind, NULL);
+			SasamiMidiMap map = SASAMI_MAP_GS88;
+			ApplyMapForce(mapForce, &map);
+			(void)map;
+		}
+		SmfPatchMapBanks(m_smf, &m_smfSize, SASAMI_MAX_SMF, m_gsMapLsb, m_laBankMsb);
 		if (m_vst != 0) {
-			int vr = OpenForeignVst(smfPtr, smfLen);
+			int vr = OpenForeignVst(m_smf, (DWORD)m_smfSize);
 			if (vr <= 0) return 0;
+			MonShow(0, pathForKind);
 			return 1;
 		}
 		DWORD rate = 44100;
 		if (cpRequest && cpRequest->dwSampleRate >= 8000 && cpRequest->dwSampleRate <= 192000)
 			rate = cpRequest->dwSampleRate;
-		m_fmMode = false;
 		m_kind = SASAMI_KIND_MPY;
 		m_titleSjis[0] = 0;
-		LoadProgramsTxt();
-		MemFile mfSmf;
-		mfSmf.p = smfPtr;
-		mfSmf.size = smfLen;
-		mfSmf.pos = 0;
-		if (!m_sequencer.load(&mfSmf, MemGetc)) return 0;
-		m_nPorts = m_sequencer.get_num_ports();
-		if (m_nPorts < 1) m_nPorts = 1;
-		if (m_nPorts > MAX_PORTS) m_nPorts = MAX_PORTS;
-		for (int i = 1; i < m_nPorts; i++) {
-			if (!m_synths[i])
-				m_synths[i] = new synthesizer(&m_note_factory);
-		}
-		{
-			int mapForce = SasamiResolveMapForceW(pathForKind, m_mapDefault);
-			mapForce = SasamiAutoMapForce(mapForce, NULL, smfPtr, (int)smfLen, pathForKind, NULL);
-			SasamiMidiMap map = SASAMI_MAP_GS88;
-			ApplyMapForce(mapForce, &map);
-			(void)map;
-		}
-		reset();
-		m_loopStart = m_sequencer.find_marker("loopStart");
-		m_loopEnd = m_sequencer.find_marker("loopEnd");
-		m_MediaInfo.dwSampleRate = rate;
-		m_MediaInfo.dwChannels = 2;
-		m_MediaInfo.nBitsPerSample = 16;
-		m_MediaInfo.dwSeekableFlags = KPI_MEDIAINFO::SEEK_FLAGS_SAMPLE;
-		m_liveStream = PathIsCemuLiveMid(pathForKind) ? true : false;
-		if (m_liveStream) {
-			m_MediaInfo.dwUnitSample = 0;
-			m_MediaInfo.qwLength = (UINT64)-1;
-			m_lastSample = 0;
-		} else {
-			m_MediaInfo.dwUnitSample = rate / 100;
-			double totalSec = m_sequencer.get_total_time();
-			if (m_loopEnd > m_loopStart && m_loopStart >= 0.0)
-				totalSec = m_loopEnd;
-			if (totalSec < 0.01) totalSec = 0.01;
-			m_MediaInfo.qwLength = (UINT64)(totalSec * 1000.0 * 10000.0);
-			m_lastSample = kpi_100nsToSample(m_MediaInfo.qwLength, rate);
-		}
-		m_MediaInfo.dwCount = 1;
-		m_MediaInfo.dwNumber = 1;
-		m_curSample = 0;
-		LiveBind();
+		if (!LoadFmMidiSequencer(rate)) return 0;
+		MonShow(0, pathForKind);
 		return 1;
 	}
 
@@ -590,16 +806,11 @@ DWORD __fastcall KbSasamiDecoder::Open(const KPI_MEDIAINFO* cpRequest, IKpiFile*
 		m_MediaInfo.dwNumber = 1;
 		m_lastSample = m_fm.TotalSamples();
 		m_curSample = 0;
+		MonShow(1, pathForKind);
 		return 1;
 	}
 
-	// MIDI: raira=1 の vst=1 はらいら本体の VST。raira=0 は専用ホスト。
-	if (m_vst != 0) {
-		int vr = OpenForeignVst(m_smf, (DWORD)m_smfSize);
-		if (vr <= 0) return 0;
-		return 1;
-	}
-
+	/* 先に SMF 化する。VST に空の m_smf を渡すとホスト側の解析がソースとずれる。 */
 	m_fmMode = false;
 	m_smfSize = 0;
 	const wchar_t* pathForMap = (real && real[0]) ? real : name;
@@ -608,34 +819,16 @@ DWORD __fastcall KbSasamiDecoder::Open(const KPI_MEDIAINFO* cpRequest, IKpiFile*
 	SasamiMidiMap map = SASAMI_MAP_GS88;
 	ApplyMapForce(mapForce, &map);
 	if (!SasamiConvertToSmf(s_song, map, m_gsMapLsb, m_smf, SASAMI_MAX_SMF, &m_smfSize, m_laBankMsb)) return 0;
-	LoadProgramsTxt();
-	MemFile mf;
-	mf.p = m_smf;
-	mf.size = (DWORD)m_smfSize;
-	mf.pos = 0;
-	if (!m_sequencer.load(&mf, MemGetc)) return 0;
-	m_nPorts = m_sequencer.get_num_ports();
-	if (m_nPorts < 1) m_nPorts = 1;
-	if (m_nPorts > MAX_PORTS) m_nPorts = MAX_PORTS;
-	for (int i = 1; i < m_nPorts; i++)
-		m_synths[i] = new synthesizer(&m_note_factory);
-	reset();
-	m_loopStart = m_sequencer.find_marker("loopStart");
-	m_loopEnd = m_sequencer.find_marker("loopEnd");
-	m_MediaInfo.dwSampleRate = rate;
-	m_MediaInfo.dwChannels = 2;
-	m_MediaInfo.nBitsPerSample = 16;
-	m_MediaInfo.dwSeekableFlags = KPI_MEDIAINFO::SEEK_FLAGS_SAMPLE;
-	m_MediaInfo.dwUnitSample = rate / 100;
-	double totalSec = m_sequencer.get_total_time();
-	if (m_loopEnd > m_loopStart && m_loopStart >= 0.0)
-		totalSec = m_loopEnd;
-	m_MediaInfo.qwLength = (UINT64)(totalSec * 1000.0 * 10000.0);
-	m_MediaInfo.dwCount = 1;
-	m_MediaInfo.dwNumber = 1;
-	m_lastSample = kpi_100nsToSample(m_MediaInfo.qwLength, rate);
-	m_curSample = 0;
-	LiveBind();
+
+	if (m_vst != 0) {
+		int vr = OpenForeignVst(m_smf, (DWORD)m_smfSize);
+		if (vr <= 0) return 0;
+		MonShow(0, pathForKind);
+		return 1;
+	}
+
+	if (!LoadFmMidiSequencer(rate)) return 0;
+	MonShow(0, pathForKind);
 	return 1;
 }
 
@@ -654,7 +847,13 @@ int KbSasamiDecoder::OpenForeignVst(const uint8_t* smf, DWORD smfLen)
 {
 	/* raira=1 は本体が VST を持つ。このルートは他アプリだけ。 */
 	if (m_raira) return 0;
-	if (!KbVstSessionOpen(smf, smfLen, m_vstGs, m_vstXg, &m_vstSess))
+	if (!smf || smfLen < 22) return -1;
+	if (smf != m_smf && smfLen <= (DWORD)SASAMI_MAX_SMF) {
+		memcpy(m_smf, smf, (size_t)smfLen);
+		m_smfSize = (int)smfLen;
+	} else if (smf == m_smf)
+		m_smfSize = (int)smfLen;
+	if (!KbVstSessionOpen(m_smf, (DWORD)m_smfSize, m_vstGs, m_vstXg, &m_vstSess))
 		return -1;
 	m_foreignVst = 1;
 	m_fmMode = false;
@@ -691,10 +890,14 @@ DWORD WINAPI KbSasamiDecoder::Render(BYTE* pBuffer, DWORD dwSizeSample)
 			return dwSizeSample;
 		}
 		m_curSample += frames;
+		if (!m_raira)
+			KbsMonPlay(( __int64)m_curSample, (int)m_MediaInfo.dwSampleRate);
 		return frames;
 	}
-	if (m_fmMode)
+	if (m_fmMode) {
+		/* 可聴位置は FM 側の 8ms タイマが出す。ここはデコード先頭なので送らない。 */
 		return m_fm.Render((int16_t*)pBuffer, dwSizeSample);
+	}
 
 	std::lock_guard<std::mutex> lk(m_midiLock);
 	const double rate = (double)m_MediaInfo.dwSampleRate;
@@ -719,6 +922,7 @@ DWORD WINAPI KbSasamiDecoder::Render(BYTE* pBuffer, DWORD dwSizeSample)
 					m_synths[i]->control_change(ch, 0x40, 0);
 				m_synths[i]->all_note_off();
 			}
+			KbsMonNotesOff();
 			m_note_factory.reset_pool_frame();
 			m_sequencer.set_position(m_loopStart);
 			m_curSample = loopStartSamp;
@@ -736,16 +940,47 @@ DWORD WINAPI KbSasamiDecoder::Render(BYTE* pBuffer, DWORD dwSizeSample)
 			ZeroMemory(p, remain * 4);
 			break;
 		}
-		const double tEnd = (double)(m_curSample + chunk) / rate;
-		m_sequencer.play_forward(tEnd, this);
+		const double tChunkEnd = (double)(m_curSample + chunk) / rate;
 		for (DWORD i = 0; i < chunk * 2; i++) m_mix[i] = 0.0;
-		/* ノート増減の前に 1 回だけ描く。発音数で閉じると次ブロックが同じ PCM を再生する。 */
-		m_note_factory.begin_pool_frame(chunk, rate);
-		for (int i = 0; i < m_nPorts; i++) {
-			if (!m_synths[i]) continue;
-			m_synths[i]->synthesize_mixing(m_mix, chunk, m_MediaInfo.dwSampleRate);
+		/* ブロック先頭でオンもオフも済ませると、ブロックより短い音符が無音になる。
+		   イベントの時刻まで今の鍵盤で描き、そのあとメッセージを渡す。 */
+		double tNow = (double)m_curSample / rate;
+		DWORD filled = 0;
+		int sliceGuard = 0;
+		while (filled < chunk && sliceGuard++ < 200000) {
+			const double nt = m_sequencer.peek_time();
+			double limit = tChunkEnd;
+			int hit = 0;
+			if (nt < limit) {
+				limit = nt;
+				hit = 1;
+			}
+			DWORD n = 0;
+			if (limit > tNow) {
+				const double samp = (limit - tNow) * rate;
+				if (samp >= 1.0)
+					n = (DWORD)samp;
+				else if (samp > 0.0 && !hit)
+					n = 1;
+				if (n > chunk - filled) n = chunk - filled;
+			}
+			if (n > 0) {
+				m_note_factory.begin_pool_frame(n, rate);
+				for (int i = 0; i < m_nPorts; i++) {
+					if (!m_synths[i]) continue;
+					m_synths[i]->synthesize_mixing(m_mix + filled * 2, n, m_MediaInfo.dwSampleRate);
+				}
+				m_note_factory.end_pool_frame();
+				filled += n;
+				tNow = (double)(m_curSample + filled) / rate;
+			}
+			if (!hit) break;
+			const double before = m_sequencer.peek_time();
+			if (before < tChunkEnd && (n == 0 || tNow + 1.5 / rate >= before))
+				m_sequencer.play_forward(before + 1.0e-9, this);
+			if (m_sequencer.peek_time() <= before && n == 0)
+				break;
 		}
-		m_note_factory.end_pool_frame();
 		int16_t* out = (int16_t*)p;
 		const double gain = m_raira ? kFmMidiOutGain : (kFmMidiOutGain * 0.5 / 1.5);
 		for (DWORD i = 0; i < chunk * 2; i++) {
@@ -771,20 +1006,13 @@ DWORD WINAPI KbSasamiDecoder::Render(BYTE* pBuffer, DWORD dwSizeSample)
 				m_silentSample = 0;
 		}
 	}
+	if (!m_raira)
+		KbsMonPlay((__int64)m_curSample, (int)m_MediaInfo.dwSampleRate);
 	return dwSizeSample;
 }
 
-UINT64 WINAPI KbSasamiDecoder::Seek(UINT64 qwPosSample, DWORD)
+UINT64 KbSasamiDecoder::SeekFmMidiLocked(UINT64 qwPosSample)
 {
-	if (m_foreignVst) {
-		if (!KbVstSessionSeek(&m_vstSess, qwPosSample))
-			return m_curSample;
-		m_curSample = qwPosSample;
-		return qwPosSample;
-	}
-	if (m_fmMode)
-		return m_fm.SeekSample(qwPosSample);
-	std::lock_guard<std::mutex> lk(m_midiLock);
 	m_seeking = true;
 	m_sequencer.play(0, this);
 	reset();
@@ -804,5 +1032,38 @@ UINT64 WINAPI KbSasamiDecoder::Seek(UINT64 qwPosSample, DWORD)
 	m_curSample = pos;
 	m_endSample = 0;
 	m_silentSample = 0;
+	return pos;
+}
+
+UINT64 WINAPI KbSasamiDecoder::Seek(UINT64 qwPosSample, DWORD)
+{
+	if (m_forceHead) {
+		qwPosSample = 0;
+		m_forceHead = 0;
+	}
+	if (m_foreignVst) {
+		if (!KbVstSessionSeek(&m_vstSess, qwPosSample))
+			return m_curSample;
+		m_curSample = qwPosSample;
+		if (!m_raira)
+			KbsMonSeek((__int64)m_curSample, (int)m_MediaInfo.dwSampleRate);
+		m_monHold = 0;
+		return qwPosSample;
+	}
+	if (m_fmMode) {
+		const UINT64 pos = m_fm.SeekSample(qwPosSample);
+		if (!m_raira)
+			KbsMonPublishHeard((__int64)pos, (int)m_MediaInfo.dwSampleRate);
+		m_monHold = 0;
+		return pos;
+	}
+	UINT64 pos = 0;
+	{
+		std::lock_guard<std::mutex> lk(m_midiLock);
+		pos = SeekFmMidiLocked(qwPosSample);
+	}
+	if (!m_raira)
+		KbsMonSeek((__int64)m_curSample, (int)m_MediaInfo.dwSampleRate);
+	m_monHold = 0;
 	return pos;
 }

@@ -1,0 +1,40 @@
+#include <winres.h>
+#include "../resource.h"
+
+IDD_MIDIMONITOR DIALOGEX 0, 0, 720, 420
+STYLE DS_SETFONT | WS_MAXIMIZEBOX | WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME
+CAPTION "FM/MIDI"
+FONT 9, "Segoe UI", 400, 0, 0x1
+BEGIN
+    PUSHBUTTON      "?",IDC_MM_HELP,688,2,24,16
+    DEFPUSHBUTTON   "Close",IDOK,663,399,50,14,NOT WS_VISIBLE
+END
+
+IDD_FMMONITOR DIALOGEX 0, 0, 720, 420
+STYLE DS_SETFONT | WS_CHILD | WS_CLIPSIBLINGS | WS_CLIPCHILDREN
+FONT 9, "Segoe UI", 400, 0, 0x1
+BEGIN
+    PUSHBUTTON      "?",IDC_FM_HELP,688,2,24,16
+    DEFPUSHBUTTON   "Close",IDOK,663,399,50,14,NOT WS_VISIBLE
+END
+
+IDD_MM_HELP DIALOGEX 0, 0, 480, 480
+STYLE DS_SETFONT | DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "MIDI Monitor Guide"
+FONT 9, "Segoe UI", 400, 0, 0x1
+BEGIN
+    DEFPUSHBUTTON   "Close",IDOK,422,458,50,14
+END
+
+IDR_SASAMI_GS RCDATA "..\\res\\SASAMI_GS.DAT"
+IDR_SASAMI_XG RCDATA "..\\res\\SASAMI_XG.DAT"
+IDR_SASAMI_EX RCDATA "..\\res\\SASAMI_EX.DAT"
+
+IDI_CTL_CLOSE    ICON "..\\res\\ui_ctl\\close.ico"
+IDI_CTL_MIN      ICON "..\\res\\ui_ctl\\min.ico"
+IDI_CTL_MAX      ICON "..\\res\\ui_ctl\\max.ico"
+IDI_CTL_RESTORE  ICON "..\\res\\ui_ctl\\restore.ico"
+IDI_CTL_PIN      ICON "..\\res\\ui_ctl\\pin.ico"
+IDI_CTL_PINOFF   ICON "..\\res\\ui_ctl\\pinoff.ico"
+IDI_CTL_COG      ICON "..\\res\\ui_ctl\\cog.ico"
+IDI_CTL_BOOK     ICON "..\\res\\ui_ctl\\book.ico"

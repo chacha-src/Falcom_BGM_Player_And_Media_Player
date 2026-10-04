@@ -1,4 +1,4 @@
-﻿#include <windows.h>
+#include <windows.h>
 #include "kbsasami_module.h"
 #include "kbsasami_decoder.h"
 #include "kpi.h"
@@ -32,6 +32,7 @@ static const wchar_t kExts[] = L".fpy/.fpy2/.mpy/.mpw2/.mpsmv/.mid/.midi/.kar/.r
 static const wchar_t SEC_KBSASAMI[] = L"kbsasami";
 static const wchar_t KEY_VST[] = L"vst";
 static const wchar_t KEY_RAIRA[] = L"raira";
+static const wchar_t KEY_FMMIDIMONITOR[] = L"fmmidimonitor";
 static const wchar_t KEY_MIDIMODE[] = L"midimode";
 static const wchar_t KEY_FMMODE[] = L"fmmode";
 
@@ -108,6 +109,13 @@ BOOL WINAPI KbSasamiDecoderModule::EnumConfig(IKpiConfigEnumerator* pEnumerator)
 			L"false(0): original KbMedia Player (interpret vst as-is, stock drums, MIDI vol/2)\r\n"
 			L"true(1): this app. Swaps vst 0/1 internally, louder FM drums.\r\n"
 			L"This app always writes raira=1." },
+		{ KPI_CFG_TYPE_BOOL, SEC_KBSASAMI, KEY_FMMIDIMONITOR, L"kbsasami.fmmidimonitor",
+			L"1", NULL, NULL, NULL, NULL,
+			L"false(0): do not open the FM/MIDI monitor in kbsasami_host.\r\n"
+			L"true(1): kbsasami_host shows that monitor (default).\r\n"
+			L"Read only when kbsasami.raira=0 (original KbMedia Player).\r\n"
+			L"When raira=1 this app uses its own monitor and does not read this key.\r\n"
+			L"Turn it off in the original player if you do not want the extra window." },
 		{ KPI_CFG_TYPE_INT, SEC_KBSASAMI, KEY_MIDIMODE, L"kbsasami.midimode",
 			L"0", NULL, NULL, NULL, NULL,
 			L"MIDI map for .mpy/.mpw2/.mid SMF (same as monitor mapForce).\r\n"
@@ -151,8 +159,12 @@ DWORD WINAPI KbSasamiDecoderModule::ApplyConfig(const wchar_t* cszSection, const
 			m_pConfig->SetStr(cszSection, cszKey, cszValue);
 		else
 			m_pConfig->SetInt(cszSection, cszKey, nValue);
-		/* NOTIFY だと本体は UpdateConfig だけで済ませ、開いた曲の VST パスや
-		   midimode を持ち続ける。演奏のたびに Open で読み直させる。 */
+		/* vst 切替は位置がずれるので RELOAD_DATA で先頭から開き直す。 */
+		if (cszKey && (_wcsicmp(cszKey, KEY_VST) == 0
+			|| _wcsicmp(cszKey, L"kbsasami.vst") == 0)) {
+			KbSasamiRequestRestartHead();
+			return KPI_CFGRET_RELOAD_DATA;
+		}
 		return KPI_CFGRET_RELOAD_DATA;
 	}
 	return KPI_CFGRET_OK;
@@ -179,3 +191,4 @@ BOOL APIENTRY DllMain(HINSTANCE hModule, DWORD reason, LPVOID)
 	}
 	return TRUE;
 }
+

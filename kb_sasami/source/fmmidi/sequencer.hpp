@@ -46,6 +46,7 @@
         std::string get_song()const;
         void play(double time, output* out);
         void play_forward(double time, output* out);
+        double peek_time() const;
         void set_position(double time);
         bool is_play_end(void){return position >= messages.end();}//ÇÁ by Kobarin
         double get_loop_point(void);//ÇÁ by Kobarin

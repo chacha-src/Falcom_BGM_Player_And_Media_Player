@@ -1,0 +1,174 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" ToolsVersion="14.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="uni_avx2_vs2026|Win32">
+      <Configuration>uni_avx2_vs2026</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="uni_avx2_vs2026|x64">
+      <Configuration>uni_avx2_vs2026</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="uni_2026_de|Win32">
+      <Configuration>uni_2026_de</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="uni_2026_de|x64">
+      <Configuration>uni_2026_de</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <ProjectGuid>{C4A91E20-6B17-4F3D-8A55-1D2E9B7C0F44}</ProjectGuid>
+    <Keyword>Win32Proj</Keyword>
+    <RootNamespace>kbsasami_host</RootNamespace>
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'!='Debug|x64' and '$(Configuration)|$(Platform)'!='Release|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v145</PlatformToolset>
+    <WholeProgramOptimization>false</WholeProgramOptimization>
+    <CharacterSet>Unicode</CharacterSet>
+    <UseOfMfc>Static</UseOfMfc>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)'=='uni_2026_de'" Label="Configuration">
+    <WholeProgramOptimization>false</WholeProgramOptimization>
+    <UseDebugLibraries>false</UseDebugLibraries>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="ExtensionSettings" />
+  <ImportGroup Label="Shared" />
+  <PropertyGroup Label="UserMacros" />
+  <PropertyGroup>
+    <!-- ogghost32 / KpiHost32 の OutDir・IntDir とは別。obj / pdb / ilk を共有しない。 -->
+    <OutDir>$(ProjectDir)out\$(Platform)\$(Configuration)\</OutDir>
+    <IntDir>$(ProjectDir)build\$(Platform)\$(Configuration)\</IntDir>
+    <TargetName Condition="'$(Platform)'=='Win32'">kbsasami_host32</TargetName>
+    <TargetName Condition="'$(Platform)'=='x64'">kbsasami_host64</TargetName>
+  </PropertyGroup>
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>WIN32_LEAN_AND_MEAN;NOMINMAX;KPIHOST32_BUILD;KBSASAMI_HOST_BUILD;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions Condition="'$(Configuration)'=='uni_avx2_vs2026'">WIN32_LEAN_AND_MEAN;NOMINMAX;KPIHOST32_BUILD;KBSASAMI_HOST_BUILD;NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(ProjectDir)..\KpiHost32;$(ProjectDir)..\;$(ProjectDir)source;$(ProjectDir)..\CEmu;$(ProjectDir)..\zstd;$(ProjectDir)..\third_party\aimp;$(ProjectDir)..\third_party\vst3sdk;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+      <ProgramDataBaseFileName>$(IntDir)$(TargetName)_cl.pdb</ProgramDataBaseFileName>
+      <EnableEnhancedInstructionSet Condition="'$(Configuration)'=='uni_avx2_vs2026' Or '$(Configuration)'=='uni_2026_de'">AdvancedVectorExtensions2</EnableEnhancedInstructionSet>
+      <Optimization Condition="'$(Configuration)'=='uni_2026_de'">MaxSpeed</Optimization>
+      <Optimization Condition="'$(Configuration)'=='uni_avx2_vs2026'">MaxSpeed</Optimization>
+      <DebugInformationFormat Condition="'$(Configuration)'=='uni_2026_de'">ProgramDatabase</DebugInformationFormat>
+      <OpenMPSupport>false</OpenMPSupport>
+    </ClCompile>
+    <Link>
+      <SubSystem>Console</SubSystem>
+      <TargetMachine Condition="'$(Platform)'=='Win32'">MachineX86</TargetMachine>
+      <TargetMachine Condition="'$(Platform)'=='x64'">MachineX64</TargetMachine>
+      <LargeAddressAware Condition="'$(Platform)'=='Win32'">true</LargeAddressAware>
+      <GenerateDebugInformation Condition="'$(Configuration)'=='uni_2026_de'">DebugFull</GenerateDebugInformation>
+      <GenerateDebugInformation Condition="'$(Configuration)'=='uni_avx2_vs2026'">true</GenerateDebugInformation>
+      <ProgramDatabaseFile>$(OutDir)$(TargetName).pdb</ProgramDatabaseFile>
+      <AdditionalLibraryDirectories Condition="'$(Platform)'=='Win32'">$(ProjectDir)..;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories Condition="'$(Platform)'=='x64'">$(ProjectDir)..\x64lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>winmm.lib;dwmapi.lib;d3d11.lib;dxgi.lib;d3dcompiler.lib;psapi.lib;libzstd_static.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+    <PostBuildEvent>
+      <Command>if not exist "$(ProjectDir)..\$(Configuration)\1\Plugins\kbsasami\" mkdir "$(ProjectDir)..\$(Configuration)\1\Plugins\kbsasami\"
+if not exist "$(ProjectDir)..\$(Configuration)\1\Plugins\kbsasami\x64\" mkdir "$(ProjectDir)..\$(Configuration)\1\Plugins\kbsasami\x64\"
+if not exist "C:\projects\APPLICATION3\ogg_binary\Plugins\kbsasami\" mkdir "C:\projects\APPLICATION3\ogg_binary\Plugins\kbsasami\"
+if not exist "C:\projects\APPLICATION3\ogg_binary\Plugins\kbsasami\x64\" mkdir "C:\projects\APPLICATION3\ogg_binary\Plugins\kbsasami\x64\"
+copy /Y "$(TargetPath)" "$(ProjectDir)..\$(Configuration)\1\Plugins\kbsasami\$(TargetFileName)"
+copy /Y "$(TargetPath)" "$(ProjectDir)..\$(Configuration)\1\Plugins\kbsasami\x64\$(TargetFileName)"
+copy /Y "$(TargetPath)" "C:\projects\APPLICATION3\ogg_binary\Plugins\kbsasami\$(TargetFileName)"
+copy /Y "$(TargetPath)" "C:\projects\APPLICATION3\ogg_binary\Plugins\kbsasami\x64\$(TargetFileName)"</Command>
+    </PostBuildEvent>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <ClCompile Include="kbsasami_host.cpp">
+      <UndefinePreprocessorDefinitions>KPIHOST32_BUILD</UndefinePreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(ProjectDir)..\;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+    <ClCompile Include="..\cpu_isa.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\simd_audio.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\simd_audio_avx512.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\KpiHost32\KpiHost32Vst.cpp" />
+    <ClCompile Include="..\KpiHost32\KpiHost32VstLive.cpp" />
+    <ClCompile Include="..\KpiHost32\kpihost_savedata.cpp" />
+    <ClCompile Include="..\KpiHost32\VstMidiEngine_k32.cpp" />
+    <ClCompile Include="..\Sf2Vst2.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="..\KpiHost32\Vst3Host_k32.cpp" />
+    <ClCompile Include="source\sasami_file.cpp" />
+    <ClCompile Include="source\sasami_midi.cpp" />
+    <ClCompile Include="source\sasami_misao.cpp" />
+    <ClCompile Include="source\kbsasami_monhost.cpp">
+      <UndefinePreprocessorDefinitions>KPIHOST32_BUILD</UndefinePreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(ProjectDir)..\;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+    <ClCompile Include="..\CMidiMonitorDlg.cpp">
+      <UndefinePreprocessorDefinitions>KPIHOST32_BUILD</UndefinePreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(ProjectDir)..\;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+    <ClCompile Include="..\CFmMonitorDlg.cpp">
+      <UndefinePreprocessorDefinitions>KPIHOST32_BUILD</UndefinePreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(ProjectDir)..\;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+    <ClCompile Include="..\CCustomControl.cpp">
+      <UndefinePreprocessorDefinitions>KPIHOST32_BUILD</UndefinePreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(ProjectDir)..\;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+    <ClCompile Include="..\CCustomPopupMenu.cpp">
+      <UndefinePreprocessorDefinitions>KPIHOST32_BUILD</UndefinePreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(ProjectDir)..\;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+    <ClCompile Include="..\GdiSoft2D.cpp">
+      <UndefinePreprocessorDefinitions>KPIHOST32_BUILD</UndefinePreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(ProjectDir)..\;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+    <ClCompile Include="..\GdiSoft3D.cpp">
+      <UndefinePreprocessorDefinitions>KPIHOST32_BUILD</UndefinePreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(ProjectDir)..\;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+    <ClCompile Include="..\UiTickPump.cpp">
+      <UndefinePreprocessorDefinitions>KPIHOST32_BUILD</UndefinePreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(ProjectDir)..\;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+    <ClCompile Include="..\CMidiHwPanel.cpp">
+      <UndefinePreprocessorDefinitions>KPIHOST32_BUILD</UndefinePreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(ProjectDir)..\;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+    <ClCompile Include="..\gpu\GpuDx11.cpp">
+      <UndefinePreprocessorDefinitions>KPIHOST32_BUILD</UndefinePreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(ProjectDir)..\;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+    <ClCompile Include="..\ListCtrlA.cpp">
+      <UndefinePreprocessorDefinitions>KPIHOST32_BUILD</UndefinePreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(ProjectDir)..\;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+    <ClCompile Include="..\BtnST.cpp">
+      <UndefinePreprocessorDefinitions>KPIHOST32_BUILD</UndefinePreprocessorDefinitions>
+      <PreprocessorDefinitions>_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(ProjectDir)..\;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+    <ClCompile Include="..\SasamiToneNames.cpp">
+      <UndefinePreprocessorDefinitions>KPIHOST32_BUILD</UndefinePreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(ProjectDir)..\;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="kbsasami_host.rc" />
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets" />
+</Project>

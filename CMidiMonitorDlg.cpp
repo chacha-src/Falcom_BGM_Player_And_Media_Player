@@ -1,20 +1,24 @@
 ﻿#include "stdafx.h"
 #include "CMidiMonitorDlg.h"
+#ifdef KBSASAMI_HOST_BUILD
+#include "kb_sasami/source/kbsasami_monhost.h"
+#else
 #include "oggDlg.h"
 #include "PlayList.h"
 #include "CMediaPlayerDlg.h"
 #include "CEqualizer.h"
+#include "VstHostDlg.h"
+#include "CPianoRoll.h"
+#include "PcHwMidiIn.h"
+#endif
 #include "resource.h"
 #include "VstMidiEngine.h"
-#include "VstHostDlg.h"
 #include "PluginKinds.h"
 #include "SasamiToneNames.h"
 #include "kb_sasami/source/sasami_midi.h"
 #include "CEmu/cemu_midi_live.h"
 #include "gpu/GpuDx11.h"
 #include "CFmMonitorDlg.h"
-#include "CPianoRoll.h"
-#include "PcHwMidiIn.h"
 #include "kb_sasami/source/sasami_file.h"
 #include "kb_sasami/source/sasami_fmmon.h"
 #include <math.h>
@@ -305,8 +309,10 @@ static void MmQpcPair(LONGLONG& freq, LONGLONG& now)
 	now = t.QuadPart;
 }
 
-static void MmBumpFade(BYTE& g, int /*burst*/)
+static void MmBumpFade(BYTE& g, int burst)
 {
+	/* 追いつきで PC/CC をまとめて入れるとインスト列が全点滅する。値は書くが光らせない。 */
+	if (burst) return;
 	g = 255;
 }
 
@@ -1494,6 +1500,126 @@ void CMmHelpDlg::OnPaint()
 
 } // namespace
 
+/* vst⇔fmmidi の Seek(0) でも INSERTION/EFX/送りを残す。ResetParts は触らない。 */
+namespace {
+struct MmFxKeep {
+	int valid;
+	wchar_t path[520];
+	int sysMode;
+	int varConn;
+	int ins1, ins2, ins3, ins4;
+	int dlyType;
+	int revType, choType, varType;
+	int revPacked, choPacked, varPacked;
+	BYTE gsEfx[32];
+	BYTE gsEfxHasLsb;
+	DWORD gsEfxMask;
+	BYTE insBlk[4][48];
+	BYTE varBlk[32];
+	struct {
+		BYTE vol, pan, rev, crs, var, efxOn;
+	} part[32];
+};
+MmFxKeep s_fxKeep;
+
+static void MmFxXgDump(BYTE ah, BYTE am, BYTE al, const BYTE* data, int n)
+{
+	if (!data || n < 1 || n > 48) return;
+	BYTE b[64];
+	b[0] = 0xf0; b[1] = 0x43; b[2] = 0x10; b[3] = 0x4c;
+	b[4] = ah; b[5] = am; b[6] = al;
+	memcpy(b + 7, data, (size_t)n);
+	b[7 + n] = 0xf7;
+	VstMidiInjectSysex(0, b, 8 + n);
+	VstMidiInjectSysex(1, b, 8 + n);
+}
+
+static BYTE MmGsPartTo1x(int part)
+{
+	part &= 15;
+	if (part == 9) return 0;
+	if (part < 9) return (BYTE)(part + 1);
+	return (BYTE)part;
+}
+
+static void MmFxGsDt1(BYTE aa, BYTE bb, BYTE cc, const BYTE* data, int n)
+{
+	if (!data || n < 1 || n > 32) return;
+	BYTE b[48];
+	int s = aa + bb + cc;
+	b[0] = 0xf0; b[1] = 0x41; b[2] = 0x10; b[3] = 0x42; b[4] = 0x12;
+	b[5] = aa; b[6] = bb; b[7] = cc;
+	for (int i = 0; i < n; ++i) {
+		b[8 + i] = data[i] & 127;
+		s += b[8 + i];
+	}
+	b[8 + n] = (BYTE)((128 - (s & 127)) & 127);
+	b[9 + n] = 0xf7;
+	VstMidiInjectSysex(0, b, 10 + n);
+	VstMidiInjectSysex(1, b, 10 + n);
+}
+} // namespace
+
+extern "C" void MmFxKeepPushVst(void)
+{
+	if (!s_fxKeep.valid) return;
+	if (!VstMidiHasPluginAudio()) return;
+	if (s_fxKeep.sysMode == 2) {
+		BYTE two[2];
+		two[0] = (BYTE)((s_fxKeep.revPacked >> 8) & 127);
+		two[1] = (BYTE)(s_fxKeep.revPacked & 127);
+		MmFxXgDump(0x02, 0x01, 0x00, two, 2);
+		two[0] = (BYTE)((s_fxKeep.choPacked >> 8) & 127);
+		two[1] = (BYTE)(s_fxKeep.choPacked & 127);
+		MmFxXgDump(0x02, 0x01, 0x20, two, 2);
+		MmFxXgDump(0x02, 0x01, 0x40, s_fxKeep.varBlk, 32);
+		BYTE conn = (BYTE)(s_fxKeep.varConn ? 1 : 0);
+		MmFxXgDump(0x02, 0x01, 0x5A, &conn, 1);
+		static const BYTE ams[4] = { 0x00, 0x01, 0x02, 0x03 };
+		const int packed[4] = { s_fxKeep.ins1, s_fxKeep.ins2, s_fxKeep.ins3, s_fxKeep.ins4 };
+		for (int s = 0; s < 4; ++s) {
+			int nz = packed[s];
+			for (int i = 0; i < 48 && !nz; ++i)
+				nz |= s_fxKeep.insBlk[s][i];
+			if (!nz) continue;
+			MmFxXgDump(0x03, ams[s], 0x00, s_fxKeep.insBlk[s], 48);
+		}
+	} else {
+		if (s_fxKeep.gsEfxMask || s_fxKeep.ins1)
+			MmFxGsDt1(0x40, 0x03, 0x00, s_fxKeep.gsEfx, 32);
+		BYTE rv = (BYTE)(s_fxKeep.revType & 127);
+		MmFxGsDt1(0x40, 0x01, 0x30, &rv, 1);
+		rv = (BYTE)(s_fxKeep.choType & 127);
+		MmFxGsDt1(0x40, 0x01, 0x38, &rv, 1);
+		rv = (BYTE)(s_fxKeep.dlyType & 127);
+		MmFxGsDt1(0x40, 0x01, 0x50, &rv, 1);
+		for (int i = 0; i < 32; ++i) {
+			if (!s_fxKeep.part[i].efxOn) continue;
+			BYTE on = 1;
+			const BYTE aa = (i >= 16) ? 0x50 : 0x40;
+			MmFxGsDt1(aa, (BYTE)(0x10 | MmGsPartTo1x(i)), 0x22, &on, 1);
+		}
+	}
+	for (int i = 0; i < 32; ++i) {
+		const BYTE vol = s_fxKeep.part[i].vol;
+		const BYTE pan = s_fxKeep.part[i].pan;
+		const BYTE rev = s_fxKeep.part[i].rev;
+		const BYTE crs = s_fxKeep.part[i].crs;
+		const BYTE var = s_fxKeep.part[i].var;
+		if (vol == 100 && pan == 64 && rev == 40 && crs == 0 && var == 0
+			&& !s_fxKeep.part[i].efxOn)
+			continue;
+		const int ch = i % 16;
+		const int port = i / 16;
+		const DWORD st = (DWORD)(0xb0 | ch);
+		VstMidiInjectShort(port, st | (7u << 8) | ((DWORD)vol << 16), 0);
+		VstMidiInjectShort(port, st | (10u << 8) | ((DWORD)pan << 16), 0);
+		VstMidiInjectShort(port, st | (91u << 8) | ((DWORD)rev << 16), 0);
+		VstMidiInjectShort(port, st | (93u << 8) | ((DWORD)crs << 16), 0);
+		VstMidiInjectShort(port, st | (94u << 8) | ((DWORD)var << 16), 0);
+	}
+}
+
 IMPLEMENT_DYNAMIC(CMidiMonitorDlg, CCustomBlurDialogExBase)
 
 CMidiMonitorDlg::CMidiMonitorDlg(CWnd* pParent)
@@ -1504,7 +1630,7 @@ CMidiMonitorDlg::CMidiMonitorDlg(CWnd* pParent)
 	, m_chromaW(0), m_chromaH(0), m_chromaReady(false)
 #endif
 	, m_fontDpi(0), m_fontH(0)
-	, m_ev(NULL), m_evCount(0), m_evPos(0), m_hadNote(0), m_hearPlayb(-1), m_sx(NULL), m_sxBytes(0)
+	, m_ev(NULL), m_evCount(0), m_evPos(0), m_hadNote(0), m_hearPlayb(-1), m_barPlayb(-1), m_sx(NULL), m_sxBytes(0)
 	, m_division(480), m_sampleRate(44100), m_loopStartSample(0), m_loopEndSample(0), m_lastPlayb(-1)
 	, m_usecQn(500000), m_tsNum(4), m_tsDen(4), m_keySf(0), m_keyMin(0), m_transpose(0)
 	, m_sysMode(0), m_revType(4), m_choType(2), m_varType(0), m_revPacked(0), m_choPacked(0), m_varPacked(0), m_varConn(1), m_ins1(0), m_ins2(0), m_ins3(0), m_ins4(0), m_dlyType(0)
@@ -1521,6 +1647,7 @@ CMidiMonitorDlg::CMidiMonitorDlg(CWnd* pParent)
 	, m_visAcc(0), m_visLastMs(0), m_pbAnchor(0), m_pbQpc(0), m_pbFreq(0), m_idleLastQpc(0)
 	, m_drumGlow(0), m_dispBpm(-1)
 	, m_dirtyRows(0xFFFFFFFFu), m_rowLive(0), m_nameNeed(0)	, m_burstApply(0)
+	, m_fxKeepPend(0)
 	, m_fm(nullptr), m_fmView(0)
 	, m_dirtyHead(true), m_fullDraw(true), m_volDragging(false)
 	, m_lcdSelA(0), m_lcdSelB(0), m_showLcdMode(0), m_showLcdSelA(-1), m_showLcdSelB(-1), m_showLcdKind(-1)
@@ -1702,6 +1829,12 @@ static int FmMidiWantFmView(int sticky)
 	extern int mode;
 	extern int g_openDecoderMode;
 	extern CString filen;
+#ifdef KBSASAMI_HOST_BUILD
+	/* 残った live.opna や mode=-3 で MIDI を FM 面にしない。
+	   曲種は kpi が共有メモリに書いたもの。 */
+	(void)sticky;
+	return KbsHostMonIsFm() ? 1 : 0;
+#endif
 	/* dump が MSX/OPM/チップなら、mode や sticky に関係なく FM 子へ。
 	   KSS は kbmsxplug が live.opna を書いていても MIDI 16ch「?」のまま見えていた。 */
 	if (FmMidiLiveDumpWantsFm() || FmMidiPlayPathLooksChip())
@@ -2057,6 +2190,79 @@ void CMidiMonitorDlg::ResetParts()
 	memset(m_latchMask, 0, sizeof(m_latchMask));
 }
 
+void CMidiMonitorDlg::CaptureFxKeep()
+{
+	if (m_fxKeepPend) return;
+	const wchar_t* src = m_sourcePath[0] ? m_sourcePath : m_loadedPath;
+	if (!src || !src[0]) return;
+	MmCopyW(s_fxKeep.path, 520, src);
+	s_fxKeep.sysMode = m_sysMode;
+	s_fxKeep.varConn = m_varConn;
+	s_fxKeep.ins1 = m_ins1;
+	s_fxKeep.ins2 = m_ins2;
+	s_fxKeep.ins3 = m_ins3;
+	s_fxKeep.ins4 = m_ins4;
+	s_fxKeep.dlyType = m_dlyType;
+	s_fxKeep.revType = m_revType;
+	s_fxKeep.choType = m_choType;
+	s_fxKeep.varType = m_varType;
+	s_fxKeep.revPacked = m_revPacked;
+	s_fxKeep.choPacked = m_choPacked;
+	s_fxKeep.varPacked = m_varPacked;
+	memcpy(s_fxKeep.gsEfx, m_gsEfx, sizeof(s_fxKeep.gsEfx));
+	s_fxKeep.gsEfxHasLsb = (BYTE)m_gsEfxHasLsb;
+	s_fxKeep.gsEfxMask = m_gsEfxMask;
+	memcpy(s_fxKeep.insBlk, m_insBlk, sizeof(s_fxKeep.insBlk));
+	memcpy(s_fxKeep.varBlk, m_varBlk, sizeof(s_fxKeep.varBlk));
+	for (int i = 0; i < PART_MAX; ++i) {
+		s_fxKeep.part[i].vol = (BYTE)(m_part[i].vol & 127);
+		s_fxKeep.part[i].pan = (BYTE)(m_part[i].pan & 127);
+		s_fxKeep.part[i].rev = (BYTE)(m_part[i].rev & 127);
+		s_fxKeep.part[i].crs = (BYTE)(m_part[i].crs & 127);
+		s_fxKeep.part[i].var = (BYTE)(m_part[i].var & 127);
+		s_fxKeep.part[i].efxOn = m_part[i].efxOn ? 1 : 0;
+	}
+	s_fxKeep.valid = 1;
+}
+
+void CMidiMonitorDlg::RestoreFxKeep()
+{
+	if (!s_fxKeep.valid || !s_fxKeep.path[0]) return;
+	const wchar_t* src = m_sourcePath[0] ? m_sourcePath : m_loadedPath;
+	if (!src || !src[0] || _wcsicmp(src, s_fxKeep.path) != 0) return;
+	m_sysMode = s_fxKeep.sysMode;
+	m_varConn = s_fxKeep.varConn;
+	m_ins1 = s_fxKeep.ins1;
+	m_ins2 = s_fxKeep.ins2;
+	m_ins3 = s_fxKeep.ins3;
+	m_ins4 = s_fxKeep.ins4;
+	m_dlyType = s_fxKeep.dlyType;
+	m_revType = s_fxKeep.revType;
+	m_choType = s_fxKeep.choType;
+	m_varType = s_fxKeep.varType;
+	m_revPacked = s_fxKeep.revPacked;
+	m_choPacked = s_fxKeep.choPacked;
+	m_varPacked = s_fxKeep.varPacked;
+	memcpy(m_gsEfx, s_fxKeep.gsEfx, sizeof(m_gsEfx));
+	m_gsEfxHasLsb = s_fxKeep.gsEfxHasLsb;
+	m_gsEfxMask = s_fxKeep.gsEfxMask;
+	memcpy(m_insBlk, s_fxKeep.insBlk, sizeof(m_insBlk));
+	memcpy(m_varBlk, s_fxKeep.varBlk, sizeof(m_varBlk));
+	for (int i = 0; i < PART_MAX; ++i) {
+		m_part[i].vol = s_fxKeep.part[i].vol;
+		m_part[i].pan = s_fxKeep.part[i].pan;
+		m_part[i].rev = s_fxKeep.part[i].rev;
+		m_part[i].crs = s_fxKeep.part[i].crs;
+		m_part[i].var = s_fxKeep.part[i].var;
+		m_part[i].efxOn = s_fxKeep.part[i].efxOn;
+	}
+	SyncXgInsParts();
+	m_dirtyHead = true;
+	m_dirtyRows = 0xFFFFFFFFu;
+	m_fullDraw = true;
+	MmFxKeepPushVst();
+}
+
 void CMidiMonitorDlg::UnloadMidi()
 {
 	MmCloseKpiLiveOut();
@@ -2292,7 +2498,10 @@ void CMidiMonitorDlg::ApplyShort(int port, DWORD msg, BOOL fromUser, BOOL liveEx
 	if (st == 0x90) {
 		if (d2 > 0) {
 			p.noteOn[d1] = (BYTE)d2;
-			p.noteFlash[d1] = 48; // ~48ms。Note Off がすぐ来ても鍵盤が点く
+			/* 追いつきで間の NoteOn まで flash すると、通り道の音が全部同時に点く。
+			   押しっぱなしは noteOn だけ残す。 */
+			if (!m_burstApply)
+				p.noteFlash[d1] = 48; // ~48ms。Note Off がすぐ来ても鍵盤が点く
 			p.lastNote = d1;
 			p.lastVel = d2;
 			p.held++;
@@ -2352,12 +2561,12 @@ void CMidiMonitorDlg::ApplyShort(int port, DWORD msg, BOOL fromUser, BOOL liveEx
 			m_nameNeed |= (1u << part);
 			m_dirtyRows |= (1u << part);
 		}
-		else if (d1 == 7) { if (fromUser || !IsLatched(part, MM_LATCH_VOL)) { if (p.vol != d2) { p.vol = d2; m_dirtyRows |= (1u << part); } } }
+		else if (d1 == 7) { if (fromUser || !IsLatched(part, MM_LATCH_VOL)) { if (p.vol != d2) { p.vol = d2; m_dirtyRows |= (1u << part); CaptureFxKeep(); } } }
 		else if (d1 == 11) { if (fromUser || !IsLatched(part, MM_LATCH_EXP)) { if (p.exp != d2) { p.exp = d2; m_dirtyRows |= (1u << part); } } }
-		else if (d1 == 10) { if (fromUser || !IsLatched(part, MM_LATCH_PAN)) { if (p.pan != d2) { p.pan = d2; m_dirtyRows |= (1u << part); } } }
-		else if (d1 == 91) { if (fromUser || !IsLatched(part, MM_LATCH_REV)) { if (p.rev != d2) { p.rev = d2; m_dirtyRows |= (1u << part); } } }
-		else if (d1 == 93) { if (fromUser || !IsLatched(part, MM_LATCH_CRS)) { if (p.crs != d2) { p.crs = d2; m_dirtyRows |= (1u << part); } } }
-		else if (d1 == 94) { if (fromUser || !IsLatched(part, MM_LATCH_VAR)) { if (p.var != d2) { p.var = d2; m_dirtyRows |= (1u << part); } } }
+		else if (d1 == 10) { if (fromUser || !IsLatched(part, MM_LATCH_PAN)) { if (p.pan != d2) { p.pan = d2; m_dirtyRows |= (1u << part); CaptureFxKeep(); } } }
+		else if (d1 == 91) { if (fromUser || !IsLatched(part, MM_LATCH_REV)) { if (p.rev != d2) { p.rev = d2; m_dirtyRows |= (1u << part); CaptureFxKeep(); } } }
+		else if (d1 == 93) { if (fromUser || !IsLatched(part, MM_LATCH_CRS)) { if (p.crs != d2) { p.crs = d2; m_dirtyRows |= (1u << part); CaptureFxKeep(); } } }
+		else if (d1 == 94) { if (fromUser || !IsLatched(part, MM_LATCH_VAR)) { if (p.var != d2) { p.var = d2; m_dirtyRows |= (1u << part); CaptureFxKeep(); } } }
 		else if (d1 == 64) { p.sus = d2; m_dirtyHead = true; }
 		else if (d1 == 71) { p.rsn = d2 - 64; MmBumpFade(p.fadeFilt, m_burstApply); m_dirtyRows |= (1u << part); }
 		else if (d1 == 74) { p.lpf = d2 - 64; MmBumpFade(p.fadeFilt, m_burstApply); m_dirtyRows |= (1u << part); }
@@ -2430,6 +2639,7 @@ void CMidiMonitorDlg::ApplySysex(const BYTE* d, int n, int livePort)
 		ResetParts();
 		m_sysMode = 0;
 		m_varConn = 1;
+		CaptureFxKeep();
 		return;
 	}
 	if (n >= 11 && VstMidiSysexIsGsReset(d, n)) {
@@ -2444,6 +2654,7 @@ void CMidiMonitorDlg::ApplySysex(const BYTE* d, int n, int livePort)
 		ResetParts();
 		m_sysMode = 1;
 		m_varConn = 1;
+		CaptureFxKeep();
 		return;
 	}
 	if (n >= 11 && VstMidiSysexIsGsSysMode(d, n)) {
@@ -2517,6 +2728,7 @@ void CMidiMonitorDlg::ApplySysex(const BYTE* d, int n, int livePort)
 		m_revPacked = 0x0100;
 		m_choPacked = 0x4100;
 		m_varPacked = 0x0500;
+		CaptureFxKeep();
 		return;
 	}
 	{
@@ -2646,6 +2858,7 @@ void CMidiMonitorDlg::ApplySysex(const BYTE* d, int n, int livePort)
 		}
 		m_nameNeed = 0;
 	}
+	CaptureFxKeep();
 }
 
 void CMidiMonitorDlg::ApplyEvent(const MmEv& e)
@@ -2688,6 +2901,9 @@ void CMidiMonitorDlg::ApplyEvent(const MmEv& e)
 void CMidiMonitorDlg::LoadCurrentMidi()
 {
 	const wchar_t* src = filen;
+	if (src && src[0] && s_fxKeep.valid && s_fxKeep.path[0]
+		&& _wcsicmp(src, s_fxKeep.path) != 0)
+		s_fxKeep.valid = 0;
 	const int wantSr = MmWantMonitorSampleRate();
 	if (src && src[0] && m_sourcePath[0] && _wcsicmp(src, m_sourcePath) == 0
 		&& m_loadedPath[0] && m_ev && m_evCount > 0 && m_sampleRate == wantSr)
@@ -3171,6 +3387,7 @@ void CMidiMonitorDlg::LoadCurrentMidi()
 	}
 	m_lastPlayb = -1;
 	m_hearPlayb = -1;
+	m_barPlayb = -1;
 	m_pbAnchor = 0;
 	m_pbQpc = 0;
 	m_evPos = 0;
@@ -3182,6 +3399,9 @@ void CMidiMonitorDlg::LoadCurrentMidi()
 			force = 0;
 		ApplyMapForce(force);
 	}
+	if (s_fxKeep.valid && s_fxKeep.path[0] && m_sourcePath[0]
+		&& _wcsicmp(s_fxKeep.path, m_sourcePath) == 0)
+		m_fxKeepPend = 1;
 	UpdatePlayPos();
 }
 
@@ -3407,8 +3627,14 @@ void CMidiMonitorDlg::SyncFromPlayback()
 		if (playy == 0 && pb < 0) pb = 0;
 		if (pb < 0) pb = 0;
 		pbRaw = pb;
+#ifdef KBSASAMI_HOST_BUILD
+		/* Pull の playb は可聴位置。200ms とプラグイン遅延を重ねると遅れる。 */
+		pbHeard = pb;
+		pbRaw = pbHeard;
+#else
 		pbHeard = pb - (__int64)sr * 700 / 1000;
 		if (pbHeard < 0) pbHeard = 0;
+#endif
 	}
 	if (m_loopEndSample > m_loopStartSample) {
 		const __int64 ls = m_loopStartSample;
@@ -3426,11 +3652,21 @@ void CMidiMonitorDlg::SyncFromPlayback()
 		if (pbHeard > pbRaw)
 			pbHeard = pbRaw;
 	}
+#ifdef KBSASAMI_HOST_BUILD
+	/* Pull が壁時計済み。ここで足すと次の Pull で戻されてダンピングする。 */
+#else
 	ExtrapolateHeard(pbHeard);
+#endif
 	if (m_loopEndSample > m_loopStartSample && pbHeard > m_loopEndSample) {
 		const __int64 span = m_loopEndSample - m_loopStartSample;
 		if (span > 0)
 			pbHeard = m_loopStartSample + ((pbHeard - m_loopEndSample - 1) % span);
+	}
+	{
+		const int srH = (m_sampleRate > 0) ? m_sampleRate : 44100;
+		if (m_hearPlayb >= 0 && pbHeard < m_hearPlayb
+			&& (m_hearPlayb - pbHeard) <= (__int64)srH / 2)
+			pbHeard = m_hearPlayb;
 	}
 	if (pbRaw < m_lastPlayb || (m_hearPlayb >= 0 && pbHeard < m_hearPlayb)) {
 		/* ライブ MPU はプログラムと CC がタップに一度しか来ず、スタブ SMF には無い。
@@ -3469,15 +3705,15 @@ void CMidiMonitorDlg::SyncFromPlayback()
 				while (m_evPos < m_evCount && m_ev[m_evPos].sample < m_loopStartSample)
 					++m_evPos;
 				m_dirtyRows = 0xFFFFFFFFu;
-			} else if (rawBack) {
-				/* 数サンプルの揺らぎで曲頭から再適用すると、通り道の
-				   NoteOn が全部 flash に残り、NOTES の MAX が 80 まで跳ねる。 */
+			} else if (rawBack || heardBack) {
+				/* 途中の揺らぎで ResetParts すると前の音と次の音が交互に出る。
+				   曲頭へ戻ったときだけやり直す。 */
 				const int srJ = (m_sampleRate > 0) ? m_sampleRate : 44100;
-				const __int64 back = m_lastPlayb - pbRaw;
-				if (back > srJ / 50) {
+				if (pbHeard < (__int64)srJ / 5 && m_hearPlayb > (__int64)srJ) {
 					ResetParts();
 					m_evPos = 0;
 					m_hadNote = 0;
+					m_fxKeepPend = 1;
 				}
 			}
 		}
@@ -3486,6 +3722,8 @@ void CMidiMonitorDlg::SyncFromPlayback()
 	}
 	m_lastPlayb = pbRaw;
 	m_hearPlayb = pbHeard;
+	/* 小節・tick も鍵盤と同じ可聴位置。デコード先頭だとモニタだけ先行する。 */
+	m_barPlayb = pbHeard;
 
 	if (CEmuMidiLiveActive()) {
 		/* スタブ SMF の CC/SysEx を鍵盤に重ねるとライブ注入と点滅する。
@@ -3500,7 +3738,7 @@ void CMidiMonitorDlg::SyncFromPlayback()
 	m_burstApply = 0;
 	if (!m_hadNote) {
 		int lastDump = m_evPos - 1;
-		for (int i = m_evPos; i < m_evCount && m_ev[i].sample <= pbRaw; ++i) {
+		for (int i = m_evPos; i < m_evCount && m_ev[i].sample <= pbHeard; ++i) {
 			if (MmEvIsNoteOn(m_ev[i]))
 				break;
 			lastDump = i;
@@ -3529,6 +3767,10 @@ void CMidiMonitorDlg::SyncFromPlayback()
 		}
 		m_nameNeed = 0;
 	}
+	if (m_fxKeepPend) {
+		RestoreFxKeep();
+		m_fxKeepPend = 0;
+	}
 	UpdateNoteMeter();
 	UpdatePlayPos();
 }
@@ -3537,20 +3779,29 @@ void CMidiMonitorDlg::UpdatePlayPos()
 {
 	unsigned __int64 tick = 0;
 	if (m_ev && m_evCount > 0) {
-		__int64 ds = 0;
-		if (m_evPos > 0) {
-			const int i = m_evPos - 1;
-			tick = m_ev[i].tick;
-			ds = m_hearPlayb - m_ev[i].sample;
-		} else {
-			ds = m_hearPlayb;
-		}
+		/* 鍵盤の適用位置で止めない。出力サンプルから小節を出す。
+		   次イベントの tick で頭打ちにすると、無音の空きで針が止まる。 */
+		__int64 pos = m_barPlayb;
+		if (pos < 0) pos = m_hearPlayb;
+		if (pos < 0) pos = 0;
+		int i = 0;
+		while (i + 1 < m_evCount && m_ev[i + 1].sample <= pos)
+			++i;
+		if (m_ev[i].sample > pos && i > 0)
+			--i;
+		tick = (m_ev[i].sample <= pos) ? m_ev[i].tick : 0;
+		__int64 ds = (m_ev[i].sample <= pos) ? (pos - m_ev[i].sample) : pos;
 		if (ds < 0) ds = 0;
-		if (ds > 0 && m_usecQn > 0 && m_division > 0 && m_sampleRate > 0) {
+		unsigned tempoU = 500000;
+		for (int k = i; k >= 0; --k) {
+			if (m_ev[k].msg == 0xff && m_ev[k].aux >= 10000 && m_ev[k].sample <= pos) {
+				tempoU = (unsigned)m_ev[k].aux;
+				break;
+			}
+		}
+		if (ds > 0 && tempoU > 0 && m_division > 0 && m_sampleRate > 0) {
 			tick += (unsigned __int64)ds * (unsigned __int64)m_division * 1000000ULL
-				/ ((unsigned __int64)m_usecQn * (unsigned __int64)m_sampleRate);
-			if (m_evPos >= 0 && m_evPos < m_evCount && tick > m_ev[m_evPos].tick)
-				tick = m_ev[m_evPos].tick;
+				/ ((unsigned __int64)tempoU * (unsigned __int64)m_sampleRate);
 		}
 		if (tick > m_maxTick) tick = m_maxTick;
 	}
@@ -3584,6 +3835,7 @@ void CMidiMonitorDlg::UpdatePlayPos()
 		const unsigned __int64 span = (target >= last) ? (target - last) : 0;
 		if (bar) *bar = (int)(acc + span / tpm) + 1;
 		if (beat) *beat = (int)((span % tpm) / tpb) + 1;
+		/* TB・小節内 tick はファイルの PPQN のまま。48 なら 48、480 なら 480。 */
 		if (tickIn) *tickIn = (int)(span % tpm);
 		if (tpbOut) *tpbOut = (int)tpm;
 		if (numOut) *numOut = num;
@@ -3938,7 +4190,7 @@ void CMidiMonitorDlg::DrawHeader(CDC& dc, int w, int headH, UINT dpi)
 		MmCopyW(nameBuf, 400, base);
 	wchar_t line1[560];
 	_snwprintf_s(line1, _TRUNCATE, L"BPM %3d    %3d%%    %s    TB %d    %d/%d    Transpose %d    %s",
-		bpm, tpc, keyBuf, m_division, m_tsNum, m_tsDen, m_transpose, nameBuf);
+		bpm, tpc, keyBuf, m_division > 0 ? m_division : 480, m_tsNum, m_tsDen, m_transpose, nameBuf);
 	{
 		CRect t1(Scale(8, dpi), Scale(2, dpi), max(Scale(48, dpi), textR), Scale(20, dpi));
 		dc.DrawText(line1, t1, DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
@@ -4009,16 +4261,18 @@ void CMidiMonitorDlg::DrawHeader(CDC& dc, int w, int headH, UINT dpi)
 		wchar_t sBar[20], sBeat[16], sTick[24];
 		_snwprintf_s(sBar, _TRUNCATE, L"%03d/%03d", m_posBar, m_posBars);
 		_snwprintf_s(sBeat, _TRUNCATE, L"%d/%d", m_posBeat, m_posNum);
-		_snwprintf_s(sTick, _TRUNCATE, L"%04d/%04d", m_posTick, m_posTpm);
+		_snwprintf_s(sTick, _TRUNCATE, L"%05d/%05d", m_posTick, m_posTpm);
 		const int pad = Scale(5, dpi);
 		const int gap = Scale(5, dpi);
 		int px = dx + ds + Scale(3, dpi) + drumSz.cx + Scale(10, dpi);
 		const CSize szBar = dc.GetTextExtent(sBar);
 		const CSize szBeat = dc.GetTextExtent(sBeat);
 		const CSize szTick = dc.GetTextExtent(sTick);
+		const CSize szTickMin = dc.GetTextExtent(L"00000/00000");
 		const int bwBar = szBar.cx + pad * 2;
 		const int bwBeat = szBeat.cx + pad * 2;
-		const int bwTick = szTick.cx + pad * 2;
+		const int tw = (szTick.cx > szTickMin.cx) ? szTick.cx : szTickMin.cx;
+		const int bwTick = tw + pad * 2;
 		if (px + bwBar <= textR) {
 			dc.FillSolidRect(px, vy, bwBar, vh, RGB(16, 28, 16));
 			dc.SetTextColor(RGB(210, 255, 210));
@@ -5461,6 +5715,10 @@ BOOL CMidiMonitorDlg::OnInitDialog()
 	SetTimer(1, 500, nullptr); // PersistPos / 種別 sticky。描画は UiTickPump
 	m_tickPump.Start(m_hWnd);
 	LoadCurrentMidi();
+	if (m_fxKeepPend) {
+		RestoreFxKeep();
+		m_fxKeepPend = 1;
+	}
 	m_fmView = 0;
 	SyncFmMidiView();
 	return TRUE;
@@ -5804,6 +6062,7 @@ void CMidiMonitorDlg::ResetPlaybackState()
 	memset(m_pcAudioOn, 0, sizeof(m_pcAudioOn));
 	m_lastPlayb = -1;
 	m_hearPlayb = -1;
+	m_barPlayb = -1;
 	m_pbAnchor = 0;
 	m_pbQpc = 0;
 	m_visAcc = 0;
@@ -5961,6 +6220,9 @@ void CMidiMonitorDlg::IdlePulse()
 // timerp 用。同期は毎ティック。描画の間引きは呼び出し側の Ms2DrawDue。
 void CMidiMonitorDlg::PumpSyncNow()
 {
+#ifdef KBSASAMI_HOST_BUILD
+	KbsHostMonPull();
+#endif
 	SyncFmMidiView();
 	if (m_fmView) {
 		if (m_fm && ::IsWindow(m_fm->GetSafeHwnd()))

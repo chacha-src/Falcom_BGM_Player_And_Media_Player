@@ -190,6 +190,8 @@ private:
 	void LoadCurrentMidi();           // 再生中パスの SMF をパース。起動時は呼ばない
 	void UnloadMidi();
 	void ResetParts();
+	void CaptureFxKeep(); // INSERTION/EFX/送りは ResetParts と別コピー
+	void RestoreFxKeep();
 	void InitPartDefaults(int i, BYTE heard);
 	void ResetPartsBank(int port);
 	void ApplyEvent(const MmEv& e);
@@ -240,6 +242,7 @@ private:
 	int m_evPos;         // ApplyDueEvents が次に読む位置
 	int m_hadNote;
 	__int64 m_hearPlayb;
+	__int64 m_barPlayb; /* 小節表示用。出力位置。イベントが無くても止めない */
 	BYTE* m_sx;          // SysEx プール
 	int m_sxBytes;
 	int m_division;
@@ -337,6 +340,7 @@ private:
 	DWORD m_rowLive;
 	DWORD m_nameNeed;
 	int m_burstApply;
+	int m_fxKeepPend; // Seek(0)/再読込のあと、頭の GM/XG が消す前の FX を戻す
 	CFmMonitorDlg* m_fm;
 	int m_fmView;
 	BYTE m_pcAudioOn[NOTE_MAX];

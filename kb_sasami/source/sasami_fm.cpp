@@ -1,7 +1,8 @@
-﻿#include "sasami_fm.h"
+#include "sasami_fm.h"
 #include "sasami_misao.h"
 #include "sasami_fmmon.h"
 #include "sasami_fmmon_map.h"
+#include "kbsasami_monitor.h"
 #include <windows.h>
 
 #include "ymfm.h"
@@ -14,6 +15,11 @@
 #include <stdio.h>
 #include <stddef.h>
 #include <mutex>
+#include <new>
+
+#ifndef CREATE_WAITABLE_TIMER_HIGH_RESOLUTION
+#define CREATE_WAITABLE_TIMER_HIGH_RESOLUTION 0x00000002
+#endif
 
 #include "sasami_neiro.inc"
 
@@ -236,6 +242,17 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 	SasamiFmMonDump* dumpLiveView;
 	SasamiFmMonRing* dumpRingView;
 	int dumpRingReady;
+	/* Render が先に進んでも、壁時計の 8ms タイマがここから可聴分だけ出す。
+	   約 10ms/tick × 8192 ≒ 85 秒。KbMedia の先読みもバナー間隔の伸びもここへ置く。 */
+	enum { kDumpQCap = 8192 };
+	SasamiFmMonDump* dumpQ;
+	uint32_t dumpQHead;
+	uint32_t dumpQCount;
+	std::mutex dumpMu;
+	LARGE_INTEGER dumpFreq;
+	LARGE_INTEGER dumpOriginQpc;
+	uint64_t dumpOriginSample;
+	int dumpClockArmed;
 	enum { MIX_FRAMES = 8192 };
 	int16_t mixBuf[MIX_FRAMES * 2];
 	uint32_t mixHave;
@@ -289,6 +306,13 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 		dumpLiveView = NULL;
 		dumpRingView = NULL;
 		dumpRingReady = 0;
+		dumpQ = NULL;
+		dumpQHead = 0;
+		dumpQCount = 0;
+		dumpFreq.QuadPart = 0;
+		dumpOriginQpc.QuadPart = 0;
+		dumpOriginSample = 0;
+		dumpClockArmed = 0;
 		mixHave = 0;
 		mixPos = 0;
 		chCount = 6;
@@ -328,7 +352,12 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 		}
 	}
 
-	~Impl() { CloseDumpFiles(); }
+	~Impl()
+	{
+		CloseDumpFiles();
+		delete[] dumpQ;
+		dumpQ = NULL;
+	}
 
 	uint8_t ymfm_external_read(ymfm::access_class type, uint32_t address) override
 	{
@@ -649,22 +678,12 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 		memset(d.ssgMidi, 0xFF, sizeof(d.ssgMidi));
 		d.pad6[2] = (uint8_t)(SASAMI_FMMON_VIEW_KEYS
 			| SASAMI_FMMON_VIEW_REGS | SASAMI_FMMON_VIEW_PANELS
-			| SASAMI_FMMON_CLOCK_DUMP);
+			| SASAMI_FMMON_CLOCK_DUMP | SASAMI_FMMON_CLOCK_LIVE);
 		strncpy_s(d.titleSjis, song.titleSjis, _TRUNCATE);
 		wcsncpy_s(d.sourcePath, dumpSrc, _TRUNCATE);
 
-		/* 音声スレッドでは mmap だけ。WriteFile / CreateDirectory は欠落や Seek の原因 */
-		if (!dumpRingView)
-			OpenDumpRing();
-		if (!dumpLiveView)
-			OpenDumpLive();
-		if (dumpRingView) {
-			if (dumpRingView->gen > dumpRingGen)
-				dumpRingGen = dumpRingView->gen;
-			SasamiFmMonPublishDump(dumpRingView, &dumpRingGen, dumpLiveView, &d);
-		} else if (dumpLiveView) {
-			memcpy(dumpLiveView, &d, sizeof(d));
-		}
+		/* ここでは溜めるだけ。mmap へ出すのは 8ms タイマ（可聴時刻になってから）。 */
+		EnqueueDump(d);
 		if (dumpSrc[0] && wcscmp(dumpNamedDone, dumpSrc) != 0) {
 			const wchar_t* name = dumpSrc;
 			for (const wchar_t* p = dumpSrc; *p; p++)
@@ -684,10 +703,113 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 		}
 	}
 
-	/* 変化が無くてもこのサンプル位置を1回出す。持続中の tick でも seq が進む */
+	void EnqueueDump(const SasamiFmMonDump& d)
+	{
+		std::lock_guard<std::mutex> lk(dumpMu);
+		if (!dumpQ) {
+			dumpQ = new (std::nothrow) SasamiFmMonDump[kDumpQCap];
+			if (!dumpQ) return;
+			dumpQHead = 0;
+			dumpQCount = 0;
+		}
+		if (dumpQCount >= (uint32_t)kDumpQCap) {
+			dumpQHead = (dumpQHead + 1u) % (uint32_t)kDumpQCap;
+			dumpQCount--;
+		}
+		const uint32_t tail = (dumpQHead + dumpQCount) % (uint32_t)kDumpQCap;
+		dumpQ[tail] = d;
+		dumpQCount++;
+	}
+
+	void ClearDumpQueue()
+	{
+		std::lock_guard<std::mutex> lk(dumpMu);
+		dumpQHead = 0;
+		dumpQCount = 0;
+		dumpClockArmed = 0;
+		dumpOriginSample = 0;
+		dumpOriginQpc.QuadPart = 0;
+	}
+
+	/* Render が来た瞬間を原点にする。以降の tick は sample 差だけ遅れて出す。
+	   タイマがデコードに追いついたあとホストが再開したら、原点を引き直す。 */
+	void NoteRenderPull(uint64_t delivered)
+	{
+		std::lock_guard<std::mutex> lk(dumpMu);
+		if (dumpFreq.QuadPart <= 0)
+			QueryPerformanceFrequency(&dumpFreq);
+		if (!dumpClockArmed || dumpFreq.QuadPart <= 0) {
+			QueryPerformanceCounter(&dumpOriginQpc);
+			dumpOriginSample = delivered;
+			dumpClockArmed = 1;
+			return;
+		}
+		LARGE_INTEGER now;
+		QueryPerformanceCounter(&now);
+		const uint32_t rate = hostRate ? hostRate : 44100;
+		uint64_t elapsed = 0;
+		if (now.QuadPart > dumpOriginQpc.QuadPart)
+			elapsed = (uint64_t)((now.QuadPart - dumpOriginQpc.QuadPart) * (__int64)rate / dumpFreq.QuadPart);
+		const uint64_t heard = dumpOriginSample + elapsed;
+		if (heard > delivered && heard - delivered > (uint64_t)rate / 5ull) {
+			QueryPerformanceCounter(&dumpOriginQpc);
+			dumpOriginSample = delivered;
+		}
+	}
+
+	uint64_t HeardSampleLocked()
+	{
+		if (!dumpClockArmed || dumpFreq.QuadPart <= 0)
+			return dumpOriginSample;
+		LARGE_INTEGER now;
+		QueryPerformanceCounter(&now);
+		const uint32_t rate = hostRate ? hostRate : 44100;
+		uint64_t elapsed = 0;
+		if (now.QuadPart > dumpOriginQpc.QuadPart)
+			elapsed = (uint64_t)((now.QuadPart - dumpOriginQpc.QuadPart) * (__int64)rate / dumpFreq.QuadPart);
+		return dumpOriginSample + elapsed;
+	}
+
+	/* 可聴時刻を過ぎた枚だけ mmap へ。1回の起きで溜め込まない（8分が飛ぶ）。 */
+	void PublishDueDumps()
+	{
+		const uint32_t rate = hostRate ? hostRate : 44100;
+		for (int n = 0; n < 4; n++) {
+			SasamiFmMonDump d;
+			int have = 0;
+			uint64_t heard = 0;
+			{
+				std::lock_guard<std::mutex> lk(dumpMu);
+				heard = HeardSampleLocked();
+				if (!dumpQ || dumpQCount == 0)
+					break;
+				const SasamiFmMonDump& head = dumpQ[dumpQHead];
+				if (head.curSample > heard)
+					break;
+				d = head;
+				dumpQHead = (dumpQHead + 1u) % (uint32_t)kDumpQCap;
+				dumpQCount--;
+				have = 1;
+			}
+			if (!have) break;
+			if (!dumpRingView)
+				OpenDumpRing();
+			if (!dumpLiveView)
+				OpenDumpLive();
+			if (dumpRingView) {
+				if (dumpRingView->gen > dumpRingGen)
+					dumpRingGen = dumpRingView->gen;
+				SasamiFmMonPublishDump(dumpRingView, &dumpRingGen, dumpLiveView, &d);
+			} else if (dumpLiveView) {
+				memcpy(dumpLiveView, &d, sizeof(d));
+			}
+			KbsMonPublishHeard((__int64)d.curSample, (int)rate);
+		}
+	}
+
 	void FlushTick(uint64_t curSample)
 	{
-		if (!dumpEnable) return;
+		if (!dumpEnable || dumpMute) return;
 		if (!dumpDirty && dumpLastFlushSample == curSample)
 			return;
 		dumpDirty = 1;
@@ -1666,6 +1788,9 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 SasamiFmPlayer::SasamiFmPlayer() : m(NULL), m_hostRate(44100), m_totalSamples(0), m_curSample(0)
 {
 	m_title[0] = 0;
+	m_dumpStop = NULL;
+	m_dumpTimer = NULL;
+	m_dumpThread = NULL;
 }
 SasamiFmPlayer::~SasamiFmPlayer() { Close(); }
 
@@ -1717,6 +1842,7 @@ bool SasamiFmPlayer::Open(const SasamiSong& song, uint32_t sampleRate, const wch
 
 void SasamiFmPlayer::Close()
 {
+	StopDumpThread();
 	std::lock_guard<std::mutex> lk(m_lock);
 	if (m) {
 		m->dumpEnable = 0;
@@ -1730,6 +1856,7 @@ void SasamiFmPlayer::Close()
 
 void SasamiFmPlayer::SetFmMonDump(int enable, const wchar_t* sourcePath)
 {
+	StopDumpThread();
 	std::lock_guard<std::mutex> lk(m_lock);
 	if (!m) return;
 	/* dump は OPN/OPNA 再生時（BEEP は無効） */
@@ -1748,7 +1875,9 @@ void SasamiFmPlayer::SetFmMonDump(int enable, const wchar_t* sourcePath)
 		m->dumpDirty = 1;
 		m->dumpLastFlushSample = 0;
 		m->ResetDumpFiles();
+		m->ClearDumpQueue();
 		m->FlushDump(m_curSample);
+		StartDumpThread();
 	}
 }
 
@@ -1761,6 +1890,9 @@ uint32_t SasamiFmPlayer::Render(int16_t* interleavedStereo, uint32_t frames)
 {
 	std::lock_guard<std::mutex> lk(m_lock);
 	if (!m || !interleavedStereo || frames == 0) return 0;
+	/* ホストが音を取りに来た時刻にタイマの原点を合わせる。dump 本体はタイマが出す。 */
+	if (m->dumpEnable && !m->dumpMute)
+		m->NoteRenderPull(m_curSample);
 	if (m->eofSent && m->mixPos >= m->mixHave) return 0;
 
 	/* MPY と同じく大きめの内部バッファで生成し、ホストへは要求分だけ渡す。
@@ -1776,8 +1908,6 @@ uint32_t SasamiFmPlayer::Render(int16_t* interleavedStereo, uint32_t frames)
 				m->eofSent = 1;
 				break;
 			}
-			if (m->dumpEnable && !m->dumpMute)
-				m->FlushDump(m_curSample);
 		}
 		uint32_t take = m->mixHave - m->mixPos;
 		if (take > frames - out) take = frames - out;
@@ -1817,13 +1947,15 @@ uint32_t SasamiFmPlayer::RenderUnlocked(int16_t* interleavedStereo, uint32_t fra
 				continue;
 			}
 			m->tickCarry %= kTickDen;
+			m->dumpClock = m_curSample + out;
 			if (m->ended && !misaoDone) {
 				if (m->misaoActive) m->misao.TickOnce();
+				m->FlushTick(m->dumpClock);
 				m->samplesLeftInTick = sl;
 				continue;
 			}
-			m->dumpClock = m_curSample + out;
 			m->TickOnce();
+			m->FlushTick(m->dumpClock);
 			m->samplesLeftInTick = sl;
 		}
 		uint32_t take = m->samplesLeftInTick;
@@ -1864,6 +1996,7 @@ uint64_t SasamiFmPlayer::SeekSample(uint64_t sample)
 		return 0;
 	}
 	sample %= m_totalSamples;
+	m->ClearDumpQueue();
 	m->SetupSong();
 	m_curSample = 0;
 	if (sample == 0) return 0;
@@ -1878,4 +2011,67 @@ uint64_t SasamiFmPlayer::SeekSample(uint64_t sample)
 	}
 	m->dumpMute = 0;
 	return m_curSample;
+}
+
+void SasamiFmPlayer::StartDumpThread()
+{
+	if (m_dumpThread) return;
+	m_dumpStop = CreateEventW(NULL, TRUE, FALSE, NULL);
+	if (!m_dumpStop) return;
+	m_dumpTimer = CreateWaitableTimerExW(NULL, NULL,
+		CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS);
+	if (!m_dumpTimer)
+		m_dumpTimer = CreateWaitableTimerW(NULL, FALSE, NULL);
+	if (m_dumpTimer) {
+		LARGE_INTEGER due;
+		due.QuadPart = -80000LL; /* 8ms。16ms だと FM の 1tick（約10ms）をまたぐ */
+		SetWaitableTimer((HANDLE)m_dumpTimer, &due, 8, NULL, NULL, FALSE);
+	}
+	m_dumpThread = CreateThread(NULL, 0, DumpThreadProc, this, 0, NULL);
+	if (!m_dumpThread)
+		StopDumpThread();
+}
+
+void SasamiFmPlayer::StopDumpThread()
+{
+	if (m_dumpStop)
+		SetEvent((HANDLE)m_dumpStop);
+	if (m_dumpTimer)
+		CancelWaitableTimer((HANDLE)m_dumpTimer);
+	if (m_dumpThread) {
+		WaitForSingleObject((HANDLE)m_dumpThread, INFINITE);
+		CloseHandle((HANDLE)m_dumpThread);
+		m_dumpThread = NULL;
+	}
+	if (m_dumpTimer) {
+		CloseHandle((HANDLE)m_dumpTimer);
+		m_dumpTimer = NULL;
+	}
+	if (m_dumpStop) {
+		CloseHandle((HANDLE)m_dumpStop);
+		m_dumpStop = NULL;
+	}
+}
+
+unsigned long __stdcall SasamiFmPlayer::DumpThreadProc(void* self)
+{
+	if (self)
+		((SasamiFmPlayer*)self)->DumpTimerLoop();
+	return 0;
+}
+
+void SasamiFmPlayer::DumpTimerLoop()
+{
+	HANDLE waits[2];
+	waits[0] = (HANDLE)m_dumpStop;
+	waits[1] = (HANDLE)m_dumpTimer;
+	const DWORD nWait = m_dumpTimer ? 2u : 1u;
+	for (;;) {
+		/* Close / SetFmMonDump はスレッドを join してから m と mmap を捨てる。 */
+		if (m && m->dumpEnable && !m->dumpMute)
+			m->PublishDueDumps();
+		const DWORD w = WaitForMultipleObjects(nWait, waits, FALSE, m_dumpTimer ? INFINITE : 8);
+		if (w == WAIT_OBJECT_0)
+			break;
+	}
 }

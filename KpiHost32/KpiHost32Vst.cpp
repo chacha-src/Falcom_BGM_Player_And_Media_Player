@@ -78,12 +78,22 @@ int VstHost32_SongActive()
 	return (g_vstOpen[0] || g_vstOpen[1]) ? 1 : 0; // アイドル終了を止める
 }
 
+#ifdef KBSASAMI_HOST_BUILD
+extern "C" void MmFxKeepPushVst(void);
+#endif
+
 uint32_t VstHost32_Seek(int slot, uint64_t posSample)
 {
 	slot = ClampSlot(slot);
 	if (!g_vstOpen[slot]) return KPIHOST32_STATUS_FAIL;
 	VstMidiSetIoSlot(slot);
-	return (VstMidiSeekSamples((__int64)posSample) == 0) ? KPIHOST32_STATUS_OK : KPIHOST32_STATUS_FAIL;
+	const uint32_t st = (VstMidiSeekSamples((__int64)posSample) == 0)
+		? KPIHOST32_STATUS_OK : KPIHOST32_STATUS_FAIL;
+#ifdef KBSASAMI_HOST_BUILD
+	if (st == KPIHOST32_STATUS_OK && posSample == 0)
+		MmFxKeepPushVst();
+#endif
+	return st;
 }
 
 uint32_t VstHost32_Close(int slot)

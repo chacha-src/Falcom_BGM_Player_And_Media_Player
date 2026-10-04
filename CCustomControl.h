@@ -256,6 +256,59 @@ inline BOOL CCC_ThemeSilk()
     return id == CCC_UI_THEME_CUTE || id == CCC_UI_THEME_GAL;
 }
 
+/* 色ではなく面の描き方。スライダーは別経路。 */
+enum {
+    CCC_FACE_FILL_SATIN = 0,
+    CCC_FACE_FILL_FLAT,
+    CCC_FACE_FILL_VGRAD,
+    CCC_FACE_FILL_HGRAD,
+    CCC_FACE_FILL_METAL,
+    CCC_FACE_FILL_NEON,
+    CCC_FACE_FILL_STRIPE,
+    CCC_FACE_FILL_WASH,
+    CCC_FACE_FILL_STREAK
+};
+enum {
+    CCC_FACE_EDGE_BEVEL = 0,
+    CCC_FACE_EDGE_HAIR,
+    CCC_FACE_EDGE_DOUBLE,
+    CCC_FACE_EDGE_GLOW,
+    CCC_FACE_EDGE_BRUSH,
+    CCC_FACE_EDGE_CHAMFER,
+    CCC_FACE_EDGE_PILL,
+    CCC_FACE_EDGE_WAVE
+};
+enum {
+    CCC_FACE_SEL_WASH = 0,
+    CCC_FACE_SEL_BAR,
+    CCC_FACE_SEL_UNDER,
+    CCC_FACE_SEL_FRAME,
+    CCC_FACE_SEL_PILL
+};
+enum {
+    CCC_FACE_SEP_LACE = 0,
+    CCC_FACE_SEP_HAIR,
+    CCC_FACE_SEP_NONE,
+    CCC_FACE_SEP_DASH,
+    CCC_FACE_SEP_DOUBLE
+};
+struct CCC_ThemeFace {
+    int radius;
+    int fill;
+    int edge;
+    int gloss;
+    int jelly;
+    int lace;
+    int sep;
+    int sel;
+};
+const CCC_ThemeFace& CCC_ThemeFaceOf();
+int CCC_ThemedCorner(const CRect& rc);
+void CCC_FillThemedPlate(CDC* pDC, const CRect& rc, COLORREF base, BOOL pushed);
+void CCC_StrokeThemedPlate(CDC* pDC, const CRect& rc, BOOL pushed, BOOL focus);
+void CCC_DrawThemedSep(CDC* pDC, int x1, int y, int x2);
+void CCC_MarkThemedSelection(CDC* pDC, const CRect& rc, BOOL opaqueHost);
+
 inline COLORREF CCC_ClrDialogBg() { return CCC_UiTheme().bg0; }
 inline COLORREF CCC_ClrEditBg() { return CCC_UiTheme().face; }
 inline COLORREF CCC_ClrListBg() { return CCC_UiTheme().face; }
@@ -282,7 +335,8 @@ inline COLORREF CCC_InkOn(COLORREF bg)
 }
 inline COLORREF CCC_ButtonInk(COLORREF bg, BOOL disabled)
 {
-    const COLORREF ink = CCC_InkOn(bg);
+    /* ボタンは白文字を避ける。かなり暗い地だけ明色。 */
+    const COLORREF ink = (CCC_Luma(bg) >= 110) ? RGB(28, 22, 30) : RGB(248, 244, 236);
     if (!disabled)
         return ink;
     return RGB(
@@ -1376,7 +1430,7 @@ public:
     void EnableAutoDelete(BOOL b = TRUE) { m_bAutoDelete = b; }
     BOOL m_bAutoDelete;
 
-    // 描画モード（0=楔バー、1=紫ダイヤ、2=ボリューム緑ダイヤ、3=カプセル、4=メーター）
+    // 描画モード（0=楔、1=中央基準、2=量バー、3=カプセル、4=メーター）。色とつまみはテーマごと
     void SetMode(int m);
     int GetMode() const { return m_nMode; }
 
@@ -1427,10 +1481,10 @@ private:
 
     // 描画モードごとの実際の描画処理
     void DrawSlider(CDC* pDC); // TBS_VERT は各 Mode 内で分岐
-    void DrawMode0(CDC* pDC, const CRect& r, int mn, int mx, int pos); // 楔形バー＋音符つまみ
-    void DrawMode1(CDC* pDC, const CRect& r, int mn, int mx, int pos); // 紫グラデ線＋ダイヤ
-    void DrawMode2(CDC* pDC, const CRect& r, int mn, int mx, int pos); // 緑グラデ線＋ダイヤ（ボリューム）
-    void DrawMode3(CDC* pDC, const CRect& r, int mn, int mx, int pos); // カプセル＋中央目盛り
+    void DrawMode0(CDC* pDC, const CRect& r, int mn, int mx, int pos); // 楔＋テーマつまみ
+    void DrawMode1(CDC* pDC, const CRect& r, int mn, int mx, int pos); // 中央から塗るレール（テンポ・ピッチ）
+    void DrawMode2(CDC* pDC, const CRect& r, int mn, int mx, int pos); // 端から伸びる量バー
+    void DrawMode3(CDC* pDC, const CRect& r, int mn, int mx, int pos); // カプセル＋中央線
     void DrawMode4(CDC* pDC, const CRect& r, int mn, int mx, int pos); // セグメントメーター
 };
 

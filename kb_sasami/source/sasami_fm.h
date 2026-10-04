@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "sasami_file.h"
 #include <stdint.h>
@@ -23,10 +23,17 @@ public:
 private:
 	struct Impl;
 	uint32_t RenderUnlocked(int16_t* interleavedStereo, uint32_t frames);
+	void StartDumpThread();
+	void StopDumpThread();
+	void DumpTimerLoop();
+	static unsigned long __stdcall DumpThreadProc(void* self);
 	Impl* m;
 	uint32_t m_hostRate;
 	uint64_t m_totalSamples;
 	uint64_t m_curSample;
 	char m_title[65];
 	std::mutex m_lock;
+	void* m_dumpStop;
+	void* m_dumpTimer;
+	void* m_dumpThread;
 };

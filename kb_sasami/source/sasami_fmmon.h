@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 // OPNA FM monitor dump — kbsasami (raira=1) writes, 本体 FMモニタ reads.
 #include <stdint.h>
 
@@ -120,7 +120,9 @@ enum {
 	SASAMI_FMMON_VIEW_REGS = 2,
 	SASAMI_FMMON_VIEW_PANELS = 4,
 	/* pad6[2]: VIEW_* | CLOCK_DUMP。CLOCK_DUMP なら可聴位置は dump.curSample−ラグ */
-	SASAMI_FMMON_CLOCK_DUMP = 8
+	SASAMI_FMMON_CLOCK_DUMP = 8,
+	/* タイマが壁時計に合わせて出した枚。curSample はすでに可聴位置なのでラグを引かない */
+	SASAMI_FMMON_CLOCK_LIVE = 16
 };
 
 #ifdef __cplusplus
@@ -129,6 +131,10 @@ inline bool SasamiFmMonDumpClock(const SasamiFmMonDump& d)
 	if (d.version < 6) return false;
 	if (d.dumpFlags & SASAMI_FMMON_FLAG_KEYSONLY) return true;
 	return (d.pad6[2] & SASAMI_FMMON_CLOCK_DUMP) != 0;
+}
+inline bool SasamiFmMonDumpLive(const SasamiFmMonDump& d)
+{
+	return (d.pad6[2] & SASAMI_FMMON_CLOCK_LIVE) != 0;
 }
 inline bool SasamiFmMonMagicOk(const SasamiFmMonDump& d)
 {

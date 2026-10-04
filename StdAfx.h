@@ -1,4 +1,4 @@
-﻿// stdafx.h : 標準のシステム インクルード ファイルのインクルード ファイル、または
+// stdafx.h : 標準のシステム インクルード ファイルのインクルード ファイル、または
 // 参照回数が多く、かつあまり変更されない、プロジェクト専用のインクルード ファイル
 // を記述します。
 
@@ -8,7 +8,10 @@
 // KpiHost32（x86）は VstMidiEngine.cpp / Vst3Host.cpp をこのフォルダからそのままコンパイルする。
 // 本体 ogg.exe（x64）と実装を共有する。ホストに MFC は無く、プリコンパイルヘッダの都合で
 // エンジンソースは #include "stdafx.h" で始まるので、切り替えはここ。
-#ifdef KPIHOST32_BUILD
+#if defined(KBSASAMI_HOST_BUILD) && !defined(KPIHOST32_BUILD)
+#include "kb_sasami/kbsasami_host_stdafx.h"
+#include "PluginKinds.h"
+#elif defined(KPIHOST32_BUILD)
 #include "KpiHost32/kpihost_stdafx.h"
 #include "PluginKinds.h"
 #else
