@@ -50,6 +50,11 @@ enum keyon_type : uint32_t
 	KEYON_CSM = 2
 };
 
+// Extra linear bits on operator amplitude. The die's power table right-shift
+// collapses a quiet sine into a 1-LSB square at the carrier rate (ジー on
+// every RR tail). Modulation still uses the original 14-bit scale.
+static constexpr uint32_t EG_HIRES_SHIFT = 8;
+
 
 
 //*********************************************************
@@ -328,8 +333,8 @@ private:
 
 	// internal state
 	uint32_t m_choffs;                     // channel offset in registers
-	int16_t m_feedback[2];                 // feedback memory for operator 1
-	mutable int16_t m_feedback_in;         // next input value for op 1 feedback (set in output)
+	int32_t m_feedback[2];                 // feedback memory for operator 1
+	mutable int32_t m_feedback_in;         // next input value for op 1 feedback (set in output)
 	fm_operator<RegisterType> *m_op[4];    // up to 4 operators
 	RegisterType &m_regs;                  // direct reference to registers
 	fm_engine_base<RegisterType> &m_owner; // reference to the owning engine

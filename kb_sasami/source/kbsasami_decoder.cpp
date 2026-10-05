@@ -1,6 +1,7 @@
 #include <windows.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include <math.h>
 #include <string.h>
 #include <string>
@@ -51,6 +52,7 @@ KbSasamiDecoder::KbSasamiDecoder(IKpiConfig* pConfig)
 	m_fmMode = false;
 	m_liveStream = false;
 	m_raira = 0;
+	m_fmOutBits = -64;
 	m_vst = 0;
 	m_foreignVst = 0;
 	m_vstGs[0] = 0;
@@ -551,7 +553,8 @@ int KbSasamiDecoder::LoadFmMidiSequencer(DWORD rate)
 	m_loopEnd = m_sequencer.find_marker("loopEnd");
 	m_MediaInfo.dwSampleRate = rate;
 	m_MediaInfo.dwChannels = 2;
-	m_MediaInfo.nBitsPerSample = 16;
+	/* 要求が 16/24/32 ならその int。-32 は float32。無指定と -64 は倍精度。 */
+	m_MediaInfo.nBitsPerSample = m_fmOutBits ? m_fmOutBits : -64;
 	m_MediaInfo.dwSeekableFlags = KPI_MEDIAINFO::SEEK_FLAGS_SAMPLE;
 	m_liveStream = PathIsCemuLiveMid(m_openPath) ? true : false;
 	if (m_liveStream) {
@@ -672,6 +675,14 @@ DWORD __fastcall KbSasamiDecoder::Open(const KPI_MEDIAINFO* cpRequest, IKpiFile*
 	(void)pFolder;
 	if (!pFile) return 0;
 	ReadOptions();
+	/* 本家は 16bit 固定のことが多く、0 や未対応の -64 だとバッファ長が狂って
+	   Seek／リング巻き戻しに見える。明示された精度だけ従う。 */
+	m_fmOutBits = m_raira ? -64 : 16;
+	if (cpRequest) {
+		const int b = cpRequest->nBitsPerSample;
+		if (b == 16 || b == 24 || b == 32 || b == -32 || b == -64)
+			m_fmOutBits = b;
+	}
 	if (InterlockedExchange(&s_restartHead, 0)) {
 		m_forceHead = 1;
 		KbsMonForgetPos();
@@ -874,6 +885,79 @@ int KbSasamiDecoder::OpenForeignVst(const uint8_t* smf, DWORD smfLen)
 	return 1;
 }
 
+static DWORD FmPcmBytesPerFrame(int bits)
+{
+	int a = bits < 0 ? -bits : bits;
+	if (a < 8) a = 64;
+	return 2u * (DWORD)(a / 8);
+}
+
+static double FmClipUnit(double x, double gain)
+{
+	double v = x * gain;
+	if (v > 1.0) v = 1.0;
+	if (v < -1.0) v = -1.0;
+	return v;
+}
+
+static void FmWritePcm(BYTE* dst, const double* mix, DWORD frames, double gain, int bits)
+{
+	const DWORD n = frames * 2;
+	if (bits == -64) {
+		double* out = (double*)dst;
+		for (DWORD i = 0; i < n; i++)
+			out[i] = FmClipUnit(mix[i], gain);
+		return;
+	}
+	if (bits == -32) {
+		float* out = (float*)dst;
+		for (DWORD i = 0; i < n; i++)
+			out[i] = (float)FmClipUnit(mix[i], gain);
+		return;
+	}
+	if (bits == 16) {
+		int16_t* out = (int16_t*)dst;
+		for (DWORD i = 0; i < n; i++) {
+			long long s = llrint(FmClipUnit(mix[i], gain) * 32767.0);
+			if (s > 32767) s = 32767;
+			if (s < -32768) s = -32768;
+			out[i] = (int16_t)s;
+		}
+		return;
+	}
+	if (bits == 32) {
+		int32_t* out = (int32_t*)dst;
+		for (DWORD i = 0; i < n; i++) {
+			long long s = llrint(FmClipUnit(mix[i], gain) * 2147483647.0);
+			if (s > 2147483647LL) s = 2147483647LL;
+			if (s < -2147483647LL - 1) s = -2147483647LL - 1;
+			out[i] = (int32_t)s;
+		}
+		return;
+	}
+	BYTE* p = dst;
+	for (DWORD i = 0; i < n; i++) {
+		long long s = llrint(FmClipUnit(mix[i], gain) * 8388607.0);
+		if (s > 8388607) s = 8388607;
+		if (s < -8388608) s = -8388608;
+		p[0] = (BYTE)(s & 0xFF);
+		p[1] = (BYTE)((s >> 8) & 0xFF);
+		p[2] = (BYTE)((s >> 16) & 0xFF);
+		p += 3;
+	}
+}
+
+static double FmSampleUnit(const BYTE* frame, int bits)
+{
+	if (bits == -64) return *(const double*)frame;
+	if (bits == -32) return (double)*(const float*)frame;
+	if (bits == 16) return (double)*(const int16_t*)frame / 32767.0;
+	if (bits == 32) return (double)*(const int32_t*)frame / 2147483647.0;
+	int v = frame[0] | (frame[1] << 8) | (frame[2] << 16);
+	if (v & 0x800000) v |= ~0xFFFFFF;
+	return (double)v / 8388607.0;
+}
+
 DWORD WINAPI KbSasamiDecoder::Render(BYTE* pBuffer, DWORD dwSizeSample)
 {
 	if (!pBuffer || dwSizeSample == 0) return 0;
@@ -908,10 +992,13 @@ DWORD WINAPI KbSasamiDecoder::Render(BYTE* pBuffer, DWORD dwSizeSample)
 	DWORD remain = dwSizeSample;
 	BYTE* p = pBuffer;
 	int wrapGuard = 0;
+	const int outBits = m_MediaInfo.nBitsPerSample ? m_MediaInfo.nBitsPerSample : -64;
+	const DWORD bytesPerFrame = FmPcmBytesPerFrame(outBits);
+	const double gain = m_raira ? kFmMidiOutGain : (kFmMidiOutGain * 0.5 / 1.5);
 	while (remain) {
 		if (looping && loopEndSamp > loopStartSamp + 1 && m_curSample > loopEndSamp) {
 			if (++wrapGuard > 64) {
-				ZeroMemory(p, remain * 4);
+				ZeroMemory(p, remain * bytesPerFrame);
 				break;
 			}
 			/* ハング中の NoteOff は SMF の loopEnd で済んでいる。
@@ -937,7 +1024,7 @@ DWORD WINAPI KbSasamiDecoder::Render(BYTE* pBuffer, DWORD dwSizeSample)
 				m_curSample = loopEndSamp + 1;
 				continue;
 			}
-			ZeroMemory(p, remain * 4);
+			ZeroMemory(p, remain * bytesPerFrame);
 			break;
 		}
 		const double tChunkEnd = (double)(m_curSample + chunk) / rate;
@@ -981,27 +1068,21 @@ DWORD WINAPI KbSasamiDecoder::Render(BYTE* pBuffer, DWORD dwSizeSample)
 			if (m_sequencer.peek_time() <= before && n == 0)
 				break;
 		}
-		int16_t* out = (int16_t*)p;
-		const double gain = m_raira ? kFmMidiOutGain : (kFmMidiOutGain * 0.5 / 1.5);
-		for (DWORD i = 0; i < chunk * 2; i++) {
-			int v = (int)(m_mix[i] * 32767.0 * gain);
-			if (v > 32767) v = 32767;
-			if (v < -32768) v = -32768;
-			out[i] = (int16_t)v;
-		}
+		FmWritePcm(p, m_mix, chunk, gain, outBits);
 		m_curSample += chunk;
 		remain -= chunk;
-		p += chunk * 4;
+		p += chunk * bytesPerFrame;
 	}
 
 	if (!m_liveStream && !looping && m_sequencer.is_play_end()) {
 		const double limit = 0.001;
-		int16_t* out = (int16_t*)pBuffer;
+		const DWORD step = bytesPerFrame / 2;
 		for (DWORD i = 0; i < dwSizeSample; i++) {
 			if (m_endSample++ >= m_MediaInfo.dwSampleRate * 5) return i;
 			if (m_silentSample++ >= m_MediaInfo.dwSampleRate / 2) return i;
-			const double l = out[i * 2] / 32767.0;
-			const double r = out[i * 2 + 1] / 32767.0;
+			const BYTE* fr = pBuffer + (size_t)i * bytesPerFrame;
+			const double l = FmSampleUnit(fr, outBits);
+			const double r = FmSampleUnit(fr + step, outBits);
 			if (l < -limit || l > limit || r < -limit || r > limit)
 				m_silentSample = 0;
 		}
@@ -1053,7 +1134,7 @@ UINT64 WINAPI KbSasamiDecoder::Seek(UINT64 qwPosSample, DWORD)
 	if (m_fmMode) {
 		const UINT64 pos = m_fm.SeekSample(qwPosSample);
 		if (!m_raira)
-			KbsMonPublishHeard((__int64)pos, (int)m_MediaInfo.dwSampleRate);
+			KbsMonSeek((__int64)pos, (int)m_MediaInfo.dwSampleRate);
 		m_monHold = 0;
 		return pos;
 	}

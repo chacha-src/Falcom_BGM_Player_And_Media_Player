@@ -2029,29 +2029,26 @@ uint64_t CFmMonitorDlg::AdvanceHeard(__int64 frames, uint32_t srDump)
 	return heard;
 }
 
+static __int64 FmHeardFromPlayback(uint32_t srDump)
+{
+	extern int wavbit_sample_Hz;
+	__int64 frames = OggGetHeardPcmFrames();
+	if (frames < 0) frames = 0;
+	const int srSrc = (wavbit_sample_Hz > 0) ? wavbit_sample_Hz : (int)srDump;
+	if (srSrc != (int)srDump && srSrc > 0)
+		frames = frames * (__int64)srDump / (__int64)srSrc;
+	return frames;
+}
+
 /* 今聞こえているサンプル位置。CLOCK_DUMP は dump.curSample−ラグ（fix2–7 と同じ）。
    可聴を再生カーソルに置き換えると kbsasami の 900ms 先読みと単位が食い違う。 */
 uint64_t CFmMonitorDlg::HeardSample(uint32_t sampleRate)
 {
 	extern int wavbit_sample_Hz;
 	const uint32_t srDump = sampleRate > 0 ? sampleRate : 44100;
-	const SasamiFmMonDump* liveD = (m_histN > 0)
-		? &m_hist[(m_histHead + m_histN - 1) % HIST_MAX] : NULL;
-	/* kpi のタイマが壁時計で出した枚。curSample が可聴位置なので 900ms は引かない。 */
-	if (liveD && SasamiFmMonDumpLive(*liveD)) {
-		const int li = (m_histHead + m_histN - 1) % HIST_MAX;
-		return AdvanceHeard((__int64)m_histSamp[li], srDump);
-	}
 #ifdef KBSASAMI_HOST_BUILD
 	/* playb はすでに KbMedia リング分だけ戻した可聴位置。dump 先頭から 900ms 引くと二重になる。 */
-	{
-		__int64 frames = OggGetHeardPcmFrames();
-		if (frames < 0) frames = 0;
-		const int srSrc = (wavbit_sample_Hz > 0) ? wavbit_sample_Hz : (int)srDump;
-		if (srSrc != (int)srDump && srSrc > 0)
-			frames = frames * (__int64)srDump / (__int64)srSrc;
-		return AdvanceHeard(frames, srDump);
-	}
+	return AdvanceHeard(FmHeardFromPlayback(srDump), srDump);
 #else
 	const SasamiFmMonDump* lastD = (m_histN > 0)
 		? &m_hist[(m_histHead + m_histN - 1) % HIST_MAX] : NULL;
@@ -3057,19 +3054,21 @@ static int FmTlLoud(int tl, int maxTl)
 	return (maxTl - tl) * 255 / maxTl;
 }
 
-/* OPN キャリア TL → 0..255。alg 0-3 は S4、4 は S2+S4、5-6 は S2-4、7 は全部 */
+/* OPN キャリア TL → 0..255。alg 0-3 は S4、4 は S2+S4、5-6 は S2-4、7 は全部。 */
 static int FmOpnCarrierLevel(const SasamiFmMonDump& d, int bank, int slot)
 {
 	if (bank < 0 || slot < 0) return 0;
 	const int alg = d.regs[bank + 0xB0 + slot] & 7;
 	static const int kCar[8] = { 8, 8, 8, 8, 10, 14, 14, 15 };
-	int best = 0;
+	int acc = 0, n = 0;
 	for (int op = 0; op < 4; op++) {
 		if (!((kCar[alg] >> op) & 1)) continue;
 		const int lv = FmTlLoud(d.regs[bank + 0x40 + op * 4 + slot] & 0x7F, 127);
-		if (lv > best) best = lv;
+		acc += lv * lv;
+		n++;
 	}
-	return best;
+	if (n <= 0) return 0;
+	return (int)sqrt((double)acc / (double)n);
 }
 
 static int FmOpmCarrierLevel(const SasamiFmMonDump& d, int ch)
@@ -3230,14 +3229,14 @@ void CFmMonitorDlg::DrawChannelKeys(CDC& dc, int x, int y, int w, int rowH, int 
 	int nameSlotW = dc.GetTextExtent(L"C352 32").cx;
 	const int noteSlotW = dc.GetTextExtent(L"O5C#").cx;
 	auto litVol = [&](int raw, int gate, int keyLit, BYTE fade) -> int {
-		if (!keyLit) return 0;
+		if (raw <= 0) return 0;
 		int lv = raw;
-		if (lv < 0) lv = 0;
 		if (lv > 255) lv = 255;
-		if (lv < 8)
-			lv = gate ? (std::max)(160, (int)fade) : (int)fade;
-		else if (!gate)
+		if (!gate) {
+			if (fade < 8) return 0;
 			lv = lv * fade / 255;
+		}
+		(void)keyLit;
 		return lv;
 	};
 	auto drawChHead = [&](int yy, const wchar_t* chNm, const wchar_t* note, BYTE fade, COLORREF hi, int volLevel) -> int {
@@ -3394,14 +3393,22 @@ void CFmMonitorDlg::DrawChannelKeys(CDC& dc, int x, int y, int w, int rowH, int 
 		else
 			FmFormatChNum(chNm, 16, L"FM", ch + 1, colPad, colPrefW);
 		int rawVol = 0;
+		int volGate = gate;
 		if (m_haveDump) {
 			if (opm) rawVol = FmOpmCarrierLevel(m_dump, ch);
 			else if (opl) rawVol = FmOplCarrierLevel(m_dump, ch);
 			else if (msx) rawVol = FmTlLoud(m_dump.regs[0x30 + ch] & 0x0F, 15);
-			else if (!KeysOnly()) rawVol = FmOpnCarrierLevel(m_dump, bank, slot);
+			else if (!KeysOnly()) {
+				const int ev = SasamiFmMonEnvVu(m_dump, ch);
+				if (ev >= 0) {
+					rawVol = ev;
+					volGate = 1;
+				} else
+					rawVol = FmOpnCarrierLevel(m_dump, bank, slot);
+			}
 		}
 		const int after = drawChHead(yy, chNm, note, fade, RGB(80, 220, 120),
-			litVol(rawVol, gate, keyLit, fade));
+			litVol(rawVol, volGate, keyLit, fade));
 		int lAmt = 255, rAmt = 255;
 		if (m_haveDump) {
 			if (opm)

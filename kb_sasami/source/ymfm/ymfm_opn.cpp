@@ -30,6 +30,7 @@
 
 #include "ymfm_opn.h"
 #include "ymfm_fm.ipp"
+#include <cmath>
 
 namespace ymfm
 {
@@ -957,7 +958,7 @@ void ym2203::clock_fm()
 	m_fm.clock(fm_engine::ALL_CHANNELS);
 
 	// update the FM content; OPN is full 14-bit with no intermediate clipping
-	m_fm.output(m_last_fm.clear(), 0, 32767, fm_engine::ALL_CHANNELS);
+	m_fm.output(m_last_fm.clear(), 0 + EG_HIRES_SHIFT, 32767, fm_engine::ALL_CHANNELS);
 
 	// convert to 10.3 floating point value for the DAC and back
 	m_last_fm.roundtrip_fp();
@@ -1410,7 +1411,7 @@ void ym2608::clock_fm_and_adpcm()
 	m_adpcm_b.clock();
 
 	// update the FM content; OPNA is 13-bit with no intermediate clipping
-	m_fm.output(m_last_fm.clear(), 1, 32767, fmmask);
+	m_fm.output(m_last_fm.clear(), 1 + EG_HIRES_SHIFT, 32767, fmmask);
 
 	// mix in the ADPCM and clamp
 	m_adpcm_a.output(m_last_fm, 0x3f);
@@ -1433,6 +1434,49 @@ void ym2608::setfmvolume(int32_t vol)
 void ym2608::setpsgvolume(int32_t vol)
 {
 	psgvolume = vol;
+}
+
+
+void ym2608::debug_fm_env_levels(uint8_t out[6])
+{
+	/* alg 0-3: S4 / 4: S2+S4 / 5-6: S2-4 / 7: 全部。bit0=S1 */
+	static const int kCar[8] = { 8, 8, 8, 8, 10, 14, 14, 15 };
+	for (uint32_t ch = 0; ch < 6; ch++) {
+		out[ch] = 0;
+		fm_channel<opna_registers> *chan = m_fm.debug_channel(ch);
+		if (chan == nullptr)
+			continue;
+		const uint32_t choff = chan->choffs();
+		const int alg = (int)m_fm.regs().ch_algorithm(choff) & 7;
+		const uint32_t am = m_fm.regs().lfo_am_offset(choff);
+		int acc = 0, n = 0;
+		for (int op = 0; op < 4; op++) {
+			if (((kCar[alg] >> op) & 1) == 0)
+				continue;
+			fm_operator<opna_registers> *o = chan->debug_operator((uint32_t)op);
+			if (o == nullptr)
+				continue;
+			opdata_cache &c = o->debug_cache();
+			uint32_t att = (uint32_t)o->debug_eg_attenuation() >> c.eg_shift;
+			if (o->debug_ssg_inverted())
+				att = (0x200 - att) & 0x3ff;
+			if (m_fm.regs().op_lfo_am_enable(o->opoffs()))
+				att += am;
+			att += c.total_level;
+			if (att > 0x3ff)
+				att = 0x3ff;
+			/* 6dB=64。線形減衰だと AM がバーに見えない */
+			int lv = (int)(255.0 * std::pow(2.0, -(double)att / 64.0) + 0.5);
+			if (lv < 0) lv = 0;
+			if (lv > 255) lv = 255;
+			if (att >= 0x3c0)
+				lv = 0;
+			acc += lv * lv;
+			n++;
+		}
+		if (n > 0)
+			out[ch] = (uint8_t)(int)std::sqrt((double)acc / (double)n);
+	}
 }
 
 
@@ -1846,7 +1890,7 @@ void ymf288::clock_fm_and_adpcm()
 		m_adpcm_a.clock(bitfield(env_counter, 2) ? 0x0f : 0x3f);
 
 	// update the FM content; OPNA is 13-bit with no intermediate clipping
-	m_fm.output(m_last_fm.clear(), 1, 32767, fmmask);
+	m_fm.output(m_last_fm.clear(), 1 + EG_HIRES_SHIFT, 32767, fmmask);
 
 	// mix in the ADPCM
 	m_adpcm_a.output(m_last_fm, 0x3f);
@@ -2202,7 +2246,7 @@ void ym2610::clock_fm_and_adpcm()
 		m_eos_status = (m_eos_status & ~0xc0) | live_eos | (live_eos << 1);
 
 	// update the FM content; OPNB is 13-bit with no intermediate clipping
-	m_fm.output(m_last_fm.clear(), 1, 32767, m_fm_mask);
+	m_fm.output(m_last_fm.clear(), 1 + EG_HIRES_SHIFT, 32767, m_fm_mask);
 
 	/* ADPCM-A は最大6chが 12bit フル近く。そのまま足して clamp16 すると
 	   FM が食われてざらつく。160/256 ≈ -4.1dB をクランプ前に掛ける。 */
@@ -2423,7 +2467,7 @@ void ym2612::generate(output_data *output, uint32_t numsamples)
 		int const last_fm_channel = m_dac_enable ? 5 : 6;
 		for (int chan = 0; chan < last_fm_channel; chan++)
 		{
-			m_fm.output(temp.clear(), 5, 256, 1 << chan);
+			m_fm.output(temp.clear(), 5 + EG_HIRES_SHIFT, 256, 1 << chan);
 			output->data[0] += dac_discontinuity(temp.data[0]);
 			output->data[1] += dac_discontinuity(temp.data[1]);
 		}
@@ -2462,7 +2506,7 @@ void ym3438::generate(output_data *output, uint32_t numsamples)
 		if (!m_dac_enable)
 		{
 			// DAC disabled: all 6 channels sum together
-			m_fm.output(output->clear(), 5, 256, fm_engine::ALL_CHANNELS);
+			m_fm.output(output->clear(), 5 + EG_HIRES_SHIFT, 256, fm_engine::ALL_CHANNELS);
 		}
 		else
 		{
@@ -2470,7 +2514,7 @@ void ym3438::generate(output_data *output, uint32_t numsamples)
 			int32_t dacval = int16_t(m_dac_data << 7) >> 7;
 			output->data[0] = m_fm.regs().ch_output_0(0x102) ? dacval : 0;
 			output->data[1] = m_fm.regs().ch_output_1(0x102) ? dacval : 0;
-			m_fm.output(*output, 5, 256, fm_engine::ALL_CHANNELS ^ (1 << 5));
+			m_fm.output(*output, 5 + EG_HIRES_SHIFT, 256, fm_engine::ALL_CHANNELS ^ (1 << 5));
 		}
 
 		// YM3438 doesn't have the same DAC discontinuity, though its output is
@@ -2496,7 +2540,7 @@ void ymf276::generate(output_data *output, uint32_t numsamples)
 		if (!m_dac_enable)
 		{
 			// DAC disabled: all 6 channels sum together
-			m_fm.output(output->clear(), 0, 8191, fm_engine::ALL_CHANNELS);
+			m_fm.output(output->clear(), 0 + EG_HIRES_SHIFT, 8191, fm_engine::ALL_CHANNELS);
 		}
 		else
 		{
@@ -2504,7 +2548,7 @@ void ymf276::generate(output_data *output, uint32_t numsamples)
 			int32_t dacval = int16_t(m_dac_data << 7) >> 7;
 			output->data[0] = m_fm.regs().ch_output_0(0x102) ? dacval : 0;
 			output->data[1] = m_fm.regs().ch_output_1(0x102) ? dacval : 0;
-			m_fm.output(*output, 0, 8191, fm_engine::ALL_CHANNELS ^ (1 << 5));
+			m_fm.output(*output, 0 + EG_HIRES_SHIFT, 8191, fm_engine::ALL_CHANNELS ^ (1 << 5));
 		}
 
 		// YMF276 is properly mixed; it shifts down 1 bit before clamping

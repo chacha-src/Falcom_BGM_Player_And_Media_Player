@@ -190,6 +190,7 @@ private:
 	void LoadCurrentMidi();           // 再生中パスの SMF をパース。起動時は呼ばない
 	void UnloadMidi();
 	void ResetParts();
+	void ApplyModeFxDefaults(); // GS/XG リセット後の Reverb/Chorus/Delay
 	void CaptureFxKeep(); // INSERTION/EFX/送りは ResetParts と別コピー
 	void RestoreFxKeep();
 	void InitPartDefaults(int i, BYTE heard);

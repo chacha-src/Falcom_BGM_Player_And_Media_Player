@@ -124,6 +124,11 @@ enum {
 	/* タイマが壁時計に合わせて出した枚。curSample はすでに可聴位置なのでラグを引かない */
 	SASAMI_FMMON_CLOCK_LIVE = 16
 };
+/* bank2Rows==0 のとき bank2[0..5]=FM1-6 実EG VU、[6][7] がこのマジック */
+enum {
+	SASAMI_FMMON_ENVVU_M0 = 'F',
+	SASAMI_FMMON_ENVVU_M1 = 'V'
+};
 
 #ifdef __cplusplus
 inline bool SasamiFmMonDumpClock(const SasamiFmMonDump& d)
@@ -140,6 +145,17 @@ inline bool SasamiFmMonMagicOk(const SasamiFmMonDump& d)
 {
 	return d.magic[0] == 'O' && d.magic[1] == 'P' && d.magic[2] == 'N' && d.magic[3] == 'A'
 		&& d.version >= 2 && d.version <= 7;
+}
+inline int SasamiFmMonHasEnvVu(const SasamiFmMonDump& d)
+{
+	return (d.version >= 7 && d.bank2Rows == 0
+		&& d.bank2[6] == (uint8_t)SASAMI_FMMON_ENVVU_M0
+		&& d.bank2[7] == (uint8_t)SASAMI_FMMON_ENVVU_M1) ? 1 : 0;
+}
+inline int SasamiFmMonEnvVu(const SasamiFmMonDump& d, int ch)
+{
+	if (ch < 0 || ch > 5 || !SasamiFmMonHasEnvVu(d)) return -1;
+	return (int)d.bank2[ch];
 }
 inline bool SasamiFmMonRingMagicOk(const SasamiFmMonRingHdr& r)
 {

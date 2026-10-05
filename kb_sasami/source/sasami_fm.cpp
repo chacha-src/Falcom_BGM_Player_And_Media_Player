@@ -190,6 +190,7 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 	uint8_t loopCnt[12][FM_LOOP_NEST];
 	uint8_t loopSp[12];
 	uint8_t vol[12];
+	uint8_t volSet[12]; /* 0=FVOL 未使用。音色のキャリア TL を残す */
 	uint32_t pc[12];
 	uint32_t voiceOff[12];
 	uint8_t voiceSrc[12];
@@ -252,6 +253,7 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 	LARGE_INTEGER dumpFreq;
 	LARGE_INTEGER dumpOriginQpc;
 	uint64_t dumpOriginSample;
+	uint64_t dumpHostPos; /* ホストへ渡したソース位置。mix 生成端ではない */
 	int dumpClockArmed;
 	enum { MIX_FRAMES = 8192 };
 	int16_t mixBuf[MIX_FRAMES * 2];
@@ -277,6 +279,7 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 		memset(loopCnt, 0, sizeof(loopCnt));
 		memset(loopSp, 0, sizeof(loopSp));
 		memset(vol, 0, sizeof(vol));
+		memset(volSet, 0, sizeof(volSet));
 		memset(pc, 0, sizeof(pc));
 		memset(voiceOff, 0, sizeof(voiceOff));
 		memset(voiceSrc, 0, sizeof(voiceSrc));
@@ -312,6 +315,7 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 		dumpFreq.QuadPart = 0;
 		dumpOriginQpc.QuadPart = 0;
 		dumpOriginSample = 0;
+		dumpHostPos = 0;
 		dumpClockArmed = 0;
 		mixHave = 0;
 		mixPos = 0;
@@ -663,8 +667,17 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 		memcpy(d.ssgHitCnt, ssgHitCnt, sizeof(ssgHitCnt));
 		memcpy(d.regWriteBits, regWriteSeen, sizeof(regWriteSeen));
 		memset(regWritePend, 0, sizeof(regWritePend));
-		d.padHit = (uint8_t)playFmMode; /* 0=BEEP 1=OPN 2=OPNA（モニタ見出し用） */
+		/* 0=BEEP 1=OPN(FM×3+SSG×3) 2=OPNA。6ch の OPNA 再生も殻は OPN。
+		   padHit=2 かつ fm10=0 はモニタが YM2612（SSG なし）と判定する。 */
+		d.padHit = (playFmMode == 2 && !fm10) ? 1 : (uint8_t)playFmMode;
 		d.fm10 = fm10 ? 1 : 0;
+		if (playFmMode) {
+			uint8_t vu[6];
+			chip.debug_fm_env_levels(vu);
+			memcpy(d.bank2, vu, 6);
+			d.bank2[6] = (uint8_t)SASAMI_FMMON_ENVVU_M0;
+			d.bank2[7] = (uint8_t)SASAMI_FMMON_ENVVU_M1;
+		}
 		d.pcmCount = 0;
 		memset(d.pcmOn, 0, sizeof(d.pcmOn));
 		memset(d.pcmNote, 0, sizeof(d.pcmNote));
@@ -678,7 +691,7 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 		memset(d.ssgMidi, 0xFF, sizeof(d.ssgMidi));
 		d.pad6[2] = (uint8_t)(SASAMI_FMMON_VIEW_KEYS
 			| SASAMI_FMMON_VIEW_REGS | SASAMI_FMMON_VIEW_PANELS
-			| SASAMI_FMMON_CLOCK_DUMP | SASAMI_FMMON_CLOCK_LIVE);
+			| SASAMI_FMMON_CLOCK_DUMP);
 		strncpy_s(d.titleSjis, song.titleSjis, _TRUNCATE);
 		wcsncpy_s(d.sourcePath, dumpSrc, _TRUNCATE);
 
@@ -729,6 +742,7 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 		dumpClockArmed = 0;
 		dumpOriginSample = 0;
 		dumpOriginQpc.QuadPart = 0;
+		dumpHostPos = 0;
 	}
 
 	/* Render が来た瞬間を原点にする。以降の tick は sample 差だけ遅れて出す。
@@ -778,15 +792,20 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 			SasamiFmMonDump d;
 			int have = 0;
 			uint64_t heard = 0;
+			uint64_t hostPos = 0;
 			{
 				std::lock_guard<std::mutex> lk(dumpMu);
 				heard = HeardSampleLocked();
 				if (!dumpQ || dumpQCount == 0)
 					break;
 				const SasamiFmMonDump& head = dumpQ[dumpQHead];
+				/* mix 8192 先読みの生成中は curSample がホスト未渡し。壁時計だけだとモニタが先走る。 */
+				if (head.curSample >= dumpHostPos)
+					break;
 				if (head.curSample > heard)
 					break;
 				d = head;
+				hostPos = dumpHostPos;
 				dumpQHead = (dumpQHead + 1u) % (uint32_t)kDumpQCap;
 				dumpQCount--;
 				have = 1;
@@ -803,7 +822,8 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 			} else if (dumpLiveView) {
 				memcpy(dumpLiveView, &d, sizeof(d));
 			}
-			KbsMonPublishHeard((__int64)d.curSample, (int)rate);
+			/* MIDI と同じくホスト渡し端を decode として lag を取る。dump.curSample だと 0 lag で針が貼り付く。 */
+			KbsMonPublishHeard((__int64)hostPos, (int)rate);
 		}
 	}
 
@@ -935,6 +955,7 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 
 	void ApplyTl(int ch)
 	{
+		if (!volSet[ch]) return;
 		const int k = OpnKey(ch);
 		if (k < 0) return;
 		const uint8_t* src = VoiceBytes(ch);
@@ -1019,6 +1040,12 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 			if (o + 25 > sizeof(kSasamiNeiro)) return;
 			src = kSasamiNeiro + o;
 			voiceOff[ch] = raw;
+			voiceSrc[ch] = 2;
+		} else if (raw <= 31) {
+			const uint32_t o = (uint32_t)raw * 0x30u;
+			if (o + 25 > sizeof(kSasamiNeiro)) return;
+			src = kSasamiNeiro + o;
+			voiceOff[ch] = kSasamiNeiroCs + o;
 			voiceSrc[ch] = 2;
 		} else
 			return;
@@ -1116,6 +1143,7 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 
 	void NoteSsg(int ch, uint8_t note, uint8_t wait)
 	{
+		if (wait < 2) wait = 2;
 		waitb[ch] = wait;
 		if (playFmMode == 0) {
 			BeepNote(ch, note, 1);
@@ -1139,6 +1167,7 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 			if (up > 4) up = 4;
 			per = (uint16_t)(per << up);
 		}
+		if (per == 0) per = 1;
 		WriteSsgPeriod(ch, per);
 		ssg[7] = (uint8_t)(ssg[7] & ~(1 << s));
 		FmOut(7, ssg[7]);
@@ -1226,6 +1255,7 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 			return 0;
 		case 11: // FVOL: operand is YM TL (0=loud … 127=silent). FMSSGVOL only uses 127-b1.
 			vol[ch] = b1;
+			volSet[ch] = 1;
 			ApplyTl(ch);
 			pc[ch] = addr + 3;
 			return 1;
@@ -1397,7 +1427,7 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 						if (softMode[ch] == 0) {
 							detune[ch] = (int16_t)((amt - softDepth[ch] / 2) * 8);
 							ApplyDetuneNow(ch);
-						} else {
+						} else if (volSet[ch]) {
 							uint8_t nv = (uint8_t)((vol[ch] > amt) ? (vol[ch] - amt) : 0);
 							uint8_t save = vol[ch];
 							vol[ch] = nv;
@@ -1618,7 +1648,8 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 			waitb[ch] = 0;
 			loopSp[ch] = 0;
 			memset(loopCnt[ch], 0, sizeof(loopCnt[ch]));
-			vol[ch] = 127;
+			vol[ch] = 0;
+			volSet[ch] = 0;
 			detune[ch] = 0;
 			backJumps[ch] = 0;
 			alive[ch] = 0;
@@ -1890,9 +1921,6 @@ uint32_t SasamiFmPlayer::Render(int16_t* interleavedStereo, uint32_t frames)
 {
 	std::lock_guard<std::mutex> lk(m_lock);
 	if (!m || !interleavedStereo || frames == 0) return 0;
-	/* ホストが音を取りに来た時刻にタイマの原点を合わせる。dump 本体はタイマが出す。 */
-	if (m->dumpEnable && !m->dumpMute)
-		m->NoteRenderPull(m_curSample);
 	if (m->eofSent && m->mixPos >= m->mixHave) return 0;
 
 	/* MPY と同じく大きめの内部バッファで生成し、ホストへは要求分だけ渡す。
@@ -1918,6 +1946,15 @@ uint32_t SasamiFmPlayer::Render(int16_t* interleavedStereo, uint32_t frames)
 	}
 	if (out < frames)
 		memset(interleavedStereo + out * 2, 0, (size_t)(frames - out) * 2 * sizeof(int16_t));
+	/* ホストへ渡した位置で時計を進める。生成端 m_curSample だと 8192 先読み分モニタが先行する。 */
+	if (m->dumpEnable && !m->dumpMute) {
+		const uint32_t delivered = out ? frames : 0;
+		if (delivered) {
+			std::lock_guard<std::mutex> dlk(m->dumpMu);
+			m->dumpHostPos += delivered;
+		}
+		m->NoteRenderPull(m->dumpHostPos);
+	}
 	/* MPY と同じく要求フレーム数を返す。短読みは本体が Seek(0) しやすい。 */
 	return out ? frames : 0;
 }
@@ -1999,6 +2036,8 @@ uint64_t SasamiFmPlayer::SeekSample(uint64_t sample)
 	m->ClearDumpQueue();
 	m->SetupSong();
 	m_curSample = 0;
+	m->mixHave = 0;
+	m->mixPos = 0;
 	if (sample == 0) return 0;
 	m->dumpMute = 1;
 	int16_t dump[1024 * 2];
@@ -2010,6 +2049,12 @@ uint64_t SasamiFmPlayer::SeekSample(uint64_t sample)
 		left -= g;
 	}
 	m->dumpMute = 0;
+	m->mixHave = 0;
+	m->mixPos = 0;
+	{
+		std::lock_guard<std::mutex> dlk(m->dumpMu);
+		m->dumpHostPos = m_curSample;
+	}
 	return m_curSample;
 }
 

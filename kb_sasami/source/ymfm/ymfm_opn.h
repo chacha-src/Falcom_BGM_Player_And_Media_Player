@@ -554,6 +554,9 @@ public:
 	void setfmvolume(int32_t vol);
 	void setpsgvolume(int32_t vol);
 
+	/* モニタ用: FM1-6 のキャリア実エンベロープ（EG+AM+TL）を 0..255 */
+	void debug_fm_env_levels(uint8_t out[6]);
+
 	/* keyon/off は FM クロック時にしか反映されない。generate 間引きを待たず強制クロックする */
 	void flush_fm_clock() { clock_fm_and_adpcm(); }
 

@@ -33,6 +33,7 @@ private:
 	bool m_fmMode;
 	bool m_liveStream; /* CEmu MPU stub: qwLength 不定、sequencer 終端で切らない */
 	int m_raira; // 1=このアプリ専用経路。モニタは出さない
+	int m_fmOutBits; // FM MIDI の出力。16/24/32 か -32/-64。0 要求は -64
 	int m_vst;   // 解釈後: 0=FM MIDI(fmmidi), 1=VST側に任せる
 	int m_foreignVst; // raira=0 かつ vst=1。専用ホストが PCM を返す
 	wchar_t m_vstGs[520];

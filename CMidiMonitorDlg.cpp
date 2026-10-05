@@ -2155,24 +2155,7 @@ void CMidiMonitorDlg::ResetParts()
 	m_ins2 = 0;
 	m_ins3 = 0;
 	m_ins4 = 0;
-	m_dlyType = 0;
-	if (m_sysMode == 2) {
-		m_revType = 1;
-		m_choType = 0x41;
-		m_varType = 5;
-		m_revPacked = 0x0100;
-		m_choPacked = 0x4100;
-		m_varPacked = 0x0500;
-		m_varConn = 0;
-	} else {
-		m_revType = 4;
-		m_choType = 2;
-		m_varType = 0;
-		m_revPacked = 0;
-		m_choPacked = 0;
-		m_varPacked = 0;
-		m_varConn = 1;
-	}
+	ApplyModeFxDefaults();
 	m_noteCount = 0;
 	m_notesPeak = 0;
 	m_notesPeakHold = 0;
@@ -2188,6 +2171,31 @@ void CMidiMonitorDlg::ResetParts()
 	memset(m_showLcdSeg, 0, sizeof(m_showLcdSeg));
 	memset(m_latchUntil, 0, sizeof(m_latchUntil));
 	memset(m_latchMask, 0, sizeof(m_latchMask));
+}
+
+/* Roland SC-88: 40 01 30=04 Hall 2, 40 01 38=02 Chorus 3, 40 01 50=00 Delay 1.
+   Yamaha XG spec: Reverb 01 00 Hall 1, Chorus 41 00 Chorus 1, Variation 05 00 Delay L,C,R. */
+void CMidiMonitorDlg::ApplyModeFxDefaults()
+{
+	if (m_sysMode == 2) {
+		m_revType = 1;
+		m_choType = 0x41;
+		m_varType = 5;
+		m_dlyType = 0;
+		m_revPacked = 0x0100;
+		m_choPacked = 0x4100;
+		m_varPacked = 0x0500;
+		m_varConn = 0;
+	} else {
+		m_revType = 4;
+		m_choType = 2;
+		m_varType = 0;
+		m_dlyType = 0;
+		m_revPacked = 0;
+		m_choPacked = 0;
+		m_varPacked = 0;
+		m_varConn = 1;
+	}
 }
 
 void CMidiMonitorDlg::CaptureFxKeep()
@@ -2648,12 +2656,12 @@ void CMidiMonitorDlg::ApplySysex(const BYTE* d, int n, int livePort)
 		if (livePort >= 0 && livePort <= 1) {
 			ResetPartsBank(livePort);
 			m_sysMode = 1;
-			m_varConn = 1;
+			ApplyModeFxDefaults();
 			return;
 		}
 		ResetParts();
 		m_sysMode = 1;
-		m_varConn = 1;
+		ApplyModeFxDefaults();
 		CaptureFxKeep();
 		return;
 	}
@@ -2716,18 +2724,12 @@ void CMidiMonitorDlg::ApplySysex(const BYTE* d, int n, int livePort)
 		if (livePort >= 0 && livePort <= 1) {
 			ResetPartsBank(livePort);
 			m_sysMode = 2;
-			m_varConn = 0;
+			ApplyModeFxDefaults();
 			return;
 		}
 		ResetParts();
 		m_sysMode = 2;
-		m_varConn = 0;
-		m_revType = 1;
-		m_choType = 0x41;
-		m_varType = 5;
-		m_revPacked = 0x0100;
-		m_choPacked = 0x4100;
-		m_varPacked = 0x0500;
+		ApplyModeFxDefaults();
 		CaptureFxKeep();
 		return;
 	}

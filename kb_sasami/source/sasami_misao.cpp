@@ -14,6 +14,8 @@ bool SasamiMisaoTrackValid(const SasamiSong& song, uint16_t ptr)
 	if (ptr == 0 || ptr == 0x10F0) return false;
 	uint32_t off = (ptr >= 0x1000) ? (uint32_t)(ptr - 0x1000) : ptr;
 	if (!SasamiOffOk(song, off, 3)) return false;
+	/* FPY 本体は 0x100 未満がヘッダ。MPY は 0x300 未満がヘッダ。 */
+	if (SasamiKindIsFm(song.kind) && off < 0x100) return false;
 	if (!SasamiKindIsFm(song.kind) && off < 0x300) return false;
 	const uint8_t cmd = SasamiGet(song, off);
 	return MisaoCmdValid(cmd);

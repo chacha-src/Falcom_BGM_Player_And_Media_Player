@@ -444,18 +444,20 @@ namespace std{
         system_mode = mode;
         if (mode == system_mode_xg) {
             fxInsFam = 3;
-            fxVarConn = 0;
-            fxVarPart = 0;
+            /* XG spec: Hall 1, Chorus 1, Variation Delay L,C,R。接続は Insertion、パートは OFF。 */
             fxRevMsb = 0x01; fxRevLsb = 0x00;
             fxRevTime = 64; fxRevChar = 4; fxRevLpf = 0; fxRevFb = 0; fxRevPre = 0;
             fxChoMsb = 0x41; fxChoLsb = 0x00;
             fxChoRate = 8; fxChoDepth = 20; fxChoFb = 8; fxChoDly = 64;
             fxChoLpf = 0; fxChoToRev = 0; fxChoToDly = 0;
-            fxDlyMsb = 0; fxDlyLsb = 0;
+            fxVarPacked = 0x0500;
+            fxVarConn = 0;
+            fxVarPart = 127;
+            fxDlyMsb = 0x05; fxDlyLsb = 0x00;
             fxDlyTime = 0x61; fxDlyFb = 64; fxDlyLpf = 0; fxDlyToRev = 0;
             sysRevLevel = 64; sysChoLevel = 64; sysDlyLevel = 64;
         } else if (mode == system_mode_gs) {
-            /* 電源投入 / GS リセット: Hall 2, Chorus 3, Delay 1 */
+            /* SC-88 GS Reset: 40 01 30=04 Hall 2, 38=02 Chorus 3, 50=00 Delay 1 */
             fxInsFam = 0;
             fxRevMsb = 0; fxRevLsb = 0;
             fxRevMode = 4;
@@ -466,7 +468,7 @@ namespace std{
             fxChoLpf = 0; fxChoToRev = 0; fxChoToDly = 0;
             fxDlyMsb = 0; fxDlyLsb = 0;
             fxDlyMode = 0;
-            fxDlyTime = 0x61; fxDlyFb = 80; fxDlyLpf = 0; fxDlyToRev = 0;
+            fxDlyTime = 0x61; fxDlyFb = 72; fxDlyLpf = 0; fxDlyToRev = 0;
             fxDlyLvlC = fxDlyLvlL = fxDlyLvlR = 127;
             sysRevLevel = 64; sysChoLevel = 64; sysDlyLevel = 64;
         }

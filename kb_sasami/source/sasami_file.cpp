@@ -227,6 +227,21 @@ uint32_t SasamiGet24(const SasamiSong& s, uint32_t off)
 		| ((uint32_t)SasamiGet(s, off + 2) << 16);
 }
 
+/* クラシック FPY はポインタ直後 0x14 からシーケンス。休符+自己ジャンプだけなら空き。 */
+static int SasamiFmTrackLooksDummy(const SasamiSong& s, uint32_t off)
+{
+	if (!SasamiOffOk(s, off, 6)) return 1;
+	const uint8_t c0 = SasamiGet(s, off);
+	const uint8_t c1 = SasamiGet(s, off + 3);
+	if (c1 != 3 && c0 != 3) return 0;
+	const uint32_t joff = (c0 == 3) ? off : (uint32_t)(off + 3);
+	const uint16_t w = SasamiGet16(s, joff + 1);
+	uint32_t dest = (w >= 0x1000) ? (uint32_t)(w - 0x1000) : w;
+	if (dest != off && dest != 0xF0) return 0;
+	if (c0 == 3) return 1;
+	return (c0 == 0 || c0 == 1 || c0 == 4 || c0 == 10);
+}
+
 static void SasamiLoadMisaoTracks(SasamiSong* out)
 {
 	out->misaoEnabled = 0;
@@ -243,11 +258,12 @@ static void SasamiLoadMisaoTracks(SasamiSong* out)
 		&& out->data[0xF1] == 'P' && out->data[0xF2] == 'P'
 		&& (out->data[0xF3] == '\n' || out->data[0xF3] == 0);
 
-	if (isFpy && (f0 == 0 || f0 == 0xFF)) {
-		/* extended FPY may still have 0xD0 tracks without classic f0=1 flag */
-	} else if (isMpy && !ppSig && f0 == 0) {
+	/* FPY の MISAO は書き出しが 0xF0=1。0 のまま 0xD0 を読むと
+	   FM ノート列（ATC-ED.FPY 等）をトラックポインタと誤認する。 */
+	if (isFpy && f0 != 1)
 		return;
-	}
+	if (isMpy && !ppSig && f0 == 0)
+		return;
 
 	int maxCh = 0;
 	int anyValid = 0;
@@ -317,13 +333,6 @@ bool SasamiLoadMemory(const uint8_t* bytes, size_t size, SasamiKind hint, Sasami
 
 	if (hint == SASAMI_KIND_FPY || hint == SASAMI_KIND_FPY2) {
 		out->kind = hint;
-		out->fmOpna10ch = (SasamiGet16(*out, 0x1E) == 0xFFFF) ? 1 : 0;
-		out->versionWord = SasamiGet16(*out, 0x1C);
-		/* versionWord==2 (or .fpy2 path) → nested-loop capable FPY2 */
-		if (out->versionWord == 2)
-			out->kind = SASAMI_KIND_FPY2;
-		else if (hint != SASAMI_KIND_FPY2)
-			out->kind = SASAMI_KIND_FPY;
 		out->trackCount = 10;
 		for (int ch = 0; ch < 10; ch++) {
 			const uint16_t ptr = SasamiGet16(*out, (uint32_t)(ch * 2));
@@ -332,6 +341,35 @@ bool SasamiLoadMemory(const uint8_t* bytes, size_t size, SasamiKind hint, Sasami
 			out->tracks[ch].part = -1;
 			out->tracks[ch].unused = (ptr == 0 || ptr == 0x10F0 || off >= size) ? 1 : 0;
 		}
+		/* 書き出し FPY はストリームが 0x100 以降。クラシックは 0x14 から命令が始まり
+		   0x1C/0x1E の version・10ch=FFFF と重なる（ATC-ED.FPY 等）。 */
+		int hdrMeta = 1;
+		for (int ch = 0; ch < 10; ch++) {
+			if (out->tracks[ch].unused) continue;
+			if (out->tracks[ch].fileOff < 0x100u) {
+				hdrMeta = 0;
+				break;
+			}
+		}
+		out->fmOpna10ch = 0;
+		out->versionWord = 0;
+		if (hdrMeta) {
+			out->fmOpna10ch = (SasamiGet16(*out, 0x1E) == 0xFFFF) ? 1 : 0;
+			out->versionWord = SasamiGet16(*out, 0x1C);
+		} else {
+			for (int ch = 7; ch < 10; ch++) {
+				if (out->tracks[ch].unused) continue;
+				if (!SasamiFmTrackLooksDummy(*out, out->tracks[ch].fileOff)) {
+					out->fmOpna10ch = 1;
+					break;
+				}
+			}
+		}
+		/* versionWord==2 (or .fpy2 path) → nested-loop capable FPY2 */
+		if (out->versionWord == 2)
+			out->kind = SASAMI_KIND_FPY2;
+		else if (hint != SASAMI_KIND_FPY2)
+			out->kind = SASAMI_KIND_FPY;
 		SasamiReadTitle(out);
 		SasamiLoadMisaoTracks(out);
 		return true;

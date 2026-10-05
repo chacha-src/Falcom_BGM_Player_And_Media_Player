@@ -391,9 +391,9 @@
             if (ms < 35) return e;
             if (ms > 1000) ms = 1000;
             int send = dlyOn ? c.dlySend : c.revSend;
-            float g = (send / 127.0f) * 0.42f;
-            if (dlyOn && c.dlyFb > 64) g += (c.dlyFb - 64) / 420.0f;
-            if (g > 0.48f) g = 0.48f;
+            float g = (send / 127.0f) * 0.28f;
+            if (dlyOn && c.dlyFb > 64) g += (c.dlyFb - 64) / 640.0f;
+            if (g > 0.32f) g = 0.32f;
             if (g < 0.06f) return e;
             e.mode = 1;
             e.ms = ms;
@@ -402,12 +402,13 @@
         }
         int varHall = c.spatXg && c.dlySend > 24 && c.dlyMsb >= 1 && c.dlyMsb <= 4;
         if ((c.revSend > 20 && !revDelay) || varHall) {
+            /* 40 01 37 はすでに ms。0 を 18ms にするとスラップエコーになる。 */
             int pre = c.revPre;
-            if (pre < 8) pre = hall ? 18 : 10;
-            if (pre > 90) pre = 90;
+            if (pre <= 0) pre = hall ? 5 : 3;
+            if (pre > 40) pre = 40;
             int send = varHall && c.revSend < c.dlySend ? c.dlySend : c.revSend;
-            float g = (send / 127.0f) * (hall ? 0.36f : 0.28f);
-            if (g > 0.38f) g = 0.38f;
+            float g = (send / 127.0f) * (hall ? 0.20f : 0.16f);
+            if (g > 0.22f) g = 0.22f;
             if (g < 0.05f) return e;
             e.mode = 2;
             e.ms = pre;
@@ -558,8 +559,18 @@
         int tail = 0, spatFb = 0, bright = 0, dark = 0;
         spat_tail(c, tail, spatFb, bright, dark);
         p.rrD -= tail;
-        p.fbDelta = (c.reso - 64) * 2 / 63;
-        p.fbDelta += spatFb;
+        /* 64 = その音色のまま。LPF を開いても変調を足さない（開く＝パッチどおり、
+           閉じる＝モジュレータを沈める）。開いたときに modTl を足すと側波が増えてジーになる。 */
+        p.fbDelta = spatFb;
+        {
+            const int rsn = c.reso - 64;
+            if (rsn > 48)
+                p.fbDelta += 2;
+            else if (rsn > 24)
+                p.fbDelta += 1;
+            else if (rsn < -24)
+                p.fbDelta -= 1;
+        }
         if (c.choSend > 28 && spatFb == 0) {
             int addFb = 0;
             if (!c.spatXg) {
@@ -575,11 +586,18 @@
             p.fbDelta -= hpf * 2 / 63;
         const int eqL = (c.eqLo - 64) * 4 / 63;
         const int eqH = (c.eqHi - 64) * 4 / 63;
-        const int cut = (c.cutoff - 64) * 8 / 63;
+        const int cutOff = c.cutoff - 64;
         p.carTl = -eqL;
         if (hpf > 0)
             p.carTl += hpf * 3 / 63;
-        p.modTl = cut - eqH / 2;
+        p.modTl = -eqH / 2;
+        if (cutOff < 0) {
+            p.modTl += cutOff * 6 / 63;
+            if (cutOff <= -24)
+                p.fbDelta -= 1;
+        } else if (cutOff > 16) {
+            p.carTl -= (cutOff - 16) * 3 / 63;
+        }
         if (dark) p.modTl -= 1;
         else if (bright) p.modTl += 1;
         p.amsOn = 0;

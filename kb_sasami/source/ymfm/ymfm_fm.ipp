@@ -129,8 +129,12 @@ inline uint32_t attenuation_to_volume(uint32_t input)
 	};
 #undef X
 
-	// look up the fractional part, then shift by the whole
-	return s_power_table[input & 0xff] >> (input >> 8);
+	// look up the fractional part, then shift by the whole.
+	// EG_HIRES_SHIFT extra bits keep quiet envelopes sinusoidal; callers that
+	// want die-accurate DAC width add the same amount to rshift.
+	uint32_t const shift = input >> 8;
+	uint32_t const man = uint32_t(s_power_table[input & 0xff]) << EG_HIRES_SHIFT;
+	return (shift >= 32) ? 0 : (man >> shift);
 }
 
 
@@ -482,7 +486,7 @@ int32_t fm_operator<RegisterType>::compute_volume(uint32_t phase, uint32_t am_of
 	// get the attenuation from the evelope generator as a 4.6 value, shifted up to 4.8
 	uint32_t env_attenuation = envelope_attenuation(am_offset) << 2;
 
-	// combine into a 5.8 value, then convert from attenuation to 13-bit linear volume
+	// combine into a 5.8 value, then convert from attenuation to linear volume
 	int32_t result = attenuation_to_volume((sin_attenuation & 0x7fff) + env_attenuation);
 
 	// negate if in the negative part of the sin wave (sign bit gives 14 bits)
@@ -924,7 +928,7 @@ void fm_channel<RegisterType>::output_2op(output_data &output, uint32_t rshift, 
 	int32_t opmod = 0;
 	uint32_t feedback = m_regs.ch_feedback(m_choffs);
 	if (feedback != 0)
-		opmod = (m_feedback[0] + m_feedback[1]) >> (10 - feedback);
+		opmod = (m_feedback[0] + m_feedback[1]) >> (10 - feedback + EG_HIRES_SHIFT);
 
 	// compute the 14-bit volume/value of operator 1 and update the feedback
 	int32_t op1value = m_feedback_in = m_op[0]->compute_volume(m_op[0]->phase() + opmod, am_offset);
@@ -942,7 +946,7 @@ void fm_channel<RegisterType>::output_2op(output_data &output, uint32_t rshift, 
 	{
 		// some OPL chips use the previous sample for modulation instead of
 		// the current sample
-		opmod = (RegisterType::MODULATOR_DELAY ? m_feedback[1] : op1value) >> 1;
+		opmod = (RegisterType::MODULATOR_DELAY ? m_feedback[1] : op1value) >> (1 + EG_HIRES_SHIFT);
 		result = m_op[1]->compute_volume(m_op[1]->phase() + opmod, am_offset) >> rshift;
 	}
 	else
@@ -981,7 +985,7 @@ void fm_channel<RegisterType>::output_4op(output_data &output, uint32_t rshift, 
 	int32_t opmod = 0;
 	uint32_t feedback = m_regs.ch_feedback(m_choffs);
 	if (feedback != 0)
-		opmod = (m_feedback[0] + m_feedback[1]) >> (10 - feedback);
+		opmod = (m_feedback[0] + m_feedback[1]) >> (10 - feedback + EG_HIRES_SHIFT);
 
 	// compute the 14-bit volume/value of operator 1 and update the feedback
 	int32_t op1value = m_feedback_in = m_op[0]->compute_volume(m_op[0]->phase() + opmod, am_offset);
@@ -1034,17 +1038,17 @@ void fm_channel<RegisterType>::output_4op(output_data &output, uint32_t rshift, 
 	uint32_t algorithm_ops = s_algorithm_ops[m_regs.ch_algorithm(m_choffs)];
 
 	// populate the opout table
-	int16_t opout[8];
+	int32_t opout[8];
 	opout[0] = 0;
 	opout[1] = op1value;
 
 	// compute the 14-bit volume/value of operator 2
-	opmod = opout[bitfield(algorithm_ops, 0, 1)] >> 1;
+	opmod = opout[bitfield(algorithm_ops, 0, 1)] >> (1 + EG_HIRES_SHIFT);
 	opout[2] = m_op[1]->compute_volume(m_op[1]->phase() + opmod, am_offset);
 	opout[5] = opout[1] + opout[2];
 
 	// compute the 14-bit volume/value of operator 3
-	opmod = opout[bitfield(algorithm_ops, 1, 3)] >> 1;
+	opmod = opout[bitfield(algorithm_ops, 1, 3)] >> (1 + EG_HIRES_SHIFT);
 	opout[3] = m_op[2]->compute_volume(m_op[2]->phase() + opmod, am_offset);
 	opout[6] = opout[1] + opout[3];
 	opout[7] = opout[2] + opout[3];
@@ -1053,10 +1057,10 @@ void fm_channel<RegisterType>::output_4op(output_data &output, uint32_t rshift, 
 	// value on the OPM; all algorithms consume OP4 output at a minimum
 	int32_t result;
 	if (m_regs.noise_enable() && m_choffs == 7)
-		result = m_op[3]->compute_noise_volume(am_offset);
+		result = m_op[3]->compute_noise_volume(am_offset) << EG_HIRES_SHIFT;
 	else
 	{
-		opmod = opout[bitfield(algorithm_ops, 4, 3)] >> 1;
+		opmod = opout[bitfield(algorithm_ops, 4, 3)] >> (1 + EG_HIRES_SHIFT);
 		result = m_op[3]->compute_volume(m_op[3]->phase() + opmod, am_offset);
 	}
 	result >>= rshift;
@@ -1095,13 +1099,13 @@ void fm_channel<RegisterType>::output_rhythm_ch6(output_data &output, uint32_t r
 	int32_t opmod = 0;
 	uint32_t feedback = m_regs.ch_feedback(m_choffs);
 	if (feedback != 0)
-		opmod = (m_feedback[0] + m_feedback[1]) >> (10 - feedback);
+		opmod = (m_feedback[0] + m_feedback[1]) >> (10 - feedback + EG_HIRES_SHIFT);
 
 	// compute the 14-bit volume/value of operator 1 and update the feedback
 	int32_t opout1 = m_feedback_in = m_op[0]->compute_volume(m_op[0]->phase() + opmod, am_offset);
 
 	// compute the 14-bit volume/value of operator 2, which is the result
-	opmod = bitfield(m_regs.ch_algorithm(m_choffs), 0) ? 0 : (opout1 >> 1);
+	opmod = bitfield(m_regs.ch_algorithm(m_choffs), 0) ? 0 : (opout1 >> (1 + EG_HIRES_SHIFT));
 	int32_t result = m_op[1]->compute_volume(m_op[1]->phase() + opmod, am_offset) >> rshift;
 
 	// add to the output

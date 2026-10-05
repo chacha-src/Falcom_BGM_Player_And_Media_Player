@@ -28,9 +28,11 @@ public:
                 continue;
             }
             output_data temp;
-            m_fm.output(temp.clear(), 5, 256, 1u << c);
-            out[c][0] = dac_discontinuity(temp.data[0]);
-            out[c][1] = dac_discontinuity(temp.data[1]);
+            /* 演算子振幅は EG_HIRES_SHIFT 分だけ細かい。変調は 14bit のまま。
+               弱い音が数 LSB の矩形になり、演奏中もジーッと残るのを防ぐ。 */
+            m_fm.output(temp.clear(), 0, 8191 << ymfm::EG_HIRES_SHIFT, 1u << c);
+            out[c][0] = temp.data[0];
+            out[c][1] = temp.data[1];
         }
     }
 };
@@ -85,7 +87,10 @@ struct Slot {
     int vib_delay_left;
     int rel_left;
     enum { kPcmFrames = 8192 };
+    enum { kDeciTaps = 255 };
     float pcm[kPcmFrames * 2];
+    /* オーバーサンプルした演算子出力の、間引きフィルタ用の直前サンプル。 */
+    float deci[(kDeciTaps - 1) * 2];
     int pcmN;
 };
 
@@ -134,8 +139,14 @@ struct Ym2612Pool::Impl {
     bool inited;
     int raira;
     double rate;
+    double clockRate;
+    int oversample;
+    int firOs;
+    float fir[Slot::kDeciTaps];
+    std::vector<float> over;
 
-    Impl() : live(0), block_open(0), order(0), inited(false), raira(0), rate(44100)
+    Impl() : live(0), block_open(0), order(0), inited(false), raira(0), rate(44100),
+             clockRate(44100), oversample(1), firOs(0)
     {
         for (int i = 0; i < kChips; i++) chips[i] = 0;
         for (int i = 0; i < kVoices; i++) {
@@ -159,6 +170,7 @@ struct Ym2612Pool::Impl {
             slots[i].vib_delay_left = 0;
             slots[i].rel_left = 0;
             slots[i].pcmN = 0;
+            std::memset(slots[i].deci, 0, sizeof(slots[i].deci));
         }
     }
     ~Impl()
@@ -229,7 +241,7 @@ struct Ym2612Pool::Impl {
         if (s.vib_depth != 0)
             midi += s.vib_depth * std::sin(s.vib_phase);
         int block = 0, fnum = 0;
-        fnum_of(midi, rate, block, fnum);
+        fnum_of(midi, clockRate, block, fnum);
         int cc = s.ch % 3;
         /* A4 latches block/F-num high. A0 commits both. Upper first. */
         wr(s.chip, s.ch, 0xA4 + cc, ((block & 7) << 3) | ((fnum >> 8) & 7));
@@ -320,7 +332,6 @@ struct Ym2612Pool::Impl {
         if (rr >= 13) sec = 0.12;
         else if (rr >= 8) sec = 0.35;
         else if (rr >= 4) sec = 0.7;
-        if (s.echoKind == 2 && sec < 1.5) sec = 1.5;
         s.rel_left = (int)(rate * sec);
         if (s.rel_left < 64) s.rel_left = 64;
     }
@@ -480,6 +491,70 @@ struct Ym2612Pool::Impl {
         }
     }
 
+    void make_fir(int os)
+    {
+        if (os == firOs) return;
+        firOs = os;
+        const int nt = Slot::kDeciTaps;
+        if (os < 2) {
+            for (int i = 0; i < nt; i++) fir[i] = 0;
+            return;
+        }
+        /* 折り返し点は 0.5/os。Kaiser で阻止域を深くし、10kHz 以上へ戻る側波を落とす。 */
+        const double cutoff = 0.42 / (double)os;
+        const int mid = nt / 2;
+        const double beta = 8.6;
+        auto bessel0 = [](double x) {
+            double sum = 1.0, term = 1.0;
+            const double x2 = x * x * 0.25;
+            for (int k = 1; k < 40; k++) {
+                term *= x2 / (double)(k * k);
+                sum += term;
+                if (term < sum * 1.0e-12) break;
+            }
+            return sum;
+        };
+        const double i0b = bessel0(beta);
+        double sum = 0;
+        for (int i = 0; i < nt; i++) {
+            const double x = (double)(i - mid);
+            const double s = (x == 0.0)
+                ? (2.0 * cutoff)
+                : (std::sin(2.0 * 3.141592653589793 * cutoff * x) / (3.141592653589793 * x));
+            const double r = (mid > 0) ? (x / (double)mid) : 0.0;
+            const double w = (r >= -1.0 && r <= 1.0) ? (bessel0(beta * std::sqrt(1.0 - r * r)) / i0b) : 0.0;
+            fir[i] = (float)(s * w);
+            sum += fir[i];
+        }
+        if (sum != 0.0) {
+            for (int i = 0; i < nt; i++) fir[i] = (float)(fir[i] / sum);
+        }
+    }
+
+    /* ホストが 48k や 44.1k のとき、YM をそのレートで刻むと変調の側波が可聴帯に折り返る。
+       内部は 176k 以上で刻む。ogg（raira=1）は Kaiser で戻す。
+       raira=0 の本家は 255tap FIR が期限を超えるので、平均で間引く（EG とピッチは内部レート）。 */
+    void update_rate(double rate_)
+    {
+        if (!(rate_ > 1)) return;
+        int os = 1;
+        if (rate_ < 176000.0) {
+            os = (int)std::ceil(176000.0 / rate_);
+            if (os < 2) os = 2;
+            if (os > 4) os = 4;
+        }
+        if (rate_ == rate && os == oversample && clockRate == rate_ * (double)os)
+            return;
+        rate = rate_;
+        oversample = os;
+        clockRate = rate_ * (double)os;
+        make_fir(os);
+        for (int i = 0; i < kVoices; i++) {
+            std::memset(slots[i].deci, 0, sizeof(slots[i].deci));
+            if (slots[i].used) write_pitch(slots[i]);
+        }
+    }
+
     void render(size_t n)
     {
         if (n > (size_t)Slot::kPcmFrames) n = (size_t)Slot::kPcmFrames;
@@ -501,31 +576,105 @@ struct Ym2612Pool::Impl {
                 slotOf[c][nslot[c]++] = i;
             slots[i].pcmN = (int)n;
         }
-        const double scale = (128.0 * 64.0 / 65.0) / 32768.0 / 3.0;
+        /* 14bit は 9bit の 32 倍。128/32=4 で、強い音の大きさは前と同じ。
+           EG_HIRES は線形の小数部だけなので、ここでも同じ倍率に戻す。 */
+        const double scale = 4.0 / 32768.0 / 3.0 / (double)(1 << ymfm::EG_HIRES_SHIFT);
+        const int os = oversample < 1 ? 1 : oversample;
         /* チップをサンプル横断で回す。サンプル毎に 22 チップを渡り歩くと
            32 パートで Render が再生期限を超え、リングが古い音を繰り返す。 */
+        if (os == 1) {
+            for (int c = 0; c < kChips; c++) {
+                if (!mask[c] || !chips[c]) continue;
+                for (size_t s = 0; s < n; s++) {
+                    int32_t ch[6][2];
+                    chips[c]->chip.clock_split(ch, mask[c]);
+                    for (int k = 0; k < nslot[c]; k++) {
+                        Slot& sl = slots[slotOf[c][k]];
+                        sl.pcm[s * 2] = (float)(ch[sl.ch][0] * scale);
+                        sl.pcm[s * 2 + 1] = (float)(ch[sl.ch][1] * scale);
+                    }
+                }
+            }
+            return;
+        }
+        const int nt = Slot::kDeciTaps;
+        const int hist = nt - 1;
+        const size_t ni = n * (size_t)os;
+        if (over.size() < (size_t)6 * ni * 2)
+            over.resize((size_t)6 * ni * 2);
         for (int c = 0; c < kChips; c++) {
             if (!mask[c] || !chips[c]) continue;
-            for (size_t s = 0; s < n; s++) {
+            for (size_t s = 0; s < ni; s++) {
                 int32_t ch[6][2];
                 chips[c]->chip.clock_split(ch, mask[c]);
                 for (int k = 0; k < nslot[c]; k++) {
                     Slot& sl = slots[slotOf[c][k]];
-                    sl.pcm[s * 2] = (float)(ch[sl.ch][0] * scale);
-                    sl.pcm[s * 2 + 1] = (float)(ch[sl.ch][1] * scale);
+                    const size_t at = ((size_t)k * ni + s) * 2;
+                    over[at] = (float)(ch[sl.ch][0] * scale);
+                    over[at + 1] = (float)(ch[sl.ch][1] * scale);
                 }
+            }
+            for (int k = 0; k < nslot[c]; k++) {
+                Slot& sl = slots[slotOf[c][k]];
+                const float* src = over.data() + (size_t)k * ni * 2;
+                if (!raira) {
+                    const float inv = 1.0f / (float)os;
+                    for (size_t i = 0; i < n; i++) {
+                        float accL = 0, accR = 0;
+                        const size_t base = i * (size_t)os;
+                        for (int j = 0; j < os; j++) {
+                            accL += src[(base + (size_t)j) * 2];
+                            accR += src[(base + (size_t)j) * 2 + 1];
+                        }
+                        sl.pcm[i * 2] = accL * inv;
+                        sl.pcm[i * 2 + 1] = accR * inv;
+                    }
+                    continue;
+                }
+                for (size_t i = 0; i < n; i++) {
+                    double accL = 0, accR = 0;
+                    const int base = (int)i * os;
+                    for (int t = 0; t < nt; t++) {
+                        const int idx = base + t;
+                        float L, R;
+                        if (idx < hist) {
+                            L = sl.deci[idx * 2];
+                            R = sl.deci[idx * 2 + 1];
+                        } else {
+                            const int s = idx - hist;
+                            L = src[(size_t)s * 2];
+                            R = src[(size_t)s * 2 + 1];
+                        }
+                        accL += (double)L * (double)fir[t];
+                        accR += (double)R * (double)fir[t];
+                    }
+                    sl.pcm[i * 2] = (float)accL;
+                    sl.pcm[i * 2 + 1] = (float)accR;
+                }
+                const int total = hist + (int)ni;
+                float tail[(Slot::kDeciTaps - 1) * 2];
+                for (int j = 0; j < hist; j++) {
+                    const int srcI = total - hist + j;
+                    float L, R;
+                    if (srcI < hist) {
+                        L = sl.deci[srcI * 2];
+                        R = sl.deci[srcI * 2 + 1];
+                    } else {
+                        const int s = srcI - hist;
+                        L = src[(size_t)s * 2];
+                        R = src[(size_t)s * 2 + 1];
+                    }
+                    tail[j * 2] = L;
+                    tail[j * 2 + 1] = R;
+                }
+                std::memcpy(sl.deci, tail, sizeof(tail));
             }
         }
     }
 
     void render_block(size_t n, double rate_)
     {
-        if (rate_ > 1 && rate_ != rate) {
-            rate = rate_;
-            init_chips();
-            for (int i = 0; i < kVoices; i++)
-                if (slots[i].used) write_pitch(slots[i]);
-        }
+        update_rate(rate_);
         init_chips();
         render(n);
         apply_lfo(n);
@@ -762,8 +911,9 @@ bool Ym2612Pool::ready() const { return impl && !impl->banks.empty(); }
 
 void Ym2612Pool::set_raira(int raira)
 {
-    if (impl)
-        impl->raira = raira ? 1 : 0;
+    if (!impl) return;
+    impl->raira = raira ? 1 : 0;
+    impl->oversample = 0;
 }
 
 void Ym2612Pool::reset_render_frame()
@@ -943,8 +1093,6 @@ note* Ym2612Pool::note_on(int program, int key, int velocity, double freq_mul, c
         impl->paint_wopn(e.inst, wet, velocity, drum);
         e.mul = slot.mul;
         e.midi = slot.midi;
-        if (ep.mode == 2)
-            e.midi += (es & 1) ? 0.16 : -0.14;
         double sr = impl->rate > 1 ? impl->rate : 44100.0;
         int delaySamp = (int)(sr * (ep.ms / 1000.0));
         if (delaySamp < 1) delaySamp = 1;
