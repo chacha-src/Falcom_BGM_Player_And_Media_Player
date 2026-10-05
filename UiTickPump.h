@@ -21,6 +21,7 @@ public:
 	void Ack();
 	bool IsRunning();
 	bool TryPostTick();
+	static void ShutdownHub();
 
 	// TheadLoop: wait for the shared hub pulse (not DwmGetCompositionTimingInfo+Sleep).
 	static void WaitVblank(HANDLE stopEvent);

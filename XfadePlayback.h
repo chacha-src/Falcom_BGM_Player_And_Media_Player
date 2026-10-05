@@ -174,8 +174,15 @@ void XfAbortCrossfade();
 int XfFindNextAudioPlIndex(int fromInclusive);
 /* 早期開始: heard が (end - xfade) に達したら 1 */
 int XfShouldStartEarly(__int64 heardBytes, __int64 endWrittenBytes);
-/* 成功で1。失敗時は呼び出し側がレガシー次曲へ */
-int XfStartCrossfadeFromNotify();
+/* KPI 等の連続再生 5 分制限。xfade 秒を引いた時点で 1 */
+int XfRenzokuLimitReached();
+int XfRenzokuLimitDueSoon();
+/* バナー／位置換算用。混合中に B の Hz へちらつかない */
+int XfDisplaySrcRate();
+int XfDisplaySrcCh();
+int XfDisplaySrcBits();
+/* 成功で1。失敗時は呼び出し側がレガシー次曲へ。準備済みだけでは混合しない */
+int XfStartCrossfadeFromNotify(int force = 0);
 int XfPreloadNextFromNotify();
 int XfShouldPreloadNext();
 /* 先読み(B)を中止。waitMs 待って 1=停止済み（スロットを閉じても安全） 0=まだ開いている */

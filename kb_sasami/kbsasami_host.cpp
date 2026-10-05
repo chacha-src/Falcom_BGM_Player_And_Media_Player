@@ -3,6 +3,7 @@
    中身は本体と同じ VstMidiEngine（juicysf 含む）。MIDI マッパーへは落とさない。 */
 #include "stdafx.h"
 #include "kb_sasami/source/kbsasami_monhost.h"
+#include "UiTickPump.h"
 #include "../kpi_host_ipc.h"
 #include "KpiHost32Vst.h"
 #include "KpiHost32VstLive.h"
@@ -17,13 +18,24 @@ static const wchar_t* const kPipeName = L"\\\\.\\pipe\\kbsasami_vst64";
 static const wchar_t* const kPipeName = L"\\\\.\\pipe\\kbsasami_vst32";
 #endif
 
+extern volatile LONG g_appExiting;
+
 static void PumpServeMsgs()
 {
 	MSG msg;
 	while (PeekMessageW(&msg, NULL, 0, 0, PM_REMOVE)) {
 		if (msg.message == WM_QUIT) {
-			PostQuitMessage((int)msg.wParam);
+			KbsHostMonRequestQuit();
 			continue;
+		}
+		if (InterlockedCompareExchange(&g_appExiting, 0, 0)) {
+			if (msg.message == WM_PAINT) {
+				if (msg.hwnd)
+					ValidateRect(msg.hwnd, NULL);
+				continue;
+			}
+			if (msg.message == WM_UITICK_VSYNC)
+				continue;
 		}
 		TranslateMessage(&msg);
 		DispatchMessageW(&msg);

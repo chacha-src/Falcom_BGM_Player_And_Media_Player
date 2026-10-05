@@ -234,6 +234,10 @@ enum {
     CCC_UI_THEME_DAWN,
     CCC_UI_THEME_RAIN,
     CCC_UI_THEME_SEA,
+    CCC_UI_THEME_MOON,
+    CCC_UI_THEME_AMBER,
+    CCC_UI_THEME_WISTERIA,
+    CCC_UI_THEME_RETRO,
     CCC_UI_THEME_COUNT
 };
 struct CCC_UiThemePal {
@@ -249,6 +253,8 @@ struct CCC_UiThemePal {
 int CCC_UiThemeId();
 const CCC_UiThemePal& CCC_UiTheme();
 LPCTSTR CCC_UiThemeName(int id);
+void CCC_SetThemePreview(int id); /* ホバー未確定。savedata は触らない */
+void CCC_ClearThemePreview();
 void CCC_RefreshThemedUi();
 inline BOOL CCC_ThemeSilk()
 {
@@ -307,6 +313,7 @@ int CCC_ThemedCorner(const CRect& rc);
 void CCC_FillThemedPlate(CDC* pDC, const CRect& rc, COLORREF base, BOOL pushed);
 void CCC_StrokeThemedPlate(CDC* pDC, const CRect& rc, BOOL pushed, BOOL focus);
 void CCC_DrawThemedSep(CDC* pDC, int x1, int y, int x2);
+void CCC_DrawThemeMotif(CDC* pDC, const CRect& rc, COLORREF c);
 void CCC_MarkThemedSelection(CDC* pDC, const CRect& rc, BOOL opaqueHost);
 
 inline COLORREF CCC_ClrDialogBg() { return CCC_UiTheme().bg0; }
@@ -375,7 +382,7 @@ inline COLORREF CCC_ButtonInk(COLORREF bg, BOOL disabled)
 #define COLOR_BUTTON_HOVER      CCC_ClrButtonHover()
 #define COLOR_SLIDER_THUMB      CCC_ClrAccent()
 #define COLOR_SEL_BG            CCC_ClrSelBg()
-#define COLOR_LIST_SEL_TEXT     CCC_ClrText()
+#define COLOR_LIST_SEL_TEXT     CCC_InkOn(CCC_ClrSelBg())
 #define COLOR_VINE_DECO         CCC_ClrSep()
 #define COLOR_HEART             CCC_ClrAccent()
 #define COLOR_BOW               CCC_ClrAccent2()

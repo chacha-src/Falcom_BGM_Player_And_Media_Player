@@ -850,7 +850,7 @@ void XfCloseSlotDecodersImpl(int slot); /* 定義は adbuf2_arr 宣言後 */
 static void CloseVstMidiSessionSlot(int slot);
 static void CloseCemuSlot(int slot);
 
-int XfStartCrossfadeFromNotify(); /* 定義は mode/filen 宣言後 — int 戻り */
+int XfStartCrossfadeFromNotify(int force); /* 定義は mode/filen 宣言後 — int 戻り */
 static void XfSaveUiMetaFromGlobals(int slot);
 static int XfSoftOpenSlot(int slot, const CString& path, int openMode);
 static CString s_xfFilen[XF_SLOTS], s_xfFnn[XF_SLOTS];
@@ -2541,25 +2541,28 @@ void ConfigurePlaybackOutputAndUpscaler()
 		srcBits = 16;
 	if (!(srcBits == 8 || srcBits == 16 || srcBits == 24 || srcBits == 32))
 		srcBits = 16;
-	if (!savedata.upscale_enable) {
-		g_ds_pcm_ch = wavchannel;
-		g_ds_pcm_rate = wavbit_sample_Hz;
-		g_ds_pcm_bits = srcBits;
-	}
-	else {
-		if (savedata.speaker_layout == 5) {
-			int ch = wavchannel;
-			if (ch < 1) ch = 2;
-			if (ch > 8) ch = 8;
-			g_ds_pcm_ch = ch;
+	const int keepSession = (XfEnabled() && m_dsb && g_ds_pcm_rate >= 8000 && g_ds_pcm_ch >= 1);
+	if (!keepSession) {
+		if (!savedata.upscale_enable) {
+			g_ds_pcm_ch = wavchannel;
+			g_ds_pcm_rate = wavbit_sample_Hz;
+			g_ds_pcm_bits = srcBits;
 		}
 		else {
-			g_ds_pcm_ch = SpeakerLayoutToOutChannels(savedata.speaker_layout);
+			if (savedata.speaker_layout == 5) {
+				int ch = wavchannel;
+				if (ch < 1) ch = 2;
+				if (ch > 8) ch = 8;
+				g_ds_pcm_ch = ch;
+			}
+			else {
+				g_ds_pcm_ch = SpeakerLayoutToOutChannels(savedata.speaker_layout);
+			}
+			g_ds_pcm_rate = (int)savedata.samples;
+			if (g_ds_pcm_rate < 8000 || g_ds_pcm_rate > 384000)
+				g_ds_pcm_rate = 44100;
+			g_ds_pcm_bits = savedata.bit32 ? 32 : (savedata.bit24 ? 24 : 16);
 		}
-		g_ds_pcm_rate = (int)savedata.samples;
-		if (g_ds_pcm_rate < 8000 || g_ds_pcm_rate > 384000)
-			g_ds_pcm_rate = 44100;
-		g_ds_pcm_bits = savedata.bit32 ? 32 : (savedata.bit24 ? 24 : 16);
 	}
 	ActiveAudioUpscaler().Configure(wavbit_sample_Hz, wavchannel, srcBits, g_ds_pcm_rate, g_ds_pcm_ch, g_ds_pcm_bits);
 	g_pcm_upscale_active = ActiveAudioUpscaler().IsActive() ? 1 : 0;
@@ -3316,16 +3319,46 @@ static DWORD g_kpiRenzokuTick = 0;
 static int   g_kpiRenzokuPnt = -999;
 static const DWORD KPI_RENZOKU_LIMIT_MS = 300000;
 
+int XfRenzokuLimitReached()
+{
+	if (g_kpiRenzokuTick == 0)
+		return 0;
+	const DWORD elapsed = GetTickCount() - g_kpiRenzokuTick;
+	DWORD xfMs = (DWORD)(XfSecFromSave() * 1000.0 + 0.5);
+	if (xfMs < 500)
+		xfMs = 500;
+	DWORD limit = KPI_RENZOKU_LIMIT_MS;
+	if (XfEnabled() && limit > xfMs + 1000)
+		limit -= xfMs;
+	return (elapsed >= limit) ? 1 : 0;
+}
+
+int XfRenzokuLimitDueSoon()
+{
+	if (g_kpiRenzokuTick == 0)
+		return 0;
+	const DWORD elapsed = GetTickCount() - g_kpiRenzokuTick;
+	DWORD xfMs = (DWORD)(XfSecFromSave() * 1000.0 + 0.5);
+	if (xfMs < 500)
+		xfMs = 500;
+	const DWORD leadMs = 4000;
+	DWORD limit = KPI_RENZOKU_LIMIT_MS;
+	if (limit > xfMs + leadMs + 1000)
+		limit -= (xfMs + leadMs);
+	return (elapsed >= limit) ? 1 : 0;
+}
+
 static void RenzokuFadeOrXfade()
 {
 	extern CString filen;
 	if (PlIsSasamiTempPreviewPath(filen)) return;
 	if (fadeadd != 0.0f) return;
 	if (InterlockedCompareExchange(&g_xfInProgress, 0, 0)) return;
+	/* tick は成功するまで消さない。消すと prepared 待ちのまま due が落ちて次曲に進まない */
+	if (XfEnabled() && XfStartCrossfadeFromNotify(1))
+		return;
 	g_kpiRenzokuTick = 0;
 	g_kpiRenzokuPnt = -999;
-	if (XfEnabled() && XfStartCrossfadeFromNotify())
-		return;
 	if (og && ::IsWindow(og->GetSafeHwnd()))
 		og->SendMessage(WM_COMMAND, MAKEWPARAM(IDC_BUTTON5, BN_CLICKED), 0);
 }
@@ -5147,11 +5180,15 @@ int XfShouldPreloadNext()
 			return 1;
 		return (pos >= startAt && pos < endRef) ? 1 : 0;
 	}
-	/* CEmu 等はカタログ長が無い。A が鳴り始めたら B を先に Boot しておかないと
-	   窓に間に合わずクロスフェードの意味が無い。 */
-	if (bpf > 0 && sr > 0 && g_heardBytes >= ((__int64)3 * (int64_t)sr * (int64_t)bpf))
-		return 1;
-	return 0;
+	/* CEmu / VST は Open が重いので長さ不明でも先に Boot する。
+	   KPI(SPC 等)は 3 秒で先読みすると準備完了＝即クロスになってしまう。
+	   5 分連続制限の窓まで待つ。 */
+	if (IsVstMidiPlayMode(nextMode) || nextMode == MODE_CEMU || IsCemuMode(nextMode)) {
+		if (bpf > 0 && sr > 0 && g_heardBytes >= ((__int64)3 * (int64_t)sr * (int64_t)bpf))
+			return 1;
+		return 0;
+	}
+	return XfRenzokuLimitDueSoon();
 }
 
 static volatile LONG g_xfPreloadBusy = 0;
@@ -5236,10 +5273,9 @@ static int XfOpenNextSlotForCrossfade(int* outCur, int* outNxt)
 			g_pcm_upscale_active = g_audioUpscalerArr[cur].IsActive() ? 1 : 0;
 			return 0;
 		}
+		/* SoftOpen 中に fill が進んだ位置はグローバルのまま。形式だけ開く前の A 袋へ戻す。 */
+		XfApplySlotFormatToGlobals(cur);
 		XfSaveSlotDecodeState(cur);
-		InterlockedExchange(&g_xfFillSlot, cur);
-		XfCaptureGlobalsToSlot(cur);
-		InterlockedExchange(&g_xfFillSlot, -1);
 		extern int g_pcm_upscale_active;
 		g_pcm_upscale_active = g_audioUpscalerArr[cur].IsActive() ? 1 : 0;
 	}
@@ -5289,6 +5325,8 @@ void XfBeginMixLocked(int cur)
 	InterlockedExchange(&g_xfPrepared, 0);
 	InterlockedExchange(&g_xfInProgress, 1);
 	InterlockedExchange(&g_xfCancelMpFade, 1);
+	g_kpiRenzokuTick = 0;
+	g_kpiRenzokuPnt = -999;
 }
 
 void XfMpCancelFadeIfRequested()
@@ -5425,7 +5463,7 @@ int XfDropPreparedForEngineChange()
 	return 1;
 }
 
-int XfStartCrossfadeFromNotify()
+int XfStartCrossfadeFromNotify(int force)
 {
 	if (!og || !pl || !XfEnabled())
 		return 0;
@@ -5433,15 +5471,24 @@ int XfStartCrossfadeFromNotify()
 		return 0;
 
 	const int cur = XfActiveSlot();
+	extern __int64 g_heardBytes, g_endWrittenBytes;
+	const int due = force
+		|| XfShouldStartEarly(g_heardBytes, g_endWrittenBytes)
+		|| XfRenzokuLimitReached();
 	if (InterlockedCompareExchange(&g_xfPrepared, 0, 0)
 		&& g_openDecoderModeSlot[XfOtherSlot(cur)] != INT_MIN) {
-		XfBeginMixNow(cur);
+		/* 先読み完了 ≠ 混合開始。窓／5 分制限まで B は待機する。
+		   force（5 分連続）では待たずに混合する。 */
+		if (due)
+			XfBeginMixNow(cur);
 		return 1;
 	}
 	if (InterlockedCompareExchange(&g_xfOpening, 0, 0)
 		|| InterlockedCompareExchange(&g_xfPreloadBusy, 0, 0))
 		return 1;
 
+	if (!due)
+		return 0;
 	int dummyCur = 0, dummyNxt = 0;
 	if (!XfOpenNextSlotForCrossfade(&dummyCur, &dummyNxt))
 		return 0;
@@ -7911,6 +7958,37 @@ static int XfSoftOpenSlot(int slot, const CString& path, int openMode)
 	if (InterlockedCompareExchange(&g_xfPreloadCancel, 0, 0)
 		|| InterlockedCompareExchange(&g_appExiting, 0, 0))
 		return 0;
+	/* B を開いても A の wavbit/mode は触らない（バナーちらつき・192→44.1 誤再生の主因） */
+	struct XfHoldAFormat {
+		int mode, rate, ch, bits, mp3, up;
+		HKMP kmp, kmp1;
+		XfHoldAFormat()
+		{
+			extern int g_pcm_upscale_active;
+			mode = g_openDecoderMode;
+			rate = wavbit_sample_Hz;
+			ch = wavchannel;
+			bits = wavsam_depth;
+			mp3 = g_mp3_decoder_bps;
+			up = g_pcm_upscale_active;
+			kmp = og ? og->kmp : NULL;
+			kmp1 = og ? og->kmp1 : NULL;
+		}
+		~XfHoldAFormat()
+		{
+			extern int g_pcm_upscale_active;
+			g_openDecoderMode = mode;
+			wavbit_sample_Hz = rate;
+			wavchannel = ch;
+			wavsam_depth = bits;
+			g_mp3_decoder_bps = mp3;
+			g_pcm_upscale_active = up;
+			if (og) {
+				og->kmp = kmp;
+				og->kmp1 = kmp1;
+			}
+		}
+	} holdA;
 	SOUNDINFO si;
 	XfFillSoundInfoDefaults(si);
 	HKMP kmpNew = NULL;
@@ -10560,7 +10638,8 @@ void COggDlg::play()
 	if (InterlockedCompareExchange(&g_appExiting, 0, 0))
 		return;
 	const BOOL xfSoftOpen = CEmuPendingLoadActive() ? FALSE
-		: (InterlockedCompareExchange(&g_xfOpening, 0, 0) != 0);
+		: (InterlockedCompareExchange(&g_xfOpening, 0, 0) != 0
+			&& InterlockedCompareExchange(&g_xfOpenThreadId, 0, 0) == (LONG)GetCurrentThreadId());
 	// 二重DS昇格: Open 中の無音を防ぐため、最初に B を再生し直す
 	muon = MUON;
 	kpi_silence_bytes = 0; kpi_heard_audio = 0;
@@ -25441,6 +25520,12 @@ BOOL COggDlg::stop1()
 		InterlockedExchange(&g_xfInProgress, 0);
 		InterlockedExchange(&g_xfOpening, 0);
 		InterlockedExchange(&g_xfPrepared, 0);
+		InterlockedExchange(&g_xfWantStart, 0);
+		g_kpiRenzokuTick = 0;
+		g_kpiRenzokuPnt = -999;
+		XfResetAll();
+		g_audioUpscalerArr[0].Reset();
+		g_audioUpscalerArr[1].Reset();
 	}
 	wav999_use_adbuf = 0;
 	if (stoppingMode == -10) { mp3_.Close(); g_mp3_decoder_bps = 16; }
@@ -27503,8 +27588,7 @@ void COggDlg::timerp()
 					g_kpiRenzokuPnt = pl->pnt;
 					g_kpiRenzokuTick = GetTickCount();
 				}
-				else if (g_kpiRenzokuTick != 0 &&
-					(DWORD)(GetTickCount() - g_kpiRenzokuTick) >= KPI_RENZOKU_LIMIT_MS) {
+				else if (XfRenzokuLimitReached()) {
 					RenzokuFadeOrXfade();
 				}
 			}
@@ -27518,8 +27602,7 @@ void COggDlg::timerp()
 							g_kpiRenzokuPnt = pl->pnt;
 							g_kpiRenzokuTick = GetTickCount();
 						}
-						else if (g_kpiRenzokuTick != 0 &&
-							(DWORD)(GetTickCount() - g_kpiRenzokuTick) >= KPI_RENZOKU_LIMIT_MS) {
+						else if (XfRenzokuLimitReached()) {
 							RenzokuFadeOrXfade();
 						}
 					}
@@ -27540,9 +27623,17 @@ void COggDlg::timerp()
 		if (mpShown) {
 			// Invalidate 待ちだとピアノ WM_PAINT に割込まれ、pending のまま次フレの
 			// 合成が落ちる（視覚的に 30fps も出ない）。合成直後にバナーだけ出す。
+			// ジャケ無しプレースホルダは Soft3D/2D アニメなので帯と同時に出す。
 			ms2 = 0;
-			mp->RedrawWindow(&mp->m_bannerRect, NULL,
-				RDW_INVALIDATE | RDW_UPDATENOW | RDW_NOERASE);
+			CRect tick = mp->m_bannerRect;
+			if (mp->JacketShowsPlaceholder() && !mp->m_jacketRect.IsRectEmpty()) {
+				CRect u;
+				if (u.UnionRect(&tick, &mp->m_jacketRect) && !u.IsRectEmpty())
+					tick = u;
+			}
+			if (!tick.IsRectEmpty())
+				mp->RedrawWindow(&tick, NULL,
+					RDW_INVALIDATE | RDW_UPDATENOW | RDW_NOERASE);
 			// OnPaint が pending を下ろす。ここで 1 に戻すと次の 16ms が死ぬ。
 		}
 		else if (mpAlive) {
@@ -28228,8 +28319,7 @@ void COggDlg::timerp()
 							g_kpiRenzokuPnt = plcnt;
 							g_kpiRenzokuTick = GetTickCount();
 						}
-						else if (g_kpiRenzokuTick != 0 &&
-							(DWORD)(GetTickCount() - g_kpiRenzokuTick) >= KPI_RENZOKU_LIMIT_MS) {
+						else if (XfRenzokuLimitReached()) {
 							RenzokuFadeOrXfade();
 						}
 					}

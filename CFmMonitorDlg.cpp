@@ -18,6 +18,9 @@
 #include <algorithm>
 #include <math.h>
 #include <string.h>
+#pragma comment(lib, "msimg32.lib")
+
+extern volatile LONG g_appExiting;
 
 /*
  * FMモニタ本体。KPI/SASAMI と CEmu が %TEMP% に書く .opna dump を読み、
@@ -971,6 +974,7 @@ CFmMonitorDlg::CFmMonitorDlg(CWnd* pParent)
 	, m_readFail(0), m_persistAge(-1), m_userClosing(0), m_hosted(0), m_lastPollMs(0)
 	, m_inPrint(0)
 	, m_inPump(0)
+	, m_exiting(0)
 	, m_lastPlayy(-1)
 	, m_fmEverOn(0)
 	, m_fmViewReady(1)
@@ -1008,6 +1012,9 @@ CFmMonitorDlg::CFmMonitorDlg(CWnd* pParent)
 	memset(m_fadeSsg, 0, sizeof(m_fadeSsg));
 	memset(m_fadePcm, 0, sizeof(m_fadePcm));
 	memset(m_fadeRzmPad, 0, sizeof(m_fadeRzmPad));
+	memset(m_egOnSamp, 0, sizeof(m_egOnSamp));
+	memset(m_egOffSamp, 0, sizeof(m_egOffSamp));
+	memset(m_egGate, 0, sizeof(m_egGate));
 	memset(m_wavePrev, 0, sizeof(m_wavePrev));
 	memset(m_waveFade, 0, sizeof(m_waveFade));
 	memset(&m_lay, 0, sizeof(m_lay));
@@ -1179,6 +1186,7 @@ bool CFmMonitorDlg::EnsureFrameBuffer(CDC& refDC, int w, int h)
 
 void CFmMonitorDlg::OnDestroy()
 {
+	InterlockedExchange(&m_exiting, 1);
 	m_tickPump.Stop();
 	StopComposeThread();
 	if (!m_hosted)
@@ -2169,14 +2177,13 @@ void CFmMonitorDlg::PersistGeom()
 
 void CFmMonitorDlg::DetachForDestroy()
 {
-	if (m_hosted) {
-		m_tickPump.Stop();
-		KillTimer(1);
-		return;
-	}
+	InterlockedExchange(&m_exiting, 1);
 	m_tickPump.Stop();
 	KillTimer(1);
-	PersistGeom();
+	StopComposeThread();
+	GpuMonSurf_Release(&m_gpu);
+	if (!m_hosted)
+		PersistGeom();
 }
 
 void CFmMonitorDlg::OnClose()
@@ -2552,7 +2559,20 @@ static void FmDrawAlgo(CDC& dc, const CRect& rc, int alg, int fontPx)
 	FmDeleteFont(font);
 }
 
-static void FmDrawEnvelope(CDC& dc, const CRect& rc, int ar, int dr, int sr, int rr, int sl, int tl)
+struct FmEgPos {
+	int att;
+	int scan;
+	int lin;
+};
+static void FmEgTimes(const uint64_t* onS, const uint64_t* offS, const uint8_t* gateA,
+	int v, uint64_t now, uint32_t sr, int liveGate, double& secOn, double& secOff, int& gate);
+static int FmOpnAmOffset(const SasamiFmMonDump& d, int bank, int slot, uint64_t cur, uint32_t sr);
+static int FmEgOpnScan(const SasamiFmMonDump& d, int bank, int slot, int op,
+	int gate, double secOn, double secOff, int amOff);
+static FmEgPos FmEgRun(int ar, int dr, int sr, int rr, int sl, int ksr,
+	int gate, double secOn, double secOff, int arMax, int rrMax);
+
+static void FmDrawEnvelope(CDC& dc, const CRect& rc, int ar, int dr, int sr, int rr, int sl, int tl, int scan = -1)
 {
 	dc.FillSolidRect(rc, RGB(18, 26, 22));
 	FmFrameRect(dc, rc, RGB(70, 100, 80));
@@ -2562,7 +2582,6 @@ static void FmDrawEnvelope(CDC& dc, const CRect& rc, int ar, int dr, int sr, int
 	const int y1 = rc.bottom - 2;
 	const int w = (std::max)(8, x1 - x0);
 	const int h = (std::max)(8, y1 - y0);
-	/* TL=減衰。表示は上が大音量 */
 	auto Y = [&](int atten) {
 		if (atten < 0) atten = 0;
 		if (atten > 127) atten = 127;
@@ -2581,10 +2600,60 @@ static void FmDrawEnvelope(CDC& dc, const CRect& rc, int ar, int dr, int sr, int
 	pts[3] = { px, Y(sus) };
 	px += 2 + (15 - (rr & 15)) * w / 40; if (px > x1) px = x1;
 	pts[4] = { px, y1 };
-	CPen env(PS_SOLID, 1, RGB(120, 220, 170));
-	CPen* oldp = dc.SelectObject(&env);
+	CPen dim(PS_SOLID, 1, RGB(70, 120, 95));
+	CPen* oldp = dc.SelectObject(&dim);
 	dc.MoveTo(pts[0]);
 	for (int i = 1; i < 5; i++) dc.LineTo(pts[i]);
+	if (scan >= 0) {
+		if (scan > 255) scan = 255;
+		int seg = 3, u = 0, den = 63;
+		if (scan < 64) { seg = 0; u = scan; den = 64; }
+		else if (scan < 128) { seg = 1; u = scan - 64; den = 64; }
+		else if (scan < 192) { seg = 2; u = scan - 128; den = 64; }
+		else { seg = 3; u = scan - 192; den = 63; }
+		if (den < 1) den = 1;
+		const int sx = pts[seg].x + (pts[seg + 1].x - pts[seg].x) * u / den;
+		const int sy = pts[seg].y + (pts[seg + 1].y - pts[seg].y) * u / den;
+		CPen live(PS_SOLID, 1, RGB(140, 240, 190));
+		dc.SelectObject(&live);
+		dc.MoveTo(pts[0]);
+		for (int i = 1; i <= seg; i++) dc.LineTo(pts[i]);
+		dc.LineTo(sx, sy);
+		dc.SelectObject(oldp);
+		oldp = nullptr;
+		/* 不透明の黄点＋1px 棒は 60Hz でちらつく。α の細い縦帯だけ */
+		auto alphaBar = [&](int x, BYTE a) {
+			if (x < rc.left || x >= rc.right || a == 0) return;
+			static HDC sHdc = NULL;
+			static HBITMAP sBmp = NULL;
+			static DWORD* sPix = NULL;
+			if (!sHdc) {
+				BITMAPINFO bmi = {};
+				bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+				bmi.bmiHeader.biWidth = 1;
+				bmi.bmiHeader.biHeight = 1;
+				bmi.bmiHeader.biPlanes = 1;
+				bmi.bmiHeader.biBitCount = 32;
+				void* bits = nullptr;
+				sHdc = ::CreateCompatibleDC(NULL);
+				sBmp = ::CreateDIBSection(sHdc, &bmi, DIB_RGB_COLORS, &bits, NULL, 0);
+				sPix = (DWORD*)bits;
+				if (sHdc && sBmp)
+					::SelectObject(sHdc, sBmp);
+			}
+			if (!sHdc || !sPix) return;
+			const BYTE r = 200, g = 255, b = 220;
+			sPix[0] = ((DWORD)a << 24) | ((DWORD)(b * a / 255) << 16)
+				| ((DWORD)(g * a / 255) << 8) | (DWORD)(r * a / 255);
+			BLENDFUNCTION bf = { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
+			::GdiAlphaBlend(dc.GetSafeHdc(), x, y0, 1, (std::max)(1, y1 - y0),
+				sHdc, 0, 0, 1, 1, bf);
+		};
+		alphaBar(sx - 1, 48);
+		alphaBar(sx, 110);
+		alphaBar(sx + 1, 48);
+		return;
+	}
 	dc.SelectObject(oldp);
 }
 
@@ -2771,7 +2840,14 @@ void CFmMonitorDlg::DrawFmChPanel(CDC& dc, const CRect& rc, int ch)
 		dc.TextOut(row.left + (labW - snZ.cx) / 2, row.top + (row.Height() - snZ.cy) / 2, sn);
 
 		CRect env(paramLeft, row.top + 2, envRight, row.bottom - 2);
-		FmDrawEnvelope(dc, env, ar, dr, srate, rr, sl, tl7);
+		double secOn = 0, secOff = 0;
+		int egGate = 0;
+		FmEgTimes(m_egOnSamp, m_egOffSamp, m_egGate, ch, m_dump.curSample, m_dump.sampleRate,
+			keyed, secOn, secOff, egGate);
+		const int amOff = FmOpnAmOffset(m_dump, bank, slot, m_dump.curSample, m_dump.sampleRate);
+		const int scan = (keyed || (ch >= 0 && ch < FM_EG_VOICES && m_egGate[ch]) || fade >= 8)
+			? FmEgOpnScan(m_dump, bank, slot, op, egGate, secOn, secOff, amOff) : -1;
+		FmDrawEnvelope(dc, env, ar, dr, srate, rr, sl, tl7, scan);
 
 		/* パラメータ格子: 上段6 (AR..TL)、下段2 (MUL DT)。セル幅=paramW/6 */
 		const int cols = 6;
@@ -3052,6 +3128,303 @@ static int FmTlLoud(int tl, int maxTl)
 	if (tl < 0) tl = 0;
 	if (tl > maxTl) tl = maxTl;
 	return (maxTl - tl) * 255 / maxTl;
+}
+
+/* YM 系 EG。rate63=0 は停止、62+ は即時。減衰域は 0=最大音量。
+   rate32（AR=16）で 0x3FF を約 56ms。旧 90 units/sec だと攻撃が数秒になり
+   グラフの短い立ち上がりよりスキャンが遅く見えた。 */
+static double FmEgSecPerUnit(int rate63)
+{
+	if (rate63 <= 0) return 1.0e6;
+	if (rate63 >= 62) return 0.0;
+	const double ups = 18300.0 * pow(2.0, (rate63 - 32) / 4.0);
+	if (ups < 1.0e-6) return 1.0e6;
+	return 1.0 / ups;
+}
+
+static int FmEgAttToLin(int att)
+{
+	static int sTab[1024];
+	static int sReady = 0;
+	if (!sReady) {
+		for (int i = 0; i < 1024; i++) {
+			if (i >= 0x3c0) sTab[i] = 0;
+			else {
+				int lv = (int)(255.0 * pow(2.0, -(double)i / 64.0) + 0.5);
+				if (lv < 0) lv = 0;
+				if (lv > 255) lv = 255;
+				sTab[i] = lv;
+			}
+		}
+		sReady = 1;
+	}
+	if (att < 0) att = 0;
+	if (att > 0x3ff) att = 0x3ff;
+	return sTab[att];
+}
+
+static int FmEgKsrOpn(uint8_t a4, uint8_t a0, int ks)
+{
+	const int block = (a4 >> 3) & 7;
+	const int fnum = ((a4 & 7) << 8) | a0;
+	int keycode = ((block & 7) << 1) | ((fnum >> 10) & 1);
+	if ((fnum & 0x780) == 0x780) keycode |= 1;
+	int sh = 3 - (ks & 3);
+	if (sh < 0) sh = 0;
+	return keycode >> sh;
+}
+
+static FmEgPos FmEgRun(int ar, int dr, int sr, int rr, int sl, int ksr,
+	int gate, double secOn, double secOff, int arMax, int rrMax)
+{
+	FmEgPos p;
+	p.att = 0x3ff;
+	p.scan = 255;
+	p.lin = 0;
+	if (arMax <= 0) arMax = 31;
+	if (rrMax <= 0) rrMax = 15;
+	if (ar < 0) ar = 0;
+	if (ar > arMax) ar = arMax;
+	if (dr < 0) dr = 0;
+	if (sr < 0) sr = 0;
+	if (rr < 0) rr = 0;
+	if (rr > rrMax) rr = rrMax;
+	if (sl < 0) sl = 0;
+	if (sl > 15) sl = 15;
+	if (secOn < 0) secOn = 0;
+	if (secOff < 0) secOff = 0;
+
+	const int rA = (ar <= 0) ? 0 : ((ar * 2 + ksr > 63) ? 63 : ar * 2 + ksr);
+	const int rD = (dr <= 0) ? 0 : ((dr * 2 + ksr > 63) ? 63 : dr * 2 + ksr);
+	const int rS = (sr <= 0) ? 0 : ((sr * 2 + ksr > 63) ? 63 : sr * 2 + ksr);
+	int rR = (rr <= 0) ? 0 : rr * (62 / rrMax) + 2 + ksr;
+	if (rR > 63) rR = 63;
+	const int sus = (sl >= 15) ? 0x3ff : (sl << 5);
+
+	int att = 0x3ff;
+	int scan = 0;
+	double t = secOn;
+	const double aSec = (rA <= 0) ? 40.0 : FmEgSecPerUnit(rA) * 0x3ff;
+	if (t < aSec) {
+		const double u = (aSec > 1.0e-9) ? t / aSec : 1.0;
+		att = (int)(0x3ff * (1.0 - u));
+		scan = (int)(u * 64.0);
+	} else {
+		double td = t - aSec;
+		const double span = (sus > 0) ? (double)sus : 1.0;
+		const double dSec = (rD <= 0) ? 0.0 : FmEgSecPerUnit(rD) * span;
+		if (rD > 0 && td < dSec) {
+			const double u = td / dSec;
+			att = (int)(sus * u);
+			scan = 64 + (int)(u * 64.0);
+		} else {
+			/* SR=0 は実機ではレベル固定。スキャンだけ高原をゆっくり進める */
+			const double ts = (rD <= 0) ? td : (td - dSec);
+			const double sSpan = (double)(0x3ff - sus);
+			const double sSec = (rS <= 0)
+				? 2.4
+				: FmEgSecPerUnit(rS) * ((sSpan > 1.0) ? sSpan : 256.0);
+			double u = (sSec > 1.0e-9) ? ts / sSec : 1.0;
+			if (u > 1.0) u = 1.0;
+			if (rS <= 0)
+				att = (rD <= 0) ? 0 : sus;
+			else
+				att = sus + (int)(sSpan * u);
+			scan = 128 + (int)(u * 63.0);
+		}
+	}
+	if (att < 0) att = 0;
+	if (att > 0x3ff) att = 0x3ff;
+
+	if (!gate) {
+		const double rSpan = (double)(0x3ff - att);
+		const double rSec = (rR <= 0)
+			? 1.8
+			: FmEgSecPerUnit(rR) * ((rSpan > 1.0) ? rSpan : 64.0);
+		double u = (rSec > 1.0e-9) ? secOff / rSec : 1.0;
+		if (u > 1.0) u = 1.0;
+		if (rR > 0) {
+			att = att + (int)(rSpan * u);
+			if (att > 0x3ff) att = 0x3ff;
+		}
+		scan = 192 + (int)(u * 63.0);
+		if (rR > 0 && att >= 0x3c0) {
+			att = 0x3ff;
+			scan = 255;
+		}
+	}
+
+	p.att = att;
+	p.scan = scan;
+	p.lin = FmEgAttToLin(att);
+	return p;
+}
+
+static int FmVuFromLin(int lin)
+{
+	if (lin <= 0) return 0;
+	if (lin > 255) lin = 255;
+	const double db = 20.0 * log10((double)lin / 255.0);
+	if (db <= -36.0) return 0;
+	if (db >= 0.0) return 255;
+	int lv = (int)((db + 36.0) / 36.0 * 255.0 + 0.5);
+	if (lv < 1) lv = 1;
+	if (lv > 255) lv = 255;
+	return lv;
+}
+
+static int FmOpnAmOffset(const SasamiFmMonDump& d, int bank, int slot, uint64_t cur, uint32_t sr)
+{
+	const uint8_t r22 = d.regs[0x22];
+	if ((r22 & 0x08) == 0) return 0;
+	const int ams = (d.regs[bank + 0xB4 + slot] >> 4) & 3;
+	if (ams <= 0) return 0;
+	static const double kHz[8] = { 3.98, 5.56, 6.02, 6.37, 6.88, 9.63, 48.1, 72.2 };
+	if (sr == 0) sr = 44100;
+	const double ph = ((double)cur / (double)sr) * kHz[r22 & 7];
+	double tri = ph - floor(ph);
+	tri = (tri < 0.5) ? tri * 2.0 : (1.0 - tri) * 2.0;
+	static const int kDep[4] = { 0, 17, 64, 126 };
+	return (int)(tri * (double)kDep[ams] + 0.5);
+}
+
+static int FmOpmAmOffset(const SasamiFmMonDump& d, int ch, uint64_t cur, uint32_t sr)
+{
+	const int ams = d.regs[0x38 + ch] & 3;
+	if (ams <= 0) return 0;
+	const uint8_t amd = d.regs[0x19];
+	if ((amd & 0x80) != 0) return 0;
+	if (sr == 0) sr = 44100;
+	const double hz = 0.008 * (1 + (d.regs[0x18] & 0xFF));
+	const double ph = ((double)cur / (double)sr) * hz;
+	double tri = ph - floor(ph);
+	tri = (tri < 0.5) ? tri * 2.0 : (1.0 - tri) * 2.0;
+	return (int)(tri * (double)(amd & 0x7F) * ams / 3.0 + 0.5);
+}
+
+static int FmOplTrem(const SasamiFmMonDump& d, int amBit, uint64_t cur, uint32_t sr)
+{
+	if (!amBit) return 0;
+	if ((d.regs[0xBD] & 0x80) == 0 && (d.dumpFlags & SASAMI_FMMON_FLAG_MSX) == 0) {
+		/* OPL は 0xBD D7。無いデータでも AM ビットだけで 3.7Hz */
+	}
+	if (sr == 0) sr = 44100;
+	const double ph = ((double)cur / (double)sr) * 3.7;
+	double tri = ph - floor(ph);
+	tri = (tri < 0.5) ? tri * 2.0 : (1.0 - tri) * 2.0;
+	return (int)(tri * 26.0 + 0.5);
+}
+
+static void FmEgTimes(const uint64_t* onS, const uint64_t* offS, const uint8_t* gateA,
+	int v, uint64_t now, uint32_t sr, int liveGate, double& secOn, double& secOff, int& gate)
+{
+	secOn = 0;
+	secOff = 0;
+	gate = liveGate ? 1 : 0;
+	if (v < 0 || v >= 24 || !onS || !offS || !gateA) return;
+	if (sr == 0) sr = 44100;
+	if (onS[v] != 0 && now >= onS[v])
+		secOn = (double)(now - onS[v]) / (double)sr;
+	if (!gate && offS[v] != 0 && now >= offS[v])
+		secOff = (double)(now - offS[v]) / (double)sr;
+	else if (!gate && onS[v] != 0)
+		secOff = secOn;
+}
+
+static int FmEgOpnScan(const SasamiFmMonDump& d, int bank, int slot, int op,
+	int gate, double secOn, double secOff, int amOff)
+{
+	const uint8_t ksAr = d.regs[bank + 0x50 + op * 4 + slot];
+	const uint8_t amDr = d.regs[bank + 0x60 + op * 4 + slot];
+	const uint8_t srV = d.regs[bank + 0x70 + op * 4 + slot];
+	const uint8_t slRr = d.regs[bank + 0x80 + op * 4 + slot];
+	const uint8_t a4 = d.regs[bank + 0xA4 + slot];
+	const uint8_t a0 = d.regs[bank + 0xA0 + slot];
+	const int ks = (ksAr >> 6) & 3;
+	const int ksr = FmEgKsrOpn(a4, a0, ks);
+	FmEgPos e = FmEgRun(ksAr & 0x1F, amDr & 0x1F, srV & 0x1F, slRr & 0x0F,
+		(slRr >> 4) & 0x0F, ksr, gate, secOn, secOff, 31, 15);
+	(void)amOff;
+	return e.scan;
+}
+
+static int FmEgOpnWave(const SasamiFmMonDump& d, int bank, int slot,
+	int gate, double secOn, double secOff, int amOff)
+{
+	const int alg = d.regs[bank + 0xB0 + slot] & 7;
+	static const int kCar[8] = { 8, 8, 8, 8, 10, 14, 14, 15 };
+	const uint8_t a4 = d.regs[bank + 0xA4 + slot];
+	const uint8_t a0 = d.regs[bank + 0xA0 + slot];
+	int acc = 0, n = 0;
+	for (int op = 0; op < 4; op++) {
+		if (((kCar[alg] >> op) & 1) == 0) continue;
+		const uint8_t ksAr = d.regs[bank + 0x50 + op * 4 + slot];
+		const uint8_t amDr = d.regs[bank + 0x60 + op * 4 + slot];
+		const uint8_t srV = d.regs[bank + 0x70 + op * 4 + slot];
+		const uint8_t slRr = d.regs[bank + 0x80 + op * 4 + slot];
+		const uint8_t tl = d.regs[bank + 0x40 + op * 4 + slot] & 0x7F;
+		const int ks = (ksAr >> 6) & 3;
+		const int ksr = FmEgKsrOpn(a4, a0, ks);
+		FmEgPos e = FmEgRun(ksAr & 0x1F, amDr & 0x1F, srV & 0x1F, slRr & 0x0F,
+			(slRr >> 4) & 0x0F, ksr, gate, secOn, secOff, 31, 15);
+		int att = e.att + tl * 8;
+		if ((amDr & 0x80) && amOff > 0) att += amOff;
+		if (att > 0x3ff) att = 0x3ff;
+		int lv = FmEgAttToLin(att);
+		acc += lv * lv;
+		n++;
+	}
+	if (n <= 0) return 0;
+	return FmVuFromLin((int)sqrt((double)acc / (double)n));
+}
+
+static int FmEgOpmWave(const SasamiFmMonDump& d, int ch, int gate, double secOn, double secOff, int amOff)
+{
+	static const int kSOff[4] = { 0, 16, 8, 24 };
+	const int alg = d.regs[0x20 + ch] & 7;
+	static const int kCar[8] = { 8, 8, 8, 8, 10, 14, 14, 15 };
+	int acc = 0, n = 0;
+	for (int op = 0; op < 4; op++) {
+		if (((kCar[alg] >> op) & 1) == 0) continue;
+		const int off = kSOff[op] + ch;
+		const uint8_t ksAr = d.regs[0x80 + off];
+		const uint8_t amDr = d.regs[0xA0 + off];
+		const uint8_t d2 = d.regs[0xC0 + off];
+		const uint8_t slRr = d.regs[0xE0 + off];
+		const uint8_t tl = d.regs[0x60 + off] & 0x7F;
+		FmEgPos e = FmEgRun(ksAr & 0x1F, amDr & 0x1F, d2 & 0x1F, slRr & 0x0F,
+			(slRr >> 4) & 0x0F, (ksAr >> 6) & 3, gate, secOn, secOff, 31, 15);
+		int att = e.att + tl * 8;
+		if ((amDr & 0x80) && amOff > 0) att += amOff;
+		if (att > 0x3ff) att = 0x3ff;
+		int lv = FmEgAttToLin(att);
+		acc += lv * lv;
+		n++;
+	}
+	if (n <= 0) return 0;
+	return FmVuFromLin((int)sqrt((double)acc / (double)n));
+}
+
+static int FmEgOplWave(const SasamiFmMonDump& d, int ch, int packed, int gate, double secOn, double secOff, int trem)
+{
+	static const int kOp2[9] = { 3, 4, 5, 9, 10, 11, 15, 16, 17 };
+	const int loc = ch % 9;
+	const int bnk = packed ? 0 : ((ch >= 9) ? 0x100 : 0);
+	auto rg = [&](int r) -> uint8_t {
+		if (packed) return d.regs[r & 0xFF];
+		return d.regs[bnk + (r & 0xFF)];
+	};
+	const int op = kOp2[loc];
+	const uint8_t tl = rg(0x40 + op);
+	const uint8_t adr = rg(0x60 + op);
+	const uint8_t srr = rg(0x80 + op);
+	FmEgPos e = FmEgRun((adr >> 4) & 0x0F, adr & 0x0F, 0, srr & 0x0F,
+		(srr >> 4) & 0x0F, 0, gate, secOn, secOff, 15, 15);
+	int att = e.att + (tl & 0x3F) * 16;
+	if (trem > 0) att += trem;
+	if (att > 0x3ff) att = 0x3ff;
+	int lv = FmEgAttToLin(att);
+	return FmVuFromLin(lv);
 }
 
 /* OPN キャリア TL → 0..255。alg 0-3 は S4、4 は S2+S4、5-6 は S2-4、7 は全部。 */
@@ -3395,16 +3768,24 @@ void CFmMonitorDlg::DrawChannelKeys(CDC& dc, int x, int y, int w, int rowH, int 
 		int rawVol = 0;
 		int volGate = gate;
 		if (m_haveDump) {
-			if (opm) rawVol = FmOpmCarrierLevel(m_dump, ch);
-			else if (opl) rawVol = FmOplCarrierLevel(m_dump, ch);
-			else if (msx) rawVol = FmTlLoud(m_dump.regs[0x30 + ch] & 0x0F, 15);
-			else if (!KeysOnly()) {
-				const int ev = SasamiFmMonEnvVu(m_dump, ch);
-				if (ev >= 0) {
-					rawVol = ev;
-					volGate = 1;
-				} else
-					rawVol = FmOpnCarrierLevel(m_dump, bank, slot);
+			double secOn = 0, secOff = 0;
+			int egGate = 0;
+			FmEgTimes(m_egOnSamp, m_egOffSamp, m_egGate, ch, m_dump.curSample, m_dump.sampleRate,
+				gate, secOn, secOff, egGate);
+			if (opm) {
+				rawVol = FmEgOpmWave(m_dump, ch, egGate, secOn, secOff,
+					FmOpmAmOffset(m_dump, ch, m_dump.curSample, m_dump.sampleRate));
+				volGate = 1;
+			} else if (opl) {
+				rawVol = FmEgOplWave(m_dump, ch, 0, egGate, secOn, secOff,
+					FmOplTrem(m_dump, 1, m_dump.curSample, m_dump.sampleRate));
+				volGate = 1;
+			} else if (msx) {
+				rawVol = FmTlLoud(m_dump.regs[0x30 + ch] & 0x0F, 15);
+			} else if (!KeysOnly()) {
+				rawVol = FmEgOpnWave(m_dump, bank, slot, egGate, secOn, secOff,
+					FmOpnAmOffset(m_dump, bank, slot, m_dump.curSample, m_dump.sampleRate));
+				volGate = 1;
 			}
 		}
 		const int after = drawChHead(yy, chNm, note, fade, RGB(80, 220, 120),
@@ -3453,14 +3834,31 @@ void CFmMonitorDlg::DrawChannelKeys(CDC& dc, int x, int y, int w, int rowH, int 
 		else
 			FmFormatChNum(chNm, 16, L"EX", i + 1, colPad, colPrefW);
 		int rawVol = 0;
+		int volGate = gate;
 		if (m_haveDump) {
-			if (opm) rawVol = FmOpmCarrierLevel(m_dump, 6 + i);
-			else if (opl) rawVol = FmOplCarrierLevel(m_dump, 6 + i);
-			else if (msx) rawVol = FmTlLoud(m_dump.regs[0x30 + 6 + i] & 0x0F, 15);
-			else if (!KeysOnly()) rawVol = FmOpnCarrierLevel(m_dump, 0, 2);
+			const int v = 6 + i;
+			double secOn = 0, secOff = 0;
+			int egGate = 0;
+			FmEgTimes(m_egOnSamp, m_egOffSamp, m_egGate, v, m_dump.curSample, m_dump.sampleRate,
+				gate, secOn, secOff, egGate);
+			if (opm) {
+				rawVol = FmEgOpmWave(m_dump, 6 + i, egGate, secOn, secOff,
+					FmOpmAmOffset(m_dump, 6 + i, m_dump.curSample, m_dump.sampleRate));
+				volGate = 1;
+			} else if (opl) {
+				rawVol = FmEgOplWave(m_dump, 6 + i, 0, egGate, secOn, secOff,
+					FmOplTrem(m_dump, 1, m_dump.curSample, m_dump.sampleRate));
+				volGate = 1;
+			} else if (msx) {
+				rawVol = FmTlLoud(m_dump.regs[0x30 + 6 + i] & 0x0F, 15);
+			} else if (!KeysOnly()) {
+				rawVol = FmEgOpnWave(m_dump, 0, 2, egGate, secOn, secOff,
+					FmOpnAmOffset(m_dump, 0, 2, m_dump.curSample, m_dump.sampleRate));
+				volGate = 1;
+			}
 		}
 		const int after = drawChHead(yy, chNm, note, fade, RGB(180, 120, 255),
-			litVol(rawVol, gate, keyLit, fade));
+			litVol(rawVol, volGate, keyLit, fade));
 		int lAmt = 255, rAmt = 255;
 		if (m_haveDump) {
 			if (opm)
@@ -4461,7 +4859,14 @@ void CFmMonitorDlg::DrawOpmChPanel(CDC& dc, const CRect& rc, int ch)
 		dc.TextOut(row.left + (labW - snZ.cx) / 2, row.top + (row.Height() - snZ.cy) / 2, sn);
 
 		CRect env(paramLeft, row.top + 2, envRight, row.bottom - 2);
-		FmDrawEnvelope(dc, env, ar, d1r, d2r, rr, sl, tl7);
+		double secOn = 0, secOff = 0;
+		int egGate = 0;
+		FmEgTimes(m_egOnSamp, m_egOffSamp, m_egGate, ch, m_dump.curSample, m_dump.sampleRate,
+			keyed, secOn, secOff, egGate);
+		FmEgPos egp = FmEgRun(ar, d1r, d2r, rr, sl, ks, egGate, secOn, secOff, 31, 15);
+		const int scan = (keyed || (ch >= 0 && ch < FM_EG_VOICES && m_egGate[ch]) || fade >= 8)
+			? egp.scan : -1;
+		FmDrawEnvelope(dc, env, ar, d1r, d2r, rr, sl, tl7, scan);
 
 		const int cols = 6;
 		const int cellW = paramW / cols;
@@ -4722,7 +5127,13 @@ void CFmMonitorDlg::DrawOplChPanel(CDC& dc, const CRect& rc, int ch, int packedC
 
 		/* OPL の AR/DR は 0..15。OPN の 0..31 に合わせてエンベロープ表示を倍にする */
 		CRect env(paramLeft, row.top + 2, envRight, row.bottom - 2);
-		FmDrawEnvelope(dc, env, ar * 2, dr * 2, 0, rr * 2, sl, tl6 * 2);
+		double secOn = 0, secOff = 0;
+		int egGate = 0;
+		FmEgTimes(m_egOnSamp, m_egOffSamp, m_egGate, ch, m_dump.curSample, m_dump.sampleRate,
+			gate, secOn, secOff, egGate);
+		FmEgPos egp = FmEgRun(ar, dr, 0, rr, sl, 0, egGate, secOn, secOff, 15, 15);
+		const int scan = (gate || (ch >= 0 && ch < FM_EG_VOICES && m_egGate[ch])) ? egp.scan : -1;
+		FmDrawEnvelope(dc, env, ar * 2, dr * 2, 0, rr * 2, sl, tl6 * 2, scan);
 
 		const int cols = 6;
 		const int cellW = paramW / cols;
@@ -4999,7 +5410,13 @@ void CFmMonitorDlg::DrawOpllChPanel(CDC& dc, const CRect& rc, int ch, int packed
 
 		CRect env(paramLeft, row.top + 2, envRight, row.bottom - 2);
 		const int tlEnv = (oi == 0) ? tl : (vol * 4);
-		FmDrawEnvelope(dc, env, ar * 2, dr * 2, 0, rr * 2, sl, tlEnv);
+		double secOn = 0, secOff = 0;
+		int egGate = 0;
+		FmEgTimes(m_egOnSamp, m_egOffSamp, m_egGate, ch, m_dump.curSample, m_dump.sampleRate,
+			gate, secOn, secOff, egGate);
+		FmEgPos egp = FmEgRun(ar, dr, 0, rr, sl, 0, egGate, secOn, secOff, 15, 15);
+		const int scan = (gate || (ch >= 0 && ch < FM_EG_VOICES && m_egGate[ch])) ? egp.scan : -1;
+		FmDrawEnvelope(dc, env, ar * 2, dr * 2, 0, rr * 2, sl, tlEnv, scan);
 
 		const int cols = 6;
 		const int cellW = paramW / cols;
@@ -5423,6 +5840,31 @@ void CFmMonitorDlg::ComposeFrame(CDC& dc, int w, int h)
 	if (m_dirtyKeys) { DrawKeysArea(dc); m_dirtyKeys = 0; }
 }
 
+void CFmMonitorDlg::StampEgVoice(int v, int gate, int retrig, uint64_t samp)
+{
+	if (v < 0 || v >= FM_EG_VOICES) return;
+	/* hitCnt は key-on レジスタ書き込みの累積。同一ノート中の連打で毎 dump 再トリガすると
+	   secOn≈0 のまま AR<31 が攻撃開始（無音バー＋スキャン左端）になる。 */
+	if (retrig && gate && m_egGate[v] && m_egOnSamp[v] != 0) {
+		const uint32_t sr = m_dump.sampleRate ? m_dump.sampleRate : 44100;
+		const uint64_t dt = (samp >= m_egOnSamp[v]) ? (samp - m_egOnSamp[v]) : 0;
+		if (dt < (uint64_t)sr / 20)
+			retrig = 0;
+	}
+	if (retrig || (gate && !m_egGate[v])) {
+		m_egOnSamp[v] = samp;
+		m_egOffSamp[v] = 0;
+		m_egGate[v] = 1;
+	} else if (!gate && m_egGate[v]) {
+		m_egOffSamp[v] = samp;
+		m_egGate[v] = 0;
+	} else if (gate) {
+		m_egGate[v] = 1;
+		if (m_egOnSamp[v] == 0)
+			m_egOnSamp[v] = samp;
+	}
+}
+
 /* 新 dump を履歴・フェード・dirty に反映。可聴位置と曲切替もここで見る */
 void CFmMonitorDlg::ApplyDump(const SasamiFmMonDump& d)
 {
@@ -5441,6 +5883,9 @@ void CFmMonitorDlg::ApplyDump(const SasamiFmMonDump& d)
 		memset(m_fadeSsg, 0, sizeof(m_fadeSsg));
 		memset(m_fadePcm, 0, sizeof(m_fadePcm));
 		memset(m_fadeRzmPad, 0, sizeof(m_fadeRzmPad));
+		memset(m_egOnSamp, 0, sizeof(m_egOnSamp));
+		memset(m_egOffSamp, 0, sizeof(m_egOffSamp));
+		memset(m_egGate, 0, sizeof(m_egGate));
 		memset(m_wavePrev, 0, sizeof(m_wavePrev));
 		memset(m_waveFade, 0, sizeof(m_waveFade));
 		wcsncpy_s(m_lastSong, d.sourcePath, _TRUNCATE);
@@ -5545,6 +5990,9 @@ void CFmMonitorDlg::ApplyDump(const SasamiFmMonDump& d)
 				dirty = 1;
 				chgKeys = 1;
 			}
+			StampEgVoice(ch, d.keyOnFm[ch] ? 1 : 0,
+				(d.version >= 4 && d.keyOnHitCnt[ch] != m_dump.keyOnHitCnt[ch]) ? 1 : 0,
+				d.curSample);
 			const uint8_t b0 = d.regs[bank + 0xB0 + slot];
 			const uint8_t pb0 = m_dump.regs[bank + 0xB0 + slot];
 			const uint8_t b4 = d.regs[bank + 0xB4 + slot];
@@ -5586,6 +6034,9 @@ void CFmMonitorDlg::ApplyDump(const SasamiFmMonDump& d)
 				FmBumpHex(m_fade, m_touched, 0xA8 + i, &chgHex);
 				FmBumpHex(m_fade, m_touched, 0xAC + i, &chgHex);
 			}
+			StampEgVoice(6 + i, d.keyOnEx[i] ? 1 : 0,
+				(d.version >= 6 && d.keyOnExHitCnt[i] != m_dump.keyOnExHitCnt[i]) ? 1 : 0,
+				d.curSample);
 		}
 		for (int i = 0; i < 3; i++) {
 			if (d.ssgOn[i] != m_dump.ssgOn[i])
@@ -5633,6 +6084,7 @@ void CFmMonitorDlg::ApplyDump(const SasamiFmMonDump& d)
 			if (d.pad6[1] == SASAMI_FMMON_KEYS_MULTIPCM
 				&& FmMultiPcmPan4(d, i) != FmMultiPcmPan4(m_dump, i))
 				chgKeys = 1;
+			StampEgVoice(9 + i, d.pcmOn[i] ? 1 : 0, 0, d.curSample);
 		}
 		if (d.padHit == 6) {
 			if (d.regs[0x11] != m_dump.regs[0x11])
@@ -5738,6 +6190,9 @@ void CFmMonitorDlg::ApplyDump(const SasamiFmMonDump& d)
 		memset(m_fadeSsg, 0, sizeof(m_fadeSsg));
 		memset(m_fadePcm, 0, sizeof(m_fadePcm));
 		memset(m_fadeRzmPad, 0, sizeof(m_fadeRzmPad));
+		memset(m_egOnSamp, 0, sizeof(m_egOnSamp));
+		memset(m_egOffSamp, 0, sizeof(m_egOffSamp));
+		memset(m_egGate, 0, sizeof(m_egGate));
 		for (int i = 0; i < 0x200; i++) {
 			if (FmHexIsFmpAdpcmNoise(d, i))
 				continue;
@@ -5773,6 +6228,10 @@ void CFmMonitorDlg::ApplyDump(const SasamiFmMonDump& d)
 			for (int i = 0; i < pcmN; i++)
 				if (d.pcmOn[i]) FmBump(m_fadePcm[i]);
 		}
+		for (int i = 0; i < 6; i++)
+			StampEgVoice(i, d.keyOnFm[i] ? 1 : 0, 0, d.curSample);
+		for (int i = 0; i < 3; i++)
+			StampEgVoice(6 + i, d.keyOnEx[i] ? 1 : 0, 0, d.curSample);
 		chgHex = chgKeys = 1;
 		panelMask = 0x3F;
 		m_dirtyHead = 1;
@@ -6103,6 +6562,21 @@ void CFmMonitorDlg::TickFades()
 	if (hex) m_dirtyHex = 1;
 	if (keys) m_dirtyKeys = 1;
 	if (panels) m_dirtyPanels = 1;
+	if (m_haveDump) {
+		int anim = 0;
+		for (int i = 0; i < 6; i++)
+			if (m_dump.keyOnFm[i] || m_fadeKey[i] >= 8) anim = 1;
+		for (int i = 0; i < 3; i++)
+			if (m_dump.keyOnEx[i] || m_fadeEx[i] >= 8) anim = 1;
+		for (int i = 0; i < SASAMI_FMMON_PCM_MAX; i++)
+			if (m_dump.pcmOn[i] || m_fadePcm[i] >= 8) anim = 1;
+		for (int i = 0; i < FM_EG_VOICES; i++)
+			if (m_egGate[i]) anim = 1;
+		if (anim) {
+			m_dirtyKeys = 1;
+			m_dirtyPanels = 1;
+		}
+	}
 }
 
 void CFmMonitorDlg::InvalidateDirtyRegions()
@@ -6203,6 +6677,8 @@ void CFmMonitorDlg::PumpSyncNow()
 #ifdef KBSASAMI_HOST_BUILD
 	KbsHostMonPull();
 #endif
+	if (m_exiting || InterlockedCompareExchange(&g_appExiting, 0, 0))
+		return;
 	if (m_inPrint || m_inPump) return;
 	if (!::IsWindow(GetSafeHwnd()))
 		return;
@@ -6239,6 +6715,8 @@ void CFmMonitorDlg::PumpSyncNow()
 
 void CFmMonitorDlg::IdlePulse()
 {
+	if (m_exiting || InterlockedCompareExchange(&g_appExiting, 0, 0))
+		return;
 	if (m_inPrint || m_inPump) return;
 	if (!::IsWindow(GetSafeHwnd()) || !IsWindowVisible() || IsIconic())
 		return;
@@ -6285,7 +6763,7 @@ void CFmMonitorDlg::StopComposeThread()
 	if (m_composeWake)
 		SetEvent(m_composeWake);
 	if (m_composeThread) {
-		::WaitForSingleObject(m_composeThread->m_hThread, 2000);
+		::WaitForSingleObject(m_composeThread->m_hThread, 800);
 		delete m_composeThread;
 		m_composeThread = nullptr;
 	}
@@ -6293,11 +6771,10 @@ void CFmMonitorDlg::StopComposeThread()
 		CloseHandle(m_composeWake);
 		m_composeWake = NULL;
 	}
-	if (m_composeCsReady)
-		EnterCriticalSection(&m_bufCs);
-	ReleaseWorkBuffers();
-	if (m_composeCsReady)
+	if (m_composeCsReady && TryEnterCriticalSection(&m_bufCs)) {
+		ReleaseWorkBuffers();
 		LeaveCriticalSection(&m_bufCs);
+	}
 }
 
 void CFmMonitorDlg::KickCompose(int w, int h)
@@ -6385,20 +6862,28 @@ void CFmMonitorDlg::ComposeThreadLoop()
 		if (!EnsureWorkBuffers(w, h))
 			continue;
 		const LONG write = 1 - (InterlockedCompareExchange(&m_composeFront, 0, 0) & 1);
-		if (m_composeCsReady)
-			EnterCriticalSection(&m_dataCs);
-		ComposeFrame(m_workDC[write], w, h);
-		if (m_composeCsReady)
+		int locked = 0;
+		if (m_composeCsReady) {
+			if (!TryEnterCriticalSection(&m_dataCs))
+				continue;
+			locked = 1;
+		}
+		if (InterlockedCompareExchange(&m_composeStop, 0, 0) == 0
+			&& InterlockedCompareExchange(&m_exiting, 0, 0) == 0)
+			ComposeFrame(m_workDC[write], w, h);
+		if (locked)
 			LeaveCriticalSection(&m_dataCs);
 		InterlockedExchange(&m_composeFront, write);
-		if (::IsWindow(m_hWnd))
+		if (InterlockedCompareExchange(&m_exiting, 0, 0) == 0
+			&& InterlockedCompareExchange(&m_composeStop, 0, 0) == 0
+			&& ::IsWindow(m_hWnd))
 			::PostMessage(m_hWnd, WM_APP + 0x46, 0, 0);
 	}
 }
 
 LRESULT CFmMonitorDlg::OnComposeDone(WPARAM, LPARAM)
 {
-	if (!::IsWindow(m_hWnd) || m_inPrint)
+	if (m_exiting || !::IsWindow(m_hWnd) || m_inPrint)
 		return 0;
 	CRect cr;
 	GetClientRect(&cr);
@@ -6590,8 +7075,14 @@ void CFmMonitorDlg::BlitCachedFrameToPrintDC(HDC hdc)
 
 int CFmMonitorDlg::TryGpuFrame(HDC hdcDest)
 {
+#ifdef KBSASAMI_HOST_BUILD
+	(void)hdcDest;
+	return 0;
+#else
 	extern int playy;
 	if (!hdcDest)
+		return 0;
+	if (m_exiting || InterlockedCompareExchange(&g_appExiting, 0, 0))
 		return 0;
 	if (playy == 0) {
 		if (m_gpu.child || m_gpu.ready)
@@ -6666,11 +7157,12 @@ int CFmMonitorDlg::TryGpuFrame(HDC hdcDest)
 	m_fullDraw = 0;
 	m_dirtyHead = m_dirtyHex = m_dirtyPanels = m_dirtyKeys = 0;
 	return 1;
+#endif
 }
 
 void CFmMonitorDlg::OnPaint()
 {
-	if (m_inPrint || CCC_PrintBusy()) {
+	if (m_exiting || m_inPrint || CCC_PrintBusy()) {
 		ValidateRect(NULL);
 		return;
 	}

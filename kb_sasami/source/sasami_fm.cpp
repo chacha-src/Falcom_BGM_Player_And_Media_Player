@@ -671,13 +671,6 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 		   padHit=2 かつ fm10=0 はモニタが YM2612（SSG なし）と判定する。 */
 		d.padHit = (playFmMode == 2 && !fm10) ? 1 : (uint8_t)playFmMode;
 		d.fm10 = fm10 ? 1 : 0;
-		if (playFmMode) {
-			uint8_t vu[6];
-			chip.debug_fm_env_levels(vu);
-			memcpy(d.bank2, vu, 6);
-			d.bank2[6] = (uint8_t)SASAMI_FMMON_ENVVU_M0;
-			d.bank2[7] = (uint8_t)SASAMI_FMMON_ENVVU_M1;
-		}
 		d.pcmCount = 0;
 		memset(d.pcmOn, 0, sizeof(d.pcmOn));
 		memset(d.pcmNote, 0, sizeof(d.pcmNote));

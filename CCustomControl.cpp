@@ -2123,7 +2123,7 @@ static void DrawLapel(CDC* pDC, const CRect& rc, COLORREF c)
         { r, b }
     };
     CBrush br(c);
-    CPen pen(PS_SOLID, 1, RGB(230, 230, 234));
+    CPen pen(PS_SOLID, 1, RGB(236, 224, 196));
     CBrush* ob = pDC->SelectObject(&br);
     CPen* op = pDC->SelectObject(&pen);
     pDC->Polygon(pt, 5);
@@ -2273,6 +2273,75 @@ static void DrawWave(CDC* pDC, const CRect& rc, COLORREF c)
     pDC->SelectObject(op);
 }
 
+static void DrawMoon(CDC* pDC, const CRect& rc, COLORREF c)
+{
+    const int cx = (rc.left + rc.right) / 2;
+    const int cy = (rc.top + rc.bottom) / 2;
+    const int rad = max(3, min(rc.Width(), rc.Height()) / 3);
+    CBrush br(c);
+    CBrush* ob = pDC->SelectObject(&br);
+    CPen pen(PS_SOLID, 1, c);
+    CPen* op = pDC->SelectObject(&pen);
+    pDC->Ellipse(cx - rad, cy - rad, cx + rad, cy + rad);
+    CBrush hole(CCC_UiTheme().bg0);
+    pDC->SelectObject(&hole);
+    pDC->Ellipse(cx - rad / 4, cy - rad, cx + rad, cy + rad / 2);
+    pDC->SelectObject(ob);
+    pDC->SelectObject(op);
+}
+
+static void DrawAmber(CDC* pDC, const CRect& rc, COLORREF c)
+{
+    const int cx = (rc.left + rc.right) / 2;
+    const int cy = (rc.top + rc.bottom) / 2;
+    const int w = max(3, rc.Width() / 3);
+    const int h = max(4, rc.Height() / 2);
+    POINT pt[4] = {
+        { cx, cy - h }, { cx + w, cy }, { cx, cy + h }, { cx - w, cy }
+    };
+    CBrush br(c);
+    CBrush* ob = pDC->SelectObject(&br);
+    CPen pen(PS_SOLID, 1, c);
+    CPen* op = pDC->SelectObject(&pen);
+    pDC->Polygon(pt, 4);
+    pDC->SelectObject(ob);
+    pDC->SelectObject(op);
+}
+
+static void DrawWisteria(CDC* pDC, const CRect& rc, COLORREF c)
+{
+    const int cx = (rc.left + rc.right) / 2;
+    const int top = rc.top + 1;
+    CPen pen(PS_SOLID, 1, c);
+    CPen* op = pDC->SelectObject(&pen);
+    CBrush br(c);
+    CBrush* ob = pDC->SelectObject(&br);
+    pDC->MoveTo(cx, top);
+    pDC->LineTo(cx, rc.bottom - 2);
+    const int r = max(1, min(rc.Width(), rc.Height()) / 8);
+    for (int i = 0; i < 4; i++) {
+        const int y = top + (rc.Height() - 4) * (i + 1) / 5;
+        const int ox = (i & 1) ? r : -r;
+        pDC->Ellipse(cx + ox - r, y - r, cx + ox + r, y + r);
+    }
+    pDC->SelectObject(ob);
+    pDC->SelectObject(op);
+}
+
+static void DrawRetro(CDC* pDC, const CRect& rc, COLORREF c)
+{
+    CPen pen(PS_SOLID, 1, c);
+    CPen* op = pDC->SelectObject(&pen);
+    CBrush br(c);
+    CBrush* ob = pDC->SelectObject(&br);
+    const int m = max(1, min(rc.Width(), rc.Height()) / 8);
+    pDC->RoundRect(rc.left + m, rc.top + m, rc.right - m, rc.bottom - m, m * 2, m * 2);
+    pDC->SelectStockObject(NULL_BRUSH);
+    pDC->Ellipse(rc.left + m * 2, rc.top + m * 2, rc.right - m * 2, rc.bottom - m * 2);
+    pDC->SelectObject(ob);
+    pDC->SelectObject(op);
+}
+
 static void DrawThemeMotif(CDC* pDC, const CRect& rc, COLORREF c)
 {
     if (!pDC || rc.Width() < 3 || rc.Height() < 3) return;
@@ -2295,8 +2364,17 @@ static void DrawThemeMotif(CDC* pDC, const CRect& rc, COLORREF c)
     case CCC_UI_THEME_DAWN: DrawDawn(pDC, rc, c); break;
     case CCC_UI_THEME_RAIN: DrawRaindrop(pDC, rc, c); break;
     case CCC_UI_THEME_SEA: DrawWave(pDC, rc, c); break;
+    case CCC_UI_THEME_MOON: DrawMoon(pDC, rc, c); break;
+    case CCC_UI_THEME_AMBER: DrawAmber(pDC, rc, c); break;
+    case CCC_UI_THEME_WISTERIA: DrawWisteria(pDC, rc, c); break;
+    case CCC_UI_THEME_RETRO: DrawRetro(pDC, rc, c); break;
     default: DrawGear(pDC, rc, c); break;
     }
+}
+
+void CCC_DrawThemeMotif(CDC* pDC, const CRect& rc, COLORREF c)
+{
+    DrawThemeMotif(pDC, rc, c);
 }
 
 // 王冠（7頂点+3宝石）。選択強調用。
@@ -2494,8 +2572,25 @@ static void DrawSoftJkChip(CDC* pDC, const CRect& rc, int animTick, BOOL hot);
 
 // ボタン角のつる+小さな花。bPA=対角ペアの向き。押下時は 1px オフセット。
 // 見た目テーマ。0=可愛い（従来のローズ／リボン）。旧.dat の 0 がその既定。
+static int s_themePreview = -1;
+
+void CCC_SetThemePreview(int id)
+{
+    if (id < 0 || id >= CCC_UI_THEME_COUNT)
+        s_themePreview = -1;
+    else
+        s_themePreview = id;
+}
+
+void CCC_ClearThemePreview()
+{
+    s_themePreview = -1;
+}
+
 int CCC_UiThemeId()
 {
+    if (s_themePreview >= 0 && s_themePreview < CCC_UI_THEME_COUNT)
+        return s_themePreview;
     int t = savedata.popupMenuTheme;
     if (t < 0 || t >= CCC_UI_THEME_COUNT) t = 0;
     return t;
@@ -2509,11 +2604,11 @@ const CCC_UiThemePal& CCC_UiTheme()
           RGB(255,248,252), RGB(220,160,190), RGB(230,200,215),
           RGB(52,34,58), RGB(108,88,108), RGB(228,234,255), RGB(186,204,248),
           RGB(255,250,253), RGB(176,118,152), 0 },
-        { RGB(242,236,226), RGB(214,196,168), RGB(28,40,72), RGB(168,132,72), RGB(18,22,36),
-          RGB(176,132,48), RGB(128,42,56), RGB(160,140,110),
-          RGB(252,248,240), RGB(36,44,68), RGB(210,196,170),
-          RGB(28,24,20), RGB(96,80,64), RGB(255,244,220), RGB(196,168,120),
-          RGB(255,250,240), RGB(120,96,64), 1 },
+        { RGB(56,74,112), RGB(86,104,148), RGB(40,54,92), RGB(204,176,92), RGB(32,44,74),
+          RGB(168,48,66), RGB(210,180,96), RGB(118,136,172),
+          RGB(48,62,98), RGB(92,110,148), RGB(68,84,122),
+          RGB(240,232,218), RGB(158,164,184), RGB(78,102,156), RGB(52,70,122),
+          RGB(148,164,198), RGB(28,38,64), 1 },
         { RGB(28,18,36), RGB(48,22,40), RGB(140,24,48), RGB(212,170,64), RGB(80,10,20),
           RGB(196,32,56), RGB(212,170,64), RGB(160,48,64),
           RGB(42,28,48), RGB(120,40,56), RGB(60,36,52),
@@ -2527,7 +2622,7 @@ const CCC_UiThemePal& CCC_UiTheme()
         { RGB(245,240,228), RGB(232,224,206), RGB(160,36,36), RGB(40,36,32), RGB(80,20,20),
           RGB(176,32,32), RGB(40,36,32), RGB(120,90,70),
           RGB(250,246,236), RGB(160,130,100), RGB(210,196,170),
-          RGB(32,28,24), RGB(96,84,72), RGB(255,236,220), RGB(230,180,160),
+          RGB(32,28,24), RGB(96,84,72), RGB(176,48,48), RGB(128,32,32),
           RGB(255,250,242), RGB(90,60,48), 3 },
         { RGB(236,246,232), RGB(210,230,206), RGB(56,120,72), RGB(168,196,120), RGB(30,70,40),
           RGB(46,130,70), RGB(140,180,90), RGB(90,140,80),
@@ -2539,21 +2634,21 @@ const CCC_UiThemePal& CCC_UiTheme()
           RGB(255,252,246), RGB(230,170,190), RGB(255,220,200),
           RGB(72,40,56), RGB(112,72,88), RGB(255,236,210), RGB(255,190,210),
           RGB(255,252,248), RGB(200,120,140), 1 },
-        { RGB(228,230,234), RGB(200,204,210), RGB(90,96,104), RGB(210,150,48), RGB(40,44,50),
-          RGB(196,120,32), RGB(160,168,176), RGB(120,126,134),
-          RGB(244,246,248), RGB(150,156,164), RGB(190,194,200),
-          RGB(32,34,38), RGB(78,82,90), RGB(236,238,242), RGB(190,196,204),
-          RGB(255,255,255), RGB(80,84,90), 5 },
+        { RGB(228,230,234), RGB(176,180,188), RGB(70,76,86), RGB(196,140,48), RGB(40,44,50),
+          RGB(186,118,36), RGB(120,128,138), RGB(96,102,112),
+          RGB(236,238,242), RGB(120,126,136), RGB(168,172,180),
+          RGB(28,30,34), RGB(70,74,82), RGB(64,110,168), RGB(48,72,120),
+          RGB(248,250,252), RGB(56,60,68), 5 },
         { RGB(255,214,232), RGB(255,236,168), RGB(255,80,150), RGB(255,210,70), RGB(120,20,60),
           RGB(255,45,140), RGB(255,196,40), RGB(255,120,170),
           RGB(255,248,252), RGB(230,80,140), RGB(255,200,220),
           RGB(40,16,28), RGB(112,48,76), RGB(255,228,120), RGB(255,160,200),
           RGB(255,252,248), RGB(160,40,90), 8 },
-        { RGB(12,12,14), RGB(28,26,24), RGB(20,18,16), RGB(196,160,72), RGB(8,8,8),
-          RGB(212,170,64), RGB(140,32,48), RGB(80,72,56),
-          RGB(36,34,32), RGB(180,146,64), RGB(48,44,40),
-          RGB(236,228,210), RGB(168,156,132), RGB(64,52,36), RGB(24,20,18),
-          RGB(212,176,96), RGB(12,10,8), 9 },
+        { RGB(40,50,92), RGB(62,70,118), RGB(28,36,72), RGB(220,184,80), RGB(22,28,56),
+          RGB(220,176,72), RGB(152,42,60), RGB(104,96,72),
+          RGB(46,54,100), RGB(188,156,72), RGB(56,62,102),
+          RGB(240,230,206), RGB(176,164,140), RGB(104,82,36), RGB(64,50,24),
+          RGB(212,180,96), RGB(20,26,52), 9 },
         { RGB(255,236,242), RGB(220,242,214), RGB(255,170,190), RGB(150,200,140), RGB(180,80,110),
           RGB(240,120,160), RGB(120,180,90), RGB(220,160,180),
           RGB(255,250,248), RGB(210,160,180), RGB(230,210,200),
@@ -2569,11 +2664,11 @@ const CCC_UiThemePal& CCC_UiTheme()
           RGB(255,248,236), RGB(190,140,90), RGB(220,180,130),
           RGB(60,32,16), RGB(104,68,40), RGB(255,210,160), RGB(220,150,90),
           RGB(255,246,232), RGB(120,70,36), 12 },
-        { RGB(236,244,250), RGB(210,226,238), RGB(140,180,210), RGB(230,240,248), RGB(80,110,140),
-          RGB(90,150,200), RGB(180,210,230), RGB(160,190,210),
-          RGB(250,252,255), RGB(170,196,214), RGB(210,224,234),
-          RGB(28,44,64), RGB(64,96,116), RGB(220,236,248), RGB(170,200,220),
-          RGB(255,255,255), RGB(100,130,156), 13 },
+        { RGB(236,244,250), RGB(186,210,228), RGB(70,140,190), RGB(210,230,242), RGB(48,86,120),
+          RGB(40,120,180), RGB(150,190,220), RGB(120,160,190),
+          RGB(246,250,254), RGB(120,160,190), RGB(198,216,230),
+          RGB(20,40,60), RGB(48,80,104), RGB(150,196,230), RGB(90,150,200),
+          RGB(255,255,255), RGB(56,96,128), 13 },
         { RGB(255,214,170), RGB(214,150,170), RGB(220,90,50), RGB(140,60,100), RGB(80,30,40),
           RGB(230,100,40), RGB(160,60,100), RGB(200,120,80),
           RGB(255,236,214), RGB(180,100,80), RGB(230,170,130),
@@ -2582,18 +2677,38 @@ const CCC_UiThemePal& CCC_UiTheme()
         { RGB(255,228,210), RGB(255,210,230), RGB(255,160,120), RGB(255,220,160), RGB(180,90,80),
           RGB(255,140,90), RGB(255,200,120), RGB(230,160,150),
           RGB(255,248,242), RGB(220,160,140), RGB(240,200,180),
-          RGB(70,40,36), RGB(112,76,68), RGB(255,220,190), RGB(255,180,160),
+          RGB(70,40,36), RGB(112,76,68), RGB(220,110,80), RGB(180,80,60),
           RGB(255,250,246), RGB(160,90,80), 15 },
         { RGB(210,216,224), RGB(180,190,204), RGB(70,90,120), RGB(140,160,180), RGB(40,50,70),
           RGB(60,100,150), RGB(120,150,180), RGB(130,145,165),
           RGB(240,242,246), RGB(140,155,175), RGB(190,198,210),
-          RGB(28,36,48), RGB(68,78,94), RGB(200,214,230), RGB(150,170,190),
+          RGB(28,36,48), RGB(68,78,94), RGB(64,96,140), RGB(48,72,110),
           RGB(248,249,252), RGB(70,84,104), 16 },
         { RGB(200,230,228), RGB(150,200,206), RGB(20,120,140), RGB(230,250,248), RGB(10,70,80),
           RGB(16,140,160), RGB(240,250,248), RGB(80,160,170),
           RGB(244,252,252), RGB(100,170,175), RGB(180,220,218),
-          RGB(16,48,52), RGB(36,96,100), RGB(180,230,226), RGB(120,190,196),
+          RGB(16,48,52), RGB(36,96,100), RGB(12,108,118), RGB(10,80,90),
           RGB(250,255,255), RGB(30,100,110), 17 },
+        { RGB(16,20,42), RGB(28,32,62), RGB(72,84,128), RGB(210,216,232), RGB(8,10,22),
+          RGB(196,206,230), RGB(140,150,186), RGB(70,80,120),
+          RGB(24,28,54), RGB(90,100,140), RGB(40,46,76),
+          RGB(236,240,250), RGB(148,156,180), RGB(48,58,110), RGB(36,44,88),
+          RGB(120,132,176), RGB(8,10,22), 18 },
+        { RGB(52,34,16), RGB(78,50,22), RGB(196,132,36), RGB(232,184,72), RGB(40,22,8),
+          RGB(220,156,48), RGB(180,110,36), RGB(140,90,40),
+          RGB(62,40,18), RGB(168,118,48), RGB(88,56,24),
+          RGB(255,236,206), RGB(176,140,96), RGB(120,70,24), RGB(88,50,16),
+          RGB(232,186,90), RGB(28,14,6), 19 },
+        { RGB(46,34,64), RGB(70,50,96), RGB(168,132,214), RGB(214,186,240), RGB(40,24,64),
+          RGB(186,148,228), RGB(140,110,186), RGB(120,90,160),
+          RGB(54,40,76), RGB(150,118,196), RGB(78,58,110),
+          RGB(246,236,255), RGB(168,148,196), RGB(96,64,140), RGB(72,48,112),
+          RGB(210,186,240), RGB(28,18,44), 20 },
+        { RGB(244,228,196), RGB(220,196,150), RGB(20,118,112), RGB(196,72,48), RGB(80,48,24),
+          RGB(196,72,48), RGB(24,128,120), RGB(176,140,90),
+          RGB(250,240,214), RGB(160,110,70), RGB(220,196,150),
+          RGB(36,24,16), RGB(96,72,48), RGB(24,128,120), RGB(180,70,44),
+          RGB(255,248,228), RGB(96,56,32), 21 },
     };
     return k[CCC_UiThemeId()];
 }
@@ -2603,7 +2718,7 @@ const CCC_ThemeFace& CCC_ThemeFaceOf()
     /* radius fill edge gloss jelly lace sep sel */
     static const CCC_ThemeFace k[CCC_UI_THEME_COUNT] = {
         { 10, CCC_FACE_FILL_SATIN,  CCC_FACE_EDGE_BEVEL,   8, 1, 1, CCC_FACE_SEP_LACE,   CCC_FACE_SEL_WASH },
-        {  0, CCC_FACE_FILL_FLAT,   CCC_FACE_EDGE_HAIR,    0, 0, 0, CCC_FACE_SEP_HAIR,   CCC_FACE_SEL_BAR },
+        {  3, CCC_FACE_FILL_METAL,  CCC_FACE_EDGE_CHAMFER,  5, 0, 0, CCC_FACE_SEP_HAIR,   CCC_FACE_SEL_BAR },
         {  0, CCC_FACE_FILL_VGRAD,  CCC_FACE_EDGE_DOUBLE,  0, 0, 0, CCC_FACE_SEP_DOUBLE, CCC_FACE_SEL_FRAME },
         {  2, CCC_FACE_FILL_NEON,   CCC_FACE_EDGE_GLOW,    0, 0, 0, CCC_FACE_SEP_HAIR,   CCC_FACE_SEL_FRAME },
         {  0, CCC_FACE_FILL_WASH,   CCC_FACE_EDGE_BRUSH,   0, 0, 0, CCC_FACE_SEP_DASH,   CCC_FACE_SEL_UNDER },
@@ -2620,6 +2735,10 @@ const CCC_ThemeFace& CCC_ThemeFaceOf()
         {  0, CCC_FACE_FILL_VGRAD,  CCC_FACE_EDGE_HAIR,    0, 0, 0, CCC_FACE_SEP_HAIR,   CCC_FACE_SEL_WASH },
         {  6, CCC_FACE_FILL_STREAK, CCC_FACE_EDGE_HAIR,    0, 0, 0, CCC_FACE_SEP_DASH,   CCC_FACE_SEL_UNDER },
         {  8, CCC_FACE_FILL_HGRAD,  CCC_FACE_EDGE_WAVE,    0, 0, 0, CCC_FACE_SEP_HAIR,   CCC_FACE_SEL_BAR },
+        {  4, CCC_FACE_FILL_METAL,  CCC_FACE_EDGE_HAIR,    0, 0, 0, CCC_FACE_SEP_HAIR,   CCC_FACE_SEL_FRAME },
+        {  5, CCC_FACE_FILL_VGRAD,  CCC_FACE_EDGE_CHAMFER, 0, 0, 0, CCC_FACE_SEP_DASH,   CCC_FACE_SEL_UNDER },
+        {  8, CCC_FACE_FILL_WASH,   CCC_FACE_EDGE_HAIR,    0, 0, 0, CCC_FACE_SEP_HAIR,   CCC_FACE_SEL_WASH },
+        { 14, CCC_FACE_FILL_STRIPE, CCC_FACE_EDGE_PILL,    0, 0, 0, CCC_FACE_SEP_NONE,   CCC_FACE_SEL_PILL },
     };
     int id = CCC_UiThemeId();
     if (id < 0 || id >= CCC_UI_THEME_COUNT) id = 0;
@@ -2709,6 +2828,22 @@ LPCTSTR CCC_UiThemeName(int id)
         return LL14(L"海", L"Sea", L"Mer", L"Mare", L"Mar",
             L"바다", L"海", L"بحر", L"Море", L"Meer",
             L"Mar", L"Zee", L"Morze", L"Deniz");
+    case CCC_UI_THEME_MOON:
+        return LL14(L"月", L"Moon", L"Lune", L"Luna", L"Luna",
+            L"달", L"月", L"قمر", L"Луна", L"Mond",
+            L"Lua", L"Maan", L"Księżyc", L"Ay");
+    case CCC_UI_THEME_AMBER:
+        return LL14(L"琥珀", L"Amber", L"Ambre", L"Ambra", L"Ambar",
+            L"호박", L"琥珀", L"كهرمان", L"Янтарь", L"Bernstein",
+            L"Ambar", L"Barnsteen", L"Bursztyn", L"Kehribar");
+    case CCC_UI_THEME_WISTERIA:
+        return LL14(L"藤", L"Wisteria", L"Glycine", L"Glicine", L"Glicinia",
+            L"등나무", L"紫藤", L"وستيريا", L"Глициния", L"Glyzinie",
+            L"Glicinia", L"Blauweregen", L"Glicynia", L"Mor salkım");
+    case CCC_UI_THEME_RETRO:
+        return LL14(L"レトロ", L"Retro", L"Retro", L"Retro", L"Retro",
+            L"레트로", L"复古", L"ريترو", L"Ретро", L"Retro",
+            L"Retrô", L"Retro", L"Retro", L"Retro");
     case CCC_UI_THEME_CUTE:
     default:
         return LL14(L"可愛い", L"Cute", L"Mignon", L"Carino", L"Tierno",
@@ -4109,6 +4244,18 @@ static int CCC_ThemeOutline(const CRect& rc, POINT* p, int cap, int* roundDiam)
         }
         return k;
     }
+    case CCC_UI_THEME_MOON:
+        c = (std::max)(6, (std::min)(w, h) / 2 - 1);
+        break;
+    case CCC_UI_THEME_AMBER:
+        c = (std::max)(4, (std::min)(w, h) / 4);
+        break;
+    case CCC_UI_THEME_WISTERIA:
+        if (roundDiam) *roundDiam = (std::min)(12, (std::min)(w, h) / 2);
+        return 0;
+    case CCC_UI_THEME_RETRO:
+        if (roundDiam) *roundDiam = (std::min)(w, h);
+        return 0;
     default:
         if (roundDiam) *roundDiam = 8;
         return 0;
@@ -8943,6 +9090,48 @@ static void CccSliderAxis(BOOL bV, const CRect& r, int margin,
     tMid = t0 + (int)((double)(midV - nMin) * span / nR);
 }
 
+static void CccSliderDrawGainTicks(CDC* pDC, BOOL bV, int axis, int t0, int t1,
+    int nMin, int nMax, int barHalf, COLORREF cMinor, COLORREF cMid, COLORREF cOutline)
+{
+    const int nR = nMax - nMin;
+    if (nR <= 0 || t1 <= t0 || barHalf < 1)
+        return;
+    int step = 0;
+    if (nR == 200)
+        step = 50;
+    else if (nR == 100)
+        step = 50;
+    else
+        return;
+    const int midV = nMin + nR / 2;
+    const int span = t1 - t0;
+    for (int v = nMin; v <= nMax; v += step) {
+        const int t = t0 + (int)((double)(v - nMin) * span / nR);
+        const BOOL isMid = (v == midV);
+        const int arm = isMid ? (barHalf + 9) : (barHalf + 5);
+        if (CPen* p = CCC_GetPooledPen(isMid ? 3 : 2, cOutline))
+            pDC->SelectObject(p);
+        if (bV) {
+            pDC->MoveTo(axis - arm, t);
+            pDC->LineTo(axis + arm + 1, t);
+        }
+        else {
+            pDC->MoveTo(t, axis - arm);
+            pDC->LineTo(t, axis + arm + 1);
+        }
+        if (CPen* p = CCC_GetPooledPen(isMid ? 2 : 1, isMid ? cMid : cMinor))
+            pDC->SelectObject(p);
+        if (bV) {
+            pDC->MoveTo(axis - arm + 1, t);
+            pDC->LineTo(axis + arm, t);
+        }
+        else {
+            pDC->MoveTo(t, axis - arm + 1);
+            pDC->LineTo(t, axis + arm);
+        }
+    }
+}
+
 static int CccThumbRad(const CRect& rect, BOOL bV)
 {
     const int room = bV ? rect.Width() : rect.Height();
@@ -9038,6 +9227,22 @@ static void CccSliderThumb(CDC* pDC, int x, int y, int rad, BOOL square, COLORRE
     case CCC_UI_THEME_SEA:
         pDC->Ellipse(x - rad - 2, y - max(2, rad / 2), x + rad + 3, y + max(2, rad / 2) + 1);
         break;
+    case CCC_UI_THEME_MOON:
+        pDC->Ellipse(x - rad, y - rad, x + rad + 1, y + rad + 1);
+        break;
+    case CCC_UI_THEME_AMBER: {
+        POINT dmd[4] = {
+            { x, y - rad }, { x + rad, y }, { x, y + rad }, { x - rad, y }
+        };
+        pDC->Polygon(dmd, 4);
+        break;
+    }
+    case CCC_UI_THEME_WISTERIA:
+        pDC->RoundRect(CRect(x - rad, y - rad, x + rad + 1, y + rad + 1), CPoint(rad, rad));
+        break;
+    case CCC_UI_THEME_RETRO:
+        pDC->RoundRect(CRect(x - rad - 1, y - max(2, rad / 2), x + rad + 2, y + max(2, rad / 2) + 1), CPoint(rad, rad));
+        break;
     case CCC_UI_THEME_RAIN:
         pDC->Rectangle(x - 2, y - rad, x + 3, y + rad + 1);
         break;
@@ -9089,7 +9294,8 @@ static void CccSliderBar(CDC* pDC, int l, int t, int r, int b, BOOL square)
     const int id = CCC_UiThemeId();
     const BOOL round = (id == CCC_UI_THEME_CUTE || id == CCC_UI_THEME_GAL || id == CCC_UI_THEME_CANDY
         || id == CCC_UI_THEME_SPRING || id == CCC_UI_THEME_DAWN || id == CCC_UI_THEME_SEA
-        || id == CCC_UI_THEME_FOREST || id == CCC_UI_THEME_SUMMER);
+        || id == CCC_UI_THEME_FOREST || id == CCC_UI_THEME_SUMMER
+        || id == CCC_UI_THEME_WISTERIA || id == CCC_UI_THEME_RETRO);
     const int rad = min(r - l, b - t);
     if (!round || rad < 4)
         pDC->Rectangle(l, t, r, b);
@@ -9665,6 +9871,7 @@ void CCustomSliderCtrl::DrawMode2(CDC* pDC, const CRect& rect, int nMin, int nMa
         CccSliderBar(pDC, t0, cY - half, t1, cY + half + 1, square);
         ink(th.accent, th.accent);
         CccSliderBar(pDC, t0, cY - half, tP, cY + half + 1, square);
+        CccSliderDrawGainTicks(pDC, FALSE, cY, t0, t1, nMin, nMax, half, th.sep, th.text, th.face);
         CccSliderThumb(pDC, tP, cY, rad, square, th.face, th.accent);
     }
     else
@@ -9676,6 +9883,7 @@ void CCustomSliderCtrl::DrawMode2(CDC* pDC, const CRect& rect, int nMin, int nMa
         CccSliderBar(pDC, cX - half, t0, cX + half + 1, t1, square);
         ink(th.accent, th.accent);
         CccSliderBar(pDC, cX - half, tP, cX + half + 1, t1, square);
+        CccSliderDrawGainTicks(pDC, TRUE, cX, t0, t1, nMin, nMax, half, th.sep, th.text, th.face);
         CccSliderThumb(pDC, cX, tP, rad, square, th.face, th.accent);
     }
     if (oldPen) pDC->SelectObject(oldPen);
@@ -9720,6 +9928,7 @@ void CCustomSliderCtrl::DrawMode3(CDC* pDC, const CRect& rect, int nMin, int nMa
         if (CPen* p = CCC_GetPooledPen(1, th.text)) pDC->SelectObject(p);
         pDC->MoveTo(tMid, cY - thick / 2 - 3);
         pDC->LineTo(tMid, cY + thick / 2 + 4);
+        CccSliderDrawGainTicks(pDC, FALSE, cY, t0, t1, nMin, nMax, thick / 2, th.sep, th.text, th.face);
         knob(tP, cY);
     }
     else
@@ -9736,6 +9945,7 @@ void CCustomSliderCtrl::DrawMode3(CDC* pDC, const CRect& rect, int nMin, int nMa
         if (CPen* p = CCC_GetPooledPen(1, th.text)) pDC->SelectObject(p);
         pDC->MoveTo(cX - thick / 2 - 3, tMid);
         pDC->LineTo(cX + thick / 2 + 4, tMid);
+        CccSliderDrawGainTicks(pDC, TRUE, cX, t0, t1, nMin, nMax, thick / 2, th.sep, th.text, th.face);
         knob(cX, tP);
     }
     if (oldPen) pDC->SelectObject(oldPen);

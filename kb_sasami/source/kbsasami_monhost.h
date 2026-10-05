@@ -90,6 +90,7 @@ void KbsHostMonStartup();
 void KbsHostMonShow();
 void KbsHostMonHide();
 void KbsHostMonQuit();
+void KbsHostMonRequestQuit();
 int KbsHostMonHolding();
 void KbsHostMonPull();
 /* 1=FM(.fpy)。0=MIDI。kpi が曲を開いたときの指定。 */

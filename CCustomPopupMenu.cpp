@@ -500,8 +500,8 @@ namespace {
 		const COLORREF ink = PopupText(enabled);
 		const int d = CCC_Luma(ink) - CCC_Luma(bg);
 		if (d < 0) {
-			if (-d >= 70) return ink;
-		} else if (d >= 70) return ink;
+			if (-d >= 90) return ink;
+		} else if (d >= 90) return ink;
 		return CCC_InkOn(bg);
 	}
 	static COLORREF PopupBorderLite()
@@ -770,17 +770,39 @@ static COLORREF BlendRGB(COLORREF a, COLORREF b, int t)
 		}
 	}
 
-	static void DrawSoftShadowText(CDC& dc, LPCTSTR text, CRect tr, UINT dt, COLORREF main, BOOL enabled)
+	static COLORREF PopupTextEdge(COLORREF main)
+	{
+		return (CCC_Luma(main) >= 140) ? RGB(18, 12, 16) : RGB(255, 252, 248);
+	}
+
+	static void DrawOutlinedText(CDC& dc, LPCTSTR text, CRect tr, UINT dt, COLORREF main)
 	{
 		if (!text || !text[0]) return;
-		if (enabled) {
-			const COLORREF edge = (CCC_Luma(main) >= 160) ? RGB(20, 14, 24) : RGB(255, 250, 252);
-			CRect w = tr; w.OffsetRect(CCC_Luma(main) >= 160 ? 1 : -1, 1);
-			dc.SetTextColor(edge);
+		const COLORREF edge = PopupTextEdge(main);
+		dc.SetTextColor(edge);
+		static const POINT kOff[8] = {
+			{ -1, -1 }, { 0, -1 }, { 1, -1 },
+			{ -1,  0 },            { 1,  0 },
+			{ -1,  1 }, { 0,  1 }, { 1,  1 }
+		};
+		for (int i = 0; i < 8; ++i) {
+			CRect w = tr;
+			w.OffsetRect(kOff[i].x, kOff[i].y);
 			dc.DrawText(text, -1, &w, dt);
 		}
 		dc.SetTextColor(main);
 		dc.DrawText(text, -1, &tr, dt);
+	}
+
+	static void DrawSoftShadowText(CDC& dc, LPCTSTR text, CRect tr, UINT dt, COLORREF main, BOOL enabled)
+	{
+		if (!text || !text[0]) return;
+		if (enabled)
+			DrawOutlinedText(dc, text, tr, dt, main);
+		else {
+			dc.SetTextColor(main);
+			dc.DrawText(text, -1, &tr, dt);
+		}
 	}
 	// fade 中は不透明な影/白縁を出さない（消えない文字の原因）
 	static void DrawPopupItemText(CDC& dc, LPCTSTR text, CRect tr, UINT dt, COLORREF main, BOOL enabled, int fade)
@@ -927,15 +949,18 @@ static COLORREF BlendRGB(COLORREF a, COLORREF b, int t)
 			s_tile.CreateCompatibleBitmap(&dc, kTile, kTile);
 			CBitmap* ob = mem.SelectObject(&s_tile);
 			mem.FillSolidRect(0, 0, kTile, kTile, c0);
-			const COLORREF hi = BlendRGB(RGB(255, 255, 255), c0, 48);
+			const int luma0 = CCC_Luma(c0);
+			const COLORREF hi = (luma0 < 140)
+				? BlendRGB(c0, RGB(255, 255, 255), 22)
+				: BlendRGB(RGB(255, 255, 255), c0, 40);
 			const int pitch = 28;
-			const int stripeW = 10;
+			const int stripeW = (luma0 < 140) ? 6 : 10;
 			for (int y = 0; y < kTile; ++y) {
 				for (int x = 0; x < kTile; ++x) {
 					const int v = (x + y) % pitch;
 					if (v < stripeW)
 						mem.SetPixel(x, y, hi);
-					else if ((x % 22) == 8 && (y % 22) == 8)
+					else if (luma0 >= 140 && (x % 22) == 8 && (y % 22) == 8)
 						mem.SetPixel(x, y, RGB(255, 255, 255));
 				}
 			}
@@ -1311,7 +1336,7 @@ CCustomPopupMenu::CCustomPopupMenu()
 	, m_asSubmenu(FALSE), m_animTick(0), m_lineAnimPhase(0), m_lineAnimStart(0)
 	, m_lineAnimOrigin(0), m_lineAnimOriginY(0), m_flightPad(0), m_chipPresentedAnimTick(-1)
 	, m_bridgePanel(FALSE)
-	, m_skipChrome(FALSE), m_chromeInjected(FALSE), m_previewing(FALSE)
+	, m_skipChrome(FALSE), m_chromeInjected(FALSE), m_previewing(FALSE), m_previewThemeOn(FALSE)
 	, m_bounceIdx(-1), m_nBounce(0), m_suppressEditNotify(FALSE)
 {
 	ZeroMemory(m_items, sizeof(m_items));
@@ -1349,7 +1374,7 @@ void CCustomPopupMenu::Reset()
 	m_comboCount = m_listCount = m_rangeCount = m_progressCount = m_buttonCount = 0;
 	m_choiceSetCount = 0;
 	m_hot = m_openSub = -1; m_result = 0; m_done = FALSE; m_tipHot = -1;
-	m_chromeInjected = FALSE; m_previewing = FALSE; m_previewFace[0] = 0;
+	m_chromeInjected = FALSE; m_previewing = FALSE; m_previewThemeOn = FALSE; m_previewFace[0] = 0;
 	m_scrollY = m_scrollMax = m_contentH = 0;
 	m_stickyCount = m_stickyH = 0;
 	m_bounceIdx = -1; m_nBounce = 0;
@@ -1725,6 +1750,63 @@ void CCustomPopupMenu::CommitFace(LPCTSTR face)
 	m_previewFace[0] = 0;
 	PersistPopupFont();
 	RefreshFontChain();
+}
+
+void CCustomPopupMenu::ApplyPreviewTheme(int id)
+{
+	CCustomPopupMenu* root = RootMenu();
+	if (!root) return;
+	if (id < 0 || id >= CCC_UI_THEME_COUNT) return;
+	root->m_previewThemeOn = TRUE;
+	CCC_SetThemePreview(id);
+	if (root->GetSafeHwnd())
+		root->InvalidateBgOnly();
+	for (int i = 0; i < root->m_subCount; ++i) {
+		if (!root->m_subs[i] || !root->m_subs[i]->GetSafeHwnd()) continue;
+		root->m_subs[i]->InvalidateBgOnly();
+	}
+	CCC_RefreshThemedUi();
+}
+
+void CCustomPopupMenu::ClearPreviewTheme()
+{
+	CCustomPopupMenu* root = RootMenu();
+	if (!root || !root->m_previewThemeOn) return;
+	root->m_previewThemeOn = FALSE;
+	CCC_ClearThemePreview();
+	if (root->GetSafeHwnd())
+		root->InvalidateBgOnly();
+	for (int i = 0; i < root->m_subCount; ++i) {
+		if (!root->m_subs[i] || !root->m_subs[i]->GetSafeHwnd()) continue;
+		root->m_subs[i]->InvalidateBgOnly();
+	}
+	CCC_RefreshThemedUi();
+}
+
+void CCustomPopupMenu::CommitTheme(int id)
+{
+	if (id < 0 || id >= CCC_UI_THEME_COUNT) id = 0;
+	m_previewThemeOn = FALSE;
+	CCC_ClearThemePreview();
+	savedata.popupMenuTheme = id;
+	MpPersistSavedataQuick();
+	for (int i = 0; i < m_itemCount; ++i) {
+		if (m_items[i].id < CCUSTOM_POPUP_ID_THEME0
+			|| m_items[i].id >= CCUSTOM_POPUP_ID_THEME0 + (UINT)CCC_UI_THEME_COUNT)
+			continue;
+		m_items[i].checked =
+			((int)(m_items[i].id - CCUSTOM_POPUP_ID_THEME0) == savedata.popupMenuTheme) ? TRUE : FALSE;
+	}
+	CCustomPopupMenu* root = RootMenu();
+	if (root && root->GetSafeHwnd())
+		root->InvalidateBgOnly();
+	if (root) {
+		for (int i = 0; i < root->m_subCount; ++i) {
+			if (!root->m_subs[i] || !root->m_subs[i]->GetSafeHwnd()) continue;
+			root->m_subs[i]->InvalidateBgOnly();
+		}
+	}
+	CCC_RefreshThemedUi();
 }
 
 // ルート先頭へ骨格を注入（サブ・skipChrome・再入は無視）。
@@ -2966,6 +3048,7 @@ void CCustomPopupMenu::CloseOpenSub()
 	}
 	m_openSub = -1;
 	ClearPreviewFace();
+	ClearPreviewTheme();
 }
 
 // ルートに結果を書いて m_done。RunModalLoop が抜けて DestroyPopupTree。
@@ -3751,6 +3834,11 @@ void CCustomPopupMenu::SetHot(int idx)
 		const CCustomPopupItem& it = m_items[idx];
 		if (it.id == CCUSTOM_POPUP_ID_FONT_FACE && it.text[0])
 			ApplyPreviewFace(it.text);
+		else if (it.id >= CCUSTOM_POPUP_ID_THEME0
+			&& it.id < CCUSTOM_POPUP_ID_THEME0 + (UINT)CCC_UI_THEME_COUNT)
+			ApplyPreviewTheme((int)(it.id - CCUSTOM_POPUP_ID_THEME0));
+		else if (RootMenu() && RootMenu()->m_previewThemeOn)
+			ClearPreviewTheme();
 		// ホバー行が変わったら開いているサブは即破棄。サブ行ならそこから再オープン（アニメ付き）。
 		// HitTest は定着座標基準なので、飛行中の重なりで非サブ→Snap 誤爆しない。
 		if (it.kind == CCUSTOM_POPUP_SUB && it.enabled)
@@ -4313,9 +4401,12 @@ void CCustomPopupMenu::OnMouseLeave()
 {
 	if (m_hot >= 0 && m_items[m_hot].kind != CCUSTOM_POPUP_SUB) {
 		const BOOL wasFace = (m_items[m_hot].id == CCUSTOM_POPUP_ID_FONT_FACE);
+		const BOOL wasTheme = (m_items[m_hot].id >= CCUSTOM_POPUP_ID_THEME0
+			&& m_items[m_hot].id < CCUSTOM_POPUP_ID_THEME0 + (UINT)CCC_UI_THEME_COUNT);
 		m_hot = -1;
 		InvalidateBgOnly();
 		if (wasFace) ClearPreviewFace();
+		if (wasTheme) ClearPreviewTheme();
 	}
 }
 
@@ -4444,20 +4535,9 @@ BOOL CCustomPopupMenu::HandleChromeClick(int idx)
 	}
 	if (it.id >= CCUSTOM_POPUP_ID_THEME0
 		&& it.id < CCUSTOM_POPUP_ID_THEME0 + (UINT)CCC_UI_THEME_COUNT) {
-		savedata.popupMenuTheme = (int)(it.id - CCUSTOM_POPUP_ID_THEME0);
-		if (savedata.popupMenuTheme < 0 || savedata.popupMenuTheme >= CCC_UI_THEME_COUNT)
-			savedata.popupMenuTheme = 0;
-		MpPersistSavedataQuick();
-		for (int i = 0; i < m_itemCount; ++i) {
-			if (m_items[i].id < CCUSTOM_POPUP_ID_THEME0
-				|| m_items[i].id >= CCUSTOM_POPUP_ID_THEME0 + (UINT)CCC_UI_THEME_COUNT)
-				continue;
-			m_items[i].checked =
-				((int)(m_items[i].id - CCUSTOM_POPUP_ID_THEME0) == savedata.popupMenuTheme) ? TRUE : FALSE;
-		}
+		CommitTheme((int)(it.id - CCUSTOM_POPUP_ID_THEME0));
 		InvalidateBgOnly();
 		CloseChain(0);
-		CCC_RefreshThemedUi();
 		return TRUE;
 	}
 	return FALSE;

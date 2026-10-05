@@ -260,9 +260,28 @@ void KbsHostMonHide()
 		g_mm->ShowWindow(SW_HIDE);
 }
 
+int KbsHostMonHolding()
+{
+	if (InterlockedCompareExchange(&g_appExiting, 0, 0))
+		return 0;
+	return g_hold;
+}
+
+void KbsHostMonRequestQuit()
+{
+	InterlockedExchange(&g_appExiting, 1);
+	g_hold = 0;
+}
+
 void KbsHostMonQuit()
 {
+	KbsHostMonRequestQuit();
+	UiTickPump::ShutdownHub();
 	g_hold = 0;
+	if (g_fm)
+		g_fm->DetachForDestroy();
+	if (g_mm)
+		g_mm->DetachForDestroy();
 	if (g_mm) {
 		if (::IsWindow(g_mm->GetSafeHwnd()))
 			g_mm->DestroyWindow();
@@ -276,9 +295,4 @@ void KbsHostMonQuit()
 		g_fm = NULL;
 	}
 	g_og.m_FmMonitorDlg = NULL;
-}
-
-int KbsHostMonHolding()
-{
-	return g_hold;
 }

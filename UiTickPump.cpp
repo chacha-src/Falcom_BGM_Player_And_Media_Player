@@ -82,6 +82,10 @@ static HMONITOR HubWantMon()
 
 static bool HubInitDxgi()
 {
+#ifdef KBSASAMI_HOST_BUILD
+	/* 本家ホストは WaitForVBlank 中に窓を壊すと DXGI で戻らない */
+	return false;
+#else
 	HubReleaseDxgi();
 	HMODULE dxgi = GetModuleHandleW(L"dxgi.dll");
 	if (!dxgi)
@@ -187,6 +191,7 @@ static bool HubInitDxgi()
 	s_dxgiInstant = 0;
 	InterlockedExchange(&s_dxgiOk, s_output ? 1 : 0);
 	return s_output != NULL;
+#endif
 }
 
 static bool HubQueryDwm(LONGLONG* lastVblank, LONGLONG* period)
@@ -493,6 +498,22 @@ void UiTickPump::Stop()
 	}
 	m_hwnd = NULL;
 	m_msg = 0;
+}
+
+void UiTickPump::ShutdownHub()
+{
+	InterlockedExchange(&g_appExiting, 1);
+	HubCsEnter();
+	HANDLE th = s_hubThread;
+	HANDLE stop = s_hubStop;
+	s_hubThread = NULL;
+	HubCsLeave();
+	if (stop)
+		SetEvent(stop);
+	if (th) {
+		WaitForSingleObject(th, 400);
+		CloseHandle(th);
+	}
 }
 
 void UiTickPump::WaitVblank(HANDLE stopEvent)

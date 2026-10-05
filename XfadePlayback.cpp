@@ -181,7 +181,9 @@ __int64 XfPlayPosBytes()
 	}
 	const int outBpf = XfDsOutBpf();
 	const int outRate = XfDsOutRate();
-	const int srcRate = (wavbit_sample_Hz > 0) ? wavbit_sample_Hz : outRate;
+	int srcRate = (s >= 0 && s < XF_SLOTS && g_xfSrcRate[s] > 0) ? g_xfSrcRate[s] : 0;
+	if (srcRate <= 0)
+		srcRate = (wavbit_sample_Hz > 0) ? wavbit_sample_Hz : outRate;
 	if (outBpf <= 0 || srcRate <= 0 || outRate <= 0)
 		return 0;
 	const __int64 outFrames = (srcRate == outRate)
@@ -217,7 +219,10 @@ __int64 XfTrackEndRefBytes(__int64 endWrittenBytes)
 		if (totalSamp > 0) {
 			const int outBpf = XfDsOutBpf();
 			const int outRate = XfDsOutRate();
-			const int srcRate = (wavbit_sample_Hz > 0) ? wavbit_sample_Hz : outRate;
+			const int s = XfActiveSlot();
+			int srcRate = (s >= 0 && s < XF_SLOTS && g_xfSrcRate[s] > 0) ? g_xfSrcRate[s] : 0;
+			if (srcRate <= 0)
+				srcRate = (wavbit_sample_Hz > 0) ? wavbit_sample_Hz : outRate;
 			if (outBpf > 0 && srcRate > 0 && outRate > 0) {
 				const __int64 outFrames = (srcRate == outRate)
 					? (__int64)totalSamp
@@ -299,6 +304,37 @@ int XfEnabled()
 		&& og->m_xfade.GetCheck())
 		return 1;
 	return 0;
+}
+
+static int XfDisplayBusy()
+{
+	return InterlockedCompareExchange(&g_xfInProgress, 0, 0)
+		|| InterlockedCompareExchange(&g_xfOpening, 0, 0)
+		|| InterlockedCompareExchange(&g_xfPrepared, 0, 0);
+}
+
+int XfDisplaySrcRate()
+{
+	const int s = XfActiveSlot();
+	if (XfDisplayBusy() && s >= 0 && s < XF_SLOTS && g_xfSrcRate[s] > 0)
+		return g_xfSrcRate[s];
+	return wavbit_sample_Hz;
+}
+
+int XfDisplaySrcCh()
+{
+	const int s = XfActiveSlot();
+	if (XfDisplayBusy() && s >= 0 && s < XF_SLOTS && g_xfSrcCh[s] > 0)
+		return g_xfSrcCh[s];
+	return wavchannel;
+}
+
+int XfDisplaySrcBits()
+{
+	const int s = XfActiveSlot();
+	if (XfDisplayBusy() && s >= 0 && s < XF_SLOTS && g_xfSrcBits[s] > 0)
+		return g_xfSrcBits[s];
+	return wavsam_depth;
 }
 
 void XfCaptureGlobalsToSlot(int slot)

@@ -288,6 +288,7 @@ public:
 
 	GdiSoft3D::Cam m_bannerCam3d;
 	GdiSoft3D::Context m_bannerSoftCtx; // 毎フレーム Create/Destroy しない（GDI枯渇防止）
+	GdiSoft3D::Context m_jacketSoftCtx; // ジャケ無しプレースホルダ用。サイズ違いなのでバナーと共用しない
 	bool m_bannerRotDragging = false;
 	CPoint m_bannerRotOrigin;
 	float m_bannerRotYaw0 = 0.f;
@@ -472,7 +473,9 @@ public:
 	void DrawSidePanels(CDC* pDC);
 	void InvalidateSidePanels();     // 曲変更・リサイズ時にサイドパネルの WM_PAINT を要求
 	void PresentJacketCached(CDC* pDC); // 黒無しでジャケを BitBlt（昇格時用）
+	bool JacketShowsPlaceholder() const; // 左ジャケが「らいら」下地（実画像なし）
 	void InvalidateJacketImageOnly();   // キャッシュ再構築＋直接提示（Invalidate しない）
+	void DrawNoJacketPlaceholder(CDC& dc, int w, int h);
 	void CancelTrackFade();             // xfade 開始／昇格時の暗いオーバーレイを止める
 	void ResetInfoScroll();          // 曲変更・リサイズ時に marquee オフセットを全行リセット
 	// m_tip チェックの ON/OFF を m_list のカスタムツールチップ(CListCtrlA)に反映する。

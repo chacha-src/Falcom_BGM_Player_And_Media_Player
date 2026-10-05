@@ -26,6 +26,7 @@ public:
 	void IdlePulse();
 	void PumpSyncNow(); /* 自前 60Hz tick: dump 同期。描画は Invalidate */
 	void DetachForDestroy();
+	int IsExiting() const { return m_exiting; }
 	void LayoutHelpBtn();
 	void PersistGeom();
 	void RestoreGeom();
@@ -143,6 +144,11 @@ private:
 	BYTE m_fadeSsg[3];
 	BYTE m_fadePcm[SASAMI_FMMON_PCM_MAX];
 	BYTE m_fadeRzmPad[6];
+	enum { FM_EG_VOICES = 24 };
+	uint64_t m_egOnSamp[FM_EG_VOICES];
+	uint64_t m_egOffSamp[FM_EG_VOICES];
+	uint8_t m_egGate[FM_EG_VOICES];
+	void StampEgVoice(int v, int gate, int retrig, uint64_t samp);
 	uint8_t m_wavePrev[8 * 32];
 	BYTE m_waveFade[8 * 32];
 	wchar_t m_lastSong[260];
@@ -168,6 +174,7 @@ private:
 	ULONGLONG m_lastPollMs;
 	int m_inPrint; /* PrintWindow / スクショ中。CPaintDC と Poll を混ぜない */
 	int m_inPump; /* PumpSyncNow 再入防止（timerp / OnIdle / タイマ） */
+	volatile LONG m_exiting; /* 終了中。Poll/Compose/GPU Present を止める */
 	int m_lastPlayy; /* FmMonIsLive() の前回値。停止遷移で鍵盤クリア */
 	int m_fmEverOn; /* この曲で主FM/OPMが一度でもキーオンした */
 	int m_fmViewReady; /* 0=先読み中。決まり次第 hex/panels/keys を出す */

@@ -18,6 +18,7 @@
 #include "CImageBase.h"
 #include "Mp3Image.h"
 #include "AudioUpscaler.h"
+#include "XfadePlayback.h"
 #include "CMpPlaylistIO.h"
 #include "CMpM3uImportDlg.h"
 #include "CMpDupesDlg.h"
@@ -4816,20 +4817,28 @@ void CMediaPlayerDlg::SyncFromMain()
 	if (!m_jacketRect.IsRectEmpty() || !m_infoPanelRect.IsRectEmpty()) {
 		CString fmt; if (::IsWindow(m_os.GetSafeHwnd())) m_os.GetWindowText(fmt);
 		CString key;
+		const int dispRate = XfDisplaySrcRate();
+		const int dispCh = XfDisplaySrcCh();
+		int dispBits = abs(XfDisplaySrcBits());
+		if (!(dispBits == 8 || dispBits == 16 || dispBits == 24 || dispBits == 32))
+			dispBits = 16;
+		const int upVis = (dispRate > 0 && g_ds_pcm_rate > 0
+			&& (dispRate != g_ds_pcm_rate || dispCh != g_ds_pcm_ch || dispBits != g_ds_pcm_bits)) ? 1 : 0;
 		key.Format(_T("%s\x01%s\x01%s\x01%s\x01%s\x01%d\x01%d\x01%d\x01%d\x01%d\x01%d\x01%d"),
 			(LPCTSTR)CurrentTrackTitle(), (LPCTSTR)tagname, (LPCTSTR)tagalbum,
 			(LPCTSTR)tagtrack, (LPCTSTR)fmt, og ? og->jx : -1,
-			g_pcm_upscale_active, wavbit_sample_Hz, wavchannel, wavsam_depth,
+			upVis, dispRate, dispCh, dispBits,
 			g_ds_pcm_rate, g_ds_pcm_ch, g_ds_pcm_bits);
 		if (key != m_lastBannerKey) {
 			m_lastBannerKey = key;
-			extern volatile LONG g_xfInProgress, g_xfOpening;
+			extern volatile LONG g_xfInProgress, g_xfOpening, g_xfPrepared;
 			extern ULONGLONG g_xfJacketStableUntil;
 			/* xfade 開始(SoftOpenでHz等が一瞬変わる)／終了(昇格で jx/タグ更新)では
 			 * 暗いトラックフェード＋ジャケ Invalidate を抑止（開始・終了の数回点滅の主因） */
 			const bool xfBusy =
 				InterlockedCompareExchange(&g_xfInProgress, 0, 0) != 0
 				|| InterlockedCompareExchange(&g_xfOpening, 0, 0) != 0
+				|| InterlockedCompareExchange(&g_xfPrepared, 0, 0) != 0
 				|| (g_xfJacketStableUntil != 0 && GetTickCount64() < g_xfJacketStableUntil);
 			if (xfBusy) {
 				ResetInfoScroll();
@@ -6079,108 +6088,399 @@ bool CMediaPlayerDlg::DrawInfoScrollRow(CDC& mem, int tx, int y, int tw, int lin
 	return true;
 }
 
-// ジャケット無しのとき、素っ気ないアイコンの代わりに「Media Player らいら」の
-// タイトルと、ほんのり可愛いパステルの模様(縦グラデ + 水玉 + キラキラ/お花)を描く。
-// dc は w×h のオフスクリーン。純黒(=アクリルのクロマキー)は使わない。
-static void Mp_DrawNoJacketPlaceholder(CDC& dc, int w, int h)
+// ジャケット無し下地。純黒(=アクリルのクロマキー)は使わない。
+static COLORREF MpJakSafe(COLORREF c)
 {
-	if (w <= 0 || h <= 0) return;
+	int r = GetRValue(c), g = GetGValue(c), b = GetBValue(c);
+	if (r < 1 && g < 1 && b < 1) return RGB(8, 8, 12);
+	return c;
+}
+static COLORREF MpJakLerp(COLORREF a, COLORREF b, int t)
+{
+	if (t < 0) t = 0; if (t > 256) t = 256;
+	const int r = (GetRValue(a) * (256 - t) + GetRValue(b) * t) / 256;
+	const int g = (GetGValue(a) * (256 - t) + GetGValue(b) * t) / 256;
+	const int bl = (GetBValue(a) * (256 - t) + GetBValue(b) * t) / 256;
+	return MpJakSafe(RGB(r, g, bl));
+}
+static COLORREF MpJakField(const CCC_UiThemePal& th)
+{
+	/* bg0 が沈むテーマでもプレースホルダは地色が見える明るさ。喪服黒にしない */
+	const COLORREF a = MpJakSafe(th.bg0);
+	const COLORREF b = MpJakSafe(th.bg1);
+	const int y = CCC_Luma(a);
+	const int t = (y < 48) ? 200 : (y < 88) ? 130 : 72;
+	COLORREF f = MpJakLerp(a, b, t);
+	if (CCC_Luma(f) < 40)
+		f = MpJakLerp(f, MpJakSafe(th.ribbon1), 90);
+	return f;
+}
+static float MpJakPulse()
+{
+	extern int speanaInst[400];
+	int s = 0;
+	for (int i = 0; i < 16; ++i) s += speanaInst[i];
+	float p = (float)s / (16.f * 96.f);
+	if (p < 0.f) p = 0.f;
+	if (p > 1.f) p = 1.f;
+	return p;
+}
 
-	// --- 背景: やわらかいピンク → ラベンダーの縦グラデ ---
-	for (int y = 0; y < h; y++) {
-		int t = (h > 1) ? (y * 100 / (h - 1)) : 0;
-		int r = 255 + (234 - 255) * t / 100;
-		int g = 226 + (223 - 226) * t / 100;
-		int b = 240 + (250 - 240) * t / 100;
-		dc.FillSolidRect(0, y, w, 1, RGB(r, g, b));
+static void MpJakThemeScene(GdiSoft3D::Context& ctx, int id, const CCC_UiThemePal& th, float t, float pulse)
+{
+	const COLORREF c0 = MpJakSafe(th.bg0);
+	const COLORREF c1 = MpJakSafe(th.bg1);
+	const COLORREF acc = MpJakSafe(th.accent);
+	const COLORREF ac2 = MpJakSafe(th.accent2);
+	const COLORREF rib = MpJakSafe(th.ribbon0);
+	const COLORREF rib1 = MpJakSafe(th.ribbon1);
+	const COLORREF sep = MpJakSafe(th.sep);
+	const COLORREF face = MpJakSafe(th.face);
+	const COLORREF hot = MpJakSafe(th.hotTop);
+	const COLORREF ink = MpJakSafe(th.text);
+	const float bob = 0.05f * sinf(t * 1.15f) + 0.07f * pulse;
+	const float orb = t * 0.72f;
+	ctx.DrawGrid(-1.15f, 1.15f, 0.02f, 1.10f, 0.0f, 6, MpJakLerp(c1, sep, 110));
+	ctx.DrawMirrorFloor(-1.10f, 1.10f, 0.04f, 1.08f, MpJakLerp(c1, rib1, 90), 0.32f);
+
+	switch (id) {
+	case CCC_UI_THEME_CUTE: {
+		ctx.postGlow = true;
+		ctx.DrawTorus(0.05f * cosf(orb), 0.34f + bob, 0.52f, 0.34f + 0.04f * pulse, 0.07f, acc, 12, 8);
+		ctx.DrawSphere(-0.62f + 0.08f * cosf(t * 1.3f), 0.42f + bob, 0.40f, 0.16f, ac2, 8, 6);
+		ctx.DrawSphere(0.68f + 0.07f * sinf(t * 1.1f), 0.38f, 0.48f, 0.14f, rib, 8, 6);
+		ctx.DrawSphere(0.10f, 0.22f + 0.06f * sinf(t * 1.7f), 0.72f, 0.11f, face, 8, 6);
+		break;
 	}
-
-	dc.SetBkMode(TRANSPARENT);
-	CGdiObject* opnNull = dc.SelectStockObject(NULL_PEN);
-
-	// --- 水玉模様(市松状にオフセット、ほんのり白でやさしく) ---
-	int step = max(12, h / 5);
-	int dot = max(2, step / 6);
-	{
-		CBrush brDot(RGB(255, 245, 250));
-		CBrush* ob = dc.SelectObject(&brDot);
-		for (int gy = 0, row = 0; gy <= h + step; gy += step, row++) {
-			int offx = (row & 1) ? step / 2 : 0;
-			for (int gx = -step; gx <= w + step; gx += step) {
-				int cx = gx + offx, cy = gy;
-				dc.Ellipse(cx - dot, cy - dot, cx + dot, cy + dot);
-			}
+	case CCC_UI_THEME_COOL: {
+		/* メンズ: 見える紺＋象牙＋金＋ワイン。黒にも秋色にもしない */
+		ctx.DrawBox(-1.12f, 1.12f, 0.58f, 0.82f, 1.12f, c1, 0.f);
+		ctx.DrawBox(-0.62f, 0.62f, 0.46f, 0.16f, 0.58f, ink, 0.f);
+		ctx.DrawTorus(0.02f, 0.40f + bob, 0.42f, 0.30f, 0.07f, ac2, 12, 8);
+		ctx.DrawBox(-0.11f, 0.11f, 0.70f + pulse * 0.14f, 0.30f, 0.52f, acc, 0.f);
+		ctx.DrawBox(0.70f, 1.05f, 0.28f, 0.20f, 0.48f, hot, 0.f);
+		break;
+	}
+	case CCC_UI_THEME_DRAMATIC: {
+		ctx.DrawNeonBox(-0.28f, 0.28f, 0.72f + bob, 0.30f, 0.70f, acc, 0.f);
+		ctx.DrawBox(-0.70f, -0.22f, 0.40f, 0.18f, 0.55f, ac2, 0.f);
+		ctx.DrawBox(0.22f, 0.70f, 0.40f, 0.18f, 0.55f, ac2, 0.f);
+		ctx.DrawTorus(0.f, 0.22f, 0.48f, 0.22f, 0.05f, rib1, 10, 7);
+		break;
+	}
+	case CCC_UI_THEME_NEON: {
+		ctx.postGlow = true;
+		ctx.DrawNeonBox(-0.85f + 0.12f * cosf(orb),  -0.25f + 0.12f * cosf(orb),
+			0.55f + bob, 0.20f, 0.58f, acc, 0.f);
+		ctx.DrawNeonBox(0.22f + 0.10f * sinf(orb), 0.88f + 0.10f * sinf(orb),
+			0.48f, 0.22f, 0.62f, ac2, 0.f);
+		ctx.DrawTorus(0.02f, 0.32f + pulse * 0.12f, 0.50f, 0.28f, 0.06f, rib1, 12, 8);
+		break;
+	}
+	case CCC_UI_THEME_INK: {
+		ctx.fillMode = GdiSoft3D::FillWire;
+		ctx.DrawBox(-0.70f, 0.70f, 0.55f, 0.18f, 0.85f, acc, 0.f);
+		ctx.fillMode = GdiSoft3D::FillSolid;
+		ctx.DrawTorus(0.05f * sinf(t * 0.6f), 0.36f, 0.48f, 0.32f, 0.05f, ink, 14, 8);
+		ctx.DrawBox(-1.05f, 1.05f, 0.10f, 0.10f, 0.90f, face, 0.f);
+		break;
+	}
+	case CCC_UI_THEME_FOREST: {
+		ctx.DrawBox(-0.12f, 0.12f, 0.38f, 0.40f, 0.62f, MpJakLerp(c0, rib, 160), 0.f);
+		ctx.DrawSphere(-0.55f, 0.48f + bob, 0.42f, 0.22f, acc, 8, 6);
+		ctx.DrawSphere(0.58f, 0.44f, 0.50f, 0.20f, ac2, 8, 6);
+		ctx.DrawSphere(0.05f, 0.58f + 0.05f * pulse, 0.38f, 0.26f, rib1, 8, 6);
+		break;
+	}
+	case CCC_UI_THEME_CANDY: {
+		ctx.postGlow = true;
+		ctx.postSaturate = true;
+		ctx.postSatAmount = 1.18f;
+		const float bx = 0.55f * cosf(orb);
+		ctx.DrawBox(bx - 0.28f, bx + 0.28f, 0.42f + bob, 0.22f, 0.58f, acc, 0.f);
+		ctx.DrawBox(-bx - 0.22f, -bx + 0.22f, 0.30f, 0.40f, 0.72f, ac2, 0.f);
+		ctx.DrawSphere(0.05f, 0.22f + pulse * 0.16f, 0.48f, 0.14f, face, 8, 6);
+		break;
+	}
+	case CCC_UI_THEME_STEEL: {
+		ctx.DrawBox(-0.95f, 0.95f, 0.22f, 0.12f, 0.88f, face, 0.f);
+		ctx.DrawTorus(0.f, 0.38f + bob * 0.5f, 0.48f, 0.36f, 0.08f, acc, 14, 8);
+		ctx.DrawBox(-0.18f, 0.18f, 0.22f, 0.70f, 0.92f, ac2, 0.f);
+		ctx.DrawBox(-1.05f, -0.55f, 0.40f, 0.20f, 0.50f, c1, 0.f);
+		break;
+	}
+	case CCC_UI_THEME_GAL: {
+		ctx.postGlow = true;
+		ctx.postSaturate = true;
+		for (int i = 0; i < 6; ++i) {
+			const float a = orb * 1.4f + i * 1.047f;
+			ctx.DrawSphere(0.62f * cosf(a), 0.28f + 0.16f * sinf(t * 1.8f + i), 0.40f + 0.28f * sinf(a),
+				0.08f + 0.03f * pulse, (i & 1) ? acc : ac2, 7, 5);
 		}
-		dc.SelectObject(ob);
+		break;
 	}
+	case CCC_UI_THEME_ULTRA: {
+		/* 超メンズ: 深い紺に金を厚く。黒金の喪服にしない */
+		ctx.DrawBox(-1.12f, 1.12f, 0.16f, 0.10f, 1.05f, c1, 0.f);
+		ctx.DrawNeonBox(-0.72f, 0.72f, 0.22f, 0.18f, 0.70f, acc, 0.f);
+		ctx.DrawTorus(0.f, 0.40f + bob * 0.4f, 0.48f, 0.36f, 0.07f, acc, 14, 8);
+		ctx.DrawBox(-0.08f, 0.08f, 0.62f + pulse * 0.10f, 0.78f, 0.98f, ac2, 0.f);
+		ctx.DrawBox(0.78f, 1.08f, 0.34f, 0.22f, 0.50f, rib1, 0.f);
+		break;
+	}
+	case CCC_UI_THEME_SPRING: {
+		ctx.DrawSphere(-0.55f + 0.06f * cosf(t), 0.40f + bob, 0.42f, 0.14f, acc, 8, 6);
+		ctx.DrawSphere(0.58f, 0.36f, 0.52f, 0.13f, rib, 8, 6);
+		ctx.DrawSphere(0.02f, 0.52f + 0.05f * sinf(t * 1.4f), 0.38f, 0.16f, ac2, 8, 6);
+		ctx.DrawBox(-0.10f, 0.10f, 0.28f, 0.44f, 0.60f, rib1, 0.f);
+		break;
+	}
+	case CCC_UI_THEME_SUMMER: {
+		ctx.DrawSphere(0.08f * sinf(t * 0.4f), 0.62f + 0.04f * pulse, 0.42f, 0.28f, acc, 10, 7);
+		ctx.DrawBox(-1.05f, 1.05f, 0.12f, 0.08f, 0.95f, ac2, 0.f);
+		ctx.DrawTorus(0.55f * cosf(orb * 0.6f), 0.22f, 0.62f, 0.18f, 0.04f, rib1, 10, 6);
+		break;
+	}
+	case CCC_UI_THEME_AUTUMN: {
+		ctx.DrawBox(-0.70f + 0.08f * sinf(t),  -0.28f + 0.08f * sinf(t),
+			0.22f + 0.18f * fabsf(sinf(t * 0.9f)), 0.22f, 0.50f, acc, 0.f);
+		ctx.DrawBox(0.18f, 0.62f, 0.18f + 0.20f * fabsf(sinf(t * 0.9f + 1.2f)), 0.30f, 0.62f, ac2, 0.f);
+		ctx.DrawBox(-0.18f, 0.16f, 0.16f + 0.16f * fabsf(sinf(t * 0.7f + 2.1f)), 0.55f, 0.82f, rib1, 0.f);
+		break;
+	}
+	case CCC_UI_THEME_WINTER: {
+		for (int i = 0; i < 7; ++i) {
+			float fy = 0.85f - fmodf(t * 0.35f + i * 0.13f, 0.95f);
+			ctx.DrawSphere(-0.85f + i * 0.26f, fy, 0.28f + 0.08f * sinf(t + i), 0.055f, face, 6, 5);
+		}
+		ctx.DrawBox(-1.05f, 1.05f, 0.10f, 0.10f, 0.90f, c1, 0.f);
+		break;
+	}
+	case CCC_UI_THEME_DUSK: {
+		ctx.postGlow = true;
+		ctx.DrawSphere(-0.15f, 0.22f + 0.04f * sinf(t * 0.5f), 0.70f, 0.22f, acc, 9, 6);
+		ctx.DrawBox(-0.95f, -0.45f, 0.32f, 0.18f, 0.48f, c1, 0.f);
+		ctx.DrawBox(-0.28f, 0.12f, 0.44f, 0.22f, 0.50f, rib, 0.f);
+		ctx.DrawBox(0.28f, 0.85f, 0.28f, 0.16f, 0.52f, ac2, 0.f);
+		break;
+	}
+	case CCC_UI_THEME_DAWN: {
+		ctx.postGlow = true;
+		const float rise = 0.22f + 0.28f * (0.5f + 0.5f * sinf(t * 0.45f));
+		ctx.DrawSphere(0.05f, rise, 0.48f, 0.24f, acc, 10, 7);
+		ctx.DrawBox(-1.05f, 1.05f, 0.12f, 0.10f, 0.90f, ac2, 0.f);
+		break;
+	}
+	case CCC_UI_THEME_RAIN: {
+		for (int i = 0; i < 11; ++i) {
+			const float x = -1.0f + i * 0.19f + 0.03f * sinf(t * 1.4f + i);
+			const float y0 = 0.88f - fmodf(t * 1.15f + i * 0.11f, 1.05f);
+			ctx.DrawLine(x, y0, 0.28f, x - 0.02f, y0 - 0.20f, 0.52f, ac2);
+		}
+		ctx.DrawBox(-1.05f, 1.05f, 0.10f, 0.12f, 0.88f, c1, 0.f);
+		break;
+	}
+	case CCC_UI_THEME_SEA: {
+		float wave[32];
+		for (int i = 0; i < 32; ++i)
+			wave[i] = sinf(t * 2.1f + i * 0.38f) * (0.55f + 0.45f * pulse);
+		ctx.DrawWaveRibbon(-1.10f, 1.10f, 0.42f, 0.28f, 0.20f, wave, 32, acc, 0.025f);
+		ctx.DrawWaveRibbon(-1.10f, 1.10f, 0.58f, 0.22f, 0.14f, wave, 32, ac2, 0.018f);
+		ctx.DrawTorus(0.55f * cosf(orb * 0.5f), 0.18f, 0.55f, 0.16f, 0.04f, rib1, 10, 6);
+		break;
+	}
+	case CCC_UI_THEME_MOON: {
+		ctx.DrawSphere(0.08f, 0.46f + bob * 0.4f, 0.46f, 0.32f, acc, 10, 7);
+		ctx.DrawSphere(-0.72f, 0.62f, 0.32f, 0.06f, ink, 6, 5);
+		ctx.DrawSphere(0.78f, 0.28f, 0.62f, 0.05f, ac2, 6, 5);
+		ctx.DrawSphere(0.42f, 0.70f, 0.30f, 0.04f, rib1, 6, 5);
+		ctx.DrawBox(-1.05f, 1.05f, 0.10f, 0.12f, 0.90f, c1, 0.f);
+		break;
+	}
+	case CCC_UI_THEME_AMBER: {
+		ctx.DrawBox(-0.72f, 0.72f, 0.42f, 0.22f, 0.78f, MpJakLerp(c1, acc, 80), 0.f);
+		ctx.DrawSphere(-0.22f, 0.28f + bob, 0.48f, 0.12f, acc, 8, 6);
+		ctx.DrawSphere(0.28f, 0.24f, 0.55f, 0.10f, ac2, 8, 6);
+		ctx.DrawTorus(0.f, 0.18f, 0.46f, 0.22f, 0.04f, rib1, 10, 6);
+		break;
+	}
+	case CCC_UI_THEME_WISTERIA: {
+		for (int i = 0; i < 5; ++i) {
+			const float x = -0.70f + i * 0.35f + 0.05f * sinf(t * 1.1f + i);
+			const float hang = 0.62f - 0.08f * i + 0.04f * sinf(t * 1.3f + i * 0.7f);
+			ctx.DrawSphere(x, hang, 0.40f + 0.06f * i, 0.09f, (i & 1) ? acc : ac2, 7, 5);
+			ctx.DrawSphere(x, hang - 0.16f, 0.42f, 0.07f, rib1, 6, 5);
+		}
+		break;
+	}
+	case CCC_UI_THEME_RETRO: {
+		ctx.DrawBox(-0.85f, 0.85f, 0.18f, 0.16f, 0.82f, face, 0.f);
+		ctx.DrawTorus(0.f, 0.36f + bob, 0.48f, 0.32f, 0.08f, acc, 12, 8);
+		ctx.DrawNeonBox(-0.55f, 0.55f, 0.14f, 0.70f, 0.92f, ac2, 0.f);
+		break;
+	}
+	default:
+		ctx.DrawTorus(0.f, 0.34f + bob, 0.50f, 0.30f, 0.07f, acc, 12, 8);
+		ctx.DrawSphere(-0.55f, 0.38f, 0.42f, 0.14f, ac2, 8, 6);
+		break;
+	}
+}
 
-	// --- ちいさなキラキラ(4尖)とお花(アクセント・ハートは使わない) ---
-	auto sparkle = [&](int cx, int cy, int s, COLORREF c) {
-		if (s < 2) return;
-		CBrush br(c);
-		CBrush* ob = dc.SelectObject(&br);
-		// 縦横のひし形クロス
-		POINT v[4] = { { cx, cy - s }, { cx + max(1, s / 4), cy }, { cx, cy + s }, { cx - max(1, s / 4), cy } };
-		POINT hz[4] = { { cx - s, cy }, { cx, cy - max(1, s / 4) }, { cx + s, cy }, { cx, cy + max(1, s / 4) } };
-		dc.Polygon(v, 4);
-		dc.Polygon(hz, 4);
-		dc.SelectObject(ob);
-	};
-	auto flower = [&](int cx, int cy, int s, COLORREF petal, COLORREF core) {
-		if (s < 2) return;
-		CBrush brP(petal);
-		CBrush* ob = dc.SelectObject(&brP);
-		int pr = max(2, s * 2 / 3);
-		dc.Ellipse(cx - pr, cy - s - pr / 3, cx + pr, cy - s / 4);           // 上
-		dc.Ellipse(cx - pr, cy + s / 4, cx + pr, cy + s + pr / 3);           // 下
-		dc.Ellipse(cx - s - pr / 3, cy - pr, cx - s / 4, cy + pr);           // 左
-		dc.Ellipse(cx + s / 4, cy - pr, cx + s + pr / 3, cy + pr);           // 右
-		CBrush brC(core);
-		dc.SelectObject(&brC);
-		int cr = max(1, s / 3);
-		dc.Ellipse(cx - cr, cy - cr, cx + cr, cy + cr);
-		dc.SelectObject(ob);
-	};
-	int hs = max(3, h / 12);
-	int fs = max(3, h / 14);
-	sparkle(w * 18 / 100, h * 22 / 100, hs, RGB(255, 198, 220));
-	flower(w * 80 / 100, h * 28 / 100, fs, RGB(255, 210, 228), RGB(255, 236, 180));
-	flower(w * 22 / 100, h * 78 / 100, fs, RGB(255, 204, 222), RGB(255, 240, 190));
-	sparkle(w * 78 / 100, h * 82 / 100, hs, RGB(255, 205, 224));
-	// 中央寄りに小さなキラを1つ(タイトル周りをふんわり)
-	sparkle(w * 88 / 100, h * 58 / 100, max(2, hs * 2 / 3), RGB(255, 220, 232));
-
-	dc.SelectObject(opnNull);
-
-	// --- タイトル: "Media Player" / "らいら" を中央に(下地にやわらかい白影) ---
-	int hbig = max(11, h / 4);
-	int hsml = max(9, h / 9);
+static void MpJakBrandText(CDC& dc, int w, int h, const CCC_UiThemePal& th)
+{
+	const COLORREF mid = MpJakField(th);
+	const COLORREF ink = CCC_InkOn(mid);
+	COLORREF sml = MpJakSafe(th.accent);
+	if (abs(CCC_Luma(sml) - CCC_Luma(mid)) < 48) sml = ink;
+	const COLORREF ol = (CCC_Luma(mid) >= 148) ? RGB(255, 255, 255) : RGB(16, 14, 20);
+	const int hbig = max(11, h / 4);
+	const int hsml = max(9, h / 9);
 	LOGFONT lf; ZeroMemory(&lf, sizeof(lf));
 	lstrcpyn(lf.lfFaceName, _T("Yu Gothic UI"), LF_FACESIZE);
 	lf.lfQuality = CLEARTYPE_QUALITY;
 	lf.lfWeight = FW_SEMIBOLD;
-
 	CFont fSml; lf.lfHeight = -hsml; fSml.CreateFontIndirect(&lf);
 	CFont fBig; lf.lfHeight = -hbig; lf.lfWeight = FW_BOLD; fBig.CreateFontIndirect(&lf);
-
-	int totalH = hsml + hbig + max(1, h / 40);
+	const int totalH = hsml + hbig + max(1, h / 40);
 	int y0 = (h - totalH) / 2; if (y0 < 0) y0 = 0;
-
-	auto shadowText = [&](CFont& f, int yy, int hh, LPCTSTR s, COLORREF fg) {
+	dc.SetBkMode(TRANSPARENT);
+	auto outlined = [&](CFont& f, int yy, int hh, LPCTSTR s, COLORREF fg) {
 		CFont* of = dc.SelectObject(&f);
 		CRect rt(0, yy, w, yy + hh);
-		CRect rs = rt; rs.OffsetRect(1, 1);
-		dc.SetTextColor(RGB(255, 255, 255));
-		dc.DrawText(s, -1, &rs, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+		for (int dy = -1; dy <= 1; ++dy) {
+			for (int dx = -1; dx <= 1; ++dx) {
+				if (dx == 0 && dy == 0) continue;
+				CRect rs = rt; rs.OffsetRect(dx, dy);
+				dc.SetTextColor(ol);
+				dc.DrawText(s, -1, &rs, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+			}
+		}
 		dc.SetTextColor(fg);
 		dc.DrawText(s, -1, &rt, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
 		dc.SelectObject(of);
 	};
-	shadowText(fSml, y0, hsml, _T("Media Player"), RGB(214, 108, 150));
-	// ブランド名はウィンドウタイトルと同じ LL14 表記(英語は Raira。らいら固定は翻訳漏れ)
-	shadowText(fBig, y0 + hsml + max(1, h / 40), hbig,
+	outlined(fSml, y0, hsml, _T("Media Player"), sml);
+	outlined(fBig, y0 + hsml + max(1, h / 40), hbig,
 		LL14(L"らいら", L"Raira", L"Raira", L"Raira", L"Raira", L"라이라", L"莱拉", L"رايرا", L"Райра", L"Raira", L"Raira", L"Raira", L"Raira", L"Raira"),
-		RGB(200, 72, 128));
+		ink);
+}
+
+static void MpJakThemeSoft2D(CDC& dc, int w, int h, int id, const CCC_UiThemePal& th, float t)
+{
+	const COLORREF c0 = MpJakField(th);
+	const COLORREF c1 = MpJakSafe(th.bg1);
+	const bool horiz = (id == CCC_UI_THEME_SUMMER || id == CCC_UI_THEME_DUSK
+		|| id == CCC_UI_THEME_DAWN || id == CCC_UI_THEME_SEA);
+	if (horiz) {
+		for (int x = 0; x < w; ++x) {
+			int u = (w > 1) ? x * 256 / (w - 1) : 0;
+			dc.FillSolidRect(x, 0, 1, h, MpJakLerp(c0, c1, u));
+		}
+	} else {
+		for (int y = 0; y < h; ++y) {
+			int u = (h > 1) ? y * 256 / (h - 1) : 0;
+			dc.FillSolidRect(0, y, w, 1, MpJakLerp(c0, c1, u));
+		}
+	}
+	dc.SetBkMode(TRANSPARENT);
+	CGdiObject* opn = dc.SelectStockObject(NULL_PEN);
+	const int ms = max(8, min(w, h) / 8);
+	auto motifAt = [&](int cx, int cy) {
+		CRect r(cx - ms, cy - ms, cx + ms, cy + ms);
+		CCC_DrawThemeMotif(&dc, r, MpJakSafe(th.accent));
+	};
+	const int ox = (int)(6.f * sinf(t * 1.1f));
+	const int oy = (int)(5.f * cosf(t * 0.9f));
+	if (id == CCC_UI_THEME_CUTE) {
+		int step = max(12, h / 5);
+		int dot = max(2, step / 6);
+		const int off = ((int)(t * 18.f) % step);
+		CBrush brDot(MpJakSafe(th.borderLite));
+		CBrush* ob = dc.SelectObject(&brDot);
+		for (int gy = -step + off, row = 0; gy <= h + step; gy += step, ++row) {
+			int offx = (row & 1) ? step / 2 : 0;
+			for (int gx = -step; gx <= w + step; gx += step)
+				dc.Ellipse(gx + offx - dot, gy - dot, gx + offx + dot, gy + dot);
+		}
+		dc.SelectObject(ob);
+		/* お花＋キラ。ハートは使わない */
+		int hs = max(3, h / 12), fs = max(3, h / 14);
+		auto sparkle = [&](int cx, int cy, int s, COLORREF c) {
+			CBrush br(c); CBrush* o = dc.SelectObject(&br);
+			POINT v[4] = { { cx, cy - s }, { cx + max(1, s / 4), cy }, { cx, cy + s }, { cx - max(1, s / 4), cy } };
+			POINT hz[4] = { { cx - s, cy }, { cx, cy - max(1, s / 4) }, { cx + s, cy }, { cx, cy + max(1, s / 4) } };
+			dc.Polygon(v, 4); dc.Polygon(hz, 4); dc.SelectObject(o);
+		};
+		auto flower = [&](int cx, int cy, int s, COLORREF petal, COLORREF core) {
+			CBrush brP(petal); CBrush* o = dc.SelectObject(&brP);
+			int pr = max(2, s * 2 / 3);
+			dc.Ellipse(cx - pr, cy - s - pr / 3, cx + pr, cy - s / 4);
+			dc.Ellipse(cx - pr, cy + s / 4, cx + pr, cy + s + pr / 3);
+			dc.Ellipse(cx - s - pr / 3, cy - pr, cx - s / 4, cy + pr);
+			dc.Ellipse(cx + s / 4, cy - pr, cx + s + pr / 3, cy + pr);
+			CBrush brC(core); dc.SelectObject(&brC);
+			int cr = max(1, s / 3);
+			dc.Ellipse(cx - cr, cy - cr, cx + cr, cy + cr);
+			dc.SelectObject(o);
+		};
+		sparkle(w * 18 / 100 + ox, h * 22 / 100 + oy, hs, MpJakSafe(th.accent2));
+		flower(w * 80 / 100 - ox, h * 28 / 100 + oy, fs, MpJakSafe(th.accent), MpJakSafe(th.accent2));
+		flower(w * 22 / 100 + ox, h * 78 / 100 - oy, fs, MpJakSafe(th.ribbon0), MpJakSafe(th.face));
+		sparkle(w * 78 / 100 - ox, h * 82 / 100 - oy, hs, MpJakSafe(th.accent));
+	} else {
+		motifAt(w * 18 / 100 + ox, h * 22 / 100 + oy);
+		motifAt(w * 80 / 100 - ox, h * 28 / 100);
+		motifAt(w * 22 / 100, h * 78 / 100 - oy);
+		motifAt(w * 78 / 100 + ox, h * 82 / 100);
+	}
+	dc.SelectObject(opn);
+}
+
+bool CMediaPlayerDlg::JacketShowsPlaceholder() const
+{
+	if (m_jacketRect.IsRectEmpty()) return false;
+	return !(og && og->jx >= 64 && !og->img.IsNull());
+}
+
+void CMediaPlayerDlg::DrawNoJacketPlaceholder(CDC& dc, int w, int h)
+{
+	if (w <= 0 || h <= 0) return;
+	const int id = CCC_UiThemeId();
+	const CCC_UiThemePal& th = CCC_UiTheme();
+	const COLORREF field = MpJakField(th);
+	const float t = (float)(::GetTickCount64() % 120000ull) * 0.001f;
+	const float pulse = MpJakPulse();
+	dc.FillSolidRect(0, 0, w, h, field);
+
+	const BOOL menuTrack = (CCustomPopupMenu::GetTrackingRoot() != NULL);
+	bool drew3d = false;
+	if (!menuTrack && w >= 40 && h >= 40 && m_jacketSoftCtx.Create(w, h)) {
+		GdiSoft3D::Context& ctx = m_jacketSoftCtx;
+		ctx.cam.yawDeg = -24.f + 16.f * sinf(t * 0.42f);
+		ctx.cam.pitchDeg = 22.f + 9.f * cosf(t * 0.31f);
+		ctx.cam.zoom = 1.08f + 0.06f * sinf(t * 0.22f) + 0.04f * pulse;
+		GdiSoft3D::ClampCam(ctx.cam);
+		const float boxes[1][6] = { { -1.20f, 1.20f, -0.05f, 0.90f, -0.05f, 1.15f } };
+		ctx.SetViewportFit(boxes, 1);
+		ctx.depthTest = true;
+		ctx.depthWrite = true;
+		ctx.fillMode = GdiSoft3D::FillSolid;
+		ctx.dofEnable = false;
+		ctx.edgeOverlay = false;
+		ctx.postGlow = false;
+		ctx.postVignette = false;
+		ctx.postSaturate = false;
+		ctx.SetFog(GdiSoft3D::FogLinear, field, 0.45f, 1.55f, 0.45f);
+		ctx.BeginFrame(field);
+		MpJakThemeScene(ctx, id, th, t, pulse);
+		ctx.EndFrame();
+		ctx.Present(dc, 0, 0);
+		drew3d = true;
+	}
+	if (!drew3d)
+		MpJakThemeSoft2D(dc, w, h, id, th, t);
+
+	MpJakBrandText(dc, w, h, th);
 }
 
 void CMediaPlayerDlg::PresentJacketCached(CDC* pDC)
@@ -6194,7 +6494,7 @@ void CMediaPlayerDlg::PresentJacketCached(CDC* pDC)
 	if (og && og->jx >= 64 && !og->img.IsNull())
 		key.Format(_T("%d:%d:%d"), og->jx, og->jy, (int)(og->jxy * 10000.0));
 	else
-		key = _T("none");
+		key.Format(_T("none:%d"), CCC_UiThemeId());
 
 	const bool need = (m_jacketMemDC.GetSafeHdc() == NULL || m_jacketMemW != w || m_jacketMemH != h
 		|| key != m_jacketCacheKey || m_jacketCacheJx != (og ? og->jx : -1));
@@ -6235,7 +6535,7 @@ void CMediaPlayerDlg::PresentJacketCached(CDC* pDC)
 		::SetStretchBltMode(m_jacketMemDC.GetSafeHdc(), om);
 	}
 	else {
-		Mp_DrawNoJacketPlaceholder(m_jacketMemDC, w, h);
+		DrawNoJacketPlaceholder(m_jacketMemDC, w, h);
 	}
 	DrawJacketHeroOverlay(m_jacketMemDC, w, h);
 
@@ -13390,13 +13690,22 @@ CString CMediaPlayerDlg::MpTechFormatLine() const
 		m_os.GetWindowText(fmt);
 	fmt.Trim();
 
-	CString audio = MpCompactAudioPiece(wavbit_sample_Hz, wavchannel, wavsam_depth);
-	if (g_pcm_upscale_active) {
-		const CString dst = MpCompactAudioPiece(g_ds_pcm_rate, g_ds_pcm_ch, g_ds_pcm_bits);
-		if (!dst.IsEmpty() && dst.CompareNoCase(audio) != 0) {
-			CString both;
-			both.Format(L"%s  %s  %s", (LPCTSTR)audio, AudioUpscaleFlowSymbol(), (LPCTSTR)dst);
-			audio = both;
+	CString audio = MpCompactAudioPiece(XfDisplaySrcRate(), XfDisplaySrcCh(), XfDisplaySrcBits());
+	{
+		const int sr = XfDisplaySrcRate();
+		const int sc = XfDisplaySrcCh();
+		int sb = abs(XfDisplaySrcBits());
+		if (!(sb == 8 || sb == 16 || sb == 24 || sb == 32))
+			sb = 16;
+		const int upVis = (sr > 0 && g_ds_pcm_rate > 0
+			&& (sr != g_ds_pcm_rate || sc != g_ds_pcm_ch || sb != g_ds_pcm_bits));
+		if (upVis) {
+			const CString dst = MpCompactAudioPiece(g_ds_pcm_rate, g_ds_pcm_ch, g_ds_pcm_bits);
+			if (!dst.IsEmpty() && dst.CompareNoCase(audio) != 0) {
+				CString both;
+				both.Format(L"%s  %s  %s", (LPCTSTR)audio, AudioUpscaleFlowSymbol(), (LPCTSTR)dst);
+				audio = both;
+			}
 		}
 	}
 

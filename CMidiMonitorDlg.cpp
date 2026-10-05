@@ -5728,6 +5728,10 @@ BOOL CMidiMonitorDlg::OnInitDialog()
 
 int CMidiMonitorDlg::TryGpuFrame(HDC hdcDest, int w, int h, int capH, UINT dpi)
 {
+#ifdef KBSASAMI_HOST_BUILD
+	(void)hdcDest; (void)w; (void)h; (void)capH; (void)dpi;
+	return 0;
+#else
 	if (FmShowing() || !hdcDest)
 		return 0;
 	extern int playy;
@@ -5784,6 +5788,7 @@ int CMidiMonitorDlg::TryGpuFrame(HDC hdcDest, int w, int h, int capH, UINT dpi)
 	if (m_gpu.child && ::IsWindow(m_gpu.child))
 		::ShowWindow(m_gpu.child, SW_HIDE);
 	return ok;
+#endif
 }
 
 void CMidiMonitorDlg::OnPaint()
@@ -6025,6 +6030,10 @@ void CMidiMonitorDlg::OnShowWindow(BOOL bShow, UINT nStatus)
 
 void CMidiMonitorDlg::OnClose()
 {
+#ifdef KBSASAMI_HOST_BUILD
+	KbsHostMonRequestQuit();
+	UiTickPump::ShutdownHub();
+#endif
 	DetachForDestroy();
 	savedata.midimonwindow = 0;
 	savedata.fmmonwindow = 0;
@@ -6055,6 +6064,8 @@ void CMidiMonitorDlg::DetachForDestroy()
 	KillTimer(1);
 	KillTimer(2);
 	PersistPos();
+	if (m_fm)
+		m_fm->DetachForDestroy();
 	ReleasePaintBuffers();
 }
 

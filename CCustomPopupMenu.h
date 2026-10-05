@@ -312,6 +312,7 @@ protected:
 	BOOL m_chromeInjected;  // EnsureChromePrefix 済み
 	wchar_t m_previewFace[32];
 	BOOL m_previewing;      // フォント面ホバー中（未確定）
+	BOOL m_previewThemeOn;  // テーマホバー中（未確定）
 	int m_bounceIdx;   // レ点バウンス中の項目（-1=なし）
 	int m_nBounce;     // CCustomCheckBox と同じ 8→0
 	BOOL m_suppressEditNotify; // Create 時 SetWindowText の EN_CHANGE を無視
@@ -370,6 +371,9 @@ protected:
 	void ApplyPreviewFace(LPCTSTR face); // ホバー即プレビュー。未確定
 	void ClearPreviewFace();
 	void CommitFace(LPCTSTR face); // savedata へ確定
+	void ApplyPreviewTheme(int id); // ホバー即プレビュー。未確定
+	void ClearPreviewTheme();
+	void CommitTheme(int id); // savedata へ確定
 	void EnsureChromePrefix(); // ルート先頭へ骨格行を一度だけ注入
 	void RebuildMenuFont();
 	BOOL HandleChromeClick(int idx); // 骨格。MIDI は PlRefreshMidiPlayModes。TRUE=消費

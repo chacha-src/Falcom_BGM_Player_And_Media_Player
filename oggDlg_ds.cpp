@@ -699,7 +699,7 @@ static int HandleFillDecodeOne(BYTE* dest, int n, int* pReadme, bool* pExitNow)
 	 * そのままクロス末尾と B の頭のずれになる。 */
 	if (!InterlockedCompareExchange(&g_xfInProgress, 0, 0)
 		&& InterlockedCompareExchange(&g_xfPrepared, 0, 0)
-		&& XfShouldStartEarly(g_heardBytes, g_endWrittenBytes)) {
+		&& (XfShouldStartEarly(g_heardBytes, g_endWrittenBytes) || XfRenzokuLimitReached())) {
 		const int cur = XfActiveSlot();
 		if (g_openDecoderModeSlot[XfOtherSlot(cur)] != INT_MIN)
 			XfBeginMixLocked(cur);
@@ -803,7 +803,7 @@ static int HandleFillChunkBytes()
 	int bpf = (g_outBytesPerFrame > 0) ? g_outBytesPerFrame : 4;
 	if (bpf < 1)
 		bpf = 4;
-	int hz = (wavbit_sample_Hz > 0) ? wavbit_sample_Hz : 44100;
+	int hz = (g_ds_pcm_rate > 0) ? g_ds_pcm_rate : ((wavbit_sample_Hz > 0) ? wavbit_sample_Hz : 44100);
 	int ms = (savedata.ms > 0) ? (int)savedata.ms : 10;
 	int n = (hz / 1000) * ms * bpf;
 	if (n < bpf * 64)
