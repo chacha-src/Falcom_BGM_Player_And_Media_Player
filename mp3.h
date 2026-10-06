@@ -432,7 +432,8 @@ protected:
 				info->hasVbrtag = 0;
 				info->bitrate = tabsel_123[lsf][lay - 1][bitrate_index] * 1000;
 				info->length = info->nbytes * 8.0 / info->bitrate;
-				//info->total_samples = framesize*freqs[srate];
+				/* 前の Xing 曲の total_samples を残すと、この曲の途中で Render が止まる */
+				info->total_samples = 0;
 			}
 			const int POST_DELAY = 1152;
 			const int DECODE_DELAY_LAYER1 = 0;
@@ -1022,7 +1023,11 @@ public:
 		while (zi.magic == 0x04034b50) {
 			dwUncompressed = zi.uncompressed_size;
 			offset = zi.size_filename + zi.size_file_extra + SIZEZIPLOCALHEADER;
+			if (offset <= 0)
+				break;
 			cur += offset;
+			if (cur <= 0)
+				break;
 			zi.magic = 0;
 			input_seek(hFile, cur, SEEK_SET);
 			if (input_read(hFile, &zi, sizeof(zi)) != sizeof(zi)) {
@@ -1148,7 +1153,12 @@ public:
 		if (lay < 0 || lay>4 || bitrate_index < 1 || bitrate_index>14
 			|| srate < 0 || srate>8)
 		{
-			input_seek(hFile, -3, FILE_END);
+			/* i==0 だと hpos が進まず NEXTSW が無限ループし、B の SoftOpen が一生戻らない */
+			if (i <= 0)
+				hpos += 1;
+			lptr = 0;
+			if (dwFileSize > 0 && (DWORD)hpos + 4 >= dwFileSize)
+				return 0;
 			goto NEXTSW;
 		}
 
@@ -1193,7 +1203,8 @@ public:
 				info->length = info->nbytes / framesize*576.0*(lsf ? 1 : 2) / freqs[srate];
 				info->hasVbrtag = 0;
 				info->bitrate = tabsel_123[lsf][lay - 1][bitrate_index] * 1000;
-				//info->length = info->nbytes * 8 / info->bitrate;
+				/* 前の Xing 曲の total_samples を残すと、この曲の途中で Render が止まる */
+				info->total_samples = 0;
 			}
 			const int POST_DELAY = 1152;
 			const int DECODE_DELAY_LAYER1 = 0;
@@ -1362,7 +1373,7 @@ public:
 	struct mad_frame     m_frame2;
 	struct mad_synth     m_synth2;
 
-	bool Open(const TCHAR *cszFileName, SOUNDINFO *pInfo)
+	bool Open(const TCHAR *cszFileName, SOUNDINFO *pInfo, int softOpen = 0)
 	{
 		Close();
 		//m_dwWritten=m_dwAllocSize =m_dwBufferSize= OUTPUT_BUFFER_SIZE*OUTPUT_BUFFER_NUM;
@@ -1413,21 +1424,34 @@ public:
 		m_clipping = 0;
 		ResetMp3Guard();
 		m_dwBufLen = 0;
-		mad_header_finish(&m_header);
-		mad_stream_finish(&m_stream);
-		mad_frame_finish(&m_frame);
-		mad_synth_finish(&m_synth);
+		/* SoftOpen 中は未初期化 mad_* の finish と未使用 calloc(600000)/seek(0) をやらない。
+		 * UI スレッドで fill と同時にやるとヒープ待ち＋SendMessage でクロスが一生始まらない。 */
+		if (!softOpen) {
+			mad_header_finish(&m_header);
+			mad_stream_finish(&m_stream);
+			mad_frame_finish(&m_frame);
+			mad_synth_finish(&m_synth);
 
-		mad_stream_init(&m_stream);
-		mad_header_init(&m_header);
-		mad_frame_init(&m_frame);
-		mad_synth_init(&m_synth);
-		ZeroMemory(&m_left_dither, sizeof(m_left_dither));
-		ZeroMemory(&m_right_dither, sizeof(m_right_dither));
-		buf2 = (BYTE*)calloc(600000,1);
-		seek(0, m_mp3info.nch);
-		DWORD bytes;
-		//    bytes = input_read(m_hFile, m_buffer + m_dwBufLen, sizeof(m_buffer) - m_dwBufLen);
+			mad_stream_init(&m_stream);
+			mad_header_init(&m_header);
+			mad_frame_init(&m_frame);
+			mad_synth_init(&m_synth);
+			ZeroMemory(&m_left_dither, sizeof(m_left_dither));
+			ZeroMemory(&m_right_dither, sizeof(m_right_dither));
+			if (!buf2)
+				buf2 = (BYTE*)calloc(600000, 1);
+			seek(0, m_mp3info.nch);
+		}
+		else {
+			mad_stream_init(&m_stream);
+			mad_header_init(&m_header);
+			mad_frame_init(&m_frame);
+			mad_synth_init(&m_synth);
+			ZeroMemory(&m_left_dither, sizeof(m_left_dither));
+			ZeroMemory(&m_right_dither, sizeof(m_right_dither));
+		}
+		/* 0 のままだと先頭百サンプルが無音から立ち上がる。曲のフェードとは別物。 */
+		fade = 1.0f;
 		return true;
 	}
 	void Close(void)
@@ -1567,8 +1591,15 @@ public:
 				//dwRet = (DWORD)((float)mad_timer_count(m_header2.duration, MAD_UNITS_MILLISECONDS)*4.0f);
 				dwRet += (DWORD)((float)mad_timer_count(m_header2.duration, MAD_UNITS_MILLISECONDS)*44.1f*4.0f) + 22;
 			}
-			memmove(m_buffer, m_stream.next_frame, &m_buffer[m_dwBufLen] - m_stream.next_frame);
-			m_dwBufLen -= m_stream.next_frame - &m_buffer[0];
+			if (m_stream.next_frame && m_stream.next_frame >= m_buffer
+				&& m_stream.next_frame <= m_buffer + m_dwBufLen) {
+				const DWORD left = (DWORD)(m_buffer + m_dwBufLen - m_stream.next_frame);
+				memmove(m_buffer, m_stream.next_frame, left);
+				m_dwBufLen = left;
+			}
+			else {
+				m_dwBufLen = 0;
+			}
 		}
 	END:
 		//    m_dwSkipRemain = m_dwSkipBytes;
@@ -1590,18 +1621,29 @@ public:
 		{
 			DWORD dwRet = 0;
 			cnt = 0;
-			while (dwRet < len) {
+			int loops = 0;
+			while (dwRet < (DWORD)len) {
+				if (++loops > 4096)
+					return (int)dwRet;
 				if (m_dwSkipRemain) {
 					m_dwSkipRemain -= m_ringbuf.Read(m_tmp, m_dwSkipRemain);
 				}
 				dwRet += m_ringbuf.Read(buf + dwRet, len - dwRet);
-				if (dwRet == len) {
-					return dwRet;
+				if (dwRet == (DWORD)len) {
+					return (int)dwRet;
 				}
 
-
-				input_read(m_hFile, m_tmp, 4);
-				input_seek(m_hFile, -4, FILE_CURRENT);
+				{
+					const DWORD nPeek = input_read(m_hFile, m_tmp, 4);
+					if (nPeek == 0)
+						return (int)dwRet;
+					if (nPeek < 4) {
+						/* 途中の短い読みで同じ位置に留まると、以降ずっと 0 になる */
+						input_seek(m_hFile, 1, FILE_CURRENT);
+						continue;
+					}
+					input_seek(m_hFile, (DWORD)(-(LONG)nPeek), FILE_CURRENT);
+				}
 				BYTE a3 = (m_tmp[1] >> 3) & 0x03;
 				BYTE a2 = (m_tmp[1] >> 1) & 0x03;
 				BYTE a1 = m_tmp[2] >> 4;
@@ -1610,17 +1652,25 @@ public:
 				int fr = freqs[a1];
 				a1 = (m_tmp[2] & 0x2) >> 1;
 				int pb = (int)a1;
-				int size = (144 * tb * 1000) / fr + pb;
-				BOOL i = input_read(m_hFile, m_tmp, size + MAD_BUFFER_GUARD);
-				if (i < ERROR_HANDLE_EOF) { return dwRet; }
-				if (fr < 0) {
-					int a;
-					a = 1;
+				if (fr < 8000 || tb <= 0) {
+					input_seek(m_hFile, 1, FILE_CURRENT);
+					continue;
 				}
+				int size = (144 * tb * 1000) / fr + pb;
+				if (size < 24 || size + MAD_BUFFER_GUARD > (int)sizeof(m_tmp)) {
+					input_seek(m_hFile, 1, FILE_CURRENT);
+					continue;
+				}
+				const DWORD nFrame = input_read(m_hFile, m_tmp, size + MAD_BUFFER_GUARD);
+				if (nFrame < (DWORD)(size + MAD_BUFFER_GUARD))
+					return (int)dwRet;
 
 				input_seek(m_hFile, -MAD_BUFFER_GUARD, FILE_CURRENT);
 				mad_stream_buffer(&m_stream2, m_tmp, size + MAD_BUFFER_GUARD);
-				mad_frame_decode(&m_frame2, &m_stream2);
+				/* 壊れたフレーム（まいご末尾の main_data_begin=511 等）を
+				 * 合成すると無音が続き、失敗のまま次の曲のデコードまで止まる。 */
+				if (mad_frame_decode(&m_frame2, &m_stream2) == -1)
+					continue;
 				mad_synth_frame(&m_synth2, &m_frame2);
 				int nch = m_synth2.pcm.channels;
 				mad_fixed_t *ch1 = m_synth2.pcm.samples[0];
@@ -1694,7 +1744,8 @@ public:
 					if (!MAD_RECOVERABLE(m_stream.error)) {
 						return dwRet;
 					}
-					if (++err_count > 65536) {
+					/* 65536 回回すとフィルが十秒止まり、混合中の B が無音のまま終わる */
+					if (++err_count > 32) {
 						return dwRet;
 					}
 					continue;
@@ -1740,8 +1791,17 @@ public:
 				*/
 				break;
 			}
-			memmove(m_buffer, m_stream.next_frame, &m_buffer[sizeof(m_buffer)] - m_stream.next_frame);
-			m_dwBufLen -= m_stream.next_frame - m_buffer;
+			/* next_frame がバッファ外だと memmove が隣の MP3 スロットまで潰し、
+			 * A も B も以降 0 バイトになる（まいご末尾で再現）。 */
+			if (m_stream.next_frame && m_stream.next_frame >= m_buffer
+				&& m_stream.next_frame <= m_buffer + m_dwBufLen) {
+				const DWORD left = (DWORD)(m_buffer + m_dwBufLen - m_stream.next_frame);
+				memmove(m_buffer, m_stream.next_frame, left);
+				m_dwBufLen = left;
+			}
+			else {
+				m_dwBufLen = 0;
+			}
 		}
 		return dwRet;
 	}

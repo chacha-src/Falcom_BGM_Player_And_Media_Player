@@ -611,6 +611,9 @@ private:
     void MarkKeyVisualDirty();
     void ApplySyncInvalidate();
     void InvalidateRegions(bool roll, bool key);
+    void InvalidateMeterStrip();
+    void PaintMeterStripOnKey(int width, int keyH, const float* chFill, int chCount);
+    bool PresentMeterStrip(CDC& dc, int w, int rollH, int keyH, int chordH);
     void EnsurePaintFonts(int clientW, int keyH, int rollH);
     void DrawExprLegend(CDC& dc, int rollW, int rollH, bool blitToDest = true) const;
     void DrawExprLegendContent(CDC& dc, int rollW, int rollH, const CRect& panel, bool fillPanelBg = true) const;

@@ -3096,9 +3096,10 @@ static void DrawFittedText(CDC& dc, const CRect& rect, const CString& str, UINT 
     const int nBudgetH = (std::max)(1, rect.Height());
     const int needW = sz.cx + italicMargin;
 
-    const bool fitsWithoutScale = (needW <= nBudgetW && nTextH <= nBudgetH);
+    /* デフォルトは仮想サイズで書いてから X 圧縮。縦縮小すると行が揃わない。 */
+    const bool fitsWithoutScale = (needW <= nBudgetW);
 
-    if (fitsWithoutScale)
+    if (fitsWithoutScale && nTextH <= nBudgetH)
     {
         if (bGrad) DrawTextWithGradient(&dc, rectDraw, str, fmt, cGS, cGE, nDir, clrSh, nSD, nDist, nBlur, bSE, clrBg, sz.cx, bPreferWide, bAeroTrans);
         else DrawTextWithShadow(&dc, rectDraw, str, fmt, RGB(0, 0, 0), clrSh, nSD, nDist, nBlur, bSE, clrBg, bAeroTrans);
@@ -3114,7 +3115,7 @@ static void DrawFittedText(CDC& dc, const CRect& rect, const CString& str, UINT 
         return;
     }
 
-    // ワイド文字: X 軸のみ縮小（旧実装どおり）。Y は収まらないときだけ最小限縮める。
+    // 裏で自然幅に書いてから横だけ圧縮。縦は揃え（scaleY しない）。
     float scaleX = 1.0f;
     if (needW > nBudgetW)
         scaleX = (float)nBudgetW / (float)needW;
@@ -3122,9 +3123,7 @@ static void DrawFittedText(CDC& dc, const CRect& rect, const CString& str, UINT 
     if (scaleX < 0.50f) scaleX = 0.50f;
     if (scaleX > 1.0f) scaleX = 1.0f;
 
-    float scaleY = 1.0f;
-    if (nTextH > nBudgetH)
-        scaleY = (float)nBudgetH / (float)nTextH;
+    const float scaleY = 1.0f;
 
     const int drawH = max(1, (int)(nTextH * scaleY + 0.5f));
     const int yTop = rect.top + max(0, (nBudgetH - drawH) / 2);
@@ -7465,8 +7464,9 @@ CCustomStatic::CCustomStatic()
     m_nGradDirection(0), m_bGradEnable(FALSE),
     m_clrShadow(RGB(0, 0, 0)), m_nShadowDirection(135),
     m_nShadowDistance(2), m_nShadowBlur(3), m_bShadowEnable(FALSE),
-    m_bPreferWideMode(FALSE), m_nCachedHeight(0), m_nCachedWidth(0), m_fCachedScaleX(1.0f),
-    m_strCachedText(_T("")), m_strText(_T("")), m_nCachedDpi(0),
+    m_bPreferWideMode(FALSE), m_bKeepFontHeight(FALSE),
+    m_nCachedHeight(0), m_nCachedWidth(0), m_fCachedScaleX(1.0f),
+    m_strCachedText(_T("")), m_strText(_T("")), m_nCachedDpi(0), m_nCachedWide(0),
     m_backstoreW(0), m_backstoreH(0), m_segCount(0), m_strSegSource(_T("")),
     m_bAeroMode(FALSE), m_bNoParentInvalidate(FALSE),
     m_bSolidFill(FALSE), m_clrSolidFill(COLOR_DIALOG_BG)
@@ -7662,6 +7662,21 @@ BOOL CCustomStatic::GetPreferWideMode() const
     return m_bPreferWideMode;
 }
 
+// 行高さいっぱいに字形を伸ばさない。チェック行のラベル用。
+void CCustomStatic::SetKeepFontHeight(BOOL b)
+{
+    m_bKeepFontHeight = b;
+    m_strCachedText.Empty();
+    m_nCachedHeight = 0;
+    m_nCachedDpi = 0;
+    if (GetSafeHwnd()) Invalidate();
+}
+
+BOOL CCustomStatic::GetKeepFontHeight() const
+{
+    return m_bKeepFontHeight;
+}
+
 // フォントをコピー所有。元 HFONT は触らない。フィットキャッシュを捨てる。
 void CCustomStatic::SetFont(CFont* pF, BOOL bR)
 {
@@ -7801,7 +7816,8 @@ void CCustomStatic::DrawClient(CDC& dc)
     const BOOL bNeedRecalc = (strText != m_strCachedText) ||
         (m_nCachedHeight == 0) ||
         (m_rectCached != rect) ||
-        (m_nCachedDpi != dpi);
+        (m_nCachedDpi != dpi) ||
+        (m_nCachedWide != (m_bPreferWideMode ? 1 : 0));
 
     if (bNeedRecalc)
     {
@@ -7841,7 +7857,7 @@ void CCustomStatic::DrawClient(CDC& dc)
             finalWidth = 0;
             szFinal = szFit;
 
-            if (szFit.cy < rectWithMargin.Height())
+            if (!m_bKeepFontHeight && szFit.cy < rectWithMargin.Height())
             {
                 const double stretch = (double)rectWithMargin.Height() / fitHeight;
                 if (stretch <= 1.35) // 縦に伸ばしすぎると潰れるので 135% まで
@@ -7912,7 +7928,15 @@ void CCustomStatic::DrawClient(CDC& dc)
 
             const int sidePad = max(1, CCC_ScaleDpi(3, dpi));
             const int availW = (std::max)(1, rectWithMargin.Width() - shadowPadX - sidePad);
-            finalHeight = min(baseHeight, rectWithMargin.Height());
+            /* 行高さいっぱいに書いてから X 圧縮（縦長）。高さでフォントを落とさない。
+               KeepFontHeight はチェック行ラベル用。行高さへ伸ばすと隣より大きくなる。 */
+            if (m_bKeepFontHeight)
+                finalHeight = max(kMinHeight, baseHeight);
+            else {
+                finalHeight = max(kMinHeight, rectWithMargin.Height());
+                if (finalHeight < baseHeight)
+                    finalHeight = baseHeight;
+            }
             finalWidth = 0;
             szFinal = MeasureText(finalHeight, 0);
             if (hasBreak) {
@@ -7977,6 +8001,7 @@ void CCustomStatic::DrawClient(CDC& dc)
         m_nCachedWidth = finalWidth;
         m_rectCached = rect;
         m_nCachedDpi = dpi;
+        m_nCachedWide = m_bPreferWideMode ? 1 : 0;
     }
     else
     {
@@ -8013,8 +8038,9 @@ void CCustomStatic::DrawClient(CDC& dc)
         {
             DrawFitControlText(&memDC, rectWithMargin, strText, fmt, 0.50f);
         }
-        else if (m_fCachedScaleX < 0.98f)
+        else if (!m_bPreferWideMode || m_fCachedScaleX < 0.98f)
         {
+            /* デフォルト: 裏描画 → 横圧縮。PreferWide で幅が余るときだけ直描き。 */
             DrawFittedText(memDC, rect, strText, fmt,
                 m_bGradEnable, m_clrGradStart, m_clrGradEnd, m_nGradDirection,
                 m_clrShadow, m_nShadowDirection, m_nShadowDistance, m_nShadowBlur,
@@ -9096,20 +9122,13 @@ static void CccSliderDrawGainTicks(CDC* pDC, BOOL bV, int axis, int t0, int t1,
     const int nR = nMax - nMin;
     if (nR <= 0 || t1 <= t0 || barHalf < 1)
         return;
-    int step = 0;
-    if (nR == 200)
-        step = 50;
-    else if (nR == 100)
-        step = 50;
-    else
-        return;
-    const int midV = nMin + nR / 2;
     const int span = t1 - t0;
-    for (int v = nMin; v <= nMax; v += step) {
+    auto drawAt = [&](int v, BOOL major) {
+        if (v < nMin || v > nMax)
+            return;
         const int t = t0 + (int)((double)(v - nMin) * span / nR);
-        const BOOL isMid = (v == midV);
-        const int arm = isMid ? (barHalf + 9) : (barHalf + 5);
-        if (CPen* p = CCC_GetPooledPen(isMid ? 3 : 2, cOutline))
+        const int arm = major ? (barHalf + 9) : (barHalf + 5);
+        if (CPen* p = CCC_GetPooledPen(major ? 3 : 2, cOutline))
             pDC->SelectObject(p);
         if (bV) {
             pDC->MoveTo(axis - arm, t);
@@ -9119,7 +9138,7 @@ static void CccSliderDrawGainTicks(CDC* pDC, BOOL bV, int axis, int t0, int t1,
             pDC->MoveTo(t, axis - arm);
             pDC->LineTo(t, axis + arm + 1);
         }
-        if (CPen* p = CCC_GetPooledPen(isMid ? 2 : 1, isMid ? cMid : cMinor))
+        if (CPen* p = CCC_GetPooledPen(major ? 2 : 1, major ? cMid : cMinor))
             pDC->SelectObject(p);
         if (bV) {
             pDC->MoveTo(axis - arm + 1, t);
@@ -9129,6 +9148,16 @@ static void CccSliderDrawGainTicks(CDC* pDC, BOOL bV, int axis, int t0, int t1,
             pDC->MoveTo(t, axis - arm + 1);
             pDC->LineTo(t, axis + arm);
         }
+    };
+    static const int kMarks[] = { 0, 50, 100, 150, 200, 250, 500, 1000 };
+    for (int i = 0; i < (int)(sizeof(kMarks) / sizeof(kMarks[0])); ++i) {
+        const int v = kMarks[i];
+        if (v < nMin || v > nMax)
+            continue;
+        if (nR > 300 && (v == 150 || v == 200 || v == 250))
+            continue;
+        const BOOL major = (v == 100 || v == 0 || v == 500 || v == 1000);
+        drawAt(v, major);
     }
 }
 
@@ -9952,8 +9981,8 @@ void CCustomSliderCtrl::DrawMode3(CDC* pDC, const CRect& rect, int nMin, int nMa
     if (oldBrush) pDC->SelectObject(oldBrush);
 }
 
-// 描画モード4: 区切られたメーター。表示間隔など、端から増える階段。
-// 点灯は accent、消灯は textDim。角テーマは四角、ほかは丸い駒。位置はテーマのモチーフ。
+// 描画モード4: 連続バー。CRender の間隔／倍率。途切れ駒は使わない。
+// 塗りは accent。100 などレンジ内のゲージは Mode2/3 と同じ。
 void CCustomSliderCtrl::DrawMode4(CDC* pDC, const CRect& rect, int nMin, int nMax, int nPos)
 {
     const int nR = nMax - nMin;
@@ -9961,49 +9990,41 @@ void CCustomSliderCtrl::DrawMode4(CDC* pDC, const CRect& rect, int nMin, int nMa
     const BOOL bV = (GetStyle() & TBS_VERT) ? TRUE : FALSE;
     const BOOL square = CccSliderSquare();
     const CCC_UiThemePal& th = CCC_UiTheme();
-    const int segs = 12;
     CPen* oldPen = pDC->GetCurrentPen();
     CBrush* oldBrush = pDC->GetCurrentBrush();
     int axis, t0, t1, tP, tMid;
-    CccSliderAxis(bV, rect, 10, nMin, nMax, nPos, axis, t0, t1, tP, tMid);
+    CccSliderAxis(bV, rect, 12, nMin, nMax, nPos, axis, t0, t1, tP, tMid);
     if (t1 <= t0) {
         if (oldPen) pDC->SelectObject(oldPen);
         if (oldBrush) pDC->SelectObject(oldBrush);
         return;
     }
-    auto block = [&](int l, int t, int r, int b, BOOL on) {
-        const COLORREF c = on ? th.accent : th.textDim;
-        if (CPen* p = CCC_GetPooledPen(1, c)) pDC->SelectObject(p);
-        if (CBrush* bsh = CCC_GetPooledBrush(c)) pDC->SelectObject(bsh);
-        CccSliderBar(pDC, l, t, r, b, square);
+    const int rad = CccThumbRad(rect, bV);
+    auto ink = [&](COLORREF edge, COLORREF fill) {
+        if (CPen* p = CCC_GetPooledPen(1, edge)) pDC->SelectObject(p);
+        if (CBrush* b = CCC_GetPooledBrush(fill)) pDC->SelectObject(b);
     };
     if (!bV)
     {
         const int cY = axis;
-        const int gap = 2;
-        const int tW = t1 - t0;
-        const int segW = max(2, (tW - gap * (segs - 1)) / segs);
-        const int bar = min(5, max(2, rect.Height() / 4));
-        for (int i = 0; i < segs; ++i)
-        {
-            const int x = t0 + i * (segW + gap);
-            block(x, cY - bar, x + segW, cY + bar + 1, (x + segW / 2) <= tP);
-        }
-        CccSliderThumb(pDC, tP, cY, min(5, CccThumbRad(rect, FALSE)), square, th.face, th.accent);
+        const int half = min(5, max(3, rect.Height() / 5));
+        ink(th.sep, th.track);
+        CccSliderBar(pDC, t0, cY - half, t1, cY + half + 1, square);
+        ink(th.accent, th.accent);
+        CccSliderBar(pDC, t0, cY - half, tP, cY + half + 1, square);
+        CccSliderDrawGainTicks(pDC, FALSE, cY, t0, t1, nMin, nMax, half, th.sep, th.text, th.face);
+        CccSliderThumb(pDC, tP, cY, rad, square, th.face, th.accent);
     }
     else
     {
         const int cX = axis;
-        const int gap = 2;
-        const int tH = t1 - t0;
-        const int segH = max(2, (tH - gap * (segs - 1)) / segs);
-        const int bar = min(5, max(2, rect.Width() / 4));
-        for (int i = 0; i < segs; ++i)
-        {
-            const int y = t1 - (i + 1) * segH - i * gap;
-            block(cX - bar, y, cX + bar + 1, y + segH, (y + segH / 2) >= tP);
-        }
-        CccSliderThumb(pDC, cX, tP, min(5, CccThumbRad(rect, TRUE)), square, th.face, th.accent);
+        const int half = min(5, max(3, rect.Width() / 5));
+        ink(th.sep, th.track);
+        CccSliderBar(pDC, cX - half, t0, cX + half + 1, t1, square);
+        ink(th.accent, th.accent);
+        CccSliderBar(pDC, cX - half, tP, cX + half + 1, t1, square);
+        CccSliderDrawGainTicks(pDC, TRUE, cX, t0, t1, nMin, nMax, half, th.sep, th.text, th.face);
+        CccSliderThumb(pDC, cX, tP, rad, square, th.face, th.accent);
     }
     if (oldPen) pDC->SelectObject(oldPen);
     if (oldBrush) pDC->SelectObject(oldBrush);

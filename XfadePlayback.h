@@ -18,6 +18,12 @@ extern volatile LONG g_xfOpenSlot;
 extern volatile LONG g_xfOpenThreadId;
 /* クロスフェード進行中 */
 extern volatile LONG g_xfInProgress;
+/* 1=規定ループの最終周。loop 点を終端としてクロスする */
+extern volatile LONG g_xfTreatLoopAsEnd;
+/* 1=ループ回数が 1 以上 */
+extern volatile LONG g_xfLoopCountActive;
+/* 1=まだ繰り返す周が残っている。この間は終端窓でクロスを始めない */
+int XfDeferCrossfadeForLoop();
 /* 副スロット（xfade 中の B） */
 extern volatile LONG g_xfSecSlot;
 /* 昇格後に SIcon するプレイリスト index（-1=なし） */
@@ -40,6 +46,9 @@ extern __int64 g_expectedDsBytes;
 __int64 XfPlayPosBytes();
 /* 曲終端（DS 出力バイト）。end 確定値 → expected → loop3/oggsize */
 __int64 XfTrackEndRefBytes(__int64 endWrittenBytes);
+/* KPI で長さ不明のときの連続再生曲長（テスト 1 分）。メタがあればその ms */
+enum { XF_KPI_DEFAULT_LEN_MS = 60000 };
+__int64 XfKpiSessionEndBytes();
 /* 曲長に含まれる「音の無い余白」（DS 出力バイト）。VST MIDI のみ */
 __int64 XfTailPadBytes();
 /* クロスフェードの基準終端（DS 出力バイト）= 終端 − 余白。窓もフェード長もこれで決める */
@@ -93,6 +102,7 @@ extern int g_xfSrcBits[XF_SLOTS];
 /* 等パワー進捗（出力フレーム単位） */
 extern __int64 g_xfFadeTotalFrames;
 extern __int64 g_xfFadePos;
+extern DWORD g_xfMixStartTick;
 
 inline int XfDecSlot()
 {
@@ -164,10 +174,14 @@ void XfLoadSlotDecodeState(int slot);
 double XfSecFromSave();
 int XfEnabled();
 void XfResetAll();
+/* 混合フラグだけ下ろす（スロットのデコーダは残す）。昇格後・通常 play 先頭用 */
+void XfClearLiveMixFlags();
 void XfCloseSlotDecoders(int slot);
 void XfApplySlotFormatToGlobals(int slot);
 void XfCaptureGlobalsToSlot(int slot);
 void XfSetSlotBag(int slot, int mode, int rate, int ch, int bits, int mp3bps, void* kmp);
+void XfUpdateSlotSrcFormat(int slot, int rate, int ch, int bits);
+void XfBindSlotUpscalerToSession(int slot);
 int XfMixEqualPower(BYTE* dst, const BYTE* a, const BYTE* b, int outBytes, int bits, int ch);
 void XfOnCrossfadeFinished();
 void XfAbortCrossfade();

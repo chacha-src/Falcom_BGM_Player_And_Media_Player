@@ -885,6 +885,10 @@ public:
     void SetPreferWideMode(BOOL b);
     BOOL GetPreferWideMode() const;
 
+    // 行高さいっぱいに字形を伸ばさない（指定フォントの高さのまま）
+    void SetKeepFontHeight(BOOL b);
+    BOOL GetKeepFontHeight() const;
+
     // 表示フォントの設定
     void SetFont(CFont* pFont, BOOL bRedraw = TRUE);
 
@@ -955,6 +959,7 @@ private:
 
     CFont m_font;                          // 描画用フォント
     BOOL m_bPreferWideMode;                // ワイドモードが有効かどうか
+    BOOL m_bKeepFontHeight;                // TRUE なら行高さへ字形を伸ばさない
 
     CString m_strText;                     // コントロールが保持しているテキスト
     CString m_strCachedText;               // キャッシュされたテキスト（再計算防止用）
@@ -962,6 +967,7 @@ private:
     float m_fCachedScaleX;               // 幅オーバー時の X 軸ワールド変換倍率（1.0=なし）
     CRect m_rectCached;                    // キャッシュされた描画領域
     UINT  m_nCachedDpi;                    // キャッシュ時の DPI（Per-Monitor 対応）
+    int   m_nCachedWide;                   // キャッシュ時の PreferWide（0/1）
 
     CBitmap m_memBackstore;                // ちらつき防止のダブルバッファリング用バックバッファ
     int m_backstoreW, m_backstoreH;        // バックバッファの寸法
@@ -1492,7 +1498,7 @@ private:
     void DrawMode1(CDC* pDC, const CRect& r, int mn, int mx, int pos); // 中央から塗るレール（テンポ・ピッチ）
     void DrawMode2(CDC* pDC, const CRect& r, int mn, int mx, int pos); // 端から伸びる量バー
     void DrawMode3(CDC* pDC, const CRect& r, int mn, int mx, int pos); // カプセル＋中央線
-    void DrawMode4(CDC* pDC, const CRect& r, int mn, int mx, int pos); // セグメントメーター
+    void DrawMode4(CDC* pDC, const CRect& r, int mn, int mx, int pos); // 連続バー＋ゲージ（CRender）
 };
 
 // ============================================================================

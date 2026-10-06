@@ -898,8 +898,9 @@ void CPianoRoll::SetChannelMeterDb(const float* dbPerChannel, int channelCount)
 {
     // UI スレッド専用。m_cs(Goertzel)を取ると解析中にメーターが遅延する。
     static constexpr float kPeakDecay = 0.994f;
-    static constexpr float kFillAttack = 0.55f;
-    static constexpr float kFillRelease = 0.18f;
+    // 立ち上がりは入力そのもの。リリースだけ少し残して床ノイズでちらつかせない。
+    static constexpr float kFillAttack = 1.0f;
+    static constexpr float kFillRelease = 0.45f;
     // オートピーク下限を上げ、無音ノイズ床をバー全長に正規化しない（停止時ちらつき対策）
     static constexpr float kMinDisplayPeak = 0.02f;
     static constexpr float kSilenceLin = 0.004f; // 約 -48 dBFS
@@ -923,7 +924,7 @@ void CPianoRoll::SetChannelMeterDb(const float* dbPerChannel, int channelCount)
         if (decaying) {
             m_meterDirty = true;
             if (::IsWindow(m_hWnd) && !m_paintDisabled)
-                ApplySyncInvalidate();
+                InvalidateMeterStrip();
         }
         return;
     }
@@ -960,8 +961,8 @@ void CPianoRoll::SetChannelMeterDb(const float* dbPerChannel, int channelCount)
             const float rate = (norm >= fill) ? kFillAttack : kFillRelease;
             fill += (norm - fill) * rate;
             if (fill < 0.005f) fill = 0.0f;
-            if (!meterChanged && fabsf(fill - prevFill) > 0.02f
-                && (fill > 0.02f || prevFill > 0.02f))
+            if (!meterChanged && fabsf(fill - prevFill) > 0.008f
+                && (fill > 0.008f || prevFill > 0.008f))
                 meterChanged = true;
         }
         else {
@@ -971,16 +972,16 @@ void CPianoRoll::SetChannelMeterDb(const float* dbPerChannel, int channelCount)
             if (m_chMeterFill[i] < 0.005f)
                 m_chMeterFill[i] = 0.0f;
             m_chMeterAutoPeak[i] = kMinDisplayPeak;
-            if (!meterChanged && (m_chMeterFill[i] > 0.02f || prevFill > 0.02f)
-                && fabsf(m_chMeterFill[i] - prevFill) > 0.02f)
+            if (!meterChanged && (m_chMeterFill[i] > 0.008f || prevFill > 0.008f)
+                && fabsf(m_chMeterFill[i] - prevFill) > 0.008f)
                 meterChanged = true;
         }
     }
     if (meterChanged) {
         m_meterDirty = true;
-        // Sync は Invalidate しない。解析完了待ちにメーターだけ遅れるのを防ぐ。
+        // 全面 Invalidate するとロール再描画にメーターが引きずられて鈍る。帯だけ。
         if (::IsWindow(m_hWnd) && !m_paintDisabled)
-            ApplySyncInvalidate();
+            InvalidateMeterStrip();
     }
 }
 
@@ -2286,6 +2287,99 @@ void CPianoRoll::InvalidateRegions(bool roll, bool key)
         const int keyTop = cr.top + rollH + chordH;
         InvalidateRect(CRect(cr.left, keyTop, cr.left + w, cr.bottom), FALSE);
     }
+}
+
+void CPianoRoll::InvalidateMeterStrip()
+{
+    if (m_paintDisabled || !::IsWindow(m_hWnd)) return;
+    // 簡易3D はシーン全体がメーターを含む。再生中は解析提示が chFill を拾う。
+    // フリーズ中だけ、ノートが止まってもメーターが死なないよう間引いて全面を出す。
+    if (IsView3D()) {
+        if (!m_frozen) return;
+        static DWORD s_frozen3dMeterTick = 0;
+        const DWORD now = GetTickCount();
+        if (s_frozen3dMeterTick != 0 && (now - s_frozen3dMeterTick) < 50)
+            return;
+        s_frozen3dMeterTick = now;
+        ApplySyncInvalidate();
+        return;
+    }
+
+    CRect cr;
+    GetClientRect(&cr);
+    const int capH = CCC_GetCustomCaptionHeight(m_hWnd);
+    const int h = cr.Height() - capH;
+    if (cr.Width() <= 0 || h <= 0) return;
+
+    int keyH = h * 20 / 100;
+    if (keyH < 50) keyH = 50;
+    if (keyH > 100) keyH = 100;
+    const int chordH = ChordPanelHeightPx();
+    const int rollH = h - keyH - chordH;
+    if (rollH <= 0) return;
+    const int labelH = min(16, keyH / 4);
+    if (labelH < 4) return;
+
+    const int top = capH + rollH + chordH;
+    CRect strip(cr.left, top, cr.right, top + labelH + 2);
+    CCC_InvalidateRectMinusOverlay(m_hWnd, strip);
+}
+
+void CPianoRoll::PaintMeterStripOnKey(int width, int keyH, const float* chFill, int chCount)
+{
+    if (!m_keyDC.GetSafeHdc() || width <= 0 || keyH <= 0) return;
+    const int labelH = min(16, keyH / 4);
+    if (labelH < 4) return;
+    CRect meterStrip(2, 1, width - 2, labelH + 1);
+    m_keyDC.FillSolidRect(meterStrip, RGB(150, 150, 155));
+    if (m_showLevelMeter)
+        DrawChannelDbBars(m_keyDC, meterStrip, chFill, chCount);
+    if (m_paintFontsReady && m_fontKeyOct.GetSafeHandle()) {
+        m_keyDC.SetBkMode(TRANSPARENT);
+        CFont* pOldFont = m_keyDC.SelectObject(
+            CFont::FromHandle((HFONT)m_fontKeyOct.GetSafeHandle()));
+        m_keyDC.SetTextColor(RGB(100, 100, 110));
+        for (int i = 0; i < KEY_COUNT; ++i) {
+            const int midi = MIDI_BASE + i;
+            if (midi % 12 != 0) continue;
+            int xL, xR;
+            GetWhiteKeyRect52(midi, width, xL, xR);
+            if (xR <= xL) continue;
+            CString oct;
+            oct.Format(L"%d", (midi / 12) - 1);
+            CRect tr(xL + 2, 1, xR - 2, labelH + 1);
+            m_keyDC.DrawText(oct, &tr, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+        }
+        m_keyDC.SelectObject(pOldFont);
+    }
+}
+
+bool CPianoRoll::PresentMeterStrip(CDC& dc, int w, int rollH, int keyH, int chordH)
+{
+    const int labelH = min(16, keyH / 4);
+    if (labelH < 4 || w <= 0 || !m_keyDC.GetSafeHdc()) return false;
+    const int meterH = labelH + 2;
+    const int capH = CCC_GetCustomCaptionHeight(m_hWnd);
+    const int screenY = capH + rollH + chordH;
+
+#if CCUSTOM_AERO_SUPPORT
+    const bool bodyAero = (savedata.aero == 1 && CCC_IsWin11());
+    const bool capGlass = (!bodyAero && CCC_AcrylicCaption(m_hWnd) && CCC_IsWin11());
+    if (bodyAero || capGlass) {
+        if (!m_chromaReady || !m_chromaCache.hdcDib)
+            return false;
+        if (bodyAero)
+            m_chromaCache.UpdateRect(m_keyDC.GetSafeHdc(), 0, 0, 0, rollH, w, meterH, PIANO_CHROMA_KEY);
+        else
+            m_chromaCache.UpdateOpaqueRect(m_keyDC.GetSafeHdc(), 0, 0, 0, rollH, w, meterH);
+        const BLENDFUNCTION bf = { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
+        if (!::GdiAlphaBlend(dc.GetSafeHdc(), 0, screenY, w, meterH,
+                m_chromaCache.hdcDib, 0, rollH, w, meterH, bf))
+            ::BitBlt(dc.GetSafeHdc(), 0, screenY, w, meterH, m_keyDC.GetSafeHdc(), 0, 0, SRCCOPY);
+        return true;
+    }
+#endif
+    return dc.BitBlt(0, screenY, w, meterH, &m_keyDC, 0, 0, SRCCOPY) ? true : false;
 }
 
 void CPianoRoll::BuildLiveNoteFrame(NoteFrame& frame) const
@@ -4778,9 +4872,12 @@ void CPianoRoll::PumpSyncNow()
     PushDisplayFrames();
     int pending = m_framesPending;
     LeaveCriticalSection(&m_cs);
-    if (pending > 0 || m_meterDirty || m_historyDirty || m_keyDirty
-        || InterlockedCompareExchange(&m_analysisPresentDirty, 0, 0) != 0)
+    const bool rollOrKey = pending > 0 || m_historyDirty || m_keyDirty
+        || InterlockedCompareExchange(&m_analysisPresentDirty, 0, 0) != 0;
+    if (rollOrKey)
         ApplySyncInvalidate();
+    else if (m_meterDirty)
+        InvalidateMeterStrip();
 }
 
 void CPianoRoll::ApplySyncInvalidate()
@@ -6012,6 +6109,29 @@ void CPianoRoll::OnPaint()
         }
     }
 
+    // メーターだけ動いたときはロール・108鍵・全面 Blit をしない。
+    // 解析完了のフラグはここでは捨てない（次のノート行を落とさない）。
+    if (!view3D && m_meterDirty && !m_keyDirty && !m_historyDirty
+        && m_keyBufReady && m_rollReady && m_keyDC.GetSafeHdc()
+        && m_keyW == w && m_keyH == keySectionH
+        && m_rollW == w && m_rollH == rollH) {
+        int pendingMeter = 0;
+        EnterCriticalSection(&m_cs);
+        pendingMeter = m_framesPending;
+        LeaveCriticalSection(&m_cs);
+        if (pendingMeter <= 0
+            && InterlockedCompareExchange(&m_analysisPresentDirty, 0, 0) == 0) {
+            float meterFill[PIANO_METER_CH_MAX];
+            const int meterCh = m_chMeterCount;
+            memcpy(meterFill, m_chMeterFill, sizeof(meterFill));
+            PaintMeterStripOnKey(w, keyH, meterFill, meterCh);
+            if (PresentMeterStrip(dc, w, rollH, keyH, chordH)) {
+                m_meterDirty = false;
+                return;
+            }
+        }
+    }
+
     if (!view3D)
         UpdateChordHistoryFromKeyCodes();
     EnsurePaintFonts(w, keyH, rollH);
@@ -6183,32 +6303,9 @@ void CPianoRoll::OnPaint()
         m_keyBufReady = true;
     }
     else if (meterOnlyDirty && m_keyDC.GetSafeHdc()) {
-        // 鍵盤全体は触らず、上部メーター帯だけ差し替える（表示OFF時もダーティは落とす）。
-        // オクターブ数字はメーターと同じ帯(y=1..labelH+1)に載るため、塗りつぶし後に必ず描き直す。
-        // 描き忘れるとメーター更新のたびに数字が消え、点滅する。
-        const int labelH = min(16, keyH / 4);
-        if (labelH >= 4) {
-            CRect meterStrip(2, 1, w - 2, labelH + 1);
-            m_keyDC.FillSolidRect(meterStrip, RGB(150, 150, 155));
-            if (m_showLevelMeter)
-                DrawChannelDbBars(m_keyDC, meterStrip, chFillCopy, chCountCopy);
-            if (m_paintFontsReady && m_fontKeyOct.GetSafeHandle()) {
-                m_keyDC.SetBkMode(TRANSPARENT);
-                CFont* pOldFont = m_keyDC.SelectObject(
-                    CFont::FromHandle((HFONT)m_fontKeyOct.GetSafeHandle()));
-                m_keyDC.SetTextColor(RGB(100, 100, 110));
-                for (int i = 0; i < KEY_COUNT; ++i) {
-                    const int midi = MIDI_BASE + i;
-                    if (midi % 12 != 0) continue;
-                    int xL, xR; GetWhiteKeyRect52(midi, w, xL, xR);
-                    if (xR <= xL) continue;
-                    CString oct; oct.Format(L"%d", PianoDraw::MidiOctaveNumber(midi));
-                    CRect tr(xL + 2, 1, xR - 2, labelH + 1);
-                    m_keyDC.DrawText(oct, &tr, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-                }
-                m_keyDC.SelectObject(pOldFont);
-            }
-        }
+        // 鍵盤全体は触らず、上部メーター帯だけ差し替える。
+        // オクターブ数字は同じ帯に載るので、塗りつぶし後に必ず描き直す。
+        PaintMeterStripOnKey(w, keyH, chFillCopy, chCountCopy);
         didMeterOnly = true;
     }
 

@@ -203371,7 +203371,7 @@ BEGIN
     LTEXT           "630",IDC_EQ_FREQ_630,181,35,13,8
     LTEXT           "1000",IDC_EQ_FREQ_1000,203,35,17,8
     LTEXT           "1600",IDC_EQ_FREQ_1600,227,35,17,8
-    LTEXT           "Hz",IDC_EQ_UNIT_HZ,354,35,16,10
+    LTEXT           "Hz",IDC_EQ_UNIT_HZ,366,45,10,10
     LTEXT           "100",IDC_STATIC_e0,13,151,13,8
     LTEXT           "100",IDC_STATIC_e1,37,151,13,8
     LTEXT           "100",IDC_STATIC_e2,62,151,13,8
@@ -203781,7 +203781,7 @@ END
 //
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 0,9,1,1524
+ FILEVERSION 0,9,1,1530
  PRODUCTVERSION 1,0,0,1
  FILEFLAGSMASK 0x3fL
 #ifdef _DEBUG
@@ -203799,10 +203799,10 @@ BEGIN
         BEGIN
             VALUE "Comments", "Falcom BGM Player & Media Player"
             VALUE "CompanyName", "Pre Prayer Power Soft"
-            VALUE "FileDescription", "Falcom BGM Player & Media Player Ver 0.9a Rel.2026.10.05 v1524"
-            VALUE "FileVersion", "0.9.1.1524"
+            VALUE "FileDescription", "Falcom BGM Player & Media Player Ver 0.9a Rel.2026.10.06 v1530"
+            VALUE "FileVersion", "0.9.1.1530"
             VALUE "InternalName", "ogg YS/ED bgm"
-            VALUE "LegalCopyright", "Copyright (C) 2026.10.05 v1524"
+            VALUE "LegalCopyright", "Copyright (C) 2026.10.06 v1530"
             VALUE "LegalTrademarks", "Pre Prayer Power Soft"
             VALUE "OriginalFilename", "oggYSEDbgm_uni_avx2.exe"
             VALUE "ProductName", "Falcom BGM Player & Media Player"

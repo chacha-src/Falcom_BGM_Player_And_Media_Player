@@ -48,6 +48,16 @@ void ResetAudioUpscalerPipeline()
 	g_audioUpscalerArr[XfDecSlot()].Reset();
 }
 
+int AudioUpscaler::BufferedFrames() const
+{
+	if (!m_active || m_srcCh < 1 || m_fifoCount < m_srcCh)
+		return 0;
+	const int frames = m_fifoCount / m_srcCh;
+	const int consumed = (m_readPos > 0.0) ? (int)m_readPos : 0;
+	const int ahead = frames - consumed;
+	return (ahead > 0) ? ahead : 0;
+}
+
 int SpeakerLayoutToOutChannels(int layout)
 {
 	switch (layout) {
@@ -162,6 +172,16 @@ void AudioUpscaler::Configure(int srcRate, int srcCh, int srcBits,
 	if (!(srcBits == 8 || srcBits == 16 || srcBits == 24 || srcBits == 32)) srcBits = 16;
 	if (!(dstBits == 16 || dstBits == 24 || dstBits == 32)) dstBits = 16;
 
+	const bool wantActive = (srcRate != dstRate || srcCh != dstCh || srcBits != dstBits)
+		&& !(srcCh > kUpChMax || dstCh > kUpChMax);
+	/* 同じ入出力なら FIFO を捨てない（混合中に毎バッファ Configure するとノイズフェードになる） */
+	if (m_srcRate == srcRate && m_srcCh == srcCh && m_srcBits == srcBits
+		&& m_dstRate == dstRate && m_dstCh == dstCh && m_dstBits == dstBits
+		&& m_active == wantActive) {
+		RefreshDsBufferBytesFromFormat();
+		return;
+	}
+
 	m_srcRate = srcRate;
 	m_srcCh = srcCh;
 	m_srcBits = srcBits;
@@ -170,7 +190,7 @@ void AudioUpscaler::Configure(int srcRate, int srcCh, int srcBits,
 	m_dstBits = dstBits;
 
 	m_bitDepthEnhance = (srcRate == dstRate && srcCh == dstCh && dstBits > srcBits);
-	m_active = (srcRate != dstRate || srcCh != dstCh || srcBits != dstBits);
+	m_active = wantActive;
 	if (srcCh > kUpChMax || dstCh > kUpChMax)
 		m_active = false;
 	if (!m_active) {

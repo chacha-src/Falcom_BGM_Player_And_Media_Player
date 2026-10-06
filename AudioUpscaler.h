@@ -28,6 +28,14 @@ public:
 	int PullInterleaved(uint8_t* dst, int dstCapacity);
 
 	bool IsActive() const { return m_active; }
+	/* まだ Pull していないソースフレーム数。0 なら FIFO は空。 */
+	int BufferedFrames() const;
+	int SrcRate() const { return m_srcRate; }
+	int SrcCh() const { return m_srcCh; }
+	int SrcBits() const { return m_srcBits; }
+	int DstRate() const { return m_dstRate; }
+	int DstCh() const { return m_dstCh; }
+	int DstBits() const { return m_dstBits; }
 
 private:
 	void EnsureConfigured() const;

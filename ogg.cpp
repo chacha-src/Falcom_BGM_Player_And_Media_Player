@@ -17,6 +17,7 @@
 #include "SongParams.h"
 #include "ProAudio.h"
 #include "MpSidecar.h"
+#include "XfadePlayback.h"
 #include "direct.h"
 #ifdef _DEBUG
 #define new DEBUG_NEW

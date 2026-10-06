@@ -18,9 +18,26 @@ volatile LONG g_xfOpening = 0;
 volatile LONG g_xfOpenSlot = 0;
 volatile LONG g_xfOpenThreadId = 0;
 volatile LONG g_xfInProgress = 0;
+/* ループ回数の最後の一周。この間はループ点を曲終端にしてクロスする。 */
+volatile LONG g_xfTreatLoopAsEnd = 0;
+/* 1=ループ回数ボックスに 1 以上。0 は無制限（回数の途中周を回さない）。 */
+volatile LONG g_xfLoopCountActive = 0;
+
+int XfDeferCrossfadeForLoop()
+{
+	if (!XfEnabled())
+		return 0;
+	if (!InterlockedCompareExchange(&g_xfLoopCountActive, 0, 0))
+		return 0;
+	if (InterlockedCompareExchange(&g_xfTreatLoopAsEnd, 0, 0))
+		return 0;
+	return 1;
+}
 volatile LONG g_xfSecSlot = 1;
 volatile LONG g_xfPromotePlIndex = -1;
 volatile LONG g_xfSuppressRestart = 0;
+/* クロスフェードでスロットを昇格した時刻。0=昇格していない */
+volatile LONG g_xfPromoteTick = 0;
 volatile LONG g_xfStartPosted = 0;
 volatile LONG g_xfWantStart = 0;
 volatile LONG g_xfPrepared = 0;
@@ -33,6 +50,7 @@ int g_xfSrcBits[XF_SLOTS] = { 16, 16 };
 
 __int64 g_xfFadeTotalFrames = 0;
 __int64 g_xfFadePos = 0;
+DWORD g_xfMixStartTick = 0;
 
 /* デコード進行・フェード: 実体を2つ */
 int poss_arr[XF_SLOTS] = {};
@@ -82,6 +100,10 @@ extern long data_size;
 extern int flacmode;
 extern int endf;
 extern std::mutex cl2;
+extern __int64 g_expectedDsBytes;
+extern __int64 g_heardBytes;
+extern __int64 g_dsWrittenBytes;
+extern __int64 g_dsSongBase;
 
 void XfClearSlotDecodeState(int slot)
 {
@@ -176,8 +198,12 @@ __int64 XfPlayPosBytes()
 	else
 		posSamp = (poss5_arr[s] > 0) ? poss5_arr[s] : (int)playb_arr[s];
 	if (posSamp <= 0) {
-		extern __int64 g_heardBytes;
-		return g_heardBytes;
+		/* 累積カーソルそのものではなく、この曲の開始からの差。
+		 * まいご（約230秒）のまま Heart（約96秒）を測ると昇格直後に EOF になる。 */
+		__int64 rel = g_heardBytes - g_dsSongBase;
+		if (rel < 0)
+			rel = 0;
+		return rel;
 	}
 	const int outBpf = XfDsOutBpf();
 	const int outRate = XfDsOutRate();
@@ -192,17 +218,62 @@ __int64 XfPlayPosBytes()
 	return outFrames * (__int64)outBpf;
 }
 
+__int64 XfKpiSessionEndBytes()
+{
+	int ms = 0;
+	const int srcRate = (wavbit_sample_Hz > 0) ? wavbit_sample_Hz : XfDsOutRate();
+	if (og) {
+		const DWORD L = og->sikpi.dwLength;
+		if (L != (DWORD)-1 && L >= 2000 && L < 7200000u)
+			ms = (int)L;
+	}
+	if (ms < 2000 && srcRate >= 8000) {
+		int samp = 0;
+		if (loop3 > 0)
+			samp = loop3;
+		else if (loop2 > 0)
+			samp = loop1 + loop2;
+		if (samp > 0) {
+			const int fromSamp = (int)((double)samp * 1000.0 / (double)srcRate + 0.5);
+			if (fromSamp >= 2000 && fromSamp < 7200000)
+				ms = fromSamp;
+		}
+	}
+	if (ms < 2000) {
+		if (!XfEnabled())
+			return 0;
+		ms = XF_KPI_DEFAULT_LEN_MS;
+	}
+	const int outBpf = XfDsOutBpf();
+	const int outRate = XfDsOutRate();
+	if (outBpf <= 0 || outRate <= 0)
+		return 0;
+	return (__int64)ms * (__int64)outRate / 1000 * (__int64)outBpf;
+}
+
 __int64 XfTrackEndRefBytes(__int64 endWrittenBytes)
 {
 	/* シーク後の g_dsWrittenBytes 絶対値は曲位置と一致しないことがある。
 	 * クロスフェード判定はソース総長（loop3/loop2）を優先する。
-	 * ただし KPI/外部プラグインのメタデータ長は UI 目安で短いことが多く、
-	 * それを endRef にすると表示長ちょうどで曲が切れる。 */
+	 * KPI メタは短いことがあるので、取れるときだけ使い、取れなければ 5 分を曲長にする。 */
 	const int dm = g_openDecoderMode;
 	const bool kpiLenHintOnly = (dm == -3 || dm == -20 || dm == -21 || dm == -22);
+	if (kpiLenHintOnly) {
+		if (endWrittenBytes > 0)
+			return endWrittenBytes;
+		if (XfEnabled()) {
+			const __int64 reserved = XfKpiSessionEndBytes();
+			if (reserved > 0)
+				return reserved;
+		}
+		if (g_expectedDsBytes > 0)
+			return g_expectedDsBytes;
+		return 0;
+	}
 	if (!kpiLenHintOnly) {
 		int totalSamp = 0;
-		if (loop2 > 0)
+		/* endf==0 の loop1/loop2 は通常ループ点。最終周だけ終端にしてクロスする。 */
+		if (loop2 > 0 && (endf != 0 || InterlockedCompareExchange(&g_xfTreatLoopAsEnd, 0, 0)))
 			totalSamp = loop1 + loop2;
 		else if (loop3 > 0)
 			totalSamp = loop3;
@@ -342,7 +413,12 @@ void XfCaptureGlobalsToSlot(int slot)
 	if (slot < 0 || slot >= XF_SLOTS)
 		return;
 	XfBag& b = g_xfBag[slot];
-	b.mode = g_openDecoderMode;
+	/* 0 は実在しないデコーダモード（未設定の bag が 0 で埋まっているだけ）。
+	 * これを取り込むとデコード先が消えるので、既存の値を残す。 */
+	if (g_openDecoderMode != 0) {
+		b.mode = g_openDecoderMode;
+		g_openDecoderModeSlot[slot] = g_openDecoderMode;
+	}
 	b.rate = wavbit_sample_Hz;
 	b.ch = wavchannel;
 	b.bits = wavsam_depth;
@@ -350,7 +426,6 @@ void XfCaptureGlobalsToSlot(int slot)
 	b.kmp = og ? og->kmp : NULL;
 	b.kmp1 = og ? og->kmp1 : NULL;
 	b.valid = 1;
-	g_openDecoderModeSlot[slot] = g_openDecoderMode;
 	g_xfSrcRate[slot] = wavbit_sample_Hz;
 	g_xfSrcCh[slot] = wavchannel;
 	{
@@ -391,6 +466,34 @@ void XfSetSlotBag(int slot, int mode, int rate, int ch, int bits, int mp3bps, vo
 	}
 }
 
+void XfUpdateSlotSrcFormat(int slot, int rate, int ch, int bits)
+{
+	if (slot < 0 || slot >= XF_SLOTS)
+		return;
+	XfBag& b = g_xfBag[slot];
+	if (rate >= 8000 && rate <= 384000) {
+		b.rate = rate;
+		g_xfSrcRate[slot] = rate;
+	}
+	if (ch >= 1 && ch <= 32) {
+		b.ch = ch;
+		g_xfSrcCh[slot] = ch;
+	}
+	if (bits != 0) {
+		int sb = abs(bits);
+		if (!(sb == 8 || sb == 16 || sb == 24 || sb == 32))
+			sb = 16;
+		if (bits < 0)
+			sb = 16;
+		b.bits = bits;
+		g_xfSrcBits[slot] = sb;
+	}
+	/* この関数は mode を書かない。bag がまだ 0（未設定）のまま valid にすると
+	 * XfApplySlotFormatToGlobals がモード 0 を globals へ流し、デコード先が消える。 */
+	if (b.mode != 0 && b.mode != INT_MIN)
+		b.valid = 1;
+}
+
 void XfApplySlotFormatToGlobals(int slot)
 {
 	if (slot < 0 || slot >= XF_SLOTS)
@@ -398,8 +501,12 @@ void XfApplySlotFormatToGlobals(int slot)
 	XfBag& b = g_xfBag[slot];
 	if (!b.valid)
 		return;
-	g_openDecoderMode = b.mode;
-	g_openDecoderModeSlot[slot] = b.mode;
+	/* モード 0 は実在しない。流すと混合中ずっと無音になり、毎サイクル
+	 * endflg=1 が立って昇格直後の曲が丸ごと飛ばされる。 */
+	if (b.mode != 0 && b.mode != INT_MIN) {
+		g_openDecoderMode = b.mode;
+		g_openDecoderModeSlot[slot] = b.mode;
+	}
 	wavbit_sample_Hz = b.rate;
 	wavchannel = b.ch;
 	wavsam_depth = b.bits;
@@ -428,6 +535,7 @@ void XfResetAll()
 	InterlockedExchange(&g_xfPrepared, 0);
 	g_xfFadeTotalFrames = 0;
 	g_xfFadePos = 0;
+	g_xfMixStartTick = 0;
 	for (int i = 0; i < XF_SLOTS; ++i) {
 		g_openDecoderModeSlot[i] = INT_MIN;
 		g_xfSrcRate[i] = 0;
@@ -436,6 +544,20 @@ void XfResetAll()
 		ZeroMemory(&g_xfBag[i], sizeof(g_xfBag[i]));
 		XfClearSlotDecodeState(i);
 	}
+}
+
+void XfClearLiveMixFlags()
+{
+	InterlockedExchange(&g_xfInProgress, 0);
+	InterlockedExchange(&g_xfPrepared, 0);
+	InterlockedExchange(&g_xfWantStart, 0);
+	InterlockedExchange(&g_xfStartPosted, 0);
+	InterlockedExchange(&g_xfOpening, 0);
+	InterlockedExchange(&g_xfOpenThreadId, 0);
+	InterlockedExchange(&g_xfFillSlot, -1);
+	g_xfFadePos = 0;
+	g_xfFadeTotalFrames = 0;
+	g_xfMixStartTick = 0;
 }
 
 void XfCloseSlotDecodersImpl(int slot);
@@ -535,29 +657,103 @@ void XfOnCrossfadeFinished()
 {
 	const int oldSlot = XfActiveSlot();
 	const int newSlot = (int)InterlockedCompareExchange(&g_xfSecSlot, 0, 0);
+	const LONG pi = InterlockedExchange(&g_xfPromotePlIndex, -1);
 	XfCloseSlotDecoders(oldSlot);
 	InterlockedExchange(&g_xfSlot, newSlot);
-	InterlockedExchange(&g_xfInProgress, 0);
-	InterlockedExchange(&g_xfPrepared, 0);
 	InterlockedExchange(&g_xfSecSlot, XfOtherSlot(newSlot));
-	g_xfFadePos = 0;
-	g_xfFadeTotalFrames = 0;
+	/* InProgress を下ろす前に終端フラグを消す。まいご（約230秒）の endflg が残ったまま
+	 * Heart（約96秒）が見えると、タイマーが EOF と判定して次の次の曲へ進む。 */
+	endflg = 0;
+	fade1 = 0;
+	InterlockedExchange(&g_xfSuppressRestart, 1);
+	/* 昇格時刻を残す。混合解除直後は g_dsWrittenBytes / g_heardBytes が前曲の
+	 * 絶対値を引きずっているので、この直後に終端を確定させてはいけない。 */
+	InterlockedExchange(&g_xfPromoteTick, (LONG)GetTickCount());
+	/* g_xfInProgress を下ろす前に新スロット側の終端ラッチも消す。
+	 * XfLoadSlotDecodeState は endflg/fade1 をスロット配列から読み直すので、
+	 * ここで消しておかないと混合解除直後に endflg=1 が復活し、
+	 * DS スレッドが前曲の絶対書込み位置を新曲の終端として確定してしまう。 */
+	if (newSlot >= 0 && newSlot < XF_SLOTS) {
+		endflg_arr[newSlot] = 0;
+		fade1_arr[newSlot] = 0;
+		fade_arr[newSlot] = 1.0f;
+	}
+	/* 混合を必ず下ろす。残ると 2 曲目再演奏がノイズ、3 曲目クロスが始まらない */
+	XfClearLiveMixFlags();
+	InterlockedExchange(&g_xfFillSlot, -1);
 	XfApplySlotFormatToGlobals(newSlot);
 	XfLoadSlotDecodeState(newSlot);
+	XfBindSlotUpscalerToSession(newSlot);
 	extern __int64 g_endWrittenBytes, g_expectedDsBytes;
 	g_endWrittenBytes = 0;
-	g_expectedDsBytes = 0;
+	{
+		/* デコーダ位置が次曲の長さを超えていたら前曲の値が漏れている。
+		 * そのままだと Heart は最初のタイマーで EOF になり、お名前が頭から始まる。 */
+		int posSamp = (poss5 > 0) ? poss5 : (int)playb;
+		int totalSamp = 0;
+		if (loop3 > 0)
+			totalSamp = loop3;
+		else if (oggsize > 0)
+			totalSamp = oggsize;
+		else if (loop2 > 0)
+			totalSamp = loop1 + loop2;
+		if (totalSamp > 44100 && posSamp >= totalSamp) {
+			poss5 = 0;
+			playb = 0;
+			poss5_arr[newSlot] = 0;
+			playb_arr[newSlot] = 0;
+			posSamp = 0;
+		}
+		/* 累積 g_dsWrittenBytes は 0 に戻さない。DS スレッドの加算が古い値を書き戻す。
+		 * 基準だけ進め、曲位置は「累積 − 基準」にする。 */
+		{
+			std::lock_guard<std::mutex> guard(cl2);
+			endflg = 0;
+			fade1 = 0;
+			g_dsSongBase = g_dsWrittenBytes;
+			g_endWrittenBytes = 0;
+		}
+	}
+	{
+		const int srcRate = (g_xfSrcRate[newSlot] > 0) ? g_xfSrcRate[newSlot] : wavbit_sample_Hz;
+		int totalSamp = 0;
+		if (loop3 > 0)
+			totalSamp = loop3;
+		else if (oggsize > 0)
+			totalSamp = oggsize;
+		else if (loop2 > 0)
+			totalSamp = loop1 + loop2;
+		const int outRate = XfDsOutRate();
+		const int outBpf = XfDsOutBpf();
+		if (totalSamp > 0 && srcRate >= 8000 && outRate >= 8000 && outBpf > 0) {
+			const __int64 outFrames = (srcRate == outRate)
+				? (__int64)totalSamp
+				: ((__int64)totalSamp * (__int64)outRate + srcRate / 2) / srcRate;
+			g_expectedDsBytes = outFrames * (__int64)outBpf;
+		}
+		else
+			g_expectedDsBytes = 0;
+	}
 	endflg_arr[newSlot] = 0;
 	fade1_arr[newSlot] = 0;
 	fade_arr[newSlot] = 1.0f;
 	endflg = 0;
 	fade1 = 0;
 	fade = 1.0f;
+	fadeadd = 0.0f;
 	readme = 0;
 	loopcnt = 0;
+	rrr = 1;
+	rrr_arr[newSlot] = 1;
+	if (g_openDecoderModeSlot[newSlot] == -10) {
+		extern int endf;
+		endf = 1;
+	}
 	extern int g_pcm_upscale_active;
 	g_pcm_upscale_active = g_audioUpscalerArr[newSlot].IsActive() ? 1 : 0;
-	const LONG pi = InterlockedExchange(&g_xfPromotePlIndex, -1);
+	/* 次曲解決は UI 待ちにしない（遅れると 2 曲目の末で同じ曲を先読みして 3 曲目が来ない） */
+	if (pi >= 0 && pl && pi < pl->playcnt)
+		plcnt = (int)pi;
 	InterlockedExchange(&g_xfSuppressRestart, 1);
 	if (og && ::IsWindow(og->GetSafeHwnd()))
 		og->PostMessage(WM_APP + 92, (WPARAM)newSlot, (LPARAM)pi);
@@ -575,10 +771,8 @@ void XfAbortCrossfade()
 	 * 開き終わった側が中止フラグを見て自分で破棄する） */
 	if (XfPreloadCancel(0))
 		XfCloseSlotDecoders(sec);
-	InterlockedExchange(&g_xfInProgress, 0);
-	InterlockedExchange(&g_xfPrepared, 0);
+	XfClearLiveMixFlags();
 	InterlockedExchange(&g_xfPromotePlIndex, -1);
-	InterlockedExchange(&g_xfWantStart, 0);
 	g_xfFadePos = 0;
 	g_xfFadeTotalFrames = 0;
 	XfApplySlotFormatToGlobals(cur);
@@ -650,9 +844,6 @@ int XfShouldStartEarly(__int64 /*heardBytes*/, __int64 endWrittenBytes)
 	extern int sek4;
 	if (sek || sek4)
 		return 0;
-	const int s = XfActiveSlot();
-	if (endflg_arr[s])
-		return 0;
 	const __int64 endRef = XfFadeEndRefBytes(endWrittenBytes);
 	if (endRef <= 0)
 		return 0;
@@ -663,7 +854,10 @@ int XfShouldStartEarly(__int64 /*heardBytes*/, __int64 endWrittenBytes)
 	const __int64 startAt = endRef - xfBytes;
 	if (startAt <= 0)
 		return (pos > 0) ? 1 : 0;
-	return (pos >= startAt && pos < endRef) ? 1 : 0;
+	/* 終端を越えた側も窓幅分だけ窓とみなす。mp3 の曲長はヘッダからの概算で
+	 * 実際に鳴る長さとずれるため、pos < endRef だけを窓にすると、
+	 * 先に pos が endRef を越える曲では開始せず EOF 任せの遅いクロスになる。 */
+	return (pos >= startAt && pos < endRef + xfBytes) ? 1 : 0;
 }
 
 void XfTryStartCrossfade()

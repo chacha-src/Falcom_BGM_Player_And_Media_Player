@@ -698,13 +698,44 @@ static int HandleFillDecodeOne(BYTE* dest, int n, int* pReadme, bool* pExitNow)
 	 * ジャケ読み込み等で UI が詰まった分だけ開始が遅れ、その遅れ量が
 	 * そのままクロス末尾と B の頭のずれになる。 */
 	if (!InterlockedCompareExchange(&g_xfInProgress, 0, 0)
-		&& InterlockedCompareExchange(&g_xfPrepared, 0, 0)
-		&& (XfShouldStartEarly(g_heardBytes, g_endWrittenBytes) || XfRenzokuLimitReached())) {
-		const int cur = XfActiveSlot();
-		if (g_openDecoderModeSlot[XfOtherSlot(cur)] != INT_MIN)
-			XfBeginMixLocked(cur);
+		&& InterlockedCompareExchange(&g_xfPrepared, 0, 0)) {
+		extern ULONGLONG g_seekUiHoldUntil;
+		extern BOOL sek;
+		extern int sek4;
+		if ((g_seekUiHoldUntil != 0 && GetTickCount64() < g_seekUiHoldUntil)
+			|| sek || sek4) {
+			/* シーク直後は FIFO が空。ここで混ぜると入り無音になる */
+		}
+		else {
+		const __int64 fadeEnd = XfFadeEndRefBytes(g_endWrittenBytes);
+		const __int64 xfWin = XfCrossfadeWindowBytes();
+		const __int64 playPos = XfPlayPosBytes();
+		/* 終端 − 設定秒に達したら混ぜる。その点を過ぎてから B が開いても
+		 * 始めないと、準備済みのまま次曲へも行かず止まる。 */
+		const int inWin = (fadeEnd > 0 && xfWin > 0 && playPos > 0
+			&& playPos + xfWin >= fadeEnd);
+		if (inWin || XfShouldStartEarly(g_heardBytes, g_endWrittenBytes) || XfRenzokuLimitReached()) {
+			const int cur = XfActiveSlot();
+			const int oth = XfOtherSlot(cur);
+			if (g_openDecoderModeSlot[oth] != INT_MIN) {
+				XfBeginMixLocked(cur);
+			}
+		}
+		}
 	}
 	if (m_dsb) {
+		if (InterlockedCompareExchange(&g_xfInProgress, 0, 0)) {
+			int mixDoneEarly = (g_xfFadeTotalFrames > 0 && g_xfFadePos >= g_xfFadeTotalFrames);
+			if (!mixDoneEarly && g_xfMixStartTick != 0) {
+				DWORD lim = (DWORD)(XfSecFromSave() * 1000.0 + 800.0);
+				if (lim < 1500)
+					lim = 1500;
+				if (GetTickCount() - g_xfMixStartTick >= lim)
+					mixDoneEarly = 1;
+			}
+			if (mixDoneEarly)
+				XfOnCrossfadeFinished();
+		}
 		if (InterlockedCompareExchange(&g_xfInProgress, 0, 0)) {
 			const int aSlot = XfActiveSlot();
 			const int bSlot = (int)InterlockedCompareExchange(&g_xfSecSlot, 0, 0);
@@ -718,14 +749,23 @@ static int HandleFillDecodeOne(BYTE* dest, int n, int* pReadme, bool* pExitNow)
 			ZeroMemory(s_xfB, nn);
 			ZeroMemory(s_xfMix, nn);
 			extern int g_pcm_upscale_active;
-			/* A: スロット配列→作業用にロードしてからデコード */
-			InterlockedExchange(&g_xfFillSlot, aSlot);
-			XfLoadSlotDecodeState(aSlot);
-			XfApplySlotFormatToGlobals(aSlot);
-			g_pcm_upscale_active = g_audioUpscalerArr[aSlot].IsActive() ? 1 : 0;
-			DispatchPlaywavFill(s_xfA, 0, nn, 0);
-			XfSaveSlotDecodeState(aSlot);
-			XfCaptureGlobalsToSlot(aSlot);
+			/* B を先に取る。A の壊れた末尾フレームでフィルが止まっても、
+			 * 次曲の PCM はもう s_xfB にある。 */
+			InterlockedExchange(&g_xfFillSlot, bSlot);
+			XfLoadSlotDecodeState(bSlot);
+			XfApplySlotFormatToGlobals(bSlot);
+			XfBindSlotUpscalerToSession(bSlot);
+			g_pcm_upscale_active = g_audioUpscalerArr[bSlot].IsActive() ? 1 : 0;
+			fade1 = 0;
+			endflg = 0;
+			fade = 1.0f;
+			fadeadd = 0.0f;
+			DispatchPlaywavFill(s_xfB, 0, nn, 0);
+			fade1 = 0;
+			endflg = 0;
+			fade = 1.0f;
+			fadeadd = 0.0f;
+			XfSaveSlotDecodeState(bSlot);
 			if (thn1 || InterlockedCompareExchange(&s_fillStop, 0, 0)
 				|| InterlockedCompareExchange(&g_appExiting, 0, 0)) {
 				InterlockedExchange(&g_xfFillSlot, -1);
@@ -736,14 +776,23 @@ static int HandleFillDecodeOne(BYTE* dest, int n, int* pReadme, bool* pExitNow)
 				sflg = FALSE;
 				return 0;
 			}
-			/* B */
-			InterlockedExchange(&g_xfFillSlot, bSlot);
-			XfLoadSlotDecodeState(bSlot);
-			XfApplySlotFormatToGlobals(bSlot);
-			g_pcm_upscale_active = g_audioUpscalerArr[bSlot].IsActive() ? 1 : 0;
-			DispatchPlaywavFill(s_xfB, 0, nn, 0);
-			XfSaveSlotDecodeState(bSlot);
-			XfCaptureGlobalsToSlot(bSlot);
+			/* A: スロット配列→作業用にロードしてからデコード */
+			InterlockedExchange(&g_xfFillSlot, aSlot);
+			XfLoadSlotDecodeState(aSlot);
+			XfApplySlotFormatToGlobals(aSlot);
+			XfBindSlotUpscalerToSession(aSlot);
+			g_pcm_upscale_active = g_audioUpscalerArr[aSlot].IsActive() ? 1 : 0;
+			/* スロットに残った fade1 で PCM を 0 にしない。等パワー側で下げる。 */
+			fade1 = 0;
+			endflg = 0;
+			fade = 1.0f;
+			fadeadd = 0.0f;
+			DispatchPlaywavFill(s_xfA, 0, nn, 0);
+			fade1 = 0;
+			endflg = 0;
+			fade = 1.0f;
+			fadeadd = 0.0f;
+			XfSaveSlotDecodeState(aSlot);
 			/* 作業用を本流 A に戻す */
 			InterlockedExchange(&g_xfFillSlot, -1);
 			XfLoadSlotDecodeState(aSlot);
@@ -763,7 +812,15 @@ static int HandleFillDecodeOne(BYTE* dest, int n, int* pReadme, bool* pExitNow)
 			memcpy(dest, s_xfMix, (size_t)nn);
 			if (nn < n)
 				ZeroMemory(dest + nn, (size_t)(n - nn));
-			if (g_xfFadePos >= g_xfFadeTotalFrames)
+			int mixDone = (g_xfFadeTotalFrames > 0 && g_xfFadePos >= g_xfFadeTotalFrames);
+			if (!mixDone && g_xfMixStartTick != 0) {
+				DWORD lim = (DWORD)(XfSecFromSave() * 1000.0 + 800.0);
+				if (lim < 1500)
+					lim = 1500;
+				if (GetTickCount() - g_xfMixStartTick >= lim)
+					mixDone = 1;
+			}
+			if (mixDone)
 				XfOnCrossfadeFinished();
 		}
 		else {
@@ -1469,8 +1526,18 @@ UINT HandleNotifications(LPVOID)
 			// readme があれば最終チャンク内の実バイト境界。無音のみなら「直前までの書込み」を終端にする。
 			// writtenBefore==0（まだ1バイトも書いていない／誤って fade1 が立った直後）では確定しない。
 			// 同サイクルの writtenThisCycle で確定すると初回バッファ直後に AUTO_STOPPED→解放レースになる。
+			// クロスフェードで A が窓の途中で尽きると endflg が立つ。Xing/Info の無い
+			// mp3（例:「まいご」）はヘッダ長が実デコード長より数十ms長いため必ずこうなる。
+			// 混合を解除した直後はこの endflg が残っており、g_dsWrittenBytes は前曲の
+			// 絶対値のままなので、そこで終端を確定すると新曲は鳴り出した瞬間に EOF と
+			// 判定される。結果 1 曲飛ばされ、その次が頭から鳴る。昇格直後は確定しない。
+			extern volatile LONG g_xfPromoteTick;
+			const LONG promoTick = InterlockedCompareExchange(&g_xfPromoteTick, 0, 0);
+			const int justPromoted = (promoTick != 0
+				&& (LONG)(GetTickCount() - (DWORD)promoTick) < 1500);
 			if (g_endWrittenBytes == 0 && (fade1 || endflg)
-				&& !InterlockedCompareExchange(&g_xfInProgress, 0, 0)) {
+				&& !InterlockedCompareExchange(&g_xfInProgress, 0, 0)
+				&& !justPromoted) {
 				if (readmeThisCycle > 0 && readmeThisCycle <= writtenThisCycle)
 					g_endWrittenBytes = writtenBefore + readmeThisCycle;
 				else if (writtenBefore > 0)
@@ -1504,7 +1571,7 @@ UINT HandleNotifications(LPVOID)
 		 * サイクル境界で自前に開始する。両方から始めると開始位置がぶれる。 */
 		if (!InterlockedCompareExchange(&g_xfInProgress, 0, 0)
 			&& !InterlockedCompareExchange(&g_xfPrepared, 0, 0) && XfEnabled()) {
-			if (XfShouldStartEarly(g_heardBytes, g_endWrittenBytes))
+			if (XfShouldStartEarly(g_heardBytes, g_endWrittenBytes) || XfRenzokuLimitReached())
 				XfTryStartCrossfade();
 		}
 
@@ -6661,24 +6728,36 @@ static void equaliserBankUnlocked(void* data, int len, BOOL reset) {
 	// eq[15]: 100=1.0倍、偏差を2倍にしてスライダー差を明確化
 	float masterGain = fmaxf(0.0f, 1.0f + (masterVolume - 100.0f) / 50.0f);
 
-	// 0dB(100)を超えるブースト量に応じて内部ヘッドルームを自動確保する。
-	// 体感音量はなるべく維持しつつ、EQ強ブースト時のハードクリップを抑える。
+	// 0dB 付近の音源は、ブーストした分がそのまま天井に当たると
+	// 大きいところだけが削られてコンプレッサーのように聞こえる。
+	// 一番上がる帯域の分だけ先に一定ゲインで下げ、メイクアップでは戻さない。
+	// 隣り合う帯域の裾は第二位の 35% だけ足す。サンプルごとの追従はしない。
 	float maxBandBoostDb = 0.0f;
+	float secondBandBoostDb = 0.0f;
 	for (int b = 0; b < EQ_BANDS; b++) {
-		float bandBoostDb = (savedata.eq[b] - 100.0f) * 0.12f;
-		if (bandBoostDb > maxBandBoostDb) maxBandBoostDb = bandBoostDb;
+		const float bandBoostDb = (savedata.eq[b] - 100.0f) * 0.12f;
+		if (bandBoostDb < 1.2f) continue; // この未満はピーキングがスルー
+		if (bandBoostDb > maxBandBoostDb) {
+			secondBandBoostDb = maxBandBoostDb;
+			maxBandBoostDb = bandBoostDb;
+		}
+		else if (bandBoostDb > secondBandBoostDb)
+			secondBandBoostDb = bandBoostDb;
 	}
 	float maxExtendedBoostDb = 0.0f;
 	{
-		const float clarityDb = (clarity - 100.0f) * 0.36f;
+		float clarityDb = (clarity - 100.0f) * 0.36f;
+		if (clarityDb < 1.2f) clarityDb = 0.0f;
 		const float balanceDb = fabsf((balance - 100.0f) * 0.24f);
-		const float densityDb = fabsf((density - 100.0f) * 0.30f);
+		float densityDb = (density - 100.0f) * 0.30f;
+		if (densityDb < 1.2f) densityDb = 0.0f;
+		else densityDb *= 1.35f; // 600Hz と 1400Hz の同じ山
 		maxExtendedBoostDb = fmaxf(clarityDb, fmaxf(balanceDb, densityDb));
 	}
-	const float totalBoostDb = maxBandBoostDb + maxExtendedBoostDb;
-	const float headroomDb = ClampFloat(totalBoostDb - 6.0f, 0.0f, 18.0f);
+	const float totalBoostDb = maxBandBoostDb + 0.35f * secondBandBoostDb + maxExtendedBoostDb;
+	const float headroomDb = ClampFloat(totalBoostDb, 0.0f, 40.0f);
 	const float eqHeadroomGain = powf(10.0f, -headroomDb / 20.0f);
-	const float eqMakeupGain = 1.0f + (1.0f - eqHeadroomGain) * 0.55f;
+	const float eqMakeupGain = 1.0f;
 
 	BlockAnalysis ba = AnalyzeBlock(pRaw, numSamples, wavchannel, wavsam_depth, bytesPerSample, masterGain);
 

@@ -2044,9 +2044,16 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 	if (m_seekLock.GetSafeHwnd())
 		m_seekLock.SetFont(&m_fontChk, TRUE);
 	m_kaisuuL.SetFont(&m_fontChk, TRUE);
-	// PreferWideMode は縦に引き伸ばして「ループ回数」だけ巨大化するので使わない
+	// PreferWideMode は縦に引き伸ばして「ループ回数」だけ巨大化するので使わない。
+	// 行高さいっぱいへの拡大も同じ理由で止める（連続再生などと同じ字の高さ）。
 	m_kaisuuL.SetPreferWideMode(FALSE);
+	m_kaisuuL.SetKeepFontHeight(TRUE);
 	m_kaisuu.SetFont(&m_fontChk, TRUE);
+	// 「秒」も同じ静的ラベルなので、行高さへ伸ばさず回数ラベルと揃える
+	if (m_xfadeL.GetSafeHwnd()) {
+		m_xfadeL.SetFont(&m_fontChk, TRUE);
+		m_xfadeL.SetKeepFontHeight(TRUE);
+	}
 	if (m_toolsToggle.GetSafeHwnd())
 		m_toolsToggle.SetFont(&m_fontChk, TRUE);
 	if (m_plrename.GetSafeHwnd())

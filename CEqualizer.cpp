@@ -1416,9 +1416,27 @@ void CEqualizer::LayoutToneColumns()
 	CClientDC dc(this);
 	CFont* pFont = GetFont();
 	CFont* pOld = pFont ? dc.SelectObject(pFont) : NULL;
-	TEXTMETRIC tm;
+	TEXTMETRIC tm = {};
 	dc.GetTextMetrics(&tm);
-	labH = max(labH, tm.tmHeight + 2);
+	/* デザイナ: Hz と同じ行。フォント高さで裏描画してから横圧縮。
+	 * 列ごとに高さを変えない（横一列）。スライダーとは 1px 空ける。 */
+	const int fontH = max(12, (int)tm.tmHeight);
+	if (pRefLb && ::IsWindow(pRefLb->GetSafeHwnd())) {
+		CRect rl;
+		pRefLb->GetWindowRect(&rl);
+		ScreenToClient(&rl);
+		labTop = rl.top;
+	}
+	labH = fontH;
+	{
+		const int cap = rs.top - labTop;
+		if (cap <= 2) {
+			labTop = rs.top - fontH - 1;
+			labH = fontH;
+		}
+		else if (labTop + labH >= rs.top)
+			labH = max(8, rs.top - labTop - 1);
+	}
 
 	CRect colS[8];
 	int colCx[8];
@@ -1452,27 +1470,35 @@ void CEqualizer::LayoutToneColumns()
 
 		CWnd* pl = GetDlgItem(cols[i].labelId);
 		if (pl && ::IsWindow(pl->GetSafeHwnd())) {
-			pl->ModifyStyle(SS_TYPEMASK, SS_CENTER);
+			pl->ModifyStyle(SS_TYPEMASK | SS_ENDELLIPSIS, SS_CENTER);
 			if (CCustomStatic* pcs = DYNAMIC_DOWNCAST(CCustomStatic, pl))
-				pcs->SetPreferWideMode(TRUE);
-			CString text;
-			pl->GetWindowText(text);
-			CSize sz = dc.GetTextExtent(text);
-			int lw = max(s.Width() + 6, sz.cx + 8);
+				pcs->SetPreferWideMode(FALSE);
+			int pitch = s.Width() + 10;
+			if (i + 1 < n && colCx[i + 1] > 0)
+				pitch = colCx[i + 1] - cx;
+			else if (i > 0 && colCx[i - 1] > 0)
+				pitch = cx - colCx[i - 1];
+			int lw = max(8, pitch - 2);
 			int left = cx - lw / 2;
 			int right = left + lw;
 			if (i == 0 && hzRight > 0 && left < hzRight) {
 				left = hzRight;
-				right = max(right, left + sz.cx + 8);
-				lw = right - left;
+				lw = max(8, right - left);
+				right = left + lw;
 			}
 			if (i + 1 < n && colCx[i + 1] > 0) {
 				const int mid = (cx + colCx[i + 1]) / 2;
-				if (right > mid + 4)
-					right = mid + 4;
-				if (right < left + sz.cx + 6)
-					right = left + sz.cx + 6;
-				lw = right - left;
+				if (right > mid - 2) {
+					right = mid - 2;
+					lw = max(8, right - left);
+				}
+			}
+			if (i > 0 && colCx[i - 1] > 0) {
+				const int midL = (colCx[i - 1] + cx) / 2;
+				if (left < midL + 2) {
+					left = midL + 2;
+					lw = max(8, right - left);
+				}
 			}
 			pl->SetWindowPos(NULL, left, labTop, lw, labH,
 				SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOREDRAW);
