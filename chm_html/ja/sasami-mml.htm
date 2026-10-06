@@ -1,0 +1,126 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<title>SASAMI MML（MICP 標準）</title>
+<link rel="stylesheet" type="text/css" href="../css/help.css">
+</head>
+<body>
+
+<div class="topnav"><a href="index.htm">目次</a> &nbsp;|&nbsp; <a href="../en/sasami-mml.htm">English</a></div>
+
+<h1>SASAMI MML（MICP 標準）</h1>
+
+<p class="lead">Win版「ささみ☆ミ」のヘルプ SASAMIM.HLP（2000年）にある MICP の書き方です。音階・パート・標準命令・ドラム・短いサンプルをここにまとめています。@ と $、ピッチの数値表は <a href="sasami-mml-ext.htm">拡張命令</a> です。テキストからどのファイルになるかは <a href="sasami-composer.htm">SASAMI Composer</a> を見てください。</p>
+<h2>音階と音長</h2>
+<p>オクターブは 1 が一番低く、8 が一番高いです。初期値は 4。音名のあとに長さを書くと、その音だけ <code>L</code> を上書きします。<code>C4</code> は <code>L4C</code> と同じです。</p>
+<table class="grid">
+<tr><th>書き方</th><th>音</th></tr>
+<tr><td><code>C</code></td><td>ド</td></tr>
+<tr><td><code>C+</code> または <code>D-</code></td><td>ド♯ / レ♭</td></tr>
+<tr><td><code>D</code></td><td>レ</td></tr>
+<tr><td><code>D+</code> または <code>E-</code></td><td>レ♯ / ミ♭</td></tr>
+<tr><td><code>E</code></td><td>ミ</td></tr>
+<tr><td><code>F</code></td><td>ファ</td></tr>
+<tr><td><code>F+</code> または <code>G-</code></td><td>ファ♯ / ソ♭</td></tr>
+<tr><td><code>G</code></td><td>ソ</td></tr>
+<tr><td><code>G+</code> または <code>A-</code></td><td>ソ♯ / ラ♭</td></tr>
+<tr><td><code>A</code></td><td>ラ</td></tr>
+<tr><td><code>A+</code> または <code>B-</code></td><td>ラ♯ / シ♭</td></tr>
+<tr><td><code>B</code></td><td>シ</td></tr>
+</table>
+<p>旧ヘルプの <code>E+</code>（<code>F-</code>）はファ、という注記でした。いまの Composer は <code>+</code> / <code>#</code> を半音上、<code>-</code> を半音下として、MIDI では o4 の <code>C</code> がノート 60 です。</p>
+<p>音符の直後の <code>&amp;</code> は、旧ヘルプではゲートを最大にします。次の音が同じ高さならタイです。例: <code>q32</code> のとき <code>C4&amp;</code> は <code>q64C4q32</code>、<code>C4&amp;C4</code> は <code>q64C4^8R8q32</code>。いまの Composer では <code>&amp;</code> も <code>^</code> も、直前の音符の長さを足します。</p>
+<h2>パート</h2>
+<p><code>[パート:ワーク]</code> でチャンネルを始めます。ワークは省略でき、空いている番号を使います。ワークは 1～63 で、同じ番号は重ねません。</p>
+<ul>
+<li>1～16 …… MIDI の A ポート。</li>
+<li>17～32 …… MIDI の B ポート。旧ヘルプでは 32ch モード以外は無効。</li>
+<li>同じパートに音を重ねるときは、ワークを変えて同じパート番号を並べます。</li>
+</ul>
+<pre class="fig">[2:1] C4
+[2:2] E4
+[2:3] G4
+
+[2] C4
+[2] E4
+[2] G4</pre>
+<p>上はどちらもドミソの和音です。いまの Composer は <code>#n</code>（1 始まり）も読めます。コメントは <code>;</code> から行末、または <code>//</code> です。</p>
+<h2>標準命令</h2>
+<p>旧ヘルプは半角大文字指定です。範囲と初期値はその記載です。右端は、いまのテキスト Composer がイベントにするかどうかです。</p>
+<table class="grid">
+<tr><th>命令</th><th>範囲</th><th>初期</th><th>意味</th><th>いま</th></tr>
+<tr><td><code>T n</code></td><td>40～3000</td><td>—</td><td>テンポ。大きいほど速い。相対変化は無いので、変えるときは書き直す。</td><td>出す（<code>t</code> も可）</td></tr>
+<tr><td><code>O n</code></td><td>1～8</td><td>4</td><td>オクターブ。端の音は鳴らないことがある。</td><td>出す（<code>o</code> も可。0 も通る）</td></tr>
+<tr><td><code>L n</code></td><td>1～192</td><td>4</td><td>音長。192 で割れる値。4分の3連は 4×3 で <code>L12</code>。</td><td>出す</td></tr>
+<tr><td><code>! n</code></td><td>1～255</td><td>—</td><td>音長の数値版。4分音符が 48。</td><td>文字だけ捨てる</td></tr>
+<tr><td><code>R n</code></td><td>1～192</td><td>L</td><td>休符。省略時は L。3連も L と同じ。</td><td>大文字 R は休符。小文字 r は待ち</td></tr>
+<tr><td><code>^ n</code></td><td>1～192</td><td>L</td><td>タイ。n のあいだ前の状態を保つ。</td><td>直前の音符を伸ばす</td></tr>
+<tr><td><code>Q</code> / <code>J</code></td><td>—</td><td>—</td><td>Q から J までを永久ループ。</td><td>出す</td></tr>
+<tr><td><code>＞</code></td><td>—</td><td>—</td><td>オクターブを 1 上げる。</td><td>出す</td></tr>
+<tr><td><code>＜</code></td><td>—</td><td>—</td><td>オクターブを 1 下げる。</td><td>出す</td></tr>
+<tr><td><code>P</code></td><td>0～127</td><td>64</td><td>パン。0 左、64 中央、127 右。パートごと。</td><td>出す。<code>P64:85</code> の副値は捨てる</td></tr>
+<tr><td><code>|: n</code> … <code>:|</code></td><td>2～250</td><td>2</td><td>メモリ節約ループ。回数分繰り返す。ピッチの相対変化には向かない。</td><td>出す</td></tr>
+<tr><td><code>｛: n</code> … <code>｝:</code></td><td>2～250</td><td>2</td><td>展開ループ。回数だけデータが増える。相対ピッチはこちら。</td><td>クラシックは展開。新形式は命令のまま</td></tr>
+<tr><td><code>(</code> / <code>)</code></td><td>—</td><td>—</td><td>ペダル on / off。例 <code>(L16CDE8^2.)</code>。</td><td>出す（CC64。<code>@PEDON</code> / <code>@PEDOFF</code> と同じ）</td></tr>
+<tr><td><code>q n</code></td><td>1～64</td><td>64</td><td>ゲート。音符の n/64 だけ鳴らして残りは休み。</td><td>出す（100 まで読む）</td></tr>
+<tr><td><code>I n</code></td><td>0～127</td><td>—</td><td>GS リバーブセンド。</td><td>命令として残す</td></tr>
+<tr><td><code>K n</code></td><td>0～127</td><td>—</td><td>GS コーラスセンド。</td><td>読み飛ばす</td></tr>
+<tr><td><code>W</code> / <code>M</code></td><td>—</td><td>—</td><td>エクスプレッションを 1 上げる / 下げる。</td><td>読み飛ばす</td></tr>
+<tr><td><code>_0</code></td><td>—</td><td>—</td><td>次行の半角 64 文字をタイトル。</td><td>タイトルは <code>TIT"…"</code></td></tr>
+<tr><td><code>_1</code></td><td>—</td><td>—</td><td>次行の引用符内（行頭、半角 30 文字）を表示文字。16 文字を超えるとスクロール。</td><td>読み飛ばす</td></tr>
+</table>
+<div class="note"><span class="label">注意</span>
+<p>旧ヘルプは <code>|:</code> と <code>｛:</code> の入れ子を禁止しています。いまの Composer は入れ子できます。1 段なら .mpy / .fpy、2 段以上は .mpw2 / .fpy2 です。<code>＞</code> が上がって <code>＜</code> が下がるのは旧ヘルプと同じです。PMD の向きとは逆です。</p>
+</div>
+<h2>ドラム（小文字）</h2>
+<p>旧ヘルプのドラム文字です。長さは <code>L</code> と同じで、省略すると L です。ノート番号が分かれば普通の音名でも書けます。旧ヘルプでは <code>s</code> と <code>O3C</code> が同じ、としています。</p>
+<table class="grid">
+<tr><th>文字</th><th>楽器</th><th>いま</th></tr>
+<tr><td><code>h</code></td><td>ハイハット（クローズ）</td><td>出す（ノート 42）</td></tr>
+<tr><td><code>s</code></td><td>スネア</td><td>出す（38）</td></tr>
+<tr><td><code>b</code></td><td>バスドラム</td><td>出す（36）</td></tr>
+<tr><td><code>o</code></td><td>オープンハイハット</td><td>専用文字は無い（<code>o</code> はオクターブ）</td></tr>
+<tr><td><code>c</code></td><td>シンバル</td><td>専用文字は無い（<code>c</code> はド）</td></tr>
+<tr><td><code>l</code></td><td>ロータム</td><td>専用文字は無い（<code>l</code> は音長）</td></tr>
+<tr><td><code>m</code></td><td>ミドルタム</td><td>読み飛ばす</td></tr>
+<tr><td><code>f</code></td><td>ハイタム</td><td>専用文字は無い（<code>f</code> はファ）</td></tr>
+<tr><td><code>r</code></td><td>（旧表には無い）</td><td>ドラムパートではライド 51</td></tr>
+</table>
+<p>ドラムにする指定は、旧ヘルプでは拡張の <code>@D</code> です。いまは <code>@DRUM 1</code>、または MIDI 10 / 26 が既定のドラムです。詳しくは拡張命令のページ。</p>
+<h2>サンプル</h2>
+<p>旧ヘルプの「基礎だけ」の 3 つです。</p>
+<h3>1 パート、テンポ 120、4分でドレミファソラシド</h3>
+<pre class="fig">[1] T120 L4
+CDEFGAB>C</pre>
+<h3>同じ旋律を永久ループ</h3>
+<pre class="fig">[1] T120 L4
+Q
+CDEFGAB>C
+J</pre>
+<h3>ドミソを永久に</h3>
+<pre class="fig">[1] T120 L4
+Q
+C
+J
+[1]
+Q
+E
+J
+[1]
+Q
+G
+J</pre>
+<div class="related"><span class="label">あわせて読みたい</span><ul><li><a href="sasami-mml-ext.htm">SASAMI MML 拡張命令</a></li><li><a href="sasami-composer.htm">SASAMI Composer（曲を作る）</a></li><li><a href="sasami-mpy.htm">SASAMI .mpy コマンド（全部）</a></li><li><a href="sasami-fpy.htm">SASAMI .fpy コマンド（全部）</a></li></ul></div>
+
+<div class="botnav">
+<span class="prev">&#171; 前へ: <a href="sasami-composer.htm">SASAMI Composer（曲を作る）</a></span>
+<span class="next">次へ: <a href="sasami-mml-ext.htm">SASAMI MML 拡張命令</a> &#187;</span>
+<span class="up"><a href="index.htm">目次</a></span>
+<div class="clear"></div>
+</div>
+
+<div class="foot">メディアプレイヤー「らいら」 (oggYSEDbgm) — PrePrayerPower Soft</div>
+
+</body>
+</html>

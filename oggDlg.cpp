@@ -6694,8 +6694,9 @@ BOOL COggDlg::OnInitDialog()
 
 	m_dsval.ShowWindow(SW_HIDE);
 	m_dsval.SetRange(-498, 1);
-	m_dsval.SetPos(-200);
-	//	m_dsval.SetPos(savedata.dsvol);
+	if (savedata.dsvol == 0 || savedata.dsvol > 1 || savedata.dsvol < -498)
+		savedata.dsvol = 1;
+	m_dsval.SetPos(savedata.dsvol);
 	voldsf = 1;
 
 	cdc0 = GetDC(); //new CClientDC(this);
@@ -6790,11 +6791,15 @@ BOOL COggDlg::OnInitDialog()
 
 
 	m_tempo_sl.SetRange(0, 400);
-	m_tempo_sl.SetPos(200);
+	if (savedata.tempoPos < 0 || savedata.tempoPos > 400)
+		savedata.tempoPos = 200;
+	if (savedata.pitchPos < 0 || savedata.pitchPos > 400)
+		savedata.pitchPos = 200;
+	m_tempo_sl.SetPos(savedata.tempoPos);
 	m_pitch_sl.SetRange(0, 400);
-	m_pitch_sl.SetPos(200);
-	tempo = 200;
-	pitch = 200;
+	m_pitch_sl.SetPos(savedata.pitchPos);
+	tempo = savedata.tempoPos;
+	pitch = savedata.pitchPos;
 	SyncMicMixUiFromSavedata();
 	AudioDevWatchEnsure(m_hWnd);
 	AudioDevApplyRescanButton(&m_micdevRefresh);
@@ -21846,24 +21851,51 @@ static bool IsBlockSilent(const BYTE* buffer, int bytes, int bitDepth)
 // worker keeps seconds of PCM ready instead.
 namespace {
 enum : int { VST_PF_CHUNK = 64 * 1024, VST_PF_SECONDS = 4 };
+enum { kVstPfCap = 8 * 1024 * 1024 };
+
+/* リング本体は初期化子を持たない配列にして BSS に置く。
+   構造体メンバのまま定数初期化すると、ゼロ 32MB が exe に焼き込まれる。 */
+static uint8_t g_vstPfRing[XF_SLOTS][kVstPfCap];
+static uint8_t g_vstPfHold[XF_SLOTS][kVstPfCap];
+static int g_vstPfBind;
 
 struct VstPrefetch
 {
-	enum { kCap = 8 * 1024 * 1024 };
-	uint8_t ring[kCap];
-	uint8_t hold[kCap];
-	size_t cap = 0;
-	size_t head = 0;
-	size_t used = 0;
-	int bpf = 4;
-	int slot = 0;
-	bool eof = false;
-	bool csReady = false;
-	CRITICAL_SECTION cs{};   // リング保護
-	CRITICAL_SECTION rcs{};  // Render 順序保護（先読みと同期フォールバックの入れ替え防止）
-	HANDLE room = NULL;
-	HANDLE stop = NULL;
-	HANDLE thread = NULL;
+	enum { kCap = kVstPfCap };
+	uint8_t* ring;
+	uint8_t* hold;
+	size_t cap;
+	size_t head;
+	size_t used;
+	int bpf;
+	int slot;
+	bool eof;
+	bool csReady;
+	CRITICAL_SECTION cs;   // リング保護
+	CRITICAL_SECTION rcs;  // Render 順序保護（先読みと同期フォールバックの入れ替え防止）
+	HANDLE room;
+	HANDLE stop;
+	HANDLE thread;
+
+	VstPrefetch()
+		: ring(g_vstPfRing[g_vstPfBind])
+		, hold(g_vstPfHold[g_vstPfBind])
+		, cap(0)
+		, head(0)
+		, used(0)
+		, bpf(4)
+		, slot(0)
+		, eof(false)
+		, csReady(false)
+		, room(NULL)
+		, stop(NULL)
+		, thread(NULL)
+	{
+		if (g_vstPfBind < XF_SLOTS)
+			++g_vstPfBind;
+		memset(&cs, 0, sizeof cs);
+		memset(&rcs, 0, sizeof rcs);
+	}
 };
 /* 曲スロットごとに独立したリング。クロスフェード中も A のリングを捨てない
  * （捨てるとエンジンは先まで描画済みなので、その分 A が数秒ワープする） */
@@ -27417,13 +27449,21 @@ void COggDlg::timerp()
 	if (savedata.playerMode == 1) {
 		extern CMediaPlayerDlg* mp;
 		if (mp && ::IsWindow(mp->m_tempo.GetSafeHwnd())) {
+			CWnd* foc = CWnd::GetFocus();
+			const HWND hf = foc ? foc->GetSafeHwnd() : NULL;
 			const int mpTempo = mp->m_tempo.GetPos();
-			if (mpTempo != tempo) {
-				tempo = mpTempo;
-				m_tempo_sl.SetPos(tempo);
+			if (hf == mp->m_tempo.GetSafeHwnd()) {
+				if (mpTempo != tempo) {
+					tempo = mpTempo;
+					m_tempo_sl.SetPos(tempo, FALSE);
+				}
+			} else if (mpTempo != tempo) {
+				mp->m_tempo.SetPos(tempo, FALSE);
 			}
 		}
 	}
+	if (tempo < 0 || tempo > 400) tempo = 200;
+	savedata.tempoPos = tempo;
 	// 動画(mode=-2) / ゲーム+動画合成: テンポ → DirectShow 再生速度
 	DougaApplyTempoToVideoRate();
 	if (!(mode == -2 || videoonly == TRUE)) {
@@ -28454,32 +28494,54 @@ void COggDlg::timerp()
 	if (savedata.playerMode == 1) {
 		extern CMediaPlayerDlg* mp;
 		if (mp && ::IsWindow(mp->GetSafeHwnd())) {
+			CWnd* foc = CWnd::GetFocus();
+			const HWND hf = foc ? foc->GetSafeHwnd() : NULL;
 			if (mp->m_tempo.GetSafeHwnd()) {
 				const int mpTempo = mp->m_tempo.GetPos();
-				if (mpTempo != tempo) {
-					tempo = mpTempo;
-					m_tempo_sl.SetPos(tempo, FALSE);
+				if (hf == mp->m_tempo.GetSafeHwnd()) {
+					if (mpTempo != tempo) {
+						tempo = mpTempo;
+						m_tempo_sl.SetPos(tempo, FALSE);
+					}
+				} else if (mpTempo != tempo) {
+					mp->m_tempo.SetPos(tempo, FALSE);
 				}
 			}
 			if (mp->m_pitch.GetSafeHwnd()) {
 				const int mpPitch = mp->m_pitch.GetPos();
-				if (mpPitch != pitch) {
-					pitch = mpPitch;
-					m_pitch_sl.SetPos(pitch, FALSE);
+				if (hf == mp->m_pitch.GetSafeHwnd()) {
+					if (mpPitch != pitch) {
+						pitch = mpPitch;
+						m_pitch_sl.SetPos(pitch, FALSE);
+					}
+				} else if (mpPitch != pitch) {
+					mp->m_pitch.SetPos(pitch, FALSE);
 				}
 			}
 			if (mp->m_kvol.GetSafeHwnd()) {
 				const int kp = mp->m_kvol.GetPos();
-				if (m_kakuVol.GetSafeHwnd() && kp != m_kakuVol.GetPos())
-					m_kakuVol.SetPos(kp, FALSE);
+				if (hf == mp->m_kvol.GetSafeHwnd()) {
+					if (m_kakuVol.GetSafeHwnd() && kp != m_kakuVol.GetPos())
+						m_kakuVol.SetPos(kp, FALSE);
+				} else if (m_kakuVol.GetSafeHwnd() && kp != m_kakuVol.GetPos()) {
+					mp->m_kvol.SetPos(m_kakuVol.GetPos(), FALSE);
+				}
 			}
 			if (mp->m_dsvol.GetSafeHwnd()) {
 				const int dp = mp->m_dsvol.GetPos();
-				if (m_dsval.GetSafeHwnd() && dp != m_dsval.GetPos())
-					m_dsval.SetPos(dp, FALSE);
+				if (hf == mp->m_dsvol.GetSafeHwnd()) {
+					if (m_dsval.GetSafeHwnd() && dp != m_dsval.GetPos())
+						m_dsval.SetPos(dp, FALSE);
+				} else if (m_dsval.GetSafeHwnd() && dp != m_dsval.GetPos()) {
+					mp->m_dsvol.SetPos(m_dsval.GetPos(), FALSE);
+				}
 			}
 		}
 	}
+	if (tempo < 0 || tempo > 400) tempo = 200;
+	if (pitch < 0 || pitch > 400) pitch = 200;
+	savedata.tempoPos = tempo;
+	savedata.pitchPos = pitch;
 	s.Format(L"%3d%%", (int)TempoPercentFromPos(tempo));
 	m_temp_num.SetWindowText(s);
 	s.Format(L"%3d%%", (int)TempoPercentFromPos(pitch));
@@ -37155,6 +37217,7 @@ void COggDlg::OnTempoStatic()
 	// TODO: ここにコントロール通知ハンドラー コードを追加します。
 	m_tempo_sl.SetPos(200);
 	tempo = 200;
+	savedata.tempoPos = 200;
 }
 
 void COggDlg::OnPitchStatic()
@@ -37162,6 +37225,7 @@ void COggDlg::OnPitchStatic()
 	// TODO: ここにコントロール通知ハンドラー コードを追加します。
 	m_pitch_sl.SetPos(200);
 	pitch = 200;
+	savedata.pitchPos = 200;
 }
 
 void COggDlg::OnMouseMove(UINT nFlags, CPoint point)
@@ -37209,11 +37273,13 @@ void COggDlg::OnLButtonDown(UINT nFlags, CPoint point)
 	{
 		m_pitch_sl.SetPos(200);
 		pitch = 200;
+		savedata.pitchPos = 200;
 	}
 	if (rectTemp.PtInRect(point))
 	{
 		m_tempo_sl.SetPos(200);
 		tempo = 200;
+		savedata.tempoPos = 200;
 	}
 	CCustomBlurDialogBase::OnLButtonDown(nFlags, point);
 }
@@ -37232,12 +37298,14 @@ void COggDlg::OnStnDblclickStaticp()
 {
 	m_pitch_sl.SetPos(200);
 	pitch = 200;
+	savedata.pitchPos = 200;
 }
 
 void COggDlg::OnStnDblclickStatict()
 {
 	m_tempo_sl.SetPos(200);
 	tempo = 200;
+	savedata.tempoPos = 200;
 }
 void COggDlg::OnBnClickedButton59()
 {

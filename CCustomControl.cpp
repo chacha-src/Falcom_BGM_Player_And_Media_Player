@@ -20605,17 +20605,20 @@ void CCC_InvalidateRectMinusOverlay(HWND hDlg, const CRect& area)
         ::InvalidateRect(hDlg, area, FALSE);
         return;
     }
-    HRGN rArea = ::CreateRectRgnIndirect(&area);
-    HRGN rLock = ::CreateRectRgnIndirect(&lockRc);
-    if (rArea && rLock) {
-        ::CombineRgn(rArea, rArea, rLock, RGN_DIFF);
-        ::InvalidateRgn(hDlg, rArea, FALSE);
+    // ピアノロールは毎フレームここを通る。Create/Delete すると GDI が痩せて Alt+Tab まで重くなる。
+    static HRGN s_area = NULL;
+    static HRGN s_lock = NULL;
+    if (!s_area) s_area = ::CreateRectRgn(0, 0, 0, 0);
+    if (!s_lock) s_lock = ::CreateRectRgn(0, 0, 0, 0);
+    if (s_area && s_lock
+        && ::SetRectRgn(s_area, area.left, area.top, area.right, area.bottom)
+        && ::SetRectRgn(s_lock, lockRc.left, lockRc.top, lockRc.right, lockRc.bottom)
+        && ::CombineRgn(s_area, s_area, s_lock, RGN_DIFF) != ERROR) {
+        ::InvalidateRgn(hDlg, s_area, FALSE);
     }
     else {
         ::InvalidateRect(hDlg, area, FALSE);
     }
-    if (rArea) ::DeleteObject(rArea);
-    if (rLock) ::DeleteObject(rLock);
 }
 
 // CCC_MainLockSyncBtnCheck: カスタム UI / アクリル補助。

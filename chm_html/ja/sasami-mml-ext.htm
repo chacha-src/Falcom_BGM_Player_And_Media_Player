@@ -1,0 +1,153 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<title>SASAMI MML 拡張命令</title>
+<link rel="stylesheet" type="text/css" href="../css/help.css">
+</head>
+<body>
+
+<div class="topnav"><a href="index.htm">目次</a> &nbsp;|&nbsp; <a href="../en/sasami-mml-ext.htm">English</a></div>
+
+<h1>SASAMI MML 拡張命令</h1>
+
+<p class="lead">SASAMIM.HLP の拡張命令です。頭は <code>@</code> または <code>$</code>、半角大文字が原則です。音階と標準命令は <a href="sasami-mml.htm">MML（MICP）</a> です。※ の付く命令は、旧ヘルプでは出したあとに 16分～64分以上の休みを取る、とあります。</p>
+<div class="note"><span class="label">注意</span>
+<p>右端はいまのテキスト Composer です。「捨てる」は引数ごと読み飛ばします。<code>@</code> の数字はプログラム番号、<code>@V</code> は音量、<code>@P</code> はピッチ、<code>@R</code> と <code>@r</code> は同じ 3 整数命令として残します。<code>$</code> の命令は MIDI に出します。命令でない <code>$</code> だけ区切りとして読み飛ばします。名前付きの <code>@PROG</code> <code>@BANK</code> <code>@CC</code> <code>@DRUM</code> は <a href="sasami-composer.htm">Composer</a> の書き方で、この表の 1 文字命令とは別です。</p>
+</div>
+<h2>@ 音量・音色・バンク</h2>
+<table class="grid">
+<tr><th>命令</th><th>範囲</th><th>初期</th><th>意味</th><th>いま</th></tr>
+<tr><td><code>@M n</code> ※</td><td>0～127</td><td>127</td><td>マスター音量。音源全体。</td><td>捨てる</td></tr>
+<tr><td><code>@N n</code></td><td>0～127</td><td>100</td><td>ノート音量。</td><td>出す（ベロシティ。<code>v</code> と同じ）</td></tr>
+<tr><td><code>@E n</code></td><td>0～127</td><td>127</td><td>エクスプレッション。パート音量を 127 とした微調整。</td><td>捨てる</td></tr>
+<tr><td><code>@N[:m][:k][:l]</code></td><td>1～128</td><td>1</td><td>音色。省略なしは n=88、m=55、k=XG、l=GM。全部略すと 55/88/XG/GM が同じ番号。k だけ略すと n=88、m=55、XG と GM は m。Lv2 は @88Pro:88:XG:GM。例 <code>@10</code>、<code>@5:8</code>、<code>@1:2:3</code>。</td><td><code>@数字</code> と <code>@数字:数字</code> はプログラム</td></tr>
+<tr><td><code>@V n[:m][:k][:l]</code></td><td>0～127</td><td>117</td><td>トラック音量。m と k の省略は音色と同じ。</td><td>出す（最初の数）</td></tr>
+<tr><td><code>@B n[:m][:k][:l]</code></td><td>0～127</td><td>0</td><td>バンク（CC0）。音色のあとでは効かない。先にバンク、次に音色。</td><td>捨てる。<code>@BANK</code></td></tr>
+<tr><td><code>@~ n</code></td><td>0～127</td><td>0</td><td>モジュレーション。大きいほど振幅が大きい。</td><td>捨てる</td></tr>
+</table>
+<h2>@ ピッチ</h2>
+<p>絶対値は 0～16383、中央 8192。旧ヘルプは 4 オクターブ分、としています。半音の数値は下の表です。相対変化は 16383 を超えず、0 を下回らないように、とあります。</p>
+<table class="grid">
+<tr><th>命令</th><th>範囲</th><th>初期</th><th>意味</th><th>いま</th></tr>
+<tr><td><code>@P n</code></td><td>0～16383</td><td>8192</td><td>ピッチベンド絶対値。</td><td>出す</td></tr>
+<tr><td><code>@^ n</code></td><td>0～</td><td>—</td><td>いまの位置から n だけ上げる。展開ループと組む。例 <code>C4 ｛:48 @^4 ^64 :}</code> は 4分のあと、付点2分のあいだ 64分ステップで 4 ずつ上がる。</td><td>捨てる</td></tr>
+<tr><td><code>@v n</code></td><td>0～</td><td>—</td><td>n だけ下げる。例 <code>C4 ｛:48 @v4 ^64 :}</code>。</td><td><code>@v</code> は音量になる</td></tr>
+</table>
+<h2>@ ドラム・マップ・転調</h2>
+<table class="grid">
+<tr><th>命令</th><th>範囲</th><th>初期</th><th>意味</th><th>いま</th></tr>
+<tr><td><code>@D n</code> ※</td><td>0, 1, 2</td><td>0（10パートは 1）</td><td>ドラム許可。0 通常、1 と 2 はドラムマップ。XG では 1 も 2 も同じ。Lv2 の XG は 0 音色、1=127、48=Ex、64=SFX、126=SFX-K、127=Drum。</td><td>捨てる。<code>@DRUM 1</code> / <code>0</code></td></tr>
+<tr><td><code>@W n</code></td><td>0～3</td><td>0</td><td>SC-55 マップ（88/88Pro）。Lv1 は 0=55、1=88。Lv2 は 0 既定、1=55、2=88、3=88Pro。Lv1 と Lv2 で意味が違う。</td><td>捨てる</td></tr>
+<tr><td><code>@K n</code></td><td>52～76</td><td>64</td><td>キー。64 が無転調、65 が +1、63 が −1。曲の途中でも可。</td><td>捨てる</td></tr>
+</table>
+<h2>@ GS / XG の効果</h2>
+<table class="grid">
+<tr><th>命令</th><th>引数</th><th>意味</th><th>いま</th></tr>
+<tr><td><code>@R n:m:k</code> ※</td><td>n 0～7、m/k 0～127</td><td>GS リバーブ。n マクロ、m LEVEL、k TIME。XG では番号を変換。</td><td>3 整数として残す</td></tr>
+<tr><td><code>@C n:m:k</code> ※</td><td>同じ</td><td>GS コーラス。m LEVEL、k RATE。XG では番号を変換。</td><td>捨てる</td></tr>
+<tr><td><code>@＜ n</code> ※</td><td>0～127</td><td>アタックレート。旧ヘルプは説明を省いています。</td><td>コンパイルできない</td></tr>
+<tr><td><code>@＞ n</code> ※</td><td>0～127</td><td>リリースレート。同上。</td><td>コンパイルできない</td></tr>
+<tr><td><code>@S n</code> ※</td><td>0～127</td><td>ソフト。同上。</td><td>捨てる</td></tr>
+<tr><td><code>@H n</code> ※</td><td>0～127</td><td>ハード。同上。</td><td>捨てる。頭の <code>H n</code> は別命令</td></tr>
+</table>
+<h3>音色の微調整</h3>
+<p>旧ヘルプの見出しは <code>@</code> のあとに項目と値です。項目 n は 0～7、値 m は 14～114（64 が 0、−50～+50）。いまの <code>@数字</code> はプログラム番号なので、この微調整としては残りません。</p>
+<table class="grid">
+<tr><th>n</th><th>項目</th></tr>
+<tr><td>0</td><td>ビブラートレート</td></tr>
+<tr><td>1</td><td>ビブラートデプス</td></tr>
+<tr><td>2</td><td>ビブラートディレイ</td></tr>
+<tr><td>3</td><td>TVF カットオフ</td></tr>
+<tr><td>4</td><td>TVF レゾナンス</td></tr>
+<tr><td>5</td><td>TVF/TVA アタック</td></tr>
+<tr><td>6</td><td>TVF/TVA ディケイ</td></tr>
+<tr><td>7</td><td>TVF/TVA リリース</td></tr>
+</table>
+<h3>ドラム音の微調整 @r</h3>
+<p>旧ヘルプは <code>@r n:m:k</code> です。m はキー番号で、<code>O3C</code> が 36。いまの Composer は <code>@r</code> を <code>@R</code> と同じ 3 整数命令にします。</p>
+<table class="grid">
+<tr><th>n</th><th>k の意味</th></tr>
+<tr><td>0</td><td>ピッチ。0～127、64 が 0。−64～+64 半音</td></tr>
+<tr><td>1</td><td>レベル。0～127</td></tr>
+<tr><td>2</td><td>パン。0 はランダム、1～64～127 が左～中央～右</td></tr>
+<tr><td>3</td><td>リバーブセンド。0～127</td></tr>
+<tr><td>4</td><td>コーラスセンド。0～127</td></tr>
+</table>
+<h2>@ エクスクルーシブと CC</h2>
+<p>一行に書きます。16進 2 桁。区切りはコンマか空白、無くても可。0～9 と A～F。末尾のチェックサムと F7 はコンパイラが付けます。データに FF は使いません（コンパイラが EOE に使うため）。</p>
+<ul>
+<li><code>@(10,20,30,40,50,60,7F,1F)</code> …… GS 固定。頭の F0 41 10 42 12 は自動。アドレスとデータだけ書く。※</li>
+<li><code>@(M01:F0,41,10,45,12:10,00,00,35,35)</code> …… モード付き。0=55（88Pro）、1=88、2=XG。複数可。<code>@(M0:</code> は 55 だけ、<code>@(M02:</code> は 55 と XG。頭とアドレスの境は <code>:</code>。チェックサムと F7 は自動。※</li>
+<li><code>@(B01,30)</code> または <code>@(B 01,30)</code> …… CC。Bn は自動で、番号と値を書く。例はモジュレーション 0x30。※</li>
+</ul>
+<p>これらの <code>@(</code> は、いまの Composer では <code>@</code> 命令として通りません。SysEx は <code>@EX</code>、任意 CC は <code>@CC</code> です。</p>
+<h2>$ 命令</h2>
+<p>頭は <code>$</code>。大文字。Composer はベロシティ、CC、GS/XG の SysEx として出します。<code>$M</code> は再生時の音源モードが一致したとき、そのパートの続きを止めます。<code>$CG</code> の TIME 欄は GS に番地が無いので、受け取るが出しません。命令の形でない <code>$</code> だけ区切りとして読み飛ばします。</p>
+<table class="grid">
+<tr><th>命令</th><th>範囲</th><th>意味</th></tr>
+<tr><td><code>$( n</code></td><td>1～99</td><td>ベロシティを @N から n 下げる。0～127 の検査はしない。例 <code>@N100 C $(20 C</code></td></tr>
+<tr><td><code>$) n</code></td><td>1～99</td><td>n 上げる。例 <code>@N100 C $)20 C</code></td></tr>
+<tr><td><code>$M n</code></td><td>0～3</td><td>そのモードでは出さない。0=55（88Pro）、1=88、2=XG、3=GM（GM2、Win版から）。<code>$M0$M1</code> は 55 と 88 を止める。</td></tr>
+<tr><td><code>$L</code> / <code>$l</code></td><td>—</td><td>88Pro レガート on / off。音色名のうしろに : がある音。例 <code>C $L DEFGAB $l</code></td></tr>
+<tr><td><code>$I n</code></td><td>0, 1</td><td>88Pro の EFX。0 off、1 on。</td></tr>
+<tr><td><code>$(I n:m,…)</code></td><td>n 0～64</td><td>88Pro EFX。0 Thru、1～64 が番号。パラメータは若い番号から。省略は空欄（<code>,,</code>）。数が違うとエラー。実行後に $+ と $# が使える（CC16 と CC17）。</td></tr>
+<tr><td><code>$+ n</code> / <code>$# n</code></td><td>0～127</td><td>EFX の + パラメータ / # パラメータ。初期 0。</td></tr>
+</table>
+<h3>$(I の書き方</h3>
+<ul>
+<li><code>$(I37)</code> …… EFX 37（OD→Delay）。パラメータは初期値。</li>
+<li><code>$(I37:50,,02,01,30,)</code> …… Drive を 50、パンは省略、Amp は 2、ディレイタイムは 30。残りは省略。</li>
+<li><code>$(I37:50,40,02,01,30,40,7f,40,40,40,7f)</code> …… パラメータを全部書く。</li>
+</ul>
+<h3>GS / XG をまとめて書く</h3>
+<p>省略は <code>,,</code>。GS 系は 10 進、XG 系は 16進 2 桁（<code>$(I</code> と同じ）。0 番は使えません。</p>
+<table class="grid">
+<tr><th>命令</th><th>中身</th></tr>
+<tr><td><code>$RG(...)</code></td><td>GS リバーブ。Macro, PRE-LPF, LEVEL, TIME, DELAY FEEDBACK, PREDELAY[88]</td></tr>
+<tr><td><code>$CG(...)</code></td><td>GS コーラス。Macro, PRE-LPF, LEVEL, TIME, FEEDBACK, DELAY, RATE, DEPTH, SEND Rev, SEND Del[88]</td></tr>
+<tr><td><code>$VG(...)</code></td><td>GS ディレイ（88 以上）。Macro, PRE-LPF, T.Center, T.R.Left, T.R.Right, L.Center, L.Left, L.Right, LEVEL, FEEDBACK, SEND Rev</td></tr>
+<tr><td><code>$RX(...)</code></td><td>XG リバーブ。番号と 13 パラメータ。準拠なら 1～8。MU80 の 9～12 も記載あり。</td></tr>
+<tr><td><code>$CX(...)</code></td><td>XG コーラス。番号と 10 パラメータ。準拠なら 1～8。</td></tr>
+<tr><td><code>$VX(...)</code></td><td>XG バリエーション。パラメータ数は種類による。準拠なら 1～38。MU80 の 39～44 も記載あり。</td></tr>
+</table>
+<h2>ピッチの数値</h2>
+<p>旧ヘルプは「1 半音が 341.333Hz、基準が 8192Hz」と書いています。単位の呼び方は Hz ですが、入れる値は <code>@P</code> の 0～16383 です。8192 が中央のド。（）は基準を C にした音名、数字は半音差です。</p>
+<pre class="fig">半音  +24   +12    +0    -12    -24
+音    C     C      C     C      C
+@P   16383 12287  8192  4095    0
+
+隣の半音は約 341.33。例: +1 (C#) = 8533、 -1 (B) = 7850。</pre>
+<table class="grid">
+<tr><th>半音</th><th>@P</th><th>半音</th><th>@P</th><th>半音</th><th>@P</th></tr>
+<tr><td>+24</td><td>16383</td><td>+8</td><td>10922</td><td>−8</td><td>5461</td></tr>
+<tr><td>+23</td><td>16042</td><td>+7</td><td>10571</td><td>−9</td><td>5119</td></tr>
+<tr><td>+22</td><td>15701</td><td>+6</td><td>10239</td><td>−10</td><td>4778</td></tr>
+<tr><td>+21</td><td>15359</td><td>+5</td><td>9898</td><td>−11</td><td>4437</td></tr>
+<tr><td>+20</td><td>15018</td><td>+4</td><td>9557</td><td>−12</td><td>4095</td></tr>
+<tr><td>+19</td><td>14677</td><td>+3</td><td>9215</td><td>−13</td><td>3754</td></tr>
+<tr><td>+18</td><td>14335</td><td>+2</td><td>8874</td><td>−14</td><td>3413</td></tr>
+<tr><td>+17</td><td>13994</td><td>+1</td><td>8533</td><td>−15</td><td>3071</td></tr>
+<tr><td>+16</td><td>13653</td><td>0</td><td>8192</td><td>−16</td><td>2730</td></tr>
+<tr><td>+15</td><td>13311</td><td>−1</td><td>7850</td><td>−17</td><td>2389</td></tr>
+<tr><td>+14</td><td>12970</td><td>−2</td><td>7509</td><td>−18</td><td>2047</td></tr>
+<tr><td>+13</td><td>12629</td><td>−3</td><td>7167</td><td>−19</td><td>1706</td></tr>
+<tr><td>+12</td><td>12287</td><td>−4</td><td>6826</td><td>−20</td><td>1365</td></tr>
+<tr><td>+11</td><td>11946</td><td>−5</td><td>6485</td><td>−21</td><td>1023</td></tr>
+<tr><td>+10</td><td>11605</td><td>−6</td><td>6143</td><td>−22</td><td>682</td></tr>
+<tr><td>+9</td><td>11263</td><td>−7</td><td>5802</td><td>−23</td><td>341</td></tr>
+<tr><td></td><td></td><td></td><td></td><td>−24</td><td>0</td></tr>
+</table>
+<div class="related"><span class="label">あわせて読みたい</span><ul><li><a href="sasami-mml.htm">SASAMI MML（MICP 標準）</a></li><li><a href="sasami-composer.htm">SASAMI Composer（曲を作る）</a></li><li><a href="sasami-mpy.htm">SASAMI .mpy コマンド（全部）</a></li><li><a href="midi-monitor.htm">FM/MIDIモニタ</a></li></ul></div>
+
+<div class="botnav">
+<span class="prev">&#171; 前へ: <a href="sasami-mml.htm">SASAMI MML（MICP 標準）</a></span>
+<span class="next">次へ: <a href="sasami-fpy.htm">SASAMI .fpy コマンド（全部）</a> &#187;</span>
+<span class="up"><a href="index.htm">目次</a></span>
+<div class="clear"></div>
+</div>
+
+<div class="foot">メディアプレイヤー「らいら」 (oggYSEDbgm) — PrePrayerPower Soft</div>
+
+</body>
+</html>

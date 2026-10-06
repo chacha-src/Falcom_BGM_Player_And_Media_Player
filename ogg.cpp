@@ -385,6 +385,8 @@ BOOL COggApp::InitInstance()
 	savedata.m4a = 1;
 	savedata.kakuVol = 100;
 	savedata.kakuVal = 100;
+	savedata.tempoPos = 200;
+	savedata.pitchPos = 200;
 	savedata.ms = 30;
 	savedata.ms2 = 16;
 	savedata.eqCodeMs = 25;
@@ -2240,6 +2242,12 @@ BOOL COggApp::InitInstance()
 	if (datFileSize < (int)(offsetof(save, laMapperMt32) + sizeof(savedata.laMapperMt32))
 		|| (savedata.laMapperMt32 != 0 && savedata.laMapperMt32 != 1))
 		savedata.laMapperMt32 = 0;
+	if (datFileSize < (int)(offsetof(save, tempoPos) + sizeof(savedata.tempoPos))
+		|| savedata.tempoPos < 0 || savedata.tempoPos > 400)
+		savedata.tempoPos = 200;
+	if (datFileSize < (int)(offsetof(save, pitchPos) + sizeof(savedata.pitchPos))
+		|| savedata.pitchPos < 0 || savedata.pitchPos > 400)
+		savedata.pitchPos = 200;
 	if (savedata.midPlayPrefer < 0 || savedata.midPlayPrefer > 2)
 		savedata.midPlayPrefer = 0;
 	/* UI パス欄は廃止。常に exe\\data（なければ hoot）。

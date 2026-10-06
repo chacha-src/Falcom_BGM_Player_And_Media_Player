@@ -1,0 +1,113 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<title>SASAMI MML extended commands</title>
+<link rel="stylesheet" type="text/css" href="../css/help.css">
+</head>
+<body>
+
+<div class="topnav"><a href="index.htm">Contents</a> &nbsp;|&nbsp; <a href="../ja/sasami-mml-ext.htm">日本語</a></div>
+
+<h1>SASAMI MML extended commands</h1>
+
+<p class="lead">Extended commands from SASAMIM.HLP. They start with <code>@</code> or <code>$</code>. Notes and standard commands are <a href="sasami-mml.htm">MML (MICP)</a>. Commands marked exclusive should be followed by at least a 16th to a 64th of rest, per the old help.</p>
+<div class="note"><span class="label">Please note</span>
+<p>The last column is the current text Composer. “skip” drops the command and its arguments. A number after <code>@</code> is a program, <code>@V</code> is volume, <code>@P</code> is pitch, and <code>@R</code> / <code>@r</code> are stored as the same three-integer command. <code>$</code> commands are written as MIDI. A <code>$</code> that is not a command is still a separator. Named forms <code>@PROG</code> <code>@BANK</code> <code>@CC</code> <code>@DRUM</code> belong to <a href="sasami-composer.htm">Composer</a>, not to these one-letter commands.</p>
+</div>
+<h2>@ volume, program, bank</h2>
+<table class="grid">
+<tr><th>Command</th><th>Range</th><th>Default</th><th>Meaning</th><th>Now</th></tr>
+<tr><td><code>@M n</code></td><td>0–127</td><td>127</td><td>Master volume.</td><td>skip</td></tr>
+<tr><td><code>@N n</code></td><td>0–127</td><td>100</td><td>Note velocity.</td><td>emitted (same as <code>v</code>)</td></tr>
+<tr><td><code>@E n</code></td><td>0–127</td><td>127</td><td>Expression, relative to 127.</td><td>skip</td></tr>
+<tr><td><code>@N[:m][:k][:l]</code></td><td>1–128</td><td>1</td><td>Program. Full form is n=88, m=55, k=XG, l=GM. Lv2 order is 88Pro:88:XG:GM. <code>@10</code>, <code>@5:8</code>, <code>@1:2:3</code>.</td><td><code>@number</code> and <code>@n:m</code> set the program</td></tr>
+<tr><td><code>@V n</code></td><td>0–127</td><td>117</td><td>Track volume. Extra fields follow the program rule.</td><td>emitted (first number)</td></tr>
+<tr><td><code>@B n</code></td><td>0–127</td><td>0</td><td>Bank CC0. Set the bank before the program.</td><td>skip. Use <code>@BANK</code></td></tr>
+<tr><td><code>@~ n</code></td><td>0–127</td><td>0</td><td>Modulation.</td><td>skip</td></tr>
+</table>
+<h2>@ pitch</h2>
+<p>Absolute bend is 0–16383, center 8192 (four octaves in the old help). Relative moves must stay inside that range.</p>
+<table class="grid">
+<tr><th>Command</th><th>Meaning</th><th>Now</th></tr>
+<tr><td><code>@P n</code></td><td>Absolute bend. Default 8192.</td><td>emitted</td></tr>
+<tr><td><code>@^ n</code></td><td>Up by n. Example <code>C4 ｛:48 @^4 ^64 :}</code> glides up by 4 per 64th for a dotted half.</td><td>skip</td></tr>
+<tr><td><code>@v n</code></td><td>Down by n.</td><td>read as volume, because <code>@v</code> is <code>@V</code></td></tr>
+</table>
+<h2>@ drums, map, transpose</h2>
+<table class="grid">
+<tr><th>Command</th><th>Meaning</th><th>Now</th></tr>
+<tr><td><code>@D n</code></td><td>0 normal, 1 and 2 drum maps (part 10 defaults to 1). XG treats 1 and 2 alike. Lv2 XG: 0 program, 1=127, 48 Ex, 64 SFX, 126 SFX-K, 127 drum.</td><td>skip. Use <code>@DRUM</code></td></tr>
+<tr><td><code>@W n</code></td><td>SC-55 map on 88/88Pro. Lv1: 0=55, 1=88. Lv2: 0 default, 1=55, 2=88, 3=88Pro.</td><td>skip</td></tr>
+<tr><td><code>@K n</code></td><td>Transpose 52–76, 64 = none, 65 = +1, 63 = −1.</td><td>skip</td></tr>
+</table>
+<h2>@ GS / XG effects</h2>
+<table class="grid">
+<tr><th>Command</th><th>Meaning</th><th>Now</th></tr>
+<tr><td><code>@R n:m:k</code></td><td>GS reverb. n macro 0–7, m level, k time. XG remaps the number.</td><td>kept as three integers</td></tr>
+<tr><td><code>@C n:m:k</code></td><td>GS chorus. m level, k rate.</td><td>skip</td></tr>
+<tr><td><code>@＜ n</code> / <code>@＞ n</code></td><td>Attack / release 0–127. The old help omits the detail.</td><td>does not compile</td></tr>
+<tr><td><code>@S n</code> / <code>@H n</code></td><td>Soft / hard 0–127.</td><td>skip. A leading <code>H n</code> is a different command</td></tr>
+</table>
+<h3>Tone tweak</h3>
+<p>The old heading is a parameter index and a value after <code>@</code>. n is 0–7, m is 14–114 (64 = 0). A number after <code>@</code> is a program in Composer, so this tweak is not stored as a tweak.</p>
+<table class="grid">
+<tr><th>n</th><th>Parameter</th></tr>
+<tr><td>0</td><td>Vibrato rate</td></tr>
+<tr><td>1</td><td>Vibrato depth</td></tr>
+<tr><td>2</td><td>Vibrato delay</td></tr>
+<tr><td>3</td><td>TVF cutoff</td></tr>
+<tr><td>4</td><td>TVF resonance</td></tr>
+<tr><td>5</td><td>TVF/TVA attack</td></tr>
+<tr><td>6</td><td>TVF/TVA decay</td></tr>
+<tr><td>7</td><td>TVF/TVA release</td></tr>
+</table>
+<h3>Drum tweak @r</h3>
+<p>Old form <code>@r n:m:k</code>. m is the key; <code>O3C</code> is 36. Composer stores <code>@r</code> with <code>@R</code>.</p>
+<table class="grid">
+<tr><th>n</th><th>k</th></tr>
+<tr><td>0</td><td>Pitch 0–127, 64 = 0 (−64..+64 semitones)</td></tr>
+<tr><td>1</td><td>Level 0–127</td></tr>
+<tr><td>2</td><td>Pan. 0 random, 1–64–127 left–center–right</td></tr>
+<tr><td>3</td><td>Reverb send</td></tr>
+<tr><td>4</td><td>Chorus send</td></tr>
+</table>
+<h2>@ exclusive and CC</h2>
+<p>One line, two hex digits. Commas or spaces optional. The compiler appends the checksum and F7. Do not put FF in the data (it is the end marker).</p>
+<ul>
+<li><code>@(10,20,30,40,50,60,7F,1F)</code> — GS. F0 41 10 42 12 is added. Write address and data only.</li>
+<li><code>@(M01:F0,41,10,45,12:10,00,00,35,35)</code> — mode filter. 0=55/88Pro, 1=88, 2=XG. Combine digits. Split header and address with <code>:</code>.</li>
+<li><code>@(B01,30)</code> — CC. Bn is added. This example is modulation 0x30.</li>
+</ul>
+<p>Composer does not accept <code>@(</code>. Use <code>@EX</code> for SysEx and <code>@CC</code> for a control change.</p>
+<h2>$ commands</h2>
+<p>Composer emits these as velocity, CC, or GS/XG SysEx. <code>$M</code> stops the rest of that part at playback when the tone-map matches. The TIME field of <code>$CG</code> has no GS address, so it is accepted and not sent. A <code>$</code> that is not one of these commands is still a separator.</p>
+<table class="grid">
+<tr><th>Command</th><th>Meaning</th></tr>
+<tr><td><code>$(n</code> / <code>$)n</code></td><td>Velocity −n / +n from <code>@N</code>, 1–99. No clamp. Example <code>@N100 C $(20 C</code>.</td></tr>
+<tr><td><code>$M n</code></td><td>Do not emit on that mode. 0=55, 1=88, 2=XG, 3=GM. <code>$M0$M1</code> blocks 55 and 88.</td></tr>
+<tr><td><code>$L</code> / <code>$l</code></td><td>88Pro legato on / off. Example <code>C $L DEFGAB $l</code>.</td></tr>
+<tr><td><code>$I n</code></td><td>88Pro EFX 0 off, 1 on.</td></tr>
+<tr><td><code>$(I n:…)</code></td><td>88Pro EFX type 0–64 and parameters from the low index. Blank fields keep the default. Wrong counts are errors. Afterwards <code>$+</code> and <code>$#</code> map to CC16 and CC17.</td></tr>
+<tr><td><code>$+ n</code> / <code>$# n</code></td><td>EFX + / # parameter, 0–127, default 0.</td></tr>
+<tr><td><code>$RG</code> <code>$CG</code> <code>$VG</code></td><td>GS reverb, chorus, delay (delay needs 88 or later). Decimal. Skip a field with <code>,,</code>.</td></tr>
+<tr><td><code>$RX</code> <code>$CX</code> <code>$VX</code></td><td>XG reverb (13 params), chorus (10), variation (count depends on type). Two hex digits. Type 0 is illegal. Stick to 1–8 / 1–8 / 1–38 for plain XG.</td></tr>
+</table>
+<h2>Pitch numbers</h2>
+<p>The old help calls one semitone 341.333 Hz and the center 8192 Hz. Those numbers are <code>@P</code> units, not acoustic hertz. 8192 is center C.</p>
+<pre class="fig">semitones  +24    +12     0     -12    -24
+@P        16383  12287   8192   4095    0
+one step is about 341.33   +1 = 8533    -1 = 7850</pre>
+<div class="related"><span class="label">See also</span><ul><li><a href="sasami-mml.htm">SASAMI MML (MICP standard)</a></li><li><a href="sasami-composer.htm">SASAMI Composer (create songs)</a></li><li><a href="sasami-mpy.htm">SASAMI .mpy commands (complete)</a></li><li><a href="midi-monitor.htm">FM/MIDI monitor</a></li></ul></div>
+
+<div class="botnav">
+<span class="prev">&#171; Back: <a href="sasami-mml.htm">SASAMI MML (MICP standard)</a></span>
+<span class="next">Next: <a href="sasami-fpy.htm">SASAMI .fpy commands (complete)</a> &#187;</span>
+<span class="up"><a href="index.htm">Contents</a></span>
+<div class="clear"></div>
+</div>
+
+<div class="foot">Media player "Raira" (oggYSEDbgm) — PrePrayerPower Soft</div>
+
+</body>
+</html>

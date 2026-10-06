@@ -9,6 +9,9 @@
 class AudioUpscaler {
 public:
 	AudioUpscaler();
+	~AudioUpscaler();
+	AudioUpscaler(const AudioUpscaler&) = delete;
+	AudioUpscaler& operator=(const AudioUpscaler&) = delete;
 
 	void Configure(int srcRate, int srcCh, int srcBits,
 		int dstRate, int dstCh, int dstBits);
@@ -57,8 +60,12 @@ private:
 	uint32_t m_ditherRng = 0xC0FFEE01u;
 
 	// 2秒×8ch×192kHz。毎 Push/Pull の vector 伸長をしない（長時間のヒープ断片化防止）
-	enum { kUpChMax = 32, kUpFifoCap = 8 * 192000 * 2, kUpPullCap = 8192 };
-	float m_fifo[kUpFifoCap];
+	// FIFO 本体はオブジェクトに埋めない。定数初期化の一部だとゼロ約 12MB が exe に入る。
+	enum { kUpChMax = 32, kUpFifoCap = 8 * 192000 * 2, kUpPullCap = 8192, kFifoPool = 4 };
+	float* m_fifo = nullptr;
+	bool m_fifoOwned = false;
+	static float s_fifoPool[kFifoPool][kUpFifoCap];
+	static int s_fifoPoolUsed;
 	int m_fifoHead = 0;
 	int m_fifoCount = 0;
 	double m_readPos = 0.0;    // fifo 先頭からのフレーム位置（小数）

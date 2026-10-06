@@ -1,0 +1,105 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<title>SASAMI MML (MICP standard)</title>
+<link rel="stylesheet" type="text/css" href="../css/help.css">
+</head>
+<body>
+
+<div class="topnav"><a href="index.htm">Contents</a> &nbsp;|&nbsp; <a href="../ja/sasami-mml.htm">日本語</a></div>
+
+<h1>SASAMI MML (MICP standard)</h1>
+
+<p class="lead">MICP text from the Windows SASAMI help SASAMIM.HLP (2000): notes, parts, standard commands, drums, and short samples. @ / $ and the pitch table are <a href="sasami-mml-ext.htm">extended commands</a>. How text becomes a file is <a href="sasami-composer.htm">SASAMI Composer</a>.</p>
+<h2>Pitch and length</h2>
+<p>Octaves run from 1 (lowest) to 8. Default is 4. A number after a note overrides <code>L</code> for that note only. <code>C4</code> is the same as <code>L4C</code>.</p>
+<table class="grid">
+<tr><th>Text</th><th>Pitch</th></tr>
+<tr><td><code>C</code></td><td>C</td></tr>
+<tr><td><code>C+</code> or <code>D-</code></td><td>C# / Db</td></tr>
+<tr><td><code>D</code> <code>E</code> <code>F</code> <code>G</code> <code>A</code> <code>B</code></td><td>D E F G A B</td></tr>
+<tr><td><code>+</code> / <code>-</code> on a name</td><td>sharp / flat of that step</td></tr>
+</table>
+<p>The old help noted <code>E+</code> (<code>F-</code>) as F. Composer treats <code>+</code> / <code>#</code> as +1 semitone and <code>-</code> as −1. On MIDI, o4 <code>C</code> is note 60.</p>
+<p>In the old help, <code>&amp;</code> after a note forces the gate to maximum, and the next same pitch becomes a tie. Composer extends the previous note for both <code>&amp;</code> and <code>^</code>.</p>
+<h2>Parts</h2>
+<p><code>[part:work]</code> starts a channel. Work may be omitted. Work numbers are 1–63 and must not be reused.</p>
+<ul>
+<li>1–16 — MIDI port A.</li>
+<li>17–32 — MIDI port B (the old help disabled this outside 32-channel mode).</li>
+<li>Chords use the same part with a different work number.</li>
+</ul>
+<pre class="fig">[2:1] C4
+[2:2] E4
+[2:3] G4</pre>
+<p>That is a C major chord. Composer also accepts <code>#n</code> (1-based). Comments run from <code>;</code> to the end of the line, or <code>//</code>.</p>
+<h2>Standard commands</h2>
+<p>The old help required uppercase. Ranges and defaults are from that text. The last column is what the current text Composer does.</p>
+<table class="grid">
+<tr><th>Command</th><th>Range</th><th>Default</th><th>Meaning</th><th>Now</th></tr>
+<tr><td><code>T n</code></td><td>40–3000</td><td>—</td><td>Tempo. Higher is faster. No relative change.</td><td>emitted (<code>t</code> too)</td></tr>
+<tr><td><code>O n</code></td><td>1–8</td><td>4</td><td>Octave.</td><td>emitted (<code>o</code> too; 0 is allowed)</td></tr>
+<tr><td><code>L n</code></td><td>1–192</td><td>4</td><td>Length. Prefer divisors of 192. A triplet inside a quarter is <code>L12</code>.</td><td>emitted</td></tr>
+<tr><td><code>! n</code></td><td>1–255</td><td>—</td><td>Numeric length. A quarter is 48.</td><td>character skipped</td></tr>
+<tr><td><code>R n</code></td><td>1–192</td><td>L</td><td>Rest.</td><td>uppercase R is a rest; lowercase r is a wait</td></tr>
+<tr><td><code>^ n</code></td><td>1–192</td><td>L</td><td>Tie.</td><td>extends the previous note</td></tr>
+<tr><td><code>Q</code> / <code>J</code></td><td>—</td><td>—</td><td>Loop forever from Q to J.</td><td>emitted</td></tr>
+<tr><td><code>＞</code> / <code>＜</code></td><td>—</td><td>—</td><td>Octave up / down. Opposite of PMD.</td><td>emitted</td></tr>
+<tr><td><code>P</code></td><td>0–127</td><td>64</td><td>Pan. 0 left, 64 center, 127 right.</td><td>emitted; extra <code>:85</code> dropped</td></tr>
+<tr><td><code>|:n</code> … <code>:|</code></td><td>2–250</td><td>2</td><td>Counted loop that does not copy the bytes.</td><td>emitted</td></tr>
+<tr><td><code>｛:n</code> … <code>｝:</code></td><td>2–250</td><td>2</td><td>Unrolled loop. Use this for relative pitch.</td><td>unrolled on classic files; kept on new files</td></tr>
+<tr><td><code>(</code> / <code>)</code></td><td>—</td><td>—</td><td>Pedal on / off.</td><td>emitted (CC64, same as <code>@PEDON</code> / <code>@PEDOFF</code>)</td></tr>
+<tr><td><code>q n</code></td><td>1–64</td><td>64</td><td>Gate. Sound for n/64 of the note.</td><td>emitted (reads up to 100)</td></tr>
+<tr><td><code>I n</code></td><td>0–127</td><td>—</td><td>GS reverb send.</td><td>kept as a command</td></tr>
+<tr><td><code>K n</code></td><td>0–127</td><td>—</td><td>GS chorus send.</td><td>skipped</td></tr>
+<tr><td><code>W</code> / <code>M</code></td><td>—</td><td>—</td><td>Expression +1 / −1.</td><td>skipped</td></tr>
+<tr><td><code>_0</code> / <code>_1</code></td><td>—</td><td>—</td><td>Next line is the title (64 chars) or a display string.</td><td>title is <code>TIT"…"</code></td></tr>
+</table>
+<div class="note"><span class="label">Please note</span>
+<p>The old help forbids nesting <code>|:</code> and <code>｛:</code>. Composer allows it: one level stays .mpy / .fpy; two or more becomes .mpw2 / .fpy2.</p>
+</div>
+<h2>Drums (lowercase)</h2>
+<p>Length follows <code>L</code>. The old help also says a known note number can be written as a normal note, and that <code>s</code> matches <code>O3C</code>.</p>
+<table class="grid">
+<tr><th>Letter</th><th>Instrument</th><th>Now</th></tr>
+<tr><td><code>h</code> / <code>s</code> / <code>b</code></td><td>closed hat / snare / bass</td><td>notes 42 / 38 / 36</td></tr>
+<tr><td><code>o</code> <code>c</code> <code>l</code> <code>m</code> <code>f</code></td><td>open hat, cymbal, low / mid / high tom</td><td>no dedicated letters (they collide with octave, C, length, or F)</td></tr>
+<tr><td><code>r</code></td><td>not in the old table</td><td>ride 51 on a drum part</td></tr>
+</table>
+<p>The old switch is <code>@D</code>. Composer uses <code>@DRUM 1</code>, and MIDI 10 / 26 start as drums.</p>
+<h2>Samples</h2>
+<h3>One part, tempo 120, quarter-note scale</h3>
+<pre class="fig">[1] T120 L4
+CDEFGAB>C</pre>
+<h3>The same line forever</h3>
+<pre class="fig">[1] T120 L4
+Q
+CDEFGAB>C
+J</pre>
+<h3>A C major chord forever</h3>
+<pre class="fig">[1] T120 L4
+Q
+C
+J
+[1]
+Q
+E
+J
+[1]
+Q
+G
+J</pre>
+<div class="related"><span class="label">See also</span><ul><li><a href="sasami-mml-ext.htm">SASAMI MML extended commands</a></li><li><a href="sasami-composer.htm">SASAMI Composer (create songs)</a></li><li><a href="sasami-mpy.htm">SASAMI .mpy commands (complete)</a></li><li><a href="sasami-fpy.htm">SASAMI .fpy commands (complete)</a></li></ul></div>
+
+<div class="botnav">
+<span class="prev">&#171; Back: <a href="sasami-composer.htm">SASAMI Composer (create songs)</a></span>
+<span class="next">Next: <a href="sasami-mml-ext.htm">SASAMI MML extended commands</a> &#187;</span>
+<span class="up"><a href="index.htm">Contents</a></span>
+<div class="clear"></div>
+</div>
+
+<div class="foot">Media player "Raira" (oggYSEDbgm) — PrePrayerPower Soft</div>
+
+</body>
+</html>

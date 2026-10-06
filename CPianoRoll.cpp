@@ -1155,6 +1155,9 @@ void CPianoRoll::DoDataExchange(CDataExchange* pDX)
 
 BEGIN_MESSAGE_MAP(CPianoRoll, CCustomBlurDialogExBase)
     ON_WM_PAINT()
+    ON_WM_ERASEBKGND()
+    ON_WM_ACTIVATE()
+    ON_WM_ACTIVATEAPP()
     ON_WM_TIMER()
     ON_WM_SIZE()
     ON_WM_MOVE()
@@ -2345,10 +2348,10 @@ void CPianoRoll::PaintMeterStripOnKey(int width, int keyH, const float* chFill, 
             int xL, xR;
             GetWhiteKeyRect52(midi, width, xL, xR);
             if (xR <= xL) continue;
-            CString oct;
-            oct.Format(L"%d", (midi / 12) - 1);
+            wchar_t oct[8];
+            wsprintfW(oct, L"%d", (midi / 12) - 1);
             CRect tr(xL + 2, 1, xR - 2, labelH + 1);
-            m_keyDC.DrawText(oct, &tr, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+            m_keyDC.DrawText(oct, -1, &tr, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
         }
         m_keyDC.SelectObject(pOldFont);
     }
@@ -2372,10 +2375,16 @@ bool CPianoRoll::PresentMeterStrip(CDC& dc, int w, int rollH, int keyH, int chor
             m_chromaCache.UpdateRect(m_keyDC.GetSafeHdc(), 0, 0, 0, rollH, w, meterH, PIANO_CHROMA_KEY);
         else
             m_chromaCache.UpdateOpaqueRect(m_keyDC.GetSafeHdc(), 0, 0, 0, rollH, w, meterH);
-        const BLENDFUNCTION bf = { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
-        if (!::GdiAlphaBlend(dc.GetSafeHdc(), 0, screenY, w, meterH,
-                m_chromaCache.hdcDib, 0, rollH, w, meterH, bf))
+        // 本文ガラスだけ AlphaBlend。不透明帯は鍵盤バッファを SRCCOPY（同じ画素で軽い）。
+        if (bodyAero) {
+            const BLENDFUNCTION bf = { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
+            if (!::GdiAlphaBlend(dc.GetSafeHdc(), 0, screenY, w, meterH,
+                    m_chromaCache.hdcDib, 0, rollH, w, meterH, bf))
+                ::BitBlt(dc.GetSafeHdc(), 0, screenY, w, meterH, m_keyDC.GetSafeHdc(), 0, 0, SRCCOPY);
+        }
+        else {
             ::BitBlt(dc.GetSafeHdc(), 0, screenY, w, meterH, m_keyDC.GetSafeHdc(), 0, 0, SRCCOPY);
+        }
         return true;
     }
 #endif
@@ -5807,6 +5816,83 @@ void CPianoRoll::DrawChordPanel(CDC& dc, int x, int y, int w, int h) const
     if (of) dc.SelectObject(of);
 }
 
+bool CPianoRoll::PresentScrolledOpaque(CDC& dc, HDC src, int yOff, int w, int rollH,
+    int keySectionH, int chordH, int scrollPx, int healTop, int keySrcY,
+    bool blitKeys, int meterH)
+{
+    // 本文アクリルは背面ぼかしを毎フレ合成する。スクロールするとガラスが流れるので使わない。
+    if (!src || scrollPx <= 0 || yOff <= 0 || w <= 0 || rollH <= scrollPx)
+        return false;
+    CRect clip;
+    const int kind = dc.GetClipBox(&clip);
+    if (kind == ERROR || kind == NULLREGION)
+        return false;
+    // キャプション込みの全面無効化は、隠れていた窓の復帰。前画面が無いので全面提示に戻す。
+    if (clip.top < yOff && clip.bottom > yOff + rollH / 2)
+        return false;
+    // メーター帯だけ等、ロール全体が無効でないときに ScrollDC すると画面がずれる。
+    CRect rollNeed(0, yOff, w, yOff + rollH);
+    CRect inter;
+    if (!inter.IntersectRect(&clip, &rollNeed))
+        return false;
+    if (inter.Width() < w - 8 || inter.Height() < rollH - 8)
+        return false;
+
+    const int saved = dc.SaveDC();
+    dc.SelectClipRgn(NULL);
+    CRect roll(0, yOff, w, yOff + rollH);
+    dc.IntersectClipRect(&roll);
+    CRect uncovered;
+    const BOOL scrolled = dc.ScrollDC(0, -scrollPx, &roll, &roll, NULL, &uncovered);
+    dc.RestoreDC(saved);
+    if (!scrolled)
+        return false;
+
+    auto blitContent = [&](int x, int cy, int rw, int rh) {
+        if (rw <= 0 || rh <= 0 || cy < 0 || x < 0) return;
+        ::BitBlt(dc.GetSafeHdc(), x, yOff + cy, rw, rh, src, x, cy, SRCCOPY);
+    };
+
+    int bandTop = (healTop > 0 && healTop < rollH) ? healTop : (rollH - scrollPx);
+    if (!uncovered.IsRectEmpty()) {
+        const int uy = uncovered.top - yOff;
+        if (uy < bandTop) bandTop = uy;
+    }
+    bandTop -= 2;
+    if (bandTop < 0) bandTop = 0;
+    if (bandTop < rollH)
+        blitContent(0, bandTop, w, rollH - bandTop);
+
+    // 追従はキャプション座標のままバッファ先頭へ焼いてある。凡例より先に戻し、凡例を上に載せる。
+    CRect lockRc;
+    CCC_MainLockGetOverlayRect(m_hWnd, lockRc);
+    if (!lockRc.IsRectEmpty()) {
+        const int top = max(0, (int)lockRc.top);
+        const int bot = min(rollH, (int)lockRc.bottom);
+        if (bot > top)
+            blitContent(lockRc.left, top, lockRc.Width(), bot - top);
+    }
+
+    if (m_showExprLegend && m_rollDC.GetSafeHdc()) {
+        CRect lg;
+        GetExprLegendPanelRect(w, rollH, lg);
+        if (!lg.IsRectEmpty())
+            blitContent(lg.left, lg.top, lg.Width(), lg.Height());
+    }
+
+    if (chordH > 0)
+        DrawChordPanel(dc, 0, yOff + rollH, w, chordH);
+
+    if (keySectionH > 0 && keySrcY >= 0) {
+        const int dstY = yOff + rollH + chordH;
+        if (blitKeys)
+            ::BitBlt(dc.GetSafeHdc(), 0, dstY, w, keySectionH, src, 0, keySrcY, SRCCOPY);
+        else if (meterH > 0)
+            ::BitBlt(dc.GetSafeHdc(), 0, dstY, w, meterH, src, 0, keySrcY, SRCCOPY);
+    }
+    return true;
+}
+
 void CPianoRoll::PresentFinalFrame(CDC& dc, int w, int h, int rollH, int keySectionH, int chordH)
 {
     // 凡例はスクロール用 m_rollDC に焼かない。最終面へだけ合成する。
@@ -5857,44 +5943,45 @@ void CPianoRoll::PresentFinalFrame(CDC& dc, int w, int h, int rollH, int keySect
             }
         }
         const int yOff = CCC_GetCustomCaptionHeight(m_hWnd);
+        const bool bodyAero = (savedata.aero == 1 && CCC_IsWin11());
+        // 不透明本文は SRCCOPY。本文ガラスだけ従来の AlphaBlend（背面を抜くため）。
+        if (!bodyAero && m_presentScrollPx > 0 && m_chromaCache.hdcDib
+            && PresentScrolledOpaque(dc, m_chromaCache.hdcDib, yOff, w, rollH, keySectionH, chordH,
+                m_presentScrollPx, m_lastScrollHealTop, rollH, m_presentBlitKeys, m_presentMeterH)) {
+            CCC_CaptionPaintGdi(dc, m_hWnd);
+            return;
+        }
+        auto blitChroma = [&](int dx, int dy, int rw, int rh, int sx, int sy) {
+            if (rw <= 0 || rh <= 0 || !m_chromaCache.hdcDib) return;
+            if (bodyAero) {
+                const BLENDFUNCTION bf = { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
+                if (!::GdiAlphaBlend(dc.GetSafeHdc(), dx, dy, rw, rh, m_chromaCache.hdcDib, sx, sy, rw, rh, bf))
+                    ::BitBlt(dc.GetSafeHdc(), dx, dy, rw, rh, m_chromaCache.hdcDib, sx, sy, SRCCOPY);
+            }
+            else {
+                ::BitBlt(dc.GetSafeHdc(), dx, dy, rw, rh, m_chromaCache.hdcDib, sx, sy, SRCCOPY);
+            }
+        };
         if (m_rollReady && (m_keyBufReady || keySectionH <= 0) && chordH <= 0) {
-            m_chromaCache.BlitFull(dc.GetSafeHdc(), 0, yOff, w, h);
+            if (bodyAero)
+                m_chromaCache.BlitFull(dc.GetSafeHdc(), 0, yOff, w, h);
+            else
+                blitChroma(0, yOff, w, h, 0, 0);
             CCC_CaptionPaintGdi(dc, m_hWnd);
             return;
         }
         if (m_rollReady && (m_keyBufReady || keySectionH <= 0) && chordH > 0) {
-            const BLENDFUNCTION bf = { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
-            if (yOff <= 0) {
-                m_chromaCache.BlitRect(dc.GetSafeHdc(), 0, 0, w, rollH);
-                if (m_keyBufReady)
-                    m_chromaCache.BlitRect(dc.GetSafeHdc(), 0, rollH + chordH, w, keySectionH);
-            }
-            else if (m_chromaCache.hdcDib) {
-                ::GdiAlphaBlend(dc.GetSafeHdc(), 0, yOff, w, rollH,
-                    m_chromaCache.hdcDib, 0, 0, w, rollH, bf);
-                if (m_keyBufReady)
-                    ::GdiAlphaBlend(dc.GetSafeHdc(), 0, yOff + rollH + chordH, w, keySectionH,
-                        m_chromaCache.hdcDib, 0, rollH, w, keySectionH, bf);
-            }
+            blitChroma(0, yOff, w, rollH, 0, 0);
+            if (m_keyBufReady)
+                blitChroma(0, yOff + rollH + chordH, w, keySectionH, 0, rollH);
             DrawChordPanel(dc, 0, yOff + rollH, w, chordH);
             CCC_CaptionPaintGdi(dc, m_hWnd);
             return;
         }
-        if (yOff <= 0) {
-            if (m_rollReady)
-                m_chromaCache.BlitRect(dc.GetSafeHdc(), 0, 0, w, rollH);
-            if (m_keyBufReady)
-                m_chromaCache.BlitRect(dc.GetSafeHdc(), 0, rollH, w, keySectionH);
-        }
-        else if (m_chromaCache.hdcDib) {
-            const BLENDFUNCTION bf = { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
-            if (m_rollReady)
-                ::GdiAlphaBlend(dc.GetSafeHdc(), 0, yOff, w, rollH,
-                    m_chromaCache.hdcDib, 0, 0, w, rollH, bf);
-            if (m_keyBufReady)
-                ::GdiAlphaBlend(dc.GetSafeHdc(), 0, yOff + rollH, w, keySectionH,
-                    m_chromaCache.hdcDib, 0, rollH, w, keySectionH, bf);
-        }
+        if (m_rollReady)
+            blitChroma(0, yOff, w, rollH, 0, 0);
+        if (m_keyBufReady)
+            blitChroma(0, yOff + rollH, w, keySectionH, 0, rollH);
         CCC_CaptionPaintGdi(dc, m_hWnd);
         return;
     }
@@ -5950,7 +6037,19 @@ void CPianoRoll::PresentFinalFrame(CDC& dc, int w, int h, int rollH, int keySect
     CCC_MainLockPaintClient(m_frameDC, m_hWnd);
     const int yOff = CCC_GetCustomCaptionHeight(m_hWnd);
 #if CCUSTOM_AERO_SUPPORT
-    if (!CCC_IsAeroEnabled() && CCC_AcrylicCaption(m_hWnd) && CCC_IsWin11())
+    const bool stretchOpaque = (!CCC_IsAeroEnabled() && CCC_AcrylicCaption(m_hWnd) && CCC_IsWin11());
+#else
+    const bool stretchOpaque = false;
+#endif
+    if (!stretchOpaque && m_presentScrollPx > 0
+        && PresentScrolledOpaque(dc, m_frameDC.GetSafeHdc(), yOff, w, rollH, keySectionH, chordH,
+            m_presentScrollPx, m_lastScrollHealTop, rollH + chordH,
+            m_presentBlitKeys, m_presentMeterH)) {
+        CCC_CaptionPaintGdi(dc, m_hWnd);
+        return;
+    }
+#if CCUSTOM_AERO_SUPPORT
+    if (stretchOpaque)
         CCC_BlitStretchOpaque(dc.GetSafeHdc(), 0, yOff, w, h, m_frameDC.GetSafeHdc(), 0, 0, w, h);
     else
 #endif
@@ -6025,11 +6124,10 @@ void CPianoRoll::BakeMainFollowOverlayIntoChroma(int w, int h, int rollH, int ke
 
     CDC dcCache;
     dcCache.Attach(m_chromaCache.hdcDib);
-    // メモリDCの GetClipBox が空/不正だと MainLockPaint が即 return するため、
-    // 明示的に全面クリップを張る。
-    CRgn fullRgn;
-    fullRgn.CreateRectRgn(0, 0, w, h);
-    dcCache.SelectClipRgn(&fullRgn);
+    // メモリDCのクリップが空だと追従描画が抜ける。リージョンの毎フレ生成はしない。
+    const int savedClip = dcCache.SaveDC();
+    dcCache.SelectClipRgn(NULL);
+    dcCache.IntersectClipRect(0, 0, w, h);
 
     CRect frozenOpaque;
     if (m_frozen) {
@@ -6048,7 +6146,7 @@ void CPianoRoll::BakeMainFollowOverlayIntoChroma(int w, int h, int rollH, int ke
         if (of) dcCache.SelectObject(of);
     }
     CCC_MainLockPaintClient(dcCache, m_hWnd);
-    dcCache.SelectClipRgn(NULL);
+    dcCache.RestoreDC(savedClip);
     dcCache.Detach();
 
     if (!lockRc.IsRectEmpty())
@@ -6057,6 +6155,54 @@ void CPianoRoll::BakeMainFollowOverlayIntoChroma(int w, int h, int rollH, int ke
         m_chromaCache.MakeRectOpaque(frozenOpaque.left, frozenOpaque.top, frozenOpaque.Width(), frozenOpaque.Height());
 }
 #endif
+
+BOOL CPianoRoll::OnEraseBkgnd(CDC* pDC)
+{
+    // ロールバッファがある間は消さない。Alt+Tab の RDW_ERASE が
+    // クライアント全面の不透明 AlphaBlend になり、その直後の OnPaint と重なって固まる。
+    if (m_rollReady)
+        return TRUE;
+    return CCustomDialogEx::OnEraseBkgnd(pDC);
+}
+
+void CPianoRoll::InvalidateCaptionChrome()
+{
+    if (!::IsWindow(m_hWnd) || m_paintDisabled) return;
+    const int capH = CCC_GetCustomCaptionHeight(m_hWnd);
+    if (capH <= 0) return;
+    CRect cr;
+    GetClientRect(&cr);
+    if (cr.bottom > capH)
+        cr.bottom = capH;
+    if (!cr.IsRectEmpty())
+        InvalidateRect(&cr, FALSE);
+    for (HWND h = ::GetWindow(m_hWnd, GW_CHILD); h; h = ::GetWindow(h, GW_HWNDNEXT)) {
+        if (!::IsWindowVisible(h))
+            continue;
+        RECT wr = {};
+        if (!::GetWindowRect(h, &wr))
+            continue;
+        ::MapWindowPoints(NULL, m_hWnd, reinterpret_cast<POINT*>(&wr), 2);
+        if (wr.top < capH)
+            ::InvalidateRect(h, NULL, FALSE);
+    }
+}
+
+void CPianoRoll::OnActivate(UINT nState, CWnd* pWndOther, BOOL bMinimized)
+{
+    // 基底は活性化のたびに RedrawWindow(ERASE|ALLCHILDREN) する。
+    // ピアノロール本文はオフスクリーンが正なので、帯とボタンだけ無効化する。
+    CCustomDialogEx::OnActivate(nState, pWndOther, bMinimized);
+    if (!bMinimized)
+        InvalidateCaptionChrome();
+}
+
+void CPianoRoll::OnActivateApp(BOOL bActive, DWORD dwThreadID)
+{
+    CCustomDialogEx::OnActivateApp(bActive, dwThreadID);
+    UNREFERENCED_PARAMETER(bActive);
+    InvalidateCaptionChrome();
+}
 
 void CPianoRoll::OnPaint()
 {
@@ -6078,6 +6224,17 @@ void CPianoRoll::OnPaint()
         return;
     }
 
+    // Alt+Tab / WM_NCACTIVATE は帯だけが無効になる。ロール再合成や全面消去はしない。
+    if (capH > 0) {
+        CRect clip;
+        const int clipKind = dc.GetClipBox(&clip);
+        if ((clipKind == SIMPLEREGION || clipKind == COMPLEXREGION)
+            && clip.bottom <= capH + 1 && clip.top < capH && clip.right > clip.left) {
+            CCC_CaptionPaintGdi(dc, m_hWnd);
+            return;
+        }
+    }
+
     // 簡易3D はクライアント全面を1枚のシーンとして扱う(鍵盤帯を分けない)。
     // 2D(既定)のときの分割・スクロール経路は従来のまま。
     // キャプション帯は除外した content 高さでレイアウト（食い込み防止）
@@ -6093,24 +6250,7 @@ void CPianoRoll::OnPaint()
         return;
     }
 
-    // 追従ドラッグ中の軽量提示。保留フレーム/ダーティがあるときは通常経路で消化する。
-    {
-        int pendingQuick = 0;
-        EnterCriticalSection(&m_cs);
-        pendingQuick = m_framesPending;
-        LeaveCriticalSection(&m_cs);
-        const bool needBufUpdate = (pendingQuick > 0) || m_historyDirty || m_keyDirty || m_meterDirty
-            || (InterlockedCompareExchange(&m_analysisPresentDirty, 0, 0) != 0);
-        const bool keyBufOk = view3D || (m_keyBufReady && m_keyW == w && m_keyH == keySectionH);
-        if (!needBufUpdate && CCC_MainLockPreferQuickPresent() && m_rollReady && keyBufOk
-            && m_rollW == w && m_rollH == rollH) {
-            PresentClientFromBuffers(dc, w, h, rollH, keySectionH);
-            return;
-        }
-    }
-
-    // メーターだけ動いたときはロール・108鍵・全面 Blit をしない。
-    // 解析完了のフラグはここでは捨てない（次のノート行を落とさない）。
+    // dB 帯だけの無効化はロールを再合成しない。露出復帰や行更新は下の通常経路。
     if (!view3D && m_meterDirty && !m_keyDirty && !m_historyDirty
         && m_keyBufReady && m_rollReady && m_keyDC.GetSafeHdc()
         && m_keyW == w && m_keyH == keySectionH
@@ -6119,14 +6259,45 @@ void CPianoRoll::OnPaint()
         EnterCriticalSection(&m_cs);
         pendingMeter = m_framesPending;
         LeaveCriticalSection(&m_cs);
-        if (pendingMeter <= 0
-            && InterlockedCompareExchange(&m_analysisPresentDirty, 0, 0) == 0) {
-            float meterFill[PIANO_METER_CH_MAX];
-            const int meterCh = m_chMeterCount;
-            memcpy(meterFill, m_chMeterFill, sizeof(meterFill));
-            PaintMeterStripOnKey(w, keyH, meterFill, meterCh);
-            if (PresentMeterStrip(dc, w, rollH, keyH, chordH)) {
-                m_meterDirty = false;
+        if (pendingMeter <= 0) {
+            CRect clip;
+            const int clipKind = dc.GetClipBox(&clip);
+            const int labelH = min(16, keyH / 4);
+            const int meterTop = capH + rollH + chordH;
+            const int meterBottom = meterTop + labelH + 2;
+            const bool meterClip = (clipKind == SIMPLEREGION || clipKind == COMPLEXREGION)
+                && clip.top >= meterTop - 2 && clip.bottom <= meterBottom + 4
+                && clip.right > clip.left;
+            if (meterClip) {
+                float meterFill[PIANO_METER_CH_MAX];
+                const int meterCh = m_chMeterCount;
+                memcpy(meterFill, m_chMeterFill, sizeof(meterFill));
+                PaintMeterStripOnKey(w, keyH, meterFill, meterCh);
+                if (PresentMeterStrip(dc, w, rollH, keyH, chordH)) {
+                    m_meterDirty = false;
+                    return;
+                }
+            }
+        }
+    }
+
+    // 追従ドラッグ中など、バッファが最新のときは貼るだけ（再合成しない）。
+    {
+        int pendingQuick = 0;
+        EnterCriticalSection(&m_cs);
+        pendingQuick = m_framesPending;
+        LeaveCriticalSection(&m_cs);
+        const bool needBufUpdate = (pendingQuick > 0) || m_historyDirty || m_keyDirty || m_meterDirty;
+        const bool keyBufOk = view3D || (m_keyBufReady && m_keyW == w && m_keyH == keySectionH);
+        if (!needBufUpdate && m_rollReady && keyBufOk
+            && m_rollW == w && m_rollH == rollH) {
+            CRect clip;
+            const int clipKind = dc.GetClipBox(&clip);
+            const bool uncover = (clipKind == SIMPLEREGION || clipKind == COMPLEXREGION)
+                && capH > 0 && clip.top < capH && clip.bottom > capH + rollH / 2;
+            if (uncover || CCC_MainLockPreferQuickPresent()) {
+                PresentClientFromBuffers(dc, w, h, rollH, keySectionH);
+                InterlockedExchange(&m_analysisPresentDirty, 0);
                 return;
             }
         }
@@ -6424,8 +6595,19 @@ void CPianoRoll::OnPaint()
     }
 #endif
 
-    // 追従UI込みでオフスクリーン合成 → 画面へ1回だけ出す（凡例もここで最終面へ）
+    // 追従UI込みでオフスクリーン合成 → 画面へ出す（1行スクロール時は差分 BitBlt）
+    m_presentScrollPx = (!view3D && didRollScroll) ? m_lastScrollPx : 0;
+    m_presentBlitKeys = (!view3D && needKeyDraw);
+    m_presentMeterH = 0;
+    if (!view3D && didMeterOnly && !needKeyDraw) {
+        const int labelH = min(16, keyH / 4);
+        if (labelH >= 4)
+            m_presentMeterH = labelH + 2;
+    }
     PresentFinalFrame(dc, w, h, rollH, keySectionH, IsView3D() ? 0 : ChordPanelHeightPx());
+    m_presentScrollPx = 0;
+    m_presentBlitKeys = false;
+    m_presentMeterH = 0;
 
     if (didRollUpdate)
         m_historyDirty = false;

@@ -994,6 +994,11 @@ struct save{
 	   0=SC モジュール（MSB 127 / LSB 0） 1=実機 MT-32（バンクを出さない）。
 	   繋がっている実機は判定できないので、ここはユーザーの想定。末尾追記。 */
 	int laMapperMt32;
+
+	/* 再生テンポ／ピッチのスライダー位置。0..400、200=100%。
+	   dsvol / kakuVol は既存フィールド。旧.datは未保存なので 200。末尾追記。 */
+	int tempoPos;
+	int pitchPos;
 };
 extern save savedata;
 

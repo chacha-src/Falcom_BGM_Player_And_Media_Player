@@ -73,6 +73,7 @@
       <FunctionLevelLinking Condition="'$(Configuration)'=='uni_avx2_vs2026'">true</FunctionLevelLinking>
       <StringPooling Condition="'$(Configuration)'=='uni_avx2_vs2026'">true</StringPooling>
       <WholeProgramOptimization Condition="'$(Configuration)'=='uni_avx2_vs2026'">true</WholeProgramOptimization>
+      <OptimizeGlobalData Condition="'$(Configuration)'=='uni_avx2_vs2026'">true</OptimizeGlobalData>
       <OpenMPSupport>false</OpenMPSupport>
     </ClCompile>
     <ResourceCompile>

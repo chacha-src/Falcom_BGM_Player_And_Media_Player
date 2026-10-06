@@ -61,6 +61,15 @@
       <EnableEnhancedInstructionSet Condition="'$(Configuration)'=='uni_avx2_vs2026' Or '$(Configuration)'=='uni_2026_de'">AdvancedVectorExtensions2</EnableEnhancedInstructionSet>
       <Optimization Condition="'$(Configuration)'=='uni_2026_de'">MaxSpeed</Optimization>
       <Optimization Condition="'$(Configuration)'=='uni_avx2_vs2026'">MaxSpeed</Optimization>
+      <InlineFunctionExpansion Condition="'$(Configuration)'=='uni_avx2_vs2026'">AnySuitable</InlineFunctionExpansion>
+      <IntrinsicFunctions Condition="'$(Configuration)'=='uni_avx2_vs2026'">true</IntrinsicFunctions>
+      <FavorSizeOrSpeed Condition="'$(Configuration)'=='uni_avx2_vs2026'">Speed</FavorSizeOrSpeed>
+      <OmitFramePointers Condition="'$(Configuration)'=='uni_avx2_vs2026'">true</OmitFramePointers>
+      <EnableFiberSafeOptimizations Condition="'$(Configuration)'=='uni_avx2_vs2026'">true</EnableFiberSafeOptimizations>
+      <FunctionLevelLinking Condition="'$(Configuration)'=='uni_avx2_vs2026'">true</FunctionLevelLinking>
+      <StringPooling Condition="'$(Configuration)'=='uni_avx2_vs2026'">true</StringPooling>
+      <WholeProgramOptimization Condition="'$(Configuration)'=='uni_avx2_vs2026'">true</WholeProgramOptimization>
+      <OptimizeGlobalData Condition="'$(Configuration)'=='uni_avx2_vs2026'">true</OptimizeGlobalData>
       <DebugInformationFormat Condition="'$(Configuration)'=='uni_2026_de'">ProgramDatabase</DebugInformationFormat>
       <OpenMPSupport>false</OpenMPSupport>
     </ClCompile>
@@ -71,6 +80,9 @@
       <LargeAddressAware Condition="'$(Platform)'=='Win32'">true</LargeAddressAware>
       <GenerateDebugInformation Condition="'$(Configuration)'=='uni_2026_de'">DebugFull</GenerateDebugInformation>
       <GenerateDebugInformation Condition="'$(Configuration)'=='uni_avx2_vs2026'">true</GenerateDebugInformation>
+      <OptimizeReferences Condition="'$(Configuration)'=='uni_avx2_vs2026'">true</OptimizeReferences>
+      <EnableCOMDATFolding Condition="'$(Configuration)'=='uni_avx2_vs2026'">true</EnableCOMDATFolding>
+      <LinkTimeCodeGeneration Condition="'$(Configuration)'=='uni_avx2_vs2026'">UseLinkTimeCodeGeneration</LinkTimeCodeGeneration>
       <ProgramDatabaseFile>$(OutDir)$(TargetName).pdb</ProgramDatabaseFile>
       <AdditionalLibraryDirectories Condition="'$(Platform)'=='Win32'">$(ProjectDir)..;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <AdditionalLibraryDirectories Condition="'$(Platform)'=='x64'">$(ProjectDir)..\x64lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>

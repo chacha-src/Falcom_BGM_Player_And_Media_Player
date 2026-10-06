@@ -156,8 +156,25 @@ CString FormatAudioPlaybackDisplay(int srcRate, int srcCh, int srcBits)
 	return out;
 }
 
+float AudioUpscaler::s_fifoPool[AudioUpscaler::kFifoPool][AudioUpscaler::kUpFifoCap];
+int AudioUpscaler::s_fifoPoolUsed;
+
 AudioUpscaler::AudioUpscaler()
 {
+	const int i = s_fifoPoolUsed++;
+	if (i >= 0 && i < kFifoPool) {
+		m_fifo = s_fifoPool[i];
+		m_fifoOwned = false;
+	} else {
+		m_fifo = new float[kUpFifoCap]();
+		m_fifoOwned = true;
+	}
+}
+
+AudioUpscaler::~AudioUpscaler()
+{
+	if (m_fifoOwned)
+		delete[] m_fifo;
 }
 
 void AudioUpscaler::Configure(int srcRate, int srcCh, int srcBits,

@@ -135,6 +135,9 @@ protected:
     DECLARE_MESSAGE_MAP()
 
     afx_msg void OnPaint();
+    afx_msg BOOL OnEraseBkgnd(CDC* pDC);
+    afx_msg void OnActivate(UINT nState, CWnd* pWndOther, BOOL bMinimized);
+    afx_msg void OnActivateApp(BOOL bActive, DWORD dwThreadID);
     afx_msg void OnTimer(UINT_PTR nIDEvent);
     afx_msg void OnSize(UINT nType, int cx, int cy);
     afx_msg void OnMove(int x, int y);
@@ -468,6 +471,10 @@ private:
     bool    m_rollScrollValid = false;
     int     m_lastScrollPx = 0;
     int     m_lastScrollHealTop = 0;
+    // この OnPaint が 1 行スクロール済みのときだけ、画面は ScrollDC + 差分 BitBlt。
+    int     m_presentScrollPx = 0;
+    bool    m_presentBlitKeys = false;
+    int     m_presentMeterH = 0;
 
     // 鍵盤描画バッファ。ノートがオン/オフするたびに再描画するが、毎フレーム再生成
     // しないためサイズ変化時にのみ再確保する。
@@ -600,6 +607,11 @@ private:
     void PresentClientFromBuffers(CPaintDC& dc, int w, int h, int rollH, int keySectionH);
     // ロール+鍵盤+追従UI をオフスクリーンへ合成し、画面へは1回だけ出す
     void PresentFinalFrame(CDC& dc, int w, int h, int rollH, int keySectionH, int chordH = 0);
+    // 不透明本文。前フレームを ScrollDC し、新規行・凡例・メーターだけ BitBlt する。
+    bool PresentScrolledOpaque(CDC& dc, HDC src, int yOff, int w, int rollH,
+        int keySectionH, int chordH, int scrollPx, int healTop, int keySrcY,
+        bool blitKeys, int meterH);
+    void InvalidateCaptionChrome();
     void UpdateChordHistoryFromKeyCodes();
     void DrawChordPanel(CDC& dc, int x, int y, int w, int h) const;
     static int ChordPanelHeightPx();

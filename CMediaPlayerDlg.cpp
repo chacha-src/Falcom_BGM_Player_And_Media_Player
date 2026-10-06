@@ -1866,10 +1866,31 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 	m_finddown.SetIcon(CCC_LoadSharedIcon(IDI_CTL_CHEVDOWN), NULL); m_finddown.SetFlat(TRUE);
 
 	// サウンド調整スライダー(og の各スライダーと同じ範囲に合わせる)
-	m_dsvol.SetRange(-498, 1); 
+	// 位置は savedata から。未設定の 0 のまま timer が走ると、本体側の復元値を上書きして保存まで戻る。
+	m_dsvol.SetRange(-498, 1);
+	{
+		int ds = savedata.dsvol;
+		if (ds == 0 || ds > 1 || ds < -498) ds = 1;
+		m_dsvol.SetPos(ds);
+	}
 	m_kvol.SetRange(100, 900);
+	{
+		int kv = savedata.kakuVol;
+		if (kv < 100 || kv > 900) kv = 100;
+		m_kvol.SetPos(kv);
+	}
 	m_tempo.SetRange(0, 400);   m_tempo.SetMode(1);
+	{
+		int tp = savedata.tempoPos;
+		if (tp < 0 || tp > 400) tp = 200;
+		m_tempo.SetPos(tp);
+	}
 	m_pitch.SetRange(0, 400);   m_pitch.SetMode(1);
+	{
+		int pp = savedata.pitchPos;
+		if (pp < 0 || pp > 400) pp = 200;
+		m_pitch.SetPos(pp);
+	}
 
 	// シークスライダーに選択範囲(緑)を有効化。リソースでは付いていないため
 	// ここで付与しないと MirrorSeekVol の SetSelection(ループ範囲/緑追随)が描画されない。

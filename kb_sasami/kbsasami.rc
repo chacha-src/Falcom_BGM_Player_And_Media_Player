@@ -1,0 +1,4 @@
+#include <winres.h>
+101 RCDATA "..\\res\\SASAMI_GS.DAT"
+102 RCDATA "data\\gs.wopn"
+103 RCDATA "data\\xg.wopn"
