@@ -1,7 +1,6 @@
 ﻿//{{NO_DEPENDENCIES}}
 // Microsoft Visual C++ で生成されたインクルード ファイル。
 // ogg.rc で使用
-//
 #define IDOK2                           2
 #define IDC_FOL                         2
 #define IDCANCEL2                       3
@@ -283,15 +282,15 @@
 #define IDI_CTL_STAR                    380
 #define IDI_CTL_FADE                    381
 #define IDI_CTL_AB                      382
-#define IDR_IW_FACE                     383
-#define IDR_IW_BODY                     384
-#define IDR_IW_BODY2                    385
-#define IDR_IW_LACE                     386
-#define IDR_IW_BOW                      387
-#define IDR_IW_BLUSH                    388
-#define IDR_IW_FLUID                    389
-#define IDR_IW_ROTOR                    390
-#define IDR_IW_VIBE                     391
+#define IDR_U383                     383
+#define IDR_U384                     384
+#define IDR_U385                    385
+#define IDR_U386                     386
+#define IDR_U387                      387
+#define IDR_U388                    388
+#define IDR_U389                    389
+#define IDR_U390                    390
+#define IDR_U391                     391
 #define IDI_CTL_CHEVTOP                 392
 #define IDI_CTL_CHEVBOTTOM              393
 #define IDC_STATIC11                    1000
@@ -2256,7 +2255,6 @@
 #define ID_DOUGA_SUBOFF                 40090
 
 // Next default values for new objects
-// 
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NEXT_RESOURCE_VALUE        372

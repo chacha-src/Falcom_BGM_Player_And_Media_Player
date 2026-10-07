@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 // RCP/R36/G36/G18/MCP/MTD (Recomposer PC-98/88)、EUP (FM Towns)、
 // SNG (BALLADE)、ZMS (Z-MUSIC MML)、KAR/RMI/SMF/MFF/SEQ。
 // 出力は %TEMP%\ogg_composer\<hash>_<stem>.mid

@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 // CFmMonitorDlg : SASAMI FPY / OPNA (YM2608) レジスタ・鍵盤モニタ
 // KPI/SASAMI: %TEMP%\ogg_kbsasami\*.opna
 // CEmu:       %TEMP%\ogg_cemu\*.opna （混ぜない）

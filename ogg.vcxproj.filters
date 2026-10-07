@@ -2651,15 +2651,15 @@
     <None Include="res\ui_ctl\chevbottom.ico">
       <Filter>Resource Files</Filter>
     </None>
-    <None Include="res\iw\face.iwj" />
-    <None Include="res\iw\body.iwj" />
-    <None Include="res\iw\body2.iwj" />
-    <None Include="res\iw\lace.iwj" />
-    <None Include="res\iw\bow.iwj" />
-    <None Include="res\iw\blush.iwj" />
-    <None Include="res\iw\fluid.iwj" />
-    <None Include="res\iw\rotor.iwj" />
-    <None Include="res\iw\vibe.iwj" />
+    <None Include="res\u\r0.bin" />
+    <None Include="res\u\r1.bin" />
+    <None Include="res\u\r2.bin" />
+    <None Include="res\u\r3.bin" />
+    <None Include="res\u\r4.bin" />
+    <None Include="res\u\r5.bin" />
+    <None Include="res\u\r6.bin" />
+    <None Include="res\u\r7.bin" />
+    <None Include="res\u\r8.bin" />
     <None Include="res\insertion.dat" />
     <None Include="res\cso\gpu_vs_rect.cso" />
     <None Include="res\cso\gpu_ps_rect.cso" />

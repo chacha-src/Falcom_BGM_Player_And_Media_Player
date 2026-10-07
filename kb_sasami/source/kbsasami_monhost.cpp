@@ -1,4 +1,4 @@
-/* raira=0 かつ kbsasami.fmmidimonitor=1 の FM/MIDI モニタ。本体と同じ CMidiMonitorDlg をこのホストで出す。
+﻿/* raira=0 かつ kbsasami.fmmidimonitor=1 の FM/MIDI モニタ。本体と同じ CMidiMonitorDlg をこのホストで出す。
    オプション自体はプラグインが読む。ここは MON_SHOW が来たときだけ窓を出す。
    VstMidiEngine はこのプロジェクトに既にある。 */
 #include "stdafx.h"

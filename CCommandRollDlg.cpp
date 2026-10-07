@@ -1075,18 +1075,18 @@ void CCommandRollView::OnPaint()
 				::BitBlt(hdcBuf, 0, 0, w, h, m_memDC.GetSafeHdc(), 0, 0, SRCCOPY);
 				::BufferedPaintMakeOpaque(hBP, &pr);
 				::EndBufferedPaint(hBP, TRUE);
-				CCC_DrawInwomanOnClient(&pdc, m_hWnd);
+				CCC_NkBlitW(&pdc, m_hWnd);
 				return;
 			}
 		}
 		CCC_BlitStretchOpaque(pdc.GetSafeHdc(), 0, 0, w, h,
 			m_memDC.GetSafeHdc(), 0, 0, w, h);
-		CCC_DrawInwomanOnClient(&pdc, m_hWnd);
+		CCC_NkBlitW(&pdc, m_hWnd);
 		return;
 	}
 #endif
 	pdc.BitBlt(0, 0, w, h, &m_memDC, 0, 0, SRCCOPY);
-	CCC_DrawInwomanOnClient(&pdc, m_hWnd);
+	CCC_NkBlitW(&pdc, m_hWnd);
 }
 
 LRESULT CCommandRollView::OnPrintClient(WPARAM wParam, LPARAM)

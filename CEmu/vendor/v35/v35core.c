@@ -1,4 +1,4 @@
-/* NEC V35 (uPD70136) core — see v35core.h for scope.
+﻿/* NEC V35 (uPD70136) core — see v35core.h for scope.
 
    Instruction semantics and the on-chip peripheral behaviour follow MAME's
    src/devices/cpu/nec (nec.cpp / v25.cpp / v25sfr.cpp, BSD-3-Clause, Bryan

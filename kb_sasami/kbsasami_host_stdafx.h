@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 /* kbsasami_host は VstMidiEngine と同じプロセスで、本体の FM/MIDI モニタ dlg を出す。
    エンジン側の save は kpihost_stdafx。その前に MFC を入れる。 */
 #ifndef VC_EXTRALEAN

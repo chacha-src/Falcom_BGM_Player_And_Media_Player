@@ -1,4 +1,4 @@
-/* raira=0 かつ fmmidimonitor=1: 再生位置を共有メモリへ書き、kbsasami_host にモニタを出させる。
+﻿/* raira=0 かつ fmmidimonitor=1: 再生位置を共有メモリへ書き、kbsasami_host にモニタを出させる。
    raira=1 は Configure(0)。fmmidimonitor は見ない。ホストへは開かない。 */
 #include <windows.h>
 #include <stdint.h>

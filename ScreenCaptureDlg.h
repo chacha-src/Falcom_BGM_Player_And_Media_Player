@@ -34,7 +34,7 @@ protected:
 };
 
 // エフェクト線形配線 (IN→最大8スロット→OUT) + パレットからドラッグ
-// 不透明オーナー描画。アクリル/淫女時も自前バッファでちらつきなし。
+// 不透明オーナー描画。アクリル時も自前バッファでちらつきなし。
 class CScFxWireCtrl : public CStatic
 {
 	DECLARE_DYNAMIC(CScFxWireCtrl)

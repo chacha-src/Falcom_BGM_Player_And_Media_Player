@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "stdafx.h"
 #include "afxdialogex.h"
@@ -13,15 +13,15 @@
 
 // ============================================================================
 // VS2026 アクリルぼかし機能 (_MSC_VER >= 1950 のときのみ有効)
-// savedata.aero == 1 かつ VS2026ビルド時のみ背景ぼかしが適用されます。
 //
+// savedata.aero == 1 かつ VS2026ビルド時のみ背景ぼかしが適用されます。
 // 【Win11 ぼかしの正しい構成】
 //   親: DWMWA_SYSTEMBACKDROP_TYPE + ExtendFrame(-1)（余白のアクリル源）
 //   親 OnPaint: WS_CLIPCHILDREN で隙間のみ薄グレー（任意）
 //   子: CCustomOpaqueFixer が BufferedPaint でアルファ255の不透明面を作り、
 //       その上に WM_PRINTCLIENT → OnPrintClient で描画する。
-//   ※CControlFixer（白を透過）は CCustom* には使わない。
 //
+//   ※CControlFixer（白を透過）は CCustom* には使わない。
 // 【Win10のぼかし (SetWindowCompositionAttributeを使用)】
 //   非公開APIである SetWindowCompositionAttribute を使用して
 //   背景にアクリルぼかし効果（ACCENT_ENABLE_BLURBEHIND 等）を適用します。
@@ -98,26 +98,17 @@ void CCC_ClearRectChroma(HDC hdcDest, const RECT& rect, COLORREF clrKey); // 矩
 void CCC_FillRectAlpha(HDC hdc, const RECT& rc, COLORREF clr, BYTE alpha);
 #endif
 
-// ============================================================================
-// 隠し機能: 複合ファンクション連打で入る裏演出 (savedata.inwoman==1)。
-// 出口は F12 を短時間に5回。入り口は F12×7 → F11×7 → F12 を2秒押しっぱなし。
-// ============================================================================
 extern save savedata;
-static inline BOOL CCC_IsInwoman()
+static inline BOOL CCC_Nk()
 {
-    return savedata.inwoman == 1;
+    return savedata.q4 == 1;
 }
-// F12連打を監視してトグル。各メインダイアログの PreTranslateMessage から呼ぶ。
-BOOL CCC_InwomanHotkey(MSG* pMsg, CWnd* pWnd);
-// 淫女モードのアニメ用に全ウィンドウを定期再描画するタイマーを用意(冪等)
-void CCC_StartInwomanTimer();
-// 終了直前。再描画タイマーを止めて BN_CLICKED / stop() を食わない。
-void CCC_StopInwomanTimer();
-// 不透明パネル等への淫女オーバーレイ描画（ポップアップメニュー等から利用）
-void CCC_DrawInwoman(CDC* pDC, const CRect& rc, BOOL bAeroTrans);
-// GDI キャンバス（ピアノロール／アナライザ等）へ裸体を重ねる。アクリルでもスチルは出す。
-void CCC_DrawInwomanOnRect(CDC* pDC, const CRect& rc);
-void CCC_DrawInwomanOnClient(CDC* pDC, HWND hWnd);
+BOOL CCC_NkMsg(MSG* pMsg, CWnd* pWnd);
+void CCC_NkArm();
+void CCC_NkDis();
+void CCC_NkBlit(CDC* pDC, const CRect& rc, BOOL bAeroTrans);
+void CCC_NkBlitR(CDC* pDC, const CRect& rc);
+void CCC_NkBlitW(CDC* pDC, HWND hWnd);
 void CCC_CaptionPaintGdi(CDC& dc, HWND hDlg);
 void CCC_PrintEnter();
 void CCC_PrintLeave();
@@ -139,8 +130,7 @@ private:
 	CCC_ModalUiGuard(const CCC_ModalUiGuard&);
 	CCC_ModalUiGuard& operator=(const CCC_ModalUiGuard&);
 };
-// ピクン時の控件全体シェイク量(非淫女/静止時は 0,0)
-void CCC_InwomanGetShake(int& dx, int& dy);
+void CCC_NkOff(int& dx, int& dy);
 // コンテキストメニューからアクリルON/OFFしたとき全UIへ再適用
 void CCC_NotifyAeroSettingChanged();
 
@@ -765,8 +755,8 @@ private:
 
 // ============================================================================
 // カスタムエディットコントロール
-// CCustomEdit
 //
+// CCustomEdit
 // ガラス親では OpaqueFixer。システムキャレットは不透明化で消えるため自前点滅。
 // IME 候補は SyncImePos。複数行は可視行だけ DrawMultilineVisibleText。
 // ============================================================================
@@ -990,8 +980,8 @@ private:
 
 // ============================================================================
 // カスタムリストボックスコントロール
-// CCustomListBox
 //
+// CCustomListBox
 // オーナードロー。交互色＋選択ラベンダー。ガラス親では不透明バッファ。
 // ドロップダウン内（コンボ子）でも同じ経路。空領域は最終行より下を塗る。
 // ============================================================================
@@ -1036,8 +1026,8 @@ private:
 
 // ============================================================================
 // カスタムコンボボックスコントロール
-// CCustomComboBox
 //
+// CCustomComboBox
 // オーナードロー。無効行は論理インデックスから除外（グループ見出し）。
 // GetCurSel は論理、GetCurSelPhysical は基底。閉じた欄は PaintClient。
 // ガラス親では不透明。ドロップリストは CtlColor + DrawItem。
@@ -1121,8 +1111,8 @@ protected:
 
 // ============================================================================
 // カスタムリストコントロール
-// CCustomListCtrl
 //
+// CCustomListCtrl
 // CListCtrlA 派生。NM_CUSTOMDRAW で交互色・選択・ホバー♡。
 // ガラス親では PaintOpaqueClient（最終行より下も交互色で α=255）。
 // WS_EX_ACCEPTFILES 時は OnDropFiles が親へ転送（リストが親を覆うため）。
@@ -1211,8 +1201,8 @@ private:
 
 // ============================================================================
 // カスタムツリーコントロール (KotoriClient CCustomTreeCtrl 移植)
-// CCustomTreeCtrl — リスト同様にアクリル下では不透明バッファ描画
 //
+// CCustomTreeCtrl — リスト同様にアクリル下では不透明バッファ描画
 // 標準 TreeView の NM_CUSTOMDRAW を横取りし、行全体を交互色＋選択色で塗る。
 // ガラス親の上では OnEraseBkgnd=FALSE、PaintOpaqueClient で α=255 にする。
 // ドラッグ開始は親へ TVN_BEGINDRAG 相当を自前通知（フル行ヒットと整合させる）。
@@ -1277,8 +1267,8 @@ private:
 
 // ============================================================================
 // カスタムタブコントロール
-// CCustomTabCtrl
 //
+// CCustomTabCtrl
 // 標準 Tab の中身を自前描画（等幅スロット、選択パネル、ホバー）。
 // TCS_VERTICAL / TCS_RIGHT も IsVertical / IsRightSide で分岐する。
 // 選択タブは Soft 立体の軽い揺れタイマー (kTabSoftTimerId)。
@@ -1670,8 +1660,8 @@ private:
 
 // ============================================================================
 // カスタムチェックボックスコントロール
-// CCustomCheckBox
 //
+// CCustomCheckBox
 // 自前レ点。ON 時 8 フレームのぷるんバウンス (m_nBounce)。
 // アクリル時は箱以外をクロマ。ポップアップのレ点バウンスと同じカウンタ規約。
 // ============================================================================
@@ -1730,7 +1720,7 @@ protected:
 };
 
 // ============================================================================
-// カスタムラジオボタン (オーナー描画・アクリル透過 / 淫女モード対応)
+// カスタムラジオボタン (オーナー描画・アクリル透過)
 // CCustomRadioButton
 // ============================================================================
 // 丸枠＋内側ドット。クリックで ON のまま（OFF へはトグルしない）。
@@ -1750,8 +1740,8 @@ protected:
 
 // ============================================================================
 // 縦レベルメータ (録音/キャプチャ/マイク検出)
-// CCustomLevelMeter
 //
+// CCustomLevelMeter
 // 0..1000。緑→黄→赤の縦バー。ピークホールドは持たない（親が SetLevel する）。
 // バー寸法は旧 WS_BORDER+Deflate(2,2) と同じ。余白と枠だけ不透明に塗る。
 // 変化なしなら Invalidate しない。
@@ -1785,11 +1775,11 @@ protected:
 };
 
 // ============================================================================
-// カスタムプログレスバー (オーナー描画・アクリル透過 / 淫女モード対応)
+// カスタムプログレスバー (オーナー描画・アクリル透過)
 // CCustomProgressCtrl
 // ============================================================================
 // ぼかしダイアログ上では背景を透過(トラック/塗り/％は不透明)、通常時は
-// COLOR_DIALOG_BG で塗りつぶす。淫女モード時は CCC_DrawInwoman を重ねる。
+// COLOR_DIALOG_BG で塗りつぶす。
 class CCustomProgressCtrl : public CWnd
 {
 	DECLARE_DYNAMIC(CCustomProgressCtrl)
@@ -1834,9 +1824,9 @@ private:
 };
 
 // ============================================================================
-// システム性能パネル (メモリ数値 + CPU 全体/コア別グラフ・アクリル/淫女対応)
-// CCustomSysPerfCtrl
+// システム性能パネル (メモリ数値 + CPU 全体/コア別グラフ・アクリル対応)
 //
+// CCustomSysPerfCtrl
 // タイマ ~1Hz で GetSystemTimes。初回差分は捨てる (m_bHaveTimes)。
 // SMBIOS は起動時一度。右クリックで表示切替・コピー・一時停止。
 // ============================================================================
@@ -1945,8 +1935,8 @@ private:
 
 // ============================================================================
 // カスタムグループボックスコントロール
-// CCustomGroupBox
 //
+// CCustomGroupBox
 // 枠＋キャプションのみ。兄弟の下に回り（WS_CLIPSIBLINGS）、兄弟領域へ描かない。
 // Soft3D 常時タイマーはピアノ等と競合するため Kill する。アクリル時は枠をクロマ。
 // ============================================================================
@@ -2062,8 +2052,8 @@ private:
 
 // ============================================================================
 // ぼかし適用済みカスタムダイアログの基底クラス (CDialog派生)
-// CCustomBlurDialogBase
 //
+// CCustomBlurDialogBase
 // EnableAero + OpaqueFixer 一覧 + カスタムキャプション（min/max/close/pin/help）。
 // ApplyDwmBlurCore を二重に走らせない（FRAMECHANGED でフリーズする）。
 // EnableMainWindowLock はメイン位置へ追従するチェック。
@@ -2138,8 +2128,8 @@ private:
 
 // ============================================================================
 // カスタムダイアログクラス (CDialogEx 派生・非 Blur)
-// CCustomDialogEx
 //
+// CCustomDialogEx
 // CCustomDialog と同型だが、もともと CDialogEx だった窓向け。
 // ぼかし＋キャプションは CCustomBlurDialogExBase。
 // ============================================================================
@@ -2181,8 +2171,8 @@ private:
 
 // ============================================================================
 // ぼかし適用済みカスタムダイアログの基底クラス (CDialogEx派生)
-// CCustomBlurDialogExBase
 //
+// CCustomBlurDialogExBase
 // CCustomBlurDialogBase と同型。もともと CDialogEx だった窓向け。
 // ApplyDwmBlurCore を二重に走らせない（FRAMECHANGED でフリーズする）。
 // ============================================================================

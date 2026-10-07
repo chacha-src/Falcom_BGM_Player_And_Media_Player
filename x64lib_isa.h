@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 /* x64lib 共通の実行時 ISA 判定（ヘッダのみ。各 TU に static で埋め、LNK2005 を避ける）。
  * AVX2 が既定経路。AVX512 は AVX512F+DQ+BW+VL かつ OS が ZMM/opmask を保存できるときだけ。
  * Win32 では常に 0（Windows x86 では実質使えない）。 */

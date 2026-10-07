@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include "cemu_hard.h"
 #include "../chip/cemu_chip.h"
 #include "../cemu_zipfs.h"

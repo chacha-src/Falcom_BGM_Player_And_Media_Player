@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "kpi_decoder.h"
 #include "kpi_impl.h"

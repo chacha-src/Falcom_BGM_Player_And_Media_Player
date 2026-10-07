@@ -1,4 +1,4 @@
-// Auto-generated short EQ environment labels for remote UI
+﻿// Auto-generated short EQ environment labels for remote UI
 // Indices match CEqualizer::m_env. Count=110
 static const wchar_t* MpRemoteEqEnvLabel(int idx)
 {

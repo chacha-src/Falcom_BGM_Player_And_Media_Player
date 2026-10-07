@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 /* raira=0 のとき kpi が書き、kbsasami_host のモニタが読む。 */
 #include <stdint.h>
 

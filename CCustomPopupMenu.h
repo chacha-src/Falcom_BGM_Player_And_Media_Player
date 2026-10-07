@@ -4,11 +4,11 @@
 // ============================================================================
 // CCustomPopupMenu — 自前コンテキストメニュー（CCustom 系）
 // ・DWM アクリル透過は載せない不透明ポップアップ
-// ・描画は BufferedPaint+Opaque / 淫女オーバーレイ正式対応（ちらつき禁止）
+// ・描画は BufferedPaint+Opaque（ちらつき禁止）
 // ・項目は固定配列。std::function / vector は使わない
 // ・ルート先頭にフォント／アクリル／KPI／MIDI KPI|VST優先（骨格注入）。フォントはホバーで即プレビュー
-// ・チェック以外の CCustom* 内包は「ラベル + コントロール」のスライダー方式
 //
+// ・チェック以外の CCustom* 内包は「ラベル + コントロール」のスライダー方式
 // 【公開API（他アプリ向け）】
 //   構築: Reset / AddCommand / AddCheck / AddSeparator / AddSubMenu
 //         AddSlider / AddEdit / AddCombo / AddList
@@ -402,6 +402,6 @@ protected:
 	afx_msg BOOL OnMouseWheel(UINT nFlags, short zDelta, CPoint pt);
 	afx_msg void OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar); // 内包 Range
 	afx_msg BOOL OnTtnNeedText(UINT id, NMHDR* pNMHDR, LRESULT* pResult);
-	afx_msg void OnTimer(UINT_PTR nIDEvent); // Tip / 淫女 / 行アニメ / バウンス / 定着
+	afx_msg void OnTimer(UINT_PTR nIDEvent); // Tip / 行アニメ / バウンス / 定着
 	DECLARE_MESSAGE_MAP()
 };

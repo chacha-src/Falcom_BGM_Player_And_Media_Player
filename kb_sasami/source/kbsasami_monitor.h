@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 /* raira=0 かつ kbsasami.fmmidimonitor=1 のときだけ。窓は kbsasami_host。
    raira=1 は ogg 側のモニタ。fmmidimonitor は見ない。 */
 

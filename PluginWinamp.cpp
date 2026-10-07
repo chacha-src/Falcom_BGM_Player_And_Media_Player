@@ -514,7 +514,7 @@ typedef In_Module* (__cdecl* pfn_winampGetInModule2)();
 
 int PluginWinamp_TryEnum(const wchar_t* dllPath, int is64)
 {
-	if (!dllPath || !dllPath[0] || kpicnt >= 149) return 0;
+	if (!dllPath || !dllPath[0] || kpicnt >= 400) return 0;
 	/* 本体と違うアーキの DLL は LoadLibrary できない。x64 本体の in_psf.dll (x86) は
 	   ogghost32 経由で拡張子を取る。逆（Win32 本体 + x64 DLL）も同様。 */
 #ifdef _WIN64

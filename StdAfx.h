@@ -1,4 +1,4 @@
-// stdafx.h : 標準のシステム インクルード ファイルのインクルード ファイル、または
+﻿// stdafx.h : 標準のシステム インクルード ファイルのインクルード ファイル、または
 // 参照回数が多く、かつあまり変更されない、プロジェクト専用のインクルード ファイル
 // を記述します。
 
@@ -340,7 +340,7 @@ struct save{
 	int mpw;           // メディアプレイヤー画面の幅
 	int mph;           // メディアプレイヤー画面の高さ
 
-	int inwoman;       // 隠し: 0=通常 1=淫女モード(UI演出のみ。出口は F12×5)
+	int q4;
 
 	int mpcol[5];      // MPリスト列幅の意味スロット: [0]名前 [1]ゲーム [2]時間 [3]アーティスト [4]未使用(★/最終列は永続化しない)
 
@@ -1155,8 +1155,8 @@ void CCC_CaptionDisableHostGlass(HWND hWnd);
 // AcrylicCaption ホストの帯ガラスを再適用（WS_EX_LAYERED を剥がしてから）
 void CCC_CaptionEnsureHostAcrylic(HWND hWnd);
 void CCC_CaptionPaint(CDC& dc, HWND hDlg);
-void CCC_DrawInwomanOnRect(CDC* pDC, const CRect& rc);
-void CCC_DrawInwomanOnClient(CDC* pDC, HWND hWnd);
+void CCC_NkBlitR(CDC* pDC, const CRect& rc);
+void CCC_NkBlitW(CDC* pDC, HWND hWnd);
 void CCC_CaptionPaintGdi(CDC& dc, HWND hDlg);
 void CCC_CaptionLayout(HWND hDlg);
 void CCC_CaptionUnregister(HWND hDlg);

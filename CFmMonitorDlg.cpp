@@ -1,4 +1,4 @@
-#include "stdafx.h"
+﻿#include "stdafx.h"
 #include "CFmMonitorDlg.h"
 #ifdef KBSASAMI_HOST_BUILD
 #include "kb_sasami/source/kbsasami_monhost.h"
@@ -1097,6 +1097,12 @@ BOOL CFmMonitorDlg::PreCreateWindow(CREATESTRUCT& cs)
 
 BOOL CFmMonitorDlg::OnInitDialog()
 {
+	/* DetachForDestroy が m_exiting を立てたまま同じオブジェクトを Create し直すと、
+	   OnPaint が即 return して子の地が白のまま残る。ピアノロールの paintDisabled と同じ。 */
+	InterlockedExchange(&m_exiting, 0);
+	m_userClosing = 0;
+	m_inPrint = 0;
+	InterlockedExchange(&m_composeStop, 0);
 	if (m_hosted) {
 		CCustomDialogEx::OnInitDialog();
 		EnableAero(FALSE);

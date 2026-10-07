@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 /* kbsasami_host が本体の CMidiMonitorDlg / CFmMonitorDlg をコンパイルするときの差。
    描画は同じ cpp。再生位置・パス・プレイヤー窓だけここ。 */
 #include "CCustomControl.h"

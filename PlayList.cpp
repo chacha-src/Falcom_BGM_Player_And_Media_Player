@@ -141,18 +141,18 @@ static bool DeserializeLogFont(const TCHAR* str, LOGFONT* lf)
 
 IMPLEMENT_DYNAMIC(CPlayList, CCustomBlurDialogBase)
 
-extern 	CString ext[150][300];
+extern 	CString ext[400][300];
 extern 	CString kpif[400];
-extern  BOOL kpichk[200];
+extern  BOOL kpichk[400];
 extern 	int kpicnt;
-extern BYTE plugkind[150];
-extern BYTE kpiarch[150];
-extern CString ext[150][300];
-extern BYTE kvar[150][300];
+extern BYTE plugkind[400];
+extern BYTE kpiarch[400];
+extern CString ext[400][300];
+extern BYTE kvar[400][300];
 extern COggDlg *og;
 extern BOOL plw;
 
-extern BYTE kvar[150][300];
+extern BYTE kvar[400][300];
 extern BYTE kvver;
 
 namespace {

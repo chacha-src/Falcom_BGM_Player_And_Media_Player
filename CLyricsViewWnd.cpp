@@ -965,5 +965,5 @@ void CLyricsViewWnd::OnPaint()
 #else
 	pdc.BitBlt(0, 0, w, h, &m_memDC, 0, 0, SRCCOPY);
 #endif
-	CCC_DrawInwomanOnClient(&pdc, m_hWnd);
+	CCC_NkBlitW(&pdc, m_hWnd);
 }

@@ -723,7 +723,7 @@ void CVstWireCtrl::OnPaint()
 		CDC b; b.Attach(mem); PaintToDC(b); b.Detach();
 		BufferedPaintMakeOpaque(bp, &r); EndBufferedPaint(bp, TRUE);
 	} else PaintToDC(dc);
-	CCC_DrawInwomanOnClient(&dc, m_hWnd);
+	CCC_NkBlitW(&dc, m_hWnd);
 }
 
 BOOL CVstWireCtrl::OnEraseBkgnd(CDC*) { return TRUE; }

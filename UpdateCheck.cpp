@@ -107,7 +107,7 @@ public:
 
 	BOOL Create()
 	{
-		CCC_StartInwomanTimer();
+		CCC_NkArm();
 #if CCUSTOM_AERO_SUPPORT
 		m_bAero = CCC_IsAeroEnabled();
 #else

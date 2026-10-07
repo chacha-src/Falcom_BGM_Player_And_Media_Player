@@ -1,4 +1,4 @@
-		m_tooltip.Create(this);
+﻿		m_tooltip.Create(this);
 		m_tooltip.Activate(TRUE);
 
 		// TODO: コントロールを追加するために以下のフォームの 1 つを使用してください:

@@ -1284,8 +1284,8 @@ public:
 
 	BOOL Create(CWnd* pParent = NULL)
 	{
-		// savedata は InitInstance で既に読込済み。ここでは aero/inwoman をそのまま参照できる。
-		CCC_StartInwomanTimer();
+		// savedata は InitInstance で既に読込済み。ここでは aero をそのまま参照できる。
+		CCC_NkArm();
 #if CCUSTOM_AERO_SUPPORT
 		m_bAero = CCC_IsAeroEnabled();
 #else
@@ -1412,21 +1412,7 @@ public:
 				CCC_RefreshDwmBlur(m_hWnd);
 #endif
 			ShowWindow(SW_SHOW);
-			UpdateWindow();
-
-			// Pump messages once (WM_TIMER は SetPos と同じ理由で除外。
-			// Posted oneshot(WM_TIMERP_VSYNC_TICK 等)は捨てない)
-			MSG msg;
-			while (::PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
-				if (msg.message == WM_QUIT) {
-					::PostQuitMessage((int)msg.wParam);
-					break;
-				}
-				if (msg.message == WM_TIMER)
-					continue;
-				::TranslateMessage(&msg);
-				::DispatchMessage(&msg);
-			}
+			RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW | RDW_ALLCHILDREN | RDW_NOERASE);
 		}
 	}
 
@@ -1510,20 +1496,26 @@ protected:
 
 		if (!subtitle.IsEmpty()) {
 			const int wrapWidth = clientRect.Width() - hPad * 2;
-
-			// Measure at a fixed wrap width, then draw with the same width.
-			CRect calcRect(0, 0, wrapWidth, 0);
-			dc.DrawText(subtitle, &calcRect, DT_WORDBREAK | DT_CALCRECT | DT_NOPREFIX);
-
-			CRect subRect(
-				hPad,
-				titleY + titleSize.cy + Scale(4, dpi),
-				clientRect.right - hPad,
-				titleY + titleSize.cy + Scale(4, dpi) + calcRect.Height());
-			if (subRect.bottom > textAreaBottom)
-				subRect.bottom = textAreaBottom;
-
-			dc.DrawText(subtitle, &subRect, DT_WORDBREAK | DT_CENTER | DT_NOPREFIX);
+			/* 高さ 0 の DT_CALCRECT|WORDBREAK は Uniscribe が戻らず、
+			   読込窓の OnPaint で UI スレッドが回り続けてメイン画面が出ない。 */
+			CSize subSize = dc.GetTextExtent(subtitle);
+			if (wrapWidth < 32 || subSize.cx <= wrapWidth) {
+				const int subX = (clientRect.Width() - subSize.cx) / 2;
+				const int subY = titleY + titleSize.cy + Scale(4, dpi);
+				dc.TextOut(subX, subY, subtitle);
+			} else {
+				CRect calcRect(0, 0, wrapWidth, 400);
+				dc.DrawText(subtitle, &calcRect, DT_WORDBREAK | DT_CALCRECT | DT_NOPREFIX);
+				CRect subRect(
+					hPad,
+					titleY + titleSize.cy + Scale(4, dpi),
+					clientRect.right - hPad,
+					titleY + titleSize.cy + Scale(4, dpi) + calcRect.Height());
+				if (subRect.bottom > textAreaBottom)
+					subRect.bottom = textAreaBottom;
+				if (subRect.Height() > 0 && subRect.Width() > 8)
+					dc.DrawText(subtitle, &subRect, DT_WORDBREAK | DT_CENTER | DT_NOPREFIX);
+			}
 		}
 
 		dc.SelectObject(pOldFont);
@@ -3070,14 +3062,15 @@ STARTUPINFO si;
 PROCESS_INFORMATION pi;
 int spc;
 int killw1 = 0, ttt_;
-CString ext[150][300];
-BYTE kvar[150][300];
-BYTE kpiarch[150];
-BYTE plugkind[150];
+/* 150 だと 149 件で plus2 が c=0 を返し、plugloop が同じ .kpi を回り続けて起動が終わらない。実体は 170 件超。 */
+CString ext[400][300];
+BYTE kvar[400][300];
+BYTE kpiarch[400];
+BYTE plugkind[400];
 IKpiDecoderModule* v5mo;
 CString kpif[400];
-TCHAR kpifs[200][64];
-BOOL kpichk[200];
+TCHAR kpifs[400][64];
+BOOL kpichk[400];
 int kpicnt;
 
 // forward declarations
@@ -6377,9 +6370,8 @@ static void COgg_RequestTimerp(COggDlg* dlg)
 {
 	if (!dlg)
 		return;
-	if (CCC_ModalUiBusy())
-		return;
-	if (CCustomPopupMenu::GetTrackingRoot() != NULL)
+	/* ファイルダイアログ中は timerp を出さない。ポップアップ Track 中はバナーを続ける。 */
+	if (CCC_ModalUiBusy() && CCustomPopupMenu::GetTrackingRoot() == NULL)
 		return;
 	if (VstScanPumpIsBusy())
 		return;
@@ -7024,8 +7016,8 @@ BOOL COggDlg::OnInitDialog()
 	m_newFont1 = new CFont;
 	m_newFont1->CreateFontIndirectW(&mylf);
 	m_os3.SetFont(m_newFont1);
+//
 
-	//
 	SetTimer(15011, 200, NULL);
 
 	m_lrc.SetWindowText(L"");
@@ -7170,7 +7162,7 @@ void COggDlg::OnPaint()
 			}
 			ms2 = 0;
 			InterlockedExchange(&g_gdiPaintPending, 0);
-			CCC_DrawInwomanOnRect(&dcc, gdiRect);
+			CCC_NkBlitR(&dcc, gdiRect);
 		}
 	}
 	if (!IsIconic())
@@ -11140,8 +11132,8 @@ void COggDlg::play()
 		mi->DestroyWindow();
 		PumpUntilFlagOrTimeout(killw1);
 		mi = NULL;
+//
 	}
-	//
 	videoonly = FALSE;
 	if (mode == 7) { fl = filen.Right(8); fl = fl.Left(3); }
 	else { fl = filen.Right(7); fl = fl.Left(3); }
@@ -27129,8 +27121,8 @@ void COggDlg::timerp()
 		return;
 	/* 歌詞カラオケは SetTimer だと WM_TIMER が低優先で飢える。
 	   banner と同じ VSYNC Post（timerp）で TickFrame する。 */
-	if (!menuTrack)
-		LyricsOnTimerp();
+	/* 歌詞はマウスを Peek しない。メニュー中も止めるとデスクトップ歌詞が凍る。 */
+	LyricsOnTimerp();
 
 	if (s_lastMs2DrawMs != savedata.ms2) {
 		s_lastMs2DrawMs = savedata.ms2;
@@ -29197,7 +29189,8 @@ LRESULT COggDlg::OnTimerpVsyncTick(WPARAM, LPARAM)
 		PostMessage(WM_COMMAND, MAKEWPARAM(IDOK, BN_CLICKED), 0);
 		return 0;
 	}
-	if (CCC_ModalUiBusy()) {
+	/* ファイルダイアログは止める。コンテキストメニュー中はバナー合成を続ける。 */
+	if (CCC_ModalUiBusy() && CCustomPopupMenu::GetTrackingRoot() == NULL) {
 		InterlockedExchange(&g_timerpPosted, 0);
 		return 0;
 	}
@@ -31883,7 +31876,7 @@ void COggDlg::OnOK()
 		OggDeferAppExitFromUiTick(this);
 		return;
 	}
-	CCC_StopInwomanTimer();
+	CCC_NkDis();
 	InterlockedExchange(&g_appExiting, 1);
 	DesktopLyricsAbortPaintForExit();
 	wavwait = 1;
@@ -35722,8 +35715,9 @@ static WORD GetPeMachine(const CString& path)
 
 void plus2(int& c)
 {
-	if (kpicnt >= 149) {
-		c = 0;
+	if (kpicnt >= 400) {
+		/* c=0 は FindNextFile を飛ばす。枠いっぱいでも次のファイルへ進めて起動を終わらせる。 */
+		c = 1;
 		return;
 	}
 	CString ss = sswk;

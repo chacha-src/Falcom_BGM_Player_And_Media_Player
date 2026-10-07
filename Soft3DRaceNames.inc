@@ -1,4 +1,4 @@
-// かわいい女性名 100（漢字・キラキラ・ひらがな混在）。言語別・日本語と対応不要。name[16] 内に収める。
+﻿// かわいい女性名 100（漢字・キラキラ・ひらがな混在）。言語別・日本語と対応不要。name[16] 内に収める。
 static const wchar_t* const kS3rGirlNamesLL[100][14] = {
 	{ L"茜", L"Starla", L"Étoile", L"Stellina", L"Estrella", L"서연", L"小雪", L"ليلى", L"Аня", L"Lena", L"Ana", L"Emma", L"Zosia", L"Elif" },
 	{ L"桜", L"Lunaria", L"Chloé", L"Sofia", L"Lucía", L"지우", L"晓彤", L"نور", L"Маша", L"Mia", L"Beatriz", L"Sophie", L"Ania", L"Zeynep" },

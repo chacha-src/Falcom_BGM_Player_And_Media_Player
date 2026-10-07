@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include <windows.h>
 
 int PluginXmplay_TryEnum(const wchar_t* dllPath, int is64);

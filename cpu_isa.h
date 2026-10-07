@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 // 実行時 CPU 判定。AVX2 が既定経路、AVX512 は OS が ZMM を保存できるときだけ。
 // Win32 では AVX512 は使わない（Windows x86 では実質使えない）。
 

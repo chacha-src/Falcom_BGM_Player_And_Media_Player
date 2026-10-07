@@ -1,4 +1,4 @@
-// Auto-extracted from CEqualizer.cpp m_pre.AddString — do not hand-edit casually
+﻿// Auto-extracted from CEqualizer.cpp m_pre.AddString — do not hand-edit casually
 #pragma once
 #ifndef MP_EQ_PRESET_COUNT
 #define MP_EQ_PRESET_COUNT 101

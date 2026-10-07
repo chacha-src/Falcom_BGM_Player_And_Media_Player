@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include <stddef.h>
 
 // PCM ホットパス。AVX2 既定、AVX512 対応 CPU なら専用実装へディスパッチ。

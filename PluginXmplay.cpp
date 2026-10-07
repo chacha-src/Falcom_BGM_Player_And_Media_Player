@@ -382,7 +382,7 @@ typedef XMPIN* (WINAPI* pfn_XMPIN_GetInterface)(UINT32 face, InterfaceProc facep
 
 int PluginXmplay_TryEnum(const wchar_t* dllPath, int is64)
 {
-	if (!dllPath || !dllPath[0] || kpicnt >= 149) return 0;
+	if (!dllPath || !dllPath[0] || kpicnt >= 400) return 0;
 #ifdef _WIN64
 	const int needRemote = !is64;
 #else

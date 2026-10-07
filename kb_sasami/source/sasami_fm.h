@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "sasami_file.h"
 #include <stdint.h>

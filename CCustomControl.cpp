@@ -1,4 +1,4 @@
-#include "stdafx.h"
+﻿#include "stdafx.h"
 #include "CCustomControl.h"
 #include "resource.h"
 #include "CImageBase.h"
@@ -21,16 +21,16 @@
 #pragma comment(lib, "windowscodecs.lib")
 
 // ============================================================================
-// CCustom アーキテクチャ（このファイル: 共通ヘルパ + CCustom* サブクラス）
 //
+// CCustom アーキテクチャ（このファイル: 共通ヘルパ + CCustom* サブクラス）
 // 親ダイアログ = DWM アクリル / Mica ガラス。ExtendFrame(-1) でクライアント全体が
 // ガラス源になる。子は原則不透明に塗る（BufferedPaint / CCustomOpaqueFixer）。
-// 例外: ラベル・スライダー等はクロマキーでガラスを透かす。
 //
+// 例外: ラベル・スライダー等はクロマキーでガラスを透かす。
 // CCC_AERO_CHROMA_KEY は RGB(1,1,1)。黒 RGB(0,0,0) は本文文字に使うためキーにできない。
 // SetAeroMode(TRUE)  = ガラスを透かす（クロマ blit）
-// SetAeroMode(FALSE) = ソリッド（不透明面）。ポップアップ配下は常に FALSE。
 //
+// SetAeroMode(FALSE) = ソリッド（不透明面）。ポップアップ配下は常に FALSE。
 // CCC_* はここに集約した描画ヘルパ。CCustom* は標準 Win32/MFC 控件のサブクラス。
 // ============================================================================
 
@@ -264,10 +264,10 @@ static void CCC_ClearDestBlt(HDC hdcDest, int x, int y, int w, int h,
 static void CCC_FillRectOpaqueBits(HDC hdc, const RECT& rc, COLORREF clr);
 static void CCC_MakeRectOpaquePreserve(HDC hdc, const RECT& rc);
 #endif
-static void CCC_DrawInwomanDlgBody(CDC* pDC, const CRect& rc);
+static void CCC_NkBody(CDC* pDC, const CRect& rc);
 
 // ダイアログ WM_ERASEBKGND 共通。Win11 アクリルは消去しない（ガラス源を残す）。
-// キャプション帯だけアクリルのときは本文だけ不透明塗り。淫女は本文に重ねる。
+// キャプション帯だけアクリルのときは本文だけ不透明塗り。
 static BOOL DlgOnEraseBkgnd(CDC* pDC, CBrush& brDlg, BOOL bAeroEnabled, HWND hWnd)
 {
     UNREFERENCED_PARAMETER(hWnd);
@@ -292,21 +292,21 @@ static BOOL DlgOnEraseBkgnd(CDC* pDC, CBrush& brDlg, BOOL bAeroEnabled, HWND hWn
     if (capH > 0 && CCC_IsWin11() && r.Height() > capH) {
         r.top = capH;
         CCC_FillRectOpaqueBits(pDC->GetSafeHdc(), r, COLOR_DIALOG_BG);
-        if (CCC_IsInwoman())
-            CCC_DrawInwomanDlgBody(pDC, r);
+        if (CCC_Nk())
+            CCC_NkBody(pDC, r);
         return TRUE;
     }
 #endif
     if (capH > 0 && r.Height() > capH) {
         r.top = capH;
         pDC->FillRect(&r, &brDlg);
-        if (CCC_IsInwoman())
-            CCC_DrawInwomanDlgBody(pDC, r);
+        if (CCC_Nk())
+            CCC_NkBody(pDC, r);
         return TRUE;
     }
     pDC->FillRect(&r, &brDlg);
-    if (CCC_IsInwoman())
-        CCC_DrawInwomanDlgBody(pDC, r);
+    if (CCC_Nk())
+        CCC_NkBody(pDC, r);
     return TRUE;
 }
 
@@ -858,7 +858,7 @@ void CCC_ClearRectChroma(HDC hdcDest, const RECT& rect, COLORREF clrKey)
     }
 }
 
-// アクリルホスト上に定数αの矩形。本文パネルの透け・淫女の火照り帯。
+// アクリルホスト上に定数αの矩形。本文パネルの透け。
 // alpha>=255 は不透明経路。SourceConstantAlpha のみ（プレマルチ不要）。
 void CCC_FillRectAlpha(HDC hdc, const RECT& rc, COLORREF clr, BYTE alpha)
 {
@@ -1796,7 +1796,7 @@ static void DrawShine(CDC* pDC, int cx, int cy, int rx, int ry, COLORREF c = RGB
     pDC->SelectObject(ob);
 }
 
-// ハート（8点ポリゴン）。リスト行デコ・淫女ハート目。べた塗りなのでクロマでも安全。
+// ハート（8点ポリゴン）。リスト行デコ。べた塗りなのでクロマでも安全。
 static void DrawHeart(CDC* pDC, CRect rc, COLORREF c)
 {
     CBrush br(c);
@@ -3540,10 +3540,9 @@ static int s_uiSoftBusy = 0;
 static GdiSoft2D::Context s_uiSoft2d;
 static GdiSoft3D::Context s_uiSoft3d;
 
-// 淫女モード共通パルス(はぁはぁ／ピクン／イク)。SoftJk・CCC_DrawInwoman 双方から使う。
-static void CCC_InwomanPulse(DWORD t, double& breath, double& twitch, double& climax);
-static void CCC_DrawVibrator(CDC* pDC, int cx, int cy, int sz, double t, double twitch, double breath, double climax, BOOL bAeroTrans);
-static void CCC_DrawLoveFluid(CDC* pDC, const CRect& rc, double breath, double twitch, double climax, BOOL bAeroTrans);
+static void CCC_NkPh(DWORD t, double& nP0, double& nP1, double& nP2);
+static void CCC_NkVb(CDC* pDC, int cx, int cy, int sz, double t, double nP1, double nP0, double nP2, BOOL bAeroTrans);
+static void CCC_NkFl(CDC* pDC, const CRect& rc, double nP0, double nP1, double nP2, BOOL bAeroTrans);
 
 // Soft2D/3D の非プレマルチ画素をプレマルチへ直し PresentAlpha。
 // UI スレッド専用。s_uiSoftBusy と対で再入禁止。
@@ -3572,8 +3571,8 @@ static void DrawSoftJkBackdrop(CDC* pDC, const CRect& rc, int animTick, BOOL hot
     ++s_uiSoftBusy;
     const int w = rc.Width();
     const int h = rc.Height();
-    const COLORREF pink = CCC_IsInwoman() ? RGB(255, 160, 200) : RGB(255, 190, 220);
-    const COLORREF lav = CCC_IsInwoman() ? RGB(240, 150, 210) : RGB(210, 190, 255);
+    const COLORREF pink = CCC_Nk() ? RGB(255, 160, 200) : RGB(255, 190, 220);
+    const COLORREF lav = CCC_Nk() ? RGB(240, 150, 210) : RGB(210, 190, 255);
 
     if (s_uiSoft3d.fb.w != w || s_uiSoft3d.fb.h != h)
         s_uiSoft3d.Create(w, h);
@@ -3588,10 +3587,10 @@ static void DrawSoftJkBackdrop(CDC* pDC, const CRect& rc, int animTick, BOOL hot
         s_uiSoft3d.postVignette = s_uiSoft3d.postGlow = s_uiSoft3d.postSaturate = false;
 
         const float t = (float)animTick * 0.035f;
-        const float buzz = CCC_IsInwoman() ? (sinf(t * 8.f) * 14.f) : (sinf(t) * 7.f);
+        const float buzz = CCC_Nk() ? (sinf(t * 8.f) * 14.f) : (sinf(t) * 7.f);
         s_uiSoft3d.cam.yawDeg = -18.f + buzz;
-        s_uiSoft3d.cam.pitchDeg = 38.f + cosf(t * 0.7f) * (CCC_IsInwoman() ? 8.f : 3.f);
-        s_uiSoft3d.cam.zoom = hot ? (CCC_IsInwoman() ? 1.16f : 1.08f) : (CCC_IsInwoman() ? 1.06f : 1.0f);
+        s_uiSoft3d.cam.pitchDeg = 38.f + cosf(t * 0.7f) * (CCC_Nk() ? 8.f : 3.f);
+        s_uiSoft3d.cam.zoom = hot ? (CCC_Nk() ? 1.16f : 1.08f) : (CCC_Nk() ? 1.06f : 1.0f);
         float boxes[1][6] = { { -0.85f, 0.85f, 0.f, 0.18f, -0.55f, 0.55f } };
         s_uiSoft3d.SetViewportFit(boxes, 1);
 
@@ -3639,16 +3638,14 @@ static void DrawSoftJkChip(CDC* pDC, const CRect& rc, int animTick, BOOL hot)
         s_uiSoft3d.dofEnable = false;
         s_uiSoft3d.postVignette = s_uiSoft3d.postGlow = s_uiSoft3d.postSaturate = false;
         const float t = (float)animTick * 0.05f;
-        // 淫女: バイブ先端の小刻み振動。通常: ゆるい揺れ
-        const float buzz = CCC_IsInwoman() ? (sinf(t * 9.f) * 16.f + cosf(t * 13.f) * 8.f) : (sinf(t) * 10.f);
+        const float buzz = CCC_Nk() ? (sinf(t * 9.f) * 16.f + cosf(t * 13.f) * 8.f) : (sinf(t) * 10.f);
         s_uiSoft3d.cam.yawDeg = -28.f + buzz;
-        s_uiSoft3d.cam.pitchDeg = 32.f + cosf(t * 0.9f) * (CCC_IsInwoman() ? 10.f : 4.f);
-        s_uiSoft3d.cam.zoom = hot ? (CCC_IsInwoman() ? 1.38f : 1.25f) : (CCC_IsInwoman() ? 1.22f : 1.1f);
+        s_uiSoft3d.cam.pitchDeg = 32.f + cosf(t * 0.9f) * (CCC_Nk() ? 10.f : 4.f);
+        s_uiSoft3d.cam.zoom = hot ? (CCC_Nk() ? 1.38f : 1.25f) : (CCC_Nk() ? 1.22f : 1.1f);
         float boxes[1][6] = { { -0.45f, 0.45f, 0.f, 0.28f, -0.45f, 0.45f } };
         s_uiSoft3d.SetViewportFit(boxes, 1);
-        const COLORREF c = CCC_IsInwoman() ? RGB(255, 96, 168) : RGB(255, 165, 210);
-        if (CCC_IsInwoman()) {
-            // 愛液まみれのバイブ先端(丸) + 本体短柱
+        const COLORREF c = CCC_Nk() ? RGB(255, 96, 168) : RGB(255, 165, 210);
+        if (CCC_Nk()) {
             s_uiSoft3d.DrawSphere(0.f, 0.22f + sinf(t * 11.f) * 0.03f, 0.04f, 0.20f, RGB(255, 190, 230), 8, 6);
             s_uiSoft3d.DrawNeonBox(-0.12f, 0.12f, 0.08f, -0.22f, 0.22f, c, -0.18f);
         } else {
@@ -3656,13 +3653,12 @@ static void DrawSoftJkChip(CDC* pDC, const CRect& rc, int animTick, BOOL hot)
             s_uiSoft3d.DrawNeonBox(-0.28f, 0.28f, y + sinf(t) * 0.02f, -0.28f, 0.28f, c, 0.f);
         }
         SoftPremultPresent(s_uiSoft3d.fb, pDC->GetSafeHdc(), rc.left, rc.top, w, h,
-            hot ? (BYTE)(CCC_IsInwoman() ? 190 : 150) : (BYTE)(CCC_IsInwoman() ? 150 : 110));
-        if (CCC_IsInwoman()) {
-            // チップ下に愛液しずく(GDI)。Soft3D の上に載せる。
-            double breath = 0, twitch = 0, climax = 0;
-            CCC_InwomanPulse(::GetTickCount(), breath, twitch, climax);
-            const int dx = rc.CenterPoint().x + (int)(2 * twitch);
-            const int dy = rc.bottom - 1 + (int)(3 * breath + 4 * climax);
+            hot ? (BYTE)(CCC_Nk() ? 190 : 150) : (BYTE)(CCC_Nk() ? 150 : 110));
+        if (CCC_Nk()) {
+            double nP0 = 0, nP1 = 0, nP2 = 0;
+            CCC_NkPh(::GetTickCount(), nP0, nP1, nP2);
+            const int dx = rc.CenterPoint().x + (int)(2 * nP1);
+            const int dy = rc.bottom - 1 + (int)(3 * nP0 + 4 * nP2);
             CBrush bf(RGB(255, 230, 244));
             CBrush* ob = pDC->SelectObject(&bf);
             CGdiObject* op = pDC->SelectStockObject(NULL_PEN);
@@ -3696,12 +3692,11 @@ static void DrawSoftJkHeart(CDC* pDC, const CRect& rc, int animTick, BOOL hot, C
         s_uiSoft3d.dofEnable = false;
         s_uiSoft3d.postVignette = s_uiSoft3d.postGlow = s_uiSoft3d.postSaturate = false;
         const float spin = (float)animTick * 5.5f;
-        double breath = 0, twitch = 0, climax = 0;
-        if (CCC_IsInwoman())
-            CCC_InwomanPulse(::GetTickCount(), breath, twitch, climax);
-        // 淫女: ハートごまかしをやめ、震えるバイブ形(先端球+縦柱)
-        if (CCC_IsInwoman()) {
-            const float buzz = (float)(twitch * 22.0 + climax * 18.0);
+        double nP0 = 0, nP1 = 0, nP2 = 0;
+        if (CCC_Nk())
+            CCC_NkPh(::GetTickCount(), nP0, nP1, nP2);
+        if (CCC_Nk()) {
+            const float buzz = (float)(nP1 * 22.0 + nP2 * 18.0);
             s_uiSoft3d.cam.yawDeg = -12.f + sinf((float)animTick * 0.9f) * (10.f + buzz);
             s_uiSoft3d.cam.pitchDeg = 26.f + cosf((float)animTick * 0.7f) * 8.f;
             s_uiSoft3d.cam.zoom = hot ? 1.55f : 1.38f;
@@ -3712,10 +3707,9 @@ static void DrawSoftJkHeart(CDC* pDC, const CRect& rc, int animTick, BOOL hot, C
             s_uiSoft3d.DrawSphere(0.f, 0.38f, 0.05f, 0.20f, tip, 9, 7);
             s_uiSoft3d.DrawNeonBox(-0.11f, 0.11f, 0.28f, -0.28f, 0.28f, body, -0.42f);
             SoftPremultPresent(s_uiSoft3d.fb, pDC->GetSafeHdc(),
-                rc.left + (int)(3 * twitch), rc.top + (int)(-2 * twitch), w, h,
+                rc.left + (int)(3 * nP1), rc.top + (int)(-2 * nP1), w, h,
                 hot ? (BYTE)240 : (BYTE)215);
-            // 下端の愛液
-            CCC_DrawLoveFluid(pDC, rc, breath, twitch, climax, FALSE);
+            CCC_NkFl(pDC, rc, nP0, nP1, nP2, FALSE);
         } else {
             s_uiSoft3d.cam.yawDeg = -22.f + spin + (hot ? sinf((float)animTick * 0.08f) * 6.f : 0.f);
             s_uiSoft3d.cam.pitchDeg = 28.f + cosf((float)animTick * 0.05f) * 4.f;
@@ -3757,28 +3751,28 @@ static void DrawSoftJkThumb(CDC* pDC, const CRect& rc, int animTick, BOOL hot, f
         s_uiSoft3d.dofEnable = false;
         s_uiSoft3d.postVignette = s_uiSoft3d.postGlow = s_uiSoft3d.postSaturate = false;
         const float t = (float)animTick * 0.06f;
-        double breath = 0, twitch = 0, climax = 0;
-        if (CCC_IsInwoman())
-            CCC_InwomanPulse(::GetTickCount(), breath, twitch, climax);
-        const float buzz = CCC_IsInwoman() ? (float)(twitch * 20.0 + climax * 14.0) : 0.f;
+        double nP0 = 0, nP1 = 0, nP2 = 0;
+        if (CCC_Nk())
+            CCC_NkPh(::GetTickCount(), nP0, nP1, nP2);
+        const float buzz = CCC_Nk() ? (float)(nP1 * 20.0 + nP2 * 14.0) : 0.f;
         s_uiSoft3d.cam.yawDeg = -24.f + tiltDeg + sinf(t) * (hot ? 14.f : 6.f) + buzz;
         s_uiSoft3d.cam.pitchDeg = 34.f + cosf(t * 0.8f) * 3.f;
-        s_uiSoft3d.cam.zoom = hot ? (CCC_IsInwoman() ? 1.42f : 1.3f) : (CCC_IsInwoman() ? 1.24f : 1.12f);
+        s_uiSoft3d.cam.zoom = hot ? (CCC_Nk() ? 1.42f : 1.3f) : (CCC_Nk() ? 1.24f : 1.12f);
         float boxes[1][6] = { { -0.4f, 0.4f, 0.f, 0.3f, -0.4f, 0.4f } };
         s_uiSoft3d.SetViewportFit(boxes, 1);
-        const COLORREF c = CCC_IsInwoman() ? RGB(255, 100, 178) : RGB(200, 160, 255);
-        if (CCC_IsInwoman()) {
+        const COLORREF c = CCC_Nk() ? RGB(255, 100, 178) : RGB(200, 160, 255);
+        if (CCC_Nk()) {
             s_uiSoft3d.DrawSphere(0.f, 0.28f, 0.04f, 0.18f, RGB(255, 200, 235), 8, 6);
             s_uiSoft3d.DrawNeonBox(-0.13f, 0.13f, 0.16f + sinf(t * 10.f) * 0.03f, -0.24f, 0.24f, c, -0.22f);
         } else {
             s_uiSoft3d.DrawNeonBox(-0.22f, 0.22f, 0.2f + sinf(t) * 0.02f, -0.22f, 0.22f, c, 0.f);
         }
         SoftPremultPresent(s_uiSoft3d.fb, pDC->GetSafeHdc(),
-            rc.left + (CCC_IsInwoman() ? (int)(2 * twitch) : 0),
-            rc.top + (CCC_IsInwoman() ? (int)(-2 * climax) : 0), w, h,
-            hot ? (BYTE)(CCC_IsInwoman() ? 200 : 165) : (BYTE)(CCC_IsInwoman() ? 155 : 125));
-        if (CCC_IsInwoman())
-            CCC_DrawLoveFluid(pDC, rc, breath, twitch, climax, FALSE);
+            rc.left + (CCC_Nk() ? (int)(2 * nP1) : 0),
+            rc.top + (CCC_Nk() ? (int)(-2 * nP2) : 0), w, h,
+            hot ? (BYTE)(CCC_Nk() ? 200 : 165) : (BYTE)(CCC_Nk() ? 155 : 125));
+        if (CCC_Nk())
+            CCC_NkFl(pDC, rc, nP0, nP1, nP2, FALSE);
     }
     --s_uiSoftBusy;
 }
@@ -3804,26 +3798,25 @@ static void DrawSoftJkKnot(CDC* pDC, const CRect& rc, int animTick)
         s_uiSoft3d.dofEnable = false;
         s_uiSoft3d.postVignette = s_uiSoft3d.postGlow = s_uiSoft3d.postSaturate = false;
         const float t = (float)animTick * 0.09f;
-        double breath = 0, twitch = 0, climax = 0;
-        if (CCC_IsInwoman())
-            CCC_InwomanPulse(::GetTickCount(), breath, twitch, climax);
-        s_uiSoft3d.cam.yawDeg = -40.f + sinf(t) * (CCC_IsInwoman() ? (24.f + (float)twitch * 20.f) : 18.f);
-        s_uiSoft3d.cam.pitchDeg = 40.f + cosf(t * 0.7f) * (CCC_IsInwoman() ? 12.f : 8.f);
-        s_uiSoft3d.cam.zoom = CCC_IsInwoman() ? 1.55f : 1.4f;
+        double nP0 = 0, nP1 = 0, nP2 = 0;
+        if (CCC_Nk())
+            CCC_NkPh(::GetTickCount(), nP0, nP1, nP2);
+        s_uiSoft3d.cam.yawDeg = -40.f + sinf(t) * (CCC_Nk() ? (24.f + (float)nP1 * 20.f) : 18.f);
+        s_uiSoft3d.cam.pitchDeg = 40.f + cosf(t * 0.7f) * (CCC_Nk() ? 12.f : 8.f);
+        s_uiSoft3d.cam.zoom = CCC_Nk() ? 1.55f : 1.4f;
         float boxes[1][6] = { { -0.5f, 0.5f, -0.2f, 0.35f, -0.5f, 0.5f } };
         s_uiSoft3d.SetViewportFit(boxes, 1);
-        const COLORREF c = CCC_IsInwoman() ? RGB(255, 96, 168) : RGB(255, 150, 200);
-        if (CCC_IsInwoman()) {
-            // 濡れ玉(愛液の塊) — リボン結びのごまかしをやめる
+        const COLORREF c = CCC_Nk() ? RGB(255, 96, 168) : RGB(255, 150, 200);
+        if (CCC_Nk()) {
             s_uiSoft3d.DrawSphere(0.f, 0.08f, 0.f, 0.32f, c, 10, 8);
             s_uiSoft3d.DrawSphere(0.06f, 0.18f, 0.08f, 0.14f, RGB(255, 220, 240), 8, 6);
         } else {
             s_uiSoft3d.DrawTorus(0.f, 0.05f, 0.f, 0.28f, 0.09f, c, 12, 8);
         }
         SoftPremultPresent(s_uiSoft3d.fb, pDC->GetSafeHdc(), rc.left, rc.top, w, h,
-            (BYTE)(CCC_IsInwoman() ? 190 : 150));
-        if (CCC_IsInwoman())
-            CCC_DrawLoveFluid(pDC, rc, breath, twitch, climax, FALSE);
+            (BYTE)(CCC_Nk() ? 190 : 150));
+        if (CCC_Nk())
+            CCC_NkFl(pDC, rc, nP0, nP1, nP2, FALSE);
     }
     --s_uiSoftBusy;
 }
@@ -3849,19 +3842,19 @@ static void DrawSoftJkSwayCorner(CDC* pDC, const CRect& rc, int animTick, float 
         s_uiSoft3d.dofEnable = false;
         s_uiSoft3d.postVignette = s_uiSoft3d.postGlow = s_uiSoft3d.postSaturate = false;
         const float t = (float)animTick * 0.04f;
-        const float buzz = CCC_IsInwoman() ? (sinf(t * 11.f) * (amp + 6.f)) : (sinf(t) * amp);
+        const float buzz = CCC_Nk() ? (sinf(t * 11.f) * (amp + 6.f)) : (sinf(t) * amp);
         s_uiSoft3d.cam.yawDeg = -20.f + buzz;
-        s_uiSoft3d.cam.pitchDeg = 36.f + cosf(t * 0.85f) * (amp * (CCC_IsInwoman() ? 0.7f : 0.4f));
-        s_uiSoft3d.cam.zoom = CCC_IsInwoman() ? 1.18f : 1.08f;
+        s_uiSoft3d.cam.pitchDeg = 36.f + cosf(t * 0.85f) * (amp * (CCC_Nk() ? 0.7f : 0.4f));
+        s_uiSoft3d.cam.zoom = CCC_Nk() ? 1.18f : 1.08f;
         float boxes[1][6] = { { -0.4f, 0.4f, 0.f, 0.22f, -0.4f, 0.4f } };
         s_uiSoft3d.SetViewportFit(boxes, 1);
-        const COLORREF c = CCC_IsInwoman() ? RGB(255, 120, 185) : RGB(220, 180, 255);
-        if (CCC_IsInwoman())
+        const COLORREF c = CCC_Nk() ? RGB(255, 120, 185) : RGB(220, 180, 255);
+        if (CCC_Nk())
             s_uiSoft3d.DrawSphere(0.f, 0.06f + sinf(t * 9.f) * 0.02f, 0.f, 0.22f, c, 8, 6);
         else
             s_uiSoft3d.DrawBox(-0.22f, 0.22f, 0.12f + sinf(t) * 0.015f, -0.22f, 0.22f, c, 0.f);
         SoftPremultPresent(s_uiSoft3d.fb, pDC->GetSafeHdc(), rc.left, rc.top, w, h,
-            (BYTE)(CCC_IsInwoman() ? 140 : 100));
+            (BYTE)(CCC_Nk() ? 140 : 100));
     }
     --s_uiSoftBusy;
 }
@@ -4881,45 +4874,33 @@ static void DrawRowDeco(CDC* pDC, int ix, int iy, int is, int kind, BOOL selecte
     }
 }
 
-// ============================================================================
-// 【隠し機能 / イースターエッグ】inwoman / CCC_Iw*
-// ユーザー向けヘルプ・操作説明には載せない。入口/出口の手順は CCC_InwomanHotkey のみ。
-// ============================================================================
-static UINT_PTR g_inwomanTimer = 0;
-static int      g_f12Count = 0;
-static int      g_f11Count = 0;
-static int      g_iwSeq = 0;      // 0=F12集め / 1=F11集め / 2=F12押しっぱなし
-static DWORD    g_seqT0 = 0;      // 現バースト最初の時刻
-static DWORD    g_armT0 = 0;      // 直前段階の達成時刻
-static DWORD    g_holdT0 = 0;     // F12 押し始め
-
-enum { IW_BURST_MS = 3000, IW_GAP_MS = 4000, IW_HOLD_MS = 2000 }; // 閾値の意味は CCC_InwomanHotkey
-
-// 連打シーケンスを初期化。タイムアウト・誤キー・出入り完了時。
-static void CCC_IwSeqReset()
+static UINT_PTR g_nkTm = 0;
+static int      g_nkC0 = 0;
+static int      g_nkC1 = 0;
+static int      g_nkSq = 0;
+static DWORD    g_nkT0 = 0;
+static DWORD    g_nkT1 = 0;
+static DWORD    g_nkT2 = 0;
+enum { NK_A = 3000, NK_B = 4000, NK_C = 2000, NK_D = 7, NK_E = 5 };
+static void CCC_NkRst()
 {
-    g_f12Count = 0;
-    g_f11Count = 0;
-    g_iwSeq = 0;
-    g_seqT0 = 0;
-    g_armT0 = 0;
-    g_holdT0 = 0;
+    g_nkC0 = 0;
+    g_nkC1 = 0;
+    g_nkSq = 0;
+    g_nkT0 = 0;
+    g_nkT1 = 0;
+    g_nkT2 = 0;
 }
-
-// 終了／閉じる。全控件 Invalidate で BN_CLICKED が落ちやすいので再描画対象から外す。
-static BOOL CCC_IwIsQuitCtrl(HWND hWnd)
+static BOOL CCC_NkSkip(HWND hWnd)
 {
     if (!hWnd)
         return FALSE;
     const UINT id = (UINT)::GetDlgCtrlID(hWnd);
     return id == IDOK || id == IDC_MP_EXIT || id == IDC_CAP_CLOSE;
 }
-
-// ちらつき対策: 背景消去を伴う全画面再描画はやめ、オーナードロー(ダブルバッファ)の
-// カスタムコントロールだけを消去なしで無効化する。
-static BOOL CALLBACK CCC_InwomanInvalidateChild(HWND hChild, LPARAM)
+static BOOL CALLBACK CCC_NkInvC(HWND hChild, LPARAM)
 {
-    if (CCC_IwIsQuitCtrl(hChild) || CCC_IsCaptionChromeCtrl(hChild))
+    if (CCC_NkSkip(hChild) || CCC_IsCaptionChromeCtrl(hChild))
         return TRUE;
     CWnd* p = CWnd::FromHandlePermanent(hChild);
     if (p && ::IsWindowVisible(hChild) &&
@@ -4934,282 +4915,234 @@ static BOOL CALLBACK CCC_InwomanInvalidateChild(HWND hChild, LPARAM)
          p->IsKindOf(RUNTIME_CLASS(CCustomGroupBox)) ||
          p->IsKindOf(RUNTIME_CLASS(CCustomStatic))))
     {
-        ::InvalidateRect(hChild, NULL, FALSE); // 消去なし=ちらつかない
+        ::InvalidateRect(hChild, NULL, FALSE);
     }
     return TRUE;
 }
-
-// 可視トップ窓を列挙。aero=0 のとき親も消さず無効化、子は OwnerDraw のみ。
-static BOOL CALLBACK CCC_InwomanTopProc(HWND hTop, LPARAM)
+static BOOL CALLBACK CCC_NkInvT(HWND hTop, LPARAM)
 {
     if (::IsWindowVisible(hTop))
     {
-        if (CCC_IsInwoman() && !CCC_IsAeroEnabled())
+        if (CCC_Nk() && !CCC_IsAeroEnabled())
             ::InvalidateRect(hTop, NULL, FALSE);
-        ::EnumChildWindows(hTop, CCC_InwomanInvalidateChild, 0);
+        ::EnumChildWindows(hTop, CCC_NkInvC, 0);
     }
     return TRUE;
 }
-
-// UI スレッドの全トップ窓へアニメ Invalidate。タイマーから。
-static void CCC_InwomanInvalidateAll()
+static void CCC_NkInvA()
 {
-    ::EnumThreadWindows(::GetCurrentThreadId(), CCC_InwomanTopProc, 0);
+    ::EnumThreadWindows(::GetCurrentThreadId(), CCC_NkInvT, 0);
 }
-
-// 隠し演出 ON（savedata.inwoman=1）。シーケンスはリセット。ヘルプ非掲載。
-static void CCC_IwEnter()
+static void CCC_NkOn()
 {
-    CCC_IwSeqReset();
-    savedata.inwoman = 1;
-    CCC_InwomanInvalidateAll();
+    CCC_NkRst();
+    savedata.q4 = 1;
+    CCC_NkInvA();
 }
-
-// 最終段の長押しをタイマー側でも見る（キーリピート欠落対策）。手順は CCC_InwomanHotkey。
-static void CCC_IwPollHold(DWORD now)
+static void CCC_NkHold(DWORD now)
 {
-    if (g_iwSeq != 2)
+    if (g_nkSq != 2)
         return;
-    if (g_holdT0 == 0) {
-        if (g_armT0 && (now - g_armT0) > IW_GAP_MS)
-            CCC_IwSeqReset();
+    if (g_nkT2 == 0) {
+        if (g_nkT1 && (now - g_nkT1) > NK_B)
+            CCC_NkRst();
         return;
     }
-    if ((::GetAsyncKeyState(VK_F12) & 0x8000) == 0) {
-        g_holdT0 = 0;
-        if (g_armT0 && (now - g_armT0) > IW_GAP_MS)
-            CCC_IwSeqReset();
+    if ((::GetAsyncKeyState(0x7B) & 0x8000) == 0) {
+        g_nkT2 = 0;
+        if (g_nkT1 && (now - g_nkT1) > NK_B)
+            CCC_NkRst();
         return;
     }
-    if ((now - g_holdT0) >= IW_HOLD_MS)
-        CCC_IwEnter();
+    if ((now - g_nkT2) >= NK_C)
+        CCC_NkOn();
 }
-
-// 180ms 周期。未入場なら長押し判定のみ。入場中はキャプチャ/メニュー中以外で再描画。
-static void CALLBACK CCC_InwomanTimerProc(HWND, UINT, UINT_PTR, DWORD)
+static void CALLBACK CCC_NkTick(HWND, UINT, UINT_PTR, DWORD)
 {
     const DWORD now = ::GetTickCount();
-    if (!CCC_IsInwoman()) {
-        CCC_IwPollHold(now);
+    if (!CCC_Nk()) {
+        CCC_NkHold(now);
         return;
     }
-    // クリック／ドラッグ中に全控件 Invalidate すると BN_CLICKED が欠落しやすい
     if (::GetCapture() != NULL) return;
     if (::GetKeyState(VK_LBUTTON) < 0 || ::GetKeyState(VK_RBUTTON) < 0) return;
     if (CCustomPopupMenu::GetTrackingRoot() != NULL) return;
-    CCC_InwomanInvalidateAll();
+    CCC_NkInvA();
 }
-
-// 冪等。各ダイアログ PreTranslate / サブクラス時に呼ぶ。間隔は入力飢餓を避けるため 180ms。
-void CCC_StartInwomanTimer()
+void CCC_NkArm()
 {
-    if (g_inwomanTimer == 0)
-        // 55ms 全控件再描画は入力飢餓の温床。Soft タイマと同程度に間引く
-        g_inwomanTimer = ::SetTimer(NULL, 0, 180, CCC_InwomanTimerProc);
+    if (g_nkTm == 0)
+        g_nkTm = ::SetTimer(NULL, 0, 180, CCC_NkTick);
 }
-
-void CCC_StopInwomanTimer()
+void CCC_NkDis()
 {
-    if (g_inwomanTimer) {
-        ::KillTimer(NULL, g_inwomanTimer);
-        g_inwomanTimer = 0;
+    if (g_nkTm) {
+        ::KillTimer(NULL, g_nkTm);
+        g_nkTm = 0;
     }
 }
-
-// 隠し演出の入口/出口。各メインダイアログの PreTranslateMessage から。ヘルプ非掲載。
-BOOL CCC_InwomanHotkey(MSG* pMsg, CWnd* pWnd)
+BOOL CCC_NkMsg(MSG* pMsg, CWnd* pWnd)
 {
     UNREFERENCED_PARAMETER(pWnd);
-    CCC_StartInwomanTimer();
+    CCC_NkArm();
     if (!pMsg)
         return FALSE;
-
     const WPARAM vk = pMsg->wParam;
     const DWORD now = ::GetTickCount();
-
     if (pMsg->message == WM_KEYUP) {
-        if (!CCC_IsInwoman() && g_iwSeq == 2 && vk == VK_F12)
-            g_holdT0 = 0;
+        if (!CCC_Nk() && g_nkSq == 2 && vk == 0x7B)
+            g_nkT2 = 0;
         return FALSE;
     }
     if (pMsg->message != WM_KEYDOWN)
         return FALSE;
-
     const int wasDown = (pMsg->lParam & (1 << 30)) ? 1 : 0;
-
-    // 出口: 入っているときだけ F12 を 2秒以内に5回
-    if (CCC_IsInwoman())
+    if (CCC_Nk())
     {
         if (wasDown)
             return FALSE;
-        if (vk != VK_F12)
+        if (vk != 0x7B)
             return FALSE;
-        if (g_f12Count == 0 || (now - g_seqT0) > 2000)
+        if (g_nkC0 == 0 || (now - g_nkT0) > NK_C)
         {
-            g_f12Count = 0;
-            g_seqT0 = now;
+            g_nkC0 = 0;
+            g_nkT0 = now;
         }
-        if (++g_f12Count >= 5)
+        if (++g_nkC0 >= NK_E)
         {
-            CCC_IwSeqReset();
-            savedata.inwoman = 0;
-            CCC_InwomanInvalidateAll();
+            CCC_NkRst();
+            savedata.q4 = 0;
+            CCC_NkInvA();
             return TRUE;
         }
         return FALSE;
     }
-
-    if (vk != VK_F12 && vk != VK_F11)
+    if (vk != 0x7B && vk != 0x7A)
         return FALSE;
-
-    // 入口最終段: F12 を IW_HOLD_MS 押しっぱなし
-    if (g_iwSeq == 2)
+    if (g_nkSq == 2)
     {
-        if (vk != VK_F12) {
-            CCC_IwSeqReset();
+        if (vk != 0x7B) {
+            CCC_NkRst();
             return FALSE;
         }
         if (!wasDown) {
-            if (g_armT0 && (now - g_armT0) > IW_GAP_MS) {
-                CCC_IwSeqReset();
+            if (g_nkT1 && (now - g_nkT1) > NK_B) {
+                CCC_NkRst();
                 return FALSE;
             }
-            g_holdT0 = now;
+            g_nkT2 = now;
         }
-        if (g_holdT0 && (now - g_holdT0) >= IW_HOLD_MS
-            && (::GetAsyncKeyState(VK_F12) & 0x8000)) {
-            CCC_IwEnter();
+        if (g_nkT2 && (now - g_nkT2) >= NK_C
+            && (::GetAsyncKeyState(0x7B) & 0x8000)) {
+            CCC_NkOn();
             return TRUE;
         }
         return FALSE;
     }
-
-    // キーリピートは連打に数えない
     if (wasDown)
         return FALSE;
-
-    // 入口: F12 を burst 以内に7回以上 → 続けて F11 を burst 以内に7回 → F12 長押し
-    if (vk == VK_F12)
+    if (vk == 0x7B)
     {
-        if (g_iwSeq == 1)
+        if (g_nkSq == 1)
         {
-            // F11待ち中の F12 は入り口やり直し
-            CCC_IwSeqReset();
+            CCC_NkRst();
         }
-        if (g_f12Count == 0 || (now - g_seqT0) > IW_BURST_MS)
+        if (g_nkC0 == 0 || (now - g_nkT0) > NK_A)
         {
-            g_f12Count = 0;
-            g_seqT0 = now;
+            g_nkC0 = 0;
+            g_nkT0 = now;
         }
-        ++g_f12Count;
-        if (g_f12Count >= 7)
+        ++g_nkC0;
+        if (g_nkC0 >= NK_D)
         {
-            g_iwSeq = 1;
-            g_f11Count = 0;
-            g_armT0 = now;
-            g_seqT0 = 0;
+            g_nkSq = 1;
+            g_nkC1 = 0;
+            g_nkT1 = now;
+            g_nkT0 = 0;
         }
         return FALSE;
     }
-
-    // F11
-    if (g_iwSeq != 1)
+    if (g_nkSq != 1)
         return FALSE;
-    if (g_f11Count == 0)
+    if (g_nkC1 == 0)
     {
-        if ((now - g_armT0) > IW_GAP_MS)
+        if ((now - g_nkT1) > NK_B)
         {
-            CCC_IwSeqReset();
+            CCC_NkRst();
             return FALSE;
         }
-        g_seqT0 = now;
+        g_nkT0 = now;
     }
-    else if ((now - g_seqT0) > IW_BURST_MS)
+    else if ((now - g_nkT0) > NK_A)
     {
-        CCC_IwSeqReset();
+        CCC_NkRst();
         return FALSE;
     }
-    if (++g_f11Count >= 7)
+    if (++g_nkC1 >= NK_D)
     {
-        g_iwSeq = 2;
-        g_holdT0 = 0;
-        g_armT0 = now;
-        g_seqT0 = 0;
+        g_nkSq = 2;
+        g_nkT2 = 0;
+        g_nkT1 = now;
+        g_nkT0 = 0;
         return FALSE;
     }
     return FALSE;
 }
-
-// はぁはぁ / ピクン(連打スパイク) / イク / 突発の刺激。控件シェイクにも使う。
-static void CCC_InwomanPulse(DWORD t, double& breath, double& twitch, double& climax)
+static void CCC_NkPh(DWORD t, double& nP0, double& nP1, double& nP2)
 {
-    breath = 0.5 + 0.5 * sin(t / 460.0);
-
-    // ピクン: 線の連続振動ではなく、短い連打スパイク(控件全体が跳ねる用)
+    nP0 = 0.5 + 0.5 * sin(t / 460.0);
     const double cyc = (t % 920) / 920.0;
-    twitch = 0.0;
+    nP1 = 0.0;
     if (cyc < 0.11)
-        twitch = sin(cyc / 0.11 * 3.14159265);
+        nP1 = sin(cyc / 0.11 * 3.14159265);
     else if (cyc > 0.15 && cyc < 0.24)
-        twitch = sin((cyc - 0.15) / 0.09 * 3.14159265);
+        nP1 = sin((cyc - 0.15) / 0.09 * 3.14159265);
     else if (cyc > 0.28 && cyc < 0.34)
-        twitch = 0.75 * sin((cyc - 0.28) / 0.06 * 3.14159265);
-    twitch *= twitch;
-
-    // 突発の突き刺激(~2.1秒に一瞬) — ロータ等の当て直し感
+        nP1 = 0.75 * sin((cyc - 0.28) / 0.06 * 3.14159265);
+    nP1 *= nP1;
     {
         const double sp = (t % 2100) / 2100.0;
         if (sp < 0.055) {
             double s = sin(sp / 0.055 * 3.14159265);
             s *= s;
-            if (s > twitch) twitch = s;
+            if (s > nP1) nP1 = s;
         }
     }
-
-    // イク: ~3.6秒周期。ピークで白み/赤み＋連ピクン
     const double oc = (t % 3600) / 3600.0;
-    climax = 0.0;
+    nP2 = 0.0;
     if (oc < 0.26) {
-        climax = sin(oc / 0.26 * 3.14159265);
-        climax *= climax;
+        nP2 = sin(oc / 0.26 * 3.14159265);
+        nP2 *= nP2;
     }
-    if (climax > 0.04) {
+    if (nP2 > 0.04) {
         const double buzz = 0.6 + 0.4 * sin(t / 22.0);
-        if (twitch < climax * buzz)
-            twitch = climax * buzz;
+        if (nP1 < nP2 * buzz)
+            nP1 = nP2 * buzz;
     }
 }
-
-// ピクン=控件全体が跳ねる。静止時は 0。
-// 振幅は最大2px程度に抑え、全面ピンク帯で操作不能にならないようにする。
-void CCC_InwomanGetShake(int& dx, int& dy)
+void CCC_NkOff(int& dx, int& dy)
 {
     dx = 0;
     dy = 0;
-    if (!CCC_IsInwoman()) return;
-    double breath = 0, twitch = 0, climax = 0;
+    if (!CCC_Nk()) return;
+    double nP0 = 0, nP1 = 0, nP2 = 0;
     const DWORD t = ::GetTickCount();
-    CCC_InwomanPulse(t, breath, twitch, climax);
-    UNREFERENCED_PARAMETER(breath);
-    const double p = (twitch > climax) ? twitch : climax;
-    // 弱いピクンは無視。ピーク時だけ小さく跳ねる
+    CCC_NkPh(t, nP0, nP1, nP2);
+    UNREFERENCED_PARAMETER(nP0);
+    const double p = (nP1 > nP2) ? nP1 : nP2;
     if (p < 0.35) return;
-    // 8方向に跳ねる(同じ方向に張り付かない)
     static const int ox[8] = { 1, -1, 0, 0, 1, -1, 1, -1 };
     static const int oy[8] = { 0, 0, 1, -1, 1, 1, -1, -1 };
     const int dir = (int)((t / 35) % 8);
-    const int amp = (p > 0.75 || climax > 0.55) ? 2 : 1;
+    const int amp = (p > 0.75 || nP2 > 0.55) ? 2 : 1;
     dx = ox[dir] * amp;
     dy = oy[dir] * amp;
 }
-
-// mem→画面の最終転送。ピクン時は露出した縁だけ gap で埋めてからずらして BitBlt。
-// (全面 FillRect するとピンク帯が並んで操作不能になる)
-static void CCC_InwomanBitBlt(HDC dst, int w, int h, HDC src, COLORREF gap)
+static void CCC_NkBlt(HDC dst, int w, int h, HDC src, COLORREF gap)
 {
     if (!dst || !src || w <= 0 || h <= 0) return;
     int ox = 0, oy = 0;
-    CCC_InwomanGetShake(ox, oy);
+    CCC_NkOff(ox, oy);
     if (ox || oy) {
         HBRUSH br = ::CreateSolidBrush(gap);
         if (br) {
@@ -5232,41 +5165,31 @@ static void CCC_InwomanBitBlt(HDC dst, int w, int h, HDC src, COLORREF gap)
     }
     ::BitBlt(dst, ox, oy, w, h, src, 0, 0, SRCCOPY);
 }
-
-// α 付き最終転送。ピクン時は座標だけずらす（隙間塗りは fixer 側が下地済み）。
-static void CCC_InwomanAlphaBlend(HDC dst, int w, int h, HDC src)
+static void CCC_NkAb(HDC dst, int w, int h, HDC src)
 {
     if (!dst || !src || w <= 0 || h <= 0) return;
     int ox = 0, oy = 0;
-    CCC_InwomanGetShake(ox, oy);
+    CCC_NkOff(ox, oy);
     if (ox || oy) {
-        // ずらし分の穴は不透明黒ではなく、src の端色に近い塗りを避け dst を一度クリア相当に
-        // (fixer 経路は直前に背景塗り済みのことが多いのでずらすだけ)
     }
     const BLENDFUNCTION bf = { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
     ::GdiAlphaBlend(dst, ox, oy, w, h, src, 0, 0, w, h, bf);
 }
-
-// とろけ顔(ハート目 + 半開きの口 + ほてり + 汗)。絶頂時に隅へ出す"イク顔"。
-static void CCC_DrawAhegaoFace(CDC* pDC, int cx, int cy, int sz, double twitch, double climax, BOOL bAeroTrans)
+static void CCC_NkFc(CDC* pDC, int cx, int cy, int sz, double nP1, double nP2, BOOL bAeroTrans)
 {
     if (!pDC || sz < 8) return;
-    const double iku = (climax > twitch) ? climax : twitch;
-
-    // 深い火照り(頬の赤み)— 濃いめにして発情感を強める
+    const double nP3 = (nP2 > nP1) ? nP2 : nP1;
     if (!bAeroTrans)
     {
-        const int rx = sz / 2 + (int)(sz / 8 * iku), ry = sz / 3 + (int)(sz / 10 * iku);
-        const BYTE a = (BYTE)(120 + (int)(60 * iku));
+        const int rx = sz / 2 + (int)(sz / 8 * nP3), ry = sz / 3 + (int)(sz / 10 * nP3);
+        const BYTE a = (BYTE)(120 + (int)(60 * nP3));
         FillRectAlpha(pDC, CRect(cx - sz / 2 - rx / 2, cy, cx - sz / 6, cy + ry), RGB(255, 50, 110), a);
         FillRectAlpha(pDC, CRect(cx + sz / 6, cy, cx + sz / 2 + rx / 2, cy + ry), RGB(255, 50, 110), a);
     }
-
     const int eo = sz / 3;
-    const int ey = cy - sz / 8 - (int)(sz / 6 * iku); // ビクッ／イクで上に
-    const int es = max(4, sz / 2 + (int)(sz / 8 * climax));
-    // 目: 普段はとろん半目。ピクン高／イクはハート目で"イってる"
-    if (iku > 0.40)
+    const int ey = cy - sz / 8 - (int)(sz / 6 * nP3);
+    const int es = max(4, sz / 2 + (int)(sz / 8 * nP2));
+    if (nP3 > 0.40)
     {
         DrawHeart(pDC, CRect(cx - eo - es / 2, ey - es / 2, cx - eo + es / 2, ey + es / 2), RGB(255, 28, 88));
         DrawHeart(pDC, CRect(cx + eo - es / 2, ey - es / 2, cx + eo + es / 2, ey + es / 2), RGB(255, 28, 88));
@@ -5289,42 +5212,34 @@ static void CCC_DrawAhegaoFace(CDC* pDC, int cx, int cy, int sz, double twitch, 
         pDC->MoveTo(cx + eo - er, ey - er / 2); pDC->LineTo(cx + eo + er, ey - er / 2);
         pDC->SelectObject(opn);
     }
-
-    // 半開きの口 + だらり舌(イクで大きく開く)
     const int my = cy + sz / 3;
-    const int mw = max(4, sz * 2 / 5) + (int)(sz / 8 * climax);
-    const int mh = max(3, sz / 5) + (int)(sz / 4 * iku);
+    const int mw = max(4, sz * 2 / 5) + (int)(sz / 8 * nP2);
+    const int mh = max(3, sz / 5) + (int)(sz / 4 * nP3);
     CBrush bm(RGB(150, 30, 52));
     CBrush* ob = pDC->SelectObject(&bm);
     CGdiObject* op = pDC->SelectStockObject(NULL_PEN);
     pDC->Ellipse(cx - mw / 2, my - mh / 2, cx + mw / 2, my + mh / 2 + 1);
     CBrush bt(RGB(255, 110, 145));
     pDC->SelectObject(&bt);
-    pDC->RoundRect(cx - mw / 4, my, cx + mw / 4, my + mh / 2 + (int)(sz / 3 * (0.45 + iku)), 3, 3);
+    pDC->RoundRect(cx - mw / 4, my, cx + mw / 4, my + mh / 2 + (int)(sz / 3 * (0.45 + nP3)), 3, 3);
     if (op) pDC->SelectObject(op);
     pDC->SelectObject(ob);
-
-    // よだれ(口角からたらり。イクで2筋)
     if (!bAeroTrans) {
-        FillRectAlpha(pDC, CRect(cx + mw / 2 - 1, my, cx + mw / 2 + 1, my + sz / 3 + (int)(sz / 5 * climax)), RGB(235, 240, 255), 160);
-        if (climax > 0.35)
+        FillRectAlpha(pDC, CRect(cx + mw / 2 - 1, my, cx + mw / 2 + 1, my + sz / 3 + (int)(sz / 5 * nP2)), RGB(235, 240, 255), 160);
+        if (nP2 > 0.35)
             FillRectAlpha(pDC, CRect(cx - mw / 2 - 1, my + 1, cx - mw / 2 + 1, my + sz / 4), RGB(235, 240, 255), 130);
     }
     DrawShine(pDC, cx - mw / 6, my, max(1, mw / 6), max(1, mh / 4), RGB(255, 200, 220));
-
-    // 汗(こめかみ) — イクで2粒
     CBrush bs(RGB(190, 225, 255));
     CBrush* ob2 = pDC->SelectObject(&bs);
     CGdiObject* op2 = pDC->SelectStockObject(NULL_PEN);
     pDC->Ellipse(cx + sz / 2 - 1, cy - sz / 2, cx + sz / 2 + 2, cy - sz / 2 + 3);
-    if (climax > 0.25)
+    if (nP2 > 0.25)
         pDC->Ellipse(cx - sz / 2 - 1, cy - sz / 3, cx - sz / 2 + 2, cy - sz / 3 + 3);
     if (op2) pDC->SelectObject(op2);
     pDC->SelectObject(ob2);
 }
-
-// 愛液: XXX(秘部)から出て垂れ・溜まる。ピクン／イクで伸び・飛び散る。
-static void CCC_DrawLoveFluid(CDC* pDC, const CRect& rc, double breath, double twitch, double climax, BOOL bAeroTrans)
+static void CCC_NkFl(CDC* pDC, const CRect& rc, double nP0, double nP1, double nP2, BOOL bAeroTrans)
 {
     if (!pDC || rc.Width() < 10 || rc.Height() < 10) return;
     const COLORREF fluid = RGB(242, 246, 255);
@@ -5332,13 +5247,11 @@ static void CCC_DrawLoveFluid(CDC* pDC, const CRect& rc, double breath, double t
     const COLORREF wet   = RGB(255, 170, 210);
     const COLORREF lip   = RGB(255, 140, 180);
     const COLORREF lipIn = RGB(200, 70, 120);
-    const double iku = (climax > twitch) ? climax : twitch;
-
-    // --- XXX ソース: 下端中央の秘部(外唇+割れ目)。ここから愛液が出る ---
+    const double nP3 = (nP2 > nP1) ? nP2 : nP1;
     const int cx = rc.left + rc.Width() / 2;
     const int srcY = rc.bottom - max(4, rc.Height() / 7);
-    const int lipW = max(6, rc.Width() / 7 + (int)(rc.Width() / 40 * breath));
-    const int lipH = max(4, rc.Height() / 12 + (int)(2 * twitch));
+    const int lipW = max(6, rc.Width() / 7 + (int)(rc.Width() / 40 * nP0));
+    const int lipH = max(4, rc.Height() / 12 + (int)(2 * nP1));
     {
         CBrush bl(lip);
         CBrush* ob = pDC->SelectObject(&bl);
@@ -5347,91 +5260,80 @@ static void CCC_DrawLoveFluid(CDC* pDC, const CRect& rc, double breath, double t
         pDC->Ellipse(cx + lipW / 6, srcY - lipH, cx + lipW + lipW / 3, srcY + lipH);
         CBrush bi(lipIn);
         pDC->SelectObject(&bi);
-        const int gap = max(2, lipW / 5) + (int)(2 * climax);
-        pDC->Ellipse(cx - gap, srcY - lipH / 2 - (int)(2 * twitch), cx + gap, srcY + lipH + (int)(3 * climax));
+        const int gap = max(2, lipW / 5) + (int)(2 * nP2);
+        pDC->Ellipse(cx - gap, srcY - lipH / 2 - (int)(2 * nP1), cx + gap, srcY + lipH + (int)(3 * nP2));
         if (op) pDC->SelectObject(op);
         pDC->SelectObject(ob);
         DrawShine(pDC, cx - lipW / 2, srcY - lipH / 3, max(1, lipW / 6), max(1, lipH / 3), RGB(255, 220, 235));
         DrawShine(pDC, cx + lipW / 4, srcY - lipH / 4, max(1, lipW / 7), max(1, lipH / 4), RGB(255, 230, 240));
     }
-
-    // 割れ目直下の溜まり(下端だけ・中央ラベルを残す)
     if (!bAeroTrans)
     {
-        const int pool = max(2, rc.Height() / 14 + (int)(rc.Height() / 20 * iku));
-        FillRectAlpha(pDC, CRect(cx - lipW, rc.bottom - pool, cx + lipW, rc.bottom), tint, (BYTE)(55 + (int)(50 * breath)));
-        FillRectAlpha(pDC, CRect(rc.left + rc.Width() / 5, rc.bottom - pool / 2, rc.right - rc.Width() / 5, rc.bottom), fluid, (BYTE)(40 + (int)(45 * iku)));
+        const int pool = max(2, rc.Height() / 14 + (int)(rc.Height() / 20 * nP3));
+        FillRectAlpha(pDC, CRect(cx - lipW, rc.bottom - pool, cx + lipW, rc.bottom), tint, (BYTE)(55 + (int)(50 * nP0)));
+        FillRectAlpha(pDC, CRect(rc.left + rc.Width() / 5, rc.bottom - pool / 2, rc.right - rc.Width() / 5, rc.bottom), fluid, (BYTE)(40 + (int)(45 * nP3)));
     }
-
-    // 割れ目から垂れる糸+しずく(ソースは中央=XXX)。伸びすぎて文字を隠さない。
     const int n = (rc.Width() >= 72) ? 4 : ((rc.Width() >= 40) ? 3 : 2);
     for (int i = 0; i < n; ++i)
     {
         const double u = (i + 0.5) / n;
         int x = cx + (int)((u - 0.5) * lipW * 2.2);
-        x += (int)(2 * sin((double)i * 1.7 + breath * 6.2831853) + 2 * twitch * ((i & 1) ? 1 : -1));
-        int drip = (int)(rc.Height() * 0.14 * (0.4 + 0.6 * breath)
-            + rc.Height() * 0.14 * twitch
-            + rc.Height() * 0.18 * climax);
+        x += (int)(2 * sin((double)i * 1.7 + nP0 * 6.2831853) + 2 * nP1 * ((i & 1) ? 1 : -1));
+        int drip = (int)(rc.Height() * 0.14 * (0.4 + 0.6 * nP0)
+            + rc.Height() * 0.14 * nP1
+            + rc.Height() * 0.18 * nP2);
         if (drip < 4) drip = 4;
         if (drip > rc.Height() / 3) drip = rc.Height() / 3;
         const int y0 = srcY + lipH / 2;
         const int y1 = min(rc.bottom, y0 + drip);
         if (!bAeroTrans) {
-            FillRectAlpha(pDC, CRect(x - 1, y0, x + 2, y1), fluid, (BYTE)(155 + (int)(50 * iku)));
+            FillRectAlpha(pDC, CRect(x - 1, y0, x + 2, y1), fluid, (BYTE)(155 + (int)(50 * nP3)));
             if (drip > 10)
                 FillRectAlpha(pDC, CRect(x - 2, y0 + drip / 3, x + 3, y0 + drip / 3 + 3), tint, 130);
         }
-        const int r = max(2, rc.Width() / 18 + (int)(2 * climax));
-        CBrush bb(iku > 0.5 ? wet : tint);
+        const int r = max(2, rc.Width() / 18 + (int)(2 * nP2));
+        CBrush bb(nP3 > 0.5 ? wet : tint);
         CBrush* ob = pDC->SelectObject(&bb);
         CGdiObject* op = pDC->SelectStockObject(NULL_PEN);
-        pDC->Ellipse(x - r, y1 - r * 2, x + r, y1 + (int)(2 * climax));
+        pDC->Ellipse(x - r, y1 - r * 2, x + r, y1 + (int)(2 * nP2));
         if (op) pDC->SelectObject(op);
         pDC->SelectObject(ob);
         DrawShine(pDC, x - r / 2, y1 - r, max(1, r / 3), max(1, r / 2));
     }
-
-    // イク: XXXから斜めに飛び散る
-    if (climax > 0.2 && !bAeroTrans && rc.Width() >= 28)
+    if (nP2 > 0.2 && !bAeroTrans && rc.Width() >= 28)
     {
         const int ns = (rc.Width() >= 64) ? 6 : 4;
         for (int s = 0; s < ns; ++s) {
             const double ang = -1.0 + s * (2.0 / (ns - 1));
-            const int len = (int)((rc.Height() / 4 + rc.Width() / 9) * climax);
+            const int len = (int)((rc.Height() / 4 + rc.Width() / 9) * nP2);
             const int x0 = cx + (s - ns / 2) * (lipW / 2);
             const int y0 = srcY;
             const int x1 = x0 + (int)(len * sin(ang));
             const int y1 = y0 - (int)(len * cos(ang) * 0.4);
-            FillRectAlpha(pDC, CRect(min(x0, x1), min(y0, y1), max(x0, x1) + 2, max(y0, y1) + 2), fluid, (BYTE)(110 + (int)(80 * climax)));
+            FillRectAlpha(pDC, CRect(min(x0, x1), min(y0, y1), max(x0, x1) + 2, max(y0, y1) + 2), fluid, (BYTE)(110 + (int)(80 * nP2)));
             CBrush bb(tint);
             CBrush* ob = pDC->SelectObject(&bb);
             CGdiObject* op = pDC->SelectStockObject(NULL_PEN);
-            const int rr = max(2, 2 + (int)(2 * climax));
+            const int rr = max(2, 2 + (int)(2 * nP2));
             pDC->Ellipse(x1 - rr, y1 - rr, x1 + rr, y1 + rr);
             if (op) pDC->SelectObject(op);
             pDC->SelectObject(ob);
         }
     }
 }
-
-// バイブ=ロータ / 電マ / 吸引バイブ / クンニ。時間で切替。愛液まみれ＋振動。
-static void CCC_DrawVibrator(CDC* pDC, int cx, int cy, int sz, double t, double twitch, double breath, double climax, BOOL bAeroTrans)
+static void CCC_NkVb(CDC* pDC, int cx, int cy, int sz, double t, double nP1, double nP0, double nP2, BOOL bAeroTrans)
 {
     if (!pDC || sz < 8) return;
-    const double iku = (climax > twitch) ? climax : twitch;
-    cx += (int)(2 * sin(t / 11.0) + 2 * cos(t / 7.0) + 3 * twitch + 4 * climax);
-    cy += (int)(1 * sin(t / 9.0) - 2 * twitch - 3 * climax);
-    const int kind = ((int)(t / 2600)) & 3; // 約2.6秒で切替。0ロータ 1電マ 2吸引 3クンニ
+    const double nP3 = (nP2 > nP1) ? nP2 : nP1;
+    cx += (int)(2 * sin(t / 11.0) + 2 * cos(t / 7.0) + 3 * nP1 + 4 * nP2);
+    cy += (int)(1 * sin(t / 9.0) - 2 * nP1 - 3 * nP2);
+    const int kind = ((int)(t / 2600)) & 3;
     const COLORREF body = RGB(236, 110, 188);
     const COLORREF tip  = RGB(255, 190, 230);
     const COLORREF fluid = RGB(240, 244, 255);
     const COLORREF tongue = RGB(255, 130, 160);
-
     CGdiObject* opN = pDC->SelectStockObject(NULL_PEN);
-
     if (kind == 0) {
-        // ロータ: 小さな楕円エッグ + 短いコード
         const int ew = max(6, sz / 2), eh = max(8, sz * 2 / 3);
         CBrush bb(body);
         CBrush* ob = pDC->SelectObject(&bb);
@@ -5447,10 +5349,9 @@ static void CCC_DrawVibrator(CDC* pDC, int cx, int cy, int sz, double t, double 
         pDC->SelectObject(opn);
         DrawShine(pDC, cx - ew / 5, cy - eh / 4, max(1, ew / 5), max(2, eh / 3), RGB(255, 235, 248));
         if (!bAeroTrans)
-            FillRectAlpha(pDC, CRect(cx - 1, cy + eh / 2, cx + 2, cy + eh / 2 + (int)(eh * 0.4 * (0.5 + iku))), fluid, 170);
+            FillRectAlpha(pDC, CRect(cx - 1, cy + eh / 2, cx + 2, cy + eh / 2 + (int)(eh * 0.4 * (0.5 + nP3))), fluid, 170);
     }
     else if (kind == 1) {
-        // 電マ: 太いヘッド + 柄
         const int hw = max(8, sz * 2 / 3), hh = max(7, sz / 2);
         const int sw = max(4, sz / 4), sh = max(8, sz / 2);
         CBrush bh(tip);
@@ -5463,39 +5364,37 @@ static void CCC_DrawVibrator(CDC* pDC, int cx, int cy, int sz, double t, double 
         DrawShine(pDC, cx - hw / 4, cy - hh, max(2, hw / 5), max(2, hh / 3), RGB(255, 255, 255));
         CPen pen(PS_SOLID, 1, RGB(255, 200, 230));
         CPen* opn = pDC->SelectObject(&pen);
-        for (int s = 0; s < 2 + (int)(2 * iku); ++s) {
+        for (int s = 0; s < 2 + (int)(2 * nP3); ++s) {
             const int d = hw / 2 + 3 + s * 3;
             pDC->Arc(cx - d, cy - hh - sh / 4 - d / 4, cx + d, cy - sh / 4 + d / 4,
                 cx + d, cy - hh / 2, cx - d, cy - hh / 2);
         }
         pDC->SelectObject(opn);
         if (!bAeroTrans)
-            FillRectAlpha(pDC, CRect(cx - hw / 3, cy - sh / 4, cx + hw / 3, cy - sh / 4 + (int)(6 + 8 * breath)), fluid, 120);
+            FillRectAlpha(pDC, CRect(cx - hw / 3, cy - sh / 4, cx + hw / 3, cy - sh / 4 + (int)(6 + 8 * nP0)), fluid, 120);
     }
     else if (kind == 2) {
-        // 吸引バイブ: カップ口 + 吸引の脈動リング
         const int rw = max(8, sz * 3 / 5), rh = max(6, sz / 2);
         CBrush bb(body);
         CBrush* ob = pDC->SelectObject(&bb);
         pDC->Ellipse(cx - rw / 2, cy - rh / 2, cx + rw / 2, cy + rh / 2);
         CBrush hole(RGB(90, 30, 55));
         pDC->SelectObject(&hole);
-        const int gap = max(3, rw / 3) - (int)(2 * breath);
+        const int gap = max(3, rw / 3) - (int)(2 * nP0);
         pDC->Ellipse(cx - gap, cy - rh / 4, cx + gap, cy + rh / 3);
         pDC->SelectObject(ob);
         CPen pen(PS_SOLID, 1, RGB(255, 180, 220));
         CPen* opn = pDC->SelectObject(&pen);
-        const int nR = 2 + (twitch > 0.3 ? 1 : 0) + (climax > 0.3 ? 1 : 0);
+        const int nR = 2 + (nP1 > 0.3 ? 1 : 0) + (nP2 > 0.3 ? 1 : 0);
         for (int s = 0; s < nR; ++s) {
             const int d = rw / 2 + 2 + s * 3 + (int)(3 * sin(t / 80.0 + s));
             pDC->Ellipse(cx - d, cy - rh / 2 - s, cx + d, cy + rh / 2 + s);
         }
         pDC->SelectObject(opn);
         if (!bAeroTrans)
-            FillRectAlpha(pDC, CRect(cx - gap, cy, cx + gap, cy + rh / 2 + (int)(rh * 0.5 * iku)), fluid, 150);
+            FillRectAlpha(pDC, CRect(cx - gap, cy, cx + gap, cy + rh / 2 + (int)(rh * 0.5 * nP3)), fluid, 150);
     }
     else {
-        // クンニ: 割れ目に舌が這う
         const int lw = max(6, sz / 2), lh = max(5, sz / 3);
         CBrush lipBr(RGB(255, 140, 180));
         CBrush* ob = pDC->SelectObject(&lipBr);
@@ -5503,24 +5402,22 @@ static void CCC_DrawVibrator(CDC* pDC, int cx, int cy, int sz, double t, double 
         pDC->Ellipse(cx + 1, cy - lh / 2, cx + lw, cy + lh / 2);
         CBrush tg(tongue);
         pDC->SelectObject(&tg);
-        const int lick = (int)(lh * 0.6 * (0.5 + 0.5 * sin(t / 90.0)) + lh * 0.4 * twitch);
+        const int lick = (int)(lh * 0.6 * (0.5 + 0.5 * sin(t / 90.0)) + lh * 0.4 * nP1);
         pDC->RoundRect(cx - lw / 4, cy - lick / 2, cx + lw / 4, cy + lh / 2 + lick / 3, 4, 4);
         pDC->SelectObject(ob);
         DrawShine(pDC, cx - 1, cy, max(1, lw / 6), max(1, lh / 3), RGB(255, 220, 230));
         if (!bAeroTrans)
-            FillRectAlpha(pDC, CRect(cx - 2, cy + lh / 3, cx + 2, cy + lh / 2 + (int)(lh * (0.5 + iku))), fluid, 180);
+            FillRectAlpha(pDC, CRect(cx - 2, cy + lh / 3, cx + 2, cy + lh / 2 + (int)(lh * (0.5 + nP3))), fluid, 180);
     }
-
     if (opN) pDC->SelectObject(opN);
-
-    for (int i = 0; i < 2 + (climax > 0.25 ? 1 : 0); ++i) {
+    for (int i = 0; i < 2 + (nP2 > 0.25 ? 1 : 0); ++i) {
         const int x = cx + ((i == 0) ? -sz / 6 : ((i == 1) ? sz / 6 : 0));
-        int drip = (int)(sz * 0.35 * (0.45 + 0.55 * breath) + sz * 0.4 * twitch + sz * 0.5 * climax);
+        int drip = (int)(sz * 0.35 * (0.45 + 0.55 * nP0) + sz * 0.4 * nP1 + sz * 0.5 * nP2);
         if (drip < 4) drip = 4;
         const int bot = cy + sz / 3;
         if (!bAeroTrans)
-            FillRectAlpha(pDC, CRect(x - 1, bot, x + 2, bot + drip), fluid, (BYTE)(160 + (int)(50 * iku)));
-        const int r = max(2, sz / 10 + (int)(2 * climax));
+            FillRectAlpha(pDC, CRect(x - 1, bot, x + 2, bot + drip), fluid, (BYTE)(160 + (int)(50 * nP3)));
+        const int r = max(2, sz / 10 + (int)(2 * nP2));
         CBrush bf(RGB(255, 220, 240));
         CBrush* obf = pDC->SelectObject(&bf);
         CGdiObject* opf = pDC->SelectStockObject(NULL_PEN);
@@ -5529,45 +5426,40 @@ static void CCC_DrawVibrator(CDC* pDC, int cx, int cy, int sz, double t, double 
         pDC->SelectObject(obf);
     }
 }
-
-// 裏演出スチル: RCDATA は IWJ2。XOR(inner*13) → zstd → XOR(outer*7)。
-static const BYTE kIwJamKey[32] = {
+static const BYTE kNkKey[32] = {
     0xA7, 0x3C, 0x91, 0xE2, 0x5B, 0x08, 0xD4, 0x6F,
     0xC1, 0x2A, 0x77, 0xBE, 0x14, 0x9D, 0xF0, 0x33,
     0x4E, 0x88, 0x1B, 0xC6, 0x59, 0xA0, 0x7D, 0x02,
     0xE5, 0x36, 0xB9, 0x4C, 0x70, 0xAD, 0x18, 0xF3
 };
-static const int kIwXorInnerMul = 13;
-static const int kIwXorOuterMul = 7;
-
-struct CCC_IwBmp {
+static const int kNkMi = 13;
+static const int kNkMo = 7;
+struct CCC_NkBm {
     HBITMAP hbm = NULL;
     int w = 0;
     int h = 0;
     BOOL tried = FALSE;
 };
-
 enum {
-    IW_FACE = 0, IW_BODY, IW_BODY2, IW_LACE, IW_BOW, IW_BLUSH, IW_FLUID, IW_ROTOR, IW_VIBE, IW_COUNT
+    NK0 = 0, NK1, NK2, NK3, NK4, NK5, NK6, NK7, NK8, NKN
 };
-static CCC_IwBmp g_iwBmp[IW_COUNT];
-static const UINT kIwResId[IW_COUNT] = {
-    IDR_IW_FACE, IDR_IW_BODY, IDR_IW_BODY2, IDR_IW_LACE, IDR_IW_BOW, IDR_IW_BLUSH,
-    IDR_IW_FLUID, IDR_IW_ROTOR, IDR_IW_VIBE
+static CCC_NkBm g_nkBm[NKN];
+static const UINT kNkId[NKN] = {
+    IDR_U383, IDR_U384, IDR_U385, IDR_U386, IDR_U387, IDR_U388,
+    IDR_U389, IDR_U390, IDR_U391
 };
-
-static void CCC_IwXor(BYTE* p, DWORD n, int mul)
+static void CCC_NkXor(BYTE* p, DWORD n, int mul)
 {
     if (!p || n == 0)
         return;
     for (DWORD i = 0; i < n; ++i)
-        p[i] = (BYTE)(p[i] ^ kIwJamKey[i % 32] ^ ((i * (DWORD)mul + 7) & 0xFF));
+        p[i] = (BYTE)(p[i] ^ kNkKey[i % 32] ^ ((i * (DWORD)mul + 7) & 0xFF));
 }
-
-// RCDATA の IWJ2 を PNG バイト列へ。外側XOR → zstd展開 → 内側XOR。
-static BOOL CCC_IwUnjam(const BYTE* src, DWORD n, BYTE* out, DWORD outn)
+static BOOL CCC_NkUnj(const BYTE* src, DWORD n, BYTE* out, DWORD outn)
 {
-    if (!src || !out || n < 12 || memcmp(src, "IWJ2", 4) != 0)
+    DWORD mag = 0;
+    if (src && n >= 4) memcpy(&mag, src, 4);
+    if (!src || !out || n < 12 || (mag ^ 0x6C1A2B3Cu) != 0x5E507C75u)
         return FALSE;
     DWORD unc = 0, cmp = 0;
     memcpy(&unc, src + 4, 4);
@@ -5580,17 +5472,15 @@ static BOOL CCC_IwUnjam(const BYTE* src, DWORD n, BYTE* out, DWORD outn)
     if (!z)
         return FALSE;
     memcpy(z, src + 12, cmp);
-    CCC_IwXor(z, cmp, kIwXorOuterMul);
+    CCC_NkXor(z, cmp, kNkMo);
     const size_t got = ZSTD_decompress(out, unc, z, cmp);
     delete[] z;
     if (ZSTD_isError(got) || got != (size_t)unc)
         return FALSE;
-    CCC_IwXor(out, unc, kIwXorInnerMul);
+    CCC_NkXor(out, unc, kNkMi);
     return TRUE;
 }
-
-// WIC で PNG→32bit PBGRA DIB。COM 未初期化ならここで CoInitialize。
-static BOOL CCC_IwDecodePng(const BYTE* png, DWORD n, CCC_IwBmp& b)
+static BOOL CCC_NkDec(const BYTE* png, DWORD n, CCC_NkBm& b)
 {
     if (!png || n < 24)
         return FALSE;
@@ -5620,7 +5510,7 @@ static BOOL CCC_IwDecodePng(const BYTE* png, DWORD n, CCC_IwBmp& b)
     if (FAILED(conv->Initialize(frame, GUID_WICPixelFormat32bppPBGRA, WICBitmapDitherTypeNone,
         NULL, 0.0, WICBitmapPaletteTypeCustom))) goto done;
     conv->GetSize(&w, &h);
-    if (w < 2 || h < 2 || w > 2048 || h > 2048) goto done; // 異常サイズ拒否
+    if (w < 2 || h < 2 || w > 2048 || h > 2048) goto done;
     bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
     bi.bmiHeader.biWidth = (LONG)w;
     bi.bmiHeader.biHeight = -(LONG)h;
@@ -5652,18 +5542,16 @@ done:
     if (fac) fac->Release();
     return ok;
 }
-
-// スチルを遅延ロード。失敗も tried にして再試行しない。
-static BOOL CCC_IwEnsure(int idx)
+static BOOL CCC_NkLd(int idx)
 {
-    if (idx < 0 || idx >= IW_COUNT)
+    if (idx < 0 || idx >= NKN)
         return FALSE;
-    CCC_IwBmp& b = g_iwBmp[idx];
+    CCC_NkBm& b = g_nkBm[idx];
     if (b.tried)
         return b.hbm != NULL;
     b.tried = TRUE;
     HINSTANCE hi = AfxGetResourceHandle();
-    HRSRC hrs = ::FindResource(hi, MAKEINTRESOURCE(kIwResId[idx]), RT_RCDATA);
+    HRSRC hrs = ::FindResource(hi, MAKEINTRESOURCE(kNkId[idx]), RT_RCDATA);
     if (!hrs)
         return FALSE;
     HGLOBAL hg = ::LoadResource(hi, hrs);
@@ -5673,7 +5561,9 @@ static BOOL CCC_IwEnsure(int idx)
     const BYTE* mem = (const BYTE*)::LockResource(hg);
     if (!mem || n < 12)
         return FALSE;
-    if (memcmp(mem, "IWJ2", 4) != 0)
+    DWORD mag = 0;
+    memcpy(&mag, mem, 4);
+    if ((mag ^ 0x6C1A2B3Cu) != 0x5E507C75u)
         return FALSE;
     DWORD unc = 0, cmp = 0;
     memcpy(&unc, mem + 4, 4);
@@ -5683,46 +5573,40 @@ static BOOL CCC_IwEnsure(int idx)
     BYTE* png = new (std::nothrow) BYTE[unc];
     if (!png)
         return FALSE;
-    if (!CCC_IwUnjam(mem, n, png, unc)) {
+    if (!CCC_NkUnj(mem, n, png, unc)) {
         delete[] png;
         return FALSE;
     }
-    BOOL ok = CCC_IwDecodePng(png, unc, b);
+    BOOL ok = CCC_NkDec(png, unc, b);
     delete[] png;
     return ok;
 }
-
-// 裏スチルの定数α。PNG 自身の α と掛け算されるので低すぎるとほぼ消える。
-static BYTE IwA(int v)
+static BYTE CCC_NkA(int v)
 {
     if (v < 8) return 0;
     if (v > 250) return 250;
     return (BYTE)v;
 }
-
-// 裏スチルを定数αで拡縮合成。alpha<8 は無視（ノイズ防止）。
-static void CCC_IwBlit(CDC* pDC, int x, int y, int dw, int dh, int idx, BYTE alpha)
+static void CCC_NkSpr(CDC* pDC, int x, int y, int dw, int dh, int idx, BYTE alpha)
 {
     if (!pDC || dw < 2 || dh < 2 || alpha < 8)
         return;
-    if (!CCC_IwEnsure(idx) || !g_iwBmp[idx].hbm)
+    if (!CCC_NkLd(idx) || !g_nkBm[idx].hbm)
         return;
     HDC hdc = ::CreateCompatibleDC(pDC->GetSafeHdc());
     if (!hdc)
         return;
-    HGDIOBJ old = ::SelectObject(hdc, g_iwBmp[idx].hbm);
+    HGDIOBJ old = ::SelectObject(hdc, g_nkBm[idx].hbm);
     BLENDFUNCTION bf = { AC_SRC_OVER, 0, alpha, AC_SRC_ALPHA };
-    ::GdiAlphaBlend(pDC->GetSafeHdc(), x, y, dw, dh, hdc, 0, 0, g_iwBmp[idx].w, g_iwBmp[idx].h, bf);
+    ::GdiAlphaBlend(pDC->GetSafeHdc(), x, y, dw, dh, hdc, 0, 0, g_nkBm[idx].w, g_nkBm[idx].h, bf);
     ::SelectObject(hdc, old);
     ::DeleteDC(hdc);
 }
-
-// アスペクト維持で box 内に収める（横長ウィンドウで裸体を潰さない）。
-static void CCC_IwBlitContain(CDC* pDC, const CRect& box, int idx, BYTE alpha)
+static void CCC_NkFit(CDC* pDC, const CRect& box, int idx, BYTE alpha)
 {
-    if (!pDC || !CCC_IwEnsure(idx) || !g_iwBmp[idx].hbm)
+    if (!pDC || !CCC_NkLd(idx) || !g_nkBm[idx].hbm)
         return;
-    const int iw = g_iwBmp[idx].w, ih = g_iwBmp[idx].h;
+    const int iw = g_nkBm[idx].w, ih = g_nkBm[idx].h;
     const int bw = box.Width(), bh = box.Height();
     if (iw < 2 || ih < 2 || bw < 2 || bh < 2)
         return;
@@ -5734,109 +5618,87 @@ static void CCC_IwBlitContain(CDC* pDC, const CRect& box, int idx, BYTE alpha)
         dh = bh;
         dw = max(2, (int)((LONGLONG)bh * iw / ih));
     }
-    CCC_IwBlit(pDC, box.left + (bw - dw) / 2, box.top + (bh - dh) / 2, dw, dh, idx, alpha);
+    CCC_NkSpr(pDC, box.left + (bw - dw) / 2, box.top + (bh - dh) / 2, dw, dh, idx, alpha);
 }
-
-// 淫女オーバーレイ: 暗号化スチルを控件いっぱいに。PNG 抜きは文字・クリックを残す。
-void CCC_DrawInwoman(CDC* pDC, const CRect& rc, BOOL bAeroTrans)
+void CCC_NkBlit(CDC* pDC, const CRect& rc, BOOL bAeroTrans)
 {
-    if (!pDC || !CCC_IsInwoman() || rc.Width() < 8 || rc.Height() < 8)
+    if (!pDC || !CCC_Nk() || rc.Width() < 8 || rc.Height() < 8)
         return;
-
     const DWORD t = ::GetTickCount();
     const int W = rc.Width(), H = rc.Height();
-    double breath = 0, twitch = 0, climax = 0;
-    CCC_InwomanPulse(t, breath, twitch, climax);
-    const double iku = (climax > twitch) ? climax : twitch;
-    const double heat = min(1.0, breath * 0.45 + twitch * 0.7 + climax * 0.85);
-
-    // --- イク: ほんのり白み＋赤み(文字が読める強さに抑える) ---
-    if (!bAeroTrans && climax > 0.22) {
-        FillRectAlpha(pDC, rc, RGB(255, 252, 255), (BYTE)(16 + (int)(48 * climax)));
-        FillRectAlpha(pDC, rc, RGB(255, 70, 120), (BYTE)(10 + (int)(40 * climax)));
+    double nP0 = 0, nP1 = 0, nP2 = 0;
+    CCC_NkPh(t, nP0, nP1, nP2);
+    const double nP3 = (nP2 > nP1) ? nP2 : nP1;
+    const double nP4 = min(1.0, nP0 * 0.45 + nP1 * 0.7 + nP2 * 0.85);
+    if (!bAeroTrans && nP2 > 0.22) {
+        FillRectAlpha(pDC, rc, RGB(255, 252, 255), (BYTE)(16 + (int)(48 * nP2)));
+        FillRectAlpha(pDC, rc, RGB(255, 70, 120), (BYTE)(10 + (int)(40 * nP2)));
     }
-
-    // --- 発情の火照り(細い縁だけ。太い帯になると操作不能) ---
     if (!bAeroTrans)
     {
-        const int g = 28 + (int)(70 * heat);
-        const COLORREF hot = (climax > 0.35) ? RGB(255, 35, 95) : RGB(255, 55, 115);
+        const int g = 28 + (int)(70 * nP4);
+        const COLORREF hot = (nP2 > 0.35) ? RGB(255, 35, 95) : RGB(255, 55, 115);
         const int b = max(2, min(6, min(W, H) / 10));
         FillRectAlpha(pDC, CRect(rc.left, rc.top, rc.right, rc.top + b), hot, (BYTE)g);
         FillRectAlpha(pDC, CRect(rc.left, rc.bottom - b, rc.right, rc.bottom), hot, (BYTE)g);
         FillRectAlpha(pDC, CRect(rc.left, rc.top, rc.left + b, rc.bottom), hot, (BYTE)(g * 3 / 4));
         FillRectAlpha(pDC, CRect(rc.right - b, rc.top, rc.right, rc.bottom), hot, (BYTE)(g * 3 / 4));
-
         if (W >= 40 && H >= 22)
         {
-            const int puffs = (W >= 80) ? (2 + (climax > 0.4 ? 1 : 0)) : 1;
+            const int puffs = (W >= 80) ? (2 + (nP2 > 0.4 ? 1 : 0)) : 1;
             for (int i = 0; i < puffs; ++i)
             {
                 const double ph = t / 420.0 + i * 1.15;
                 const int px = rc.left + rc.Width() * (i * 2 + 1) / (puffs * 2) + (int)(3 * sin(ph));
-                const int rise = (int)((0.5 + 0.5 * sin(ph)) * (H / 8 + (int)(H / 14 * climax)));
+                const int rise = (int)((0.5 + 0.5 * sin(ph)) * (H / 8 + (int)(H / 14 * nP2)));
                 const int py = rc.top + 2 + rise;
-                const int pr = max(2, W / 28 + (int)(1 * climax));
-                FillRectAlpha(pDC, CRect(px - pr, py - pr, px + pr, py + pr), RGB(255, 245, 250), (BYTE)(28 + (int)(32 * iku)));
+                const int pr = max(2, W / 28 + (int)(1 * nP2));
+                FillRectAlpha(pDC, CRect(px - pr, py - pr, px + pr, py + pr), RGB(255, 245, 250), (BYTE)(28 + (int)(32 * nP3)));
             }
         }
     }
-
-    const BYTE aLace = IwA(130 + (int)(70 * heat));
-    const BYTE aBody = IwA(200 + (int)(40 * heat) + (int)(10 * climax));
-    const BYTE aFace = IwA(210 + (int)(35 * iku));
-    const int ox = (int)(1.5 * sin(t / 180.0) + 2 * twitch);
-    const int oy = (int)(-1 * climax);
-
-    // ジャム解除スチル。抜きPNGなので全面に出してもラベルは残る。
+    const BYTE nL0 = CCC_NkA(130 + (int)(70 * nP4));
+    const BYTE nL1 = CCC_NkA(200 + (int)(40 * nP4) + (int)(10 * nP2));
+    const BYTE nL2 = CCC_NkA(210 + (int)(35 * nP3));
+    const int ox = (int)(1.5 * sin(t / 180.0) + 2 * nP1);
+    const int oy = (int)(-1 * nP2);
     if (H >= 14 && W >= 20)
-        CCC_IwBlit(pDC, rc.left + 1, rc.bottom - max(10, H / 4), W - 2, max(10, H / 4), IW_LACE, aLace);
-
+        CCC_NkSpr(pDC, rc.left + 1, rc.bottom - max(10, H / 4), W - 2, max(10, H / 4), NK3, nL0);
     if (H >= 16 && W >= 24) {
         const int bw = max(12, W / 4), bh = max(10, H / 3);
-        CCC_IwBlit(pDC, rc.left + 1, rc.bottom - bh - 1, bw, bh, IW_BLUSH, IwA(110 + (int)(60 * heat)));
-        CCC_IwBlit(pDC, rc.right - bw - 1, rc.bottom - bh - 1, bw, bh, IW_BLUSH, IwA(110 + (int)(60 * heat)));
+        CCC_NkSpr(pDC, rc.left + 1, rc.bottom - bh - 1, bw, bh, NK5, CCC_NkA(110 + (int)(60 * nP4)));
+        CCC_NkSpr(pDC, rc.right - bw - 1, rc.bottom - bh - 1, bw, bh, NK5, CCC_NkA(110 + (int)(60 * nP4)));
     }
-
-    // 控件は1枚のM字スチルをアスペクト維持。潰して3枚重ねない。
     if (H >= 16 && W >= 24) {
         CRect bodyBox(rc.left + ox, rc.top + oy, rc.right - 1, rc.bottom - 1);
-        CCC_IwBlitContain(pDC, bodyBox, IW_BODY, aBody);
+        CCC_NkFit(pDC, bodyBox, NK1, nL1);
     }
-
     if (H >= 18 && W >= 28) {
         const int fs = min(min(H / 3, W / 3), 72);
-        CCC_IwBlit(pDC, rc.left + 1 + ox, rc.top + 1 + oy, fs, fs, IW_FACE, aFace);
+        CCC_NkSpr(pDC, rc.left + 1 + ox, rc.top + 1 + oy, fs, fs, NK0, nL2);
     }
-
     if (H >= 18 && W >= 24) {
         const int fw = max(10, W / 6), fh = max(12, H / 5);
-        CCC_IwBlit(pDC, rc.left + W / 3 - fw / 2, rc.bottom - fh - 1, fw, fh, IW_FLUID, IwA(150 + (int)(90 * iku)));
+        CCC_NkSpr(pDC, rc.left + W / 3 - fw / 2, rc.bottom - fh - 1, fw, fh, NK6, CCC_NkA(150 + (int)(90 * nP3)));
     }
-
-    // トイは裸体の秘所を避ける。右上へ小さく。
     if (H >= 16 && W >= 22) {
         const int rs = min(min(H / 4, W / 5), 40);
-        CCC_IwBlit(pDC, rc.right - rs - 1 + ox, rc.top + 1 + oy, rs, rs, IW_ROTOR,
-            IwA(180 + (int)(70 * heat)));
+        CCC_NkSpr(pDC, rc.right - rs - 1 + ox, rc.top + 1 + oy, rs, rs, NK7,
+            CCC_NkA(180 + (int)(70 * nP4)));
     }
     if (H >= 20 && W >= 30) {
         const int vs = min(min(H / 4, W / 5), 48);
-        CCC_IwBlit(pDC, rc.right - vs - 1 + ox, rc.top + H / 5 + oy, vs, vs, IW_VIBE,
-            IwA(170 + (int)(70 * heat)));
+        CCC_NkSpr(pDC, rc.right - vs - 1 + ox, rc.top + H / 5 + oy, vs, vs, NK8,
+            CCC_NkA(170 + (int)(70 * nP4)));
     }
-
     if (H >= 18 && W >= 32) {
         const int bs = max(12, min(24, H / 2));
-        CCC_IwBlit(pDC, rc.left + W / 2 - bs / 2, rc.top + 1, bs, bs, IW_BOW, IwA(150 + (int)(50 * breath)));
+        CCC_NkSpr(pDC, rc.left + W / 2 - bs / 2, rc.top + 1, bs, bs, NK4, CCC_NkA(150 + (int)(50 * nP0)));
     }
-
-    const BOOL havePhoto = CCC_IwEnsure(IW_BODY) || CCC_IwEnsure(IW_FACE);
-    const BOOL haveToy = CCC_IwEnsure(IW_ROTOR) || CCC_IwEnsure(IW_VIBE);
-    const BOOL haveFluid = CCC_IwEnsure(IW_FLUID);
-
-    // スチルが無いときだけ従来の描画デコ
-    if (!haveToy)
+    const BOOL nH0 = CCC_NkLd(NK1) || CCC_NkLd(NK0);
+    const BOOL nH1 = CCC_NkLd(NK7) || CCC_NkLd(NK8);
+    const BOOL nH2 = CCC_NkLd(NK6);
+    if (!nH1)
     {
         if (W >= 48 && H >= 22)
         {
@@ -5844,118 +5706,96 @@ void CCC_DrawInwoman(CDC* pDC, const CRect& rc, BOOL bAeroTrans)
             const int vw = max(4, vs / 3);
             const int vx = rc.right - vw / 2 - max(2, W / 18);
             const int vy = rc.top + H / 2;
-            CCC_DrawVibrator(pDC, vx, vy, vs, (double)t, twitch, breath, climax, bAeroTrans);
+            CCC_NkVb(pDC, vx, vy, vs, (double)t, nP1, nP0, nP2, bAeroTrans);
         }
     }
-    if (!haveFluid && !havePhoto)
+    if (!nH2 && !nH0)
     {
         if (H >= 28 && W >= 36)
-            CCC_DrawLoveFluid(pDC, rc, breath, twitch, climax, bAeroTrans);
-        if (W >= 72 && H >= 36 && iku > 0.45)
+            CCC_NkFl(pDC, rc, nP0, nP1, nP2, bAeroTrans);
+        if (W >= 72 && H >= 36 && nP3 > 0.45)
         {
             const int fs = min(H / 4, max(10, W / 9));
-            CCC_DrawAhegaoFace(pDC, rc.left + fs / 2 + 3, rc.top + fs / 2 + 2, fs, twitch, climax, bAeroTrans);
+            CCC_NkFc(pDC, rc.left + fs / 2 + 3, rc.top + fs / 2 + 2, fs, nP1, nP2, bAeroTrans);
         }
     }
-
-    // --- 汗 ---
     if (H >= 16)
     {
-        const int sx = rc.left + 4 + (int)(2 * sin(t / 70.0) + 1 * twitch);
+        const int sx = rc.left + 4 + (int)(2 * sin(t / 70.0) + 1 * nP1);
         const int sy = rc.top + 3 + (int)(3 * (0.5 + 0.5 * sin(t / 95.0)));
         CBrush bb(RGB(190, 225, 255));
         CBrush* ob = pDC->SelectObject(&bb);
         CGdiObject* op = pDC->SelectStockObject(NULL_PEN);
         pDC->Ellipse(sx - 1, sy - 2, sx + 2, sy + 2);
-        if (climax > 0.35)
+        if (nP2 > 0.35)
             pDC->Ellipse(sx + 5, sy + 3, sx + 8, sy + 7);
         if (op) pDC->SelectObject(op);
         pDC->SelectObject(ob);
         DrawShine(pDC, sx - 1, sy - 1, 1, 1);
     }
 }
-
-// aero=0 の窓本体（控件の隙間）。キャプション帯は呼ばない側で除く。
-static void CCC_DrawInwomanDlgBody(CDC* pDC, const CRect& rc)
+static void CCC_NkBody(CDC* pDC, const CRect& rc)
 {
-    if (!pDC || !CCC_IsInwoman() || rc.Width() < 48 || rc.Height() < 36)
+    if (!pDC || !CCC_Nk() || rc.Width() < 48 || rc.Height() < 36)
         return;
-
     const DWORD t = ::GetTickCount();
-    double breath = 0, twitch = 0, climax = 0;
-    CCC_InwomanPulse(t, breath, twitch, climax);
-    const double iku = (climax > twitch) ? climax : twitch;
-    const double heat = min(1.0, breath * 0.45 + twitch * 0.7 + climax * 0.85);
+    double nP0 = 0, nP1 = 0, nP2 = 0;
+    CCC_NkPh(t, nP0, nP1, nP2);
+    const double nP3 = (nP2 > nP1) ? nP2 : nP1;
+    const double nP4 = min(1.0, nP0 * 0.45 + nP1 * 0.7 + nP2 * 0.85);
     const int W = rc.Width(), H = rc.Height();
-    const int ox = (int)(3 * sin(t / 220.0) + 4 * twitch);
-    const int oy = (int)(-2 * climax);
-
-    if (!CCC_IsAeroEnabled() && climax > 0.18) {
-        FillRectAlpha(pDC, rc, RGB(255, 70, 120), (BYTE)(14 + (int)(36 * climax)));
+    const int ox = (int)(3 * sin(t / 220.0) + 4 * nP1);
+    const int oy = (int)(-2 * nP2);
+    if (!CCC_IsAeroEnabled() && nP2 > 0.18) {
+        FillRectAlpha(pDC, rc, RGB(255, 70, 120), (BYTE)(14 + (int)(36 * nP2)));
     }
-
-    // メインはM字スチル1枚。顔は左上の小さな表情、2枚目は右下サムネ。潰して重ねない。
     CRect bodyBox(rc);
     bodyBox.DeflateRect(max(6, W / 48), max(6, H / 40));
     bodyBox.OffsetRect(ox, oy);
-    CCC_IwBlitContain(pDC, bodyBox, IW_BODY, IwA(220 + (int)(25 * heat)));
-
+    CCC_NkFit(pDC, bodyBox, NK1, CCC_NkA(220 + (int)(25 * nP4)));
     const int face = min(min(W / 6, H / 4), 176);
-    CCC_IwBlit(pDC, rc.left + 10 + ox, rc.top + 10 + oy, face, face, IW_FACE,
-        IwA(225 + (int)(25 * iku)));
-
+    CCC_NkSpr(pDC, rc.left + 10 + ox, rc.top + 10 + oy, face, face, NK0,
+        CCC_NkA(225 + (int)(25 * nP3)));
     const int thumb = min(min(W / 5, H / 3), 220);
     CRect t2(rc.right - thumb - 10 + ox, rc.bottom - thumb - 10 + oy,
         rc.right - 10 + ox, rc.bottom - 10 + oy);
-    CCC_IwBlitContain(pDC, t2, IW_BODY2, IwA(200 + (int)(30 * heat)));
-
+    CCC_NkFit(pDC, t2, NK2, CCC_NkA(200 + (int)(30 * nP4)));
     const int vh = min(88, max(36, H / 8));
-    CCC_IwBlit(pDC, rc.right - vh - 8 + ox, rc.top + 8 + oy, vh, vh, IW_VIBE,
-        IwA(195 + (int)(50 * heat)));
-
+    CCC_NkSpr(pDC, rc.right - vh - 8 + ox, rc.top + 8 + oy, vh, vh, NK8,
+        CCC_NkA(195 + (int)(50 * nP4)));
     const int rh = min(56, max(28, H / 12));
-    CCC_IwBlit(pDC, rc.right - rh - 14 + ox, rc.top + vh + 12 + oy, rh, rh, IW_ROTOR,
-        IwA(200 + (int)(45 * heat)));
-
+    CCC_NkSpr(pDC, rc.right - rh - 14 + ox, rc.top + vh + 12 + oy, rh, rh, NK7,
+        CCC_NkA(200 + (int)(45 * nP4)));
     const int fh = max(28, H / 10);
     const int fw = max(32, W / 10);
-    CCC_IwBlit(pDC, rc.left + W / 2 - fw / 2 + ox, rc.bottom - fh - 4 + oy, fw, fh, IW_FLUID,
-        IwA(175 + (int)(70 * iku)));
-
-    CCC_IwBlit(pDC, rc.left, rc.bottom - max(18, H / 14), W, max(18, H / 14), IW_LACE,
-        IwA(140 + (int)(40 * heat)));
+    CCC_NkSpr(pDC, rc.left + W / 2 - fw / 2 + ox, rc.bottom - fh - 4 + oy, fw, fh, NK6,
+        CCC_NkA(175 + (int)(70 * nP3)));
+    CCC_NkSpr(pDC, rc.left, rc.bottom - max(18, H / 14), W, max(18, H / 14), NK3,
+        CCC_NkA(140 + (int)(40 * nP4)));
 }
-
-// GDI キャンバスへ裸体オーバーレイ。アクリルでもスチルは AlphaBlend できる（塗り潰しは DlgBody 側で弾く）。
-void CCC_DrawInwomanOnRect(CDC* pDC, const CRect& rc)
+void CCC_NkBlitR(CDC* pDC, const CRect& rc)
 {
-    if (!pDC || !CCC_IsInwoman())
+    if (!pDC || !CCC_Nk())
         return;
-    CCC_DrawInwomanDlgBody(pDC, rc);
+    CCC_NkBody(pDC, rc);
 }
-
-// クライアント本文（キャプション帯を除く）へ。ピアノロール等の GDI 面。
-void CCC_DrawInwomanOnClient(CDC* pDC, HWND hWnd)
+void CCC_NkBlitW(CDC* pDC, HWND hWnd)
 {
-    if (!pDC || !hWnd || !CCC_IsInwoman())
+    if (!pDC || !hWnd || !CCC_Nk())
         return;
     CRect r;
     ::GetClientRect(hWnd, &r);
     const int capH = CCC_GetCustomCaptionHeight(hWnd);
     if (capH > 0 && r.Height() > capH)
         r.top = capH;
-    CCC_DrawInwomanDlgBody(pDC, r);
+    CCC_NkBody(pDC, r);
 }
-
-// カスタムキャプション描画の前に本文へ淫女を重ねる。
 void CCC_CaptionPaintGdi(CDC& dc, HWND hDlg)
 {
-    CCC_DrawInwomanOnClient(&dc, hDlg);
+    CCC_NkBlitW(&dc, hDlg);
     CCC_CaptionPaint(dc, hDlg);
 }
-
-// ソリッドダイアログの WM_PAINT。本文を地色で塗ってから淫女。キャプション帯は塗らない。
-static void DlgPaintSolidInwoman(CWnd* pWnd)
+static void CCC_NkSolid(CWnd* pWnd)
 {
     CPaintDC dc(pWnd);
     CRect r;
@@ -5964,7 +5804,7 @@ static void DlgPaintSolidInwoman(CWnd* pWnd)
     if (capH > 0 && r.Height() > capH)
         r.top = capH;
     dc.FillSolidRect(&r, COLOR_DIALOG_BG);
-    CCC_DrawInwomanDlgBody(&dc, r);
+    CCC_NkBody(&dc, r);
 }
 
 // ============================================================================
@@ -5975,7 +5815,7 @@ static void DlgPaintSolidInwoman(CWnd* pWnd)
 template<typename DlgBase>
 static void DoSubclassChildControls(DlgBase* pDlg)
 {
-    CCC_StartInwomanTimer();
+    CCC_NkArm();
     HWND hc = ::GetWindow(pDlg->m_hWnd, GW_CHILD);
     while (hc)
     {
@@ -7007,7 +6847,7 @@ void CCustomEdit::PaintOpaqueClient(CDC& dc)
         dc.FillSolidRect(&r, COLOR_EDIT_BG);
 #endif
         DrawClientText(dc, r);
-        CCC_DrawInwoman(&dc, r, FALSE);
+        CCC_NkBlit(&dc, r, FALSE);
         dc.RestoreDC(savedDc);
         return;
     }
@@ -7017,7 +6857,7 @@ void CCustomEdit::PaintOpaqueClient(CDC& dc)
         CDC dcBuf;
         dcBuf.Attach(hdcBuf);
         DrawClientText(dcBuf, r);
-        CCC_DrawInwoman(&dcBuf, r, FALSE);
+        CCC_NkBlit(&dcBuf, r, FALSE);
         dcBuf.Detach();
     }
     ::BufferedPaintMakeOpaque(hBP, &r);
@@ -8070,14 +7910,12 @@ void CCustomStatic::DrawClient(CDC& dc)
 
     memDC.SelectObject(pOF);
 
-    // 淫女演出は文字描画の後。中央は塗らないので読みやすさは維持。
-    // (高さ20未満は CCC_DrawInwoman 側で主要デコをスキップ)
-    CCC_DrawInwoman(&memDC, rect, bTrans);
+    CCC_NkBlit(&memDC, rect, bTrans);
 
     if (bTrans)
         blitTrans(memDC.GetSafeHdc());
     else
-        CCC_InwomanBitBlt(dc.GetSafeHdc(), rw, rh, memDC.GetSafeHdc(), COLOR_DIALOG_BG);
+        CCC_NkBlt(dc.GetSafeHdc(), rw, rh, memDC.GetSafeHdc(), COLOR_DIALOG_BG);
 
     memDC.SelectObject(ob);
     memDC.DeleteDC();
@@ -8353,30 +8191,29 @@ void CCustomListBox::DrawItem(LPDRAWITEMSTRUCT lp)
     int ix = r.left + max(4, is / 2);
     int iy = r.top + (r.Height() - is) / 2;
 
-    if (CCC_IsInwoman()) {
-        // 花/星/ハートごまかし禁止 → バイブ／愛液／ピクン
-        double breath = 0, twitch = 0, climax = 0;
-        CCC_InwomanPulse(::GetTickCount(), breath, twitch, climax);
+    if (CCC_Nk()) {
+        double nP0 = 0, nP1 = 0, nP2 = 0;
+        CCC_NkPh(::GetTickCount(), nP0, nP1, nP2);
         const int cx = ix + is / 2, cy = iy + is / 2;
         switch (it) {
         case 0:
         case 2:
-            CCC_DrawVibrator(pDC, cx, cy, is, (double)::GetTickCount(), twitch, breath, climax, FALSE);
+            CCC_NkVb(pDC, cx, cy, is, (double)::GetTickCount(), nP1, nP0, nP2, FALSE);
             break;
         case 1:
         case 3:
-            CCC_DrawLoveFluid(pDC, CRect(ix, iy, ix + is, iy + is + is / 2), breath, twitch, climax, FALSE);
+            CCC_NkFl(pDC, CRect(ix, iy, ix + is, iy + is + is / 2), nP0, nP1, nP2, FALSE);
             break;
         }
     } else
         DrawRowDeco(pDC, ix, iy, is, it, (lp->itemState & ODS_SELECTED) != 0);
 
     if (lp->itemState & ODS_SELECTED) {
-        if (CCC_IsInwoman()) {
-            double breath = 0, twitch = 0, climax = 0;
-            CCC_InwomanPulse(::GetTickCount(), breath, twitch, climax);
-            CCC_DrawVibrator(pDC, r.right - max(10, is + 4), r.top + r.Height() / 2,
-                max(8, is * 2 / 3), (double)::GetTickCount(), twitch, breath, climax, FALSE);
+        if (CCC_Nk()) {
+            double nP0 = 0, nP1 = 0, nP2 = 0;
+            CCC_NkPh(::GetTickCount(), nP0, nP1, nP2);
+            CCC_NkVb(pDC, r.right - max(10, is + 4), r.top + r.Height() / 2,
+                max(8, is * 2 / 3), (double)::GetTickCount(), nP1, nP0, nP2, FALSE);
         } else {
             DrawThemeMotif(pDC, CRect(r.right - max(16, is + 6), r.top + 2, r.right - 3, r.bottom - 2), CCC_UiTheme().accent);
         }
@@ -8644,7 +8481,7 @@ BOOL CCustomComboBox::OnEraseBkgnd(CDC* pDC)
 
 // 閉じた選択欄のオーナードロー本体。メモリDCに描いてから blit。
 // bTrans（Aero かつ Blur 子でない）は黒下地+α半透明。それ以外は不透明 COLOR_COMBO_BG。
-// 最後: 透過は ClearDestBlt（黒クロマ抜き）、不透明は InwomanBitBlt。
+// 最後: 透過は ClearDestBlt（黒クロマ抜き）、不透明は転送。
 // クロマ blit をガラス親で使うと未描画が穴。HostNeedsChildOpaque 時は OnPaint 側で MakeOpaque。
 // CBS_DROPDOWN/SIMPLE は編集欄テキスト優先（CurSel で上書きすると手入力が消える）。
 void CCustomComboBox::PaintClient(CDC& dc)
@@ -8686,17 +8523,16 @@ void CCustomComboBox::PaintClient(CDC& dc)
     CCC_FillThemedPlate(&mDC, rB, CCC_UiTheme().accent2, FALSE);
     CCC_StrokeThemedPlate(&mDC, rB, FALSE, FALSE);
 
-    // 淫女: リボンごまかし→震えるバイブ。通常: 上品リボン
     {
         int cy2 = rB.Height() / 2 + rB.top;
         int bw = min(rB.Width() - 4, CCC_ScaleDpi(16, dpi));
         const int bh = CCC_ScaleDpi(5, dpi);
         const int cxB = rB.CenterPoint().x;
-        if (CCC_IsInwoman()) {
-            double breath = 0, twitch = 0, climax = 0;
-            CCC_InwomanPulse(::GetTickCount(), breath, twitch, climax);
+        if (CCC_Nk()) {
+            double nP0 = 0, nP1 = 0, nP2 = 0;
+            CCC_NkPh(::GetTickCount(), nP0, nP1, nP2);
             const int vs = max(10, rB.Height() - 2);
-            CCC_DrawVibrator(&mDC, cxB, cy2, vs, (double)::GetTickCount(), twitch, breath, climax, bTrans);
+            CCC_NkVb(&mDC, cxB, cy2, vs, (double)::GetTickCount(), nP1, nP0, nP2, bTrans);
         } else {
             DrawThemeBow(&mDC, CRect(cxB - bw / 2, cy2 - bh, cxB + bw / 2, cy2 + bh), COLOR_BOW);
             if (GetDroppedState() && CCC_ThemeSilk())
@@ -8705,10 +8541,10 @@ void CCustomComboBox::PaintClient(CDC& dc)
         }
     }
 
-    if (CCC_IsInwoman()) {
-        double breath = 0, twitch = 0, climax = 0;
-        CCC_InwomanPulse(::GetTickCount(), breath, twitch, climax);
-        CCC_DrawLoveFluid(&mDC, r, breath, twitch, climax, bTrans);
+    if (CCC_Nk()) {
+        double nP0 = 0, nP1 = 0, nP2 = 0;
+        CCC_NkPh(::GetTickCount(), nP0, nP1, nP2);
+        CCC_NkFl(&mDC, r, nP0, nP1, nP2, bTrans);
     } else if (CCC_ThemeFaceOf().gloss > 0) {
         DrawSparkle(&mDC, r.right - CCC_ScaleDpi(8, dpi), r.top + CCC_ScaleDpi(8, dpi), CCC_ScaleDpi(4, dpi), CCC_UiTheme().accent2);
     }
@@ -8761,11 +8597,11 @@ void CCustomComboBox::PaintClient(CDC& dc)
     DrawFitControlText(&mDC, rt, st, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX, 0.50f);
     mDC.SelectObject(pOF);
 
-    CCC_DrawInwoman(&mDC, r, bTrans);
+    CCC_NkBlit(&mDC, r, bTrans);
 
     // 透過: 黒クロマ抜き。不透明: 背景色キーの BitBlt（ガラス親では OnPaint が MakeOpaque）
     if (bTrans) CCC_ClearDestBlt(dc.GetSafeHdc(), 0, 0, r.Width(), r.Height(), mDC.GetSafeHdc(), 0, 0, RGB(0, 0, 0));
-    else CCC_InwomanBitBlt(dc.GetSafeHdc(), r.Width(), r.Height(), mDC.GetSafeHdc(), COLOR_COMBO_BG);
+    else CCC_NkBlt(dc.GetSafeHdc(), r.Width(), r.Height(), mDC.GetSafeHdc(), COLOR_COMBO_BG);
 
     mDC.SelectObject(ob);
     mB.DeleteObject();
@@ -8876,14 +8712,14 @@ void CCustomComboBox::DrawItem(LPDRAWITEMSTRUCT lp)
         if (is > isMax) is = isMax;
         int ix = r.left + max(4, is / 2);
         int iy = r.top + (r.Height() - is) / 2;
-        if (CCC_IsInwoman()) {
-            double breath = 0, twitch = 0, climax = 0;
-            CCC_InwomanPulse(::GetTickCount(), breath, twitch, climax);
+        if (CCC_Nk()) {
+            double nP0 = 0, nP1 = 0, nP2 = 0;
+            CCC_NkPh(::GetTickCount(), nP0, nP1, nP2);
             const int cx = ix + is / 2, cy = iy + is / 2;
             if (it == 0 || it == 2)
-                CCC_DrawVibrator(pDC, cx, cy, is, (double)::GetTickCount(), twitch, breath, climax, FALSE);
+                CCC_NkVb(pDC, cx, cy, is, (double)::GetTickCount(), nP1, nP0, nP2, FALSE);
             else
-                CCC_DrawLoveFluid(pDC, CRect(ix, iy, ix + is, iy + is + is / 2), breath, twitch, climax, FALSE);
+                CCC_NkFl(pDC, CRect(ix, iy, ix + is, iy + is + is / 2), nP0, nP1, nP2, FALSE);
         } else
             DrawRowDeco(pDC, ix, iy, is, it, (lp->itemState & ODS_SELECTED) != 0);
     }
@@ -9462,7 +9298,7 @@ void CCustomSliderCtrl::PreSubclassWindow()
 
 // メモリDCへ DrawSlider。HostNeedsChildOpaque ならクロマ禁止（穴抜き禁止）。
 // 透過: クロマキー塗り→ BlitChromaCached（Win11）/ BlitChromaTrans。
-// 不透明: COLOR_DIALOG_BG 塗り→ InwomanBitBlt。クロマ blit を不透明ホストで使うと縁が溶ける。
+// 不透明: COLOR_DIALOG_BG 塗り→転送。クロマ blit を不透明ホストで使うと縁が溶ける。
 void CCustomSliderCtrl::PaintClient(CDC& dc)
 {
     CRect r;
@@ -9492,7 +9328,7 @@ void CCustomSliderCtrl::PaintClient(CDC& dc)
     {
         mDC.FillSolidRect(&r, CCC_AERO_CHROMA_KEY);
         DrawSlider(&mDC);
-        CCC_DrawInwoman(&mDC, r, TRUE);
+        CCC_NkBlit(&mDC, r, TRUE);
 #if CCUSTOM_AERO_SUPPORT
         if (CCC_IsAeroEnabled() && CCC_IsWin11())
             CCC_BlitChromaCached(dc.GetSafeHdc(), 0, 0, rw, rh,
@@ -9505,8 +9341,8 @@ void CCustomSliderCtrl::PaintClient(CDC& dc)
     {
         mDC.FillSolidRect(&r, COLOR_DIALOG_BG);
         DrawSlider(&mDC);
-        CCC_DrawInwoman(&mDC, r, FALSE);
-        CCC_InwomanBitBlt(dc.GetSafeHdc(), rw, rh, mDC.GetSafeHdc(), COLOR_DIALOG_BG);
+        CCC_NkBlit(&mDC, r, FALSE);
+        CCC_NkBlt(dc.GetSafeHdc(), rw, rh, mDC.GetSafeHdc(), COLOR_DIALOG_BG);
     }
     mDC.SelectObject(ob);
     mDC.DeleteDC();
@@ -9524,11 +9360,11 @@ void CCustomSliderCtrl::PaintOpaqueIntoBuffer(HDC hdcBuf)
     mem.Attach(hdcBuf);
     mem.FillSolidRect(&r, COLOR_DIALOG_BG);
     DrawSlider(&mem);
-    CCC_DrawInwoman(&mem, r, FALSE);
+    CCC_NkBlit(&mem, r, FALSE);
     mem.Detach();
 }
 
-// ガラス親向け α=255。BeginBufferedPaint+MakeOpaque。失敗時はメモリDC+InwomanBitBlt。
+// ガラス親向け α=255。BeginBufferedPaint+MakeOpaque。失敗時はメモリDCへ転送。
 // クロマ blit は使わない（未描画が透明穴になる）。
 void CCustomSliderCtrl::PaintOpaqueClient(CDC& dc)
 {
@@ -9548,8 +9384,8 @@ void CCustomSliderCtrl::PaintOpaqueClient(CDC& dc)
         CBitmap* old = mem.SelectObject(&bmp);
         mem.FillSolidRect(0, 0, r.Width(), r.Height(), COLOR_DIALOG_BG);
         DrawSlider(&mem);
-        CCC_DrawInwoman(&mem, r, FALSE);
-        CCC_InwomanBitBlt(dc.GetSafeHdc(), r.Width(), r.Height(), mem.GetSafeHdc(), COLOR_DIALOG_BG);
+        CCC_NkBlit(&mem, r, FALSE);
+        CCC_NkBlt(dc.GetSafeHdc(), r.Width(), r.Height(), mem.GetSafeHdc(), COLOR_DIALOG_BG);
         mem.SelectObject(old);
         return;
     }
@@ -9557,7 +9393,7 @@ void CCustomSliderCtrl::PaintOpaqueClient(CDC& dc)
     mem.Attach(hdcBuf);
     mem.FillSolidRect(&r, COLOR_DIALOG_BG);
     DrawSlider(&mem);
-    CCC_DrawInwoman(&mem, r, FALSE);
+    CCC_NkBlit(&mem, r, FALSE);
     mem.Detach();
     ::BufferedPaintMakeOpaque(hBP, &r);
     ::EndBufferedPaint(hBP, TRUE);
@@ -10557,7 +10393,7 @@ void CCustomRangeSliderCtrl::GetSelection(int& mn, int& mx) const
 }
 
 // スライダーと同様。キャプションのみアクリルのホストでは穴抜き禁止（HostNeeds で bTrans オフ）。
-// 透過はクロマ blit、不透明は InwomanBitBlt。
+// 透過はクロマ blit、不透明は転送。
 void CCustomRangeSliderCtrl::PaintClient(CDC& dc)
 {
     CRect r;
@@ -10588,7 +10424,7 @@ void CCustomRangeSliderCtrl::PaintClient(CDC& dc)
     {
         mDC.FillSolidRect(&r, CCC_AERO_CHROMA_KEY);
         DrawRangeSlider(&mDC);
-        CCC_DrawInwoman(&mDC, r, TRUE);
+        CCC_NkBlit(&mDC, r, TRUE);
 #if CCUSTOM_AERO_SUPPORT
         if (CCC_IsAeroEnabled() && CCC_IsWin11())
             CCC_BlitChromaCached(dc.GetSafeHdc(), 0, 0, rw, rh,
@@ -10602,8 +10438,8 @@ void CCustomRangeSliderCtrl::PaintClient(CDC& dc)
     {
         mDC.FillSolidRect(&r, COLOR_DIALOG_BG);
         DrawRangeSlider(&mDC);
-        CCC_DrawInwoman(&mDC, r, FALSE);
-        CCC_InwomanBitBlt(dc.GetSafeHdc(), rw, rh, mDC.GetSafeHdc(), COLOR_DIALOG_BG);
+        CCC_NkBlit(&mDC, r, FALSE);
+        CCC_NkBlt(dc.GetSafeHdc(), rw, rh, mDC.GetSafeHdc(), COLOR_DIALOG_BG);
     }
     mDC.SelectObject(ob);
     mDC.DeleteDC();
@@ -10620,7 +10456,7 @@ void CCustomRangeSliderCtrl::PaintOpaqueIntoBuffer(HDC hdcBuf)
     mem.Attach(hdcBuf);
     mem.FillSolidRect(&r, COLOR_DIALOG_BG);
     DrawRangeSlider(&mem);
-    CCC_DrawInwoman(&mem, r, FALSE);
+    CCC_NkBlit(&mem, r, FALSE);
     mem.Detach();
 }
 
@@ -10643,8 +10479,8 @@ void CCustomRangeSliderCtrl::PaintOpaqueClient(CDC& dc)
         CBitmap* old = mem.SelectObject(&bmp);
         mem.FillSolidRect(0, 0, r.Width(), r.Height(), COLOR_DIALOG_BG);
         DrawRangeSlider(&mem);
-        CCC_DrawInwoman(&mem, r, FALSE);
-        CCC_InwomanBitBlt(dc.GetSafeHdc(), r.Width(), r.Height(), mem.GetSafeHdc(), COLOR_DIALOG_BG);
+        CCC_NkBlit(&mem, r, FALSE);
+        CCC_NkBlt(dc.GetSafeHdc(), r.Width(), r.Height(), mem.GetSafeHdc(), COLOR_DIALOG_BG);
         mem.SelectObject(old);
         return;
     }
@@ -10652,7 +10488,7 @@ void CCustomRangeSliderCtrl::PaintOpaqueClient(CDC& dc)
     mem.Attach(hdcBuf);
     mem.FillSolidRect(&r, COLOR_DIALOG_BG);
     DrawRangeSlider(&mem);
-    CCC_DrawInwoman(&mem, r, FALSE);
+    CCC_NkBlit(&mem, r, FALSE);
     mem.Detach();
     ::BufferedPaintMakeOpaque(hBP, &r);
     ::EndBufferedPaint(hBP, TRUE);
@@ -13794,7 +13630,7 @@ void CCustomStandardButton::OnTimer(UINT_PTR nIDEvent)
         UpdateAnimTimer(); // 残点ゼロ＆非ホバーなら停止
         Invalidate(FALSE);
         // 終了ボタンは UpdateWindow 連打で BN_CLICKED が落ちる
-        if (!(CCC_IsInwoman() && CCC_IwIsQuitCtrl(m_hWnd)))
+        if (!(CCC_Nk() && CCC_NkSkip(m_hWnd)))
             UpdateWindow();
         return;
     }
@@ -13975,7 +13811,7 @@ HBRUSH CCustomStandardButton::CtlColor(CDC*, UINT)
 
 // ボタン本体。メモリ DC にサテン/グラデ/ジェリー/スパークル/アイコン/文字。
 // アクリル透過時はクロマ塗り＋薄いティントのみ（白枠は不透明板に見える）。
-// 無効でも質感は描き、最後にグレーヴェール。隠し淫女は短く重ねるだけ。
+// 無効でも質感は描き、最後にグレーヴェール。
 // 最後に BitBlt またはクロマ合成。キャプション帯のグリフ専用文字は出さない。
 void CCustomStandardButton::PaintClient(CDC& dc, const CRect& r)
 {
@@ -14285,19 +14121,19 @@ void CCustomStandardButton::PaintClient(CDC& dc, const CRect& r)
     }
     mDC.SelectObject(pOF);
 
-    if (!bD && !(CCC_IsInwoman() && CCC_IwIsQuitCtrl(m_hWnd)))
-        CCC_DrawInwoman(&mDC, r, bAeroTrans); // 淫女モード演出
+    if (!bD && !(CCC_Nk() && CCC_NkSkip(m_hWnd)))
+        CCC_NkBlit(&mDC, r, bAeroTrans);
 
 #if CCUSTOM_AERO_SUPPORT
     if (bAeroTrans) {
         int ox = 0, oy = 0;
-        CCC_InwomanGetShake(ox, oy);
+        CCC_NkOff(ox, oy);
         CCC_BlitChromaTrans(dc.GetSafeHdc(), ox, oy, r.Width(), r.Height(),
             mDC.GetSafeHdc(), 0, 0, CCC_AERO_CHROMA_KEY);
     } else
 #endif
     {
-        CCC_InwomanBitBlt(dc.GetSafeHdc(), r.Width(), r.Height(), mDC.GetSafeHdc(), COLOR_BUTTON_BG);
+        CCC_NkBlt(dc.GetSafeHdc(), r.Width(), r.Height(), mDC.GetSafeHdc(), COLOR_BUTTON_BG);
     }
     mDC.SelectObject(ob);
     mB.DeleteObject();
@@ -14532,7 +14368,7 @@ void CCustomStandardButton::OnEnable(BOOL b)
 
 void CCustomStandardButton::OnLButtonDown(UINT nFlags, CPoint point)
 {
-    if (CCC_IsInwoman() && CCC_IwIsQuitCtrl(m_hWnd)) {
+    if (CCC_Nk() && CCC_NkSkip(m_hWnd)) {
         SetCapture();
         SendMessage(BM_SETSTATE, TRUE, 0);
         return;
@@ -14542,7 +14378,7 @@ void CCustomStandardButton::OnLButtonDown(UINT nFlags, CPoint point)
 
 void CCustomStandardButton::OnLButtonUp(UINT nFlags, CPoint point)
 {
-    if (CCC_IsInwoman() && CCC_IwIsQuitCtrl(m_hWnd)) {
+    if (CCC_Nk() && CCC_NkSkip(m_hWnd)) {
         if (GetCapture() == this)
             ReleaseCapture();
         SendMessage(BM_SETSTATE, FALSE, 0);
@@ -14776,14 +14612,14 @@ void CCustomCheckBox::OnPaint()
     }
 #endif
 
-    // 非透過時はダブルバッファ化してちらつきを防ぐ(淫女モードの毎フレーム再描画対策)
+    // 非透過時はダブルバッファ化してちらつきを防ぐ
     CDC mem;
     if (!mem.CreateCompatibleDC(&dc)) { OnDrawLayer(&dc, r); return; }
     CBitmap bmp;
     if (!bmp.CreateCompatibleBitmap(&dc, r.Width(), r.Height())) { OnDrawLayer(&dc, r); return; }
     CBitmap* ob = mem.SelectObject(&bmp);
     OnDrawLayer(&mem, r);
-    CCC_InwomanBitBlt(dc.GetSafeHdc(), r.Width(), r.Height(), mem.GetSafeHdc(), COLOR_DIALOG_BG);
+    CCC_NkBlt(dc.GetSafeHdc(), r.Width(), r.Height(), mem.GetSafeHdc(), COLOR_DIALOG_BG);
     mem.SelectObject(ob);
 }
 
@@ -14830,7 +14666,6 @@ static void CCC_CompositeTrans(HWND hWnd, BOOL bAeroMode, CDC& destDC, const CRe
 // 本体描画。flat/pushlike はボタン塗り、通常はローズ枠＋レ点。
 // バウンス中はレ点を枠からはみ出して膨らませる（隣にはみ出さないようクランプ）。
 // キャプション帯の「メインに追従」は白文字（暗色だと黒帯に溶ける）。
-// 隠し淫女は短く重ねるだけ。
 void CCustomCheckBox::OnDrawLayer(CDC* pDC, CRect rect)
 {
     const int rw = rect.Width();
@@ -14947,7 +14782,7 @@ void CCustomCheckBox::OnDrawLayer(CDC* pDC, CRect rect)
             if (!m_bIsFlatStyle) rf.left += 20; else rf.DeflateRect(3, 3);
             dc.DrawFocusRect(&rf);
         }
-        CCC_DrawInwoman(&dc, CRect(0, 0, rw, rh), CCC_UseTransPaint(m_hWnd, m_bAeroMode));
+        CCC_NkBlit(&dc, CRect(0, 0, rw, rh), CCC_UseTransPaint(m_hWnd, m_bAeroMode));
     });
 }
 
@@ -15002,7 +14837,7 @@ void CCustomRadioButton::OnLButtonUp(UINT n, CPoint p)
     }
 }
 
-// 丸枠＋内側ドット。チェックと同じガラス／淫女／バウンス経路。
+// 丸枠＋内側ドット。チェックと同じガラス／バウンス経路。
 void CCustomRadioButton::OnDrawLayer(CDC* pDC, CRect rect)
 {
     const int rw = rect.Width();
@@ -15100,7 +14935,7 @@ void CCustomRadioButton::OnDrawLayer(CDC* pDC, CRect rect)
             if (!m_bIsFlatStyle) rf.left += 20; else rf.DeflateRect(3, 3);
             dc.DrawFocusRect(&rf);
         }
-        CCC_DrawInwoman(&dc, CRect(0, 0, rw, rh), CCC_UseTransPaint(m_hWnd, m_bAeroMode));
+        CCC_NkBlit(&dc, CRect(0, 0, rw, rh), CCC_UseTransPaint(m_hWnd, m_bAeroMode));
     });
 }
 
@@ -15440,7 +15275,6 @@ void CCustomProgressCtrl::SetAeroMode(BOOL b)
 // 上 1/3 を明るく、下 1/3 を落とす縦陰影。先端にハイライト玉。
 // ホバー時のみ Soft3D ジェム。％は縁取り白文字（グラデ上でも読む）。
 // 透過時はドロップシャドウを描かない（半透明塗りが穴になる）。
-// 隠し淫女は最後に短く重ねるだけ。
 void CCustomProgressCtrl::DrawProgressLayer(CDC& dc, const CRect& r, BOOL bAeroTrans)
 {
 	if (r.Width() <= 0 || r.Height() <= 0) return;
@@ -15448,7 +15282,7 @@ void CCustomProgressCtrl::DrawProgressLayer(CDC& dc, const CRect& r, BOOL bAeroT
 	CRect track = r;
 	track.DeflateRect(2, 3);
 	if (track.Width() < 4 || track.Height() < 4) {
-		CCC_DrawInwoman(&dc, r, bAeroTrans);
+		CCC_NkBlit(&dc, r, bAeroTrans);
 		return;
 	}
 	const CCC_ThemeFace& face = CCC_ThemeFaceOf();
@@ -15526,20 +15360,29 @@ void CCustomProgressCtrl::DrawProgressLayer(CDC& dc, const CRect& r, BOOL bAeroT
 		const int yMid1 = fill.top + (std::max)(1, h / 3);
 		const int yMid2 = fill.top + (std::max)(2, h * 2 / 3);
 		const int yBot = fill.bottom;
-		for (int x = fill.left; x < fill.right; ++x) {
-			const double tx = (fill.Width() <= 1) ? 1.0
-				: (double)(x - fill.left) / (double)(fill.Width() - 1);
-			COLORREF base;
-			if (tx < 0.5)
-				base = ProgLerp(peach, midCol, tx * 2.0);
-			else
-				base = ProgLerp(midCol, fill1, (tx - 0.5) * 2.0);
-			if (face.fill == CCC_FACE_FILL_STRIPE && ((((x - fill.left) + (fill.top)) / 7) & 1))
-				base = ProgLighten(base, 12);
-			dc.FillSolidRect(x, yTop, 1, yMid1 - yTop, ProgLighten(base, 28));
-			dc.FillSolidRect(x, yMid1, 1, yMid2 - yMid1, base);
-			dc.FillSolidRect(x, yMid2, 1, yBot - yMid2, ProgDarken(base, 22));
-		}
+		/* 1px ごとの FillSolidRect は ExtTextOut で、読込窓がプラグイン毎に
+		   ここから戻らずメイン画面が出ない。横グラデは帯 3 本。 */
+		auto bandH = [&](int y0, int y1, COLORREF c0, COLORREF c1) {
+			if (y1 <= y0 || fill.right <= fill.left) return;
+			TRIVERTEX tv[2];
+			tv[0].x = fill.left; tv[0].y = y0;
+			tv[0].Red = (COLOR16)(GetRValue(c0) << 8);
+			tv[0].Green = (COLOR16)(GetGValue(c0) << 8);
+			tv[0].Blue = (COLOR16)(GetBValue(c0) << 8);
+			tv[0].Alpha = 0;
+			tv[1].x = fill.right; tv[1].y = y1;
+			tv[1].Red = (COLOR16)(GetRValue(c1) << 8);
+			tv[1].Green = (COLOR16)(GetGValue(c1) << 8);
+			tv[1].Blue = (COLOR16)(GetBValue(c1) << 8);
+			tv[1].Alpha = 0;
+			GRADIENT_RECT gr;
+			gr.UpperLeft = 0;
+			gr.LowerRight = 1;
+			::GradientFill(dc.GetSafeHdc(), tv, 2, &gr, 1, GRADIENT_FILL_RECT_H);
+		};
+		bandH(yTop, yMid1, ProgLighten(peach, 28), ProgLighten(fill1, 28));
+		bandH(yMid1, yMid2, peach, fill1);
+		bandH(yMid2, yBot, ProgDarken(peach, 22), ProgDarken(fill1, 22));
 
 		if (face.gloss >= 6) {
 			CRect gloss = fill;
@@ -15647,7 +15490,7 @@ void CCustomProgressCtrl::DrawProgressLayer(CDC& dc, const CRect& r, BOOL bAeroT
 	dc.SelectObject(oldPen);
 	dc.SelectObject(oldBr);
 
-	CCC_DrawInwoman(&dc, r, bAeroTrans);
+	CCC_NkBlit(&dc, r, bAeroTrans);
 }
 
 // クライアント全体へ DrawProgressLayer。矩形版へ委譲。
@@ -15660,7 +15503,7 @@ void CCustomProgressCtrl::PaintClient(CDC& dc)
 }
 
 // メモリ DC にキャンディバーを描き、透過ならクロマ、通常は BitBlt。
-// 隠し淫女は DrawProgressLayer 末尾。親アクリルの穴を開けない。
+// DrawProgressLayer 末尾。親アクリルの穴を開けない。
 void CCustomProgressCtrl::PaintClient(CDC& dc, const CRect& r)
 {
 	const int rw = r.Width();
@@ -15764,6 +15607,14 @@ void CCustomProgressCtrl::OnPaint()
 	CPaintDC dc(this);
 	CRect r;
 	GetClientRect(&r);
+	/* プラグイン読込中の EndBufferedPaint はテーマアニメが戻らず、
+	   読込窓のままメイン画面が出ない。ここでは素描き。 */
+	extern int g_oggKpiLoading;
+	if (g_oggKpiLoading) {
+		if (r.Width() > 0 && r.Height() > 0)
+			PaintClient(dc);
+		return;
+	}
 #if CCUSTOM_AERO_SUPPORT
 	if (CCC_HostNeedsChildOpaque(m_hWnd))
 	{
@@ -16032,8 +15883,8 @@ void CCustomSysPerfCtrl::OnDestroy()
 	CWnd::OnDestroy();
 }
 
-// ツールチップ Relay。ダイアログ側は F1 ヘルプ。隠し演出入力は短く見るだけ。
-// ツールチップ Relay。F1 はヘルプ。隠し演出は短く見るだけ。
+// ツールチップ Relay。ダイアログ側は F1 ヘルプ。
+// ツールチップ Relay。F1 はヘルプ。
 BOOL CCustomSysPerfCtrl::PreTranslateMessage(MSG* pMsg)
 {
 	if (m_tip.GetSafeHwnd())
@@ -16652,7 +16503,7 @@ void CCustomSysPerfCtrl::DrawPerfLayer(CDC& dc, const CRect& r, BOOL bAeroTrans)
 			DrawSoftJkThumb(&dc, CRect(r.right - 18, r.top + 4, r.right - 4, r.top + 18),
 				(int)(::GetTickCount64() / 80), TRUE, 5.f);
 	}
-	CCC_DrawInwoman(&dc, r, bAeroTrans);
+	CCC_NkBlit(&dc, r, bAeroTrans);
 }
 
 // クライアント全体へ DrawPerfLayer。矩形版へ委譲。
@@ -17177,7 +17028,7 @@ void CCustomGroupBox::DrawGroupBox(CDC* pDC, CRect& rect)
     CString t;
     GetWindowText(t);
 
-    // 常にダブルバッファ: 淫女タイマーの Invalidate(FALSE) でもちらつかない
+    // 常にダブルバッファ: Invalidate(FALSE) でもちらつかない
     CDC memDC;
     if (!memDC.CreateCompatibleDC(pDC)) {
         if (!bOpaqueFrame) {
@@ -17212,7 +17063,7 @@ void CCustomGroupBox::DrawGroupBox(CDC* pDC, CRect& rect)
     CFont* pF = GetFont();
     if (pF) memDC.SelectObject(pF);
     CCC_DrawGroupBoxFrame(memDC, CRect(0, 0, rw, rh), t, bAeroTrans);
-    CCC_DrawInwoman(&memDC, CRect(0, 0, rw, rh), bAeroTrans);
+    CCC_NkBlit(&memDC, CRect(0, 0, rw, rh), bAeroTrans);
 
     CCC_BlitGroupBoxMinusSiblings(m_hWnd, pDC->GetSafeHdc(), rect.left, rect.top,
         rw, rh, memDC.GetSafeHdc(), bOpaqueFrame, bAeroTrans);
@@ -17423,8 +17274,8 @@ void CCustomDialog::OnPaint()
     }
     if (m_bAeroEnabled)
         DlgOnPaintAero(this, m_bAeroEnabled);
-    else if (CCC_IsInwoman())
-        DlgPaintSolidInwoman(this);
+    else if (CCC_Nk())
+        CCC_NkSolid(this);
     else
         CDialogEx::OnPaint();
 }
@@ -18027,7 +17878,6 @@ private:
     // 子を不透明面として dest へ出す。ガラス（ExtendFrame -1）では必須。
     // クロマボタンはクロマ合成。通常は共有 DIB を α=255 にして AlphaBlend。
     // 失敗時 BeginBufferedPaint + MakeOpaque。部分 MakeOpaque は周囲が穴になる。
-    // 淫女シェイク時だけ AlphaBlend 経路でずらす（短く、ホットキーは書かない）。
     void PaintOpaque(HWND hWnd, HDC hDestDC)
     {
         RECT rect = {};
@@ -18063,15 +17913,15 @@ private:
                 ::FillRect(m_dib.hdcDib, &zr, (HBRUSH)brush.GetSafeHandle());
                 PaintClientIntoBuffer(hWnd, m_dib.hdcDib);
                 m_dib.MakeRectOpaque(0, 0, width, height);
-                if (CCC_IsInwoman()) {
+                if (CCC_Nk()) {
                     int ox = 0, oy = 0;
-                    CCC_InwomanGetShake(ox, oy);
+                    CCC_NkOff(ox, oy);
                     if (ox || oy) {
                         CBrush brush(m_clrBg);
                         RECT zr = { 0, 0, width, height };
                         ::FillRect(hDestDC, &zr, (HBRUSH)brush.GetSafeHandle());
                     }
-                    CCC_InwomanAlphaBlend(hDestDC, width, height, m_dib.hdcDib);
+                    CCC_NkAb(hDestDC, width, height, m_dib.hdcDib);
                     return;
                 }
                 const BLENDFUNCTION bf = { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
@@ -18111,7 +17961,7 @@ private:
         CBrush brush(m_clrBg);
         dcMem.FillRect(CRect(0, 0, width, height), &brush);
         PaintClientIntoBuffer(hWnd, dcMem.GetSafeHdc());
-        CCC_InwomanBitBlt(dcDest.GetSafeHdc(), width, height, dcMem.GetSafeHdc(), m_clrBg);
+        CCC_NkBlt(dcDest.GetSafeHdc(), width, height, dcMem.GetSafeHdc(), m_clrBg);
 
         dcMem.SelectObject(pOld);
         dcDest.Detach();
@@ -19230,8 +19080,8 @@ static void CCC_PaintOpaqueBodyBelowCaption(CDC& dc, CWnd* pDlg, CBrush& brDlg)
         if (fill.IntersectRect(&body, &clip) && fill.Width() > 0 && fill.Height() > 0)
             CCC_FillRectOpaqueBits(dc.GetSafeHdc(), fill, COLOR_DIALOG_BG);
     }
-    if (CCC_IsInwoman())
-        CCC_DrawInwomanDlgBody(&dc, body);
+    if (CCC_Nk())
+        CCC_NkBody(&dc, body);
     dc.RestoreDC(saved);
 #else
     UNREFERENCED_PARAMETER(dc);
@@ -22989,11 +22839,11 @@ BOOL CCustomBlurDialogBase::OnTtnNeedText(UINT, NMHDR*, LRESULT* pResult)
     return FALSE;
 }
 
-// ツールチップ Relay。ダイアログ側は F1 ヘルプ。隠し演出入力は短く見るだけ。
+// ツールチップ Relay。ダイアログ側は F1 ヘルプ。
 // キャプションボタンのチップは m_capTip.RelayEvent。
 BOOL CCustomBlurDialogBase::PreTranslateMessage(MSG* pMsg)
 {
-    if (CCC_InwomanHotkey(pMsg, this))
+    if (CCC_NkMsg(pMsg, this))
         return TRUE;
     if (pMsg && pMsg->message == WM_KEYDOWN && pMsg->wParam == VK_F1)
     {
@@ -23115,8 +22965,8 @@ void CCustomDialogEx::OnPaint()
     }
     if (m_bAeroEnabled)
         DlgOnPaintAero(this, m_bAeroEnabled);
-    else if (CCC_IsInwoman())
-        DlgPaintSolidInwoman(this);
+    else if (CCC_Nk())
+        CCC_NkSolid(this);
     else
         CDialogEx::OnPaint();
 }
@@ -23920,11 +23770,11 @@ BOOL CCustomBlurDialogExBase::OnTtnNeedText(UINT, NMHDR*, LRESULT* pResult)
     return FALSE;
 }
 
-// ツールチップ Relay。ダイアログ側は F1 ヘルプ。隠し演出入力は短く見るだけ。
+// ツールチップ Relay。ダイアログ側は F1 ヘルプ。
 // キャプションボタンのチップは m_capTip.RelayEvent。
 BOOL CCustomBlurDialogExBase::PreTranslateMessage(MSG* pMsg)
 {
-    if (CCC_InwomanHotkey(pMsg, this))
+    if (CCC_NkMsg(pMsg, this))
         return TRUE;
     if (pMsg && pMsg->message == WM_KEYDOWN && pMsg->wParam == VK_F1)
     {

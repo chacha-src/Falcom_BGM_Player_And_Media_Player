@@ -2721,7 +2721,7 @@ void CMediaPlayerDlg::RequestAppShutdown()
 {
 	extern volatile LONG g_appExiting;
 	InterlockedExchange(&g_appExiting, 1);
-	CCC_StopInwomanTimer();
+	CCC_NkDis();
 	/* timerp スタック上で DestroyWindow(レイヤード歌詞)すると ULW/DWM 待ちで戻らない。
 	   ここでは描画だけ止め、破棄は og::OnOK に任せる。 */
 	DesktopLyricsAbortPaintForExit();
@@ -4960,16 +4960,17 @@ void CMediaPlayerDlg::MirrorSeekVol()
 		KickWaveOverview();
 		RefreshSeekCues();
 		{
-			float bins[64];
+			/* モノラルは spelv[0..87] がスペアナ本体。先頭64本をシークに載せるとのっかかる。
+			   リボンは出さない。ピークは波形の穴埋めだけに使う（ST は 100/200 台）。 */
 			float peak = 1.f;
-			for (int i = 0; i < 64; ++i) {
+			for (int i = 0; i < 88; ++i) {
 				float v = (float)spelv[i];
+				if ((float)spelv[100 + i] > v) v = (float)spelv[100 + i];
+				if ((float)spelv[200 + i] > v) v = (float)spelv[200 + i];
 				if (v > peak) peak = v;
 			}
 			if (peak < 1.f) peak = 1.f;
-			for (int i = 0; i < 64; ++i)
-				bins[i] = (float)spelv[i] / peak;
-			m_seek.SetMeterRibbon(bins, 64);
+			m_seek.SetMeterRibbon(NULL, 0);
 			// #1: PCM ライブピーク優先(スペアナOFFでも埋まる)。WAVは後からフル概観で置換
 			if (savedata.mpSeekWave && plf) {
 				float amp = ProAudio_LivePeak();
@@ -5588,8 +5589,12 @@ void CMediaPlayerDlg::BannerSoft3dZoomCb(void* ctx, int value)
 void CMediaPlayerDlg::PresentBannerSoft3D(CDC* pDC)
 {
 	if (!pDC || m_bannerRect.IsRectEmpty()) return;
-	// Soft3D 本体はメニュー Track 中は重いので止めるが、Speana 供給＋2D 棒は継続する
-	const BOOL menuTrack = (CCustomPopupMenu::GetTrackingRoot() != NULL);
+	/* Track 中も timerp が合成した GDI バナー（ジャケ・文字・スペアナ）を出す。
+	   ここで Soft3D を回すと FM/MIDI と取り合い、メニューの出現が止まる。 */
+	if (CCustomPopupMenu::GetTrackingRoot() != NULL) {
+		BlitVisualizer(pDC);
+		return;
+	}
 	// アナライザ/ピアノと同様: Soft3D はバナー矩形だけ。ジャケ/情報は 2D サイドパネル。
 	// （旧: 3領域を1枚に載せてバーがジャケ・情報の下に食い込み、クリップで中心帯だけ見えて壊れて見えた）
 	const int sw = m_bannerRect.Width(), sh = m_bannerRect.Height();
@@ -5667,45 +5672,6 @@ void CMediaPlayerDlg::PresentBannerSoft3D(CDC* pDC)
 			if (levL[i] > 0.01f || levR[i] > 0.01f) ++nz;
 		}
 		have = (nz > 0);
-	}
-
-	if (menuTrack) {
-		// メニュー中: Soft3D を避けつつスペアナ棒だけ更新
-		if (have) {
-			const int pad = max(2, sw / 80);
-			const int gap = max(1, sw / 200);
-			const int baseY = sh - pad;
-			if (stereo) {
-				const int half = (sw - pad * 2 - gap) / 2;
-				const float bw = (float)half / (float)barN;
-				for (int i = 0; i < barN; ++i) {
-					int hL = (int)(levL[i] * (float)(sh - pad * 2));
-					int hR = (int)(levR[i] * (float)(sh - pad * 2));
-					if (hL < 0) hL = 0; if (hR < 0) hR = 0;
-					int x0 = pad + (int)(i * bw);
-					int x1 = pad + (int)((i + 1) * bw) - 1;
-					if (x1 < x0) x1 = x0;
-					if (hL > 0) m_memBanner.FillSolidRect(x0, baseY - hL, x1 - x0 + 1, hL, RGB(80, 210, 255));
-					int xr0 = pad + half + gap + (int)(i * bw);
-					int xr1 = pad + half + gap + (int)((i + 1) * bw) - 1;
-					if (xr1 < xr0) xr1 = xr0;
-					if (hR > 0) m_memBanner.FillSolidRect(xr0, baseY - hR, xr1 - xr0 + 1, hR, RGB(255, 140, 90));
-				}
-			} else {
-				const float bw = (float)(sw - pad * 2) / (float)barN;
-				for (int i = 0; i < barN; ++i) {
-					int h = (int)(levL[i] * (float)(sh - pad * 2));
-					if (h < 0) h = 0;
-					int x0 = pad + (int)(i * bw);
-					int x1 = pad + (int)((i + 1) * bw) - 1;
-					if (x1 < x0) x1 = x0;
-					if (h > 0) m_memBanner.FillSolidRect(x0, baseY - h, x1 - x0 + 1, h, RGB(80, 210, 255));
-				}
-			}
-		}
-		pDC->BitBlt(m_bannerRect.left, m_bannerRect.top, sw, sh, &m_memBanner, 0, 0, SRCCOPY);
-		::SelectObject(m_memBanner.GetSafeHdc(), oldBmp);
-		return;
 	}
 
 	const float boxes[1][6] = { { -1.15f, 1.15f, -0.02f, 0.72f, 0.0f, 0.95f } };
@@ -5947,14 +5913,14 @@ void CMediaPlayerDlg::ResetInfoScroll()
 	InterlockedExchange(&m_iscScrollPosted, 0);
 }
 
+//
 // 1行のテキストをスクロール対応で mem DC へ描画する。
 //
 // 収まる場合: DrawText で静止描画して false を返す(スクロール不要)。
-//
 // はみ出す場合: 「テキスト + セパレータ」2連続のワイド DC を行キャッシュし、
 // m_isc[rowIdx] オフセットで可視幅(tw)分だけ BitBlt する。
-// （旧実装は毎フレーム CreateCompatibleBitmap/CreatePen → 長時間で GDI が死ぬ）
 //
+// （旧実装は毎フレーム CreateCompatibleBitmap/CreatePen → 長時間で GDI が死ぬ）
 // rowIdx: m_isc/m_iscW のインデックス(0=タイトル行, 1〜5=サブ行)
 static int InfoMarqueeScreenStep()
 {

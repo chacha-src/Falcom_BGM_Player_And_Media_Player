@@ -6279,7 +6279,7 @@ protected:
 		const int rh = rc.Height();
 		const int R = ((rw < rh) ? rw : rh) / 2 - 2;
 		if (R <= 8) {
-			CCC_DrawInwoman(&dc, rc, FALSE);
+			CCC_NkBlit(&dc, rc, FALSE);
 			return;
 		}
 
@@ -6335,7 +6335,7 @@ protected:
 
 		dc.SelectObject(ob);
 		dc.SelectObject(op);
-		CCC_DrawInwoman(&dc, rc, FALSE);
+		CCC_NkBlit(&dc, rc, FALSE);
 	}
 
 	afx_msg void OnPaint()

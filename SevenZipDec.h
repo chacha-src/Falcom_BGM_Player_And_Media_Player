@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include <time.h>
 #include "lzma_sdk/7z.h"

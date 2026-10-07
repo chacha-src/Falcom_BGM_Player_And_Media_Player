@@ -316,14 +316,14 @@ BEGIN_MESSAGE_MAP(CKpilist, CCustomBlurDialogBase)
 cmn(CKpilist);
 
 // CKpilist メッセージ ハンドラ
-extern CString ext[150][300];
+extern CString ext[400][300];
 extern int kpicnt;
 extern CString kpif[400];
-extern TCHAR kpifs[200][64];
-extern BOOL kpichk[200];
-extern BYTE plugkind[150];
-extern BYTE kpiarch[150];
-extern BYTE kvar[150][300];
+extern TCHAR kpifs[400][64];
+extern BOOL kpichk[400];
+extern BYTE plugkind[400];
+extern BYTE kpiarch[400];
+extern BYTE kvar[400][300];
 extern TCHAR karento2[1024];
 
 IMPLEMENT_DYNAMIC(CKpiListCtrl, CCustomListCtrl)
@@ -831,7 +831,7 @@ void CKpilist::SyncChecksFromList()
 	const int n = m_lc.GetItemCount();
 	for (int row = 0; row < n; ++row) {
 		const int idx = (int)m_lc.GetItemData(row);
-		if (idx < 0 || idx >= kpicnt || idx >= 200) continue;
+		if (idx < 0 || idx >= kpicnt || idx >= 400) continue;
 		kpichk[idx] = m_lc.GetCheck(row) ? TRUE : FALSE;
 	}
 }
@@ -946,7 +946,7 @@ void CKpilist::Init()
 	if (cnt > 200) cnt = 200;
 
 	// 現在のプラグイン → 保存済み状態。新キー(#指紋_Arch)優先、旧ベース名は同名1件のときだけ。
-	const int nLive = (kpicnt > 200) ? 200 : kpicnt;
+	const int nLive = (kpicnt > 400) ? 400 : kpicnt;
 	for (int j = 0; j < nLive; j++) {
 		BOOL chk = TRUE;
 		const CString key = KpiChkKey(kpif[j], KpiArchOf(j));
@@ -1052,7 +1052,7 @@ void CKpilist::OnLvnItemchangedList1(NMHDR *pNMHDR, LRESULT *pResult)
 	const int row = pNMLV->iItem;
 	if (row < 0) return;
 	const int idx = (int)m_lc.GetItemData(row);
-	if (idx < 0 || idx >= kpicnt || idx >= 200) return;
+	if (idx < 0 || idx >= kpicnt || idx >= 400) return;
 	kpichk[idx] = m_lc.GetCheck(row) ? TRUE : FALSE;
 }
 

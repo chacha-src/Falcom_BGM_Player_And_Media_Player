@@ -18,7 +18,7 @@ extern CString ext[][300];
 extern BYTE kvar[][300];
 extern BYTE kpiarch[];
 
-enum { KE_MAX_PLUG = 150, KE_MAX_EXT = 299, KE_CACHE_VER = 6 };
+enum { KE_MAX_PLUG = 400, KE_MAX_EXT = 299, KE_CACHE_VER = 6 };
 
 struct KeFileFp {
 	ULONGLONG size;

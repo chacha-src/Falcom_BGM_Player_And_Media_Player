@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 // ============================================================================
 // KpiHost32 用の最小 stdafx
 // ----------------------------------------------------------------------------
@@ -33,7 +33,7 @@ struct save {
 	/* 本体の save と同じ名前。モニタ dlg が読む分だけ。末尾追加。 */
 	DWORD samples;
 	int aero;
-	int inwoman;
+	int q4;
 	int popupMenuTheme;
 	int popupMenuAnim;
 	TCHAR popupMenuFace[32];

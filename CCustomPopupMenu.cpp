@@ -10,6 +10,9 @@
 #ifndef WM_TIMERP_VSYNC_TICK
 #define WM_TIMERP_VSYNC_TICK (WM_APP + 70)
 #endif
+#ifndef WM_UITICK_VSYNC
+#define WM_UITICK_VSYNC (WM_APP + 548)
+#endif
 #ifndef WM_SPEANA_TICK
 #define WM_SPEANA_TICK (WM_APP + 73)
 #endif
@@ -87,8 +90,8 @@ BEGIN_MESSAGE_MAP(CCustomPopupMenu, CWnd)
 END_MESSAGE_MAP()
 
 namespace {
-	// タイマ: Tip / 淫女 / 行アニメ(入場16ms・idle33ms兼用) / レ点バウンス / 強制定着
-	enum { kTipTimer = 7701, kInwomanTimer = 7702, kAnimTimer = 7703, kBounceTimer = 7704, kSettleTimer = 7705 };
+	// タイマ: Tip / 行アニメ(入場16ms・idle33ms兼用) / レ点バウンス / 強制定着
+	enum { kTipTimer = 7701, kNkTm = 7702, kAnimTimer = 7703, kBounceTimer = 7704, kSettleTimer = 7705 };
 	// BigBang内部マーカー（画面には出さない。ULWでα=0へ変換）
 	static const COLORREF kChipChromaKey = RGB(255, 0, 255);
 	enum { kStripeTile = 56 };
@@ -474,22 +477,22 @@ namespace {
 
 	static COLORREF PopupBg()
 	{
-		if (CCC_UiThemeId() == 0 && CCC_IsInwoman()) return RGB(255, 220, 236);
+		if (CCC_UiThemeId() == 0 && CCC_Nk()) return RGB(255, 220, 236);
 		return CCC_UiTheme().bg0;
 	}
 	static COLORREF PopupHotTop()
 	{
-		if (CCC_UiThemeId() == 0 && CCC_IsInwoman()) return RGB(255, 198, 220);
+		if (CCC_UiThemeId() == 0 && CCC_Nk()) return RGB(255, 198, 220);
 		return CCC_UiTheme().hotTop;
 	}
 	static COLORREF PopupHotBot()
 	{
-		if (CCC_UiThemeId() == 0 && CCC_IsInwoman()) return RGB(255, 152, 192);
+		if (CCC_UiThemeId() == 0 && CCC_Nk()) return RGB(255, 152, 192);
 		return CCC_UiTheme().hotBot;
 	}
 	static COLORREF PopupText(BOOL enabled)
 	{
-		if (CCC_UiThemeId() == 0 && CCC_IsInwoman())
+		if (CCC_UiThemeId() == 0 && CCC_Nk())
 			return enabled ? RGB(52, 34, 58) : RGB(170, 158, 170);
 		const CCC_UiThemePal& th = CCC_UiTheme();
 		return enabled ? th.text : th.textDim;
@@ -506,12 +509,12 @@ namespace {
 	}
 	static COLORREF PopupBorderLite()
 	{
-		if (CCC_UiThemeId() == 0 && CCC_IsInwoman()) return RGB(255, 250, 253);
+		if (CCC_UiThemeId() == 0 && CCC_Nk()) return RGB(255, 250, 253);
 		return CCC_UiTheme().borderLite;
 	}
 	static COLORREF PopupBorderDark()
 	{
-		if (CCC_UiThemeId() == 0 && CCC_IsInwoman()) return RGB(176, 118, 152);
+		if (CCC_UiThemeId() == 0 && CCC_Nk()) return RGB(176, 118, 152);
 		return CCC_UiTheme().borderDark;
 	}
 
@@ -616,8 +619,8 @@ namespace {
 		const int h = rc.Height();
 		const int boost = savedata.popupMenuSoftBoost ? 1 : 0;
 		const BOOL rowPill = (h <= 40);
-		const COLORREF pink = CCC_IsInwoman() ? RGB(255, 160, 200) : RGB(255, 190, 220);
-		const COLORREF lav = CCC_IsInwoman() ? RGB(240, 150, 210) : RGB(210, 190, 255);
+		const COLORREF pink = CCC_Nk() ? RGB(255, 160, 200) : RGB(255, 190, 220);
+		const COLORREF lav = CCC_Nk() ? RGB(240, 150, 210) : RGB(210, 190, 255);
 		auto premultPresent = [&](GdiSoftFB::Framebuffer& fb, BYTE constA) {
 			if (!fb.color || !fb.hdc || fb.w != w || fb.h != h) return;
 			const int n = w * h;
@@ -634,7 +637,8 @@ namespace {
 			fb.PresentAlpha(dc.GetSafeHdc(), rc.left, rc.top, constA);
 		};
 		// Soft3D は行ピル／扉アニメのみ。全面パネル毎フレ Soft3D が重さの主因。
-		const BOOL useSoft3d = rowPill || (doorT >= 0.f);
+		/* 全面 Soft3D は FM/MIDI と同時だと出現がコマ落ちする。 */
+		const BOOL useSoft3d = rowPill || (CCC_Nk() && doorT >= 0.f);
 		if (useSoft3d) {
 			if (s_popSoft3d.fb.w != w || s_popSoft3d.fb.h != h)
 				s_popSoft3d.Create(w, h);
@@ -665,7 +669,8 @@ namespace {
 			}
 		}
 		// Soft2D: 行ピル／boost／扉。全面は Soft2D のみ（Soft3D より軽い）＋3フレに1回
-		const BOOL soft2dWant = rowPill || boost || doorT >= 0.f;
+		/* 通常テーマに出すとセパレータ以外にも楕円が残る。 */
+		const BOOL soft2dWant = CCC_Nk() && (rowPill || boost || doorT >= 0.f);
 		const BOOL soft2dThrottleOk = rowPill || doorT >= 0.f || ((animTick % 5) == 0);
 		if (soft2dWant && soft2dThrottleOk && s_popSoft2d.Create(w, h, false) && s_popSoft2d.fb.color) {
 			s_popSoft2d.ClearArgb(0);
@@ -705,7 +710,7 @@ namespace {
 			s_popSoft3d.cam.zoom = 1.15f;
 			float boxes[1][6] = { { -0.5f, 0.5f, 0.f, 0.2f, -0.5f, 0.5f } };
 			s_popSoft3d.SetViewportFit(boxes, 1);
-			const COLORREF c = CCC_IsInwoman() ? RGB(255, 140, 185) : RGB(230, 170, 230);
+			const COLORREF c = CCC_Nk() ? RGB(255, 140, 185) : RGB(230, 170, 230);
 			s_popSoft3d.DrawBox(-0.28f, 0.28f, 0.12f, -0.28f, 0.28f, c, 0.f);
 			s_popSoft3d.fb.PresentAlpha(dc.GetSafeHdc(), rc.left, rc.top, savedata.popupMenuSoftBoost ? (BYTE)120 : (BYTE)95);
 		}
@@ -905,31 +910,40 @@ static COLORREF BlendRGB(COLORREF a, COLORREF b, int t)
 		const int L = rc.left + PopupSx(dpi, CCUSTOM_POPUP_PAD_X) + PopupSx(dpi, CCUSTOM_POPUP_CHECK_W);
 		const int R = rc.right - PopupSx(dpi, CCUSTOM_POPUP_PAD_RIGHT);
 		const int mid = (L + R) / 2;
-		const int gap = PopupSx(dpi, 14);
-		FillHGrad(dc, CRect(L, y, mid - gap, y + 1), CCC_UiTheme().face, CCC_UiTheme().sep);
-		FillHGrad(dc, CRect(mid + gap, y, R, y + 1), CCC_UiTheme().sep, CCC_UiTheme().face);
-		dc.FillSolidRect(L, y + 1, mid - gap - L, 1, RGB(255, 255, 255));
-		dc.FillSolidRect(mid + gap, y + 1, R - (mid + gap), 1, RGB(255, 255, 255));
-		CBrush brA(CCC_UiTheme().accent2);
-		CBrush brB(CCC_UiTheme().accent);
-		CPen pen(PS_SOLID, 1, RGB(255, 240, 248));
-		CPen* op = dc.SelectObject(&pen);
-		CBrush* ob = dc.SelectObject(&brA);
-		dc.Ellipse(mid - 10, y - 2, mid - 5, y + 3);
-		dc.Ellipse(mid + 6, y - 2, mid + 11, y + 3);
-		dc.SelectObject(&brB);
-		dc.Ellipse(mid - 4, y - 4, mid + 5, y + 5);
-		dc.SetPixel(mid - 1, y - 1, RGB(255, 255, 255));
-		dc.SelectObject(ob);
-		dc.SelectObject(op);
-		CRect gem(mid - 7, y - 7, mid + 8, y + 8);
-		PopupSoftGem(dc, gem, (int)(::GetTickCount64() / 48));
+		/* 中央の空きは楕円用。通常は一本の線（空きに楕円の残像が出ない）。 */
+		const int gap = CCC_Nk() ? PopupSx(dpi, 14) : 0;
+		if (gap > 0) {
+			FillHGrad(dc, CRect(L, y, mid - gap, y + 1), CCC_UiTheme().face, CCC_UiTheme().sep);
+			FillHGrad(dc, CRect(mid + gap, y, R, y + 1), CCC_UiTheme().sep, CCC_UiTheme().face);
+			dc.FillSolidRect(L, y + 1, mid - gap - L, 1, RGB(255, 255, 255));
+			dc.FillSolidRect(mid + gap, y + 1, R - (mid + gap), 1, RGB(255, 255, 255));
+		} else {
+			FillHGrad(dc, CRect(L, y, R, y + 1), CCC_UiTheme().face, CCC_UiTheme().sep);
+			dc.FillSolidRect(L, y + 1, R - L, 1, RGB(255, 255, 255));
+		}
+		/* 通常は線だけ（テーマをまたいで楕円が残らない）。 */
+		if (CCC_Nk()) {
+			CBrush brA(CCC_UiTheme().accent2);
+			CBrush brB(CCC_UiTheme().accent);
+			CPen pen(PS_SOLID, 1, RGB(255, 240, 248));
+			CPen* op = dc.SelectObject(&pen);
+			CBrush* ob = dc.SelectObject(&brA);
+			dc.Ellipse(mid - 10, y - 2, mid - 5, y + 3);
+			dc.Ellipse(mid + 6, y - 2, mid + 11, y + 3);
+			dc.SelectObject(&brB);
+			dc.Ellipse(mid - 4, y - 4, mid + 5, y + 5);
+			dc.SetPixel(mid - 1, y - 1, RGB(255, 255, 255));
+			dc.SelectObject(ob);
+			dc.SelectObject(op);
+			CRect gem(mid - 7, y - 7, mid + 8, y + 8);
+			PopupSoftGem(dc, gem, (int)(::GetTickCount64() / 48));
+		}
 	}
 
 	static void DrawJkBackdrop(CDC& dc, const CRect& rc, int /*animTick*/, float doorT = -1.f, BOOL softOn = TRUE)
 	{
-		const COLORREF c0 = (CCC_UiThemeId() == 0 && CCC_IsInwoman()) ? RGB(255, 220, 236) : CCC_UiTheme().bg0;
-		const COLORREF c1 = (CCC_UiThemeId() == 0 && CCC_IsInwoman()) ? RGB(255, 192, 224) : CCC_UiTheme().bg1;
+		const COLORREF c0 = (CCC_UiThemeId() == 0 && CCC_Nk()) ? RGB(255, 220, 236) : CCC_UiTheme().bg0;
+		const COLORREF c1 = (CCC_UiThemeId() == 0 && CCC_Nk()) ? RGB(255, 192, 224) : CCC_UiTheme().bg1;
 		// タイルとリボンが全面を覆う。走査線グラデは捨て描画だった。
 		dc.FillSolidRect(&rc, c0);
 
@@ -1007,8 +1021,8 @@ static COLORREF BlendRGB(COLORREF a, COLORREF b, int t)
 	static void DrawTornRibbon(CDC& dc, const CRect& rcClient, int animTick)
 	{
 		const int w = CCUSTOM_POPUP_RIBBON_W;
-		const COLORREF c0 = (CCC_UiThemeId() == 0 && CCC_IsInwoman()) ? RGB(255, 108, 168) : CCC_UiTheme().ribbon0;
-		const COLORREF c1 = (CCC_UiThemeId() == 0 && CCC_IsInwoman()) ? RGB(255, 186, 214) : CCC_UiTheme().ribbon1;
+		const COLORREF c0 = (CCC_UiThemeId() == 0 && CCC_Nk()) ? RGB(255, 108, 168) : CCC_UiTheme().ribbon0;
+		const COLORREF c1 = (CCC_UiThemeId() == 0 && CCC_Nk()) ? RGB(255, 186, 214) : CCC_UiTheme().ribbon1;
 		POINT pts[14];
 		pts[0].x = rcClient.left; pts[0].y = rcClient.top;
 		pts[1].x = rcClient.left + w - 1; pts[1].y = rcClient.top;
@@ -1133,10 +1147,10 @@ static COLORREF BlendRGB(COLORREF a, COLORREF b, int t)
 		} else {
 			dc.Draw3dRect(&hr, PopupBorderLite(), PopupBorderDark());
 		}
-		if (!CCC_ThemeSilk())
+		if (!CCC_ThemeSilk() || !CCC_Nk())
 			return;
 		const int cy = (hr.top + hr.bottom) / 2;
-		CBrush br(CCC_IsInwoman() ? RGB(255, 80, 150) : RGB(120, 110, 210));
+		CBrush br(RGB(255, 80, 150));
 		CBrush* ob = dc.SelectObject(&br);
 		dc.Ellipse(hr.left + 5, cy - 3, hr.left + 12, cy + 4);
 		dc.SelectObject(ob);
@@ -1175,8 +1189,8 @@ static COLORREF BlendRGB(COLORREF a, COLORREF b, int t)
 
 		++s_popSoftBusy;
 		const int boost = savedata.popupMenuSoftBoost ? 1 : 0;
-		const COLORREF pink = CCC_IsInwoman() ? RGB(255, 160, 200) : RGB(255, 190, 220);
-		const COLORREF lav = CCC_IsInwoman() ? RGB(240, 150, 210) : RGB(210, 190, 255);
+		const COLORREF pink = CCC_Nk() ? RGB(255, 160, 200) : RGB(255, 190, 220);
+		const COLORREF lav = CCC_Nk() ? RGB(240, 150, 210) : RGB(210, 190, 255);
 		// リボン側の小さなパッチだけ（全幅 Soft の ~1/6）
 		const int aw = min(48, max(28, chip.Width() / 5));
 		const int ah = min(28, chip.Height());
@@ -1293,11 +1307,11 @@ static COLORREF BlendRGB(COLORREF a, COLORREF b, int t)
 			DrawJkBackdrop(dc, chip, animTick);
 			DrawTornRibbon(dc, chip, animTick);
 		} else {
-			const COLORREF c0 = (CCC_UiThemeId() == 0 && CCC_IsInwoman()) ? RGB(255, 220, 236) : CCC_UiTheme().bg0;
-			const COLORREF c1 = (CCC_UiThemeId() == 0 && CCC_IsInwoman()) ? RGB(255, 192, 224) : CCC_UiTheme().bg1;
+			const COLORREF c0 = (CCC_UiThemeId() == 0 && CCC_Nk()) ? RGB(255, 220, 236) : CCC_UiTheme().bg0;
+			const COLORREF c1 = (CCC_UiThemeId() == 0 && CCC_Nk()) ? RGB(255, 192, 224) : CCC_UiTheme().bg1;
 			FillVGrad(dc, chip, BlendRGB(PopupBg(), c0, fade), BlendRGB(PopupBg(), c1, fade));
 			CRect rib(chip.left, chip.top, chip.left + CCUSTOM_POPUP_RIBBON_W, chip.bottom);
-			const COLORREF r0 = (CCC_UiThemeId() == 0 && CCC_IsInwoman()) ? RGB(255, 108, 168) : CCC_UiTheme().ribbon0;
+			const COLORREF r0 = (CCC_UiThemeId() == 0 && CCC_Nk()) ? RGB(255, 108, 168) : CCC_UiTheme().ribbon0;
 			dc.FillSolidRect(&rib, BlendRGB(PopupBg(), r0, fade));
 			if (!flying && fade >= 180)
 				DrawTornRibbon(dc, chip, animTick);
@@ -1346,11 +1360,11 @@ CCustomPopupMenu::CCustomPopupMenu()
 }
 
 // Track 途中の例外／早期 return でも s_trackingRoot を残さない。
-// Speana・Soft3D・淫女タイマが永久停止しないよう根を切ってから Reset。
+// Speana・Soft3Dタイマが永久停止しないよう根を切ってから Reset。
 // 所有 HFONT とバックバッファ、残 HWND を破棄。
 CCustomPopupMenu::~CCustomPopupMenu()
 {
-	// Track 中例外／途中 return でも Speana・Soft3D・淫女タイマが永久停止しないよう掃除
+	// Track 中例外／途中 return でも Speana・Soft3Dタイマが永久停止しないよう掃除
 	if (s_trackingRoot == this) {
 		s_trackingRoot = NULL;
 		s_trackingHwnd = NULL;
@@ -2965,7 +2979,7 @@ BOOL CCustomPopupMenu::CreatePopupAt(CPoint screenPt, CCustomPopupMenu* parentMe
 		m_tip.SendMessage(TTM_ADDTOOL, 0, (LPARAM)&ti);
 		CCustomControlUtility::FinalizeDialogToolTip(m_tip, 420, 12000);
 	}
-	if (CCC_IsInwoman()) { CCC_StartInwomanTimer(); SetTimer(kInwomanTimer, 180, NULL); }
+	if (CCC_Nk()) { CCC_NkArm(); SetTimer(kNkTm, 180, NULL); }
 	SetWindowPos(&wndTopMost, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 	AnimateIn();
 	// 内包コントロールは行アニメ完了後に OnTimer で表示（出現中のちらつき防止）
@@ -3020,7 +3034,7 @@ void CCustomPopupMenu::DestroyPopupTree(BOOL animateOut)
 		if (m_buttons[i].GetSafeHwnd()) m_buttons[i].DestroyWindow();
 	if (m_tip.GetSafeHwnd()) m_tip.DestroyWindow();
 	if (GetSafeHwnd()) {
-		KillTimer(kTipTimer); KillTimer(kInwomanTimer); KillTimer(kAnimTimer); KillTimer(kSettleTimer); KillTimer(kBounceTimer);
+		KillTimer(kTipTimer); KillTimer(kNkTm); KillTimer(kAnimTimer); KillTimer(kSettleTimer); KillTimer(kBounceTimer);
 		if (animateOut)
 			AnimateOut();
 		else
@@ -3721,7 +3735,13 @@ void CCustomPopupMenu::PulseVsyncFrame()
 			InvalidateBgOnly();
 	}
 	else {
-		InvalidateBgOnly();
+		/* 定着後のストライプは 48ms で足りる。毎フレ全面は FM/MIDI の描画と奪い合う。 */
+		static ULONGLONG s_idleBlit = 0;
+		const ULONGLONG now = ::GetTickCount64();
+		if (s_idleBlit == 0 || now - s_idleBlit >= 48) {
+			s_idleBlit = now;
+			InvalidateBgOnly();
+		}
 	}
 	if (m_openSub >= 0 && m_openSub < m_itemCount) {
 		const int si = m_items[m_openSub].subIndex;
@@ -4136,7 +4156,7 @@ void CCustomPopupMenu::PaintToDC(CDC& dc)
 			DrawJkBackdrop(dc, rc, m_animTick, (animStyle == POPUP_ANIM_EXPAND) ? doorT : -1.f);
 			DrawTornRibbon(dc, rc, m_animTick);
 			if (animStyle == POPUP_ANIM_EXPAND && !m_asSubmenu) {
-				const COLORREF tip = (CCC_UiThemeId() == 0 && CCC_IsInwoman()) ? RGB(255, 190, 220) : CCC_UiTheme().ribbon1;
+				const COLORREF tip = (CCC_UiThemeId() == 0 && CCC_Nk()) ? RGB(255, 190, 220) : CCC_UiTheme().ribbon1;
 				dc.FillSolidRect(hull.left + CCUSTOM_POPUP_RIBBON_W + 2, hull.top, hull.Width() - CCUSTOM_POPUP_RIBBON_W - 4, 1,
 					BlendRGB(PopupBg(), tip, 140));
 				dc.FillSolidRect(hull.left + CCUSTOM_POPUP_RIBBON_W + 2, hull.bottom - 1, hull.Width() - CCUSTOM_POPUP_RIBBON_W - 4, 1,
@@ -4182,7 +4202,7 @@ void CCustomPopupMenu::PaintToDC(CDC& dc)
 		if (hasHull) {
 			const int iwSave = dc.SaveDC();
 			dc.IntersectClipRect(&hull);
-			CCC_DrawInwoman(&dc, rc, FALSE);
+			CCC_NkBlit(&dc, rc, FALSE);
 			dc.RestoreDC(iwSave);
 		}
 		dc.SelectObject(oldFont);
@@ -4224,7 +4244,7 @@ void CCustomPopupMenu::PaintToDC(CDC& dc)
 		dc.FillSolidRect(x, thumbY, 3, thumbH, RGB(255, 120, 180));
 	}
 
-	CCC_DrawInwoman(&dc, rc, FALSE);
+	CCC_NkBlit(&dc, rc, FALSE);
 	dc.SelectObject(oldFont);
 }
 
@@ -4824,14 +4844,14 @@ void CCustomPopupMenu::SyncHotFromCursor()
 		CloseOpenSub(); // hot は合っているがサブが残っている場合
 }
 
-// 淫女／行アニメ／定着／レ点バウンス。
+// 行アニメ／定着／レ点バウンス。
 // EXPAND は定位置行の外接で RGN。チップ入場は ForceChipPresent。
 // 所要超過 or atRest で SnapAnimToIdle。idle は背景のみ再描画。
 // phase: 0 idle / 1 enter / 2 exit（退場は現状短いフェード優先）。
 void CCustomPopupMenu::OnTimer(UINT_PTR nIDEvent)
 {
-	if (nIDEvent == kInwomanTimer) {
-		if (CCC_IsInwoman()) InvalidateBgOnly(); else KillTimer(kInwomanTimer);
+	if (nIDEvent == kNkTm) {
+		if (CCC_Nk()) InvalidateBgOnly(); else KillTimer(kNkTm);
 		return;
 	}
 	if (nIDEvent == kAnimTimer) {
@@ -5061,9 +5081,35 @@ void CCustomPopupMenu::RunModalLoop()
 		// 出現アニメが途中で凍る。ここは短い MsgWait + Pulse にする。
 		PulseVsyncFrame();
 		int nPeek = 0;
-		while (!m_done && nPeek < 64 && ::PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
+		int foreignHeavy = 0;
+		while (!m_done && nPeek < 24 && ::PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
 			++nPeek;
+			/* メニュー自身の描画は先に尽くす。FM/MIDI やバナー tick は1通で一旦戻し、
+			   次の Pulse で出現を進める（他UIは止めない。連続処理でアニメが凍るのを防ぐ）。 */
+			int ours = 0;
+			if (msg.hwnd) {
+				CCustomPopupMenu* walk[48];
+				int wn = 0;
+				walk[wn++] = this;
+				while (wn > 0 && !ours) {
+					CCustomPopupMenu* p = walk[--wn];
+					if (!p || !p->GetSafeHwnd())
+						continue;
+					if (msg.hwnd == p->m_hWnd || ::IsChild(p->m_hWnd, msg.hwnd))
+						ours = 1;
+					else {
+						for (int si = 0; si < p->m_subCount && wn < 48; ++si) {
+							if (p->m_subs[si])
+								walk[wn++] = p->m_subs[si];
+						}
+					}
+				}
+			}
+			const int heavy = (!ours && (msg.message == WM_PAINT || msg.message == WM_TIMER
+				|| msg.message == WM_UITICK_VSYNC || msg.message == WM_TIMERP_VSYNC_TICK));
 			if (!dispatchOne(msg))
+				break;
+			if (heavy && ++foreignHeavy >= 1)
 				break;
 		}
 		SettleOpenChainIfDue();
