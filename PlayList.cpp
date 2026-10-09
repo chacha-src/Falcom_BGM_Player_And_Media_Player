@@ -73,14 +73,12 @@ static int PlMessageBox(CPlayList* plDlg, LPCTSTR text, UINT type)
 		CWnd* owner = GetPlaylistModalOwner(plDlg);
 		h = (owner && ::IsWindow(owner->GetSafeHwnd())) ? owner->GetSafeHwnd() : NULL;
 	}
-	if (h) {
+	if (h)
 		::EnableWindow(h, TRUE);
-		::SetForegroundWindow(h);
-	}
 	LPCTSTR cap = AfxGetAppName();
 	if (!cap || !cap[0])
 		cap = _T("ogg");
-	return (int)::MessageBox(h, text, cap, type | MB_SETFOREGROUND);
+	return CCC_MessageBoxForeground(h, text, cap, type);
 }
 
 enum { kPlJakN = 48, kPlJakPx = 24 };

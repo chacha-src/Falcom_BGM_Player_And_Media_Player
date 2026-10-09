@@ -211,6 +211,24 @@ static void OggActivateOrForwardExisting()
 	}
 }
 
+// AfxMessageBox は隠れメイン窓を親にすると、ピン留めの再生窓や歌詞の裏に残る。
+int COggApp::DoMessageBox(LPCTSTR lpszPrompt, UINT nType, UINT nIDPrompt)
+{
+	(void)nIDPrompt;
+	HWND h = ::GetForegroundWindow();
+	DWORD pid = 0;
+	if (h)
+		::GetWindowThreadProcessId(h, &pid);
+	if (!h || pid != ::GetCurrentProcessId()) {
+		CWnd* main = AfxGetMainWnd();
+		h = (main && ::IsWindow(main->GetSafeHwnd())) ? main->GetSafeHwnd() : NULL;
+	}
+	CString cap;
+	if (m_pszAppName && m_pszAppName[0])
+		cap = m_pszAppName;
+	return CCC_MessageBoxForeground(h, lpszPrompt, cap.IsEmpty() ? (LPCTSTR)NULL : (LPCTSTR)cap, nType);
+}
+
 LRESULT COggApp::ProcessWndProcException(CException* e, const MSG* pMsg)
 {
 	// デバッガ出力に「どのウィンドウのどのメッセージ処理中か」を残す

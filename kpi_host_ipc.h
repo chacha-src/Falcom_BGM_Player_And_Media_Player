@@ -38,6 +38,14 @@ enum KPIHOST32_CMD : uint32_t
 	KPIHOST32_CMD_FOREIGN_RENDER = 12,
 	KPIHOST32_CMD_FOREIGN_SEEK = 13,
 	KPIHOST32_CMD_FOREIGN_CLOSE = 14,
+	// プラグイン情報と EnumConfig。[u32 kind][wstring path]
+	// 応答: [u32 chars][wchar]。行は \n、列は \t。列内改行は U+0001。リスト区切りは U+0002。
+	// I \t 名 \t 値
+	// K \t type \t section \t key \t 表示名 \t 既定 \t ヘルプ \t list(\t は U+0002)
+	// W \t 1  … Winamp Config(HWND) が呼べる
+	KPIHOST32_CMD_INSPECT = 15,
+	// Winamp の Config をホスト側でモーダル表示。[u32 kind][wstring path]
+	KPIHOST32_CMD_PLUGIN_UI = 16,
 	// プレイリストの .mid を x64 VST で鳴らす（曲ファイル再生）。スロット 0/1 はクロスフェード用。
 	KPIHOST32_CMD_VST_OPEN = 20,   // [u32 slot][u32 midChars][mid][u32 dllChars][dll][u32 extraChars][extra]
 	KPIHOST32_CMD_VST_RENDER = 21, // RenderReq.sessionId = スロット 0 または 1

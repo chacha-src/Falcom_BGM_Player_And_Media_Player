@@ -33,6 +33,7 @@ public:
 	virtual BOOL ExitInstance();
 	virtual BOOL OnIdle(LONG lCount); // MIDI モニタ IdlePulse。TRUE を返して回し続けない
 	virtual LRESULT ProcessWndProcException(CException* e, const MSG* pMsg);
+	virtual int DoMessageBox(LPCTSTR lpszPrompt, UINT nType, UINT nIDPrompt);
 	//}}AFX_VIRTUAL
 
 // インプリメンテーション

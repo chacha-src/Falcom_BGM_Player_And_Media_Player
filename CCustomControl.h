@@ -154,6 +154,25 @@ inline void CCC_BringDialogToForeground(CWnd* dlg)
     dlg->SetForegroundWindow();
 }
 
+// 完了通知などが最前面の再生窓・歌詞・動画の裏に回らないようにする。
+// MB_TOPMOST はメッセージだけ。親がピン留めならピンは外さない。
+inline int CCC_MessageBoxForeground(HWND owner, LPCTSTR text, LPCTSTR caption, UINT type)
+{
+    HWND h = (owner && ::IsWindow(owner)) ? owner : NULL;
+    const BOOL wasTop = (h && (::GetWindowLongW(h, GWL_EXSTYLE) & WS_EX_TOPMOST)) ? TRUE : FALSE;
+    if (h)
+        ::SetForegroundWindow(h);
+    const int r = ::MessageBoxW(h, text, caption, type | MB_TOPMOST | MB_SETFOREGROUND);
+    if (h && ::IsWindow(h)) {
+        if (wasTop)
+            ::SetWindowPos(h, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
+        else
+            ::SetWindowPos(h, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
+        ::SetForegroundWindow(h);
+    }
+    return r;
+}
+
 // 最小化復帰・再表示時: オーナードロー子が親 Invalidate だけでは再描画されないため明示的に更新
 void CCC_ForceRepaintHwnd(HWND hWnd);
 void CCC_RefreshKids(HWND hWnd);
@@ -1136,6 +1155,12 @@ public:
 
     virtual BOOL PreTranslateMessage(MSG* pMsg);
 
+    // 選択行の col 列を常時エディットにする。-1 でオフ。
+    // 文字は変えた瞬間に OnLiveEditText。クリックで消えない。
+    void SetLiveEditColumn(int col);
+    // 行を作り直しているあいだ隠す。FALSE で選択行へ戻す。
+    void SetLiveEditHold(BOOL hold);
+
     // CCustomOpaqueFixer 用: 外側の BufferedPaint バッファへ直接描画
     void PaintOpaqueIntoBuffer(HDC hdcBuf);
 
@@ -1155,6 +1180,10 @@ protected:
 
     virtual void PreSubclassWindow();
     virtual void PostNcDestroy();
+    // この行を常時エディットにするか。チェック専用の行は FALSE。
+    virtual BOOL WantLiveEditRow(int row);
+    // 値を変えた直後。ここで保存する。
+    virtual void OnLiveEditText(int row, LPCTSTR text);
 
     // メッセージハンドラ群
     afx_msg HBRUSH CtlColor(CDC*, UINT);
@@ -1176,6 +1205,10 @@ protected:
     // リストが WS_EX_ACCEPTFILES を持つ場合に、リスト上へのファイルドロップを
     // 親ダイアログへ転送する(リストが親を覆い、親がドロップを受け取れない問題への対処)。
     afx_msg void OnDropFiles(HDROP hDropInfo);
+    afx_msg void OnLiveEditChange();
+    afx_msg BOOL OnLiveEditItemChanged(NMHDR* pNMHDR, LRESULT* pResult);
+    afx_msg void OnLiveEditHeader(NMHDR* pNMHDR, LRESULT* pResult);
+    afx_msg LRESULT OnLiveEditFocus(WPARAM wParam, LPARAM lParam);
 
     DECLARE_MESSAGE_MAP()
 
@@ -1201,6 +1234,13 @@ private:
     void ScheduleOpaqueRepaint();
     // 可視最終行より下(とプレペイント時は行下地)を交互色・不透明で塗る
     void FillEmptyBelowVisible(HDC hdc, BOOL belowItemsOnly = TRUE);
+    void PlaceLiveEdit();
+    int m_liveEditCol;
+    int m_liveEditRow;
+    int m_liveEditArm; // 値列を押している行。離したあとでフォーカスする
+    BOOL m_liveEditHold;
+    BOOL m_liveEditSilent;
+    CCustomEdit m_liveEdit;
 };
 
 // ============================================================================
@@ -2026,6 +2066,12 @@ public:
     CCustomDialog(UINT nIDTemplate, CWnd* pParentWnd = NULL);
     virtual ~CCustomDialog();
 
+    // CWnd::MessageBox を隠す。最前面窓の裏に完了通知が残らないようにする。
+    int MessageBox(LPCTSTR lpszText, LPCTSTR lpszCaption = NULL, UINT nType = MB_OK)
+    {
+        return CCC_MessageBoxForeground(GetSafeHwnd(), lpszText, lpszCaption, nType);
+    }
+
     // アクリルぼかし機能の有効・無効を切り替えます
     void EnableAero(BOOL bEnable);
     BOOL IsAeroEnabled() const { return m_bAeroEnabled; }
@@ -2144,6 +2190,12 @@ public:
     CCustomDialogEx();
     CCustomDialogEx(UINT nIDTemplate, CWnd* pParentWnd = NULL);
     virtual ~CCustomDialogEx();
+
+    // CWnd::MessageBox を隠す。最前面窓の裏に完了通知が残らないようにする。
+    int MessageBox(LPCTSTR lpszText, LPCTSTR lpszCaption = NULL, UINT nType = MB_OK)
+    {
+        return CCC_MessageBoxForeground(GetSafeHwnd(), lpszText, lpszCaption, nType);
+    }
 
     // アクリルぼかし機能の有効・無効を切り替えます
     void EnableAero(BOOL bEnable);

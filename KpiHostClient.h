@@ -35,6 +35,10 @@ public:
 
 	bool Ping();
 	bool ListExts(const std::wstring& kpiPath, uint32_t& outKpiVer, std::wstring& outSupportExts);
+	// kind は PLUGKIND_*。応答テキストは kpi_host_ipc.h の INSPECT。
+	bool InspectPlugin(uint32_t kind, const std::wstring& path, std::wstring& outText);
+	// Winamp の設定画面をホストプロセスで出す。ダイアログを閉じるまで戻らない。
+	bool ShowPluginUi(uint32_t kind, const std::wstring& path);
 	bool Open(const std::wstring& kpiPath, const std::wstring& mediaPath, const KPI_MEDIAINFO& request, uint32_t songNo, KpiHost32Session& outSession);
 	bool RenderBytes(uint32_t sessionId, uint32_t bytesWanted, uint8_t* outPcm, uint32_t outCap, uint32_t& outBytes, bool& outEof);
 	bool Seek(uint32_t sessionId, uint64_t posSample, uint32_t flag, uint64_t& outNewPosSample);

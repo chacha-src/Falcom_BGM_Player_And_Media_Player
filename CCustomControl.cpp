@@ -11087,6 +11087,11 @@ BEGIN_MESSAGE_MAP(CCustomListCtrl, CListCtrlA)
     ON_MESSAGE(CCC_WM_POST_OPAQUE_PAINT, OnPostOpaquePaint)
     ON_MESSAGE(WM_APP + 341, OnHotRowsPaint)
     ON_WM_DROPFILES()
+    ON_EN_CHANGE(0x6C31, OnLiveEditChange)
+    ON_NOTIFY_REFLECT_EX(LVN_ITEMCHANGED, OnLiveEditItemChanged)
+    ON_NOTIFY(HDN_ITEMCHANGEDW, 0, OnLiveEditHeader)
+    ON_NOTIFY(HDN_ITEMCHANGEDA, 0, OnLiveEditHeader)
+    ON_MESSAGE(WM_APP + 342, OnLiveEditFocus)
 END_MESSAGE_MAP()
 
 static const UINT_PTR kListScrollOpaqueTimerId = 4108;
@@ -11111,6 +11116,7 @@ CCustomListCtrl::CCustomListCtrl()
     : m_bAutoDelete(FALSE), m_nHotItem(-1), m_bAeroMode(FALSE)
     , m_ptLBtnDown(0, 0), m_bTrackDragGate(FALSE)
     , m_hotRowsPosted(FALSE), m_hotRowsN(0)
+    , m_liveEditCol(-1), m_liveEditRow(-1), m_liveEditArm(-1), m_liveEditHold(FALSE), m_liveEditSilent(FALSE)
 {
     m_brBackground.CreateSolidBrush(COLOR_LIST_BG);
     m_heartRcSel.SetRectEmpty();
@@ -11145,6 +11151,24 @@ void CCustomListCtrl::PreSubclassWindow()
 // Ctrl+A 等のキー処理後、アクリル下では不透明再描画を予約（選択が一気に変わる）。
 BOOL CCustomListCtrl::PreTranslateMessage(MSG* pMsg)
 {
+    // 値の常時エディット中は上下で行を移す。文字は既に OnLiveEditText 済み。
+    if (m_liveEditCol >= 0 && m_liveEdit.GetSafeHwnd() && pMsg
+        && pMsg->hwnd == m_liveEdit.m_hWnd && pMsg->message == WM_KEYDOWN
+        && (pMsg->wParam == VK_UP || pMsg->wParam == VK_DOWN || pMsg->wParam == VK_RETURN)) {
+        int next = m_liveEditRow;
+        if (pMsg->wParam == VK_UP) next--;
+        else next++;
+        if (next >= 0 && next < GetItemCount()) {
+            SetItemState(next, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
+            EnsureVisible(next, FALSE);
+            PlaceLiveEdit();
+            if (m_liveEdit.IsWindowVisible()) {
+                m_liveEdit.SetFocus();
+                m_liveEdit.SetSel(0, -1);
+            }
+        }
+        return TRUE;
+    }
     const BOOL handled = CListCtrlA::PreTranslateMessage(pMsg);
     if (handled && pMsg && pMsg->hwnd == m_hWnd && pMsg->message == WM_KEYDOWN
         && (pMsg->wParam == 'A' || pMsg->wParam == 'a'))
@@ -11164,17 +11188,43 @@ HBRUSH CCustomListCtrl::CtlColor(CDC* pDC, UINT)
 }
 
 // 行上クリックの選択は既定へ。起点だけ覚え、しきい値未満では BEGINDRAG を出させない。
+// 値列はここで選択してエディットへフォーカスする。既定に渡すとキャプチャが残り、
+// ボタンアップでリストへフォーカスが戻り、キャレットが2回目のクリックまで出ない。
 void CCustomListCtrl::OnLButtonDown(UINT f, CPoint p)
 {
-    UINT ht = 0;
     m_ptLBtnDown = p;
-    m_bTrackDragGate = (HitTest(p, &ht) >= 0);
+    m_liveEditArm = -1;
+    if (m_liveEditCol >= 0 && !m_liveEditHold && m_liveEdit.GetSafeHwnd()) {
+        LVHITTESTINFO ht = {};
+        ht.pt = p;
+        const int row = SubItemHitTest(&ht);
+        if (row >= 0 && ht.iSubItem == m_liveEditCol && WantLiveEditRow(row)) {
+            m_bTrackDragGate = FALSE;
+            SetItemState(row, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
+            EnsureVisible(row, FALSE);
+            PlaceLiveEdit();
+            // 既定の押下はキャプチャしたまま離すときにリストへフォーカスを戻す。
+            m_liveEditArm = row;
+            SetCapture();
+            return;
+        }
+    }
+    UINT htFlags = 0;
+    m_bTrackDragGate = (HitTest(p, &htFlags) >= 0);
     CListCtrl::OnLButtonDown(f, p);
 }
 
 void CCustomListCtrl::OnLButtonUp(UINT f, CPoint p)
 {
     m_bTrackDragGate = FALSE;
+    if (m_liveEditArm >= 0) {
+        const int row = m_liveEditArm;
+        m_liveEditArm = -1;
+        if (GetCapture() == this) ReleaseCapture();
+        // 離したあとに回す。押下中に SetFocus するとボタンアップが奪い戻す。
+        PostMessage(WM_APP + 342, (WPARAM)row, 0);
+        return;
+    }
     CListCtrl::OnLButtonUp(f, p);
 }
 
@@ -11249,17 +11299,20 @@ void CCustomListCtrl::OnVScroll(UINT n, UINT p, CScrollBar* s)
     CListCtrl::OnVScroll(n, p, s);
     // OpaqueFixer が直後に全面描画する。ここでの Invalidate は名前列ちらつきの元。
     m_nHotItem = -1;
+    PlaceLiveEdit();
 }
 // 横スクロール後もホット索引だけ破棄（部分 Invalidate しない）。
 void CCustomListCtrl::OnHScroll(UINT n, UINT p, CScrollBar* s)
 {
     CListCtrl::OnHScroll(n, p, s);
     m_nHotItem = -1;
+    PlaceLiveEdit();
 }
 // ホット行の再 Invalidate 禁止。索引だけ合わせて直後の Opaque に任せる。
 BOOL CCustomListCtrl::OnMouseWheel(UINT n, short z, CPoint p)
 {
     BOOL r = CListCtrl::OnMouseWheel(n, z, p);
+    PlaceLiveEdit();
     // ホット行の再 Invalidate 禁止(名前列ちらつき)。索引だけ合わせて直後の Opaque に任せる。
     CPoint pt;
     if (GetCursorPos(&pt)) {
@@ -11438,9 +11491,130 @@ LRESULT CCustomListCtrl::OnHotRowsPaint(WPARAM, LPARAM)
 }
 
 // サイズ変化でアクリル穴が残ることがあるので遅延 Opaque。
+BOOL CCustomListCtrl::WantLiveEditRow(int row)
+{
+    UNREFERENCED_PARAMETER(row);
+    return TRUE;
+}
+
+void CCustomListCtrl::OnLiveEditText(int row, LPCTSTR text)
+{
+    UNREFERENCED_PARAMETER(row);
+    UNREFERENCED_PARAMETER(text);
+}
+
+void CCustomListCtrl::SetLiveEditColumn(int col)
+{
+    m_liveEditCol = col;
+    if (col < 0) {
+        m_liveEditRow = -1;
+        if (m_liveEdit.GetSafeHwnd()) m_liveEdit.ShowWindow(SW_HIDE);
+        return;
+    }
+    if (GetSafeHwnd() && !m_liveEdit.GetSafeHwnd()) {
+        m_liveEdit.Create(WS_CHILD | ES_AUTOHSCROLL | ES_LEFT, CRect(0, 0, 0, 0), this, 0x6C31);
+        if (CFont* f = GetFont()) m_liveEdit.SetFont(f);
+        m_liveEdit.SetAeroMode(FALSE);
+    }
+    PlaceLiveEdit();
+}
+
+void CCustomListCtrl::SetLiveEditHold(BOOL hold)
+{
+    m_liveEditHold = hold ? TRUE : FALSE;
+    if (m_liveEditHold) {
+        m_liveEditRow = -1;
+        if (m_liveEdit.GetSafeHwnd() && m_liveEdit.IsWindowVisible())
+            m_liveEdit.ShowWindow(SW_HIDE);
+        return;
+    }
+    PlaceLiveEdit();
+}
+
+void CCustomListCtrl::PlaceLiveEdit()
+{
+    if (m_liveEditCol < 0 || m_liveEditHold || !m_liveEdit.GetSafeHwnd()) return;
+    const int row = GetNextItem(-1, LVNI_SELECTED);
+    if (m_liveEditRow >= 0 && m_liveEditRow != row && m_liveEditRow < GetItemCount()) {
+        CString prev;
+        m_liveEdit.GetWindowText(prev);
+        m_liveEditSilent = TRUE;
+        SetItemText(m_liveEditRow, m_liveEditCol, prev);
+        m_liveEditSilent = FALSE;
+    }
+    if (row < 0 || row >= GetItemCount() || !WantLiveEditRow(row)) {
+        m_liveEditRow = -1;
+        if (m_liveEdit.IsWindowVisible()) m_liveEdit.ShowWindow(SW_HIDE);
+        return;
+    }
+    CRect rc;
+    // サブアイテムの LVIR_BOUNDS は左が 0 になることがある。ラベル矩形を使う。
+    if (!GetSubItemRect(row, m_liveEditCol, LVIR_LABEL, rc)) {
+        if (!GetSubItemRect(row, m_liveEditCol, LVIR_BOUNDS, rc)) return;
+    }
+    CRect client;
+    GetClientRect(&client);
+    if (rc.bottom <= client.top || rc.top >= client.bottom || rc.right <= client.left) {
+        if (m_liveEdit.IsWindowVisible()) m_liveEdit.ShowWindow(SW_HIDE);
+        return;
+    }
+    if (row != m_liveEditRow) {
+        m_liveEditSilent = TRUE;
+        m_liveEdit.SetWindowText(GetItemText(row, m_liveEditCol));
+        m_liveEditSilent = FALSE;
+        m_liveEditRow = row;
+    }
+    CRect cur;
+    m_liveEdit.GetWindowRect(&cur);
+    ScreenToClient(&cur);
+    if (cur != rc) m_liveEdit.MoveWindow(&rc, FALSE);
+    if (!m_liveEdit.IsWindowVisible())
+        m_liveEdit.ShowWindow(SW_SHOWNA);
+    m_liveEdit.SetWindowPos(&CWnd::wndTop, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+}
+
+LRESULT CCustomListCtrl::OnLiveEditFocus(WPARAM wParam, LPARAM)
+{
+    const int row = (int)wParam;
+    if (m_liveEditCol < 0 || m_liveEditHold || !m_liveEdit.GetSafeHwnd()) return 0;
+    if (row != m_liveEditRow) PlaceLiveEdit();
+    if (!m_liveEdit.IsWindowVisible()) return 0;
+    m_liveEdit.SetFocus();
+    const int n = m_liveEdit.GetWindowTextLength();
+    m_liveEdit.SetSel(n, n);
+    return 0;
+}
+
+void CCustomListCtrl::OnLiveEditChange()
+{
+    if (m_liveEditSilent || m_liveEditHold || m_liveEditRow < 0) return;
+    if (m_liveEditRow >= GetItemCount()) return;
+    CString t;
+    m_liveEdit.GetWindowText(t);
+    // リスト文字は行を離れるまで触らない（キー毎の再描画でちらつかない）。保存だけ即時。
+    OnLiveEditText(m_liveEditRow, t);
+}
+
+BOOL CCustomListCtrl::OnLiveEditItemChanged(NMHDR* pNMHDR, LRESULT* pResult)
+{
+    *pResult = 0;
+    if (m_liveEditCol < 0 || m_liveEditSilent || m_liveEditHold) return FALSE;
+    LPNMLISTVIEW p = reinterpret_cast<LPNMLISTVIEW>(pNMHDR);
+    if (p && (p->uChanged & LVIF_STATE) && ((p->uNewState ^ p->uOldState) & LVIS_SELECTED))
+        PlaceLiveEdit();
+    return FALSE;
+}
+
+void CCustomListCtrl::OnLiveEditHeader(NMHDR*, LRESULT* pResult)
+{
+    *pResult = 0;
+    PlaceLiveEdit();
+}
+
 void CCustomListCtrl::OnWindowPosChanged(WINDOWPOS* lpwndpos)
 {
     CListCtrl::OnWindowPosChanged(lpwndpos);
+    PlaceLiveEdit();
 #if CCUSTOM_AERO_SUPPORT
     if (CCC_IsAeroEnabled() && CCC_IsWin11())
         ScheduleOpaqueRepaint();
@@ -11754,6 +11928,9 @@ void CCustomListCtrl::OnPaint()
     CClientDC dc(this);
     FillEmptyBelowVisible(dc.GetSafeHdc());
     ShowScrollBar(SB_HORZ, FALSE);
+    // ダブルバッファの blit が子エディットを塗り潰す。描き終わってから載せ直す。
+    if (m_liveEdit.GetSafeHwnd() && m_liveEdit.IsWindowVisible())
+        m_liveEdit.RedrawWindow(NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW | RDW_NOERASE);
 }
 
 // 既定に委譲して CustomDraw を走らせるだけ。FillEmpty は呼び出し側（Opaque/OnPaint）。
@@ -12101,6 +12278,9 @@ void CCustomListCtrl::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
             // 状態イメージ矩形で行うため、同じ左端位置へ描けば操作性も復活する。
             if (GetExtendedStyle() & LVS_EX_CHECKBOXES)
             {
+                // 状態イメージ 0 はチェック無し行（設定一覧の文字列項目）。描かない。
+                const UINT stMask = GetItemState(ni, LVIS_STATEIMAGEMASK);
+                const int stIdx = (int)((stMask & LVIS_STATEIMAGEMASK) >> 12);
                 int cbSize = 16;
                 if (CImageList* pStIL = GetImageList(LVSIL_STATE))
                 {
@@ -12115,8 +12295,9 @@ void CCustomListCtrl::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
                 rcCb.top = r.top + (rowH - cbSize) / 2;
                 rcCb.right = rcCb.left + cbSize;
                 rcCb.bottom = rcCb.top + cbSize;
-                CCC_DrawListCheckBox(pDC, rcCb, GetCheck(ni) != FALSE);
-                checkPad = (rcCb.right - r.left) + 4; // チェック右端 + 隙間
+                if (stIdx != 0)
+                    CCC_DrawListCheckBox(pDC, rcCb, GetCheck(ni) != FALSE);
+                checkPad = (rcCb.right - r.left) + 4; // チェック右端 + 隙間（無い行も字位置を揃える）
             }
             // 再生アイコン: ImageList と pc[].icon の対応は
             //   0=♪A(IDI_ICON1) / 1=空(IDI_ICON2・透明) / 2=♪B(IDI_ICON3)
@@ -17481,7 +17662,7 @@ public:
     // Install で SetWindowSubclass。親の ExtendFrame(-1) があると GDI が消えるため必須。
     CCustomOpaqueFixer(COLORREF clrBg, BOOL bChroma = FALSE)
         : m_hWnd(NULL), m_bPrinting(FALSE), m_clrBg(clrBg), m_bChroma(bChroma)
-        , m_clsKind(0), m_ncOpaque(FALSE), m_bDeferPaint(FALSE) {}
+        , m_clsKind(0), m_ncOpaque(FALSE), m_bDeferPaint(FALSE), m_rawCaretOn(TRUE) {}
     // サブクラスと DIB キャッシュを外す。ダイアログ OnDestroy からも呼ばれる。
     ~CCustomOpaqueFixer() { Uninstall(); }
 
@@ -17526,7 +17707,59 @@ private:
     int m_clsKind;         // 1 Edit 2 ListBox 3 Combo 4 LV 5 Tree 6 Tab 7 Header
     BOOL m_ncOpaque;       // WM_NCPAINT で全面 PaintOpaque が必要
     BOOL m_bDeferPaint;    // Unlock 中の空 WM_PAINT を捨て、直後の PaintOpaque に任せる
+    BOOL m_rawCaretOn;     // コンボ内 Edit の自前キャレット。システムキャレットは α=0 穴
     CCC_ChromaBlitCache m_dib;
+    enum { kRawEditHoldTimerId = 4118, kRawEditCaretTimerId = 4119 };
+
+    BOOL IsRawEdit() const
+    {
+        if (m_clsKind != 1 || !m_hWnd)
+            return FALSE;
+        if (CWnd* pw = CWnd::FromHandlePermanent(m_hWnd))
+            if (dynamic_cast<CCustomEdit*>(pw))
+                return FALSE;
+        return TRUE;
+    }
+
+    void StampRawEditCaret(HDC hdc, int width, int height)
+    {
+        if (!hdc || !IsRawEdit() || !m_rawCaretOn)
+            return;
+        if (::GetFocus() != m_hWnd)
+            return;
+        DWORD s0 = 0, s1 = 0;
+        ::SendMessage(m_hWnd, EM_GETSEL, (WPARAM)&s0, (LPARAM)&s1);
+        if (s0 != s1)
+            return;
+        TEXTMETRIC tm = {};
+        int lineH = 14;
+        if (::GetTextMetrics(hdc, &tm) && tm.tmHeight > 0)
+            lineH = tm.tmHeight;
+        int x = 1, y = 1;
+        const int len = (int)::GetWindowTextLengthW(m_hWnd);
+        if (len > 0) {
+            int idx = (int)s0;
+            if (idx > len) idx = len;
+            LRESULT lr = ::SendMessage(m_hWnd, EM_POSFROMCHAR, (WPARAM)idx, 0);
+            if (lr == (LRESULT)-1 && idx > 0)
+                lr = ::SendMessage(m_hWnd, EM_POSFROMCHAR, (WPARAM)(idx - 1), 0);
+            if (lr == (LRESULT)-1)
+                return;
+            x = (short)LOWORD(lr);
+            y = (short)HIWORD(lr);
+        }
+        if (x < 0) x = 0;
+        if (y < 0) y = 0;
+        if (x > width - 2) x = width - 2;
+        if (x < 0) x = 0;
+        RECT rc = { x, y, x + 2, y + lineH };
+        if (rc.bottom > height) rc.bottom = height;
+        if (rc.right <= rc.left || rc.bottom <= rc.top)
+            return;
+        HBRUSH br = ::CreateSolidBrush(RGB(40, 30, 50));
+        ::FillRect(hdc, &rc, br);
+        ::DeleteObject(br);
+    }
 
     // LockWindowUpdate 中の素 GetDC は可視領域が空（何も描かれない）。
     // DCX_LOCKWINDOWUPDATE ならロック中でもクライアントへ出せる。
@@ -17728,6 +17961,13 @@ private:
             if (pThis->m_clsKind != 1 && pThis->m_clsKind != 2 && pThis->m_clsKind != 3)
                 break;
             LRESULT lRes = ::DefSubclassProc(hWnd, uMsg, wParam, lParam);
+            // コンボ文字欄は押しているあいだ既定が部分 α=0 を載せ続ける。Post だと間に合わない。
+            if (uMsg == WM_MOUSEMOVE && pThis->m_clsKind == 1 && (wParam & MK_LBUTTON)) {
+                if (pThis->IsRawEdit())
+                    ::HideCaret(hWnd);
+                pThis->PaintOpaqueNow(hWnd);
+                return lRes;
+            }
             // 連続 WM_MOUSEMOVE は Post でまとめて再不透明化
             ::PostMessage(hWnd, CCC_WM_POST_OPAQUE_PAINT, 0, 0);
             return lRes;
@@ -17739,6 +17979,19 @@ private:
         case WM_LBUTTONDBLCLK:
         case WM_LBUTTONUP:
         {
+            // コンボ内 Edit: 押下中の既定部分描画がアクリル穴になる。同期で全面を不透明に戻す。
+            if (pThis->m_clsKind == 1) {
+                LRESULT lRes = ::DefSubclassProc(hWnd, uMsg, wParam, lParam);
+                if (pThis->IsRawEdit()) {
+                    ::HideCaret(hWnd);
+                    if (uMsg == WM_LBUTTONUP)
+                        ::KillTimer(hWnd, CCustomOpaqueFixer::kRawEditHoldTimerId);
+                    else
+                        ::SetTimer(hWnd, CCustomOpaqueFixer::kRawEditHoldTimerId, 33, NULL);
+                }
+                pThis->PaintOpaqueNow(hWnd);
+                return lRes;
+            }
             if (pThis->m_clsKind == 4 || pThis->m_clsKind == 5) {
                 LRESULT lRes = ::DefSubclassProc(hWnd, uMsg, wParam, lParam);
                 ::PostMessage(hWnd, CCC_WM_POST_OPAQUE_PAINT, 0, 0);
@@ -17858,6 +18111,54 @@ private:
             }
             return 0;
         }
+        case WM_SETFOCUS:
+        {
+            LRESULT lRes = ::DefSubclassProc(hWnd, uMsg, wParam, lParam);
+            if (pThis->IsRawEdit()) {
+                ::HideCaret(hWnd);
+                pThis->m_rawCaretOn = TRUE;
+                UINT blink = ::GetCaretBlinkTime();
+                if (blink == 0 || blink == INFINITE)
+                    blink = 530;
+                ::SetTimer(hWnd, CCustomOpaqueFixer::kRawEditCaretTimerId, blink, NULL);
+                pThis->PaintOpaqueNow(hWnd);
+            }
+            return lRes;
+        }
+        case WM_KILLFOCUS:
+        {
+            if (pThis->IsRawEdit()) {
+                ::KillTimer(hWnd, CCustomOpaqueFixer::kRawEditCaretTimerId);
+                ::KillTimer(hWnd, CCustomOpaqueFixer::kRawEditHoldTimerId);
+            }
+            LRESULT lRes = ::DefSubclassProc(hWnd, uMsg, wParam, lParam);
+            if (pThis->m_clsKind == 1)
+                pThis->PaintOpaqueNow(hWnd);
+            return lRes;
+        }
+        case WM_TIMER:
+        {
+            if (wParam == CCustomOpaqueFixer::kRawEditHoldTimerId && pThis->IsRawEdit()) {
+                if (::GetKeyState(VK_LBUTTON) & 0x8000) {
+                    ::HideCaret(hWnd);
+                    pThis->PaintOpaqueNow(hWnd);
+                } else {
+                    ::KillTimer(hWnd, CCustomOpaqueFixer::kRawEditHoldTimerId);
+                }
+                return 0;
+            }
+            if (wParam == CCustomOpaqueFixer::kRawEditCaretTimerId && pThis->IsRawEdit()) {
+                if (::GetFocus() != hWnd) {
+                    ::KillTimer(hWnd, CCustomOpaqueFixer::kRawEditCaretTimerId);
+                    return 0;
+                }
+                ::HideCaret(hWnd);
+                pThis->m_rawCaretOn = !pThis->m_rawCaretOn;
+                pThis->PaintOpaqueNow(hWnd);
+                return 0;
+            }
+            break;
+        }
         case WM_SHOWWINDOW:
         {
             // SHOW は通常 Invalidate→WM_PAINT。ここで Send POST_OPAQUE すると
@@ -17953,6 +18254,7 @@ private:
                 RECT zr = { 0, 0, width, height };
                 ::FillRect(m_dib.hdcDib, &zr, (HBRUSH)brush.GetSafeHandle());
                 PaintClientIntoBuffer(hWnd, m_dib.hdcDib);
+                StampRawEditCaret(m_dib.hdcDib, width, height);
                 m_dib.MakeRectOpaque(0, 0, width, height);
                 if (CCC_Nk()) {
                     int ox = 0, oy = 0;
@@ -17985,6 +18287,7 @@ private:
             CBrush brush(m_clrBg);
             ::FillRect(hdcBuf, &rect, (HBRUSH)brush.GetSafeHandle());
             PaintClientIntoBuffer(hWnd, hdcBuf);
+            StampRawEditCaret(hdcBuf, width, height);
             ::BufferedPaintMakeOpaque(hBufferedPaint, NULL);
             ::EndBufferedPaint(hBufferedPaint, TRUE);
             return;
@@ -18002,6 +18305,7 @@ private:
         CBrush brush(m_clrBg);
         dcMem.FillRect(CRect(0, 0, width, height), &brush);
         PaintClientIntoBuffer(hWnd, dcMem.GetSafeHdc());
+        StampRawEditCaret(dcMem.GetSafeHdc(), width, height);
         CCC_NkBlt(dcDest.GetSafeHdc(), width, height, dcMem.GetSafeHdc(), m_clrBg);
 
         dcMem.SelectObject(pOld);

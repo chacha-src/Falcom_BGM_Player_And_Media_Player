@@ -1290,6 +1290,7 @@ if errorlevel 1 exit /b 1</Command>
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="Kpilist.cpp" />
+    <ClCompile Include="KpilistDetail.cpp" />
     <ClCompile Include="SongParams.cpp" />
     <ClCompile Include="ProAudio.cpp" />
     <ClCompile Include="CProToolsDlg.cpp" />

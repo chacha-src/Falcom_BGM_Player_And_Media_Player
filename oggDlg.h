@@ -579,7 +579,7 @@ void OggArmResumeFromStartKeepSave();
 BOOL OggKpiDownloadPlugins(CWnd* owner, BOOL confirm, BOOL startupEmpty, BOOL reloadAfter);
 BOOL OggKpiReloadPlugins(CWnd* owner);
 #ifndef WM_APP_KPI_PLUGIN
-#define WM_APP_KPI_PLUGIN (WM_APP + 58) // wParam: 1=DL 2=再読込
+#define WM_APP_KPI_PLUGIN (WM_APP + 58) // wParam: 1=DL 2=再読込 3=プラグイン一覧
 #endif
 #ifndef WM_APP_CEMU_CATLIST
 #define WM_APP_CEMU_CATLIST (WM_APP + 59) // Cemu対応一覧を開く

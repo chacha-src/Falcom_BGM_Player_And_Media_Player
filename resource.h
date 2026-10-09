@@ -1286,6 +1286,12 @@
 #define IDC_SC_LIVE_ADV                 4020
 #define IDC_KPI_PLUGIN_DL               4021
 #define IDC_KPI_PLUGIN_RELOAD           4022
+#define IDC_KPI_INFO_L                  4560
+#define IDC_KPI_INFO                    4561
+#define IDC_KPI_CFG_L                   4562
+#define IDC_KPI_CFG                     4563
+#define IDC_KPI_CFGHELP                 4564
+#define IDC_KPI_CFGEDIT                 4565
 #define IDC_CMDPAL_FILTER               4023
 #define IDC_CMDPAL_LIST                 4024
 #define IDC_CMDPAL_RUN                  4025
@@ -2259,7 +2265,7 @@
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NEXT_RESOURCE_VALUE        372
 #define _APS_NEXT_COMMAND_VALUE         33310
-#define _APS_NEXT_CONTROL_VALUE         4560
+#define _APS_NEXT_CONTROL_VALUE         4566
 #define _APS_NEXT_SYMED_VALUE           104
 #endif
 #endif

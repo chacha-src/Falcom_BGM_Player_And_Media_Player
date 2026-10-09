@@ -101,6 +101,7 @@ enum {
 	CCUSTOM_POPUP_ID_MID_HOST = 0x00E00130,   // VSTホストプリセット優先（midPlayPrefer=2）
 	CCUSTOM_POPUP_ID_LA_SC = 0x00E00131,     // LA を MIDI 出力: SC バンク 127
 	CCUSTOM_POPUP_ID_LA_MT32 = 0x00E00132,   // LA を MIDI 出力: 実機 MT-32
+	CCUSTOM_POPUP_ID_KPI_LIST = 0x00E00133,  // プラグイン一覧（WM_APP_KPI_PLUGIN wParam 3）
 	CCUSTOM_POPUP_ID_CEMU_LIST = 0x00E0012F,  // Cemu対応一覧（arcdata.zip があるときのみ）
 	// 見た目テーマ。HandleChromeClick が savedata.popupMenuTheme を書く。
 	CCUSTOM_POPUP_ID_THEME0 = 0x00E00140

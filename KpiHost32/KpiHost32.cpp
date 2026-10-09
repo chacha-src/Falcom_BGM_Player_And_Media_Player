@@ -897,6 +897,419 @@ static uint32_t Cmd_ListExts(const std::wstring& kpiPath, HostReplyBuf& out)
 	return KPIHOST32_STATUS_OK;
 }
 
+// 検査テキストの1列。タブと改行は潰す（行区切りを壊さない）。改行は U+0001。
+static void InspEsc(std::wstring& out, const wchar_t* s)
+{
+	if (!s) return;
+	for (; *s; ++s) {
+		if (*s == L'\r') continue;
+		if (*s == L'\n') { out.push_back((wchar_t)1); continue; }
+		if (*s == L'\t') { out.push_back(L' '); continue; }
+		out.push_back(*s);
+	}
+}
+
+static void InspLineI(std::wstring& blob, const wchar_t* name, const wchar_t* value)
+{
+	blob += L"I\t";
+	InspEsc(blob, name);
+	blob += L'\t';
+	InspEsc(blob, value);
+	blob += L'\n';
+}
+
+static void InspAcp(std::wstring& out, const char* s)
+{
+	out.clear();
+	if (!s || !s[0]) return;
+	int n = MultiByteToWideChar(CP_ACP, 0, s, -1, NULL, 0);
+	if (n <= 1) return;
+	out.resize((size_t)n - 1);
+	MultiByteToWideChar(CP_ACP, 0, s, -1, out.data(), n);
+}
+
+// Winamp in_ の先頭だけ。out.h をホストに引き込まない。
+struct WaInPeek
+{
+	int version;
+	char* description;
+	HWND hMainWindow;
+	HINSTANCE hDllInstance;
+	char* FileExtensions;
+	int is_seekable;
+	int UsesOutputPlug;
+	void (__cdecl* Config)(HWND);
+	void (__cdecl* About)(HWND);
+	int (__cdecl* Init)();
+	void (__cdecl* Quit)();
+};
+
+static void SafeWaConfig(void (__cdecl* fn)(HWND), HWND hwnd)
+{
+	if (!fn) return;
+	__try { fn(hwnd); }
+	__except (EXCEPTION_EXECUTE_HANDLER) {}
+}
+
+// ホスト側の Config も別プロセスなので、作ったダイアログだけ前面へ出す。
+static HHOOK s_waUiHook;
+static HWND s_waUiMade[8];
+static int s_waUiMadeN;
+
+static LRESULT CALLBACK WaUiCbtProc(int code, WPARAM wp, LPARAM lp)
+{
+	if (code == HCBT_CREATEWND) {
+		HWND h = (HWND)wp;
+		CBT_CREATEWNDW* cw = (CBT_CREATEWNDW*)lp;
+		if (h && cw && cw->lpcs && !(cw->lpcs->style & WS_CHILD) && s_waUiMadeN < 8)
+			s_waUiMade[s_waUiMadeN++] = h;
+	} else if (code == HCBT_ACTIVATE) {
+		HWND h = (HWND)wp;
+		for (int i = 0; i < s_waUiMadeN; ++i) {
+			if (s_waUiMade[i] != h) continue;
+			SetWindowPos(h, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
+			SetForegroundWindow(h);
+			break;
+		}
+	}
+	return CallNextHookEx(s_waUiHook, code, wp, lp);
+}
+
+static WaInPeek* SafeWaGet(WaInPeek* (__cdecl* getIn)())
+{
+	WaInPeek* in = NULL;
+	if (!getIn) return NULL;
+	__try { in = getIn(); }
+	__except (EXCEPTION_EXECUTE_HANDLER) { in = NULL; }
+	return in;
+}
+
+static void SafeGetModuleInfo(IKpiDecoderModule* mod, const KPI_DECODER_MODULEINFO** out)
+{
+	*out = NULL;
+	if (!mod) return;
+	__try { mod->GetModuleInfo(out); }
+	__except (EXCEPTION_EXECUTE_HANDLER) { *out = NULL; }
+}
+
+static void SafeEnumConfig(IKpiDecoderModule* mod, IKpiConfigEnumerator* en)
+{
+	if (!mod || !en) return;
+	__try { mod->EnumConfig(en); }
+	__except (EXCEPTION_EXECUTE_HANDLER) {}
+}
+
+static KMPMODULE* SafeGetKmp(pfnGetKMPModule fn)
+{
+	KMPMODULE* m = NULL;
+	if (!fn) return NULL;
+	__try { m = fn(); }
+	__except (EXCEPTION_EXECUTE_HANDLER) { m = NULL; }
+	return m;
+}
+
+class InspectEnum : public IKpiConfigEnumerator
+{
+	long m_ref = 1;
+	std::wstring* m_blob;
+	struct Sec { std::wstring name, desc, help; };
+	std::vector<Sec> m_sec;
+public:
+	explicit InspectEnum(std::wstring* blob) : m_blob(blob) {}
+	ULONG STDMETHODCALLTYPE AddRef() override { return InterlockedIncrement(&m_ref); }
+	ULONG STDMETHODCALLTYPE Release() override {
+		ULONG r = InterlockedDecrement(&m_ref);
+		if (r == 0) delete this;
+		return r;
+	}
+	HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void** ppv) override {
+		if (!ppv) return E_POINTER;
+		if (riid == IID_IUnknown || riid == IID_IKpiConfigEnumerator) {
+			*ppv = static_cast<IKpiConfigEnumerator*>(this);
+			AddRef();
+			return S_OK;
+		}
+		*ppv = NULL;
+		return E_NOINTERFACE;
+	}
+	BOOL WINAPI EnumSection(const KPI_CFG_SECTION* s) override {
+		if (!s || !s->cszSection || !s->cszSection[0]) return TRUE;
+		for (size_t i = 0; i < m_sec.size(); ++i) {
+			if (_wcsicmp(m_sec[i].name.c_str(), s->cszSection) == 0) {
+				if (s->cszSecDesc) m_sec[i].desc = s->cszSecDesc;
+				if (s->cszSecHelp) m_sec[i].help = s->cszSecHelp;
+				return TRUE;
+			}
+		}
+		Sec e;
+		e.name = s->cszSection;
+		if (s->cszSecDesc) e.desc = s->cszSecDesc;
+		if (s->cszSecHelp) e.help = s->cszSecHelp;
+		m_sec.push_back(e);
+		return TRUE;
+	}
+	BOOL WINAPI EnumKey(const KPI_CFG_KEY* k) override {
+		if (!m_blob || !k || !k->cszKey || !k->cszKey[0] || !k->cszSection) return TRUE;
+		const wchar_t* secHelp = NULL;
+		const wchar_t* secDesc = NULL;
+		for (size_t i = 0; i < m_sec.size(); ++i) {
+			if (_wcsicmp(m_sec[i].name.c_str(), k->cszSection) == 0) {
+				secHelp = m_sec[i].help.c_str();
+				secDesc = m_sec[i].desc.c_str();
+				break;
+			}
+		}
+		std::wstring help;
+		help += L"Section: ";
+		help += k->cszSection;
+		if (secDesc && secDesc[0] && _wcsicmp(secDesc, k->cszSection) != 0) {
+			help += L" (";
+			help += secDesc;
+			help += L")";
+		}
+		if (secHelp && secHelp[0]) { help += L"\n"; help += secHelp; }
+		if (k->cszHelp && k->cszHelp[0]) { help += L"\n"; help += k->cszHelp; }
+		std::wstring list;
+		if (k->cszList) {
+			for (const wchar_t* p = k->cszList; *p; ++p) {
+				if (*p == L'\t') list.push_back((wchar_t)2);
+				else if (*p != L'\r' && *p != L'\n') list.push_back(*p);
+			}
+		}
+		wchar_t typ[16];
+		swprintf_s(typ, L"%u", (unsigned)k->dwType);
+		*m_blob += L"K\t";
+		*m_blob += typ;
+		*m_blob += L'\t';
+		InspEsc(*m_blob, k->cszSection);
+		*m_blob += L'\t';
+		InspEsc(*m_blob, k->cszKey);
+		*m_blob += L'\t';
+		InspEsc(*m_blob, (k->cszKeyDesc && k->cszKeyDesc[0]) ? k->cszKeyDesc : k->cszKey);
+		*m_blob += L'\t';
+		InspEsc(*m_blob, k->cszDefault);
+		*m_blob += L'\t';
+		InspEsc(*m_blob, help.c_str());
+		*m_blob += L'\t';
+		InspEsc(*m_blob, list.c_str());
+		*m_blob += L'\n';
+		return TRUE;
+	}
+};
+
+static void InspPutReply(HostReplyBuf& out, const std::wstring& blob)
+{
+	uint32_t chars = (uint32_t)blob.size();
+	const size_t maxChars = (HostReplyBuf::kCap - 4) / sizeof(wchar_t);
+	if ((size_t)chars > maxChars) chars = (uint32_t)maxChars;
+	out.resize(4 + (size_t)chars * sizeof(wchar_t));
+	memcpy(out.data(), &chars, 4);
+	if (chars) memcpy(out.data() + 4, blob.data(), (size_t)chars * sizeof(wchar_t));
+}
+
+// DLL 検索ディレクトリは FreeLibrary まで残す（遅延ロードが親フォルダを見る）。
+struct InspDll
+{
+	ScopedDllDirectory dir;
+	ScopedDllDirectory parent;
+	ScopedDllDirectories exeDirs;
+	HMODULE h;
+	explicit InspDll(const std::wstring& path)
+		: dir(DirNameOf(path))
+		, parent(ParentDirOf(DirNameOf(path)))
+		, exeDirs(GetExeRelatedDllDirs())
+		, h(NULL)
+	{
+		h = LoadLibraryExW(path.c_str(), NULL,
+			LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_USER_DIRS | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
+		if (!h) h = LoadLibraryW(path.c_str());
+	}
+	~InspDll() { if (h) FreeLibrary(h); }
+};
+
+static uint32_t Cmd_InspectWinamp(const std::wstring& path, HostReplyBuf& out)
+{
+	InspDll dll(path);
+	if (!dll.h) return KPIHOST32_STATUS_FAIL;
+	std::wstring blob;
+	InspLineI(blob, L"Type", L"Winamp");
+	InspLineI(blob, L"Path", path.c_str());
+	typedef WaInPeek* (__cdecl* pfnGet)();
+	auto getIn = (pfnGet)GetProcAddress(dll.h, "winampGetInModule2");
+	if (getIn) {
+		WaInPeek* in = SafeWaGet(getIn);
+		if (in) {
+			std::wstring desc;
+			InspAcp(desc, in->description);
+			if (!desc.empty()) InspLineI(blob, L"Description", desc.c_str());
+			std::wstring exts;
+			if (in->FileExtensions) {
+				const char* p = in->FileExtensions;
+				while (*p) {
+					std::wstring g;
+					InspAcp(g, p);
+					p += strlen(p) + 1;
+					if (*p) p += strlen(p) + 1;
+					for (size_t i = 0; i < g.size();) {
+						size_t sc = g.find(L';', i);
+						std::wstring tok = g.substr(i, sc == std::wstring::npos ? std::wstring::npos : sc - i);
+						if (!tok.empty()) {
+							if (tok[0] != L'.') tok = L"." + tok;
+							if (!exts.empty()) exts += L'/';
+							exts += tok;
+						}
+						if (sc == std::wstring::npos) break;
+						i = sc + 1;
+					}
+				}
+			}
+			if (!exts.empty()) InspLineI(blob, L"SupportExts", exts.c_str());
+			InspLineI(blob, L"Seekable", in->is_seekable ? L"Yes" : L"No");
+			wchar_t ver[32];
+			swprintf_s(ver, L"0x%X", (unsigned)in->version);
+			InspLineI(blob, L"Version", ver);
+			if (in->Config) blob += L"W\t1\n";
+		}
+	}
+	InspPutReply(out, blob);
+	return KPIHOST32_STATUS_OK;
+}
+
+static uint32_t Cmd_InspectKpi(const std::wstring& kpiPath, HostReplyBuf& out)
+{
+	InspDll dll(kpiPath);
+	if (!dll.h) return KPIHOST32_STATUS_FAIL;
+	std::wstring blob;
+	InspLineI(blob, L"Path", kpiPath.c_str());
+	InspLineI(blob, L"Type", L"Decoder");
+	if (auto cr = (pfn_kpiCreateInstance)GetProcAddress(dll.h, "kpi_CreateInstance")) {
+		IKpiDecoderModule* mod = NULL;
+		HostProvider* prov = new HostProvider(kpiPath.c_str());
+		HRESULT hr = SafeKpiCreateInstance(cr, IID_IKpiDecoderModule, (void**)&mod, (IKpiUnknown*)prov);
+		if (hr == S_OK && mod) {
+			const KPI_DECODER_MODULEINFO* info = NULL;
+			SafeGetModuleInfo(mod, &info);
+			if (info) {
+				if (info->cszDescription) InspLineI(blob, L"Description", info->cszDescription);
+				if (info->cszCopyright) InspLineI(blob, L"Copyright", info->cszCopyright);
+				if (info->cszSupportExts) InspLineI(blob, L"SupportExts", info->cszSupportExts);
+				if (info->cszMultiSongExts) InspLineI(blob, L"MultiSongExts", info->cszMultiSongExts);
+				wchar_t tmp[96];
+				if (info->dwModuleVersion == KPI_DECODER_MODULE_VERSION)
+					swprintf_s(tmp, L"%u(new kpi)", (unsigned)info->dwModuleVersion);
+				else
+					swprintf_s(tmp, L"%u", (unsigned)info->dwModuleVersion);
+				InspLineI(blob, L"ModuleVersion", tmp);
+				swprintf_s(tmp, L"%u", (unsigned)info->dwPluginVersion);
+				InspLineI(blob, L"Version", tmp);
+				if (info->dwMultipleInstance == KPI_MULTINST_INFINITE)
+					wcscpy_s(tmp, L"Yes(MultipleInstance=\x221E)");
+				else if (info->dwMultipleInstance == KPI_MULTINST_ZERO)
+					wcscpy_s(tmp, L"No(MultipleInstance=0)");
+				else if (info->dwMultipleInstance == KPI_MULTINST_UNIQUE)
+					wcscpy_s(tmp, L"Unique");
+				else if (info->dwMultipleInstance == KPI_MULTINST_ONE)
+					wcscpy_s(tmp, L"Yes(MultipleInstance=1)");
+				else
+					swprintf_s(tmp, L"Yes(MultipleInstance=%u)", (unsigned)info->dwMultipleInstance);
+				InspLineI(blob, L"Reentrant", tmp);
+				wchar_t g[80];
+				if (StringFromGUID2(info->guid, g, 80) > 0)
+					InspLineI(blob, L"GUID", g);
+				InspLineI(blob, L"TagInfo", info->dwSupportTagInfo ? L"supported" : L"not supported");
+				InspLineI(blob, L"Config", info->dwSupportConfig ? L"supported" : L"not supported");
+			}
+			InspectEnum* en = new InspectEnum(&blob);
+			SafeEnumConfig(mod, en);
+			en->Release();
+			mod->Release();
+		}
+		prov->Release();
+	}
+	else if (auto fn = (pfnGetKMPModule)GetProcAddress(dll.h, SZ_KMP_GETMODULE)) {
+		KMPMODULE* m = SafeGetKmp(fn);
+		if (m) {
+			std::wstring s;
+			InspAcp(s, m->pszDescription);
+			if (!s.empty()) InspLineI(blob, L"Description", s.c_str());
+			InspAcp(s, m->pszCopyright);
+			if (!s.empty()) InspLineI(blob, L"Copyright", s.c_str());
+			std::wstring exts;
+			if (m->ppszSupportExts) {
+				for (int i = 0; m->ppszSupportExts[i]; ++i) {
+					std::wstring e;
+					InspAcp(e, m->ppszSupportExts[i]);
+					if (e.empty()) continue;
+					if (e[0] != L'.') e = L"." + e;
+					if (!exts.empty()) exts += L'/';
+					exts += e;
+				}
+			}
+			if (!exts.empty()) InspLineI(blob, L"SupportExts", exts.c_str());
+			wchar_t tmp[64];
+			swprintf_s(tmp, L"%u", (unsigned)m->dwVersion);
+			InspLineI(blob, L"ModuleVersion", tmp);
+			swprintf_s(tmp, L"%u", (unsigned)m->dwPluginVersion);
+			InspLineI(blob, L"Version", tmp);
+			if (m->dwReentrant == 1)
+				wcscpy_s(tmp, L"Yes(MultipleInstance=\x221E)");
+			else if (m->dwReentrant == 0xFFFFFFFFu)
+				wcscpy_s(tmp, L"No(MultipleInstance=0)");
+			else
+				wcscpy_s(tmp, L"Yes(MultipleInstance=1)");
+			InspLineI(blob, L"Reentrant", tmp);
+			InspLineI(blob, L"Config", L"not supported");
+		}
+	}
+	InspPutReply(out, blob);
+	return KPIHOST32_STATUS_OK;
+}
+
+static uint32_t Cmd_Inspect(uint32_t kind, const std::wstring& path, HostReplyBuf& out)
+{
+	out.clear();
+	if (path.empty()) return KPIHOST32_STATUS_BAD_REQUEST;
+	if (kind == PLUGKIND_WINAMP)
+		return Cmd_InspectWinamp(path, out);
+	if (kind != PLUGKIND_KPI) {
+		std::wstring blob;
+		const wchar_t* ty = L"Plugin";
+		if (kind == PLUGKIND_XMPLAY) ty = L"XMPlay";
+		else if (kind == PLUGKIND_AIMP) ty = L"AIMP";
+		InspLineI(blob, L"Type", ty);
+		InspLineI(blob, L"Path", path.c_str());
+		InspPutReply(out, blob);
+		return KPIHOST32_STATUS_OK;
+	}
+	return Cmd_InspectKpi(path, out);
+}
+
+static uint32_t Cmd_PluginUi(uint32_t kind, const std::wstring& path)
+{
+	if (kind != PLUGKIND_WINAMP || path.empty()) return KPIHOST32_STATUS_NOT_SUPPORTED;
+	InspDll dll(path);
+	if (!dll.h) return KPIHOST32_STATUS_FAIL;
+	typedef WaInPeek* (__cdecl* pfnGet)();
+	auto getIn = (pfnGet)GetProcAddress(dll.h, "winampGetInModule2");
+	uint32_t st = KPIHOST32_STATUS_NOT_SUPPORTED;
+	if (getIn) {
+		WaInPeek* in = SafeWaGet(getIn);
+		if (in && in->Config) {
+			in->hDllInstance = (HINSTANCE)dll.h;
+			in->hMainWindow = GetDesktopWindow();
+			s_waUiMadeN = 0;
+			s_waUiHook = SetWindowsHookExW(WH_CBT, WaUiCbtProc, NULL, GetCurrentThreadId());
+			SafeWaConfig(in->Config, GetDesktopWindow());
+			if (s_waUiHook) {
+				UnhookWindowsHookEx(s_waUiHook);
+				s_waUiHook = NULL;
+			}
+			st = KPIHOST32_STATUS_OK;
+		}
+	}
+	return st;
+}
+
 static void SoundInfoToMediaInfo(const SOUNDINFO& si, KPI_MEDIAINFO& mi)
 {
 	kpi_InitMediaInfo(&mi);
@@ -1488,6 +1901,22 @@ static void ServeOnce(HANDLE pipe)
 			std::wstring kpiPath;
 			if (!ReadWString(p, end, kpiPath) || p != end) { status = KPIHOST32_STATUS_BAD_REQUEST; break; }
 			status = Cmd_ListExts(kpiPath, reply);
+			break;
+		}
+		case KPIHOST32_CMD_INSPECT: {
+			if (end - p < 4) { status = KPIHOST32_STATUS_BAD_REQUEST; break; }
+			uint32_t kind = *(const uint32_t*)p; p += 4;
+			std::wstring path;
+			if (!ReadWString(p, end, path) || p != end) { status = KPIHOST32_STATUS_BAD_REQUEST; break; }
+			status = Cmd_Inspect(kind, path, reply);
+			break;
+		}
+		case KPIHOST32_CMD_PLUGIN_UI: {
+			if (end - p < 4) { status = KPIHOST32_STATUS_BAD_REQUEST; break; }
+			uint32_t kind = *(const uint32_t*)p; p += 4;
+			std::wstring path;
+			if (!ReadWString(p, end, path) || p != end) { status = KPIHOST32_STATUS_BAD_REQUEST; break; }
+			status = Cmd_PluginUi(kind, path);
 			break;
 		}
 		case KPIHOST32_CMD_OPEN: {

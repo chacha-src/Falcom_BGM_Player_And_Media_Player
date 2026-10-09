@@ -562,6 +562,36 @@ bool KpiHost32Client::ListExts(const std::wstring& kpiPath, uint32_t& outKpiVer,
 	return true;
 }
 
+bool KpiHost32Client::InspectPlugin(uint32_t kind, const std::wstring& path, std::wstring& outText)
+{
+	outText.clear();
+	std::vector<uint8_t> req;
+	AppendU32(req, kind);
+	AppendWString(req, path);
+	uint32_t replyN = 0;
+	uint32_t st = 0;
+	if (!SendRequest(KPIHOST32_CMD_INSPECT, req.data(), (uint32_t)req.size(), g_ipcReply, kIpcReplyCap, replyN, st))
+		return false;
+	if (st != KPIHOST32_STATUS_OK || replyN < 4) return false;
+	uint32_t chars = *(const uint32_t*)g_ipcReply;
+	if (replyN < 4 + chars * (uint32_t)sizeof(wchar_t)) return false;
+	outText.assign((const wchar_t*)(g_ipcReply + 4), (const wchar_t*)(g_ipcReply + 4) + chars);
+	return true;
+}
+
+bool KpiHost32Client::ShowPluginUi(uint32_t kind, const std::wstring& path)
+{
+	std::vector<uint8_t> req;
+	AppendU32(req, kind);
+	AppendWString(req, path);
+	uint32_t replyN = 0;
+	uint32_t st = 0;
+	// 設定ダイアログを開いているあいだホストは戻らない。
+	if (!SendRequest(KPIHOST32_CMD_PLUGIN_UI, req.data(), (uint32_t)req.size(), g_ipcReply, kIpcReplyCap, replyN, st, 3600000))
+		return false;
+	return st == KPIHOST32_STATUS_OK;
+}
+
 bool KpiHost32Client::Open(const std::wstring& kpiPath, const std::wstring& mediaPath, const KPI_MEDIAINFO& request, uint32_t songNo, KpiHost32Session& outSession)
 {
 	outSession = {};

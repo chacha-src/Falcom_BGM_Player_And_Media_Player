@@ -6,7 +6,27 @@
 #include "Kpilist.h"
 #include "PluginKinds.h"
 #include "KpiPluginInstall.h"
+#include "KpiV5ConfigStore.h"
+#include "KpiHostClient.h"
+#include "kpi_decoder.h"
+#include "kmp_pi.h"
 #include <algorithm>
+#include <shlobj.h>
+
+extern HINSTANCE hDLLk1[500];
+extern KMPMODULE* mod1[500];
+extern KpiHost32Client g_kpiHost;
+extern void MpPersistSavedataQuick();
+
+static HWND s_kpiListHwnd = NULL;
+HWND KpiListFind()
+{
+	if (s_kpiListHwnd && ::IsWindow(s_kpiListHwnd))
+		return s_kpiListHwnd;
+	s_kpiListHwnd = NULL;
+	return NULL;
+}
+
 
 // 先に使用するファイルスコープ関数の前方宣言
 static void KpiPersistSavedata();
@@ -233,6 +253,57 @@ void CKpiHelpDlg::OnPaint()
 		L"· Kropka na początku opcjonalna. Oddziel spacją, przecinkiem lub /",
 		L"· Baştaki . isteğe bağlı. Birden fazlasını boşluk, , veya / ile ayırın")); y += lh + 4;
 
+	title(L, y, LL14(L"情報と設定", L"Info and settings", L"Infos et reglages", L"Info e impostazioni",
+		L"Info y ajustes", L"정보와 설정", L"信息与设置", L"المعلومات والإعدادات",
+		L"Сведения и настройки", L"Info und Einstellungen", L"Info e ajustes", L"Info en instellingen",
+		L"Informacje i ustawienia", L"Bilgi ve ayarlar"));
+	y += titleLh;
+	body(L, y, LL14(
+		L"・一覧の下に、モジュール情報（説明・拡張子・GUID など取れるもの）と設定が出ます",
+		L"· Below the list: module info (whatever can be read) and settings",
+		L"· Sous la liste : infos du module (ce qui est lisible) et reglages",
+		L"· Sotto l'elenco: info modulo (cio che si legge) e impostazioni",
+		L"· Bajo la lista: info del modulo (lo que se pueda leer) y ajustes",
+		L"· 목록 아래에 모듈 정보(읽을 수 있는 것)와 설정",
+		L"· 列表下方显示模块信息（能读到的）和设置",
+		L"· تحت القائمة: معلومات الوحدة (ما يمكن قراءته) والإعدادات",
+		L"· Под списком: сведения модуля (что удалось прочитать) и настройки",
+		L"· Unter der Liste: Modulinfo (was lesbar ist) und Einstellungen",
+		L"· Abaixo da lista: info do modulo (o que der para ler) e ajustes",
+		L"· Onder de lijst: module-info (wat leesbaar is) en instellingen",
+		L"· Pod lista: info modulu (co da sie odczytac) i ustawienia",
+		L"· Listenin altinda: modul bilgisi (okunabilen) ve ayarlar")); y += lh;
+	body(L, y, LL14(
+		L"・チェックは真偽。値の列は常に編集でき、打つたびに保存されます。ファイルと候補は右クリック。KPI設定画面と同じ保存先です",
+		L"· Checkbox is bool. The value column stays editable and saves as you type. Right-click for files and choices. Same store as the KPI settings screen",
+		L"· Case = booleen. La colonne valeur reste editable et s'enregistre a la frappe. Clic droit : fichier ou choix",
+		L"· Casella = bool. La colonna valore resta modificabile e salva mentre si digita. Tasto destro: file o scelte",
+		L"· Casilla = bool. La columna valor sigue editable y guarda al escribir. Clic derecho: archivo o lista",
+		L"· 확인란은 참/거짓. 값 열은 항상 편집되고 입력 즉시 저장. 파일·후보는 우클릭",
+		L"· 复选框为布尔。值列始终可编辑，输入即保存。文件和候选用右键",
+		L"· المربع قيمة منطقية. عمود القيمة يبقى قابلاً للتحرير ويُحفظ أثناء الكتابة. اليمين للملف أو الخيارات",
+		L"· Флажок — да/нет. Столбец значения всегда редактируется и сохраняется при вводе. Правый: файл или список",
+		L"· Kontrollkaestchen = Bool. Wertspalte bleibt editierbar und speichert beim Tippen. Rechtsklick: Datei oder Auswahl",
+		L"· Caixa = bool. A coluna valor fica editavel e grava ao digitar. Direito: ficheiro ou lista",
+		L"· Vakje = bool. Waardekolom blijft bewerkbaar en slaat op tijdens typen. Rechtsklik: bestand of keuzes",
+		L"· Pole = bool. Kolumna wartosci zostaje edytowalna i zapisuje przy wpisywaniu. Prawy: plik lub lista",
+		L"· Kutu dogru/yanlis. Deger sutunu hep duzenlenir ve yazarken kaydolur. Sag tik: dosya veya liste")); y += lh;
+	body(L, y, LL14(
+		L"・kbsasami の raira はこのアプリでは常に 1 です（変更できません）",
+		L"· kbsasami raira is always 1 in this app (locked)",
+		L"· raira de kbsasami est toujours 1 ici (verrouille)",
+		L"· raira di kbsasami e sempre 1 (bloccato)",
+		L"· raira de kbsasami siempre es 1 (bloqueado)",
+		L"· kbsasami 의 raira 는 항상 1 (잠김)",
+		L"· kbsasami 的 raira 在本程序中始终为 1（锁定）",
+		L"· raira في kbsasami دائما 1 (مقفلة)",
+		L"· raira у kbsasami всегда 1 (заблокировано)",
+		L"· raira von kbsasami ist hier immer 1 (gesperrt)",
+		L"· raira do kbsasami e sempre 1 (bloqueado)",
+		L"· raira van kbsasami is altijd 1 (vergrendeld)",
+		L"· raira kbsasami jest zawsze 1 (zablokowane)",
+		L"· kbsasami raira burada her zaman 1 (kilitli)")); y += lh + 4;
+
 	title(L, y, LL14(L"Ver5 について", L"About Ver5", L"À propos de Ver5", L"Informazioni su Ver5",
 		L"Acerca de Ver5", L"Ver5 정보", L"关于 Ver5", L"حول Ver5",
 		L"О Ver5", L"Zu Ver5", L"Sobre Ver5", L"Over Ver5",
@@ -297,16 +368,25 @@ void CKpilist::DoDataExchange(CDataExchange* pDX)
 {
 	CCustomBlurDialogBase::DoDataExchange(pDX);
 	DDX_Control(pDX, IDC_LIST1, m_lc);
+	DDX_Control(pDX, IDC_KPI_INFO, m_info);
+	DDX_Control(pDX, IDC_KPI_CFG, m_cfg);
 	DDX_Control(pDX, IDOK, m_okdummy);
 	DDX_Control(pDX, IDC_STATIC, m_desc);
 	DDX_Control(pDX, IDC_KPI_EXTFILTER, m_extFilter);
+	DDX_Control(pDX, IDC_KPI_CFGHELP, m_cfgHelp);
 	DDX_Control(pDX, IDC_KPI_EXTFILTER_L, m_extFilterLbl);
+	DDX_Control(pDX, IDC_KPI_INFO_L, m_infoLbl);
+	DDX_Control(pDX, IDC_KPI_CFG_L, m_cfgLbl);
 	DDX_Control(pDX, IDC_KPI_HELP, m_help);
 }
 
 #include "CImageBase.h"
 BEGIN_MESSAGE_MAP(CKpilist, CCustomBlurDialogBase)
 	ON_NOTIFY(LVN_ITEMCHANGED, IDC_LIST1, OnLvnItemchangedList1)
+	ON_NOTIFY(LVN_ITEMCHANGED, IDC_KPI_CFG, OnLvnItemchangedCfg)
+	ON_NOTIFY(NM_DBLCLK, IDC_KPI_CFG, OnCfgDblClk)
+	ON_NOTIFY(NM_RCLICK, IDC_KPI_CFG, OnCfgRClick)
+	ON_NOTIFY(NM_RCLICK, IDC_KPI_INFO, OnInfoRClick)
 	ON_EN_CHANGE(IDC_KPI_EXTFILTER, OnEnChangeExtFilter)
 	ON_BN_CLICKED(IDOK, OnBnClickedOk)
 	ON_BN_CLICKED(IDC_KPI_HELP, OnBnClickedHelp)
@@ -327,9 +407,23 @@ extern BYTE kvar[400][300];
 extern TCHAR karento2[1024];
 
 IMPLEMENT_DYNAMIC(CKpiListCtrl, CCustomListCtrl)
+IMPLEMENT_DYNAMIC(CKpiInfoList, CCustomListCtrl)
 
 BEGIN_MESSAGE_MAP(CKpiListCtrl, CCustomListCtrl)
 END_MESSAGE_MAP()
+
+BEGIN_MESSAGE_MAP(CKpiInfoList, CCustomListCtrl)
+END_MESSAGE_MAP()
+
+void CKpiInfoList::BuildToolTipText(int row, int col, CString& out)
+{
+	UNREFERENCED_PARAMETER(col);
+	out.Empty();
+	if (row < 0 || row >= GetItemCount()) return;
+	CString v = GetItemText(row, 1);
+	if (v.GetLength() > 48)
+		out = v;
+}
 
 void CKpiListCtrl::BuildToolTipText(int row, int col, CString& out)
 {
@@ -393,9 +487,14 @@ BOOL CKpilist::OnInitDialog()
 {
 	CCustomBlurDialogBase::OnInitDialog();
 
+	s_kpiListHwnd = m_hWnd;
 	SetWindowText(LL14(L"プラグイン一覧", L"Plugin list", L"Liste plugins", L"Elenco plugin", L"Lista de plugins", L"플러그인 목록", L"插件列表", L"قائمة الإضافات", L"Список плагинов", L"Plugin-Liste", L"Lista de plugins", L"Pluginlijst", L"Lista wtyczek", L"Eklenti listesi"));
 	if (m_extFilterLbl.GetSafeHwnd())
 		m_extFilterLbl.SetWindowText(LL14(L"絞り込み", L"Filter", L"Filtrer", L"Filtro", L"Filtro", L"필터", L"筛选", L"تصفية", L"Фильтр", L"Filter", L"Filtro", L"Filter", L"Filtr", L"Filtre"));
+	if (m_infoLbl.GetSafeHwnd())
+		m_infoLbl.SetWindowText(LL14(L"情報", L"Info", L"Infos", L"Info", L"Info", L"정보", L"信息", L"معلومات", L"Сведения", L"Info", L"Info", L"Info", L"Informacje", L"Bilgi"));
+	if (m_cfgLbl.GetSafeHwnd())
+		m_cfgLbl.SetWindowText(LL14(L"設定", L"Settings", L"Reglages", L"Impostazioni", L"Ajustes", L"설정", L"设置", L"إعدادات", L"Настройки", L"Einstellungen", L"Ajustes", L"Instellingen", L"Ustawienia", L"Ayarlar"));
 	m_help.SetWindowText(L"?");
 	m_help.SetFlat(TRUE);
 	m_help.SetGradation(RGB(255, 245, 220), RGB(240, 210, 160), 0, TRUE);
@@ -433,6 +532,12 @@ BOOL CKpilist::OnInitDialog()
 		DWORD ex = m_lc.GetExtendedStyle();
 		ex |= LVS_EX_INFOTIP;
 		m_lc.SetExtendedStyle(ex);
+	}
+	if (m_info.GetSafeHwnd())
+		m_info.EnableToolTips(TRUE);
+	if (m_cfgHelp.GetSafeHwnd()) {
+		m_cfgHelp.SetReadOnly(TRUE);
+		m_cfgHelp.SetAeroMode(FALSE);
 	}
 
 	// サイジング枠(WS_THICKFRAME)はダイアログテンプレート側で付与済み。
@@ -509,12 +614,51 @@ void CKpilist::LayoutControls()
 	if (m_extFilter.GetSafeHwnd())
 		m_extFilter.MoveWindow(filtEditX, filtTop, filtEditW, filtH);
 
-	// リスト: フィルタの下〜ボタンの上
-	const int listBottom = by - PX(6 * dy);
-	const int listH = (std::max)(0, listBottom - listTop);
-	m_lc.MoveWindow(mx, listTop, (std::max)(0, cx - 2 * mx), listH);
+	// リスト / 情報 / 設定 / ヘルプ。OK の上に積む。比率は情報が見えることを優先。
+	const int gap = PX(3 * dy);
+	const int lblH = PX(10 * dy);
+	const int helpH = PX(36 * dy);
+	const int helpTop = by - gap - helpH;
+	const int innerTop = listTop;
+	int inner = helpTop - gap - innerTop - 2 * (lblH + gap);
+	if (inner < PX(60 * dy)) inner = PX(60 * dy);
+	const int listH = inner * 42 / 100;
+	const int infoH = inner * 28 / 100;
+	int cfgH = inner - listH - infoH;
+	if (cfgH < PX(16 * dy)) cfgH = PX(16 * dy);
+	const int lw = (std::max)(0, cx - 2 * mx);
+	int y = innerTop;
+	m_lc.MoveWindow(mx, y, lw, listH);
+	y += listH + gap;
+	if (m_infoLbl.GetSafeHwnd())
+		m_infoLbl.MoveWindow(mx, y, lw, lblH);
+	y += lblH;
+	if (m_info.GetSafeHwnd())
+		m_info.MoveWindow(mx, y, lw, infoH);
+	y += infoH + gap;
+	if (m_cfgLbl.GetSafeHwnd())
+		m_cfgLbl.MoveWindow(mx, y, lw, lblH);
+	y += lblH;
+	if (m_cfg.GetSafeHwnd())
+		m_cfg.MoveWindow(mx, y, lw, cfgH);
+	if (m_cfgHelp.GetSafeHwnd())
+		m_cfgHelp.MoveWindow(mx, helpTop, lw, helpH);
 
 	LayoutKpiColumns();
+	if (m_info.GetSafeHwnd() && m_info.GetHeaderCtrl() && m_info.GetHeaderCtrl()->GetItemCount() >= 2) {
+		CRect ir; m_info.GetClientRect(&ir);
+		int nw = ir.Width() * 38 / 100;
+		if (nw < 80) nw = 80;
+		m_info.SetColumnWidth(0, nw);
+		m_info.SetColumnWidth(1, (std::max)(40, ir.Width() - nw));
+	}
+	if (m_cfg.GetSafeHwnd() && m_cfg.GetHeaderCtrl() && m_cfg.GetHeaderCtrl()->GetItemCount() >= 2) {
+		CRect ir; m_cfg.GetClientRect(&ir);
+		int nw = ir.Width() * 42 / 100;
+		if (nw < 80) nw = 80;
+		m_cfg.SetColumnWidth(0, nw);
+		m_cfg.SetColumnWidth(1, (std::max)(40, ir.Width() - nw));
+	}
 }
 
 // kpi と 拡張子 の列幅を、Ver/Arch を固定したうえで残り幅へ自動フィットさせる。
@@ -627,6 +771,8 @@ void CKpilist::OnDestroy()
 	}
 	if (g_kpiHelpDlg && ::IsWindow(g_kpiHelpDlg->GetSafeHwnd()))
 		g_kpiHelpDlg->DestroyWindow();
+	if (s_kpiListHwnd == m_hWnd)
+		s_kpiListHwnd = NULL;
 	CCustomBlurDialogBase::OnDestroy();
 }
 
@@ -936,6 +1082,20 @@ void CKpilist::FillKpiList()
 	m_lc.Invalidate(FALSE);
 	m_bFillingList = FALSE;
 	LayoutKpiColumns();
+
+	int sel = 0;
+	const int keep = m_detailIdx;
+	const int nRow = m_lc.GetItemCount();
+	for (int r = 0; r < nRow; ++r) {
+		if ((int)m_lc.GetItemData(r) == keep) { sel = r; break; }
+	}
+	if (nRow > 0) {
+		m_lc.SetItemState(sel, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
+		m_lc.EnsureVisible(sel, FALSE);
+		ShowPluginDetail((int)m_lc.GetItemData(sel));
+	}
+	else
+		ShowPluginDetail(-1);
 }
 
 void CKpilist::Init()
@@ -993,6 +1153,22 @@ void CKpilist::Init()
 	m_lc.InsertColumn(3, L"Arch", LVCFMT_CENTER, 50, 0);
 	m_lc.InsertColumn(4, LL14(L"拡張子", L"Extensions", L"Extensions", L"Estensioni", L"Extensiones", L"확장자", L"扩展名", L"الامتدادات", L"Расширения", L"Erweiterungen", L"Extensões", L"Extensies", L"Rozszerzenia", L"Uzantılar"), LVCFMT_LEFT, 280, 0);
 
+	if (m_info.GetSafeHwnd()) {
+		m_info.SetExtendedStyle(m_info.GetExtendedStyle() | LVS_EX_FULLROWSELECT | LVS_EX_GRIDLINES | LVS_EX_INFOTIP);
+		m_info.ModifyStyle(0, LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS);
+		m_info.SetAeroMode(FALSE);
+		m_info.InsertColumn(0, LL14(L"項目", L"Item", L"Element", L"Voce", L"Elemento", L"항목", L"项目", L"عنصر", L"Поле", L"Feld", L"Item", L"Veld", L"Pole", L"Alan"), LVCFMT_LEFT, 120, 0);
+		m_info.InsertColumn(1, LL14(L"値", L"Value", L"Valeur", L"Valore", L"Valor", L"값", L"值", L"القيمة", L"Значение", L"Wert", L"Valor", L"Waarde", L"Wartość", L"Değer"), LVCFMT_LEFT, 260, 0);
+	}
+	if (m_cfg.GetSafeHwnd()) {
+		m_cfg.SetExtendedStyle(m_cfg.GetExtendedStyle() | LVS_EX_FULLROWSELECT | LVS_EX_GRIDLINES | LVS_EX_CHECKBOXES);
+		m_cfg.ModifyStyle(0, LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS);
+		m_cfg.SetAeroMode(FALSE);
+		m_cfg.InsertColumn(0, LL14(L"設定", L"Setting", L"Reglage", L"Impostazione", L"Ajuste", L"설정", L"设置", L"إعداد", L"Параметр", L"Einstellung", L"Ajuste", L"Instelling", L"Ustawienie", L"Ayar"), LVCFMT_LEFT, 140, 0);
+		m_cfg.InsertColumn(1, LL14(L"値", L"Value", L"Valeur", L"Valore", L"Valor", L"값", L"值", L"القيمة", L"Значение", L"Wert", L"Valor", L"Waarde", L"Wartość", L"Değer"), LVCFMT_LEFT, 240, 0);
+		m_cfg.SetLiveEditColumn(1);
+	}
+
 	FillKpiList();
 }
 
@@ -1044,6 +1220,11 @@ void CKpilist::OnLvnItemchangedList1(NMHDR *pNMHDR, LRESULT *pResult)
 	LPNMLISTVIEW pNMLV = reinterpret_cast<LPNMLISTVIEW>(pNMHDR);
 	*pResult = 0;
 	if (m_bFillingList || !pNMLV) return;
+	// 行選択で下段の情報と設定を切り替える。チェック変化より先（同じ通知に両方が乗る）
+	if ((pNMLV->uNewState & LVIS_SELECTED) && !(pNMLV->uOldState & LVIS_SELECTED)) {
+		const int sel = (int)m_lc.GetItemData(pNMLV->iItem);
+		ShowPluginDetail(sel);
+	}
 	// チェックボックス(状態イメージ)の変化だけを kpichk[実index] へ即反映
 	if ((pNMLV->uChanged & LVIF_STATE) == 0) return;
 	const UINT oldImg = (pNMLV->uOldState & LVIS_STATEIMAGEMASK);

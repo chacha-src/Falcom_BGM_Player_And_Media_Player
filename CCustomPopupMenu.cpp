@@ -1427,6 +1427,7 @@ BOOL CCustomPopupMenu::IsChromeCommand(UINT id) const
 		|| id == CCUSTOM_POPUP_ID_FONT_FACE
 		|| id == CCUSTOM_POPUP_ID_KPI_DL
 		|| id == CCUSTOM_POPUP_ID_KPI_RELOAD
+		|| id == CCUSTOM_POPUP_ID_KPI_LIST
 		|| id == CCUSTOM_POPUP_ID_MID_KPI
 		|| id == CCUSTOM_POPUP_ID_MID_VST
 		|| id == CCUSTOM_POPUP_ID_MID_HOST
@@ -2011,6 +2012,25 @@ void CCustomPopupMenu::EnsureChromePrefix()
 			L"Pobierz lub wczytaj ponownie wtyczki", L"Eklentileri indir/yeniden yukle"));
 	if (kpiSub) {
 		kpiSub->SetSkipChrome(TRUE);
+		kpiSub->AddCommand(CCUSTOM_POPUP_ID_KPI_LIST,
+			LL14(L"プラグイン一覧", L"Plugin list", L"Liste des plugins", L"Elenco plugin",
+				L"Lista de plugins", L"플러그인 목록", L"插件列表", L"قائمة الإضافات",
+				L"Список плагинов", L"Plugin-Liste", L"Lista de plugins", L"Pluginlijst",
+				L"Lista wtyczek", L"Eklenti listesi"),
+			LL14(L"有効・順序・モジュール情報・KPI設定をこの画面で扱います。設定はKPI設定画面と同じ保存先です",
+				L"Enable, order, module info, and KPI settings. Same store as the KPI settings screen",
+				L"Activer, ordre, infos et reglages KPI. Meme stockage que l'ecran KPI",
+				L"Abilita, ordine, info e impostazioni KPI. Stesso archivio della schermata KPI",
+				L"Activar, orden, info y ajustes KPI. Mismo almacen que la pantalla KPI",
+				L"사용·순서·모듈 정보·KPI 설정. KPI 설정 화면과 같은 저장소",
+				L"启用、顺序、模块信息和 KPI 设置。与 KPI 设置窗口同一存储",
+				L"التفعيل والترتيب ومعلومات الوحدة وإعدادات KPI. نفس تخزين شاشة KPI",
+				L"Включение, порядок, сведения и настройки KPI. То же хранилище, что у экрана KPI",
+				L"Aktiv, Reihenfolge, Modulinfo und KPI-Einstellungen. Gleicher Speicher wie der KPI-Dialog",
+				L"Ativar, ordem, info e ajustes KPI. O mesmo arquivo da tela KPI",
+				L"Aan, volgorde, module-info en KPI-instellingen. Zelfde opslag als het KPI-scherm",
+				L"Wlacz, kolejnosc, info i ustawienia KPI. Ten sam magazyn co ekran KPI",
+				L"Etkin, sira, modul bilgisi ve KPI ayarlari. KPI ekraniyla ayni kayit"));
 		kpiSub->AddCommand(CCUSTOM_POPUP_ID_KPI_DL,
 			LL14(L"KPIプラグインダウンロード", L"Download KPI plugins", L"Telecharger plugins KPI",
 				L"Scarica plugin KPI", L"Descargar plugins KPI", L"KPI 플러그인 다운로드",
@@ -4501,8 +4521,10 @@ BOOL CCustomPopupMenu::HandleChromeClick(int idx)
 		InvalidateBgOnly();
 		return TRUE;
 	}
-	if (it.id == CCUSTOM_POPUP_ID_KPI_DL || it.id == CCUSTOM_POPUP_ID_KPI_RELOAD) {
-		const WPARAM wp = (it.id == CCUSTOM_POPUP_ID_KPI_DL) ? 1 : 2;
+	if (it.id == CCUSTOM_POPUP_ID_KPI_DL || it.id == CCUSTOM_POPUP_ID_KPI_RELOAD || it.id == CCUSTOM_POPUP_ID_KPI_LIST) {
+		WPARAM wp = 2;
+		if (it.id == CCUSTOM_POPUP_ID_KPI_DL) wp = 1;
+		else if (it.id == CCUSTOM_POPUP_ID_KPI_LIST) wp = 3;
 		CloseChain(0);
 		CWnd* main = AfxGetMainWnd();
 		if (main && ::IsWindow(main->GetSafeHwnd()))

@@ -30079,6 +30079,21 @@ LRESULT COggDlg::OnKpiPluginMsg(WPARAM wParam, LPARAM)
 		OggKpiDownloadPlugins(this, TRUE, FALSE, TRUE);
 	else if (wParam == 2)
 		OggKpiReloadPlugins(this);
+	else if (wParam == 3) {
+		if (HWND h = KpiListFind()) {
+			if (::IsIconic(h)) ::ShowWindow(h, SW_RESTORE);
+			::SetForegroundWindow(h);
+			return 0;
+		}
+		HWND fg = ::GetForegroundWindow();
+		DWORD pid = 0;
+		if (fg) ::GetWindowThreadProcessId(fg, &pid);
+		CWnd* owner = (fg && pid == ::GetCurrentProcessId()) ? CWnd::FromHandlePermanent(fg) : NULL;
+		if (!owner) owner = this;
+		CKpilist k(owner);
+		k.status = 0;
+		k.DoModal();
+	}
 	return 0;
 }
 
