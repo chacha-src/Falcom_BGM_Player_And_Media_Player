@@ -1172,6 +1172,7 @@ protected:
     afx_msg void OnPaint();
     afx_msg LRESULT OnPrintClient(WPARAM, LPARAM);
     afx_msg LRESULT OnPostOpaquePaint(WPARAM, LPARAM);
+    afx_msg LRESULT OnHotRowsPaint(WPARAM, LPARAM);
     // リストが WS_EX_ACCEPTFILES を持つ場合に、リスト上へのファイルドロップを
     // 親ダイアログへ転送する(リストが親を覆い、親がドロップを受け取れない問題への対処)。
     afx_msg void OnDropFiles(HDROP hDropInfo);
@@ -1186,6 +1187,9 @@ private:
     // 回転♡: リスト全体ではなく♡の矩形だけ再描画してなめらかに回す
     CRect m_heartRcSel;    // 選択行の♡
     CRect m_heartRcHot;    // ホバー行の♡
+    BOOL m_hotRowsPosted;
+    RECT m_hotRows[4];
+    int m_hotRowsN;
 
     // ホバー状態のアイテムを更新し、必要に応じて再描画します
     void UpdateHotItem(int n);

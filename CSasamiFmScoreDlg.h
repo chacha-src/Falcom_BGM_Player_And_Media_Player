@@ -33,6 +33,7 @@ public:
 	void RefreshBoundRoll();
 	static uint8_t MidiToFmNoteByte(int midiNote);
 	void HistPush();
+	void ExportStandardMidi();
 
 protected:
 	virtual void DoDataExchange(CDataExchange* pDX);

@@ -286,7 +286,7 @@ void ScStaffUiInit(ScStaffUi* u, int trackCount, int isFm)
 	memset(u, 0, sizeof(*u));
 	u->trackCount = trackCount;
 	if (u->trackCount > 32) u->trackCount = 32;
-	u->tool = SC_TOOL_PENCIL;
+	u->tool = SC_TOOL_SELECT; /* 音符はパレットを押したときだけ。空所の右クリックで戻す */
 	u->pxBeat = SC_PX_BEAT_DEFAULT;
 	u->staffScale = 100;
 	u->baseDur = SC_PPQN;

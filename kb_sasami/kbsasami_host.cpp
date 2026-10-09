@@ -19,6 +19,8 @@ static const wchar_t* const kPipeName = L"\\\\.\\pipe\\kbsasami_vst32";
 #endif
 
 extern volatile LONG g_appExiting;
+/* 本体の KPI 読込フラグ。ホストは oggDlg をリンクしないので 0 のまま。 */
+int g_oggKpiLoading = 0;
 
 static void PumpServeMsgs()
 {

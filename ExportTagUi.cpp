@@ -177,6 +177,7 @@ void ExportTagUi_InitFields(bool multi, const playlistdata0& pc,
 	artistL.SetWindowText(LL14(L"アーティスト", L"Artist", L"Artiste", L"Artista", L"Artista", L"아티스트", L"艺术家", L"Artist", L"Исполнитель", L"Interpret", L"Artista", L"Artiest", L"Artysta", L"Sanatci"));
 	albumL.SetWindowText(LL14(L"アルバム", L"Album", L"Album", L"Album", L"Album", L"앨범", L"专辑", L"Album", L"Альбом", L"Album", L"Album", L"Album", L"Album", L"Album"));
 	coverL.SetWindowText(LL14(L"ジャケット", L"Cover", L"Pochette", L"Copertina", L"Portada", L"커버", L"封面", L"Cover", L"Обложка", L"Cover", L"Capa", L"Omslag", L"Okładka", L"Kapak"));
+	coverHint.SetKeepFontHeight(TRUE);
 	coverClear.SetWindowText(LL14(L"解除", L"Clear", L"Effacer", L"Cancella", L"Quitar", L"해제", L"清除", L"Clear", L"Сброс", L"Entfernen", L"Limpar", L"Wissen", L"Wyczysc", L"Temizle"));
 	ExportTagUi_ClearCover(coverPic, coverHint, coverPath, coverBmp);
 

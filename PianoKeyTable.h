@@ -102,6 +102,174 @@ namespace PianoKey
         return NearestKeyIndex(KeyHz(fundKey) * (float)harmonicN);
     }
 
+    // 鍵盤上端を超える倍音は「最上鍵」に丸めない。丸めると最上鍵が自分の倍音で
+    // 自分を支持する自己参照になり、B7 が常時点灯する。
+    inline int HarmonicKeyOnBoard(int fundKey, int harmonicN)
+    {
+        if (harmonicN <= 1) return fundKey;
+        if (fundKey < 0 || fundKey >= COUNT || harmonicN < 2) return -1;
+        const float hz = KeyHz(fundKey) * (float)harmonicN;
+        if (hz > KeyHz(COUNT - 1) * 1.03f) return -1;
+        const int k = HarmonicUpKeyAny(fundKey, harmonicN);
+        if (k <= fundKey || k >= COUNT) return -1;
+        return k;
+    }
+
+    // hi が lo の n 次倍音として鍵盤上で採用する鍵そのものであるとき n を返す。
+    // 比率が「だいたい n」だけでは、隣の半音（別の旋律）まで倍音にしてしまう。
+    inline int ExactHarmonicNumber(int hi, int lo, int nMax = 24)
+    {
+        if (hi <= lo || lo < 0 || hi >= COUNT) return 0;
+        const float fl = KeyHz(lo);
+        if (fl <= 1.0e-3f) return 0;
+        const float ratio = KeyHz(hi) / fl;
+        const int n = (int)(ratio + 0.5f);
+        if (n < HARMONIC_N_MIN || n > nMax) return 0;
+        if (HarmonicKeyOnBoard(lo, n) != hi) return 0;
+        return n;
+    }
+
+    // 振幅ドメインの倍音包絡。 blend はパワーなので呼ぶ前に sqrt する。
+    // base は n=1 換算の振幅、slope は amp(n) = base / n^slope。
+    // 基音が体鳴で凹む擦弦でも、第2倍音以降の中央値から base を戻す。
+    // ある次数だけ異常に大きい（別の実音が重なった）点は中央値では支配しない。
+    struct AmpEnv { float base; float slope; };
+
+    inline AmpEnv FitAmpEnv(const float* amp, int key, int count)
+    {
+        AmpEnv env;
+        env.base = (amp && key >= 0 && key < count) ? amp[key] : 0.0f;
+        if (env.base < 0.0f) env.base = 0.0f;
+        env.slope = 1.05f;
+        if (!amp || key < 0 || key >= count) return env;
+
+        float implied[8];
+        int m = 0;
+        for (int n = 2; n <= 8; ++n) {
+            const int hk = HarmonicKeyOnBoard(key, n);
+            if (hk < 0 || hk >= count) continue;
+            const float v = amp[hk];
+            if (v < 1e-6f) continue;
+            implied[m++] = v * (float)n;
+        }
+        if (m <= 0) {
+            // 倍音が無い（正弦に近い）。高次を発明しないよう減衰は急にする。
+            env.base = amp[key];
+            env.slope = 1.75f;
+            return env;
+        }
+        if (m == 1) {
+            // 上の部分音が1本だけ。
+            // 1/n 付近なら通常の倍音なので傾き 1 で引き切る。傾きを急にすると
+            // 予測が小さくなり、第2倍音がオクターブ上の別音として残る。
+            // 基音より明らかに大きい第2倍音だけは擦弦の穴として包絡に入れる。
+            // 高音の弦は第3倍音が鍵盤の外に出て、見えるのが第2倍音だけになる。
+            // 同程度の音量（オクターブの正弦）は急な傾きのまま残す。
+            int onlyN = 0;
+            float onlyV = 0.0f;
+            for (int n = 2; n <= 8; ++n) {
+                const int hk = HarmonicKeyOnBoard(key, n);
+                if (hk < 0 || hk >= count) continue;
+                if (amp[hk] < 1.0e-6f) continue;
+                onlyN = n;
+                onlyV = amp[hk];
+            }
+            env.base = amp[key];
+            env.slope = 1.75f;
+            if (amp[key] > 1.0e-6f && onlyN >= 2) {
+                const float harm = amp[key] / (float)onlyN;
+                if (onlyN == 2 && onlyV > amp[key] * 1.15f) {
+                    env.base = onlyV * 2.0f;
+                    env.slope = 1.0f;
+                    if (amp[key] > env.base) env.base = amp[key];
+                }
+                else if (onlyV <= harm * 1.8f)
+                    env.slope = 1.0f;
+            }
+            return env;
+        }
+        for (int i = 1; i < m; ++i) {
+            const float v = implied[i];
+            int j = i;
+            while (j > 0 && implied[j - 1] > v) { implied[j] = implied[j - 1]; --j; }
+            implied[j] = v;
+        }
+        env.base = implied[m / 2];
+
+        float eSum = 0.0f;
+        int eN = 0;
+        for (int n = 2; n <= 8; ++n) {
+            const int hk = HarmonicKeyOnBoard(key, n);
+            if (hk < 0 || hk >= count) continue;
+            const float v = amp[hk];
+            if (v < 1e-6f || env.base <= v) continue;
+            const float pred1 = env.base / (float)n;
+            if (v > pred1 * 2.6f || v < pred1 * 0.12f) continue;
+            eSum += logf(env.base / v) / logf((float)n);
+            ++eN;
+        }
+        if (eN > 0) env.slope = eSum / (float)eN;
+        if (env.slope < 0.55f) env.slope = 0.55f;
+        if (env.slope > 1.80f) env.slope = 1.80f;
+
+        m = 0;
+        for (int n = 2; n <= 8; ++n) {
+            const int hk = HarmonicKeyOnBoard(key, n);
+            if (hk < 0 || hk >= count) continue;
+            const float v = amp[hk];
+            if (v < 1e-6f) continue;
+            implied[m++] = v * powf((float)n, env.slope);
+        }
+        if (m > 0) {
+            for (int i = 1; i < m; ++i) {
+                const float v = implied[i];
+                int j = i;
+                while (j > 0 && implied[j - 1] > v) { implied[j] = implied[j - 1]; --j; }
+                implied[j] = v;
+            }
+            env.base = implied[m / 2];
+        }
+        // 基音が倍音からの外挿より十分あるなら、そちらも採用して過小推定を避ける。
+        if (amp[key] > env.base) env.base = amp[key];
+        return env;
+    }
+
+    inline float PredictHarmonicAmp(const AmpEnv& env, int harmonicN)
+    {
+        if (harmonicN < 1 || env.base <= 0.0f) return 0.0f;
+        if (harmonicN == 1) return env.base;
+        return env.base / powf((float)harmonicN, env.slope);
+    }
+
+    // 候補の奇数次（3,5,7）が、親の包絡では説明できない大きさか。
+    // オクターブ上の実音は親の偶数次としか重ならないので、奇数次の余りが独立音の証拠。
+    inline bool OddPartialExceedsParent(const float* amp, int note, int parent, int count)
+    {
+        if (!amp || note < 0 || parent < 0 || note >= count || parent >= count) return false;
+        const AmpEnv env = FitAmpEnv(amp, parent, count);
+        for (int n = 3; n <= 7; n += 2) {
+            const int hk = HarmonicKeyOnBoard(note, n);
+            if (hk < 0 || hk >= count) continue;
+            const float ratio = KeyHz(hk) / KeyHz(parent);
+            const int pn = (int)(ratio + 0.5f);
+            float pred = 0.0f;
+            if (pn >= 2 && fabsf(ratio - (float)pn) <= 0.05f * (float)pn)
+                pred = PredictHarmonicAmp(env, pn);
+            // 親の系列に乗らないビンは、予測 0 と比べるとどんな残差も「超過」になる。
+            // 独立した音の証拠は、候補自身に対して大きい局所ピークだけ。
+            if (pred > 1.0e-8f) {
+                if (amp[hk] > pred * 1.75f && amp[hk] > amp[note] * 0.15f)
+                    return true;
+            }
+            else if (amp[hk] > amp[note] * 0.45f) {
+                if (hk > 0 && amp[hk - 1] > amp[hk]) continue;
+                if (hk + 1 < count && amp[hk + 1] >= amp[hk]) continue;
+                return true;
+            }
+        }
+        return false;
+    }
+
     // 検出パイプラインの O(n^2) ループで多用されるため事前計算テーブル化（結果は不変）。
     // テーブルは h2..h9（従来互換）。高次は IsHarmonicPairExtended を使う。
     inline bool IsHarmonicPair(int hi, int lo)
@@ -157,88 +325,57 @@ namespace PianoKey
         const float sc = st[candidate];
         if (sc <= 1e-8f) return false;
         float own = 0.0f;
-        const int h2 = HarmonicUpKeyAny(candidate, 2);
-        const int h3 = HarmonicUpKeyAny(candidate, 3);
+        const int h2 = HarmonicKeyOnBoard(candidate, 2);
+        const int h3 = HarmonicKeyOnBoard(candidate, 3);
         if (h2 >= 0 && h2 < count) own += st[h2];
         if (h3 >= 0 && h3 < count) own += st[h3] * 0.70f;
         return own >= sc * minRatio;
     }
 
-    // 漏れ込みゴースト判定。
-    // [重要] n は 2〜8 のみ。n=9〜24 まで広げると O5 主旋律がベースの
-    // 15〜20次倍音として誤認され食われる（ガウバン参上 0〜10秒で確認）。
-    // 実害のある漏れ込みはほぼ h2〜h6（オクターブ〜2オクターブ＋α）。
-    // bassBandEnd: 低音帯の終端(PianoRoll108::BASS_END を渡す)
+    // 親の整数倍音として振幅包絡で説明できるか。
+    // 入力 st は検出スペクトル（パワー = 振幅^2）。比較は振幅に戻してから行う。
+    // 「親がより大きい」「帯域最大の何割」では、小さい高音も弦の倍音も全部ゴーストになる。
+    // 逆に、矩形波の倍音は自分の倍音列を持つので「自前の倍音がある」だけでは救えず、
+    // 奇数次が親の予測を超えるかで独立音と倍音を分ける。
+    // 候補が予測の kPartialExplain 倍を超える、または奇数次が余るなら実音。
+    // bassBandEnd は旧帯域ヒューリスティックの名残。判定には使わない（API 互換）。
+    static constexpr float kPartialExplain = 1.48f;
+    static constexpr int kGhostNMax = 18;
+
     inline bool IsHarmonicGhostPartial(const float* st, int candidate, int count,
         int bassBandEnd = 36)
     {
-        if (!st || candidate <= 0 || candidate >= count) return false;
-        const float sc = st[candidate];
-        if (sc <= 1e-8f) return false;
+        (void)bassBandEnd;
+        if (!st || candidate <= 0 || candidate >= count || count > COUNT) return false;
+        if (st[candidate] <= 1e-10f) return false;
 
-        static constexpr int kGhostHarmonicNMax = 8;
+        float amp[COUNT];
+        for (int i = 0; i < count; ++i)
+            amp[i] = (st[i] > 0.0f) ? sqrtf(st[i]) : 0.0f;
 
-        int bandLo = 0, bandHi = count;
-        if (candidate < bassBandEnd) {
-            bandLo = 0; bandHi = bassBandEnd;
-        }
-        else if (candidate < 60) {
-            bandLo = bassBandEnd; bandHi = 60;
-        }
-        else if (candidate < 72) {
-            bandLo = 60; bandHi = 72;
-        }
-        else if (candidate < 100) {
-            bandLo = 72; bandHi = 100;
-        }
-        else {
-            bandLo = 100; bandHi = count;
-        }
-        float bandMax = 0.0f;
-        for (int i = bandLo; i < bandHi; ++i)
-            if (st[i] > bandMax) bandMax = st[i];
-        const bool bandProminent = (bandMax > 1e-6f && sc >= bandMax * 0.18f);
+        const float sc = amp[candidate];
+        if (sc < 1e-7f) return false;
 
-        if (HasOwnOvertoneSupport(st, candidate, count, 0.12f) && bandProminent)
-            return false;
-
-        for (int n = HARMONIC_N_MIN; n <= kGhostHarmonicNMax; ++n) {
+        for (int n = HARMONIC_N_MIN; n <= kGhostNMax; ++n) {
             const int lo = HarmonicDownKeyAny(candidate, n);
             if (lo < 0 || lo >= candidate) continue;
-            // n<=8 なので通常の IsHarmonicPair で足りるが、念のため Extended の
-            // 計算を nMax=8 相当で行う（ペア表は h9 までなので compute 直呼び）
-            if (!IsHarmonicPairCompute(candidate, lo, kGhostHarmonicNMax)) continue;
+            if (HarmonicKeyOnBoard(lo, n) != candidate) continue;
+            if (lo > 0 && amp[lo - 1] > amp[lo] * 1.02f) continue;
+            if (lo + 1 < count && amp[lo + 1] > amp[lo] * 1.02f) continue;
+            if (amp[lo] < sc * 0.45f) continue;
 
-            const float loSc = st[lo];
-            if (lo > 0 && st[lo - 1] > loSc) continue;
-            if (lo + 1 < count && st[lo + 1] > loSc) continue;
-
-            const bool octaveLike = (n == 2 || n == 4 || n == 8);
-            const bool parentInBass = (lo < bassBandEnd);
-
-            if (octaveLike) {
-                if (parentInBass) {
-                    // ベースのオクターブ重ねは「帯域またがりゴースト」になりやすい。
-                    // 自帯域で十分目立ち、かつ親より明らかに強く自前倍音もあるときだけ独立音。
-                    if (bandProminent && sc >= loSc * 1.12f &&
-                        HasOwnOvertoneSupport(st, candidate, count, 0.14f))
-                        continue;
-                    if (sc <= loSc * 1.05f)
-                        return true;
-                    if (!bandProminent)
-                        return true;
-                    continue;
-                }
-                if (!bandProminent && sc < loSc * 0.65f)
+            const float raw = amp[lo] / (float)n;
+            if (raw > 1e-8f && sc <= raw * 1.55f) {
+                if (!(sc > raw * 1.08f && OddPartialExceedsParent(amp, candidate, lo, count)))
                     return true;
             }
-            else {
-                // h3/h5/h6/h7: 帯域トップ級はメロディ候補として残す
-                if (sc >= bandMax * 0.40f)
-                    continue;
-                if (loSc >= sc * 0.55f && sc <= loSc * 0.90f)
-                    return true;
-            }
+            const AmpEnv env = FitAmpEnv(amp, lo, count);
+            const float pred = PredictHarmonicAmp(env, n);
+            if (pred < 1e-8f) continue;
+            if (sc > pred * kPartialExplain) continue;
+            if (sc > pred * 1.08f && OddPartialExceedsParent(amp, candidate, lo, count))
+                continue;
+            return true;
         }
         return false;
     }

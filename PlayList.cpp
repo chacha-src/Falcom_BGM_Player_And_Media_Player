@@ -3343,6 +3343,67 @@ static void PlApplyCemuToggleFlip(CPlayList* pl, unsigned code)
 	}
 }
 
+static void PlExportRowMidi(CPlayList* self, LPCTSTR fol)
+{
+	if (!self || !fol || !fol[0])
+		return;
+#ifndef _UNICODE
+	CStringW srcW(fol);
+	const wchar_t* src = srcW;
+#else
+	const wchar_t* src = fol;
+#endif
+	wchar_t tmp[MAX_PATH];
+	tmp[0] = 0;
+	int ok = 0;
+	const wchar_t* dot = wcsrchr(src, L'.');
+	const int already = (dot && (_wcsicmp(dot, L".mid") == 0 || _wcsicmp(dot, L".midi") == 0)) ? 1 : 0;
+	if (already) {
+		wcsncpy_s(tmp, src, _TRUNCATE);
+		ok = 1;
+	}
+	else if (SasamiExtIsMidi(src))
+		ok = SasamiConvertPathToMidiFile(src, tmp, MAX_PATH);
+	else
+		ok = ComposerConvertToMidi(src, tmp, MAX_PATH);
+	if (!ok || !tmp[0]) {
+		PlMessageBox(self, LL14(L"標準MIDIへ変換できませんでした", L"Could not convert to standard MIDI",
+			L"Conversion MIDI impossible", L"Conversione MIDI non riuscita", L"No se pudo convertir a MIDI",
+			L"표준 MIDI 변환 실패", L"无法转为标准MIDI", L"تعذر التحويل إلى MIDI", L"Не удалось преобразовать в MIDI",
+			L"MIDI-Konvertierung fehlgeschlagen", L"Falha ao converter para MIDI", L"Omzetten naar MIDI mislukt",
+			L"Nie udało się przekonwertować na MIDI", L"Standart MIDI'ye çevrilemedi"),
+			MB_OK | MB_ICONWARNING);
+		return;
+	}
+	wchar_t dest[MAX_PATH];
+	dest[0] = 0;
+	const wchar_t* leaf = wcsrchr(src, L'\\');
+	if (!leaf) leaf = wcsrchr(src, L'/');
+	wcsncpy_s(dest, leaf ? leaf + 1 : src, _TRUNCATE);
+	wchar_t* dext = wcsrchr(dest, L'.');
+	if (dext) wcscpy_s(dext, (size_t)(MAX_PATH - (dext - dest)), L".mid");
+	else wcscat_s(dest, L".mid");
+	OPENFILENAMEW ofn;
+	ZeroMemory(&ofn, sizeof(ofn));
+	ofn.lStructSize = sizeof(ofn);
+	ofn.hwndOwner = self->GetSafeHwnd();
+	ofn.lpstrFilter = L"Standard MIDI (*.mid)\0*.mid\0\0";
+	ofn.lpstrFile = dest;
+	ofn.nMaxFile = MAX_PATH;
+	ofn.Flags = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST | OFN_EXPLORER;
+	ofn.lpstrDefExt = L"mid";
+	if (!GetSaveFileNameW(&ofn))
+		return;
+	if (_wcsicmp(tmp, dest) == 0)
+		return;
+	if (!CopyFileW(tmp, dest, FALSE)) {
+		PlMessageBox(self, LL14(L"書き込みに失敗しました", L"Write failed", L"Échec écriture", L"Scrittura non riuscita", L"Error al escribir",
+			L"쓰기 실패", L"写入失败", L"فشل الكتابة", L"Ошибка записи", L"Schreiben fehlgeschlagen",
+			L"Falha ao gravar", L"Schrijven mislukt", L"Zapis nieudany", L"Yazma başarısız"),
+			MB_OK | MB_ICONWARNING);
+	}
+}
+
 int CPlayList::ShowTrackContextMenu(CPoint pt, CWnd* pOwner)
 {
 	extern CMediaPlayerDlg* mp;
@@ -3606,6 +3667,32 @@ int CPlayList::ShowTrackContextMenu(CPoint pt, CWnd* pOwner)
 			LL14(L".mpy/.mpw2 の SMF 変換音源。55map / 88map / XG 等", L"Sound source for .mpy/.mpw2 SMF conversion (55map, 88map, XG…)", L"Source sonore pour conversion SMF .mpy/.mpw2", L"Sorgente per conversione SMF .mpy/.mpw2", L"Fuente sonora para conversion SMF .mpy/.mpw2", L".mpy/.mpw2 SMF 변환 음원(55map, 88map, XG 등)", L".mpy/.mpw2 的 SMF 转换音源（55map/88map/XG 等）", L"مصدر صوت لتحويل SMF لـ .mpy/.mpw2", L"Источник звука для SMF из .mpy/.mpw2", L"Klangquelle fur .mpy/.mpw2-SMF-Konvertierung", L"Fonte sonora para conversao SMF .mpy/.mpw2", L"Geluidbron voor .mpy/.mpw2 SMF-conversie", L"Zrodlo dzwieku konwersji SMF .mpy/.mpw2", L".mpy/.mpw2 SMF donusum ses kaynagi"));
 		if (sm)
 			PlAddMapForceItems(sm, PL_CTX_SASAMIM_BASE, midiForce);
+	}
+	if (anySasamiMidi || anyOtherMidi) {
+		menu.AddSeparator();
+		CCustomPopupMenu* ex = menu.AddSubMenu(
+			LL14(L"MIDIに変換", L"Convert to MIDI", L"Convertir en MIDI", L"Converti in MIDI", L"Convertir a MIDI",
+				L"MIDI로 변환", L"转换为MIDI", L"تحويل إلى MIDI", L"Преобразовать в MIDI", L"In MIDI umwandeln",
+				L"Converter para MIDI", L"Omzetten naar MIDI", L"Konwertuj do MIDI", L"MIDI'ye dönüştür"),
+			LL14(L"選択曲を標準MIDI (.mid) として保存します。VST3の音色状態は入らないのでピアノ、VST2はプログラムが入ります",
+				L"Save the selection as standard MIDI. VST3 timbre state is omitted (piano); VST2 program is kept",
+				L"Enregistre la sélection en MIDI standard. État VST3 omis (piano); programme VST2 conservé",
+				L"Salva la selezione come MIDI standard. Stato VST3 omesso (piano); programma VST2 tenuto",
+				L"Guarda la selección como MIDI estándar. Estado VST3 omitido (piano); programa VST2 se conserva",
+				L"선택 곡을 표준 MIDI로 저장. VST3 음색 상태는 빠지고 피아노, VST2는 프로그램이 남습니다",
+				L"将所选存为标准MIDI。VST3音色状态不含（钢琴），VST2程序会保留",
+				L"يحفظ التحديد كـ MIDI قياسي. حالة VST3 تُحذف (بيانو)؛ برنامج VST2 يبقى",
+				L"Сохранить выбор как стандартный MIDI. Состояние VST3 не входит (пианино); программа VST2 сохраняется",
+				L"Auswahl als Standard-MIDI speichern. VST3-Zustand fehlt (Klavier); VST2-Programm bleibt",
+				L"Salva a seleção como MIDI padrão. Estado VST3 omitido (piano); programa VST2 fica",
+				L"Selectie opslaan als standaard-MIDI. VST3-staat weg (piano); VST2-programma blijft",
+				L"Zapisz zaznaczenie jako standardowe MIDI. Stan VST3 pominięty (fortepian); program VST2 zostaje",
+				L"Seçimi standart MIDI olarak kaydeder. VST3 tını durumu yok (piyano); VST2 programı kalır"));
+		if (ex)
+			ex->AddCommand(PL_CTX_MID_EXPORT,
+				LL14(L"標準MIDIとして保存…", L"Save as standard MIDI…", L"Enregistrer en MIDI standard…", L"Salva come MIDI standard…", L"Guardar como MIDI estándar…",
+					L"표준 MIDI로 저장…", L"另存为标准MIDI…", L"حفظ كـ MIDI قياسي…", L"Сохранить как стандартный MIDI…", L"Als Standard-MIDI speichern…",
+					L"Salvar como MIDI padrão…", L"Opslaan als standaard-MIDI…", L"Zapisz jako standardowe MIDI…", L"Standart MIDI olarak kaydet…"));
 	}
 	if (anyOtherMidi) {
 		menu.AddSeparator();
@@ -4629,6 +4716,15 @@ void CPlayList::HandleTrackContextCmd(int cmd)
 	}
 	else if (cmd == PL_CTX_PIANOROLL) {
 		if (og && ::IsWindow(og->GetSafeHwnd())) og->TogglePianoRoll();
+	}
+	else if (cmd == PL_CTX_MID_EXPORT) {
+		std::vector<int> sel;
+		CollectSelectedIndices(sel);
+		int row = m_ctxHit;
+		if (row < 0 || row >= playcnt)
+			row = sel.empty() ? -1 : sel[0];
+		if (row >= 0 && row < playcnt && pc)
+			PlExportRowMidi(this, pc[row].fol);
 	}
 	else if (cmd == PL_CTX_MIDIMON) {
 		if (og && ::IsWindow(og->GetSafeHwnd())) og->ToggleMidiMonitor();

@@ -322,6 +322,7 @@ enum {
 	PL_CTX_WRD_WIN = 123, // ウィンドウメニュー: WRD画面トグル
 	PL_CTX_CEMUTOGGLE_BASE = 124, // CEmu zip カタログトグル (Food empty / TO BOSS…)
 	PL_CTX_CEMUTOGGLE_LAST = PL_CTX_CEMUTOGGLE_BASE + 7, // up to 8 toggles
+	PL_CTX_MID_EXPORT = 132, // mp*/rcp/mid を標準MIDIへ書き出す
 	PL_CTX_CEMULOAD = 42490, // CEmu zip を配置してドライバ初期化のみ（演奏しない）
 	PL_CTX_MOVE_BASE = 42500,
 	PL_CTX_COPY_BASE = 43500,

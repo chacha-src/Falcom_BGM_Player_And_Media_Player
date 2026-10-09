@@ -587,6 +587,20 @@ int CEmuDos98::ResolveProgram(const char* name, const unsigned char** outData, u
 	return 0;
 }
 
+/* MDZN の失敗復帰は `or word cs:[bp+4],1`。割り込みフレームは SS にある。
+   別セグメントの glue から呼ぶと CS:[SP+4] がパーサの bit0 を立て、
+   `mov ds,ax` が `mov ds,cx` になって曲バッファを読めなくなる。接頭辞を SS にする。 */
+static void MdznFixCarryFrame(uint8_t* img, unsigned imageSize)
+{
+	if (!img || imageSize < 16) return;
+	if (img[5] != 'M' || img[6] != 'D' || img[7] != 'Z' || img[8] != 'S') return;
+	static const uint8_t kOrCs[5] = { 0x2E, 0x83, 0x4E, 0x04, 0x01 };
+	for (unsigned i = 0; i + 5 <= imageSize; i++) {
+		if (memcmp(img + i, kOrCs, 5) != 0) continue;
+		img[i] = 0x36;
+	}
+}
+
 /* データを載せる */
 int CEmuDos98::LoadCom(uint8_t* mem, const unsigned char* image, unsigned imageSize, const char* tail)
 {
@@ -598,6 +612,7 @@ int CEmuDos98::LoadCom(uint8_t* mem, const unsigned char* image, unsigned imageS
 	BuildPsp(mem, psp, (uint16_t)(psp + 0x1000), tail, DOS98_ENV_SEG);
 	if (0x100u + imageSize > 0x10000u) return 0;
 	memcpy(mem + DosLin(psp, 0x100), image, imageSize);
+	MdznFixCarryFrame(mem + DosLin(psp, 0x100), imageSize);
 	pspSeg_ = psp;
 	dtaSeg_ = psp;
 	dtaOff_ = 0x80;
@@ -910,9 +925,8 @@ int CEmuDos98::LoadDeviceImage(uint8_t* mem, const char* name, uint16_t* outSeg,
 							if (img[i] != 0x75)
 								continue;
 							const unsigned dest = i + 2u + (unsigned)img[i + 1];
-							/* 元の +6B は `MOV [1AC0],0` の途中（BAA+4）。
-							   dest を clrLock+6（EOI）へずらすと INT14 が lock=1 のまま
-							   毎回即 IRET → jleage keyOn=0 FAIL_SILENT。触らない。 */
+							/* ロック中の jne は EOI のまま。NOP すると STI の入れ子が
+							   演奏本体に再入して無音になる。 */
 							if (dest == clrLock + 6u)
 								img[i + 1] = (uint8_t)((clrLock + 6u) - (i + 2u));
 						}

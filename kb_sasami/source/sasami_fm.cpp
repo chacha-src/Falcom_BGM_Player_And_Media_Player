@@ -202,11 +202,15 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 	int eofSent;
 	unsigned T;
 	uint8_t ssgOn[3];
+	uint8_t ssgFlg[3]; /* 原版 SSGFLG。1 になった ch は以降 FNOTE でミキサを触らない */
 	uint32_t hostRate;
 	uint32_t chipRate;
 	uint64_t tickCarry;
 	uint32_t samplesLeftInTick;
-	int64_t chipAcc;
+	/* 1 ホストサンプルが食べるチップサンプル数（Q32）。22 と 23 の切替平均は使わない */
+	uint64_t chipStepQ;
+	uint32_t chipRemQ; /* 直前サンプルの食い残し。0 = 保持なし */
+	int32_t chipHoldL, chipHoldR;
 	int32_t curL, curR;
 	uint32_t ticksPlayed;
 	uint32_t totalTicks;
@@ -286,6 +290,7 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 		memset(alive, 0, sizeof(alive));
 		memset(backJumps, 0, sizeof(backJumps));
 		memset(ssgOn, 0, sizeof(ssgOn));
+		memset(ssgFlg, 0, sizeof(ssgFlg));
 		memset(regs, 0, sizeof(regs));
 		memset(keyOnFm, 0, sizeof(keyOnFm));
 		memset(rhythmFlashLeft, 0, sizeof(rhythmFlashLeft));
@@ -328,7 +333,9 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 		chipRate = 0;
 		tickCarry = 0;
 		samplesLeftInTick = 0;
-		chipAcc = 0;
+		chipStepQ = 0;
+		chipRemQ = 0;
+		chipHoldL = chipHoldR = 0;
 		curL = curR = 0;
 		ticksPlayed = 0;
 		totalTicks = 0;
@@ -792,7 +799,7 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 				if (!dumpQ || dumpQCount == 0)
 					break;
 				const SasamiFmMonDump& head = dumpQ[dumpQHead];
-				/* mix 8192 先読みの生成中は curSample がホスト未渡し。壁時計だけだとモニタが先走る。 */
+				/* 生成中の curSample はホスト未渡し。壁時計だけだとモニタが先走る。 */
 				if (head.curSample >= dumpHostPos)
 					break;
 				if (head.curSample > heard)
@@ -877,6 +884,12 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 		regs[reg] = data;
 		MarkRegWrite(reg);
 		if (reg < 16) ssg[reg] = data;
+		/* 音量 0 の SSG は無音。ゲートを残すとモニタの O3/O4 が点きっぱなしになる */
+		if (reg >= 8 && reg <= 10) {
+			const int s = (int)reg - 8;
+			if ((data & 0x1F) == 0)
+				ssgOn[s] = 0;
+		}
 		if (playFmMode == 0) {
 			if (reg == 0x28) NoteKeyOnReg(data);
 			MarkDump();
@@ -1102,9 +1115,7 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 
 	void NoteFm(int ch, uint8_t note, uint8_t wait, int keyOn)
 	{
-		/* SASAMI waits of 0/1 still need a hold; ymfm also needs >=1 tick of
-		   key-on before the next key-off or the attack never clocks. */
-		if (wait < 2) wait = 2;
+		/* 原版は待ち 0 も 1 も次の割り込みで次命令。ここで 2 にすると 1 tick の音が倍になる。 */
 		waitb[ch] = wait;
 		if (playFmMode == 0) {
 			BeepNote(ch, note, keyOn);
@@ -1136,7 +1147,7 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 
 	void NoteSsg(int ch, uint8_t note, uint8_t wait)
 	{
-		if (wait < 2) wait = 2;
+		/* 原版 PSGOLJ: 待ちは生値。0 と 1 は次の tick で次命令（長さ 1）。 */
 		waitb[ch] = wait;
 		if (playFmMode == 0) {
 			BeepNote(ch, note, 1);
@@ -1149,21 +1160,25 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 		}
 		const int s = SsgSlot(ch);
 		if (s < 0) return;
-		const int nidx = note & 0x0F;
-		int oct = (note >> 4) & 0x0F;
-		if (oct > 9) oct = 9;
-		uint16_t per = kPsgHz[nidx & 15];
-		const int sh = oct - 1;
-		if (sh > 0 && sh < 16) per = (uint16_t)(per >> sh);
-		else if (sh < 0) {
-			int up = -sh;
-			if (up > 4) up = 4;
-			per = (uint16_t)(per << up);
+		/* 8086 SHR reg,CL は CL&31。オクターブ 0 は 31 ビットで周期 0（左シフトしない）。 */
+		const unsigned nidx = (unsigned)(note & 0x0F);
+		const unsigned oct = (unsigned)((note >> 4) & 0x0F);
+		unsigned per = kPsgHz[nidx];
+		const unsigned sh = (oct - 1u) & 31u;
+		if (sh) per >>= sh;
+		WriteSsgPeriod(ch, (uint16_t)per);
+		/* トーン許可はチャンネルにつき一度。以降は PSGAND/PSGOR のミキサを維持する。
+		   毎ノートでトーンを戻すと、ノイズだけのパートが正弦の別テンポになる。 */
+		if (!ssgFlg[s]) {
+			ssg[7] = (uint8_t)(ssg[7] & ~(1u << s));
+			FmOut(7, ssg[7]);
+			ssgFlg[s] = 1;
 		}
-		if (per == 0) per = 1;
-		WriteSsgPeriod(ch, per);
-		ssg[7] = (uint8_t)(ssg[7] & ~(1 << s));
-		FmOut(7, ssg[7]);
+		/* 音量 0 の NOTE は無音。キーを出すと未使用 ch の 00 が O3C で点滅する。 */
+		if ((ssg[8 + s] & 0x1F) == 0) {
+			ssgOn[s] = 0;
+			return;
+		}
 		ssgHitCnt[s]++;
 		ssgOn[s] = 1;
 	}
@@ -1470,12 +1485,13 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 		curR = (int32_t)sr;
 	}
 
-	void ChipSampleN(int n, int64_t* sumL, int64_t* sumR)
+	void ChipSampleN(int n, int64_t* sumL, int64_t* sumR, int32_t* outL = NULL, int32_t* outR = NULL)
 	{
-		if (n <= 0 || !sumL || !sumR) return;
+		if (n <= 0) return;
 		enum { N = 32 };
 		ymfm::ym2608::output_data tmp[N];
 		const int nout = (int)ymfm::ym2608::OUTPUTS;
+		int written = 0;
 		while (n > 0) {
 			const int k = (n < N) ? n : N;
 			chip.generate(tmp, (uint32_t)k);
@@ -1483,8 +1499,13 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 				const int32_t a = tmp[i].data[0];
 				const int32_t b = tmp[i].data[1 % nout];
 				const int32_t c = tmp[i].data[2 % nout];
-				*sumL += a + c;
-				*sumR += b + c;
+				const int32_t sL = a + c;
+				const int32_t sR = b + c;
+				if (sumL) *sumL += sL;
+				if (sumR) *sumR += sR;
+				if (outL) outL[written] = sL;
+				if (outR) outR[written] = sR;
+				written++;
 			}
 			n -= k;
 		}
@@ -1532,20 +1553,48 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 		}
 		/* 間引きだけだと SSG ノイズ LFSR がエイリアスしてボソボソになる。
 		   1 host sample 分の chip 出力を平均してから出す。
-		   generate(1) を22回回すと音声スレッドが遅れ、ホストの KPI リングが
+		   本数を 22 と 23 で切り替えると窓長が約 300Hz で揺れ、高音の利得だけ震える。
+		   窓は常に chipRate/hostRate サンプル（端数は前後のサンプルで分ける）。
+		   generate(1) を回すと音声スレッドが遅れ、ホストの KPI リングが
 		   ゼロ埋めして極短無音が連続する。必要数をまとめて generate する。 */
-		int nGen = 0;
-		chipAcc += (int64_t)chipRate;
-		while (chipAcc >= (int64_t)hostRate) {
-			chipAcc -= (int64_t)hostRate;
-			nGen++;
+		const uint64_t step = chipStepQ ? chipStepQ : (1ull << 32);
+		uint64_t need = step;
+		int64_t accL = 0, accR = 0;
+		if (chipRemQ) {
+			const uint64_t take = (need < chipRemQ) ? need : (uint64_t)chipRemQ;
+			accL += (int64_t)chipHoldL * (int64_t)take;
+			accR += (int64_t)chipHoldR * (int64_t)take;
+			chipRemQ = (uint32_t)((uint64_t)chipRemQ - take);
+			need -= take;
 		}
-		if (nGen > 0) {
-			int64_t sumL = 0, sumR = 0;
-			ChipSampleN(nGen, &sumL, &sumR);
-			curL = (int32_t)(sumL / nGen);
-			curR = (int32_t)(sumR / nGen);
+		if (need) {
+			const uint64_t nFull = need >> 32;
+			const uint32_t frac = (uint32_t)need;
+			uint32_t nGen = (uint32_t)nFull + (frac ? 1u : 0u);
+			if (nGen > 160) nGen = 160;
+			int32_t bufL[160];
+			int32_t bufR[160];
+			ChipSampleN((int)nGen, NULL, NULL, bufL, bufR);
+			uint32_t i = 0;
+			uint64_t fullLeft = nFull;
+			while (fullLeft && i < nGen) {
+				accL += (int64_t)bufL[i] * ((int64_t)1 << 32);
+				accR += (int64_t)bufR[i] * ((int64_t)1 << 32);
+				fullLeft--;
+				i++;
+			}
+			if (frac && i < nGen) {
+				accL += (int64_t)bufL[i] * (int64_t)frac;
+				accR += (int64_t)bufR[i] * (int64_t)frac;
+				chipHoldL = bufL[i];
+				chipHoldR = bufR[i];
+				chipRemQ = (uint32_t)(0u - frac);
+			} else {
+				chipRemQ = 0;
+			}
 		}
+		curL = (int32_t)(accL / (int64_t)step);
+		curR = (int32_t)(accR / (int64_t)step);
 		int32_t l = curL, r = curR;
 		if (playFmMode == 2)
 			MixRhythm(&l, &r);
@@ -1558,6 +1607,7 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 	{
 		memset(beep, 0, sizeof(beep));
 		beepTdm = -1;
+		memset(ssgFlg, 0, sizeof(ssgFlg));
 		memset(regWritePend, 0, sizeof(regWritePend));
 		memset(regWriteSeen, 0, sizeof(regWriteSeen));
 		if (playFmMode == 0) {
@@ -1636,7 +1686,7 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 		samplesLeftInTick = 0;
 		mixHave = 0;
 		mixPos = 0;
-		chipAcc = 0;
+		chipRemQ = 0;
 		for (int ch = 0; ch < 12; ch++) {
 			waitb[ch] = 0;
 			loopSp[ch] = 0;
@@ -1842,6 +1892,8 @@ bool SasamiFmPlayer::Open(const SasamiSong& song, uint32_t sampleRate, const wch
 	} else {
 		m->chipRate = m->hostRate;
 	}
+	m->chipStepQ = m->hostRate ? (((uint64_t)m->chipRate << 32) / m->hostRate) : (1ull << 32);
+	if (m->chipStepQ == 0) m->chipStepQ = 1ull << 32;
 	strncpy_s(m_title, song.titleSjis, _TRUNCATE);
 	{
 		m->measureLen = 1;
@@ -1916,13 +1968,16 @@ uint32_t SasamiFmPlayer::Render(int16_t* interleavedStereo, uint32_t frames)
 	if (!m || !interleavedStereo || frames == 0) return 0;
 	if (m->eofSent && m->mixPos >= m->mixHave) return 0;
 
-	/* MPY と同じく大きめの内部バッファで生成し、ホストへは要求分だけ渡す。
-	   4ms ずつ Tick/key-on すると短時間に同じ発音が連打される。 */
+	/* 8192 を先に作ると、ホストが数百サンプルしか要らないコールバックの中で
+	   チップを一周分回し、KPI のリングがゼロ埋めして高音だけが揺れる。
+	   要求分だけ作る。tick 状態は Impl に残るので短い呼び出しでも連打にはならない。 */
 	uint32_t out = 0;
 	while (out < frames) {
 		if (m->mixPos >= m->mixHave) {
 			if (m->eofSent) break;
-			const uint32_t n = RenderUnlocked(m->mixBuf, (uint32_t)Impl::MIX_FRAMES);
+			uint32_t chunk = frames - out;
+			if (chunk > (uint32_t)Impl::MIX_FRAMES) chunk = (uint32_t)Impl::MIX_FRAMES;
+			const uint32_t n = RenderUnlocked(m->mixBuf, chunk);
 			m->mixHave = n;
 			m->mixPos = 0;
 			if (n == 0) {

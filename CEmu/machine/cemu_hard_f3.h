@@ -64,6 +64,8 @@ public:
 
 	int cpuHz_;
 	int esHz_;
+	/* 1 のとき、空きリスト先頭 $136 が 0 ならプールを繋ぎ直す。0x21 と 0x0C は 0。 */
+	int nodeRefill_;
 
 private:
 	void RebuildOtisBanks();
@@ -75,6 +77,7 @@ private:
 	void DpramRingWriteByte(unsigned byteOff, uint8_t data);
 	void EnqueueRingPacket(const uint8_t* bytes, int nbytes);
 	void EnsureHostRing();
+	void RefillFreeNodes();
 
 	enum {
 		kOsramBytes = 0x10000,

@@ -1836,10 +1836,17 @@ void CHardFm7::RunSubroutine(uint16_t addr, int maxSteps, int clockChips)
 			break;
 		const unsigned long dc = cpu_.cycles - c0;
 		if (dc && clockChips) {
-			if (chipOpn_ && cpuHz_ > 0)
-				chipOpn_->AdvanceClocks(((uint64_t)dc * (uint64_t)opnHz_) / (uint64_t)cpuHz_ + 1u);
-			if (chipAy_ && cpuHz_ > 0)
-				chipAy_->AdvanceClocks(((uint64_t)dc * (uint64_t)ayHz_) / (uint64_t)cpuHz_ + 1u);
+			/* 商が 0 のときだけ 1 クロック。毎命令 +1 だとサブルーチン中の音源が速くなる。 */
+			if (chipOpn_ && cpuHz_ > 0) {
+				uint64_t ticks = ((uint64_t)dc * (uint64_t)opnHz_) / (uint64_t)cpuHz_;
+				if (ticks == 0) ticks = 1;
+				chipOpn_->AdvanceClocks(ticks);
+			}
+			if (chipAy_ && cpuHz_ > 0) {
+				uint64_t ticks = ((uint64_t)dc * (uint64_t)ayHz_) / (uint64_t)cpuHz_;
+				if (ticks == 0) ticks = 1;
+				chipAy_->AdvanceClocks(ticks);
+			}
 			cpuCycles_ += dc;
 		}
 		if (before != retPc && cpu_.pc.w == retPc)

@@ -34,6 +34,7 @@ CDriverF3::CDriverF3()
 	, hitDisp_(0)
 	, hitTick_(0)
 	, seqTickAcc_(0)
+	, seqFastAcc_(0)
 	, seqCalls_(0)
 	, irq6Vec_(0)
 	, delayGated_(0)
@@ -51,7 +52,10 @@ CDriverF3::CDriverF3()
 	, chainLoopEvery_(0)
 	, tblOffs_(0)
 	, chainPark_(0)
+	, walkEntry_(0)
+	, walking_(0)
 {
+	memset(romVec_, 0, sizeof(romVec_));
 	memset(tryCodes_, 0, sizeof(tryCodes_));
 	memset(chainSnap_, 0, sizeof(chainSnap_));
 }
@@ -106,6 +110,7 @@ int CDriverF3::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 	hitDisp_ = 0;
 	hitTick_ = 0;
 	seqTickAcc_ = 0;
+	seqFastAcc_ = 0;
 	seqCalls_ = 0;
 	irq6Vec_ = 0;
 	delayGated_ = 0;
@@ -123,6 +128,9 @@ int CDriverF3::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 	chainLoopEvery_ = 0;
 	tblOffs_ = 0;
 	chainPark_ = 0;
+	walkEntry_ = 0;
+	walking_ = 0;
+	memset(romVec_, 0, sizeof(romVec_));
 	memset(chainSnap_, 0, sizeof(chainSnap_));
 
 	songCode_ = titleCode ? titleCode : 1;
@@ -150,6 +158,11 @@ int CDriverF3::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 	f3Arabianm_ = (hw_->Read32(0x28u) == 0xC10D12u) ? 1 : 0;
 	if (!f3Arabianm_ && hw_->SoundChip())
 		CEmuChipEs5505SetSlowLpe(hw_->SoundChip(), 1);
+	/* 曲ロードが IRQ ベクタを踏む前の値。壊れたベクタへ飛ぶと以降の実行がチェインを消す。 */
+	if (!f3Arabianm_) {
+		for (int i = 0; i < 96; i++)
+			romVec_[i] = hw_->Read32((unsigned)i * 4u);
+	}
 	songCode_ = tryCodes_[0];
 	cmdIndex_ = tryCount_;
 	locked_ = 1;
@@ -163,6 +176,7 @@ int CDriverF3::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 	/* $6DFC は植えない。C12B8C はリストにあれば停止（compact + C12AD0 が 5DAA+4 を壊す）。C12E70 は常に C12C36 へ BRA して開始。 */
 	KickMailboxOnce();
 	RunCycles(cpuHz_ / 2);
+	RescueGunlockCpu();
 	/* C15538 が D4B3 をクリアし、D0F4 チェイン前に C13B94 が走るので C152B0 はキーオンゲートを見ない。チェイン生存後に武装。 */
 	ArmKeyOnGates();
 	irq6Vec_ = hw_->Read32(0x100u);
@@ -470,6 +484,151 @@ void CDriverF3::RestoreChain()
 	hw_->Write16(0xD4A6u, 1);
 }
 
+/* 鳴っている声の音量指数が 0 のとき、ノート側の 0x78 まで戻す。音量 0 はそのまま。 */
+void CDriverF3::LiftGunlockEnvelope()
+{
+	if (!hw_ || !hw_->SoundChip())
+		return;
+	CChip* chip = hw_->SoundChip();
+	int live = 0;
+	int last = -1;
+	for (int v = 0; v < 32; v++) {
+		chip->Write(0x0f, (uint32_t)v);
+		const uint16_t st = CEmuChipEs5505Read(chip, 2);
+		if (st < 0x0100u || st >= 0x8000u)
+			continue;
+		const uint16_t cr = CEmuChipEs5505PeekCr(chip, v);
+		if (cr & 3u) {
+			last = v;
+			continue;
+		}
+		live++;
+		chip->Write(0x08, 0xE0F0u);
+		chip->Write(0x09, 0xE0F0u);
+	}
+	/* チェーンが生きていて声が全部止まった曲は、最後に置いた 1 声だけ戻す。全声を起こすと 32767 で割れる。 */
+	const unsigned head = hw_->Read16(0xD0F4u);
+	if (live == 0 && last >= 0 && head >= 0xD000u && head < 0xEE00u) {
+		chip->Write(0x0f, (uint32_t)last);
+		const uint16_t cr = CEmuChipEs5505PeekCr(chip, last);
+		chip->Write(0x00, (uint32_t)((cr & 0x0ffcu) | 0x0018u));
+		chip->Write(0x08, 0xE0F0u);
+		chip->Write(0x09, 0xE0F0u);
+	}
+}
+
+/* 曲ロードが IRQ ベクタを ROM 外へ書いたら戻し、飛んだ PC をアイドルへ戻す。 */
+void CDriverF3::RescueGunlockCpu()
+{
+	if (!hw_ || f3Arabianm_ || tblOffs_)
+		return;
+	for (int i = 0; i < 96; i++) {
+		const unsigned saved = romVec_[i];
+		if (saved < 0xC00000u || saved >= 0xC80000u)
+			continue;
+		const unsigned cur = hw_->Read32((unsigned)i * 4u);
+		if (cur < 0xC00000u || cur >= 0xC80000u)
+			hw_->Write32((unsigned)i * 4u, saved);
+	}
+	const unsigned pc = (unsigned)m68k_get_reg(NULL, M68K_REG_PC);
+	if (pc >= 0xC00000u && pc < 0xC80000u)
+		return;
+	m68k_set_reg(M68K_REG_PC, 0xC10B14u);
+	m68k_set_reg(M68K_REG_SR, 0x2000);
+	m68k_clear_stopped();
+	const unsigned ssp = (unsigned)m68k_get_reg(NULL, M68K_REG_ISP);
+	if (ssp < 0x1000u || ssp >= 0xF000u)
+		m68k_set_reg(M68K_REG_ISP, 0x9E00);
+}
+
+/* ガンロックは曲を載せたあとスケジューラ STOP で止まる。待ち減算へ 1 回戻す。 */
+void CDriverF3::KickGunlockWalker()
+{
+	/* pbobble4（tbloffs 0xF3176）は既存の再生を崩さない。tbloffs 無しの基板だけ起こす。 */
+	if (!hw_ || f3Arabianm_ || tblOffs_ || seqCalls_ < 40u)
+		return;
+	if (!walkEntry_) {
+		for (unsigned a = 0xC14000u; a + 8u < 0xC16000u; a += 2u) {
+			if (hw_->Read16(a) == 0x3F38u && hw_->Read16(a + 2u) == 0xD0F4u
+				&& hw_->Read16(a - 4u) == 0x6100u) {
+				walkEntry_ = a - 4u;
+				break;
+			}
+		}
+	}
+	if (!walkEntry_)
+		return;
+	const unsigned head = hw_->Read16(0xD0F4u);
+	const unsigned tab = hw_->Read32(0xD404u);
+	if (head < 0xD000u || head >= 0xEE00u)
+		return;
+	if (tab < 0xC00000u || tab >= 0xC80000u)
+		return;
+	{
+		/* 0x400 以上は曲頭のゲート。0x8F 級のフレーズ待ちは残す。 */
+		unsigned node = head;
+		int hops = 0;
+		while (node >= 0xD000u && node < 0xEE00u && hops < 12) {
+			const unsigned w = hw_->Read16(node + 4u);
+			if (w >= 0x400u)
+				hw_->Write16(node + 4u, 0x10);
+			node = hw_->Read16(node);
+			hops++;
+		}
+	}
+	unsigned song = hw_->Read32(0xD414u);
+	if (song >= 0x40u && song < 0x40000u)
+		song += tab;
+	else if (song < 0xC00000u || song >= 0xC80000u)
+		song = 0;
+	if (song && hw_->Read32(head + 6u) < 0x40u) {
+		unsigned offs[16];
+		int nt = 0;
+		unsigned p = song + 4u;
+		for (int i = 0; i < 16; i++) {
+			const unsigned a = hw_->Read16(p);
+			const unsigned b = hw_->Read16(p + 2u);
+			p += 4u;
+			if (!a && !b)
+				break;
+			if (b >= 0x20u && b < 0x8000u)
+				offs[nt++] = b;
+		}
+		const unsigned songOff = song - tab;
+		unsigned node = head;
+		int ti = 0;
+		int hops = 0;
+		while (node >= 0xD000u && node < 0xEE00u && hops < 16 && ti < nt) {
+			if (hw_->Read32(node + 6u) < 0x40u)
+				hw_->Write32(node + 6u, songOff + offs[ti]);
+			ti++;
+			node = hw_->Read16(node);
+			hops++;
+		}
+	}
+	const unsigned pc = (unsigned)m68k_get_reg(NULL, M68K_REG_PC);
+	const int idle = (pc >= 0xC10B08u && pc < 0xC10B18u);
+	const int inWalk = (pc >= 0xC13E00u && pc < 0xC15A00u);
+	if (walking_ && idle)
+		walking_ = 0;
+	/* 歩きの途中でアイドルへ戻すと、同じ頭を読み直して音符が進まない。 */
+	if (walking_ && inWalk)
+		return;
+	if (!idle)
+		return;
+	unsigned ssp = (unsigned)m68k_get_reg(NULL, M68K_REG_ISP);
+	/* 0x9E00 へ付け替えると例外がリセットへ落ち、音量 0 の初期化が鳴っている音を消す。 */
+	if (ssp < 0x1000u || ssp >= 0xF000u)
+		return;
+	ssp -= 4u;
+	hw_->Write32(ssp, 0xC10B10u);
+	m68k_set_reg(M68K_REG_ISP, ssp);
+	m68k_set_reg(M68K_REG_PC, walkEntry_);
+	m68k_set_reg(M68K_REG_SR, 0x2700);
+	m68k_clear_stopped();
+	walking_ = 1;
+}
+
 /* 起動は遅延 D4A6。頭を落としたあとは 30Hz。中休符はホストが潰す。 */
 void CDriverF3::TickSeqHost()
 {
@@ -480,9 +639,9 @@ void CDriverF3::TickSeqHost()
 			hw_->Write16(obj, 0x10);
 		const unsigned head = hw_->Read16(0xD0F4u);
 		if (head >= 0xD000u && head < 0xEE00u) {
-			if (seqCalls_ <= 8u)
-				ArmKeyOnGates();
-			/* 待ちを 1 に潰すと音符がクリックになる。arabianm はファームの減算に任せる。 */
+			/* チェインは曲注入のあと増える。最初の 8 回だけだと 0x21 の即時トラックが bit4 無しのまま C152B0 を通り、ES5505 に届かない。 */
+			ArmKeyOnGates();
+			/* 待ちを 1 に潰すと音符がクリックになる。0x400 未満（フレーズ長）は残す。それ以上は頭の無音だけで、旋律の E6 は 0x90–0x120。 */
 			if (chainLoopEvery_ && chainSnapN_ == 0 && seqCalls_ >= 8u) {
 				SnapChainOnce();
 				if (chainSnapN_ >= 6)
@@ -499,8 +658,11 @@ void CDriverF3::TickSeqHost()
 				&& seqCalls_ >= restartEvery_
 				&& (seqCalls_ % restartEvery_) == 0u)
 				hw_->SetSongCommand(songCode_);
-			/* トランポリンは D4A6 が非 0 のときだけシーケンサを 1 回呼んでクリアする。30Hz で 1 を立てる。 */
+			/* トランポリンは D4A6 が非 0 のときだけシーケンサを 1 回呼び、待ちからその値を引く。
+			   0 ちょうどでのみ次の音符へ進む。2 以上は 0 を飛び越して旋律が止まる。 */
 			hw_->Write16(0xD4A6u, 1);
+			/* 未使用ノードだけ戻しても、0x0E の 2 発目が消える。ES 書き込みは増えない。 */
+			hw_->nodeRefill_ = 0;
 			/* ループ変位が曲バンクを外へ出るとストリームが 0xFE**** になり旋律が死ぬ。最初の正常オフセットへ戻してフレーズを回す。 */
 			{
 				static unsigned snapSong = 0xffffffffu;
@@ -511,16 +673,28 @@ void CDriverF3::TickSeqHost()
 					snapSong = songCode_;
 					snapN = 0;
 				}
-				if (snapN == 0 && seqCalls_ >= 4u) {
+				/* 最初の数 tick で一番大きいストリームを覚える。E9 が全トラックを
+				   0x8E に揃えたら、曲頭のオフセットへ戻す。0x0C は 0x2000 台のまま。 */
+				if (seqCalls_ <= 8u) {
 					unsigned hp = hw_->Read16(0xD0F4u);
-					while (hp >= 0xD000u && hp < 0xEE00u && snapN < 12) {
+					int hops = 0;
+					while (hp >= 0xD000u && hp < 0xEE00u && hops < 12) {
 						const uint32_t s = hw_->Read32(hp + 6u);
-						if (s >= 0x40u && s < 0x40000u) {
-							snapNode[snapN] = (uint16_t)hp;
-							snapStrm[snapN] = s;
-							snapN++;
+						int found = -1;
+						for (int i = 0; i < snapN; i++) {
+							if (snapNode[i] == (uint16_t)hp) { found = i; break; }
+						}
+						if (s >= 0x200u && s < 0x40000u) {
+							if (found < 0 && snapN < 12) {
+								snapNode[snapN] = (uint16_t)hp;
+								snapStrm[snapN] = s;
+								snapN++;
+							} else if (found >= 0 && s > snapStrm[found]) {
+								snapStrm[found] = s;
+							}
 						}
 						hp = hw_->Read16(hp);
+						hops++;
 					}
 				}
 				for (int i = 0; i < snapN; i++) {
@@ -528,16 +702,95 @@ void CDriverF3::TickSeqHost()
 					if (s >= 0x40000u)
 						hw_->Write32(snapNode[i] + 6u, snapStrm[i]);
 				}
+				/* 起動時のチェインを覚える。ノードが 3 未満まで落ちたときだけ繋ぎ直す。
+				   0x0C は 8 本のままなのでここを通らない。1 本だけ次ポインタが一時的に
+				   空になる正規の繋ぎ替えは触らない。 */
+				{
+					static unsigned linkSong = 0xffffffffu;
+					static uint16_t linkNode[12];
+					static uint16_t linkNext[12];
+					static int linkN = 0;
+					if (linkSong != songCode_) {
+						linkSong = songCode_;
+						linkN = 0;
+					}
+					unsigned hp = hw_->Read16(0xD0F4u);
+					int live = 0;
+					while (hp >= 0xD000u && hp < 0xEE00u && live < 16) {
+						live++;
+						hp = hw_->Read16(hp);
+					}
+					if (linkN == 0 && live >= 4 && seqCalls_ <= 30u) {
+						hp = hw_->Read16(0xD0F4u);
+						while (hp >= 0xD000u && hp < 0xEE00u && linkN < 12) {
+							const unsigned nxt = hw_->Read16(hp);
+							linkNode[linkN] = (uint16_t)hp;
+							linkNext[linkN] = (uint16_t)nxt;
+							linkN++;
+							if (nxt < 0xD000u || nxt >= 0xEE00u)
+								break;
+							hp = nxt;
+						}
+						if (linkN < 4)
+							linkN = 0;
+					}
+					if (linkN >= 4 && live < 3) {
+						for (int i = 0; i < linkN; i++) {
+							if (linkNext[i] >= 0xD000u && linkNext[i] < 0xEE00u)
+								hw_->Write16(linkNode[i], linkNext[i]);
+						}
+						hw_->Write16(0xD0F4u, linkNode[0]);
+					}
+					/* 先頭の次ポインタだけが D000 外へ飛ぶと live が 1 になる。毎 tick 戻す。 */
+					for (int i = 0; i < linkN; i++) {
+						const unsigned cur = hw_->Read16(linkNode[i]);
+						const unsigned want = linkNext[i];
+						int known = (cur == want) ? 1 : 0;
+						if (!known && (songCode_ & 0xffu) == 0x0Cu) {
+							for (int j = 0; j < linkN; j++) {
+								if (cur == linkNode[j] || cur == linkNext[j]) {
+									known = 1;
+									break;
+								}
+							}
+						} else if (cur >= 0xD000u && cur < 0xEE00u) {
+							known = 1;
+						}
+						if (want >= 0xD000u && want < 0xEE00u && !known)
+							hw_->Write16(linkNode[i], (uint16_t)want);
+						/* 0x1000 以上は曲頭の無音。0x90–0xFFF はフレーズ休符。
+						   0x0C の 0x2E80 はゲートなので残す。 */
+						const unsigned wt = hw_->Read16(linkNode[i] + 4u);
+						if ((songCode_ & 0xffu) == 0x0Cu) {
+							if (wt >= 0x8000u)
+								hw_->Write16(linkNode[i] + 4u, 1);
+						} else if (wt >= 0xF000u) {
+							hw_->Write16(linkNode[i] + 4u, 1);
+						} else if (wt >= 0x200u && wt < 0x8000u) {
+							hw_->Write16(linkNode[i] + 4u, 0x18);
+						}
+					}
+				}
 			}
 			{
+				/* パーサの戻りは SSP 上。シーケンサ中にアイドル値へ戻すと RTS が死ぬ。 */
+				const unsigned pcSsp = (unsigned)m68k_get_reg(NULL, M68K_REG_PC);
+				const int inParse = (pcSsp >= 0xC14600u && pcSsp < 0xC15A00u);
 				const unsigned ssp = (unsigned)m68k_get_reg(NULL, M68K_REG_ISP);
-				if (ssp < 0x400u || ssp >= 0xFFFF00u)
+				if (!inParse && (ssp < 0x400u || ssp >= 0xFFFF00u))
 					m68k_set_reg(M68K_REG_ISP, 0x9E00);
 			}
 			if (irq6Vec_ && hw_->Read32(0x100u) == 0)
 				hw_->Write32(0x100u, irq6Vec_);
 		}
 	} else {
+		RescueGunlockCpu();
+		if (tblOffs_ == 0xF3176u) {
+			/* ガンロックが曲表ポインタを ES 空間へ落とすと、以降の曲番号が空になる。 */
+			const unsigned tab = hw_->Read32(0xD404u);
+			if (tab < 0xC00000u || tab >= 0xC80000u)
+				hw_->Write32(0xD404u, 0xC20000u);
+		}
 		const unsigned cpuPc = (unsigned)m68k_get_reg(NULL, M68K_REG_PC);
 		if (chainPark_ && seqCalls_ >= 150u) {
 			if (cpuPc < 0xC00000u || cpuPc >= 0xC80000u) {
@@ -564,7 +817,7 @@ void CDriverF3::TickSeqHost()
 			m68k_set_reg(M68K_REG_PC, idlePark_ ? idlePark_ : 0xC10B14u);
 			m68k_set_reg(M68K_REG_SR, 0x2000);
 		}
-		if (cpuPc >= 0xC14F00u && cpuPc < 0xC15480u && seqCalls_ >= 180u
+		if (!walking_ && cpuPc >= 0xC14F00u && cpuPc < 0xC15480u && seqCalls_ >= 180u
 			&& (seqCalls_ % 16u) == 15u) {
 			m68k_set_reg(M68K_REG_PC, idlePark_ ? idlePark_ : 0xC10B14u);
 			m68k_set_reg(M68K_REG_SR, 0x2000);
@@ -575,9 +828,16 @@ void CDriverF3::TickSeqHost()
 			hw_->Write8(0xD4F9u, 1);
 		{
 			const unsigned bank = hw_->Read32(0xD408u);
-			if (bank >= 0xC00000u && bank < 0xC80000u)
-				hw_->Write32(0xD0E8u, bank);
-			else if (tblOffs_ && tblOffs_ < 0x180000u) {
+			if (bank >= 0xC00000u && bank < 0xC80000u) {
+				/* D0E8 は曲によっては音量カウンタ。tbloffs 無しの基板へバンクを書くと 0x0FF0 のまま無音になる。 */
+				if (tblOffs_)
+					hw_->Write32(0xD0E8u, bank);
+			}
+			else if (tblOffs_ == 0xF3176u) {
+				/* tbloffs 0xF3176 は窓の外。曲表は 0xC20000。 */
+				hw_->Write32(0xD408u, 0xC20000u);
+				hw_->Write32(0xD0E8u, 0xC20000u);
+			} else if (tblOffs_ && tblOffs_ < 0x180000u) {
 				const unsigned t = 0xC00000u + tblOffs_;
 				hw_->Write32(0xD408u, t);
 				hw_->Write32(0xD0E8u, t);
@@ -688,17 +948,13 @@ void CDriverF3::TickSeqHost()
 			}
 		}
 		hw_->Write16(0xD4A6u, 1);
+		KickGunlockWalker();
 		if (demoRestart_ && restartEvery_
 			&& (expiredHead_ || chainPark_)
 			&& seqCalls_ >= restartEvery_
 			&& (seqCalls_ % restartEvery_) == 0u)
 			hw_->SetSongCommand(songCode_);
 		PostTypeE();
-		{
-			const unsigned ssp = (unsigned)m68k_get_reg(NULL, M68K_REG_ISP);
-			if (ssp < 0x400u || ssp >= 0xFFFF00u)
-				m68k_set_reg(M68K_REG_ISP, 0x9E00);
-		}
 		if (irq6Vec_ && hw_->Read32(0x100u) == 0)
 			hw_->Write32(0x100u, irq6Vec_);
 		{
@@ -728,6 +984,11 @@ unsigned CDriverF3::MapSongCode(unsigned code)
 	}
 	const unsigned lo = code & 0xffu;
 	const unsigned hi = (code >> 8) & 0xffu;
+	if (tblOffs_ == 0xF3176u) {
+		const unsigned tabNow = hw_->Read32(0xD404u);
+		if (tabNow < 0xC00000u || tabNow >= 0xC80000u)
+			hw_->Write32(0xD404u, 0xC20000u);
+	}
 	if (lo == 0x5Du) {
 		demoRestart_ = 1;
 		restartEvery_ = 120u;
@@ -774,7 +1035,19 @@ unsigned CDriverF3::MapSongCode(unsigned code)
 		return 0x0Bu;
 	}
 	if (hi == 0 && lo >= 0x7Du && lo <= 0x88u) {
-		/* pbobble4 BGM。$5C 減算せず、短い曲はチェインで回す。 */
+		if (tblOffs_ == 0xF3176u) {
+			const unsigned tabNow = hw_->Read32(0xD404u);
+			if (tabNow < 0xC00000u || tabNow >= 0xC80000u)
+				hw_->Write32(0xD404u, 0xC20000u);
+			/* pbobble4 の hoot 番号は曲表の途中を指す。実体はスロット 0x00 から。
+			   ガンロック側は放置すると CPU が曲の外へ出るので、頭へ戻して回す。 */
+			chainLoopEvery_ = 90u;
+			chainPark_ = 1;
+			demoRestart_ = 1;
+			restartEvery_ = 90u;
+			return lo - 0x7Du;
+		}
+		/* 他基板の 0x7D 帯。短い曲はチェインで回す。 */
 		chainLoopEvery_ = 90u;
 		chainPark_ = 1;
 		demoRestart_ = 1;
@@ -896,19 +1169,12 @@ unsigned CDriverF3::MapSongCode(unsigned code)
 		restartEvery_ = 90u;
 		return 0x1Cu;
 	}
-	if (tblOffs_ == 0xF3176u && hi == 0 && lo == 0x7Eu) {
+	if (tblOffs_ == 0xF3176u && hi == 0x01u && lo == 0xB3u) {
 		chainLoopEvery_ = 90u;
 		chainPark_ = 1;
 		demoRestart_ = 1;
 		restartEvery_ = 90u;
-		return 0x0Au;
-	}
-	if (tblOffs_ == 0xF3176u && hi == 0 && lo == 0x7Fu) {
-		chainLoopEvery_ = 90u;
-		chainPark_ = 1;
-		demoRestart_ = 1;
-		restartEvery_ = 90u;
-		return 0x05u;
+		return 0x0Cu;
 	}
 	if (tblOffs_ == 0x27006u && hi == 0 && lo == 0x39u) {
 		chainLoopEvery_ = 90u;
@@ -1199,12 +1465,123 @@ void CDriverF3::RunCycles(int cycles)
 	while (cycles > 0) {
 		int slice = cycles;
 		if (slice > 4000) slice = 4000;
+		/* ユーザモードの A7 は $FFFFFF から降りて D404 と IRQ ベクタを踏む。tbloffs 無しだけ戻す。 */
+		if (!f3Arabianm_ && !tblOffs_) {
+			const unsigned sr = (unsigned)m68k_get_reg(NULL, M68K_REG_SR);
+			if ((sr & 0x2000u) == 0) {
+				/* 短いユーザ呼び出しは USP が $FFFFFFxx に留まる。降り続けたら D404 を踏む。 */
+				const unsigned usp = (unsigned)m68k_get_reg(NULL, M68K_REG_USP) & 0xffffffu;
+				if (usp < 0xFFF000u)
+					m68k_set_reg(M68K_REG_SR, sr | 0x2000u);
+			}
+			if (seqCalls_ >= 20u) {
+				static unsigned pinSong = 0xffffffffu;
+				static unsigned pinTab = 0, pinId = 0, pinPtr = 0, pinHead = 0;
+				if (pinSong != songCode_) {
+					pinSong = songCode_;
+					pinTab = pinId = pinPtr = pinHead = 0;
+				}
+				const unsigned tab = hw_->Read32(0xD404u);
+				const unsigned id = hw_->Read16(0xD40Eu);
+				const unsigned ptr = hw_->Read32(0xD414u);
+				const unsigned head = hw_->Read16(0xD0F4u);
+				const int tabOk = (tab >= 0xC00000u && tab < 0xC80000u);
+				const int headOk = (head >= 0xD000u && head < 0xEE00u);
+				const int ptrOk = (ptr >= 0x40u && ptr < 0x40000u);
+				const int idOk = ((id & 0xffu) == (songCode_ & 0xffu));
+				if (tabOk && headOk && ptrOk && idOk) {
+					pinTab = tab;
+					pinId = id;
+					pinPtr = ptr;
+					pinHead = head;
+				} else if (pinTab) {
+					if (!tabOk)
+						hw_->Write32(0xD404u, pinTab);
+					if (!idOk)
+						hw_->Write16(0xD40Eu, (uint16_t)pinId);
+					if (!ptrOk)
+						hw_->Write32(0xD414u, pinPtr);
+					if (!headOk)
+						hw_->Write16(0xD0F4u, (uint16_t)pinHead);
+				}
+			}
+		}
 		hw_->TickDuart(slice);
 		if (hw_->DuartIrqPending())
 			m68k_set_irq(M68K_IRQ_6);
 		else
 			m68k_set_irq(M68K_IRQ_NONE);
 		const int ran = m68k_execute(slice);
+		{
+			/* C147B8 は未知オペコードの正ワード飛ばし。A0 が曲バンクを出ると 0 を
+			   読み続けて戻らない。今のノードのストリームから次のコマンドへ戻す。
+			   PC と A6 は動かさない。0x0C の再生中 PC は C146D8 で、ここを通らない。 */
+			static int badParse = 0;
+			if (!(f3Arabianm_ && seqCalls_ >= 90u)) {
+				badParse = 0;
+			} else {
+				const unsigned pcNow = (unsigned)m68k_get_reg(NULL, M68K_REG_PC);
+				const unsigned a0Now = (unsigned)m68k_get_reg(NULL, M68K_REG_A0);
+				const unsigned base = hw_->Read32(0xD404u);
+				const int bankOk = (base >= 0xC00000u && base < 0xC80000u);
+				const int skipping = (pcNow >= 0xC147B8u && pcNow < 0xC147C0u);
+				const int outside = bankOk && (a0Now < base || a0Now >= base + 0x20000u);
+				if (skipping && outside) badParse++;
+				else badParse = 0;
+				if (badParse > 6) {
+					badParse = 0;
+					unsigned node = (unsigned)m68k_get_reg(NULL, M68K_REG_A6);
+					unsigned strm = 0;
+					if (node >= 0xD000u && node < 0xEE00u)
+						strm = hw_->Read32(node + 6u);
+					if (strm < 0x40u || strm >= 0x40000u) {
+						unsigned best = 0;
+						unsigned bestW = 0xffffu;
+						unsigned hp = hw_->Read16(0xD0F4u);
+						int hops = 0;
+						while (hp >= 0xD000u && hp < 0xEE00u && hops < 12) {
+							const unsigned w = hw_->Read16(hp + 4u);
+							const unsigned s = hw_->Read32(hp + 6u);
+							if (s >= 0x40u && s < 0x40000u && w < bestW) {
+								bestW = w;
+								best = hp;
+								strm = s;
+							}
+							hp = hw_->Read16(hp);
+							hops++;
+						}
+						node = best;
+					}
+					if (node && strm >= 0x40u && strm < 0x40000u) {
+						unsigned addr = (base + strm) & ~1u;
+						for (int k = 0; k < 96; k++) {
+							if (addr < base || addr + 1u >= base + 0x20000u)
+								break;
+							if (hw_->Read16(addr) & 0x8000u)
+								break;
+							addr += 2u;
+						}
+						m68k_set_reg(M68K_REG_A0, addr);
+					}
+				}
+				/* 1 回のパーサ呼び出しが数十ミリ秒返らないと、他トラックの待ちが減らない。
+				   停止ビットを立てて C146A4（A0 を戻して RTS）へ抜け、次のノードへ進める。
+				   0x0C は短い和音のあと E6 で戻るので対象外。 */
+				static int heldParse = 0;
+				if ((songCode_ & 0xffu) == 0x0Cu || seqCalls_ < 90u) {
+					heldParse = 0;
+				} else if (pcNow >= 0xC14680u && pcNow < 0xC14810u) {
+					if (++heldParse > 200) {
+						heldParse = 0;
+						const unsigned d463 = hw_->Read16(0xD463u);
+						hw_->Write16(0xD463u, (uint16_t)(d463 | 0x0001u));
+						m68k_set_reg(M68K_REG_PC, 0xC146A4u);
+					}
+				} else {
+					heldParse = 0;
+				}
+			}
+		}
 		if (chainPark_ && seqCalls_ >= 150u) {
 			const unsigned pcBad = (unsigned)m68k_get_reg(NULL, M68K_REG_PC);
 			if (pcBad < 0xC00000u || pcBad >= 0xC80000u) {
@@ -1220,12 +1597,21 @@ void CDriverF3::RunCycles(int cycles)
 			const int stuck = (ran == slice);
 			/* C14884–C14A10 を IPL7 のまま走らせる。ここで落とすと IRQ6 がネストして C14A6C で止まり live ボイスが無音になる。 */
 			/* C14884–C14A10 を IPL7 のまま走らせる。C14A6C の正ワード待ちは yield させる。gunlock シーケンサは +0xB0 の C14AC0、キーオンは C15360。 */
+			/* 音符パーサ C146AE とキーオン C152B0 で IPL を落とすと IRQ6 がネストし、SSP が一周して RAM が 3C3C で埋まる。待ち減算から ES 書き込みまで割り込み禁止のまま通す。 */
 			const int inSeq = f3Arabianm_
-				? ((pc >= 0xC14884u && pc < 0xC14A60u) ? 1 : 0)
-				: ((pc >= 0xC14884u && pc < 0xC15480u) ? 1 : 0);
+				? ((pc >= 0xC14600u && pc < 0xC15A00u) ? 1 : 0)
+				: (tblOffs_
+					? ((pc >= 0xC14884u && pc < 0xC15480u) ? 1 : 0)
+					: ((pc >= 0xC13E00u && pc < 0xC15A00u) ? 1 : 0));
 			/* arabianm も IRQ ハンドラ中に IPL を落とすと IRQ6 がネストして SSP が一周する。 */
-			const int inIrq = (pc >= 0xC10E00u && pc < 0xC11200u) ? 1 : 0;
-			if (ipl >= 6u && !inSeq && !inIrq && (stuck || ran < 256))
+			/* C10E68 は C112A8 / C1125E / C103BC / C10D26 へ jmp する。そこも割り込み禁止のままにする。 */
+			const int inIrq = (pc >= 0xC10E00u && pc < 0xC11200u)
+				|| (f3Arabianm_ && (
+					(pc >= 0xC103A0u && pc < 0xC10440u)
+					|| (pc >= 0xC10D20u && pc < 0xC10D80u)
+					|| (pc >= 0xC11240u && pc < 0xC11400u))) ? 1 : 0;
+			const int inTrap = (f3Arabianm_ && pc >= 0xC10B00u && pc < 0xC10E00u) ? 1 : 0;
+			if (ipl >= 6u && !inSeq && !inIrq && !inTrap && (stuck || ran < 256))
 				m68k_set_reg(M68K_REG_SR, (sr | 0x2000u) & ~0x0700u);
 		}
 		{
@@ -1294,11 +1680,23 @@ int CDriverF3::Render(int16_t* stereo, int frames)
 			seqTickAcc_ = 0;
 			TickSeqHost();
 		}
+		/* 60Hz の 1 減算だとフレーズ待ち 0x90 が数秒になる。起動後、サンプル間に 1 を立てて
+		   遅延ループに消費させる。D4A6 は 1 のまま。2 以上は待ちの 0 を飛び越して旋律が止まる。 */
+		if (f3Arabianm_ && locked_ && seqCalls_ >= 90u && hostRate_ > 480) {
+			seqFastAcc_ += 1;
+			if (seqFastAcc_ >= hostRate_ / 480) {
+				seqFastAcc_ = 0;
+				hw_->Write16(0xD4A6u, 1);
+			}
+		}
 		cpuAcc_ += (int64_t)cpuHz_;
 		int cyclesPerSample = (int)(cpuAcc_ / (int64_t)hostRate_);
 		cpuAcc_ %= (int64_t)hostRate_;
 		if (cyclesPerSample < 1) cyclesPerSample = 1;
 		RunCycles(cyclesPerSample);
+		/* CPU が音量を指数 0 に戻したあと、合成の直前でノート速度まで戻す。 */
+		if (!f3Arabianm_ && !tblOffs_ && seqCalls_ >= 40u)
+			LiftGunlockEnvelope();
 		chip->Render(stereo + i * 2, 1);
 		if (!locked_) {
 			const int16_t l = stereo[i * 2];

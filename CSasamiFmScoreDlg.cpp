@@ -2643,6 +2643,240 @@ LRESULT CSasamiFmScoreDlg::OnNoteProps(WPARAM w, LPARAM)
 
 void CSasamiFmScoreDlg::OnBnClickedHelp() { CSasamiCmdHelpDlg::Show(this, CSasamiCmdHelpDlg::kTabScore2); }
 
+struct FmMidEv {
+	uint32_t tick;
+	uint8_t ord;
+	uint8_t ch;
+	uint8_t note;
+	uint8_t vel;
+	uint8_t isTempo;
+	uint16_t bpm;
+};
+
+static int FmMidEvCmp(const void* a, const void* b)
+{
+	const FmMidEv* x = (const FmMidEv*)a;
+	const FmMidEv* y = (const FmMidEv*)b;
+	if (x->tick < y->tick) return -1;
+	if (x->tick > y->tick) return 1;
+	if (x->ord < y->ord) return -1;
+	if (x->ord > y->ord) return 1;
+	return 0;
+}
+
+static int FmSmfVlq(uint8_t* d, uint32_t value)
+{
+	uint8_t b[4];
+	b[0] = (uint8_t)(value & 0x7F);
+	int n = 1;
+	value >>= 7;
+	while (value && n < 4) {
+		b[n++] = (uint8_t)((value & 0x7F) | 0x80);
+		value >>= 7;
+	}
+	for (int i = 0; i < n; i++)
+		d[i] = b[n - 1 - i];
+	return n;
+}
+
+static int FmSmfPut(uint8_t* d, uint32_t cap, uint32_t* n, const uint8_t* s, uint32_t sn)
+{
+	if (*n + sn > cap) return 0;
+	memcpy(d + *n, s, sn);
+	*n += sn;
+	return 1;
+}
+
+void CSasamiFmScoreDlg::ExportStandardMidi()
+{
+	const int nEv = m_doc.evCount;
+	if (nEv <= 0) {
+		m_status.SetWindowText(LL14(L"書き出す音符がありません", L"No notes to export",
+			L"Aucune note", L"Nessuna nota", L"No hay notas", L"내보낼 음표 없음", L"没有可导出的音符",
+			L"لا توجد نغمات", L"Нет нот", L"Keine Noten", L"Sem notas", L"Geen noten", L"Brak nut", L"Nota yok"));
+		return;
+	}
+	FmMidEv* ev = (FmMidEv*)HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(FmMidEv) * (size_t)nEv * 2u + 8u);
+	if (!ev) return;
+	int n = 0;
+	const int capEv = nEv * 2 + 4;
+	uint8_t lastVol[16];
+	for (int i = 0; i < 16; i++) lastVol[i] = 100;
+	for (int i = 0; i < nEv; i++) {
+		const ScEvent& e = m_doc.ev[i];
+		if (e.kind == SC_EV_FM_VOL && e.ch < 16) {
+			int v = (e.b == 1) ? ((int)e.a * 8) : (127 - (int)e.a);
+			if (v < 1) v = 1;
+			if (v > 127) v = 127;
+			lastVol[e.ch] = (uint8_t)v;
+		}
+		if (e.kind == SC_EV_FM_TEMPO && n < capEv) {
+			int t = e.a | (e.b << 8);
+			int bpm = (t > 0) ? (int)((13000.0 * 120.0) / (double)t + 0.5) : 120;
+			if (bpm < 20) bpm = 20;
+			if (bpm > 400) bpm = 400;
+			ev[n].tick = e.tick;
+			ev[n].ord = 0;
+			ev[n].isTempo = 1;
+			ev[n].bpm = (uint16_t)bpm;
+			n++;
+		}
+		if ((e.kind == SC_EV_FM_NOTE || e.kind == SC_EV_FM_LEGATO) && n + 1 < capEv) {
+			const int oct = (e.a >> 4) & 15;
+			const int sc = e.a & 15;
+			if (sc > 11) continue;
+			int midi = (oct + 1) * 12 + sc;
+			if (midi < 0) midi = 0;
+			if (midi > 127) midi = 127;
+			const uint8_t ch = (uint8_t)(e.ch & 15);
+			uint32_t dur = e.dur ? e.dur : (uint32_t)(SC_PPQN / 4);
+			if (dur < 1) dur = 1;
+			ev[n].tick = e.tick;
+			ev[n].ord = 2;
+			ev[n].ch = ch;
+			ev[n].note = (uint8_t)midi;
+			ev[n].vel = lastVol[ch];
+			n++;
+			ev[n].tick = e.tick + dur;
+			ev[n].ord = 1;
+			ev[n].ch = ch;
+			ev[n].note = (uint8_t)midi;
+			n++;
+		}
+	}
+	if (n <= 0) {
+		HeapFree(GetProcessHeap(), 0, ev);
+		m_status.SetWindowText(LL14(L"書き出す音符がありません", L"No notes to export",
+			L"Aucune note", L"Nessuna nota", L"No hay notas", L"내보낼 음표 없음", L"没有可导出的音符",
+			L"لا توجد نغمات", L"Нет нот", L"Keine Noten", L"Sem notas", L"Geen noten", L"Brak nut", L"Nota yok"));
+		return;
+	}
+	qsort(ev, (size_t)n, sizeof(FmMidEv), FmMidEvCmp);
+
+	wchar_t dest[MAX_PATH];
+	wcscpy_s(dest, L"score.mid");
+	OPENFILENAMEW ofn;
+	ZeroMemory(&ofn, sizeof(ofn));
+	ofn.lStructSize = sizeof(ofn);
+	ofn.hwndOwner = GetSafeHwnd();
+	ofn.lpstrFilter = L"Standard MIDI (*.mid)\0*.mid\0\0";
+	ofn.lpstrFile = dest;
+	ofn.nMaxFile = MAX_PATH;
+	ofn.Flags = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST | OFN_EXPLORER;
+	ofn.lpstrDefExt = L"mid";
+	if (!GetSaveFileNameW(&ofn)) {
+		HeapFree(GetProcessHeap(), 0, ev);
+		return;
+	}
+
+	const uint32_t cap = (uint32_t)n * 16u + 64u;
+	uint8_t* body = (uint8_t*)HeapAlloc(GetProcessHeap(), 0, cap);
+	if (!body) {
+		HeapFree(GetProcessHeap(), 0, ev);
+		return;
+	}
+	uint32_t bn = 0;
+	int ok = 1;
+	uint32_t last = 0;
+	int haveTempo = 0;
+	for (int i = 0; i < n; i++) if (ev[i].isTempo) { haveTempo = 1; break; }
+	if (!haveTempo) {
+		uint8_t tmeta[8];
+		int vn = FmSmfVlq(tmeta, 0);
+		tmeta[vn++] = 0xFF; tmeta[vn++] = 0x51; tmeta[vn++] = 0x03;
+		const uint32_t us = 500000;
+		tmeta[vn++] = (uint8_t)(us >> 16);
+		tmeta[vn++] = (uint8_t)(us >> 8);
+		tmeta[vn++] = (uint8_t)us;
+		ok = FmSmfPut(body, cap, &bn, tmeta, (uint32_t)vn);
+	}
+	for (int i = 0; ok && i < n; i++) {
+		uint8_t pkt[12];
+		const uint32_t dt = (ev[i].tick >= last) ? (ev[i].tick - last) : 0;
+		last = ev[i].tick;
+		int pn = FmSmfVlq(pkt, dt);
+		if (ev[i].isTempo) {
+			int bpm = ev[i].bpm ? ev[i].bpm : 120;
+			uint32_t us = 60000000u / (uint32_t)bpm;
+			pkt[pn++] = 0xFF; pkt[pn++] = 0x51; pkt[pn++] = 0x03;
+			pkt[pn++] = (uint8_t)(us >> 16);
+			pkt[pn++] = (uint8_t)(us >> 8);
+			pkt[pn++] = (uint8_t)us;
+		} else if (ev[i].ord == 2) {
+			pkt[pn++] = (uint8_t)(0x90 | (ev[i].ch & 15));
+			pkt[pn++] = ev[i].note;
+			pkt[pn++] = ev[i].vel ? ev[i].vel : 100;
+		} else {
+			pkt[pn++] = (uint8_t)(0x80 | (ev[i].ch & 15));
+			pkt[pn++] = ev[i].note;
+			pkt[pn++] = 0;
+		}
+		ok = FmSmfPut(body, cap, &bn, pkt, (uint32_t)pn);
+	}
+	if (ok) {
+		uint8_t end[4] = { 0x00, 0xFF, 0x2F, 0x00 };
+		ok = FmSmfPut(body, cap, &bn, end, 4);
+	}
+	HeapFree(GetProcessHeap(), 0, ev);
+	if (!ok) {
+		HeapFree(GetProcessHeap(), 0, body);
+		m_status.SetWindowText(LL14(L"書き込みに失敗しました", L"Write failed", L"Échec écriture", L"Scrittura non riuscita", L"Error al escribir",
+			L"쓰기 실패", L"写入失败", L"فشل الكتابة", L"Ошибка записи", L"Schreiben fehlgeschlagen",
+			L"Falha ao gravar", L"Schrijven mislukt", L"Zapis nieudany", L"Yazma başarısız"));
+		return;
+	}
+	uint8_t hdr[22];
+	memcpy(hdr, "MThd", 4);
+	hdr[4] = 0; hdr[5] = 0; hdr[6] = 0; hdr[7] = 6;
+	hdr[8] = 0; hdr[9] = 0; /* format 0 */
+	hdr[10] = 0; hdr[11] = 1;
+	hdr[12] = (uint8_t)((SC_PPQN >> 8) & 0xFF);
+	hdr[13] = (uint8_t)(SC_PPQN & 0xFF);
+	memcpy(hdr + 14, "MTrk", 4);
+	hdr[18] = (uint8_t)(bn >> 24);
+	hdr[19] = (uint8_t)(bn >> 16);
+	hdr[20] = (uint8_t)(bn >> 8);
+	hdr[21] = (uint8_t)bn;
+	HANDLE hf = CreateFileW(dest, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+	if (hf == INVALID_HANDLE_VALUE) {
+		HeapFree(GetProcessHeap(), 0, body);
+		m_status.SetWindowText(LL14(L"書き込みに失敗しました", L"Write failed", L"Échec écriture", L"Scrittura non riuscita", L"Error al escribir",
+			L"쓰기 실패", L"写入失败", L"فشل الكتابة", L"Ошибка записи", L"Schreiben fehlgeschlagen",
+			L"Falha ao gravar", L"Schrijven mislukt", L"Zapis nieudany", L"Yazma başarısız"));
+		return;
+	}
+	DWORD wr = 0;
+	int wok = WriteFile(hf, hdr, 22, &wr, NULL) && wr == 22;
+	if (wok) {
+		wr = 0;
+		wok = WriteFile(hf, body, bn, &wr, NULL) && wr == bn;
+	}
+	CloseHandle(hf);
+	HeapFree(GetProcessHeap(), 0, body);
+	if (!wok) {
+		DeleteFileW(dest);
+		m_status.SetWindowText(LL14(L"書き込みに失敗しました", L"Write failed", L"Échec écriture", L"Scrittura non riuscita", L"Error al escribir",
+			L"쓰기 실패", L"写入失败", L"فشل الكتابة", L"Ошибка записи", L"Schreiben fehlgeschlagen",
+			L"Falha ao gravar", L"Schrijven mislukt", L"Zapis nieudany", L"Yazma başarısız"));
+		return;
+	}
+	m_status.SetWindowText(LL14(
+		L"標準MIDIを書き出しました（FM音色はSMFに入らないのでピアノです）",
+		L"Wrote standard MIDI (FM voices are not in SMF, so it plays as piano)",
+		L"MIDI écrit (voix FM absentes du SMF, piano)",
+		L"MIDI scritto (voci FM assenti dal SMF, piano)",
+		L"MIDI escrito (voces FM no están en el SMF, piano)",
+		L"표준 MIDI 저장 (FM 음색은 SMF에 없어 피아노)",
+		L"已写出标准MIDI（FM音色不在SMF中，为钢琴）",
+		L"كُتب MIDI (أصوات FM ليست في SMF، بيانو)",
+		L"MIDI записан (FM-тембры не в SMF, пианино)",
+		L"Standard-MIDI geschrieben (FM-Stimmen nicht im SMF, Klavier)",
+		L"MIDI gravado (vozes FM fora do SMF, piano)",
+		L"Standaard-MIDI geschreven (FM-klanken niet in SMF, piano)",
+		L"Zapisano MIDI (barwy FM poza SMF, fortepian)",
+		L"Standart MIDI yazıldı (FM tınıları SMF'de yok, piyano)"));
+}
+
 void CSasamiFmScoreDlg::OnBnClickedExport()
 {
 	wchar_t path[MAX_PATH];
@@ -2655,10 +2889,23 @@ void CSasamiFmScoreDlg::OnContextMenu(CWnd* pWnd, CPoint point)
 	CPoint client = point;
 	ScreenToClient(&client);
 	if (m_ui.tool == SC_TOOL_PENCIL || m_ui.tool == SC_TOOL_TEMPO) {
-		ScStaffEnterSelectTool(&m_ui);
-		UpdateNoteCursor();
-		InvalidateRect(m_bodyRc, FALSE);
-		return;
+		int onNote = 0;
+		if (m_gridRc.PtInRect(client)) {
+			int hitTr = -1;
+			if (ScStaffHitNote(m_gridRc, &m_ui, m_doc.ev, m_doc.evCount, 1, client, &hitTr) >= 0)
+				onNote = 1;
+		}
+		if (!onNote && m_ui.showRollSplit && m_rollRc.PtInRect(client)) {
+			if (ScPianoRollHitNote(&m_rollView, m_rollRc, m_doc.ev, m_doc.evCount, &m_ui, m_curCh, client) >= 0)
+				onNote = 1;
+		}
+		if (!onNote) {
+			ScStaffEnterSelectTool(&m_ui);
+			UpdateNoteCursor();
+			::SetCursor(::LoadCursor(NULL, IDC_ARROW));
+			InvalidateRect(m_bodyRc, FALSE);
+			return;
+		}
 	}
 	/* 左トラック列 → 譜面五線の順で、右クリック位置のパートを取る */
 	int tr = ScStaffHitTrack(m_trackRc, &m_ui, client);
@@ -2801,12 +3048,20 @@ void CSasamiFmScoreDlg::OnContextMenu(CWnd* pWnd, CPoint point)
 		L"音声書き出し…", L"Audio export…", L"Export audio…", L"Esporta audio…", L"Exportar audio…",
 		L"오디오 내보내기…", L"导出音频…", L"تصدير صوت…", L"Экспорт аудио…", L"Audio exportieren…",
 		L"Exportar áudio…", L"Audio exporteren…", L"Eksport audio…", L"Ses dışa aktar…"));
+	menu.AddCommand(9088, LL14(
+		L"標準MIDIに書き出す…", L"Export standard MIDI…", L"Exporter MIDI standard…", L"Esporta MIDI standard…", L"Exportar MIDI estándar…",
+		L"표준 MIDI로 내보내기…", L"导出标准MIDI…", L"تصدير MIDI قياسي…", L"Экспорт стандартного MIDI…", L"Standard-MIDI exportieren…",
+		L"Exportar MIDI padrão…", L"Standaard-MIDI exporteren…", L"Eksportuj standardowe MIDI…", L"Standart MIDI dışa aktar…"));
 	menu.AddSeparator();
 	menu.AddCommand(IDC_SASAMI_FM_HELP, LL14(
 		L"ヘルプ", L"Help", L"Aide", L"Guida", L"Ayuda",
 		L"도움말", L"帮助", L"مساعدة", L"Справка", L"Hilfe",
 		L"Ajuda", L"Help", L"Pomoc", L"Yardım"));
 	const UINT cmd = menu.Track(point, this);
+	if (cmd == 9088) {
+		ExportStandardMidi();
+		return;
+	}
 	auto afterMark = [&](uint8_t kind) {
 		m_ui.visible[tr] = 1;
 		m_curCh = tr;

@@ -693,6 +693,12 @@ int m68k_execute(int num_cycles)
 	return num_cycles;
 }
 
+/* STOP 中は m68k_execute が命令を実行しない。PC を差し替えたホストが続ける。 */
+void m68k_clear_stopped(void)
+{
+	CPU_STOPPED &= ~STOP_LEVEL_STOP;
+}
+
 
 int m68k_cycles_run(void)
 {

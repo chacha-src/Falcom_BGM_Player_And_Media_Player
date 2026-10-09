@@ -3324,6 +3324,80 @@ void CSasamiMidiScoreDlg::OnBnClickedHelp()
 	CSasamiCmdHelpDlg::Show(this, CSasamiCmdHelpDlg::kTabScore1);
 }
 
+void CSasamiMidiScoreDlg::ExportStandardMidi()
+{
+	wchar_t built[MAX_PATH];
+	if (!BuildToTemp(built, MAX_PATH))
+		return;
+	wchar_t mid[MAX_PATH];
+	mid[0] = 0;
+	if (!SasamiConvertPathToMidiFile(built, mid, MAX_PATH) || !mid[0]) {
+		m_status.SetWindowText(LL14(L"標準MIDIへ変換できませんでした", L"Could not convert to standard MIDI",
+			L"Conversion MIDI impossible", L"Conversione MIDI non riuscita", L"No se pudo convertir a MIDI",
+			L"표준 MIDI 변환 실패", L"无法转为标准MIDI", L"تعذر التحويل إلى MIDI", L"Не удалось преобразовать в MIDI",
+			L"MIDI-Konvertierung fehlgeschlagen", L"Falha ao converter para MIDI", L"Omzetten naar MIDI mislukt",
+			L"Nie udało się przekonwertować na MIDI", L"Standart MIDI'ye çevrilemedi"));
+		return;
+	}
+	wchar_t dest[MAX_PATH];
+	wcscpy_s(dest, L"score.mid");
+	OPENFILENAMEW ofn;
+	ZeroMemory(&ofn, sizeof(ofn));
+	ofn.lStructSize = sizeof(ofn);
+	ofn.hwndOwner = GetSafeHwnd();
+	ofn.lpstrFilter = L"Standard MIDI (*.mid)\0*.mid\0\0";
+	ofn.lpstrFile = dest;
+	ofn.nMaxFile = MAX_PATH;
+	ofn.Flags = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST | OFN_EXPLORER;
+	ofn.lpstrDefExt = L"mid";
+	if (!GetSaveFileNameW(&ofn))
+		return;
+	if (!CopyFileW(mid, dest, FALSE)) {
+		m_status.SetWindowText(LL14(L"書き込みに失敗しました", L"Write failed", L"Échec écriture", L"Scrittura non riuscita", L"Error al escribir",
+			L"쓰기 실패", L"写入失败", L"فشل الكتابة", L"Ошибка записи", L"Schreiben fehlgeschlagen",
+			L"Falha ao gravar", L"Schrijven mislukt", L"Zapis nieudany", L"Yazma başarısız"));
+		return;
+	}
+	int vst3 = 0;
+	for (int i = 0; i < 32; i++) {
+		const wchar_t* p = m_doc.bind.vstPath[i];
+		if (p[0] && wcsstr(p, L".vst3"))
+			vst3 = 1;
+	}
+	if (vst3)
+		m_status.SetWindowText(LL14(
+			L"標準MIDIを書き出しました。VST3の音色状態はSMFに入らないのでピアノになります",
+			L"Wrote standard MIDI. VST3 timbre state is not in SMF, so it plays as piano",
+			L"MIDI écrit. L'état VST3 n'est pas dans le SMF (piano)",
+			L"MIDI scritto. Lo stato VST3 non è nel SMF (piano)",
+			L"MIDI escrito. El estado VST3 no está en el SMF (piano)",
+			L"표준 MIDI 저장. VST3 음색 상태는 SMF에 없어 피아노가 됩니다",
+			L"已写出标准MIDI。VST3音色状态不在SMF中，会变成钢琴",
+			L"كُتب MIDI. حالة VST3 ليست في SMF (بيانو)",
+			L"MIDI записан. Состояние VST3 не входит в SMF (пианино)",
+			L"Standard-MIDI geschrieben. VST3-Klangzustand ist nicht im SMF (Klavier)",
+			L"MIDI gravado. O estado VST3 não entra no SMF (piano)",
+			L"Standaard-MIDI geschreven. VST3-klank staat niet in het SMF (piano)",
+			L"Zapisano MIDI. Stan VST3 nie wchodzi do SMF (fortepian)",
+			L"Standart MIDI yazıldı. VST3 tını durumu SMF'de yok (piyano)"));
+	else
+		m_status.SetWindowText(LL14(
+			L"標準MIDIを書き出しました（VST2のプログラム／バンクはSMFの音色として入ります）",
+			L"Wrote standard MIDI (VST2 program/bank travel as SMF timbre)",
+			L"MIDI écrit (programme/banque VST2 dans le SMF)",
+			L"MIDI scritto (programma/banco VST2 nel SMF)",
+			L"MIDI escrito (programa/banco VST2 en el SMF)",
+			L"표준 MIDI 저장 (VST2 프로그램/뱅크는 SMF 음색)",
+			L"已写出标准MIDI（VST2程序/库作为SMF音色）",
+			L"كُتب MIDI (برنامج/بنك VST2 داخل SMF)",
+			L"MIDI записан (программа/банк VST2 в SMF)",
+			L"Standard-MIDI geschrieben (VST2-Programm/Bank im SMF)",
+			L"MIDI gravado (programa/banco VST2 no SMF)",
+			L"Standaard-MIDI geschreven (VST2-programma/bank in SMF)",
+			L"Zapisano MIDI (program/bank VST2 w SMF)",
+			L"Standart MIDI yazıldı (VST2 program/bank SMF tınısı)"));
+}
+
 void CSasamiMidiScoreDlg::OnBnClickedExport()
 {
 	wchar_t path[MAX_PATH];
@@ -3336,10 +3410,24 @@ void CSasamiMidiScoreDlg::OnContextMenu(CWnd* pWnd, CPoint point)
 	CPoint client = point;
 	ScreenToClient(&client);
 	if (m_ui.tool == SC_TOOL_PENCIL || m_ui.tool == SC_TOOL_TEMPO) {
-		ScStaffEnterSelectTool(&m_ui);
-		UpdateNoteCursor();
-		InvalidateRect(m_bodyRc, FALSE);
-		return;
+		/* 置いてある音符の上は従来のメニュー。空きは音符モードを外すだけでメニューは出さない。 */
+		int onNote = 0;
+		if (m_gridRc.PtInRect(client)) {
+			int hitTr = -1;
+			if (ScStaffHitNote(m_gridRc, &m_ui, m_doc.ev, m_doc.evCount, 0, client, &hitTr) >= 0)
+				onNote = 1;
+		}
+		if (!onNote && m_ui.showRollSplit && m_rollRc.PtInRect(client)) {
+			if (ScPianoRollHitNote(&m_rollView, m_rollRc, m_doc.ev, m_doc.evCount, &m_ui, m_curCh, client) >= 0)
+				onNote = 1;
+		}
+		if (!onNote) {
+			ScStaffEnterSelectTool(&m_ui);
+			UpdateNoteCursor();
+			::SetCursor(::LoadCursor(NULL, IDC_ARROW));
+			InvalidateRect(m_bodyRc, FALSE);
+			return;
+		}
 	}
 	/* 左トラック列 → 譜面五線（音符／空き／Prog帯）の順で、右クリック位置のパートを取る */
 	int tr = ScStaffHitTrack(m_trackRc, &m_ui, client);
@@ -3561,11 +3649,19 @@ void CSasamiMidiScoreDlg::OnContextMenu(CWnd* pWnd, CPoint point)
 	menu.AddCommand(IDC_SASAMI_MIDI_EXPORT, LL14(
 		L"音声書き出し…", L"Audio export...", L"Export audio...", L"Esporta audio...", L"Exportar audio...",
 		L"Audio export...", L"导出音频...", L"Audio export...", L"Audio export...", L"Audio export...", L"Exportar audio...", L"Audio exporteren...", L"Eksport audio...", L"Ses disa aktar..."));
+	menu.AddCommand(9088, LL14(
+		L"標準MIDIに書き出す…", L"Export standard MIDI…", L"Exporter MIDI standard…", L"Esporta MIDI standard…", L"Exportar MIDI estándar…",
+		L"표준 MIDI로 내보내기…", L"导出标准MIDI…", L"تصدير MIDI قياسي…", L"Экспорт стандартного MIDI…", L"Standard-MIDI exportieren…",
+		L"Exportar MIDI padrão…", L"Standaard-MIDI exporteren…", L"Eksportuj standardowe MIDI…", L"Standart MIDI dışa aktar…"));
 	menu.AddSeparator();
 	menu.AddCommand(IDC_SASAMI_MIDI_HELP, LL14(
 		L"ヘルプ", L"Help", L"Aide", L"Guida", L"Ayuda",
 		L"Help", L"帮助", L"Help", L"Help", L"Hilfe", L"Ajuda", L"Help", L"Pomoc", L"Yardim"));
 	const UINT cmd = menu.Track(point, this);
+	if (cmd == 9088) {
+		ExportStandardMidi();
+		return;
+	}
 	auto afterMark = [&](uint8_t kind) {
 		m_ui.visible[tr] = 1;
 		m_curCh = tr;

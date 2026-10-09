@@ -942,17 +942,17 @@ void CPianoRoll::SetChannelMeterDb(const float* dbPerChannel, int channelCount)
                 lin = 0.0f;
 
             float& peak = m_chMeterAutoPeak[i];
-            if (lin > 0.0f) {
-                if (lin > peak)
-                    peak = lin;
-                else
-                    peak = peak * kPeakDecay + lin * (1.0f - kPeakDecay);
-            } else {
+            if (lin > peak)
+                peak = lin;
+            else
                 peak = peak * kPeakDecay;
-            }
             if (peak < kMinDisplayPeak) peak = kMinDisplayPeak;
+            (void)peak;
 
-            float norm = (lin > 0.0f) ? (lin / peak) : 0.0f;
+            /* 0 dBFS が端、無音ゲート -48 dBFS が 0。直近ピークへの正規化は実音とずれる。 */
+            float norm = 0.0f;
+            if (in > -48.0f)
+                norm = (in + 48.0f) / 48.0f;
             if (norm < 0.0f) norm = 0.0f;
             if (norm > 1.0f) norm = 1.0f;
 
@@ -1844,10 +1844,9 @@ void CPianoRoll::UpdateNoteStates()
         // ここでの二次剪定でピアノを再キルしない（パッチ連鎖の主因だった）。
         //
         // picked[i] が立っているフレームには掛けない。BuildFramePicks は
-        // 白色化スペクトルからの反復倍音減算で「倍音では説明できない」と
-        // 判定した鍵だけを返しており、ここで blend の絶対量比による旧判定を
-        // 重ねると、ベースが鳴っている間じゅう中高音が再度落とされる。
-        // 本来この剪定はコメント通りホールド延長ぶんだけが対象。
+        // 振幅ドメインで倍音包絡を引いたあと「その包絡では説明できない」鍵だけを
+        // 返している。ここでパワー比の旧判定を重ねると、ベースが鳴っている間
+        // 中高音が再度落とされる。この剪定はホールド延長ぶんだけが対象。
         if (effective && !picked[i] &&
             (i < PianoRoll108::C4_KEY || i >= PianoRoll108::O5_HI) &&
             PianoKey::IsHarmonicGhostPartial(blend, i, KEY_COUNT, PianoRoll108::BASS_END)) {

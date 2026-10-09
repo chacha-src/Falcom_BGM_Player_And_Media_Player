@@ -29,6 +29,9 @@ private:
 	void PunchMediumWaits();
 	void SnapChainOnce();
 	void RestoreChain();
+	void KickGunlockWalker();
+	void RescueGunlockCpu();
+	void LiftGunlockEnvelope();
 	unsigned MapSongCode(unsigned code);
 	void LogState(const char* tag);
 
@@ -57,6 +60,7 @@ private:
 	unsigned hitDisp_;
 	unsigned hitTick_;
 	int seqTickAcc_;
+	int seqFastAcc_;
 	unsigned seqCalls_;
 	unsigned irq6Vec_;
 	int delayGated_;
@@ -75,6 +79,9 @@ private:
 	unsigned chainLoopEvery_;
 	unsigned tblOffs_;
 	int chainPark_;
+	unsigned walkEntry_;
+	int walking_;
+	uint32_t romVec_[96];
 };
 
 /* F3 ドライバ生成 */

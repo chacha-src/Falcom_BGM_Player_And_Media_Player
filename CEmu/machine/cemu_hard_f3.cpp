@@ -54,6 +54,7 @@ CHardF3* CEmuHardF3GetActive()
 CHardF3::CHardF3()
 	: cpuHz_(15238100)
 	, esHz_(15238100)
+	, nodeRefill_(0)
 	, audioCpu_(NULL)
 	, audioCpuSize_(0)
 	, ensoniq_(NULL)
@@ -326,12 +327,52 @@ uint8_t CHardF3::Read8(unsigned addr)
 	return 0xff;
 }
 
+/* 他の RAM から指されていないノードだけ空きリストへ戻す。使用中ボイスは残す。
+   空きが 0 のまま trap #3 に入ると trap #0 が SSP を 0 にして曲が落ちる。 */
+void CHardF3::RefillFreeNodes()
+{
+	enum { kBase = 0xEE8Au, kEnd = 0xFB0Au, kStep = 8u, kCount = (0xFB0Au - 0xEE8Au) / 8u };
+	uint8_t used[kCount];
+	memset(used, 0, sizeof used);
+	for (unsigned off = 0; off + 1u < kOsramBytes; off += 2u) {
+		if (off >= kBase && off < kEnd) continue;
+		const unsigned v = ((unsigned)osram_[off] << 8) | (unsigned)osram_[off + 1u];
+		if (v < kBase || v >= kEnd) continue;
+		const unsigned rel = v - kBase;
+		if (rel % kStep) continue;
+		const unsigned ix = rel / kStep;
+		if (ix < kCount) used[ix] = 1;
+	}
+	unsigned head = 0;
+	unsigned prev = 0;
+	for (unsigned i = 0; i < kCount; i++) {
+		if (used[i]) continue;
+		const unsigned a = kBase + i * kStep;
+		osram_[a] = 0;
+		osram_[a + 1u] = 0;
+		if (!head) head = a;
+		else {
+			osram_[prev] = (uint8_t)(a >> 8);
+			osram_[prev + 1u] = (uint8_t)a;
+		}
+		prev = a;
+	}
+	if (!head) return;
+	osram_[0x136u] = (uint8_t)(head >> 8);
+	osram_[0x137u] = (uint8_t)head;
+}
+
 /* 16bit 読込 */
 uint16_t CHardF3::Read16(unsigned addr)
 {
 	addr &= 0xffffffu;
 	if (addr >= 0x200000u && addr <= 0x20001fu && !(addr & 1))
 		return CEmuChipEs5505Read(chip_, (addr - 0x200000u) >> 1);
+	if ((addr < 0x40000u || addr >= 0xff0000u) && (addr & 0xffffu) == 0x136u) {
+		const uint16_t head = (uint16_t)((Read8(addr) << 8) | Read8(addr + 1u));
+		if (head == 0 && nodeRefill_ && Read32(0x28u) == 0x00C10D12u)
+			RefillFreeNodes();
+	}
 	return (uint16_t)((Read8(addr) << 8) | Read8(addr + 1));
 }
 
@@ -420,7 +461,22 @@ void CHardF3::Write16(unsigned addr, uint16_t data)
 {
 	addr &= 0xffffffu;
 	if (addr >= 0x200000u && addr <= 0x20001fu && !(addr & 1) && chip_) {
-		chip_->Write((addr - 0x200000u) >> 1, data);
+		const unsigned reg = (addr - 0x200000u) >> 1;
+		/* パーサがバンク外を走ると L/R 音量へ 0 を連打し、出た音を消す。
+		   指数 2 以上の音量は残す。0x0F へのリリースは通す。 */
+		if ((reg == 8u || reg == 9u) && data == 0) {
+			const uint16_t cur = CEmuChipEs5505Read(chip_, reg);
+			if ((cur & 0xf000u) >= 0x2000u)
+				return;
+		}
+		/* 脱線したパーサは周波数も 0 にする。鳴っている音のピッチは残す。 */
+		if ((reg == 6u || reg == 7u) && data == 0) {
+			const uint16_t vol = CEmuChipEs5505Read(chip_, reg == 6u ? 8u : 9u);
+			const uint16_t cur = CEmuChipEs5505Read(chip_, reg);
+			if (cur != 0 && (vol & 0xf000u) >= 0x2000u)
+				return;
+		}
+		chip_->Write(reg, data);
 		esWrites_++;
 		NoteEsWrite((addr - 0x200000u) >> 1, data, 1);
 		return;
@@ -440,6 +496,22 @@ void CHardF3::Write16(unsigned addr, uint16_t data)
 /* 32bit 書込 */
 void CHardF3::Write32(unsigned addr, uint32_t data)
 {
+	addr &= 0xffffffu;
+	/* トラックのストリームは曲バンク内のオフセット。E9 の再配置が曲データの
+	   ど真ん中をポインタと足して 0xFE**** を書くと、以降の音符がコード ROM を
+	   読んで旋律が死ぬ。リンク付きノードへの範囲外ストアだけ捨て、直前の正常値を残す。
+	   FF ミラーへ畳むと、符号拡張された正規ポインタまで捨てて全曲が無音になる。 */
+	if (addr >= 0xD006u && addr < 0xEE00u && !(addr & 1u)) {
+		const unsigned link = Read16(addr - 6u);
+		const int track = (link == 0u || (link >= 0xD000u && link < 0xEE00u)) ? 1 : 0;
+		const int outside = (data >= 0x80000u && data < 0xC00000u) || (data >= 0x80000000u);
+		/* C13E90 は bit4+bit3 の旋律トラックへストリーム 4 を書く。C1483A は RTS で、
+		   ローダが入れた曲内オフセットをヘッダ先頭に潰す。4 未満は曲に無い。 */
+		const uint32_t prev = Read32(addr);
+		const int tiny = (data < 0x40u) && (prev >= 0x40u && prev < 0x40000u);
+		if (track && (outside || tiny))
+			return;
+	}
 	Write16(addr, (uint16_t)(data >> 16));
 	Write16(addr + 2, (uint16_t)(data & 0xffff));
 }
@@ -1113,7 +1185,17 @@ int CHardF3::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode
 			tr[4] = 0x67; tr[5] = 0x12;
 			tr[6] = 0x2f; tr[7] = 0x0e;
 			if (gunOs) {
-				const unsigned callOff = playOff ? playOff : tickOff;
+				unsigned tblOff = 0;
+				if (ge && ge->opt) {
+					for (int oi = 0; oi < ge->optCount; oi++) {
+						if (_stricmp(ge->opt[oi].name, "tbloffs") == 0) {
+							tblOff = (unsigned)strtoul(ge->opt[oi].value, NULL, 0);
+							break;
+						}
+					}
+				}
+				/* playOff は遅延回数だけ走ると曲によって RAM を 0x2600 で埋める。tbloffs 無しは待ち減算だけ。 */
+				const unsigned callOff = (tblOff == 0 && tickOff) ? tickOff : (playOff ? playOff : tickOff);
 				const unsigned callCpu = 0xC00000u + (callOff - win0);
 				tr[8] = 0x3c; tr[9] = 0x78; tr[10] = 0xd0; tr[11] = 0xf4;
 				tr[12] = 0x4e; tr[13] = 0xb9;

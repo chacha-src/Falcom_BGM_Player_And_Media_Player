@@ -36,6 +36,7 @@ public:
 	void PersistSession();
 	void PersistUiGeom();
 	void RestoreUiGeom();
+	void ExportStandardMidi();
 
 protected:
 	virtual void DoDataExchange(CDataExchange* pDX);

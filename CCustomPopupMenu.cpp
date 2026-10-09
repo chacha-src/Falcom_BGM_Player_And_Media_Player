@@ -2740,6 +2740,51 @@ BOOL CCustomPopupMenu::CalcLineAnim(int idx, int* ox, int* oy, int* fade, float*
 	return (fade ? *fade : 256) > 8;
 }
 
+/* AnimateWindow は UI スレッドを占有してスペアナとバナーを止める。
+   同じブレンドを刻み、その間は再生 tick と描画だけ通す。 */
+static void PopupPumpUiDuringFade()
+{
+	MSG msg;
+	int n = 0;
+	while (n < 6 && ::PeekMessage(&msg, NULL, 0, 0, PM_NOREMOVE)) {
+		const UINT m = msg.message;
+		const int pass = (m == WM_TIMERP_VSYNC_TICK || m == WM_SPEANA_TICK
+			|| m == WM_PAINT || m == WM_TIMER);
+		if (!pass)
+			break;
+		if (!::PeekMessage(&msg, NULL, 0, 0, PM_REMOVE))
+			break;
+		::TranslateMessage(&msg);
+		::DispatchMessage(&msg);
+		++n;
+	}
+}
+
+static void PopupBlendWindow(HWND hwnd, int ms, BOOL hide)
+{
+	if (!hwnd || !::IsWindow(hwnd))
+		return;
+	const LONG ex = ::GetWindowLong(hwnd, GWL_EXSTYLE);
+	::SetWindowLong(hwnd, GWL_EXSTYLE, ex | WS_EX_LAYERED);
+	int steps = ms / 16;
+	if (steps < 1) steps = 1;
+	for (int i = 0; i <= steps; ++i) {
+		int a = (255 * i) / steps;
+		if (hide) a = 255 - a;
+		if (a < 0) a = 0;
+		if (a > 255) a = 255;
+		::SetLayeredWindowAttributes(hwnd, 0, (BYTE)a, LWA_ALPHA);
+		PopupPumpUiDuringFade();
+		::MsgWaitForMultipleObjects(0, NULL, FALSE, 8, QS_TIMER | QS_PAINT | QS_POSTMESSAGE);
+		PopupPumpUiDuringFade();
+	}
+	if (hide)
+		::ShowWindow(hwnd, SW_HIDE);
+	::SetWindowLong(hwnd, GWL_EXSTYLE, ex & ~WS_EX_LAYERED);
+	if (!hide)
+		::RedrawWindow(hwnd, NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW | RDW_ALLCHILDREN);
+}
+
 // 入場。クラシック／skipChrome は即時表示（ヒットずれ防止）。
 // EXPAND は RGN が上下に開く。行チップ系は BeginChipFlight + ULW。
 // phase=1。kAnimTimer 16ms と kSettleTimer（所要+余裕）で強制定着。
@@ -2758,7 +2803,7 @@ void CCustomPopupMenu::AnimateIn()
 		::SetWindowRgn(m_hWnd, NULL, FALSE);
 		ShowWindow(SW_SHOWNA);
 		if (style == POPUP_ANIM_CLASSIC && !m_asSubmenu)
-			::AnimateWindow(m_hWnd, 160, AW_BLEND);
+			PopupBlendWindow(m_hWnd, 160, FALSE);
 		ShowEmbedded(TRUE);
 		SyncEmbeddedChildren();
 		InvalidateBgOnly();
@@ -2866,8 +2911,7 @@ void CCustomPopupMenu::AnimateOut()
 		ShowWindow(SW_HIDE);
 		return;
 	}
-	if (!::AnimateWindow(m_hWnd, 90, AW_BLEND | AW_HIDE))
-		ShowWindow(SW_HIDE);
+	PopupBlendWindow(m_hWnd, 90, TRUE);
 }
 
 // ポップアップ HWND を作り AnimateIn。オーナーは WS_EX_NOACTIVATE | TOPMOST。
@@ -4976,11 +5020,8 @@ void CCustomPopupMenu::RunModalLoop()
 		}
 		/* Track 中は再生 tick を食う。Dispatch すると ULW がモーダルを飢えさせ、
 		   出現アニメが途中で止まる／クリックが届かない。 */
-		if (m.message == WM_TIMERP_VSYNC_TICK || m.message == WM_SPEANA_TICK) {
-			extern void COgg_DropPlaybackUiPostedMsg(UINT message);
-			COgg_DropPlaybackUiPostedMsg(m.message);
-			return TRUE;
-		}
+		/* 以前は再生 tick を捨てていた。バナーとスペアナがメニュー中に止まる。
+		   1通だけ Dispatch し、heavy 側で Peek を切って出現アニメは続ける。 */
 		if (m.message == WM_KEYDOWN && m.wParam == VK_ESCAPE) {
 			CWnd* f = GetFocus();
 			if (!(f && IsChild(f) && f->IsKindOf(RUNTIME_CLASS(CCustomEdit)))) {

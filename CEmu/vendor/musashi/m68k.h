@@ -318,6 +318,9 @@ unsigned int m68k_get_reg(void* context, m68k_register_t reg);
 /* Poke values into the internals of the currently running CPU context */
 void m68k_set_reg(m68k_register_t reg, unsigned int value);
 
+/* STOP 命令の停止を解く。PC を差し替えて実行を続けるとき用。 */
+void m68k_clear_stopped(void);
+
 /* Check if an instruction is valid for the specified CPU type */
 unsigned int m68k_is_valid_instruction(unsigned int instruction, unsigned int cpu_type);
 

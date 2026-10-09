@@ -88,7 +88,7 @@
                   + _k2_syn2_report.txt
                   + _k2_ac48_plays.txt
                   + _k2_crush15_report.txt
-   Archives probed: 5085, supported: 4578; MSX +replcart_msx/shiryo_msx/msxfan_msx (_k2_x1msx8full_0.txt _k2_x1msx8fan_0.txt) + x1alba (_k2_x1msx8alba_0.txt)
+   Archives probed: 5085, supported: 4586; MSX +replcart_msx/shiryo_msx/msxfan_msx (_k2_x1msx8full_0.txt _k2_x1msx8fan_0.txt) + x1alba (_k2_x1msx8alba_0.txt)
                   + _k2_ac2s86_report.txt (genpeitd/rthunder/skykiddx/wndrmomo Sys86)
                   + _k2_ac2wsgo_report.txt (pacland/skykid/drgnbstr wsg63701)
                   + bosco wsgz80 (0289 BGM via $8A14 + $0139 id)
@@ -100,7 +100,11 @@
                   + momoko Jaleco YM2203×2 GNG map 5 (A000/C000, YM2 port A latch)
                   + skyfox/exerizer same map 5 latch @B000
                   + fcombat Jaleco YM2149×3 SJ map 20 (latch 6000, data_address 8002/A002/C002)
-                  + _gap_run (pc98/x68k/pc9821, all modes, pick 1,2,3, wins=4) */
+                  + _gap_run (pc98/x68k/pc9821, all modes, pick 1,2,3, wins=4)
+                  + gintetsu_98 MDR_98 (INT14 lock clear, text cell 0x20)
+                  + 5th2_98/nayuta_98 MDZN (carry frame SS, not CS)
+                  + lguard2_98 NAX (NLP_HOOT planted; stack off stosw; HLT not INT 20)
+                  + kidsap_98/qroad_98/presence_98/wa_1_98 MUAPLAY (BIOS INT 1Ch AH=02 one-shot) */
 
 #include "StdAfx.h"
 #include "cemu_support.h"
@@ -150,6 +154,7 @@ static const char* const kSupported[] = {
 	"4thunit3_msx",
 	"4thunit4_msx",
 	"500gp",
+	"5th2_98",
 	"5venus_98",
 	"64street",
 	"688as_at",
@@ -1634,6 +1639,7 @@ static const char* const kSupported[] = {
 	"ginga_msx",
 	"ginkun",
 	"ginps68snd",
+	"gintetsu_98",
 	"giri2tel_98",
 	"giripara_98",
 	"girl2_98",
@@ -2102,6 +2108,7 @@ static const char* const kSupported[] = {
 	"kicknrun",
 	"kickoff",
 	"kidniki",
+	"kidsap_98",
 	"kikcubic",
 	"kikikai",
 	"kikikaik",
@@ -2282,6 +2289,7 @@ static const char* const kSupported[] = {
 	"letpirat_21",
 	"lgtnfght",
 	"lguard1_98",
+	"lguard2_98",
 	"liberty_88",
 	"liberty_98",
 	"libido7_98",
@@ -2782,6 +2790,7 @@ static const char* const kSupported[] = {
 	"navitn98",
 	"navitn_msx",
 	"navitune",
+	"nayuta_98",
 	"nazo_98",
 	"nbapbp",
 	"nbbatman",
@@ -3086,6 +3095,7 @@ static const char* const kSupported[] = {
 	"prem68snd",
 	"premium2_98",
 	"premium_98",
+	"presence_98",
 	"present_98",
 	"prgtr_98",
 	"primglex",
@@ -3170,6 +3180,7 @@ static const char* const kSupported[] = {
 	"qouji_98",
 	"qroad2_98",
 	"qroad68snd",
+	"qroad_98",
 	"qsangk98",
 	"qtono2j",
 	"qtorimon",
@@ -4324,6 +4335,7 @@ static const char* const kSupported[] = {
 	"vulcan",
 	"wa368snd",
 	"wa368snd_fix",
+	"wa_1_98",
 	"wa_2_98",
 	"wa_3_98",
 	"wa_sp_98",

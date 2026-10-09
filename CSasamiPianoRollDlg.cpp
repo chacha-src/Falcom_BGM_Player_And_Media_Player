@@ -1394,8 +1394,21 @@ void CSasamiPianoRollDlg::OnContextMenu(CWnd* pWnd, CPoint point)
 {
 	(void)pWnd;
 	if (!m_ui) return;
-	if (m_ui->tool == SC_TOOL_PENCIL || m_ui->tool == SC_TOOL_TEMPO)
-		ScStaffEnterSelectTool(m_ui);
+	if (m_ui->tool == SC_TOOL_PENCIL || m_ui->tool == SC_TOOL_TEMPO) {
+		CPoint probe = point;
+		if (probe.x < 0) probe = CPoint(0, 0);
+		else ScreenToClient(&probe);
+		int onNote = 0;
+		if (m_ev && m_evCount && m_curPart
+			&& ScPianoRollHitNote(&m_roll, m_gridRc, m_ev, *m_evCount, m_ui, *m_curPart, probe) >= 0)
+			onNote = 1;
+		if (!onNote) {
+			ScStaffEnterSelectTool(m_ui);
+			::SetCursor(::LoadCursor(NULL, IDC_ARROW));
+			Invalidate(FALSE);
+			return;
+		}
+	}
 	CPoint pt = point;
 	CPoint client = point;
 	if (pt.x < 0) { pt = CPoint(0, 0); ClientToScreen(&pt); client = CPoint(0, 0); }
@@ -1411,6 +1424,10 @@ void CSasamiPianoRollDlg::OnContextMenu(CWnd* pWnd, CPoint point)
 	menu.AddCommand(9004, LL14(L"削除\tDelete", L"Delete\tDelete", L"Supprimer", L"Elimina", L"Eliminar", L"삭제", L"删除", L"حذف", L"Удалить", L"Löschen", L"Apagar", L"Verwijderen", L"Usuń", L"Sil"));
 	menu.AddCommand(9005, LL14(L"タイ\tCtrl+T", L"Tie\tCtrl+T", L"Liaison", L"Legatura", L"Ligadura", L"타이", L"连音", L"ربط", L"Лига", L"Bindebogen", L"Ligadura", L"Boog", L"Łuk", L"Bağ"));
 	menu.AddSeparator();
+	menu.AddCommand(9088, LL14(
+		L"標準MIDIに書き出す…", L"Export standard MIDI…", L"Exporter MIDI standard…", L"Esporta MIDI standard…", L"Exportar MIDI estándar…",
+		L"표준 MIDI로 내보내기…", L"导出标准MIDI…", L"تصدير MIDI قياسي…", L"Экспорт стандартного MIDI…", L"Standard-MIDI exportieren…",
+		L"Exportar MIDI padrão…", L"Standaard-MIDI exporteren…", L"Eksportuj standardowe MIDI…", L"Standart MIDI dışa aktar…"));
 	menu.AddCommand(9101, LL14(L"ループ開始 (|:n)…", L"Loop start (|:n)…", L"Début de boucle", L"Inizio loop", L"Inicio de bucle", L"루프 시작", L"循环开始", L"بداية الحلقة", L"Начало цикла", L"Schleifenstart", L"Início do loop", L"Lusbegin", L"Początek pętli", L"Döngü başlangıcı"));
 	menu.AddCommand(9102, LL14(L"ループ終了 (:|)", L"Loop end (:|)", L"Fin de boucle", L"Fine loop", L"Fin de bucle", L"루프 끝", L"循环结束", L"نهاية الحلقة", L"Конец цикла", L"Schleifenende", L"Fim do loop", L"Luseinde", L"Koniec pętli", L"Döngü sonu"));
 	if (!m_isFm) {
@@ -1442,6 +1459,14 @@ void CSasamiPianoRollDlg::OnContextMenu(CWnd* pWnd, CPoint point)
 		}
 	}
 	const UINT cmd = menu.Track(pt, this);
+	if (cmd == 9088) {
+		if (m_isFm) {
+			if (m_fmScore) m_fmScore->ExportStandardMidi();
+		} else if (m_midiScore) {
+			m_midiScore->ExportStandardMidi();
+		}
+		return;
+	}
 	if (!cmd || !m_ev || !m_evCount) return;
 	ScEvent* clip = ClipBuf();
 	int* clipN = ClipCountPtr();

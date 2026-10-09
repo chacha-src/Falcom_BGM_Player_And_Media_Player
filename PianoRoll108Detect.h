@@ -1,8 +1,14 @@
 ﻿#pragma once
 // 108鍵簡易ピアノロール検出
 //
-// 旧実装（帯域ごとの枠数と相対比によるピック）をベースにしつつ、
-// 「低音に食われる（高音が消える）」問題と「音数制限」を解消した「いいとこ取り」版。
+// 鳴っている基音だけを返す。
+// 倍音は「3度・5度」などの音程ではなく、周波数の整数倍（n*f0）だけ。
+// 検出スペクトルは振幅の2乗なので、比較の前に振幅へ戻す。
+// 一つの音の部分音は、次数 n に対して振幅が n のべきで減衰する。
+// その包絡に乗る山だけをその音の倍音として引き、乗らない山は別の音。
+// 和音の5度や3度は整数倍の減衰曲線に乗らないので残る。
+// 低域は半音が分析ビンより狭く、1音が2〜3鍵に割れる。分解できない範囲は
+// 谷で分かれた音以外を1鍵にまとめる。
 //
 // 公開 API / 定数名は CPianoRoll.cpp 互換を維持する。
 #include <algorithm>
@@ -139,6 +145,69 @@ namespace PianoRoll108
         }
     }
 
+    // 検出窓の周波数分解能。低音は Hann 8192、C6 以上は Blackman 4096（CPianoRoll と同一）。
+    inline float AnalysisBinHz(int key)
+    {
+        const float nWin = (key >= WIN_MID_END) ? 4096.0f : 8192.0f;
+        return 44100.0f / nWin;
+    }
+
+    // 半音 d 個ぶん離れた鍵への Hann 窓の漏れ（中心を 1 とした振幅比）。
+    // 低音では半音間隔がビン幅より狭く、1音が 2〜3 鍵にまたがる。さらに ±3 ビン付近の
+    // サイドローブが別の局所ピークになり、同じ音がもう 1〜2 鍵点灯する。
+    inline float HannLeakAmp(int key, int deltaSemi)
+    {
+        if (deltaSemi == 0) return 1.0f;
+        const float bins = fabsf((float)deltaSemi) * PianoKey::KeyHz(key) * 0.059463094f
+            / AnalysisBinHz(key);
+        if (bins < 1.0e-3f) return 1.0f;
+        const float denom = 1.0f - bins * bins;
+        const float sinc = sinf(3.14159265f * bins) / (3.14159265f * bins);
+        if (fabsf(denom) < 0.08f)
+            return fabsf(sinc) * 0.12f;
+        float w = fabsf(sinc / denom);
+        if (w > 1.0f) w = 1.0f;
+        return w;
+    }
+
+    inline int LeakReachSemis(int key)
+    {
+        const float semi = PianoKey::KeyHz(key) * 0.059463094f;
+        const float bins = 6.5f;
+        int r = (int)ceilf(bins * AnalysisBinHz(key) / (semi > 1.0f ? semi : 1.0f));
+        if (r < 1) r = 1;
+        if (r > 8) r = 8;
+        return r;
+    }
+
+    // 高音ほど絶対床を下げる。旧実装は最高オクターブの床を上げていたため、
+    // 弦の弱い高音（基音が小さく、第2倍音は鍵盤外）が先にゼロになった。
+    inline float AmpFloorForKey(int key, float powerFloor)
+    {
+        float rel = 0.20f;
+        if (key < BASS_END) rel = 1.0f;
+        else if (key < C4_KEY) rel = 0.42f;
+        else if (key < O5_HI) rel = 0.16f;
+        else if (key < EDGE_HI) rel = 0.09f;
+        else rel = 0.055f;
+        float p = powerFloor * rel;
+        if (p < 1.0e-8f) p = 1.0e-8f;
+        return sqrtf(p);
+    }
+
+    inline float BandStrict(int key, float pickBassRel, float pickLowMidRel,
+        float pickMelodyRel, float pickTreRel)
+    {
+        float rel = 1.0f;
+        if (key < BASS_END) rel = pickBassRel / 0.28f;
+        else if (key < C4_KEY) rel = pickLowMidRel / 0.20f;
+        else if (key < O5_HI) rel = pickMelodyRel / 0.10f;
+        else rel = pickTreRel / 0.22f;
+        if (rel < 0.35f) rel = 0.35f;
+        if (rel > 3.5f) rel = 3.5f;
+        return rel;
+    }
+
     inline void BuildFramePicks(const float* blend, bool* outPicked, int count,
         float levelScale = 1.0f, float absNoiseFloor = 0.00055f,
         const float* onset = nullptr, const float* prevOnset = nullptr,
@@ -149,132 +218,262 @@ namespace PianoRoll108
         if (!blend || !outPicked || count != COUNT) return;
         memset(outPicked, 0, (size_t)count * sizeof(bool));
 
-        float gated[COUNT];
-        for (int i = 0; i < count; ++i) {
-            const float floor = AbsFloorForKey(i, absNoiseFloor);
-            gated[i] = (blend[i] >= floor) ? blend[i] : 0.0f;
-        }
-
         float scale = levelScale;
-        if (scale < 0.70f) scale = 0.70f;
-        if (scale > 1.10f) scale = 1.10f;
+        if (scale < 0.55f) scale = 0.55f;
+        if (scale > 1.25f) scale = 1.25f;
 
-        bool band[COUNT];
+        float amp[COUNT];
+        for (int i = 0; i < count; ++i)
+            amp[i] = (blend[i] > 0.0f) ? sqrtf(blend[i]) : 0.0f;
 
-        // ---- 1) 低音: 枠2本、相対厳しめ。隣接は後で強制1本化 ----
-        PickFundamentalNotesRange(gated, band, count, EDGE_LO, BASS_END, 8, pickBassRel / scale);
-        for (int i = 0; i < EDGE_LO; ++i) band[i] = false;
-        CollapseNearbyPicks(blend, band, EDGE_LO, BASS_END, 3, false); // 強い方優先
-        ForceUniqueBassAdjacents(blend, band, EDGE_LO, BASS_END);
-        RefineToLocalPeaksInBand(blend, band, count, EDGE_LO, BASS_END, 1);
-        // 低域DC/サブオーディオ裾の除去: 基音は「下隣の半音より強い」真の局所ピークで
-        // あること。すぐ下の鍵(EDGE_LO 未満のサブオーディオ帯を含む)が同等以上に強ければ、
-        // それは基音ではなく DC 方向へ単調増加する漏れ裾の縁にすぎない。裾は下ほど強いので
-        // 縁を落とすと1つ上へ連鎖し、真の局所ピーク(下より強い鍵)が現れた所で自然に止まる。
-        // RefineToLocalPeaksInBand は帯域下端より下を見ないため、この判定を別途行う。
-        // オクターブ0(C0–B0 = key12–23, 約16–31Hz)は 185ms 窓では半音間隔(<2Hz)が
-        // 分解能(約5.4Hz)を大きく下回り、原理的に音程を分離できない。PSG/ピアノの
-        // 最低音 A0 以下でもあり、実質 DC 漏れ裾の常時点灯源にしかならないため検出しない。
-        for (int i = EDGE_LO; i < MUSIC_LOW_FLOOR && i < BASS_END; ++i)
-            band[i] = false;
-        // それ以上(オクターブ1〜)は「下隣の半音より強い」真の局所ピークのみ採用する。
-        // すぐ下の鍵が同等以上に強ければ、それは基音でなく DC 方向へ単調増加する漏れ裾の
-        // 縁にすぎない。係数 0.98 は低音側の分解能不足で隣接鍵がほぼ同値になる分の許容。
-        for (int i = MUSIC_LOW_FLOOR; i < BASS_END; ++i) {
-            if (!band[i]) continue;
-            if (blend[i - 1] >= blend[i] * 0.98f)
-                band[i] = false;
-        }
-        MergeBandPicks(outPicked, band, EDGE_LO, BASS_END);
+        // 部分音 n=2..8 の対数振幅を Theil-Sen で直線に合わせる。
+        // 傾きが負で包絡に乗る山だけが倍音。包絡より明らかに大きく、
+        // 奇数次が親の系列に無い山は別の音。平坦な列は和音なので足さない。
+        auto sieve = [&](const float* spec, int key, float* pred, bool* inlier,
+            float* slopeOut, float* iceptOut) -> float {
+            for (int n = 0; n <= 8; ++n) { pred[n] = 0.0f; inlier[n] = false; }
+            *slopeOut = 0.0f;
+            *iceptOut = 0.0f;
+            if (key < MUSIC_LOW_FLOOR || key >= count || spec[key] < 1.0e-8f) return 0.0f;
 
-        // ベース倍音のソフト減衰は高音の欠落（低音に食われる）を招くため廃止。
-        // ゴースト除去は IsHarmonicGhostPartial に任せる。
-        // float upperSpec[COUNT];
-        // memcpy(upperSpec, gated, sizeof(upperSpec));
-        // SoftAttenuateBassHarmonics(outPicked, upperSpec, count);
-
-        // ---- 2) 低中 (C3–C4): 弦の支えなど ----
-        // 音数制限を大幅に緩和（実質無制限）
-        PickFundamentalNotesRange(gated, band, count, BASS_END, C4_KEY, 16, pickLowMidRel);
-        CollapseNearbyPicks(blend, band, BASS_END, C4_KEY, 3, false);
-        MergeBandPicks(outPicked, band, BASS_END, C4_KEY);
-
-        // ---- 3) メロディ帯 C4–C6: 枠を多め・閾値緩め（ピアノ本命）----
-        PickFundamentalNotesRange(gated, band, count, C4_KEY, O5_HI, 24, pickMelodyRel);
-        // 帯域内 salience で取れなかったアタックを onset で救出（ゴースト形は除外）
-        if (onset && prevOnset) {
-            for (int i = C4_KEY; i < O5_HI; ++i) {
-                if (band[i]) continue;
-                if (gated[i] < AbsFloorForKey(i, absNoiseFloor) * 1.5f) continue;
-                if (!IsStrictLocalPeak(gated, i, C4_KEY, O5_HI)) continue;
-                if (PianoKey::IsHarmonicGhostPartial(blend, i, count, BASS_END)) continue;
-                if (OnsetSupportsPickInBand(onset, prevOnset, i, C4_KEY, O5_HI, scale, onsetDeltaScale))
-                    band[i] = true;
+            float a[9];
+            a[1] = spec[key];
+            float strongest = a[1];
+            for (int n = 2; n <= 8; ++n) {
+                const int hk = PianoKey::HarmonicKeyOnBoard(key, n);
+                a[n] = (hk >= 0 && hk < count) ? spec[hk] : 0.0f;
+                if (a[n] > strongest) strongest = a[n];
             }
-        }
-        CollapseNearbyPicks(blend, band, C4_KEY, O5_HI, 2, false);
-        MergeBandPicks(outPicked, band, C4_KEY, O5_HI);
+            // 基音が無い（最強部分音の 6% 未満）。和音から想像した空の基音は音にしない。
+            if (strongest > 1.0e-8f && a[1] < strongest * 0.06f) return 0.0f;
+            // 1 割未満は基音として残せるが、上の山は別の音なので点数に足さない。
+            const bool fundPresent = a[1] >= strongest * 0.10f;
 
-        // ---- 4) 高音 C6–C7: 控えめ ----
-        PickFundamentalNotesRange(gated, band, count, O5_HI, EDGE_HI, 16, pickTreRel);
-        for (int i = O5_HI; i < EDGE_HI; ++i) {
-            if (!band[i]) continue;
-            if (PianoKey::IsHarmonicGhostPartial(blend, i, count, BASS_END) &&
-                !PianoKey::HasOwnOvertoneSupport(blend, i, count, 0.18f))
-                band[i] = false;
-        }
-        MergeBandPicks(outPicked, band, O5_HI, EDGE_HI);
-
-        // ---- 5) 最高音 C7–B7: 通常曲の高音メロディ/装飾を拾う ----
-        if (EDGE_HI < count) {
-            PickFundamentalNotesRange(gated, band, count, EDGE_HI, count, 16, pickTreRel);
-            for (int i = EDGE_HI; i < count; ++i) {
-                if (!band[i]) continue;
-                if (PianoKey::IsHarmonicGhostPartial(blend, i, count, BASS_END) &&
-                    !PianoKey::HasOwnOvertoneSupport(blend, i, count, 0.18f))
-                    band[i] = false;
-            }
-            MergeBandPicks(outPicked, band, EDGE_HI, count);
-        }
-
-        // ---- 全域倍音ふるい（パルス波/矩形波対策）----
-        // PSG 等のパルス波は全整数次倍音を含むため、各倍音自身も倍音列(2f,3f…)を
-        // 持ち、HasOwnOvertoneSupport 等で「独立音」に誤判定されて残る。帯域別ピック
-        // では取り切れないので、最後に全域で「より強い確定音の整数倍音位置にある
-        // 弱いピック」を剪定する。高い方から見て、より強い下位ピック j の n:1 倍音に
-        // あたる i を落とす。独立音級(親に肉薄する強さ)は残す。
-        // n は h2〜h8 まで。24次まで広げるとベースの 15〜20 次としてメロディを落とす。
-        // メロディ帯(C4–C6)はピアノのオクターブ重ねを守るため、明確に弱い倍音のみ対象。
-        for (int i = count - 1; i > EDGE_LO; --i) {
-            if (!outPicked[i]) continue;
-            for (int j = i - 1; j >= EDGE_LO; --j) {
-                if (!outPicked[j]) continue;
-                if (blend[j] <= blend[i]) continue; // 親はより強い方のみ
-                
-                int n = PianoKey::GetHarmonicNCompute(i, j, 16);
-                if (n == 0) continue;
-
-                // パワー（blend）での予測減衰カーブ。振幅が1/nならパワーは1/n^2程度。
-                // 余裕を持たせて、予想最大パワーを計算。
-                float expectedPowerRatio = 2.0f / powf((float)n, 1.3f);
-                if (n == 2 || n == 4 || n == 8) expectedPowerRatio *= 1.5f;
-
-                if (blend[i] > blend[j] * expectedPowerRatio) continue; // 独立音級は残す
-
-                // 倍音の予想パワー以下だった場合、独自の倍音列を持っていれば実音として救出
-                bool isOctave = (n == 2 || n == 4 || n == 8 || n == 16);
-                if (!isOctave && PianoKey::HasOwnOvertoneSupport(blend, i, count, 0.15f)) {
-                    continue; // 実音として残す
+            float logN[8], logA[8];
+            int np = 0;
+            if (fundPresent) {
+                for (int n = 2; n <= 8; ++n) {
+                    if (a[n] < 1.0e-5f) continue;
+                    logN[np] = logf((float)n);
+                    logA[np] = logf(a[n]);
+                    ++np;
                 }
+            }
+            float slope = 0.0f;
+            float icept = 0.0f;
+            bool fitted = false;
+            if (np >= 2) {
+                float slopes[32];
+                int ns = 0;
+                for (int i = 0; i < np; ++i) {
+                    for (int j = i + 1; j < np; ++j) {
+                        const float dn = logN[j] - logN[i];
+                        if (dn < 1.0e-6f) continue;
+                        slopes[ns++] = (logA[j] - logA[i]) / dn;
+                    }
+                }
+                for (int i = 1; i < ns; ++i) {
+                    const float v = slopes[i];
+                    int j = i;
+                    while (j > 0 && slopes[j - 1] > v) { slopes[j] = slopes[j - 1]; --j; }
+                    slopes[j] = v;
+                }
+                slope = (ns > 0) ? slopes[ns / 2] : 0.0f;
+                // 平坦な部分音列は減衰する一つの音ではない（同音量のオクターブ、和音）。
+                if (slope < -0.20f) {
+                    float ic[8];
+                    for (int i = 0; i < np; ++i)
+                        ic[i] = logA[i] - slope * logN[i];
+                    for (int i = 1; i < np; ++i) {
+                        const float v = ic[i];
+                        int j = i;
+                        while (j > 0 && ic[j - 1] > v) { ic[j] = ic[j - 1]; --j; }
+                        ic[j] = v;
+                    }
+                    icept = ic[np / 2];
+                    fitted = true;
+                    *slopeOut = slope;
+                    *iceptOut = icept;
+                }
+            }
 
-                outPicked[i] = false;
-                break;
+            float score = a[1];
+            if (fitted) {
+                for (int n = 2; n <= 8; ++n) {
+                    if (a[n] < 1.0e-5f) continue;
+                    pred[n] = expf(icept + slope * logf((float)n));
+                    const float hi = a[n] > pred[n] ? a[n] : pred[n];
+                    const float lo = a[n] > pred[n] ? pred[n] : a[n];
+                    if (lo > 1.0e-8f && hi <= lo * 1.70f) {
+                        inlier[n] = true;
+                        score += a[n];
+                    }
+                }
+            } else if (fundPresent && np == 1) {
+                for (int n = 2; n <= 8; ++n) {
+                    if (a[n] < 1.0e-5f) continue;
+                    // 1/n 以下は減衰する倍音。第3倍音が鍵盤外で第2倍音だけ大きいのは弦の基音。
+                    const bool decay = a[n] <= a[1] / (float)n * 1.20f;
+                    const bool highString = (n == 2)
+                        && PianoKey::HarmonicKeyOnBoard(key, 3) < 0
+                        && a[2] > a[1] * 1.15f;
+                    if (decay || highString) {
+                        pred[n] = a[n];
+                        inlier[n] = true;
+                        score += a[n];
+                    }
+                }
+            }
+            pred[1] = a[1];
+            inlier[1] = true;
+            return score;
+        };
+
+        float residual[COUNT];
+        for (int i = 0; i < count; ++i) residual[i] = amp[i];
+
+        bool emitted[COUNT];
+        bool dead[COUNT];
+        memset(emitted, 0, sizeof(emitted));
+        memset(dead, 0, sizeof(dead));
+
+        for (int round = 0; round < 16; ++round) {
+            int best = -1;
+            float bestScore = 0.0f;
+            float bestPred[9];
+            bool bestIn[9];
+            float bestSlope = 0.0f;
+            float bestIcept = 0.0f;
+            for (int i = MUSIC_LOW_FLOOR; i < count; ++i) {
+                if (dead[i] || emitted[i]) continue;
+                if (i > 0 && residual[i - 1] > residual[i]) continue;
+                if (i + 1 < count && residual[i + 1] >= residual[i]) continue;
+                const float th = AmpFloorForKey(i, absNoiseFloor) * 2.15f
+                    * BandStrict(i, pickBassRel, pickLowMidRel, pickMelodyRel, pickTreRel)
+                    / scale;
+                if (residual[i] < th) continue;
+                float pred[9];
+                bool inlier[9];
+                float slope = 0.0f, icept = 0.0f;
+                const float sc = sieve(residual, i, pred, inlier, &slope, &icept);
+                if (sc < th || sc <= bestScore) continue;
+                bool leak = false;
+                for (int j = MUSIC_LOW_FLOOR; j < count && !leak; ++j) {
+                    if (!emitted[j]) continue;
+                    const int d = i - j;
+                    const int ad = d < 0 ? -d : d;
+                    if (ad < 1 || ad > 8) continue;
+                    if (amp[i] <= amp[j] * HannLeakAmp(j, d) * 1.35f) leak = true;
+                }
+                if (leak) continue;
+                best = i;
+                bestScore = sc;
+                bestSlope = slope;
+                bestIcept = icept;
+                for (int n = 0; n <= 8; ++n) { bestPred[n] = pred[n]; bestIn[n] = inlier[n]; }
+            }
+            if (best < 0) break;
+            emitted[best] = true;
+
+            int nIn = 0;
+            for (int n = 2; n <= 8; ++n) if (bestIn[n]) ++nIn;
+            const bool series = bestSlope < -0.20f && nIn >= 3;
+            for (int n = 1; n <= 24; ++n) {
+                const int hk = (n == 1) ? best : PianoKey::HarmonicKeyOnBoard(best, n);
+                if (hk < 0 || hk >= count) continue;
+                float pred = 0.0f;
+                if (n == 1) pred = bestPred[1];
+                else if (series)
+                    pred = expf(bestIcept + bestSlope * logf((float)n));
+                else if (n <= 8 && bestIn[n]) pred = bestPred[n];
+                else continue;
+                if (pred <= 1.0e-8f) continue;
+                const float before = residual[hk];
+                const float keep = before * before - pred * pred;
+                residual[hk] = (keep > 0.0f) ? sqrtf(keep) : 0.0f;
+                // 包絡以下は倍音の谷。少し上回るだけならフォルマント。
+                // はっきり上回り、奇数次が親の系列に無いときだけ別の音。
+                const bool ownTone = n > 1 && before > pred * 1.08f
+                    && PianoKey::OddPartialExceedsParent(amp, hk, best, count);
+                if (before <= pred * 1.05f || (!ownTone && before <= pred * 1.35f))
+                    dead[hk] = true;
+                int reach = 1;
+                while (reach < 6 && HannLeakAmp(hk, reach) > 0.22f) ++reach;
+                for (int d = -reach; d <= reach; ++d) {
+                    if (d == 0) continue;
+                    const int s = hk + d;
+                    if (s < 0 || s >= count) continue;
+                    const float skirt = pred * HannLeakAmp(hk, d);
+                    const float sk = residual[s] * residual[s] - skirt * skirt;
+                    residual[s] = (sk > 0.0f) ? sqrtf(sk) : 0.0f;
+                    if (amp[s] <= skirt * 1.40f)
+                        dead[s] = true;
+                }
             }
         }
 
-        // 最後にもう一度低音隣接を潰す（帯域マージ後の漏れ）
-        ForceUniqueBassAdjacents(blend, outPicked, EDGE_LO, BASS_END);
-        // 全域 RefineToLocalPeaks は中高音の半音和音（短2度）を落とすため廃止。
-        // 各帯域の PickFundamentalNotesRange 内で isPeak 判定を行っているため不要。
+        for (int i = 0; i < count; ++i)
+            outPicked[i] = emitted[i] && i >= MUSIC_LOW_FLOOR;
+
+        // 分解できない低域は、谷が無い隣鍵を強い側へまとめる。
+        for (int i = MUSIC_LOW_FLOOR; i < BASS_END; ++i) {
+            if (!outPicked[i]) continue;
+            const float semiHz = PianoKey::KeyHz(i) * 0.059463094f;
+            const float binHz = AnalysisBinHz(i);
+            if (semiHz > binHz * 1.15f) continue;
+            int rad = (int)ceilf(2.2f * binHz / (semiHz > 0.5f ? semiHz : 0.5f));
+            if (rad < 2) rad = 2;
+            if (rad > 5) rad = 5;
+            for (int j = i + 1; j <= i + rad && j < BASS_END; ++j) {
+                if (!outPicked[j]) continue;
+                float valley = amp[i] < amp[j] ? amp[i] : amp[j];
+                for (int k = i + 1; k < j; ++k)
+                    if (amp[k] < valley) valley = amp[k];
+                const int strong = amp[i] >= amp[j] ? i : j;
+                const int weak = strong == i ? j : i;
+                const bool separated = (j - i) >= 2
+                    && valley < amp[weak] * 0.50f && valley < amp[strong] * 0.50f;
+                if (separated && PianoKey::OddPartialExceedsParent(amp, weak, strong, count))
+                    continue;
+                outPicked[weak] = false;
+                if (weak == i) break;
+            }
+        }
+
+        // 分解できる高さの短2度。峰の片側だけ残ったとき、漏れより大きい隣を戻す。
+        for (int j = MUSIC_LOW_FLOOR; j < count; ++j) {
+            if (!outPicked[j]) continue;
+            if (PianoKey::KeyHz(j) * 0.059463094f < AnalysisBinHz(j) * 1.15f) continue;
+            for (int d = -1; d <= 1; d += 2) {
+                const int i = j + d;
+                if (i < MUSIC_LOW_FLOOR || i >= count || outPicked[i] || dead[i]) continue;
+                if (amp[i] < amp[j] * 0.82f) continue;
+                if (amp[i] <= amp[j] * HannLeakAmp(j, d) * 1.35f) continue;
+                outPicked[i] = true;
+            }
+        }
+
+        if (onset && prevOnset) {
+            for (int i = C4_KEY; i < count; ++i) {
+                if (outPicked[i] || dead[i]) continue;
+                if (amp[i] < AmpFloorForKey(i, absNoiseFloor) * 1.15f) continue;
+                if (!IsStrictLocalPeak(blend, i, (i >= O5_HI) ? O5_HI : C4_KEY, count)) continue;
+                bool harm = false;
+                for (int j = MUSIC_LOW_FLOOR; j < i; ++j) {
+                    if (!outPicked[j]) continue;
+                    const int n = PianoKey::ExactHarmonicNumber(i, j, 12);
+                    if (n < 2) continue;
+                    if (amp[i] <= amp[j] / (float)n * 1.35f &&
+                        !PianoKey::OddPartialExceedsParent(amp, i, j, count)) {
+                        harm = true;
+                        break;
+                    }
+                }
+                if (harm) continue;
+                const int blo = (i >= O5_HI) ? O5_HI : C4_KEY;
+                if (OnsetSupportsPickInBand(onset, prevOnset, i, blo, count, scale, onsetDeltaScale))
+                    outPicked[i] = true;
+            }
+        }
     }
 }

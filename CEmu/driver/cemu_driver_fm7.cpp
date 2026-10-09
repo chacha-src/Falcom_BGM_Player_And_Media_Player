@@ -95,8 +95,9 @@ void CDriverFm7::DeliverIrqs(uint64_t now)
 
 	/* 音楽 IRQ は 1 源だけ: OPN タイトルはチップタイマ端（vsync+タイマ二重は ys2_fmav が超速）。
 	   PSG タイトルは vsync のみ。$FD03 ステータスは上で ApplyFd03Vsync。 */
+	/* 端は CPU が受けるまで残す。ここで prev を立てて Ack すると、I/F マスク中
+	   （ISR の ORCC）に来た次のタイマが消えてテンポが遅れる。 */
 	int chipIrqEdge = (chipIrq && !prevChipIrq_) ? 1 : 0;
-	prevChipIrq_ = chipIrq;
 
 	auto isFd03Stub = [&](uint16_t vec) -> int {
 		if (vec == 0 || vec == 0xFFFF) return 0;
@@ -352,8 +353,9 @@ void CDriverFm7::DeliverIrqs(uint64_t now)
 	}
 
 	/* 6809 の IRQ/FIRQ はレベル線。マスク中（ISR 中の ORCC 等）に来た vsync を捨てず、線を立てられる
-	   命令まで要求を保持する（多重の vsync は 1 本にまとまる）。ホスト tick は即時に消費。チップ端は
-	   ここで毎回 Ack するのでその場限り（保持すると luxsor の OPN ISR がフラグ無しで走り無音）。 */
+	   命令まで要求を保持する（多重の vsync は 1 本にまとまる）。ホスト tick は即時に消費。
+	   チップ端は CPU が受けたときだけ Ack する。マスク中に消すと次のタイマが落ち、
+	   受けたあとも線を残すと luxsor の OPN ISR がフラグ無しで再入して無音になる。 */
 	if (ranHostTick) {
 		vsyncReq_ = 0;
 	} else {
@@ -361,15 +363,15 @@ void CDriverFm7::DeliverIrqs(uint64_t now)
 		raiseFromVsync = vsyncReq_;
 	}
 	const unsigned pulsesBefore = irqPulses_;
+	const int ysPsg = (!hw_->useOpn_ && hw_->patchTableBase_ == 0xFED0) ? 1 : 0;
+	const uint16_t pcNow = cpu->pc.w;
+	const int inAlbDrv = (irqVec == 0x87CA
+		&& ((pcNow >= 0xF000 && pcNow < 0xF900)
+			|| (pcNow >= 0x8500 && pcNow < 0xC500)));
 	if (!ranHostTick && (raiseFromChip || raiseFromVsync)) {
 		/* vsync 源は 6809 の 1 線だけ。ちょうど 1 ベクタが $FD03 ハンドラならその線。Ys で他ベクタを撃つと $FF00 の PATCH データへ飛び、MANPR 初ノート前に RTI フレームを壊す。 */
-		const int ysPsg = (!hw_->useOpn_ && hw_->patchTableBase_ == 0xFED0) ? 1 : 0;
 		const int routeFd03 = (raiseFromVsync && !raiseFromChip
 			&& (irqStub != firqStub)) ? 1 : 0;
-		const uint16_t pcNow = cpu->pc.w;
-		const int inAlbDrv = (irqVec == 0x87CA
-			&& ((pcNow >= 0xF000 && pcNow < 0xF900)
-				|| (pcNow >= 0x8500 && pcNow < 0xC500)));
 		if (!inAlbDrv) {
 			if (hw_->useOpn_) {
 				/* IRQ+FIRQ 同時（I も F もクリア）は kohaku を嵐にした: 4000+ パルスで YM 書込がほぼ無い。1 線、IRQ 優先。 */
@@ -398,8 +400,16 @@ void CDriverFm7::DeliverIrqs(uint64_t now)
 			vsyncReq_ = 0;
 	}
 
-	if (chipIrq && hw_->ChipOpn())
+	/* 届けた端、または意図して捨てる端だけ線を下ろす。マスク中は残す。 */
+	const int raised = (irqPulses_ != pulsesBefore) ? 1 : 0;
+	const int ignoreChip = (ysPsg && raiseFromChip && !raiseFromVsync) ? 1 : 0;
+	if (hw_->ChipOpn() && chipIrq
+		&& ((raised && raiseFromChip) || inAlbDrv || ignoreChip)) {
 		hw_->ChipOpn()->AckIrq();
+		prevChipIrq_ = 0;
+	} else if (!chipIrq) {
+		prevChipIrq_ = 0;
+	}
 
 	if (vsyncDue && vsyncPeriod_ > 0) {
 		while (nextVsync_ + vsyncPeriod_ <= now)

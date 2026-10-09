@@ -1026,6 +1026,12 @@ static void PlantPc98BiosTimer(uint8_t* mem)
 		0xFF, 0x06, 0x6C, 0x04,       /* inc word [046C] */
 		0x83, 0x16, 0x6E, 0x04, 0x00, /* adc word [046E], 0 */
 		0x1F,                         /* pop ds */
+		/* INT 1Ch AH=02 は一回だけ。計測手続きは常駐コピーで上書きされる。
+		   フラグ 00C0:0040。呼んだら消す。 */
+		0x2E, 0x80, 0x3E, 0x40, 0x00, 0x00, /* cmp byte cs:[0040], 0 */
+		0x74, 0x08,                   /* jz skip（INT 80 とフラグ消しを飛ばす） */
+		0xCD, 0x80,                   /* int 80h — ユーザ手続き（IRET） */
+		0x2E, 0xC6, 0x06, 0x40, 0x00, 0x00, /* mov byte cs:[0040], 0 */
 		0xCD, 0x1C,                   /* int 1Ch */
 		0xB0, 0x20,                   /* mov al, 20h */
 		0xE6, 0x00,                   /* out 00h, al */
@@ -1033,6 +1039,7 @@ static void PlantPc98BiosTimer(uint8_t* mem)
 		0xCF                          /* iret */
 	};
 	memcpy(mem + b, kIsr, sizeof(kIsr));
+	mem[b + 0x40] = 0;
 	mem[0x08 * 4 + 0] = 0x00;
 	mem[0x08 * 4 + 1] = 0x00;
 	mem[0x08 * 4 + 2] = (uint8_t)(tickSeg & 0xff);
@@ -1050,6 +1057,37 @@ static void PlantPc98BiosTimer(uint8_t* mem)
 			mem[0x1C * 4 + 3] = (uint8_t)(tickSeg >> 8);
 		}
 	}
+}
+
+/* AH=02 で IRQ0 を開けた。一回の計測が終わったらマスクへ戻す。 */
+static int s_pc98UserTmr;
+
+/* PC-98 BIOS INT 1Ch AH=02h: ES:BX をユーザタイマ、CX を間隔にする。
+   MUAPLAY は常駐前にこれで計測し、戻らないと INT 60 を植えない。
+   実機は IRQ0 が常に開いている。登録した手続きは BIOS INT 08 から INT 80h で呼ぶ。 */
+static int Pc98TakeTimerApi(uint8_t* mem)
+{
+	const uint16_t cs = np2_reg_get(NP2_R_CS);
+	const uint16_t ip = np2_reg_get(NP2_R_IP);
+	if (cs == 0x00C0)
+		return 0;
+	const unsigned lin = ((unsigned)cs << 4) + ip;
+	if (!mem || lin + 2u >= 0x200000u)
+		return 0;
+	if (mem[lin] != 0xCD || mem[lin + 1] != 0x1C)
+		return 0;
+	if ((np2_reg_get(NP2_R_AX) >> 8) != 0x02)
+		return 0;
+	const uint16_t es = np2_reg_get(NP2_R_ES);
+	const uint16_t bx = np2_reg_get(NP2_R_BX);
+	mem[(0x00C0u << 4) + 0x40] = 1;
+	s_pc98UserTmr = 1;
+	mem[0x80 * 4 + 0] = (uint8_t)(bx & 0xff);
+	mem[0x80 * 4 + 1] = (uint8_t)(bx >> 8);
+	mem[0x80 * 4 + 2] = (uint8_t)(es & 0xff);
+	mem[0x80 * 4 + 3] = (uint8_t)(es >> 8);
+	np2_reg_set(NP2_R_IP, (uint16_t)(ip + 2));
+	return 1;
 }
 
 /* pc98vx / bootcs は DOS を通らない。FMD98.DRV は INT 21 AH=25/35 で
@@ -1106,6 +1144,8 @@ static void PlantPc98Int21SetVec(uint8_t* mem)
 }
 
 /* CEMU_PC98_IPPROF=<file>: play ポンプ中に実行した線形 PC のヒストグラム。曲を載せて mute するドライバはほぼ待ち条件でスピンし、ホット番地が見る命令を示す。 */
+unsigned g_mdrHit = 0, g_mdrClr = 0, g_mdrDefer = 0;
+unsigned g_opnLineSeen = 0, g_opnIfBlock = 0, g_tmrSnap = 0;
 namespace {
 
 struct Pc98IpProf {
@@ -3513,10 +3553,16 @@ int CHardPc98::DeliverIrqs()
 		flags = (uint16_t)(flags | 0x0200);
 		np2_reg_set(NP2_R_FLAGS, flags);
 	}
+	g_tmrSnap = g_lastTimerCtrl;
 	if ((flags & 0x200) == 0) { /* IF クリア（割り込み禁止） */
-		if (chip_ && chip_->Irq()) g_censIfOff++;
+		if (chip_ && chip_->Irq()) {
+			g_censIfOff++;
+			g_opnIfBlock++;
+		}
 		return 0;
 	}
+	if (chip_ && chip_->Irq())
+		g_opnLineSeen++;
 	/* MMD2 ISR は STI しない。IF セットは IRET 済み。ymfm はまだレベル線を保持し得るので、旧ラッチは HLT アイドルを飢えた。 */
 	if (g_mmdPicIsr)
 		opnInService_ = 0;
@@ -3527,6 +3573,13 @@ int CHardPc98::DeliverIrqs()
 
 	if (packCmd1_ && IvtHooked(PC98_TIMER_VEC, isDos_))
 		picMask_ = (uint8_t)(picMask_ & 0xfeu);
+	if (s_pc98UserTmr) {
+		uint8_t* um = np2_mem();
+		if (!um || um[(0x00C0u << 4) + 0x40] == 0) {
+			s_pc98UserTmr = 0;
+			picMask_ = (uint8_t)(picMask_ | 0x01u);
+		}
+	}
 	if (pitIrqPending_ && (picMask_ & 0x01) == 0 && !g_pitInService) {
 		if (s_fmpIrqLock) {
 			/* FMP ISR 中は IRQ0 を保留（捨てない）。INT 08 へ入ると CS が
@@ -3683,6 +3736,31 @@ int CHardPc98::DeliverIrqs()
 		if (vec == PC98_OPN_IRQ_VEC)
 			picMask_ = (uint8_t)(picMask_ & ~(1u << 3));
 		if (IvtHooked(vec, isDos_)) {
+			/* MDR INT14 は [1A08] が 1 のあいだ演奏を飛ばす。INT40 ロード中に
+			   ネストすると SS が壊れロードが戻らず、戻ったあとも lock が残る。 */
+			if (mem) {
+				unsigned ps = 0;
+				if (vec == 0x14 || vec == PC98_OPN_IRQ_VEC)
+					ps = (unsigned)mem[vec * 4 + 2] | ((unsigned)mem[vec * 4 + 3] << 8);
+				const unsigned db = ps << 4;
+				if (ps && ps != (unsigned)DOS98_TRAMP_SEG
+					&& db + 0x1AC1u < 0x200000u
+					&& mem[db + 10] == 'M' && mem[db + 11] == 'D'
+					&& mem[db + 12] == 'R' && mem[db + 13] == '$') {
+					/* 演奏本体が lock を立てたまま IRET すると、以降の tick は
+					   0xBAE へ飛んで曲を進めない。配送直前（非ネスト）に落とす。
+					   INT0B ミラーでも同じ MDR 本体なので vec は 14 に限らない。 */
+					g_mdrHit++;
+					if (mem[db + 0x1A08] != 0) {
+						g_mdrDefer++;
+						return 0;
+					}
+					if (mem[db + 0x1AC0] != 0) {
+						g_mdrClr++;
+						mem[db + 0x1AC0] = 0;
+					}
+				}
+			}
 			if (vec >= 0x08 && vec <= 0x0F && (picMask_ & (1 << (vec - 0x08))) != 0) {
 				g_censMasked++;
 				return 0;
@@ -6204,17 +6282,48 @@ static void MdrPlantChannels(uint8_t* mem)
 		mem[bx + 1] = (uint8_t)(off >> 8);
 		mem[bx + 4] = mem[bx + 0];
 		mem[bx + 5] = mem[bx + 1];
+		/* [SI+2] が残ると 0DE6 はトラックをクリアする。[SI+4A]/[SI+4C] が
+		   残るとゲートが尽きるまで次のイベントを読まない。 */
+		mem[bx - 2] = 0;
+		mem[bx - 1] = 0;
 		mem[bx + 0x44] = 0;
 		mem[bx + 0x45] = 0;
+		mem[bx + 0x46] = 0;
+		mem[bx + 0x47] = 0;
+		mem[bx + 0x48] = 0;
+		mem[bx + 0x49] = 0;
 	}
 	/* INT40 BX=7 が [1A18] を立てる。糊は BX=5/1/2/3 だけで 0 のまま。
 	   0xD2E（8C ゲート）と 0DE6 の <80 ノートが JZ で YM を呼ばない。 */
 	if (db + 0x1A19u < 0x200000u)
 		mem[db + 0x1A18] = 1;
-	/* INT14 は [1AC0]!=0 だと 0DE6 を飛ばす。ネスト tick が COM SS を戻すと 1 のまま。 */
-	if (db + 0x1AC1u < 0x200000u) {
+	/* BX=3 は [1A0E]=0x1E をテンポ加算に使う。0 のままだと [1A14] が
+	   閾値 0x138 に届かずシーケンサが一度も走らない（全曲同じドローン）。 */
+	if (db + 0x1A11u < 0x200000u) {
+		const unsigned tempo = (unsigned)mem[db + 0x1A0E]
+			| ((unsigned)mem[db + 0x1A0F] << 8);
+		if (tempo == 0) {
+			mem[db + 0x1A0E] = 0x1E;
+			mem[db + 0x1A0F] = 0;
+		}
+	}
+	/* INT14 は [1AC0]!=0 だと 0DE6 を飛ばす。ネスト tick が COM SS を戻すと 1 のまま。
+	   [1A08] が 1 のままだと DeliverIrqs が INT14 を捨て、ポンプで INT40 が
+	   戻らなかった曲は同じ初期音のままになる。演奏前には両方落とす。
+	   [1AC2]/[1AC6] のビジーマスクが残るとそのトラックは毎 tick 飛ばされる。 */
+	if (db + 0x1AC9u < 0x200000u) {
+		mem[db + 0x1A08] = 0;
+		mem[db + 0x1A09] = 0;
 		mem[db + 0x1AC0] = 0;
 		mem[db + 0x1AC1] = 0;
+		mem[db + 0x1AC2] = 0;
+		mem[db + 0x1AC3] = 0;
+		mem[db + 0x1AC4] = 0;
+		mem[db + 0x1AC5] = 0;
+		mem[db + 0x1AC6] = 0;
+		mem[db + 0x1AC7] = 0;
+		mem[db + 0x1AC8] = 0;
+		mem[db + 0x1AC9] = 0;
 	}
 	/* [1A1E]/[1A22] 初期値は A000:0 / A200:0（テキストVRAM）。エミュはそこを
 	   作業RAMにしないので 0x12A が 1A4C を読めずノートが死ぬ。DGROUP へ移す。 */
@@ -6222,14 +6331,15 @@ static void MdrPlantChannels(uint8_t* mem)
 		const unsigned vram0 = (unsigned)mem[db + 0x1A20] | ((unsigned)mem[db + 0x1A21] << 8);
 		const unsigned vram1 = (unsigned)mem[db + 0x1A24] | ((unsigned)mem[db + 0x1A25] << 8);
 		if (vram0 >= 0xA000u) {
-			memset(mem + db + 0x8000u, 0, 0x800u);
+			/* テキスト VRAM の空白は 0x20。0 埋めだと 0x12A が [1A4C] を 0 のままにしノートを捨てる。 */
+			memset(mem + db + 0x8000u, 0x20, 0x800u);
 			mem[db + 0x1A1E] = 0x00;
 			mem[db + 0x1A1F] = 0x80;
 			mem[db + 0x1A20] = (uint8_t)(dcs & 0xff);
 			mem[db + 0x1A21] = (uint8_t)(dcs >> 8);
 		}
 		if (vram1 >= 0xA000u) {
-			memset(mem + db + 0x8800u, 0, 0x800u);
+			memset(mem + db + 0x8800u, 0x20, 0x800u);
 			mem[db + 0x1A22] = 0x00;
 			mem[db + 0x1A23] = 0x88;
 			mem[db + 0x1A24] = (uint8_t)(dcs & 0xff);
@@ -6970,6 +7080,9 @@ static void PatchMfdExeTsr(uint8_t* mem)
 
 /* 400 バイト mfd_98.com（INT 42 糊）: INT 7F のあと INT 18 AX=9801 を一度フックし ISR を本線として落ちる（pusha / IRET smash）。Night_s の 143 バイト COM は INT 18 をループ。setvect 後に止め、BootDos が 64KB COM 割当を保ったまま進む（AH=31 / 30h パラが CS:0290 を切る）。 */
 static uint16_t s_mfd98GlueCs;
+/* NAX の糊が再生後に留まる HLT。INT 20 でポンプを切らない。 */
+static uint16_t s_naxIdleCs;
+static uint16_t s_naxIdleIp;
 
 /* MfdSmfVar の実装 */
 static unsigned MfdSmfVar(const uint8_t* p, unsigned n, unsigned* i)
@@ -9268,6 +9381,10 @@ int CHardPc98::RunDosCommand(const char* cmdline, uint64_t budgetCycles)
 		}
 		if (DeliverIrqs())
 			continue;
+		if (Pc98TakeTimerApi(np2_mem())) {
+			picMask_ = (uint8_t)(picMask_ & 0xfeu);
+			continue;
+		}
 		uint16_t cs = np2_reg_get(NP2_R_CS);
 		uint16_t ip = np2_reg_get(NP2_R_IP);
 		if (s_mfd98GlueCs && cs == s_mfd98GlueCs && ip == 0x112)
@@ -9342,6 +9459,62 @@ int CHardPc98::RunDosCommand(const char* cmdline, uint64_t budgetCycles)
 	return stubState_ == 0x81 ? 1 : 0;
 }
 
+/* NAX -I は INT60 とタイマまで植えて戻らず、続く NLP_HOOT が INT7F を植えない。
+   糊は cmd0 で AH=2 停止、ハンドル 0 を [0171] へ読み、AH=1 でそのセグメントを再生する。
+   再生後にインストールへ IRET すると AH=31 の次の RET が INT 20 になり、ポンプが
+   終了扱いでタイマを止める。フレームを捨てて HLT に留まる。 */
+static void NaxPlantHootGlue(CEmuDos98& dos, uint8_t* mem)
+{
+	s_naxIdleCs = 0;
+	s_naxIdleIp = 0;
+	if (!mem || IvtHooked(0x7F, 1) || !IvtHooked(0x60, 1))
+		return;
+	const CEmuDos98File* glue = dos.FindFile("NLP_HOOT.COM");
+	if (!glue)
+		glue = dos.FindFile("NLP_HOOT");
+	if (!glue || !glue->data || glue->size < 0x160)
+		return;
+	const unsigned char* img = glue->data;
+	if (img[0x28] != 0xB8 || img[0x29] != 0x01 || img[0x2A] != 0x98)
+		return;
+	if (img[0x38] != 0xBA || img[0x39] != 0xE0 || img[0x3A] != 0x07)
+		return;
+	if (img[0x44] != 0x07 || img[0x45] != 0x5A || img[0x46] != 0x61 || img[0x47] != 0xCF)
+		return;
+	/* 曲は最大約 29KB。NAX 常駐後は 64KB 空きが残らないので 32KB で足りる。 */
+	uint16_t buf = 0;
+	if (!dos.AllocBlock(mem, 0x800, &buf))
+		buf = 0xC000;
+	const unsigned need = (0x100u + glue->size + 15u) / 16u;
+	uint16_t gseg = 0;
+	if (!dos.AllocBlock(mem, (uint16_t)need, &gseg) || !gseg)
+		gseg = 0x0B00;
+	const unsigned base = (unsigned)gseg << 4;
+	if (base + 0x100u + glue->size >= 0x200000u)
+		return;
+	memcpy(mem + base + 0x100, img, glue->size);
+	mem[base + 0x171] = (uint8_t)(buf & 0xff);
+	mem[base + 0x172] = (uint8_t)(buf >> 8);
+	/* 出口は 4 バイトしかない（直後 0148 が cmd0）。0180 の空きへ飛ぶ。
+	   再生後に NAX へ IRET すると AH=31 の次の RET が INT 20 になりタイマが止まる。 */
+	mem[base + 0x144] = 0xEB;
+	mem[base + 0x145] = 0x3A; /* jmp 0180 */
+	mem[base + 0x146] = 0x90;
+	mem[base + 0x147] = 0x90;
+	static const uint8_t kPark[] = {
+		0x07, 0x5A, 0x61,             /* pop es / pop dx / popaw */
+		0x83, 0xC4, 0x06,             /* add sp, 6 */
+		0xFB, 0xF4, 0xEB, 0xFD        /* sti / hlt / jmp hlt */
+	};
+	memcpy(mem + base + 0x180, kPark, sizeof(kPark));
+	mem[0x7F * 4 + 0] = 0x2F;
+	mem[0x7F * 4 + 1] = 0x01;
+	mem[0x7F * 4 + 2] = (uint8_t)(gseg & 0xff);
+	mem[0x7F * 4 + 3] = (uint8_t)(gseg >> 8);
+	s_naxIdleCs = gseg;
+	s_naxIdleIp = 0x0187;
+}
+
 /* CHardPc98::BootDos の実装 */
 int CHardPc98::BootDos(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode)
 {
@@ -9361,6 +9534,8 @@ int CHardPc98::BootDos(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCod
 
 	dos_.Reset();
 	s_mfd98GlueCs = 0;
+	s_naxIdleCs = 0;
+	s_naxIdleIp = 0;
 	s_mfdInt42Host = 0;
 	s_midiDrvHostSmf = 0;
 	dos_.InitArena(mem);
@@ -9456,6 +9631,7 @@ int CHardPc98::BootDos(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCod
 	cpuCycles_ = 0;
 	opnPumpResidual_ = 0;
 	picMask_ = 0xff;
+	s_pc98UserTmr = 0;
 	slavePicMask_ = 0xff;
 	s_valkyKeepIrq0 = 0;
 	s_fmxKeepIrq0 = 0;
@@ -9482,6 +9658,8 @@ int CHardPc98::BootDos(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCod
 	irqEdgeSeen_ = 0;
 	irqEdgeConsumed_ = 0;
 	g_censLine = g_censSvc = g_censNoVec = g_censMasked = g_censIfOff = 0;
+	g_mdrHit = g_mdrClr = g_mdrDefer = 0;
+	g_opnLineSeen = g_opnIfBlock = 0;
 	opnWriteCount_ = 0;
 	opnKeyOnCount_ = 0;
 	opnTlLiveCount_ = 0;
@@ -10083,6 +10261,11 @@ int CHardPc98::BootDos(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCod
 			ValkyArmSscpPlay(np2_mem(), (uint16_t)(titleCode & 0xffff),
 				&dos_, dosSong_);
 	}
+	{
+		static const char* kNax[] = { "NAX", "nax", "NLP_HOOT", NULL };
+		if (DosShellStarts(ge, kNax))
+			NaxPlantHootGlue(dos_, np2_mem());
+	}
 	return 1;
 }
 
@@ -10635,6 +10818,10 @@ void CHardPc98::PumpCycles(uint64_t endCycle)
 		cs = np2_reg_get(NP2_R_CS);
 		ip = np2_reg_get(NP2_R_IP);
 		mem = np2_mem();
+		if (Pc98TakeTimerApi(mem)) {
+			picMask_ = (uint8_t)(picMask_ & 0xfeu);
+			continue;
+		}
 		const unsigned phys = ((unsigned)cs << 4) + (unsigned)ip;
 		/* 下の HLT 処理の前に標本化: DOS トラップでない HLT にパークしたドライバはここを回り np2_step に届かず、診断用ヒストグラムがまさにそのハングで空になっていた。 */
 		if (g_ipProf)
@@ -10646,6 +10833,20 @@ void CHardPc98::PumpCycles(uint64_t endCycle)
 					dosSong_[0] ? dosSong_
 						: SelectedDosSong(dosGe_, extSong_), vec);
 				CEmuDos98Result res = dos_.ServiceInt(mem, vec);
+				/* NAX は AH=31 の次の RET で INT 20 する。ここでポンプを切ると
+				   曲を載せてあってもタイマが止まって無音になる。 */
+				if (s_naxIdleCs
+					&& (res == DOS98_TERMINATED || res == DOS98_RESIDENT)) {
+					np2_reg_set(NP2_R_CS, s_naxIdleCs);
+					np2_reg_set(NP2_R_IP, s_naxIdleIp);
+					np2_reg_set(NP2_R_FLAGS,
+						(uint16_t)(np2_reg_get(NP2_R_FLAGS) | 0x0200));
+					const uint64_t q = 200;
+					cpuCycles_ += q;
+					TickSide(q);
+					AdvanceOpnClocks(q);
+					continue;
+				}
 				/* olteus MAP 音楽は COM/EXE TSR や終了後も tick し続ける。PumpCycles 中断はホストタイマ補助を凍らせた。 */
 				if (res == DOS98_TERMINATED && !olteusMapSeg_)
 					return;
@@ -10685,6 +10886,10 @@ void CHardPc98::PumpCycles(uint64_t endCycle)
 				AdvanceOpnClocks(q);
 				continue;
 			}
+			/* NAX の AH=1 はタイマ ISR が SP=00E0 に載せ替えると戻り先を壊して INT 20 する。
+			   糊が HLT に着いてから IRQ3 を開ける。 */
+			if (s_naxIdleCs && cs == s_naxIdleCs && ip == s_naxIdleIp)
+				picMask_ = (uint8_t)(picMask_ & (uint8_t)~0x08u);
 			const uint64_t q = 200;
 			cpuCycles_ += q;
 			TickSide(q);
@@ -10725,6 +10930,12 @@ void CHardPc98::RaiseFuncVect()
 		TickSide(u);
 		AdvanceOpnClocks(u);
 		DeliverIrqs();
+	}
+	if (s_naxIdleCs) {
+		/* インストール途中の SP は 0x19B4 付近で、AH=1 の rep stosw が戻り先を消す。 */
+		picMask_ = (uint8_t)(picMask_ | 0x08u);
+		np2_reg_set(NP2_R_SS, s_naxIdleCs);
+		np2_reg_set(NP2_R_SP, 0x0800);
 	}
 	np2_interrupt((uint8_t)funcVect_);
 }

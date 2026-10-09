@@ -11085,6 +11085,7 @@ BEGIN_MESSAGE_MAP(CCustomListCtrl, CListCtrlA)
     ON_WM_ERASEBKGND()
     ON_MESSAGE(WM_PRINTCLIENT, OnPrintClient)
     ON_MESSAGE(CCC_WM_POST_OPAQUE_PAINT, OnPostOpaquePaint)
+    ON_MESSAGE(WM_APP + 341, OnHotRowsPaint)
     ON_WM_DROPFILES()
 END_MESSAGE_MAP()
 
@@ -11109,6 +11110,7 @@ void CCustomListCtrl::OnDropFiles(HDROP hDropInfo)
 CCustomListCtrl::CCustomListCtrl()
     : m_bAutoDelete(FALSE), m_nHotItem(-1), m_bAeroMode(FALSE)
     , m_ptLBtnDown(0, 0), m_bTrackDragGate(FALSE)
+    , m_hotRowsPosted(FALSE), m_hotRowsN(0)
 {
     m_brBackground.CreateSolidBrush(COLOR_LIST_BG);
     m_heartRcSel.SetRectEmpty();
@@ -11269,6 +11271,9 @@ BOOL CCustomListCtrl::OnMouseWheel(UINT n, short z, CPoint p)
     return r;
 }
 
+static int s_cccListClipOn = 0;
+static RECT s_cccListClip = {};
+
 // オフスクリーン全面描画 → 指定矩形だけ α=255 blit。
 // ホバーで POST_OPAQUE（全面）すると全体が点滅する。Invalidate は Fixer が全面描画するので使わない。
 static void CCC_ListPaintOpaqueRects(CCustomListCtrl* pList, const RECT* rects, int nRects)
@@ -11293,12 +11298,14 @@ static void CCC_ListPaintOpaqueRects(CCustomListCtrl* pList, const RECT* rects, 
         pList->PostMessage(CCC_WM_POST_OPAQUE_PAINT);
         return;
     }
-    pList->PaintOpaqueIntoBuffer(s_hover.hdcDib);
-    s_hover.MakeRectOpaque(0, 0, cw, ch);
-
     CRect uni = rects[0];
     for (int i = 1; i < nRects; ++i)
         uni.UnionRect(&uni, &rects[i]);
+    s_cccListClip = uni;
+    s_cccListClipOn = 1;
+    pList->PaintOpaqueIntoBuffer(s_hover.hdcDib);
+    s_cccListClipOn = 0;
+    s_hover.MakeRectOpaque(0, 0, cw, ch);
     /* 隣接行はまとめて1 blit（行間チラつき防止） */
     const int rowH0 = rects[0].bottom - rects[0].top;
     const BOOL bClose = (nRects <= 2 && rowH0 > 0 && uni.Height() <= rowH0 * 3);
@@ -11378,17 +11385,25 @@ void CCustomListCtrl::UpdateHotItem(int n)
     /* 前の行の♡はもう無い。古い矩形を回し続けない */
     m_heartRcHot.SetRectEmpty();
     if (CCC_HostNeedsChildOpaque(m_hWnd)) {
-        RECT rs[2];
-        int nr = 0;
+        /* マウス移動の中で全面 PrintClient するとスペアナが止まる。行矩形を溜めて1回だけ後回し。 */
+        if (m_hotRowsN >= 3) {
+            CRect u(m_hotRows[0]);
+            for (int i = 1; i < m_hotRowsN; ++i) {
+                CRect t(m_hotRows[i]);
+                u.UnionRect(&u, &t);
+            }
+            m_hotRows[0] = u;
+            m_hotRowsN = 1;
+        }
         CRect rr;
-        if (o >= 0 && GetItemRect(o, &rr, LVIR_BOUNDS))
-            rs[nr++] = rr;
-        if (m_nHotItem >= 0 && GetItemRect(m_nHotItem, &rr, LVIR_BOUNDS))
-            rs[nr++] = rr;
-        if (nr > 0)
-            CCC_ListPaintOpaqueRects(this, rs, nr);
-        else
-            PostMessage(CCC_WM_POST_OPAQUE_PAINT);
+        if (o >= 0 && GetItemRect(o, &rr, LVIR_BOUNDS) && m_hotRowsN < 4)
+            m_hotRows[m_hotRowsN++] = rr;
+        if (m_nHotItem >= 0 && GetItemRect(m_nHotItem, &rr, LVIR_BOUNDS) && m_hotRowsN < 4)
+            m_hotRows[m_hotRowsN++] = rr;
+        if (!m_hotRowsPosted) {
+            m_hotRowsPosted = TRUE;
+            PostMessage(WM_APP + 341, 0, 0);
+        }
         return;
     }
     if (o >= 0) {
@@ -11405,6 +11420,21 @@ void CCustomListCtrl::UpdateHotItem(int n)
         else
             RedrawItems(m_nHotItem, m_nHotItem);
     }
+}
+
+LRESULT CCustomListCtrl::OnHotRowsPaint(WPARAM, LPARAM)
+{
+    m_hotRowsPosted = FALSE;
+    RECT rs[4];
+    int n = m_hotRowsN;
+    if (n > 4) n = 4;
+    if (n < 0) n = 0;
+    for (int i = 0; i < n; ++i)
+        rs[i] = m_hotRows[i];
+    m_hotRowsN = 0;
+    if (n > 0)
+        CCC_ListPaintOpaqueRects(this, rs, n);
+    return 0;
 }
 
 // サイズ変化でアクリル穴が残ることがあるので遅延 Opaque。
@@ -11935,6 +11965,17 @@ void CCustomListCtrl::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
         *pResult = CDRF_NOTIFYITEMDRAW;
         break;
     case CDDS_ITEMPREPAINT:
+        if (s_cccListClipOn) {
+            CRect ir;
+            if (GetItemRect((int)p->nmcd.dwItemSpec, &ir, LVIR_BOUNDS)) {
+                CRect clip(s_cccListClip);
+                CRect hit;
+                if (!hit.IntersectRect(&ir, &clip)) {
+                    *pResult = CDRF_SKIPDEFAULT;
+                    break;
+                }
+            }
+        }
         *pResult = CDRF_NOTIFYSUBITEMDRAW;
         break;
     case CDDS_ITEMPREPAINT | CDDS_SUBITEM:

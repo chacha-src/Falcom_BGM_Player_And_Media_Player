@@ -3136,9 +3136,11 @@ static int FmTlLoud(int tl, int maxTl)
 	return (maxTl - tl) * 255 / maxTl;
 }
 
-/* YM 系 EG。rate63=0 は停止、62+ は即時。減衰域は 0=最大音量。
-   rate32（AR=16）で 0x3FF を約 56ms。旧 90 units/sec だと攻撃が数秒になり
-   グラフの短い立ち上がりよりスキャンが遅く見えた。 */
+/* YM 系 EG。rate63=0 は停止、62+ は即時。
+   アタック用の 18300 はグラフの立ち上がり用（rate32 で約 56ms）。
+   減衰・サス・リリースは OPN 実機: FM≈55.5kHz、EG は 3 サンプルに 1、
+   rate_shift=rate>>2、増分は 2^(11-shift) 周期。rate32 で 0x400 は約 0.45s。
+   表示用ユニットの約 8 倍。OPM/OPL も同じ FmEgRun を通る。 */
 static double FmEgSecPerUnit(int rate63)
 {
 	if (rate63 <= 0) return 1.0e6;
@@ -3147,6 +3149,7 @@ static double FmEgSecPerUnit(int rate63)
 	if (ups < 1.0e-6) return 1.0e6;
 	return 1.0 / ups;
 }
+static const double kEgDecayChip = 8.0;
 
 static int FmEgAttToLin(int att)
 {
@@ -3218,7 +3221,7 @@ static FmEgPos FmEgRun(int ar, int dr, int sr, int rr, int sl, int ksr,
 	} else {
 		double td = t - aSec;
 		const double span = (sus > 0) ? (double)sus : 1.0;
-		const double dSec = (rD <= 0) ? 0.0 : FmEgSecPerUnit(rD) * span;
+		const double dSec = (rD <= 0) ? 0.0 : FmEgSecPerUnit(rD) * span * kEgDecayChip;
 		if (rD > 0 && td < dSec) {
 			const double u = td / dSec;
 			att = (int)(sus * u);
@@ -3228,8 +3231,8 @@ static FmEgPos FmEgRun(int ar, int dr, int sr, int rr, int sl, int ksr,
 			const double ts = (rD <= 0) ? td : (td - dSec);
 			const double sSpan = (double)(0x3ff - sus);
 			const double sSec = (rS <= 0)
-				? 2.4
-				: FmEgSecPerUnit(rS) * ((sSpan > 1.0) ? sSpan : 256.0);
+				? 2.4 * kEgDecayChip
+				: FmEgSecPerUnit(rS) * ((sSpan > 1.0) ? sSpan : 256.0) * kEgDecayChip;
 			double u = (sSec > 1.0e-9) ? ts / sSec : 1.0;
 			if (u > 1.0) u = 1.0;
 			if (rS <= 0)
@@ -3245,8 +3248,8 @@ static FmEgPos FmEgRun(int ar, int dr, int sr, int rr, int sl, int ksr,
 	if (!gate) {
 		const double rSpan = (double)(0x3ff - att);
 		const double rSec = (rR <= 0)
-			? 1.8
-			: FmEgSecPerUnit(rR) * ((rSpan > 1.0) ? rSpan : 64.0);
+			? 1.8 * kEgDecayChip
+			: FmEgSecPerUnit(rR) * ((rSpan > 1.0) ? rSpan : 64.0) * kEgDecayChip;
 		double u = (rSec > 1.0e-9) ? secOff / rSec : 1.0;
 		if (u > 1.0) u = 1.0;
 		if (rR > 0) {
@@ -3266,17 +3269,24 @@ static FmEgPos FmEgRun(int ar, int dr, int sr, int rr, int sl, int ksr,
 	return p;
 }
 
-static int FmVuFromLin(int lin)
+/* 1.0=0dB。ymfm EG_QUIET(0x380) は約 -84dB。-36dB で切るとピアノの尾がバー 0 になる。 */
+static int FmVuFromAmp(double amp)
 {
-	if (lin <= 0) return 0;
-	if (lin > 255) lin = 255;
-	const double db = 20.0 * log10((double)lin / 255.0);
-	if (db <= -36.0) return 0;
+	if (amp < 1.0e-5) return 0;
+	if (amp > 1.0) amp = 1.0;
+	const double db = 20.0 * log10(amp);
+	if (db <= -84.0) return 0;
 	if (db >= 0.0) return 255;
-	int lv = (int)((db + 36.0) / 36.0 * 255.0 + 0.5);
+	int lv = (int)((db + 84.0) / 84.0 * 255.0 + 0.5);
 	if (lv < 1) lv = 1;
 	if (lv > 255) lv = 255;
 	return lv;
+}
+static double FmEgAttAmp(int att)
+{
+	if (att < 0) att = 0;
+	if (att >= 0x380) return 0.0;
+	return pow(2.0, -(double)att / 64.0);
 }
 
 static int FmOpnAmOffset(const SasamiFmMonDump& d, int bank, int slot, uint64_t cur, uint32_t sr)
@@ -3361,7 +3371,8 @@ static int FmEgOpnWave(const SasamiFmMonDump& d, int bank, int slot,
 	static const int kCar[8] = { 8, 8, 8, 8, 10, 14, 14, 15 };
 	const uint8_t a4 = d.regs[bank + 0xA4 + slot];
 	const uint8_t a0 = d.regs[bank + 0xA0 + slot];
-	int acc = 0, n = 0;
+	double acc = 0;
+	int n = 0;
 	for (int op = 0; op < 4; op++) {
 		if (((kCar[alg] >> op) & 1) == 0) continue;
 		const uint8_t ksAr = d.regs[bank + 0x50 + op * 4 + slot];
@@ -3376,12 +3387,12 @@ static int FmEgOpnWave(const SasamiFmMonDump& d, int bank, int slot,
 		int att = e.att + tl * 8;
 		if ((amDr & 0x80) && amOff > 0) att += amOff;
 		if (att > 0x3ff) att = 0x3ff;
-		int lv = FmEgAttToLin(att);
-		acc += lv * lv;
+		const double amp = FmEgAttAmp(att);
+		acc += amp * amp;
 		n++;
 	}
 	if (n <= 0) return 0;
-	return FmVuFromLin((int)sqrt((double)acc / (double)n));
+	return FmVuFromAmp(sqrt(acc / (double)n));
 }
 
 static int FmEgOpmWave(const SasamiFmMonDump& d, int ch, int gate, double secOn, double secOff, int amOff)
@@ -3389,7 +3400,8 @@ static int FmEgOpmWave(const SasamiFmMonDump& d, int ch, int gate, double secOn,
 	static const int kSOff[4] = { 0, 16, 8, 24 };
 	const int alg = d.regs[0x20 + ch] & 7;
 	static const int kCar[8] = { 8, 8, 8, 8, 10, 14, 14, 15 };
-	int acc = 0, n = 0;
+	double acc = 0;
+	int n = 0;
 	for (int op = 0; op < 4; op++) {
 		if (((kCar[alg] >> op) & 1) == 0) continue;
 		const int off = kSOff[op] + ch;
@@ -3403,12 +3415,12 @@ static int FmEgOpmWave(const SasamiFmMonDump& d, int ch, int gate, double secOn,
 		int att = e.att + tl * 8;
 		if ((amDr & 0x80) && amOff > 0) att += amOff;
 		if (att > 0x3ff) att = 0x3ff;
-		int lv = FmEgAttToLin(att);
-		acc += lv * lv;
+		const double amp = FmEgAttAmp(att);
+		acc += amp * amp;
 		n++;
 	}
 	if (n <= 0) return 0;
-	return FmVuFromLin((int)sqrt((double)acc / (double)n));
+	return FmVuFromAmp(sqrt(acc / (double)n));
 }
 
 static int FmEgOplWave(const SasamiFmMonDump& d, int ch, int packed, int gate, double secOn, double secOff, int trem)
@@ -3429,8 +3441,7 @@ static int FmEgOplWave(const SasamiFmMonDump& d, int ch, int packed, int gate, d
 	int att = e.att + (tl & 0x3F) * 16;
 	if (trem > 0) att += trem;
 	if (att > 0x3ff) att = 0x3ff;
-	int lv = FmEgAttToLin(att);
-	return FmVuFromLin(lv);
+	return FmVuFromAmp(FmEgAttAmp(att));
 }
 
 /* OPN キャリア TL → 0..255。alg 0-3 は S4、4 は S2+S4、5-6 は S2-4、7 は全部。 */

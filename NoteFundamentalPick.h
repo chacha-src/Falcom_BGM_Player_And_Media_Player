@@ -6,15 +6,12 @@
 
 inline float ScaleGoertzelAmpFlat(float rawAmp)
 {
+    // 検出スペクトルは振幅の2乗（パワー）。以前は raw<=0.0001 を強制ゼロにしており、
+    // AGC後でも小さい高音の部分音だけが床の下で消えていた。二次曲線は連続のまま使う。
     if (rawAmp <= 0.00005f) return 0.0f;
-    double amp = rawAmp;
-    if (amp > 0.0001) {
-        const double boost = amp * 50.0;
-        amp = boost * boost * 0.002;
-        if (amp > 10.0) amp = 10.0;
-    } else {
-        amp = 0.0;
-    }
+    const double boost = (double)rawAmp * 50.0;
+    double amp = boost * boost * 0.002;
+    if (amp > 10.0) amp = 10.0;
     return (float)amp;
 }
 
