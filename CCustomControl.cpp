@@ -13185,7 +13185,7 @@ BEGIN_MESSAGE_MAP(CCustomTabCtrl, CTabCtrl)
 END_MESSAGE_MAP()
 
 // 等幅オーナードロータブ。縦置き TCS_VERTICAL / TCS_RIGHT 対応。
-// 選択タブの Soft 揺れは常時タイマを張らず、描画時の TickCount で足す。
+// 選択タブの Soft は 220ms で回す。描画時の TickCount も足す。
 CCustomTabCtrl::CCustomTabCtrl()
 	: m_bAutoDelete(FALSE), m_bAeroMode(FALSE), m_nHotItem(-1), m_bTracking(FALSE)
 {
@@ -13363,7 +13363,7 @@ void CCustomTabCtrl::DrawPagePanel(CDC* pDC, const CRect& rcClient)
 	CCC_StrokeThemedPlate(pDC, rcClip, FALSE, FALSE);
 }
 
-// 角丸グラデ。選択横タブは Soft 立体。常時 Soft タイマは張らない（UI スレッドを食う）。
+// 角丸グラデ。選択横タブは Soft 立体。選択中は 220ms で ♡ を回す。
 // 縦は GM_ADVANCED + escapement で TextOut。横は DrawText 中央。
 void CCustomTabCtrl::DrawTabItem(CDC* pDC, int nItem, CRect rc, BOOL bSelected, BOOL bHot)
 {
@@ -13383,10 +13383,13 @@ void CCustomTabCtrl::DrawTabItem(CDC* pDC, int nItem, CRect rc, BOOL bSelected, 
 	CCC_FillThemedPlate(pDC, rc, clrBottom, FALSE);
 	CCC_StrokeThemedPlate(pDC, rc, FALSE, bSelected);
 	if (bSelected && !IsVertical() && CCC_ThemeFaceOf().gloss >= 6) {
-		if (rc.Width() >= 36 && rc.Height() >= 18)
+		if (rc.Width() >= 36 && rc.Height() >= 18) {
 			DrawSoftJkBackdrop(pDC, rc, (int)(::GetTickCount64() / 80), bHot);
-		if (GetSafeHwnd())
-			KillTimer(kTabSoftTimerId);
+			if (GetSafeHwnd())
+				SetTimer(kTabSoftTimerId, 220, NULL);
+		}
+	} else if (bSelected && GetSafeHwnd()) {
+		KillTimer(kTabSoftTimerId);
 	}
 
 	TCHAR szText[256] = {};
@@ -13616,13 +13619,14 @@ void CCustomTabCtrl::OnWindowPosChanged(WINDOWPOS* lpwndpos)
 #endif
 }
 
-// kTabSoftTimerId: 互換。現在は DrawTabItem が Kill する（常時揺れ禁止）。
+// kTabSoftTimerId: 選択タブの Soft を 220ms で回す。
 // kTabScrollOpaqueTimerId: 遅延不透明。
 void CCustomTabCtrl::OnTimer(UINT_PTR nIDEvent)
 {
 	if (nIDEvent == kTabSoftTimerId) {
-		if (GetCurSel() < 0) {
-			KillTimer(kTabSoftTimerId);
+		if (GetCurSel() < 0 || !IsWindowVisible()) {
+			if (GetCurSel() < 0)
+				KillTimer(kTabSoftTimerId);
 			return;
 		}
 		Invalidate(FALSE);
@@ -13718,8 +13722,7 @@ BEGIN_MESSAGE_MAP(CCustomStandardButton, CButton)
 END_MESSAGE_MAP()
 
 // カスタム標準ボタン。グラデ/影/アイコン/スパークル軌道の初期値。
-// 常時 Soft3D タイマーは張らない（ピアノロール 60fps を食うため）。
-// ホバー／フォーカス時だけ 33ms のキラキラタイマーを後から張る。
+// ♡ の Soft は 220ms。ホバー／フォーカスのキラキラは別途 33ms。
 CCustomStandardButton::CCustomStandardButton()
     : m_bAutoDelete(FALSE), m_bMouseOver(FALSE), m_nAnimTick(0), m_bAnimRunning(FALSE),
     m_nSparkleN(0), m_nSparkleSpawnAcc(0),
@@ -13819,27 +13822,30 @@ void CCustomStandardButton::UpdateAnimTimer()
     }
 }
 
-// Soft3D 背景の常時ゆらぎ。
-// 旧: 全 CCustom ボタンが 220ms で Invalidate → Soft3D ラスタが UI スレッドを占有し、
-// ピアノロール等の 60fps 提示が「割り込みが長い／遅い」体感になった（〜7月末は無し）。
-// Soft3D チップ自体は通常の OnPaint（ホバー／押下／親の再描画）で描く。常時タイマーは張らない。
-static void CCC_ButtonSoftTimerSync(HWND hWnd, BOOL /*bFlat*/)
+// 角の ♡ / Soft3D は時計を見るだけだと再描画が止まった瞬間に固まる。
+// 平坦ボタンとキャプション帯は対象外。Invalidate のみ（UpdateWindow は連打しない）。
+static void CCC_ButtonSoftTimerSync(HWND hWnd, BOOL bFlat)
 {
-	if (hWnd)
+	if (!hWnd) return;
+	if (bFlat || CCC_IsCaptionChromeCtrl(hWnd) || CCC_ThemeFaceOf().gloss < 6)
 		::KillTimer(hWnd, kButtonSoftTimerId);
+	else
+		::SetTimer(hWnd, kButtonSoftTimerId, 220, NULL);
 }
 
-// kButtonSoftTimerId: 残骸。キャプション chrome では即 Kill。
+// kButtonSoftTimerId: 非 flat の ♡ / Soft を 220ms で回す。キャプション chrome は Kill。
 // kButtonAnimTimerId: ティック++、ホバー中のみ spawn、残点ゼロで停止。
 // Invalidate(FALSE) だけ。Erase するとアクリルが抜ける。
 void CCustomStandardButton::OnTimer(UINT_PTR nIDEvent)
 {
     if (nIDEvent == kButtonSoftTimerId)
     {
-        if (CCC_IsCaptionChromeCtrl(m_hWnd)) {
+        if (m_bFlat || CCC_IsCaptionChromeCtrl(m_hWnd) || CCC_ThemeFaceOf().gloss < 6) {
             KillTimer(kButtonSoftTimerId);
             return;
         }
+        if (!IsWindowVisible())
+            return;
         m_nAnimTick++;
         Invalidate(FALSE);
         return;
@@ -17090,21 +17096,23 @@ void CCustomGroupBox::PostNcDestroy()
 }
 
 // グループは兄弟の下に回り、兄弟領域へ描かない（WS_CLIPSIBLINGS）。
-// Soft3D ゆらゆら常時タイマーはピアノ等と競合するため張らず Kill する。
+// 枠の ♡ / Soft は 500ms で回す。
 void CCustomGroupBox::PreSubclassWindow()
 {
     CButton::PreSubclassWindow();
-    // グループは兄弟(Edit/Static)の下に回り、かつ兄弟領域へ描画しない
     ModifyStyle(0, WS_CLIPSIBLINGS);
-    // Soft3D ゆらゆら常時タイマーはピアノ等と競合するため張らない
-    KillTimer(kGroupSoftTimerId);
+    if (CCC_ThemeFaceOf().gloss >= 6)
+        SetTimer(kGroupSoftTimerId, 500, NULL);
 }
 
-// 旧 Soft3D ゆらゆら（kGroupSoftTimerId）。可視なら Invalidate。
-// 常時タイマーは PreSubclass で Kill 済み。残骸 ID だけ処理。
+// kGroupSoftTimerId: 枠の ♡ / Soft を 500ms で回す。
 void CCustomGroupBox::OnTimer(UINT_PTR nIDEvent)
 {
     if (nIDEvent == kGroupSoftTimerId) {
+        if (CCC_ThemeFaceOf().gloss < 6) {
+            KillTimer(kGroupSoftTimerId);
+            return;
+        }
         if (!IsWindowVisible()) return;
         Invalidate(FALSE);
         return;

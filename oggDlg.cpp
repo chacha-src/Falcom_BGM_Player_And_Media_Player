@@ -23046,7 +23046,7 @@ int readkpi(BYTE* bw, int cnt)
 						} else if (!CEmuMidiLiveActive()) {
 							const int fileLooping = (kpi_file_loop && loop2 > 0) ? 1 : 0;
 							/* ループ曲の休符では切らない。ループ無しは再生も
-							   wav/mp3/flac 書き出しも、無音か曲長超過で止める。 */
+							   wav/mp3/flac 書き出しも、無音で止める。曲長では切らない。 */
 							if (!fileLooping) {
 								if (IsBlockSilent((const BYTE*)bufkpi + cnt3, (int)r, abs(wavsam_depth))) {
 									if (kpi_heard_audio || loop2 == 0 || midiLike)
@@ -23064,13 +23064,8 @@ int readkpi(BYTE* bw, int cnt)
 									&& maxSilentBytes > 0 && kpi_silence_bytes >= maxSilentBytes) {
 									kpiDecEof = 1;
 								}
-								/* 終端で音を出したまま回るプラグイン。曲長の 4 秒後に切る。 */
-								if (!kpiDecEof && loop2 > 0 && bps > 0 && kpi_heard_audio) {
-									const int bpf = ch * bps;
-									const int pos = poss5 + (int)((cnt3 + r) / (DWORD)bpf);
-									if (pos >= loop2 + hz * 4)
-										kpiDecEof = 1;
-								}
+								/* 曲長超過では切らない。長さは目安で、J で回る FPY は
+								   計測がループ無しになることがあり、ここで切ると数周で止まる。 */
 							}
 						}
 					}

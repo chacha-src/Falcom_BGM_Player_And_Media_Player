@@ -1182,14 +1182,13 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 			alive[ch] = 0;
 			return 0;
 		}
-		/* 曲末の停止。FKYU/FSLR の直後へ戻る短い J、または先頭付近の
-		   停止ルーチン。曲の Q へ戻る長い J ではない。回し続けると
-		   ループ無しの曲が終わっても止まらない。 */
+		/* 曲末の停止ルーチンだけ切る。着地が休符か J で、その数命令以内に
+		   自分へ戻る J があるとき。ノートで始まる短い Q や、距離だけでは切らない
+		   （MS014SYS ch5 は 6 バイトの NOTE ループ）。 */
 		{
-			int halt = (dest < addr && (addr - dest) <= 12u) ? 1 : 0;
-			if (!halt && SasamiOffOk(song, dest, 3)) {
+			int halt = 0;
+			if (SasamiOffOk(song, dest, 3)) {
 				const int c0 = song.data[dest];
-				/* 着地が休符か J のときだけ停止ルーチンと見る。ノートで始まる Q は残す。 */
 				if (c0 == 1 || c0 == 3 || c0 == 10 || c0 == 17) {
 					uint32_t p = dest;
 					for (int n = 0; n < 4 && !halt; n++) {
