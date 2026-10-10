@@ -370,7 +370,8 @@ uint16_t CHardF3::Read16(unsigned addr)
 		return CEmuChipEs5505Read(chip_, (addr - 0x200000u) >> 1);
 	if ((addr < 0x40000u || addr >= 0xff0000u) && (addr & 0xffffu) == 0x136u) {
 		const uint16_t head = (uint16_t)((Read8(addr) << 8) | Read8(addr + 1u));
-		if (head == 0 && nodeRefill_ && Read32(0x28u) == 0x00C10D12u)
+		/* 空きリストが尽きた曲は未参照ノードだけ戻す。フラグは cbombers だけ立てる。 */
+		if (head == 0 && nodeRefill_)
 			RefillFreeNodes();
 	}
 	return (uint16_t)((Read8(addr) << 8) | Read8(addr + 1));
@@ -1192,6 +1193,34 @@ int CHardF3::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode
 							tblOff = (unsigned)strtoul(ge->opt[oi].value, NULL, 0);
 							break;
 						}
+					}
+				}
+				/* テンポ 0 の A-line は戻らず、待ち減算まで届かない。tbloffs 無しだけ NOP。 */
+				if (tblOff == 0) {
+					static const uint8_t kTempoAline[12] = {
+						0x31, 0xf8, 0xd4, 0x8e, 0xd4, 0x90, 0x30, 0x3c, 0xff, 0xff, 0x30, 0x3c
+					};
+					for (unsigned i = win0; i + 18u <= win1; i += 2u) {
+						if (memcmp(audioCpu_ + i, kTempoAline, 12) != 0)
+							continue;
+						if (audioCpu_[i + 12] == 0x27 && audioCpu_[i + 13] == 0x00
+							&& audioCpu_[i + 14] == 0xa0 && audioCpu_[i + 15] == 0x00) {
+							audioCpu_[i + 14] = 0x4e;
+							audioCpu_[i + 15] = 0x71;
+						}
+						break;
+					}
+				}
+				/* 待ち 0 から D4A6=1 を引くと桁が借りて bne がパーサを飛ばす。tbloffs 無しだけ bgt にする。 */
+				if (tblOff == 0) {
+					static const uint8_t kSubD4a6[8] = {
+						0x30, 0x38, 0xd4, 0xa6, 0x91, 0x6e, 0x00, 0x04
+					};
+					for (unsigned i = win0; i + 16u <= win1; i += 2u) {
+						if (memcmp(audioCpu_ + i, kSubD4a6, 8) == 0
+							&& audioCpu_[i + 8] == 0x64 && audioCpu_[i + 9] == 0x06
+							&& audioCpu_[i + 14] == 0x66 && audioCpu_[i + 15] == 0x08)
+							audioCpu_[i + 14] = 0x6e;
 					}
 				}
 				/* playOff は遅延回数だけ走ると曲によって RAM を 0x2600 で埋める。tbloffs 無しは待ち減算だけ。 */

@@ -214,6 +214,19 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 	int32_t curL, curR;
 	uint32_t ticksPlayed;
 	uint32_t totalTicks;
+	/* 長さ計測中だけ。戻り J の着地アドレスを最初に通ったサンプル。 */
+	uint64_t measSample;
+	uint64_t loopStartSample;
+	uint64_t loopEndSample;
+	int loopClip;
+	/* 終端の FJUMP を実行済み。ホストの周回シークではチップを初期化しない。 */
+	int loopHeld;
+	int pastLoop;
+	enum { kSeenMax = 4096 };
+	uint32_t seenAddr[kSeenMax];
+	uint64_t seenAt[kSeenMax];
+	uint8_t seenUse[kSeenMax];
+	int seenN;
 	int ended;
 	RhythmVoice rhythm[6];
 	int rhythmHaveWav;
@@ -232,6 +245,7 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 	uint8_t regs[0x200];
 	uint8_t keyOnFm[6];
 	int dumpEnable;
+	int dumpRaira; /* 1=ogg 用 live/ring。0=ホスト用 r0_32/64 */
 	int dumpMute; /* 1=Seek の空回し。seq を飛ばさない */
 	int dumpShadow; /* 1=kb 共通の FmMonShadow。自前リングは使わない */
 	int dumpDirty;
@@ -258,6 +272,7 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 	LARGE_INTEGER dumpOriginQpc;
 	uint64_t dumpOriginSample;
 	uint64_t dumpHostPos; /* ホストへ渡したソース位置。mix 生成端ではない */
+	uint64_t dumpAbs; /* モニタ用。周回シークでも戻さない */
 	int dumpClockArmed;
 	enum { MIX_FRAMES = 8192 };
 	int16_t mixBuf[MIX_FRAMES * 2];
@@ -299,6 +314,7 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 		regs[0xB4] = regs[0xB5] = regs[0xB6] = 0xC0;
 		regs[0x1B4] = regs[0x1B5] = regs[0x1B6] = 0xC0;
 		dumpEnable = 0;
+		dumpRaira = 1;
 		dumpMute = 0;
 		dumpShadow = 0;
 		dumpDirty = 0;
@@ -321,6 +337,7 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 		dumpOriginQpc.QuadPart = 0;
 		dumpOriginSample = 0;
 		dumpHostPos = 0;
+		dumpAbs = 0;
 		dumpClockArmed = 0;
 		mixHave = 0;
 		mixPos = 0;
@@ -328,6 +345,7 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 		fm10 = 0;
 		measureLen = 0;
 		eofSent = 0;
+		loopClip = 0;
 		T = kDefaultT;
 		hostRate = 44100;
 		chipRate = 0;
@@ -339,6 +357,14 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 		curL = curR = 0;
 		ticksPlayed = 0;
 		totalTicks = 0;
+		measSample = 0;
+		loopStartSample = 0;
+		loopEndSample = 0;
+		loopClip = 0;
+		loopHeld = 0;
+		pastLoop = 0;
+		memset(seenUse, 0, sizeof(seenUse));
+		seenN = 0;
 		ended = 0;
 		rhythmHaveWav = 0;
 		rhythmtl = 0;
@@ -552,7 +578,14 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 		}
 		wchar_t dir[MAX_PATH], path[MAX_PATH];
 		EnsureDumpDir(dir, MAX_PATH);
-		_snwprintf_s(path, _TRUNCATE, L"%s\\fmmon_live.opna", dir);
+		if (dumpRaira)
+			_snwprintf_s(path, _TRUNCATE, L"%s\\fmmon_live.opna", dir);
+		else
+#ifdef _WIN64
+			_snwprintf_s(path, _TRUNCATE, L"%s\\fmmon_live_r0_64.opna", dir);
+#else
+			_snwprintf_s(path, _TRUNCATE, L"%s\\fmmon_live_r0_32.opna", dir);
+#endif
 		dumpLiveH = CreateFileW(path, GENERIC_READ | GENERIC_WRITE,
 			FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
 			NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
@@ -569,7 +602,14 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 		}
 		wchar_t dir[MAX_PATH], path[MAX_PATH];
 		EnsureDumpDir(dir, MAX_PATH);
-		_snwprintf_s(path, _TRUNCATE, L"%s\\fmmon_ring.opna", dir);
+		if (dumpRaira)
+			_snwprintf_s(path, _TRUNCATE, L"%s\\fmmon_ring.opna", dir);
+		else
+#ifdef _WIN64
+			_snwprintf_s(path, _TRUNCATE, L"%s\\fmmon_ring_r0_64.opna", dir);
+#else
+			_snwprintf_s(path, _TRUNCATE, L"%s\\fmmon_ring_r0_32.opna", dir);
+#endif
 		dumpRingH = CreateFileW(path, GENERIC_READ | GENERIC_WRITE,
 			FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
 			NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
@@ -827,6 +867,31 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 		}
 	}
 
+	/* 時刻ゲートを待たず、いま鳴っている状態をモニタへ出す。
+	   周回シークがキューを空にする前に、J の最後の音を残す。 */
+	void ForcePublishTail()
+	{
+		if (!dumpEnable || dumpMute) return;
+		SasamiFmMonDump d;
+		{
+			std::lock_guard<std::mutex> lk(dumpMu);
+			if (!dumpQ || dumpQCount == 0) return;
+			const uint32_t tail = (dumpQHead + dumpQCount - 1u) % (uint32_t)kDumpQCap;
+			d = dumpQ[tail];
+		}
+		if (!dumpRingView)
+			OpenDumpRing();
+		if (!dumpLiveView)
+			OpenDumpLive();
+		if (dumpRingView) {
+			if (dumpRingView->gen > dumpRingGen)
+				dumpRingGen = dumpRingView->gen;
+			SasamiFmMonPublishDump(dumpRingView, &dumpRingGen, dumpLiveView, &d);
+		} else if (dumpLiveView) {
+			memcpy(dumpLiveView, &d, sizeof(d));
+		}
+	}
+
 	void FlushTick(uint64_t curSample)
 	{
 		if (!dumpEnable || dumpMute) return;
@@ -1079,6 +1144,36 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 		ApplyTl(ch);
 	}
 
+	void NoteSeen(uint32_t addr)
+	{
+		if (!measureLen || addr == 0 || addr == 0xF0) return;
+		uint32_t i = (addr * 2654435761u) & (kSeenMax - 1);
+		for (int n = 0; n < 32; n++) {
+			const uint32_t k = (i + (uint32_t)n) & (kSeenMax - 1);
+			if (!seenUse[k]) {
+				if (seenN >= kSeenMax) return;
+				seenUse[k] = 1;
+				seenAddr[k] = addr;
+				seenAt[k] = measSample;
+				seenN++;
+				return;
+			}
+			if (seenAddr[k] == addr) return;
+		}
+	}
+
+	uint64_t SeenAt(uint32_t addr) const
+	{
+		if (!addr) return ~0ull;
+		uint32_t i = (addr * 2654435761u) & (kSeenMax - 1);
+		for (int n = 0; n < 32; n++) {
+			const uint32_t k = (i + (uint32_t)n) & (kSeenMax - 1);
+			if (!seenUse[k]) return ~0ull;
+			if (seenAddr[k] == addr) return seenAt[k];
+		}
+		return ~0ull;
+	}
+
 	int JumpTo(int ch, uint32_t addr, uint16_t w1)
 	{
 		uint32_t dest = w1;
@@ -1087,8 +1182,47 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 			alive[ch] = 0;
 			return 0;
 		}
+		/* 曲末の停止。FKYU/FSLR の直後へ戻る短い J、または先頭付近の
+		   停止ルーチン。曲の Q へ戻る長い J ではない。回し続けると
+		   ループ無しの曲が終わっても止まらない。 */
+		{
+			int halt = (dest < addr && (addr - dest) <= 12u) ? 1 : 0;
+			if (!halt && SasamiOffOk(song, dest, 3)) {
+				const int c0 = song.data[dest];
+				/* 着地が休符か J のときだけ停止ルーチンと見る。ノートで始まる Q は残す。 */
+				if (c0 == 1 || c0 == 3 || c0 == 10 || c0 == 17) {
+					uint32_t p = dest;
+					for (int n = 0; n < 4 && !halt; n++) {
+						if (!SasamiOffOk(song, p, 3)) break;
+						const int c = song.data[p];
+						if (c == 3 || c == 17) {
+							uint32_t d = SasamiGet16(song, p + 1);
+							if (d >= 0x1000) d -= 0x1000;
+							if (d == dest || d == p || (d <= p && (p - d) <= 12u))
+								halt = 1;
+						}
+						p += 3;
+					}
+				}
+			}
+			if (halt) {
+				alive[ch] = 0;
+				return 0;
+			}
+		}
 		if (dest < addr) {
-			KeyOff(ch);
+			/* 計測中だけ。一番長い戻り J を 1 周にする。 */
+			if (measureLen) {
+				const uint64_t st = SeenAt(dest);
+				if (st != ~0ull && measSample > st) {
+					const uint64_t en = measSample;
+					if (en - st > loopEndSample - loopStartSample || loopEndSample <= loopStartSample) {
+						loopStartSample = st;
+						loopEndSample = en;
+					}
+				}
+			}
+			/* 原版 FJUMP は 28h を書かない。直前の音は着地先の FNOTE/FKYU まで鳴る。 */
 			/* 2周目で |: ネストや soft が残ると cmd14 dest が壊れて落ちる */
 			loopSp[ch] = 0;
 			memset(loopCnt[ch], 0, sizeof(loopCnt[ch]));
@@ -1108,6 +1242,12 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 					return 0;
 				}
 			}
+		}
+		/* 再生中の曲ループ着地。ホストが先頭へ戻しても、ここを通った印を残す。 */
+		if (!measureLen && dest < addr && loopEndSample > loopStartSample) {
+			const uint64_t st = SeenAt(dest);
+			if (st == loopStartSample)
+				loopHeld = 1;
 		}
 		pc[ch] = dest;
 		return 1;
@@ -1166,6 +1306,16 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 		unsigned per = kPsgHz[nidx];
 		const unsigned sh = (oct - 1u) & 31u;
 		if (sh) per >>= sh;
+		/* 周期 0 はオクターブ 0 / ノート下位 12-15。ymfm は毎クロック反転してキーンになる。
+		   ミキサは触らず音量だけチップへ 0。次の実ノートで ssg[] の音量を戻す。 */
+		if (per == 0) {
+			ssgOn[s] = 0;
+			chip.write(0, (uint8_t)(8 + s));
+			chip.write(1, 0);
+			return;
+		}
+		chip.write(0, (uint8_t)(8 + s));
+		chip.write(1, ssg[8 + s]);
 		WriteSsgPeriod(ch, (uint16_t)per);
 		/* トーン許可はチャンネルにつき一度。以降は PSGAND/PSGOR のミキサを維持する。
 		   毎ノートでトーンを戻すと、ノイズだけのパートが正弦の別テンポになる。 */
@@ -1190,6 +1340,7 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 			alive[ch] = 0;
 			return 0;
 		}
+		NoteSeen(addr);
 		const int cmd = song.data[addr];
 		const uint8_t b1 = SasamiGet(song, addr + 1);
 		const uint8_t b2 = SasamiGet(song, addr + 2);
@@ -1681,6 +1832,9 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 		T = kDefaultT;
 		ended = 0;
 		eofSent = 0;
+		loopClip = 0;
+		loopHeld = 0;
+		pastLoop = 0;
 		ticksPlayed = 0;
 		tickCarry = 0;
 		samplesLeftInTick = 0;
@@ -1859,7 +2013,7 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 	}
 };
 
-SasamiFmPlayer::SasamiFmPlayer() : m(NULL), m_hostRate(44100), m_totalSamples(0), m_curSample(0)
+SasamiFmPlayer::SasamiFmPlayer() : m(NULL), m_hostRate(44100), m_totalSamples(0), m_curSample(0), m_loopStartSample(0), m_loopEndSample(0)
 {
 	m_title[0] = 0;
 	m_dumpStop = NULL;
@@ -1897,18 +2051,33 @@ bool SasamiFmPlayer::Open(const SasamiSong& song, uint32_t sampleRate, const wch
 	strncpy_s(m_title, song.titleSjis, _TRUNCATE);
 	{
 		m->measureLen = 1;
+		m->loopStartSample = 0;
+		m->loopEndSample = 0;
+		m->seenN = 0;
+		memset(m->seenUse, 0, sizeof(m->seenUse));
 		m->SetupSong();
 		uint64_t samples = 0;
 		uint64_t carry = 0;
 		uint32_t guard = 0;
 		while ((!m->ended || (m->misaoActive && !m->misao.Ended())) && guard++ < kMaxTicks) {
+			m->measSample = samples;
 			carry += (uint64_t)m->hostRate * m->T;
 			samples += carry / kTickDen;
 			carry %= kTickDen;
 			m->TickOnce();
 		}
 		m->totalTicks = m->ticksPlayed;
+		/* 曲末の長い J だけを 1 周にする。途中の短い Q/J では切らない。 */
+		if (m->loopEndSample > m->loopStartSample
+			&& m->loopEndSample + (uint64_t)m->hostRate / 2ull >= samples)
+			samples = m->loopEndSample;
+		else {
+			m->loopStartSample = 0;
+			m->loopEndSample = 0;
+		}
 		m_totalSamples = samples ? samples : (uint64_t)m_hostRate;
+		m_loopStartSample = m->loopStartSample;
+		m_loopEndSample = m->loopEndSample;
 		m->measureLen = 0;
 		m->SetupSong();
 	}
@@ -1928,9 +2097,11 @@ void SasamiFmPlayer::Close()
 	m = NULL;
 	m_totalSamples = 0;
 	m_curSample = 0;
+	m_loopStartSample = 0;
+	m_loopEndSample = 0;
 }
 
-void SasamiFmPlayer::SetFmMonDump(int enable, const wchar_t* sourcePath)
+void SasamiFmPlayer::SetFmMonDump(int enable, const wchar_t* sourcePath, int raira)
 {
 	StopDumpThread();
 	std::lock_guard<std::mutex> lk(m_lock);
@@ -1939,6 +2110,7 @@ void SasamiFmPlayer::SetFmMonDump(int enable, const wchar_t* sourcePath)
 	if (enable && m->playFmMode == 0)
 		enable = 0;
 	m->dumpEnable = enable ? 1 : 0;
+	m->dumpRaira = raira ? 1 : 0;
 	m->dumpShadow = 0;
 	m->dumpNamedDone[0] = 0;
 	if (sourcePath && sourcePath[0])
@@ -1950,6 +2122,8 @@ void SasamiFmPlayer::SetFmMonDump(int enable, const wchar_t* sourcePath)
 		m->dumpRingGen = 0;
 		m->dumpDirty = 1;
 		m->dumpLastFlushSample = 0;
+		/* 前回とレーンが違うハンドルを握ったままだと、相手の live を 0 埋めする */
+		m->CloseDumpFiles();
 		m->ResetDumpFiles();
 		m->ClearDumpQueue();
 		m->FlushDump(m_curSample);
@@ -1992,18 +2166,23 @@ uint32_t SasamiFmPlayer::Render(int16_t* interleavedStereo, uint32_t frames)
 		m->mixPos += take;
 		out += take;
 	}
-	if (out < frames)
+	/* ループ終端は短く返す。ゼロ埋めすると周の境に無音が入る。 */
+	if (out < frames && !(m && m->loopClip))
 		memset(interleavedStereo + out * 2, 0, (size_t)(frames - out) * 2 * sizeof(int16_t));
 	/* ホストへ渡した位置で時計を進める。生成端 m_curSample だと 8192 先読み分モニタが先行する。 */
 	if (m->dumpEnable && !m->dumpMute) {
-		const uint32_t delivered = out ? frames : 0;
+		const int clip = (m && m->loopClip) ? 1 : 0;
+		const uint32_t delivered = clip ? out : (out ? frames : 0);
 		if (delivered) {
 			std::lock_guard<std::mutex> dlk(m->dumpMu);
 			m->dumpHostPos += delivered;
 		}
 		m->NoteRenderPull(m->dumpHostPos);
 	}
-	/* MPY と同じく要求フレーム数を返す。短読みは本体が Seek(0) しやすい。 */
+	/* ループ無しは要求フレーム数（短読みで本体が頭へ戻さない）。
+	   ループ終端だけ実サンプル数。本体が次の周へシークする。 */
+	if (m && m->loopClip)
+		return out;
 	return out ? frames : 0;
 }
 
@@ -2014,6 +2193,8 @@ uint32_t SasamiFmPlayer::RenderUnlocked(int16_t* interleavedStereo, uint32_t fra
 
 	uint32_t out = 0;
 	while (out < frames) {
+		/* 終端で短読みにするとホストが Seek(0) し、初回 J だけチャンネル先頭へ戻る。
+		   2回目はチップを残すので Q に聞こえる。FJUMP の着地をそのまま鳴らす。 */
 		if (m->samplesLeftInTick == 0) {
 			const int misaoDone = !m->misaoActive || m->misao.Ended();
 			if (m->ended && misaoDone) {
@@ -2032,7 +2213,7 @@ uint32_t SasamiFmPlayer::RenderUnlocked(int16_t* interleavedStereo, uint32_t fra
 				continue;
 			}
 			m->tickCarry %= kTickDen;
-			m->dumpClock = m_curSample + out;
+			m->dumpClock = m->dumpAbs;
 			if (m->ended && !misaoDone) {
 				if (m->misaoActive) m->misao.TickOnce();
 				m->FlushTick(m->dumpClock);
@@ -2066,6 +2247,9 @@ uint32_t SasamiFmPlayer::RenderUnlocked(int16_t* interleavedStereo, uint32_t fra
 		}
 		m->samplesLeftInTick -= take;
 		out += take;
+		m->dumpAbs += take;
+		/* ここで短く返すとホストが poss5 を loop1（先頭付近）に戻し、
+		   1回目の J が 00:00:00 になる。FJUMP の着地をそのまま続ける。 */
 	}
 	m_curSample += out;
 	return out;
@@ -2081,7 +2265,26 @@ uint64_t SasamiFmPlayer::SeekSample(uint64_t sample)
 		return 0;
 	}
 	sample %= m_totalSamples;
+	/* 周回は FJUMP 済み。SetupSong はチャンネル先頭（Q の前）に戻す。 */
+	const uint64_t loopNear = (m->hostRate > 0) ? (uint64_t)m->hostRate : 44100ull;
+	const int haveLoop = (m->loopEndSample > m->loopStartSample) ? 1 : 0;
+	const int nearLoop = (haveLoop && sample + loopNear >= m->loopStartSample
+		&& sample <= m->loopStartSample + loopNear) ? 1 : 0;
+	const int atEnd = (haveLoop && m_curSample + 1 >= m->loopEndSample) ? 1 : 0;
+	if (haveLoop && (m->loopHeld || atEnd) && (nearLoop || sample == 0)) {
+		m->loopHeld = 0;
+		m->pastLoop = 0;
+		m->ended = 0;
+		m->eofSent = 0;
+		m->loopClip = 0;
+		/* キューと dumpAbs は残す。戻すとモニタが J〜Q を曲切替として捨てる。 */
+		m_curSample = (sample > m->loopStartSample) ? sample : m->loopStartSample;
+		m->mixHave = 0;
+		m->mixPos = 0;
+		return m_curSample;
+	}
 	m->ClearDumpQueue();
+	m->dumpAbs = 0;
 	m->SetupSong();
 	m_curSample = 0;
 	m->mixHave = 0;
@@ -2097,8 +2300,13 @@ uint64_t SasamiFmPlayer::SeekSample(uint64_t sample)
 		left -= g;
 	}
 	m->dumpMute = 0;
+	m->loopHeld = 0;
+	m->loopClip = 0;
+	m->eofSent = 0;
+	m->ended = 0;
 	m->mixHave = 0;
 	m->mixPos = 0;
+	m->dumpAbs = m_curSample;
 	{
 		std::lock_guard<std::mutex> dlk(m->dumpMu);
 		m->dumpHostPos = m_curSample;

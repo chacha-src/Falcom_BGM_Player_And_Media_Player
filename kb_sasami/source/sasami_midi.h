@@ -9,7 +9,11 @@ enum { SASAMI_MAX_SMF = 2 * 1024 * 1024 };
 
 // gsBankLsb: GS/88 系の初期 CC32 (1=55, 2=88, 3=88Pro, 4=8820)。0=付けない。
 // out must have room for SASAMI_MAX_SMF (or outCap). *outSize set on success.
-bool SasamiConvertToSmf(const SasamiSong& song, SasamiMidiMap map, int gsBankLsb, uint8_t* out, int outCap, int* outSize, int laBankMsb = 0);
+// exportLoops: 0=再生（1周＋loopStart/CC111）。1以上=標準MIDI書き出し。
+//   最長トラックに戻る J が無いときはマーカーも切り詰めもせず1回。
+//   最長に J があるときはその周を exportLoops 回展開し、ループマーカーは付けない。
+// outLongestJump: 非NULLなら、最長トラックが戻る J を持つか 0/1 を書く。
+bool SasamiConvertToSmf(const SasamiSong& song, SasamiMidiMap map, int gsBankLsb, uint8_t* out, int outCap, int* outSize, int laBankMsb = 0, int exportLoops = 0, int* outLongestJump = 0);
 
 void SasamiMapForceToSel(int mapForce, SasamiMidiMap* map, int* gsBankLsb, int* laBankMsb = 0);
 int SasamiReadMidMapForceW(const wchar_t* fol, int* outForce);
@@ -28,7 +32,9 @@ extern "C" {
 #endif
 int SasamiPathIsMidi(const wchar_t* path);
 int SasamiPathIsFm(const wchar_t* path);
-int SasamiConvertPathToMidiFile(const wchar_t* src, wchar_t* dest, int destChars);
+/* exportLoops 0=再生用テンポラリ。1以上=書き出し（J の有無は変換側）。
+   負=ディスクに書かず、最長に J があれば 2、無ければ 1、失敗は 0。dest は不要。 */
+int SasamiConvertPathToMidiFile(const wchar_t* src, wchar_t* dest, int destChars, int exportLoops = 0);
 #ifdef __cplusplus
 }
 #endif

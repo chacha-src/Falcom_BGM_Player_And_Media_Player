@@ -1,12 +1,11 @@
 ﻿#pragma once
 // 108鍵簡易ピアノロール検出
 //
-// 鳴っている基音だけを返す。
-// 倍音は「3度・5度」などの音程ではなく、周波数の整数倍（n*f0）だけ。
+// 鳴っている周波数の鍵を返す。ドの周波数はドの鍵。
 // 検出スペクトルは振幅の2乗なので、比較の前に振幅へ戻す。
-// 一つの音の部分音は、次数 n に対して振幅が n のべきで減衰する。
-// その包絡に乗る山だけをその音の倍音として引き、乗らない山は別の音。
-// 和音の5度や3度は整数倍の減衰曲線に乗らないので残る。
+// オクターブ（2,4,8,16倍）は、間の倍音（3,5,6,7次）が同じ減衰で揃っている
+// ときだけ一つの音の倍音として消す。オクターブだけが重なるときは各鍵を残す。
+// オクターブでない整数倍は和音の音程ではないので、1/n に収まれば消す。
 // 低域は半音が分析ビンより狭く、1音が2〜3鍵に割れる。分解できない範囲は
 // 谷で分かれた音以外を1鍵にまとめる。
 //
@@ -226,42 +225,40 @@ namespace PianoRoll108
         for (int i = 0; i < count; ++i)
             amp[i] = (blend[i] > 0.0f) ? sqrtf(blend[i]) : 0.0f;
 
-        // 部分音 n=2..8 の対数振幅を Theil-Sen で直線に合わせる。
-        // 傾きが負で包絡に乗る山だけが倍音。包絡より明らかに大きく、
-        // 奇数次が親の系列に無い山は別の音。平坦な列は和音なので足さない。
-        auto sieve = [&](const float* spec, int key, float* pred, bool* inlier,
-            float* slopeOut, float* iceptOut) -> float {
-            for (int n = 0; n <= 8; ++n) { pred[n] = 0.0f; inlier[n] = false; }
-            *slopeOut = 0.0f;
-            *iceptOut = 0.0f;
-            if (key < MUSIC_LOW_FLOOR || key >= count || spec[key] < 1.0e-8f) return 0.0f;
-
-            float a[9];
-            a[1] = spec[key];
-            float strongest = a[1];
+        auto isPeak = [&](int i) -> bool {
+            if (i < 0 || i >= count || amp[i] <= 1.0e-8f) return false;
+            if (i > 0 && amp[i - 1] > amp[i]) return false;
+            if (i + 1 < count && amp[i + 1] >= amp[i]) return false;
+            return true;
+        };
+        auto pow2 = [](int n) -> bool { return n >= 2 && (n & (n - 1)) == 0; };
+        // オクターブ以外の倍音が、オクターブ倍音と同じ減衰に乗っているとき一つの音色。
+        // オクターブの山だけが並ぶ場合は、別々のドとして残す。
+        auto seriesComplete = [&](int key) -> bool {
+            if (key < MUSIC_LOW_FLOOR || key >= count || amp[key] < 1.0e-6f) return false;
+            int nonOct = 0;
+            bool octPartial = false;
             for (int n = 2; n <= 8; ++n) {
                 const int hk = PianoKey::HarmonicKeyOnBoard(key, n);
-                a[n] = (hk >= 0 && hk < count) ? spec[hk] : 0.0f;
-                if (a[n] > strongest) strongest = a[n];
+                if (hk < 0 || hk >= count) continue;
+                if (amp[hk] < 1.0e-4f) continue;
+                if (amp[hk] < amp[key] / (float)n * 0.35f) continue;
+                if (pow2(n)) octPartial = true;
+                else ++nonOct;
             }
-            // 基音が無い（最強部分音の 6% 未満）。和音から想像した空の基音は音にしない。
-            if (strongest > 1.0e-8f && a[1] < strongest * 0.06f) return 0.0f;
-            // 1 割未満は基音として残せるが、上の山は別の音なので点数に足さない。
-            const bool fundPresent = a[1] >= strongest * 0.10f;
-
+            return nonOct >= 2 || (nonOct >= 1 && octPartial);
+        };
+        // 部分音の対数振幅を Theil-Sen で直線にする。減衰しているときだけ有効。
+        auto predict = [&](int fund, int n) -> float {
             float logN[8], logA[8];
             int np = 0;
-            if (fundPresent) {
-                for (int n = 2; n <= 8; ++n) {
-                    if (a[n] < 1.0e-5f) continue;
-                    logN[np] = logf((float)n);
-                    logA[np] = logf(a[n]);
-                    ++np;
-                }
+            for (int k = 2; k <= 8; ++k) {
+                const int hk = PianoKey::HarmonicKeyOnBoard(fund, k);
+                if (hk < 0 || hk >= count || amp[hk] < 1.0e-5f) continue;
+                logN[np] = logf((float)k);
+                logA[np] = logf(amp[hk]);
+                ++np;
             }
-            float slope = 0.0f;
-            float icept = 0.0f;
-            bool fitted = false;
             if (np >= 2) {
                 float slopes[32];
                 int ns = 0;
@@ -278,8 +275,7 @@ namespace PianoRoll108
                     while (j > 0 && slopes[j - 1] > v) { slopes[j] = slopes[j - 1]; --j; }
                     slopes[j] = v;
                 }
-                slope = (ns > 0) ? slopes[ns / 2] : 0.0f;
-                // 平坦な部分音列は減衰する一つの音ではない（同音量のオクターブ、和音）。
+                const float slope = (ns > 0) ? slopes[ns / 2] : 0.0f;
                 if (slope < -0.20f) {
                     float ic[8];
                     for (int i = 0; i < np; ++i)
@@ -290,130 +286,129 @@ namespace PianoRoll108
                         while (j > 0 && ic[j - 1] > v) { ic[j] = ic[j - 1]; --j; }
                         ic[j] = v;
                     }
-                    icept = ic[np / 2];
-                    fitted = true;
-                    *slopeOut = slope;
-                    *iceptOut = icept;
+                    return expf(ic[np / 2] + slope * logf((float)n));
                 }
             }
-
-            float score = a[1];
-            if (fitted) {
-                for (int n = 2; n <= 8; ++n) {
-                    if (a[n] < 1.0e-5f) continue;
-                    pred[n] = expf(icept + slope * logf((float)n));
-                    const float hi = a[n] > pred[n] ? a[n] : pred[n];
-                    const float lo = a[n] > pred[n] ? pred[n] : a[n];
-                    if (lo > 1.0e-8f && hi <= lo * 1.70f) {
-                        inlier[n] = true;
-                        score += a[n];
-                    }
-                }
-            } else if (fundPresent && np == 1) {
-                for (int n = 2; n <= 8; ++n) {
-                    if (a[n] < 1.0e-5f) continue;
-                    // 1/n 以下は減衰する倍音。第3倍音が鍵盤外で第2倍音だけ大きいのは弦の基音。
-                    const bool decay = a[n] <= a[1] / (float)n * 1.20f;
-                    const bool highString = (n == 2)
-                        && PianoKey::HarmonicKeyOnBoard(key, 3) < 0
-                        && a[2] > a[1] * 1.15f;
-                    if (decay || highString) {
-                        pred[n] = a[n];
-                        inlier[n] = true;
-                        score += a[n];
-                    }
-                }
-            }
-            pred[1] = a[1];
-            inlier[1] = true;
-            return score;
+            return amp[fund] / (float)n;
+        };
+        auto harmonicOf = [&](int hk, int fund, int n) -> bool {
+            if (hk < 0 || fund < 0 || n < 2) return false;
+            const float pred = predict(fund, n);
+            if (pred <= 1.0e-8f) return false;
+            const float before = amp[hk];
+            const bool ownTone = before > pred * 1.08f
+                && PianoKey::OddPartialExceedsParent(amp, hk, fund, count);
+            const float lim = pow2(n) ? 1.35f : 1.60f;
+            return before <= pred * 1.05f || (!ownTone && before <= pred * lim);
         };
 
-        float residual[COUNT];
-        for (int i = 0; i < count; ++i) residual[i] = amp[i];
+        int order[COUNT];
+        int nOrder = 0;
+        for (int i = MUSIC_LOW_FLOOR; i < count; ++i) {
+            const float th = AmpFloorForKey(i, absNoiseFloor) * 2.15f
+                * BandStrict(i, pickBassRel, pickLowMidRel, pickMelodyRel, pickTreRel)
+                / scale;
+            if (!isPeak(i) || amp[i] < th) continue;
+            // 両隣が同じ高さの盛り上がりはノイズ。短2度は片側だけ高い。
+            if (PianoKey::KeyHz(i) * 0.059463094f > AnalysisBinHz(i) * 1.15f
+                && i > 0 && i + 1 < count
+                && amp[i - 1] > amp[i] * 0.72f && amp[i + 1] > amp[i] * 0.72f)
+                continue;
+            order[nOrder++] = i;
+        }
+        for (int a = 1; a < nOrder; ++a) {
+            const int v = order[a];
+            int b = a;
+            while (b > 0 && amp[order[b - 1]] < amp[v]) {
+                order[b] = order[b - 1];
+                --b;
+            }
+            order[b] = v;
+        }
 
         bool emitted[COUNT];
         bool dead[COUNT];
         memset(emitted, 0, sizeof(emitted));
         memset(dead, 0, sizeof(dead));
 
-        for (int round = 0; round < 16; ++round) {
-            int best = -1;
-            float bestScore = 0.0f;
-            float bestPred[9];
-            bool bestIn[9];
-            float bestSlope = 0.0f;
-            float bestIcept = 0.0f;
-            for (int i = MUSIC_LOW_FLOOR; i < count; ++i) {
-                if (dead[i] || emitted[i]) continue;
-                if (i > 0 && residual[i - 1] > residual[i]) continue;
-                if (i + 1 < count && residual[i + 1] >= residual[i]) continue;
-                const float th = AmpFloorForKey(i, absNoiseFloor) * 2.15f
-                    * BandStrict(i, pickBassRel, pickLowMidRel, pickMelodyRel, pickTreRel)
-                    / scale;
-                if (residual[i] < th) continue;
-                float pred[9];
-                bool inlier[9];
-                float slope = 0.0f, icept = 0.0f;
-                const float sc = sieve(residual, i, pred, inlier, &slope, &icept);
-                if (sc < th || sc <= bestScore) continue;
-                bool leak = false;
-                for (int j = MUSIC_LOW_FLOOR; j < count && !leak; ++j) {
-                    if (!emitted[j]) continue;
-                    const int d = i - j;
-                    const int ad = d < 0 ? -d : d;
-                    if (ad < 1 || ad > 8) continue;
-                    if (amp[i] <= amp[j] * HannLeakAmp(j, d) * 1.35f) leak = true;
-                }
-                if (leak) continue;
-                best = i;
-                bestScore = sc;
-                bestSlope = slope;
-                bestIcept = icept;
-                for (int n = 0; n <= 8; ++n) { bestPred[n] = pred[n]; bestIn[n] = inlier[n]; }
-            }
-            if (best < 0) break;
-            emitted[best] = true;
-
-            int nIn = 0;
-            for (int n = 2; n <= 8; ++n) if (bestIn[n]) ++nIn;
-            const bool series = bestSlope < -0.20f && nIn >= 3;
-            for (int n = 1; n <= 24; ++n) {
-                const int hk = (n == 1) ? best : PianoKey::HarmonicKeyOnBoard(best, n);
-                if (hk < 0 || hk >= count) continue;
-                float pred = 0.0f;
-                if (n == 1) pred = bestPred[1];
-                else if (series)
-                    pred = expf(bestIcept + bestSlope * logf((float)n));
-                else if (n <= 8 && bestIn[n]) pred = bestPred[n];
-                else continue;
-                if (pred <= 1.0e-8f) continue;
-                const float before = residual[hk];
-                const float keep = before * before - pred * pred;
-                residual[hk] = (keep > 0.0f) ? sqrtf(keep) : 0.0f;
-                // 包絡以下は倍音の谷。少し上回るだけならフォルマント。
-                // はっきり上回り、奇数次が親の系列に無いときだけ別の音。
-                const bool ownTone = n > 1 && before > pred * 1.08f
-                    && PianoKey::OddPartialExceedsParent(amp, hk, best, count);
-                if (before <= pred * 1.05f || (!ownTone && before <= pred * 1.35f))
-                    dead[hk] = true;
+        auto strip = [&](int fund, bool asString) {
+            const bool complete = seriesComplete(fund);
+            for (int n = 2; n <= 24; ++n) {
+                const int hk = PianoKey::HarmonicKeyOnBoard(fund, n);
+                if (hk < 0 || hk >= count || hk == fund || emitted[hk]) continue;
+                // 基音より大きい山は、その鍵の音。弦と確認できたときだけ倍音として消す。
+                if (amp[hk] > amp[fund] * 1.05f && !asString) continue;
+                if (pow2(n) && !complete && !asString) continue;
+                if (!harmonicOf(hk, fund, n)) continue;
+                dead[hk] = true;
+                const float pred = predict(fund, n);
                 int reach = 1;
                 while (reach < 6 && HannLeakAmp(hk, reach) > 0.22f) ++reach;
                 for (int d = -reach; d <= reach; ++d) {
                     if (d == 0) continue;
                     const int s = hk + d;
-                    if (s < 0 || s >= count) continue;
-                    const float skirt = pred * HannLeakAmp(hk, d);
-                    const float sk = residual[s] * residual[s] - skirt * skirt;
-                    residual[s] = (sk > 0.0f) ? sqrtf(sk) : 0.0f;
-                    if (amp[s] <= skirt * 1.40f)
+                    if (s < 0 || s >= count || emitted[s]) continue;
+                    if (amp[s] <= pred * HannLeakAmp(hk, d) * 1.40f)
                         dead[s] = true;
                 }
             }
+        };
+
+        int emittedN = 0;
+        for (int t = 0; t < nOrder && emittedN < 24; ++t) {
+            const int p = order[t];
+            if (dead[p] || emitted[p]) continue;
+            bool leak = false;
+            for (int j = MUSIC_LOW_FLOOR; j < count && !leak; ++j) {
+                if (!emitted[j] || amp[j] < amp[p]) continue;
+                const int d = p - j;
+                const int ad = d < 0 ? -d : d;
+                if (ad < 1 || ad > 8) continue;
+                if (amp[p] <= amp[j] * HannLeakAmp(j, d) * 1.35f) leak = true;
+            }
+            if (leak) continue;
+
+            int fund = p;
+            bool asString = false;
+            bool consumed = false;
+            for (int n = 2; n <= 8 && !consumed; ++n) {
+                const int lo = PianoKey::HarmonicDownKeyAny(p, n);
+                if (lo < MUSIC_LOW_FLOOR || lo >= p) continue;
+                if (PianoKey::ExactHarmonicNumber(p, lo, 12) != n) continue;
+                if (dead[lo]) continue;
+                const float thLo = AmpFloorForKey(lo, absNoiseFloor) * 2.15f
+                    * BandStrict(lo, pickBassRel, pickLowMidRel, pickMelodyRel, pickTreRel)
+                    / scale;
+                if (amp[lo] < thLo) continue;
+                const int h3 = PianoKey::HarmonicKeyOnBoard(lo, 3);
+                const int h4 = PianoKey::HarmonicKeyOnBoard(lo, 4);
+                const bool highString = n == 2 && h3 < 0
+                    && amp[p] > amp[lo] * 1.15f
+                    && amp[lo] >= amp[p] * 0.10f;
+                // 第2倍音より第3・第4がはっきり小さいときだけ、弱い基音の弦。
+                const bool h3ok = n == 2 && h3 >= 0
+                    && amp[h3] <= amp[p] * 0.85f && amp[h3] >= amp[p] * 0.35f;
+                const bool h4ok = h4 < 0
+                    || (amp[h4] <= amp[p] * 0.70f && amp[h4] >= amp[p] * 0.20f);
+                const bool stringFold = n == 2 && isPeak(lo)
+                    && amp[lo] < amp[p] && amp[lo] >= amp[p] * 0.15f
+                    && h3ok && h4ok;
+                if (!highString && !stringFold) continue;
+                if (emitted[lo]) { consumed = true; break; }
+                fund = lo;
+                asString = true;
+                break;
+            }
+            if (consumed) { dead[p] = true; continue; }
+            emitted[fund] = true;
+            ++emittedN;
+            if (fund != p) dead[p] = true;
+            strip(fund, asString);
         }
 
         for (int i = 0; i < count; ++i)
-            outPicked[i] = emitted[i] && i >= MUSIC_LOW_FLOOR;
+            outPicked[i] = emitted[i] && !dead[i] && i >= MUSIC_LOW_FLOOR;
+
 
         // 分解できない低域は、谷が無い隣鍵を強い側へまとめる。
         for (int i = MUSIC_LOW_FLOOR; i < BASS_END; ++i) {

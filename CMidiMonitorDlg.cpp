@@ -5702,8 +5702,10 @@ BOOL CMidiMonitorDlg::OnInitDialog()
 	m_help.SetGradation(RGB(255, 245, 220), RGB(240, 210, 160), 0, TRUE);
 	LayoutHelpBtn();
 	if (m_tooltip.Create(this, TTS_ALWAYSTIP | TTS_NOPREFIX)) {
+#ifndef KBSASAMI_HOST_BUILD
 		if (m_help.GetSafeHwnd())
 			m_tooltip.AddTool(&m_help, LL14(L"操作ガイドを表示", L"Show operation guide", L"Afficher le guide", L"Mostra guida", L"Mostrar guía", L"조작 가이드 표시", L"显示操作指南", L"إظهار الدليل", L"Показать руководство", L"Bedienungsanleitung", L"Mostrar guia", L"Handleiding tonen", L"Pokaż przewodnik", L"İşlem kılavuzunu göster"));
+#endif
 		m_tooltip.SetDelayTime(TTDT_INITIAL, 400);
 		m_tooltip.SetDelayTime(TTDT_RESHOW, 120);
 		m_tooltip.SetDelayTime(TTDT_AUTOPOP, 12000);

@@ -21,6 +21,7 @@
 #include "kb_sasami/source/sasami_write.h"
 #include "kb_sasami/source/sasami_file.h"
 #include "kb_sasami/source/sasami_midi.h"
+#include "CSasamiMidiExportDlg.h"
 
 void MmBindVstActiveSlot();
 
@@ -3331,7 +3332,15 @@ void CSasamiMidiScoreDlg::ExportStandardMidi()
 		return;
 	wchar_t mid[MAX_PATH];
 	mid[0] = 0;
-	if (!SasamiConvertPathToMidiFile(built, mid, MAX_PATH) || !mid[0]) {
+	const int hint = SasamiConvertPathToMidiFile(built, NULL, 0, -1);
+	int loops = 1;
+	if (hint == 2) {
+		CSasamiMidiExportDlg dlg(this);
+		if (dlg.DoModal() != IDOK)
+			return;
+		loops = dlg.Loops();
+	}
+	if (!hint || !SasamiConvertPathToMidiFile(built, mid, MAX_PATH, loops) || !mid[0]) {
 		m_status.SetWindowText(LL14(L"標準MIDIへ変換できませんでした", L"Could not convert to standard MIDI",
 			L"Conversion MIDI impossible", L"Conversione MIDI non riuscita", L"No se pudo convertir a MIDI",
 			L"표준 MIDI 변환 실패", L"无法转为标准MIDI", L"تعذر التحويل إلى MIDI", L"Не удалось преобразовать в MIDI",
@@ -3652,7 +3661,21 @@ void CSasamiMidiScoreDlg::OnContextMenu(CWnd* pWnd, CPoint point)
 	menu.AddCommand(9088, LL14(
 		L"標準MIDIに書き出す…", L"Export standard MIDI…", L"Exporter MIDI standard…", L"Esporta MIDI standard…", L"Exportar MIDI estándar…",
 		L"표준 MIDI로 내보내기…", L"导出标准MIDI…", L"تصدير MIDI قياسي…", L"Экспорт стандартного MIDI…", L"Standard-MIDI exportieren…",
-		L"Exportar MIDI padrão…", L"Standaard-MIDI exporteren…", L"Eksportuj standardowe MIDI…", L"Standart MIDI dışa aktar…"));
+		L"Exportar MIDI padrão…", L"Standaard-MIDI exporteren…", L"Eksportuj standardowe MIDI…", L"Standart MIDI dışa aktar…"),
+		LL14(L"最長トラックに J があるときはループ回数を指定します。無いときは1回で、ループマーカーは付きません",
+			L"If the longest track has J, choose the loop count. Otherwise one pass, with no loop markers",
+			L"Si la piste la plus longue a un J, choisir les boucles. Sinon un passage, sans marqueurs",
+			L"Se la traccia più lunga ha J, scegli i cicli. Altrimenti un passaggio, senza marcatori",
+			L"Si la pista más larga tiene J, elige las repeticiones. Si no, una pasada, sin marcadores",
+			L"가장 긴 트랙에 J가 있으면 반복 횟수를 지정합니다. 없으면 1회이며 루프 마커는 없습니다",
+			L"最长轨有 J 时可指定循环次数。没有则只写一遍，不加循环标记",
+			L"إذا كان أطول مسار فيه J فاختر عدد التكرار. وإلا مرة واحدة بلا علامات حلقة",
+			L"Если у самой длинной дорожки есть J, укажите число повторов. Иначе один проход без маркеров",
+			L"Hat die längste Spur ein J, Wiederholungen wählen. Sonst ein Durchlauf ohne Marker",
+			L"Se a faixa mais longa tiver J, escolha as repetições. Senão uma vez, sem marcadores",
+			L"Heeft de langste track een J, kies de herhalingen. Anders één keer, zonder markeringen",
+			L"Jeśli najdłuższa ścieżka ma J, podaj liczbę powtórzeń. Inaczej raz, bez markerów",
+			L"En uzun kanalda J varsa tekrar sayısını seçin. Yoksa bir kez, döngü işareti yok"));
 	menu.AddSeparator();
 	menu.AddCommand(IDC_SASAMI_MIDI_HELP, LL14(
 		L"ヘルプ", L"Help", L"Aide", L"Guida", L"Ayuda",

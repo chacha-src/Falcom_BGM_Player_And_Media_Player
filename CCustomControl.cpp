@@ -19665,6 +19665,15 @@ void CCC_CaptionPlaceHelpBtn(HWND hDlg, CWnd* pHelp)
         return;
     if (!CCC_IsCaptionHelpChromeId((UINT)pHelp->GetDlgCtrlID()))
         return;
+#ifdef KBSASAMI_HOST_BUILD
+    /* 設定・全画面・?・オフラインヘルプは raira=0 に無い */
+    pHelp->ShowWindow(SW_HIDE);
+    if (CCC_CaptionEntry* he = CCC_FindCaption(hDlg)) {
+        if (he->pOfflineHelp && ::IsWindow(he->pOfflineHelp->GetSafeHwnd()))
+            he->pOfflineHelp->ShowWindow(SW_HIDE);
+    }
+    return;
+#endif
 
     CCC_CaptionEntry* e = CCC_FindCaption(hDlg);
     if (!e || !e->installed)
@@ -19802,10 +19811,15 @@ void CCC_CaptionLayout(HWND hDlg)
             pHelp = CWnd::FromHandle(hHelp);
         if (!pHelp)
             continue;
+#ifdef KBSASAMI_HOST_BUILD
+        pHelp->ShowWindow(SW_HIDE);
+        continue;
+#else
         // 未表示でも位置だけ合わせる（初回に P の裏に残るのを防ぐ）
         if (!pHelp->IsWindowVisible())
             pHelp->ShowWindow(SW_SHOWNA);
         CCC_CaptionPlaceHelpBtn(hDlg, pHelp);
+#endif
     }
 
     CCC_MainLockBringToFront(hDlg);
@@ -21838,6 +21852,11 @@ static void CCC_CaptionInstallCore(CWnd* pDlg, CToolTipCtrl* pTip)
         || ((style & (WS_POPUP | WS_THICKFRAME | WS_MINIMIZEBOX))
             == (WS_POPUP | WS_THICKFRAME | WS_MINIMIZEBOX));
     e->hasSettings = !CCC_CaptionIsRenderClass(pDlg);
+#ifdef KBSASAMI_HOST_BUILD
+    /* raira=0 のホスト窓に設定・最大化は無い */
+    e->hasMax = FALSE;
+    e->hasSettings = FALSE;
+#endif
     e->topmost = (::GetWindowLong(hWnd, GWL_EXSTYLE) & WS_EX_TOPMOST) != 0;
 
     CRect rcBefore;
@@ -23190,11 +23209,13 @@ BOOL CCustomBlurDialogBase::PreTranslateMessage(MSG* pMsg)
 {
     if (CCC_NkMsg(pMsg, this))
         return TRUE;
+#ifndef KBSASAMI_HOST_BUILD
     if (pMsg && pMsg->message == WM_KEYDOWN && pMsg->wParam == VK_F1)
     {
         OfflineHelpOpen(m_hWnd);
         return TRUE;
     }
+#endif
     if (m_capTip.GetSafeHwnd())
         m_capTip.RelayEvent(pMsg);
     return CCustomDialog::PreTranslateMessage(pMsg);
@@ -24121,11 +24142,13 @@ BOOL CCustomBlurDialogExBase::PreTranslateMessage(MSG* pMsg)
 {
     if (CCC_NkMsg(pMsg, this))
         return TRUE;
+#ifndef KBSASAMI_HOST_BUILD
     if (pMsg && pMsg->message == WM_KEYDOWN && pMsg->wParam == VK_F1)
     {
         OfflineHelpOpen(m_hWnd);
         return TRUE;
     }
+#endif
     if (m_capTip.GetSafeHwnd())
         m_capTip.RelayEvent(pMsg);
     return CCustomDialogEx::PreTranslateMessage(pMsg);

@@ -46,6 +46,7 @@ struct MidiTrackState {
 	uint32_t loopEndTick;
 	uint32_t loopDest; /* 直近の戻り先。変わったら変異ループ */
 	uint32_t period;   /* その戻り先の 1 周 */
+	uint32_t endTick;  /* J せず死んだ tick。未演奏は 0 */
 	/* Wave3 soft FX (cmd 46/47) — expand into SMF curves while note is held */
 	int softMode;   /* -1 off, 0=vib, 1=trem */
 	int softDelay;
@@ -1494,7 +1495,7 @@ static int SasamiRegistryMapDefault()
 	return (v >= 0 && v <= 19) ? v : 0;
 }
 
-static void SasamiTempMidiPath(const wchar_t* src, wchar_t* dest, int destChars);
+static void SasamiTempMidiPath(const wchar_t* src, wchar_t* dest, int destChars, int exportLoops = 0);
 
 struct SasamiTempCache {
 	wchar_t src[MAX_PATH];
@@ -1502,6 +1503,7 @@ struct SasamiTempCache {
 	DWORD srcSize;
 	int mapForce;
 	int convVer;
+	int exportLoops;
 };
 static SasamiTempCache s_tempCache;
 enum { SASAMI_SMF_CACHE_VER = 16 };
@@ -1528,10 +1530,11 @@ static int SasamiReadSourceStamp(const wchar_t* src, FILETIME* writeTime, DWORD*
 	return 1;
 }
 
-static int SasamiTempCacheValid(const wchar_t* src, int mapForce, const wchar_t* dest)
+static int SasamiTempCacheValid(const wchar_t* src, int mapForce, const wchar_t* dest, int exportLoops)
 {
 	if (!src || !src[0] || !dest || !dest[0] || !s_tempCache.src[0]) return 0;
 	if (s_tempCache.convVer != SASAMI_SMF_CACHE_VER) return 0;
+	if (s_tempCache.exportLoops != exportLoops) return 0;
 	if (_wcsicmp(s_tempCache.src, src) != 0 || s_tempCache.mapForce != mapForce) return 0;
 	FILETIME wt;
 	DWORD sz = 0;
@@ -1551,10 +1554,13 @@ void SasamiInvalidateTempMidi(const wchar_t* src)
 		memset(&s_tempCache, 0, sizeof(s_tempCache));
 }
 
-bool SasamiConvertToSmf(const SasamiSong& song, SasamiMidiMap map, int gsBankLsb, uint8_t* out, int outCap, int* outSize, int laBankMsb)
+bool SasamiConvertToSmf(const SasamiSong& song, SasamiMidiMap map, int gsBankLsb, uint8_t* out, int outCap, int* outSize, int laBankMsb, int exportLoops, int* outLongestJump)
 {
 	if (!out || !outSize || outCap <= 0) return false;
 	*outSize = 0;
+	if (outLongestJump) *outLongestJump = 0;
+	if (exportLoops < 0) exportLoops = 0;
+	if (exportLoops > 32) exportLoops = 32;
 	if (!EnsureMidiWork()) return false;
 	if (song.kind != SASAMI_KIND_MPY && song.kind != SASAMI_KIND_MPW2 && song.kind != SASAMI_KIND_MPW3) return false;
 	if (song.trackCount <= 0) return false;
@@ -1667,6 +1673,7 @@ bool SasamiConvertToSmf(const SasamiSong& song, SasamiMidiMap map, int gsBankLsb
 	(void)curT;
 	uint32_t gLoopStart = 0xFFFFFFFFu;
 	uint32_t gLoopEnd = 0;
+	int smfReps = 1;
 
 	auto releaseTrack = [&](int i) {
 		const int ch = tr[i].part;
@@ -1682,6 +1689,7 @@ bool SasamiConvertToSmf(const SasamiSong& song, SasamiMidiMap map, int gsBankLsb
 
 	auto killTrack = [&](int i) {
 		if (!tr[i].alive) return;
+		tr[i].endTick = tick;
 		releaseTrack(i);
 		tr[i].alive = 0;
 	};
@@ -2328,7 +2336,35 @@ bool SasamiConvertToSmf(const SasamiSong& song, SasamiMidiMap map, int gsBankLsb
 			enum { kLoopCap = 96000 };
 			if (!pending && nper > 0 && lcm > 0 && lcm <= (uint32_t)kLoopCap) {
 				gLoopStart = latestQ;
-				gLoopEnd = latestQ + lcm;
+				int reps = 1;
+				uint32_t endBase = latestQ;
+				uint32_t endStep = lcm;
+				/* 書き出しで最長が戻る J のときだけ、そのトラックの周を指定回数まで進める。
+				   再生（exportLoops==0）は公倍数 1 周のまま。 */
+				if (exportLoops > 1) {
+					uint32_t bestJ = 0, bestLin = 0, jStart = 0, jPeriod = 0;
+					for (int i = 0; i < song.trackCount && i < 64; i++) {
+						if (tr[i].everJump && tr[i].period > 0 && tr[i].loopEndTick > bestJ) {
+							bestJ = tr[i].loopEndTick;
+							jStart = tr[i].loopStartTick;
+							jPeriod = tr[i].period;
+						} else if (!tr[i].everJump && (tr[i].alive || tr[i].endTick > 0)) {
+							const uint32_t len = tr[i].alive ? tick : tr[i].endTick;
+							if (len > bestLin) bestLin = len;
+						}
+					}
+					if (bestJ > bestLin && jPeriod > 0 && jStart != 0xFFFFFFFFu && jStart < SASAMI_MAX_TICKS) {
+						uint32_t room = (SASAMI_MAX_TICKS - jStart) / jPeriod;
+						if (room < 1) room = 1;
+						reps = exportLoops;
+						if ((uint32_t)reps > room) reps = (int)room;
+						endBase = jStart;
+						endStep = jPeriod;
+						gLoopStart = jStart;
+					}
+				}
+				smfReps = reps;
+				gLoopEnd = endBase + endStep * (uint32_t)reps;
 			}
 			if (!pending && gLoopEnd > 0 && tick >= gLoopEnd)
 				break;
@@ -2340,12 +2376,28 @@ bool SasamiConvertToSmf(const SasamiSong& song, SasamiMidiMap map, int gsBankLsb
 	/* 終端はシミュレーション中に決めた公倍数。ここでは一番長い Q/J に差し替えない。
 	   展開がイベント上限で先に止まったときは、届いていない終端を採用しない。 */
 	if (gLoopEnd > 0 && tick < gLoopEnd) {
-		gLoopEnd = 0;
-		gLoopStart = 0xFFFFFFFFu;
+		/* イベント上限で指定回数に届かないときは、届いた周だけ残す。 */
+		if (smfReps > 1 && gLoopStart != 0xFFFFFFFFu && tick > gLoopStart) {
+			const uint32_t span = gLoopEnd - gLoopStart;
+			const uint32_t one = span / (uint32_t)smfReps;
+			const uint32_t done = (one > 0) ? (tick - gLoopStart) / one : 0;
+			if (done >= 1) {
+				gLoopEnd = gLoopStart + one * done;
+				smfReps = (int)done;
+			} else {
+				gLoopEnd = 0;
+				gLoopStart = 0xFFFFFFFFu;
+				smfReps = 1;
+			}
+		} else {
+			gLoopEnd = 0;
+			gLoopStart = 0xFFFFFFFFu;
+		}
 	}
 	/* 最長 J 同士のずれが 1 小節以内なら、遅い方へ伸ばさず多数派の J で閉じる。
-	   長さは公倍数のままなので 192tick の倍数（4/4 の小節）から外れない。 */
-	if (gLoopEnd > gLoopStart) {
+	   長さは公倍数のままなので 192tick の倍数（4/4 の小節）から外れない。
+	   複数周の書き出しは、シミュレーションが止めた tick が各周の境目なので触らない。 */
+	if (gLoopEnd > gLoopStart && smfReps <= 1) {
 		uint32_t lcm = 0;
 		for (int i = 0; i < song.trackCount && i < 64; i++) {
 			if (!tr[i].period) continue;
@@ -2360,10 +2412,36 @@ bool SasamiConvertToSmf(const SasamiSong& song, SasamiMidiMap map, int gsBankLsb
 
 	if (gLoopEnd > 0 && gLoopStart == 0xFFFFFFFFu)
 		gLoopStart = 0;
+	int longestJ = 0;
+	{
+		uint32_t best = 0;
+		int any = 0;
+		for (int i = 0; i < song.trackCount && i < 64; i++) {
+			if (tr[i].everJump && tr[i].loopEndTick > 0) {
+				if (!any || tr[i].loopEndTick > best) {
+					best = tr[i].loopEndTick;
+					longestJ = 1;
+					any = 1;
+				}
+			} else if (!tr[i].everJump && (tr[i].alive || tr[i].endTick > 0)) {
+				const uint32_t len = tr[i].alive ? tick : tr[i].endTick;
+				if (!any || len >= best) {
+					best = len;
+					longestJ = 0;
+					any = 1;
+				}
+			}
+		}
+		if (outLongestJump) *outLongestJump = longestJ;
+	}
 	const int haveLoop = (gLoopStart != 0xFFFFFFFFu && gLoopEnd > gLoopStart) ? 1 : 0;
 	/* |: :| だけ伸びるパートの 2 周目以降は gLoopEnd で切る。SMF ループを
-	   付けないと MAX_EV まで展開したあと再生が止まる。 */
-	const int useSmfLoop = haveLoop ? 1 : 0;
+	   付けないと MAX_EV まで展開したあと再生が止まる。
+	   書き出しで最長に J が無いときは、短い周で切らず曲の終わりまで残す。 */
+	int useSmfLoop = haveLoop ? 1 : 0;
+	if (exportLoops > 0 && !longestJ)
+		useSmfLoop = 0;
+	const int writeMarkers = (useSmfLoop && exportLoops <= 0) ? 1 : 0;
 	if (useSmfLoop) {
 		int keepN = 0;
 		for (int i = 0; i < s_evCount; i++) {
@@ -2402,24 +2480,26 @@ bool SasamiConvertToSmf(const SasamiSong& song, SasamiMidiMap map, int gsBankLsb
 			uint8_t ts[7] = { 0xFF, 0x58, 0x04, 0x04, 0x02, 0x18, 0x08 };
 			PushEv(phase, 0, ts, 7);
 		}
-		{
-			static const char kLoopStart[] = "loopStart";
-			const int n = (int)(sizeof(kLoopStart) - 1);
-			uint8_t d[128];
-			d[0] = 0xFF; d[1] = 0x06; d[2] = (uint8_t)n;
-			memcpy(d + 3, kLoopStart, (size_t)n);
-			PushEv(gLoopStart, 0, d, 3 + n);
+		if (writeMarkers) {
+			{
+				static const char kLoopStart[] = "loopStart";
+				const int n = (int)(sizeof(kLoopStart) - 1);
+				uint8_t d[128];
+				d[0] = 0xFF; d[1] = 0x06; d[2] = (uint8_t)n;
+				memcpy(d + 3, kLoopStart, (size_t)n);
+				PushEv(gLoopStart, 0, d, 3 + n);
+			}
+			{
+				static const char kLoopEnd[] = "loopEnd";
+				const int n = (int)(sizeof(kLoopEnd) - 1);
+				uint8_t d[128];
+				d[0] = 0xFF; d[1] = 0x06; d[2] = (uint8_t)n;
+				memcpy(d + 3, kLoopEnd, (size_t)n);
+				PushEv(gLoopEnd, 0, d, 3 + n);
+			}
+			PushShort(gLoopStart, 0, 0xB0, 111, 0);
+			PushShort(gLoopEnd, 0, 0xB0, 111, 127);
 		}
-		{
-			static const char kLoopEnd[] = "loopEnd";
-			const int n = (int)(sizeof(kLoopEnd) - 1);
-			uint8_t d[128];
-			d[0] = 0xFF; d[1] = 0x06; d[2] = (uint8_t)n;
-			memcpy(d + 3, kLoopEnd, (size_t)n);
-			PushEv(gLoopEnd, 0, d, 3 + n);
-		}
-		PushShort(gLoopStart, 0, 0xB0, 111, 0);
-		PushShort(gLoopEnd, 0, 0xB0, 111, 127);
 	} else {
 		for (int i = 0; i < song.trackCount && i < 64; i++)
 			killTrack(i);
@@ -2491,8 +2571,9 @@ bool SasamiConvertToSmf(const SasamiSong& song, SasamiMidiMap map, int gsBankLsb
 		}
 		/* 終端の NoteOff はループ終了サンプルにあり、再生がそこを飛ばすと
 		   J の音が残ったまま Q の NoteOn が重なる。Q の tick で、まだ鳴って
-		   いる音を NoteOn より前に切る。SASAMI は同じ tick で off してから on。 */
-		{
+		   いる音を NoteOn より前に切る。SASAMI は同じ tick で off してから on。
+		   書き出しの展開には付けない（頭で切ると前奏から伸びた音が落ちる）。 */
+		if (writeMarkers) {
 			uint8_t boundary[2][16][128];
 			int boundaryPed[2][16];
 			memset(boundary, 0, sizeof(boundary));
@@ -2574,7 +2655,7 @@ int SasamiPathIsFm(const wchar_t* path)
 	return SasamiExtIsFm(path) ? 1 : 0;
 }
 
-static void SasamiTempMidiPath(const wchar_t* src, wchar_t* dest, int destChars)
+static void SasamiTempMidiPath(const wchar_t* src, wchar_t* dest, int destChars, int exportLoops)
 {
 	wchar_t tmp[MAX_PATH];
 	GetTempPathW(MAX_PATH, tmp);
@@ -2593,25 +2674,41 @@ static void SasamiTempMidiPath(const wchar_t* src, wchar_t* dest, int destChars)
 		*dot = 0;
 	if (!stem[0])
 		wcsncpy_s(stem, L"sasami", _TRUNCATE);
-	_snwprintf_s(dest, destChars, _TRUNCATE, L"%s\\%s.mid", dir, stem);
+	if (exportLoops > 0)
+		_snwprintf_s(dest, destChars, _TRUNCATE, L"%s\\%s.e%d.mid", dir, stem, exportLoops);
+	else
+		_snwprintf_s(dest, destChars, _TRUNCATE, L"%s\\%s.mid", dir, stem);
 }
 
-int SasamiConvertPathToMidiFile(const wchar_t* src, wchar_t* dest, int destChars)
+int SasamiConvertPathToMidiFile(const wchar_t* src, wchar_t* dest, int destChars, int exportLoops)
 {
-	if (!src || !dest || destChars < 8) return 0;
-	dest[0] = 0;
-	if (!SasamiExtIsMidi(src)) return 0;
+	if (!src || !src[0] || !SasamiExtIsMidi(src)) return 0;
+	if (exportLoops > 32) exportLoops = 32;
+	if (exportLoops >= 0 && (!dest || destChars < 8)) return 0;
+	if (exportLoops >= 0) dest[0] = 0;
 	if (!EnsureMidiWork()) return 0;
-	SasamiTempMidiPath(src, dest, destChars);
 	int force = SasamiResolveMapForceW(src, SasamiRegistryMapDefault());
 	static SasamiSong s_song;
 	int songLoaded = 0;
-	if (force <= 0) {
+	if (force <= 0 || exportLoops < 0) {
 		if (!SasamiLoadFileW(src, &s_song)) return 0;
 		songLoaded = 1;
-		force = SasamiAutoMapForce(0, &s_song, NULL, 0, src, s_song.titleSjis);
+		if (force <= 0)
+			force = SasamiAutoMapForce(0, &s_song, NULL, 0, src, s_song.titleSjis);
 	}
-	if (SasamiTempCacheValid(src, force, dest))
+	if (exportLoops < 0) {
+		SasamiMidiMap map = SASAMI_MAP_GS88;
+		int gsLsb = 2;
+		int laBank = 0;
+		int jump = 0;
+		int sz = 0;
+		SasamiMapForceToSel(force, &map, &gsLsb, &laBank);
+		if (!SasamiConvertToSmf(s_song, map, gsLsb, s_smfWork, SASAMI_MAX_SMF, &sz, laBank, 0, &jump))
+			return 0;
+		return jump ? 2 : 1;
+	}
+	SasamiTempMidiPath(src, dest, destChars, exportLoops);
+	if (SasamiTempCacheValid(src, force, dest, exportLoops))
 		return 1;
 	if (!songLoaded) {
 		if (!SasamiLoadFileW(src, &s_song)) return 0;
@@ -2621,7 +2718,7 @@ int SasamiConvertPathToMidiFile(const wchar_t* src, wchar_t* dest, int destChars
 	int laBank = 0;
 	SasamiMapForceToSel(force, &map, &gsLsb, &laBank);
 	int sz = 0;
-	if (!SasamiConvertToSmf(s_song, map, gsLsb, s_smfWork, SASAMI_MAX_SMF, &sz, laBank)) return 0;
+	if (!SasamiConvertToSmf(s_song, map, gsLsb, s_smfWork, SASAMI_MAX_SMF, &sz, laBank, exportLoops, 0)) return 0;
 	HANDLE h = CreateFileW(dest, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
 	if (h == INVALID_HANDLE_VALUE) return 0;
 	DWORD w = 0;
@@ -2637,6 +2734,7 @@ int SasamiConvertPathToMidiFile(const wchar_t* src, wchar_t* dest, int destChars
 			s_tempCache.srcSize = fsz;
 			s_tempCache.mapForce = force;
 			s_tempCache.convVer = SASAMI_SMF_CACHE_VER;
+			s_tempCache.exportLoops = exportLoops;
 		} else {
 			memset(&s_tempCache, 0, sizeof(s_tempCache));
 		}

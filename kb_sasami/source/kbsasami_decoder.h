@@ -47,6 +47,7 @@ private:
 	char m_titleSjis[65];
 	double m_loopStart;
 	double m_loopEnd;
+	int m_loopClosed; /* 1周出し切った。次の Render は 0。巻き戻しは本体。 */
 	double m_mix[MIX_FRAMES * 2];
 	uint8_t m_smf[SASAMI_MAX_SMF];
 	int m_smfSize;

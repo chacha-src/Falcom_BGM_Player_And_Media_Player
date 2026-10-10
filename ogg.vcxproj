@@ -826,6 +826,7 @@ if errorlevel 1 exit /b 1</Command>
     <ClCompile Include="CSasamiSimpleInputDlg.cpp" />
     <ClCompile Include="CSasamiNotePropsDlg.cpp" />
     <ClCompile Include="CSasamiExcRpnDlg.cpp" />
+    <ClCompile Include="CSasamiMidiExportDlg.cpp" />
     <ClCompile Include="CSasamiInsertFxDlg.cpp" />
     <ClCompile Include="CSasamiVstPickDlg.cpp" />
     <ClCompile Include="CSasamiToneMapDlg.cpp" />
@@ -1135,6 +1136,7 @@ if errorlevel 1 exit /b 1</Command>
     <ClInclude Include="CSasamiSimpleInputDlg.h" />
     <ClInclude Include="CSasamiNotePropsDlg.h" />
     <ClInclude Include="CSasamiExcRpnDlg.h" />
+    <ClInclude Include="CSasamiMidiExportDlg.h" />
     <ClInclude Include="CSasamiInsertFxDlg.h" />
     <ClInclude Include="CSasamiVstPickDlg.h" />
     <ClInclude Include="CSasamiToneMapDlg.h" />

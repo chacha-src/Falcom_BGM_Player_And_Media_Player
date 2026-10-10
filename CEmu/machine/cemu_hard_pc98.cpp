@@ -2184,6 +2184,51 @@ int CHardPc98::LoadSongToAddr(unsigned songNum, int destAddr, int maxSize, int i
 	return 1;
 }
 
+/* Birdy / PMD 糊。07D0=11h の戻りを LDS する（off:seg）。
+   cmd1 が 0x1000 バイトをコピーして AH=0、cmd0 が AH=1 で再生する。
+   rouge はスロット CS:0084、pias は CS:0122。この形はどちらかだけ。 */
+static int BirdyPmdGlue(uint8_t* mem, int bootCs)
+{
+	if (!mem || bootCs <= 0)
+		return 0;
+	const unsigned b = (unsigned)bootCs << 4;
+	const unsigned n = 0x180u;
+	if (b + n >= 0x200000u)
+		return 0;
+	const uint8_t* s = mem + b;
+	if (s[0] != 0xFA || s[1] != 0xBA || s[2] != 0xE8
+		|| s[3] != 0x07 || s[4] != 0xB0 || s[5] != 0x80)
+		return 0;
+	static const uint8_t kAsk[] = {
+		0xB0, 0x11, 0xEE, 0xBA, 0xD4, 0x07, 0xED, 0x2E, 0xA3
+	};
+	for (unsigned i = 0; i + 11u < n; i++) {
+		unsigned k = 0;
+		for (; k < sizeof(kAsk); k++)
+			if (s[i + k] != kAsk[k])
+				break;
+		if (k != sizeof(kAsk))
+			continue;
+		const uint8_t lo = s[i + 9];
+		const uint8_t hi = s[i + 10];
+		int lds = 0;
+		for (unsigned j = 0; j + 5u < n; j++) {
+			if (s[j] == 0x2E && s[j + 1] == 0xC5 && s[j + 2] == 0x36
+				&& s[j + 3] == lo && s[j + 4] == hi) {
+				lds = 1;
+				break;
+			}
+		}
+		if (!lds)
+			continue;
+		for (unsigned j = 0; j + 3u < n; j++) {
+			if (s[j] == 0xB9 && s[j + 1] == 0x00 && s[j + 2] == 0x10)
+				return 1;
+		}
+	}
+	return 0;
+}
+
 /* CHardPc98::HostService の実装 */
 void CHardPc98::HostService(uint8_t func)
 {
@@ -2226,7 +2271,7 @@ void CHardPc98::HostService(uint8_t func)
 		break;
 	case 0x11:
 		/* DOFMD_98.BIN / BRANM_98 再生経路: IN AX,07D4/07D6 → SI/DS をリアルモード曲ポインタ、続けて INT 45h で MSC/MV22/MUSIC.BIN へ。 */
-		if (dofmd_) {
+		if (dofmd_ || BirdyPmdGlue(mem, bootCs_)) {
 			hostParam2_ = (uint16_t)((unsigned)dataAddr_ & 0x000Fu);
 			hostParam3_ = (uint16_t)((unsigned)dataAddr_ >> 4);
 		} else {
@@ -5921,6 +5966,23 @@ void CHardPc98::BindDosTriggerSong(const CEmuGameEntry* ge, unsigned titleCode)
 		};
 		if (DosShellStarts(ge, kUsdSong)) {
 			opensByName = 0;
+			/* 長い USD 糊だけ、ハンドル 0 の中身をファイル名として F4 AH=0 が AH=3D する。
+			   曲バイトだと先頭 01 00 が "C:\x01" になりロードフラグが立たない。
+			   932 バイトの糊は曲バイトそのものを渡すので、ここでは触らない。 */
+			if (dos_.FindFile("ADVBIOS.OVL") && !dos_.FindFile("ADVH.EXE")) {
+				const CEmuDos98File* usd = dos_.FindFile("USD_98.COM");
+				static const uint8_t kNameLoad[] = {
+					0x2E, 0x8E, 0x1E, 0x12, 0x07, 0x33, 0xDB, 0x33, 0xC0, 0xCD, 0xF4
+				};
+				if (usd && usd->data) {
+					for (unsigned i = 0; i + sizeof(kNameLoad) <= usd->size; i++) {
+						if (memcmp(usd->data + i, kNameLoad, sizeof(kNameLoad)) == 0) {
+							opensByName = 1;
+							break;
+						}
+					}
+				}
+			}
 			/* ADVH F1 EB 06 は DS:0 ASCIIZ を AH=3D。EB 0F（watagolf）はメモリロードで曲バイト必須。 */
 			if (dos_.FindFile("ADVH.EXE")) {
 				int memLoad = 0;
@@ -11715,10 +11777,29 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 							unsigned need = (advh->size / 16u) + minA + 0x20u;
 							if (need < 0x800u)
 								need = 0x800u;
-							if (need > 0x3800u)
-								need = 0x3800u;
-							if (dos_.AllocBlock(mem, (uint16_t)need, &got) && got)
+							/* minalloc が FFFF（残り全部）のときだけ旧上限。
+							   ADVBIOS.OVL は min=2D7B で SS が +30A2。0x3800 に切ると
+							   初期化が確保外へ出て INT 06 になる。 */
+							unsigned want = need;
+							if (minA >= 0xF000u || want > 0xA000u)
+								want = 0x3800u;
+							if (!(dos_.AllocBlock(mem, (uint16_t)want, &got) && got)
+								&& want != 0x3800u) {
+								want = 0x3800u;
+								got = 0;
+								dos_.AllocBlock(mem, (uint16_t)want, &got);
+							}
+							if (got) {
+								const unsigned lin = (unsigned)got << 4;
+								const unsigned bytes = want << 4;
+								if (lin < 0x200000u) {
+									unsigned n = bytes;
+									if (lin + n > 0x200000u)
+										n = 0x200000u - lin;
+									memset(mem + lin, 0, n);
+								}
 								alloc = (got > 0x10u) ? (got - 0x10u) : got;
+							}
 							if (!alloc || alloc == (unsigned)DOS98_TRAMP_SEG) {
 								/* BootDos が ADVBIOS 用に AH=48 したまま IN 60h で止まった塊を再利用 */
 								unsigned mcb = 0x1000;
@@ -11765,8 +11846,14 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 								mem[tramp + ti++] = 0xF4;
 								np2_reg_set(NP2_R_CS, 0x5000);
 								np2_reg_set(NP2_R_IP, 0);
-								np2_reg_set(NP2_R_DS, (uint16_t)loadSeg);
-								np2_reg_set(NP2_R_ES, (uint16_t)loadSeg);
+								/* EXEPACK は ES を PSP と見て +10h をロードセグメントにする。
+								   ES=loadSeg だと復号先が 1 パラグラフずれて INT 06 になる。 */
+								{
+									const uint16_t psp = (alloc + 0x10u == loadSeg)
+										? (uint16_t)alloc : (uint16_t)loadSeg;
+									np2_reg_set(NP2_R_DS, psp);
+									np2_reg_set(NP2_R_ES, psp);
+								}
 								{
 									const unsigned ssRel = (unsigned)advh->data[0x0E]
 										| ((unsigned)advh->data[0x0F] << 8);
@@ -11835,6 +11922,19 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 								}
 							}
 						}
+						if (f4Live && dosSong_[0]
+							&& (!songLen || !workSeg || songLen >= 0xF000u)) {
+							const CEmuDos98File* sf = dos_.FindFile(dosSong_);
+							if (sf && sf->data && sf->size && sf->size < 0xF000u) {
+								const unsigned dest = 0x4000u;
+								const unsigned dp = dest << 4;
+								if (dp + sf->size < 0x200000u) {
+									memcpy(mem + dp, sf->data, sf->size);
+									workSeg = dest;
+									songLen = sf->size;
+								}
+							}
+						}
 						if (songLen && workSeg && songLen < 0xF000 && f4Live && !nameLoad) {
 							/* ADVBIOS: AH=0x30 がタイマ+ISR を武装。AH=1 が再生 */
 							const unsigned tramp = 0x50000;
@@ -11869,7 +11969,7 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 							PumpCycles(cpuCycles_ + (drainBudget / 2ull));
 						}
 						/* ADVH INT F1: ドライバ公開 API だけ呼ぶ。EB 06 = ファイル名開き（AL=0 → INT21 AH=3D）。EB 0F = メモリロード（AL=0 は DS:0 + CX=len が要る）。 */
-						if ((!f4Live || nameLoad) && f1Live) {
+						if (!f4Live && f1Live) {
 							unsigned songOff = 0x712, lenOff = 0x716;
 							{
 								const unsigned i7 = (s7f << 4) + 0x240u;
@@ -12063,7 +12163,9 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 						/* OPN IRQ3（INT 0B）をドライバの本物音楽 ISR へバインド。nameLoadAdvh: INT F1 入口は EB 06 'U' ファイル名ロード ADVH。 */
 						int nameLoadAdvh = 0;
 						int found = 0;
-						unsigned isrOff = 0, isrSeg = apiSeg;
+						/* F4 が生きているときは音楽 ISR は ADVBIOS 側。名前ロードの F1 セグメントには無い。 */
+						const unsigned isrApi = f4Live ? sF4 : apiSeg;
+						unsigned isrOff = 0, isrSeg = isrApi;
 						if (f1Live && !f4Live) {
 							const unsigned ent = (sF1 << 4)
 								+ ((unsigned)mem[0xF1 * 4]
@@ -12090,7 +12192,7 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 								| ((unsigned)mem[0x14 * 4 + 1] << 8);
 							const unsigned s14 = (unsigned)mem[0x14 * 4 + 2]
 								| ((unsigned)mem[0x14 * 4 + 3] << 8);
-							if (s14 == apiSeg && o14) {
+							if (s14 == isrApi && o14) {
 								const unsigned bp = (s14 << 4) + o14;
 								if (bp + 8 < 0x200000u && mem[bp] == 0x50 && mem[bp + 1] == 0x53
 									&& mem[bp + 2] == 0x51 && mem[bp + 3] == 0x52
@@ -12108,7 +12210,7 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 									| ((unsigned)mem[v * 4 + 1] << 8);
 								const unsigned s = (unsigned)mem[v * 4 + 2]
 									| ((unsigned)mem[v * 4 + 3] << 8);
-								if (s != apiSeg) continue;
+								if (s != isrApi) continue;
 								const unsigned bp = (s << 4) + o;
 								if (bp + 8 < 0x200000u && mem[bp] == 0x50 && mem[bp + 1] == 0x53
 									&& mem[bp + 2] == 0x51 && mem[bp + 3] == 0x52
@@ -12123,7 +12225,7 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 						}
 						if (!found) {
 							for (unsigned off = 0x600; off < 0x3000; off++) {
-								const unsigned bp = (apiSeg << 4) + off;
+								const unsigned bp = (isrApi << 4) + off;
 								if (bp + 8 >= 0x200000u) break;
 								if (mem[bp] == 0x50 && mem[bp + 1] == 0x53
 									&& mem[bp + 2] == 0x51 && mem[bp + 3] == 0x52
@@ -12138,7 +12240,7 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 						if (!found) {
 							/* ファイル名ロード ADVH は OEM ISR を 04AB 近くに残す */
 							for (unsigned off = 0x400; off < 0x600; off++) {
-								const unsigned bp = (apiSeg << 4) + off;
+								const unsigned bp = (isrApi << 4) + off;
 								if (bp + 8 >= 0x200000u) break;
 								if (mem[bp] == 0x50 && mem[bp + 1] == 0x53
 									&& mem[bp + 2] == 0x51 && mem[bp + 3] == 0x52
@@ -12151,6 +12253,8 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 							}
 						}
 						if (found && !nameLoadAdvh) {
+							np2_reg_set(NP2_R_FLAGS,
+								(uint16_t)(np2_reg_get(NP2_R_FLAGS) | 0x0200));
 							if (isrOff) {
 								mem[PC98_OPN_IRQ_VEC * 4 + 0] = (uint8_t)(isrOff & 0xff);
 								mem[PC98_OPN_IRQ_VEC * 4 + 1] = (uint8_t)((isrOff >> 8) & 0xff);
@@ -13299,6 +13403,19 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 			(void)loaded;
 			return 1;
 		}
+	}
+
+	/* Birdy/PMD 糊: cmd1 が dataaddr から演奏バッファへコピーして AH=0、
+	   cmd0 が AH=1 でそのバッファを鳴らす。先に cmd0 だと組み込みの同じ曲になる。 */
+	if (BirdyPmdGlue(np2_mem(), bootCs_)) {
+		extCmd_ = 1;
+		RaiseFuncVect();
+		DrainInterrupt(drainBudget);
+		extCmd_ = 0;
+		RaiseFuncVect();
+		DrainInterrupt(drainBudget);
+		pumpAbortOnMusic_ = 0;
+		return 1;
 	}
 
 	/* INT 1C ドライバは BIOS が既に IRQ0 を進めていることを期待。こちらは代わりに PIT を組まないので、待っている tick を与える。OPN タイマを持たないときだけ — チップ駆動ドライバには不要で、余分な tick は二重駆動になる。 */

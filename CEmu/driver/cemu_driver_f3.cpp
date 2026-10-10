@@ -58,6 +58,12 @@ CDriverF3::CDriverF3()
 	memset(romVec_, 0, sizeof(romVec_));
 	memset(tryCodes_, 0, sizeof(tryCodes_));
 	memset(chainSnap_, 0, sizeof(chainSnap_));
+	songPtr_ = 0;
+	gunN_ = 0;
+	memset(gunNode_, 0, sizeof(gunNode_));
+	memset(gunNext_, 0, sizeof(gunNext_));
+	memset(gunFlg_, 0, sizeof(gunFlg_));
+	memset(gunStrm_, 0, sizeof(gunStrm_));
 }
 
 /* 後始末 */
@@ -131,6 +137,8 @@ int CDriverF3::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 	walkEntry_ = 0;
 	walking_ = 0;
 	memset(romVec_, 0, sizeof(romVec_));
+	songPtr_ = 0;
+	gunN_ = 0;
 	memset(chainSnap_, 0, sizeof(chainSnap_));
 
 	songCode_ = titleCode ? titleCode : 1;
@@ -204,6 +212,7 @@ int CDriverF3::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 	/* 他の曲コードを探さない（SAMESONG）。再エンキューもしない。 */
 	locked_ = 1;
 	bestSongCode_ = songCode_;
+	CaptureGunlockChain();
 	LogState("open");
 	return 1;
 }
@@ -503,8 +512,11 @@ void CDriverF3::LiftGunlockEnvelope()
 			continue;
 		}
 		live++;
-		chip->Write(0x08, 0xE0F0u);
-		chip->Write(0x09, 0xE0F0u);
+		/* 指数 0 だけ持ち上げる。CPU が既に付けた音量を E0 で上書きすると複数声で 32767 になる。 */
+		if ((CEmuChipEs5505Read(chip, 8) & 0xF000u) == 0)
+			chip->Write(0x08, 0xC0F0u);
+		if ((CEmuChipEs5505Read(chip, 9) & 0xF000u) == 0)
+			chip->Write(0x09, 0xC0F0u);
 	}
 	/* チェーンが生きていて声が全部止まった曲は、最後に置いた 1 声だけ戻す。全声を起こすと 32767 で割れる。 */
 	const unsigned head = hw_->Read16(0xD0F4u);
@@ -512,8 +524,72 @@ void CDriverF3::LiftGunlockEnvelope()
 		chip->Write(0x0f, (uint32_t)last);
 		const uint16_t cr = CEmuChipEs5505PeekCr(chip, last);
 		chip->Write(0x00, (uint32_t)((cr & 0x0ffcu) | 0x0018u));
-		chip->Write(0x08, 0xE0F0u);
-		chip->Write(0x09, 0xE0F0u);
+		chip->Write(0x08, 0xC0F0u);
+		chip->Write(0x09, 0xC0F0u);
+	}
+}
+
+/* 起動直後のチェインを覚える。E9 がストリームを 0xFE**** へ飛ばす前の位置。 */
+void CDriverF3::CaptureGunlockChain()
+{
+	songPtr_ = 0;
+	gunN_ = 0;
+	if (!hw_ || f3Arabianm_ || tblOffs_)
+		return;
+	const unsigned ptr = hw_->Read32(0xD414u);
+	if (ptr >= 0x40u && ptr < 0x20000u)
+		songPtr_ = ptr;
+	unsigned hp = hw_->Read16(0xD0F4u);
+	while (hp >= 0xD000u && hp < 0xEE00u && gunN_ < 12) {
+		const unsigned nxt = hw_->Read16(hp);
+		gunNode_[gunN_] = (uint16_t)hp;
+		gunNext_[gunN_] = (uint16_t)nxt;
+		gunFlg_[gunN_] = hw_->Read8(hp + 2u);
+		gunStrm_[gunN_] = hw_->Read32(hp + 6u);
+		gunN_++;
+		if (nxt < 0xD000u || nxt >= 0xEE00u)
+			break;
+		hp = nxt;
+	}
+}
+
+/* 0xFE**** へ飛んだストリームと、潰れた曲ポインタを起動時のチェインへ戻す。 */
+void CDriverF3::HoldGunlockChain(int restore)
+{
+	if (!hw_ || f3Arabianm_ || tblOffs_ || !songPtr_ || gunN_ < 2)
+		return;
+	if (hw_->Read32(0xD414u) != songPtr_)
+		hw_->Write32(0xD414u, songPtr_);
+	if (hw_->Read32(0xD404u) != 0xC20000u)
+		hw_->Write32(0xD404u, 0xC20000u);
+	if ((hw_->Read16(0xD40Eu) & 0xffu) != (songCode_ & 0xffu))
+		hw_->Write16(0xD40Eu, (uint16_t)(songCode_ & 0xffu));
+	unsigned hp = hw_->Read16(0xD0F4u);
+	int live = 0;
+	while (hp >= 0xD000u && hp < 0xEE00u && live < 16) {
+		live++;
+		hp = hw_->Read16(hp);
+	}
+	if (restore && (live < 3 || hw_->Read16(0xD0F4u) != gunNode_[0])) {
+		hw_->Write16(0xD0F4u, gunNode_[0]);
+		for (int i = 0; i < gunN_; i++) {
+			if (gunNext_[i] >= 0xD000u && gunNext_[i] < 0xEE00u)
+				hw_->Write16(gunNode_[i], gunNext_[i]);
+		}
+	}
+	for (int i = 0; i < gunN_; i++) {
+		const unsigned node = gunNode_[i];
+		if (node < 0xD000u || node >= 0xEE00u)
+			continue;
+		const unsigned s = hw_->Read32(node + 6u);
+		const unsigned fl = hw_->Read8(node + 2u);
+		/* 0xFE**** は E9 の桁あふれ。バンク内でフラグが残っている間だけ進んだ位置を覚える。 */
+		if (s >= 0x40u && s < 0x18000u && (fl & 0x18u))
+			gunStrm_[i] = s;
+		else if (restore && gunStrm_[i] >= 0x40u && gunStrm_[i] < 0x18000u)
+			hw_->Write32(node + 6u, gunStrm_[i]);
+		if (restore && (fl & 0x18u) == 0 && (gunFlg_[i] & 0x18u))
+			hw_->Write8(node + 2u, gunFlg_[i]);
 	}
 }
 
@@ -558,6 +634,9 @@ void CDriverF3::KickGunlockWalker()
 	}
 	if (!walkEntry_)
 		return;
+	/* FFFF はテンポゲートが減算しない。1 にして次の呼び出しでループ解除を一度通す。 */
+	if (hw_->Read16(0xD490u) == 0xFFFFu)
+		hw_->Write16(0xD490u, 1);
 	const unsigned head = hw_->Read16(0xD0F4u);
 	const unsigned tab = hw_->Read32(0xD404u);
 	if (head < 0xD000u || head >= 0xEE00u)
@@ -566,13 +645,59 @@ void CDriverF3::KickGunlockWalker()
 		return;
 	{
 		/* 0x400 以上は曲頭のゲート。0x8F 級のフレーズ待ちは残す。 */
+		static unsigned stuckSong = 0xffffffffu;
+		static uint32_t stuckStrm[12];
+		static int stuckN[12];
+		if (stuckSong != songCode_) {
+			stuckSong = songCode_;
+			for (int i = 0; i < 12; i++) {
+				stuckStrm[i] = 0xffffffffu;
+				stuckN[i] = 0;
+			}
+		}
 		unsigned node = head;
+		unsigned prev = 0;
 		int hops = 0;
 		while (node >= 0xD000u && node < 0xEE00u && hops < 12) {
+			const unsigned nxt = hw_->Read16(node);
+			const unsigned fl = hw_->Read8(node + 2u);
+			/* フラグの無いノードはチェインのゴミ。手前で切る。 */
+			if (hops > 0 && (fl & 0x18u) == 0) {
+				if (prev)
+					hw_->Write16(prev, 0);
+				break;
+			}
+			/* E9 は bit5 を立ててストリームを進めない。コマンドを飛ばして旋律へ。 */
+			if (fl & 0x20u)
+				hw_->Write8(node + 2u, (uint8_t)(fl & ~0x20u));
+			unsigned strm = hw_->Read32(node + 6u);
+			if (strm >= 0x40u && strm < 0x18000u && tab >= 0xC00000u && tab < 0xC80000u) {
+				const unsigned cmd = hw_->Read16(tab + strm);
+				const int same = (hops < 12 && strm == stuckStrm[hops]) ? 1 : 0;
+				if (hops < 12) {
+					if (same) stuckN[hops]++;
+					else stuckN[hops] = 0;
+				}
+				/* 音符（0x58 未満）は CPU に演奏させる。制御が 6 tick 居座ったら長さ分だけ進める。 */
+				if ((cmd & 0xffu) == 0xE9u)
+					hw_->Write32(node + 6u, strm + 6u);
+				else if (same && hops < 12 && stuckN[hops] >= 6
+					&& (cmd & 0x8000u) && (cmd & 0xffu) >= 0x58u) {
+					hw_->Write32(node + 6u, strm + 4u);
+					stuckN[hops] = 0;
+				}
+				strm = hw_->Read32(node + 6u);
+			}
+			if (hops < 12)
+				stuckStrm[hops] = strm;
 			const unsigned w = hw_->Read16(node + 4u);
-			if (w >= 0x400u)
+			/* 待ち 0 から 1 を引くと桁が借りて bne がパーサを飛ばす。80xx は待ち 0。 */
+			if (w == 0 || w >= 0xF000u)
+				hw_->Write16(node + 4u, 1);
+			else if (w >= 0x400u)
 				hw_->Write16(node + 4u, 0x10);
-			node = hw_->Read16(node);
+			prev = node;
+			node = nxt;
 			hops++;
 		}
 	}
@@ -606,20 +731,51 @@ void CDriverF3::KickGunlockWalker()
 			hops++;
 		}
 	}
-	const unsigned pc = (unsigned)m68k_get_reg(NULL, M68K_REG_PC);
-	const int idle = (pc >= 0xC10B08u && pc < 0xC10B18u);
+	unsigned pc = (unsigned)m68k_get_reg(NULL, M68K_REG_PC);
+	int idle = (pc >= 0xC10B08u && pc < 0xC10B18u);
 	const int inWalk = (pc >= 0xC13E00u && pc < 0xC15A00u);
+	const unsigned sspNow = (unsigned)m68k_get_reg(NULL, M68K_REG_ISP);
+	const int sspDead = (sspNow < 0x100u || sspNow >= 0xFFFF00u)
+		&& pc >= 0xC10900u && pc < 0xC10E00u;
+	/* DUART 入口・ボイスリスト・落ちた SSP で止まったままだと待ちが減らない。 */
+	if (!idle && (sspDead || (pc >= 0xC10EE2u && pc < 0xC10F80u)
+		|| (pc >= 0xC17040u && pc < 0xC170C0u))) {
+		if (pc >= 0xC10EE2u && pc < 0xC10F80u)
+			hw_->Write8(0x28000Bu, 0);
+		m68k_set_reg(M68K_REG_PC, 0xC10B14u);
+		m68k_set_reg(M68K_REG_SR, 0x2700);
+		m68k_clear_stopped();
+		idle = 1;
+		walking_ = 0;
+		pc = 0xC10B14u;
+	}
 	if (walking_ && idle)
 		walking_ = 0;
-	/* 歩きの途中でアイドルへ戻すと、同じ頭を読み直して音符が進まない。 */
-	if (walking_ && inWalk)
-		return;
+	/* 1 tick で歩きは戻る。数 tick 残っていたらループなので起こし直す。 */
+	if (walking_ && inWalk) {
+		static unsigned walkSong = 0xffffffffu;
+		static int walkHold = 0;
+		if (walkSong != songCode_) {
+			walkSong = songCode_;
+			walkHold = 0;
+		}
+		if (++walkHold < 4)
+			return;
+		walkHold = 0;
+		m68k_set_reg(M68K_REG_PC, 0xC10B14u);
+		m68k_set_reg(M68K_REG_SR, 0x2700);
+		m68k_clear_stopped();
+		walking_ = 0;
+		idle = 1;
+	}
 	if (!idle)
 		return;
 	unsigned ssp = (unsigned)m68k_get_reg(NULL, M68K_REG_ISP);
-	/* 0x9E00 へ付け替えると例外がリセットへ落ち、音量 0 の初期化が鳴っている音を消す。 */
-	if (ssp < 0x1000u || ssp >= 0xF000u)
-		return;
+	/* アイドルで範囲外のときだけ戻す。歩きの途中で付け替えるとリセットへ落ちる。 */
+	if (ssp < 0x1000u || ssp >= 0xF000u) {
+		ssp = 0x9E00u;
+		m68k_set_reg(M68K_REG_ISP, ssp);
+	}
 	ssp -= 4u;
 	hw_->Write32(ssp, 0xC10B10u);
 	m68k_set_reg(M68K_REG_ISP, ssp);
@@ -785,6 +941,7 @@ void CDriverF3::TickSeqHost()
 		}
 	} else {
 		RescueGunlockCpu();
+		HoldGunlockChain(1);
 		if (tblOffs_ == 0xF3176u) {
 			/* ガンロックが曲表ポインタを ES 空間へ落とすと、以降の曲番号が空になる。 */
 			const unsigned tab = hw_->Read32(0xD404u);
@@ -947,6 +1104,9 @@ void CDriverF3::TickSeqHost()
 				}
 			}
 		}
+		/* 空きが 0 のままだと新しいノートを取れず、鳴っていた声の停止で曲が切れる。 */
+		if (!tblOffs_)
+			hw_->nodeRefill_ = 1;
 		hw_->Write16(0xD4A6u, 1);
 		KickGunlockWalker();
 		if (demoRestart_ && restartEvery_

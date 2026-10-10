@@ -31,6 +31,8 @@ private:
 	void RestoreChain();
 	void KickGunlockWalker();
 	void RescueGunlockCpu();
+	void CaptureGunlockChain();
+	void HoldGunlockChain(int restore);
 	void LiftGunlockEnvelope();
 	unsigned MapSongCode(unsigned code);
 	void LogState(const char* tag);
@@ -82,6 +84,12 @@ private:
 	unsigned walkEntry_;
 	int walking_;
 	uint32_t romVec_[96];
+	unsigned songPtr_;
+	uint16_t gunNode_[12];
+	uint16_t gunNext_[12];
+	uint8_t gunFlg_[12];
+	uint32_t gunStrm_[12];
+	int gunN_;
 };
 
 /* F3 ドライバ生成 */

@@ -135,8 +135,12 @@ void ssg_engine::clock()
 	// programmed period
 	for (int chan = 0; chan < 3; chan++)
 	{
+		/* 周期 0 は毎クロック反転（超音波のキーン）。ノートではないので進めない。 */
+		const uint32_t per = m_regs.ch_tone_period(chan);
+		if (per == 0)
+			continue;
 		m_tone_count[chan]++;
-		if (m_tone_count[chan] >= m_regs.ch_tone_period(chan))
+		if (m_tone_count[chan] >= per)
 		{
 			m_tone_state[chan] ^= 1;
 			m_tone_count[chan] = 0;
@@ -205,6 +209,17 @@ void ssg_engine::output(output_data &output)
 
 		// tone depends on the current tone state
 		uint32_t tone_on = m_regs.ch_tone_enable_n(chan) | m_tone_state[chan];
+		/* トーン許可かつ周期 0 は最大周波の矩形になる。無演奏 ch のキーンを出さない。
+		   ノイズだけ有効なときは矩形を無視してノイズは通す。 */
+		if (m_regs.ch_tone_period(chan) == 0 && m_regs.ch_tone_enable_n(chan) == 0)
+		{
+			if (m_regs.ch_noise_enable_n(chan) != 0)
+			{
+				output.data[chan] = 0;
+				continue;
+			}
+			tone_on = 1;
+		}
 
 		// if neither tone nor noise enabled, return 0
 		uint32_t volume;

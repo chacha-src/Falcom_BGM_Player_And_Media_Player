@@ -66,6 +66,7 @@ KbSasamiDecoder::KbSasamiDecoder(IKpiConfig* pConfig)
 	m_titleSjis[0] = 0;
 	m_loopStart = -1.0;
 	m_loopEnd = -1.0;
+	m_loopClosed = 0;
 	m_smfSize = 0;
 	m_openPath[0] = 0;
 	m_monHold = 0;
@@ -569,6 +570,18 @@ int KbSasamiDecoder::LoadFmMidiSequencer(DWORD rate)
 		if (totalSec < 0.01) totalSec = 0.01;
 		m_MediaInfo.qwLength = (UINT64)(totalSec * 1000.0 * 10000.0);
 		m_lastSample = kpi_100nsToSample(m_MediaInfo.qwLength, rate);
+		/* J で切った 1 周を qwLoop にする。回数とフェードは本体（書き出し含む）。 */
+		if (m_loopEnd > m_loopStart && m_loopStart >= 0.0) {
+			const UINT64 ls = (UINT64)(m_loopStart * (double)rate + 0.5);
+			const UINT64 le = (UINT64)(m_loopEnd * (double)rate + 0.5);
+			if (le > ls + 1) {
+				m_MediaInfo.qwLength = kpi_SampleTo100ns(le, rate);
+				m_MediaInfo.qwLoop = kpi_SampleTo100ns(le - ls, rate);
+				m_MediaInfo.qwFadeOut = (UINT64)-1;
+				m_MediaInfo.dwLoopCount = 0;
+				m_lastSample = le;
+			}
+		}
 	}
 	m_MediaInfo.dwCount = 1;
 	m_MediaInfo.dwNumber = 1;
@@ -795,9 +808,9 @@ DWORD __fastcall KbSasamiDecoder::Open(const KPI_MEDIAINFO* cpRequest, IKpiFile*
 		   以前は m_raira 依存だったが、IKpiConfig が NullConfig になると
 		   raira が 0 のまま音声だけ再生され、live が更新されずモニタが固まる。 */
 		if (fmMode == 1 || fmMode == 2)
-			m_fm.SetFmMonDump(1, pathForKind);
+			m_fm.SetFmMonDump(1, pathForKind, m_raira);
 		else
-			m_fm.SetFmMonDump(0, pathForKind);
+			m_fm.SetFmMonDump(0, pathForKind, m_raira);
 		m_MediaInfo.dwSampleRate = m_fm.SampleRate();
 		m_MediaInfo.dwChannels = 2;
 		m_MediaInfo.nBitsPerSample = 16;
@@ -812,6 +825,18 @@ DWORD __fastcall KbSasamiDecoder::Open(const KPI_MEDIAINFO* cpRequest, IKpiFile*
 			if (sr > 0)
 				ns = (samples * 10000000ull + (UINT64)sr - 1ull) / (UINT64)sr;
 			m_MediaInfo.qwLength = ns;
+		}
+		{
+			const UINT64 ls = m_fm.LoopStartSample();
+			const UINT64 le = m_fm.LoopEndSample();
+			const DWORD sr = m_MediaInfo.dwSampleRate;
+			if (sr > 0 && le > ls + 1) {
+				m_MediaInfo.qwLength = kpi_SampleTo100ns(le, sr);
+				m_MediaInfo.qwLoop = kpi_SampleTo100ns(le - ls, sr);
+				m_MediaInfo.qwFadeOut = (UINT64)-1;
+				m_MediaInfo.dwLoopCount = 0;
+				m_lastSample = le;
+			}
 		}
 		m_MediaInfo.dwCount = 1;
 		m_MediaInfo.dwNumber = 1;
@@ -832,8 +857,30 @@ DWORD __fastcall KbSasamiDecoder::Open(const KPI_MEDIAINFO* cpRequest, IKpiFile*
 	if (!SasamiConvertToSmf(s_song, map, m_gsMapLsb, m_smf, SASAMI_MAX_SMF, &m_smfSize, m_laBankMsb)) return 0;
 
 	if (m_vst != 0) {
+		{
+			MemFile mf;
+			mf.p = m_smf;
+			mf.size = (DWORD)m_smfSize;
+			mf.pos = 0;
+			if (m_sequencer.load(&mf, MemGetc)) {
+				m_loopStart = m_sequencer.find_marker("loopStart");
+				m_loopEnd = m_sequencer.find_marker("loopEnd");
+			}
+		}
 		int vr = OpenForeignVst(m_smf, (DWORD)m_smfSize);
 		if (vr <= 0) return 0;
+		if (m_loopEnd > m_loopStart && m_loopStart >= 0.0) {
+			const DWORD sr = m_MediaInfo.dwSampleRate ? m_MediaInfo.dwSampleRate : rate;
+			const UINT64 ls = (UINT64)(m_loopStart * (double)sr + 0.5);
+			const UINT64 le = (UINT64)(m_loopEnd * (double)sr + 0.5);
+			if (le > ls + 1) {
+				m_MediaInfo.qwLength = kpi_SampleTo100ns(le, sr);
+				m_MediaInfo.qwLoop = kpi_SampleTo100ns(le - ls, sr);
+				m_MediaInfo.qwFadeOut = (UINT64)-1;
+				m_MediaInfo.dwLoopCount = 0;
+				m_lastSample = le;
+			}
+		}
 		MonShow(0, pathForKind);
 		return 1;
 	}
@@ -984,6 +1031,7 @@ DWORD WINAPI KbSasamiDecoder::Render(BYTE* pBuffer, DWORD dwSizeSample)
 	}
 
 	std::lock_guard<std::mutex> lk(m_midiLock);
+	if (m_loopClosed) return 0;
 	const double rate = (double)m_MediaInfo.dwSampleRate;
 	const int looping = (m_loopEnd > m_loopStart && m_loopStart >= 0.0) ? 1 : 0;
 	const UINT64 loopStartSamp = looping ? (UINT64)(m_loopStart * rate + 0.5) : 0;
@@ -991,28 +1039,15 @@ DWORD WINAPI KbSasamiDecoder::Render(BYTE* pBuffer, DWORD dwSizeSample)
 
 	DWORD remain = dwSizeSample;
 	BYTE* p = pBuffer;
-	int wrapGuard = 0;
 	const int outBits = m_MediaInfo.nBitsPerSample ? m_MediaInfo.nBitsPerSample : -64;
 	const DWORD bytesPerFrame = FmPcmBytesPerFrame(outBits);
 	const double gain = m_raira ? kFmMidiOutGain : (kFmMidiOutGain * 0.5 / 1.5);
 	while (remain) {
+		/* 1周で止める。2周目以降は本体が loop 先頭へシークする（回数・フェード・無音）。
+		   ここで巻き戻すと書き出しの繰返し回数が数えない。 */
 		if (looping && loopEndSamp > loopStartSamp + 1 && m_curSample > loopEndSamp) {
-			if (++wrapGuard > 64) {
-				ZeroMemory(p, remain * bytesPerFrame);
-				break;
-			}
-			/* ハング中の NoteOff は SMF の loopEnd で済んでいる。
-			   all_sound_off は 2 周目の A01 が欠ける。 */
-			for (int i = 0; i < m_nPorts; i++) {
-				if (!m_synths[i]) continue;
-				for (int ch = 0; ch < 16; ch++)
-					m_synths[i]->control_change(ch, 0x40, 0);
-				m_synths[i]->all_note_off();
-			}
-			KbsMonNotesOff();
-			m_note_factory.reset_pool_frame();
-			m_sequencer.set_position(m_loopStart);
-			m_curSample = loopStartSamp;
+			m_loopClosed = 1;
+			break;
 		}
 		DWORD chunk = remain;
 		if (chunk > MIX_FRAMES) chunk = MIX_FRAMES;
@@ -1021,8 +1056,8 @@ DWORD WINAPI KbSasamiDecoder::Render(BYTE* pBuffer, DWORD dwSizeSample)
 			chunk = (DWORD)(loopEndSamp + 1 - m_curSample);
 		if (chunk == 0) {
 			if (looping && loopEndSamp > loopStartSamp) {
-				m_curSample = loopEndSamp + 1;
-				continue;
+				m_loopClosed = 1;
+				break;
 			}
 			ZeroMemory(p, remain * bytesPerFrame);
 			break;
@@ -1074,6 +1109,15 @@ DWORD WINAPI KbSasamiDecoder::Render(BYTE* pBuffer, DWORD dwSizeSample)
 		p += chunk * bytesPerFrame;
 	}
 
+	if (m_loopClosed) {
+		const DWORD wrote = dwSizeSample - remain;
+		if (remain)
+			ZeroMemory(p, remain * bytesPerFrame);
+		if (!m_raira)
+			KbsMonPlay((__int64)m_curSample, (int)m_MediaInfo.dwSampleRate);
+		return wrote;
+	}
+
 	if (!m_liveStream && !looping && m_sequencer.is_play_end()) {
 		const double limit = 0.001;
 		const DWORD step = bytesPerFrame / 2;
@@ -1095,6 +1139,7 @@ DWORD WINAPI KbSasamiDecoder::Render(BYTE* pBuffer, DWORD dwSizeSample)
 UINT64 KbSasamiDecoder::SeekFmMidiLocked(UINT64 qwPosSample)
 {
 	m_seeking = true;
+	m_loopClosed = 0;
 	m_sequencer.play(0, this);
 	reset();
 	UINT64 pos = qwPosSample;

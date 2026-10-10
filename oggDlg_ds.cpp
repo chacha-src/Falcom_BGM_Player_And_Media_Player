@@ -1703,8 +1703,15 @@ void HandleNotifications_export()
 			if (outRate < 8000) outRate = wavbit_sample_Hz;
 			if (outCh < 1) outCh = 2;
 			const int bpfOut = outCh * (outBits / 8);
-			const __int64 maxOut = (__int64)((double)g_wavExportMaxSec * (double)outRate + 0.5);
-			const __int64 maxSrc = (__int64)((double)g_wavExportMaxSec * (double)wavbit_sample_Hz + 0.5);
+			/* J ループがある曲は 240 秒打ち切りにしない。周の長さ×回数まで出す。 */
+			double capSec = (double)g_wavExportMaxSec;
+			if (endf == 0 && loop2 > 0 && wavExportLoopCount > 0) {
+				const double one = (double)(loop1 + loop2) / (double)wavbit_sample_Hz;
+				const double need = one * (double)wavExportLoopCount + 60.0;
+				if (capSec < need) capSec = need;
+			}
+			const __int64 maxOut = (__int64)(capSec * (double)outRate + 0.5);
+			const __int64 maxSrc = (__int64)(capSec * (double)wavbit_sample_Hz + 0.5);
 			const __int64 writtenFrames = (bpfOut > 0) ? (wl / bpfOut) : 0;
 			if (writtenFrames >= maxOut || playb >= maxSrc) {
 				fade1 = 1;
@@ -1750,8 +1757,15 @@ void HandleNotifications_export()
 			if (outRate < 8000) outRate = wavbit_sample_Hz;
 			if (outCh < 1) outCh = 2;
 			const int bpfOut = outCh * (outBits / 8);
-			const __int64 maxOut = (__int64)((double)g_wavExportMaxSec * (double)outRate + 0.5);
-			const __int64 maxSrc = (__int64)((double)g_wavExportMaxSec * (double)wavbit_sample_Hz + 0.5);
+			/* J ループがある曲は 240 秒打ち切りにしない。周の長さ×回数まで出す。 */
+			double capSec = (double)g_wavExportMaxSec;
+			if (endf == 0 && loop2 > 0 && wavExportLoopCount > 0) {
+				const double one = (double)(loop1 + loop2) / (double)wavbit_sample_Hz;
+				const double need = one * (double)wavExportLoopCount + 60.0;
+				if (capSec < need) capSec = need;
+			}
+			const __int64 maxOut = (__int64)(capSec * (double)outRate + 0.5);
+			const __int64 maxSrc = (__int64)(capSec * (double)wavbit_sample_Hz + 0.5);
 			const __int64 writtenFrames = (bpfOut > 0) ? (wl / bpfOut) : 0;
 			if (writtenFrames >= maxOut || playb >= maxSrc) {
 				fade1 = 1;

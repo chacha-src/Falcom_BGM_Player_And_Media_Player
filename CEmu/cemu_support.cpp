@@ -88,7 +88,7 @@
                   + _k2_syn2_report.txt
                   + _k2_ac48_plays.txt
                   + _k2_crush15_report.txt
-   Archives probed: 5085, supported: 4586; MSX +replcart_msx/shiryo_msx/msxfan_msx (_k2_x1msx8full_0.txt _k2_x1msx8fan_0.txt) + x1alba (_k2_x1msx8alba_0.txt)
+   Archives probed: 5085, supported: 4589; MSX +replcart_msx/shiryo_msx/msxfan_msx (_k2_x1msx8full_0.txt _k2_x1msx8fan_0.txt) + x1alba (_k2_x1msx8alba_0.txt)
                   + _k2_ac2s86_report.txt (genpeitd/rthunder/skykiddx/wndrmomo Sys86)
                   + _k2_ac2wsgo_report.txt (pacland/skykid/drgnbstr wsg63701)
                   + bosco wsgz80 (0289 BGM via $8A14 + $0139 id)
@@ -104,7 +104,9 @@
                   + gintetsu_98 MDR_98 (INT14 lock clear, text cell 0x20)
                   + 5th2_98/nayuta_98 MDZN (carry frame SS, not CS)
                   + lguard2_98 NAX (NLP_HOOT planted; stack off stosw; HLT not INT 20)
-                  + kidsap_98/qroad_98/presence_98/wa_1_98 MUAPLAY (BIOS INT 1Ch AH=02 one-shot) */
+                  + kidsap_98/qroad_98/presence_98/wa_1_98 MUAPLAY (BIOS INT 1Ch AH=02 one-shot)
+                  + rouge_98/pias_98 Birdy PMD glue (07D4 real-mode ptr, cmd1 then cmd0)
+                  + kerakera_98 ADVBIOS (USD name on handle 0, OPN IRQ from INT 15) */
 
 #include "StdAfx.h"
 #include "cemu_support.h"
@@ -2094,6 +2096,7 @@ static const char* const kSupported[] = {
 	"kenja",
 	"kenseim",
 	"kerakera68snd",
+	"kerakera_98",
 	"kflappy",
 	"kflouie_at",
 	"kgc1_msx",
@@ -3000,6 +3003,7 @@ static const char* const kSupported[] = {
 	"phozon",
 	"pia_98",
 	"pias88",
+	"pias_98",
 	"picknpile_at",
 	"pinballdreams_at",
 	"pinbpinb68snd",
@@ -3375,6 +3379,7 @@ static const char* const kSupported[] = {
 	"roseblod_98",
 	"rotd",
 	"rouge88",
+	"rouge_98",
 	"rouge_d_98",
 	"rougea68snd",
 	"rougea_msx",

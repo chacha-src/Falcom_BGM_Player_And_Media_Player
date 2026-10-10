@@ -80,11 +80,57 @@ static void FmExtractBestMonStem(const wchar_t* path, wchar_t* stem, int n)
 	FmPathStem(path, stem, n);
 }
 
-/* フォルダが mode で分かれている。中身の解釈は dumpFlags/pad6 のみ */
+/* ファイル名（拡張子つき）。live を共有した別曲（OPN と OPNA）を弾く */
+static void FmDumpFileTitle(const wchar_t* path, wchar_t* out, int n)
+{
+	if (!out || n < 2) return;
+	out[0] = 0;
+	if (!path || !path[0]) return;
+	const wchar_t* base = path;
+	for (const wchar_t* p = path; *p; p++)
+		if (*p == L'\\' || *p == L'/') base = p + 1;
+	wcsncpy_s(out, n, base, _TRUNCATE);
+	wchar_t* cut = wcsstr(out, L"::");
+	if (cut) *cut = 0;
+}
+
+/* ogg の FPY と raira=0 の OPN が同じ live を書いたとき、今の曲以外は捨てる。
+   CEmu は別フォルダ。fpy 以外（PMD/FMP/KSS）は従来どおり全部読む。 */
 static int FmDumpMatchesPlay(const SasamiFmMonDump& d)
 {
-	(void)d;
-	return 1;
+	if (IsCemuMode(mode))
+		return 1;
+	if (!d.sourcePath[0])
+		return 1;
+	const wchar_t* hints[4] = { (LPCWSTR)filen, (LPCWSTR)fnn, NULL, NULL };
+	if (pl && pl->pc && plcnt >= 0 && plcnt < pl->playcnt) {
+		hints[2] = pl->pc[plcnt].fol;
+		hints[3] = pl->pc[plcnt].name;
+	}
+	wchar_t dumpFile[260];
+	FmDumpFileTitle(d.sourcePath, dumpFile, 260);
+	int saw = 0;
+	int fpy = 0;
+	for (int i = 0; i < 4; i++) {
+		if (!hints[i] || !hints[i][0]) continue;
+		saw = 1;
+		const wchar_t* dot = wcsrchr(hints[i], L'.');
+		if (dot && (_wcsicmp(dot, L".fpy") == 0 || _wcsicmp(dot, L".fpy2") == 0))
+			fpy = 1;
+		if (_wcsicmp(hints[i], d.sourcePath) == 0)
+			return 1;
+		wchar_t hn[260];
+		FmDumpFileTitle(hints[i], hn, 260);
+		if (hn[0] && dumpFile[0] && _wcsicmp(hn, dumpFile) == 0)
+			return 1;
+	}
+#ifdef KBSASAMI_HOST_BUILD
+	if (!saw) return 1;
+	return 0;
+#else
+	if (!fpy || !saw) return 1;
+	return 0;
+#endif
 }
 
 /* 再生中ファイルの stem。曲切替検知用 */
@@ -247,7 +293,15 @@ static void FmMonLivePath(wchar_t* out, int n)
 	if (IsCemuMode(mode))
 		_snwprintf_s(out, n, _TRUNCATE, L"%sogg_cemu\\fmmon_live.opna", tmp);
 	else
+#ifdef KBSASAMI_HOST_BUILD
+#ifdef _WIN64
+		_snwprintf_s(out, n, _TRUNCATE, L"%sogg_kbsasami\\fmmon_live_r0_64.opna", tmp);
+#else
+		_snwprintf_s(out, n, _TRUNCATE, L"%sogg_kbsasami\\fmmon_live_r0_32.opna", tmp);
+#endif
+#else
 		_snwprintf_s(out, n, _TRUNCATE, L"%sogg_kbsasami\\fmmon_live.opna", tmp);
+#endif
 }
 
 /* フラッシュ履歴リング。live より遅れても短音を拾う */
@@ -258,7 +312,15 @@ static void FmMonRingPath(wchar_t* out, int n)
 	if (IsCemuMode(mode))
 		_snwprintf_s(out, n, _TRUNCATE, L"%sogg_cemu\\fmmon_ring.opna", tmp);
 	else
+#ifdef KBSASAMI_HOST_BUILD
+#ifdef _WIN64
+		_snwprintf_s(out, n, _TRUNCATE, L"%sogg_kbsasami\\fmmon_ring_r0_64.opna", tmp);
+#else
+		_snwprintf_s(out, n, _TRUNCATE, L"%sogg_kbsasami\\fmmon_ring_r0_32.opna", tmp);
+#endif
+#else
 		_snwprintf_s(out, n, _TRUNCATE, L"%sogg_kbsasami\\fmmon_ring.opna", tmp);
+#endif
 }
 
 static HANDLE s_hLiveRd = INVALID_HANDLE_VALUE;
@@ -6323,7 +6385,8 @@ void CFmMonitorDlg::ResetDumpSync()
 
 void CFmMonitorDlg::PushHistDump(const SasamiFmMonDump& d)
 {
-	if (FmMonIsLive() && !FmDumpMatchesPlay(d))
+	/* 停止中でも別プレイヤーの live を混ぜると OPN/OPNA が交互に Reset される */
+	if (!FmDumpMatchesPlay(d))
 		return;
 	if (d.sourcePath[0]) {
 		if ((m_lastSong[0] && wcscmp(m_lastSong, d.sourcePath) != 0)

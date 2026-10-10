@@ -27,6 +27,7 @@
 #include "VstMidiEngine.h"
 #include "PluginAimp.h"
 #include "kb_sasami/source/sasami_midi.h"
+#include "CSasamiMidiExportDlg.h"
 #include "kb_sasami/source/sasami_file.h"
 #include "mp3image.h"
 #include "CMidiMonitorDlg.h"
@@ -3360,8 +3361,18 @@ static void PlExportRowMidi(CPlayList* self, LPCTSTR fol)
 		wcsncpy_s(tmp, src, _TRUNCATE);
 		ok = 1;
 	}
-	else if (SasamiExtIsMidi(src))
-		ok = SasamiConvertPathToMidiFile(src, tmp, MAX_PATH);
+	else if (SasamiExtIsMidi(src)) {
+		const int hint = SasamiConvertPathToMidiFile(src, NULL, 0, -1);
+		int loops = 1;
+		if (hint == 2) {
+			CSasamiMidiExportDlg dlg(self);
+			if (dlg.DoModal() != IDOK)
+				return;
+			loops = dlg.Loops();
+		}
+		if (hint != 0)
+			ok = SasamiConvertPathToMidiFile(src, tmp, MAX_PATH, loops);
+	}
 	else
 		ok = ComposerConvertToMidi(src, tmp, MAX_PATH);
 	if (!ok || !tmp[0]) {
@@ -3672,20 +3683,20 @@ int CPlayList::ShowTrackContextMenu(CPoint pt, CWnd* pOwner)
 			LL14(L"MIDIに変換", L"Convert to MIDI", L"Convertir en MIDI", L"Converti in MIDI", L"Convertir a MIDI",
 				L"MIDI로 변환", L"转换为MIDI", L"تحويل إلى MIDI", L"Преобразовать в MIDI", L"In MIDI umwandeln",
 				L"Converter para MIDI", L"Omzetten naar MIDI", L"Konwertuj do MIDI", L"MIDI'ye dönüştür"),
-			LL14(L"選択曲を標準MIDI (.mid) として保存します。VST3の音色状態は入らないのでピアノ、VST2はプログラムが入ります",
-				L"Save the selection as standard MIDI. VST3 timbre state is omitted (piano); VST2 program is kept",
-				L"Enregistre la sélection en MIDI standard. État VST3 omis (piano); programme VST2 conservé",
-				L"Salva la selezione come MIDI standard. Stato VST3 omesso (piano); programma VST2 tenuto",
-				L"Guarda la selección como MIDI estándar. Estado VST3 omitido (piano); programa VST2 se conserva",
-				L"선택 곡을 표준 MIDI로 저장. VST3 음색 상태는 빠지고 피아노, VST2는 프로그램이 남습니다",
-				L"将所选存为标准MIDI。VST3音色状态不含（钢琴），VST2程序会保留",
-				L"يحفظ التحديد كـ MIDI قياسي. حالة VST3 تُحذف (بيانو)؛ برنامج VST2 يبقى",
-				L"Сохранить выбор как стандартный MIDI. Состояние VST3 не входит (пианино); программа VST2 сохраняется",
-				L"Auswahl als Standard-MIDI speichern. VST3-Zustand fehlt (Klavier); VST2-Programm bleibt",
-				L"Salva a seleção como MIDI padrão. Estado VST3 omitido (piano); programa VST2 fica",
-				L"Selectie opslaan als standaard-MIDI. VST3-staat weg (piano); VST2-programma blijft",
-				L"Zapisz zaznaczenie jako standardowe MIDI. Stan VST3 pominięty (fortepian); program VST2 zostaje",
-				L"Seçimi standart MIDI olarak kaydeder. VST3 tını durumu yok (piyano); VST2 programı kalır"));
+			LL14(L"選択曲を標準MIDI (.mid) として保存します。最長にJがあるmp*はループ回数を指定します。VST3の音色状態は入らないのでピアノ、VST2はプログラムが入ります",
+				L"Save the selection as standard MIDI. If the longest mp* track has J, choose the loop count. VST3 timbre state is omitted (piano); VST2 program is kept",
+				L"Enregistre la sélection en MIDI standard. Si la piste mp* la plus longue a un J, choisir le nombre de boucles. État VST3 omis (piano); programme VST2 conservé",
+				L"Salva la selezione come MIDI standard. Se la traccia mp* più lunga ha J, scegli i cicli. Stato VST3 omesso (piano); programma VST2 tenuto",
+				L"Guarda la selección como MIDI estándar. Si la pista mp* más larga tiene J, elige las repeticiones. Estado VST3 omitido (piano); programa VST2 se conserva",
+				L"선택 곡을 표준 MIDI로 저장. 가장 긴 mp* 트랙에 J가 있으면 반복 횟수를 지정합니다. VST3 음색 상태는 빠지고 피아노, VST2는 프로그램이 남습니다",
+				L"将所选存为标准MIDI。最长的 mp* 轨有 J 时可指定循环次数。VST3音色状态不含（钢琴），VST2程序会保留",
+				L"يحفظ التحديد كـ MIDI قياسي. إذا كان أطول مسار mp* فيه J فاختر عدد التكرار. حالة VST3 تُحذف (بيانو)؛ برنامج VST2 يبقى",
+				L"Сохранить выбор как стандартный MIDI. Если у самой длинной дорожки mp* есть J, укажите число повторов. Состояние VST3 не входит (пианино); программа VST2 сохраняется",
+				L"Auswahl als Standard-MIDI speichern. Hat die längste mp*-Spur ein J, die Wiederholungen wählen. VST3-Zustand fehlt (Klavier); VST2-Programm bleibt",
+				L"Salva a seleção como MIDI padrão. Se a faixa mp* mais longa tiver J, escolha as repetições. Estado VST3 omitido (piano); programa VST2 fica",
+				L"Selectie opslaan als standaard-MIDI. Heeft de langste mp*-track een J, kies het aantal herhalingen. VST3-staat weg (piano); VST2-programma blijft",
+				L"Zapisz zaznaczenie jako standardowe MIDI. Jeśli najdłuższa ścieżka mp* ma J, podaj liczbę powtórzeń. Stan VST3 pominięty (fortepian); program VST2 zostaje",
+				L"Seçimi standart MIDI olarak kaydeder. En uzun mp* kanalında J varsa tekrar sayısını seçin. VST3 tını durumu yok (piyano); VST2 programı kalır"));
 		if (ex)
 			ex->AddCommand(PL_CTX_MID_EXPORT,
 				LL14(L"標準MIDIとして保存…", L"Save as standard MIDI…", L"Enregistrer en MIDI standard…", L"Salva come MIDI standard…", L"Guardar como MIDI estándar…",

@@ -1305,6 +1305,9 @@
     <ClCompile Include="CSasamiExcRpnDlg.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="CSasamiMidiExportDlg.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="CSasamiInsertFxDlg.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -2348,6 +2351,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="CSasamiExcRpnDlg.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CSasamiMidiExportDlg.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="CSasamiInsertFxDlg.h">

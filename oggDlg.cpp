@@ -15684,7 +15684,7 @@ open_mode_vst_midi:
 			// loop2 は PCM サンプル数。oggsize/(2*ch*Hz) だと bit depth を打ち消せず
 			// 32bit でリストがバナーの約2倍、8bit で約半分になる。
 			const int kpiSec = (oggsize == 0) ? -1
-				: ((wavbit_sample_Hz > 0 && loop2 > 0) ? (int)(loop2 / wavbit_sample_Hz)
+				: ((wavbit_sample_Hz > 0 && loop2 > 0) ? (int)((double)loop2 / (double)wavbit_sample_Hz + 0.5)
 					: ((wavbit_sample_Hz > 0 && wavchannel > 0 && wavsam_depth != 0)
 						? (int)((double)oggsize / (double)(wavbit_sample_Hz * 2 * wavchannel) / (double)(abs(wavsam_depth) / 16.0) + 0.5)
 						: 0));
@@ -21483,6 +21483,45 @@ int playwavkpi(BYTE* bw, int old, int l1, int l2)
 			kpidec->Seek(pos, KPI_MEDIAINFO::SEEK_FLAGS_SAMPLE);
 		}
 	};
+	/* fpy/mp の J ループ。終端の短読みで先頭無音を足さず、loop 先頭から次の周を読む。
+	   回数に達したらフェード側へ渡す。-1 はループ処理しない。 */
+	auto kpiTakeLoop = [&](BYTE* dst, int got, int want) -> int {
+		if (got >= want || !kpi_file_loop || loop2 <= 0 || !dst) return -1;
+		const int endS = loop1 + loop2;
+		if (endS <= 0) return -1;
+		const int pos = (poss5 > 0) ? poss5 : (int)playb;
+		const int hz = (wavbit_sample_Hz > 0) ? wavbit_sample_Hz : 44100;
+		const int nearEnd = (got <= 0 && pos >= loop1) || (pos + hz / 8 >= endS);
+		if (!nearEnd || pos < hz / 4) return -1;
+		const int counting = (exporting && wavExportLoopCount > 0) ? 1 : 0;
+		if (counting && loopcnt >= wavExportLoopCount) {
+			fade1 = 1;
+			return (got > 0) ? got : 0;
+		}
+		if (!counting && !WantPlaybackLoop()) return -1;
+		PlaybackNoteLoop(loop1);
+		kpiSeekLoop();
+		kpi_silence_bytes = 0;
+		kpi_heard_audio = 0;
+		poss2 = poss3 = poss4 = poss6 = 0;
+		poss5 = loop1;
+		cnt3 = 0;
+		RubberBand_DestroyBank(0);
+		reset = TRUE;
+		if (got < 0) got = 0;
+		if (got >= want) return got;
+		const int more = readkpi(dst + got, want - got);
+		{
+			const int bpf = PcmOutBytesPerFrame();
+			if (bpf > 0)
+				AdvanceOutAndSrcPos(more / bpf);
+		}
+		if (got <= 0 && more <= 0) {
+			fade1 = 1;
+			return 0;
+		}
+		return got + more;
+	};
 	//データ読み込み（playb は実デコード後に進める。先に足すと秒数打ち切りだけ進んで空WAVになる）
 	int rrr = readkpi(bw + old, l1);
 	{
@@ -21491,8 +21530,14 @@ int playwavkpi(BYTE* bw, int old, int l1, int l2)
 			AdvanceOutAndSrcPos(rrr / bpf);
 	}
 	if (l1 != rrr) {
+		const int wrapped = kpiTakeLoop(bw + old, rrr, l1);
+		if (wrapped >= 0) {
+			if (wrapped < l1)
+				ZeroMemory(bw + old + wrapped, (SIZE_T)(l1 - wrapped));
+			l1 = wrapped;
+		}
 		// 書き出し中は秒数上限で止める。短い返却を即 EOF にすると RB プライミングで失敗する。
-		if (!WantPlaybackLoop() && !exporting) {
+		else if (!WantPlaybackLoop() && !exporting) {
 			if (rrr < l1)
 				ZeroMemory(bw + old + rrr, (SIZE_T)(l1 - rrr));
 			// 途中のリング/RB短読みは終端にしない（DSD/MP3 と同じ）。真欠落だけ fade。
@@ -21540,7 +21585,13 @@ int playwavkpi(BYTE* bw, int old, int l1, int l2)
 				AdvanceOutAndSrcPos(rrr / bpf);
 		}
 		if (l2 != rrr) {
-			if (!WantPlaybackLoop() && !exporting) {
+			const int wrapped = kpiTakeLoop(bw, rrr, l2);
+			if (wrapped >= 0) {
+				if (wrapped < l2)
+					ZeroMemory(bw + wrapped, (SIZE_T)(l2 - wrapped));
+				l2 = wrapped;
+			}
+			else if (!WantPlaybackLoop() && !exporting) {
 				if (rrr < l2)
 					ZeroMemory(bw + rrr, (SIZE_T)(l2 - rrr));
 				if (PlaybackShortMeansEof(rrr)) {
@@ -22992,20 +23043,34 @@ int readkpi(BYTE* bw, int cnt)
 										kpiDecEof = 1;
 								}
 							}
-						} else if (!CEmuMidiLiveActive() && !kpiExporting) {
+						} else if (!CEmuMidiLiveActive()) {
 							const int fileLooping = (kpi_file_loop && loop2 > 0) ? 1 : 0;
-							if (IsBlockSilent((const BYTE*)bufkpi + cnt3, (int)r, abs(wavsam_depth))) {
-								if (!fileLooping && (kpi_heard_audio || loop2 == 0 || midiLike))
-									kpi_silence_bytes += r;
-							} else {
-								kpi_silence_bytes = 0;
-								kpi_heard_audio = 1;
-							}
-							const double silentSec = (kpi_heard_audio && !midiLike) ? 2.0 : 4.0;
-							int maxSilentBytes = (int)((double)wavbit_sample_Hz * (double)wavchannel * (double)(abs(wavsam_depth) / 8) * silentSec);
-							if (!fileLooping && (kpi_heard_audio || loop2 == 0 || midiLike)
-								&& maxSilentBytes > 0 && kpi_silence_bytes >= maxSilentBytes) {
-								kpiDecEof = 1;
+							/* ループ曲の休符では切らない。ループ無しは再生も
+							   wav/mp3/flac 書き出しも、無音か曲長超過で止める。 */
+							if (!fileLooping) {
+								if (IsBlockSilent((const BYTE*)bufkpi + cnt3, (int)r, abs(wavsam_depth))) {
+									if (kpi_heard_audio || loop2 == 0 || midiLike)
+										kpi_silence_bytes += r;
+								} else {
+									kpi_silence_bytes = 0;
+									kpi_heard_audio = 1;
+								}
+								const double silentSec = (kpi_heard_audio && !midiLike) ? 2.0 : 4.0;
+								const int hz = (wavbit_sample_Hz > 0) ? wavbit_sample_Hz : 44100;
+								const int ch = (wavchannel > 0) ? wavchannel : 2;
+								const int bps = abs(wavsam_depth) / 8;
+								int maxSilentBytes = (int)((double)hz * (double)ch * (double)bps * silentSec);
+								if ((kpi_heard_audio || loop2 == 0 || midiLike)
+									&& maxSilentBytes > 0 && kpi_silence_bytes >= maxSilentBytes) {
+									kpiDecEof = 1;
+								}
+								/* 終端で音を出したまま回るプラグイン。曲長の 4 秒後に切る。 */
+								if (!kpiDecEof && loop2 > 0 && bps > 0 && kpi_heard_audio) {
+									const int bpf = ch * bps;
+									const int pos = poss5 + (int)((cnt3 + r) / (DWORD)bpf);
+									if (pos >= loop2 + hz * 4)
+										kpiDecEof = 1;
+								}
 							}
 						}
 					}
@@ -29634,7 +29699,7 @@ void timerog1(UINT nIDEvent)
 				else if (mode == -3) {
 					// loop2=サンプル数。バナー総時間と揃える（bit depth を oggsize から打ち消す旧式は廃止）
 					const int kpiSec = (oggsize == 0) ? -1
-						: ((wavbit_sample_Hz > 0 && loop2 > 0) ? (int)(loop2 / wavbit_sample_Hz) : 0);
+						: ((wavbit_sample_Hz > 0 && loop2 > 0) ? (int)((double)loop2 / (double)wavbit_sample_Hz + 0.5) : 0);
 					if (oggsize == 0)
 						plc = pl->Add(tagfile, mode, loop1, loop2, tagname, tagalbum, filen, 0, -1, 1);
 					else

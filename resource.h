@@ -1800,6 +1800,9 @@
 #define IDC_CEMU_CAT_FILTER_L           4713
 #define IDC_CEMU_CAT_FILTER             4714
 #define IDC_CEMU_CAT_LIST               4715
+#define IDD_SASAMI_MIDI_EXPORT          4720
+#define IDC_SASAMI_MEX_LOOPS            4721
+#define IDC_SASAMI_MEX_HINT             4722
 #define IDR_CSO_GPU_VS_RECT             4810
 #define IDR_CSO_GPU_PS_RECT             4811
 #define IDR_CSO_GPU_VS_PIANO            4812
