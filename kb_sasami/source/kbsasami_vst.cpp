@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "kbsasami_vst.h"
+#include "kbsasami_lang.h"
 #include "../../kpi_host_ipc.h"
 
 extern HINSTANCE g_hKpi;
@@ -252,6 +253,14 @@ static int SendReq(HostConn* c, uint32_t cmd, const void* payload, uint32_t payl
 	return 1;
 }
 
+static void PushLang(HostConn* c)
+{
+	uint32_t lang = (uint32_t)KbsDetectUiLang();
+	uint8_t reply[8];
+	uint32_t rn = 0, st = 0;
+	SendReq(c, KPIHOST32_CMD_PING, &lang, sizeof(lang), reply, sizeof(reply), &rn, &st);
+}
+
 int KbVstMonCmd(int show)
 {
 #ifdef _WIN64
@@ -267,6 +276,7 @@ int KbVstMonCmd(int show)
 	}
 	uint8_t reply[16];
 	uint32_t replyN = 0, st = 0;
+	PushLang(c);
 	const uint32_t cmd = show ? KPIHOST32_CMD_MON_SHOW : KPIHOST32_CMD_MON_HIDE;
 	const int ok = SendReq(c, cmd, NULL, 0, reply, sizeof(reply), &replyN, &st);
 	LeaveCriticalSection(&c->cs);
@@ -328,6 +338,7 @@ int KbVstSessionOpen(const void* smf, uint32_t smfLen,
 
 	uint8_t reply[256];
 	uint32_t replyN = 0, st = 0;
+	PushLang(c);
 	int ok = SendReq(c, KPIHOST32_CMD_VST_OPEN, req.data(), (uint32_t)req.size(),
 		reply, sizeof(reply), &replyN, &st);
 	if (!ok || st != KPIHOST32_STATUS_OK || replyN < sizeof(KPIHOST32_ForeignOpenReply)) {

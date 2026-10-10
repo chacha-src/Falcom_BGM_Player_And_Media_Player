@@ -3451,6 +3451,32 @@ int CHardPc98::DeliverIrqs()
 		/* 正確な SS:SP — SP>= ではない。OPNDRV の INT D2 と INT0B は両方 SS=CS。ISR の SP=24E4 は INT D2 の SP=0180 より上なので、SP>= は私有スタックを IRET 済みと見て約 20 万 IRQ/s 入れ子した。 */
 		if (ss == g_opnIsrSs && sp == g_opnIsrSp)
 			opnInService_ = 0;
+		/* USD アイドル HLT へ戻ったのに入口 SP と違うとラッチが残り、
+		   レベル線のまま次のタイマが届かない（FIS）。 */
+		else if (uint8_t* mem = np2_mem()) {
+			const uint16_t cs = np2_reg_get(NP2_R_CS);
+			const uint16_t ip = np2_reg_get(NP2_R_IP);
+			const unsigned b = (unsigned)cs << 4;
+			const unsigned at = b + ip;
+			if (ip == 0x022E && b + 0x235u < 0x200000u
+				&& mem[b + 0x22E] == 0xF4
+				&& mem[b + 0x232] == 0x06 && mem[b + 0x233] == 0x1E
+				&& mem[b + 0x234] == 0x60)
+				opnInService_ = 0;
+			/* ホストスタブの HLT。FIS は入口 SP と違うまま戻るので、その ISR のときだけ外す。 */
+			else if (cs == 0x5000 && at < 0x200000u && mem[at] == 0xF4) {
+				const unsigned o15 = (unsigned)mem[0x15 * 4]
+					| ((unsigned)mem[0x15 * 4 + 1] << 8);
+				const unsigned s15 = (unsigned)mem[0x15 * 4 + 2]
+					| ((unsigned)mem[0x15 * 4 + 3] << 8);
+				const unsigned phys = (s15 << 4) + o15;
+				if (s15 && phys + 0x1Cu < 0x200000u
+					&& mem[phys] == 0x50 && mem[phys + 1] == 0x53
+					&& mem[phys + 0x18] == 0xFF && mem[phys + 0x19] == 0x1E
+					&& mem[phys + 0x1A] == 0x0C && mem[phys + 0x1B] == 0x00)
+					opnInService_ = 0;
+			}
+		}
 	}
 	if (s_fmpIrqLock) {
 		const uint16_t ss = np2_reg_get(NP2_R_SS);
@@ -3760,6 +3786,36 @@ int CHardPc98::DeliverIrqs()
 					}
 				}
 				if (hasIn0A) {
+					vec = 0x15;
+					picMask_ = (uint8_t)(picMask_ & ~(1u << 2));
+					slavePicMask_ = (uint8_t)(slavePicMask_ & ~(1u << 5));
+				}
+			}
+		}
+		/* FIS: 音源 IRQ を INT15 に植える。CS は保存先 [000C] と同じセグメント。
+		   同じ線形番地を F1 セグメントの別名で INT0B に置くと [000C] がコードを指し #UD する。 */
+		if (mem && IvtHooked(0x15, isDos_)) {
+			const unsigned o15 = (unsigned)mem[0x15 * 4]
+				| ((unsigned)mem[0x15 * 4 + 1] << 8);
+			const unsigned s15 = (unsigned)mem[0x15 * 4 + 2]
+				| ((unsigned)mem[0x15 * 4 + 3] << 8);
+			const unsigned phys = ((unsigned)s15 << 4) + o15;
+			static const uint8_t kFisIsr[] = {
+				0x50, 0x53, 0x51, 0x52, 0x55, 0x56, 0x57, 0x1E, 0x06
+			};
+			if (s15 && phys + 0x20u < 0x200000u
+				&& memcmp(mem + phys, kFisIsr, sizeof(kFisIsr)) == 0) {
+				int chain = 0;
+				for (unsigned k = 8; k + 3 < 0x20; k++) {
+					if (mem[phys + k] == 0xFF && mem[phys + k + 1] == 0x1E
+						&& mem[phys + k + 2] == 0x0C && mem[phys + k + 3] == 0x00)
+						chain = 1;
+				}
+				const unsigned cbase = (unsigned)s15 << 4;
+				const unsigned cseg = (cbase + 0x0Fu < 0x200000u)
+					? ((unsigned)mem[cbase + 0x0E] | ((unsigned)mem[cbase + 0x0F] << 8))
+					: 0;
+				if (chain && cseg == 0x0060u) {
 					vec = 0x15;
 					picMask_ = (uint8_t)(picMask_ & ~(1u << 2));
 					slavePicMask_ = (uint8_t)(slavePicMask_ & ~(1u << 5));
@@ -6000,6 +6056,23 @@ void CHardPc98::BindDosTriggerSong(const CEmuGameEntry* ge, unsigned titleCode)
 				}
 				if (!memLoad)
 					opensByName = 1;
+			}
+			/* FIS: モード 1 の INT F1 AX=0 は DS:0 をファイル名として AH=3D する。
+			   曲バイトだとオープンが失敗しロードフラグが立たない。ADVH と ADVBIOS は上で決まる。 */
+			if (!opensByName && !dos_.FindFile("ADVH.EXE")
+				&& !dos_.FindFile("ADVBIOS.OVL")) {
+				const CEmuDos98File* usd = dos_.FindFile("USD_98.COM");
+				static const uint8_t kF1Name[] = {
+					0x2E, 0x8E, 0x1E, 0x04, 0x07, 0x33, 0xDB, 0x33, 0xC0, 0xCD, 0xF1
+				};
+				if (usd && usd->data) {
+					for (unsigned i = 0; i + sizeof(kF1Name) <= usd->size; i++) {
+						if (memcmp(usd->data + i, kF1Name, sizeof(kF1Name)) == 0) {
+							opensByName = 1;
+							break;
+						}
+					}
+				}
 			}
 		}
 	}
@@ -10998,6 +11071,26 @@ void CHardPc98::RaiseFuncVect()
 		picMask_ = (uint8_t)(picMask_ | 0x08u);
 		np2_reg_set(NP2_R_SS, s_naxIdleCs);
 		np2_reg_set(NP2_R_SP, 0x0800);
+	}
+	/* FPLAY の曲ロード（09A9→21A1）は今の SS のままレジスタを書く。OPN の
+	   1tick はチャネル分の待ちで 5ms を超え、その途中で再生コマンドを割らせると
+	   SP=125E の ISR スタックがエピローグ（1210）を潰して #UD になる。
+	   1tick が終わるまで待ってから撃つ。終わらない ISR は 50ms で諦める。 */
+	{
+		static const char* kFplayWait[] = {
+			"fplay", "FPLAY", "cplay", "cplay98", "bplay", "BPLAY", NULL
+		};
+		if (DosShellStarts(dosGe_, kFplayWait)) {
+			const uint64_t fplayEnd = cpuCycles_ + (uint64_t)cpuHz_ / 20ull;
+			while (opnInService_ && cpuCycles_ < fplayEnd) {
+				const int32_t cyc = np2_step();
+				const uint64_t u = (cyc > 0) ? (uint64_t)cyc : 1ull;
+				cpuCycles_ += u;
+				TickSide(u);
+				AdvanceOpnClocks(u);
+				DeliverIrqs();
+			}
+		}
 	}
 	np2_interrupt((uint8_t)funcVect_);
 }

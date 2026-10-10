@@ -1592,6 +1592,11 @@ BOOL COggApp::InitInstance()
 		}
 		savedata.langselect = 1;
 	}
+	{
+		wchar_t lb[8];
+		_itow_s(savedata.lang, lb, 10);
+		SetEnvironmentVariableW(L"OGG_UI_LANG", lb);
+	}
 #if _UNICODE
 	if (ac.m_hFile != CFile::hFileNull)
 		ac.Close();

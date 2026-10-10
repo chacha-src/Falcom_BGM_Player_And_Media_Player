@@ -34,6 +34,7 @@ private:
 	void CaptureGunlockChain();
 	void HoldGunlockChain(int restore);
 	void LiftGunlockEnvelope();
+	void ApplyGunlockPitch();
 	unsigned MapSongCode(unsigned code);
 	void LogState(const char* tag);
 

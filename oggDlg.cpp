@@ -6061,6 +6061,7 @@ DWORD COgg_GetGdiPaintPendingAgeMs()
    NULL 宛 Peek(WM_TIMER) は EQ/ピアノ/アナライザのタイマーを奪って末尾へ回し
    飢餓させるので使わない。chrome / viz は HWND 指定 Peek でのみ取り出す。 */
 static volatile LONG s_inChromePump = 0;
+static bool OggClickOrKeyQueued();
 /* バナー描画の途中でキャプチャ GDI を回すと、描画中の窓を PrintWindow する */
 static int s_oggSkipScPump = 0;
 
@@ -6072,6 +6073,8 @@ static int OggIsChromeAnimHwnd(HWND h)
 	if (_tcsicmp(cls, TOOLTIPS_CLASS) == 0) return 1;
 	if (_tcsicmp(cls, _T("Button")) == 0) return 1;
 	if (_tcsicmp(cls, TRACKBAR_CLASS) == 0) return 1;
+	if (_tcsicmp(cls, _T("SysListView32")) == 0) return 1;
+	if (_tcsicmp(cls, _T("SysTabControl32")) == 0) return 1;
 	if (_tcsicmp(cls, _T("CCustomPopupMenuClass")) == 0) return 1;
 	if (_tcsicmp(cls, _T("CCustomPopupMenuChipClass")) == 0) return 1;
 	return 0;
@@ -6096,6 +6099,13 @@ static int OggDispatchHwndTimers(HWND h, int maxN)
 	while (n < maxN && ::PeekMessage(&msg, h, WM_TIMER, WM_TIMER, PM_REMOVE)) {
 		::DispatchMessage(&msg);
 		++n;
+	}
+	/* タイマ内の UpdateWindow はホバー離脱を再入させてタイマを殺す。
+	   無効化した分はハンドラの外で塗る。再生中は WM_PAINT が来ない。 */
+	if (n > 0 && OggIsChromeAnimHwnd(h) && ::IsWindow(h) && ::IsWindowVisible(h) && !OggClickOrKeyQueued()) {
+		RECT upd;
+		if (::GetUpdateRect(h, &upd, FALSE))
+			::UpdateWindow(h);
 	}
 	return n;
 }

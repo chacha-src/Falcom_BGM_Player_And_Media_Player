@@ -2351,6 +2351,11 @@ void CRender::OnBnClickedOk()
 	savedata.speanamode = m_speana.GetCheck();
 	savedata.speananum = m_speana_num.GetCurSel();
 	savedata.lang = m_comboLang.GetCurSel();
+	if (savedata.lang >= 0 && savedata.lang <= 13) {
+		wchar_t lb[8];
+		_itow_s(savedata.lang, lb, 10);
+		SetEnvironmentVariableW(L"OGG_UI_LANG", lb);
+	}
 	int ihz = m_Hz.GetCurSel();
 	if (ihz >= 0 && ihz < 12)
 		savedata.samples = samp[ihz];

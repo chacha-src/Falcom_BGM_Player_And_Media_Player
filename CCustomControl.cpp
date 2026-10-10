@@ -8872,7 +8872,7 @@ END_MESSAGE_MAP()
 // モード0/1/2 のオーナードローつまみ。シマー点はホバー中だけ発生し、離脱後は慣性で消える。
 // backstore は毎描画 CreateCompatibleBitmap を避ける。chromaCache は Win11 アクリル用。
 CCustomSliderCtrl::CCustomSliderCtrl() : m_bAutoDelete(FALSE), m_nMode(0), m_bAeroMode(FALSE),
-    m_nShimmer(0), m_bHover(FALSE), m_nSparkleN(0), m_nSparkleSpawnAcc(0),
+    m_nShimmer(0), m_bHover(FALSE), m_shimmerFireMs(0), m_nSparkleN(0), m_nSparkleSpawnAcc(0),
     m_backstoreW(0), m_backstoreH(0)
 {
     ZeroMemory(m_sparklePos, sizeof(m_sparklePos));
@@ -9224,8 +9224,10 @@ LRESULT CCustomSliderCtrl::OnMouseLeaveMsg(WPARAM, LPARAM)
 {
     m_bHover = FALSE;
     // 残点が消えるまでタイマー継続（全滅したら OnTimer で止める）
-    if (m_nSparkleN <= 0)
+    if (m_nSparkleN <= 0) {
+        m_shimmerFireMs = 0;
         KillTimer(kSliderShimmerTimerId);
+    }
     Invalidate(FALSE);
     return 0;
 }
@@ -9236,12 +9238,29 @@ void CCustomSliderCtrl::OnTimer(UINT_PTR nIDEvent)
 {
     if (nIDEvent == kSliderShimmerTimerId)
     {
+        m_shimmerFireMs = ::GetTickCount();
         m_nShimmer++;
+        {
+            POINT pt;
+            CRect rc;
+            GetClientRect(&rc);
+            if (::GetCursorPos(&pt) && ::ScreenToClient(m_hWnd, &pt)) {
+                const BOOL inside = rc.PtInRect(pt);
+                if (inside && !m_bHover) {
+                    TRACKMOUSEEVENT t = { sizeof(t), TME_LEAVE, m_hWnd, 0 };
+                    TrackMouseEvent(&t);
+                    m_bHover = TRUE;
+                } else if (!inside && m_bHover) {
+                    m_bHover = FALSE;
+                }
+            }
+        }
         SparkleTick(m_bHover);
-        if (!m_bHover && m_nSparkleN <= 0)
+        if (!m_bHover && m_nSparkleN <= 0) {
+            m_shimmerFireMs = 0;
             KillTimer(kSliderShimmerTimerId);
+        }
         Invalidate(FALSE);
-        UpdateWindow();
         return;
     }
     CSliderCtrl::OnTimer(nIDEvent);
@@ -9488,7 +9507,14 @@ LRESULT CCustomSliderCtrl::OnMouseMoveMsg(WPARAM w, LPARAM l)
             m_nSparkleN = 1;
             m_nSparkleSpawnAcc = 0;
         }
+        m_shimmerFireMs = ::GetTickCount();
         SetTimer(kSliderShimmerTimerId, 40, NULL); // きらめき SparkleTick。LEAVE 後も残点がある間は止めない
+    } else {
+        const DWORD now = ::GetTickCount();
+        if (m_shimmerFireMs == 0 || (now - m_shimmerFireMs) > 120) {
+            m_shimmerFireMs = now;
+            SetTimer(kSliderShimmerTimerId, 40, NULL);
+        }
     }
 #if CCUSTOM_AERO_SUPPORT
     CCC_InvalidateParent(m_hWnd, m_bAeroMode);
@@ -11115,6 +11141,7 @@ void CCustomListCtrl::OnDropFiles(HDROP hDropInfo)
 CCustomListCtrl::CCustomListCtrl()
     : m_bAutoDelete(FALSE), m_nHotItem(-1), m_bAeroMode(FALSE)
     , m_ptLBtnDown(0, 0), m_bTrackDragGate(FALSE)
+    , m_heartTimerOn(FALSE)
     , m_hotRowsPosted(FALSE), m_hotRowsN(0)
     , m_liveEditCol(-1), m_liveEditRow(-1), m_liveEditArm(-1), m_liveEditHold(FALSE), m_liveEditSilent(FALSE)
 {
@@ -11387,12 +11414,31 @@ void CCustomListCtrl::OnTimer(UINT_PTR nIDEvent)
 {
     if (nIDEvent == kListSoftTimerId)
     {
+        if (m_nHotItem < 0) {
+            POINT pt;
+            if (::GetCursorPos(&pt) && ::ScreenToClient(m_hWnd, &pt)) {
+                UINT flags = 0;
+                const int hit = HitTest(pt, &flags);
+                if (hit >= 0)
+                    m_nHotItem = hit;
+            }
+        }
         if (m_nHotItem < 0)
             m_heartRcHot.SetRectEmpty();
         if (GetSelectedCount() <= 0)
             m_heartRcSel.SetRectEmpty();
-        if (m_heartRcSel.IsRectEmpty() && m_heartRcHot.IsRectEmpty()) {
+        if (m_nHotItem < 0 && GetSelectedCount() <= 0) {
+            m_heartTimerOn = FALSE;
             KillTimer(kListSoftTimerId);
+            return;
+        }
+        if (m_heartRcSel.IsRectEmpty() && m_heartRcHot.IsRectEmpty()) {
+            CRect rr;
+            int row = m_nHotItem;
+            if (row < 0)
+                row = GetNextItem(-1, LVNI_SELECTED);
+            if (row >= 0 && GetItemRect(row, &rr, LVIR_BOUNDS))
+                InvalidateRect(&rr, FALSE);
             return;
         }
 #if CCUSTOM_AERO_SUPPORT
@@ -11432,7 +11478,13 @@ void CCustomListCtrl::OnTimer(UINT_PTR nIDEvent)
 // ガラス親: 全面 POST_OPAQUE は全体点滅の元 → 旧/新行だけオフスクリーン blit。
 void CCustomListCtrl::UpdateHotItem(int n)
 {
-    if (m_nHotItem == n) return;
+    if (m_nHotItem == n) {
+        if (n >= 0 && !m_heartTimerOn && GetSafeHwnd()) {
+            SetTimer(kListSoftTimerId, kListHeartTimerMs, NULL);
+            m_heartTimerOn = TRUE;
+        }
+        return;
+    }
     const int o = m_nHotItem;
     m_nHotItem = n;
     /* 前の行の♡はもう無い。古い矩形を回し続けない */
@@ -12380,8 +12432,10 @@ void CCustomListCtrl::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
                 // リスト全体の周期 Invalidate は再生中のピアノ提示を遅らせる。
                 // ♡ の矩形だけ回して、なめらかさと軽さを両立させる。
                 if (bS) m_heartRcSel = rh; else m_heartRcHot = rh;
-                if (GetSafeHwnd())
+                if (GetSafeHwnd() && !m_heartTimerOn) {
                     SetTimer(kListSoftTimerId, kListHeartTimerMs, NULL);
+                    m_heartTimerOn = TRUE;
+                }
             }
             if (pIL && noteImg >= 0 && noteImg != 1) {
                 // ImageList は行高確保(♪相当)。♪自体は 16x16@96dpi。
@@ -13724,7 +13778,7 @@ END_MESSAGE_MAP()
 // カスタム標準ボタン。グラデ/影/アイコン/スパークル軌道の初期値。
 // ♡ の Soft は 220ms。ホバー／フォーカスのキラキラは別途 33ms。
 CCustomStandardButton::CCustomStandardButton()
-    : m_bAutoDelete(FALSE), m_bMouseOver(FALSE), m_nAnimTick(0), m_bAnimRunning(FALSE),
+    : m_bAutoDelete(FALSE), m_bMouseOver(FALSE), m_nAnimTick(0), m_bAnimRunning(FALSE), m_animFireMs(0),
     m_nSparkleN(0), m_nSparkleSpawnAcc(0),
     m_clrGradStart(RGB(255, 255, 255)),
     m_clrGradEnd(RGB(255, 255, 255)), m_nGradDirection(0), m_bGradEnable(FALSE),
@@ -13800,23 +13854,47 @@ void CCustomStandardButton::SparkleTick(BOOL bSpawn)
     }
 }
 
-// 33ms キラキラタイマーの ON/OFF。常時軌道はうざいのでやめる。
-// 条件: 有効 かつ (ホバー or フォーカス or 残点あり)。
-// 不要になったら KillTimer + Invalidate。キャプション chrome でも同じ ID。
+// 33ms キラキラタイマーの ON/OFF。常時軌道は張らない。
+// 再生開始の Join は WM_TIMER とマウスを捨てる。m_bAnimRunning が真のまま
+// タイマーだけ死ぬと、乗ったまま動かしても二度と SetTimer されない。
+// カーソル位置でホバーを取り直し、最後に走ってから 150ms 空いたら張り直す。
 void CCustomStandardButton::UpdateAnimTimer()
 {
     if (!GetSafeHwnd()) return;
-    // ホバー／フォーカス／残点のみ（33ms の常時軌道はうざいのでやめる）
+    if (IsWindowEnabled()) {
+        POINT pt;
+        CRect rc;
+        GetClientRect(&rc);
+        if (::GetCursorPos(&pt) && ::ScreenToClient(m_hWnd, &pt)) {
+            const BOOL inside = rc.PtInRect(pt);
+            if (inside && !m_bMouseOver) {
+                TRACKMOUSEEVENT t = { sizeof(t), TME_LEAVE, m_hWnd, 0 };
+                TrackMouseEvent(&t);
+                m_bMouseOver = TRUE;
+                if (!m_bFlat && m_nSparkleN <= 0) {
+                    m_sparklePos[0] = 0;
+                    m_nSparkleN = 1;
+                    m_nSparkleSpawnAcc = 0;
+                }
+                Invalidate(FALSE);
+            } else if (!inside && m_bMouseOver) {
+                m_bMouseOver = FALSE;
+            }
+        }
+    }
     const BOOL bWant = IsWindowEnabled() &&
         (m_bMouseOver || (GetFocus() == this) || m_nSparkleN > 0);
-    if (bWant && !m_bAnimRunning)
-    {
-        m_bAnimRunning = TRUE;
-        SetTimer(kButtonAnimTimerId, 33, NULL);
-    }
-    else if (!bWant && m_bAnimRunning)
-    {
+    if (bWant) {
+        const DWORD now = ::GetTickCount();
+        const BOOL stale = (m_animFireMs == 0) || ((now - m_animFireMs) > 150);
+        if (!m_bAnimRunning || stale) {
+            m_bAnimRunning = TRUE;
+            m_animFireMs = now;
+            SetTimer(kButtonAnimTimerId, 33, NULL);
+        }
+    } else if (m_bAnimRunning) {
         m_bAnimRunning = FALSE;
+        m_animFireMs = 0;
         KillTimer(kButtonAnimTimerId);
         Invalidate(FALSE);
     }
@@ -13847,19 +13925,21 @@ void CCustomStandardButton::OnTimer(UINT_PTR nIDEvent)
         if (!IsWindowVisible())
             return;
         m_nAnimTick++;
+        /* 33ms が死んでいても、カーソルが乗っていればここから戻す */
+        UpdateAnimTimer();
         Invalidate(FALSE);
         return;
     }
     if (nIDEvent == kButtonAnimTimerId)
     {
+        m_animFireMs = ::GetTickCount();
         m_nAnimTick++;
         // ホバー中だけ新規点。flat（キャプション）は動かさない。
         SparkleTick(m_bMouseOver && !m_bFlat);
         UpdateAnimTimer(); // 残点ゼロ＆非ホバーなら停止
         Invalidate(FALSE);
-        // 終了ボタンは UpdateWindow 連打で BN_CLICKED が落ちる
-        if (!(CCC_Nk() && CCC_NkSkip(m_hWnd)))
-            UpdateWindow();
+        /* UpdateWindow は再生の chrome pump から再入し、ホバーを消して
+           タイマーを殺す。塗るのは pump 側（ハンドラの外）に任せる。 */
         return;
     }
     CButton::OnTimer(nIDEvent);
@@ -14158,7 +14238,8 @@ void CCustomStandardButton::PaintClient(CDC& dc, const CRect& r)
             {
                 const int bandW = max(10, W / 4);
                 const int period = W + bandW + W / 2;
-                const int pos = (int)((m_nAnimTick * 7) % (UINT)max(1, period));
+                const UINT hoverTick = (UINT)(::GetTickCount64() / 33ull);
+                const int pos = (int)((hoverTick * 7) % (UINT)max(1, period));
                 CRect band(r.left + pos - bandW, r.top, r.left + pos, r.bottom);
                 FillRectAlpha(&mDC, band, RGB(255, 255, 255), bP ? 48 : 72);
             }
@@ -14180,7 +14261,8 @@ void CCustomStandardButton::PaintClient(CDC& dc, const CRect& r)
         // フォーカス: 鼓動のようにほのかに明滅
         if (bF)
         {
-            const double ph = (m_nAnimTick % 44) / 44.0 * 6.2831853;
+            const UINT hoverTick = (UINT)(::GetTickCount64() / 33ull);
+            const double ph = (hoverTick % 44) / 44.0 * 6.2831853;
             const int a = 24 + (int)(26 * (0.5 + 0.5 * sin(ph)));
             FillRectAlpha(&mDC, r, COLOR_BUTTON_HOVER, a);
         }
@@ -14209,10 +14291,11 @@ void CCustomStandardButton::PaintClient(CDC& dc, const CRect& r)
             }
             if (m_bMouseOver && !bP)
             {
-                const float ang = sinf((float)m_nAnimTick * 0.08f) * 14.f;
+                const UINT hoverTick = (UINT)(::GetTickCount64() / 33ull);
+                const float ang = sinf((float)hoverTick * 0.08f) * 14.f;
                 DrawThemeOrnament(&mDC, CRect(r.Width() / 2 - 11, r.top + 2, r.Width() / 2 + 11, r.top + 16), CCC_UiTheme().accent2, ang);
                 if (CCC_ThemeSilk())
-                    DrawSoftJkKnot(&mDC, CRect(r.Width() / 2 - 10, r.top + 1, r.Width() / 2 + 10, r.top + 18), (int)m_nAnimTick);
+                    DrawSoftJkKnot(&mDC, CRect(r.Width() / 2 - 10, r.top + 1, r.Width() / 2 + 10, r.top + 18), (int)hoverTick);
                 DrawSparkle(&mDC, r.right - 10, r.top + 10, 4, CCC_UiTheme().accent2);
                 DrawSparkle(&mDC, r.left + 12, r.bottom - 10, 3, CCC_UiTheme().accent);
             }
@@ -14221,7 +14304,8 @@ void CCustomStandardButton::PaintClient(CDC& dc, const CRect& r)
                 DrawSparkle(&mDC, r.Width() / 2, r.top + 8, 4, CCC_UiTheme().accent2);
                 DrawThemeMotif(&mDC, CRect(r.left + 8, r.Height() / 2 - 6, r.left + 20, r.Height() / 2 + 6), CCC_UiTheme().accent);
                 DrawThemeMotif(&mDC, CRect(r.right - 20, r.Height() / 2 - 6, r.right - 8, r.Height() / 2 + 6), CCC_UiTheme().accent);
-                const float ang = sinf((float)m_nAnimTick * 0.1f) * 10.f;
+                const UINT hoverTick = (UINT)(::GetTickCount64() / 33ull);
+                const float ang = sinf((float)hoverTick * 0.1f) * 10.f;
                 DrawThemeOrnament(&mDC, CRect(r.Width() / 2 - 10, r.bottom - 15, r.Width() / 2 + 10, r.bottom - 2), CCC_UiTheme().accent2, ang);
             }
         }
@@ -14548,10 +14632,11 @@ void CCustomStandardButton::OnMouseMove(UINT f, CPoint p)
             m_nSparkleN = 1;
             m_nSparkleSpawnAcc = 0;
         }
-        UpdateAnimTimer();
         Invalidate(FALSE);
         CCC_InvalidateParent(m_hWnd, m_bAeroMode);
     }
+    /* 既に乗っているときも。再生でタイマだけ死ぬと enter が二度と来ない。 */
+    UpdateAnimTimer();
     CButton::OnMouseMove(f, p);
 }
 
@@ -14642,7 +14727,7 @@ END_MESSAGE_MAP()
 // HWND はまだ無い。タイマーは PreSubclass/OnCreate で張る。
 CCustomCheckBox::CCustomCheckBox()
     : m_bAutoDelete(FALSE), m_bIsFlatStyle(FALSE), m_bIsPressed(FALSE),
-    m_bIsHot(FALSE), m_bTracking(FALSE), m_nCheck(0), m_bAeroMode(FALSE), m_nBounce(0)
+    m_bIsHot(FALSE), m_hoverFireMs(0), m_bTracking(FALSE), m_nCheck(0), m_bAeroMode(FALSE), m_nBounce(0)
 {}
 
 // チェック ON のぷるん。m_nBounce=8、28ms で減衰しながら Invalidate。
@@ -14664,14 +14749,24 @@ void CCustomCheckBox::OnTimer(UINT_PTR nIDEvent)
     {
         if (--m_nBounce <= 0) { m_nBounce = 0; KillTimer(kCheckBounceTimerId); }
         Invalidate(FALSE);
-        UpdateWindow();
         return;
     }
     if (nIDEvent == kCheckHoverTimerId)
     {
-        if (!m_bIsHot) { KillTimer(kCheckHoverTimerId); return; }
+        m_hoverFireMs = ::GetTickCount();
+        if (!m_bIsHot) {
+            POINT pt;
+            CRect rc;
+            GetClientRect(&rc);
+            if (::GetCursorPos(&pt) && ::ScreenToClient(m_hWnd, &pt) && rc.PtInRect(pt))
+                m_bIsHot = TRUE;
+        }
+        if (!m_bIsHot) {
+            m_hoverFireMs = 0;
+            KillTimer(kCheckHoverTimerId);
+            return;
+        }
         Invalidate(FALSE);
-        UpdateWindow();
         return;
     }
     CButton::OnTimer(nIDEvent);
@@ -14776,9 +14871,20 @@ void CCustomCheckBox::OnMouseMove(UINT n, CPoint p)
     if (m_bIsHot != h)
     {
         m_bIsHot = h;
-        if (h) SetTimer(kCheckHoverTimerId, 50, NULL);
-        else KillTimer(kCheckHoverTimerId);
+        if (h) {
+            m_hoverFireMs = ::GetTickCount();
+            SetTimer(kCheckHoverTimerId, 50, NULL);
+        } else {
+            m_hoverFireMs = 0;
+            KillTimer(kCheckHoverTimerId);
+        }
         Invalidate();
+    } else if (h) {
+        const DWORD now = ::GetTickCount();
+        if (m_hoverFireMs == 0 || (now - m_hoverFireMs) > 150) {
+            m_hoverFireMs = now;
+            SetTimer(kCheckHoverTimerId, 50, NULL);
+        }
     }
 }
 
@@ -14787,6 +14893,7 @@ void CCustomCheckBox::OnMouseMove(UINT n, CPoint p)
 void CCustomCheckBox::OnMouseLeave()
 {
     m_bIsHot = m_bTracking = FALSE;
+    m_hoverFireMs = 0;
     KillTimer(kCheckHoverTimerId);
     Invalidate();
 }

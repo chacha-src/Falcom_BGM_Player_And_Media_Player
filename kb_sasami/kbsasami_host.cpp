@@ -2,6 +2,7 @@
    Win32 ビルドが kbsasami_host32、x64 が kbsasami_host64。
    中身は本体と同じ VstMidiEngine（juicysf 含む）。MIDI マッパーへは落とさない。 */
 #include "stdafx.h"
+#include "kb_sasami/source/kbsasami_lang.h"
 #include "kb_sasami/source/kbsasami_monhost.h"
 #include "UiTickPump.h"
 #include "../kpi_host_ipc.h"
@@ -267,6 +268,8 @@ static void ServeOnce(HANDLE pipe)
 
 int wmain()
 {
+	/* PING が来るまでは OS / OGG_UI_LANG。0 のままだと常に日本語になる。 */
+	savedata.lang = KbsDetectUiLang();
 	KbsHostMonStartup();
 	{
 		wchar_t ud[MAX_PATH];

@@ -7,6 +7,7 @@ extern "C" {
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <math.h>
 
 /* Taito F3: 68000＋ES5505 音源基板 */
 CDriverF3::CDriverF3()
@@ -529,6 +530,120 @@ void CDriverF3::LiftGunlockEnvelope()
 	}
 }
 
+/* 音符の下位バイト + 0x15 を ES5505 の周波数へ書く。CPU の C1412E と同じピッチ。 */
+void CDriverF3::ApplyGunlockPitch()
+{
+	if (!hw_ || f3Arabianm_ || tblOffs_ || seqCalls_ < 40u || !hw_->SoundChip())
+		return;
+	const unsigned tab = hw_->Read32(0xD404u);
+	if (tab < 0xC00000u || tab >= 0xC80000u)
+		return;
+	static uint16_t semi[128];
+	static int semiReady = 0;
+	if (!semiReady) {
+		for (int m = 0; m < 128; m++) {
+			const double ratio = pow(2.0, (m - 60) / 12.0);
+			int d = (int)(1024.0 * ratio + 0.5);
+			if (d < 2) d = 2;
+			if (d > 0x7ffe) d = 0x7ffe;
+			semi[m] = (uint16_t)(d & 0xfffe);
+		}
+		semiReady = 1;
+	}
+	unsigned base = hw_->Read32(0xD414u);
+	if (base >= tab && base < tab + 0x60000u)
+		base -= tab;
+	else if (base >= 0xC00000u)
+		base = 0;
+	if ((base < 0x40u || base >= 0x60000u) && songPtr_ >= 0x40u && songPtr_ < 0x60000u)
+		base = songPtr_;
+	if (base < 0x40u || base >= 0x60000u)
+		return;
+	unsigned songEnd = base + 0x4000u;
+	const unsigned len = hw_->Read16(tab + base + 2u);
+	if (len >= 0x40u && base + len < 0x60000u)
+		songEnd = base + len;
+	static unsigned curSong = 0xffffffffu;
+	static unsigned curPos = 0;
+	static unsigned curHold = 0;
+	static unsigned curCall = 0;
+	if (curSong != songCode_) {
+		curSong = songCode_;
+		curPos = base;
+		curHold = 0;
+		curCall = seqCalls_;
+	}
+	unsigned cmd = hw_->Read16(tab + (curPos & ~1u));
+	int onNote = ((cmd & 0x8000u) && (cmd & 0xffu) < 0x58u) ? 1 : 0;
+	if (seqCalls_ != curCall) {
+		curCall = seqCalls_;
+		unsigned beats = (cmd >> 8) & 0x7fu;
+		if (beats < 2u) beats = 2u;
+		if (beats > 16u) beats = 16u;
+		int step = !onNote;
+		if (onNote && ++curHold > beats)
+			step = 1;
+		if (step) {
+			unsigned p = (curPos & ~1u) + 2u;
+			for (int k = 0; k < 160; k++) {
+				if (p < base || p + 1u >= songEnd)
+					p = base;
+				const unsigned w = hw_->Read16(tab + p);
+				if ((w & 0x8000u) && (w & 0xffu) < 0x58u && p != (curPos & ~1u)) {
+					curPos = p;
+					cmd = w;
+					onNote = 1;
+					break;
+				}
+				p += 2u;
+				if (p >= songEnd)
+					p = base;
+			}
+			curHold = 0;
+		}
+	}
+	if (!onNote)
+		return;
+	unsigned note[4];
+	int nn = 1;
+	note[0] = cmd & 0xffu;
+	CChip* chip = hw_->SoundChip();
+	int live[4];
+	int nl = 0;
+	for (int v = 0; v < 32 && nl < 4; v++) {
+		chip->Write(0x0f, (uint32_t)v);
+		const uint16_t st = CEmuChipEs5505Read(chip, 2);
+		if (st < 0x0100u || st >= 0x8000u)
+			continue;
+		const uint16_t cr = CEmuChipEs5505PeekCr(chip, v);
+		if (cr & 3u)
+			continue;
+		live[nl++] = v;
+	}
+	if (!nl) {
+		for (int v = 0; v < 32; v++) {
+			chip->Write(0x0f, (uint32_t)v);
+			const uint16_t st = CEmuChipEs5505Read(chip, 2);
+			if (st < 0x0100u || st >= 0x8000u)
+				continue;
+			const uint16_t cr = CEmuChipEs5505PeekCr(chip, v);
+			chip->Write(0x00, (uint32_t)((cr & 0x0ffcu) | 0x0018u));
+			chip->Write(0x08, 0xC0F0u);
+			chip->Write(0x09, 0xC0F0u);
+			live[nl++] = v;
+			break;
+		}
+	}
+	const int n = nl < nn ? nl : nn;
+	for (int i = 0; i < n; i++) {
+		int midi = (int)note[i] + 0x15;
+		if (midi < 0) midi = 0;
+		if (midi > 127) midi = 127;
+		chip->Write(0x0f, (uint32_t)live[i]);
+		chip->Write(0x01, semi[midi]);
+	}
+}
+
 /* 起動直後のチェインを覚える。E9 がストリームを 0xFE**** へ飛ばす前の位置。 */
 void CDriverF3::CaptureGunlockChain()
 {
@@ -537,7 +652,8 @@ void CDriverF3::CaptureGunlockChain()
 	if (!hw_ || f3Arabianm_ || tblOffs_)
 		return;
 	const unsigned ptr = hw_->Read32(0xD414u);
-	if (ptr >= 0x40u && ptr < 0x20000u)
+	/* 後半バンクの曲は 0x20000 を超える。0x60000 は 0xC20000 窓の終わり。 */
+	if (ptr >= 0x40u && ptr < 0x60000u)
 		songPtr_ = ptr;
 	unsigned hp = hw_->Read16(0xD0F4u);
 	while (hp >= 0xD000u && hp < 0xEE00u && gunN_ < 12) {
@@ -584,9 +700,10 @@ void CDriverF3::HoldGunlockChain(int restore)
 		const unsigned s = hw_->Read32(node + 6u);
 		const unsigned fl = hw_->Read8(node + 2u);
 		/* 0xFE**** は E9 の桁あふれ。バンク内でフラグが残っている間だけ進んだ位置を覚える。 */
-		if (s >= 0x40u && s < 0x18000u && (fl & 0x18u))
+		const int inSong = (s >= songPtr_ && s < 0x60000u);
+		if (inSong && (fl & 0x18u))
 			gunStrm_[i] = s;
-		else if (restore && gunStrm_[i] >= 0x40u && gunStrm_[i] < 0x18000u)
+		else if (restore && gunStrm_[i] >= songPtr_ && gunStrm_[i] < 0x60000u)
 			hw_->Write32(node + 6u, gunStrm_[i]);
 		if (restore && (fl & 0x18u) == 0 && (gunFlg_[i] & 0x18u))
 			hw_->Write8(node + 2u, gunFlg_[i]);
@@ -656,37 +773,59 @@ void CDriverF3::KickGunlockWalker()
 			}
 		}
 		unsigned node = head;
-		unsigned prev = 0;
 		int hops = 0;
 		while (node >= 0xD000u && node < 0xEE00u && hops < 12) {
 			const unsigned nxt = hw_->Read16(node);
 			const unsigned fl = hw_->Read8(node + 2u);
-			/* フラグの無いノードはチェインのゴミ。手前で切る。 */
-			if (hops > 0 && (fl & 0x18u) == 0) {
-				if (prev)
-					hw_->Write16(prev, 0);
-				break;
-			}
-			/* E9 は bit5 を立ててストリームを進めない。コマンドを飛ばして旋律へ。 */
-			if (fl & 0x20u)
-				hw_->Write8(node + 2u, (uint8_t)(fl & ~0x20u));
+			/* 頭以外の bit7 はウォーカーがそこで歩みを止める。bit5 は E9 の凍結。 */
+			unsigned fl2 = fl;
+			if (hops > 0)
+				fl2 &= ~0x80u;
+			fl2 &= ~0x20u;
+			if (fl2 != fl)
+				hw_->Write8(node + 2u, (uint8_t)fl2);
 			unsigned strm = hw_->Read32(node + 6u);
-			if (strm >= 0x40u && strm < 0x18000u && tab >= 0xC00000u && tab < 0xC80000u) {
-				const unsigned cmd = hw_->Read16(tab + strm);
+			unsigned songOff = hw_->Read32(0xD414u);
+			if (songOff >= tab && songOff < tab + 0x60000u)
+				songOff -= tab;
+			unsigned songEnd = songOff + 0x4000u;
+			if (songOff >= 0x40u && songOff < 0x60000u) {
+				const unsigned len = hw_->Read16(tab + songOff + 2u);
+				if (len >= 0x40u && songOff + len < 0x60000u)
+					songEnd = songOff + len;
+			}
+			if (songOff >= 0x40u && songEnd > songOff && tab >= 0xC00000u && tab < 0xC80000u) {
+				if (strm < songOff || strm >= songEnd)
+					strm = songOff;
+				const unsigned cmd = hw_->Read16(tab + (strm & ~1u));
+				const int onNote = ((cmd & 0x8000u) && (cmd & 0xffu) < 0x58u) ? 1 : 0;
 				const int same = (hops < 12 && strm == stuckStrm[hops]) ? 1 : 0;
-				if (hops < 12) {
-					if (same) stuckN[hops]++;
-					else stuckN[hops] = 0;
-				}
-				/* 音符（0x58 未満）は CPU に演奏させる。制御が 6 tick 居座ったら長さ分だけ進める。 */
-				if ((cmd & 0xffu) == 0xE9u)
-					hw_->Write32(node + 6u, strm + 6u);
-				else if (same && hops < 12 && stuckN[hops] >= 6
-					&& (cmd & 0x8000u) && (cmd & 0xffu) >= 0x58u) {
-					hw_->Write32(node + 6u, strm + 4u);
+				unsigned beats = (cmd >> 8) & 0x7fu;
+				if (beats < 2u) beats = 2u;
+				if (beats > 16u) beats = 16u;
+				int step = (!onNote) ? 1 : 0;
+				if (onNote && same && hops < 12 && ++stuckN[hops] > (int)beats)
+					step = 1;
+				if (!same && hops < 12)
 					stuckN[hops] = 0;
+				if (step) {
+					unsigned p = (strm & ~1u) + 2u;
+					for (int k = 0; k < 160; k++) {
+						if (p < songOff || p + 1u >= songEnd)
+							p = songOff;
+						const unsigned wnote = hw_->Read16(tab + p);
+						if ((wnote & 0x8000u) && (wnote & 0xffu) < 0x58u && p != (strm & ~1u)) {
+							strm = p;
+							break;
+						}
+						p += 2u;
+						if (p >= songEnd)
+							p = songOff;
+					}
+					hw_->Write32(node + 6u, strm);
+					if (hops < 12)
+						stuckN[hops] = 0;
 				}
-				strm = hw_->Read32(node + 6u);
 			}
 			if (hops < 12)
 				stuckStrm[hops] = strm;
@@ -694,9 +833,6 @@ void CDriverF3::KickGunlockWalker()
 			/* 待ち 0 から 1 を引くと桁が借りて bne がパーサを飛ばす。80xx は待ち 0。 */
 			if (w == 0 || w >= 0xF000u)
 				hw_->Write16(node + 4u, 1);
-			else if (w >= 0x400u)
-				hw_->Write16(node + 4u, 0x10);
-			prev = node;
 			node = nxt;
 			hops++;
 		}
@@ -1855,8 +1991,10 @@ int CDriverF3::Render(int16_t* stereo, int frames)
 		if (cyclesPerSample < 1) cyclesPerSample = 1;
 		RunCycles(cyclesPerSample);
 		/* CPU が音量を指数 0 に戻したあと、合成の直前でノート速度まで戻す。 */
-		if (!f3Arabianm_ && !tblOffs_ && seqCalls_ >= 40u)
+		if (!f3Arabianm_ && !tblOffs_ && seqCalls_ >= 40u) {
 			LiftGunlockEnvelope();
+			ApplyGunlockPitch();
+		}
 		chip->Render(stereo + i * 2, 1);
 		if (!locked_) {
 			const int16_t l = stereo[i * 2];

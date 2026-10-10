@@ -88,7 +88,7 @@
                   + _k2_syn2_report.txt
                   + _k2_ac48_plays.txt
                   + _k2_crush15_report.txt
-   Archives probed: 5085, supported: 4589; MSX +replcart_msx/shiryo_msx/msxfan_msx (_k2_x1msx8full_0.txt _k2_x1msx8fan_0.txt) + x1alba (_k2_x1msx8alba_0.txt)
+   Archives probed: 5085, supported: 4600; MSX +replcart_msx/shiryo_msx/msxfan_msx (_k2_x1msx8full_0.txt _k2_x1msx8fan_0.txt) + x1alba (_k2_x1msx8alba_0.txt)
                   + _k2_ac2s86_report.txt (genpeitd/rthunder/skykiddx/wndrmomo Sys86)
                   + _k2_ac2wsgo_report.txt (pacland/skykid/drgnbstr wsg63701)
                   + bosco wsgz80 (0289 BGM via $8A14 + $0139 id)
@@ -106,7 +106,10 @@
                   + lguard2_98 NAX (NLP_HOOT planted; stack off stosw; HLT not INT 20)
                   + kidsap_98/qroad_98/presence_98/wa_1_98 MUAPLAY (BIOS INT 1Ch AH=02 one-shot)
                   + rouge_98/pias_98 Birdy PMD glue (07D4 real-mode ptr, cmd1 then cmd0)
-                  + kerakera_98 ADVBIOS (USD name on handle 0, OPN IRQ from INT 15) */
+                  + kerakera_98 ADVBIOS (USD name on handle 0, OPN IRQ from INT 15)
+                  + illumina_98 FIS (OPN IRQ stays on INT 15, stub HLT releases the latch)
+                  + ds98_05/07/08/15/19 ds_08 FPLAY (hoot command waits out the OPN tick; a nested load was smashing SP=125E)
+                  + _k2_f3arc_plays.txt (f3: cbombers, dangcurv, landgear, sidebs) */
 
 #include "StdAfx.h"
 #include "cemu_support.h"
@@ -675,6 +678,7 @@ static const char* const kSupported[] = {
 	"cave68snd",
 	"cawing",
 	"cb168snd",
+	"cbombers",
 	"cbs68snd",
 	"cbuster",
 	"cclimbr2",
@@ -884,6 +888,7 @@ static const char* const kSupported[] = {
 	"dang68snd",
 	"dangaio88",
 	"dangar",
+	"dangcurv",
 	"dange_sp_98",
 	"dangel_98",
 	"dangseed",
@@ -1181,14 +1186,19 @@ static const char* const kSupported[] = {
 	"ds98_02",
 	"ds98_03",
 	"ds98_04",
+	"ds98_05",
 	"ds98_06",
+	"ds98_07",
+	"ds98_08",
 	"ds98_09",
 	"ds98_10",
 	"ds98_11",
 	"ds98_12",
+	"ds98_15",
 	"ds98_16",
 	"ds98_17",
 	"ds98_18",
+	"ds98_19",
 	"ds98_20",
 	"ds98ex_01",
 	"ds98ex_02",
@@ -1200,6 +1210,7 @@ static const char* const kSupported[] = {
 	"ds_05",
 	"ds_06",
 	"ds_07",
+	"ds_08",
 	"ds_09",
 	"ds_11",
 	"dsaber",
@@ -1921,6 +1932,7 @@ static const char* const kSupported[] = {
 	"ikuikup_98",
 	"illlaser68snd",
 	"illumina",
+	"illumina_98",
 	"illumina_msx",
 	"image1_98",
 	"image2_98",
@@ -2235,6 +2247,7 @@ static const char* const kSupported[] = {
 	"lakers_at",
 	"lamachin",
 	"lamia",
+	"landgear",
 	"lands_21",
 	"lap68snd",
 	"laplace",
@@ -3681,6 +3694,7 @@ static const char* const kSupported[] = {
 	"shutend_98",
 	"shworlds_at",
 	"sidearms",
+	"sidebs",
 	"siege_at",
 	"sig68snd",
 	"silbersee_at",
@@ -4704,7 +4718,7 @@ static const char* const kSupported[] = {
 	"zowawrld_msx",
 	"ztgkolym_msx",
 	"zukkoke_msx",
-	"zyojus_98",
+	"zyojus_98"
 };
 
 static int CmpStem(const void* key, const void* elem)

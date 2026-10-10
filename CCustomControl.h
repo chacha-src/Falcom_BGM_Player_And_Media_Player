@@ -1220,6 +1220,7 @@ private:
     // 回転♡: リスト全体ではなく♡の矩形だけ再描画してなめらかに回す
     CRect m_heartRcSel;    // 選択行の♡
     CRect m_heartRcHot;    // ホバー行の♡
+    BOOL m_heartTimerOn;   // 30ms が生きている。毎描画の SetTimer は周期を潰す
     BOOL m_hotRowsPosted;
     RECT m_hotRows[4];
     int m_hotRowsN;
@@ -1432,6 +1433,7 @@ private:
     BOOL m_bMouseOver;     // マウスカーソルがボタンに乗っているかどうか
     UINT m_nAnimTick;      // アニメーション用カウンタ(流れるツヤ・鼓動パルス)
     BOOL m_bAnimRunning;   // アニメーションタイマー動作中か
+    DWORD m_animFireMs;    // 33ms が最後に走った時刻。切れたら張り直す
     void UpdateAnimTimer(); // ホバー/フォーカス/残点に応じてタイマーを開始/停止
     void SparkleTick(BOOL bSpawn); // 点を進め、必要なら発生。全滅で FALSE 相当は N==0
 
@@ -1513,6 +1515,7 @@ protected:
 private:
     UINT m_nShimmer; // 流れるシマー用カウンタ（ホバーキラキラ／DrawSoftJkThumb）
     BOOL m_bHover;   // マウスがスライダー上にあるか
+    DWORD m_shimmerFireMs; // 40ms が最後に走った時刻。切れたら張り直す
     enum { kSliderSparkleMax = 48 };
     int m_nSparkleN;                    // 生存中の流れる点の数
     int m_sparklePos[kSliderSparkleMax]; // 各点の軌跡上位置（px）
@@ -1757,6 +1760,7 @@ protected:
     BOOL m_bIsFlatStyle; // フラットスタイルかどうか
     BOOL m_bIsPressed;   // 押下状態かどうか
     BOOL m_bIsHot;       // ホバー状態かどうか
+    DWORD m_hoverFireMs; // ホバー50ms が最後に走った時刻。切れたら張り直す
     BOOL m_bTracking;    // マウストラッキング中かどうか
     int m_nCheck;        // チェック状態 (BST_CHECKED / BST_UNCHECKED)
     BOOL m_bAeroMode;    // アクリルモードが有効かどうか
