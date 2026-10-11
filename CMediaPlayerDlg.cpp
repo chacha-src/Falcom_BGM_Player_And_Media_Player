@@ -6378,6 +6378,78 @@ static void MpJakThemeScene(GdiSoft3D::Context& ctx, int id, const CCC_UiThemePa
 		ctx.DrawBox(0.72f, 1.05f, 0.32f, 0.16f, 0.40f, rib, 0.f);
 		break;
 	}
+	case CCC_UI_THEME_HEAVEN: {
+		ctx.postGlow = true;
+		ctx.DrawTorus(0.f, 0.62f + bob * 0.3f, 0.46f, 0.28f, 0.04f, acc, 14, 6);
+		ctx.DrawBox(-0.85f, -0.15f, 0.28f, 0.22f, 0.48f, face, 0.f);
+		ctx.DrawBox(0.15f, 0.85f, 0.28f, 0.22f, 0.48f, face, 0.f);
+		ctx.DrawSphere(0.f, 0.36f, 0.55f, 0.14f, ac2, 8, 6);
+		ctx.DrawSphere(-0.55f, 0.72f, 0.32f, 0.08f, rib1, 6, 5);
+		ctx.DrawSphere(0.62f, 0.68f, 0.36f, 0.07f, rib1, 6, 5);
+		break;
+	}
+	case CCC_UI_THEME_RUINS: {
+		ctx.DrawBox(-0.95f, -0.45f, 0.55f, 0.16f, 0.55f, face, 0.f);
+		ctx.DrawBox(0.35f, 0.85f, 0.38f, 0.18f, 0.62f, c1, 0.f);
+		ctx.DrawBox(-0.20f, 0.25f, 0.16f, 0.40f, 0.70f, sep, 0.f);
+		ctx.DrawSphere(-0.15f, 0.48f + bob, 0.42f, 0.10f, acc, 7, 5);
+		ctx.DrawSphere(0.55f, 0.42f, 0.48f, 0.08f, ac2, 7, 5);
+		break;
+	}
+	case CCC_UI_THEME_SHRINE: {
+		ctx.DrawBox(-0.72f, -0.48f, 0.62f, 0.16f, 0.48f, acc, 0.f);
+		ctx.DrawBox(0.48f, 0.72f, 0.62f, 0.16f, 0.48f, acc, 0.f);
+		ctx.DrawBox(-0.95f, 0.95f, 0.58f, 0.22f, 0.40f, ac2, 0.f);
+		ctx.DrawBox(-0.78f, 0.78f, 0.48f, 0.28f, 0.42f, acc, 0.f);
+		ctx.DrawBox(-1.05f, 1.05f, 0.10f, 0.10f, 0.90f, c1, 0.f);
+		break;
+	}
+	case CCC_UI_THEME_STARRY: {
+		ctx.postGlow = true;
+		for (int i = 0; i < 9; ++i) {
+			const float a = t * 0.35f + i * 0.7f;
+			ctx.DrawSphere(0.85f * cosf(a), 0.22f + 0.42f * sinf(a * 1.3f), 0.30f + 0.2f * sinf(a),
+				0.04f + 0.02f * (i & 1), (i & 1) ? acc : ac2, 6, 5);
+		}
+		ctx.DrawSphere(0.05f, 0.48f + bob * 0.4f, 0.55f, 0.16f, rib1, 8, 6);
+		break;
+	}
+	case CCC_UI_THEME_ABYSS: {
+		ctx.postGlow = true;
+		ctx.DrawSphere(0.05f * sinf(t), 0.48f + bob, 0.42f, 0.22f, acc, 9, 6);
+		ctx.DrawBox(-0.10f, 0.02f, 0.22f, 0.28f, 0.55f, ac2, 0.f);
+		ctx.DrawBox(0.04f, 0.16f, 0.18f, 0.22f, 0.62f, rib, 0.f);
+		ctx.DrawSphere(-0.55f, 0.22f, 0.55f, 0.06f, face, 6, 5);
+		ctx.DrawSphere(0.62f, 0.30f, 0.60f, 0.05f, ac2, 6, 5);
+		ctx.DrawBox(-1.05f, 1.05f, 0.08f, 0.10f, 0.90f, c1, 0.f);
+		break;
+	}
+	case CCC_UI_THEME_GARDEN: {
+		ctx.DrawSphere(-0.55f, 0.46f + bob, 0.42f, 0.16f, acc, 8, 6);
+		ctx.DrawSphere(0.48f, 0.40f, 0.48f, 0.14f, ac2, 8, 6);
+		ctx.DrawSphere(0.02f, 0.28f, 0.55f, 0.12f, rib1, 8, 6);
+		ctx.DrawSphere(-0.22f, 0.62f, 0.36f, 0.10f, hot, 7, 5);
+		ctx.DrawBox(-0.04f, 0.04f, 0.22f, 0.40f, 0.58f, rib, 0.f);
+		ctx.DrawBox(-1.05f, 1.05f, 0.10f, 0.10f, 0.88f, c1, 0.f);
+		break;
+	}
+	case CCC_UI_THEME_ROSE: {
+		ctx.DrawSphere(0.f, 0.48f + bob, 0.46f, 0.22f, acc, 10, 7);
+		ctx.DrawSphere(0.f, 0.48f, 0.58f, 0.12f, rib1, 8, 6);
+		ctx.DrawBox(-0.04f, 0.04f, 0.28f, 0.36f, 0.55f, ac2, 0.f);
+		ctx.DrawSphere(-0.42f, 0.30f, 0.40f, 0.08f, ac2, 6, 5);
+		ctx.DrawSphere(0.46f, 0.26f, 0.42f, 0.07f, ac2, 6, 5);
+		break;
+	}
+	case CCC_UI_THEME_BUTTERFLY: {
+		const float flap = 0.18f * sinf(t * 3.2f);
+		ctx.DrawSphere(-0.38f - flap, 0.40f + bob, 0.42f, 0.22f, acc, 8, 6);
+		ctx.DrawSphere(0.38f + flap, 0.40f, 0.46f, 0.22f, ac2, 8, 6);
+		ctx.DrawBox(-0.05f, 0.05f, 0.55f, 0.22f, 0.40f, ink, 0.f);
+		ctx.DrawSphere(-0.22f, 0.22f, 0.55f, 0.08f, rib1, 6, 5);
+		ctx.DrawSphere(0.22f, 0.22f, 0.55f, 0.08f, rib1, 6, 5);
+		break;
+	}
 	default:
 		ctx.DrawTorus(0.f, 0.34f + bob, 0.50f, 0.30f, 0.07f, acc, 12, 8);
 		ctx.DrawSphere(-0.55f, 0.38f, 0.42f, 0.14f, ac2, 8, 6);
