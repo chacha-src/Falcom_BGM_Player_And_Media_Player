@@ -2342,6 +2342,140 @@ static void DrawRetro(CDC* pDC, const CRect& rc, COLORREF c)
     pDC->SelectObject(op);
 }
 
+static void DrawLily(CDC* pDC, const CRect& rc, COLORREF c)
+{
+    const int cx = (rc.left + rc.right) / 2;
+    const int cy = (rc.top + rc.bottom) / 2;
+    int r = min(rc.Width(), rc.Height()) / 5;
+    if (r < 2) r = 2;
+    CBrush br(c);
+    CBrush* ob = pDC->SelectObject(&br);
+    CPen pen(PS_SOLID, 1, CCC_Darken(c, 30));
+    CPen* op = pDC->SelectObject(&pen);
+    for (int i = 0; i < 6; ++i) {
+        const double a = i * 3.14159265 / 3.0;
+        const int x = cx + (int)(cos(a) * r * 2);
+        const int y = cy + (int)(sin(a) * r * 2);
+        pDC->Ellipse(x - r, y - r, x + r, y + r);
+    }
+    CBrush core(RGB(255, 255, 255));
+    pDC->SelectObject(&core);
+    pDC->Ellipse(cx - r / 2, cy - r / 2, cx + r / 2, cy + r / 2);
+    pDC->SelectObject(ob);
+    pDC->SelectObject(op);
+}
+
+static void DrawCollar(CDC* pDC, const CRect& rc, COLORREF c)
+{
+    CPen pen(PS_SOLID, 2, c);
+    CPen* op = pDC->SelectObject(&pen);
+    const int cx = (rc.left + rc.right) / 2;
+    const int y0 = rc.top + rc.Height() / 5;
+    const int y1 = rc.bottom - rc.Height() / 5;
+    pDC->MoveTo(rc.left + 1, y0);
+    pDC->LineTo(cx, y1);
+    pDC->LineTo(rc.right - 1, y0);
+    pDC->MoveTo(cx, y0);
+    pDC->LineTo(cx, y1);
+    pDC->SelectObject(op);
+}
+
+static void DrawGlitch(CDC* pDC, const CRect& rc, COLORREF c)
+{
+    const COLORREF c2 = CCC_UiTheme().accent2;
+    const int m = max(1, min(rc.Width(), rc.Height()) / 6);
+    CPen p1(PS_SOLID, 2, c);
+    CPen p2(PS_SOLID, 1, c2);
+    CPen* op = pDC->SelectObject(&p1);
+    pDC->MoveTo(rc.left, rc.top + m);
+    pDC->LineTo(rc.right - m, rc.top + m);
+    pDC->MoveTo(rc.left + m * 2, rc.CenterPoint().y);
+    pDC->LineTo(rc.right, rc.CenterPoint().y);
+    pDC->SelectObject(&p2);
+    pDC->MoveTo(rc.left, rc.bottom - m * 2);
+    pDC->LineTo(rc.right - m, rc.bottom - m);
+    CBrush br(c);
+    CBrush* ob = pDC->SelectObject(&br);
+    pDC->SelectStockObject(NULL_PEN);
+    pDC->Rectangle(rc.left + m, rc.top + m * 2, rc.left + m * 3, rc.bottom - m);
+    pDC->SelectObject(ob);
+    pDC->SelectObject(op);
+}
+
+static void DrawShard(CDC* pDC, const CRect& rc, COLORREF c)
+{
+    const COLORREF c2 = CCC_UiTheme().accent2;
+    CPen pen(PS_SOLID, 1, c);
+    CBrush br(c);
+    CBrush br2(c2);
+    CPen* op = pDC->SelectObject(&pen);
+    CBrush* ob = pDC->SelectObject(&br);
+    POINT a[3] = {
+        { rc.left, rc.bottom }, { rc.CenterPoint().x, rc.top }, { rc.CenterPoint().x, rc.bottom - rc.Height() / 4 }
+    };
+    POINT b[3] = {
+        { rc.right, rc.top }, { rc.CenterPoint().x + 1, rc.CenterPoint().y }, { rc.right, rc.bottom }
+    };
+    pDC->Polygon(a, 3);
+    pDC->SelectObject(&br2);
+    pDC->Polygon(b, 3);
+    pDC->SelectObject(ob);
+    pDC->SelectObject(op);
+}
+
+static void DrawLaceRing(CDC* pDC, const CRect& rc, COLORREF c)
+{
+    CPen pen(PS_SOLID, 1, c);
+    CPen* op = pDC->SelectObject(&pen);
+    pDC->SelectStockObject(NULL_BRUSH);
+    const int m = max(1, min(rc.Width(), rc.Height()) / 6);
+    pDC->Ellipse(rc.left + m, rc.top + m, rc.right - m, rc.bottom - m);
+    pDC->Ellipse(rc.left + m * 2, rc.top + m * 2, rc.right - m * 2, rc.bottom - m * 2);
+    const int cx = rc.CenterPoint().x;
+    const int cy = rc.CenterPoint().y;
+    pDC->MoveTo(cx, rc.top + m);
+    pDC->LineTo(cx, rc.bottom - m);
+    pDC->MoveTo(rc.left + m, cy);
+    pDC->LineTo(rc.right - m, cy);
+    pDC->SelectObject(op);
+}
+
+static void DrawRibbonBow(CDC* pDC, const CRect& rc, COLORREF c)
+{
+    CBrush br(c);
+    CPen pen(PS_SOLID, 1, CCC_Darken(c, 40));
+    CBrush* ob = pDC->SelectObject(&br);
+    CPen* op = pDC->SelectObject(&pen);
+    const int cx = rc.CenterPoint().x;
+    const int cy = rc.CenterPoint().y;
+    const int w = max(2, rc.Width() / 3);
+    const int h = max(2, rc.Height() / 3);
+    POINT L[3] = { { cx, cy }, { rc.left, rc.top }, { rc.left, rc.bottom } };
+    POINT R[3] = { { cx, cy }, { rc.right, rc.top }, { rc.right, rc.bottom } };
+    pDC->Polygon(L, 3);
+    pDC->Polygon(R, 3);
+    pDC->Ellipse(cx - w / 4, cy - h / 4, cx + w / 4, cy + h / 4);
+    pDC->SelectObject(ob);
+    pDC->SelectObject(op);
+}
+
+static void DrawBlazerBtn(CDC* pDC, const CRect& rc, COLORREF c)
+{
+    CPen pen(PS_SOLID, 2, c);
+    CBrush br(CCC_Darken(c, 50));
+    CPen* op = pDC->SelectObject(&pen);
+    CBrush* ob = pDC->SelectObject(&br);
+    const int m = max(1, min(rc.Width(), rc.Height()) / 5);
+    pDC->Ellipse(rc.left + m, rc.top + m, rc.right - m, rc.bottom - m);
+    pDC->SelectStockObject(NULL_BRUSH);
+    pDC->MoveTo(rc.CenterPoint().x, rc.top + m * 2);
+    pDC->LineTo(rc.CenterPoint().x, rc.bottom - m * 2);
+    pDC->MoveTo(rc.left + m * 2, rc.CenterPoint().y);
+    pDC->LineTo(rc.right - m * 2, rc.CenterPoint().y);
+    pDC->SelectObject(ob);
+    pDC->SelectObject(op);
+}
+
 static void DrawThemeMotif(CDC* pDC, const CRect& rc, COLORREF c)
 {
     if (!pDC || rc.Width() < 3 || rc.Height() < 3) return;
@@ -2368,6 +2502,14 @@ static void DrawThemeMotif(CDC* pDC, const CRect& rc, COLORREF c)
     case CCC_UI_THEME_AMBER: DrawAmber(pDC, rc, c); break;
     case CCC_UI_THEME_WISTERIA: DrawWisteria(pDC, rc, c); break;
     case CCC_UI_THEME_RETRO: DrawRetro(pDC, rc, c); break;
+    case CCC_UI_THEME_PURE_F: DrawLily(pDC, rc, c); break;
+    case CCC_UI_THEME_PURE_M: DrawCollar(pDC, rc, c); break;
+    case CCC_UI_THEME_BREAK_F: DrawGlitch(pDC, rc, c); break;
+    case CCC_UI_THEME_BREAK_M: DrawShard(pDC, rc, c); break;
+    case CCC_UI_THEME_GOTH_F: DrawLaceRing(pDC, rc, c); break;
+    case CCC_UI_THEME_GOTH_M: DrawCrest(pDC, rc, c); break;
+    case CCC_UI_THEME_SCHOOL_F: DrawRibbonBow(pDC, rc, c); break;
+    case CCC_UI_THEME_SCHOOL_M: DrawBlazerBtn(pDC, rc, c); break;
     default: DrawGear(pDC, rc, c); break;
     }
 }
@@ -2709,6 +2851,46 @@ const CCC_UiThemePal& CCC_UiTheme()
           RGB(250,240,214), RGB(160,110,70), RGB(220,196,150),
           RGB(36,24,16), RGB(96,72,48), RGB(24,128,120), RGB(180,70,44),
           RGB(255,248,228), RGB(96,56,32), 21 },
+        { RGB(248,246,242), RGB(230,236,242), RGB(186,198,214), RGB(255,255,255), RGB(150,160,176),
+          RGB(120,140,168), RGB(210,198,214), RGB(190,198,208),
+          RGB(255,255,255), RGB(176,184,196), RGB(220,224,230),
+          RGB(48,52,64), RGB(96,104,116), RGB(236,240,246), RGB(214,220,230),
+          RGB(255,255,255), RGB(140,150,166), 22 },
+        { RGB(236,240,244), RGB(214,222,230), RGB(36,64,112), RGB(186,196,210), RGB(24,40,72),
+          RGB(28,56,104), RGB(168,176,188), RGB(120,132,150),
+          RGB(248,250,252), RGB(140,152,170), RGB(200,208,216),
+          RGB(24,32,48), RGB(64,76,96), RGB(214,224,236), RGB(168,184,204),
+          RGB(255,255,255), RGB(40,56,88), 23 },
+        { RGB(28,8,24), RGB(64,12,48), RGB(255,40,160), RGB(40,255,220), RGB(255,0,128),
+          RGB(255,60,180), RGB(80,255,230), RGB(255,120,200),
+          RGB(40,12,36), RGB(255,80,190), RGB(20,8,24),
+          RGB(255,230,250), RGB(200,140,190), RGB(255,0,140), RGB(0,220,200),
+          RGB(255,80,180), RGB(12,0,16), 24 },
+        { RGB(8,16,8), RGB(16,32,12), RGB(180,255,40), RGB(255,40,80), RGB(40,80,16),
+          RGB(160,255,32), RGB(255,48,72), RGB(80,140,40),
+          RGB(18,24,14), RGB(140,200,40), RGB(10,16,8),
+          RGB(220,255,180), RGB(120,160,80), RGB(120,220,20), RGB(40,80,10),
+          RGB(180,255,60), RGB(4,8,2), 25 },
+        { RGB(28,16,24), RGB(48,24,36), RGB(120,24,48), RGB(80,16,32), RGB(40,8,16),
+          RGB(168,36,64), RGB(90,70,80), RGB(100,48,64),
+          RGB(36,22,30), RGB(90,48,60), RGB(48,28,36),
+          RGB(236,220,224), RGB(160,128,136), RGB(72,28,40), RGB(48,16,28),
+          RGB(120,70,84), RGB(16,8,12), 26 },
+        { RGB(22,22,26), RGB(36,36,42), RGB(70,74,82), RGB(160,164,172), RGB(16,16,20),
+          RGB(176,180,188), RGB(70,74,84), RGB(90,94,104),
+          RGB(30,30,36), RGB(100,104,114), RGB(42,42,50),
+          RGB(230,230,234), RGB(140,142,150), RGB(48,50,58), RGB(32,34,40),
+          RGB(150,154,164), RGB(10,10,14), 27 },
+        { RGB(232,240,250), RGB(255,236,240), RGB(24,48,120), RGB(196,32,56), RGB(16,32,80),
+          RGB(180,28,52), RGB(36,56,128), RGB(160,180,210),
+          RGB(248,250,255), RGB(140,160,200), RGB(210,220,236),
+          RGB(20,28,56), RGB(48,64,104), RGB(255,228,232), RGB(200,214,236),
+          RGB(255,255,255), RGB(24,40,96), 28 },
+        { RGB(20,20,24), RGB(36,36,40), RGB(196,160,48), RGB(48,48,52), RGB(12,12,16),
+          RGB(210,170,56), RGB(80,80,88), RGB(120,100,48),
+          RGB(32,32,36), RGB(140,116,48), RGB(48,48,52),
+          RGB(236,228,200), RGB(150,142,120), RGB(72,60,24), RGB(40,36,20),
+          RGB(220,184,72), RGB(8,8,10), 29 },
     };
     return k[CCC_UiThemeId()];
 }
@@ -2739,6 +2921,14 @@ const CCC_ThemeFace& CCC_ThemeFaceOf()
         {  5, CCC_FACE_FILL_VGRAD,  CCC_FACE_EDGE_CHAMFER, 0, 0, 0, CCC_FACE_SEP_DASH,   CCC_FACE_SEL_UNDER },
         {  8, CCC_FACE_FILL_WASH,   CCC_FACE_EDGE_HAIR,    0, 0, 0, CCC_FACE_SEP_HAIR,   CCC_FACE_SEL_WASH },
         { 14, CCC_FACE_FILL_STRIPE, CCC_FACE_EDGE_PILL,    0, 0, 0, CCC_FACE_SEP_NONE,   CCC_FACE_SEL_PILL },
+        {  6, CCC_FACE_FILL_WASH,   CCC_FACE_EDGE_HAIR,    0, 0, 0, CCC_FACE_SEP_LACE,   CCC_FACE_SEL_WASH },
+        {  2, CCC_FACE_FILL_FLAT,   CCC_FACE_EDGE_HAIR,    0, 0, 0, CCC_FACE_SEP_HAIR,   CCC_FACE_SEL_UNDER },
+        {  0, CCC_FACE_FILL_STRIPE, CCC_FACE_EDGE_GLOW,    0, 0, 0, CCC_FACE_SEP_NONE,   CCC_FACE_SEL_PILL },
+        {  0, CCC_FACE_FILL_STREAK, CCC_FACE_EDGE_GLOW,    0, 0, 0, CCC_FACE_SEP_DASH,   CCC_FACE_SEL_FRAME },
+        {  4, CCC_FACE_FILL_VGRAD,  CCC_FACE_EDGE_DOUBLE,  0, 0, 0, CCC_FACE_SEP_LACE,   CCC_FACE_SEL_FRAME },
+        {  2, CCC_FACE_FILL_METAL,  CCC_FACE_EDGE_CHAMFER, 0, 0, 0, CCC_FACE_SEP_HAIR,   CCC_FACE_SEL_BAR },
+        {  8, CCC_FACE_FILL_WASH,   CCC_FACE_EDGE_HAIR,    0, 0, 0, CCC_FACE_SEP_HAIR,   CCC_FACE_SEL_WASH },
+        {  3, CCC_FACE_FILL_METAL,  CCC_FACE_EDGE_CHAMFER, 0, 0, 0, CCC_FACE_SEP_HAIR,   CCC_FACE_SEL_BAR },
     };
     int id = CCC_UiThemeId();
     if (id < 0 || id >= CCC_UI_THEME_COUNT) id = 0;
@@ -2844,6 +3034,38 @@ LPCTSTR CCC_UiThemeName(int id)
         return LL14(L"レトロ", L"Retro", L"Retro", L"Retro", L"Retro",
             L"레트로", L"复古", L"ريترو", L"Ретро", L"Retro",
             L"Retrô", L"Retro", L"Retro", L"Retro");
+    case CCC_UI_THEME_PURE_F:
+        return LL14(L"清楚・女", L"Neat (F)", L"Epuré (F)", L"Pulito (F)", L"Puro (F)",
+            L"청초·여", L"清纯·女", L"نقي (أ)", L"Чистый (ж)", L"Schlicht (w)",
+            L"Puro (F)", L"Strak (v)", L"Czysty (k)", L"Sade (k)");
+    case CCC_UI_THEME_PURE_M:
+        return LL14(L"清楚・男", L"Neat (M)", L"Epuré (H)", L"Pulito (M)", L"Puro (M)",
+            L"청초·남", L"清爽·男", L"نقي (ذ)", L"Чистый (м)", L"Schlicht (m)",
+            L"Puro (M)", L"Strak (m)", L"Czysty (m)", L"Sade (e)");
+    case CCC_UI_THEME_BREAK_F:
+        return LL14(L"ぶっ壊れ・女", L"Broken (F)", L"Cassé (F)", L"Rotto (F)", L"Roto (F)",
+            L"고장·여", L"崩坏·女", L"مكسور (أ)", L"Сломан (ж)", L"Kaputt (w)",
+            L"Quebrado (F)", L"Kapot (v)", L"Zepsuty (k)", L"Bozuk (k)");
+    case CCC_UI_THEME_BREAK_M:
+        return LL14(L"ぶっ壊れ・男", L"Broken (M)", L"Cassé (H)", L"Rotto (M)", L"Roto (M)",
+            L"고장·남", L"崩坏·男", L"مكسور (ذ)", L"Сломан (м)", L"Kaputt (m)",
+            L"Quebrado (M)", L"Kapot (m)", L"Zepsuty (m)", L"Bozuk (e)");
+    case CCC_UI_THEME_GOTH_F:
+        return LL14(L"ゴシック・女", L"Gothic (F)", L"Gothique (F)", L"Gotico (F)", L"Gotico (F)",
+            L"고딕·여", L"哥特·女", L"قوطي (أ)", L"Готика (ж)", L"Gotisch (w)",
+            L"Gotico (F)", L"Gothic (v)", L"Gotyk (k)", L"Gotik (k)");
+    case CCC_UI_THEME_GOTH_M:
+        return LL14(L"ゴシック・男", L"Gothic (M)", L"Gothique (H)", L"Gotico (M)", L"Gotico (M)",
+            L"고딕·남", L"哥特·男", L"قوطي (ذ)", L"Готика (м)", L"Gotisch (m)",
+            L"Gotico (M)", L"Gothic (m)", L"Gotyk (m)", L"Gotik (e)");
+    case CCC_UI_THEME_SCHOOL_F:
+        return LL14(L"学園・女", L"School (F)", L"Ecole (F)", L"Scuola (F)", L"Escuela (F)",
+            L"학원·여", L"学园·女", L"مدرسة (أ)", L"Школа (ж)", L"Schule (w)",
+            L"Escola (F)", L"School (v)", L"Szkoła (k)", L"Okul (k)");
+    case CCC_UI_THEME_SCHOOL_M:
+        return LL14(L"学園・男", L"School (M)", L"Ecole (H)", L"Scuola (M)", L"Escuela (M)",
+            L"학원·남", L"学园·男", L"مدرسة (ذ)", L"Школа (м)", L"Schule (m)",
+            L"Escola (M)", L"School (m)", L"Szkoła (m)", L"Okul (e)");
     case CCC_UI_THEME_CUTE:
     default:
         return LL14(L"可愛い", L"Cute", L"Mignon", L"Carino", L"Tierno",
@@ -3671,7 +3893,112 @@ static void DrawSoftJkChip(CDC* pDC, const CRect& rc, int animTick, BOOL hot)
     --s_uiSoftBusy;
 }
 
-// Soft3D ハート（2球＋下三角）。yaw でゆっくり回転。リスト／ツリー／レンジサム用。
+// リスト等の回転マーク。可愛い系はハート、それ以外はテーマの立体。
+static void SoftSpinThemeMark(int id, COLORREF c, COLORREF c2, int animTick)
+{
+    const float wob = sinf((float)animTick * 0.35f);
+    const float jit = sinf((float)animTick * 2.2f);
+    switch (id) {
+    case CCC_UI_THEME_CUTE:
+    case CCC_UI_THEME_GAL:
+    case CCC_UI_THEME_CANDY:
+        s_uiSoft3d.DrawSphere(-0.18f, 0.18f, 0.05f, 0.22f, c, 10, 7);
+        s_uiSoft3d.DrawSphere(0.18f, 0.18f, 0.05f, 0.22f, c, 10, 7);
+        s_uiSoft3d.DrawQuad(
+            -0.38f, 0.02f, 0.02f,  0.38f, 0.02f, 0.02f,
+             0.0f, -0.48f, 0.08f,  0.0f, -0.48f, -0.02f, CCC_Darken(c, 40));
+        break;
+    case CCC_UI_THEME_COOL:
+    case CCC_UI_THEME_ULTRA:
+    case CCC_UI_THEME_SCHOOL_M:
+        s_uiSoft3d.DrawBox(-0.12f, 0.12f, 0.42f, -0.08f, 0.16f, c, 0.f);
+        s_uiSoft3d.DrawBox(-0.32f, 0.32f, 0.16f, -0.06f, 0.14f, c2, 0.f);
+        break;
+    case CCC_UI_THEME_DRAMATIC:
+    case CCC_UI_THEME_GOTH_M:
+        s_uiSoft3d.DrawBox(-0.22f, 0.22f, 0.40f, -0.10f, 0.22f, c, 0.f);
+        s_uiSoft3d.DrawSphere(0.f, 0.08f, 0.18f, 0.12f, c2, 8, 6);
+        break;
+    case CCC_UI_THEME_NEON:
+    case CCC_UI_THEME_BREAK_F:
+        s_uiSoft3d.DrawNeonBox(-0.28f + jit * 0.10f, 0.22f + jit * 0.08f, 0.22f, -0.16f, 0.22f, c, 0.f);
+        s_uiSoft3d.DrawBox(-0.08f - jit * 0.12f, 0.36f, 0.02f, -0.20f, 0.18f, c2, 0.f);
+        break;
+    case CCC_UI_THEME_BREAK_M:
+        s_uiSoft3d.DrawBox(-0.40f, -0.02f + jit * 0.08f, 0.28f, -0.20f, 0.16f, c, 0.f);
+        s_uiSoft3d.DrawBox(0.04f, 0.42f, 0.06f - jit * 0.10f, -0.08f, 0.22f, c2, 0.f);
+        break;
+    case CCC_UI_THEME_INK:
+        s_uiSoft3d.DrawTorus(0.f, 0.05f, 0.f, 0.28f, 0.06f, c, 12, 6);
+        break;
+    case CCC_UI_THEME_FOREST:
+    case CCC_UI_THEME_SPRING:
+    case CCC_UI_THEME_PURE_F:
+        s_uiSoft3d.DrawSphere(0.f, 0.02f, 0.05f, 0.10f, c2, 8, 6);
+        s_uiSoft3d.DrawSphere(-0.22f, 0.12f, 0.02f, 0.12f, c, 8, 6);
+        s_uiSoft3d.DrawSphere(0.22f, 0.12f, 0.02f, 0.12f, c, 8, 6);
+        s_uiSoft3d.DrawSphere(0.f, 0.28f, 0.02f, 0.11f, c, 8, 6);
+        s_uiSoft3d.DrawSphere(0.f, -0.18f, 0.02f, 0.11f, c, 8, 6);
+        break;
+    case CCC_UI_THEME_STEEL:
+    case CCC_UI_THEME_RETRO:
+        s_uiSoft3d.DrawTorus(0.f, 0.02f, 0.f, 0.26f, 0.07f, c, 10, 6);
+        s_uiSoft3d.DrawBox(-0.08f, 0.08f, 0.08f, -0.08f, 0.12f, c2, 0.f);
+        break;
+    case CCC_UI_THEME_SUMMER:
+    case CCC_UI_THEME_DAWN:
+    case CCC_UI_THEME_DUSK:
+        s_uiSoft3d.DrawSphere(0.f, 0.06f + wob * 0.06f, 0.05f, 0.24f, c, 10, 7);
+        break;
+    case CCC_UI_THEME_AUTUMN:
+        s_uiSoft3d.DrawBox(-0.28f, -0.02f, 0.10f + (float)fabs(wob) * 0.12f, -0.16f, 0.10f, c, 0.f);
+        s_uiSoft3d.DrawBox(0.02f, 0.30f, 0.02f, -0.10f, 0.16f, c2, 0.f);
+        break;
+    case CCC_UI_THEME_WINTER:
+        s_uiSoft3d.DrawSphere(-0.16f, 0.10f, 0.f, 0.08f, c, 6, 5);
+        s_uiSoft3d.DrawSphere(0.16f, 0.10f, 0.f, 0.08f, c, 6, 5);
+        s_uiSoft3d.DrawSphere(0.f, -0.08f, 0.04f, 0.08f, c2, 6, 5);
+        break;
+    case CCC_UI_THEME_RAIN:
+        s_uiSoft3d.DrawBox(-0.06f, 0.06f, 0.36f, -0.28f, 0.08f, c, 0.f);
+        s_uiSoft3d.DrawSphere(0.f, -0.22f, 0.02f, 0.10f, c2, 8, 6);
+        break;
+    case CCC_UI_THEME_SEA:
+        s_uiSoft3d.DrawTorus(0.f, -0.04f, 0.f, 0.28f, 0.05f, c, 12, 5);
+        s_uiSoft3d.DrawSphere(0.18f * wob, 0.16f, 0.08f, 0.08f, c2, 7, 5);
+        break;
+    case CCC_UI_THEME_MOON:
+        s_uiSoft3d.DrawSphere(0.04f, 0.04f, 0.f, 0.26f, c, 10, 7);
+        s_uiSoft3d.DrawSphere(-0.10f, 0.08f, 0.12f, 0.20f, c2, 8, 6);
+        break;
+    case CCC_UI_THEME_AMBER:
+        s_uiSoft3d.DrawBox(-0.16f, 0.16f, 0.28f, -0.16f, 0.18f, c, 0.f);
+        s_uiSoft3d.DrawSphere(0.f, 0.02f, 0.12f, 0.08f, c2, 7, 5);
+        break;
+    case CCC_UI_THEME_WISTERIA:
+        s_uiSoft3d.DrawSphere(-0.16f, 0.16f, 0.f, 0.10f, c, 7, 5);
+        s_uiSoft3d.DrawSphere(0.12f, 0.02f, 0.04f, 0.09f, c2, 7, 5);
+        s_uiSoft3d.DrawSphere(0.02f, -0.16f, 0.02f, 0.08f, c, 7, 5);
+        break;
+    case CCC_UI_THEME_PURE_M:
+        s_uiSoft3d.DrawBox(-0.22f, 0.22f, 0.28f, -0.22f, 0.06f, c, 0.f);
+        s_uiSoft3d.DrawBox(-0.04f, 0.04f, 0.22f, -0.18f, 0.10f, c2, 0.f);
+        break;
+    case CCC_UI_THEME_GOTH_F:
+        s_uiSoft3d.DrawTorus(0.f, 0.04f, 0.f, 0.24f, 0.05f, c, 12, 6);
+        s_uiSoft3d.DrawSphere(0.f, 0.04f, 0.08f, 0.08f, c2, 7, 5);
+        break;
+    case CCC_UI_THEME_SCHOOL_F:
+        s_uiSoft3d.DrawSphere(-0.18f, 0.10f, 0.04f, 0.14f, c, 8, 6);
+        s_uiSoft3d.DrawSphere(0.18f, 0.10f, 0.04f, 0.14f, c, 8, 6);
+        s_uiSoft3d.DrawBox(-0.06f, 0.06f, 0.08f, -0.22f, 0.08f, c2, 0.f);
+        break;
+    default:
+        s_uiSoft3d.DrawTorus(0.f, 0.04f, 0.f, 0.26f, 0.07f, c, 10, 6);
+        break;
+    }
+}
+
 static void DrawSoftJkHeart(CDC* pDC, const CRect& rc, int animTick, BOOL hot, COLORREF col)
 {
     if (!pDC || s_uiSoftBusy) return;
@@ -3711,18 +4038,17 @@ static void DrawSoftJkHeart(CDC* pDC, const CRect& rc, int animTick, BOOL hot, C
                 hot ? (BYTE)240 : (BYTE)215);
             CCC_NkFl(pDC, rc, nP0, nP1, nP2, FALSE);
         } else {
-            s_uiSoft3d.cam.yawDeg = -22.f + spin + (hot ? sinf((float)animTick * 0.08f) * 6.f : 0.f);
+            const int id = CCC_UiThemeId();
+            float yawJ = 0.f;
+            if (id == CCC_UI_THEME_BREAK_F || id == CCC_UI_THEME_BREAK_M)
+                yawJ = sinf((float)animTick * 2.6f) * 22.f;
+            s_uiSoft3d.cam.yawDeg = -22.f + spin + yawJ + (hot ? sinf((float)animTick * 0.08f) * 6.f : 0.f);
             s_uiSoft3d.cam.pitchDeg = 28.f + cosf((float)animTick * 0.05f) * 4.f;
             s_uiSoft3d.cam.zoom = hot ? 1.45f : 1.28f;
             float boxes[1][6] = { { -0.55f, 0.55f, -0.55f, 0.55f, -0.4f, 0.4f } };
             s_uiSoft3d.SetViewportFit(boxes, 1);
-            const COLORREF c = col ? col : RGB(255, 140, 188);
-            const COLORREF cDeep = CCC_Darken(c, 40);
-            s_uiSoft3d.DrawSphere(-0.18f, 0.18f, 0.05f, 0.22f, c, 10, 7);
-            s_uiSoft3d.DrawSphere(0.18f, 0.18f, 0.05f, 0.22f, c, 10, 7);
-            s_uiSoft3d.DrawQuad(
-                -0.38f, 0.02f, 0.02f,  0.38f, 0.02f, 0.02f,
-                 0.0f, -0.48f, 0.08f,  0.0f, -0.48f, -0.02f, cDeep);
+            const COLORREF c = col ? col : CCC_UiTheme().accent;
+            SoftSpinThemeMark(id, c, CCC_UiTheme().accent2, animTick);
             SoftPremultPresent(s_uiSoft3d.fb, pDC->GetSafeHdc(), rc.left, rc.top, w, h,
                 hot ? (BYTE)230 : (BYTE)200);
         }
@@ -9160,7 +9486,8 @@ static void CccSliderBar(CDC* pDC, int l, int t, int r, int b, BOOL square)
     const BOOL round = (id == CCC_UI_THEME_CUTE || id == CCC_UI_THEME_GAL || id == CCC_UI_THEME_CANDY
         || id == CCC_UI_THEME_SPRING || id == CCC_UI_THEME_DAWN || id == CCC_UI_THEME_SEA
         || id == CCC_UI_THEME_FOREST || id == CCC_UI_THEME_SUMMER
-        || id == CCC_UI_THEME_WISTERIA || id == CCC_UI_THEME_RETRO);
+        || id == CCC_UI_THEME_WISTERIA || id == CCC_UI_THEME_RETRO
+        || id == CCC_UI_THEME_PURE_F || id == CCC_UI_THEME_SCHOOL_F);
     const int rad = min(r - l, b - t);
     if (!round || rad < 4)
         pDC->Rectangle(l, t, r, b);
@@ -12424,11 +12751,8 @@ void CCustomListCtrl::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
             if (bS || bH) {
                 CRect rh(noteX, noteY + CCC_ScaleDpi(2, dpiNote),
                     noteX + CCC_ScaleDpi(14, dpiNote), noteY + ih);
-                if (CCC_ThemeSilk())
-                    DrawSoftJkHeart(pDC, rh, (int)(::GetTickCount64() / kListHeartStepMs),
-                        TRUE, CCC_UiTheme().accent);
-                else
-                    DrawThemeMotif(pDC, rh, CCC_UiTheme().accent);
+                DrawSoftJkHeart(pDC, rh, (int)(::GetTickCount64() / kListHeartStepMs),
+                    TRUE, CCC_UiTheme().accent);
                 // リスト全体の周期 Invalidate は再生中のピアノ提示を遅らせる。
                 // ♡ の矩形だけ回して、なめらかさと軽さを両立させる。
                 if (bS) m_heartRcSel = rh; else m_heartRcHot = rh;

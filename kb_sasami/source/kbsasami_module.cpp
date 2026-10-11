@@ -11,7 +11,7 @@ static const DWORD kPluginVersion = 0x7FFFFFFF;
 #define KBSASAMI_VERSION_STR L"0x7FFFFFFF(Debug)"
 #else
 static const DWORD kPluginVersion = 1;
-#define KBSASAMI_VERSION_STR L"1.25"
+#define KBSASAMI_VERSION_STR L"1.27"
 #endif
 
 static wchar_t g_desc[384];

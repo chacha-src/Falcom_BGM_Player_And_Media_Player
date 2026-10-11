@@ -6313,6 +6313,71 @@ static void MpJakThemeScene(GdiSoft3D::Context& ctx, int id, const CCC_UiThemePa
 		ctx.DrawNeonBox(-0.55f, 0.55f, 0.14f, 0.70f, 0.92f, ac2, 0.f);
 		break;
 	}
+	case CCC_UI_THEME_PURE_F: {
+		ctx.DrawSphere(0.f, 0.42f + bob, 0.46f, 0.12f, face, 8, 6);
+		ctx.DrawSphere(-0.22f, 0.52f, 0.40f, 0.14f, acc, 8, 6);
+		ctx.DrawSphere(0.22f, 0.52f, 0.40f, 0.14f, acc, 8, 6);
+		ctx.DrawSphere(0.f, 0.66f, 0.36f, 0.13f, ac2, 8, 6);
+		ctx.DrawSphere(-0.18f, 0.30f, 0.50f, 0.12f, rib1, 8, 6);
+		ctx.DrawSphere(0.18f, 0.30f, 0.50f, 0.12f, rib1, 8, 6);
+		ctx.DrawBox(-0.04f, 0.04f, 0.22f, 0.42f, 0.58f, rib, 0.f);
+		break;
+	}
+	case CCC_UI_THEME_PURE_M: {
+		ctx.DrawBox(-1.05f, 1.05f, 0.18f, 0.12f, 0.90f, c1, 0.f);
+		ctx.DrawBox(-0.55f, 0.55f, 0.62f, 0.22f, 0.55f, face, 0.f);
+		ctx.DrawBox(-0.08f, 0.08f, 0.58f, 0.28f, 0.48f, acc, 0.f);
+		ctx.DrawTorus(0.f, 0.28f, 0.50f, 0.18f, 0.03f, ac2, 12, 6);
+		break;
+	}
+	case CCC_UI_THEME_BREAK_F: {
+		ctx.postGlow = true;
+		const float sh = 0.16f * sinf(t * 7.5f);
+		ctx.DrawNeonBox(-0.70f + sh, -0.10f + sh, 0.55f, 0.20f, 0.58f, acc, 0.f);
+		ctx.DrawNeonBox(0.05f - sh, 0.72f, 0.28f, 0.30f, 0.70f, ac2, 0.f);
+		ctx.DrawBox(-0.20f, 0.35f + sh, 0.18f, 0.55f, 0.82f, rib1, 0.f);
+		ctx.DrawSphere(0.40f * cosf(t * 3.2f), 0.48f + bob, 0.42f, 0.10f, face, 7, 5);
+		break;
+	}
+	case CCC_UI_THEME_BREAK_M: {
+		ctx.postGlow = true;
+		const float sh = 0.18f * sinf(t * 6.2f);
+		ctx.DrawBox(-0.90f, -0.15f + sh, 0.48f, 0.18f, 0.55f, acc, 0.f);
+		ctx.DrawBox(0.05f - sh, 0.85f, 0.22f, 0.28f, 0.62f, ac2, 0.f);
+		ctx.DrawBox(-0.30f + sh, 0.25f, 0.12f, 0.60f, 0.88f, rib, 0.f);
+		ctx.DrawTorus(sh, 0.36f, 0.46f, 0.20f, 0.04f, face, 8, 5);
+		break;
+	}
+	case CCC_UI_THEME_GOTH_F: {
+		ctx.DrawTorus(0.f, 0.40f + bob, 0.48f, 0.34f, 0.05f, acc, 14, 8);
+		ctx.DrawTorus(0.f, 0.40f, 0.48f, 0.20f, 0.03f, ac2, 12, 6);
+		ctx.DrawSphere(0.f, 0.40f, 0.55f, 0.08f, rib1, 8, 6);
+		ctx.DrawBox(-1.05f, 1.05f, 0.12f, 0.10f, 0.90f, c1, 0.f);
+		break;
+	}
+	case CCC_UI_THEME_GOTH_M: {
+		ctx.DrawBox(-0.55f, 0.55f, 0.70f, 0.22f, 0.70f, face, 0.f);
+		ctx.DrawBox(-0.12f, 0.12f, 0.62f, 0.30f, 0.55f, acc, 0.f);
+		ctx.DrawBox(-0.85f, -0.40f, 0.36f, 0.18f, 0.48f, ac2, 0.f);
+		ctx.DrawBox(0.40f, 0.85f, 0.36f, 0.18f, 0.48f, ac2, 0.f);
+		ctx.DrawTorus(0.f, 0.22f, 0.50f, 0.16f, 0.03f, rib1, 10, 6);
+		break;
+	}
+	case CCC_UI_THEME_SCHOOL_F: {
+		ctx.DrawSphere(-0.28f, 0.42f + bob, 0.42f, 0.16f, acc, 8, 6);
+		ctx.DrawSphere(0.28f, 0.42f, 0.46f, 0.16f, acc, 8, 6);
+		ctx.DrawBox(-0.08f, 0.08f, 0.28f, 0.40f, 0.58f, ac2, 0.f);
+		ctx.DrawBox(-1.05f, 1.05f, 0.14f, 0.10f, 0.88f, c1, 0.f);
+		break;
+	}
+	case CCC_UI_THEME_SCHOOL_M: {
+		ctx.DrawBox(-0.70f, 0.70f, 0.55f, 0.18f, 0.70f, c1, 0.f);
+		ctx.DrawBox(-0.10f, 0.10f, 0.48f, 0.28f, 0.52f, acc, 0.f);
+		ctx.DrawTorus(0.f, 0.30f, 0.48f, 0.22f, 0.04f, ac2, 12, 6);
+		ctx.DrawBox(-1.05f, -0.72f, 0.32f, 0.16f, 0.40f, rib, 0.f);
+		ctx.DrawBox(0.72f, 1.05f, 0.32f, 0.16f, 0.40f, rib, 0.f);
+		break;
+	}
 	default:
 		ctx.DrawTorus(0.f, 0.34f + bob, 0.50f, 0.30f, 0.07f, acc, 12, 8);
 		ctx.DrawSphere(-0.55f, 0.38f, 0.42f, 0.14f, ac2, 8, 6);
@@ -6422,10 +6487,16 @@ static void MpJakThemeSoft2D(CDC& dc, int w, int h, int id, const CCC_UiThemePal
 		flower(w * 22 / 100 + ox, h * 78 / 100 - oy, fs, MpJakSafe(th.ribbon0), MpJakSafe(th.face));
 		sparkle(w * 78 / 100 - ox, h * 82 / 100 - oy, hs, MpJakSafe(th.accent));
 	} else {
-		motifAt(w * 18 / 100 + ox, h * 22 / 100 + oy);
-		motifAt(w * 80 / 100 - ox, h * 28 / 100);
-		motifAt(w * 22 / 100, h * 78 / 100 - oy);
-		motifAt(w * 78 / 100 + ox, h * 82 / 100);
+		const int gx = (id == CCC_UI_THEME_BREAK_F || id == CCC_UI_THEME_BREAK_M)
+			? (int)(14.f * sinf(t * 6.4f)) : 0;
+		motifAt(w * 18 / 100 + ox + gx, h * 22 / 100 + oy);
+		motifAt(w * 80 / 100 - ox - gx, h * 28 / 100);
+		motifAt(w * 22 / 100 + gx, h * 78 / 100 - oy);
+		motifAt(w * 78 / 100 + ox, h * 82 / 100 - gx);
+		if (gx) {
+			CRect r(w / 2 - ms + gx, h / 2 - ms, w / 2 + ms + gx, h / 2 + ms);
+			CCC_DrawThemeMotif(&dc, r, MpJakSafe(th.accent2));
+		}
 	}
 	dc.SelectObject(opn);
 }
@@ -6450,7 +6521,10 @@ void CMediaPlayerDlg::DrawNoJacketPlaceholder(CDC& dc, int w, int h)
 	bool drew3d = false;
 	if (!menuTrack && w >= 40 && h >= 40 && m_jacketSoftCtx.Create(w, h)) {
 		GdiSoft3D::Context& ctx = m_jacketSoftCtx;
-		ctx.cam.yawDeg = -24.f + 16.f * sinf(t * 0.42f);
+		float yawJ = 0.f;
+		if (id == CCC_UI_THEME_BREAK_F || id == CCC_UI_THEME_BREAK_M)
+			yawJ = 18.f * sinf(t * 6.0f);
+		ctx.cam.yawDeg = -24.f + yawJ + 16.f * sinf(t * 0.42f);
 		ctx.cam.pitchDeg = 22.f + 9.f * cosf(t * 0.31f);
 		ctx.cam.zoom = 1.08f + 0.06f * sinf(t * 0.22f) + 0.04f * pulse;
 		GdiSoft3D::ClampCam(ctx.cam);

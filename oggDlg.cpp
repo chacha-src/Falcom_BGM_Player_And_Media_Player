@@ -37,6 +37,7 @@ int flacmode = 0;
 #include "ScreenCaptureDlg.h"
 #include "MidiPack.h"
 #include "ComposerConvert.h"
+#include "kb_sasami/source/sasami_file.h"
 #include "CSasamiMidiScoreDlg.h"
 #include "CSasamiFmScoreDlg.h"
 #include "CSasamiTextDlg.h"
@@ -5888,6 +5889,28 @@ int XfStartCrossfadeFromNotify(int force)
 CString wavExportPath;
 int wavExportLoopCount = 0;
 float g_wavExportMaxSec = 0; // KPI等: 書き出し上限秒(0=無制限)
+/* SASAMI の書き出し。J ありは前奏1回+最長Jを回数分。J なしは無音終端。秒数では切らない。 */
+static double s_sasamiExportEnd = -1.0;
+void WavExportBeginPass()
+{
+	s_sasamiExportEnd = -1.0;
+}
+int WavExportSkipSecCap()
+{
+	return SasamiExtIsAny(filen) ? 1 : 0;
+}
+int WavExportSasamiLoopDone()
+{
+	if (!WavExportSkipSecCap()) return 0;
+	if (!(kpi_file_loop && loop2 > 0 && wavExportLoopCount > 0 && wavbit_sample_Hz > 0))
+		return 0;
+	const double endSamp = (double)loop1 + (double)loop2 * (double)wavExportLoopCount;
+	if (s_sasamiExportEnd < 0.0) {
+		s_sasamiExportEnd = endSamp;
+		MpDecodeProgressSetExpectedSec(endSamp / (double)wavbit_sample_Hz);
+	}
+	return ((double)playb >= endSamp) ? 1 : 0;
+}
 int g_wavExportSampleRate = 0; // 書き出し先Hz(0=ソースのまま)
 int g_wavExportChannels = 0; // 書き出しch(0=ソース。クロスフェード追従)
 int g_wavExportBits = 0; // 書き出しbit(0=ソース。16/24/32)
@@ -15893,7 +15916,7 @@ BOOL COggDlg::ExportToWav(playlistdata0* pc, CString outputPath, int loopCount, 
 			}
 		}
 	}
-	if (pc->sub == -3) {
+	if (pc->sub == -3 && !SasamiExtIsAny(pc->fol)) {
 		float sec = localOpts.kpiDurationSec;
 		if (sec < 1.f) sec = savedata.wav_export_kpi_sec;
 		if (sec < 1.f) sec = 240.f;
@@ -15907,7 +15930,9 @@ BOOL COggDlg::ExportToWav(playlistdata0* pc, CString outputPath, int loopCount, 
 		double expect = (pc->time > 0) ? (double)pc->time : 180.0;
 		if (g_wavExportMaxSec > 0)
 			expect = (double)g_wavExportMaxSec;
-		expect *= (double)loopCount;
+		/* SASAMI の J 無しは曲長で止まる。J ありの期待長は周が分かってから入れる。 */
+		if (!SasamiExtIsAny(pc->fol))
+			expect *= (double)loopCount;
 		MpDecodeProgressSetExpectedSec(expect);
 		MpDecodeProgressReport(1, LL14(
 			L"読込開始…", L"Loading...", L"Chargement...", L"Caricamento...", L"Cargando...",

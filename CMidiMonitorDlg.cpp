@@ -781,15 +781,17 @@ static int MmEvSoftRank(DWORD msg)
 	const int st = (int)(msg & 0xF0);
 	const int d1 = (int)((msg >> 8) & 0x7F);
 	const int d2 = (int)((msg >> 16) & 0x7F);
-	/* 同時刻の並びは譜面 CmpEv と同じ: 準備 CC → ノート → 後始末 CC。
-	   CC64 on はノートより前、CC64 off はノートより後。 */
+	/* 同時刻: 準備 CC → ノート → 後始末 CC。
+	   CC64 on はノートより前、CC64 off はノートより後。
+	   NoteOff と NoteOn は同じ段。ファイル順（SASAMI は切ってから出す）を
+	   崩すと、同音の2音目とループ頭の音が Off で消える。 */
 	if (st == 0xB0) {
 		if (d1 == 64) return (d2 >= 64) ? 1 : 5;
 		return 2;
 	}
 	if (st == 0xC0 || st == 0xE0) return 2;
 	if (st == 0x90 && d2 != 0) return 4;
-	if (st == 0x80 || (st == 0x90 && d2 == 0)) return 5;
+	if (st == 0x80 || (st == 0x90 && d2 == 0)) return 4;
 	if ((msg & 0xFF) >= 0xfa) return 0; /* meta / tempo / lyric first */
 	return 3;
 }

@@ -3352,29 +3352,50 @@ static void PlExportRowMidi(CPlayList* self, LPCTSTR fol)
 #else
 	const wchar_t* src = fol;
 #endif
+	wchar_t dest[MAX_PATH];
+	dest[0] = 0;
+	const wchar_t* leaf = wcsrchr(src, L'\\');
+	if (!leaf) leaf = wcsrchr(src, L'/');
+	wcsncpy_s(dest, leaf ? leaf + 1 : src, _TRUNCATE);
+	wchar_t* dext = wcsrchr(dest, L'.');
+	if (dext) wcscpy_s(dext, (size_t)(MAX_PATH - (dext - dest)), L".mid");
+	else wcscat_s(dest, L".mid");
 	wchar_t tmp[MAX_PATH];
 	tmp[0] = 0;
 	int ok = 0;
+	int loops = 1;
 	const wchar_t* dot = wcsrchr(src, L'.');
 	const int already = (dot && (_wcsicmp(dot, L".mid") == 0 || _wcsicmp(dot, L".midi") == 0)) ? 1 : 0;
 	if (already) {
 		wcsncpy_s(tmp, src, _TRUNCATE);
 		ok = 1;
+		if (!SasamiMidiPickSave(self->GetSafeHwnd(), dest, MAX_PATH, 0, &loops))
+			return;
 	}
 	else if (SasamiExtIsMidi(src)) {
 		const int hint = SasamiConvertPathToMidiFile(src, NULL, 0, -1);
-		int loops = 1;
-		if (hint == 2) {
-			CSasamiMidiExportDlg dlg(self);
-			if (dlg.DoModal() != IDOK)
-				return;
-			loops = dlg.Loops();
-		}
-		if (hint != 0)
+		if (!hint) {
+			ok = 0;
+		} else if (!SasamiMidiPickSave(self->GetSafeHwnd(), dest, MAX_PATH, hint == 2, &loops)) {
+			return;
+		} else {
 			ok = SasamiConvertPathToMidiFile(src, tmp, MAX_PATH, loops);
+		}
 	}
-	else
+	else {
 		ok = ComposerConvertToMidi(src, tmp, MAX_PATH);
+		if (!ok || !tmp[0]) {
+			PlMessageBox(self, LL14(L"標準MIDIへ変換できませんでした", L"Could not convert to standard MIDI",
+				L"Conversion MIDI impossible", L"Conversione MIDI non riuscita", L"No se pudo convertir a MIDI",
+				L"표준 MIDI 변환 실패", L"无法转为标准MIDI", L"تعذر التحويل إلى MIDI", L"Не удалось преобразовать в MIDI",
+				L"MIDI-Konvertierung fehlgeschlagen", L"Falha ao converter para MIDI", L"Omzetten naar MIDI mislukt",
+				L"Nie udało się przekonwertować na MIDI", L"Standart MIDI'ye çevrilemedi"),
+				MB_OK | MB_ICONWARNING);
+			return;
+		}
+		if (!SasamiMidiPickSave(self->GetSafeHwnd(), dest, MAX_PATH, 0, &loops))
+			return;
+	}
 	if (!ok || !tmp[0]) {
 		PlMessageBox(self, LL14(L"標準MIDIへ変換できませんでした", L"Could not convert to standard MIDI",
 			L"Conversion MIDI impossible", L"Conversione MIDI non riuscita", L"No se pudo convertir a MIDI",
@@ -3384,25 +3405,6 @@ static void PlExportRowMidi(CPlayList* self, LPCTSTR fol)
 			MB_OK | MB_ICONWARNING);
 		return;
 	}
-	wchar_t dest[MAX_PATH];
-	dest[0] = 0;
-	const wchar_t* leaf = wcsrchr(src, L'\\');
-	if (!leaf) leaf = wcsrchr(src, L'/');
-	wcsncpy_s(dest, leaf ? leaf + 1 : src, _TRUNCATE);
-	wchar_t* dext = wcsrchr(dest, L'.');
-	if (dext) wcscpy_s(dext, (size_t)(MAX_PATH - (dext - dest)), L".mid");
-	else wcscat_s(dest, L".mid");
-	OPENFILENAMEW ofn;
-	ZeroMemory(&ofn, sizeof(ofn));
-	ofn.lStructSize = sizeof(ofn);
-	ofn.hwndOwner = self->GetSafeHwnd();
-	ofn.lpstrFilter = L"Standard MIDI (*.mid)\0*.mid\0\0";
-	ofn.lpstrFile = dest;
-	ofn.nMaxFile = MAX_PATH;
-	ofn.Flags = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST | OFN_EXPLORER;
-	ofn.lpstrDefExt = L"mid";
-	if (!GetSaveFileNameW(&ofn))
-		return;
 	if (_wcsicmp(tmp, dest) == 0)
 		return;
 	if (!CopyFileW(tmp, dest, FALSE)) {

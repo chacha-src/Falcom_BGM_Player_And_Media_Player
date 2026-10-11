@@ -3330,17 +3330,22 @@ void CSasamiMidiScoreDlg::ExportStandardMidi()
 	wchar_t built[MAX_PATH];
 	if (!BuildToTemp(built, MAX_PATH))
 		return;
+	const int hint = SasamiConvertPathToMidiFile(built, NULL, 0, -1);
+	wchar_t dest[MAX_PATH];
+	wcscpy_s(dest, L"score.mid");
+	int loops = 1;
+	if (!hint || !SasamiMidiPickSave(GetSafeHwnd(), dest, MAX_PATH, hint == 2, &loops)) {
+		if (!hint)
+			m_status.SetWindowText(LL14(L"標準MIDIへ変換できませんでした", L"Could not convert to standard MIDI",
+				L"Conversion MIDI impossible", L"Conversione MIDI non riuscita", L"No se pudo convertir a MIDI",
+				L"표준 MIDI 변환 실패", L"无法转为标准MIDI", L"تعذر التحويل إلى MIDI", L"Не удалось преобразовать в MIDI",
+				L"MIDI-Konvertierung fehlgeschlagen", L"Falha ao converter para MIDI", L"Omzetten naar MIDI mislukt",
+				L"Nie udało się przekonwertować na MIDI", L"Standart MIDI'ye çevrilemedi"));
+		return;
+	}
 	wchar_t mid[MAX_PATH];
 	mid[0] = 0;
-	const int hint = SasamiConvertPathToMidiFile(built, NULL, 0, -1);
-	int loops = 1;
-	if (hint == 2) {
-		CSasamiMidiExportDlg dlg(this);
-		if (dlg.DoModal() != IDOK)
-			return;
-		loops = dlg.Loops();
-	}
-	if (!hint || !SasamiConvertPathToMidiFile(built, mid, MAX_PATH, loops) || !mid[0]) {
+	if (!SasamiConvertPathToMidiFile(built, mid, MAX_PATH, loops) || !mid[0]) {
 		m_status.SetWindowText(LL14(L"標準MIDIへ変換できませんでした", L"Could not convert to standard MIDI",
 			L"Conversion MIDI impossible", L"Conversione MIDI non riuscita", L"No se pudo convertir a MIDI",
 			L"표준 MIDI 변환 실패", L"无法转为标准MIDI", L"تعذر التحويل إلى MIDI", L"Не удалось преобразовать в MIDI",
@@ -3348,19 +3353,6 @@ void CSasamiMidiScoreDlg::ExportStandardMidi()
 			L"Nie udało się przekonwertować na MIDI", L"Standart MIDI'ye çevrilemedi"));
 		return;
 	}
-	wchar_t dest[MAX_PATH];
-	wcscpy_s(dest, L"score.mid");
-	OPENFILENAMEW ofn;
-	ZeroMemory(&ofn, sizeof(ofn));
-	ofn.lStructSize = sizeof(ofn);
-	ofn.hwndOwner = GetSafeHwnd();
-	ofn.lpstrFilter = L"Standard MIDI (*.mid)\0*.mid\0\0";
-	ofn.lpstrFile = dest;
-	ofn.nMaxFile = MAX_PATH;
-	ofn.Flags = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST | OFN_EXPLORER;
-	ofn.lpstrDefExt = L"mid";
-	if (!GetSaveFileNameW(&ofn))
-		return;
 	if (!CopyFileW(mid, dest, FALSE)) {
 		m_status.SetWindowText(LL14(L"書き込みに失敗しました", L"Write failed", L"Échec écriture", L"Scrittura non riuscita", L"Error al escribir",
 			L"쓰기 실패", L"写入失败", L"فشل الكتابة", L"Ошибка записи", L"Schreiben fehlgeschlagen",

@@ -1803,6 +1803,7 @@
 #define IDD_SASAMI_MIDI_EXPORT          4720
 #define IDC_SASAMI_MEX_LOOPS            4721
 #define IDC_SASAMI_MEX_HINT             4722
+#define IDC_SASAMI_MEX_LABEL            4723
 #define IDR_CSO_GPU_VS_RECT             4810
 #define IDR_CSO_GPU_PS_RECT             4811
 #define IDR_CSO_GPU_VS_PIANO            4812

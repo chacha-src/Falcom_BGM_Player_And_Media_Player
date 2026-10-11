@@ -1043,21 +1043,25 @@ DWORD WINAPI KbSasamiDecoder::Render(BYTE* pBuffer, DWORD dwSizeSample)
 	const DWORD bytesPerFrame = FmPcmBytesPerFrame(outBits);
 	const double gain = m_raira ? kFmMidiOutGain : (kFmMidiOutGain * 0.5 / 1.5);
 	while (remain) {
-		/* 1周で止める。2周目以降は本体が loop 先頭へシークする（回数・フェード・無音）。
-		   ここで巻き戻すと書き出しの繰返し回数が数えない。 */
-		if (looping && loopEndSamp > loopStartSamp + 1 && m_curSample > loopEndSamp) {
-			m_loopClosed = 1;
-			break;
+		/* FPY と同じ。ここで短く返すと本体が loop1（Q より前、先頭付近）へ
+		   シークし、1回目の J が曲頭から鳴る。Q の時刻へ位置だけ戻して続ける。
+		   play(0) はしない。先頭から送り直すと Q より前のノートが残る。 */
+		if (looping && loopEndSamp > loopStartSamp + 1 && m_curSample >= loopEndSamp) {
+			m_sequencer.set_position(m_loopStart);
+			m_curSample = loopStartSamp;
+			m_loopClosed = 0;
 		}
 		DWORD chunk = remain;
 		if (chunk > MIX_FRAMES) chunk = MIX_FRAMES;
-		if (looping && loopEndSamp > loopStartSamp && m_curSample <= loopEndSamp
-			&& m_curSample + chunk > loopEndSamp + 1)
-			chunk = (DWORD)(loopEndSamp + 1 - m_curSample);
+		if (looping && loopEndSamp > loopStartSamp && m_curSample < loopEndSamp
+			&& m_curSample + chunk > loopEndSamp)
+			chunk = (DWORD)(loopEndSamp - m_curSample);
 		if (chunk == 0) {
-			if (looping && loopEndSamp > loopStartSamp) {
-				m_loopClosed = 1;
-				break;
+			if (looping && loopEndSamp > loopStartSamp + 1 && m_curSample >= loopEndSamp) {
+				m_sequencer.set_position(m_loopStart);
+				m_curSample = loopStartSamp;
+				m_loopClosed = 0;
+				continue;
 			}
 			ZeroMemory(p, remain * bytesPerFrame);
 			break;
@@ -1109,15 +1113,6 @@ DWORD WINAPI KbSasamiDecoder::Render(BYTE* pBuffer, DWORD dwSizeSample)
 		p += chunk * bytesPerFrame;
 	}
 
-	if (m_loopClosed) {
-		const DWORD wrote = dwSizeSample - remain;
-		if (remain)
-			ZeroMemory(p, remain * bytesPerFrame);
-		if (!m_raira)
-			KbsMonPlay((__int64)m_curSample, (int)m_MediaInfo.dwSampleRate);
-		return wrote;
-	}
-
 	if (!m_liveStream && !looping && m_sequencer.is_play_end()) {
 		const double limit = 0.001;
 		const DWORD step = bytesPerFrame / 2;
@@ -1138,18 +1133,30 @@ DWORD WINAPI KbSasamiDecoder::Render(BYTE* pBuffer, DWORD dwSizeSample)
 
 UINT64 KbSasamiDecoder::SeekFmMidiLocked(UINT64 qwPosSample)
 {
+	const double rate = (double)m_MediaInfo.dwSampleRate;
+	const int haveLoop = (m_loopEnd > m_loopStart && m_loopStart >= 0.0 && rate > 0.0) ? 1 : 0;
+	const UINT64 ls = haveLoop ? (UINT64)(m_loopStart * rate + 0.5) : 0;
+	const UINT64 le = haveLoop ? (UINT64)(m_loopEnd * rate + 0.5) : 0;
+	const UINT64 loopNear = (rate > 0.0) ? (UINT64)rate : 44100ull;
+	const int nearLoop = (haveLoop && qwPosSample + loopNear >= ls && qwPosSample <= ls + loopNear) ? 1 : 0;
+	const int atEnd = (haveLoop && le > ls && m_curSample + 1 >= le) ? 1 : 0;
+	/* FPY の軟シーク。周回直後の先頭シークで play(0) すると Q より前に戻る。 */
+	if (haveLoop && atEnd && (nearLoop || qwPosSample == 0)) {
+		m_seeking = false;
+		m_loopClosed = 0;
+		m_sequencer.set_position(m_loopStart);
+		m_curSample = ls;
+		m_endSample = 0;
+		m_silentSample = 0;
+		return m_curSample;
+	}
 	m_seeking = true;
 	m_loopClosed = 0;
 	m_sequencer.play(0, this);
 	reset();
 	UINT64 pos = qwPosSample;
-	if (m_loopEnd > m_loopStart && m_loopStart >= 0.0) {
-		const double rate = (double)m_MediaInfo.dwSampleRate;
-		const UINT64 ls = (UINT64)(m_loopStart * rate + 0.5);
-		const UINT64 le = (UINT64)(m_loopEnd * rate + 0.5);
-		if (le > ls && pos >= le)
-			pos = ls + ((pos - ls) % (le - ls));
-	}
+	if (haveLoop && le > ls && pos >= le)
+		pos = ls + ((pos - ls) % (le - ls));
 	if (pos > 0) {
 		const double t = (double)pos / (double)m_MediaInfo.dwSampleRate;
 		m_sequencer.play(t, this);

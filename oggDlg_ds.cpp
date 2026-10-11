@@ -1627,6 +1627,9 @@ UINT HandleNotifications(LPVOID)
 } //handlenotifications()
 
 // WAV出力専用：DirectSoundを使わずデコード→ファイル書き込みのみ。m_c2チェックに関係なくcc1で出力。
+void WavExportBeginPass();
+int WavExportSkipSecCap();
+int WavExportSasamiLoopDone();
 void HandleNotifications_export()
 {
 	extern volatile LONG g_mpPromptAnalyzeOnly;
@@ -1666,6 +1669,7 @@ void HandleNotifications_export()
 		MpPromptTickAtTime(0.0);
 	}
 
+	WavExportBeginPass();
 	MpDecodeProgressReport(2, LL14(
 		L"デコード中…", L"Decoding...", L"Decodage...", L"Decodifica...", L"Decodificando...",
 		L"디코딩 중…", L"解码中…", L"Decoding...", L"Декодирование...", L"Dekodiere...",
@@ -1682,9 +1686,11 @@ void HandleNotifications_export()
 		if (syukai == 2) break;
 		if (fade1) break;
 		if (wavExportLoopCount > 0 && loopcnt >= wavExportLoopCount) break;
+		if (WavExportSasamiLoopDone()) { fade1 = 1; break; }
 		// KPI(mode==-3)等: 終端のないソースは秒数で打ち切る（実書き込み量優先）
+		// SASAMI は秒数を見ない（J は回数、J なしは曲末）。
 		// wl は変換後バイト。打ち切りもロック済み出力形式で数える（192k→48k で 1/4 短縮しない）
-		if (g_wavExportMaxSec > 0 && wavbit_sample_Hz > 0) {
+		if (!WavExportSkipSecCap() && g_wavExportMaxSec > 0 && wavbit_sample_Hz > 0) {
 			extern int g_pcm_upscale_active;
 			extern int g_ds_pcm_rate, g_ds_pcm_ch, g_ds_pcm_bits;
 			int outRate = wavbit_sample_Hz;
@@ -1738,7 +1744,8 @@ void HandleNotifications_export()
 			MpPromptTickAtTime(0.0);
 		if (fade1) break;
 		if (wavExportLoopCount > 0 && loopcnt >= wavExportLoopCount) break;
-		if (g_wavExportMaxSec > 0 && wavbit_sample_Hz > 0) {
+		if (WavExportSasamiLoopDone()) { fade1 = 1; break; }
+		if (!WavExportSkipSecCap() && g_wavExportMaxSec > 0 && wavbit_sample_Hz > 0) {
 			extern int g_pcm_upscale_active;
 			extern int g_ds_pcm_rate, g_ds_pcm_ch, g_ds_pcm_bits;
 			int outRate = wavbit_sample_Hz;
