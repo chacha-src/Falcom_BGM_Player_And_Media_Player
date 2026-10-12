@@ -23216,7 +23216,12 @@ int readkpi(BYTE* bw, int cnt)
 									kpi_silence_bytes = 0;
 									kpi_heard_audio = 1;
 								}
-								const double silentSec = (kpi_heard_audio && !midiLike) ? 2.0 : 4.0;
+								/* 頭の休符。mid を 4 秒で切ると、最初のノートが 20 秒後の
+								   曲はモニタだけセットアップ位置で止まり、音とずれる。
+								   一度鳴ったあとの無音は今まで通り。 */
+								const int midiLead = (midiLike && !kpi_heard_audio && loop2 != 0) ? 1 : 0;
+								const double silentSec = midiLead ? 120.0
+									: ((kpi_heard_audio && !midiLike) ? 2.0 : 4.0);
 								const int hz = (wavbit_sample_Hz > 0) ? wavbit_sample_Hz : 44100;
 								const int ch = (wavchannel > 0) ? wavchannel : 2;
 								const int bps = abs(wavsam_depth) / 8;

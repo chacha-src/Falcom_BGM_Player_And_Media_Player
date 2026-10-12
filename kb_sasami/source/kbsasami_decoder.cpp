@@ -375,6 +375,24 @@ void KbSasamiDecoder::midi_message(int port, uint_least32_t message)
 
 void KbSasamiDecoder::sysex_message(int port, const void* data, std::size_t size)
 {
+	unsigned char routed[256];
+	const unsigned char* d0 = (const unsigned char*)data;
+	/* GS はケーブル 1 本のまま 40=ポートA / 50=ポートB。FF21 が 0 の
+	   セットアップトラックに 50 が乗ると、B の音量・パン・音色が捨てられ、
+	   モニタ（アドレスで B に載せる）だけ先に合う。 */
+	if (d0 && size >= 8 && size <= sizeof(routed) && m_nPorts > 1
+		&& d0[0] == 0xf0 && d0[1] == 0x41 && d0[3] == 0x42 && d0[4] == 0x12) {
+		const int aa = d0[5] & 0x7f;
+		int blk = -1;
+		if (aa == 0x50) blk = 1;
+		else if (aa == 0x60 && m_nPorts > 2) blk = 2;
+		if (blk > 0 && blk < m_nPorts && m_synths[blk]) {
+			memcpy(routed, d0, size);
+			routed[5] = 0x40;
+			data = routed;
+			port = blk;
+		}
+	}
 	if (port < 0 || port >= m_nPorts) port = 0;
 	m_synths[port]->sysex_message(data, size);
 	const unsigned char* d = (const unsigned char*)data;

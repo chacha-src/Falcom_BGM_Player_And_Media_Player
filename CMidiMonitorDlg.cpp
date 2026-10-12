@@ -3106,6 +3106,9 @@ void CMidiMonitorDlg::LoadCurrentMidi()
 					}
 				}
 				q += sl;
+				/* SMF では F0/F7 でランニングを切る。残すと、続くデータバイトを
+				   前のチャンネルとして読み、音（シーケンサ）と tick がずれる。 */
+				running = 0;
 			} else {
 				const int kind = st & 0xf0;
 				const int need = (kind == 0xc0 || kind == 0xd0) ? 1 : 2;
