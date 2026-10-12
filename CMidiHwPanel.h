@@ -54,5 +54,7 @@ void MidiHwLcdDraw(CDC& dc, const CRect& rc, UINT dpi,
 	int selA,
 	const MidiHwLcdPartSnap* partsB,
 	const BYTE* keyBitsB,
-	int selB);
+	int selB,
+	CRect* outPrev,
+	CRect* outNext);
 int MidiHwLcdSeg(float lev, int held);

@@ -191,6 +191,13 @@ static void KillStaleKpiHost32()
 	CloseHandle(snap);
 }
 
+void KpiHost32Client::RecycleHost()
+{
+	Disconnect();
+	KillStaleKpiHost32();
+	Sleep(250);
+}
+
 void OggPurgeObsoleteKpiHost32()
 {
 	HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);

@@ -1247,7 +1247,6 @@ private:
     // ホバー状態のアイテムを更新し、必要に応じて再描画します
     void UpdateHotItem(int n);
     void UpdateHotItemFromCursor();
-    void PumpWhileInput();
 
     // 表示されているアイテム領域を再描画します
     void RedrawVisibleItems();

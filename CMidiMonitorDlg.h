@@ -264,7 +264,8 @@ private:
 	int m_liveTextKind; // 0=なし 1=Text 5=Lyric 6=Marker 7=Cue
 	int m_smfFormat;
 	int m_smfTracks;
-	int m_gsMapKind; // 0=なし 1=55 2=88 3=88Pro 4=8820 5=GM 6=SD 8=LA 9..=ETC
+	int m_gsMapKind; // 0=なし 1=55 2=88 3=88Pro 4=8820 5=GM 6=SD 8=LA 9..=ETC（CC32 / 音色マップ）
+	int m_gsModuleKind; // LCD 機種。00 00 7F の System Mode。CC32 の 55MAP では変えない
 	int m_fileHasXg;
 	int m_fileHasGm;
 	int m_fileHasSd;

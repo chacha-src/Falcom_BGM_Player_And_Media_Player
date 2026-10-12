@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include <windows.h>
 #include <string>
@@ -32,6 +32,9 @@ public:
 	bool EnsureConnected(); // 未接続なら ogghost32.exe を起動してパイプ接続
 	bool IsConnected() const;
 	void Disconnect();
+	/* VST Close 後のゾンビ SC-VA 対策。パイプを切り ogghost32 を落とす。
+	   次の EnsureConnected が新しいプロセスを起こす。 */
+	void RecycleHost();
 
 	bool Ping();
 	bool ListExts(const std::wstring& kpiPath, uint32_t& outKpiVer, std::wstring& outSupportExts);

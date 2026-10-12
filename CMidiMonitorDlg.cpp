@@ -825,13 +825,18 @@ static int MmGsDt1Hdr(const BYTE* d, int n)
 	return 0;
 }
 
-/* 00 00 7F のデータ。00=SC-55 01=SC-88 02=SC-88Pro 03以降=SC-8820/8850 */
-static int MmGsSysModeToMap(int mode)
+/* Roland 00 00 7F System Mode Set。00=その機種の Native（SC-55 にはこのメッセージが無い）。
+   01 は一つ前の互換、02 は二つ前。nativeKind: 2=SC-88 3=SC-88Pro 4=SC-8820。 */
+static int MmGsSysModeToMap(int mode, int nativeKind)
 {
-	if (mode <= 0) return 1;
-	if (mode == 1) return 2;
-	if (mode == 2) return 3;
-	return 4;
+	if (nativeKind < 2 || nativeKind > 4)
+		nativeKind = 3;
+	if (mode < 0)
+		mode = 0;
+	int k = nativeKind - mode;
+	if (k < 1) k = 1;
+	if (k > 4) k = 4;
+	return k;
 }
 
 static int MmXgBassHz(int v)
@@ -1639,7 +1644,7 @@ CMidiMonitorDlg::CMidiMonitorDlg(CWnd* pParent)
 	, m_noteCount(0), m_masterVol(100)
 	, m_notesPeak(0), m_notesPeakHold(0), m_layW(0)
 	, m_dragKind(0), m_dragPart(-1), m_playPart(-1), m_playNote(-1)
-	, m_viewMode(0), m_mapForce(0), m_gsMapKind(0), m_fileHasXg(0), m_fileHasGm(0), m_fileHasSd(0), m_gs32(0), m_mirrorToB(0)
+	, m_viewMode(0), m_mapForce(0), m_gsMapKind(0), m_gsModuleKind(0), m_fileHasXg(0), m_fileHasGm(0), m_fileHasSd(0), m_gs32(0), m_mirrorToB(0)
 	, m_tsEvN(0), m_maxTick(0)
 	, m_posBar(1), m_posBars(1), m_posBeat(1), m_posTick(0), m_posTpm(1920), m_posNum(4)
 	, m_frozen(false), m_alwaysOnTop(false), m_paintDisabled(false)
@@ -2314,6 +2319,7 @@ void CMidiMonitorDlg::UnloadMidi()
 	m_smfFormat = 0;
 	m_smfTracks = 0;
 	m_gsMapKind = 0;
+	m_gsModuleKind = 0;
 	m_fileHasXg = 0;
 	m_fileHasGm = 0;
 	m_fileHasSd = 0;
@@ -2342,6 +2348,10 @@ void CMidiMonitorDlg::ApplyMapForce(int force)
 {
 	m_mapForce = force;
 	const int mid = MmForceMapId(force);
+	if (mid >= 1 && mid <= 4)
+		m_gsModuleKind = mid;
+	else if (force == 1)
+		m_gsModuleKind = 0;
 	for (int i = 0; i < PART_MAX; ++i) {
 		Part& p = m_part[i];
 		if (mid >= 0) {
@@ -2717,6 +2727,7 @@ void CMidiMonitorDlg::ApplySysex(const BYTE* d, int n, int livePort)
 		m_sysMode = 0;
 		m_varConn = 1;
 		if (gm2) m_gsMapKind = 9;
+		m_gsModuleKind = 0;
 		if (livePort >= 0 && livePort <= 1) {
 			ResetPartsBank(livePort);
 			m_sysMode = 0;
@@ -2745,12 +2756,19 @@ void CMidiMonitorDlg::ApplySysex(const BYTE* d, int n, int livePort)
 		return;
 	}
 	if (n >= 11 && VstMidiSysexIsGsSysMode(d, n)) {
-		/* 00=SC-55 01=SC-88 02=SC-88Pro 03=SC-8820/8850。音色は消さない。 */
+		/* 00=Native（88/88Pro/8820）。01 は一つ前、02 は二つ前。音色バンクは後続 CC32。 */
 		m_sysMode = 1;
 		m_varConn = 1;
+		int native = 3;
+		if (m_gsModuleKind >= 2 && m_gsModuleKind <= 4)
+			native = m_gsModuleKind;
+		else if (m_gsMapKind >= 2 && m_gsMapKind <= 4)
+			native = m_gsMapKind;
+		const int kind = MmGsSysModeToMap((n >= 9) ? (int)(d[8] & 0x7f) : 0, native);
+		m_gsModuleKind = kind;
+		m_dirtyHead = true;
 		if (m_mapForce != 0)
 			return;
-		const int kind = MmGsSysModeToMap((n >= 9) ? (int)(d[8] & 0x7f) : 0);
 		m_gsMapKind = kind;
 		const int lo = (livePort >= 0 && livePort <= 1) ? livePort * 16 : 0;
 		const int hi = (livePort >= 0 && livePort <= 1) ? lo + 16 : PART_MAX;
@@ -2807,6 +2825,7 @@ void CMidiMonitorDlg::ApplySysex(const BYTE* d, int n, int livePort)
 	if (n >= 9 && VstMidiSysexIsXgOn(d, n)) {
 		m_sysMode = 2;
 		m_varConn = 0;
+		m_gsModuleKind = 0;
 		if (livePort >= 0 && livePort <= 1) {
 			ResetPartsBank(livePort);
 			m_sysMode = 2;
@@ -3471,7 +3490,7 @@ void CMidiMonitorDlg::LoadCurrentMidi()
 		BYTE msb[32];
 		BYTE have[2048];
 		unsigned short pairs[256];
-		int nPairs = 0, hasGm = 0, hasGs = 0, hasSd = 0, hasGm2 = 0, cc32Max = 0, lastSysMap = 0;
+		int nPairs = 0, hasGm = 0, hasGs = 0, hasSd = 0, hasGm2 = 0, cc32Max = 0, lastSysByte = -1;
 		memset(msb, 0, sizeof(msb));
 		memset(have, 0, sizeof(have));
 		for (int i = 0; i < count; ++i) {
@@ -3486,7 +3505,7 @@ void CMidiMonitorDlg::LoadCurrentMidi()
 					}
 					if (VstMidiSysexIsGsReset(d, n)) hasGs = 1;
 					if (VstMidiSysexIsGsSysMode(d, n) && n >= 9)
-						lastSysMap = MmGsSysModeToMap(d[8] & 0x7f);
+						lastSysByte = (int)(d[8] & 0x7f);
 				}
 				continue;
 			}
@@ -3518,9 +3537,24 @@ void CMidiMonitorDlg::LoadCurrentMidi()
 				}
 			}
 		}
+		int native = 3;
+		if (mapHint >= 2 && mapHint <= 4) native = mapHint;
+		if (cc32Max >= 2 && cc32Max <= 4 && cc32Max > native) native = cc32Max;
+		{
+			const wchar_t* vp = savedata.vstMultiDll;
+			if (vp && vp[0]) {
+				if (wcsstr(vp, L"8820") || wcsstr(vp, L"8850"))
+					native = 4;
+				else if (wcsstr(vp, L"88Pro") || wcsstr(vp, L"88PRO") || wcsstr(vp, L"SC-VA") || wcsstr(vp, L"SCVA")) {
+					if (native < 3) native = 3;
+				} else if ((wcsstr(vp, L"SC-88") || wcsstr(vp, L"SC88")) && native < 2)
+					native = 2;
+			}
+		}
+		const int lastSysMap = (lastSysByte >= 0) ? MmGsSysModeToMap(lastSysByte, native) : 0;
 		int resolved = 0;
 		if (hasXg) resolved = 0;
-		/* システムモード 00 は SC-55 だが、CC32=3 なら音色は 88Pro。バンクを優先する */
+		/* 音色マップは CC32。LCD 機種は System Mode（00=Native）。 */
 		else if (cc32Max >= 1 && cc32Max <= 4) resolved = cc32Max;
 		else if (lastSysMap >= 1 && lastSysMap <= 4) resolved = lastSysMap;
 		else if (mapHint == 8) resolved = 8;
@@ -3535,6 +3569,14 @@ void CMidiMonitorDlg::LoadCurrentMidi()
 		m_fileHasSd = (resolved == 6) ? 1 : 0;
 		m_gsMapKind = (resolved == 8 || (resolved >= 1 && resolved <= 6) ||
 			(resolved >= 9 && resolved <= 18)) ? resolved : 0;
+		if (hasXg)
+			m_gsModuleKind = 0;
+		else if (lastSysMap >= 1 && lastSysMap <= 4)
+			m_gsModuleKind = lastSysMap;
+		else if (mapHint >= 2 && mapHint <= 4)
+			m_gsModuleKind = mapHint;
+		else
+			m_gsModuleKind = 0;
 	}
 	BYTE chUse[PART_MAX];
 	memset(chUse, 0, sizeof(chUse));
@@ -4840,8 +4882,11 @@ void CMidiMonitorDlg::DrawHeader(CDC& dc, int w, int headH, UINT dpi)
 	m_showEvN = m_evCount;
 	m_showSr = m_sampleRate;
 	{
-		const int kind = MidiHwLcdKind(m_sysMode, m_gsMapKind);
-		const wchar_t* model = MidiHwLcdModelName(m_sysMode, m_gsMapKind);
+		int lcdMap = m_gsModuleKind;
+		if (lcdMap < 1 && m_gsMapKind >= 5)
+			lcdMap = m_gsMapKind;
+		const int kind = MidiHwLcdKind(m_sysMode, lcdMap > 0 ? lcdMap : m_gsMapKind);
+		const wchar_t* model = MidiHwLcdModelName(m_sysMode, lcdMap);
 		MidiHwLcdPartSnap snapA[16];
 		BYTE keyA[16];
 		if (!lcdAll.IsRectEmpty()) {
@@ -4853,25 +4898,7 @@ void CMidiMonitorDlg::DrawHeader(CDC& dc, int w, int headH, UINT dpi)
 			const int bank = (user >= 16) ? 1 : 0;
 			FillLcdSnap(snapA, keyA, bank);
 			MidiHwLcdDraw(dc, lcdAll, dpi, kind, model, m_lcd,
-				snapA, keyA, user, NULL, NULL, 0);
-			const int ah = max(14, Scale(14, dpi));
-			m_lcdPrevRc.SetRect(lcdAll.left + 2, lcdAll.top + 1, lcdAll.left + ah + 2, lcdAll.top + ah + 1);
-			m_lcdNextRc.SetRect(lcdAll.right - ah - 2, lcdAll.top + 1, lcdAll.right - 2, lcdAll.top + ah + 1);
-			CPen pen(PS_SOLID, 1, RGB(20, 16, 8));
-			CBrush br(RGB(20, 16, 8));
-			CPen* oldP = dc.SelectObject(&pen);
-			CBrush* oldB = dc.SelectObject(&br);
-			POINT tri[3];
-			tri[0].x = m_lcdPrevRc.left + 2; tri[0].y = (m_lcdPrevRc.top + m_lcdPrevRc.bottom) / 2;
-			tri[1].x = m_lcdPrevRc.right - 2; tri[1].y = m_lcdPrevRc.top + 2;
-			tri[2].x = m_lcdPrevRc.right - 2; tri[2].y = m_lcdPrevRc.bottom - 2;
-			dc.Polygon(tri, 3);
-			tri[0].x = m_lcdNextRc.right - 2; tri[0].y = (m_lcdNextRc.top + m_lcdNextRc.bottom) / 2;
-			tri[1].x = m_lcdNextRc.left + 2; tri[1].y = m_lcdNextRc.top + 2;
-			tri[2].x = m_lcdNextRc.left + 2; tri[2].y = m_lcdNextRc.bottom - 2;
-			dc.Polygon(tri, 3);
-			dc.SelectObject(oldP);
-			dc.SelectObject(oldB);
+				snapA, keyA, user, NULL, NULL, 0, &m_lcdPrevRc, &m_lcdNextRc);
 		} else {
 			m_lcdPrevRc.SetRectEmpty();
 			m_lcdNextRc.SetRectEmpty();

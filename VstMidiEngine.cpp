@@ -38,7 +38,6 @@ extern "C" int SasamiHostGsVstReady(void)
 #else
 #include "KpiHost32VstLive.h"
 #endif
-
 #pragma comment(lib, "winmm.lib")
 static int ProbeLoadedEffectAudible(AEffect* effect);
 static int ProbeLoadedVst3Audible(Vst3Inst* vst3, int drums);
@@ -2986,6 +2985,10 @@ static int GsDt1SkipVstScaleFill(const BYTE* d, int n)
 	return GsDt1UniformFill(d, n);
 }
 
+/* Open で System Mode Set を先に消化した。再生側で同じメッセージを
+   もう一度出すと、切替がやり直されてまた無音になる。 */
+static int g_sysModeConsumed[2];
+
 // Two 16-part VSTs do not share Rx CHANNEL the way one SC-88 does. Host keeps
 // the listen map. 1x 02 is sent (16-part remap: 11h–1Fh minus 10h). After 1x 15
 // (USE FOR RHYTHM) the same block sends 1x 02 from that map, not a forced
@@ -3228,7 +3231,10 @@ static int PrepareSongSysex(const BYTE* data, int len, int smfPort,
 		const BYTE cc = data[7];
 		const int partRx = (bb >= 0x10 && bb <= 0x1f && cc == 0x02 && len >= 11) ? 1 : 0;
 		const int partRhy = (bb >= 0x10 && bb <= 0x1f && cc == 0x15 && len >= 11) ? 1 : 0;
-		if (aa == 0x00 && bb == 0x01 && cc <= 0x1f && len >= 11) {
+		if (aa == 0x00 && bb == 0x00 && cc == 0x7f && g_sysModeConsumed[VstIoSlot()]) {
+			skipVst = 1;
+			units = 0;
+		} else if (aa == 0x00 && bb == 0x01 && cc <= 0x1f && len >= 11) {
 			RxBlockPortSet((int)cc, data[8]);
 			skipVst = 1;
 		} else if (aa == 0x40 && bb <= 0x01)
@@ -3874,7 +3880,8 @@ static void DispatchDueEvents(__int64 start, int frames)
 				if (port > 1) port = 1;
 				if (raw && rawLen > 0) {
 					MidiKeepAliveIfCcSx(0xf0);
-					VstLiveMidiSysex(port, raw, rawLen);
+					if (!(g_sysModeConsumed[VstIoSlot()] && VstMidiSysexIsGsSysMode(raw, rawLen)))
+						VstLiveMidiSysex(port, raw, rawLen);
 					if (VstMidiSysexIsGsReset(raw, rawLen)) {
 						BYTE rhy[11], map2[11];
 						GsFillRhythmDt1(rhy, 0x40);
@@ -4011,7 +4018,8 @@ static void DispatchDueEvents(__int64 start, int frames)
 			if (liveBinds) {
 				int port = e.port < 0 ? 0 : e.port;
 				if (port > 1) port = 1;
-				VstLiveMidiSysex(port, raw, rawLen);
+				if (!(g_sysModeConsumed[VstIoSlot()] && VstMidiSysexIsGsSysMode(raw, rawLen)))
+					VstLiveMidiSysex(port, raw, rawLen);
 				if (VstMidiSysexIsGsReset(raw, rawLen)) {
 					BYTE rhy[11], map2[11];
 					GsFillRhythmDt1(rhy, 0x40);
@@ -4025,7 +4033,7 @@ static void DispatchDueEvents(__int64 start, int frames)
 			int units = 0, rhyBb = -1;
 			const int n = PrepareSongSysex(raw, rawLen, e.port, buf, (int)sizeof(buf),
 				&units, &rhyBb);
-			if (g_eng.midiOut)
+			if (g_eng.midiOut && !(g_sysModeConsumed[VstIoSlot()] && VstMidiSysexIsGsSysMode(raw, rawLen)))
 				MapperSysex(g_eng.midiOut, raw, (DWORD)rawLen);
 			if (n > 0) {
 				if (units & 1) pushSx(0, buf, n, e.sample, e.port);
@@ -6143,16 +6151,11 @@ static int MapperOpen()
 	return 1;
 }
 
-static void FreeSong()
+static wchar_t g_loadedPlugPath[2][VST_PATH_CHARS];
+
+static void FreeSongData()
 {
 	MapperClose();
-	JuicyCloseParts();
-	CloseEffect(g_eng.module, g_eng.effect);
-	Vst3Close(g_eng.vst3); g_eng.vst3 = NULL;
-	CloseEffect(g_eng.moduleB, g_eng.effectB);
-	CloseEffect(g_eng.moduleC, g_eng.effectC);
-	Vst3Close(g_eng.vst3C); g_eng.vst3C = NULL;
-	CloseMixSlots();
 	delete[] g_eng.events; g_eng.events = NULL;
 	delete[] g_eng.fileData; g_eng.fileData = NULL;
 	delete[] g_eng.sysexData; g_eng.sysexData = NULL;
@@ -6168,9 +6171,30 @@ static void FreeSong()
 	g_eng.gsMapLsb = 0;
 	g_eng.songGm = 0;
 	g_eng.songLa = 0;
+	g_sysModeConsumed[VstIoSlot()] = 0;
 	g_eng.loopStartSample = 0;
 	g_eng.loopEndSample = 0;
+	g_vstHeldFlushed[VstIoSlot()] = 0;
+	g_liveTailFrames = 0;
+}
+
+static void FreeSongPlugins()
+{
+	JuicyCloseParts();
+	CloseEffect(g_eng.module, g_eng.effect);
+	Vst3Close(g_eng.vst3); g_eng.vst3 = NULL;
+	CloseEffect(g_eng.moduleB, g_eng.effectB);
+	CloseEffect(g_eng.moduleC, g_eng.effectC);
+	Vst3Close(g_eng.vst3C); g_eng.vst3C = NULL;
+	CloseMixSlots();
+	g_loadedPlugPath[VstIoSlot()][0] = 0;
 	g_juicySong[VstIoSlot()] = 0;
+}
+
+static void FreeSong()
+{
+	FreeSongData();
+	FreeSongPlugins();
 }
 
 static void ResetSequence()
@@ -7270,13 +7294,47 @@ static int ResetModeForPath(const wchar_t* p)
 }
 
 // SMF を読み、GS/XG 指定の VSTi（またはマッパー）で曲再生を始める。スロットは TLS。
+static void LiveSongResetPart(struct LivePart& p);
+static void LiveSongResetRemote();
+
+static void ConsumeSystemModeBeforePlay()
+{
+	const BYTE* d = NULL;
+	int n = 0;
+	for (int i = 0; i < g_eng.eventCount; ++i) {
+		const MidiItem& e = g_eng.events[i];
+		if ((e.msg & 0xff) != 0xf0 || e.sysexOff < 0) continue;
+		const int len = (int)e.aux;
+		if (e.sysexOff + len > g_eng.sysexBytes || len < 11) continue;
+		const BYTE* s = g_eng.sysexData + e.sysexOff;
+		if (!VstMidiSysexIsGsSysMode(s, len)) continue;
+		d = s;
+		n = len;
+		break;
+	}
+	if (!d) return;
+	if (g_eng.effect) SendVstSysex(g_eng.effect, d, n, 0);
+	if (g_eng.vst3) Vst3MidiSysex(g_eng.vst3, d, n, 0);
+	if (g_eng.effectB) SendVstSysex(g_eng.effectB, d, n, 0);
+	if (g_eng.effectC) SendVstSysex(g_eng.effectC, d, n, 0);
+	if (g_eng.vst3C) Vst3MidiSysex(g_eng.vst3C, d, n, 0);
+	g_sysModeConsumed[VstIoSlot()] = 1;
+	for (int i = 0; i < 32; ++i) {
+		if (g_eng.useEnsemble)
+			RenderEnsemble(g_eng.outL, g_eng.outR, BLOCK_FRAMES);
+		else
+			RenderSongUnits(BLOCK_FRAMES);
+	}
+}
+
 extern "C" int VstMidiOpen(const wchar_t* midPath,
 	const wchar_t hints[][128], int hintCount, HWND parentForWait)
 {
 	(void)hints; (void)hintCount; (void)parentForWait;
 	if (!midPath) return -1;
 	EnterCriticalSection(&g_eng.cs);
-	FreeSong();
+	/* 曲データはここで捨て、プラグインは下で毎回 Load し直す。 */
+	FreeSongData();
 	int rc = LoadSmf(midPath);
 	if (rc < 0) { LeaveCriticalSection(&g_eng.cs); return rc; }
 
@@ -7293,6 +7351,11 @@ extern "C" int VstMidiOpen(const wchar_t* midPath,
 		g_eng.playSample = 0;
 		g_eng.ringRead = g_eng.ringCount = 0;
 		ZeroMemory(g_eng.noteState, sizeof(g_eng.noteState));
+		/* 共有ライブ音源は GM リセットを送らない。前曲が CC120 や音量 0 で
+		   終わっていると次曲が最後まで無音になる。 */
+		for (int i = 0; i < 32; ++i)
+			LiveSongResetPart(g_eng.live[i]);
+		LiveSongResetRemote();
 		LeaveCriticalSection(&g_eng.cs);
 		return anyLive ? 0 : -5;
 	}
@@ -7308,22 +7371,31 @@ extern "C" int VstMidiOpen(const wchar_t* midPath,
 		LeaveCriticalSection(&g_eng.cs);
 		return -5;
 #else
+		FreeSongPlugins();
 		if (!MapperOpen()) {
 			LeaveCriticalSection(&g_eng.cs);
 			return -5;
 		}
 		loaded = 1;
 #endif
-	} else if (!TryLoadPluginPath(pickDll, 0)) {
-		EnsLog(L"VstMidiOpen FAIL specified plugin [%s]", pickDll);
-		LeaveCriticalSection(&g_eng.cs);
-		return -5;
 	} else {
+		wchar_t want[VST_PATH_CHARS];
+		SafeCopy(want, VST_PATH_CHARS, pickDll);
+		if (!EqExt(pickDll, L".vst3"))
+			ResolveRolandScVaPath(pickDll, want, VST_PATH_CHARS, HostArch());
+		const int slot = VstIoSlot();
+		FreeSongPlugins();
+		if (!TryLoadPluginPath(pickDll, 0)) {
+			EnsLog(L"VstMidiOpen FAIL specified plugin [%s]", pickDll);
+			LeaveCriticalSection(&g_eng.cs);
+			return -5;
+		}
 		loaded = 1;
 		loadedPath = pickDll;
 		resetMode = ResetModeForPath(pickDll);
+		SafeCopy(g_loadedPlugPath[slot], VST_PATH_CHARS, want);
 		if (PathLooksLikeSfPlayer(pickDll)) {
-			g_juicySong[VstIoSlot()] = 1;
+			g_juicySong[slot] = 1;
 			JuicySpawnParts(0, g_eng.effect, g_eng.module, pickDll);
 		}
 	}
@@ -7333,7 +7405,16 @@ extern "C" int VstMidiOpen(const wchar_t* midPath,
 			JuicyResetRack(0, resetMode);
 		else
 			SendGmGsReset(g_eng.effect, g_eng.vst3, resetMode);
-		LoadPortExtraUnits(loadedPath, resetMode);
+		if (g_eng.effectB || g_eng.effectC || g_eng.vst3C) {
+			if (g_eng.effectB)
+				SendGmGsReset(g_eng.effectB, NULL, resetMode);
+			if (g_eng.effectC)
+				SendGmGsReset(g_eng.effectC, NULL, resetMode);
+			if (g_eng.vst3C)
+				SendGmGsReset(NULL, g_eng.vst3C, resetMode);
+		} else {
+			LoadPortExtraUnits(loadedPath, resetMode);
+		}
 	} else {
 		g_eng.gmResetMode = 0;
 	}
@@ -7350,14 +7431,21 @@ extern "C" int VstMidiOpen(const wchar_t* midPath,
 	/* GM/GS/XGリセット後、プラグイン（特にSC-VAなど）が内部でリセット処理を
 	 * 完了する前にCC/PCを送りつけると無視されてしまうため、少しだけ空レンダリングして
 	 * リセットを消化させる。 */
+	int settleN = 12;
+	if (resetMode == 1 || PathLooksLikeScVa(pickDll))
+		settleN = 32; /* GS/SC-VA: 12 では前曲 Close 直後にリセットが残ることがある */
 	if (g_eng.effect || g_eng.vst3 || g_eng.effectB || g_eng.effectC || g_eng.vst3C || g_eng.useEnsemble) {
-		for (int i = 0; i < 12; ++i) { // 12 * 512 = 6144 frames (~139ms)
+		for (int i = 0; i < settleN; ++i) {
 			if (g_eng.useEnsemble)
 				RenderEnsemble(g_eng.outL, g_eng.outR, BLOCK_FRAMES);
 			else
 				RenderSongUnits(BLOCK_FRAMES);
 		}
 	}
+	/* yse12s8 は GS Reset を持たず System Mode Set だけ。再生中に出すと
+	   切替がやり直されるので、開くときに一度だけ送る。 */
+	if (loadedPath && !g_juicySong[VstIoSlot()] && !g_eng.useMapper)
+		ConsumeSystemModeBeforePlay();
 	EnsLog(L"VstMidiOpen pick=[%s] used=[%s] loaded=%d effect=%p "
 		L"vst3=%p mapper=%d hasOut=%d reset=%d gs=[%s] xg=[%s]",
 		pickDll[0] ? pickDll : L"(none)",
@@ -7380,6 +7468,7 @@ static int g_reportedLatencySamples[2] = { 0, 0 };
 extern "C" void VstMidiClose(void)
 {
 	EnterCriticalSection(&g_eng.cs);
+	/* stop / 自動停止で VSTi を破棄する。次の再生で Load し直す。 */
 	FreeSong();
 	LeaveCriticalSection(&g_eng.cs);
 	g_reportedLatencySamples[VstIoSlot()] = 0;
@@ -8348,6 +8437,33 @@ static void LivePanicRemote()
 			LiveRemoteMidi(port, (DWORD)((0xb0 | ch) | (64 << 8)));
 			LiveRemoteMidi(port, (DWORD)((0xb0 | ch) | (120 << 8)));
 			LiveRemoteMidi(port, (DWORD)((0xb0 | ch) | (123 << 8)));
+		}
+}
+
+/* 曲頭。CC121 でコントローラを戻し、音量は 127。CC120 は出さない
+   （all sound off のまま次の NoteOn まで黙る音源がある）。 */
+static void LiveSongResetPart(LivePart& p)
+{
+	if (!p.effect && !p.vst3 && !p.remote) return;
+	p.pend.count = 0;
+	p.pend.sysexUsed = 0;
+	for (int ch = 0; ch < 16; ++ch) {
+		LivePendPush(p, (DWORD)((0xb0 | ch) | (121 << 8)));
+		LivePendPush(p, (DWORD)((0xb0 | ch) | (7 << 8) | (127 << 16)));
+		LivePendPush(p, (DWORD)((0xb0 | ch) | (11 << 8) | (127 << 16)));
+	}
+	LivePendFlush(p);
+	PumpSilent(p.effect, p.vst3, 4);
+}
+
+static void LiveSongResetRemote()
+{
+	if (!LiveRemoteActive()) return;
+	for (int port = 0; port < 3; ++port)
+		for (int ch = 0; ch < 16; ++ch) {
+			LiveRemoteMidi(port, (DWORD)((0xb0 | ch) | (121 << 8)));
+			LiveRemoteMidi(port, (DWORD)((0xb0 | ch) | (7 << 8) | (127 << 16)));
+			LiveRemoteMidi(port, (DWORD)((0xb0 | ch) | (11 << 8) | (127 << 16)));
 		}
 }
 

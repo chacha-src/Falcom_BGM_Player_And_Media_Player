@@ -11958,28 +11958,17 @@ void OggPumpAbsVisuals()
     InterlockedExchange(&in, 0);
 }
 
-void CCustomListCtrl::PumpWhileInput()
-{
-    /* 毎マウスで♡全面 PrintClient するとリストが重く、他の描画が止まる */
-    static DWORD s_heart = 0;
-    const DWORD now = ::GetTickCount();
-    if (m_heartTimerOn && (s_heart == 0 || now - s_heart >= (DWORD)kListHeartStepMs)) {
-        s_heart = now;
-        OnTimer(kListSoftTimerId);
-    }
-    OggPumpAbsVisuals();
-}
-
 void CCustomListCtrl::OnMouseMove(UINT f, CPoint p)
 {
     LVHITTESTINFO h;
     h.pt = p;
     UpdateHotItem(SubItemHitTest(&h));
-    /* ボタン無しの移動で既定へ渡すと、見える行を全部描き直してタイマーが飢える */
+    /* ボタン無しの移動で既定へ渡すと、見える行を全部描き直してタイマーが飢える。
+       TheadLoop の描画は UI へ Post されるので、ここで SendMessage / PrintClient
+       すると speana もモニタも止まる。行切替は UpdateHotItem の Post だけ。 */
     if ((f & (MK_LBUTTON | MK_RBUTTON | MK_MBUTTON)) == 0) {
         TRACKMOUSEEVENT t = { sizeof(t), TME_LEAVE, m_hWnd, 0 };
         TrackMouseEvent(&t);
-        PumpWhileInput();
         return;
     }
     if (m_bTrackDragGate && (f & MK_LBUTTON)) {
@@ -11994,7 +11983,6 @@ void CCustomListCtrl::OnMouseMove(UINT f, CPoint p)
             if (CCC_HostNeedsChildOpaque(m_hWnd))
                 ::ValidateRect(m_hWnd, NULL);
 #endif
-            PumpWhileInput();
             return;
         }
     }
@@ -12005,7 +11993,6 @@ void CCustomListCtrl::OnMouseMove(UINT f, CPoint p)
 #endif
     TRACKMOUSEEVENT t = { sizeof(t), TME_LEAVE, m_hWnd, 0 };
     TrackMouseEvent(&t);
-    PumpWhileInput();
 }
 
 // ホバー解除。行 blit 後、既定 Leave の Invalidate を Validate で捨てる（SETREDRAW 禁止）。
@@ -12046,7 +12033,6 @@ void CCustomListCtrl::OnVScroll(UINT n, UINT p, CScrollBar* s)
     // OpaqueFixer が直後に全面描画する。ここでの Invalidate は名前列ちらつきの元。
     m_nHotItem = -1;
     PlaceLiveEdit();
-    PumpWhileInput();
 }
 // 横スクロール後もホット索引だけ破棄（部分 Invalidate しない）。
 void CCustomListCtrl::OnHScroll(UINT n, UINT p, CScrollBar* s)
@@ -12054,7 +12040,6 @@ void CCustomListCtrl::OnHScroll(UINT n, UINT p, CScrollBar* s)
     CListCtrl::OnHScroll(n, p, s);
     m_nHotItem = -1;
     PlaceLiveEdit();
-    PumpWhileInput();
 }
 // ホット行の再 Invalidate 禁止。索引だけ合わせて直後の Opaque に任せる。
 BOOL CCustomListCtrl::OnMouseWheel(UINT n, short z, CPoint p)
@@ -12069,7 +12054,6 @@ BOOL CCustomListCtrl::OnMouseWheel(UINT n, short z, CPoint p)
         h.pt = pt;
         m_nHotItem = SubItemHitTest(&h);
     }
-    PumpWhileInput();
     return r;
 }
 
@@ -18642,14 +18626,12 @@ private:
     }
 
     // SETREDRAW 禁止: FALSE はアクリル下で子が穴になり親ガラスが一瞬見える。
-    // 先に Lock して最後の良いフレームを残し、Def の α=0 はクリップ。
-    // PrintClient は Lock 中に DIB だけ。Unlock 直後は Blit 1 回（画面へは二重に出さない）。
+    // LockWindowUpdate はセッションで1つだけの GDI ロック。矢印のあいだ
+    // TheadLoop から来た timerp も speana も止まるので使わない。
+    // Def 中の α=0 は m_bDeferPaint で WM_PAINT を捨て、あとから行だけ描く。
     LRESULT FrozenDefThenPaint(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
     {
-        // ポップアップ Track 中の LockWindowUpdate はメニュー HWND の描画領域を空にし、
-        // 項目クリックが下のリストへ抜ける／演奏中にメニューが出ない原因になる。
         const BOOL menuTrack = (CCustomPopupMenu::GetTrackingRoot() != NULL);
-        /* 上下キーで見える行を全部 PrintClient すると、そのあいだ全タイマーが止まる */
         const BOOL listKey = (uMsg == WM_KEYDOWN && m_clsKind == 4);
         int topBefore = 0;
         int xBefore = 0;
@@ -18663,7 +18645,6 @@ private:
             if (::GetScrollInfo(hWnd, SB_HORZ, &si))
                 xBefore = si.nPos;
         }
-        const BOOL locked = menuTrack ? FALSE : ::LockWindowUpdate(hWnd);
         m_bDeferPaint = TRUE;
         LRESULT lRes = ::DefSubclassProc(hWnd, uMsg, wParam, lParam);
         m_bDeferPaint = FALSE;
@@ -18698,36 +18679,26 @@ private:
                     rowOnly = FALSE;
             }
         }
-        const BOOL cached = rowOnly ? FALSE : BuildOpaqueCache(hWnd);
-        m_bDeferPaint = TRUE;
-        if (locked)
-            ::LockWindowUpdate(NULL);
-        m_bDeferPaint = FALSE;
-        if (rowOnly) {
-            CWnd* pw = CWnd::FromHandlePermanent(hWnd);
-            CCustomListCtrl* pList = pw ? dynamic_cast<CCustomListCtrl*>(pw) : NULL;
-            if (pList)
-                CCC_ListPaintOpaqueRects(pList, rows, nRows);
-            else {
-                HDC hDC = menuTrack ? GetOpaqueDestDC(hWnd) : ::GetDC(hWnd);
-                if (hDC) {
-                    PaintOpaque(hWnd, hDC);
-                    ::ReleaseDC(hWnd, hDC);
-                }
-            }
-        } else {
-            HDC hDC = menuTrack ? GetOpaqueDestDC(hWnd) : ::GetDC(hWnd);
-            if (hDC) {
-                if (cached)
-                    PresentCachedOpaque(hWnd, hDC);
+        ::ValidateRect(hWnd, NULL);
+        if (m_clsKind == 4) {
+            if (listKey && rowOnly && nRows > 0) {
+                CWnd* pw = CWnd::FromHandlePermanent(hWnd);
+                CCustomListCtrl* pList = pw ? dynamic_cast<CCustomListCtrl*>(pw) : NULL;
+                if (pList)
+                    CCC_ListPaintOpaqueRects(pList, rows, nRows);
                 else
-                    PaintOpaque(hWnd, hDC);
-                ::ReleaseDC(hWnd, hDC);
+                    ::PostMessage(hWnd, CCC_WM_POST_OPAQUE_PAINT, 0, 0);
+            } else {
+                ::PostMessage(hWnd, CCC_WM_POST_OPAQUE_PAINT, 0, 0);
             }
+            return lRes;
+        }
+        HDC hDC = menuTrack ? GetOpaqueDestDC(hWnd) : ::GetDC(hWnd);
+        if (hDC) {
+            PaintOpaque(hWnd, hDC);
+            ::ReleaseDC(hWnd, hDC);
         }
         ::ValidateRect(hWnd, NULL);
-        /* 行移動のあいだメッセージが回らない。キーが残っていても他の画面はここで描く */
-        OggPumpAbsVisuals();
         return lRes;
     }
 

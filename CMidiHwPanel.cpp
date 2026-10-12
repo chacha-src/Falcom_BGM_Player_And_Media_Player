@@ -718,8 +718,12 @@ void MidiHwLcdDraw(CDC& dc, const CRect& rc, UINT dpi,
 	int selA,
 	const MidiHwLcdPartSnap* partsB,
 	const BYTE* keyBitsB,
-	int selB)
+	int selB,
+	CRect* outPrev,
+	CRect* outNext)
 {
+	if (outPrev) outPrev->SetRectEmpty();
+	if (outNext) outNext->SetRectEmpty();
 	if (!partsA || rc.Width() < 40 || rc.Height() < 18) return;
 	const int stacked = partsB ? 1 : 0;
 	if (selA < 0) selA = 0;
@@ -745,7 +749,7 @@ void MidiHwLcdDraw(CDC& dc, const CRect& rc, UINT dpi,
 	dc.FillSolidRect(rc.left, rc.top, 1, rc.Height(), pal.bezelHi);
 
 	const int bezel = max(2, LcdSc(3, dpi));
-	const int brandH = LcdSc(8, dpi);
+	const int brandH = LcdSc(10, dpi);
 	CRect lcd = rc;
 	lcd.DeflateRect(bezel, bezel);
 	lcd.top += brandH;
@@ -758,13 +762,55 @@ void MidiHwLcdDraw(CDC& dc, const CRect& rc, UINT dpi,
 		wchar_t bw[24];
 		MultiByteToWideChar(CP_ACP, 0, brand, -1, bw, 24);
 		bw[23] = 0;
-		const int bh = max(8, brandH - 1);
+		int bandTop = rc.top + 1;
+		int bandBot = lcd.top - 1;
+		if (bandBot - bandTop < 6) {
+			bandTop = rc.top + 1;
+			bandBot = rc.top + max(brandH, 7);
+		}
+		const int ah = max(6, min(bandBot - bandTop, LcdSc(8, dpi)));
+		const int midY = (bandTop + bandBot) / 2;
+		const int letterW = LcdSc(8, dpi);
+		const int gap = max(1, LcdSc(1, dpi));
+		const int navR = rc.right - bezel - 1;
+		CRect nextRc(navR - ah, midY - ah / 2, navR, midY - ah / 2 + ah);
+		CRect letRc(nextRc.left - gap - letterW, bandTop, nextRc.left - gap, bandBot);
+		CRect prevRc(letRc.left - gap - ah, nextRc.top, letRc.left - gap, nextRc.bottom);
+		if (prevRc.left < rc.left + bezel + LcdSc(36, dpi)) {
+			const int shift = (rc.left + bezel + LcdSc(36, dpi)) - prevRc.left;
+			prevRc.OffsetRect(shift, 0);
+			letRc.OffsetRect(shift, 0);
+			nextRc.OffsetRect(shift, 0);
+		}
+		const int bh = max(7, min(brandH - 1, bandBot - bandTop));
 		int by = rc.top + max(0, (brandH + bezel - bh) / 2);
-		LcdDrawW(dc, rc.left + bezel + 1, by, bh, rc.Width() / 2, bw, pal.brand);
+		const int modelW = max(8, prevRc.left - (rc.left + bezel + 1) - LcdSc(2, dpi));
+		LcdDrawW(dc, rc.left + bezel + 1, by, bh, modelW, bw, pal.brand);
 		wchar_t side[4];
-		if (stacked) wcscpy_s(side, L"32");
-		else { side[0] = L'A'; side[1] = 0; }
-		LcdDrawW(dc, rc.right - bezel - LcdSc(18, dpi), by, bh, LcdSc(18, dpi), side, pal.brand);
+		if (stacked)
+			wcscpy_s(side, L"32");
+		else if (selA >= 16)
+			wcscpy_s(side, L"B");
+		else
+			wcscpy_s(side, L"A");
+		LcdDrawW(dc, letRc.left, by, bh, letRc.Width(), side, pal.brand);
+		CPen pen(PS_SOLID, 1, pal.brand);
+		CBrush br(pal.brand);
+		CPen* oldP = dc.SelectObject(&pen);
+		CBrush* oldB = dc.SelectObject(&br);
+		POINT tri[3];
+		tri[0].x = prevRc.left + 1; tri[0].y = (prevRc.top + prevRc.bottom) / 2;
+		tri[1].x = prevRc.right - 1; tri[1].y = prevRc.top + 1;
+		tri[2].x = prevRc.right - 1; tri[2].y = prevRc.bottom - 1;
+		dc.Polygon(tri, 3);
+		tri[0].x = nextRc.right - 1; tri[0].y = (nextRc.top + nextRc.bottom) / 2;
+		tri[1].x = nextRc.left + 1; tri[1].y = nextRc.top + 1;
+		tri[2].x = nextRc.left + 1; tri[2].y = nextRc.bottom - 1;
+		dc.Polygon(tri, 3);
+		dc.SelectObject(oldP);
+		dc.SelectObject(oldB);
+		if (outPrev) *outPrev = prevRc;
+		if (outNext) *outNext = nextRc;
 	}
 
 	CRect bars, text, keysRc;

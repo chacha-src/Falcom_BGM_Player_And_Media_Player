@@ -806,6 +806,9 @@ static inline bool IsPlaybackStopRequested()
 // play/stop/stop1 の DoEvent 再入でデコーダを二重解放しないためのガード（UI スレッド専用）
 static bool s_inPlay = false;
 static bool s_inStop1 = false;
+/* 曲を開き直すたびに増やす。終端の PostMessage は開始時の値を載せ、
+   次曲が既に始まっていたらそのメッセージでは止めない。 */
+volatile LONG g_playGeneration = 0;
 
 // 実際に Open 中のデコーダ形式。playlist Get() が mode を次曲に差し替えても、
 // stop/stop1 はこちらで正しいデコーダを閉じる（停止ボタンでは mode が一致するため落ちない）。
@@ -3632,6 +3635,9 @@ static int PlaylistGoNext(int doRestart, int nextBtn)
 		return 0;
 	}
 	if (!pl || next >= pl->playcnt) return 0;
+	/* 先に次曲へ Get してから止めると、停止ボタンと違い前曲の VSTi が残る。 */
+	if (doRestart && og && ::IsWindow(og->GetSafeHwnd()))
+		og->SendMessage(WM_COMMAND, MAKEWPARAM(IDC_BUTTON1, BN_CLICKED), 0);
 	plcnt = next;
 	pl->Get(plcnt);
 	pl->SIcon(plcnt);
@@ -4158,6 +4164,7 @@ static void CloseVstMidiSession()
 {
 	VstPrefetchStopAll();
 	const int keepLive = g_cemuLiveKeepAcrossClose;
+	const int hadRemote = g_vstRemote64Slot[0] | g_vstRemote64Slot[1];
 	if (keepLive)
 		g_cemuLiveKeepAcrossClose = 0;
 	/* Close VST/Host32 first so Pump/Steal no longer touch live hard, then
@@ -4165,11 +4172,20 @@ static void CloseVstMidiSession()
 	   while Host32 waits in Pump / UI waits on Host32). */
 	CloseVstMidiSessionSlot(0);
 	CloseVstMidiSessionSlot(1);
-	VstHostPauseForSong(0);
+	/* 終端でホスト waveOut を起こすと、次曲の DirectSound が無音になる。
+	   thru 再生だけホスト出力を残す。 */
+	if (VstLiveThruIsOn())
+		VstHostPauseForSong(0);
+	else
+		VstHostPauseForSong(1);
 	if (!keepLive) {
 		CEmuMidiLiveStop();
 		VstLiveTapFlush();
 	}
+	/* 同じ ogghost32 で重い GS の Close+Load をすると、次曲が数十秒無音。
+	   Pause のあと、ライブ／KPI がホストを握っていないときだけプロセスを捨てる。 */
+	if (hadRemote && !keepLive && !VstLiveThruIsOn() && !VstLiveAnyRemotePart() && !g_kpiRemote)
+		g_kpiHost.RecycleHost();
 }
 
 static HWND ShowVstWaitPopup(HWND owner)
@@ -5750,7 +5766,8 @@ static unsigned __stdcall XfPreloadProc(void*)
 	/* VST プラグインは COM を使うものがある（ホスト側で STA を用意する） */
 	const HRESULT hrCo = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
 	int cur = 0, nxt = 0;
-	if (XfOpenNextSlotForCrossfade(&cur, &nxt)) {
+	const int preOk = XfOpenNextSlotForCrossfade(&cur, &nxt);
+	if (preOk) {
 		if (InterlockedCompareExchange(&g_xfPreloadCancel, 0, 0))
 			XfDropPreloadedSlot(nxt);
 		else
@@ -6456,8 +6473,15 @@ static void OggDispatchChromeMessages(int includeViz = 1)
 		}
 		::TranslateMessage(&msg);
 		::DispatchMessage(&msg);
-		if (OggIsChromeAnimHwnd(msg.hwnd) && msg.hwnd && ::IsWindow(msg.hwnd))
-			::UpdateWindow(msg.hwnd);
+		/* リスト/ツリーの UpdateWindow は全面 PrintClient になり、
+		   TheadLoop から来た timerp を同じ UI スレッドで止める。 */
+		if (OggIsChromeAnimHwnd(msg.hwnd) && msg.hwnd && ::IsWindow(msg.hwnd)) {
+			TCHAR cls[32];
+			if (::GetClassName(msg.hwnd, cls, 32)
+				&& _tcsicmp(cls, _T("SysListView32")) != 0
+				&& _tcsicmp(cls, _T("SysTreeView32")) != 0)
+				::UpdateWindow(msg.hwnd);
+		}
 		++n;
 	}
 	InterlockedExchange(&s_inChromePump, 0);
@@ -8730,8 +8754,9 @@ static int XfSoftOpenSlot(int slot, const CString& path, int openMode)
 			wchar_t vstPlug[VST_PATH_CHARS]; vstPlug[0] = 0;
 			if (VstShouldOpenRemote64(mid, vstPlug, VST_PATH_CHARS)) {
 				KPIHOST32_ForeignOpenReply orp{};
-				if (!g_kpiHost.VstOpen(std::wstring(mid), std::wstring(savedata.vstMultiDll),
-					std::wstring(savedata.vstExtraPath), orp, (uint32_t)slot))
+				const bool opened = g_kpiHost.VstOpen(std::wstring(mid), std::wstring(savedata.vstMultiDll),
+					std::wstring(savedata.vstExtraPath), orp, (uint32_t)slot);
+				if (!opened)
 					return 0;
 				remote = 1;
 				rate = (int)orp.sampleRate;
@@ -11262,6 +11287,13 @@ void COggDlg::play()
 	if (s_inPlay)
 		return;
 	s_inPlay = true;
+	{
+		MSG stale = {};
+		HWND hwnd = GetSafeHwnd();
+		while (hwnd && PeekMessage(&stale, hwnd, WM_PLAYBACK_AUTO_STOPPED, WM_PLAYBACK_AUTO_STOPPED, PM_REMOVE)) {
+		}
+	}
+	InterlockedIncrement(&g_playGeneration);
 	struct ClearInPlay {
 		COggDlg* dlg;
 		~ClearInPlay() {
@@ -14035,6 +14067,13 @@ open_mode_vst_midi:
 				m_saisai.EnableWindow(TRUE); endflg = 0; return;
 			}
 		}
+		/* ファイル MIDI は DS が鳴らす。前曲 thru が残ると Lock が ZeroMemory して無音。 */
+		if (liveBinds <= 0) {
+			VstLiveThruSet(0);
+			VstHostPauseForSong(1);
+		} else if (!VstLiveThruIsOn()) {
+			VstHostPauseForSong(1);
+		}
 		VstSongUseLiveBindsSet(liveBinds > 0 ? 1 : 0);
 		wchar_t vstPlug[VST_PATH_CHARS]; vstPlug[0] = 0;
 		int vstOk = 0;
@@ -14044,8 +14083,9 @@ open_mode_vst_midi:
 		if (useRemote) {
 			triedRemote = 1;
 			KPIHOST32_ForeignOpenReply orp{};
-			if (g_kpiHost.VstOpen(std::wstring(mid), std::wstring(savedata.vstMultiDll),
-				std::wstring(savedata.vstExtraPath), orp, (uint32_t)vstSlot)) {
+			const bool opened = g_kpiHost.VstOpen(std::wstring(mid), std::wstring(savedata.vstMultiDll),
+				std::wstring(savedata.vstExtraPath), orp, (uint32_t)vstSlot);
+			if (opened) {
 				g_vstRemote64Slot[vstSlot] = 1;
 				VstMidiSetReportedLatencySamples((int)orp.latencySamples);
 				wavbit_sample_Hz = (int)orp.sampleRate;
@@ -14101,7 +14141,8 @@ open_mode_vst_midi:
 				/* Re-open Host32 live SHM if monitor teardown dropped the map. */
 				VstLivePollRemoteEditorClosed();
 			}
-			if (VstMidiOpen(mid, hints, hc, m_hWnd) != 0) {
+			const int openRc = VstMidiOpen(mid, hints, hc, m_hWnd);
+			if (openRc != 0) {
 				VstSongUseLiveBindsSet(0);
 				g_cemuLiveKeepAcrossClose = 0;
 				CEmuMidiLiveStop();
@@ -14328,10 +14369,16 @@ open_mode_vst_midi:
 	//lrc
 	lrcnum = 0;
 	lrccur = 0;
+	lrc_backup = L"";
 	for (int m = 0; m < 300; m++) {
 		lrc[m] = L"";
 		lrctm[m] = 0;
 	}
+	m_lrc.SetWindowText(L"");
+	m_lrc2.SetWindowText(LL14(L"歌詞(.lrc)が表示されます", L"Lyrics (.lrc) will be displayed here", L"Paroles (.lrc) affichees ici", L"Testi (.lrc) visualizzati qui", L"Letra (.lrc) mostrada aqui", L"가사(.lrc)가 여기에 표시됩니다", L"歌词(.lrc)将在此显示", L"كلمات (.lrc) ستُعرض هنا", L"Текст (.lrc) отображается здесь", L"Liedtext (.lrc) wird hier angezeigt", L"Letra (.lrc) exibida aqui", L"Songtekst (.lrc) wordt hier getoond", L"Teksty (.lrc) wy?wietlone tutaj", L"Soz (.lrc) burada goruntulenir"));
+	m_lrc3.SetWindowText(L"");
+	m_lrc4.SetWindowText(L"");
+	m_lrc5.SetWindowText(L"");
 	int gg = filen.GetLength() * 2;
 	int gg2 = filen.ReverseFind(L'.');
 	CString filenll = filen.Left(gg2) + L".lrc";
@@ -14499,6 +14546,7 @@ open_mode_vst_midi:
 		if (nLy >= 2)
 			lrcnum = nLy;
 	}
+	LyricsOnTimerp();
 
 	if (mode == 21 || mode == 30 || mode == 31) {
 		wavbit_sample_Hz = 48000;
@@ -15810,13 +15858,29 @@ open_mode_vst_midi:
 	thn1 = FALSE;
 	playf = 1;
 	plf = 1;
+	g_dsWrittenBytes = 0;
+	g_dsSongBase = 0;
+	g_endWrittenBytes = 0;
+	g_heardBytes = 0;
+	fade1 = 0;
+	endflg = 0;
 	// DSD: Play 前に通知。FLAC は KPI と同じく Play 後（先に notify すると頭が残って数周する）。
 	if (g_openDecoderMode == -7 || mode == -7)
 		BeginPlaybackNotifyThread();
 	if (m_dsb) {
 		DsOpLock ds;
-		if (m_dsb)
+		if (m_dsb) {
+			DWORD st = 0;
+			if (m_dsb->GetStatus(&st) == DS_OK && (st & DSBSTATUS_BUFFERLOST))
+				m_dsb->Restore();
+			/* 前曲の終端フェードが DSBVOLUME_MIN のまま残ることがある。 */
+			if (!VstLiveThruIsOn() && savedata.dsvol != -498)
+				m_dsb->SetVolume((savedata.dsvol - 1) * 10);
 			m_dsb->Play(0, 0, DSBPLAY_LOOPING);
+			m_analyzerSyncValid = FALSE;
+			if (::IsWindow(m_AnalyzerDlg->GetSafeHwnd()))
+				m_AnalyzerDlg->ResumePlaybackFeed();
+		}
 	}
 	if (!(g_openDecoderMode == -7 || mode == -7))
 		BeginPlaybackNotifyThread();
@@ -20954,6 +21018,16 @@ static bool PlaybackShortMeansEof(int gotBytes)
 			if (pos < hz / 4)
 				return false;
 		}
+		/* VST/KPI: 自動停止直後の次曲は先頭の 0 返却がよくある。
+		   それを EOF にすると fade1 が立ち、以降 PCM だけ 0 のまま
+		   モニタと playb は進む。無音中に再生し直すと先頭読みが成功して鳴る。 */
+		if (dm == -3 || IsForeignPluginMode(dm) || IsVstMidiPlayMode(dm)) {
+			if (pos < hz)
+				return false;
+			const int total = PlaybackSrcTotalSamples();
+			if (total >= hz && pos + hz / 2 < total)
+				return false;
+		}
 		return true;
 	}
 	const int dm = ActiveDecodeMode();
@@ -22657,6 +22731,10 @@ static int VstSilenceAccum(BYTE* pcm, int bytes)
 
 static void VstMarkPlaybackEof()
 {
+	const int hz = (wavbit_sample_Hz > 0) ? wavbit_sample_Hz : 44100;
+	const int pos = (poss5 > 0) ? poss5 : (int)playb;
+	if (pos < hz)
+		return;
 	if (CEmuMidiLiveIsLoadOnly() || savedata.saverenzoku == 0)
 		fade1 = 1;
 	else
@@ -26204,9 +26282,16 @@ void COggDlg::stop()
 			else if (g_interactiveTrackChange)
 				joinTimeout = 2500u;
 		}
+		const int vstJoin = IsVstMidiPlayMode(PeekOpenDecoderMode(mode)) || IsVstMidiPlayMode(mode);
+		if (vstJoin && joinTimeout < 5000u)
+			joinTimeout = 5000u;
 		if (!WaitForPlaybackNotifyThreadExit(joinTimeout)) {
-			SongParams_OnSongStopped();
-			return;
+			if (vstJoin)
+				WaitForPlaybackNotifyThreadExit(5000u);
+			else {
+				SongParams_OnSongStopped();
+				return;
+			}
 		}
 		if (InterlockedCompareExchange(&g_appExiting, 0, 0))
 			XfPreloadCancel(15000);
@@ -26257,6 +26342,8 @@ void COggDlg::stop()
 		thend = 1;
 		fadeadd = 0; fade = 1.0;
 	}
+	else if (IsVstMidiPlayMode(PeekOpenDecoderMode(mode)) || IsVstMidiPlayMode(mode))
+		CloseVstMidiSession();
 	if (!img.IsNull())
 		img.Destroy();
 	if (pMainFrame1 != NULL)
@@ -26295,6 +26382,16 @@ void COggDlg::stop()
 	/* Notify thread already gone (auto-stop / pause) still leaves CEmu open. */
 	if (CemuAnyKind() || CEmuMidiLiveActive())
 		CloseCemuPlaybackResources();
+	/* 自動停止でスレッドが先に抜けても、停止ボタンと同じく VSTi を必ず捨てる。 */
+	if (IsVstMidiPlayMode(PeekOpenDecoderMode(mode)) || IsVstMidiPlayMode(mode))
+		CloseVstMidiSession();
+	/* playb だけ 0 にすると可聴位置 (g_heardBytes) が前曲の終端のまま残る。
+	   次曲の play() までの間にモニタがその位置まで新曲を適用し、終端の CC7=0 を
+	   FX キープに取り込んで頭で注入する（短い曲が最初の CC7 から無音になる）。 */
+	g_dsWrittenBytes = 0;
+	g_dsSongBase = 0;
+	g_endWrittenBytes = 0;
+	g_heardBytes = 0;
 }
 
 BOOL COggDlg::stop1()
@@ -27401,6 +27498,32 @@ void OggResetRubberBandStretcher()
 	RubberBand_DestroyBank(0);
 }
 
+/* 5656: 2秒でホールド解除、5657: 50ms で 1 段落とす。
+   再生中は VSYNC Post が WM_TIMER を飢やすので timerp からも同じ処理を回す。 */
+static void SpeanaPeakDecayTick()
+{
+	static DWORD s_holdArm = 0;
+	static DWORD s_fallAt = 0;
+	const DWORD now = GetTickCount();
+	if (s_holdArm == 0)
+		s_holdArm = now;
+	if (now - s_holdArm >= 2000u) {
+		for (int i = 0; i < 300; ++i)
+			spetm[i] = 1;
+		s_holdArm = now;
+	}
+	if (s_fallAt == 0 || now - s_fallAt >= 50u) {
+		s_fallAt = now;
+		for (int i = 0; i < 300; ++i) {
+			if (spetm[i] != 1)
+				continue;
+			--spelv[i];
+			if (spelv[i] < 0)
+				spelv[i] = 0;
+		}
+	}
+}
+
 void COggDlg::timerp()
 {
 	struct TickGuard {
@@ -27880,10 +28003,13 @@ void COggDlg::timerp()
 		const bool eqVis = pEq
 			&& ::IsWindow(pEq->GetSafeHwnd())
 			&& ::IsWindowVisible(pEq->GetSafeHwnd());
-		const bool speanaDraw = bGdiFrame && m_supe.GetCheck() == TRUE && plf == 1 && (wav || ogg || m_dsb);
+		const bool bannerSpeanaOn = (m_supe.GetCheck() == TRUE) && plf == 1 && (wav || ogg || m_dsb);
+		const bool speanaDraw = bGdiFrame && bannerSpeanaOn;
 		extern BOOL MpSsVizIsOpen();
 		const bool ssVizNeed = MpSsVizIsOpen() && plf == 1 && (wav || ogg || m_dsb);
-		if (plf == 1 && (wav || ogg || m_dsb) && eqVis && !speanaDraw && !ssVizNeed) {
+		SpeanaPeakDecayTick();
+		/* EQ コード専用。バナー Speana は GDI フレーム内 Speana(TRUE)。 */
+		if (plf == 1 && (wav || ogg || m_dsb) && eqVis && !speanaDraw && !ssVizNeed && !bannerSpeanaOn) {
 			static DWORD s_eqFeedMs = 0;
 			const DWORD nowFeed = GetTickCount();
 			if (s_eqFeedMs == 0 || (nowFeed - s_eqFeedMs) >= (DWORD)EqCodeIntervalMs()) {
@@ -27891,13 +28017,13 @@ void COggDlg::timerp()
 				Speana(FALSE);
 			}
 		}
-		// GDIフレーム外でも SSビジュアライザ用に spelv を更新
+		/* SS は spelv だけ。黒クリア前に Speana(TRUE) するとピーク帯が残る。 */
 		if (!bGdiFrame && ssVizNeed) {
 			static DWORD s_ssSpeanaMs = 0;
 			const DWORD nowSs = GetTickCount();
 			if (s_ssSpeanaMs == 0 || (nowSs - s_ssSpeanaMs) >= 33u) {
 				s_ssSpeanaMs = nowSs;
-				Speana(TRUE);
+				Speana(FALSE, TRUE);
 			}
 		}
 	}
@@ -29977,18 +30103,8 @@ void timerog1(UINT nIDEvent)
 			return;   // EnterMediaPlayerMode 側で設定
 		SetupTaskbarThumbButtons(hTarget, mpMode);
 	}
-	if (nIDEvent == 5656) {
-		for (int i = 0; i < 300; i++)spetm[i] = 1;
-	}
-
-	if (nIDEvent == 5657) {
-		for (int i = 0; i < 300; i++) {
-			if (spetm[i] == 1) {
-				spelv[i]--;
-				if (spelv[i] < 0) spelv[i] = 0;
-			}
-		}
-	}
+	if (nIDEvent == 5656 || nIDEvent == 5657)
+		SpeanaPeakDecayTick();
 
 	if (nIDEvent == 11251) {
 		ttt_++;
@@ -30030,19 +30146,11 @@ void timerog1(UINT nIDEvent)
 					og->SendMessage(WM_COMMAND, MAKEWPARAM(IDC_BUTTON1, BN_CLICKED), 0);
 				}
 				else {
+					og->SendMessage(WM_COMMAND, MAKEWPARAM(IDC_BUTTON1, BN_CLICKED), 0);
 					plcnt = next;
 					endflg = 0;
 					pl->Get(plcnt);
 					pl->SIcon(plcnt);
-					thn = FALSE;
-					const DWORD t0 = GetTickCount();
-					for (int j = 0; j < 200; j++) {
-						DoEvent();
-						Sleep(10);
-						if (thn == TRUE) break;
-						if (GetTickCount() - t0 >= 3000) break;
-					}
-					og->stop();
 					fade1 = 0; lenl = 0;
 					RequestPlaybackRestart(og->GetSafeHwnd());
 				}
@@ -30313,74 +30421,18 @@ LRESULT COggDlg::dp2(WPARAM, LPARAM)
 // ワーカースレッド上で stop()/OnPause を呼ばない（UI フリーズ/デッドロック防止）。
 // スレッドは既に Join 済みなので、DS/デコーダをここで解放し次曲開始時の
 // stop()→play() が二重 Join や停止済みバッファ上でのデコード待ちで固まらないようにする。
-LRESULT COggDlg::OnPlaybackAutoStopped(WPARAM, LPARAM)
+LRESULT COggDlg::OnPlaybackAutoStopped(WPARAM wParam, LPARAM)
 {
 	// play/stop1 実行中は触らない（曲切替中の自動停止メッセージでデコーダを潰さない）
 	if (s_inPlay || s_inStop1)
 		return 0;
-	// 二重DS昇格中は B を止めない
-	// スレッドは PostMessage 前に終了済み想定だが、念のため Join（DoEvent なし）
-	SignalPlaybackNotifyThreadStop();
-	if (!WaitForPlaybackNotifyThreadExit(0))
+	/* このメッセージは前曲の通知スレッドが出したもの。次曲の play() が世代を
+	   進めたあとで処理されると、Wait が thn1/PlayAbort を立て直して
+	   新しい通知スレッドが即死し、VST が無音になる。 */
+	if ((LONG)wParam != g_playGeneration)
 		return 0;
-	fade1 = 0;
-	endflg = 0;
-	plf = 0;
-	playf = 0;
-	ps = 0;
-	thn = TRUE;
-	g_endWrittenBytes = 0;
-	g_dsWrittenBytes = 0;
-	g_dsSongBase = 0;
-	g_heardBytes = 0;
-	g_expectedDsBytes = 0;
-	eqflg = TRUE;
-	KillTimer(1250);
-	Closeds();
-	if (ogg) {
-		ReleaseOggVorbis(&ogg);
-		ogg = NULL;
-	}
-	if (adbuf2) {
-		free(adbuf2);
-		adbuf2 = NULL;
-	}
-	const int stoppingMode = PeekOpenDecoderMode(mode);
-	if (stoppingMode == -10) { mp3_.Close(); g_mp3_decoder_bps = 16; }
-	if (stoppingMode == -8 && og) flac_.Close(og->kmp);
-	if (stoppingMode == -9 && og) m4a_.Close(og->kmp);
-	if (stoppingMode == -7 && og) dsd_.kpiClose(og->kmp);
-	if (stoppingMode == 999) wav_.Close();
-	if (IsVstMidiPlayMode(stoppingMode)) CloseVstMidiSession();
-	if (stoppingMode == MODE_CEMU
-		|| IsVstMidiPlayMode(stoppingMode)
-		|| CemuAnyKind()
-		|| CEmuMidiLiveActive())
-		CloseCemuPlaybackResources();
-	if (stoppingMode == MODE_PLUGIN_WINAMP) PluginWinamp_Close();
-	if (stoppingMode == MODE_PLUGIN_XMPLAY) PluginXmplay_Close();
-	if (stoppingMode == MODE_PLUGIN_AIMP) PluginAimp_Close();
-	if (stoppingMode == MODE_ZMUSIC) ZmusicSessionClose();
-	kmp = NULL;
-	ClearOpenDecoderMode();
-	ReleaseKpiPlaybackAsync(mod, kmp1, hDLLk);
-	thn1 = FALSE;
-	stf = 0;
-	thend = 1;
-	plf = 0;
-	playf = 0;
-	if (wav) {
-		free(wav);
-		wav = NULL;
-	}
-	if (::IsWindow(m_PianoRollDlg->GetSafeHwnd()))
-		m_PianoRollDlg->OnPlayerFeedStopping(true);
-	if (::IsWindow(m_AnalyzerDlg->GetSafeHwnd()))
-		m_AnalyzerDlg->ResetPlaybackState();
-	m_analyzerSyncValid = FALSE;
-	ResetPauseButtonUi();
-	if (ptl)
-		ptl->SetProgressState(m_hWnd, TBPF_NOPROGRESS);
+	/* 自動停止 = 停止ボタン。独自の Join/Close は停止と違う経路になる。 */
+	OnButton1();
 	return 0;
 }
 

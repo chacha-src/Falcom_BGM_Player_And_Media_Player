@@ -1,4 +1,4 @@
-﻿// CMediaPlayerDlg.cpp : メディアプレイヤーモード画面(張りぼて)とモード選択ダイアログ
+// CMediaPlayerDlg.cpp : メディアプレイヤーモード画面(張りぼて)とモード選択ダイアログ
 //
 // 実体は COggDlg(og->) と CPlayList(pl->)。ここは表示と操作の取り次ぎだけを行う。
 // メディアプレイヤーモード中は og / pl のウィンドウを非表示にして裏で生かしておく。
@@ -4624,6 +4624,50 @@ void CMediaPlayerDlg::ApplyPauseButtonLabel()
 	}
 }
 
+/* Timer1(SyncFromMain) は再生中に飢える。歌詞の有無が変わった瞬間だけ
+   ここから 5行 / 3行+OS を切り替える。毎フレーム DoLayout はしない。 */
+static int s_mpLyricsLayout = -1;
+static int s_mpLrcExpandLayout = -1;
+
+static CString MpLyricsPlaceholder()
+{
+	return CString(LL14(L"歌詞(.lrc)が表示されます", L"Lyrics (.lrc) will be displayed here", L"Paroles (.lrc) affichees ici", L"Testi (.lrc) visualizzati qui", L"Letra (.lrc) mostrada aqui", L"가사(.lrc)가 여기에 표시됩니다", L"歌词(.lrc)将在此显示", L"كلمات (.lrc) ستُعرض هنا", L"Текст (.lrc) отображается здесь", L"Liedtext (.lrc) wird hier angezeigt", L"Letra (.lrc) exibida aqui", L"Songtekst (.lrc) wordt hier getoond", L"Teksty (.lrc) wy?wietlone tutaj", L"Soz (.lrc) burada goruntulenir"));
+}
+
+static void MpPutLyricsText(CWnd& w, const CString& s)
+{
+	if (!w.GetSafeHwnd()) return;
+	CString cur;
+	w.GetWindowText(cur);
+	if (cur != s) w.SetWindowText(s);
+}
+
+static void MpSwitchLyricsLayout(CMediaPlayerDlg* mp, int hasLyrics)
+{
+	if (!mp || !::IsWindow(mp->GetSafeHwnd()))
+		return;
+	if (mp->m_lrcBadge.GetSafeHwnd()) {
+		CString badge;
+		if (hasLyrics)
+			badge = _T("LRC●");
+		else if (savedata.lrc_net)
+			badge = _T("net");
+		else
+			badge = _T("—");
+		MpPutLyricsText(mp->m_lrcBadge, badge);
+	}
+	const int mode = hasLyrics ? 1 : 0;
+	if (s_mpLyricsLayout == mode && s_mpLrcExpandLayout == savedata.mpLrcExpand)
+		return;
+	s_mpLyricsLayout = mode;
+	s_mpLrcExpandLayout = savedata.mpLrcExpand;
+	mp->DoLayout();
+	CCC_GroupBoxesBack(mp->GetSafeHwnd());
+	mp->RefreshListAfterLayout();
+	mp->RedrawWindow(NULL, NULL,
+		RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_UPDATENOW);
+}
+
 void CMediaPlayerDlg::TickLyricsView()
 {
 	if (!m_uiReady)
@@ -4631,8 +4675,27 @@ void CMediaPlayerDlg::TickLyricsView()
 	extern volatile LONG g_appExiting;
 	if (InterlockedCompareExchange(&g_appExiting, 0, 0))
 		return;
-	if (!og || !::IsWindow(og->GetSafeHwnd()) || og->lrcnum < 2)
+	if (!og || !::IsWindow(og->GetSafeHwnd()))
 		return;
+	const int hasLyrics = (og->lrcnum >= 2) ? 1 : 0;
+	MpSwitchLyricsLayout(this, hasLyrics);
+	if (!hasLyrics) {
+		if (m_lrcView.GetSafeHwnd() && ::IsWindow(m_lrcView.GetSafeHwnd()))
+			m_lrcView.Clear();
+		if (m_lrc.GetSafeHwnd()) {
+			MpPutLyricsText(m_lrc, CString());
+			MpPutLyricsText(m_lrc2, MpLyricsPlaceholder());
+			MpPutLyricsText(m_lrc3, CString());
+			MpPutLyricsText(m_lrc4, CString());
+			MpPutLyricsText(m_lrc5, CString());
+			m_lrc3.SetSolidFill(FALSE, 0);
+		}
+		CString s, s2;
+		og->m_OS.GetWindowText(s); m_os.GetWindowText(s2); if (s != s2) m_os.SetWindowText(s);
+		og->m_cpu.GetWindowText(s); m_cpu.GetWindowText(s2); if (s != s2) m_cpu.SetWindowText(s);
+		og->m_os3.GetWindowText(s); m_os3.GetWindowText(s2); if (s != s2) m_os3.SetWindowText(s);
+		return;
+	}
 	/* 歌詞窓は timerp から動く。MP の5行は Timer1 待ちだと再生中に先頭で止まる。 */
 	extern double OggGetLyricsPlaySec();
 	double sec = OggGetLyricsPlaySec();
@@ -4661,14 +4724,8 @@ void CMediaPlayerDlg::TickLyricsView()
 	}
 	if (!m_lrc.GetSafeHwnd())
 		return;
-	auto put = [](CWnd& w, const CString& s) {
-		if (!w.GetSafeHwnd()) return;
-		CString cur;
-		w.GetWindowText(cur);
-		if (cur != s) w.SetWindowText(s);
-	};
-	put(m_lrc, (lp >= 2) ? og->lrc[lp - 2] : CString());
-	put(m_lrc2, (lp >= 1) ? og->lrc[lp - 1] : CString());
+	MpPutLyricsText(m_lrc, (lp >= 2) ? og->lrc[lp - 2] : CString());
+	MpPutLyricsText(m_lrc2, (lp >= 1) ? og->lrc[lp - 1] : CString());
 	CString hi;
 	hi.Format(_T("!@C1E46AA%s"), (LPCTSTR)og->lrc[lp]);
 	CString cur3;
@@ -4677,8 +4734,8 @@ void CMediaPlayerDlg::TickLyricsView()
 		m_lrc3.SetWindowText(hi);
 		m_lrc3.SetSolidFill(TRUE, RGB(220, 232, 255));
 	}
-	put(m_lrc4, (lp + 1 < n) ? og->lrc[lp + 1] : CString());
-	put(m_lrc5, (lp + 2 < n - 1) ? og->lrc[lp + 2] : CString());
+	MpPutLyricsText(m_lrc4, (lp + 1 < n) ? og->lrc[lp + 1] : CString());
+	MpPutLyricsText(m_lrc5, (lp + 2 < n - 1) ? og->lrc[lp + 2] : CString());
 }
 
 // DS/拡張/テンポ/ピッチの%は見える MP スライダーの GetPos から作る。
@@ -4742,23 +4799,24 @@ void CMediaPlayerDlg::SyncFromMain()
 				m_lrcView.Clear();
 			}
 		}
-		else {
+		else if (hasLyrics) {
 			og->m_lrc.GetWindowText(s); m_lrc.GetWindowText(s2); if (s != s2) m_lrc.SetWindowText(s);
 			og->m_lrc2.GetWindowText(s); m_lrc2.GetWindowText(s2); if (s != s2) m_lrc2.SetWindowText(s);
-			// 現在行(3行目): 背景+文字色でハイライト
-			if (hasLyrics) {
-				CString cur = og->lrc[og->lrccur];
-				CString hi;
-				hi.Format(_T("!@C1E46AA%s"), (LPCTSTR)cur);
-				m_lrc3.GetWindowText(s2);
-				if (hi != s2) m_lrc3.SetWindowText(hi);
-				m_lrc3.SetSolidFill(TRUE, RGB(220, 232, 255));
-				og->m_lrc4.GetWindowText(s); m_lrc4.GetWindowText(s2); if (s != s2) m_lrc4.SetWindowText(s);
-				og->m_lrc5.GetWindowText(s); m_lrc5.GetWindowText(s2); if (s != s2) m_lrc5.SetWindowText(s);
-			} else {
-				og->m_lrc3.GetWindowText(s); m_lrc3.GetWindowText(s2); if (s != s2) m_lrc3.SetWindowText(s);
-				m_lrc3.SetSolidFill(FALSE, 0);
-			}
+			CString cur = og->lrc[og->lrccur];
+			CString hi;
+			hi.Format(_T("!@C1E46AA%s"), (LPCTSTR)cur);
+			m_lrc3.GetWindowText(s2);
+			if (hi != s2) m_lrc3.SetWindowText(hi);
+			m_lrc3.SetSolidFill(TRUE, RGB(220, 232, 255));
+			og->m_lrc4.GetWindowText(s); m_lrc4.GetWindowText(s2); if (s != s2) m_lrc4.SetWindowText(s);
+			og->m_lrc5.GetWindowText(s); m_lrc5.GetWindowText(s2); if (s != s2) m_lrc5.SetWindowText(s);
+		} else {
+			MpPutLyricsText(m_lrc, CString());
+			MpPutLyricsText(m_lrc2, MpLyricsPlaceholder());
+			MpPutLyricsText(m_lrc3, CString());
+			MpPutLyricsText(m_lrc4, CString());
+			MpPutLyricsText(m_lrc5, CString());
+			m_lrc3.SetSolidFill(FALSE, 0);
 		}
 		if (!hasLyrics) {
 			og->m_OS.GetWindowText(s); m_os.GetWindowText(s2); if (s != s2) m_os.SetWindowText(s);
@@ -4767,30 +4825,7 @@ void CMediaPlayerDlg::SyncFromMain()
 		}
 		// 拡大歌詞の有無に関係なく歌詞ウィンドウへ同期（以前は mpLrcExpand 時のみだった）
 		SyncDesktopLyricsIfOpen();
-		static int s_lastLyricsMode = -1;
-		const int lyricsMode = hasLyrics ? 1 : 0;
-		static int s_lastLrcExpand = -1;
-		if (s_lastLyricsMode != lyricsMode || s_lastLrcExpand != savedata.mpLrcExpand) {
-			s_lastLyricsMode = lyricsMode;
-			s_lastLrcExpand = savedata.mpLrcExpand;
-			DoLayout();
-			CCC_GroupBoxesBack(GetSafeHwnd());
-			RefreshListAfterLayout();
-			RedrawWindow(NULL, NULL,
-				RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_UPDATENOW);
-		}
-		// LRC 状態バッジ — 幅が狭いので短い記号のみ（意味は Tip）
-		if (m_lrcBadge.GetSafeHwnd()) {
-			CString badge;
-			if (hasLyrics)
-				badge = _T("LRC●");
-			else if (savedata.lrc_net)
-				badge = _T("net");
-			else
-				badge = _T("—");
-			CString curB; m_lrcBadge.GetWindowText(curB);
-			if (curB != badge) m_lrcBadge.SetWindowText(badge);
-		}
+		MpSwitchLyricsLayout(this, hasLyrics ? 1 : 0);
 
 		// シーク/音量は timerp → MirrorSeekVol が駆動。ここは二重になるので呼ばない。
 

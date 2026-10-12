@@ -1,4 +1,4 @@
-﻿#include "stdafx.h"
+#include "stdafx.h"
 #include "NoteFundamentalPick.h"
 #include "ogg.h"
 #include "oggDlg.h"
@@ -42,6 +42,7 @@
 #pragma comment(lib,"rubberband-library")
 #endif
 // 曲終端のジャスト検出用（oggDlg.cpp 定義）。単位は「DS バッファへ書き込んだ総バイト数」。
+extern volatile LONG g_playGeneration;
 extern __int64 g_dsWrittenBytes;
 extern __int64 g_endWrittenBytes;
 extern __int64 g_heardBytes;
@@ -1025,7 +1026,11 @@ static int HandleFillTake(BYTE* dest, int need, int* pReadme, bool* pExitNow)
 
 static int HandleFillIsRunning()
 {
-	return (s_fillThread != nullptr) ? 1 : 0;
+	if (!s_fillThread || !s_fillThread->m_hThread)
+		return 0;
+	if (WaitForSingleObject(s_fillThread->m_hThread, 0) == WAIT_OBJECT_0)
+		return 0;
+	return 1;
 }
 
 static void HandleFillRequestStop()
@@ -1205,6 +1210,10 @@ void BeginPlaybackNotifyThread()
 	stf = 0;
 	syukai = 0;
 	syukai2 = 0;
+	/* 前曲終端の fade1 が残ると、モニタは動いても PCM が 0 のままになる。 */
+	fade1 = 0;
+	endflg = 0;
+	g_endWrittenBytes = 0;
 	// CREATE_SUSPENDED で起動し、スレッド本体が走り出す前に m_bAutoDelete を
 	// 落として寿命を自前管理する。これによりスレッドが自己終了しても
 	// CWinThread オブジェクトとスレッドハンドルは破棄されず、安全に Join できる。
@@ -1228,6 +1237,7 @@ void BeginPlaybackNotifyThread()
 
 UINT HandleNotifications(LPVOID)
 {
+	const LONG playGen = g_playGeneration;
 	readme = 0;
 	int fade2 = 0;
 	syoriflg = FALSE;
@@ -1265,8 +1275,17 @@ UINT HandleNotifications(LPVOID)
 	oldw = 0;
 	if (isPlausibleDsb(m_dsb)) {
 		DsOpLock ds;
-		if (isPlausibleDsb(m_dsb))
+		if (isPlausibleDsb(m_dsb)) {
+			DWORD st = 0;
+			if (m_dsb->GetStatus(&st) == DS_OK && (st & DSBSTATUS_BUFFERLOST))
+				m_dsb->Restore();
 			m_dsb->SetCurrentPosition(0);
+			/* wav 側 Play が前曲 Stop と競合すると、Fill だけ進んで
+			   スペアナ(PlayCursor)は止まりスピーカーは無音になる。 */
+			if (!VstLiveThruIsOn() && savedata.dsvol != -498)
+				m_dsb->SetVolume((savedata.dsvol - 1) * 10);
+			m_dsb->Play(0, 0, DSBPLAY_LOOPING);
+		}
 	}
 	// mode ではなく Open 中の形式（曲切替で mode が先に変わる）
 	if (g_openDecoderMode == -10 || g_openDecoderMode == 999) {
@@ -1334,6 +1353,16 @@ UINT HandleNotifications(LPVOID)
 			dsb = m_dsb;
 			if (!isPlausibleDsb(dsb))
 				continue;
+			DWORD st = 0;
+			if (!fade1 && dsb->GetStatus(&st) == DS_OK) {
+				if (st & DSBSTATUS_BUFFERLOST)
+					dsb->Restore();
+				if (!(st & DSBSTATUS_PLAYING)) {
+					if (!VstLiveThruIsOn() && savedata.dsvol != -498)
+						dsb->SetVolume((savedata.dsvol - 1) * 10);
+					dsb->Play(0, 0, DSBPLAY_LOOPING);
+				}
+			}
 			dsb->GetCurrentPosition(&PlayCursor, &WriteCursor);
 		}
 		const ULONG ringBytes = (g_ds_buffer_bytes > 0) ? g_ds_buffer_bytes : (ULONG)(OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM);
@@ -1398,7 +1427,7 @@ UINT HandleNotifications(LPVOID)
 		int stageBytes = 0;
 		bool stageFade = false;
 		int readmeThisCycle = 0;
-		const int writtenThisCycle = len1 + len2;
+		int writtenThisCycle = len1 + len2;
 		bool exitAfterCl2 = false;
 
 		/* 動画 Run は DirectShow 側。fill スレッドへ移さない（COM アパート）。
@@ -1435,8 +1464,17 @@ UINT HandleNotifications(LPVOID)
 			}
 			if (fillExit || PlayAbortIsSet() || thn1)
 				return stopPlaybackAndExit();
-			if (got < stageBytes && stageBytes > 0)
-				ZeroMemory(s_dsStage + got, (size_t)(stageBytes - got));
+			/* 取り出し 0 を無音で埋めて Lock すると、Fill は進んでもスピーカーとスペアナが死ぬ。 */
+			if (got <= 0)
+				continue;
+			stageBytes = got;
+			if (len1 > stageBytes) {
+				len1 = stageBytes;
+				len2 = 0;
+			} else if (len2 > 0 && len1 + len2 > stageBytes) {
+				len2 = stageBytes - len1;
+			}
+			writtenThisCycle = len1 + len2;
 			stageFade = (!InterlockedCompareExchange(&g_xfInProgress, 0, 0)
 				&& drainSilence) ? true : false;
 		}
@@ -1618,7 +1656,7 @@ UINT HandleNotifications(LPVOID)
 					}
 				}
 				if (og && ::IsWindow(og->GetSafeHwnd()))
-					og->PostMessage(WM_PLAYBACK_AUTO_STOPPED, 0, 0);
+					og->PostMessage(WM_PLAYBACK_AUTO_STOPPED, (WPARAM)(ULONG)playGen, 0);
 				// AfxEndThread 禁止（stopPlaybackAndExit と同じ理由）。通常 return でスレッド終了。
 				return 0;
 			}
