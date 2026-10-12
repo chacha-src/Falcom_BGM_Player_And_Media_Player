@@ -206,6 +206,86 @@ static void PushExclBody(uint32_t tick, int port, int xg, uint8_t devId, const u
 	PushEv(tick, port, sx, n);
 }
 
+/* MICP `_1` は 0xC0 へ1文字ずつ先頭挿入するので逆順。長さは 0xDF（1..31）。
+   32 や 0 はテンプレートのままなので曲のレターではない。 */
+static int SasamiMonitorLetter(const SasamiSong& song, uint8_t* out, int cap)
+{
+	if (!out || cap < 1 || !SasamiOffOk(song, 0xDFu, 1)) return 0;
+	int n = (int)SasamiGet(song, 0xDFu);
+	if (n < 1 || n > 31) return 0;
+	if (n > cap) n = cap;
+	for (int i = 0; i < n; ++i) {
+		uint8_t c = 0x20;
+		const uint32_t off = 0xC0u + (uint32_t)(n - 1 - i);
+		if (SasamiOffOk(song, off, 1))
+			c = (uint8_t)(SasamiGet(song, off) & 0x7F);
+		if (c < 0x20 || c > 0x7E) c = 0x20;
+		out[i] = c;
+	}
+	return n;
+}
+
+/* PNL_OUT の GS 文字は model 45 / 10 00 00。XG は 43 10 4C 06 00 00。 */
+static void PushLcdLetter(uint32_t tick, int port, const uint8_t* text, int n)
+{
+	if (!text || n <= 0) return;
+	if (n > 32) n = 32;
+	uint8_t gs[40];
+	uint8_t xg[40];
+	gs[0] = 0x10; gs[1] = 0x00; gs[2] = 0x00;
+	xg[0] = 0x06; xg[1] = 0x00; xg[2] = 0x00;
+	for (int i = 0; i < n; ++i) {
+		const uint8_t c = (uint8_t)(text[i] & 0x7F);
+		gs[3 + i] = c;
+		xg[3 + i] = c;
+	}
+	PushExclBody(tick, port, 0, 0x45, gs, 3 + n);
+	PushExclBody(tick, port, 1, 0x4C, xg, 3 + n);
+}
+
+/* パネルドット。GS は 10 01 00 に 64 バイト＋ページ 1 表示。
+   XG は 07 00 00 に 48 バイト。ASM の 80h/C0h は MIDI データなので 7bit に落とす。 */
+static const uint8_t kSasamiPnlGs[64] = {
+	0x0A,0x1C,0x04,0x04,0x02,0x02,0x0E,0x12,0x10,0x10,0x10,0x10,0x12,0x0A,0x0C,0x00,
+	0x0A,0x1C,0x04,0x04,0x02,0x02,0x0E,0x12,0x10,0x10,0x10,0x10,0x12,0x0A,0x0C,0x00,
+	0x0C,0x14,0x04,0x04,0x05,0x05,0x05,0x07,0x0F,0x1D,0x15,0x15,0x15,0x19,0x1A,0x00,
+	0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x10,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00
+};
+static const uint8_t kSasamiPnlXg[48] = {
+	0x29,0x73,0x10,0x10,0x08,0x08,0x39,0x4A,0x42,0x42,0x42,0x42,0x4B,0x29,0x31,0x00,
+	0x26,0x4A,0x42,0x42,0x22,0x22,0x62,0x23,0x07,0x0E,0x0A,0x0A,0x2A,0x2C,0x4B,0x00,
+	0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x40,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00
+};
+
+static void PushLcdDots(uint32_t tick, int port)
+{
+	uint8_t gs[3 + 64];
+	gs[0] = 0x10; gs[1] = 0x01; gs[2] = 0x00;
+	memcpy(gs + 3, kSasamiPnlGs, 64);
+	PushExclBody(tick, port, 0, 0x45, gs, 3 + 64);
+	const uint8_t show[4] = { 0x10, 0x20, 0x00, 0x01 };
+	PushExclBody(tick, port, 0, 0x45, show, 4);
+	uint8_t xg[3 + 48];
+	xg[0] = 0x07; xg[1] = 0x00; xg[2] = 0x00;
+	memcpy(xg + 3, kSasamiPnlXg, 48);
+	PushExclBody(tick, port, 1, 0x4C, xg, 3 + 48);
+}
+
+static void PushSongLcd(uint32_t tick, int port, const SasamiSong& song)
+{
+	uint8_t let[32];
+	const int n = SasamiMonitorLetter(song, let, 32);
+	if (n > 0) {
+		PushLcdLetter(tick, port, let, n);
+	} else {
+		static const uint8_t welcome[16] = {
+			' ','W','e','l','c','o','m','e',' ','S','A','S','A','M','I',' '
+		};
+		PushLcdLetter(tick, port, welcome, 16);
+	}
+	PushLcdDots(tick, port);
+}
+
 static int GsPartIdx(int ch)
 {
 	if (ch == 9) return 0;
@@ -1655,6 +1735,8 @@ bool SasamiConvertToSmf(const SasamiSong& song, SasamiMidiMap map, int gsBankLsb
 		for (int ch = 0; ch < 16; ch++)
 			PushMmodeChannelInit(0, p, ch, map, gsBankLsb, flg88, laBankMsb);
 	}
+	/* _1 のモニターレターとパネルドット。GS（SC-88）と XG の両方へ出す。 */
+	PushSongLcd(0, 0, song);
 
 	uint32_t tick = 0;
 	/* 同じ MIDI ch の複数トラックが同じ音高を持つ。先に終わった方の
@@ -2047,16 +2129,20 @@ bool SasamiConvertToSmf(const SasamiSong& song, SasamiMidiMap map, int gsBankLsb
 					PushShort(tick, port, (uint8_t)(0xB0 | ch), 0x26, 0);
 					tr[i].addr = addr + 3;
 					break;
-				case 28: { // TITL: GS LCD 11 文字 (M_MUSIC+0C0)
-					uint8_t body[14];
-					body[0] = 0x10;
-					body[1] = 0;
-					body[2] = 0;
-					for (int k = 0; k < 11; k++) {
-						const uint32_t titOff = 0xC0u + (uint32_t)k;
-						body[3 + k] = SasamiOffOk(song, titOff, 1) ? SasamiGet(song, titOff) : 0;
+				case 28: { // TITL。_1 があれば逆順を戻した全文。無いときだけ 0xC0 の並び 11 文字。
+					uint8_t let[32];
+					int n = SasamiMonitorLetter(song, let, 32);
+					if (n <= 0) {
+						n = 11;
+						for (int k = 0; k < 11; k++) {
+							const uint32_t titOff = 0xC0u + (uint32_t)k;
+							uint8_t c = SasamiOffOk(song, titOff, 1) ? SasamiGet(song, titOff) : 0x20;
+							c = (uint8_t)(c & 0x7F);
+							if (c < 0x20) c = 0x20;
+							let[k] = c;
+						}
 					}
-					PushExclBody(tick, port, 0, 0x45, body, 14);
+					PushLcdLetter(tick, port, let, n);
 					tr[i].addr = addr + 3;
 					break;
 				}
