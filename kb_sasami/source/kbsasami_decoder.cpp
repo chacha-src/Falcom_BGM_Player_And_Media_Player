@@ -71,6 +71,9 @@ KbSasamiDecoder::KbSasamiDecoder(IKpiConfig* pConfig)
 	m_openPath[0] = 0;
 	m_monHold = 0;
 	m_forceHead = 0;
+	memset(m_drumMap, 0, sizeof(m_drumMap));
+	memset(m_kitPc, 0, sizeof(m_kitPc));
+	memset(m_kitOn, 0, sizeof(m_kitOn));
 	m_synths[0] = &m_synthesizer;
 	for (int i = 1; i < MAX_PORTS; i++) m_synths[i] = NULL;
 }
@@ -371,6 +374,16 @@ void KbSasamiDecoder::midi_message(int port, uint_least32_t message)
 		}
 	}
 	m_synths[port]->midi_event(message);
+	/* ドラム番号 1/2 への PC は、その番号の全部のパートのキットを同時に変える。 */
+	if (st == 0xc0 && port >= 0 && port < MAX_PORTS) {
+		const int ch = (int)(message & 0x0f);
+		const int map = m_drumMap[port][ch];
+		if (map == 1 || map == 2) {
+			m_kitPc[map] = (int)((message >> 8) & 0x7f);
+			m_kitOn[map] = 1;
+			ShareDrumKit(map);
+		}
+	}
 }
 
 void KbSasamiDecoder::sysex_message(int port, const void* data, std::size_t size)
@@ -394,7 +407,29 @@ void KbSasamiDecoder::sysex_message(int port, const void* data, std::size_t size
 		}
 	}
 	if (port < 0 || port >= m_nPorts) port = 0;
+	int rhyCh = -1;
+	int rhyMap = -1;
+	{
+		const unsigned char* sx = (const unsigned char*)data;
+		if (sx && size >= 11 && sx[0] == 0xf0 && sx[1] == 0x41 && sx[3] == 0x42
+			&& sx[4] == 0x12 && sx[5] == 0x40 && (sx[6] & 0xf0) == 0x10
+			&& sx[7] == 0x15 && sx[size - 1] == 0xf7) {
+			const int block = sx[6] & 0x0f;
+			rhyCh = (block == 0) ? 9 : (block < 10 ? block - 1 : block);
+			const int v = sx[8] & 0x7f;
+			rhyMap = (v == 2) ? 2 : ((v == 1) ? 1 : 0);
+		}
+	}
 	m_synths[port]->sysex_message(data, size);
+	if (rhyCh >= 0 && rhyCh < 16 && port >= 0 && port < MAX_PORTS) {
+		m_drumMap[port][rhyCh] = rhyMap;
+		if (rhyMap == 1 || rhyMap == 2) {
+			if (m_kitOn[rhyMap])
+				ShareDrumKit(rhyMap);
+			else if (m_synths[port])
+				m_synths[port]->program_change(rhyCh, 0);
+		}
+	}
 	const unsigned char* d = (const unsigned char*)data;
 	/* GM/GM2 On はバンクを捨てて PC だけになる。判定が GS/XG なら wopn のモードへ戻す。 */
 	int gmReset = (d && size == 6 && d[0] == 0xf0 && d[1] == 0x7e && d[2] == 0x7f &&
@@ -403,7 +438,13 @@ void KbSasamiDecoder::sysex_message(int port, const void* data, std::size_t size
 		if (m_synths[port])
 			m_synths[port]->set_system_mode((system_mode_t)m_wopnMode);
 		ApplyGsBankLsb();
+		ResetDrumMaps();
 		return;
+	}
+	if (d0 && size >= 11 && d0[0] == 0xf0 && d0[1] == 0x41 && d0[3] == 0x42 && d0[4] == 0x12
+		&& d0[5] == 0x40 && d0[6] == 0x00 && d0[7] == 0x7f && (d0[8] & 0x7f) == 0x00) {
+		/* GS Reset。ドラム番号とキットを初期（A10=MAP1、B10=MAP2）に戻す。 */
+		ResetDrumMaps();
 	}
 	if (m_gsMapLsb >= 1 && m_gsMapLsb <= 4 && d && size >= 11 &&
 		d[0] == 0xf0 && d[1] == 0x41 && d[3] == 0x42 && d[4] == 0x12 &&
@@ -467,7 +508,37 @@ void KbSasamiDecoder::reset()
 	m_note_factory.reset_pool_frame();
 	ApplyWopnMode();
 	ApplyGsBankLsb();
+	ResetDrumMaps();
 	KbsMonNotesOff();
+}
+
+void KbSasamiDecoder::ResetDrumMaps()
+{
+	for (int p = 0; p < MAX_PORTS; p++) {
+		for (int c = 0; c < 16; c++)
+			m_drumMap[p][c] = 0;
+	}
+	/* 音源全体でドラムは2つ。A のパート10が MAP1、B のパート10が MAP2。 */
+	m_drumMap[0][9] = 1;
+	if (m_nPorts > 1)
+		m_drumMap[1][9] = 2;
+	for (int m = 0; m < 3; m++) {
+		m_kitPc[m] = 0;
+		m_kitOn[m] = 0;
+	}
+}
+
+void KbSasamiDecoder::ShareDrumKit(int map)
+{
+	if (map < 1 || map > 2 || !m_kitOn[map]) return;
+	const int kit = m_kitPc[map] & 127;
+	for (int p = 0; p < m_nPorts; p++) {
+		if (!m_synths[p]) continue;
+		for (int c = 0; c < 16; c++) {
+			if (m_drumMap[p][c] != map) continue;
+			m_synths[p]->program_change(c, kit);
+		}
+	}
 }
 
 DWORD WINAPI KbSasamiDecoder::UpdateConfig(void*)

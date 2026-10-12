@@ -1439,8 +1439,9 @@ namespace std{
             int block = data[6] & 0x0F;
             int channel = (block == 0) ? 9 : (block < 10 ? block - 1 : block);
             int map = data[8];
+            /* PC 0 に戻すと、同じ MAP のキット（ROOM / RHYTHM FX）が STANDARD 1 に潰れる。
+               キットはデコーダが MAP 番号ごとに揃える。 */
             channels[channel]->set_rhythm_part(map != 0);
-            channels[channel]->program_change(0);
         }else if(size >= 9 && data[0] == 0xF0 && data[1] == 0x43 && (data[2] & 0xF0) == 0x10
             && data[3] == 0x4C && data[size - 1] == 0xF7){
             const int ah = data[4] & 0x7F;

@@ -113,6 +113,7 @@ private:
 		int lastVel;
 		int sus;        // CC64 Hold
 		int isDrum;
+		int drumMap;    // GS USE FOR RHYTHM。0=OFF 1=MAP1 2=MAP2。同じ番号は同じキット
 		BYTE xgPartMode; // XG 08 pp 06。0=Normal 1+=Drum（MSB127 と OR）
 		int held;       // 押鍵数。メータはフェードさせない（glow は使わない）
 		int rxCh;   // 0-15, 16=off（GS Rx Channel）
@@ -201,6 +202,8 @@ private:
 	void ApplyNrpn(Part& p);
 	void ApplyXgPartByte(int part, int addr, BYTE v);
 	void ApplyGsPartByte(Part& p, int kind, int addr, BYTE v, int* changed, int* mark);
+	void CaptureDrumKit(int map, const Part& s);
+	void ShareDrumKit(int map);
 	void RefreshPartName(Part& p);
 	void LookupToneName(int isXg, int mapId, int bankMsb, int bankLsb, int pc, int isDrum, wchar_t* out, int outN);
 	void PersistPos();
@@ -264,6 +267,11 @@ private:
 	int m_fileHasGm;
 	int m_fileHasSd;
 	int m_gs32;      // GS Port B / XG 17-32 SysEx
+	int m_kitPc[3];    // MAP1/MAP2 のドラムセット。0 は未使用
+	int m_kitMsb[3];
+	int m_kitLsb[3];
+	int m_kitMapId[3];
+	int m_kitOn[3];    // その番号へ PC が来た。1 になるまで初期キットは STANDARD 1
 	int m_mirrorToB; // FF 21 無し: チャンネル MIDI が両ケーブルに届く
 	struct MmTsEv {
 		unsigned __int64 tick;

@@ -1657,6 +1657,11 @@ CMidiMonitorDlg::CMidiMonitorDlg(CWnd* pParent)
 {
 	m_loadedPath[0] = 0;
 	m_sourcePath[0] = 0;
+	memset(m_kitPc, 0, sizeof(m_kitPc));
+	memset(m_kitMsb, 0, sizeof(m_kitMsb));
+	memset(m_kitLsb, 0, sizeof(m_kitLsb));
+	memset(m_kitMapId, 0, sizeof(m_kitMapId));
+	memset(m_kitOn, 0, sizeof(m_kitOn));
 	m_titleBuf[0] = 0;
 	m_copyBuf[0] = 0;
 	m_liveText[0] = 0;
@@ -2101,8 +2106,13 @@ void CMidiMonitorDlg::InitPartDefaults(int i, BYTE heard)
 		}
 	}
 	p.xgPartMode = 0;
+	p.drumMap = 0;
 	p.isDrum = ((i % 16) == 9) ? 1 : 0;
+	/* ドラムは2つ。A10 が MAP1、B10 が MAP2。同じ番号は後から来た PC も割り当て時も揃う。 */
+	if (p.isDrum && !m_fileHasXg)
+		p.drumMap = (i >= 16) ? 2 : 1;
 	if (m_sysMode == 2) {
+		p.drumMap = 0;
 		if ((i % 16) == 9) {
 			p.xgPartMode = 1;
 			if (p.bankMsb == 0)
@@ -2137,6 +2147,11 @@ void CMidiMonitorDlg::ResetParts()
 		heard[i] = m_part[i].heard;
 	memset(m_part, 0, sizeof(m_part));
 	memset(m_plugShown, 0, sizeof(m_plugShown));
+	memset(m_kitPc, 0, sizeof(m_kitPc));
+	memset(m_kitMsb, 0, sizeof(m_kitMsb));
+	memset(m_kitLsb, 0, sizeof(m_kitLsb));
+	memset(m_kitMapId, 0, sizeof(m_kitMapId));
+	memset(m_kitOn, 0, sizeof(m_kitOn));
 	for (int i = 0; i < PART_MAX; ++i)
 		InitPartDefaults(i, heard[i]);
 	m_usecQn = 500000;
@@ -2430,6 +2445,39 @@ void CMidiMonitorDlg::ApplyXgPartByte(int part, int a, BYTE v)
 	m_dirtyRows |= (1u << part);
 }
 
+void CMidiMonitorDlg::CaptureDrumKit(int map, const Part& s)
+{
+	if (map < 1 || map > 2) return;
+	m_kitPc[map] = s.pc;
+	m_kitMsb[map] = s.bankMsb;
+	m_kitLsb[map] = s.bankLsb;
+	m_kitMapId[map] = s.mapId;
+	m_kitOn[map] = 1;
+}
+
+void CMidiMonitorDlg::ShareDrumKit(int map)
+{
+	if (map < 1 || map > 2 || !m_kitOn[map]) return;
+	for (int i = 0; i < PART_MAX; ++i) {
+		Part& q = m_part[i];
+		if (q.drumMap != map) continue;
+		if (q.pc == m_kitPc[map] && q.bankMsb == m_kitMsb[map]
+			&& q.bankLsb == m_kitLsb[map] && q.mapId == m_kitMapId[map])
+			continue;
+		q.pc = m_kitPc[map];
+		q.bankMsb = m_kitMsb[map];
+		q.bankLsb = m_kitLsb[map];
+		q.mapId = m_kitMapId[map];
+		q.isDrum = 1;
+		if (!m_burstApply)
+			RefreshPartName(q);
+		else
+			m_nameNeed |= (1u << i);
+		MmBumpFade(q.fadeInst, m_burstApply);
+		m_dirtyRows |= (1u << i);
+	}
+}
+
 void CMidiMonitorDlg::ApplyGsPartByte(Part& p, int kind, int a, BYTE v, int* changed, int* mark)
 {
 	const int vv = v & 127;
@@ -2440,7 +2488,25 @@ void CMidiMonitorDlg::ApplyGsPartByte(Part& p, int kind, int a, BYTE v, int* cha
 			p.rxCh = (vv >= 0x10) ? 16 : vv;
 			*changed = 1; *mark = 1;
 		} else if (a == 0x15) {
-			p.isDrum = (vv != 0) ? 1 : 0;
+			/* 00=OFF 01=MAP1 02=MAP2。変わった瞬間に、その番号のキットをコピーする。 */
+			if (vv == 0) {
+				p.isDrum = 0;
+				p.drumMap = 0;
+			} else {
+				const int map = (vv == 2) ? 2 : 1;
+				p.isDrum = 1;
+				if (p.drumMap != map) {
+					p.drumMap = map;
+					if (m_kitOn[map]) {
+						p.pc = m_kitPc[map];
+						p.bankMsb = m_kitMsb[map];
+						p.bankLsb = m_kitLsb[map];
+						p.mapId = m_kitMapId[map];
+					} else {
+						p.pc = 0;
+					}
+				}
+			}
 			*changed = 1;
 			*mark = 1;
 		} else if (a == 0x16) {
@@ -2539,6 +2605,11 @@ void CMidiMonitorDlg::ApplyShort(int port, DWORD msg, BOOL fromUser, BOOL liveEx
 			MmBumpFade(p.fadeInst, m_burstApply);
 			m_nameNeed |= (1u << part);
 			m_dirtyRows |= (1u << part);
+			/* ドラム番号 1/2 の PC は、その番号の全部のパートへ同時に載せる。 */
+			if (p.drumMap == 1 || p.drumMap == 2) {
+				CaptureDrumKit(p.drumMap, p);
+				ShareDrumKit(p.drumMap);
+			}
 		}
 	} else if (st == 0xb0) {
 		if (d1 == 0) {
@@ -2707,6 +2778,13 @@ void CMidiMonitorDlg::ApplySysex(const BYTE* d, int n, int livePort)
 			p.pan = 64;
 			p.rev = 40;
 			p.isDrum = ((i % 16) == 9) ? 1 : 0;
+			p.drumMap = p.isDrum ? 2 : 0;
+			if (p.drumMap && m_kitOn[p.drumMap]) {
+				p.pc = m_kitPc[p.drumMap];
+				p.bankMsb = m_kitMsb[p.drumMap];
+				p.bankLsb = m_kitLsb[p.drumMap];
+				p.mapId = m_kitMapId[p.drumMap];
+			}
 			p.rxCh = i % 16;
 			p.rxPort = 1;
 			memset(p.noteOn, 0, sizeof(p.noteOn));
@@ -3272,7 +3350,8 @@ void CMidiMonitorDlg::LoadCurrentMidi()
 	const int wantB = (gs32 || maxPort >= 1) ? 1 : 0;
 	if (!hasXg && m_fileHasGm == 0 && count + 8 < EV_MAX && sxUsed + 44 <= sxCap) {
 		const BYTE rhyA[11] = { 0xf0, 0x41, 0x10, 0x42, 0x12, 0x40, 0x10, 0x15, 0x01, 0x1a, 0xf7 };
-		const BYTE rhyB[11] = { 0xf0, 0x41, 0x10, 0x42, 0x12, 0x50, 0x10, 0x15, 0x01, 0x0a, 0xf7 };
+		/* B10 は 2 つめのドラム（MAP2）。01 のままだと ROOM と FX が同じ番号になり、A11 が STANDARD 1 のまま残る。 */
+		const BYTE rhyB[11] = { 0xf0, 0x41, 0x10, 0x42, 0x12, 0x50, 0x10, 0x15, 0x02, 0x09, 0xf7 };
 		auto isRst = [&](const MmEv& e) -> int {
 			if (e.msg != 0xf0 || e.sysexOff < 0) return 0;
 			const int n = (int)e.aux;

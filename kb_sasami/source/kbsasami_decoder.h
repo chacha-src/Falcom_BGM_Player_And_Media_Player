@@ -63,6 +63,11 @@ private:
 	void ApplyMapForce(int mapForce, SasamiMidiMap* map);
 	void ApplyWopnMode();
 	void ApplyGsBankLsb();
+	void ResetDrumMaps();
+	void ShareDrumKit(int map);
+	int m_drumMap[MAX_PORTS][16]; // 0=OFF 1=MAP1 2=MAP2。A10=1、B10=2
+	int m_kitPc[3];
+	int m_kitOn[3];
 	int OpenForeignVst(const uint8_t* smf, DWORD smfLen);
 	int LoadFmMidiSequencer(DWORD rate);
 	int SwitchMidiEngine();
