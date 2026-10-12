@@ -181,6 +181,25 @@ copy /Y "$(TargetPath)" "C:\projects\APPLICATION3\ogg_binary\Plugins\kbsasami\x6
   <ItemGroup>
     <ResourceCompile Include="kbsasami_host.rc" />
   </ItemGroup>
+  <ItemGroup>
+    <None Include="..\res\insertion.dat" />
+    <None Include="..\res\SASAMI_EX.DAT" />
+    <None Include="..\res\SASAMI_GS.DAT" />
+    <None Include="..\res\SASAMI_XG.DAT" />
+  </ItemGroup>
+  <ItemGroup>
+    <Image Include="..\res\ui_ctl\book.ico" />
+    <Image Include="..\res\ui_ctl\close.ico" />
+    <Image Include="..\res\ui_ctl\cog.ico" />
+    <Image Include="..\res\ui_ctl\max.ico" />
+    <Image Include="..\res\ui_ctl\min.ico" />
+    <Image Include="..\res\ui_ctl\pin.ico" />
+    <Image Include="..\res\ui_ctl\pinoff.ico" />
+    <Image Include="..\res\ui_ctl\restore.ico" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="resource.h" />
+  </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets" />
 </Project>

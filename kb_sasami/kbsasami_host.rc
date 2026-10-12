@@ -109,7 +109,7 @@ END
 //
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 1,27,0,0
+ FILEVERSION 1,30,0,1
  PRODUCTVERSION 1,0,0,1
  FILEFLAGSMASK 0x3fL
 #ifdef _DEBUG
@@ -127,9 +127,9 @@ BEGIN
         BEGIN
             VALUE "CompanyName", "Falcom BGM Player & Media Player"
             VALUE "FileDescription", "Pre Prayer Power Soft"
-            VALUE "FileVersion", "1.27.0.0"
+            VALUE "FileVersion", "1.30.0.1"
             VALUE "InternalName", "kbsasami_host.exe"
-            VALUE "LegalCopyright", "Copyright (C) 2026.10.12"
+            VALUE "LegalCopyright", "Copyright (C) 2026.10.12 1.30a"
             VALUE "OriginalFilename", "kbsasami_host.exe"
             VALUE "ProductName", "Falcom BGM Player & Media Player"
             VALUE "ProductVersion", "1.0.0.1"

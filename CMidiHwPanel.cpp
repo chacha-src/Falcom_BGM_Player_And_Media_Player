@@ -723,37 +723,20 @@ void MidiHwLcdDraw(CDC& dc, const CRect& rc, UINT dpi,
 	if (!partsA || rc.Width() < 40 || rc.Height() < 18) return;
 	const int stacked = partsB ? 1 : 0;
 	if (selA < 0) selA = 0;
-	if (selA > 15) selA = 15;
 	if (selB < 0) selB = 0;
 	if (selB > 15) selB = 15;
 
 	int bank = 0;
 	int sel = selA;
 	const MidiHwLcdPartSnap* parts = partsA;
-	BYTE keyOr[16];
 	const BYTE* keyBits = keyBitsA;
-	if (stacked) {
-		int aH = 0, bH = 0;
-		float aL = 0.f, bL = 0.f;
-		for (int i = 0; i < 16; ++i) {
-			if (partsA[i].held) aH++;
-			if (partsB[i].held) bH++;
-			if (partsA[i].lev > aL) aL = partsA[i].lev;
-			if (partsB[i].lev > bL) bL = partsB[i].lev;
-		}
-		if (bH > aH || (bH == aH && bL > aL)) {
-			bank = 1;
-			sel = selB;
-			parts = partsB;
-		}
-		if (keyBitsA && keyBitsB) {
-			for (int i = 0; i < 16; ++i)
-				keyOr[i] = (BYTE)(keyBitsA[i] | keyBitsB[i]);
-			keyBits = keyOr;
-		} else if (keyBitsB) {
-			keyBits = keyBitsB;
-		}
+	/* selA が 16 以上なら B バンク。鳴っているパートへは追従しない */
+	if (!stacked && sel >= 16) {
+		bank = 1;
+		sel -= 16;
 	}
+	if (sel < 0) sel = 0;
+	if (sel > 15) sel = 15;
 	const MidiHwLcdPartSnap& sp = parts[sel];
 
 	const LcdPal pal = LcdPalette(kind);

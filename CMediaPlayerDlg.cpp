@@ -4631,11 +4631,54 @@ void CMediaPlayerDlg::TickLyricsView()
 	extern volatile LONG g_appExiting;
 	if (InterlockedCompareExchange(&g_appExiting, 0, 0))
 		return;
-	if (!savedata.mpLrcExpand)
+	if (!og || !::IsWindow(og->GetSafeHwnd()) || og->lrcnum < 2)
 		return;
-	if (!m_lrcView.GetSafeHwnd() || !::IsWindow(m_lrcView.GetSafeHwnd()))
+	/* 歌詞窓は timerp から動く。MP の5行は Timer1 待ちだと再生中に先頭で止まる。 */
+	extern double OggGetLyricsPlaySec();
+	double sec = OggGetLyricsPlaySec();
+	if (sec < 0.0) sec = 0.0;
+	const unsigned nowCs = (unsigned)(sec * 100.0 + 0.5);
+	int lp = 0;
+	const int n = og->lrcnum;
+	for (int i = 0; i < n - 1; ++i) {
+		if (og->lrctm[i] <= nowCs && og->lrctm[i + 1] > nowCs) {
+			lp = i;
+			break;
+		}
+		if (nowCs >= og->lrctm[i])
+			lp = i;
+	}
+	if (lp < 0) lp = 0;
+	if (lp >= n) lp = n - 1;
+	og->lrccur = lp;
+	const bool lrcScroll = (savedata.mpLrcExpand && m_lrcView.GetSafeHwnd()
+		&& ::IsWindow(m_lrcView.GetSafeHwnd()));
+	if (lrcScroll) {
+		const int lines = (n > 1) ? (n - 1) : 0;
+		m_lrcView.SetLines(og->lrc, lines, og->lrctm, n);
+		m_lrcView.TickFrame();
 		return;
-	m_lrcView.TickFrame();
+	}
+	if (!m_lrc.GetSafeHwnd())
+		return;
+	auto put = [](CWnd& w, const CString& s) {
+		if (!w.GetSafeHwnd()) return;
+		CString cur;
+		w.GetWindowText(cur);
+		if (cur != s) w.SetWindowText(s);
+	};
+	put(m_lrc, (lp >= 2) ? og->lrc[lp - 2] : CString());
+	put(m_lrc2, (lp >= 1) ? og->lrc[lp - 1] : CString());
+	CString hi;
+	hi.Format(_T("!@C1E46AA%s"), (LPCTSTR)og->lrc[lp]);
+	CString cur3;
+	m_lrc3.GetWindowText(cur3);
+	if (cur3 != hi) {
+		m_lrc3.SetWindowText(hi);
+		m_lrc3.SetSolidFill(TRUE, RGB(220, 232, 255));
+	}
+	put(m_lrc4, (lp + 1 < n) ? og->lrc[lp + 1] : CString());
+	put(m_lrc5, (lp + 2 < n - 1) ? og->lrc[lp + 2] : CString());
 }
 
 // DS/拡張/テンポ/ピッチの%は見える MP スライダーの GetPos から作る。

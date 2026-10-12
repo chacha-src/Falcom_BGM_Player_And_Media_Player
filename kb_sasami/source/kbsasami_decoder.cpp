@@ -639,6 +639,11 @@ int KbSasamiDecoder::LoadFmMidiSequencer(DWORD rate)
 			m_synths[i] = new synthesizer(&m_note_factory);
 	}
 	reset();
+	/* 前の曲の J を引き継ぐと、ループの無い mid がホスト側で回り続ける */
+	m_MediaInfo.qwLoop = 0;
+	m_MediaInfo.dwLoopCount = 0;
+	m_loopStart = -1.0;
+	m_loopEnd = -1.0;
 	m_loopStart = m_sequencer.find_marker("loopStart");
 	m_loopEnd = m_sequencer.find_marker("loopEnd");
 	m_MediaInfo.dwSampleRate = rate;
@@ -916,6 +921,8 @@ DWORD __fastcall KbSasamiDecoder::Open(const KPI_MEDIAINFO* cpRequest, IKpiFile*
 			m_MediaInfo.qwLength = ns;
 		}
 		{
+			m_MediaInfo.qwLoop = 0;
+			m_MediaInfo.dwLoopCount = 0;
 			const UINT64 ls = m_fm.LoopStartSample();
 			const UINT64 le = m_fm.LoopEndSample();
 			const DWORD sr = m_MediaInfo.dwSampleRate;
@@ -946,6 +953,10 @@ DWORD __fastcall KbSasamiDecoder::Open(const KPI_MEDIAINFO* cpRequest, IKpiFile*
 	if (!SasamiConvertToSmf(s_song, map, m_gsMapLsb, m_smf, SASAMI_MAX_SMF, &m_smfSize, m_laBankMsb)) return 0;
 
 	if (m_vst != 0) {
+		m_MediaInfo.qwLoop = 0;
+		m_MediaInfo.dwLoopCount = 0;
+		m_loopStart = -1.0;
+		m_loopEnd = -1.0;
 		{
 			MemFile mf;
 			mf.p = m_smf;

@@ -1875,6 +1875,8 @@ BOOL CAboutDlg::OnInitDialog()
 /////////////////////////////////////////////////////////////////////////////
 // COggDlg ダイアログ
 
+static void OggAbsVisualBody();
+
 COggDlg::COggDlg(CWnd* pParent /*=NULL*/)
 	: CCustomBlurDialogBase(COggDlg::IDD, pParent)
 	, m_hTimerpVsyncThread(NULL)
@@ -1884,6 +1886,7 @@ COggDlg::COggDlg(CWnd* pParent /*=NULL*/)
 	//}}AFX_DATA_INIT
 	// メモ: LoadIcon は Win32 の DestroyIcon のサブシーケンスを要求しません。
 	m_hIcon = AfxGetApp()->LoadIcon(IDR_MAINFRAME);
+	OggSetAbsVisualHook(OggAbsVisualBody);
 	m_jacketFocus = 0.0;
 	m_lastTick = 0;
 	m_EqualizerDlg = new CEqualizer();
@@ -6092,6 +6095,51 @@ static volatile LONG g_timerpPosted = 0;
 static volatile LONG g_gdiPaintPending = 0;
 static volatile LONG g_speanaPosted = 0;
 static volatile LONG g_inPlaybackUiTick = 0;
+/* リストの行移動中はキーがキューに残っていても、モニタとバナーは今描く */
+static volatile LONG g_listNavVisual = 0;
+
+/* マウスやスクロールでキューが埋まっても、モニタとバナーをここから進める。
+   Invalidate だけでは WM_PAINT がキーより後回しになり、行移動中は一枚も出ない。 */
+static void OggAbsPaintNow(CWnd* w)
+{
+	if (!w) return;
+	HWND h = w->GetSafeHwnd();
+	if (!h || !::IsWindow(h) || !::IsWindowVisible(h) || ::IsIconic(h))
+		return;
+	::RedrawWindow(h, NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW | RDW_NOERASE);
+}
+
+static void OggAbsVisualBody()
+{
+	if (InterlockedCompareExchange(&g_inPlaybackUiTick, 0, 0) != 0)
+		return;
+	extern COggDlg* og;
+	if (!og || !::IsWindow(og->GetSafeHwnd()))
+		return;
+	InterlockedExchange(&g_listNavVisual, 1);
+	if (og->m_MidiMonitorDlg && ::IsWindow(og->m_MidiMonitorDlg->GetSafeHwnd())
+		&& og->m_MidiMonitorDlg->IsWindowVisible()) {
+		og->m_MidiMonitorDlg->PumpSyncNow();
+		OggAbsPaintNow(og->m_MidiMonitorDlg);
+	}
+	if (og->m_FmMonitorDlg && ::IsWindow(og->m_FmMonitorDlg->GetSafeHwnd())
+		&& og->m_FmMonitorDlg->IsWindowVisible()) {
+		og->m_FmMonitorDlg->PumpSyncNow();
+		OggAbsPaintNow(og->m_FmMonitorDlg);
+	}
+	if (og->m_PianoRollDlg && ::IsWindow(og->m_PianoRollDlg->GetSafeHwnd())
+		&& og->m_PianoRollDlg->IsWindowVisible()) {
+		og->m_PianoRollDlg->SendMessage(WM_APP + 420, 0, 0);
+		OggAbsPaintNow(og->m_PianoRollDlg);
+	}
+	if (og->m_AnalyzerDlg && ::IsWindow(og->m_AnalyzerDlg->GetSafeHwnd())
+		&& og->m_AnalyzerDlg->IsWindowVisible()) {
+		og->m_AnalyzerDlg->SendMessage(WM_APP + 512, 0, 0);
+		OggAbsPaintNow(og->m_AnalyzerDlg);
+	}
+	/* timerp 本体は VSYNC 側。ここから呼ぶとリスト操作のたびに二重になり重くなる。 */
+	InterlockedExchange(&g_listNavVisual, 0);
+}
 static DWORD g_gdiPaintPendingSince = 0;
 
 // メディアプレイヤーモードでメイン画面(og)が非表示の間は OnPaint が呼ばれず
@@ -6207,14 +6255,24 @@ static BOOL CALLBACK OggChromeTimerEnumTop(HWND h, LPARAM)
 }
 
 /* クリック／キー／終了がキューに残っている。vsync の同期描画より先にメインループへ返す。 */
-static bool OggClickOrKeyQueued()
+static bool OggMouseButtonQueued()
 {
 	MSG msg;
-	if (::PeekMessage(&msg, NULL, WM_KEYFIRST, WM_KEYLAST, PM_NOREMOVE))
-		return true;
 	if (::PeekMessage(&msg, NULL, WM_LBUTTONDOWN, WM_MBUTTONDBLCLK, PM_NOREMOVE))
 		return true;
 	if (::PeekMessage(&msg, NULL, WM_NCLBUTTONDOWN, WM_NCMBUTTONDBLCLK, PM_NOREMOVE))
+		return true;
+	return false;
+}
+
+static bool OggClickOrKeyQueued()
+{
+	if (g_listNavVisual)
+		return false;
+	MSG msg;
+	if (::PeekMessage(&msg, NULL, WM_KEYFIRST, WM_KEYLAST, PM_NOREMOVE))
+		return true;
+	if (OggMouseButtonQueued())
 		return true;
 	if (::PeekMessage(&msg, NULL, WM_COMMAND, WM_COMMAND, PM_NOREMOVE))
 		return true;
@@ -14436,6 +14494,12 @@ open_mode_vst_midi:
 			}
 		}
 
+	if (lrcnum < 2) {
+		const int nLy = MidiSmfFillLrc((LPCTSTR)filen, lrc, lrctm, 300);
+		if (nLy >= 2)
+			lrcnum = nLy;
+	}
+
 	if (mode == 21 || mode == 30 || mode == 31) {
 		wavbit_sample_Hz = 48000;
 	}
@@ -20843,6 +20907,9 @@ static bool WantPlaybackLoop()
 	}
 	if (dm == -10)
 		return false;
+	/* 標準 MIDI はループ点が無い。endf が 0 のままでも全長をループ点にしない */
+	if (kpi_file_loop == 0 && (dm == -3 || IsVstMidiPlayMode(dm)))
+		return false;
 	return realLoop;
 }
 
@@ -22149,11 +22216,11 @@ __int64 OggGetCemuLiveHeardFrames()
 		else
 			lag += q;
 	}
-	/* アナログまでの約 700ms。ライブ時計は emu レートなので KPI の wavbit で引かない。 */
+	/* アナログまでの残り。ライブ時計は emu レート。測れたキューが 700ms の近くならそちら */
 	const int sr = kpiSink
 		? ((liveHz > 0) ? liveHz : 44100)
 		: ((wavbit_sample_Hz > 0) ? wavbit_sample_Hz : 44100);
-	lag += (__int64)sr * 700 / 1000;
+	lag += (__int64)sr * OggGetPlaybackLagMs(700) / 1000;
 	__int64 heard = CEmuMidiLiveAudioFrames() - lag;
 	if (heard < 0) heard = 0;
 	return heard;
@@ -27176,6 +27243,19 @@ static void OggRefreshDsQueuedSamplesCache()
 	}
 }
 
+int OggGetPlaybackLagMs(int fallbackMs)
+{
+	if (fallbackMs < 0) fallbackMs = 0;
+	OggRefreshDsQueuedSamplesCache();
+	if (g_dsQueuedSamplesCache <= 0 || wavbit_sample_Hz < 8000)
+		return fallbackMs;
+	const int ms = (int)((__int64)g_dsQueuedSamplesCache * 1000 / wavbit_sample_Hz);
+	/* 固定遅れの近くだけ。heard バイトの別原点は使わない */
+	if (ms < fallbackMs - 80 || ms > fallbackMs + 80)
+		return fallbackMs;
+	return ms;
+}
+
 __int64 OggGetHeardPcmFrames()
 {
 	extern __int64 g_heardBytes;
@@ -29424,14 +29504,19 @@ LRESULT COggDlg::OnTimerpVsyncTick(WPARAM, LPARAM)
 		InterlockedExchange(&g_timerpPosted, 0);
 		return 0;
 	}
-	/* バナー BitBlt / アナライザ UpdateWindow の前にクリックを通す。
-	   未演奏のダブルクリックが演奏開始に届かないのも、tick や Join が
-	   マウスを先に抱えたままだと同じ症状になる。 */
-	if (OggClickOrKeyQueued()) {
+	/* マウスクリックだけ先に通す。キーリピートで tick を捨てると
+	   バナーもモニタも歌詞も、押しているあいだ全部止まる。 */
+	if (OggMouseButtonQueued()) {
 		InterlockedExchange(&g_timerpPosted, 0);
 		return 0;
 	}
+	MSG keyMsg;
+	const bool keyQueued = (::PeekMessage(&keyMsg, NULL, WM_KEYFIRST, WM_KEYLAST, PM_NOREMOVE) != FALSE);
+	if (keyQueued)
+		InterlockedExchange(&g_listNavVisual, 1);
 	timerp();
+	if (keyQueued)
+		InterlockedExchange(&g_listNavVisual, 0);
 	if (InterlockedCompareExchange(&g_appExiting, 0, 0)
 		|| InterlockedCompareExchange(&g_inPlaybackJoinPump, 0, 0)) {
 		/* ULW 直後の DestroyWindow を避ける。終了は IDOK 側で行う */

@@ -1652,7 +1652,7 @@ CMidiMonitorDlg::CMidiMonitorDlg(CWnd* pParent)
 	, m_fxKeepPend(0)
 	, m_fm(nullptr), m_fmView(0)
 	, m_dirtyHead(true), m_fullDraw(true), m_volDragging(false)
-	, m_lcdSelA(0), m_lcdSelB(0), m_showLcdMode(0), m_showLcdSelA(-1), m_showLcdSelB(-1), m_showLcdKind(-1)
+	, m_lcdSelA(0), m_lcdSelB(0), m_lcdUser(0), m_showLcdMode(0), m_showLcdSelA(-1), m_showLcdSelB(-1), m_showLcdKind(-1)
 	, m_showLcdPage(-1), m_showLcdScroll(-1), m_showLcdGen(0)
 {
 	m_loadedPath[0] = 0;
@@ -1665,6 +1665,8 @@ CMidiMonitorDlg::CMidiMonitorDlg(CWnd* pParent)
 	m_titleBuf[0] = 0;
 	m_copyBuf[0] = 0;
 	m_liveText[0] = 0;
+	m_lyricHold[0] = 0;
+	m_markerText[0] = 0;
 	m_liveTextKind = 0;
 	m_smfFormat = 0;
 	m_smfTracks = 0;
@@ -1672,6 +1674,8 @@ CMidiMonitorDlg::CMidiMonitorDlg(CWnd* pParent)
 	m_volBarRc.SetRectEmpty();
 	m_notesBarRc.SetRectEmpty();
 	m_lcdRc.SetRectEmpty();
+	m_lcdPrevRc.SetRectEmpty();
+	m_lcdNextRc.SetRectEmpty();
 	MidiHwLcdReset(&m_lcd);
 	memset(m_showLcdSeg, 0, sizeof(m_showLcdSeg));
 	memset(m_part, 0, sizeof(m_part));
@@ -2162,6 +2166,8 @@ void CMidiMonitorDlg::ResetParts()
 	m_transpose = 0;
 	m_sysMode = m_fileHasXg ? 2 : ((m_fileHasGm || m_gsMapKind == 5 || m_gsMapKind == 9) ? 0 : 1);
 	m_liveText[0] = 0;
+	m_lyricHold[0] = 0;
+	m_markerText[0] = 0;
 	m_liveTextKind = 0;
 	memset(m_gsEfx, 0, sizeof(m_gsEfx));
 	m_gsEfxHasLsb = 0;
@@ -2302,6 +2308,8 @@ void CMidiMonitorDlg::UnloadMidi()
 	m_titleBuf[0] = 0;
 	m_copyBuf[0] = 0;
 	m_liveText[0] = 0;
+	m_lyricHold[0] = 0;
+	m_markerText[0] = 0;
 	m_liveTextKind = 0;
 	m_smfFormat = 0;
 	m_smfTracks = 0;
@@ -2582,8 +2590,6 @@ void CMidiMonitorDlg::ApplyShort(int port, DWORD msg, BOOL fromUser, BOOL liveEx
 			p.lastVel = d2;
 			p.held++;
 			if (p.held < 1) p.held = 1;
-			if (part < 16) m_lcdSelA = part;
-			else m_lcdSelB = part - 16;
 			m_dirtyHead = true;
 			const float lv = (float)d2 / 127.f;
 			if (lv > p.lev) p.lev = lv;
@@ -2943,6 +2949,209 @@ void CMidiMonitorDlg::ApplySysex(const BYTE* d, int n, int livePort)
 	CaptureFxKeep();
 }
 
+struct MidiLrcItem {
+	unsigned tick;
+	int order;
+	int tempo;
+	wchar_t text[96];
+};
+
+static int MidiLrcCmp(const void* a, const void* b)
+{
+	const MidiLrcItem* x = (const MidiLrcItem*)a;
+	const MidiLrcItem* y = (const MidiLrcItem*)b;
+	if (x->tick < y->tick) return -1;
+	if (x->tick > y->tick) return 1;
+	return x->order - y->order;
+}
+
+static int MidiLrcVlq(const BYTE*& p, const BYTE* end, unsigned* v)
+{
+	unsigned x = 0;
+	for (int i = 0; i < 4; ++i) {
+		if (p >= end) return 0;
+		const BYTE b = *p++;
+		x = (x << 7) | (unsigned)(b & 0x7f);
+		if ((b & 0x80) == 0) {
+			*v = x;
+			return 1;
+		}
+	}
+	return 0;
+}
+
+static int MidiLrcBlank(const wchar_t* s)
+{
+	if (!s || !s[0]) return 1;
+	for (const wchar_t* p = s; *p; ++p) {
+		if (*p != L' ' && *p != L'\t' && *p != L'/' && *p != L'\\' && *p != L'\r' && *p != L'\n')
+			return 0;
+	}
+	return 1;
+}
+
+static void MidiLrcToWide(const BYTE* s, int n, wchar_t* out, int outN)
+{
+	out[0] = 0;
+	if (!s || n <= 0 || outN < 2) return;
+	if (n > 180) n = 180;
+	char tmp[184];
+	memcpy(tmp, s, (size_t)n);
+	tmp[n] = 0;
+	int w = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, tmp, n, out, outN - 1);
+	if (w <= 0)
+		w = MultiByteToWideChar(932, 0, tmp, n, out, outN - 1);
+	if (w < 0) w = 0;
+	if (w >= outN) w = outN - 1;
+	out[w] = 0;
+	while (w > 0 && (out[w - 1] == L' ' || out[w - 1] == L'\t' || out[w - 1] == L'\r' || out[w - 1] == L'\n'))
+		out[--w] = 0;
+}
+
+int MidiSmfFillLrc(const wchar_t* path, CString* lines, DWORD* cs, int cap)
+{
+	if (!path || !path[0] || !lines || !cs || cap < 4) return 0;
+	HANDLE h = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+	if (h == INVALID_HANDLE_VALUE) return 0;
+	LARGE_INTEGER sz;
+	if (!GetFileSizeEx(h, &sz) || sz.QuadPart < 22 || sz.QuadPart > 16 * 1024 * 1024) {
+		CloseHandle(h);
+		return 0;
+	}
+	const int nb = (int)sz.QuadPart;
+	BYTE* buf = (BYTE*)malloc((size_t)nb);
+	if (!buf) {
+		CloseHandle(h);
+		return 0;
+	}
+	DWORD got = 0;
+	const BOOL ok = ReadFile(h, buf, (DWORD)nb, &got, NULL);
+	CloseHandle(h);
+	if (!ok || (int)got != nb || memcmp(buf, "MThd", 4) != 0) {
+		free(buf);
+		return 0;
+	}
+	const int hdr = (int)((buf[4] << 24) | (buf[5] << 16) | (buf[6] << 8) | buf[7]);
+	if (hdr < 6 || 8 + hdr > nb) {
+		free(buf);
+		return 0;
+	}
+	const int division = (buf[8 + 4] << 8) | buf[8 + 5];
+	if (division <= 0 || (division & 0x8000)) {
+		free(buf);
+		return 0;
+	}
+	const int kMax = 12000;
+	MidiLrcItem* items = (MidiLrcItem*)malloc(sizeof(MidiLrcItem) * (size_t)kMax);
+	if (!items) {
+		free(buf);
+		return 0;
+	}
+	int nItem = 0;
+	int order = 0;
+	const BYTE* p = buf + 8 + hdr;
+	const BYTE* fileEnd = buf + nb;
+	while (p + 8 <= fileEnd && nItem < kMax) {
+		if (memcmp(p, "MTrk", 4) != 0) break;
+		const int trkLen = (int)((p[4] << 24) | (p[5] << 16) | (p[6] << 8) | p[7]);
+		p += 8;
+		if (trkLen < 0 || p + trkLen > fileEnd) break;
+		const BYTE* trk = p;
+		const BYTE* tend = p + trkLen;
+		p = tend;
+		unsigned absTick = 0;
+		int run = 0;
+		while (trk < tend && nItem < kMax) {
+			unsigned delta = 0;
+			if (!MidiLrcVlq(trk, tend, &delta)) break;
+			absTick += delta;
+			if (trk >= tend) break;
+			int st = *trk;
+			if (st < 0x80) {
+				if (run == 0) break;
+				st = run;
+			} else {
+				trk++;
+				if (st < 0xf0) run = st;
+			}
+			if (st == 0xff) {
+				if (trk >= tend) break;
+				const int type = *trk++;
+				unsigned ln = 0;
+				if (!MidiLrcVlq(trk, tend, &ln)) break;
+				if (trk + ln > tend) break;
+				if (type == 0x51 && ln >= 3 && nItem < kMax) {
+					MidiLrcItem& it = items[nItem++];
+					it.tick = absTick;
+					it.order = order++;
+					it.tempo = (trk[0] << 16) | (trk[1] << 8) | trk[2];
+					if (it.tempo < 1) it.tempo = 500000;
+					it.text[0] = 0;
+				} else if (type == 0x05 && ln > 0 && nItem < kMax) {
+					MidiLrcItem& it = items[nItem++];
+					it.tick = absTick;
+					it.order = order++;
+					it.tempo = 0;
+					MidiLrcToWide(trk, (int)ln, it.text, 96);
+					if (MidiLrcBlank(it.text))
+						nItem--;
+				}
+				trk += ln;
+				continue;
+			}
+			if (st == 0xf0 || st == 0xf7) {
+				unsigned ln = 0;
+				if (!MidiLrcVlq(trk, tend, &ln)) break;
+				if (trk + ln > tend) break;
+				trk += ln;
+				run = 0;
+				continue;
+			}
+			const int need = ((st & 0xf0) == 0xc0 || (st & 0xf0) == 0xd0) ? 1 : 2;
+			if (trk + need > tend) break;
+			trk += need;
+		}
+	}
+	free(buf);
+	if (nItem > 1)
+		qsort(items, (size_t)nItem, sizeof(MidiLrcItem), MidiLrcCmp);
+	int lyrics = 0;
+	for (int i = 0; i < nItem; ++i)
+		if (items[i].tempo == 0) lyrics++;
+	if (lyrics < 1) {
+		free(items);
+		return 0;
+	}
+	lines[0] = L"...";
+	cs[0] = 0;
+	int n = 1;
+	double sec = 0.0;
+	unsigned prev = 0;
+	unsigned tempo = 500000;
+	for (int i = 0; i < nItem; ++i) {
+		const MidiLrcItem& it = items[i];
+		if (it.tick > prev)
+			sec += (double)(it.tick - prev) * (double)tempo / 1000000.0 / (double)division;
+		prev = it.tick;
+		if (it.tempo > 0) {
+			tempo = (unsigned)it.tempo;
+			continue;
+		}
+		if (n >= cap - 1) break;
+		DWORD cent = (DWORD)(sec * 100.0 + 0.5);
+		if (n > 1 && cent < cs[n - 1]) cent = cs[n - 1];
+		lines[n] = it.text;
+		cs[n] = cent;
+		n++;
+	}
+	free(items);
+	if (n < 2) return 0;
+	cs[n] = cs[n - 1] + 500;
+	lines[n] = L"";
+	n++;
+	return n;
+}
+
 void CMidiMonitorDlg::ApplyEvent(const MmEv& e)
 {
 	if (e.msg == 0xff) {
@@ -2953,9 +3162,21 @@ void CMidiMonitorDlg::ApplyEvent(const MmEv& e)
 		const int kind = (int)((e.aux >> 24) & 0xff);
 		const int n = (int)(e.aux & 0xffffff);
 		if (e.sysexOff >= 0 && n > 0 && e.sysexOff + n <= m_sxBytes) {
-			MmMetaBytesToWide(m_sx + e.sysexOff, (unsigned)n, m_liveText, 280);
-			m_liveTextKind = kind;
-			m_dirtyHead = true;
+			/* FF 05 が出たあとは FF 06/07 で見出しを置き換えない */
+			if (kind == 5) {
+				MmMetaBytesToWide(m_sx + e.sysexOff, (unsigned)n, m_lyricHold, 280);
+				if (m_lyricHold[0]) {
+					wcsncpy_s(m_liveText, m_lyricHold, _TRUNCATE);
+					m_liveTextKind = 5;
+					m_dirtyHead = true;
+				}
+			} else if ((kind == 6 || kind == 7) && m_lyricHold[0]) {
+				MmMetaBytesToWide(m_sx + e.sysexOff, (unsigned)n, m_markerText, 280);
+			} else if (!m_lyricHold[0]) {
+				MmMetaBytesToWide(m_sx + e.sysexOff, (unsigned)n, m_liveText, 280);
+				m_liveTextKind = kind;
+				m_dirtyHead = true;
+			}
 		}
 		return;
 	}
@@ -3079,6 +3300,8 @@ void CMidiMonitorDlg::LoadCurrentMidi()
 	m_titleBuf[0] = 0;
 	m_copyBuf[0] = 0;
 	m_liveText[0] = 0;
+	m_lyricHold[0] = 0;
+	m_markerText[0] = 0;
 	m_liveTextKind = 0;
 	const BYTE* p = smf + 8 + MmReadBE(smf + 4, 4);
 	const BYTE* fileEnd = smf + smfSize;
@@ -3280,7 +3503,7 @@ void CMidiMonitorDlg::LoadCurrentMidi()
 				if (VstMidiBankMsbIsSdNative(d2)) hasSd = 1;
 				if (d2 == 121) hasGm2 = 1;
 			} else if (st == 0xb0 && d1 == 32) {
-				if (!drum && d2 >= 1 && d2 <= 4 && d2 > cc32Max) cc32Max = d2;
+				if (d2 >= 1 && d2 <= 4 && d2 > cc32Max) cc32Max = d2;
 			} else if (st == 0xc0 && !drum) {
 				const int bank = (int)msb[idx];
 				const int bit = bank * 128 + d1;
@@ -3297,6 +3520,8 @@ void CMidiMonitorDlg::LoadCurrentMidi()
 		}
 		int resolved = 0;
 		if (hasXg) resolved = 0;
+		/* システムモード 00 は SC-55 だが、CC32=3 なら音色は 88Pro。バンクを優先する */
+		else if (cc32Max >= 1 && cc32Max <= 4) resolved = cc32Max;
 		else if (lastSysMap >= 1 && lastSysMap <= 4) resolved = lastSysMap;
 		else if (mapHint == 8) resolved = 8;
 		else if (mapHint >= 9 && mapHint <= 18) resolved = mapHint;
@@ -3678,9 +3903,8 @@ void CMidiMonitorDlg::ApplyDueEvents(int lastDue)
 	m_burstApply = savedBurst;
 }
 
-// playb を鍵盤・CC 表示へ進める。
-// VST: GDI 可聴 − プラグイン遅延 − 700ms。
-// KPI MIDI: playb（RB 後の出力）− 700ms。FPY の dump−900 はデコード位置で RB 分を含む。
+// playb と同じ原点から、DS に残っているキューだけ戻す。
+// heard バイトは曲境界で原点が違い、モニタが大きく遅れる。
 void CMidiMonitorDlg::SyncFromPlayback()
 {
 	if (m_frozen) return;
@@ -3695,30 +3919,31 @@ void CMidiMonitorDlg::SyncFromPlayback()
 	if (IsVstMidiPlayMode(mode)) {
 		const int vstPcm = (savedata.vstMultiDll[0] || savedata.vstExtraPath[0]);
 		if (vstPcm) {
-			// 時間表示と同じ再生カーソル（エンジン側）。ノート表示だけ
-			// プラグイン遅延＋DS がアナログより先に進む 700ms を引く。
 			const int sr = (m_sampleRate > 0) ? m_sampleRate : 44100;
 			const double sec = OggGetGdiPlaybackTimeSec();
 			pbRaw = (__int64)(sec * (double)sr + 0.5);
 			MmBindVstActiveSlot();
-			pbHeard = pbRaw - VstMidiGetLatencySamples() - (__int64)sr * 700 / 1000;
+#ifdef KBSASAMI_HOST_BUILD
+			const int lagMs = 700;
+#else
+			const int lagMs = OggGetPlaybackLagMs(700);
+#endif
+			pbHeard = pbRaw - VstMidiGetLatencySamples() - (__int64)sr * lagMs / 1000;
 			if (pbRaw < 0) pbRaw = 0;
 			if (pbHeard < 0) pbHeard = 0;
 		}
 	} else if (mode == -3) {
-		/* mid(kpi): playb は KPI 出力（RB 後）。FPY の dump−900 はデコード位置で
-		   RB 約 200ms を含む。同じ 900 を playb から引くとモニタが 200ms 遅れる。 */
 		const int sr = (m_sampleRate > 0) ? m_sampleRate : 44100;
 		__int64 pb = playb;
 		if (playy == 0 && pb < 0) pb = 0;
 		if (pb < 0) pb = 0;
 		pbRaw = pb;
 #ifdef KBSASAMI_HOST_BUILD
-		/* Pull の playb は可聴位置。200ms とプラグイン遅延を重ねると遅れる。 */
 		pbHeard = pb;
 		pbRaw = pbHeard;
 #else
-		pbHeard = pb - (__int64)sr * 700 / 1000;
+		const int lagMs = OggGetPlaybackLagMs(700);
+		pbHeard = pb - (__int64)sr * lagMs / 1000;
 		if (pbHeard < 0) pbHeard = 0;
 #endif
 	}
@@ -4617,21 +4842,42 @@ void CMidiMonitorDlg::DrawHeader(CDC& dc, int w, int headH, UINT dpi)
 	{
 		const int kind = MidiHwLcdKind(m_sysMode, m_gsMapKind);
 		const wchar_t* model = MidiHwLcdModelName(m_sysMode, m_gsMapKind);
-		MidiHwLcdPartSnap snapA[16], snapB[16];
-		BYTE keyA[16], keyB[16];
+		MidiHwLcdPartSnap snapA[16];
+		BYTE keyA[16];
 		if (!lcdAll.IsRectEmpty()) {
-			FillLcdSnap(snapA, keyA, 0);
-			if (ch32) {
-				FillLcdSnap(snapB, keyB, 1);
-				MidiHwLcdDraw(dc, lcdAll, dpi, kind, model, m_lcd,
-					snapA, keyA, m_lcdSelA, snapB, keyB, m_lcdSelB);
-			} else {
-				MidiHwLcdDraw(dc, lcdAll, dpi, kind, model, m_lcd,
-					snapA, keyA, m_lcdSelA, NULL, NULL, 0);
-			}
+			int user = m_lcdUser;
+			const int npart = ch32 ? 32 : 16;
+			if (user < 0) user = 0;
+			if (user >= npart) user = 0;
+			m_lcdUser = user;
+			const int bank = (user >= 16) ? 1 : 0;
+			FillLcdSnap(snapA, keyA, bank);
+			MidiHwLcdDraw(dc, lcdAll, dpi, kind, model, m_lcd,
+				snapA, keyA, user, NULL, NULL, 0);
+			const int ah = max(14, Scale(14, dpi));
+			m_lcdPrevRc.SetRect(lcdAll.left + 2, lcdAll.top + 1, lcdAll.left + ah + 2, lcdAll.top + ah + 1);
+			m_lcdNextRc.SetRect(lcdAll.right - ah - 2, lcdAll.top + 1, lcdAll.right - 2, lcdAll.top + ah + 1);
+			CPen pen(PS_SOLID, 1, RGB(20, 16, 8));
+			CBrush br(RGB(20, 16, 8));
+			CPen* oldP = dc.SelectObject(&pen);
+			CBrush* oldB = dc.SelectObject(&br);
+			POINT tri[3];
+			tri[0].x = m_lcdPrevRc.left + 2; tri[0].y = (m_lcdPrevRc.top + m_lcdPrevRc.bottom) / 2;
+			tri[1].x = m_lcdPrevRc.right - 2; tri[1].y = m_lcdPrevRc.top + 2;
+			tri[2].x = m_lcdPrevRc.right - 2; tri[2].y = m_lcdPrevRc.bottom - 2;
+			dc.Polygon(tri, 3);
+			tri[0].x = m_lcdNextRc.right - 2; tri[0].y = (m_lcdNextRc.top + m_lcdNextRc.bottom) / 2;
+			tri[1].x = m_lcdNextRc.left + 2; tri[1].y = m_lcdNextRc.top + 2;
+			tri[2].x = m_lcdNextRc.left + 2; tri[2].y = m_lcdNextRc.bottom - 2;
+			dc.Polygon(tri, 3);
+			dc.SelectObject(oldP);
+			dc.SelectObject(oldB);
+		} else {
+			m_lcdPrevRc.SetRectEmpty();
+			m_lcdNextRc.SetRectEmpty();
 		}
 		m_showLcdMode = m_lcd.mode;
-		m_showLcdSelA = m_lcdSelA;
+		m_showLcdSelA = m_lcdUser;
 		m_showLcdSelB = m_lcdSelB;
 		m_showLcdKind = kind;
 		m_showLcdPage = m_lcd.showPage;
@@ -5549,8 +5795,8 @@ void CMidiMonitorDlg::InvalidateDirty()
 			}
 		}
 		m_dirtyRows = diff;
-		const int lcdPartDirty = ((diff & (1u << m_lcdSelA)) != 0)
-			|| ((diff & (1u << (16 + m_lcdSelB))) != 0);
+		const int lcdPart = (m_lcdUser < 0) ? 0 : (m_lcdUser >= PART_MAX ? 0 : m_lcdUser);
+		const int lcdPartDirty = (diff & (1u << lcdPart)) != 0;
 		int bpm = 0;
 		if (m_usecQn > 0)
 			bpm = (int)((60000000.0 / (double)m_usecQn) + 0.5);
@@ -5588,7 +5834,7 @@ void CMidiMonitorDlg::InvalidateDirty()
 		if (!m_dirtyHead) {
 			const int kind = MidiHwLcdKind(m_sysMode, m_gsMapKind);
 			if (kind != m_showLcdKind || m_lcd.mode != m_showLcdMode
-				|| m_lcdSelA != m_showLcdSelA || m_lcdSelB != m_showLcdSelB
+				|| m_lcdUser != m_showLcdSelA || m_lcdSelB != m_showLcdSelB
 				|| m_lcd.showPage != m_showLcdPage
 				|| m_lcd.gen != m_showLcdGen
 				|| MidiHwLcdScrollIdx(&m_lcd, GetTickCount()) != m_showLcdScroll)
@@ -6278,7 +6524,8 @@ void CMidiMonitorDlg::IdlePulse()
 		return;
 	}
 	if (IsView3D()) return;
-	if (::GetQueueStatus(QS_KEY | QS_MOUSEBUTTON | QS_HOTKEY))
+	/* ボタン押しっぱなし（リストのスクロール）では戻らない。絶対描画が止まる */
+	if (::GetQueueStatus(QS_KEY | QS_HOTKEY))
 		return;
 
 	HWND fg = ::GetForegroundWindow();
@@ -6710,6 +6957,22 @@ void CMidiMonitorDlg::OnLButtonDown(UINT nFlags, CPoint point)
 	if (capH > 0 && point.y >= 0 && point.y < capH) {
 		CCustomBlurDialogExBase::OnLButtonDown(nFlags, point);
 		return;
+	}
+	{
+		CPoint f = point;
+		f.y -= CCC_GetCustomCaptionHeight(m_hWnd);
+		if (m_lcdPrevRc.PtInRect(f) || m_lcdNextRc.PtInRect(f)) {
+			const int npart = m_gs32 ? 32 : 16;
+			const int dir = m_lcdNextRc.PtInRect(f) ? 1 : -1;
+			int u = m_lcdUser + dir;
+			if (u < 0) u = npart - 1;
+			if (u >= npart) u = 0;
+			m_lcdUser = u;
+			m_dirtyHead = true;
+			m_fullDraw = true;
+			Invalidate(FALSE);
+			return;
+		}
 	}
 	if (IsView3D()) {
 		m_rotDragging = true;

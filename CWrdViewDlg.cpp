@@ -43,8 +43,7 @@ int WrdWantSampleRate()
 	return 44100;
 }
 
-	/* MIDI: KPI はモニタと同じ playb − 700ms（FPY dump−900 から RB 約 200ms を除く）。
-	   VST は GDI 可聴 − 900 − プラグイン遅延。歌詞壁時計に 200ms だけ足すと符号が逆。 */
+	/* MIDI は playb から DS キュー分。heard バイトへ替えると歌詞が遅れる。 */
 	__int64 WrdPlaybackSamples(int sr)
 	{
 		int useSr = (sr >= 8000) ? sr : WrdWantSampleRate();
@@ -55,7 +54,8 @@ int WrdWantSampleRate()
 			__int64 pb = playb;
 			if (playy == 0 && pb < 0) pb = 0;
 			if (pb < 0) pb = 0;
-			const __int64 pad = (__int64)useSr * 700 / 1000;
+			const int lagMs = OggGetPlaybackLagMs(700);
+			const __int64 pad = (__int64)useSr * lagMs / 1000;
 			if (pb > pad)
 				return pb - pad;
 			return 0;
@@ -71,7 +71,9 @@ int WrdWantSampleRate()
 				if (pb < 0) pb = 0;
 				ui = pb;
 			}
-			__int64 pad = (__int64)useSr * 900 / 1000;
+			const int lagMs = OggGetPlaybackLagMs(700);
+			__int64 pad = (__int64)useSr * (900 + (lagMs - 700)) / 1000;
+			if (pad < 0) pad = 0;
 			MmBindVstActiveSlot();
 			const int lat = VstMidiGetLatencySamples();
 			if (lat > 0)

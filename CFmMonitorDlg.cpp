@@ -2116,25 +2116,26 @@ static __int64 FmHeardFromPlayback(uint32_t srDump)
 	return frames;
 }
 
-/* 今聞こえているサンプル位置。CLOCK_DUMP は dump.curSample−ラグ（fix2–7 と同じ）。
-   可聴を再生カーソルに置き換えると kbsasami の 900ms 先読みと単位が食い違う。 */
+/* dump 時計から戻す。基準は 900ms（kbsasami）。DS キューが 700ms の近くならその差だけ動かす。
+   heard バイトへ置き換えると原点が違って大きく遅れる。 */
 uint64_t CFmMonitorDlg::HeardSample(uint32_t sampleRate)
 {
 	extern int wavbit_sample_Hz;
 	const uint32_t srDump = sampleRate > 0 ? sampleRate : 44100;
 #ifdef KBSASAMI_HOST_BUILD
-	/* playb はすでに KbMedia リング分だけ戻した可聴位置。dump 先頭から 900ms 引くと二重になる。 */
 	return AdvanceHeard(FmHeardFromPlayback(srDump), srDump);
 #else
 	const SasamiFmMonDump* lastD = (m_histN > 0)
 		? &m_hist[(m_histHead + m_histN - 1) % HIST_MAX] : NULL;
 	const int useDumpClock = (lastD && SasamiFmMonDumpClock(*lastD)) ? 1 : 0;
+	const int qDelta = OggGetPlaybackLagMs(700) - 700;
 	__int64 frames = 0;
 	if (useDumpClock) {
 		const int li = (m_histHead + m_histN - 1) % HIST_MAX;
 		const uint64_t latest = m_histSamp[li];
-		const unsigned lagMs = (unsigned)FmPlayHeardLagMs(lastD);
-		const uint64_t lag = (uint64_t)srDump * lagMs / 1000u;
+		int lagMs = FmPlayHeardLagMs(lastD) + qDelta;
+		if (lagMs < 200) lagMs = FmPlayHeardLagMs(lastD);
+		const uint64_t lag = (uint64_t)srDump * (unsigned)lagMs / 1000u;
 		frames = (latest > lag) ? (__int64)(latest - lag) : 0;
 	} else {
 		const int srSrc = (wavbit_sample_Hz > 0) ? wavbit_sample_Hz : (int)srDump;
@@ -2142,7 +2143,9 @@ uint64_t CFmMonitorDlg::HeardSample(uint32_t sampleRate)
 		if (frames < 0) frames = 0;
 		if (srSrc != (int)srDump && srSrc > 0)
 			frames = frames * (__int64)srDump / (__int64)srSrc;
-		frames -= (__int64)srDump * FmPlayHeardLagMs(lastD) / 1000;
+		int lagMs = FmPlayHeardLagMs(lastD) + qDelta;
+		if (lagMs < 200) lagMs = FmPlayHeardLagMs(lastD);
+		frames -= (__int64)srDump * lagMs / 1000;
 		if (frames < 0) frames = 0;
 	}
 	return AdvanceHeard(frames, srDump);

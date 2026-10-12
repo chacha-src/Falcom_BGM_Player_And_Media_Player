@@ -1,5 +1,6 @@
 ﻿#include "stdafx.h"
 #include "CCustomPopupMenu.h"
+#include "CCustomControl.h"
 #include "GdiSoft2D.h"
 #include "GdiSoft3D.h"
 #include "KpiV5ConfigStore.h"
@@ -5143,6 +5144,8 @@ void CCustomPopupMenu::RunModalLoop()
 		// DXGI WaitForVBlank は再生 ULW と取り合うとスレッドが止まり、
 		// 出現アニメが途中で凍る。ここは短い MsgWait + Pulse にする。
 		PulseVsyncFrame();
+		/* 出現アニメを先に進めたあと、裏のモニタと ♡ も止まれない */
+		OggPumpAbsVisuals();
 		int nPeek = 0;
 		int foreignHeavy = 0;
 		while (!m_done && nPeek < 24 && ::PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {

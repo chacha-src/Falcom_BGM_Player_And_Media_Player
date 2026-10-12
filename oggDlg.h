@@ -541,6 +541,8 @@ double OggGetLyricsPlaySec();
 DWORD OggGetLyricsPlayCentis();
 /* バナーと同じ可聴 PCM フレーム（playb − DS 書込先行）。FM モニタ同期用 */
 __int64 OggGetHeardPcmFrames();
+/* DS に残っているキューをミリ秒で返す。測れない、または fallback から 80ms 以上離れていれば fallback */
+int OggGetPlaybackLagMs(int fallbackMs);
 /* DS 再生カーソルより後ろの analog。CLOCK_DUMP では使わない（900ms キューと二重） */
 __int64 OggGetAnalogAfterPlayFrames(int sr);
 /* DS に積んだが未再生のソースフレーム。-1 は未計測 */

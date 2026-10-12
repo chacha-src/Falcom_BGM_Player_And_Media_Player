@@ -15037,6 +15037,143 @@ static void PlDetachListsForReload(CPlayList* self)
 	}
 }
 
+static HFONT s_plWaitFont = NULL;
+static wchar_t s_plWaitMsg[256];
+
+static LRESULT CALLBACK PlWaitProc(HWND h, UINT msg, WPARAM w, LPARAM l)
+{
+	if (msg == WM_ERASEBKGND)
+		return 1;
+	if (msg == WM_PAINT) {
+		PAINTSTRUCT ps;
+		HDC dc = BeginPaint(h, &ps);
+		RECT rc;
+		GetClientRect(h, &rc);
+		HBRUSH br = CreateSolidBrush(GetSysColor(COLOR_BTNFACE));
+		FillRect(dc, &rc, br);
+		DeleteObject(br);
+		SetBkMode(dc, TRANSPARENT);
+		SetTextColor(dc, GetSysColor(COLOR_BTNTEXT));
+		HFONT font = s_plWaitFont ? s_plWaitFont : (HFONT)GetStockObject(DEFAULT_GUI_FONT);
+		HGDIOBJ old = SelectObject(dc, font);
+		const wchar_t* t = (const wchar_t*)GetWindowLongPtrW(h, GWLP_USERDATA);
+		DrawTextW(dc, t ? t : L"", -1, &rc, DT_CENTER | DT_VCENTER | DT_WORDBREAK | DT_NOPREFIX);
+		SelectObject(dc, old);
+		EndPaint(h, &ps);
+		return 0;
+	}
+	return DefWindowProcW(h, msg, w, l);
+}
+
+static HWND PlWaitHost(CWnd* playlist)
+{
+	extern CMediaPlayerDlg* mp;
+	extern COggDlg* og;
+	if (mp && ::IsWindow(mp->GetSafeHwnd()) && ::IsWindowVisible(mp->GetSafeHwnd()) && !::IsIconic(mp->GetSafeHwnd()))
+		return mp->GetSafeHwnd();
+	if (playlist && ::IsWindow(playlist->GetSafeHwnd()) && ::IsWindowVisible(playlist->GetSafeHwnd()) && !::IsIconic(playlist->GetSafeHwnd()))
+		return playlist->GetSafeHwnd();
+	if (og && ::IsWindow(og->GetSafeHwnd()) && ::IsWindowVisible(og->GetSafeHwnd()) && !::IsIconic(og->GetSafeHwnd()))
+		return og->GetSafeHwnd();
+	HWND fg = ::GetForegroundWindow();
+	DWORD pid = 0;
+	if (fg)
+		::GetWindowThreadProcessId(fg, &pid);
+	if (fg && pid == ::GetCurrentProcessId())
+		return fg;
+	if (og && ::IsWindow(og->GetSafeHwnd()))
+		return og->GetSafeHwnd();
+	return playlist ? playlist->GetSafeHwnd() : NULL;
+}
+
+static HWND PlWaitOpen(CWnd* playlist)
+{
+	static int reg = 0;
+	if (!reg) {
+		WNDCLASSW wc = {};
+		wc.lpfnWndProc = PlWaitProc;
+		wc.hInstance = GetModuleHandleW(NULL);
+		wc.hCursor = LoadCursorW(NULL, IDC_ARROW);
+		wc.lpszClassName = L"OggPlWait";
+		RegisterClassW(&wc);
+		reg = 1;
+	}
+	HWND owner = PlWaitHost(playlist);
+	UINT dpi = 96;
+	HMODULE user = GetModuleHandleW(L"user32.dll");
+	typedef UINT (WINAPI *GDF)(HWND);
+	GDF gdf = user ? (GDF)GetProcAddress(user, "GetDpiForWindow") : NULL;
+	if (gdf && owner) {
+		UINT d = gdf(owner);
+		if (d >= 96) dpi = d;
+	}
+	LOGFONTW lf = {};
+	HFONT stock = (HFONT)GetStockObject(DEFAULT_GUI_FONT);
+	if (stock) GetObjectW(stock, sizeof(lf), &lf);
+	lf.lfHeight = -MulDiv(9, (int)dpi, 96);
+	if (lf.lfHeight == 0) lf.lfHeight = -12;
+	if (s_plWaitFont) {
+		DeleteObject(s_plWaitFont);
+		s_plWaitFont = NULL;
+	}
+	s_plWaitFont = CreateFontIndirectW(&lf);
+	wcsncpy_s(s_plWaitMsg, LL14(L"切り替え中お待ちください", L"Switching. Please wait.", L"Changement en cours. Veuillez patienter.",
+		L"Cambio in corso. Attendere.", L"Cambiando. Espere.", L"전환 중입니다. 잠시 기다려 주세요.",
+		L"正在切换，请稍候", L"جارٍ التبديل. يرجى الانتظار", L"Переключение. Подождите.",
+		L"Wird gewechselt. Bitte warten.", L"A mudar. Aguarde.", L"Bezig met wisselen. Even geduld.",
+		L"Przełączanie. Proszę czekać.", L"Geçiş yapılıyor. Lütfen bekleyin."), _TRUNCATE);
+	int lineH = MulDiv(16, (int)dpi, 96);
+	HDC dc = GetDC(owner);
+	if (dc) {
+		HGDIOBJ old = SelectObject(dc, s_plWaitFont ? s_plWaitFont : stock);
+		TEXTMETRICW tm = {};
+		if (GetTextMetricsW(dc, &tm) && tm.tmHeight > 0)
+			lineH = tm.tmHeight + tm.tmExternalLeading;
+		SelectObject(dc, old);
+		ReleaseDC(owner, dc);
+	}
+	const int pad = MulDiv(12, (int)dpi, 96);
+	const int w = MulDiv(360, (int)dpi, 96);
+	const int h = pad * 2 + lineH * 2;
+	RECT cr = {};
+	POINT tl = {};
+	POINT br = {};
+	if (owner && GetClientRect(owner, &cr)) {
+		tl.x = cr.left; tl.y = cr.top;
+		br.x = cr.right; br.y = cr.bottom;
+		ClientToScreen(owner, &tl);
+		ClientToScreen(owner, &br);
+	} else {
+		br.x = GetSystemMetrics(SM_CXSCREEN);
+		br.y = GetSystemMetrics(SM_CYSCREEN);
+	}
+	int x = tl.x + ((br.x - tl.x) - w) / 2;
+	int y = tl.y + ((br.y - tl.y) - h) / 2;
+	if (x < tl.x + 4) x = tl.x + 4;
+	if (y < tl.y + 4) y = tl.y + 4;
+	if (x + w > br.x - 4) x = br.x - w - 4;
+	if (y + h > br.y - 4) y = br.y - h - 4;
+	HWND wnd = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_TOPMOST, L"OggPlWait", L"",
+		WS_POPUP | WS_BORDER, x, y, w, h, owner, NULL, GetModuleHandleW(NULL), NULL);
+	if (!wnd) return NULL;
+	SetWindowLongPtrW(wnd, GWLP_USERDATA, (LONG_PTR)s_plWaitMsg);
+	ShowWindow(wnd, SW_SHOWNOACTIVATE);
+	UpdateWindow(wnd);
+	return wnd;
+}
+
+struct CPlWaitHold
+{
+	HWND hwnd;
+	explicit CPlWaitHold(CWnd* owner) { hwnd = PlWaitOpen(owner); }
+	~CPlWaitHold()
+	{
+		if (hwnd && ::IsWindow(hwnd))
+			DestroyWindow(hwnd);
+		hwnd = NULL;
+	}
+};
+
 void CPlayList::OnCbnSelchangeCombo1()
 {
 	if (m_tempMode) return;
@@ -15083,6 +15220,7 @@ void CPlayList::ApplyPlaylistComboSel()
 	const BOOL creatingNew = (num >= fileCnt);
 	if (!creatingNew && num == savedata.playlistnum && pc != NULL && playcnt > 0)
 		return;
+	CPlWaitHold plWait(this);
 	const BOOL keepPlayback = (plf != 0 || playf != 0) && filen.GetLength() > 0;
 	CString keepFol, keepFnn;
 	int keepMode = 0, keepModesub = 0, keepLoop1 = 0, keepLoop2 = 0, keepRet2 = 0;

@@ -259,6 +259,8 @@ private:
 	wchar_t m_titleBuf[280];
 	wchar_t m_copyBuf[280];
 	wchar_t m_liveText[280];
+	wchar_t m_lyricHold[280]; // FF 05。マーカーが来ても消さない
+	wchar_t m_markerText[280];
 	int m_liveTextKind; // 0=なし 1=Text 5=Lyric 6=Marker 7=Cue
 	int m_smfFormat;
 	int m_smfTracks;
@@ -366,6 +368,9 @@ private:
 	MidiHwLcdState m_lcd;
 	int m_lcdSelA;
 	int m_lcdSelB;
+	int m_lcdUser; // 0=A01 … クリックの ◀▶ でだけ動かす
+	CRect m_lcdPrevRc;
+	CRect m_lcdNextRc;
 	BYTE m_showLcdSeg[PART_MAX];
 	int m_showLcdMode;
 	int m_showLcdSelA;
@@ -380,3 +385,6 @@ private:
 	int InsFootCount() const;
 	int InsPacked(int slot) const;
 };
+
+/* SMF の FF 05 を百秒単位で返す。歌詞が無ければ 0。先頭は "..."、末尾は番兵 */
+int MidiSmfFillLrc(const wchar_t* path, CString* lines, DWORD* cs, int cap);

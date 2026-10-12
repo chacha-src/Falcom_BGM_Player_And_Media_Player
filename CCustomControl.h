@@ -177,6 +177,9 @@ inline int CCC_MessageBoxForeground(HWND owner, LPCTSTR text, LPCTSTR caption, U
 void CCC_ForceRepaintHwnd(HWND hWnd);
 void CCC_RefreshKids(HWND hWnd);
 void CCC_PostRefreshKids(HWND hWnd);
+/* マウス移動やリストスクロールで WM_TIMER が飢えても、絶対描画を回す */
+void OggPumpAbsVisuals();
+void OggSetAbsVisualHook(void (*fn)());
 void CCC_InvalidateKidsIfHostFullPaint(CWnd* pWnd);
 void CCC_GroupBoxesBack(HWND hDlg);
 
@@ -1244,6 +1247,7 @@ private:
     // ホバー状態のアイテムを更新し、必要に応じて再描画します
     void UpdateHotItem(int n);
     void UpdateHotItemFromCursor();
+    void PumpWhileInput();
 
     // 表示されているアイテム領域を再描画します
     void RedrawVisibleItems();
