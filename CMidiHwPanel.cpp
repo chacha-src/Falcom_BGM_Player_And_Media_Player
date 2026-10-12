@@ -145,12 +145,22 @@ int MidiHwLcdHeadH(UINT dpi)
 	return LcdSc(112, dpi);
 }
 
+/* 16桁。溢れた文は右端から入り左へ抜ける。抜けたあと空、Welcome、また先頭。 */
+enum { kLcdCols = 16, kLcdStepMs = 280, kLcdBlankSteps = 4, kLcdWelcomeSteps = 8 };
+
+static int LcdScrollSpan(int n)
+{
+	if (n <= kLcdCols) return 1;
+	/* 右端に1文字目 .. 左端に最後の1文字 .. 空 .. Welcome */
+	return n + (kLcdCols - 1) + kLcdBlankSteps + kLcdWelcomeSteps;
+}
+
 int MidiHwLcdScrollIdx(const MidiHwLcdState* s, DWORD nowMs)
 {
-	if (!s || s->letterN <= 16) return 0;
-	int span = s->letterN - 16 + 1;
-	if (span < 1) return 0;
-	return (int)((nowMs / 280) % (DWORD)span);
+	if (!s || s->letterN <= kLcdCols) return 0;
+	const int span = LcdScrollSpan(s->letterN);
+	if (span < 1 || s->letterMs == 0 || nowMs < s->letterMs) return 0;
+	return (int)(((nowMs - s->letterMs) / kLcdStepMs) % (DWORD)span);
 }
 
 int MidiHwLcdAnim(const MidiHwLcdState* s)
@@ -221,6 +231,8 @@ int MidiHwLcdApplySysex(MidiHwLcdState* s, const BYTE* d, int n)
 			int end = cc + nval;
 			if (end > s->letterN) s->letterN = (end > 32) ? 32 : end;
 			s->mode = LcdHasLetter(*s) ? 1 : 0;
+			s->letterMs = GetTickCount();
+			if (s->letterMs == 0) s->letterMs = 1;
 			s->gen++;
 			return 1;
 		}
@@ -266,6 +278,8 @@ int MidiHwLcdApplySysex(MidiHwLcdState* s, const BYTE* d, int n)
 		int end = cc + nval;
 		if (end > s->letterN) s->letterN = (end > 32) ? 32 : end;
 		s->mode = LcdHasLetter(*s) ? 1 : 0;
+		s->letterMs = GetTickCount();
+		if (s->letterMs == 0) s->letterMs = 1;
 		s->gen++;
 		return 1;
 	}
@@ -294,12 +308,14 @@ int MidiHwLcdApplySysex(MidiHwLcdState* s, const BYTE* d, int n)
 				int end = al + nd;
 				if (end > s->letterN) s->letterN = (end > 32) ? 32 : end;
 				s->mode = LcdHasLetter(*s) ? 1 : 0;
+				s->letterMs = GetTickCount();
+				if (s->letterMs == 0) s->letterMs = 1;
 				s->gen++;
 				return 1;
 			}
 			if (ah == 0x07) {
-				LcdPutBytes(s->page[0], 64, al, data, nd);
-				s->pageOn[0] = 1;
+				LcdPutBytes(s->xgDot, 48, al, data, nd);
+				s->xgDotOn = 1;
 				s->showPage = 1;
 				LcdMarkShown(s);
 				s->gen++;
@@ -507,13 +523,30 @@ static void LcdText(CDC& dc, int x, int y, int px, int py, int gap, const char* 
 static void LcdText16(CDC& dc, const CRect& rc, const char* s16, COLORREF on)
 {
 	if (!s16 || rc.Width() < 8 || rc.Height() < 6) return;
-	wchar_t w[20];
-	int n = 0;
-	for (; n < 16 && s16[n]; ++n)
-		w[n] = (wchar_t)(unsigned char)s16[n];
-	w[n] = 0;
-	const int h = max(8, min(rc.Height() - 1, 16));
-	LcdDrawW(dc, rc.left, rc.top + max(0, (rc.Height() - h) / 2), h, rc.Width(), w, on);
+	const int cellW = max(1, rc.Width() / kLcdCols);
+	int h = rc.Height() - 1;
+	if (h > cellW + 4) h = cellW + 4;
+	if (h < 8) h = min(8, rc.Height() - 1);
+	CFont f;
+	f.CreateFont(-h, 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE,
+		DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+		ANTIALIASED_QUALITY, FIXED_PITCH | FF_MODERN, _T("Consolas"));
+	CFont* old = dc.SelectObject(&f);
+	const int oldBk = dc.SetBkMode(TRANSPARENT);
+	const COLORREF oldC = dc.SetTextColor(on);
+	const int y = rc.top + max(0, (rc.Height() - h) / 2);
+	for (int i = 0; i < kLcdCols; ++i) {
+		unsigned char c = (unsigned char)s16[i];
+		if (c < 32 || c > 126) c = ' ';
+		wchar_t ch[2];
+		ch[0] = (wchar_t)c;
+		ch[1] = 0;
+		CRect r(rc.left + i * cellW, y, rc.left + (i + 1) * cellW, y + h + 1);
+		dc.DrawText(ch, 1, &r, DT_CENTER | DT_SINGLELINE | DT_NOPREFIX | DT_VCENTER);
+	}
+	dc.SetTextColor(oldC);
+	dc.SetBkMode(oldBk);
+	dc.SelectObject(old);
 }
 
 static void LcdTextFit(CDC& dc, const CRect& rc, const char* s, COLORREF on)
@@ -568,6 +601,28 @@ static void LcdDrawGs16(CDC& dc, const CRect& rc, const BYTE* d64, COLORREF on, 
 	for (int y = 0; y < 16; ++y) {
 		for (int x = 0; x < 16; ++x)
 			dc.FillSolidRect(ox + x * cell, oy + y * cell, cell, cell, GsDot(d64, x, y) ? on : off);
+	}
+}
+
+/* XG は 16 行×21 ドット。バイトは行順で 3 本、bit6 が各バイトの左端。 */
+static int XgDot(const BYTE* d48, int x, int y)
+{
+	if (!d48 || x < 0 || x > 20 || y < 0 || y > 15) return 0;
+	const int group = x / 7;
+	const int bit = 6 - (x % 7);
+	return (d48[group * 16 + y] >> bit) & 1;
+}
+
+static void LcdDrawXg21(CDC& dc, const CRect& rc, const BYTE* d48, COLORREF on, COLORREF off)
+{
+	if (rc.Width() < 21 || rc.Height() < 16) return;
+	const int cell = min(rc.Width() / 21, rc.Height() / 16);
+	if (cell < 1) return;
+	const int ox = rc.left + (rc.Width() - cell * 21) / 2;
+	const int oy = rc.top + (rc.Height() - cell * 16) / 2;
+	for (int y = 0; y < 16; ++y) {
+		for (int x = 0; x < 21; ++x)
+			dc.FillSolidRect(ox + x * cell, oy + y * cell, cell, cell, XgDot(d48, x, y) ? on : off);
 	}
 }
 
@@ -764,9 +819,17 @@ void MidiHwLcdDraw(CDC& dc, const CRect& rc, UINT dpi,
 		win[16] = 0;
 		if (n > 16) {
 			const int off = MidiHwLcdScrollIdx(&st, GetTickCount());
-			for (int i = 0; i < 16; ++i) {
-				const int src = off + i;
-				win[i] = (src < n) ? raw[src] : ' ';
+			const int blankAt = n + (kLcdCols - 1);
+			const int welcomeAt = blankAt + kLcdBlankSteps;
+			if (off >= welcomeAt) {
+				static const char welcome[] = " Welcome SASAMI ";
+				for (int i = 0; i < kLcdCols; ++i)
+					win[i] = welcome[i];
+			} else {
+				for (int i = 0; i < kLcdCols; ++i) {
+					const int src = off + i - (kLcdCols - 1);
+					win[i] = (src >= 0 && src < n) ? raw[src] : ' ';
+				}
 			}
 		} else {
 			/* 実機どおり 16 桁。VG2 Wild Kitten は先頭スペース込み */
@@ -814,8 +877,13 @@ void MidiHwLcdDraw(CDC& dc, const CRect& rc, UINT dpi,
 	}
 
 	const int pg = st.showPage;
-	if (pg >= 1 && pg <= 10 && st.pageOn[pg - 1])
+	const int xgKind = (kind == kKindXgGreen || kind == kKindKorgBlue);
+	if (xgKind && st.xgDotOn && pg == 1)
+		LcdDrawXg21(dc, bars, st.xgDot, pal.pixel, pal.barEmpty);
+	else if (pg >= 1 && pg <= 10 && st.pageOn[pg - 1])
 		LcdDrawGs16(dc, bars, st.page[pg - 1], pal.pixel, pal.barEmpty);
+	else if (st.xgDotOn && pg == 1)
+		LcdDrawXg21(dc, bars, st.xgDot, pal.pixel, pal.barEmpty);
 	else if (stacked)
 		LcdDrawMeters32(dc, bars, partsA, partsB, selA, selB, pal.pixel, pal.barEmpty, pal.cursor);
 	else

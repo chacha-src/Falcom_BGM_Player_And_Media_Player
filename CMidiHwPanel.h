@@ -10,11 +10,14 @@ struct MidiHwLcdState {
 	int letterN;
 	BYTE page[10][64]; // GS 16x16 × 10 ページ（d00-d63）
 	BYTE pageOn[10];
+	BYTE xgDot[48]; // XG 07h。16行×21ドット（1バイト7ドット、bit6が左）
+	BYTE xgDotOn;
 	int showPage; // 0=バー 1-10=ドットページ
 	int dispTime; // -1=未指定（4秒）, 0-15=SysEx 10 20 01（0-7.2秒）
 	DWORD shownMs; // 最後にカスタムパネルを出した TickCount
 	int mode; // 0=パート 1=文字（左の INSTRUMENT 欄）
 	unsigned gen; // 表示データが変わったら++。アニメの再描画用
+	DWORD letterMs; // レターを受け取った時刻。スクロールはここから右端の1文字目
 };
 
 struct MidiHwLcdPartSnap {
