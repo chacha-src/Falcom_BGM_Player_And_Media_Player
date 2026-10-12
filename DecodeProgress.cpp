@@ -11,6 +11,7 @@ int g_lastPct = -1;
 int g_basePct = 0;
 int g_spanPct = 100;
 int g_pcmCap = 95;
+wchar_t g_fileLabel[480];
 }
 
 void MpDecodeProgressSetCb(MpDecodeProgressCb cb, void* user)
@@ -23,6 +24,14 @@ void MpDecodeProgressClearCb()
 {
 	g_cb = nullptr;
 	g_user = nullptr;
+	g_fileLabel[0] = 0;
+}
+
+void MpDecodeProgressSetFileLabel(LPCTSTR label)
+{
+	g_fileLabel[0] = 0;
+	if (!label || !label[0]) return;
+	wcsncpy_s(g_fileLabel, label, _TRUNCATE);
 }
 
 void MpDecodeProgressReset()
@@ -33,6 +42,7 @@ void MpDecodeProgressReset()
 	g_spanPct = 100;
 	g_pcmCap = 95;
 	g_expectSec = 0;
+	g_fileLabel[0] = 0;
 }
 
 void MpDecodeProgressSetExpectedSec(double sec)
@@ -77,8 +87,15 @@ void MpDecodeProgressReport(int pct, LPCTSTR status)
 	if (!hasStatus && out != 0 && out != 100 && g_lastPct >= 0 && out < g_lastPct + 2)
 		return;
 	g_lastPct = out;
-	if (g_cb)
-		g_cb(out, status ? status : _T(""), g_user);
+	if (g_cb) {
+		wchar_t joined[700];
+		LPCTSTR shown = status ? status : _T("");
+		if (shown[0] && g_fileLabel[0] && !wcsstr(shown, g_fileLabel)) {
+			_snwprintf_s(joined, _TRUNCATE, L"%s %s", shown, g_fileLabel);
+			shown = joined;
+		}
+		g_cb(out, shown, g_user);
+	}
 }
 
 void MpDecodeProgressBumpAfterPcm(LPCTSTR status)

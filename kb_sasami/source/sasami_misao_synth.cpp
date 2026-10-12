@@ -477,9 +477,8 @@ struct SasamiMisaoSynth::Impl {
 					ch[i].pc = addr + 3;
 					break;
 				case 3: {
-					uint32_t dest = w1;
-					if (dest >= 0x1000) dest -= 0x1000;
-					if (dest == 0xF0) { ch[i].alive = 0; gate[i] = 0; }
+					uint32_t dest = 0;
+					if (!SasamiMapAbs(song, w1, &dest) || dest == 0xF0) { ch[i].alive = 0; gate[i] = 0; }
 					else {
 						if (dest < addr) {
 							ch[i].backJumps++;
@@ -529,9 +528,12 @@ struct SasamiMisaoSynth::Impl {
 						ch[i].pc = addr + 3;
 					} else {
 						*cp = c;
-						uint32_t dest = w1;
-						if (dest >= 0x1000) dest -= 0x1000;
-						ch[i].pc = dest;
+						uint32_t dest = 0;
+						if (!SasamiMapAbs(song, w1, &dest)) {
+							ch[i].loopSp--;
+							ch[i].pc = addr + 3;
+						} else
+							ch[i].pc = dest;
 					}
 					break;
 				}

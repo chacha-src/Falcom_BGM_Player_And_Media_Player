@@ -47,12 +47,15 @@ protected:
 
 public:
 	virtual BOOL OnInitDialog();
+	virtual INT_PTR DoModal();
+	virtual void OnCancel();
 	afx_msg void OnShowWindow(BOOL bShow, UINT nStatus);
 	afx_msg void OnLButtonDown(UINT nFlags, CPoint point);
 	afx_msg LRESULT OnLayoutTabsMsg(WPARAM wParam, LPARAM lParam);
 	afx_msg void OnBnClickedExec();
 	afx_msg void OnBnClickedBrowse();
 	afx_msg void OnBnClickedClose();
+	afx_msg void OnClose();
 	afx_msg void OnBnClickedHelp();
 	afx_msg void OnCbnSelchangeFormat();
 	afx_msg void OnTcnSelchangeTabs(NMHDR* pNMHDR, LRESULT* pResult);
@@ -90,7 +93,10 @@ protected:
 	CCustomStatic m_pathLabel;
 	CCustomStandardButton m_browse;
 	CCustomStandardButton m_exec;
+	CCustomStandardButton m_cancel;
 	CCustomStandardButton m_close;
+	BOOL m_exporting;
+	BOOL m_closePending;
 	CCustomCheckBox m_fadeCheck;
 	CCustomEdit m_fadeSec;
 	CCustomStatic m_fadeLabel;

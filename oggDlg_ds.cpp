@@ -320,6 +320,7 @@ extern IMediaControl* pMediaControl;
 extern CString wavExportPath;
 extern int wavExportLoopCount;
 extern float g_wavExportMaxSec;
+extern int g_wavExportCancel;
 extern int wavbit_sample_Hz;
 extern CFile cc;
 extern int cc1;
@@ -1680,6 +1681,7 @@ void HandleNotifications_export()
 	int iter = 0;
 	for (;;) {
 		DoEvent();
+		if (g_wavExportCancel) { fade1 = 1; break; }
 		// DoEvent 再入で stop 要求が立っても、書き出し本体は続行する
 		thn1 = FALSE;
 		stf = 0;

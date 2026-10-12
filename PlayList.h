@@ -109,6 +109,8 @@ protected:
 	afx_msg LRESULT OnReapplyOpaqueFixers(WPARAM wParam, LPARAM lParam);
 	afx_msg LRESULT OnPlMissDone(WPARAM wParam, LPARAM lParam);
 	afx_msg LRESULT OnPlJakDone(WPARAM wParam, LPARAM lParam);
+	afx_msg LRESULT OnPlSwitch(WPARAM wParam, LPARAM lParam);
+	void ApplyPlaylistComboSel();
 	virtual void DoDataExchange(CDataExchange* pDX);    // DDX/DDV サポート
 	CToolTipCtrl m_tooltip;
 

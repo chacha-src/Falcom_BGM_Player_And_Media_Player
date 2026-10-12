@@ -49,6 +49,8 @@ struct SasamiSong {
 	uint32_t dataCap;
 	char titleSjis[65];
 	int fmOpna10ch;
+	/* FPY の絶対番地の ORG。クラシックは 0x1000。SUB__SAM などは 0x5000。 */
+	uint16_t fmLoadBase;
 	int misaoEnabled;
 	int misaoChCount;
 	SasamiTrack misaoTracks[SASAMI_MISAO_MAX_CH];
@@ -90,3 +92,20 @@ uint16_t SasamiGet16(const SasamiSong& s, uint32_t off);
 uint32_t SasamiGet24(const SasamiSong& s, uint32_t off);
 
 bool SasamiOffOk(const SasamiSong& s, uint32_t off, uint32_t need);
+
+/* 絶対番地をファイルオフセットへ。ORG 未満の 0x1xxx は常駐(アイドル)なので載せない。
+   0x1000 未満はそのままファイルオフセット。載らないときは 0。 */
+static inline int SasamiMapAbs(const SasamiSong& s, uint32_t absAddr, uint32_t* off)
+{
+	const uint32_t base = s.fmLoadBase ? (uint32_t)s.fmLoadBase : 0x1000u;
+	uint32_t o;
+	if (absAddr >= base)
+		o = absAddr - base;
+	else if (absAddr >= 0x1000u)
+		return 0;
+	else
+		o = absAddr;
+	if (!SasamiOffOk(s, o, 1)) return 0;
+	if (off) *off = o;
+	return 1;
+}

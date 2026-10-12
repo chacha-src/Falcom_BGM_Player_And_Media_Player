@@ -1101,8 +1101,8 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 		if (k < 0) return;
 		const uint8_t* src = NULL;
 		if (raw >= 0x1000) {
-			const uint32_t off = (uint32_t)raw - 0x1000;
-			if (!SasamiOffOk(song, off, 25)) return;
+			uint32_t off = 0;
+			if (!SasamiMapAbs(song, raw, &off) || !SasamiOffOk(song, off, 25)) return;
 			src = &song.data[off];
 			voiceOff[ch] = off;
 			voiceSrc[ch] = 1;
@@ -1146,7 +1146,7 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 
 	void NoteSeen(uint32_t addr)
 	{
-		if (!measureLen || addr == 0 || addr == 0xF0) return;
+		if (!measureLen || addr == 0) return;
 		uint32_t i = (addr * 2654435761u) & (kSeenMax - 1);
 		for (int n = 0; n < 32; n++) {
 			const uint32_t k = (i + (uint32_t)n) & (kSeenMax - 1);
@@ -1176,9 +1176,11 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 
 	int JumpTo(int ch, uint32_t addr, uint16_t w1)
 	{
-		uint32_t dest = w1;
-		if (dest >= 0x1000) dest -= 0x1000;
-		if (dest == 0xF0 || dest == addr || !SasamiOffOk(song, dest, 1)) {
+		uint32_t dest = 0;
+		/* 終了は J のオペランド 0x00F0 / 0x10F0（着地がファイル 0xF0）。
+		   命令列がファイル 0xF0 を通過するのは普通の休符で、ここで切ると
+		   SASAMI3 R1 のように導入のあとメロディが消え、短い待ちだけが残る。 */
+		if (!SasamiMapAbs(song, w1, &dest) || dest == 0xF0 || dest == addr) {
 			alive[ch] = 0;
 			return 0;
 		}
@@ -1195,9 +1197,10 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 						if (!SasamiOffOk(song, p, 3)) break;
 						const int c = song.data[p];
 						if (c == 3 || c == 17) {
-							uint32_t d = SasamiGet16(song, p + 1);
-							if (d >= 0x1000) d -= 0x1000;
-							if (d == dest || d == p || (d <= p && (p - d) <= 12u))
+							uint32_t d = 0;
+							if (!SasamiMapAbs(song, SasamiGet16(song, p + 1), &d))
+								halt = 1;
+							else if (d == dest || d == p || (d <= p && (p - d) <= 12u))
 								halt = 1;
 						}
 						p += 3;
@@ -1335,7 +1338,7 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 	int ExecCmd(int ch)
 	{
 		uint32_t addr = pc[ch];
-		if (!SasamiOffOk(song, addr, 1) || addr == 0xF0) {
+		if (!SasamiOffOk(song, addr, 1)) {
 			alive[ch] = 0;
 			return 0;
 		}
@@ -1445,9 +1448,8 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 				pc[ch] = addr + 3;
 			} else {
 				*cp = c;
-				uint32_t dest = w1;
-				if (dest >= 0x1000) dest -= 0x1000;
-				if (!SasamiOffOk(song, dest, 1)) {
+				uint32_t dest = 0;
+				if (!SasamiMapAbs(song, w1, &dest)) {
 					loopSp[ch]--;
 					pc[ch] = addr + 3;
 				} else
@@ -1863,7 +1865,6 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 		for (int ch = 0; ch < chCount && ch < 10; ch++) {
 			pc[ch] = song.tracks[ch].fileOff;
 			alive[ch] = song.tracks[ch].unused ? 0 : 1;
-			if (pc[ch] == 0xF0) alive[ch] = 0;
 		}
 		InitChip();
 		if (misaoActive) misao.Reset();

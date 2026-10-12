@@ -141,14 +141,16 @@ CString TcSanitizeFilePath(const CString& pathIn)
 CString TcBaseNameFromItem(const playlistdata0& item)
 {
 	CString name = item.name;
-	if (name.IsEmpty()) {
-		CString fol = item.fol;
-		const int pos = fol.ReverseFind(L'\\');
-		if (pos >= 0) name = fol.Mid(pos + 1);
-		else name = fol;
-	}
+	name.Trim();
+	/* プレイリスト名の途中の . は拡張子ではない（11.ゲームオーバー 等）。 */
+	if (!name.IsEmpty())
+		return name;
+	CString fol = item.fol;
+	const int pos = fol.ReverseFind(L'\\');
+	if (pos >= 0) name = fol.Mid(pos + 1);
+	else name = fol;
 	const int dot = name.ReverseFind(L'.');
-	if (dot >= 0) name = name.Left(dot);
+	if (dot > 0) name = name.Left(dot);
 	return name;
 }
 
@@ -1410,6 +1412,8 @@ CTranscodeExport::CTranscodeExport(CWnd* pParent)
 	, m_preferXfade(false)
 	, m_coverBmp(NULL)
 	, m_persistReady(FALSE)
+	, m_exporting(FALSE)
+	, m_closePending(FALSE)
 	, m_mixPctCount(0)
 	, m_mixEditRow(-1)
 {
@@ -1443,6 +1447,7 @@ void CTranscodeExport::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDC_TC_PATH_L, m_pathLabel);
 	DDX_Control(pDX, IDC_TC_BROWSE, m_browse);
 	DDX_Control(pDX, IDC_TC_EXEC, m_exec);
+	DDX_Control(pDX, IDCANCEL, m_cancel);
 	DDX_Control(pDX, IDC_TC_CLOSE, m_close);
 	DDX_Control(pDX, IDC_TC_FADE, m_fadeCheck);
 	DDX_Control(pDX, IDC_TC_FADE_SEC, m_fadeSec);
@@ -1473,6 +1478,7 @@ void CTranscodeExport::DoDataExchange(CDataExchange* pDX)
 
 
 BEGIN_MESSAGE_MAP(CTranscodeExport, CCustomBlurDialogBase)
+	ON_WM_CLOSE()
 	ON_WM_SHOWWINDOW()
 	ON_WM_LBUTTONDOWN()
 	ON_MESSAGE(WM_TC_LAYOUT_TABS, OnLayoutTabsMsg)
@@ -1790,9 +1796,9 @@ void CTranscodeExport::SyncTitleFieldForPathMode()
 		}
 	}
 	else {
-		m_title.SetWindowText(LL14(L"(複数のため変更不可)", L"(locked for multi)", L"(verrouille)", L"(bloccato)", L"(bloqueado)",
-			L"(다중 선택 잠금)", L"(多选不可改)", L"(locked)", L"(заблокировано)", L"(gesperrt)",
-			L"(bloqueado)", L"(vergrendeld)", L"(zablokowane)", L"(kilitli)"));
+		m_title.SetWindowText(LL14(L"(各曲のプレイリスト名)", L"(each playlist name)", L"(nom de chaque liste)", L"(nome di ogni brano)", L"(nombre de cada pista)",
+			L"(각 곡의 재생목록 이름)", L"(各曲的播放列表名)", L"(each playlist name)", L"(имя в плейлисте)", L"(Name je Titel)",
+			L"(nome de cada faixa)", L"(elke afspeellijstnaam)", L"(nazwa z playlisty)", L"(her parcanin liste adi)"));
 		m_title.EnableWindow(FALSE);
 	}
 }
@@ -2363,6 +2369,10 @@ BOOL CTranscodeExport::OnInitDialog()
 			L"Aplicar ejecucion del prompt", L"프롬프트 실행 적용", L"应用提示执行", L"Apply prompt",
 			L"Применить промпт", L"Prompt anwenden", L"Aplicar prompt", L"Prompt toepassen",
 			L"Zastosuj prompt", L"Prompt uygula"));
+	m_cancel.SetWindowText(LL14(L"キャンセル", L"Cancel", L"Annuler", L"Annulla",
+		L"Cancelar", L"취소", L"取消", L"إلغاء",
+		L"Отмена", L"Abbrechen", L"Cancelar", L"Annuleren",
+		L"Anuluj", L"Iptal"));
 	m_close.SetWindowText(LL14(L"閉じる", L"Close", L"Fermer", L"Chiudi",
 		L"Cerrar", L"닫기", L"关闭", L"إغلاق",
 		L"Закрыть", L"Schließen", L"Fechar", L"Sluiten",
@@ -2767,10 +2777,11 @@ BOOL CTranscodeExport::OnInitDialog()
 			const int bw = ctlW(m_exec, scale(80));
 			const int bh = ctlH(m_exec, scale(22));
 			const int gap = scale(12);
-			const int total = bw * 2 + gap;
+			const int total = bw * 3 + gap * 2;
 			const int x0 = (std::max)(marginL, (rcClient.Width() - total) / 2);
 			placeSized(m_exec, x0, y, bw, bh);
-			placeSized(m_close, x0 + bw + gap, y, bw, bh);
+			placeSized(m_cancel, x0 + bw + gap, y, bw, bh);
+			placeSized(m_close, x0 + (bw + gap) * 2, y, bw, bh);
 			y += bh + scale(10);
 		}
 		if (CWnd* pProgL = GetDlgItem(IDC_TC_PROG_L)) {
@@ -2784,15 +2795,40 @@ BOOL CTranscodeExport::OnInitDialog()
 			y += ph + scale(8);
 		}
 		{
-			const int sh = (std::max)(heightOf(m_status), scale(14));
-			placeSized(m_status, xCheckL, y, (std::max)(scale(80), clientRight - xCheckL), sh);
-			y += sh + scale(10);
+			int statusH = scale(22);
+			if (CDC* pDc = GetDC()) {
+				CFont* pFont = m_status.GetFont();
+				if (!pFont) pFont = GetFont();
+				CFont* pOld = pDc->SelectObject(pFont);
+				TEXTMETRIC tm = {};
+				if (pDc->GetTextMetrics(&tm))
+					statusH = tm.tmHeight + tm.tmExternalLeading + scale(8);
+				if (pOld) pDc->SelectObject(pOld);
+				ReleaseDC(pDc);
+			}
+			if (statusH < scale(22)) statusH = scale(22);
+			placeSized(m_status, xCheckL, y, (std::max)(scale(80), clientRight - xCheckL), statusH);
+			y += statusH + scale(16);
 		}
 
 		CRect rcWin; GetWindowRect(&rcWin);
 		const int chrome = rcWin.Height() - rcClient.Height();
-		if (y + chrome > 120)
-			SetWindowPos(NULL, 0, 0, rcWin.Width(), y + chrome, SWP_NOMOVE | SWP_NOZORDER);
+		const int wantH = y + chrome + scale(8);
+		if (wantH > 120)
+			SetWindowPos(NULL, 0, 0, rcWin.Width(), wantH, SWP_NOMOVE | SWP_NOZORDER);
+		/* キャプション分でクライアントが縮むと、進捗の下の状態文字が窓の外に出る。 */
+		for (int growPass = 0; growPass < 2; ++growPass) {
+			CRect rcNow;
+			GetClientRect(&rcNow);
+			if (rcNow.Height() >= y + scale(4))
+				break;
+			CRect rw;
+			GetWindowRect(&rw);
+			const int grow = y + scale(8) - rcNow.Height();
+			if (grow <= 0)
+				break;
+			SetWindowPos(NULL, 0, 0, rw.Width(), rw.Height() + grow, SWP_NOMOVE | SWP_NOZORDER);
+		}
 	}
 
 
@@ -2999,9 +3035,24 @@ BOOL CTranscodeExport::OnInitDialog()
 			L"Start export met huidige instellingen",
 			L"Rozpocznij eksport z biezacymi ustawieniami",
 			L"Gecerli ayarlarla disa aktarimi baslatir"));
+		addTip(m_cancel, LL14(
+			L"書き出しだけ止めます。この画面は開いたままです",
+			L"Stop the export. This dialog stays open",
+			L"Arrete l'export. La fenetre reste ouverte",
+			L"Ferma l'esportazione. La finestra resta aperta",
+			L"Detiene la exportacion. El dialogo sigue abierto",
+			L"내보내기만 멈춥니다. 창은 그대로입니다",
+			L"只停止导出。对话框保持打开",
+			L"Stop the export. Dialog stays open",
+			L"Остановить экспорт. Окно остаётся",
+			L"Export stoppen. Dialog bleibt offen",
+			L"Para a exportacao. A janela fica aberta",
+			L"Stopt alleen de export. Venster blijft open",
+			L"Zatrzymuje eksport. Okno zostaje",
+			L"Yalnizca disa aktarimi durdurur. Pencere acik kalir"));
 		addTip(m_close, LL14(
-			L"書き出さずにダイアログを閉じます",
-			L"Close the dialog without exporting",
+			L"書き出しを止めて、この画面を閉じます",
+			L"Stop the export and close this dialog",
 			L"Fermer sans exporter",
 			L"Chiudi senza esportare",
 			L"Cerrar sin exportar",
@@ -3095,19 +3146,8 @@ void CTranscodeExport::ExportProgressThunk(int percent, LPCTSTR status, void* us
 	}
 	if (status && status[0])
 		self->m_status.SetWindowText(status);
-	// エンコード中は DoEvent 全通しすると危険なので、自ダイアログ配下の描画だけ通す
-	MSG msg;
-	HWND hDlg = self->GetSafeHwnd();
-	while (::PeekMessage(&msg, hDlg, WM_PAINT, WM_PAINT, PM_REMOVE))
-		::DispatchMessage(&msg);
-	if (self->m_progress.GetSafeHwnd()) {
-		while (::PeekMessage(&msg, self->m_progress.GetSafeHwnd(), WM_PAINT, WM_PAINT, PM_REMOVE))
-			::DispatchMessage(&msg);
-	}
-	if (self->m_status.GetSafeHwnd()) {
-		while (::PeekMessage(&msg, self->m_status.GetSafeHwnd(), WM_PAINT, WM_PAINT, PM_REMOVE))
-			::DispatchMessage(&msg);
-	}
+	extern void WavExportPumpUi();
+	WavExportPumpUi();
 	::SetCursor(::LoadCursor(NULL, IDC_ARROW));
 }
 
@@ -3183,6 +3223,16 @@ void CTranscodeExport::OnBnClickedBrowse()
 	CFileDialog fd(FALSE, ext, path, OFN_HIDEREADONLY | OFN_OVERWRITEPROMPT, FilterForFormat(fmt));
 	if (fd.DoModal() == IDOK)
 		m_path.SetWindowText(fd.GetPathName());
+}
+
+static void TcSetExportFileLabel(int index1, int total, const CString& name)
+{
+	CString lab;
+	if (total > 1)
+		lab.Format(L"(%d/%d) %s", index1, total, (LPCTSTR)name);
+	else
+		lab = name;
+	MpDecodeProgressSetFileLabel(lab);
 }
 
 void CTranscodeExport::OnBnClickedExec()
@@ -3285,7 +3335,13 @@ void CTranscodeExport::OnBnClickedExec()
 	}
 
 	// 再生中の状態が書き出しに混ざらないよう、先に停止する
+	extern int g_wavExportCancel;
+	extern HWND g_wavExportDlg;
+	g_wavExportCancel = 0;
+	m_closePending = FALSE;
+	m_exporting = TRUE;
 	if (og) og->stop1();
+	g_wavExportDlg = GetSafeHwnd();
 	m_status.SetWindowText(LL14(L"出力中...", L"Exporting...", L"Export en cours...", L"Esportazione in corso...",
 		L"Exportando...", L"내보내는 중...", L"导出中...", L"جاري التصدير...",
 		L"Экспорт...", L"Exportiere...", L"Exportando...", L"Exporteren...",
@@ -3300,6 +3356,9 @@ void CTranscodeExport::OnBnClickedExec()
 	UpdateWindow();
 
 	BOOL ok = TRUE;
+	extern void WavExportSuspendMonitors();
+	extern void WavExportResumeMonitors();
+	WavExportSuspendMonitors();
 	if (mix) {
 		CString finalPath = NormalizeOutPath(pathStr, fmt);
 		m_path.SetWindowText(finalPath);
@@ -3347,15 +3406,22 @@ void CTranscodeExport::OnBnClickedExec()
 			MpDecodeProgressSetSegment(base, span > 0 ? span : 1);
 			MpDecodeProgressSetPcmCap(95);
 			CString st;
-			st.Format(LL14(L"ミックス用PCM出力中... (%d/%d)", L"Mix PCM export... (%d/%d)", L"Export PCM mix... (%d/%d)", L"Export PCM mix... (%d/%d)",
-				L"Export PCM mix... (%d/%d)", L"믹스 PCM 출력 중... (%d/%d)", L"混音PCM导出中... (%d/%d)", L"Mix PCM export... (%d/%d)",
-				L"PCM для микса... (%d/%d)", L"Mix-PCM Export... (%d/%d)", L"Export PCM mix... (%d/%d)", L"Mix-PCM-export... (%d/%d)",
-				L"Eksport PCM mix... (%d/%d)", L"Mix PCM... (%d/%d)"),
-				i + 1, n);
+			CString pieceName = pcs[i].name;
+			pieceName.Trim();
+			if (pieceName.IsEmpty())
+				pieceName = TcBaseNameFromItem(pcs[i]);
+			TcSetExportFileLabel(i + 1, n, pieceName);
+			st.Format(LL14(L"ミックス用PCM出力中... (%d/%d) %s", L"Mix PCM export... (%d/%d) %s", L"Export PCM mix... (%d/%d) %s", L"Export PCM mix... (%d/%d) %s",
+				L"Export PCM mix... (%d/%d) %s", L"믹스 PCM 출력 중... (%d/%d) %s", L"混音PCM导出中... (%d/%d) %s", L"Mix PCM export... (%d/%d) %s",
+				L"PCM для микса... (%d/%d) %s", L"Mix-PCM Export... (%d/%d) %s", L"Export PCM mix... (%d/%d) %s", L"Mix-PCM-export... (%d/%d) %s",
+				L"Eksport PCM mix... (%d/%d) %s", L"Mix PCM... (%d/%d) %s"),
+				i + 1, n, (LPCTSTR)pieceName);
 			m_status.SetWindowText(st);
 			UpdateWindow();
 			DoEvent();
+			if (g_wavExportCancel) { ok = FALSE; break; }
 			ok = og->ExportToWav(&pcs[i], temps[i], loopCount, &pieceOpts, false);
+			if (g_wavExportCancel) { ok = FALSE; break; }
 			if (ok && i == 0) {
 				CFile f;
 				if (f.Open(temps[i], CFile::modeRead | CFile::shareDenyWrite)) {
@@ -3437,15 +3503,22 @@ void CTranscodeExport::OnBnClickedExec()
 			else
 				MpDecodeProgressSetPcmCap(95);
 			CString st;
-			st.Format(LL14(L"クロスフェード出力中... (%d/%d)", L"Crossfade export... (%d/%d)", L"Export fondu... (%d/%d)", L"Export crossfade... (%d/%d)",
-				L"Export fundido... (%d/%d)", L"크로스페이드 출력 중... (%d/%d)", L"交叉淡入淡出导出中... (%d/%d)", L"Crossfade export... (%d/%d)",
-				L"Кроссфейд... (%d/%d)", L"Ueberblend-Export... (%d/%d)", L"Export crossfade... (%d/%d)", L"Crossfade-export... (%d/%d)",
-				L"Eksport przejścia... (%d/%d)", L"Capraz solma... (%d/%d)"),
-				(int)(i + 1), (int)total);
+			CString pieceName = pcs[i].name;
+			pieceName.Trim();
+			if (pieceName.IsEmpty())
+				pieceName = TcBaseNameFromItem(pcs[i]);
+			TcSetExportFileLabel((int)(i + 1), (int)total, pieceName);
+			st.Format(LL14(L"クロスフェード出力中... (%d/%d) %s", L"Crossfade export... (%d/%d) %s", L"Export fondu... (%d/%d) %s", L"Export crossfade... (%d/%d) %s",
+				L"Export fundido... (%d/%d) %s", L"크로스페이드 출력 중... (%d/%d) %s", L"交叉淡入淡出导出中... (%d/%d) %s", L"Crossfade export... (%d/%d) %s",
+				L"Кроссфейд... (%d/%d) %s", L"Ueberblend-Export... (%d/%d) %s", L"Export crossfade... (%d/%d) %s", L"Crossfade-export... (%d/%d) %s",
+				L"Eksport przejścia... (%d/%d) %s", L"Capraz solma... (%d/%d) %s"),
+				(int)(i + 1), (int)total, (LPCTSTR)pieceName);
 			m_status.SetWindowText(st);
 			UpdateWindow();
 			DoEvent();
+			if (g_wavExportCancel) { ok = FALSE; break; }
 			ok = og->ExportToWav(&pcs[i], piecePath, loopCount, &pieceOpts, false);
+			if (g_wavExportCancel) { ok = FALSE; break; }
 			// 2曲目以降を先頭WAVのHz/ch/bitへ揃える（ソースのままでも合成可能に）
 			if (ok && i == 0) {
 				CFile f;
@@ -3509,27 +3582,43 @@ void CTranscodeExport::OnBnClickedExec()
 		const size_t total = pcs.size();
 		for (size_t i = 0; i < total; ++i) {
 			CString outPath = OutputPathForItem(folder, pcs[i], fmt);
+			WavExportOptions fileOpts = opts;
+			CString rowTitle = pcs[i].name;
+			rowTitle.Trim();
+			if (rowTitle.IsEmpty())
+				rowTitle = TcBaseNameFromItem(pcs[i]);
+			fileOpts.tagTitle = rowTitle;
+			if (fileOpts.tagArtist.IsEmpty() && pcs[i].art[0])
+				fileOpts.tagArtist = pcs[i].art;
+			if (fileOpts.tagAlbum.IsEmpty() && pcs[i].alb[0])
+				fileOpts.tagAlbum = pcs[i].alb;
+			TcSetExportFileLabel((int)(i + 1), (int)total, rowTitle);
 			const int base = (int)((i * 100) / total);
 			const int span = (int)(((i + 1) * 100) / total) - base;
 			MpDecodeProgressSetSegment(base, span > 0 ? span : 1);
 			CString st;
-			st.Format(LL14(L"出力中... (%d/%d)", L"Exporting... (%d/%d)", L"Export en cours... (%d/%d)", L"Esportazione... (%d/%d)",
-				L"Exportando... (%d/%d)", L"내보내는 중... (%d/%d)", L"导出中... (%d/%d)", L"جاري التصدير... (%d/%d)",
-				L"Экспорт... (%d/%d)", L"Exportiere... (%d/%d)", L"Exportando... (%d/%d)", L"Exporteren... (%d/%d)",
-				L"Eksportowanie... (%d/%d)", L"Dışa aktarılıyor... (%d/%d)"),
-				(int)(i + 1), (int)total);
+			st.Format(LL14(L"出力中... (%d/%d) %s", L"Exporting... (%d/%d) %s", L"Export en cours... (%d/%d) %s", L"Esportazione... (%d/%d) %s",
+				L"Exportando... (%d/%d) %s", L"내보내는 중... (%d/%d) %s", L"导出中... (%d/%d) %s", L"جاري التصدير... (%d/%d) %s",
+				L"Экспорт... (%d/%d) %s", L"Exportiere... (%d/%d) %s", L"Exportando... (%d/%d) %s", L"Exporteren... (%d/%d) %s",
+				L"Eksportowanie... (%d/%d) %s", L"Dışa aktarılıyor... (%d/%d) %s"),
+				(int)(i + 1), (int)total, (LPCTSTR)rowTitle);
 			m_status.SetWindowText(st);
 			UpdateWindow();
 			DoEvent();
+			if (g_wavExportCancel) { ok = FALSE; break; }
 			if (fmt == TC_FMT_WAV)
-				ok = og->ExportToWav(&pcs[i], outPath, loopCount, &opts, true) && ok;
+				ok = og->ExportToWav(&pcs[i], outPath, loopCount, &fileOpts, true) && ok;
 			else
-				ok = og->ExportToTranscode(&pcs[i], outPath, loopCount, &opts, fmt, mp3Kbps, flacLevel) && ok;
+				ok = og->ExportToTranscode(&pcs[i], outPath, loopCount, &fileOpts, fmt, mp3Kbps, flacLevel) && ok;
 		}
 	}
 	else {
 		CString path = NormalizeOutPath(pathStr, fmt);
 		m_path.SetWindowText(path);
+		CString oneName = path;
+		const int slash = oneName.ReverseFind(L'\\');
+		if (slash >= 0) oneName = oneName.Mid(slash + 1);
+		TcSetExportFileLabel(1, 1, oneName);
 		MpDecodeProgressSetSegment(0, 100);
 		if (fmt == TC_FMT_WAV)
 			ok = og->ExportToWav(&pc, path, loopCount, &opts, true);
@@ -3537,6 +3626,26 @@ void CTranscodeExport::OnBnClickedExec()
 			ok = og->ExportToTranscode(&pc, path, loopCount, &opts, fmt, mp3Kbps, flacLevel);
 	}
 
+	WavExportResumeMonitors();
+	const BOOL closeNow = m_closePending;
+	m_exporting = FALSE;
+	m_closePending = FALSE;
+	g_wavExportDlg = NULL;
+	if (g_wavExportCancel) {
+		g_wavExportCancel = 0;
+		MpDecodeProgressClearCb();
+		m_exec.EnableWindow(TRUE);
+		if (closeNow) {
+			EndDialog(IDCANCEL);
+			return;
+		}
+		m_status.SetWindowText(LL14(
+			L"中止しました", L"Stopped", L"Arrete", L"Interrotto",
+			L"Detenido", L"중지했습니다", L"已停止", L"Stopped",
+			L"Остановлено", L"Gestoppt", L"Parado", L"Gestopt",
+			L"Zatrzymano", L"Durduruldu"));
+		return;
+	}
 	if (ok && m_progress.GetSafeHwnd())
 		m_progress.SetPos(100);
 	MpDecodeProgressClearCb();
@@ -3563,8 +3672,67 @@ void CTranscodeExport::OnBnClickedExec()
 	}
 }
 
+void CTranscodeExport::OnClose()
+{
+	OnBnClickedClose();
+}
+
 void CTranscodeExport::OnBnClickedClose()
 {
+	extern int g_wavExportCancel;
+	if (m_exporting) {
+		m_closePending = TRUE;
+		g_wavExportCancel = 1;
+		if (m_status.GetSafeHwnd())
+			m_status.SetWindowText(LL14(
+				L"閉じています…", L"Closing...", L"Fermeture...", L"Chiusura...",
+				L"Cerrando...", L"닫는 중…", L"正在关闭…", L"Closing...",
+				L"Закрытие...", L"Schliessen...", L"Fechando...", L"Sluiten...",
+				L"Zamykanie...", L"Kapatiliyor..."));
+		return;
+	}
 	PersistKpiDurationFromUi();
 	EndDialog(IDCANCEL);
+}
+
+static void TcEnableTree(HWND h)
+{
+	for (int i = 0; h && ::IsWindow(h) && i < 8; ++i) {
+		::EnableWindow(h, TRUE);
+		HWND parent = ::GetParent(h);
+		HWND owner = ::GetWindow(h, GW_OWNER);
+		if (parent && parent != h)
+			h = parent;
+		else if (owner && owner != h)
+			h = owner;
+		else
+			break;
+	}
+}
+
+INT_PTR CTranscodeExport::DoModal()
+{
+	CWnd* parent = m_pParentWnd;
+	INT_PTR r = CCustomBlurDialogBase::DoModal();
+	TcEnableTree(parent ? parent->GetSafeHwnd() : NULL);
+	if (og)
+		TcEnableTree(og->GetSafeHwnd());
+	extern CPlayList* pl;
+	if (pl)
+		TcEnableTree(pl->GetSafeHwnd());
+	return r;
+}
+
+void CTranscodeExport::OnCancel()
+{
+	extern int g_wavExportCancel;
+	if (!m_exporting)
+		return;
+	g_wavExportCancel = 1;
+	if (m_status.GetSafeHwnd())
+		m_status.SetWindowText(LL14(
+			L"キャンセルしています…", L"Cancelling...", L"Annulation...", L"Annullamento...",
+			L"Cancelando...", L"취소 중…", L"正在取消…", L"Cancel...",
+			L"Отмена...", L"Abbrechen...", L"Cancelando...", L"Annuleren...",
+			L"Anulowanie...", L"Iptal ediliyor..."));
 }

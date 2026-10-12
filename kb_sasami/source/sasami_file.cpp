@@ -186,6 +186,7 @@ void SasamiSongInit(SasamiSong* out)
 {
 	if (!out) return;
 	memset(out, 0, sizeof(*out));
+	out->fmLoadBase = 0x1000;
 	for (int i = 0; i < 32; i++) {
 		out->vstProg[i] = -1;
 		out->vstForceCh[i] = -1;
@@ -236,7 +237,8 @@ static int SasamiFmTrackLooksDummy(const SasamiSong& s, uint32_t off)
 	if (c1 != 3 && c0 != 3) return 0;
 	const uint32_t joff = (c0 == 3) ? off : (uint32_t)(off + 3);
 	const uint16_t w = SasamiGet16(s, joff + 1);
-	uint32_t dest = (w >= 0x1000) ? (uint32_t)(w - 0x1000) : w;
+	uint32_t dest = 0;
+	if (!SasamiMapAbs(s, w, &dest)) return 1;
 	if (dest != off && dest != 0xF0) return 0;
 	if (c0 == 3) return 1;
 	return (c0 == 0 || c0 == 1 || c0 == 4 || c0 == 10);
@@ -249,27 +251,32 @@ static void SasamiLoadMisaoTracks(SasamiSong* out)
 	memset(out->misaoTracks, 0, sizeof(out->misaoTracks));
 	if (!out || out->dataSize < 0xF2) return;
 
-	const int isFpy = SasamiKindIsFm(out->kind);
-	const int isMpy = (out->kind == SASAMI_KIND_MPY || out->kind == SASAMI_KIND_MPW2 || out->kind == SASAMI_KIND_MPW3);
-	if (!isFpy && !isMpy) return;
+	/* MISAO は ADPCM/PCM で FM だけ。MP* の 0xD0 はヘッダなので、
+	   そこをトラックにすると曲データの途中をテンポとして MIDI に足す。 */
+	if (!SasamiKindIsFm(out->kind))
+		return;
 
 	const uint8_t f0 = SasamiGet(*out, 0xF0);
-	const int ppSig = isMpy && out->dataSize > 0xF3
-		&& out->data[0xF1] == 'P' && out->data[0xF2] == 'P'
-		&& (out->data[0xF3] == '\n' || out->data[0xF3] == 0);
 
-	/* FPY の MISAO は書き出しが 0xF0=1。0 のまま 0xD0 を読むと
-	   FM ノート列（ATC-ED.FPY 等）をトラックポインタと誤認する。 */
-	if (isFpy && f0 != 1)
-		return;
-	if (isMpy && !ppSig && f0 == 0)
-		return;
+	/* FPY の MISAO は書き出しが 0xF0=1 で、トラックは 0x100 以降。
+	   クラシックは 0x14 付近から命令なので、0xF0 が休符(01)の先頭になる。
+	   それをフラグにすると FM の途中を MISAO として読み、テンポを書き換える。 */
+	{
+		int packed = 0;
+		for (int ch = 0; ch < out->trackCount && ch < 10; ch++) {
+			if (out->tracks[ch].unused) continue;
+			if (out->tracks[ch].fileOff < 0x100u) { packed = 1; break; }
+		}
+		if (packed || f0 != 1)
+			return;
+	}
 
 	int maxCh = 0;
 	int anyValid = 0;
 	for (int i = 0; i < SASAMI_MISAO_MAX_CH; i++) {
 		const uint16_t ptr = SasamiGet16(*out, (uint32_t)(0xD0 + i * 2));
-		const uint32_t off = (ptr >= 0x1000) ? (uint32_t)(ptr - 0x1000) : ptr;
+		uint32_t off = 0;
+		if (!SasamiMapAbs(*out, ptr, &off)) off = 0;
 		out->misaoTracks[i].fileOff = off;
 		out->misaoTracks[i].unused = SasamiMisaoTrackValid(*out, ptr) ? 0 : 1;
 		if (!out->misaoTracks[i].unused && off) {
@@ -280,20 +287,9 @@ static void SasamiLoadMisaoTracks(SasamiSong* out)
 	if (!anyValid) return;
 
 	out->misaoEnabled = 1;
-	if (isFpy) {
-		if (f0 == 1) {
-			const int f1 = SasamiGet(*out, 0xF1);
-			out->misaoChCount = (f1 > 0 && f1 <= SASAMI_MISAO_MAX_CH) ? f1 : maxCh;
-		} else {
-			out->misaoChCount = maxCh;
-		}
-	} else if (ppSig) {
-		out->misaoChCount = (f0 > 0 && f0 <= SASAMI_MISAO_MAX_CH) ? f0 : maxCh;
-	} else {
+	{
 		const int f1 = SasamiGet(*out, 0xF1);
 		out->misaoChCount = (f1 > 0 && f1 <= SASAMI_MISAO_MAX_CH) ? f1 : maxCh;
-		if (out->misaoChCount <= 0 && f0 > 0 && f0 <= SASAMI_MISAO_MAX_CH)
-			out->misaoChCount = f0;
 	}
 	if (maxCh > out->misaoChCount) out->misaoChCount = maxCh;
 	if (out->misaoChCount > SASAMI_MISAO_MAX_CH) out->misaoChCount = SASAMI_MISAO_MAX_CH;
@@ -316,6 +312,31 @@ static void SasamiReadTitle(SasamiSong* out)
 	}
 }
 
+/* 4K 境界の ORG のうち、ポインタがファイル内に乗り、先頭が FVOL(0x0B) になるものを選ぶ。
+   同点は小さい ORG（クラシック 0x1000）を残す。 */
+static uint16_t SasamiPickFmOrg(const SasamiSong& s)
+{
+	int bestScore = -1;
+	uint16_t best = 0x1000;
+	if (!s.data || s.dataSize < 20) return best;
+	for (uint32_t base = 0x1000; base <= 0xF000; base += 0x1000) {
+		int score = 0;
+		for (int ch = 0; ch < 10; ch++) {
+			const uint16_t ptr = SasamiGet16(s, (uint32_t)(ch * 2));
+			if (ptr == 0 || ptr == 0x10F0 || ptr < base) continue;
+			const uint32_t off = (uint32_t)ptr - base;
+			if (off >= s.dataSize) continue;
+			score += 1;
+			if (s.data[off] == 0x0B) score += 4;
+		}
+		if (score > bestScore) {
+			bestScore = score;
+			best = (uint16_t)base;
+		}
+	}
+	return best;
+}
+
 bool SasamiLoadMemory(const uint8_t* bytes, size_t size, SasamiKind hint, SasamiSong* out)
 {
 	if (!bytes || !out || size < 32) return false;
@@ -334,12 +355,18 @@ bool SasamiLoadMemory(const uint8_t* bytes, size_t size, SasamiKind hint, Sasami
 	if (hint == SASAMI_KIND_FPY || hint == SASAMI_KIND_FPY2) {
 		out->kind = hint;
 		out->trackCount = 10;
+		out->fmLoadBase = SasamiPickFmOrg(*out);
 		for (int ch = 0; ch < 10; ch++) {
 			const uint16_t ptr = SasamiGet16(*out, (uint32_t)(ch * 2));
-			uint32_t off = (ptr >= 0x1000) ? (uint32_t)(ptr - 0x1000) : ptr;
-			out->tracks[ch].fileOff = off;
+			uint32_t off = 0;
+			/* 0x1000 未満はファイル内オフセットではない。ドライバは F_MUSIC-0x1000 を足すので
+			   イメージの手前になる。SASAMI3 の ch9=0x0309 を曲の途中として読むと命令が 1 バイトずれ、
+			   テンポもノートも壊れる。0x3001 は同じ曲の ch8 に入る非トラック印。 */
+			const int mapped = (ptr >= 0x1000 && ptr != 0x10F0 && ptr != 0x3001)
+				&& SasamiMapAbs(*out, ptr, &off);
+			out->tracks[ch].fileOff = mapped ? off : 0;
 			out->tracks[ch].part = -1;
-			out->tracks[ch].unused = (ptr == 0 || ptr == 0x10F0 || off >= size) ? 1 : 0;
+			out->tracks[ch].unused = mapped ? 0 : 1;
 		}
 		/* 書き出し FPY はストリームが 0x100 以降。クラシックは 0x14 から命令が始まり
 		   0x1C/0x1E の version・10ch=FFFF と重なる（ATC-ED.FPY 等）。 */

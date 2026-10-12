@@ -12,18 +12,18 @@ static const int kMisaoSmfPort = 1;
 bool SasamiMisaoTrackValid(const SasamiSong& song, uint16_t ptr)
 {
 	if (ptr == 0 || ptr == 0x10F0) return false;
-	uint32_t off = (ptr >= 0x1000) ? (uint32_t)(ptr - 0x1000) : ptr;
-	if (!SasamiOffOk(song, off, 3)) return false;
-	/* FPY 本体は 0x100 未満がヘッダ。MPY は 0x300 未満がヘッダ。 */
-	if (SasamiKindIsFm(song.kind) && off < 0x100) return false;
-	if (!SasamiKindIsFm(song.kind) && off < 0x300) return false;
+	uint32_t off = 0;
+	if (!SasamiKindIsFm(song.kind)) return false;
+	if (!SasamiMapAbs(song, ptr, &off) || !SasamiOffOk(song, off, 3)) return false;
+	/* FPY 本体は 0x100 未満がヘッダ。 */
+	if (off < 0x100) return false;
 	const uint8_t cmd = SasamiGet(song, off);
 	return MisaoCmdValid(cmd);
 }
 
 bool SasamiMisaoActive(const SasamiSong& song)
 {
-	if (!song.misaoEnabled) return false;
+	if (!SasamiKindIsFm(song.kind) || !song.misaoEnabled) return false;
 	for (int i = 0; i < SASAMI_MISAO_MAX_CH; i++) {
 		if (!song.misaoTracks[i].unused && song.misaoTracks[i].fileOff)
 			return true;
@@ -96,9 +96,8 @@ int SasamiMisaoBuildEvents(const SasamiSong& song, SasamiMisaoEv* out, int maxEv
 					ch[i].pc = addr + 3;
 					break;
 				case 3: {
-					uint32_t dest = w1;
-					if (dest >= 0x1000) dest -= 0x1000;
-					if (dest == 0xF0) ch[i].alive = 0;
+					uint32_t dest = 0;
+					if (!SasamiMapAbs(song, w1, &dest) || dest == 0xF0) ch[i].alive = 0;
 					else if (measureLen && dest < addr) {
 						ch[i].backJumps++;
 						if (ch[i].backJumps >= 2) ch[i].alive = 0;
@@ -152,9 +151,12 @@ int SasamiMisaoBuildEvents(const SasamiSong& song, SasamiMisaoEv* out, int maxEv
 						ch[i].pc = addr + 3;
 					} else {
 						*cp = c;
-						uint32_t dest = w1;
-						if (dest >= 0x1000) dest -= 0x1000;
-						ch[i].pc = dest;
+						uint32_t dest = 0;
+						if (!SasamiMapAbs(song, w1, &dest)) {
+							ch[i].loopSp--;
+							ch[i].pc = addr + 3;
+						} else
+							ch[i].pc = dest;
 					}
 					break;
 				}

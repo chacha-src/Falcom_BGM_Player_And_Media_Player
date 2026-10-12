@@ -5889,6 +5889,40 @@ int XfStartCrossfadeFromNotify(int force)
 CString wavExportPath;
 int wavExportLoopCount = 0;
 float g_wavExportMaxSec = 0; // KPI等: 書き出し上限秒(0=無制限)
+int g_wavExportCancel = 0; // 書き出しダイアログの閉じる／キャンセル
+HWND g_wavExportDlg = NULL;
+static HWND s_exportHideMidi = NULL;
+static HWND s_exportHideFm = NULL;
+
+static void WavExportTakeMon(CWnd* w, HWND& slot)
+{
+	slot = NULL;
+	if (!w) return;
+	HWND hw = w->GetSafeHwnd();
+	if (!hw || !::IsWindow(hw) || !::IsWindowVisible(hw)) return;
+	slot = hw;
+	::ShowWindow(hw, SW_HIDE);
+}
+
+void WavExportSuspendMonitors()
+{
+	extern COggDlg* og;
+	s_exportHideMidi = NULL;
+	s_exportHideFm = NULL;
+	if (!og) return;
+	WavExportTakeMon(og->m_MidiMonitorDlg, s_exportHideMidi);
+	WavExportTakeMon(og->m_FmMonitorDlg, s_exportHideFm);
+}
+
+void WavExportResumeMonitors()
+{
+	if (s_exportHideMidi && ::IsWindow(s_exportHideMidi))
+		::ShowWindow(s_exportHideMidi, SW_SHOWNOACTIVATE);
+	if (s_exportHideFm && ::IsWindow(s_exportHideFm))
+		::ShowWindow(s_exportHideFm, SW_SHOWNOACTIVATE);
+	s_exportHideMidi = NULL;
+	s_exportHideFm = NULL;
+}
 /* SASAMI の書き出し。J ありは前奏1回+最長Jを回数分。J なしは無音終端。秒数では切らない。 */
 static double s_sasamiExportEnd = -1.0;
 void WavExportBeginPass()
@@ -5902,9 +5936,17 @@ int WavExportSkipSecCap()
 int WavExportSasamiLoopDone()
 {
 	if (!WavExportSkipSecCap()) return 0;
-	if (!(kpi_file_loop && loop2 > 0 && wavExportLoopCount > 0 && wavbit_sample_Hz > 0))
+	if (wavbit_sample_Hz <= 0 || loop2 <= 0)
 		return 0;
-	const double endSamp = (double)loop1 + (double)loop2 * (double)wavExportLoopCount;
+	/* J ありは前奏1回+本体×回数。J なしは報告された曲長で1回。ここを過ぎても
+	   デコーダが音を出し続けると、秒数上限を外した書き出しが戻らなくなる。 */
+	double endSamp;
+	if (kpi_file_loop && wavExportLoopCount > 0)
+		endSamp = (double)loop1 + (double)loop2 * (double)wavExportLoopCount;
+	else if (!kpi_file_loop)
+		endSamp = (double)loop2;
+	else
+		return 0;
 	if (s_sasamiExportEnd < 0.0) {
 		s_sasamiExportEnd = endSamp;
 		MpDecodeProgressSetExpectedSec(endSamp / (double)wavbit_sample_Hz);
@@ -7887,9 +7929,93 @@ void ReleaseOggVorbis(char** pOggBuf)
 	}
 }
 
+static HWND s_wavExportPumpHwnd[96];
+static int s_wavExportPumpN = 0;
+static int s_wavExportPump = 0;
+static BOOL CALLBACK WavExportCollectChild(HWND h, LPARAM)
+{
+	if (s_wavExportPumpN < 96)
+		s_wavExportPumpHwnd[s_wavExportPumpN++] = h;
+	return TRUE;
+}
+static void WavExportDispatchHwnd(HWND h)
+{
+	MSG msg;
+	for (int n = 0; n < 24; ++n) {
+		if (!::PeekMessage(&msg, h, 0, 0, PM_REMOVE))
+			break;
+		if (msg.message == WM_QUIT) {
+			::PostQuitMessage((int)msg.wParam);
+			break;
+		}
+		::TranslateMessage(&msg);
+		::DispatchMessage(&msg);
+	}
+}
+/* 書き出し中は本体のタイマーがキューを埋め、キャンセルのクリックが届かない。
+   ダイアログ配下は先に処理し、本体のクリックとタイマーは捨てる。 */
+void WavExportPumpUi()
+{
+	if (s_wavExportPump) return;
+	s_wavExportPump = 1;
+	HWND hDlg = g_wavExportDlg;
+	if (hDlg && ::IsWindow(hDlg)) {
+		for (int pass = 0; pass < 2; ++pass) {
+			s_wavExportPumpN = 0;
+			s_wavExportPumpHwnd[s_wavExportPumpN++] = hDlg;
+			::EnumChildWindows(hDlg, WavExportCollectChild, 0);
+			for (int i = 0; i < s_wavExportPumpN; ++i)
+				WavExportDispatchHwnd(s_wavExportPumpHwnd[i]);
+		}
+	}
+	MSG msg;
+	for (int budget = 48; budget > 0; --budget) {
+		if (!::PeekMessage(&msg, NULL, 0, 0, PM_REMOVE))
+			break;
+		if (msg.message == WM_QUIT) {
+			::PostQuitMessage((int)msg.wParam);
+			break;
+		}
+		const int mine = (hDlg && (msg.hwnd == hDlg || ::IsChild(hDlg, msg.hwnd))) ? 1 : 0;
+		if (mine) {
+			::TranslateMessage(&msg);
+			::DispatchMessage(&msg);
+			continue;
+		}
+		/* モニタの seq 描画は書き出しを実演速度まで落とす。窓は別途隠してある。 */
+		{
+			extern COggDlg* og;
+			HWND mon = NULL;
+			if (og && og->m_MidiMonitorDlg)
+				mon = og->m_MidiMonitorDlg->GetSafeHwnd();
+			HWND fm = NULL;
+			if (og && og->m_FmMonitorDlg)
+				fm = og->m_FmMonitorDlg->GetSafeHwnd();
+			if ((mon && ::IsWindow(mon) && (msg.hwnd == mon || ::IsChild(mon, msg.hwnd)))
+				|| (fm && ::IsWindow(fm) && (msg.hwnd == fm || ::IsChild(fm, msg.hwnd))))
+				continue;
+		}
+		const UINT m = msg.message;
+		if (m == WM_TIMER || m == WM_COMMAND || m == WM_SYSCOMMAND
+			|| m == WM_LBUTTONDOWN || m == WM_LBUTTONUP || m == WM_LBUTTONDBLCLK
+			|| m == WM_RBUTTONDOWN || m == WM_RBUTTONUP || m == WM_RBUTTONDBLCLK
+			|| m == WM_MBUTTONDOWN || m == WM_MBUTTONUP
+			|| m == WM_CONTEXTMENU || m == WM_KEYDOWN || m == WM_KEYUP || m == WM_CHAR
+			|| m == WM_SYSKEYDOWN || m == WM_SYSKEYUP)
+			continue;
+		::TranslateMessage(&msg);
+		::DispatchMessage(&msg);
+	}
+	s_wavExportPump = 0;
+}
+
 //main
 void DoEvent()
 {
+	if (g_wavExportDlg) {
+		WavExportPumpUi();
+		return;
+	}
 	MSG msg;
 	if (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE))
 	{
@@ -15941,7 +16067,9 @@ BOOL COggDlg::ExportToWav(playlistdata0* pc, CString outputPath, int loopCount, 
 	}
 	play();
 	// 成否はファイル実長由来の g_wavExportDataBytes で判定（trim/fade後も正しい）
-	BOOL ok = (g_wavExportDataBytes > 0 && cc1 == 0);
+	BOOL ok = (!g_wavExportCancel && g_wavExportDataBytes > 0 && cc1 == 0);
+	if (g_wavExportCancel)
+		DeleteFile(outputPath);
 	if (ok) {
 		MpDecodeProgressBumpAfterPcm(LL14(
 			L"後処理中…", L"Post-processing...", L"Post-traitement...", L"Post-elaborazione...", L"Postproceso...",
@@ -15967,8 +16095,7 @@ BOOL COggDlg::ExportToWav(playlistdata0* pc, CString outputPath, int loopCount, 
 	if (ok && applyTags && pc->fol[0] != 0) {
 		const int copyTags = localOpts.copyTags ? 1 : 0;
 		FileTagFields fill;
-		if (!localOpts.multiFile)
-			fill.title = localOpts.tagTitle;
+		fill.title = localOpts.tagTitle;
 		fill.artist = localOpts.tagArtist;
 		fill.album = localOpts.tagAlbum;
 		const bool needMeta = copyTags
@@ -16042,8 +16169,7 @@ BOOL COggDlg::ExportToTranscode(playlistdata0* pc, CString outputPath, int loopC
 		if (opts) localOpts = *opts;
 		else localOpts.copyTags = savedata.wav_export_copy_tags ? 1 : 0;
 		FileTagFields fill;
-		if (!localOpts.multiFile)
-			fill.title = localOpts.tagTitle;
+		fill.title = localOpts.tagTitle;
 		fill.artist = localOpts.tagArtist;
 		fill.album = localOpts.tagAlbum;
 		const int copyTags = localOpts.copyTags ? 1 : 0;

@@ -55,6 +55,13 @@ BOOL CPlayListNew::OnInitDialog()
 {
 	CCustomBlurDialogExBase::OnInitDialog();
 
+	CWnd* owner = GetParent();
+	const BOOL ownerTop = (owner && ::IsWindow(owner->GetSafeHwnd())
+		&& (::GetWindowLong(owner->GetSafeHwnd(), GWL_EXSTYLE) & WS_EX_TOPMOST)) ? TRUE : FALSE;
+	CCC_BringDialogToForeground(this);
+	if (ownerTop)
+		SetWindowPos(&wndTopMost, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
+
 	SetWindowText(LL14(L"新しいプレイリスト", L"New Playlist", L"Nouvelle liste", L"Nuova playlist", L"Nueva lista", L"새 재생 목록", L"新建播放列表", L"قائمة جديدة", L"Новый плейлист", L"Neue Playlist", L"Nova playlist", L"Nieuwe afspeellijst", L"Nowa playlist", L"Yeni çalma listesi"));
 	m_label.SetWindowText(LL14(L"新しいプレイリスト名", L"New playlist name", L"Nom de la nouvelle liste", L"Nome nuova playlist", L"Nombre de nueva lista", L"새 재생 목록 이름", L"新建播放列表名称", L"اسم القائمة الجديدة", L"Имя нового плейлиста", L"Name der neuen Playlist", L"Nome da nova playlist", L"Naam nieuwe afspeellijst", L"Nazwa nowej playlisty", L"Yeni çalma listesi adı"));
 	m_name.SetWindowText(name);

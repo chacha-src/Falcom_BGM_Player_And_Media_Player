@@ -89,6 +89,11 @@ enum { kPlJakN = 48, kPlJakPx = 24 };
 #ifndef WM_PL_JAK_DONE
 #define WM_PL_JAK_DONE (WM_APP + 66)
 #endif
+#ifndef WM_PL_SWITCH
+#define WM_PL_SWITCH (WM_APP + 68)
+#endif
+static int s_plSwitchRun = 0;
+static int s_plSwitchQueued = 0;
 static void PlJakMemInit();
 static HBITMAP PlJacketGetCb(void* ctx, int row);
 static int PlNoteIconGetCb(void* ctx, int row);
@@ -710,6 +715,7 @@ BEGIN_MESSAGE_MAP(CPlayList, CCustomBlurDialogBase)
 #endif
 	ON_MESSAGE(WM_PL_MISS_DONE, OnPlMissDone)
 	ON_MESSAGE(WM_PL_JAK_DONE, OnPlJakDone)
+	ON_MESSAGE(WM_PL_SWITCH, OnPlSwitch)
 END_MESSAGE_MAP()
 
 static const UINT_PTR kPlayListNavRefreshTimer = 4945;
@@ -13505,6 +13511,18 @@ void CPlayList::Load(BOOL restoreSavedRow)
 	int cx=0,cy=0,x=-10000,y=0,c=0;
 	playcnt = 0;
 	MpPlaylistNatOrdClear();
+	if (::IsWindow(m_lc.GetSafeHwnd())) {
+		m_lc.SetItemCount(0);
+		m_lc.pc = NULL;
+	}
+	{
+		extern CMediaPlayerDlg* mp;
+		if (mp && ::IsWindow(mp->m_list.GetSafeHwnd())) {
+			mp->m_list.SetItemCount(0);
+			mp->m_list.pc = NULL;
+			mp->m_lastCount = 0;
+		}
+	}
 	if (pc) {
 		free(pc);
 		pc = NULL;
@@ -15000,7 +15018,61 @@ void CPlayList::OnCbnSelchangeEndMode()
 	MpPersistSavedataQuick();
 }
 
+/* 切替中にオーナーデータリストが古い pc を描くと解放後参照になる。件数を先に 0 にする。 */
+static void PlDetachListsForReload(CPlayList* self)
+{
+	if (!self) return;
+	self->playcnt = 0;
+	self->pnt = -1;
+	self->pnt1 = -1;
+	if (::IsWindow(self->m_lc.GetSafeHwnd())) {
+		self->m_lc.SetItemCount(0);
+		self->m_lc.pc = NULL;
+	}
+	extern CMediaPlayerDlg* mp;
+	if (mp && ::IsWindow(mp->m_list.GetSafeHwnd())) {
+		mp->m_list.SetItemCount(0);
+		mp->m_list.pc = NULL;
+		mp->m_lastCount = 0;
+	}
+}
+
 void CPlayList::OnCbnSelchangeCombo1()
+{
+	if (m_tempMode) return;
+	if (changeflg == TRUE) return;
+	if (s_plSwitchRun) return;
+	if (!::IsWindow(m_listchange.GetSafeHwnd())) return;
+	const int num = m_listchange.GetCurSel();
+	if (num < 0) return;
+	if (s_plSwitchQueued) return;
+	s_plSwitchQueued = 1;
+	if (PostMessage(WM_PL_SWITCH, (WPARAM)num, 0))
+		return;
+	s_plSwitchQueued = 0;
+	ApplyPlaylistComboSel();
+}
+
+LRESULT CPlayList::OnPlSwitch(WPARAM wParam, LPARAM)
+{
+	s_plSwitchQueued = 0;
+	if (s_plSwitchRun) return 0;
+	s_plSwitchRun = 1;
+	if (::IsWindow(m_listchange.GetSafeHwnd())) {
+		m_listchange.ShowDropDown(FALSE);
+		const int want = (int)wParam;
+		if (want >= 0 && m_listchange.GetCurSel() != want) {
+			changeflg = TRUE;
+			m_listchange.SetCurSel(want);
+			changeflg = FALSE;
+		}
+	}
+	ApplyPlaylistComboSel();
+	s_plSwitchRun = 0;
+	return 0;
+}
+
+void CPlayList::ApplyPlaylistComboSel()
 {
 	extern COggDlg* og;
 	if (m_tempMode) return;
@@ -15030,12 +15102,15 @@ void CPlayList::OnCbnSelchangeCombo1()
 	if (creatingNew) {
 		const int prevNum = savedata.playlistnum;
 		savedata.playlistnum = fileCnt;
-		playcnt = 0;
-		pnt = -1;
-		pnt1 = -1;
+		PlDetachListsForReload(this);
 		MpPlaylistNatOrdClear();
 		free(pc);
-		pc = (playlistdata0*)malloc(sizeof(playlistdata0));
+		pc = (playlistdata0*)calloc(1, sizeof(playlistdata0));
+		m_lc.pc = pc;
+		{
+			extern CMediaPlayerDlg* mp;
+			if (mp) mp->m_list.pc = pc;
+		}
 		Save();
 		// 実体が作れていないのに新スロットへ切り替えると、以降の Save が
 		// 既存リストのファイルを上書きしてしまう。作成失敗なら元へ戻す。
@@ -15075,9 +15150,7 @@ void CPlayList::OnCbnSelchangeCombo1()
 	}
 
 	savedata.playlistnum = num;
-	playcnt = 0;
-	pnt = -1;
-	pnt1 = -1;
+	PlDetachListsForReload(this);
 	MpPlaylistNatOrdClear();
 	free(pc);
 	pc = NULL;
@@ -15223,7 +15296,20 @@ void CPlayList::OnBnClickedButton3()
 {
 	// TODO: ここにコントロール通知ハンドラー コードを追加します。
 	if (m_tempMode) return;
-	CPlayListNew pn;
+	if (savedata.playlistnum < 0 || savedata.playlistnum >= 1000) return;
+	CWnd* owner = this;
+	{
+		HWND fg = ::GetForegroundWindow();
+		HWND root = fg ? ::GetAncestor(fg, GA_ROOT) : NULL;
+		CWnd* fgRoot = root ? CWnd::FromHandlePermanent(root) : NULL;
+		extern CMediaPlayerDlg* mp;
+		if (fgRoot && (fgRoot == this || (mp && fgRoot == mp)))
+			owner = fgRoot;
+		else if (mp && ::IsWindow(mp->GetSafeHwnd()) && mp->IsWindowVisible()
+			&& !(::IsWindow(GetSafeHwnd()) && IsWindowVisible()))
+			owner = mp;
+	}
+	CPlayListNew pn(owner);
 	pn.name = savedata.playlistname[savedata.playlistnum];
 	if (pn.name == L"") pn.name = GetPlaylistDisplayName(savedata.playlistnum);
 	if (pn.DoModal() == IDOK) {

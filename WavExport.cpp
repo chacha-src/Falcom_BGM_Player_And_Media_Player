@@ -123,14 +123,15 @@ CString WavExportNormalizeOutputPath(const CString& pathIn)
 CString WavExportBaseNameFromItem(const playlistdata0& item)
 {
 	CString name = item.name;
-	if (name.IsEmpty()) {
-		CString fol = item.fol;
-		const int pos = fol.ReverseFind(L'\\');
-		if (pos >= 0) name = fol.Mid(pos + 1);
-		else name = fol;
-	}
+	name.Trim();
+	if (!name.IsEmpty())
+		return name;
+	CString fol = item.fol;
+	const int pos = fol.ReverseFind(L'\\');
+	if (pos >= 0) name = fol.Mid(pos + 1);
+	else name = fol;
 	const int dot = name.ReverseFind(L'.');
-	if (dot >= 0) name = name.Left(dot);
+	if (dot > 0) name = name.Left(dot);
 	return name;
 }
 

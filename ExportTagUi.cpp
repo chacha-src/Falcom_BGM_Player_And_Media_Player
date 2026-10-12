@@ -193,9 +193,9 @@ void ExportTagUi_InitFields(bool multi, const playlistdata0& pc,
 	if (al.IsEmpty() && pc.alb[0]) al = pc.alb;
 
 	if (multi) {
-		title.SetWindowText(LL14(L"(複数のため変更不可)", L"(locked for multi)", L"(verrouille)", L"(bloccato)", L"(bloqueado)",
-			L"(다중 선택 잠금)", L"(多选不可改)", L"(locked)", L"(заблокировано)", L"(gesperrt)",
-			L"(bloqueado)", L"(vergrendeld)", L"(zablokowane)", L"(kilitli)"));
+		title.SetWindowText(LL14(L"(各曲のプレイリスト名)", L"(each playlist name)", L"(nom de chaque liste)", L"(nome di ogni brano)", L"(nombre de cada pista)",
+			L"(각 곡의 재생목록 이름)", L"(各曲的播放列表名)", L"(each playlist name)", L"(имя в плейлисте)", L"(Name je Titel)",
+			L"(nome de cada faixa)", L"(elke afspeellijstnaam)", L"(nazwa z playlisty)", L"(her parcanin liste adi)"));
 		title.EnableWindow(FALSE);
 		artist.SetWindowText(L"");
 		album.SetWindowText(L"");

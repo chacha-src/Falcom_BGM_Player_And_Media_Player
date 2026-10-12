@@ -10,6 +10,8 @@ void MpDecodeProgressReset();
 void MpDecodeProgressSetExpectedSec(double sec);
 // 複数曲: 全体のうち base..(base+span) にマップ (例: 2/5曲目なら base=40, span=20)
 void MpDecodeProgressSetSegment(int basePct, int spanPct);
+// 書き出し中の状態文のうしろに残す「(n/total) 名前」。空で消す。
+void MpDecodeProgressSetFileLabel(LPCTSTR label);
 // PCMデコード段階の上限% (既定95。mp3/FLACはエンコード余白のため 78 など)
 void MpDecodeProgressSetPcmCap(int maxPct);
 void MpDecodeProgressReport(int pct, LPCTSTR status);

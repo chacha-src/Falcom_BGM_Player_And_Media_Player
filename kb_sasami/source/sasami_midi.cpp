@@ -1,5 +1,4 @@
 ﻿#include "sasami_midi.h"
-#include "sasami_misao.h"
 
 #include <windows.h>
 #include <algorithm>
@@ -2004,13 +2003,16 @@ bool SasamiConvertToSmf(const SasamiSong& song, SasamiMidiMap map, int gsBankLsb
 					}
 					tr[i].addr = addr + 3;
 					break;
-				case 23:
+				case 23: {
+					/* |: の回数省略は 2。0 を int のまま引くと -1 で回り続ける。 */
+					const int cnt = b1 ? (int)b1 : 2;
 					if (tr[i].loopSp < MidiTrackState::MIDI_LOOP_NEST)
-						tr[i].loopStack[tr[i].loopSp++] = b1;
+						tr[i].loopStack[tr[i].loopSp++] = cnt;
 					else
-						tr[i].loopStack[MidiTrackState::MIDI_LOOP_NEST - 1] = b1;
+						tr[i].loopStack[MidiTrackState::MIDI_LOOP_NEST - 1] = cnt;
 					tr[i].addr = addr + 3;
 					break;
+				}
 				case 24: {
 					uint32_t nxt = 0;
 					const uint32_t dest = ReadJump(song, addr, ver, &nxt);
@@ -2513,19 +2515,6 @@ bool SasamiConvertToSmf(const SasamiSong& song, SasamiMidiMap map, int gsBankLsb
 
 	for (int i = 0; i < s_evCount; i++) {
 		if (s_evs[i].port >= nports) nports = s_evs[i].port + 1;
-	}
-
-	if (SasamiMisaoActive(song)) {
-		enum { kMisaoEvMax = 8192 };
-		static SasamiMisaoEv s_misaoEv[kMisaoEvMax];
-		unsigned misaoTicks = 0;
-		const int nMisao = SasamiMisaoBuildEvents(song, s_misaoEv, kMisaoEvMax, &misaoTicks);
-		for (int i = 0; i < nMisao; i++) {
-			const SasamiMisaoEv& me = s_misaoEv[i];
-			PushEv(me.tick, me.port, me.bytes, me.len);
-			if (me.port + 1 > nports) nports = me.port + 1;
-		}
-		(void)misaoTicks;
 	}
 
 	if (useSmfLoop) {
