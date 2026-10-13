@@ -1236,6 +1236,8 @@ private:
     int m_nHotItem;        // 現在マウスカーソルが乗っているアイテムのインデックス（ホバー処理用）
     CPoint m_ptLBtnDown;   // 行クリック起点。しきい値未満の移動では LVN_BEGINDRAG を出さない
     BOOL m_bTrackDragGate; // 項目上での LBUTTON 中だけ既定 OnMouseMove を抑止
+    BOOL m_bLeaveTrack;    // TME_LEAVE 済み。毎ムーブ TrackMouseEvent しない
+    CRect m_hotHitRc;      // 現ホット行。矩形内なら HitTest しない
     // 回転♡: リスト全体ではなく♡の矩形だけ再描画してなめらかに回す
     CRect m_heartRcSel;    // 選択行の♡
     CRect m_heartRcHot;    // ホバー行の♡

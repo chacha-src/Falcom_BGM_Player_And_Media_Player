@@ -642,6 +642,9 @@ if errorlevel 1 exit /b 1</Command>
     <ClCompile Include="CEmu\vendor\np2\glue\np2mem.c" />
     <ClCompile Include="CEmu\vendor\np2\glue\np2io.c" />
     <ClCompile Include="CEmu\fmmon\fmmon_shadow.cpp" />
+    <ClCompile Include="C:\projects\APPLICATION3\kpi_sources_20240712\kpi_decoder\fmmon_common\kbs_gimic.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
     <ClCompile Include="CEmu\fmmon\cemu_fmmon_bind.cpp" />
     <ClCompile Include="CEmu\fmmon\fmmon_write.cpp" />
     <ClCompile Include="CEmu\z80\Ay_Cpu.cpp" />

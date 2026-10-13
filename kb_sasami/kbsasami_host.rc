@@ -3,7 +3,7 @@
 #include <winres.h>
 #include "resource.h"
 /////////////////////////////////////////////////////////////////////////////
-// 日本語 (日本) resources
+// Japanese resources
 
 #if !defined(AFX_RESOURCE_DLL) || defined(AFX_TARG_JPN)
 LANGUAGE LANG_JAPANESE, SUBLANG_DEFAULT
@@ -91,6 +91,7 @@ END
 
 2 TEXTINCLUDE 
 BEGIN
+    "#include ""winres.h""\r\n"
     "\0"
 END
 
@@ -129,7 +130,7 @@ BEGIN
             VALUE "FileDescription", "Pre Prayer Power Soft"
             VALUE "FileVersion", "1.30.0.1"
             VALUE "InternalName", "kbsasami_host.exe"
-            VALUE "LegalCopyright", "Copyright (C) 2026.10.12 1.30a"
+            VALUE "LegalCopyright", "Copyright (C) 2026.10.13 1.30b"
             VALUE "OriginalFilename", "kbsasami_host.exe"
             VALUE "ProductName", "Falcom BGM Player & Media Player"
             VALUE "ProductVersion", "1.0.0.1"
@@ -141,7 +142,7 @@ BEGIN
     END
 END
 
-#endif    // 日本語 (日本) resources
+#endif    // Japanese resources
 /////////////////////////////////////////////////////////////////////////////
 
 

@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <math.h>
 #include "fmmon_shadow.h"
+#include "../../../kpi_sources_20240712/kpi_decoder/fmmon_common/kbs_gimic.h"
 
 /* KPI一覧の [FMmon]/[MIDmon] 検出用。Flush 経路から参照してリンク残す。 */
 extern "C" const char g_oggKpiFmMonTag[] = "ogg.FMmon";
@@ -593,6 +594,11 @@ void FmMonShadowSetCurSample(uint64_t n)
 
 void FmMonShadowWriteReg(unsigned addr, unsigned data)
 {
+	{
+		unsigned a = addr & 0x1FFu;
+		if (a != 0x2Au)
+			KbsGimicWrite(a, (uint8_t)(data & 0xFFu), (int64_t)s_cur);
+	}
 	if (FmMonShadowIsHeld())
 		return;
 	EnsureCs();

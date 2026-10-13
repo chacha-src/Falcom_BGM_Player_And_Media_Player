@@ -281,10 +281,17 @@ public:
 			if (_wcsicmp(m_sec[i], k->cszSection) == 0) { secHelp = m_secHelp[i]; break; }
 		}
 		CString help;
-		help = L"Section:";
-		help += k->cszSection;
-		if (secHelp[0]) { help += L"\n"; help += secHelp; }
-		if (k->cszHelp && k->cszHelp[0]) { help += L"\n"; help += k->cszHelp; }
+		if (k->cszHelp && k->cszHelp[0])
+			help = k->cszHelp;
+		else if (k->cszKeyDesc && k->cszKeyDesc[0])
+			help = k->cszKeyDesc;
+		else {
+			help = k->cszKey;
+		}
+		if (secHelp[0]) {
+			if (!help.IsEmpty()) help += L"\n";
+			help += secHelp;
+		}
 		CString list;
 		if (k->cszList) {
 			for (const wchar_t* p = k->cszList; *p; ++p) {
@@ -351,7 +358,19 @@ static void KpiFillKmp(KMPMODULE* m, CString& blob)
 static void KpiFillLocalKpi(int idx, CString& blob)
 {
 	if (idx < 0 || idx >= 500) return;
+	/* plug() は列挙後に FreeLibrary する。残った HMODULE では EnumConfig が読めず、
+	   既知キーの名前だけが説明になる。詳細表示のあいだだけ読み直す。 */
+	wchar_t alive[8];
 	HMODULE h = hDLLk1[idx];
+	HMODULE owned = NULL;
+	if (!h || !GetModuleFileNameW(h, alive, 8)) {
+		const wchar_t* path = kpif[idx];
+		if (path && path[0]) {
+			h = LoadLibraryExW(path, NULL, LOAD_WITH_ALTERED_SEARCH_PATH);
+			if (!h) h = LoadLibraryW(path);
+			owned = h;
+		}
+	}
 	if (!h) return;
 	KpiBlobI(blob, L"Path", kpif[idx]);
 	KpiBlobI(blob, L"Type", L"Decoder");
@@ -407,6 +426,7 @@ static void KpiFillLocalKpi(int idx, CString& blob)
 		KMPMODULE* m = KpiSafeKmp(fn);
 		KpiFillKmp(m, blob);
 	}
+	if (owned) FreeLibrary(owned);
 }
 
 static int KpiFillWinamp(const wchar_t* path, CString& blob)
@@ -595,7 +615,15 @@ void CKpilist::ShowPluginDetail(int idx)
 			wcsncpy_s(m_cfgDesc[row], known[i].key, _TRUNCATE);
 			wcsncpy_s(m_cfgDef[row], known[i].defaultValue ? known[i].defaultValue : L"", _TRUNCATE);
 			m_cfgHelpTxt[row][0] = 0;
-			swprintf_s(m_cfgHelpTxt[row], L"Section:%s", known[i].section);
+			if (_wcsicmp(known[i].key, L"gimic") == 0) {
+				m_cfgType[row] = KPI_CFG_TYPE_BOOL;
+				wcsncpy_s(m_cfgHelpTxt[row],
+					L"false(0): ソフト音源のまま（初期値）。\r\n"
+					L"true(1): G.I.M.I.C。kbsasami_host32 を起動する。モニタ窓は出さない（raira=1 は本体のモニタ）。",
+					_TRUNCATE);
+			} else {
+				wcsncpy_s(m_cfgHelpTxt[row], known[i].key, _TRUNCATE);
+			}
 			m_cfgList[row][0] = 0;
 			m_cfgVal[row][0] = 0;
 		}

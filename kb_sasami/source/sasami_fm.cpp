@@ -1,4 +1,5 @@
 ﻿#include "sasami_fm.h"
+#include "kbs_gimic.h"
 #include "sasami_misao.h"
 #include "sasami_fmmon.h"
 #include "sasami_fmmon_map.h"
@@ -729,9 +730,10 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 		memset(d.keyMidi, 0xFF, sizeof(d.keyMidi));
 		memset(d.exMidi, 0xFF, sizeof(d.exMidi));
 		memset(d.ssgMidi, 0xFF, sizeof(d.ssgMidi));
+		/* チップが鳴っている枚は curSample がすでにその時刻。900ms を引かない。 */
 		d.pad6[2] = (uint8_t)(SASAMI_FMMON_VIEW_KEYS
 			| SASAMI_FMMON_VIEW_REGS | SASAMI_FMMON_VIEW_PANELS
-			| SASAMI_FMMON_CLOCK_DUMP);
+			| (KbsGimicDevOk() ? SASAMI_FMMON_CLOCK_LIVE : SASAMI_FMMON_CLOCK_DUMP));
 		strncpy_s(d.titleSjis, song.titleSjis, _TRUNCATE);
 		wcsncpy_s(d.sourcePath, dumpSrc, _TRUNCATE);
 
@@ -963,6 +965,8 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 		/* OPN/OPNA とも ym2608。OPN はリズム無効 */
 		chip.write(0, reg);
 		chip.write(1, data);
+		if (!measureLen)
+			KbsGimicWrite(reg, data, (int64_t)dumpAbs);
 		if (reg == 0x28) NoteKeyOnReg(data);
 		if (playFmMode == 2)
 			RhythmReg(reg, data);
@@ -973,6 +977,8 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 		if (playFmMode != 2) return;
 		chip.write(2, reg);
 		chip.write(3, data);
+		if (!measureLen)
+			KbsGimicWrite(0x100u | reg, data, (int64_t)dumpAbs);
 		regs[0x100 | reg] = data;
 		MarkRegWrite(0x100u | reg);
 		MarkDump();
@@ -1312,12 +1318,15 @@ struct SasamiFmPlayer::Impl : public ymfm::ymfm_interface {
 		   ミキサは触らず音量だけチップへ 0。次の実ノートで ssg[] の音量を戻す。 */
 		if (per == 0) {
 			ssgOn[s] = 0;
+			/* 音量レジスタだけ 0。ssg[] に残した音量は次の実ノートで戻す。 */
 			chip.write(0, (uint8_t)(8 + s));
 			chip.write(1, 0);
+			if (!measureLen)
+				KbsGimicWrite((uint8_t)(8 + s), 0, (int64_t)dumpAbs);
 			return;
 		}
-		chip.write(0, (uint8_t)(8 + s));
-		chip.write(1, ssg[8 + s]);
+		/* FmOut だと ssg[8+s] を同じ値で上書きするだけ。G.I.M.I.C へはここを通さないと音量が 0 のまま。 */
+		FmOut((uint8_t)(8 + s), ssg[8 + s]);
 		WriteSsgPeriod(ch, (uint16_t)per);
 		/* トーン許可はチャンネルにつき一度。以降は PSGAND/PSGOR のミキサを維持する。
 		   毎ノートでトーンを戻すと、ノイズだけのパートが正弦の別テンポになる。 */
@@ -2079,6 +2088,8 @@ bool SasamiFmPlayer::Open(const SasamiSong& song, uint32_t sampleRate, const wch
 		m_loopStartSample = m->loopStartSample;
 		m_loopEndSample = m->loopEndSample;
 		m->measureLen = 0;
+		if (m->playFmMode == 1 || m->playFmMode == 2)
+			KbsGimicBegin(KBS_GIMIC_CHIP_OPNA, kOpnaClock, m->hostRate);
 		m->SetupSong();
 	}
 	m_curSample = 0;
@@ -2087,6 +2098,7 @@ bool SasamiFmPlayer::Open(const SasamiSong& song, uint32_t sampleRate, const wch
 
 void SasamiFmPlayer::Close()
 {
+	KbsGimicEnd();
 	StopDumpThread();
 	std::lock_guard<std::mutex> lk(m_lock);
 	if (m) {
@@ -2170,14 +2182,21 @@ uint32_t SasamiFmPlayer::Render(int16_t* interleavedStereo, uint32_t frames)
 	if (out < frames && !(m && m->loopClip))
 		memset(interleavedStereo + out * 2, 0, (size_t)(frames - out) * 2 * sizeof(int16_t));
 	/* ホストへ渡した位置で時計を進める。生成端 m_curSample だと 8192 先読み分モニタが先行する。 */
-	if (m->dumpEnable && !m->dumpMute) {
+	{
 		const int clip = (m && m->loopClip) ? 1 : 0;
 		const uint32_t delivered = clip ? out : (out ? frames : 0);
-		if (delivered) {
-			std::lock_guard<std::mutex> dlk(m->dumpMu);
-			m->dumpHostPos += delivered;
+		if (m && delivered && !m->dumpMute) {
+			if (m->dumpEnable) {
+				std::lock_guard<std::mutex> dlk(m->dumpMu);
+				m->dumpHostPos += delivered;
+			} else {
+				m->dumpHostPos += delivered;
+			}
 		}
-		m->NoteRenderPull(m->dumpHostPos);
+		if (m && m->dumpEnable && !m->dumpMute)
+			m->NoteRenderPull(m->dumpHostPos);
+		if (delivered && m)
+			KbsGimicSilence(interleavedStereo, delivered, (int64_t)m->dumpHostPos, m->hostRate);
 	}
 	/* ループ無しは要求フレーム数（短読みで本体が頭へ戻さない）。
 	   ループ終端だけ実サンプル数。本体が次の周へシークする。 */
@@ -2291,6 +2310,7 @@ uint64_t SasamiFmPlayer::SeekSample(uint64_t sample)
 	m->mixPos = 0;
 	if (sample == 0) return 0;
 	m->dumpMute = 1;
+	KbsGimicSetBurst(1);
 	int16_t dump[1024 * 2];
 	uint64_t left = sample;
 	while (left) {
@@ -2299,6 +2319,7 @@ uint64_t SasamiFmPlayer::SeekSample(uint64_t sample)
 		if (g == 0) break;
 		left -= g;
 	}
+	KbsGimicSetBurst(0);
 	m->dumpMute = 0;
 	m->loopHeld = 0;
 	m->loopClip = 0;

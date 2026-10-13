@@ -6231,8 +6231,13 @@ static int OggDispatchHwndTimers(HWND h, int maxN)
 		++n;
 	}
 	/* タイマ内の UpdateWindow はホバー離脱を再入させてタイマを殺す。
-	   無効化した分はハンドラの外で塗る。再生中は WM_PAINT が来ない。 */
+	   無効化した分はハンドラの外で塗る。再生中は WM_PAINT が来ない。
+	   リスト/ツリーは♡タイマが PrintClient 全面になるのでここから UpdateWindow しない。 */
 	if (n > 0 && OggIsChromeAnimHwnd(h) && ::IsWindow(h) && ::IsWindowVisible(h) && !OggClickOrKeyQueued()) {
+		TCHAR cls[32];
+		if (::GetClassName(h, cls, 32)
+			&& (_tcsicmp(cls, _T("SysListView32")) == 0 || _tcsicmp(cls, _T("SysTreeView32")) == 0))
+			return n;
 		RECT upd;
 		if (::GetUpdateRect(h, &upd, FALSE))
 			::UpdateWindow(h);

@@ -4006,6 +4006,8 @@ static void FillRectAlpha(CDC* pDC, const CRect& rc, COLORREF clr, BYTE alpha)
 static int s_uiSoftBusy = 0;
 static GdiSoft2D::Context s_uiSoft2d;
 static GdiSoft3D::Context s_uiSoft3d;
+/* リスト♡等の小物専用。s_uiSoft3d を 14px に作り直すとバナー/モニタが毎フレーム再確保される。 */
+static GdiSoft3D::Context s_uiHeart3d;
 
 static void CCC_NkPh(DWORD t, double& nP0, double& nP1, double& nP2);
 static void CCC_NkVb(CDC* pDC, int cx, int cy, int sz, double t, double nP1, double nP0, double nP2, BOOL bAeroTrans);
@@ -4139,7 +4141,7 @@ static void DrawSoftJkChip(CDC* pDC, const CRect& rc, int animTick, BOOL hot)
 }
 
 // リスト等の回転マーク。可愛い系はハート、それ以外はテーマの立体。
-static void SoftSpinThemeMark(int id, COLORREF c, COLORREF c2, int animTick)
+static void SoftSpinThemeMark(GdiSoft3D::Context& cx, int id, COLORREF c, COLORREF c2, int animTick)
 {
     const float wob = sinf((float)animTick * 0.35f);
     const float jit = sinf((float)animTick * 2.2f);
@@ -4147,141 +4149,141 @@ static void SoftSpinThemeMark(int id, COLORREF c, COLORREF c2, int animTick)
     case CCC_UI_THEME_CUTE:
     case CCC_UI_THEME_GAL:
     case CCC_UI_THEME_CANDY:
-        s_uiSoft3d.DrawSphere(-0.18f, 0.18f, 0.05f, 0.22f, c, 10, 7);
-        s_uiSoft3d.DrawSphere(0.18f, 0.18f, 0.05f, 0.22f, c, 10, 7);
-        s_uiSoft3d.DrawQuad(
+        cx.DrawSphere(-0.18f, 0.18f, 0.05f, 0.22f, c, 10, 7);
+        cx.DrawSphere(0.18f, 0.18f, 0.05f, 0.22f, c, 10, 7);
+        cx.DrawQuad(
             -0.38f, 0.02f, 0.02f,  0.38f, 0.02f, 0.02f,
              0.0f, -0.48f, 0.08f,  0.0f, -0.48f, -0.02f, CCC_Darken(c, 40));
         break;
     case CCC_UI_THEME_COOL:
     case CCC_UI_THEME_ULTRA:
     case CCC_UI_THEME_SCHOOL_M:
-        s_uiSoft3d.DrawBox(-0.12f, 0.12f, 0.42f, -0.08f, 0.16f, c, 0.f);
-        s_uiSoft3d.DrawBox(-0.32f, 0.32f, 0.16f, -0.06f, 0.14f, c2, 0.f);
+        cx.DrawBox(-0.12f, 0.12f, 0.42f, -0.08f, 0.16f, c, 0.f);
+        cx.DrawBox(-0.32f, 0.32f, 0.16f, -0.06f, 0.14f, c2, 0.f);
         break;
     case CCC_UI_THEME_DRAMATIC:
     case CCC_UI_THEME_GOTH_M:
-        s_uiSoft3d.DrawBox(-0.22f, 0.22f, 0.40f, -0.10f, 0.22f, c, 0.f);
-        s_uiSoft3d.DrawSphere(0.f, 0.08f, 0.18f, 0.12f, c2, 8, 6);
+        cx.DrawBox(-0.22f, 0.22f, 0.40f, -0.10f, 0.22f, c, 0.f);
+        cx.DrawSphere(0.f, 0.08f, 0.18f, 0.12f, c2, 8, 6);
         break;
     case CCC_UI_THEME_NEON:
     case CCC_UI_THEME_BREAK_F:
-        s_uiSoft3d.DrawNeonBox(-0.28f + jit * 0.10f, 0.22f + jit * 0.08f, 0.22f, -0.16f, 0.22f, c, 0.f);
-        s_uiSoft3d.DrawBox(-0.08f - jit * 0.12f, 0.36f, 0.02f, -0.20f, 0.18f, c2, 0.f);
+        cx.DrawNeonBox(-0.28f + jit * 0.10f, 0.22f + jit * 0.08f, 0.22f, -0.16f, 0.22f, c, 0.f);
+        cx.DrawBox(-0.08f - jit * 0.12f, 0.36f, 0.02f, -0.20f, 0.18f, c2, 0.f);
         break;
     case CCC_UI_THEME_BREAK_M:
-        s_uiSoft3d.DrawBox(-0.40f, -0.02f + jit * 0.08f, 0.28f, -0.20f, 0.16f, c, 0.f);
-        s_uiSoft3d.DrawBox(0.04f, 0.42f, 0.06f - jit * 0.10f, -0.08f, 0.22f, c2, 0.f);
+        cx.DrawBox(-0.40f, -0.02f + jit * 0.08f, 0.28f, -0.20f, 0.16f, c, 0.f);
+        cx.DrawBox(0.04f, 0.42f, 0.06f - jit * 0.10f, -0.08f, 0.22f, c2, 0.f);
         break;
     case CCC_UI_THEME_INK:
-        s_uiSoft3d.DrawTorus(0.f, 0.05f, 0.f, 0.28f, 0.06f, c, 12, 6);
+        cx.DrawTorus(0.f, 0.05f, 0.f, 0.28f, 0.06f, c, 12, 6);
         break;
     case CCC_UI_THEME_FOREST:
     case CCC_UI_THEME_SPRING:
     case CCC_UI_THEME_PURE_F:
-        s_uiSoft3d.DrawSphere(0.f, 0.02f, 0.05f, 0.10f, c2, 8, 6);
-        s_uiSoft3d.DrawSphere(-0.22f, 0.12f, 0.02f, 0.12f, c, 8, 6);
-        s_uiSoft3d.DrawSphere(0.22f, 0.12f, 0.02f, 0.12f, c, 8, 6);
-        s_uiSoft3d.DrawSphere(0.f, 0.28f, 0.02f, 0.11f, c, 8, 6);
-        s_uiSoft3d.DrawSphere(0.f, -0.18f, 0.02f, 0.11f, c, 8, 6);
+        cx.DrawSphere(0.f, 0.02f, 0.05f, 0.10f, c2, 8, 6);
+        cx.DrawSphere(-0.22f, 0.12f, 0.02f, 0.12f, c, 8, 6);
+        cx.DrawSphere(0.22f, 0.12f, 0.02f, 0.12f, c, 8, 6);
+        cx.DrawSphere(0.f, 0.28f, 0.02f, 0.11f, c, 8, 6);
+        cx.DrawSphere(0.f, -0.18f, 0.02f, 0.11f, c, 8, 6);
         break;
     case CCC_UI_THEME_STEEL:
     case CCC_UI_THEME_RETRO:
-        s_uiSoft3d.DrawTorus(0.f, 0.02f, 0.f, 0.26f, 0.07f, c, 10, 6);
-        s_uiSoft3d.DrawBox(-0.08f, 0.08f, 0.08f, -0.08f, 0.12f, c2, 0.f);
+        cx.DrawTorus(0.f, 0.02f, 0.f, 0.26f, 0.07f, c, 10, 6);
+        cx.DrawBox(-0.08f, 0.08f, 0.08f, -0.08f, 0.12f, c2, 0.f);
         break;
     case CCC_UI_THEME_SUMMER:
     case CCC_UI_THEME_DAWN:
     case CCC_UI_THEME_DUSK:
-        s_uiSoft3d.DrawSphere(0.f, 0.06f + wob * 0.06f, 0.05f, 0.24f, c, 10, 7);
+        cx.DrawSphere(0.f, 0.06f + wob * 0.06f, 0.05f, 0.24f, c, 10, 7);
         break;
     case CCC_UI_THEME_AUTUMN:
-        s_uiSoft3d.DrawBox(-0.28f, -0.02f, 0.10f + (float)fabs(wob) * 0.12f, -0.16f, 0.10f, c, 0.f);
-        s_uiSoft3d.DrawBox(0.02f, 0.30f, 0.02f, -0.10f, 0.16f, c2, 0.f);
+        cx.DrawBox(-0.28f, -0.02f, 0.10f + (float)fabs(wob) * 0.12f, -0.16f, 0.10f, c, 0.f);
+        cx.DrawBox(0.02f, 0.30f, 0.02f, -0.10f, 0.16f, c2, 0.f);
         break;
     case CCC_UI_THEME_WINTER:
-        s_uiSoft3d.DrawSphere(-0.16f, 0.10f, 0.f, 0.08f, c, 6, 5);
-        s_uiSoft3d.DrawSphere(0.16f, 0.10f, 0.f, 0.08f, c, 6, 5);
-        s_uiSoft3d.DrawSphere(0.f, -0.08f, 0.04f, 0.08f, c2, 6, 5);
+        cx.DrawSphere(-0.16f, 0.10f, 0.f, 0.08f, c, 6, 5);
+        cx.DrawSphere(0.16f, 0.10f, 0.f, 0.08f, c, 6, 5);
+        cx.DrawSphere(0.f, -0.08f, 0.04f, 0.08f, c2, 6, 5);
         break;
     case CCC_UI_THEME_RAIN:
-        s_uiSoft3d.DrawBox(-0.06f, 0.06f, 0.36f, -0.28f, 0.08f, c, 0.f);
-        s_uiSoft3d.DrawSphere(0.f, -0.22f, 0.02f, 0.10f, c2, 8, 6);
+        cx.DrawBox(-0.06f, 0.06f, 0.36f, -0.28f, 0.08f, c, 0.f);
+        cx.DrawSphere(0.f, -0.22f, 0.02f, 0.10f, c2, 8, 6);
         break;
     case CCC_UI_THEME_SEA:
-        s_uiSoft3d.DrawTorus(0.f, -0.04f, 0.f, 0.28f, 0.05f, c, 12, 5);
-        s_uiSoft3d.DrawSphere(0.18f * wob, 0.16f, 0.08f, 0.08f, c2, 7, 5);
+        cx.DrawTorus(0.f, -0.04f, 0.f, 0.28f, 0.05f, c, 12, 5);
+        cx.DrawSphere(0.18f * wob, 0.16f, 0.08f, 0.08f, c2, 7, 5);
         break;
     case CCC_UI_THEME_MOON:
-        s_uiSoft3d.DrawSphere(0.04f, 0.04f, 0.f, 0.26f, c, 10, 7);
-        s_uiSoft3d.DrawSphere(-0.10f, 0.08f, 0.12f, 0.20f, c2, 8, 6);
+        cx.DrawSphere(0.04f, 0.04f, 0.f, 0.26f, c, 10, 7);
+        cx.DrawSphere(-0.10f, 0.08f, 0.12f, 0.20f, c2, 8, 6);
         break;
     case CCC_UI_THEME_AMBER:
-        s_uiSoft3d.DrawBox(-0.16f, 0.16f, 0.28f, -0.16f, 0.18f, c, 0.f);
-        s_uiSoft3d.DrawSphere(0.f, 0.02f, 0.12f, 0.08f, c2, 7, 5);
+        cx.DrawBox(-0.16f, 0.16f, 0.28f, -0.16f, 0.18f, c, 0.f);
+        cx.DrawSphere(0.f, 0.02f, 0.12f, 0.08f, c2, 7, 5);
         break;
     case CCC_UI_THEME_WISTERIA:
-        s_uiSoft3d.DrawSphere(-0.16f, 0.16f, 0.f, 0.10f, c, 7, 5);
-        s_uiSoft3d.DrawSphere(0.12f, 0.02f, 0.04f, 0.09f, c2, 7, 5);
-        s_uiSoft3d.DrawSphere(0.02f, -0.16f, 0.02f, 0.08f, c, 7, 5);
+        cx.DrawSphere(-0.16f, 0.16f, 0.f, 0.10f, c, 7, 5);
+        cx.DrawSphere(0.12f, 0.02f, 0.04f, 0.09f, c2, 7, 5);
+        cx.DrawSphere(0.02f, -0.16f, 0.02f, 0.08f, c, 7, 5);
         break;
     case CCC_UI_THEME_PURE_M:
-        s_uiSoft3d.DrawBox(-0.22f, 0.22f, 0.28f, -0.22f, 0.06f, c, 0.f);
-        s_uiSoft3d.DrawBox(-0.04f, 0.04f, 0.22f, -0.18f, 0.10f, c2, 0.f);
+        cx.DrawBox(-0.22f, 0.22f, 0.28f, -0.22f, 0.06f, c, 0.f);
+        cx.DrawBox(-0.04f, 0.04f, 0.22f, -0.18f, 0.10f, c2, 0.f);
         break;
     case CCC_UI_THEME_GOTH_F:
-        s_uiSoft3d.DrawTorus(0.f, 0.04f, 0.f, 0.24f, 0.05f, c, 12, 6);
-        s_uiSoft3d.DrawSphere(0.f, 0.04f, 0.08f, 0.08f, c2, 7, 5);
+        cx.DrawTorus(0.f, 0.04f, 0.f, 0.24f, 0.05f, c, 12, 6);
+        cx.DrawSphere(0.f, 0.04f, 0.08f, 0.08f, c2, 7, 5);
         break;
     case CCC_UI_THEME_SCHOOL_F:
-        s_uiSoft3d.DrawSphere(-0.18f, 0.10f, 0.04f, 0.14f, c, 8, 6);
-        s_uiSoft3d.DrawSphere(0.18f, 0.10f, 0.04f, 0.14f, c, 8, 6);
-        s_uiSoft3d.DrawBox(-0.06f, 0.06f, 0.08f, -0.22f, 0.08f, c2, 0.f);
+        cx.DrawSphere(-0.18f, 0.10f, 0.04f, 0.14f, c, 8, 6);
+        cx.DrawSphere(0.18f, 0.10f, 0.04f, 0.14f, c, 8, 6);
+        cx.DrawBox(-0.06f, 0.06f, 0.08f, -0.22f, 0.08f, c2, 0.f);
         break;
     case CCC_UI_THEME_HEAVEN:
-        s_uiSoft3d.DrawTorus(0.f, 0.22f, 0.f, 0.22f, 0.04f, c2, 12, 5);
-        s_uiSoft3d.DrawBox(-0.42f, -0.08f, 0.10f, -0.06f, 0.10f, c, 0.f);
-        s_uiSoft3d.DrawBox(0.08f, 0.42f, 0.10f, -0.06f, 0.10f, c, 0.f);
-        s_uiSoft3d.DrawSphere(0.f, 0.02f, 0.08f, 0.10f, c2, 8, 6);
+        cx.DrawTorus(0.f, 0.22f, 0.f, 0.22f, 0.04f, c2, 12, 5);
+        cx.DrawBox(-0.42f, -0.08f, 0.10f, -0.06f, 0.10f, c, 0.f);
+        cx.DrawBox(0.08f, 0.42f, 0.10f, -0.06f, 0.10f, c, 0.f);
+        cx.DrawSphere(0.f, 0.02f, 0.08f, 0.10f, c2, 8, 6);
         break;
     case CCC_UI_THEME_RUINS:
-        s_uiSoft3d.DrawBox(-0.36f, -0.12f, 0.28f, -0.22f, 0.16f, c, 0.f);
-        s_uiSoft3d.DrawBox(0.08f, 0.34f, 0.16f, -0.18f, 0.20f, c2, 0.f);
-        s_uiSoft3d.DrawBox(-0.10f, 0.18f, 0.02f, -0.06f, 0.10f, c, 0.f);
+        cx.DrawBox(-0.36f, -0.12f, 0.28f, -0.22f, 0.16f, c, 0.f);
+        cx.DrawBox(0.08f, 0.34f, 0.16f, -0.18f, 0.20f, c2, 0.f);
+        cx.DrawBox(-0.10f, 0.18f, 0.02f, -0.06f, 0.10f, c, 0.f);
         break;
     case CCC_UI_THEME_SHRINE:
-        s_uiSoft3d.DrawBox(-0.28f, -0.16f, 0.36f, -0.28f, 0.08f, c, 0.f);
-        s_uiSoft3d.DrawBox(0.16f, 0.28f, 0.36f, -0.28f, 0.08f, c, 0.f);
-        s_uiSoft3d.DrawBox(-0.36f, 0.36f, 0.34f, -0.04f, 0.10f, c2, 0.f);
+        cx.DrawBox(-0.28f, -0.16f, 0.36f, -0.28f, 0.08f, c, 0.f);
+        cx.DrawBox(0.16f, 0.28f, 0.36f, -0.28f, 0.08f, c, 0.f);
+        cx.DrawBox(-0.36f, 0.36f, 0.34f, -0.04f, 0.10f, c2, 0.f);
         break;
     case CCC_UI_THEME_STARRY:
-        s_uiSoft3d.DrawSphere(-0.18f, 0.16f, 0.02f, 0.07f, c, 6, 5);
-        s_uiSoft3d.DrawSphere(0.20f, 0.10f, 0.06f, 0.05f, c2, 6, 5);
-        s_uiSoft3d.DrawSphere(0.02f, -0.08f, 0.04f, 0.09f, c, 6, 5);
-        s_uiSoft3d.DrawSphere(-0.08f, -0.20f, 0.f, 0.04f, c2, 5, 4);
+        cx.DrawSphere(-0.18f, 0.16f, 0.02f, 0.07f, c, 6, 5);
+        cx.DrawSphere(0.20f, 0.10f, 0.06f, 0.05f, c2, 6, 5);
+        cx.DrawSphere(0.02f, -0.08f, 0.04f, 0.09f, c, 6, 5);
+        cx.DrawSphere(-0.08f, -0.20f, 0.f, 0.04f, c2, 5, 4);
         break;
     case CCC_UI_THEME_ABYSS:
-        s_uiSoft3d.DrawSphere(0.f, 0.16f, 0.04f, 0.16f, c, 8, 6);
-        s_uiSoft3d.DrawBox(-0.08f, 0.02f, -0.02f, -0.28f, 0.06f, c2, 0.f);
-        s_uiSoft3d.DrawBox(0.02f, 0.12f, -0.04f, -0.32f, 0.06f, c, 0.f);
+        cx.DrawSphere(0.f, 0.16f, 0.04f, 0.16f, c, 8, 6);
+        cx.DrawBox(-0.08f, 0.02f, -0.02f, -0.28f, 0.06f, c2, 0.f);
+        cx.DrawBox(0.02f, 0.12f, -0.04f, -0.32f, 0.06f, c, 0.f);
         break;
     case CCC_UI_THEME_GARDEN:
-        s_uiSoft3d.DrawSphere(-0.16f, 0.10f, 0.02f, 0.12f, c, 8, 6);
-        s_uiSoft3d.DrawSphere(0.16f, 0.06f, 0.04f, 0.11f, c2, 8, 6);
-        s_uiSoft3d.DrawSphere(0.f, -0.12f, 0.02f, 0.10f, c, 8, 6);
+        cx.DrawSphere(-0.16f, 0.10f, 0.02f, 0.12f, c, 8, 6);
+        cx.DrawSphere(0.16f, 0.06f, 0.04f, 0.11f, c2, 8, 6);
+        cx.DrawSphere(0.f, -0.12f, 0.02f, 0.10f, c, 8, 6);
         break;
     case CCC_UI_THEME_ROSE:
-        s_uiSoft3d.DrawSphere(0.f, 0.06f, 0.02f, 0.18f, c, 10, 7);
-        s_uiSoft3d.DrawSphere(0.f, 0.06f, 0.10f, 0.10f, c2, 8, 6);
-        s_uiSoft3d.DrawBox(-0.03f, 0.03f, -0.02f, -0.32f, 0.06f, c2, 0.f);
+        cx.DrawSphere(0.f, 0.06f, 0.02f, 0.18f, c, 10, 7);
+        cx.DrawSphere(0.f, 0.06f, 0.10f, 0.10f, c2, 8, 6);
+        cx.DrawBox(-0.03f, 0.03f, -0.02f, -0.32f, 0.06f, c2, 0.f);
         break;
     case CCC_UI_THEME_BUTTERFLY:
-        s_uiSoft3d.DrawSphere(-0.20f, 0.06f, 0.04f, 0.16f, c, 8, 6);
-        s_uiSoft3d.DrawSphere(0.20f, 0.06f, 0.04f, 0.16f, c2, 8, 6);
-        s_uiSoft3d.DrawBox(-0.03f, 0.03f, 0.22f, -0.22f, 0.06f, c, 0.f);
+        cx.DrawSphere(-0.20f, 0.06f, 0.04f, 0.16f, c, 8, 6);
+        cx.DrawSphere(0.20f, 0.06f, 0.04f, 0.16f, c2, 8, 6);
+        cx.DrawBox(-0.03f, 0.03f, 0.22f, -0.22f, 0.06f, c, 0.f);
         break;
     default:
-        s_uiSoft3d.DrawTorus(0.f, 0.04f, 0.f, 0.26f, 0.07f, c, 10, 6);
+        cx.DrawTorus(0.f, 0.04f, 0.f, 0.26f, 0.07f, c, 10, 6);
         break;
     }
 }
@@ -4294,33 +4296,34 @@ static void DrawSoftJkHeart(CDC* pDC, const CRect& rc, int animTick, BOOL hot, C
     ++s_uiSoftBusy;
     const int w = rc.Width();
     const int h = rc.Height();
-    if (s_uiSoft3d.fb.w != w || s_uiSoft3d.fb.h != h)
-        s_uiSoft3d.Create(w, h);
-    if (s_uiSoft3d.fb.color && s_uiSoft3d.fb.w == w && s_uiSoft3d.fb.h == h) {
-        s_uiSoft3d.fb.Clear(GdiSoftFB::PackBGRA(0, 0, 0, 0), 1e9f);
-        s_uiSoft3d.alphaBlend = true;
-        s_uiSoft3d.depthTest = true;
-        s_uiSoft3d.depthWrite = true;
-        s_uiSoft3d.fogMode = GdiSoft3D::FogNone;
-        s_uiSoft3d.edgeOverlay = false;
-        s_uiSoft3d.dofEnable = false;
-        s_uiSoft3d.postVignette = s_uiSoft3d.postGlow = s_uiSoft3d.postSaturate = false;
+    GdiSoft3D::Context& cx = s_uiHeart3d;
+    if (cx.fb.w != w || cx.fb.h != h)
+        cx.Create(w, h);
+    if (cx.fb.color && cx.fb.w == w && cx.fb.h == h) {
+        cx.fb.Clear(GdiSoftFB::PackBGRA(0, 0, 0, 0), 1e9f);
+        cx.alphaBlend = true;
+        cx.depthTest = true;
+        cx.depthWrite = true;
+        cx.fogMode = GdiSoft3D::FogNone;
+        cx.edgeOverlay = false;
+        cx.dofEnable = false;
+        cx.postVignette = cx.postGlow = cx.postSaturate = false;
         const float spin = (float)animTick * 5.5f;
         double nP0 = 0, nP1 = 0, nP2 = 0;
         if (CCC_Nk())
             CCC_NkPh(::GetTickCount(), nP0, nP1, nP2);
         if (CCC_Nk()) {
             const float buzz = (float)(nP1 * 22.0 + nP2 * 18.0);
-            s_uiSoft3d.cam.yawDeg = -12.f + sinf((float)animTick * 0.9f) * (10.f + buzz);
-            s_uiSoft3d.cam.pitchDeg = 26.f + cosf((float)animTick * 0.7f) * 8.f;
-            s_uiSoft3d.cam.zoom = hot ? 1.55f : 1.38f;
+            cx.cam.yawDeg = -12.f + sinf((float)animTick * 0.9f) * (10.f + buzz);
+            cx.cam.pitchDeg = 26.f + cosf((float)animTick * 0.7f) * 8.f;
+            cx.cam.zoom = hot ? 1.55f : 1.38f;
             float boxes[1][6] = { { -0.35f, 0.35f, -0.55f, 0.55f, -0.35f, 0.35f } };
-            s_uiSoft3d.SetViewportFit(boxes, 1);
+            cx.SetViewportFit(boxes, 1);
             const COLORREF tip = RGB(255, 198, 232);
             const COLORREF body = col ? col : RGB(255, 110, 175);
-            s_uiSoft3d.DrawSphere(0.f, 0.38f, 0.05f, 0.20f, tip, 9, 7);
-            s_uiSoft3d.DrawNeonBox(-0.11f, 0.11f, 0.28f, -0.28f, 0.28f, body, -0.42f);
-            SoftPremultPresent(s_uiSoft3d.fb, pDC->GetSafeHdc(),
+            cx.DrawSphere(0.f, 0.38f, 0.05f, 0.20f, tip, 9, 7);
+            cx.DrawNeonBox(-0.11f, 0.11f, 0.28f, -0.28f, 0.28f, body, -0.42f);
+            SoftPremultPresent(cx.fb, pDC->GetSafeHdc(),
                 rc.left + (int)(3 * nP1), rc.top + (int)(-2 * nP1), w, h,
                 hot ? (BYTE)240 : (BYTE)215);
             CCC_NkFl(pDC, rc, nP0, nP1, nP2, FALSE);
@@ -4329,14 +4332,14 @@ static void DrawSoftJkHeart(CDC* pDC, const CRect& rc, int animTick, BOOL hot, C
             float yawJ = 0.f;
             if (id == CCC_UI_THEME_BREAK_F || id == CCC_UI_THEME_BREAK_M)
                 yawJ = sinf((float)animTick * 2.6f) * 22.f;
-            s_uiSoft3d.cam.yawDeg = -22.f + spin + yawJ + (hot ? sinf((float)animTick * 0.08f) * 6.f : 0.f);
-            s_uiSoft3d.cam.pitchDeg = 28.f + cosf((float)animTick * 0.05f) * 4.f;
-            s_uiSoft3d.cam.zoom = hot ? 1.45f : 1.28f;
+            cx.cam.yawDeg = -22.f + spin + yawJ + (hot ? sinf((float)animTick * 0.08f) * 6.f : 0.f);
+            cx.cam.pitchDeg = 28.f + cosf((float)animTick * 0.05f) * 4.f;
+            cx.cam.zoom = hot ? 1.45f : 1.28f;
             float boxes[1][6] = { { -0.55f, 0.55f, -0.55f, 0.55f, -0.4f, 0.4f } };
-            s_uiSoft3d.SetViewportFit(boxes, 1);
+            cx.SetViewportFit(boxes, 1);
             const COLORREF c = col ? col : CCC_UiTheme().accent;
-            SoftSpinThemeMark(id, c, CCC_UiTheme().accent2, animTick);
-            SoftPremultPresent(s_uiSoft3d.fb, pDC->GetSafeHdc(), rc.left, rc.top, w, h,
+            SoftSpinThemeMark(cx, id, c, CCC_UiTheme().accent2, animTick);
+            SoftPremultPresent(cx.fb, pDC->GetSafeHdc(), rc.left, rc.top, w, h,
                 hot ? (BYTE)230 : (BYTE)200);
         }
     }
@@ -7033,6 +7036,12 @@ void CCustomEdit::DrawClientText(CDC& dc, const CRect& r)
         DrawMultilineVisibleText(dc, rc);
         if (pOld) dc.SelectObject(pOld);
         DrawCaretIfNeeded(dc);
+        return;
+    }
+    /* 設定の説明は改行を含む。単一行のままだと折返しされない。 */
+    if (!(style & ES_PASSWORD) && text.Find(L'\n') >= 0) {
+        dc.DrawText(text, &rc, DT_NOPREFIX | DT_WORDBREAK | DT_LEFT | DT_TOP);
+        if (pOld) dc.SelectObject(pOld);
         return;
     }
 
@@ -11756,7 +11765,7 @@ void CCustomListCtrl::OnDropFiles(HDROP hDropInfo)
 // リスト全体 Invalidate は再生中ピアノ提示を遅らせるので使わない。
 CCustomListCtrl::CCustomListCtrl()
     : m_bAutoDelete(FALSE), m_nHotItem(-1), m_bAeroMode(FALSE)
-    , m_ptLBtnDown(0, 0), m_bTrackDragGate(FALSE)
+    , m_ptLBtnDown(0, 0), m_bTrackDragGate(FALSE), m_bLeaveTrack(FALSE)
     , m_heartTimerOn(FALSE)
     , m_hotRowsPosted(FALSE), m_hotRowsN(0)
     , m_liveEditCol(-1), m_liveEditRow(-1), m_liveEditArm(-1), m_liveEditHold(FALSE), m_liveEditSilent(FALSE)
@@ -11764,6 +11773,7 @@ CCustomListCtrl::CCustomListCtrl()
     m_brBackground.CreateSolidBrush(COLOR_LIST_BG);
     m_heartRcSel.SetRectEmpty();
     m_heartRcHot.SetRectEmpty();
+    m_hotHitRc.SetRectEmpty();
 }
 
 // 背景ブラシのみ。ハートタイマは HWND 破棄で停止。
@@ -11880,6 +11890,10 @@ static BOOL CALLBACK OggAbsSoftChild(HWND h, LPARAM)
 {
     if (!h || !::IsWindowVisible(h))
         return TRUE;
+    TCHAR cls[32];
+    if (::GetClassName(h, cls, 32)
+        && (_tcsicmp(cls, _T("SysListView32")) == 0 || _tcsicmp(cls, _T("SysTreeView32")) == 0))
+        return TRUE;
     ::SendMessage(h, WM_TIMER, 4124, 0);
     ::SendMessage(h, WM_TIMER, 4125, 0);
     ::SendMessage(h, WM_TIMER, 4126, 0);
@@ -11960,16 +11974,26 @@ void OggPumpAbsVisuals()
 
 void CCustomListCtrl::OnMouseMove(UINT f, CPoint p)
 {
-    LVHITTESTINFO h;
-    h.pt = p;
-    UpdateHotItem(SubItemHitTest(&h));
     /* ボタン無しの移動で既定へ渡すと、見える行を全部描き直してタイマーが飢える。
        TheadLoop の描画は UI へ Post されるので、ここで SendMessage / PrintClient
        すると speana もモニタも止まる。行切替は UpdateHotItem の Post だけ。 */
     if ((f & (MK_LBUTTON | MK_RBUTTON | MK_MBUTTON)) == 0) {
-        TRACKMOUSEEVENT t = { sizeof(t), TME_LEAVE, m_hWnd, 0 };
-        TrackMouseEvent(&t);
+        if (!m_bLeaveTrack) {
+            TRACKMOUSEEVENT t = { sizeof(t), TME_LEAVE, m_hWnd, 0 };
+            TrackMouseEvent(&t);
+            m_bLeaveTrack = TRUE;
+        }
+        if (m_nHotItem >= 0 && m_hotHitRc.PtInRect(p))
+            return;
+        LVHITTESTINFO h;
+        h.pt = p;
+        UpdateHotItem(SubItemHitTest(&h));
         return;
+    }
+    {
+        LVHITTESTINFO h;
+        h.pt = p;
+        UpdateHotItem(SubItemHitTest(&h));
     }
     if (m_bTrackDragGate && (f & MK_LBUTTON)) {
         int gx = GetSystemMetrics(SM_CXDRAG);
@@ -11991,13 +12015,18 @@ void CCustomListCtrl::OnMouseMove(UINT f, CPoint p)
     if (CCC_HostNeedsChildOpaque(m_hWnd))
         ::ValidateRect(m_hWnd, NULL);
 #endif
-    TRACKMOUSEEVENT t = { sizeof(t), TME_LEAVE, m_hWnd, 0 };
-    TrackMouseEvent(&t);
+    if (!m_bLeaveTrack) {
+        TRACKMOUSEEVENT t = { sizeof(t), TME_LEAVE, m_hWnd, 0 };
+        TrackMouseEvent(&t);
+        m_bLeaveTrack = TRUE;
+    }
 }
 
 // ホバー解除。行 blit 後、既定 Leave の Invalidate を Validate で捨てる（SETREDRAW 禁止）。
 void CCustomListCtrl::OnMouseLeave()
 {
+    m_bLeaveTrack = FALSE;
+    m_hotHitRc.SetRectEmpty();
     UpdateHotItem(-1);
     CListCtrl::OnMouseLeave();
 #if CCUSTOM_AERO_SUPPORT
@@ -12091,7 +12120,12 @@ static void CCC_ListPaintOpaqueRects(CCustomListCtrl* pList, const RECT* rects, 
     s_cccListClipOn = 1;
     pList->PaintOpaqueIntoBuffer(s_hover.hdcDib);
     s_cccListClipOn = 0;
-    s_hover.MakeRectOpaque(0, 0, cw, ch);
+    if (uni.left < 0) uni.left = 0;
+    if (uni.top < 0) uni.top = 0;
+    if (uni.right > cw) uni.right = cw;
+    if (uni.bottom > ch) uni.bottom = ch;
+    if (uni.Width() > 0 && uni.Height() > 0)
+        s_hover.MakeRectOpaque(uni.left, uni.top, uni.Width(), uni.Height());
     /* 隣接行はまとめて1 blit（行間チラつき防止） */
     const int rowH0 = rects[0].bottom - rects[0].top;
     const BOOL bClose = (nRects <= 2 && rowH0 > 0 && uni.Height() <= rowH0 * 3);
@@ -12138,15 +12172,8 @@ void CCustomListCtrl::OnTimer(UINT_PTR nIDEvent)
             KillTimer(kListSoftTimerId);
             return;
         }
-        if (m_heartRcSel.IsRectEmpty() && m_heartRcHot.IsRectEmpty()) {
-            CRect rr;
-            int row = m_nHotItem;
-            if (row < 0)
-                row = GetNextItem(-1, LVNI_SELECTED);
-            if (row >= 0 && GetItemRect(row, &rr, LVIR_BOUNDS))
-                InvalidateRect(&rr, FALSE);
+        if (m_heartRcSel.IsRectEmpty() && m_heartRcHot.IsRectEmpty())
             return;
-        }
 #if CCUSTOM_AERO_SUPPORT
         /* ガラス親: Invalidate→Fixer 全面 PaintOpaque で全体点滅。♡矩形だけ blit */
         if (CCC_HostNeedsChildOpaque(m_hWnd)) {
@@ -12193,6 +12220,10 @@ void CCustomListCtrl::UpdateHotItem(int n)
     }
     const int o = m_nHotItem;
     m_nHotItem = n;
+    if (n >= 0)
+        GetItemRect(n, &m_hotHitRc, LVIR_BOUNDS);
+    else
+        m_hotHitRc.SetRectEmpty();
     /* 前の行の♡はもう無い。古い矩形を回し続けない */
     m_heartRcHot.SetRectEmpty();
     if (CCC_HostNeedsChildOpaque(m_hWnd)) {
@@ -12620,17 +12651,31 @@ void CCustomListCtrl::PaintOpaqueIntoBuffer(HDC hdcBuf)
     CRect r;
     GetClientRect(&r);
     if (r.Width() <= 0 || r.Height() <= 0) return;
-    {
-        const int saved = ::SaveDC(hdcBuf);
-        ::SelectClipRgn(hdcBuf, NULL);
-        ::FillRect(hdcBuf, &r, (HBRUSH)m_brBackground.GetSafeHandle());
-        if (saved) ::RestoreDC(hdcBuf, saved);
+    CRect fill = r;
+    if (s_cccListClipOn) {
+        CRect clip(s_cccListClip);
+        if (!fill.IntersectRect(&r, &clip) || fill.Width() <= 0 || fill.Height() <= 0)
+            return;
     }
+    const int saved = ::SaveDC(hdcBuf);
+    if (s_cccListClipOn) {
+        HRGN rg = ::CreateRectRgn(fill.left, fill.top, fill.right, fill.bottom);
+        if (rg) {
+            ::SelectClipRgn(hdcBuf, rg);
+            ::DeleteObject(rg);
+        }
+    } else
+        ::SelectClipRgn(hdcBuf, NULL);
+    ::FillRect(hdcBuf, &fill, (HBRUSH)m_brBackground.GetSafeHandle());
     s_cccInternalPrintClient++;
     ::SendMessage(m_hWnd, WM_PRINTCLIENT, (WPARAM)hdcBuf, PRF_CLIENT | PRF_ERASEBKGND);
     s_cccInternalPrintClient--;
-    // PrintClient が空きを黒くしクリップを残すことがある → 解除して交互色で塗り直す
-    FillEmptyBelowVisible(hdcBuf);
+    if (!s_cccListClipOn)
+        FillEmptyBelowVisible(hdcBuf);
+    if (saved)
+        ::RestoreDC(hdcBuf, saved);
+    else
+        ::SelectClipRgn(hdcBuf, NULL);
 }
 
 // Fixer 未装着時用。画面を消す BPPF_ERASE は禁止（消えてから出る隙間の元）。

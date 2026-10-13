@@ -182,6 +182,7 @@ if exist "C:\projects\APPLICATION3\ogg_binary\Plugins\Kobarin\fmpmd\Rhythm\2608_
     </ClCompile>
     <ClCompile Include="C:\projects\APPLICATION3\kpi_sources_20240712\kpi_decoder\fmmon_common\fmmon_write.cpp" />
     <ClCompile Include="C:\projects\APPLICATION3\kpi_sources_20240712\kpi_decoder\fmmon_common\fmmon_shadow.cpp" />
+    <ClCompile Include="C:\projects\APPLICATION3\kpi_sources_20240712\kpi_decoder\fmmon_common\kbs_gimic.cpp" />
     <ClCompile Include="source\ymfm\ymfm_opn.cpp">
       <UseMSVC Condition="'$(Platform)'=='x64'">true</UseMSVC>
       <AdditionalOptions Condition="'$(Platform)'=='x64'">/utf-8 /std:c++17 /O2 /arch:AVX2</AdditionalOptions>

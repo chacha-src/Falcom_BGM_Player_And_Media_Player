@@ -4,6 +4,7 @@
 #include "stdafx.h"
 #include "kb_sasami/source/kbsasami_lang.h"
 #include "kb_sasami/source/kbsasami_monhost.h"
+#include "kbs_gimic.h"
 #include "UiTickPump.h"
 #include "../kpi_host_ipc.h"
 #include "KpiHost32Vst.h"
@@ -268,6 +269,9 @@ static void ServeOnce(HANDLE pipe)
 
 int wmain()
 {
+	/* Mutex first, so the player can see host32 before the monitor runtime starts.
+	   MON_SHOW is still the only path that opens the monitor window. */
+	KbsGimicHostStart();
 	/* PING が来るまでは OS / OGG_UI_LANG。0 のままだと常に日本語になる。 */
 	savedata.lang = KbsDetectUiLang();
 	KbsHostMonStartup();
@@ -282,6 +286,7 @@ int wmain()
 			L"--disable-gpu --disable-gpu-compositing");
 	}
 
+	const DWORD idleMs = 30000;
 	HANDLE pipe = CreateNamedPipeW(
 		kPipeName,
 		PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED,
@@ -291,9 +296,28 @@ int wmain()
 		1024 * 1024,
 		0,
 		NULL);
-	if (pipe == INVALID_HANDLE_VALUE) return 2;
+	if (pipe == INVALID_HANDLE_VALUE) {
+		/* Pipe is the monitor/VST channel. G.I.M.I.C does not need it.
+		   Stay up while the player holds gimic, and do not open the monitor window. */
+		DWORD waited = 0;
+		int sawProd = 0;
+		while (waited < idleMs) {
+			PumpServeMsgs();
+			if (KbsGimicHostBusy()) {
+				waited = 0;
+				sawProd = 1;
+			} else if (sawProd && !KbsHostMonHolding() && !VstHost32_LiveActive() && !VstHost32_SongActive()) {
+				/* プレイヤーが落ちた。30秒待たずに c86ctl を放す。 */
+				if (waited >= 400)
+					break;
+			}
+			Sleep(15);
+			waited += 15;
+		}
+		KbsGimicHostStop();
+		return 0;
+	}
 
-	const DWORD idleMs = 30000;
 	for (;;) {
 		OVERLAPPED ov{};
 		ov.hEvent = CreateEventW(NULL, TRUE, FALSE, NULL);
@@ -309,6 +333,7 @@ int wmain()
 			}
 		}
 		DWORD waited = 0;
+		int sawProd = 0;
 		DWORD wr = WAIT_TIMEOUT;
 		while (waited < idleMs) {
 			const DWORD slice = 15;
@@ -322,12 +347,21 @@ int wmain()
 			}
 			if (wr != WAIT_OBJECT_0 + 1 && wr != WAIT_TIMEOUT)
 				break;
+			if (KbsGimicHostBusy()) {
+				waited = 0;
+				sawProd = 1;
+			} else if (sawProd && !KbsHostMonHolding() && !VstHost32_LiveActive() && !VstHost32_SongActive()) {
+				if (waited >= 400) {
+					wr = WAIT_TIMEOUT;
+					break;
+				}
+			}
 			waited += slice;
 		}
 		if (wr != WAIT_OBJECT_0) {
 			CancelIoEx(pipe, &ov);
 			CloseHandle(ov.hEvent);
-			if (!ClientAlive() || (!VstHost32_LiveActive() && !KbsHostMonHolding())) {
+			if (!KbsGimicHostBusy() && (!ClientAlive() || (!VstHost32_LiveActive() && !KbsHostMonHolding()))) {
 				KbsHostMonQuit();
 				if (VstHost32_SongActive())
 					(void)VstHost32_CloseAll();
@@ -341,7 +375,7 @@ int wmain()
 		WatchClientPid(clientPid);
 		ServeOnce(pipe);
 		DisconnectNamedPipe(pipe);
-		if (!ClientAlive() || !KbsHostMonHolding()) {
+		if (!KbsGimicHostBusy() && (!ClientAlive() || !KbsHostMonHolding())) {
 			KbsHostMonQuit();
 			if (VstHost32_LiveActive())
 				(void)VstHost32_LiveUnloadAll();
@@ -357,5 +391,6 @@ int wmain()
 	}
 	(void)VstHost32_CloseAll();
 	CloseHandle(pipe);
+	KbsGimicHostStop();
 	return 0;
 }

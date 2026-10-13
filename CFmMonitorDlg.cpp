@@ -2122,6 +2122,13 @@ uint64_t CFmMonitorDlg::HeardSample(uint32_t sampleRate)
 {
 	extern int wavbit_sample_Hz;
 	const uint32_t srDump = sampleRate > 0 ? sampleRate : 44100;
+	const SasamiFmMonDump* liveD = (m_histN > 0)
+		? &m_hist[(m_histHead + m_histN - 1) % HIST_MAX] : NULL;
+	/* G.I.M.I.C: 枚はチップへ書いた時刻。PCM 用の固定ラグは足さない。 */
+	if (liveD && SasamiFmMonDumpLive(*liveD)) {
+		const int li = (m_histHead + m_histN - 1) % HIST_MAX;
+		return AdvanceHeard((__int64)m_histSamp[li], srDump);
+	}
 #ifdef KBSASAMI_HOST_BUILD
 	return AdvanceHeard(FmHeardFromPlayback(srDump), srDump);
 #else

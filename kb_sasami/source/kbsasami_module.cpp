@@ -11,7 +11,7 @@ static const DWORD kPluginVersion = 0x7FFFFFFF;
 #define KBSASAMI_VERSION_STR L"0x7FFFFFFF(Debug)"
 #else
 static const DWORD kPluginVersion = 1;
-#define KBSASAMI_VERSION_STR L"1.30a"
+#define KBSASAMI_VERSION_STR L"1.30b"
 #endif
 
 static wchar_t g_desc[384];
@@ -146,6 +146,7 @@ static const wchar_t SEC_KBSASAMI[] = L"kbsasami";
 static const wchar_t KEY_VST[] = L"vst";
 static const wchar_t KEY_RAIRA[] = L"raira";
 static const wchar_t KEY_FMMIDIMONITOR[] = L"fmmidimonitor";
+static const wchar_t KEY_GIMIC[] = L"gimic";
 static const wchar_t KEY_MIDIMODE[] = L"midimode";
 static const wchar_t KEY_FMMODE[] = L"fmmode";
 
@@ -460,6 +461,65 @@ BOOL WINAPI KbSasamiDecoderModule::EnumConfig(IKpiConfigEnumerator* pEnumerator)
 				L"Yalnızca kbsasami.raira=0 (özgün KbMedia Player) iken okunur.\r\n"
 				L"raira=1 iken bu uygulama kendi izleyicisini kullanır ve bu anahtarı okumaz.\r\n"
 				L"Fazladan pencere istemezseniz özgün oynatıcıda kapatın.") },
+		{ KPI_CFG_TYPE_BOOL, SEC_KBSASAMI, KEY_GIMIC, L"kbsasami.gimic",
+			L"0", NULL, NULL, NULL, NULL,
+			KbsPick14(
+				L"false(0): ソフト音源のまま（初期値）。\r\n"
+				L"true(1): G.I.M.I.C の実チップで鳴らす。\r\n"
+				L"kbsasami_host32.exe と c86ctl.dll は、この KPI から本体 exe までのフォルダのどこかにあればよい。\r\n"
+				L"ホスト、DLL、装置が無いとき、または差しているモジュールの種類が曲と違うときはソフト音源のまま。",
+				L"false(0): keep the software synth (default).\r\n"
+				L"true(1): play on a G.I.M.I.C chip.\r\n"
+				L"kbsasami_host32.exe and c86ctl.dll may sit in any folder between this KPI and the player exe.\r\n"
+				L"If the host, DLL, or device is missing, or the module type does not match the song, software audio stays.",
+				L"false(0) : garder le synthé logiciel (défaut).\r\n"
+				L"true(1) : jouer sur une puce G.I.M.I.C.\r\n"
+				L"kbsasami_host32.exe et c86ctl.dll peuvent être dans n'importe quel dossier entre ce KPI et l'exe.\r\n"
+				L"Sans hôte, DLL ou appareil, ou si le module ne correspond pas au morceau, le son logiciel reste.",
+				L"false(0): resta il synth software (predefinito).\r\n"
+				L"true(1): suona sul chip G.I.M.I.C.\r\n"
+				L"kbsasami_host32.exe e c86ctl.dll possono stare in qualsiasi cartella tra questo KPI e l'exe.\r\n"
+				L"Senza host, DLL o dispositivo, o se il modulo non coincide col brano, resta l'audio software.",
+				L"false(0): se queda el sintetizador por software (predeterminado).\r\n"
+				L"true(1): suena en el chip G.I.M.I.C.\r\n"
+				L"kbsasami_host32.exe y c86ctl.dll pueden estar en cualquier carpeta entre este KPI y el exe.\r\n"
+				L"Si falta el host, la DLL o el aparato, o el módulo no coincide con el tema, sigue el audio por software.",
+				L"false(0): 소프트 음원 그대로(초기값).\r\n"
+				L"true(1): G.I.M.I.C 실제 칩으로 냅니다.\r\n"
+				L"kbsasami_host32.exe 와 c86ctl.dll 은 이 KPI 에서 본체 exe 까지의 폴더 어디든 있으면 됩니다.\r\n"
+				L"호스트, DLL, 장치가 없거나 모듈 종류가 곡과 다르면 소프트 음원 그대로입니다.",
+				L"false(0): 仍用软件音源（默认）。\r\n"
+				L"true(1): 用 G.I.M.I.C 实芯片播放。\r\n"
+				L"kbsasami_host32.exe 和 c86ctl.dll 放在本 KPI 到播放器 exe 之间的任一文件夹即可。\r\n"
+				L"没有主机程序、DLL 或设备，或模块种类与曲子不符时，仍用软件音源。",
+				L"false(0): يبقى المركّب البرمجي (الافتراضي).\r\n"
+				L"true(1): التشغيل على شريحة G.I.M.I.C.\r\n"
+				L"يمكن وضع kbsasami_host32.exe و c86ctl.dll في أي مجلد بين KPI هذا وملف exe.\r\n"
+				L"إذا غاب المضيف أو DLL أو الجهاز، أو لم يطابق نوع الوحدة القطعة، يبقى الصوت البرمجي.",
+				L"false(0): оставить программный синтез (по умолчанию).\r\n"
+				L"true(1): играть на чипе G.I.M.I.C.\r\n"
+				L"kbsasami_host32.exe и c86ctl.dll могут лежать в любой папке между этим KPI и exe плеера.\r\n"
+				L"Если нет хоста, DLL или устройства, или тип модуля не совпадает с песней, остаётся программный звук.",
+				L"false(0): Software-Synth bleibt (Vorgabe).\r\n"
+				L"true(1): über den G.I.M.I.C-Chip abspielen.\r\n"
+				L"kbsasami_host32.exe und c86ctl.dll dürfen in jedem Ordner zwischen diesem KPI und der Player-Exe liegen.\r\n"
+				L"Fehlen Host, DLL oder Gerät, oder passt der Modul-Typ nicht zum Stück, bleibt die Software-Ausgabe.",
+				L"false(0): mantém o sintetizador em software (padrão).\r\n"
+				L"true(1): toca no chip G.I.M.I.C.\r\n"
+				L"kbsasami_host32.exe e c86ctl.dll podem ficar em qualquer pasta entre este KPI e o exe.\r\n"
+				L"Sem host, DLL ou aparelho, ou se o módulo não coincidir com a faixa, o áudio em software permanece.",
+				L"false(0): software-synth blijft (standaard).\r\n"
+				L"true(1): afspelen op de G.I.M.I.C-chip.\r\n"
+				L"kbsasami_host32.exe en c86ctl.dll mogen in elke map tussen deze KPI en de exe staan.\r\n"
+				L"Zonder host, DLL of apparaat, of als het moduletype niet bij het nummer past, blijft de software-audio.",
+				L"false(0): zostaje syntezator programowy (domyślnie).\r\n"
+				L"true(1): gra na układzie G.I.M.I.C.\r\n"
+				L"kbsasami_host32.exe i c86ctl.dll mogą leżeć w dowolnym folderze między tym KPI a exe.\r\n"
+				L"Bez hosta, DLL albo urządzenia, albo gdy typ modułu nie pasuje do utworu, zostaje dźwięk programowy.",
+				L"false(0): yazılım sentezi kalır (varsayılan).\r\n"
+				L"true(1): G.I.M.I.C yongasında çalar.\r\n"
+				L"kbsasami_host32.exe ve c86ctl.dll, bu KPI ile exe arasındaki herhangi bir klasörde olabilir.\r\n"
+				L"Host, DLL veya aygıt yoksa, ya da modül türü parçayla uyuşmuyorsa yazılım sesi kalır.") },
 		{ KPI_CFG_TYPE_INT, SEC_KBSASAMI, KEY_MIDIMODE, L"kbsasami.midimode",
 			L"0", NULL, NULL, NULL, NULL,
 			KbsPick14(

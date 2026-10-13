@@ -303,6 +303,7 @@ const std::vector<KpiV5ConfigEntry>& GetKpiV5KnownEntries()
 		// midPlayPrefer=0(KPI/FM) → 保存1、raira で反転して実効0。VST/ホスト優先時は保存0→実効1
 		{ L"kbsasami", L"kbsasami", L"vst", L"1" },
 		{ L"kbsasami", L"kbsasami", L"fmmidimonitor", L"1" },
+		{ L"kbsasami", L"kbsasami", L"gimic", L"0" },
 		{ L"kbsasami", L"kbsasami", L"midimode", L"0" },
 		{ L"kbsasami", L"kbsasami", L"vstfullpath_gs", L"" },
 		{ L"kbsasami", L"kbsasami", L"vstfullpath_xg", L"" },

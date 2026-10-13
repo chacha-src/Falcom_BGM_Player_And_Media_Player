@@ -8,6 +8,7 @@
 
 #include "kbsasami_decoder.h"
 #include "kbsasami_monitor.h"
+#include "kbs_gimic.h"
 #include "ComposerConvert.h"
 #include "../../kpi_host_ipc.h"
 
@@ -17,6 +18,7 @@ static const wchar_t SEC_KBSASAMI[] = L"kbsasami";
 static const wchar_t KEY_VST[] = L"vst";
 static const wchar_t KEY_RAIRA[] = L"raira";
 static const wchar_t KEY_FMMIDIMONITOR[] = L"fmmidimonitor";
+static const wchar_t KEY_GIMIC[] = L"gimic";
 static const wchar_t KEY_MIDIMODE[] = L"midimode";
 static const wchar_t KEY_MAP_LEGACY[] = L"map";
 static const wchar_t KEY_FMMODE[] = L"fmmode";
@@ -177,6 +179,11 @@ void KbSasamiDecoder::ReadOptions()
 			mon = (int)m_pConfig->GetInt(SEC_KBSASAMI, KEY_FMMIDIMONITOR, 1) ? 1 : 0;
 	}
 	KbsMonConfigure(mon);
+	/* raira=1 でも読む。1 なら kbsasami_host32 を起こす。MON_SHOW は送らない。 */
+	int gimic = 0;
+	if (m_pConfig)
+		gimic = (int)m_pConfig->GetInt(SEC_KBSASAMI, KEY_GIMIC, 0) ? 1 : 0;
+	KbsGimicSetEnable(gimic);
 }
 
 static int PathIsCemuLiveMid(const wchar_t* path)

@@ -17,6 +17,9 @@
 #ifndef WM_SPEANA_TICK
 #define WM_SPEANA_TICK (WM_APP + 73)
 #endif
+#ifndef PM_QS_INPUT
+#define PM_QS_INPUT (QS_INPUT << 16)
+#endif
 #ifndef CREATE_WAITABLE_TIMER_HIGH_RESOLUTION
 #define CREATE_WAITABLE_TIMER_HIGH_RESOLUTION 0x00000002
 #endif
@@ -483,12 +486,12 @@ namespace {
 	}
 	static COLORREF PopupHotTop()
 	{
-		if (CCC_UiThemeId() == 0 && CCC_Nk()) return RGB(255, 198, 220);
+		if (CCC_UiThemeId() == 0 && CCC_Nk()) return RGB(255, 120, 176);
 		return CCC_UiTheme().hotTop;
 	}
 	static COLORREF PopupHotBot()
 	{
-		if (CCC_UiThemeId() == 0 && CCC_Nk()) return RGB(255, 152, 192);
+		if (CCC_UiThemeId() == 0 && CCC_Nk()) return RGB(220, 40, 120);
 		return CCC_UiTheme().hotBot;
 	}
 	static COLORREF PopupText(BOOL enabled)
@@ -1121,7 +1124,8 @@ static COLORREF BlendRGB(COLORREF a, COLORREF b, int t)
 	{
 		const CCC_ThemeFace& f = CCC_ThemeFaceOf();
 		CRect hr = itemRc;
-		hr.DeflateRect(4, 2, 6, 2);
+		hr.DeflateRect(3, 1, 4, 1);
+		dc.FillSolidRect(itemRc.left + 1, itemRc.top + 1, 4, max(1, itemRc.Height() - 2), CCC_UiTheme().accent);
 		if (f.sel == CCC_FACE_SEL_BAR) {
 			dc.FillSolidRect(itemRc.left + 2, itemRc.top + 2, 3, max(1, itemRc.Height() - 4), CCC_UiTheme().accent);
 			FillVGrad(dc, hr, PopupHotTop(), PopupHotBot());
@@ -4277,6 +4281,8 @@ void CCustomPopupMenu::PaintToDC(CDC& dc)
 	// ---- 通常: 一枚のパネル ----
 	DrawJkBackdrop(dc, rc, m_animTick);
 	DrawTornRibbon(dc, rc, m_animTick);
+	/* キラは行の下。上に塗ると選択色が地に溶ける。 */
+	CCC_NkBlit(&dc, rc, FALSE);
 
 	if (m_stickyCount > 0 && m_stickyH > 0) {
 		for (int i = 0; i < m_stickyCount; ++i)
@@ -4309,7 +4315,6 @@ void CCustomPopupMenu::PaintToDC(CDC& dc)
 		dc.FillSolidRect(x, thumbY, 3, thumbH, RGB(255, 120, 180));
 	}
 
-	CCC_NkBlit(&dc, rc, FALSE);
 	dc.SelectObject(oldFont);
 }
 
@@ -5009,8 +5014,9 @@ void CCustomPopupMenu::OnTimer(UINT_PTR nIDEvent)
 }
 
 // Track の心。m_tracking 中 Peek+Dispatch。WM_QUIT は再投稿。
-// 入場中は 16ms MsgWait（長い timeout だと WM_TIMER が合成されずチップが止まる）。
-// 定着後は 33ms で IsForegroundOurs（ACTIVATEAPP はキューに乗らない）。
+// 投稿 tick（再生の timerp、停止後も UiTick）は入力より先に dequeue される。
+// 先に入力を抜かないと、メニューは出るがクリックもサブも届かない。
+// 投稿は1通だけ Dispatch して Pulse に戻す（バナーは止めない）。
 // 外側クリックで閉じる。右は reopen 武装、左は閉じるだけ。DOWN の対 UP も食う。
 // RELAX_DISMISS でもアプリ非アクティブと外側クリックは有効。
 // 他トップレベルへ移ったあとは owner を SetForeground しない。
@@ -5041,10 +5047,8 @@ void CCustomPopupMenu::RunModalLoop()
 			dismissForForeignFocus();
 			return TRUE;
 		}
-		/* Track 中は再生 tick を食う。Dispatch すると ULW がモーダルを飢えさせ、
-		   出現アニメが途中で止まる／クリックが届かない。 */
-		/* 以前は再生 tick を捨てていた。バナーとスペアナがメニュー中に止まる。
-		   1通だけ Dispatch し、heavy 側で Peek を切って出現アニメは続ける。 */
+		/* 再生 tick は捨てない。入力より先に1通だけ進め、バナーは止めない。
+		   クリックは別途 PM_QS_INPUT で先に抜く。 */
 		if (m.message == WM_KEYDOWN && m.wParam == VK_ESCAPE) {
 			CWnd* f = GetFocus();
 			if (!(f && IsChild(f) && f->IsKindOf(RUNTIME_CLASS(CCustomEdit)))) {
@@ -5140,37 +5144,78 @@ void CCustomPopupMenu::RunModalLoop()
 		return TRUE;
 	};
 
+	auto menuChainHwnd = [&](HWND hw) -> int {
+		if (!hw)
+			return 0;
+		CCustomPopupMenu* walk[48];
+		int wn = 0;
+		walk[wn++] = this;
+		while (wn > 0) {
+			CCustomPopupMenu* p = walk[--wn];
+			if (!p || !p->GetSafeHwnd())
+				continue;
+			if (hw == p->m_hWnd || ::IsChild(p->m_hWnd, hw))
+				return 1;
+			for (int si = 0; si < p->m_subCount && wn < 48; ++si) {
+				if (p->m_subs[si])
+					walk[wn++] = p->m_subs[si];
+			}
+		}
+		return 0;
+	};
+
 	while (!m_done) {
 		// DXGI WaitForVBlank は再生 ULW と取り合うとスレッドが止まり、
 		// 出現アニメが途中で凍る。ここは短い MsgWait + Pulse にする。
 		PulseVsyncFrame();
 		/* 出現アニメを先に進めたあと、裏のモニタと ♡ も止まれない */
 		OggPumpAbsVisuals();
+		/* 右クリック元がキャプチャを持ったままだと移動もクリックもメニューに届かない。
+		   メニュー子のドラッグ中は残す。 */
+		{
+			HWND cap = ::GetCapture();
+			if (cap && !menuChainHwnd(cap))
+				::ReleaseCapture();
+		}
+		int nInput = 0;
+		while (!m_done && nInput < 32
+			&& ::PeekMessage(&msg, NULL, 0, 0, PM_REMOVE | PM_QS_INPUT)) {
+			++nInput;
+			/* リスト宛の移動を Dispatch するとサブが開かない。ホバーはカーソル同期。 */
+			if ((msg.message == WM_MOUSEMOVE || msg.message == WM_NCMOUSEMOVE)
+				&& !menuChainHwnd(msg.hwnd))
+				continue;
+			if (!dispatchOne(msg))
+				break;
+		}
+		/* 投稿 tick が残っていても、カーソル下の行をホバーする（サブを開く）。 */
+		if (!m_done) {
+			HWND cap = ::GetCapture();
+			if (!cap || !menuChainHwnd(cap)) {
+				CPoint sp;
+				::GetCursorPos(&sp);
+				CCustomPopupMenu* hit = FindDeepestMenuAtScreen(sp);
+				if (hit && hit->GetSafeHwnd()) {
+					CPoint c = sp;
+					hit->ScreenToClient(&c);
+					const int idx = hit->HitTest(c);
+					if (idx != hit->m_hot)
+						hit->SetHot(idx);
+				} else if (m_lineAnimPhase == 0 && m_hot >= 0) {
+					SetHot(-1);
+				}
+			}
+		}
 		int nPeek = 0;
 		int foreignHeavy = 0;
 		while (!m_done && nPeek < 24 && ::PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
 			++nPeek;
 			/* メニュー自身の描画は先に尽くす。FM/MIDI やバナー tick は1通で一旦戻し、
 			   次の Pulse で出現を進める（他UIは止めない。連続処理でアニメが凍るのを防ぐ）。 */
-			int ours = 0;
-			if (msg.hwnd) {
-				CCustomPopupMenu* walk[48];
-				int wn = 0;
-				walk[wn++] = this;
-				while (wn > 0 && !ours) {
-					CCustomPopupMenu* p = walk[--wn];
-					if (!p || !p->GetSafeHwnd())
-						continue;
-					if (msg.hwnd == p->m_hWnd || ::IsChild(p->m_hWnd, msg.hwnd))
-						ours = 1;
-					else {
-						for (int si = 0; si < p->m_subCount && wn < 48; ++si) {
-							if (p->m_subs[si])
-								walk[wn++] = p->m_subs[si];
-						}
-					}
-				}
-			}
+			if ((msg.message == WM_MOUSEMOVE || msg.message == WM_NCMOUSEMOVE)
+				&& !menuChainHwnd(msg.hwnd))
+				continue;
+			const int ours = menuChainHwnd(msg.hwnd);
 			const int heavy = (!ours && (msg.message == WM_PAINT || msg.message == WM_TIMER
 				|| msg.message == WM_UITICK_VSYNC || msg.message == WM_TIMERP_VSYNC_TICK));
 			if (!dispatchOne(msg))
@@ -5181,7 +5226,7 @@ void CCustomPopupMenu::RunModalLoop()
 		SettleOpenChainIfDue();
 		if (!m_done && !IsForegroundOurs())
 			dismissForForeignFocus();
-		if (!m_done && nPeek == 0)
+		if (!m_done && nInput == 0 && nPeek == 0)
 			::MsgWaitForMultipleObjects(0, NULL, FALSE, 8, QS_ALLINPUT);
 	}
 	m_tracking = FALSE;

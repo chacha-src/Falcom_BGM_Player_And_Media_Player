@@ -54,7 +54,7 @@
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>WIN32_LEAN_AND_MEAN;NOMINMAX;KPIHOST32_BUILD;KBSASAMI_HOST_BUILD;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <PreprocessorDefinitions Condition="'$(Configuration)'=='uni_avx2_vs2026'">WIN32_LEAN_AND_MEAN;NOMINMAX;KPIHOST32_BUILD;KBSASAMI_HOST_BUILD;NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>$(ProjectDir)..\KpiHost32;$(ProjectDir)..\;$(ProjectDir)source;$(ProjectDir)..\CEmu;$(ProjectDir)..\zstd;$(ProjectDir)..\third_party\aimp;$(ProjectDir)..\third_party\vst3sdk;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)..\KpiHost32;$(ProjectDir)..\;$(ProjectDir)source;$(ProjectDir)..\CEmu;$(ProjectDir)..\zstd;$(ProjectDir)..\third_party\aimp;$(ProjectDir)..\third_party\vst3sdk;C:\projects\APPLICATION3\kpi_sources_20240712\kpi_decoder\fmmon_common;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpp17</LanguageStandard>
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
       <ProgramDataBaseFileName>$(IntDir)$(TargetName)_cl.pdb</ProgramDataBaseFileName>
@@ -100,6 +100,7 @@ copy /Y "$(TargetPath)" "C:\projects\APPLICATION3\ogg_binary\Plugins\kbsasami\x6
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="C:\projects\APPLICATION3\kpi_sources_20240712\kpi_decoder\fmmon_common\kbs_gimic.cpp" />
     <ClCompile Include="kbsasami_host.cpp">
       <UndefinePreprocessorDefinitions>KPIHOST32_BUILD</UndefinePreprocessorDefinitions>
       <AdditionalIncludeDirectories>$(ProjectDir)..\;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
