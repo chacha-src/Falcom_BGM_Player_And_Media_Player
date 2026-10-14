@@ -69,6 +69,7 @@ KbSasamiDecoder::KbSasamiDecoder(IKpiConfig* pConfig)
 	m_loopStart = -1.0;
 	m_loopEnd = -1.0;
 	m_loopClosed = 0;
+	m_seqAutoLoop = 0;
 	m_smfSize = 0;
 	m_openPath[0] = 0;
 	m_monHold = 0;
@@ -823,6 +824,7 @@ DWORD __fastcall KbSasamiDecoder::Open(const KPI_MEDIAINFO* cpRequest, IKpiFile*
 	m_wopnMode = 0;
 	m_smfSize = 0;
 	m_openPath[0] = 0;
+	m_seqAutoLoop = 0;
 
 	const int smfMagic = (n >= 4 && s_fileBuf[0] == 'M' && s_fileBuf[1] == 'T'
 		&& s_fileBuf[2] == 'h' && s_fileBuf[3] == 'd') ? 1 : 0;
@@ -863,6 +865,7 @@ DWORD __fastcall KbSasamiDecoder::Open(const KPI_MEDIAINFO* cpRequest, IKpiFile*
 			rate = cpRequest->dwSampleRate;
 		m_kind = SASAMI_KIND_MPY;
 		m_titleSjis[0] = 0;
+		m_seqAutoLoop = 0;
 		if (!LoadFmMidiSequencer(rate)) return 0;
 		MonShow(0, pathForKind);
 		return 1;
@@ -992,6 +995,7 @@ DWORD __fastcall KbSasamiDecoder::Open(const KPI_MEDIAINFO* cpRequest, IKpiFile*
 		return 1;
 	}
 
+	m_seqAutoLoop = 1;
 	if (!LoadFmMidiSequencer(rate)) return 0;
 	MonShow(0, pathForKind);
 	return 1;
@@ -1140,7 +1144,7 @@ DWORD WINAPI KbSasamiDecoder::Render(BYTE* pBuffer, DWORD dwSizeSample)
 	std::lock_guard<std::mutex> lk(m_midiLock);
 	if (m_loopClosed) return 0;
 	const double rate = (double)m_MediaInfo.dwSampleRate;
-	const int looping = (m_loopEnd > m_loopStart && m_loopStart >= 0.0) ? 1 : 0;
+	const int looping = (m_seqAutoLoop && m_loopEnd > m_loopStart && m_loopStart >= 0.0) ? 1 : 0;
 	const UINT64 loopStartSamp = looping ? (UINT64)(m_loopStart * rate + 0.5) : 0;
 	const UINT64 loopEndSamp = looping ? (UINT64)(m_loopEnd * rate + 0.5) : 0;
 

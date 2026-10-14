@@ -1662,6 +1662,8 @@ void CRender::Once5x() { ApplyCemuVolChecks(5); }
 void CRender::OnCemuGimic()
 {
 	savedata.cemuGimic = (m_cemuGimic.GetCheck() == BST_CHECKED) ? 1 : 0;
+	KpiV5SyncCrenderGimic(savedata.cemuGimic);
+	OggKpiNotifyConfigChange();
 }
 
 void CRender::OnBnClicked24bit()

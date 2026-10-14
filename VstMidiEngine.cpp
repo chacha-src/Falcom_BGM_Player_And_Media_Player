@@ -687,6 +687,7 @@ struct EngineState {
 	int songLa;      // 1=MT-32/LA — Bank MSB 127（SC-VA Capital Tone）
 	__int64 loopStartSample;
 	__int64 loopEndSample;
+	int autoWrapLoop; /* 1=ogg_kbsasami 変換 SMF（MPY J）。0=RCP/MID は本体のループ再生 */
 
 	EngineState() : csReady(0), fileData(NULL), fileBytes(0), events(NULL),
 		eventCount(0), eventPos(0), playSample(0), lengthSamples(0),
@@ -695,7 +696,7 @@ struct EngineState {
 		sysexData(NULL), sysexBytes(0), maxMidiPort(0), mirrorToB(0),
 		useEnsemble(0), useMapper(0), midiOut(NULL), mixCount(0),
 		ringRead(0), ringCount(0), gmResetMode(0), gsMapLsb(0), songGm(0), songLa(0),
-		loopStartSample(0), loopEndSample(0)
+		loopStartSample(0), loopEndSample(0), autoWrapLoop(0)
 	{
 		InitializeCriticalSection(&cs);
 		csReady = 1;
@@ -6174,6 +6175,7 @@ static void FreeSongData()
 	g_sysModeConsumed[VstIoSlot()] = 0;
 	g_eng.loopStartSample = 0;
 	g_eng.loopEndSample = 0;
+	g_eng.autoWrapLoop = 0;
 	g_vstHeldFlushed[VstIoSlot()] = 0;
 	g_liveTailFrames = 0;
 }
@@ -7337,6 +7339,8 @@ extern "C" int VstMidiOpen(const wchar_t* midPath,
 	FreeSongData();
 	int rc = LoadSmf(midPath);
 	if (rc < 0) { LeaveCriticalSection(&g_eng.cs); return rc; }
+	/* 変換先は .mid。MPY だけ ogg_kbsasami に置く。RCP は ogg_composer。 */
+	g_eng.autoWrapLoop = ContainsI(midPath, L"ogg_kbsasami") ? 1 : 0;
 
 	/* Score .mpsmv: HALion already in live slots — do not open MIDI Mapper (GM piano). */
 	if (InterlockedCompareExchange(&g_songUseLiveBinds, 0, 0)) {
@@ -7540,9 +7544,9 @@ extern "C" int VstMidiRead(BYTE* dst, int bytesWanted)
 	int written = 0;
 	while (written < bytesWanted) {
 		if (!g_eng.ringCount) {
-			if (SongHasLoop() && g_eng.playSample > g_eng.loopEndSample)
+			if (SongHasLoop() && g_eng.autoWrapLoop && g_eng.playSample > g_eng.loopEndSample)
 				WrapSongLoop();
-			const int looping = SongHasLoop();
+			const int looping = (SongHasLoop() && g_eng.autoWrapLoop) ? 1 : 0;
 			/* ループ無しで長さちょうどで止めると、終端サンプルの NoteOff が
 			   sample < end に入らず J が鳴り続ける。 */
 			if (!looping && g_eng.events && g_eng.playSample >= g_eng.lengthSamples &&

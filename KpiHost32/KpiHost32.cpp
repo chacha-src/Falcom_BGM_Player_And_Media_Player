@@ -216,6 +216,8 @@ public:
 			if (_wcsicmp(key, L"vst") == 0)
 				return KpiV5GetInt(m_pluginName, L"kbsasami", L"vst", 1);
 		}
+		if (KpiV5CrenderGimicForceOn(key))
+			return 1;
 		return KpiV5GetInt(m_pluginName, sec ? sec : L"", key ? key : L"", def);
 	}
 	void WINAPI SetFloat(const wchar_t* sec, const wchar_t* key, double v) override {
@@ -235,6 +237,16 @@ public:
 		KpiV5SetStr(m_pluginName, sec ? sec : L"", key ? key : L"", value ? value : L"");
 	}
 	DWORD WINAPI GetStr(const wchar_t* sec, const wchar_t* key, wchar_t* pszValue, DWORD dwSize, const wchar_t* cszDefault) override {
+		if (KpiV5CrenderGimicForceOn(key)) {
+			const DWORD need = (DWORD)(2 * sizeof(wchar_t));
+			if (pszValue && dwSize >= sizeof(wchar_t)) {
+				if (dwSize >= need)
+					wcscpy_s(pszValue, dwSize / sizeof(wchar_t), L"1");
+				else
+					pszValue[0] = 0;
+			}
+			return need;
+		}
 		const std::wstring value = KpiV5GetStr(m_pluginName, sec ? sec : L"", key ? key : L"", cszDefault ? cszDefault : L"");
 		const DWORD need = (DWORD)((value.size() + 1) * sizeof(wchar_t));
 		if (pszValue && dwSize >= sizeof(wchar_t)) {

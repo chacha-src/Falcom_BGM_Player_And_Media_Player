@@ -318,3 +318,29 @@ void KpiV5SyncKbsasamiOptions(int midPlayPrefer)
 	// 本家: vst=0 が FM MIDI。raira=1 で入れ替えるので、希望の逆を書く
 	KpiV5SetInt(L"kbsasami", L"kbsasami", L"vst", (midPlayPrefer != 0) ? 0 : 1);
 }
+
+void KpiV5SyncCrenderGimic(int on)
+{
+	KpiV5SetInt(L"_ogghost", L"CRender", L"gimic", on ? 1 : 0);
+}
+
+int KpiV5CrenderGimicMaster(void)
+{
+	return KpiV5GetInt(L"_ogghost", L"CRender", L"gimic", 0) ? 1 : 0;
+}
+
+int KpiV5KeyIsGimic(const wchar_t* key)
+{
+	if (!key || !key[0]) return 0;
+	const wchar_t* leaf = key;
+	for (const wchar_t* p = key; *p; ++p) {
+		if (*p == L'.')
+			leaf = p + 1;
+	}
+	return _wcsicmp(leaf, L"gimic") == 0 ? 1 : 0;
+}
+
+int KpiV5CrenderGimicForceOn(const wchar_t* key)
+{
+	return (KpiV5KeyIsGimic(key) && KpiV5CrenderGimicMaster()) ? 1 : 0;
+}

@@ -29,4 +29,10 @@ double KpiV5GetFloat(const std::wstring& pluginName, const std::wstring& section
 // (プラグイン側は raira=1 のとき vst の 0/1 を入れ替える → 実効は midPlayPrefer と一致)
 void KpiV5SyncKbsasamiOptions(int midPlayPrefer);
 
+/* CRender の G.I.M.I.C。KPI 側 gimic=0 でもオンなら IKpiConfig で 1 を返す。 */
+void KpiV5SyncCrenderGimic(int on);
+int KpiV5CrenderGimicMaster(void);
+int KpiV5KeyIsGimic(const wchar_t* key);
+int KpiV5CrenderGimicForceOn(const wchar_t* key);
+
 const std::vector<KpiV5ConfigEntry>& GetKpiV5KnownEntries();
