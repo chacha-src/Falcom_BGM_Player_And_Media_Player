@@ -649,7 +649,8 @@ void CKpilist::ShowPluginDetail(int idx)
 				m_cfgType[row] = KPI_CFG_TYPE_BOOL;
 				wcsncpy_s(m_cfgHelpTxt[row],
 					L"false(0): ソフト音源のまま（初期値）。\r\n"
-					L"true(1): G.I.M.I.C。kbsasami_host32 を起動する。モニタ窓は出さない（raira=1 は本体のモニタ）。",
+					L"true(1): G.I.M.I.C。kbsasami_host32 を起動する。モニタ窓は出さない（raira=1 は本体のモニタ）。\r\n"
+					L"CRender の G.I.M.I.C がオンなら、ここがオフでも実チップで鳴らす。",
 					_TRUNCATE);
 			} else {
 				wcsncpy_s(m_cfgHelpTxt[row], known[i].key, _TRUNCATE);

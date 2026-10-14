@@ -8,6 +8,7 @@
 // プレイリスト行の表示用メタデータを og 側へ反映(未再生時のバナー/情報パネル用)
 void ApplyPlaylistRowDisplay(const playlistdata0& row);
 void OggPersistSaveDatNow();
+void OggKpiNotifyConfigChange();
 /* IDirectSoundBuffer 操作の直列化。Lock 中に UI から Stop/Release するとドライバで戻らない。 */
 void DsOpEnter();
 void DsOpLeave();

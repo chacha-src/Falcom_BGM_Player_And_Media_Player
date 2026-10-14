@@ -1436,7 +1436,8 @@ void CEmuGimicOnRender(CEmuSession* s, int16_t* stereo, int frames)
 	KbsGimicSetExtraLag(s_gimicMix ? CEmuGimicDsLead() : 0);
 	const int rate = s && s->sampleRate > 0 ? s->sampleRate : 44100;
 	const int64_t pos = (int64_t)FmMonShadowGetCurSample();
-	if (!s_gimicMix && KbsGimicDevOk())
+	/* 純FMは devOk 前（resetReq）もソフトを出さない。即再生で初音がスピーカーに漏れる。 */
+	if (!s_gimicMix)
 		KbsGimicSilence(stereo, (uint32_t)frames, pos, (uint32_t)rate);
 	else
 		KbsGimicSilence(NULL, (uint32_t)frames, pos, (uint32_t)rate);

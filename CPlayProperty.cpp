@@ -1449,10 +1449,16 @@ BOOL CPlayProperty::OnInitDialog()
 	m_tab3.m_kpiIdx = m_kpiIdx;
 	m_tab4.m_pl = m_pl;
 
+	/* Create 中の WS_VISIBLE 初回 WM_PAINT は fixer 未装着でガラス穴になる。 */
+	SetRedraw(FALSE);
 	m_tab1.Create(IDD_PLAYPROP_TAB1, this);
 	m_tab2.Create(IDD_PLAYPROP_TAB2, this);
 	m_tab3.Create(IDD_PLAYPROP_TAB3, this);
 	m_tab4.Create(IDD_PLAYPROP_TAB4, this);
+	if (m_tab1.GetSafeHwnd()) m_tab1.ShowWindow(SW_HIDE);
+	if (m_tab2.GetSafeHwnd()) m_tab2.ShowWindow(SW_HIDE);
+	if (m_tab3.GetSafeHwnd()) m_tab3.ShowWindow(SW_HIDE);
+	if (m_tab4.GetSafeHwnd()) m_tab4.ShowWindow(SW_HIDE);
 
 	TCITEM ti = {};
 	ti.mask = TCIF_TEXT;
@@ -1476,6 +1482,9 @@ BOOL CPlayProperty::OnInitDialog()
 	m_minW = wr.Width();
 	m_minH = wr.Height();
 	LayoutPages();
+	/* ページ HWND が揃ってから fixer を載せる。Post だと ShowPage の初回描画に間に合わない。 */
+	SendMessage(CCC_MSG_REAPPLY_OPAQUE_FIXERS);
+	SetRedraw(TRUE);
 	ShowPage(0);
 	CCustomControlUtility::BeginDialogToolTip(m_tooltip, this);
 	m_tooltip.AddTool(&m_apply, LL14(L"プレイリスト欄とタグの変更を保存して、この窓は開いたままにします。",
@@ -1493,7 +1502,6 @@ BOOL CPlayProperty::OnInitDialog()
 		L"Zapisz playlistę i tagi, zostaw okno.",
 		L"Liste ve etiketleri kaydet, pencere açık kalsın."));
 	CCustomControlUtility::FinalizeDialogToolTip(m_tooltip, 512, 10000);
-	PostMessage(CCC_MSG_REAPPLY_OPAQUE_FIXERS);
 	return TRUE;
 }
 

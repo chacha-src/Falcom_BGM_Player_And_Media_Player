@@ -4084,6 +4084,11 @@ const KPI_DECODER_MODULEINFO* m_ModuleInfo5;
 const KPI_MEDIAINFO* pMediaInfo = NULL;
 KPI_MEDIAINFO me5;
 IKpiDecoder* kpidec = NULL;
+void OggKpiNotifyConfigChange()
+{
+	if (kpidec)
+		kpidec->UpdateConfig(NULL);
+}
 bool g_kpiRemote = false;
 int g_kpiPlaybackArch = 0;   // 0=不明 32=x86 64=x64（再生中の KPI arch 表示用）
 KpiHost32Client g_kpiHost;
@@ -5207,6 +5212,9 @@ public:
 			if (_wcsicmp(key, L"vst") == 0)
 				return (savedata.midPlayPrefer != 0) ? 0 : 1;
 		}
+		/* CRender G.I.M.I.C オンなら KPI 側 gimic チェックが落ちていても実チップ。 */
+		if (KpiV5KeyIsGimic(key) && (savedata.cemuGimic || KpiV5CrenderGimicMaster()))
+			return 1;
 		return KpiV5GetInt(m_pluginName, sec ? sec : L"", key ? key : L"", def);
 	}
 	virtual void WINAPI SetFloat(const wchar_t* sec, const wchar_t* key, double v) {
@@ -5225,6 +5233,16 @@ public:
 		KpiV5SetStr(m_pluginName, sec ? sec : L"", key ? key : L"", value ? value : L"");
 	}
 	virtual DWORD WINAPI GetStr(const wchar_t* sec, const wchar_t* key, wchar_t* pszValue, DWORD dwSize, const wchar_t* cszDefault) {
+		if (KpiV5KeyIsGimic(key) && (savedata.cemuGimic || KpiV5CrenderGimicMaster())) {
+			const DWORD need = (DWORD)(2 * sizeof(wchar_t));
+			if (pszValue && dwSize >= sizeof(wchar_t)) {
+				if (dwSize >= need)
+					wcscpy_s(pszValue, dwSize / sizeof(wchar_t), L"1");
+				else
+					pszValue[0] = L'\0';
+			}
+			return need;
+		}
 		const std::wstring value = KpiV5GetStr(m_pluginName, sec ? sec : L"", key ? key : L"", cszDefault ? cszDefault : L"");
 		const DWORD need = (DWORD)((value.size() + 1) * sizeof(wchar_t));
 		if (pszValue && dwSize >= sizeof(wchar_t)) {
@@ -6042,6 +6060,7 @@ static void TempoPredOnLoopTo(int samplePos, double rate);
 static void TempoPredNotifyLoop(int samplePos);
 static void PlaybackNoteLoop(int toSample);
 static bool WantPlaybackLoop();
+static bool IsMidiLikePath(const CString& path);
 static int PlaybackSrcTotalSamples();
 static bool PlaybackShortMeansEof(int gotBytes);
 static void TempoPredAdvanceTo(double wallSec, double rateNow, double totalSrcSec);
@@ -6577,6 +6596,7 @@ BOOL COggDlg::OnInitDialog()
 {
 	CCustomBlurDialogBase::OnInitDialog();
 	KpiV5SyncKbsasamiOptions(savedata.midPlayPrefer);
+	KpiV5SyncCrenderGimic(savedata.cemuGimic);
 	KpiV5SetInt(L"kbgme", L"SupportExt", L"EnableHES", 1);
 	KpiV5SetInt(L"kbgme", L"SupportExt", L"EnableKSS", 1);
 	KpiV5SetInt(L"kbgme", L"SupportExt", L"EnableSPC", 1);
@@ -20975,6 +20995,10 @@ static bool WantPlaybackLoop()
 		return true;
 	}
 	if (dm == -10)
+		return false;
+	/* RCP/MID 等は変換 SMF の CC111/marker があっても、ループ再生OFFなら一周で止める。
+	   FPY/MPY は拡張子が midi-like ではないので従来どおりファイルの J を使う。 */
+	if (IsMidiLikePath(filen))
 		return false;
 	/* 標準 MIDI はループ点が無い。endf が 0 のままでも全長をループ点にしない */
 	if (kpi_file_loop == 0 && (dm == -3 || IsVstMidiPlayMode(dm)))
