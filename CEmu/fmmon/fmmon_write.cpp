@@ -3,6 +3,7 @@
 #include <string.h>
 #include "fmmon_write.h"
 #include "sasami_fmmon_map.h"
+#include "fmmon_shadow.h"
 
 /* %TEMP%\ogg_cemu を用意。KPI の ogg_kbsasami とは別 */
 static void FmMonEnsureDir(wchar_t* dir, int n)
@@ -195,6 +196,8 @@ void FmMonWriteDump(const SasamiFmMonDump* d)
 	if (!d) return;
 	SasamiFmMonDump stamped = *d;
 	stamped.pad6[2] = (uint8_t)(stamped.pad6[2] | SASAMI_FMMON_CLOCK_DUMP);
+	if (CEmuGimicMonitorLive())
+		stamped.pad6[2] = (uint8_t)(stamped.pad6[2] | SASAMI_FMMON_CLOCK_LIVE);
 	d = &stamped;
 	FmMonIoInit();
 	EnterCriticalSection(&s_ioCs);

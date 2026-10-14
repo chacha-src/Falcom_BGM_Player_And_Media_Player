@@ -1,4 +1,4 @@
-﻿#include "stdafx.h"
+#include "stdafx.h"
 #include "CCustomControl.h"
 #include "resource.h"
 #include "CImageBase.h"
@@ -14121,12 +14121,27 @@ void CCustomTabCtrl::ScheduleOpaqueRepaint()
 }
 
 // Win11 アクリル時 PaintOpaqueClient。
+// CClientDC は CLIPSIBLINGS が無いので、ページ上の子ダイアログを上書きする。
+// 見出し以外は除外してから描く（OnPaint のクロマ経路と同じ）。
 LRESULT CCustomTabCtrl::OnPostOpaquePaint(WPARAM, LPARAM)
 {
 #if CCUSTOM_AERO_SUPPORT
 	if (CCC_IsAeroEnabled() && CCC_IsWin11()) {
-		CClientDC dc(this);
-		PaintOpaqueClient(dc);
+		HDC hdc = ::GetDCEx(m_hWnd, NULL, DCX_CACHE | DCX_CLIPSIBLINGS | DCX_LOCKWINDOWUPDATE);
+		if (!hdc) hdc = ::GetDC(m_hWnd);
+		if (hdc) {
+			CDC dc;
+			dc.Attach(hdc);
+			CRect rcClient;
+			GetClientRect(&rcClient);
+			CRect rcDisp = rcClient;
+			AdjustRect(FALSE, &rcDisp);
+			if (rcDisp.Height() >= 12 && rcDisp.Width() >= 12)
+				dc.ExcludeClipRect(&rcDisp);
+			PaintOpaqueClient(dc);
+			dc.Detach();
+			::ReleaseDC(m_hWnd, hdc);
+		}
 	}
 #endif
 	return 0;
@@ -14335,11 +14350,16 @@ void CCustomTabCtrl::PaintOpaqueIntoBuffer(HDC hdcBuf)
 }
 
 // BufferedPaint+MakeOpaque。失敗時 Default。
+// ページ領域は子ダイアログの地。ここへ blit するとラベルが抜ける。
 void CCustomTabCtrl::PaintOpaqueClient(CDC& dc)
 {
 	CRect r;
 	GetClientRect(&r);
 	if (r.Width() <= 0 || r.Height() <= 0) return;
+	CRect rcDisp = r;
+	AdjustRect(FALSE, &rcDisp);
+	if (rcDisp.Height() >= 12 && rcDisp.Width() >= 12)
+		dc.ExcludeClipRect(&rcDisp);
 	BP_PAINTPARAMS params = { sizeof(BP_PAINTPARAMS) };
 	params.dwFlags = BPPF_ERASE;
 	HDC hdcBuf = NULL;
@@ -18231,11 +18251,13 @@ static LRESULT CCC_HandlePlainPrint(CWnd* pWnd, WPARAM wParam, LPARAM lParam, BO
     s_cccPrintDepth++;
     RECT rc = {};
     ::GetClientRect(pWnd->m_hWnd, &rc);
-    HBRUSH br = ::CreateSolidBrush(COLOR_DIALOG_BG);
-    if (br) {
-        ::FillRect(hdc, &rc, br);
-        ::DeleteObject(br);
-    }
+    CDC dc;
+    dc.Attach(hdc);
+    CRect r(rc);
+    dc.FillSolidRect(&r, COLOR_DIALOG_BG);
+    if (CCC_Nk())
+        CCC_NkBody(&dc, r);
+    dc.Detach();
     s_cccPrintDepth--;
     return 0;
 }
@@ -19378,6 +19400,14 @@ static BOOL CCC_ShouldOpaqueFix(HWND hWnd)
         if (c.Find(_T("STATIC")) >= 0) return TRUE;
         if (c.Find(TRACKBAR_CLASS) >= 0) return TRUE;
         if (c.Find(_T("MSCTLS_PROGRESS32")) >= 0) return TRUE;
+        // プロパティのタブページはガラス穴になるので不透明化する（他の子ダイアログは自前描画）
+        if (CWnd* pwPp = CWnd::FromHandlePermanent(hWnd)) {
+            if (CRuntimeClass* rcPp = pwPp->GetRuntimeClass()) {
+                const char* cnPp = rcPp->m_lpszClassName;
+                if (cnPp && strncmp(cnPp, "CPlayProperty_tab", 17) == 0)
+                    return TRUE;
+            }
+        }
         // 子ダイアログ / DXGI ホストは自前描画。fixer を載せると本文が消える
         if (c.Compare(_T("#32770")) == 0) return FALSE;
         if (c.Compare(_T("OGGGPUMONHOST")) == 0) return FALSE;
@@ -20804,6 +20834,9 @@ UINT CCC_IconIdForDialogTemplate(UINT idd)
 		{ IDD_KPI5CFG, IDI_UI_FOLDER },
 		{ IDD_ZEROFOL, IDI_UI_FOLDER }, { IDD_FD_HELP, IDI_UI_FOLDER },
 		{ IDD_SYOSAI, IDI_UI_INFO }, { IDD_SY_HELP, IDI_UI_INFO },
+		{ IDD_PLAYPROP, IDI_UI_INFO }, { IDD_PLAYPROP_TAB1, IDI_UI_INFO },
+		{ IDD_PLAYPROP_TAB2, IDI_UI_TAG }, { IDD_PLAYPROP_TAB3, IDI_UI_FOLDER },
+		{ IDD_PLAYPROP_TAB4, IDI_UI_APPS },
 		{ IDD_ABOUTBOX, IDI_UI_INFO }, { IDD_OGG_HELP, IDI_UI_INFO },
 		{ IDD_DOUGA_HELP, IDI_UI_VIDEO },
 		{ IDD_MP_CMDROLL, IDI_UI_KEYBOARD }, { IDD_MP_CMDROLL_HELP, IDI_UI_KEYBOARD },

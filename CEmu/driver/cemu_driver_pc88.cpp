@@ -384,12 +384,20 @@ void CDriverPc88::DeliverIrqs(uint64_t now)
    無音先頭は EndLeadCapture で切る。キックが純初期化のリップ（1942_88 は 8s ドレインでノート無し）に無音イントロを足さない。 */
 enum { LEAD_MAX_SECONDS = 16 };
 
+static unsigned s_leadFrames = 0;
+static unsigned s_leadTrimmed = 0;
+static unsigned s_leadMark = 0;
+unsigned CEmuPc88LeadFrames() { return s_leadFrames; }
+unsigned CEmuPc88LeadTrimmedFrames() { return s_leadTrimmed; }
+unsigned CEmuPc88LeadMark(void) { return s_leadMark; }
+
 /* CDriverPc88::BeginLeadCapture の実装 */
 void CDriverPc88::BeginLeadCapture()
 {
 	if (!hw_ || !hw_->SoundChip() || hostRate_ < 1) return;
 	capturing_ = 1;
 	capAcc_ = 0;
+	s_leadMark = 0;
 }
 
 /* CDriverPc88::CaptureLead の実装 */
@@ -419,14 +427,9 @@ void CDriverPc88::CaptureLead(uint64_t cpuCycles)
 		}
 		chip->Render(lead_ + leadLen_, 1);
 		leadLen_ += 2;
+		s_leadMark = (unsigned)(leadLen_ / 2);
 	}
 }
-
-/* 直近キックが拾ったオープニング（先頭欠落プローブ用）。ウォッチドッグカウンタと同じく、プローブは同時 1 曲なのでグローバル。 */
-static unsigned s_leadFrames = 0;
-static unsigned s_leadTrimmed = 0;
-unsigned CEmuPc88LeadFrames() { return s_leadFrames; }
-unsigned CEmuPc88LeadTrimmedFrames() { return s_leadTrimmed; }
 
 /* CDriverPc88::EndLeadCapture の実装 */
 void CDriverPc88::EndLeadCapture()
@@ -455,10 +458,12 @@ void CDriverPc88::EndLeadCapture()
 	if (firstLoud < 0) {
 		s_leadTrimmed = (unsigned)((leadLen_ - leadPos_) / 2);
 		leadLen_ = leadPos_; /* 初期化無音だけ */
+		s_leadMark = 0xFFFFFFFFu;
 		return;
 	}
 	s_leadTrimmed = (unsigned)((firstLoud - leadPos_) / 2);
 	leadPos_ = firstLoud;
+	s_leadMark = (unsigned)(leadPos_ / 2);
 }
 
 /* CDriverPc88::DrainLead の実装 */
@@ -469,6 +474,7 @@ int CDriverPc88::DrainLead(int16_t* stereo, int frames)
 			leadLen_ = 0;
 			leadPos_ = 0;
 		}
+		s_leadMark = 0xFFFFFFFFu;
 		return 0;
 	}
 	int n = (leadLen_ - leadPos_) / 2;
@@ -478,6 +484,9 @@ int CDriverPc88::DrainLead(int16_t* stereo, int frames)
 	if (leadPos_ >= leadLen_) {
 		leadLen_ = 0;
 		leadPos_ = 0;
+		s_leadMark = 0xFFFFFFFFu;
+	} else {
+		s_leadMark = (unsigned)(leadPos_ / 2);
 	}
 	return n;
 }

@@ -1,9 +1,19 @@
 // Microsoft Visual C++ generated resource script.
 //
-#include <winres.h>
 #include "resource.h"
+
+#define APSTUDIO_READONLY_SYMBOLS
 /////////////////////////////////////////////////////////////////////////////
-// Japanese resources
+//
+// Generated from the TEXTINCLUDE 2 resource.
+//
+#include "winres.h"
+
+/////////////////////////////////////////////////////////////////////////////
+#undef APSTUDIO_READONLY_SYMBOLS
+
+/////////////////////////////////////////////////////////////////////////////
+// 日本語 (日本) resources
 
 #if !defined(AFX_RESOURCE_DLL) || defined(AFX_TARG_JPN)
 LANGUAGE LANG_JAPANESE, SUBLANG_DEFAULT
@@ -110,7 +120,7 @@ END
 //
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 1,30,0,1
+ FILEVERSION 1,30,0,3
  PRODUCTVERSION 1,0,0,1
  FILEFLAGSMASK 0x3fL
 #ifdef _DEBUG
@@ -128,9 +138,9 @@ BEGIN
         BEGIN
             VALUE "CompanyName", "Falcom BGM Player & Media Player"
             VALUE "FileDescription", "Pre Prayer Power Soft"
-            VALUE "FileVersion", "1.30.0.1"
+            VALUE "FileVersion", "1.30.0.3"
             VALUE "InternalName", "kbsasami_host.exe"
-            VALUE "LegalCopyright", "Copyright (C) 2026.10.13 1.30b"
+            VALUE "LegalCopyright", "Copyright (C) 2026.10.14 1.30c"
             VALUE "OriginalFilename", "kbsasami_host.exe"
             VALUE "ProductName", "Falcom BGM Player & Media Player"
             VALUE "ProductVersion", "1.0.0.1"
@@ -142,7 +152,7 @@ BEGIN
     END
 END
 
-#endif    // Japanese resources
+#endif    // 日本語 (日本) resources
 /////////////////////////////////////////////////////////////////////////////
 
 

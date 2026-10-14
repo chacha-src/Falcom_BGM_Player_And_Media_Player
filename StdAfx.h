@@ -999,6 +999,8 @@ struct save{
 	   dsvol / kakuVol は既存フィールド。旧.datは未保存なので 200。末尾追記。 */
 	int tempoPos;
 	int pitchPos;
+	/* CEmu の G.I.M.I.C。0=ソフトのまま（初期値） 1=対応チップを実機へ。末尾追記。 */
+	int cemuGimic;
 };
 extern save savedata;
 

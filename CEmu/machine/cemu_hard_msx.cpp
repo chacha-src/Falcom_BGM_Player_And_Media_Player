@@ -394,6 +394,7 @@ void CHardMsx::Shutdown()
 	if (chipSng_) { CEmuChipSn76489Destroy(chipSng_); chipSng_ = NULL; }
 	if (chipOpl_) { CEmuChipYm3812Destroy(chipOpl_); chipOpl_ = NULL; }
 	if (chipOpll_) {
+		CEmuGimicNoteChip(4, 0, 0);
 		OPLL_delete((OPLL*)chipOpll_);
 		chipOpll_ = NULL;
 	}
@@ -422,6 +423,7 @@ void CHardMsx::EnsureOpll(int force)
 		OPLL_set_quality(o, 1);
 		OPLL_reset_patch(o, 0);
 		chipOpll_ = (void*)o;
+		CEmuGimicNoteChip(4, (uint32_t)opllHz_, 1);
 		memset(opllRegs_, 0, sizeof(opllRegs_));
 	}
 }
@@ -1446,6 +1448,7 @@ int CHardMsx::LoadKss(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode
 	titleCode_ = titleCode;
 
 	if (chipOpll_) {
+		CEmuGimicNoteChip(4, 0, 0);
 		OPLL_delete((OPLL*)chipOpll_);
 		chipOpll_ = NULL;
 	}

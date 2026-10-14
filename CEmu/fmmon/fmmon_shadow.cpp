@@ -3,7 +3,7 @@
 #include <stdio.h>
 #include <math.h>
 #include "fmmon_shadow.h"
-#include "../../../kpi_sources_20240712/kpi_decoder/fmmon_common/kbs_gimic.h"
+#include "kbs_gimic.h"
 
 /* KPI一覧の [FMmon]/[MIDmon] 検出用。Flush 経路から参照してリンク残す。 */
 extern "C" const char g_oggKpiFmMonTag[] = "ogg.FMmon";
@@ -27,6 +27,7 @@ static uint8_t s_wave[8 * 32];
 static uint8_t s_bits[64];     /* 直前 Flush 区間（フェード用にクリア） */
 static uint8_t s_written[64]; /* 曲開始以降に1回でも書いた番地（00→00 含む） */
 static uint8_t s_keyFm[6], s_hitFm[6], s_midiFm[6];
+static uint8_t s_keySlot[6]; /* $28 の slot ビット。未初期化 TL を 0xF0 で叩かない */
 static uint8_t s_keyEx[3], s_hitEx[3], s_midiEx[3];
 static uint8_t s_ssg[3], s_hitSsg[3], s_midiSsg[3];
 static uint8_t s_rhyKey, s_rhyPulse, s_hitRhy[6];
@@ -348,6 +349,7 @@ void FmMonShadowReset(void)
 	memset(s_bits, 0, sizeof(s_bits));
 	memset(s_written, 0, sizeof(s_written));
 	memset(s_keyFm, 0, sizeof(s_keyFm));
+	memset(s_keySlot, 0, sizeof(s_keySlot));
 	memset(s_hitFm, 0, sizeof(s_hitFm));
 	memset(s_midiFm, 0xFF, sizeof(s_midiFm));
 	memset(s_keyEx, 0, sizeof(s_keyEx));
@@ -524,9 +526,23 @@ void FmMonShadowSetOpmRegSnapshotEx(const unsigned char* regs256, int keyRegOrNe
 		memcpy(s_regs, ayKeep, sizeof(ayKeep));
 		memcpy(s_bits, ayBitsKeep, sizeof(ayBitsKeep));
 	}
+	uint8_t opmSendA[256];
+	uint8_t opmSendD[256];
+	int opmSendN = 0;
 	for (int i = 0; i < 256; i++) {
 		if (s_regs[i] != prevOpm[i])
 			MarkBit((unsigned)i);
+		/* AY を残している間、低位はシャドウ上 AY。実 OPM へは regs256 の $10 以降を出す。 */
+		if (regs256[i] != prevOpm[i] && (i >= 0x10 || (!keepAy && (i == 0x01 || i == 0x08 || i == 0x0F)))) {
+			opmSendA[opmSendN] = (uint8_t)i;
+			opmSendD[opmSendN] = regs256[i];
+			opmSendN++;
+		}
+	}
+	if (keyRegOrNeg1 >= 0 && opmSendN < 256) {
+		opmSendA[opmSendN] = 0x08;
+		opmSendD[opmSendN] = (uint8_t)keyRegOrNeg1;
+		opmSendN++;
 	}
 	s_opmRegsValid = 1;
 	s_opnaLayout = -1;
@@ -542,6 +558,16 @@ void FmMonShadowSetOpmRegSnapshotEx(const unsigned char* regs256, int keyRegOrNe
 	RefreshOpmKeysFromRegs();
 	s_dirty = 1;
 	LeaveCriticalSection(&s_cs);
+	if (opmSendN) {
+		if (CEmuGimicWriteOk(2)) {
+			const int64_t st = CEmuGimicStamp();
+			for (int i = 0; i < opmSendN; i++)
+				KbsGimicWrite(opmSendA[i], opmSendD[i], st);
+		} else {
+			for (int i = 0; i < opmSendN; i++)
+				CEmuGimicAdpcmPrep(opmSendA[i], opmSendD[i]);
+		}
+	}
 }
 
 void FmMonShadowMarkRegWrite(unsigned addr)
@@ -596,8 +622,20 @@ void FmMonShadowWriteReg(unsigned addr, unsigned data)
 {
 	{
 		unsigned a = addr & 0x1FFu;
-		if (a != 0x2Au)
-			KbsGimicWrite(a, (uint8_t)(data & 0xFFu), (int64_t)s_cur);
+		if (a != 0x2Au && !(CEmuGimicOpnaIsYm2612() && a < 0x20u)
+			&& !CEmuGimicAdpcmDrop(a, data & 0xFFu)) {
+			const unsigned d = data & 0xFFu;
+			const int act = CEmuGimicAdpcmPrep(a, d);
+			if (CEmuGimicWriteOk(1)) {
+				const int64_t st = CEmuGimicStamp();
+				if (act == 1)
+					KbsGimicWritePaced(a, (uint8_t)d, 0);
+				else if (act == 3)
+					KbsGimicWrite(a, (uint8_t)d, 0);
+				else if (act != 2)
+					KbsGimicWrite(a, (uint8_t)d, st);
+			}
+		}
 	}
 	if (FmMonShadowIsHeld())
 		return;
@@ -644,6 +682,8 @@ void FmMonShadowWriteReg(unsigned addr, unsigned data)
 			if (on)
 				s_hitFm[fm]++;
 			s_keyFm[fm] = (uint8_t)(on ? 1 : 0);
+			if (on)
+				s_keySlot[fm] = (uint8_t)(data & 0xF0);
 			s_flushUrgent = 1;
 			if (on) {
 				int bank, slot;
@@ -1567,6 +1607,9 @@ void FmMonShadowApplyOpllRegs(const unsigned char* reg64)
 	if (s_ssgClock == 0 || s_ssgClock == 7987200u)
 		s_ssgClock = 3579545u;
 	int changed = 0;
+	uint8_t ollA[64];
+	uint8_t ollD[64];
+	int ollN = 0;
 	if (IdentHasPlus() && s_opnaLayout >= 0 && !s_msxDevMask) {
 		CompCopy(reg64, 64);
 		changed = 1;
@@ -1576,6 +1619,11 @@ void FmMonShadowApplyOpllRegs(const unsigned char* reg64)
 		s_regs[0x40 + i] = reg64[i];
 		MarkBit(0x40 + i);
 		changed = 1;
+		if (ollN < 64) {
+			ollA[ollN] = (uint8_t)i;
+			ollD[ollN] = reg64[i];
+			ollN++;
+		}
 	}
 	}
 	const int rhythm = (reg64[0x0e] & 0x20) != 0;
@@ -1616,6 +1664,99 @@ void FmMonShadowApplyOpllRegs(const unsigned char* reg64)
 	}
 	if (changed) s_dirty = 1;
 	LeaveCriticalSection(&s_cs);
+	if (ollN) {
+		if (CEmuGimicWriteOk(4)) {
+			const int64_t st = CEmuGimicStamp();
+			for (int i = 0; i < ollN; i++)
+				KbsGimicWrite(ollA[i], ollD[i], st);
+		} else {
+			for (int i = 0; i < ollN; i++)
+				CEmuGimicAdpcmPrep(ollA[i], ollD[i]);
+		}
+	}
+}
+
+void FmMonShadowPushGimic(void)
+{
+	if (!CEmuGimicWriteOk(1) && !CEmuGimicWriteOk(2) && !CEmuGimicWriteOk(3) && !CEmuGimicWriteOk(4))
+		return;
+	uint8_t img[0x200];
+	uint8_t wr[64];
+	int kind = 0;
+	EnsureCs();
+	EnterCriticalSection(&s_cs);
+	memcpy(img, s_regs, sizeof(img));
+	memcpy(wr, s_written, sizeof(wr));
+	if (CEmuGimicWriteOk(1)) kind = 1;
+	else if (CEmuGimicWriteOk(2)) kind = 2;
+	else if (CEmuGimicWriteOk(3)) kind = 3;
+	else if (CEmuGimicWriteOk(4)) kind = 4;
+	LeaveCriticalSection(&s_cs);
+	const int64_t st = CEmuGimicStamp();
+	const int ym2612 = (kind == 1 && CEmuGimicOpnaIsYm2612()) ? 1 : 0;
+	int n = 0;
+	int base = 0;
+	if (kind == 1 || kind == 3) n = 0x200;
+	else if (kind == 2) n = 256;
+	else if (kind == 4) { n = 64; base = 0x40; }
+	if (kind == 1) {
+		/* 2D/2E/2F はアドレス書き。後から書いた方が有効。2F を最後に出す。 */
+		if ((wr[0x2D >> 3] & (uint8_t)(1u << (0x2D & 7))) != 0)
+			KbsGimicWrite(0x2D, 0, st);
+		if ((wr[0x2E >> 3] & (uint8_t)(1u << (0x2E & 7))) != 0)
+			KbsGimicWrite(0x2E, 0, st);
+		if ((wr[0x2F >> 3] & (uint8_t)(1u << (0x2F & 7))) != 0)
+			KbsGimicWrite(0x2F, 0, st);
+		/* 6ch を先に。bank1 の音色が 3ch 扱いのまま残ると最初の音が壊れる。 */
+		KbsGimicWrite(0x29, 0x80, st);
+		/* リセット後の TL=0 は最大音量。書いてないオペレータを先に黙らせる。 */
+		for (int b = 0; b < 2; b++) {
+			if (ym2612 && b == 1) break;
+			const unsigned bank = b ? 0x100u : 0u;
+			for (int op = 0; op < 4; op++) {
+				for (int ch = 0; ch < 3; ch++)
+					KbsGimicWrite(bank + 0x40u + (unsigned)op * 4u + (unsigned)ch, 0x7F, st);
+			}
+		}
+	}
+	for (int i = 0; i < n; i++) {
+		const unsigned addr = (unsigned)(base + i);
+		if ((wr[addr >> 3] & (uint8_t)(1u << (addr & 7))) == 0) continue;
+		if (kind == 2 && i < 0x10 && i != 0x01 && i != 0x08 && i != 0x0F) continue;
+		if (ym2612 && (addr < 0x20u || addr >= 0x100u)) continue;
+		if (addr == 0x2Au) continue;
+		if (kind == 1 && addr >= 0x100u && addr <= 0x110u) continue;
+		if (kind == 1 && addr >= 0x2Du && addr <= 0x2Fu) continue;
+		/* 鳴る系は ADPCM のあと。ここでは音色だけ。 */
+		if (kind == 1 && addr == 0x28u) continue;
+		if (kind == 1 && addr >= 0x07u && addr <= 0x0Du) continue;
+		if (kind == 1 && addr == 0x10u) continue;
+		if (kind == 2 && addr == 0x08u) continue;
+		const unsigned outAddr = (kind == 4) ? (unsigned)i : addr;
+		KbsGimicWrite(outAddr, img[addr], st);
+	}
+}
+
+void FmMonShadowPushAdpcmPlayback(void)
+{
+	if (!CEmuGimicWriteOk(1) || CEmuGimicOpnaIsYm2612()) return;
+	uint8_t img[0x200];
+	uint8_t wr[64];
+	EnsureCs();
+	EnterCriticalSection(&s_cs);
+	memcpy(img, s_regs, sizeof(img));
+	memcpy(wr, s_written, sizeof(wr));
+	LeaveCriticalSection(&s_cs);
+	const int64_t st = CEmuGimicStamp();
+	static const unsigned order[] = {
+		0x101, 0x102, 0x103, 0x104, 0x105, 0x106, 0x107,
+		0x109, 0x10A, 0x10B, 0x10C, 0x10D, 0x10E, 0x10F
+	};
+	for (int i = 0; i < (int)(sizeof(order) / sizeof(order[0])); i++) {
+		const unsigned addr = order[i];
+		if ((wr[addr >> 3] & (uint8_t)(1u << (addr & 7))) == 0) continue;
+		KbsGimicWrite(addr, img[addr], st);
+	}
 }
 
 void FmMonShadowApplyScc(const unsigned* freq12, const unsigned* vol4, unsigned enableMask)
@@ -1992,6 +2133,10 @@ void FmMonShadowSetOplMode(unsigned mode)
 
 void FmMonShadowWriteOplReg(unsigned addr, unsigned data)
 {
+	if (CEmuGimicWriteOk(3))
+		KbsGimicWrite(addr & 0x1FFu, (uint8_t)(data & 0xFFu), CEmuGimicStamp());
+	else
+		CEmuGimicAdpcmPrep(addr & 0x1FFu, data & 0xFFu);
 	EnsureCs();
 	EnterCriticalSection(&s_cs);
 	if (s_oplSuppress) {

@@ -2,6 +2,7 @@
 #include "cemu_chip_opna.h"
 #include "cemu_chip.h"
 #include "../fmmon/fmmon_shadow.h"
+#include "../fmmon/kbs_gimic.h"
 #include "ymfm.h"
 #include "ymfm_opn.h"
 #include <string.h>
@@ -45,6 +46,9 @@ struct CEmuChipOpnaImpl : ymfm::ymfm_interface {
 	/* ADPCM-B: ゲームサンプルRAM（catalog type=adpcm、多くの場合100KB超）。 */
 	uint8_t adpcmB[256 * 1024];
 	unsigned adpcmBSize;
+	/* 実チップへまだ載せていない範囲 [lo, hi)。先読み中のゲーム転送もここに残る。 */
+	unsigned adpcmDirtyLo;
+	unsigned adpcmDirtyHi;
 
 	int allowTimerAIrq; /* 0=mucom88流（タイマBのみ）、1=多くのPC88ドライバ */
 	unsigned dbgFireA, dbgFireB, dbgIrqPulse;
@@ -97,6 +101,8 @@ struct CEmuChipOpnaImpl : ymfm::ymfm_interface {
 		, carrierFadeClamp(0)
 		, adpcmRomSize(0)
 		, adpcmBSize(0)
+		, adpcmDirtyLo(0xFFFFFFFFu)
+		, adpcmDirtyHi(0)
 		, allowTimerAIrq(1)
 		, dbgFireA(0)
 		, dbgFireB(0)
@@ -197,6 +203,8 @@ struct CEmuChipOpnaImpl : ymfm::ymfm_interface {
 			adpcmB[address] = data;
 			if (address + 1 > adpcmBSize)
 				adpcmBSize = address + 1;
+			if (address < adpcmDirtyLo) adpcmDirtyLo = address;
+			if (address + 1 > adpcmDirtyHi) adpcmDirtyHi = address + 1;
 		}
 	}
 
@@ -426,6 +434,8 @@ struct CEmuChipOpnaImpl : ymfm::ymfm_interface {
 	}
 };
 
+static CEmuChipOpnaImpl* g_gimicOpna;
+
 static int32_t CEmuClamp16(int32_t v)
 {
 	if (v > 32767) return 32767;
@@ -477,6 +487,8 @@ void CEmuChipOpnaInit(CEmuChipOpna* c, uint32_t clockHz, int opnaMode, int sampl
 	c->sampleRate = impl->hostRate;
 	c->opnaMode = impl->opnaMode;
 	c->ready = 1;
+	g_gimicOpna = impl;
+	CEmuGimicNoteChip(KBS_GIMIC_CHIP_OPNA, clk, 1);
 }
 
 void CEmuChipOpnaReset(CEmuChipOpna* c)
@@ -531,6 +543,10 @@ void CEmuChipOpnaWrite(CEmuChipOpna* c, uint32_t addr, uint32_t data)
 		   Render はリセット ÷6 のまま進む（vg2 など）。 */
 		if (p == 0 && (data == 0x2D || data == 0x2E || data == 0x2F)) {
 			impl->RefreshChipRate();
+			/* アドレス書きだけでプリスケーラが切替わる。データポート経由だと
+			   シャドウにも実チップにも届かず、PC-98 SOUND BIOS の 2Fh が
+			   リセット ÷6 のままになり音程が 1/3（半分に聞こえる）になる。 */
+			FmMonShadowWriteReg((unsigned)data, 0);
 		}
 		return;
 	}
@@ -721,6 +737,11 @@ void CEmuChipOpnaRender(CEmuChipOpna* c, int16_t* stereo, int frames)
 			stereo[i * 2 + 1] = (int16_t)CEmuSoftKnee16(impl->curR);
 		}
 	}
+	/* 実チップが鳴っている間はソフト側の OPN を出さない。他チップは後から加算する。 */
+	if (CEmuGimicOwns(KBS_GIMIC_CHIP_OPNA)) {
+		for (int i = 0; i < frames * 2; i++)
+			stereo[i] = 48;
+	}
 }
 
 void CEmuChipOpnaSetAdpcmRom(CEmuChipOpna* c, const uint8_t* data, unsigned size, unsigned destOffset)
@@ -747,6 +768,10 @@ void CEmuChipOpnaSetAdpcmB(CEmuChipOpna* c, const uint8_t* data, unsigned size, 
 	memcpy(impl->adpcmB + destOffset, data, n);
 	if (destOffset + n > impl->adpcmBSize)
 		impl->adpcmBSize = destOffset + n;
+	if (destOffset < impl->adpcmDirtyLo)
+		impl->adpcmDirtyLo = destOffset;
+	if (destOffset + n > impl->adpcmDirtyHi)
+		impl->adpcmDirtyHi = destOffset + n;
 }
 
 unsigned CEmuChipOpnaGetAdpcmRomSize(const CEmuChipOpna* c)
@@ -843,10 +868,56 @@ void CEmuChipOpnaClearTimerDebug(CEmuChipOpna* c)
 	impl->dbgClockSum = 0;
 }
 
+int CEmuChipOpnaFlushAdpcmB(int full)
+{
+	CEmuChipOpnaImpl* impl = g_gimicOpna;
+	if (!impl || !KbsGimicDevOk()) return 0;
+	unsigned lo = impl->adpcmDirtyLo;
+	unsigned hi = impl->adpcmDirtyHi;
+	if (full) {
+		lo = 0;
+		hi = impl->adpcmBSize;
+	}
+	if (hi > sizeof(impl->adpcmB)) hi = (unsigned)sizeof(impl->adpcmB);
+	if (lo >= hi) return 0;
+	/* 8bit と 1bit の DRAM は RAM 上の並びが違う。ゲームが鳴らす並びで書かないとノイズになる。 */
+	const uint8_t ctl2 = impl->fmRegs[0x101];
+	const unsigned shift = (ctl2 & 0x02) ? 5u : 2u;
+	const unsigned unit = 1u << shift;
+	lo &= ~(unit - 1u);
+	hi = (hi + unit - 1u) & ~(unit - 1u);
+	if (hi > sizeof(impl->adpcmB)) hi = (unsigned)sizeof(impl->adpcmB);
+	const unsigned startU = lo >> shift;
+	const unsigned endU = (hi >> shift) - 1u;
+	impl->adpcmDirtyLo = 0xFFFFFFFFu;
+	impl->adpcmDirtyHi = 0;
+	KbsGimicSetQueueWait(400);
+	KbsGimicWrite(0x100, 0x01, 0);
+	KbsGimicWrite(0x110, 0x80, 0);
+	KbsGimicWrite(0x100, 0x60, 0);
+	KbsGimicWrite(0x101, (uint8_t)(ctl2 & 0x02), 0);
+	KbsGimicWrite(0x10C, 0xFF, 0);
+	KbsGimicWrite(0x10D, 0xFF, 0);
+	KbsGimicWrite(0x102, (uint8_t)(startU & 0xff), 0);
+	KbsGimicWrite(0x103, (uint8_t)((startU >> 8) & 0xff), 0);
+	KbsGimicWrite(0x104, (uint8_t)(endU & 0xff), 0);
+	KbsGimicWrite(0x105, (uint8_t)((endU >> 8) & 0xff), 0);
+	for (unsigned i = lo; i < hi; i++)
+		KbsGimicWritePaced(0x108, impl->adpcmB[i], 0);
+	KbsGimicWrite(0x100, 0x01, 0);
+	KbsGimicWrite(0x100, 0x00, 0);
+	KbsGimicSetQueueWait(40);
+	return 1;
+}
+
 void CEmuChipOpnaShutdown(CEmuChipOpna* c)
 {
 	if (!c) return;
 	if (c->chip) {
+		if (g_gimicOpna == (CEmuChipOpnaImpl*)c->chip) {
+			g_gimicOpna = NULL;
+			CEmuGimicNoteChip(KBS_GIMIC_CHIP_OPNA, 0, 0);
+		}
 		delete (CEmuChipOpnaImpl*)c->chip;
 		c->chip = NULL;
 	}

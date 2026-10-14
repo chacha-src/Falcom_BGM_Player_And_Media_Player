@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003" DefaultTargets="Build" ToolsVersion="14.0">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="uni_2026_de|Win32">
@@ -642,7 +642,7 @@ if errorlevel 1 exit /b 1</Command>
     <ClCompile Include="CEmu\vendor\np2\glue\np2mem.c" />
     <ClCompile Include="CEmu\vendor\np2\glue\np2io.c" />
     <ClCompile Include="CEmu\fmmon\fmmon_shadow.cpp" />
-    <ClCompile Include="C:\projects\APPLICATION3\kpi_sources_20240712\kpi_decoder\fmmon_common\kbs_gimic.cpp">
+    <ClCompile Include="CEmu\fmmon\kbs_gimic.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="CEmu\fmmon\cemu_fmmon_bind.cpp" />
@@ -1126,6 +1126,7 @@ if errorlevel 1 exit /b 1</Command>
     <ClInclude Include="CEmu\driver\cemu_driver_pc98.h" />
     <ClInclude Include="CEmu\vendor\np2\np2ffi.h" />
     <ClInclude Include="CEmu\fmmon\fmmon_shadow.h" />
+    <ClInclude Include="CEmu\fmmon\kbs_gimic.h" />
     <ClInclude Include="CEmuHelpDlg.h" />
     <ClInclude Include="CEmuCatalogListDlg.h" />
     <ClInclude Include="kb_sasami\source\sasami_fmmon.h" />
@@ -1326,6 +1327,7 @@ if errorlevel 1 exit /b 1</Command>
     <ClCompile Include="CMpQueueDlg.cpp" />
     <ClCompile Include="CMpCommandPaletteDlg.cpp" />
     <ClCompile Include="CMpHelpDlg.cpp" />
+    <ClCompile Include="CPlayProperty.cpp" />
     <ClCompile Include="CMpPlaylistIO.cpp" />
     <ClCompile Include="oggDlg.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">Use</PrecompiledHeader>
@@ -1495,6 +1497,7 @@ if errorlevel 1 exit /b 1</Command>
     <ClInclude Include="CMpQueueDlg.h" />
     <ClInclude Include="CMpCommandPaletteDlg.h" />
     <ClInclude Include="CMpHelpDlg.h" />
+    <ClInclude Include="CPlayProperty.h" />
     <ClInclude Include="CMpPlaylistIO.h" />
     <ClInclude Include="AppMixerMuteCheck.h" />
     <ClInclude Include="AudioDevSync.h" />

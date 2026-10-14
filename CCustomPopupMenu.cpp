@@ -1,4 +1,4 @@
-﻿#include "stdafx.h"
+#include "stdafx.h"
 #include "CCustomPopupMenu.h"
 #include "CCustomControl.h"
 #include "GdiSoft2D.h"
@@ -739,12 +739,12 @@ static COLORREF BlendRGB(COLORREF a, COLORREF b, int t)
 		v[0].Red = (COLOR16)(GetRValue(c0) << 8);
 		v[0].Green = (COLOR16)(GetGValue(c0) << 8);
 		v[0].Blue = (COLOR16)(GetBValue(c0) << 8);
-		v[0].Alpha = 0;
+		v[0].Alpha = 0xFF00;
 		v[1].x = r.right; v[1].y = r.bottom;
 		v[1].Red = (COLOR16)(GetRValue(c1) << 8);
 		v[1].Green = (COLOR16)(GetGValue(c1) << 8);
 		v[1].Blue = (COLOR16)(GetBValue(c1) << 8);
-		v[1].Alpha = 0;
+		v[1].Alpha = 0xFF00;
 		GRADIENT_RECT gr = { 0, 1 };
 		if (!::GradientFill(dc.GetSafeHdc(), v, 2, &gr, 1, GRADIENT_FILL_RECT_V)) {
 			const int h = r.Height();
@@ -763,12 +763,12 @@ static COLORREF BlendRGB(COLORREF a, COLORREF b, int t)
 		v[0].Red = (COLOR16)(GetRValue(c0) << 8);
 		v[0].Green = (COLOR16)(GetGValue(c0) << 8);
 		v[0].Blue = (COLOR16)(GetBValue(c0) << 8);
-		v[0].Alpha = 0;
+		v[0].Alpha = 0xFF00;
 		v[1].x = r.right; v[1].y = r.bottom;
 		v[1].Red = (COLOR16)(GetRValue(c1) << 8);
 		v[1].Green = (COLOR16)(GetGValue(c1) << 8);
 		v[1].Blue = (COLOR16)(GetBValue(c1) << 8);
-		v[1].Alpha = 0;
+		v[1].Alpha = 0xFF00;
 		GRADIENT_RECT gr = { 0, 1 };
 		if (!::GradientFill(dc.GetSafeHdc(), v, 2, &gr, 1, GRADIENT_FILL_RECT_H)) {
 			const int w = r.Width();
@@ -1125,6 +1125,8 @@ static COLORREF BlendRGB(COLORREF a, COLORREF b, int t)
 		const CCC_ThemeFace& f = CCC_ThemeFaceOf();
 		CRect hr = itemRc;
 		hr.DeflateRect(3, 1, 4, 1);
+		if (itemRc.Width() > 0 && itemRc.Height() > 0)
+			dc.FillSolidRect(&itemRc, PopupHotTop());
 		dc.FillSolidRect(itemRc.left + 1, itemRc.top + 1, 4, max(1, itemRc.Height() - 2), CCC_UiTheme().accent);
 		if (f.sel == CCC_FACE_SEL_BAR) {
 			dc.FillSolidRect(itemRc.left + 2, itemRc.top + 2, 3, max(1, itemRc.Height() - 4), CCC_UiTheme().accent);
@@ -1354,6 +1356,7 @@ CCustomPopupMenu::CCustomPopupMenu()
 	, m_stickyCount(0), m_stickyH(0)
 	, m_asSubmenu(FALSE), m_animTick(0), m_lineAnimPhase(0), m_lineAnimStart(0)
 	, m_lineAnimOrigin(0), m_lineAnimOriginY(0), m_flightPad(0), m_chipPresentedAnimTick(-1)
+	, m_chipPresentedHot(-99)
 	, m_bridgePanel(FALSE)
 	, m_skipChrome(FALSE), m_chromeInjected(FALSE), m_previewing(FALSE), m_previewThemeOn(FALSE)
 	, m_bounceIdx(-1), m_nBounce(0), m_suppressEditNotify(FALSE)
@@ -3564,7 +3567,7 @@ void CCustomPopupMenu::BlitOpaqueToWindow(HDC hdcSrc, int w, int h)
 void CCustomPopupMenu::ForceChipPresent()
 {
 	if (!GetSafeHwnd()) return;
-	if (m_chipPresentedAnimTick == m_animTick)
+	if (m_chipPresentedAnimTick == m_animTick && m_chipPresentedHot == m_hot)
 		return;
 	if (!(GetExStyle() & WS_EX_LAYERED))
 		ModifyStyleEx(0, WS_EX_LAYERED);
@@ -3582,6 +3585,7 @@ void CCustomPopupMenu::ForceChipPresent()
 	PaintToDC(mDC);
 	PresentChipLayered(mDC.GetSafeHdc(), rc.Width(), rc.Height());
 	m_chipPresentedAnimTick = m_animTick;
+	m_chipPresentedHot = m_hot;
 	mDC.SelectObject(ob);
 }
 
@@ -3664,6 +3668,18 @@ void CCustomPopupMenu::InvalidateBgOnly()
 			rgn.CombineRgn(&rgn, &child, RGN_DIFF);
 	}
 	InvalidateRgn(&rgn, FALSE);
+}
+
+void CCustomPopupMenu::PresentHotNow()
+{
+	if (!GetSafeHwnd()) return;
+	const BOOL chipFlight = (m_lineAnimPhase != 0 && UsesRowChipFlight(PopupAnimStyle()));
+	if (chipFlight) {
+		m_chipPresentedAnimTick = -1;
+		ForceChipPresent();
+	} else {
+		UpdateWindow();
+	}
 }
 
 // 本文スクロール（sticky より下のみ）。先に SyncEmbeddedChildren。
@@ -3878,6 +3894,7 @@ void CCustomPopupMenu::SetHot(int idx)
 					m_hot = m_openSub;
 					InvalidateBgOnly();
 					UpdateTip();
+					PresentHotNow();
 				}
 				return;
 			}
@@ -3906,12 +3923,14 @@ void CCustomPopupMenu::SetHot(int idx)
 			m_hot = -1;
 			InvalidateBgOnly();
 			UpdateTip();
+			PresentHotNow();
 			CloseOpenSub();
 			return;
 		}
 		m_hot = -1;
 		InvalidateBgOnly();
 		UpdateTip();
+		PresentHotNow();
 		return;
 	}
 
@@ -3919,6 +3938,7 @@ void CCustomPopupMenu::SetHot(int idx)
 	// Invalidate(FALSE) は BufferedPaint が子 HWND を塗り潰す。背景のみ。
 	InvalidateBgOnly();
 	UpdateTip();
+	PresentHotNow();
 	if (idx >= 0 && idx < m_itemCount) {
 		const CCustomPopupItem& it = m_items[idx];
 		if (it.id == CCUSTOM_POPUP_ID_FONT_FACE && it.text[0])
@@ -4045,8 +4065,7 @@ void CCustomPopupMenu::PaintToDC(CDC& dc)
 		}
 
 		const BOOL interactive = IsInteractiveKind(it.kind);
-		const BOOL hot = (i == m_hot && it.enabled && !interactive
-			&& (m_lineAnimPhase == 0 || snapAtRest));
+		const BOOL hot = (i == m_hot && it.enabled && !interactive);
 		if (hot) DrawHotPill(dc, vr);
 
 		const COLORREF bgRef = PopupBg();
@@ -4328,7 +4347,8 @@ void CCustomPopupMenu::OnPaint()
 	if (r.Width() <= 0 || r.Height() <= 0) return;
 	const BOOL chipFlight = (m_lineAnimPhase != 0 && UsesRowChipFlight(PopupAnimStyle()));
 	// タイマの ForceChipPresent が同じコマを既に ULW している。二重 PaintToDC しない。
-	if (chipFlight && m_chipPresentedAnimTick == m_animTick)
+	// ただし m_hot が変わったホバーは同じ tick でも描き直す。
+	if (chipFlight && m_chipPresentedAnimTick == m_animTick && m_chipPresentedHot == m_hot)
 		return;
 
 	// 子 HWND をクリップから除外（rcPaint は外接矩形なので InvalidateRgn だけでは足りない）
@@ -4361,6 +4381,7 @@ void CCustomPopupMenu::OnPaint()
 	if (chipFlight) {
 		PresentChipLayered(mDC.GetSafeHdc(), r.Width(), r.Height());
 		m_chipPresentedAnimTick = m_animTick;
+		m_chipPresentedHot = m_hot;
 		mDC.SelectObject(ob);
 		return;
 	}

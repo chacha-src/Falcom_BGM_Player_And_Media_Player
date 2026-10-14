@@ -5796,7 +5796,7 @@ BEGIN
     0x9248, 0xfe43, 0x20ad, 0xd260, 0xb605, 0x2965, 0x395c, 0x1b7b, 0xaa01, 
     0xf9c7, 0x3963, 0x2823, 0xd0b0, 0xd249, 0xe525, 0xb28c, 0xf0b7, 0xb6c6, 
     0xdfbf, 0xda08, 0x8f7d, 0x744d, 0xff7f, 0xbfef, 0xbfef, 0xbfef, 0xbfef, 
-    0xbfef, 0xbfef, 0xbfef, 0xbfef, 0xbfef, "\275" 
+    0xbfef, 0xbfef, 0xbfef, 0xbfef, 0xbfef, 0xbfef, "\275" 
 END
 
 IDR_S3TEX_R_OIL RCDATA 
@@ -9476,7 +9476,7 @@ BEGIN
     0x2375, 0x947e, 0xc8b5, 0xace6, 0x348e, 0xb698, 0x86a7, 0x278d, 0xb6d2, 
     0x601f, 0xf464, 0x388c, 0xed89, 0x9f60, 0xcdcb, 0x5c7a, 0x8100, 0x88f9, 
     0xcefd, 0xdbee, 0x9f88, 0x6e8d, 0x6c1f, 0xaf0c, 0xff47, 0xbfef, 0xbfef, 
-    0xbfef, 0xbfef, 0xbfef, 0xbfef, 0xbfef, 0xbfef, 0xbfef, "\275" 
+    0xbfef, 0xbfef, 0xbfef, 0xbfef, 0xbfef, 0xbfef, 0xbfef, 0xbfef, "\275" 
 END
 
 IDR_S3TEX_R_NIGHT       RCDATA                  "res\\s3tex\\r_night.png"
@@ -27561,7 +27561,7 @@ BEGIN
     0x8196, 0x5057, 0xb63f, 0x403d, 0x4e62, 0xebd5, 0x710b, 0xa7c3, 0x76d9, 
     0xcc92, 0x94c9, 0xb068, 0x357d, 0x57ce, 0xec71, 0xd347, 0x9f93, 0xd363, 
     0xb1eb, 0x73ba, 0x9287, 0x63d7, 0x7b52, 0x396c, 0xff9f, 0xbfef, 0xbfef, 
-    0xbfef, 0xbfef, 0xbfef, 0xbfef, 0xbfef, 0xbfef, 0xbfef, "\275" 
+    0xbfef, 0xbfef, 0xbfef, 0xbfef, 0xbfef, 0xbfef, 0xbfef, 0xbfef, "\275" 
 END
 
 IDR_S3TEX_R_MESA RCDATA 
@@ -30751,7 +30751,8 @@ BEGIN
     0xb992, 0x9648, 0x03c5, 0xbb14, 0x4a8c, 0x6fc3, 0x20e2, 0xe75f, 0x2795, 
     0xdb4c, 0xa263, 0x4692, 0x4151, 0x2d5c, 0x1e6d, 0x1c72, 0x1fa3, 0x0c4b, 
     0x4862, 0x4843, 0x16a0, 0x205b, 0x3b67, 0x8e1e, 0x55a9, 0xffb3, 0xbfef, 
-    0xbfef, 0xbfef, 0xbfef, 0xbfef, 0xbfef, 0xbfef, 0xbfef, 0xbfef, "\275" 
+    0xbfef, 0xbfef, 0xbfef, 0xbfef, 0xbfef, 0xbfef, 0xbfef, 0xbfef, 0xbfef, 
+    "\275" 
 END
 
 IDR_S3TEX_R_CLOUD RCDATA 
@@ -33484,7 +33485,7 @@ BEGIN
     0x50ed, 0x6e55, 0xb615, 0x25de, 0x2aa6, 0x5038, 0x747a, 0xaae9, 0xc8a1, 
     0x49b4, 0x7965, 0xabb8, 0x220a, 0xeb40, 0xe6f5, 0x2f80, 0xe3c4, 0xd53f, 
     0x142c, 0xc0c5, 0x4ca6, 0x5fef, 0x504d, 0xff7f, 0xbfef, 0xbfef, 0xbfef, 
-    0xbfef, 0xbfef, 0xbfef, 0xbfef, 0xbfef, 0xbfef, "\275" 
+    0xbfef, 0xbfef, 0xbfef, 0xbfef, 0xbfef, 0xbfef, 0xbfef, "\275" 
 END
 
 IDR_S3TEX_R_CRAFT       RCDATA                  "res\\s3tex\\r_craft.png"
@@ -59945,7 +59946,7 @@ BEGIN
     0x68e2, 0x3214, 0x270e, 0x1db9, 0x2d5f, 0x1d45, 0x6642, 0xe834, 0xa256, 
     0xb599, 0x1e32, 0x7564, 0xf55b, 0x7504, 0x8feb, 0x854c, 0x9ace, 0x0031, 
     0x26b6, 0xffdc, 0xbfef, 0xbfef, 0xbfef, 0xbfef, 0xbfef, 0xbfef, 0xbfef, 
-    0xbfef, 0xbfef, "\275" 
+    0xbfef, 0xbfef, 0xbfef, "\275" 
 END
 
 IDR_S3TEX_M_FLOOR3 RCDATA 
@@ -72849,7 +72850,8 @@ BEGIN
     0xdae5, 0x42de, 0x67bf, 0x815e, 0xb364, 0x926a, 0xc233, 0x6d41, 0xe102, 
     0x2234, 0x6491, 0xb020, 0x0620, 0x257e, 0x5649, 0xae07, 0x89ac, 0x9ce9, 
     0x4d87, 0xdef4, 0xb338, 0xaaa4, 0xd94a, 0xfa56, 0xbed7, 0xff51, 0xbfef, 
-    0xbfef, 0xbfef, 0xbfef, 0xbfef, 0xbfef, 0xbfef, 0xbfef, 0xbfef, "\275" 
+    0xbfef, 0xbfef, 0xbfef, 0xbfef, 0xbfef, 0xbfef, 0xbfef, 0xbfef, 0xbfef, 
+    "\275" 
 END
 
 IDR_S3TEX_M_MIRWALL RCDATA 
@@ -84760,7 +84762,7 @@ BEGIN
     0x2b7d, 0xa435, 0x49db, 0x7a68, 0x82ed, 0x1208, 0x1260, 0xea6a, 0xba60, 
     0x22db, 0x9d46, 0xd4f3, 0x4083, 0xb2ab, 0xdcc8, 0x4fd6, 0x9923, 0xc7a0, 
     0x65ab, 0x32bc, 0x1980, 0x8f91, 0x12c5, 0xffd7, 0xbfef, 0xbfef, 0xbfef, 
-    0xbfef, 0xbfef, 0xbfef, 0xbfef, 0xbfef, 0xbfef, "\275" 
+    0xbfef, 0xbfef, 0xbfef, 0xbfef, 0xbfef, 0xbfef, 0xbfef, "\275" 
 END
 
 IDR_S3TEX_R_FOREST_D RCDATA 
@@ -94133,7 +94135,8 @@ BEGIN
     0x830a, 0x1b23, 0xf78d, 0x810a, 0x1942, 0x5a52, 0xab54, 0xaccb, 0x8c5f, 
     0x22b5, 0x5658, 0xeaac, 0x29d2, 0xc808, 0x1472, 0xc983, 0x8f64, 0x8207, 
     0x7c42, 0xb5f4, 0xd60c, 0xf153, 0xab18, 0x123b, 0xf87c, 0xff9f, 0xbfef, 
-    0xbfef, 0xbfef, 0xbfef, 0xbfef, 0xbfef, 0xbfef, 0xbfef, 0xbfef, "\275" 
+    0xbfef, 0xbfef, 0xbfef, 0xbfef, 0xbfef, 0xbfef, 0xbfef, 0xbfef, 0xbfef, 
+    "\275" 
 END
 
 IDR_S3TEX_R_RUINS_D     RCDATA                  "res\\s3tex\\r_ruins_d.png"
@@ -100684,7 +100687,7 @@ BEGIN
     0x7f49, 0x9112, 0xfeae, 0x7b83, 0x2d92, 0xf6c9, 0xc6df, 0xe42b, 0x2ada, 
     0x90a4, 0x5527, 0x8e90, 0x11c3, 0x98a5, 0x80d8, 0x3807, 0xd410, 0xa864, 
     0xff9f, 0xbfef, 0xbfef, 0xbfef, 0xbfef, 0xbfef, 0xbfef, 0xbfef, 0xbfef, 
-    0xbfef, "\275" 
+    0xbfef, 0xbfef, "\275" 
 END
 
 IDR_S3TEX_R_NIGHT_D RCDATA 
@@ -106915,7 +106918,7 @@ BEGIN
     0x1113, 0x0472, 0xc1da, 0xda23, 0xd128, 0xc3ec, 0xf7bd, 0x6804, 0x7fb9, 
     0x82c8, 0x78e5, 0x451e, 0xe648, 0x4779, 0x6280, 0xe316, 0x4982, 0xd9fc, 
     0x7eb3, 0xea3c, 0xba36, 0xff29, 0xbfef, 0xbfef, 0xbfef, 0xbfef, 0xbfef, 
-    0xbfef, 0xbfef, 0xbfef, 0xbfef, "\275" 
+    0xbfef, 0xbfef, 0xbfef, 0xbfef, 0xbfef, "\275" 
 END
 
 IDR_S3TEX_R_UNDER_D RCDATA 
@@ -121241,7 +121244,7 @@ BEGIN
     0x4dd1, 0x22ce, 0x07d0, 0x8032, 0x93b2, 0x4c2f, 0x7c9a, 0x9684, 0x557f, 
     0x4b12, 0x4f6f, 0xe577, 0x275f, 0x2ee8, 0x91b5, 0x06bf, 0x1f79, 0x7df5, 
     0x8886, 0x8d97, 0xff97, 0xbfef, 0xbfef, 0xbfef, 0xbfef, 0xbfef, 0xbfef, 
-    0xbfef, 0xbfef, 0xbfef, "\275" 
+    0xbfef, 0xbfef, 0xbfef, 0xbfef, "\275" 
 END
 
 IDR_S3TEX_R_MESA_D      RCDATA                  "res\\s3tex\\r_mesa_d.png"
@@ -124434,7 +124437,7 @@ BEGIN
     0x3f98, 0xd3cc, 0x72a2, 0x0193, 0x084b, 0xc0dc, 0x68df, 0x6ac6, 0x6461, 
     0x27d7, 0x6782, 0xb68b, 0x7173, 0x1e08, 0x93ab, 0x1e94, 0xc1c7, 0x66f4, 
     0x2ce2, 0x8691, 0xfa7c, 0x6bab, 0xaad9, 0xff47, 0xbfef, 0xbfef, 0xbfef, 
-    0xbfef, 0xbfef, 0xbfef, 0xbfef, 0xbfef, 0xbfef, "\275" 
+    0xbfef, 0xbfef, 0xbfef, 0xbfef, 0xbfef, 0xbfef, 0xbfef, "\275" 
 END
 
 IDR_S3TEX_R_OBS         RCDATA                  "res\\s3tex\\r_obs.png"
@@ -147190,7 +147193,7 @@ BEGIN
     0x0e4d, 0x28a2, 0x84b7, 0x7055, 0xf290, 0xbf08, 0xd195, 0x7a0b, 0x2a6b, 
     0xddc8, 0x1897, 0xd6a6, 0xffe2, 0x1b3f, 0x8bd5, 0x92c0, 0xe232, 0x0078, 
     0x0000, 0x4900, 0x4e45, 0xae44, 0x6042, 0xbfef, 0xbfef, 0xbfef, 0xbfef, 
-    0xbfef, 0xbfef, 0xbfef, 0xbfef, 0xbfef, "\275" 
+    0xbfef, 0xbfef, 0xbfef, 0xbfef, 0xbfef, 0xbfef, "\275" 
 END
 
 IDR_S3TEX_M_WALL2_D     RCDATA                  "res\\s3tex\\m_wall2_d.png"
@@ -159388,7 +159391,7 @@ BEGIN
     0x4150, 0xaea2, 0x92c6, 0x2796, 0x8be3, 0x4a59, 0x925d, 0x5c58, 0x03a9, 
     0xc02b, 0x95aa, 0x69eb, 0xffb4, 0x5b0f, 0x7953, 0x72d3, 0x636d, 0x00eb, 
     0x0000, 0x4900, 0x4e45, 0xae44, 0x6042, 0xbfef, 0xbfef, 0xbfef, 0xbfef, 
-    0xbfef, 0xbfef, 0xbfef, 0xbfef, 0xbfef, "\275" 
+    0xbfef, 0xbfef, 0xbfef, 0xbfef, 0xbfef, 0xbfef, "\275" 
 END
 
 IDR_S3TEX_M_FLOOR0_D    RCDATA                  "res\\s3tex\\m_floor0_d.png"
@@ -164576,7 +164579,7 @@ BEGIN
     0x7655, 0x2cc9, 0xba71, 0x7f21, 0x7d34, 0xf7c5, 0xebe2, 0x75e8, 0x459a, 
     0x45b3, 0x72d5, 0xc526, 0x239f, 0x88a8, 0x8026, 0xeb82, 0x3016, 0xe468, 
     0x7ca2, 0x2892, 0xef6d, 0x684a, 0xadf9, 0xff20, 0xbfef, 0xbfef, 0xbfef, 
-    0xbfef, 0xbfef, 0xbfef, 0xbfef, 0xbfef, 0xbfef, "\275" 
+    0xbfef, 0xbfef, 0xbfef, 0xbfef, 0xbfef, 0xbfef, 0xbfef, "\275" 
 END
 
 IDR_S3TEX_M_FLOOR3_D RCDATA 
@@ -186352,7 +186355,7 @@ BEGIN
     0x0842, 0x8421, 0x4210, 0x2108, 0x1084, 0x0842, 0x8421, 0x4210, 0x2108, 
     0xe7c4, 0x7f8e, 0xf404, 0xcc89, 0xc1d9, 0x6a33, 0x009a, 0x0000, 0x4900, 
     0x4e45, 0xae44, 0x6042, 0xbfef, 0xbfef, 0xbfef, 0xbfef, 0xbfef, 0xbfef, 
-    0xbfef, 0xbfef, 0xbfef, "\275" 
+    0xbfef, 0xbfef, 0xbfef, 0xbfef, "\275" 
 END
 
 IDR_S3TEX_R_ITEM RCDATA 
@@ -188807,7 +188810,7 @@ BEGIN
     0x2040, 0x0810, 0x0204, 0x4081, 0x1020, 0x0408, 0x8102, 0x2040, 0x0810, 
     0x6304, 0xffc3, 0x250f, 0xc546, 0xf152, 0x0b45, 0x00c0, 0x0000, 0x4900, 
     0x4e45, 0xae44, 0x6042, 0xbfef, 0xbfef, 0xbfef, 0xbfef, 0xbfef, 0xbfef, 
-    0xbfef, 0xbfef, 0xbfef, "\275" 
+    0xbfef, 0xbfef, 0xbfef, 0xbfef, "\275" 
 END
 
 IDR_S3TEX_M_ITEM        RCDATA                  "res\\s3tex\\m_item.png"
@@ -194926,7 +194929,7 @@ BEGIN
     0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 
     0x0000, 0xb800, 0xfdb9, 0xc03f, 0x25a0, 0x670e, 0x4d80, 0x00c8, 0x0000, 
     0x4900, 0x4e45, 0xae44, 0x6042, 0xbfef, 0xbfef, 0xbfef, 0xbfef, 0xbfef, 
-    0xbfef, 0xbfef, 0xbfef, 0xbfef, "\275" 
+    0xbfef, 0xbfef, 0xbfef, 0xbfef, 0xbfef, "\275" 
 END
 
 IDR_S3TEX_M_SKY2        RCDATA                  "res\\s3tex\\m_sky2.png"
@@ -201657,6 +201660,7 @@ BEGIN
     CONTROL         "x3.0",IDC_CHECK_CE3,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,54,225,22,10
     CONTROL         "x4.0",IDC_CHECK_CE4,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,77,225,22,10
     CONTROL         "x5.0",IDC_CHECK_CE5,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,101,225,22,10
+    CONTROL         "G.I.M.I.C",IDC_CHECK_CEMU_GIMIC,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,132,225,70,10
     LTEXT           "MIDI再生",IDC_STATIC_MID_PREFER,7,241,40,8
     CONTROL         "KPI優先",IDC_MID_PREFER_KPI,"Button",BS_AUTORADIOBUTTON | WS_GROUP | WS_TABSTOP,48,240,52,10
     CONTROL         "VST優先",IDC_MID_PREFER_VST,"Button",BS_AUTORADIOBUTTON | WS_TABSTOP,102,240,52,10
@@ -202223,6 +202227,126 @@ BEGIN
     CONTROL         "",IDC_MPH_TABS,"SysTabControl32",WS_TABSTOP,7,7,586,24
     PUSHBUTTON      "Copy",IDC_MPH_COPY,7,354,100,18
     CONTROL         "",IDC_MPH_BODY,"Static",SS_OWNERDRAW | SS_NOTIFY,7,36,586,310
+END
+
+IDD_PLAYPROP DIALOGEX 0, 0, 392, 300
+STYLE DS_SETFONT | WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME
+CAPTION "プロパティ"
+FONT 9, "メイリオ", 400, 0, 0x80
+BEGIN
+    CONTROL         "",IDC_PP_TABS,"SysTabControl32",WS_CLIPSIBLINGS | WS_TABSTOP,6,6,380,270
+    DEFPUSHBUTTON   "OK",IDOK,196,282,50,14
+    PUSHBUTTON      "キャンセル",IDCANCEL,250,282,70,14
+    PUSHBUTTON      "適用",IDC_PP_APPLY,324,282,50,14
+END
+
+IDD_PLAYPROP_TAB1 DIALOGEX 0, 0, 364, 248
+STYLE DS_SETFONT | DS_CONTROL | WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_CLIPCHILDREN
+FONT 9, "メイリオ", 400, 0, 0x80
+BEGIN
+    GROUPBOX        "プレイリスト",IDC_SYOSAI_GRP_EDIT,6,4,352,78,WS_CLIPSIBLINGS
+    LTEXT           "名前",IDC_SYOSAI_LBL_NAME,12,16,36,8
+    EDITTEXT        IDC_EDIT1,52,14,300,12,ES_AUTOHSCROLL
+    LTEXT           "アーティスト",IDC_SYOSAI_LBL_ART,12,30,36,8
+    EDITTEXT        IDC_EDIT4,52,28,300,12,ES_AUTOHSCROLL
+    LTEXT           "アルバム",IDC_SYOSAI_LBL_ALB,12,44,36,8
+    EDITTEXT        IDC_EDIT5,52,42,300,12,ES_AUTOHSCROLL
+    LTEXT           "パス",IDC_SYOSAI_LBL_FILE,12,58,36,8
+    EDITTEXT        IDC_EDIT6,52,56,258,22,ES_MULTILINE | ES_AUTOVSCROLL | ES_WANTRETURN | WS_VSCROLL
+    PUSHBUTTON      "参照",IDC_SYOSAI_BTN_BROWSE,314,56,38,14
+    GROUPBOX        "タグ情報",IDC_SYOSAI_GRP_TAG,6,84,352,58,WS_CLIPSIBLINGS
+    LTEXT           "年",IDC_SYOSAI_LBL_YEAR,12,96,16,8
+    EDITTEXT        IDC_EDIT7,52,94,40,12,ES_AUTOHSCROLL
+    LTEXT           "Track",IDC_SYOSAI_LBL_TRACK,96,96,24,8
+    EDITTEXT        IDC_EDIT9,122,94,32,12,ES_AUTOHSCROLL
+    LTEXT           "ジャンル",IDC_SYOSAI_LBL_GENRE,160,96,28,8
+    EDITTEXT        IDC_EDIT10,190,94,162,12,ES_AUTOHSCROLL
+    LTEXT           "コメント",IDC_SYOSAI_LBL_CMT,12,112,36,8
+    EDITTEXT        IDC_EDIT11,52,110,300,16,ES_MULTILINE | ES_AUTOVSCROLL | WS_VSCROLL
+    PUSHBUTTON      "タグ→PL",IDC_SYOSAI_BTN_TAG2PL,12,130,50,12
+    PUSHBUTTON      "再読込",IDC_SYOSAI_BTN_RELOADTAG,66,130,44,12
+    PUSHBUTTON      "タグ書込",IDC_SYOSAI_BTN_WRITETAG,114,130,50,12
+    GROUPBOX        "内部情報",IDC_SYOSAI_GRP_INTERNAL,6,144,352,38,WS_CLIPSIBLINGS
+    LTEXT           "内部ID",IDC_SYOSAI_LBL_ID,12,156,28,8
+    EDITTEXT        IDC_EDIT2,52,154,40,12,ES_AUTOHSCROLL | ES_READONLY
+    LTEXT           "Game",IDC_SYOSAI_LBL_GAME,96,156,24,8
+    EDITTEXT        IDC_EDIT3,122,154,230,12,ES_AUTOHSCROLL | ES_READONLY
+    LTEXT           "時間",IDC_SYOSAI_LBL_TIME,12,170,24,8
+    EDITTEXT        IDC_EDIT12,52,168,40,12,ES_AUTOHSCROLL | ES_READONLY
+    LTEXT           "ループ",IDC_SYOSAI_LBL_LOOP,96,170,24,8
+    EDITTEXT        IDC_EDIT13,122,168,48,12,ES_AUTOHSCROLL
+    EDITTEXT        IDC_EDIT14,174,168,48,12,ES_AUTOHSCROLL
+    LTEXT           "Idx",IDC_SYOSAI_LBL_RET2,226,170,14,8
+    EDITTEXT        IDC_EDIT15,242,168,110,12,ES_AUTOHSCROLL | ES_READONLY
+    LTEXT           "",IDC_SYOSAI_LBL_STATUS,6,186,352,8
+    LTEXT           "",IDC_SYOSAI_LBL_PARAM,6,196,352,8
+    LTEXT           "",IDC_PP_FILE_META,6,206,352,8
+    PUSHBUTTON      "Explorer",IDOK999,6,218,50,12
+    PUSHBUTTON      "パスコピー",IDC_SYOSAI_BTN_COPYPATH,60,218,50,12
+    PUSHBUTTON      "名コピー",IDC_SYOSAI_BTN_COPYNAME,114,218,44,12
+    PUSHBUTTON      "再生詳細",IDC_SYOSAI_BTN_PROTOOLS,162,218,50,12
+    PUSHBUTTON      "[SAV]削除",IDC_SYOSAI_BTN_CLEARPARAM,216,218,50,12
+END
+
+IDD_PLAYPROP_TAB2 DIALOGEX 0, 0, 364, 248
+STYLE DS_SETFONT | DS_CONTROL | WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_CLIPCHILDREN
+FONT 9, "メイリオ", 400, 0, 0x80
+BEGIN
+    LTEXT           "タイトル",IDC_TAGEDIT_TITLE_L,6,8,44,8
+    EDITTEXT        IDC_TAGEDIT_TITLE,54,6,304,12,ES_AUTOHSCROLL
+    LTEXT           "アーティスト",IDC_TAGEDIT_ARTIST_L,6,24,44,8
+    EDITTEXT        IDC_TAGEDIT_ARTIST,54,22,304,12,ES_AUTOHSCROLL
+    LTEXT           "アルバム",IDC_TAGEDIT_ALBUM_L,6,40,44,8
+    EDITTEXT        IDC_TAGEDIT_ALBUM,54,38,304,12,ES_AUTOHSCROLL
+    LTEXT           "年",IDC_TAGEDIT_YEAR_L,6,56,44,8
+    EDITTEXT        IDC_TAGEDIT_YEAR,54,54,64,12,ES_AUTOHSCROLL
+    LTEXT           "トラック",IDC_TAGEDIT_TRACK_L,124,56,36,8
+    EDITTEXT        IDC_TAGEDIT_TRACK,164,54,48,12,ES_AUTOHSCROLL
+    LTEXT           "ジャンル",IDC_TAGEDIT_GENRE_L,6,72,44,8
+    EDITTEXT        IDC_TAGEDIT_GENRE,54,70,304,12,ES_AUTOHSCROLL
+    LTEXT           "コメント",IDC_TAGEDIT_COMMENT_L,6,88,44,8
+    EDITTEXT        IDC_TAGEDIT_COMMENT,54,86,304,12,ES_AUTOHSCROLL
+    LTEXT           "ジャケット",IDC_TAGEDIT_COVER_L,6,106,44,8
+    CONTROL         "",IDC_TAGEDIT_COVER_PIC,"Static",SS_BITMAP | SS_CENTERIMAGE | WS_BORDER,54,104,44,44
+    CTEXT           "JPG/PNGをここにドロップ",IDC_TAGEDIT_COVER,104,110,198,32,SS_CENTERIMAGE | WS_BORDER
+    PUSHBUTTON      "解除",IDC_TAGEDIT_COVER_CLEAR,308,118,50,14
+    LTEXT           "",IDC_TAGEDIT_HINT,6,154,352,10
+    LTEXT           "",IDC_TAGEDIT_STATUS,6,166,352,10
+    PUSHBUTTON      "タグ書込",IDC_TAGEDIT_SAVE,6,180,64,14
+END
+
+IDD_PLAYPROP_TAB3 DIALOGEX 0, 0, 364, 248
+STYLE DS_SETFONT | DS_CONTROL | WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_CLIPCHILDREN
+FONT 9, "メイリオ", 400, 0, 0x80
+BEGIN
+    LTEXT           "",IDC_PP_KPI_NAME,6,4,352,10
+    LTEXT           "情報",IDC_PP_INFO_L,6,16,48,8
+    CONTROL         "",IDC_PP_INFO,"SysListView32",LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS | LVS_ALIGNLEFT | WS_BORDER | WS_TABSTOP,6,26,352,80
+    LTEXT           "設定",IDC_PP_CFG_L,6,110,48,8
+    CONTROL         "",IDC_PP_CFG,"SysListView32",LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS | LVS_ALIGNLEFT | WS_BORDER | WS_TABSTOP,6,120,352,72
+    EDITTEXT        IDC_PP_CFGHELP,6,196,352,44,ES_MULTILINE | ES_AUTOVSCROLL | ES_READONLY | ES_WANTRETURN | WS_VSCROLL | NOT WS_TABSTOP
+END
+
+IDD_PLAYPROP_TAB4 DIALOGEX 0, 0, 364, 248
+STYLE DS_SETFONT | DS_CONTROL | WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_CLIPCHILDREN
+FONT 9, "メイリオ", 400, 0, 0x80
+BEGIN
+    LTEXT           "",IDC_PP_MORE_HINT,6,4,352,16
+    PUSHBUTTON      "Explorer",IDC_PP_MORE_EXPLORER,6,24,114,16
+    PUSHBUTTON      "フォルダを開く",IDC_PP_MORE_OPENFOLDER,126,24,114,16
+    PUSHBUTTON      "パスコピー",IDC_PP_MORE_COPYPATH,246,24,114,16
+    PUSHBUTTON      "名コピー",IDC_PP_MORE_COPYNAME,6,44,114,16
+    PUSHBUTTON      "再生詳細",IDC_PP_MORE_PROTOOLS,126,44,114,16
+    PUSHBUTTON      "[SAV]削除",IDC_PP_MORE_CLEARPARAM,246,44,114,16
+    PUSHBUTTON      "WAV書き出し",IDC_PP_MORE_WAV,6,64,114,16
+    PUSHBUTTON      "変換",IDC_PP_MORE_TRANSCODE,126,64,114,16
+    PUSHBUTTON      "映像抽出",IDC_PP_MORE_VIDEO,246,64,114,16
+    PUSHBUTTON      "BPM",IDC_PP_MORE_BPM,6,84,114,16
+    PUSHBUTTON      "まとめて編集",IDC_PP_MORE_TAGBATCH,126,84,114,16
+    PUSHBUTTON      "キューに追加",IDC_PP_MORE_QUEUE,246,84,114,16
+    PUSHBUTTON      "次に再生",IDC_PP_MORE_PLAYNEXT,6,104,114,16
+    PUSHBUTTON      "同じフォルダを追加",IDC_PP_MORE_ADDSAME,126,104,114,16
+    PUSHBUTTON      "MIDI書き出し",IDC_PP_MORE_MIDEXPORT,246,104,114,16
 END
 
 IDD_CEMU_HELP DIALOGEX 0, 0, 640, 420
@@ -203803,7 +203927,7 @@ END
 //
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 0,9,1,1544
+ FILEVERSION 0,9,1,1545
  PRODUCTVERSION 1,0,0,1
  FILEFLAGSMASK 0x3fL
 #ifdef _DEBUG
@@ -203821,10 +203945,10 @@ BEGIN
         BEGIN
             VALUE "Comments", "Falcom BGM Player & Media Player"
             VALUE "CompanyName", "Pre Prayer Power Soft"
-            VALUE "FileDescription", "Falcom BGM Player & Media Player Ver 0.9a Rel.2026.10.13 v1544"
-            VALUE "FileVersion", "0.9.1.1544"
+            VALUE "FileDescription", "Falcom BGM Player & Media Player Ver 0.9a Rel.2026.10.14 v1545"
+            VALUE "FileVersion", "0.9.1.1545"
             VALUE "InternalName", "ogg YS/ED bgm"
-            VALUE "LegalCopyright", "Copyright (C) 2026.10.13 v1544"
+            VALUE "LegalCopyright", "Copyright (C) 2026.10.14 v1545"
             VALUE "LegalTrademarks", "Pre Prayer Power Soft"
             VALUE "OriginalFilename", "oggYSEDbgm_uni_avx2.exe"
             VALUE "ProductName", "Falcom BGM Player & Media Player"
@@ -204145,6 +204269,26 @@ BEGIN
     END
 
     IDD_MP_CHEATSHEET, DIALOG
+    BEGIN
+    END
+
+    IDD_PLAYPROP, DIALOG
+    BEGIN
+    END
+
+    IDD_PLAYPROP_TAB1, DIALOG
+    BEGIN
+    END
+
+    IDD_PLAYPROP_TAB2, DIALOG
+    BEGIN
+    END
+
+    IDD_PLAYPROP_TAB3, DIALOG
+    BEGIN
+    END
+
+    IDD_PLAYPROP_TAB4, DIALOG
     BEGIN
     END
 
@@ -204746,6 +204890,31 @@ BEGIN
 END
 
 IDD_MP_CHEATSHEET AFX_DIALOG_LAYOUT
+BEGIN
+    0
+END
+
+IDD_PLAYPROP AFX_DIALOG_LAYOUT
+BEGIN
+    0
+END
+
+IDD_PLAYPROP_TAB1 AFX_DIALOG_LAYOUT
+BEGIN
+    0
+END
+
+IDD_PLAYPROP_TAB2 AFX_DIALOG_LAYOUT
+BEGIN
+    0
+END
+
+IDD_PLAYPROP_TAB3 AFX_DIALOG_LAYOUT
+BEGIN
+    0
+END
+
+IDD_PLAYPROP_TAB4 AFX_DIALOG_LAYOUT
 BEGIN
     0
 END

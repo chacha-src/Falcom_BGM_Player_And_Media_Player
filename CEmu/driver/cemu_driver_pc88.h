@@ -17,6 +17,8 @@ void CEmuPc88IrqResetCount();
    フレーム数。プローブ専用。 */
 unsigned CEmuPc88LeadFrames();
 unsigned CEmuPc88LeadTrimmedFrames();
+/* 先読みバッファ上のサンプル位置。G.I.M.I.C が曲頭の書き込みを合わせる。 */
+unsigned CEmuPc88LeadMark(void);
 
 /* PC-88: Z80 + YM2203/YM2608。RTC/VRTC と OPN タイマで IRQ */
 class CDriverPc88 : public CDriver {

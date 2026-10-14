@@ -1,4 +1,4 @@
-﻿// PlayList.cpp : 実装ファイル
+// PlayList.cpp : 実装ファイル
 //
 
 #include "stdafx.h"
@@ -12,9 +12,11 @@
 #include "CProToolsDlg.h"
 #include "SongParams.h"
 #include "ListSyosai.h"
+#include "CPlayProperty.h"
 #include "TranscodeExport.h"
 #include "TagEditDlg.h"
 #include "TagBatchEditDlg.h"
+#include "CPlayProperty.h"
 #include <vector>
 #include <algorithm>
 #include "Douga.h"
@@ -4523,6 +4525,25 @@ int CPlayList::ShowTrackContextMenu(CPoint pt, CWnd* pOwner)
 				L"Muestra la hoja guia de operaciones de la lista", L"재생목록 조작 설명 시트를 표시합니다", L"显示播放列表操作说明页", L"يعرض ورقة دليل تشغيل قائمة التشغيل",
 				L"Показывает лист-справку по операциям плейлиста", L"Zeigt das Bedienungsblatt fuer Playlist-Aktionen", L"Mostra a folha-guia de operacoes da playlist", L"Toont het bedieningsblad voor playlist-acties",
 				L"Pokazuje arkusz przewodnika po operacjach playlisty", L"Oynatma listesi islem kilavuzu sayfasini gosterir"));
+	menu.AddSeparator();
+	menu.AddCommand(PL_CTX_PROPERTY,
+			LL14(L"プロパティ", L"Properties", L"Propriétés", L"Proprietà", L"Propiedades",
+				L"속성", L"属性", L"خصائص", L"Свойства", L"Eigenschaften", L"Propriedades", L"Eigenschappen",
+				L"Właściwości", L"Özellikler"),
+			LL14(L"ファイル情報・タグ・プラグイン設定などをタブでまとめて開きます",
+				L"Open file info, tags, plugin settings and more in a tabbed dialog",
+				L"Ouvre infos fichier, tags, reglages plugin dans un dialogue a onglets",
+				L"Apre info file, tag, impostazioni plugin in un dialogo a schede",
+				L"Abre info de archivo, etiquetas y ajustes de plugin en pestañas",
+				L"파일 정보·태그·플러그인 설정을 탭으로 모아서 엽니다",
+				L"以选项卡汇总打开文件信息、标签、插件设置等",
+				L"يفتح معلومات الملف والوسوم وإعداد الإضافة في حوار بعلامات تبويب",
+				L"Открывает сведения о файле, теги и настройки плагина во вкладках",
+				L"Oeffnet Dateiinfo, Tags und Plugin-Einstellungen in einem Dialog mit Registerkarten",
+				L"Abre info do arquivo, tags e ajustes de plugin em abas",
+				L"Opent bestandsinfo, tags en plugin-instellingen in tabbladen",
+				L"Otwiera informacje o pliku, tagi i ustawienia wtyczki w kartach",
+				L"Dosya bilgisi, etiket ve eklenti ayarlarını sekmeli pencerede açar"));
 
 	return (int)menu.Track(pt, pOwner ? pOwner : this);
 }
@@ -4551,6 +4572,7 @@ void CPlayList::HandleTrackContextCmd(int cmd)
 		return;
 	}
 	if (cmd == PL_CTX_INFO) OnList();
+	else if (cmd == PL_CTX_PROPERTY) OnPlayProperty();
 	else if (cmd == PL_CTX_WAV) OnPopWavExport();
 	else if (cmd == PL_CTX_VIDEO_EXTRACT) {
 		extern CMediaPlayerDlg* mp;
@@ -14435,6 +14457,28 @@ void CPlayList::OnList()
 		extern void OpenProToolsForSelection();
 		OpenProToolsForSelection();
 	}
+}
+
+void CPlayList::OnPlayProperty()
+{
+	std::vector<int> sel;
+	CollectSelectedIndices(sel);
+	if (sel.empty())
+		return;
+
+	CPlayProperty* a = new CPlayProperty(GetPlaylistModalOwner(this));
+	w_flg = FALSE;
+	CWnd::PostMessage(0x118);
+	memcpy(&a->pc, &pc[sel[0]], sizeof(playlistdata0));
+	a->m_pl = this;
+	if (sel.size() > 1)
+		a->m_batchIndices = sel;
+	else
+		a->m_batchIndices.push_back(sel[0]);
+
+	a->DoModal();
+	w_flg = TRUE;
+	delete a;
 }
 #define ID_HOTKEY0 8000
 #define ID_HOTKEY1 8001

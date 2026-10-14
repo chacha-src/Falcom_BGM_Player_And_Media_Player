@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include "afxwin.h"
 #include "afxcmn.h"
 // CPlayList ダイアログ
@@ -33,6 +33,7 @@ public:
 	CImageList il;
 	playlistdata0 *pc;
 	void OnList();
+	void OnPlayProperty();
 	int nnn;
 	int pnt,pnt1;
 	int playcnt;
@@ -325,6 +326,7 @@ enum {
 	PL_CTX_CEMUTOGGLE_BASE = 124, // CEmu zip カタログトグル (Food empty / TO BOSS…)
 	PL_CTX_CEMUTOGGLE_LAST = PL_CTX_CEMUTOGGLE_BASE + 7, // up to 8 toggles
 	PL_CTX_MID_EXPORT = 132, // mp*/rcp/mid を標準MIDIへ書き出す
+	PL_CTX_PROPERTY = 133, // ファイル情報・タグ・プラグイン設定の統合プロパティ
 	PL_CTX_CEMULOAD = 42490, // CEmu zip を配置してドライバ初期化のみ（演奏しない）
 	PL_CTX_MOVE_BASE = 42500,
 	PL_CTX_COPY_BASE = 43500,

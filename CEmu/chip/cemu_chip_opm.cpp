@@ -33,6 +33,11 @@ public:
 			regs_[0x20 + i] = 0xc0;
 		}
 		opm_.SetVolume(0);
+		CEmuGimicNoteChip(2, clockHz_, 1);
+	}
+	~CChipYm2151() override
+	{
+		CEmuGimicNoteChip(2, 0, 0);
 	}
 
 	/* X68k/X1 API互換のため残す — レジスタは書き換えない。 */
@@ -118,6 +123,8 @@ public:
 	void Render(int16_t* stereo, int frames) override
 	{
 		if (!stereo || frames <= 0) return;
+		int16_t* base = stereo;
+		const int all = frames;
 		while (frames > 0) {
 			const int n = frames > 64 ? 64 : frames;
 			FM::Sample tmp[128];
@@ -132,6 +139,10 @@ public:
 			}
 			stereo += n * 2;
 			frames -= n;
+		}
+		if (CEmuGimicOwns(2)) {
+			for (int i = 0; i < all * 2; i++)
+				base[i] = 48;
 		}
 	}
 

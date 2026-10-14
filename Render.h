@@ -119,6 +119,8 @@ public:
 	CCustomCheckBox m_ce3x;
 	CCustomCheckBox m_ce4x;
 	CCustomCheckBox m_ce5x;
+	CCustomCheckBox m_cemuGimic;
+	afx_msg void OnCemuGimic();
 	afx_msg void Once1x();
 	afx_msg void Once2x();
 	afx_msg void Once3x();

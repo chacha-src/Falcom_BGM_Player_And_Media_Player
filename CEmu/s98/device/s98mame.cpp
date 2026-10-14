@@ -22,6 +22,7 @@ private:
 	Uint32 uPan;
 	bool bEnable;
 	void *ifp;
+	int gimicOn;
 };
 
 class S98DEVICE_OPL3 : public S98DEVICEIF {
@@ -39,16 +40,18 @@ public:
 private:
 	bool bEnable;
 	void *ifp;
+	int gimicOn;
 };
 
 S98DEVICE_OPL2::S98DEVICE_OPL2(void) :
-ifp(NULL)
+ifp(NULL), gimicOn(0)
 {
 	Disable();
 }
 
 S98DEVICE_OPL2::~S98DEVICE_OPL2()
 {
+	if (gimicOn) CEmuGimicNoteChip(3, 0, 0);
 	if (ifp) ::YM3812Shutdown(ifp);
 }
 
@@ -97,6 +100,10 @@ void S98DEVICE_OPL2::Init(Uint32 clock, Uint32 rate)
 	if (!ifp) {
 		ifp = ::YM3812Init(clock, rate);
 	}
+	if (!gimicOn && clock) {
+		CEmuGimicNoteChip(3, clock, 1);
+		gimicOn = 1;
+	}
 	Reset();
 }
 
@@ -106,13 +113,14 @@ void S98DEVICE_OPL2::Disable(void)
 }
 
 S98DEVICE_OPL3::S98DEVICE_OPL3(void) :
-ifp(NULL)
+ifp(NULL), gimicOn(0)
 {
 	Disable();
 }
 
 S98DEVICE_OPL3::~S98DEVICE_OPL3()
 {
+	if (gimicOn) CEmuGimicNoteChip(3, 0, 0);
 	if (ifp) ::YMF262Shutdown(ifp);
 }
 
@@ -163,6 +171,10 @@ void S98DEVICE_OPL3::Init(Uint32 clock, Uint32 rate)
 {
 	if (!ifp) {
 		ifp = ::YMF262Init(clock, rate);
+	}
+	if (!gimicOn && clock) {
+		CEmuGimicNoteChip(3, clock, 1);
+		gimicOn = 1;
 	}
 	Reset();
 }

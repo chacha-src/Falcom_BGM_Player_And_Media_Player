@@ -3456,6 +3456,7 @@ int CHardAc::Init(const CEmuGameEntry* ge, int sampleRate)
 		alphaNmiMask_ = 0;
 		alphaPaLatch_ = 0;
 		if (alphaOpll_) {
+			CEmuGimicNoteChip(4, 0, 0);
 			OPLL_delete((OPLL*)alphaOpll_);
 			alphaOpll_ = NULL;
 		}
@@ -3465,6 +3466,7 @@ int CHardAc::Init(const CEmuGameEntry* ge, int sampleRate)
 				OPLL_set_quality(o, 1);
 				OPLL_reset_patch(o, 0);
 				alphaOpll_ = (void*)o;
+				CEmuGimicNoteChip(4, 3579545u, 1);
 			}
 		}
 	} else if (board_ == CEMU_AC_BOARD_KONAMI_HCASTLE) {
@@ -4062,6 +4064,7 @@ int CHardAc::Init(const CEmuGameEntry* ge, int sampleRate)
 			alphaOpllAddr_ = 0;
 			alphaPaLatch_ = 0;
 			if (alphaOpll_) {
+				CEmuGimicNoteChip(4, 0, 0);
 				OPLL_delete((OPLL*)alphaOpll_);
 				alphaOpll_ = NULL;
 			}
@@ -4071,6 +4074,7 @@ int CHardAc::Init(const CEmuGameEntry* ge, int sampleRate)
 					OPLL_set_quality(o, 1);
 					OPLL_reset_patch(o, 0);
 					alphaOpll_ = (void*)o;
+					CEmuGimicNoteChip(4, 4000000u, 1);
 				}
 			}
 		} else if (macross2) {
@@ -4438,6 +4442,7 @@ void CHardAc::Shutdown()
 		chip_ = NULL;
 	}
 	if (alphaOpll_) {
+		CEmuGimicNoteChip(4, 0, 0);
 		OPLL_delete((OPLL*)alphaOpll_);
 		alphaOpll_ = NULL;
 	}

@@ -2271,6 +2271,9 @@ BOOL COggApp::InitInstance()
 	if (datFileSize < (int)(offsetof(save, pitchPos) + sizeof(savedata.pitchPos))
 		|| savedata.pitchPos < 0 || savedata.pitchPos > 400)
 		savedata.pitchPos = 200;
+	if (datFileSize < (int)(offsetof(save, cemuGimic) + sizeof(savedata.cemuGimic))
+		|| (savedata.cemuGimic != 0 && savedata.cemuGimic != 1))
+		savedata.cemuGimic = 0;
 	if (savedata.midPlayPrefer < 0 || savedata.midPlayPrefer > 2)
 		savedata.midPlayPrefer = 0;
 	/* UI パス欄は廃止。常に exe\\data（なければ hoot）。

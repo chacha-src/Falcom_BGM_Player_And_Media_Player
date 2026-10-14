@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include "afxcmn.h"
 #include "ListCtrlA.h"
 #include "CCustomControl.h"
@@ -27,6 +27,10 @@ protected:
 
 // 開いているプラグイン一覧。無ければ NULL。
 HWND KpiListFind();
+
+// プラグイン一覧下段と同じ検査。CPlayProperty_tab3 からも使う。
+BOOL KpiInspectPluginBlob(int idx, CString& blob, int& winUi);
+void KpiOpenWinampUi(const wchar_t* path, HWND owner, BOOL remote);
 
 class CKpilist;
 // 設定リスト。値の列は常時エディット（CCustomListCtrl::SetLiveEditColumn）。

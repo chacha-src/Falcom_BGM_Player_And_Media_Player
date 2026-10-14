@@ -14,6 +14,28 @@
 #include "machine/cemu_hard_msx.h"
 #include "fmmon/fmmon_shadow.h"
 #include "fmmon/cemu_fmmon_bind.h"
+#include "chip/cemu_chip_opna.h"
+#include "fmmon/kbs_gimic.h"
+
+void CEmuGimicStop(void);
+static int s_gimicPushed;
+static int s_gimicNeedBegin;
+static uint64_t s_adpcmGuardUntil;
+static int s_adpcmLoading;
+static int s_adpcmHold;
+static int s_adpcmRelease;
+static unsigned s_adpcmBytes;
+static int s_paceOn;
+static LARGE_INTEGER s_paceT0;
+static int64_t s_paceOrigin;
+enum { CEMU_GIMIC_CAP = 16384 };
+static uint16_t s_capA[CEMU_GIMIC_CAP];
+static uint8_t s_capD[CEMU_GIMIC_CAP];
+static unsigned s_capS[CEMU_GIMIC_CAP];
+static int s_capN;
+static int s_capR;
+extern unsigned CEmuPc88LeadMark(void);
+extern unsigned CEmuPc98LeadMark(void);
 #include <string.h>
 #include <stdlib.h>
 
@@ -43,6 +65,7 @@ void CEmuSessionClose(CEmuSession* s)
 	CEmuMsxClose(&s->msx);
 	CEmuFm7Close(&s->fm7);
 	CEmuPicoClose(&s->pico);
+	CEmuGimicStop();
 	memset(s, 0, sizeof(*s));
 	s->channels = 2;
 }
@@ -768,11 +791,34 @@ static void CEmuSessionWatchHardSilence(CEmuSession* s, short* stereo, int frame
 	s->silenceFrames += (uint32_t)frames;
 
 	int peak = 0;
-	const int n = frames * 2;
-	for (int i = 0; i < n; i++) {
-		int v = (int)stereo[i];
-		if (v < 0) v = -v;
-		if (v > peak) peak = v;
+	if (KbsGimicDevOk()) {
+		/* 実チップ再生は PCM が直流ダミーなので、キーオン／F-num の動きで終端を見る。
+		   ここを無条件に「鳴っている」にすると、曲が終わっても次の同 zip へ進まない。 */
+		CChip* chip = NULL;
+		if (s->kind == CEMU_KIND_PC88 && s->pc88.hard)
+			chip = s->pc88.hard->SoundChip();
+		else if (s->kind == CEMU_KIND_PC98 && s->pc98.hard)
+			chip = s->pc98.hard->SoundChip();
+		unsigned w = 0, k = 0, f = 0, ss = 0, m = 0;
+		if (chip)
+			CEmuChipYm2608GetPlayMetrics(chip, &w, &k, &f, &ss, &m);
+		const unsigned motion = k + f + ss;
+		static CEmuSession* s_wdS;
+		static unsigned s_wdMotion;
+		if (s_wdS != s) {
+			s_wdS = s;
+			s_wdMotion = motion;
+		}
+		if (motion != s_wdMotion)
+			peak = 1000;
+		s_wdMotion = motion;
+	} else {
+		const int n = frames * 2;
+		for (int i = 0; i < n; i++) {
+			int v = (int)stereo[i];
+			if (v < 0) v = -v;
+			if (v > peak) peak = v;
+		}
 	}
 
 	if (peak >= heardThresh) {
@@ -843,6 +889,19 @@ int CEmuSessionRender(CEmuSession* s, short* stereo, int frames)
 		if (drv) {
 			drv->loadOnly = 0;
 			drv->overlayMix = s->overlayMix ? 1 : 0;
+			if (!tog && !s->overlayMix) {
+				/* 前曲のキーを残したまま次曲の先読みを積むと、実チップが固まり次が始まらない。 */
+				KbsGimicDropPending();
+				KbsGimicEnd();
+				s_gimicNeedBegin = 1;
+				s_gimicPushed = 0;
+				s_adpcmHold = 0;
+				s_adpcmGuardUntil = 0;
+				s_adpcmRelease = 0;
+				s_capN = 0;
+				s_capR = 0;
+				s_paceOn = 0;
+			}
 			drv->OverlayTitle(s->overlayCode);
 			drv->overlayMix = 0;
 			if (!tog && !s->overlayMix && s->overlayCode)
@@ -944,6 +1003,7 @@ static int CEmuSessionSeekHard(CEmuSession* s, UINT64 sample)
 	}
 	short junk[4096 * 2];
 	s->seekRender = 1;
+	CEmuGimicSuppress(1);
 	while (s->curSample < sample) {
 		UINT64 left = sample - s->curSample;
 		int want = (left > 4096ull) ? 4096 : (int)left;
@@ -955,6 +1015,12 @@ static int CEmuSessionSeekHard(CEmuSession* s, UINT64 sample)
 		FmMonShadowFlush(0);
 	}
 	s->seekRender = 0;
+	CEmuGimicSuppress(0);
+	/* 実チップの ADPCM RAM はシークで消えない。読み直しはしない。 */
+	s_gimicPushed = 0;
+	s_adpcmGuardUntil = 0;
+	s_adpcmRelease = 0;
+	KbsGimicSetQueueWait(40);
 	FmMonShadowFlush(1);
 	return 1;
 }
@@ -1044,4 +1110,365 @@ void CEmuSessionMixStereo(short* dst, const short* add, int frames)
 		if (v < -32768) v = -32768;
 		dst[i] = (short)v;
 	}
+}
+
+/* 実機へ出すチップ。1=OPNA 系 2=OPM 3=OPL 4=OPLL。コンストラクタがクロックを残す。 */
+static int s_gimicLive[5];
+static int s_gimicCount[5];
+static int s_gimicYm2612;
+static int s_gimicCat2612;
+static uint32_t s_gimicClk[5];
+static int s_gimicKind;
+static int s_gimicSuppress;
+static int s_gimicMix;
+static uint32_t s_gimicClock;
+
+extern __int64 g_dsWrittenBytes;
+extern __int64 g_heardBytes;
+extern int g_outBytesPerFrame;
+extern save savedata;
+
+void CEmuGimicNoteChip(int kind, uint32_t clockHz, int on)
+{
+	if (kind < 1 || kind > 4) return;
+	if (on) {
+		s_gimicCount[kind]++;
+		s_gimicLive[kind] = 1;
+		if (clockHz)
+			s_gimicClk[kind] = clockHz;
+	} else if (s_gimicCount[kind] > 0) {
+		s_gimicCount[kind]--;
+		if (s_gimicCount[kind] == 0 && !(kind == KBS_GIMIC_CHIP_OPNA && s_gimicYm2612 > 0)) {
+			s_gimicLive[kind] = 0;
+			s_gimicClk[kind] = 0;
+		}
+	}
+}
+
+void CEmuGimicNoteYm2612(uint32_t clockHz, int on)
+{
+	if (on) {
+		if (s_gimicCount[KBS_GIMIC_CHIP_OPNA] == 0) {
+			s_gimicLive[KBS_GIMIC_CHIP_OPNA] = 1;
+			if (clockHz)
+				s_gimicClk[KBS_GIMIC_CHIP_OPNA] = clockHz;
+		}
+		s_gimicYm2612++;
+	} else if (s_gimicYm2612 > 0) {
+		s_gimicYm2612--;
+		if (s_gimicYm2612 == 0 && s_gimicCount[KBS_GIMIC_CHIP_OPNA] == 0) {
+			s_gimicLive[KBS_GIMIC_CHIP_OPNA] = 0;
+			s_gimicClk[KBS_GIMIC_CHIP_OPNA] = 0;
+		}
+	}
+}
+
+static int CEmuGimicCovered(int id, int kind)
+{
+	if (kind == KBS_GIMIC_CHIP_OPNA)
+		return id == CEMU_CHIP_OPNA || id == CEMU_CHIP_OPN || id == CEMU_CHIP_YM2612
+			|| id == CEMU_CHIP_AY;
+	if (kind == KBS_GIMIC_CHIP_OPM)
+		return id == CEMU_CHIP_OPM;
+	if (kind == KBS_GIMIC_CHIP_OPL)
+		return id == CEMU_CHIP_OPL2 || id == CEMU_CHIP_OPL3;
+	if (kind == KBS_GIMIC_CHIP_OPLL)
+		return id == CEMU_CHIP_OPLL;
+	return 0;
+}
+
+static int CEmuGimicListHasExtra(const int* ids, int n, int kind)
+{
+	if (!ids) return 0;
+	for (int i = 0; i < n; i++) {
+		if (!ids[i]) continue;
+		if (!CEmuGimicCovered(ids[i], kind))
+			return 1;
+	}
+	return 0;
+}
+
+int CEmuGimicWriteOk(int kind)
+{
+	/* ADPCM を載せ終わるまで FM を出さない。先読み中の数音が実チップに乗ると、
+	   そのあと転送で演奏が止まる。 */
+	return (s_gimicKind == kind && s_adpcmHold && !s_gimicSuppress && savedata.cemuGimic) ? 1 : 0;
+}
+
+int64_t CEmuGimicStamp(void)
+{
+	return (int64_t)FmMonShadowGetCurSample();
+}
+
+void CEmuGimicAdpcmGuard(uint32_t samples)
+{
+	if (!samples) samples = 1;
+	s_adpcmGuardUntil = FmMonShadowGetCurSample() + samples;
+}
+
+int CEmuGimicAdpcmDrop(unsigned addr, unsigned data)
+{
+	if (!s_adpcmGuardUntil) return 0;
+	if (FmMonShadowGetCurSample() >= s_adpcmGuardUntil) {
+		s_adpcmGuardUntil = 0;
+		return 0;
+	}
+	/* 載せた直後の CPU 再転送（記録・外部メモリ・データポート）だけ捨てる。 */
+	if (addr == 0x108u) return 1;
+	if (addr == 0x100u && (data & 0x60u)) return 1;
+	return 0;
+}
+
+int CEmuGimicAdpcmPrep(unsigned addr, unsigned data)
+{
+	if (addr == 0x108u)
+		return 2;
+	if (addr == 0x100u && (data & 0x40u))
+		return 2;
+	/* 先読み中の FM/SSG は実チップへ出さず残す。ADPCM のあと曲頭として流す。 */
+	if (!s_adpcmHold && s_gimicKind && !s_gimicSuppress && savedata.cemuGimic) {
+		if (s_capN < CEMU_GIMIC_CAP) {
+			unsigned mark = CEmuPc98LeadMark();
+			if (mark == 0 || mark == 0xFFFFFFFFu)
+				mark = CEmuPc88LeadMark();
+			s_capA[s_capN] = (uint16_t)addr;
+			s_capD[s_capN] = (uint8_t)data;
+			s_capS[s_capN] = mark;
+			s_capN++;
+		}
+		return 2;
+	}
+	return 0;
+}
+
+int CEmuGimicMonitorLive(void)
+{
+	/* 実チップがそのまま鳴る曲は、モニタを PCM 用の遅れに載せない。 */
+	return (s_gimicKind && !s_gimicMix && !s_gimicSuppress
+		&& savedata.cemuGimic && KbsGimicDevOk()) ? 1 : 0;
+}
+
+void CEmuGimicAdpcmRelease(void)
+{
+	if (!s_adpcmRelease) return;
+	s_adpcmRelease = 0;
+	FmMonShadowPushGimic();
+	FmMonShadowPushAdpcmPlayback();
+}
+
+int CEmuGimicOwns(int kind)
+{
+	return (CEmuGimicWriteOk(kind) && KbsGimicDevOk()) ? 1 : 0;
+}
+
+int CEmuGimicOpnaIsYm2612(void)
+{
+	if (s_gimicCount[KBS_GIMIC_CHIP_OPNA] > 0) return 0;
+	return (s_gimicYm2612 > 0 || s_gimicCat2612) ? 1 : 0;
+}
+
+static int64_t CEmuGimicDsLead(void)
+{
+	int bpf = g_outBytesPerFrame > 0 ? g_outBytesPerFrame : 4;
+	int64_t live = 0;
+	if (g_dsWrittenBytes > g_heardBytes)
+		live = (g_dsWrittenBytes - g_heardBytes) / bpf;
+	const int64_t cap = (int64_t)30720 * 5 / bpf;
+	if (live < 0) live = 0;
+	if (live > cap) live = cap;
+	/* バッファがまだ空の立ち上がりは、埋まったときの遅れに合わせる。
+	   途中から遅らせると先に出た音だけ速く聞こえる。 */
+	if (live < cap / 2)
+		live = cap;
+	return live;
+}
+
+void CEmuGimicStop(void)
+{
+	s_gimicKind = 0;
+	s_gimicMix = 0;
+	s_gimicClock = 0;
+	s_gimicPushed = 0;
+	s_gimicNeedBegin = 0;
+	s_gimicCat2612 = 0;
+	s_adpcmGuardUntil = 0;
+	s_adpcmLoading = 0;
+	s_adpcmHold = 0;
+	s_adpcmRelease = 0;
+	s_adpcmBytes = 0;
+	s_capN = 0;
+	s_capR = 0;
+	s_paceOn = 0;
+	KbsGimicSetQueueWait(40);
+	KbsGimicSetBurst(0);
+	KbsGimicSetExtraLag(0);
+	KbsGimicEnd();
+	KbsGimicSetEnable(0);
+}
+
+static void CEmuGimicArm(CEmuSession* s)
+{
+	if (!s || !s->kind || !savedata.cemuGimic || s->kind == CEMU_KIND_PMD) {
+		if (s_gimicKind)
+			CEmuGimicStop();
+		return;
+	}
+	int kind = 0;
+	if (s_gimicLive[KBS_GIMIC_CHIP_OPNA]) kind = KBS_GIMIC_CHIP_OPNA;
+	else if (s_gimicLive[KBS_GIMIC_CHIP_OPM]) kind = KBS_GIMIC_CHIP_OPM;
+	else if (s_gimicLive[KBS_GIMIC_CHIP_OPL]) kind = KBS_GIMIC_CHIP_OPL;
+	else if (s_gimicLive[KBS_GIMIC_CHIP_OPLL]) kind = KBS_GIMIC_CHIP_OPLL;
+	s_gimicCat2612 = 0;
+	if (!kind && s->game) {
+		int seen2612 = 0;
+		int seenOpn = 0;
+		const int* lists[2] = { s->game->chipIds, s->game->docChipIds };
+		const int ns[2] = { s->game->chipCount, s->game->docChipCount };
+		for (int li = 0; li < 2; li++) {
+			if (!lists[li]) continue;
+			for (int i = 0; i < ns[li]; i++) {
+				const int id = lists[li][i];
+				if (id == CEMU_CHIP_YM2612) seen2612 = 1;
+				if (id == CEMU_CHIP_OPNA || id == CEMU_CHIP_OPN) seenOpn = 1;
+				int k = 0;
+				if (id == CEMU_CHIP_OPNA || id == CEMU_CHIP_OPN || id == CEMU_CHIP_YM2612)
+					k = KBS_GIMIC_CHIP_OPNA;
+				else if (id == CEMU_CHIP_OPM) k = KBS_GIMIC_CHIP_OPM;
+				else if (id == CEMU_CHIP_OPL2 || id == CEMU_CHIP_OPL3) k = KBS_GIMIC_CHIP_OPL;
+				else if (id == CEMU_CHIP_OPLL) k = KBS_GIMIC_CHIP_OPLL;
+				if (k == KBS_GIMIC_CHIP_OPNA) kind = k;
+				else if (!kind && k) kind = k;
+				else if (kind != KBS_GIMIC_CHIP_OPNA && k == KBS_GIMIC_CHIP_OPM) kind = k;
+				else if (kind != KBS_GIMIC_CHIP_OPNA && kind != KBS_GIMIC_CHIP_OPM
+					&& k == KBS_GIMIC_CHIP_OPL) kind = k;
+			}
+		}
+		if (kind == KBS_GIMIC_CHIP_OPNA && seen2612 && !seenOpn)
+			s_gimicCat2612 = 1;
+	}
+	if (!kind) {
+		if (s_gimicKind)
+			CEmuGimicStop();
+		return;
+	}
+	uint32_t clk = s_gimicClk[kind];
+	if (!clk) {
+		if (kind == KBS_GIMIC_CHIP_OPNA) clk = 7987200u;
+		else if (kind == KBS_GIMIC_CHIP_OPM) clk = 4000000u;
+		else clk = 3579545u;
+	}
+	/* YM2203 は ~4MHz・内部 ÷72。実 OPNA(YM2608) は ~8MHz・内部 ÷144。
+	   同じ F 番号を 3993600 のまま PLL に渡すと音程が半分になる。 */
+	if (kind == KBS_GIMIC_CHIP_OPNA && clk > 0 && clk < 7000000u)
+		clk *= 2u;
+	int mix = 0;
+	/* 純FMはソフトウェア PCM を混ぜない。PC-98/X68k/MDX も OPNA/OPM だけなら
+	   PC-88 と同じく実チップに任せる。OPL や PCM が並ぶときだけ下の extra で mix。 */
+	if (s->kind == CEMU_KIND_AC || s->kind == CEMU_KIND_F3 || s->kind == CEMU_KIND_PCAT)
+		mix = 1;
+	if (s->game) {
+		if (CEmuGimicListHasExtra(s->game->chipIds, s->game->chipCount, kind)
+			|| CEmuGimicListHasExtra(s->game->docChipIds, s->game->docChipCount, kind))
+			mix = 1;
+	}
+	/* YM2612 は AY/SSG を持たない。カタログの AY は別チップ。 */
+	if (kind == KBS_GIMIC_CHIP_OPNA && clk > 7000000u && clk < 7800000u && s->game) {
+		for (int i = 0; i < s->game->chipCount; i++)
+			if (s->game->chipIds[i] == CEMU_CHIP_AY)
+				mix = 1;
+	}
+	const int rate = s->sampleRate > 0 ? s->sampleRate : 44100;
+	if (s_gimicNeedBegin || s_gimicKind != kind || s_gimicClock != clk) {
+		s_gimicNeedBegin = 0;
+		KbsGimicSetEnable(1);
+		KbsGimicBegin(kind, clk, (uint32_t)rate);
+		s_gimicKind = kind;
+		s_gimicClock = clk;
+		s_gimicPushed = 0;
+		/* リセットで RAM が消える。先に置いたデータは次の発音前に載せ直す。 */
+		s_adpcmHold = 0;
+		s_paceOn = 0;
+		s_capN = 0;
+		s_capR = 0;
+	}
+	s_gimicMix = mix;
+	/* 純FMはホストで時刻を付け直さない。テンポは CEmu のスライス（約 4ms）に任せる。 */
+	KbsGimicSetBurst(mix ? 0 : 1);
+	KbsGimicSetExtraLag(mix ? CEmuGimicDsLead() : 0);
+}
+
+void CEmuGimicOnRender(CEmuSession* s, int16_t* stereo, int frames)
+{
+	CEmuGimicArm(s);
+	CEmuGimicAdpcmRelease();
+	if (KbsGimicDevOk() && !s_gimicPushed) {
+		/* 音色 → 実チップへ届くのを待つ → ADPCM → キーオン。
+		   キーオンを音色・ADPCM と同じ束で出すと、初回だけ壊れた音色になる。 */
+		s_adpcmHold = 1;
+		FmMonShadowPushGimic();
+		KbsGimicWaitDrained(5000);
+		if (s_gimicKind == KBS_GIMIC_CHIP_OPNA && CEmuChipOpnaFlushAdpcmB(1))
+			KbsGimicWaitDrained(20000);
+		FmMonShadowPushAdpcmPlayback();
+		s_gimicPushed = 1;
+		if (!s_gimicMix) {
+			QueryPerformanceCounter(&s_paceT0);
+			s_paceOrigin = (int64_t)FmMonShadowGetCurSample();
+			s_paceOn = 1;
+		}
+	}
+	if (s_gimicPushed && s_capR < s_capN) {
+		unsigned until = CEmuPc98LeadMark();
+		if (until == 0 || until == 0xFFFFFFFFu) {
+			const unsigned a = CEmuPc88LeadMark();
+			if (until == 0 || (a != 0 && a != 0xFFFFFFFFu))
+				until = a;
+		}
+		if (until == 0)
+			until = 0xFFFFFFFFu;
+		while (s_capR < s_capN && s_capS[s_capR] <= until) {
+			KbsGimicWrite(s_capA[s_capR], s_capD[s_capR], 0);
+			s_capR++;
+		}
+	}
+	if (!s_gimicKind || !stereo || frames <= 0) return;
+	KbsGimicSetBurst(s_gimicMix ? 0 : 1);
+	KbsGimicSetExtraLag(s_gimicMix ? CEmuGimicDsLead() : 0);
+	const int rate = s && s->sampleRate > 0 ? s->sampleRate : 44100;
+	const int64_t pos = (int64_t)FmMonShadowGetCurSample();
+	if (!s_gimicMix && KbsGimicDevOk())
+		KbsGimicSilence(stereo, (uint32_t)frames, pos, (uint32_t)rate);
+	else
+		KbsGimicSilence(NULL, (uint32_t)frames, pos, (uint32_t)rate);
+	/* 純FMはバッファ先読みでエミュを走らせない。実時間に合わせるとチップとモニタが同じテンポになる。 */
+	if (s_paceOn && !s_gimicMix && KbsGimicDevOk() && frames > 0) {
+		LARGE_INTEGER freq, now;
+		QueryPerformanceFrequency(&freq);
+		const int64_t want = pos + (int64_t)frames - s_paceOrigin;
+		const int64_t slack = (int64_t)rate / 40;
+		for (;;) {
+			QueryPerformanceCounter(&now);
+			int64_t wall = 0;
+			if (freq.QuadPart)
+				wall = (now.QuadPart - s_paceT0.QuadPart) * (int64_t)rate / freq.QuadPart;
+			const int64_t ahead = want - slack - wall;
+			if (ahead <= 0) break;
+			int ms = (int)(ahead * 1000 / (int64_t)rate);
+			if (ms < 1) ms = 1;
+			if (ms > 8) ms = 8;
+			Sleep(ms);
+		}
+	}
+}
+
+void CEmuGimicSuppress(int on)
+{
+	s_gimicSuppress = on ? 1 : 0;
+	if (!on)
+		KbsGimicDropPending();
+}
+
+void CEmuGimicPrepare(CEmuSession* s)
+{
+	CEmuGimicArm(s);
 }

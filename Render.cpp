@@ -533,6 +533,7 @@ void CRender::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDC_CHECK_CE3, m_ce3x);
 	DDX_Control(pDX, IDC_CHECK_CE4, m_ce4x);
 	DDX_Control(pDX, IDC_CHECK_CE5, m_ce5x);
+	DDX_Control(pDX, IDC_CHECK_CEMU_GIMIC, m_cemuGimic);
 	DDX_Control(pDX, IDCANCEL3, m_kpi);
 	DDX_Control(pDX, IDC_KPI_PLUGIN_DL, m_kpiPluginDl);
 	DDX_Control(pDX, IDC_KPI_PLUGIN_RELOAD, m_kpiPluginReload);
@@ -622,6 +623,7 @@ BEGIN_MESSAGE_MAP(CRender, CCustomBlurDialogExBase)
 	ON_BN_CLICKED(IDC_CHECK_CE3, Once3x)
 	ON_BN_CLICKED(IDC_CHECK_CE4, Once4x)
 	ON_BN_CLICKED(IDC_CHECK_CE5, Once5x)
+	ON_BN_CLICKED(IDC_CHECK_CEMU_GIMIC, OnCemuGimic)
 	ON_BN_CLICKED(IDCANCEL3, Onkpi)
 	ON_BN_CLICKED(IDC_KPI_PLUGIN_DL, OnKpiPluginDl)
 	ON_BN_CLICKED(IDC_KPI_PLUGIN_RELOAD, OnKpiPluginReload)
@@ -828,6 +830,7 @@ BOOL CRender::OnInitDialog()
 	}
 	ApplyWinampVolChecks(savedata.winampvol);
 	ApplyCemuVolChecks(savedata.cemuvol);
+	m_cemuGimic.SetCheck(savedata.cemuGimic ? BST_CHECKED : BST_UNCHECKED);
 	if (in.dwMajorVersion <= 5) {
 		m_evr.EnableWindow(FALSE);
 		m_con.EnableWindow(FALSE);
@@ -1655,6 +1658,11 @@ void CRender::Once2x() { ApplyCemuVolChecks(2); }
 void CRender::Once3x() { ApplyCemuVolChecks(3); }
 void CRender::Once4x() { ApplyCemuVolChecks(4); }
 void CRender::Once5x() { ApplyCemuVolChecks(5); }
+
+void CRender::OnCemuGimic()
+{
+	savedata.cemuGimic = (m_cemuGimic.GetCheck() == BST_CHECKED) ? 1 : 0;
+}
 
 void CRender::OnBnClicked24bit()
 {

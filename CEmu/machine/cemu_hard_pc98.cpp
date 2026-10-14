@@ -10406,6 +10406,9 @@ int CHardPc98::BootDos(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCod
 
 enum { BOOT_PCM_MAX_SECONDS = 16 };
 
+static unsigned s_pc98LeadMark = 0;
+unsigned CEmuPc98LeadMark(void) { return s_pc98LeadMark; }
+
 static int BootPcmClamp16(int v)
 {
 	if (v > 32767) return 32767;
@@ -10424,6 +10427,7 @@ void CHardPc98::BootPcmFree()
 	bootPcmLen_ = 0;
 	bootPcmPos_ = 0;
 	bootPcmAcc_ = 0;
+	s_pc98LeadMark = 0;
 }
 
 void CHardPc98::BootPcmBegin()
@@ -10432,6 +10436,7 @@ void CHardPc98::BootPcmBegin()
 	bootPcmLen_ = 0;
 	bootPcmPos_ = 0;
 	bootPcmAcc_ = 0;
+	s_pc98LeadMark = 0;
 }
 
 void CHardPc98::BootPcmStopCapture()
@@ -10474,13 +10479,17 @@ void CHardPc98::BootPcmTick(uint64_t cpuCycles)
 			p[1] = (int16_t)BootPcmClamp16(pR - pR / 4 + o[1] / 4);
 		}
 		bootPcmLen_ += 2;
+		s_pc98LeadMark = (unsigned)(bootPcmLen_ / 2);
 	}
 }
 
 int CHardPc98::BootPcmDrain(int16_t* stereo, int frames)
 {
-	if (!stereo || frames <= 0 || !bootPcm_ || bootPcmPos_ >= bootPcmLen_)
+	if (!stereo || frames <= 0 || !bootPcm_ || bootPcmPos_ >= bootPcmLen_) {
+		if (!bootPcmOn_ && (bootPcmLen_ <= 0 || bootPcmPos_ >= bootPcmLen_))
+			s_pc98LeadMark = 0xFFFFFFFFu;
 		return 0;
+	}
 	const int avail = (bootPcmLen_ - bootPcmPos_) / 2;
 	int n = frames;
 	if (n > avail) n = avail;
@@ -10489,6 +10498,9 @@ int CHardPc98::BootPcmDrain(int16_t* stereo, int frames)
 	if (bootPcmPos_ >= bootPcmLen_) {
 		bootPcmLen_ = 0;
 		bootPcmPos_ = 0;
+		s_pc98LeadMark = 0xFFFFFFFFu;
+	} else {
+		s_pc98LeadMark = (unsigned)(bootPcmPos_ / 2);
 	}
 	return n;
 }
@@ -11101,6 +11113,8 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 	unsigned song = titleCode & 0xff;
 	extSong_ = (uint16_t)(titleCode & 0xffff);
 	extParam_ = (uint16_t)((titleCode >> 16) & 0xffff);
+	if (!modeMidi_ && (pumpPlayCode_ == 0 || pumpPlayCode_ == titleCode))
+		BootPcmBegin();
 
 	const uint64_t drainBudget = (uint64_t)cpuHz_ / 2ull;
 

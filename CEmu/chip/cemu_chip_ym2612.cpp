@@ -35,9 +35,14 @@ public:
 		/* レイアウト/識別は CEmuFmMonBindFromGe（OPN2 vs OPN+SSG vs
 		   Sys32 複合）。ここで OPN レイアウト0を強制しない。 */
 		Reset();
+		CEmuGimicNoteYm2612(clockHz_, 1);
 	}
 
-	~CChipYm2612() override { delete ym_; }
+	~CChipYm2612() override
+	{
+		CEmuGimicNoteYm2612(0, 0);
+		delete ym_;
+	}
 
 	void ymfm_update_irq(bool asserted) override { irq_ = asserted ? 1 : 0; }
 	void ymfm_set_timer(uint32_t tnum, int32_t duration) override
@@ -92,6 +97,10 @@ public:
 		if (!stereo || frames <= 0) return;
 		memset(stereo, 0, (size_t)frames * 2 * sizeof(int16_t));
 		MixAdd(stereo, frames, 256);
+		if (CEmuGimicOwns(1)) {
+			for (int i = 0; i < frames * 2; i++)
+				stereo[i] = 48;
+		}
 	}
 
 	void MixAdd(int16_t* stereo, int frames, int gain) override

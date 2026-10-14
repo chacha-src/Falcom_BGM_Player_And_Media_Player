@@ -371,3 +371,4 @@ private:
 
 void CEmuHardPc98SetActive(CHardPc98* hw);
 CHardPc98* CEmuHardPc98GetActive();
+unsigned CEmuPc98LeadMark(void);

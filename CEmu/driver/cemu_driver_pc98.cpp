@@ -186,6 +186,11 @@ int CDriverPc98::Render(int16_t* stereo, int frames)
 	CEmuNp2Guard np2;
 	CChip* const opl = hw_->OplChip();
 	CEmuHardPc98SetActive(hw_);
+	if (!triggered_) {
+		if (!loadOnly)
+			hw_->TriggerPlay(titleCode_);
+		triggered_ = 1;
+	}
 	hw_->BootPcmStopCapture();
 	const int want = frames;
 	const int drained = hw_->BootPcmDrain(stereo, frames);
@@ -194,11 +199,6 @@ int CDriverPc98::Render(int16_t* stereo, int frames)
 	if (drained > 0) {
 		stereo += drained * 2;
 		frames -= drained;
-	}
-	if (!triggered_) {
-		if (!loadOnly)
-			hw_->TriggerPlay(titleCode_);
-		triggered_ = 1;
 	}
 	const int rate = hostRate_ > 0 ? hostRate_ : 44100;
 	if (cpuHz_ < 1 || rate < 1) return drained;

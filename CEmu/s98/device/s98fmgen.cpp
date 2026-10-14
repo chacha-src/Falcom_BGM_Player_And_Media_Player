@@ -65,10 +65,18 @@ class S98DEVICE_OPN : public S98DEVICEIF
 {
 public:
 	S98DEVICE_OPN() {}
-	~S98DEVICE_OPN() { enable = false; }
+	~S98DEVICE_OPN()
+	{
+		if (gimicOn) CEmuGimicNoteChip(1, 0, 0);
+		enable = false;
+	}
 	void Init(Uint32 clock, Uint32 rate)
 	{
 		device.Init(clock, rate, false);
+		if (!gimicOn) {
+			CEmuGimicNoteChip(1, clock, 1);
+			gimicOn = 1;
+		}
 		Reset();
 	}
 	void Reset(void)
@@ -97,16 +105,25 @@ public:
 private:
 	FM::OPN device;
 	bool enable;
+	int gimicOn = 0;
 };
 
 class S98DEVICE_OPN2 : public S98DEVICEIF
 {
 public:
 	S98DEVICE_OPN2() {}
-	~S98DEVICE_OPN2() { enable = false; }
+	~S98DEVICE_OPN2()
+	{
+		if (gimicOn) CEmuGimicNoteYm2612(0, 0);
+		enable = false;
+	}
 	void Init(Uint32 clock, Uint32 rate)
 	{
 		device.Init(clock, rate, true);
+		if (!gimicOn) {
+			CEmuGimicNoteYm2612(clock, 1);
+			gimicOn = 1;
+		}
 		Reset();
 	}
 	void Reset(void)
@@ -137,6 +154,7 @@ public:
 private:
 	FM::OPN2 device;
 	bool enable;
+	int gimicOn = 0;
 };
 
 extern void GetRhythmPath(wchar_t *pszPath, int nSize);
@@ -145,7 +163,11 @@ class S98DEVICE_OPNA : public S98DEVICEIF
 {
 public:
 	S98DEVICE_OPNA() {}
-	~S98DEVICE_OPNA() { enable = false; }
+	~S98DEVICE_OPNA()
+	{
+		if (gimicOn) CEmuGimicNoteChip(1, 0, 0);
+		enable = false;
+	}
 	void Init(Uint32 clock, Uint32 rate)
 	{
 		wchar_t rhythmPath[MAX_PATH];
@@ -156,6 +178,10 @@ public:
 		else
 		{
 			device.Init(clock, rate, true, rhythmPath);
+		}
+		if (!gimicOn) {
+			CEmuGimicNoteChip(1, clock, 1);
+			gimicOn = 1;
 		}
 		Reset();
 	}
@@ -185,16 +211,25 @@ public:
 private:
 	FM::OPNA device;
 	bool enable;
+	int gimicOn = 0;
 };
 
 class S98DEVICE_OPM : public S98DEVICEIF
 {
 public:
 	S98DEVICE_OPM() {}
-	~S98DEVICE_OPM() { enable = false; }
+	~S98DEVICE_OPM()
+	{
+		if (gimicOn) CEmuGimicNoteChip(2, 0, 0);
+		enable = false;
+	}
 	void Init(Uint32 clock, Uint32 rate)
 	{
 		device.Init(clock, rate, false);
+		if (!gimicOn) {
+			CEmuGimicNoteChip(2, clock, 1);
+			gimicOn = 1;
+		}
 		Reset();
 	}
 	void Reset(void)
@@ -223,6 +258,7 @@ public:
 private:
 	FM::OPM device;
 	bool enable;
+	int gimicOn = 0;
 	static unsigned char s_opm[256];
 };
 unsigned char S98DEVICE_OPM::s_opm[256];

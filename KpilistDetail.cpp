@@ -20,6 +20,9 @@ extern HINSTANCE hDLLk1[500];
 extern KMPMODULE* mod1[500];
 extern KpiHost32Client g_kpiHost;
 extern void MpPersistSavedataQuick();
+class IKpiDecoder;
+extern IKpiDecoder* kpidec;
+extern bool g_kpiRemote;
 
 struct KpiWaPeek
 {
@@ -454,7 +457,7 @@ static int KpiFillWinamp(const wchar_t* path, CString& blob)
 	return hasUi;
 }
 
-static void KpiOpenWinampUi(const wchar_t* path, HWND owner, BOOL remote)
+void KpiOpenWinampUi(const wchar_t* path, HWND owner, BOOL remote)
 {
 	if (!path || !path[0]) return;
 	if (remote) {
@@ -512,6 +515,28 @@ static void KpiPut(wchar_t* dst, int cap, const CString& s)
 	wcsncpy_s(dst, cap, s, _TRUNCATE);
 }
 
+BOOL KpiInspectPluginBlob(int idx, CString& blob, int& winUi)
+{
+	winUi = 0;
+	blob.Empty();
+	if (idx < 0 || idx >= kpicnt || idx >= 400) return FALSE;
+#ifdef _WIN64
+	const BOOL remote = (kpiarch[idx] == 32) ? TRUE : FALSE;
+#else
+	const BOOL remote = (kpiarch[idx] == 64) ? TRUE : FALSE;
+#endif
+	if (remote) {
+		std::wstring t;
+		if (g_kpiHost.InspectPlugin((uint32_t)plugkind[idx], (LPCWSTR)kpif[idx], t))
+			blob = t.c_str();
+	}
+	else if (plugkind[idx] == PLUGKIND_KPI)
+		KpiFillLocalKpi(idx, blob);
+	else if (plugkind[idx] == PLUGKIND_WINAMP)
+		winUi = KpiFillWinamp(kpif[idx], blob);
+	return TRUE;
+}
+
 void CKpilist::ShowPluginDetail(int idx)
 {
 	if (idx == m_detailIdx) return;
@@ -545,15 +570,20 @@ void CKpilist::ShowPluginDetail(int idx)
 #endif
 	CString blob;
 	int winUi = 0;
-	if (remote) {
-		std::wstring t;
-		if (g_kpiHost.InspectPlugin((uint32_t)plugkind[idx], (LPCWSTR)kpif[idx], t))
-			blob = t.c_str();
+	/* 演奏中にモジュールを作り直すと、再生スレッドが掴んでいる DLL を
+	   Release が落とす。p など絞り込みで別プラグインを選んだ瞬間に落ちていた。
+	   パスと既知の設定は下のフォールバックで出す。 */
+	if (kpidec == NULL && !g_kpiRemote) {
+		if (remote) {
+			std::wstring t;
+			if (g_kpiHost.InspectPlugin((uint32_t)plugkind[idx], (LPCWSTR)kpif[idx], t))
+				blob = t.c_str();
+		}
+		else if (plugkind[idx] == PLUGKIND_KPI)
+			KpiFillLocalKpi(idx, blob);
+		else if (plugkind[idx] == PLUGKIND_WINAMP)
+			winUi = KpiFillWinamp(kpif[idx], blob);
 	}
-	else if (plugkind[idx] == PLUGKIND_KPI)
-		KpiFillLocalKpi(idx, blob);
-	else if (plugkind[idx] == PLUGKIND_WINAMP)
-		winUi = KpiFillWinamp(kpif[idx], blob);
 
 	int pos = 0;
 	while (pos < blob.GetLength()) {

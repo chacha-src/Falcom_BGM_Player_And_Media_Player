@@ -147,6 +147,11 @@
 #define IDD_VST_HELP                    275
 #define IDD_VST_WAIT                    276
 #define IDD_VSTHOST_CACHE_ASK            371
+#define IDD_PLAYPROP                    394
+#define IDD_PLAYPROP_TAB1               395
+#define IDD_PLAYPROP_TAB2               396
+#define IDD_PLAYPROP_TAB3               397
+#define IDD_PLAYPROP_TAB4               398
 #define IDD_MIDIMONITOR                 277
 #define IDD_MM_HELP                     278
 #define IDR_SASAMI_GS                   279
@@ -563,6 +568,7 @@
 #define IDC_CHECK_CE3                   4545
 #define IDC_CHECK_CE4                   4546
 #define IDC_CHECK_CE5                   4547
+#define IDC_CHECK_CEMU_GIMIC            4591
 #define IDC_WAVEXPORT_LOOP              3300
 #define IDC_WAVEXPORT_PATH              3301
 #define IDC_WAVEXPORT_BROWSE            3302
@@ -1292,6 +1298,31 @@
 #define IDC_KPI_CFG                     4563
 #define IDC_KPI_CFGHELP                 4564
 #define IDC_KPI_CFGEDIT                 4565
+#define IDC_PP_TABS                     4566
+#define IDC_PP_APPLY                    4567
+#define IDC_PP_INFO_L                   4568
+#define IDC_PP_INFO                     4569
+#define IDC_PP_CFG_L                    4570
+#define IDC_PP_CFG                      4571
+#define IDC_PP_CFGHELP                  4572
+#define IDC_PP_KPI_NAME                 4573
+#define IDC_PP_MORE_EXPLORER            4574
+#define IDC_PP_MORE_COPYPATH            4575
+#define IDC_PP_MORE_COPYNAME            4576
+#define IDC_PP_MORE_PROTOOLS            4577
+#define IDC_PP_MORE_CLEARPARAM          4578
+#define IDC_PP_MORE_WAV                 4579
+#define IDC_PP_MORE_TRANSCODE           4580
+#define IDC_PP_MORE_VIDEO               4581
+#define IDC_PP_MORE_BPM                 4582
+#define IDC_PP_MORE_TAGBATCH            4583
+#define IDC_PP_MORE_QUEUE               4584
+#define IDC_PP_MORE_PLAYNEXT            4585
+#define IDC_PP_MORE_ADDSAME             4586
+#define IDC_PP_MORE_MIDEXPORT           4587
+#define IDC_PP_MORE_OPENFOLDER          4588
+#define IDC_PP_MORE_HINT                4589
+#define IDC_PP_FILE_META                4590
 #define IDC_CMDPAL_FILTER               4023
 #define IDC_CMDPAL_LIST                 4024
 #define IDC_CMDPAL_RUN                  4025
@@ -2267,9 +2298,9 @@
 // Next default values for new objects
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
-#define _APS_NEXT_RESOURCE_VALUE        372
+#define _APS_NEXT_RESOURCE_VALUE        399
 #define _APS_NEXT_COMMAND_VALUE         33310
-#define _APS_NEXT_CONTROL_VALUE         4566
+#define _APS_NEXT_CONTROL_VALUE         4592
 #define _APS_NEXT_SYMED_VALUE           104
 #endif
 #endif

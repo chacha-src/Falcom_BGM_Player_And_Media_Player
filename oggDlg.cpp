@@ -22909,8 +22909,11 @@ int readcemu(BYTE* bw, int cnt)
 			break;
 		int want = frames - done;
 		if (want > sliceFrames) want = sliceFrames;
-		const int got = CEmuSessionRender(&CemuSess(),
-			(short*)(bw + (size_t)done * (size_t)bpf), want);
+		CEmuGimicPrepare(&CemuSess());
+		short* slice = (short*)(bw + (size_t)done * (size_t)bpf);
+		const int got = CEmuSessionRender(&CemuSess(), slice, want);
+		if (got > 0)
+			CEmuGimicOnRender(&CemuSess(), slice, got);
 		if (got <= 0) break;
 		CemuSess().curSample += (UINT64)got;
 		if (!pmdNative) {

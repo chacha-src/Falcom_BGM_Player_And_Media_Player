@@ -90,3 +90,7 @@ int CEmuSessionOverlayTitle(CEmuSession* s, unsigned titleCode, int mixSfx = 0);
    聞けない基板だけカタログのラベル（[SE] 等）へ落とす。 */
 int CEmuSessionCodeIsOverlay(CEmuSession* s, unsigned titleCode);
 void CEmuSessionMixStereo(short* dst, const short* add, int frames);
+void CEmuGimicPrepare(CEmuSession* s);
+void CEmuGimicOnRender(CEmuSession* s, int16_t* stereo, int frames);
+void CEmuGimicSuppress(int on);
+void CEmuGimicStop(void);

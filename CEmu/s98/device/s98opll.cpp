@@ -21,6 +21,7 @@ private:
 	Uint32 uFreq;
 	bool bEnable;
 	OPLL *ifp;
+	int gimicOn;
 };
 
 void S98DEVICE_OPLL::Mix(Sample *pBuffer, int numSamples)
@@ -71,6 +72,10 @@ void S98DEVICE_OPLL::Init(Uint32 clock, Uint32 rate)
 	if (ifp) OPLL_delete(ifp);
 	ifp = OPLL_new(uClock, uFreq);
 	if (ifp) OPLL_set_quality(ifp, 1);
+	if (!gimicOn && clock) {
+		CEmuGimicNoteChip(4, clock, 1);
+		gimicOn = 1;
+	}
 
 	Reset();
 }
@@ -81,13 +86,14 @@ void S98DEVICE_OPLL::Disable(void)
 }
 
 S98DEVICE_OPLL::S98DEVICE_OPLL(void)
-: uClock(3579545),ifp(NULL)
+: uClock(3579545),ifp(NULL),gimicOn(0)
 {
 	Disable();
 }
 
 S98DEVICE_OPLL::~S98DEVICE_OPLL()
 {
+	if (gimicOn) CEmuGimicNoteChip(4, 0, 0);
 	if (ifp) OPLL_delete(ifp);
 }
 

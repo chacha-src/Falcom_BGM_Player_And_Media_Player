@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include "CCustomControl.h"
 
 // ============================================================================
@@ -308,6 +308,7 @@ protected:
 	int m_lineAnimOriginY; // クライアントY（起点）
 	int m_flightPad; // 行チップ飛行余白（0=通常。コンテンツは (pad,pad) 起点）
 	int m_chipPresentedAnimTick; // この tick で ULW 済み（OnPaint と ForceChipPresent の二重を防ぐ）
+	int m_chipPresentedHot; // ULW したときの m_hot。ホバー変更は同じ tick でも再 Present
 	BOOL m_bridgePanel; // 飛行⇔定着の橋渡しで一枚パネルを強制（点滅防止）
 	BOOL m_skipChrome;      // TRUE なら骨格を付けない（フォント／KPI サブ等）
 	BOOL m_chromeInjected;  // EnsureChromePrefix 済み
@@ -332,6 +333,7 @@ protected:
 	CRect ItemViewRect(int idx) const; // スクロール後の可視矩形
 	int HitTest(CPoint pt) const; // クライアント。sticky 帯を先に見る
 	void SetHot(int idx);
+	void PresentHotNow(); // Invalidate 後に ULW / UpdateWindow。ホバー背景を即座に出す
 	void OpenSubAt(int idx);
 	void CloseOpenSub();
 	void SyncEmbeddedChildren(); // ラベル下へ HWND を置く。飛行中は Hide

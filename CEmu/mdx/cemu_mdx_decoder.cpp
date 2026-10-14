@@ -29,6 +29,8 @@ void CEmuMdxInit(CEmuMdxPlayer* p)
 void CEmuMdxClose(CEmuMdxPlayer* p)
 {
 	if (!p) return;
+	if (p->open)
+		CEmuGimicNoteChip(2, 0, 0);
 	if (p->impl) {
 		CEmuMdxImpl* im = (CEmuMdxImpl*)p->impl;
 		if (im->started) {
@@ -274,6 +276,7 @@ int CEmuMdxOpenBuffer(CEmuMdxPlayer* p,
 	FmMonShadowSetSource(p->sourcePath);
 	FmMonShadowSetSampleRate(p->sampleRate);
 	FmMonShadowSetKeysProfile(SASAMI_FMMON_KEYS_MDX);
+	CEmuGimicNoteChip(2, 4000000u, 1);
 	p->open = 1;
 	return 1;
 }

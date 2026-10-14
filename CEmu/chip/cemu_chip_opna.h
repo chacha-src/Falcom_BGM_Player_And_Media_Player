@@ -22,6 +22,9 @@ uint8_t CEmuChipOpnaReadStatusHi(CEmuChipOpna* c);
 uint8_t CEmuChipOpnaReadDataHi(CEmuChipOpna* c);
 void CEmuChipOpnaSetAdpcmRom(CEmuChipOpna* c, const uint8_t* data, unsigned size, unsigned destOffset);
 void CEmuChipOpnaSetAdpcmB(CEmuChipOpna* c, const uint8_t* data, unsigned size, unsigned destOffset);
+/* 直近の OPNA に載った ADPCM-B を実チップの RAM へ書く。リズム ROM は実機内蔵。 */
+/* まだ実チップに無い ADPCM-B 範囲を載せる。full=1 は全体（リセット後）。1 = 書いた。 */
+int CEmuChipOpnaFlushAdpcmB(int full);
 unsigned CEmuChipOpnaGetAdpcmRomSize(const CEmuChipOpna* c);
 unsigned CEmuChipOpnaGetAdpcmBSize(const CEmuChipOpna* c);
 void CEmuChipOpnaSetTimerIrqPolicy(CEmuChipOpna* c, int allowTimerA);

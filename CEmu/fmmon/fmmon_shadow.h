@@ -105,6 +105,27 @@ void FmMonShadowApplyGa20Reg(unsigned ofs, unsigned data8);
 void FmMonShadowSetCompanionRegs(const uint8_t* data, unsigned nbytes);
 /* YMW258 MultiPCM: chipId 0/1, port 0=data 1=slot 2=reg */
 void FmMonShadowApplyMultiPcm(int chipId, unsigned port, unsigned data8);
+/* kind は KBS_GIMIC_CHIP_*（1=OPNA 系, 2=OPM, 3=OPL, 4=OPLL）。 */
+void CEmuGimicNoteChip(int kind, uint32_t clockHz, int on);
+/* YM2612。OPNA と同じ枠だが SSG は送らない。生存数で出す。 */
+void CEmuGimicNoteYm2612(uint32_t clockHz, int on);
+int CEmuGimicWriteOk(int kind);
+int64_t CEmuGimicStamp(void);
+int CEmuGimicOwns(int kind);
+/* 1 = 今の OPNA 枠が YM2612（SSG なし）。AY を実チップへ書かない。 */
+int CEmuGimicOpnaIsYm2612(void);
+/* 音色だけ。キーオン・SSG 音量・リズムは出さない。 */
+void FmMonShadowPushGimic(void);
+/* ADPCM 再生設定のあと、SSG/リズム/FM キーオンで鳴らし始める。 */
+void FmMonShadowPushAdpcmPlayback(void);
+/* 先に載せた RAM を、CPU の再転送で潰さない期間。 */
+void CEmuGimicAdpcmGuard(uint32_t samples);
+int CEmuGimicAdpcmDrop(unsigned addr, unsigned data);
+/* 0 = そのまま書く。1 = ADPCM データ。2 = 保留。3 = 時刻を付けずに書く。 */
+int CEmuGimicAdpcmPrep(unsigned addr, unsigned data);
+void CEmuGimicAdpcmRelease(void);
+/* 1 = モニタをチップと同じ時刻にする（PCM 遅れを引かない）。 */
+int CEmuGimicMonitorLive(void);
 
 #ifdef __cplusplus
 }

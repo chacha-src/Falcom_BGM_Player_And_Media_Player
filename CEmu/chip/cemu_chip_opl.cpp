@@ -21,6 +21,7 @@ public:
 		timerLeft_[0] = timerLeft_[1] = -1;
 		memset(regHist_, 0, sizeof(regHist_));
 		chip_ = YM3812Init((int)clockHz_, sampleRate_);
+		CEmuGimicNoteChip(3, clockHz_, 1);
 		if (chip_) {
 			YM3812ResetChip(chip_);
 			/* KOEI FMDRV の AdLib 検出（およびOPLタイマ利用者）は
@@ -32,6 +33,7 @@ public:
 
 	~CChipOpl2() override
 	{
+		CEmuGimicNoteChip(3, 0, 0);
 		if (chip_) {
 			YM3812SetTimerHandler(chip_, NULL, NULL);
 			YM3812Shutdown(chip_);
@@ -107,6 +109,10 @@ public:
 			/* OPL2 はモノラル。L/R へ同じ値。 */
 			stereo[i * 2] = (int16_t)v;
 			stereo[i * 2 + 1] = (int16_t)v;
+		}
+		if (CEmuGimicOwns(3)) {
+			for (int i = 0; i < frames * 2; i++)
+				stereo[i] = 48;
 		}
 	}
 
