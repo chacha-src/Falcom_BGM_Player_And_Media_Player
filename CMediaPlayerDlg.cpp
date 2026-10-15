@@ -4629,6 +4629,12 @@ void CMediaPlayerDlg::ApplyPauseButtonLabel()
 static int s_mpLyricsLayout = -1;
 static int s_mpLrcExpandLayout = -1;
 
+void MpLyricsForceRelayout()
+{
+	s_mpLyricsLayout = -1;
+	s_mpLrcExpandLayout = -1;
+}
+
 static CString MpLyricsPlaceholder()
 {
 	return CString(LL14(L"歌詞(.lrc)が表示されます", L"Lyrics (.lrc) will be displayed here", L"Paroles (.lrc) affichees ici", L"Testi (.lrc) visualizzati qui", L"Letra (.lrc) mostrada aqui", L"가사(.lrc)가 여기에 표시됩니다", L"歌词(.lrc)将在此显示", L"كلمات (.lrc) ستُعرض هنا", L"Текст (.lrc) отображается здесь", L"Liedtext (.lrc) wird hier angezeigt", L"Letra (.lrc) exibida aqui", L"Songtekst (.lrc) wordt hier getoond", L"Teksty (.lrc) wy?wietlone tutaj", L"Soz (.lrc) burada goruntulenir"));
@@ -4674,6 +4680,10 @@ void CMediaPlayerDlg::TickLyricsView()
 		return;
 	extern volatile LONG g_appExiting;
 	if (InterlockedCompareExchange(&g_appExiting, 0, 0))
+		return;
+	if (!InterlockedCompareExchange(&g_xfLrcIgnoreMix, 0, 0)
+		&& InterlockedCompareExchange(&g_xfLrcPlayCs, 0, 0) < 0
+		&& InterlockedCompareExchange(&g_xfInProgress, 0, 0))
 		return;
 	if (!og || !::IsWindow(og->GetSafeHwnd()))
 		return;

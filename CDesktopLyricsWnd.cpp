@@ -3,6 +3,7 @@
 #include "CCustomPopupMenu.h"
 #include "oggDlg.h"
 #include "CMediaPlayerDlg.h"
+#include "XfadePlayback.h"
 #include "resource.h"
 
 extern save savedata;
@@ -1117,6 +1118,12 @@ void SyncDesktopLyricsIfOpen()
 		g_desktopLyricsWnd->SyncFromOg();
 }
 
+void SyncDesktopLyricsReload()
+{
+	if (g_desktopLyricsWnd && ::IsWindow(g_desktopLyricsWnd->GetSafeHwnd()))
+		g_desktopLyricsWnd->SyncFromOg(TRUE);
+}
+
 BOOL IsDesktopLyricsOpen()
 {
 	return (g_desktopLyricsWnd && ::IsWindow(g_desktopLyricsWnd->GetSafeHwnd())) ? TRUE : FALSE;
@@ -1126,6 +1133,12 @@ void LyricsOnTimerp()
 {
 	extern volatile LONG g_appExiting;
 	if (InterlockedCompareExchange(&g_appExiting, 0, 0))
+		return;
+	/* 混合中は B の playb が UI に漏れると歌詞が空↔全文を点滅する。
+	 * 昇格の LRC 再読込だけは混合フラグを見ない。 */
+	if (!InterlockedCompareExchange(&g_xfLrcIgnoreMix, 0, 0)
+		&& InterlockedCompareExchange(&g_xfLrcPlayCs, 0, 0) < 0
+		&& InterlockedCompareExchange(&g_xfInProgress, 0, 0))
 		return;
 	if (g_desktopLyricsWnd && ::IsWindow(g_desktopLyricsWnd->GetSafeHwnd()))
 		g_desktopLyricsWnd->TickView();

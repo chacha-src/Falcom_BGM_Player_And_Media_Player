@@ -56,6 +56,9 @@ public:
 	DWORD __fastcall SetPosition(LONGLONG dwPos);
 	DWORD __fastcall Render(BYTE* Buffer, DWORD dwSize);
 	BOOL  __fastcall IsEndOfStream(void);
+	int SampleRate() const { return (int)m_stream_info.sample_rate; }
+	int Channels() const { return (int)m_stream_info.channels; }
+	int BitsPerSample() const { return (int)m_stream_info.bits_per_sample; }
 	KbFlacDecoder(void);
 	~KbFlacDecoder(void);
 };

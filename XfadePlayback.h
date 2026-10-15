@@ -35,6 +35,15 @@ extern volatile LONG g_xfStartPosted;
 /* notify が立てる開始要求（UI timer9000 が処理） */
 extern volatile LONG g_xfWantStart;
 extern volatile LONG g_xfPrepared;
+/* SoftOpen 失敗。timer 9000 が同じ曲で Restart を繰り返さない */
+extern volatile LONG g_xfSoftOpenFailed;
+/* 昇格直後の LRC 適用。混合フラグで Tick を落とさない */
+extern volatile LONG g_xfLrcIgnoreMix;
+/* >=0: 次曲 LRC を載せた。混合中はフェード位置、昇格後はバナー */
+extern volatile LONG g_xfLrcPlayCs;
+extern volatile LONG g_xfPromoteTick;
+/* バナー時計で終端 lead 秒以内なら 1（スロット1でも 0→1 と同じ窓） */
+int XfSongClockNearEnd(double extraLeadSec);
 
 extern int g_ds_pcm_ch;
 extern int g_ds_pcm_bits;
@@ -94,10 +103,14 @@ inline __int64 XfEndRefBytes(__int64 endWrittenBytes)
 /* スロット毎 Open 中の mode。未使用は INT_MIN */
 extern int g_openDecoderModeSlot[XF_SLOTS];
 
-/* スロット毎ソース形式（ミキシング前） */
+/* スロット毎ソース形式（ミキシング前）。Capture/Bind が DS レートで上書きすることがある */
 extern int g_xfSrcRate[XF_SLOTS];
 extern int g_xfSrcCh[XF_SLOTS];
 extern int g_xfSrcBits[XF_SLOTS];
+/* Open 時のファイル形式。Capture/Update は触らない。混合の Direct 早送り防止 */
+extern int g_xfFileRate[XF_SLOTS];
+extern int g_xfFileCh[XF_SLOTS];
+extern int g_xfFileBits[XF_SLOTS];
 
 /* 等パワー進捗（出力フレーム単位） */
 extern __int64 g_xfFadeTotalFrames;
@@ -178,11 +191,17 @@ void XfResetAll();
 void XfClearLiveMixFlags();
 void XfCloseSlotDecoders(int slot);
 void XfApplySlotFormatToGlobals(int slot);
+void XfBindKpiSlot(int slot);
 void XfCaptureGlobalsToSlot(int slot);
 void XfSetSlotBag(int slot, int mode, int rate, int ch, int bits, int mp3bps, void* kmp);
+void XfFreezeSlotFileFormat(int slot, int rate, int ch, int bits);
+void* XfSlotKmp(int slot);
+void XfSetSlotOggf(int slot, int v);
 void XfUpdateSlotSrcFormat(int slot, int rate, int ch, int bits);
 void XfBindSlotUpscalerToSession(int slot);
-int XfMixEqualPower(BYTE* dst, const BYTE* a, const BYTE* b, int outBytes, int bits, int ch);
+void XfMixEnterSlot(int slot);
+int XfMixAttachDecoder(int slot);
+void XfDispatchMixFill(BYTE* buf, int nn);int XfMixEqualPower(BYTE* dst, const BYTE* a, const BYTE* b, int outBytes, int bits, int ch);
 void XfOnCrossfadeFinished();
 void XfAbortCrossfade();
 int XfFindNextAudioPlIndex(int fromInclusive);

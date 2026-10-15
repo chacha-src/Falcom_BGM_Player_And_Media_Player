@@ -69,6 +69,7 @@ private:
 void OpenDesktopLyricsModeless(CWnd* pParent);
 void CloseDesktopLyricsIfOpen();
 void SyncDesktopLyricsIfOpen();
+void SyncDesktopLyricsReload();
 BOOL IsDesktopLyricsOpen();
 void LyricsOnTimerp();
 // 終了開始: ULW を止め隠すだけ（timerp 再入中に DestroyWindow しない）

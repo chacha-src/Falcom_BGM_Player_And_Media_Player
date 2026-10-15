@@ -64,6 +64,13 @@ static int g_waBps = 16;
 static int g_waOpenOk = 0;
 static int g_waRemote = 0;
 static uint32_t g_waRemoteSid = 0;
+static uint32_t g_waSidArr[2];
+static int g_waRateArr[2] = { 44100, 44100 };
+static int g_waChArr[2] = { 2, 2 };
+static int g_waBpsArr[2] = { 16, 16 };
+static int g_waLenArr[2];
+static int g_waSoftOpenArr[2];
+static int g_waBoundSlot = -1;
 static int g_waLengthMs = 0;
 static int g_waPause = 0;
 static int g_waVol = 255;
@@ -645,6 +652,109 @@ int PluginWinamp_Open(const wchar_t* dllPath, const wchar_t* mediaPath, HWND hwn
 	return 1;
 }
 
+static int WaXfSlot()
+{
+	extern volatile LONG g_xfFillSlot;
+	extern volatile LONG g_xfSlot;
+	const LONG f = InterlockedCompareExchange(&g_xfFillSlot, -1, -1);
+	if (f >= 0 && f < 2)
+		return (int)f;
+	const LONG s = InterlockedCompareExchange(&g_xfSlot, 0, 0);
+	if (s >= 0 && s < 2)
+		return (int)s;
+	return 0;
+}
+
+static uint32_t WaSidNow()
+{
+	const int sl = WaXfSlot();
+	if (sl >= 0 && sl < 2 && g_waSidArr[sl])
+		return g_waSidArr[sl];
+	return g_waRemoteSid;
+}
+
+static void WaDisarmSid(uint32_t sid)
+{
+	if (!sid)
+		return;
+	for (int i = 0; i < 2; ++i) {
+		if (g_waSidArr[i] == sid) {
+			g_waSidArr[i] = 0;
+			g_waSoftOpenArr[i] = 0;
+			if (g_waBoundSlot == i)
+				g_waBoundSlot = -1;
+		}
+	}
+}
+
+int PluginWinamp_SoftOpenSlot(int slot, const wchar_t* dllPath, const wchar_t* mediaPath,
+	int* rate, int* ch, int* bits, int* lenMs)
+{
+	if (slot < 0 || slot >= 2 || !dllPath || !mediaPath)
+		return 0;
+	PluginWinamp_ClearSlot(slot);
+	KPIHOST32_ForeignOpenReply fr{};
+	if (!g_kpiHost.ForeignOpen(PLUGKIND_WINAMP, dllPath, mediaPath, fr) || fr.sessionId == 0)
+		return 0;
+	g_waSidArr[slot] = fr.sessionId;
+	g_waRateArr[slot] = fr.sampleRate > 0 ? (int)fr.sampleRate : 44100;
+	g_waChArr[slot] = fr.channels > 0 ? (int)fr.channels : 2;
+	g_waBpsArr[slot] = fr.bitsPerSample > 0 ? fr.bitsPerSample : 16;
+	{
+		const int r = g_waRateArr[slot];
+		g_waLenArr[slot] = (fr.lengthSamples > 0 && r > 0)
+			? (int)(fr.lengthSamples * 1000 / r) : 0;
+	}
+	g_waSoftOpenArr[slot] = 1;
+	if (rate) *rate = g_waRateArr[slot];
+	if (ch) *ch = g_waChArr[slot];
+	if (bits) *bits = g_waBpsArr[slot];
+	if (lenMs) *lenMs = g_waLenArr[slot];
+	return 1;
+}
+
+void PluginWinamp_BindSlot(int slot)
+{
+	if (slot < 0 || slot >= 2)
+		return;
+	if (!g_waSoftOpenArr[slot] && g_waBoundSlot != slot)
+		return;
+	if (!g_waSoftOpenArr[slot])
+		return;
+	g_waRemote = 1;
+	g_waRemoteSid = g_waSidArr[slot];
+	g_waRate = g_waRateArr[slot];
+	g_waCh = g_waChArr[slot];
+	g_waBps = g_waBpsArr[slot];
+	g_waLengthMs = g_waLenArr[slot];
+	g_waOpenOk = 1;
+	InterlockedExchange(&g_waStopping, 0);
+	g_waBoundSlot = slot;
+}
+
+void PluginWinamp_ClearSlot(int slot)
+{
+	if (slot < 0 || slot >= 2)
+		return;
+	if (g_waBoundSlot == slot) {
+		g_waSidArr[slot] = 0;
+		g_waSoftOpenArr[slot] = 0;
+		g_waBoundSlot = -1;
+		return;
+	}
+	const uint32_t sid = g_waSidArr[slot];
+	if (g_waSoftOpenArr[slot] && sid) {
+		g_kpiHost.ForeignClose(sid);
+		if (g_waRemoteSid == sid) {
+			g_waRemoteSid = 0;
+			g_waRemote = 0;
+			g_waOpenOk = 0;
+		}
+	}
+	g_waSidArr[slot] = 0;
+	g_waSoftOpenArr[slot] = 0;
+}
+
 int PluginWinamp_OpenRemote(const wchar_t* dllPath, const wchar_t* mediaPath)
 {
 	PluginWinamp_Close();
@@ -667,11 +777,14 @@ void PluginWinamp_Close()
 {
 	InterlockedExchange(&g_waStopping, 1);
 	if (g_waRemote) {
-		if (g_waRemoteSid)
+		if (g_waRemoteSid) {
+			WaDisarmSid(g_waRemoteSid);
 			g_kpiHost.ForeignClose(g_waRemoteSid);
+		}
 		g_waRemote = 0;
 		g_waRemoteSid = 0;
 		g_waOpenOk = 0;
+		g_waBoundSlot = -1;
 		return;
 	}
 	if (g_waIn) {
@@ -702,12 +815,17 @@ void PluginWinamp_Close()
 
 int PluginWinamp_SeekMs(int timeMs)
 {
-	if (!g_waOpenOk) return 0;
-	if (g_waRemote) {
-		if (g_waRate <= 0) return 0;
-		uint64_t samp = (uint64_t)timeMs * (uint64_t)g_waRate / 1000;
-		return g_kpiHost.ForeignSeek(g_waRemoteSid, samp) ? 1 : 0;
+	const uint32_t sid = WaSidNow();
+	if (sid) {
+		int rate = g_waRate;
+		const int sl = WaXfSlot();
+		if (sl >= 0 && sl < 2 && g_waSidArr[sl] && g_waRateArr[sl] > 0)
+			rate = g_waRateArr[sl];
+		if (rate <= 0) return 0;
+		uint64_t samp = (uint64_t)timeMs * (uint64_t)rate / 1000;
+		return g_kpiHost.ForeignSeek(sid, samp) ? 1 : 0;
 	}
+	if (!g_waOpenOk) return 0;
 	if (!g_waIn || !g_waIn->SetOutputTime) return 0;
 	InterlockedExchange(&g_waEof, 0);
 	WaJob job{};
@@ -719,7 +837,7 @@ int PluginWinamp_SeekMs(int timeMs)
 	return 1;
 }
 
-int PluginWinamp_IsOpen() { return g_waOpenOk; }
+int PluginWinamp_IsOpen() { return WaSidNow() ? 1 : g_waOpenOk; }
 int PluginWinamp_SampleRate() { return g_waRate; }
 int PluginWinamp_Channels() { return g_waCh; }
 int PluginWinamp_Bits() { return g_waBps; }
@@ -732,8 +850,9 @@ int PluginWinamp_LengthMs()
 
 int PluginWinamp_Read(BYTE* dst, int bytesWanted)
 {
-	if (!dst || bytesWanted <= 0 || !g_waOpenOk) return 0;
-	if (g_waRemote) {
+	if (!dst || bytesWanted <= 0) return 0;
+	const uint32_t sid = WaSidNow();
+	if (sid) {
 		// ホストは溜まっている分だけ返す。5秒待ちをパイプの中でやると
 		// 曲切替の Close が届かず UI が固まる（空読みが2回と窓待ちで約13秒）。
 		int got = 0;
@@ -743,7 +862,7 @@ int PluginWinamp_Read(BYTE* dst, int bytesWanted)
 			if (InterlockedCompareExchange(&g_waStopping, 0, 0)) break;
 			bool eof = false;
 			uint32_t n = 0;
-			if (!g_kpiHost.ForeignRender(g_waRemoteSid, (uint32_t)(bytesWanted - got), dst + got, (uint32_t)(bytesWanted - got), n, eof))
+			if (!g_kpiHost.ForeignRender(sid, (uint32_t)(bytesWanted - got), dst + got, (uint32_t)(bytesWanted - got), n, eof))
 				break;
 			if (n > 0) {
 				got += (int)n;
@@ -761,6 +880,7 @@ int PluginWinamp_Read(BYTE* dst, int bytesWanted)
 		}
 		return got;
 	}
+	if (!g_waOpenOk) return 0;
 	WaEnsureCs();
 	int got = 0;
 	DWORD tIdle = GetTickCount();

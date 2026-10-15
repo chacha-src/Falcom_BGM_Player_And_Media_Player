@@ -8,10 +8,11 @@ typedef void (*KpiInstallProgressFn)(int percent, void* ctx);
 // exeDir に Plugins.zip を展開（中の plugins フォルダごと）。成功で TRUE。
 BOOL KpiInstall_DownloadAndExtract(LPCTSTR exeDir, KpiInstallProgressFn progress, void* ctx, CString& errOut);
 
-// 起動時サイレント: Plugins.zip から kbsasami/kbfmmidi の kpi/txt/wopn を新規、他は既存のみ。
-// KPI があるのに gs.wopn / xg.wopn / programs.txt が無いときも補完する（音色が壊れるため）。
-// wav / YM2608 リズム ROM は出さない。専用 kbsasami.zip は使わない。
-// DL は kbsasami.kpi 無し、サイドカー欠落、または ZIP が exe より新しいとき（Fmpmd と共有・1回）。
+// 起動時サイレント: Plugins.zip から kbsasami/kbfmmidi の kpi/txt/wopn と
+// kbsasami_host32.exe / kbsasami_host64.exe を新規可。他は既存のみ。
+// KPI があるのに gs.wopn / xg.wopn / programs.txt / host32/64 が無いときも補完する。
+// wav / YM2608 リズム ROM / c86ctl は出さない。専用 kbsasami.zip は使わない。
+// DL は kbsasami.kpi 無し、サイドカー欠落、host 欠落、または ZIP が exe より新しいとき（Fmpmd と共有・1回）。
 // 失敗は無言。plug() 前に呼べば DLL ロック無し。
 BOOL KpiInstall_SilentUpdateKbsasami(LPCTSTR exeDir);
 

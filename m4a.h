@@ -1341,7 +1341,7 @@ public:
 			return FALSE;
 		}
 
-		IKbAacDecoder *pAAC;
+		IKbAacDecoder *pAAC = NULL;
 		mp4ff_callback_t callback = { 0 };
 		callback.read = read_callback;
 		callback.seek = seek_callback;
@@ -1375,10 +1375,13 @@ public:
 			}
 		}
 		fclose(fp);
+		fp = NULL;
 		if (pMp4ff) {
 			mp4ff_close(pMp4ff);
 			pMp4ff = NULL;
 		}
+		if (!pAAC)
+			return NULL;
 		if (pAAC->Open(cszFileName, pInfo)) {
 			return pAAC;
 		}

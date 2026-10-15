@@ -43,6 +43,13 @@ static int g_aimpFloat = 0;   // デコーダのネイティブが 32bit float
 static INT64 g_aimpSize = 0;
 static int g_aimpRemote = 0;
 static uint32_t g_aimpRemoteSid = 0;
+static uint32_t g_aimpSidArr[2];
+static int g_aimpRateArr[2] = { 44100, 44100 };
+static int g_aimpChArr[2] = { 2, 2 };
+static int g_aimpBitsArr[2] = { 16, 16 };
+static INT64 g_aimpSizeArr[2];
+static int g_aimpSoftOpenArr[2];
+static int g_aimpBoundSlot = -1;
 static volatile LONG g_aimpStopping = 0;
 
 // ---- minimal IAIMPString ----
@@ -411,6 +418,107 @@ int PluginAimp_TryEnum(const wchar_t* dllPath, int is64)
 	return ok;
 }
 
+static int AimpXfSlot()
+{
+	extern volatile LONG g_xfFillSlot;
+	extern volatile LONG g_xfSlot;
+	const LONG f = InterlockedCompareExchange(&g_xfFillSlot, -1, -1);
+	if (f >= 0 && f < 2)
+		return (int)f;
+	const LONG s = InterlockedCompareExchange(&g_xfSlot, 0, 0);
+	if (s >= 0 && s < 2)
+		return (int)s;
+	return 0;
+}
+
+static uint32_t AimpSidNow()
+{
+	const int sl = AimpXfSlot();
+	if (sl >= 0 && sl < 2 && g_aimpSidArr[sl])
+		return g_aimpSidArr[sl];
+	return g_aimpRemoteSid;
+}
+
+static void AimpDisarmSid(uint32_t sid)
+{
+	if (!sid)
+		return;
+	for (int i = 0; i < 2; ++i) {
+		if (g_aimpSidArr[i] == sid) {
+			g_aimpSidArr[i] = 0;
+			g_aimpSoftOpenArr[i] = 0;
+			if (g_aimpBoundSlot == i)
+				g_aimpBoundSlot = -1;
+		}
+	}
+}
+
+int PluginAimp_SoftOpenSlot(int slot, const wchar_t* dllPath, const wchar_t* mediaPath,
+	int* rate, int* ch, int* bits, INT64* sizeBytes)
+{
+	if (slot < 0 || slot >= 2 || !dllPath || !mediaPath)
+		return 0;
+	PluginAimp_ClearSlot(slot);
+	KPIHOST32_ForeignOpenReply fr{};
+	if (!g_kpiHost.ForeignOpen(PLUGKIND_AIMP, dllPath, mediaPath, fr) || fr.sessionId == 0)
+		return 0;
+	g_aimpSidArr[slot] = fr.sessionId;
+	g_aimpRateArr[slot] = fr.sampleRate > 0 ? (int)fr.sampleRate : 44100;
+	g_aimpChArr[slot] = fr.channels > 0 ? (int)fr.channels : 2;
+	g_aimpBitsArr[slot] = fr.bitsPerSample > 0 ? fr.bitsPerSample : 16;
+	{
+		int bpf = (g_aimpBitsArr[slot] / 8) * (g_aimpChArr[slot] > 0 ? g_aimpChArr[slot] : 2);
+		g_aimpSizeArr[slot] = (fr.lengthSamples > 0 && bpf > 0)
+			? (INT64)fr.lengthSamples * bpf : 0;
+	}
+	g_aimpSoftOpenArr[slot] = 1;
+	if (rate) *rate = g_aimpRateArr[slot];
+	if (ch) *ch = g_aimpChArr[slot];
+	if (bits) *bits = g_aimpBitsArr[slot];
+	if (sizeBytes) *sizeBytes = g_aimpSizeArr[slot];
+	return 1;
+}
+
+void PluginAimp_BindSlot(int slot)
+{
+	if (slot < 0 || slot >= 2)
+		return;
+	if (!g_aimpSoftOpenArr[slot])
+		return;
+	g_aimpRemote = 1;
+	g_aimpRemoteSid = g_aimpSidArr[slot];
+	g_aimpRate = g_aimpRateArr[slot];
+	g_aimpCh = g_aimpChArr[slot];
+	g_aimpBits = g_aimpBitsArr[slot];
+	g_aimpSize = g_aimpSizeArr[slot];
+	g_aimpOpen = 1;
+	InterlockedExchange(&g_aimpStopping, 0);
+	g_aimpBoundSlot = slot;
+}
+
+void PluginAimp_ClearSlot(int slot)
+{
+	if (slot < 0 || slot >= 2)
+		return;
+	if (g_aimpBoundSlot == slot) {
+		g_aimpSidArr[slot] = 0;
+		g_aimpSoftOpenArr[slot] = 0;
+		g_aimpBoundSlot = -1;
+		return;
+	}
+	const uint32_t sid = g_aimpSidArr[slot];
+	if (g_aimpSoftOpenArr[slot] && sid) {
+		g_kpiHost.ForeignClose(sid);
+		if (g_aimpRemoteSid == sid) {
+			g_aimpRemoteSid = 0;
+			g_aimpRemote = 0;
+			g_aimpOpen = 0;
+		}
+	}
+	g_aimpSidArr[slot] = 0;
+	g_aimpSoftOpenArr[slot] = 0;
+}
+
 int PluginAimp_OpenRemote(const wchar_t* dllPath, const wchar_t* mediaPath)
 {
 	PluginAimp_Close();
@@ -488,11 +596,14 @@ void PluginAimp_Close()
 {
 	InterlockedExchange(&g_aimpStopping, 1);
 	if (g_aimpRemote) {
-		if (g_aimpRemoteSid)
+		if (g_aimpRemoteSid) {
+			AimpDisarmSid(g_aimpRemoteSid);
 			g_kpiHost.ForeignClose(g_aimpRemoteSid);
+		}
 		g_aimpRemote = 0;
 		g_aimpRemoteSid = 0;
 		g_aimpOpen = 0;
+		g_aimpBoundSlot = -1;
 		g_aimpFloat = 0;
 		g_aimpSize = 0;
 		return;
@@ -502,18 +613,25 @@ void PluginAimp_Close()
 
 int PluginAimp_SeekBytes(INT64 pos)
 {
-	if (!g_aimpOpen) return 0;
-	if (g_aimpRemote) {
-		int bpf = (g_aimpBits / 8) * (g_aimpCh > 0 ? g_aimpCh : 2);
+	const uint32_t sid = AimpSidNow();
+	if (sid) {
+		int bits = g_aimpBits, ch = g_aimpCh;
+		const int sl = AimpXfSlot();
+		if (sl >= 0 && sl < 2 && g_aimpSidArr[sl]) {
+			bits = g_aimpBitsArr[sl];
+			ch = g_aimpChArr[sl];
+		}
+		int bpf = (bits / 8) * (ch > 0 ? ch : 2);
 		if (bpf <= 0) return 0;
 		uint64_t samp = (uint64_t)(pos / bpf);
-		return g_kpiHost.ForeignSeek(g_aimpRemoteSid, samp) ? 1 : 0;
+		return g_kpiHost.ForeignSeek(sid, samp) ? 1 : 0;
 	}
+	if (!g_aimpOpen) return 0;
 	if (!g_aimpDec) return 0;
 	return g_aimpDec->SetPosition(pos) ? 1 : 0;
 }
 
-int PluginAimp_IsOpen() { return g_aimpOpen; }
+int PluginAimp_IsOpen() { return AimpSidNow() ? 1 : g_aimpOpen; }
 int PluginAimp_SampleRate() { return g_aimpRate; }
 int PluginAimp_Channels() { return g_aimpCh; }
 int PluginAimp_Bits() { return g_aimpBits; }
@@ -521,8 +639,9 @@ INT64 PluginAimp_SizeBytes() { return g_aimpSize; }
 
 int PluginAimp_Read(BYTE* dst, int bytesWanted)
 {
-	if (!dst || bytesWanted <= 0 || !g_aimpOpen) return 0;
-	if (g_aimpRemote) {
+	if (!dst || bytesWanted <= 0) return 0;
+	const uint32_t sid = AimpSidNow();
+	if (sid) {
 		int got = 0;
 		DWORD tIdle = GetTickCount();
 		while (got < bytesWanted) {
@@ -530,7 +649,7 @@ int PluginAimp_Read(BYTE* dst, int bytesWanted)
 			if (InterlockedCompareExchange(&g_aimpStopping, 0, 0)) break;
 			bool eof = false;
 			uint32_t n = 0;
-			if (!g_kpiHost.ForeignRender(g_aimpRemoteSid, (uint32_t)(bytesWanted - got), dst + got, (uint32_t)(bytesWanted - got), n, eof))
+			if (!g_kpiHost.ForeignRender(sid, (uint32_t)(bytesWanted - got), dst + got, (uint32_t)(bytesWanted - got), n, eof))
 				break;
 			if (n > 0) {
 				got += (int)n;
@@ -545,6 +664,7 @@ int PluginAimp_Read(BYTE* dst, int bytesWanted)
 		}
 		return got;
 	}
+	if (!g_aimpOpen) return 0;
 	if (!g_aimpDec) return 0;
 	int n = 0;
 	try { n = g_aimpDec->Read(dst, bytesWanted); }

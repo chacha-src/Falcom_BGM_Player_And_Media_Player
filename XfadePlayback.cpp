@@ -6,6 +6,9 @@
 #include "AudioUpscaler.h"
 #include "VstMidiEngine.h"
 #include "PluginKinds.h"
+#include "PluginWinamp.h"
+#include "PluginXmplay.h"
+#include "PluginAimp.h"
 #include <math.h>
 #include <mutex>
 
@@ -41,12 +44,18 @@ volatile LONG g_xfPromoteTick = 0;
 volatile LONG g_xfStartPosted = 0;
 volatile LONG g_xfWantStart = 0;
 volatile LONG g_xfPrepared = 0;
+volatile LONG g_xfSoftOpenFailed = 0;
+volatile LONG g_xfLrcIgnoreMix = 0;
+volatile LONG g_xfLrcPlayCs = -1;
 volatile LONG g_xfCancelMpFade = 0;
 
 int g_openDecoderModeSlot[XF_SLOTS] = { INT_MIN, INT_MIN };
 int g_xfSrcRate[XF_SLOTS] = { 0, 0 };
 int g_xfSrcCh[XF_SLOTS] = { 2, 2 };
 int g_xfSrcBits[XF_SLOTS] = { 16, 16 };
+int g_xfFileRate[XF_SLOTS] = { 0, 0 };
+int g_xfFileCh[XF_SLOTS] = { 2, 2 };
+int g_xfFileBits[XF_SLOTS] = { 16, 16 };
 
 __int64 g_xfFadeTotalFrames = 0;
 __int64 g_xfFadePos = 0;
@@ -72,6 +81,8 @@ BOOL reset_arr[XF_SLOTS] = { TRUE, TRUE };
 __int64 playb_arr[XF_SLOTS] = {};
 __int64 g_oggPcmDecodePos_arr[XF_SLOTS] = {};
 int g_oggRbPrimingNeed_arr[XF_SLOTS] = {};
+DWORD cnt3_arr[XF_SLOTS] = {};
+int oggf_arr[XF_SLOTS] = {};
 
 /* 作業用ミラーは oggDlg.cpp 側の実体を extern（二重定義禁止） */
 
@@ -99,6 +110,8 @@ extern int oggsize;
 extern long data_size;
 extern int flacmode;
 extern int endf;
+extern int oggf;
+extern DWORD cnt3;
 extern std::mutex cl2;
 extern __int64 g_expectedDsBytes;
 extern __int64 g_heardBytes;
@@ -128,6 +141,8 @@ void XfClearSlotDecodeState(int slot)
 	playb_arr[slot] = 0;
 	g_oggPcmDecodePos_arr[slot] = 0;
 	g_oggRbPrimingNeed_arr[slot] = 0;
+	cnt3_arr[slot] = 0;
+	oggf_arr[slot] = 0;
 }
 
 void XfSaveSlotDecodeState(int slot)
@@ -153,6 +168,8 @@ void XfSaveSlotDecodeState(int slot)
 	playb_arr[slot] = playb;
 	g_oggPcmDecodePos_arr[slot] = g_oggPcmDecodePos;
 	g_oggRbPrimingNeed_arr[slot] = g_oggRbPrimingNeed;
+	cnt3_arr[slot] = cnt3;
+	oggf_arr[slot] = oggf;
 	extern void XfSyncSlotDecodeRingSave(int slot);
 	extern void XfSyncSlotSongMetaSave(int slot);
 	XfSyncSlotDecodeRingSave(slot);
@@ -182,6 +199,8 @@ void XfLoadSlotDecodeState(int slot)
 	playb = playb_arr[slot];
 	g_oggPcmDecodePos = g_oggPcmDecodePos_arr[slot];
 	g_oggRbPrimingNeed = g_oggRbPrimingNeed_arr[slot];
+	cnt3 = cnt3_arr[slot];
+	oggf = oggf_arr[slot];
 	extern void XfSyncSlotDecodeRingLoad(int slot);
 	extern void XfSyncSlotSongMetaLoad(int slot);
 	XfSyncSlotDecodeRingLoad(slot);
@@ -207,7 +226,9 @@ __int64 XfPlayPosBytes()
 	}
 	const int outBpf = XfDsOutBpf();
 	const int outRate = XfDsOutRate();
-	int srcRate = (s >= 0 && s < XF_SLOTS && g_xfSrcRate[s] > 0) ? g_xfSrcRate[s] : 0;
+	int srcRate = (s >= 0 && s < XF_SLOTS && g_xfFileRate[s] >= 8000) ? g_xfFileRate[s] : 0;
+	if (srcRate <= 0)
+		srcRate = (s >= 0 && s < XF_SLOTS && g_xfSrcRate[s] > 0) ? g_xfSrcRate[s] : 0;
 	if (srcRate <= 0)
 		srcRate = (wavbit_sample_Hz > 0) ? wavbit_sample_Hz : outRate;
 	if (outBpf <= 0 || srcRate <= 0 || outRate <= 0)
@@ -291,7 +312,9 @@ __int64 XfTrackEndRefBytes(__int64 endWrittenBytes)
 			const int outBpf = XfDsOutBpf();
 			const int outRate = XfDsOutRate();
 			const int s = XfActiveSlot();
-			int srcRate = (s >= 0 && s < XF_SLOTS && g_xfSrcRate[s] > 0) ? g_xfSrcRate[s] : 0;
+			int srcRate = (s >= 0 && s < XF_SLOTS && g_xfFileRate[s] >= 8000) ? g_xfFileRate[s] : 0;
+			if (srcRate <= 0)
+				srcRate = (s >= 0 && s < XF_SLOTS && g_xfSrcRate[s] > 0) ? g_xfSrcRate[s] : 0;
 			if (srcRate <= 0)
 				srcRate = (wavbit_sample_Hz > 0) ? wavbit_sample_Hz : outRate;
 			if (outBpf > 0 && srcRate > 0 && outRate > 0) {
@@ -435,6 +458,9 @@ void XfCaptureGlobalsToSlot(int slot)
 		if (wavsam_depth < 0)
 			sb = 16;
 		g_xfSrcBits[slot] = sb;
+		/* 未凍結なら Open 直後の wavbit をファイル形式として残す。既にあれば触らない。 */
+		if (g_xfFileRate[slot] < 8000 && wavbit_sample_Hz >= 8000)
+			XfFreezeSlotFileFormat(slot, wavbit_sample_Hz, wavchannel, sb);
 	}
 	extern void XfSyncSlotMediaPtrsCapture(int slot);
 	XfSyncSlotMediaPtrsCapture(slot);
@@ -464,6 +490,36 @@ void XfSetSlotBag(int slot, int mode, int rate, int ch, int bits, int mp3bps, vo
 			sb = 16;
 		g_xfSrcBits[slot] = sb;
 	}
+	XfFreezeSlotFileFormat(slot, rate, b.ch, bits);
+}
+
+void XfFreezeSlotFileFormat(int slot, int rate, int ch, int bits)
+{
+	if (slot < 0 || slot >= XF_SLOTS)
+		return;
+	if (rate >= 8000 && rate <= 384000)
+		g_xfFileRate[slot] = rate;
+	if (ch >= 1 && ch <= 32)
+		g_xfFileCh[slot] = ch;
+	int sb = abs(bits);
+	if (bits < 0)
+		sb = 16;
+	if (sb == 8 || sb == 16 || sb == 24 || sb == 32)
+		g_xfFileBits[slot] = sb;
+}
+
+void* XfSlotKmp(int slot)
+{
+	if (slot < 0 || slot >= XF_SLOTS)
+		return NULL;
+	return (void*)g_xfBag[slot].kmp;
+}
+
+void XfSetSlotOggf(int slot, int v)
+{
+	if (slot < 0 || slot >= XF_SLOTS)
+		return;
+	oggf_arr[slot] = v;
 }
 
 void XfUpdateSlotSrcFormat(int slot, int rate, int ch, int bits)
@@ -510,6 +566,11 @@ void XfApplySlotFormatToGlobals(int slot)
 	wavbit_sample_Hz = b.rate;
 	wavchannel = b.ch;
 	wavsam_depth = b.bits;
+	if (g_xfFileRate[slot] >= 8000) {
+		wavbit_sample_Hz = g_xfFileRate[slot];
+		if (g_xfFileCh[slot] >= 1)
+			wavchannel = g_xfFileCh[slot];
+	}
 	g_mp3_decoder_bps = b.mp3bps;
 	if (og) {
 		og->kmp = b.kmp;
@@ -517,6 +578,14 @@ void XfApplySlotFormatToGlobals(int slot)
 	}
 	extern void XfSyncSlotMediaPtrsApply(int slot);
 	XfSyncSlotMediaPtrsApply(slot);
+	extern void XfBindKpiSlot(int slot);
+	XfBindKpiSlot(slot);
+	if (b.mode == MODE_PLUGIN_WINAMP)
+		PluginWinamp_BindSlot(slot);
+	else if (b.mode == MODE_PLUGIN_XMPLAY)
+		PluginXmplay_BindSlot(slot);
+	else if (b.mode == MODE_PLUGIN_AIMP)
+		PluginAimp_BindSlot(slot);
 }
 
 void XfResetAll()
@@ -533,6 +602,9 @@ void XfResetAll()
 	InterlockedExchange(&g_xfStartPosted, 0);
 	InterlockedExchange(&g_xfWantStart, 0);
 	InterlockedExchange(&g_xfPrepared, 0);
+	InterlockedExchange(&g_xfSoftOpenFailed, 0);
+	InterlockedExchange(&g_xfLrcIgnoreMix, 0);
+	InterlockedExchange(&g_xfLrcPlayCs, -1);
 	g_xfFadeTotalFrames = 0;
 	g_xfFadePos = 0;
 	g_xfMixStartTick = 0;
@@ -541,9 +613,14 @@ void XfResetAll()
 		g_xfSrcRate[i] = 0;
 		g_xfSrcCh[i] = 2;
 		g_xfSrcBits[i] = 16;
+		g_xfFileRate[i] = 0;
+		g_xfFileCh[i] = 2;
+		g_xfFileBits[i] = 16;
 		ZeroMemory(&g_xfBag[i], sizeof(g_xfBag[i]));
 		XfClearSlotDecodeState(i);
 	}
+	extern void XfClearSlotUiCaches();
+	XfClearSlotUiCaches();
 }
 
 void XfClearLiveMixFlags()
@@ -568,6 +645,14 @@ void XfCloseSlotDecoders(int slot)
 		g_openDecoderModeSlot[slot] = INT_MIN;
 		g_xfBag[slot].valid = 0;
 		g_xfBag[slot].mode = INT_MIN;
+		g_xfBag[slot].kmp = NULL;
+		g_xfBag[slot].kmp1 = NULL;
+		g_xfSrcRate[slot] = 0;
+		g_xfSrcCh[slot] = 2;
+		g_xfSrcBits[slot] = 16;
+		g_xfFileRate[slot] = 0;
+		g_xfFileCh[slot] = 2;
+		g_xfFileBits[slot] = 16;
 		XfClearSlotDecodeState(slot);
 	}
 }
@@ -658,9 +743,12 @@ void XfOnCrossfadeFinished()
 	const int oldSlot = XfActiveSlot();
 	const int newSlot = (int)InterlockedCompareExchange(&g_xfSecSlot, 0, 0);
 	const LONG pi = InterlockedExchange(&g_xfPromotePlIndex, -1);
-	XfCloseSlotDecoders(oldSlot);
+	/* 先に本流を新スロットへ。Close が fill を旧スロットにすると notify が
+	 * 閉じかけのデコーダを踏む。Close は bag.kmp / vf_arr[slot] だけ見る。 */
+	InterlockedExchange(&g_xfFillSlot, -1);
 	InterlockedExchange(&g_xfSlot, newSlot);
 	InterlockedExchange(&g_xfSecSlot, XfOtherSlot(newSlot));
+	XfCloseSlotDecoders(oldSlot);
 	/* InProgress を下ろす前に終端フラグを消す。まいご（約230秒）の endflg が残ったまま
 	 * Heart（約96秒）が見えると、タイマーが EOF と判定して次の次の曲へ進む。 */
 	endflg = 0;
@@ -693,8 +781,15 @@ void XfOnCrossfadeFinished()
 		int totalSamp = 0;
 		if (loop3 > 0)
 			totalSamp = loop3;
-		else if (oggsize > 0)
-			totalSamp = oggsize;
+		else if (oggsize > 0 && wavchannel > 0 && wavsam_depth >= 8) {
+			if (g_openDecoderMode == -10)
+				totalSamp = oggsize;
+			else {
+				const int bps = abs(wavsam_depth) / 8;
+				if (bps > 0)
+					totalSamp = oggsize / (wavchannel * bps);
+			}
+		}
 		else if (loop2 > 0)
 			totalSamp = loop1 + loop2;
 		if (totalSamp > 44100 && posSamp >= totalSamp) {
@@ -719,8 +814,15 @@ void XfOnCrossfadeFinished()
 		int totalSamp = 0;
 		if (loop3 > 0)
 			totalSamp = loop3;
-		else if (oggsize > 0)
-			totalSamp = oggsize;
+		else if (oggsize > 0 && wavchannel > 0 && wavsam_depth >= 8) {
+			if (g_openDecoderMode == -10)
+				totalSamp = oggsize;
+			else {
+				const int bps = abs(wavsam_depth) / 8;
+				if (bps > 0)
+					totalSamp = oggsize / (wavchannel * bps);
+			}
+		}
 		else if (loop2 > 0)
 			totalSamp = loop1 + loop2;
 		const int outRate = XfDsOutRate();
@@ -755,6 +857,7 @@ void XfOnCrossfadeFinished()
 	if (pi >= 0 && pl && pi < pl->playcnt)
 		plcnt = (int)pi;
 	InterlockedExchange(&g_xfSuppressRestart, 1);
+	InterlockedExchange(&g_xfSoftOpenFailed, 0);
 	if (og && ::IsWindow(og->GetSafeHwnd()))
 		og->PostMessage(WM_APP + 92, (WPARAM)newSlot, (LPARAM)pi);
 }

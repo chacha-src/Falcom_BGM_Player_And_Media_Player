@@ -714,9 +714,10 @@ static int HandleFillDecodeOne(BYTE* dest, int n, int* pReadme, bool* pExitNow)
 		const __int64 playPos = XfPlayPosBytes();
 		/* 終端 − 設定秒に達したら混ぜる。その点を過ぎてから B が開いても
 		 * 始めないと、準備済みのまま次曲へも行かず止まる。 */
-		const int inWin = (fadeEnd > 0 && xfWin > 0 && playPos > 0
+		const int inWin = (fadeEnd > 0 && xfWin > 0
 			&& playPos + xfWin >= fadeEnd);
-		if (inWin || XfShouldStartEarly(g_heardBytes, g_endWrittenBytes) || XfRenzokuLimitReached()) {
+		if (inWin || endflg || XfSongClockNearEnd(0.0)
+			|| XfShouldStartEarly(g_heardBytes, g_endWrittenBytes) || XfRenzokuLimitReached()) {
 			const int cur = XfActiveSlot();
 			const int oth = XfOtherSlot(cur);
 			if (g_openDecoderModeSlot[oth] != INT_MIN) {
@@ -756,13 +757,18 @@ static int HandleFillDecodeOne(BYTE* dest, int n, int* pReadme, bool* pExitNow)
 			InterlockedExchange(&g_xfFillSlot, bSlot);
 			XfLoadSlotDecodeState(bSlot);
 			XfApplySlotFormatToGlobals(bSlot);
-			XfBindSlotUpscalerToSession(bSlot);
-			g_pcm_upscale_active = g_audioUpscalerArr[bSlot].IsActive() ? 1 : 0;
-			fade1 = 0;
-			endflg = 0;
-			fade = 1.0f;
-			fadeadd = 0.0f;
-			DispatchPlaywavFill(s_xfB, 0, nn, 0);
+			if (!XfMixAttachDecoder(bSlot)) {
+				ZeroMemory(s_xfB, nn);
+			}
+			else {
+				XfBindSlotUpscalerToSession(bSlot);
+				g_pcm_upscale_active = g_audioUpscalerArr[bSlot].IsActive() ? 1 : 0;
+				fade1 = 0;
+				endflg = 0;
+				fade = 1.0f;
+				fadeadd = 0.0f;
+				XfDispatchMixFill(s_xfB, nn);
+			}
 			fade1 = 0;
 			endflg = 0;
 			fade = 1.0f;
@@ -782,14 +788,19 @@ static int HandleFillDecodeOne(BYTE* dest, int n, int* pReadme, bool* pExitNow)
 			InterlockedExchange(&g_xfFillSlot, aSlot);
 			XfLoadSlotDecodeState(aSlot);
 			XfApplySlotFormatToGlobals(aSlot);
-			XfBindSlotUpscalerToSession(aSlot);
-			g_pcm_upscale_active = g_audioUpscalerArr[aSlot].IsActive() ? 1 : 0;
-			/* スロットに残った fade1 で PCM を 0 にしない。等パワー側で下げる。 */
-			fade1 = 0;
-			endflg = 0;
-			fade = 1.0f;
-			fadeadd = 0.0f;
-			DispatchPlaywavFill(s_xfA, 0, nn, 0);
+			if (!XfMixAttachDecoder(aSlot)) {
+				ZeroMemory(s_xfA, nn);
+			}
+			else {
+				XfBindSlotUpscalerToSession(aSlot);
+				g_pcm_upscale_active = g_audioUpscalerArr[aSlot].IsActive() ? 1 : 0;
+				/* スロットに残った fade1 で PCM を 0 にしない。等パワー側で下げる。 */
+				fade1 = 0;
+				endflg = 0;
+				fade = 1.0f;
+				fadeadd = 0.0f;
+				XfDispatchMixFill(s_xfA, nn);
+			}
 			fade1 = 0;
 			endflg = 0;
 			fade = 1.0f;
@@ -5430,7 +5441,7 @@ typedef struct {
 static FxReverb g_fxReverb[EQ_BANKS];
 
 static void FxReverbReset(int rate) {
-	memset(&g_fxReverb[g_eqCur], 0, sizeof(g_fxReverb));
+	memset(&g_fxReverb[g_eqCur], 0, sizeof(g_fxReverb[0]));
 	// Freeverb の標準チューニング (44100Hz 基準のサンプル数)
 	static const int combTune[FX_REV_COMBS] = { 1116,1188,1277,1356,1422,1491,1557,1617 };
 	static const int allpTune[FX_REV_ALLPS] = { 556,441,341,225 };
@@ -5535,7 +5546,7 @@ typedef struct {
 static FxChorus g_fxChorus[EQ_BANKS];
 
 static void FxChorusReset(int rate) {
-	memset(&g_fxChorus[g_eqCur], 0, sizeof(g_fxChorus));
+	memset(&g_fxChorus[g_eqCur], 0, sizeof(g_fxChorus[0]));
 	g_fxChorus[g_eqCur].rate = rate;
 }
 
@@ -5587,7 +5598,7 @@ typedef struct {
 static FxDelay g_fxDelay[EQ_BANKS];
 
 static void FxDelayReset(int rate) {
-	memset(&g_fxDelay[g_eqCur], 0, sizeof(g_fxDelay));
+	memset(&g_fxDelay[g_eqCur], 0, sizeof(g_fxDelay[0]));
 	g_fxDelay[g_eqCur].rate = rate;
 }
 

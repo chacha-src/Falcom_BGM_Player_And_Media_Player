@@ -13514,8 +13514,12 @@ void CPlayList::Save()
 
 		CFile ab;
 #if _UNICODE
+		DatArc_InvalidateLeaf(s0);
+		DatArc_InvalidateLeaf(L"oggYSEDbgmu.dat");
 		if (ab.Open(L"oggYSEDbgmu.dat", CFile::modeCreate | CFile::modeWrite | CFile::shareExclusive, NULL) == TRUE) {
 #else
+		DatArc_InvalidateLeaf(_T("playlist.dat"));
+		DatArc_InvalidateLeaf(_T("oggYSEDbgm.dat"));
 		if (ab.Open("oggYSEDbgm.dat", CFile::modeCreate | CFile::modeWrite | CFile::shareExclusive, NULL) == TRUE) {
 #endif
 			ab.Write(&savedata, sizeof(save));
@@ -13617,7 +13621,8 @@ void CPlayList::Load(BOOL restoreSavedRow)
 		}
 		playcnt = got;
 		c=0;f.Read(&c,4);m_loop.SetCheck(c);
-		c=0;f.Read(&c,4);m_renzoku.SetCheck(c);
+		c=0;f.Read(&c,4); /* ファイル上の renzoku は読むだけ。UI は savedata を正とする */
+		m_renzoku.SetCheck(savedata.saverenzoku ? 1 : 0);
 		c=1;f.Read(&c,4);m_tool.SetCheck(c);
 		c=1;f.Read(&c,4);m_saisyo.SetCheck(c);
 		c=-1;f.Read(&c,4);if(c!=-1){ if(c<72) c=72; m_lc.SetColumnWidth(3,c); } // 時間

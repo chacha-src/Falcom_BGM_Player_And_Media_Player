@@ -1,4 +1,4 @@
-﻿#include "stdafx.h"
+#include "stdafx.h"
 #include "DatArchive.h"
 #include <shlwapi.h>
 #include <zstd.h>
@@ -235,17 +235,8 @@ static BOOL DatArc_ExtractOne(int i)
 	DatArcMemEnt& e = g_ent[i];
 	const CString path = DatArc_StagePath(e.nameW);
 	if (::PathFileExists(path)) {
-		if (!e.stageFpValid) {
-			WIN32_FILE_ATTRIBUTE_DATA fad = {};
-			if (::GetFileAttributesEx(path, GetFileExInfoStandard, &fad)) {
-				ULARGE_INTEGER sz;
-				sz.LowPart = fad.nFileSizeLow;
-				sz.HighPart = fad.nFileSizeHigh;
-				e.stageSize = sz.QuadPart;
-				e.stageMtime = fad.ftLastWriteTime;
-				e.stageFpValid = 1;
-			}
-		}
+		/* 既にあるステージは「今のアーカイブ塊と一致」とは限らない。
+		 * ここで指紋を取ると、直後の FlushAll が古い圧縮塊を再利用する。 */
 		return TRUE;
 	}
 	if (!g_arcMap || e.cmpSize == 0) {
@@ -776,6 +767,9 @@ BOOL DatArc_FlushAll()
 		g_flushDirty = TRUE;
 		return TRUE;
 	}
+	/* 同サイズ上書きは mtime が変わらず、指紋一致で OFF が ON の塊に戻る */
+	for (int i = 0; i < g_n; ++i)
+		g_ent[i].stageFpValid = 0;
 	return DatArc_RebuildFromStage();
 }
 

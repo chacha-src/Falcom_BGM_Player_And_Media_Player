@@ -857,7 +857,7 @@ static void CloseCemuSlot(int slot);
 int XfStartCrossfadeFromNotify(int force); /* 定義は mode/filen 宣言後 — int 戻り */
 static void XfSaveUiMetaFromGlobals(int slot);
 static int XfSoftOpenSlot(int slot, const CString& path, int openMode);
-static CString s_xfFilen[XF_SLOTS], s_xfFnn[XF_SLOTS];
+static CString s_xfFilen[XF_SLOTS], s_xfFnn[XF_SLOTS], s_xfLrcPath[XF_SLOTS];
 static CString s_xfTagName[XF_SLOTS], s_xfTagFile[XF_SLOTS], s_xfTagAlbum[XF_SLOTS], s_xfStitle[XF_SLOTS];
 static int s_xfUiMode[XF_SLOTS];
 static int s_xfTimeMax[XF_SLOTS];
@@ -2095,6 +2095,7 @@ BEGIN_MESSAGE_MAP(COggDlg, CCustomBlurDialogBase)
 	ON_MESSAGE(WM_APP + 92, OnXfadePromoted)
 	ON_MESSAGE(WM_APP + 93, OnXfadePreloadJacket)
 	ON_MESSAGE(WM_APP + 94, OnXfadePromoteUi)
+	ON_MESSAGE(WM_APP + 95, OnXfadeIncomingLrc)
 	ON_WM_WINDOWPOSCHANGING()
 	ON_BN_CLICKED(IDC_BUTTON58, OnBnmp3jake)
 	ON_BN_CLICKED(IDC_CHECK_MICMIX, OnMicMixCheck)
@@ -2500,7 +2501,58 @@ static void ApplyFadeCubedToInterleavedPcm(void* data, int byteLen)
 /* 1=そのスロットは Render（m_stream）で鳴っている。混合で Render2 に替えると無音になる。 */
 static int g_mp3FollowStream[2];
 
+static SOUNDINFO s_xfSikpi[XF_SLOTS];
+static int s_xfSikpiValid[XF_SLOTS] = { 0, 0 };
+
+static void XfClearKpiSlot(int slot);
+
+void XfClearSlotUiCaches()
+{
+	for (int i = 0; i < XF_SLOTS; ++i) {
+		s_xfSikpiValid[i] = 0;
+		ZeroMemory(&s_xfSikpi[i], sizeof(s_xfSikpi[i]));
+		XfClearKpiSlot(i);
+	}
+}
+
 static int DecodeSourceIntoScratch(uint8_t* scratch, int sb);
+
+/* Open 時のファイル形式を優先。袋を変換器ソースで上書きすると 48k が 192k 扱いになり早送りになる。 */
+static void XfResolveFileSrcFormat(int slot, int dm, int& srcRate, int& srcCh, int& srcBits)
+{
+	if (slot >= 0 && slot < XF_SLOTS && g_xfFileRate[slot] >= 8000) {
+		srcRate = g_xfFileRate[slot];
+		if (g_xfFileCh[slot] >= 1)
+			srcCh = g_xfFileCh[slot];
+		if (g_xfFileBits[slot] == 8 || g_xfFileBits[slot] == 16
+			|| g_xfFileBits[slot] == 24 || g_xfFileBits[slot] == 32)
+			srcBits = g_xfFileBits[slot];
+	}
+	else if (slot >= 0 && slot < XF_SLOTS && s_xfSikpiValid[slot]
+		&& (g_openDecoderModeSlot[slot] == INT_MIN || g_openDecoderModeSlot[slot] == dm)) {
+		const SOUNDINFO& si = s_xfSikpi[slot];
+		if (si.dwSamplesPerSec >= 8000 && si.dwSamplesPerSec <= 384000)
+			srcRate = (int)si.dwSamplesPerSec;
+		if (si.dwChannels >= 1 && si.dwChannels <= 32)
+			srcCh = (int)si.dwChannels;
+		const int b = (int)si.dwBitsPerSample;
+		if (b == 8 || b == 16 || b == 24 || b == 32)
+			srcBits = b;
+	}
+	if (dm == -8 && og && og->kmp && XfDecSlot() == slot
+		&& !InterlockedCompareExchange(&g_xfOpening, 0, 0)) {
+		KbFlacDecoder* d = (KbFlacDecoder*)og->kmp;
+		const int r = d->SampleRate();
+		const int c = d->Channels();
+		const int b = d->BitsPerSample();
+		if (r >= 8000 && r <= 384000)
+			srcRate = r;
+		if (c >= 1 && c <= 32)
+			srcCh = c;
+		if (b == 8 || b == 16 || b == 24 || b == 32)
+			srcBits = b;
+	}
+}
 
 void XfBindSlotUpscalerToSession(int slot)
 {
@@ -2511,8 +2563,15 @@ void XfBindSlotUpscalerToSession(int slot)
 	int srcBits = abs(wavsam_depth);
 	if (wavsam_depth < 0)
 		srcBits = 16;
-	/* g_xfSrcBits 初期値 16 は未設定。rate が入ってからスロット値を使う */
-	if (g_xfSrcRate[slot] >= 8000) {
+	if (g_xfFileRate[slot] >= 8000) {
+		srcRate = g_xfFileRate[slot];
+		if (g_xfFileCh[slot] >= 1)
+			srcCh = g_xfFileCh[slot];
+		if (g_xfFileBits[slot] == 8 || g_xfFileBits[slot] == 16
+			|| g_xfFileBits[slot] == 24 || g_xfFileBits[slot] == 32)
+			srcBits = g_xfFileBits[slot];
+	}
+	else if (g_xfSrcRate[slot] >= 8000) {
 		srcRate = g_xfSrcRate[slot];
 		if (g_xfSrcCh[slot] >= 1)
 			srcCh = g_xfSrcCh[slot];
@@ -2523,6 +2582,7 @@ void XfBindSlotUpscalerToSession(int slot)
 	int md = g_openDecoderModeSlot[slot];
 	if (md == INT_MIN)
 		md = g_openDecoderMode;
+	XfResolveFileSrcFormat(slot, md, srcRate, srcCh, srcBits);
 	if (md == -10) {
 		const int fr = (int)mp3_arr[slot].m_mp3info.freq;
 		if (fr >= 8000 && fr <= 384000)
@@ -2560,27 +2620,70 @@ void XfBindSlotUpscalerToSession(int slot)
 	if (!(dstBits == 16 || dstBits == 24 || dstBits == 32))
 		dstBits = 16;
 	AudioUpscaler& up = g_audioUpscalerArr[slot];
-	/* すでにセッションへ出している変換器は、混ぜ始めでも昇格でも捨てない。
-	 * Configure は FIFO を空にする。1曲目はそこにあった音が消え、
-	 * 空いた分（最大約2秒）が無音になってから本編が戻る。
-	 * 2曲目は未出力の先読みが飛ぶか、残った分が出口でもう一度鳴る。 */
+	/* ソースも出口も同じなら FIFO を捨てない。ソースだけ違うときは入れ直す
+	 * （袋を変換器側に合わせると 48k を 192k として Direct 埋めして早送りになる）。 */
 	if (up.IsActive()
-		&& up.DstRate() == dstRate && up.DstCh() == dstCh && up.DstBits() == dstBits) {
-		if (up.SrcRate() != srcRate || up.SrcCh() != srcCh || up.SrcBits() != srcBits) {
-			XfUpdateSlotSrcFormat(slot, up.SrcRate(), up.SrcCh(), up.SrcBits());
-			if (XfDecSlot() == slot) {
-				wavbit_sample_Hz = up.SrcRate();
-				wavchannel = up.SrcCh();
-				wavsam_depth = up.SrcBits();
-				if (md == -10)
-					g_mp3_decoder_bps = up.SrcBits();
-			}
-		}
+		&& up.DstRate() == dstRate && up.DstCh() == dstCh && up.DstBits() == dstBits
+		&& up.SrcRate() == srcRate && up.SrcCh() == srcCh && up.SrcBits() == srcBits)
 		return;
-	}
 	if (up.SrcRate() != srcRate || up.SrcCh() != srcCh || up.SrcBits() != srcBits
 		|| up.DstRate() != dstRate || up.DstCh() != dstCh || up.DstBits() != dstBits)
 		up.Configure(srcRate, srcCh, srcBits, dstRate, dstCh, dstBits);
+}
+
+void XfMixEnterSlot(int slot)
+{
+	if (slot < 0 || slot >= XF_SLOTS)
+		return;
+	if (g_openDecoderModeSlot[slot] == INT_MIN)
+		return;
+	XfBindSlotUpscalerToSession(slot);
+	int srcRate = (g_xfFileRate[slot] >= 8000) ? g_xfFileRate[slot] : g_xfSrcRate[slot];
+	int srcCh = (g_xfFileCh[slot] >= 1) ? g_xfFileCh[slot] : 2;
+	int srcBits = g_xfFileBits[slot];
+	if (!(srcBits == 8 || srcBits == 16 || srcBits == 24 || srcBits == 32))
+		srcBits = 16;
+	if (srcRate < 8000)
+		return;
+	int dstRate = (g_ds_pcm_rate >= 8000) ? g_ds_pcm_rate : srcRate;
+	int dstCh = (g_ds_pcm_ch >= 1) ? g_ds_pcm_ch : srcCh;
+	int dstBits = (g_ds_pcm_bits >= 8) ? g_ds_pcm_bits : 16;
+	AudioUpscaler& up = g_audioUpscalerArr[slot];
+	if (srcRate != dstRate || srcCh != dstCh || srcBits != dstBits) {
+		if (!up.IsActive()
+			|| up.SrcRate() != srcRate || up.SrcCh() != srcCh || up.SrcBits() != srcBits
+			|| up.DstRate() != dstRate || up.DstCh() != dstCh || up.DstBits() != dstBits)
+			up.Configure(srcRate, srcCh, srcBits, dstRate, dstCh, dstBits);
+	}
+}
+
+int XfMixAttachDecoder(int slot)
+{
+	if (slot < 0 || slot >= XF_SLOTS)
+		return 0;
+	const int md = g_openDecoderModeSlot[slot];
+	if (md == 0 || md == INT_MIN)
+		return 0;
+	g_openDecoderMode = md;
+	HKMP h = (HKMP)XfSlotKmp(slot);
+	if (og && h)
+		og->kmp = h;
+	return 1;
+}
+
+void DispatchPlaywavFill(BYTE* bufwav3, ULONG oldw, int len1, int len2);
+
+void XfDispatchMixFill(BYTE* buf, int nn)
+{
+	if (!buf || nn <= 0)
+		return;
+	_set_se_translator(trans_func);
+	try {
+		DispatchPlaywavFill(buf, 0, nn, 0);
+	}
+	catch (...) {
+		ZeroMemory(buf, (size_t)nn);
+	}
 }
 
 /* SoftOpen 直後の B は RB/アップスケーラが空で、混合すると A だけフェードして B が無音になる。
@@ -2839,44 +2942,87 @@ void DispatchPlaywavFill(BYTE* bufwav3, ULONG oldw, int len1, int len2)
 	int srcBits = abs(wavsam_depth);
 	if (wavsam_depth < 0)
 		srcBits = 16;
-	if (dm == -10)
+	int srcRate = wavbit_sample_Hz;
+	int srcCh = wavchannel;
+	const int slot = XfDecSlot();
+	if (slot >= 0 && slot < XF_SLOTS && g_xfFileRate[slot] >= 8000) {
+		srcRate = g_xfFileRate[slot];
+		if (g_xfFileCh[slot] >= 1)
+			srcCh = g_xfFileCh[slot];
+		if (g_xfFileBits[slot] == 8 || g_xfFileBits[slot] == 16
+			|| g_xfFileBits[slot] == 24 || g_xfFileBits[slot] == 32)
+			srcBits = g_xfFileBits[slot];
+	}
+	else if (slot >= 0 && slot < XF_SLOTS && g_xfSrcRate[slot] >= 8000) {
+		srcRate = g_xfSrcRate[slot];
+		if (g_xfSrcCh[slot] >= 1)
+			srcCh = g_xfSrcCh[slot];
+		if (g_xfSrcBits[slot] == 8 || g_xfSrcBits[slot] == 16
+			|| g_xfSrcBits[slot] == 24 || g_xfSrcBits[slot] == 32)
+			srcBits = g_xfSrcBits[slot];
+	}
+	XfResolveFileSrcFormat(slot, dm, srcRate, srcCh, srcBits);
+	if (dm == -10) {
 		srcBits = Mp3DecoderBitsClampedFromObject();
+		const int fr = (int)mp3_.m_mp3info.freq;
+		if (fr >= 8000 && fr <= 384000)
+			srcRate = fr;
+		else
+			srcRate = 44100;
+		const int nch = (int)mp3_.m_mp3info.nch;
+		if (nch >= 1 && nch <= 8)
+			srcCh = nch;
+	}
 	if (!(srcBits == 8 || srcBits == 16 || srcBits == 24 || srcBits == 32))
 		srcBits = 16;
+	if (srcRate >= 8000)
+		wavbit_sample_Hz = srcRate;
+	if (srcCh >= 1)
+		wavchannel = srcCh;
+	wavsam_depth = srcBits;
 	/* セッション出力（1曲目でロックした DS）とソースが違うときは必ずアップスケール。
-	 * 非アクティブのまま dest サイズで Direct 埋めすると 44.1 が 192k バッファに載ってノイズ＋早送り EOF になる。 */
+	 * 非アクティブのまま dest サイズで Direct 埋めすると 48k/24 が 192k バッファに載って早送り EOF になる。 */
 	int needUpscale = 0;
 	if (g_ds_pcm_rate >= 8000) {
-		int srcRate = wavbit_sample_Hz;
-		int srcCh = wavchannel;
-		if (dm == -10) {
-			const int fr = (int)mp3_.m_mp3info.freq;
-			if (fr >= 8000 && fr <= 384000)
-				srcRate = fr;
-			else
-				srcRate = 44100;
-			const int nch = (int)mp3_.m_mp3info.nch;
-			if (nch >= 1 && nch <= 8)
-				srcCh = nch;
-		}
 		needUpscale = (srcRate > 0 && srcRate != g_ds_pcm_rate)
 			|| (g_ds_pcm_ch >= 1 && srcCh > 0 && srcCh != g_ds_pcm_ch)
 			|| (g_ds_pcm_bits >= 8 && srcBits != g_ds_pcm_bits);
-		if (needUpscale) {
-			const int slot = XfDecSlot();
-			XfBindSlotUpscalerToSession(slot);
-			srcBits = abs(wavsam_depth);
-			if (dm == -10)
-				srcBits = Mp3DecoderBitsClampedFromObject();
-			if (!ActiveAudioUpscaler().IsActive()) {
-				int dstRate = g_ds_pcm_rate;
-				int dstCh = (g_ds_pcm_ch >= 1) ? g_ds_pcm_ch : srcCh;
-				int dstBits = (g_ds_pcm_bits >= 8) ? g_ds_pcm_bits : 16;
-				if (srcRate < 8000) srcRate = 44100;
-				if (srcCh < 1) srcCh = 2;
-				ActiveAudioUpscaler().Configure(srcRate, srcCh, srcBits, dstRate, dstCh, dstBits);
-			}
-			g_pcm_upscale_active = ActiveAudioUpscaler().IsActive() ? 1 : 0;
+		XfBindSlotUpscalerToSession(slot);
+		if (needUpscale && !ActiveAudioUpscaler().IsActive()) {
+			int dstRate = g_ds_pcm_rate;
+			int dstCh = (g_ds_pcm_ch >= 1) ? g_ds_pcm_ch : srcCh;
+			int dstBits = (g_ds_pcm_bits >= 8) ? g_ds_pcm_bits : 16;
+			if (srcRate < 8000) srcRate = 44100;
+			if (srcCh < 1) srcCh = 2;
+			ActiveAudioUpscaler().Configure(srcRate, srcCh, srcBits, dstRate, dstCh, dstBits);
+		}
+		g_pcm_upscale_active = ActiveAudioUpscaler().IsActive() ? 1 : 0;
+	}
+	/* 混合中は Open 時ファイル形式≠DS なら dest サイズ Direct 禁止（48k を 192k バッファに載せて早送りになる） */
+	if (InterlockedCompareExchange(&g_xfInProgress, 0, 0)
+		&& slot >= 0 && slot < XF_SLOTS && g_xfFileRate[slot] >= 8000
+		&& g_ds_pcm_rate >= 8000) {
+		const int fr = g_xfFileRate[slot];
+		const int fc = g_xfFileCh[slot];
+		const int fb = g_xfFileBits[slot];
+		if (fr != g_ds_pcm_rate
+			|| (g_ds_pcm_ch >= 1 && fc >= 1 && fc != g_ds_pcm_ch)
+			|| (g_ds_pcm_bits >= 8 && fb != 0 && fb != g_ds_pcm_bits)) {
+			needUpscale = 1;
+			srcRate = fr;
+			if (fc >= 1) srcCh = fc;
+			if (fb == 8 || fb == 16 || fb == 24 || fb == 32) srcBits = fb;
+			wavbit_sample_Hz = srcRate;
+			wavchannel = srcCh;
+			wavsam_depth = srcBits;
+			int dstCh = (g_ds_pcm_ch >= 1) ? g_ds_pcm_ch : srcCh;
+			int dstBits = (g_ds_pcm_bits >= 8) ? g_ds_pcm_bits : 16;
+			AudioUpscaler& mixUp = ActiveAudioUpscaler();
+			if (!mixUp.IsActive()
+				|| mixUp.SrcRate() != srcRate || mixUp.SrcCh() != srcCh || mixUp.SrcBits() != srcBits
+				|| mixUp.DstRate() != g_ds_pcm_rate || mixUp.DstCh() != dstCh || mixUp.DstBits() != dstBits)
+				mixUp.Configure(srcRate, srcCh, srcBits, g_ds_pcm_rate, dstCh, dstBits);
+			g_pcm_upscale_active = mixUp.IsActive() ? 1 : 0;
 		}
 	}
 	if (needUpscale && !g_pcm_upscale_active) {
@@ -3005,6 +3151,8 @@ char* adbuf2_arr[2] = { NULL, NULL };
 void XfSyncSlotMediaPtrsCapture(int slot);
 void XfSyncSlotMediaPtrsApply(int slot);
 void XfInitSlotDecodeRing(int slot);
+void RubberBand_DestroyBank(int bank);
+extern OggVorbis_File vf_arr[2];
 
 void ReleaseOggVorbis(char** pOggBuf);
 
@@ -3012,33 +3160,30 @@ void XfCloseSlotDecodersImpl(int slot)
 {
 	if (slot < 0 || slot >= XF_SLOTS)
 		return;
+	s_xfSikpiValid[slot] = 0;
+	ZeroMemory(&s_xfSikpi[slot], sizeof(s_xfSikpi[slot]));
+	extern void XfInvalidateSlotSongMeta(int slot);
+	XfInvalidateSlotSongMeta(slot);
 	const int m = g_openDecoderModeSlot[slot];
-	if (m == INT_MIN)
-		return;
-	InterlockedExchange(&g_xfFillSlot, slot);
-	XfApplySlotFormatToGlobals(slot);
+	HKMP h = (HKMP)XfSlotKmp(slot);
+	/* fill を触らない。先読み中に fill=B すると notify が A を見失う。 */
 	if (m == -10) {
 		mp3_arr[slot].Close();
-		g_mp3_decoder_bps = 16;
 	}
-	else if (m == -8 && og && og->kmp) {
-		flac_arr[slot].Close(og->kmp);
-		og->kmp = NULL;
+	else if (m == -8 && h) {
+		flac_arr[slot].Close(h);
 	}
-	else if (m == -9 && og && og->kmp) {
-		m4a_arr[slot].Close(og->kmp);
-		og->kmp = NULL;
+	else if (m == -9 && h) {
+		m4a_arr[slot].Close(h);
 	}
-	else if (m == -7 && og && og->kmp) {
-		dsd_arr[slot].kpiClose(og->kmp);
-		og->kmp = NULL;
+	else if (m == -7 && h) {
+		dsd_arr[slot].kpiClose(h);
 	}
 	else if (m == 999) {
 		wav_arr[slot].Close();
 	}
-	else if ((m == -6 || m == 34 || m == 35) && og && og->kmp) {
-		opus_arr[slot].Close(og->kmp);
-		og->kmp = NULL;
+	else if ((m == -6 || m == 34 || m == 35) && h) {
+		opus_arr[slot].Close(h);
 	}
 	else if (IsVstMidiPlayMode(m)) {
 		CloseVstMidiSessionSlot(slot);
@@ -3046,10 +3191,28 @@ void XfCloseSlotDecodersImpl(int slot)
 	else if (m == MODE_CEMU) {
 		CloseCemuSlot(slot);
 	}
+	else if (m == -3) {
+		XfClearKpiSlot(slot);
+	}
+	else if (m == MODE_PLUGIN_WINAMP) {
+		PluginWinamp_ClearSlot(slot);
+	}
+	else if (m == MODE_PLUGIN_XMPLAY) {
+		PluginXmplay_ClearSlot(slot);
+	}
+	else if (m == MODE_PLUGIN_AIMP) {
+		PluginAimp_ClearSlot(slot);
+	}
+	if (m == -1 || ogg_arr[slot]) {
+		ov_clear(&vf_arr[slot]);
+		ZeroMemory(&vf_arr[slot], sizeof(vf_arr[slot]));
+	}
 	if (ogg_arr[slot]) {
-		ReleaseOggVorbis(&ogg_arr[slot]);
+		free(ogg_arr[slot]);
 		ogg_arr[slot] = NULL;
 	}
+	if (og && h && og->kmp == h)
+		og->kmp = NULL;
 	{
 		char* freed = adbuf2_arr[slot];
 		if (freed) {
@@ -3060,7 +3223,7 @@ void XfCloseSlotDecodersImpl(int slot)
 		}
 	}
 	g_audioUpscalerArr[slot].Reset();
-	InterlockedExchange(&g_xfFillSlot, -1);
+	RubberBand_DestroyBank(slot);
 }
 
 BOOL thend1;
@@ -4231,6 +4394,15 @@ static HWND ShowVstWaitPopup(HWND owner)
 	return wnd;
 }
 static KpiHost32Session g_kpiSession;
+static KpiHost32Session g_kpiSessionArr[XF_SLOTS];
+static int g_kpiRemoteArr[XF_SLOTS];
+static IKpiDecoder* g_kpidecArr[XF_SLOTS];
+static IKpiDecoderModule* g_kpiModArr[XF_SLOTS];
+static HMODULE g_kpiDllArr[XF_SLOTS];
+static BYTE g_kvverArr[XF_SLOTS];
+static int g_kpiWavsamSrcArr[XF_SLOTS];
+static int g_kpiSoftOpenArr[XF_SLOTS];
+static int g_kpiBoundSlot = -1;
 static CEmuSession g_cemuSessionSlot[XF_SLOTS];
 static uint8_t g_kpiRemoteCache[kRouteCap];
 static size_t g_kpiRemoteCacheLen = 0;
@@ -4406,6 +4578,86 @@ static void ResetKpiRemoteCache()
 	g_kpiRemoteCacheLen = 0;
 	g_kpiRemoteCachePos = 0;
 	g_kpiRemoteEof = false;
+}
+
+static void XfDisarmKpiSlot(int slot)
+{
+	if (slot < 0 || slot >= XF_SLOTS)
+		return;
+	ZeroMemory(&g_kpiSessionArr[slot], sizeof(g_kpiSessionArr[slot]));
+	g_kpiRemoteArr[slot] = 0;
+	g_kpidecArr[slot] = NULL;
+	g_kpiModArr[slot] = NULL;
+	g_kpiDllArr[slot] = NULL;
+	g_kvverArr[slot] = 0;
+	g_kpiWavsamSrcArr[slot] = 16;
+	g_kpiSoftOpenArr[slot] = 0;
+	if (g_kpiBoundSlot == slot)
+		g_kpiBoundSlot = -1;
+}
+
+static void XfClearKpiSlot(int slot)
+{
+	if (slot < 0 || slot >= XF_SLOTS)
+		return;
+	/* 昇格済みは本流 ReleaseKpiPlaybackAsync が Close する。ここでやると二重解放で落ちる */
+	if (g_kpiBoundSlot == slot || !g_kpiSoftOpenArr[slot]) {
+		XfDisarmKpiSlot(slot);
+		return;
+	}
+	const uint32_t sid = g_kpiSessionArr[slot].sessionId;
+	if (g_kpiRemoteArr[slot] && sid != 0) {
+		g_kpiHost.Close(sid);
+		if (g_kpiSession.sessionId == sid) {
+			ZeroMemory(&g_kpiSession, sizeof(g_kpiSession));
+			g_kpiRemote = false;
+			ResetKpiRemoteCache();
+		}
+	}
+	if (g_kpidecArr[slot]) {
+		IKpiDecoder* d = g_kpidecArr[slot];
+		g_kpidecArr[slot] = NULL;
+		if (kpidec == d)
+			kpidec = NULL;
+		d->Release();
+	}
+	if (g_kpiModArr[slot]) {
+		IKpiDecoderModule* m = g_kpiModArr[slot];
+		g_kpiModArr[slot] = NULL;
+		if (ob5 == m)
+			ob5 = NULL;
+		m->Release();
+	}
+	if (g_kpiDllArr[slot]) {
+		HMODULE h = g_kpiDllArr[slot];
+		g_kpiDllArr[slot] = NULL;
+		FreeLibrary(h);
+	}
+	XfDisarmKpiSlot(slot);
+}
+
+void XfBindKpiSlot(int slot)
+{
+	if (slot < 0 || slot >= XF_SLOTS)
+		return;
+	if (g_openDecoderModeSlot[slot] != -3)
+		return;
+	if (!g_kpiSoftOpenArr[slot] && g_kpiBoundSlot != slot)
+		return;
+	if (g_kpiSoftOpenArr[slot]) {
+		g_kpiSession = g_kpiSessionArr[slot];
+		g_kpiRemote = g_kpiRemoteArr[slot] != 0;
+		kpidec = g_kpidecArr[slot];
+		kvver = g_kvverArr[slot];
+		if (g_kpiWavsamSrcArr[slot] != 0)
+			wavsam_src = g_kpiWavsamSrcArr[slot];
+		g_kpiSourceBitsPerSample = wavsam_src;
+		ob5 = g_kpiModArr[slot];
+		if (og && g_kpiDllArr[slot])
+			og->hDLLk = (HINSTANCE)g_kpiDllArr[slot];
+		ResetKpiRemoteCache();
+		g_kpiBoundSlot = slot;
+	}
 }
 
 // loop2=PCMサンプル数 → oggsize/data_size。int 乗算溢れ防止（192k/2ch/16bit で約46.6分が壁）
@@ -4725,6 +4977,8 @@ static void ReleaseKpiPlaybackAsync(KMPMODULE*& modRef, HKMP& kmp1Ref, HINSTANCE
 		g_kpiRemote = false;
 		ResetKpiRemoteCache();
 	}
+	if (g_kpiBoundSlot >= 0)
+		XfDisarmKpiSlot(g_kpiBoundSlot);
 	g_kpiPlaybackArch = 0;
 
 	ResetEvent(g_kpiTeardownDone);
@@ -5495,7 +5749,9 @@ static int XfModeCanSoftOpen(int m)
 {
 	if (IsVstMidiPlayMode(m) || m == MODE_CEMU || IsCemuMode(m))
 		return 1;
-	if (m == -8 || m == -9 || m == -10)
+	if (m == -1 || m == -3 || m == -7 || m == -8 || m == -9 || m == -10 || m == 999)
+		return 1;
+	if (IsForeignPluginMode(m))
 		return 1;
 	return 0;
 }
@@ -5516,6 +5772,8 @@ int XfShouldPreloadNext()
 	extern BOOL sek;
 	extern int sek4;
 	if (sek || sek4)
+		return 0;
+	if (InterlockedCompareExchange(&g_xfSoftOpenFailed, 0, 0))
 		return 0;
 	if (!pl || !pl->pc || pl->playcnt <= 0)
 		return 0;
@@ -5543,11 +5801,19 @@ int XfShouldPreloadNext()
 			leadSec = 45.0;
 		else if (nextMode == MODE_CEMU || IsCemuMode(nextMode))
 			leadSec = 12.0;
+		else if (nextMode == -3)
+			leadSec = 8.0;
 		if (leadSec > 0.0)
 			loadBytes = (__int64)(leadSec * (double)sr + 0.5) * (__int64)bpf;
 	}
 	if (loadBytes < xfBytes)
 		loadBytes = xfBytes;
+	/* バナー時計。スロット1では poss5/endRef がずれることがあり、0→1 と同じ窓に乗せる */
+	if (XfSongClockNearEnd(4.0))
+		return 1;
+	/* 1→0 でも 0→1 と同じ。終端に達していれば窓計算を待たず B を開く。 */
+	if (endflg)
+		return 1;
 	/* 先読みは終端フラグではなく、終端から設定秒＋リード分だけ手前。 */
 	if (endRef > 0) {
 		const __int64 startAt = XfFadeEndRefBytes(g_endWrittenBytes) - xfBytes - loadBytes;
@@ -5608,6 +5874,8 @@ static int XfOpenNextSlotForCrossfade(int* outCur, int* outNxt)
 	if (pl->pc[nextIdx].sub == -2)
 		return 0;
 
+	InterlockedExchange(&g_xfSoftOpenFailed, 0);
+
 	const int cur = XfActiveSlot();
 	const int nxt = XfOtherSlot(cur);
 	if (outCur) *outCur = cur;
@@ -5637,6 +5905,7 @@ static int XfOpenNextSlotForCrossfade(int* outCur, int* outNxt)
 	const CString nextPath = pl->pc[nextIdx].fol;
 	const int nextMode = pl->pc[nextIdx].sub;
 	s_xfFilen[nxt] = nextPath;
+	s_xfLrcPath[nxt] = nextPath;
 	s_xfFnn[nxt] = pl->pc[nextIdx].name;
 	s_xfTagFile[nxt] = pl->pc[nextIdx].name;
 	s_xfTagName[nxt] = pl->pc[nextIdx].art;
@@ -5651,6 +5920,7 @@ static int XfOpenNextSlotForCrossfade(int* outCur, int* outNxt)
 	{
 		std::unique_lock<std::mutex> xfLock(cl2);
 		if (!openedOk || g_openDecoderModeSlot[nxt] == INT_MIN) {
+			InterlockedExchange(&g_xfSoftOpenFailed, 1);
 			InterlockedExchange(&g_xfPromotePlIndex, -1);
 			endflg_arr[cur] = saveEndflg;
 			g_endWrittenBytes = saveEndWritten;
@@ -5727,6 +5997,9 @@ void XfBeginMixLocked(int cur)
 		extern int g_pcm_upscale_active;
 		g_pcm_upscale_active = g_audioUpscalerArr[cur].IsActive() ? 1 : 0;
 	}
+	XfMixEnterSlot(XfOtherSlot(cur));
+	if (og && ::IsWindow(og->GetSafeHwnd()))
+		og->PostMessage(WM_APP + 95, (WPARAM)XfOtherSlot(cur), 0);
 }
 
 void XfMpCancelFadeIfRequested()
@@ -5899,11 +6172,14 @@ int XfStartCrossfadeFromNotify(int force)
 		|| inWin
 		|| XfShouldStartEarly(g_heardBytes, g_endWrittenBytes)
 		|| XfRenzokuLimitReached();
-	if (InterlockedCompareExchange(&g_xfPrepared, 0, 0)
-		&& g_openDecoderModeSlot[XfOtherSlot(cur)] != INT_MIN) {
-		/* 混合は fill が cl2 内で始める。UI から BeginMixNow すると
-		 * cl2 待ち＋fill の SendMessage でタイマが凍りクロスが始まらない。 */
-		return 1;
+	if (InterlockedCompareExchange(&g_xfPrepared, 0, 0)) {
+		if (g_openDecoderModeSlot[XfOtherSlot(cur)] != INT_MIN) {
+			/* 混合は fill が cl2 内で始める。UI から BeginMixNow すると
+			 * cl2 待ち＋fill の SendMessage でタイマが凍りクロスが始まらない。 */
+			return 1;
+		}
+		/* 1→0: 昇格後に prepared だけ残ると次曲を開かず Restart する */
+		InterlockedExchange(&g_xfPrepared, 0);
 	}
 	if (InterlockedCompareExchange(&g_xfOpening, 0, 0)
 		|| InterlockedCompareExchange(&g_xfPreloadBusy, 0, 0))
@@ -6065,6 +6341,35 @@ static int PlaybackSrcTotalSamples();
 static bool PlaybackShortMeansEof(int gotBytes);
 static void TempoPredAdvanceTo(double wallSec, double rateNow, double totalSrcSec);
 static void TempoPredSyncSourcePos(double wallSec, double rateNow, double totalSrcSec);
+
+int XfSongClockNearEnd(double extraLeadSec)
+{
+	if (extraLeadSec < 0.0)
+		extraLeadSec = 0.0;
+	const int slot = XfActiveSlot();
+	int rate = (slot >= 0 && slot < XF_SLOTS && g_xfFileRate[slot] >= 8000)
+		? g_xfFileRate[slot] : wavbit_sample_Hz;
+	if (rate < 8000)
+		rate = 44100;
+	int samp = loop3;
+	if (samp <= 0 && loop2 > 0)
+		samp = loop1 + loop2;
+	if (samp < rate)
+		return 0;
+	const double durSec = (double)samp / (double)rate;
+	if (durSec < 1.0)
+		return 0;
+	double posSec = 0.0;
+	if (g_tpUiValid && g_tpSrcSec > 0.0)
+		posSec = g_tpSrcSec;
+	else if (poss5 > 0)
+		posSec = (double)poss5 / (double)rate;
+	if (posSec < 0.2)
+		return 0;
+	const double need = XfSecFromSave() + extraLeadSec;
+	return (posSec + need >= durSec) ? 1 : 0;
+}
+
 CString tagname, tagfile, tagalbum;
 CString tagtrack;   // 曲番号(トラック番号)。全形式でタグから補完して表示に使用
 
@@ -8474,9 +8779,8 @@ BYTE bufkpi2[OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 3];
 BYTE bufkpi3[OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 3];
 BYTE bufkpi4[OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 3];
 enum { XF_KPI_RING_BYTES = OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 3 };
-
-static SOUNDINFO s_xfSikpi[XF_SLOTS];
-static int s_xfSikpiValid[XF_SLOTS] = { 0, 0 };
+/* readogg は ov_read の読み残しを bufwav 先頭に poss 分持ち越す */
+static BYTE bufwav_arr[XF_SLOTS][OUTPUT_BUFFER_SIZE * 3];
 
 /* mid VST の読み出し（readvst）は DS ステージへ直接書き、bufkpi* を一切使わない。
  * それでも毎サイクル 5 本×リング分を往復コピーすると、A と B を同じサイクルで
@@ -8499,6 +8803,7 @@ void XfSyncSlotDecodeRingSave(int slot)
 	memcpy(bufkpi2_arr[slot], bufkpi2, XF_KPI_RING_BYTES);
 	memcpy(bufkpi3_arr[slot], bufkpi3, XF_KPI_RING_BYTES);
 	memcpy(bufkpi4_arr[slot], bufkpi4, XF_KPI_RING_BYTES);
+	memcpy(bufwav_arr[slot], bufwav, sizeof(bufwav));
 }
 
 void XfSyncSlotDecodeRingLoad(int slot)
@@ -8510,12 +8815,19 @@ void XfSyncSlotDecodeRingLoad(int slot)
 	memcpy(bufkpi2, bufkpi2_arr[slot], XF_KPI_RING_BYTES);
 	memcpy(bufkpi3, bufkpi3_arr[slot], XF_KPI_RING_BYTES);
 	memcpy(bufkpi4, bufkpi4_arr[slot], XF_KPI_RING_BYTES);
+	memcpy(bufwav, bufwav_arr[slot], sizeof(bufwav));
 }
 
 static int s_xfLoop1[XF_SLOTS], s_xfLoop2[XF_SLOTS], s_xfLoop3[XF_SLOTS];
 static int s_xfOggsize[XF_SLOTS], s_xfFlacmode[XF_SLOTS], s_xfEndf[XF_SLOTS];
 static long s_xfDataSize[XF_SLOTS];
 static int s_xfMetaValid[XF_SLOTS] = { 0, 0 };
+
+void XfInvalidateSlotSongMeta(int slot)
+{
+	if (slot < 0 || slot >= XF_SLOTS) return;
+	s_xfMetaValid[slot] = 0;
+}
 
 void XfSyncSlotSongMetaSave(int slot)
 {
@@ -8549,7 +8861,7 @@ void XfSyncSlotMediaPtrsCapture(int slot)
 	extern OggVorbis_File vf_arr[2];
 	extern OggVorbis_File* g_vfPtr;
 	adbuf2_arr[slot] = adbuf2;
-	ogg_arr[slot] = ogg;
+	/* ogg_arr[slot] = ogg は #define ogg 経由で別スロットを別名コピーしてしまう */
 	g_vfPtr = &vf_arr[slot];
 	if (og) {
 		s_xfSikpi[slot] = og->sikpi;
@@ -8563,7 +8875,6 @@ void XfSyncSlotMediaPtrsApply(int slot)
 	extern OggVorbis_File vf_arr[2];
 	extern OggVorbis_File* g_vfPtr;
 	adbuf2 = adbuf2_arr[slot];
-	ogg = ogg_arr[slot];
 	g_vfPtr = &vf_arr[slot];
 	if (og && s_xfSikpiValid[slot])
 		og->sikpi = s_xfSikpi[slot];
@@ -8578,6 +8889,7 @@ void XfInitSlotDecodeRing(int slot)
 	ZeroMemory(bufkpi2_arr[slot], XF_KPI_RING_BYTES);
 	ZeroMemory(bufkpi3_arr[slot], XF_KPI_RING_BYTES);
 	ZeroMemory(bufkpi4_arr[slot], XF_KPI_RING_BYTES);
+	ZeroMemory(bufwav_arr[slot], sizeof(bufwav_arr[slot]));
 }
 
 static void XfSaveUiMetaFromGlobals(int slot)
@@ -8612,6 +8924,184 @@ static void XfFillSoundInfoDefaults(SOUNDINFO& si)
 		si.dwBitsPerSample = 16;
 }
 
+static int XfSoftOpenKpi(int slot, const CString& path, SOUNDINFO& si,
+	int& loop3v, int& oggsz, long& dsz, int& timeMax)
+{
+	if (!pl || path.IsEmpty())
+		return 0;
+	XfClearKpiSlot(slot);
+	CString media = path;
+	CString bare;
+	uint32_t sel = 1;
+	SplitKpiSubsongPath(media, bare, sel);
+	if (!bare.IsEmpty())
+		media = bare;
+	KpiRewriteSeqAsMidi(media);
+	playlistdata pd = {};
+	TCHAR dll[512] = {};
+	BYTE ver = 0;
+	pl->plugs(media, &pd, dll, ver);
+	if (!dll[0])
+		return 0;
+	const WORD km = GetPeMachine(dll);
+#ifdef _WIN64
+	const bool needRemote = PeMachineNeedsRemote(km)
+		|| (!km && ResolveKpiArchBits(CString(dll), media) == 32);
+#else
+	const bool needRemote = PeMachineNeedsRemote(km);
+#endif
+	int rate = 44100, ch = 2, bits = 16, srcBits = 16;
+	if (needRemote) {
+		KPI_MEDIAINFO req;
+		kpi_InitMediaInfo(&req);
+		req.dwSampleRate = savedata.samples;
+		req.nBitsPerSample = 0;
+		req.dwChannels = 0;
+		req.dwFormatType = KPI_MEDIAINFO::FORMAT_PCM;
+		KpiHost32Session sess{};
+		if (!g_kpiHost.Open(dll, (const wchar_t*)media, req, sel, sess) || sess.sessionId == 0)
+			return 0;
+		g_kpiSessionArr[slot] = sess;
+		g_kpiRemoteArr[slot] = 1;
+		g_kvverArr[slot] = 5;
+		g_kpidecArr[slot] = NULL;
+		const KPI_MEDIAINFO& mi = sess.mediaInfo;
+		rate = (mi.dwSampleRate >= 8000) ? (int)mi.dwSampleRate : 44100;
+		ch = (mi.dwChannels >= 1) ? (int)mi.dwChannels : 2;
+		srcBits = mi.nBitsPerSample;
+		bits = (srcBits < 0) ? 16 : srcBits;
+		if (!(bits == 8 || bits == 16 || bits == 24 || bits == 32))
+			bits = 16;
+		if (mi.qwLength != (UINT64)-1 && rate >= 1000)
+			loop3v = (int)kpi_100nsToSample(mi.qwLength, (DWORD)rate);
+		uint64_t np = 0;
+		g_kpiHost.Seek(sess.sessionId, 0, 0, np);
+	}
+	else if (ver == 5) {
+		HMODULE h = LoadKpiLibraryWithDependencies(dll);
+		if (!h)
+			return 0;
+		typedef HRESULT(WINAPI* kpi_CreateInstance)(REFIID riid, void** ppvObject, IKpiUnknown* pUnknown);
+		kpi_CreateInstance cr = (kpi_CreateInstance)GetProcAddress(h, "kpi_CreateInstance");
+		if (!cr) {
+			FreeLibrary(h);
+			return 0;
+		}
+		IUnknown* host = new CMyHost(dll);
+		IKpiDecoderModule* ob = NULL;
+		if (SafeCreateDecoderModuleInstance(cr, (void**)&ob, host) != S_OK || !ob) {
+			FreeLibrary(h);
+			return 0;
+		}
+		KPI_MEDIAINFO me;
+		kpi_InitMediaInfo(&me);
+		me.dwSampleRate = savedata.samples;
+		CMyHostFile* hf = new CMyHostFile();
+		if (!hf->Open(media)) {
+			hf->Release();
+			ob->Release();
+			FreeLibrary(h);
+			return 0;
+		}
+		IKpiFolder* fold = new CMyDummyFolder(media);
+		IKpiDecoder* dec = NULL;
+		ob->Open(&me, hf, fold, &dec);
+		if (fold)
+			fold->Release();
+		hf->Release();
+		if (!dec) {
+			ob->Release();
+			FreeLibrary(h);
+			return 0;
+		}
+		const KPI_MEDIAINFO* pmi = NULL;
+		SafeKpiDecoderSelect(dec, (sel <= 0) ? 1 : sel, &pmi);
+		dec->Seek(0, 0);
+		g_kpidecArr[slot] = dec;
+		g_kpiModArr[slot] = ob;
+		g_kpiDllArr[slot] = h;
+		g_kpiRemoteArr[slot] = 0;
+		g_kvverArr[slot] = 5;
+		if (pmi) {
+			rate = (pmi->dwSampleRate >= 8000) ? (int)pmi->dwSampleRate : 44100;
+			ch = (pmi->dwChannels >= 1) ? (int)pmi->dwChannels : 2;
+			srcBits = pmi->nBitsPerSample;
+			bits = (srcBits < 0) ? 16 : srcBits;
+			if (!(bits == 8 || bits == 16 || bits == 24 || bits == 32))
+				bits = 16;
+			if (pmi->qwLength != (UINT64)-1 && rate >= 1000)
+				loop3v = (int)kpi_100nsToSample(pmi->qwLength, (DWORD)rate);
+		}
+	}
+	else {
+		return 0;
+	}
+	XfFillSoundInfoDefaults(si);
+	si.dwSamplesPerSec = (DWORD)rate;
+	si.dwChannels = (DWORD)ch;
+	si.dwBitsPerSample = (DWORD)bits;
+	g_kpiWavsamSrcArr[slot] = srcBits;
+	g_kpiSoftOpenArr[slot] = 1;
+	if (loop3v < 0)
+		loop3v = 0;
+	timeMax = (loop3v > 0) ? loop3v : 1;
+	const int bps = (bits >= 8) ? (bits / 8) : 2;
+	const __int64 bytesTotal = (__int64)loop3v * (__int64)ch * (__int64)bps;
+	oggsz = (bytesTotal > 0 && bytesTotal < (__int64)0x7fffffff) ? (int)bytesTotal : 0;
+	dsz = oggsz;
+	return 1;
+}
+
+static int XfSoftOpenForeign(int slot, const CString& path, int openMode,
+	SOUNDINFO& si, int& loop3v, int& oggsz, long& dsz, int& timeMax)
+{
+	if (!pl || path.IsEmpty() || slot < 0 || slot >= XF_SLOTS)
+		return 0;
+	playlistdata pd = {};
+	TCHAR dll[512] = {};
+	BYTE ver = 0;
+	pl->plugs(path, &pd, dll, ver);
+	if (!dll[0])
+		return 0;
+	int rate = 44100, ch = 2, bits = 16, lenMs = 0;
+	int ok = 0;
+	if (openMode == MODE_PLUGIN_WINAMP) {
+		int ms = 0;
+		ok = PluginWinamp_SoftOpenSlot(slot, dll, path, &rate, &ch, &bits, &ms);
+		lenMs = ms;
+	}
+	else if (openMode == MODE_PLUGIN_XMPLAY) {
+		double sec = 0.0;
+		ok = PluginXmplay_SoftOpenSlot(slot, dll, path, &rate, &ch, &bits, &sec);
+		if (sec > 0.0 && rate > 0)
+			lenMs = (int)(sec * 1000.0 + 0.5);
+	}
+	else if (openMode == MODE_PLUGIN_AIMP) {
+		INT64 nbytes = 0;
+		ok = PluginAimp_SoftOpenSlot(slot, dll, path, &rate, &ch, &bits, &nbytes);
+		const int bpf = (bits / 8) * ((ch > 0) ? ch : 2);
+		if (nbytes > 0 && bpf > 0 && rate > 0)
+			lenMs = (int)((nbytes / bpf) * 1000 / rate);
+	}
+	if (!ok)
+		return 0;
+	if (rate < 8000) rate = 44100;
+	if (ch < 1) ch = 2;
+	if (!(bits == 8 || bits == 16 || bits == 24 || bits == 32))
+		bits = 16;
+	XfFillSoundInfoDefaults(si);
+	si.dwSamplesPerSec = (DWORD)rate;
+	si.dwChannels = (DWORD)ch;
+	si.dwBitsPerSample = (DWORD)bits;
+	loop3v = (lenMs > 0 && rate > 0) ? (int)((__int64)lenMs * (__int64)rate / 1000) : 0;
+	timeMax = (loop3v > 0) ? loop3v : 1;
+	const int bps = (bits >= 8) ? (bits / 8) : 2;
+	const __int64 bytesTotal = (__int64)loop3v * (__int64)ch * (__int64)bps;
+	oggsz = (bytesTotal > 0 && bytesTotal < (__int64)0x7fffffff) ? (int)bytesTotal : 0;
+	dsz = oggsz;
+	return 1;
+}
+
 /* 作業用グローバル（A）を触らずスロット B だけ開く。notify は A を埋め続けられる。 */
 static int XfSoftOpenSlot(int slot, const CString& path, int openMode)
 {
@@ -8622,29 +9112,38 @@ static int XfSoftOpenSlot(int slot, const CString& path, int openMode)
 		return 0;
 	/* B を開いても A の wavbit/mode は触らない（バナーちらつき・192→44.1 誤再生の主因） */
 	struct XfHoldAFormat {
-		int mode, rate, ch, bits, mp3, up;
+		int mode, rate, ch, bits, mp3, up, oggfSave;
+		DWORD cnt3Save;
 		HKMP kmp, kmp1;
 		XfHoldAFormat()
 		{
 			extern int g_pcm_upscale_active;
+			extern int oggf;
+			extern DWORD cnt3;
 			mode = g_openDecoderMode;
 			rate = wavbit_sample_Hz;
 			ch = wavchannel;
 			bits = wavsam_depth;
 			mp3 = g_mp3_decoder_bps;
 			up = g_pcm_upscale_active;
+			oggfSave = oggf;
+			cnt3Save = cnt3;
 			kmp = og ? og->kmp : NULL;
 			kmp1 = og ? og->kmp1 : NULL;
 		}
 		~XfHoldAFormat()
 		{
 			extern int g_pcm_upscale_active;
+			extern int oggf;
+			extern DWORD cnt3;
 			g_openDecoderMode = mode;
 			wavbit_sample_Hz = rate;
 			wavchannel = ch;
 			wavsam_depth = bits;
 			g_mp3_decoder_bps = mp3;
 			g_pcm_upscale_active = up;
+			oggf = oggfSave;
+			cnt3 = cnt3Save;
 			if (og) {
 				og->kmp = kmp;
 				og->kmp1 = kmp1;
@@ -8660,6 +9159,9 @@ static int XfSoftOpenSlot(int slot, const CString& path, int openMode)
 	long dsz = 0;
 	int flacModeSlot = 0;
 	int mp3Bps = g_mp3_decoder_bps;
+	int oggfSniff = 0;
+	/* スロット0の再利用（1→0）。INT_MIN でもデコーダオブジェクトを捨ててから開く */
+	XfCloseSlotDecoders(slot);
 
 	if (openMode == -8) {
 		{
@@ -8743,10 +9245,14 @@ static int XfSoftOpenSlot(int slot, const CString& path, int openMode)
 		if (!kmpNew)
 			return 0;
 		m4a_arr[slot].SetPosition(kmpNew, 0);
-		loop3v = (si.dwLength != (DWORD)-1) ? (int)si.dwLength : 0;
-		oggsz = loop3v;
-		dsz = loop3v * ((si.dwBitsPerSample >= 8) ? (int)(si.dwBitsPerSample / 4) : 4);
-		timeMax = (loop3v > 0) ? loop3v : 1;
+		{
+			const int depth = (si.dwBitsPerSample >= 8) ? (int)si.dwBitsPerSample : 16;
+			const int den = (depth / 4) > 0 ? (depth / 4) : 4;
+			loop3v = (si.dwLength != (DWORD)-1) ? (int)((float)si.dwLength / (float)den) : 0;
+			oggsz = loop3v;
+			dsz = loop3v * den;
+			timeMax = (loop3v > 0) ? loop3v : 1;
+		}
 	}
 	else if (IsVstMidiPlayMode(openMode)) {
 		wchar_t mid[VST_PATH_CHARS]; mid[0] = 0;
@@ -8867,6 +9373,93 @@ static int XfSoftOpenSlot(int slot, const CString& path, int openMode)
 		const __int64 bytesTotal = (__int64)loop3v * 2 * 2;
 		oggsz = dsz = (bytesTotal > 0 && bytesTotal < (__int64)0x7fffffff) ? (int)bytesTotal : 0;
 	}
+	else if (openMode == -1) {
+		FILE* fp = _tfopen(path, _T("rb"));
+		if (!fp)
+			return 0;
+		oggf = 0;
+		if (ov_open_callbacks(fp, &vf_arr[slot], NULL, 0, callbacks) < 0) {
+			fclose(fp);
+			return 0;
+		}
+		oggfSniff = oggf;
+		vorbis_info* vi = ov_info(&vf_arr[slot], -1);
+		if (!vi) {
+			ov_clear(&vf_arr[slot]);
+			ZeroMemory(&vf_arr[slot], sizeof(vf_arr[slot]));
+			return 0;
+		}
+		si.dwSamplesPerSec = (DWORD)((vi->rate > 0) ? vi->rate : 44100);
+		si.dwChannels = (DWORD)((vi->channels > 0) ? vi->channels : 2);
+		si.dwBitsPerSample = 16;
+		{
+			const ogg_int64_t total = ov_pcm_total(&vf_arr[slot], -1);
+			loop3v = (total > 0 && total < (__int64)0x7fffffff) ? (int)total : 0;
+		}
+		{
+			/* LoadOggVorbis と同じくバイト数。readogg の終端判定は data_size/bpf */
+			const __int64 bytesTotal = (__int64)loop3v * (__int64)si.dwChannels * 2;
+			oggsz = dsz = (bytesTotal > 0 && bytesTotal < (__int64)0x7fffffff) ? (int)bytesTotal : 0;
+		}
+		timeMax = (loop3v > 0) ? loop3v : 1;
+		if (ogg_arr[slot]) {
+			free(ogg_arr[slot]);
+			ogg_arr[slot] = NULL;
+		}
+		ogg_arr[slot] = (char*)malloc(1);
+	}
+	else if (openMode == -7) {
+		/* dsdload と同じ出力要求。違うと A と B で DSD→PCM の bit/rate が食い違う */
+		si.dwChannels = 6;
+		si.dwBitsPerSample = (savedata.bit32 == 1) ? 32 : ((savedata.bit24 == 1) ? 24 : 16);
+		if (si.dwSamplesPerSec < 8000 || si.dwSamplesPerSec > 384000)
+			si.dwSamplesPerSec = 44100;
+		kpiInit();
+		ULONGLONG pointer = 0;
+		CString pth = path;
+		TCHAR* f = pth.GetBuffer();
+		kmpNew = dsd_arr[slot].kpiOpen(f, &si, pointer);
+		pth.ReleaseBuffer();
+		if (!kmpNew)
+			return 0;
+		dsd_arr[slot].kpiSetPosition(kmpNew, 0);
+		const int rate = (si.dwSamplesPerSec > 0) ? (int)si.dwSamplesPerSec : 44100;
+		if (si.dwLength != (DWORD)-1 && rate > 0)
+			loop3v = (int)((double)(DWORD)si.dwLength * (double)rate / 1000.0 + 0.5);
+		timeMax = (loop3v > 0) ? loop3v : 1;
+		int bps = (si.dwBitsPerSample >= 8) ? (int)(si.dwBitsPerSample / 8) : 2;
+		const int ch = (si.dwChannels > 0) ? (int)si.dwChannels : 2;
+		const __int64 bytesTotal = (__int64)loop3v * (__int64)ch * (__int64)bps;
+		oggsz = dsz = (bytesTotal > 0 && bytesTotal < (__int64)0x7fffffff) ? (int)bytesTotal : 0;
+	}
+	else if (openMode == 999) {
+		wavinfo wi;
+		if (!wav_arr[slot].Open(path, &wi))
+			return 0;
+		if (wav_arr[slot].IsMSADPCM()) {
+			wav_arr[slot].Close();
+			return 0;
+		}
+		si.dwSamplesPerSec = wi.nSamplesPerSec;
+		si.dwChannels = wi.nChannels;
+		/* readwav はファイル bit を wavsam_depth へ変換して出す。play() と同じ 16/24 */
+		si.dwBitsPerSample = (wi.wBitsPerSample <= 16) ? 16 : 24;
+		loop3v = (wi.totalSamples > 0 && wi.totalSamples < (__int64)0x7fffffff)
+			? (int)wi.totalSamples : 0;
+		{
+			const __int64 bytesTotal = (__int64)loop3v * (__int64)(si.dwBitsPerSample / 8) * (__int64)si.dwChannels;
+			oggsz = dsz = (bytesTotal > 0 && bytesTotal < (__int64)0x7fffffff) ? (int)bytesTotal : 0;
+		}
+		timeMax = (loop3v > 0) ? loop3v : 1;
+	}
+	else if (openMode == -3) {
+		if (!XfSoftOpenKpi(slot, path, si, loop3v, oggsz, dsz, timeMax))
+			return 0;
+	}
+	else if (IsForeignPluginMode(openMode)) {
+		if (!XfSoftOpenForeign(slot, path, openMode, si, loop3v, oggsz, dsz, timeMax))
+			return 0;
+	}
 	else {
 		return 0;
 	}
@@ -8914,14 +9507,120 @@ static int XfSoftOpenSlot(int slot, const CString& path, int openMode)
 	const int dstCh = (g_ds_pcm_ch > 0) ? g_ds_pcm_ch : (int)si.dwChannels;
 	const int dstBits = (g_ds_pcm_bits >= 8) ? g_ds_pcm_bits : 16;
 	/* 前の曲の FIFO が残っていると、入りでその数秒分がドルル／無音になる。 */
+	RubberBand_DestroyBank(slot);
 	g_audioUpscalerArr[slot].Reset();
 	g_audioUpscalerArr[slot].Configure((int)si.dwSamplesPerSec, (int)si.dwChannels, srcBits, dstRate, dstCh, dstBits);
 	XfBindSlotUpscalerToSession(slot);
 	/* equaliserResetBank は g_eqMu。UI で fill と同時に取ると SendMessage 相互待ち。BeginMix でやる。 */
 	XfInitSlotDecodeRing(slot);
+	if (openMode == -1)
+		XfSetSlotOggf(slot, oggfSniff);
 	/* ここで Render して FIFO と playb だけ進めると、出口でその分が
 	 * もう一度出るか、逆に飛んでつなぎ目がずれる。デコーダは 0 のまま。 */
 	return 1;
+}
+
+static void OggApplySidecarLrc(const CString& path, int pickCs = -1, int doTick = 1)
+{
+	if (!og)
+		return;
+	og->lrcnum = 0;
+	og->lrccur = 0;
+	og->lrc_backup = L"";
+	for (int m = 0; m < 300; m++) {
+		og->lrc[m] = L"";
+		og->lrctm[m] = 0;
+	}
+	const CString ph = LL14(L"歌詞(.lrc)が表示されます", L"Lyrics (.lrc) will be displayed here", L"Paroles (.lrc) affichees ici", L"Testi (.lrc) visualizzati qui", L"Letra (.lrc) mostrada aqui", L"가사(.lrc)가 여기에 표시됩니다", L"歌词(.lrc)将在此显示", L"كلمات (.lrc) ستُعرض هنا", L"Текст (.lrc) отображается здесь", L"Liedtext (.lrc) wird hier angezeigt", L"Letra (.lrc) exibida aqui", L"Songtekst (.lrc) wordt hier getoond", L"Teksty (.lrc) wy?wietlone tutaj", L"Soz (.lrc) burada goruntulenir");
+	og->m_lrc.SetWindowText(L"");
+	og->m_lrc2.SetWindowText(ph);
+	og->m_lrc3.SetWindowText(L"");
+	og->m_lrc4.SetWindowText(L"");
+	og->m_lrc5.SetWindowText(L"");
+	const int gg2 = path.IsEmpty() ? -1 : path.ReverseFind(L'.');
+	if (gg2 > 0) {
+		CString filenll = path.Left(gg2) + L".lrc";
+		if (PathFileExistsW(filenll)) {
+			og->lrc[og->lrcnum] = L"...";
+			og->lrctm[og->lrcnum] = 0;
+			og->lrcnum++;
+			CStdioFile a(_tfopen(filenll, _T("r, ccs=UTF-8")));
+			CString buf;
+			while (a.ReadString(buf) && og->lrcnum < 298) {
+					if (buf.IsEmpty()) continue;
+					int lastBracket = buf.ReverseFind(']');
+					if (lastBracket == -1) continue;
+					CString text = buf.Mid(lastBracket + 1);
+					int curPos = 0;
+					while (curPos < lastBracket && og->lrcnum < 298) {
+						int startBracket = buf.Find('[', curPos);
+						int endBracket = buf.Find(']', curPos);
+						if (startBracket != -1 && endBracket != -1 && endBracket > startBracket) {
+							int mm = _wtoi(buf.Mid(startBracket + 1, 2));
+							int ss = _wtoi(buf.Mid(startBracket + 4, 2));
+							int xx = _wtoi(buf.Mid(startBracket + 7, 2));
+							og->lrc[og->lrcnum] = text;
+							og->lrctm[og->lrcnum] = mm * 60 * 100 + ss * 100 + xx;
+							og->lrcnum++;
+							curPos = endBracket + 1;
+						}
+						else break;
+					}
+				}
+			a.Close();
+			for (int i = 0; i < og->lrcnum - 1; i++) {
+				for (int j = 0; j < og->lrcnum - i - 1; j++) {
+					if (og->lrctm[j] > og->lrctm[j + 1]) {
+						DWORD tempTm = og->lrctm[j]; og->lrctm[j] = og->lrctm[j + 1]; og->lrctm[j + 1] = tempTm;
+						CString tempTxt = og->lrc[j]; og->lrc[j] = og->lrc[j + 1]; og->lrc[j + 1] = tempTxt;
+					}
+				}
+			}
+			if (og->lrcnum > 0) {
+				DWORD lastT = og->lrctm[og->lrcnum - 1];
+				og->lrctm[og->lrcnum] = lastT + 500;
+				og->lrc[og->lrcnum] = L"";
+				og->lrcnum++;
+			}
+		}
+	}
+	if (og->lrcnum < 2 && !path.IsEmpty()) {
+		const int nLy = MidiSmfFillLrc((LPCTSTR)path, og->lrc, og->lrctm, 300);
+		if (nLy >= 2)
+			og->lrcnum = nLy;
+	}
+	if (og->lrcnum >= 2) {
+		extern UINT ttt;
+		const UINT now = (pickCs >= 0) ? (UINT)pickCs : ttt;
+		int lp = 0;
+		for (int i = 0; i < og->lrcnum - 1; ++i) {
+			if (og->lrctm[i] <= now && og->lrctm[i + 1] > now) {
+				lp = i;
+				break;
+			}
+			if (now >= og->lrctm[i])
+				lp = i;
+		}
+		og->lrccur = lp;
+		og->m_lrc.SetWindowText(lp >= 2 ? og->lrc[lp - 2] : L"");
+		og->m_lrc2.SetWindowText(lp >= 1 ? og->lrc[lp - 1] : L"");
+		og->m_lrc3.SetWindowText(og->lrc[lp]);
+		og->m_lrc4.SetWindowText((lp + 1 < og->lrcnum) ? og->lrc[lp + 1] : L"");
+		og->m_lrc5.SetWindowText((lp + 2 < og->lrcnum - 1) ? og->lrc[lp + 2] : L"");
+		og->lrc_backup = og->lrc[lp];
+	}
+	extern void MpLyricsForceRelayout();
+	extern void SyncDesktopLyricsReload();
+	extern CMediaPlayerDlg* mp;
+	InterlockedExchange(&g_xfLrcIgnoreMix, 1);
+	MpLyricsForceRelayout();
+	SyncDesktopLyricsReload();
+	if (doTick) {
+		if (mp && ::IsWindow(mp->GetSafeHwnd()))
+			mp->TickLyricsView();
+		LyricsOnTimerp();
+	}
+	InterlockedExchange(&g_xfLrcIgnoreMix, 0);
 }
 
 
@@ -11339,6 +12038,19 @@ void COggDlg::play()
 			&& InterlockedCompareExchange(&g_xfPreloadBusy, 0, 0) != 0);
 	if (!xfSoftOpen) {
 		XfClearLiveMixFlags();
+		/* 対話再生は常にスロット0。DSF 昇格後に1のままだと、前曲の sikpi/6ch が残る */
+		InterlockedExchange(&g_xfSlot, 0);
+		InterlockedExchange(&g_xfSecSlot, 1);
+		for (int i = 0; i < XF_SLOTS; ++i) {
+			g_xfFileRate[i] = 0;
+			g_xfFileCh[i] = 2;
+			g_xfFileBits[i] = 16;
+			g_xfSrcRate[i] = 0;
+			g_xfSrcCh[i] = 2;
+			g_xfSrcBits[i] = 16;
+			s_xfSikpiValid[i] = 0;
+			ZeroMemory(&s_xfSikpi[i], sizeof(s_xfSikpi[i]));
+		}
 		/* DoEvent より前に前曲の終端を消す。まいご（約230秒）のカーソルが残ったまま
 		 * Heart（約96秒）の長さと比べると、play() の途中でタイマーが EOF と見て
 		 * もう一度次曲へ進み、お名前が頭から始まる。 */
@@ -12213,8 +12925,8 @@ void COggDlg::play()
 			if (ds >= 0 && ds < XF_SLOTS)
 				g_vfPtr = &vf_arr[ds];
 			char** pOggLoad = &ogg;
-			if (xfSoftOpen && ds == 1)
-				pOggLoad = &ogg_arr[1];
+			if (ds >= 0 && ds < XF_SLOTS)
+				pOggLoad = &ogg_arr[ds];
 			oggsize = LoadOggVorbis(filen, 2, pOggLoad, m_time);
 			if (oggsize < 0) {
 				m_saisai.EnableWindow(TRUE);
@@ -13414,6 +14126,7 @@ open_mode_kpi:
 				ret2 = cemuMidiRet2;
 		}
 		g_kpiRemote = false;
+		WaitPendingKpiTeardown(30000);
 		/* CEmu→KPI: xfade の副スロットだけ閉じる（A の CEmu を殺さない）
 		   ライブ MPU を KPI FM に流すときは emu を残す。 */
 		if (xfSoftOpen)
@@ -14391,95 +15104,9 @@ open_mode_vst_midi:
 	//	else
 	//		playwavds2(bufwav3,0,dwDataLen*4,0);
 
-	//lrc
-	lrcnum = 0;
-	lrccur = 0;
-	lrc_backup = L"";
-	for (int m = 0; m < 300; m++) {
-		lrc[m] = L"";
-		lrctm[m] = 0;
-	}
-	m_lrc.SetWindowText(L"");
-	m_lrc2.SetWindowText(LL14(L"歌詞(.lrc)が表示されます", L"Lyrics (.lrc) will be displayed here", L"Paroles (.lrc) affichees ici", L"Testi (.lrc) visualizzati qui", L"Letra (.lrc) mostrada aqui", L"가사(.lrc)가 여기에 표시됩니다", L"歌词(.lrc)将在此显示", L"كلمات (.lrc) ستُعرض هنا", L"Текст (.lrc) отображается здесь", L"Liedtext (.lrc) wird hier angezeigt", L"Letra (.lrc) exibida aqui", L"Songtekst (.lrc) wordt hier getoond", L"Teksty (.lrc) wy?wietlone tutaj", L"Soz (.lrc) burada goruntulenir"));
-	m_lrc3.SetWindowText(L"");
-	m_lrc4.SetWindowText(L"");
-	m_lrc5.SetWindowText(L"");
-	int gg = filen.GetLength() * 2;
-	int gg2 = filen.ReverseFind(L'.');
-	CString filenll = filen.Left(gg2) + L".lrc";
-	if (PathFileExistsW(filenll)) {
-		lrc[lrcnum] = L"...";
-		lrctm[lrcnum] = 0;
-		lrcnum++;
-
-		CStdioFile a(_tfopen(filenll, _T("r, ccs=UTF-8")));
-		CString buf;
-		while (a.ReadString(buf)) {
-			if (buf.IsEmpty()) continue;
-
-			// 1. 一番最後の ']' を探して、それより後ろを歌詞テキストとする
-			int lastBracket = buf.ReverseFind(']');
-			CString text = _T("");
-			if (lastBracket != -1) {
-				text = buf.Mid(lastBracket + 1);
-			}
-			else {
-				continue; // タグがない行はスキップ
-			}
-
-			// 2. 先頭から順に '[' ... ']' を探して時間を取得
-			int curPos = 0;
-			while (curPos < lastBracket) {
-				int startBracket = buf.Find('[', curPos);
-				int endBracket = buf.Find(']', curPos);
-
-				if (startBracket != -1 && endBracket != -1 && endBracket > startBracket) {
-					// 時間解析 [mm:ss.xx]
-					int mm = _wtoi(buf.Mid(startBracket + 1, 2));
-					int ss = _wtoi(buf.Mid(startBracket + 4, 2));
-					int xx = _wtoi(buf.Mid(startBracket + 7, 2));
-
-					// 配列に追加
-					lrc[lrcnum] = text;
-					lrctm[lrcnum] = mm * 60 * 100 + ss * 100 + xx;
-					lrcnum++;
-
-					curPos = endBracket + 1;
-				}
-				else {
-					break;
-				}
-			}
-		}
-		a.Close();
-
-		// ★追加: 時間順にソート (バブルソート)
-		// 複数タグによって順番が前後している可能性があるため整列させます
-		for (int i = 0; i < lrcnum - 1; i++) {
-			for (int j = 0; j < lrcnum - i - 1; j++) {
-				if (lrctm[j] > lrctm[j + 1]) {
-					// 時間の入れ替え
-					int tempTm = lrctm[j];
-					lrctm[j] = lrctm[j + 1];
-					lrctm[j + 1] = tempTm;
-					// 歌詞の入れ替え
-					CString tempTxt = lrc[j];
-					lrc[j] = lrc[j + 1];
-					lrc[j + 1] = tempTxt;
-				}
-			}
-		}
-
-		// 番兵: 最終行+5秒(旧 99*100*99 は桁誤りで数時間になり最終行のカラオケがほぼ動かない)
-		{
-			DWORD lastT = (lrcnum > 0) ? lrctm[lrcnum - 1] : 0;
-			lrctm[lrcnum] = lastT + 500;
-			lrcnum++;
-		}
-	}
-	else
-		//ネットを見るかどうか
-		if (savedata.lrc_net && (filen.Right(4).MakeLower() == L".mp3" || filen.Right(4).MakeLower() == L".mp2" || filen.Right(4).MakeLower() == L".mp1" || filen.Right(4).MakeLower() == L".rmp"
+	InterlockedExchange(&g_xfLrcPlayCs, -1);
+	OggApplySidecarLrc(filen);
+	if (lrcnum < 2 && savedata.lrc_net && (filen.Right(4).MakeLower() == L".mp3" || filen.Right(4).MakeLower() == L".mp2" || filen.Right(4).MakeLower() == L".mp1" || filen.Right(4).MakeLower() == L".rmp"
 			|| filen.Right(4).MakeLower() == L".m4a" || filen.Right(4).MakeLower() == L".aac" || filen.Right(5).MakeLower() == L".flac" || filen.Right(4).MakeLower() == L".tta" || filen.Right(4).MakeLower() == L".ape"
 			|| filen.Right(4).MakeLower() == L".dsf" || filen.Right(4).MakeLower() == L".dff" || filen.Right(4).MakeLower() == L".wav" || filen.Right(4).MakeLower() == L".ogg" || filen.Right(5).MakeLower() == L".opus")) {
 			const double wavv = WavBannerChFromBytes(wavchannel);
@@ -15062,6 +15689,21 @@ open_mode_vst_midi:
 	 * 現行の先読みは XfSoftOpenSlot 側でも PlChDiskSet する。 */
 	if (!xfSoftOpen) {
 		ConfigurePlaybackOutputAndUpscaler();
+		/* プリフィルより前に袋を確定。残っている DSF の sikpi(6ch) で Direct 埋めすると早送りになる */
+		{
+			const int sl = XfActiveSlot();
+			int bits = abs(wavsam_depth);
+			if (wavsam_depth < 0)
+				bits = 16;
+			if (!(bits == 8 || bits == 16 || bits == 24 || bits == 32))
+				bits = 16;
+			const int md = (g_openDecoderMode != 0 && g_openDecoderMode != INT_MIN)
+				? g_openDecoderMode : mode;
+			XfSetSlotBag(sl, md, wavbit_sample_Hz, wavchannel, bits,
+				g_mp3_decoder_bps, og ? og->kmp : NULL);
+			s_xfSikpi[sl] = sikpi;
+			s_xfSikpiValid[sl] = 1;
+		}
 	}
 	else if (!filen.IsEmpty() && wavchannel >= 1 && wavchannel <= 8)
 		PlChDiskSet(filen, wavchannel);
@@ -21098,7 +21740,11 @@ static void TempoPredSyncSourcePos(double wallSec, double rateNow, double totalS
 	TempoPredAdvanceTo(wallSec, rateNow, totalSrcSec);
 
 	// DSバッファ単位の poss5 と連続時計の差が 1 秒超えたときだけ合わせる（ゆれ防止）
-	if (wavbit_sample_Hz > 0) {
+	// 昇格直後は前曲 poss5 が残ると 2 曲目 LRC が末尾空行になるので合わせない
+	extern volatile LONG g_xfPromoteTick;
+	const LONG promoAt = InterlockedCompareExchange(&g_xfPromoteTick, 0, 0);
+	const DWORD promoAge = (promoAt != 0) ? (GetTickCount() - (DWORD)promoAt) : 0xFFFFFFFFu;
+	if (wavbit_sample_Hz > 0 && promoAge > 1500u) {
 		const int realSamp = TempoPredRealSrcSamples();
 		if (realSamp >= 0) {
 			const double realSec = (double)realSamp / (double)wavbit_sample_Hz;
@@ -21175,13 +21821,15 @@ int readtempo(BYTE* data, int len,bool t = false)
 	// 体感で数倍重くなる主因だった。伸縮が必要なときだけ RB を使う。
 	const bool doFinalFlush = t || (len <= 0);
 	const bool identity = (tempo == 200 && pitch == 200);
-	static bool s_rbBypassActive = true;
+	static bool s_rbBypassActive[2] = { true, true };
+	const int rbSlot = XfDecSlot();
+	const int rbIdx = (rbSlot >= 0 && rbSlot < 2) ? rbSlot : 0;
 
 	if (identity) {
-		if (!s_rbBypassActive) {
+		if (!s_rbBypassActive[rbIdx]) {
 			// 伸縮→100% 復帰: 内部バッファを破棄してから素通しへ
-			RubberBand_DestroyBank(0);
-			s_rbBypassActive = true;
+			RubberBand_DestroyBank(rbIdx);
+			s_rbBypassActive[rbIdx] = true;
 		}
 		m_convertedPcmN = 0;
 		if (doFinalFlush || len <= 0) {
@@ -21198,7 +21846,7 @@ int readtempo(BYTE* data, int len,bool t = false)
 		return len;
 	}
 
-	s_rbBypassActive = false;
+	s_rbBypassActive[rbIdx] = false;
 	m_bufwav3_1_n = 0;
 	if (len > 0 && data) {
 		if (len > kRouteCap) len = kRouteCap;
@@ -23605,11 +24253,6 @@ int playwavm4a(BYTE* bw, int old, int l1, int l2)
 	const int l1req = l1;
 	const int l2req = l2;
 	int rrr = readm4a(bw + old, l1);
-	{
-		const int bpf = PcmOutBytesPerFrame();
-		const int outSamp = (bpf > 0) ? ((l1 + l2) / bpf) : 0;
-		AdvanceOutAndSrcPos(outSamp);
-	}
 
 	if (l1 != rrr) {
 		if (!WantPlaybackLoop()) {
@@ -23628,7 +24271,7 @@ int playwavm4a(BYTE* bw, int old, int l1, int l2)
 				PlaybackNoteLoop(loop1);
 				m4a_.SetPosition(og->kmp, 0);
 				poss2 = poss3 = poss4 = poss6 = 0; poss5 = loop1;
-				RubberBand_DestroyBank(0);
+				RubberBand_DestroyBank(XfDecSlot());
 				reset = TRUE;
 				readm4a(bw + old + rrr, l1req - rrr);
 				l1 = l1req;
@@ -23659,7 +24302,7 @@ int playwavm4a(BYTE* bw, int old, int l1, int l2)
 					PlaybackNoteLoop(loop1);
 					m4a_.SetPosition(og->kmp, 0);
 					poss2 = poss3 = poss4 = poss6 = 0; poss5 = loop1;
-					RubberBand_DestroyBank(0);
+					RubberBand_DestroyBank(XfDecSlot());
 					reset = TRUE;
 					readm4a(bw + rrr, (int)l2req - rrr);
 					l2 = l2req;
@@ -23674,6 +24317,12 @@ int playwavm4a(BYTE* bw, int old, int l1, int l2)
 		}
 		if (l2 < l2req)
 			ZeroMemory(bw + l2, (SIZE_T)(l2req - l2));
+	}
+	{
+		const int bpf = PcmOutBytesPerFrame();
+		const int got = ((l1 > 0) ? l1 : 0) + ((l2req) ? l2 : 0);
+		const int outSamp = (bpf > 0) ? (got / bpf) : 0;
+		AdvanceOutAndSrcPos(outSamp);
 	}
 	return l1 + l2;
 }
@@ -23874,7 +24523,7 @@ int playwavflac(BYTE* bw, int old, int l1, int l2)
 					flac_.SetPosition(og->kmp, loop1);
 				::rrr = 1;  // シーク後は Render を再開（グローバル）
 				poss2 = poss3 = poss4 = poss6 = 0; poss5 = loop1;
-				RubberBand_DestroyBank(0);
+				RubberBand_DestroyBank(XfDecSlot());
 				reset = TRUE;
 				readflac(bw + old + rrr, l1req - rrr);
 				l1 = l1req;
@@ -23912,7 +24561,7 @@ int playwavflac(BYTE* bw, int old, int l1, int l2)
 						flac_.SetPosition(og->kmp, loop1);
 					::rrr = 1;  // シーク後は Render を再開（グローバル）
 					poss2 = poss3 = poss4 = poss6 = 0; poss5 = loop1;
-					RubberBand_DestroyBank(0);
+					RubberBand_DestroyBank(XfDecSlot());
 					reset = TRUE;
 					readflac(bw + rrr, (int)l2req - rrr);
 					l2out = l2req;
@@ -23942,6 +24591,8 @@ int readflac(BYTE* bw, int cnt)
 	EqualiserSetFormatVolContext(0, FALSE);
 	_set_se_translator(trans_func);
 	DWORD cnt1 = og->sikpi.dwUnitRender * 2, cnt2 = (DWORD)cnt, cnt4 = 0, lenl = cnt; if (cnt1 == 0) cnt1 = 1024;
+	if (lenl > (DWORD)sizeof(bufkpi))
+		lenl = (DWORD)sizeof(bufkpi);
 	DWORD r = 0;
 	if (flacmode == 1)
 		if (poss5 + (int)(lenl / 6) > (loop1 + loop2)) {
@@ -26424,6 +27075,16 @@ void COggDlg::stop()
 	g_dsSongBase = 0;
 	g_endWrittenBytes = 0;
 	g_heardBytes = 0;
+	/* 昇格後の KPI/Winamp も閉じる。片側だけだと本流セッションが残って落ちる */
+	{
+		for (int i = 0; i < XF_SLOTS; ++i) {
+			if (g_openDecoderModeSlot[i] != INT_MIN)
+				XfCloseSlotDecoders(i);
+		}
+		XfResetAll();
+		g_audioUpscalerArr[0].Reset();
+		g_audioUpscalerArr[1].Reset();
+	}
 }
 
 BOOL COggDlg::stop1()
@@ -26549,10 +27210,12 @@ BOOL COggDlg::stop1()
 	{
 		/* 先読み中に閉じると壊れる。開き終わらない場合は開いた側が自分で破棄する */
 		const int preloadIdle = XfPreloadCancel(4000);
-		const int act = XfActiveSlot();
-		const int oth = XfOtherSlot(act);
-		if (preloadIdle && g_openDecoderModeSlot[oth] != INT_MIN)
-			XfCloseSlotDecoders(oth);
+		if (preloadIdle) {
+			for (int i = 0; i < XF_SLOTS; ++i) {
+				if (g_openDecoderModeSlot[i] != INT_MIN)
+					XfCloseSlotDecoders(i);
+			}
+		}
 		InterlockedExchange(&g_xfInProgress, 0);
 		InterlockedExchange(&g_xfOpening, 0);
 		InterlockedExchange(&g_xfPrepared, 0);
@@ -27452,6 +28115,26 @@ double OggGetLyricsPlaySec()
 	extern int videoonly;
 	if (mode == -2 || videoonly)
 		return (double)ttt / 100.0;
+	{
+		const LONG cs = InterlockedCompareExchange(&g_xfLrcPlayCs, 0, 0);
+		if (cs >= 0) {
+			if (InterlockedCompareExchange(&g_xfInProgress, 0, 0)) {
+				const int r = XfDsOutRate();
+				if (r >= 8000 && g_xfFadeTotalFrames > 0)
+					return (double)g_xfFadePos / (double)r;
+				return (double)cs / 100.0;
+			}
+			double sec = (double)cs / 100.0;
+			const LONG promo = InterlockedCompareExchange(&g_xfPromoteTick, 0, 0);
+			if (promo != 0) {
+				const DWORD age = GetTickCount() - (DWORD)promo;
+				double rate = (g_tpLastRate > 0.05) ? g_tpLastRate : 1.0;
+				sec += (double)age * 0.001 * rate;
+			}
+			if (sec < 0.0) sec = 0.0;
+			return sec;
+		}
+	}
 	/* バナーと同じ壁時計をその場で読む。g_tpSrcSec だけだと timerp 間隔で段になる */
 	if (g_tpUiValid && wavbit_sample_Hz >= 8000) {
 		double sec = g_tpSrcSec;
@@ -27831,17 +28514,20 @@ void COggDlg::timerp()
 	else {
 		const double wavv = WavBannerChFromBytes(wavchannel);
 		const double wavv2 = WavBannerChFromFrames(wavchannel);
+		int hz = wavbit_sample_Hz;
+		if (hz < 8000)
+			hz = XfDisplaySrcRate();
+		if (hz < 8000)
+			hz = 44100;
 		// MP3: oggsize / playb はいずれも「PCM フレーム数」（秒 = /wavbit_sample_Hz）。スライダー範囲は m_time.SetRange(F/100) と OnHScroll の curpos×100 で対応。
 		if (mode == -10) {
-			int hz = XfDisplaySrcRate();
-			if (hz < 8000)
-				hz = wavbit_sample_Hz;
-			if (hz < 8000)
-				hz = 44100;
 			t3 = (double)snap_oggsize / (double)hz;
 		}
+		else if (snap_oggsize <= 0 && loop3 > 0) {
+			t3 = (double)loop3 / (double)hz;
+		}
 		else {
-			t3 = (double)snap_oggsize / (double)(wavbit_sample_Hz * 2.0 * wavv) / (double)(wavsam_depth / 16.0f);
+			t3 = (double)snap_oggsize / (double)(hz * 2.0 * wavv) / (double)(wavsam_depth / 16.0f);
 		}
 		if ((mode == -9) && wavchannel > 2) t3 *= wavchannel / 2.0;
 		tt = (int)(t3 * 100.0);
@@ -27850,12 +28536,12 @@ void COggDlg::timerp()
 		ta = t1 / 60;
 		tb = t1 % 60;
 		tc = tt % 100;
-		t3 = (double)snap_playb / (double)(wavbit_sample_Hz / wavv2);// / (double)(wavsam_depth / 16.0f);
+		t3 = (double)snap_playb / (double)(hz / wavv2);// / (double)(wavsam_depth / 16.0f);
 		//先読み分を除去: playb はデコード先頭、実際に聴こえる位置は DS キュー分だけ過去
 		// playb は PcmOutBytesPerFrame 基準のフレーム数。MP3 はシークも含めフレーム単位に統一（旧×4は廃止）。
 		// 全 DS 出力モード（FLAC/ゲーム系含む）で実再生カーソル基準に統一する。
 		if (qSamplesHeard > 0 && snap_playb > qSamplesHeard)
-			t3 = (double)(snap_playb - qSamplesHeard) / (double)(wavbit_sample_Hz / wavv2);
+			t3 = (double)(snap_playb - qSamplesHeard) / (double)(hz / wavv2);
 		if ((mode == -9) && wavchannel > 2) t3 *= wavchannel / 2.0;
 		if (t3 < 0.0) t3 = 0.0;
 		tt = (int)(t3 * 100.0);
@@ -27865,7 +28551,7 @@ void COggDlg::timerp()
 		tb1 = t1 % 60;
 		tc1 = tt % 100;
 		ttt = (UINT)tt;
-		t3 = (double)snap_wl / (double)(wavbit_sample_Hz * 2.0 * wavv) / (double)(wavsam_depth / 16.0f);
+		t3 = (double)snap_wl / (double)(hz * 2.0 * wavv) / (double)(wavsam_depth / 16.0f);
 		if (t3 < 0.0) t3 = 0.0;
 		tt = (int)(t3 * 100.0);
 		if (tt < 0) tt = 0;
@@ -28061,9 +28747,12 @@ void COggDlg::timerp()
 	}
 
 	/* 歌詞行送りはバナー GDI フレームに乗せない。pending 中は bGdiFrame が落ちて LRC が止まる */
-	if (lrcnum >= 2) {
+	if (lrcnum >= 2 && (InterlockedCompareExchange(&g_xfLrcIgnoreMix, 0, 0)
+		|| InterlockedCompareExchange(&g_xfLrcPlayCs, 0, 0) >= 0
+		|| !InterlockedCompareExchange(&g_xfInProgress, 0, 0))) {
+		const UINT lrcNow = (UINT)(OggGetLyricsPlaySec() * 100.0 + 0.5);
 		for (int lp = 0; lp < lrcnum - 1; lp++) {
-			if (lrctm[lp] <= ttt && lrctm[lp + 1] > ttt) {
+			if (lrctm[lp] <= lrcNow && lrctm[lp + 1] > lrcNow) {
 				if (lrc[lp] != lrc_backup) {
 					m_lrc.SetWindowText(lp >= 2 ? lrc[lp - 2] : L"");
 					m_lrc2.SetWindowText(lp >= 1 ? lrc[lp - 1] : L"");
@@ -30013,7 +30702,7 @@ void timerog1(UINT nIDEvent)
 		const __int64 xfWin = XfCrossfadeWindowBytes();
 		const bool atEof = (endflg == 1)
 			|| (endRef > 0 && playPos >= endRef)
-			|| (g_endWrittenBytes > g_dsSongBase && g_heardBytes >= g_endWrittenBytes);
+			|| (endRef <= 0 && g_endWrittenBytes > g_dsSongBase && g_heardBytes >= g_endWrittenBytes);
 		const bool inXfadeWindow = (endflg != 1 && fadeEnd > 0 && xfWin > 0
 			&& playPos + xfWin >= fadeEnd && playPos < fadeEnd);
 		const bool kpiXfadeDue = XfEnabled() && (XfRenzokuLimitReached() || XfRenzokuLimitDueSoon());
@@ -30039,12 +30728,17 @@ void timerog1(UINT nIDEvent)
 			if (XfEnabled() && (inXfadeWindow || xfPrepared || atEof || xfBusy || kpiXfadeDue)) {
 		if (XfStartCrossfadeFromNotify((atEof || kpiXfadeDue || inXfadeWindow) ? 1 : 0))
 			return;
-		if (xfBusy)
+		if (xfBusy || xfPrepared)
 			return;
 		/* 窓の途中で次曲を切り直すと、混ぜる前に A が切れて無音になる。
 		 * 本当に終端で B が開けないときだけ、下の次曲開始へ落ちる。 */
 		if (!atEof)
 			return;
+		if (!InterlockedCompareExchange(&g_xfSoftOpenFailed, 0, 0)
+			&& XfShouldPreloadNext()) {
+			XfPreloadNextFromNotify();
+			return;
+		}
 			}
 			ProAudio_OnSongBoundary();
 			endflg = 0;
@@ -35816,7 +36510,8 @@ LRESULT COggDlg::OnXfadePromoteUi(WPARAM wParam, LPARAM lParam)
 			kpi_file_loop = 0;
 			endf = 1;
 		}
-		srcRate = (g_xfSrcRate[slot] > 0) ? g_xfSrcRate[slot] : wavbit_sample_Hz;
+		srcRate = (g_xfFileRate[slot] >= 8000) ? g_xfFileRate[slot]
+			: ((g_xfSrcRate[slot] > 0) ? g_xfSrcRate[slot] : wavbit_sample_Hz);
 		if (md == -10) {
 			extern int kbps;
 			int br = (int)mp3_arr[slot].m_mp3info.bitrate;
@@ -35882,13 +36577,47 @@ LRESULT COggDlg::OnXfadePromoteUi(WPARAM wParam, LPARAM lParam)
 		/* Invalidate しない: Soft3D 次フレームで自然更新（強制再描画が点滅の主因） */
 	}
 
+	if (srcRate < 8000)
+		srcRate = 44100;
+	plf = 1;
+	playf = 1;
 	double srcSec = 0.0;
 	if (srcRate > 0 && pos > 0)
 		srcSec = (double)pos / (double)srcRate;
-	if (md == -10 && oggsize > 0 && srcRate >= 8000) {
-		const double dur = (double)oggsize / (double)srcRate;
+	{
+		double dur = 0.0;
+		if (md == -10 && oggsize > 0 && srcRate >= 8000)
+			dur = (double)oggsize / (double)srcRate;
+		else if (loop3 > 0 && srcRate >= 8000)
+			dur = (double)loop3 / (double)srcRate;
+		else if (oggsize > 0 && srcRate >= 8000 && wavchannel > 0) {
+			int bps = (wavsam_depth >= 8) ? (wavsam_depth / 8) : 2;
+			if (bps < 1) bps = 2;
+			dur = (double)oggsize / ((double)srcRate * (double)wavchannel * (double)bps);
+		}
 		if (dur > 0.5 && srcSec > dur)
 			srcSec = 0.0;
+		/* B はクロス秒しか鳴っていない。同形式だと poss5 が前曲終端のままになり LRC が空行になる */
+		{
+			double xfSec = XfSecFromSave();
+			const int orate = XfDsOutRate();
+			if (g_xfFadeTotalFrames > 0 && orate >= 8000)
+				xfSec = (double)g_xfFadeTotalFrames / (double)orate;
+			if (xfSec < 0.05)
+				xfSec = XfSecFromSave();
+			srcSec = xfSec;
+			const int fr = (srcRate >= 8000) ? srcRate : 44100;
+			const int samp = (int)(srcSec * (double)fr + 0.5);
+			poss5 = samp;
+			playb = samp;
+			poss5_arr[slot] = samp;
+			playb_arr[slot] = samp;
+			g_oggPcmDecodePos = samp;
+			g_oggPcmDecodePos_arr[slot] = samp;
+		}
+	}
+	if (md == -10 && oggsize > 0 && srcRate >= 8000) {
+		const double dur = (double)oggsize / (double)srcRate;
 		extern __int64 g_expectedDsBytes;
 		const int dsRate = (g_ds_pcm_rate > 0) ? g_ds_pcm_rate : srcRate;
 		const int dsCh = (g_ds_pcm_ch > 0) ? g_ds_pcm_ch : 2;
@@ -35899,6 +36628,9 @@ LRESULT COggDlg::OnXfadePromoteUi(WPARAM wParam, LPARAM lParam)
 	}
 	const double tempoRate = TempoPlaybackRateFromPos(m_tempo_sl.GetPos());
 	TempoPredReset(srcSec, srcSec / ((tempoRate > 0.05) ? tempoRate : 1.0), tempoRate);
+	g_tpUiValid = 1;
+	ttt = (UINT)(srcSec * 100.0 + 0.5);
+	InterlockedExchange(&g_xfLrcPlayCs, (LONG)ttt);
 
 	if (pi >= 0 && pl && pi < pl->playcnt) {
 		plcnt = pi;
@@ -35969,64 +36701,35 @@ LRESULT COggDlg::OnXfadePromoteUi(WPARAM wParam, LPARAM lParam)
 		m_PianoRollDlg->ResumePlaybackFeed();
 	}
 
-	/* ローカル .lrc のみ（ネット取得は昇格 UI を塞がない） */
-	lrcnum = 0;
-	lrccur = 0;
-	for (int m = 0; m < 300; m++) {
-		lrc[m] = L"";
-		lrctm[m] = 0;
-	}
-	if (!path.IsEmpty()) {
-		const int gg2 = path.ReverseFind(L'.');
-		if (gg2 > 0) {
-			CString filenll = path.Left(gg2) + L".lrc";
-			if (PathFileExistsW(filenll)) {
-				lrc[lrcnum] = L"...";
-				lrctm[lrcnum] = 0;
-				lrcnum++;
-				CStdioFile a(_tfopen(filenll, _T("r, ccs=UTF-8")));
-				CString buf;
-				while (a.ReadString(buf)) {
-					if (buf.IsEmpty()) continue;
-					int lastBracket = buf.ReverseFind(']');
-					if (lastBracket == -1) continue;
-					CString text = buf.Mid(lastBracket + 1);
-					int curPos = 0;
-					while (curPos < lastBracket) {
-						int startBracket = buf.Find('[', curPos);
-						int endBracket = buf.Find(']', curPos);
-						if (startBracket != -1 && endBracket != -1 && endBracket > startBracket) {
-							int mm = _wtoi(buf.Mid(startBracket + 1, 2));
-							int ss = _wtoi(buf.Mid(startBracket + 4, 2));
-							int xx = _wtoi(buf.Mid(startBracket + 7, 2));
-							lrc[lrcnum] = text;
-							lrctm[lrcnum] = mm * 60 * 100 + ss * 100 + xx;
-							lrcnum++;
-							curPos = endBracket + 1;
-						}
-						else break;
-					}
-				}
-				a.Close();
-				for (int i = 0; i < lrcnum - 1; i++) {
-					for (int j = 0; j < lrcnum - i - 1; j++) {
-						if (lrctm[j] > lrctm[j + 1]) {
-							int tempTm = lrctm[j]; lrctm[j] = lrctm[j + 1]; lrctm[j + 1] = tempTm;
-							CString tempTxt = lrc[j]; lrc[j] = lrc[j + 1]; lrc[j + 1] = tempTxt;
-						}
-					}
-				}
-				if (lrcnum > 0) {
-					DWORD lastT = lrctm[lrcnum - 1];
-					lrctm[lrcnum] = lastT + 500;
-					lrc[lrcnum] = L"";
-					lrcnum++;
-				}
-			}
-		}
+	/* 2曲目以降も play() と同じく sidecar .lrc を読み直して出す */
+	{
+		CString lrcPath = s_xfLrcPath[slot].IsEmpty() ? path : s_xfLrcPath[slot];
+		if (lrcPath.IsEmpty())
+			lrcPath = filen;
+		OggApplySidecarLrc(lrcPath, (int)ttt, 1);
 	}
 
 	SongParams_OnSongStarted();
+	return 0;
+}
+
+LRESULT COggDlg::OnXfadeIncomingLrc(WPARAM wParam, LPARAM)
+{
+	const int slot = (int)wParam;
+	if (slot < 0 || slot >= XF_SLOTS)
+		return 0;
+	CString path = s_xfLrcPath[slot].IsEmpty() ? s_xfFilen[slot] : s_xfLrcPath[slot];
+	if (path.IsEmpty())
+		return 0;
+	const int mixing = InterlockedCompareExchange(&g_xfInProgress, 0, 0) ? 1 : 0;
+	int pick = 0;
+	if (mixing)
+		InterlockedExchange(&g_xfLrcPlayCs, 0);
+	else {
+		const LONG cs = InterlockedCompareExchange(&g_xfLrcPlayCs, 0, 0);
+		pick = (cs >= 0) ? (int)cs : 0;
+	}
+	OggApplySidecarLrc(path, pick, 1);
 	return 0;
 }
 

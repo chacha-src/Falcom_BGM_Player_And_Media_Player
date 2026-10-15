@@ -57,6 +57,13 @@ static __int64 g_xmpPlayedFloats = 0;
 static XMPFORMAT g_xmpFmt = { 44100, 2, 2 };
 static int g_xmpRemote = 0;
 static uint32_t g_xmpRemoteSid = 0;
+static uint32_t g_xmpSidArr[2];
+static int g_xmpRateArr[2] = { 44100, 44100 };
+static int g_xmpChArr[2] = { 2, 2 };
+static int g_xmpBitsArr[2] = { 16, 16 };
+static float g_xmpLenArr[2];
+static int g_xmpSoftOpenArr[2];
+static int g_xmpBoundSlot = -1;
 static volatile LONG g_xmpStopping = 0;
 
 static XMPFUNC_IN g_xmpFuncIn;
@@ -449,6 +456,107 @@ int PluginXmplay_TryEnum(const wchar_t* dllPath, int is64)
 	return ok;
 }
 
+static int XmpXfSlot()
+{
+	extern volatile LONG g_xfFillSlot;
+	extern volatile LONG g_xfSlot;
+	const LONG f = InterlockedCompareExchange(&g_xfFillSlot, -1, -1);
+	if (f >= 0 && f < 2)
+		return (int)f;
+	const LONG s = InterlockedCompareExchange(&g_xfSlot, 0, 0);
+	if (s >= 0 && s < 2)
+		return (int)s;
+	return 0;
+}
+
+static uint32_t XmpSidNow()
+{
+	const int sl = XmpXfSlot();
+	if (sl >= 0 && sl < 2 && g_xmpSidArr[sl])
+		return g_xmpSidArr[sl];
+	return g_xmpRemoteSid;
+}
+
+static void XmpDisarmSid(uint32_t sid)
+{
+	if (!sid)
+		return;
+	for (int i = 0; i < 2; ++i) {
+		if (g_xmpSidArr[i] == sid) {
+			g_xmpSidArr[i] = 0;
+			g_xmpSoftOpenArr[i] = 0;
+			if (g_xmpBoundSlot == i)
+				g_xmpBoundSlot = -1;
+		}
+	}
+}
+
+int PluginXmplay_SoftOpenSlot(int slot, const wchar_t* dllPath, const wchar_t* mediaPath,
+	int* rate, int* ch, int* bits, double* lenSec)
+{
+	if (slot < 0 || slot >= 2 || !dllPath || !mediaPath)
+		return 0;
+	PluginXmplay_ClearSlot(slot);
+	KPIHOST32_ForeignOpenReply fr{};
+	if (!g_kpiHost.ForeignOpen(PLUGKIND_XMPLAY, dllPath, mediaPath, fr) || fr.sessionId == 0)
+		return 0;
+	g_xmpSidArr[slot] = fr.sessionId;
+	g_xmpRateArr[slot] = fr.sampleRate > 0 ? (int)fr.sampleRate : 44100;
+	g_xmpChArr[slot] = fr.channels > 0 ? (int)fr.channels : 2;
+	g_xmpBitsArr[slot] = fr.bitsPerSample > 0 ? fr.bitsPerSample : 16;
+	{
+		const int r = g_xmpRateArr[slot];
+		g_xmpLenArr[slot] = (fr.lengthSamples > 0 && r > 0)
+			? (float)((double)fr.lengthSamples / (double)r) : 0.f;
+	}
+	g_xmpSoftOpenArr[slot] = 1;
+	if (rate) *rate = g_xmpRateArr[slot];
+	if (ch) *ch = g_xmpChArr[slot];
+	if (bits) *bits = g_xmpBitsArr[slot];
+	if (lenSec) *lenSec = (double)g_xmpLenArr[slot];
+	return 1;
+}
+
+void PluginXmplay_BindSlot(int slot)
+{
+	if (slot < 0 || slot >= 2)
+		return;
+	if (!g_xmpSoftOpenArr[slot])
+		return;
+	g_xmpRemote = 1;
+	g_xmpRemoteSid = g_xmpSidArr[slot];
+	g_xmpRate = g_xmpRateArr[slot];
+	g_xmpCh = g_xmpChArr[slot];
+	g_xmpBits = g_xmpBitsArr[slot];
+	g_xmpLen = g_xmpLenArr[slot];
+	g_xmpOpen = 1;
+	InterlockedExchange(&g_xmpStopping, 0);
+	g_xmpBoundSlot = slot;
+}
+
+void PluginXmplay_ClearSlot(int slot)
+{
+	if (slot < 0 || slot >= 2)
+		return;
+	if (g_xmpBoundSlot == slot) {
+		g_xmpSidArr[slot] = 0;
+		g_xmpSoftOpenArr[slot] = 0;
+		g_xmpBoundSlot = -1;
+		return;
+	}
+	const uint32_t sid = g_xmpSidArr[slot];
+	if (g_xmpSoftOpenArr[slot] && sid) {
+		g_kpiHost.ForeignClose(sid);
+		if (g_xmpRemoteSid == sid) {
+			g_xmpRemoteSid = 0;
+			g_xmpRemote = 0;
+			g_xmpOpen = 0;
+		}
+	}
+	g_xmpSidArr[slot] = 0;
+	g_xmpSoftOpenArr[slot] = 0;
+}
+
 int PluginXmplay_OpenRemote(const wchar_t* dllPath, const wchar_t* mediaPath)
 {
 	PluginXmplay_Close();
@@ -543,11 +651,14 @@ void PluginXmplay_Close()
 {
 	InterlockedExchange(&g_xmpStopping, 1);
 	if (g_xmpRemote) {
-		if (g_xmpRemoteSid)
+		if (g_xmpRemoteSid) {
+			XmpDisarmSid(g_xmpRemoteSid);
 			g_kpiHost.ForeignClose(g_xmpRemoteSid);
+		}
 		g_xmpRemote = 0;
 		g_xmpRemoteSid = 0;
 		g_xmpOpen = 0;
+		g_xmpBoundSlot = -1;
 		g_xmpPendingBytes = 0;
 		g_xmpPendingOff = 0;
 		g_xmpEof = 0;
@@ -576,12 +687,17 @@ void PluginXmplay_Close()
 
 int PluginXmplay_SeekSec(double sec)
 {
-	if (!g_xmpOpen) return 0;
-	if (g_xmpRemote) {
-		if (g_xmpRate <= 0) return 0;
-		uint64_t samp = (uint64_t)(sec * (double)g_xmpRate);
-		return g_kpiHost.ForeignSeek(g_xmpRemoteSid, samp) ? 1 : 0;
+	const uint32_t sid = XmpSidNow();
+	if (sid) {
+		int rate = g_xmpRate;
+		const int sl = XmpXfSlot();
+		if (sl >= 0 && sl < 2 && g_xmpSidArr[sl] && g_xmpRateArr[sl] > 0)
+			rate = g_xmpRateArr[sl];
+		if (rate <= 0) return 0;
+		uint64_t samp = (uint64_t)(sec * (double)rate);
+		return g_kpiHost.ForeignSeek(sid, samp) ? 1 : 0;
 	}
+	if (!g_xmpOpen) return 0;
 	if (!g_xmpIn || !g_xmpIn->SetPosition) return 0;
 	// 既定の粒度はミリ秒（GetGranularity があればそれが1単位の秒数）
 	double gran = 0.001;
@@ -597,7 +713,7 @@ int PluginXmplay_SeekSec(double sec)
 	return 1;
 }
 
-int PluginXmplay_IsOpen() { return g_xmpOpen; }
+int PluginXmplay_IsOpen() { return XmpSidNow() ? 1 : g_xmpOpen; }
 int PluginXmplay_SampleRate() { return g_xmpRate; }
 int PluginXmplay_Channels() { return g_xmpCh; }
 int PluginXmplay_Bits() { return g_xmpBits; }
@@ -621,8 +737,9 @@ static void XmpFloatToS16(const float* src, int count, BYTE* dst)
 
 int PluginXmplay_Read(BYTE* dst, int bytesWanted)
 {
-	if (!dst || bytesWanted <= 0 || !g_xmpOpen) return 0;
-	if (g_xmpRemote) {
+	if (!dst || bytesWanted <= 0) return 0;
+	const uint32_t sid = XmpSidNow();
+	if (sid) {
 		int got = 0;
 		DWORD tIdle = GetTickCount();
 		while (got < bytesWanted) {
@@ -630,7 +747,7 @@ int PluginXmplay_Read(BYTE* dst, int bytesWanted)
 			if (InterlockedCompareExchange(&g_xmpStopping, 0, 0)) break;
 			bool eof = false;
 			uint32_t n = 0;
-			if (!g_kpiHost.ForeignRender(g_xmpRemoteSid, (uint32_t)(bytesWanted - got), dst + got, (uint32_t)(bytesWanted - got), n, eof))
+			if (!g_kpiHost.ForeignRender(sid, (uint32_t)(bytesWanted - got), dst + got, (uint32_t)(bytesWanted - got), n, eof))
 				break;
 			if (n > 0) {
 				got += (int)n;
@@ -645,6 +762,7 @@ int PluginXmplay_Read(BYTE* dst, int bytesWanted)
 		}
 		return got;
 	}
+	if (!g_xmpOpen) return 0;
 	if (!g_xmpIn) return 0;
 	int got = 0;
 	while (got < bytesWanted) {

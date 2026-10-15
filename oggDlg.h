@@ -1,4 +1,4 @@
-﻿// oggDlg.h : ヘッダー ファイル
+// oggDlg.h : ヘッダー ファイル
 //
 #include "afxmt.h"
 //#include "afxcmn.h"
@@ -517,6 +517,7 @@ public:
 	afx_msg LRESULT OnXfadePromoted(WPARAM wParam, LPARAM lParam);
 	afx_msg LRESULT OnXfadePreloadJacket(WPARAM wParam, LPARAM lParam);
 	afx_msg LRESULT OnXfadePromoteUi(WPARAM wParam, LPARAM lParam);
+	afx_msg LRESULT OnXfadeIncomingLrc(WPARAM wParam, LPARAM lParam);
 	HANDLE m_hTimerpVsyncThread;
 	HANDLE m_hTimerpVsyncStopEvent;
 };
