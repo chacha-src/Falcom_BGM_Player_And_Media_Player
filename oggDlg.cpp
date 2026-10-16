@@ -28,6 +28,7 @@ int flacmode = 0;
 #include "CEqualizer.h"
 #include "CPianoRoll.h"
 #include "UiTickPump.h"
+#include "VizUiThread.h"
 #include "CPianoRollTuneDlg.h"
 #include "CAnalyzerDlg.h"
 #include "CMidiMonitorDlg.h"
@@ -6469,16 +6470,8 @@ static void OggAbsVisualBody()
 		og->m_FmMonitorDlg->PumpSyncNow();
 		OggAbsPaintNow(og->m_FmMonitorDlg);
 	}
-	if (og->m_PianoRollDlg && ::IsWindow(og->m_PianoRollDlg->GetSafeHwnd())
-		&& og->m_PianoRollDlg->IsWindowVisible()) {
-		og->m_PianoRollDlg->SendMessage(WM_APP + 420, 0, 0);
-		OggAbsPaintNow(og->m_PianoRollDlg);
-	}
-	if (og->m_AnalyzerDlg && ::IsWindow(og->m_AnalyzerDlg->GetSafeHwnd())
-		&& og->m_AnalyzerDlg->IsWindowVisible()) {
-		og->m_AnalyzerDlg->SendMessage(WM_APP + 512, 0, 0);
-		OggAbsPaintNow(og->m_AnalyzerDlg);
-	}
+	/* ピアノロール／アナライザーは専用 UI スレッドが自分のティックで描く。
+	   ここから Send/UPDATENOW するとメインがその描画完了を待つ。 */
 	/* timerp 本体は VSYNC 側。ここから呼ぶとリスト操作のたびに二重になり重くなる。 */
 	InterlockedExchange(&g_listNavVisual, 0);
 }
@@ -6714,24 +6707,7 @@ static void OggDispatchVizWindows()
 			}
 		}
 	}
-	if (og->m_PianoRollDlg) {
-		HWND h = og->m_PianoRollDlg->GetSafeHwnd();
-		if (h && ::IsWindow(h) && ::IsWindowVisible(h) && !::IsIconic(h)) {
-			OggDispatchHwndTimers(h, 2);
-			/* SYNC は UiTickPump。ここで Dispatch+UpdateWindow するとバナーが飢える。 */
-			OggDispatchHwndRange(h,
-				OGG_WM_PIANOROLL_ANALYSIS_DONE, OGG_WM_PIANOROLL_ANALYSIS_DONE, 8);
-		}
-	}
-	if (og->m_AnalyzerDlg) {
-		HWND h = og->m_AnalyzerDlg->GetSafeHwnd();
-		if (h && ::IsWindow(h) && ::IsWindowVisible(h) && !::IsIconic(h)) {
-			OggDispatchHwndTimers(h, 2);
-			/* SYNC は UiTickPump。PRESENT までを Dispatch し、UpdateWindow はしない。 */
-			OggDispatchHwndRange(h,
-				OGG_WM_ANALYZER_SPEC_DONE, OGG_WM_ANALYZER_PRESENT, 8);
-		}
-	}
+	/* ピアノロール／アナライザーは専用 UI スレッドのキューで処理される（ここでは汲まない）。 */
 	/* 画面キャプチャのプレビュー GDI。NULL 宛 Peek をやめたあと、
 	   この HWND の WM_TIMER だけキューに残って Prev が 0fps で止まる。
 	   取り込み中に再入すると PrintWindow が自分を待つので、その間は触らない。 */
@@ -6911,6 +6887,7 @@ BOOL COggDlg::OnInitDialog()
 	if (savedata.playerMode == 1)
 		ShowWindow(SW_HIDE);
 	g_oggUiThreadId = GetCurrentThreadId();
+	VizUi::InitMainThread();
 	ms2 = 0;
 	QueryPerformanceFrequency(&freq);
 	SetPriorityClass(GetCurrentProcess(), HIGH_PRIORITY_CLASS);
@@ -27347,6 +27324,7 @@ BOOL COggDlg::DestroyWindow()
 		m_AnalyzerDlg->DetachForDestroy();
 		m_AnalyzerDlg->DestroyWindow();
 	}
+	VizUi::Shutdown();
 	if (::IsWindow(m_MidiMonitorDlg->GetSafeHwnd())) {
 		m_MidiMonitorDlg->DetachForDestroy();
 		m_MidiMonitorDlg->DestroyWindow();
@@ -38733,6 +38711,8 @@ void COggDlg::ShowPianoRollTune()
 
 void COggDlg_ShowPianoRollTune()
 {
+	if (VizUi::PostToMainIfOff([]() { COggDlg_ShowPianoRollTune(); }))
+		return;
 	if (og)
 		og->ShowPianoRollTune();
 }

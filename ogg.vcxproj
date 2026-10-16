@@ -514,6 +514,7 @@ if errorlevel 1 exit /b 1</Command>
     <ClCompile Include="gpu\GpuDx11.cpp" />
     <ClCompile Include="CWrdViewDlg.cpp" />
     <ClCompile Include="UiTickPump.cpp" />
+    <ClCompile Include="VizUiThread.cpp" />
     <ClCompile Include="WrdEngine.cpp" />
     <ClCompile Include="MagImage.cpp" />
     <ClCompile Include="ComposerConvert.cpp">
@@ -1030,7 +1031,7 @@ if errorlevel 1 exit /b 1</Command>
     <ClCompile Include="Dino.cpp" />
     <ClCompile Include="Douga.cpp" />
     <ClInclude Include="SevenZipDec.h" />
-    <ClInclude Include="HarmonicProfile.h" />
+    <ClInclude Include="PianoRollPeakSpectrum.h" />
     <ClInclude Include="NoteEnvelopeModel.h" />
     <ClInclude Include="NoteFundamentalPick.h" />
     <ClInclude Include="PianoKeyTable.h" />
@@ -1043,6 +1044,7 @@ if errorlevel 1 exit /b 1</Command>
     <ClInclude Include="CEmu\cemu_align.h" />
     <ClInclude Include="CWrdViewDlg.h" />
     <ClInclude Include="UiTickPump.h" />
+    <ClInclude Include="VizUiThread.h" />
     <ClInclude Include="WrdEngine.h" />
     <ClInclude Include="MagImage.h" />
     <ClInclude Include="ComposerConvert.h" />
@@ -1239,6 +1241,9 @@ if errorlevel 1 exit /b 1</Command>
     <ClCompile Include="DeviceRecordDlg.cpp" />
     <ClCompile Include="DigitizeDlg.cpp" />
     <ClCompile Include="VoiceChangerDlg.cpp" />
+    <ClCompile Include="EqKeyAnalyze.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+    </ClCompile>
     <ClCompile Include="VcVocalTract.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|Win32'">NotUsing</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='uni_avx2_vs2026|x64'">NotUsing</PrecompiledHeader>
@@ -1435,6 +1440,7 @@ if errorlevel 1 exit /b 1</Command>
     <ClInclude Include="DigitizeDlg.h" />
     <ClInclude Include="VoiceChangerDlg.h" />
     <ClInclude Include="CdPlayerDlg.h" />
+    <ClInclude Include="EqKeyAnalyze.h" />
     <ClInclude Include="VcVocalTract.h" />
     <ClInclude Include="TunerPracticeDlg.h" />
     <ClInclude Include="PhotoFrameDlg.h" />

@@ -1,4 +1,5 @@
 ﻿#include "stdafx.h"
+#include "EqKeyAnalyze.h"
 #ifndef _USE_MATH_DEFINES
 #define _USE_MATH_DEFINES
 #endif
@@ -13,15 +14,14 @@
 #include "oggDlg.h"
 #include "CMediaPlayerDlg.h"
 #include "PcHwMidiIn.h"
+#include "VizUiThread.h"
 
 class COggDlg;
 extern COggDlg* og;
 #include "resource.h"
 #include "NoteFundamentalPick.h"
-#include "PianoRollPick.h"
 #include "PianoRoll108Detect.h"
 #include "PianoKeyTable.h"
-#include "HarmonicProfile.h"
 #include "PianoRollGoertzelAvx2.h"
 
 extern save savedata;
@@ -486,51 +486,34 @@ IMPLEMENT_DYNAMIC(CPianoRoll, CCustomBlurDialogExBase)
 // pick fix 5 ベースを低音/中高音(一体)の2帯に整理。// BAND_MID_END はレーン色用のみ。追加パッチ関数は置かない。
 namespace Cfg
 {
-    // piano roll3: 基音ピック + NormalizeDisplayPeak + 包絡ホールド
-    static constexpr float IIR_ALPHA = 0.40f;
-    static constexpr float IIR_ALPHA_BASS = 0.28f;
     // 絶対無音ゲート。解析AGCを -3dBFS 目標にしたあとでも、
     // 弱い楽節(例: OST導入部)がここで全滅しないよう 0.002→0.0007 に下げた。
     static constexpr float SILENCE_ABS = 0.0007f;
     static constexpr float BAND_SILENCE_BASS = 0.00055f;
     static constexpr float BAND_SILENCE_MID = 0.00045f;
     static constexpr float BAND_SILENCE_TRE = 0.00045f;
-    static constexpr int   ATTACK_FRAMES = 1;
     static constexpr int   ATTACK_FRAMES_EDGE = 2;
-    // T130 の 16分(~115ms)/32分(~58ms)を分離できるようリリースを短く。
-    // 旧5だと中域 TemporalFrames で最大20F(≈460ms)まで伸びて連打が1本に見える。
-    static constexpr int   RELEASE_FRAMES = 3;
-    static constexpr int   VIS_GAP_FRAMES = 2;
-    static constexpr int   VIS_GAP_FRAMES_BASS = 3;
-    static constexpr int   VIS_GAP_FRAMES_MID = 1;
-    static constexpr int   VIS_GAP_FRAMES_TRE = 1;
-    static constexpr int   VIS_GAP_SUSTAIN_BONUS = 1;
+    // 2分音符・全音符の持続中に他の音やドラムが重なって数フレーム PickNotes から漏れても
+    // 途切れず 1 本の長い音符として繋がるようにし、かつ 16分音符のアタックは切れる値にする。
+    static constexpr int   RELEASE_FRAMES = 5;
+    static constexpr int   VIS_GAP_FRAMES = 4;
+    static constexpr int   VIS_GAP_FRAMES_BASS = 5;
+    static constexpr int   VIS_GAP_FRAMES_MID = 4;
+    static constexpr int   VIS_GAP_FRAMES_TRE = 3;
+    static constexpr int   VIS_GAP_SUSTAIN_BONUS = 2;
     static constexpr int   ATTACK_MISS_GRACE = 2;
-    static constexpr float RETRIGGER_RATIO = 0.28f;
+    static constexpr float RETRIGGER_RATIO = 0.16f;
     static constexpr int   BAND_BASS_END = PianoRoll108::BASS_END;
     static constexpr int   BAND_MID_END = PianoRoll108::MID_END;
-    static constexpr int   KEY_O2G = 43;   // G2
-    static constexpr int   KEY_O5C = 72;   // C5
-    static constexpr int   KEY_O7C = 96;   // C7
-    // ノート有無: 調波サリエンスの局所ピークが領域ノイズ床×SNR を超えること。
-    // 帯域max比は使わない（静音で高音が消え、派手な曲で砂になるため）。
-    static constexpr float BASS_PICK_THRESH = 0.20f;
-    static constexpr float UPPER_PICK_THRESH = 0.06f;
-    static constexpr float PEAK_SNR = 3.0f;
-    static constexpr float PEAK_REGION_REL = 0.055f;  // legacy pick helpers (unused path)
-    // [検証のため元値へ復帰] 隣接ホッピング対策を単独の変数として切り分けて検証する。
-    static constexpr float HOLD_ENV_BASS = 0.28f;
-    static constexpr float HOLD_ENV_MID = 0.22f;  // 短音分離: 旧0.14は減衰残響で隙間を埋める
-    static constexpr float HOLD_ENV_TRE = 0.24f;
-    static constexpr float DISPLAY_PEAK_CAP = 5.0f;
+    // ホールド: 持続音の減衰やビブラートの谷でもしっかり繋がるよう 0.14〜0.18 に設定。
+    static constexpr float HOLD_ENV_BASS = 0.18f;
+    static constexpr float HOLD_ENV_MID = 0.14f;
+    static constexpr float HOLD_ENV_TRE = 0.16f;
     static constexpr int   ANALYZE_INTERVAL = 1024; // FeedPCM未使用。実ホップは SyncPianoRoll + ANALYZE_MIN_MS
-    static constexpr int   ONSET_KEY_START = 62;  // D4（旧 index 41 + MIDI base 21）
-    static constexpr float ONSET_DELTA_THRESH = 0.012f;
-    static constexpr float ONSET_MIN_STRENGTH = 0.018f;
-    static constexpr float BASS_ONSET_DELTA_THRESH = 0.034f;
-    static constexpr float BASS_ONSET_MIN_STRENGTH = 0.055f;
-    static constexpr float UPPER_ONSET_DELTA_THRESH = 0.040f;
-    static constexpr float UPPER_ONSET_MIN_STRENGTH = 0.065f;
+    // 正弦波成分とみなす FFT ピークの、鍵帯域雑音床からの最低 S/N [dB]
+    static constexpr float PEAK_SNR_DB = 9.0f;
+    // 打楽器過渡の 1 フレームあたりの減衰(16ms ホップで約 160ms 残る)
+    static constexpr float PERC_DECAY = 0.82f;
 
     // 解析専用の双方向AGC。再生用EQマスターとは独立に、窓ピークを目標へ揃える。
     // 旧: 上げのみ(+→-11dB、既に大きい入力は触らない) → 静かな曲は床に沈み、
@@ -542,9 +525,6 @@ namespace Cfg
     static constexpr float BUFWAV3_PEAK_FLOOR_DB = -60.0f;
     // 絶対ノイズ床の基準(AGC後)。旧0.0015は -3dB 動作点では厳しすぎる。
     static constexpr float ABS_NOISE_FLOOR_BASE = 0.00055f;
-    // スペクトル相対床: 下位パーセンタイル × 倍率 (マスター上げ時の砂粒ゴースト対策)
-    static constexpr float SPECTRAL_NOISE_PERCENTILE = 0.35f;
-    static constexpr float SPECTRAL_NOISE_FLOOR_MUL = 2.2f;
 
     static float PeakDbFs(const double* samples, int n)
     {
@@ -592,32 +572,6 @@ namespace Cfg
         return g;
     }
 
-    // blend スペクトルの下位パーセンタイルをノイズ床推定に使う。
-    // ノートが多いフレームでは相対床が上がり、砂粒ゴーストを押し下げる。
-    static float SpectralNoiseEstimate(const float* blend, int count)
-    {
-        if (!blend || count <= 0) return 0.0f;
-        float tmp[128];
-        int n = 0;
-        const int cap = (count < 128) ? count : 128;
-        for (int i = 0; i < count && n < cap; ++i) {
-            if (blend[i] > 1e-8f)
-                tmp[n++] = blend[i];
-        }
-        if (n < 8) return 0.0f;
-        int k = (int)((float)n * SPECTRAL_NOISE_PERCENTILE);
-        if (k < 0) k = 0;
-        if (k >= n) k = n - 1;
-        // 部分選択（std::nth_element 禁止）
-        for (int i = 0; i <= k; ++i) {
-            int best = i;
-            for (int j = i + 1; j < n; ++j)
-                if (tmp[j] < tmp[best]) best = j;
-            if (best != i) { float t = tmp[i]; tmp[i] = tmp[best]; tmp[best] = t; }
-        }
-        return tmp[k];
-    }
-
     static float PickThreshScaleFromLevelDb(float levelDb)
     {
         if (levelDb < -32.0f) return 0.58f;
@@ -643,13 +597,6 @@ namespace Cfg
     }
 
     // C4 = MIDI 60。弦/鍵盤の減衰は中音域で長く、高音ほど短い。
-    static float HoldEnvRatio(int keyIndex)
-    {
-        if (keyIndex < BAND_BASS_END) return HOLD_ENV_BASS;
-        if (keyIndex < BAND_MID_END) return HOLD_ENV_MID;
-        return HOLD_ENV_TRE;
-    }
-
     static int TemporalFrames(int keyIndex, int baseFrames)
     {
         int lo = 0, hi = PianoKey::COUNT;
@@ -672,52 +619,39 @@ namespace Cfg
         const float bell = expf(-dc * dc);
         int f = (int)(baseFrames * scale + bell * 2.0f + 0.5f);
         if (keyIndex >= BAND_MID_END) {
-            if (f < 2) f = 2;
-            if (f > 5) f = 5;   // 高音リリース上限: 旧12F→5F (≈115ms@1024hop ≈16分)
+            if (f < 3) f = 3;
+            if (f > 8) f = 8;
         }
         else {
             if (keyIndex < BAND_BASS_END) {
-                if (f < 1) f = 1;
-                if (f > 8) f = 8;
+                if (f < 3) f = 3;
+                if (f > 10) f = 10;
             }
             else {
-                if (f < 2) f = 2;
-                if (f > 6) f = 6; // 中音上限: 旧20F→6F (≈140ms、16分連打を分離)
+                if (f < 4) f = 4;
+                if (f > 10) f = 10;
             }
         }
         return f;
     }
 
+    // 新規点灯に要る連続ピック数。単発1フレームの揺れや倍音漏れが16分音符ゴミにならないよう、
+    // 原則 2 フレーム連続(特にブレやすい超低音・超高音は 3 フレーム連続)を要求する。
     static int AttackFramesForKey(int keyIndex)
     {
-        if (keyIndex >= PianoRoll108::BASS_END && keyIndex < PianoRoll108::EDGE_HI)
-            return 1;
-        if (keyIndex < 12 || keyIndex >= PianoRoll108::EDGE_HI)
-            return TemporalFrames(keyIndex, ATTACK_FRAMES_EDGE);
-        return 1;
+        if (keyIndex < 36 || keyIndex >= PianoRoll108::O5_HI)
+            return 3;
+        return 2;
     }
 
     static int VisGapFrames(int keyIndex)
     {
         if (keyIndex >= PianoRoll108::BASS_END && keyIndex < PianoRoll108::MID_END)
-            return VIS_GAP_FRAMES_MID;
+            return TemporalFrames(keyIndex, VIS_GAP_FRAMES_MID);
         const int base = (keyIndex < BAND_BASS_END) ? VIS_GAP_FRAMES_BASS
             : (keyIndex >= BAND_MID_END) ? VIS_GAP_FRAMES_TRE : VIS_GAP_FRAMES;
         return TemporalFrames(keyIndex, base);
     }
-
-    static void NormalizeBandPeak(float* values, int lo, int hi, float cap)
-    {
-        if (!values || lo >= hi || cap <= 0.0f) return;
-        float maxV = 0.0f;
-        for (int i = lo; i < hi; ++i)
-            if (values[i] > maxV) maxV = values[i];
-        if (maxV <= cap) return;
-        const float scale = cap / maxV;
-        for (int i = lo; i < hi; ++i)
-            values[i] *= scale;
-    }
-
 
 }
 
@@ -727,6 +661,11 @@ int CPianoRoll::ScaleWinSamples(int refSamples, int sampleRate, int capSamples)
     if (sampleRate < 8000) sampleRate = REF_SAMPLE_RATE;
     int64_t n = ((int64_t)refSamples * (int64_t)sampleRate + REF_SAMPLE_RATE / 2) / REF_SAMPLE_RATE;
     if (n < 64) n = 64;
+    // 48kHz で 8916 などの半端な長さになると、FFT で 16384 へゼロ詰めされ、
+    // リンギングで雑音床が跳ねる。最も近い 2 のべき乗へ揃える。
+    int p2 = 64;
+    while (p2 * 2 <= 65536 && (int64_t)p2 * 3 < n * 2) p2 <<= 1;
+    n = p2;
     static const int kAbsMax = 131072;
     if (n > kAbsMax) n = kAbsMax;
     if (capSamples > 0 && n > capSamples) n = capSamples;
@@ -830,7 +769,10 @@ CPianoRoll::CPianoRoll(CWnd* pParent)
     memset(m_reattackMark, 0, sizeof(m_reattackMark));
     memset(m_onsetBoostThisFrame, 0, sizeof(m_onsetBoostThisFrame));
     memset(m_onsetBoostStreak, 0, sizeof(m_onsetBoostStreak));
-    memset(m_harmonicGhostStreak, 0, sizeof(m_harmonicGhostStreak));
+    memset(m_noiseRaw, 0, sizeof(m_noiseRaw));
+    memset(m_noiseSmoothed, 0, sizeof(m_noiseSmoothed));
+    memset(m_fftSalRaw, 0, sizeof(m_fftSalRaw));
+    memset(m_fftSalSmoothed, 0, sizeof(m_fftSalSmoothed));
     for (int i = 0; i < PIANO_METER_CH_MAX; ++i) {
         m_chMeterDb[i] = -60.0f;
         m_chMeterFill[i] = 0.0f;
@@ -865,6 +807,8 @@ CPianoRoll::~CPianoRoll()
 // stop/曲切替の先頭。DoEvent 再入で旧形式バッファを解析しない。
 void CPianoRoll::PauseAnalysis()
 {
+    if (VizUi::MarshalToOwner(m_hWnd, [this]() { PauseAnalysis(); }))
+        return;
     m_feedEnabled = false;
     InterlockedIncrement(&m_analysisEpoch);
     InterlockedExchange(&m_jobPending, 0);
@@ -994,6 +938,9 @@ void CPianoRoll::SetChannelMeterDb(const float* dbPerChannel, int channelCount)
 // 解析スレッドはここでは起動しない。ResumePlaybackFeed（DS 再生開始後）でのみ起動する。
 void CPianoRoll::ResetPlaybackState()
 {
+    // 表示バッファ・タイマーはピアノロール専用 UI スレッドの持ち物
+    if (VizUi::MarshalToOwner(m_hWnd, [this]() { ResetPlaybackState(); }))
+        return;
     // Pause で busy=0 を待つので、表示状態のクリアはワーカー停止成否に依存しない。
     PauseAnalysis();
 
@@ -1058,7 +1005,15 @@ void CPianoRoll::ResetPlaybackState()
             m_envModel[i].ResetOff();
         memset(m_reattackMark, 0, sizeof(m_reattackMark));
         memset(m_onsetBoostStreak, 0, sizeof(m_onsetBoostStreak));
-        memset(m_harmonicGhostStreak, 0, sizeof(m_harmonicGhostStreak));
+        memset(m_noiseRaw, 0, sizeof(m_noiseRaw));
+        memset(m_noiseSmoothed, 0, sizeof(m_noiseSmoothed));
+        memset(m_fftSalRaw, 0, sizeof(m_fftSalRaw));
+        memset(m_fftSalSmoothed, 0, sizeof(m_fftSalSmoothed));
+        m_tuneC = 0.0;
+        m_tuneS = 0.0;
+        m_tuneW = 0.0;
+        m_tuneSemis = 0.0f;
+        m_percLevel = 0.0f;
         m_historyDirty = true;
         m_keyDirty = true;
         m_historyCount = 0;
@@ -1416,25 +1371,6 @@ void CPianoRoll::EnsureAnalysisTables(int sampleRate, int capCaptureFrames)
     m_analysisTablesReady = true;
 }
 
-// Goertzel アルゴリズムで単一周波数の振幅(magnitude)を計算する。
-// 係数 coefficient = 2*cos(2π*f/sr) は EnsureAnalysisTables で事前計算済み。
-// window が非 null なら掛け算でサイドローブを抑制する(Hann, Blackman 等)。
-// 戻り値は numSamples で正規化した振幅(0.0〜)。FFT 全帯域ではなく対象周波数だけ
-// 計算するため 88 鍵 × O(N) の計算量で済む(FFT の O(N log N) より有利な用途)。
-double CPianoRoll::GoertzelMagnitude(const double* samples, int numSamples,
-    double coefficient, const double* window)
-{
-    double s_prev = 0.0, s_prev2 = 0.0;
-    for (int n = 0; n < numSamples; ++n) {
-        const double x = window ? (samples[n] * window[n]) : samples[n];
-        const double s = x + coefficient * s_prev - s_prev2;
-        s_prev2 = s_prev;
-        s_prev = s;
-    }
-    const double power = s_prev2 * s_prev2 + s_prev * s_prev - coefficient * s_prev * s_prev2;
-    return sqrt(power > 0.0 ? power : 0.0) * 2.5 / numSamples;
-}
-
 float CPianoRoll::ApplyDisplayScale(float rawAmp, int keyIndex, int winSamples, int refWinSamples)
 {
     if (rawAmp <= 1e-10f) return 0.0f;
@@ -1597,9 +1533,13 @@ void CPianoRoll::RunGoertzelFromBuffer(const double* winLow,
             m_envModel[i].ResetOff();
             m_reattackMark[i] = false;
             m_onsetBoostStreak[i] = 0;
-            m_harmonicGhostStreak[i] = 0;
+            m_noiseRaw[i] = 0.0f;
+            m_noiseSmoothed[i] *= 0.5f;
+            m_fftSalRaw[i] = 0.0f;
+            m_fftSalSmoothed[i] *= 0.5f;
         }
         memcpy(m_prevOnsetStrengths, m_onsetStrengths, sizeof(m_onsetStrengths));
+        m_percLevel = 0.0f;
         m_detectSilent = true;
         return;
     }
@@ -1617,39 +1557,76 @@ void CPianoRoll::RunGoertzelFromBuffer(const double* winLow,
     const int splitLo = PianoRoll108::WIN_LONG_END;
     const int splitHi = PianoRoll108::WIN_MID_END;
 
-    auto storeKey = [this](int i, float goertzel, int winSamples, int refWin) {
-        m_rawStrengths[i] = ApplyDetectScale(goertzel, winSamples, refWin);
-        m_displayStrengths[i] = ApplyDisplayScale(goertzel, i, winSamples, refWin);
+    float peakMag[KEY_COUNT];
+    float floorMag[KEY_COUNT];
+    PianoRollPeakSpectrum::TuneAcc tune;
+    auto analyzePeaks = [&](const double* windowed, int winLen, float sidelobeDb, int keyLo, int keyHi) {
+        m_peakSpec.Analyze(windowed, winLen, m_inputSampleRate, sidelobeDb, keyLo, keyHi,
+            m_tuneSemis, Cfg::PEAK_SNR_DB, peakMag, floorMag, m_fftSalRaw, &tune);
+    };
+    auto storeKeys = [&](int keyLo, int keyHi, int winSamples, int refWin) {
+        for (int i = keyLo; i < keyHi; ++i) {
+            m_rawStrengths[i] = ApplyDetectScale(peakMag[i], winSamples, refWin);
+            m_displayStrengths[i] = ApplyDisplayScale(peakMag[i], i, winSamples, refWin);
+            m_noiseRaw[i] = ApplyDetectScale(floorMag[i], winSamples, refWin);
+        }
     };
 
-    if (hasBass) {
+    if (hasBass && m_winBass != m_winLow) {
         for (int i = 0; i < m_winBass; ++i)
             m_windowedBass[i] = m_bassAnalysisBuf[i] * m_hannBass[i];
-        PianoRollGoertzelBatchAvx2(
-            m_windowedBass, m_winBass, m_goertzelCoeffs,
-            0, splitLo, m_goertzelRawScratch);
-        for (int i = 0; i < splitLo; ++i)
-            storeKey(i, (float)m_goertzelRawScratch[i], m_winBass, WIN_BASS_REF);
+        analyzePeaks(m_windowedBass, m_winBass, PianoRollPeakSpectrum::SIDELOBE_HANN_DB, 0, splitLo);
+        storeKeys(0, splitLo, m_winBass, WIN_BASS_REF);
+        analyzePeaks(m_windowedLow, m_winLow, PianoRollPeakSpectrum::SIDELOBE_HANN_DB, splitLo, splitHi);
+        storeKeys(splitLo, splitHi, m_winLow, WIN_LOW_REF);
     }
     else {
-        PianoRollGoertzelBatchAvx2(
-            m_windowedLow, m_winLow, m_goertzelCoeffs,
-            0, splitLo, m_goertzelRawScratch);
-        for (int i = 0; i < splitLo; ++i)
-            storeKey(i, (float)m_goertzelRawScratch[i], m_winLow, WIN_BASS_REF);
+        analyzePeaks(m_windowedLow, m_winLow, PianoRollPeakSpectrum::SIDELOBE_HANN_DB, 0, splitHi);
+        storeKeys(0, splitHi, m_winLow, WIN_LOW_REF);
+    }
+    // 4096 サンプル窓(直近 ~93ms)は C4(splitLo=60)以上も解析し、60..84 の中高音メロディで
+    // 8192 窓内で音が動いてピークが割れている場合のみ 4096 窓側を採用する。
+    // C4 未満の低〜中低音は分解能の高い 8192 窓のみを使い、隣鍵への滲みを防ぐ。
+    float peakHigh[KEY_COUNT];
+    float floorHigh[KEY_COUNT];
+    float salHigh[KEY_COUNT];
+    m_peakSpec.Analyze(m_windowedHigh, m_winHigh, m_inputSampleRate,
+        PianoRollPeakSpectrum::SIDELOBE_BLACKMAN_DB, splitLo, KEY_COUNT,
+        m_tuneSemis, Cfg::PEAK_SNR_DB, peakHigh, floorHigh, salHigh, &tune);
+    for (int i = splitLo; i < splitHi; ++i) {
+        const float rH = ApplyDetectScale(peakHigh[i], m_winHigh, WIN_HIGH_REF);
+        const float nH = ApplyDetectScale(floorHigh[i], m_winHigh, WIN_HIGH_REF);
+        const float snrL = (m_noiseRaw[i] > 1.0e-12f) ? (m_rawStrengths[i] / m_noiseRaw[i]) : 0.0f;
+        const float snrH = (nH > 1.0e-12f) ? (rH / nH) : 0.0f;
+        if (snrH > snrL * 1.25f) {
+            m_rawStrengths[i] = rH;
+            m_displayStrengths[i] = ApplyDisplayScale(peakHigh[i], i, m_winHigh, WIN_HIGH_REF);
+            m_noiseRaw[i] = nH;
+            m_fftSalRaw[i] = salHigh[i];
+        }
+    }
+    for (int i = splitHi; i < KEY_COUNT; ++i) {
+        m_rawStrengths[i] = ApplyDetectScale(peakHigh[i], m_winHigh, WIN_HIGH_REF);
+        m_displayStrengths[i] = ApplyDisplayScale(peakHigh[i], i, m_winHigh, WIN_HIGH_REF);
+        m_noiseRaw[i] = ApplyDetectScale(floorHigh[i], m_winHigh, WIN_HIGH_REF);
+        m_fftSalRaw[i] = salHigh[i];
     }
 
-    PianoRollGoertzelBatchAvx2(
-        m_windowedLow, m_winLow, m_goertzelCoeffs,
-        splitLo, splitHi, m_goertzelRawScratch);
-    for (int i = splitLo; i < splitHi; ++i)
-        storeKey(i, (float)m_goertzelRawScratch[i - splitLo], m_winLow, WIN_LOW_REF);
-
-    PianoRollGoertzelBatchAvx2(
-        m_windowedHigh, m_winHigh, m_goertzelCoeffs,
-        splitHi, KEY_COUNT, m_goertzelRawScratch);
-    for (int i = splitHi; i < KEY_COUNT; ++i)
-        storeKey(i, (float)m_goertzelRawScratch[i - splitHi], m_winHigh, WIN_HIGH_REF);
+    // 調律: 強い正弦波成分の A440 鍵中心からのずれを約 2 秒の時定数で円周平均する。
+    // まとまりが弱い(ビブラート・グリッサンド主体)ときは直前の値を保つ。
+    {
+        const double th = 6.283185307179586 * (double)m_tuneSemis;
+        const double c = tune.c * cos(th) - tune.s * sin(th);
+        const double s = tune.c * sin(th) + tune.s * cos(th);
+        m_tuneC = m_tuneC * 0.993 + c;
+        m_tuneS = m_tuneS * 0.993 + s;
+        m_tuneW = m_tuneW * 0.993 + tune.w;
+        if (m_tuneW > 1.0e-6) {
+            const double resultant = sqrt(m_tuneC * m_tuneC + m_tuneS * m_tuneS) / m_tuneW;
+            if (resultant > 0.5)
+                m_tuneSemis = (float)(atan2(m_tuneS, m_tuneC) / 6.283185307179586);
+        }
+    }
 
     PianoRollGoertzelBatchAvx2(
         m_windowedOnset, m_winOnset, m_goertzelCoeffs,
@@ -1664,48 +1641,23 @@ void CPianoRoll::RunGoertzelFromBuffer(const double* winLow,
             m_smoothedStrengths[i] * (1.0f - alpha) + m_rawStrengths[i] * alpha;
         m_displaySmoothed[i] =
             m_displaySmoothed[i] * (1.0f - alpha) + m_displayStrengths[i] * alpha;
+        m_noiseSmoothed[i] =
+            m_noiseSmoothed[i] * (1.0f - alpha) + m_noiseRaw[i] * alpha;
+        m_fftSalSmoothed[i] =
+            m_fftSalSmoothed[i] * (1.0f - alpha) + m_fftSalRaw[i] * alpha;
     }
     // UpdateNoteStates / PushDisplayFrames は m_cs 下の PublishDetectResults で行う
 }
 
 namespace
 {
-    // 倍音ゴースト抑制用: candidate が「他の音の倍音として際どく通過した」かどうかを判定する。
-    // PianoKeyTable.h の PassesFundamentalTest/PassesFundamentalTestSustain と同じ
-    // 判定式(下側の潜在的な基音候補との比率が 0.78 を超えたら本来は倍音として棄却)
-    // を土台にしているが、目的が異なるため単純化して再現している:
-    //   - あちらは「棄却するかどうか」の最終判定(1回だけ実行)
-    //   - こちらは「棄却ラインのすぐ近く(僅差)で生き残ったか」だけを見る予備検知
-    // 明確に独立している音(下の潜在基音がほとんど鳴っていない)は対象外となり、
-    // 実際にゴーストが観測された「閾値をまたいで一瞬だけ通過する」ケースだけを狙う。
-    bool IsMarginalFund(const float* blend, int candidate, int count, float marginRatio, float rejectRatio)
-    {
-        if (!blend || candidate < 0 || candidate >= count) return false;
-        const float sc = blend[candidate];
-        if (sc <= 0.0f) return false;
-        for (int n = PianoKey::HARMONIC_N_MIN; n <= PianoKey::HARMONIC_N_MAX; ++n) {
-            const int lo = PianoKey::HarmonicDownKey(candidate, n);
-            if (lo < 0 || lo >= count || lo >= candidate) continue;
-            const float rejectAt = sc * rejectRatio;
-            const float marginAt = rejectAt * marginRatio;
-            if (blend[lo] >= marginAt && blend[lo] < rejectAt)
-                return true;
-        }
-        return false;
-    }
-}
-
-namespace
-{
     // 隣接半音間のピック“ホッピング”対策。
-    // 実音の周波数が2鍵のちょうど中間に近いと、IsLocalPeakInBand/SnapToLocalMaximum
-    // (NoteFundamentalPick.h)の判定がフレームごとに僅差で入れ替わり、同じ1音が
-    // 隣接する2鍵の間を毎フレーム飛び移ってしまう。m_activeKeys は鍵ごとに独立して
-    // いるため、これがそのまま「隣接する2本のバーが交互にチラつく」症状になる。
-    // 前フレームで鳴っていた鍵(prevActive)と、今フレーム僅差で勝った隣の鍵の値が
-    // 近い(marginRatio以内)場合は、前フレームの鍵を優先して復活させ、
-    // 隣の鍵は降ろすことでホッピングを抑える。
-    // NoteFundamentalPick.h 側の判定式自体には一切手を入れない、後付けの安定化。
+    // 実音の周波数が2鍵のちょうど中間に近い(ビブラート・ポルタメント)と、鍵への
+    // 割り当てがフレームごとに入れ替わり、同じ1音が隣接する2鍵の間を飛び移る。
+    // m_activeKeys は鍵ごとに独立しているため、これが「隣接する2本のバーが交互に
+    // チラつく」症状になる。前フレームで鳴っていた鍵(prevActive)と、今フレーム
+    // 僅差で勝った隣の鍵の値が近い(marginRatio以内)場合は、前フレームの鍵を
+    // 優先して復活させ、隣の鍵は降ろす。
     void StabilizeBinHop(const float* blend, bool* picked,
         const bool* prevActive, int count, float marginRatio)
     {
@@ -1739,9 +1691,9 @@ void CPianoRoll::UpdateNoteStates()
     const float bandSilMid = PrTuneF(savedata.prTuneBandSilMidPct, BAND_SILENCE_MID);
     const float bandSilTre = PrTuneF(savedata.prTuneBandSilTrePct, BAND_SILENCE_TRE);
     const float retriggerRatio = PrTuneF(savedata.prTuneRetrigPct, RETRIGGER_RATIO);
-    const float harmGhostMargin = PrTuneF(savedata.prTuneHarmGhostPct, kHarmonicGhostMarginRatio);
-    const float harmRejectRatio = PrTuneF(savedata.prTuneHarmRejectPct, 0.78f);
-    const float harmProfMin = PrTuneF(savedata.prTuneHarmProfPct, kHarmonicProfileNoiseMinConfidence);
+    const float ghostStrict = PrTuneF(savedata.prTuneHarmGhostPct, 1.0f);
+    const float envMargin = PrTuneF(savedata.prTuneHarmRejectPct, 1.10f);
+    const float percStrict = PrTuneF(savedata.prTuneHarmProfPct, 1.0f);
     const float pickBassRel = PrTuneF(savedata.prTunePickBassPct, 0.28f);
     const float pickLowMidRel = PrTuneF(savedata.prTunePickLowMidPct, 0.20f);
     const float pickMelodyRel = PrTuneF(savedata.prTunePickMelodyPct, 0.10f);
@@ -1781,39 +1733,52 @@ void CPianoRoll::UpdateNoteStates()
             m_envModel[i].ResetOff();
             m_reattackMark[i] = false;
             m_onsetBoostStreak[i] = 0;
-            m_harmonicGhostStreak[i] = 0;
         }
+        m_percLevel = 0.0f;
         memcpy(m_prevOnsetStrengths, m_onsetStrengths, sizeof(m_onsetStrengths));
         return;
     }
 
-    // ノイズ床: AGC後の固定基準 + スペクトル相対床。
-    // 旧: absFloor = base * gainLinear → ブーストで床が上がり静かな曲が載らず、
-    //     マスター上げ(gain≈0)で床が最低になりゴーストが増える。
-    // 新: 双方向AGCで動作点を揃えたうえで、相対床で砂粒を抑える。
-    // 大きなブースト時のみソースSNR悪化分を控えめに持ち上げる。
+    // 絶対床: 双方向AGCで動作点を揃えた固定基準。大きなブースト時のみソースSNR悪化分を
+    // 控えめに持ち上げる。相対的な雑音床は鍵帯域ごとに FFT 側で推定している(m_noiseSmoothed)。
     const float baseFloor = PrTuneF(savedata.prTuneAbsFloorPct, ABS_NOISE_FLOOR_BASE);
     float absFloor = baseFloor;
-    const float noiseEst = SpectralNoiseEstimate(blend, KEY_COUNT);
-    if (noiseEst > 0.0f) {
-        const float relFloor = noiseEst * SPECTRAL_NOISE_FLOOR_MUL;
-        if (relFloor > absFloor) absFloor = relFloor;
-    }
     if (m_lastGainDb > 8.0f) {
         const float extra = powf(10.0f, (m_lastGainDb - 8.0f) * 0.25f / 20.0f);
         const float boostFloor = baseFloor * extra;
         if (boostFloor > absFloor) absFloor = boostFloor;
     }
 
+    if (PianoRoll108::IsBroadbandTransient(m_onsetStrengths, m_prevOnsetStrengths, percStrict))
+        m_percLevel = 1.0f;
+    else
+        m_percLevel *= PERC_DECAY;
+    const bool percussive = m_harmonicProfileGuardEnabled && m_percLevel > 0.3f;
+
+    float floorBlend[KEY_COUNT];
+    float salBlend[KEY_COUNT];
+    PianoRoll108::BuildDetectionSpectrum(m_noiseSmoothed, m_noiseRaw, floorBlend, KEY_COUNT);
+    PianoRoll108::BuildDetectionSpectrum(m_fftSalSmoothed, m_fftSalRaw, salBlend, KEY_COUNT);
+
+    PianoRoll108::PickParams pp;
+    pp.levelScale = pickScale;
+    pp.absNoiseFloor = absFloor;
+    pp.pickBassRel = pickBassRel;
+    pp.pickLowMidRel = pickLowMidRel;
+    pp.pickMelodyRel = pickMelodyRel;
+    pp.pickTreRel = pickTreRel;
+    pp.ghostStrict = ghostStrict;
+    pp.envMargin = envMargin;
+    pp.verifyExplained = m_harmonicGhostGuardEnabled;
+    pp.percussive = m_harmonicProfileGuardEnabled ? m_percLevel : 0.0f;
+    pp.fftHarmSal = salBlend;
+
     bool picked[KEY_COUNT];
-    PianoRoll108::BuildFramePicks(blend, picked, KEY_COUNT, pickScale, absFloor,
-        m_onsetStrengths, m_prevOnsetStrengths,
-        pickBassRel, pickLowMidRel, pickMelodyRel, pickTreRel, onsetDeltaScale);
+    float ownPow[KEY_COUNT];
+    PianoRoll108::PickNotes(blend, floorBlend, m_activeKeys, picked, ownPow, pp);
 
 #ifdef _DEBUG
-    // [診断用] BuildFramePicks直後、picked[]そのものが絶対値フロアで
-    // 本当に弾かれているかを確認する。ここで picked[i]==false なのに
-    // 後段で active=1 になっているなら、原因はホールド系ロジック側にある。
+    // [診断用] ピック直後、絶対床の半分にも満たない鍵が選ばれていないかを確認する。
     {
         static DWORD s_dbgPickLogTick = 0;
         const DWORD dbgNow2 = GetTickCount();
@@ -1831,14 +1796,17 @@ void CPianoRoll::UpdateNoteStates()
     }
 #endif
 
-    // 隣接半音ホッピング対策(実験的、既定で常時有効)。
-    // 前フレームでアクティブだった鍵(m_activeKeys、この時点ではまだ前フレームの値)を
+    // 隣接半音ホッピング対策。前フレームの鍵(m_activeKeys、この時点ではまだ前フレームの値)を
     // 基準に、僅差で入れ替わっただけの隣接ピックを元に戻す。
     static constexpr float kAdjacentHoppingMarginRatio = 0.85f;
     StabilizeBinHop(blend, picked, m_activeKeys, KEY_COUNT, kAdjacentHoppingMarginRatio);
+    for (int i = 0; i < KEY_COUNT; ++i)
+        if (picked[i] && blend[i] > ownPow[i]) ownPow[i] = blend[i];
 
     for (int i = 0; i < KEY_COUNT; ++i) {
-        const float sigStrength = blend[i];
+        // 以降の強さは「他の音の倍音として説明できない分」。倍音位置の鍵は、親の音が
+        // 鳴っている間も残差がほぼゼロなので、ホールドで居座らない。
+        const float sigStrength = ownPow[i];
         bool effective = picked[i];
 
         if (!effective && m_activeKeys[i]) {
@@ -1850,25 +1818,17 @@ void CPianoRoll::UpdateNoteStates()
             else
                 holdRatio = PrTuneF(savedata.prTuneHoldTrePct, HOLD_ENV_TRE);
             if (holdRatio > 0.0f && m_envPeak[i] > 0.001f) {
-                if (sigStrength >= m_envPeak[i] * holdRatio)
+                // 持続中のノートが倍音減算のフレーム揺れで一瞬 ownPow=0 になっても、
+                // 実際の平滑スペクトル(m_smoothedStrengths)がピークに対して十分残っており、
+                // かつ下の音の単純倍音ゴーストでなければ持続(ホールド)を維持する。
+                if (sigStrength >= m_envPeak[i] * holdRatio) {
                     effective = true;
-                else if (m_smoothedStrengths[i] >= m_envPeak[i] * holdRatio * 0.82f)
+                }
+                else if (m_smoothedStrengths[i] >= m_envPeak[i] * holdRatio * 0.85f &&
+                    !PianoKey::IsHarmonicOfAnyActive(blend, i, picked, PianoRoll108::MUSIC_LOW_FLOOR, i, KEY_COUNT, 0.90f)) {
                     effective = true;
+                }
             }
-        }
-
-        // ホールド延長でもパッシブ倍音を残さない。
-        // ただし C4〜C6 のメロディー帯は、ピック側の FinishPicks に任せ、
-        // ここでの二次剪定でピアノを再キルしない（パッチ連鎖の主因だった）。
-        //
-        // picked[i] が立っているフレームには掛けない。BuildFramePicks は
-        // 振幅ドメインで倍音包絡を引いたあと「その包絡では説明できない」鍵だけを
-        // 返している。ここでパワー比の旧判定を重ねると、ベースが鳴っている間
-        // 中高音が再度落とされる。この剪定はホールド延長ぶんだけが対象。
-        if (effective && !picked[i] &&
-            (i < PianoRoll108::C4_KEY || i >= PianoRoll108::O5_HI) &&
-            PianoKey::IsHarmonicGhostPartial(blend, i, KEY_COUNT, PianoRoll108::BASS_END)) {
-            effective = false;
         }
 
         if (effective) {
@@ -1908,59 +1868,23 @@ void CPianoRoll::UpdateNoteStates()
         else {
             m_onsetBoostStreak[i] = 0;
         }
-        const int attackNeed = onsetBoost ? 1 : AttackFramesForKey(i);
+        // 単発1フレームのスパイクが16分音符ゴミとして乱発するのを防ぐため、
+        // OnsetSupportsPick による 1フレーム即時点灯は「中域メロディ帯(C3〜C6)で打楽器過渡でない強いオンセット」に限定し、
+        // 低音・高音や通常音は必ず AttackFramesForKey (2〜3フレーム連続) を経て点灯させる。
+        const bool strongMidOnset = onsetBoost && !percussive &&
+            (i >= PianoRoll108::BASS_END && i < PianoRoll108::O5_HI) &&
+            (sigStrength >= absFloor * 4.0f);
+        const int attackNeed = strongMidOnset ? 1 : AttackFramesForKey(i);
 
         bool cur = m_activeKeys[i];
         if (!cur) {
             if (effective && m_consecActive[i] >= attackNeed) {
-                bool allowOn = true;
-                if (m_harmonicGhostGuardEnabled) {
-                    const bool suspect = IsMarginalFund(
-                        blend, i, KEY_COUNT, harmGhostMargin, harmRejectRatio);
-                    if (suspect) {
-                        // [特性ベース判定] 振幅のしきい値では「本物の小さい音」と
-                        // 「ゴースト(親音への追従に過ぎない漏れ込み)」は区別できない。
-                        // 違いは振る舞いの「形」にある: ゴーストは親音の減衰に
-                        // ただ追従するだけで、それ自体のアタック(短窓オンセットの
-                        // 立ち上がり)を持たない。本物の音は音量が小さくても、
-                        // 自分自身のアタック transient を持つはずである。
-                        // そこで振幅の持続フレーム数ではなく、m_onsetBoostStreak
-                        // (実測済みの短窓オンセット信号が連続で立っているか)を
-                        // 直接の合否基準にする。
-                        m_harmonicGhostStreak[i] = m_onsetBoostStreak[i];
-                        allowOn = (m_onsetBoostStreak[i] >= kHarmonicGhostConfirmFrames);
-                    }
-                    else {
-                        m_harmonicGhostStreak[i] = 0;
-                    }
-                }
-                if (allowOn && m_harmonicProfileGuardEnabled) {
-                    // メロディー帯(C4-C6)はプロファイル追加判定を掛けない。
-                    // 未較正テンプレがピアノをノイズ/部分音と誤認し、拾えない主因になっていた。
-                    const bool melodyBand =
-                        (i >= PianoRoll108::C4_KEY && i < PianoRoll108::O5_HI);
-                    if (!melodyBand) {
-                        if (HarmonicProfile::LooksLikeNoiseProfile(
-                            blend, i, KEY_COUNT, harmProfMin)) {
-                            allowOn = false;
-                        }
-                        else if (HarmonicProfile::LooksLikePartialGhost(blend, i, KEY_COUNT)) {
-                            allowOn = false;
-                        }
-                    }
-                }
-                if (allowOn) {
-                    cur = true;
-                    m_consecSilent[i] = 0;
-                    ++m_segmentId[i];
-                    m_envPeak[i] = sigStrength;
-                    m_unpickedFrames[i] = 0;
-                    m_strengthDipFrames[i] = 0;
-                    m_harmonicGhostStreak[i] = 0;
-                }
-            }
-            else {
-                m_harmonicGhostStreak[i] = 0;
+                cur = true;
+                m_consecSilent[i] = 0;
+                ++m_segmentId[i];
+                m_envPeak[i] = sigStrength;
+                m_unpickedFrames[i] = 0;
+                m_strengthDipFrames[i] = 0;
             }
         }
         else {
@@ -1987,8 +1911,8 @@ void CPianoRoll::UpdateNoteStates()
     }
 
     // ホールド延長だけで隣半音が同時残った場合だけ落とす。
-    // 両方とも本フレームのピックなら CollapseNearby 済みの正当な近接なので触らない
-    // （全域 ForceUnique は和音・装飾を潰して昨日より悪化した）。
+    // 両方とも本フレームのピックなら PickNotes が独立と判定した近接なので触らない
+    // （全域 ForceUnique は和音・装飾を潰す）。
     for (int i = 0; i + 1 < KEY_COUNT; ++i) {
         if (!m_activeKeys[i] || !m_activeKeys[i + 1]) continue;
         const bool pi = picked[i];
@@ -2049,6 +1973,8 @@ void CPianoRoll::UpdateNoteStates()
         if (disp <= 0.0f) disp = m_displayStrengths[i];
         if (disp <= 0.0f) disp = m_smoothedStrengths[i];
         if (disp <= 0.0f) disp = m_rawStrengths[i];
+        // 基音ピークが床下で倍音列から起こした音は、検出パワーでバーを出す。
+        if (disp <= 0.0f && ownPow[i] > 0.0f) disp = ownPow[i];
         if (disp > 10.0f) disp = 10.0f;
         m_noteStrength[i] = disp;
     }
@@ -3248,6 +3174,8 @@ void CPianoRoll::OnToggleCaptureMusicXml()
 
 void CPianoRoll::OnPlayerFeedStopping(bool fullReset)
 {
+	if (VizUi::MarshalToOwner(m_hWnd, [this, fullReset]() { OnPlayerFeedStopping(fullReset); }))
+		return;
 	if (m_scoreCapMidi || m_scoreCapXml) {
 		if (!savedata.mpLoopbackScore) {
 			savedata.mpLoopbackScore = 1;
@@ -3472,7 +3400,7 @@ void CPianoRoll::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
             LL14(L"倍音ゴースト抑制", L"Harmonic ghost suppress", L"Suppression fantomes harmoniques", L"Soppressione fantasmi armonici", L"Supresion de fantasmas armonicos", L"배음 고스트 억제", L"泛音幽灵抑制", L"كبح أشباح التوافقيات", L"Подавление гармонических призраков", L"Oberton-Geister unterdrucken", L"Suprimir fantasmas harmonicos", L"Harmonische spoken dempen", L"Tlumienie duchow harmonicznych", L"Armonik hayaletini bastir"),
             m_harmonicGhostGuardEnabled);
         subDetect->AddCheck(IDM_ROLL_HARM_PROF,
-            LL14(L"音色プロファイル判定", L"Timbre profile guard", L"Garde profil de timbre", L"Protezione profilo timbrico", L"Guardia de perfil timbrico", L"음색 프로파일 판정", L"音色轮廓判定", L"حارس ملف الطابع", L"Профиль тембра", L"Klangprofil-Schutz", L"Guarda de perfil timbrico", L"Timbreprofiel-bewaking", L"Ochrona profilu barwy", L"Timbre profil korumasi"),
+            LL14(L"打楽器ノイズ除去", L"Percussion noise reject", L"Rejet bruit de percussion", L"Scarto rumore percussioni", L"Rechazo ruido de percusion", L"타악기 노이즈 제거", L"打击乐噪声去除", L"رفض ضوضاء الإيقاع", L"Подавление шума ударных", L"Schlagzeug-Rauschen unterdrucken", L"Rejeitar ruido de percussao", L"Slagwerkruis onderdrukken", L"Tlumienie szumu perkusji", L"Perkusyon gurultusunu bastir"),
             m_harmonicProfileGuardEnabled);
     }
 
@@ -4136,6 +4064,8 @@ void CPianoRoll::DrawChannelDbBars(CDC& dc, const CRect& rc, const float* chFill
 
 void CPianoRoll::DetachForDestroy()
 {
+    if (VizUi::MarshalToOwner(m_hWnd, [this]() { DetachForDestroy(); }))
+        return;
     m_tickPump.Stop();
     KillTimer(1);
     m_feedEnabled = false;
@@ -5835,21 +5765,9 @@ void CPianoRoll::UpdateChordHistoryFromKeyCodes()
         chord = u.Mid(lt + 1, gt - lt - 1);
     else
         chord = u;
-    CString clean;
-    for (int i = 0; i < chord.GetLength(); ++i) {
-        if (chord[i] == L'!' && i + 1 < chord.GetLength() && chord[i + 1] == L'@') {
-            i += 2;
-            while (i < chord.GetLength() && ((chord[i] >= L'0' && chord[i] <= L'9')
-                || (chord[i] >= L'a' && chord[i] <= L'z')
-                || (chord[i] >= L'A' && chord[i] <= L'Z')
-                || chord[i] == L'+' || chord[i] == L'-'))
-                ++i;
-            --i;
-            continue;
-        }
-        if (chord[i] >= 32)
-            clean += chord[i];
-    }
+    wchar_t vis[160];
+    EqKeyStripMarkup(chord, vis, 160);
+    CString clean(vis);
     clean.Trim();
     if (clean.IsEmpty() || clean.Find(L"F-01") >= 0)
         clean = L"-";
@@ -6705,18 +6623,6 @@ void CPianoRoll::OnPaint()
     InterlockedExchange(&m_analysisDonePosted, 0);
     InterlockedExchange(&m_syncPosted, 0);
 
-    // EQ コード更新を1件だけ先に捌く（ピアノ OnPaint 独占で g_eqKeyUiPosted が固まるのを防ぐ）
-#ifndef WM_EQ_KEY_UPDATE
-#define WM_EQ_KEY_UPDATE (WM_APP + 430)
-#endif
-    {
-        MSG eqMsg;
-        if (::PeekMessage(&eqMsg, NULL, WM_EQ_KEY_UPDATE, WM_EQ_KEY_UPDATE, PM_REMOVE)) {
-            ::TranslateMessage(&eqMsg);
-            ::DispatchMessage(&eqMsg);
-        }
-    }
-
     // 追い付き Post は「この OnPaint が軽かったとき」だけ。重い描画の直後に再キックすると
     // UI がピアノで埋まり、30分後に EQ が数回/秒・ロールがガクガクになる。
     const DWORD paintMs = GetTickCount() - paintStart;
@@ -6833,6 +6739,24 @@ void CPianoRoll::OnShowWindow(BOOL bShow, UINT nStatus)
     }
 }
 
+
+BOOL CPianoRoll::Create(UINT nIDTemplate, CWnd* pParentWnd)
+{
+    // 描画・ティックをメイン UI(timerp/バナー)と分けるため、窓は専用 UI スレッドで作る。
+    BOOL ok = FALSE;
+    VizUi::Invoke(VIZ_UI_PIANO, [&]() {
+        ok = CCustomBlurDialogExBase::Create(nIDTemplate, pParentWnd);
+    });
+    return ok;
+}
+
+BOOL CPianoRoll::DestroyWindow()
+{
+    BOOL ok = FALSE;
+    if (VizUi::MarshalToOwner(m_hWnd, [&]() { ok = DestroyWindow(); }))
+        return ok;
+    return CCustomBlurDialogExBase::DestroyWindow();
+}
 
 void CPianoRoll::OnClose()
 {
@@ -6991,7 +6915,12 @@ BOOL CPianoRoll::PreTranslateMessage(MSG* pMsg)
         && !(::GetKeyState(VK_MENU) & 0x8000)) {
         extern CMediaPlayerDlg* mp;
         if (mp && ::IsWindow(mp->GetSafeHwnd())) {
-            mp->OpenCommandPalette();
+            if (!VizUi::PostToMainIfOff([]() {
+                    extern CMediaPlayerDlg* mp;
+                    if (mp && ::IsWindow(mp->GetSafeHwnd()))
+                        mp->OpenCommandPalette();
+                }))
+                mp->OpenCommandPalette();
             return TRUE;
         }
     }

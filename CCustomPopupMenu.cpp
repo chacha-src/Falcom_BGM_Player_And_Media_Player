@@ -5436,8 +5436,8 @@ BOOL CCustomPopupMenu::GetRangeValues(UINT id, int* pos, int* selMin, int* selMa
 }
 
 // Track 中のルート。GetTrackingRoot が dangling this を返さないよう HWND も保持
-CCustomPopupMenu* CCustomPopupMenu::s_trackingRoot = NULL;
-HWND CCustomPopupMenu::s_trackingHwnd = NULL;
+thread_local CCustomPopupMenu* CCustomPopupMenu::s_trackingRoot = NULL;
+thread_local HWND CCustomPopupMenu::s_trackingHwnd = NULL;
 
 // 現在 Track 中のルート。無ければ NULL。
 // HWND 破棄済みなら dangling this を返さず NULL（s_trackingHwnd で検知）。

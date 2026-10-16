@@ -280,7 +280,10 @@ namespace GdiSoft3D
 		const View* view = nullptr;
 
 		void Begin(const View& v) {
-			static Face s_pool[kMaxFaces];
+			// スレッド毎（静的 TLS に載せると全スレッドに 2048 面分が確保されるのでヒープ）
+			static thread_local Face* s_pool = nullptr;
+			if (!s_pool)
+				s_pool = new Face[kMaxFaces];
 			faces = s_pool;
 			view = &v;
 			n = 0;

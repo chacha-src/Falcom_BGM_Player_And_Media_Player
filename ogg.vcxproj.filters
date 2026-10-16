@@ -507,6 +507,9 @@
     <ClCompile Include="VoiceChangerDlg.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="EqKeyAnalyze.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="VcVocalTract.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -589,6 +592,9 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="UiTickPump.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="VizUiThread.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="WrdEngine.cpp">
@@ -1843,6 +1849,9 @@
     <ClInclude Include="CdPlayerDlg.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="EqKeyAnalyze.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="VcVocalTract.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -1922,6 +1931,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="UiTickPump.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="VizUiThread.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="WrdEngine.h">
@@ -2053,7 +2065,7 @@
     <ClInclude Include="PianoRollPick.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="HarmonicProfile.h">
+    <ClInclude Include="PianoRollPeakSpectrum.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="CPianoRollTuneDlg.h">

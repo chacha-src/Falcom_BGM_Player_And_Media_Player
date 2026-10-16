@@ -1,14 +1,14 @@
 ﻿// CPianoRoll.h : リアルタイム簡易ピアノロールビジュアライザ
 //
-// PCM ストリームを Goertzel アルゴリズムで 88 鍵分に変換し、ノートのオン/オフと
-// 強度を推定して簡易ピアノロール形式で描画する。
+// PCM の解析窓から FFT ピーク(正弦波成分)を鍵へ集め、倍音列の推定でノートのオン/オフと
+// 強度を求めて簡易ピアノロール形式で描画する。
 //
 // スレッドモデル:
 //   - FeedPCM()          … 再生スレッドから呼ばれる。現状 no-op（リングは廃止）
 //   - RequestRingCapture() … UI/timerp はキックのみ。PCM 変換は載せない
 //   - AnalysisWorkerLoop() … 専用ワーカー。bufwav3 キャプチャ＋Goertzel → ANALYSIS_DONE
-//   - OnAnalysisDone()   … UI スレッド。Invalidate のみ
-//   - OnPaint() / OnTimer() … UI スレッド。確定済みフレームを GDI バッファへ描画
+//   - OnAnalysisDone()   … ピアノロール専用 UI スレッド(VizUiThread)。Invalidate のみ
+//   - OnPaint() / OnTimer() … 同上。メイン UI(timerp/バナー)とは別スレッドで描画
 //
 // 描画バッファ(メモリDC)は 3 種:
 //   m_rollDC  … 簡易ピアノロール(時間軸スクロール: 最新行を下端に追記)
@@ -19,6 +19,7 @@
 #include "afxdialogex.h"
 #include "CCustomControl.h"
 #include "NoteEnvelopeModel.h"
+#include "PianoRollPeakSpectrum.h"
 #include "GdiSoft3D.h"
 #include "UiTickPump.h"
 
@@ -29,6 +30,10 @@ class CPianoRoll : public CCustomBlurDialogExBase
 public:
     CPianoRoll(CWnd* pParent = nullptr);
     virtual ~CPianoRoll();
+
+    // 窓はピアノロール専用 UI スレッドで生成・破棄する（呼び出し元スレッドは問わない）
+    BOOL Create(UINT nIDTemplate, CWnd* pParentWnd = nullptr);
+    virtual BOOL DestroyWindow();
 
     void RequestSyncFromMainUi();
     void PumpSyncNow();
@@ -98,25 +103,13 @@ public:
     // 効果を確認しながら有効化することを推奨する。
     bool m_impulsiveGhostSuppressEnabled = false;
 
-    // 倍音ゴースト抑制: 既に鳴っている音の倍音(オクターブ等)にあたる候補が、
-    // 一瞬だけ基音より強くなって PassesFundamentalTest 等の閾値を超えた場合でも、
-    // 単発フレームで即座に独立ノートとして通さず、連続 kHarmonicGhostConfirmFrames
-    // フレーム分そのまま通過し続けた時だけ新規ノートと認める。
-    // 実音源(悲しみ2)の実測で、通常は正しく棄却される倍音/基音比が
-    // アタック直後などの一瞬だけ閾値(0.78)を超えて誤通過することを確認済み。
-    // 既定は無効(opt-in)。和音で意図的に倍音関係の2音を同時に弾いた場合、
-    // 後から鳴らした方の検出が数ms(既定設定で約12ms)遅れる副作用があるため、
-    // 実音源で確認しながら有効化すること。
+    // 倍音ゴースト抑制: 既に採った音の倍音位置にある候補は、包絡で説明しきれない残差と
+    // 自前の部分音の残差を両方持つときだけ実音とする(PianoRoll108::PickNotes)。
     bool m_harmonicGhostGuardEnabled = true;
 
-    // 倍音比率プロファイル(HarmonicProfile.h)による音色分類を、既存のゴースト判定に
-    // 追加の判断材料として組み込むかどうか。
-    // [重要] 各プロファイルの数値は実測較正されたものではなく目安値のため、
-    // 実音源で確認しながら HarmonicProfile.h の数値を調整することを前提とする。
-    // LooksLikeNoiseProfile は「最良ノイズ ≥ 閾値 かつ 最良楽器を明確に上回る」ときだけ拒否。
+    // 打楽器ノイズ除去: 広帯域の同時立ち上がり(ドラム等)の直後は、倍音の裏付けがない
+    // 新規候補を採らず、オンセットによる即時点灯も止める。
     bool m_harmonicProfileGuardEnabled = true;
-    // ノイズ系とみなす最低確信度(コサイン類似度)。楽器側とのマージン判定と併用。
-    static constexpr float kHarmonicProfileNoiseMinConfidence = 0.92f;
 
     void LayoutHelpBtn();
     void ShowHelpSheet();
@@ -293,27 +286,19 @@ private:
     uint8_t m_onsetBoostStreak[KEY_COUNT];
     static constexpr uint8_t kOnsetConfirmFrames = 3;
 
-    // 倍音ゴースト抑制用: 既存活性音の倍音として疑わしい候補が、
-    // 連続何フレーム閾値超えを維持しているか(m_harmonicGhostGuardEnabled 用)。
-    uint8_t m_harmonicGhostStreak[KEY_COUNT];
-    // 「疑わしい」と見なす基準。
-    // [重要・修正] 以前は「他に鳴っている音と倍音関係にあるだけ」で疑う設計だったが、
-    // 実際の音楽ではメロディ音がベースのオクターブ/5度上であることはごく普通で、
-    // 本物のメロディ音の大半がこの条件に該当してしまい、通常のホールド機構による
-    // 一瞬の再ピック(本来は継続音として自然に埋まるはず)まで足止めしてしまい、
-    // 継続音が途切れて見える「漏れ」を引き起こしていた。
-    // そこで、実際の基音判定式(PianoKeyTable.h の PassesFundamentalTest 系、
-    // 閾値0.78)が「ギリギリで通過したか」だけを見る方式に変更した
-    // (IsMarginalFund、CPianoRoll.cpp 側に実装)。
-    // marginRatio: 0.78の閾値に対し、この比率以上に接近していたら「際どい通過」とみなす。
-    // [調整] 0.85 → 0.75: 疑わしいと見なす範囲を少し広げ、悲しみ2L実測で
-    // 残っていた微小なゴーストをできる範囲で追い込む。
-    static constexpr float kHarmonicGhostMarginRatio = 0.75f;
-    // [特性ベース判定へ変更] 際どい通過をした候補について、振幅の持続時間ではなく
-    // 「それ自体の短窓オンセット(アタック transient)が連続何フレーム観測されたか」
-    // (m_onsetBoostStreak)を合否基準にする。ゴースト(親音への追従に過ぎない漏れ込み)
-    // は自分自身のアタックを持たないため、これを要求するだけで振幅に関係なく弾ける。
-    static constexpr uint8_t kHarmonicGhostConfirmFrames = 3;
+    // ---- 検出スペクトル(FFT ピーク)と雑音床 ----
+    PianoRollPeakSpectrum::Analyzer m_peakSpec;
+    float m_noiseRaw[KEY_COUNT];          // 鍵帯域の雑音床(検出スケール)
+    float m_noiseSmoothed[KEY_COUNT];     // 同 IIR
+    float m_fftSalRaw[KEY_COUNT];         // FFT 連続周波数の調波サリエンス
+    float m_fftSalSmoothed[KEY_COUNT];    // 同 IIR
+    // 調律推定(強いピークの鍵中心からのずれの円周平均)。曲ごとにリセット。
+    double m_tuneC = 0.0;
+    double m_tuneS = 0.0;
+    double m_tuneW = 0.0;
+    float  m_tuneSemis = 0.0f;
+    // 打楽器過渡の強さ(広帯域立ち上がりで 1、以降フレームごとに減衰)
+    float  m_percLevel = 0.0f;
 
     // ---- PCM インプット（FeedPCM は現状 no-op。リングは廃止）----
     int                 m_ringWrite = 0;
@@ -430,8 +415,6 @@ private:
     const NoteFrame& HistoryAt(int indexFromNewest) const;  // 0=最新フレーム
 
     static double ReadMonoSample(const uint8_t* sp, int bits);
-    static double GoertzelMagnitude(const double* samples, int numSamples,
-        double coefficient, const double* window);
     static float  ApplyDisplayScale(float rawAmp, int keyIndex, int winSamples, int refWinSamples);
     // 検出専用: 窓正規化 + 平坦圧縮のみ（鍵EQなし）。部分音が基音より強く見えるのを防ぐ。
     static float  ApplyDetectScale(float rawAmp, int winSamples, int refWinSamples);

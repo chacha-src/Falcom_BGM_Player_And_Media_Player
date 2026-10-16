@@ -353,13 +353,25 @@ int CCC_CaptureBusy()
     return InterlockedCompareExchange(&s_cccCaptureDepth, 0, 0) > 0 ? 1 : 0;
 }
 
+// メイン UI(アプリ)スレッドのモーダルだけ数える。可視化窓の専用 UI スレッドの
+// メニュー／ダイアログはメインのメッセージループを塞がないので timerp を止めない。
+static bool CCC_OnAppThread()
+{
+    CWinApp* app = AfxGetApp();
+    return !app || app->m_nThreadID == 0 || app->m_nThreadID == ::GetCurrentThreadId();
+}
+
 void CCC_ModalUiEnter()
 {
+    if (!CCC_OnAppThread())
+        return;
     InterlockedIncrement(&s_cccModalUiDepth);
 }
 
 void CCC_ModalUiLeave()
 {
+    if (!CCC_OnAppThread())
+        return;
     if (InterlockedCompareExchange(&s_cccModalUiDepth, 0, 0) > 0)
         InterlockedDecrement(&s_cccModalUiDepth);
 }
@@ -1199,15 +1211,15 @@ static void CCC_RemapSolidColorInDC(CDC& dc, const CRect& r, COLORREF clrFrom, C
     const int h = r.Height();
     if (w <= 0 || h <= 0) return;
 
-    static HBITMAP s_dib = nullptr;
-    static void* s_bits = nullptr;
-    static int s_w = 0, s_h = 0;
-    static CDC s_mem;
-    static bool s_memReady = false;
+    // スレッド毎（可視化窓は専用 UI スレッドで並行に塗る）
+    static thread_local HBITMAP s_dib = nullptr;
+    static thread_local void* s_bits = nullptr;
+    static thread_local int s_w = 0, s_h = 0;
+    static thread_local HDC s_memDc = NULL;
 
-    if (!s_memReady) {
-        if (!s_mem.CreateCompatibleDC(&dc)) return;
-        s_memReady = true;
+    if (!s_memDc) {
+        s_memDc = ::CreateCompatibleDC(dc.GetSafeHdc());
+        if (!s_memDc) return;
     }
     if (w > s_w || h > s_h || !s_dib) {
         if (s_dib) { ::DeleteObject(s_dib); s_dib = nullptr; s_bits = nullptr; }
@@ -1223,8 +1235,8 @@ static void CCC_RemapSolidColorInDC(CDC& dc, const CRect& r, COLORREF clrFrom, C
         s_w = w; s_h = h;
     }
 
-    HGDIOBJ old = s_mem.SelectObject(s_dib);
-    s_mem.BitBlt(0, 0, w, h, &dc, r.left, r.top, SRCCOPY);
+    HGDIOBJ old = ::SelectObject(s_memDc, s_dib);
+    ::BitBlt(s_memDc, 0, 0, w, h, dc.GetSafeHdc(), r.left, r.top, SRCCOPY);
     const UINT32 from = ((UINT32)clrFrom) & 0x00FFFFFFu;
     const UINT32 to = ((UINT32)clrTo) & 0x00FFFFFFu;
     UINT32* p = (UINT32*)s_bits;
@@ -1236,8 +1248,8 @@ static void CCC_RemapSolidColorInDC(CDC& dc, const CRect& r, COLORREF clrFrom, C
                 row[x] = (row[x] & 0xFF000000u) | to;
         }
     }
-    dc.BitBlt(r.left, r.top, w, h, &s_mem, 0, 0, SRCCOPY);
-    s_mem.SelectObject(old);
+    ::BitBlt(dc.GetSafeHdc(), r.left, r.top, w, h, s_memDc, 0, 0, SRCCOPY);
+    ::SelectObject(s_memDc, old);
 }
 #else
 // アクリル無効ビルド。キー判定は常に偽。
@@ -1247,6 +1259,12 @@ static BOOL CCC_IsChromaBg(COLORREF) { return FALSE; }
 // セグメント描画用フォントプール（CreateFont/Delete 嵐で分単位に UI が死ぬのを防ぐ）
 // アクリル有無に依存しない（EQ コードラベル等で常時使用）
 namespace {
+// プールはメイン UI と可視化窓の専用 UI スレッドから並行に引かれる
+SRWLOCK g_segPoolLock = SRWLOCK_INIT;
+struct SegPoolGuard {
+    SegPoolGuard() { AcquireSRWLockExclusive(&g_segPoolLock); }
+    ~SegPoolGuard() { ReleaseSRWLockExclusive(&g_segPoolLock); }
+};
 struct SegFontSlot {
     LONG lfHeight = 0;
     LONG lfWidth = 0;
@@ -1263,6 +1281,7 @@ unsigned g_segFontRR = 0;
 // LOGFONT 一致で再利用。不一致はラウンドロビンで上書き（48 スロット）。
 CFont* CCC_GetPooledSegFont(const LOGFONT& lt)
 {
+    SegPoolGuard guard;
     for (int i = 0; i < kSegFontPool; ++i) {
         SegFontSlot& s = g_segFontPool[i];
         if (!s.alive) continue;
@@ -1303,6 +1322,7 @@ unsigned g_segPenRR = 0;
 CPen* CCC_GetPooledPen(int width, COLORREF color)
 {
     if (width < 1) width = 1;
+    SegPoolGuard guard;
     for (int i = 0; i < kSegPenPool; ++i) {
         SegPenSlot& s = g_segPenPool[i];
         if (!s.alive) continue;
@@ -1335,6 +1355,7 @@ unsigned g_segBrushRR = 0;
 // ブラシプール。スライダー等の毎フレーム CreateSolidBrush 嵐を止める。
 CBrush* CCC_GetPooledBrush(COLORREF color)
 {
+    SegPoolGuard guard;
     for (int i = 0; i < kSegBrushPool; ++i) {
         SegBrushSlot& s = g_segBrushPool[i];
         if (!s.alive) continue;
@@ -1544,7 +1565,7 @@ static void DrawTextShadow(CDC* pDC, const CRect& rect, const CString& str, UINT
             return TRUE;
         }
     };
-    static ShadowDibCache s_shadowCache;
+    static thread_local ShadowDibCache s_shadowCache;
     if (!s_shadowCache.Ensure(pDC->GetSafeHdc(), bw, bh))
         return;
 
@@ -1574,9 +1595,9 @@ static void DrawTextShadow(CDC* pDC, const CRect& rect, const CString& str, UINT
     dcShadow.DrawText(str, &tr, fmt);
 
     // alpha/tmp は容量拡張して再利用（毎描画 std::vector new/delete で断片化しない）
-    static BYTE* s_alpha = nullptr;
-    static BYTE* s_tmp = nullptr;
-    static int s_cap = 0;
+    static thread_local BYTE* s_alpha = nullptr;
+    static thread_local BYTE* s_tmp = nullptr;
+    static thread_local int s_cap = 0;
     if (nPx > s_cap || !s_alpha || !s_tmp) {
         int cap = (s_cap > 0) ? s_cap : 4096;
         while (cap < nPx) {
@@ -20454,6 +20475,8 @@ static LRESULT CCC_CaptionHandleNcCalcSize(HWND hWnd, WPARAM wParam, LPARAM lPar
 // 詳細は呼び出し元のコメントを優先。
 static CCC_CaptionEntry* CCC_FindCaption(HWND hWnd)
 {
+    if (!hWnd)
+        return nullptr;
     for (int i = 0; i < g_captionCount; ++i) {
         if (g_captions[i].hWnd == hWnd)
             return &g_captions[i];
@@ -20461,17 +20484,34 @@ static CCC_CaptionEntry* CCC_FindCaption(HWND hWnd)
     return nullptr;
 }
 
+// 可視化窓は専用 UI スレッドで登録/解除する。スロットは詰めずに再利用し、
+// 他スレッドが握っているエントリのポインタが別窓の中身にすり替わらないようにする。
+static SRWLOCK g_ccRegLock = SRWLOCK_INIT;
+
 // CCC_GetOrCreateCaption: カスタム UI / アクリル補助。
 // ガラス上の子は不透明、キャプション chrome は帯専用ボタン。
 // 詳細は呼び出し元のコメントを優先。
 static CCC_CaptionEntry* CCC_GetOrCreateCaption(HWND hWnd)
 {
+    if (!hWnd)
+        return nullptr;
     if (CCC_CaptionEntry* e = CCC_FindCaption(hWnd))
         return e;
-    if (g_captionCount >= (int)_countof(g_captions))
-        return nullptr;
-    CCC_CaptionEntry* e = &g_captions[g_captionCount++];
-    e->hWnd = hWnd;
+    AcquireSRWLockExclusive(&g_ccRegLock);
+    CCC_CaptionEntry* e = CCC_FindCaption(hWnd);
+    if (!e) {
+        for (int i = 0; i < g_captionCount; ++i) {
+            if (!g_captions[i].hWnd) {
+                e = &g_captions[i];
+                break;
+            }
+        }
+        if (!e && g_captionCount < (int)_countof(g_captions))
+            e = &g_captions[g_captionCount++];
+        if (e)
+            e->hWnd = hWnd;
+    }
+    ReleaseSRWLockExclusive(&g_ccRegLock);
     return e;
 }
 
@@ -20529,10 +20569,11 @@ void CCC_CaptionUnregister(HWND hWnd)
         CCC_CaptionDestroyBtn(g_captions[i].pSettings);
         CCC_CaptionDestroyBtn(g_captions[i].pPin);
         CCC_CaptionDestroyBtn(g_captions[i].pOfflineHelp);
-        for (int j = i + 1; j < g_captionCount; ++j)
-            g_captions[j - 1] = g_captions[j];
-        --g_captionCount;
-        ZeroMemory(&g_captions[g_captionCount], sizeof(g_captions[g_captionCount]));
+        AcquireSRWLockExclusive(&g_ccRegLock);
+        ZeroMemory(&g_captions[i], sizeof(g_captions[i]));
+        while (g_captionCount > 0 && !g_captions[g_captionCount - 1].hWnd)
+            --g_captionCount;
+        ReleaseSRWLockExclusive(&g_ccRegLock);
         break;
     }
 }
@@ -21520,6 +21561,8 @@ static void CCC_MainLockMarkOverlayDirty(CCC_MainLockEntry* e)
 // 詳細は呼び出し元のコメントを優先。
 static CCC_MainLockEntry* CCC_FindMainLockEntry(HWND hWnd)
 {
+    if (!hWnd)
+        return nullptr;
     for (int i = 0; i < g_mainLockCount; ++i) {
         if (g_mainLocks[i].hWnd == hWnd)
             return &g_mainLocks[i];
@@ -21532,12 +21575,25 @@ static CCC_MainLockEntry* CCC_FindMainLockEntry(HWND hWnd)
 // 詳細は呼び出し元のコメントを優先。
 static CCC_MainLockEntry* CCC_GetOrCreateMainLockEntry(HWND hWnd)
 {
+    if (!hWnd)
+        return nullptr;
     if (CCC_MainLockEntry* e = CCC_FindMainLockEntry(hWnd))
         return e;
-    if (g_mainLockCount >= (int)_countof(g_mainLocks))
-        return nullptr;
-    CCC_MainLockEntry* e = &g_mainLocks[g_mainLockCount++];
-    e->hWnd = hWnd;
+    AcquireSRWLockExclusive(&g_ccRegLock);
+    CCC_MainLockEntry* e = CCC_FindMainLockEntry(hWnd);
+    if (!e) {
+        for (int i = 0; i < g_mainLockCount; ++i) {
+            if (!g_mainLocks[i].hWnd) {
+                e = &g_mainLocks[i];
+                break;
+            }
+        }
+        if (!e && g_mainLockCount < (int)_countof(g_mainLocks))
+            e = &g_mainLocks[g_mainLockCount++];
+        if (e)
+            e->hWnd = hWnd;
+    }
+    ReleaseSRWLockExclusive(&g_ccRegLock);
     return e;
 }
 
@@ -22961,15 +23017,11 @@ void CCC_MainLockUnregister(HWND hWnd)
             continue;
         CCC_MainLockDestroyBtn(&g_mainLocks[i]);
         CCC_MainLockReleaseOverlayCache(&g_mainLocks[i]);
-        for (int j = i + 1; j < g_mainLockCount; ++j)
-            g_mainLocks[j - 1] = g_mainLocks[j];
-        --g_mainLockCount;
-        g_mainLocks[g_mainLockCount].hWnd = NULL;
-        g_mainLocks[g_mainLockCount].pLockBtn = nullptr;
-        g_mainLocks[g_mainLockCount].pSaveFlag = nullptr;
-        g_mainLocks[g_mainLockCount].pOverlay = nullptr;
-        g_mainLocks[g_mainLockCount].locked = FALSE;
-        g_mainLocks[g_mainLockCount].overlayPaint = FALSE;
+        AcquireSRWLockExclusive(&g_ccRegLock);
+        g_mainLocks[i] = CCC_MainLockEntry();
+        while (g_mainLockCount > 0 && !g_mainLocks[g_mainLockCount - 1].hWnd)
+            --g_mainLockCount;
+        ReleaseSRWLockExclusive(&g_ccRegLock);
         break;
     }
 }
@@ -24501,7 +24553,10 @@ static void CCC_CaptionTrackContextMenu(CWnd* pDlg, CPoint ptClient, int* pMainL
 // 詳細は呼び出し元のコメントを優先。
 static void CCC_CaptionOpenSettings(CWnd* pDlg)
 {
-    CWnd* pMain = AfxGetMainWnd();
+    // 可視化窓の専用 UI スレッドでは AfxGetMainWnd がアクティブ窓（自分）を返す
+    CWnd* pMain = AfxGetApp() ? AfxGetApp()->m_pMainWnd : nullptr;
+    if (!pMain)
+        pMain = AfxGetMainWnd();
     if (!pMain || !::IsWindow(pMain->GetSafeHwnd()))
         return;
     if (pDlg && pMain->GetSafeHwnd() == pDlg->GetSafeHwnd())

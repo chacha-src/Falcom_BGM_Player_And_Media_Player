@@ -102,7 +102,8 @@ namespace GdiSoft3D
 		PostEdge();
 		PostDof();
 		if ((postVignette || postGlow || postSaturate) && fb.color && fb.w > 0) {
-			static GdiSoft2D::Context s_post2d;
+			// スレッド毎（ピアノロール／アナライザーは別 UI スレッドで並行に描く）
+			static thread_local GdiSoft2D::Context s_post2d;
 			if (s_post2d.Create(fb.w, fb.h, false)) {
 				memcpy(s_post2d.fb.color, fb.color, (size_t)fb.w * (size_t)fb.h * 4);
 				if (postSaturate) s_post2d.Saturate(postSatAmount);
@@ -662,8 +663,8 @@ namespace GdiSoft3D
 	{
 		if (!edgeOverlay || !fb.color || !fb.z) return;
 		const int n = fb.w * fb.h;
-		static DWORD* s_edge = nullptr;
-		static int s_edgeCap = 0;
+		static thread_local DWORD* s_edge = nullptr;
+		static thread_local int s_edgeCap = 0;
 		if (n > s_edgeCap) {
 			int cap = s_edgeCap > 0 ? s_edgeCap : 4096;
 			while (cap < n) {
@@ -697,14 +698,14 @@ namespace GdiSoft3D
 	void Context::PostDof()
 	{
 		if (!dofEnable || !fb.color || !fb.z || dofMaxRadius < 1) return;
-		static GdiSoft2D::Context s_dofSoft;
+		static thread_local GdiSoft2D::Context s_dofSoft;
 		if (!s_dofSoft.Create(fb.w, fb.h, false)) return;
 		memcpy(s_dofSoft.fb.color, fb.color, (size_t)fb.w * (size_t)fb.h * 4);
 		s_dofSoft.BlurRect(0, 0, fb.w, fb.h, (std::max)(1, dofMaxRadius / 2));
 		const int n = fb.w * fb.h;
-		static DWORD* s_blur1 = nullptr;
-		static DWORD* s_blur2 = nullptr;
-		static int s_dofCap = 0;
+		static thread_local DWORD* s_blur1 = nullptr;
+		static thread_local DWORD* s_blur2 = nullptr;
+		static thread_local int s_dofCap = 0;
 		if (n > s_dofCap) {
 			int cap = s_dofCap > 0 ? s_dofCap : 4096;
 			while (cap < n) {
@@ -794,7 +795,7 @@ namespace GdiSoft3D
 		}
 
 		// 毎フレーム Context をスタック生成→破棄すると DIB の Create/Delete が連発し GDI 枯渇する
-		static Context s_flushCtx;
+		static thread_local Context s_flushCtx;
 		if (!s_flushCtx.Create(ww, hh)) { n = 0; return; }
 		Context& ctx = s_flushCtx;
 		ctx.view = *view;

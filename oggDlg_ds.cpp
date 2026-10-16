@@ -1,4 +1,5 @@
 #include "stdafx.h"
+#include "EqKeyAnalyze.h"
 #include "NoteFundamentalPick.h"
 #include "ogg.h"
 #include "oggDlg.h"
@@ -7406,7 +7407,7 @@ static void equaliserBankUnlocked(void* data, int len, BOOL reset) {
 // Goertzel 低域は最大4096点。PCM供給もここに揃える。
 static const int EQKEY_PCM_MAX = 4096;
 static const int EQKEY_HIST_MAX = 4;
-static const int EQKEY_CHORD_CAND_MAX = 32;
+static const int EQKEY_NAME_MAX = 160;
 
 static float  g_noteStrength[108];        // MIDI 0-107 の強度
 static float  g_noteStrengthPrev[108];    // 指数平滑用
@@ -7415,6 +7416,7 @@ static double g_hannWindow4096[4096];   // 低域 Goertzel 用 Hann 窓
 static double g_blackmanWindow2048[2048]; // 高域 Goertzel 用 Blackman 窓
 static bool   g_analysisInitialized = false;
 static double g_analysisSampleRate = 0.0; // 係数計算に使ったサンプルレート
+static int    g_noteNyquist = 108;        // このインデックス以降はナイキスト超え
 
 static WCHAR g_currentVowel = L' ';
 
@@ -7432,6 +7434,8 @@ static volatile LONG g_eqKeyStop = 0;
 static volatile LONG g_eqKeyNeed = 0;
 static double g_eqKeyL[EQKEY_PCM_MAX];
 static double g_eqKeyR[EQKEY_PCM_MAX];
+static double g_eqKeyWorkL[EQKEY_PCM_MAX];
+static double g_eqKeyWorkR[EQKEY_PCM_MAX];
 static int g_eqKeyCount = 0;
 static int g_eqKeyRate = 44100;
 static LONG g_eqKeySeq = 0;
@@ -7536,8 +7540,6 @@ void SnapshotEqKeyCodes(CString& lo, CString& mid, CString& hi, CString& all)
 
 static DWORD WINAPI EqKeyWorkerEntry(LPVOID)
 {
-	double workL[EQKEY_PCM_MAX];
-	double workR[EQKEY_PCM_MAX];
 	int workN = 0;
 	int workRate = 44100;
 	for (;;) {
@@ -7551,15 +7553,16 @@ static DWORD WINAPI EqKeyWorkerEntry(LPVOID)
 		EnterCriticalSection(&g_eqKeyCs);
 		workN = g_eqKeyCount;
 		if (workN > EQKEY_PCM_MAX) workN = EQKEY_PCM_MAX;
+		if (workN < 0) workN = 0;
 		if (workN > 0) {
-			memcpy(workL, g_eqKeyL, (size_t)workN * sizeof(double));
-			memcpy(workR, g_eqKeyR, (size_t)workN * sizeof(double));
+			memcpy(g_eqKeyWorkL, g_eqKeyL, (size_t)workN * sizeof(double));
+			memcpy(g_eqKeyWorkR, g_eqKeyR, (size_t)workN * sizeof(double));
 		}
 		workRate = g_eqKeyRate;
 		LeaveCriticalSection(&g_eqKeyCs);
 		if (workN <= 0)
 			continue;
-		AnalyzeMusicKey(workL, workR, workN, workRate);
+		AnalyzeMusicKey(g_eqKeyWorkL, g_eqKeyWorkR, workN, workRate);
 	}
 	return 0;
 }
@@ -7567,17 +7570,21 @@ static DWORD WINAPI EqKeyWorkerEntry(LPVOID)
 static void EnsureEqKeyWorker()
 {
 	EnsureEqKeyCs();
-	if (g_eqKeyThread) return;
-	InterlockedExchange(&g_eqKeyStop, 0);
-	if (!g_eqKeyWake) {
-		g_eqKeyWake = CreateEvent(nullptr, FALSE, FALSE, nullptr);
-		if (!g_eqKeyWake) return;
-	}
-	g_eqKeyThread = CreateThread(nullptr, 0, EqKeyWorkerEntry, nullptr, 0, nullptr);
+	if (InterlockedCompareExchange(&g_eqKeyCsInitState, 0, 0) != 2)
+		return;
+	EnterCriticalSection(&g_eqKeyCs);
 	if (!g_eqKeyThread) {
-		CloseHandle(g_eqKeyWake);
-		g_eqKeyWake = nullptr;
+		InterlockedExchange(&g_eqKeyStop, 0);
+		if (!g_eqKeyWake)
+			g_eqKeyWake = CreateEvent(nullptr, FALSE, FALSE, nullptr);
+		if (g_eqKeyWake)
+			g_eqKeyThread = CreateThread(nullptr, 0, EqKeyWorkerEntry, nullptr, 0, nullptr);
+		if (!g_eqKeyThread && g_eqKeyWake) {
+			CloseHandle(g_eqKeyWake);
+			g_eqKeyWake = nullptr;
+		}
 	}
+	LeaveCriticalSection(&g_eqKeyCs);
 }
 
 void PublishEqKeyPcm(const double* bufferL, const double* bufferR, int sampleCount, int sampleRate)
@@ -7625,8 +7632,14 @@ static void InitializeAnalysis(double sampleRate) {
 	if (!firstInit && !rateChanged) return;
 
 	g_analysisSampleRate = sampleRate;
+	g_noteNyquist = 108;
 	for (int k = 0; k < 108; ++k) {
 		double freq = 440.0 * pow(2.0, ((12 + k) - 69.0) / 12.0);
+		if (freq >= sampleRate * 0.47) {
+			g_noteNyquist = k;
+			for (int j = k; j < 108; ++j) g_goertzelCoeffs[j] = 0.0;
+			break;
+		}
 		g_goertzelCoeffs[k] = 2.0 * cos(2.0 * M_PI * freq / sampleRate);
 	}
 	for (int n = 0; n < 4096; ++n)
@@ -7646,6 +7659,7 @@ static void InitializeAnalysis(double sampleRate) {
 static double GoertzelMagnitude(const double* samples, int numSamples, double coefficient,
 	const double* window)
 {
+	if (!samples || numSamples <= 0) return 0.0;
 	double s_prev = 0.0, s_prev2 = 0.0;
 	for (int n = 0; n < numSamples; ++n) {
 		const double x = window ? (samples[n] * window[n]) : samples[n];
@@ -7656,27 +7670,22 @@ static double GoertzelMagnitude(const double* samples, int numSamples, double co
 	return sqrt(power > 0.0 ? power : 0.0) * 2.5 / numSamples;
 }
 
-// ノート強度を低域/中域/高域/全体のピッチクラスに集約
-// オクターブ内での最大ノートを基準に協和音程の弱化を行い
-// 支配的なルート音の誤検出を抑制する
+// git と同じ帯域集計。倍音を別帯域へ移さない。
 static void AggregateNoteClasses(float* bassClass, float* midClass, float* highClass, float* allClass) {
 	for (int i = 0; i < 12; i++) bassClass[i] = midClass[i] = highClass[i] = allClass[i] = 0.0f;
 	float octaveMax[9] = { 0 }; int octaveMaxNote[9] = { -1 };
-	// 各オクターブの最大強度ノートを特定
 	for (int note = 0; note < 108; note++) {
 		int oct = note / 12;
 		if (g_noteStrength[note] > octaveMax[oct]) {
 			octaveMax[oct] = g_noteStrength[note]; octaveMaxNote[oct] = note;
 		}
 	}
-	// 協和音程バイアス補正 & 帯域別集計
 	for (int note = 0; note < 108; note++) {
 		float strength = g_noteStrength[note];
 		int pc = note % 12, oct = note / 12;
 		if (octaveMaxNote[oct] >= 0 && note != octaveMaxNote[oct]) {
 			int iv = (pc - octaveMaxNote[oct] % 12 + 12) % 12;
-			float r = strength / octaveMax[oct];
-			// 完全5度・長3度等の弱い協和音程をさらに弱める
+			float r = (octaveMax[oct] > 0.f) ? strength / octaveMax[oct] : 0.f;
 			if (iv == 7 && r < 0.4f)  strength *= 0.4f;
 			else if (iv == 4 && r < 0.3f)  strength *= 0.6f;
 			else if (iv == 2 && r < 0.35f) strength *= 0.3f;
@@ -7690,157 +7699,9 @@ static void AggregateNoteClasses(float* bassClass, float* midClass, float* highC
 	}
 }
 
-// コードパターン定義
-// pattern[12]: 各音程ウェイト (3=ルート, 2=5度, 1=3度, 0=不使用)
-// bonus: パターンマッチ時の追加スコア (複雑なコードは負値)
-typedef struct { const WCHAR* name; int pattern[12]; float bonus; } ChordPattern;
-static const ChordPattern CHORD_PATTERNS[] = {
-	{L"",                                    {3,0,0,0,2,0,0,1,0,0,0,0}, 0.5f},   // メジャー
-	{L"!@C0066bbm!@C000000",                 {3,0,0,2,0,0,0,1,0,0,0,0}, 0.5f},   // マイナー
-	{L"!@Cff55005!@C000000",                 {3,0,0,0,0,0,0,2,0,0,0,0}, 0.4f},   // 5度 (Power)
-	{L"!@C8844ccsus!@Cff55004!@C000000",     {3,0,0,0,0,3,0,1,0,0,0,0}, 0.4f},   // sus4
-	{L"!@C8844ccsus!@Cff55002!@C000000",     {3,0,3,0,0,0,0,1,0,0,0,0}, 0.4f},   // sus2
-	{L"!@Caa7744dim!@C000000",               {3,0,0,2,0,0,2,0,0,0,0,0}, 0.3f},   // ディミニッシュ
-	{L"!@Ccc4400aug!@C000000",               {3,0,0,0,2,0,0,0,2,0,0,0}, 0.3f},   // オーギュメント
-	{L"!@Cff55007!@C000000",                 {3,0,0,0,2,0,0,1,0,0,2,0}, 0.3f},   // 7th
-	{L"!@C00aa77M!@Cff55007!@C000000",       {3,0,0,0,2,0,0,1,0,0,0,2}, 0.3f},   // メジャー7th
-	{L"!@C0066bbm!@Cff55007!@C000000",       {3,0,0,2,0,0,0,1,0,0,2,0}, 0.3f},   // マイナー7th
-	{L"!@Cff55006!@C000000",                 {3,0,0,0,2,0,0,1,0,2,0,0}, 0.2f},   // 6th
-	{L"!@C0066bbm!@Cff55006!@C000000",       {3,0,0,2,0,0,0,1,0,2,0,0}, 0.2f},   // マイナー6th
-	{L"!@Cbb7733add!@Cff55009!@C000000",     {3,0,2,0,2,0,0,1,0,0,0,0}, 0.2f},   // add9
-	{L"!@Cff55007!@C8844ccsus!@Cff55004!@C000000", {3,0,0,0,0,2,0,1,0,0,2,0}, 0.2f},  // 7sus4
-	{L"!@C0066bbm!@Cff55007!@Cdd2222b!@Cff55005!@C000000", {3,0,0,2,0,0,2,0,0,0,2,0}, 0.2f}, // m7b5
-	{L"!@Caa7744dim!@Cff55007!@C000000",     {3,0,0,2,0,0,2,0,0,2,0,0}, 0.2f},   // ディミニッシュ7th
-	{L"!@Cff55009!@C000000",                 {3,0,2,0,2,0,0,1,0,0,2,0}, -0.5f},  // 9th (複雑)
-	{L"!@C00aa77M!@Cff55009!@C000000",       {3,0,2,0,2,0,0,1,0,0,0,2}, -0.5f},  // メジャー9th
-	{L"!@C0066bbm!@Cff55009!@C000000",       {3,0,2,2,0,0,0,1,0,0,2,0}, -0.5f}   // マイナー9th
-};
-
-static const int EQKEY_NAME_MAX = 160;
-
-struct ChordCandidate { WCHAR name[EQKEY_NAME_MAX]; float score; int complexity; };
-
-static void EqKeyCopy(WCHAR* dst, int cap, const WCHAR* src)
-{
-	if (!dst || cap <= 0) return;
-	wcsncpy_s(dst, cap, src ? src : L"", _TRUNCATE);
-}
-
-static void EqKeyCat2(WCHAR* dst, int cap, const WCHAR* a, const WCHAR* b)
-{
-	EqKeyCopy(dst, cap, a);
-	wcsncat_s(dst, cap, b ? b : L"", _TRUNCATE);
-}
-
-static void EqKeyTrimInPlace(WCHAR* s)
-{
-	if (!s || !*s) return;
-	WCHAR* p = s;
-	while (*p == L' ') ++p;
-	if (p != s) memmove(s, p, (wcslen(p) + 1) * sizeof(WCHAR));
-	size_t n = wcslen(s);
-	while (n > 0 && s[n - 1] == L' ') s[--n] = 0;
-}
-
-static void EqKeyRootName(WCHAR* dst, int cap, int rootIdx)
-{
-	EqKeyCopy(dst, cap, NOTE_NAMES[rootIdx]);
-	EqKeyTrimInPlace(dst);
-}
-
-// コード推定 (ヒストリーなし版)
-// 各コードパターンとピッチクラス強度のマッチングスコアで最適コードを選ぶ
+// コード照合は EqKeyAnalyze（12 ルート全部をテンプレートに当てる）。
 static void EstimateChordRawInto(WCHAR* out, int outCap, float* noteClass, float threshold) {
-	out[0] = 0;
-	float maxVal = 0.0f;
-	for (int i = 0; i < 12; i++) if (noteClass[i] > maxVal) maxVal = noteClass[i];
-	if (maxVal < 0.001f) return;
-	float n[12];
-	for (int i = 0; i < 12; i++) { n[i] = noteClass[i] / maxVal; if (n[i] < 0.08f) n[i] = 0.0f; }
-	int bestRoot = 0;
-	for (int i = 1; i < 12; i++) if (n[i] > n[bestRoot]) bestRoot = i;
-	if (n[bestRoot] < threshold) return;
-
-	int active = 0;
-	for (int i = 0; i < 12; i++) if (n[i] > 0.08f) active++;
-	WCHAR root[8];
-	EqKeyRootName(root, _countof(root), bestRoot);
-	if (active <= 1) { EqKeyCopy(out, outCap, root); return; }
-
-	float third = max(n[(bestRoot + 3) % 12], n[(bestRoot + 4) % 12]);
-	float fifth = n[(bestRoot + 7) % 12];
-	// パワーコード判定 (5度音のみ、3度なし)
-	if (fifth > 0.3f && third < 0.15f && active <= 3) {
-		EqKeyCat2(out, outCap, root, L"!@B[!@Cff0000Power!@Cffffff]!@B");
-		return;
-	}
-
-	ChordCandidate cands[EQKEY_CHORD_CAND_MAX];
-	int candCount = 0;
-	int np = sizeof(CHORD_PATTERNS) / sizeof(ChordPattern);
-	for (int c = 0; c < np; c++) {
-		float sc = 0.0f; int matched = 0, req = 0;
-		for (int x = 0; x < 12; x++) if (CHORD_PATTERNS[c].pattern[x] > 0) req++;
-		bool is9 = (req >= 5);
-		for (int nn = 0; nn < 12; nn++) {
-			int note = (bestRoot + nn) % 12, w = CHORD_PATTERNS[c].pattern[nn];
-			if (w > 0) { sc += n[note] * w * 2.0f; if (n[note] > 0.12f) matched++; }
-			else if (n[note] > 0.25f) sc -= n[note] * 1.5f;
-		}
-		if (is9) {
-			float mr = (req > 0) ? (float)matched / req : 0.0f;
-			if (mr < 0.8f) sc -= 10.0f;
-			if (n[(bestRoot + 2) % 12] < 0.2f) sc -= 5.0f;
-		}
-		else {
-			if ((req > 0) && (float)matched / req < 0.4f) sc -= 3.0f;
-			if (req == 4) {
-				int tensionNote = -1;
-				for (int x = 11; x >= 1; x--) {
-					if (x != 3 && x != 4 && x != 7 && x != 5) {
-						if (CHORD_PATTERNS[c].pattern[x] > 0) {
-							tensionNote = x;
-							break;
-						}
-					}
-				}
-				if (tensionNote != -1) {
-					float tVal = n[(bestRoot + tensionNote) % 12];
-					if (tVal < 0.15f) sc -= 4.0f;
-					else if (tVal < 0.22f) sc -= 1.5f;
-				}
-			}
-		}
-		sc -= (active - matched) * 1.0f;
-		sc += CHORD_PATTERNS[c].bonus;
-		if (req == 3) sc += 1.2f; if (req == 4) sc += 0.5f; if (req >= 5) sc -= 1.0f;
-		if (sc > (is9 ? 3.5f : 0.8f) && candCount < EQKEY_CHORD_CAND_MAX) {
-			EqKeyCat2(cands[candCount].name, EQKEY_NAME_MAX, root, CHORD_PATTERNS[c].name);
-			cands[candCount].score = sc; cands[candCount].complexity = req; candCount++;
-		}
-	}
-	if (candCount <= 0) { EqKeyCopy(out, outCap, root); return; }
-	for (int i = 0; i < candCount; ++i) {
-		int best = i;
-		for (int j = i + 1; j < candCount; ++j) {
-			const bool jBetter = (abs(cands[j].score - cands[best].score) < 0.3f)
-				? (cands[j].complexity < cands[best].complexity)
-				: (cands[j].score > cands[best].score);
-			if (jBetter) best = j;
-		}
-		if (best != i) { ChordCandidate tmp = cands[i]; cands[i] = cands[best]; cands[best] = tmp; }
-	}
-	// 上位3候補を ", " で連結して返す
-	EqKeyCopy(out, outCap, cands[0].name); int count = 1;
-	for (int i = 1; i < candCount && count < 3; i++) {
-		if (cands[0].score - cands[i].score > 2.0f) break;
-		if (cands[i].score < cands[0].score * 0.55f) continue;
-		if (wcscmp(cands[i].name, out) == 0) continue;
-		if (wcsstr(cands[i].name, L"9") && cands[0].score - cands[i].score > 1.2f) continue;
-		wcsncat_s(out, outCap, L", ", _TRUNCATE);
-		wcsncat_s(out, outCap, cands[i].name, _TRUNCATE);
-		count++;
-	}
+	EqKeyEstimateChord(noteClass, threshold, nullptr, nullptr, out, outCap);
 }
 
 static CString EstimateChordRaw(float* noteClass, float threshold) {
@@ -7868,7 +7729,7 @@ static WCHAR g_historyAll[EQKEY_HIST_MAX][EQKEY_NAME_MAX];
 static int g_historyLowN = 0, g_historyMidN = 0, g_historyHighN = 0, g_historyAllN = 0;
 static int g_historyLowHead = 0, g_historyMidHead = 0, g_historyHighHead = 0, g_historyAllHead = 0;
 const int HISTORY_SIZE = EQKEY_HIST_MAX;  // 直近4フレームで多数決
-const float SMOOTHING_FACTOR = 0.3f;  // ノート強度の指数平滑係数
+const float SMOOTHING_FACTOR = 0.3f;  // ノート強度の指数平滑。大きいほど前フレームを残す
 static float g_prevRMS = 0.0f, g_peakRMS = 0.0f;
 static bool  g_isPlaying = false;
 static int   g_silenceFrameCount = 0;
@@ -7879,6 +7740,30 @@ const float SILENCE_THRESHOLD_REL = 0.15f;     // ピークRMSに対する相対
 const float PLAYING_THRESHOLD = 0.01f;     // 再生中判定閾値
 const int   SILENCE_FRAMES_FOR_CLEAR = 10;     // このフレーム数無音でヒストリーをクリア
 static int  g_soundFrameCount = 0;
+
+static void EqKeyCopy(WCHAR* d, int cap, const WCHAR* s)
+{
+	if (!d || cap <= 0) return;
+	if (!s) { d[0] = 0; return; }
+	int i = 0;
+	for (; i < cap - 1 && s[i]; ++i) d[i] = s[i];
+	d[i] = 0;
+}
+
+static void EqKeyTrimInPlace(WCHAR* s)
+{
+	if (!s) return;
+	WCHAR* b = s;
+	while (*b == L' ' || *b == L'\t') ++b;
+	if (b != s) {
+		WCHAR* d = s;
+		while (*b) *d++ = *b++;
+		*d = 0;
+	}
+	int n = 0;
+	while (s[n]) ++n;
+	while (n > 0 && (s[n - 1] == L' ' || s[n - 1] == L'\t')) s[--n] = 0;
+}
 
 static void HistoryClear(WCHAR ring[][EQKEY_NAME_MAX], int& n, int& head)
 {
@@ -8001,105 +7886,15 @@ static bool IsChordInListW(const WCHAR* chord, const WCHAR* list) {
 // ヒストリー付きコード推定 (単一帯域版)
 // prev と一致するコードにボーナスを与え、フレーム間の揺れを抑制
 static void EstimateChordRawWithHistoryInto(WCHAR* out, int outCap, float* nc, float threshold, const WCHAR* prev) {
-	out[0] = 0;
-	float maxVal = 0.0f;
-	for (int i = 0; i < 12; i++) if (nc[i] > maxVal) maxVal = nc[i];
-	if (maxVal < 0.001f) return;
-	float n[12];
-	for (int i = 0; i < 12; i++) { n[i] = nc[i] / maxVal; if (n[i] < 0.08f) n[i] = 0.0f; }
-	int bestRoot = 0;
-	for (int i = 1; i < 12; i++) if (n[i] > n[bestRoot]) bestRoot = i;
-	if (n[bestRoot] < threshold) return;
-
-	int active = 0;
-	for (int i = 0; i < 12; i++) if (n[i] > 0.08f) active++;
-	WCHAR root[8];
-	EqKeyRootName(root, _countof(root), bestRoot);
-	if (active <= 1) { EqKeyCopy(out, outCap, root); return; }
-
-	float third = max(n[(bestRoot + 3) % 12], n[(bestRoot + 4) % 12]);
-	float fifth = n[(bestRoot + 7) % 12];
-	if (fifth > 0.3f && third < 0.15f && active <= 3) {
-		EqKeyCat2(out, outCap, root, L"!@B!@I[Power]!@B!@I");
-		return;
-	}
-
-	ChordCandidate cands[EQKEY_CHORD_CAND_MAX];
-	int candCount = 0;
-	int np = sizeof(CHORD_PATTERNS) / sizeof(ChordPattern);
-	for (int c = 0; c < np; c++) {
-		float sc = 0.0f; int matched = 0, req = 0;
-		for (int x = 0; x < 12; x++) if (CHORD_PATTERNS[c].pattern[x] > 0) req++;
-		bool is9 = (req >= 5);
-		for (int nn = 0; nn < 12; nn++) {
-			int note = (bestRoot + nn) % 12, w = CHORD_PATTERNS[c].pattern[nn];
-			if (w > 0) { sc += n[note] * w * 2.0f; if (n[note] > 0.12f) matched++; }
-			else if (n[note] > 0.25f) sc -= n[note] * 1.5f;
-		}
-		if (is9) {
-			float mr = (req > 0) ? (float)matched / req : 0.0f;
-			if (mr < 0.8f) sc -= 10.0f;
-			if (n[(bestRoot + 2) % 12] < 0.2f) sc -= 5.0f;
-		}
-		else {
-			if ((req > 0) && (float)matched / req < 0.4f) sc -= 3.0f;
-			if (req == 4) {
-				int tensionNote = -1;
-				for (int x = 11; x >= 1; x--) {
-					if (x != 3 && x != 4 && x != 7 && x != 5) {
-						if (CHORD_PATTERNS[c].pattern[x] > 0) {
-							tensionNote = x;
-							break;
-						}
-					}
-				}
-				if (tensionNote != -1) {
-					float tVal = n[(bestRoot + tensionNote) % 12];
-					if (tVal < 0.15f) sc -= 4.0f;
-					else if (tVal < 0.22f) sc -= 1.5f;
-				}
-			}
-		}
-		sc -= (active - matched) * 1.0f;
-		sc += CHORD_PATTERNS[c].bonus;
-		if (req == 3) sc += 1.2f; if (req == 4) sc += 0.5f; if (req >= 5) sc -= 1.0f;
-		WCHAR cur[EQKEY_NAME_MAX];
-		EqKeyCat2(cur, EQKEY_NAME_MAX, root, CHORD_PATTERNS[c].name);
-		if (prev && prev[0] && IsChordInListW(cur, prev)) sc += 1.5f;
-		if (sc > (is9 ? 3.5f : 0.8f) && candCount < EQKEY_CHORD_CAND_MAX) {
-			EqKeyCopy(cands[candCount].name, EQKEY_NAME_MAX, cur);
-			cands[candCount].score = sc; cands[candCount].complexity = req; candCount++;
-		}
-	}
-	if (candCount <= 0) { EqKeyCopy(out, outCap, root); return; }
-	for (int i = 0; i < candCount; ++i) {
-		int best = i;
-		for (int j = i + 1; j < candCount; ++j) {
-			const bool jBetter = (abs(cands[j].score - cands[best].score) < 0.3f)
-				? (cands[j].complexity < cands[best].complexity)
-				: (cands[j].score > cands[best].score);
-			if (jBetter) best = j;
-		}
-		if (best != i) { ChordCandidate tmp = cands[i]; cands[i] = cands[best]; cands[best] = tmp; }
-	}
-
-	EqKeyCopy(out, outCap, cands[0].name); int count = 1;
-	for (int i = 1; i < candCount && count < 3; i++) {
-		if (cands[0].score - cands[i].score > 2.0f) break;
-		if (cands[i].score < cands[0].score * 0.55f) continue;
-		if (wcscmp(cands[i].name, out) == 0) continue;
-		if (wcsstr(cands[i].name, L"9") && cands[0].score - cands[i].score > 1.2f) continue;
-		wcsncat_s(out, outCap, L", ", _TRUNCATE);
-		wcsncat_s(out, outCap, cands[i].name, _TRUNCATE);
-		count++;
-	}
+	EqKeyEstimateChord(nc, threshold, prev, nullptr, out, outCap);
 }
 
 // ヒストリー付きコード推定 (全帯域統合版)
 static void EstimateChordRawWithHistoryIntoAll(WCHAR* out, int outCap, float* b, float* m, float* h, float* a, const WCHAR* prev) {
-	EstimateChordRawWithHistoryInto(out, outCap, a, 0.03f, prev);
+	// 低域クロマをルートの事前確率にする（ベースがルートであることが多い）。
+	EqKeyEstimateChord(a, 0.03f, prev, b, out, outCap);
 	if (out[0]) return;
-	EstimateChordRawWithHistoryInto(out, outCap, b, 0.02f, prev);
+	EqKeyEstimateChord(b, 0.02f, prev, nullptr, out, outCap);
 }
 
 // ============================================================
@@ -8110,7 +7905,7 @@ static void EstimateChordRawWithHistoryIntoAll(WCHAR* out, int outCap, float* b,
 //   2. Goertzel で各MIDI音の強度を計算 (低域:4096点, 高域:2048点)
 //   3. 帯域別ピッチクラスに集約
 //   4. コード推定 (低域/中域/高域/全体, ヒストリー付き)
-//   5. FFT + Viterbi でメロディ音を推定
+//   5. 中央の声だけ母音（あいうえお）と音名。伴奏のみは出さない
 //   6. KeyCodeLow/Mid/High/All に結果を格納
 // ============================================================
 void AnalyzeMusicKey(const double* bufferL, const double* bufferR, int sampleCount, int sampleRate) {
@@ -8120,7 +7915,14 @@ void AnalyzeMusicKey(const double* bufferL, const double* bufferR, int sampleCou
 	bool stereo = (bufferR != nullptr);
 
 	// 表示用フォーマット: "ルート, <コード名>" の形式（固定バッファ・CString 嵐禁止）
-	auto FormatChordInto = [](WCHAR* out, int outCap, const WCHAR* s) {
+	auto AppendChord = [](WCHAR* out, int outCap, const WCHAR* root, const WCHAR* body) {
+		EqKeyCopy(out, outCap, L"!@B");
+		wcsncat_s(out, outCap, root, _TRUNCATE);
+		wcsncat_s(out, outCap, L", !@C002525<!@C000000", _TRUNCATE);
+		wcsncat_s(out, outCap, body ? body : L"", _TRUNCATE);
+		wcsncat_s(out, outCap, L"!@C002525>!@C000000!@B", _TRUNCATE);
+	};
+	auto FormatChordInto = [&](WCHAR* out, int outCap, const WCHAR* s) {
 		if (!s || !s[0]) {
 			EqKeyCopy(out, outCap, L"!@B  , <  >!@B");
 			return;
@@ -8130,33 +7932,31 @@ void AnalyzeMusicKey(const double* bufferL, const double* bufferR, int sampleCou
 			{ root[0] = s[0]; root[1] = s[1]; root[2] = 0; }
 		else
 			{ root[0] = s[0]; root[1] = L' '; root[2] = 0; }
-		swprintf_s(out, outCap, L"!@B%s, !@C002525<!@C000000%s!@C002525>!@C000000!@B", root, s);
+		AppendChord(out, outCap, root, s);
 	};
 
+	// key4（全音域）: C  [C4 ] , <コード>。声が無いときは C  [   ] , <コード>。
 	auto FormatChordAllInto = [](WCHAR* out, int outCap, const WCHAR* s, const WCHAR* melody) {
-		if (wcscmp(melody, L"[   ]") == 0) {
-			if (!s || !s[0]) {
-				EqKeyCopy(out, outCap, L"!@B  , <  >!@B");
-				return;
-			}
-			WCHAR root[8];
-			if (s[0] && (s[1] == L'#' || s[1] == L'b'))
+		const bool noMel = (!melody || !melody[0] || wcscmp(melody, L"[   ]") == 0);
+		const WCHAR* mel = noMel ? L"   " : melody;
+		WCHAR root[8] = L"  ";
+		if (s && s[0]) {
+			if (s[1] == L'#' || s[1] == L'b')
 				{ root[0] = s[0]; root[1] = s[1]; root[2] = 0; }
 			else
 				{ root[0] = s[0]; root[1] = L' '; root[2] = 0; }
-			swprintf_s(out, outCap, L"!@B%s, !@C002525<!@C000000%s!@C002525>!@C000000!@B", root, s);
-			return;
 		}
-		if (!s || !s[0]) {
-			swprintf_s(out, outCap, L"!@B   %s, !@C002525<!@C000000!@F-01 !@F+01!@C002525>!@C000000!@B", melody);
-			return;
-		}
-		WCHAR root[8];
-		if (s[0] && (s[1] == L'#' || s[1] == L'b'))
-			{ root[0] = s[0]; root[1] = s[1]; root[2] = 0; }
+		EqKeyCopy(out, outCap, L"!@B");
+		wcsncat_s(out, outCap, root, _TRUNCATE);
+//		wcsncat_s(out, outCap, L" [", _TRUNCATE);
+//		wcsncat_s(out, outCap, mel, _TRUNCATE);
+//		wcsncat_s(out, outCap, L"] , !@C002525<!@C000000", _TRUNCATE);
+		wcsncat_s(out, outCap, L" , !@C002525<!@C000000", _TRUNCATE);
+		if (!s || !s[0])
+			wcsncat_s(out, outCap, L"!@F-01 !@F+01", _TRUNCATE);
 		else
-			{ root[0] = s[0]; root[1] = L' '; root[2] = 0; }
-		swprintf_s(out, outCap, L"!@B%s %s, !@C002525<!@C000000%s!@C002525>!@C000000!@B", root, melody, s);
+			wcsncat_s(out, outCap, s, _TRUNCATE);
+		wcsncat_s(out, outCap, L"!@C002525>!@C000000!@B", _TRUNCATE);
 	};
 
 	float currentRMS = CalculateRMS(bufferL, bufferR, totalSamples, stereo);
@@ -8190,10 +7990,13 @@ void AnalyzeMusicKey(const double* bufferL, const double* bufferR, int sampleCou
 		g_prevChordLow[0] = g_prevChordMid[0] = g_prevChordAll[0] = g_prevChordHigh[0] = 0;
 		memset(g_noteStrength, 0, sizeof(g_noteStrength));
 		memset(g_noteStrengthPrev, 0, sizeof(g_noteStrengthPrev));
+		EqKeyVocalReset();
 	}
 
 	// 無音時は空白表示して減衰（ゴーストノート防止）
 	if (isSilent) {
+		EqKeyVocalReset();
+		g_currentVowel = L' ';
 		SetKeyCodesLocked(
 			L"!@B  , !@C002525<!@C000000!@F-01 !@F+01!@C002525>!@C000000!@B",
 			L"!@B  , !@C002525<!@C000000!@F-01 !@F+01!@C002525>!@C000000!@B",
@@ -8221,7 +8024,7 @@ void AnalyzeMusicKey(const double* bufferL, const double* bufferR, int sampleCou
 		const double* win = (LOW_N == 4096) ? g_hannWindow4096 : nullptr;
 		double aL = GoertzelMagnitude(bufferL + LOW_S, LOW_N, g_goertzelCoeffs[k], win);
 		double aR = stereo ? GoertzelMagnitude(bufferR + LOW_S, LOW_N, g_goertzelCoeffs[k], win) : aL;
-		float ns = (float)max(aL, aR) * (1.0f + k / 100.0f);  // 低域補正
+		float ns = (float)max(aL, aR) * (1.0f + k / 100.0f);
 		g_noteStrength[k] = g_noteStrengthPrev[k] * SMOOTHING_FACTOR + ns * (1.0f - SMOOTHING_FACTOR);
 		g_noteStrengthPrev[k] = g_noteStrength[k];
 	}
@@ -8229,7 +8032,7 @@ void AnalyzeMusicKey(const double* bufferL, const double* bufferR, int sampleCou
 		const double* win = (HI_N == 2048) ? g_blackmanWindow2048 : nullptr;
 		double aL = GoertzelMagnitude(bufferL + HI_S, HI_N, g_goertzelCoeffs[k], win);
 		double aR = stereo ? GoertzelMagnitude(bufferR + HI_S, HI_N, g_goertzelCoeffs[k], win) : aL;
-		float ns = (float)max(aL, aR) * (1.0f + k / 50.0f);   // 高域補正
+		float ns = (float)max(aL, aR) * (1.0f + k / 50.0f);
 		g_noteStrength[k] = g_noteStrengthPrev[k] * SMOOTHING_FACTOR + ns * (1.0f - SMOOTHING_FACTOR);
 		g_noteStrengthPrev[k] = g_noteStrength[k];
 	}
@@ -8264,9 +8067,11 @@ void AnalyzeMusicKey(const double* bufferL, const double* bufferR, int sampleCou
 	EqKeyCopy(g_prevChordAll, EQKEY_NAME_MAX, rawAll);
 	EqKeyCopy(g_prevChordHigh, EQKEY_NAME_MAX, rawHigh);
 
-	// メロディ Viterbi/FFT は表示が #if 0 で無効なため実行しない。
-	// 毎 Speana で 4096点×2 FFT + ヒープ確保すると UI が分単位で死ぬ。
-	const WCHAR* rawMelody = L"[   ]";
+	// 歌唱だけ母音＋音名。インストは空。key4 は [あC4] , <コード>。
+	WCHAR melodyBuf[24] = L"";
+	//EqKeyVocalMelody(bufferL, bufferR, totalSamples, sampleRate, 0, melodyBuf, 24);
+	//g_currentVowel = (melodyBuf[0] && melodyBuf[0] != L'[') ? melodyBuf[0] : L' ';
+	const WCHAR* rawMelody = melodyBuf;
 
 	// 出力コード文字列生成（ここだけで CString 化）
 	WCHAR outLowW[256], outMidW[256], outAllW[256], outHighW[256];
@@ -8274,15 +8079,7 @@ void AnalyzeMusicKey(const double* bufferL, const double* bufferR, int sampleCou
 	FormatChordInto(outMidW, _countof(outMidW), rawMid);
 	FormatChordAllInto(outAllW, _countof(outAllW), rawAll, rawMelody);
 
-	// 高域コードが空のときはメロディ音名で補完
-	if (!rawHigh[0] && wcscmp(rawMelody, L"[   ]") != 0) {
-		const WCHAR* t = rawMelody + 1;
-		if (t[0] && t[1] == L'#')
-			{ rawHigh[0] = t[0]; rawHigh[1] = t[1]; rawHigh[2] = 0; }
-		else
-			{ rawHigh[0] = t[0]; rawHigh[1] = 0; }
-	}
-	if (wcscmp(rawMelody, L"[   ]") == 0 && !rawHigh[0])
+	if (!rawHigh[0])
 		EqKeyCopy(outHighW, _countof(outHighW), L"!@B  , !@C002525<!@C000000!@F-01 !@F+01!@C002525>!@C000000!@B");
 	else
 		FormatChordInto(outHighW, _countof(outHighW), rawHigh);

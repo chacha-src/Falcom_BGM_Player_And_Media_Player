@@ -10,13 +10,14 @@
 
 namespace GdiSoft2D
 {
-	static DWORD* s_grabPix = nullptr;
-	static int s_grabCap = 0;
-	static DWORD* s_blurA = nullptr;
-	static DWORD* s_blurB = nullptr;
-	static int s_blurCap = 0;
-	static DWORD* s_post = nullptr;
-	static int s_postCap = 0;
+	// スレッド毎（ピアノロール／アナライザーは別 UI スレッドで並行に描く）
+	static thread_local DWORD* s_grabPix = nullptr;
+	static thread_local int s_grabCap = 0;
+	static thread_local DWORD* s_blurA = nullptr;
+	static thread_local DWORD* s_blurB = nullptr;
+	static thread_local int s_blurCap = 0;
+	static thread_local DWORD* s_post = nullptr;
+	static thread_local int s_postCap = 0;
 	void Context::PushClipRect(int l, int t, int r, int b)
 	{
 		ClipRect c{ l, t, r, b };

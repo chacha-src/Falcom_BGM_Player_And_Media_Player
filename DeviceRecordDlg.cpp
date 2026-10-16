@@ -10,6 +10,7 @@
 #include "TranscodeExport.h"
 #include "ProAudio.h"
 #include "MpPlayerAddons.h"
+#include "VizUiThread.h"
 #include <mmdeviceapi.h>
 #include <Audioclient.h>
 #include <FunctionDiscoveryKeys_devpkey.h>
@@ -1678,6 +1679,9 @@ void CDeviceRecordDlg::OnTimer(UINT_PTR nIDEvent)
 
 void OpenDeviceRecordModeless(CWnd* parent)
 {
+	// 録音ダイアログはメイン UI スレッドの窓（ピアノロール等の専用スレッドから来ても作らない）
+	if (VizUi::PostToMainIfOff([parent]() { OpenDeviceRecordModeless(parent); }))
+		return;
 	if (g_deviceRecordDlg && ::IsWindow(g_deviceRecordDlg->GetSafeHwnd())) {
 		g_deviceRecordDlg->ShowWindow(SW_SHOW);
 		g_deviceRecordDlg->SetForegroundWindow();
@@ -1700,6 +1704,8 @@ void OpenDeviceRecordModeless(CWnd* parent)
 void EnsureDeviceRecordLoopbackFeed(CWnd* parent)
 {
 	if (!savedata.mpLoopbackScore) return;
+	if (VizUi::PostToMainIfOff([parent]() { EnsureDeviceRecordLoopbackFeed(parent); }))
+		return;
 	if (g_deviceRecordDlg && ::IsWindow(g_deviceRecordDlg->GetSafeHwnd())) {
 		g_deviceRecordDlg->EnsurePeakMonitorRunning();
 		return;
@@ -1716,6 +1722,8 @@ void EnsureDeviceRecordLoopbackFeed(CWnd* parent)
 
 void StopDeviceRecordLoopbackFeed()
 {
+	if (VizUi::PostToMainIfOff([]() { StopDeviceRecordLoopbackFeed(); }))
+		return;
 	if (!g_deviceRecordDlg || !::IsWindow(g_deviceRecordDlg->GetSafeHwnd())) return;
 	g_deviceRecordDlg->StopPeakMonitorIfPeakOnly();
 }

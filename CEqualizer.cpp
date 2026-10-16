@@ -1,7 +1,8 @@
-﻿// CEqualizer.cpp : 実装ファイル
+// CEqualizer.cpp : 実装ファイル
 //
 
 #include "stdafx.h"
+#include "EqKeyAnalyze.h"
 #include "XfadePlayback.h"
 #include "ogg.h"
 #include "afxdialogex.h"
@@ -87,26 +88,15 @@ namespace {
 
 	static int EqPresetIndexFromKeyCodes(const CString& keyAll)
 	{
-		CString u = keyAll;
-		u.MakeUpper();
-		int lt = u.ReverseFind(L'<');
-		int gt = u.ReverseFind(L'>');
+		int lt = keyAll.ReverseFind(L'<');
+		int gt = keyAll.ReverseFind(L'>');
 		CString chord;
 		if (lt >= 0 && gt > lt)
-			chord = u.Mid(lt + 1, gt - lt - 1);
+			chord = keyAll.Mid(lt + 1, gt - lt - 1);
 		else
-			chord = u;
+			chord = keyAll;
 		chord.Trim();
-		bool minor = false;
-		if (chord.Find(L"MIN") >= 0 || chord.Find(L"DIM") >= 0 || chord.Find(L"M7B5") >= 0)
-			minor = true;
-		else if (chord.GetLength() >= 2 && chord[1] == L'M') {
-			if (chord.GetLength() == 2)
-				minor = true;
-			else if (chord[2] != L'A' && chord[2] != L'J')
-				minor = true;
-		}
-		if (minor) return 31;
+		if (EqKeyPrimaryIsMinor(chord)) return 31;
 		return 11;
 	}
 
@@ -1253,8 +1243,9 @@ void CEqualizer::ApplyKeyCodesUi()
 	extern int playf;
 	CString keyLow, keyMid, keyHigh, keyAll;
 	if (playf == 0) {
-		keyLow = keyMid = keyHigh = keyAll =
+		keyLow = keyMid = keyHigh =
 			L"!@B  , !@C002525<!@C000000!@F-01 !@F+01!@C002525>!@C000000!@B";
+		keyAll = L"!@B  , !@C002525<!@C000000!@F-01 !@F+01!@C002525>!@C000000!@B";
 	}
 	else {
 		SnapshotEqKeyCodes(keyLow, keyMid, keyHigh, keyAll);

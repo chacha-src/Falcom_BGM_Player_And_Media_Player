@@ -284,8 +284,9 @@ protected:
 	CWnd* m_owner;      // Track の owner（前面復帰・関連 HWND・relax-dismiss）
 	CCustomPopupMenu* m_parentMenu; // サブなら親。ルートは NULL
 	CCustomPopupMenu* m_root;       // チェーン根。NULL なら this
-	static CCustomPopupMenu* s_trackingRoot;
-	static HWND s_trackingHwnd; // 破棄検知用（dangling this を触らない）
+	// スレッド毎（ピアノロール／アナライザーの専用 UI スレッドのメニューはメインから見えない）
+	static thread_local CCustomPopupMenu* s_trackingRoot;
+	static thread_local HWND s_trackingHwnd; // 破棄検知用（dangling this を触らない）
 	CToolTipCtrl m_tip;
 	int m_tipHot;       // ツールチップ対象行（m_hot のスナップ）
 	CBitmap m_memBmp;   // OnPaint バックバッファ

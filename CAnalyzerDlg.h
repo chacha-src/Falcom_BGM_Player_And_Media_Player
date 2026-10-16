@@ -20,6 +20,10 @@ public:
 	CAnalyzerDlg(CWnd* pParent = nullptr);
 	virtual ~CAnalyzerDlg();
 
+	// 窓はアナライザー専用 UI スレッドで生成・破棄する（呼び出し元スレッドは問わない）
+	BOOL Create(UINT nIDTemplate, CWnd* pParentWnd = nullptr);
+	virtual BOOL DestroyWindow();
+
 #ifdef AFX_DESIGN_TIME
 	enum { IDD = IDD_ANALYZER };
 #endif
@@ -91,7 +95,7 @@ public:
 	void RequestSyncFromMainUi();
 	void PumpSyncNow();
 	// 曲ごと保存パラメータからの周波数表示モード適用(外部から)
-	void ApplySpecStyleExternal(int style) { SetSpecStyle(style); }
+	void ApplySpecStyleExternal(int style);
 	// ローカルリモート用: スペクトルを ch×64 バー(0..96)へ間引き。ch は 1..8
 	void ExportRemoteBars(BYTE outCh64[][64], int maxCh, int& outCh) const;
 

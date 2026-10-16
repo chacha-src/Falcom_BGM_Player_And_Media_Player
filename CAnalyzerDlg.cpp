@@ -7,6 +7,7 @@
 #include "CEqualizer.h"
 #include "CProToolsDlg.h"
 #include "CMediaPlayerDlg.h"
+#include "VizUiThread.h"
 #include <cmath>
 #include <cstring>
 #include <algorithm>
@@ -1038,6 +1039,9 @@ void CAnalyzerDlg::ExportRemoteBars(BYTE outCh64[][64], int maxCh, int& outCh) c
 
 void CAnalyzerDlg::ResetPlaybackState()
 {
+	// 描画フラグ・バッファはアナライザー専用 UI スレッドの持ち物
+	if (VizUi::MarshalToOwner(m_hWnd, [this]() { ResetPlaybackState(); }))
+		return;
 	EnterCriticalSection(&m_cs);
 	for (int c = 0; c < CH_MAX; ++c)
 		std::fill(m_ring[c].begin(), m_ring[c].end(), 0.0f);
@@ -1081,6 +1085,8 @@ void CAnalyzerDlg::ResetPlaybackState()
 
 void CAnalyzerDlg::DetachForDestroy()
 {
+	if (VizUi::MarshalToOwner(m_hWnd, [this]() { DetachForDestroy(); }))
+		return;
 	m_feedEnabled = false;
 	m_tickPump.Stop();
 	KillTimer(1);
@@ -1353,6 +1359,11 @@ void CAnalyzerDlg::PushWaterfallRow()
 
 void CAnalyzerDlg::SyncEqUiFromSavedata()
 {
+	if (VizUi::PostToMainIfOff([]() {
+			if (og && og->m_EqualizerDlg && ::IsWindow(og->m_EqualizerDlg->GetSafeHwnd()))
+				og->m_EqualizerDlg->SyncSlidersFromSavedata();
+		}))
+		return;
 	if (og && og->m_EqualizerDlg && ::IsWindow(og->m_EqualizerDlg->GetSafeHwnd()))
 		og->m_EqualizerDlg->SyncSlidersFromSavedata();
 }
@@ -1539,6 +1550,11 @@ static void AnalyzerApplyMsPreset(int widthPct, int mono)
 	savedata.pro_ms_width = ProClampI(widthPct, 0, 200);
 	savedata.pro_ms_mono = mono ? 1 : 0;
 	extern CProToolsDlg* g_proToolsDlg;
+	if (VizUi::PostToMainIfOff([]() {
+			if (g_proToolsDlg && ::IsWindow(g_proToolsDlg->GetSafeHwnd()))
+				g_proToolsDlg->LoadFromSavedata();
+		}))
+		return;
 	if (g_proToolsDlg && ::IsWindow(g_proToolsDlg->GetSafeHwnd()))
 		g_proToolsDlg->LoadFromSavedata();
 }
@@ -4547,8 +4563,17 @@ void CAnalyzerDlg::SyncSoft3DCamsFromSave()
 	GdiSoft3D::CamFromSaved(m_camBot, savedata.analyzer3dyawBot, savedata.analyzer3dpitchBot, savedata.analyzer3dzoomBot);
 }
 
+void CAnalyzerDlg::ApplySpecStyleExternal(int style)
+{
+	if (VizUi::MarshalToOwner(m_hWnd, [this, style]() { SetSpecStyle(style); }))
+		return;
+	SetSpecStyle(style);
+}
+
 void CAnalyzerDlg::PaletteApplySoft3D()
 {
+	if (VizUi::MarshalToOwner(m_hWnd, [this]() { PaletteApplySoft3D(); }))
+		return;
 	SyncSoft3DCamsFromSave();
 	KickUiPresent();
 }
@@ -5414,6 +5439,24 @@ void CAnalyzerDlg::OnShowWindow(BOOL bShow, UINT nStatus)
 }
 
 
+BOOL CAnalyzerDlg::Create(UINT nIDTemplate, CWnd* pParentWnd)
+{
+	// 描画・ティックをメイン UI(timerp/バナー)と分けるため、窓は専用 UI スレッドで作る。
+	BOOL ok = FALSE;
+	VizUi::Invoke(VIZ_UI_ANALYZER, [&]() {
+		ok = CCustomBlurDialogExBase::Create(nIDTemplate, pParentWnd);
+	});
+	return ok;
+}
+
+BOOL CAnalyzerDlg::DestroyWindow()
+{
+	BOOL ok = FALSE;
+	if (VizUi::MarshalToOwner(m_hWnd, [&]() { ok = DestroyWindow(); }))
+		return ok;
+	return CCustomBlurDialogExBase::DestroyWindow();
+}
+
 void CAnalyzerDlg::OnClose()
 {
 	savedata.analyzerwindow = 0;
@@ -5665,7 +5708,11 @@ BOOL CAnalyzerDlg::PreTranslateMessage(MSG* pMsg)
 			&& !(::GetKeyState(VK_MENU) & 0x8000)) {
 			extern CMediaPlayerDlg* mp;
 			if (mp && ::IsWindow(mp->GetSafeHwnd())) {
-				mp->OpenCommandPalette();
+				if (!VizUi::PostToMainIfOff([]() {
+						if (mp && ::IsWindow(mp->GetSafeHwnd()))
+							mp->OpenCommandPalette();
+					}))
+					mp->OpenCommandPalette();
 				return TRUE;
 			}
 		}

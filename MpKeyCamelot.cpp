@@ -1,4 +1,5 @@
-﻿#include "stdafx.h"
+#include "stdafx.h"
+#include "EqKeyAnalyze.h"
 #include "MpKeyCamelot.h"
 #include "SongParams.h"
 #include "oggDlg.h"
@@ -61,34 +62,31 @@ BOOL MpKeyParseFromDisplay(LPCTSTR keyCode, int* root, int* minor)
 	if (!root || !minor) return FALSE;
 	*root = -1; *minor = 0;
 	if (!keyCode || !*keyCode) return FALSE;
-	const WCHAR* p = keyCode;
-	while (*p && !((*p >= L'A' && *p <= L'G') || (*p >= L'a' && *p <= L'g')))
-		++p;
-	if (!*p) return FALSE;
-	WCHAR r0 = (WCHAR)towupper(*p);
-	WCHAR r1 = p[1];
+	// !@B の B をルートと読まない。コード本体は < > の中。
+	const WCHAR* chord = keyCode;
+	const WCHAR* lt = wcschr(keyCode, L'<');
+	const WCHAR* gt = wcschr(keyCode, L'>');
+	if (lt && gt && gt > lt) chord = lt + 1;
+	wchar_t vis[160];
+	EqKeyStripMarkup(chord, vis, 160);
+	const WCHAR* p = vis;
+	while (*p == L' ' || *p == L',') ++p;
+	if (!(*p >= L'A' && *p <= L'G')) return FALSE;
 	static const WCHAR* names[12] = {
 		L"C", L"C#", L"D", L"D#", L"E", L"F", L"F#", L"G", L"G#", L"A", L"A#", L"B"
 	};
 	static const WCHAR* flats[12] = {
 		L"C", L"Db", L"D", L"Eb", L"E", L"F", L"Gb", L"G", L"Ab", L"A", L"Bb", L"B"
 	};
-	WCHAR tok[4] = { r0, 0, 0, 0 };
-	if (r1 == L'#' || r1 == L'b') { tok[1] = r1; tok[2] = 0; }
+	WCHAR tok[4] = { p[0], 0, 0, 0 };
+	if (p[1] == L'#' || p[1] == L'b') { tok[1] = p[1]; tok[2] = 0; }
 	int found = -1;
 	for (int i = 0; i < 12; ++i) {
 		if (_wcsicmp(tok, names[i]) == 0 || _wcsicmp(tok, flats[i]) == 0) { found = i; break; }
 	}
 	if (found < 0) return FALSE;
 	*root = found;
-	const WCHAR* q = p + (tok[1] ? 2 : 1);
-	while (*q == L' ' || *q == L',') ++q;
-	if (*q == L'm' || *q == L'M') {
-		if (q[1] == 0 || q[1] == L' ' || q[1] == L',' || q[1] == L'i' || q[1] == L'I')
-			*minor = 1;
-	}
-	if (wcsstr(keyCode, L"min") || wcsstr(keyCode, L"Min") || wcsstr(keyCode, L"MIN"))
-		*minor = 1;
+	*minor = EqKeyPrimaryIsMinor(vis) ? 1 : 0;
 	return TRUE;
 }
 
