@@ -2065,10 +2065,25 @@ static void ServeOnce(HANDLE pipe)
 				uint32_t nEx = *(const uint32_t*)p; p += sizeof(uint32_t);
 				if ((size_t)(end - p) < nEx * sizeof(wchar_t)) { status = KPIHOST32_STATUS_BAD_REQUEST; break; }
 				extra.assign((const wchar_t*)p, (const wchar_t*)p + nEx);
+				p += nEx * sizeof(wchar_t);
+			}
+			std::wstring gsSf, xgSf;
+			if ((size_t)(end - p) >= sizeof(uint32_t)) {
+				uint32_t nSf = *(const uint32_t*)p; p += sizeof(uint32_t);
+				if ((size_t)(end - p) < nSf * sizeof(wchar_t)) { status = KPIHOST32_STATUS_BAD_REQUEST; break; }
+				gsSf.assign((const wchar_t*)p, (const wchar_t*)p + nSf);
+				p += nSf * sizeof(wchar_t);
+			}
+			if ((size_t)(end - p) >= sizeof(uint32_t)) {
+				uint32_t nSf = *(const uint32_t*)p; p += sizeof(uint32_t);
+				if ((size_t)(end - p) < nSf * sizeof(wchar_t)) { status = KPIHOST32_STATUS_BAD_REQUEST; break; }
+				xgSf.assign((const wchar_t*)p, (const wchar_t*)p + nSf);
 			}
 			status = VstHost32_Open((int)slot, mid.c_str(),
 				dll.empty() ? nullptr : dll.c_str(),
-				extra.empty() ? nullptr : extra.c_str());
+				extra.empty() ? nullptr : extra.c_str(),
+				gsSf.empty() ? nullptr : gsSf.c_str(),
+				xgSf.empty() ? nullptr : xgSf.c_str());
 			if (status == KPIHOST32_STATUS_OK) {
 				KPIHOST32_ForeignOpenReply orp{};
 				orp.sessionId = slot;

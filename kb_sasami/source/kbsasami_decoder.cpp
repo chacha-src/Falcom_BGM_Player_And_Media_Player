@@ -24,6 +24,8 @@ static const wchar_t KEY_MAP_LEGACY[] = L"map";
 static const wchar_t KEY_FMMODE[] = L"fmmode";
 static const wchar_t KEY_VST_GS[] = L"vstfullpath_gs";
 static const wchar_t KEY_VST_XG[] = L"vstfullpath_xg";
+static const wchar_t KEY_VST_GS_SF[] = L"vstsoundfont_gs";
+static const wchar_t KEY_VST_XG_SF[] = L"vstsoundfont_xg";
 
 /* fmmidi/ymfm の正規化が小さく、mpy/mpw2/rcp/mid が実聴で約 1/6。
    raira=0（本家）はさらに /2 のうえ 1.5 倍下げる。 */
@@ -59,6 +61,8 @@ KbSasamiDecoder::KbSasamiDecoder(IKpiConfig* pConfig)
 	m_foreignVst = 0;
 	m_vstGs[0] = 0;
 	m_vstXg[0] = 0;
+	m_vstGsSf[0] = 0;
+	m_vstXgSf[0] = 0;
 	memset(&m_vstSess, 0, sizeof(m_vstSess));
 	m_mapDefault = 0;
 	m_fmModeDefault = 2;
@@ -165,6 +169,8 @@ void KbSasamiDecoder::ReadOptions()
 		m_fmModeDefault = (int)m_pConfig->GetInt(SEC_KBSASAMI, KEY_FMMODE, 2);
 		m_pConfig->GetStr(SEC_KBSASAMI, KEY_VST_GS, m_vstGs, (DWORD)(sizeof(m_vstGs)), L"");
 		m_pConfig->GetStr(SEC_KBSASAMI, KEY_VST_XG, m_vstXg, (DWORD)(sizeof(m_vstXg)), L"");
+		m_pConfig->GetStr(SEC_KBSASAMI, KEY_VST_GS_SF, m_vstGsSf, (DWORD)(sizeof(m_vstGsSf)), L"");
+		m_pConfig->GetStr(SEC_KBSASAMI, KEY_VST_XG_SF, m_vstXgSf, (DWORD)(sizeof(m_vstXgSf)), L"");
 	}
 	if (m_mapDefault < 0 || m_mapDefault > 19) m_mapDefault = 0;
 	if (m_fmModeDefault < 0 || m_fmModeDefault > 2) m_fmModeDefault = 2;
@@ -1022,7 +1028,8 @@ int KbSasamiDecoder::OpenForeignVst(const uint8_t* smf, DWORD smfLen)
 		m_smfSize = (int)smfLen;
 	} else if (smf == m_smf)
 		m_smfSize = (int)smfLen;
-	if (!KbVstSessionOpen(m_smf, (DWORD)m_smfSize, m_vstGs, m_vstXg, &m_vstSess))
+	if (!KbVstSessionOpen(m_smf, (DWORD)m_smfSize, m_vstGs, m_vstXg, &m_vstSess,
+		m_vstGsSf[0] ? m_vstGsSf : NULL, m_vstXgSf[0] ? m_vstXgSf : NULL))
 		return -1;
 	m_foreignVst = 1;
 	m_fmMode = false;

@@ -284,7 +284,8 @@ int KbVstMonCmd(int show)
 }
 
 int KbVstSessionOpen(const void* smf, uint32_t smfLen,
-	const wchar_t* gsPath, const wchar_t* xgPath, KbVstSession* out)
+	const wchar_t* gsPath, const wchar_t* xgPath, KbVstSession* out,
+	const wchar_t* gsSoundFont, const wchar_t* xgSoundFont)
 {
 	if (!out || !smf || smfLen < 22) return 0;
 	memset(out, 0, sizeof(*out));
@@ -321,12 +322,16 @@ int KbVstSessionOpen(const void* smf, uint32_t smfLen,
 	/* ホストは GS=vstMultiDll、XG=vstExtraPath。曲側が無い方は空のまま（フォールバックしない）。 */
 	if (wantXg) gs.clear();
 	else xg.clear();
+	std::wstring gsSf = gsSoundFont ? gsSoundFont : L"";
+	std::wstring xgSf = xgSoundFont ? xgSoundFont : L"";
 	uint32_t nMid = (uint32_t)mid.size();
 	uint32_t nGs = (uint32_t)gs.size();
 	uint32_t nXg = (uint32_t)xg.size();
+	uint32_t nGsSf = (uint32_t)gsSf.size();
+	uint32_t nXgSf = (uint32_t)xgSf.size();
 	uint32_t slotU = (uint32_t)slot;
 	std::vector<uint8_t> req;
-	req.resize(sizeof(uint32_t) * 4 + (nMid + nGs + nXg) * sizeof(wchar_t));
+	req.resize(sizeof(uint32_t) * 6 + (nMid + nGs + nXg + nGsSf + nXgSf) * sizeof(wchar_t));
 	uint8_t* p = req.data();
 	memcpy(p, &slotU, 4); p += 4;
 	memcpy(p, &nMid, 4); p += 4;
@@ -334,7 +339,11 @@ int KbVstSessionOpen(const void* smf, uint32_t smfLen,
 	memcpy(p, &nGs, 4); p += 4;
 	if (nGs) { memcpy(p, gs.c_str(), nGs * sizeof(wchar_t)); p += nGs * sizeof(wchar_t); }
 	memcpy(p, &nXg, 4); p += 4;
-	if (nXg) memcpy(p, xg.c_str(), nXg * sizeof(wchar_t));
+	if (nXg) { memcpy(p, xg.c_str(), nXg * sizeof(wchar_t)); p += nXg * sizeof(wchar_t); }
+	memcpy(p, &nGsSf, 4); p += 4;
+	if (nGsSf) { memcpy(p, gsSf.c_str(), nGsSf * sizeof(wchar_t)); p += nGsSf * sizeof(wchar_t); }
+	memcpy(p, &nXgSf, 4); p += 4;
+	if (nXgSf) memcpy(p, xgSf.c_str(), nXgSf * sizeof(wchar_t));
 
 	uint8_t reply[256];
 	uint32_t replyN = 0, st = 0;

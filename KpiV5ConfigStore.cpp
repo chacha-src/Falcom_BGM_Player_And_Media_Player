@@ -307,6 +307,8 @@ const std::vector<KpiV5ConfigEntry>& GetKpiV5KnownEntries()
 		{ L"kbsasami", L"kbsasami", L"midimode", L"0" },
 		{ L"kbsasami", L"kbsasami", L"vstfullpath_gs", L"" },
 		{ L"kbsasami", L"kbsasami", L"vstfullpath_xg", L"" },
+		{ L"kbsasami", L"kbsasami", L"vstsoundfont_gs", L"" },
+		{ L"kbsasami", L"kbsasami", L"vstsoundfont_xg", L"" },
 		{ L"kbsasami", L"kbsasami", L"fmmode", L"2" },
 	};
 	return entries;

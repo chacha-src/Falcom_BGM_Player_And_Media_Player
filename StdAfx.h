@@ -1001,8 +1001,97 @@ struct save{
 	int pitchPos;
 	/* CEmu の G.I.M.I.C。0=ソフトのまま（初期値） 1=対応チップを実機へ。末尾追記。 */
 	int cemuGimic;
+
+	/* MP とファルコムでサブUIの位置・開閉を別々に持つ。inited=0 は未設定。 */
+	struct UiSubGeomBank {
+		int inited;
+		int eqwindow, eqx, eqy, eqMainLock;
+		int pianorollwindow, pianorollx, pianorolly, pianorollw, pianorollh, pianorollMainLock;
+		int analyzerwindow, analyzerx, analyzery, analyzerw, analyzerh, analyzerMainLock;
+		int midimonwindow, midimonx, midimony, midimonw, midimonh, midimonMainLock;
+		int wrdwindow, wrdx, wrdy, wrdw, wrdh, wrdMainLock;
+		int prTunewindow, prTunex, prTuney, prTuneMainLock;
+		int playlistMainLock;
+	};
+	UiSubGeomBank uiFc;
+	UiSubGeomBank uiMp;
 };
 extern save savedata;
+
+inline void UiSubGeomFromWorking(save::UiSubGeomBank& b)
+{
+	b.inited = 1;
+	b.eqwindow = savedata.eqwindow; b.eqx = savedata.eqx; b.eqy = savedata.eqy; b.eqMainLock = savedata.eqMainLock;
+	b.pianorollwindow = savedata.pianorollwindow;
+	b.pianorollx = savedata.pianorollx; b.pianorolly = savedata.pianorolly;
+	b.pianorollw = savedata.pianorollw; b.pianorollh = savedata.pianorollh;
+	b.pianorollMainLock = savedata.pianorollMainLock;
+	b.analyzerwindow = savedata.analyzerwindow;
+	b.analyzerx = savedata.analyzerx; b.analyzery = savedata.analyzery;
+	b.analyzerw = savedata.analyzerw; b.analyzerh = savedata.analyzerh;
+	b.analyzerMainLock = savedata.analyzerMainLock;
+	b.midimonwindow = savedata.midimonwindow;
+	b.midimonx = savedata.midimonx; b.midimony = savedata.midimony;
+	b.midimonw = savedata.midimonw; b.midimonh = savedata.midimonh;
+	b.midimonMainLock = savedata.midimonMainLock;
+	b.wrdwindow = savedata.wrdwindow;
+	b.wrdx = savedata.wrdx; b.wrdy = savedata.wrdy;
+	b.wrdw = savedata.wrdw; b.wrdh = savedata.wrdh;
+	b.wrdMainLock = savedata.wrdMainLock;
+	b.prTunewindow = savedata.prTunewindow;
+	b.prTunex = savedata.prTunex; b.prTuney = savedata.prTuney;
+	b.prTuneMainLock = savedata.prTuneMainLock;
+	b.playlistMainLock = savedata.playlistMainLock;
+}
+inline void UiSubGeomToWorking(const save::UiSubGeomBank& b)
+{
+	if (!b.inited) return;
+	savedata.eqwindow = b.eqwindow; savedata.eqx = b.eqx; savedata.eqy = b.eqy; savedata.eqMainLock = b.eqMainLock;
+	savedata.pianorollwindow = b.pianorollwindow;
+	savedata.pianorollx = b.pianorollx; savedata.pianorolly = b.pianorolly;
+	savedata.pianorollw = b.pianorollw; savedata.pianorollh = b.pianorollh;
+	savedata.pianorollMainLock = b.pianorollMainLock;
+	savedata.analyzerwindow = b.analyzerwindow;
+	savedata.analyzerx = b.analyzerx; savedata.analyzery = b.analyzery;
+	savedata.analyzerw = b.analyzerw; savedata.analyzerh = b.analyzerh;
+	savedata.analyzerMainLock = b.analyzerMainLock;
+	savedata.midimonwindow = b.midimonwindow;
+	savedata.midimonx = b.midimonx; savedata.midimony = b.midimony;
+	savedata.midimonw = b.midimonw; savedata.midimonh = b.midimonh;
+	savedata.midimonMainLock = b.midimonMainLock;
+	savedata.wrdwindow = b.wrdwindow;
+	savedata.wrdx = b.wrdx; savedata.wrdy = b.wrdy;
+	savedata.wrdw = b.wrdw; savedata.wrdh = b.wrdh;
+	savedata.wrdMainLock = b.wrdMainLock;
+	savedata.prTunewindow = b.prTunewindow;
+	savedata.prTunex = b.prTunex; savedata.prTuney = b.prTuney;
+	savedata.prTuneMainLock = b.prTuneMainLock;
+	savedata.playlistMainLock = b.playlistMainLock;
+}
+inline void UiSubGeomSeedIfNeeded()
+{
+	if (!savedata.uiFc.inited && !savedata.uiMp.inited) {
+		UiSubGeomFromWorking(savedata.uiFc);
+		UiSubGeomFromWorking(savedata.uiMp);
+		return;
+	}
+	if (!savedata.uiFc.inited) UiSubGeomFromWorking(savedata.uiFc);
+	if (!savedata.uiMp.inited) UiSubGeomFromWorking(savedata.uiMp);
+}
+inline void UiSubGeomFlushCurrent()
+{
+	if (savedata.playerMode == 1)
+		UiSubGeomFromWorking(savedata.uiMp);
+	else
+		UiSubGeomFromWorking(savedata.uiFc);
+}
+inline void UiSubGeomApplyMode(int mp)
+{
+	if (mp)
+		UiSubGeomToWorking(savedata.uiMp);
+	else
+		UiSubGeomToWorking(savedata.uiFc);
+}
 
 #define EQ_FMT_VOL_NONE   0
 #define EQ_FMT_VOL_KPI    1

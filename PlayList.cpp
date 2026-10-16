@@ -13050,6 +13050,7 @@ void CPlayList::plugs(CString fff, playlistdata *p,TCHAR* kpi, BYTE& kv)
 		   MIDI 優先を切り替えると全 MIDI 行の引き直しで UI スレッドが数秒止まっていた。 */
 		if (savedata.midPlayPrefer == 0 && ComposerIsSeqExt(fff)) {
 			int pick = -1;
+			int best = -1;
 			BYTE kvS = 0;
 			for (int i = 0; i < kpicnt; i++) {
 				if (plugkind[i] != PLUGKIND_KPI || kpichk[i] != 1) continue;
@@ -13058,12 +13059,18 @@ void CPlayList::plugs(CString fff, playlistdata *p,TCHAR* kpi, BYTE& kv)
 				const int sas = (leaf.Find(L"kbsasami.kpi") >= 0) ? 1 : 0;
 				const int fm = (leaf.Find(L"kbfmmidi.kpi") >= 0) ? 1 : 0;
 				if (!sas && !fm) continue;
-				if (pick < 0 || sas) {
+				int score = sas ? 20 : 0;
+#ifdef _WIN64
+				if (kpiarch[i] == 64) score += 10;
+				else if (kpiarch[i] == 32) score += 1;
+#else
+				if (kpiarch[i] == 32) score += 10;
+				else if (kpiarch[i] == 64) score += 1;
+#endif
+				if (score > best) {
+					best = score;
 					pick = i;
-					kvS = 0;
 				}
-				if (sas && kpiarch[i] != 64)
-					break;
 			}
 			if (pick >= 0) {
 				_tcscpy(p->fol, fff);
@@ -13098,6 +13105,7 @@ void CPlayList::plugs(CString fff, playlistdata *p,TCHAR* kpi, BYTE& kv)
 		wantExt.MakeLower();
 		int pick = -1;
 		BYTE kvS = 0;
+		int best = -1;
 		for (int i = 0; i < kpicnt; i++) {
 			if (plugkind[i] != PLUGKIND_KPI || kpichk[i] != 1) continue;
 			int hit = 0;
@@ -13111,14 +13119,18 @@ void CPlayList::plugs(CString fff, playlistdata *p,TCHAR* kpi, BYTE& kv)
 				}
 			}
 			if (!hit) continue;
-			if (pick < 0) {
+			int score = 0;
+#ifdef _WIN64
+			if (kpiarch[i] == 64) score += 10;
+			else if (kpiarch[i] == 32) score += 1;
+#else
+			if (kpiarch[i] == 32) score += 10;
+			else if (kpiarch[i] == 64) score += 1;
+#endif
+			if (score > best) {
+				best = score;
 				pick = i;
 				kvS = kvHit;
-			}
-			if (kpiarch[i] != 64) {
-				pick = i;
-				kvS = kvHit;
-				break;
 			}
 		}
 		CString ftS = fff.Right(fff.GetLength() - fff.ReverseFind(L'\\') - 1);

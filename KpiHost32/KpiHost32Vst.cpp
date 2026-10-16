@@ -12,10 +12,15 @@ static int ClampSlot(int slot)
 	return (slot == 1) ? 1 : 0;
 }
 
-uint32_t VstHost32_Open(int slot, const wchar_t* midPath, const wchar_t* vstDllPath, const wchar_t* extraScanPath)
+uint32_t VstHost32_Open(int slot, const wchar_t* midPath, const wchar_t* vstDllPath, const wchar_t* extraScanPath,
+	const wchar_t* gsSoundFont, const wchar_t* xgSoundFont)
 {
 	slot = ClampSlot(slot);
 	if (!midPath || !midPath[0]) return KPIHOST32_STATUS_BAD_REQUEST;
+	if (gsSoundFont && gsSoundFont[0])
+		wcsncpy_s(savedata.vstGsSoundFont, _countof(savedata.vstGsSoundFont), gsSoundFont, _TRUNCATE);
+	if (xgSoundFont && xgSoundFont[0])
+		wcsncpy_s(savedata.vstXgSoundFont, _countof(savedata.vstXgSoundFont), xgSoundFont, _TRUNCATE);
 	int rescan = 0;
 	if (extraScanPath && extraScanPath[0]) {
 		if (_wcsicmp(savedata.vstExtraPath, extraScanPath) != 0) {

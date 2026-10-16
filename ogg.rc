@@ -201629,7 +201629,7 @@ BEGIN
     LTEXT           "演奏bit震度：",IDC_STATIC_R_BIT,7,150,62,8
     CONTROL         "24bitを使う",IDC_CHECK49,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,77,150,48,10
     CONTROL         "32bitを使う",IDC_CHECK51,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,125,150,48,10
-    LTEXT           "MAXサンプルレート：",IDC_STATIC_R_SAMP,7,161,70,14
+    LTEXT           "MAXサンプルレート：",IDC_STATIC_R_SAMP,7,161,70,8
     COMBOBOX        IDC_COMBO3,81,161,57,173,CBS_DROPDOWNLIST | CBS_OWNERDRAWVARIABLE | CBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP
     LTEXT           "Hz",IDC_STATIC_R_HZ,142,162,15,8
     LTEXT           ".SPC,.HES音量(kpi)",IDC_STATIC_R_SPC,7,176,100,8
@@ -203929,7 +203929,7 @@ END
 //
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 0,9,1,1550
+ FILEVERSION 0,9,1,1551
  PRODUCTVERSION 1,0,0,1
  FILEFLAGSMASK 0x3fL
 #ifdef _DEBUG
@@ -203947,10 +203947,10 @@ BEGIN
         BEGIN
             VALUE "Comments", "Falcom BGM Player & Media Player"
             VALUE "CompanyName", "Pre Prayer Power Soft"
-            VALUE "FileDescription", "Falcom BGM Player & Media Player Ver 0.9a Rel.2026.10.15 v1550"
-            VALUE "FileVersion", "0.9.1.1550"
+            VALUE "FileDescription", "Falcom BGM Player & Media Player Ver 0.9a Rel.2026.10.16 v1551"
+            VALUE "FileVersion", "0.9.1.1551"
             VALUE "InternalName", "ogg YS/ED bgm"
-            VALUE "LegalCopyright", "Copyright (C) 2026.10.15 v1550"
+            VALUE "LegalCopyright", "Copyright (C) 2026.10.16 v1551"
             VALUE "LegalTrademarks", "Pre Prayer Power Soft"
             VALUE "OriginalFilename", "oggYSEDbgm_uni_avx2.exe"
             VALUE "ProductName", "Falcom BGM Player & Media Player"

@@ -4,10 +4,10 @@
 // 強度を推定して簡易ピアノロール形式で描画する。
 //
 // スレッドモデル:
-//   - FeedPCM()          … 再生スレッドから呼ばれる。モノラル変換後リングバッファへ書込
-//   - AnalyzePlayCursor() … 同スレッドから呼ばれる。ワーカーへジョブをポスト
-//   - AnalysisWorkerLoop() … 専用ワーカースレッド。Goertzel 実行 → WM_PIANOROLL_ANALYSIS_DONE ポスト
-//   - OnAnalysisDone()   … UI スレッド。UpdateNoteStates/DetectExpressions を実行しフレーム確定
+//   - FeedPCM()          … 再生スレッドから呼ばれる。現状 no-op（リングは廃止）
+//   - RequestRingCapture() … UI/timerp はキックのみ。PCM 変換は載せない
+//   - AnalysisWorkerLoop() … 専用ワーカー。bufwav3 キャプチャ＋Goertzel → ANALYSIS_DONE
+//   - OnAnalysisDone()   … UI スレッド。Invalidate のみ
 //   - OnPaint() / OnTimer() … UI スレッド。確定済みフレームを GDI バッファへ描画
 //
 // 描画バッファ(メモリDC)は 3 種:
@@ -44,6 +44,8 @@ public:
     void AnalyzePlayCursorMono(const double* mono, int frameCount, int sampleRate);
     // PC音(ループバック)用: 短いWASAPIパケットを蓄積してから解析に渡す
     void FeedLoopbackMono(const double* mono, int frameCount, int sampleRate);
+    // UI/timerp はキックのみ。PCM 変換と Goertzel は解析ワーカー
+    void RequestRingCapture();
     // Sync 側の重い PCM 変換を、解析受付可能時だけに限定するための判定
     bool ShouldCaptureAnalyzeJob();
     // チャンネル別 dB を受け取りメーターバーへ反映(レベルメーターは Goertzel 非依存)
@@ -364,6 +366,7 @@ private:
     HANDLE           m_hAnalysisWake = NULL;   // SetEvent でワーカーを起こすイベント
     volatile LONG    m_workerStop = 0;    // 1 にするとワーカーが自己終了
     volatile LONG    m_jobPending = 0;    // InterlockedExchange で管理するジョブ有無フラグ
+    volatile LONG    m_captureNeed = 0;   // UI はキックのみ。ワーカーが bufwav3 を読む
     volatile LONG    m_analysisBusy = 0;  // ProcessAnalysisJob 実行中
     volatile LONG    m_analysisEpoch = 0; // Reset ごとに加算。古いジョブを破棄
     double           m_jobMono[WIN_SAMPLES_MAX];  // m_jobCs 保護下でコピーされる入力バッファ
@@ -419,6 +422,7 @@ private:
     bool EnsureAnalysisWorkerAlive();
     DWORD AnalysisWorkerLoop();
     bool ProcessAnalysisJob();  // ワーカースレッド内。ジョブバッファの Goertzel 解析を実行
+    bool ProcessRingCapture();  // ワーカースレッド内。bufwav3 キャプチャ＋解析（timerp に載せない）
     bool RunAnalysisJob(const double* mono, int frameCount, int sampleRate, LONG epochAtStart);
     static DWORD WINAPI AnalysisWorkerThreadEntry(LPVOID param);
     int  HistoryCountLocked() const;

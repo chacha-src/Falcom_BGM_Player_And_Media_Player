@@ -520,6 +520,10 @@ BOOL KpiInspectPluginBlob(int idx, CString& blob, int& winUi)
 	winUi = 0;
 	blob.Empty();
 	if (idx < 0 || idx >= kpicnt || idx >= 400) return FALSE;
+	/* 演奏中に CreateInstance/EnumConfig すると kbsasami の再生スレッドと
+	   同じ DLL を UI/timerp で取り合う。パスと既知キーは呼び出し側のフォールバック。 */
+	if (kpidec != NULL || g_kpiRemote)
+		return TRUE;
 #ifdef _WIN64
 	const BOOL remote = (kpiarch[idx] == 32) ? TRUE : FALSE;
 #else

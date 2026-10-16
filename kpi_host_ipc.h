@@ -47,7 +47,7 @@ enum KPIHOST32_CMD : uint32_t
 	// Winamp の Config をホスト側でモーダル表示。[u32 kind][wstring path]
 	KPIHOST32_CMD_PLUGIN_UI = 16,
 	// プレイリストの .mid を x64 VST で鳴らす（曲ファイル再生）。スロット 0/1 はクロスフェード用。
-	KPIHOST32_CMD_VST_OPEN = 20,   // [u32 slot][u32 midChars][mid][u32 dllChars][dll][u32 extraChars][extra]
+	KPIHOST32_CMD_VST_OPEN = 20,   // [u32 slot][u32 midChars][mid][u32 dllChars][dll][u32 extraChars][extra] 任意で [u32 gsSfChars][gsSf][u32 xgSfChars][xgSf]
 	KPIHOST32_CMD_VST_RENDER = 21, // RenderReq.sessionId = スロット 0 または 1
 	KPIHOST32_CMD_VST_SEEK = 22,   // SeekReq.sessionId = スロット
 	KPIHOST32_CMD_VST_CLOSE = 23,  // 任意の U32 スロット。空ペイロードなら両方閉じる

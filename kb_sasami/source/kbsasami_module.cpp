@@ -11,7 +11,7 @@ static const DWORD kPluginVersion = 0x7FFFFFFF;
 #define KBSASAMI_VERSION_STR L"0x7FFFFFFF(Debug)"
 #else
 static const DWORD kPluginVersion = 1;
-#define KBSASAMI_VERSION_STR L"1.30b"
+#define KBSASAMI_VERSION_STR L"3.5.7"
 #endif
 
 static wchar_t g_desc[384];
@@ -697,6 +697,44 @@ BOOL WINAPI KbSasamiDecoderModule::EnumConfig(IKpiConfigEnumerator* pEnumerator)
 				L"XG VST2/VST3 DLL dosyasının tam yolu. Yalnızca raira=0 ve vst=1 iken kullanılır.\r\n"
 				L"XG parçası GS DLL'ine düşmez. juicysf / sfplugin yolları\r\n"
 				L"bu uygulamanın VST MIDI motoruyla aynı çalışır.") },
+		{ KPI_CFG_TYPE_STR, SEC_KBSASAMI, L"vstsoundfont_gs", L"kbsasami.vstsoundfont_gs",
+			L"", NULL, L"520", NULL, NULL,
+			KbsPick14(
+				L"raira=0 で juicysf 等を使うときの GS 側 SoundFont (.sf2) のフルパス。\r\n"
+				L"空なら DLL と同じフォルダの SGM*.sf2 を探す。vstfullpath_gs が juicysf.dll のとき使う。",
+				L"Full path of the GS SoundFont (.sf2) when raira=0 uses juicysf etc.\r\n"
+				L"Empty = look for SGM*.sf2 next to the DLL. Used with vstfullpath_gs=juicysf.dll.",
+				L"Chemin du SoundFont GS (.sf2) si raira=0 utilise juicysf.\r\nVide = SGM*.sf2 a cote de la DLL.",
+				L"Percorso SoundFont GS (.sf2) se raira=0 usa juicysf.\r\nVuoto = SGM*.sf2 accanto alla DLL.",
+				L"Ruta del SoundFont GS (.sf2) si raira=0 usa juicysf.\r\nVacio = SGM*.sf2 junto a la DLL.",
+				L"raira=0 에서 juicysf 를 쓸 때 GS SoundFont(.sf2) 전체 경로.\r\n비우면 DLL 옆 SGM*.sf2.",
+				L"raira=0 使用 juicysf 时的 GS SoundFont(.sf2) 全路径。\r\n空则在 DLL 旁找 SGM*.sf2。",
+				L"مسار SoundFont GS (.sf2) عند raira=0 مع juicysf.\r\nفارغ = SGM*.sf2 بجانب DLL.",
+				L"Полный путь GS SoundFont (.sf2) при raira=0 и juicysf.\r\nПусто = SGM*.sf2 рядом с DLL.",
+				L"Pfad der GS-SoundFont (.sf2) bei raira=0 mit juicysf.\r\nLeer = SGM*.sf2 neben der DLL.",
+				L"Caminho do SoundFont GS (.sf2) com raira=0 e juicysf.\r\nVazio = SGM*.sf2 ao lado da DLL.",
+				L"Pad van GS-SoundFont (.sf2) bij raira=0 met juicysf.\r\nLeeg = SGM*.sf2 naast de DLL.",
+				L"Pelna sciezka GS SoundFont (.sf2) przy raira=0 i juicysf.\r\nPuste = SGM*.sf2 obok DLL.",
+				L"raira=0 iken juicysf GS SoundFont (.sf2) tam yolu.\r\nBos = DLL yaninda SGM*.sf2.") },
+		{ KPI_CFG_TYPE_STR, SEC_KBSASAMI, L"vstsoundfont_xg", L"kbsasami.vstsoundfont_xg",
+			L"", NULL, L"520", NULL, NULL,
+			KbsPick14(
+				L"raira=0 で juicysf 等を使うときの XG 側 SoundFont (.sf2) のフルパス。\r\n"
+				L"空なら DLL と同じフォルダの SGM*.sf2。vstfullpath_xg と組で使う。",
+				L"Full path of the XG SoundFont (.sf2) when raira=0 uses juicysf etc.\r\n"
+				L"Empty = SGM*.sf2 next to the DLL. Pair with vstfullpath_xg.",
+				L"Chemin du SoundFont XG (.sf2) si raira=0 utilise juicysf.\r\nVide = SGM*.sf2 a cote de la DLL.",
+				L"Percorso SoundFont XG (.sf2) se raira=0 usa juicysf.\r\nVuoto = SGM*.sf2 accanto alla DLL.",
+				L"Ruta del SoundFont XG (.sf2) si raira=0 usa juicysf.\r\nVacio = SGM*.sf2 junto a la DLL.",
+				L"raira=0 에서 juicysf 를 쓸 때 XG SoundFont(.sf2) 전체 경로.\r\n비우면 DLL 옆 SGM*.sf2.",
+				L"raira=0 使用 juicysf 时的 XG SoundFont(.sf2) 全路径。\r\n空则在 DLL 旁找 SGM*.sf2。",
+				L"مسار SoundFont XG (.sf2) عند raira=0 مع juicysf.\r\nفارغ = SGM*.sf2 بجانب DLL.",
+				L"Полный путь XG SoundFont (.sf2) при raira=0 и juicysf.\r\nПусто = SGM*.sf2 рядом с DLL.",
+				L"Pfad der XG-SoundFont (.sf2) bei raira=0 mit juicysf.\r\nLeer = SGM*.sf2 neben der DLL.",
+				L"Caminho do SoundFont XG (.sf2) com raira=0 e juicysf.\r\nVazio = SGM*.sf2 ao lado da DLL.",
+				L"Pad van XG-SoundFont (.sf2) bij raira=0 met juicysf.\r\nLeeg = SGM*.sf2 naast de DLL.",
+				L"Pelna sciezka XG SoundFont (.sf2) przy raira=0 i juicysf.\r\nPuste = SGM*.sf2 obok DLL.",
+				L"raira=0 iken juicysf XG SoundFont (.sf2) tam yolu.\r\nBos = DLL yaninda SGM*.sf2.") },
 		{ KPI_CFG_TYPE_INT, SEC_KBSASAMI, KEY_FMMODE, L"kbsasami.fmmode",
 			L"2", NULL, NULL, NULL, NULL,
 			KbsPick14(

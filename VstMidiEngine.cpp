@@ -4842,11 +4842,16 @@ static void JuicyArmPart(AEffect* e, int drum, int bankMsb)
 	}
 	const int bank = xg ? 127 : 128;
 	JuicySetDrumParams(e, bank, 0);
+	/* GS で CC0=0 を出すと Bank=128 を上書きしてキットが消える。
+	   ノートは ch10。XG だけ MSB 127 を載せる。 */
 	MidiItem cc[3] = {};
-	cc[0].msg = 0xb0u | (0u << 8) | ((DWORD)(xg ? 127 : 0) << 16);
-	cc[1].msg = 0xb0u | (32u << 8);
-	cc[2].msg = 0xc0u;
-	SendVstEvents(e, cc, 3, 0);
+	int nc = 0;
+	if (xg) {
+		cc[nc++].msg = 0xb9u | (0u << 8) | (127u << 16);
+		cc[nc++].msg = 0xb9u | (32u << 8);
+	}
+	cc[nc++].msg = 0xc9u;
+	SendVstEvents(e, cc, nc, 0);
 }
 
 static int JuicyPartMsb(int sl, int unit, int p)
@@ -4904,6 +4909,25 @@ static void JuicySpawnParts(int unit, AEffect* primary, HMODULE mod, const wchar
 		}
 		TryBindSoundFont(path, e);
 		g_sfPart[sl][unit][p] = e;
+	}
+	if (!g_sfPart[sl][unit][9] && proc) {
+		AEffect* e9 = NULL;
+		DWORD seh9 = 0;
+		__try { e9 = proc(HostCallback); }
+		__except (seh9 = GetExceptionCode(), EXCEPTION_EXECUTE_HANDLER) { e9 = NULL; }
+		if (e9 && e9->magic == kEffectMagic && e9->dispatcher && e9->processReplacing) {
+			VstPlugDirBind(e9);
+			if (JuicyInitClone(e9)) {
+				TryBindSoundFont(path, e9);
+				g_sfPart[sl][unit][9] = e9;
+				EnsLog(L"juicy clone 9 retry ok");
+			} else {
+				JuicyCloseClone(e9);
+				EnsLog(L"juicy clone 9 retry init fail seh=0x%08X", seh9);
+			}
+		} else {
+			EnsLog(L"juicy clone 9 retry fail seh=0x%08X", seh9);
+		}
 	}
 	g_sfPartN[sl][unit] = 16;
 	int live = 0;
@@ -5106,11 +5130,17 @@ static void JuicyRackSlice(int unit, __int64 t0, int done, int nfr, float* l, fl
 			if (src[i].sample < a || src[i].sample >= b) continue;
 			if ((src[i].msg & 0xff) == 0xf0) continue;
 			if ((int)(src[i].msg & 0x0f) != p) continue;
-			tmp[nt] = src[i];
-			tmp[nt].msg = JuicyRemapCh0(src[i].msg);
 			const int st = (int)(src[i].msg & 0xf0);
 			const int d1 = (int)((src[i].msg >> 8) & 0x7f);
 			const int d2 = (int)((src[i].msg >> 16) & 0x7f);
+			if (g_sfDrum[sl][unit][p] && st == 0xb0 && (d1 == 0 || d1 == 32)
+				&& !(d1 == 0 && (d2 == 120 || d2 == 127)))
+				continue;
+			tmp[nt] = src[i];
+			if (g_sfDrum[sl][unit][p])
+				tmp[nt].msg = (src[i].msg & ~0x0fu) | 9u;
+			else
+				tmp[nt].msg = JuicyRemapCh0(src[i].msg);
 			if (st == 0xb0 && d1 == 0 && (d2 == 120 || d2 == 127)) {
 				const int was = g_sfDrum[sl][unit][p];
 				g_sfDrum[sl][unit][p] = 1;
@@ -5142,6 +5172,8 @@ static void JuicyRackSlice(int unit, __int64 t0, int done, int nfr, float* l, fl
 			RenderEffect(e, tl, tr, nfr - pos);
 			JuicyMixAdd(l + pos, r ? r + pos : l + pos, tl, tr, nfr - pos);
 		}
+		if (g_sfDrum[sl][unit][p])
+			JuicySetDrumParams(e, JuicyPartMsb(sl, unit, p), kit);
 	}
 }
 

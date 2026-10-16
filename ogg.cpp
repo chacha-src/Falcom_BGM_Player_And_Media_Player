@@ -2274,6 +2274,12 @@ BOOL COggApp::InitInstance()
 	if (datFileSize < (int)(offsetof(save, cemuGimic) + sizeof(savedata.cemuGimic))
 		|| (savedata.cemuGimic != 0 && savedata.cemuGimic != 1))
 		savedata.cemuGimic = 0;
+	if (datFileSize < (int)(offsetof(save, uiFc) + sizeof(savedata.uiFc))) {
+		savedata.uiFc.inited = 0;
+		savedata.uiMp.inited = 0;
+	}
+	UiSubGeomSeedIfNeeded();
+	UiSubGeomApplyMode(savedata.playerMode);
 	if (savedata.midPlayPrefer < 0 || savedata.midPlayPrefer > 2)
 		savedata.midPlayPrefer = 0;
 	/* UI パス欄は廃止。常に exe\\data（なければ hoot）。
@@ -2430,6 +2436,7 @@ BOOL COggApp::InitInstance()
 #else
 	if (ab.Open("oggYSEDbgm.dat", CFile::modeCreate | CFile::modeWrite | CFile::shareExclusive, NULL) == TRUE) {
 #endif
+		UiSubGeomFlushCurrent();
 		ab.Write(&savedata, sizeof(save));
 		ab.Close();
 #if _UNICODE
@@ -2467,6 +2474,7 @@ BOOL COggApp::InitInstance()
 #else
 		if (sf.Open("oggYSEDbgm.dat", CFile::modeCreate | CFile::modeWrite | CFile::shareExclusive, NULL) == TRUE) {
 #endif
+			UiSubGeomFlushCurrent();
 			sf.Write(&savedata, sizeof(save));
 			sf.Close();
 #if _UNICODE
@@ -2489,6 +2497,7 @@ BOOL COggApp::InitInstance()
 #else
 		if(ab.Open("oggYSEDbgm.dat",CFile::modeCreate | CFile::modeWrite | CFile::shareExclusive,NULL)==TRUE){
 #endif
+		UiSubGeomFlushCurrent();
 		ab.Write(&savedata,sizeof(save));
 		ab.Close();
 #if _UNICODE

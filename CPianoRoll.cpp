@@ -27,7 +27,7 @@ extern COggDlg* og;
 extern save savedata;
 extern int tempo;
 extern int pitch;
-void COggDlg_SyncPianoRollFast();
+BOOL COggDlg_FillPianoRollCapture(double* monoOut, int monoCap, int* outFrames, int* outRate, float* meterDb, int* meterCh);
 void COggDlg_ShowPianoRollTune();
 
 static int PrTuneClampPct(int v)
@@ -868,6 +868,7 @@ void CPianoRoll::PauseAnalysis()
     m_feedEnabled = false;
     InterlockedIncrement(&m_analysisEpoch);
     InterlockedExchange(&m_jobPending, 0);
+    InterlockedExchange(&m_captureNeed, 0);
     // Peek で SYNC/ANALYSIS_DONE を捨てる前に落とす。残ると以降の Post が永久に no-op になる。
     InterlockedExchange(&m_syncPosted, 0);
     InterlockedExchange(&m_analysisDonePosted, 0);
@@ -980,8 +981,12 @@ void CPianoRoll::SetChannelMeterDb(const float* dbPerChannel, int channelCount)
     if (meterChanged) {
         m_meterDirty = true;
         // 全面 Invalidate するとロール再描画にメーターが引きずられて鈍る。帯だけ。
-        if (::IsWindow(m_hWnd) && !m_paintDisabled)
-            InvalidateMeterStrip();
+        // ワーカーから来たときは Invalidate せず dirty だけ。UI の PumpSyncNow が塗る。
+        if (::IsWindow(m_hWnd) && !m_paintDisabled) {
+            const DWORD tid = GetWindowThreadProcessId(m_hWnd, NULL);
+            if (tid == GetCurrentThreadId())
+                InvalidateMeterStrip();
+        }
     }
 }
 
@@ -1520,12 +1525,25 @@ bool CPianoRoll::ShouldCaptureAnalyzeJob()
     if (!m_feedEnabled) return false;
     if (InterlockedCompareExchange(&m_analysisBusy, 0, 0) != 0) return false;
     if (InterlockedCompareExchange(&m_jobPending, 0, 0) != 0) return false;
+    if (InterlockedCompareExchange(&m_captureNeed, 0, 0) != 0) return false;
     if (m_lastAnalyzeTick != 0) {
         const DWORD now = GetTickCount();
         if ((now - m_lastAnalyzeTick) < EffectiveAnalyzeMinMs())
             return false;
     }
     return true;
+}
+
+void CPianoRoll::RequestRingCapture()
+{
+    if (savedata.mpLoopbackScore) return;
+    ResumePlaybackFeed();
+    if (!ShouldCaptureAnalyzeJob()) return;
+    if (!m_hAnalysisWake) return;
+    const DWORD now = GetTickCount();
+    m_lastAnalyzeTick = now;
+    InterlockedExchange(&m_captureNeed, 1);
+    SetEvent(m_hAnalysisWake);
 }
 
 // 窓掛け済みバッファから Goertzel 解析を実行し m_rawStrengths を更新する。
@@ -4875,7 +4893,7 @@ void CPianoRoll::PumpSyncNow()
 {
     // VSYNC ティックが周期。GetTickCount 間引きは 16ms 粒度で半速/欠フレームになる。
     if (!::IsWindow(m_hWnd) || m_paintDisabled) return;
-    COggDlg_SyncPianoRollFast();
+    RequestRingCapture();
     EnterCriticalSection(&m_cs);
     PushDisplayFrames();
     int pending = m_framesPending;
@@ -4914,7 +4932,7 @@ LRESULT CPianoRoll::OnSyncRequest(WPARAM, LPARAM)
         InterlockedExchange(&m_syncPosted, 0);
         return 0;
     }
-    COggDlg_SyncPianoRollFast();
+    RequestRingCapture();
     InterlockedExchange(&m_syncPosted, 0);
     return 0;
 }
@@ -5072,6 +5090,10 @@ DWORD CPianoRoll::AnalysisWorkerLoop()
             break;
 
         bool didWork = false;
+        if (InterlockedExchange(&m_captureNeed, 0) == 1) {
+            if (ProcessRingCapture())
+                didWork = true;
+        }
         while (InterlockedCompareExchange(&m_jobPending, 0, 1) == 1) {
             if (InterlockedCompareExchange(&m_workerStop, 0, 0) != 0)
                 break;
@@ -5098,6 +5120,64 @@ DWORD CPianoRoll::AnalysisWorkerLoop()
         }
     }
     return 0;
+}
+
+bool CPianoRoll::ProcessRingCapture()
+{
+    InterlockedExchange(&m_analysisBusy, 1);
+    const LONG epochAtStart = InterlockedCompareExchange(&m_analysisEpoch, 0, 0);
+
+    int frameCount = 0;
+    int sampleRate = 44100;
+    int meterCh = 0;
+    float meterDb[PIANO_METER_CH_MAX];
+    for (int i = 0; i < PIANO_METER_CH_MAX; ++i)
+        meterDb[i] = -60.0f;
+
+    bool captured = false;
+    if (m_feedEnabled &&
+        InterlockedCompareExchange(&m_analysisEpoch, 0, 0) == epochAtStart) {
+        __try {
+            captured = COggDlg_FillPianoRollCapture(
+                m_workerMonoScratch, WIN_SAMPLES_MAX,
+                &frameCount, &sampleRate, meterDb, &meterCh) != FALSE;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER) {
+            captured = false;
+        }
+    }
+
+    bool ok = false;
+    if (captured &&
+        m_feedEnabled &&
+        InterlockedCompareExchange(&m_analysisEpoch, 0, 0) == epochAtStart) {
+        SetChannelMeterDb(meterDb, meterCh);
+        sampleRate = CapAnalyzeSampleRate(sampleRate);
+        if (frameCount > WIN_SAMPLES_MAX) frameCount = WIN_SAMPLES_MAX;
+        if (frameCount >= MinAnalyzeFrameCount(sampleRate, frameCount) && sampleRate >= 8000) {
+            __try {
+                ok = RunAnalysisJob(m_workerMonoScratch, frameCount, sampleRate, epochAtStart);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER) {
+                ok = false;
+            }
+            if (ok &&
+                m_feedEnabled &&
+                InterlockedCompareExchange(&m_analysisEpoch, 0, 0) == epochAtStart) {
+                EnterCriticalSection(&m_cs);
+                __try {
+                    PublishDetectResults();
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER) {
+                    ok = false;
+                }
+                LeaveCriticalSection(&m_cs);
+            }
+        }
+    }
+
+    InterlockedExchange(&m_analysisBusy, 0);
+    return ok;
 }
 
 // ジョブバッファをローカルにコピーしてから m_jobCs を解放し、

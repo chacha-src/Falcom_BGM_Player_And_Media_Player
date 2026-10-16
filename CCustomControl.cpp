@@ -7917,9 +7917,23 @@ BEGIN_MESSAGE_MAP(CCustomStatic, CStatic)
     ON_MESSAGE(WM_SETTEXT, OnSetText)
     ON_MESSAGE(WM_GETTEXT, OnGetText)
     ON_MESSAGE(WM_GETTEXTLENGTH, OnGetTextLength)
+    ON_WM_RBUTTONUP()
 END_MESSAGE_MAP()
 
 // ラベル。ガラス上はクロマキー、ソリッド指定/Opaque ホストでは不透明。!@ 書式セグメント対応。
+void CCustomStatic::OnRButtonUp(UINT nFlags, CPoint point)
+{
+    CWnd* pParent = GetParent();
+    if (pParent && pParent->GetSafeHwnd()) {
+        CPoint sp = point;
+        ClientToScreen(&sp);
+        pParent->ScreenToClient(&sp);
+        pParent->SendMessage(WM_RBUTTONUP, (WPARAM)nFlags, MAKELPARAM(sp.x, sp.y));
+        return;
+    }
+    CStatic::OnRButtonUp(nFlags, point);
+}
+
 CCustomStatic::CCustomStatic()
     : m_bAutoDelete(FALSE),
     m_clrGradStart(RGB(255, 255, 255)), m_clrGradEnd(RGB(255, 255, 255)),
@@ -17954,6 +17968,8 @@ BEGIN_MESSAGE_MAP(CCustomGroupBox, CButton)
     ON_MESSAGE(WM_PRINTCLIENT, OnPrintClient)
     ON_WM_ERASEBKGND()
     ON_WM_TIMER()
+    ON_WM_RBUTTONUP()
+    ON_WM_CONTEXTMENU()
 END_MESSAGE_MAP()
 
 // CCustomGroupBox のコンストラクタ。描画フラグとブラシを初期化。
@@ -17978,6 +17994,30 @@ void CCustomGroupBox::PreSubclassWindow()
     ModifyStyle(0, WS_CLIPSIBLINGS);
     if (CCC_ThemeFaceOf().gloss >= 6)
         SetTimer(kGroupSoftTimerId, 500, NULL);
+}
+
+void CCustomGroupBox::OnRButtonUp(UINT nFlags, CPoint point)
+{
+    CWnd* parent = GetParent();
+    if (parent && ::IsWindow(parent->GetSafeHwnd())) {
+        ClientToScreen(&point);
+        parent->ScreenToClient(&point);
+        parent->SendMessage(WM_RBUTTONUP, nFlags, MAKELPARAM(point.x, point.y));
+        return;
+    }
+    CButton::OnRButtonUp(nFlags, point);
+}
+
+void CCustomGroupBox::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
+{
+    CWnd* parent = GetParent();
+    if (parent && ::IsWindow(parent->GetSafeHwnd())) {
+        if (point.x == -1 && point.y == -1)
+            ::GetCursorPos(&point);
+        parent->SendMessage(WM_CONTEXTMENU, (WPARAM)parent->GetSafeHwnd(),
+            MAKELPARAM(point.x, point.y));
+        return;
+    }
 }
 
 // kGroupSoftTimerId: 枠の ♡ / Soft を 500ms で回す。

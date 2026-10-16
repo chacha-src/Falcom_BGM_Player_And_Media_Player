@@ -15,7 +15,8 @@ struct KbVstSession {
 };
 
 int KbVstSessionOpen(const void* smf, uint32_t smfLen,
-	const wchar_t* gsPath, const wchar_t* xgPath, KbVstSession* out);
+	const wchar_t* gsPath, const wchar_t* xgPath, KbVstSession* out,
+	const wchar_t* gsSoundFont = NULL, const wchar_t* xgSoundFont = NULL);
 int KbVstSessionRender(KbVstSession* s, void* pcm, uint32_t bytes,
 	uint32_t* got, uint32_t* eof);
 int KbVstSessionSeek(KbVstSession* s, uint64_t sample);

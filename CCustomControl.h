@@ -959,6 +959,7 @@ protected:
     afx_msg LRESULT OnSetText(WPARAM, LPARAM);
     afx_msg LRESULT OnGetText(WPARAM, LPARAM);
     afx_msg LRESULT OnGetTextLength(WPARAM, LPARAM);
+    afx_msg void OnRButtonUp(UINT nFlags, CPoint point);
 
     DECLARE_MESSAGE_MAP()
 
@@ -2036,6 +2037,8 @@ protected:
     afx_msg LRESULT OnPrintClient(WPARAM, LPARAM);
     afx_msg BOOL OnEraseBkgnd(CDC*);
     afx_msg void OnTimer(UINT_PTR nIDEvent);
+    afx_msg void OnRButtonUp(UINT nFlags, CPoint point);
+    afx_msg void OnContextMenu(CWnd* pWnd, CPoint point);
 
     DECLARE_MESSAGE_MAP()
 

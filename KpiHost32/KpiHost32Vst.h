@@ -11,7 +11,8 @@
 
 // SMF を開き VSTi を載せる。vstDllPath=GS 側、extraScanPath=XG 側（空なら savedata を使う）。
 // 戻り: KPIHOST32_STATUS_*
-uint32_t VstHost32_Open(int slot, const wchar_t* midPath, const wchar_t* vstDllPath, const wchar_t* extraScanPath);
+uint32_t VstHost32_Open(int slot, const wchar_t* midPath, const wchar_t* vstDllPath, const wchar_t* extraScanPath,
+	const wchar_t* gsSoundFont = NULL, const wchar_t* xgSoundFont = NULL);
 // PCM を読む。eof には KPIHOST32_EOF_* を OR する（短い読み／MIDI 未消化／SysEx・CC）。
 uint32_t VstHost32_Render(int slot, uint32_t bytesWanted, uint8_t* dest, uint32_t destCap, uint32_t& gotBytes, uint32_t& eof);
 uint32_t VstHost32_Seek(int slot, uint64_t posSample); // サンプル絶対位置

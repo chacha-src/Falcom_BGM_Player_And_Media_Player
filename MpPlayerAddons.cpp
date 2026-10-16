@@ -7968,9 +7968,9 @@ protected:
 			savedata.mpBeatGrid = savedata.mpBeatGrid ? 0 : 1;
 			MpPersistSavedataQuick();
 			if (mp && mp->m_seek.GetSafeHwnd()) {
-				const float bpm = savedata.mpDetectedBpm > 0 ? (float)savedata.mpDetectedBpm : 120.f;
+				const BOOL gridOn = (savedata.mpBeatGrid && savedata.mpDetectedBpm > 0) ? TRUE : FALSE;
 				const int meter = savedata.mpDetectedMeterNum >= 2 ? savedata.mpDetectedMeterNum : 4;
-				mp->m_seek.SetBeatGrid(bpm, savedata.mpBeatGrid ? TRUE : FALSE, savedata.mpBeatGridOffsetMs, meter);
+				mp->m_seek.SetBeatGrid(gridOn ? (float)savedata.mpDetectedBpm : 0.f, gridOn, savedata.mpBeatGridOffsetMs, meter);
 			}
 		} else if (cmd == 111) {
 			OnRemeasure();

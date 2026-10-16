@@ -105,6 +105,7 @@ public:
 	enum { IDD = IDD_PLAYPROP_TAB3 };
 	CPlayProperty_tab3(CWnd* pParent = NULL);
 	int m_kpiIdx;
+	BOOL m_pluginLoaded;
 	void LoadPlugin(int idx);
 	void SaveCfgRow(int row);
 	friend class CPlayPropCfgList;
@@ -186,6 +187,7 @@ protected:
 
 	void LayoutPages();
 	void ShowPage(int idx);
+	void EnsurePage(int page);
 
 	CCustomTabCtrl m_tabs;
 	CCustomStandardButton m_ok, m_cancel, m_apply;

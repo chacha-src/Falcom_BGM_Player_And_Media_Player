@@ -38,6 +38,8 @@ private:
 	int m_foreignVst; // raira=0 かつ vst=1。専用ホストが PCM を返す
 	wchar_t m_vstGs[520];
 	wchar_t m_vstXg[520];
+	wchar_t m_vstGsSf[520];
+	wchar_t m_vstXgSf[520];
 	KbVstSession m_vstSess;
 	int m_mapDefault; // kbsasami.midimode (0=auto .. 19)
 	int m_fmModeDefault; // kbsasami.fmmode 0=BEEP 1=OPN 2=OPNA

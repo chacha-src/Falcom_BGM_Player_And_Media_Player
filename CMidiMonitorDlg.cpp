@@ -3102,17 +3102,19 @@ int MidiSmfFillLrc(const wchar_t* path, CString* lines, DWORD* cs, int cap)
 				if (type == 0x51 && ln >= 3 && nItem < kMax) {
 					MidiLrcItem& it = items[nItem++];
 					it.tick = absTick;
-					it.order = order++;
+					it.order = -1000000 + order++;
 					it.tempo = (trk[0] << 16) | (trk[1] << 8) | trk[2];
 					if (it.tempo < 1) it.tempo = 500000;
 					it.text[0] = 0;
-				} else if (type == 0x05 && ln > 0 && nItem < kMax) {
+				} else if ((type == 0x05 || type == 0x01) && ln > 0 && nItem < kMax) {
 					MidiLrcItem& it = items[nItem++];
 					it.tick = absTick;
 					it.order = order++;
 					it.tempo = 0;
 					MidiLrcToWide(trk, (int)ln, it.text, 96);
-					if (MidiLrcBlank(it.text))
+					if (type == 0x01 && it.text[0] == L'@')
+						nItem--;
+					else if (MidiLrcBlank(it.text))
 						nItem--;
 				}
 				trk += ln;
@@ -3147,6 +3149,21 @@ int MidiSmfFillLrc(const wchar_t* path, CString* lines, DWORD* cs, int cap)
 	double sec = 0.0;
 	unsigned prev = 0;
 	unsigned tempo = 500000;
+	CString acc;
+	DWORD accCs = 0;
+	double accSec = -1.0;
+	auto flushAcc = [&]() {
+		if (acc.IsEmpty() || n >= cap - 1) {
+			acc.Empty();
+			accSec = -1.0;
+			return;
+		}
+		lines[n] = acc;
+		cs[n] = accCs;
+		n++;
+		acc.Empty();
+		accSec = -1.0;
+	};
 	for (int i = 0; i < nItem; ++i) {
 		const MidiLrcItem& it = items[i];
 		if (it.tick > prev)
@@ -3157,12 +3174,29 @@ int MidiSmfFillLrc(const wchar_t* path, CString* lines, DWORD* cs, int cap)
 			continue;
 		}
 		if (n >= cap - 1) break;
-		DWORD cent = (DWORD)(sec * 100.0 + 0.5);
-		if (n > 1 && cent < cs[n - 1]) cent = cs[n - 1];
-		lines[n] = it.text;
-		cs[n] = cent;
-		n++;
+		CString piece = it.text;
+		piece.Replace(L"\r", L"");
+		piece.Replace(L"\n", L"");
+		const BOOL newLine = (!piece.IsEmpty() && (piece[0] == L'/' || piece[0] == L'\\'));
+		piece.Remove(L'/');
+		piece.Remove(L'\\');
+		piece.Trim();
+		if (piece.IsEmpty()) {
+			if (newLine) flushAcc();
+			continue;
+		}
+		const BOOL gap = (accSec >= 0.0 && (sec - accSec) > 0.08);
+		if (acc.IsEmpty() || gap || newLine) {
+			if (!acc.IsEmpty()) flushAcc();
+			acc = piece;
+			accSec = sec;
+			accCs = (DWORD)(sec * 100.0 + 0.5);
+			if (n > 1 && accCs < cs[n - 1]) accCs = cs[n - 1];
+		} else {
+			acc += piece;
+		}
 	}
+	flushAcc();
 	free(items);
 	if (n < 2) return 0;
 	cs[n] = cs[n - 1] + 500;

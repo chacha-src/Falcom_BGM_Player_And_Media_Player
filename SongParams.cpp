@@ -792,8 +792,19 @@ void SongParams_RestoreBpmForCurrentSong()
 		return;
 
 	SongParam e;
-	if (!SongParams_FindCopy(list, path, md, r2, e) || e.detectedBpm <= 0)
+	if (!SongParams_FindCopy(list, path, md, r2, e) || e.detectedBpm <= 0) {
+		savedata.mpDetectedBpm = 0;
+		savedata.mpBpmCand[0] = savedata.mpBpmCand[1] = savedata.mpBpmCand[2] = 0;
+		savedata.mpBeatGrid = 0;
+		savedata.mpDetectedMeterNum = 0;
+		savedata.mpDetectedMeterDen = 0;
+		savedata.mpDetectedPulse = 0;
+		if (mp && ::IsWindow(mp->GetSafeHwnd()) && mp->m_seek.GetSafeHwnd()) {
+			mp->m_seek.SetBeatGrid(0.f, FALSE, savedata.mpBeatGridOffsetMs, 4);
+			mp->m_seek.Invalidate(FALSE);
+		}
 		return;
+	}
 
 	savedata.mpDetectedBpm = ClampI(e.detectedBpm, 0, 300);
 	savedata.mpBpmCand[0] = ClampI(e.bpmCand[0], 0, 300);
@@ -809,7 +820,8 @@ void SongParams_RestoreBpmForCurrentSong()
 	savedata.mpDetectedPulse = e.pulse;
 	if (mp && ::IsWindow(mp->GetSafeHwnd()) && mp->m_seek.GetSafeHwnd()) {
 		const int meter = savedata.mpDetectedMeterNum >= 2 ? savedata.mpDetectedMeterNum : 4;
-		mp->m_seek.SetBeatGrid((float)savedata.mpDetectedBpm, savedata.mpBeatGrid ? TRUE : FALSE, savedata.mpBeatGridOffsetMs, meter);
+		const BOOL gridOn = (savedata.mpBeatGrid && savedata.mpDetectedBpm > 0) ? TRUE : FALSE;
+		mp->m_seek.SetBeatGrid(gridOn ? (float)savedata.mpDetectedBpm : 0.f, gridOn, savedata.mpBeatGridOffsetMs, meter);
 		mp->m_seek.Invalidate(FALSE);
 	}
 }
@@ -1134,6 +1146,13 @@ void SongParams_ApplyEntryToMain(const SongParam& e)
 		savedata.mpDetectedMeterNum = e.meterNum;
 		savedata.mpDetectedMeterDen = e.meterDen;
 		savedata.mpDetectedPulse = e.pulse;
+	} else {
+		savedata.mpDetectedBpm = 0;
+		savedata.mpBpmCand[0] = savedata.mpBpmCand[1] = savedata.mpBpmCand[2] = 0;
+		savedata.mpBeatGrid = 0;
+		savedata.mpDetectedMeterNum = 0;
+		savedata.mpDetectedMeterDen = 0;
+		savedata.mpDetectedPulse = 0;
 	}
 	savedata.mpKeyRoot = e.keyRoot;
 	savedata.mpKeyMinor = e.keyMinor ? 1 : 0;
@@ -1164,9 +1183,9 @@ void SongParams_ApplyEntryToMain(const SongParam& e)
 		og->m_AnalyzerDlg->ApplySpecStyleExternal(savedata.analyzerspecstyle);
 
 	if (mp && ::IsWindow(mp->GetSafeHwnd()) && mp->m_seek.GetSafeHwnd()) {
-		const float bpm = savedata.mpDetectedBpm > 0 ? (float)savedata.mpDetectedBpm : 120.f;
+		const BOOL gridOn = (savedata.mpBeatGrid && savedata.mpDetectedBpm > 0) ? TRUE : FALSE;
 		const int meter = savedata.mpDetectedMeterNum >= 2 ? savedata.mpDetectedMeterNum : 4;
-		mp->m_seek.SetBeatGrid(bpm, savedata.mpBeatGrid ? TRUE : FALSE, savedata.mpBeatGridOffsetMs, meter);
+		mp->m_seek.SetBeatGrid(gridOn ? (float)savedata.mpDetectedBpm : 0.f, gridOn, savedata.mpBeatGridOffsetMs, meter);
 		mp->m_seek.Invalidate(FALSE);
 	}
 }

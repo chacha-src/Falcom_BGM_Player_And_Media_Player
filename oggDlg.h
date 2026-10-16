@@ -152,6 +152,7 @@ public:
 	void Speana(BOOL bPaintBars = TRUE, BOOL bFillLevels = FALSE);
 	void SyncPianoRollFromPlayCursor();
 	void SyncPianoRollFast();
+	bool FillPianoRollCapture(double* monoOut, int monoCap, int* outFrames, int* outRate, float* meterDb, int* meterCh);
 	void SyncAnalyzerFromPlayCursor();
 	void TogglePianoRoll();
 	void ToggleAnalyzer();
@@ -523,6 +524,7 @@ public:
 };
 
 void COggDlg_SyncPianoRollFast();
+BOOL COggDlg_FillPianoRollCapture(double* monoOut, int monoCap, int* outFrames, int* outRate, float* meterDb, int* meterCh);
 void COggDlg_ShowPianoRollTune();
 void COggDlg_SyncAnalyzerFast();
 BOOL COgg_IsEqualizerVisible();

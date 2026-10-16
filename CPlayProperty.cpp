@@ -200,13 +200,26 @@ int CPlayProperty::FindKpiForPath(LPCTSTR path)
 	if (dot < 0) return -1;
 	CString extPart = media.Mid(dot);
 	extPart.MakeLower();
-	int pick = -1;
+	int pick = -1, best = -1;
 	for (int i = 0; i < kpicnt && i < 400; ++i) {
+		int hit = 0;
 		for (int j = 0; j < 299; ++j) {
 			if (ext[i][j].IsEmpty()) break;
-			if (ext[i][j].CompareNoCase(extPart) != 0) continue;
-			if (pick < 0) pick = i;
-			if (kpichk[i]) return i;
+			if (ext[i][j].CompareNoCase(extPart) == 0) { hit = 1; break; }
+		}
+		if (!hit) continue;
+		int score = 0;
+		if (kpichk[i]) score += 100;
+#ifdef _WIN64
+		if (kpiarch[i] == 64) score += 10;
+		else if (kpiarch[i] == 32) score += 1;
+#else
+		if (kpiarch[i] == 32) score += 10;
+		else if (kpiarch[i] == 64) score += 1;
+#endif
+		if (score > best) {
+			best = score;
+			pick = i;
 		}
 	}
 	return pick;
@@ -895,7 +908,7 @@ IMPLEMENT_DYNAMIC(CPlayProperty_tab3, CCustomDialog)
 
 CPlayProperty_tab3::CPlayProperty_tab3(CWnd* pParent)
 	: CCustomDialog(CPlayProperty_tab3::IDD, pParent)
-	, m_kpiIdx(-1), m_bFillingDetail(FALSE), m_inN(0), m_cfgN(0)
+	, m_kpiIdx(-1), m_bFillingDetail(FALSE), m_pluginLoaded(FALSE), m_inN(0), m_cfgN(0)
 {
 	ZeroMemory(m_cfgType, sizeof(m_cfgType));
 	ZeroMemory(m_cfgLock, sizeof(m_cfgLock));
@@ -941,8 +954,6 @@ BOOL CPlayProperty_tab3::OnInitDialog()
 	m_cfg.SetLiveEditColumn(1);
 	SetDlgItemText(IDC_PP_INFO_L, LL14(L"情報", L"Info", L"Infos", L"Info", L"Info", L"정보", L"信息", L"معلومات", L"Сведения", L"Info", L"Info", L"Info", L"Info", L"Bilgi"));
 	SetDlgItemText(IDC_PP_CFG_L, LL14(L"設定", L"Settings", L"Reglages", L"Impostazioni", L"Ajustes", L"설정", L"设置", L"إعدادات", L"Настройки", L"Einstellungen", L"Ajustes", L"Instellingen", L"Ustawienia", L"Ayarlar"));
-	if (m_kpiIdx >= 0)
-		LoadPlugin(m_kpiIdx);
 	return TRUE;
 }
 
@@ -1449,7 +1460,8 @@ BOOL CPlayProperty::OnInitDialog()
 	m_tab3.m_kpiIdx = m_kpiIdx;
 	m_tab4.m_pl = m_pl;
 
-	/* Create 中の WS_VISIBLE 初回 WM_PAINT は fixer 未装着でガラス穴になる。 */
+	/* Create 中の WS_VISIBLE 初回 WM_PAINT は fixer 未装着でガラス穴になる。
+	   全ページをここで作る。後から Create するとアクリル抜けする。 */
 	SetRedraw(FALSE);
 	m_tab1.Create(IDD_PLAYPROP_TAB1, this);
 	m_tab2.Create(IDD_PLAYPROP_TAB2, this);
@@ -1520,10 +1532,27 @@ void CPlayProperty::LayoutPages()
 	}
 }
 
+void CPlayProperty::EnsurePage(int page)
+{
+	if (page < 0 || page > 3) return;
+	CCustomDialog* pages[4] = { &m_tab1, &m_tab2, &m_tab3, &m_tab4 };
+	const UINT ids[4] = { IDD_PLAYPROP_TAB1, IDD_PLAYPROP_TAB2, IDD_PLAYPROP_TAB3, IDD_PLAYPROP_TAB4 };
+	if (!pages[page]->GetSafeHwnd()) {
+		pages[page]->Create(ids[page], this);
+		LayoutPages();
+		SendMessage(CCC_MSG_REAPPLY_OPAQUE_FIXERS);
+	}
+	if (page == 2 && m_kpiIdx >= 0 && !m_tab3.m_pluginLoaded) {
+		m_tab3.m_pluginLoaded = TRUE;
+		m_tab3.LoadPlugin(m_kpiIdx);
+	}
+}
+
 void CPlayProperty::ShowPage(int tabSel)
 {
 	int page = tabSel;
 	if (m_kpiIdx < 0 && tabSel >= 2) page = 3;
+	EnsurePage(page);
 	CCustomDialog* pages[4] = { &m_tab1, &m_tab2, &m_tab3, &m_tab4 };
 	for (int i = 0; i < 4; ++i) {
 		if (i == page) continue;
@@ -1576,7 +1605,7 @@ BOOL CPlayProperty::ApplyChanges()
 			_tcscpy(m_pl->pc[idx].art, pc.art);
 			_tcscpy(m_pl->pc[idx].alb, pc.alb);
 		}
-		if (m_tab2.m_multi) {
+		if (m_tab2.m_multi && m_tab2.GetSafeHwnd()) {
 			m_tab2.WriteTags();
 			const size_t n = (m_batchIndices.size() < m_tab2.m_pcs.size()) ? m_batchIndices.size() : m_tab2.m_pcs.size();
 			for (size_t i = 0; i < n; ++i) {
@@ -1598,7 +1627,8 @@ BOOL CPlayProperty::ApplyChanges()
 			const CString folStored = PlStorePlaylistFol(pc.fol, m_pl->pc[idx].sub);
 			_tcscpy(m_pl->pc[idx].fol, folStored);
 		}
-		m_tab2.WriteTags();
+		if (m_tab2.GetSafeHwnd())
+			m_tab2.WriteTags();
 		if (idx >= 0 && idx < m_pl->playcnt) {
 			_tcscpy(m_pl->pc[idx].name, pc.name);
 			_tcscpy(m_pl->pc[idx].art, pc.art);

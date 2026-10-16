@@ -1002,6 +1002,21 @@ static bool IsExt(const CString& ext, LPCTSTR suffix)
 	return ext.GetLength() >= (int)_tcslen(suffix) && ext.Right((int)_tcslen(suffix)) == suffix;
 }
 
+static bool IsChipOrMidiLikeExt(const CString& ext)
+{
+	static const LPCTSTR kSkip[] = {
+		_T(".fpy"), _T(".fpy2"), _T(".mpy"), _T(".mpw2"), _T(".mpsmv"),
+		_T(".mid"), _T(".midi"), _T(".kar"), _T(".rmi"), _T(".smf"),
+		_T(".rcp"), _T(".r36"), _T(".g36"), _T(".g18"), _T(".mcp"),
+		_T(".mtd"), _T(".mff"), _T(".seq"), _T(".eup"), _T(".sng"), _T(".zms")
+	};
+	for (int i = 0; i < (int)(sizeof(kSkip) / sizeof(kSkip[0])); ++i) {
+		if (IsExt(ext, kSkip[i]))
+			return true;
+	}
+	return false;
+}
+
 // ---- タグ書き込み共通 ----
 
 static CStringA CStringToUtf8(const CString& s)
@@ -2052,6 +2067,8 @@ void ReadFileTagFields(LPCTSTR path, FileTagFields& out)
 		ReadDsdTags(path, ext, out);
 		return;
 	}
+	if (IsChipOrMidiLikeExt(ext))
+		return;
 
 	FileTagFields id3;
 	ReadId3Tags(path, id3);
@@ -3196,8 +3213,9 @@ int ExtractCoverArt(LPCTSTR path, BYTE* buf, int bufCap, char* mimeOut, int mime
 	else if (IsExt(ext, _T(".dsf")))
 		n = CoverFromDsf(path, buf, bufCap, mimeOut, mimeCap);
 
-	// mp3 / dff / wsd / tta / ape / その他は ID3v2 を総当り
-	if (n == 0)
+	// mp3 / dff / wsd / tta / ape / その他は ID3v2 を総当り。
+	// FPY/MIDI 系はタグ無し。演奏中に同じファイルを UI が掃くと kbsasami と取り合う。
+	if (n == 0 && !IsChipOrMidiLikeExt(ext))
 		n = CoverFromId3v2Anywhere(path, buf, bufCap, mimeOut, mimeCap);
 	if (n == 0)
 		n = CoverFromSidecar(path, buf, bufCap, mimeOut, mimeCap);

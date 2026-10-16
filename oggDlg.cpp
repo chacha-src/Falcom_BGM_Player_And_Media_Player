@@ -3274,6 +3274,7 @@ extern int gameon;
 
 void MpPersistSavedataQuick()
 {
+	UiSubGeomFlushCurrent();
 	TCHAR tmp[1024];
 	_tgetcwd(tmp, 1000);
 	DatArc_Chdir();
@@ -9590,8 +9591,7 @@ static void OggApplySidecarLrc(const CString& path, int pickCs = -1, int doTick 
 			og->lrcnum = nLy;
 	}
 	if (og->lrcnum >= 2) {
-		extern UINT ttt;
-		const UINT now = (pickCs >= 0) ? (UINT)pickCs : ttt;
+		const UINT now = (pickCs >= 0) ? (UINT)pickCs : OggGetLyricsPlayCentis();
 		int lp = 0;
 		for (int i = 0; i < og->lrcnum - 1; ++i) {
 			if (og->lrctm[i] <= now && og->lrctm[i + 1] > now) {
@@ -33961,6 +33961,12 @@ void COggDlg_SyncPianoRollFast()
 	og->SyncPianoRollFast();
 }
 
+BOOL COggDlg_FillPianoRollCapture(double* monoOut, int monoCap, int* outFrames, int* outRate, float* meterDb, int* meterCh)
+{
+	if (!og) return FALSE;
+	return og->FillPianoRollCapture(monoOut, monoCap, outFrames, outRate, meterDb, meterCh) ? TRUE : FALSE;
+}
+
 BOOL COgg_IsEqualizerVisible()
 {
 	if (!og || !og->m_EqualizerDlg) return FALSE;
@@ -34118,14 +34124,28 @@ void COggDlg::SyncAnalyzerFromPlayCursor()
 
 void COggDlg::SyncPianoRollFromPlayCursor()
 {
+	/* timerp/UI はキックのみ。PCM 変換は解析ワーカー（FillPianoRollCapture）。 */
 	if (playf == 0 || thn1 || plf != 1) return;
-	if (ps == 1) return; // 一時停止中は履歴スクロール・解析更新を止める
-	if (!::IsWindow(m_PianoRollDlg->GetSafeHwnd())) return;
-	// PC音譜面化時はループバック側が解析を供給（再生フィードと二重書きしない）
+	if (ps == 1) return;
+	if (!m_PianoRollDlg || !::IsWindow(m_PianoRollDlg->GetSafeHwnd())) return;
 	if (savedata.mpLoopbackScore) return;
-	if (!bufwav3) return;
+	m_PianoRollDlg->RequestRingCapture();
+}
+
+bool COggDlg::FillPianoRollCapture(double* monoOut, int monoCap, int* outFrames, int* outRate, float* meterDb, int* meterChOut)
+{
+	if (outFrames) *outFrames = 0;
+	if (outRate) *outRate = 44100;
+	if (meterChOut) *meterChOut = 0;
+	if (!monoOut || monoCap < 64) return false;
+	if (playf == 0 || thn1 || plf != 1) return false;
+	if (ps == 1) return false;
+	if (!m_PianoRollDlg || !::IsWindow(m_PianoRollDlg->GetSafeHwnd())) return false;
+	// PC音譜面化時はループバック側が解析を供給（再生フィードと二重書きしない）
+	if (savedata.mpLoopbackScore) return false;
+	if (!bufwav3) return false;
 	// DS 未生成中は解析しない（形式切替の隙間で旧パラメータを使わない）
-	if (!m_dsb) return;
+	if (!m_dsb) return false;
 
 	double sampleRate;
 	int channels;
@@ -34145,22 +34165,20 @@ void COggDlg::SyncPianoRollFromPlayCursor()
 	if (bitDepth != 8 && bitDepth != 16 && bitDepth != 24 && bitDepth != 32)
 		bitDepth = abs(bitDepth);
 	if (bitDepth != 8 && bitDepth != 16 && bitDepth != 24 && bitDepth != 32)
-		return;
+		return false;
 
 	const int bytesPerSample = (bitDepth / 8) < 1 ? 2 : (bitDepth / 8);
 	const int bytesPerFrame = bytesPerSample * channels;
 	const int TOTAL_BUF_BYTES = (int)((g_ds_buffer_bytes > 0) ? g_ds_buffer_bytes : (ULONG)(OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM));
-	if (bytesPerFrame <= 0 || TOTAL_BUF_BYTES <= bytesPerFrame) return;
-
-	m_PianoRollDlg->ResumePlaybackFeed();
+	if (bytesPerFrame <= 0 || TOTAL_BUF_BYTES <= bytesPerFrame) return false;
 
 	ULONG playCur = 0, writeCur = 0;
 	{
 		DsOpTryLock ds;
 		if (!ds || !m_dsb)
-			return;
+			return false;
 		if (m_dsb->GetCurrentPosition(&playCur, &writeCur) != DS_OK)
-			return;
+			return false;
 	}
 	PlayCursor2 = playCur;
 	WriteCursor = writeCur;
@@ -34174,7 +34192,6 @@ void COggDlg::SyncPianoRollFromPlayCursor()
 	static char prRaw[CPianoRoll::RING_SIZE * 8 * 4];
 	static char meterRaw[16384 * 8 * 4];
 	static double prMono[CPianoRoll::RING_SIZE];
-	static double prMonoAnalyze[CPianoRoll::RING_SIZE];
 	static double chPeak[CPianoRoll::PIANO_METER_CH_MAX];
 	static double chSumSq[CPianoRoll::PIANO_METER_CH_MAX];
 
@@ -34264,12 +34281,11 @@ void COggDlg::SyncPianoRollFromPlayCursor()
 		if (level < 1e-9) chDb[ch] = -60.0f;
 		else chDb[ch] = (float)(20.0 * log10(level));
 	}
-	m_PianoRollDlg->SetChannelMeterDb(chDb, meterCh);
-
-	// 解析ビジー/スロットル中に ~8192ch 変換すると EQ/MP の UI が飢える。
-	// 受付可能時だけ重いキャプチャ＋モノラル化を行う。
-	if (!m_PianoRollDlg->ShouldCaptureAnalyzeJob())
-		return;
+	if (meterDb) {
+		for (int ch = 0; ch < meterCh; ++ch)
+			meterDb[ch] = chDb[ch];
+	}
+	if (meterChOut) *meterChOut = meterCh;
 
 	const int analyzeRate = CPianoRoll::CapAnalyzeSampleRate(srInt);
 	const int ringFrames = TOTAL_BUF_BYTES / bytesPerFrame;
@@ -34279,12 +34295,12 @@ void COggDlg::SyncPianoRollFromPlayCursor()
 	const int speanaFrames = CPianoRoll::ScaleWinSamples(speanaFramesRef, srInt);
 	const int capMargin = 128;
 	const int ringUsable = ringFrames - capMargin;
-	if (ringUsable <= 0) return;
+	if (ringUsable <= 0) return true;
 	// 解析は analyzeRate 基準。ソースが hi-res のときはダウンサンプル前提で必要フレームを換算。
 	const int minNeedAnalyze = CPianoRoll::MinAnalyzeFrameCount(analyzeRate, ringUsable);
 	int minNeedSrc = CPianoRoll::SourceFramesForAnalyze(minNeedAnalyze, srInt, analyzeRate);
 	if (minNeedSrc > ringUsable) minNeedSrc = ringUsable;
-	if (ringUsable < minNeedSrc) return;
+	if (ringUsable < minNeedSrc) return true;
 	int maxPrFrames = ringUsable;
 	if (speanaFrames > 0 && ringUsable > speanaFrames + minNeedSrc)
 		maxPrFrames = ringUsable - speanaFrames;
@@ -34302,17 +34318,17 @@ void COggDlg::SyncPianoRollFromPlayCursor()
 		else
 			wantAnalyzeFrames = prFrames;
 	}
-	if (prFrames < minNeedSrc || wantAnalyzeFrames < minNeedAnalyze) return;
+	if (prFrames < minNeedSrc || wantAnalyzeFrames < minNeedAnalyze) return true;
 	const int prBytes = prFrames * bytesPerFrame;
-	if (prBytes <= 0 || prBytes > TOTAL_BUF_BYTES) return;
-	if (prFrames > CPianoRoll::RING_SIZE || prBytes > (int)sizeof(prRaw)) return;
+	if (prBytes <= 0 || prBytes > TOTAL_BUF_BYTES) return true;
+	if (prFrames > CPianoRoll::RING_SIZE || prBytes > (int)sizeof(prRaw)) return true;
 
 	const int speanaBytes = speanaFrames * bytesPerFrame;
 	long prPos = PianoRollWideReadPos(playCur, prBytes, speanaBytes, bytesPerFrame, (int)ringBytes, sampleRate, kPianoRollExtraLatencyMs);
 
 	char* prDst = prRaw;
 	if (!ReadRingPcm(prPos, prBytes, prDst))
-		return;
+		return true;
 
 	auto GetSampleValue = [&](int sampleIndex, int chIndex) -> double {
 		return GetSampleValueFrom(prDst, sampleIndex, chIndex);
@@ -34366,7 +34382,9 @@ void COggDlg::SyncPianoRollFromPlayCursor()
 
 	// hi-res/アップスケール時は解析を ≤48k に落とす（Goertzel 窓が SR 比例で肥大するのを防ぐ）
 	if (srInt > analyzeRate && wantAnalyzeFrames > 0 && wantAnalyzeFrames <= prFrames) {
-		for (int i = 0; i < wantAnalyzeFrames; ++i) {
+		int nOut = wantAnalyzeFrames;
+		if (nOut > monoCap) nOut = monoCap;
+		for (int i = 0; i < nOut; ++i) {
 			const __int64 srcStart = ((__int64)i * prFrames) / wantAnalyzeFrames;
 			const __int64 srcEnd = ((__int64)(i + 1) * prFrames) / wantAnalyzeFrames;
 			double sum = 0.0;
@@ -34375,13 +34393,19 @@ void COggDlg::SyncPianoRollFromPlayCursor()
 				sum += prMono[(int)s];
 				++n;
 			}
-			prMonoAnalyze[i] = (n > 0) ? (sum / (double)n) : 0.0;
+			monoOut[i] = (n > 0) ? (sum / (double)n) : 0.0;
 		}
-		m_PianoRollDlg->AnalyzePlayCursorMono(prMonoAnalyze, wantAnalyzeFrames, analyzeRate);
+		if (outFrames) *outFrames = nOut;
+		if (outRate) *outRate = analyzeRate;
 	}
 	else {
-		m_PianoRollDlg->AnalyzePlayCursorMono(prMono, prFrames, srInt);
+		int nOut = prFrames;
+		if (nOut > monoCap) nOut = monoCap;
+		memcpy(monoOut, prMono, (size_t)nOut * sizeof(double));
+		if (outFrames) *outFrames = nOut;
+		if (outRate) *outRate = srInt;
 	}
+	return true;
 }
 
 void COggDlg::Speana(BOOL bPaintBars, BOOL bFillLevels)

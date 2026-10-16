@@ -2074,6 +2074,7 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 	if (m_xfadeL.GetSafeHwnd()) {
 		m_xfadeL.SetFont(&m_fontChk, TRUE);
 		m_xfadeL.SetKeepFontHeight(TRUE);
+		m_xfadeL.SetPreferWideMode(FALSE);
 	}
 	if (m_toolsToggle.GetSafeHwnd())
 		m_toolsToggle.SetFont(&m_fontChk, TRUE);
@@ -2162,7 +2163,39 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 		m_vcApply.SetCheck(savedata.vc_mic_apply ? BST_CHECKED : BST_UNCHECKED);
 	if (m_micmix.GetSafeHwnd()) m_micmix.SetFont(&m_fontChk, TRUE);
 	if (m_vcApply.GetSafeHwnd()) m_vcApply.SetFont(&m_fontChk, TRUE);
-	if (m_miclevL.GetSafeHwnd()) m_miclevL.SetFont(&m_fontChk, TRUE);
+	if (m_miclevL.GetSafeHwnd()) {
+		m_miclevL.SetFont(&m_fontChk, TRUE);
+		m_miclevL.SetKeepFontHeight(TRUE);
+		m_miclevL.SetPreferWideMode(FALSE);
+	}
+	auto keepInfoLabel = [](CCustomStatic& s) {
+		if (!s.GetSafeHwnd()) return;
+		s.SetKeepFontHeight(TRUE);
+		s.SetPreferWideMode(FALSE);
+	};
+	keepInfoLabel(m_dsvolL);
+	keepInfoLabel(m_kvolL);
+	keepInfoLabel(m_tempoL);
+	keepInfoLabel(m_pitchL);
+	keepInfoLabel(m_vollabel);
+	keepInfoLabel(m_volval);
+	keepInfoLabel(m_time);
+	keepInfoLabel(m_lrc);
+	keepInfoLabel(m_lrc2);
+	keepInfoLabel(m_lrc3);
+	keepInfoLabel(m_lrc4);
+	keepInfoLabel(m_lrc5);
+	keepInfoLabel(m_lrcBadge);
+	keepInfoLabel(m_title);
+	keepInfoLabel(m_artist);
+	keepInfoLabel(m_album);
+	keepInfoLabel(m_os);
+	keepInfoLabel(m_cpu);
+	keepInfoLabel(m_os3);
+	keepInfoLabel(m_tempHint);
+	if (m_os.GetSafeHwnd()) m_os.SetFont(&m_fontTech, TRUE);
+	if (m_cpu.GetSafeHwnd()) m_cpu.SetFont(&m_fontTech, TRUE);
+	if (m_os3.GetSafeHwnd()) m_os3.SetFont(&m_fontTech, TRUE);
 	// マイクミックスONなら起動時からキャプチャ（メーター確認用）。OFFなら止める。
 	if (og && ::IsWindow(og->GetSafeHwnd())) {
 		if (og->m_micmix.GetSafeHwnd())
@@ -2560,6 +2593,36 @@ BOOL CMediaPlayerDlg::RelayPreTranslateMessage(MSG* pMsg)
 		// LMB と同じスリープメニュー
 		OnBotSleep();
 		return TRUE;
+	}
+	if (pMsg->message == WM_RBUTTONUP || pMsg->message == WM_CONTEXTMENU) {
+		HWND hw = pMsg->hwnd;
+		if (hw && (hw == m_hWnd || ::IsChild(m_hWnd, hw))) {
+			const BOOL skipList = (m_list.GetSafeHwnd() && (hw == m_list.GetSafeHwnd() || ::IsChild(m_list.GetSafeHwnd(), hw)));
+			const BOOL skipSeek = (m_seek.GetSafeHwnd() && hw == m_seek.GetSafeHwnd());
+			TCHAR cls[32] = {};
+			::GetClassName(hw, cls, 32);
+			const BOOL skipEdit = (_tcsicmp(cls, _T("Edit")) == 0 || _tcsicmp(cls, _T("ComboBox")) == 0);
+			const BOOL skipLib = (m_libTree.GetSafeHwnd() && (hw == m_libTree.GetSafeHwnd() || ::IsChild(m_libTree.GetSafeHwnd(), hw)))
+				|| (m_libAlbums.GetSafeHwnd() && (hw == m_libAlbums.GetSafeHwnd() || ::IsChild(m_libAlbums.GetSafeHwnd(), hw)))
+				|| (m_histList.GetSafeHwnd() && (hw == m_histList.GetSafeHwnd() || ::IsChild(m_histList.GetSafeHwnd(), hw)));
+			if (!skipList && !skipSeek && !skipEdit && !skipLib) {
+				CPoint sp;
+				if (pMsg->message == WM_CONTEXTMENU) {
+					sp.x = (short)LOWORD(pMsg->lParam);
+					sp.y = (short)HIWORD(pMsg->lParam);
+					if (sp.x == -1 && sp.y == -1)
+						::GetCursorPos(&sp);
+				} else {
+					sp.x = (short)LOWORD(pMsg->lParam);
+					sp.y = (short)HIWORD(pMsg->lParam);
+					::ClientToScreen(hw, &sp);
+				}
+				CPoint client = sp;
+				ScreenToClient(&client);
+				OnRButtonUp(0, client);
+				return TRUE;
+			}
+		}
 	}
 	if (pMsg->message == WM_KEYDOWN && pMsg->wParam == VK_RETURN) {
 		CWnd* pFocus = GetFocus();
@@ -3765,7 +3828,7 @@ void CMediaPlayerDlg::DoLayout()
 		const int micChkW = (int)(88 * s);
 		const int vcChkW = (m_vcApply.GetSafeHwnd()) ? (int)(36 * s) : 0;
 		const int vcBtnW = (m_vcOpen.GetSafeHwnd()) ? (int)(36 * s) : 0;
-		const int micLabW = (int)(36 * s);
+		const int micLabW = (int)(44 * s);
 		const int micSlW = (int)(88 * s);
 		const int micMeterW = (int)(10 * s);
 		const int gapMic = (int)(4 * s);
@@ -5036,9 +5099,12 @@ void CMediaPlayerDlg::MirrorSeekVol()
 				tb = 100;
 			m_seek.SetTimeBaseHz(tb);
 		}
-		m_seek.SetBeatGrid(savedata.mpDetectedBpm > 0 ? (float)savedata.mpDetectedBpm : 120.f,
-			savedata.mpBeatGrid ? TRUE : FALSE, savedata.mpBeatGridOffsetMs,
-			savedata.mpDetectedMeterNum >= 2 ? savedata.mpDetectedMeterNum : 4);
+		{
+			const BOOL gridOn = (savedata.mpBeatGrid && savedata.mpDetectedBpm > 0) ? TRUE : FALSE;
+			m_seek.SetBeatGrid(gridOn ? (float)savedata.mpDetectedBpm : 0.f, gridOn,
+				savedata.mpBeatGridOffsetMs,
+				savedata.mpDetectedMeterNum >= 2 ? savedata.mpDetectedMeterNum : 4);
+		}
 		{
 			int xms = 0;
 			if (savedata.mpXfadePreview)
@@ -13792,8 +13858,8 @@ void CMediaPlayerDlg::OnBeatGridToggle()
 	savedata.mpBeatGrid = savedata.mpBeatGrid ? 0 : 1;
 	MpPersistSavedataQuick();
 	if (m_seek.GetSafeHwnd()) {
-		const float bpm = savedata.mpDetectedBpm > 0 ? (float)savedata.mpDetectedBpm : 120.f;
-		m_seek.SetBeatGrid(bpm, savedata.mpBeatGrid ? TRUE : FALSE, savedata.mpBeatGridOffsetMs,
+		const BOOL gridOn = (savedata.mpBeatGrid && savedata.mpDetectedBpm > 0) ? TRUE : FALSE;
+		m_seek.SetBeatGrid(gridOn ? (float)savedata.mpDetectedBpm : 0.f, gridOn, savedata.mpBeatGridOffsetMs,
 			savedata.mpDetectedMeterNum >= 2 ? savedata.mpDetectedMeterNum : 4);
 		m_seek.Invalidate(FALSE);
 	}
@@ -14923,7 +14989,11 @@ void EnterMediaPlayerMode(BOOL bConvertCoords)
 		return;
 	}
 	plw = 1;
+	if (savedata.playerMode == 0)
+		UiSubGeomFromWorking(savedata.uiFc);
 	savedata.playerMode = 1;
+	UiSubGeomSeedIfNeeded();
+	UiSubGeomApplyMode(1);
 
 	// メディアプレイヤー画面を生成・表示。
 	// オーナーは og のまま(EQ/簡易ピアノロールと同じアクリルグループ)にして、
@@ -14997,7 +15067,11 @@ void EnterMediaPlayerMode(BOOL bConvertCoords)
 // してしまう問題を避けられる。
 void EnterFalcomMode()
 {
+	if (savedata.playerMode == 1)
+		UiSubGeomFromWorking(savedata.uiMp);
 	savedata.playerMode = 0;
+	UiSubGeomSeedIfNeeded();
+	UiSubGeomApplyMode(0);
 
 	// ファルコム特化型では内蔵(ミニ)ジャケを必ず表示するため抑止フラグを解除。
 	g_mpSideJacket = 0;
