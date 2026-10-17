@@ -153,6 +153,7 @@ public:
 	void SyncPianoRollFromPlayCursor();
 	void SyncPianoRollFast();
 	bool FillPianoRollCapture(double* monoOut, int monoCap, int* outFrames, int* outRate, float* meterDb, int* meterCh);
+	void AbortPianoRollCaptureNow();
 	void SyncAnalyzerFromPlayCursor();
 	void TogglePianoRoll();
 	void ToggleAnalyzer();

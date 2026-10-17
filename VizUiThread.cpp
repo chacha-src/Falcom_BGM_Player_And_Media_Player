@@ -130,7 +130,7 @@ HWND EnsureSlot(int slot, DWORD* outTid)
 	}
 	if (!s.th && InterlockedCompareExchange(&s_shutdown, 0, 0) == 0) {
 		CVizUiThread* th = new CVizUiThread();
-		if (th->CreateThread(CREATE_SUSPENDED)) {
+		if (th->CreateThread(CREATE_SUSPENDED, 4u * 1024u * 1024u)) {
 			th->ResumeThread();
 			if (th->m_ready)
 				::WaitForSingleObject(th->m_ready, 5000);

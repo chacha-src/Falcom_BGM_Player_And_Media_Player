@@ -40,6 +40,7 @@ namespace PianoRollPeakSpectrum
             if (!windowed || !outMag || !outFloor || sampleRate < 8000) return;
             if (keyLo < 0) keyLo = 0;
             if (keyHi > KEYS) keyHi = KEYS;
+            m_nOutPeaks = 0;
             for (int k = keyLo; k < keyHi; ++k) {
                 outMag[k] = 0.0f;
                 outFloor[k] = 0.0f;
@@ -82,13 +83,12 @@ namespace PianoRollPeakSpectrum
             //    そこで、ビン間隔が十分に広く(1半音=4〜30ビン)かつ常に音楽成分が存在する
             //    中域(350Hz〜3200Hz)の非ピークビンの 25% 分位点を基準フロアとし、
             //    中高域(key>=64)のみ局所(±6半音・最低32ビン)の 25% 分位点とブレンドする。
-            unsigned char isPeakLobe[FFT_MAX / 2 + 4];
-            memset(isPeakLobe, 0, (size_t)(half + 2));
+            memset(m_isPeakLobe, 0, (size_t)(half + 2));
             for (int b = 2; b <= half - 2; ++b) {
                 if (m_pow[b] > m_pow[b - 1] && m_pow[b] >= m_pow[b + 1]) {
-                    isPeakLobe[b - 1] = 1;
-                    isPeakLobe[b] = 1;
-                    isPeakLobe[b + 1] = 1;
+                    m_isPeakLobe[b - 1] = 1;
+                    m_isPeakLobe[b] = 1;
+                    m_isPeakLobe[b + 1] = 1;
                 }
             }
 
@@ -96,16 +96,15 @@ namespace PianoRollPeakSpectrum
             const int bMidLo = (int)ceil(350.0 / binHz);
             const int bMidHi = (int)floor(3200.0 / binHz);
             for (int b = (bMidLo > 3 ? bMidLo : 3); b <= (bMidHi < half - 2 ? bMidHi : half - 2) && gCnt < (FFT_MAX / 2); ++b) {
-                if (!isPeakLobe[b]) m_sel[gCnt++] = m_pow[b];
+                if (!m_isPeakLobe[b]) m_sel[gCnt++] = m_pow[b];
             }
             const float midBandFloor = (gCnt > 8) ? SelectKth(m_sel, gCnt, gCnt / 4) : 0.0f;
 
-            float noisePow[KEYS];
             for (int k = 0; k < KEYS; ++k) {
                 if (k < 64) {
                     // 低〜中低音(E4未満)はビン裾重なりによる自己マスクを防ぐため基準フロアを使用
                     const float bandMul = (k < 48) ? 1.15f : 1.00f;
-                    noisePow[k] = midBandFloor * bandMul;
+                    m_noisePow[k] = midBandFloor * bandMul;
                     continue;
                 }
                 const double fc = (double)PianoKey::KeyHz(k) * tuneMul;
@@ -123,7 +122,7 @@ namespace PianoRollPeakSpectrum
                 if (i1 > half - 2) i1 = half - 2;
                 int cnt = 0;
                 for (int b = i0; b <= i1; ++b) {
-                    if (!isPeakLobe[b]) m_sel[cnt++] = m_pow[b];
+                    if (!m_isPeakLobe[b]) m_sel[cnt++] = m_pow[b];
                 }
                 float locFloor = midBandFloor;
                 if (cnt >= 8) {
@@ -139,10 +138,10 @@ namespace PianoRollPeakSpectrum
                     locFloor = midBandFloor * 1.6f;
                 if (locFloor < midBandFloor * 0.45f)
                     locFloor = midBandFloor * 0.45f;
-                noisePow[k] = locFloor;
+                m_noisePow[k] = locFloor;
             }
             for (int k = keyLo; k < keyHi; ++k)
-                outFloor[k] = sqrtf(noisePow[k]) * magScale;
+                outFloor[k] = sqrtf(m_noisePow[k]) * magScale;
 
             // 2) 局所ピークの抽出 → サイドローブ除去 → 最も近い 1 つの鍵へ集約。
             const double fLo = (double)PianoKey::KeyHz(keyLo) * tuneMul * 0.97153;
@@ -158,7 +157,7 @@ namespace PianoRollPeakSpectrum
                 const float p = m_pow[b];
                 if (!(p > m_pow[b - 1] && p >= m_pow[b + 1])) continue;
                 const int kn = KeyOfHz((double)b * binHz, tuneSemis);
-                const float np0 = noisePow[kn];
+                const float np0 = m_noisePow[kn];
                 const float a = 10.0f * log10f(m_pow[b - 1] + 1.0e-30f);
                 const float c = 10.0f * log10f(p);
                 const float e = 10.0f * log10f(m_pow[b + 1] + 1.0e-30f);
@@ -180,28 +179,28 @@ namespace PianoRollPeakSpectrum
                 ++np;
             }
 
-            int order[PEAK_MAX];
             for (int i = 0; i < np; ++i) {
                 const float v = m_peakPow[i];
                 int j = i;
-                while (j > 0 && m_peakPow[order[j - 1]] < v) {
-                    order[j] = order[j - 1];
+                while (j > 0 && m_peakPow[m_order[j - 1]] < v) {
+                    m_order[j] = m_order[j - 1];
                     --j;
                 }
-                order[j] = i;
+                m_order[j] = i;
             }
             const float slLin = powf(10.0f, (sidelobeDb + 6.0f) / 10.0f);
-            int kept[PEAK_MAX];
             int nk = 0;
-            float keyPow[KEYS];
-            for (int k = keyLo; k < keyHi; ++k) keyPow[k] = 0.0f;
+            for (int k = keyLo; k < keyHi; ++k) m_keyPow[k] = 0.0f;
+            m_nOutPeaks = 0;
             for (int oi = 0; oi < np; ++oi) {
-                const int i = order[oi];
+                const int i = m_order[oi];
                 bool side = false;
                 for (int q = 0; q < nk && !side; ++q) {
-                    const int j = kept[q];
+                    const int j = m_kept[q];
                     const float d = fabsf(m_peakBin[i] - m_peakBin[j]) / (float)resBins;
-                    if (d < 1.5f || d > 24.0f) continue;
+                    // 同一主ローブの割れ(1.5 ビン以内)は強い方だけ残す。残すと隣鍵が同時点灯する。
+                    if (d < 1.5f) { side = true; break; }
+                    if (d > 24.0f) continue;
                     float lim = m_peakPow[j] * slLin;
                     if (d > 2.5f) {
                         const float t = 2.5f / d;
@@ -211,15 +210,29 @@ namespace PianoRollPeakSpectrum
                     if (m_peakPow[i] <= lim) side = true;
                 }
                 if (side) continue;
-                kept[nk++] = i;
-
                 const double hz = (double)m_peakBin[i] * binHz;
                 if (hz <= 1.0) continue;
+                // 0.55 半音以内の弱いピークは同じ部分音。鍵グリッドへ落とす前に潰す。
+                bool nearKept = false;
+                for (int q = 0; q < nk && !nearKept; ++q) {
+                    const double hz0 = (double)m_peakBin[m_kept[q]] * binHz;
+                    if (hz0 <= 1.0) continue;
+                    const double cents = 1731.234049066756 * fabs(log(hz / hz0));
+                    if (cents < 55.0) nearKept = true;
+                }
+                if (nearKept) continue;
+                m_kept[nk++] = i;
+
                 const double kf = 69.0 + 12.0 * log2(hz / 440.0) - (double)tuneSemis;
                 const int k = (int)floor(kf + 0.5);
+                if (m_nOutPeaks < PEAK_MAX) {
+                    m_outHz[m_nOutPeaks] = (float)hz;
+                    m_outAmp[m_nOutPeaks] = sqrtf(m_peakPow[i]) * magScale;
+                    ++m_nOutPeaks;
+                }
                 if (k < keyLo || k >= keyHi) continue;
-                if (fabs(kf - (double)k) > 0.42) continue;
-                if (m_peakPow[i] > keyPow[k]) keyPow[k] = m_peakPow[i];
+                if (fabs(kf - (double)k) > 0.49) continue;
+                if (m_peakPow[i] > m_keyPow[k]) m_keyPow[k] = m_peakPow[i];
                 if (tune && m_peakSnr[i] >= 100.0f && k >= 36 && k < 96) {
                     const double dev = kf - (double)k;
                     const double w = sqrt((double)m_peakPow[i]);
@@ -229,13 +242,13 @@ namespace PianoRollPeakSpectrum
                 }
             }
             for (int k = keyLo; k < keyHi; ++k)
-                outMag[k] = (keyPow[k] > 0.0f) ? sqrtf(keyPow[k]) * magScale : 0.0f;
+                outMag[k] = (m_keyPow[k] > 0.0f) ? sqrtf(m_keyPow[k]) * magScale : 0.0f;
 
             // 3) 連続周波数の調波サリエンス。基音ピークが動いて割れていても、
             //    n*f0 の位置にある倍音ピークから低〜中音の基音を見つけられるようにする。
             if (outHarmSal) {
                 for (int k = keyLo; k < keyHi; ++k) {
-                    if (k < 24 || keyPow[k] <= 0.0f) continue;
+                    if (k < 24 || m_keyPow[k] <= 0.0f) continue;
                     const double f0 = (double)PianoKey::KeyHz(k) * tuneMul;
                     float sal = 0.0f;
                     for (int h = 1; h <= SAL_HARMONICS; ++h) {
@@ -255,7 +268,7 @@ namespace PianoRollPeakSpectrum
                                 if (m_pow[b] > pk) pk = m_pow[b];
                         }
                         const int hk = KeyOfHz(fh, tuneSemis);
-                        const float nf = noisePow[hk];
+                        const float nf = m_noisePow[hk];
                         if (nf <= 0.0f || pk <= nf * snrLin) continue;
                         float db = 10.0f * log10f(pk / nf) - 5.5f;
                         if (db > 40.0f) db = 40.0f;
@@ -264,6 +277,16 @@ namespace PianoRollPeakSpectrum
                     outHarmSal[k] = sal;
                 }
             }
+        }
+
+        int PeakCount() const { return m_nOutPeaks; }
+        float PeakHzAt(int i) const
+        {
+            return (i >= 0 && i < m_nOutPeaks) ? m_outHz[i] : 0.0f;
+        }
+        float PeakAmpAt(int i) const
+        {
+            return (i >= 0 && i < m_nOutPeaks) ? m_outAmp[i] : 0.0f;
         }
 
     private:
@@ -358,5 +381,13 @@ namespace PianoRollPeakSpectrum
         float m_peakBin[PEAK_MAX];
         float m_peakPow[PEAK_MAX];
         float m_peakSnr[PEAK_MAX];
+        int   m_nOutPeaks = 0;
+        float m_outHz[PEAK_MAX] = {};
+        float m_outAmp[PEAK_MAX] = {};
+        unsigned char m_isPeakLobe[FFT_MAX / 2 + 4] = {};
+        int   m_order[PEAK_MAX] = {};
+        int   m_kept[PEAK_MAX] = {};
+        float m_keyPow[KEYS] = {};
+        float m_noisePow[KEYS] = {};
     };
 }

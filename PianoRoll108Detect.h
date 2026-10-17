@@ -6,9 +6,8 @@
 //   - 鍵帯域の雑音床パワー floorPow[k]
 //   - FFT 連続周波数での調波サリエンス fftSal[k] (任意)
 //
-// 反復は常に「低い候補への昇格」を含めて進む。高音に立ったピークは、それを倍音として
-// 持つ低〜中音があればまず下の基音へ回収され、その倍音包絡が引かれる。だから
-// 低〜中音が先に立ち、その倍音が高音へ化けない。
+// ノートは FFT 正弦波ピークを Hz で調波系列に束ねて決める。鍵グリッドで
+// W[n·key] を足すと、楽曲ではメロディがベースの整数倍に乗って部分音が全部ノートになる。
 #include <cmath>
 #include <cstring>
 #include "PianoKeyTable.h"
@@ -25,7 +24,7 @@ namespace PianoRoll108
     static constexpr int C4_KEY = 60;
     static constexpr int O5_HI = 84;      // C6
     static constexpr int EDGE_HI = 96;    // C7
-    static constexpr int MUSIC_LOW_FLOOR = 24; // C1
+    static constexpr int MUSIC_LOW_FLOOR = 28; // E1。C1 付近は 2f0 の影が出る
 
     inline int KeyBandIndex(int keyIndex)
     {
@@ -52,8 +51,13 @@ namespace PianoRoll108
         int keyIndex, float levelScale, float onsetDeltaScale = 1.0f)
     {
         if (!onset || !prevOnset || keyIndex < 0 || keyIndex >= COUNT) return false;
+        // キックのオンセットを全域の基準にすると、高音の 16 分が常に埋もれる。
+        int lo = MUSIC_LOW_FLOOR, hi = COUNT;
+        if (keyIndex < BASS_END) { lo = MUSIC_LOW_FLOOR; hi = BASS_END; }
+        else if (keyIndex < MID_END) { lo = BASS_END; hi = MID_END; }
+        else { lo = MID_END; hi = COUNT; }
         float oMax = 0.0f;
-        for (int i = 0; i < COUNT; ++i)
+        for (int i = lo; i < hi; ++i)
             if (onset[i] > oMax) oMax = onset[i];
         if (oMax < 0.004f) return false;
         float scale = levelScale;
@@ -92,7 +96,8 @@ namespace PianoRoll108
 
     static constexpr int SAL_HARM = 8;
     static constexpr int SUB_HARM = 24;
-    static constexpr int MAX_NOTES = 5;
+    // 基音条件を満たす系列はすべて採用（本数上限なし）。雲は残差減算と整数倍除外で止める。
+    static constexpr int MAX_NOTES = COUNT;
     static constexpr float W_OFFSET_DB = 6.5f;
     static constexpr float W_CAP_DB = 40.0f;
     static constexpr float SAL_MIN = 10.5f;
@@ -145,7 +150,7 @@ namespace PianoRoll108
         if (key < BASS_END) rel = pickBassRel / 0.28f * 0.82f;
         else if (key < C4_KEY) rel = pickLowMidRel / 0.20f * 0.80f;
         else if (key < MID_END) rel = pickMelodyRel / 0.10f * 0.85f;
-        else if (key < O5_HI) rel = pickMelodyRel / 0.10f * 1.00f;
+        else if (key < EDGE_HI) rel = pickMelodyRel / 0.10f * 1.00f;
         else rel = pickTreRel / 0.22f * 1.25f;
         if (rel < 0.35f) rel = 0.35f;
         if (rel > 3.5f) rel = 3.5f;
@@ -178,380 +183,635 @@ namespace PianoRoll108
         bool  verifyExplained = true;
         float percussive = 0.0f;
         const float* fftHarmSal = nullptr;
+        const float* peakHz = nullptr;
+        const float* peakAmp = nullptr;
+        int nPeaks = 0;
+        float tuneSemis = 0.0f;
+        // 直前フレームの「ピック結果」の f0(Hz)。VisGap で点灯中の鍵は入れない。
+        const float* prevF0Hz = nullptr;
+        float* outF0Hz = nullptr;
     };
+
+    inline int KeyFromHzTune(float hz, float tuneSemis)
+    {
+        if (hz <= 1.0f) return -1;
+        const float kf = 69.0f + 12.0f * log2f(hz / 440.0f) - tuneSemis;
+        const int k = (int)floorf(kf + 0.5f);
+        if (k < 0 || k >= COUNT) return -1;
+        return k;
+    }
+
+    inline int FindPeakNearHz(const float* hz, const float* amp, int n,
+        float target, float centsTol, const bool* dead)
+    {
+        if (!hz || !amp || target <= 1.0f || n <= 0) return -1;
+        float best = centsTol;
+        int idx = -1;
+        for (int i = 0; i < n; ++i) {
+            if (dead && dead[i]) continue;
+            if (hz[i] <= 1.0f || amp[i] <= 1.0e-10f) continue;
+            const float c = 1731.234049066756f * fabsf(logf(hz[i] / target));
+            if (c < best) {
+                best = c;
+                idx = i;
+            }
+        }
+        return idx;
+    }
+
+    // Hz 昇順インデックス。cents 窓内だけ見る。全ピーク×logf は残差ループで UI を止める。
+    inline int FindPeakInHzWindow(const float* hz, const float* amp, int n,
+        const int* ord, float target, float centsTol)
+    {
+        if (!hz || !amp || !ord || target <= 1.0f || n <= 0) return -1;
+        const float u = expf(centsTol * (1.0f / 1731.234049066756f));
+        const float lo = target / u;
+        const float hi = target * u;
+        int l = 0, r = n;
+        while (l < r) {
+            const int m = (l + r) >> 1;
+            if (hz[ord[m]] < lo) l = m + 1;
+            else r = m;
+        }
+        float best = centsTol;
+        int idx = -1;
+        for (int t = l; t < n; ++t) {
+            const int i = ord[t];
+            const float f = hz[i];
+            if (f > hi) break;
+            if (f <= 1.0f || amp[i] <= 1.0e-10f) continue;
+            const float c = 1731.234049066756f * fabsf(logf(f / target));
+            if (c < best) {
+                best = c;
+                idx = i;
+            }
+        }
+        return idx;
+    }
+
+    struct PickScratch
+    {
+        static constexpr int PMAX = 80;
+        static constexpr int CMAX = 96;
+        float amp[COUNT];
+        float nf[COUNT];
+        float thr[COUNT];
+        float phz[PMAX];
+        float pa[PMAX];
+        float pa0[PMAX];
+        int   idx[256];
+        int   hzOrd[PMAX];
+        float candF0[CMAX];
+        bool  rejected[COUNT];
+        bool  candUsed[CMAX];
+        bool  continued[COUNT];
+        float contA1[COUNT];
+        int   prevOrd[COUNT];
+        int   prevBestPk[COUNT];
+        bool  peakUsed[PMAX];
+    };
+
+    inline PickScratch& PickWork()
+    {
+        static PickScratch s;
+        return s;
+    }
+
+    inline float HarmCentsTol(int n, bool subtract)
+    {
+        if (subtract) return (n == 1) ? 36.0f : ((n <= 4) ? 42.0f : 48.0f);
+        return (n == 1) ? 18.0f : ((n <= 4) ? 24.0f : 30.0f);
+    }
 
     inline int PickNotes(const float* blend, const float* floorPow, const bool* prevActive,
         bool* outPicked, float* outOwnPow, const PickParams& p)
     {
         if (!blend || !floorPow || !outPicked || !outOwnPow) return 0;
         memset(outPicked, 0, sizeof(bool) * COUNT);
+        if (p.outF0Hz) memset(p.outF0Hz, 0, sizeof(float) * COUNT);
         const HarmTable& ht = Harm();
 
         float scale = p.levelScale;
         if (scale < 0.55f) scale = 0.55f;
         if (scale > 1.25f) scale = 1.25f;
 
-        float amp[COUNT], r[COUNT], nf[COUNT], db0[COUNT], thr[COUNT];
+        PickScratch& wk = PickWork();
+        float* amp = wk.amp;
+        float* nf = wk.nf;
+        float* thr = wk.thr;
         for (int i = 0; i < COUNT; ++i) {
             amp[i] = (blend[i] > 0.0f) ? sqrtf(blend[i]) : 0.0f;
-            r[i] = amp[i];
             float n0 = (floorPow[i] > 0.0f) ? sqrtf(floorPow[i]) : 0.0f;
             const float nAbs = AmpFloorForKey(i, p.absNoiseFloor) * 0.72f;
             const float nCap = nAbs * 2.40f;
             if (n0 < nAbs) n0 = nAbs;
             if (n0 > nCap) n0 = nCap;
             nf[i] = n0;
-            db0[i] = (amp[i] > 0.0f) ? 20.0f * log10f(amp[i]) : -300.0f;
             float t = SAL_MIN * BandStrict(i, p.pickBassRel, p.pickLowMidRel,
                 p.pickMelodyRel, p.pickTreRel) / scale * (0.45f + 0.55f * ht.availFrac[i]);
-            // 前フレームで鳴っていたノートは持続ヒステリシス(0.68倍)を掛け、
-            // 2分音符・全音符が途中で途切れて細切れになるのを防ぐ。
             if (prevActive && prevActive[i]) t *= 0.68f;
             thr[i] = t;
         }
 
-        // 近傍(±4 半音以内)の強い音によるスカート漏れ・うなりをマスクする。
-        float maskDb[COUNT];
-        for (int i = 0; i < COUNT; ++i) {
-            float mk = -300.0f;
-            if (amp[i] > 0.0f) {
-                for (int j = i - 4; j <= i + 4; ++j) {
-                    if (j < 0 || j >= COUNT || j == i || amp[j] <= 0.0f) continue;
-                    const float dSemi = (float)((i > j) ? (i - j) : (j - i));
-                    const float v = db0[j] - 12.0f - dSemi * 4.8f;
-                    if (v > mk) mk = v;
+        static constexpr int PMAX = PickScratch::PMAX;
+        static constexpr int CMAX = PickScratch::CMAX;
+        static constexpr int HARM_N = 10;
+
+        float* phz = wk.phz;
+        float* pa = wk.pa;
+        int* idx = wk.idx;
+        int* hzOrd = wk.hzOrd;
+        int np = 0;
+        if (p.peakHz && p.peakAmp && p.nPeaks > 0) {
+            int srcN = p.nPeaks;
+            if (srcN > 256) srcN = 256;
+            for (int i = 0; i < srcN; ++i) idx[i] = i;
+            for (int i = 1; i < srcN; ++i) {
+                const int v = idx[i];
+                const float av = p.peakAmp[v];
+                int j = i;
+                while (j > 0 && p.peakAmp[idx[j - 1]] < av) {
+                    idx[j] = idx[j - 1];
+                    --j;
+                }
+                idx[j] = v;
+            }
+            for (int i = 0; i < srcN && np < PMAX; ++i) {
+                const int s = idx[i];
+                if (p.peakHz[s] <= 1.0f || p.peakAmp[s] <= 0.0f) continue;
+                phz[np] = p.peakHz[s];
+                pa[np] = sqrtf(p.peakAmp[s]);
+                ++np;
+            }
+        }
+        if (np <= 0) {
+            for (int k = MUSIC_LOW_FLOOR; k < COUNT && np < PMAX; ++k) {
+                if (amp[k] <= nf[k] * 1.5f) continue;
+                if (k > 0 && amp[k - 1] > amp[k]) continue;
+                if (k + 1 < COUNT && amp[k + 1] >= amp[k]) continue;
+                phz[np] = PianoKey::KeyHz(k);
+                pa[np] = amp[k];
+                ++np;
+            }
+        }
+        for (int i = 0; i < np; ++i) hzOrd[i] = i;
+        for (int i = 1; i < np; ++i) {
+            const int v = hzOrd[i];
+            const float fv = phz[v];
+            int j = i;
+            while (j > 0 && phz[hzOrd[j - 1]] > fv) {
+                hzOrd[j] = hzOrd[j - 1];
+                --j;
+            }
+            hzOrd[j] = v;
+        }
+        float* pa0 = wk.pa0;
+        for (int i = 0; i < np; ++i) pa0[i] = pa[i];
+
+        float* candF0 = wk.candF0;
+        int nCand = 0;
+        auto addCand = [&](float f0) {
+            if (f0 < PianoKey::KeyHz(MUSIC_LOW_FLOOR) * 0.97f) return;
+            if (f0 > PianoKey::KeyHz(O5_HI) * 1.03f) return;
+            for (int i = 0; i < nCand; ++i) {
+                const float c = 1731.234049066756f * fabsf(logf(candF0[i] / f0));
+                if (c < 25.0f) return;
+            }
+            if (nCand < CMAX) candF0[nCand++] = f0;
+        };
+
+        bool* rejected = wk.rejected;
+        memset(rejected, 0, sizeof(wk.rejected));
+        int nPicked = 0;
+        int nBand[3] = { 0, 0, 0 };
+        float firstSal = 0.0f;
+        float firstSalBand[3] = { 0.0f, 0.0f, 0.0f };
+        bool* candUsed = wk.candUsed;
+        memset(candUsed, 0, sizeof(wk.candUsed));
+
+        auto findNear = [&](float tgt, float centsTol) -> int {
+            return FindPeakInHzWindow(phz, pa, np, hzOrd, tgt, centsTol);
+        };
+
+        // 歌声がギターの整数倍に乗ると奇数倍音も下の系列と一致する。
+        // 傾斜で説明できない余った f0 ピークは独立音。
+        auto extraSource = [&](float fHi, float fLo, int nMul) -> bool {
+            if (fHi <= 1.0f || fLo <= 1.0f || nMul < 2 || nMul > 4) return false;
+            const int jH = FindPeakInHzWindow(phz, pa0, np, hzOrd, fHi, HarmCentsTol(1, false));
+            const int jL = FindPeakInHzWindow(phz, pa0, np, hzOrd, fLo, HarmCentsTol(1, true));
+            if (jH < 0 || jL < 0) return false;
+            const float pred = pa0[jL] * powf((float)nMul, -0.65f);
+            if (pred <= 1.0e-12f) return pa0[jH] > 0.0f;
+            return pa0[jH] > pred * 1.45f;
+        };
+
+        auto extraResidual = [&](float fHi, float fLo, int nMul) -> bool {
+            if (fHi <= 1.0f || fLo <= 1.0f || nMul < 2 || nMul > 4) return false;
+            const int jH = findNear(fHi, HarmCentsTol(1, false));
+            const int jL = FindPeakInHzWindow(phz, pa0, np, hzOrd, fLo, HarmCentsTol(1, true));
+            if (jH < 0) return false;
+            if (jL < 0) return pa[jH] > 0.0f;
+            const float pred = pa0[jL] * powf((float)nMul, -0.65f);
+            if (pred <= 1.0e-12f) return pa[jH] > 0.0f;
+            return pa[jH] > pred * 1.45f;
+        };
+
+        auto scoreF0 = [&](float f0, float& a1, int& nHit, int& nLow, int& nOdd) -> float {
+            a1 = 0.0f;
+            nHit = 0;
+            nLow = 0;
+            nOdd = 0;
+            float s = 0.0f;
+            for (int n = 1; n <= HARM_N; ++n) {
+                const float tgt = f0 * (float)n;
+                if (tgt > PianoKey::KeyHz(COUNT - 1) * 1.06f) break;
+                const int j = findNear(tgt, HarmCentsTol(n, false));
+                if (j < 0) continue;
+                const int hk = KeyFromHzTune(phz[j], p.tuneSemis);
+                const float n0 = (hk >= 0) ? nf[hk] : nf[MUSIC_LOW_FLOOR];
+                float db = 0.0f;
+                if (pa[j] > 0.0f && n0 > 0.0f)
+                    db = 20.0f * log10f(pa[j] / n0) - W_OFFSET_DB;
+                if (db < 0.0f) db = 0.0f;
+                if (db > W_CAP_DB) db = W_CAP_DB;
+                s += powf((float)n, -0.55f) * db;
+                ++nHit;
+                if (n <= 4) ++nLow;
+                if (n == 3 || n == 5 || n == 7) ++nOdd;
+                if (n == 1) a1 = pa[j];
+            }
+            return s;
+        };
+
+        auto subtractSeries = [&](float f0, float aFund) {
+            float a1 = aFund;
+            // 観測 f0 があるのに高い山から a1 を上げると、2f0 に乗った歌声を
+            // 「強すぎる基音」とみなして丸ごと引いてしまう。
+            if (a1 <= 1.0e-10f) {
+                for (int n = 2; n <= 4; ++n) {
+                    const int j = findNear(f0 * (float)n, HarmCentsTol(n, true));
+                    if (j < 0) continue;
+                    if (extraSource(f0 * (float)n, f0, n)) continue;
+                    const float est = pa[j] * powf((float)n, 0.65f);
+                    if (est > a1) a1 = est;
                 }
             }
-            maskDb[i] = mk;
-        }
-
-        float explained[COUNT];
-        float explainedAmp[COUNT];
-        bool rejected[COUNT];
-        memset(explained, 0, sizeof(explained));
-        memset(explainedAmp, 0, sizeof(explainedAmp));
-        memset(rejected, 0, sizeof(rejected));
-
-        int nPicked = 0;
-        float firstSal = 0.0f;
-        float W[COUNT], sal[COUNT], fundPow[COUNT];
-        memset(fundPow, 0, sizeof(fundPow));
-
-        // 基音自体が雑音床の下でも、1 本の減衰した倍音列が揃っていれば基音として起こす。
-        auto buriedSeries = [&](int key) -> bool {
-            if (key < MUSIC_LOW_FLOOR || key >= MID_END) return false;
-            int supp = 0, lowN = 0, peaks = 0;
-            float mx = 0.0f, a2 = 0.0f, a3 = 0.0f;
-            for (int n = 2; n <= 8; ++n) {
-                const int hk = ht.k[key][n - 1];
-                if (hk < 0 || W[hk] <= 0.0f || r[hk] <= 0.0f) continue;
-                ++supp;
-                if (n <= 4) ++lowN;
-                if (n == 2) a2 = r[hk];
-                if (n == 3) a3 = r[hk];
-                if (n <= 6 && r[hk] > mx) mx = r[hk];
+            if (a1 <= 1.0e-10f) return;
+            for (int n = 1; n <= 12; ++n) {
+                const int j = findNear(f0 * (float)n, HarmCentsTol(n, true));
+                if (j < 0) continue;
+                float pred = a1 * powf((float)n, -0.65f);
+                // 3 次以上はコードトーンとボーカルが重なる。引き切ると声の f0 が消える。
+                if (n >= 3) pred *= 0.55f;
+                if (n >= 2 && extraSource(f0 * (float)n, f0, n))
+                    pred *= 0.45f;
+                if (pred > pa[j]) pa[j] = 0.0f;
+                else pa[j] -= pred;
             }
-            if (lowN < 3 || supp < 5 || mx <= 0.0f) return false;
-            for (int n = 2; n <= 6; ++n) {
-                const int hk = ht.k[key][n - 1];
-                if (hk >= 0 && r[hk] > mx * 0.70f) ++peaks;
+        };
+
+        auto hasOwnOdd = [&](float fHi, float fLo) -> bool {
+            if (fHi <= 1.0f || fLo <= 1.0f) return false;
+            for (int h = 3; h <= 7; h += 2) {
+                const int j = findNear(fHi * (float)h, HarmCentsTol(h, false));
+                if (j < 0) continue;
+                const float ratio = phz[j] / fLo;
+                bool ofLo = false;
+                for (int n = 2; n <= 16; ++n) {
+                    if (fabsf(ratio - (float)n) <= 0.03f * (float)n) { ofLo = true; break; }
+                }
+                if (!ofLo) return true;
             }
-            if (peaks > 2) return false;
-            if (!(a2 >= mx * 0.99f || a3 >= mx * 0.99f)) return false;
-            const int k4 = ht.k[key][3];
-            const float a4 = (k4 >= 0) ? r[k4] : 0.0f;
-            float top = a2;
-            if (a3 > top) top = a3;
-            if (a4 > top) top = a4;
-            if (a2 < top * 0.35f || a3 < top * 0.28f || a4 < top * 0.20f) return false;
-            const int kLo = ht.k[key][1];
-            const int kHi = ht.k[key][5];
-            if (kLo >= 0 && kHi > kLo) {
-                const float gate = top * 0.45f;
-                for (int j = kLo + 1; j < kHi; ++j) {
-                    if (r[j] <= gate || W[j] <= 0.0f) continue;
-                    bool slot = false;
-                    for (int n = 2; n <= 6 && !slot; ++n)
-                        if (ht.k[key][n - 1] == j) slot = true;
-                    if (!slot) return false;
+            return false;
+        };
+
+        auto seriesOk = [&](int key, float a1, int nHit, int nLow, int nOdd, bool fromPrev) -> bool {
+            if (fromPrev) {
+                if (nHit < 2) return false;
+                if (a1 <= 0.0f && nLow < 2) return false;
+                if (a1 <= 0.0f && nOdd < 1 && key < C4_KEY) return false;
+                return true;
+            }
+            // 偶数倍音だけ当たるのは 1 オクターブ上の音の影。観測 a1 があっても同じ。
+            if (nOdd < 1 && key < O5_HI) return false;
+            // 低音は観測ピークが無いとキック／2f0 の影。欠け基音は繰り下げ側で起こす。
+            if (key < BASS_END && a1 <= 0.0f) return false;
+            if (key < C4_KEY) {
+                if (nHit < 3 && !(nHit >= 2 && a1 > 0.0f && nLow >= 2)) return false;
+            }
+            else if (key < MID_END) {
+                if (nHit < 2) return false;
+                if (a1 <= 0.0f && nLow < 2) return false;
+            }
+            else if (key < O5_HI) {
+                if (nHit < 3 && !(nHit >= 2 && a1 > 0.0f && nLow >= 2)) return false;
+            }
+            else {
+                if (nHit < 2) return false;
+            }
+            return true;
+        };
+
+        auto commitKey = [&](float f0, int bestKey, float bestSal, float bestA1, int bestHit, bool fromPrev) -> bool {
+            bool ok = true;
+            const float a0 = amp[bestKey];
+            if (!fromPrev) {
+                if (bestKey >= EDGE_HI && !(prevActive && prevActive[bestKey])) {
+                    if (bestHit < 2 || nPicked >= 2) ok = false;
+                }
+                else if (bestKey >= O5_HI && !(prevActive && prevActive[bestKey])) {
+                    int nNear = 0;
+                    for (int d = 1; d <= 5; ++d) {
+                        if (bestKey - d >= 0 && amp[bestKey - d] >= a0 * 0.63f) ++nNear;
+                        if (bestKey + d < COUNT && amp[bestKey + d] >= a0 * 0.63f) ++nNear;
+                    }
+                    if (nNear >= 4) ok = false;
+                }
+            }
+            if (ok) {
+                for (int d = -1; d <= 1; d += 2) {
+                    const int a = bestKey + d;
+                    if (a >= 0 && a < COUNT && outPicked[a] && a0 < amp[a] * 0.90f) ok = false;
+                }
+            }
+            // 継続中の音は「下の倍音だから」では落とさない。コードトーンが
+            // ベースの 3f0 に乗ると毎フレーム veto で細切れになる。
+            if (ok && !fromPrev) {
+                for (int j = MUSIC_LOW_FLOOR; j < bestKey && ok; ++j) {
+                    if (!outPicked[j]) continue;
+                    float fj = PianoKey::KeyHz(j);
+                    if (p.outF0Hz && p.outF0Hz[j] > 1.0f) fj = p.outF0Hz[j];
+                    if (fj <= 1.0f) continue;
+                    const float ratio = f0 / fj;
+                    for (int n = 2; n <= 10; ++n) {
+                        if (fabsf(ratio - (float)n) > 0.03f * (float)n) continue;
+                        if (!hasOwnOdd(f0, fj) && !extraResidual(f0, fj, n)) ok = false;
+                        break;
+                    }
+                }
+            }
+            if (!ok) return false;
+            outPicked[bestKey] = true;
+            if (p.outF0Hz) p.outF0Hz[bestKey] = f0;
+            if (nPicked == 0) firstSal = bestSal;
+            {
+                const int pb = KeyBandIndex(bestKey);
+                if (firstSalBand[pb] <= 0.0f) firstSalBand[pb] = bestSal;
+                ++nBand[pb];
+            }
+            ++nPicked;
+            if (fromPrev) {
+                wk.continued[bestKey] = true;
+                wk.contA1[bestKey] = bestA1;
+            }
+            else {
+                subtractSeries(f0, bestA1);
+                for (int hi = bestKey + 1; hi < COUNT; ++hi) {
+                    if (!outPicked[hi] || wk.continued[hi]) continue;
+                    float fHi = PianoKey::KeyHz(hi);
+                    if (p.outF0Hz && p.outF0Hz[hi] > 1.0f) fHi = p.outF0Hz[hi];
+                    const float ratio = fHi / f0;
+                    int nMul = 0;
+                    for (int n = 2; n <= 10; ++n) {
+                        if (fabsf(ratio - (float)n) <= 0.03f * (float)n) { nMul = n; break; }
+                    }
+                    if (nMul == 0) continue;
+                    if (hasOwnOdd(fHi, f0) || extraSource(fHi, f0, nMul)) continue;
+                    outPicked[hi] = false;
+                    outOwnPow[hi] = 0.0f;
+                    if (p.outF0Hz) p.outF0Hz[hi] = 0.0f;
+                    --nPicked;
+                    {
+                        const int hb = KeyBandIndex(hi);
+                        if (nBand[hb] > 0) --nBand[hb];
+                    }
                 }
             }
             return true;
         };
 
-        for (int phase = 0; phase < 2; ++phase)
-        for (int iter = 0; iter < COUNT && nPicked < MAX_NOTES; ++iter) {
-            for (int k = 0; k < COUNT; ++k) {
-                float v = 0.0f;
-                if (r[k] > 0.0f) {
-                    v = 20.0f * log10f(r[k] / nf[k]) - W_OFFSET_DB;
-                    if (v < 0.0f) v = 0.0f;
-                    if (v > W_CAP_DB) v = W_CAP_DB;
-                }
-                W[k] = v;
+        // 前フレームの f0 を残差減算の前に全部載せる。低音から引くと伴奏の
+        // 整数倍スロットが毎フレーム落ち、ピークは残っているのに細切れになる。
+        memset(wk.continued, 0, sizeof(wk.continued));
+        memset(wk.contA1, 0, sizeof(wk.contA1));
+        memset(wk.peakUsed, 0, sizeof(wk.peakUsed));
+        if (prevActive) {
+            int nPrev = 0;
+            for (int key = MUSIC_LOW_FLOOR; key < COUNT; ++key) {
+                if (!prevActive[key] || rejected[key]) continue;
+                float f0 = PianoKey::KeyHz(key);
+                if (p.prevF0Hz && p.prevF0Hz[key] > 1.0f)
+                    f0 = p.prevF0Hz[key];
+                wk.prevBestPk[key] = FindPeakInHzWindow(phz, pa0, np, hzOrd, f0, 80.0f);
+                wk.prevOrd[nPrev++] = key;
             }
-
-            int best = -1;
-            float bestSal = 0.0f;
-            for (int k = 0; k < COUNT; ++k) {
-                sal[k] = 0.0f;
-                if (k < MUSIC_LOW_FLOOR || outPicked[k] || rejected[k]) continue;
-                float s = 0.0f;
-                int supp = 0;
-                for (int n = 1; n <= SAL_HARM; ++n) {
-                    const int hk = ht.k[k][n - 1];
-                    if (hk < 0 || W[hk] <= 0.0f) continue;
-                    s += ht.w[n - 1] * W[hk];
-                    ++supp;
+            for (int i = 1; i < nPrev; ++i) {
+                const int v = wk.prevOrd[i];
+                float f0v = PianoKey::KeyHz(v);
+                if (p.prevF0Hz && p.prevF0Hz[v] > 1.0f) f0v = p.prevF0Hz[v];
+                float cv = 999.0f;
+                if (wk.prevBestPk[v] >= 0 && f0v > 1.0f)
+                    cv = 1731.234049066756f * fabsf(logf(phz[wk.prevBestPk[v]] / f0v));
+                int j = i;
+                while (j > 0) {
+                    const int u = wk.prevOrd[j - 1];
+                    float f0u = PianoKey::KeyHz(u);
+                    if (p.prevF0Hz && p.prevF0Hz[u] > 1.0f) f0u = p.prevF0Hz[u];
+                    float cu = 999.0f;
+                    if (wk.prevBestPk[u] >= 0 && f0u > 1.0f)
+                        cu = 1731.234049066756f * fabsf(logf(phz[wk.prevBestPk[u]] / f0u));
+                    if (cu <= cv) break;
+                    wk.prevOrd[j] = u;
+                    --j;
                 }
-                // FFT 連続周波数の調波サリエンス。まだどの倍音も引かれていない鍵で、
-                // 鍵中心からわずかに外れた倍音がある場合にのみ微調整として使う。
-                if (p.fftHarmSal && k < C4_KEY && explained[k] <= 0.0f && supp >= 2) {
-                    const float fs = p.fftHarmSal[k];
-                    if (fs > s && fs < s * 1.35f) s = fs;
-                }
-                sal[k] = s;
-                const bool buried = (W[k] <= 0.0f);
-                if (phase == 0) {
-                    if (buried) {
-                        if (!buriedSeries(k)) continue;
-                    }
-                    else if (supp < 2 && (k < 48 || W[k] < 12.0f)) {
-                        // phase 0 では倍音を持つ音、または中〜高域で明確に強い基音を先に拾う。
-                        continue;
-                    }
-                    if (!buried && db0[k] < maskDb[k]) continue;
-                }
-                else {
-                    if (buried || db0[k] < maskDb[k]) continue;
-                    // 低音(C3=key48未満)の単発ピーク(supp<2)はバスドラムのドン鳴りなので弾く。
-                    if (supp < 2 && (k < BASS_END || W[k] < 13.0f)) continue;
-                }
-                if (s < thr[k]) continue;
-                const float relNeed = (prevActive && prevActive[k]) ? (SAL_REL * 0.70f) : SAL_REL;
-                if (nPicked > 0 && s < firstSal * relNeed) continue;
-                // 前フレームから持続中の鍵はサリエンスに持続ボーナスを与え、別鍵へのランダムな飛び移りを抑える
-                const float score = (prevActive && prevActive[k]) ? (s * 1.18f) : s;
-                if (score > bestSal) {
-                    bestSal = score;
-                    best = k;
-                }
+                wk.prevOrd[j] = v;
             }
-            if (best < 0) break;
-
-            // 高次倍音(2〜6 次)が先に最大になった場合、その真の基音が低〜中音にあれば昇格する。
-            for (bool moved = true; moved; ) {
-                moved = false;
-                for (int m = 2; m <= 6 && !moved; ++m) {
-                    const int lo = PianoKey::HarmonicDownKeyAny(best, m);
-                    if (lo < MUSIC_LOW_FLOOR || lo >= best || ht.k[lo][m - 1] != best) continue;
-                    if (outPicked[lo] || rejected[lo]) continue;
-                    if (W[lo] <= 0.0f && !buriedSeries(lo)) continue;
-                    if (sal[lo] < thr[lo] || sal[lo] < bestSal * PROMOTE_REL) continue;
-                    int ind = 0;
-                    for (int n = 2; n <= SAL_HARM; ++n) {
-                        if (n % m == 0) continue;
-                        const int hk = ht.k[lo][n - 1];
-                        if (hk >= 0 && W[hk] > 0.0f) ++ind;
-                    }
-                    if (ind < 1) continue;
-                    best = lo;
-                    bestSal = sal[lo];
-                    moved = true;
-                }
-            }
-
-            bool ok = true;
-            const float a0 = amp[best];
-            if (p.verifyExplained && explained[best] > EXPLAINED_FRAC * a0 * a0) {
-                float keep = 0.48f * p.ghostStrict;
-                if (keep < 0.25f) keep = 0.25f;
-                if (keep > 0.85f) keep = 0.85f;
-                if (r[best] < a0 * keep) {
-                    ok = false;
-                }
-                else {
-                    int avail = 0, own = 0;
-                    for (int n = 2; n <= 4; ++n) {
-                        const int hk = ht.k[best][n - 1];
-                        if (hk < 0) continue;
-                        ++avail;
-                        if (W[hk] > 0.0f && r[hk] >= amp[hk] * (keep * 0.75f)) ++own;
-                    }
-                    if (avail > 0 ? own < 1 : W[best] < 14.0f * p.ghostStrict) ok = false;
-                }
-            }
-            // 高音域(G5 以上): 下にまだ選んでいない基音候補があり、その倍音列の 1 本として
-            // 自然な大きさなら、実音ではなく倍音とみなして見送る。
-            if (ok && best >= 79) {
-                for (int j = MUSIC_LOW_FLOOR; j < best && ok; ++j) {
-                    if (amp[j] <= a0 * 0.8f && !outPicked[j]) continue;
-                    for (int n = 2; n <= SUB_HARM; ++n) {
-                        if (ht.k[j][n - 1] != best) continue;
-                        int sib = 0;
-                        for (int m = 2; m <= 8; ++m) {
-                            if (m == n) continue;
-                            const int sk = ht.k[j][m - 1];
-                            if (sk >= 0 && amp[sk] > nf[sk] * 2.0f) ++sib;
-                        }
-                        if (sib >= 2 && a0 <= amp[j] / powf((float)n, 0.7f) * 1.6f)
-                            ok = false;
-                        break;
+            for (int pi = 0; pi < nPrev && nPicked < MAX_NOTES; ++pi) {
+                const int key = wk.prevOrd[pi];
+                float f0 = PianoKey::KeyHz(key);
+                if (p.prevF0Hz && p.prevF0Hz[key] > 1.0f)
+                    f0 = p.prevF0Hz[key];
+                const int jNear = wk.prevBestPk[key];
+                if (jNear >= 0 && jNear < PMAX && !wk.peakUsed[jNear]) {
+                    const float fAlt = phz[jNear];
+                    float aKeep = 0.0f, aAlt = 0.0f;
+                    int h0 = 0, l0 = 0, o0 = 0, h1 = 0, l1 = 0, o1 = 0;
+                    const float sKeep = scoreF0(f0, aKeep, h0, l0, o0);
+                    const float sAlt = scoreF0(fAlt, aAlt, h1, l1, o1);
+                    const int kAlt = KeyFromHzTune(fAlt, p.tuneSemis);
+                    if (sAlt >= sKeep * 0.90f && kAlt >= key - 1 && kAlt <= key + 1) {
+                        f0 = fAlt;
+                        wk.peakUsed[jNear] = true;
                     }
                 }
+                const int keyNow = KeyFromHzTune(f0, p.tuneSemis);
+                if (keyNow < MUSIC_LOW_FLOOR || keyNow >= COUNT) continue;
+                if (outPicked[keyNow] || rejected[keyNow]) continue;
+                float a1 = 0.0f;
+                int nHit = 0, nLow = 0, nOdd = 0;
+                const float s = scoreF0(f0, a1, nHit, nLow, nOdd);
+                if (s < thr[keyNow] * 0.72f) continue;
+                if (!seriesOk(keyNow, a1, nHit, nLow, nOdd, true)) continue;
+                if (!commitKey(f0, keyNow, s, a1, nHit, true))
+                    rejected[keyNow] = true;
             }
-            // ドラム過渡ガードは高音域(ハイハット・シンバル帯域)のみに適用し、
-            // 拍頭で同時に鳴る低音(ベース)や中音(コード・メロディ)を巻き添えで消さない。
-            if (ok && best >= MID_END && p.percussive > 0.3f && !(prevActive && prevActive[best])) {
-                int avail = 0, sup = 0;
-                for (int n = 2; n <= 5; ++n) {
-                    const int hk = ht.k[best][n - 1];
-                    if (hk < 0) continue;
-                    ++avail;
-                    if (W[hk] > 0.0f) ++sup;
-                }
-                if (avail > 0 ? sup < 1 : W[best] < 15.0f) ok = false;
+            for (int key = 0; key < COUNT; ++key) {
+                if (!wk.continued[key] || !p.outF0Hz) continue;
+                subtractSeries(p.outF0Hz[key], wk.contA1[key]);
             }
-            // ベース音域(C3=48未満)は原則モノフォニック(単音、またはオクターブ重ねのみ)。
-            // 既に低音域で別の音を選んでいるフレームで、オクターブ関係(±12)でない2本目の低音候補が
-            // 来た場合は、キックの被りや倍音混濁によるランダム飛びなので棄却する。
-            if (ok && best < BASS_END) {
-                for (int j = MUSIC_LOW_FLOOR; j < BASS_END; ++j) {
-                    if (!outPicked[j]) continue;
-                    const int diff = (best > j) ? (best - j) : (j - best);
-                    if (diff != 12) {
-                        ok = false;
-                        break;
-                    }
-                }
-            }
-            if (ok) {
-                for (int d = -1; d <= 1; d += 2) {
-                    const int a = best + d;
-                    if (a >= 0 && a < COUNT && outPicked[a] && a0 < amp[a] * SEMI_SPILL) ok = false;
-                }
-            }
-            if (!ok) {
-                rejected[best] = true;
-                continue;
-            }
-
-            outPicked[best] = true;
-            if (nPicked == 0) firstSal = sal[best];
-            ++nPicked;
-
-            // 倍音包絡フィッティング:
-            // 単一楽器の第2・第3倍音(基音の0.7〜1.0倍程度)はしっかり引き切る一方、
-            // 上のオクターブや12度で「別の強いメロディ/和音」が同時に鳴っているときに
-            // その1本の大振幅に引っ張られて logA が跳ね上がりメロディまで消してしまうのを防ぐ。
-            float refAmp = r[best];
-            {
-                float hTop1 = 0.0f, hTop2 = 0.0f;
-                for (int n = 2; n <= 4; ++n) {
-                    const int hk = ht.k[best][n - 1];
-                    if (hk < 0 || W[hk] <= 0.0f || r[hk] <= 0.0f) continue;
-                    if (r[hk] > hTop1) { hTop2 = hTop1; hTop1 = r[hk]; }
-                    else if (r[hk] > hTop2) { hTop2 = r[hk]; }
-                }
-                if (refAmp <= 0.0f) {
-                    refAmp = (hTop2 > 0.0f) ? hTop2 : hTop1;
-                }
-                else if (hTop2 > refAmp) {
-                    const float capRef = refAmp * 1.25f;
-                    refAmp = (hTop2 < capRef) ? hTop2 : capRef;
-                }
-            }
-
-            float la[SAL_HARM], ln[SAL_HARM];
-            int cnt = 0;
-            for (int n = 1; n <= SAL_HARM; ++n) {
-                const int hk = ht.k[best][n - 1];
-                if (hk < 0 || W[hk] <= 0.0f || r[hk] <= 0.0f) continue;
-                float aUse = r[hk];
-                if (n >= 2 && refAmp > 0.0f) {
-                    const float capH = refAmp / powf((float)n, 0.35f);
-                    if (aUse > capH) aUse = capH;
-                }
-                la[cnt] = logf(aUse);
-                ln[cnt] = logf((float)n);
-                ++cnt;
-            }
-            float beta = 1.05f;
-            float logA = (r[best] > 0.0f) ? logf(r[best]) : -30.0f;
-            if (cnt >= 2) {
-                float bestErr = 1.0e30f;
-                for (int g = 0; g < 11; ++g) {
-                    const float bt = 0.5f + 0.18f * (float)g;
-                    float v[SAL_HARM];
-                    for (int i = 0; i < cnt; ++i) {
-                        const float x = la[i] + bt * ln[i];
-                        int j = i;
-                        while (j > 0 && v[j - 1] > x) { v[j] = v[j - 1]; --j; }
-                        v[j] = x;
-                    }
-                    const float lA = v[(int)(ENV_TAU * (float)(cnt - 1))];
-                    float err = 0.0f;
-                    for (int i = 0; i < cnt; ++i) {
-                        const float e = la[i] - (lA - bt * ln[i]);
-                        err += (e >= 0.0f) ? ENV_TAU * e : (ENV_TAU - 1.0f) * e;
-                    }
-                    if (err < bestErr) {
-                        bestErr = err;
-                        beta = bt;
-                        logA = lA;
-                    }
-                }
-            }
-
-            float predPow[COUNT], predAmp[COUNT];
-            memset(predPow, 0, sizeof(predPow));
-            memset(predAmp, 0, sizeof(predAmp));
-            for (int n = 2; n <= SUB_HARM; ++n) {
-                const int hk = ht.k[best][n - 1];
-                if (hk < 0 || hk == best) continue;
-                float bUse = beta;
-                if (n > 4 && bUse > 1.0f) bUse = 1.0f;
-                const float pa = expf(logA - bUse * logf((float)n)) * p.envMargin;
-                predPow[hk] += pa * pa;
-                if (n <= 6 && pa > predAmp[hk]) predAmp[hk] = pa;
-            }
-            for (int k = 0; k < COUNT; ++k) {
-                if (predPow[k] <= 0.0f || r[k] <= 0.0f) continue;
-                const bool multi = (explainedAmp[k] > 0.0f && predAmp[k] > 0.0f);
-                explained[k] += predPow[k];
-                explainedAmp[k] += predAmp[k];
-                // 複数の既選択音の低次倍音(2〜4次)が同じ鍵に重なる場合(例: C3の3倍音とG3の2倍音がG4で重なる)、
-                // 同相干渉で振幅が足し算されるため 0.78*(Σpa)^2 まで説明する。
-                float totExp = explained[k];
-                if (multi) {
-                    const float coh = 0.78f * explainedAmp[k] * explainedAmp[k];
-                    if (coh > totExp) totExp = coh;
-                }
-                const float p0 = amp[k] * amp[k];
-                r[k] = (totExp < p0) ? sqrtf(p0 - totExp) : 0.0f;
-                explained[k] = (totExp < p0) ? totExp : p0;
-            }
-            explained[best] += r[best] * r[best];
-            if (amp[best] * 2.0f < expf(logA)) {
-                float partial = 0.0f;
-                for (int n = 2; n <= 6; ++n) {
-                    const int hk = ht.k[best][n - 1];
-                    if (hk >= 0 && blend[hk] > partial) partial = blend[hk];
-                }
-                fundPow[best] = partial * 0.5f;
-            }
-            r[best] = 0.0f;
         }
 
-        for (int i = 0; i < COUNT; ++i) {
-            if (outPicked[i]) {
-                outOwnPow[i] = blend[i];
-                if (fundPow[i] > outOwnPow[i]) outOwnPow[i] = fundPow[i];
+        // 継続で引いたあとの残差ピークだけを新規候補にする。元ピーク一覧から
+        // 拾うと、既に説明した倍音が毎フレーム「新しい音」として流れ落ちる。
+        nCand = 0;
+        memset(candUsed, 0, sizeof(wk.candUsed));
+        for (int i = 0; i < np; ++i) {
+            const int k = KeyFromHzTune(phz[i], p.tuneSemis);
+            if (k < MUSIC_LOW_FLOOR || k >= O5_HI) continue;
+            if (pa[i] <= 1.0e-10f) continue;
+            if (outPicked[k]) continue;
+            if (k < BASS_END) {
+                const int j2 = findNear(phz[i] * 2.0f, HarmCentsTol(2, false));
+                if (j2 >= 0 && pa[j2] > pa[i] * 1.15f &&
+                    !extraResidual(phz[i] * 2.0f, phz[i], 2))
+                    continue;
             }
-            else {
-                outOwnPow[i] = r[i] * r[i];
+            bool harmOfLower = false;
+            for (int j = 0; j < np && !harmOfLower; ++j) {
+                if (j == i || phz[j] <= 1.0f || pa[j] <= 1.0e-10f) continue;
+                if (phz[j] >= phz[i] * 0.97f) continue;
+                const float ratio = phz[i] / phz[j];
+                for (int n = 2; n <= 10; ++n) {
+                    if (fabsf(ratio - (float)n) > 0.03f * (float)n) continue;
+                    if (!hasOwnOdd(phz[i], phz[j]) && !extraResidual(phz[i], phz[j], n))
+                        harmOfLower = true;
+                    break;
+                }
+            }
+            if (!harmOfLower)
+                addCand(phz[i]);
+        }
+
+        for (int iter = 0; iter < CMAX && nPicked < MAX_NOTES; ++iter) {
+            int bestC = -1;
+            float bestSal = 0.0f, bestA1 = 0.0f;
+            int bestHit = 0;
+            for (int c = 0; c < nCand; ++c) {
+                if (candUsed[c]) continue;
+                const int key = KeyFromHzTune(candF0[c], p.tuneSemis);
+                if (key < MUSIC_LOW_FLOOR || key >= COUNT) {
+                    candUsed[c] = true;
+                    continue;
+                }
+                if (outPicked[key] || rejected[key]) {
+                    candUsed[c] = true;
+                    continue;
+                }
+                float a1 = 0.0f;
+                int nHit = 0, nLow = 0, nOdd = 0;
+                const float s = scoreF0(candF0[c], a1, nHit, nLow, nOdd);
+                // 残差は減るだけ。nHit/スコア不足は後ラウンドで回復しない。
+                if (!seriesOk(key, a1, nHit, nLow, nOdd, false) || s < thr[key]) {
+                    candUsed[c] = true;
+                    continue;
+                }
+                if (prevActive) {
+                    bool hop = false;
+                    for (int d = -1; d <= 1 && !hop; ++d) {
+                        if (d == 0) continue;
+                        const int n = key + d;
+                        if (n < MUSIC_LOW_FLOOR || n >= COUNT) continue;
+                        if (prevActive[n] && !outPicked[n] && s < firstSal * 0.80f)
+                            hop = true;
+                    }
+                    if (hop) continue;
+                }
+                if (s > bestSal) {
+                    bestSal = s;
+                    bestC = c;
+                    bestA1 = a1;
+                    bestHit = nHit;
+                }
+            }
+            if (bestC < 0) break;
+
+            float f0 = candF0[bestC];
+            int bestKey = KeyFromHzTune(f0, p.tuneSemis);
+            if (bestKey < MUSIC_LOW_FLOOR || bestKey >= COUNT) {
+                candUsed[bestC] = true;
+                continue;
+            }
+            // 観測 f0 があるピークはそれ自体が音。下へ繰り下げると歌声が中低音に吸われる。
+            if (bestKey >= BASS_END && bestA1 <= 1.0e-10f) {
+                const int mMax = (bestKey >= MID_END) ? 8 : ((bestKey >= C4_KEY) ? 4 : 2);
+                for (int m = mMax; m >= 2; --m) {
+                    const float loF = f0 / (float)m;
+                    const int lo = KeyFromHzTune(loF, p.tuneSemis);
+                    if (lo < MUSIC_LOW_FLOOR || lo >= bestKey) continue;
+                    if (outPicked[lo] || rejected[lo]) continue;
+                    float a1b = 0.0f;
+                    int nh = 0, nl = 0, nOddLo = 0;
+                    const float sLo = scoreF0(loF, a1b, nh, nl, nOddLo);
+                    if (sLo < thr[lo] || sLo < bestSal * 0.50f) continue;
+                    if (!seriesOk(lo, a1b, nh, nl, nOddLo, false)) continue;
+                    f0 = loF;
+                    bestKey = lo;
+                    bestSal = sLo;
+                    bestA1 = a1b;
+                    bestHit = nh;
+                    break;
+                }
+            }
+
+            candUsed[bestC] = true;
+            if (!commitKey(f0, bestKey, bestSal, bestA1, bestHit, false))
+                rejected[bestKey] = true;
+        }
+
+        for (int i = 0; i < COUNT; ++i)
+            outOwnPow[i] = outPicked[i] ? blend[i] : 0.0f;
+        auto dropKey = [&](int drop) {
+            if (drop < 0 || drop >= COUNT || !outPicked[drop]) return;
+            outPicked[drop] = false;
+            outOwnPow[drop] = 0.0f;
+            if (p.outF0Hz) p.outF0Hz[drop] = 0.0f;
+            --nPicked;
+        };
+        for (int i = 0; i + 1 < COUNT; ++i) {
+            if (!outPicked[i] || !outPicked[i + 1]) continue;
+            int drop = (amp[i] >= amp[i + 1]) ? (i + 1) : i;
+            if (wk.continued[drop] && !wk.continued[drop == i ? i + 1 : i])
+                drop = (drop == i) ? (i + 1) : i;
+            dropKey(drop);
+        }
+        // オクターブ重ね: 傾斜どおりの 2f0 だけ落とす。鍵グリッド振幅で高い方を消すと歌声が死ぬ。
+        for (int lo = MUSIC_LOW_FLOOR; lo < COUNT; ++lo) {
+            if (!outPicked[lo]) continue;
+            const int hi = lo + 12;
+            if (hi >= COUNT || !outPicked[hi]) continue;
+            float fLo = PianoKey::KeyHz(lo);
+            float fHi = PianoKey::KeyHz(hi);
+            if (p.outF0Hz && p.outF0Hz[lo] > 1.0f) fLo = p.outF0Hz[lo];
+            if (p.outF0Hz && p.outF0Hz[hi] > 1.0f) fHi = p.outF0Hz[hi];
+            if (extraSource(fHi, fLo, 2)) continue;
+            // 両方とも継続中ならオクターブ重ねを落とさない（細切れの主因）。
+            if (wk.continued[lo] && wk.continued[hi]) continue;
+            const int jL = FindPeakInHzWindow(phz, pa0, np, hzOrd, fLo, HarmCentsTol(1, true));
+            const int jH = FindPeakInHzWindow(phz, pa0, np, hzOrd, fHi, HarmCentsTol(1, false));
+            int drop = hi;
+            if (jL < 0 && jH >= 0) drop = lo;
+            else if (jH >= 0 && jL >= 0 && pa0[jL] < pa0[jH] * 0.50f) drop = lo;
+            if (wk.continued[drop] && !wk.continued[drop == hi ? lo : hi])
+                drop = (drop == hi) ? lo : hi;
+            dropKey(drop);
+        }
+        if (p.outF0Hz) {
+            for (int i = 0; i < COUNT; ++i) {
+                if (outPicked[i] && p.outF0Hz[i] <= 1.0f)
+                    p.outF0Hz[i] = PianoKey::KeyHz(i);
             }
         }
         return nPicked;
+
     }
 }

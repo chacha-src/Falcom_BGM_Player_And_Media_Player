@@ -473,6 +473,13 @@ static void OpenOutFromMode()
 
 static void RecycleSysexUi()
 {
+	// midiInAddBuffer / midiOutLongMsg は midiInOpen したスレッド以外から呼ぶと落ちることがある。
+	// ピアノロールは専用 UI スレッドなので、アプリスレッド以外では Flush も再投入もしない。
+	{
+		CWinApp* app = AfxGetApp();
+		if (app && app->m_nThreadID != 0 && app->m_nThreadID != ::GetCurrentThreadId())
+			return;
+	}
 	FlushOutSysex();
 	if (InterlockedCompareExchange(&g_stopRecycle, 0, 0) != 0) return;
 	for (int p = 0; p < PCHW_PORT_N; ++p) {

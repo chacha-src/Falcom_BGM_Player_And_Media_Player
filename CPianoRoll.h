@@ -57,6 +57,10 @@ public:
     void SetChannelMeterDb(const float* dbPerChannel, int channelCount);
     // stop/曲切替の先頭で呼ぶ。DoEvent より前に解析を止める
     void PauseAnalysis();
+    // メインスレッドから marshal せず epoch/feed を落とす。SendMessage 待ちにしない。
+    void AbortAnalysisFromAnyThread();
+    // FillPianoRollCapture 中だけ待つ。PickNotes は待たない（バナー凍結の原因になる）。
+    void WaitCaptureIdle(DWORD timeoutMs);
     // 曲切替時などに分析状態を全クリアし、解析ワーカーを作り直す
     void ResetPlaybackState();
     // 再生スレッド稼働後に解析を再開する
@@ -251,6 +255,16 @@ private:
     NoteFrame m_historyRing[MAX_HISTORY];  // 確定済みフレームの環状配列
     int       m_historyCount = 0;          // 有効フレーム数(MAX_HISTORY 未満の間は増える)
     int       m_historyHead = 0;           // 次に書き込むインデックス(新→旧 = head-1, head-2, ...)
+    // OnPaint 用スナップショット。NoteFrame×120 は約 300KB あり、専用 UI スレッドの
+    // 既定 1MB スタックに置くとプレイリスト表示などの入れ子 WM_PAINT で溢れる。
+    NoteFrame m_paintHistSnap[MAX_HISTORY];
+    NoteFrame m_paintLiveSnap;
+    bool m_paintActives[KEY_COUNT];
+    uint8_t m_paintBandMask[KEY_COUNT];
+    float m_paintLane[KEY_COUNT][3];
+    uint8_t m_paintExpr[KEY_COUNT];
+    float m_paintChFill[PIANO_METER_CH_MAX];
+    volatile LONG m_inPaint = 0;
 
     // ---- ノート状態(UI スレッド / m_cs 保護なし。OnAnalysisDone からのみ更新) ----
     bool  m_activeKeys[KEY_COUNT];
@@ -292,6 +306,14 @@ private:
     float m_noiseSmoothed[KEY_COUNT];     // 同 IIR
     float m_fftSalRaw[KEY_COUNT];         // FFT 連続周波数の調波サリエンス
     float m_fftSalSmoothed[KEY_COUNT];    // 同 IIR
+    static constexpr int DET_PEAK_MAX = 80;
+    float m_detPeakHz[DET_PEAK_MAX];
+    float m_detPeakAmp[DET_PEAK_MAX];
+    int   m_detPeakN = 0;
+    // 直前フレームの PickNotes 出力（VisGap 点灯は含めない）。系列を Hz で追う。
+    bool  m_prevPicked[KEY_COUNT] = {};
+    float m_prevPickHz[KEY_COUNT] = {};
+    float m_pickHz[KEY_COUNT] = {};
     // 調律推定(強いピークの鍵中心からのずれの円周平均)。曲ごとにリセット。
     double m_tuneC = 0.0;
     double m_tuneS = 0.0;
@@ -353,6 +375,7 @@ private:
     volatile LONG    m_jobPending = 0;    // InterlockedExchange で管理するジョブ有無フラグ
     volatile LONG    m_captureNeed = 0;   // UI はキックのみ。ワーカーが bufwav3 を読む
     volatile LONG    m_analysisBusy = 0;  // ProcessAnalysisJob 実行中
+    volatile LONG    m_captureBusy = 0;   // FillPianoRollCapture 中。形式破棄はこの間だけ待つ
     volatile LONG    m_analysisEpoch = 0; // Reset ごとに加算。古いジョブを破棄
     double           m_jobMono[WIN_SAMPLES_MAX];  // m_jobCs 保護下でコピーされる入力バッファ
     double           m_workerMonoScratch[WIN_SAMPLES_MAX];
@@ -385,7 +408,7 @@ private:
 
     void EnsureAnalysisTables(int sampleRate, int capCaptureFrames = 0);   // Goertzel 係数と窓関数を再計算
     void RunGoertzelFromBuffer(const double* winLow, const double* winBass, int bassWinLen);
-    void PublishDetectResults(); // UpdateNoteStates/PushDisplayFrames または無音クリア（m_cs 下）
+    void PublishDetectResults(); // ピックはロック外。状態更新と譜面録りだけ m_cs
     void ResetScoreCaptureLocked();
     void SeedScoreCaptureLocked();
     void AppendScoreCaptureLocked();

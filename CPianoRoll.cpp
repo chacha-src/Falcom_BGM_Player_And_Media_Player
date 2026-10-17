@@ -635,12 +635,12 @@ namespace Cfg
         return f;
     }
 
-    // 新規点灯に要る連続ピック数。単発1フレームの揺れや倍音漏れが16分音符ゴミにならないよう、
-    // 原則 2 フレーム連続(特にブレやすい超低音・超高音は 3 フレーム連続)を要求する。
+    // メロディ帯の 16 分は 1 フレームで点灯させる。低音と C7 以上だけ 2 フレーム
+    // （単発ノイズの抑止）。3 フレームだと 16 分と高音スタッカートが消える。
     static int AttackFramesForKey(int keyIndex)
     {
-        if (keyIndex < 36 || keyIndex >= PianoRoll108::O5_HI)
-            return 3;
+        if (keyIndex >= PianoRoll108::BASS_END && keyIndex < PianoRoll108::EDGE_HI)
+            return 1;
         return 2;
     }
 
@@ -773,6 +773,12 @@ CPianoRoll::CPianoRoll(CWnd* pParent)
     memset(m_noiseSmoothed, 0, sizeof(m_noiseSmoothed));
     memset(m_fftSalRaw, 0, sizeof(m_fftSalRaw));
     memset(m_fftSalSmoothed, 0, sizeof(m_fftSalSmoothed));
+    memset(m_detPeakHz, 0, sizeof(m_detPeakHz));
+    memset(m_detPeakAmp, 0, sizeof(m_detPeakAmp));
+    m_detPeakN = 0;
+    memset(m_prevPicked, 0, sizeof(m_prevPicked));
+    memset(m_prevPickHz, 0, sizeof(m_prevPickHz));
+    memset(m_pickHz, 0, sizeof(m_pickHz));
     for (int i = 0; i < PIANO_METER_CH_MAX; ++i) {
         m_chMeterDb[i] = -60.0f;
         m_chMeterFill[i] = 0.0f;
@@ -817,14 +823,13 @@ void CPianoRoll::PauseAnalysis()
     InterlockedExchange(&m_syncPosted, 0);
     InterlockedExchange(&m_analysisDonePosted, 0);
     InterlockedExchange(&m_analysisPresentDirty, 0);
-    EnterCriticalSection(&m_jobCs);
-    m_jobFrameCount = 0;
-    LeaveCriticalSection(&m_jobCs);
-    for (int i = 0; i < 1000; ++i) {
-        if (InterlockedCompareExchange(&m_analysisBusy, 0, 0) == 0)
-            break;
-        Sleep(1);
+    if (TryEnterCriticalSection(&m_jobCs)) {
+        m_jobFrameCount = 0;
+        LeaveCriticalSection(&m_jobCs);
     }
+    // epoch を進めたので進行中ジョブは Publish しない。UI スレッドで busy 待ち
+    // すると SendMessage で止まったメインが 0:00.00 のままになり、待ち中の
+    // Sleep にスクショ WM_PAINT が割り込んで落ちる。
     InterlockedExchange(&m_jobPending, 0);
 
     // 停止中にループバック／ノイズ床でメーターがちらつかないよう沈黙させる
@@ -837,6 +842,24 @@ void CPianoRoll::PauseAnalysis()
     m_meterDirty = true;
     if (::IsWindow(m_hWnd) && !m_paintDisabled)
         ApplySyncInvalidate();
+}
+
+void CPianoRoll::AbortAnalysisFromAnyThread()
+{
+    m_feedEnabled = false;
+    InterlockedIncrement(&m_analysisEpoch);
+    InterlockedExchange(&m_jobPending, 0);
+    InterlockedExchange(&m_captureNeed, 0);
+}
+
+void CPianoRoll::WaitCaptureIdle(DWORD timeoutMs)
+{
+    const DWORD t0 = GetTickCount();
+    while (InterlockedCompareExchange(&m_captureBusy, 0, 0) != 0) {
+        if (timeoutMs == 0 || (GetTickCount() - t0) >= timeoutMs)
+            break;
+        Sleep(1);
+    }
 }
 
 void CPianoRoll::SetChannelMeterDb(const float* dbPerChannel, int channelCount)
@@ -941,7 +964,7 @@ void CPianoRoll::ResetPlaybackState()
     // 表示バッファ・タイマーはピアノロール専用 UI スレッドの持ち物
     if (VizUi::MarshalToOwner(m_hWnd, [this]() { ResetPlaybackState(); }))
         return;
-    // Pause で busy=0 を待つので、表示状態のクリアはワーカー停止成否に依存しない。
+    // epoch で進行中ジョブを捨てる。ワーカー停止待ちはしない。
     PauseAnalysis();
 
     if (::IsWindow(m_hWnd)) {
@@ -1009,6 +1032,12 @@ void CPianoRoll::ResetPlaybackState()
         memset(m_noiseSmoothed, 0, sizeof(m_noiseSmoothed));
         memset(m_fftSalRaw, 0, sizeof(m_fftSalRaw));
         memset(m_fftSalSmoothed, 0, sizeof(m_fftSalSmoothed));
+        memset(m_detPeakHz, 0, sizeof(m_detPeakHz));
+        memset(m_detPeakAmp, 0, sizeof(m_detPeakAmp));
+        m_detPeakN = 0;
+        memset(m_prevPicked, 0, sizeof(m_prevPicked));
+        memset(m_prevPickHz, 0, sizeof(m_prevPickHz));
+        memset(m_pickHz, 0, sizeof(m_pickHz));
         m_tuneC = 0.0;
         m_tuneS = 0.0;
         m_tuneW = 0.0;
@@ -1037,60 +1066,19 @@ void CPianoRoll::ResetPlaybackState()
         }
         };
 
-    bool gotCs = false;
-    for (int attempt = 0; attempt < 50; ++attempt) {
-        if (TryEnterCriticalSection(&m_cs)) {
-            gotCs = true;
-            break;
-        }
-        Sleep(1);
-    }
-    if (gotCs) {
+    if (TryEnterCriticalSection(&m_cs)) {
         clearDisplayState();
         LeaveCriticalSection(&m_cs);
     }
-    else {
-        // CS が取れなくても表示用メンバは UI スレッド専用なので消す
-        clearDisplayState();
-    }
+    // 取れないときはワーカーが UpdateNoteStates 中。unlocked memset は
+    // 曲切替クラッシュの原因。epoch で Publish は捨てるので次フレームで消える。
 
-    StopAnalysisWorker();
-    InterlockedExchange(&m_analysisBusy, 0);
+    // 曲切替でワーカーを殺して待つと、メインの SendMessage(Reset) が
+    // PickNotes 完了まで止まり、バナーが 0:00.00 のままになる。
+    // epoch 無効化で旧ジョブは捨て、スレッドは Resume まで生かす。
     InterlockedExchange(&m_jobPending, 0);
     InterlockedExchange(&m_syncPosted, 0);
-
-    // ワーカー完全停止後だけ解析テーブルを破棄（稼働中に触ると UAF）
-    bool workerGone = (m_hAnalysisThread == NULL);
-    if (!workerGone) {
-        const DWORD wr = WaitForSingleObject(m_hAnalysisThread, 0);
-        if (wr == WAIT_OBJECT_0) {
-            CloseHandle(m_hAnalysisThread);
-            m_hAnalysisThread = NULL;
-            if (m_hAnalysisWake) {
-                CloseHandle(m_hAnalysisWake);
-                m_hAnalysisWake = NULL;
-            }
-            InterlockedExchange(&m_workerStop, 0);
-            workerGone = true;
-        }
-    }
-
-    if (workerGone && TryEnterCriticalSection(&m_cs)) {
-        m_ringWrite = 0;
-        m_ringCount = 0;
-        m_samplesSinceAnalyze = 0;
-        m_playbackDelaySamples = 0;
-        m_lastAnalyzeTick = 0;
-        m_inputSampleRate = 0;
-        m_winLow = m_winBass = m_winHigh = m_winOnset = 0;
-        m_analysisTablesReady = false;
-        m_analysisHasBass = false;
-        LeaveCriticalSection(&m_cs);
-    }
-    else {
-        // ワーカー生存時もスロットルだけリセット（次曲の解析投入を止めない）
-        m_lastAnalyzeTick = 0;
-    }
+    m_lastAnalyzeTick = 0;
 
     // 前曲の絵が残ったまま止まって見えないよう再描画を要求
     if (::IsWindow(m_hWnd))
@@ -1538,6 +1526,7 @@ void CPianoRoll::RunGoertzelFromBuffer(const double* winLow,
             m_fftSalRaw[i] = 0.0f;
             m_fftSalSmoothed[i] *= 0.5f;
         }
+        m_detPeakN = 0;
         memcpy(m_prevOnsetStrengths, m_onsetStrengths, sizeof(m_onsetStrengths));
         m_percLevel = 0.0f;
         m_detectSilent = true;
@@ -1560,6 +1549,45 @@ void CPianoRoll::RunGoertzelFromBuffer(const double* winLow,
     float peakMag[KEY_COUNT];
     float floorMag[KEY_COUNT];
     PianoRollPeakSpectrum::TuneAcc tune;
+    m_detPeakN = 0;
+    auto takePeaks = [&](int keyLo, int keyHi, int winSamples, int refWin) {
+        const int n = m_peakSpec.PeakCount();
+        for (int i = 0; i < n; ++i) {
+            const float hz = m_peakSpec.PeakHzAt(i);
+            const float raw = m_peakSpec.PeakAmpAt(i);
+            if (hz <= 1.0f || raw <= 0.0f) continue;
+            const float kf = 69.0f + 12.0f * log2f(hz / 440.0f) - m_tuneSemis;
+            const int k = (int)floorf(kf + 0.5f);
+            if (k < keyLo || k >= keyHi) continue;
+            const float amp = ApplyDetectScale(raw, winSamples, refWin);
+            int found = -1;
+            for (int j = 0; j < m_detPeakN; ++j) {
+                const float c = 1731.234049066756f * fabsf(logf(hz / m_detPeakHz[j]));
+                if (c < 50.0f) { found = j; break; }
+            }
+            if (found >= 0) {
+                if (amp > m_detPeakAmp[found]) {
+                    m_detPeakHz[found] = hz;
+                    m_detPeakAmp[found] = amp;
+                }
+                continue;
+            }
+            if (m_detPeakN < DET_PEAK_MAX) {
+                m_detPeakHz[m_detPeakN] = hz;
+                m_detPeakAmp[m_detPeakN] = amp;
+                ++m_detPeakN;
+            }
+            else {
+                int w = 0;
+                for (int j = 1; j < m_detPeakN; ++j)
+                    if (m_detPeakAmp[j] < m_detPeakAmp[w]) w = j;
+                if (amp > m_detPeakAmp[w]) {
+                    m_detPeakHz[w] = hz;
+                    m_detPeakAmp[w] = amp;
+                }
+            }
+        }
+    };
     auto analyzePeaks = [&](const double* windowed, int winLen, float sidelobeDb, int keyLo, int keyHi) {
         m_peakSpec.Analyze(windowed, winLen, m_inputSampleRate, sidelobeDb, keyLo, keyHi,
             m_tuneSemis, Cfg::PEAK_SNR_DB, peakMag, floorMag, m_fftSalRaw, &tune);
@@ -1577,12 +1605,15 @@ void CPianoRoll::RunGoertzelFromBuffer(const double* winLow,
             m_windowedBass[i] = m_bassAnalysisBuf[i] * m_hannBass[i];
         analyzePeaks(m_windowedBass, m_winBass, PianoRollPeakSpectrum::SIDELOBE_HANN_DB, 0, splitLo);
         storeKeys(0, splitLo, m_winBass, WIN_BASS_REF);
+        takePeaks(0, splitLo, m_winBass, WIN_BASS_REF);
         analyzePeaks(m_windowedLow, m_winLow, PianoRollPeakSpectrum::SIDELOBE_HANN_DB, splitLo, splitHi);
         storeKeys(splitLo, splitHi, m_winLow, WIN_LOW_REF);
+        takePeaks(splitLo, splitHi, m_winLow, WIN_LOW_REF);
     }
     else {
         analyzePeaks(m_windowedLow, m_winLow, PianoRollPeakSpectrum::SIDELOBE_HANN_DB, 0, splitHi);
         storeKeys(0, splitHi, m_winLow, WIN_LOW_REF);
+        takePeaks(0, splitHi, m_winLow, WIN_LOW_REF);
     }
     // 4096 サンプル窓(直近 ~93ms)は C4(splitLo=60)以上も解析し、60..84 の中高音メロディで
     // 8192 窓内で音が動いてピークが割れている場合のみ 4096 窓側を採用する。
@@ -1611,6 +1642,7 @@ void CPianoRoll::RunGoertzelFromBuffer(const double* winLow,
         m_noiseRaw[i] = ApplyDetectScale(floorHigh[i], m_winHigh, WIN_HIGH_REF);
         m_fftSalRaw[i] = salHigh[i];
     }
+    takePeaks(splitLo, KEY_COUNT, m_winHigh, WIN_HIGH_REF);
 
     // 調律: 強い正弦波成分の A440 鍵中心からのずれを約 2 秒の時定数で円周平均する。
     // まとまりが弱い(ビブラート・グリッサンド主体)ときは直前の値を保つ。
@@ -1646,39 +1678,7 @@ void CPianoRoll::RunGoertzelFromBuffer(const double* winLow,
         m_fftSalSmoothed[i] =
             m_fftSalSmoothed[i] * (1.0f - alpha) + m_fftSalRaw[i] * alpha;
     }
-    // UpdateNoteStates / PushDisplayFrames は m_cs 下の PublishDetectResults で行う
-}
-
-namespace
-{
-    // 隣接半音間のピック“ホッピング”対策。
-    // 実音の周波数が2鍵のちょうど中間に近い(ビブラート・ポルタメント)と、鍵への
-    // 割り当てがフレームごとに入れ替わり、同じ1音が隣接する2鍵の間を飛び移る。
-    // m_activeKeys は鍵ごとに独立しているため、これが「隣接する2本のバーが交互に
-    // チラつく」症状になる。前フレームで鳴っていた鍵(prevActive)と、今フレーム
-    // 僅差で勝った隣の鍵の値が近い(marginRatio以内)場合は、前フレームの鍵を
-    // 優先して復活させ、隣の鍵は降ろす。
-    void StabilizeBinHop(const float* blend, bool* picked,
-        const bool* prevActive, int count, float marginRatio)
-    {
-        if (!blend || !picked || !prevActive || count <= 0) return;
-        for (int i = 0; i < count; ++i) {
-            if (!prevActive[i] || picked[i]) continue;
-            const float bi = blend[i];
-            if (bi <= 0.0f) continue;
-            for (int d = -1; d <= 1; d += 2) {
-                const int j = i + d;
-                if (j < 0 || j >= count || !picked[j]) continue;
-                const float bj = blend[j];
-                if (bj <= 0.0f) continue;
-                if (bi >= bj * marginRatio) {
-                    picked[i] = true;
-                    picked[j] = false;
-                    break;
-                }
-            }
-        }
-    }
+    // ピックは m_cs 外。状態書き込みだけ PublishDetectResults / UpdateNoteStates が短時間取る。
 }
 
 void CPianoRoll::UpdateNoteStates()
@@ -1716,26 +1716,35 @@ void CPianoRoll::UpdateNoteStates()
         treMax >= bandSilTre;
 
     if (!anyBandLive || maxS < silenceAbs) {
-        for (int i = 0; i < KEY_COUNT; ++i) {
-            m_activeKeys[i] = false;
-            m_noteStrength[i] = 0.0f;
-            m_consecActive[i] = 0;
-            m_consecSilent[i] = 0;
-            m_unpickedFrames[i] = 0;
-            m_strengthDipFrames[i] = 0;
-            m_transientHold[i] = 0;
-            m_envPeak[i] = 0.0f;
-            m_bandMask[i] = 0;
-            memset(m_laneStrength[i], 0, sizeof(m_laneStrength[i]));
-            m_smoothedStrengths[i] *= 0.4f;
-            m_displaySmoothed[i] *= 0.4f;
-            // 無音区間は音色エンベロープモデルもオフへ戻す
-            m_envModel[i].ResetOff();
-            m_reattackMark[i] = false;
-            m_onsetBoostStreak[i] = 0;
+        EnterCriticalSection(&m_cs);
+        __try {
+            for (int i = 0; i < KEY_COUNT; ++i) {
+                m_activeKeys[i] = false;
+                m_noteStrength[i] = 0.0f;
+                m_consecActive[i] = 0;
+                m_consecSilent[i] = 0;
+                m_unpickedFrames[i] = 0;
+                m_strengthDipFrames[i] = 0;
+                m_transientHold[i] = 0;
+                m_envPeak[i] = 0.0f;
+                m_bandMask[i] = 0;
+                memset(m_laneStrength[i], 0, sizeof(m_laneStrength[i]));
+                m_smoothedStrengths[i] *= 0.4f;
+                m_displaySmoothed[i] *= 0.4f;
+                // 無音区間は音色エンベロープモデルもオフへ戻す
+                m_envModel[i].ResetOff();
+                m_reattackMark[i] = false;
+                m_onsetBoostStreak[i] = 0;
+            }
+            m_percLevel = 0.0f;
+            memcpy(m_prevOnsetStrengths, m_onsetStrengths, sizeof(m_onsetStrengths));
+            memset(m_prevPicked, 0, sizeof(m_prevPicked));
+            memset(m_prevPickHz, 0, sizeof(m_prevPickHz));
+            memset(m_pickHz, 0, sizeof(m_pickHz));
         }
-        m_percLevel = 0.0f;
-        memcpy(m_prevOnsetStrengths, m_onsetStrengths, sizeof(m_onsetStrengths));
+        __except (EXCEPTION_EXECUTE_HANDLER) {
+        }
+        LeaveCriticalSection(&m_cs);
         return;
     }
 
@@ -1772,10 +1781,22 @@ void CPianoRoll::UpdateNoteStates()
     pp.verifyExplained = m_harmonicGhostGuardEnabled;
     pp.percussive = m_harmonicProfileGuardEnabled ? m_percLevel : 0.0f;
     pp.fftHarmSal = salBlend;
+    pp.peakHz = m_detPeakHz;
+    pp.peakAmp = m_detPeakAmp;
+    pp.nPeaks = m_detPeakN;
+    pp.tuneSemis = m_tuneSemis;
 
+    bool prevActive[KEY_COUNT];
+    float prevHz[KEY_COUNT];
     bool picked[KEY_COUNT];
     float ownPow[KEY_COUNT];
-    PianoRoll108::PickNotes(blend, floorBlend, m_activeKeys, picked, ownPow, pp);
+    EnterCriticalSection(&m_cs);
+    memcpy(prevActive, m_prevPicked, sizeof(prevActive));
+    memcpy(prevHz, m_prevPickHz, sizeof(prevHz));
+    LeaveCriticalSection(&m_cs);
+    pp.prevF0Hz = prevHz;
+    pp.outF0Hz = m_pickHz;
+    PianoRoll108::PickNotes(blend, floorBlend, prevActive, picked, ownPow, pp);
 
 #ifdef _DEBUG
     // [診断用] ピック直後、絶対床の半分にも満たない鍵が選ばれていないかを確認する。
@@ -1796,10 +1817,10 @@ void CPianoRoll::UpdateNoteStates()
     }
 #endif
 
-    // 隣接半音ホッピング対策。前フレームの鍵(m_activeKeys、この時点ではまだ前フレームの値)を
-    // 基準に、僅差で入れ替わっただけの隣接ピックを元に戻す。
-    static constexpr float kAdjacentHoppingMarginRatio = 0.85f;
-    StabilizeBinHop(blend, picked, m_activeKeys, KEY_COUNT, kAdjacentHoppingMarginRatio);
+    // 隣接ホッピングの復活は gap ホールドと重なると 1 音が 2 鍵になる。
+    // 継続は PickNotes が残差上で前フレーム音を先に確定する。
+    EnterCriticalSection(&m_cs);
+    __try {
     for (int i = 0; i < KEY_COUNT; ++i)
         if (picked[i] && blend[i] > ownPow[i]) ownPow[i] = blend[i];
 
@@ -1808,28 +1829,9 @@ void CPianoRoll::UpdateNoteStates()
         // 鳴っている間も残差がほぼゼロなので、ホールドで居座らない。
         const float sigStrength = ownPow[i];
         bool effective = picked[i];
-
-        if (!effective && m_activeKeys[i]) {
-            float holdRatio;
-            if (i < BAND_BASS_END)
-                holdRatio = PrTuneF(savedata.prTuneHoldBassPct, HOLD_ENV_BASS);
-            else if (i < BAND_MID_END)
-                holdRatio = PrTuneF(savedata.prTuneHoldMidPct, HOLD_ENV_MID);
-            else
-                holdRatio = PrTuneF(savedata.prTuneHoldTrePct, HOLD_ENV_TRE);
-            if (holdRatio > 0.0f && m_envPeak[i] > 0.001f) {
-                // 持続中のノートが倍音減算のフレーム揺れで一瞬 ownPow=0 になっても、
-                // 実際の平滑スペクトル(m_smoothedStrengths)がピークに対して十分残っており、
-                // かつ下の音の単純倍音ゴーストでなければ持続(ホールド)を維持する。
-                if (sigStrength >= m_envPeak[i] * holdRatio) {
-                    effective = true;
-                }
-                else if (m_smoothedStrengths[i] >= m_envPeak[i] * holdRatio * 0.85f &&
-                    !PianoKey::IsHarmonicOfAnyActive(blend, i, picked, PianoRoll108::MUSIC_LOW_FLOOR, i, KEY_COUNT, 0.90f)) {
-                    effective = true;
-                }
-            }
-        }
+        // 鍵グリッドの裾・倍音エネルギーで effective を立てると、PickNotes が捨てた
+        // 部分音が gap をリセットして居座り、画面が和音の雲になる。欠測の接続は
+        // 下の unpickedFrames / VisGap だけが行う。
 
         if (effective) {
             ++m_consecActive[i];
@@ -1868,12 +1870,10 @@ void CPianoRoll::UpdateNoteStates()
         else {
             m_onsetBoostStreak[i] = 0;
         }
-        // 単発1フレームのスパイクが16分音符ゴミとして乱発するのを防ぐため、
-        // OnsetSupportsPick による 1フレーム即時点灯は「中域メロディ帯(C3〜C6)で打楽器過渡でない強いオンセット」に限定し、
-        // 低音・高音や通常音は必ず AttackFramesForKey (2〜3フレーム連続) を経て点灯させる。
-        const bool strongMidOnset = onsetBoost && !percussive &&
-            (i >= PianoRoll108::BASS_END && i < PianoRoll108::O5_HI) &&
-            (sigStrength >= absFloor * 4.0f);
+        // メロディ帯(C3〜C7)はオンセットがあれば即時点灯（16分）。ノイズは PickNotes 側で落とす。
+        const bool strongMidOnset = onsetBoost &&
+            (i >= PianoRoll108::BASS_END && i < PianoRoll108::EDGE_HI) &&
+            (sigStrength >= absFloor * 3.0f);
         const int attackNeed = strongMidOnset ? 1 : AttackFramesForKey(i);
 
         bool cur = m_activeKeys[i];
@@ -1910,14 +1910,27 @@ void CPianoRoll::UpdateNoteStates()
         m_activeKeys[i] = cur;
     }
 
-    // ホールド延長だけで隣半音が同時残った場合だけ落とす。
-    // 両方とも本フレームのピックなら PickNotes が独立と判定した近接なので触らない
-    // （全域 ForceUnique は和音・装飾を潰す）。
+    // PickNotes が捨てた部分音が gap で残っているなら即切る。
+    for (int i = PianoRoll108::MUSIC_LOW_FLOOR; i < KEY_COUNT; ++i) {
+        if (!m_activeKeys[i] || picked[i]) continue;
+        if (!PianoKey::IsHarmonicOfAnyActive(blend, i, picked,
+            PianoRoll108::MUSIC_LOW_FLOOR, i, KEY_COUNT, 0.80f))
+            continue;
+        m_activeKeys[i] = false;
+        m_consecActive[i] = 0;
+        m_envPeak[i] = 0.0f;
+        m_unpickedFrames[i] = 0;
+        m_strengthDipFrames[i] = 0;
+        m_noteStrength[i] = 0.0f;
+        m_bandMask[i] = 0;
+        memset(m_laneStrength[i], 0, sizeof(m_laneStrength[i]));
+    }
+
+    // 隣半音の同時点灯は FFT ローブ割れ・ホールド残り。実音の短2度より漏れの方が圧倒的に多い。
     for (int i = 0; i + 1 < KEY_COUNT; ++i) {
         if (!m_activeKeys[i] || !m_activeKeys[i + 1]) continue;
         const bool pi = picked[i];
         const bool pj = picked[i + 1];
-        if (pi && pj) continue;
         int drop = -1;
         if (pi && !pj) drop = i + 1;
         else if (!pi && pj) drop = i;
@@ -1995,6 +2008,12 @@ void CPianoRoll::UpdateNoteStates()
     UpdateEnvelope();
 
     memcpy(m_prevOnsetStrengths, m_onsetStrengths, sizeof(m_onsetStrengths));
+    memcpy(m_prevPicked, picked, sizeof(m_prevPicked));
+    memcpy(m_prevPickHz, m_pickHz, sizeof(m_prevPickHz));
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER) {
+    }
+    LeaveCriticalSection(&m_cs);
 }
 
 // 音色エンベロープモデル(NoteEnvelopeModel.h)の更新。
@@ -3245,7 +3264,11 @@ void CPianoRoll::ReleasePcAudioForScoreCaptureIfHeld()
 
 void CPianoRoll::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
 {
-    CCustomPopupMenu menu;
+    // CCustomPopupMenu は項目・フォント面・CCustom 内包で数百 KB ある。
+    // 専用 UI スレッドの既定 1MB スタックに置くと、再生中 OnPaint と重なって溢れる。
+    CCustomPopupMenu* pMenu = new CCustomPopupMenu();
+    if (!pMenu) return;
+    CCustomPopupMenu& menu = *pMenu;
 
     CCustomPopupMenu* subView = menu.AddSubMenu(
         LL14(L"表示モード", L"View mode", L"Mode d'affichage", L"Modalita di visualizzazione", L"Modo de visualizacion", L"표시 모드", L"显示模式", L"وضع العرض", L"Режим отображения", L"Anzeigemodus", L"Modo de exibicao", L"Weergavemodus", L"Tryb wyswietlania", L"Goruntuleme modu"),
@@ -3455,7 +3478,15 @@ void CPianoRoll::OnContextMenu(CWnd* /*pWnd*/, CPoint point)
         CRect rc; GetClientRect(&rc); ClientToScreen(&rc);
         point = CPoint(rc.left + 8, rc.top + 8);
     }
-    const UINT cmd = menu.Track(point, this);
+    UINT cmd = 0;
+    try {
+        cmd = menu.Track(point, this);
+    }
+    catch (...) {
+        cmd = 0;
+    }
+    delete pMenu;
+    pMenu = nullptr;
     if (PcHwMidiInHandleCmd(cmd, this))
         return;
     if (cmd == ID_MP_OPEN_EQ || cmd == ID_MP_OPEN_ANALYZER || cmd == ID_MP_OPEN_MIDIMON) {
@@ -4824,10 +4855,12 @@ void CPianoRoll::PumpSyncNow()
     // VSYNC ティックが周期。GetTickCount 間引きは 16ms 粒度で半速/欠フレームになる。
     if (!::IsWindow(m_hWnd) || m_paintDisabled) return;
     RequestRingCapture();
-    EnterCriticalSection(&m_cs);
-    PushDisplayFrames();
-    int pending = m_framesPending;
-    LeaveCriticalSection(&m_cs);
+    int pending = 0;
+    if (TryEnterCriticalSection(&m_cs)) {
+        PushDisplayFrames();
+        pending = m_framesPending;
+        LeaveCriticalSection(&m_cs);
+    }
     const bool rollOrKey = pending > 0 || m_historyDirty || m_keyDirty
         || InterlockedCompareExchange(&m_analysisPresentDirty, 0, 0) != 0;
     if (rollOrKey)
@@ -4909,7 +4942,8 @@ void CPianoRoll::StartAnalysisWorker()
         if (!m_hAnalysisWake) return;
     }
     m_hAnalysisThread = CreateThread(
-        NULL, 0, AnalysisWorkerThreadEntry, this, 0, NULL);
+        NULL, 4u * 1024u * 1024u, AnalysisWorkerThreadEntry, this,
+        STACK_SIZE_PARAM_IS_A_RESERVATION, NULL);
     if (!m_hAnalysisThread) {
         CloseHandle(m_hAnalysisWake);
         m_hAnalysisWake = NULL;
@@ -5020,15 +5054,23 @@ DWORD CPianoRoll::AnalysisWorkerLoop()
             break;
 
         bool didWork = false;
-        if (InterlockedExchange(&m_captureNeed, 0) == 1) {
-            if (ProcessRingCapture())
-                didWork = true;
+        __try {
+            if (InterlockedExchange(&m_captureNeed, 0) == 1) {
+                InterlockedExchange(&m_captureBusy, 1);
+                if (ProcessRingCapture())
+                    didWork = true;
+            }
+            while (InterlockedCompareExchange(&m_jobPending, 0, 1) == 1) {
+                if (InterlockedCompareExchange(&m_workerStop, 0, 0) != 0)
+                    break;
+                if (ProcessAnalysisJob())
+                    didWork = true;
+            }
         }
-        while (InterlockedCompareExchange(&m_jobPending, 0, 1) == 1) {
-            if (InterlockedCompareExchange(&m_workerStop, 0, 0) != 0)
-                break;
-            if (ProcessAnalysisJob())
-                didWork = true;
+        __except (EXCEPTION_EXECUTE_HANDLER) {
+            InterlockedExchange(&m_analysisBusy, 0);
+            InterlockedExchange(&m_captureBusy, 0);
+            didWork = false;
         }
 
         // 多重 Post するとキューが空にならず WM_PAINT / EQ が飢餓する。
@@ -5065,17 +5107,19 @@ bool CPianoRoll::ProcessRingCapture()
         meterDb[i] = -60.0f;
 
     bool captured = false;
-    if (m_feedEnabled &&
-        InterlockedCompareExchange(&m_analysisEpoch, 0, 0) == epochAtStart) {
-        __try {
+    InterlockedExchange(&m_captureBusy, 1);
+    __try {
+        if (m_feedEnabled &&
+            InterlockedCompareExchange(&m_analysisEpoch, 0, 0) == epochAtStart) {
             captured = COggDlg_FillPianoRollCapture(
                 m_workerMonoScratch, WIN_SAMPLES_MAX,
                 &frameCount, &sampleRate, meterDb, &meterCh) != FALSE;
         }
-        __except (EXCEPTION_EXECUTE_HANDLER) {
-            captured = false;
-        }
     }
+    __except (EXCEPTION_EXECUTE_HANDLER) {
+        captured = false;
+    }
+    InterlockedExchange(&m_captureBusy, 0);
 
     bool ok = false;
     if (captured &&
@@ -5094,14 +5138,12 @@ bool CPianoRoll::ProcessRingCapture()
             if (ok &&
                 m_feedEnabled &&
                 InterlockedCompareExchange(&m_analysisEpoch, 0, 0) == epochAtStart) {
-                EnterCriticalSection(&m_cs);
                 __try {
                     PublishDetectResults();
                 }
                 __except (EXCEPTION_EXECUTE_HANDLER) {
                     ok = false;
                 }
-                LeaveCriticalSection(&m_cs);
             }
         }
     }
@@ -5113,7 +5155,7 @@ bool CPianoRoll::ProcessRingCapture()
 // ジョブバッファをローカルにコピーしてから m_jobCs を解放し、
 // 長い Goertzel 演算中はジョブバッファを解放しておく(再生スレッドが
 // 次のジョブを書き込める状態を保つ)。
-// Goertzel は m_cs 外。UI OnPaint が結果スナップショットだけ短時間待つようにする。
+// Goertzel / PickNotes は m_cs 外。UI OnPaint が結果スナップショットだけ短時間待つ。
 // SEH で CS / busy を必ず解放し、例外でワーカーが死んでもロックを残さない。
 bool CPianoRoll::ProcessAnalysisJob()
 {
@@ -5147,14 +5189,12 @@ bool CPianoRoll::ProcessAnalysisJob()
         if (ok &&
             m_feedEnabled &&
             InterlockedCompareExchange(&m_analysisEpoch, 0, 0) == epochAtStart) {
-            EnterCriticalSection(&m_cs);
             __try {
                 PublishDetectResults();
             }
             __except (EXCEPTION_EXECUTE_HANDLER) {
                 ok = false;
             }
-            LeaveCriticalSection(&m_cs);
         }
     }
 
@@ -5165,17 +5205,29 @@ bool CPianoRoll::ProcessAnalysisJob()
 void CPianoRoll::PublishDetectResults()
 {
     if (m_detectSilent) {
-        for (int i = 0; i < KEY_COUNT; ++i) {
-            m_activeKeys[i] = false;
-            m_bandMask[i] = 0;
-            memset(m_laneStrength[i], 0, sizeof(m_laneStrength[i]));
-            m_exprFlags[i] = 0;
+        EnterCriticalSection(&m_cs);
+        __try {
+            for (int i = 0; i < KEY_COUNT; ++i) {
+                m_activeKeys[i] = false;
+                m_bandMask[i] = 0;
+                memset(m_laneStrength[i], 0, sizeof(m_laneStrength[i]));
+                m_exprFlags[i] = 0;
+            }
+            AppendScoreCaptureLocked();
         }
-        AppendScoreCaptureLocked();
+        __except (EXCEPTION_EXECUTE_HANDLER) {
+        }
+        LeaveCriticalSection(&m_cs);
         return;
     }
     UpdateNoteStates();
-    AppendScoreCaptureLocked();
+    EnterCriticalSection(&m_cs);
+    __try {
+        AppendScoreCaptureLocked();
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER) {
+    }
+    LeaveCriticalSection(&m_cs);
 }
 
 bool CPianoRoll::RunAnalysisJob(const double* mono, int frameCount, int sampleRate, LONG epochAtStart)
@@ -6187,24 +6239,37 @@ void CPianoRoll::InvalidateCaptionChrome()
 
 void CPianoRoll::OnActivate(UINT nState, CWnd* pWndOther, BOOL bMinimized)
 {
-    // 基底は活性化のたびに RedrawWindow(ERASE|ALLCHILDREN) する。
-    // ピアノロール本文はオフスクリーンが正なので、帯とボタンだけ無効化する。
-    CCustomDialogEx::OnActivate(nState, pWndOther, bMinimized);
+    // 基底の Blur/Ex OnActivate は RedrawWindow(ERASE|ALLCHILDREN) する。
+    // プレイリストを前面にした瞬間、専用 UI スレッドの OnPaint と入れ子になり溢れる。
+    // 本文はオフスクリーンが正なので、帯だけ無効化する。
+    UNREFERENCED_PARAMETER(nState);
+    UNREFERENCED_PARAMETER(pWndOther);
     if (!bMinimized)
         InvalidateCaptionChrome();
 }
 
 void CPianoRoll::OnActivateApp(BOOL bActive, DWORD dwThreadID)
 {
-    CCustomDialogEx::OnActivateApp(bActive, dwThreadID);
     UNREFERENCED_PARAMETER(bActive);
+    UNREFERENCED_PARAMETER(dwThreadID);
     InvalidateCaptionChrome();
 }
 
 void CPianoRoll::OnPaint()
 {
-    CPaintDC dc(this);
     const DWORD paintStart = GetTickCount();
+    if (InterlockedCompareExchange(&m_inPaint, 1, 0) != 0) {
+        ValidateRect(NULL);
+        InterlockedExchange(&m_analysisDonePosted, 0);
+        InterlockedExchange(&m_syncPosted, 0);
+        return;
+    }
+    CPaintDC dc(this);
+    struct PaintScope {
+        volatile LONG* flag;
+        explicit PaintScope(volatile LONG* f) : flag(f) {}
+        ~PaintScope() { InterlockedExchange(flag, 0); }
+    } paintScope(&m_inPaint);
     if (m_paintDisabled) {
         InterlockedExchange(&m_analysisDonePosted, 0);
         InterlockedExchange(&m_syncPosted, 0);
@@ -6253,9 +6318,10 @@ void CPianoRoll::OnPaint()
         && m_keyW == w && m_keyH == keySectionH
         && m_rollW == w && m_rollH == rollH) {
         int pendingMeter = 0;
-        EnterCriticalSection(&m_cs);
-        pendingMeter = m_framesPending;
-        LeaveCriticalSection(&m_cs);
+        if (TryEnterCriticalSection(&m_cs)) {
+            pendingMeter = m_framesPending;
+            LeaveCriticalSection(&m_cs);
+        }
         if (pendingMeter <= 0) {
             CRect clip;
             const int clipKind = dc.GetClipBox(&clip);
@@ -6281,9 +6347,10 @@ void CPianoRoll::OnPaint()
     // 追従ドラッグ中など、バッファが最新のときは貼るだけ（再合成しない）。
     {
         int pendingQuick = 0;
-        EnterCriticalSection(&m_cs);
-        pendingQuick = m_framesPending;
-        LeaveCriticalSection(&m_cs);
+        if (TryEnterCriticalSection(&m_cs)) {
+            pendingQuick = m_framesPending;
+            LeaveCriticalSection(&m_cs);
+        }
         const bool needBufUpdate = (pendingQuick > 0) || m_historyDirty || m_keyDirty || m_meterDirty;
         const bool keyBufOk = view3D || (m_keyBufReady && m_keyW == w && m_keyH == keySectionH);
         if (!needBufUpdate && m_rollReady && keyBufOk
@@ -6309,31 +6376,30 @@ void CPianoRoll::OnPaint()
         return;
     }
 
-    NoteFrame liveSnap;
-    bool activesCopy[KEY_COUNT];
-    uint8_t bandMaskCopy[KEY_COUNT];
-    float laneStrengthCopy[KEY_COUNT][3];
-    float chFillCopy[PIANO_METER_CH_MAX];
-    uint8_t exprCopy[KEY_COUNT];
     int chCountCopy = 0;
     chCountCopy = m_chMeterCount;
-    memcpy(chFillCopy, m_chMeterFill, sizeof(chFillCopy));
-    EnterCriticalSection(&m_cs);
-    BuildLiveNoteFrame(liveSnap);
-    memcpy(activesCopy, m_activeKeys, sizeof(m_activeKeys));
-    memcpy(bandMaskCopy, m_bandMask, sizeof(m_bandMask));
-    memcpy(laneStrengthCopy, m_laneStrength, sizeof(m_laneStrength));
-    memcpy(exprCopy, m_exprFlags, sizeof(m_exprFlags));
-    LeaveCriticalSection(&m_cs);
+    memcpy(m_paintChFill, m_chMeterFill, sizeof(m_paintChFill));
+    if (TryEnterCriticalSection(&m_cs)) {
+        BuildLiveNoteFrame(m_paintLiveSnap);
+        memcpy(m_paintActives, m_activeKeys, sizeof(m_activeKeys));
+        memcpy(m_paintBandMask, m_bandMask, sizeof(m_bandMask));
+        memcpy(m_paintLane, m_laneStrength, sizeof(m_laneStrength));
+        memcpy(m_paintExpr, m_exprFlags, sizeof(m_exprFlags));
+        LeaveCriticalSection(&m_cs);
+    } else if (m_rollReady && m_rollW == w && m_rollH == rollH) {
+        PresentClientFromBuffers(dc, w, h, rollH, keySectionH);
+        return;
+    }
 
     // メーター変化だけで 108 鍵フル再描画すると UI スレッドを食いつぶし EQ が数秒に1回になる。
     // 鍵盤状態が汚れていないときはメーター帯だけ更新する。
     const bool meterOnlyDirty = m_meterDirty && !m_keyDirty && m_keyBufReady;
 
     int pending = 0;
-    EnterCriticalSection(&m_cs);
-    pending = m_framesPending;
-    LeaveCriticalSection(&m_cs);
+    if (TryEnterCriticalSection(&m_cs)) {
+        pending = m_framesPending;
+        LeaveCriticalSection(&m_cs);
+    }
 
     const bool rollDirty = m_historyDirty;
     const bool needKeyDraw = !view3D && (m_keyDirty || !m_keyBufReady);
@@ -6346,7 +6412,7 @@ void CPianoRoll::OnPaint()
     // 簡易3D は差分スクロールを持たない。毎フレーム、シーンを丸ごと描き直す。
     if (view3D) {
         Capture3DWalls();
-        Draw3DSceneToBuffer(m_rollDC, w, rollH, activesCopy, chFillCopy, chCountCopy, exprCopy);
+        Draw3DSceneToBuffer(m_rollDC, w, rollH, m_paintActives, m_paintChFill, chCountCopy, m_paintExpr);
         if (m_soft3dTourUntil != 0 && GetTickCount() < m_soft3dTourUntil) {
             m_rollDC.SetBkMode(TRANSPARENT);
             m_rollDC.SetTextColor(RGB(240, 245, 255));
@@ -6406,9 +6472,10 @@ void CPianoRoll::OnPaint()
                     L"Ağır mı? Bağlam menüsünden 2B'ye dönün"));
             }
         }
-        EnterCriticalSection(&m_cs);
-        m_framesPending = 0;
-        LeaveCriticalSection(&m_cs);
+        if (TryEnterCriticalSection(&m_cs)) {
+            m_framesPending = 0;
+            LeaveCriticalSection(&m_cs);
+        }
         m_rollScrollValid = false;
         m_rollReady = true;
         m_keyBufReady = false;
@@ -6418,27 +6485,26 @@ void CPianoRoll::OnPaint()
     // 1行/Present。複数行まとめと同一 vsync の追い付きはスクロールが跳ぶ。
     else if (pending > 0 && m_rollReady) {
         const int n = 1;
-        if (TryAdvanceRollBuffer(w, rollH, 0, nullptr, n, liveSnap)) {
-            EnterCriticalSection(&m_cs);
-            m_framesPending -= n;
-            if (m_framesPending < 0) m_framesPending = 0;
+            if (TryAdvanceRollBuffer(w, rollH, 0, nullptr, n, m_paintLiveSnap)) {
+            if (TryEnterCriticalSection(&m_cs)) {
+                m_framesPending -= n;
+                if (m_framesPending < 0) m_framesPending = 0;
+                LeaveCriticalSection(&m_cs);
+            }
             needAnotherRollFrame = false;
-            LeaveCriticalSection(&m_cs);
             m_rollScrollValid = true;
             m_rollReady = true;
             didRollUpdate = true;
             didRollScroll = true;
         }
         else {
-            NoteFrame histFull[MAX_HISTORY];
             int histFullCount = 0;
-            EnterCriticalSection(&m_cs);
-            CopyHistorySnapshot(histFull, MAX_HISTORY, histFullCount);
-            LeaveCriticalSection(&m_cs);
-            ComposeRollBuffer(m_rollDC, w, rollH, histFullCount, histFull, liveSnap);
-            EnterCriticalSection(&m_cs);
-            m_framesPending = 0;
-            LeaveCriticalSection(&m_cs);
+            if (TryEnterCriticalSection(&m_cs)) {
+                CopyHistorySnapshot(m_paintHistSnap, MAX_HISTORY, histFullCount);
+                m_framesPending = 0;
+                LeaveCriticalSection(&m_cs);
+            }
+            ComposeRollBuffer(m_rollDC, w, rollH, histFullCount, m_paintHistSnap, m_paintLiveSnap);
             m_rollScrollValid = true;
             m_rollReady = true;
             didRollUpdate = true;
@@ -6446,34 +6512,32 @@ void CPianoRoll::OnPaint()
         }
     }
     else if (rollDirty || !m_rollReady) {
-        NoteFrame histSnap[MAX_HISTORY];
         int histCount = 0;
-        EnterCriticalSection(&m_cs);
-        CopyHistorySnapshot(histSnap, MAX_HISTORY, histCount);
-        LeaveCriticalSection(&m_cs);
-        ComposeRollBuffer(m_rollDC, w, rollH, histCount, histSnap, liveSnap);
-        EnterCriticalSection(&m_cs);
-        m_framesPending = 0;
-        LeaveCriticalSection(&m_cs);
+        if (TryEnterCriticalSection(&m_cs)) {
+            CopyHistorySnapshot(m_paintHistSnap, MAX_HISTORY, histCount);
+            m_framesPending = 0;
+            LeaveCriticalSection(&m_cs);
+        }
+        ComposeRollBuffer(m_rollDC, w, rollH, histCount, m_paintHistSnap, m_paintLiveSnap);
         m_rollScrollValid = true;
         m_rollReady = true;
         didRollUpdate = true;
         didRollScroll = false;
     }
     else if (m_rollReady) {
-        DrawPlayheadRow(m_rollDC, w, rollH, liveSnap);
+        DrawPlayheadRow(m_rollDC, w, rollH, m_paintLiveSnap);
         didRollUpdate = true;
         didPlayheadOnly = true;
     }
 
     if (needKeyDraw) {
-        DrawKeyboardToBuffer(m_keyDC, w, keySectionH, keyH, activesCopy, bandMaskCopy, laneStrengthCopy, chFillCopy, chCountCopy, exprCopy);
+        DrawKeyboardToBuffer(m_keyDC, w, keySectionH, keyH, m_paintActives, m_paintBandMask, m_paintLane, m_paintChFill, chCountCopy, m_paintExpr);
         m_keyBufReady = true;
     }
     else if (meterOnlyDirty && m_keyDC.GetSafeHdc()) {
         // 鍵盤全体は触らず、上部メーター帯だけ差し替える。
         // オクターブ数字は同じ帯に載るので、塗りつぶし後に必ず描き直す。
-        PaintMeterStripOnKey(w, keyH, chFillCopy, chCountCopy);
+        PaintMeterStripOnKey(w, keyH, m_paintChFill, chCountCopy);
         didMeterOnly = true;
     }
 

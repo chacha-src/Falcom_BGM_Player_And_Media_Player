@@ -26814,6 +26814,7 @@ void COggDlg::stop()
 		playf = 0;
 		plf = 0;
 		SignalPlaybackNotifyThreadStop();
+		AbortPianoRollCaptureNow();
 		return;
 	}
 	// play/stop1 実行中の再入: 停止要求だけ出して本体は触らない
@@ -26821,6 +26822,7 @@ void COggDlg::stop()
 		playf = 0;
 		plf = 0;
 		SignalPlaybackNotifyThreadStop();
+		AbortPianoRollCaptureNow();
 		if (::IsWindow(m_PianoRollDlg->GetSafeHwnd()))
 			m_PianoRollDlg->OnPlayerFeedStopping(false);
 		if (::IsWindow(m_AnalyzerDlg->GetSafeHwnd()))
@@ -26836,6 +26838,7 @@ void COggDlg::stop()
 	// DoEvent 再入より先に解析を止める（停止ボタンでは起きず曲切替で落ちる主因）
 	playf = 0;
 	plf = 0;
+	AbortPianoRollCaptureNow();
 	if (::IsWindow(m_PianoRollDlg->GetSafeHwnd()))
 		m_PianoRollDlg->OnPlayerFeedStopping(false);
 	if (::IsWindow(m_AnalyzerDlg->GetSafeHwnd()))
@@ -27014,6 +27017,7 @@ void COggDlg::stop()
 	videoonly = FALSE;
 	plf = 0;
 	playf = 0;
+	AbortPianoRollCaptureNow();
 	if (::IsWindow(m_PianoRollDlg->GetSafeHwnd()))
 		m_PianoRollDlg->OnPlayerFeedStopping(true);
 	if (::IsWindow(m_AnalyzerDlg->GetSafeHwnd()))
@@ -27095,6 +27099,7 @@ BOOL COggDlg::stop1()
 	g_tpUiValid = 0;
 	InterlockedExchange(&g_tpLoopPending, 0);
 	// SongParams_OnSongStopped は Join 後に呼ぶ(再生スレッドが Sync 中に UI/ロックを掴むため)
+	AbortPianoRollCaptureNow();
 	if (::IsWindow(m_PianoRollDlg->GetSafeHwnd()))
 		m_PianoRollDlg->OnPlayerFeedStopping(false);
 	if (::IsWindow(m_AnalyzerDlg->GetSafeHwnd()))
@@ -27235,6 +27240,7 @@ BOOL COggDlg::stop1()
 	videoonly = FALSE;
 	plf = 0;
 	playf = 0;
+	AbortPianoRollCaptureNow();
 	if (::IsWindow(m_PianoRollDlg->GetSafeHwnd()))
 		m_PianoRollDlg->OnPlayerFeedStopping(true);
 	if (::IsWindow(m_AnalyzerDlg->GetSafeHwnd()))
@@ -34100,6 +34106,14 @@ void COggDlg::SyncAnalyzerFromPlayCursor()
 	}
 }
 
+void COggDlg::AbortPianoRollCaptureNow()
+{
+	if (!m_PianoRollDlg || !::IsWindow(m_PianoRollDlg->GetSafeHwnd()))
+		return;
+	m_PianoRollDlg->AbortAnalysisFromAnyThread();
+	m_PianoRollDlg->WaitCaptureIdle(250);
+}
+
 void COggDlg::SyncPianoRollFromPlayCursor()
 {
 	/* timerp/UI はキックのみ。PCM 変換は解析ワーカー（FillPianoRollCapture）。 */
@@ -34107,6 +34121,18 @@ void COggDlg::SyncPianoRollFromPlayCursor()
 	if (ps == 1) return;
 	if (!m_PianoRollDlg || !::IsWindow(m_PianoRollDlg->GetSafeHwnd())) return;
 	if (savedata.mpLoopbackScore) return;
+	/* IDirectSoundBuffer は生成スレッド以外から触ると 24bit/48k FLAC などで落ちる。
+	   カーソルだけ UI 側で取り、ワーカーは bufwav3 の memcpy に徹する。 */
+	if (m_dsb) {
+		DsOpTryLock ds;
+		if (ds && m_dsb) {
+			ULONG pc = 0, wc = 0;
+			if (m_dsb->GetCurrentPosition(&pc, &wc) == DS_OK) {
+				PlayCursor2 = pc;
+				WriteCursor = wc;
+			}
+		}
+	}
 	m_PianoRollDlg->RequestRingCapture();
 }
 
@@ -34138,8 +34164,8 @@ bool COggDlg::FillPianoRollCapture(double* monoOut, int monoCap, int* outFrames,
 		channels = wavchannel;
 		bitDepth = wavsam_depth;
 	}
-	if (sampleRate < 8000.0) sampleRate = 44100.0;
-	if (channels < 1) channels = 2;
+	if (sampleRate < 8000.0 || channels < 1 || channels > 8)
+		return false;
 	if (bitDepth != 8 && bitDepth != 16 && bitDepth != 24 && bitDepth != 32)
 		bitDepth = abs(bitDepth);
 	if (bitDepth != 8 && bitDepth != 16 && bitDepth != 24 && bitDepth != 32)
@@ -34149,19 +34175,23 @@ bool COggDlg::FillPianoRollCapture(double* monoOut, int monoCap, int* outFrames,
 	const int bytesPerFrame = bytesPerSample * channels;
 	const int TOTAL_BUF_BYTES = (int)((g_ds_buffer_bytes > 0) ? g_ds_buffer_bytes : (ULONG)(OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM));
 	if (bytesPerFrame <= 0 || TOTAL_BUF_BYTES <= bytesPerFrame) return false;
+	if (TOTAL_BUF_BYTES > (int)sizeof(bufwav3))
+		return false;
 
-	ULONG playCur = 0, writeCur = 0;
-	{
-		DsOpTryLock ds;
-		if (!ds || !m_dsb)
-			return false;
-		if (m_dsb->GetCurrentPosition(&playCur, &writeCur) != DS_OK)
-			return false;
-	}
-	PlayCursor2 = playCur;
-	WriteCursor = writeCur;
+	// ワーカーからは IDirectSoundBuffer を呼ばない（生成スレッド以外だと FLAC 24bit 等で落ちる）。
+	const ULONG playCur = PlayCursor2;
+	const ULONG writeCur = WriteCursor;
 
 	const ULONG ringBytes = Bufwav3RingBytes();
+	if (ringBytes < (ULONG)bytesPerFrame * 64u)
+		return false;
+	if ((ringBytes % (ULONG)bytesPerFrame) != 0)
+		return false;
+	if (playCur >= ringBytes || writeCur >= ringBytes * 2u)
+		return false;
+	// 形式切替で playf/DS が落ちたあとに旧パラメータで memcpy しない
+	if (playf == 0 || thn1 || plf != 1 || !m_dsb)
+		return false;
 	/* スペアナと同じ readPos。追加の 700ms はメーターとロールを実音より遅らせていた。 */
 	const int kMeterExtraLatencyMs = 0;
 	const int kPianoRollExtraLatencyMs = 0;
@@ -34175,29 +34205,41 @@ bool COggDlg::FillPianoRollCapture(double* monoOut, int monoCap, int* outFrames,
 
 	const char* srcBufBase = (const char*)bufwav3;
 	auto ReadRingPcm = [&](long bytePos, int byteCount, char* dst) -> bool {
-		if (bytePos < 0 || byteCount <= 0) return false;
+		if (bytePos < 0 || byteCount <= 0 || !dst) return false;
+		if (bytePos >= TOTAL_BUF_BYTES || byteCount > TOTAL_BUF_BYTES) return false;
 		if (bytePos + byteCount <= TOTAL_BUF_BYTES) {
 			memcpy(dst, srcBufBase + bytePos, byteCount);
 			return true;
 		}
 		const int firstPart = TOTAL_BUF_BYTES - (int)bytePos;
 		const int secondPart = byteCount - firstPart;
-		if (firstPart < 0 || secondPart < 0) return false;
+		if (firstPart <= 0 || secondPart <= 0) return false;
 		memcpy(dst, srcBufBase + bytePos, firstPart);
 		memcpy(dst + firstPart, srcBufBase, secondPart);
 		return true;
 		};
 
-	auto GetSampleValueFrom = [&](const char* pcmBase, int sampleIndex, int chIndex) -> double {
+	auto GetSampleValueFrom = [&](const char* pcmBase, int pcmBytes, int sampleIndex, int chIndex) -> double {
+		if (!pcmBase || pcmBytes <= 0 || sampleIndex < 0 || chIndex < 0 || chIndex >= channels)
+			return 0.0;
 		const int offset = sampleIndex * bytesPerFrame + chIndex * bytesPerSample;
-		if (bitDepth == 16) return (double)(*(const short*)(pcmBase + offset)) / 32768.0;
+		if (offset < 0 || offset + bytesPerSample > pcmBytes) return 0.0;
+		if (bitDepth == 16) {
+			short s16;
+			memcpy(&s16, pcmBase + offset, 2);
+			return (double)s16 / 32768.0;
+		}
 		if (bitDepth == 24) {
 			const unsigned char* p = (const unsigned char*)(pcmBase + offset);
 			int val = (p[0]) | (p[1] << 8) | (p[2] << 16);
 			if (val & 0x800000) val |= 0xFF000000;
 			return (double)val / 8388608.0;
 		}
-		if (bitDepth == 32) return (double)(*(const int*)(pcmBase + offset)) / 2147483648.0;
+		if (bitDepth == 32) {
+			int s32;
+			memcpy(&s32, pcmBase + offset, 4);
+			return (double)s32 / 2147483648.0;
+		}
 		if (bitDepth == 8) return ((double)(*(const unsigned char*)(pcmBase + offset)) - 128.0) / 128.0;
 		return 0.0;
 		};
@@ -34241,7 +34283,7 @@ bool COggDlg::FillPianoRollCapture(double* monoOut, int monoCap, int* outFrames,
 			meterN = meterFrames;
 			for (int i = 0; i < meterFrames; ++i) {
 				for (int ch = 0; ch < meterCh; ++ch) {
-					const double a = fabs(GetSampleValueFrom(mDst, i, meterSrcCh(ch)));
+					const double a = fabs(GetSampleValueFrom(mDst, meterBytes, i, meterSrcCh(ch)));
 					if (a > chPeak[ch]) chPeak[ch] = a;
 					chSumSq[ch] += a * a;
 				}
@@ -34309,7 +34351,7 @@ bool COggDlg::FillPianoRollCapture(double* monoOut, int monoCap, int* outFrames,
 		return true;
 
 	auto GetSampleValue = [&](int sampleIndex, int chIndex) -> double {
-		return GetSampleValueFrom(prDst, sampleIndex, chIndex);
+		return GetSampleValueFrom(prDst, prBytes, sampleIndex, chIndex);
 		};
 
 	for (int i = 0; i < prFrames; ++i) {
@@ -36699,6 +36741,7 @@ LRESULT COggDlg::OnXfadePromoteUi(WPARAM wParam, LPARAM lParam)
 		m_AnalyzerDlg->ResumePlaybackFeed();
 	}
 	if (::IsWindow(m_PianoRollDlg->GetSafeHwnd())) {
+		AbortPianoRollCaptureNow();
 		m_PianoRollDlg->ResetPlaybackState();
 		m_PianoRollDlg->ResumePlaybackFeed();
 	}
