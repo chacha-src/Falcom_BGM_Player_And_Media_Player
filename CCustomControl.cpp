@@ -6821,6 +6821,156 @@ HBRUSH CCustomEdit::CtlColor(CDC* pDC, UINT)
     return (HBRUSH)m_brBackground.GetSafeHandle();
 }
 
+static TCHAR CccMmlLower(TCHAR c)
+{
+    if (c >= _T('A') && c <= _T('Z'))
+        return (TCHAR)(c - _T('A') + _T('a'));
+    return c;
+}
+
+static int CccMmlIsNote(TCHAR c)
+{
+    c = CccMmlLower(c);
+    return c == _T('a') || c == _T('b') || c == _T('c') || c == _T('d')
+        || c == _T('e') || c == _T('f') || c == _T('g') || c == _T('r');
+}
+
+static int CccMmlIsCmd(TCHAR c)
+{
+    switch (CccMmlLower(c)) {
+    case _T('t'): case _T('o'): case _T('l'): case _T('v'): case _T('q'):
+    case _T('p'): case _T('i'): case _T('k'): case _T('w'): case _T('m'):
+    case _T('n'): case _T('h'): case _T('s'): case _T('j'): case _T('x'):
+    case _T('y'): case _T('z'): case _T('u'):
+        return 1;
+    default:
+        return 0;
+    }
+}
+
+/* SASAMIM の MICP 色分けに寄せる。コマンド青、音符緑、数値/文字列は赤紫、コメントは緑。 */
+static void CccDrawMmlLine(CDC& dc, const CString& line, int x, int y, const CRect& rc, int selA, int selB)
+{
+    const COLORREF cCmt = RGB(0, 128, 0);
+    const COLORREF cStr = RGB(170, 0, 150);
+    const COLORREF cNote = RGB(16, 122, 64);
+    const COLORREF cCmd = RGB(0, 60, 200);
+    const COLORREF cNum = RGB(170, 0, 150);
+    const COLORREF cTie = RGB(160, 50, 30);
+    const int n = line.GetLength();
+    int cx = x;
+    int i = 0;
+    while (i < n) {
+        COLORREF col = COLOR_EDIT_TEXT;
+        int j = i + 1;
+        const TCHAR c0 = line[i];
+        const TCHAR c1 = (i + 1 < n) ? line[i + 1] : 0;
+        if (c0 == _T(';') || (c0 == _T('/') && c1 == _T('/'))) {
+            col = cCmt;
+            j = n;
+        } else if (c0 == _T('"')) {
+            col = cStr;
+            j = i + 1;
+            while (j < n && line[j] != _T('"') && line[j] != _T('\r'))
+                ++j;
+            if (j < n && line[j] == _T('"'))
+                ++j;
+        } else if (c0 == _T('(')) {
+            /* FMP/PMD/DAT: (Bd+Cynbal) は音色名コメント。中の音符に色を付けない。 */
+            col = cCmt;
+            while (j < n && line[j] != _T(')'))
+                ++j;
+            if (j < n && line[j] == _T(')'))
+                ++j;
+        } else if (c0 == _T('@')) {
+            /* @50A+ は @50 と音符 A+。@V120 / @METER / @¥54 は名前と数値までがコマンド。 */
+            col = cCmd;
+            const TCHAR c = (j < n) ? line[j] : 0;
+            const int digit = (c >= _T('0') && c <= _T('9'));
+            const int letter = (c >= _T('A') && c <= _T('Z')) || (c >= _T('a') && c <= _T('z'));
+            if (digit) {
+                while (j < n && line[j] >= _T('0') && line[j] <= _T('9'))
+                    ++j;
+                if (j < n && line[j] == _T(':') && j + 1 < n
+                    && line[j + 1] >= _T('0') && line[j + 1] <= _T('9')) {
+                    j += 2;
+                    while (j < n && line[j] >= _T('0') && line[j] <= _T('9'))
+                        ++j;
+                }
+            } else if (c == _T('\\') || c == (TCHAR)0x00A5 || c == (TCHAR)0xFFE5
+                || c == _T('~') || c == _T('#') || c == _T('!') || c == _T('%')
+                || c == _T('*') || c == _T('^')) {
+                ++j;
+                while (j < n && ((line[j] >= _T('0') && line[j] <= _T('9'))
+                    || line[j] == _T(':') || line[j] == _T('+') || line[j] == _T('-') || line[j] == _T('.')))
+                    ++j;
+            } else if (letter) {
+                while (j < n && ((line[j] >= _T('A') && line[j] <= _T('Z'))
+                    || (line[j] >= _T('a') && line[j] <= _T('z'))))
+                    ++j;
+                while (j < n && line[j] >= _T('0') && line[j] <= _T('9'))
+                    ++j;
+            }
+        } else if (c0 == _T('#') || c0 == _T('$') || c0 == _T('!')) {
+            col = cCmd;
+            while (j < n) {
+                const TCHAR c = line[j];
+                if (c == _T(' ') || c == _T('\t') || c == _T(';') || c == _T(',')
+                    || c == _T('[') || c == _T(']') || c == _T('@'))
+                    break;
+                if (CccMmlIsNote(c))
+                    break;
+                if (c == _T('/') && j + 1 < n && line[j + 1] == _T('/'))
+                    break;
+                ++j;
+            }
+        } else if ((c0 == _T('|') && c1 == _T(':')) || (c0 == _T(':') && c1 == _T('|'))
+            || (c0 == _T('{') && c1 == _T(':')) || (c0 == _T('}') && c1 == _T(':'))
+            || (c0 == (TCHAR)0xFF5B && c1 == _T(':')) || (c0 == (TCHAR)0xFF5D && c1 == _T(':'))) {
+            col = cCmd;
+            j = i + 2;
+        } else if (c0 == _T('<') || c0 == _T('>') || c0 == (TCHAR)0xFF1C || c0 == (TCHAR)0xFF1E
+            || c0 == _T('_')) {
+            col = cCmd;
+        } else if (c0 == _T('[') || c0 == _T(']') || c0 == _T('&') || c0 == _T('^')) {
+            col = cTie;
+        } else if ((c0 >= _T('0') && c0 <= _T('9')) || (c0 == _T('.') && c1 >= _T('0') && c1 <= _T('9'))) {
+            col = cNum;
+            while (j < n && line[j] >= _T('0') && line[j] <= _T('9'))
+                ++j;
+            if (j < n && line[j] == _T('.'))
+                ++j;
+        } else if (CccMmlIsNote(c0)) {
+            col = cNote;
+            if (j < n && (line[j] == _T('+') || line[j] == _T('-') || line[j] == _T('#')))
+                ++j;
+        } else if (CccMmlIsCmd(c0) || c0 == _T('+') || c0 == _T('-') || c0 == _T('#')) {
+            col = (c0 == _T('+') || c0 == _T('-') || c0 == _T('#')) ? cNote : cCmd;
+        }
+        int a = i;
+        while (a < j) {
+            int e = j;
+            COLORREF use = col;
+            if (selA >= 0 && a < selB && selA < j) {
+                if (a < selA)
+                    e = selA;
+                else {
+                    use = COLOR_EDIT_SEL_TEXT;
+                    e = (selB < j) ? selB : j;
+                }
+            }
+            if (e <= a)
+                break;
+            CString run = line.Mid(a, e - a);
+            dc.SetTextColor(use);
+            dc.ExtTextOut(cx, y, ETO_CLIPPED, &rc, run, run.GetLength(), NULL);
+            cx += dc.GetTextExtent(run).cx;
+            a = e;
+        }
+        i = j;
+    }
+}
+
 // 複数行の可視範囲だけ描く。選択ハイライトは行跨ぎ対応。パスワードは呼び出し側で置換済み。
 void CCustomEdit::DrawMultilineVisibleText(CDC& dc, const CRect& rc)
 {
@@ -6929,7 +7079,21 @@ void CCustomEdit::DrawMultilineVisibleText(CDC& dc, const CRect& rc)
         }
 
         const int lineEnd = idx + line.GetLength();
-        if (hasSel && sel0 < lineEnd && sel1 > idx) {
+        if (m_bMmlSyntax && !line.IsEmpty()) {
+            /* Folded @VSTSTATEB64 summary stays one gray line. */
+            if ((line.Find(L"VSTSTATEB64") >= 0 || line.Find(L"VSTCTRLB64") >= 0)
+                && line.Find(L"…(") >= 0 && line.Find(L"lines)") >= 0) {
+                dc.SetTextColor(RGB(120, 120, 130));
+                dc.ExtTextOut(x, y, ETO_CLIPPED, &rc, line, line.GetLength(), NULL);
+                continue;
+            }
+            int selA = -1, selB = -1;
+            if (hasSel && sel0 < lineEnd && sel1 > idx) {
+                selA = (sel0 > idx) ? (sel0 - idx) : 0;
+                selB = (sel1 < lineEnd) ? (sel1 - idx) : line.GetLength();
+            }
+            CccDrawMmlLine(dc, line, x, y, rc, selA, selB);
+        } else if (hasSel && sel0 < lineEnd && sel1 > idx) {
             const int a = (sel0 > idx) ? sel0 : idx;
             const int b = (sel1 < lineEnd) ? sel1 : lineEnd;
             CString pre = line.Left(a - idx);
@@ -6949,74 +7113,6 @@ void CCustomEdit::DrawMultilineVisibleText(CDC& dc, const CRect& rc)
             if (!post.IsEmpty()) {
                 dc.SetTextColor(COLOR_EDIT_TEXT);
                 dc.ExtTextOut(cx, y, ETO_CLIPPED, &rc, post, post.GetLength(), NULL);
-            }
-        } else if (m_bMmlSyntax && !line.IsEmpty()) {
-            /* Folded @VSTSTATEB64 summary: @VSTSTATEB64 …(N bytes, L lines)… */
-            if (line.Find(L"VSTSTATEB64") >= 0 || line.Find(L"VSTCTRLB64") >= 0) {
-                if (line.Find(L"…(") >= 0 && line.Find(L"lines)") >= 0) {
-                    dc.SetTextColor(RGB(120, 120, 130));
-                    dc.ExtTextOut(x, y, ETO_CLIPPED, &rc, line, line.GetLength(), NULL);
-                    continue;
-                }
-            }
-            /* SASAMI MML: コメント灰・@/#コマンド青・音符緑・数字茶・それ以外通常色 */
-            int cx = x;
-            const int n = line.GetLength();
-            int i = 0;
-            while (i < n) {
-                COLORREF col = COLOR_EDIT_TEXT;
-                int j = i + 1;
-                const TCHAR c0 = line[i];
-                if (c0 == _T(';') || (c0 == _T('/') && i + 1 < n && line[i + 1] == _T('/'))) {
-                    col = RGB(120, 120, 130);
-                    j = n;
-                } else if (c0 == _T('[') || c0 == _T(']')) {
-                    col = RGB(180, 40, 40);
-                    j = i + 1;
-                } else if (c0 == _T('@') || c0 == _T('#')) {
-                    col = RGB(40, 70, 180);
-                    while (j < n) {
-                        const TCHAR c = line[j];
-                        if (c == _T(' ') || c == _T('\t') || c == _T(';') || c == _T('/')) break;
-                        ++j;
-                    }
-                } else if ((c0 >= _T('0') && c0 <= _T('9')) || c0 == _T('.') || c0 == _T('-')) {
-                    col = RGB(140, 90, 40);
-                    while (j < n) {
-                        const TCHAR c = line[j];
-                        if (!((c >= _T('0') && c <= _T('9')) || c == _T('.') || c == _T('-'))) break;
-                        ++j;
-                    }
-                } else if ((c0 >= _T('a') && c0 <= _T('g')) || (c0 >= _T('A') && c0 <= _T('G'))
-                    || c0 == _T('r') || c0 == _T('R') || c0 == _T('o') || c0 == _T('O')
-                    || c0 == _T('l') || c0 == _T('L') || c0 == _T('v') || c0 == _T('V')
-                    || c0 == _T('t') || c0 == _T('T') || c0 == _T('<') || c0 == _T('>')
-                    || c0 == _T('+') || c0 == _T('&') || c0 == _T('^')) {
-                    col = RGB(20, 120, 70);
-                    while (j < n) {
-                        const TCHAR c = line[j];
-                        if (c == _T(' ') || c == _T('\t') || c == _T(';') || c == _T('#') || c == _T('@')) break;
-                        if ((c >= _T('0') && c <= _T('9')) || c == _T('.') || c == _T('-')) break;
-                        ++j;
-                    }
-                } else {
-                    while (j < n) {
-                        const TCHAR c = line[j];
-                        if (c == _T(';') || c == _T('@') || c == _T('#') || c == _T('/')
-                            || (c >= _T('0') && c <= _T('9'))
-                            || (c >= _T('a') && c <= _T('g')) || (c >= _T('A') && c <= _T('G'))
-                            || c == _T('r') || c == _T('R') || c == _T('o') || c == _T('O')
-                            || c == _T('l') || c == _T('L') || c == _T('v') || c == _T('V')
-                            || c == _T('t') || c == _T('T'))
-                            break;
-                        ++j;
-                    }
-                }
-                CString run = line.Mid(i, j - i);
-                dc.SetTextColor(col);
-                dc.ExtTextOut(cx, y, ETO_CLIPPED, &rc, run, run.GetLength(), NULL);
-                cx += dc.GetTextExtent(run).cx;
-                i = j;
             }
         } else {
             dc.SetTextColor(COLOR_EDIT_TEXT);
@@ -7453,7 +7549,9 @@ void CCustomEdit::RepaintClient()
     if (CCC_HostNeedsChildOpaque(m_hWnd))
     {
         // UPDATENOW|ERASE / FRAMECHANGED は親消去で兄弟Editが消える原因になる。
-        PaintOpaqueFrame();
+        /* MML は枠の全面塗りが本文を一度消してちらつかせる。本文だけ差し替える。 */
+        if (!m_bMmlSyntax)
+            PaintOpaqueFrame();
         CClientDC dc(this);
         PaintOpaqueClient(dc);
         return;
@@ -7522,7 +7620,8 @@ LRESULT CCustomEdit::OnPostOpaquePaint(WPARAM, LPARAM)
 #if CCUSTOM_AERO_SUPPORT
     if (CCC_HostNeedsChildOpaque(m_hWnd))
     {
-        PaintOpaqueFrame();
+        if (!m_bMmlSyntax)
+            PaintOpaqueFrame();
         CClientDC dc(this);
         PaintOpaqueClient(dc);
     }
@@ -7534,13 +7633,15 @@ LRESULT CCustomEdit::OnPostOpaquePaint(WPARAM, LPARAM)
 void CCustomEdit::OnPaint()
 {
 #if CCUSTOM_AERO_SUPPORT
-    if (CCC_HostNeedsChildOpaque(m_hWnd))
+    if (CCC_HostNeedsChildOpaque(m_hWnd) || m_bMmlSyntax)
+#else
+    if (m_bMmlSyntax)
+#endif
     {
         CPaintDC dc(this);
         PaintOpaqueClient(dc);
         return;
     }
-#endif
     Default();
 }
 
@@ -7548,6 +7649,8 @@ void CCustomEdit::OnPaint()
 BOOL CCustomEdit::OnEraseBkgnd(CDC* pDC)
 {
 #if CCUSTOM_AERO_SUPPORT
+    if (m_bMmlSyntax && pDC)
+        return TRUE;
     if (CCC_HostNeedsChildOpaque(m_hWnd) && pDC)
     {
         CRect r;
@@ -7555,6 +7658,9 @@ BOOL CCustomEdit::OnEraseBkgnd(CDC* pDC)
         CCC_FillRectOpaqueBits(pDC->GetSafeHdc(), r, COLOR_EDIT_BG);
         return TRUE;
     }
+#else
+    if (m_bMmlSyntax && pDC)
+        return TRUE;
 #endif
     UNREFERENCED_PARAMETER(pDC);
     return FALSE;
@@ -7596,6 +7702,11 @@ void CCustomEdit::PaintOpaqueFrame()
     GetWindowRect(&r);
     r.OffsetRect(-r.left, -r.top);
     if (r.Width() <= 0 || r.Height() <= 0) return;
+    /* 全面塗りは MML 本文を消してから描き直す。枠線だけにする。 */
+    if (m_bMmlSyntax) {
+        DrawEditFrame(dc, r);
+        return;
+    }
 
 #if CCUSTOM_AERO_SUPPORT
     if (CCC_HostNeedsChildOpaque(m_hWnd))
@@ -13452,6 +13563,59 @@ void CCustomListCtrl::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
         break;
     }
     }
+}
+
+// ============================================================================
+// CCustomListTreeCtrl — レポート列のまま列0左端で開閉
+// ============================================================================
+IMPLEMENT_DYNAMIC(CCustomListTreeCtrl, CCustomListCtrl)
+
+BEGIN_MESSAGE_MAP(CCustomListTreeCtrl, CCustomListCtrl)
+    ON_WM_LBUTTONDOWN()
+END_MESSAGE_MAP()
+
+int CCustomListTreeCtrl::GetTreeGlyphWidth() const
+{
+    const UINT dpi = CCC_GetControlDpi(m_hWnd);
+    return CCC_ScaleDpi(22, dpi);
+}
+
+BOOL CCustomListTreeCtrl::HitTestTreeGlyph(CPoint ptClient, int& rowOut) const
+{
+    rowOut = -1;
+    if (!GetSafeHwnd()) return FALSE;
+    LVHITTESTINFO ht = {};
+    ht.pt = ptClient;
+    const int row = const_cast<CCustomListTreeCtrl*>(this)->SubItemHitTest(&ht);
+    if (row < 0 || ht.iSubItem != 0) return FALSE;
+    if (!IsTreeParentRow(row)) return FALSE;
+    CRect rc;
+    if (!const_cast<CCustomListTreeCtrl*>(this)->GetSubItemRect(row, 0, LVIR_BOUNDS, rc))
+        return FALSE;
+    const int gw = GetTreeGlyphWidth();
+    if (ptClient.x < rc.left || ptClient.x >= rc.left + gw)
+        return FALSE;
+    rowOut = row;
+    return TRUE;
+}
+
+void CCustomListTreeCtrl::OnLButtonDown(UINT nFlags, CPoint point)
+{
+    int row = -1;
+    if (HitTestTreeGlyph(point, row) && row >= 0) {
+        /* ダブルクリックの2発目で開→閉と戻らないようにする */
+        static DWORD s_lastGlyphTick = 0;
+        const DWORD now = (DWORD)GetMessageTime();
+        const UINT lim = GetDoubleClickTime();
+        if (now - s_lastGlyphTick < lim) {
+            s_lastGlyphTick = now;
+            return;
+        }
+        s_lastGlyphTick = now;
+        OnTreeGlyphClick(row);
+        return;
+    }
+    CCustomListCtrl::OnLButtonDown(nFlags, point);
 }
 
 // ============================================================================

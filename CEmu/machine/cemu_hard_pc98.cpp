@@ -40,6 +40,8 @@ int CEmuPc98ValkyKeepIrq0()
 }
 /* FairyDust FMX 3.10（lemmona）も同じ: PIT 校正後のワンショット INT08 @3660 が IRQ0 をマスクし、本物シーケンサ CS:1D60 が tick しない。 */
 static int s_fmxKeepIrq0 = 0;
+/* PMD86 の INT0B は IN A468h bit4 が立つ間 FIFO 処理へ戻る。このプロセスは曲ごとに機械を作り直すがフラグは静的なので Init で毎回下ろす。 */
+static int s_pmd86Board = 0;
 /* IWADRV F.COM カナリア: OUT 18Ah / IN が ymfm ReadData() だと 1 が戻らず INT14 を飛ばす。 */
 static int s_iwaBusHold = 0;
 /* FMX 3.10 はワンショット INT08 を植えたあと CS:[3B84] でスピン。IRQ0 は CALL FAR [3B6C]（まだ 0000:0000）。待ちオペコードが CS:IP の最初に非 0 カウントを poke。 */
@@ -1891,20 +1893,31 @@ int CHardPc98::Init(const CEmuGameEntry* ge, int sampleRate)
 {
 	if (!ge) return 0;
 	sampleRate_ = sampleRate > 0 ? sampleRate : 44100;
-	/* type=86 は PC-9801-86 基板だが、カタログ 86 リップの多く（flixmix / kolin2）は A460 無しで YM2203 として既に PLAYS。全体で入れると無音になった。要 YM2608 + ID 0x40 なのは emit_* FMDRV86（さもなくば PIC マスク／keyOn=0）。 */
+	/* type=86 は PC-9801-86 基板だが、カタログ 86 リップの多く（flixmix / kolin2）は A460 無しで YM2203 として既に PLAYS。全体で入れると無音になった。要 YM2608 + ID 0x40 なのは emit_* FMDRV86 と、PMD86 が A460==FF で基板無しと見て INT0B を植えないパック（imd_1）。 */
+	s_pmd86Board = 0;
 	opnaMode = (_stricmp(ge->subtype, "opna") == 0) ? 1 : 0;
 	if (!opnaMode && ge->subtype
 		&& (_stricmp(ge->subtype, "86") == 0
 			|| _stricmp(ge->subtype, "86+otomix2") == 0)) {
 		if (ge->archive && _strnicmp(ge->archive, "emit", 4) == 0)
 			opnaMode = 1;
-		for (int i = 0; i < ge->romCount && !opnaMode; i++) {
-			const char* n = ge->rom[i].name;
-			if (!n) continue;
+		for (int i = 0; i < ge->romCount; i++) {
+			const char* raw = ge->rom[i].name;
+			if (!raw) continue;
+			const char* n = raw;
 			for (const char* p = n; *p; p++)
 				if (*p == '\\' || *p == '/' || *p == ':')
 					n = p + 1;
 			if (_strnicmp(n, "FMDRV86", 7) == 0)
+				opnaMode = 1;
+			/* シェルは "PMD86 /K ... /S"。スラッシュをパスとして切ると末尾の S だけが残る。 */
+			if (_stricmp(ge->rom[i].type, "shell") == 0
+				&& _strnicmp(raw, "PMD86", 5) == 0) {
+				opnaMode = 1;
+				s_pmd86Board = 1;
+			}
+			if (_stricmp(ge->rom[i].type, "shell") == 0
+				&& _strnicmp(raw, "P86DRV", 6) == 0)
 				opnaMode = 1;
 		}
 	}
@@ -4521,12 +4534,17 @@ uint8_t CHardPc98::PortIn(uint16_t port)
 	case OPN_ADDR1: {
 		if (modeSorch_)
 			return opl_ ? opl_->ReadStatus() : 0x06; /* OPL2 ID パターン */
+		/* PMD86 は A460 bit0（YM2608 拡張）を立てる前、188h に FF を書いた直後の 18Ch/18Eh がオープンバス FF であることを基板の証拠にする。bit0=0 で実ステータス 0 を返すと「基板無し」で INT0B を植えない。拡張を有効にしたあとの ADPCM ステータスは従来どおり。 */
+		if (s_pmd86Board && opnaMode && (sound86Mask_ & 1) == 0 && opnLatchedAddr_ == 0xFF)
+			return 0xff;
 		uint8_t s = chip_ ? chip_->ReadStatusHi() : 0xff;
 		s = Pc98OpnStatusClearBusy(s);
 		return s;
 	}
 	case OPN_DATA1:
 		if (modeSorch_) return 0xff; /* OPL2 に読めるデータポートは無い */
+		if (s_pmd86Board && opnaMode && (sound86Mask_ & 1) == 0 && opnLatchedAddr_ == 0xFF)
+			return 0xff;
 		return chip_ ? chip_->ReadDataHi() : 0xff;
 	case EXT_CMD: return extCmd_;
 	case EXT_SONG: return (uint8_t)(extSong_ & 0xff);
@@ -4550,6 +4568,9 @@ uint8_t CHardPc98::PortIn(uint16_t port)
 		/* FMX 3.10 INT14 1BB4: [2849]==2 なら IN A468h / TEST 10h が CALL 011C でスピン。オープンバス FF は bit4 を消さない。 */
 		if (s_fmxKeepIrq0)
 			return 0;
+		/* PMD86 ISR（CS:2E53）は bit4 が 0 になるまで FIFO を呼び続ける。FF だと最初の Timer IRQ の中で IRET せず、キーオンまで届かない。bit4 は FIFO 要求で、空のときは制御ラッチの許可ビットを読ませない。 */
+		if (s_pmd86Board && opnaMode)
+			return (uint8_t)(sound86FifoCtl_ & (uint8_t)~0x10);
 		return 0xff;
 	/* A466–A66E: タイトルがソフト 86PCM を要しない限りオープンバスのまま。空 FIFO を stub すると FMP3 が無音 PCM 経路を取った（vg2）。 */
 	case 0x506:
@@ -11731,6 +11752,11 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 		/* n3gv2 cmd0: INT D2 AH=2 停止 + 7E4 スキップ読 + AH=7 ロード + AH=1 再生。
 		   2 回目 poke は BindDos 既定で EXT_PARAM を潰し、曲ファイル先頭を再ロードしてワンショット化する。 */
 		static const char* kN3gvOnce[] = { "n3gv2", "N3GV2", NULL };
+		/* MAKO_98 cmd0 は IN 7E4=曲番号、IN 7E2 下位=バンクハンドルで読んで INT40 AH=0。
+		   2 回目 poke は BindDos の byte2 既定で EXT_PARAM=0 になり、ディレクトリの
+		   低位+0Ah をハンドルにする。tousin1 曲2 はそのハンドルが未オープンの 0Dh で、
+		   入口の INT40 AH=1 がタイマを 30h にしたまま再開できない。 */
+		static const char* kMakoOnce[] = { "MAKO", "mako", NULL };
 		static const char* kOpndrvOnce[] = { "fugam", "fgplay", NULL };
 		/* olteus オーバーレイ再生（INT7F cmd2 → MAP:D471）は 20KB MUS+MTB を載せる。2 回目 poke は DEF1 途中でロードを再開。 */
 		static const char* kOlteusOnce[] = { "olteus", NULL };
@@ -11773,7 +11799,8 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 			|| DosShellStarts(dosGe_, kValkyOnce)
 			|| DosShellStarts(dosGe_, kFmxOnce)
 			|| DosShellStarts(dosGe_, kFmpOnce)
-			|| DosShellStarts(dosGe_, kN3gvOnce))));
+			|| DosShellStarts(dosGe_, kN3gvOnce)
+			|| DosShellStarts(dosGe_, kMakoOnce))));
 		if (repeatPlay) {
 			if (dosGe_)
 				BindDosTriggerSong(dosGe_, titleCode);

@@ -33,7 +33,7 @@
 #endif
 
 // CCustom* 一覧（実装は CCustomControl.cpp / CCustomPopupMenu.cpp）
-//   子控件: Edit / Static / ListBox / ComboBox / ListCtrl / TreeCtrl / TabCtrl
+//   子控件: Edit / Static / ListBox / ComboBox / ListCtrl / ListTreeCtrl / TreeCtrl / TabCtrl
 //           StandardButton / Slider / RangeSlider / CheckBox / LevelMeter
 //           Progress / SysPerf / GroupBox
 //   ダイアログ: CCustomDialog(Ex) → CCustomBlurDialog(Ex)Base
@@ -1287,6 +1287,30 @@ private:
     BOOL m_liveEditHold;
     BOOL m_liveEditSilent;
     CCustomEdit m_liveEdit;
+};
+
+// ============================================================================
+// リスト＋ツリー開閉（レポート列はそのまま、列0左端の ▶/▼ だけツリー）
+// CEmu対応一覧のように「親は複数列・子は曲名」を載せる用途。
+// 実データは LVS_OWNERDATA 側。このクラスはグリフ当たり判定とクリック横取りだけ。
+// ============================================================================
+class CCustomListTreeCtrl : public CCustomListCtrl
+{
+    DECLARE_DYNAMIC(CCustomListTreeCtrl)
+public:
+    CCustomListTreeCtrl() = default;
+    virtual ~CCustomListTreeCtrl() = default;
+    int GetTreeGlyphWidth() const;
+    BOOL HitTestTreeGlyph(CPoint ptClient, int& rowOut) const;
+protected:
+    virtual BOOL IsTreeParentRow(int row) const
+    {
+        UNREFERENCED_PARAMETER(row);
+        return FALSE;
+    }
+    virtual void OnTreeGlyphClick(int row) { UNREFERENCED_PARAMETER(row); }
+    afx_msg void OnLButtonDown(UINT nFlags, CPoint point);
+    DECLARE_MESSAGE_MAP()
 };
 
 // ============================================================================

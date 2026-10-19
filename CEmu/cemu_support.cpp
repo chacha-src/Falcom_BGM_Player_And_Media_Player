@@ -88,7 +88,7 @@
                   + _k2_syn2_report.txt
                   + _k2_ac48_plays.txt
                   + _k2_crush15_report.txt
-   Archives probed: 5085, supported: 4607; MSX +replcart_msx/shiryo_msx/msxfan_msx (_k2_x1msx8full_0.txt _k2_x1msx8fan_0.txt) + x1alba (_k2_x1msx8alba_0.txt)
+   Archives probed: 5085, supported: 4618; MSX +replcart_msx/shiryo_msx/msxfan_msx (_k2_x1msx8full_0.txt _k2_x1msx8fan_0.txt) + x1alba (_k2_x1msx8alba_0.txt)
                   + _k2_ac2s86_report.txt (genpeitd/rthunder/skykiddx/wndrmomo Sys86)
                   + _k2_ac2wsgo_report.txt (pacland/skykid/drgnbstr wsg63701)
                   + bosco wsgz80 (0289 BGM via $8A14 + $0139 id)
@@ -110,7 +110,11 @@
                   + illumina_98 FIS (OPN IRQ stays on INT 15, stub HLT releases the latch)
                   + ds98_05/07/08/15/19 ds_08 FPLAY (hoot command waits out the OPN tick; a nested load was smashing SP=125E)
                   + drbystln_98/racerx_98/wiz7cds_98 MUSE2 (hoot stop waits out the OPN tick; the tick halts the timer at entry)
-                  + _k2_f3arc_plays.txt (f3: cbombers, dangcurv, dendego, dendego2, groundfx, landgear, sidebs, undrfire) */
+                  + tousin1_98/rance3_98 MAKO (second hoot poke cleared EXT_PARAM and stopped the timer on an unopened handle)
+                  + pmngr_98 GSP98 (OPN pack; songs 1-3 stay audible for the whole 8s window)
+                  + imd_1_98 PMD86 (A460 was open bus so INT0B was never planted; 18Ch/18Eh read FF until bit0, and A468 bit4 must not stick)
+                  + scldays_98 MDB (a rest longer than the 2s watchdog was restarted before the first note)
+                  + _k2_f3arc_plays.txt (f3: cbombers, dangcurv, dendego, dendego2, groundfx, gunbustr, gunlock, landgear, scfinals, sidebs, sidebs2, superchs, trstar, undrfire) */
 
 #include "StdAfx.h"
 #include "cemu_support.h"
@@ -1747,12 +1751,14 @@ static const char* const kSupported[] = {
 	"gulliver_msx",
 	"gunbird",
 	"gunboat_at",
+	"gunbustr",
 	"gundam_msx",
 	"gundamco68snd",
 	"gundamto88",
 	"gunforc2",
 	"gunforce",
 	"gunfront",
+	"gunlock",
 	"gunship68snd",
 	"gunship_msx",
 	"gunsmoke",
@@ -1942,6 +1948,7 @@ static const char* const kSupported[] = {
 	"image1_98",
 	"image2_98",
 	"image68snd",
+	"imd_1_98",
 	"imd_2_98",
 	"imd_3_98",
 	"imd_4_98",
@@ -3069,6 +3076,7 @@ static const char* const kSupported[] = {
 	"pm_msx",
 	"pmaker_at",
 	"pmfoot98",
+	"pmngr_98",
 	"pmydoll_98",
 	"pnickj",
 	"pnyaa",
@@ -3268,6 +3276,7 @@ static const char* const kSupported[] = {
 	"rance2_98",
 	"rance2_msx",
 	"rance368snd",
+	"rance3_98",
 	"rance3h_98",
 	"rance4_1_98",
 	"rance4_2_98",
@@ -3545,6 +3554,7 @@ static const char* const kSupported[] = {
 	"sc_mikie",
 	"sc_pitfall2v1",
 	"sc_starjackerv1",
+	"scfinals",
 	"scheme",
 	"schgirl_98",
 	"schmeisr",
@@ -3556,6 +3566,7 @@ static const char* const kSupported[] = {
 	"schwarz2_msx",
 	"schwarz_msx",
 	"sci",
+	"scldays_98",
 	"scobra",
 	"scontra",
 	"scotrsht",
@@ -3701,6 +3712,7 @@ static const char* const kSupported[] = {
 	"shworlds_at",
 	"sidearms",
 	"sidebs",
+	"sidebs2",
 	"siege_at",
 	"sig68snd",
 	"silbersee_at",
@@ -3950,6 +3962,7 @@ static const char* const kSupported[] = {
 	"summerch_at",
 	"supaplex_at",
 	"supbtime",
+	"superchs",
 	"superdps_98",
 	"superman",
 	"superpac",
@@ -4179,6 +4192,7 @@ static const char* const kSupported[] = {
 	"toukon3",
 	"toumei_98",
 	"tousin168snd",
+	"tousin1_98",
 	"tousin1h_98",
 	"tousin1n_98",
 	"tousin2_98",
@@ -4204,6 +4218,7 @@ static const char* const kSupported[] = {
 	"triton2_msx",
 	"trog_at",
 	"trojan",
+	"trstar",
 	"true_h_98",
 	"trushbox_98",
 	"truxton",

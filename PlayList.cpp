@@ -12994,6 +12994,61 @@ bool PlCemuAddZipAndPlay(LPCTSTR zipPhysical)
 	return true;
 }
 
+bool PlCemuAddZipTitleAndPlay(LPCTSTR zipPhysical, unsigned titleIndex1)
+{
+	extern CPlayList* pl;
+	extern int gameon;
+	extern int plcnt;
+	if (!pl || !zipPhysical || !zipPhysical[0] || titleIndex1 == 0) return false;
+	CString zp = zipPhysical;
+	const int colon = zp.Find(L"::");
+	if (colon >= 0) zp = zp.Left(colon);
+	if (zp.Right(4).CompareNoCase(L".zip") != 0) return false;
+	if (!PlCemuPickModeIfNeeded(pl, zp))
+		return false;
+	wchar_t zipOut[CEMU_ZIP_PATH];
+	char dataDir[CEMU_DATA_DIR];
+	const CEmuGameEntry* ge = CEmuMgrResolveZip(CEmuMgrGet(), zp, zipOut, (int)_countof(zipOut), dataDir, (int)sizeof(dataDir));
+	if (!ge || CEmuGameTitleCount(ge) <= 0) return false;
+	if (!CEmuArchiveIsSupported(ge->archive)) {
+		CemuWarnUnsupported();
+		return true;
+	}
+	if ((int)titleIndex1 > CEmuGameTitleCount(ge))
+		titleIndex1 = (unsigned)CEmuGameTitleCount(ge);
+	const wchar_t* zipBase = zipOut[0] ? zipOut : (LPCTSTR)zp;
+	playlistdata row;
+	ZeroMemory(&row, sizeof(row));
+	PlCemuFillPlaylistRow(ge, zipBase, titleIndex1, &row);
+	if (!row.name[0] || !row.fol[0]) return false;
+	const int before = pl->playcnt;
+	const BOOL hadLc = pl->m_lc.GetSafeHwnd() != NULL;
+	if (hadLc)
+		pl->m_lc.SetRedraw(FALSE);
+	pl->Add(row.name, row.sub, row.loop1, row.loop2, row.art, row.alb, row.fol, row.ret2, 0);
+	int playIdx = before;
+	if (playIdx < 0 || playIdx >= pl->playcnt) {
+		playIdx = pl->FindByPath(row.fol);
+	}
+	if (playIdx >= 0 && playIdx < pl->playcnt) {
+		plcnt = playIdx;
+		pl->Get(plcnt);
+		gameon = 0;
+		RequestPlaylistRestartAsync();
+	}
+	pl->Save();
+	if (hadLc) {
+		pl->m_lc.SetItemCount(pl->playcnt);
+		pl->m_lc.SetRedraw(TRUE);
+		pl->m_lc.Invalidate();
+		pl->m_lc.UpdateWindow();
+	}
+	extern CMediaPlayerDlg* mp;
+	if (mp && ::IsWindow(mp->GetSafeHwnd()))
+		mp->RefreshList(TRUE);
+	return true;
+}
+
 void CPlayList::plugs(CString fff, playlistdata *p,TCHAR* kpi, BYTE& kv)
 {
 	// CEmu: hoot アーカイブ zip（カタログ照合）

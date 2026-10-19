@@ -219,6 +219,7 @@ void PlMissDiskSet(LPCTSTR fol, int miss);
 void PlMissDiskForget(LPCTSTR fol);
 void PlRefreshMidiPlayModes();
 bool PlCemuAddZipAndPlay(LPCTSTR zipPhysical);
+bool PlCemuAddZipTitleAndPlay(LPCTSTR zipPhysical, unsigned titleIndex1);
 
 /* "Not supported yet" notice for CEmu archives that do not play. Shown at
    most once per drop; call the reset before handling a batch of files. */

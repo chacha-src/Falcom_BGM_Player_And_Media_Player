@@ -182,6 +182,7 @@ BOOL CSasamiTextDlg::OnInitDialog()
 	if (m_btnPlay.GetSafeHwnd()) m_btnPlay.SetIcon(IDI_CTL_PLAY);
 	if (m_btnExport.GetSafeHwnd()) m_btnExport.SetIcon(IDI_UI_EXPORT);
 	if (m_btnHelp.GetSafeHwnd()) m_btnHelp.SetIcon(IDI_UI_HELP);
+	ModifyStyle(0, WS_CLIPCHILDREN);
 	m_edit.SetLimitText(4u * 1024u * 1024u);
 	m_edit.SetMmlSyntax(TRUE);
 	ApplyLang();
@@ -437,7 +438,6 @@ void CSasamiTextDlg::OnEnChange()
 		ApplyB64ViewToEdit();
 	}
 	SyncTextFullFromEdit();
-	ColorizeEdit();
 	UpdateB64FoldButton();
 	if (!m_b64RefreshLock)
 		ScheduleScoreSync();
@@ -640,10 +640,13 @@ void CSasamiTextDlg::OnBnClickedOpen()
 		m_status.SetWindowText(LL14(L"\u8aad\u8fbc\u5931\u6557", L"Load failed", L"Échec lecture", L"Caricamento fallito", L"Carga fallida", L"읽기 실패", L"读取失败", L"فشل التحميل", L"Ошибка чтения", L"Laden fehlgeschlagen", L"Falha ao carregar", L"Laden mislukt", L"Wczytywanie nieudane", L"Yükleme başarısız"));
 		return;
 	}
+	m_edit.SetRedraw(FALSE);
 	m_edit.SetWindowText(buf);
 	m_textFull = buf;
 	m_b64Expanded = ScMmlContainsVstB64(buf) ? 0 : 1;
 	ApplyB64ViewToEdit();
+	m_edit.SetRedraw(TRUE);
+	m_edit.Invalidate(FALSE);
 	m_textDirty = 1;
 	/* .dat: PC98/OPNA dumps with @n → FM by default. @VST / ;MIDI → MIDI. */
 	m_modeFm = 0;

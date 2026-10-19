@@ -10,6 +10,9 @@ enum {
 	PC98_WD_IDLE_MS = 2000
 };
 
+/* TriggerPlay 直後の OPN IRQ 回数。休符でキーオンが無いだけの曲を、2 秒で頭に戻さない。 */
+static unsigned s_wdIrqAtTrigger;
+
 /* PC-98 ドライバ */
 CDriverPc98::CDriverPc98()
 	: hw_(NULL)
@@ -55,6 +58,7 @@ int CDriverPc98::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigne
 	wdMotion_ = 0;
 	wdReplays_ = 0;
 	wdEverActive_ = 0;
+	s_wdIrqAtTrigger = 0;
 
 	{
 		CEmuNp2Guard np2;
@@ -161,6 +165,13 @@ void CDriverPc98::WatchdogTick()
 	/* 一度も鳴っていないときだけ — CDriverPc88::WatchdogTick 参照。
 	   既に動いているプレーヤを再キックすると RAM の途中状態から再開し、
 	   直そうとした無音より耳障りになる。 */
+	/* タイマ IRQ が TriggerPlay のあとにも届いているならシーケンサは休符中。
+	   再キックは曲頭へ戻し、導入の休符が 2 秒を超える MDB（scldays NO_02）は
+	   最初のノートに届かない。止まったドライバは IRQ が増えないので従来どおり再キックする。 */
+	if (hw_->opnIrqDeliverCount_ > s_wdIrqAtTrigger + 16u) {
+		wdEverActive_ = 1;
+		return;
+	}
 	if (wdEverActive_ || wdReplays_ >= 4)
 		return;
 	if (loadOnly)
@@ -189,6 +200,7 @@ int CDriverPc98::Render(int16_t* stereo, int frames)
 	if (!triggered_) {
 		if (!loadOnly)
 			hw_->TriggerPlay(titleCode_);
+		s_wdIrqAtTrigger = hw_->opnIrqDeliverCount_;
 		triggered_ = 1;
 	}
 	hw_->BootPcmStopCapture();

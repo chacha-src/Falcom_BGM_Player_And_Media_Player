@@ -4,7 +4,9 @@
 #include "cemu_types.h"
 #include <vector>
 
-class CEmuCatListCtrl : public CCustomListCtrl
+class CEmuCatalogListDlg;
+
+class CEmuCatListCtrl : public CCustomListTreeCtrl
 {
 	DECLARE_DYNAMIC(CEmuCatListCtrl)
 public:
@@ -14,6 +16,8 @@ public:
 protected:
 	void BuildToolTipText(int row, int col, CString& out) override;
 	BOOL GetListRowTint(int row, COLORREF& tintBg, COLORREF& accent) const override;
+	BOOL IsTreeParentRow(int row) const override;
+	void OnTreeGlyphClick(int row) override;
 	DECLARE_MESSAGE_MAP()
 	void EnsureSortArrows();
 	CImageList m_sortIL;
@@ -21,16 +25,28 @@ protected:
 	BOOL m_colTitleReady = FALSE;
 };
 
-/* One list row = one archive group that has a local zip. */
+/* One parent row = one archive group that has a local zip. */
 struct CEmuCatListRow {
 	const CEmuGameEntry* ge;
 	CString title;
 	CString modes;
 	CString hayLower;
 	CString zipPath;
+	CString genreChip;
+	CString platChip;
+	CString soundChip;
+	CString monChip;
+	CString dataChip;
 	int origIndex = 0;
 	int monFm = 0;   /* FMモニタ */
 	int monMidi = 0; /* MIDIモニタ */
+	int songCount = 0;
+	bool expanded = false;
+};
+
+struct CEmuCatVisRow {
+	int parent = 0; /* m_rows index */
+	int song = -1;  /* -1 = parent, else 0-based XML title index */
 };
 
 /* arcdata.zip 対応タイトル一覧（モデルレス。MP 閉じると一緒に閉じる） */
@@ -44,6 +60,9 @@ public:
 	/* Open (or refresh) modeless. Closes with owner (MP). */
 	static void Show(CWnd* pParent);
 	static void CloseIfOpen();
+	const CEmuCatListRow* VisParentRow(int vis) const;
+	int VisSongIndex(int vis) const;
+	void ToggleExpandVis(int vis);
 	cmnh();
 protected:
 	virtual void DoDataExchange(CDataExchange* pDX);
@@ -57,6 +76,7 @@ protected:
 	afx_msg void OnEnChangeFilter();
 	afx_msg void OnNMDblclkList(NMHDR* pNMHDR, LRESULT* pResult);
 	afx_msg void OnLvnColumnClick(NMHDR* pNMHDR, LRESULT* pResult);
+	afx_msg void OnLvnGetdispinfo(NMHDR* pNMHDR, LRESULT* pResult);
 	afx_msg void OnSize(UINT nType, int cx, int cy);
 	afx_msg void OnGetMinMaxInfo(MINMAXINFO* lpMMI);
 	afx_msg void OnDestroy();
@@ -71,11 +91,11 @@ protected:
 	void ShowHelpSheet();
 	void RestoreSavedPlacement();
 	void SaveSavedPlacement();
-	/* Returns number of rows with a local zip. Re-scans disk each call. */
+	/* Returns number of parent rows with a local zip. */
 	int BuildRowCache();
 	void ApplyFilterToList();
 	void UpdateSortHeader();
-	int PlaySelectedRow();
+	int PlayVisRow(int vis);
 
 	CEmuCatListCtrl m_lc;
 	CCustomEdit m_filter;
@@ -88,6 +108,7 @@ protected:
 	int m_minH = 0;
 	BOOL m_bFilling = FALSE;
 	std::vector<CEmuCatListRow> m_rows;
+	std::vector<CEmuCatVisRow> m_vis;
 	unsigned m_filterGen = 0;
 	size_t m_zipStemCount = 0; /* last scan size — detect newly added zips */
 	int m_sortCol = -1; /* -1 = 元の順 */

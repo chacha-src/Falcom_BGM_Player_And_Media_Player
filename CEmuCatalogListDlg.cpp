@@ -109,8 +109,8 @@ void CEmuCatHelpDlg::OnPaint()
 	dc.SetTextColor(RGB(65, 65, 80));
 	auto body = [&](LPCTSTR t) { dc.TextOut(L, y, t); y += lh; };
 	body(LL14(
-		L"・ダブルクリック …… 対応 zip をプレイリストへ追加して再生",
-		L"· Double-click …… add matching zip to playlist and play",
+		L"・タイトル行のダブルクリック …… 対応 zip の全曲をプレイリストへ追加して再生",
+		L"· Double-click a title row …… add every track in the zip and play",
 		L"· Double-clic …… ajouter le zip et lire",
 		L"· Doppio clic …… aggiungi zip e riproduci",
 		L"· Doble clic …… anadir zip y reproducir",
@@ -123,6 +123,36 @@ void CEmuCatHelpDlg::OnPaint()
 		L"· Dubbelklik …… zip toevoegen en spelen",
 		L"· Dwuklik …… dodaj zip i odtworz",
 		L"· Cift tik …… zip ekle ve cal"));
+	body(LL14(
+		L"・▶ / ▼ …… クリックで XML 曲一覧を開閉（絞り込みでは自動開閉しない）",
+		L"· ▶ / ▼ …… click to expand/collapse XML song list (filter never auto-opens)",
+		L"· ▶ / ▼ …… clic pour ouvrir/fermer la liste XML (le filtre n'ouvre pas tout seul)",
+		L"· ▶ / ▼ …… clic per aprire/chiudere l'elenco XML (il filtro non apre da solo)",
+		L"· ▶ / ▼ …… clic para abrir/cerrar la lista XML (el filtro no abre solo)",
+		L"· ▶ / ▼ …… 클릭으로 XML 곡 목록 개폐 (필터는 자동으로 열지 않음)",
+		L"· ▶ / ▼ …… 单击开合 XML 曲目（筛选不会自动展开）",
+		L"· ▶ / ▼ …… انقر لفتح/إغلاق قائمة XML (التصفية لا تفتح وحدها)",
+		L"· ▶ / ▼ …… клик раскрывает XML-список (фильтр сам не раскрывает)",
+		L"· ▶ / ▼ …… Klick klappt XML-Titel auf/zu (Filter öffnet nicht selbst)",
+		L"· ▶ / ▼ …… clique abre/fecha a lista XML (filtro nao abre sozinho)",
+		L"· ▶ / ▼ …… klik open/dicht XML-lijst (filter opent niet zelf)",
+		L"· ▶ / ▼ …… klik otwiera/zamyka XML (filtr sam nie otwiera)",
+		L"· ▶ / ▼ …… tik XML sarki listesini acar/kapatir (filtre kendiliginden acmaz)"));
+	body(LL14(
+		L"・曲名のダブルクリック …… その曲だけプレイリストへ追加して再生",
+		L"· Double-click a song …… add only that track and play",
+		L"· Double-clic sur un titre …… ajouter seulement ce morceau",
+		L"· Doppio clic su un brano …… aggiungi solo quel brano",
+		L"· Doble clic en una pista …… anadir solo esa pista",
+		L"· 곡 더블클릭 …… 그 곡만 플레이리스트에 넣고 재생",
+		L"· 双击曲名 …… 只加入该曲并播放",
+		L"· نقر مزدوج على أغنية …… إضافة تلك الأغنية فقط",
+		L"· Двойной клик по треку …… добавить только его",
+		L"· Doppelklick auf einen Titel …… nur diesen Titel",
+		L"· Duplo clique numa faixa …… adicionar so essa",
+		L"· Dubbelklik op een nummer …… alleen dat nummer",
+		L"· Dwuklik na utworze …… dodaj tylko ten utwor",
+		L"· Sarkiya cift tik …… sadece o sarkiyi ekle"));
 	body(LL14(
 		L"・絞り込み …… 空白区切りで複数指定（すべて含む）。全角空白・, / も可",
 		L"· Filter …… space-separated terms (AND). Full-width space, comma, / also split",
@@ -549,9 +579,23 @@ static void CEmuSaveZipScanRoot(const wchar_t* root)
 	CloseHandle(h);
 }
 
+struct CEmuZipStemCache {
+	std::unordered_set<std::string> stems;
+	std::unordered_map<std::string, std::wstring> stemToPath;
+	DWORD tick = 0;
+	bool valid = false;
+};
+static CEmuZipStemCache s_zipStemCache;
+
 static size_t CEmuCollectLocalZipStems(std::unordered_set<std::string>& stems,
-	std::unordered_map<std::string, std::wstring>& stemToPath)
+	std::unordered_map<std::string, std::wstring>& stemToPath, bool force = false)
 {
+	const DWORD now = GetTickCount();
+	if (!force && s_zipStemCache.valid && (now - s_zipStemCache.tick) < 2000) {
+		stems = s_zipStemCache.stems;
+		stemToPath = s_zipStemCache.stemToPath;
+		return stems.size();
+	}
 	stems.clear();
 	stemToPath.clear();
 	CEmuMgr* mgr = CEmuMgrGet();
@@ -561,6 +605,10 @@ static size_t CEmuCollectLocalZipStems(std::unordered_set<std::string>& stems,
 	CEmuLoadZipScanRoot(extra, MAX_PATH);
 	if (extra[0])
 		CEmuScanLocalZipStemsMerge(extra, stems, stemToPath);
+	s_zipStemCache.stems = stems;
+	s_zipStemCache.stemToPath = stemToPath;
+	s_zipStemCache.tick = now;
+	s_zipStemCache.valid = true;
 	return stems.size();
 }
 
@@ -592,40 +640,77 @@ static bool CatRowMatchesFilter(const CString& hayLower, const CString& filterRa
 	return true;
 }
 
-static CString CEmuJoinArchiveModeTags(const CEmuCatalog* cat, const CEmuGameEntry* ge)
+struct CEmuCatGroupAcc {
+	const CEmuGameEntry* pick = nullptr;
+	CEmuArchiveMode modes[CEMU_MODE_MAX];
+	int modeN = 0;
+};
+
+static void CEmuCatGroupKey(const CEmuGameEntry* ge, char* out, int outCap)
+{
+	if (!out || outCap <= 0) return;
+	out[0] = 0;
+	if (!ge) return;
+	_snprintf_s(out, (size_t)outCap, _TRUNCATE, "%s\n%s",
+		ge->archive[0] ? ge->archive : "",
+		ge->dataDir[0] ? ge->dataDir : "");
+	for (char* p = out; *p; p++) {
+		if (*p >= 'A' && *p <= 'Z') *p = (char)(*p - 'A' + 'a');
+	}
+}
+
+static void CEmuCatAccAddEntry(CEmuCatGroupAcc& g, const CEmuCatalog* cat,
+	const CEmuGameEntry* e, int entryIndex)
+{
+	if (!e) return;
+	if (!g.pick || e->titleCount > g.pick->titleCount)
+		g.pick = e;
+	char tag[CEMU_MODE_TAG] = {};
+	if (!CEmuModeTagFromEntry(e, tag, (int)sizeof(tag)) || !tag[0]) return;
+	int found = -1;
+	for (int j = 0; j < g.modeN; j++) {
+		if (CEmuModeTagsEqual(g.modes[j].tag, tag)) { found = j; break; }
+	}
+	if (found >= 0) {
+		if (cat && g.modes[found].entryIndex >= 0 && g.modes[found].entryIndex < cat->count) {
+			const CEmuGameEntry* prev = cat->entry[g.modes[found].entryIndex];
+			if (prev && e->titleCount > prev->titleCount)
+				g.modes[found].entryIndex = entryIndex;
+		} else {
+			g.modes[found].entryIndex = entryIndex;
+		}
+		return;
+	}
+	if (g.modeN >= CEMU_MODE_MAX) return;
+	memset(&g.modes[g.modeN], 0, sizeof(g.modes[g.modeN]));
+	strncpy_s(g.modes[g.modeN].tag, tag, _TRUNCATE);
+	strncpy_s(g.modes[g.modeN].subtype, e->subtype, _TRUNCATE);
+	g.modes[g.modeN].isMidi = CEmuModeIsMidiTag(tag) ? 1 : 0;
+	g.modes[g.modeN].entryIndex = entryIndex;
+	g.modeN++;
+}
+
+static CString CEmuJoinModeTags(const CEmuArchiveMode* modes, int n)
 {
 	CString out;
-	if (!cat || !ge || !ge->archive[0]) {
-		if (ge && ge->subtype[0]) out = ge->subtype;
-		return out;
-	}
-	CEmuArchiveMode modes[CEMU_MODE_MAX];
-	const int n = CEmuCatalogListArchiveModes(cat, ge->archive, ge->dataDir, NULL,
-		modes, CEMU_MODE_MAX);
+	if (!modes || n <= 0) return out;
 	for (int i = 0; i < n; i++) {
 		if (!modes[i].tag[0]) continue;
 		if (!out.IsEmpty()) out += L" / ";
 		out += modes[i].tag;
 	}
-	if (out.IsEmpty() && ge->subtype[0])
-		out = ge->subtype;
 	return out;
 }
 
-static void CEmuFillMonitorFlags(const CEmuCatalog* cat, const CEmuGameEntry* ge,
-	int& monFm, int& monMidi)
+static void CEmuFillMonitorFromModes(const CEmuArchiveMode* modes, int n,
+	const CEmuGameEntry* ge, int& monFm, int& monMidi)
 {
 	monFm = 0;
 	monMidi = 0;
-	if (cat && ge && ge->archive[0]) {
-		CEmuArchiveMode modes[CEMU_MODE_MAX];
-		const int n = CEmuCatalogListArchiveModes(cat, ge->archive, ge->dataDir, NULL,
-			modes, CEMU_MODE_MAX);
-		for (int i = 0; i < n; i++) {
-			if (!modes[i].tag[0]) continue;
-			if (modes[i].isMidi) monMidi = 1;
-			else monFm = 1;
-		}
+	for (int i = 0; i < n; i++) {
+		if (!modes[i].tag[0]) continue;
+		if (modes[i].isMidi) monMidi = 1;
+		else monFm = 1;
 	}
 	if (!monFm && !monMidi && ge) {
 		char tag[CEMU_MODE_TAG] = {};
@@ -860,19 +945,11 @@ static HBITMAP CEmuMakeSortArrowBmp(BOOL up)
 	return hb;
 }
 
-static const CEmuGameEntry* CEmuPickGroupRepresentative(const CEmuCatalog* cat,
-	const CEmuGameEntry* ge)
-{
-	if (!cat || !ge || !ge->archive[0]) return ge;
-	const CEmuGameEntry* best = CEmuCatalogFindArchiveForZipMode(cat, ge->archive,
-		ge->dataDir, NULL, NULL);
-	return best ? best : ge;
-}
-
-static CString CEmuBuildFilterHay(const CEmuCatalog* cat, const CEmuGameEntry* ge,
-	const CString& modes)
+static CString CEmuBuildFilterHayFast(const CEmuCatalog* cat, const CEmuGameEntry* ge,
+	const CString& modes, const CEmuArchiveMode* m, int n)
 {
 	CString hay;
+	if (!ge) return hay;
 	hay.Format(L"%hs %hs %hs %hs %hs %s %s",
 		ge->archive[0] ? ge->archive : "",
 		ge->platform[0] ? ge->platform : "",
@@ -881,22 +958,17 @@ static CString CEmuBuildFilterHay(const CEmuCatalog* cat, const CEmuGameEntry* g
 		ge->genre[0] ? ge->genre : "",
 		ge->name[0] ? ge->name : L"",
 		(LPCTSTR)modes);
-	if (cat && ge->archive[0]) {
-		CEmuArchiveMode m[CEMU_MODE_MAX];
-		const int n = CEmuCatalogListArchiveModes(cat, ge->archive, ge->dataDir, NULL,
-			m, CEMU_MODE_MAX);
-		for (int i = 0; i < n; i++) {
-			if (m[i].entryIndex >= 0 && m[i].entryIndex < cat->count) {
-				const CEmuGameEntry* e = cat->entry[m[i].entryIndex];
-				if (e && e->name[0]) {
-					hay += L' ';
-					hay += e->name;
-				}
-			}
-			if (m[i].tag[0]) {
+	for (int i = 0; i < n; i++) {
+		if (cat && m[i].entryIndex >= 0 && m[i].entryIndex < cat->count) {
+			const CEmuGameEntry* e = cat->entry[m[i].entryIndex];
+			if (e && e->name[0]) {
 				hay += L' ';
-				hay += CEmuShortSoundTag(CString(m[i].tag));
+				hay += e->name;
 			}
+		}
+		if (m[i].tag[0]) {
+			hay += L' ';
+			hay += CEmuShortSoundTag(CString(m[i].tag));
 		}
 	}
 	hay += L' ';
@@ -904,6 +976,14 @@ static CString CEmuBuildFilterHay(const CEmuCatalog* cat, const CEmuGameEntry* g
 	hay += L' ';
 	hay += CEmuModesChipText(modes);
 	hay += CEmuGenreHayExtra(ge->genre[0] ? ge->genre : "");
+	if (ge->title && ge->titleCount > 0) {
+		hay.Preallocate(hay.GetLength() + ge->titleCount * 40 + 16);
+		for (int t = 0; t < ge->titleCount; t++) {
+			if (!ge->title[t].label[0]) continue;
+			hay += L' ';
+			hay += ge->title[t].label;
+		}
+	}
 	hay.MakeLower();
 	return hay;
 }
@@ -912,9 +992,10 @@ static CString CEmuBuildFilterHay(const CEmuCatalog* cat, const CEmuGameEntry* g
 
 /* PlayList.cpp から公開 */
 bool PlCemuAddZipAndPlay(LPCTSTR zipPhysical);
+bool PlCemuAddZipTitleAndPlay(LPCTSTR zipPhysical, unsigned titleIndex1);
 
-IMPLEMENT_DYNAMIC(CEmuCatListCtrl, CCustomListCtrl)
-BEGIN_MESSAGE_MAP(CEmuCatListCtrl, CCustomListCtrl)
+IMPLEMENT_DYNAMIC(CEmuCatListCtrl, CCustomListTreeCtrl)
+BEGIN_MESSAGE_MAP(CEmuCatListCtrl, CCustomListTreeCtrl)
 END_MESSAGE_MAP()
 
 void CEmuCatListCtrl::EnsureSortArrows()
@@ -984,7 +1065,8 @@ void CEmuCatListCtrl::SetSortState(int col, int dir)
 BOOL CEmuCatListCtrl::GetListRowTint(int row, COLORREF& tintBg, COLORREF& accent) const
 {
 	if (row < 0) return FALSE;
-	const CEmuCatListRow* rowp = (const CEmuCatListRow*)GetItemData(row);
+	CEmuCatalogListDlg* dlg = DYNAMIC_DOWNCAST(CEmuCatalogListDlg, GetParent());
+	const CEmuCatListRow* rowp = dlg ? dlg->VisParentRow(row) : NULL;
 	if (!rowp || !rowp->ge) return FALSE;
 	const COLORREF c = CEmuDataKindColor(rowp->ge->dataDir);
 	tintBg = c;
@@ -992,13 +1074,51 @@ BOOL CEmuCatListCtrl::GetListRowTint(int row, COLORREF& tintBg, COLORREF& accent
 	return TRUE;
 }
 
+BOOL CEmuCatListCtrl::IsTreeParentRow(int row) const
+{
+	CEmuCatalogListDlg* dlg = DYNAMIC_DOWNCAST(CEmuCatalogListDlg, GetParent());
+	if (!dlg) return FALSE;
+	const CEmuCatListRow* rowp = dlg->VisParentRow(row);
+	return rowp && rowp->songCount > 0 && dlg->VisSongIndex(row) < 0;
+}
+
+void CEmuCatListCtrl::OnTreeGlyphClick(int row)
+{
+	CEmuCatalogListDlg* dlg = DYNAMIC_DOWNCAST(CEmuCatalogListDlg, GetParent());
+	if (dlg) dlg->ToggleExpandVis(row);
+}
+
 void CEmuCatListCtrl::BuildToolTipText(int row, int col, CString& out)
 {
 	UNREFERENCED_PARAMETER(col);
 	out.Empty();
 	if (row < 0) return;
-	const CEmuCatListRow* rowp = (const CEmuCatListRow*)GetItemData(row);
+	CEmuCatalogListDlg* dlg = DYNAMIC_DOWNCAST(CEmuCatalogListDlg, GetParent());
+	const CEmuCatListRow* rowp = dlg ? dlg->VisParentRow(row) : NULL;
 	if (!rowp || !rowp->ge) return;
+	const int song = dlg ? dlg->VisSongIndex(row) : -1;
+	if (song >= 0) {
+		wchar_t lab[CEMU_GAME_NAME] = {};
+		CEmuGameTitleAt(rowp->ge, song, NULL, lab, (int)_countof(lab));
+		out.Format(LL14(
+			L"曲: %s\nタイトル: %s\n（ダブルクリックでこの曲だけ追加）",
+			L"Song: %s\nTitle: %s\n(Double-click to add this song only)",
+			L"Morceau: %s\nTitre: %s\n(Double-clic = ce morceau seul)",
+			L"Brano: %s\nTitolo: %s\n(Doppio clic = solo questo)",
+			L"Pista: %s\nTitulo: %s\n(Doble clic = solo esta)",
+			L"곡: %s\n제목: %s\n(더블클릭으로 이 곡만 추가)",
+			L"曲目：%s\n标题：%s\n（双击只加入此曲）",
+			L"أغنية: %s\nعنوان: %s",
+			L"Трек: %s\nНазвание: %s",
+			L"Titel: %s\nSpiel: %s",
+			L"Faixa: %s\nTitulo: %s",
+			L"Nummer: %s\nTitel: %s",
+			L"Utwor: %s\nTytul: %s",
+			L"Sarki: %s\nBaslik: %s"),
+			lab[0] ? lab : L"-",
+			(LPCTSTR)rowp->title);
+		return;
+	}
 	const CEmuGameEntry* ge = rowp->ge;
 	CString modes = rowp->modes;
 	CString title = rowp->title;
@@ -1069,6 +1189,7 @@ BEGIN_MESSAGE_MAP(CEmuCatalogListDlg, CCustomBlurDialogBase)
 	ON_BN_CLICKED(IDC_CEMU_CAT_HELP, OnBnClickedHelp)
 	ON_EN_CHANGE(IDC_CEMU_CAT_FILTER, OnEnChangeFilter)
 	ON_NOTIFY(NM_DBLCLK, IDC_CEMU_CAT_LIST, OnNMDblclkList)
+	ON_NOTIFY(LVN_GETDISPINFO, IDC_CEMU_CAT_LIST, OnLvnGetdispinfo)
 	ON_NOTIFY(LVN_COLUMNCLICK, IDC_CEMU_CAT_LIST, OnLvnColumnClick)
 	ON_MESSAGE(WM_CEMU_CAT_FILTER, OnFilterApply)
 	ON_WM_SIZE()
@@ -1150,6 +1271,7 @@ void CEmuCatalogListDlg::Show(CWnd* pParent)
 	}
 
 	if (g_cemuCatList && ::IsWindow(g_cemuCatList->GetSafeHwnd())) {
+		CEmuCollectLocalZipStems(stems, stemToPath, true);
 		g_cemuCatList->BuildRowCache();
 		g_cemuCatList->ApplyFilterToList();
 		g_cemuCatList->ShowWindow(SW_SHOW);
@@ -1193,8 +1315,8 @@ BOOL CEmuCatalogListDlg::OnInitDialog()
 		L"Lista obslugi Cemu", L"Cemu destek listesi"));
 	if (m_desc.GetSafeHwnd())
 		m_desc.SetWindowText(LL14(
-			L"ダブルクリックでプレイリストへ追加して再生（手元にある zip のみ表示。同一zipの音源違いは1行）",
-			L"Double-click to add and play (local zips only; sound variants share one row)",
+			L"▶で曲一覧。タイトル行ダブルクリックで全曲、曲名ダブルクリックで1曲（手元の zip のみ。同一zipの音源違いは1行）",
+			L"▶ songs. Double-click title = all tracks, song = one (local zips; sound variants share a row)",
 			L"Double-clic pour ajouter et lire (zips locaux uniquement ; variantes son sur une ligne)",
 			L"Doppio clic per aggiungere e riprodurre (solo zip locali; varianti audio in una riga)",
 			L"Doble clic para anadir y reproducir (solo zips locales; variantes en una fila)",
@@ -1218,8 +1340,8 @@ BOOL CEmuCatalogListDlg::OnInitDialog()
 	m_tooltip.AddTool(&m_help, LL14(L"操作ガイドを表示", L"Show operation guide", L"Afficher le guide", L"Mostra guida", L"Mostrar guía", L"조작 가이드 표시", L"显示操作指南", L"إظهار الدليل", L"Показать руководство", L"Bedienungsanleitung", L"Mostrar guia", L"Handleiding tonen", L"Pokaż przewodnik", L"İşlem kılavuzunu göster"));
 	if (m_filter.GetSafeHwnd()) {
 		m_tooltip.AddTool(&m_filter, LL14(
-			L"タイトル・ジャンル・機種・音源・モニタ・data で絞り込み。空白区切りで複数指定（すべて含む）。Shooter / ARPG / STG なども可。",
-			L"Filter by title, genre, platform, sound, monitor, data. Space-separated terms (AND). Shooter / ARPG / STG also work.",
+			L"タイトル・曲名・ジャンル・機種・音源・モニタ・data で絞り込み。空白区切りで複数指定（すべて含む）。曲名ヒットでも自動では開きません。",
+			L"Filter by title, songs, genre, platform, sound, monitor, data. Space-separated (AND). Matching a song does not auto-expand.",
 			L"Filtrer titre/genre/plateforme/son/data. Mots separes par espace (ET). Espace pleine chasse, virgule, / aussi.",
 			L"Filtra titolo/genere/piattaforma/suono/data. Termini separati da spazio (AND). Spazio pieno, virgola, /.",
 			L"Filtrar titulo/genero/plataforma/sonido/data. Terminos separados por espacio (AND). Espacio ancho, coma, /.",
@@ -1288,7 +1410,17 @@ BOOL CEmuCatalogListDlg::PreTranslateMessage(MSG* pMsg)
 
 int CEmuCatalogListDlg::BuildRowCache()
 {
+	std::unordered_map<std::string, char> wasExp;
+	wasExp.reserve(m_rows.size() + 8);
+	for (size_t i = 0; i < m_rows.size(); i++) {
+		const CEmuCatListRow& r = m_rows[i];
+		if (!r.expanded || !r.ge) continue;
+		char k[CEMU_ARCHIVE_NAME + CEMU_DATA_DIR + 4];
+		CEmuCatGroupKey(r.ge, k, (int)sizeof(k));
+		if (k[0]) wasExp[k] = 1;
+	}
 	m_rows.clear();
+	m_vis.clear();
 	m_zipStemCount = 0;
 	CEmuMgr* mgr = CEmuMgrGet();
 	CEmuMgrEnsureCatalog(mgr);
@@ -1299,7 +1431,16 @@ int CEmuCatalogListDlg::BuildRowCache()
 	std::unordered_map<std::string, std::wstring> stemToPath;
 	m_zipStemCount = CEmuCollectLocalZipStems(localStems, stemToPath);
 
-	/* First pass: one row per archive(+dataDir) group — O(n) with a set. */
+	std::unordered_map<std::string, CEmuCatGroupAcc> groups;
+	groups.reserve((size_t)cat->count);
+	for (int i = 0; i < cat->count; i++) {
+		const CEmuGameEntry* ge = cat->entry[i];
+		if (!ge || !ge->archive[0]) continue;
+		char groupKey[CEMU_ARCHIVE_NAME + CEMU_DATA_DIR + 4];
+		CEmuCatGroupKey(ge, groupKey, (int)sizeof(groupKey));
+		CEmuCatAccAddEntry(groups[groupKey], cat, ge, i);
+	}
+
 	std::unordered_set<std::string> seenGroup;
 	m_rows.reserve((size_t)(cat->count / 2) + 8);
 	for (int i = 0; i < cat->count; i++) {
@@ -1307,15 +1448,17 @@ int CEmuCatalogListDlg::BuildRowCache()
 		if (!ge || !ge->archive[0]) continue;
 
 		char groupKey[CEMU_ARCHIVE_NAME + CEMU_DATA_DIR + 4];
-		_snprintf_s(groupKey, _TRUNCATE, "%s\n%s", ge->archive, ge->dataDir[0] ? ge->dataDir : "");
-		for (char* p = groupKey; *p; p++) {
-			if (*p >= 'A' && *p <= 'Z') *p = (char)(*p - 'A' + 'a');
-		}
+		CEmuCatGroupKey(ge, groupKey, (int)sizeof(groupKey));
 		if (!seenGroup.insert(groupKey).second)
 			continue;
 
+		auto git = groups.find(groupKey);
+		if (git == groups.end()) continue;
+		const CEmuGameEntry* pick = git->second.pick ? git->second.pick : ge;
+		if (!pick) continue;
+
 		char stem[CEMU_ARCHIVE_NAME];
-		CEmuArchivePrimaryStem(ge->archive, stem, (int)sizeof(stem));
+		CEmuArchivePrimaryStem(pick->archive, stem, (int)sizeof(stem));
 		if (!stem[0] || localStems.find(stem) == localStems.end())
 			continue;
 		/* Listing an archive that plays nothing is worse than not offering
@@ -1323,19 +1466,31 @@ int CEmuCatalogListDlg::BuildRowCache()
 		if (!CEmuArchiveIsSupported(stem))
 			continue;
 
-		const CEmuGameEntry* pick = CEmuPickGroupRepresentative(cat, ge);
-		if (!pick) pick = ge;
-
 		CEmuCatListRow row;
 		row.ge = pick;
 		row.title = pick->name[0] ? pick->name : L"(no name)";
 		CEmuStripModeParenFromTitle(row.title);
-		row.modes = CEmuJoinArchiveModeTags(cat, pick);
-		CEmuFillMonitorFlags(cat, pick, row.monFm, row.monMidi);
-		row.hayLower = CEmuBuildFilterHay(cat, pick, row.modes);
+		row.modes = CEmuJoinModeTags(git->second.modes, git->second.modeN);
+		if (row.modes.IsEmpty() && pick->subtype[0])
+			row.modes = pick->subtype;
+		CEmuFillMonitorFromModes(git->second.modes, git->second.modeN, pick,
+			row.monFm, row.monMidi);
+		row.hayLower = CEmuBuildFilterHayFast(cat, pick, row.modes,
+			git->second.modes, git->second.modeN);
 		if (row.monFm) row.hayLower += L" fm fmmon";
 		if (row.monMidi) row.hayLower += L" midi midimon";
 		if (row.monFm && row.monMidi) row.hayLower += L" fm+midi";
+		row.genreChip = CEmuChipWrap(CString(pick->genre[0] ? pick->genre : "-"));
+		row.platChip = CEmuChipWrap(CEmuPlatformChipLabel(
+			pick->platform[0] ? pick->platform : ""));
+		row.soundChip = CEmuModesChipText(row.modes);
+		if (row.soundChip.IsEmpty() && pick->subtype[0])
+			row.soundChip = CEmuChipWrap(CEmuShortSoundTag(CString(pick->subtype)));
+		row.monChip = CEmuMonitorChipText(row.monFm, row.monMidi);
+		row.dataChip = CEmuChipWrap(CString(pick->dataDir[0] ? pick->dataDir : "-"));
+		row.songCount = pick->titleCount;
+		if (wasExp.find(groupKey) != wasExp.end())
+			row.expanded = true;
 		auto it = stemToPath.find(stem);
 		if (it != stemToPath.end())
 			row.zipPath = it->second.c_str();
@@ -1351,68 +1506,73 @@ void CEmuCatalogListDlg::ApplyFilterToList()
 	m_bFilling = TRUE;
 	m_lc.SetRedraw(FALSE);
 
-	CString keepKey;
+	int keepParent = -1, keepSong = -1;
 	{
 		POSITION pos = m_lc.GetFirstSelectedItemPosition();
 		if (pos) {
 			const int sel = m_lc.GetNextSelectedItem(pos);
-			const CEmuCatListRow* rowp = (const CEmuCatListRow*)m_lc.GetItemData(sel);
-			if (rowp && rowp->ge && rowp->ge->archive[0]) {
-				keepKey.Format(L"%hs\n%hs", rowp->ge->archive,
-					rowp->ge->dataDir[0] ? rowp->ge->dataDir : "");
+			if (sel >= 0 && sel < (int)m_vis.size()) {
+				keepParent = m_vis[sel].parent;
+				keepSong = m_vis[sel].song;
 			}
 		}
 	}
 
-	m_lc.DeleteAllItems();
 	CString filter;
 	if (m_filter.GetSafeHwnd())
 		m_filter.GetWindowText(filter);
 
-	std::vector<CEmuCatListRow*> vis;
-	vis.reserve(m_rows.size());
+	std::vector<int> order;
+	order.reserve(m_rows.size());
 	for (size_t i = 0; i < m_rows.size(); i++) {
-		CEmuCatListRow& r = m_rows[i];
-		if (CatRowMatchesFilter(r.hayLower, filter))
-			vis.push_back(&r);
+		if (CatRowMatchesFilter(m_rows[i].hayLower, filter))
+			order.push_back((int)i);
 	}
 	if (m_sortCol >= 0 && m_sortDir != 0) {
 		const int col = m_sortCol;
 		const int dir = m_sortDir;
-		std::stable_sort(vis.begin(), vis.end(),
-			[col, dir](const CEmuCatListRow* a, const CEmuCatListRow* b) {
-				const int c = CEmuCatCmpRows(*a, *b, col);
+		std::stable_sort(order.begin(), order.end(),
+			[this, col, dir](int a, int b) {
+				const int c = CEmuCatCmpRows(m_rows[(size_t)a], m_rows[(size_t)b], col);
 				return (dir == 2) ? (c > 0) : (c < 0);
 			});
 	}
 
-	int restore = -1;
-	int row = 0;
-	for (size_t i = 0; i < vis.size(); i++) {
-		CEmuCatListRow& r = *vis[i];
-		const int idx = m_lc.InsertItem(row, r.title);
-		m_lc.SetItemText(idx, 1, CEmuChipWrap(CString(r.ge->genre[0] ? r.ge->genre : "-")));
-		m_lc.SetItemText(idx, 2, CString(r.ge->archive));
-		m_lc.SetItemText(idx, 3, CEmuChipWrap(CEmuPlatformChipLabel(
-			r.ge->platform[0] ? r.ge->platform : "")));
-		CString soundChip = CEmuModesChipText(r.modes);
-		if (soundChip.IsEmpty() && r.ge->subtype[0])
-			soundChip = CEmuChipWrap(CEmuShortSoundTag(CString(r.ge->subtype)));
-		m_lc.SetItemText(idx, 4, soundChip);
-		m_lc.SetItemText(idx, 5, CEmuMonitorChipText(r.monFm, r.monMidi));
-		m_lc.SetItemText(idx, 6, CEmuChipWrap(CString(r.ge->dataDir[0] ? r.ge->dataDir : "-")));
-		m_lc.SetItemData(idx, (DWORD_PTR)&r);
-		if (restore < 0 && !keepKey.IsEmpty() && r.ge && r.ge->archive[0]) {
-			CString k;
-			k.Format(L"%hs\n%hs", r.ge->archive, r.ge->dataDir[0] ? r.ge->dataDir : "");
-			if (k == keepKey) restore = idx;
+	m_vis.clear();
+	m_vis.reserve(order.size() * 2);
+	for (size_t i = 0; i < order.size(); i++) {
+		const int pi = order[i];
+		CEmuCatVisRow vr;
+		vr.parent = pi;
+		vr.song = -1;
+		m_vis.push_back(vr);
+		const CEmuCatListRow& r = m_rows[(size_t)pi];
+		if (!r.expanded || !r.ge || r.songCount <= 0 || !r.ge->title)
+			continue;
+		for (int t = 0; t < r.ge->titleCount; t++) {
+			if (!r.ge->title[t].label[0]) continue;
+			CEmuCatVisRow ch;
+			ch.parent = pi;
+			ch.song = t;
+			m_vis.push_back(ch);
 		}
-		row++;
+	}
+
+	const int n = (int)m_vis.size();
+	m_lc.SetItemCountEx(n, LVSICF_NOSCROLL);
+
+	int restore = -1;
+	for (int i = 0; i < n; i++) {
+		if (m_vis[i].parent != keepParent) continue;
+		if (m_vis[i].song == keepSong) { restore = i; break; }
+		if (restore < 0 && m_vis[i].song < 0) restore = i;
 	}
 	if (restore >= 0) {
 		m_lc.SetItemState(restore, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
 		m_lc.EnsureVisible(restore, FALSE);
 	}
+	if (n > 0)
+		m_lc.RedrawItems(0, n - 1);
 	m_lc.SetRedraw(TRUE);
 	m_lc.Invalidate();
 	m_bFilling = FALSE;
@@ -1509,7 +1669,7 @@ void CEmuCatalogListDlg::OnActivate(UINT nState, CWnd* pWndOther, BOOL bMinimize
 	/* Re-scan so newly dropped zips appear without reopening. */
 	std::unordered_set<std::string> stems;
 	std::unordered_map<std::string, std::wstring> stemToPath;
-	const size_t n = CEmuCollectLocalZipStems(stems, stemToPath);
+	const size_t n = CEmuCollectLocalZipStems(stems, stemToPath, true);
 	if (n == m_zipStemCount) return;
 	BuildRowCache();
 	ApplyFilterToList();
@@ -1594,13 +1754,93 @@ void CEmuCatalogListDlg::OnDestroy()
 	CCustomBlurDialogBase::OnDestroy();
 }
 
-int CEmuCatalogListDlg::PlaySelectedRow()
+const CEmuCatListRow* CEmuCatalogListDlg::VisParentRow(int vis) const
 {
-	POSITION pos = m_lc.GetFirstSelectedItemPosition();
-	if (!pos) return 0;
-	const int row = m_lc.GetNextSelectedItem(pos);
-	const CEmuCatListRow* rowp = (const CEmuCatListRow*)m_lc.GetItemData(row);
+	if (vis < 0 || vis >= (int)m_vis.size()) return NULL;
+	const int p = m_vis[vis].parent;
+	if (p < 0 || p >= (int)m_rows.size()) return NULL;
+	return &m_rows[(size_t)p];
+}
+
+int CEmuCatalogListDlg::VisSongIndex(int vis) const
+{
+	if (vis < 0 || vis >= (int)m_vis.size()) return -1;
+	return m_vis[vis].song;
+}
+
+void CEmuCatalogListDlg::ToggleExpandVis(int vis)
+{
+	if (vis < 0 || vis >= (int)m_vis.size()) return;
+	if (m_vis[vis].song >= 0) return;
+	const int p = m_vis[vis].parent;
+	if (p < 0 || p >= (int)m_rows.size()) return;
+	if (m_rows[(size_t)p].songCount <= 0) return;
+	m_lc.SetItemState(vis, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
+	m_rows[(size_t)p].expanded = !m_rows[(size_t)p].expanded;
+	ApplyFilterToList();
+}
+
+void CEmuCatalogListDlg::OnLvnGetdispinfo(NMHDR* pNMHDR, LRESULT* pResult)
+{
+	if (pResult) *pResult = 0;
+	NMLVDISPINFO* pDi = reinterpret_cast<NMLVDISPINFO*>(pNMHDR);
+	if (!pDi) return;
+	LVITEM& it = pDi->item;
+	const int vis = it.iItem;
+	if (vis < 0 || vis >= (int)m_vis.size()) return;
+	const CEmuCatVisRow& v = m_vis[(size_t)vis];
+	if (v.parent < 0 || v.parent >= (int)m_rows.size()) return;
+	const CEmuCatListRow& r = m_rows[(size_t)v.parent];
+	if (it.mask & LVIF_IMAGE)
+		it.iImage = I_IMAGENONE;
+	if (!(it.mask & LVIF_TEXT) || !it.pszText || it.cchTextMax <= 0)
+		return;
+	it.pszText[0] = 0;
+	if (v.song >= 0) {
+		if (it.iSubItem == 0 && r.ge) {
+			wchar_t lab[CEMU_GAME_NAME] = {};
+			CEmuGameTitleAt(r.ge, v.song, NULL, lab, (int)_countof(lab));
+			_snwprintf_s(it.pszText, (size_t)it.cchTextMax, _TRUNCATE, L"      %s", lab);
+		}
+		return;
+	}
+	switch (it.iSubItem) {
+	case 0:
+		if (r.songCount > 0)
+			_snwprintf_s(it.pszText, (size_t)it.cchTextMax, _TRUNCATE, L"%s  %s",
+				r.expanded ? L"▼" : L"▶", (LPCTSTR)r.title);
+		else
+			wcsncpy_s(it.pszText, (size_t)it.cchTextMax, r.title, _TRUNCATE);
+		return;
+	case 1:
+		wcsncpy_s(it.pszText, (size_t)it.cchTextMax, r.genreChip, _TRUNCATE);
+		return;
+	case 2:
+		if (r.ge && r.ge->archive[0])
+			_snwprintf_s(it.pszText, (size_t)it.cchTextMax, _TRUNCATE, L"%hs", r.ge->archive);
+		return;
+	case 3:
+		wcsncpy_s(it.pszText, (size_t)it.cchTextMax, r.platChip, _TRUNCATE);
+		return;
+	case 4:
+		wcsncpy_s(it.pszText, (size_t)it.cchTextMax, r.soundChip, _TRUNCATE);
+		return;
+	case 5:
+		wcsncpy_s(it.pszText, (size_t)it.cchTextMax, r.monChip, _TRUNCATE);
+		return;
+	case 6:
+		wcsncpy_s(it.pszText, (size_t)it.cchTextMax, r.dataChip, _TRUNCATE);
+		return;
+	default:
+		return;
+	}
+}
+
+int CEmuCatalogListDlg::PlayVisRow(int vis)
+{
+	const CEmuCatListRow* rowp = VisParentRow(vis);
 	if (!rowp || !rowp->ge || !rowp->ge->archive[0]) return 0;
+	const int song = VisSongIndex(vis);
 	wchar_t zipPath[CEMU_ZIP_PATH] = {};
 	if (rowp->zipPath.GetLength() > 0
 		&& GetFileAttributesW(rowp->zipPath) != INVALID_FILE_ATTRIBUTES) {
@@ -1614,7 +1854,10 @@ int CEmuCatalogListDlg::PlaySelectedRow()
 		if (CEmuModeTagFromEntry(rowp->ge, tag, (int)sizeof(tag)) && tag[0])
 			CEmuModePrefSet(zipPath, tag);
 	}
-	if (!PlCemuAddZipAndPlay(zipPath)) {
+	const bool ok = (song >= 0)
+		? PlCemuAddZipTitleAndPlay(zipPath, (unsigned)(song + 1))
+		: PlCemuAddZipAndPlay(zipPath);
+	if (!ok) {
 		AfxMessageBox(LL14(
 			L"プレイリストへの追加に失敗しました。",
 			L"Failed to add to the playlist.",
@@ -1661,7 +1904,11 @@ void CEmuCatalogListDlg::OnLvnColumnClick(NMHDR* pNMHDR, LRESULT* pResult)
 
 void CEmuCatalogListDlg::OnNMDblclkList(NMHDR* pNMHDR, LRESULT* pResult)
 {
-	UNREFERENCED_PARAMETER(pNMHDR);
 	if (pResult) *pResult = 0;
-	PlaySelectedRow();
+	NMITEMACTIVATE* p = reinterpret_cast<NMITEMACTIVATE*>(pNMHDR);
+	if (!p || p->iItem < 0) return;
+	int glyphRow = -1;
+	if (m_lc.HitTestTreeGlyph(p->ptAction, glyphRow))
+		return;
+	PlayVisRow(p->iItem);
 }
