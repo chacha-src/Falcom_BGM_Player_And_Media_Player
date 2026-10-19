@@ -88,7 +88,7 @@
                   + _k2_syn2_report.txt
                   + _k2_ac48_plays.txt
                   + _k2_crush15_report.txt
-   Archives probed: 5085, supported: 4600; MSX +replcart_msx/shiryo_msx/msxfan_msx (_k2_x1msx8full_0.txt _k2_x1msx8fan_0.txt) + x1alba (_k2_x1msx8alba_0.txt)
+   Archives probed: 5085, supported: 4607; MSX +replcart_msx/shiryo_msx/msxfan_msx (_k2_x1msx8full_0.txt _k2_x1msx8fan_0.txt) + x1alba (_k2_x1msx8alba_0.txt)
                   + _k2_ac2s86_report.txt (genpeitd/rthunder/skykiddx/wndrmomo Sys86)
                   + _k2_ac2wsgo_report.txt (pacland/skykid/drgnbstr wsg63701)
                   + bosco wsgz80 (0289 BGM via $8A14 + $0139 id)
@@ -109,7 +109,8 @@
                   + kerakera_98 ADVBIOS (USD name on handle 0, OPN IRQ from INT 15)
                   + illumina_98 FIS (OPN IRQ stays on INT 15, stub HLT releases the latch)
                   + ds98_05/07/08/15/19 ds_08 FPLAY (hoot command waits out the OPN tick; a nested load was smashing SP=125E)
-                  + _k2_f3arc_plays.txt (f3: cbombers, dangcurv, landgear, sidebs) */
+                  + drbystln_98/racerx_98/wiz7cds_98 MUSE2 (hoot stop waits out the OPN tick; the tick halts the timer at entry)
+                  + _k2_f3arc_plays.txt (f3: cbombers, dangcurv, dendego, dendego2, groundfx, landgear, sidebs, undrfire) */
 
 #include "StdAfx.h"
 #include "cemu_support.h"
@@ -967,6 +968,8 @@ static const char* const kSupported[] = {
 	"den2_msx",
 	"den3_msx",
 	"den3demo_msx",
+	"dendego",
+	"dendego2",
 	"dengekid_98",
 	"dennou_98",
 	"dennou_g_98",
@@ -1151,6 +1154,7 @@ static const char* const kSupported[] = {
 	"drahaku68snd",
 	"drakkhen_at",
 	"drasou_98",
+	"drbystln_98",
 	"dream_s_98",
 	"dreturn68snd",
 	"drgarm_98",
@@ -1724,6 +1728,7 @@ static const char* const kSupported[] = {
 	"grnseed_98",
 	"grobda",
 	"grobda88",
+	"groundfx",
 	"groupx68snd",
 	"growl",
 	"gsgaiden_98",
@@ -3226,6 +3231,7 @@ static const char* const kSupported[] = {
 	"r_san_98",
 	"r_sanpb_98",
 	"racedrivin_at",
+	"racerx_98",
 	"rachero",
 	"racinfrc",
 	"racingb",
@@ -4256,6 +4262,7 @@ static const char* const kSupported[] = {
 	"ultraman",
 	"undead_msx",
 	"undine",
+	"undrfire",
 	"universe_at",
 	"unlmtdadv_at",
 	"unsquad",
@@ -4436,6 +4443,7 @@ static const char* const kSupported[] = {
 	"winrun91",
 	"winsltn_msx",
 	"winspike",
+	"wiz7cds_98",
 	"wizardry7_at",
 	"wizdfire",
 	"wizkid_at",

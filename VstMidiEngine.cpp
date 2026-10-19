@@ -4581,12 +4581,11 @@ extern "C" int VstLiveLeftPluginsMapped(void)
 
 static int LiveAbandonNow(void)
 {
+	/* App exit used to skip effClose / terminate and leave the DLL mapped.
+	   ExitProcess then hung in DLL_PROCESS_DETACH. Abandon only when the
+	   audio thread is still inside process() and a real close would deadlock. */
 	if (InterlockedCompareExchange(&g_liveAbandonPlugins, 0, 0))
 		return 1;
-#ifndef KPIHOST32_BUILD
-	if (InterlockedCompareExchange(&g_appExiting, 0, 0))
-		return 1;
-#endif
 	return 0;
 }
 
@@ -7108,15 +7107,16 @@ static int ProbeLoadedVst3Audible(Vst3Inst* vst3, int drums)
 			a = fabsf(g_eng.outR[i]); if (a > peak) peak = a;
 		}
 	}
-	Vst3MidiShort(vst3, 0x80 | (60 << 8), 0);
-	Vst3MidiShort(vst3, 0x80 | (48 << 8), 0);
-	Vst3MidiShort(vst3, 0x80 | (36 << 8), 0);
-	Vst3MidiShort(vst3, 0x80 | (38 << 8), 0);
-	Vst3MidiShort(vst3, 0x80 | (42 << 8), 0);
-	Vst3MidiShort(vst3, 0x89 | (36 << 8), 0);
-	Vst3MidiShort(vst3, 0x89 | (38 << 8), 0);
-	Vst3MidiShort(vst3, 0x89 | (42 << 8), 0);
-	PumpSilent(NULL, vst3, 2);
+	if (peak >= 1.0e-5f) {
+		if (!drums) {
+			Vst3MidiShort(vst3, 0x80 | (60 << 8), 0);
+			Vst3MidiShort(vst3, 0x80 | (48 << 8), 0);
+			Vst3DrainUntilQuiet(vst3, 64);
+		} else {
+			/* ワンショットはノートオフでは止まらない。無音の試し打ちでは捨てない。 */
+			Vst3DrainUntilQuiet(vst3, 345);
+		}
+	}
 	EnsLog(L"probe vst3 peak=%.6f", peak);
 	return peak >= 1.0e-5f ? 1 : 0;
 }
@@ -7540,6 +7540,9 @@ static int LiveVst3ReadyWait(int timeoutMs)
 	if (!n) return 1;
 	const DWORD t0 = GetTickCount();
 	for (;;) {
+		/* キットのロード完了はプラグイン窓のタイマーと投稿で届く。
+		   ここで止めるとプローブが鳴かず、20秒待ったあと VST3 が無音のまま曲が始まる。
+		   play() は s_inPlay で再入を落とす。 */
 		MSG msg;
 		while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
 			if (msg.message == WM_QUIT) { PostQuitMessage((int)msg.wParam); break; }
@@ -7555,16 +7558,10 @@ static int LiveVst3ReadyWait(int timeoutMs)
 			if (!aud) aud = ProbeLoadedVst3Audible(v, pr[k].drums ? 0 : 1);
 			if (aud) pr[k].ready = 1; else allReady = 0;
 		}
-		if (allReady) {
-			/* Clear any probe tails so playback starts clean. */
+		if (allReady || GetTickCount() - t0 >= (DWORD)timeoutMs) {
 			for (int k = 0; k < n; ++k)
 				LivePanicPart(LiveEng().live[pr[k].part]);
-			return 1;
-		}
-		if (GetTickCount() - t0 >= (DWORD)timeoutMs) {
-			for (int k = 0; k < n; ++k)
-				LivePanicPart(LiveEng().live[pr[k].part]);
-			return 0;
+			return allReady ? 1 : 0;
 		}
 		Sleep(30);
 	}
@@ -7613,6 +7610,9 @@ extern "C" int VstMidiOpen(const wchar_t* midPath,
 		   play. Cheap when already loaded (first probe is audible). */
 		LiveVst3ReadyWait(20000);
 		InterlockedExchange(&g_liveVst3Woken, 1);
+		/* Probe and the previous song leave voices inside the kit.
+		   Drain them before DirectSound starts calling process(). */
+		VstLiveReleaseSoundingNotes();
 		return anyLive ? 0 : -5;
 	}
 
@@ -8685,6 +8685,10 @@ static void LivePanicPart(LivePart& p)
 	// note-on left in there would start a voice right after the all-notes-off.
 	p.pend.count = 0;
 	p.pend.sysexUsed = 0;
+	/* Kit CC120 goes through MapMidiCc and retunes the MediaBay state.
+	   Voices are cleared by Vst3ReleaseNotes, not channel mode. */
+	if (p.vst3 && NeedsUserPatch(p.path, p.path))
+		return;
 	for (int ch = 0; ch < 16; ++ch) {
 		LivePendPush(p, (DWORD)((0xb0 | ch) | (64 << 8) | (0 << 16)));
 		LivePendPush(p, (DWORD)((0xb0 | ch) | (120 << 8)));
@@ -8720,8 +8724,8 @@ static void LiveSongResetPart(LivePart& p)
 	/* Groove Agent / HALion: CC121 empties the kit. CC120 leaves some
 	   plugs silent until a later replay — do not send either here. */
 	if (p.vst3 && NeedsUserPatch(p.path, p.path)) {
-		/* MapMidiCc on CC123/CC64 writes kit parameters. Host MIDI IN is
-		   notes only — leave the MediaBay state alone. */
+		/* CC121 empties the kit. Voices are stopped by note-off in
+		   VstLiveReleaseSoundingNotes, not by channel mode. */
 		p.pend.count = 0;
 		p.pend.sysexUsed = 0;
 		return;
@@ -8994,6 +8998,34 @@ extern "C" void VstLiveAllNotesOff()
 	LivePanicRemote();
 }
 
+extern "C" void VstLiveReleaseSoundingNotes(void)
+{
+	if (InterlockedCompareExchange(&g_liveShuttingDown, 0, 0))
+		return;
+	if (VstLiveShouldAbortProcess())
+		return;
+	Vst3Inst* v3[32];
+	int drum[32];
+	int n3 = 0;
+	EnterCriticalSection(&g_eng.cs);
+	for (int i = 0; i < 32; ++i) {
+		LivePart& p = LiveEng().live[i];
+		if (!p.vst3 || n3 >= 32) continue;
+		v3[n3] = p.vst3;
+		drum[n3] = NeedsUserPatch(p.path, p.path) ? 1 : 0;
+		++n3;
+	}
+	LeaveCriticalSection(&g_eng.cs);
+	/* process() must not run while g_eng.cs is held.
+	   Drum kits ignore note-off, so only discard the tail. */
+	for (int i = 0; i < n3; ++i) {
+		if (drum[i])
+			Vst3DrainUntilQuiet(v3[i], 345);
+		else
+			Vst3ReleaseNotes(v3[i]);
+	}
+}
+
 extern "C" void VstLiveResetPartsForPlay(void)
 {
 	EnterCriticalSection(&g_eng.cs);
@@ -9147,7 +9179,8 @@ static BOOL CALLBACK LiveDestroyLeftoverEditorWnd(HWND h, LPARAM)
 extern "C" void VstLivePrepareAppExit(void)
 {
 	InterlockedExchange(&g_liveShuttingDown, 1);
-	VstLiveAbandonHostPlugins(1);
+	/* Do not abandon yet. Shutdown joins the audio thread, then either
+	   really closes the plug-ins or abandons only if that thread is stuck. */
 }
 
 extern "C" void VstLiveShutdown(void)
@@ -9161,6 +9194,12 @@ extern "C" void VstLiveShutdown(void)
 	VstLiveMonitorStop();
 	if (g_vstHostDlg)
 		g_vstHostDlg->StopAudio();
+	/* Real effClose / terminate only after process() has returned.
+	   A stuck audio thread still abandons, so we do not close into it. */
+	if (g_vstHostDlg && g_vstHostDlg->AudioThreadAlive())
+		VstLiveAbandonHostPlugins(1);
+	else
+		VstLiveAbandonHostPlugins(0);
 	LiveRemoteStop();
 	g_liveShm.parts = 0;
 #endif
@@ -11966,9 +12005,15 @@ extern "C" void VstLiveEditorClose(int part1to32)
 		h = g_liveSoftHiddenWnd[part1to32];
 		if (!h) return;
 	}
-	/* VST3 IPlugView::removed() is the hang (Steinberg FrameWindowClass,
-	   NI, etc.). Product names do not scale. VST2 still gets effEditClose. */
-	const int softClose = LiveAbandonNow() || (p.vst3 != NULL);
+	/* VST3 IPlugView::removed() hangs if process() is still on the audio
+	   thread. Once that thread has joined, removed() is the real close.
+	   During playback, hide only. */
+#ifndef KPIHOST32_BUILD
+	const int exiting = InterlockedCompareExchange(&g_appExiting, 0, 0) != 0;
+#else
+	const int exiting = 0;
+#endif
+	const int softClose = LiveAbandonNow() || (p.vst3 != NULL && !exiting);
 	/* Snapshot getState WHILE editor is still open (view kept on soft-close). */
 	LiveCloseSnapCapture(part1to32);
 #ifdef KPIHOST32_BUILD

@@ -95,6 +95,7 @@ public:
 	int PresetHasAnyPath(int index) const;
 	void PauseAudioForSong(int pause);
 	int AudioIsRunning();
+	int AudioThreadAlive() const { return m_audioThread ? 1 : 0; }
 
 	struct Preset {
 		wchar_t name[64];

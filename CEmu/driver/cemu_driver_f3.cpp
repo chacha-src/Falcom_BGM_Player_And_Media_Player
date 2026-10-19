@@ -764,11 +764,13 @@ void CDriverF3::KickGunlockWalker()
 		/* 0x400 以上は曲頭のゲート。0x8F 級のフレーズ待ちは残す。 */
 		static unsigned stuckSong = 0xffffffffu;
 		static uint32_t stuckStrm[12];
+		static uint16_t stuckWait[12];
 		static int stuckN[12];
 		if (stuckSong != songCode_) {
 			stuckSong = songCode_;
 			for (int i = 0; i < 12; i++) {
 				stuckStrm[i] = 0xffffffffu;
+				stuckWait[i] = 0xffffu;
 				stuckN[i] = 0;
 			}
 		}
@@ -777,55 +779,31 @@ void CDriverF3::KickGunlockWalker()
 		while (node >= 0xD000u && node < 0xEE00u && hops < 12) {
 			const unsigned nxt = hw_->Read16(node);
 			const unsigned fl = hw_->Read8(node + 2u);
-			/* 頭以外の bit7 はウォーカーがそこで歩みを止める。bit5 は E9 の凍結。 */
-			unsigned fl2 = fl;
-			if (hops > 0)
-				fl2 &= ~0x80u;
-			fl2 &= ~0x20u;
-			if (fl2 != fl)
-				hw_->Write8(node + 2u, (uint8_t)fl2);
+			/* E9 は bit5 を立ててストリームを進めない。bit7 はトラックの終端なので残す。 */
+			if (fl & 0x20u)
+				hw_->Write8(node + 2u, (uint8_t)(fl & ~0x20u));
 			unsigned strm = hw_->Read32(node + 6u);
-			unsigned songOff = hw_->Read32(0xD414u);
-			if (songOff >= tab && songOff < tab + 0x60000u)
-				songOff -= tab;
-			unsigned songEnd = songOff + 0x4000u;
-			if (songOff >= 0x40u && songOff < 0x60000u) {
-				const unsigned len = hw_->Read16(tab + songOff + 2u);
-				if (len >= 0x40u && songOff + len < 0x60000u)
-					songEnd = songOff + len;
-			}
-			if (songOff >= 0x40u && songEnd > songOff && tab >= 0xC00000u && tab < 0xC80000u) {
-				if (strm < songOff || strm >= songEnd)
-					strm = songOff;
-				const unsigned cmd = hw_->Read16(tab + (strm & ~1u));
-				const int onNote = ((cmd & 0x8000u) && (cmd & 0xffu) < 0x58u) ? 1 : 0;
-				const int same = (hops < 12 && strm == stuckStrm[hops]) ? 1 : 0;
-				unsigned beats = (cmd >> 8) & 0x7fu;
-				if (beats < 2u) beats = 2u;
-				if (beats > 16u) beats = 16u;
-				int step = (!onNote) ? 1 : 0;
-				if (onNote && same && hops < 12 && ++stuckN[hops] > (int)beats)
-					step = 1;
-				if (!same && hops < 12)
-					stuckN[hops] = 0;
-				if (step) {
-					unsigned p = (strm & ~1u) + 2u;
-					for (int k = 0; k < 160; k++) {
-						if (p < songOff || p + 1u >= songEnd)
-							p = songOff;
-						const unsigned wnote = hw_->Read16(tab + p);
-						if ((wnote & 0x8000u) && (wnote & 0xffu) < 0x58u && p != (strm & ~1u)) {
-							strm = p;
-							break;
-						}
-						p += 2u;
-						if (p >= songEnd)
-							p = songOff;
-					}
-					hw_->Write32(node + 6u, strm);
-					if (hops < 12)
-						stuckN[hops] = 0;
+			if (strm >= 0x40u && strm < 0x18000u && tab >= 0xC00000u && tab < 0xC80000u) {
+				const unsigned cmd = hw_->Read16(tab + strm);
+				const unsigned wt = hw_->Read16(node + 4u);
+				/* 0 と 1 は同じ「鳴らせる」状態。減算中の B1 は CPU がキーオンする。 */
+				const unsigned wtKey = (wt <= 1u) ? 1u : wt;
+				const int frozen = (hops < 12 && strm == stuckStrm[hops]
+					&& wtKey == stuckWait[hops]) ? 1 : 0;
+				if (hops < 12) {
+					if (frozen) stuckN[hops]++;
+					else stuckN[hops] = 0;
+					stuckWait[hops] = (uint16_t)wtKey;
 				}
+				const unsigned op = cmd & 0xffu;
+				if (op == 0xE9u)
+					hw_->Write32(node + 6u, strm + 6u);
+				else if (frozen && hops < 12 && stuckN[hops] >= 6
+					&& (cmd & 0x8000u) && op >= 0x58u) {
+					hw_->Write32(node + 6u, strm + 4u);
+					stuckN[hops] = 0;
+				}
+				strm = hw_->Read32(node + 6u);
 			}
 			if (hops < 12)
 				stuckStrm[hops] = strm;
@@ -833,6 +811,8 @@ void CDriverF3::KickGunlockWalker()
 			/* 待ち 0 から 1 を引くと桁が借りて bne がパーサを飛ばす。80xx は待ち 0。 */
 			if (w == 0 || w >= 0xF000u)
 				hw_->Write16(node + 4u, 1);
+			else if (w >= 0x400u)
+				hw_->Write16(node + 4u, 0x10);
 			node = nxt;
 			hops++;
 		}
@@ -1157,7 +1137,7 @@ void CDriverF3::TickSeqHost()
 		}
 		const unsigned head = hw_->Read16(0xD0F4u);
 		if (head >= 0xD000u && head < 0xEE00u) {
-			if (seqCalls_ <= 8u)
+			if (!tblOffs_ || seqCalls_ <= 8u)
 				ArmKeyOnGates();
 			ExpireHeadWaitOnce();
 			if (!expiredHead_) {

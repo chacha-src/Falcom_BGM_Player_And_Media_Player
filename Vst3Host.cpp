@@ -1141,6 +1141,41 @@ void Vst3MidiShort(Vst3Inst* v, DWORD msg, int sampleOffset)
 	v->pending.addEvent(e);
 }
 
+void Vst3DrainUntilQuiet(Vst3Inst* v, int maxBlocks)
+{
+	if (!v || !v->ok || !v->processor || maxBlocks <= 0) return;
+	float l[512], r[512];
+	int quiet = 0;
+	for (int b = 0; b < maxBlocks && quiet < 2; ++b) {
+		if (VstLiveShouldAbortProcess()) return;
+		Vst3Process(v, l, r, 512);
+		float peak = 0.f;
+		for (int i = 0; i < 512; ++i) {
+			float a = l[i]; if (a < 0.f) a = -a; if (a > peak) peak = a;
+			a = r[i]; if (a < 0.f) a = -a; if (a > peak) peak = a;
+		}
+		if (peak < 1.0e-4f) ++quiet;
+		else quiet = 0;
+	}
+}
+
+void Vst3ReleaseNotes(Vst3Inst* v)
+{
+	if (!v || !v->ok || !v->processor) return;
+	if (VstLiveShouldAbortProcess()) return;
+	int chs = v->midiInCh;
+	if (chs <= 1) chs = 1;
+	if (chs > 16) chs = 16;
+	float l[512], r[512];
+	for (int ch = 0; ch < chs; ++ch) {
+		for (int n = 0; n < 128; ++n)
+			Vst3MidiShort(v, (DWORD)((0x80 | ch) | (n << 8) | (64 << 16)), 0);
+		if (VstLiveShouldAbortProcess()) return;
+		Vst3Process(v, l, r, 512);
+	}
+	Vst3DrainUntilQuiet(v, 48);
+}
+
 void Vst3MidiSysex(Vst3Inst* v, const unsigned char* data, int bytes, int sampleOffset)
 {
 	using namespace Steinberg;

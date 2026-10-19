@@ -15,6 +15,11 @@ struct Vst3Inst; // 中身は Vst3Host.cpp。呼び出し側からは opaque。
 Vst3Inst* Vst3Open(const wchar_t* vst3PathOrDll); // バンドル or 中の DLL。失敗時 NULL
 void Vst3Close(Vst3Inst* inst);
 void Vst3MidiShort(Vst3Inst* inst, DWORD msg, int sampleOffset); // sampleOffset=ブロック先頭からのフレーム
+/* Note-off 0-127 only (no CC120/121 — those rewrite Groove Agent kit params).
+   Then process until the tail is quiet. Do not call while another thread is in Vst3Process. */
+void Vst3ReleaseNotes(Vst3Inst* inst);
+/* Render and discard until the plug-in is quiet. Drum one-shots ignore note-off. */
+void Vst3DrainUntilQuiet(Vst3Inst* inst, int maxBlocks);
 void Vst3MidiSysex(Vst3Inst* inst, const unsigned char* data, int bytes, int sampleOffset);
 void Vst3Process(Vst3Inst* inst, float* outL, float* outR, int frames);
 // プラグイン自身のエディタを parentHwnd に載せる。サイズを返すので窓を合わせる。

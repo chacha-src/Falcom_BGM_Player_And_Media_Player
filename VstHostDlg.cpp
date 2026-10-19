@@ -2926,17 +2926,34 @@ void CVstHostDlg::StopAudio()
 	if (m_audioStop) SetEvent(m_audioStop);
 	if (m_audioEvent) SetEvent(m_audioEvent);
 	if (m_audioThread) {
-		WaitForSingleObject(m_audioThread, 3000);
-		CloseHandle(m_audioThread);
-		m_audioThread = NULL;
+		/* process() may SendMessage the UI. Waiting here without pumping
+		   deadlocks that call, the thread stays up, and the exe remains. */
+		const DWORD t0 = GetTickCount();
+		for (;;) {
+			const DWORD w = MsgWaitForMultipleObjects(1, &m_audioThread, FALSE, 50, QS_SENDMESSAGE);
+			if (w == WAIT_OBJECT_0)
+				break;
+			MSG msg;
+			while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE | PM_QS_SENDMESSAGE))
+				DispatchMessage(&msg);
+			if (GetTickCount() - t0 > 8000)
+				break;
+		}
+		if (WaitForSingleObject(m_audioThread, 0) == WAIT_OBJECT_0) {
+			CloseHandle(m_audioThread);
+			m_audioThread = NULL;
+		}
 	}
-	if (m_waveOut) {
+	/* Still inside process(): do not close waveOut under it. */
+	if (!m_audioThread && m_waveOut) {
 		waveOutReset(m_waveOut);
 		waveOutClose(m_waveOut);
 		m_waveOut = NULL;
 	}
-	if (m_audioEvent) { CloseHandle(m_audioEvent); m_audioEvent = NULL; }
-	if (m_audioStop) { CloseHandle(m_audioStop); m_audioStop = NULL; }
+	if (!m_audioThread) {
+		if (m_audioEvent) { CloseHandle(m_audioEvent); m_audioEvent = NULL; }
+		if (m_audioStop) { CloseHandle(m_audioStop); m_audioStop = NULL; }
+	}
 	InterlockedExchange(&m_audioRunning, 0);
 	VstLiveProcessPause(0);
 	--m_audioHold;
@@ -3481,7 +3498,14 @@ void OpenVstHostModeless(CWnd* parent)
 {
 	/* Score/tone-map monitor holds waveOut; release so Host StartAudio can open it. */
 	VstLiveMonitorStop();
-	VstSongUseLiveBindsSet(0);
+	/* playy==0 is a song in progress: that thread owns process().
+	   After the song, drain VST3 voices before this window's audio thread
+	   starts, or the previous kit keeps sounding. */
+	extern int playy;
+	if (playy != 0) {
+		VstLiveReleaseSoundingNotes();
+		VstSongUseLiveBindsSet(0);
+	}
 	if (g_vstHostDlg && ::IsWindow(g_vstHostDlg->GetSafeHwnd())) {
 		g_vstHostDlg->ShowWindow(SW_SHOW);
 		g_vstHostDlg->SetForegroundWindow();

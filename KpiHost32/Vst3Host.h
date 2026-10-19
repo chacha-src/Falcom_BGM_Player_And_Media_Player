@@ -12,6 +12,8 @@ struct Vst3Inst;
 Vst3Inst* Vst3Open(const wchar_t* vst3PathOrDll);
 void Vst3Close(Vst3Inst* inst);
 void Vst3MidiShort(Vst3Inst* inst, DWORD msg, int sampleOffset);
+void Vst3ReleaseNotes(Vst3Inst* inst);
+void Vst3DrainUntilQuiet(Vst3Inst* inst, int maxBlocks);
 void Vst3MidiSysex(Vst3Inst* inst, const unsigned char* data, int bytes, int sampleOffset);
 void Vst3Process(Vst3Inst* inst, float* outL, float* outR, int frames);
 // プラグイン自身のエディタを parentHwnd に載せる。サイズを返すので窓を合わせる。

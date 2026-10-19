@@ -182,6 +182,9 @@ void VstLiveShutdown(void);
 // KpiHost32 専用: 固まったプラグインがパイプを掴んだままにしないよう effClose/FreeLibrary を飛ばす。
 void VstLiveAbandonHostPlugins(int on);
 void VstLiveAllNotesOff();
+/* VST3 voices survive the last process() of a song. Note-off and drain the
+   tail before the next song or the host UI calls process() again. */
+void VstLiveReleaseSoundingNotes(void);
 /* Same as song-open live reset: VST2 volume/CC, VST3 kit-safe notes-off. */
 void VstLiveResetPartsForPlay(void);
 /* Host UI only: GS Reset into live VST2 so SC-VA speaks without an SMF. */

@@ -11084,13 +11084,14 @@ void CHardPc98::RaiseFuncVect()
 		np2_reg_set(NP2_R_SS, s_naxIdleCs);
 		np2_reg_set(NP2_R_SP, 0x0800);
 	}
-	/* FPLAY の曲ロード（09A9→21A1）は今の SS のままレジスタを書く。OPN の
-	   1tick はチャネル分の待ちで 5ms を超え、その途中で再生コマンドを割らせると
-	   SP=125E の ISR スタックがエピローグ（1210）を潰して #UD になる。
-	   1tick が終わるまで待ってから撃つ。終わらない ISR は 50ms で諦める。 */
+	/* FPLAY の曲ロードは今の SS のままレジスタを書く。1tick の途中で再生コマンドを
+	   割らせると SP=125E がエピローグを潰す。MUSE2 は tick 入口でタイマを止め、
+	   糊の AL=11 が「ISR が [149F] を落とすまで」待つ。tick 中にその停止を割らせると
+	   再武装（0880）へ戻れず、タイマは 30h のまま固まる。どちらも tick が終わるまで待つ。
+	   終わらない ISR は 50ms で諦める。 */
 	{
 		static const char* kFplayWait[] = {
-			"fplay", "FPLAY", "cplay", "cplay98", "bplay", "BPLAY", NULL
+			"fplay", "cplay", "cplay98", "bplay", "muse", NULL
 		};
 		if (DosShellStarts(dosGe_, kFplayWait)) {
 			const uint64_t fplayEnd = cpuCycles_ + (uint64_t)cpuHz_ / 20ull;

@@ -4343,6 +4343,9 @@ void MmBindVstActiveSlot()
 
 static void CloseVstMidiSession()
 {
+	/* Last process() left VST3 voices running. Drain before the host UI
+	   or the next song calls process() again. */
+	VstLiveReleaseSoundingNotes();
 	VstPrefetchStopAll();
 	const int keepLive = g_cemuLiveKeepAcrossClose;
 	const int hadRemote = g_vstRemote64Slot[0] | g_vstRemote64Slot[1];
@@ -9305,11 +9308,20 @@ static int XfSoftOpenSlot(int slot, const CString& path, int openMode)
 				return 0;
 		}
 		if (liveBinds <= 0) {
-			int already = 0;
-			for (int p = 1; p <= 32; ++p)
-				if (VstLivePartIsLoaded(p)) ++already;
-			if (already > 0)
-				liveBinds = already;
+			if (savedata.midPlayPrefer == 2) {
+				int already = 0;
+				for (int p = 1; p <= 32; ++p)
+					if (VstLivePartIsLoaded(p)) ++already;
+				if (already > 0)
+					liveBinds = already;
+			} else {
+				/* VST mode is SC-VA / SGP2 only. A leftover host rack
+				   would keep playing as if host mode was still selected. */
+				for (int p = 1; p <= 32; ++p)
+					if (VstLivePartIsLoaded(p))
+						VstLiveUnloadPart(p);
+				VstSongUseLiveBindsSet(0);
+			}
 		}
 		VstLiveThruSet(0);
 		VstSongUseLiveBindsSet(liveBinds > 0 ? 1 : 0);
@@ -14848,11 +14860,18 @@ open_mode_vst_midi:
 			}
 		}
 		if (liveBinds <= 0) {
-			int already = 0;
-			for (int p = 1; p <= 32; ++p)
-				if (VstLivePartIsLoaded(p)) ++already;
-			if (already > 0)
-				liveBinds = already;
+			if (savedata.midPlayPrefer == 2) {
+				int already = 0;
+				for (int p = 1; p <= 32; ++p)
+					if (VstLivePartIsLoaded(p)) ++already;
+				if (already > 0)
+					liveBinds = already;
+			} else {
+				for (int p = 1; p <= 32; ++p)
+					if (VstLivePartIsLoaded(p))
+						VstLiveUnloadPart(p);
+				VstSongUseLiveBindsSet(0);
+			}
 		}
 		/* ファイル MIDI は DS が鳴らす。ホスト waveOut が同じ live を
 		   process すると全パートにノイズが乗る。thru 中でも止める。 */
