@@ -777,6 +777,9 @@ CPianoRoll::CPianoRoll(CWnd* pParent)
     memset(m_detPeakAmp, 0, sizeof(m_detPeakAmp));
     m_detPeakN = 0;
     memset(m_prevPicked, 0, sizeof(m_prevPicked));
+    memset(m_ownVoice, 0, sizeof(m_ownVoice));
+    m_melodyHz = 0.0f;
+    m_melodyMiss = 0;
     memset(m_prevPickHz, 0, sizeof(m_prevPickHz));
     memset(m_pickHz, 0, sizeof(m_pickHz));
     for (int i = 0; i < PIANO_METER_CH_MAX; ++i) {
@@ -1036,6 +1039,9 @@ void CPianoRoll::ResetPlaybackState()
         memset(m_detPeakAmp, 0, sizeof(m_detPeakAmp));
         m_detPeakN = 0;
         memset(m_prevPicked, 0, sizeof(m_prevPicked));
+    memset(m_ownVoice, 0, sizeof(m_ownVoice));
+    m_melodyHz = 0.0f;
+    m_melodyMiss = 0;
         memset(m_prevPickHz, 0, sizeof(m_prevPickHz));
         memset(m_pickHz, 0, sizeof(m_pickHz));
         m_tuneC = 0.0;
@@ -1739,6 +1745,9 @@ void CPianoRoll::UpdateNoteStates()
             m_percLevel = 0.0f;
             memcpy(m_prevOnsetStrengths, m_onsetStrengths, sizeof(m_onsetStrengths));
             memset(m_prevPicked, 0, sizeof(m_prevPicked));
+    memset(m_ownVoice, 0, sizeof(m_ownVoice));
+    m_melodyHz = 0.0f;
+    m_melodyMiss = 0;
             memset(m_prevPickHz, 0, sizeof(m_prevPickHz));
             memset(m_pickHz, 0, sizeof(m_pickHz));
         }
@@ -1796,6 +1805,11 @@ void CPianoRoll::UpdateNoteStates()
     LeaveCriticalSection(&m_cs);
     pp.prevF0Hz = prevHz;
     pp.outF0Hz = m_pickHz;
+    pp.onset = m_onsetStrengths;
+    pp.prevOnset = m_prevOnsetStrengths;
+    pp.ownVoice = m_ownVoice;
+    pp.melodyHz = &m_melodyHz;
+    pp.melodyMiss = &m_melodyMiss;
     PianoRoll108::PickNotes(blend, floorBlend, prevActive, picked, ownPow, pp);
 
 #ifdef _DEBUG
@@ -5108,6 +5122,11 @@ bool CPianoRoll::ProcessRingCapture()
 
     bool captured = false;
     InterlockedExchange(&m_captureBusy, 1);
+    // Fill 内の C++ デストラクタは、この __except では走らない。
+    // ロックを Fill の中に置くと例外で掴んだままになり、その後のクリックが UI を止める。
+    extern void PrPcmLockForPiano();
+    extern void PrPcmUnlockForPiano();
+    PrPcmLockForPiano();
     __try {
         if (m_feedEnabled &&
             InterlockedCompareExchange(&m_analysisEpoch, 0, 0) == epochAtStart) {
@@ -5119,6 +5138,7 @@ bool CPianoRoll::ProcessRingCapture()
     __except (EXCEPTION_EXECUTE_HANDLER) {
         captured = false;
     }
+    PrPcmUnlockForPiano();
     InterlockedExchange(&m_captureBusy, 0);
 
     bool ok = false;
@@ -6807,9 +6827,12 @@ void CPianoRoll::OnShowWindow(BOOL bShow, UINT nStatus)
 BOOL CPianoRoll::Create(UINT nIDTemplate, CWnd* pParentWnd)
 {
     // 描画・ティックをメイン UI(timerp/バナー)と分けるため、窓は専用 UI スレッドで作る。
+    // 親をメイン窓にすると、曲選択やクリックのたびに描画スレッドへ同期メッセージが入り落ちる。
     BOOL ok = FALSE;
     VizUi::Invoke(VIZ_UI_PIANO, [&]() {
-        ok = CCustomBlurDialogExBase::Create(nIDTemplate, pParentWnd);
+        CWnd* owner = VizUi::ThreadOwner(VIZ_UI_PIANO);
+        ok = CCustomBlurDialogExBase::Create(nIDTemplate, owner);
+        (void)pParentWnd;
     });
     return ok;
 }

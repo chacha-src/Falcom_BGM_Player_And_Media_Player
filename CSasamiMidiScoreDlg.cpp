@@ -1,6 +1,7 @@
 ﻿#include "stdafx.h"
 #include "ogg.h"
 #include "CSasamiMidiScoreDlg.h"
+#include "CSasamiSoftKey.h"
 #include "CSasamiNotePaletteDlg.h"
 #include "CSasamiLayoutPaletteDlg.h"
 #include "CSasamiSimpleInputDlg.h"
@@ -51,28 +52,6 @@ static void ScMidiSetVstLabel(ScStaffUi* u, int part0, const wchar_t* path)
 
 CSasamiMidiScoreDlg* CSasamiMidiScoreDlg::s_inst = NULL;
 
-static void StripPaintLine(ScStaffUi* u, int lane, int c0, int v0, int c1, int v1)
-{
-	if (!u || lane < 0 || lane >= SC_STRIP_LANES_MAX) return;
-	const int colMax = ScStaffStripColCount(u);
-	if (c0 > c1) { int t = c0; c0 = c1; c1 = t; t = v0; v0 = v1; v1 = t; }
-	if (c0 < 0) c0 = 0;
-	if (c1 >= colMax) c1 = colMax - 1;
-	if (c0 == c1) {
-		int v = v0;
-		if (v < 0) v = 0;
-		if (v > 127) v = 127;
-		u->strip[lane][c0] = (uint8_t)v;
-		return;
-	}
-	for (int c = c0; c <= c1; c++) {
-		int v = v0 + (v1 - v0) * (c - c0) / (c1 - c0);
-		if (v < 0) v = 0;
-		if (v > 127) v = 127;
-		u->strip[lane][c] = (uint8_t)v;
-	}
-}
-
 IMPLEMENT_DYNAMIC(CSasamiMidiScoreDlg, CCustomBlurDialogExBase)
 
 CSasamiMidiScoreDlg::CSasamiMidiScoreDlg(CWnd* pParent)
@@ -114,28 +93,16 @@ void CSasamiMidiScoreDlg::OpenOwned(CWnd* owner)
 	s_inst = new CSasamiMidiScoreDlg(owner);
 	CWnd* parent = AfxGetMainWnd();
 	if (!parent) parent = owner;
-	if (!s_inst->Create(IDD_SASAMI_MIDI_SCORE, parent)) {
+	if (!	s_inst->Create(IDD_SASAMI_MIDI_SCORE, parent)) {
 		delete s_inst;
 		s_inst = NULL;
 		AfxMessageBox(L"MIDI Score: Create() failed (check resource IDD_SASAMI_MIDI_SCORE).", MB_ICONERROR);
 		return;
 	}
-	/* Session/text compile after Create — keep large work off the Create path. */
-	s_inst->PullDocFromText();
-	if (s_inst->m_doc.evCount <= 0) {
-		ScMidiDoc* tmp = (ScMidiDoc*)HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(ScMidiDoc));
-		if (tmp) {
-			if (ScSessionLoadLastMidi(tmp, NULL, 0))
-				s_inst->LoadFromDoc(*tmp);
-			ScMidiDocClear(tmp);
-			HeapFree(GetProcessHeap(), 0, tmp);
-		}
-	}
-	s_inst->SyncMeterFromDoc();
-	s_inst->RefreshProgLabels();
-	ScStaffUpdateContentExtent(&s_inst->m_ui, s_inst->m_doc.ev, s_inst->m_doc.evCount);
-	s_inst->InvalidateRect(s_inst->m_bodyRc, FALSE);
+	/* Paint the empty chrome first. Session compile and insert-FX load run after. */
 	CCC_PresentOwnedHelp(s_inst, parent);
+	s_inst->UpdateWindow();
+	s_inst->PostMessage(WM_APP + 63, 0, 0);
 }
 
 void CSasamiMidiScoreDlg::DoDataExchange(CDataExchange* pDX)
@@ -224,6 +191,7 @@ BEGIN_MESSAGE_MAP(CSasamiMidiScoreDlg, CCustomBlurDialogExBase)
 	ON_BN_CLICKED(IDC_SASAMI_MIDI_CHORD, OnBnClickedChord)
 	ON_BN_CLICKED(IDC_SASAMI_MIDI_PATT, OnBnClickedPatt)
 	ON_BN_CLICKED(IDC_SASAMI_MIDI_ROLL, OnBnClickedRoll)
+	ON_BN_CLICKED(0x5F21, OnBnClickedKey)
 	ON_CBN_SELCHANGE(IDC_SASAMI_MIDI_CH, OnCbnSelchangeCh)
 	ON_CBN_SELCHANGE(IDC_SASAMI_MIDI_INDEV, OnCbnMidiIn)
 	ON_CBN_SELCHANGE(IDC_SASAMI_MIDI_INCH, OnCbnMidiIn)
@@ -246,6 +214,7 @@ BEGIN_MESSAGE_MAP(CSasamiMidiScoreDlg, CCustomBlurDialogExBase)
 	ON_MESSAGE(WM_SASAMI_EXC_RPN_CHANGED, OnExcRpnChanged)
 	ON_MESSAGE(WM_SASAMI_INSERT_FX_CHANGED, OnInsertFxChanged)
 	ON_MESSAGE(WM_APP + 61, OnDeferredInit)
+	ON_MESSAGE(WM_APP + 63, OnDeferredSession)
 	ON_MESSAGE(WM_APP + 62, OnDeferredPushText)
 	ON_MESSAGE(WM_APP + 7204, OnDeferredOpenVst)
 	ON_MESSAGE(WM_APP + 7206, OnDeferredProgLabels)
@@ -335,6 +304,9 @@ BOOL CSasamiMidiScoreDlg::OnInitDialog()
 	if (m_btnChord.GetSafeHwnd()) flatBtn(m_btnChord);
 	if (m_btnPatt.GetSafeHwnd()) flatBtn(m_btnPatt);
 	if (m_btnRoll.GetSafeHwnd()) flatBtn(m_btnRoll);
+	if (!m_btnKey.GetSafeHwnd())
+		m_btnKey.Create(L"鍵盤", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, CRect(0, 0, 64, 28), this, 0x5F21);
+	flatBtn(m_btnKey);
 	/* Score tool icons (embedded res\\ui_score / ui_ctl / ui_icons). */
 	if (m_btnOpen.GetSafeHwnd()) m_btnOpen.SetIcon(IDI_UI_FOLDER);
 	if (m_btnSave.GetSafeHwnd()) m_btnSave.SetIcon(IDI_UI_FILE);
@@ -409,8 +381,6 @@ BOOL CSasamiMidiScoreDlg::OnInitDialog()
 	RefreshPartEnabled();
 	SetupTooltips();
 	UpdateHelpBar();
-	/* Defer VST sync + ednotify poll: sync on init can trip unloaded engine CS. */
-	PostMessage(WM_APP + 61, 0, 0);
 	return TRUE;
 }
 
@@ -492,7 +462,7 @@ void CSasamiMidiScoreDlg::SetupTooltips()
 		L"레인2 종류", L"车道2类型", L"نوع الممر 2", L"Тип дорожки 2", L"Spur 2-Art", L"Tipo faixa 2", L"Baan 2-soort", L"Rodzaj toru 2", L"Şerit 2 türü"));
 	tip(m_stripKind2, LL14(L"レーン3の種類: Exp/Vol/Pitch/Gate/Pan", L"Lane 3 kind: Exp/Vol/Pitch/Gate/Pan", L"Type piste 3", L"Tipo corsia 3", L"Tipo pista 3",
 		L"레인3 종류", L"车道3类型", L"نوع الممر 3", L"Тип дорожки 3", L"Spur 3-Art", L"Tipo faixa 3", L"Baan 3-soort", L"Rodzaj toru 3", L"Şerit 3 türü"));
-	tip(m_stripDraw, LL14(L"CCレーン描画: 鉛筆/直線/曲線（テンポ帯・パートCC・下ストリップ）", L"CC lane draw: Pencil/Line/Curve (tempo band, part CC, bottom strip)", L"Dessin CC", L"Disegno CC", L"Dibujo CC",
+	tip(m_stripDraw, LL14(L"CCレーン描画: 自由/直線/曲線/サイン/水平/ランダム/階段/のこぎり", L"CC lane draw: Free/Straight/Curve/Sine/Flat/Random/Step/Saw", L"Dessin CC", L"Disegno CC", L"Dibujo CC",
 		L"스트립 그리기: 연필/직선/곡선", L"条带绘制: 铅笔/直线/曲线", L"رسم الشريط: قلم/خط/منحنى", L"Рисование полосы: карандаш/линия/кривая", L"Strip-Zeichnung: Stift/Linie/Kurve", L"Desenho faixa: Lápis/Linha/Curva", L"Strooktekenen: Potlood/Lijn/Kromme", L"Rysowanie pasa: Ołówek/Linia/Krzywa", L"Şerit çizimi: Kalem/Çizgi/Eğri"));
 	tip(m_stripLanes, LL14(L"CCレーン数: なし / ×1 / ×2 / ×3（パート別）", L"CC lane count: none / ×1 / ×2 / ×3 (per part)", L"Nb pistes CC: aucune / ×1–3", L"N. corsie CC: nessuna / ×1–3", L"Nº pistas CC: ninguna / ×1–3",
 		L"CC 레인 수: 없음 / ×1–3 (파트별)", L"CC车道数: 无 / ×1–3（按声部）", L"عدد ممرات CC: بلا / ×1–3", L"Число CC-дорожек: нет / ×1–3", L"CC-Spuren: keine / ×1–3", L"Nº faixas CC: nenhuma / ×1–3", L"CC-banen: geen / ×1–3", L"Liczba torów CC: brak / ×1–3", L"CC şerit sayısı: yok / ×1–3"));
@@ -557,6 +527,7 @@ void CSasamiMidiScoreDlg::LayoutChrome()
 	if (m_btnPal.GetSafeHwnd()) m_btnPal.ShowWindow(SW_HIDE);
 	if (m_ch.GetSafeHwnd()) { layoutCombo(m_ch, x, y, 104, btnH + 4); x += 112; }
 	place(m_btnHelp, 48);
+	place(m_btnKey, 64);
 	y += btnH + 6;
 	x = pad;
 	const int propY = y;
@@ -568,7 +539,7 @@ void CSasamiMidiScoreDlg::LayoutChrome()
 	x = pad;
 	layoutCombo(m_stripLanes, x, y, 120, cbH, 140); x += 126;
 	layoutCombo(m_stripStep, x, y, 88, cbH, 120); x += 94;
-	layoutCombo(m_stripDraw, x, y, 108, cbH, 140); x += 114;
+	layoutCombo(m_stripDraw, x, y, 132, cbH, 168); x += 138;
 	layoutCombo(m_pasteMode, x, y, 100, cbH, 120);
 	y += cbH + 6;
 	if (m_ui.stripCount >= 1) {
@@ -753,15 +724,29 @@ void CSasamiMidiScoreDlg::UpdateHelpBar()
 	m_helpBar.SetWindowText(buf);
 }
 
+static int StripComboKind(const CComboBox& cb)
+{
+	const int i = cb.GetCurSel();
+	if (i < 0) return -1;
+	return (int)cb.GetItemData(i);
+}
+
 void CSasamiMidiScoreDlg::SyncStripCombos()
 {
-	auto fillKind = [](CCustomComboBox& cb, int sel) {
+	const int part1 = m_curCh + 1;
+	auto fillKind = [&](CCustomComboBox& cb, int sel) {
 		cb.ResetContent();
-		for (int k = 0; k < SC_STRIP_KIND_COUNT; k++)
-			cb.AddString(ScStaffStripKindName(k));
-		if (sel < 0 || sel >= SC_STRIP_KIND_COUNT) sel = 0;
-		cb.SetCurSel(sel);
-		cb.SetDroppedWidth(260);
+		const int n = ScStaffStripKindComboCount(part1);
+		int pick = 0;
+		for (int i = 0; i < n; i++) {
+			wchar_t name[96];
+			const int kind = ScStaffStripKindComboItem(part1, i, name, 96);
+			const int idx = cb.AddString(name);
+			if (idx >= 0) cb.SetItemData(idx, (DWORD_PTR)kind);
+			if (kind == sel) pick = idx >= 0 ? idx : 0;
+		}
+		cb.SetCurSel(pick);
+		cb.SetDroppedWidth(280);
 	};
 	auto fillHgt = [](CCustomComboBox& cb, int sel) {
 		cb.ResetContent();
@@ -778,12 +763,12 @@ void CSasamiMidiScoreDlg::SyncStripCombos()
 	fillHgt(m_stripHgt1, m_ui.stripLaneHgt[1]);
 	fillHgt(m_stripHgt2, m_ui.stripLaneHgt[2]);
 	m_stripDraw.ResetContent();
-	m_stripDraw.AddString(ScStaffStripDrawModeName(SC_STRIP_DRAW_PENCIL));
-	m_stripDraw.AddString(ScStaffStripDrawModeName(SC_STRIP_DRAW_LINE));
-	m_stripDraw.AddString(ScStaffStripDrawModeName(SC_STRIP_DRAW_CURVE));
-	if (m_ui.stripDraw < 0 || m_ui.stripDraw > 2) m_ui.stripDraw = SC_STRIP_DRAW_PENCIL;
+	for (int d = 0; d < SC_STRIP_DRAW_COUNT; d++)
+		m_stripDraw.AddString(ScStaffStripDrawModeName(d));
+	if (m_ui.stripDraw < 0 || m_ui.stripDraw >= SC_STRIP_DRAW_COUNT)
+		m_ui.stripDraw = SC_STRIP_DRAW_PENCIL;
 	m_stripDraw.SetCurSel(m_ui.stripDraw);
-	m_stripDraw.SetDroppedWidth(120);
+	m_stripDraw.SetDroppedWidth(160);
 	m_stripLanes.ResetContent();
 	for (int n = 0; n <= SC_STRIP_LANES_MAX; n++)
 		m_stripLanes.AddString(ScStaffStripLanesLabel(n));
@@ -807,9 +792,9 @@ void CSasamiMidiScoreDlg::SyncStripCombos()
 
 void CSasamiMidiScoreDlg::OnCbnStrip()
 {
-	int k0 = m_stripKind0.GetCurSel();
-	int k1 = m_stripKind1.GetCurSel();
-	int k2 = m_stripKind2.GetCurSel();
+	int k0 = StripComboKind(m_stripKind0);
+	int k1 = StripComboKind(m_stripKind1);
+	int k2 = StripComboKind(m_stripKind2);
 	int h0 = m_stripHgt0.GetCurSel();
 	int h1 = m_stripHgt1.GetCurSel();
 	int h2 = m_stripHgt2.GetCurSel();
@@ -1463,6 +1448,33 @@ void CSasamiMidiScoreDlg::SyncFxBindsToLive()
 	}
 }
 
+LRESULT CSasamiMidiScoreDlg::OnDeferredSession(WPARAM, LPARAM)
+{
+	m_status.SetWindowText(LL14(L"前回のセッションを読み込んでいます…", L"Loading the last session…",
+		L"Chargement de la session…", L"Caricamento sessione…", L"Cargando la sesión…",
+		L"마지막 세션 읽는 중…", L"正在读取上次会话…", L"جارٍ تحميل الجلسة…", L"Загрузка сессии…",
+		L"Letzte Sitzung wird geladen…", L"A carregar a sessão…", L"Laatste sessie laden…",
+		L"Wczytywanie sesji…", L"Son oturum yükleniyor…"));
+	PullDocFromText();
+	if (m_doc.evCount <= 0) {
+		ScMidiDoc* tmp = (ScMidiDoc*)HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(ScMidiDoc));
+		if (tmp) {
+			if (ScSessionLoadLastMidi(tmp, NULL, 0))
+				LoadFromDoc(*tmp, 0);
+			ScMidiDocClear(tmp);
+			HeapFree(GetProcessHeap(), 0, tmp);
+		}
+	}
+	SyncMeterFromDoc();
+	RefreshProgLabels();
+	ScStaffUpdateContentExtent(&m_ui, m_doc.ev, m_doc.evCount);
+	if (m_bodyRc.Width() > 0)
+		InvalidateRect(m_bodyRc, FALSE);
+	UpdateWindow();
+	PostMessage(WM_APP + 61, 0, 0);
+	return 0;
+}
+
 LRESULT CSasamiMidiScoreDlg::OnDeferredInit(WPARAM, LPARAM)
 {
 	__try {
@@ -1476,15 +1488,8 @@ LRESULT CSasamiMidiScoreDlg::OnDeferredInit(WPARAM, LPARAM)
 	/* Start ednotify poll only after the window is fully up (not during Create). */
 	VstLiveEditorSetNotifyHwnd(m_hWnd);
 	SetTimer(9122, 250, NULL);
-	/* Note + layout palettes always visible while score is open. */
-	{
-		CRect wr; GetWindowRect(&wr);
-		CSasamiNotePaletteDlg::OpenNear(this, CPoint(wr.left + 40, wr.top + 100));
-	}
-	{
-		CRect wr; GetWindowRect(&wr);
-		CSasamiLayoutPaletteDlg::OpenNear(this, CPoint(wr.left + 420, wr.top + 100));
-	}
+	/* Palettes after the staff has painted — opening them inline blocked the first show. */
+	SetTimer(9125, 1, NULL);
 	return 0;
 }
 
@@ -1838,6 +1843,7 @@ void CSasamiMidiScoreDlg::OnLButtonDown(UINT nFlags, CPoint point)
 		m_ui.stripLineAnchorVal = val;
 		m_ui.stripLineLane = lane;
 		m_ui.strip[lane][col] = (uint8_t)val;
+		ScStaffLiveTouchStrip(m_curCh, m_ui.stripKind[lane], val);
 		m_ui.dragEv = -2000 - lane;
 		SetCapture();
 		InvalidateRect(m_stripRc, FALSE);
@@ -2026,12 +2032,10 @@ void CSasamiMidiScoreDlg::OnMouseMove(UINT nFlags, CPoint point)
 		int dragLane = -(m_ui.dragEv + 2000);
 		int lane = 0, col = 0, val = 0;
 		if (ScStaffHitStrip(m_stripRc, &m_ui, point, &lane, &col, &val)) {
-			if (m_ui.stripDraw == SC_STRIP_DRAW_LINE && m_ui.stripLineAnchorCol >= 0) {
-				StripPaintLine(&m_ui, dragLane,
-					m_ui.stripLineAnchorCol, m_ui.stripLineAnchorVal, col, val);
-			} else {
-				m_ui.strip[dragLane][col] = (uint8_t)val;
-			}
+			if (dragLane < 0 || dragLane >= SC_STRIP_LANES_MAX) dragLane = lane;
+			ScStaffBandDragStroke(&m_ui, m_ui.strip[dragLane],
+				m_ui.stripLineAnchorCol, m_ui.stripLineAnchorVal, col, val, 0);
+			ScStaffLiveTouchStrip(m_curCh, m_ui.stripKind[dragLane], val);
 			InvalidateRect(m_stripRc, FALSE);
 		}
 	} else if (m_ui.dragMode == 2 && (m_ui.nSel > 0 || m_ui.selEv >= 0) &&
@@ -2854,7 +2858,7 @@ void CSasamiMidiScoreDlg::SyncMeterFromDoc()
 	ScStaffSetMeter(&m_ui, m_doc.numer > 0 ? m_doc.numer : 4, m_doc.denom > 0 ? m_doc.denom : 4);
 }
 
-void CSasamiMidiScoreDlg::LoadFromDoc(const ScMidiDoc& src)
+void CSasamiMidiScoreDlg::LoadFromDoc(const ScMidiDoc& src, int applyFx)
 {
 	/* Deep-copy bind heaps — operator= would alias malloc'd state blobs. */
 	ScMidiVstBindFreeStates(&m_doc.bind);
@@ -2879,7 +2883,8 @@ void CSasamiMidiScoreDlg::LoadFromDoc(const ScMidiDoc& src)
 					src.fxBind.fxState[i][sl], src.fxBind.fxStateLen[i][sl]);
 		}
 	}
-	SyncFxBindsToLive();
+	if (applyFx)
+		SyncFxBindsToLive();
 	SyncMeterFromDoc();
 	ScStaffApplyDocClef(&m_ui, m_doc.ev, m_doc.evCount);
 	RefreshProgLabels();
@@ -3219,6 +3224,13 @@ void CSasamiMidiScoreDlg::OnTimer(UINT_PTR nIDEvent)
 		PushDocToText();
 		return;
 	}
+	if (nIDEvent == 9125) {
+		KillTimer(9125);
+		CRect wr; GetWindowRect(&wr);
+		CSasamiNotePaletteDlg::OpenNear(this, CPoint(wr.left + 40, wr.top + 100));
+		CSasamiLayoutPaletteDlg::OpenNear(this, CPoint(wr.left + 420, wr.top + 100));
+		return;
+	}
 	if (nIDEvent == 9121) {
 		KillTimer(9121);
 		const int part = m_pendingEdClosePart;
@@ -3314,6 +3326,7 @@ LRESULT CSasamiMidiScoreDlg::OnExcRpnChanged(WPARAM, LPARAM)
 LRESULT CSasamiMidiScoreDlg::OnInsertFxChanged(WPARAM, LPARAM)
 {
 	SyncFxBindsToLive();
+	SyncStripCombos();
 	PushDocToText();
 	PersistSession();
 	m_status.SetWindowText(LL14(L"インサートFXを更新しました", L"Insert FX updated", L"Insert FX mis à jour", L"Insert FX aggiornato", L"Insert FX actualizado", L"인서트 FX 업데이트", L"插入FX已更新", L"تم تحديث Insert FX", L"Insert FX обновлён", L"Insert-FX aktualisiert", L"Insert FX atualizado", L"Insert-FX bijgewerkt", L"Zaktualizowano Insert FX", L"Insert FX güncellendi"));
@@ -4754,6 +4767,11 @@ void CSasamiMidiScoreDlg::OnBnClickedPatt()
 		}
 		InvalidateRect(m_bodyRc, FALSE);
 	}
+}
+
+void CSasamiMidiScoreDlg::OnBnClickedKey()
+{
+	ScSoftKeyOpen(this);
 }
 
 void CSasamiMidiScoreDlg::OnBnClickedRoll()

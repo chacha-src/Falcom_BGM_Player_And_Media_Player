@@ -28,7 +28,7 @@ public:
 	void RefreshBoundRoll();
 	void HistPush(); /* public for piano-roll / shared undo */
 	void SetPartDrum(int tr, int drum); /* GS/XG rhythm part (any MIDI ch) */
-	void LoadFromDoc(const ScMidiDoc& src);
+	void LoadFromDoc(const ScMidiDoc& src, int applyFx = 1);
 	void SyncMeterFromDoc();
 	void PushDocToText();
 	void PullDocFromText();
@@ -83,6 +83,7 @@ protected:
 	afx_msg void OnBnClickedChord();
 	afx_msg void OnBnClickedPatt();
 	afx_msg void OnBnClickedRoll();
+	afx_msg void OnBnClickedKey();
 	afx_msg void OnCbnSelchangeCh();
 	afx_msg void OnCbnStrip();
 	afx_msg void OnCbnMidiIn();
@@ -96,6 +97,7 @@ protected:
 	afx_msg LRESULT OnExcRpnChanged(WPARAM w, LPARAM l);
 	afx_msg LRESULT OnInsertFxChanged(WPARAM w, LPARAM l);
 	afx_msg LRESULT OnDeferredInit(WPARAM w, LPARAM l);
+	afx_msg LRESULT OnDeferredSession(WPARAM w, LPARAM l);
 	afx_msg LRESULT OnDeferredPushText(WPARAM w, LPARAM l);
 	afx_msg LRESULT OnDeferredOpenVst(WPARAM w, LPARAM l);
 	afx_msg LRESULT OnDeferredProgLabels(WPARAM w, LPARAM l);
@@ -137,7 +139,7 @@ protected:
 	CCustomStandardButton m_btnOpen, m_btnSave, m_btnNew, m_btnPlay, m_btnHelp, m_btnTempo, m_btnExport;
 	CCustomStandardButton m_btnPencil, m_btnErase, m_btnSel, m_btnPal, m_btnPropUpd;
 	CCustomStandardButton m_btnMark, m_btnLoopA, m_btnLoopB, m_btnLoopClr, m_btnShowAll, m_btnText;
-	CCustomStandardButton m_btnFx, m_btnArr, m_btnLayout, m_btnChord, m_btnPatt, m_btnRoll;
+	CCustomStandardButton m_btnFx, m_btnArr, m_btnLayout, m_btnChord, m_btnPatt, m_btnRoll, m_btnKey;
 	CCustomComboBox m_ch, m_stripKind0, m_stripKind1, m_stripKind2, m_stripHgt0, m_stripHgt1, m_stripHgt2, m_stripDraw, m_stripLanes, m_stripStep;
 	CCustomComboBox m_midiInDev, m_midiInCh, m_midiInMode, m_follow;
 	CCustomComboBox m_pasteMode;

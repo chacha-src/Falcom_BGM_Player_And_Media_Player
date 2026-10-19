@@ -1306,8 +1306,104 @@ static int ScStaffStripKindCc(int kind)
 	case SC_STRIP_EXPR: return 11;
 	case SC_STRIP_VOL: return 7;
 	case SC_STRIP_PAN: return 10;
+	case SC_STRIP_DATA: return 6;
+	case SC_STRIP_PORTA_CTL: return 84;
 	default: return -1;
 	}
+}
+
+int ScStaffStripKindIsFx(int kind)
+{
+	return (kind >= SC_STRIP_FX_BASE &&
+		kind < SC_STRIP_FX_BASE + 2 * SC_STRIP_FX_PARAMS) ? 1 : 0;
+}
+
+int ScStaffStripFxKind(int slot0to1, int paramIndex)
+{
+	if (slot0to1 < 0) slot0to1 = 0;
+	if (slot0to1 > 1) slot0to1 = 1;
+	if (paramIndex < 0) paramIndex = 0;
+	if (paramIndex >= SC_STRIP_FX_PARAMS) paramIndex = SC_STRIP_FX_PARAMS - 1;
+	return SC_STRIP_FX_BASE + slot0to1 * SC_STRIP_FX_PARAMS + paramIndex;
+}
+
+static int ScStaffStripFxDecode(int kind, int* slot, int* param)
+{
+	if (!ScStaffStripKindIsFx(kind)) return 0;
+	const int rel = kind - SC_STRIP_FX_BASE;
+	if (slot) *slot = rel / SC_STRIP_FX_PARAMS;
+	if (param) *param = rel % SC_STRIP_FX_PARAMS;
+	return 1;
+}
+
+void ScStaffLiveTouchStrip(int part0, int kind, int value0to127)
+{
+	if (part0 < 0 || part0 >= 32) return;
+	if (value0to127 < 0) value0to127 = 0;
+	if (value0to127 > 127) value0to127 = 127;
+	const int ch = part0 & 15;
+	const int port = part0 / 16;
+	if (kind == SC_STRIP_CHAT) {
+		VstLiveMidiShort(port, (DWORD)(0xD0 | ch) | ((DWORD)value0to127 << 8));
+		return;
+	}
+	if (kind == SC_STRIP_POLYAT) {
+		/* Lane has pressure only; aim it at C4 so a kit/melodic plug still answers. */
+		VstLiveMidiShort(port, (DWORD)(0xA0 | ch) | (60u << 8) | ((DWORD)value0to127 << 16));
+		return;
+	}
+	int slot = 0, param = 0;
+	if (!ScStaffStripFxDecode(kind, &slot, &param)) return;
+	if (!VstLiveFxIsLoaded(part0 + 1, slot)) return;
+	VstLiveFxSetParam(part0 + 1, slot, param, (float)value0to127 / 127.0f);
+}
+
+int ScStaffStripKindComboCount(int part1to32)
+{
+	int n = SC_STRIP_KIND_COUNT;
+	if (part1to32 < 1 || part1to32 > 32) return n;
+	for (int slot = 0; slot < 2; ++slot) {
+		if (!VstLiveFxIsLoaded(part1to32, slot)) continue;
+		int pc = VstLiveFxParamCount(part1to32, slot);
+		if (pc < 0) pc = 0;
+		if (pc > SC_STRIP_FX_PARAMS) pc = SC_STRIP_FX_PARAMS;
+		n += pc;
+	}
+	return n;
+}
+
+int ScStaffStripKindComboItem(int part1to32, int index, wchar_t* name, int nameCch)
+{
+	if (name && nameCch > 0) name[0] = 0;
+	if (index < 0) index = 0;
+	if (index < SC_STRIP_KIND_COUNT) {
+		if (name && nameCch > 0)
+			wcsncpy_s(name, nameCch, ScStaffStripKindName(index), _TRUNCATE);
+		return index;
+	}
+	int walk = SC_STRIP_KIND_COUNT;
+	if (part1to32 >= 1 && part1to32 <= 32) {
+		for (int slot = 0; slot < 2; ++slot) {
+			if (!VstLiveFxIsLoaded(part1to32, slot)) continue;
+			int pc = VstLiveFxParamCount(part1to32, slot);
+			if (pc < 0) pc = 0;
+			if (pc > SC_STRIP_FX_PARAMS) pc = SC_STRIP_FX_PARAMS;
+			if (index < walk + pc) {
+				const int param = index - walk;
+				wchar_t pn[64];
+				pn[0] = 0;
+				if (!VstLiveFxParamName(part1to32, slot, param, pn, 64) || !pn[0])
+					_snwprintf_s(pn, _TRUNCATE, L"Param %d", param + 1);
+				if (name && nameCch > 0)
+					_snwprintf_s(name, nameCch, _TRUNCATE, L"FX%d  %s", slot + 1, pn);
+				return ScStaffStripFxKind(slot, param);
+			}
+			walk += pc;
+		}
+	}
+	if (name && nameCch > 0)
+		wcsncpy_s(name, nameCch, ScStaffStripKindName(SC_STRIP_EXPR), _TRUNCATE);
+	return SC_STRIP_EXPR;
 }
 
 int ScStaffStripKindFromCc(int cc)
@@ -1317,8 +1413,10 @@ int ScStaffStripKindFromCc(int cc)
 	case 5: return SC_STRIP_PORTA_T;
 	case 7: return SC_STRIP_VOL;
 	case 10: return SC_STRIP_PAN;
+	case 6: return SC_STRIP_DATA;
 	case 11: return SC_STRIP_EXPR;
 	case 64: return SC_STRIP_HOLD;
+	case 84: return SC_STRIP_PORTA_CTL;
 	case 65: return SC_STRIP_PORTA;
 	case 66: return SC_STRIP_SOST;
 	case 67: return SC_STRIP_SOFT;
@@ -1380,7 +1478,8 @@ void ScStaffLoadStripPrefsFromSave(ScStaffUi* u)
 		u->partStripCount[p] = c;
 		for (int L = 0; L < SC_STRIP_LANES_MAX; L++) {
 			int k = (int)savedata.sasamiPartStripKind[p][L];
-			if (k < 0 || k >= SC_STRIP_KIND_COUNT) k = (L == 0) ? SC_STRIP_EXPR : SC_STRIP_PAN;
+			if (k < 0 || (k >= SC_STRIP_KIND_COUNT && !ScStaffStripKindIsFx(k)))
+				k = (L == 0) ? SC_STRIP_EXPR : SC_STRIP_PAN;
 			u->partStripKind[p][L] = k;
 			int h = (int)savedata.sasamiPartStripHgt[p][L];
 			if (h < 0 || h >= SC_STRIP_HGT_COUNT) h = SC_STRIP_HGT_WIDE;
@@ -1399,7 +1498,7 @@ void ScStaffSaveStripPrefsToSave(const ScStaffUi* u)
 		savedata.sasamiPartStripCount[p] = (unsigned char)c;
 		for (int L = 0; L < SC_STRIP_LANES_MAX; L++) {
 			int k = u->partStripKind[p][L];
-			if (k < 0 || k >= SC_STRIP_KIND_COUNT) k = SC_STRIP_EXPR;
+			if (k < 0 || (k >= SC_STRIP_KIND_COUNT && !ScStaffStripKindIsFx(k))) k = SC_STRIP_EXPR;
 			savedata.sasamiPartStripKind[p][L] = (unsigned char)k;
 			int h = u->partStripLaneHgt[p][L];
 			if (h < 0 || h >= SC_STRIP_HGT_COUNT) h = SC_STRIP_HGT_WIDE;
@@ -1481,64 +1580,82 @@ const wchar_t* ScStaffStripKindName(int kind)
 {
 	switch (kind) {
 	case SC_STRIP_EXPR:
-		return LL14(L"Exp(CC11)", L"Exp (CC11)", L"Exp (CC11)", L"Esp (CC11)", L"Exp (CC11)",
+		return LL14(L"Expression(11)", L"Expression(11)", L"Exp (CC11)", L"Esp (CC11)", L"Exp (CC11)",
 			L"표정(CC11)", L"表情(CC11)", L"تعبير (CC11)", L"Экспр. (CC11)", L"Exp (CC11)",
 			L"Exp (CC11)", L"Exp (CC11)", L"Exp (CC11)", L"Exp (CC11)");
 	case SC_STRIP_VOL:
-		return LL14(L"Vol(CC7/TL)", L"Vol (CC7/TL)", L"Vol (CC7/TL)", L"Vol (CC7/TL)", L"Vol (CC7/TL)",
+		return LL14(L"Volume(7)", L"Volume(7)", L"Vol (CC7/TL)", L"Vol (CC7/TL)", L"Vol (CC7/TL)",
 			L"볼륨(CC7/TL)", L"音量(CC7/TL)", L"صوت (CC7/TL)", L"Громк. (CC7/TL)", L"Vol (CC7/TL)",
 			L"Vol (CC7/TL)", L"Vol (CC7/TL)", L"Vol (CC7/TL)", L"Vol (CC7/TL)");
 	case SC_STRIP_PITCH:
-		return LL14(L"ピッチ", L"Pitch bend", L"Hauteur", L"Pitch", L"Tono",
+		return LL14(L"Pitch Bend", L"Pitch Bend", L"Hauteur", L"Pitch", L"Tono",
 			L"피치", L"音高", L"طبقة", L"Высота", L"Pitch", L"Tom", L"Toonhoogte", L"Wysokość", L"Perde");
 	case SC_STRIP_GATE:
-		return LL14(L"Gate%", L"Gate %", L"Gate %", L"Gate %", L"Gate %",
+		return LL14(L"Gate Time", L"Gate Time", L"Gate %", L"Gate %", L"Gate %",
 			L"게이트%", L"门控%", L"بوابة%", L"Gate %", L"Gate %", L"Gate %", L"Gate %", L"Gate %", L"Gate %");
 	case SC_STRIP_PAN:
-		return LL14(L"Pan(CC10)", L"Pan (CC10)", L"Pan (CC10)", L"Pan (CC10)", L"Pan (CC10)",
+		return LL14(L"Panpot(10)", L"Panpot(10)", L"Pan (CC10)", L"Pan (CC10)", L"Pan (CC10)",
 			L"팬(CC10)", L"声像(CC10)", L"بان (CC10)", L"Пан (CC10)", L"Pan (CC10)",
 			L"Pan (CC10)", L"Pan (CC10)", L"Pan (CC10)", L"Pan (CC10)");
 	case SC_STRIP_MOD:
-		return LL14(L"Mod(CC1)", L"Mod (CC1)", L"Mod (CC1)", L"Mod (CC1)", L"Mod (CC1)",
+		return LL14(L"Modulation(1)", L"Modulation(1)", L"Mod (CC1)", L"Mod (CC1)", L"Mod (CC1)",
 			L"모듈레이션(CC1)", L"调制(CC1)", L"تعديل (CC1)", L"Мод. (CC1)", L"Mod (CC1)",
 			L"Mod (CC1)", L"Mod (CC1)", L"Mod (CC1)", L"Mod (CC1)");
 	case SC_STRIP_PORTA_T:
-		return LL14(L"Port.T(CC5)", L"Port.time (CC5)", L"Port.t (CC5)", L"Port.t (CC5)", L"Port.t (CC5)",
+		return LL14(L"Portamento Time(5)", L"Portamento Time(5)", L"Port.t (CC5)", L"Port.t (CC5)", L"Port.t (CC5)",
 			L"포르타멘토T(CC5)", L"滑音T(CC5)", L"زمن بورت. (CC5)", L"Port.t (CC5)", L"Port.t (CC5)",
 			L"Port.t (CC5)", L"Port.t (CC5)", L"Port.t (CC5)", L"Port.t (CC5)");
 	case SC_STRIP_HOLD:
-		return LL14(L"Hold(CC64)", L"Hold (CC64)", L"Hold (CC64)", L"Hold (CC64)", L"Hold (CC64)",
+		return LL14(L"Hold Pedal(64)", L"Hold Pedal(64)", L"Hold (CC64)", L"Hold (CC64)", L"Hold (CC64)",
 			L"홀드(CC64)", L"延音(CC64)", L"استدامة (CC64)", L"Hold (CC64)", L"Hold (CC64)",
 			L"Hold (CC64)", L"Hold (CC64)", L"Hold (CC64)", L"Hold (CC64)");
 	case SC_STRIP_PORTA:
-		return LL14(L"Port.(CC65)", L"Port. (CC65)", L"Port. (CC65)", L"Port. (CC65)", L"Port. (CC65)",
+		return LL14(L"Portamento(65)", L"Portamento(65)", L"Port. (CC65)", L"Port. (CC65)", L"Port. (CC65)",
 			L"포르타멘토(CC65)", L"滑音开(CC65)", L"بورت. (CC65)", L"Port. (CC65)", L"Port. (CC65)",
 			L"Port. (CC65)", L"Port. (CC65)", L"Port. (CC65)", L"Port. (CC65)");
 	case SC_STRIP_SOST:
-		return LL14(L"Sost.(CC66)", L"Sost. (CC66)", L"Sost. (CC66)", L"Sost. (CC66)", L"Sost. (CC66)",
+		return LL14(L"Sostenuto(66)", L"Sostenuto(66)", L"Sost. (CC66)", L"Sost. (CC66)", L"Sost. (CC66)",
 			L"소스테누토(CC66)", L"持续踏板(CC66)", L"سوست. (CC66)", L"Sost. (CC66)", L"Sost. (CC66)",
 			L"Sost. (CC66)", L"Sost. (CC66)", L"Sost. (CC66)", L"Sost. (CC66)");
 	case SC_STRIP_SOFT:
-		return LL14(L"Soft(CC67)", L"Soft (CC67)", L"Soft (CC67)", L"Soft (CC67)", L"Soft (CC67)",
+		return LL14(L"Soft Pedal(67)", L"Soft Pedal(67)", L"Soft (CC67)", L"Soft (CC67)", L"Soft (CC67)",
 			L"소프트(CC67)", L"柔音(CC67)", L"ناعم (CC67)", L"Soft (CC67)", L"Soft (CC67)",
 			L"Soft (CC67)", L"Soft (CC67)", L"Soft (CC67)", L"Soft (CC67)");
 	case SC_STRIP_REVERB:
-		return LL14(L"Reverb(CC91)", L"Reverb (CC91)", L"Reverb (CC91)", L"Reverb (CC91)", L"Reverb (CC91)",
+		return LL14(L"Reverb(91)", L"Reverb(91)", L"Reverb (CC91)", L"Reverb (CC91)", L"Reverb (CC91)",
 			L"리버브(CC91)", L"混响(CC91)", L"صدى (CC91)", L"Реверб (CC91)", L"Reverb (CC91)",
 			L"Reverb (CC91)", L"Reverb (CC91)", L"Reverb (CC91)", L"Reverb (CC91)");
 	case SC_STRIP_CHORUS:
-		return LL14(L"Chorus(CC93)", L"Chorus (CC93)", L"Chorus (CC93)", L"Chorus (CC93)", L"Chorus (CC93)",
+		return LL14(L"Chorus(93)", L"Chorus(93)", L"Chorus (CC93)", L"Chorus (CC93)", L"Chorus (CC93)",
 			L"코러스(CC93)", L"合唱(CC93)", L"كورس (CC93)", L"Хорус (CC93)", L"Chorus (CC93)",
 			L"Chorus (CC93)", L"Chorus (CC93)", L"Chorus (CC93)", L"Chorus (CC93)");
 	case SC_STRIP_DELAY:
-		return LL14(L"Delay(CC94)", L"Delay (CC94)", L"Delay (CC94)", L"Delay (CC94)", L"Delay (CC94)",
+		return LL14(L"Delay(94)", L"Delay(94)", L"Delay (CC94)", L"Delay (CC94)", L"Delay (CC94)",
 			L"딜레이(CC94)", L"延迟(CC94)", L"تأخير (CC94)", L"Дилей (CC94)", L"Delay (CC94)",
 			L"Delay (CC94)", L"Delay (CC94)", L"Delay (CC94)", L"Delay (CC94)");
 	case SC_STRIP_VEL:
-		return LL14(L"ベロシティ", L"Velocity", L"Vélocité", L"Velocità", L"Velocidad",
+		return LL14(L"Velocity", L"Velocity", L"Vélocité", L"Velocità", L"Velocidad",
 			L"벨로시티", L"力度", L"سرعة", L"Скорость", L"Anschlag",
 			L"Velocidade", L"Velocity", L"Velocity", L"Velocity");
-	default: return L"?";
+	case SC_STRIP_DATA:
+		return LL14(L"Data Entry(6)", L"Data Entry(6)", L"Data Entry(6)", L"Data Entry(6)", L"Data Entry(6)",
+			L"데이터(CC6)", L"数据输入(6)", L"إدخال(6)", L"Data(6)", L"Data(6)",
+			L"Data(6)", L"Data(6)", L"Data(6)", L"Data(6)");
+	case SC_STRIP_PORTA_CTL:
+		return LL14(L"Porta.Ctl(84)", L"Porta.Ctl(84)", L"Porta.Ctl(84)", L"Porta.Ctl(84)", L"Porta.Ctl(84)",
+			L"포르타멘토Ctl(84)", L"滑音控制(84)", L"تحكم بورت.(84)", L"Porta.Ctl(84)", L"Porta.Ctl(84)",
+			L"Porta.Ctl(84)", L"Porta.Ctl(84)", L"Porta.Ctl(84)", L"Porta.Ctl(84)");
+	case SC_STRIP_CHAT:
+		return LL14(L"Ch AfterTouch", L"Ch AfterTouch", L"Aftertouch", L"Aftertouch", L"Aftertouch",
+			L"채널 애프터터치", L"通道触后", L"لمسة بعدية", L"Aftertouch", L"Aftertouch",
+			L"Aftertouch", L"Aftertouch", L"Aftertouch", L"Aftertouch");
+	case SC_STRIP_POLYAT:
+		return LL14(L"Poly AfterTouch", L"Poly AfterTouch", L"Poly AT", L"Poly AT", L"Poly AT",
+			L"폴리 애프터터치", L"复音触后", L"لمس متعدد", L"Poly AT", L"Poly AT",
+			L"Poly AT", L"Poly AT", L"Poly AT", L"Poly AT");
+	default:
+		if (ScStaffStripKindIsFx(kind)) return L"Insert FX";
+		return L"?";
 	}
 }
 
@@ -1587,14 +1704,29 @@ const wchar_t* ScStaffStripDrawModeName(int mode)
 {
 	switch (mode) {
 	case SC_STRIP_DRAW_LINE:
-		return LL14(L"直線", L"Line", L"Ligne", L"Linea", L"Linea",
-			L"직선", L"直线", L"خط", L"Линия", L"Linie", L"Linha", L"Lijn", L"Linia", L"Çizgi");
+		return LL14(L"直線", L"Straight", L"Droite", L"Retta", L"Recta",
+			L"직선", L"直线", L"مستقيم", L"Прямая", L"Gerade", L"Reta", L"Recht", L"Prosta", L"Düz");
 	case SC_STRIP_DRAW_CURVE:
-		return LL14(L"曲線", L"Curve", L"Courbe", L"Curva", L"Curva",
+		return LL14(L"曲線", L"Curved Line", L"Courbe", L"Curva", L"Curva",
 			L"곡선", L"曲线", L"منحنى", L"Кривая", L"Kurve", L"Curva", L"Kromme", L"Krzywa", L"Eğri");
+	case SC_STRIP_DRAW_SINE:
+		return LL14(L"サイン", L"Sine Curve", L"Sinusoïde", L"Sinusoide", L"Seno",
+			L"사인", L"正弦", L"جيب", L"Синус", L"Sinus", L"Seno", L"Sinus", L"Sinus", L"Sinüs");
+	case SC_STRIP_DRAW_FLAT:
+		return LL14(L"水平", L"Flat", L"Plat", L"Piatto", L"Plano",
+			L"수평", L"水平", L"أفقي", L"Горизонт", L"Flach", L"Plano", L"Vlak", L"Poziomo", L"Düz");
+	case SC_STRIP_DRAW_RANDOM:
+		return LL14(L"ランダム", L"Random", L"Aléatoire", L"Casuale", L"Aleatorio",
+			L"랜덤", L"随机", L"عشوائي", L"Случайно", L"Zufall", L"Aleatório", L"Willekeurig", L"Losowo", L"Rastgele");
+	case SC_STRIP_DRAW_STEP:
+		return LL14(L"階段", L"Step", L"Marche", L"Gradino", L"Escalón",
+			L"계단", L"阶梯", L"درجة", L"Ступень", L"Stufe", L"Degrau", L"Trede", L"Schodek", L"Basamak");
+	case SC_STRIP_DRAW_SAW:
+		return LL14(L"のこぎり", L"Saw", L"Dent de scie", L"Sega", L"Sierra",
+			L"톱니", L"锯齿", L"منشار", L"Пила", L"Säge", L"Serra", L"Zaag", L"Piła", L"Testere");
 	default:
-		return LL14(L"鉛筆", L"Pencil", L"Crayon", L"Matita", L"Lapiz",
-			L"연필", L"铅笔", L"قلم", L"Карандаш", L"Stift", L"Lapis", L"Potlood", L"Olowek", L"Kalem");
+		return LL14(L"自由", L"Free Hand", L"Main levée", L"Mano libera", L"Mano alzada",
+			L"자유", L"自由", L"حر", L"Свободно", L"Freihand", L"Mão livre", L"Vrijhand", L"Odręcznie", L"Serbest");
 	}
 }
 
@@ -2907,8 +3039,11 @@ void ScStaffDrawCursorsFree(ScStaffDrawCursors* c)
 HCURSOR ScStaffDrawCursorPick(const ScStaffDrawCursors* c, int stripDraw)
 {
 	if (!c) return NULL;
-	if (stripDraw == SC_STRIP_DRAW_LINE && c->line) return c->line;
-	if (stripDraw == SC_STRIP_DRAW_CURVE && c->curve) return c->curve;
+	if ((stripDraw == SC_STRIP_DRAW_LINE || stripDraw == SC_STRIP_DRAW_FLAT ||
+		stripDraw == SC_STRIP_DRAW_STEP || stripDraw == SC_STRIP_DRAW_SAW) && c->line)
+		return c->line;
+	if ((stripDraw == SC_STRIP_DRAW_CURVE || stripDraw == SC_STRIP_DRAW_SINE) && c->curve)
+		return c->curve;
 	return c->pencil ? c->pencil : NULL;
 }
 
@@ -4518,7 +4653,9 @@ void ScStaffPaintStaves(CDC& dc, const CRect& grid, const ScStaffUi* u,
 
 		const int defNumer = u->meterNumer > 0 ? u->meterNumer : 4;
 		const int defDenom = u->meterDenom > 0 ? u->meterDenom : 4;
-		if (tr == 0) {
+		{
+			/* Every part keeps clef + key + meter. SSW drops 4/4 and the
+			   signature on later systems; the score side does not. */
 			int numer0 = defNumer, denom0 = defDenom;
 			ScStaffMeterAtTick(ev, evCount, 0, defNumer, defDenom, &numer0, &denom0);
 			const int ks0 = ScStaffKeySigAtTick(ev, evCount, 0, u->keySig);
@@ -4860,7 +4997,7 @@ void ScStaffPaintStrip(CDC& dc, const CRect& rc, const ScStaffUi* u)
 				npt++;
 			}
 		}
-		if (u->stripDraw == SC_STRIP_DRAW_CURVE && npt >= 2) {
+		if (u->stripDraw != SC_STRIP_DRAW_PENCIL && u->stripDraw != SC_STRIP_DRAW_RANDOM && npt >= 2) {
 			CPen pen(PS_SOLID, 2, RGB(40, 80, 160));
 			CPen* op = dc.SelectObject(&pen);
 			dc.Polyline(pts, npt);
@@ -5711,7 +5848,7 @@ static void ScStaffPaintBandCurve(CDC& dc, const CRect& lane, const ScStaffUi* u
 			npt++;
 		}
 	}
-	if (u->stripDraw == SC_STRIP_DRAW_CURVE && npt >= 2) {
+	if (u->stripDraw != SC_STRIP_DRAW_PENCIL && u->stripDraw != SC_STRIP_DRAW_RANDOM && npt >= 2) {
 		CPen pen(PS_SOLID, 2, isTempo ? RGB(160, 50, 50) : RGB(40, 80, 160));
 		CPen* op = dc.SelectObject(&pen);
 		dc.Polyline(pts, npt);
@@ -5830,28 +5967,148 @@ void ScStaffBandFillCurve(uint8_t* buf, int colMax, int c0, int v0, int c1, int 
 	}
 }
 
+static void ScStaffBandClamp(int* v, int vmin, int vmax)
+{
+	if (!v) return;
+	if (*v < vmin) *v = vmin;
+	if (*v > vmax) *v = vmax;
+}
+
+static void ScStaffBandFillSine(uint8_t* buf, int colMax, int c0, int v0, int c1, int v1, int vmin, int vmax)
+{
+	if (!buf || colMax <= 0) return;
+	if (c0 > c1) { int t = c0; c0 = c1; c1 = t; t = v0; v0 = v1; v1 = t; }
+	if (c0 < 0) c0 = 0;
+	if (c1 >= colMax) c1 = colMax - 1;
+	const int span = c1 - c0;
+	if (span <= 0) {
+		int v = v1;
+		ScStaffBandClamp(&v, vmin, vmax);
+		buf[c0] = (uint8_t)v;
+		return;
+	}
+	for (int c = c0; c <= c1; c++) {
+		const double t = (double)(c - c0) / (double)span;
+		const double lin = v0 + (v1 - v0) * t;
+		const double wobble = sin(t * 6.28318530718 * 2.0) * fabs((double)(v1 - v0)) * 0.45;
+		int v = (int)(lin + wobble + 0.5);
+		ScStaffBandClamp(&v, vmin, vmax);
+		buf[c] = (uint8_t)v;
+	}
+}
+
+static void ScStaffBandFillFlat(uint8_t* buf, int colMax, int c0, int v0, int c1, int vmin, int vmax)
+{
+	if (!buf || colMax <= 0) return;
+	if (c0 > c1) { int t = c0; c0 = c1; c1 = t; }
+	if (c0 < 0) c0 = 0;
+	if (c1 >= colMax) c1 = colMax - 1;
+	int v = v0;
+	ScStaffBandClamp(&v, vmin, vmax);
+	for (int c = c0; c <= c1; c++) buf[c] = (uint8_t)v;
+}
+
+static void ScStaffBandFillRandom(uint8_t* buf, int colMax, int c0, int v0, int c1, int v1, int vmin, int vmax)
+{
+	if (!buf || colMax <= 0) return;
+	if (c0 > c1) { int t = c0; c0 = c1; c1 = t; t = v0; v0 = v1; v1 = t; }
+	if (c0 < 0) c0 = 0;
+	if (c1 >= colMax) c1 = colMax - 1;
+	int lo = v0 < v1 ? v0 : v1;
+	int hi = v0 > v1 ? v0 : v1;
+	if (hi <= lo) { lo = vmin; hi = vmax; }
+	for (int c = c0; c <= c1; c++) {
+		unsigned h = (unsigned)c * 1103515245u + 12345u;
+		int v = lo + (int)((h >> 16) % (unsigned)(hi - lo + 1));
+		ScStaffBandClamp(&v, vmin, vmax);
+		buf[c] = (uint8_t)v;
+	}
+}
+
+static void ScStaffBandFillStep(uint8_t* buf, int colMax, int c0, int v0, int c1, int v1, int vmin, int vmax)
+{
+	if (!buf || colMax <= 0) return;
+	if (c0 > c1) { int t = c0; c0 = c1; c1 = t; t = v0; v0 = v1; v1 = t; }
+	if (c0 < 0) c0 = 0;
+	if (c1 >= colMax) c1 = colMax - 1;
+	const int span = c1 - c0;
+	if (span <= 0) {
+		int v = v1;
+		ScStaffBandClamp(&v, vmin, vmax);
+		buf[c0] = (uint8_t)v;
+		return;
+	}
+	const int plateau = 4;
+	int held = v0;
+	for (int c = c0; c <= c1; c++) {
+		if (((c - c0) % plateau) == 0) {
+			held = v0 + (v1 - v0) * (c - c0) / span;
+			ScStaffBandClamp(&held, vmin, vmax);
+		}
+		buf[c] = (uint8_t)held;
+	}
+}
+
+static void ScStaffBandFillSaw(uint8_t* buf, int colMax, int c0, int v0, int c1, int v1, int vmin, int vmax)
+{
+	if (!buf || colMax <= 0) return;
+	if (c0 > c1) { int t = c0; c0 = c1; c1 = t; t = v0; v0 = v1; v1 = t; }
+	if (c0 < 0) c0 = 0;
+	if (c1 >= colMax) c1 = colMax - 1;
+	const int period = 8;
+	for (int c = c0; c <= c1; c++) {
+		const int phase = (c - c0) % period;
+		int v = v0 + (v1 - v0) * phase / (period - 1);
+		ScStaffBandClamp(&v, vmin, vmax);
+		buf[c] = (uint8_t)v;
+	}
+}
+
 void ScStaffBandDragStroke(ScStaffUi* u, uint8_t* buf, int anchorCol, int anchorVal, int col, int val, int isTempo)
 {
 	if (!u || !buf) return;
 	const int colMax = ScStaffStripColCount(u);
 	const int vmin = isTempo ? 40 : 0;
 	const int vmax = isTempo ? 255 : 127;
-	if (u->stripDraw == SC_STRIP_DRAW_LINE && anchorCol >= 0) {
-		ScStaffBandFillRange(buf, colMax, anchorCol, anchorVal, col, val, vmin, vmax);
-		return;
+	if (anchorCol >= 0) {
+		if (u->stripDraw == SC_STRIP_DRAW_LINE) {
+			ScStaffBandFillRange(buf, colMax, anchorCol, anchorVal, col, val, vmin, vmax);
+			return;
+		}
+		if (u->stripDraw == SC_STRIP_DRAW_CURVE) {
+			ScStaffBandFillCurve(buf, colMax, anchorCol, anchorVal, col, val, vmin, vmax);
+			return;
+		}
+		if (u->stripDraw == SC_STRIP_DRAW_SINE) {
+			ScStaffBandFillSine(buf, colMax, anchorCol, anchorVal, col, val, vmin, vmax);
+			return;
+		}
+		if (u->stripDraw == SC_STRIP_DRAW_FLAT) {
+			ScStaffBandFillFlat(buf, colMax, anchorCol, anchorVal, col, vmin, vmax);
+			return;
+		}
+		if (u->stripDraw == SC_STRIP_DRAW_RANDOM) {
+			ScStaffBandFillRandom(buf, colMax, anchorCol, anchorVal, col, val, vmin, vmax);
+			return;
+		}
+		if (u->stripDraw == SC_STRIP_DRAW_STEP) {
+			ScStaffBandFillStep(buf, colMax, anchorCol, anchorVal, col, val, vmin, vmax);
+			return;
+		}
+		if (u->stripDraw == SC_STRIP_DRAW_SAW) {
+			ScStaffBandFillSaw(buf, colMax, anchorCol, anchorVal, col, val, vmin, vmax);
+			return;
+		}
 	}
-	if (u->stripDraw == SC_STRIP_DRAW_CURVE && anchorCol >= 0) {
-		ScStaffBandFillCurve(buf, colMax, anchorCol, anchorVal, col, val, vmin, vmax);
-		return;
-	}
-	int c0 = min(anchorCol, col), c1 = max(anchorCol, col);
-	if (anchorCol < 0) c0 = c1 = col;
-	for (int c = c0; c <= c1; c++) {
-		int v = val;
-		if (v < vmin) v = vmin;
-		if (v > vmax) v = vmax;
-		buf[c] = (uint8_t)v;
-	}
+	/* Free hand: only the column under the pointer. */
+	if (col < 0) col = 0;
+	if (col >= colMax) col = colMax - 1;
+	int v = val;
+	if (v < vmin) v = vmin;
+	if (v > vmax) v = vmax;
+	buf[col] = (uint8_t)v;
+	(void)anchorCol;
+	(void)anchorVal;
 }
 
 static int ScStaffBandValFromPt(const CRect& lane, const ScStaffUi* u, const ScEvent* ev, int evCount,
@@ -6053,6 +6310,9 @@ static int ScPushEv(ScEvent* ev, int* count, uint32_t tick, uint8_t ch, uint8_t 
 static void ApplyOneStripMidi(ScMidiDoc* d, int track, int kind, const uint8_t* strip, const ScStaffUi* u)
 {
 	const int colMax = ScStaffStripColCount(u);
+	/* Insert FX and aftertouch are heard while drawing. They are not MIDI CCs. */
+	if (ScStaffStripKindIsFx(kind) || kind == SC_STRIP_CHAT || kind == SC_STRIP_POLYAT)
+		return;
 	if (kind == SC_STRIP_GATE) {
 		for (int i = 0; i < d->evCount; i++) {
 			if (d->ev[i].ch != (uint8_t)track) continue;

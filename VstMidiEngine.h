@@ -159,15 +159,33 @@ int VstApplyMpw3Binds(const wchar_t* mpw3Path, int openEditor);
 /* .mpsmv preview: route SMF notes to live VST parts (HALion) instead of GM mapper. */
 void VstSongUseLiveBindsSet(int enable);
 int VstSongUseLiveBinds(void);
+/* Host StopAudio: skip process() so the waveOut thread can join. */
+void VstLiveProcessPause(int pause);
+int VstLiveShouldAbortProcess(void);
+int VstLiveAnyLocalVst3(void);
+/* which: bit0=VST2 default, bit1=VST3 overlays. 3=both. */
+int VstLiveRenderMasked(float* L, float* R, int frames, int which);
+/* Host AudioThread: process VST3 overlays, keep the result for the song mix.
+   Speakers should stay silent — the song engine plays the mix. */
+void VstLiveVst3HostPump(float* tmpL, float* tmpR, int frames);
 /* 1=曲の live 描画がプラグイン内。このとき UI からスキャンすると固まる。 */
 int VstLiveScanTryHold(void);
 void VstLiveScanRelease(void);
 void VstLiveUnloadPart(int part1to32);
+/* App exit: skip process() so DirectSound / host waveOut can join. */
+void VstLivePrepareAppExit(void);
+/* 1 = exit left SC-VA / Groove Agent DLLs mapped (unload never returns).
+   ExitProcess would run their DLL_PROCESS_DETACH and can hang there. */
+int VstLiveLeftPluginsMapped(void);
 // ホスト窓が閉じるとき: 先にリモート音声を止め、全部のパートを降ろす。
 void VstLiveShutdown(void);
 // KpiHost32 専用: 固まったプラグインがパイプを掴んだままにしないよう effClose/FreeLibrary を飛ばす。
 void VstLiveAbandonHostPlugins(int on);
 void VstLiveAllNotesOff();
+/* Same as song-open live reset: VST2 volume/CC, VST3 kit-safe notes-off. */
+void VstLiveResetPartsForPlay(void);
+/* Host UI only: GS Reset into live VST2 so SC-VA speaks without an SMF. */
+void VstLiveWakeHostVst2(void);
 void VstLiveMidiShort(int portIndex0to2, DWORD shortMsg);
 void VstLiveMidiToPart(int part1to32, DWORD shortMsg);
 void VstLiveMidiSongShort(int portIndex0to2, DWORD shortMsg);

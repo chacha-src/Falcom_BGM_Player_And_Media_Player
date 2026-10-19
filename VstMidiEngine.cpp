@@ -46,6 +46,10 @@ static int ProbeLoadedVst3Audible(Vst3Inst* vst3, int drums);
 #pragma comment(lib, "ole32.lib")
 #pragma comment(lib, "shell32.lib")
 
+
+static volatile LONG g_liveShuttingDown = 0;
+
+
 static void MmCompactKey(const wchar_t* s, wchar_t* out, int outN)
 {
 	int j = 0;
@@ -516,6 +520,32 @@ extern "C" int VstMidiGsMapDropFromUsed(const unsigned short* pairs, int nPairs,
 extern volatile LONG g_appExiting;
 extern void COgg_DropPlaybackUiPostedMsg(UINT message);
 #endif
+static volatile LONG g_liveSkipProcess = 0;
+static DWORD g_liveUiTid = 0;
+static volatile LONG g_liveVst3Woken = 0;
+
+static int LiveAudioAbort(void)
+{
+	if (InterlockedCompareExchange(&g_liveSkipProcess, 0, 0))
+		return 1;
+	if (InterlockedCompareExchange(&g_liveShuttingDown, 0, 0))
+		return 1;
+#ifndef KPIHOST32_BUILD
+	if (InterlockedCompareExchange(&g_appExiting, 0, 0))
+		return 1;
+#endif
+	return 0;
+}
+
+extern "C" void VstLiveProcessPause(int pause)
+{
+	InterlockedExchange(&g_liveSkipProcess, pause ? 1 : 0);
+}
+
+extern "C" int VstLiveShouldAbortProcess(void)
+{
+	return LiveAudioAbort();
+}
 static volatile LONG g_vstWaitPump = 0;
 extern "C" int VstScanPumpIsBusy(void)
 {
@@ -756,6 +786,8 @@ extern "C" int VstMidiGetIoSlot(void)
 }
 
 #define g_eng (g_engs[VstIoSlot()])
+/* Host UI and mid/mp* share one live grid. SMF playhead stays per xf slot. */
+static EngineState& LiveEng() { return g_engs[0]; }
 
 static VstPluginInfo g_plugins[VST_MAX_PLUGINS];
 static int g_pluginCount = 0;
@@ -3790,6 +3822,95 @@ extern "C" int VstSongUseLiveBinds(void)
 	return (int)InterlockedCompareExchange(&g_songUseLiveBinds, 0, 0);
 }
 
+/* VST3 overlay MIDI/audio off the song DS callback. Groove Agent process()
+   inside VstMidiRead made SC-VA underrun and left the kit silent. */
+enum { VST3_QMAX = 1024 };
+static SRWLOCK g_v3Lock = SRWLOCK_INIT;
+static Vst3Inst* g_v3qV[VST3_QMAX];
+static DWORD g_v3qM[VST3_QMAX];
+static int g_v3qN;
+static float g_v3MixL[BLOCK_FRAMES];
+static float g_v3MixR[BLOCK_FRAMES];
+static int g_v3MixN;
+
+static void LiveVst3QPush(Vst3Inst* v, DWORD msg)
+{
+	if (!v) return;
+	AcquireSRWLockExclusive(&g_v3Lock);
+	if (g_v3qN < VST3_QMAX) {
+		g_v3qV[g_v3qN] = v;
+		g_v3qM[g_v3qN] = msg;
+		++g_v3qN;
+	}
+	ReleaseSRWLockExclusive(&g_v3Lock);
+}
+
+static void LiveVst3QFlush(void)
+{
+	Vst3Inst* mv[VST3_QMAX];
+	DWORD msgs[VST3_QMAX];
+	int nm = 0;
+	AcquireSRWLockExclusive(&g_v3Lock);
+	nm = g_v3qN;
+	if (nm > 0) {
+		memcpy(mv, g_v3qV, (size_t)nm * sizeof(mv[0]));
+		memcpy(msgs, g_v3qM, (size_t)nm * sizeof(msgs[0]));
+		g_v3qN = 0;
+	}
+	ReleaseSRWLockExclusive(&g_v3Lock);
+	for (int i = 0; i < nm; ++i)
+		Vst3MidiShort(mv[i], msgs[i], 0);
+}
+
+static void LiveVst3MixAdd(float* L, float* R, int frames)
+{
+	if (!L || !R || frames <= 0) return;
+	AcquireSRWLockShared(&g_v3Lock);
+	const int n = (g_v3MixN < frames) ? g_v3MixN : frames;
+	for (int i = 0; i < n; ++i) {
+		L[i] += g_v3MixL[i];
+		R[i] += g_v3MixR[i];
+	}
+	ReleaseSRWLockShared(&g_v3Lock);
+}
+
+extern "C" void VstLiveVst3HostPump(float* tmpL, float* tmpR, int frames)
+{
+	if (!tmpL || !tmpR || frames <= 0) return;
+	Vst3Inst* vs[32];
+	int nv = 0;
+	LiveVst3QFlush();
+	/* Snapshot without g_eng.cs — song holds that lock for SC-VA process. */
+	for (int p = 0; p < 32; ++p)
+		if (LiveEng().live[p].vst3)
+			vs[nv++] = LiveEng().live[p].vst3;
+	ZeroMemory(tmpL, (size_t)frames * sizeof(float));
+	ZeroMemory(tmpR, (size_t)frames * sizeof(float));
+	__declspec(align(32)) float tl[BLOCK_FRAMES];
+	__declspec(align(32)) float tr[BLOCK_FRAMES];
+	int remain = frames, pos = 0;
+	while (remain > 0) {
+		int n = remain;
+		if (n > BLOCK_FRAMES) n = BLOCK_FRAMES;
+		for (int i = 0; i < nv; ++i) {
+			Vst3Process(vs[i], tl, tr, n);
+			for (int s = 0; s < n; ++s) {
+				tmpL[pos + s] += tl[s];
+				tmpR[pos + s] += tr[s];
+			}
+		}
+		pos += n;
+		remain -= n;
+	}
+	int store = frames;
+	if (store > BLOCK_FRAMES) store = BLOCK_FRAMES;
+	AcquireSRWLockExclusive(&g_v3Lock);
+	memcpy(g_v3MixL, tmpL, (size_t)store * sizeof(float));
+	memcpy(g_v3MixR, tmpR, (size_t)store * sizeof(float));
+	g_v3MixN = store;
+	ReleaseSRWLockExclusive(&g_v3Lock);
+}
+
 static void DispatchDueEvents(__int64 start, int frames)
 {
 	/* VST2 keeps only the last processEvents in a processReplacing, so this
@@ -4154,7 +4275,11 @@ static void RenderSongUnits(int frames)
 		/* スキャンがプラグインを開閉しているあいだは描画しない。UI と process の待ちで固まる。 */
 		if (!LiveSongRenderEnter())
 			return;
-		VstLiveRender(g_eng.outL, g_eng.outR, frames);
+		/* g_eng.cs is LiveEng().cs on slot 0. Holding it across process()
+		   deadlocks Groove Agent when the UI takes the same lock. */
+		LeaveCriticalSection(&g_eng.cs);
+		VstLiveRenderMasked(g_eng.outL, g_eng.outR, frames, 3);
+		EnterCriticalSection(&g_eng.cs);
 		LiveSongRenderLeave();
 		return;
 	}
@@ -4230,34 +4355,47 @@ static void LiveDllDirFromEffect(AEffect* e)
 	wchar_t dirW[MAX_PATH];
 	if (MultiByteToWideChar(CP_ACP, 0, dirA, -1, dirW, MAX_PATH) <= 0 || !dirW[0])
 		return;
-	if (_wcsicmp(g_liveDllDirW, dirW) == 0) {
-		SetDllDirectoryW(dirW);
+	if (_wcsicmp(g_liveDllDirW, dirW) == 0)
 		return;
-	}
 	wcsncpy_s(g_liveDllDirW, dirW, _TRUNCATE);
 	SetDllDirectoryW(dirW);
-	SetCurrentDirectoryW(dirW);
+	/* Do not SetCurrentDirectory here. The audio thread used to change the
+	   process CWD every 512 frames; that locked the UI thread (VST3 load)
+	   and came out as SC-VA underrun noise. */
 }
 
 static void RenderEffect(AEffect* e, float* l, float* r, int frames)
 {
 	LiveDllDirFromEffect(e);
-	float* in[32], *out[32];
-	for (int i = 0; i < 32; ++i) {
-		in[i] = g_eng.zero;
-		out[i] = g_eng.zero;
+	if (!e || !e->processReplacing || frames <= 0) {
+		if (l && frames > 0) ZeroMemory(l, frames * sizeof(float));
+		if (r && frames > 0) ZeroMemory(r, frames * sizeof(float));
+		return;
 	}
-	out[0] = l; out[1] = r;
+	enum { MAXB = 8 };
+	if (frames > BLOCK_FRAMES) frames = BLOCK_FRAMES;
+	int no = e->numOutputs;
+	if (no < 1) no = 1;
+	if (no > MAXB) no = MAXB;
+	/* One silent buffer per bus. Aliasing every extra in/out onto g_eng.zero
+	   made SC-VA mute its stereo when Groove Agent was also in the rack. */
+	__declspec(align(32)) float extra[MAXB][BLOCK_FRAMES];
+	ZeroMemory(extra, sizeof(extra));
+	float* in[MAXB], *out[MAXB];
+	for (int i = 0; i < MAXB; ++i) {
+		in[i] = extra[i];
+		out[i] = extra[i];
+	}
+	out[0] = l;
+	if (no > 1) out[1] = r;
 	ZeroMemory(l, frames * sizeof(float));
 	ZeroMemory(r, frames * sizeof(float));
-	ZeroMemory(g_eng.zero, frames * sizeof(float));
-	if (!e || !e->processReplacing) return;
 	__try { e->processReplacing(e, in, out, frames); }
 	__except (EXCEPTION_EXECUTE_HANDLER) {
 		ZeroMemory(l, frames * sizeof(float));
 		ZeroMemory(r, frames * sizeof(float));
 	}
-	if (e->numOutputs == 1) memcpy(r, l, frames * sizeof(float));
+	if (no == 1) memcpy(r, l, frames * sizeof(float));
 }
 
 static void RenderFxEffect(AEffect* e, float* l, float* r, int frames)
@@ -4427,28 +4565,43 @@ static int LoadVst2(const wchar_t* path, HMODULE& module, AEffect*& effect)
 	return 1;
 }
 
-#ifdef KPIHOST32_BUILD
 static volatile LONG g_liveAbandonPlugins = 0;
+/* 1 = a plug-in DLL was left mapped on purpose (effClose / terminate hang).
+   Its DLL_PROCESS_DETACH would still run inside ExitProcess. */
+static volatile LONG g_liveLeftMapped = 0;
 extern "C" void VstLiveAbandonHostPlugins(int on)
 {
 	InterlockedExchange(&g_liveAbandonPlugins, on ? 1 : 0);
 }
-#else
-extern "C" void VstLiveAbandonHostPlugins(int) {}
+
+extern "C" int VstLiveLeftPluginsMapped(void)
+{
+	return (int)InterlockedCompareExchange(&g_liveLeftMapped, 0, 0);
+}
+
+static int LiveAbandonNow(void)
+{
+	if (InterlockedCompareExchange(&g_liveAbandonPlugins, 0, 0))
+		return 1;
+#ifndef KPIHOST32_BUILD
+	if (InterlockedCompareExchange(&g_appExiting, 0, 0))
+		return 1;
 #endif
+	return 0;
+}
 
 static void CloseEffect(HMODULE& module, AEffect*& effect)
 {
-#ifdef KPIHOST32_BUILD
-	// SOUND Canvas VA's effClose / FreeLibrary can never return. Dropping the
-	// pointers leaks the module until this process exits, which is how the
-	// pipe stays able to open a KPI file after the live host window closes.
-	if (InterlockedCompareExchange(&g_liveAbandonPlugins, 0, 0)) {
+	// SOUND Canvas VA's effClose / FreeLibrary can never return. Groove Agent
+	// terminate hangs the same way. On app exit, drop the pointers and let
+	// ExitProcess unmap the DLLs so DoModal can return.
+	if (LiveAbandonNow()) {
+		if (effect || module)
+			InterlockedExchange(&g_liveLeftMapped, 1);
 		effect = NULL;
 		module = NULL;
 		return;
 	}
-#endif
 	if (effect && effect->dispatcher) {
 		__try {
 			effect->dispatcher(effect, effStopProcess, 0, 0, NULL, 0);
@@ -7361,6 +7514,62 @@ static void ConsumeSystemModeBeforePlay()
 	}
 }
 
+/* Groove Agent / HALion stream their kit on a background thread after
+   setState and only become audible once loading completes (the plug then
+   fires restartComponent). The song starts long before that, so the first
+   play(s) were silent. The VST host UI "fixed" it only because opening the
+   editor pumped the message loop long enough for the load to finish.
+   Here we do the same deterministically: pump messages and silently probe
+   each dedicated VST3 with a test note until it actually produces sound
+   (kit ready) or a timeout. Probe audio goes into g_eng.outL/outR, which is
+   NOT streamed during this load phase, so the user hears nothing. */
+static void LivePanicPart(LivePart& p);
+static int LiveVst3ReadyWait(int timeoutMs)
+{
+	struct Probe { int part; int drums; int ready; } pr[32];
+	int n = 0;
+	for (int i = 0; i < 32; ++i) {
+		LivePart& p = LiveEng().live[i];
+		if (p.vst3 && !p.isMulti) {
+			pr[n].part = i;
+			pr[n].drums = ((i & 15) == 9) ? 1 : 0; /* ch10 = drums */
+			pr[n].ready = 0;
+			++n;
+		}
+	}
+	if (!n) return 1;
+	const DWORD t0 = GetTickCount();
+	for (;;) {
+		MSG msg;
+		while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
+			if (msg.message == WM_QUIT) { PostQuitMessage((int)msg.wParam); break; }
+			TranslateMessage(&msg);
+			DispatchMessage(&msg);
+		}
+		int allReady = 1;
+		for (int k = 0; k < n; ++k) {
+			if (pr[k].ready) continue;
+			Vst3Inst* v = LiveEng().live[pr[k].part].vst3;
+			if (!v) { pr[k].ready = 1; continue; }
+			int aud = ProbeLoadedVst3Audible(v, pr[k].drums);
+			if (!aud) aud = ProbeLoadedVst3Audible(v, pr[k].drums ? 0 : 1);
+			if (aud) pr[k].ready = 1; else allReady = 0;
+		}
+		if (allReady) {
+			/* Clear any probe tails so playback starts clean. */
+			for (int k = 0; k < n; ++k)
+				LivePanicPart(LiveEng().live[pr[k].part]);
+			return 1;
+		}
+		if (GetTickCount() - t0 >= (DWORD)timeoutMs) {
+			for (int k = 0; k < n; ++k)
+				LivePanicPart(LiveEng().live[pr[k].part]);
+			return 0;
+		}
+		Sleep(30);
+	}
+}
+
 extern "C" int VstMidiOpen(const wchar_t* midPath,
 	const wchar_t hints[][128], int hintCount, HWND parentForWait)
 {
@@ -7378,7 +7587,7 @@ extern "C" int VstMidiOpen(const wchar_t* midPath,
 	if (InterlockedCompareExchange(&g_songUseLiveBinds, 0, 0)) {
 		int anyLive = 0;
 		for (int i = 0; i < 32; ++i) {
-			const LivePart& p = g_eng.live[i];
+			const LivePart& p = LiveEng().live[i];
 			if (p.effect || p.vst3 || p.remote) { anyLive = 1; break; }
 		}
 		g_eng.gmResetMode = 0;
@@ -7387,12 +7596,23 @@ extern "C" int VstMidiOpen(const wchar_t* midPath,
 		g_eng.playSample = 0;
 		g_eng.ringRead = g_eng.ringCount = 0;
 		ZeroMemory(g_eng.noteState, sizeof(g_eng.noteState));
-		/* 共有ライブ音源は GM リセットを送らない。前曲が CC120 や音量 0 で
-		   終わっていると次曲が最後まで無音になる。 */
-		for (int i = 0; i < 32; ++i)
-			LiveSongResetPart(g_eng.live[i]);
+		/* VST2 only. VST3 kit CC here went through MapMidiCc and emptied
+		   Groove Agent before the SMF notes arrived. */
+		for (int i = 0; i < 32; ++i) {
+			if (LiveEng().live[i].vst3 && NeedsUserPatch(LiveEng().live[i].path, LiveEng().live[i].path))
+				continue;
+			LiveSongResetPart(LiveEng().live[i]);
+		}
 		LiveSongResetRemote();
 		LeaveCriticalSection(&g_eng.cs);
+		g_liveUiTid = GetCurrentThreadId();
+		InterlockedExchange(&g_liveVst3Woken, 0);
+		/* Wait until each dedicated VST3 kit has finished its async load and
+		   actually makes sound, pumping messages meanwhile. This replaces the
+		   open/close-host workaround and makes mid/mp* sound on the FIRST
+		   play. Cheap when already loaded (first probe is audible). */
+		LiveVst3ReadyWait(20000);
+		InterlockedExchange(&g_liveVst3Woken, 1);
 		return anyLive ? 0 : -5;
 	}
 
@@ -7509,7 +7729,9 @@ extern "C" void VstMidiClose(void)
 	LeaveCriticalSection(&g_eng.cs);
 	g_reportedLatencySamples[VstIoSlot()] = 0;
 	InterlockedExchange(&g_midiKeepAlive[VstIoSlot()], 0);
-	InterlockedExchange(&g_songUseLiveBinds, 0);
+	/* Keep g_songUseLiveBinds. Clearing it here started the score monitor
+	   while live SC-VA/GA stayed loaded; the next mid then process() twice
+	   (noise) and re-applied the VST3 chunk (silent kit). oggDlg decides. */
 }
 
 extern "C" void VstMidiCloseSlot(int slot)
@@ -7920,7 +8142,6 @@ struct LiveRemoteShm {
 };
 
 static LiveRemoteShm g_liveShm;
-static volatile LONG g_liveShuttingDown = 0;
 #ifndef KPIHOST32_BUILD
 static HWND g_liveEdNotifyHwnd = NULL;
 static HWND g_liveEdNotifyHwnd2 = NULL;
@@ -8119,6 +8340,8 @@ extern "C" void VstLivePollRemoteEditorClosed(void)
 // Adds the host's output on top of whatever the local parts produced.
 static void LiveRemoteMix(float* L, float* R, int frames)
 {
+	if (g_liveShm.parts <= 0) return;
+	if (!VstLiveAnyRemotePart()) return;
 	AcquireSRWLockExclusive(&g_liveShmLock);
 	KPIHOST32_VstLiveAudioShm* s = g_liveShm.audio;
 	if (!s || !s->capacity) { ReleaseSRWLockExclusive(&g_liveShmLock); return; }
@@ -8242,10 +8465,10 @@ extern "C" int VstLiveLoadPart(int part1to32,
 	const wchar_t* pluginPath, int isVst3)
 {
 	if (part1to32 < 1 || part1to32 > 32 || !pluginPath) return -1;
-	EnterCriticalSection(&g_eng.cs);
-	LivePart& p = g_eng.live[part1to32 - 1];
+	EnterCriticalSection(&LiveEng().cs);
+	LivePart& p = LiveEng().live[part1to32 - 1];
 	const int wasRemote = p.remote;
-	LeaveCriticalSection(&g_eng.cs);
+	LeaveCriticalSection(&LiveEng().cs);
 #ifndef KPIHOST32_BUILD
 	/* Stop remote audio only when THIS was the sole remote part. Stopping while
 	   other remotes (SampleTank) stay loaded remaps SHM and crashes preview. */
@@ -8258,8 +8481,8 @@ extern "C" int VstLiveLoadPart(int part1to32,
 	   Sync UNLOAD closes the editor on its UI thread before destroy. */
 	if (!wasRemote)
 		VstLiveEditorClose(part1to32);
-	EnterCriticalSection(&g_eng.cs);
-	LivePart& p2 = g_eng.live[part1to32 - 1];
+	EnterCriticalSection(&LiveEng().cs);
+	LivePart& p2 = LiveEng().live[part1to32 - 1];
 	CloseEffect(p2.module, p2.effect);
 	Vst3Close(p2.vst3); p2.vst3 = NULL;
 	p2.isMulti = 0;
@@ -8268,12 +8491,14 @@ extern "C" int VstLiveLoadPart(int part1to32,
 	p2.prog = -1;
 	p2.path[0] = 0;
 	p2.edWnd = NULL;
-	LeaveCriticalSection(&g_eng.cs);
+	LeaveCriticalSection(&LiveEng().cs);
 	if (wasRemote) LiveRemoteUnload(part1to32);
 
 	wchar_t loadPath[VST_PATH_CHARS];
 	SafeCopy(loadPath, VST_PATH_CHARS, pluginPath);
 	int loadVst3 = isVst3;
+	if (!loadVst3 && EqExt(loadPath, L".vst3"))
+		loadVst3 = 1;
 #ifndef KPIHOST32_BUILD
 	// 本体（x64）と違うアーキは x86 の ogghost32（プロジェクト KpiHost32）へ。
 	// SC-VA は HostArch のスタブ（C:\Roland VS\64 等）へ寄せてから判定する。
@@ -8290,14 +8515,16 @@ extern "C" int VstLiveLoadPart(int part1to32,
 		EnsLog(L"LiveLoad part=%d remote rc=%d arch=%d vst3=%d path=%s",
 			part1to32, rc, arch, loadVst3, loadPath);
 		if (rc == 0) {
-			EnterCriticalSection(&g_eng.cs);
-			LivePart& rp = g_eng.live[part1to32 - 1];
+			EnterCriticalSection(&LiveEng().cs);
+			LivePart& rp = LiveEng().live[part1to32 - 1];
 			rp.remote = 1;
 			rp.isMulti = LiveIsMultiPath(loadPath);
-			rp.sendCh = rp.isMulti ? -1 : 0;
+			/* Dedicated: keep the song's MIDI channel. sendCh=0 folded Groove
+			   Agent drums (ch10) onto ch1 and the kit stayed silent. */
+			rp.sendCh = -1;
 			rp.prog = -1;
 			wcsncpy_s(rp.path, loadPath, _TRUNCATE);
-			LeaveCriticalSection(&g_eng.cs);
+			LeaveCriticalSection(&LiveEng().cs);
 			return 0;
 		}
 		/* x86 本体+x64 プラグインも、x64 本体+x86 プラグインも、失敗したら
@@ -8342,20 +8569,20 @@ extern "C" int VstLiveLoadPart(int part1to32,
 		ok = LoadVst2(pluginPath, module, effect);
 	}
 
-	EnterCriticalSection(&g_eng.cs);
+	EnterCriticalSection(&LiveEng().cs);
 	if (ok) {
 		p.vst3 = vst3;
 		p.module = module;
 		p.effect = effect;
 		p.prog = prog;
 		p.isMulti = LiveIsMultiPath(pluginPath);
-		p.sendCh = p.isMulti ? -1 : 0;
+		p.sendCh = -1;
 		wcsncpy_s(p.path, pluginPath, _TRUNCATE);
 		vst3 = NULL;
 		module = NULL;
 		effect = NULL;
 	}
-	LeaveCriticalSection(&g_eng.cs);
+	LeaveCriticalSection(&LiveEng().cs);
 	if (!ok) {
 		if (vst3) Vst3Close(vst3);
 		if (effect || module) CloseEffect(module, effect);
@@ -8365,6 +8592,9 @@ extern "C" int VstLiveLoadPart(int part1to32,
 }
 
 enum { LIVE_PEND_SYSEX_EVENTS = 32 };
+
+static DWORD LiveSendMsg(const LivePart& p, DWORD msg);
+static DWORD LiveOverlayMsg(const LivePart& p, DWORD msg);
 
 static void LivePendPush(LivePart& p, DWORD msg)
 {
@@ -8400,7 +8630,7 @@ static void LivePendFlush(LivePart& p)
 	if (!q.count) return;
 	if (p.effect && p.effect->dispatcher) {
 		LiveDllDirFromEffect(p.effect);
-		const int pi = (int)(&p - g_eng.live);
+		const int pi = (int)(&p - LiveEng().live);
 		VstPendBuf& buf = g_livePend[(pi >= 0 && pi < 32) ? pi : 0];
 		buf.block.reserved = 0;
 		int n = 0, nsx = 0;
@@ -8436,9 +8666,10 @@ static void LivePendFlush(LivePart& p)
 		}
 	}
 	if (p.vst3) {
-		// Vst3MidiShort already accumulates until the next Vst3Process.
-		for (int i = 0; i < q.count; ++i)
-			if (q.ev[i].sysexOff < 0) Vst3MidiShort(p.vst3, q.ev[i].msg, 0);
+		for (int i = 0; i < q.count; ++i) {
+			if (q.ev[i].sysexOff >= 0) continue;
+			Vst3MidiShort(p.vst3, LiveOverlayMsg(p, q.ev[i].msg), 0);
+		}
 	}
 	q.count = 0;
 	q.sysexUsed = 0;
@@ -8459,6 +8690,11 @@ static void LivePanicPart(LivePart& p)
 		LivePendPush(p, (DWORD)((0xb0 | ch) | (120 << 8)));
 		LivePendPush(p, (DWORD)((0xb0 | ch) | (123 << 8)));
 	}
+	/* Do not process() while the UI thread holds g_eng.cs on the way out —
+	   Groove Agent removed() then waits for the audio thread that is waiting
+	   on this same lock. */
+	if (InterlockedCompareExchange(&g_liveShuttingDown, 0, 0))
+		return;
 	// Panic also runs while unloading, where no render follows, so push it out
 	// and give the plug-in the process call that acts on it.
 	LivePendFlush(p);
@@ -8481,6 +8717,15 @@ static void LivePanicRemote()
 static void LiveSongResetPart(LivePart& p)
 {
 	if (!p.effect && !p.vst3 && !p.remote) return;
+	/* Groove Agent / HALion: CC121 empties the kit. CC120 leaves some
+	   plugs silent until a later replay — do not send either here. */
+	if (p.vst3 && NeedsUserPatch(p.path, p.path)) {
+		/* MapMidiCc on CC123/CC64 writes kit parameters. Host MIDI IN is
+		   notes only — leave the MediaBay state alone. */
+		p.pend.count = 0;
+		p.pend.sysexUsed = 0;
+		return;
+	}
 	p.pend.count = 0;
 	p.pend.sysexUsed = 0;
 	for (int ch = 0; ch < 16; ++ch) {
@@ -8743,10 +8988,42 @@ static void LiveSysexDescribe(const unsigned char* d, int n)
 extern "C" void VstLiveAllNotesOff()
 {
 	EnterCriticalSection(&g_eng.cs);
-	for (int i = 0; i < 32; ++i) LivePanicPart(g_eng.live[i]);
+	for (int i = 0; i < 32; ++i) LivePanicPart(LiveEng().live[i]);
 	LeaveCriticalSection(&g_eng.cs);
 	LiveActReset();
 	LivePanicRemote();
+}
+
+extern "C" void VstLiveResetPartsForPlay(void)
+{
+	EnterCriticalSection(&g_eng.cs);
+	for (int i = 0; i < 32; ++i)
+		LiveSongResetPart(LiveEng().live[i]);
+	LeaveCriticalSection(&g_eng.cs);
+	LiveSongResetRemote();
+}
+
+/* Host UI has no SMF GS Reset. SC-VA stays silent on notes until it gets one.
+   Song play is fine because the MID carries GS. Do not send this to VST3. */
+extern "C" void VstLiveWakeHostVst2(void)
+{
+	static const BYTE gsReset[] = {
+		0xf0, 0x41, 0x10, 0x42, 0x12, 0x40, 0x00, 0x7f, 0x00, 0x41, 0xf7
+	};
+	EnterCriticalSection(&g_eng.cs);
+	for (int i = 0; i < 32; ++i) {
+		LivePart& p = LiveEng().live[i];
+		if (!p.effect || p.vst3) continue;
+		LivePendPushSysex(p, gsReset, (int)sizeof(gsReset));
+		BYTE rhy[11], map2[11];
+		GsFillRhythmDt1(rhy, 0x40);
+		GsFillRhythmDt1Map2(map2, 0x40);
+		LivePendPushSysex(p, rhy, 11);
+		LivePendPushSysex(p, map2, 11);
+		LivePendFlush(p);
+		PumpSilent(p.effect, NULL, 8);
+	}
+	LeaveCriticalSection(&g_eng.cs);
 }
 
 /* Soft-closed SampleTank keeps IPlugView on this hidden HWND until unload. */
@@ -8755,10 +9032,14 @@ static HWND g_liveSoftHiddenWnd[33];
 extern "C" void VstLiveUnloadPart(int part1to32)
 {
 	if (part1to32 < 1 || part1to32 > 32) return;
-#ifdef KPIHOST32_BUILD
-	if (InterlockedCompareExchange(&g_liveAbandonPlugins, 0, 0)) {
+	if (LiveAbandonNow()) {
+		{
+			const LivePart& q = LiveEng().live[part1to32 - 1];
+			if (q.vst3 || q.effect || q.module)
+				InterlockedExchange(&g_liveLeftMapped, 1);
+		}
 		if (TryEnterCriticalSection(&g_eng.cs)) {
-			LivePart& p = g_eng.live[part1to32 - 1];
+			LivePart& p = LiveEng().live[part1to32 - 1];
 			p.vst3 = NULL;
 			p.effect = NULL;
 			p.module = NULL;
@@ -8769,10 +9050,9 @@ extern "C" void VstLiveUnloadPart(int part1to32)
 		}
 		return;
 	}
-#endif
 	int wasRemote = 0;
 	EnterCriticalSection(&g_eng.cs);
-	wasRemote = g_eng.live[part1to32 - 1].remote;
+	wasRemote = LiveEng().live[part1to32 - 1].remote;
 	LeaveCriticalSection(&g_eng.cs);
 #ifndef KPIHOST32_BUILD
 	// effEditClose / effClose while KpiHost32 is inside processReplacing is
@@ -8784,24 +9064,40 @@ extern "C" void VstLiveUnloadPart(int part1to32)
 	   — avoid async EDITOR_CLOSE racing a following LoadPart. */
 	if (!wasRemote)
 		VstLiveEditorClose(part1to32);
+	HMODULE dropMod = NULL;
+	AEffect* dropFx = NULL;
+	Vst3Inst* dropV3 = NULL;
 	EnterCriticalSection(&g_eng.cs);
-	LivePanicPart(g_eng.live[part1to32 - 1]);
-	LivePart& p = g_eng.live[part1to32 - 1];
+	LivePanicPart(LiveEng().live[part1to32 - 1]);
+	LivePart& p = LiveEng().live[part1to32 - 1];
 	wasRemote = p.remote;
-	CloseEffect(p.module, p.effect);
-	Vst3Close(p.vst3); p.vst3 = NULL;
+	dropMod = p.module; p.module = NULL;
+	dropFx = p.effect; p.effect = NULL;
+	dropV3 = p.vst3; p.vst3 = NULL;
 	p.isMulti = 0;
 	p.remote = 0;
 	p.edWnd = NULL;
 	p.path[0] = 0;
 	LeaveCriticalSection(&g_eng.cs);
-	/* Soft-close may have left a hidden host HWND (SampleTank); destroy after view gone. */
+	if (LiveAbandonNow()) {
+		if (dropMod || dropFx || dropV3)
+			InterlockedExchange(&g_liveLeftMapped, 1);
+		dropMod = NULL;
+		dropFx = NULL;
+		dropV3 = NULL;
+	} else {
+		CloseEffect(dropMod, dropFx);
+		Vst3Close(dropV3);
+	}
+	/* Soft-close left a hidden host HWND. DestroyWindow walks Groove Agent's
+	   FrameWindowClass and hangs — leftover ogg.exe. Keep it hidden. */
 	{
 		HWND orphan = g_liveSoftHiddenWnd[part1to32];
 		g_liveSoftHiddenWnd[part1to32] = NULL;
 		if (orphan && IsWindow(orphan)) {
 			SetWindowLongPtrW(orphan, GWLP_USERDATA, 0);
-			DestroyWindow(orphan);
+			ShowWindow(orphan, SW_HIDE);
+			EnableWindow(orphan, FALSE);
 		}
 	}
 	if (wasRemote) LiveRemoteUnload(part1to32);
@@ -8817,36 +9113,82 @@ extern "C" void VstLiveEditorCloseAllRemote(void)
 #ifndef KPIHOST32_BUILD
 	if (InterlockedCompareExchange(&g_liveShuttingDown, 0, 0))
 		return;
-	if (InterlockedCompareExchange(&g_appExiting, 0, 0))
-		return;
-	if (!g_kpiHost.EnsureConnected())
+	/* Do not launch KpiHost32 on the way out. If it is already up, close its
+	   editors; leaving them open keeps the host process, and the exe, alive. */
+	if (!g_kpiHost.IsConnected())
 		return;
 	(void)g_kpiHost.VstLiveEditorCloseAll();
 #endif
 }
 
+static BOOL CALLBACK LiveDestroyLeftoverEditorWnd(HWND h, LPARAM)
+{
+	DWORD pid = 0;
+	GetWindowThreadProcessId(h, &pid);
+	if (pid != GetCurrentProcessId()) return TRUE;
+	wchar_t cls[80] = {};
+	if (!GetClassNameW(h, cls, 80)) return TRUE;
+	if (_wcsicmp(cls, L"OggVstLiveEditor") == 0
+		|| _wcsicmp(cls, L"OggVstLiveFxEditor") == 0) {
+		ShowWindow(h, SW_HIDE);
+		EnableWindow(h, FALSE);
+		return TRUE;
+	}
+	/* Groove Agent / HALion / VSTGUI / JUCE frames: Hide only.
+	   DestroyWindow runs their WndProc and hangs like IPlugView::removed. */
+	if (wcsstr(cls, L"FrameWindowClass") != NULL
+		|| wcsstr(cls, L"VSTGUI") != NULL
+		|| wcsstr(cls, L"JUCE") != NULL
+		|| wcsstr(cls, L"Steinberg") != NULL)
+		ShowWindow(h, SW_HIDE);
+	return TRUE;
+}
+
+extern "C" void VstLivePrepareAppExit(void)
+{
+	InterlockedExchange(&g_liveShuttingDown, 1);
+	VstLiveAbandonHostPlugins(1);
+}
+
 extern "C" void VstLiveShutdown(void)
 {
+	VstLiveAbandonHostPlugins(1);
 #ifndef KPIHOST32_BUILD
-	VstLiveEditorCloseAllRemote();
+	VstLiveEditorOpenCancelPending();
 	InterlockedExchange(&g_liveShuttingDown, 1);
+	/* Audio threads first. Unload while process() holds g_eng.cs deadlocks
+	   Groove Agent IPlugView::removed and leaves the exe running. */
+	VstLiveMonitorStop();
+	if (g_vstHostDlg)
+		g_vstHostDlg->StopAudio();
 	LiveRemoteStop();
-	g_kpiHost.VstLiveUnloadAll();
 	g_liveShm.parts = 0;
 #endif
+	/* Tear down Steinberg frames BEFORE any plugin destructor. SC-VA
+	   effClose never returns; if we UnloadPart first, AgentFrameWindowClass
+	   stays and DoModal never ends. */
+	for (int i = 1; i <= 32; ++i)
+		VstLiveEditorClose(i);
+	EnumWindows(LiveDestroyLeftoverEditorWnd, 0);
 	for (int i = 1; i <= 32; ++i) {
 		for (int sl = 0; sl < 2; ++sl)
 			VstLiveUnloadFx(i, sl);
 		VstLiveUnloadPart(i);
 	}
+	EnumWindows(LiveDestroyLeftoverEditorWnd, 0);
 #ifndef KPIHOST32_BUILD
-	InterlockedExchange(&g_liveShuttingDown, 0);
+	if (InterlockedCompareExchange(&g_appExiting, 0, 0))
+		g_kpiHost.RecycleHost();
+	else {
+		VstLiveAbandonHostPlugins(0);
+		InterlockedExchange(&g_liveShuttingDown, 0);
+	}
 #endif
 }
 
 static int LivePartFreeForProbe(int part0)
 {
-	const LivePart& p = g_eng.live[part0];
+	const LivePart& p = LiveEng().live[part0];
 	return (!p.effect && !p.vst3 && !p.remote && !p.module && !p.edWnd) ? 1 : 0;
 }
 
@@ -8869,7 +9211,7 @@ static double PeakOf(const float* l, const float* r, int n)
 static double LiveProbeLocal(int part1to32, int channel0, int note,
 	int velocity, int honourSendCh)
 {
-	LivePart& p = g_eng.live[part1to32 - 1];
+	LivePart& p = LiveEng().live[part1to32 - 1];
 	if (!p.effect && !p.vst3) return 0.0;
 
 	int ch = channel0 & 15;
@@ -8984,7 +9326,7 @@ static int LiveProbePartAudible(int part1to32, int* outPeakMilli,
 	int* outBaseMilli, int* outProgram, int tryPrograms)
 {
 	if (part1to32 < 1 || part1to32 > 32) return 0;
-	const int remote = g_eng.live[part1to32 - 1].remote ? 1 : 0;
+	const int remote = LiveEng().live[part1to32 - 1].remote ? 1 : 0;
 	double base = 0.0;
 	double rise = LiveProbeBothStages(part1to32, remote, &base);
 	int usedProgram = -1;
@@ -9276,7 +9618,7 @@ extern "C" void VstScanVerifyLiveList(HWND parentForWait)
 			continue;
 		}
 		int milli = 0, base = 0, prog = -1;
-		const int wasRemote = g_eng.live[part - 1].remote;
+		const int wasRemote = LiveEng().live[part - 1].remote;
 		int needsPatch = 0;
 		if (!factory && !PathIsSoundFont(p.path)) {
 			const int nprog = VstLiveProgramCount(part);
@@ -9338,7 +9680,7 @@ extern "C" void VstScanVerifyLiveList(HWND parentForWait)
 static int LivePartLoaded(int part)
 {
 	if (part < 0 || part >= 32) return 0;
-	const LivePart& p = g_eng.live[part];
+	const LivePart& p = LiveEng().live[part];
 	return (p.effect || p.vst3 || p.remote) ? 1 : 0;
 }
 
@@ -9353,14 +9695,14 @@ static int LiveFxValid(int part1to32, int slot0to1)
 static void LiveFxCloseEditor(int part1to32, int slot0to1)
 {
 	if (!LiveFxValid(part1to32, slot0to1)) return;
-	LiveFxSlot& fx = g_eng.liveFx[part1to32 - 1][slot0to1];
+	LiveFxSlot& fx = LiveEng().liveFx[part1to32 - 1][slot0to1];
 	HWND h = fx.edWnd;
 	fx.edWnd = NULL;
 	if (h && IsWindow(h)) {
 		KillTimer(h, 1);
 		ShowWindow(h, SW_HIDE);
 	}
-	if (fx.vst3) Vst3EditorClose(fx.vst3);
+	if (fx.vst3) Vst3EditorCloseEx(fx.vst3, 1);
 	if (fx.effect && fx.effect->dispatcher) {
 		__try { fx.effect->dispatcher(fx.effect, effEditClose, 0, 0, NULL, 0); }
 		__except (EXCEPTION_EXECUTE_HANDLER) {}
@@ -9377,7 +9719,7 @@ static LRESULT CALLBACK LiveFxEditorWndProc(HWND h, UINT m, WPARAM w, LPARAM l)
 	const int part = (code >> 8) & 0xFF;
 	const int slot = code & 0xFF;
 	if (LiveFxValid(part, slot)) {
-		LiveFxSlot& fx = g_eng.liveFx[part - 1][slot];
+		LiveFxSlot& fx = LiveEng().liveFx[part - 1][slot];
 		if (m == WM_TIMER && w == 1) {
 			if (fx.effect && fx.effect->dispatcher) {
 				__try { fx.effect->dispatcher(fx.effect, effEditIdle, 0, 0, NULL, 0); }
@@ -9422,7 +9764,7 @@ extern "C" int VstLiveLoadFx(int part1to32, int slot0to1,
 {
 	if (!LiveFxValid(part1to32, slot0to1) || !pluginPath || !pluginPath[0]) return -1;
 	LiveFxCloseEditor(part1to32, slot0to1);
-	LiveFxSlot& fx = g_eng.liveFx[part1to32 - 1][slot0to1];
+	LiveFxSlot& fx = LiveEng().liveFx[part1to32 - 1][slot0to1];
 	EnterCriticalSection(&g_eng.cs);
 	CloseEffect(fx.module, fx.effect);
 	Vst3Close(fx.vst3); fx.vst3 = NULL;
@@ -9460,19 +9802,33 @@ extern "C" void VstLiveUnloadFx(int part1to32, int slot0to1)
 {
 	if (!LiveFxValid(part1to32, slot0to1)) return;
 	LiveFxCloseEditor(part1to32, slot0to1);
+	HMODULE dropMod = NULL;
+	AEffect* dropFx = NULL;
+	Vst3Inst* dropV3 = NULL;
 	EnterCriticalSection(&g_eng.cs);
-	LiveFxSlot& fx = g_eng.liveFx[part1to32 - 1][slot0to1];
-	CloseEffect(fx.module, fx.effect);
-	Vst3Close(fx.vst3); fx.vst3 = NULL;
+	LiveFxSlot& fx = LiveEng().liveFx[part1to32 - 1][slot0to1];
+	dropMod = fx.module; fx.module = NULL;
+	dropFx = fx.effect; fx.effect = NULL;
+	dropV3 = fx.vst3; fx.vst3 = NULL;
 	fx.bypass = 0;
 	fx.path[0] = 0;
 	LeaveCriticalSection(&g_eng.cs);
+	if (LiveAbandonNow()) {
+		if (dropMod || dropFx || dropV3)
+			InterlockedExchange(&g_liveLeftMapped, 1);
+		dropMod = NULL;
+		dropFx = NULL;
+		dropV3 = NULL;
+	} else {
+		CloseEffect(dropMod, dropFx);
+		Vst3Close(dropV3);
+	}
 }
 
 extern "C" int VstLiveFxIsLoaded(int part1to32, int slot0to1)
 {
 	if (!LiveFxValid(part1to32, slot0to1)) return 0;
-	const LiveFxSlot& fx = g_eng.liveFx[part1to32 - 1][slot0to1];
+	const LiveFxSlot& fx = LiveEng().liveFx[part1to32 - 1][slot0to1];
 	return (fx.effect || fx.vst3) ? 1 : 0;
 }
 
@@ -9480,14 +9836,14 @@ extern "C" int VstLiveFxGetPath(int part1to32, int slot0to1, wchar_t* outPath, i
 {
 	if (outPath && outCch > 0) outPath[0] = 0;
 	if (!LiveFxValid(part1to32, slot0to1) || !outPath || outCch <= 0) return 0;
-	wcsncpy_s(outPath, outCch, g_eng.liveFx[part1to32 - 1][slot0to1].path, _TRUNCATE);
+	wcsncpy_s(outPath, outCch, LiveEng().liveFx[part1to32 - 1][slot0to1].path, _TRUNCATE);
 	return outPath[0] ? 1 : 0;
 }
 
 extern "C" int VstLiveFxParamCount(int part1to32, int slot0to1)
 {
 	if (!LiveFxValid(part1to32, slot0to1)) return 0;
-	LiveFxSlot& fx = g_eng.liveFx[part1to32 - 1][slot0to1];
+	LiveFxSlot& fx = LiveEng().liveFx[part1to32 - 1][slot0to1];
 	if (fx.vst3) return Vst3ParamCount(fx.vst3);
 	if (fx.effect) return fx.effect->numParams > 0 ? fx.effect->numParams : 0;
 	return 0;
@@ -9496,7 +9852,7 @@ extern "C" int VstLiveFxParamCount(int part1to32, int slot0to1)
 extern "C" float VstLiveFxGetParam(int part1to32, int slot0to1, int paramIndex)
 {
 	if (!LiveFxValid(part1to32, slot0to1) || paramIndex < 0) return 0.0f;
-	LiveFxSlot& fx = g_eng.liveFx[part1to32 - 1][slot0to1];
+	LiveFxSlot& fx = LiveEng().liveFx[part1to32 - 1][slot0to1];
 	if (fx.vst3) return Vst3GetParam(fx.vst3, paramIndex);
 	if (fx.effect && paramIndex < fx.effect->numParams && fx.effect->getParameter)
 		return fx.effect->getParameter(fx.effect, paramIndex);
@@ -9508,7 +9864,7 @@ extern "C" int VstLiveFxSetParam(int part1to32, int slot0to1, int paramIndex, fl
 	if (!LiveFxValid(part1to32, slot0to1) || paramIndex < 0) return 0;
 	if (value01 < 0.0f) value01 = 0.0f;
 	if (value01 > 1.0f) value01 = 1.0f;
-	LiveFxSlot& fx = g_eng.liveFx[part1to32 - 1][slot0to1];
+	LiveFxSlot& fx = LiveEng().liveFx[part1to32 - 1][slot0to1];
 	if (fx.vst3) return Vst3SetParam(fx.vst3, paramIndex, value01);
 	if (fx.effect && paramIndex < fx.effect->numParams && fx.effect->setParameter) {
 		fx.effect->setParameter(fx.effect, paramIndex, value01);
@@ -9521,7 +9877,7 @@ extern "C" int VstLiveFxParamName(int part1to32, int slot0to1, int paramIndex, w
 {
 	if (out && outChars > 0) out[0] = 0;
 	if (!LiveFxValid(part1to32, slot0to1) || !out || outChars <= 0 || paramIndex < 0) return 0;
-	LiveFxSlot& fx = g_eng.liveFx[part1to32 - 1][slot0to1];
+	LiveFxSlot& fx = LiveEng().liveFx[part1to32 - 1][slot0to1];
 	if (fx.vst3) return Vst3ParamName(fx.vst3, paramIndex, out, outChars);
 	if (fx.effect && fx.effect->dispatcher && paramIndex < fx.effect->numParams) {
 		char nm[64] = {};
@@ -9536,7 +9892,7 @@ extern "C" int VstLiveFxParamDisplay(int part1to32, int slot0to1, int paramIndex
 {
 	if (out && outChars > 0) out[0] = 0;
 	if (!LiveFxValid(part1to32, slot0to1) || !out || outChars <= 0 || paramIndex < 0) return 0;
-	LiveFxSlot& fx = g_eng.liveFx[part1to32 - 1][slot0to1];
+	LiveFxSlot& fx = LiveEng().liveFx[part1to32 - 1][slot0to1];
 	if (fx.vst3) return Vst3ParamDisplay(fx.vst3, paramIndex, out, outChars);
 	if (fx.effect && fx.effect->dispatcher && paramIndex < fx.effect->numParams) {
 		char nm[64] = {};
@@ -9550,7 +9906,7 @@ extern "C" int VstLiveFxParamDisplay(int part1to32, int slot0to1, int paramIndex
 extern "C" int VstLiveFxEditorOpen(int part1to32, int slot0to1)
 {
 	if (!LiveFxValid(part1to32, slot0to1)) return -1;
-	LiveFxSlot& fx = g_eng.liveFx[part1to32 - 1][slot0to1];
+	LiveFxSlot& fx = LiveEng().liveFx[part1to32 - 1][slot0to1];
 	if (!fx.effect && !fx.vst3) return -2;
 	if (fx.edWnd && IsWindow(fx.edWnd)) {
 		ShowWindow(fx.edWnd, SW_SHOW);
@@ -9586,13 +9942,13 @@ extern "C" int VstLiveFxEditorOpen(int part1to32, int slot0to1)
 extern "C" void VstLiveFxSetBypass(int part1to32, int slot0to1, int bypass)
 {
 	if (!LiveFxValid(part1to32, slot0to1)) return;
-	g_eng.liveFx[part1to32 - 1][slot0to1].bypass = bypass ? 1 : 0;
+	LiveEng().liveFx[part1to32 - 1][slot0to1].bypass = bypass ? 1 : 0;
 }
 
 extern "C" int VstLiveFxGetBypass(int part1to32, int slot0to1)
 {
 	if (!LiveFxValid(part1to32, slot0to1)) return 0;
-	return g_eng.liveFx[part1to32 - 1][slot0to1].bypass ? 1 : 0;
+	return LiveEng().liveFx[part1to32 - 1][slot0to1].bypass ? 1 : 0;
 }
 
 extern "C" int VstLiveFxCaptureState(int part1to32, int slot0to1,
@@ -9601,7 +9957,7 @@ extern "C" int VstLiveFxCaptureState(int part1to32, int slot0to1,
 	if (outBytes) *outBytes = NULL;
 	if (outLen) *outLen = 0;
 	if (!LiveFxValid(part1to32, slot0to1) || !outBytes || !outLen) return 0;
-	LiveFxSlot& fx = g_eng.liveFx[part1to32 - 1][slot0to1];
+	LiveFxSlot& fx = LiveEng().liveFx[part1to32 - 1][slot0to1];
 	int ok = 0;
 	EnterCriticalSection(&g_eng.cs);
 	if (fx.vst3) {
@@ -9627,7 +9983,7 @@ extern "C" int VstLiveFxApplyState(int part1to32, int slot0to1,
 	const unsigned char* bytes, int len)
 {
 	if (!LiveFxValid(part1to32, slot0to1) || !bytes || len <= 0) return 0;
-	LiveFxSlot& fx = g_eng.liveFx[part1to32 - 1][slot0to1];
+	LiveFxSlot& fx = LiveEng().liveFx[part1to32 - 1][slot0to1];
 	int ok = 0;
 	EnterCriticalSection(&g_eng.cs);
 	if (fx.vst3) {
@@ -9657,15 +10013,23 @@ extern "C" int VstLiveAnyRemotePart(void)
 	return 0;
 }
 
+extern "C" int VstLiveAnyLocalVst3(void)
+{
+	for (int i = 0; i < 32; ++i)
+		if (LiveEng().live[i].vst3)
+			return 1;
+	return 0;
+}
+
 extern "C" int VstLivePartEditorIsOpen(int part1to32)
 {
 	if (part1to32 < 1 || part1to32 > 32) return 0;
 #ifdef KPIHOST32_BUILD
-	HWND h = g_eng.live[part1to32 - 1].edWnd;
+	HWND h = LiveEng().live[part1to32 - 1].edWnd;
 	return (h && IsWindow(h)) ? 1 : 0;
 #else
 	{
-		HWND h = g_eng.live[part1to32 - 1].edWnd;
+		HWND h = LiveEng().live[part1to32 - 1].edWnd;
 		if (h && IsWindow(h)) return 1;
 	}
 	LiveEdNotifyOpen();
@@ -9683,7 +10047,7 @@ extern "C" int VstLivePartGetPath(int part1to32, wchar_t* outPath, int outCch)
 	if (part1to32 < 1 || part1to32 > 32 || !outPath || outCch < 2) return 0;
 	outPath[0] = 0;
 	EnterCriticalSection(&g_eng.cs);
-	const LivePart& p = g_eng.live[part1to32 - 1];
+	const LivePart& p = LiveEng().live[part1to32 - 1];
 	if (p.path[0])
 		wcsncpy_s(outPath, outCch, p.path, _TRUNCATE);
 	LeaveCriticalSection(&g_eng.cs);
@@ -9697,36 +10061,91 @@ static int LiveMultiPart(int portIndex0to2)
 {
 	const int blockStart = portIndex0to2 * 16;
 	for (int i = blockStart; i < blockStart + 16 && i < 32; ++i)
-		if (g_eng.live[i].isMulti && LivePartLoaded(i))
+		if (LiveEng().live[i].isMulti && LivePartLoaded(i))
 			return i;
 	return -1;
 }
 
-/* Score / per-channel VSTs (SampleTank + Groove Agent + HALion…): each MIDI
-   channel maps to its own live part. Multi-timbral alone keeps port-wide
-   routing (LiveMultiPart). Any loaded non-multi part → channel mode. */
-static int LivePortChannelMode(int portIndex0to2)
+/* Overlay slot: a dedicated plug (Groove Agent, HALion, …) replaces this
+   MIDI channel. Every other channel stays on the VST2 multi (SC-VA).
+   Up to 32 overlays; loading one VST3 must not take the port off SC-VA. */
+static int LiveChannelDedicated(int chPart)
 {
-	if (portIndex0to2 < 0 || portIndex0to2 > 2) return 0;
-	const int b0 = portIndex0to2 * 16;
-	int nMono = 0, nMulti = 0;
-	for (int i = b0; i < b0 + 16 && i < 32; ++i) {
-		if (!LivePartLoaded(i)) continue;
-		if (g_eng.live[i].isMulti) nMulti++;
-		else nMono++;
-	}
-	if (nMono > 0) return 1;
-	if (nMulti > 1) return 1; /* odd: treat as per-ch */
-	return 0;
+	if (chPart < 0 || chPart >= 32) return 0;
+	if (!LivePartLoaded(chPart)) return 0;
+	if (LiveEng().live[chPart].isMulti) return 0;
+	return 1;
 }
 
 // The part decides which channel its plug-in sees. Status 0xF0 and above
 // carries no channel, so it passes through untouched.
+// A multi (SC-VA) must keep ch1-9 and ch11-16 distinct. Folding them onto
+// sendCh would park every program change on one part and leave the rest
+// on the default tone.
 static DWORD LiveSendMsg(const LivePart& p, DWORD msg)
 {
 	const DWORD st = msg & 0xf0;
-	if (p.sendCh < 0 || st < 0x80 || st >= 0xf0) return msg;
+	if (p.isMulti || p.sendCh < 0 || st < 0x80 || st >= 0xf0) return msg;
 	return (msg & ~(DWORD)0x0f) | (DWORD)(p.sendCh & 15);
+}
+
+/* Same channel the host MIDI IN uses. Folding song notes onto ch0 while the
+   host kept the device channel left Groove Agent silent on mid/mp*. */
+static DWORD LiveOverlayMsg(const LivePart& p, DWORD msg)
+{
+	const DWORD st = msg & 0xf0;
+	if (st < 0x80 || st >= 0xf0) return msg;
+	return LiveSendMsg(p, msg);
+}
+
+/* Host MIDI IN / 鍵盤 are notes (and AT / bend). SMF CC/PC go through
+   MapMidiCc onto Groove Agent / HALion kit parameters and empty the
+   MediaBay slot the host already loaded. Notes still reach the kit. */
+static int LiveVst3SkipSongTone(DWORD msg)
+{
+	if (!InterlockedCompareExchange(&g_songUseLiveBinds, 0, 0))
+		return 0;
+	const DWORD st = msg & 0xf0;
+	return (st == 0xb0 || st == 0xc0) ? 1 : 0;
+}
+
+/* Last bank select seen on the way into a live multi. SC-VA maps
+   CC0=1..125 with CC32=1 onto an empty 14-bit slot, so the tone misses.
+   The song engine inserts CC32=0 before that PC; the live grid must too. */
+static BYTE g_liveBankMsb[3][16];
+static BYTE g_liveBankLsb[3][16];
+
+static void LiveRememberBank(int port, DWORD msg)
+{
+	if ((msg & 0xf0) != 0xb0) return;
+	if (port < 0) port = 0;
+	if (port > 2) port = 2;
+	const int ch = (int)(msg & 15);
+	const int cc = (int)((msg >> 8) & 0x7f);
+	const int v = (int)((msg >> 16) & 0x7f);
+	if (cc == 0) g_liveBankMsb[port][ch] = (BYTE)v;
+	else if (cc == 32) g_liveBankLsb[port][ch] = (BYTE)v;
+}
+
+static void LiveBankClear()
+{
+	memset(g_liveBankMsb, 0, sizeof(g_liveBankMsb));
+	memset(g_liveBankLsb, 0, sizeof(g_liveBankLsb));
+}
+
+/* 1 = pushed a CC32=0 that the multi needs before this program change. */
+static int LiveBankFixBeforePc(LivePart& p, int port, DWORD msg)
+{
+	if (!p.isMulti || (msg & 0xf0) != 0xc0) return 0;
+	if (port < 0) port = 0;
+	if (port > 2) port = 2;
+	const int ch = (int)(msg & 15);
+	const int msb = g_liveBankMsb[port][ch];
+	const int lsb = g_liveBankLsb[port][ch];
+	if (msb < 1 || msb > 125 || lsb != 1) return 0;
+	LivePendPush(p, (DWORD)(0xb0 | ch) | (32u << 8));
+	g_liveBankLsb[port][ch] = 0;
+	return 1;
 }
 
 static volatile LONG g_thruOn = 0;
@@ -10025,6 +10444,18 @@ extern "C" void VstLiveThruPcmPush(const BYTE* pcm, int bytes, int rate, int ch,
 extern "C" void VstLiveThruPcmMix(float* L, float* R, int frames)
 {
 	if (!g_thruOn || !L || !R || frames <= 0 || !g_thruPcmCsOn) return;
+	/* Live parts already render this SMF. Mixing the player's PCM on top is
+	   the all-channel noise (and it steals Groove Agent's drum slot). */
+	if (VstSongUseLiveBinds())
+		return;
+	{
+		int any = 0;
+		EnterCriticalSection(&g_eng.cs);
+		for (int i = 0; i < 32; ++i)
+			if (LivePartLoaded(i)) { any = 1; break; }
+		LeaveCriticalSection(&g_eng.cs);
+		if (any) return;
+	}
 	EnterCriticalSection(&g_thruPcmCs);
 	const int rate = g_thruFmtRate;
 	if (rate >= 8000 && g_thruFmtBpf >= 1) {
@@ -10061,6 +10492,10 @@ extern "C" void VstLiveThruPcmMix(float* L, float* R, int frames)
 extern "C" void VstLiveThruPoll(__int64 playSample)
 {
 	if (!g_thruOn) return;
+	/* Song engine already feeds the same live parts. Polling the SMF here
+	   doubles every note into SC-VA. */
+	if (VstSongUseLiveBinds())
+		return;
 	if (g_thruPcmPb >= 0) {
 		const __int64 d = playSample - g_thruPcmPb;
 		if (d < -(SAMPLE_RATE / 5) || d > (__int64)SAMPLE_RATE * 2)
@@ -10122,14 +10557,7 @@ extern "C" void VstLiveMidiSongShort(int portIndex0to2, DWORD shortMsg)
 {
 	if (portIndex0to2 < 0) portIndex0to2 = 0;
 	if (portIndex0to2 > 2) portIndex0to2 = 2;
-	/* Multiple live instruments (score) OR any dedicated part → per-part aim.
-	   Sole multi (SC-VA) keeps classic port-wide routing. */
-	const int multiOnly = (LiveMultiPart(portIndex0to2) >= 0 && !LivePortChannelMode(portIndex0to2));
-	if (!multiOnly) {
-		const int chPart = portIndex0to2 * 16 + (int)(shortMsg & 15);
-		VstLiveMidiToPart(chPart + 1, shortMsg);
-		return;
-	}
+	/* Dedicated plug on this channel, otherwise the shared multi. */
 	VstLiveMidiShort(portIndex0to2, shortMsg);
 }
 
@@ -10137,18 +10565,40 @@ extern "C" void VstLiveMidiToPart(int part1to32, DWORD shortMsg)
 {
 	if (part1to32 < 1 || part1to32 > 32) return;
 	const int part = part1to32 - 1;
-	EnterCriticalSection(&g_eng.cs);
-	if (LivePartLoaded(part)) {
-		LivePart& lp = g_eng.live[part];
-		if (lp.effect || lp.vst3)
-			LivePendPush(lp, LiveSendMsg(lp, shortMsg));
+	const DWORD st = shortMsg & 0xf0;
+	int loaded = 0;
+	int remote = 0;
+	int skipTone = 0;
+	EnterCriticalSection(&LiveEng().cs);
+	loaded = LivePartLoaded(part);
+	if (loaded) {
+		LivePart& lp = LiveEng().live[part];
+		remote = lp.remote ? 1 : 0;
+		/* VST2 multi keeps SMF channels. Overlay VST3 always hits part 1. */
+		if (!lp.isMulti && (lp.effect || lp.vst3))
+			shortMsg = LiveOverlayMsg(lp, shortMsg);
+		skipTone = (!lp.isMulti && (lp.vst3 || lp.remote) && LiveVst3SkipSongTone(shortMsg)) ? 1 : 0;
+		if (!skipTone && !remote && (lp.effect || lp.vst3)) {
+			LivePendPush(lp, shortMsg);
+			if (lp.vst3) {
+				const DWORD m0 = shortMsg & ~(DWORD)0x0f;
+				if (m0 != shortMsg)
+					LivePendPush(lp, m0);
+			}
+		}
 	}
-	LeaveCriticalSection(&g_eng.cs);
+	LeaveCriticalSection(&LiveEng().cs);
+	if (!loaded) {
+		if (st >= 0x80 && st < 0xf0)
+			shortMsg = (shortMsg & ~(DWORD)0x0f) | (DWORD)(part & 15);
+		/* Empty slot still belongs to the covering multi (SC-VA). */
+		VstLiveMidiShort(part / 16, shortMsg);
+		return;
+	}
 	const int port = part / 16;
-	/* Activity map uses MIDI channel nibble; keep original msg channel. */
 	LiveActTrack(port, shortMsg);
 #ifndef KPIHOST32_BUILD
-	if (LiveRemoteEnsureForSong() || LiveRemoteActive())
+	if (remote && !skipTone)
 		LiveRemoteMidiToPart(part1to32, shortMsg);
 #endif
 }
@@ -10157,40 +10607,56 @@ extern "C" void VstLiveMidiShort(int portIndex0to2, DWORD shortMsg)
 {
 	if (portIndex0to2 < 0 || portIndex0to2 > 2) return;
 	const int chPart = portIndex0to2 * 16 + (int)(shortMsg & 15);
-	/* Channel-mode score: never steal other channels into a multi. */
-	if (LivePortChannelMode(portIndex0to2)) {
-		VstLiveMidiToPart(chPart + 1, shortMsg);
+	int remote = 0;
+	EnterCriticalSection(&LiveEng().cs);
+	if (LiveChannelDedicated(chPart)) {
+		/* Overlay replaces this channel. Do not also feed SC-VA. */
+		LivePart& ov = LiveEng().live[chPart];
+		DWORD msg = LiveOverlayMsg(ov, shortMsg);
+		const int skipTone = (ov.vst3 || ov.remote) && !ov.isMulti && LiveVst3SkipSongTone(msg);
+		if (ov.remote)
+			remote = 1;
+		else if (!skipTone && (ov.effect || ov.vst3)) {
+			LivePendPush(ov, msg);
+			if (ov.vst3) {
+				const DWORD m0 = msg & ~(DWORD)0x0f;
+				if (m0 != msg)
+					LivePendPush(ov, m0);
+			}
+		}
+		LeaveCriticalSection(&LiveEng().cs);
+		LiveActTrack(portIndex0to2, shortMsg);
+#ifndef KPIHOST32_BUILD
+		if (remote && !skipTone)
+			LiveRemoteMidiToPart(chPart + 1, msg);
+#endif
 		return;
 	}
-	EnterCriticalSection(&g_eng.cs);
+	/* Default VST2 multi: keep the SMF channel as-is. */
+	LiveRememberBank(portIndex0to2, shortMsg);
 	const int multi = LiveMultiPart(portIndex0to2);
 	int part = (multi >= 0) ? multi : chPart;
-	if (LivePartLoaded(chPart) && !g_eng.live[chPart].isMulti)
-		part = chPart;
-	int localPlug = 0;
 	if (part >= 0 && part < 32 && LivePartLoaded(part)) {
-		LivePart& lp = g_eng.live[part];
-		if (lp.effect || lp.vst3) {
+		LivePart& lp = LiveEng().live[part];
+		if (lp.remote)
+			remote = 1;
+		else if (lp.effect || lp.vst3) {
+			LiveBankFixBeforePc(lp, portIndex0to2, shortMsg);
 			LivePendPush(lp, LiveSendMsg(lp, shortMsg));
-			localPlug = 1;
 		}
 	}
-	LeaveCriticalSection(&g_eng.cs);
+	LeaveCriticalSection(&LiveEng().cs);
 	LiveActTrack(portIndex0to2, shortMsg);
 #ifndef KPIHOST32_BUILD
-	if (LiveRemoteEnsureForSong() || LiveRemoteActive())
+	if (remote)
 		LiveRemoteMidi(portIndex0to2, shortMsg);
-	else
-		(void)localPlug;
-#else
-	(void)localPlug;
 #endif
 }
 
 extern "C" int VstLiveSendChannel(int part1to32)
 {
 	if (part1to32 < 1 || part1to32 > 32) return -1;
-	return g_eng.live[part1to32 - 1].sendCh;
+	return LiveEng().live[part1to32 - 1].sendCh;
 }
 
 extern "C" void VstLiveSetSendChannel(int part1to32, int sendCh)
@@ -10198,7 +10664,7 @@ extern "C" void VstLiveSetSendChannel(int part1to32, int sendCh)
 	if (part1to32 < 1 || part1to32 > 32) return;
 	if (sendCh > 15) sendCh = 15;
 	if (sendCh < 0) sendCh = -1;
-	LivePart& p = g_eng.live[part1to32 - 1];
+	LivePart& p = LiveEng().live[part1to32 - 1];
 	EnterCriticalSection(&g_eng.cs);
 	// Whatever is held on the old channel would never get its note-off.
 	if (p.sendCh != sendCh && (p.effect || p.vst3)) LivePanicPart(p);
@@ -10237,7 +10703,7 @@ static int LivePartSkipProgramList(const LivePart& p)
 extern "C" int VstLiveProgramCount(int part1to32)
 {
 	if (part1to32 < 1 || part1to32 > 32) return 0;
-	LivePart& p = g_eng.live[part1to32 - 1];
+	LivePart& p = LiveEng().live[part1to32 - 1];
 	if (LivePartSkipProgramList(p)) return 0;
 #ifndef KPIHOST32_BUILD
 	if (p.remote) {
@@ -10256,7 +10722,7 @@ extern "C" int VstLiveProgramCount(int part1to32)
 extern "C" int VstLiveProgramCurrent(int part1to32)
 {
 	if (part1to32 < 1 || part1to32 > 32) return -1;
-	LivePart& p = g_eng.live[part1to32 - 1];
+	LivePart& p = LiveEng().live[part1to32 - 1];
 	if (LivePartSkipProgramList(p))
 		return p.prog >= 0 ? p.prog : -1;
 #ifndef KPIHOST32_BUILD
@@ -10280,7 +10746,7 @@ extern "C" int VstLiveProgramName(int part1to32, int index, wchar_t* out,
 	if (!out || outChars <= 0) return 0;
 	out[0] = 0;
 	if (part1to32 < 1 || part1to32 > 32 || index < 0) return 0;
-	LivePart& p = g_eng.live[part1to32 - 1];
+	LivePart& p = LiveEng().live[part1to32 - 1];
 	if (LivePartSkipProgramList(p)) return 0;
 #ifndef KPIHOST32_BUILD
 	if (p.remote) {
@@ -10313,7 +10779,7 @@ extern "C" int VstLiveProgramNames(int part1to32, int first, int count,
 	if (!out || stride <= 1 || count <= 0 || first < 0) return 0;
 	if (part1to32 < 1 || part1to32 > 32) return 0;
 	for (int i = 0; i < count; ++i) out[(size_t)i * stride] = 0;
-	LivePart& p = g_eng.live[part1to32 - 1];
+	LivePart& p = LiveEng().live[part1to32 - 1];
 	if (LivePartSkipProgramList(p)) return 0;
 #ifndef KPIHOST32_BUILD
 	if (p.remote) {
@@ -10338,7 +10804,7 @@ extern "C" int VstLiveProgramNames(int part1to32, int first, int count,
 extern "C" int VstLiveSetProgram(int part1to32, int index)
 {
 	if (part1to32 < 1 || part1to32 > 32 || index < 0) return 0;
-	LivePart& p = g_eng.live[part1to32 - 1];
+	LivePart& p = LiveEng().live[part1to32 - 1];
 #ifndef KPIHOST32_BUILD
 	if (p.remote) {
 		if (!g_kpiHost.VstLiveSetProgram((uint32_t)part1to32, (uint32_t)index))
@@ -10366,13 +10832,13 @@ extern "C" int VstLiveSetProgram(int part1to32, int index)
 extern "C" int VstLivePartIsMulti(int part1to32)
 {
 	if (part1to32 < 1 || part1to32 > 32) return 0;
-	return g_eng.live[part1to32 - 1].isMulti ? 1 : 0;
+	return LiveEng().live[part1to32 - 1].isMulti ? 1 : 0;
 }
 
 static void LivePartPushShort(int part1to32, DWORD msg)
 {
 	if (part1to32 < 1 || part1to32 > 32) return;
-	LivePart& p = g_eng.live[part1to32 - 1];
+	LivePart& p = LiveEng().live[part1to32 - 1];
 	const DWORD out = LiveSendMsg(p, msg);
 #ifndef KPIHOST32_BUILD
 	/* Remote (SC-VA via Host32): SHM only — never wait on g_eng.cs held by
@@ -10396,7 +10862,7 @@ extern "C" void VstLiveSendBankProgram(int part1to32, int bankMsb, int bankLsb, 
 	bankMsb &= 127;
 	bankLsb &= 127;
 	prog0to127 &= 127;
-	LivePart& p = g_eng.live[part1to32 - 1];
+	LivePart& p = LiveEng().live[part1to32 - 1];
 	const int ch = LivePartSendCh(p, part1to32) & 15;
 	LivePartPushShort(part1to32, (DWORD)(0xb0 | ch) | (0u << 8) | ((DWORD)bankMsb << 16));
 	LivePartPushShort(part1to32, (DWORD)(0xb0 | ch) | (32u << 8) | ((DWORD)bankLsb << 16));
@@ -10479,7 +10945,7 @@ extern "C" void VstLiveAuditionNote(int part1to32, int noteMidi, int velocity, i
 	if (velocity > 127) velocity = 127;
 	if (durMs < 40) durMs = 40;
 	if (durMs > 2000) durMs = 2000;
-	LivePart& p = g_eng.live[part1to32 - 1];
+	LivePart& p = LiveEng().live[part1to32 - 1];
 	const int ch = LivePartSendCh(p, part1to32) & 15;
 	const DWORD noteOn = (DWORD)(0x90 | ch) | ((DWORD)noteMidi << 8) | ((DWORD)velocity << 16);
 	const DWORD noteOff = (DWORD)(0x80 | ch) | ((DWORD)noteMidi << 8);
@@ -10501,29 +10967,34 @@ extern "C" void VstLiveMidiSysex(int portIndex0to2, const unsigned char* data,
 {
 	if (portIndex0to2 < 0 || portIndex0to2 > 2 || !data || bytes <= 0) return;
 	LiveSysexDescribe(data, bytes);
+	if (VstMidiSysexIsGsReset(data, bytes) || VstMidiSysexIsGmOn(data, bytes) ||
+		VstMidiSysexIsXgOn(data, bytes))
+		LiveBankClear();
 #ifndef KPIHOST32_BUILD
 	if (LiveRemoteActive())
 		g_kpiHost.VstLiveSysex((uint32_t)portIndex0to2, data, (uint32_t)bytes);
 #endif
-	EnterCriticalSection(&g_eng.cs);
+	EnterCriticalSection(&LiveEng().cs);
 	int part = LiveMultiPart(portIndex0to2);
 	if (part < 0) {
 		const int b0 = portIndex0to2 * 16;
 		for (int i = b0; i < b0 + 16 && i < 32; ++i)
 			if (LivePartLoaded(i)) { part = i; break; }
 	}
-	/* Fan-out GS/XG reset to every loaded part on this port (multi-VST score). */
-	if (part >= 0 && part < 32)
-		LivePendPushSysex(g_eng.live[part], data, bytes);
+	/* GS/XG reset is for the VST2 multi (SC-VA). Overlay VST3 kits must not
+	   see it — process() stalls and the song buffer underruns. */
+	if (part >= 0 && part < 32 && !LiveEng().live[part].vst3)
+		LivePendPushSysex(LiveEng().live[part], data, bytes);
 	{
 		const int b0 = portIndex0to2 * 16;
 		for (int i = b0; i < b0 + 16 && i < 32; ++i) {
 			if (i == part) continue;
 			if (!LivePartLoaded(i)) continue;
-			LivePendPushSysex(g_eng.live[i], data, bytes);
+			if (LiveEng().live[i].vst3) continue;
+			LivePendPushSysex(LiveEng().live[i], data, bytes);
 		}
 	}
-	LeaveCriticalSection(&g_eng.cs);
+	LeaveCriticalSection(&LiveEng().cs);
 }
 
 // The plug-in draws its own editor, and VST2 requires effEditIdle for the
@@ -10552,7 +11023,7 @@ static void LiveCloseSnapCapture(int part1to32)
 {
 	if (part1to32 < 1 || part1to32 > 32) return;
 	LiveCloseSnapClear(part1to32);
-	LivePart& p = g_eng.live[part1to32 - 1];
+	LivePart& p = LiveEng().live[part1to32 - 1];
 	if (!p.vst3) return;
 	/* Soft-close path holds editPause and keeps the view — getState here is OK.
 	   (Old skip was for DestroyWindow/removed hang racing GET from ogg.) */
@@ -10636,7 +11107,7 @@ extern "C" int VstLiveGetState(int part1to32, int which, unsigned char** outByte
 		*outLen = g_closeSnapCtrlLen[part1to32];
 		return 1;
 	}
-	LivePart& p = g_eng.live[part1to32 - 1];
+	LivePart& p = LiveEng().live[part1to32 - 1];
 #ifndef KPIHOST32_BUILD
 	if (p.remote) {
 		/* Pipe returns Host32 close-snap when present; Host32 skips live getState
@@ -10682,7 +11153,7 @@ extern "C" int VstLiveSetState(int part1to32, int which, const unsigned char* by
 {
 	if (part1to32 < 1 || part1to32 > 32 || which < 0 || which > 1 || !bytes || len <= 0)
 		return 0;
-	LivePart& p = g_eng.live[part1to32 - 1];
+	LivePart& p = LiveEng().live[part1to32 - 1];
 #ifndef KPIHOST32_BUILD
 	if (p.remote) {
 		return g_kpiHost.VstLiveSetState((uint32_t)part1to32, (uint32_t)which,
@@ -10710,7 +11181,7 @@ extern "C" int VstLiveApplyStates(int part1to32,
 	const unsigned char* ctrl, int ctrlLen)
 {
 	if (part1to32 < 1 || part1to32 > 32 || !comp || compLen <= 0) return 0;
-	LivePart& p = g_eng.live[part1to32 - 1];
+	LivePart& p = LiveEng().live[part1to32 - 1];
 #ifndef KPIHOST32_BUILD
 	if (p.remote) {
 		if (!g_kpiHost.VstLiveSetState((uint32_t)part1to32, 0, comp, (uint32_t)compLen))
@@ -10721,13 +11192,14 @@ extern "C" int VstLiveApplyStates(int part1to32,
 	}
 #endif
 	int ok = 0;
-	EnterCriticalSection(&g_eng.cs);
+	EnterCriticalSection(&LiveEng().cs);
 	if (p.vst3)
 		ok = Vst3ApplyStates(p.vst3, comp, compLen, ctrl, ctrlLen);
-	else if (p.effect) {
+	else if (p.effect)
 		ok = LiveVst2SetChunk(p.effect, comp, compLen);
-	}
-	LeaveCriticalSection(&g_eng.cs);
+	LeaveCriticalSection(&LiveEng().cs);
+	if (ok)
+		LivePendingStateStore(part1to32, comp, compLen, ctrl, ctrlLen);
 	return ok;
 }
 
@@ -10930,7 +11402,7 @@ static void LiveDismissMediaBayObstructions(HWND host)
 static void LiveEditorArmHomeDismiss(HWND host, int part1to32)
 {
 	if (!host || part1to32 < 1 || part1to32 > 32) return;
-	const wchar_t* path = g_eng.live[part1to32 - 1].path;
+	const wchar_t* path = LiveEng().live[part1to32 - 1].path;
 	if (LivePathNeedsHomeDismiss(path) != 1) return;
 	/* Fresh tone assign: do NOT steal mouse / Esc / close dialogs — that races
 	   MediaBay + UI keyboard and crashes HALion. Only auto-dismiss when we
@@ -10998,7 +11470,7 @@ static LRESULT CALLBACK LiveEditorWndProc(HWND h, UINT m, WPARAM w, LPARAM l)
 	const int part = (int)GetWindowLongPtrW(h, GWLP_USERDATA);
 	if (part >= 1 && part <= 32) {
 		if (m == WM_TIMER && w == LIVE_EDITOR_IDLE_TIMER) {
-			AEffect* e = g_eng.live[part - 1].effect;
+			AEffect* e = LiveEng().live[part - 1].effect;
 			if (e && e->dispatcher) {
 				__try { e->dispatcher(e, effEditIdle, 0, 0, NULL, 0); }
 				__except (EXCEPTION_EXECUTE_HANDLER) {}
@@ -11057,15 +11529,13 @@ extern "C" int VstApplyMpw3Binds(const wchar_t* mpw3Path, int openEditor)
 		}
 		if (!loadedOk) continue;
 		++n;
-		/* Dedicated plugs always speak on ch0 inside the instance. Legacy score
-		   files stored forceCh=partIndex (1,2,…) which made GA/HL ignore notes. */
-		if (LiveIsMultiPath(pp)) {
-			if (song.vstForceCh[i] >= 0)
-				VstLiveSetSendChannel(i + 1, song.vstForceCh[i]);
-			else
-				VstLiveSetSendChannel(i + 1, -1);
-		} else {
-			VstLiveSetSendChannel(i + 1, 0);
+		/* Keep the incoming MIDI channel. sendCh=0 remapped Groove Agent
+		   drums (ch10) onto ch1 and the kit stayed silent. */
+		{
+			int force = song.vstForceCh[i];
+			if (ContainsI(pp, L"Groove Agent") || force < 0)
+				force = -1;
+			VstLiveSetSendChannel(i + 1, force);
 		}
 		if (song.vstCompLen[i] > 0 && song.vstComp[i]) {
 			VstLiveApplyStates(i + 1, song.vstComp[i], (int)song.vstCompLen[i],
@@ -11074,7 +11544,7 @@ extern "C" int VstApplyMpw3Binds(const wchar_t* mpw3Path, int openEditor)
 				song.vstCtrl[i], (int)song.vstCtrlLen[i]);
 			if (openEditor && !already)
 				VstLiveEditorOpenAsync(i + 1);
-		} else if (song.vstProg[i] >= 0) {
+		} else if (song.vstProg[i] >= 0 && !(is3 && NeedsUserPatch(pp, pp))) {
 			VstLiveSetProgram(i + 1, song.vstProg[i]);
 			if (openEditor && !already && LivePathNeedsHomeDismiss(pp))
 				VstLiveEditorOpenAsync(i + 1);
@@ -11129,7 +11599,7 @@ static LiveMonitorState g_liveMon = {};
 static int LiveAnyPartLoadedUnlocked(void)
 {
 	for (int i = 0; i < 32; ++i) {
-		const LivePart& p = g_eng.live[i];
+		const LivePart& p = LiveEng().live[i];
 		if (p.effect || p.vst3 || p.remote) return 1;
 	}
 	return 0;
@@ -11153,8 +11623,12 @@ static unsigned __stdcall LiveMonitorThreadProc(void*)
 	InterlockedExchange(&g_liveMon.running, 1);
 	float L[LIVE_MON_FRAMES], R[LIVE_MON_FRAMES];
 	while (WaitForSingleObject(g_liveMon.stop, 0) != WAIT_OBJECT_0) {
+		if (LiveAudioAbort())
+			break;
 		/* Yield when VST Host dialog owns playback. */
 		if (g_vstHostDlg && ::IsWindow(g_vstHostDlg->GetSafeHwnd()))
+			break;
+		if (VstSongUseLiveBinds())
 			break;
 		if (!LiveAnyPartLoadedUnlocked() && !InterlockedCompareExchange(&g_liveMon.want, 0, 0))
 			break;
@@ -11214,6 +11688,11 @@ extern "C" void VstLiveMonitorStop(void)
 
 extern "C" void VstLiveMonitorEnsure(void)
 {
+	if (InterlockedCompareExchange(&g_liveShuttingDown, 0, 0)
+		|| InterlockedCompareExchange(&g_appExiting, 0, 0))
+		return;
+	if (VstSongUseLiveBinds())
+		return;
 	InterlockedExchange(&g_liveMon.want, 1);
 	if (g_vstHostDlg && ::IsWindow(g_vstHostDlg->GetSafeHwnd()))
 		return; /* Host AudioThread already pumps. */
@@ -11333,7 +11812,7 @@ extern "C" int VstLiveEditorOpenAsync(int part1to32)
 {
 	if (part1to32 < 1 || part1to32 > 32) return -1;
 	InterlockedExchange(&g_vstEdOpenCancel, 0);
-	LivePart& p = g_eng.live[part1to32 - 1];
+	LivePart& p = LiveEng().live[part1to32 - 1];
 	if (p.remote) {
 		/* Host-like: open editor + keep draining SHM so HALion UI keyboard sounds.
 		   (Crash was ednotify FILE_MAP_READ+Interlocked, not MonitorEnsure.) */
@@ -11373,7 +11852,7 @@ extern "C" void VstLiveSoftTeardownPart(int part1to32, void* hwnd)
 extern "C" int VstLiveEditorOpen(int part1to32)
 {
 	if (part1to32 < 1 || part1to32 > 32) return -1;
-	LivePart& p = g_eng.live[part1to32 - 1];
+	LivePart& p = LiveEng().live[part1to32 - 1];
 #ifndef KPIHOST32_BUILD
 	if (p.remote) {
 		const int ok = g_kpiHost.VstLiveEditorOpen((uint32_t)part1to32) ? 0 : -5;
@@ -11465,11 +11944,11 @@ extern "C" void VstLiveEditorClose(int part1to32)
 	if (part1to32 < 1 || part1to32 > 32) return;
 #ifdef KPIHOST32_BUILD
 	if (InterlockedCompareExchange(&g_liveAbandonPlugins, 0, 0)) {
-		g_eng.live[part1to32 - 1].edWnd = NULL;
+		LiveEng().live[part1to32 - 1].edWnd = NULL;
 		return;
 	}
 #endif
-	LivePart& p = g_eng.live[part1to32 - 1];
+	LivePart& p = LiveEng().live[part1to32 - 1];
 	const int prog = p.prog;
 #ifndef KPIHOST32_BUILD
 	if (p.remote) {
@@ -11487,9 +11966,9 @@ extern "C" void VstLiveEditorClose(int part1to32)
 		h = g_liveSoftHiddenWnd[part1to32];
 		if (!h) return;
 	}
-	const int softClose =
-		ContainsI(p.path, L"SampleTank") || ContainsI(p.path, L"Sample Tank") ||
-		ContainsI(p.path, L"Kontakt");
+	/* VST3 IPlugView::removed() is the hang (Steinberg FrameWindowClass,
+	   NI, etc.). Product names do not scale. VST2 still gets effEditClose. */
+	const int softClose = LiveAbandonNow() || (p.vst3 != NULL);
 	/* Snapshot getState WHILE editor is still open (view kept on soft-close). */
 	LiveCloseSnapCapture(part1to32);
 #ifdef KPIHOST32_BUILD
@@ -11533,52 +12012,107 @@ extern "C" void VstLiveEditorClose(int part1to32)
 		__except (EXCEPTION_EXECUTE_HANDLER) {}
 	}
 	SetWindowLongPtrW(h, GWLP_USERDATA, 0);
-	DestroyWindow(h);
+	/* DestroyWindow on the host HWND walks Steinberg FrameWindowClass and
+	   hangs IPlugView — leftover ogg.exe. Hide and leak the HWND on VST3;
+	   ExitProcess reaps it. */
+	if (p.vst3 || softClose) {
+		g_liveSoftHiddenWnd[part1to32] = h;
+		ShowWindow(h, SW_HIDE);
+	} else {
+		DestroyWindow(h);
+	}
 #ifdef KPIHOST32_BUILD
 	VstHost32_EditorCloseEnd();
 	VstHost32_NotifyEditorClosed(part1to32, prog);
 #else
 	InterlockedExchange(&g_liveEditorClosing, 0);
-	if (VstLivePartIsLoaded(part1to32))
+	if (!InterlockedCompareExchange(&g_liveShuttingDown, 0, 0)
+		&& !InterlockedCompareExchange(&g_appExiting, 0, 0)
+		&& VstLivePartIsLoaded(part1to32))
 		VstLiveMonitorEnsure();
 #endif
 }
 
-extern "C" int VstLiveRender(float* L, float* R, int frames)
+extern "C" int VstLiveRenderMasked(float* L, float* R, int frames, int which)
 {
 	if (!L || !R || frames <= 0) return 0;
-	EnterCriticalSection(&g_eng.cs);
+	if (LiveAudioAbort()) {
+		ZeroMemory(L, frames * sizeof(float));
+		ZeroMemory(R, frames * sizeof(float));
+		return frames;
+	}
+	static volatile LONG s_busy = 0;
+	if (InterlockedCompareExchange(&s_busy, 1, 0) != 0) {
+		ZeroMemory(L, frames * sizeof(float));
+		ZeroMemory(R, frames * sizeof(float));
+		return frames;
+	}
+	if (LiveAudioAbort()) {
+		ZeroMemory(L, frames * sizeof(float));
+		ZeroMemory(R, frames * sizeof(float));
+		InterlockedExchange(&s_busy, 0);
+		return frames;
+	}
+	AEffect* v2[32] = {};
+	Vst3Inst* v3[32] = {};
+	AEffect* fxE[32][2] = {};
+	const DWORD tid = GetCurrentThreadId();
+	const int skipV3Ui = (g_liveUiTid && tid == g_liveUiTid
+		&& !InterlockedCompareExchange(&g_liveVst3Woken, 0, 0)) ? 1 : 0;
+	EnterCriticalSection(&LiveEng().cs);
 	ZeroMemory(L, frames * sizeof(float));
 	ZeroMemory(R, frames * sizeof(float));
+	for (int p = 0; p < 32; ++p) {
+		LivePart& lp = LiveEng().live[p];
+		LivePendFlush(lp);
+		if ((which & 1) && lp.effect && !lp.vst3)
+			v2[p] = lp.effect;
+		if ((which & 2) && lp.vst3 && !skipV3Ui)
+			v3[p] = lp.vst3;
+		for (int fx = 0; fx < 2; ++fx) {
+			LiveFxSlot& fs = LiveEng().liveFx[p][fx];
+			if (!fs.bypass && fs.effect)
+				fxE[p][fx] = fs.effect;
+		}
+	}
+	LeaveCriticalSection(&LiveEng().cs);
 	__declspec(align(32)) float tl[BLOCK_FRAMES];
 	__declspec(align(32)) float tr[BLOCK_FRAMES];
 	for (int pos = 0; pos < frames;) {
 		int n = frames - pos;
 		if (n > BLOCK_FRAMES) n = BLOCK_FRAMES;
-		for (int p = 0; p < 32; ++p)
-			if (g_eng.live[p].effect || g_eng.live[p].vst3) {
-			// Immediately before the process call, as VST2 requires.
-			LivePendFlush(g_eng.live[p]);
-			if (g_eng.live[p].vst3)
-				Vst3Process(g_eng.live[p].vst3, tl, tr, n);
-			else
-				RenderEffect(g_eng.live[p].effect, tl, tr, n);
-			for (int fx = 0; fx < 2; ++fx) {
-				LiveFxSlot& fs = g_eng.liveFx[p][fx];
-				if (fs.bypass) continue;
-				if (fs.effect)
-					RenderFxEffect(fs.effect, tl, tr, n);
-				/* VST3 insert FX load/param/editor is supported; audio-input processing
-				   needs a VST3 host input-bus path and is intentionally skipped here. */
-			}
-			for (int i = 0; i < n; ++i) {
-				L[pos + i] += tl[i];
-				R[pos + i] += tr[i];
+		for (int pass = 0; pass < 2; ++pass) {
+			if (pass == 0 && !(which & 1)) continue;
+			if (pass == 1 && !(which & 2)) continue;
+			for (int p = 0; p < 32; ++p) {
+				if (pass == 0) {
+					if (!v2[p]) continue;
+					RenderEffect(v2[p], tl, tr, n);
+				} else {
+					if (!v3[p]) continue;
+					Vst3Process(v3[p], tl, tr, n);
+					if (tid != g_liveUiTid)
+						InterlockedExchange(&g_liveVst3Woken, 1);
+				}
+				for (int fx = 0; fx < 2; ++fx) {
+					if (fxE[p][fx])
+						RenderFxEffect(fxE[p][fx], tl, tr, n);
+				}
+				for (int i = 0; i < n; ++i) {
+					L[pos + i] += tl[i];
+					R[pos + i] += tr[i];
+				}
 			}
 		}
 		pos += n;
 	}
-	LeaveCriticalSection(&g_eng.cs);
-	LiveRemoteMix(L, R, frames);
+	if (which & 1)
+		LiveRemoteMix(L, R, frames);
+	InterlockedExchange(&s_busy, 0);
 	return frames;
+}
+
+extern "C" int VstLiveRender(float* L, float* R, int frames)
+{
+	return VstLiveRenderMasked(L, R, frames, 3);
 }

@@ -1,15 +1,16 @@
-﻿// �\�t�g�E�F�AMIDI�V���Z�T�C�U�B
+﻿// ソフトウェアMIDIシンセサイザ。
 // Copyright(c)2003-2004 yuno
-//�ǉ� by Kobarin
+//追加 by Kobarin
+//更に追加 ちゃちゃ
 #pragma warning(disable:4305)
 #pragma warning(disable:4786)
 namespace std
 {
     typedef size_t size_t;
 };
-//�����܂�
+//ここまで
 /*
-    �u�� by Kobarin
+    置換 by Kobarin
     std::max => __max
     std::min => __min
     std::memset => memset
@@ -22,9 +23,9 @@ namespace std
 #include "ym2612_pool.hpp"
 
 #include <cassert>
-//namespace std{//�ǉ� by Kobarin
+//namespace std{//追加 by Kobarin
 #include <cmath>
-//};            //�ǉ� by Kobarin
+//};            //追加 by Kobarin
 #include <cstring>
 #include <utility>
 
@@ -41,13 +42,13 @@ namespace std{
 #define M_PI 3.14159265358979323846
 #endif
 
-//namespace midisynth{//�폜 by Kobarin
-    // �`�����l���R���X�g���N�^�B
+//namespace midisynth{//削除 by Kobarin
+    // チャンネルコンストラクタ。
     channel::channel(note_factory* factory_, int bank, int chIndex_):
         factory(factory_), default_bank(bank), chIndex(chIndex_)
     {
-        //�ǉ� by Kobarin
-        //�O�̂��ߊe��ϐ���������
+        //追加 by Kobarin
+        //念のため各種変数を初期化
         /*program = 0;
         bank = 0;
         panpot = 0;
@@ -72,17 +73,18 @@ namespace std{
         frequency_multiplier = 0;
         master_frequency_multiplier = 0;
         system_mode = system_mode_default;
-        //�����܂�
+        //ここまで
         */
+
         notes.reserve(256);
         reset_all_parameters();
     }
-    // �`�����l���f�X�g���N�^�B
+    // チャンネルデストラクタ。
     channel::~channel()
     {
         all_sound_off_immediately();
     }
-    // �������̉�����������B
+    // 発音中の音を合成する。
     int channel::synthesize(sample_t* out, std::size_t samples, double rate, int_least32_t master_volume, int master_balance)
     {
         int expr = expression;
@@ -149,7 +151,7 @@ namespace std{
         }
         return num_notes;
     }
-    // ���ׂẴp�����[�^��������Ԃɖ߂��B
+    // すべてのパラメータを初期状態に戻す。
     void channel::reset_all_parameters()
     {
         program = default_bank * 128;
@@ -221,14 +223,14 @@ namespace std{
         }
         reset_all_controller();
     }
-    // �p�����[�^��������Ԃɖ߂��B
+    // パラメータを初期状態に戻す。
     void channel::reset_all_controller()
     {
         expression = 16383;
         channel_pressure(0);
         pitch_bend = 8192;
         pitch_bend_sensitivity = 256;
-        frequency_multiplier = 0;//�ǉ� by Kobarin (����� update_frequency_multiplier �Ăяo�����ɕ��������_�G���[����������̂�����j 
+        frequency_multiplier = 0;//追加 by Kobarin (初回の update_frequency_multiplier 呼び出し時に浮動小数点エラーが発生するのを回避） 
         update_frequency_multiplier();
         modulation_depth = 0;
         modulation_depth_range = 64;
@@ -254,7 +256,7 @@ namespace std{
         nrpnVibRate = nrpnVibDepth = nrpnVibDelay = 64;
         eqLoGain = eqHiGain = 64;
     }
-    // ���ׂẲ����m�[�g�I�t����B
+    // すべての音をノートオフする。
     void channel::all_note_off()
     {
         for(std::vector<NOTE>::iterator i = notes.begin(); i != notes.end(); ++i){
@@ -264,7 +266,7 @@ namespace std{
             }
         }
     }
-    // ���ׂẲ����T�E���h�I�t����B
+    // すべての音をサウンドオフする。
     void channel::all_sound_off()
     {
         for(std::vector<NOTE>::iterator i = notes.begin(); i != notes.end(); ++i){
@@ -274,7 +276,7 @@ namespace std{
             }
         }
     }
-    // ���������B
+    // 即時消音。
     void channel::all_sound_off_immediately()
     {
         for(std::vector<NOTE>::iterator i = notes.begin(); i != notes.end(); ++i){
@@ -282,7 +284,7 @@ namespace std{
         }
         notes.clear();
     }
-    // �m�[�g�I���B�����o���B
+
     namespace {
         int clampi(int v, int lo, int hi)
         {
@@ -444,7 +446,7 @@ namespace std{
         system_mode = mode;
         if (mode == system_mode_xg) {
             fxInsFam = 3;
-            /* XG spec: Hall 1, Chorus 1, Variation Delay L,C,R。接続は Insertion、パートは OFF。 */
+            /* XG spec: Hall 1, Chorus 1, Variation Delay L,C,R。接続は Insertion、パートは OFF。  追加 ちゃちゃ */
             fxRevMsb = 0x01; fxRevLsb = 0x00;
             fxRevTime = 64; fxRevChar = 4; fxRevLpf = 0; fxRevFb = 0; fxRevPre = 0;
             fxChoMsb = 0x41; fxChoLsb = 0x00;
@@ -760,7 +762,7 @@ namespace std{
     void channel::update_fx_vibrato()
     {
         tone_color c = effect_color();
-        /* コーラスはピッチ LFO。1.0 = ±1 半音。ショートディレイは LFO にしない。 */
+        /* コーラスはピッチ LFO。1.0 = ±1 半音。ショートディレイは LFO にしない。  追加 ちゃちゃ */
         double baseHz = 0;
         double baseDep = 0;
         double rateRef = 3.0;
@@ -826,6 +828,8 @@ namespace std{
         factory->set_tone_color(effect_color());
         update_fx_vibrato();
     }
+
+    // ノートオン。音を出す。
     void channel::note_on(int note, int velocity)
     {
         assert(note >= 0 && note < NUM_NOTES);
@@ -874,7 +878,7 @@ namespace std{
             int lsb = (program >> 7) & 0x7F;
             int msb = (program >> 14) & 0x7F;
             int drum = rhythm || ((bank & 0x3F80) == 0x3C00) || msb == 126;
-            /* MSB 127 は XG ドラムと、LA/MT-32 の SC-55 バンク 127。リズム以外はメロディ。 */
+            /* MSB 127 は XG ドラムと、LA/MT-32 の SC-55 バンク 127。リズム以外はメロディ。  追加 ちゃちゃ */
             if (msb == 127 && (rhythm || lsb > 4)) drum = 1;
             int prog = pc | (lsb << 7) | (msb << 14) | ((system_mode & 7) << 21) | (drum ? (1 << 24) : 0);
             double mul = frequency_multiplier;
@@ -908,7 +912,7 @@ namespace std{
             }
         }
     }
-    // �m�[�g�I�t�B���������[�X�^�C���ɓ���B
+    // ノートオフ。音がリリースタイムに入る。
     void channel::note_off(int note, int velocity)
     {
         assert(note >= 0 && note < NUM_NOTES);
@@ -920,7 +924,7 @@ namespace std{
             }
         }
     }
-    // �|���t�H�j�b�N�L�[�v���b�V���B
+    // ポリフォニックキープレッシャ。
     void channel::polyphonic_key_pressure(int note, int value)
     {
         assert(note >= 0 && note < NUM_NOTES);
@@ -931,7 +935,7 @@ namespace std{
             }
         }
     }
-    // �`�����l���v���b�V���B
+    // チャンネルプレッシャ。
     void channel::channel_pressure(int value)
     {
         assert(value >= 0 && value <= 127);
@@ -944,14 +948,14 @@ namespace std{
             }
         }
     }
-    // �R���g���[���`�F���W�B
+    // コントロールチェンジ。
     void channel::control_change(int control, int value)
     {
         assert(value >= 0 && value <= 0x7F);
         switch(control){
         case 0x00:
             {
-                /* 初期値 0x3C80 が残っていると MSB が 121 になり、変動バンクが落ちる。 */
+                /* 初期値 0x3C80 が残っていると MSB が 121 になり、変動バンクが落ちる。  追加 ちゃちゃ */
                 int cur = bank;
                 if ((cur & 0x3F80) == 0x3C80)
                     cur &= 0x7F;
@@ -996,7 +1000,7 @@ namespace std{
             expression = (expression & 0x7F) | (value << 7);
             break;
         case 0x20:
-            /* LSB。CC0 と同じ式だと SC-55/88 のマップ（1=55, 2=88, 3=88Pro, 4=8820）が選べない */
+            /* LSB。CC0 と同じ式だと SC-55/88 のマップ（1=55, 2=88, 3=88Pro, 4=8820）が選べない  追加 ちゃちゃ */
             {
                 int cur = bank;
                 if ((cur & 0x3F80) == 0x3C80)
@@ -1091,7 +1095,7 @@ namespace std{
             softPedal = value;
             break;
         case 0x44:
-            /* レガート。オンのあいだは同じ音の打ち直しを残す。 */
+            /* レガート。オンのあいだは同じ音の打ち直しを残す。  追加 ちゃちゃ */
             if(value >= 64) set_damper(127);
             else set_damper(0);
             break;
@@ -1099,7 +1103,7 @@ namespace std{
             set_freeze(value);
             break;
         case 0x46:
-            /* サウンドバリエーション。明るさと同じく音色を動かす。 */
+            /* サウンドバリエーション。明るさと同じく音色を動かす。  追加 ちゃちゃ */
             nrpnCutoff = value;
             touch_tone();
             break;
@@ -1145,7 +1149,7 @@ namespace std{
             all_note_off();
             break;
         case 0x7A:
-            /* ローカルコントロール。鍵盤が無いので音は変えない。値は残す。 */
+            /* ローカルコントロール。鍵盤が無いので音は変えない。値は残す。  追加 ちゃちゃ */
             break;
         case 0x7E:
             mono_mode_on();
@@ -1159,12 +1163,12 @@ namespace std{
         if(control >= 0 && control < 128)
             ccMem[control] = value;
     }
-    // �o���N�Z���N�g
+    // バンクセレクト（CC0 / CC32）。次のプログラムチェンジで音色を決める。  追加 ちゃちゃ
     void channel::bank_select(int value)
     {
         switch(system_mode){
         case system_mode_gm:
-            /* GM On でバンクを捨てると、途中の CC0/CC32 が効かず PC だけになる。 */
+            /* GM On でバンクを捨てると、途中の CC0/CC32 が効かず PC だけになる。  追加 ちゃちゃ */
             if(default_bank == 0x3C00){
                 set_bank(0x3C00 | (value & 0x7F));
             }else{
@@ -1200,7 +1204,7 @@ namespace std{
             break;
         }
     }
-    // �_���p�[���ʁB
+    // ダンパー効果。
     void channel::set_damper(int value)
     {
         if(damper != value){
@@ -1210,7 +1214,7 @@ namespace std{
             }
         }
     }
-    // �\�X�e�k�[�g���ʁB
+    // ソステヌート効果。
     void channel::set_sostenute(int value)
     {
         sostenute = value;
@@ -1218,7 +1222,7 @@ namespace std{
             i->note->set_sostenute(value);
         }
     }
-    // �t���[�Y���ʁB
+    // フリーズ効果。
     void channel::set_freeze(int value)
     {
         if(freeze != value){
@@ -1228,7 +1232,7 @@ namespace std{
             }
         }
     }
-    // RPN�擾�B
+    // RPN取得。
     int channel::get_registered_parameter()
     {
         switch(RPN){
@@ -1244,7 +1248,7 @@ namespace std{
             return 0;
         }
     }
-    // RPN�ݒ�B
+    // RPN設定。
     void channel::set_registered_parameter(int value)
     {
         switch(RPN){
@@ -1264,7 +1268,7 @@ namespace std{
             break;
         }
     }
-    // ���g���{�����Čv�Z���X�V����B
+    // 周波数倍率を再計算し更新する。
     void channel::update_frequency_multiplier()
     {
         double value = master_frequency_multiplier
@@ -1280,28 +1284,28 @@ namespace std{
             }
         }
     }
-    // ���W�����[�V�����f�v�X���ʂ̍X�V�B
+    // モジュレーションデプス効果の更新。
     void channel::update_modulation()
     {
         update_fx_vibrato();
     }
 
-    // �V���Z�T�C�U�R���X�g���N�^�B
+    // シンセサイザコンストラクタ。
     synthesizer::synthesizer(note_factory* factory)
     {
         for(int i = 0; i < 16; ++i){
-            //channels[i].reset(new channel(factory, i == 9 ? 0x3C00 : 0x3C80));//�폜 by Kobarin
-            channels[i]= std::auto_ptr<channel>(new channel(factory, i == 9 ? 0x3C00 : 0x3C80, i));//�ǉ� by Kobarin
+            //channels[i].reset(new channel(factory, i == 9 ? 0x3C00 : 0x3C80));//削除 by Kobarin
+            channels[i]= std::auto_ptr<channel>(new channel(factory, i == 9 ? 0x3C00 : 0x3C80, i));//追加 by Kobarin
         }
         reset_all_parameters();
     }
-    // �`�����l���擾�B
+    // チャンネル取得。
     channel* synthesizer::get_channel(int ch)
     {
         assert(ch >= 0 && ch < NUM_CHANNELS);
         return channels[ch].get();
     }
-    // ������������B��������Ԃ��B
+    // 音を合成する。発音数を返す。
     int synthesizer::synthesize(sample_t* output, std::size_t samples, double rate)
     {
         std::size_t n = samples * 2;
@@ -1323,13 +1327,13 @@ namespace std{
         }
         return num_notes;
     }
-    // �V���Z�T�C�U�����S�Ƀ��Z�b�g����B
+    // シンセサイザを完全にリセットする。
     void synthesizer::reset()
     {
         all_sound_off_immediately();
         reset_all_parameters();
     }
-    // ���ׂẴp�����[�^��������Ԃɖ߂��B
+    // すべてのパラメータを初期状態に戻す。
     void synthesizer::reset_all_parameters()
     {
         active_sensing = -1;
@@ -1344,35 +1348,35 @@ namespace std{
             channels[i]->reset_all_parameters();
         }
     }
-    // �p�����[�^��������Ԃɖ߂��B
+    // パラメータを初期状態に戻す。
     void synthesizer::reset_all_controller()
     {
         for(int i = 0; i < NUM_CHANNELS; ++i){
             channels[i]->reset_all_controller();
         }
     }
-    // �I�[���m�[�g�I�t�B���ׂẲ����m�[�g�I�t����B
+    // オールノートオフ。すべての音をノートオフする。
     void synthesizer::all_note_off()
     {
         for(int i = 0; i < NUM_CHANNELS; ++i){
             channels[i]->all_note_off();
         }
     }
-    // �I�[���T�E���h�I�t�B���ׂẲ����T�E���h�I�t����B
+    // オールサウンドオフ。すべての音をサウンドオフする。
     void synthesizer::all_sound_off()
     {
         for(int i = 0; i < NUM_CHANNELS; ++i){
             channels[i]->all_sound_off();
         }
     }
-    // ���������B
+    // 即時消音。
     void synthesizer::all_sound_off_immediately()
     {
         for(int i = 0; i < NUM_CHANNELS; ++i){
             channels[i]->all_sound_off_immediately();
         }
     }
-    // �V�X�e���G�N�X�N���[�V�u���b�Z�[�W�̉��ߎ��s�B
+    // システムエクスクルーシブメッセージの解釈実行。
     void synthesizer::sysex_message(const void* pvdata, std::size_t size)
     {
         const unsigned char* data = reinterpret_cast<const unsigned char*>(pvdata);
@@ -1386,7 +1390,7 @@ namespace std{
             /* GM2 system on */
             set_system_mode(system_mode_gm2);
         }else if(size >= 10 && data[0] == 0xF0 && data[1] == 0x41 && data[3] == 0x16 && data[4] == 0x12 && data[size - 1] == 0xF7){
-            /* MT-32。システム域 10 00 00 のリバーブを FM に反映する。 */
+            /* MT-32。システム域 10 00 00 のリバーブを FM に反映する。  追加 ちゃちゃ */
             const int addr = ((data[5] & 0x7F) << 14) | ((data[6] & 0x7F) << 7) | (data[7] & 0x7F);
             const int n = (int)size - 10;
             for(int i = 0; i < n; ++i){
@@ -1435,7 +1439,7 @@ namespace std{
             set_master_coarse_tuning((data[5] & 0x7F) | ((data[6] & 0x7F) << 7));
         }else if(size == 11 && memcmp(data, "\xF0\x41", 2) == 0 && (data[2] & 0xF0) == 0x10 && memcmp(data + 3, "\x42\x12\x40", 3) == 0 && (data[6] & 0xF0) == 0x10 && data[7] == 0x15 && data[10] == 0xF7){
             /* use for rhythm part */
-            /* GS: 40 1n 15. n=0 はパート10、1-9 はパート1-9、A-F はパート11-16 */
+            /* GS: 40 1n 15. n=0 はパート10、1-9 はパート1-9、A-F はパート11-16  追加 ちゃちゃ */
             int block = data[6] & 0x0F;
             int channel = (block == 0) ? 9 : (block < 10 ? block - 1 : block);
             int map = data[8];
@@ -1486,7 +1490,7 @@ namespace std{
                 const int a = cc + i;
                 const int val = data[8 + i] & 0x7F;
                 if (data[5] == 0x00 && bb == 0x00 && a == 0x7F && i == 0) {
-                    /* SC システムモード。00=55, 01=88, 02=88Pro, 03=8820。音のマップが変わる。 */
+                    /* SC システムモード。00=55, 01=88, 02=88Pro, 03=8820。音のマップが変わる。  追加 ちゃちゃ */
                     int mode = val & 0x7F;
                     int lsb = (mode >= 0 && mode <= 3) ? (mode + 1) : 1;
                     set_system_mode(system_mode_gs);
@@ -1507,7 +1511,7 @@ namespace std{
                 if (blockB && bb != 0x01 && bb != 0x02)
                     continue;
                 if (!blockB && bb == 0x00) {
-                    /* 40 00 システム。マスター音量・パン・キーシフト。 */
+                    /* 40 00 システム。マスター音量・パン・キーシフト。  追加 ちゃちゃ */
                     if (a == 0x04)
                         set_master_volume((val & 0x7f) << 7);
                     else if (a == 0x05)
@@ -1552,6 +1556,8 @@ namespace std{
             }
         }
     }
+
+    // MIDIイベントの解釈実行。
     void synthesizer::midi_event(int event, int param1, int param2)
     {
         switch(event & 0xF0){
@@ -1587,7 +1593,7 @@ namespace std{
             break;
         }
     }
-    // �V�X�e�����[�h��ύX����B
+    // システムモードを変更する。
     void synthesizer::set_system_mode(system_mode_t mode)
     {
         all_sound_off();
@@ -1597,7 +1603,7 @@ namespace std{
             channels[i]->set_system_mode(mode);
         }
     }
-    // �}�X�^�[�`���[�j���O���Čv�Z���X�V����B
+    // マスターチューニングを再計算し更新する。
     void synthesizer::update_master_frequency_multiplier()
     {
         double value = std::pow(2.0, (master_coarse_tuning - 8192) / (128.0 * 100.0 * 12.0)
@@ -1610,7 +1616,7 @@ namespace std{
         }
     }
 
-    // �����e�[�u���B�����g�W�F�l���[�^�p�B
+    // 正弦テーブル。正弦波ジェネレータ用。
     namespace{
         class sine_table{
         public:
@@ -1628,7 +1634,7 @@ namespace std{
             }
         }
     }
-    // �����g������R���X�g���N�^�B
+    // 正弦波生成器コンストラクタ。
     inline sine_wave_generator::sine_wave_generator():
         position(0), step(0)
     {
@@ -1638,7 +1644,7 @@ namespace std{
     {
         set_cycle(cycle);
     }
-    // �����g�̎�����ύX����B
+    // 正弦波の周期を変更する。
     void sine_wave_generator::set_cycle(double cycle)
     {
         if(cycle){
@@ -1647,17 +1653,17 @@ namespace std{
             step = 0;
         }
     }
-    // ���W�����[�V������������B
+    // モジュレーションを加える。
     void sine_wave_generator::add_modulation(int_least32_t x)
     {
         position += static_cast<int_least32_t>(static_cast<int_least64_t>(step) * x >> 16);
     }
-    // ���̃T���v�������o���B
+    // 次のサンプルを取り出す。
     inline int sine_wave_generator::get_next()
     {
         return sine_table.get((position += step) / 32768 % sine_table::DIVISION);
     }
-    // ���̃T���v�������o��(���g���ϒ��t��)�B
+    // 次のサンプルを取り出す(周波数変調付き)。
     inline int sine_wave_generator::get_next(int_least32_t modulation)
     {
         uint_least32_t m = modulation * sine_table::DIVISION / 65536;
@@ -1665,7 +1671,7 @@ namespace std{
         return sine_table.get(p);
     }
 
-    // �ΐ��ϊ��e�[�u���B�G���x���[�v�W�F�l���[�^�̃f�B�P�C�ȍ~�Ŏg���B
+    // 対数変換テーブル。エンベロープジェネレータのディケイ以降で使う。
     namespace{
         #define LOG10_32767 4.5154366811416989472479934140484
         #define LOGTABLE_SIZE 4096
@@ -1685,7 +1691,7 @@ namespace std{
         }
     }
 
-    // ���[�g�e�[�u���BAR�ADR�ASR�ARR�̌v�Z�����̍������B
+    // レートテーブル。AR、DR、SR、RRの計算処理の高速化。
     namespace{
         struct envelope_table{
             envelope_table();
@@ -1723,7 +1729,7 @@ namespace std{
         }
     }
 
-    // �G���x���[�v������R���X�g���N�^�B
+    // エンベロープ生成器コンストラクタ。
     envelope_generator::envelope_generator(int AR_, int DR_, int SR_, int RR_, int SL, int TL_):
         AR(AR_), DR(DR_), SR(SR_), RR(RR_), TL(TL_),
         state(ATTACK), current(0), rate(1), hold(0), freeze(0)
@@ -1749,13 +1755,13 @@ namespace std{
         fDRR = 0;
         fDSS = 0;
     }
-    // �Đ����[�g��ݒ肷��B
+    // 再生レートを設定する。
     inline void envelope_generator::set_rate(double rate)
     {
         this->rate = rate ? rate : 1;
         update_parameters();
     }
-    // �z�[���h(�_���p�[&�\�X�e�k�[�g)��ݒ肷��B
+    // ホールド(ダンパー&ソステヌート)を設定する。
     void envelope_generator::set_hold(double hold)
     {
         if(this->hold > hold || state <= SASTAIN || current >= fSL){
@@ -1763,7 +1769,7 @@ namespace std{
             update_parameters();
         }
     }
-    // �t���[�Y��ݒ肷��B
+    // フリーズを設定する。
     void envelope_generator::set_freeze(double freeze)
     {
         if(this->freeze > freeze || state <= SASTAIN || current >= fSL){
@@ -1771,7 +1777,7 @@ namespace std{
             update_parameters();
         }
     }
-    // �e�p�����[�^�̍X�V�B
+    // 各パラメータの更新。
     void envelope_generator::update_parameters()
     {
         double fAR = envelope_table.AR[AR][TL] / rate;
@@ -1802,7 +1808,7 @@ namespace std{
         this->fDRR = __max(this->fDR, this->fRR);
         this->fDSS = __max(this->fDRR, this->fSS);
     }
-    // �L�[�I�t�B�����[�X�ɓ���B
+    // キーオフ。リリースに入る。
     void envelope_generator::key_off()
     {
         switch(state){
@@ -1819,7 +1825,7 @@ namespace std{
             break;
         }
     }
-    // �T�E���h�I�t�B�}���������[�h�ɓ���B
+    // サウンドオフ。急速消音モードに入る。
     void envelope_generator::sound_off()
     {
         switch(state){
@@ -1834,13 +1840,13 @@ namespace std{
         }
         state = SOUNDOFF;
     }
-    // �����[�X����T�E���h�I�t�Ɉڂ郌�x���B�����[�X�̒����������܂ł�����
-    // ���Ă��CPU�p���[�̖��ʂȂ̂œK���ȂƂ���Ő؂邽�߁B�����͑ΐ��Ȃ̂�
-    // ���ʂ��^�Ƀ[���ɂȂ�ɂ͖����̎��Ԃ�v����B���ۂɂ͐����ɐ؂�̂Ă�
-    // �������Ă���̂łP�����ɂȂ����疳���ɂȂ�Ƃ͂����c�B
-    // �s���R�łȂ����x�ɂȂ�ׂ������l�̕����p�t�H�[�}���X�����シ��B
+    // リリースからサウンドオフに移るレベル。リリースの長い音をいつまでも発音
+    // してるとCPUパワーの無駄なので適当なところで切るため。減衰は対数なので
+    // 音量が真にゼロになるには無限の時間を要する。実際には整数に切り捨てて
+    // 処理しているので１未満になったら無音になるとはいえ…。
+    // 不自然でない程度になるべく高い値の方がパフォーマンスが向上する。
     #define SOUNDOFF_LEVEL 1024
-    // ���̃T���v���𓾂�B
+    // 次のサンプルを得る。
     int envelope_generator::get_next()
     {
         uint_least32_t current = this->current;
@@ -1913,7 +1919,7 @@ namespace std{
     }
 
     namespace{
-        // �L�[�X�P�[�����O�e�[�u��
+        // キースケーリングテーブル
         const int keyscale_table[4][128] = {
             {
                  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
@@ -1953,7 +1959,7 @@ namespace std{
                 31,31,31,31,31,31,31,31,31,31,31,31,31,31,31,31
             }
         };
-        // �f�B�`���[���e�[�u��
+        // ディチューンテーブル
         const double detune_table[4][128] = {
             { 0 },
             {
@@ -2008,7 +2014,7 @@ namespace std{
                 1.164, 1.164, 1.164, 1.164, 1.164, 1.164, 1.164, 1.164
             }
         };
-        // LFO�e�[�u��
+        // LFOテーブル
         const uint_least32_t ams_table[4] = {
             0,
             128 - 128 * std::pow(10.0, -1.44 / 10),
@@ -2017,7 +2023,7 @@ namespace std{
         };
     }
 
-    // FM�I�y���[�^�̃R���X�g���N�^�B
+    // FMオペレータのコンストラクタ。
     fm_operator::fm_operator(int AR, int DR, int SR, int RR, int SL, int TL, int KS, int ML_, int DT_, int AMS_, int key):
         eg(AR * 2 + keyscale_table[KS][key],
            DR * 2 + keyscale_table[KS][key],
@@ -2052,7 +2058,7 @@ namespace std{
         ams_factor = ams_table[AMS_] / 2;
         ams_bias = 32768 - ams_factor * 256;
     }
-    // �Đ����g���ݒ�B
+    // 再生周波数設定。
     void fm_operator::set_freq_rate(double freq, double rate)
     {
         freq += DT;
@@ -2060,7 +2066,7 @@ namespace std{
         swg.set_cycle(rate / freq);
         eg.set_rate(rate);
     }
-    // ���̃T���v���𓾂�B
+    // 次のサンプルを得る。
     inline int fm_operator::get_next()
     {
         return static_cast<int_least32_t>(swg.get_next()) * eg.get_next() >> 15;
@@ -2074,7 +2080,7 @@ namespace std{
         return (static_cast<int_least32_t>(swg.get_next(modulate)) * eg.get_next() >> 15) * (ams * ams_factor + ams_bias) >> 15;
     }
 
-    // �r�u���[�g�e�[�u���B
+    // ビブラートテーブル。
     namespace{
         class vibrato_table{
         public:
@@ -2094,7 +2100,7 @@ namespace std{
         }
     }
     
-    // FM�����R���X�g���N�^�B
+    // FM音源コンストラクタ。
     fm_sound_generator::fm_sound_generator(const FMPARAMETER& params, int note, double frequency_multiplier):
         op1(params.op1.AR, params.op1.DR, params.op1.SR, params.op1.RR, params.op1.SL, params.op1.TL, params.op1.KS, params.op1.ML, params.op1.DT, params.op1.AMS, note),
         op2(params.op2.AR, params.op2.DR, params.op2.SR, params.op2.RR, params.op2.SL, params.op2.TL, params.op2.KS, params.op2.ML, params.op2.DT, params.op2.AMS, note),
@@ -2127,7 +2133,7 @@ namespace std{
         ams_freq = ams_table[params.LFO];
         ams_enable = (params.op1.AMS + params.op2.AMS + params.op3.AMS + params.op4.AMS != 0);
     }
-    // �Đ����[�g�ݒ�B
+    // 再生レート設定。
     void fm_sound_generator::set_rate(double rate)
     {
         if(this->rate != rate){
@@ -2142,7 +2148,7 @@ namespace std{
             op4.set_freq_rate(f, rate);
         }
     }
-    // ���g���{���ݒ�B
+    // 周波数倍率設定。
     void fm_sound_generator::set_frequency_multiplier(double value)
     {
         freq_mul = value;
@@ -2152,7 +2158,7 @@ namespace std{
         op3.set_freq_rate(f, rate);
         op4.set_freq_rate(f, rate);
     }
-    // �_���p�[���ʐݒ�B
+    // ダンパー効果設定。
     void fm_sound_generator::set_damper(int damper)
     {
         this->damper = damper;
@@ -2162,7 +2168,7 @@ namespace std{
         op3.set_hold(value);
         op4.set_hold(value);
     }
-    // �\�X�e�k�[�g���ʐݒ�B
+    // ソステヌート効果設定。
     void fm_sound_generator::set_sostenute(int sostenute)
     {
         this->sostenute = sostenute;
@@ -2172,7 +2178,7 @@ namespace std{
         op3.set_hold(value);
         op4.set_hold(value);
     }
-    // �t���[�Y���ʐݒ�B
+    // フリーズ効果設定。
     void fm_sound_generator::set_freeze(int freeze)
     {
         double value = freeze / 127.0;
@@ -2181,21 +2187,21 @@ namespace std{
         op3.set_freeze(value);
         op4.set_freeze(value);
     }
-    // �g���������ʐݒ�B
+    // トレモロ効果設定。
     void fm_sound_generator::set_tremolo(int depth, double frequency)
     {
         tremolo_depth = depth;
         tremolo_freq = frequency;
         tremolo_lfo.set_cycle(rate / frequency);
     }
-    // �r�u���[�g���ʐݒ�B
+    // ビブラート効果設定。
     void fm_sound_generator::set_vibrato(double depth, double frequency)
     {
         vibrato_depth = depth * (vibrato_table::DIVISION / 256.0);
         vibrato_freq = frequency;
         vibrato_lfo.set_cycle(rate / frequency);
     }
-    // �L�[�I�t�B
+    // キーオフ。
     void fm_sound_generator::key_off()
     {
         op1.key_off();
@@ -2203,7 +2209,7 @@ namespace std{
         op3.key_off();
         op4.key_off();
     }
-    // �T�E���h�I�t�B
+    // サウンドオフ。
     void fm_sound_generator::sound_off()
     {
         op1.sound_off();
@@ -2211,7 +2217,7 @@ namespace std{
         op3.sound_off();
         op4.sound_off();
     }
-    // ���̔������I���������ǂ�����Ԃ��B
+    // 音の発生が終了したかどうかを返す。
     bool fm_sound_generator::is_finished()const
     {
         switch(ALG){
@@ -2232,7 +2238,7 @@ namespace std{
             return true;
         }
     }
-    // ���̃T���v���𓾂�B
+    // 次のサンプルを得る。
     int fm_sound_generator::get_next()
     {
         if(vibrato_depth){
@@ -2316,7 +2322,7 @@ namespace std{
         return ret;
     }
 
-    // FM�m�[�g�̃R���X�g���N�^�B
+    // FMノートのコンストラクタ。
     fm_note::fm_note(const FMPARAMETER& params, int note, int velocity_, int panpot, int assign, double frequency_multiplier):
         ::note(assign, panpot),
         fm(params, note, frequency_multiplier),
@@ -2325,12 +2331,12 @@ namespace std{
         assert(velocity >= 1 && velocity <= 127);
         ++velocity;
     }
-    // �g�`�o�́B
+    // 波形出力。ベロシティを float 倍率にしてステレオへ加算する。  追加 ちゃちゃ
     bool fm_note::synthesize(sample_t* buf, std::size_t samples, double rate, sample_t left, sample_t right)
     {
         //left = (left * velocity) >> 7;
         //right = (right * velocity) >> 7;
-        left = (left * velocity) / 128.0;//>> 7;  //�C�� by Kobarin
+        left = (left * velocity) / 128.0;//>> 7;  //修正 by Kobarin
         right = (right * velocity) / 128.0;//>> 7;//
         
         fm.set_rate(rate);
@@ -2338,53 +2344,53 @@ namespace std{
             int_least32_t sample = fm.get_next();
             //buf[i * 2 + 0] += (sample * left) >> 14;
             //buf[i * 2 + 1] += (sample * right) >> 14;
-            buf[i * 2 + 0] += (sample * left) / (16384.0 * 32768.0); //�C�� by Kobarin(64bit float �p�ɒ������邽�߁A32768.0 �Ŋ���)
+            buf[i * 2 + 0] += (sample * left) / (16384.0 * 32768.0); //修正 by Kobarin(64bit float 用に桁を落とすため、32768.0 で割る)
             buf[i * 2 + 1] += (sample * right) / (16384.0 * 32768.0);//
         }
         return !fm.is_finished();
     }
-    // �m�[�g�I�t�B
+    // ノートオフ。
     void fm_note::note_off(int)
     {
         fm.key_off();
     }
-    // �T�E���h�I�t�B
+    // サウンドオフ。
     void fm_note::sound_off()
     {
         fm.sound_off();
     }
-    // ���g���{���ݒ�B
+    // 周波数倍率設定。
     void fm_note::set_frequency_multiplier(double value)
     {
         fm.set_frequency_multiplier(value);
     }
-    // �g���������ʐݒ�B
+    // トレモロ効果設定。
     void fm_note::set_tremolo(int depth, double freq)
     {
         fm.set_tremolo(depth, freq);
     }
-    // �r�u���[�g���ʐݒ�B
+    // ビブラート効果設定。
     void fm_note::set_vibrato(double depth, double freq)
     {
         fm.set_vibrato(depth, freq);
     }
-    // �_���p�[���ʐݒ�B
+    // ダンパー効果設定。
     void fm_note::set_damper(int value)
     {
         fm.set_damper(value);
     }
-    // �\�X�e�k�[�g���ʐݒ�B
+    // ソステヌート効果設定。
     void fm_note::set_sostenute(int value)
     {
         fm.set_sostenute(value);
     }
-    // �t���[�Y���ʐݒ�B
+    // フリーズ効果設定。
     void fm_note::set_freeze(int value)
     {
         fm.set_freeze(value);
     }
 
-    // FM�m�[�g�t�@�N�g���������B
+    // FMノートファクトリ初期化。
     fm_note_factory::fm_note_factory()
         : ym(new Ym2612Pool())
     {
@@ -2402,6 +2408,116 @@ namespace std{
     bool fm_note_factory::load_wopn_mem(const void* data, size_t size, int family, int append)
     {
         return ym && ym->load_mem(data, size, family, append);
+    }
+    void fm_note_factory::seed_from_wopn(const void* data, size_t sz, int xg)
+    {
+        if (!data || sz < 32 || sz > 8 * 1024 * 1024) return;
+        const unsigned char* b = (const unsigned char*)data;
+        int ver = 0;
+        size_t o = 0;
+        if (sz >= 13 && memcmp(b, "WOPN2-B2NK", 11) == 0) {
+            ver = b[11] | (b[12] << 8);
+            o = 13;
+        } else if (sz >= 11 && memcmp(b, "WOPN2-BANK", 11) == 0) {
+            ver = 1;
+            o = 11;
+        } else {
+            return;
+        }
+        if (o + 5 > sz) return;
+        int mb = (b[o] << 8) | b[o + 1];
+        int pb = (b[o + 2] << 8) | b[o + 3];
+        o += 5;
+        if (mb < 1 || mb > 128 || pb < 0 || pb > 128) return;
+        int stride = (ver >= 2) ? 69 : 65;
+        size_t need = o + (size_t)(mb + pb) * 34 + (size_t)(mb + pb) * 128 * stride;
+        if (need > sz) return;
+        struct BankId { int msb, lsb, perc; };
+        BankId ids[256];
+        int nb = mb + pb;
+        for (int i = 0; i < nb; i++) {
+            ids[i].lsb = b[o + 32];
+            ids[i].msb = b[o + 33];
+            ids[i].perc = i >= mb;
+            o += 34;
+        }
+        for (int i = 0; i < nb; i++) {
+            for (int pc = 0; pc < 128; pc++) {
+                const unsigned char* p = b + o;
+                o += stride;
+                int noteOff = (int)((p[32] << 8) | p[33]);
+                if (noteOff >= 32768) noteOff -= 65536;
+                if (noteOff < -48) noteOff = -48;
+                if (noteOff > 48) noteOff = 48;
+                int ops[4][10];
+                for (int k = 0; k < 4; k++) {
+                    const unsigned char* r = p + 37 + k * 7;
+                    ops[k][0] = r[2] & 31;
+                    ops[k][1] = r[3] & 31;
+                    ops[k][2] = r[4] & 31;
+                    ops[k][3] = r[5] & 15;
+                    ops[k][4] = r[5] >> 4;
+                    ops[k][5] = r[1] & 127;
+                    ops[k][6] = r[2] >> 6;
+                    ops[k][7] = r[0] & 15;
+                    ops[k][8] = (r[0] >> 4) & 7;
+                    ops[k][9] = (r[3] & 0x80) ? 1 : 0;
+                }
+                int alive = 0;
+                for (int k = 0; k < 4; k++) {
+                    if (ops[k][5] < 120 && ops[k][0] > 0) alive = 1;
+                }
+                if (!alive) continue;
+                /* p[36] is chip FMS. Software LFO is an AM rate, and programs.txt left it at 0. */
+                if (ids[i].perc) {
+                    if (ids[i].msb != 0 || ids[i].lsb != 0) continue;
+                    DRUMPARAMETER d;
+                    memset(&d, 0, sizeof(d));
+                    d.ALG = p[35] & 7;
+                    d.FB = (p[35] >> 3) & 7;
+                    d.LFO = 0;
+                    d.key = p[34] ? p[34] : pc;
+                    d.panpot = 8192;
+                    d.assign = pc;
+                    d.transpose = noteOff;
+                    d.op1.AR = ops[0][0]; d.op1.DR = ops[0][1]; d.op1.SR = ops[0][2]; d.op1.RR = ops[0][3];
+                    d.op1.SL = ops[0][4]; d.op1.TL = ops[0][5]; d.op1.KS = ops[0][6]; d.op1.ML = ops[0][7];
+                    d.op1.DT = ops[0][8]; d.op1.AMS = ops[0][9];
+                    d.op2.AR = ops[1][0]; d.op2.DR = ops[1][1]; d.op2.SR = ops[1][2]; d.op2.RR = ops[1][3];
+                    d.op2.SL = ops[1][4]; d.op2.TL = ops[1][5]; d.op2.KS = ops[1][6]; d.op2.ML = ops[1][7];
+                    d.op2.DT = ops[1][8]; d.op2.AMS = ops[1][9];
+                    d.op3.AR = ops[2][0]; d.op3.DR = ops[2][1]; d.op3.SR = ops[2][2]; d.op3.RR = ops[2][3];
+                    d.op3.SL = ops[2][4]; d.op3.TL = ops[2][5]; d.op3.KS = ops[2][6]; d.op3.ML = ops[2][7];
+                    d.op3.DT = ops[2][8]; d.op3.AMS = ops[2][9];
+                    d.op4.AR = ops[3][0]; d.op4.DR = ops[3][1]; d.op4.SR = ops[3][2]; d.op4.RR = ops[3][3];
+                    d.op4.SL = ops[3][4]; d.op4.TL = ops[3][5]; d.op4.KS = ops[3][6]; d.op4.ML = ops[3][7];
+                    d.op4.DT = ops[3][8]; d.op4.AMS = ops[3][9];
+                    set_drum_program(pc, d);
+                } else {
+                    int key = ((ids[i].lsb & 0x7f) << 14) | ((ids[i].msb & 0x7f) << 7) | pc;
+                    if (xg) key |= 0x8000;
+                    FMPARAMETER fm;
+                    memset(&fm, 0, sizeof(fm));
+                    fm.ALG = p[35] & 7;
+                    fm.FB = (p[35] >> 3) & 7;
+                    fm.LFO = 0;
+                    fm.transpose = noteOff;
+                    fm.op1.AR = ops[0][0]; fm.op1.DR = ops[0][1]; fm.op1.SR = ops[0][2]; fm.op1.RR = ops[0][3];
+                    fm.op1.SL = ops[0][4]; fm.op1.TL = ops[0][5]; fm.op1.KS = ops[0][6]; fm.op1.ML = ops[0][7];
+                    fm.op1.DT = ops[0][8]; fm.op1.AMS = ops[0][9];
+                    fm.op2.AR = ops[1][0]; fm.op2.DR = ops[1][1]; fm.op2.SR = ops[1][2]; fm.op2.RR = ops[1][3];
+                    fm.op2.SL = ops[1][4]; fm.op2.TL = ops[1][5]; fm.op2.KS = ops[1][6]; fm.op2.ML = ops[1][7];
+                    fm.op2.DT = ops[1][8]; fm.op2.AMS = ops[1][9];
+                    fm.op3.AR = ops[2][0]; fm.op3.DR = ops[2][1]; fm.op3.SR = ops[2][2]; fm.op3.RR = ops[2][3];
+                    fm.op3.SL = ops[2][4]; fm.op3.TL = ops[2][5]; fm.op3.KS = ops[2][6]; fm.op3.ML = ops[2][7];
+                    fm.op3.DT = ops[2][8]; fm.op3.AMS = ops[2][9];
+                    fm.op4.AR = ops[3][0]; fm.op4.DR = ops[3][1]; fm.op4.SR = ops[3][2]; fm.op4.RR = ops[3][3];
+                    fm.op4.SL = ops[3][4]; fm.op4.TL = ops[3][5]; fm.op4.KS = ops[3][6]; fm.op4.ML = ops[3][7];
+                    fm.op4.DT = ops[3][8]; fm.op4.AMS = ops[3][9];
+                    set_program(key, fm);
+                }
+            }
+        }
     }
     void fm_note_factory::reset_pool_frame()
     {
@@ -2423,10 +2539,10 @@ namespace std{
         if (ym)
             ym->set_raira(raira);
     }
-    // �N���A�B
+    // 音色テーブルを初期化し、デフォルト波形（sin）を載せる。  追加 ちゃちゃ
     void fm_note_factory::clear()
     {
-        // �f�t�H���g�̉��F(sin�g)
+        // デフォルトの音色(sin波)
         static const struct FMPARAMETER param = {
             7, 0, 0,    // ALG FB LFO
             //AR DR SR RR SL  TL KS ML DT AMS
@@ -2439,7 +2555,7 @@ namespace std{
         programs.clear();
         programs[-1] = param;
     }
-    // ���F�p�����[�^�̐���������
+    // 音色パラメータの正当性検査
     namespace{
         bool is_valid_fmparameter(const FMPARAMETER& p)
         {
@@ -2494,7 +2610,7 @@ namespace std{
                 && p.panpot >= 0 && p.panpot <= 16383;
         }
     }
-    // ���F�p�����[�^�擾�B
+    // 音色パラメータ取得。
     void fm_note_factory::get_program(int program, FMPARAMETER& p)
     {
         if(programs.find(program) != programs.end()){
@@ -2507,7 +2623,7 @@ namespace std{
             p = programs[-1];
         }
     }
-    // ���F�p�����[�^���Z�b�g�B
+    // 音色パラメータをセット。
     bool fm_note_factory::set_program(int number, const FMPARAMETER& p)
     {
         if(is_valid_fmparameter(p)){
@@ -2517,7 +2633,7 @@ namespace std{
             return false;
         }
     }
-    // �h�������F�p�����[�^���Z�b�g�B
+    // ドラム音色パラメータをセット。
     bool fm_note_factory::set_drum_program(int number, const DRUMPARAMETER& p)
     {
         if(is_valid_drumparameter(p)){
@@ -2527,7 +2643,7 @@ namespace std{
             return false;
         }
     }
-    // �m�[�g�I���B
+    // ノートオン。
     note* fm_note_factory::note_on(int_least32_t program, int note, int velocity, double frequency_multiplier)
     {
         if(ym && ym->ready())
@@ -2572,7 +2688,7 @@ namespace std{
         }else{
             struct FMPARAMETER* p = NULL;
             const int pc = program & 0x7F;
-            /* wopn が空のときだけ。バンクは見ず GM の PC だけ。wopn が載っていればここには来ない。 */
+            /* wopn が空のときだけ。バンクは見ず GM の PC だけ。wopn が載っていればここには来ない。  追加 ちゃちゃ */
             if(programs.find(pc) != programs.end())
                 p = &programs[pc];
             else if(programs.find(program) != programs.end())
@@ -2587,4 +2703,4 @@ namespace std{
             return new fm_note(painted, sounded, velocity, 8192, 0, frequency_multiplier);
         }
     }
-//}//�폜 by Kobarin
+//}//削除 by Kobarin

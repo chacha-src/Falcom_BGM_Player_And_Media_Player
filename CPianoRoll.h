@@ -312,6 +312,9 @@ private:
     int   m_detPeakN = 0;
     // 直前フレームの PickNotes 出力（VisGap 点灯は含めない）。系列を Hz で追う。
     bool  m_prevPicked[KEY_COUNT] = {};
+    bool  m_ownVoice[KEY_COUNT] = {};
+    float m_melodyHz = 0.0f;
+    int   m_melodyMiss = 0;
     float m_prevPickHz[KEY_COUNT] = {};
     float m_pickHz[KEY_COUNT] = {};
     // 調律推定(強いピークの鍵中心からのずれの円周平均)。曲ごとにリセット。

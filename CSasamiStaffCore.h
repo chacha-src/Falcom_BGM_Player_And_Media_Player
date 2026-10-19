@@ -77,7 +77,15 @@ enum ScStripKind : int {
 	SC_STRIP_CHORUS = 12, /* Chorus CC93 */
 	SC_STRIP_DELAY = 13, /* Delay CC94 */
 	SC_STRIP_VEL = 14, /* Note velocity */
-	SC_STRIP_KIND_COUNT = 15
+	SC_STRIP_DATA = 15, /* Data entry CC6 */
+	SC_STRIP_PORTA_CTL = 16, /* Portamento control CC84 */
+	SC_STRIP_CHAT = 17, /* Channel aftertouch */
+	SC_STRIP_POLYAT = 18, /* Polyphonic aftertouch */
+	SC_STRIP_KIND_COUNT = 19,
+	/* Insert FX params are not in KIND_COUNT. Slot0 params 0..31 = 64..95,
+	   slot1 = 96..127. Fits the unsigned-char strip-kind pref. */
+	SC_STRIP_FX_BASE = 64,
+	SC_STRIP_FX_PARAMS = 32
 };
 
 /* Fixed per-part CC bands (inline above staff, SSW-style). */
@@ -136,9 +144,15 @@ enum ScHelpTopic : int {
 };
 
 enum ScStripDraw : int {
-	SC_STRIP_DRAW_PENCIL = 0,
-	SC_STRIP_DRAW_LINE = 1,
-	SC_STRIP_DRAW_CURVE = 2
+	SC_STRIP_DRAW_PENCIL = 0, /* free hand */
+	SC_STRIP_DRAW_LINE = 1,   /* straight */
+	SC_STRIP_DRAW_CURVE = 2,  /* curved line */
+	SC_STRIP_DRAW_SINE = 3,
+	SC_STRIP_DRAW_FLAT = 4,
+	SC_STRIP_DRAW_RANDOM = 5,
+	SC_STRIP_DRAW_STEP = 6,
+	SC_STRIP_DRAW_SAW = 7,
+	SC_STRIP_DRAW_COUNT = 8
 };
 
 struct ScStaffUi {
@@ -165,7 +179,7 @@ struct ScStaffUi {
 	int stripCount; /* 0..SC_STRIP_LANES_MAX (0 = no strip) */
 	int stripKind[SC_STRIP_LANES_MAX];
 	int stripLaneHgt[SC_STRIP_LANES_MAX]; /* ScStripHeight */
-	int stripDraw; /* pencil / line / curve */
+	int stripDraw; /* ScStripDraw: free / straight / curve / sine / flat / random / step / saw */
 	int stripStepTicks; /* column = 1 beat fraction: PPQN..PPQN/16 (1/4..1/64) */
 	uint8_t strip[SC_STRIP_LANES_MAX][SC_STRIP_COLS_MAX];
 	int stripLineAnchorCol;
@@ -277,6 +291,12 @@ int ScStaffStripLaneHeightPx(const ScStaffUi* u, int lane);
 const wchar_t* ScStaffStripHeightName(int hgt);
 int ScStaffStripKindBipolar(int kind);
 int ScStaffStripKindFromCc(int cc);
+int ScStaffStripKindIsFx(int kind);
+int ScStaffStripFxKind(int slot0to1, int paramIndex);
+int ScStaffStripKindComboCount(int part1to32);
+int ScStaffStripKindComboItem(int part1to32, int index, wchar_t* name, int nameCch);
+/* Hear the value under the pen: insert-FX param, channel/poly aftertouch. */
+void ScStaffLiveTouchStrip(int part0, int kind, int value0to127);
 void ScStaffLoadStripPrefsFromSave(ScStaffUi* u);
 void ScStaffSaveStripPrefsToSave(const ScStaffUi* u);
 int ScStaffClampNote(int noteMidi);
@@ -465,7 +485,7 @@ int ScStaffPtInBandEditZone(const CRect& grid, const CRect& stripRc, const ScSta
 const wchar_t* ScStaffStripKindName(int kind);
 const wchar_t* ScStaffStripKindNameFm(int kind); /* FM score strip combo labels */
 const wchar_t* ScStaffStripKindNameJp(int kind); /* alias → localized name */
-const wchar_t* ScStaffStripDrawModeName(int mode); /* pencil/line/curve */
+const wchar_t* ScStaffStripDrawModeName(int mode); /* ScStripDraw */
 const wchar_t* ScStaffStripLanesLabel(int lanes); /* 0..SC_STRIP_LANES_MAX */
 const wchar_t* ScStaffToolName(int tool);
 /* Fill bottom help bar from topic + current tool/strip state. */

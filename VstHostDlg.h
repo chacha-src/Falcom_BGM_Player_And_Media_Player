@@ -44,7 +44,7 @@ protected:
 	CString m_actNotes[PART_COUNT];
 	unsigned m_actMask[PART_COUNT][4];
 	// Slot buttons: 0 = open the plug-in editor, 1 = part/program menu.
-	enum { SLOT_BTN_EDIT = 0, SLOT_BTN_MENU = 1 };
+	enum { SLOT_BTN_EDIT = 0, SLOT_BTN_MENU = 1, SLOT_BTN_CLEAR = 2 };
 	int m_pressSlot;
 	int m_pressBtn;
 	int m_hintSlot;
@@ -94,6 +94,7 @@ public:
 	int CopyPresetName(int index, wchar_t* out, int outChars) const;
 	int PresetHasAnyPath(int index) const;
 	void PauseAudioForSong(int pause);
+	int AudioIsRunning();
 
 	struct Preset {
 		wchar_t name[64];
@@ -104,6 +105,9 @@ public:
 		BYTE isVst3[32];
 		int midiThru; // 0=off 1=on。VWR1 は midiIn[2]==-2 がスルー
 	};
+
+	void StopAudio();
+
 
 protected:
 	virtual void DoDataExchange(CDataExchange* pDX);
@@ -130,7 +134,6 @@ protected:
 	void BindThruSong();
 	void StopWav();
 	BOOL StartAudio();
-	void StopAudio();
 	void ShowHelpSheet();
 	void SetStatus(LPCTSTR text);
 	// PC keyboard as a one-row MIDI keyboard (Z=C4…). Skips Edit/Combo focus.
@@ -153,6 +156,7 @@ protected:
 	afx_msg void OnRename();
 	afx_msg void OnDelete();
 	afx_msg void OnSave();
+	afx_msg void OnSaveNew();
 	afx_msg void OnWavClick();
 	afx_msg void OnRescan();
 	afx_msg void OnHelp();
@@ -167,6 +171,7 @@ protected:
 	afx_msg void OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar);
 	afx_msg LRESULT OnVstEditorClosed(WPARAM w, LPARAM l);
 	afx_msg LRESULT OnActRefresh(WPARAM w, LPARAM l);
+	afx_msg LRESULT OnArmAudio(WPARAM w, LPARAM l);
 	void ApplyVolUi();
 	void CapturePartStateToCurrentPreset(int part1to32);
 
@@ -183,6 +188,7 @@ protected:
 	CCustomStandardButton m_rename;
 	CCustomStandardButton m_del;
 	CCustomStandardButton m_save;
+	CCustomStandardButton m_saveNew;
 	CCustomStandardButton m_wav;
 	CVstWireCtrl m_wire;
 	CToolTipCtrl m_tooltip;
@@ -212,6 +218,7 @@ protected:
 	HANDLE m_audioStop;
 	HANDLE m_audioThread;
 	volatile LONG m_audioRunning;
+	volatile LONG m_audioArmed;
 	HANDLE m_wavFile;
 	volatile LONG m_wavOn;
 	LONG m_wavBytes;
@@ -223,14 +230,23 @@ protected:
 	int m_pcOctaveShift;
 	// 0 = ch1 and MIDI keeps the device bank. 1..31 force soft keys and MIDI onto that part.
 	volatile LONG m_keyCh;
+	int m_ignorePresetSel;
+	/* StopAudio / ApplyPreset pumps messages. OnActivate must not StartAudio
+	   in the middle of that or two waveOut threads process() the same plugs. */
+	int m_audioHold;
 };
 
 #ifndef WM_VST_ACT_REFRESH
 #define WM_VST_ACT_REFRESH (WM_APP + 9122)
 #endif
+#ifndef WM_VST_HOST_ARM_AUDIO
+#define WM_VST_HOST_ARM_AUDIO (WM_APP + 9123)
+#endif
 
 extern CVstHostDlg* g_vstHostDlg;
 void OpenVstHostModeless(CWnd* parent);
+/* App exit: stop the audio thread, then destroy the host so live VSTs unload. */
+void VstHostDlgCloseForAppExit(void);
 /* HWND of open VST Host, or NULL. Used by live monitor to yield waveOut. */
 HWND VstHostDlgGetHwnd(void);
 int VstHostPresetCount(void);

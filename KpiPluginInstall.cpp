@@ -884,10 +884,6 @@ static void KpiInstallCopyIfMissing(LPCTSTR src, LPCTSTR dst)
 	CopyFile(src, dst, TRUE);
 }
 
-static const TCHAR* const kFmMidiSidecarNames[] = {
-	L"gs.wopn", L"xg.wopn", L"programs.txt"
-};
-
 static BOOL KpiInstallDirHasKpi(LPCTSTR dir, LPCTSTR kpiName)
 {
 	if (!dir || !dir[0] || !kpiName || !kpiName[0])
@@ -901,12 +897,6 @@ static BOOL KpiInstallDirMissingSidecar(LPCTSTR dir, LPCTSTR kpiName)
 {
 	if (!KpiInstallDirHasKpi(dir, kpiName))
 		return FALSE;
-	for (int i = 0; i < (int)(sizeof(kFmMidiSidecarNames) / sizeof(kFmMidiSidecarNames[0])); ++i) {
-		TCHAR p[MAX_PATH * 2] = {};
-		_sntprintf_s(p, _TRUNCATE, L"%s\\%s", dir, kFmMidiSidecarNames[i]);
-		if (!KpiInstallFileExists(p))
-			return TRUE;
-	}
 	return FALSE;
 }
 
@@ -978,23 +968,6 @@ static BOOL KpiInstallEnsureFmMidiSidecars(LPCTSTR exeDir)
 		_sntprintf_s(destDir, _TRUNCATE, L"%s%s", exeDir, kDstRel[d]);
 		if (!KpiInstallDirHasKpi(destDir, kDstKpi[d]))
 			continue;
-		for (int sname = 0; sname < (int)(sizeof(kFmMidiSidecarNames) / sizeof(kFmMidiSidecarNames[0])); ++sname) {
-			TCHAR dst[MAX_PATH * 2] = {};
-			_sntprintf_s(dst, _TRUNCATE, L"%s\\%s", destDir, kFmMidiSidecarNames[sname]);
-			if (KpiInstallFileExists(dst))
-				continue;
-			for (int s = 0; s < nSrc; ++s) {
-				TCHAR src[MAX_PATH * 2] = {};
-				_sntprintf_s(src, _TRUNCATE, L"%s\\%s", srcAbs[s], kFmMidiSidecarNames[sname]);
-				if (!KpiInstallFileExists(src) || _tcsicmp(src, dst) == 0)
-					continue;
-				KpiInstallCopyIfMissing(src, dst);
-				if (KpiInstallFileExists(dst)) {
-					did = TRUE;
-					break;
-				}
-			}
-		}
 	}
 	return did;
 }

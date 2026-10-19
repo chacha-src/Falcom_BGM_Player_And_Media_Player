@@ -5743,12 +5743,8 @@ void CMediaPlayerDlg::BannerSoft3dZoomCb(void* ctx, int value)
 void CMediaPlayerDlg::PresentBannerSoft3D(CDC* pDC)
 {
 	if (!pDC || m_bannerRect.IsRectEmpty()) return;
-	/* Track 中も timerp が合成した GDI バナー（ジャケ・文字・スペアナ）を出す。
-	   ここで Soft3D を回すと FM/MIDI と取り合い、メニューの出現が止まる。 */
-	if (CCustomPopupMenu::GetTrackingRoot() != NULL) {
-		BlitVisualizer(pDC);
-		return;
-	}
+	/* メニュー中も Soft3D を回す。出現アニメはメニュー側が重い描画を1通で切るので、
+	   ここで抜けるとバナーだけが最後の GDI フレームで止まる。 */
 	// アナライザ/ピアノと同様: Soft3D はバナー矩形だけ。ジャケ/情報は 2D サイドパネル。
 	// （旧: 3領域を1枚に載せてバーがジャケ・情報の下に食い込み、クリップで中心帯だけ見えて壊れて見えた）
 	const int sw = m_bannerRect.Width(), sh = m_bannerRect.Height();

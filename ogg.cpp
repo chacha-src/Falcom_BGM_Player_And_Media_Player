@@ -18,6 +18,7 @@
 #include "ProAudio.h"
 #include "MpSidecar.h"
 #include "XfadePlayback.h"
+#include "VstMidiEngine.h"
 #include "direct.h"
 #ifdef _DEBUG
 #define new DEBUG_NEW
@@ -266,7 +267,13 @@ BOOL COggApp::OnIdle(LONG lCount)
 BOOL COggApp::ExitInstance()
 {
 	GpuDx11_Shutdown();
-	return CWinApp::ExitInstance();
+	const int rc = CWinApp::ExitInstance();
+	/* savedata / dat / mutex are done. SC-VA and Groove Agent were left
+	   mapped because effClose / terminate never return; ExitProcess would
+	   still call their DLL_PROCESS_DETACH and hang there (leftover exe). */
+	if (VstLiveLeftPluginsMapped())
+		::TerminateProcess(::GetCurrentProcess(), (UINT)rc);
+	return rc;
 }
 
 BOOL COggApp::InitInstance()

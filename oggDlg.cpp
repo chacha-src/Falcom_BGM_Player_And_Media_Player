@@ -46,6 +46,8 @@ int flacmode = 0;
 #include "CSasamiNotePaletteDlg.h"
 #include "CSasamiLayoutPaletteDlg.h"
 #include "CSasamiNotePropsDlg.h"
+#include "CSasamiInsertFxDlg.h"
+#include "CSasamiExcRpnDlg.h"
 #include "VstHostDlg.h"
 #include "CProToolsDlg.h"
 #include "TranscodeExport.h"
@@ -4125,11 +4127,16 @@ void COggDlg::OnSysCommand(UINT nID, LPARAM lParam)
 	{
 		CAboutDlg dlgAbout(this);
 		dlgAbout.DoModal();
+		return;
 	}
-	else
-	{
-		CCustomBlurDialogBase::OnSysCommand(nID, lParam);
+	/* SC_CLOSE -> DefWindowProc destroys the dialog without EndModalLoop.
+	   DoModal then pumps forever, the window is gone, and a VST frame
+	   (Groove Agent) keeps the process — and the exe — locked. */
+	if ((nID & 0xFFF0) == SC_CLOSE) {
+		OnOK();
+		return;
 	}
+	CCustomBlurDialogBase::OnSysCommand(nID, lParam);
 }
 
 // バージョン情報ダイアログをモーダル表示する(他画面=メディアプレイヤー側から呼ぶ)。
@@ -4304,7 +4311,11 @@ static int TryVstHostPlayBinds(HWND waitOwner)
 	if (!VstHostPresetHasCache(idx))
 		return -1;
 	VstHostPauseForSong(1);
+	/* ApplyPreset → RestartIo would StartAudio while this flag is still 0. */
+	VstSongUseLiveBindsSet(1);
 	const int n = VstHostApplyPresetForPlay(idx, waitOwner);
+	if (n <= 0)
+		VstSongUseLiveBindsSet(0);
 	return n > 0 ? n : 0;
 }
 
@@ -4342,9 +4353,21 @@ static void CloseVstMidiSession()
 	   while Host32 waits in Pump / UI waits on Host32). */
 	CloseVstMidiSessionSlot(0);
 	CloseVstMidiSessionSlot(1);
+	/* Host window open: drop the song flag so the host AudioThread can run.
+	   Host closed with live SC-VA/GA still loaded: keep the flag so the
+	   score monitor does not process() the same instances before the next
+	   mid (2nd play = VST2 noise, VST3 silent). */
+	const int hostOpen = (g_vstHostDlg && ::IsWindow(g_vstHostDlg->GetSafeHwnd())) ? 1 : 0;
+	int anyLive = 0;
+	if (!hostOpen) {
+		for (int p = 1; p <= 32; ++p)
+			if (VstLivePartIsLoaded(p)) { anyLive = 1; break; }
+	}
+	if (hostOpen || !anyLive)
+		VstSongUseLiveBindsSet(0);
 	/* 終端でホスト waveOut を起こすと、次曲の DirectSound が無音になる。
-	   thru 再生だけホスト出力を残す。 */
-	if (VstLiveThruIsOn())
+	   thru 再生だけホスト出力を残す。ホスト窓が前面なら OnActivate で再開。 */
+	if (VstLiveThruIsOn() && hostOpen)
 		VstHostPauseForSong(0);
 	else
 		VstHostPauseForSong(1);
@@ -6292,6 +6315,33 @@ int killw;
 ULONG PlayCursora, WriteCursora;
 double oggsize2 = 0;
 BYTE bufwav3[OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 8];
+
+/* 解析ワーカーの bufwav3 読みと、曲切替の ZeroMemory を重ねない。
+   再生スレッドの通常書き込みはここでは止めない（欠けサンプルであり落ちではない）。 */
+static CRITICAL_SECTION g_prPcmCs;
+static volatile LONG g_prPcmOnce = 0;
+static void PrPcmLock()
+{
+	if (InterlockedCompareExchange(&g_prPcmOnce, 1, 0) == 0) {
+		InitializeCriticalSection(&g_prPcmCs);
+		InterlockedExchange(&g_prPcmOnce, 2);
+	}
+	else {
+		while (InterlockedCompareExchange(&g_prPcmOnce, 2, 2) != 2)
+			Sleep(0);
+	}
+	EnterCriticalSection(&g_prPcmCs);
+}
+static void PrPcmUnlock()
+{
+	LeaveCriticalSection(&g_prPcmCs);
+}
+void PrPcmLockForPiano() { PrPcmLock(); }
+void PrPcmUnlockForPiano() { PrPcmUnlock(); }
+struct PrPcmGuard {
+	PrPcmGuard() { PrPcmLock(); }
+	~PrPcmGuard() { PrPcmUnlock(); }
+};
 
 
 char abuf[28];
@@ -9254,7 +9304,17 @@ static int XfSoftOpenSlot(int slot, const CString& path, int openMode)
 			else if (savedata.midPlayPrefer == 2)
 				return 0;
 		}
+		if (liveBinds <= 0) {
+			int already = 0;
+			for (int p = 1; p <= 32; ++p)
+				if (VstLivePartIsLoaded(p)) ++already;
+			if (already > 0)
+				liveBinds = already;
+		}
+		VstLiveThruSet(0);
 		VstSongUseLiveBindsSet(liveBinds > 0 ? 1 : 0);
+		if (liveBinds > 0)
+			VstHostPauseForSong(1);
 		int remote = 0;
 		int rate = 44100, ch = 2, bits = 16;
 		int lenSamp = 0;
@@ -12829,8 +12889,11 @@ void COggDlg::play()
 	wavchannel = 2;
 	g_ysxS1LrOnly = 0;
 	wavsam_depth = 16;
-	if (!xfSoftOpen)
+	if (!xfSoftOpen) {
+		PrPcmLock();
 		ZeroMemory(bufwav3, sizeof(bufwav3));
+		PrPcmUnlock();
+	}
 	/* flac/ogg 等へ切替わったのにロードの MPU/ハードが残るとジングルが混ざる */
 	if (!xfSoftOpen
 		&& mode != MODE_CEMU && !IsCemuMode(mode)
@@ -13438,7 +13501,9 @@ void COggDlg::play()
 	if (!xfSoftOpen) {
 		if (m_dsb != NULL) m_dsb->Release();
 		m_dsb = NULL;
+		PrPcmLock();
 		ZeroMemory(bufwav3, sizeof(bufwav3));
+		PrPcmUnlock();
 	}
 	DWORD  dwDataLen = WAVDALen / OUTPUT_BUFFER_NUM;
 	if (((mode >= 10 && mode <= 21) || IsBuffwavNegMode(mode)) && mode != -10 || mode == -6 || mode == 34 || mode == 35 || mode == 30 || mode == 31) {
@@ -14782,14 +14847,19 @@ open_mode_vst_midi:
 				m_saisai.EnableWindow(TRUE); endflg = 0; return;
 			}
 		}
-		/* ファイル MIDI は DS が鳴らす。前曲 thru が残ると Lock が ZeroMemory して無音。 */
 		if (liveBinds <= 0) {
-			VstLiveThruSet(0);
-			VstHostPauseForSong(1);
-		} else if (!VstLiveThruIsOn()) {
-			VstHostPauseForSong(1);
+			int already = 0;
+			for (int p = 1; p <= 32; ++p)
+				if (VstLivePartIsLoaded(p)) ++already;
+			if (already > 0)
+				liveBinds = already;
 		}
+		/* ファイル MIDI は DS が鳴らす。ホスト waveOut が同じ live を
+		   process すると全パートにノイズが乗る。thru 中でも止める。 */
+		VstLiveThruSet(0);
 		VstSongUseLiveBindsSet(liveBinds > 0 ? 1 : 0);
+		if (liveBinds > 0)
+			VstHostPauseForSong(1);
 		wchar_t vstPlug[VST_PATH_CHARS]; vstPlug[0] = 0;
 		int vstOk = 0;
 		int triedRemote = 0;
@@ -16251,7 +16321,9 @@ open_mode_vst_midi:
 	playf = 1;
 	fade1 = 0; fade = 1.0f; fadeadd = 0.0f;
 	poss = 0; poss2 = 0; poss3 = 0; poss4 = 0; poss5 = 0; poss6 = 0;
+	PrPcmLock();
 	ZeroMemory(bufwav3, sizeof(bufwav3));
+	PrPcmUnlock();
 	g_oggPcmDecodePos = 0;
 	g_oggRbPrimingNeed = OggRbLatencyReserveBytes();
 	mcnt = mcnt1 = mcnt2 = mcnt3 = mcnt4 = mcnt5 = mcnt6 = mcnt7 = 0;
@@ -27259,8 +27331,20 @@ BOOL COggDlg::stop1()
 	return TRUE;
 }
 
+/* Safety net: if teardown hangs inside a plug-in's DLL_PROCESS_DETACH (Groove
+   Agent / Steinberg frame window), force the process down so no ogg.exe is left
+   running after Exit. */
+static unsigned __stdcall OggExitWatchdogProc(void*)
+{
+	Sleep(15000);
+	TerminateProcess(GetCurrentProcess(), 0);
+	return 0;
+}
+
 BOOL COggDlg::DestroyWindow()
 {
+	if (!GetSafeHwnd() || !::IsWindow(GetSafeHwnd()))
+		return TRUE;
 	if (OggInPlaybackUiTick()) {
 		OggDeferAppExitFromUiTick(this);
 		return FALSE;
@@ -27269,8 +27353,48 @@ BOOL COggDlg::DestroyWindow()
 		OggDeferAppExitFromUiTick(this);
 		return FALSE;
 	}
-	InterlockedExchange(&g_appExiting, 1);
+	static volatile LONG s_oggDestroying = 0;
+	if (InterlockedCompareExchange(&s_oggDestroying, 1, 0) != 0)
+		return FALSE;
+	/* Unload live VST while this window still exists. Otherwise the plug-in's
+	   own frame survives DestroyWindow and DoModal never returns.
+	   Soft-close editors BEFORE destroying the host dialog: DestroyWindow on
+	   the host used to walk Groove Agent's child frame and hang, leaving the
+	   exe running (hidden AgentFrameWindowClass).
+	   Skip process() first, then join DirectSound (stop), then host waveOut,
+	   then unload. Unload-while-DS-still-in-process left the exe running. */
 	VstLiveEditorOpenCancelPending();
+	InterlockedExchange(&g_appExiting, 1);
+	{
+		unsigned tid = 0;
+		HANDLE wd = (HANDLE)_beginthreadex(NULL, 0, OggExitWatchdogProc, NULL, 0, &tid);
+		if (wd) CloseHandle(wd);
+	}
+	VstLivePrepareAppExit();
+	stop();
+	VstLiveMonitorStop();
+	if (g_vstHostDlg && ::IsWindow(g_vstHostDlg->GetSafeHwnd()))
+		g_vstHostDlg->StopAudio();
+	VstLiveShutdown();
+	VstHostDlgCloseForAppExit();
+	CSasamiNotePropsDlg::CloseOpen();
+	CSasamiExcRpnDlg::CloseOpen();
+	CSasamiInsertFxDlg::CloseOpen();
+	{
+		CWnd* tools[] = {
+			CSasamiNotePaletteDlg::Instance(),
+			CSasamiLayoutPaletteDlg::Instance(),
+			CSasamiPianoRollDlg::InstanceMidi(),
+			CSasamiPianoRollDlg::InstanceFm(),
+			CSasamiTextDlg::Instance(),
+			CSasamiMidiScoreDlg::Instance(),
+			CSasamiFmScoreDlg::Instance(),
+		};
+		for (int i = 0; i < (int)(sizeof(tools) / sizeof(tools[0])); ++i) {
+			if (tools[i] && ::IsWindow(tools[i]->GetSafeHwnd()))
+				tools[i]->DestroyWindow();
+		}
+	}
 	DesktopLyricsAbortPaintForExit();
 	MpDjPadPrepareAppExit();
 	MpPromptOnAppShutdown();
@@ -27429,7 +27553,10 @@ BOOL COggDlg::DestroyWindow()
 		_tchdir(tmp_savedir);
 	}
 
-	return CCustomBlurDialogBase::DestroyWindow();
+	const BOOL ok = CCustomBlurDialogBase::DestroyWindow();
+	/* If close destroyed the window without EndDialog, release the modal loop. */
+	EndModalLoop(IDOK);
+	return ok;
 }
 
 // mcopy は RB レイテンシで 1 回の要求バイトに満たないことがある。部分返却を繰り返して DS 要求分を満たす（readmp3 と同じ）

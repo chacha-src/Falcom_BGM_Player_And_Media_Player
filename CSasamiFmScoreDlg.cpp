@@ -124,27 +124,15 @@ void CSasamiFmScoreDlg::OpenOwned(CWnd* owner)
 	s_inst = new CSasamiFmScoreDlg(owner);
 	CWnd* parent = AfxGetMainWnd();
 	if (!parent) parent = owner;
-	if (!s_inst->Create(IDD_SASAMI_FM_SCORE, parent)) {
+	if (!	s_inst->Create(IDD_SASAMI_FM_SCORE, parent)) {
 		delete s_inst;
 		s_inst = NULL;
 		AfxMessageBox(L"FM Score: Create() failed (check resource IDD_SASAMI_FM_SCORE).", MB_ICONERROR);
 		return;
 	}
-	s_inst->PullDocFromText(1);
-	if (s_inst->m_doc.evCount <= 0) {
-		ScFmDoc* tmp = (ScFmDoc*)HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(ScFmDoc));
-		if (tmp) {
-			if (ScSessionLoadLastFm(tmp, NULL, 0))
-				s_inst->LoadFromDoc(*tmp);
-			ScFmDocClear(tmp);
-			HeapFree(GetProcessHeap(), 0, tmp);
-		}
-	}
-	s_inst->SyncMeterFromDoc();
-	s_inst->RefreshToneLabels();
-	ScStaffUpdateContentExtent(&s_inst->m_ui, s_inst->m_doc.ev, s_inst->m_doc.evCount);
-	s_inst->InvalidateRect(s_inst->m_bodyRc, FALSE);
 	CCC_PresentOwnedHelp(s_inst, parent);
+	s_inst->UpdateWindow();
+	s_inst->PostMessage(WM_APP + 63, 0, 0);
 }
 
 void CSasamiFmScoreDlg::DoDataExchange(CDataExchange* pDX)
@@ -244,6 +232,7 @@ BEGIN_MESSAGE_MAP(CSasamiFmScoreDlg, CCustomBlurDialogExBase)
 	ON_MESSAGE(WM_SASAMI_PAL_LAYOUT, OnPalLayout)
 	ON_MESSAGE(WM_SASAMI_NOTE_PROPS, OnNoteProps)
 	ON_MESSAGE(WM_APP + 61, OnDeferredInit)
+	ON_MESSAGE(WM_APP + 63, OnDeferredSession)
 END_MESSAGE_MAP()
 
 void CSasamiFmScoreDlg::ApplyLang()
@@ -406,7 +395,6 @@ BOOL CSasamiFmScoreDlg::OnInitDialog()
 	RestoreUiGeom();
 	RefreshPartEnabled();
 	UpdateHelpBar();
-	PostMessage(WM_APP + 61, 0, 0);
 	return TRUE;
 }
 
@@ -443,12 +431,12 @@ void CSasamiFmScoreDlg::SyncStripCombos()
 	fillHgt(m_stripHgt1, m_ui.stripLaneHgt[1]);
 	fillHgt(m_stripHgt2, m_ui.stripLaneHgt[2]);
 	m_stripDraw.ResetContent();
-	m_stripDraw.AddString(ScStaffStripDrawModeName(SC_STRIP_DRAW_PENCIL));
-	m_stripDraw.AddString(ScStaffStripDrawModeName(SC_STRIP_DRAW_LINE));
-	m_stripDraw.AddString(ScStaffStripDrawModeName(SC_STRIP_DRAW_CURVE));
-	if (m_ui.stripDraw < 0 || m_ui.stripDraw > 2) m_ui.stripDraw = SC_STRIP_DRAW_PENCIL;
+	for (int d = 0; d < SC_STRIP_DRAW_COUNT; d++)
+		m_stripDraw.AddString(ScStaffStripDrawModeName(d));
+	if (m_ui.stripDraw < 0 || m_ui.stripDraw >= SC_STRIP_DRAW_COUNT)
+		m_ui.stripDraw = SC_STRIP_DRAW_PENCIL;
 	m_stripDraw.SetCurSel(m_ui.stripDraw);
-	m_stripDraw.SetDroppedWidth(120);
+	m_stripDraw.SetDroppedWidth(160);
 	m_stripLanes.ResetContent();
 	for (int n = 0; n <= SC_STRIP_LANES_MAX; n++)
 		m_stripLanes.AddString(ScStaffStripLanesLabel(n));
@@ -700,11 +688,36 @@ void CSasamiFmScoreDlg::SetupTooltips()
 	CCustomControlUtility::FinalizeDialogToolTip(m_tooltip);
 }
 
+LRESULT CSasamiFmScoreDlg::OnDeferredSession(WPARAM, LPARAM)
+{
+	m_status.SetWindowText(LL14(L"前回のセッションを読み込んでいます…", L"Loading the last session…",
+		L"Chargement de la session…", L"Caricamento sessione…", L"Cargando la sesión…",
+		L"마지막 세션 읽는 중…", L"正在读取上次会话…", L"جارٍ تحميل الجلسة…", L"Загрузка сессии…",
+		L"Letzte Sitzung wird geladen…", L"A carregar a sessão…", L"Laatste sessie laden…",
+		L"Wczytywanie sesji…", L"Son oturum yükleniyor…"));
+	PullDocFromText(1);
+	if (m_doc.evCount <= 0) {
+		ScFmDoc* tmp = (ScFmDoc*)HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(ScFmDoc));
+		if (tmp) {
+			if (ScSessionLoadLastFm(tmp, NULL, 0))
+				LoadFromDoc(*tmp);
+			ScFmDocClear(tmp);
+			HeapFree(GetProcessHeap(), 0, tmp);
+		}
+	}
+	SyncMeterFromDoc();
+	RefreshToneLabels();
+	ScStaffUpdateContentExtent(&m_ui, m_doc.ev, m_doc.evCount);
+	if (m_bodyRc.Width() > 0)
+		InvalidateRect(m_bodyRc, FALSE);
+	UpdateWindow();
+	PostMessage(WM_APP + 61, 0, 0);
+	return 0;
+}
+
 LRESULT CSasamiFmScoreDlg::OnDeferredInit(WPARAM, LPARAM)
 {
-	CRect wr; GetWindowRect(&wr);
-	CSasamiNotePaletteDlg::OpenNear(this, CPoint(wr.left + 40, wr.top + 100));
-	CSasamiLayoutPaletteDlg::OpenNear(this, CPoint(wr.left + 420, wr.top + 100));
+	SetTimer(9125, 1, NULL);
 	return 0;
 }
 
@@ -1801,7 +1814,9 @@ void CSasamiFmScoreDlg::OnMouseMove(UINT nFlags, CPoint point)
 			sval = 64;
 		}
 		if (lane < 0) lane = 0;
-		m_ui.strip[lane][scol] = (uint8_t)sval;
+		if (lane >= SC_STRIP_LANES_MAX) lane = SC_STRIP_LANES_MAX - 1;
+		ScStaffBandDragStroke(&m_ui, m_ui.strip[lane],
+			m_ui.stripLineAnchorCol, m_ui.stripLineAnchorVal, scol, sval, 0);
 		InvalidateRect(m_stripRc, FALSE);
 	} else if (m_ui.dragMode == 2 && (m_ui.nSel > 0 || m_ui.selEv >= 0) &&
 		(m_ui.tool == SC_TOOL_SELECT || m_ui.tool == SC_TOOL_PENCIL)) {
@@ -2625,6 +2640,13 @@ void CSasamiFmScoreDlg::OnTimer(UINT_PTR nIDEvent)
 			ApplyFollowScroll();
 			InvalidateRect(m_bodyRc, FALSE);
 		}
+		return;
+	}
+	if (nIDEvent == 9125) {
+		KillTimer(9125);
+		CRect wr; GetWindowRect(&wr);
+		CSasamiNotePaletteDlg::OpenNear(this, CPoint(wr.left + 40, wr.top + 100));
+		CSasamiLayoutPaletteDlg::OpenNear(this, CPoint(wr.left + 420, wr.top + 100));
 		return;
 	}
 	CCustomBlurDialogExBase::OnTimer(nIDEvent);

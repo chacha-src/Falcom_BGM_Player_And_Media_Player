@@ -5,6 +5,7 @@
 #include "oggDlg.h"
 #include "CMidiMonitorDlg.h"
 #include "CCustomPopupMenu.h"
+#include "CSasamiSoftKey.h"
 #include <process.h>
 #include <math.h>
 #include <mmsystem.h>
@@ -15,6 +16,7 @@
 extern __int64 playb;
 extern int wavbit_sample_Hz;
 extern CString filen;
+extern volatile LONG g_appExiting;
 
 
 namespace {
@@ -28,8 +30,11 @@ enum {
 	ID_VST_POP_RESCAN = 0xe710,
 	ID_VST_POP_CLEAR = 0xe711,
 	ID_VST_POP_SAVE = 0xe712,
+	ID_VST_POP_SAVE_NEW = 0xe718,
+	IDC_VST_SAVE_NEW = 0x7e15,
 	ID_VST_POP_EDITOR = 0xe713,
 	ID_VST_POP_WAV = 0xe714,
+	ID_VST_POP_SOFTKEY = 0xe715,
 	ID_VST_POP_MIDIMON = 0xe716,
 	ID_VST_POP_THRU = 0xe717,
 	// MIDI In 1/2/3: (none) plus per-device 1-16ch / 17-32ch (max 32 devices).
@@ -54,6 +59,48 @@ enum {
 	SYSEX_SLOT_BYTES = 4096,
 	SYSEX_BUFS_PER_PORT = 4
 };
+
+static int PathLooksVst3(const wchar_t* path)
+{
+	if (!path || !path[0]) return 0;
+	const size_t n = wcslen(path);
+	return (n >= 5 && _wcsicmp(path + n - 5, L".vst3") == 0) ? 1 : 0;
+}
+
+static int PresetLoadIsVst3(const CVstHostDlg::Preset& p, int part)
+{
+	if (part < 0 || part >= 32) return 0;
+	return (p.isVst3[part] || PathLooksVst3(p.path[part])) ? 1 : 0;
+}
+
+static int ScanIndexForPath(const wchar_t* path, const wchar_t** outName)
+{
+	if (!path || !path[0]) return -1;
+	const wchar_t* leaf = wcsrchr(path, L'\\');
+	if (!leaf) leaf = wcsrchr(path, L'/');
+	leaf = leaf ? leaf + 1 : path;
+	int byLeaf = -1;
+	for (int i = 0; i < VstScanGetCount(); ++i) {
+		const VstPluginInfo* pi = VstScanGet(i);
+		if (!pi || !pi->path[0]) continue;
+		if (_wcsicmp(pi->path, path) == 0) {
+			if (outName) *outName = pi->name;
+			return i;
+		}
+		if (byLeaf < 0) {
+			const wchar_t* pl = wcsrchr(pi->path, L'\\');
+			if (!pl) pl = wcsrchr(pi->path, L'/');
+			pl = pl ? pl + 1 : pi->path;
+			if (_wcsicmp(pl, leaf) == 0)
+				byLeaf = i;
+		}
+	}
+	if (byLeaf >= 0 && outName) {
+		const VstPluginInfo* pi = VstScanGet(byLeaf);
+		if (pi) *outName = pi->name;
+	}
+	return byLeaf;
+}
 
 // MIDI used to reach the engine through the dialog's message queue. Whenever
 // the UI thread stalled (painting, menus, a drag) the events piled up and were
@@ -233,8 +280,9 @@ public:
 			t->SetWindowText(LL14(L"名前", L"Name", L"Nom", L"Nome", L"Nombre", L"이름", L"名称", L"الاسم",
 				L"Имя", L"Name", L"Nome", L"Naam", L"Nazwa", L"Ad"));
 		CRect rc; GetClientRect(&rc);
+		/* ID 1 is IDOK — a previous edit with that id swallowed the name. */
 		m_edit.Create(WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_BORDER | ES_AUTOHSCROLL,
-			CRect(10, 28, rc.right - 10, 50), this, 1);
+			CRect(10, 28, rc.right - 10, 50), this, 1001);
 		m_ok.Create(LL14(L"決定", L"OK", L"OK", L"OK", L"Aceptar", L"확인", L"确定", L"موافق",
 			L"ОК", L"OK", L"OK", L"OK", L"OK", L"Tamam"),
 			WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_DEFPUSHBUTTON,
@@ -465,10 +513,11 @@ CRect CVstWireCtrl::SlotBtnRect(int i, int which) const
 	int bh = r.Height() - 6;
 	if (bh > 15) bh = 15;
 	if (bh < 8) bh = r.Height() - 2;
-	if (bh < 6 || r.Width() < 3 * bw + 24) return CRect(0, 0, 0, 0);
+	if (bh < 6 || r.Width() < 4 * bw + 28) return CRect(0, 0, 0, 0);
 	const int top = r.top + (r.Height() - bh) / 2;
 	CRect b(r.right - 4 - bw, top, r.right - 4, top + bh);
 	if (which == SLOT_BTN_EDIT) b.OffsetRect(-(bw + 2), 0);
+	if (which == SLOT_BTN_CLEAR) b.OffsetRect(-2 * (bw + 2), 0);
 	return b;
 }
 
@@ -476,7 +525,7 @@ int CVstWireCtrl::HitSlotBtn(CPoint pt, int* outBtn) const
 {
 	for (int i = 0; i < PART_COUNT; ++i) {
 		if (m_slots[i] < 0) continue;
-		for (int b = 0; b < 2; ++b) {
+		for (int b = 0; b < 3; ++b) {
 			CRect r = SlotBtnRect(i, b);
 			if (!r.IsRectEmpty() && r.PtInRect(pt)) {
 				if (outBtn) *outBtn = b;
@@ -506,16 +555,17 @@ void CVstWireCtrl::NotifyChanged(int slot)
 	if (m_owner) m_owner->OnWireChanged(slot);
 }
 
-// A multi-timbral instance answers all 16 MIDI channels of its port block, so
-// the slots above it hold no instance of their own yet are in use. Returns the
-// slot that owns them, or -1 when this slot stands alone.
+// A multi-timbral instance answers every empty channel of its 16-ch block.
+// A dedicated plug (Groove Agent on ch10) owns only that slot; channels after
+// it still belong to the multi behind it (SC-VA on ch1).
 int CVstWireCtrl::CoveringMulti(int slot) const
 {
 	if (!m_owner || slot < 0 || slot >= PART_COUNT) return -1;
 	if (m_slots[slot] >= 0) return -1;
-	for (int i = slot - 1, blockStart = (slot / 16) * 16; i >= blockStart; --i) {
+	const int blockStart = (slot / 16) * 16;
+	for (int i = slot - 1; i >= blockStart; --i) {
 		if (m_slots[i] < 0) continue;
-		return m_owner->PluginIsMulti(m_slots[i]) ? i : -1;
+		if (m_owner->PluginIsMulti(m_slots[i])) return i;
 	}
 	return -1;
 }
@@ -618,7 +668,9 @@ void CVstWireCtrl::PaintToDC(CDC& dc)
 		CRect t = r; t.DeflateRect(4, 1);
 		CRect bEdit = full ? SlotBtnRect(i, SLOT_BTN_EDIT) : CRect(0, 0, 0, 0);
 		CRect bMenu = full ? SlotBtnRect(i, SLOT_BTN_MENU) : CRect(0, 0, 0, 0);
-		if (!bEdit.IsRectEmpty()) t.right = bEdit.left - 4;
+		CRect bClear = full ? SlotBtnRect(i, SLOT_BTN_CLEAR) : CRect(0, 0, 0, 0);
+		if (!bClear.IsRectEmpty()) t.right = bClear.left - 4;
+		else if (!bEdit.IsRectEmpty()) t.right = bEdit.left - 4;
 		if (lit && !m_actText[i].IsEmpty()) {
 			CRect nt = t;
 			nt.left = max(t.left, t.right - 120);
@@ -629,15 +681,25 @@ void CVstWireCtrl::PaintToDC(CDC& dc)
 		dc.SetTextColor(lit ? RGB(228, 255, 238)
 			: (full ? RGB(255, 238, 180) : (cover >= 0 ? RGB(198, 176, 124) : RGB(155, 164, 180))));
 		dc.DrawText(s, t, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
-		for (int b = 0; b < 2; ++b) {
-			CRect bt = b == SLOT_BTN_EDIT ? bEdit : bMenu;
+		for (int b = 0; b < 3; ++b) {
+			CRect bt = b == SLOT_BTN_EDIT ? bEdit : (b == SLOT_BTN_MENU ? bMenu : bClear);
 			if (bt.IsRectEmpty()) continue;
 			const BOOL down = m_pressSlot == i && m_pressBtn == b;
-			dc.FillSolidRect(bt, down ? RGB(96, 130, 180) : RGB(46, 56, 76));
+			const BOOL isClear = (b == SLOT_BTN_CLEAR);
+			dc.FillSolidRect(bt, down ? (isClear ? RGB(150, 64, 64) : RGB(96, 130, 180))
+				: (isClear ? RGB(72, 40, 40) : RGB(46, 56, 76)));
 			dc.Draw3dRect(bt, down ? RGB(200, 232, 255) : RGB(132, 158, 198),
 				RGB(20, 24, 32));
-			const COLORREF ink = down ? RGB(255, 255, 255) : RGB(198, 220, 250);
-			if (b == SLOT_BTN_EDIT) {
+			const COLORREF ink = down ? RGB(255, 255, 255) : (isClear ? RGB(255, 180, 170) : RGB(198, 220, 250));
+			if (b == SLOT_BTN_CLEAR) {
+				const int x0 = bt.left + 3, y0 = bt.top + 3;
+				const int x1 = bt.right - 4, y1 = bt.bottom - 4;
+				CPen pen(PS_SOLID, 1, ink);
+				CPen* op = dc.SelectObject(&pen);
+				dc.MoveTo(x0, y0); dc.LineTo(x1, y1);
+				dc.MoveTo(x0, y1); dc.LineTo(x1, y0);
+				dc.SelectObject(op);
+			} else if (b == SLOT_BTN_EDIT) {
 				// A little window with a title bar: this opens the plug-in's own UI.
 				CRect g = bt; g.DeflateRect(4, 4);
 				if (g.Width() >= 4 && g.Height() >= 4) {
@@ -759,6 +821,10 @@ void CVstWireCtrl::OnLButtonUp(UINT flags, CPoint pt)
 		Invalidate(FALSE);
 		int hitBtn = -1;
 		if (HitSlotBtn(pt, &hitBtn) != slot || hitBtn != btn) return;
+		if (btn == SLOT_BTN_CLEAR) {
+			ClearSlot(slot);
+			return;
+		}
 		if (btn == SLOT_BTN_EDIT) {
 			if (VstLiveEditorOpen(slot + 1) != 0 && m_owner)
 				m_owner->SetStatus(LL14(L"このプラグインには設定画面がありません",
@@ -904,6 +970,10 @@ void CVstWireCtrl::ShowSlotMenu(int slot, CPoint screenPt)
 		L"Azzera slot", L"Borrar ranura", L"이 슬롯 해제", L"清除此插槽", L"مسح هذه الفتحة",
 		L"Очистить слот", L"Slot leeren", L"Limpar slot", L"Slot wissen", L"Wyczyść slot",
 		L"Slotu temizle"));
+	menu.AddCommand(ID_VST_POP_SOFTKEY, LL14(L"ソフトキーボード", L"Soft keyboard", L"Clavier logiciel",
+		L"Tastiera software", L"Teclado virtual", L"소프트 키보드", L"软键盘", L"لوحة مفاتيح",
+		L"Экранная клавиатура", L"Bildschirmtastatur", L"Teclado virtual", L"Schermtoetsenbord",
+		L"Klawiatura ekranowa", L"Yazılım klavyesi"));
 	menu.AddSeparator();
 	{
 		const int cur0 = m_owner->m_midiIn[0].GetCurSel() >= 0
@@ -986,6 +1056,7 @@ void CVstWireCtrl::ShowSlotMenu(int slot, CPoint screenPt)
 	const UINT cmd = menu.Track(screenPt, (CWnd*)m_owner);
 	if (!cmd) return;
 	if (cmd == ID_VST_POP_EDITOR) VstLiveEditorOpen(part);
+	else if (cmd == ID_VST_POP_SOFTKEY) ScSoftKeyOpen(m_owner);
 	else if (cmd == ID_VST_POP_CLEAR) ClearSlot(slot);
 	else if (cmd == ID_VST_POP_CH_ASIS) VstLiveSetSendChannel(part, -1);
 	else if (cmd >= ID_VST_POP_CH_FIRST && cmd < ID_VST_POP_CH_FIRST + 16)
@@ -1056,9 +1127,16 @@ void CVstWireCtrl::OnRButtonUp(UINT, CPoint pt)
 	menu.AddCommand(ID_VST_POP_CLEAR, LL14(L"このスロットを解除", L"Clear this slot", L"Effacer ce slot", L"Azzera slot",
 		L"Borrar ranura", L"이 슬롯 해제", L"清除此插槽", L"مسح هذه الفتحة", L"Очистить слот", L"Slot leeren",
 		L"Limpar slot", L"Slot wissen", L"Wyczyść slot", L"Slotu temizle"), NULL, slot >= 0 && m_slots[slot] >= 0);
-	menu.AddCommand(ID_VST_POP_SAVE, LL14(L"プリセットを保存", L"Save preset", L"Enregistrer", L"Salva preset", L"Guardar preset",
-		L"프리셋 저장", L"保存预设", L"حفظ الإعداد", L"Сохранить пресет", L"Preset speichern", L"Guardar predefinição",
-		L"Preset opslaan", L"Zapisz preset", L"Ön ayarı kaydet"));
+	menu.AddCommand(ID_VST_POP_SOFTKEY, LL14(L"ソフトキーボード", L"Soft keyboard", L"Clavier logiciel",
+		L"Tastiera software", L"Teclado virtual", L"소프트 키보드", L"软键盘", L"لوحة مفاتيح",
+		L"Экранная клавиатура", L"Bildschirmtastatur", L"Teclado virtual", L"Schermtoetsenbord",
+		L"Klawiatura ekranowa", L"Yazılım klavyesi"));
+	menu.AddCommand(ID_VST_POP_SAVE, LL14(L"プリセットを上書き保存", L"Overwrite preset", L"Écraser le préréglage", L"Sovrascrivi preset", L"Sobrescribir preset",
+		L"프리셋 덮어쓰기", L"覆盖保存预设", L"استبدال الإعداد", L"Перезаписать пресет", L"Preset überschreiben", L"Sobrescrever predefinição",
+		L"Preset overschrijven", L"Nadpisz preset", L"Ön ayarın üzerine yaz"));
+	menu.AddCommand(ID_VST_POP_SAVE_NEW, LL14(L"プリセットを新規保存", L"Save as new preset", L"Enregistrer comme nouveau", L"Salva come nuovo", L"Guardar como nuevo",
+		L"프리셋 새로 저장", L"另存为新预设", L"حفظ كإعداد جديد", L"Сохранить как новый", L"Als neues Preset", L"Guardar como nova",
+		L"Opslaan als nieuw", L"Zapisz jako nowy", L"Yeni ön ayar olarak kaydet"));
 	menu.AddCommand(ID_VST_POP_WAV, LL14(L"WAVへ書き出す", L"Write to WAV", L"Écrire en WAV", L"Scrivi su WAV", L"Escribir a WAV",
 		L"WAV로 쓰기", L"导出为 WAV", L"كتابة إلى WAV", L"Записать в WAV", L"Als WAV schreiben", L"Escrever para WAV",
 		L"Naar WAV schrijven", L"Zapisz do WAV", L"WAV olarak yaz"));
@@ -1132,7 +1210,9 @@ void CVstWireCtrl::OnRButtonUp(UINT, CPoint pt)
 	if (!m_owner) return;
 	if (cmd == ID_VST_POP_RESCAN) m_owner->OnRescan();
 	else if (cmd == ID_VST_POP_CLEAR && slot >= 0) ClearSlot(slot);
+	else if (cmd == ID_VST_POP_SOFTKEY) ScSoftKeyOpen(m_owner);
 	else if (cmd == ID_VST_POP_SAVE) m_owner->OnSave();
+	else if (cmd == ID_VST_POP_SAVE_NEW) m_owner->OnSaveNew();
 	else if (cmd == ID_VST_POP_WAV) m_owner->OnWavClick();
 	else if (cmd == ID_VST_POP_MIDIMON) {
 		extern COggDlg* og;
@@ -1189,8 +1269,10 @@ IMPLEMENT_DYNAMIC(CVstHostDlg, CCustomBlurDialogBase)
 CVstHostDlg::CVstHostDlg(CWnd* parent)
 	: CCustomBlurDialogBase(IDD, parent), m_presetCount(0), m_waveOut(NULL),
 	  m_audioEvent(NULL), m_audioStop(NULL), m_audioThread(NULL), m_audioRunning(0),
+	  m_audioArmed(0),
 	  m_wavFile(INVALID_HANDLE_VALUE), m_wavOn(0), m_wavBytes(0), m_volLevel(100),
-	  m_volUiLock(0), m_actPosted(0), m_pcOctaveShift(0), m_keyCh(0)
+	  m_volUiLock(0), m_actPosted(0), m_pcOctaveShift(0), m_keyCh(0),
+	  m_ignorePresetSel(0), m_audioHold(0)
 {
 	memset(m_presets, 0, sizeof(m_presets));
 	memset(m_presetComp, 0, sizeof(m_presetComp));
@@ -1236,6 +1318,7 @@ BEGIN_MESSAGE_MAP(CVstHostDlg, CCustomBlurDialogBase)
 	ON_BN_CLICKED(IDC_VST_RENAME, OnRename)
 	ON_BN_CLICKED(IDC_VST_DEL, OnDelete)
 	ON_BN_CLICKED(IDC_VST_SAVE, OnSave)
+	ON_BN_CLICKED(IDC_VST_SAVE_NEW, OnSaveNew)
 	ON_BN_CLICKED(IDC_VST_RESCAN, OnRescan)
 	ON_BN_CLICKED(IDC_VST_HELP, OnHelp)
 	ON_BN_CLICKED(IDC_VST_CLOSE, OnCloseButton)
@@ -1254,6 +1337,7 @@ BEGIN_MESSAGE_MAP(CVstHostDlg, CCustomBlurDialogBase)
 	ON_WM_HSCROLL()
 	ON_MESSAGE(WM_VST_LIVE_EDITOR_CLOSED, OnVstEditorClosed)
 	ON_MESSAGE(WM_VST_ACT_REFRESH, OnActRefresh)
+	ON_MESSAGE(WM_VST_HOST_ARM_AUDIO, OnArmAudio)
 END_MESSAGE_MAP()
 
 BOOL CVstHostDlg::OnInitDialog()
@@ -1279,6 +1363,12 @@ BOOL CVstHostDlg::OnInitDialog()
 		L"Удалить", L"Löschen", L"Eliminar", L"Verwijderen", L"Usuń", L"Sil"));
 	m_save.SetWindowText(LL14(L"保存", L"Save", L"Enregistrer", L"Salva", L"Guardar", L"저장", L"保存", L"حفظ",
 		L"Сохранить", L"Speichern", L"Guardar", L"Opslaan", L"Zapisz", L"Kaydet"));
+	if (!m_saveNew.GetSafeHwnd())
+		m_saveNew.Create(L"新規", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+			CRect(0, 0, 64, 24), this, IDC_VST_SAVE_NEW);
+	m_saveNew.SetFont(GetFont());
+	m_saveNew.SetWindowText(LL14(L"新規", L"New", L"Nouveau", L"Nuovo", L"Nuevo", L"새로", L"新建",
+		L"جديد", L"Новый", L"Neu", L"Novo", L"Nieuw", L"Nowy", L"Yeni"));
 
 	for (int i = 0; i < 3; ++i) m_midiIn[i].SetAeroMode(FALSE);
 	m_preset.SetAeroMode(FALSE);
@@ -1393,7 +1483,14 @@ BOOL CVstHostDlg::OnInitDialog()
 			L"플러그인을 파트로 드래그하고 우클릭으로 조작", L"拖动插件到声部；右键操作", L"اسحب الإضافات؛ انقر يميناً للإجراءات",
 			L"Перетащите плагины; ПКМ для действий", L"Plug-ins auf Parts ziehen; Rechtsklick für Aktionen", L"Arraste plug-ins; clique direito para ações",
 			L"Sleep plug-ins naar partijen; rechtsklik voor acties", L"Przeciągnij wtyczki; PPM otwiera akcje", L"Eklentileri bölümlere sürükleyin; işlemler için sağ tık"));
-		m_tooltip.AddTool(&m_save, LL14(L"現在の配線とデバイスをプリセットへ保存", L"Save current wiring and devices as a preset",
+		if (m_saveNew.GetSafeHwnd())
+			m_tooltip.AddTool(&m_saveNew, LL14(L"今の配線を新しいプリセットとして追加（既存は残す）",
+				L"Save the current wiring as a new preset",
+				L"Enregistrer comme nouveau préréglage", L"Salva come nuovo preset", L"Guardar como preset nuevo",
+				L"현재 배선을 새 프리셋으로 추가", L"把当前连线另存为新预设", L"حفظ التوصيل كإعداد جديد",
+				L"Сохранить как новый пресет", L"Als neues Preset speichern", L"Guardar como nova predefinição",
+				L"Opslaan als nieuw preset", L"Zapisz jako nowy preset", L"Yeni ön ayar olarak kaydet"));
+		m_tooltip.AddTool(&m_save, LL14(L"選択中のプリセットを上書き保存", L"Overwrite the selected preset",
 			L"Enregistrer câblage et périphériques", L"Salva cablaggio e dispositivi", L"Guardar cableado y dispositivos",
 			L"현재 배선과 장치를 프리셋으로 저장", L"将当前连线和设备保存为预设", L"حفظ التوصيلات والأجهزة كإعداد",
 			L"Сохранить схему и устройства", L"Aktuelle Verdrahtung und Geräte speichern", L"Guardar ligações e dispositivos",
@@ -1563,6 +1660,15 @@ LRESULT CVstHostDlg::OnActRefresh(WPARAM, LPARAM)
 	return 0;
 }
 
+LRESULT CVstHostDlg::OnArmAudio(WPARAM, LPARAM)
+{
+	if (!m_audioThread || m_audioHold)
+		return 0;
+	InterlockedExchange(&m_audioArmed, 1);
+	if (m_audioEvent) SetEvent(m_audioEvent);
+	return 0;
+}
+
 void CVstHostDlg::PlaySendAt(int ch0to31, DWORD msg)
 {
 	if (ch0to31 < 0) ch0to31 = 0;
@@ -1706,6 +1812,9 @@ void CVstHostDlg::OnActivate(UINT nState, CWnd* pWndOther, BOOL bMinimized)
 {
 	CCustomBlurDialogBase::OnActivate(nState, pWndOther, bMinimized);
 	if (nState == WA_INACTIVE) PcKeyReleaseAll();
+	if (nState != WA_INACTIVE && !bMinimized && !m_audioHold
+		&& !VstSongUseLiveBinds() && !AudioIsRunning())
+		StartAudio();
 }
 
 void CVstHostDlg::OnLButtonDown(UINT nFlags, CPoint point)
@@ -1741,6 +1850,9 @@ void CVstHostDlg::LayoutChildren(int cx, int cy)
 	m_preset.SetWindowPos(NULL, x, top, 180, 220, SWP_NOZORDER); x += 180 + gap;
 	m_rename.SetWindowPos(NULL, x, top, 80, rowH, SWP_NOZORDER); x += 80 + gap;
 	m_del.SetWindowPos(NULL, x, top, 60, rowH, SWP_NOZORDER); x += 60 + gap;
+	if (m_saveNew.GetSafeHwnd()) {
+		m_saveNew.SetWindowPos(NULL, x, top, 64, rowH, SWP_NOZORDER); x += 64 + gap;
+	}
 	m_save.SetWindowPos(NULL, x, top, 64, rowH, SWP_NOZORDER); x += 64 + gap;
 	m_rescan.SetWindowPos(NULL, cx - pad - 82, top, 82, rowH, SWP_NOZORDER);
 	const int y2 = top + rowH + gap + lblH + lblGap;
@@ -2093,15 +2205,27 @@ BOOL CVstHostDlg::SavePresets()
 
 void CVstHostDlg::RefreshPresetCombo(int select)
 {
+	m_ignorePresetSel++;
 	m_preset.ResetContent();
-	for (int i = 0; i < m_presetCount; ++i) m_preset.AddString(m_presets[i].name);
+	for (int i = 0; i < m_presetCount; ++i) {
+		CString s(m_presets[i].name);
+		s.Trim();
+		if (s.IsEmpty())
+			s.Format(L"%d", i + 1);
+		m_preset.AddString(s);
+	}
 	if (select >= 0 && select < m_presetCount) m_preset.SetCurSel(select);
+	m_ignorePresetSel--;
 }
 
 void CVstHostDlg::CaptureCurrent(Preset& p, LPCTSTR name)
 {
+	/* OnSave passes p.name as `name`. ZeroMemory would wipe that buffer first. */
+	wchar_t keepName[64] = {};
+	if (name && name[0])
+		wcsncpy_s(keepName, name, _TRUNCATE);
 	ZeroMemory(&p, sizeof(p));
-	wcsncpy_s(p.name, name ? name : L"", _TRUNCATE);
+	wcsncpy_s(p.name, keepName, _TRUNCATE);
 	for (int i = 0; i < 3; ++i) {
 		p.midiIn[i] = ComboSelData(m_midiIn[i]);
 	}
@@ -2121,6 +2245,10 @@ void CVstHostDlg::CaptureCurrent(Preset& p, LPCTSTR name)
 			wcsncpy_s(p.path[i], pi->path, _TRUNCATE);
 			p.isVst3[i] = pi->isVst3 ? 1 : 0;
 		}
+		if (!p.path[i][0] && VstLivePartIsLoaded(i + 1))
+			VstLivePartGetPath(i + 1, p.path[i], 520);
+		if (p.path[i][0] && !p.isVst3[i] && PathLooksVst3(p.path[i]))
+			p.isVst3[i] = 1;
 		if (storeStates && VstLivePartIsLoaded(i + 1)) {
 			unsigned char* comp = NULL; int compLen = 0;
 			unsigned char* ctrl = NULL; int ctrlLen = 0;
@@ -2142,10 +2270,24 @@ void CVstHostDlg::CaptureCurrent(Preset& p, LPCTSTR name)
 	}
 }
 
+static int LivePathsMatchPreset(const CVstHostDlg::Preset& p)
+{
+	for (int i = 0; i < 32; ++i) {
+		wchar_t cur[520] = {};
+		VstLivePartGetPath(i + 1, cur, 520);
+		if (!p.path[i][0] && !cur[0]) continue;
+		if (!p.path[i][0] || !cur[0] || _wcsicmp(p.path[i], cur) != 0)
+			return 0;
+	}
+	return 1;
+}
+
 void CVstHostDlg::ApplyPreset(int index)
 {
 	if (index < 0 || index >= m_presetCount) return;
 	const Preset& p = m_presets[index];
+	++m_audioHold;
+	StopAudio();
 	for (int port = 0; port < 3; ++port) {
 		int want = p.midiIn[port];
 		if (want == -2) want = -1;
@@ -2165,24 +2307,32 @@ void CVstHostDlg::ApplyPreset(int index)
 	for (int i = 0; i < m_speakerOut.GetCount(); ++i)
 		if ((int)m_speakerOut.GetItemData(i) == p.outDev) { outSel = i; break; }
 	m_speakerOut.CComboBox::SetCurSel(outSel);
-	int anyLoad = 0;
+	if (LivePathsMatchPreset(p)) {
+		/* Same DLLs already in RAM (host keyboard is using this kit).
+		   Re-applying the file blob on song start ran setState + process
+		   on the UI thread and wiped the live MediaBay kit. */
+		for (int part = 0; part < 32; ++part) {
+			if (!p.path[part][0]) { m_slots[part] = -1; continue; }
+			const wchar_t* waitName = p.path[part];
+			m_slots[part] = ScanIndexForPath(p.path[part], &waitName);
+		}
+		m_wire.SetSlots(m_slots);
+		--m_audioHold;
+		RestartIo();
+		return;
+	}
 	for (int part = 0; part < 32; ++part) {
 		m_slots[part] = -1;
 		VstLiveUnloadPart(part + 1);
+	}
+	int anyLoad = 0;
+	for (int part = 0; part < 32; ++part) {
 		if (!p.path[part][0]) continue;
-		int scanIndex = -1;
 		const wchar_t* waitName = p.path[part];
-		for (int i = 0; i < VstScanGetCount(); ++i) {
-			const VstPluginInfo* pi = VstScanGet(i);
-			if (pi && _wcsicmp(pi->path, p.path[part]) == 0) {
-				scanIndex = i;
-				waitName = pi->name;
-				break;
-			}
-		}
+		int scanIndex = ScanIndexForPath(p.path[part], &waitName);
 		VstWaitShowLoad(m_hWnd, waitName);
 		anyLoad = 1;
-		if (VstLiveLoadPart(part + 1, p.path[part], p.isVst3[part]) == 0) {
+		if (VstLiveLoadPart(part + 1, p.path[part], PresetLoadIsVst3(p, part)) == 0) {
 			m_slots[part] = scanIndex;
 			if (m_presetCompLen[index][part] > 0 && m_presetComp[index][part]) {
 				VstLiveApplyStates(part + 1,
@@ -2193,6 +2343,9 @@ void CVstHostDlg::ApplyPreset(int index)
 	}
 	if (anyLoad) VstWaitHide();
 	m_wire.SetSlots(m_slots);
+	VstLiveResetPartsForPlay();
+	VstLiveWakeHostVst2();
+	--m_audioHold;
 	RestartIo();
 }
 
@@ -2203,7 +2356,11 @@ BOOL CVstHostDlg::PromptName(CString& name, LPCTSTR title)
 	name = dlg.m_value; return TRUE;
 }
 
-void CVstHostDlg::OnPresetSelChange() { ApplyPreset(m_preset.GetCurSel()); }
+void CVstHostDlg::OnPresetSelChange()
+{
+	if (m_ignorePresetSel) return;
+	ApplyPreset(m_preset.GetCurSel());
+}
 void CVstHostDlg::OnPluginFilterChange() { RebuildPluginList(); }
 
 void CVstHostDlg::OnRename()
@@ -2214,7 +2371,11 @@ void CVstHostDlg::OnRename()
 	if (!PromptName(name, LL14(L"プリセット名の変更", L"Rename preset", L"Renommer le préréglage", L"Rinomina preset",
 		L"Renombrar preset", L"프리셋 이름 변경", L"重命名预设", L"إعادة تسمية الإعداد", L"Переименовать пресет",
 		L"Preset umbenennen", L"Renomear predefinição", L"Preset hernoemen", L"Zmień nazwę presetu", L"Ön ayarı yeniden adlandır"))) return;
-	wcsncpy_s(m_presets[i].name, name, _TRUNCATE);
+	{
+		wchar_t keep[64] = {};
+		wcsncpy_s(keep, name, _TRUNCATE);
+		wcsncpy_s(m_presets[i].name, keep, _TRUNCATE);
+	}
 	SavePresets(); RefreshPresetCombo(i);
 }
 
@@ -2265,6 +2426,32 @@ void CVstHostDlg::OnSave()
 	m_presetCount++; SavePresets(); RefreshPresetCombo(m_presetCount - 1);
 }
 
+void CVstHostDlg::OnSaveNew()
+{
+	if (m_presetCount >= 100) {
+		SetStatus(LL14(L"プリセットは100件までです", L"Preset list is full (100)", L"100 préréglages maximum",
+			L"Massimo 100 preset", L"Máximo 100 presets", L"프리셋은 100개까지", L"预设最多 100 个",
+			L"الحد 100 إعداد", L"Не больше 100 пресетов", L"Höchstens 100 Presets", L"Máximo de 100",
+			L"Maximaal 100 presets", L"Maksymalnie 100 presetów", L"En fazla 100 ön ayar"));
+		return;
+	}
+	CString name;
+	name.Format(LL14(L"プリセット %d", L"Preset %d", L"Préréglage %d", L"Preset %d", L"Preset %d", L"프리셋 %d",
+		L"预设 %d", L"إعداد %d", L"Пресет %d", L"Preset %d", L"Predefinição %d", L"Preset %d", L"Preset %d", L"Ön ayar %d"),
+		m_presetCount + 1);
+	if (!PromptName(name, LL14(L"新規プリセット", L"New preset", L"Nouveau préréglage", L"Nuovo preset", L"Preset nuevo",
+		L"새 프리셋", L"新建预设", L"إعداد جديد", L"Новый пресет", L"Neues Preset", L"Nova predefinição",
+		L"Nieuw preset", L"Nowy preset", L"Yeni ön ayar"))) return;
+	CaptureCurrent(m_presets[m_presetCount], name);
+	m_presetCount++;
+	SavePresets();
+	RefreshPresetCombo(m_presetCount - 1);
+	SetStatus(LL14(L"新しいプリセットを追加しました", L"New preset added", L"Nouveau préréglage ajouté",
+		L"Nuovo preset aggiunto", L"Preset nuevo añadido", L"새 프리셋을 추가했습니다", L"已添加新预设",
+		L"تمت إضافة إعداد جديد", L"Новый пресет добавлен", L"Neues Preset hinzugefügt", L"Nova predefinição adicionada",
+		L"Nieuw preset toegevoegd", L"Dodano nowy preset", L"Yeni ön ayar eklendi"));
+}
+
 void CVstHostDlg::OnRescan()
 {
 	/* 曲再生が live パートの process 中だと、Unload が同じ CS を待って UI が固まる。 */
@@ -2313,9 +2500,41 @@ void CVstHostDlg::OnWireChanged(int slot)
 {
 	m_wire.GetSlots(m_slots);
 	if (slot < 0 || slot >= 32) return;
-	VstLiveUnloadPart(slot + 1);
 	const VstPluginInfo* pi = VstScanGet(m_slots[slot]);
-	if (!pi) return;
+	if (!pi) {
+		VstLiveUnloadPart(slot + 1);
+		return;
+	}
+	/* Same multi already on this port: this channel goes back to that one
+	   VST2. Do not load a second copy, and do not touch the other parts. */
+	if (pi->isMultiTimbral) {
+		const int b0 = (slot / 16) * 16;
+		for (int i = b0; i < b0 + 16 && i < 32; ++i) {
+			if (i == slot || m_slots[i] < 0 || !PluginIsMulti(m_slots[i])) continue;
+			const VstPluginInfo* other = VstScanGet(m_slots[i]);
+			if (!other || _wcsicmp(other->path, pi->path) != 0) continue;
+			VstLiveUnloadPart(slot + 1);
+			m_slots[slot] = -1;
+			m_wire.SetSlots(m_slots);
+			SetStatus(LL14(
+				L"このチャンネルは共有VST2に戻りました",
+				L"This channel is back on the shared VST2",
+				L"Ce canal est revenu au VST2 partagé",
+				L"Canale di nuovo sul VST2 condiviso",
+				L"Este canal volvió al VST2 compartido",
+				L"이 채널이 공유 VST2로 돌아갔습니다",
+				L"此通道已回到共享 VST2",
+				L"عادت هذه القناة إلى VST2 المشترك",
+				L"Канал снова на общем VST2",
+				L"Kanal wieder auf dem gemeinsamen VST2",
+				L"Canal de volta ao VST2 partilhado",
+				L"Kanaal terug op de gedeelde VST2",
+				L"Kanał wrócił do wspólnego VST2",
+				L"Bu kanal paylaşılan VST2'ye döndü"));
+			return;
+		}
+	}
+	VstLiveUnloadPart(slot + 1);
 	VstWaitShowLoad(m_hWnd, pi->name);
 	const int loadRc = VstLiveLoadPart(slot + 1, pi->path, pi->isVst3);
 	VstWaitHide();
@@ -2327,17 +2546,8 @@ void CVstHostDlg::OnWireChanged(int slot)
 			L"Não foi possível carregar o plug-in", L"Kan plug-in niet laden", L"Nie można wczytać wtyczki", L"Eklenti yüklenemedi"));
 		return;
 	}
-	// A multi-timbral instance answers all 16 channels of its port block, so
-	// the remaining slots of that block must not look free.
-	if (pi->isMultiTimbral) {
-		const int blockEnd = (slot / 16) * 16 + 16;
-		for (int i = slot + 1; i < blockEnd && i < 32; ++i) {
-			if (m_slots[i] < 0) continue;
-			VstLiveUnloadPart(i + 1);
-			m_slots[i] = -1;
-		}
-		m_wire.SetSlots(m_slots);
-	}
+	/* A multi covers empty channels of its port. Dedicated plugs already
+	   sitting on other channels (drums on Groove Agent, …) stay loaded. */
 	SetStatus(pi->name);
 }
 
@@ -2367,12 +2577,9 @@ void CALLBACK CVstHostDlg::MidiInProc(HMIDIIN hmi, UINT msg, DWORD_PTR instance,
 		}
 		if ((mask & 3) == 3 && self->m_midiF5Port[slot] != 0xFF)
 			mask = (BYTE)(1 << (self->m_midiF5Port[slot] & 1));
-		const DWORD st = m & 0xF0u;
-		const int playCh = self->PlayChIndex();
-		if (playCh > 0 && st >= 0x80u && st < 0xF0u) {
-			self->PlaySendAt(playCh, m);
-			return;
-		}
+		/* Play-ch is only the PC / soft keyboard. Folding MIDI In onto it
+		   sucked ch1–16 into the Groove Agent slot (ch10) and left VST2
+		   silent. External MIDI keeps the channel the device sent. */
 		if (!mask) mask = 1;
 		for (int d = 0; d < 2; ++d) {
 			if (!(mask & (1 << d))) continue;
@@ -2610,18 +2817,31 @@ UINT __stdcall CVstHostDlg::AudioThreadProc(void* ctx)
 	}
 	InterlockedExchange(&self->m_audioRunning, 1);
 	while (WaitForSingleObject(self->m_audioStop, 0) != WAIT_OBJECT_0) {
+		if (InterlockedCompareExchange(&g_appExiting, 0, 0))
+			break;
 		BOOL queued = FALSE;
 		for (int b = 0; b < VST_AUDIO_BUFFERS; ++b) if (hdr[b].dwFlags & WHDR_DONE) {
 			ZeroMemory(L, sizeof(L)); ZeroMemory(R, sizeof(R));
 			MidiFifoDrain();
 			MidiSysexRecycle();
-			__int64 pb = playb;
-			const int sr = wavbit_sample_Hz;
-			if (sr >= 8000 && sr != 44100)
-				pb = playb * 44100 / sr;
-			VstLiveThruPoll(pb);
-			VstLiveRender(L, R, VST_AUDIO_FRAMES);
-			VstLiveThruPcmMix(L, R, VST_AUDIO_FRAMES);
+			if (!InterlockedCompareExchange(&self->m_audioArmed, 0, 0)
+				|| VstSongUseLiveBinds()
+				|| VstLiveShouldAbortProcess()
+				|| InterlockedCompareExchange(&g_appExiting, 0, 0)) {
+				/* Song DirectSound owns live process(). Do not process or
+				   pump here — that was VST2-silent / VST3-only on the host
+				   and all-silent (or underrun) on mid/mp*. */
+				ZeroMemory(L, sizeof(L));
+				ZeroMemory(R, sizeof(R));
+			} else {
+				__int64 pb = playb;
+				const int sr = wavbit_sample_Hz;
+				if (sr >= 8000 && sr != 44100)
+					pb = playb * 44100 / sr;
+				VstLiveThruPoll(pb);
+				VstLiveRender(L, R, VST_AUDIO_FRAMES);
+				VstLiveThruPcmMix(L, R, VST_AUDIO_FRAMES);
+			}
 			const int vol = (int)InterlockedCompareExchange(&self->m_volLevel, 0, 0);
 			const float g = (vol <= 0) ? 0.f : ((vol >= 100) ? 1.f : (float)vol * 0.01f);
 			for (int i = 0; i < VST_AUDIO_FRAMES; ++i) {
@@ -2652,9 +2872,18 @@ UINT __stdcall CVstHostDlg::AudioThreadProc(void* ctx)
 	return 0;
 }
 
+int CVstHostDlg::AudioIsRunning()
+{
+	return InterlockedCompareExchange(&m_audioRunning, 0, 0) ? 1 : 0;
+}
+
 BOOL CVstHostDlg::StartAudio()
 {
+	if (VstSongUseLiveBinds())
+		return FALSE;
 	StopAudio();
+	if (m_audioThread)
+		return FALSE;
 	/* Ensure score monitor released waveOut (OpenVstHostModeless also stops it). */
 	VstLiveMonitorStop();
 	WAVEFORMATEX wf = { WAVE_FORMAT_PCM, 2, 44100, 44100 * 4, 4, 16, 0 };
@@ -2678,63 +2907,47 @@ BOOL CVstHostDlg::StartAudio()
 	}
 	unsigned tid = 0;
 	MidiFifoInit();
+	InterlockedExchange(&m_audioArmed, 0);
 	m_audioThread = (HANDLE)_beginthreadex(NULL, 0, AudioThreadProc, this, 0, &tid);
-	if (m_audioThread) SetThreadPriority(m_audioThread, THREAD_PRIORITY_ABOVE_NORMAL);
+	if (m_audioThread) {
+		SetThreadPriority(m_audioThread, THREAD_PRIORITY_ABOVE_NORMAL);
+		if (m_hWnd) PostMessage(WM_VST_HOST_ARM_AUDIO, 0, 0);
+	}
 	return m_audioThread != NULL;
 }
 
 void CVstHostDlg::StopAudio()
 {
+	++m_audioHold;
+	InterlockedExchange(&m_audioArmed, 0);
+	/* Skip process() so this join does not MsgWait into Groove Agent and
+	   leave the AudioThread running (open-close host then mid leftover). */
+	VstLiveProcessPause(1);
 	if (m_audioStop) SetEvent(m_audioStop);
 	if (m_audioEvent) SetEvent(m_audioEvent);
 	if (m_audioThread) {
-		/* process 中のプラグインが UI へ SendMessage すると、素の Wait では固まる。 */
-		DWORD w = WAIT_TIMEOUT;
-		const DWORD t0 = GetTickCount();
-		for (;;) {
-			const DWORD elapsed = GetTickCount() - t0;
-			if (elapsed >= 8000) break;
-			w = MsgWaitForMultipleObjects(1, &m_audioThread, FALSE, 8000 - elapsed, QS_ALLINPUT);
-			if (w == WAIT_OBJECT_0 || w == WAIT_FAILED) break;
-			if (w == WAIT_OBJECT_0 + 1) {
-				MSG msg;
-				while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
-					if (msg.message == WM_QUIT) {
-						PostQuitMessage((int)msg.wParam);
-						break;
-					}
-					TranslateMessage(&msg);
-					DispatchMessage(&msg);
-				}
-			}
-		}
-		if (w != WAIT_OBJECT_0 && m_waveOut) {
-			// Thread is still inside waveOutWrite; Reset is the only nudge
-			// that is safe once the loop has already been asked to exit.
-			waveOutReset(m_waveOut);
-			w = WaitForSingleObject(m_audioThread, 3000);
-		}
+		WaitForSingleObject(m_audioThread, 3000);
 		CloseHandle(m_audioThread);
 		m_audioThread = NULL;
-		if (w != WAIT_OBJECT_0) {
-			InterlockedExchange(&m_audioRunning, 0);
-			return;
-		}
 	}
 	if (m_waveOut) {
+		waveOutReset(m_waveOut);
 		waveOutClose(m_waveOut);
 		m_waveOut = NULL;
 	}
 	if (m_audioEvent) { CloseHandle(m_audioEvent); m_audioEvent = NULL; }
 	if (m_audioStop) { CloseHandle(m_audioStop); m_audioStop = NULL; }
 	InterlockedExchange(&m_audioRunning, 0);
+	VstLiveProcessPause(0);
+	--m_audioHold;
 }
 
 void CVstHostDlg::RestartIo()
 {
 	StopAudio();
 	StartMidi();
-	StartAudio();
+	if (!VstSongUseLiveBinds())
+		StartAudio();
 }
 void CVstHostDlg::OnDeviceChange() { RestartIo(); }
 
@@ -2870,7 +3083,10 @@ void CVstHostDlg::OnDestroy()
 	StopWav();
 	StopAudio();
 	StopMidi();
-	VstLiveShutdown();
+	/* Do not VstLiveShutdown here. Closing the host UI used to abandon
+	   SC-VA/GA and leave zombie frames; the next mid/mp* reload then
+	   noised VST2 and silenced VST3. Plugins stay loaded for song play.
+	   App exit calls VstLiveShutdown before destroying this window. */
 	CCustomBlurDialogBase::OnDestroy();
 }
 
@@ -2909,9 +3125,10 @@ int CVstHostDlg::PresetCacheBytes(int index) const
 
 void CVstHostDlg::PauseAudioForSong(int pause)
 {
-	if (pause)
+	if (pause) {
 		StopAudio();
-	else if (!m_audioThread)
+		VstLiveMonitorStop();
+	} else if (!VstSongUseLiveBinds() && !m_audioThread)
 		StartAudio();
 }
 
@@ -3113,16 +3330,29 @@ static int VstHostWireApplyFromFile(int index, HWND waitOwner)
 	f.Close();
 	{
 		int n = 0;
+		if (LivePathsMatchPreset(p)) {
+			/* Already loaded — keep the in-RAM kit. Host applied the blob
+			   on the real LoadPart. Re-setState here was UI-thread and
+			   left Groove Agent empty for mid/mp*. */
+			for (int part = 0; part < 32; ++part)
+				if (p.path[part][0]) ++n;
+			for (int part = 0; part < 32; ++part) {
+				free(comp[part]);
+				free(ctrl[part]);
+			}
+			return n;
+		}
+		for (int part = 0; part < 32; ++part)
+			VstLiveUnloadPart(part + 1);
 		int anyLoad = 0;
 		for (int part = 0; part < 32; ++part) {
-			VstLiveUnloadPart(part + 1);
 			if (!p.path[part][0]) continue;
 			const wchar_t* waitName = p.path[part];
 			if (const wchar_t* slash = wcsrchr(p.path[part], L'\\'))
 				waitName = slash + 1;
 			VstWaitShowLoad(waitOwner, waitName);
 			anyLoad = 1;
-			if (VstLiveLoadPart(part + 1, p.path[part], p.isVst3[part]) == 0) {
+			if (VstLiveLoadPart(part + 1, p.path[part], PresetLoadIsVst3(p, part)) == 0) {
 				++n;
 				if (compLen[part] > 0 && comp[part])
 					VstLiveApplyStates(part + 1, comp[part], (int)compLen[part],
@@ -3149,6 +3379,7 @@ int VstHostApplyPresetForPlay(int index, HWND waitOwner)
 {
 	if (index < 0) return 0;
 	if (g_vstHostDlg && ::IsWindow(g_vstHostDlg->GetSafeHwnd())) {
+		g_vstHostDlg->PauseAudioForSong(1);
 		g_vstHostDlg->ApplyPreset(index);
 		g_vstHostDlg->PauseAudioForSong(1);
 		int n = 0;
@@ -3231,10 +3462,26 @@ int VstHostAskCacheMissing(CWnd* owner)
 	return (int)dlg.DoModal();
 }
 
+void VstHostDlgCloseForAppExit(void)
+{
+	CVstHostDlg* dlg = g_vstHostDlg;
+	if (!dlg) return;
+	/* StopAudio before DestroyWindow: OnDestroy also stops, but a hung
+	   nested VstLiveShutdown used to run while this thread still processed. */
+	dlg->StopAudio();
+	if (::IsWindow(dlg->GetSafeHwnd()))
+		dlg->DestroyWindow();
+	else if (g_vstHostDlg == dlg) {
+		g_vstHostDlg = NULL;
+		delete dlg;
+	}
+}
+
 void OpenVstHostModeless(CWnd* parent)
 {
 	/* Score/tone-map monitor holds waveOut; release so Host StartAudio can open it. */
 	VstLiveMonitorStop();
+	VstSongUseLiveBindsSet(0);
 	if (g_vstHostDlg && ::IsWindow(g_vstHostDlg->GetSafeHwnd())) {
 		g_vstHostDlg->ShowWindow(SW_SHOW);
 		g_vstHostDlg->SetForegroundWindow();

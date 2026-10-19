@@ -90,47 +90,74 @@ PC-98 ささみ (SASAMI) の曲データを再生します。
     ストリームは cmd41。@CC 類の自動判定には入らないので、
     これだけなら .mpy のまま cmd41 が出ることがある
 
-[設定] kbsasami.vst / kbsasami.raira
+[同梱するもの]
 
-  セクション kbsasami:
+  kbsasami.kpi
+  kbsasami_host32.exe
+  kbsasami_host64.exe
+  kbsasami.txt（このファイル）
 
-  kbsasami.vst
-    本家 KbMedia Player: 0 = FM MIDI (プラグイン内 fmmidi / programs.txt)
-                         1 = VST 側を想定 (本家では通常 0)
-	kbsasami.raira
-    0 = 本家互換 (vst をそのまま解釈、ドラム音量は上げない、MIDI 音量は /2)
-    1 = このアプリ専用。vst の 0 と 1 を内部で入れ替え、
-        FM MIDI のドラムを少し大きくし、
-        FPY 再生時は %TEMP%\ogg_kbsasami\ に OPN/OPNA レジスタ dump
-        （fmmon_live.opna / fmmon_ring.opna / <曲名>.opna）を出して FM モニタと同期する
-        ※ dump は fmmode=OPN/OPNA（BEEP は対象外）
+  GS/XG の音色（gs.wopn / xg.wopn）は kpi の中に入っています。
+  同じフォルダに gs.wopn、xg.wopn、programs.txt が残っていても読みません。
+  消す必要はありません。置いたままにして構いません。
+
+[設定]  セクション名は kbsasami
+
+  数値は KbMedia Player のプラグイン設定、または ini の [kbsasami] に書きます。
+  このアプリは再生のたびに raira と vst を下の規則で書き直します。
+
+  kbsasami.vst          初期値 0
+    0  FM MIDI。kpi 内蔵の fmmidi で鳴らす。GS/XG の音色も kpi の中。
+    1  VST 側。本家 KbMedia Player では通常 0 のまま。
+    raira=1 のときは、このアプリが 0 と 1 の意味を入れ替える（下）。
+
+  kbsasami.raira        初期値 0（このアプリが起動時に 1 を書く）
+    0  本家互換。vst はそのまま。ドラムは標準の大きさ。MIDI 音量は半分。
+    1  このアプリ。vst の 0 と 1 を内部で入れ替える。FM ドラムを少し大きくする。
+       .fpy で fmmode が OPN または OPNA のとき、
+       %TEMP%\ogg_kbsasami\ にレジスタ dump を出す
+       （fmmon_live.opna / fmmon_ring.opna / <曲名>.opna）。
+       BEEP では dump しない。
     シーケンサ系（RCP/R36/G36/G18/MCP/MTD/EUP/SNG/ZMS/KAR/RMI/MFF/SEQ）は
-    ファイルがまだ SMF でなければプラグイン内で翻訳する。
-    raira の値では翻訳を止めない（らいらが書いた raira=1 が本家の ini に
-    残っていても RCP 等が鳴るようにするため）。
-    このアプリ自身は開く前に KpiRewriteSeqAsMidi で SMF 化する。
+    まだ SMF でなければプラグイン内で翻訳する。raira では翻訳を止めない。
+    本家の ini に raira=1 が残っていても RCP 等は鳴る。
+    このアプリ自身は開く前に SMF へ直してから渡す。
 
-  このアプリは常に raira=1 を書き込み、midPlayPrefer に合わせて
-  vst に逆値を自動代入します。結果として:
-    midPlayPrefer=KPI → 実効 vst=0 (fmmidi)
-    midPlayPrefer=VST → 実効 vst=1 (KPI は MIDI を開かずホストが VST)
-    .mpsmv はトレイラの VST をホストが直接開く（HALion 等）
+    このアプリが書く組み合わせ:
+      演奏を KPI（fmmidi）にする → 実効 vst=0
+      演奏を VST にする         → 実効 vst=1（KPI は MIDI を開かない）
+      .mpsmv の VST はホストがトレイラから直接開く（HALion 等）
 
-  kbsasami.vstfullpath_gs / kbsasami.vstfullpath_xg
-    raira=0 かつ vst=1 のときだけ。GS / XG の VST DLL のフルパス。
-    kbsasami.kpi は DLL の 32/64 に合わせて kbsasami_host32.exe /
+  kbsasami.fmmidimonitor  初期値 1
+    0  kbsasami_host の FM/MIDI モニタを出さない
+    1  出す
+    読むのは raira=0（本家 KbMedia Player など）のときだけ。
+    raira=1 のこのアプリは本体のモニタを使い、この値は見ない。
+
+  kbsasami.gimic        初期値 0
+    0  ソフト音源のまま
+    1  G.I.M.I.C の実チップで鳴らす
+    kbsasami_host32.exe と c86ctl.dll は、kpi から本体 exe までの
+    フォルダのどこかにあればよい。
+    ホスト、DLL、装置が無いとき、または差しているモジュールの種類が
+    曲と違うときはソフト音源のまま。
+
+  kbsasami.vstfullpath_gs
+  kbsasami.vstfullpath_xg
+    raira=0 かつ vst=1 のときだけ。GS / XG の VST2/VST3 DLL のフルパス。
+    kpi は DLL の 32/64 に合わせて kbsasami_host32.exe /
     kbsasami_host64.exe を起こし、専用パイプで PCM を受け取る。
     ogg の ogghost32 / \\.\pipe\ogg_kpi32 は使わない。
-    らいら（raira=1）はこの経路に入らない。
-    XG の曲に XG パスが無いときは GS へ落とさない。juicysf も同じホストが鳴らす。
+    raira=1 はこのパスを見ない。自分の VST ホストを使う。
+    XG の曲に XG パスが無いときは GS へ落とさない。
     ホスト exe は kbsasami.kpi と同じフォルダ（またはその x64）に置く。
 
-  モニタ
-    raira=0（本家 KbMedia Player など）の再生では、kbsasami_host が
-    本体と同じ FM/MIDI モニタを出す。オンオフの設定値は見ない。
-    raira=1（このアプリ）は本体のモニタを使う。プラグインからは出さない。
+  kbsasami.vstsoundfont_gs
+  kbsasami.vstsoundfont_xg
+    raira=0 で juicysf を使うときの SoundFont（.sf2）のフルパス。
+    空なら DLL の隣の SGM*.sf2 を探す。同じホスト exe が鳴らす。
 
-[設定] kbsasami.midimode
+[設定] kbsasami.midimode    初期値 0
 
   .mpy / .mpw2 / .mpsmv / .mid / シーケンサ翻訳後 SMF の音源
   (MIDI モニタの mapForce と同じ番号):
@@ -149,7 +176,7 @@ PC-98 ささみ (SASAMI) の曲データを再生します。
   プレイリストの「ささみ☆ﾐ 音源モード」で曲ごとに上書き可能。
   曲ごとの「自動」(midflag=0) はグローバル既定を使わず中身を見る。
 
-[設定] kbsasami.fmmode
+[設定] kbsasami.fmmode      初期値 2
 
   .fpy / .fpy2 の再生音源 (SASAMI /B /N 相当):
 
@@ -166,6 +193,16 @@ fmpmd / kpis98）:
 
   ym2608_adpcm_rom.bin     ymfm が使う ADPCM-A ROM
   2608_BD/SD/TOP/HH/TOM/RIM.WAV   fmgen 形式の PCM
+
+[命令の読み方]
+
+  左の数字が、ファイルに入っている命令番号です。
+  その右が名前、続けて何をするかです。
+  Composer の @名前 は、書き出したときにその番号になります。
+  3B は 3 バイト、4B は 4 バイト。可変は終端 0xFF までです。
+  .fpy / .mpy に無い命令は、うしろの「差分」の節にだけ書いてあります。
+  手書きの cmd と、Composer が細かく展開する @ は別です。
+  展開するものは「手書き用。Composer は展開」と書いてあります。
 
 [命令の長さ（共通）]
 

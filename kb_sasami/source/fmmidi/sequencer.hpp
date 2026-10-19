@@ -5,7 +5,7 @@
 #include <stdint.h>
 #include <string>
 #include <vector>
-//namespace midisequencer{//í by Kobarin
+//namespace midisequencer{//削除 by Kobarin
 //    typedef unsigned long uint_least32_t;
 
     struct midi_message{
@@ -14,7 +14,7 @@
         int port;
         int track;
     };
-/* í by Kobarin
+/* 削除 by Kobarin
     class uncopyable{
     public:
         uncopyable(){}
@@ -23,7 +23,7 @@
         void operator=(const uncopyable&);
     };
 */
-    class output{//:uncopyable{//C³ by Kobarin
+    class output{//:uncopyable{//修正 by Kobarin
     public:
         virtual void midi_message(int port, uint_least32_t message) = 0;
         virtual void sysex_message(int port, const void* data, std::size_t size) = 0;
@@ -33,7 +33,7 @@
         ~output(){}
     };
 
-    class sequencer{//:uncopyable{//C³ by Kobarin
+    class sequencer{//:uncopyable{//修正 by Kobarin
     public:
         sequencer();
         void clear();
@@ -45,18 +45,18 @@
         std::string get_copyright()const;
         std::string get_song()const;
         void play(double time, output* out);
-        void play_forward(double time, output* out);
-        double peek_time() const;
-        void set_position(double time);
-        bool is_play_end(void){return position >= messages.end();}//ÇÁ by Kobarin
-        double get_loop_point(void);//ÇÁ by Kobarin
-        double find_marker(const char* name) const;
+        void play_forward(double time, output* out); // 指定時刻まで進める。追加 ちゃちゃ
+        double peek_time() const; // 次イベント時刻。追加 ちゃちゃ
+        void set_position(double time); // 再生位置を秒で合わせる。追加 ちゃちゃ
+        bool is_play_end(void){return position >= messages.end();}//追加 by Kobarin
+        double get_loop_point(void);//追加 by Kobarin
+        double find_marker(const char* name) const; // マーカー名の時刻。追加 ちゃちゃ
     private:
         std::vector<midi_message> messages;
         std::vector<midi_message>::iterator position;
         std::vector<std::string> long_messages;
         void load_smf(void* fp, int(*fgetc)(void*));
     };
-//}//í by Kobarin
+//}//削除 by Kobarin
 
 #endif

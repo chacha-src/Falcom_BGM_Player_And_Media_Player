@@ -12,6 +12,7 @@ enum {
 	SC_VST_POP_CHANGE = 0xf714,
 	SC_VST_POP_MEDIABAY_HINT = 0xf715,
 	SC_VST_POP_CLEAR = 0xf711,
+	SC_VST_POP_VST2 = 0xf716,
 	SC_VST_POP_CH_ASIS = 0xf720,
 	SC_VST_POP_CH_FIRST = 0xf721, /* +0..15 */
 	SC_VST_POP_PROG_FIRST = 0xf740,
@@ -50,6 +51,53 @@ static int ScVstPathIsDedicated(const wchar_t* path)
 	return VstDetectMultiTimbral(path) ? 0 : 1;
 }
 
+/* Another part on this port already runs this multi. 0 = none. */
+static int ScVstFindSameMulti(int part1to32, const wchar_t* path)
+{
+	if (part1to32 < 1 || part1to32 > 32 || !path || !path[0]) return 0;
+	const int b0 = ((part1to32 - 1) / 16) * 16 + 1;
+	for (int p = b0; p < b0 + 16 && p <= 32; ++p) {
+		if (p == part1to32) continue;
+		if (!VstLivePartIsLoaded(p) || !VstLivePartIsMulti(p)) continue;
+		wchar_t cur[520];
+		cur[0] = 0;
+		if (!VstLivePartGetPath(p, cur, 520) || !cur[0]) continue;
+		if (_wcsicmp(cur, path) == 0) return p;
+	}
+	return 0;
+}
+
+static int ScVstFindAnyMulti(int part1to32)
+{
+	if (part1to32 < 1 || part1to32 > 32) return 0;
+	const int b0 = ((part1to32 - 1) / 16) * 16 + 1;
+	for (int p = b0; p < b0 + 16 && p <= 32; ++p) {
+		if (p == part1to32) continue;
+		if (VstLivePartIsLoaded(p) && VstLivePartIsMulti(p)) return p;
+	}
+	return 0;
+}
+
+static int ScVstTryLoadPath(CWnd* owner, int part1to32, ScMidiVstBind* bind, const wchar_t* path);
+
+/* Drop a dedicated plug and let this channel hear the shared VST2 again.
+   If the port has no multi left, load the preferred GS/XG onto this part. */
+static int ScVstReturnToShared(CWnd* owner, int part1to32, ScMidiVstBind* bind)
+{
+	const int wasMulti = VstLivePartIsLoaded(part1to32) && VstLivePartIsMulti(part1to32);
+	if (VstLivePartIsLoaded(part1to32) && !wasMulti) {
+		VstLiveUnloadPart(part1to32);
+		ScVstClearBind(bind, part1to32);
+	}
+	if (wasMulti || ScVstFindAnyMulti(part1to32))
+		return 1;
+	wchar_t pref[520];
+	pref[0] = 0;
+	if (VstPickPreferredPlugin(pref, 520) && pref[0])
+		return ScVstTryLoadPath(owner, part1to32, bind, pref);
+	return 1;
+}
+
 static int ScVstLoadPicked(CWnd* owner, int part1to32, ScMidiVstBind* bind)
 {
 	wchar_t path[520];
@@ -57,6 +105,15 @@ static int ScVstLoadPicked(CWnd* owner, int part1to32, ScMidiVstBind* bind)
 	if (CSasamiVstPickDlg::PickForPart(owner, part1to32, path, 520, &is3) != IDOK)
 		return 0;
 	if (::GetCapture()) ::ReleaseCapture();
+
+	/* Picking the VST2 that already plays this port: unload the dedicated
+	   plug on this channel and leave the one shared instance. */
+	if (!ScVstPathIsDedicated(path) && ScVstFindSameMulti(part1to32, path)) {
+		if (VstLivePartIsLoaded(part1to32) && !VstLivePartIsMulti(part1to32))
+			VstLiveUnloadPart(part1to32);
+		ScVstClearBind(bind, part1to32);
+		return 1;
+	}
 
 	/* Same path already live — no reload (avoids HALion 30s cold restart). */
 	if (ScVstSamePathLoaded(part1to32, path)) {
@@ -98,16 +155,11 @@ static int ScVstLoadPicked(CWnd* owner, int part1to32, ScMidiVstBind* bind)
 	}
 	ScVstApplyBindPath(bind, part1to32, path);
 	if (bind) {
-		/* Dedicated (ST/GA/HALion…): plugin hears ch0. Live part index selects
-		   which instance — do NOT set sendCh=part-1 (that silenced GA/HL).
-		   Multi (SC-VA): keep incoming channel (-1). */
-		if (ScVstPathIsDedicated(path)) {
-			VstLiveSetSendChannel(part1to32, 0);
-			bind->vstForceCh[part1to32 - 1] = 0;
-		} else {
-			VstLiveSetSendChannel(part1to32, -1);
-			bind->vstForceCh[part1to32 - 1] = -1;
-		}
+		/* Keep the song/part MIDI channel. sendCh=0 remapped Groove Agent
+		   drums (ch10) onto ch1 and the kit stayed silent. ToPart stamps
+		   the slot channel for the software keyboard. */
+		VstLiveSetSendChannel(part1to32, -1);
+		bind->vstForceCh[part1to32 - 1] = -1;
 	}
 	VstLiveMonitorEnsure();
 	return 1;
@@ -137,13 +189,8 @@ static int ScVstTryLoadPath(CWnd* owner, int part1to32, ScMidiVstBind* bind, con
 	if (rc != 0) return 0;
 	ScVstApplyBindPath(bind, part1to32, path);
 	if (bind) {
-		if (ScVstPathIsDedicated(path)) {
-			VstLiveSetSendChannel(part1to32, 0);
-			bind->vstForceCh[part1to32 - 1] = 0;
-		} else {
-			VstLiveSetSendChannel(part1to32, -1);
-			bind->vstForceCh[part1to32 - 1] = -1;
-		}
+		VstLiveSetSendChannel(part1to32, -1);
+		bind->vstForceCh[part1to32 - 1] = -1;
 	}
 	VstLiveMonitorEnsure();
 	return 1;
@@ -218,6 +265,12 @@ int ScVstShowPartMenu(CWnd* owner, int part1to32, CPoint screenPt, ScMidiVstBind
 	}
 
 	menu.AddSeparator();
+	menu.AddCommand(SC_VST_POP_VST2, LL14(
+		L"このチャンネルをVST2に戻す", L"Return this channel to VST2", L"Rendre ce canal au VST2",
+		L"Riporta il canale al VST2", L"Devolver este canal al VST2", L"이 채널을 VST2로",
+		L"此通道回到 VST2", L"إعادة هذه القناة إلى VST2", L"Вернуть канал на VST2",
+		L"Kanal zurück auf VST2", L"Devolver canal ao VST2", L"Kanaal terug naar VST2",
+		L"Wróć kanałem do VST2", L"Bu kanalı VST2'ye döndür"));
 	menu.AddCommand(SC_VST_POP_CLEAR, LL14(
 		L"このパートの音色を解除", L"Clear this part's tone", L"Effacer le timbre", L"Azzera il timbro",
 		L"Borrar el timbre", L"이 파트의 음색 해제", L"清除此声部音色", L"مسح طابع هذا الجزء",
@@ -232,6 +285,9 @@ int ScVstShowPartMenu(CWnd* owner, int part1to32, CPoint screenPt, ScMidiVstBind
 		return 1;
 	} else if (cmd == SC_VST_POP_CHANGE) {
 		if (ScVstLoadPicked(owner, part1to32, bind))
+			changed = 1;
+	} else if (cmd == SC_VST_POP_VST2) {
+		if (ScVstReturnToShared(owner, part1to32, bind))
 			changed = 1;
 	} else if (cmd == SC_VST_POP_CLEAR) {
 		VstLiveUnloadPart(part1to32);

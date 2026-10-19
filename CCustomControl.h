@@ -1243,6 +1243,29 @@ private:
     CRect m_heartRcSel;    // 選択行の♡
     CRect m_heartRcHot;    // ホバー行の♡
     BOOL m_heartTimerOn;   // 30ms が生きている。毎描画の SetTimer は周期を潰す
+    // ♡の下地。30ms ごとに行を PrintClient しない。スクロールで ok を落とす。
+    struct HeartUnder {
+        HDC plate;
+        HDC work;
+        HBITMAP plateBmp;
+        HBITMAP workBmp;
+        HGDIOBJ oldPlate;
+        HGDIOBJ oldWork;
+        void* plateBits;
+        void* workBits;
+        int w;
+        int h;
+        BOOL ok;
+        HeartUnder()
+            : plate(NULL), work(NULL), plateBmp(NULL), workBmp(NULL)
+            , oldPlate(NULL), oldWork(NULL)
+            , plateBits(NULL), workBits(NULL), w(0), h(0), ok(FALSE) {}
+    };
+    HeartUnder m_heartUnderSel;
+    HeartUnder m_heartUnderHot;
+    void FreeHeartUnder(HeartUnder& u);
+    void CaptureHeartUnder(HeartUnder& u, HDC src, const CRect& rc);
+    void PresentHeartUnder(HeartUnder& u, HDC dst, const CRect& rc, int tick, BOOL hot, COLORREF col);
     BOOL m_hotRowsPosted;
     RECT m_hotRows[4];
     int m_hotRowsN;

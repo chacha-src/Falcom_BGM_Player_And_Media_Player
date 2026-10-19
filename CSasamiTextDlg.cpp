@@ -55,6 +55,8 @@ void CSasamiTextDlg::OpenOwned(CWnd* owner)
 		s_inst = NULL;
 		return;
 	}
+	CCC_PresentOwnedHelp(s_inst, owner ? owner : AfxGetMainWnd());
+	s_inst->UpdateWindow();
 	if (dynamic_cast<CSasamiFmScoreDlg*>(owner) || dynamic_cast<CSasamiMidiScoreDlg*>(owner))
 		syncFromScore();
 	else if (CSasamiFmScoreDlg* fm = CSasamiFmScoreDlg::Instance()) {
@@ -90,7 +92,6 @@ void CSasamiTextDlg::OpenOwned(CWnd* owner)
 		}
 		if (mml) HeapFree(GetProcessHeap(), 0, mml);
 	}
-	CCC_PresentOwnedHelp(s_inst, owner ? owner : AfxGetMainWnd());
 }
 
 void CSasamiTextDlg::DoDataExchange(CDataExchange* pDX)

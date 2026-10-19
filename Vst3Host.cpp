@@ -21,6 +21,8 @@
 #include <stdlib.h>
 #include <wchar.h>
 
+extern "C" int VstLiveShouldAbortProcess(void);
+
 struct Vst3Inst;
 
 namespace Vst3Detail {
@@ -709,6 +711,33 @@ struct Vst3Inst {
 	}
 };
 
+namespace Vst3Detail {
+// Push every controller parameter value into the processor's input parameter
+// queue for the next process(). The host editor triggers this via
+// restartComponent(kParamValuesChanged); the song path (mid/mp*) has no editor,
+// so after a state restore the processor keeps running at default values and
+// instruments whose live kit lives on the controller side (Groove Agent,
+// HALion, …) come out silent. Calling this after setState mirrors the editor.
+void PushControllerParams(Vst3Inst* owner)
+{
+	using namespace Steinberg;
+	using namespace Steinberg::Vst;
+	if (!owner || !owner->ok || !owner->controller) return;
+	EnterCriticalSection(&owner->paramCs);
+	const int32 np = owner->controller->getParameterCount();
+	for (int32 i = 0; i < np && i < 512; ++i) {
+		ParameterInfo pi = {};
+		if (owner->controller->getParameterInfo(i, pi) != kResultOk) continue;
+		int32 index = 0;
+		IParamValueQueue* q = owner->params.addParameterData(pi.id, index);
+		if (!q) break;
+		int32 pt = 0;
+		q->addPoint(0, owner->controller->getParamNormalized(pi.id), pt);
+	}
+	LeaveCriticalSection(&owner->paramCs);
+}
+} // namespace Vst3Detail
+
 Steinberg::tresult PLUGIN_API Vst3Detail::CompHandler::performEdit(
 	Steinberg::Vst::ParamID id, Steinberg::Vst::ParamValue valueNormalized)
 {
@@ -734,20 +763,8 @@ Steinberg::tresult PLUGIN_API Vst3Detail::CompHandler::restartComponent(int32 fl
 	// Editor-driven kit/preset loads change many parameters at once. Push the
 	// current controller values into the next process() so the processor side
 	// matches what the GUI is showing.
-	if ((flags & kParamValuesChanged) && owner->controller) {
-		EnterCriticalSection(&owner->paramCs);
-		const int32 np = owner->controller->getParameterCount();
-		for (int32 i = 0; i < np && i < 512; ++i) {
-			ParameterInfo pi = {};
-			if (owner->controller->getParameterInfo(i, pi) != kResultOk) continue;
-			int32 index = 0;
-			IParamValueQueue* q = owner->params.addParameterData(pi.id, index);
-			if (!q) break;
-			int32 pt = 0;
-			q->addPoint(0, owner->controller->getParamNormalized(pi.id), pt);
-		}
-		LeaveCriticalSection(&owner->paramCs);
-	}
+	if ((flags & kParamValuesChanged) && owner->controller)
+		Vst3Detail::PushControllerParams(owner);
 	if (flags & (kLatencyChanged | kIoChanged)) {
 		if (owner->processor && owner->processing) {
 			owner->processor->setProcessing(false);
@@ -885,20 +902,13 @@ Vst3Inst* Vst3Open(const wchar_t* vst3PathOrDll)
 	if (audioOuts < 1) {
 		Vst3Fail(L"no audio out bus"); Vst3Close(v); return NULL;
 	}
-	const int32 nIn = audioIns > VST3_MAX_BUSES ? VST3_MAX_BUSES : audioIns;
-	const int32 nOut = audioOuts > VST3_MAX_BUSES ? VST3_MAX_BUSES : audioOuts;
-	SpeakerArrangement inArr[VST3_MAX_BUSES];
-	SpeakerArrangement outArr[VST3_MAX_BUSES];
-	for (int i = 0; i < VST3_MAX_BUSES; ++i) {
-		inArr[i] = SpeakerArr::kStereo;
-		outArr[i] = SpeakerArr::kStereo;
-	}
-	for (int32 i = 0; i < nIn; ++i)
-		v->processor->getBusArrangement(kInput, i, inArr[i]);
-	for (int32 i = 0; i < nOut; ++i)
-		v->processor->getBusArrangement(kOutput, i, outArr[i]);
-	if (audioIns <= VST3_MAX_BUSES && audioOuts <= VST3_MAX_BUSES)
-		v->processor->setBusArrangements(inArr, nIn, outArr, nOut);
+	/* kSimple: one stereo in (if the plug has any) and one stereo out.
+	   Asking Groove Agent for 32 pad buses made process() too heavy for the
+	   song buffer (underrun) and left the kit silent. */
+	SpeakerArrangement inArr = SpeakerArr::kStereo;
+	SpeakerArrangement outArr = SpeakerArr::kStereo;
+	const int32 useIn = (audioIns > 0) ? 1 : 0;
+	v->processor->setBusArrangements(useIn ? &inArr : NULL, useIn, &outArr, 1);
 
 	BusInfo outInfo = {};
 	if (v->component->getBusInfo(kAudio, kOutput, 0, outInfo) != kResultOk) {
@@ -910,16 +920,9 @@ Vst3Inst* Vst3Open(const wchar_t* vst3PathOrDll)
 	v->bus0Channels = outInfo.channelCount;
 	if (v->bus0Channels > 16) v->bus0Channels = 16;
 	v->outputChannels = (v->bus0Channels >= 2) ? 2 : 1;
-	v->audioIns = audioIns;
-	v->audioOuts = audioOuts;
-	v->mixOutBuses = audioOuts;
-	if (v->mixOutBuses < 1) v->mixOutBuses = 1;
-	if (v->mixOutBuses > VST3_MAX_MIX_BUSES) v->mixOutBuses = VST3_MAX_MIX_BUSES;
-	if (v->mixOutBuses > 1) {
-		v->extraBufs = (float*)calloc((size_t)(v->mixOutBuses - 1) * 2 * VST3_BLOCK,
-			sizeof(float));
-		if (!v->extraBufs) v->mixOutBuses = 1;
-	}
+	v->audioIns = useIn;
+	v->audioOuts = 1;
+	v->mixOutBuses = 1;
 
 	ProcessSetup setup = {};
 	setup.processMode = kRealtime;
@@ -935,9 +938,9 @@ Vst3Inst* Vst3Open(const wchar_t* vst3PathOrDll)
 	// Groove Agent declares a stereo audio input (sidechain / pad). Leaving it
 	// inactive made process() run with a mismatched bus layout and stay silent.
 	for (int32 i = 0; i < audioIns; ++i)
-		v->component->activateBus(kAudio, kInput, i, true);
+		v->component->activateBus(kAudio, kInput, i, i == 0 && useIn);
 	for (int32 i = 0; i < audioOuts; ++i)
-		v->component->activateBus(kAudio, kOutput, i, i < v->mixOutBuses);
+		v->component->activateBus(kAudio, kOutput, i, i == 0);
 	if (v->component->setActive(true) != kResultOk) {
 		Vst3Fail(L"setActive"); Vst3Close(v); return NULL;
 	}
@@ -1071,7 +1074,13 @@ void Vst3MidiShort(Vst3Inst* v, DWORD msg, int sampleOffset)
 	e.flags = 0;
 	const int status = msg & 0xff;
 	const int type = status & 0xf0;
-	const int channel = status & 15;
+	int channel = status & 15;
+	/* A dedicated kit (Groove Agent) often has 1 event channel, or 16 with
+	   the instrument on ch0. SMF drum ch10 must still trigger the kit. */
+	if (v->midiInCh <= 1)
+		channel = 0;
+	else if (channel >= v->midiInCh)
+		channel = channel % v->midiInCh;
 	const int d1 = (msg >> 8) & 0x7f;
 	const int d2 = (msg >> 16) & 0x7f;
 	if (type == 0xb0)
@@ -1201,7 +1210,8 @@ void Vst3EditorClose(Vst3Inst* v)
 	Vst3EditorCloseEx(v, 0);
 }
 
-/* soft!=0: skip view->removed() — SampleTank can hang forever there under editClose. */
+/* soft!=0: skip view->removed(). VST3 IPlugView (Steinberg FrameWindowClass,
+   SampleTank, Groove Agent, …) can wait there forever. */
 void Vst3EditorCloseEx(Vst3Inst* v, int soft)
 {
 	if (!v || !v->view) return;
@@ -1224,7 +1234,8 @@ void Vst3Process(Vst3Inst* v, float* outL, float* outR, int frames)
 	using namespace Steinberg::Vst;
 	using namespace Vst3Detail;
 	if (!outL || !outR || frames <= 0) return;
-	if (!v || !v->ok || !v->processor) {
+	/* Pending events stay queued for the next real process(). */
+	if (!v || !v->ok || !v->processor || VstLiveShouldAbortProcess()) {
 		ZeroMemory(outL, frames * sizeof(float));
 		ZeroMemory(outR, frames * sizeof(float));
 		return;
@@ -1249,13 +1260,22 @@ void Vst3Process(Vst3Inst* v, float* outL, float* outR, int frames)
 		}
 		v->pending.count = keep;
 
-		__declspec(align(32)) float zin[2][VST3_BLOCK];
+		enum { VST3_MAX_IN_BUSES = 8 };
+		__declspec(align(32)) float zin[VST3_MAX_IN_BUSES][2][VST3_BLOCK];
 		ZeroMemory(zin, sizeof(zin));
-		float* inCh[2] = { zin[0], zin[1] };
-		AudioBusBuffers input = {};
-		input.numChannels = 2;
-		input.silenceFlags = 3;
-		input.channelBuffers32 = inCh;
+		AudioBusBuffers inputs[VST3_MAX_IN_BUSES];
+		ZeroMemory(inputs, sizeof(inputs));
+		float* inPtr[VST3_MAX_IN_BUSES][2];
+		int nIn = v->audioIns;
+		if (nIn > VST3_MAX_IN_BUSES) nIn = VST3_MAX_IN_BUSES;
+		if (nIn < 0) nIn = 0;
+		for (int i = 0; i < nIn; ++i) {
+			inPtr[i][0] = zin[i][0];
+			inPtr[i][1] = zin[i][1];
+			inputs[i].numChannels = 2;
+			inputs[i].silenceFlags = 3;
+			inputs[i].channelBuffers32 = inPtr[i];
+		}
 
 		__declspec(align(32)) float dump[16][VST3_BLOCK];
 		ZeroMemory(dump, sizeof(dump));
@@ -1280,7 +1300,7 @@ void Vst3Process(Vst3Inst* v, float* outL, float* outR, int frames)
 			extraCh[b - 1][0] = v->extraBufs + (size_t)(b - 1) * 2 * VST3_BLOCK;
 			extraCh[b - 1][1] = extraCh[b - 1][0] + VST3_BLOCK;
 			output[b].numChannels = 2;
-			output[b].silenceFlags = 0;
+			output[b].silenceFlags = 3;
 			output[b].channelBuffers32 = extraCh[b - 1];
 		}
 
@@ -1297,9 +1317,9 @@ void Vst3Process(Vst3Inst* v, float* outL, float* outR, int frames)
 		data.processMode = kRealtime;
 		data.symbolicSampleSize = kSample32;
 		data.numSamples = count;
-		data.numInputs = (v->audioIns > 0) ? 1 : 0;
+		data.numInputs = nIn;
 		data.numOutputs = nOut;
-		data.inputs = (v->audioIns > 0) ? &input : NULL;
+		data.inputs = nIn ? inputs : NULL;
 		data.outputs = output;
 		EnterCriticalSection(&v->paramCs);
 		data.inputParameterChanges = &v->params;
@@ -1307,32 +1327,23 @@ void Vst3Process(Vst3Inst* v, float* outL, float* outR, int frames)
 		data.inputEvents = &v->blockEvents;
 		data.processContext = &v->ctx;
 		if (v->processor->process(data) != kResultOk) {
+			/* kResultFalse is not a dead instance. Host AudioThread keeps
+			   calling process(); song used to set ok=0 here and every later
+			   block (including mid/mp*) came out silent. */
 			ZeroMemory(outL + done, count * sizeof(float));
 			ZeroMemory(outR + done, count * sizeof(float));
-			v->ok = 0;
 		}
 		v->params.clear();
 		LeaveCriticalSection(&v->paramCs);
-		if (nOut > 1) {
-			for (int b = 1; b < nOut; ++b) {
-				const float* xl = extraCh[b - 1][0];
-				const float* xr = extraCh[b - 1][1];
-				for (int i = 0; i < count; ++i) {
-					outL[done + i] += xl[i];
-					outR[done + i] += xr[i];
-				}
-			}
-		}
-		if (nch >= 3) {
-			for (int i = 0; i < count; ++i) {
-				for (int c = 2; c < nch; ++c) {
-					outL[done + i] += dump[c][i] * 0.35f;
-					outR[done + i] += dump[c][i] * 0.35f;
-				}
-			}
-		}
 		if (nch == 1)
 			memcpy(outR + done, outL + done, count * sizeof(float));
+		for (int i = 0; i < count; ++i) {
+			float l = outL[done + i], r = outR[done + i];
+			if (l != l || l > 8.f || l < -8.f) l = 0.f;
+			if (r != r || r > 8.f || r < -8.f) r = 0.f;
+			outL[done + i] = l;
+			outR[done + i] = r;
+		}
 		v->samplePos += count;
 		done += count;
 	}
@@ -1587,7 +1598,8 @@ int Vst3SetControllerState(Vst3Inst* v, const unsigned char* bytes, int len)
 	MemStream st;
 	if (st.assignCopy(bytes, len) != kResultOk) return 0;
 	st.rewind();
-	return (v->controller->setState(&st) == kResultOk) ? 1 : 0;
+	if (v->controller->setState(&st) != kResultOk) return 0;
+	return 1;
 }
 
 int Vst3ApplyStates(Vst3Inst* v,

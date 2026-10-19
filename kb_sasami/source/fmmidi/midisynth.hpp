@@ -1,4 +1,4 @@
-﻿// \tgEFAMIDIVZTCUB
+﻿// ソフトウェアMIDIシンセサイザ。
 // Copyright(c)2003-2004 yuno
 #ifndef midisynth_hpp
 #define midisynth_hpp
@@ -12,11 +12,11 @@
     typedef double sample_t;//added by Kobarin
     class channel;
 
-    // VXe[hñ^B
+    // システムモード列挙型。
     enum system_mode_t{ system_mode_default, system_mode_gm, system_mode_gm2, system_mode_gs, system_mode_xg };
 
-    // Rs[sÂÌî{NXB
-/*  í by Kobarin
+    // コピー不可の基本クラス。
+/*  削除 by Kobarin
     class uncopyable{
     public:
         uncopyable(){}
@@ -25,11 +25,11 @@
         void operator=(const uncopyable&){}
     };
 */
-    // m[gB­¹Ì¹B
+    // ノート。発音中の音。
     struct tone_color;
 
-    // m[gB­¹Ì¹B
-    class note{//:uncopyable{//C³ by Kobarin
+    // ノート。発音中の音。
+    class note{//:uncopyable{//修正 by Kobarin
     public:
         note(int assign_, int panpot_):assign(assign_), panpot(panpot_){}
         virtual ~note(){}
@@ -44,14 +44,14 @@
         virtual void set_damper(int value) = 0;
         virtual void set_sostenute(int value) = 0;
         virtual void set_freeze(int value) = 0;
-        virtual void apply_tone(const tone_color&) {}
+        virtual void apply_tone(const tone_color&) {} /* GS/XG 音色パラメータをノートへ渡す。追加 ちゃちゃ */
     private:
         int assign;
         int panpot;
     };
 
-    // m[gt@NgB
-    // m[gIbZ[WÉÎµÄKØÈm[gðìèo·B
+    // ノートファクトリ。
+    // ノートオンメッセージに対して適切なノートを作り出す。
     struct tone_color{
         int revSend, choSend, dlySend;
         int revMode, choMode, dlyMode, insMode, ins2;
@@ -63,12 +63,12 @@
         int insDrive;
         int insLo, insHi;
         int mapLsb, varMsb, pc, sysMode, bankExact;
-        /* SysEx の生値。64 付近が「そのタイプの標準」。spatXg=1 のときタイプは MSB/LSB。 */
+        /* SysEx の生値。64 付近が「そのタイプの標準」。spatXg=1 のときタイプは MSB/LSB。  追加 ちゃちゃ */
         int revTime, revChar, revLpf, revFb, revPre;
         int choRate, choDepth, choFb, choDly, choLpf, choToRev, choToDly;
         int dlyTime, dlyFb, dlyLpf, dlyToRev, dlyTrim;
         int revMsb, revLsb, choMsb, choLsb, dlyMsb, dlyLsb, spatXg;
-        int spatPass; /* 0=通常 1=ドライ（尾は別チャンネル） */
+        int spatPass; /* 0=通常 1=ドライ（尾は別チャンネル）  追加 ちゃちゃ */
         tone_color():
             revSend(0), choSend(0), dlySend(0),
             revMode(0), choMode(0), dlyMode(0), insMode(0), ins2(0),
@@ -84,7 +84,7 @@
             spatPass(0) {}
     };
 
-    /* GS/XG: 64 = no change. Time (atk/dec/rel) は大きいほど遅く、YM の AR/DR/RR は逆。 */
+    /* GS/XG: 64 = no change. Time (atk/dec/rel) は大きいほど遅く、YM の AR/DR/RR は逆。  追加 ちゃちゃ */
     struct tone_paint {
         int arD, drD, rrD, fbDelta, carTl, modTl, amsOn;
         int dtD, mulD, slD;
@@ -325,7 +325,7 @@
         if (v > 127) return 127;
         return v;
     }
-    /* SC-88 delay time 01h–73h。0x61 が約 340ms。短いほどエコー感を出さない。 */
+    /* SC-88 delay time 01h–73h。0x61 が約 340ms。短いほどエコー感を出さない。  追加 ちゃちゃ */
     inline int dly_time_mul(int t)
     {
         if (t <= 0) t = 0x61;
@@ -335,7 +335,7 @@
         if (t < 0x69) return 100;
         return 112;
     }
-    /* リバーブ枠がディレイ型ならホールは足さない。ディレイ枠と同時でも尾は最大 2 段。 */
+    /* リバーブ枠がディレイ型ならホールは足さない。ディレイ枠と同時でも尾は最大 2 段。  追加 ちゃちゃ */
     inline double gs_delay_ms(int t)
     {
         if (t < 1) t = 1;
@@ -362,7 +362,7 @@
         }
         return 340.0;
     }
-    /* mode 1=ディレイ（遅れたゲート） 2=リバーブ（短いプリディレイの別音） */
+    /* mode 1=ディレイ（遅れたゲート） 2=リバーブ（短いプリディレイの別音）  追加 ちゃちゃ */
     struct echo_plan { int mode; int ms; float gain; };
     inline echo_plan plan_echo(const tone_color& c)
     {
@@ -402,7 +402,7 @@
         }
         int varHall = c.spatXg && c.dlySend > 24 && c.dlyMsb >= 1 && c.dlyMsb <= 4;
         if ((c.revSend > 20 && !revDelay) || varHall) {
-            /* 40 01 37 はすでに ms。0 を 18ms にするとスラップエコーになる。 */
+            /* 40 01 37 はすでに ms。0 を 18ms にするとスラップエコーになる。  追加 ちゃちゃ */
             int pre = c.revPre;
             if (pre <= 0) pre = hall ? 5 : 3;
             if (pre > 40) pre = 40;
@@ -624,7 +624,7 @@
         return dly * (1.5 / 63.0);
     }
 
-    class note_factory{//:uncopyable{//C³ by Kobarin
+    class note_factory{//:uncopyable{//修正 by Kobarin
     public:
         virtual note* note_on(int_least32_t program, int note, int velocity, double frequency_multiplier)=0;
         virtual void set_tone_color(const tone_color&) {}
@@ -632,8 +632,8 @@
         ~note_factory(){}
     };
 
-    // MIDI`lB
-    class channel{//:uncopyable{//C³ by Kobarin
+    // MIDIチャンネル。
+    class channel{//:uncopyable{//修正 by Kobarin
         enum{ NUM_NOTES = 128 };
     public:
         channel(note_factory* factory, int bank, int chIndex = 0);
@@ -799,8 +799,8 @@
         void apply_nrpn_data(int value);
     };
 
-    // MIDIVZTCUB
-    class synthesizer{//:uncopyable{//C³ by Kobarin
+    // MIDIシンセサイザ。
+    class synthesizer{//:uncopyable{//修正 by Kobarin
         enum{ NUM_CHANNELS = 16 };
     public:
         synthesizer(note_factory* factory);
@@ -854,8 +854,8 @@
         void update_master_frequency_multiplier();
     };
 
-    // ³·g¶¬íB
-    // U 32768 (-32767`32767) Ì³·gð¶¬·éB
+    // 正弦波生成器。
+    // 振幅 32768 (-32767～32767) の正弦波を生成する。
     class sine_wave_generator{
     public:
         sine_wave_generator();
@@ -869,8 +869,8 @@
         uint_least32_t step;
     };
 
-    // Gx[v¶¬íB
-    // TL=0 ÌÆ« 0`32767 Ìlð¶¬·éB
+    // エンベロープ生成器。
+    // TL=0 のとき 0～32767 の値を生成する。
     class envelope_generator{
     public:
         envelope_generator(int AR, int DR, int SR, int RR, int SL, int TL);
@@ -892,7 +892,7 @@
         void update_parameters();
     };
 
-    // FMIy[^ (W[^¨æÑLA)B
+    // FMオペレータ (モジュレータおよびキャリア)。
     class fm_operator{
     public:
         fm_operator(int AR, int DR, int SR, int RR, int SL, int TL, int KS, int ML, int DT, int AMS, int key);
@@ -918,7 +918,7 @@
         int_least32_t ams_bias;
     };
 
-    // FM¹¹p[^B
+    // FM音源パラメータ。
     struct FMPARAMETER{
         int ALG, FB, LFO;
         struct{
@@ -926,12 +926,12 @@
         }op1, op2, op3, op4;
         int transpose;
     };
-    // hp[^B
+    // ドラムパラメータ。
     struct DRUMPARAMETER:FMPARAMETER{
         int key, panpot, assign;
     };
 
-    // FMTEhWFl[^B
+    // FMサウンドジェネレータ。
     class fm_sound_generator{
     public:
         fm_sound_generator(const FMPARAMETER& params, int note, double frequency_multiplier);
@@ -970,7 +970,7 @@
         int sostenute;
     };
 
-    // FM¹¹m[gB
+    // FM音源ノート。
     class fm_note:public note{
     public:
         fm_note(const FMPARAMETER& params, int note, int velocity, int panpot, int assign, double frequency_multiplier);
@@ -989,7 +989,7 @@
         int velocity;
     };
 
-    // FM¹¹m[gt@NgB
+    // FM音源ノートファクトリ。
     class Ym2612Pool;
     class fm_note_factory:public note_factory{
     public:
@@ -998,6 +998,8 @@
         void clear();
         bool load_wopn(const wchar_t* path, int family = 0, int append = 0);
         bool load_wopn_mem(const void* data, size_t size, int family = 0, int append = 0);
+        /* Same program keys as programs.txt. xg=1 adds 0x8000. Does not touch the YM pool. */
+        void seed_from_wopn(const void* data, size_t size, int xg);
         void get_program(int number, FMPARAMETER& p);
         bool set_program(int number, const FMPARAMETER& p);
         bool set_drum_program(int number, const DRUMPARAMETER& p);

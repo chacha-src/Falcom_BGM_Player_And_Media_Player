@@ -11,7 +11,7 @@ static const DWORD kPluginVersion = 0x7FFFFFFF;
 #define KBSASAMI_VERSION_STR L"0x7FFFFFFF(Debug)"
 #else
 static const DWORD kPluginVersion = 1;
-#define KBSASAMI_VERSION_STR L"3.5.7"
+#define KBSASAMI_VERSION_STR L"3.6"
 #endif
 
 static wchar_t g_desc[384];
@@ -259,85 +259,85 @@ BOOL WINAPI KbSasamiDecoderModule::EnumConfig(IKpiConfigEnumerator* pEnumerator)
 		{ KPI_CFG_TYPE_BOOL, SEC_KBSASAMI, KEY_VST, L"kbsasami.vst",
 			L"0", NULL, NULL, NULL, NULL,
 			KbsPick14(
-				L"false(0): FM MIDI（プラグイン内の fmmidi / programs.txt）\r\n"
+				L"false(0): FM MIDI（プラグイン内の fmmidi。GS/XG 音色は kpi に内蔵）\r\n"
 				L"true(1): VST。raira=1 のときはこのアプリに任せる。\r\n"
 				L"raira=0 では kbsasami.vstfullpath_gs / _xg を kbsasami_host32/64 で鳴らす。\r\n"
 				L"\r\n"
 				L"kbsasami.raira=1 のとき、0 と 1 の意味は逆になる。\r\n"
 				L"本来のプレーヤの初期値は false（FM MIDI）。",
-				L"false(0): FM MIDI mode (fmmidi / programs.txt inside plugin)\r\n"
+				L"false(0): FM MIDI mode (fmmidi inside plugin)\r\n"
 				L"true(1): VST. raira=1 leaves it to this app.\r\n"
 				L"raira=0 plays kbsasami.vstfullpath_gs / _xg via kbsasami_host32/64.\r\n"
 				L"\r\n"
 				L"With kbsasami.raira=1, 0 and 1 meanings are swapped.\r\n"
 				L"Default for original player is false (FM MIDI).",
-				L"false(0) : FM MIDI (fmmidi / programs.txt dans le plugin)\r\n"
+				L"false(0) : FM MIDI (fmmidi dans le plugin)\r\n"
 				L"true(1) : VST. Avec raira=1, c'est cette application qui décide.\r\n"
 				L"raira=0 joue kbsasami.vstfullpath_gs / _xg via kbsasami_host32/64.\r\n"
 				L"\r\n"
 				L"Avec kbsasami.raira=1, les sens de 0 et 1 sont inversés.\r\n"
 				L"Le lecteur d'origine démarre à false (FM MIDI).",
-				L"false(0): FM MIDI (fmmidi / programs.txt nel plugin)\r\n"
+				L"false(0): FM MIDI (fmmidi nel plugin)\r\n"
 				L"true(1): VST. Con raira=1 decide questa app.\r\n"
 				L"raira=0 suona kbsasami.vstfullpath_gs / _xg tramite kbsasami_host32/64.\r\n"
 				L"\r\n"
 				L"Con kbsasami.raira=1 i significati di 0 e 1 si invertono.\r\n"
 				L"Il lettore originale parte da false (FM MIDI).",
-				L"false(0): FM MIDI (fmmidi / programs.txt dentro del plugin)\r\n"
+				L"false(0): FM MIDI (fmmidi dentro del plugin)\r\n"
 				L"true(1): VST. Con raira=1 lo decide esta aplicación.\r\n"
 				L"raira=0 reproduce kbsasami.vstfullpath_gs / _xg con kbsasami_host32/64.\r\n"
 				L"\r\n"
 				L"Con kbsasami.raira=1, el sentido de 0 y 1 se invierte.\r\n"
 				L"El reproductor original empieza en false (FM MIDI).",
-				L"false(0): FM MIDI (플러그인 안의 fmmidi / programs.txt)\r\n"
+				L"false(0): FM MIDI (플러그인 안의 fmmidi)\r\n"
 				L"true(1): VST. raira=1 이면 이 앱이 맡습니다.\r\n"
 				L"raira=0 은 kbsasami.vstfullpath_gs / _xg 를 kbsasami_host32/64 로 재생합니다.\r\n"
 				L"\r\n"
 				L"kbsasami.raira=1 이면 0과 1의 의미가 바뀝니다.\r\n"
 				L"원래 플레이어의 초기값은 false(FM MIDI)입니다.",
-				L"false(0): FM MIDI（插件内的 fmmidi / programs.txt）\r\n"
+				L"false(0): FM MIDI（插件内的 fmmidi）\r\n"
 				L"true(1): VST。raira=1 时交给本程序。\r\n"
 				L"raira=0 时用 kbsasami_host32/64 播放 kbsasami.vstfullpath_gs / _xg。\r\n"
 				L"\r\n"
 				L"kbsasami.raira=1 时，0 和 1 的含义对调。\r\n"
 				L"原来的播放器默认是 false（FM MIDI）。",
-				L"false(0): وضع FM MIDI (fmmidi / programs.txt داخل الإضافة)\r\n"
+				L"false(0): وضع FM MIDI (fmmidi داخل الإضافة)\r\n"
 				L"true(1): VST. مع raira=1 يقرره هذا البرنامج.\r\n"
 				L"raira=0 يشغّل kbsasami.vstfullpath_gs / _xg عبر kbsasami_host32/64.\r\n"
 				L"\r\n"
 				L"مع kbsasami.raira=1 ينعكس معنى 0 و 1.\r\n"
 				L"الافتراضي في المشغّل الأصلي هو false (FM MIDI).",
-				L"false(0): режим FM MIDI (fmmidi / programs.txt внутри плагина)\r\n"
+				L"false(0): режим FM MIDI (fmmidi внутри плагина)\r\n"
 				L"true(1): VST. При raira=1 решает это приложение.\r\n"
 				L"raira=0 играет kbsasami.vstfullpath_gs / _xg через kbsasami_host32/64.\r\n"
 				L"\r\n"
 				L"При kbsasami.raira=1 смысл 0 и 1 меняется местами.\r\n"
 				L"У исходного плеера по умолчанию false (FM MIDI).",
-				L"false(0): FM-MIDI (fmmidi / programs.txt im Plugin)\r\n"
+				L"false(0): FM-MIDI (fmmidi im Plugin)\r\n"
 				L"true(1): VST. Bei raira=1 entscheidet diese App.\r\n"
 				L"raira=0 spielt kbsasami.vstfullpath_gs / _xg über kbsasami_host32/64.\r\n"
 				L"\r\n"
 				L"Bei kbsasami.raira=1 sind die Bedeutungen von 0 und 1 vertauscht.\r\n"
 				L"Der ursprüngliche Player startet mit false (FM-MIDI).",
-				L"false(0): FM MIDI (fmmidi / programs.txt dentro do plugin)\r\n"
+				L"false(0): FM MIDI (fmmidi dentro do plugin)\r\n"
 				L"true(1): VST. Com raira=1 este aplicativo decide.\r\n"
 				L"raira=0 toca kbsasami.vstfullpath_gs / _xg via kbsasami_host32/64.\r\n"
 				L"\r\n"
 				L"Com kbsasami.raira=1, o sentido de 0 e 1 se inverte.\r\n"
 				L"O leitor original começa em false (FM MIDI).",
-				L"false(0): FM-MIDI (fmmidi / programs.txt in de plugin)\r\n"
+				L"false(0): FM-MIDI (fmmidi in de plugin)\r\n"
 				L"true(1): VST. Bij raira=1 beslist deze app.\r\n"
 				L"raira=0 speelt kbsasami.vstfullpath_gs / _xg via kbsasami_host32/64.\r\n"
 				L"\r\n"
 				L"Bij kbsasami.raira=1 zijn de betekenissen van 0 en 1 verwisseld.\r\n"
 				L"De oorspronkelijke speler start op false (FM-MIDI).",
-				L"false(0): FM MIDI (fmmidi / programs.txt w pluginie)\r\n"
+				L"false(0): FM MIDI (fmmidi w pluginie)\r\n"
 				L"true(1): VST. Przy raira=1 decyduje ta aplikacja.\r\n"
 				L"raira=0 odtwarza kbsasami.vstfullpath_gs / _xg przez kbsasami_host32/64.\r\n"
 				L"\r\n"
 				L"Przy kbsasami.raira=1 znaczenia 0 i 1 są zamienione.\r\n"
 				L"Oryginalny odtwarzacz startuje od false (FM MIDI).",
-				L"false(0): FM MIDI (eklentideki fmmidi / programs.txt)\r\n"
+				L"false(0): FM MIDI (eklentideki fmmidi)\r\n"
 				L"true(1): VST. raira=1 iken bu uygulama karar verir.\r\n"
 				L"raira=0, kbsasami.vstfullpath_gs / _xg yolunu kbsasami_host32/64 ile çalar.\r\n"
 				L"\r\n"

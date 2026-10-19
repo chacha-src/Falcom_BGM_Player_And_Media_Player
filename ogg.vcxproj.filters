@@ -636,6 +636,9 @@
     <ClCompile Include="CSasamiVstPartMenu.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="CSasamiSoftKey.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="CSasamiStaffCore.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -1976,6 +1979,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="CSasamiToneMapDlg.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CSasamiSoftKey.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="CSasamiVstPartMenu.h">

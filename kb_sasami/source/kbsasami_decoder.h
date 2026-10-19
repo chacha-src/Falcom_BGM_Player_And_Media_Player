@@ -11,6 +11,8 @@
 #include <mutex>
 
 void KbSasamiRequestRestartHead();
+/* loadPool=1 で YM プールも載せる。0 は programs 表だけ（Misao のソフト FM）。 */
+void KbsApplyEmbeddedWopn(fm_note_factory& factory, int loadPool);
 
 class KbSasamiDecoder : public KbKpiUnknownImpl<IKpiDecoder>, public output
 {

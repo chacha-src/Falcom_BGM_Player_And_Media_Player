@@ -11814,6 +11814,8 @@ CCustomListCtrl::CCustomListCtrl()
 // 背景ブラシのみ。ハートタイマは HWND 破棄で停止。
 CCustomListCtrl::~CCustomListCtrl()
 {
+    FreeHeartUnder(m_heartUnderSel);
+    FreeHeartUnder(m_heartUnderHot);
     if (m_brBackground.GetSafeHandle()) m_brBackground.DeleteObject();
 }
 
@@ -12096,6 +12098,8 @@ void CCustomListCtrl::OnVScroll(UINT n, UINT p, CScrollBar* s)
     CListCtrl::OnVScroll(n, p, s);
     // OpaqueFixer が直後に全面描画する。ここでの Invalidate は名前列ちらつきの元。
     m_nHotItem = -1;
+    m_heartUnderSel.ok = FALSE;
+    m_heartUnderHot.ok = FALSE;
     PlaceLiveEdit();
 }
 // 横スクロール後もホット索引だけ破棄（部分 Invalidate しない）。
@@ -12103,12 +12107,16 @@ void CCustomListCtrl::OnHScroll(UINT n, UINT p, CScrollBar* s)
 {
     CListCtrl::OnHScroll(n, p, s);
     m_nHotItem = -1;
+    m_heartUnderSel.ok = FALSE;
+    m_heartUnderHot.ok = FALSE;
     PlaceLiveEdit();
 }
 // ホット行の再 Invalidate 禁止。索引だけ合わせて直後の Opaque に任せる。
 BOOL CCustomListCtrl::OnMouseWheel(UINT n, short z, CPoint p)
 {
     BOOL r = CListCtrl::OnMouseWheel(n, z, p);
+    m_heartUnderSel.ok = FALSE;
+    m_heartUnderHot.ok = FALSE;
     PlaceLiveEdit();
     // ホット行の再 Invalidate 禁止(名前列ちらつき)。索引だけ合わせて直後の Opaque に任せる。
     CPoint pt;
@@ -12183,7 +12191,102 @@ static void CCC_ListPaintOpaqueRects(CCustomListCtrl* pList, const RECT* rects, 
     }
 }
 
+void CCustomListCtrl::FreeHeartUnder(HeartUnder& u)
+{
+    u.ok = FALSE;
+    if (u.plate) {
+        if (u.oldPlate) ::SelectObject(u.plate, u.oldPlate);
+        ::DeleteDC(u.plate);
+    }
+    if (u.work) {
+        if (u.oldWork) ::SelectObject(u.work, u.oldWork);
+        ::DeleteDC(u.work);
+    }
+    if (u.plateBmp) ::DeleteObject(u.plateBmp);
+    if (u.workBmp) ::DeleteObject(u.workBmp);
+    u.plate = u.work = NULL;
+    u.plateBmp = u.workBmp = NULL;
+    u.oldPlate = u.oldWork = NULL;
+    u.plateBits = u.workBits = NULL;
+    u.w = u.h = 0;
+}
+
+static HBITMAP CccHeartDib(HDC ref, int w, int h, void** bits)
+{
+    BITMAPINFO bi = {};
+    bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    bi.bmiHeader.biWidth = w;
+    bi.bmiHeader.biHeight = -h;
+    bi.bmiHeader.biPlanes = 1;
+    bi.bmiHeader.biBitCount = 32;
+    bi.bmiHeader.biCompression = BI_RGB;
+    return ::CreateDIBSection(ref, &bi, DIB_RGB_COLORS, bits, NULL, 0);
+}
+
+// 行描画の♡直前の画素を残す。タイマーはこれへ♡だけ重ね、PrintClient しない。
+void CCustomListCtrl::CaptureHeartUnder(HeartUnder& u, HDC src, const CRect& rc)
+{
+    const int w = rc.Width();
+    const int h = rc.Height();
+    u.ok = FALSE;
+    if (!src || w < 10 || h < 10 || w > 40 || h > 40) return;
+    if (!u.plate || u.w != w || u.h != h) {
+        FreeHeartUnder(u);
+        void* pb = NULL;
+        void* wb = NULL;
+        u.plateBmp = CccHeartDib(src, w, h, &pb);
+        u.workBmp = CccHeartDib(src, w, h, &wb);
+        u.plate = ::CreateCompatibleDC(src);
+        u.work = ::CreateCompatibleDC(src);
+        if (!u.plateBmp || !u.workBmp || !u.plate || !u.work || !pb || !wb) {
+            FreeHeartUnder(u);
+            return;
+        }
+        u.oldPlate = ::SelectObject(u.plate, u.plateBmp);
+        u.oldWork = ::SelectObject(u.work, u.workBmp);
+        u.plateBits = pb;
+        u.workBits = wb;
+        u.w = w;
+        u.h = h;
+    }
+    if (!::BitBlt(u.plate, 0, 0, w, h, src, rc.left, rc.top, SRCCOPY))
+        return;
+    UINT32* p = (UINT32*)u.plateBits;
+    const int n = w * h;
+    for (int i = 0; i < n; ++i)
+        p[i] |= 0xFF000000u;
+    u.ok = TRUE;
+}
+
+void CCustomListCtrl::PresentHeartUnder(HeartUnder& u, HDC dst, const CRect& rc, int tick, BOOL hot, COLORREF col)
+{
+    if (!u.ok || !u.plate || !u.work || !u.workBits || !dst) return;
+    if (u.w != rc.Width() || u.h != rc.Height()) return;
+    if (rc.left < 0 || rc.top < 0) return;
+    if (!::BitBlt(u.work, 0, 0, u.w, u.h, u.plate, 0, 0, SRCCOPY))
+        return;
+    {
+        UINT32* p = (UINT32*)u.workBits;
+        const int n = u.w * u.h;
+        for (int i = 0; i < n; ++i)
+            p[i] |= 0xFF000000u;
+    }
+    CDC cdc;
+    cdc.Attach(u.work);
+    DrawSoftJkHeart(&cdc, CRect(0, 0, u.w, u.h), tick, hot, col);
+    cdc.Detach();
+    {
+        UINT32* p = (UINT32*)u.workBits;
+        const int n = u.w * u.h;
+        for (int i = 0; i < n; ++i)
+            p[i] |= 0xFF000000u;
+    }
+    const BLENDFUNCTION bf = { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
+    ::GdiAlphaBlend(dst, rc.left, rc.top, u.w, u.h, u.work, 0, 0, u.w, u.h, bf);
+}
+
 // kListSoftTimerId: 選択/ホバー♡の矩形だけ更新（30ms）。両方空なら Kill。
+// 下地が無いときは何もしない。行の PrintClient に戻すとカーソルを置いただけで重くなる。
 // kListScrollOpaqueTimerId: スクロール後の遅延不透明塗り。
 void CCustomListCtrl::OnTimer(UINT_PTR nIDEvent)
 {
@@ -12209,22 +12312,14 @@ void CCustomListCtrl::OnTimer(UINT_PTR nIDEvent)
         }
         if (m_heartRcSel.IsRectEmpty() && m_heartRcHot.IsRectEmpty())
             return;
-#if CCUSTOM_AERO_SUPPORT
-        /* ガラス親: Invalidate→Fixer 全面 PaintOpaque で全体点滅。♡矩形だけ blit */
-        if (CCC_HostNeedsChildOpaque(m_hWnd)) {
-            RECT rs[2];
-            int nr = 0;
-            if (!m_heartRcSel.IsRectEmpty()) rs[nr++] = m_heartRcSel;
-            if (!m_heartRcHot.IsRectEmpty()) rs[nr++] = m_heartRcHot;
-            if (nr > 0)
-                CCC_ListPaintOpaqueRects(this, rs, nr);
-            return;
-        }
-#endif
+        CClientDC dc(this);
+        HDC hdc = dc.GetSafeHdc();
+        const int tick = (int)(::GetTickCount64() / kListHeartStepMs);
+        const COLORREF col = CCC_UiTheme().accent;
         if (!m_heartRcSel.IsRectEmpty())
-            InvalidateRect(&m_heartRcSel, FALSE);
-        if (!m_heartRcHot.IsRectEmpty())
-            InvalidateRect(&m_heartRcHot, FALSE);
+            PresentHeartUnder(m_heartUnderSel, hdc, m_heartRcSel, tick, TRUE, col);
+        if (!m_heartRcHot.IsRectEmpty() && m_heartRcHot != m_heartRcSel)
+            PresentHeartUnder(m_heartUnderHot, hdc, m_heartRcHot, tick, TRUE, col);
         return;
     }
     if (nIDEvent == kListScrollOpaqueTimerId)
@@ -13210,6 +13305,10 @@ void CCustomListCtrl::OnCustomDraw(NMHDR* pNMHDR, LRESULT* pResult)
             if (bS || bH) {
                 CRect rh(noteX, noteY + CCC_ScaleDpi(2, dpiNote),
                     noteX + CCC_ScaleDpi(14, dpiNote), noteY + ih);
+                if (bS)
+                    CaptureHeartUnder(m_heartUnderSel, pDC->GetSafeHdc(), rh);
+                else
+                    CaptureHeartUnder(m_heartUnderHot, pDC->GetSafeHdc(), rh);
                 DrawSoftJkHeart(pDC, rh, (int)(::GetTickCount64() / kListHeartStepMs),
                     TRUE, CCC_UiTheme().accent);
                 // リスト全体の周期 Invalidate は再生中のピアノ提示を遅らせる。
@@ -24241,8 +24340,46 @@ BOOL CCustomBlurDialogBase::OnTtnNeedText(UINT, NMHDR*, LRESULT* pResult)
 
 // ツールチップ Relay。ダイアログ側は F1 ヘルプ。
 // キャプションボタンのチップは m_capTip.RelayEvent。
+// ホイールはフォーカス窓へ行く。MP とプレイリストが別トップレベルでも、
+// カーソル下のリスト（同じ UI スレッド）へ渡す。メニュー追跡中は奪わない。
+static BOOL CCC_WheelToListUnderCursor(MSG* pMsg)
+{
+    if (!pMsg) return FALSE;
+    if (pMsg->message != WM_MOUSEWHEEL && pMsg->message != WM_MOUSEHWHEEL)
+        return FALSE;
+    if (CCustomPopupMenu::GetTrackingRoot() != NULL)
+        return FALSE;
+    POINT pt;
+    pt.x = (short)LOWORD(pMsg->lParam);
+    pt.y = (short)HIWORD(pMsg->lParam);
+    HWND under = ::WindowFromPoint(pt);
+    if (!under) return FALSE;
+    DWORD pid = 0;
+    const DWORD tid = ::GetWindowThreadProcessId(under, &pid);
+    if (pid != ::GetCurrentProcessId() || tid != ::GetCurrentThreadId())
+        return FALSE;
+    HWND list = NULL;
+    TCHAR cls[32];
+    if (!::GetClassName(under, cls, 32))
+        return FALSE;
+    if (_tcsicmp(cls, _T("SysListView32")) == 0)
+        list = under;
+    else if (_tcsicmp(cls, _T("SysHeader32")) == 0) {
+        HWND par = ::GetParent(under);
+        TCHAR pc[32];
+        if (par && ::GetClassName(par, pc, 32) && _tcsicmp(pc, _T("SysListView32")) == 0)
+            list = par;
+    }
+    if (!list || list == pMsg->hwnd)
+        return FALSE;
+    ::SendMessage(list, pMsg->message, pMsg->wParam, pMsg->lParam);
+    return TRUE;
+}
+
 BOOL CCustomBlurDialogBase::PreTranslateMessage(MSG* pMsg)
 {
+    if (CCC_WheelToListUnderCursor(pMsg))
+        return TRUE;
     if (CCC_NkMsg(pMsg, this))
         return TRUE;
 #ifndef KBSASAMI_HOST_BUILD
@@ -25179,6 +25316,8 @@ BOOL CCustomBlurDialogExBase::OnTtnNeedText(UINT, NMHDR*, LRESULT* pResult)
 // キャプションボタンのチップは m_capTip.RelayEvent。
 BOOL CCustomBlurDialogExBase::PreTranslateMessage(MSG* pMsg)
 {
+    if (CCC_WheelToListUnderCursor(pMsg))
+        return TRUE;
     if (CCC_NkMsg(pMsg, this))
         return TRUE;
 #ifndef KBSASAMI_HOST_BUILD

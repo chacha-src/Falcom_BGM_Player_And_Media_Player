@@ -835,6 +835,7 @@ if errorlevel 1 exit /b 1</Command>
     <ClCompile Include="CSasamiVstPickDlg.cpp" />
     <ClCompile Include="CSasamiToneMapDlg.cpp" />
     <ClCompile Include="CSasamiVstPartMenu.cpp" />
+    <ClCompile Include="CSasamiSoftKey.cpp" />
     <ClCompile Include="CSasamiStaffCore.cpp" />
     <ClCompile Include="CSasamiScoreMidiIn.cpp" />
     <ClCompile Include="CSasamiScoreHist.cpp" />
@@ -1147,6 +1148,7 @@ if errorlevel 1 exit /b 1</Command>
     <ClInclude Include="CSasamiVstPickDlg.h" />
     <ClInclude Include="CSasamiToneMapDlg.h" />
     <ClInclude Include="CSasamiVstPartMenu.h" />
+    <ClInclude Include="CSasamiSoftKey.h" />
     <ClInclude Include="SasamiToneNames.h" />
     <ClInclude Include="CSasamiStaffCore.h" />
     <ClInclude Include="SasamiComposerDoc.h" />

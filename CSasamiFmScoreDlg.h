@@ -87,6 +87,7 @@ protected:
 	afx_msg LRESULT OnPalLayout(WPARAM w, LPARAM l);
 	afx_msg LRESULT OnNoteProps(WPARAM w, LPARAM l);
 	afx_msg LRESULT OnDeferredInit(WPARAM w, LPARAM l);
+	afx_msg LRESULT OnDeferredSession(WPARAM w, LPARAM l);
 	afx_msg LRESULT OnScoreMidi(WPARAM w, LPARAM l);
 	void LayoutChrome();
 	void PersistUiGeom();

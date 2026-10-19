@@ -9,14 +9,15 @@
 #include <algorithm>
 #include <stdexcept>
 
-//namespace midisequencer{//í by Kobarin
-    //namespace{//í by Kobarin
+//namespace midisequencer{//削除 by Kobarin
+    //namespace{//削除 by Kobarin
         class load_error:public std::runtime_error{
         public:
             load_error(const std::string& s):std::runtime_error(s){}
         };
         /* ogg の MidiStatusRank と同じ。同じ tick では SysEx / CC / PC をノートより前。
-           バンクが別トラックだと、ノートが先に鳴って PC 固定（programs.txt と同じ）になる。 */
+           バンクが別トラックだと、ノートが先に鳴って PC 固定（programs.txt と同じ）になる。
+           追加 ちゃちゃ */
         static int midi_setup_rank(uint_least32_t msg)
         {
             const unsigned st = msg & 0xFFu;
@@ -66,7 +67,7 @@
             }while(d & 0x80);
             return ret;
         }
-    //}//í by Kobarin
+    //}//削除 by Kobarin
 
     sequencer::sequencer():
         position(messages.begin())
@@ -309,7 +310,7 @@
             midi_message msg;
             msg.port = 0;
             msg.track = track;
-            /* F0 が F7 で終わらないときは、続く F7 パケットを足して 1 本の SysEx にする。 */
+            /* F0 が F7 で終わらないときは、続く F7 パケットを足して 1 本の SysEx にする。  追加 ちゃちゃ */
             std::string sxOpen;
             for(;;){
                 if(track_length < 4){
@@ -473,7 +474,7 @@
                         --track_length;
                         break;
                     default:
-                        /* チャンネルメッセージでないバイトはここで消費済み。トラックは続ける。 */
+                        /* チャンネルメッセージでないバイトはここで消費済み。トラックは続ける。  追加 ちゃちゃ */
                         running_status = 0;
                         continue;
                     }
@@ -525,15 +526,15 @@
         }
     }
     double sequencer::get_loop_point(void)//add By Kobarin
-    {//[v|Cgª êÎ»ÌðÔ·
-     //È¢êÍ -1.0 ðÔ·
+    {//ループポイントがあればその時刻を返す
+     //ない場合は -1.0 を返す
          for(auto pos = messages.begin() ; pos != messages.end(); pos++){
             uint_least32_t message = pos->message;
-            if((message&0xFFF0) == 0x6FB0){//[v|Cg(CC111)
+            if((message&0xFFF0) == 0x6FB0){//ループポイント(CC111)
                 return pos->time;
             }
          }
          return -1.0;
     }
 
-//}//í by Kobarin
+//}//削除 by Kobarin

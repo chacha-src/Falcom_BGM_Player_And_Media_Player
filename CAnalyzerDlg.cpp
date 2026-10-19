@@ -5442,9 +5442,12 @@ void CAnalyzerDlg::OnShowWindow(BOOL bShow, UINT nStatus)
 BOOL CAnalyzerDlg::Create(UINT nIDTemplate, CWnd* pParentWnd)
 {
 	// 描画・ティックをメイン UI(timerp/バナー)と分けるため、窓は専用 UI スレッドで作る。
+	// 親をメイン窓にすると、操作のたびに描画スレッドへ同期メッセージが入り落ちる。
 	BOOL ok = FALSE;
 	VizUi::Invoke(VIZ_UI_ANALYZER, [&]() {
-		ok = CCustomBlurDialogExBase::Create(nIDTemplate, pParentWnd);
+		CWnd* owner = VizUi::ThreadOwner(VIZ_UI_ANALYZER);
+		ok = CCustomBlurDialogExBase::Create(nIDTemplate, owner);
+		(void)pParentWnd;
 	});
 	return ok;
 }

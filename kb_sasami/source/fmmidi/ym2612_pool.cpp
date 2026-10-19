@@ -9,8 +9,8 @@
 #include <vector>
 
 namespace ympool {
-    // midiの同時発音数(SC8850)が128音なので合わせる = 6 * 22 = 132音。
-const int kChips = 22;
+    // midiの同時発音数(SC8850)が128音でAパートとBパートがあるので256音。合わせる。 = 6 * 43 = 258音。
+const int kChips = 43;
 const int kChPerChip = 6;
 const int kVoices = kChips * kChPerChip;
 const int kKeyChan[6] = { 0, 1, 2, 4, 5, 6 };

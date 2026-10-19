@@ -64,20 +64,31 @@ public:
 	virtual BOOL InitInstance()
 	{
 		m_sink = CreateSink();
+		/* 非表示のオーナー。メイン窓を親にするとスレッドをまたいで落ちる。 */
+		m_owner.CreateEx(WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW, kSinkClass, L"",
+			WS_POPUP, 0, 0, 0, 0, NULL, 0);
 		if (m_ready)
 			::SetEvent(m_ready);
 		return TRUE;
 	}
 	virtual int ExitInstance()
 	{
+		if (m_owner.GetSafeHwnd() && ::IsWindow(m_owner.GetSafeHwnd()))
+			m_owner.DestroyWindow();
 		if (m_sink && ::IsWindow(m_sink))
 			::DestroyWindow(m_sink);
 		m_sink = NULL;
 		return CWinThread::ExitInstance();
 	}
 
+	CWnd* OwnerWnd()
+	{
+		return (m_owner.GetSafeHwnd() && ::IsWindow(m_owner.GetSafeHwnd())) ? &m_owner : NULL;
+	}
+
 	HANDLE m_ready = NULL;
 	HWND m_sink = NULL;
+	CWnd m_owner;
 };
 
 struct Slot {
@@ -197,6 +208,19 @@ void Invoke(int slot, const std::function<void()>& fn)
 		return;
 	}
 	::SendMessageW(sink, kInvokeMsg, 0, reinterpret_cast<LPARAM>(&fn));
+}
+
+CWnd* ThreadOwner(int slot)
+{
+	if (slot < 0 || slot >= VIZ_UI_SLOTS)
+		return NULL;
+	CWnd* owner = NULL;
+	Lock();
+	Slot& s = s_slots[slot];
+	if (s.th && s.tid == ::GetCurrentThreadId())
+		owner = s.th->OwnerWnd();
+	Unlock();
+	return owner;
 }
 
 bool MarshalToOwner(HWND hwnd, const std::function<void()>& fn)
