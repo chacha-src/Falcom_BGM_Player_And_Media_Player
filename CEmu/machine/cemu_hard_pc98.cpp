@@ -1061,8 +1061,11 @@ static void PlantPc98BiosTimer(uint8_t* mem)
 	}
 }
 
-/* AH=02 で IRQ0 を開けた。一回の計測が終わったらマスクへ戻す。 */
+/* AH=02 で IRQ0 を開けた。一回の計測が終わったらマスクへ戻す。
+   ABIKO はコールバックの先頭で毎回 AH=02 を掛け直す。BIOS が INT 80h の
+   直後にフラグを消すと、その再登録が無効になり最初の和音で止まる。 */
 static int s_pc98UserTmr;
+static int s_abikoRepeating;
 
 /* PC-98 BIOS INT 1Ch AH=02h: ES:BX をユーザタイマ、CX を間隔にする。
    MUAPLAY は常駐前にこれで計測し、戻らないと INT 60 を植えない。
@@ -3467,6 +3470,41 @@ int CHardPc98::DeliverIrqs()
 		/* USD アイドル HLT へ戻ったのに入口 SP と違うとラッチが残り、
 		   レベル線のまま次のタイマが届かない（FIS）。 */
 		else if (uint8_t* mem = np2_mem()) {
+			/* BGMDRV（earlyk）の tick は pushaw を戻さず IRET する。入口 SP には
+			   二度と戻らないので、ドライバ CS を離れたらラッチを外す。
+			   プロローグ FA 1E 50 53 … B9 3A 27 の ISR だけ。 */
+			{
+				const uint16_t cs = np2_reg_get(NP2_R_CS);
+				const unsigned o0b = (unsigned)mem[0x0B * 4]
+					| ((unsigned)mem[0x0B * 4 + 1] << 8);
+				const unsigned s0b = (unsigned)mem[0x0B * 4 + 2]
+					| ((unsigned)mem[0x0B * 4 + 3] << 8);
+				const unsigned phys = (s0b << 4) + o0b;
+				if (s0b && cs != (uint16_t)s0b && phys + 13u < 0x200000u
+					&& mem[phys] == 0xFA && mem[phys + 1] == 0x1E
+					&& mem[phys + 2] == 0x50 && mem[phys + 3] == 0x53
+					&& mem[phys + 10] == 0xB9 && mem[phys + 11] == 0x3A
+					&& mem[phys + 12] == 0x27)
+					opnInService_ = 0;
+			}
+			/* GROP の停止待ちは [0]|[2] が 0 になるまで同じ CS でスピンする。
+			   ISR は IRET 済みでも入口 SP より深いので、この 9 バイトのときだけ外す。 */
+			{
+				const uint16_t cs = np2_reg_get(NP2_R_CS);
+				const uint16_t ip = np2_reg_get(NP2_R_IP);
+				const unsigned at = ((unsigned)cs << 4) + ip;
+				static const uint8_t kGropWait[] = {
+					0xA0, 0x00, 0x00, 0x0A, 0x06, 0x02, 0x00, 0x75, 0xF7
+				};
+				for (unsigned back = 0; back <= 6; back += 3) {
+					if (at < back || at - back + sizeof(kGropWait) >= 0x200000u)
+						continue;
+					if (memcmp(mem + (at - back), kGropWait, sizeof(kGropWait)) == 0) {
+						opnInService_ = 0;
+						break;
+					}
+				}
+			}
 			const uint16_t cs = np2_reg_get(NP2_R_CS);
 			const uint16_t ip = np2_reg_get(NP2_R_IP);
 			const unsigned b = (unsigned)cs << 4;
@@ -3596,6 +3634,32 @@ int CHardPc98::DeliverIrqs()
 				picMask_ = (uint8_t)(picMask_ & ~(1u << 3));
 		}
 	}
+	/* MV（bind）の AH=2 は [20D0]|[20D1] が 0 になるまで INT F0 の中で待つ。
+	   OPN ISR が入口で立てて出口で消すフラグを、hoot の INT 7F が ISR の途中で
+	   踏み、待ちが ISR の再開を塞ぐ。このスピンのときだけフラグを落とす。 */
+	{
+		uint8_t* mem = np2_mem();
+		if (mem) {
+			const uint16_t cs = np2_reg_get(NP2_R_CS);
+			const uint16_t ip = np2_reg_get(NP2_R_IP);
+			const unsigned at = ((unsigned)cs << 4) + ip;
+			static const uint8_t kMvWait[] = {
+				0xA0, 0xD0, 0x20, 0x0A, 0x06, 0xD1, 0x20, 0x75, 0xF7
+			};
+			for (unsigned back = 0; back <= 6; back += 3) {
+				if (at < back || at - back + sizeof(kMvWait) >= 0x200000u)
+					continue;
+				if (memcmp(mem + (at - back), kMvWait, sizeof(kMvWait)) != 0)
+					continue;
+				const unsigned dp = ((unsigned)np2_reg_get(NP2_R_DS) << 4) + 0x20D0u;
+				if (dp + 2u < 0x200000u) {
+					mem[dp] = 0;
+					mem[dp + 1] = 0;
+				}
+				break;
+			}
+		}
+	}
 	uint16_t flags = np2_reg_get(NP2_R_FLAGS);
 	const int guestIf = (flags & 0x0200) != 0;
 	if ((modeBeep_ || modeMidi_ || s_valkyKeepIrq0) && pitIrqPending_ && !g_pitInService) {
@@ -3657,7 +3721,7 @@ int CHardPc98::DeliverIrqs()
 
 	if (packCmd1_ && IvtHooked(PC98_TIMER_VEC, isDos_))
 		picMask_ = (uint8_t)(picMask_ & 0xfeu);
-	if (s_pc98UserTmr) {
+	if (s_pc98UserTmr && !s_abikoRepeating) {
 		uint8_t* um = np2_mem();
 		if (!um || um[(0x00C0u << 4) + 0x40] == 0) {
 			s_pc98UserTmr = 0;
@@ -3829,6 +3893,38 @@ int CHardPc98::DeliverIrqs()
 					? ((unsigned)mem[cbase + 0x0E] | ((unsigned)mem[cbase + 0x0F] << 8))
 					: 0;
 				if (chain && cseg == 0x0060u) {
+					vec = 0x15;
+					picMask_ = (uint8_t)(picMask_ & ~(1u << 2));
+					slavePicMask_ = (uint8_t)(slavePicMask_ & ~(1u << 5));
+				}
+			}
+		}
+		/* Queen of Duellist は OPN タイマを INT15 に置く。INT0B は空なので
+		   線だけ立って届かない。プロローグ 1E 06 60 … FB で 27h を触る ISR だけ。 */
+		if (mem && !IvtHooked(PC98_OPN_IRQ_VEC, isDos_) && IvtHooked(0x15, isDos_)) {
+			const unsigned o15 = (unsigned)mem[0x15 * 4]
+				| ((unsigned)mem[0x15 * 4 + 1] << 8);
+			const unsigned s15 = (unsigned)mem[0x15 * 4 + 2]
+				| ((unsigned)mem[0x15 * 4 + 3] << 8);
+			const unsigned phys = ((unsigned)s15 << 4) + o15;
+			static const uint8_t kQodIsr[] = {
+				0x1E, 0x06, 0x60, 0x8C, 0xC8, 0x8E, 0xD8, 0xFB
+			};
+			/* qodp は STI が先。本体は同じ push ds/es/pushaw。 */
+			static const uint8_t kQodIsrSti[] = {
+				0xFB, 0x1E, 0x06, 0x60, 0x8C, 0xC8, 0x8E, 0xD8
+			};
+			if (s15 && phys + 0x20u < 0x200000u
+				&& (memcmp(mem + phys, kQodIsr, sizeof(kQodIsr)) == 0
+					|| memcmp(mem + phys, kQodIsrSti, sizeof(kQodIsrSti)) == 0)) {
+				int timer = 0;
+				for (unsigned k = 8; k + 1 < 0x20; k++) {
+					if (mem[phys + k] == 0xB6 && mem[phys + k + 1] == 0x27) {
+						timer = 1;
+						break;
+					}
+				}
+				if (timer) {
 					vec = 0x15;
 					picMask_ = (uint8_t)(picMask_ & ~(1u << 2));
 					slavePicMask_ = (uint8_t)(slavePicMask_ & ~(1u << 5));
@@ -5531,6 +5627,10 @@ void CHardPc98::MaterializeDosFiles(CEmuZipFs* fs, const CEmuGameEntry* ge)
 		if (!data || !sz) continue;
 		char addName[DOS98_NAME];
 		DosCfgFileStem(r->name, addName, (int)sizeof(addName));
+		/* conin は拡張子無し。zip 先頭が .ONS だと AddFile が既存の .MUS を音色で上書きする
+		   （RIKA01.ONS が RIKA01.MUS より先、RIKA02.MUS は先に居る）。曲は file 側が正。 */
+		if (_stricmp(r->type, "conin") == 0 && addName[0] && dos_.FindFile(addName))
+			continue;
 		if (addName[0])
 			dos_.AddFile(addName, data, sz);
 	}
@@ -9788,6 +9888,23 @@ int CHardPc98::BootDos(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCod
 	opnPumpResidual_ = 0;
 	picMask_ = 0xff;
 	s_pc98UserTmr = 0;
+	s_abikoRepeating = 0;
+	{
+		static const char* kAbikoTmr[] = { "ABIKO", "abiko", NULL };
+		if (DosShellStarts(ge, kAbikoTmr)) {
+			/* INT 08 の `mov cs:[0040],0` を潰す。フラグが残るので毎 tick INT 80h。 */
+			s_abikoRepeating = 1;
+			uint8_t* isr = mem + (0x00C0u << 4);
+			for (unsigned i = 0; i + 6u < 0x40u; i++) {
+				if (isr[i] == 0x2E && isr[i + 1] == 0xC6 && isr[i + 2] == 0x06
+					&& isr[i + 3] == 0x40 && isr[i + 4] == 0x00
+					&& isr[i + 5] == 0x00) {
+					memset(isr + i, 0x90, 6);
+					break;
+				}
+			}
+		}
+	}
 	slavePicMask_ = 0xff;
 	s_valkyKeepIrq0 = 0;
 	s_fmxKeepIrq0 = 0;

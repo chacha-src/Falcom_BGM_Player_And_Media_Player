@@ -5,6 +5,7 @@
 #include "Soft3DMazeDlg.h"
 #include "Soft3DRaceDlg.h"
 #include <mmsystem.h>
+#include <objbase.h>
 
 extern COggDlg* og;
 extern int tempo;
@@ -121,6 +122,8 @@ void Soft3DPostStatusText(HWND hwnd, volatile LONG* posted, LPCTSTR text)
 static UINT Soft3DLoopProc(LPVOID)
 {
 	SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_NORMAL);
+	/* DirectInput はこのスレッドで作る。COM 未初期化だと抜き差し後に装置が死んだままになる。 */
+	const HRESULT co = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
 	while (InterlockedCompareExchange(&s_run, 1, 1) == 1) {
 		const DWORD t0 = timeGetTime();
 		Soft3DMazeOnTimerp();
@@ -133,6 +136,10 @@ static UINT Soft3DLoopProc(LPVOID)
 		else
 			Sleep(1);
 	}
+	Soft3DMazeReleaseJoypad();
+	Soft3DRaceReleaseJoypad();
+	if (co == S_OK)
+		CoUninitialize();
 	return 0;
 }
 

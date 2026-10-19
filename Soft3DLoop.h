@@ -41,6 +41,8 @@ void Soft3DDxReinitAck();
 void Soft3DDeferPresent(int on);
 int Soft3DPresentShouldSkip();
 int Soft3DLoopStopping();
+void Soft3DRaceReleaseJoypad();
+void Soft3DMazeReleaseJoypad();
 
 struct Soft3DDxGuard {
 	Soft3DDxGuard() { Soft3DDxLock(); }

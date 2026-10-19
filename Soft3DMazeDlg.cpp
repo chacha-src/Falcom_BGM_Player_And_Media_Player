@@ -681,26 +681,103 @@ struct S3mJoyState {
 };
 static IDirectInput8W* g_s3mDi = NULL;
 static IDirectInputDevice8W* g_s3mPad = NULL;
-static BOOL g_s3mDiTried = FALSE;
+static CRITICAL_SECTION g_s3mPadCs;
+static volatile LONG g_s3mPadCsState = 0;
+static volatile LONG g_s3mDropReq = 0;
+static DWORD g_s3mOwnerTid = 0;
+static DWORD g_s3mRetryAt = 0;
 
+static void S3mPadLock()
+{
+	for (;;) {
+		const LONG st = InterlockedCompareExchange(&g_s3mPadCsState, 1, 0);
+		if (st == 0) {
+			InitializeCriticalSection(&g_s3mPadCs);
+			InterlockedExchange(&g_s3mPadCsState, 2);
+			break;
+		}
+		if (st == 2)
+			break;
+		Sleep(0);
+	}
+	EnterCriticalSection(&g_s3mPadCs);
+}
+static void S3mPadUnlock()
+{
+	if (InterlockedCompareExchange(&g_s3mPadCsState, 2, 2) == 2)
+		LeaveCriticalSection(&g_s3mPadCs);
+}
+static void S3mComReleaseDevice(IDirectInputDevice8W* p)
+{
+	if (!p) return;
+	__try { p->Unacquire(); } __except (EXCEPTION_EXECUTE_HANDLER) {}
+	__try { p->Release(); } __except (EXCEPTION_EXECUTE_HANDLER) {}
+}
+static void S3mComReleaseDi(IDirectInput8W* p)
+{
+	if (!p) return;
+	__try { p->Release(); } __except (EXCEPTION_EXECUTE_HANDLER) {}
+}
+static void S3mDropPadLocked()
+{
+	IDirectInputDevice8W* pad = g_s3mPad;
+	g_s3mPad = NULL;
+	g_s3mRetryAt = 0;
+	S3mComReleaseDevice(pad);
+}
+static void S3mDropAllLocked()
+{
+	S3mDropPadLocked();
+	IDirectInput8W* di = g_s3mDi;
+	g_s3mDi = NULL;
+	g_s3mOwnerTid = 0;
+	S3mComReleaseDi(di);
+}
+static int S3mPadErr(HRESULT hr)
+{
+	if (SUCCEEDED(hr)) return 0;
+	if (hr == DIERR_INPUTLOST || hr == DIERR_NOTACQUIRED || hr == DIERR_OTHERAPPHASPRIO)
+		return 1;
+	return 2;
+}
 static BOOL CALLBACK S3mEnumPads(const DIDEVICEINSTANCEW* inst, void*)
 {
-	if (FAILED(g_s3mDi->CreateDevice(inst->guidInstance, &g_s3mPad, NULL)))
+	if (!inst || !g_s3mDi || g_s3mPad) return DIENUM_STOP;
+	if (FAILED(g_s3mDi->CreateDevice(inst->guidInstance, &g_s3mPad, NULL)) || !g_s3mPad)
 		return DIENUM_CONTINUE;
 	return DIENUM_STOP;
 }
-static void S3mEnsureJoypad()
+static void S3mTryOpenLocked()
 {
-	if (g_s3mDiTried) return;
-	g_s3mDiTried = TRUE;
-	if (FAILED(DirectInput8Create(GetModuleHandle(NULL), DIRECTINPUT_VERSION, IID_IDirectInput8W, (void**)&g_s3mDi, NULL)))
+	if (g_s3mPad) return;
+	const DWORD now = GetTickCount();
+	if (g_s3mRetryAt != 0 && (LONG)(now - g_s3mRetryAt) < 0)
 		return;
-	g_s3mDi->EnumDevices(DI8DEVCLASS_GAMECTRL, S3mEnumPads, NULL, DIEDFL_ATTACHEDONLY);
+	g_s3mRetryAt = now + 200;
+	if (!g_s3mDi) {
+		if (FAILED(DirectInput8Create(GetModuleHandle(NULL), DIRECTINPUT_VERSION, IID_IDirectInput8W, (void**)&g_s3mDi, NULL)) || !g_s3mDi)
+			return;
+		g_s3mOwnerTid = GetCurrentThreadId();
+	}
+	if (FAILED(g_s3mDi->EnumDevices(DI8DEVCLASS_GAMECTRL, S3mEnumPads, NULL, DIEDFL_ATTACHEDONLY))) {
+		S3mDropAllLocked();
+		return;
+	}
 	if (!g_s3mPad) return;
-	g_s3mPad->SetDataFormat(&c_dfDIJoystick2);
-	HWND hw = AfxGetMainWnd() ? AfxGetMainWnd()->GetSafeHwnd() : NULL;
-	if (!hw) hw = ::GetDesktopWindow();
-	g_s3mPad->SetCooperativeLevel(hw, DISCL_BACKGROUND | DISCL_NONEXCLUSIVE);
+	if (FAILED(g_s3mPad->SetDataFormat(&c_dfDIJoystick2))) {
+		S3mDropPadLocked();
+		return;
+	}
+	HWND hw = NULL;
+	CWnd* main = AfxGetMainWnd();
+	if (main && ::IsWindow(main->GetSafeHwnd()))
+		hw = main->GetSafeHwnd();
+	if (!hw || !::IsWindow(hw))
+		hw = ::GetDesktopWindow();
+	if (!hw || FAILED(g_s3mPad->SetCooperativeLevel(hw, DISCL_BACKGROUND | DISCL_NONEXCLUSIVE))) {
+		S3mDropPadLocked();
+		return;
+	}
 	DIPROPRANGE range = {};
 	range.diph.dwSize = sizeof(range);
 	range.diph.dwHeaderSize = sizeof(range.diph);
@@ -715,8 +792,12 @@ static void S3mEnsureJoypad()
 	dead.diph.dwHeaderSize = sizeof(dead.diph);
 	dead.diph.dwHow = DIPH_DEVICE;
 	dead.dwData = 1200;
-	g_s3mPad->SetProperty(DIPROP_DEADZONE, &dead.diph);
-	g_s3mPad->Acquire();
+	if (g_s3mPad)
+		g_s3mPad->SetProperty(DIPROP_DEADZONE, &dead.diph);
+	if (!g_s3mPad) return;
+	const HRESULT aq = g_s3mPad->Acquire();
+	if (S3mPadErr(aq) == 2)
+		S3mDropPadLocked();
 }
 static float S3mAxisN(LONG v)
 {
@@ -730,13 +811,48 @@ static void S3mUpdateJoypadState(S3mJoyState& out)
 {
 	memset(&out, 0, sizeof(out));
 	out.hat = -1;
-	S3mEnsureJoypad();
-	if (!g_s3mPad) return;
+	S3mPadLock();
+	if (g_s3mDropReq) {
+		S3mDropAllLocked();
+		g_s3mDropReq = 0;
+		S3mPadUnlock();
+		return;
+	}
+	if (!g_s3mPad)
+		S3mTryOpenLocked();
+	if (!g_s3mPad) { S3mPadUnlock(); return; }
 	HRESULT hr = g_s3mPad->Poll();
-	if (FAILED(hr)) { g_s3mPad->Acquire(); hr = g_s3mPad->Poll(); }
+	int err = S3mPadErr(hr);
+	if (err == 1 && g_s3mPad) {
+		hr = g_s3mPad->Acquire();
+		err = S3mPadErr(hr);
+		if (err != 2 && g_s3mPad)
+			hr = g_s3mPad->Poll();
+	}
+	if (!g_s3mPad || S3mPadErr(hr) == 2) {
+		S3mDropPadLocked();
+		S3mPadUnlock();
+		return;
+	}
 	DIJOYSTATE2 st = {};
 	hr = g_s3mPad->GetDeviceState(sizeof(st), &st);
-	if (FAILED(hr)) return;
+	err = S3mPadErr(hr);
+	if (err == 1 && g_s3mPad) {
+		hr = g_s3mPad->Acquire();
+		if (S3mPadErr(hr) == 2) {
+			S3mDropPadLocked();
+			S3mPadUnlock();
+			return;
+		}
+		if (g_s3mPad)
+			hr = g_s3mPad->GetDeviceState(sizeof(st), &st);
+	}
+	if (!g_s3mPad || FAILED(hr)) {
+		if (g_s3mPad && S3mPadErr(hr) != 0)
+			S3mDropPadLocked();
+		S3mPadUnlock();
+		return;
+	}
 	out.connected = 1;
 	out.lx = S3mAxisN(st.lX);
 	out.ly = S3mAxisN(st.lY);
@@ -758,12 +874,18 @@ static void S3mUpdateJoypadState(S3mJoyState& out)
 	DWORD pov = st.rgdwPOV[0];
 	if (pov != 0xFFFFFFFF && (LOWORD(pov) != 0xFFFF))
 		out.hat = (int)((pov + 2250) / 4500) % 8;
+	S3mPadUnlock();
 }
 static void S3mReleaseJoypad()
 {
-	if (g_s3mPad) { g_s3mPad->Unacquire(); g_s3mPad->Release(); g_s3mPad = NULL; }
-	if (g_s3mDi) { g_s3mDi->Release(); g_s3mDi = NULL; }
-	g_s3mDiTried = FALSE;
+	S3mPadLock();
+	if (g_s3mOwnerTid != 0 && g_s3mOwnerTid != GetCurrentThreadId())
+		g_s3mDropReq = 1;
+	else {
+		g_s3mDropReq = 0;
+		S3mDropAllLocked();
+	}
+	S3mPadUnlock();
 }
 
 static BOOL S3mIsPickupCell(BYTE c)
@@ -874,6 +996,11 @@ static int S3mNormalizeSavedSize(int sz)
 }
 
 } // namespace
+
+void Soft3DMazeReleaseJoypad()
+{
+	S3mReleaseJoypad();
+}
 
 static CSoft3DMazeDlg* g_s3m = NULL;
 

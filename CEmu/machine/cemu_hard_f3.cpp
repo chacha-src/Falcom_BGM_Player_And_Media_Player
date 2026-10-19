@@ -140,10 +140,32 @@ void CHardF3::Shutdown()
 }
 
 /* PCM／コードバンク */
+static uint8_t f3BankLive[8];
+
+static void RefreshBankLive(const uint8_t* rom, unsigned romBytes)
+{
+	memset(f3BankLive, 0, sizeof(f3BankLive));
+	if (!rom) return;
+	for (unsigned b = 0; b < 8; b++) {
+		const unsigned off = b * 0x200000u;
+		if (off >= romBytes) break;
+		const unsigned end = (off + 0x200000u < romBytes) ? off + 0x200000u : romBytes;
+		for (unsigned i = off; i < end; i++) {
+			if (rom[i]) { f3BankLive[b] = 1; break; }
+		}
+	}
+}
+
 void CHardF3::RebuildOtisBanks()
 {
 	for (int i = 0; i < kOtisBankWords; i++) {
-		calcOtisBank_[i] = (otisBank_[i] & bankMask_) << 20;
+		const uint32_t base = (otisBank_[i] & bankMask_) << 20;
+		const unsigned page = (ensoniqSize_ >= 0x200000u)
+			? (unsigned)((base * 2u) / 0x200000u) : 0u;
+		/* 空の 2MB 面へ切り替えると、同じ声が無音の ROM を読んで曲が落ちる。 */
+		if (page < 8 && !f3BankLive[page] && f3BankLive[0])
+			continue;
+		calcOtisBank_[i] = base;
 		if (chip_)
 			CEmuChipEs5505SetVoiceBank(chip_, i, calcOtisBank_[i]);
 	}
@@ -961,6 +983,7 @@ int CHardF3::LoadRoms(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCode
 	}
 
 	bankMask_ = (ensoniqSize_ / 0x200000u) ? ((ensoniqSize_ / 0x200000u) - 1u) : 0u;
+	RefreshBankLive(ensoniq_, ensoniqSize_);
 	RebuildOtisBanks();
 	chip_->SetPcmRom(ensoniq_, ensoniqSize_);
 	chip_->Reset();

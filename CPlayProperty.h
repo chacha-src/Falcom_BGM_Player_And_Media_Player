@@ -115,10 +115,12 @@ protected:
 	virtual BOOL OnInitDialog();
 	virtual void OnOK();
 	virtual void OnCancel();
+	virtual BOOL PreTranslateMessage(MSG* pMsg);
 	afx_msg void OnLvnItemchangedCfg(NMHDR* pNMHDR, LRESULT* pResult);
 	afx_msg void OnCfgDblClk(NMHDR* pNMHDR, LRESULT* pResult);
 	DECLARE_MESSAGE_MAP()
 
+	CToolTipCtrl m_tooltip;
 	CKpiInfoList m_info;
 	CPlayPropCfgList m_cfg;
 	CCustomEdit m_cfgHelp;
@@ -150,11 +152,14 @@ public:
 protected:
 	virtual void DoDataExchange(CDataExchange* pDX);
 	virtual BOOL OnInitDialog();
+	virtual BOOL PreTranslateMessage(MSG* pMsg);
 	virtual void OnOK();
 	virtual void OnCancel();
 	afx_msg void OnMoreCmd(UINT nID);
 	DECLARE_MESSAGE_MAP()
 
+	void UpdateActions();
+	CToolTipCtrl m_tooltip;
 	CCustomStatic m_hint;
 	CCustomStandardButton m_btnExplorer, m_btnOpenFolder, m_btnCopyPath, m_btnCopyName;
 	CCustomStandardButton m_btnProTools, m_btnClearParam, m_btnWav, m_btnTranscode, m_btnVideo;

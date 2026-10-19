@@ -474,26 +474,104 @@ struct S3rJoyState {
 };
 static IDirectInput8W* g_s3rDi = NULL;
 static IDirectInputDevice8W* g_s3rPad = NULL;
-static BOOL g_s3rDiTried = FALSE;
+static CRITICAL_SECTION g_s3rPadCs;
+static volatile LONG g_s3rPadCsState = 0;
+static volatile LONG g_s3rDropReq = 0;
+static DWORD g_s3rOwnerTid = 0;
+static DWORD g_s3rRetryAt = 0;
 
+static void S3rPadLock()
+{
+	for (;;) {
+		const LONG st = InterlockedCompareExchange(&g_s3rPadCsState, 1, 0);
+		if (st == 0) {
+			InitializeCriticalSection(&g_s3rPadCs);
+			InterlockedExchange(&g_s3rPadCsState, 2);
+			break;
+		}
+		if (st == 2)
+			break;
+		Sleep(0);
+	}
+	EnterCriticalSection(&g_s3rPadCs);
+}
+static void S3rPadUnlock()
+{
+	if (InterlockedCompareExchange(&g_s3rPadCsState, 2, 2) == 2)
+		LeaveCriticalSection(&g_s3rPadCs);
+}
+static void S3rComReleaseDevice(IDirectInputDevice8W* p)
+{
+	if (!p) return;
+	__try { p->Unacquire(); } __except (EXCEPTION_EXECUTE_HANDLER) {}
+	__try { p->Release(); } __except (EXCEPTION_EXECUTE_HANDLER) {}
+}
+static void S3rComReleaseDi(IDirectInput8W* p)
+{
+	if (!p) return;
+	__try { p->Release(); } __except (EXCEPTION_EXECUTE_HANDLER) {}
+}
+static void S3rDropPadLocked()
+{
+	IDirectInputDevice8W* pad = g_s3rPad;
+	g_s3rPad = NULL;
+	g_s3rRetryAt = 0;
+	S3rComReleaseDevice(pad);
+}
+static void S3rDropAllLocked()
+{
+	S3rDropPadLocked();
+	IDirectInput8W* di = g_s3rDi;
+	g_s3rDi = NULL;
+	g_s3rOwnerTid = 0;
+	S3rComReleaseDi(di);
+}
+/* 0=使える 1=Acquire し直し 2=抜き差しで装置を捨てて次の判定で開き直す */
+static int S3rPadErr(HRESULT hr)
+{
+	if (SUCCEEDED(hr)) return 0;
+	if (hr == DIERR_INPUTLOST || hr == DIERR_NOTACQUIRED || hr == DIERR_OTHERAPPHASPRIO)
+		return 1;
+	return 2;
+}
 static BOOL CALLBACK S3rEnumPads(const DIDEVICEINSTANCEW* inst, void*)
 {
-	if (FAILED(g_s3rDi->CreateDevice(inst->guidInstance, &g_s3rPad, NULL)))
+	if (!inst || !g_s3rDi || g_s3rPad) return DIENUM_STOP;
+	if (FAILED(g_s3rDi->CreateDevice(inst->guidInstance, &g_s3rPad, NULL)) || !g_s3rPad)
 		return DIENUM_CONTINUE;
 	return DIENUM_STOP;
 }
-static void S3rEnsureJoypad()
+static void S3rTryOpenLocked()
 {
-	if (g_s3rDiTried) return;
-	g_s3rDiTried = TRUE;
-	if (FAILED(DirectInput8Create(GetModuleHandle(NULL), DIRECTINPUT_VERSION, IID_IDirectInput8W, (void**)&g_s3rDi, NULL)))
+	if (g_s3rPad) return;
+	const DWORD now = GetTickCount();
+	if (g_s3rRetryAt != 0 && (LONG)(now - g_s3rRetryAt) < 0)
 		return;
-	g_s3rDi->EnumDevices(DI8DEVCLASS_GAMECTRL, S3rEnumPads, NULL, DIEDFL_ATTACHEDONLY);
+	g_s3rRetryAt = now + 200;
+	if (!g_s3rDi) {
+		if (FAILED(DirectInput8Create(GetModuleHandle(NULL), DIRECTINPUT_VERSION, IID_IDirectInput8W, (void**)&g_s3rDi, NULL)) || !g_s3rDi)
+			return;
+		g_s3rOwnerTid = GetCurrentThreadId();
+	}
+	if (FAILED(g_s3rDi->EnumDevices(DI8DEVCLASS_GAMECTRL, S3rEnumPads, NULL, DIEDFL_ATTACHEDONLY))) {
+		S3rDropAllLocked();
+		return;
+	}
 	if (!g_s3rPad) return;
-	g_s3rPad->SetDataFormat(&c_dfDIJoystick2);
-	HWND hw = AfxGetMainWnd() ? AfxGetMainWnd()->GetSafeHwnd() : NULL;
-	if (!hw) hw = ::GetDesktopWindow();
-	g_s3rPad->SetCooperativeLevel(hw, DISCL_BACKGROUND | DISCL_NONEXCLUSIVE);
+	if (FAILED(g_s3rPad->SetDataFormat(&c_dfDIJoystick2))) {
+		S3rDropPadLocked();
+		return;
+	}
+	HWND hw = NULL;
+	CWnd* main = AfxGetMainWnd();
+	if (main && ::IsWindow(main->GetSafeHwnd()))
+		hw = main->GetSafeHwnd();
+	if (!hw || !::IsWindow(hw))
+		hw = ::GetDesktopWindow();
+	if (!hw || FAILED(g_s3rPad->SetCooperativeLevel(hw, DISCL_BACKGROUND | DISCL_NONEXCLUSIVE))) {
+		S3rDropPadLocked();
+		return;
+	}
 	DIPROPRANGE range = {};
 	range.diph.dwSize = sizeof(range);
 	range.diph.dwHeaderSize = sizeof(range.diph);
@@ -508,8 +586,12 @@ static void S3rEnsureJoypad()
 	dead.diph.dwHeaderSize = sizeof(dead.diph);
 	dead.diph.dwHow = DIPH_DEVICE;
 	dead.dwData = 1200;
-	g_s3rPad->SetProperty(DIPROP_DEADZONE, &dead.diph);
-	g_s3rPad->Acquire();
+	if (g_s3rPad)
+		g_s3rPad->SetProperty(DIPROP_DEADZONE, &dead.diph);
+	if (!g_s3rPad) return;
+	const HRESULT aq = g_s3rPad->Acquire();
+	if (S3rPadErr(aq) == 2)
+		S3rDropPadLocked();
 }
 static float S3rAxisN(LONG v)
 {
@@ -535,13 +617,48 @@ static void UpdateJoypadState(S3rJoyState& out)
 {
 	memset(&out, 0, sizeof(out));
 	out.hat = -1;
-	S3rEnsureJoypad();
-	if (!g_s3rPad) return;
+	S3rPadLock();
+	if (g_s3rDropReq) {
+		S3rDropAllLocked();
+		g_s3rDropReq = 0;
+		S3rPadUnlock();
+		return;
+	}
+	if (!g_s3rPad)
+		S3rTryOpenLocked();
+	if (!g_s3rPad) { S3rPadUnlock(); return; }
 	HRESULT hr = g_s3rPad->Poll();
-	if (FAILED(hr)) { g_s3rPad->Acquire(); hr = g_s3rPad->Poll(); }
+	int err = S3rPadErr(hr);
+	if (err == 1 && g_s3rPad) {
+		hr = g_s3rPad->Acquire();
+		err = S3rPadErr(hr);
+		if (err != 2 && g_s3rPad)
+			hr = g_s3rPad->Poll();
+	}
+	if (!g_s3rPad || S3rPadErr(hr) == 2) {
+		S3rDropPadLocked();
+		S3rPadUnlock();
+		return;
+	}
 	DIJOYSTATE2 st = {};
 	hr = g_s3rPad->GetDeviceState(sizeof(st), &st);
-	if (FAILED(hr)) return;
+	err = S3rPadErr(hr);
+	if (err == 1 && g_s3rPad) {
+		hr = g_s3rPad->Acquire();
+		if (S3rPadErr(hr) == 2) {
+			S3rDropPadLocked();
+			S3rPadUnlock();
+			return;
+		}
+		if (g_s3rPad)
+			hr = g_s3rPad->GetDeviceState(sizeof(st), &st);
+	}
+	if (!g_s3rPad || FAILED(hr)) {
+		if (g_s3rPad && S3rPadErr(hr) != 0)
+			S3rDropPadLocked();
+		S3rPadUnlock();
+		return;
+	}
 	out.connected = 1;
 	out.lx = S3rAxisN(st.lX);
 	out.ly = S3rAxisN(st.lY);
@@ -557,12 +674,18 @@ static void UpdateJoypadState(S3rJoyState& out)
 	DWORD pov = st.rgdwPOV[0];
 	if (pov != 0xFFFFFFFF && (LOWORD(pov) != 0xFFFF))
 		out.hat = (int)((pov + 2250) / 4500) % 8;
+	S3rPadUnlock();
 }
 static void S3rReleaseJoypad()
 {
-	if (g_s3rPad) { g_s3rPad->Unacquire(); g_s3rPad->Release(); g_s3rPad = NULL; }
-	if (g_s3rDi) { g_s3rDi->Release(); g_s3rDi = NULL; }
-	g_s3rDiTried = FALSE;
+	S3rPadLock();
+	if (g_s3rOwnerTid != 0 && g_s3rOwnerTid != GetCurrentThreadId())
+		g_s3rDropReq = 1;
+	else {
+		g_s3rDropReq = 0;
+		S3rDropAllLocked();
+	}
+	S3rPadUnlock();
 }
 
 static const float kCraftColors[12][3] = {
@@ -940,6 +1063,11 @@ void CS3rHelpDlg::OnPaint()
 }
 
 } // namespace
+
+void Soft3DRaceReleaseJoypad()
+{
+	S3rReleaseJoypad();
+}
 
 static CSoft3DRaceDlg* g_s3r = NULL;
 

@@ -88,7 +88,7 @@
                   + _k2_syn2_report.txt
                   + _k2_ac48_plays.txt
                   + _k2_crush15_report.txt
-   Archives probed: 5085, supported: 4618; MSX +replcart_msx/shiryo_msx/msxfan_msx (_k2_x1msx8full_0.txt _k2_x1msx8fan_0.txt) + x1alba (_k2_x1msx8alba_0.txt)
+   Archives probed: 5085, supported: 4639; MSX +replcart_msx/shiryo_msx/msxfan_msx (_k2_x1msx8full_0.txt _k2_x1msx8fan_0.txt) + x1alba (_k2_x1msx8alba_0.txt)
                   + _k2_ac2s86_report.txt (genpeitd/rthunder/skykiddx/wndrmomo Sys86)
                   + _k2_ac2wsgo_report.txt (pacland/skykid/drgnbstr wsg63701)
                   + bosco wsgz80 (0289 BGM via $8A14 + $0139 id)
@@ -114,7 +114,15 @@
                   + pmngr_98 GSP98 (OPN pack; songs 1-3 stay audible for the whole 8s window)
                   + imd_1_98 PMD86 (A460 was open bus so INT0B was never planted; 18Ch/18Eh read FF until bit0, and A468 bit4 must not stick)
                   + scldays_98 MDB (a rest longer than the 2s watchdog was restarted before the first note)
-                  + _k2_f3arc_plays.txt (f3: cbombers, dangcurv, dendego, dendego2, groundfx, gunbustr, gunlock, landgear, scfinals, sidebs, sidebs2, superchs, trstar, undrfire) */
+                  + daremo_98/tonight_98 NAX (OPN; songs 1-3 stay audible for the whole 8s window)
+                  + beroncho_98/trilogy_98 ABIKO (BIOS cleared the AH=02 flag after one INT 80, so the sequencer clock stopped)
+                  + sematte_98 FMD (conin was overwriting RIKA0n.MUS with the .ONS that sits earlier in the zip)
+                  + earlyk98 BGMDRV (tick leaked pushaw so the OPN latch never matched the idle stack)
+                  + grecall_98 GROP (stop-wait spins in the driver CS, so the OPN latch stayed set after IRET)
+                  + fflush_98 AGUMIX (OPN; songs 1-3 stay audible for the whole 8s window)
+                  + qoda_98/qodg_98 QOD (OPN timer lives on INT 15, so INT 0B never ticked)
+                  + qodp_98 QOD (same INT 15 timer; STI is the first byte of the ISR)
+                  + _k2_f3arc_plays.txt (f3: arkretrn, bubblem, cbombers, cleopatr, dangcurv, dariusg, dendego, dendego2, dungeonm, groundfx, gunbustr, gunlock, landgear, landmakr, pbobble3, popnpop, pwrgoal, scfinals, sidebs, sidebs2, superchs, tcobra2, trstar, twinqix, undrfire) */
 
 #include "StdAfx.h"
 #include "cemu_support.h"
@@ -369,6 +377,7 @@ static const char* const kSupported[] = {
 	"arkanoid98",
 	"arkarea",
 	"arknoid268snd",
+	"arkretrn",
 	"armedf",
 	"armist_98",
 	"armorcar",
@@ -492,6 +501,7 @@ static const char* const kSupported[] = {
 	"benberob",
 	"berabohm",
 	"bermudat",
+	"beroncho_98",
 	"beyond_98",
 	"bfighter68snd",
 	"bfuture2_at",
@@ -604,6 +614,7 @@ static const char* const kSupported[] = {
 	"bub68snd",
 	"bubble_msx",
 	"bubbledizzy_at",
+	"bubblem",
 	"bubbletr",
 	"bublbobl",
 	"bublboblp",
@@ -746,6 +757,7 @@ static const char* const kSupported[] = {
 	"cl_21",
 	"cl_98",
 	"claw_at",
+	"cleopatr",
 	"close98",
 	"cloth_98",
 	"clrd4_98",
@@ -904,8 +916,10 @@ static const char* const kSupported[] = {
 	"dante2_msx",
 	"dante_98",
 	"dante_msx",
+	"daremo_98",
 	"darius",
 	"darius2",
+	"dariusg",
 	"darkages_at",
 	"darkedge",
 	"darkmist",
@@ -1248,6 +1262,7 @@ static const char* const kSupported[] = {
 	"duelkn98",
 	"duelsc98",
 	"dunbine_msx",
+	"dungeonm",
 	"dunkmnia",
 	"dunkshot",
 	"dvon68snd",
@@ -1270,6 +1285,7 @@ static const char* const kSupported[] = {
 	"dynamo98",
 	"dynatech_at",
 	"dynwar",
+	"earlyk98",
 	"earthjkr",
 	"ecofghtr",
 	"ed2_88",
@@ -1441,6 +1457,7 @@ static const char* const kSupported[] = {
 	"feti_98",
 	"ff_msx",
 	"ffight",
+	"fflush_98",
 	"fghthist",
 	"fgsel1c",
 	"fgsel1m",
@@ -1728,6 +1745,7 @@ static const char* const kSupported[] = {
 	"gran68snd",
 	"grandif68snd",
 	"grecall_21",
+	"grecall_98",
 	"gridiron",
 	"grnseed_98",
 	"grobda",
@@ -2260,6 +2278,7 @@ static const char* const kSupported[] = {
 	"lamachin",
 	"lamia",
 	"landgear",
+	"landmakr",
 	"lands_21",
 	"lap68snd",
 	"laplace",
@@ -2994,6 +3013,7 @@ static const char* const kSupported[] = {
 	"pbaction",
 	"pblue_98",
 	"pbobble",
+	"pbobble3",
 	"pbobblen",
 	"pclubys",
 	"pctv_98",
@@ -3101,6 +3121,7 @@ static const char* const kSupported[] = {
 	"poplus2_98",
 	"poplus68snd",
 	"poplus98",
+	"popnpop",
 	"populous_at",
 	"posesso_98",
 	"pow",
@@ -3186,6 +3207,7 @@ static const char* const kSupported[] = {
 	"pwmajan2_98",
 	"pwmajan_98",
 	"pwrdarby_98",
+	"pwrgoal",
 	"pwrinst2",
 	"pwrlg68snd",
 	"pwrsngd_98",
@@ -3205,7 +3227,10 @@ static const char* const kSupported[] = {
 	"qndream",
 	"qod_98",
 	"qoda68snd",
+	"qoda_98",
+	"qodg_98",
 	"qodh_98",
+	"qodp_98",
 	"qoffght98",
 	"qouji_98",
 	"qroad2_98",
@@ -3616,6 +3641,7 @@ static const char* const kSupported[] = {
 	"sekai_88",
 	"sela_98",
 	"selfeena",
+	"sematte_98",
 	"senegal68snd",
 	"sengoku",
 	"sengoku2",
@@ -4032,6 +4058,7 @@ static const char* const kSupported[] = {
 	"tbyahhoo",
 	"tchaser1_98",
 	"tchaser2_98",
+	"tcobra2",
 	"td3_at",
 	"tdfever",
 	"tdragon2",
@@ -4177,6 +4204,7 @@ static const char* const kSupported[] = {
 	"tokisens",
 	"tokkae",
 	"tokyowar",
+	"tonight_98",
 	"tophuntr",
 	"topland",
 	"topmng2_98",
@@ -4212,6 +4240,7 @@ static const char* const kSupported[] = {
 	"trigger1_98",
 	"trigger2_98",
 	"trilogy68snd",
+	"trilogy_98",
 	"triothep",
 	"triton",
 	"triton2",
@@ -4250,6 +4279,7 @@ static const char* const kSupported[] = {
 	"twinbee_msx",
 	"twincobr",
 	"twinhawk",
+	"twinqix",
 	"twinspri",
 	"tws96",
 	"twzone3_msx",

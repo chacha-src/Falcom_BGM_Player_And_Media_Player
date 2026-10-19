@@ -11,6 +11,8 @@
 #include "kpi.h"
 #include "KpiV5ConfigStore.h"
 #include "CCustomPopupMenu.h"
+#include "VstMidiEngine.h"
+#include "kb_sasami/source/sasami_file.h"
 #include <shlwapi.h>
 #include <shlobj.h>
 #include <algorithm>
@@ -38,6 +40,32 @@ extern void MpPersistSavedataQuick();
 extern void PlRefreshMidiPlayModes();
 extern void CEmuRequestMidiEngineReplay();
 extern void OggArmSilentResumeFromCurrent();
+
+static void PpTip(CToolTipCtrl& tip, CWnd& w, LPCWSTR s)
+{
+	if (w.GetSafeHwnd() && s && s[0])
+		tip.AddTool(&w, s);
+}
+
+static BOOL PpLooksLikeVideo(LPCTSTR path)
+{
+	if (!path || !path[0]) return FALSE;
+	LPCTSTR dot = _tcsrchr(path, _T('.'));
+	if (!dot) return FALSE;
+	static const LPCTSTR kExts[] = {
+		_T(".mp4"), _T(".m4v"), _T(".mkv"), _T(".avi"), _T(".webm"),
+		_T(".mov"), _T(".qt"), _T(".wmv"), _T(".asf"), _T(".mpg"),
+		_T(".mpeg"), _T(".mpe"), _T(".m1v"), _T(".m2v"), _T(".mpv"),
+		_T(".vob"), _T(".ts"), _T(".m2ts"), _T(".mts"), _T(".ogv"),
+		_T(".flv"), _T(".f4v"), _T(".3gp"), _T(".3g2"), _T(".divx"),
+		_T(".rm"), _T(".rmvb")
+	};
+	for (int i = 0; i < (int)_countof(kExts); ++i) {
+		if (_tcsicmp(dot, kExts[i]) == 0)
+			return TRUE;
+	}
+	return FALSE;
+}
 
 static int CALLBACK PpEditWordBreakProc(LPTSTR /*lpch*/, int ichCurrent, int /*cch*/, int code)
 {
@@ -191,6 +219,16 @@ static void PpOpenExplorer(LPCTSTR pathIn)
 		ShellExecute(NULL, _T("open"), folder, _T(""), NULL, SW_SHOWNORMAL);
 }
 
+/* 再生が内蔵デコーダ固定の拡張子。KPI が同じ拡張子を持っていてもプラグインタブは出さない。 */
+static int PpBuiltinDecoderExt(const CString& ext)
+{
+	return ext == _T(".mp3") || ext == _T(".mp2") || ext == _T(".mp1") || ext == _T(".rmp")
+		|| ext == _T(".ogg") || ext == _T(".oga") || ext == _T(".opus") || ext == _T(".qull3")
+		|| ext == _T(".flac") || ext == _T(".fla") || ext == _T(".qull3h")
+		|| ext == _T(".wav") || ext == _T(".wave")
+		|| ext == _T(".dsf") || ext == _T(".dff") || ext == _T(".wsd");
+}
+
 int CPlayProperty::FindKpiForPath(LPCTSTR path)
 {
 	CString media = PlPhysicalMediaPath(path);
@@ -200,6 +238,10 @@ int CPlayProperty::FindKpiForPath(LPCTSTR path)
 	if (dot < 0) return -1;
 	CString extPart = media.Mid(dot);
 	extPart.MakeLower();
+	if (PpBuiltinDecoderExt(extPart)) return -1;
+	/* m4a/AAC は CRender の内蔵チェックがオンのときだけ内蔵。オフなら KPI。 */
+	if ((extPart == _T(".m4a") || extPart == _T(".aac")) && savedata.m4a)
+		return -1;
 	int pick = -1, best = -1;
 	for (int i = 0; i < kpicnt && i < 400; ++i) {
 		int hit = 0;
@@ -539,8 +581,359 @@ BOOL CPlayProperty_tab1::OnInitDialog()
 	}
 	ApplyBatchUi();
 	RefreshStatusLines();
-	CCustomControlUtility::BeginDialogToolTip(m_tooltip, this);
-	CCustomControlUtility::FinalizeDialogToolTip(m_tooltip, 512, 10000);
+	if (CCustomControlUtility::BeginDialogToolTip(m_tooltip, this)) {
+		CString s;
+		s = LL14(L"一覧に出す曲名です。OK でプレイリストへ保存します。",
+			L"Display name in the list. OK saves it to the playlist.",
+			L"Nom affiché dans la liste. OK l'enregistre.",
+			L"Nome in elenco. OK lo salva nella playlist.",
+			L"Nombre en la lista. OK lo guarda.",
+			L"목록에 보이는 곡명. OK로 재생 목록에 저장합니다.",
+			L"列表中的曲名。OK 写入播放列表。",
+			L"الاسم في القائمة. OK يحفظه.",
+			L"Имя в списке. OK пишет в плейлист.",
+			L"Name in der Liste. OK speichert es.",
+			L"Nome na lista. OK grava na playlist.",
+			L"Naam in de lijst. OK slaat het op.",
+			L"Nazwa na liscie. OK zapisuje ja.",
+			L"Listedeki ad. OK calma listesine yazar.");
+		PpTip(m_tooltip, m_lblName, s); PpTip(m_tooltip, m_name, s);
+		s = LL14(L"プレイリスト側のアーティストです。ファイルのタグとは別に保存されます。",
+			L"Playlist artist. Stored separately from the file tag.",
+			L"Artiste de la liste, distinct du tag fichier.",
+			L"Artista della playlist, distinto dal tag file.",
+			L"Artista de la lista, aparte de la etiqueta del archivo.",
+			L"재생 목록의 아티스트. 파일 태그와 따로 저장됩니다.",
+			L"播放列表中的艺术家，与文件标签分开保存。",
+			L"فنان القائمة، منفصل عن وسم الملف.",
+			L"Исполнитель плейлиста, отдельно от тега файла.",
+			L"Kuenstler der Liste, getrennt vom Datei-Tag.",
+			L"Artista da lista, separado da tag do arquivo.",
+			L"Artiest van de lijst, los van de bestandstag.",
+			L"Artysta playlisty, osobno od tagu pliku.",
+			L"Calma listesi sanatcisi. Dosya etiketinden ayri saklanir.");
+		PpTip(m_tooltip, m_lblArt, s); PpTip(m_tooltip, m_art, s);
+		s = LL14(L"プレイリスト側のアルバムです。ファイルのタグとは別に保存されます。",
+			L"Playlist album. Stored separately from the file tag.",
+			L"Album de la liste, distinct du tag fichier.",
+			L"Album della playlist, distinto dal tag file.",
+			L"Album de la lista, aparte de la etiqueta.",
+			L"재생 목록의 앨범. 파일 태그와 따로 저장됩니다.",
+			L"播放列表中的专辑，与文件标签分开保存。",
+			L"ألبوم القائمة، منفصل عن وسم الملف.",
+			L"Альбом плейлиста, отдельно от тега файла.",
+			L"Album der Liste, getrennt vom Datei-Tag.",
+			L"Album da lista, separado da tag do arquivo.",
+			L"Album van de lijst, los van de bestandstag.",
+			L"Album playlisty, osobno od tagu pliku.",
+			L"Calma listesi albumu. Dosya etiketinden ayri saklanir.");
+		PpTip(m_tooltip, m_lblAlb, s); PpTip(m_tooltip, m_alb, s);
+		s = LL14(L"再生に使うファイルの場所です。参照で別のファイルに差し替えられます。",
+			L"File used for playback. Browse replaces it with another file.",
+			L"Fichier lu. Parcourir le remplace.",
+			L"File riprodotto. Sfoglia lo sostituisce.",
+			L"Archivo que se reproduce. Examinar lo cambia.",
+			L"재생에 쓰는 파일 위치. 찾아보기로 바꿉니다.",
+			L"用于播放的文件路径。浏览可换成别的文件。",
+			L"ملف التشغيل. استعراض يستبدله.",
+			L"Файл воспроизведения. Обзор заменяет его.",
+			L"Datei fuer die Wiedergabe. Durchsuchen ersetzt sie.",
+			L"Arquivo da reproducao. Procurar troca o arquivo.",
+			L"Bestand dat wordt afgespeeld. Bladeren vervangt het.",
+			L"Plik odtwarzania. Przegladaj podmienia go.",
+			L"Calinan dosyanin yeri. Gozat baska dosyayla degistirir.");
+		PpTip(m_tooltip, m_lblFile, s); PpTip(m_tooltip, m_fol, s);
+		PpTip(m_tooltip, m_btnBrowse, LL14(L"別のファイルを選んでパスを差し替えます。",
+			L"Pick another file and replace the path.",
+			L"Choisir un autre fichier.",
+			L"Scegli un altro file.",
+			L"Elige otro archivo.",
+			L"다른 파일을 골라 경로를 바꿉니다.",
+			L"另选文件并替换路径。",
+			L"اختيار ملف آخر واستبدال المسار.",
+			L"Выбрать другой файл.",
+			L"Andere Datei waehlen.",
+			L"Escolher outro arquivo.",
+			L"Ander bestand kiezen.",
+			L"Wybierz inny plik.",
+			L"Baska dosya sec."));
+		s = LL14(L"ファイルから読んだ年です。タグ書込でファイルへ戻します。",
+			L"Year read from the file. Write tag stores it back.",
+			L"Annee lue du fichier. Ecrire tag la renvoie.",
+			L"Anno letto dal file. Scrivi tag lo salva.",
+			L"Ano leido del archivo. Escribir tag lo guarda.",
+			L"파일에서 읽은 연도. 태그 쓰기로 파일에 넣습니다.",
+			L"从文件读出的年份。写入标签会写回文件。",
+			L"السنة من الملف. كتابة الوسم تعيدها.",
+			L"Год из файла. Запись тега возвращает его.",
+			L"Jahr aus der Datei. Tag schreiben speichert es zurueck.",
+			L"Ano lido do arquivo. Gravar tag devolve.",
+			L"Jaar uit het bestand. Tag schrijven zet het terug.",
+			L"Rok z pliku. Zapisz tag zapisuje go z powrotem.",
+			L"Dosyadan okunan yil. Etiket yaz dosyaya geri yazar.");
+		PpTip(m_tooltip, m_lblYear, s); PpTip(m_tooltip, m_year, s);
+		s = LL14(L"ファイルから読んだトラック番号です。",
+			L"Track number read from the file.",
+			L"Numero de piste lu du fichier.",
+			L"Numero traccia letto dal file.",
+			L"Numero de pista leido del archivo.",
+			L"파일에서 읽은 트랙 번호입니다.",
+			L"从文件读出的曲目号。",
+			L"رقم المسار من الملف.",
+			L"Номер трека из файла.",
+			L"Titelnummer aus der Datei.",
+			L"Numero da faixa lido do arquivo.",
+			L"Tracknummer uit het bestand.",
+			L"Numer utworu z pliku.",
+			L"Dosyadan okunan parca numarasi.");
+		PpTip(m_tooltip, m_lblTrack, s); PpTip(m_tooltip, m_track, s);
+		s = LL14(L"ファイルから読んだジャンルです。",
+			L"Genre read from the file.",
+			L"Genre lu du fichier.",
+			L"Genere letto dal file.",
+			L"Genero leido del archivo.",
+			L"파일에서 읽은 장르입니다.",
+			L"从文件读出的流派。",
+			L"النوع من الملف.",
+			L"Жанр из файла.",
+			L"Genre aus der Datei.",
+			L"Genero lido do arquivo.",
+			L"Genre uit het bestand.",
+			L"Gatunek z pliku.",
+			L"Dosyadan okunan tur.");
+		PpTip(m_tooltip, m_lblGenre, s); PpTip(m_tooltip, m_j, s);
+		s = LL14(L"ファイルから読んだコメントです。",
+			L"Comment read from the file.",
+			L"Commentaire lu du fichier.",
+			L"Commento letto dal file.",
+			L"Comentario leido del archivo.",
+			L"파일에서 읽은 설명입니다.",
+			L"从文件读出的注释。",
+			L"التعليق من الملف.",
+			L"Комментарий из файла.",
+			L"Kommentar aus der Datei.",
+			L"Comentario lido do arquivo.",
+			L"Opmerking uit het bestand.",
+			L"Komentarz z pliku.",
+			L"Dosyadan okunan yorum.");
+		PpTip(m_tooltip, m_lblCmt, s); PpTip(m_tooltip, m_cmt, s);
+		PpTip(m_tooltip, m_btnTag2Pl, LL14(L"ファイルのタグを、上の名前・アーティスト・アルバムへコピーします。",
+			L"Copy file tags into the name, artist, and album above.",
+			L"Copie les tags fichier vers nom, artiste, album.",
+			L"Copia i tag file in nome, artista, album.",
+			L"Copia las etiquetas al nombre, artista y album.",
+			L"파일 태그를 위의 이름·아티스트·앨범으로 복사합니다.",
+			L"把文件标签复制到上面的名称、艺术家、专辑。",
+			L"ينسخ وسوم الملف إلى الاسم والفنان والألبوم.",
+			L"Копирует теги файла в имя, исполнителя и альбом.",
+			L"Kopiert Datei-Tags in Name, Kuenstler und Album.",
+			L"Copia tags do arquivo para nome, artista e album.",
+			L"Kopieert bestandstags naar naam, artiest en album.",
+			L"Kopiuje tagi pliku do nazwy, artysty i albumu.",
+			L"Dosya etiketlerini ad, sanatci ve albume kopyalar."));
+		PpTip(m_tooltip, m_btnReloadTag, LL14(L"ファイルからタグを読み直します。",
+			L"Reload tags from the file.",
+			L"Relire les tags du fichier.",
+			L"Rilegge i tag dal file.",
+			L"Vuelve a leer las etiquetas.",
+			L"파일에서 태그를 다시 읽습니다.",
+			L"从文件重新读取标签。",
+			L"يعيد قراءة الوسوم من الملف.",
+			L"Снова читает теги из файла.",
+			L"Tags neu aus der Datei lesen.",
+			L"Reler as tags do arquivo.",
+			L"Tags opnieuw uit het bestand lezen.",
+			L"Wczytaj tagi z pliku ponownie.",
+			L"Etiketleri dosyadan yeniden okur."));
+		PpTip(m_tooltip, m_btnWriteTag, LL14(L"年・トラック・ジャンル・コメント・ループをファイルへ書きます。MP3 / FLAC / WAV / M4A / Ogg Vorbis。",
+			L"Write year, track, genre, comment, and loop into the file. MP3 / FLAC / WAV / M4A / Ogg Vorbis.",
+			L"Ecrit annee, piste, genre, commentaire et boucle. MP3 / FLAC / WAV / M4A / Ogg Vorbis.",
+			L"Scrive anno, traccia, genere, commento e loop. MP3 / FLAC / WAV / M4A / Ogg Vorbis.",
+			L"Escribe ano, pista, genero, comentario y bucle. MP3 / FLAC / WAV / M4A / Ogg Vorbis.",
+			L"연도·트랙·장르·설명·루프를 파일에 씁니다. MP3 / FLAC / WAV / M4A / Ogg Vorbis.",
+			L"把年、曲目、流派、注释、循环写入文件。MP3 / FLAC / WAV / M4A / Ogg Vorbis。",
+			L"يكتب السنة والمسار والنوع والتعليق والتكرار. MP3 / FLAC / WAV / M4A / Ogg Vorbis.",
+			L"Пишет год, трек, жанр, комментарий и петлю. MP3 / FLAC / WAV / M4A / Ogg Vorbis.",
+			L"Schreibt Jahr, Titel, Genre, Kommentar und Loop. MP3 / FLAC / WAV / M4A / Ogg Vorbis.",
+			L"Grava ano, faixa, genero, comentario e loop. MP3 / FLAC / WAV / M4A / Ogg Vorbis.",
+			L"Schrijft jaar, track, genre, opmerking en loop. MP3 / FLAC / WAV / M4A / Ogg Vorbis.",
+			L"Zapisuje rok, utwor, gatunek, komentarz i petle. MP3 / FLAC / WAV / M4A / Ogg Vorbis.",
+			L"Yil, parca, tur, yorum ve donguyu dosyaya yazar. MP3 / FLAC / WAV / M4A / Ogg Vorbis."));
+		s = LL14(L"再生経路の番号です（内蔵デコーダやプラグインの区別）。変更はできません。",
+			L"Playback route number (built-in decoder or plugin). Read-only.",
+			L"Numero de voie de lecture (decodeur interne ou plugin). Lecture seule.",
+			L"Numero del percorso di lettura. Sola lettura.",
+			L"Numero de la via de reproduccion. Solo lectura.",
+			L"재생 경로 번호(내장 디코더 또는 플러그인). 변경할 수 없습니다.",
+			L"播放路径编号（内置解码或插件）。不能修改。",
+			L"رقم مسار التشغيل. للقراءة فقط.",
+			L"Номер пути воспроизведения. Только чтение.",
+			L"Nummer des Wiedergabewegs. Nur lesen.",
+			L"Numero da rota de reproducao. Somente leitura.",
+			L"Nummer van de afspeelroute. Alleen lezen.",
+			L"Numer sciezki odtwarzania. Tylko do odczytu.",
+			L"Calma yolu numarasi. Degistirilemez.");
+		PpTip(m_tooltip, m_lblId, s); PpTip(m_tooltip, m_id, s);
+		s = LL14(L"曲に付いたゲーム名です。変更はできません。",
+			L"Game name stored with the track. Read-only.",
+			L"Nom du jeu lie a la piste. Lecture seule.",
+			L"Nome del gioco della traccia. Sola lettura.",
+			L"Nombre del juego de la pista. Solo lectura.",
+			L"곡에 붙은 게임 이름입니다. 변경할 수 없습니다.",
+			L"曲目附带的游戏名。不能修改。",
+			L"اسم اللعبة المرتبط بالمسار. للقراءة فقط.",
+			L"Название игры у трека. Только чтение.",
+			L"Spielname des Titels. Nur lesen.",
+			L"Nome do jogo da faixa. Somente leitura.",
+			L"Spelnaam bij het nummer. Alleen lezen.",
+			L"Nazwa gry utworu. Tylko do odczytu.",
+			L"Parcaya bagli oyun adi. Degistirilemez.");
+		PpTip(m_tooltip, m_lblGame, s); PpTip(m_tooltip, m_game, s);
+		s = LL14(L"一覧に出す長さです。変更はできません。",
+			L"Length shown in the list. Read-only.",
+			L"Duree affichee. Lecture seule.",
+			L"Durata in elenco. Sola lettura.",
+			L"Duracion en la lista. Solo lectura.",
+			L"목록에 보이는 길이입니다. 변경할 수 없습니다.",
+			L"列表中的时长。不能修改。",
+			L"المدة في القائمة. للقراءة فقط.",
+			L"Длительность в списке. Только чтение.",
+			L"Laenge in der Liste. Nur lesen.",
+			L"Duracao na lista. Somente leitura.",
+			L"Duur in de lijst. Alleen lezen.",
+			L"Dlugosc na liscie. Tylko do odczytu.",
+			L"Listede gorunen sure. Degistirilemez.");
+		PpTip(m_tooltip, m_lblTime, s); PpTip(m_tooltip, m_time, s);
+		s = LL14(L"ループの開始と終了（サンプル位置）。タグ書込でファイルへ保存できます。",
+			L"Loop start and end (sample position). Write tag can store them in the file.",
+			L"Debut et fin de boucle (echantillons). Ecrire tag peut les sauver.",
+			L"Inizio e fine loop (campioni). Scrivi tag puo salvarli.",
+			L"Inicio y fin del bucle (muestras). Escribir tag puede guardarlos.",
+			L"루프 시작과 끝(샘플 위치). 태그 쓰기로 파일에 저장할 수 있습니다.",
+			L"循环起止（采样位置）。写入标签可存进文件。",
+			L"بداية التكرار ونهايته (موضع العينة).",
+			L"Начало и конец петли (позиция сэмпла).",
+			L"Loop-Anfang und -Ende (Sampleposition).",
+			L"Inicio e fim do loop (posicao de amostra).",
+			L"Loopbegin en -einde (samplepositie).",
+			L"Poczatek i koniec petli (pozycja probki).",
+			L"Dongu baslangici ve bitisi (ornek konumu).");
+		PpTip(m_tooltip, m_lblLoop, s); PpTip(m_tooltip, m_loop1, s); PpTip(m_tooltip, m_loop2, s);
+		s = LL14(L"曲ごとの補助番号です。変更はできません。",
+			L"Extra index stored with the track. Read-only.",
+			L"Index auxiliaire de la piste. Lecture seule.",
+			L"Indice ausiliario della traccia. Sola lettura.",
+			L"Indice extra de la pista. Solo lectura.",
+			L"곡별 보조 번호입니다. 변경할 수 없습니다.",
+			L"曲目的附加编号。不能修改。",
+			L"رقم إضافي للمسار. للقراءة فقط.",
+			L"Доп. индекс трека. Только чтение.",
+			L"Zusatzindex des Titels. Nur lesen.",
+			L"Indice extra da faixa. Somente leitura.",
+			L"Extra index van het nummer. Alleen lezen.",
+			L"Dodatkowy indeks utworu. Tylko do odczytu.",
+			L"Parcaya ozel ek numara. Degistirilemez.");
+		PpTip(m_tooltip, m_lblRet2, s); PpTip(m_tooltip, m_ret2, s);
+		PpTip(m_tooltip, m_lblStatus, LL14(L"ファイルの有無、拡張子、サイズ、更新日時です。",
+			L"Whether the file exists, plus extension, size, and modified time.",
+			L"Presence du fichier, extension, taille et date.",
+			L"Presenza del file, estensione, dimensione e data.",
+			L"Si el archivo existe, extension, tamano y fecha.",
+			L"파일 존재, 확장자, 크기, 수정 시각입니다.",
+			L"文件是否存在、扩展名、大小、修改时间。",
+			L"وجود الملف والامتداد والحجم والتاريخ.",
+			L"Наличие файла, расширение, размер и дата.",
+			L"Datei vorhanden, Erweiterung, Groesse und Datum.",
+			L"Se o arquivo existe, extensao, tamanho e data.",
+			L"Of het bestand bestaat, plus extensie, grootte en datum.",
+			L"Czy plik istnieje, rozszerzenie, rozmiar i data.",
+			L"Dosya var mi, uzanti, boyut ve tarih."));
+		PpTip(m_tooltip, m_lblParam, LL14(L"この曲だけの音量・EQ（[SAV]）があるとき、その内容を出します。",
+			L"Shows this track's own volume and EQ ([SAV]) when one exists.",
+			L"Affiche volume et EQ propres a cette piste ([SAV]).",
+			L"Mostra volume ed EQ propri di questa traccia ([SAV]).",
+			L"Muestra volumen y EQ propios de esta pista ([SAV]).",
+			L"이 곡만의 음량·EQ([SAV])가 있으면 내용을 보여 줍니다.",
+			L"若这首有单独的音量与 EQ（[SAV]），在此显示。",
+			L"يعرض مستوى الصوت وEQ الخاصين بهذا المسار ([SAV]).",
+			L"Показывает громкость и EQ только этого трека ([SAV]).",
+			L"Zeigt Lautstaerke und EQ nur dieses Titels ([SAV]).",
+			L"Mostra volume e EQ so desta faixa ([SAV]).",
+			L"Toont volume en EQ van alleen dit nummer ([SAV]).",
+			L"Pokazuje glosnosc i EQ tylko tego utworu ([SAV]).",
+			L"Yalniz bu parcanin ses ve EQ'sunu ([SAV]) gosterir."));
+		PpTip(m_tooltip, m_btnExplorer, LL14(L"エクスプローラーでこのファイルを選択して開きます。ファイルが無いときは使えません。",
+			L"Select this file in Explorer. Unavailable if the file is missing.",
+			L"Selectionne ce fichier dans l'Explorateur. Indisponible s'il manque.",
+			L"Seleziona il file in Esplora. Non disponibile se manca.",
+			L"Selecciona el archivo en el Explorador. No disponible si falta.",
+			L"탐색기에서 이 파일을 선택해 엽니다. 파일이 없으면 쓸 수 없습니다.",
+			L"在资源管理器中选中此文件。文件不在时不可用。",
+			L"يحدد الملف في المستكشف. غير متاح إن كان مفقوداً.",
+			L"Выделяет файл в Проводнике. Недоступно, если файла нет.",
+			L"Waehlt die Datei im Explorer. Nicht verfuegbar, wenn sie fehlt.",
+			L"Seleciona o arquivo no Explorer. Indisponivel se faltar.",
+			L"Selecteert het bestand in Verkenner. Niet beschikbaar als het ontbreekt.",
+			L"Zaznacza plik w Eksploratorze. Niedostepne, gdy pliku brak.",
+			L"Gezginde bu dosyayi secer. Dosya yoksa kullanilamaz."));
+		PpTip(m_tooltip, m_btnCopyPath, LL14(L"パスをクリップボードへコピーします。",
+			L"Copy the path to the clipboard.",
+			L"Copie le chemin.",
+			L"Copia il percorso.",
+			L"Copia la ruta.",
+			L"경로를 클립보드에 복사합니다.",
+			L"把路径复制到剪贴板。",
+			L"ينسخ المسار.",
+			L"Копирует путь.",
+			L"Pfad kopieren.",
+			L"Copia o caminho.",
+			L"Kopieert het pad.",
+			L"Kopiuje sciezke.",
+			L"Yolu kopyalar."));
+		PpTip(m_tooltip, m_btnCopyName, LL14(L"ファイル名だけをクリップボードへコピーします。",
+			L"Copy only the file name to the clipboard.",
+			L"Copie seulement le nom de fichier.",
+			L"Copia solo il nome file.",
+			L"Copia solo el nombre de archivo.",
+			L"파일 이름만 클립보드에 복사합니다.",
+			L"只把文件名复制到剪贴板。",
+			L"ينسخ اسم الملف فقط.",
+			L"Копирует только имя файла.",
+			L"Nur den Dateinamen kopieren.",
+			L"Copia so o nome do arquivo.",
+			L"Kopieert alleen de bestandsnaam.",
+			L"Kopiuje sama nazwe pliku.",
+			L"Yalnizca dosya adini kopyalar."));
+		PpTip(m_tooltip, m_btnProTools, LL14(L"この曲の再生詳細（音量・EQ など）を開きます。",
+			L"Open playback details for this track (volume, EQ, and more).",
+			L"Ouvre les details de lecture (volume, EQ…).",
+			L"Apre i dettagli di riproduzione (volume, EQ…).",
+			L"Abre los detalles de reproduccion (volumen, EQ…).",
+			L"이 곡의 재생 상세(음량·EQ 등)를 엽니다.",
+			L"打开这首的播放详情（音量、EQ 等）。",
+			L"يفتح تفاصيل التشغيل (المستوى وEQ).",
+			L"Открывает детали воспроизведения (громкость, EQ).",
+			L"Oeffnet Wiedergabedetails (Lautstaerke, EQ).",
+			L"Abre detalhes de reproducao (volume, EQ).",
+			L"Opent afspeeldetails (volume, EQ).",
+			L"Otwiera szczegoly odtwarzania (glosnosc, EQ).",
+			L"Bu parcanin oynatma ayrintilarini acar (ses, EQ)."));
+		PpTip(m_tooltip, m_btnClearParam, LL14(L"この曲だけの音量・EQ（[SAV]）を消します。無いときは押せません。",
+			L"Delete this track's own volume and EQ ([SAV]). Disabled when there is none.",
+			L"Efface volume et EQ propres ([SAV]). Desactive s'il n'y en a pas.",
+			L"Cancella volume ed EQ propri ([SAV]). Disattivo se assenti.",
+			L"Borra volumen y EQ propios ([SAV]). Desactivado si no hay.",
+			L"이 곡만의 음량·EQ([SAV])를 지웁니다. 없으면 누를 수 없습니다.",
+			L"删除这首单独的音量与 EQ（[SAV]）。没有时不可按。",
+			L"يحذف مستوى الصوت وEQ الخاصين ([SAV]).",
+			L"Удаляет громкость и EQ только этого трека ([SAV]).",
+			L"Loescht Lautstaerke und EQ nur dieses Titels ([SAV]).",
+			L"Apaga volume e EQ so desta faixa ([SAV]).",
+			L"Wist volume en EQ van alleen dit nummer ([SAV]).",
+			L"Usuwa glosnosc i EQ tylko tego utworu ([SAV]).",
+			L"Yalniz bu parcanin ses ve EQ'sunu ([SAV]) siler."));
+		CCustomControlUtility::FinalizeDialogToolTip(m_tooltip, 512, 10000);
+	}
 	return TRUE;
 }
 
@@ -760,8 +1153,186 @@ BOOL CPlayProperty_tab2::OnInitDialog()
 				L"Lege velden wijzigen niet.", L"Puste pola bez zmian.", L"Boş alanlar değişmez."));
 		}
 	}
-	CCustomControlUtility::BeginDialogToolTip(m_tooltip, this);
-	CCustomControlUtility::FinalizeDialogToolTip(m_tooltip, 512, 10000);
+	if (CCustomControlUtility::BeginDialogToolTip(m_tooltip, this)) {
+		CString s;
+		s = LL14(L"ファイルに書くタイトルです。複数選択では空欄のままにすると変更しません。",
+			L"Title written to the file. With several tracks, a blank field is left unchanged.",
+			L"Titre ecrit dans le fichier. A plusieurs, un champ vide ne change rien.",
+			L"Titolo scritto nel file. Con piu tracce, un campo vuoto non cambia.",
+			L"Titulo que se escribe. Con varias pistas, un campo vacio no cambia.",
+			L"파일에 쓸 제목입니다. 여러 곡이면 빈 칸은 바꾸지 않습니다.",
+			L"写入文件的标题。多选时空白项不改。",
+			L"العنوان المكتوب في الملف. مع عدة مسارات الحقل الفارغ لا يتغير.",
+			L"Название в файл. При нескольких треках пустое поле не меняется.",
+			L"Titel in die Datei. Bei mehreren Titeln bleibt ein leeres Feld.",
+			L"Titulo gravado no arquivo. Com varias faixas, campo vazio nao muda.",
+			L"Titel naar het bestand. Bij meerdere nummers blijft een leeg veld.",
+			L"Tytul zapisywany do pliku. Przy wielu utworach puste pole bez zmian.",
+			L"Dosyaya yazilan baslik. Birden cok parcada bos alan degismez.");
+		PpTip(m_tooltip, m_titleL, s); PpTip(m_tooltip, m_title, s);
+		s = LL14(L"ファイルに書くアーティストです。複数選択では空欄のままにすると変更しません。",
+			L"Artist written to the file. With several tracks, a blank field is left unchanged.",
+			L"Artiste ecrit dans le fichier. Champ vide = aucun changement.",
+			L"Artista scritto nel file. Campo vuoto = nessun cambiamento.",
+			L"Artista que se escribe. Campo vacio = sin cambio.",
+			L"파일에 쓸 아티스트입니다. 여러 곡이면 빈 칸은 바꾸지 않습니다.",
+			L"写入文件的艺术家。多选时空白项不改。",
+			L"الفنان المكتوب في الملف. الحقل الفارغ لا يتغير.",
+			L"Исполнитель в файл. Пустое поле не меняется.",
+			L"Kuenstler in die Datei. Leeres Feld bleibt.",
+			L"Artista gravado no arquivo. Campo vazio nao muda.",
+			L"Artiest naar het bestand. Leeg veld blijft.",
+			L"Artysta zapisywany do pliku. Puste pole bez zmian.",
+			L"Dosyaya yazilan sanatci. Bos alan degismez.");
+		PpTip(m_tooltip, m_artistL, s); PpTip(m_tooltip, m_artist, s);
+		s = LL14(L"ファイルに書くアルバムです。複数選択では空欄のままにすると変更しません。",
+			L"Album written to the file. With several tracks, a blank field is left unchanged.",
+			L"Album ecrit dans le fichier. Champ vide = aucun changement.",
+			L"Album scritto nel file. Campo vuoto = nessun cambiamento.",
+			L"Album que se escribe. Campo vacio = sin cambio.",
+			L"파일에 쓸 앨범입니다. 여러 곡이면 빈 칸은 바꾸지 않습니다.",
+			L"写入文件的专辑。多选时空白项不改。",
+			L"الألبوم المكتوب في الملف. الحقل الفارغ لا يتغير.",
+			L"Альбом в файл. Пустое поле не меняется.",
+			L"Album in die Datei. Leeres Feld bleibt.",
+			L"Album gravado no arquivo. Campo vazio nao muda.",
+			L"Album naar het bestand. Leeg veld blijft.",
+			L"Album zapisywany do pliku. Puste pole bez zmian.",
+			L"Dosyaya yazilan album. Bos alan degismez.");
+		PpTip(m_tooltip, m_albumL, s); PpTip(m_tooltip, m_album, s);
+		s = LL14(L"ファイルに書く年です。",
+			L"Year written to the file.",
+			L"Annee ecrite dans le fichier.",
+			L"Anno scritto nel file.",
+			L"Ano que se escribe.",
+			L"파일에 쓸 연도입니다.",
+			L"写入文件的年份。",
+			L"السنة المكتوبة في الملف.",
+			L"Год в файл.",
+			L"Jahr in die Datei.",
+			L"Ano gravado no arquivo.",
+			L"Jaar naar het bestand.",
+			L"Rok zapisywany do pliku.",
+			L"Dosyaya yazilan yil.");
+		PpTip(m_tooltip, m_yearL, s); PpTip(m_tooltip, m_year, s);
+		s = LL14(L"ファイルに書くトラック番号です。",
+			L"Track number written to the file.",
+			L"Numero de piste ecrit dans le fichier.",
+			L"Numero traccia scritto nel file.",
+			L"Numero de pista que se escribe.",
+			L"파일에 쓸 트랙 번호입니다.",
+			L"写入文件的曲目号。",
+			L"رقم المسار المكتوب في الملف.",
+			L"Номер трека в файл.",
+			L"Titelnummer in die Datei.",
+			L"Numero da faixa gravado no arquivo.",
+			L"Tracknummer naar het bestand.",
+			L"Numer utworu zapisywany do pliku.",
+			L"Dosyaya yazilan parca numarasi.");
+		PpTip(m_tooltip, m_trackL, s); PpTip(m_tooltip, m_track, s);
+		s = LL14(L"ファイルに書くジャンルです。",
+			L"Genre written to the file.",
+			L"Genre ecrit dans le fichier.",
+			L"Genere scritto nel file.",
+			L"Genero que se escribe.",
+			L"파일에 쓸 장르입니다.",
+			L"写入文件的流派。",
+			L"النوع المكتوب في الملف.",
+			L"Жанр в файл.",
+			L"Genre in die Datei.",
+			L"Genero gravado no arquivo.",
+			L"Genre naar het bestand.",
+			L"Gatunek zapisywany do pliku.",
+			L"Dosyaya yazilan tur.");
+		PpTip(m_tooltip, m_genreL, s); PpTip(m_tooltip, m_genre, s);
+		s = LL14(L"ファイルに書くコメントです。",
+			L"Comment written to the file.",
+			L"Commentaire ecrit dans le fichier.",
+			L"Commento scritto nel file.",
+			L"Comentario que se escribe.",
+			L"파일에 쓸 설명입니다.",
+			L"写入文件的注释。",
+			L"التعليق المكتوب في الملف.",
+			L"Комментарий в файл.",
+			L"Kommentar in die Datei.",
+			L"Comentario gravado no arquivo.",
+			L"Opmerking naar het bestand.",
+			L"Komentarz zapisywany do pliku.",
+			L"Dosyaya yazilan yorum.");
+		PpTip(m_tooltip, m_commentL, s); PpTip(m_tooltip, m_comment, s);
+		s = LL14(L"ジャケット画像です。画像ファイルをここにドロップしても入れられます。",
+			L"Cover art. You can also drop an image file here.",
+			L"Pochette. Vous pouvez aussi deposer une image ici.",
+			L"Copertina. Si puo anche rilasciare un'immagine qui.",
+			L"Portada. Tambien puedes soltar una imagen aqui.",
+			L"재킷 그림입니다. 이미지 파일을 여기에 놓아도 됩니다.",
+			L"封面图。也可以把图片拖到这里。",
+			L"صورة الغلاف. يمكن إفلات ملف صورة هنا.",
+			L"Обложка. Сюда можно перетащить изображение.",
+			L"Cover. Ein Bild kann hier abgelegt werden.",
+			L"Capa. Tambem da para soltar uma imagem aqui.",
+			L"Hoes. Je kunt hier ook een afbeelding neerzetten.",
+			L"Okladka. Mozna tu upuscic obraz.",
+			L"Kapak resmi. Buraya resim dosyasi da birakilabilir.");
+		PpTip(m_tooltip, m_coverL, s); PpTip(m_tooltip, m_cover, s); PpTip(m_tooltip, m_coverPic, s);
+		PpTip(m_tooltip, m_coverClear, LL14(L"入れたジャケットを外します。保存するまでファイルは変わりません。",
+			L"Remove the cover. The file stays unchanged until you save.",
+			L"Retire la pochette. Le fichier change seulement a l'enregistrement.",
+			L"Toglie la copertina. Il file cambia solo al salvataggio.",
+			L"Quita la portada. El archivo cambia al guardar.",
+			L"넣은 재킷을 뺍니다. 저장하기 전에는 파일이 바뀌지 않습니다.",
+			L"去掉封面。保存前文件不变。",
+			L"يزيل الغلاف. الملف لا يتغير حتى الحفظ.",
+			L"Убирает обложку. Файл не меняется до сохранения.",
+			L"Cover entfernen. Die Datei aendert sich erst beim Speichern.",
+			L"Remove a capa. O arquivo so muda ao salvar.",
+			L"Hoes weghalen. Het bestand wijzigt pas bij opslaan.",
+			L"Usuwa okladke. Plik zmienia sie dopiero po zapisaniu.",
+			L"Kapagi kaldirir. Kaydedene kadar dosya degismez."));
+		PpTip(m_tooltip, m_hint, LL14(L"対応は MP3 / FLAC / WAV / M4A / Ogg Vorbis です。再生中の曲が含まれると、書いてから同じ位置で再開します。",
+			L"Supported: MP3 / FLAC / WAV / M4A / Ogg Vorbis. If a playing file is included, playback resumes at the same place after writing.",
+			L"Pris en charge : MP3 / FLAC / WAV / M4A / Ogg Vorbis. Si un fichier en lecture est inclus, la lecture reprend au meme endroit.",
+			L"Supportati: MP3 / FLAC / WAV / M4A / Ogg Vorbis. Se c'e il file in riproduzione, riparte dallo stesso punto.",
+			L"Admitidos: MP3 / FLAC / WAV / M4A / Ogg Vorbis. Si incluye el archivo en reproduccion, sigue en el mismo punto.",
+			L"지원: MP3 / FLAC / WAV / M4A / Ogg Vorbis. 재생 중인 파일이 들어 있으면 쓴 뒤 같은 위치에서 이어 재생합니다.",
+			L"支持 MP3 / FLAC / WAV / M4A / Ogg Vorbis。若包含正在播放的文件，写完后从原位置继续。",
+			L"المدعوم: MP3 / FLAC / WAV / M4A / Ogg Vorbis.",
+			L"Поддержка: MP3 / FLAC / WAV / M4A / Ogg Vorbis. Если файл играет, воспроизведение продолжится с того же места.",
+			L"Unterstuetzt: MP3 / FLAC / WAV / M4A / Ogg Vorbis. Laeuft eine Datei, geht es danach an derselben Stelle weiter.",
+			L"Suportado: MP3 / FLAC / WAV / M4A / Ogg Vorbis. Se a faixa tocando entra, a reproducao volta ao mesmo ponto.",
+			L"Ondersteund: MP3 / FLAC / WAV / M4A / Ogg Vorbis. Speelt een bestand mee, dan gaat het daarna op dezelfde plek verder.",
+			L"Obslugiwane: MP3 / FLAC / WAV / M4A / Ogg Vorbis. Jesli gra plik z zestawu, odtwarzanie wroci w to samo miejsce.",
+			L"Destek: MP3 / FLAC / WAV / M4A / Ogg Vorbis. Calan dosya varsa yazinca ayni yerden surer."));
+		PpTip(m_tooltip, m_status, LL14(L"直前の保存が成功したか、失敗したかを出します。",
+			L"Shows whether the last save succeeded or failed.",
+			L"Indique si le dernier enregistrement a reussi.",
+			L"Indica se l'ultimo salvataggio e riuscito.",
+			L"Indica si el ultimo guardado funciono.",
+			L"바로 앞의 저장이 되었는지 실패했는지를 보여 줍니다.",
+			L"显示刚才的保存是成功还是失败。",
+			L"يبين نجاح آخر حفظ أو فشله.",
+			L"Показывает, удалось ли последнее сохранение.",
+			L"Zeigt, ob das letzte Speichern gelang.",
+			L"Mostra se o ultimo salvamento deu certo.",
+			L"Toont of het laatste opslaan lukte.",
+			L"Pokazuje, czy ostatni zapis sie udal.",
+			L"Son kaydin basarili olup olmadigini gosterir."));
+		PpTip(m_tooltip, m_save, LL14(L"入力したタグとジャケットをファイルへ書きます。再生中の曲が含まれると一旦止めて、同じ位置から再開します。",
+			L"Write the tags and cover into the file. If a playing file is included, playback stops and resumes at the same place.",
+			L"Ecrit tags et pochette. Si un fichier en lecture est inclus, la lecture reprend au meme endroit.",
+			L"Scrive tag e copertina. Se c'e il file in riproduzione, riparte dallo stesso punto.",
+			L"Escribe etiquetas y portada. Si incluye el archivo en reproduccion, sigue en el mismo punto.",
+			L"입력한 태그와 재킷을 파일에 씁니다. 재생 중인 곡이 있으면 멈춘 뒤 같은 위치에서 이어 재생합니다.",
+			L"把标签和封面写入文件。若包含正在播放的文件，会先停下再从原位置继续。",
+			L"يكتب الوسوم والغلاف في الملف.",
+			L"Пишет теги и обложку в файл. Если файл играет, воспроизведение продолжится с того же места.",
+			L"Schreibt Tags und Cover. Laeuft eine Datei, geht es danach an derselben Stelle weiter.",
+			L"Grava tags e capa. Se a faixa tocando entra, a reproducao volta ao mesmo ponto.",
+			L"Schrijft tags en hoes. Speelt een bestand mee, dan gaat het daarna op dezelfde plek verder.",
+			L"Zapisuje tagi i okladke. Jesli gra plik z zestawu, odtwarzanie wroci w to samo miejsce.",
+			L"Etiket ve kapagi dosyaya yazar. Calan dosya varsa durup ayni yerden surer."));
+		CCustomControlUtility::FinalizeDialogToolTip(m_tooltip, 512, 10000);
+	}
 	return TRUE;
 }
 
@@ -954,7 +1525,101 @@ BOOL CPlayProperty_tab3::OnInitDialog()
 	m_cfg.SetLiveEditColumn(1);
 	SetDlgItemText(IDC_PP_INFO_L, LL14(L"情報", L"Info", L"Infos", L"Info", L"Info", L"정보", L"信息", L"معلومات", L"Сведения", L"Info", L"Info", L"Info", L"Info", L"Bilgi"));
 	SetDlgItemText(IDC_PP_CFG_L, LL14(L"設定", L"Settings", L"Reglages", L"Impostazioni", L"Ajustes", L"설정", L"设置", L"إعدادات", L"Настройки", L"Einstellungen", L"Ajustes", L"Instellingen", L"Ustawienia", L"Ayarlar"));
+	if (CCustomControlUtility::BeginDialogToolTip(m_tooltip, this)) {
+		PpTip(m_tooltip, m_kpiName, LL14(L"この拡張子を受け持つプラグインのファイル名です。",
+			L"File name of the plugin that handles this extension.",
+			L"Nom du plugin qui prend cette extension.",
+			L"Nome del plugin per questa estensione.",
+			L"Nombre del complemento de esta extension.",
+			L"이 확장자를 맡는 플러그인 파일 이름입니다.",
+			L"负责此扩展名的插件文件名。",
+			L"اسم ملف الإضافة لهذه اللاحقة.",
+			L"Имя файла плагина для этого расширения.",
+			L"Dateiname des Plugins fuer diese Endung.",
+			L"Nome do arquivo do plugin desta extensao.",
+			L"Bestandsnaam van de plug-in voor deze extensie.",
+			L"Nazwa pliku wtyczki dla tego rozszerzenia.",
+			L"Bu uzantiyi ustlenen eklentinin dosya adi."));
+		PpTip(m_tooltip, m_infoLbl, LL14(L"プラグインが返す識別情報です。ここは変更できません。",
+			L"Identity the plugin reports. This list is read-only.",
+			L"Identite renvoyee par le plugin. Liste en lecture seule.",
+			L"Identita restituita dal plugin. Solo lettura.",
+			L"Identidad que devuelve el complemento. Solo lectura.",
+			L"플러그인이 돌려주는 식별 정보입니다. 여기서는 바꿀 수 없습니다.",
+			L"插件返回的标识。此处不能改。",
+			L"هوية الإضافة. القائمة للقراءة فقط.",
+			L"Сведения, которые сообщает плагин. Только чтение.",
+			L"Kennung, die das Plugin meldet. Nur lesen.",
+			L"Identidade que o plugin informa. Somente leitura.",
+			L"Identiteit die de plug-in meldt. Alleen lezen.",
+			L"Tozsamosc, ktora podaje wtyczka. Tylko do odczytu.",
+			L"Eklentinin bildirdigi kimlik. Buradan degistirilemez."));
+		PpTip(m_tooltip, m_info, LL14(L"プラグイン名や対応形式などの読み取り専用の一覧です。",
+			L"Read-only list of the plugin name, formats, and similar details.",
+			L"Liste en lecture seule : nom, formats, etc.",
+			L"Elenco in sola lettura: nome, formati, ecc.",
+			L"Lista de solo lectura: nombre, formatos, etc.",
+			L"플러그인 이름과 지원 형식 등의 읽기 전용 목록입니다.",
+			L"插件名、支持格式等的只读列表。",
+			L"قائمة للقراءة فقط: الاسم والصيغ وغيرها.",
+			L"Список только для чтения: имя, форматы и прочее.",
+			L"Nur-Lese-Liste: Name, Formate und mehr.",
+			L"Lista somente leitura: nome, formatos e mais.",
+			L"Alleen-lezenlijst: naam, formaten en meer.",
+			L"Lista tylko do odczytu: nazwa, formaty i inne.",
+			L"Eklenti adi ve desteklenen bicimler. Salt okunur."));
+		PpTip(m_tooltip, m_cfgLbl, LL14(L"このプラグインの設定です。チェック、値の編集、行のダブルクリックが使えます。",
+			L"Settings for this plugin. Use the checkbox, edit the value, or double-click a row.",
+			L"Reglages du plugin. Case, edition, ou double-clic.",
+			L"Impostazioni del plugin. Casella, modifica o doppio clic.",
+			L"Ajustes del complemento. Casilla, edicion o doble clic.",
+			L"이 플러그인의 설정입니다. 체크, 값 편집, 행 더블 클릭을 씁니다.",
+			L"此插件的设置。可勾选、编辑数值，或双击一行。",
+			L"إعدادات الإضافة. مربع أو تحرير أو نقر مزدوج.",
+			L"Настройки плагина. Флажок, правка или двойной щелчок.",
+			L"Einstellungen des Plugins. Kontrollkaestchen, Wert oder Doppelklick.",
+			L"Ajustes do plugin. Caixa, edicao ou clique duplo.",
+			L"Instellingen van de plug-in. Vakje, waarde of dubbelklik.",
+			L"Ustawienia wtyczki. Pole, edycja albo podwojne klikniecie.",
+			L"Bu eklentinin ayarlari. Kutu, deger veya cift tik."));
+		PpTip(m_tooltip, m_cfg, LL14(L"左のチェックはオン/オフです。値の列は直接編集できます。プラグイン画面の行をダブルクリックすると、その画面を開きます。",
+			L"The left checkbox is on/off. Edit the value column directly. Double-click the plugin-window row to open that window.",
+			L"La case est on/off. La colonne valeur se modifie. Double-clic sur la ligne fenetre ouvre le plugin.",
+			L"La casella e on/off. La colonna valore si modifica. Doppio clic sulla riga finestra apre il plugin.",
+			L"La casilla es on/off. La columna valor se edita. Doble clic en la fila de ventana abre el complemento.",
+			L"왼쪽 체크는 켜기/끄기입니다. 값 열은 직접 고칩니다. 플러그인 창 행을 더블 클릭하면 그 창이 열립니다.",
+			L"左侧勾选是开关。值列可直接改。双击插件窗口那一行会打开该窗口。",
+			L"المربع تشغيل/إيقاف. عمود القيمة يُحرَّر. النقر المزدوج على صف النافذة يفتحها.",
+			L"Флажок слева — вкл/выкл. Столбец значения правится. Двойной щелчок по строке окна открывает его.",
+			L"Links an/aus. Die Wertspalte ist editierbar. Doppelklick auf die Fensterzeile oeffnet es.",
+			L"A caixa e liga/desliga. A coluna valor se edita. Clique duplo na linha da janela abre o plugin.",
+			L"Het vakje is aan/uit. De waardekolom is te bewerken. Dubbelklik op de vensterrij opent het.",
+			L"Pole po lewej to wl/wyl. Kolumne wartosci mozna edytowac. Podwojne klikniecie wiersza okna otwiera je.",
+			L"Soldaki kutu ac/kapa. Deger sutunu dogrudan duzenlenir. Eklenti penceresi satirina cift tik o pencereyi acar."));
+		PpTip(m_tooltip, m_cfgHelp, LL14(L"選んだ設定行の説明です。",
+			L"Description of the selected setting.",
+			L"Description du reglage choisi.",
+			L"Descrizione dell'impostazione scelta.",
+			L"Descripcion del ajuste elegido.",
+			L"고른 설정 행의 설명입니다.",
+			L"所选设置行的说明。",
+			L"وصف الإعداد المحدد.",
+			L"Описание выбранной настройки.",
+			L"Beschreibung der gewaehlten Einstellung.",
+			L"Descricao do ajuste escolhido.",
+			L"Uitleg van de gekozen instelling.",
+			L"Opis wybranego ustawienia.",
+			L"Secilen ayar satirinin aciklamasi."));
+		CCustomControlUtility::FinalizeDialogToolTip(m_tooltip, 512, 10000);
+	}
 	return TRUE;
+}
+
+BOOL CPlayProperty_tab3::PreTranslateMessage(MSG* pMsg)
+{
+	if (m_tooltip.GetSafeHwnd())
+		m_tooltip.RelayEvent(pMsg);
+	return CCustomDialog::PreTranslateMessage(pMsg);
 }
 
 void CPlayProperty_tab3::LoadPlugin(int idx)
@@ -1353,7 +2018,292 @@ BOOL CPlayProperty_tab4::OnInitDialog()
 	SetDlgItemText(IDC_PP_MORE_PLAYNEXT, LL14(L"次に再生", L"Play next", L"Lire ensuite", L"Riproduci dopo", L"Reproducir siguiente", L"다음에 재생", L"下一首播放", L"تشغيل التالي", L"Играть следующим", L"Als Nächstes", L"Tocar em seguida", L"Speel hierna", L"Odtwórz następny", L"Sırada çal"));
 	SetDlgItemText(IDC_PP_MORE_ADDSAME, LL14(L"同じフォルダを追加", L"Add same folder", L"Ajouter le même dossier", L"Aggiungi stessa cartella", L"Añadir misma carpeta", L"같은 폴더 추가", L"添加相同文件夹", L"إضافة نفس المجلد", L"Добавить ту же папку", L"Gleichen Ordner hinzufügen", L"Adicionar mesma pasta", L"Zelfde map toevoegen", L"Dodaj ten sam folder", L"Aynı klasörü ekle"));
 	SetDlgItemText(IDC_PP_MORE_MIDEXPORT, LL14(L"MIDI書き出し", L"MIDI export", L"Export MIDI", L"Esporta MIDI", L"Exportar MIDI", L"MIDI보내기", L"导出MIDI", L"تصدير MIDI", L"Экспорт MIDI", L"MIDI exportieren", L"Exportar MIDI", L"MIDI exporteren", L"Eksport MIDI", L"MIDI dışa aktar"));
+	if (CCustomControlUtility::BeginDialogToolTip(m_tooltip, this)) {
+		PpTip(m_tooltip, m_hint, LL14(L"押せないボタンは、今の選択では動きません。",
+			L"A dimmed button does nothing for the current selection.",
+			L"Un bouton grise ne fait rien pour la selection actuelle.",
+			L"Un pulsante spento non fa nulla per la selezione attuale.",
+			L"Un boton atenuado no hace nada con la seleccion actual.",
+			L"흐린 단추는 지금 선택에서는 동작하지 않습니다.",
+			L"变灰的按钮对当前选择不起作用。",
+			L"الزر الباهت لا يعمل للتحديد الحالي.",
+			L"Неактивная кнопка для текущего выбора ничего не делает.",
+			L"Eine abgeblendete Schaltflaeche gilt nicht fuer die Auswahl.",
+			L"Um botao esmaecido nao vale para a selecao atual.",
+			L"Een gedimde knop doet niets voor de huidige selectie.",
+			L"Wygaszony przycisk nic nie robi dla biezacego wyboru.",
+			L"Soluk dugme bu secim icin calismaz."));
+		PpTip(m_tooltip, m_btnExplorer, LL14(L"エクスプローラーでこのファイルを選択します。ファイルが無いときは押せません。",
+			L"Select this file in Explorer. Disabled when the file is missing.",
+			L"Selectionne le fichier dans l'Explorateur. Desactive s'il manque.",
+			L"Seleziona il file in Esplora. Disattivo se manca.",
+			L"Selecciona el archivo en el Explorador. Desactivado si falta.",
+			L"탐색기에서 이 파일을 선택합니다. 파일이 없으면 누를 수 없습니다.",
+			L"在资源管理器中选中此文件。文件不在时不可按。",
+			L"يحدد الملف في المستكشف. غير متاح إن كان مفقوداً.",
+			L"Выделяет файл в Проводнике. Недоступно, если файла нет.",
+			L"Waehlt die Datei im Explorer. Gesperrt, wenn sie fehlt.",
+			L"Seleciona o arquivo no Explorer. Desativado se faltar.",
+			L"Selecteert het bestand in Verkenner. Uit als het ontbreekt.",
+			L"Zaznacza plik w Eksploratorze. Wylaczone, gdy pliku brak.",
+			L"Gezginde bu dosyayi secer. Dosya yoksa basilamaz."));
+		PpTip(m_tooltip, m_btnOpenFolder, LL14(L"このファイルがあるフォルダを開きます。ファイルが無いときは押せません。",
+			L"Open the folder that contains this file. Disabled when the file is missing.",
+			L"Ouvre le dossier du fichier. Desactive s'il manque.",
+			L"Apre la cartella del file. Disattivo se manca.",
+			L"Abre la carpeta del archivo. Desactivado si falta.",
+			L"이 파일이 있는 폴더를 엽니다. 파일이 없으면 누를 수 없습니다.",
+			L"打开此文件所在的文件夹。文件不在时不可按。",
+			L"يفتح مجلد الملف. غير متاح إن كان مفقوداً.",
+			L"Открывает папку файла. Недоступно, если файла нет.",
+			L"Oeffnet den Ordner der Datei. Gesperrt, wenn sie fehlt.",
+			L"Abre a pasta do arquivo. Desativado se faltar.",
+			L"Opent de map van het bestand. Uit als het ontbreekt.",
+			L"Otwiera folder pliku. Wylaczone, gdy pliku brak.",
+			L"Dosyanin klasorunu acar. Dosya yoksa basilamaz."));
+		PpTip(m_tooltip, m_btnCopyPath, LL14(L"パスをクリップボードへコピーします。",
+			L"Copy the path to the clipboard.",
+			L"Copie le chemin.",
+			L"Copia il percorso.",
+			L"Copia la ruta.",
+			L"경로를 클립보드에 복사합니다.",
+			L"把路径复制到剪贴板。",
+			L"ينسخ المسار.",
+			L"Копирует путь.",
+			L"Pfad kopieren.",
+			L"Copia o caminho.",
+			L"Kopieert het pad.",
+			L"Kopiuje sciezke.",
+			L"Yolu kopyalar."));
+		PpTip(m_tooltip, m_btnCopyName, LL14(L"ファイル名だけをクリップボードへコピーします。",
+			L"Copy only the file name to the clipboard.",
+			L"Copie seulement le nom de fichier.",
+			L"Copia solo il nome file.",
+			L"Copia solo el nombre de archivo.",
+			L"파일 이름만 클립보드에 복사합니다.",
+			L"只把文件名复制到剪贴板。",
+			L"ينسخ اسم الملف فقط.",
+			L"Копирует только имя файла.",
+			L"Nur den Dateinamen kopieren.",
+			L"Copia so o nome do arquivo.",
+			L"Kopieert alleen de bestandsnaam.",
+			L"Kopiuje sama nazwe pliku.",
+			L"Yalnizca dosya adini kopyalar."));
+		PpTip(m_tooltip, m_btnProTools, LL14(L"この曲の再生詳細（音量・EQ など）を開きます。",
+			L"Open playback details for this track (volume, EQ, and more).",
+			L"Ouvre les details de lecture (volume, EQ…).",
+			L"Apre i dettagli di riproduzione (volume, EQ…).",
+			L"Abre los detalles de reproduccion (volumen, EQ…).",
+			L"이 곡의 재생 상세(음량·EQ 등)를 엽니다.",
+			L"打开这首的播放详情（音量、EQ 等）。",
+			L"يفتح تفاصيل التشغيل.",
+			L"Открывает детали воспроизведения.",
+			L"Oeffnet Wiedergabedetails.",
+			L"Abre detalhes de reproducao.",
+			L"Opent afspeeldetails.",
+			L"Otwiera szczegoly odtwarzania.",
+			L"Bu parcanin oynatma ayrintilarini acar."));
+		PpTip(m_tooltip, m_btnClearParam, LL14(L"この曲だけの音量・EQ（[SAV]）を消します。",
+			L"Delete this track's own volume and EQ ([SAV]).",
+			L"Efface volume et EQ propres a cette piste ([SAV]).",
+			L"Cancella volume ed EQ propri ([SAV]).",
+			L"Borra volumen y EQ propios ([SAV]).",
+			L"이 곡만의 음량·EQ([SAV])를 지웁니다.",
+			L"删除这首单独的音量与 EQ（[SAV]）。",
+			L"يحذف مستوى الصوت وEQ الخاصين ([SAV]).",
+			L"Удаляет громкость и EQ только этого трека ([SAV]).",
+			L"Loescht Lautstaerke und EQ nur dieses Titels ([SAV]).",
+			L"Apaga volume e EQ so desta faixa ([SAV]).",
+			L"Wist volume en EQ van alleen dit nummer ([SAV]).",
+			L"Usuwa glosnosc i EQ tylko tego utworu ([SAV]).",
+			L"Yalniz bu parcanin ses ve EQ'sunu ([SAV]) siler."));
+		PpTip(m_tooltip, m_btnWav, LL14(L"選択曲を WAV などに書き出す画面を開きます。",
+			L"Open the dialog that exports the selection to WAV or similar.",
+			L"Ouvre l'export de la selection en WAV, etc.",
+			L"Apre l'export della selezione in WAV, ecc.",
+			L"Abre la exportacion de la seleccion a WAV, etc.",
+			L"선택 곡을 WAV 등으로 내보내는 화면을 엽니다.",
+			L"打开把所选导出为 WAV 等的画面。",
+			L"يفتح تصدير التحديد إلى WAV وغيره.",
+			L"Открывает экспорт выбора в WAV и т.п.",
+			L"Oeffnet den Export der Auswahl als WAV usw.",
+			L"Abre a exportacao da selecao para WAV etc.",
+			L"Opent het exporteren van de selectie naar WAV e.d.",
+			L"Otwiera eksport wyboru do WAV itd.",
+			L"Secimi WAV vb. olarak aktarma penceresini acar."));
+		PpTip(m_tooltip, m_btnTranscode, LL14(L"選択曲を mp3 または FLAC に変換する画面を開きます。",
+			L"Open the dialog that converts the selection to mp3 or FLAC.",
+			L"Ouvre la conversion de la selection en mp3 ou FLAC.",
+			L"Apre la conversione della selezione in mp3 o FLAC.",
+			L"Abre la conversion de la seleccion a mp3 o FLAC.",
+			L"선택 곡을 mp3 또는 FLAC로 변환하는 화면을 엽니다.",
+			L"打开把所选转为 mp3 或 FLAC 的画面。",
+			L"يفتح تحويل التحديد إلى mp3 أو FLAC.",
+			L"Открывает конвертацию выбора в mp3 или FLAC.",
+			L"Oeffnet die Umwandlung der Auswahl nach mp3 oder FLAC.",
+			L"Abre a conversao da selecao para mp3 ou FLAC.",
+			L"Opent het omzetten van de selectie naar mp3 of FLAC.",
+			L"Otwiera konwersje wyboru do mp3 lub FLAC.",
+			L"Secimi mp3 veya FLAC'a donusturme penceresini acar."));
+		PpTip(m_tooltip, m_btnVideo, LL14(L"動画から音声だけを取り出します。動画でないときは押せません。",
+			L"Extract only the audio from a video. Disabled unless the selection is a video.",
+			L"Extrait seulement l'audio d'une video. Desactive sinon.",
+			L"Estrae solo l'audio da un video. Disattivo altrimenti.",
+			L"Extrae solo el audio de un video. Desactivado si no es video.",
+			L"동영상에서 음성만 꺼냅니다. 동영상이 아니면 누를 수 없습니다.",
+			L"只从视频取出音频。不是视频时不可按。",
+			L"يستخرج الصوت فقط من فيديو. غير متاح لغير الفيديو.",
+			L"Извлекает только звук из видео. Недоступно, если это не видео.",
+			L"Holt nur die Audiospur aus einem Video. Sonst gesperrt.",
+			L"Extrai so o audio de um video. Desativado se nao for video.",
+			L"Haalt alleen audio uit een video. Uit als het geen video is.",
+			L"Wyciaga samo audio z wideo. Wylaczone, gdy to nie wideo.",
+			L"Videodan yalniz sesi cikarir. Video degilse basilamaz."));
+		PpTip(m_tooltip, m_btnBpm, LL14(L"メディアプレイヤーで再生中の曲のテンポを測ります。プレイヤーが開いていないときは押せません。",
+			L"Measure the tempo of the track playing in the media player. Disabled when that window is closed.",
+			L"Mesure le tempo du morceau en lecture. Desactive si le lecteur est ferme.",
+			L"Misura il tempo del brano in riproduzione. Disattivo se il player e chiuso.",
+			L"Mide el tempo de lo que suena. Desactivado si el reproductor esta cerrado.",
+			L"미디어 플레이어에서 재생 중인 곡의 템포를 잽니다. 플레이어가 닫혀 있으면 누를 수 없습니다.",
+			L"测量媒体播放器里正在播放的曲目速度。播放器未开时不可按。",
+			L"يقيس إيقاع المقطع الجاري. غير متاح إن كان المشغّل مغلقاً.",
+			L"Меряет темп играющего трека. Недоступно, если плеер закрыт.",
+			L"Misst das Tempo des laufenden Titels. Gesperrt, wenn der Player zu ist.",
+			L"Mede o tempo da faixa tocando. Desativado se o player estiver fechado.",
+			L"Meet het tempo van het spelende nummer. Uit als de speler dicht is.",
+			L"Mierzy tempo granego utworu. Wylaczone, gdy odtwarzacz jest zamkniety.",
+			L"Oynaticida calan parcanin temposunu olcer. Oynatici kapaliysa basilamaz."));
+		PpTip(m_tooltip, m_btnTagBatch, LL14(L"選んだ複数曲のタグを一度に書き換えます。1曲だけなら押せません。",
+			L"Rewrite tags of several selected tracks at once. Disabled for a single track.",
+			L"Reecrit les tags de plusieurs pistes. Desactive pour une seule.",
+			L"Riscrive i tag di piu tracce. Disattivo per una sola.",
+			L"Reescribe etiquetas de varias pistas. Desactivado si hay una sola.",
+			L"고른 여러 곡의 태그를 한 번에 고칩니다. 한 곡이면 누를 수 없습니다.",
+			L"一次改写多首所选的标签。只选一首时不可按。",
+			L"يعيد كتابة وسوم عدة مسارات. غير متاح لمسار واحد.",
+			L"Переписывает теги нескольких треков. Недоступно для одного.",
+			L"Schreibt Tags mehrerer Titel auf einmal. Bei einem Titel gesperrt.",
+			L"Regrava tags de varias faixas. Desativado para uma so.",
+			L"Herschrijft tags van meerdere nummers. Uit bij een enkel nummer.",
+			L"Zmienia tagi wielu utworow naraz. Wylaczone przy jednym.",
+			L"Secilen birden cok parcanin etiketini birden yazar. Tek parcada basilamaz."));
+		PpTip(m_tooltip, m_btnQueue, LL14(L"選択曲を再生キューへ足します。メディアプレイヤーが開いていないときは押せません。",
+			L"Add the selection to the play queue. Disabled when the media player is closed.",
+			L"Ajoute la selection a la file. Desactive si le lecteur est ferme.",
+			L"Aggiunge la selezione alla coda. Disattivo se il player e chiuso.",
+			L"Anade la seleccion a la cola. Desactivado si el reproductor esta cerrado.",
+			L"선택 곡을 재생 큐에 넣습니다. 미디어 플레이어가 닫혀 있으면 누를 수 없습니다.",
+			L"把所选加入播放队列。媒体播放器未开时不可按。",
+			L"يضيف التحديد إلى الطابور. غير متاح إن كان المشغّل مغلقاً.",
+			L"Добавляет выбор в очередь. Недоступно, если плеер закрыт.",
+			L"Haengt die Auswahl an die Warteschlange. Gesperrt, wenn der Player zu ist.",
+			L"Adiciona a selecao a fila. Desativado se o player estiver fechado.",
+			L"Zet de selectie in de wachtrij. Uit als de speler dicht is.",
+			L"Dodaje wybor do kolejki. Wylaczone, gdy odtwarzacz jest zamkniety.",
+			L"Secimi calma kuyruguna ekler. Oynatici kapaliysa basilamaz."));
+		PpTip(m_tooltip, m_btnPlayNext, LL14(L"今の曲の次に選択曲を再生します。メディアプレイヤーが開いていないときは押せません。",
+			L"Play the selection right after the current track. Disabled when the media player is closed.",
+			L"Lit la selection juste apres le morceau en cours. Desactive si le lecteur est ferme.",
+			L"Riproduce la selezione subito dopo il brano attuale. Disattivo se il player e chiuso.",
+			L"Reproduce la seleccion justo despues de la pista actual. Desactivado si el reproductor esta cerrado.",
+			L"지금 곡 다음에 선택 곡을 재생합니다. 미디어 플레이어가 닫혀 있으면 누를 수 없습니다.",
+			L"在当前曲之后播放所选。媒体播放器未开时不可按。",
+			L"يشغّل التحديد بعد المقطع الحالي. غير متاح إن كان المشغّل مغلقاً.",
+			L"Играет выбор сразу после текущего. Недоступно, если плеер закрыт.",
+			L"Spielt die Auswahl direkt nach dem aktuellen Titel. Gesperrt, wenn der Player zu ist.",
+			L"Toca a selecao logo apos a faixa atual. Desativado se o player estiver fechado.",
+			L"Speelt de selectie direct na het huidige nummer. Uit als de speler dicht is.",
+			L"Odtwarza wybor zaraz po biezacym. Wylaczone, gdy odtwarzacz jest zamkniety.",
+			L"Secimi simdiki parcadan hemen sonra calar. Oynatici kapaliysa basilamaz."));
+		PpTip(m_tooltip, m_btnAddSame, LL14(L"このファイルと同じフォルダの曲を一覧へ追加します。ファイルが無いときは押せません。",
+			L"Add tracks from the same folder to the list. Disabled when the file is missing.",
+			L"Ajoute les pistes du meme dossier. Desactive si le fichier manque.",
+			L"Aggiunge i brani della stessa cartella. Disattivo se il file manca.",
+			L"Anade pistas de la misma carpeta. Desactivado si falta el archivo.",
+			L"이 파일과 같은 폴더의 곡을 목록에 추가합니다. 파일이 없으면 누를 수 없습니다.",
+			L"把同一文件夹的曲目加入列表。文件不在时不可按。",
+			L"يضيف مقاطع المجلد نفسه. غير متاح إن كان الملف مفقوداً.",
+			L"Добавляет треки из той же папки. Недоступно, если файла нет.",
+			L"Fuegt Titel aus demselben Ordner hinzu. Gesperrt, wenn die Datei fehlt.",
+			L"Adiciona faixas da mesma pasta. Desativado se o arquivo faltar.",
+			L"Voegt nummers uit dezelfde map toe. Uit als het bestand ontbreekt.",
+			L"Dodaje utwory z tego samego folderu. Wylaczone, gdy pliku brak.",
+			L"Ayni klasordeki parcalari listeye ekler. Dosya yoksa basilamaz."));
+		PpTip(m_tooltip, m_btnMidExport, LL14(L"MIDI またはささみ☆ﾐ の曲を標準 MIDI として保存します。MIDI でないときは押せません。",
+			L"Save a MIDI or Sasami track as standard MIDI. Disabled unless the selection is MIDI.",
+			L"Enregistre un MIDI ou Sasami en MIDI standard. Desactive sinon.",
+			L"Salva un MIDI o Sasami come MIDI standard. Disattivo altrimenti.",
+			L"Guarda un MIDI o Sasami como MIDI estandar. Desactivado si no es MIDI.",
+			L"MIDI 또는 사사미 곡을 표준 MIDI로 저장합니다. MIDI가 아니면 누를 수 없습니다.",
+			L"把 MIDI 或ささみ☆ﾐ 曲存成标准 MIDI。不是 MIDI 时不可按。",
+			L"يحفظ MIDI أو Sasami كـ MIDI قياسي. غير متاح لغير MIDI.",
+			L"Сохраняет MIDI или Sasami как обычный MIDI. Недоступно, если это не MIDI.",
+			L"Speichert MIDI oder Sasami als Standard-MIDI. Sonst gesperrt.",
+			L"Salva MIDI ou Sasami como MIDI padrao. Desativado se nao for MIDI.",
+			L"Slaat MIDI of Sasami op als standaard-MIDI. Uit als het geen MIDI is.",
+			L"Zapisuje MIDI lub Sasami jako standardowe MIDI. Wylaczone, gdy to nie MIDI.",
+			L"MIDI veya Sasami parcayi standart MIDI olarak kaydeder. MIDI degilse basilamaz."));
+		CCustomControlUtility::FinalizeDialogToolTip(m_tooltip, 512, 10000);
+	}
+	UpdateActions();
 	return TRUE;
+}
+
+BOOL CPlayProperty_tab4::PreTranslateMessage(MSG* pMsg)
+{
+	if (m_tooltip.GetSafeHwnd())
+		m_tooltip.RelayEvent(pMsg);
+	return CCustomDialog::PreTranslateMessage(pMsg);
+}
+
+void CPlayProperty_tab4::UpdateActions()
+{
+	CPlayProperty* host = dynamic_cast<CPlayProperty*>(GetParent());
+	if (!host) return;
+	CString path = host->pc.fol;
+	CString phys = PlPhysicalMediaPath(path);
+	if (phys.IsEmpty()) phys = path;
+	const BOOL hasPath = !path.IsEmpty();
+	const BOOL onDisk = (!phys.IsEmpty() && PathFileExists(phys)) ? TRUE : FALSE;
+	const BOOL multi = (host->m_batchIndices.size() >= 2) ? TRUE : FALSE;
+	const BOOL hasMp = (mp && ::IsWindow(mp->GetSafeHwnd())) ? TRUE : FALSE;
+
+	BOOL video = (host->pc.sub == -2 || PpLooksLikeVideo(phys.IsEmpty() ? (LPCTSTR)path : (LPCTSTR)phys)) ? TRUE : FALSE;
+	BOOL midi = FALSE;
+	const int nBatch = (int)host->m_batchIndices.size();
+	for (int k = 0; k < nBatch && !(video && midi); ++k) {
+		const int i = host->m_batchIndices[k];
+		if (!m_pl || !m_pl->pc || i < 0 || i >= m_pl->playcnt) continue;
+		const CString& fol = m_pl->pc[i].fol;
+		if (!video && (m_pl->pc[i].sub == -2 || PpLooksLikeVideo(fol)))
+			video = TRUE;
+#ifndef _UNICODE
+		if (!midi && (SasamiExtIsMidi(CStringW(fol)) || VstIsMidiExt(CStringW(fol))))
+#else
+		if (!midi && (SasamiExtIsMidi(fol) || VstIsMidiExt(fol)))
+#endif
+			midi = TRUE;
+	}
+	if (!midi && hasPath) {
+#ifndef _UNICODE
+		if (SasamiExtIsMidi(CStringW(path)) || VstIsMidiExt(CStringW(path)))
+#else
+		if (SasamiExtIsMidi(path) || VstIsMidiExt(path))
+#endif
+			midi = TRUE;
+	}
+
+	m_btnExplorer.EnableWindow(onDisk);
+	m_btnOpenFolder.EnableWindow(onDisk);
+	m_btnAddSame.EnableWindow(onDisk);
+	m_btnCopyPath.EnableWindow(hasPath);
+	m_btnCopyName.EnableWindow(hasPath);
+	m_btnVideo.EnableWindow(video);
+	m_btnTagBatch.EnableWindow(multi);
+	m_btnQueue.EnableWindow(hasMp);
+	m_btnPlayNext.EnableWindow(hasMp);
+	m_btnBpm.EnableWindow(hasMp);
+	m_btnMidExport.EnableWindow(midi);
 }
 
 void CPlayProperty_tab4::OnMoreCmd(UINT nID)
@@ -1498,22 +2448,65 @@ BOOL CPlayProperty::OnInitDialog()
 	SendMessage(CCC_MSG_REAPPLY_OPAQUE_FIXERS);
 	SetRedraw(TRUE);
 	ShowPage(0);
-	CCustomControlUtility::BeginDialogToolTip(m_tooltip, this);
-	m_tooltip.AddTool(&m_apply, LL14(L"プレイリスト欄とタグの変更を保存して、この窓は開いたままにします。",
-		L"Save playlist fields and tags, keep this window open.",
-		L"Enregistrer playlist et tags, garder la fenêtre.",
-		L"Salva playlist e tag, tieni aperta.",
-		L"Guardar lista y etiquetas, dejar abierta.",
-		L"재생 목록과 태그를 저장하고 창은 엽니다.",
-		L"保存播放列表与标签，窗口保持打开。",
-		L"حفظ القائمة والوسوم مع إبقاء النافذة.",
-		L"Сохранить плейлист и теги, окно оставить.",
-		L"Playlist und Tags speichern, Fenster offen lassen.",
-		L"Salvar lista e tags, manter janela.",
-		L"Playlist en tags opslaan, venster openhouden.",
-		L"Zapisz playlistę i tagi, zostaw okno.",
-		L"Liste ve etiketleri kaydet, pencere açık kalsın."));
-	CCustomControlUtility::FinalizeDialogToolTip(m_tooltip, 512, 10000);
+	if (CCustomControlUtility::BeginDialogToolTip(m_tooltip, this)) {
+		PpTip(m_tooltip, m_tabs, LL14(L"ファイル情報、タグ、プラグイン、その他のページを切り替えます。",
+			L"Switch among file info, tags, plugin, and more.",
+			L"Bascule entre fichier, tags, plugin et plus.",
+			L"Passa tra file, tag, plugin e altro.",
+			L"Cambia entre archivo, etiquetas, complemento y mas.",
+			L"파일 정보, 태그, 플러그인, 기타 페이지를 바꿉니다.",
+			L"在文件信息、标签、插件、其他页面之间切换。",
+			L"التبديل بين الملف والوسوم والإضافة والمزيد.",
+			L"Переключение: файл, теги, плагин и прочее.",
+			L"Wechselt zwischen Datei, Tags, Plugin und mehr.",
+			L"Alterna entre arquivo, tags, plugin e mais.",
+			L"Wisselt tussen bestand, tags, plug-in en meer.",
+			L"Przelacza plik, tagi, wtyczke i wiecej.",
+			L"Dosya, etiket, eklenti ve diger sayfalar arasinda gecer."));
+		PpTip(m_tooltip, m_ok, LL14(L"プレイリスト欄とタグの変更を保存して閉じます。",
+			L"Save playlist fields and tags, then close.",
+			L"Enregistre playlist et tags, puis ferme.",
+			L"Salva playlist e tag, poi chiude.",
+			L"Guarda lista y etiquetas, y cierra.",
+			L"재생 목록과 태그를 저장하고 닫습니다.",
+			L"保存播放列表与标签后关闭。",
+			L"يحفظ القائمة والوسوم ثم يغلق.",
+			L"Сохраняет плейлист и теги и закрывает.",
+			L"Speichert Playlist und Tags und schliesst.",
+			L"Salva lista e tags e fecha.",
+			L"Slaat playlist en tags op en sluit.",
+			L"Zapisuje playliste i tagi i zamyka.",
+			L"Liste ve etiketleri kaydedip kapatir."));
+		PpTip(m_tooltip, m_cancel, LL14(L"プレイリスト欄とタグの変更を捨てて閉じます。その他ですでに実行した操作は戻しません。",
+			L"Discard playlist and tag edits and close. Actions already run on More stay done.",
+			L"Abandonne playlist et tags. Les actions deja faites dans Plus restent.",
+			L"Scarta playlist e tag. Le azioni gia fatte in Altro restano.",
+			L"Descarta lista y etiquetas. Lo ya hecho en Mas permanece.",
+			L"재생 목록과 태그 변경을 버리고 닫습니다. 기타에서 이미 실행한 조작은 그대로입니다.",
+			L"放弃播放列表和标签的修改并关闭。其他页已经执行的操作不会撤回。",
+			L"يتجاهل تعديلات القائمة والوسوم. ما نُفِّذ في المزيد يبقى.",
+			L"Отменяет правки плейлиста и тегов. Уже сделанное на «Ещё» остаётся.",
+			L"Verwirft Playlist- und Tag-Aenderungen. Bereits ausgefuehrte Mehr-Aktionen bleiben.",
+			L"Descarta lista e tags. O que ja foi feito em Mais permanece.",
+			L"Gooit playlist- en tagwijzigingen weg. Al uitgevoerde Meer-acties blijven.",
+			L"Odrzuca zmiany playlisty i tagow. Juz wykonane akcje z Wiecej zostaja.",
+			L"Liste ve etiket degisikliklerini atar. Diger'de yapilan islemler kalir."));
+		PpTip(m_tooltip, m_apply, LL14(L"プレイリスト欄とタグの変更を保存して、この窓は開いたままにします。",
+			L"Save playlist fields and tags, keep this window open.",
+			L"Enregistrer playlist et tags, garder la fenetre.",
+			L"Salva playlist e tag, tieni aperta.",
+			L"Guardar lista y etiquetas, dejar abierta.",
+			L"재생 목록과 태그를 저장하고 창은 엽니다.",
+			L"保存播放列表与标签，窗口保持打开。",
+			L"حفظ القائمة والوسوم مع إبقاء النافذة.",
+			L"Сохранить плейлист и теги, окно оставить.",
+			L"Playlist und Tags speichern, Fenster offen lassen.",
+			L"Salvar lista e tags, manter janela.",
+			L"Playlist en tags opslaan, venster openhouden.",
+			L"Zapisz playliste i tagi, zostaw okno.",
+			L"Liste ve etiketleri kaydet, pencere acik kalsin."));
+		CCustomControlUtility::FinalizeDialogToolTip(m_tooltip, 512, 10000);
+	}
 	return TRUE;
 }
 
