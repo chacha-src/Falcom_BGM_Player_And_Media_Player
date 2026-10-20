@@ -103,3 +103,5 @@ int ScAutoArrangeApply(ScEvent* ev, int* evCount, int evMax,
 	const ScAutoArrangeOpt* opt, ScAutoArrangeResult* out);
 /* モーダル。試し聴きは host->preview、決定でヒストリへ積む。 */
 int ScAutoArrangeDlgRun(const ScAutoArrangeHost* host);
+/* 音符の無いパートのソロは外す。アンドゥ後に空ソロが残らないようにする。 */
+void ScAutoArrangeReleaseEmptySolo(ScStaffUi* ui, const ScEvent* ev, int n);

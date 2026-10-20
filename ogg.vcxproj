@@ -840,6 +840,8 @@ if errorlevel 1 exit /b 1</Command>
     <ClCompile Include="CSasamiScoreMidiIn.cpp" />
     <ClCompile Include="CSasamiScoreHist.cpp" />
     <ClCompile Include="CSasamiScoreArrange.cpp" />
+    <ClCompile Include="CSasamiAutoArrange.cpp" />
+    <ClCompile Include="CSasamiAutoArrangeDlg.cpp" />
     <ClCompile Include="CSasamiPianoRollView.cpp" />
     <ClCompile Include="CSasamiPianoRollDlg.cpp" />
     <ClCompile Include="SasamiToneNames.cpp" />
@@ -1141,6 +1143,7 @@ if errorlevel 1 exit /b 1</Command>
     <ClInclude Include="CSasamiLayoutPaletteDlg.h" />
     <ClInclude Include="CSasamiNotePaletteDlg.h" />
     <ClInclude Include="CSasamiSimpleInputDlg.h" />
+    <ClInclude Include="CSasamiAutoArrange.h" />
     <ClInclude Include="CSasamiNotePropsDlg.h" />
     <ClInclude Include="CSasamiExcRpnDlg.h" />
     <ClInclude Include="CSasamiMidiExportDlg.h" />

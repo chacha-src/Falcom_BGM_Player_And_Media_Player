@@ -12,6 +12,7 @@
 #include "CSasamiExcRpnDlg.h"
 #include "CSasamiInsertFxDlg.h"
 #include "CSasamiScoreArrange.h"
+#include "CSasamiAutoArrange.h"
 #include "CSasamiPianoRollDlg.h"
 #include "CCustomPopupMenu.h"
 #include "OfflineHelp.h"
@@ -3981,7 +3982,11 @@ void CSasamiMidiScoreDlg::OnKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags)
 	const int shift = (GetKeyState(VK_SHIFT) & 0x8000) ? 1 : 0;
 	if (ctrl && (nChar == 'Z' || nChar == 'z')) {
 		if (ScScoreHistUndo(&m_hist, m_doc.ev, &m_doc.evCount, SC_EV_MAX)) {
+			ScAutoArrangeReleaseEmptySolo(&m_ui, m_doc.ev, m_doc.evCount);
+			ScStaffUpdateContentExtent(&m_ui, m_doc.ev, m_doc.evCount);
+			UpdateScrollBars();
 			RefreshStrip();
+			NotifyEdited();
 			InvalidateRect(m_bodyRc, FALSE);
 			m_status.SetWindowText(LL14(L"元に戻す", L"Undo", L"Annuler", L"Annulla", L"Deshacer", L"실행 취소", L"撤销", L"تراجع", L"Отмена", L"Rückgängig", L"Desfazer", L"Ongedaan", L"Cofnij", L"Geri al"));
 		}
@@ -3989,7 +3994,11 @@ void CSasamiMidiScoreDlg::OnKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags)
 	}
 	if (ctrl && (nChar == 'Y' || nChar == 'y')) {
 		if (ScScoreHistRedo(&m_hist, m_doc.ev, &m_doc.evCount, SC_EV_MAX)) {
+			ScAutoArrangeReleaseEmptySolo(&m_ui, m_doc.ev, m_doc.evCount);
+			ScStaffUpdateContentExtent(&m_ui, m_doc.ev, m_doc.evCount);
+			UpdateScrollBars();
 			RefreshStrip();
+			NotifyEdited();
 			InvalidateRect(m_bodyRc, FALSE);
 			m_status.SetWindowText(LL14(L"やり直し", L"Redo", L"Rétablir", L"Ripeti", L"Rehacer", L"다시 실행", L"重做", L"إعادة", L"Повтор", L"Wiederholen", L"Refazer", L"Opnieuw", L"Ponów", L"Yinele"));
 		}
@@ -4752,11 +4761,96 @@ void CSasamiMidiScoreDlg::OnBnClickedLayout()
 	CSasamiLayoutPaletteDlg::OpenNear(this, pt);
 }
 
+void CSasamiMidiScoreDlg::AutoArrangeStop()
+{
+	ScStaffStopHostPreview(&m_ui);
+	KillTimer(kScPreviewTimer);
+}
+
+void CSasamiMidiScoreDlg::AutoArrangeRefresh()
+{
+	ScStaffUpdateContentExtent(&m_ui, m_doc.ev, m_doc.evCount);
+	UpdateScrollBars();
+	NotifyEdited();
+	Invalidate(FALSE);
+}
+
+int CSasamiMidiScoreDlg::AutoArrangePreview()
+{
+	const uint32_t saved = m_ui.markerTick;
+	m_ui.markerTick = 0;
+	OnBnClickedPlay();
+	m_ui.markerTick = saved;
+	return m_ui.previewActive ? 1 : 0;
+}
+
+static void MidiAaRefresh(void* ctx) { ((CSasamiMidiScoreDlg*)ctx)->AutoArrangeRefresh(); }
+static void MidiAaStop(void* ctx) { ((CSasamiMidiScoreDlg*)ctx)->AutoArrangeStop(); }
+static int MidiAaPreview(void* ctx) { return ((CSasamiMidiScoreDlg*)ctx)->AutoArrangePreview(); }
+
+void CSasamiMidiScoreDlg::OpenAutoArrange()
+{
+	if (ScAutoArrangeCountNotes(m_doc.ev, m_doc.evCount) <= 0) {
+		m_status.SetWindowText(LL14(
+			L"音符が無いのでアレンジできません。",
+			L"No notes, so there is nothing to arrange.",
+			L"Aucune note : impossible d'arranger.",
+			L"Nessuna nota: niente da arrangiare.",
+			L"No hay notas: no se puede arreglar.",
+			L"음표가 없어 편곡할 수 없습니다.",
+			L"没有音符，无法编曲。",
+			L"لا توجد نغمات، لا يمكن التوزيع.",
+			L"Нет нот — аранжировать нечего.",
+			L"Keine Noten, nichts zu arrangieren.",
+			L"Sem notas, não há o que arranjar.",
+			L"Geen noten, niets om te arrangeren.",
+			L"Brak nut, nie ma czego aranżować.",
+			L"Nota yok, düzenlenecek bir şey yok."));
+		return;
+	}
+	ScAutoArrangeHost host;
+	memset(&host, 0, sizeof(host));
+	host.ev = m_doc.ev;
+	host.evCount = &m_doc.evCount;
+	host.evMax = SC_EV_MAX;
+	host.ui = &m_ui;
+	host.hist = &m_hist;
+	host.isFm = 0;
+	host.curPart = m_curCh;
+	host.defMeterN = m_ui.meterNumer > 0 ? m_ui.meterNumer : 4;
+	host.defMeterD = m_ui.meterDenom > 0 ? m_ui.meterDenom : 4;
+	host.defKey = m_ui.keySig;
+	host.ctx = this;
+	host.refresh = MidiAaRefresh;
+	host.preview = MidiAaPreview;
+	host.stop = MidiAaStop;
+	if (ScAutoArrangeDlgRun(&host) == IDOK) {
+		m_status.SetWindowText(LL14(
+			L"自動伴奏を入れました。元に戻すで消せます。",
+			L"Accompaniment added. Undo removes it.",
+			L"Accompagnement ajouté. Annuler le retire.",
+			L"Accompagnamento aggiunto. Annulla lo toglie.",
+			L"Acompañamiento añadido. Deshacer lo quita.",
+			L"자동 반주를 넣었습니다. 실행 취소로 되돌립니다.",
+			L"已加入自动伴奏。撤销可去掉。",
+			L"أُضيفت المرافقة. التراجع يزيلها.",
+			L"Аккомпанемент добавлен. Отмена убирает его.",
+			L"Begleitung ergänzt. Rückgängig entfernt sie.",
+			L"Acompanhamento adicionado. Desfazer remove.",
+			L"Begeleiding toegevoegd. Ongedaan maken haalt het weg.",
+			L"Akompaniament dodany. Cofnij go usuwa.",
+			L"Eşlik eklendi. Geri al kaldırır."));
+	}
+}
+
 void CSasamiMidiScoreDlg::OnBnClickedArr()
 {
 	static int s_lastPreset = SC_ARR_HUMANIZE;
 	CCustomPopupMenu menu;
 	menu.SetAeroMode(FALSE);
+	menu.AddCommand(9550, LL14(L"自動伴奏…", L"Auto accompaniment…", L"Accompagnement auto…", L"Accompagnamento auto…", L"Acompañamiento auto…",
+		L"자동 반주…", L"自动伴奏…", L"مرافقة تلقائية…", L"Автоаккомпанемент…", L"Auto-Begleitung…", L"Acompanhamento auto…", L"Auto-begeleiding…", L"Automatyczny akompaniament…", L"Otomatik eşlik…"));
+	menu.AddSeparator();
 	for (int i = 0; i < SC_ARR_COUNT; i++)
 		menu.AddCommand(9200 + i, ScArrangePresetName(i));
 	menu.AddSeparator();
@@ -4765,6 +4859,10 @@ void CSasamiMidiScoreDlg::OnBnClickedArr()
 	menu.AddCommand(9212, LL14(L"全体に適用", L"Apply to all", L"Tout", L"Tutto", L"Todo", L"전체", L"全部", L"الكل", L"Всё", L"Alles", L"Tudo", L"Alles", L"Wszystko", L"Tümü"));
 	CPoint pt; GetCursorPos(&pt);
 	const UINT cmd = menu.Track(pt, this);
+	if (cmd == 9550) {
+		OpenAutoArrange();
+		return;
+	}
 	if (cmd >= 9200 && cmd < 9200 + (UINT)SC_ARR_COUNT) {
 		s_lastPreset = (int)(cmd - 9200);
 		HistPush();

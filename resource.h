@@ -2310,13 +2310,30 @@
 #define IDR_CSO_TAC_PSSKY               4881
 #define IDR_TAC_SFX                     4882
 #define ID_MP_OMAKETACTICS              33770
+#define IDD_SASAMI_AUTO_ARRANGE         4900
+#define IDC_SAA_STYLE                   4901
+#define IDC_SAA_DRUM                    4902
+#define IDC_SAA_BASS                    4903
+#define IDC_SAA_CHORD                   4904
+#define IDC_SAA_MELVOL                  4905
+#define IDC_SAA_MELPITCH                4906
+#define IDC_SAA_INTRO                   4907
+#define IDC_SAA_BREAK                   4908
+#define IDC_SAA_ENDING                  4909
+#define IDC_SAA_INTROBARS               4910
+#define IDC_SAA_BREAKBARS               4911
+#define IDC_SAA_ENDBARS                 4912
+#define IDC_SAA_PITCHMODE               4913
+#define IDC_SAA_PREVIEW                 4914
+#define IDC_SAA_HINT                    4915
+#define IDC_SAA_STATUS                  4916
 
 // Next default values for new objects
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NEXT_RESOURCE_VALUE        399
 #define _APS_NEXT_COMMAND_VALUE         33310
-#define _APS_NEXT_CONTROL_VALUE         4592
+#define _APS_NEXT_CONTROL_VALUE         4925
 #define _APS_NEXT_SYMED_VALUE           104
 #endif
 #endif

@@ -34,6 +34,10 @@ public:
 	static uint8_t MidiToFmNoteByte(int midiNote);
 	void HistPush();
 	void ExportStandardMidi();
+	void OpenAutoArrange();
+	void AutoArrangeRefresh();
+	void AutoArrangeStop();
+	int AutoArrangePreview();
 
 protected:
 	virtual void DoDataExchange(CDataExchange* pDX);

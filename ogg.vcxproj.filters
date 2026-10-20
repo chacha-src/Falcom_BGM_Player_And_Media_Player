@@ -1359,6 +1359,12 @@
     <ClCompile Include="CSasamiScoreArrange.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="CSasamiAutoArrange.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CSasamiAutoArrangeDlg.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="CSasamiPianoRollView.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -2426,6 +2432,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="CSasamiSimpleInputDlg.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CSasamiAutoArrange.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="CSasamiExcRpnDlg.h">

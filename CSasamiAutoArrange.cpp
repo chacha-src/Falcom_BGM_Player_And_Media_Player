@@ -1,6 +1,7 @@
 #include "stdafx.h"
 #include "CSasamiAutoArrange.h"
 #include <string.h>
+#include <stdlib.h>
 
 /* スタイルは 16 分（または 12 分割）の格子。x が打点。ベース数字は度数。 */
 
@@ -31,6 +32,7 @@ struct BarInfo {
 	int root;
 	int type;
 	int section;
+	int voiced;
 };
 
 static int IsNoteKind(uint8_t k)
@@ -438,7 +440,7 @@ static int Push(Ctx* c, uint32_t tick, int ch, uint8_t kind, uint8_t a, uint8_t 
 	e.a = a; e.b = b; e.c = c8;
 	e.dur = dur;
 	(*c->n)++;
-	c->added++;
+	if (IsNoteKind(kind)) c->added++;
 	return 1;
 }
 
@@ -452,7 +454,7 @@ static int HasKind(const ScEvent* ev, int n, int ch, uint8_t kind)
 static int DrumChannel(const ScEvent* ev, int n, int ch, int isFm)
 {
 	if (isFm) return ch == 6;
-	return ScMidiPartIsDrum(ev, n, ch, 0);
+	return ScMidiPartIsDrum(ev, n, ch, 0xFFFFFFFFu);
 }
 
 static int PitchOf(const ScEvent& e, int isFm)
@@ -705,7 +707,7 @@ static int BarHas(const ScEvent* ev, int n, int ch, uint32_t t0, uint32_t t1)
 	return 0;
 }
 
-static void AnalyzeChord(const ScEvent* ev, int n, int isFm, int chordCh, int melodyCh, uint32_t t0, uint32_t t1, int keySig, int prevRoot, int prevType, int* outRoot, int* outType, int* outLow)
+static void AnalyzeChord(const ScEvent* ev, int n, int isFm, int chordCh, int melodyCh, uint32_t t0, uint32_t t1, int keySig, int prevRoot, int prevType, int* outRoot, int* outType, int* outVoiced)
 {
 	int pc[12];
 	memset(pc, 0, sizeof(pc));
@@ -729,7 +731,7 @@ static void AnalyzeChord(const ScEvent* ev, int n, int isFm, int chordCh, int me
 	if (sum <= 0) {
 		*outRoot = prevRoot >= 0 ? prevRoot : TonicPc(keySig);
 		*outType = prevType >= 0 ? prevType : CH_MAJ;
-		*outLow = lowPc;
+		*outVoiced = 0;
 		return;
 	}
 	static const int kN[8] = { 3, 3, 4, 4, 4, 3, 3, 2 };
@@ -757,7 +759,7 @@ static void AnalyzeChord(const ScEvent* ev, int n, int isFm, int chordCh, int me
 	}
 	*outRoot = bestR;
 	*outType = bestT;
-	*outLow = lowPc;
+	*outVoiced = 1;
 }
 
 static int ToneBelow(int midi, int root, int type)
@@ -909,6 +911,18 @@ static void FillMsg(ScAutoArrangeResult* out)
 		out->chHarm >= 0 ? out->chHarm + 1 : 0);
 }
 
+struct NpNote { uint32_t tick; int midi; int ch; };
+
+static int __cdecl CmpNpNote(const void* va, const void* vb)
+{
+	const NpNote* a = (const NpNote*)va;
+	const NpNote* b = (const NpNote*)vb;
+	if (a->ch != b->ch) return a->ch - b->ch;
+	if (a->tick < b->tick) return -1;
+	if (a->tick > b->tick) return 1;
+	return a->midi - b->midi;
+}
+
 int ScAutoArrangeApply(ScEvent* ev, int* evCount, int evMax, const ScAutoArrangeOpt* opt, ScAutoArrangeResult* out)
 {
 	if (out) {
@@ -929,60 +943,131 @@ int ScAutoArrangeApply(ScEvent* ev, int* evCount, int evMax, const ScAutoArrange
 
 	int notes[32];
 	int polyTicks[32];
+	int tickCount[32];
 	int sumPitch[32];
 	memset(notes, 0, sizeof(notes));
 	memset(polyTicks, 0, sizeof(polyTicks));
+	memset(tickCount, 0, sizeof(tickCount));
 	memset(sumPitch, 0, sizeof(sumPitch));
-	for (int ch = 0; ch < 32 && ch < lim; ch++) {
-		if (DrumChannel(ev, *evCount, ch, isFm)) continue;
-		uint32_t seenTick = 0xFFFFFFFFu;
-		int atTick = 0;
-		for (int i = 0; i < *evCount; i++) {
-			if ((int)ev[i].ch != ch || !IsNoteKind(ev[i].kind)) continue;
-			int m = PitchOf(ev[i], isFm);
-			if (m < 0) continue;
-			notes[ch]++;
-			sumPitch[ch] += m;
-			if (ev[i].tick != seenTick) { seenTick = ev[i].tick; atTick = 1; }
-			else if (atTick == 1) { polyTicks[ch]++; atTick = 2; }
+	for (int ch = 0; ch < lim && ch < 32; ch++) {
+		if (DrumChannel(ev, *evCount, ch, isFm)) notes[ch] = 1000000;
+	}
+	NpNote* np = (NpNote*)HeapAlloc(GetProcessHeap(), 0, sizeof(NpNote) * (size_t)(*evCount > 0 ? *evCount : 1));
+	if (!np) {
+		if (out) { out->err = SC_AE_OVERFLOW; FillMsg(out); }
+		return SC_AE_OVERFLOW;
+	}
+	int nn = 0;
+	for (int i = 0; i < *evCount; i++) {
+		if (!IsNoteKind(ev[i].kind)) continue;
+		if ((int)ev[i].ch < 0 || (int)ev[i].ch >= lim) continue;
+		if (DrumChannel(ev, *evCount, ev[i].ch, isFm)) continue;
+		int m = PitchOf(ev[i], isFm);
+		if (m < 0) continue;
+		np[nn].tick = ev[i].tick;
+		np[nn].midi = m;
+		np[nn].ch = (int)ev[i].ch;
+		nn++;
+	}
+	if (nn > 1) qsort(np, (size_t)nn, sizeof(NpNote), CmpNpNote);
+	{
+		int ch = -1, ticks = 0, poly = 0, sum = 0, count = 0, run = 0;
+		uint32_t lastTick = 0xFFFFFFFFu;
+		for (int i = 0; i <= nn; i++) {
+			int boundary = (i == nn) || (ch >= 0 && np[i].ch != ch);
+			if (boundary && ch >= 0) {
+				if (run > 0) { ticks++; if (run >= 2) poly++; }
+				if (ch < 32) {
+					notes[ch] = count;
+					polyTicks[ch] = poly;
+					tickCount[ch] = ticks;
+					sumPitch[ch] = sum;
+				}
+				run = 0;
+				lastTick = 0xFFFFFFFFu;
+				ticks = poly = sum = count = 0;
+			}
+			if (i == nn) break;
+			if (np[i].ch != ch) ch = np[i].ch;
+			if (np[i].tick != lastTick) {
+				if (run > 0) { ticks++; if (run >= 2) poly++; }
+				run = 0;
+				lastTick = np[i].tick;
+			}
+			run++;
+			count++;
+			sum += np[i].midi;
 		}
 	}
+	HeapFree(GetProcessHeap(), 0, np);
 
-	int chordCh = -1, melodyCh = -1, bassHave = -1;
+	int chordSrc = -1, melodyCh = -1, bassHave = -1;
 	int bestPoly = 3;
-	for (int ch = 0; ch < lim; ch++) {
-		if (polyTicks[ch] > bestPoly) { bestPoly = polyTicks[ch]; chordCh = ch; }
+	for (int ch = 0; ch < lim && ch < 32; ch++) {
+		int ratio = tickCount[ch] ? (polyTicks[ch] * 100) / tickCount[ch] : 0;
+		if (polyTicks[ch] >= 4 && ratio >= 35 && polyTicks[ch] > bestPoly) {
+			bestPoly = polyTicks[ch];
+			chordSrc = ch;
+		}
 	}
 	int cur = opt->curPart;
-	if (cur >= 0 && cur < lim && notes[cur] > 0 && !DrumChannel(ev, *evCount, cur, isFm)) {
-		int ratio = notes[cur] ? (polyTicks[cur] * 100) / notes[cur] : 0;
-		if (ratio < 45) melodyCh = cur;
+	if (cur >= 0 && cur < lim && cur < 32 && notes[cur] > 0 && notes[cur] < 1000000) {
+		int ratio = tickCount[cur] ? (polyTicks[cur] * 100) / tickCount[cur] : 0;
+		if (ratio < 50) melodyCh = cur;
 	}
 	if (melodyCh < 0) {
-		int bestAvg = -1;
-		for (int ch = 0; ch < lim; ch++) {
-			if (notes[ch] < 1 || DrumChannel(ev, *evCount, ch, isFm)) continue;
-			int ratio = (polyTicks[ch] * 100) / notes[ch];
-			if (ratio >= 45) continue;
+		int bestScore = -1;
+		for (int ch = 0; ch < lim && ch < 32; ch++) {
+			if (notes[ch] < 1 || notes[ch] >= 1000000) continue;
+			int ratio = tickCount[ch] ? (polyTicks[ch] * 100) / tickCount[ch] : 0;
+			if (ratio >= 50) continue;
 			int avg = sumPitch[ch] / notes[ch];
-			if (avg > bestAvg) { bestAvg = avg; melodyCh = ch; }
+			int score = notes[ch] * 128 + avg;
+			if (score > bestScore) { bestScore = score; melodyCh = ch; }
 		}
 	}
-	if (chordCh >= 0 && chordCh == melodyCh) {
-		int ratio = notes[chordCh] ? (polyTicks[chordCh] * 100) / notes[chordCh] : 0;
-		if (ratio >= 45) melodyCh = -1;
+	if (chordSrc >= 0 && chordSrc == melodyCh) {
+		int ratio = tickCount[chordSrc] ? (polyTicks[chordSrc] * 100) / tickCount[chordSrc] : 0;
+		if (ratio >= 50) melodyCh = -1;
+		else chordSrc = -1;
 	}
-	if (chordCh == melodyCh) chordCh = -1;
-	for (int ch = 0; ch < lim; ch++) {
-		if (notes[ch] < 8 || ch == melodyCh || ch == chordCh) continue;
-		if (DrumChannel(ev, *evCount, ch, isFm)) continue;
-		int ratio = (polyTicks[ch] * 100) / notes[ch];
+	for (int ch = 0; ch < lim && ch < 32; ch++) {
+		if (notes[ch] < 8 || notes[ch] >= 1000000 || ch == melodyCh || ch == chordSrc) continue;
+		int ratio = tickCount[ch] ? (polyTicks[ch] * 100) / tickCount[ch] : 0;
 		if (ratio >= 40) continue;
 		int avg = sumPitch[ch] / notes[ch];
-		if (avg <= 50) { bassHave = ch; break; }
+		if (avg <= 48) { bassHave = ch; break; }
 	}
 
+	const int preferBassFm[] = { 5, 4, 3, 2, 1, 0, 7, 8, 9 };
+	const int preferChFm[] = { 0, 1, 2, 7, 8, 9, 3, 4, 5 };
+	const int preferHFm[] = { 7, 8, 9, 1, 0, 2, 4, 5, 3 };
+	const int preferMid[] = { 1, 2, 3, 4, 5, 6, 7, 8, 11, 12, 13, 14, 0 };
+	int chDrum = -1, chBass = -1, chChord = -1, chHarm = -1;
 	int layers = opt->jobs & (SC_AJ_DRUM | SC_AJ_BASS | SC_AJ_CHORD);
+	if ((opt->jobs & SC_AJ_DRUM) && layers) {
+		if (isFm) chDrum = (6 < lim) ? 6 : -1;
+		else if (9 < lim && (ScMidiPartIsDrum(ev, *evCount, 9, 0xFFFFFFFFu) || notes[9] == 0)) chDrum = 9;
+		else if (25 < lim && (notes[25] == 0 || ScMidiPartIsDrum(ev, *evCount, 25, 0xFFFFFFFFu))) chDrum = 25;
+		else chDrum = PickEmpty(notes, lim, 0, melodyCh, chordSrc, bassHave, preferMid, 13);
+	}
+	if (opt->jobs & SC_AJ_BASS) {
+		if (bassHave >= 0) chBass = bassHave;
+		else chBass = PickEmpty(notes, lim, isFm, melodyCh, chordSrc, chDrum, isFm ? preferBassFm : preferMid, isFm ? 9 : 13);
+	}
+	if ((opt->jobs & SC_AJ_CHORD) && chordSrc < 0)
+		chChord = PickEmpty(notes, lim, isFm, melodyCh, chordSrc, chBass, isFm ? preferChFm : preferMid, isFm ? 9 : 13);
+	if ((opt->jobs & SC_AJ_MEL_PITCH) && opt->pitchMode > 0 && melodyCh >= 0)
+		chHarm = PickEmpty(notes, lim, isFm, melodyCh, chBass, chChord, isFm ? preferHFm : preferMid, isFm ? 9 : 13);
+	int canLayer = (chDrum >= 0 || chBass >= 0 || chChord >= 0);
+	int canMel = ((opt->jobs & SC_AJ_MEL_VOL) && melodyCh >= 0)
+		|| ((opt->jobs & SC_AJ_MEL_PITCH) && opt->pitchMode > 0 && melodyCh >= 0 && (chHarm >= 0 || opt->pitchMode >= 2));
+	if (!canLayer && !canMel) {
+		if (out) { out->err = SC_AE_EMPTY; FillMsg(out); }
+		return SC_AE_EMPTY;
+	}
+	if (!canLayer) layers = 0;
+
 	int doIntro = (opt->jobs & SC_AJ_INTRO) && opt->introBars > 0 && layers;
 	int doBreak = (opt->jobs & SC_AJ_BREAK) && opt->breakBars > 0 && layers;
 	int doEnd = (opt->jobs & SC_AJ_ENDING) && opt->endBars > 0 && layers;
@@ -991,7 +1076,9 @@ int ScAutoArrangeApply(ScEvent* ev, int* evCount, int evMax, const ScAutoArrange
 	int defD = opt->defMeterD > 0 ? opt->defMeterD : 4;
 	uint32_t introTicks = 0;
 	if (doIntro) {
-		int bl = ScStaffMeterTicksPerMeasure(defN, defD);
+		int nM = defN, dM = defD;
+		ScStaffMeterAtTick(ev, *evCount, 0, defN, defD, &nM, &dM);
+		int bl = ScStaffMeterTicksPerMeasure(nM, dM);
 		introTicks = (uint32_t)(opt->introBars * bl);
 		int n0 = *evCount;
 		ShiftFrom(ev, n0, 0, introTicks);
@@ -1000,13 +1087,16 @@ int ScAutoArrangeApply(ScEvent* ev, int* evCount, int evMax, const ScAutoArrange
 			if (ev[i].tick == introTicks && IsSetupKind(ev[i].kind)) {
 				ScEvent cpy = ev[i];
 				cpy.tick = 0;
-				if (!Push(&tmp, 0, cpy.ch, cpy.kind, cpy.a, cpy.b, cpy.c, cpy.dur)) break;
+				if (!Push(&tmp, 0, cpy.ch, cpy.kind, cpy.a, cpy.b, cpy.c, cpy.dur)) {
+					if (out) { out->err = SC_AE_OVERFLOW; FillMsg(out); }
+					return SC_AE_OVERFLOW;
+				}
 				ev[*evCount - 1].seq = cpy.seq;
 			}
 		}
 	}
 
-	int lead = melodyCh >= 0 ? melodyCh : chordCh;
+	int lead = melodyCh >= 0 ? melodyCh : chordSrc;
 	uint32_t lead0 = 0xFFFFFFFFu, lead1 = 0;
 	uint32_t noteEnd = 0;
 	for (int i = 0; i < *evCount; i++) {
@@ -1026,7 +1116,7 @@ int ScAutoArrangeApply(ScEvent* ev, int* evCount, int evMax, const ScAutoArrange
 	if (doBreak) {
 		int gap = 0;
 		uint32_t t = 0;
-		while (t < lead1 && gap == 0) {
+		while (lead >= 0 && t < lead1 && gap == 0) {
 			int nM = defN, dM = defD;
 			ScStaffMeterAtTick(ev, *evCount, t, defN, defD, &nM, &dM);
 			int bl = ScStaffMeterTicksPerMeasure(nM, dM);
@@ -1094,8 +1184,9 @@ int ScAutoArrangeApply(ScEvent* ev, int* evCount, int evMax, const ScAutoArrange
 			BarInfo& b = bars[nBars];
 			b.t0 = t;
 			b.len = bl;
-			int low = -1;
-			AnalyzeChord(ev, *evCount, isFm, chordCh, melodyCh, t, t + (uint32_t)bl, opt->defKey, prevR, prevT, &b.root, &b.type, &low);
+			int voiced = 0;
+			AnalyzeChord(ev, *evCount, isFm, chordSrc, melodyCh, t, t + (uint32_t)bl, opt->defKey, prevR, prevT, &b.root, &b.type, &voiced);
+			b.voiced = voiced;
 			prevR = b.root; prevT = b.type;
 			if (introTicks && t < introTicks) b.section = SEC_INTRO;
 			else if (breakT0 != 0xFFFFFFFFu && t >= breakT0 && t < breakT1) b.section = SEC_BREAK;
@@ -1112,11 +1203,21 @@ int ScAutoArrangeApply(ScEvent* ev, int* evCount, int evMax, const ScAutoArrange
 	if (nBars > 0) {
 		int tonic = bars[0].root;
 		int tonicType = bars[0].type;
+		int src = -1;
 		for (int i = 0; i < nBars; i++) {
-			if (bars[i].section == SEC_BODY || bars[i].section == SEC_INTRO) {
-				tonic = bars[i].root;
-				tonicType = bars[i].type;
-				if (bars[i].section == SEC_BODY) break;
+			if (bars[i].section == SEC_BODY && bars[i].voiced) { src = i; break; }
+		}
+		if (src < 0) {
+			for (int i = 0; i < nBars; i++) if (bars[i].voiced) { src = i; break; }
+		}
+		if (src >= 0) {
+			tonic = bars[src].root;
+			tonicType = bars[src].type;
+			for (int i = 0; i < nBars; i++) {
+				if (bars[i].section == SEC_INTRO || (i < src && !bars[i].voiced)) {
+					bars[i].root = tonic;
+					bars[i].type = tonicType;
+				}
 			}
 		}
 		for (int i = nBars - 1; i >= 0; i--) {
@@ -1140,28 +1241,6 @@ int ScAutoArrangeApply(ScEvent* ev, int* evCount, int evMax, const ScAutoArrange
 			}
 		}
 	}
-
-	int noteSnap[32];
-	memcpy(noteSnap, notes, sizeof(notes));
-	const int preferBassFm[] = { 5, 4, 3, 2, 1, 0, 7, 8, 9 };
-	const int preferChFm[] = { 0, 1, 2, 7, 8, 9, 3, 4, 5 };
-	const int preferHFm[] = { 7, 8, 9, 1, 0, 2, 4, 5, 3 };
-	const int preferMid[] = { 1, 2, 3, 4, 5, 6, 7, 8, 11, 12, 13, 14, 0 };
-	int chDrum = -1, chBass = -1, chChord = -1, chHarm = -1;
-	if ((opt->jobs & SC_AJ_DRUM) && layers) {
-		if (isFm) chDrum = (6 < lim) ? 6 : -1;
-		else if (9 < lim && (ScMidiPartIsDrum(ev, *evCount, 9, 0) || noteSnap[9] == 0)) chDrum = 9;
-		else if (25 < lim && (noteSnap[25] == 0 || ScMidiPartIsDrum(ev, *evCount, 25, 0))) chDrum = 25;
-		else chDrum = PickEmpty(noteSnap, lim, 0, melodyCh, chordCh, bassHave, preferMid, 13);
-	}
-	if (opt->jobs & SC_AJ_BASS) {
-		if (bassHave >= 0) chBass = bassHave;
-		else chBass = PickEmpty(noteSnap, lim, isFm, melodyCh, chordCh, chDrum, isFm ? preferBassFm : preferMid, isFm ? 9 : 13);
-	}
-	if (opt->jobs & SC_AJ_CHORD)
-		chChord = PickEmpty(noteSnap, lim, isFm, melodyCh, chordCh, chBass, isFm ? preferChFm : preferMid, isFm ? 9 : 13);
-	if ((opt->jobs & SC_AJ_MEL_PITCH) && opt->pitchMode > 0 && melodyCh >= 0)
-		chHarm = PickEmpty(noteSnap, lim, isFm, melodyCh, chBass, chChord, isFm ? preferHFm : preferMid, isFm ? 9 : 13);
 
 	int anySolo = 0;
 	if (opt->ui) {
@@ -1252,10 +1331,17 @@ int ScAutoArrangeApply(ScEvent* ev, int* evCount, int evMax, const ScAutoArrange
 			}
 			if (!skipChord && !occupiedCh && chChord >= 0 && (chordSlots == 0 ? slot == 0 : (chordMask & bit))) {
 				int dur = (chordSlots <= 0) ? (b.len - 2) : chordSlots * slotDur;
+				uint32_t ct = tick;
+				if (b.section == SEC_INTRO && last) {
+					uint32_t mid = b.t0 + (uint32_t)(b.len / 2);
+					if (chordSlots <= 0) {
+						ct = mid;
+						dur = b.len / 2 - 2;
+					} else if (tick < mid)
+						continue;
+				}
 				if (dur < 2) dur = 2;
-				if (b.section == SEC_INTRO && last && tick + (uint32_t)dur > b.t0 + (uint32_t)(b.len / 2) && slot < div / 2)
-					continue;
-				PlaceChord(&ctx, chChord, tick, dur, vel - 8, b.root, b.type, st.power, st.arp);
+				PlaceChord(&ctx, chChord, ct, dur, vel - 8, b.root, b.type, st.power, st.arp);
 			}
 		}
 		if (b.section == SEC_BODY) bodyIx++;
@@ -1274,4 +1360,22 @@ int ScAutoArrangeApply(ScEvent* ev, int* evCount, int evMax, const ScAutoArrange
 		FillMsg(out);
 	}
 	return ctx.overflow ? SC_AE_OVERFLOW : (ctx.added > 0 ? SC_AE_OK : SC_AE_EMPTY);
+}
+
+void ScAutoArrangeReleaseEmptySolo(ScStaffUi* ui, const ScEvent* ev, int n)
+{
+	if (!ui) return;
+	for (int ch = 0; ch < ui->trackCount && ch < 32; ch++) {
+		if (!ui->solo[ch]) continue;
+		int has = 0;
+		if (ev && n > 0) {
+			for (int i = 0; i < n; i++) {
+				if ((int)ev[i].ch == ch && (ev[i].kind == SC_EV_NOTE || ev[i].kind == SC_EV_FM_NOTE)) {
+					has = 1;
+					break;
+				}
+			}
+		}
+		if (!has) ui->solo[ch] = 0;
+	}
 }
