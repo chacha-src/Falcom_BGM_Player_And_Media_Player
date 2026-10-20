@@ -26,13 +26,12 @@ struct TacClip {
 	short* pcm;
 	int n;
 	int rate;
+	short* play;
+	int playN;
 };
 struct TacVoice {
-	int on;
-	int i;
-	float frac;
-	float gain;
-	const TacClip* clip;
+	LPDIRECTSOUNDBUFFER buf;
+	int frames;
 };
 
 static LPDIRECTSOUND8 s_ds;
@@ -146,6 +145,8 @@ static int TacDecodeMem(const unsigned char* p, size_t n, TacClip& out)
 	return 1;
 }
 
+static void TacBake(int id);
+
 static void TacLoadPack()
 {
 	memset(s_clip, 0, sizeof(s_clip));
@@ -166,7 +167,36 @@ static void TacLoadPack()
 		unsigned len = *(const unsigned*)(p + 12 + i * 8);
 		if (off >= sz || len > sz - off) continue;
 		TacDecodeMem(p + off, len, s_clip[i]);
+		TacBake((int)i);
 	}
+}
+
+static void TacBake(int id)
+{
+	TacClip& c = s_clip[id];
+	if (!c.pcm || c.n < 1 || id < 0 || id >= TS_N) return;
+	int frames = (int)((long long)c.n * TAC_RATE / (c.rate > 0 ? c.rate : TAC_RATE));
+	if (frames < 1) frames = 1;
+	short* dst = (short*)malloc((size_t)frames * 2 * sizeof(short));
+	if (!dst) return;
+	float g = kGain[id];
+	for (int f = 0; f < frames; f++) {
+		float pos = (float)f * (float)c.rate / (float)TAC_RATE;
+		int i0 = (int)pos;
+		if (i0 < 0) i0 = 0;
+		if (i0 >= c.n) i0 = c.n - 1;
+		int i1 = i0 + 1 < c.n ? i0 + 1 : i0;
+		float fr = pos - (float)(int)pos;
+		if (fr < 0) fr = 0;
+		float s = ((float)c.pcm[i0] + ((float)c.pcm[i1] - (float)c.pcm[i0]) * fr) * g;
+		if (s > 32767.f) s = 32767.f;
+		if (s < -32768.f) s = -32768.f;
+		dst[f * 2] = dst[f * 2 + 1] = (short)s;
+	}
+	c.play = dst;
+	c.playN = frames;
+	free(c.pcm);
+	c.pcm = NULL;
 }
 
 static size_t BgmRead(void* dst, size_t sz, size_t nm, void* h)
@@ -361,26 +391,6 @@ static int TacPullBgmOut(short& L, short& R)
 static void TacMix(short* dst, int frames)
 {
 	for (int i = 0; i < frames * 2; i++) dst[i] = 0;
-	for (int v = 0; v < TAC_VOICES; v++) {
-		TacVoice& vc = s_voice[v];
-		if (!vc.on || !vc.clip || !vc.clip->pcm) continue;
-		float step = (float)vc.clip->rate / (float)TAC_RATE;
-		for (int f = 0; f < frames; f++) {
-			if (vc.i >= vc.clip->n) { vc.on = 0; break; }
-			int s0 = vc.clip->pcm[vc.i];
-			int s1 = vc.i + 1 < vc.clip->n ? vc.clip->pcm[vc.i + 1] : s0;
-			float s = (float)s0 + ((float)s1 - (float)s0) * vc.frac;
-			int a = (int)(s * vc.gain);
-			int l = (int)dst[f * 2] + a;
-			int r = (int)dst[f * 2 + 1] + a;
-			if (l > 32767) l = 32767; if (l < -32768) l = -32768;
-			if (r > 32767) r = 32767; if (r < -32768) r = -32768;
-			dst[f * 2] = (short)l;
-			dst[f * 2 + 1] = (short)r;
-			vc.frac += step;
-			while (vc.frac >= 1.f) { vc.frac -= 1.f; vc.i++; }
-		}
-	}
 	if (s_bgm) {
 		const float g = 0.42f;
 		short holdL = 0, holdR = 0;
@@ -411,34 +421,77 @@ void TacAudioStart(void* hwnd)
 void TacAudioStop()
 {
 	TacPauseMain(0);
+	for (int i = 0; i < TAC_VOICES; i++) {
+		if (s_voice[i].buf) { s_voice[i].buf->Stop(); s_voice[i].buf->Release(); s_voice[i].buf = NULL; }
+	}
 	if (s_buf) { s_buf->Stop(); s_buf->Release(); s_buf = NULL; }
 	if (s_ds) { s_ds->Release(); s_ds = NULL; }
 	s_started = 0;
 	TacCloseBgm();
-	for (int i = 0; i < TS_N; i++) { free(s_clip[i].pcm); s_clip[i].pcm = NULL; s_clip[i].n = 0; }
+	for (int i = 0; i < TS_N; i++) {
+		free(s_clip[i].pcm); s_clip[i].pcm = NULL;
+		free(s_clip[i].play); s_clip[i].play = NULL;
+		s_clip[i].n = s_clip[i].playN = 0;
+	}
 	memset(s_voice, 0, sizeof(s_voice));
+}
+
+static int TacSfxBuf(TacVoice& v, int frames)
+{
+	DWORD bytes = (DWORD)frames * 4;
+	if (bytes < 4) bytes = 4;
+	if (v.buf && v.frames == frames) return 1;
+	if (v.buf) { v.buf->Stop(); v.buf->Release(); v.buf = NULL; }
+	WAVEFORMATEX wfx = {};
+	wfx.wFormatTag = WAVE_FORMAT_PCM;
+	wfx.nChannels = 2;
+	wfx.nSamplesPerSec = TAC_RATE;
+	wfx.wBitsPerSample = 16;
+	wfx.nBlockAlign = 4;
+	wfx.nAvgBytesPerSec = TAC_RATE * 4;
+	DSBUFFERDESC d = {};
+	d.dwSize = sizeof(d);
+	d.dwFlags = DSBCAPS_CTRLVOLUME | DSBCAPS_GLOBALFOCUS | DSBCAPS_LOCSOFTWARE;
+	d.dwBufferBytes = bytes;
+	d.lpwfxFormat = &wfx;
+	if (FAILED(s_ds->CreateSoundBuffer(&d, &v.buf, NULL)) || !v.buf) return 0;
+	v.buf->SetVolume(-400);
+	v.frames = frames;
+	return 1;
 }
 
 void TacSfx(int id)
 {
-	if (id < 0 || id >= TS_N || !s_clip[id].pcm || !s_buf) return;
+	if (id < 0 || id >= TS_N || !s_clip[id].play || !s_ds) return;
 	if (id == TS_CURSOR) {
 		DWORD n = GetTickCount();
 		if (s_cursorAt && (DWORD)(n - s_cursorAt) < 40) return;
 		s_cursorAt = n;
 	}
-	int slot = 0;
-	int worst = -1;
+	const TacClip& clip = s_clip[id];
+	int slot = -1;
+	int steal = 0;
+	DWORD stealAt = 0;
 	for (int i = 0; i < TAC_VOICES; i++) {
-		if (!s_voice[i].on) { slot = i; worst = -2; break; }
-		if (s_voice[i].i > worst) { worst = s_voice[i].i; slot = i; }
+		if (!s_voice[i].buf) { slot = i; break; }
+		DWORD st = 0, pos = 0;
+		s_voice[i].buf->GetStatus(&st);
+		if (!(st & DSBSTATUS_PLAYING)) { slot = i; break; }
+		s_voice[i].buf->GetCurrentPosition(&pos, NULL);
+		if (slot < 0 || pos >= stealAt) { steal = i; stealAt = pos; }
 	}
+	if (slot < 0) slot = steal;
 	TacVoice& v = s_voice[slot];
-	v.on = 1;
-	v.i = 0;
-	v.frac = 0;
-	v.gain = kGain[id];
-	v.clip = &s_clip[id];
+	if (!TacSfxBuf(v, clip.playN)) return;
+	v.buf->Stop();
+	void* p1 = NULL; void* p2 = NULL; DWORD n1 = 0, n2 = 0;
+	DWORD bytes = (DWORD)clip.playN * 4;
+	if (FAILED(v.buf->Lock(0, bytes, &p1, &n1, &p2, &n2, 0))) return;
+	if (p1 && n1) memcpy(p1, clip.play, n1);
+	if (p2 && n2) memcpy(p2, (char*)clip.play + n1, n2);
+	v.buf->Unlock(p1, n1, p2, n2);
+	v.buf->SetCurrentPosition(0);
+	v.buf->Play(0, 0, 0);
 }
 
 void TacAudioPump()
