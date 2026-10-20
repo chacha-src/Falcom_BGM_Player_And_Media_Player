@@ -47,6 +47,7 @@
 #include "CSasamiFmScoreDlg.h"
 #include "CSasamiPianoRollDlg.h"
 #include "Soft3DRaceDlg.h"
+#include "OmakeTactics.h"
 #include "CDesktopLyricsWnd.h"
 #include "Douga.h"
 #include "MpPlayerAddons.h"
@@ -1251,8 +1252,7 @@ BEGIN_MESSAGE_MAP(CMediaPlayerDlg, CCustomBlurDialogExBase)
 	ON_BN_CLICKED(IDC_MP_BOT_MIDI, OnMidiMonitor)
 	ON_BN_CLICKED(IDC_MP_BOT_FM, OnFmMonitor)
 	ON_BN_CLICKED(IDC_MP_BOT_CD, OnMpCdPlayer)
-	ON_BN_CLICKED(IDC_MP_BOT_MAZE, OnMpSoft3DMaze)
-	ON_BN_CLICKED(IDC_MP_BOT_RACE, OnMpSoft3DRace)
+	ON_BN_CLICKED(IDC_MP_BOT_MAZE, OnBotOmake)
 	ON_COMMAND(ID_MP_BOTVIS_DJ, OnBotVisDj)
 	ON_COMMAND(ID_MP_BOTVIS_TAG, OnBotVisTag)
 	ON_COMMAND(ID_MP_BOTVIS_BPM, OnBotVisBpm)
@@ -1263,7 +1263,6 @@ BEGIN_MESSAGE_MAP(CMediaPlayerDlg, CCustomBlurDialogExBase)
 	ON_COMMAND(ID_MP_BOTVIS_REMOTE, OnBotVisRemote)
 	ON_COMMAND(ID_MP_BOTVIS_VST, OnBotVisVst)
 	ON_COMMAND(ID_MP_BOTVIS_MAZE, OnBotVisMaze)
-	ON_COMMAND(ID_MP_BOTVIS_RACE, OnBotVisRace)
 	ON_BN_CLICKED(IDC_MP_SAVEPARAM, OnSaveParam)
 	ON_BN_CLICKED(IDC_MP_RESETDATA, OnResetData)
 	ON_EN_KILLFOCUS(IDC_MP_KAISUU, OnKaisuuKillFocus)
@@ -1359,6 +1358,7 @@ BEGIN_MESSAGE_MAP(CMediaPlayerDlg, CCustomBlurDialogExBase)
 	ON_COMMAND(ID_MP_PHOTOFRAME, OnMpPhotoFrame)
 	ON_COMMAND(ID_MP_SOFT3DMAZE, OnMpSoft3DMaze)
 	ON_COMMAND(ID_MP_SOFT3DRACE, OnMpSoft3DRace)
+	ON_COMMAND(ID_MP_OMAKETACTICS, OnMpOmakeTactics)
 	ON_COMMAND(ID_MP_VIDEO_EXTRACT, OnMpVideoExtract)
 	ON_COMMAND(ID_MP_VIDEO_REPLACE, OnMpVideoReplace)
 	ON_COMMAND(ID_MP_GAME_PRESET, OnMpGamePreset)
@@ -1632,16 +1632,14 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 			m_botMidi.Create(_T("FM/MIDI"), WS_CHILD | BS_PUSHBUTTON | WS_TABSTOP, rc, this, IDC_MP_BOT_MIDI); // VST と CD のあいだ
 		if (!m_botCd.GetSafeHwnd())
 			m_botCd.Create(_T("CD"), WS_CHILD | BS_PUSHBUTTON | WS_TABSTOP, rc, this, IDC_MP_BOT_CD);
-		if (!m_botMaze.GetSafeHwnd())
-			m_botMaze.Create(_T("Maze"), WS_CHILD | BS_PUSHBUTTON | WS_TABSTOP, rc, this, IDC_MP_BOT_MAZE);
-		if (!m_botRace.GetSafeHwnd())
-			m_botRace.Create(_T("Race"), WS_CHILD | BS_PUSHBUTTON | WS_TABSTOP, rc, this, IDC_MP_BOT_RACE);
+		if (!m_botOmake.GetSafeHwnd())
+			m_botOmake.Create(_T("Extras"), WS_CHILD | BS_PUSHBUTTON | WS_TABSTOP, rc, this, IDC_MP_BOT_MAZE);
 		{
 			// ショートカットは色で役割が分かるようにする（水色一色は避ける）
-			CCustomStandardButton* bots[13] = {
-				&m_botDj, &m_botTag, &m_botBpm, &m_botSleep, &m_botMirror, &m_botSsViz, &m_botAlarm, &m_botRemote, &m_botVst, &m_botMidi, &m_botCd, &m_botMaze, &m_botRace
+			CCustomStandardButton* bots[12] = {
+				&m_botDj, &m_botTag, &m_botBpm, &m_botSleep, &m_botMirror, &m_botSsViz, &m_botAlarm, &m_botRemote, &m_botVst, &m_botMidi, &m_botCd, &m_botOmake
 			};
-			const COLORREF botGrad[13][2] = {
+			const COLORREF botGrad[12][2] = {
 				{ RGB(240, 225, 255), RGB(200, 170, 245) }, // DJ: 紫
 				{ RGB(255, 235, 220), RGB(250, 195, 160) }, // Tag: 桃
 				{ RGB(220, 250, 235), RGB(155, 220, 190) }, // BPM: ミント
@@ -1653,10 +1651,9 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 				{ RGB(245, 235, 255), RGB(190, 160, 230) }, // VST: 藤
 				{ RGB(230, 245, 255), RGB(155, 195, 235) }, // MIDI: 水色
 				{ RGB(250, 248, 240), RGB(200, 190, 160) }, // CD: 銀
-				{ RGB(235, 245, 255), RGB(150, 190, 230) }, // Maze: 青
-				{ RGB(255, 230, 220), RGB(245, 150, 120) }, // Race: 珊瑚
+				{ RGB(255, 236, 222), RGB(245, 165, 130) }, // おまけ: 珊瑚
 			};
-			for (int bi = 0; bi < 13; ++bi) {
+			for (int bi = 0; bi < 12; ++bi) {
 				if (!bots[bi]->GetSafeHwnd()) continue;
 				bots[bi]->SetGradation(botGrad[bi][0], botGrad[bi][1], 0, TRUE);
 			}
@@ -2109,8 +2106,7 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 	if (m_botMidi.GetSafeHwnd()) m_botMidi.SetFont(&m_fontChk, TRUE);
 	if (m_botFm.GetSafeHwnd()) m_botFm.SetFont(&m_fontChk, TRUE);
 	if (m_botCd.GetSafeHwnd()) m_botCd.SetFont(&m_fontChk, TRUE);
-	if (m_botMaze.GetSafeHwnd()) m_botMaze.SetFont(&m_fontChk, TRUE);
-	if (m_botRace.GetSafeHwnd()) m_botRace.SetFont(&m_fontChk, TRUE);
+	if (m_botOmake.GetSafeHwnd()) m_botOmake.SetFont(&m_fontChk, TRUE);
 	if (m_abA.GetSafeHwnd()) m_abA.SetFont(&m_fontChk, TRUE);
 	if (m_abB.GetSafeHwnd()) m_abB.SetFont(&m_fontChk, TRUE);
 	if (m_abClr.GetSafeHwnd()) m_abClr.SetFont(&m_fontChk, TRUE);
@@ -2419,10 +2415,8 @@ BOOL CMediaPlayerDlg::OnInitDialog()
 			L"FM/MIDI monitoru ac/kapa (acikken basili kalir)."));
 	if (m_botCd.GetSafeHwnd())
 		addTip(m_botCd, LL14(L"CDプレイヤー（再生・取り込み・曲目検索・書き込み）", L"CD player (play / rip / lookup / burn)", L"Lecteur CD (lecture / extraction / recherche / gravure)", L"Lettore CD (play / estrazione / ricerca / masterizza)", L"Reproductor CD (reproducir / extraer / buscar / grabar)", L"CD 플레이어(재생/추출/검색/굽기)", L"CD播放器（播放/抓轨/检索/刻录）", L"مشغل CD (تشغيل/استخراج/بحث/حرق)", L"CD-плеер (воспроизведение/извлечение/поиск/запись)", L"CD-Player (Play/Rip/Suche/Brennen)", L"Leitor de CD (play / extrair / pesquisa / gravar)", L"CD-speler (afspelen / rippen / zoeken / branden)", L"Odtwarzacz CD (odtwarzanie / zgrywanie / szukanie / nagranie)", L"CD oynatici (oynat / aktar / ara / yaz)"));
-	if (m_botMaze.GetSafeHwnd())
-		addTip(m_botMaze, LL14(L"迷路で遊びます。", L"Play the maze.", L"Jouer au labyrinthe.", L"Gioca al labirinto.", L"Jugar al laberinto.", L"미로로 놀기.", L"玩迷宫。", L"اللعب بمتاهة.", L"Играть в лабиринт.", L"Im Labyrinth spielen.", L"Jogar o labirinto.", L"Speel het doolhof.", L"Graj w labirynt.", L"Labirentte oyna."));
-	if (m_botRace.GetSafeHwnd())
-		addTip(m_botRace, LL14(L"空中レースで遊びます。", L"Play the aerial race.", L"Jouer à la course aérienne.", L"Gioca alla gara aerea.", L"Jugar a la carrera aérea.", L"공중 레이스로 놀기.", L"玩空中竞速。", L"اللعب بالسباق الجوي.", L"Играть в воздушную гонку.", L"Im Luftrennen spielen.", L"Jogar a corrida aérea.", L"Speel de luchtrace.", L"Graj w wyścig powietrzny.", L"Hava yarışında oyna."));
+	if (m_botOmake.GetSafeHwnd())
+		addTip(m_botOmake, LL14(L"おまけゲーム（レース・迷路・タクティクス）を選んで遊びます。", L"Pick a bonus game (race, maze, tactics).", L"Choisir un jeu bonus (course, labyrinthe, tactique).", L"Scegli un gioco extra (gara, labirinto, tattica).", L"Elegir un juego extra (carrera, laberinto, táctica).", L"보너스 게임(레이스·미로·택틱스)을 골라 플레이합니다.", L"选择附赠游戏（竞速、迷宫、战棋）。", L"اختر لعبة إضافية (سباق، متاهة، تكتيكات).", L"Выбрать бонусную игру (гонка, лабиринт, тактика).", L"Bonusspiel wählen (Rennen, Labyrinth, Taktik).", L"Escolher um jogo extra (corrida, labirinto, tática).", L"Kies een bonusspel (race, doolhof, tactiek).", L"Wybierz grę dodatkową (wyścig, labirynt, taktyka).", L"Ekstra oyun seç (yarış, labirent, taktik)."));
 	addTip(m_saveparam, LL14(L"曲ごとに音量・EQ・テンポ等の全パラメータを記憶し、その曲を再生する度に自動で復元します。", L"Remember all parameters (volume, EQ, tempo, etc.) per song and auto-restore them each time the song plays.", L"Memoriser tous les parametres par morceau et les restaurer automatiquement.", L"Memorizza tutti i parametri per brano e li ripristina automaticamente.", L"Recuerda todos los parametros por pista y los restaura automaticamente.", L"곡별로 볼륨·EQ·템포 등 모든 파라미터를 기억하고 재생할 때마다 자동 복원합니다.", L"逐曲记忆音量、EQ、速度等所有参数，每次播放该曲时自动恢复。", L"تذكر كل المعلمات لكل أغنية واستعادتها تلقائيًا.", L"Запоминать все параметры для каждого трека и восстанавливать автоматически.", L"Alle Parameter pro Titel merken und automatisch wiederherstellen.", L"Memoriza todos os parametros por faixa e restaura automaticamente.", L"Onthoud alle parameters per nummer en herstel automatisch.", L"Zapamietaj wszystkie parametry na utwor i przywracaj automatycznie.", L"Her parça için tüm parametreleri hatırla ve otomatik geri yükle."));
 	addTip(m_resetdata, LL14(L"曲ごとに保存した設定を全削除し、音量50%・拡張100%・EQ等を初期状態へ戻します。", L"Delete all per-song saved settings and reset volume to 50%, ext to 100%, EQ etc. to defaults.", L"Supprimer tous les reglages par morceau et reinitialiser les parametres.", L"Elimina tutte le impostazioni per brano e ripristina i parametri.", L"Elimina todos los ajustes por pista y restablece los parametros.", L"곡별 저장 설정을 모두 삭제하고 볼륨 50%·확장 100%·EQ 등을 초기화합니다.", L"删除所有逐曲保存的设置，并将音量重置为50%、扩展100%、EQ等为默认。", L"حذف كل الإعدادات المحفوظة لكل أغنية وإعادة الضبط.", L"Удалить все сохранённые настройки треков и сбросить параметры.", L"Alle pro-Titel-Einstellungen loeschen und Parameter zuruecksetzen.", L"Excluir todas as configuracoes por faixa e redefinir os parametros.", L"Verwijder alle per-nummer-instellingen en reset de parameters.", L"Usun wszystkie ustawienia na utwor i zresetuj parametry.", L"Tum parca ayarlarini sil ve parametreleri sifirla."));
 	addTip(m_kaisuu, LL14(L"連続再生時のループ回数。空欄・0・-1は無制限（ループ曲は5分で次へ）。数字を入れるとその回数。上限は64bit整数。", L"Loop count for continuous play. Empty/0/-1 = unlimited (looped tracks advance at 5 min). A number sets the count (64-bit max).", L"Nombre de boucles. Vide/0/-1 = illimite (5 min pour les boucles). Un nombre = ce compte (max 64 bits).", L"Conteggio loop. Vuoto/0/-1 = illimitato (5 min per i loop). Un numero = il conteggio (max 64 bit).", L"Cuenta de bucle. Vacio/0/-1 = ilimitado (5 min en bucles). Un numero = la cuenta (max 64 bits).", L"연속 재생 루프 횟수. 공백·0·-1=무제한(루프 곡은 5분). 숫자=횟수(64비트 상한).", L"连续播放循环次数。空/0/-1=无限（循环曲5分钟后下一首）。数字=次数（64位上限）。", L"عدد الحلقات. فارغ/0/-1=غير محدود (5 دقائق للحلقات). رقم=العدد (حد 64 بت).", L"Число повторов. Пусто/0/-1=без лимита (зацикленные — через 5 мин). Число=счётчик (макс. 64 бит).", L"Schleifenzahl. Leer/0/-1=unbegrenzt (Loops nach 5 Min.). Zahl=Anzahl (64-Bit-Maximum).", L"Contagem de loop. Vazio/0/-1=ilimitado (loops aos 5 min). Numero=contagem (max 64 bits).", L"Loopaantal. Leeg/0/-1=onbeperkt (loops na 5 min). Getal=aantal (64-bits max).", L"Liczba petli. Puste/0/-1=bez limitu (petle po 5 min). Liczba=ilosc (max 64 bity).", L"Dongu sayisi. Bos/0/-1=sinirsiz (dongulu 5 dk). Sayi=adet (64-bit ust sinir)."));
@@ -2699,7 +2693,8 @@ BOOL CMediaPlayerDlg::RelayPreTranslateMessage(MSG* pMsg)
 	// Space = 再生/一時停止。og(非表示)の IsDialogMessage がフォーカスボタン(Ys6等)を押すのを防ぐ
 	// 迷路／空中レースが開いている間は SPACE を再生に使わない
 	if (pMsg->message == WM_KEYDOWN && pMsg->wParam == VK_SPACE) {
-		if (IsSoft3DMazeOpen() || IsSoft3DMazeActive() || IsSoft3DRaceOpen() || IsSoft3DRaceActive())
+		if (IsSoft3DMazeOpen() || IsSoft3DMazeActive() || IsSoft3DRaceOpen() || IsSoft3DRaceActive()
+			|| IsOmakeTacticsOpen())
 			return TRUE;
 		CWnd* pFocus = GetFocus();
 		const BOOL inEdit = (pFocus && (pFocus->GetSafeHwnd() == m_find.GetSafeHwnd()
@@ -3900,32 +3895,35 @@ void CMediaPlayerDlg::DoLayout()
 
 	if (!savedata.mpBotToolsInited) {
 		savedata.mpBotToolsInited = 1;
-		savedata.mpBotToolsFlags = 0x70F; // DJ|Tag|BPM|Sleep|VST|Maze|Race
+		savedata.mpBotToolsFlags = 0x70F; // DJ|Tag|BPM|Sleep|VST|おまけ
 	}
+	// 旧「レース」ボタン(512)は「おまけ」(256)へ統合
+	if (savedata.mpBotToolsFlags & 512)
+		savedata.mpBotToolsFlags = (savedata.mpBotToolsFlags & ~512) | 256;
 	// VSTホストは切替対象にせず、底バーへ常時出す
 	savedata.mpBotToolsFlags |= 1024 | 2048 | 4096;
 	const int botFl = savedata.mpBotToolsFlags;
-	CCustomStandardButton* botBtn[13] = {
-		&m_botDj, &m_botTag, &m_botBpm, &m_botSleep, &m_botMirror, &m_botSsViz, &m_botAlarm, &m_botRemote, &m_botVst, &m_botMidi, &m_botCd, &m_botMaze, &m_botRace
+	CCustomStandardButton* botBtn[12] = {
+		&m_botDj, &m_botTag, &m_botBpm, &m_botSleep, &m_botMirror, &m_botSsViz, &m_botAlarm, &m_botRemote, &m_botVst, &m_botMidi, &m_botCd, &m_botOmake
 	};
-	const int botBit[13] = { 1, 2, 4, 8, 16, 32, 64, 128, 1024, 4096, 2048, 256, 512 };
-	const int wFull[13] = {
+	const int botBit[12] = { 1, 2, 4, 8, 16, 32, 64, 128, 1024, 4096, 2048, 256 };
+	const int wFull[12] = {
 		(int)(56 * s) + icoAdd, (int)(52 * s) + icoAdd, (int)(48 * s) + icoAdd, (int)(56 * s) + icoAdd,
 		(int)(60 * s) + icoAdd, (int)(40 * s) + icoAdd, (int)(56 * s) + icoAdd, (int)(64 * s) + icoAdd,
-		(int)(48 * s) + icoAdd, (int)(64 * s) + icoAdd, (int)(48 * s) + icoAdd, (int)(52 * s) + icoAdd, (int)(52 * s) + icoAdd
+		(int)(48 * s) + icoAdd, (int)(64 * s) + icoAdd, (int)(48 * s) + icoAdd, (int)(60 * s) + icoAdd
 	};
-	const int wMid[13] = {
+	const int wMid[12] = {
 		(int)(40 * s) + icoAdd, (int)(40 * s) + icoAdd, (int)(40 * s) + icoAdd, (int)(40 * s) + icoAdd,
 		(int)(40 * s) + icoAdd, (int)(36 * s) + icoAdd, (int)(40 * s) + icoAdd, (int)(44 * s) + icoAdd,
-		(int)(40 * s) + icoAdd, (int)(52 * s) + icoAdd, (int)(40 * s) + icoAdd, (int)(40 * s) + icoAdd, (int)(40 * s) + icoAdd
+		(int)(40 * s) + icoAdd, (int)(52 * s) + icoAdd, (int)(40 * s) + icoAdd, (int)(44 * s) + icoAdd
 	};
-	const int wShort[13] = {
+	const int wShort[12] = {
 		(int)(28 * s), (int)(28 * s), (int)(28 * s), (int)(28 * s),
 		(int)(28 * s), (int)(28 * s), (int)(28 * s), (int)(28 * s),
-		(int)(28 * s), (int)(28 * s), (int)(28 * s), (int)(28 * s), (int)(28 * s)
+		(int)(28 * s), (int)(28 * s), (int)(28 * s), (int)(28 * s)
 	};
 	int needFull = 0, needMid = 0, needShort = 0;
-	for (int i = 0; i < 13; ++i) {
+	for (int i = 0; i < 12; ++i) {
 		if (!(botFl & botBit[i])) continue;
 		needFull += wFull[i] + gapBot;
 		needMid += wMid[i] + gapBot;
@@ -3962,8 +3960,7 @@ void CMediaPlayerDlg::DoLayout()
 			if (m_botVst.GetSafeHwnd()) m_botVst.SetWindowText(L"VST");
 			if (m_botMidi.GetSafeHwnd()) m_botMidi.SetWindowText(L"F/M");
 			if (m_botCd.GetSafeHwnd()) m_botCd.SetWindowText(L"CD");
-			if (m_botMaze.GetSafeHwnd()) m_botMaze.SetWindowText(L"Mz");
-			if (m_botRace.GetSafeHwnd()) m_botRace.SetWindowText(L"Rc");
+			if (m_botOmake.GetSafeHwnd()) m_botOmake.SetWindowText(LL14(L"他", L"Ex", L"Bn", L"Ex", L"Ex", L"보", L"附", L"إض", L"Бн", L"Ex", L"Ex", L"Ex", L"Dod", L"Eks"));
 		}
 		else {
 			m_switch.SetWindowText(LL14(L"ファルコム特化型へ", L"To Falcom screen", L"Vers ecran Falcom", L"Alla schermata Falcom", L"A pantalla Falcom", L"팔콤 화면으로", L"切换到Falcom画面", L"إلى شاشة Falcom", L"К экрану Falcom", L"Zum Falcom-Bildschirm", L"Para tela Falcom", L"Naar Falcom-scherm", L"Do ekranu Falcom", L"Falcom ekranına"));
@@ -3990,10 +3987,8 @@ void CMediaPlayerDlg::DoLayout()
 				m_botMidi.SetWindowText(L"FM/MIDI");
 			if (m_botCd.GetSafeHwnd())
 				m_botCd.SetWindowText(LL14(L"CD", L"CD", L"CD", L"CD", L"CD", L"CD", L"CD", L"CD", L"CD", L"CD", L"CD", L"CD", L"CD", L"CD"));
-			if (m_botMaze.GetSafeHwnd())
-				m_botMaze.SetWindowText(LL14(L"迷路", L"Maze", L"Labyrinthe", L"Labirinto", L"Laberinto", L"미로", L"迷宫", L"متاهة", L"Лабиринт", L"Labyrinth", L"Labirinto", L"Doolhof", L"Labirynt", L"Labirent"));
-			if (m_botRace.GetSafeHwnd())
-				m_botRace.SetWindowText(LL14(L"レース", L"Race", L"Course", L"Gara", L"Carrera", L"레이스", L"竞速", L"سباق", L"Гонка", L"Rennen", L"Corrida", L"Race", L"Wyścig", L"Yarış"));
+			if (m_botOmake.GetSafeHwnd())
+				m_botOmake.SetWindowText(LL14(L"おまけ", L"Extras", L"Bonus", L"Extra", L"Extras", L"보너스", L"附赠", L"إضافات", L"Бонус", L"Extras", L"Extras", L"Extra's", L"Dodatki", L"Ekstralar"));
 		}
 	}
 
@@ -4004,7 +3999,7 @@ void CMediaPlayerDlg::DoLayout()
 	MoveCtl(&m_capture, bx, botY, capW, swH); bx += capW + gapLead;
 	if (m_botFm.GetSafeHwnd() && m_botFm.IsWindowVisible())
 		m_botFm.ShowWindow(SW_HIDE);
-	for (int i = 0; i < 13; ++i) {
+	for (int i = 0; i < 12; ++i) {
 		CCustomStandardButton* b = botBtn[i];
 		if (!b->GetSafeHwnd()) continue;
 		if (!(botFl & botBit[i])) {
@@ -8254,7 +8249,7 @@ void CMediaPlayerDlg::ToggleBotVisFlag(int bit)
 {
 	if (!savedata.mpBotToolsInited) {
 		savedata.mpBotToolsInited = 1;
-		savedata.mpBotToolsFlags = 0x70F; // DJ|Tag|BPM|Sleep|VST|Maze|Race
+		savedata.mpBotToolsFlags = 0x70F; // DJ|Tag|BPM|Sleep|VST|おまけ
 	}
 	// VSTホスト(1024)・MIDIモニタ(4096)・CD(2048)は常時表示。消さない。
 	if (bit == 1024 || bit == 2048 || bit == 4096) {
@@ -8278,7 +8273,6 @@ void CMediaPlayerDlg::OnBotVisAlarm() { ToggleBotVisFlag(64); }
 void CMediaPlayerDlg::OnBotVisRemote() { ToggleBotVisFlag(128); }
 void CMediaPlayerDlg::OnBotVisMaze() { ToggleBotVisFlag(256); }
 void CMediaPlayerDlg::OnBotVisVst() { ToggleBotVisFlag(1024); }
-void CMediaPlayerDlg::OnBotVisRace() { ToggleBotVisFlag(512); }
 
 void CMediaPlayerDlg::OnSaveParam()
 {
@@ -11879,8 +11873,7 @@ void CMediaPlayerDlg::ShowToolsExtrasMenu(CPoint screenPt)
 				botSub->AddCheck(ID_MP_BOTVIS_SSVIZ, LL14(L"SS ビジュアライザ", L"SS visualizer", L"Visualiseur SS", L"Visualizzatore SS", L"Visualizador SS", L"SS 비주얼", L"SS 可视化", L"عارض SS", L"SS-визуализатор", L"SS-Visualizer", L"Visual SS", L"SS-visualizer", L"Wizual SS", L"SS gorsel"), (bf & 32) != 0);
 				botSub->AddCheck(ID_MP_BOTVIS_ALARM, LL14(L"アラーム", L"Alarm", L"Alarme", L"Sveglia", L"Alarma", L"알람", L"闹钟", L"منبه", L"Будильник", L"Wecker", L"Alarme", L"Wekker", L"Budzik", L"Alarm"), (bf & 64) != 0);
 				botSub->AddCheck(ID_MP_BOTVIS_REMOTE, LL14(L"リモート", L"Remote", L"Remote", L"Remote", L"Remoto", L"리모트", L"遥控", L"تحكم", L"Пульт", L"Remote", L"Remoto", L"Remote", L"Pilot", L"Uzaktan"), (bf & 128) != 0);
-				botSub->AddCheck(ID_MP_BOTVIS_MAZE, LL14(L"迷路", L"Maze", L"Labyrinthe", L"Labirinto", L"Laberinto", L"미로", L"迷宫", L"متاهة", L"Лабиринт", L"Labyrinth", L"Labirinto", L"Doolhof", L"Labirynt", L"Labirent"), (bf & 256) != 0);
-				botSub->AddCheck(ID_MP_BOTVIS_RACE, LL14(L"レース", L"Race", L"Course", L"Gara", L"Carrera", L"레이스", L"竞速", L"سباق", L"Гонка", L"Rennen", L"Corrida", L"Race", L"Wyścig", L"Yarış"), (bf & 512) != 0);
+				botSub->AddCheck(ID_MP_BOTVIS_MAZE, LL14(L"おまけ", L"Extras", L"Bonus", L"Extra", L"Extras", L"보너스", L"附赠", L"إضافات", L"Бонус", L"Extras", L"Extras", L"Extra's", L"Dodatki", L"Ekstralar"), (bf & (256 | 512)) != 0);
 			}
 		}
 		sub->AddCommand(ID_MP_MISS_MANAGE,
@@ -12350,20 +12343,8 @@ void CMediaPlayerDlg::ShowToolsExtrasMenu(CPoint screenPt)
 			LL14(L"画像スライドショー。プレイリストを BGM にできます", L"Image slideshow; can use the playlist as BGM", L"Diaporama d'images; playlist en BGM possible", L"Presentazione immagini; playlist come BGM", L"Diapositivas de imágenes; playlist como BGM",
 				L"이미지 슬라이드쇼. 플레이리스트를 BGM으로 사용 가능", L"图片幻灯片；可用播放列表作 BGM", L"عرض شرائح للصور؛ يمكن استخدام قائمة التشغيل كـ BGM", L"Слайд-шоу изображений; плейлист как BGM", L"Bild-Diashow; Playlist als BGM möglich",
 				L"Apresentação de imagens; playlist como BGM", L"Afbeeldingsdiavoorstelling; afspeellijst als BGM", L"Pokaz obrazów; playlista jako BGM", L"Görüntü slayt gösterisi; çalma listesi BGM olabilir"));
-		sub->AddCommand(ID_MP_SOFT3DMAZE,
-			LL14(L"迷路…", L"Maze…", L"Labyrinthe…", L"Labirinto…", L"Laberinto…",
-				L"미로…", L"迷宫…", L"متاهة…", L"Лабиринт…", L"Labyrinth…",
-				L"Labirinto…", L"doolhof…", L"Labirynt…", L"labirent…"),
-			LL14(L"大きさで迷路を生成。アイテムでテンポ・ピッチ・次曲・EQ に干渉します", L"Generate a maze by size; items tweak tempo, pitch, next track, EQ", L"Labyrinthe par taille ; objets affectent tempo, hauteur, piste, EQ", L"Labirinto per dimensione; oggetti influenzano tempo, pitch, brano, EQ", L"Laberinto por tamaño; objetos afectan tempo, tono, pista, EQ",
-				L"크기로 미로 생성. 아이템이 템포·피치·다음 곡·EQ에 개입", L"按大小生成迷宫；道具干预速度、音高、下一曲、EQ", L"متاهة حسب الحجم؛ العناصر تؤثر على الإيقاع والطبقة والمسار وEQ", L"Лабиринт по размеру; предметы влияют на темп, высоту, трек, EQ", L"Labyrinth nach Größe; Items greifen in Tempo, Tonhöhe, Titel, EQ ein",
-				L"Labirinto por tamanho; itens afetam tempo, tom, faixa, EQ", L"Doolhof op grootte; items grijpen in op tempo, toon, nummer, EQ", L"Labirynt wg rozmiaru; przedmioty wpływają na tempo, wysokość, utwór, EQ", L"Boyuta göre labirent; öğeler tempo, perde, parça, EQ’ye müdahale eder"));
-		sub->AddCommand(ID_MP_SOFT3DRACE,
-			LL14(L"空中レース…", L"Aerial race…", L"Course aérienne…", L"Gara aerea…", L"Carrera aérea…",
-				L"공중 레이스…", L"空中竞速…", L"السباق الجوي…", L"Воздушная гонка…", L"Luftrennen…",
-				L"Corrida aérea…", L"luchtrace…", L"Wyścig powietrzny…", L"hava yarışı…"),
-			LL14(L"空中コースを飛ぶレース。アイテムで再生とブースト等に干渉します", L"Fly an aerial course; items tweak playback and boosts", L"Course aérienne ; objets affectent lecture et boosts", L"Gara aerea; oggetti influenzano riproduzione e boost", L"Carrera aérea; objetos afectan reproducción y boosts",
-				L"공중 코스를 나는 레이스. 아이템이 재생·부스트에 개입", L"空中赛道竞速；道具干预播放与加速等", L"سباق جوي؛ العناصر تؤثر على التشغيل والدفع", L"Воздушная гонка; предметы влияют на воспроизведение и бусты", L"Luftrennen; Items greifen in Wiedergabe und Boosts ein",
-				L"Corrida aérea; itens afetam reprodução e boosts", L"Luchtrace; items grijpen in op afspelen en boosts", L"Wyścig powietrzny; przedmioty wpływają na odtwarzanie i boosty", L"Hava yarışı; öğeler çalma ve boost’a müdahale eder"));
+		AddOmakeMenuItems(sub->AddSubMenu(LL14(L"おまけ", L"Extras", L"Bonus", L"Extra", L"Extras", L"보너스", L"附赠", L"إضافات", L"Бонус", L"Extras", L"Extras", L"Extra's", L"Dodatki", L"Ekstralar"),
+			LL14(L"おまけゲーム（レース・迷路・タクティクス）", L"Bonus games (race, maze, tactics)", L"Jeux bonus (course, labyrinthe, tactique)", L"Giochi extra (gara, labirinto, tattica)", L"Juegos extra (carrera, laberinto, táctica)", L"보너스 게임(레이스·미로·택틱스)", L"附赠游戏（竞速、迷宫、战棋）", L"ألعاب إضافية (سباق، متاهة، تكتيكات)", L"Бонусные игры (гонка, лабиринт, тактика)", L"Bonusspiele (Rennen, Labyrinth, Taktik)", L"Jogos extra (corrida, labirinto, tática)", L"Bonusspellen (race, doolhof, tactiek)", L"Gry dodatkowe (wyścig, labirynt, taktyka)", L"Ekstra oyunlar (yarış, labirent, taktik)")));
 		sub->AddCommand(ID_MP_SSVIZ,
 			LL14(L"SS ビジュアライザ", L"SS visualizer", L"Visualiseur SS", L"Visualizzatore SS", L"Visualizador SS", L"SS 비주얼", L"SS 可视化", L"عارض SS", L"SS-визуализатор", L"SS-Visualizer", L"Visual SS", L"SS-visualizer", L"Wizual SS", L"SS gorsel"),
 			LL14(L"スクリーンセーバー風ビジュアライザを開きます", L"Open the screensaver-style visualizer", L"Ouvrir le visualiseur type ecran de veille", L"Apri il visualizzatore stile screensaver", L"Abrir el visualizador tipo protector", L"화면보호기풍 비주얼라이저를 엽니다", L"打开屏保风格可视化器", L"فتح العارض بأسلوب شاشة التوقف", L"Открыть визуализатор в стиле заставки", L"Screensaver-Visualizer oeffnen", L"Abrir o visualizador estilo protetor", L"Screensaver-achtige visualizer openen", L"Otworz wizualizer w stylu wygaszacza", L"Ekran koruyucu tarzi gorseli ac"));
@@ -13904,7 +13885,7 @@ void CMediaPlayerDlg::OnMpDigitize() { OpenDigitizeModeless(this); }
 void CMediaPlayerDlg::OnMpVoiceChanger() { OpenVoiceChangerModeless(this); }
 void CMediaPlayerDlg::OnMpTunerPractice() { OpenTunerPracticeModeless(this); }
 void CMediaPlayerDlg::OnMpPhotoFrame() { OpenPhotoFrameModeless(this); }
-void CMediaPlayerDlg::OnMpSoft3DMaze() { OpenSoft3DMazeModeless(this); }
+void CMediaPlayerDlg::OnMpSoft3DMaze() { CloseOmakeTacticsIfOpen(); OpenSoft3DMazeModeless(this); }
 void CMediaPlayerDlg::OnMpVstHost() { OpenVstHostModeless(this); }
 void CMediaPlayerDlg::OnMpSasamiText() { CSasamiTextDlg::OpenOwned(this); }
 void CMediaPlayerDlg::OnMpSasamiMidi() { CSasamiMidiScoreDlg::OpenOwned(this); }
@@ -13924,7 +13905,50 @@ void CMediaPlayerDlg::OnMpSasamiFmRoll()
 		CSasamiPianoRollDlg::OpenForFm(sc);
 }
 void CMediaPlayerDlg::OnMpCdPlayer() { OpenCdPlayerModeless(this); }
-void CMediaPlayerDlg::OnMpSoft3DRace() { OpenSoft3DRaceModeless(this); }
+void CMediaPlayerDlg::OnMpSoft3DRace() { CloseOmakeTacticsIfOpen(); OpenSoft3DRaceModeless(this); }
+void CMediaPlayerDlg::OnMpOmakeTactics() { OpenOmakeTacticsModeless(this); }
+
+void CMediaPlayerDlg::AddOmakeMenuItems(CCustomPopupMenu* menu)
+{
+	if (!menu) return;
+	menu->AddCommand(ID_MP_SOFT3DRACE,
+		LL14(L"おまけレース…", L"Bonus race…", L"Course bonus…", L"Gara extra…", L"Carrera extra…",
+			L"보너스 레이스…", L"附赠竞速…", L"سباق إضافي…", L"Бонусная гонка…", L"Bonus-Rennen…",
+			L"Corrida extra…", L"Bonusrace…", L"Wyścig dodatkowy…", L"Ekstra yarış…"),
+		LL14(L"空中コースを飛ぶレース。アイテムで再生とブースト等に干渉します", L"Fly an aerial course; items tweak playback and boosts", L"Course aérienne ; objets affectent lecture et boosts", L"Gara aerea; oggetti influenzano riproduzione e boost", L"Carrera aérea; objetos afectan reproducción y boosts",
+			L"공중 코스를 나는 레이스. 아이템이 재생·부스트에 개입", L"空中赛道竞速；道具干预播放与加速等", L"سباق جوي؛ العناصر تؤثر على التشغيل والدفع", L"Воздушная гонка; предметы влияют на воспроизведение и бусты", L"Luftrennen; Items greifen in Wiedergabe und Boosts ein",
+			L"Corrida aérea; itens afetam reprodução e boosts", L"Luchtrace; items grijpen in op afspelen en boosts", L"Wyścig powietrzny; przedmioty wpływają na odtwarzanie i boosty", L"Hava yarışı; öğeler çalma ve boost’a müdahale eder"));
+	menu->AddCommand(ID_MP_SOFT3DMAZE,
+		LL14(L"おまけ迷路ゲーム…", L"Bonus maze game…", L"Jeu de labyrinthe bonus…", L"Labirinto extra…", L"Laberinto extra…",
+			L"보너스 미로 게임…", L"附赠迷宫游戏…", L"لعبة متاهة إضافية…", L"Бонусный лабиринт…", L"Bonus-Labyrinthspiel…",
+			L"Labirinto extra…", L"Bonus-doolhofspel…", L"Labirynt dodatkowy…", L"Ekstra labirent oyunu…"),
+		LL14(L"大きさで迷路を生成。アイテムでテンポ・ピッチ・次曲・EQ に干渉します", L"Generate a maze by size; items tweak tempo, pitch, next track, EQ", L"Labyrinthe par taille ; objets affectent tempo, hauteur, piste, EQ", L"Labirinto per dimensione; oggetti influenzano tempo, pitch, brano, EQ", L"Laberinto por tamaño; objetos afectan tempo, tono, pista, EQ",
+			L"크기로 미로 생성. 아이템이 템포·피치·다음 곡·EQ에 개입", L"按大小生成迷宫；道具干预速度、音高、下一曲、EQ", L"متاهة حسب الحجم؛ العناصر تؤثر على الإيقاع والطبقة والمسار وEQ", L"Лабиринт по размеру; предметы влияют на темп, высоту, трек, EQ", L"Labyrinth nach Größe; Items greifen in Tempo, Tonhöhe, Titel, EQ ein",
+			L"Labirinto por tamanho; itens afetam tempo, tom, faixa, EQ", L"Doolhof op grootte; items grijpen in op tempo, toon, nummer, EQ", L"Labirynt wg rozmiaru; przedmioty wpływają na tempo, wysokość, utwór, EQ", L"Boyuta göre labirent; öğeler tempo, perde, parça, EQ’ye müdahale eder"));
+	menu->AddCommand(ID_MP_OMAKETACTICS,
+		LL14(L"おまけタクティクスゲーム…", L"Bonus tactics game…", L"Jeu de tactique bonus…", L"Gioco tattico extra…", L"Juego táctico extra…",
+			L"보너스 택틱스 게임…", L"附赠战棋游戏…", L"لعبة تكتيكات إضافية…", L"Бонусная тактика…", L"Bonus-Taktikspiel…",
+			L"Jogo tático extra…", L"Bonus-tactiekspel…", L"Gra taktyczna dodatkowa…", L"Ekstra taktik oyunu…"),
+		LL14(L"ファンタジー風のターン制シミュレーション。キャラを育てて全100ステージに挑みます", L"Fantasy turn-based tactics; train characters and take on 100 stages", L"Tactique au tour par tour fantasy ; entraînez vos héros sur 100 niveaux", L"Tattica a turni fantasy; allena i personaggi in 100 livelli", L"Táctica por turnos de fantasía; entrena personajes en 100 fases",
+			L"판타지 턴제 시뮬레이션. 캐릭터를 키워 100스테이지에 도전", L"奇幻回合制战棋；培养角色挑战全100关", L"تكتيكات فانتازيا بالأدوار؛ درّب الشخصيات وتحدَّ 100 مرحلة", L"Фэнтезийная пошаговая тактика; развивайте героев и пройдите 100 этапов", L"Rundenbasierte Fantasy-Taktik; Figuren trainieren, 100 Stufen meistern",
+			L"Tática por turnos de fantasia; treine personagens em 100 fases", L"Fantasy-tactiek in beurten; train personages in 100 levels", L"Fantastyczna taktyka turowa; rozwijaj postacie przez 100 etapów", L"Fantastik sıra tabanlı taktik; karakter geliştir, 100 bölüme meydan oku"));
+}
+
+void CMediaPlayerDlg::OnBotOmake()
+{
+	CCustomPopupMenu menu;
+	menu.SetAeroMode(FALSE);
+	menu.SetSkipChrome(TRUE);
+	AddOmakeMenuItems(&menu);
+	CRect r;
+	if (m_botOmake.GetSafeHwnd())
+		m_botOmake.GetWindowRect(&r);
+	else
+		GetCursorPos(&r.TopLeft());
+	const UINT cmd = menu.Track(CPoint(r.left, r.bottom), this);
+	if (cmd)
+		PostMessage(WM_COMMAND, cmd);
+}
 void CMediaPlayerDlg::OnMpRemote()
 {
 	CloseMpRemoteDlgIfOpen();

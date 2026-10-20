@@ -525,6 +525,27 @@
     <ClCompile Include="Soft3DMazeDlg.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="OmakeTacticsData.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="OmakeTacticsRender.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="OmakeTacticsModels.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="OmakeTacticsGame.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="OmakeTacticsBattle.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="OmakeTacticsText.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="OmakeTacticsDlg.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="Soft3DRaceDlg.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -1868,6 +1889,27 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="Soft3DMazeDlg.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="OmakeTactics.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="OmakeTacticsData.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="OmakeTacticsRender.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="OmakeTacticsModels.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="OmakeTacticsGame.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="OmakeTacticsText.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="OmakeTacticsDlg.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="Soft3DRaceDlg.h">

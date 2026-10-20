@@ -2294,6 +2294,21 @@
 #define ID_ETC39                        40088
 #define ID_ETC40                        40089
 #define ID_DOUGA_SUBOFF                 40090
+#define IDD_OMAKE_TACTICS               405
+#define IDI_UI_TACTICS                  406
+#define IDR_TAC_ASSETS                  4870
+#define IDR_CSO_TAC_VSS                 4871
+#define IDR_CSO_TAC_VSK                 4872
+#define IDR_CSO_TAC_PSM                 4873
+#define IDR_CSO_TAC_PSO                 4874
+#define IDR_CSO_TAC_PSOV                4875
+#define IDR_CSO_TAC_VSH                 4876
+#define IDR_CSO_TAC_PSH                 4877
+#define IDR_CSO_TAC_VSP                 4878
+#define IDR_CSO_TAC_PSP                 4879
+#define IDR_CSO_TAC_VSQ                 4880
+#define IDR_CSO_TAC_PSSKY               4881
+#define ID_MP_OMAKETACTICS              33770
 
 // Next default values for new objects
 #ifdef APSTUDIO_INVOKED

@@ -1261,6 +1261,13 @@ if errorlevel 1 exit /b 1</Command>
     <ClCompile Include="Soft3DGpuInfo.cpp" />
     <ClCompile Include="Soft3DLoop.cpp" />
     <ClCompile Include="Soft3DMazeDlg.cpp" />
+    <ClCompile Include="OmakeTacticsData.cpp" />
+    <ClCompile Include="OmakeTacticsRender.cpp" />
+    <ClCompile Include="OmakeTacticsModels.cpp" />
+    <ClCompile Include="OmakeTacticsGame.cpp" />
+    <ClCompile Include="OmakeTacticsBattle.cpp" />
+    <ClCompile Include="OmakeTacticsText.cpp" />
+    <ClCompile Include="OmakeTacticsDlg.cpp" />
     <ClCompile Include="Soft3DRaceDlg.cpp" />
     <ClCompile Include="Soft3DTextD2D.cpp" />
     <ClCompile Include="Soft3DGameSfx.cpp" />
@@ -1450,6 +1457,13 @@ if errorlevel 1 exit /b 1</Command>
     <ClInclude Include="Soft3DGpuInfo.h" />
     <ClInclude Include="Soft3DLoop.h" />
     <ClInclude Include="Soft3DMazeDlg.h" />
+    <ClInclude Include="OmakeTactics.h" />
+    <ClInclude Include="OmakeTacticsData.h" />
+    <ClInclude Include="OmakeTacticsRender.h" />
+    <ClInclude Include="OmakeTacticsModels.h" />
+    <ClInclude Include="OmakeTacticsGame.h" />
+    <ClInclude Include="OmakeTacticsText.h" />
+    <ClInclude Include="OmakeTacticsDlg.h" />
     <ClInclude Include="Soft3DRaceDlg.h" />
     <ClInclude Include="Soft3DGameSfx.h" />
     <ClInclude Include="Soft3DTexRes.h" />

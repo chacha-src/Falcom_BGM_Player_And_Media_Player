@@ -1,0 +1,1667 @@
+// OmakeTacticsData.cpp — おまけタクティクス: ルール・マップ生成・経路・戦闘・AI・セーブ
+
+#include "stdafx.h"
+#include "OmakeTacticsData.h"
+#include "DatArchive.h"
+#include <stdio.h>
+
+namespace otac {
+
+// ============================================================ 数学
+float WrapAngle(float a)
+{
+	const float P = 3.14159265f;
+	while (a > P) a -= 2 * P;
+	while (a < -P) a += 2 * P;
+	return a;
+}
+
+Q4 QNlerp(const Q4& a, const Q4& b, float t)
+{
+	float d = a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w;
+	float s = d < 0 ? -1.f : 1.f;
+	Q4 r = { a.x + (b.x * s - a.x) * t, a.y + (b.y * s - a.y) * t, a.z + (b.z * s - a.z) * t, a.w + (b.w * s - a.w) * t };
+	float l = sqrtf(r.x * r.x + r.y * r.y + r.z * r.z + r.w * r.w);
+	if (l > 1e-8f) { r.x /= l; r.y /= l; r.z /= l; r.w /= l; }
+	return r;
+}
+
+Q4 QAxis(V3 ax, float ang)
+{
+	ax = Norm(ax);
+	float s = sinf(ang * .5f);
+	Q4 q = { ax.x * s, ax.y * s, ax.z * s, cosf(ang * .5f) };
+	return q;
+}
+
+Q4 QMul(const Q4& a, const Q4& b)
+{
+	Q4 r;
+	r.w = a.w * b.w - a.x * b.x - a.y * b.y - a.z * b.z;
+	r.x = a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y;
+	r.y = a.w * b.y - a.x * b.z + a.y * b.w + a.z * b.x;
+	r.z = a.w * b.z + a.x * b.y - a.y * b.x + a.z * b.w;
+	return r;
+}
+
+M4 MIdent() { M4 r = {}; r.m[0] = r.m[5] = r.m[10] = r.m[15] = 1; return r; }
+
+M4 MMul(const M4& a, const M4& b)
+{
+	M4 r;
+	for (int i = 0; i < 4; i++)
+		for (int j = 0; j < 4; j++)
+			r.m[i * 4 + j] = a.m[i * 4 + 0] * b.m[0 * 4 + j] + a.m[i * 4 + 1] * b.m[1 * 4 + j]
+				+ a.m[i * 4 + 2] * b.m[2 * 4 + j] + a.m[i * 4 + 3] * b.m[3 * 4 + j];
+	return r;
+}
+
+M4 MTRS(V3 t, const Q4& q, V3 s)
+{
+	const float x = q.x, y = q.y, z = q.z, w = q.w;
+	M4 r = {};
+	r.m[0] = (1 - 2 * (y * y + z * z)) * s.x; r.m[1] = (2 * (x * y + z * w)) * s.x; r.m[2] = (2 * (x * z - y * w)) * s.x;
+	r.m[4] = (2 * (x * y - z * w)) * s.y; r.m[5] = (1 - 2 * (x * x + z * z)) * s.y; r.m[6] = (2 * (y * z + x * w)) * s.y;
+	r.m[8] = (2 * (x * z + y * w)) * s.z; r.m[9] = (2 * (y * z - x * w)) * s.z; r.m[10] = (1 - 2 * (x * x + y * y)) * s.z;
+	r.m[12] = t.x; r.m[13] = t.y; r.m[14] = t.z; r.m[15] = 1;
+	return r;
+}
+
+M4 MTrans(float x, float y, float z) { M4 r = MIdent(); r.m[12] = x; r.m[13] = y; r.m[14] = z; return r; }
+M4 MScale(float x, float y, float z) { M4 r = MIdent(); r.m[0] = x; r.m[5] = y; r.m[10] = z; return r; }
+M4 MRotY(float a) { M4 r = MIdent(); float c = cosf(a), s = sinf(a); r.m[0] = c; r.m[2] = -s; r.m[8] = s; r.m[10] = c; return r; }
+M4 MRotX(float a) { M4 r = MIdent(); float c = cosf(a), s = sinf(a); r.m[5] = c; r.m[6] = s; r.m[9] = -s; r.m[10] = c; return r; }
+M4 MRotZ(float a) { M4 r = MIdent(); float c = cosf(a), s = sinf(a); r.m[0] = c; r.m[1] = s; r.m[4] = -s; r.m[5] = c; return r; }
+
+M4 MLookAtLH(V3 eye, V3 at, V3 up)
+{
+	V3 z = Norm(at - eye), x = Norm(Cross(up, z)), y = Cross(z, x);
+	M4 r = MIdent();
+	r.m[0] = x.x; r.m[1] = y.x; r.m[2] = z.x;
+	r.m[4] = x.y; r.m[5] = y.y; r.m[6] = z.y;
+	r.m[8] = x.z; r.m[9] = y.z; r.m[10] = z.z;
+	r.m[12] = -Dot(x, eye); r.m[13] = -Dot(y, eye); r.m[14] = -Dot(z, eye);
+	return r;
+}
+
+M4 MPerspLH(float fovY, float aspect, float zn, float zf)
+{
+	float ys = 1.f / tanf(fovY * .5f), xs = ys / aspect;
+	M4 r = {};
+	r.m[0] = xs; r.m[5] = ys; r.m[10] = zf / (zf - zn); r.m[11] = 1; r.m[14] = -zn * zf / (zf - zn);
+	return r;
+}
+
+M4 MOrthoLH(float w, float h, float zn, float zf)
+{
+	M4 r = MIdent();
+	r.m[0] = 2 / w; r.m[5] = 2 / h; r.m[10] = 1 / (zf - zn); r.m[14] = -zn / (zf - zn);
+	return r;
+}
+
+M4 MTranspose(const M4& a)
+{
+	M4 r;
+	for (int i = 0; i < 4; i++) for (int j = 0; j < 4; j++) r.m[i * 4 + j] = a.m[j * 4 + i];
+	return r;
+}
+
+M4 MInverse(const M4& a)
+{
+	const float* m = a.m;
+	float inv[16];
+	inv[0] = m[5] * m[10] * m[15] - m[5] * m[11] * m[14] - m[9] * m[6] * m[15] + m[9] * m[7] * m[14] + m[13] * m[6] * m[11] - m[13] * m[7] * m[10];
+	inv[4] = -m[4] * m[10] * m[15] + m[4] * m[11] * m[14] + m[8] * m[6] * m[15] - m[8] * m[7] * m[14] - m[12] * m[6] * m[11] + m[12] * m[7] * m[10];
+	inv[8] = m[4] * m[9] * m[15] - m[4] * m[11] * m[13] - m[8] * m[5] * m[15] + m[8] * m[7] * m[13] + m[12] * m[5] * m[11] - m[12] * m[7] * m[9];
+	inv[12] = -m[4] * m[9] * m[14] + m[4] * m[10] * m[13] + m[8] * m[5] * m[14] - m[8] * m[6] * m[13] - m[12] * m[5] * m[10] + m[12] * m[6] * m[9];
+	inv[1] = -m[1] * m[10] * m[15] + m[1] * m[11] * m[14] + m[9] * m[2] * m[15] - m[9] * m[3] * m[14] - m[13] * m[2] * m[11] + m[13] * m[3] * m[10];
+	inv[5] = m[0] * m[10] * m[15] - m[0] * m[11] * m[14] - m[8] * m[2] * m[15] + m[8] * m[3] * m[14] + m[12] * m[2] * m[11] - m[12] * m[3] * m[10];
+	inv[9] = -m[0] * m[9] * m[15] + m[0] * m[11] * m[13] + m[8] * m[1] * m[15] - m[8] * m[3] * m[13] - m[12] * m[1] * m[11] + m[12] * m[3] * m[9];
+	inv[13] = m[0] * m[9] * m[14] - m[0] * m[10] * m[13] - m[8] * m[1] * m[14] + m[8] * m[2] * m[13] + m[12] * m[1] * m[10] - m[12] * m[2] * m[9];
+	inv[2] = m[1] * m[6] * m[15] - m[1] * m[7] * m[14] - m[5] * m[2] * m[15] + m[5] * m[3] * m[14] + m[13] * m[2] * m[7] - m[13] * m[3] * m[6];
+	inv[6] = -m[0] * m[6] * m[15] + m[0] * m[7] * m[14] + m[4] * m[2] * m[15] - m[4] * m[3] * m[14] - m[12] * m[2] * m[7] + m[12] * m[3] * m[6];
+	inv[10] = m[0] * m[5] * m[15] - m[0] * m[7] * m[13] - m[4] * m[1] * m[15] + m[4] * m[3] * m[13] + m[12] * m[1] * m[7] - m[12] * m[3] * m[5];
+	inv[14] = -m[0] * m[5] * m[14] + m[0] * m[6] * m[13] + m[4] * m[1] * m[14] - m[4] * m[2] * m[13] - m[12] * m[1] * m[6] + m[12] * m[2] * m[5];
+	inv[3] = -m[1] * m[6] * m[11] + m[1] * m[7] * m[10] + m[5] * m[2] * m[11] - m[5] * m[3] * m[10] - m[9] * m[2] * m[7] + m[9] * m[3] * m[6];
+	inv[7] = m[0] * m[6] * m[11] - m[0] * m[7] * m[10] - m[4] * m[2] * m[11] + m[4] * m[3] * m[10] + m[8] * m[2] * m[7] - m[8] * m[3] * m[6];
+	inv[11] = -m[0] * m[5] * m[11] + m[0] * m[7] * m[9] + m[4] * m[1] * m[11] - m[4] * m[3] * m[9] - m[8] * m[1] * m[7] + m[8] * m[3] * m[5];
+	inv[15] = m[0] * m[5] * m[10] - m[0] * m[6] * m[9] - m[4] * m[1] * m[10] + m[4] * m[2] * m[9] + m[8] * m[1] * m[6] - m[8] * m[2] * m[5];
+	float det = m[0] * inv[0] + m[1] * inv[4] + m[2] * inv[8] + m[3] * inv[12];
+	M4 r = MIdent();
+	if (fabsf(det) < 1e-12f) return r;
+	det = 1.f / det;
+	for (int i = 0; i < 16; i++) r.m[i] = inv[i] * det;
+	return r;
+}
+
+V3 MXformPt(const M4& a, V3 p)
+{
+	const float* m = a.m;
+	float x = p.x * m[0] + p.y * m[4] + p.z * m[8] + m[12];
+	float y = p.x * m[1] + p.y * m[5] + p.z * m[9] + m[13];
+	float z = p.x * m[2] + p.y * m[6] + p.z * m[10] + m[14];
+	float w = p.x * m[3] + p.y * m[7] + p.z * m[11] + m[15];
+	if (fabsf(w) > 1e-8f && fabsf(w - 1) > 1e-6f) { x /= w; y /= w; z /= w; }
+	return v3(x, y, z);
+}
+
+V3 MXformDir(const M4& a, V3 d)
+{
+	const float* m = a.m;
+	return v3(d.x * m[0] + d.y * m[4] + d.z * m[8], d.x * m[1] + d.y * m[5] + d.z * m[9], d.x * m[2] + d.y * m[6] + d.z * m[10]);
+}
+
+// ============================================================ 地形・テーマ
+static const TerrainDef kTerrain[T_COUNT] = {
+	{ TX_TER_PLAIN,    1, 1, 0, 0 },
+	{ TX_TER_FOREST,   2, 1, 10, 20 },
+	{ TX_TER_HILL,     2, 1, 15, 10 },
+	{ TX_TER_MOUNTAIN, 99, 0, 0, 0 },
+	{ TX_TER_WATER,    99, 1, 0, 0 },
+	{ TX_TER_CHASM,    99, 1, 0, 0 },
+	{ TX_TER_LAVA,     99, 1, 0, 0 },
+	{ TX_TER_SAND,     2, 1, 0, 5 },
+	{ TX_TER_SNOW,     2, 1, 0, 5 },
+	{ TX_TER_SWAMP,    3, 1, -10, -10 },
+	{ TX_TER_ROAD,     1, 1, 0, 0 },
+	{ TX_TER_BRIDGE,   1, 1, 0, 0 },
+	{ TX_TER_RUINS,    1, 1, 10, 10 },
+	{ TX_TER_ROCK,     99, 0, 0, 0 },
+};
+const TerrainDef& TerrainInfo(int t) { return kTerrain[Clampi(t, 0, T_COUNT - 1)]; }
+int ThemeNameTx(int th) { return TX_TH_PLAINS + Clampi(th, 0, TH_COUNT - 1); }
+int StatNameTx(int s) { return TX_ST_HP + Clampi(s, 0, S_COUNT - 1); }
+
+float Map::TopY(int x, int z) const
+{
+	if (!In(x, z)) return 0;
+	const Cell& c = At(x, z);
+	if (c.t == T_CHASM) return -3.2f;
+	return c.h * kHStep;
+}
+
+float Map::StandY(int x, int z) const
+{
+	if (!In(x, z)) return 0;
+	const Cell& c = At(x, z);
+	if (c.t == T_CHASM) return 0.0f;
+	if (c.t == T_WATER) return c.h * kHStep + 0.3f;
+	if (c.t == T_LAVA) return c.h * kHStep + 0.25f;
+	return c.h * kHStep;
+}
+
+// ---- 値ノイズ
+static float HashF(DWORD seed, int x, int z)
+{
+	DWORD h = seed * 0x9E3779B1u ^ (DWORD)x * 0x85EBCA77u ^ (DWORD)z * 0xC2B2AE3Du;
+	h ^= h >> 15; h *= 0x2C1B3C6Du; h ^= h >> 12; h *= 0x297A2D39u; h ^= h >> 15;
+	return (h & 0xFFFFFF) / 16777216.f;
+}
+static float VNoise(DWORD seed, float x, float z)
+{
+	int ix = (int)floorf(x), iz = (int)floorf(z);
+	float fx = x - ix, fz = z - iz;
+	fx = fx * fx * (3 - 2 * fx); fz = fz * fz * (3 - 2 * fz);
+	float a = HashF(seed, ix, iz), b = HashF(seed, ix + 1, iz), c = HashF(seed, ix, iz + 1), d = HashF(seed, ix + 1, iz + 1);
+	return Lerpf(Lerpf(a, b, fx), Lerpf(c, d, fx), fz);
+}
+static float Fbm(DWORD seed, float x, float z, int oct)
+{
+	float s = 0, a = .5f, n = 0;
+	for (int i = 0; i < oct; i++) { s += a * VNoise(seed + i * 101, x, z); n += a; x *= 2.03f; z *= 2.03f; a *= .5f; }
+	return s / n;
+}
+
+struct ThemeParam {
+	float amp, freq;
+	int baseH, ground;
+	float forestThr;
+	int valley;        // 0=川 1=谷(裂け目) 2=溶岩 3=沼の池
+	int ranges, rockPct, road, swamp;
+};
+static const ThemeParam kTheme[TH_COUNT] = {
+	{ 4.5f, .055f, 2, T_PLAIN, .63f, 0, 2, 2, 1, 0 },
+	{ 6.0f, .050f, 3, T_PLAIN, .74f, 1, 3, 4, 0, 0 },
+	{ 3.0f, .060f, 2, T_PLAIN, .45f, 0, 1, 2, 1, 0 },
+	{ 5.0f, .050f, 2, T_SNOW, .60f, 0, 3, 3, 0, 0 },
+	{ 4.0f, .045f, 2, T_SAND, .84f, 1, 2, 5, 1, 0 },
+	{ 5.0f, .055f, 3, T_PLAIN, .80f, 2, 3, 6, 0, 0 },
+	{ 2.0f, .060f, 2, T_PLAIN, .58f, 3, 1, 2, 0, 1 },
+	{ 3.0f, .050f, 2, T_PLAIN, .70f, 1, 2, 3, 1, 0 },
+};
+
+static bool FootPassable(int t) { return TerrainInfo(t).costFoot < 99; }
+
+static void MeanderLine(Rng& r, int* xs, int* zs, int& n, int maxN, bool vertical)
+{
+	n = 0;
+	float p = (float)r.Range(14, MAPN - 15);
+	float dir = 0;
+	for (int i = 0; i < MAPN && n < maxN; i++) {
+		dir += r.F(-.35f, .35f);
+		dir = Clampf(dir, -.8f, .8f);
+		p += dir;
+		if (p < 3) { p = 3; dir = .3f; }
+		if (p > MAPN - 4) { p = MAPN - 4; dir = -.3f; }
+		if (vertical) { xs[n] = (int)p; zs[n] = i; }
+		else { xs[n] = i; zs[n] = (int)p; }
+		n++;
+	}
+}
+
+static void CarveValleyAround(Map& m, const BYTE (*mark)[MAPN], int depth)
+{
+	// 印のセルからの距離で地面を下げる（谷）
+	static short dist[MAPN][MAPN];
+	int qx[MAPN * MAPN], qz[MAPN * MAPN], qh = 0, qt = 0;
+	for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) {
+		dist[z][x] = mark[z][x] ? 0 : 999;
+		if (mark[z][x]) { qx[qt] = x; qz[qt] = z; qt++; }
+	}
+	static const int dx[4] = { 1, -1, 0, 0 }, dz[4] = { 0, 0, 1, -1 };
+	while (qh < qt) {
+		int x = qx[qh], z = qz[qh]; qh++;
+		for (int k = 0; k < 4; k++) {
+			int nx = x + dx[k], nz = z + dz[k];
+			if (!Map::In(nx, nz) || dist[nz][nx] <= dist[z][x] + 1) continue;
+			dist[nz][nx] = (short)(dist[z][x] + 1);
+			qx[qt] = nx; qz[qt] = nz; qt++;
+		}
+	}
+	for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) {
+		int d = dist[z][x];
+		if (d > depth) continue;
+		Cell& c = m.c[z][x];
+		int dec = depth - d;
+		c.h = (BYTE)max(1, (int)c.h - dec);
+	}
+}
+
+static void PlaceLine(Map& m, Rng& r, int type, int width, bool vertical, BYTE (*mark)[MAPN], int* bridgeX, int* bridgeZ, int& nb)
+{
+	int xs[MAPN], zs[MAPN], n = 0;
+	MeanderLine(r, xs, zs, n, MAPN, vertical);
+	nb = 0;
+	int nBridge = r.Range(2, 3);
+	int bridgeAt[3];
+	for (int i = 0; i < nBridge; i++) bridgeAt[i] = (i + 1) * n / (nBridge + 1) + r.Range(-4, 4);
+	for (int i = 0; i < n; i++) {
+		bool bridge = false;
+		for (int b = 0; b < nBridge; b++) if (abs(i - bridgeAt[b]) == 0) bridge = true;
+		for (int w = 0; w < width; w++) {
+			int x = xs[i] + (vertical ? w : 0), z = zs[i] + (vertical ? 0 : w);
+			if (!Map::In(x, z)) continue;
+			mark[z][x] = 1;
+			if (bridge) {
+				if (nb < 6) { bridgeX[nb] = x; bridgeZ[nb] = z; nb++; }
+			}
+		}
+	}
+	(void)type;
+}
+
+static void MountainRange(Map& m, Rng& r, int extra)
+{
+	int x = r.Range(6, MAPN - 7), z = r.Range(6, MAPN - 7);
+	float a = r.F(0, 6.283f);
+	int len = r.Range(10, 22);
+	for (int i = 0; i < len; i++) {
+		a += r.F(-.4f, .4f);
+		int w = r.Range(1, 2);
+		for (int oz = -w + 1; oz < w; oz++) for (int ox = -w + 1; ox < w; ox++) {
+			int cx = x + ox, cz = z + oz;
+			if (!Map::In(cx, cz)) continue;
+			Cell& c = m.c[cz][cx];
+			if (c.t == T_WATER || c.t == T_CHASM || c.t == T_LAVA || c.t == T_BRIDGE) continue;
+			c.t = T_MOUNTAIN;
+			c.h = (BYTE)min(MAXH, c.h + extra + r.Range(0, 1));
+		}
+		x += (int)roundf(cosf(a) * 1.5f);
+		z += (int)roundf(sinf(a) * 1.5f);
+		if (!Map::In(x, z)) break;
+	}
+}
+
+static int StepCostGen(const Map& m, int x, int z)
+{
+	const Cell& c = m.c[z][x];
+	switch (c.t) {
+	case T_MOUNTAIN: return 30;
+	case T_ROCK: return 25;
+	case T_WATER: case T_LAVA: case T_CHASM: return 14;
+	case T_FOREST: return 4;
+	case T_SWAMP: return 4;
+	case T_ROAD: return 1;
+	default: return 2;
+	}
+}
+
+static int CarveRoad(Map& m, int sx, int sz, int tx, int tz, int* px, int* pz, int maxN)
+{
+	// ダイクストラ（高低差にもペナルティ）
+	static int dist[MAPN][MAPN];
+	static short prev[MAPN][MAPN];
+	static BYTE done[MAPN][MAPN];
+	for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) { dist[z][x] = 1 << 29; prev[z][x] = -1; done[z][x] = 0; }
+	dist[sz][sx] = 0;
+	static const int dx[4] = { 1, -1, 0, 0 }, dz[4] = { 0, 0, 1, -1 };
+	for (;;) {
+		int bx = -1, bz = -1, bd = 1 << 29;
+		for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++)
+			if (!done[z][x] && dist[z][x] < bd) { bd = dist[z][x]; bx = x; bz = z; }
+		if (bx < 0 || (bx == tx && bz == tz)) break;
+		done[bz][bx] = 1;
+		for (int k = 0; k < 4; k++) {
+			int nx = bx + dx[k], nz = bz + dz[k];
+			if (!Map::In(nx, nz) || done[nz][nx]) continue;
+			int dh = abs((int)m.c[nz][nx].h - (int)m.c[bz][bx].h);
+			int nd = bd + StepCostGen(m, nx, nz) + dh * 3;
+			if (nd < dist[nz][nx]) { dist[nz][nx] = nd; prev[nz][nx] = (short)(bz * MAPN + bx); }
+		}
+	}
+	int n = 0;
+	int cx = tx, cz = tz;
+	int tmpx[MAPN * MAPN / 4], tmpz[MAPN * MAPN / 4];
+	while (n < (int)_countof(tmpx)) {
+		tmpx[n] = cx; tmpz[n] = cz; n++;
+		if (cx == sx && cz == sz) break;
+		int p = prev[cz][cx];
+		if (p < 0) break;
+		cx = p % MAPN; cz = p / MAPN;
+	}
+	int out = 0;
+	for (int i = n - 1; i >= 0 && out < maxN; i--) { px[out] = tmpx[i]; pz[out] = tmpz[i]; out++; }
+	return out;
+}
+
+static bool FootReachable(const Map& m, int sx, int sz, int tx, int tz)
+{
+	static BYTE seen[MAPN][MAPN];
+	memset(seen, 0, sizeof(seen));
+	static int qx[MAPN * MAPN], qz[MAPN * MAPN];
+	int qh = 0, qt = 0;
+	qx[qt] = sx; qz[qt] = sz; qt++; seen[sz][sx] = 1;
+	static const int dx[4] = { 1, -1, 0, 0 }, dz[4] = { 0, 0, 1, -1 };
+	while (qh < qt) {
+		int x = qx[qh], z = qz[qh]; qh++;
+		if (x == tx && z == tz) return true;
+		for (int k = 0; k < 4; k++) {
+			int nx = x + dx[k], nz = z + dz[k];
+			if (!Map::In(nx, nz) || seen[nz][nx]) continue;
+			if (!CanStep(m, x, z, nx, nz, MV_FOOT, 2)) continue;
+			seen[nz][nx] = 1;
+			qx[qt] = nx; qz[qt] = nz; qt++;
+		}
+	}
+	return false;
+}
+
+static void PickDeploy(Map& m, int ax, int az, int* outX, int* outZ, int want, int spacing, const BYTE (*taken)[MAPN])
+{
+	static BYTE seen[MAPN][MAPN];
+	memset(seen, 0, sizeof(seen));
+	static int qx[MAPN * MAPN], qz[MAPN * MAPN];
+	int qh = 0, qt = 0, got = 0;
+	qx[qt] = ax; qz[qt] = az; qt++; seen[az][ax] = 1;
+	static const int dx[4] = { 1, -1, 0, 0 }, dz[4] = { 0, 0, 1, -1 };
+	while (qh < qt && got < want) {
+		int x = qx[qh], z = qz[qh]; qh++;
+		const Cell& c = m.c[z][x];
+		bool ok = FootPassable(c.t) && !(taken && taken[z][x]);
+		for (int i = 0; i < got && ok; i++)
+			if (Dist(outX[i], outZ[i], x, z) < spacing) ok = false;
+		if (ok) { outX[got] = x; outZ[got] = z; got++; }
+		for (int k = 0; k < 4; k++) {
+			int nx = x + dx[k], nz = z + dz[k];
+			if (!Map::In(nx, nz) || seen[nz][nx]) continue;
+			if (!CanStep(m, x, z, nx, nz, MV_FOOT, 3)) continue;
+			seen[nz][nx] = 1;
+			qx[qt] = nx; qz[qt] = nz; qt++;
+		}
+	}
+	for (int i = got; i < want; i++) { outX[i] = outX[got ? i % got : 0]; outZ[i] = outZ[got ? i % got : 0]; }
+}
+
+void GenerateMap(Map& m, int stage, DWORD seed)
+{
+	memset(&m, 0, sizeof(m));
+	Rng r(seed);
+	m.seed = seed;
+	m.stage = stage;
+	int th;
+	if (stage <= 1) th = TH_PLAINS;
+	else if (stage % 10 == 0) th = (stage / 10) & 1 ? TH_VOLCANO : TH_RUINS;
+	else th = r.Range(0, TH_COUNT - 1);
+	m.theme = th;
+	const ThemeParam& tp = kTheme[th];
+	const DWORD ns = seed * 7 + 13;
+
+	// 1) 高さと基本地面
+	for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) {
+		float n = Fbm(ns, x * tp.freq, z * tp.freq, 4);
+		int h = tp.baseH + (int)roundf((n - .35f) * tp.amp * 2.f);
+		Cell& c = m.c[z][x];
+		c.h = (BYTE)Clampi(h, 1, MAXH - 3);
+		c.t = (BYTE)tp.ground;
+		c.var = (BYTE)r.Range(0, 255);
+	}
+	// 高台は丘
+	for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) {
+		Cell& c = m.c[z][x];
+		int hmax = c.h;
+		static const int dx[4] = { 1, -1, 0, 0 }, dz[4] = { 0, 0, 1, -1 };
+		for (int k = 0; k < 4; k++) if (Map::In(x + dx[k], z + dz[k])) hmax = max(hmax, (int)m.c[z + dz[k]][x + dx[k]].h);
+		if (c.h >= tp.baseH + (int)(tp.amp * .7f) && hmax - c.h <= 1 && th != TH_DESERT)
+			c.t = T_HILL;
+	}
+
+	// 2) 谷（川／裂け目／溶岩）
+	static BYTE mark[MAPN][MAPN];
+	memset(mark, 0, sizeof(mark));
+	int bx[6], bz[6], nb = 0;
+	const bool vert = r.Chance(50);
+	int width = (tp.valley == 1) ? r.Range(2, 3) : r.Range(1, 2);
+	if (th == TH_CANYON) width = 3;
+	PlaceLine(m, r, 0, width, vert, mark, bx, bz, nb);
+	CarveValleyAround(m, mark, th == TH_CANYON ? 4 : 2);
+	for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) {
+		if (!mark[z][x]) continue;
+		Cell& c = m.c[z][x];
+		switch (tp.valley) {
+		case 1: c.t = T_CHASM; c.h = 0; break;
+		case 2: c.t = T_LAVA; c.h = (BYTE)max(0, (int)c.h - 1); break;
+		default: c.t = T_WATER; c.h = (BYTE)max(0, (int)c.h - 1); break;
+		}
+	}
+	for (int i = 0; i < nb; i++) {
+		Cell& c = m.c[bz[i]][bx[i]];
+		int hh = 0, cnt = 0;
+		for (int oz = -2; oz <= 2; oz++) for (int ox = -2; ox <= 2; ox++) {
+			int x = bx[i] + ox, z = bz[i] + oz;
+			if (Map::In(x, z) && !mark[z][x]) { hh += m.c[z][x].h; cnt++; }
+		}
+		c.t = T_BRIDGE;
+		c.h = (BYTE)Clampi(cnt ? hh / cnt : 2, 1, MAXH);
+	}
+	// 小さな副谷（全テーマで「谷」を入れる）
+	if (tp.valley != 1) {
+		memset(mark, 0, sizeof(mark));
+		int cx = r.Range(10, MAPN - 11), cz = r.Range(10, MAPN - 11);
+		float a = r.F(0, 6.283f);
+		int len = r.Range(6, 10);
+		for (int i = 0; i < len; i++) {
+			if (Map::In(cx, cz)) mark[cz][cx] = 1;
+			a += r.F(-.5f, .5f);
+			cx += (int)roundf(cosf(a)); cz += (int)roundf(sinf(a));
+		}
+		CarveValleyAround(m, mark, 1);
+		for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++)
+			if (mark[z][x] && m.c[z][x].t != T_WATER && m.c[z][x].t != T_BRIDGE && m.c[z][x].t != T_LAVA) { m.c[z][x].t = T_CHASM; m.c[z][x].h = 0; }
+	}
+	// 池（沼・砂漠オアシス）
+	int pools = (th == TH_SWAMP) ? 6 : (th == TH_DESERT || th == TH_FOREST) ? 2 : 1;
+	for (int p = 0; p < pools; p++) {
+		int cx = r.Range(6, MAPN - 7), cz = r.Range(6, MAPN - 7), rad = r.Range(2, 3);
+		for (int z = cz - rad; z <= cz + rad; z++) for (int x = cx - rad; x <= cx + rad; x++) {
+			if (!Map::In(x, z)) continue;
+			float d = sqrtf((float)((x - cx) * (x - cx) + (z - cz) * (z - cz))) + r.F(0, .8f);
+			Cell& c = m.c[z][x];
+			if (d < rad && c.t != T_CHASM && c.t != T_BRIDGE) {
+				c.t = (th == TH_VOLCANO) ? T_LAVA : T_WATER;
+				c.h = (BYTE)max(1, (int)c.h - 1);
+			}
+		}
+	}
+
+	// 3) 山脈
+	for (int i = 0; i < tp.ranges + 1; i++) MountainRange(m, r, 3);
+
+	// 4) 森・沼・岩・遺跡
+	const DWORD fs = seed * 31 + 7;
+	for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) {
+		Cell& c = m.c[z][x];
+		if (c.t != tp.ground && c.t != T_HILL) continue;
+		float f = Fbm(fs, x * .11f, z * .11f, 3);
+		if (f > tp.forestThr) c.t = T_FOREST;
+		else if (tp.swamp && Fbm(fs + 99, x * .09f, z * .09f, 3) > .58f) c.t = T_SWAMP;
+		else if (r.Range(0, 99) < tp.rockPct) c.t = T_ROCK;
+	}
+	if (th == TH_RUINS || (th != TH_CANYON && r.Chance(40))) {
+		int nr = th == TH_RUINS ? r.Range(4, 6) : 1;
+		for (int k = 0; k < nr; k++) {
+			int w = r.Range(5, 9), d = r.Range(5, 9);
+			int x0 = r.Range(4, MAPN - w - 5), z0 = r.Range(4, MAPN - d - 5);
+			int hh = m.c[z0 + d / 2][x0 + w / 2].h;
+			if (m.c[z0 + d / 2][x0 + w / 2].t == T_CHASM) hh = 2;
+			for (int z = z0; z < z0 + d; z++) for (int x = x0; x < x0 + w; x++) {
+				Cell& c = m.c[z][x];
+				if (c.t == T_WATER || c.t == T_CHASM || c.t == T_LAVA || c.t == T_BRIDGE) continue;
+				c.t = T_RUINS; c.h = (BYTE)Clampi(hh, 1, MAXH - 3);
+				bool edge = (x == x0 || z == z0 || x == x0 + w - 1 || z == z0 + d - 1);
+				if (edge && ((x + z) % 2 == 0) && r.Chance(70)) c.t = T_ROCK;
+			}
+		}
+	}
+
+	// 5) 初期位置（離す）
+	float ang = r.F(0, 6.283f);
+	int pax = Clampi((int)(MAPN / 2 + cosf(ang) * 23), 4, MAPN - 5);
+	int paz = Clampi((int)(MAPN / 2 + sinf(ang) * 23), 4, MAPN - 5);
+	int eax = Clampi((int)(MAPN / 2 - cosf(ang) * 23 + r.Range(-3, 3)), 4, MAPN - 5);
+	int eaz = Clampi((int)(MAPN / 2 - sinf(ang) * 23 + r.Range(-3, 3)), 4, MAPN - 5);
+	for (int pass = 0; pass < 2; pass++) {
+		int ax = pass ? eax : pax, az = pass ? eaz : paz;
+		int hh = max(1, (int)m.c[az][ax].h);
+		if (m.c[az][ax].t == T_MOUNTAIN) hh = max(1, hh - 3);
+		if (m.c[az][ax].t == T_CHASM) hh = 2;
+		int rad = pass ? 4 : 3;
+		for (int z = az - rad; z <= az + rad; z++) for (int x = ax - rad; x <= ax + rad; x++) {
+			if (!Map::In(x, z)) continue;
+			Cell& c = m.c[z][x];
+			c.t = (BYTE)(tp.ground == T_SAND ? T_SAND : (tp.ground == T_SNOW ? T_SNOW : T_PLAIN));
+			int d = max(abs(x - ax), abs(z - az));
+			c.h = (BYTE)Clampi(d < rad - 1 ? hh : (hh + c.h) / 2, 1, MAXH);
+		}
+	}
+
+	// 6) 道（連結保証）
+	int px[MAPN * 4], pz[MAPN * 4];
+	int np = CarveRoad(m, pax, paz, eax, eaz, px, pz, MAPN * 4);
+	for (int i = 0; i < np; i++) {
+		Cell& c = m.c[pz[i]][px[i]];
+		if (c.t == T_WATER || c.t == T_LAVA || c.t == T_CHASM) {
+			int hh = i > 0 ? m.c[pz[i - 1]][px[i - 1]].h : 2;
+			c.t = T_BRIDGE; c.h = (BYTE)Clampi(hh, 1, MAXH);
+		} else if (c.t == T_MOUNTAIN || c.t == T_ROCK) {
+			c.t = (BYTE)(tp.road ? T_ROAD : tp.ground);
+			if (i > 0) c.h = m.c[pz[i - 1]][px[i - 1]].h;
+		} else if (tp.road && c.t != T_BRIDGE && c.t != T_RUINS) {
+			c.t = T_ROAD;
+		} else if (c.t == T_SWAMP && !tp.swamp) {
+			c.t = (BYTE)tp.ground;
+		}
+		if (i > 0) {
+			int ph = m.c[pz[i - 1]][px[i - 1]].h;
+			if ((int)c.h > ph + 1) c.h = (BYTE)(ph + 1);
+			if ((int)c.h < ph - 1) c.h = (BYTE)(ph - 1);
+			if (c.h < 1) c.h = 1;
+		}
+	}
+	// 橋の両端も段差を揃える
+	for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) {
+		if (m.c[z][x].t != T_BRIDGE) continue;
+		static const int dx[4] = { 1, -1, 0, 0 }, dz[4] = { 0, 0, 1, -1 };
+		for (int k = 0; k < 4; k++) {
+			int nx = x + dx[k], nz = z + dz[k];
+			if (!Map::In(nx, nz)) continue;
+			Cell& n = m.c[nz][nx];
+			if (FootPassable(n.t) && n.t != T_BRIDGE && abs((int)n.h - (int)m.c[z][x].h) > 2)
+				n.h = (BYTE)Clampi(m.c[z][x].h + (n.h > m.c[z][x].h ? 2 : -2), 1, MAXH);
+		}
+	}
+	if (!FootReachable(m, pax, paz, eax, eaz)) {
+		// 保険: 経路の段差を 0 に、障害物を除去
+		for (int i = 0; i < np; i++) {
+			Cell& c = m.c[pz[i]][px[i]];
+			if (!FootPassable(c.t)) c.t = (BYTE)(c.t == T_WATER || c.t == T_LAVA || c.t == T_CHASM ? T_BRIDGE : T_ROAD);
+			if (i > 0) c.h = m.c[pz[i - 1]][px[i - 1]].h;
+			if (c.h < 1) c.h = 1;
+		}
+	}
+
+	// 7) 配置セル
+	static BYTE taken[MAPN][MAPN];
+	memset(taken, 0, sizeof(taken));
+	m.nP = MAX_PARTY; m.nE = MAX_ENEMY;
+	PickDeploy(m, pax, paz, m.pStartX, m.pStartZ, MAX_PARTY, 1, NULL);
+	for (int i = 0; i < MAX_PARTY; i++) taken[m.pStartZ[i]][m.pStartX[i]] = 1;
+	PickDeploy(m, eax, eaz, m.eStartX, m.eStartZ, MAX_ENEMY, 2, taken);
+
+	// 8) 小物
+	for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) {
+		Cell& c = m.c[z][x];
+		c.prop = PK_NONE;
+		switch (c.t) {
+		case T_FOREST:
+			if (th == TH_SNOW) c.prop = PK_PINE;
+			else if (th == TH_DESERT || th == TH_VOLCANO) c.prop = PK_DEAD;
+			else if (th == TH_SWAMP) c.prop = (c.var & 3) == 0 ? PK_DEAD : PK_TREE;
+			else c.prop = (c.var & 3) == 0 ? PK_TREES : ((c.var & 7) == 1 ? PK_HILLTREES : PK_TREE);
+			break;
+		case T_MOUNTAIN: c.prop = PK_MOUNT; break;
+		case T_ROCK:
+			if (th == TH_RUINS) c.prop = PK_PILLAR;
+			else if (th == TH_SWAMP || th == TH_VOLCANO) c.prop = (c.var & 1) ? PK_GRAVE : PK_ROCK;
+			else c.prop = PK_ROCK;
+			break;
+		case T_WATER:
+			if ((th == TH_SWAMP || th == TH_PLAINS || th == TH_FOREST) && (c.var % 5) == 0) c.prop = PK_LILY;
+			break;
+		case T_RUINS:
+			if ((c.var % 23) == 0) c.prop = PK_LANTERN;
+			break;
+		default: break;
+		}
+	}
+	// 拠点の飾り（通行不可の小物は岩扱い）
+	{
+		int tx = Clampi(pax + 2, 1, MAPN - 2), tz = Clampi(paz - 2, 1, MAPN - 2);
+		bool used = false;
+		for (int i = 0; i < MAX_PARTY; i++) if (m.pStartX[i] == tx && m.pStartZ[i] == tz) used = true;
+		if (!used) { m.c[tz][tx].t = T_ROCK; m.c[tz][tx].prop = PK_TENT; }
+		int fx = Clampi(pax - 2, 1, MAPN - 2), fz = Clampi(paz + 2, 1, MAPN - 2);
+		used = false;
+		for (int i = 0; i < MAX_PARTY; i++) if (m.pStartX[i] == fx && m.pStartZ[i] == fz) used = true;
+		if (!used) { m.c[fz][fx].t = T_ROCK; m.c[fz][fx].prop = PK_FLAG; }
+		for (int k = 0; k < 3; k++) {
+			int cx = Clampi(eax + r.Range(-4, 4), 1, MAPN - 2), cz = Clampi(eaz + r.Range(-4, 4), 1, MAPN - 2);
+			bool u2 = false;
+			for (int i = 0; i < MAX_ENEMY; i++) if (m.eStartX[i] == cx && m.eStartZ[i] == cz) u2 = true;
+			if (u2 || !FootPassable(m.c[cz][cx].t)) continue;
+			m.c[cz][cx].t = T_ROCK;
+			m.c[cz][cx].prop = (BYTE)(th == TH_SWAMP ? PK_PUMPKIN : (k & 1) ? PK_CRATE : PK_BARREL);
+		}
+	}
+	if (!FootReachable(m, m.pStartX[0], m.pStartZ[0], m.eStartX[0], m.eStartZ[0])) {
+		for (int i = 0; i < np; i++) {
+			Cell& c = m.c[pz[i]][px[i]];
+			if (!FootPassable(c.t)) { c.t = T_ROAD; c.prop = PK_NONE; }
+		}
+	}
+}
+
+// ============================================================ クラス
+#define L6(a,b,c,d,e,f,g,h) { {a,b},{c,d},{e,f},{g,h},{0,-1},{0,-1} }
+static const ClassDef kClass[C_PLAYER_COUNT] = {
+	// name, desc, tier, magic, group, move, jump, rMin, rMax, mag, pow, look, style, base[10], grow[10], learn
+	{ TX_CL_SOLDIER, TX_CLD_SOLDIER, 1, 0, G_MELEE, MV_FOOT, 2, 1, 1, 0, 5, WL_SWORD_SHIELD, AS_SLASH,
+	  { 24, 4, 7, 6, 1, 2, 6, 6, 4, 5 }, { 45, 10, 55, 50, 5, 25, 40, 45, 35, 0 }, L6(3, SKL_POWER, 8, SKL_BASH, 13, SKL_P_IRON, 19, SKL_VITAL) },
+	{ TX_CL_FIGHTER, TX_CLD_FIGHTER, 1, 0, G_MELEE, MV_FOOT, 2, 1, 1, 0, 7, WL_AXE2, AS_CHOP2,
+	  { 28, 2, 9, 4, 0, 1, 5, 5, 3, 5 }, { 55, 5, 65, 35, 0, 15, 35, 40, 30, 0 }, L6(3, SKL_POWER, 7, SKL_P_MIGHT, 12, SKL_DOUBLE, 18, SKL_WHIRL) },
+	{ TX_CL_ARCHER, TX_CLD_ARCHER, 1, 0, G_SWIFT, MV_FOOT, 2, 2, 3, 0, 5, WL_CROSSBOW2, AS_SHOOT,
+	  { 20, 4, 6, 3, 1, 3, 7, 9, 5, 5 }, { 40, 10, 45, 30, 5, 25, 50, 60, 40, 0 }, L6(4, SKL_PIERCE, 9, SKL_P_CRIT, 14, SKL_ARROWRAIN, 19, SKL_STITCH) },
+	{ TX_CL_THIEF, TX_CLD_THIEF, 1, 0, G_SWIFT, MV_FOOT, 3, 1, 1, 0, 4, WL_KNIVES, AS_STAB,
+	  { 19, 4, 5, 3, 1, 3, 10, 8, 8, 6 }, { 38, 10, 40, 25, 5, 25, 65, 55, 55, 0 }, L6(3, SKL_VITAL, 7, SKL_P_EVADE, 12, SKL_STITCH, 18, SKL_P_SWIFT) },
+	{ TX_CL_MAGE, TX_CLD_MAGE, 1, 1, G_MAGIC, MV_FOOT, 2, 1, 2, 1, 4, WL_STAFF, AS_CAST,
+	  { 17, 14, 1, 2, 9, 7, 6, 6, 4, 4 }, { 30, 60, 5, 20, 65, 45, 40, 40, 35, 0 }, L6(1, SKL_FIRE, 5, SKL_THUNDER, 10, SKL_BLIZZARD, 16, SKL_P_SPELL) },
+	{ TX_CL_CLERIC, TX_CLD_CLERIC, 1, 1, G_HOLY, MV_FOOT, 2, 1, 2, 1, 2, WL_WAND_BOOK, AS_CAST,
+	  { 18, 16, 2, 3, 7, 9, 5, 5, 6, 4 }, { 32, 65, 10, 22, 50, 60, 35, 35, 45, 0 }, L6(1, SKL_HEAL, 6, SKL_PROTECT, 11, SKL_HIGHHEAL, 17, SKL_BLESS) },
+
+	{ TX_CL_PALADIN, TX_CLD_PALADIN, 2, 0, G_HOLY, MV_FOOT, 2, 1, 1, 0, 8, WL_SWORD_BADGE, AS_SLASH,
+	  { 34, 10, 11, 11, 4, 7, 7, 8, 6, 5 }, { 55, 25, 55, 60, 15, 40, 35, 45, 40, 0 }, L6(15, SKL_PROTECT, 20, SKL_HOLYBLADE, 26, SKL_P_IRON, 32, SKL_HEAL) },
+	{ TX_CL_RUNEKNIGHT, TX_CLD_RUNEKNIGHT, 2, 1, G_MAGIC, MV_FOOT, 2, 1, 1, 0, 7, WL_SWORD_BOOK, AS_SLASH,
+	  { 30, 16, 10, 8, 10, 8, 8, 8, 5, 5 }, { 48, 40, 45, 40, 45, 40, 40, 40, 35, 0 }, L6(15, SKL_RUNEBLADE, 18, SKL_FIRE, 24, SKL_THUNDER, 30, SKL_P_SPELL) },
+	{ TX_CL_BERSERKER, TX_CLD_BERSERKER, 2, 0, G_MELEE, MV_FOOT, 2, 1, 1, 0, 10, WL_AXES, AS_SLASH,
+	  { 40, 4, 15, 6, 0, 3, 8, 7, 3, 5 }, { 70, 5, 75, 30, 0, 15, 40, 40, 25, 0 }, L6(15, SKL_DOUBLE, 18, SKL_WHIRL, 24, SKL_P_MIGHT, 30, SKL_DRAGONFANG) },
+	{ TX_CL_SNIPER, TX_CLD_SNIPER, 2, 0, G_SWIFT, MV_FOOT, 2, 2, 4, 0, 7, WL_CROSSBOW2, AS_SHOOT,
+	  { 26, 6, 9, 5, 1, 5, 9, 14, 7, 5 }, { 42, 15, 50, 30, 5, 30, 50, 70, 45, 0 }, L6(15, SKL_PIERCE, 18, SKL_ARROWRAIN, 24, SKL_P_CRIT, 30, SKL_VITAL) },
+	{ TX_CL_ASSASSIN, TX_CLD_ASSASSIN, 2, 0, G_SWIFT, MV_FOOT, 3, 1, 1, 0, 7, WL_KNIVES, AS_STAB,
+	  { 24, 8, 9, 5, 2, 5, 14, 12, 10, 6 }, { 40, 20, 50, 25, 10, 30, 70, 60, 55, 0 }, L6(15, SKL_ASSASSINATE, 18, SKL_P_EVADE, 24, SKL_STITCH, 30, SKL_P_SWIFT) },
+	{ TX_CL_WIZARD, TX_CLD_WIZARD, 2, 1, G_MAGIC, MV_FOOT, 2, 1, 3, 1, 6, WL_STAFF, AS_CAST,
+	  { 22, 26, 1, 4, 15, 11, 8, 8, 5, 4 }, { 32, 70, 5, 22, 75, 50, 40, 40, 35, 0 }, L6(15, SKL_BLIZZARD, 18, SKL_THUNDER, 24, SKL_METEOR, 30, SKL_P_SPELL) },
+	{ TX_CL_BISHOP, TX_CLD_BISHOP, 2, 1, G_HOLY, MV_FOOT, 2, 1, 2, 1, 4, WL_WAND_BOOK, AS_CAST,
+	  { 24, 28, 3, 5, 12, 14, 7, 7, 8, 4 }, { 35, 70, 10, 25, 55, 65, 35, 35, 50, 0 }, L6(15, SKL_HIGHHEAL, 18, SKL_HOLY, 24, SKL_HEALALL, 30, SKL_P_REGEN) },
+	{ TX_CL_SKYKNIGHT, TX_CLD_SKYKNIGHT, 2, 0, G_SWIFT, MV_FLY, 9, 1, 1, 0, 7, WL_SWORD_SPIKE, AS_STAB,
+	  { 28, 8, 10, 7, 3, 8, 11, 9, 7, 7 }, { 45, 20, 50, 35, 10, 40, 60, 50, 45, 0 }, L6(15, SKL_VITAL, 18, SKL_P_EVADE, 24, SKL_HASTE, 30, SKL_DRAGONFANG) },
+
+	{ TX_CL_HERO, TX_CLD_HERO, 3, 0, G_MELEE, MV_FOOT, 3, 1, 1, 0, 12, WL_SWORD2, AS_CHOP2,
+	  { 46, 14, 17, 13, 6, 10, 12, 13, 10, 6 }, { 60, 30, 65, 50, 20, 40, 50, 55, 50, 0 }, L6(35, SKL_BRAVE, 38, SKL_P_CRIT, 44, SKL_HOLYBLADE, 50, SKL_P_REGEN) },
+	{ TX_CL_ARCHMAGE, TX_CLD_ARCHMAGE, 3, 1, G_MAGIC, MV_FOOT, 2, 1, 3, 1, 9, WL_STAFF, AS_CAST,
+	  { 30, 40, 2, 7, 22, 16, 10, 10, 8, 5 }, { 38, 80, 5, 25, 85, 55, 45, 45, 40, 0 }, L6(35, SKL_METEOR, 38, SKL_HOLY, 44, SKL_DARKNESS, 50, SKL_HASTE) },
+	{ TX_CL_SAINT, TX_CLD_SAINT, 3, 1, G_HOLY, MV_FOOT, 2, 1, 2, 1, 6, WL_WAND_BOOK, AS_CAST,
+	  { 32, 42, 4, 8, 17, 22, 9, 9, 12, 5 }, { 40, 80, 10, 30, 60, 75, 40, 40, 60, 0 }, L6(35, SKL_HEALALL, 38, SKL_HOLY, 44, SKL_BLESS, 50, SKL_P_REGEN) },
+	{ TX_CL_PHANTOM, TX_CLD_PHANTOM, 3, 0, G_SWIFT, MV_FOOT, 4, 1, 2, 0, 9, WL_CROSS_KNIFE, AS_SHOOT1,
+	  { 32, 12, 13, 8, 4, 8, 18, 16, 14, 7 }, { 45, 25, 55, 30, 15, 35, 80, 65, 65, 0 }, L6(35, SKL_ASSASSINATE, 38, SKL_ARROWRAIN, 44, SKL_P_SWIFT, 50, SKL_P_EVADE) },
+	{ TX_CL_DRAGONLORD, TX_CLD_DRAGONLORD, 3, 0, G_MELEE, MV_FLY, 9, 1, 1, 0, 12, WL_SWORD2, AS_CHOP2,
+	  { 44, 12, 16, 14, 5, 10, 12, 11, 8, 7 }, { 60, 25, 65, 55, 10, 40, 45, 45, 40, 0 }, L6(35, SKL_DRAGONFANG, 38, SKL_WHIRL, 44, SKL_P_IRON, 50, SKL_BRAVE) },
+};
+#undef L6
+const ClassDef& ClassInfo(int c) { return kClass[Clampi(c, 0, C_PLAYER_COUNT - 1)]; }
+
+// ============================================================ スキル
+// name, desc, kind, mp, power, rMin, rMax(-1=武器射程, 0=自分中心), area, element, hits, critBonus, effect, enemyOnly
+static const SkillDef kSkill[SKL_COUNT] = {
+	{ TX_SK_POWER, TX_SKD_POWER, SK_PHYS, 4, 150, -1, -1, 0, EL_NONE, 1, 0, EF_NONE, 0 },
+	{ TX_SK_DOUBLE, TX_SKD_DOUBLE, SK_PHYS, 6, 80, -1, -1, 0, EL_NONE, 2, 0, EF_NONE, 0 },
+	{ TX_SK_WHIRL, TX_SKD_WHIRL, SK_PHYS, 8, 100, 0, 0, 1, EL_WIND, 1, 0, EF_NONE, 0 },
+	{ TX_SK_PIERCE, TX_SKD_PIERCE, SK_PHYS, 6, 110, -1, -1, 0, EL_NONE, 1, 0, EF_IGNDEF, 0 },
+	{ TX_SK_STITCH, TX_SKD_STITCH, SK_PHYS, 6, 100, -1, -1, 0, EL_DARK, 1, 0, EF_SLOW, 0 },
+	{ TX_SK_VITAL, TX_SKD_VITAL, SK_PHYS, 5, 120, -1, -1, 0, EL_NONE, 1, 40, EF_NONE, 0 },
+	{ TX_SK_BASH, TX_SKD_BASH, SK_PHYS, 5, 120, -1, -1, 0, EL_EARTH, 1, 0, EF_DEFDOWN, 0 },
+	{ TX_SK_DRAGONFANG, TX_SKD_DRAGONFANG, SK_PHYS, 14, 220, -1, -1, 0, EL_FIRE, 1, 10, EF_NONE, 0 },
+	{ TX_SK_HOLYBLADE, TX_SKD_HOLYBLADE, SK_PHYS, 12, 170, -1, -1, 0, EL_HOLY, 1, 5, EF_NONE, 0 },
+	{ TX_SK_ARROWRAIN, TX_SKD_ARROWRAIN, SK_PHYS, 12, 90, 2, 5, 1, EL_WIND, 1, 0, EF_NONE, 0 },
+	{ TX_SK_ASSASSINATE, TX_SKD_ASSASSINATE, SK_PHYS, 12, 200, -1, -1, 0, EL_DARK, 1, 25, EF_NONE, 0 },
+	{ TX_SK_BRAVE, TX_SKD_BRAVE, SK_PHYS, 18, 260, -1, -1, 0, EL_HOLY, 1, 15, EF_NONE, 0 },
+	{ TX_SK_FIRE, TX_SKD_FIRE, SK_MAGIC, 4, 8, 1, 3, 0, EL_FIRE, 1, 0, EF_NONE, 0 },
+	{ TX_SK_BLIZZARD, TX_SKD_BLIZZARD, SK_MAGIC, 8, 11, 1, 3, 1, EL_ICE, 1, 0, EF_NONE, 0 },
+	{ TX_SK_THUNDER, TX_SKD_THUNDER, SK_MAGIC, 8, 14, 1, 4, 0, EL_THUNDER, 1, 0, EF_NONE, 0 },
+	{ TX_SK_METEOR, TX_SKD_METEOR, SK_MAGIC, 20, 22, 2, 5, 2, EL_FIRE, 1, 0, EF_NONE, 0 },
+	{ TX_SK_RUNEBLADE, TX_SKD_RUNEBLADE, SK_MAGIC, 6, 12, 1, 1, 0, EL_THUNDER, 1, 0, EF_NONE, 0 },
+	{ TX_SK_HOLY, TX_SKD_HOLY, SK_MAGIC, 14, 18, 1, 3, 0, EL_HOLY, 1, 0, EF_NONE, 0 },
+	{ TX_SK_DARKNESS, TX_SKD_DARKNESS, SK_MAGIC, 10, 16, 1, 3, 0, EL_DARK, 1, 0, EF_DEFDOWN, 0 },
+	{ TX_SK_HEAL, TX_SKD_HEAL, SK_HEAL, 4, 12, 0, 2, 0, EL_HOLY, 1, 0, EF_NONE, 0 },
+	{ TX_SK_HIGHHEAL, TX_SKD_HIGHHEAL, SK_HEAL, 9, 26, 0, 3, 0, EL_HOLY, 1, 0, EF_NONE, 0 },
+	{ TX_SK_HEALALL, TX_SKD_HEALALL, SK_HEAL, 16, 18, 0, 3, 2, EL_HOLY, 1, 0, EF_NONE, 0 },
+	{ TX_SK_PROTECT, TX_SKD_PROTECT, SK_BUFF, 6, 0, 0, 2, 0, EL_EARTH, 1, 0, EF_BUFF_DEF, 0 },
+	{ TX_SK_HASTE, TX_SKD_HASTE, SK_BUFF, 8, 0, 0, 2, 0, EL_WIND, 1, 0, EF_BUFF_AGI, 0 },
+	{ TX_SK_BLESS, TX_SKD_BLESS, SK_BUFF, 8, 0, 0, 2, 0, EL_HOLY, 1, 0, EF_BUFF_ATK, 0 },
+	{ TX_SK_P_EVADE, TX_SKD_P_EVADE, SK_PASSIVE, 0, 0, 0, 0, 0, EL_NONE, 0, 0, EF_NONE, 0 },
+	{ TX_SK_P_MIGHT, TX_SKD_P_MIGHT, SK_PASSIVE, 0, 0, 0, 0, 0, EL_NONE, 0, 0, EF_NONE, 0 },
+	{ TX_SK_P_SPELL, TX_SKD_P_SPELL, SK_PASSIVE, 0, 0, 0, 0, 0, EL_NONE, 0, 0, EF_NONE, 0 },
+	{ TX_SK_P_IRON, TX_SKD_P_IRON, SK_PASSIVE, 0, 0, 0, 0, 0, EL_NONE, 0, 0, EF_NONE, 0 },
+	{ TX_SK_P_SWIFT, TX_SKD_P_SWIFT, SK_PASSIVE, 0, 0, 0, 0, 0, EL_NONE, 0, 0, EF_NONE, 0 },
+	{ TX_SK_P_REGEN, TX_SKD_P_REGEN, SK_PASSIVE, 0, 0, 0, 0, 0, EL_NONE, 0, 0, EF_NONE, 0 },
+	{ TX_SK_P_CRIT, TX_SKD_P_CRIT, SK_PASSIVE, 0, 0, 0, 0, 0, EL_NONE, 0, 0, EF_NONE, 0 },
+	{ TX_SK_E_VENOM, TX_SKD_E_VENOM, SK_PHYS, 4, 120, 1, 1, 0, EL_POISON, 1, 0, EF_POISON, 1 },
+	{ TX_SK_E_BREATH, TX_SKD_E_BREATH, SK_MAGIC, 8, 16, 1, 3, 1, EL_FIRE, 1, 0, EF_NONE, 1 },
+	{ TX_SK_E_CRUSH, TX_SKD_E_CRUSH, SK_PHYS, 5, 160, -1, -1, 0, EL_EARTH, 1, 0, EF_NONE, 1 },
+	{ TX_SK_E_DRAIN, TX_SKD_E_DRAIN, SK_PHYS, 5, 100, 1, 1, 0, EL_DARK, 1, 0, EF_DRAIN, 1 },
+	{ TX_SK_E_SPIT, TX_SKD_E_SPIT, SK_PHYS, 3, 90, 1, 2, 0, EL_POISON, 1, 0, EF_SLOW, 1 },
+	{ TX_SK_E_QUAKE, TX_SKD_E_QUAKE, SK_PHYS, 8, 130, 0, 0, 1, EL_EARTH, 1, 0, EF_NONE, 1 },
+};
+const SkillDef& SkillInfo(int s) { return kSkill[Clampi(s, 0, SKL_COUNT - 1)]; }
+
+// ============================================================ モンスター
+// name, look, model, wlook, move, jump, rMin, rMax, mag, pow, style, base, grow, skills, minStage, weight, scale, tint
+static const MonsterDef kMon[M_COUNT] = {
+	{ TX_MO_SLIME, LK_SLIME, -1, 0, MV_FOOT, 1, 1, 1, 0, 3, AS_BITE,
+	  { 22, 4, 6, 4, 0, 4, 3, 4, 2, 3 }, { 60, 5, 40, 40, 0, 30, 20, 30, 20, 0 }, { SKL_E_SPIT, -1, -1 }, 1, 10, 1.0f, 0x60E070 },
+	{ TX_MO_SKEL_MINION, LK_KAYKIT, 6, 1, MV_FOOT, 2, 1, 1, 0, 4, AS_SLASH,
+	  { 18, 0, 6, 3, 0, 1, 5, 5, 2, 4 }, { 45, 0, 45, 30, 0, 15, 35, 40, 20, 0 }, { -1, -1, -1 }, 1, 10, 1.0f, 0xFFFFFF },
+	{ TX_MO_SKEL_WARRIOR, LK_KAYKIT, 5, 2, MV_FOOT, 2, 1, 1, 0, 6, AS_CHOP2,
+	  { 26, 6, 9, 7, 0, 2, 4, 6, 2, 4 }, { 55, 10, 55, 50, 0, 20, 30, 40, 20, 0 }, { SKL_E_CRUSH, -1, -1 }, 3, 8, 1.0f, 0xFFFFFF },
+	{ TX_MO_SKEL_ARCHER, LK_KAYKIT, 7, 3, MV_FOOT, 2, 2, 3, 0, 5, AS_SHOOT,
+	  { 18, 0, 7, 3, 0, 3, 6, 8, 3, 4 }, { 40, 0, 45, 25, 0, 20, 40, 55, 25, 0 }, { -1, -1, -1 }, 4, 7, 1.0f, 0xFFFFFF },
+	{ TX_MO_BAT, LK_BAT, -1, 0, MV_FLY, 9, 1, 1, 0, 4, AS_BITE,
+	  { 15, 6, 6, 2, 0, 3, 11, 7, 6, 6 }, { 35, 10, 40, 20, 0, 25, 60, 45, 40, 0 }, { SKL_E_DRAIN, -1, -1 }, 5, 6, 1.0f, 0x806070 },
+	{ TX_MO_LICH, LK_KAYKIT, 8, 4, MV_FOOT, 2, 1, 3, 1, 4, AS_CAST,
+	  { 20, 20, 1, 3, 8, 8, 5, 6, 4, 4 }, { 40, 50, 5, 25, 60, 50, 30, 40, 30, 0 }, { SKL_FIRE, SKL_DARKNESS, SKL_HEAL }, 8, 5, 1.0f, 0xD8C8FF },
+	{ TX_MO_POISON_SLIME, LK_SLIME, -1, 0, MV_FOOT, 1, 1, 1, 0, 5, AS_BITE,
+	  { 28, 8, 8, 6, 0, 6, 4, 5, 3, 3 }, { 65, 10, 45, 45, 0, 35, 25, 35, 20, 0 }, { SKL_E_VENOM, SKL_E_SPIT, -1 }, 12, 6, 1.15f, 0xB070E0 },
+	{ TX_MO_GOLEM, LK_GOLEM, -1, 0, MV_FOOT, 1, 1, 1, 0, 8, AS_PUNCH,
+	  { 40, 8, 12, 14, 0, 4, 2, 5, 1, 3 }, { 75, 10, 60, 70, 0, 25, 10, 30, 10, 0 }, { SKL_E_QUAKE, -1, -1 }, 15, 4, 1.0f, 0xFFFFFF },
+	{ TX_MO_WYVERN, LK_WYVERN, -1, 0, MV_FLY, 9, 1, 1, 0, 8, AS_BITE,
+	  { 34, 12, 12, 8, 6, 6, 9, 8, 5, 6 }, { 60, 20, 60, 45, 20, 30, 45, 40, 30, 0 }, { SKL_E_BREATH, -1, -1 }, 20, 4, 1.0f, 0x7AA060 },
+	{ TX_MO_DARK_KNIGHT, LK_KAYKIT, 5, 5, MV_FOOT, 2, 1, 1, 0, 9, AS_SLASH,
+	  { 36, 10, 14, 13, 2, 8, 7, 9, 4, 5 }, { 60, 10, 65, 60, 10, 35, 35, 45, 25, 0 }, { SKL_E_CRUSH, SKL_BASH, -1 }, 30, 4, 1.12f, 0x8070A0 },
+	{ TX_MO_DRAGON, LK_WYVERN, -1, 0, MV_FLY, 9, 1, 1, 0, 12, AS_BITE,
+	  { 70, 30, 18, 14, 14, 12, 8, 10, 8, 5 }, { 90, 40, 70, 55, 60, 45, 35, 40, 30, 0 }, { SKL_E_BREATH, SKL_E_CRUSH, -1 }, 999, 0, 1.75f, 0xE05040 },
+};
+const MonsterDef& MonsterInfo(int m) { return kMon[Clampi(m, 0, M_COUNT - 1)]; }
+
+// ============================================================ キャラ
+void CharRecalcInit(CharData& c)
+{
+	const ClassDef& cd = ClassInfo(c.cls);
+	for (int s = 0; s < S_COUNT; s++) c.stat[s] = cd.base[s];
+	if (c.gender == 1) { c.stat[S_AGI] += 1; c.stat[S_RES] += 1; c.stat[S_STR] = max(1, c.stat[S_STR] - 1); }
+	c.lv = 1;
+	c.exp = 0;
+	c.skills = 0;
+	for (int i = 0; i < 6; i++)
+		if (cd.learn[i].skill >= 0 && cd.learn[i].lv <= 1)
+			c.skills |= (1ull << cd.learn[i].skill);
+}
+
+bool CharHasSkill(const CharData& c, int s) { return s >= 0 && s < 64 && (c.skills & (1ull << s)) != 0; }
+
+int CharLearnAt(const CharData& c, int lv)
+{
+	const ClassDef& cd = ClassInfo(c.cls);
+	for (int i = 0; i < 6; i++) if (cd.learn[i].skill >= 0 && cd.learn[i].lv == lv) return cd.learn[i].skill;
+	return -1;
+}
+
+int CharLevelUp(CharData& c, Rng& r, int gains[S_COUNT])
+{
+	const ClassDef& cd = ClassInfo(c.cls);
+	int total = 0;
+	for (int s = 0; s < S_COUNT; s++) {
+		int g = cd.grow[s], add = 0;
+		if (s == S_HP || s == S_MP) {
+			add = g / 10 + ((int)(r.Next() % 10) < g % 10 ? 1 : 0);
+		} else if (s != S_MOV) {
+			add = g / 100 + ((int)(r.Next() % 100) < g % 100 ? 1 : 0);
+		}
+		gains[s] = add;
+		c.stat[s] += add;
+		if (s != S_HP && s != S_MP) total += add;
+	}
+	if (total == 0) {
+		int s = cd.magic ? S_MAG : S_STR;
+		gains[s]++; c.stat[s]++;
+	}
+	c.lv++;
+	int sk = CharLearnAt(c, c.lv);
+	if (sk >= 0 && !CharHasSkill(c, sk)) { c.skills |= (1ull << sk); return sk; }
+	return -1;
+}
+
+// ============================================================ 進化
+struct EvoRow { int from; EvoOption o[3]; };
+static const EvoRow kEvo[] = {
+	{ C_SOLDIER,    { { C_PALADIN, -1 }, { C_RUNEKNIGHT, G_MAGIC }, { C_SKYKNIGHT, G_SWIFT } } },
+	{ C_FIGHTER,    { { C_BERSERKER, -1 }, { C_PALADIN, G_HOLY }, { C_SKYKNIGHT, G_SWIFT } } },
+	{ C_ARCHER,     { { C_SNIPER, -1 }, { C_ASSASSIN, G_SWIFT }, { C_SKYKNIGHT, G_MELEE } } },
+	{ C_THIEF,      { { C_ASSASSIN, -1 }, { C_SNIPER, G_SWIFT }, { C_SKYKNIGHT, G_MELEE } } },
+	{ C_MAGE,       { { C_WIZARD, -1 }, { C_RUNEKNIGHT, G_MELEE }, { C_BISHOP, G_HOLY } } },
+	{ C_CLERIC,     { { C_BISHOP, -1 }, { C_PALADIN, G_MELEE }, { C_WIZARD, G_MAGIC } } },
+	{ C_PALADIN,    { { C_HERO, -1 }, { C_SAINT, G_HOLY }, { C_DRAGONLORD, G_SWIFT } } },
+	{ C_BERSERKER,  { { C_HERO, -1 }, { C_DRAGONLORD, G_SWIFT }, { -1, -1 } } },
+	{ C_RUNEKNIGHT, { { C_HERO, -1 }, { C_ARCHMAGE, G_MAGIC }, { -1, -1 } } },
+	{ C_SNIPER,     { { C_PHANTOM, -1 }, { C_DRAGONLORD, G_MELEE }, { -1, -1 } } },
+	{ C_ASSASSIN,   { { C_PHANTOM, -1 }, { C_HERO, G_MELEE }, { -1, -1 } } },
+	{ C_SKYKNIGHT,  { { C_DRAGONLORD, -1 }, { C_HERO, G_MELEE }, { C_PHANTOM, G_SWIFT } } },
+	{ C_WIZARD,     { { C_ARCHMAGE, -1 }, { C_SAINT, G_HOLY }, { -1, -1 } } },
+	{ C_BISHOP,     { { C_SAINT, -1 }, { C_ARCHMAGE, G_MAGIC }, { -1, -1 } } },
+};
+
+int EvoOptions(int cls, EvoOption out[4])
+{
+	int n = 0;
+	for (int i = 0; i < (int)_countof(kEvo); i++) {
+		if (kEvo[i].from != cls) continue;
+		for (int k = 0; k < 3; k++) if (kEvo[i].o[k].target >= 0) out[n++] = kEvo[i].o[k];
+	}
+	return n;
+}
+
+bool EvoMainEligible(const CharData& c)
+{
+	if (!c.used) return false;
+	const ClassDef& cd = ClassInfo(c.cls);
+	EvoOption o[4];
+	if (EvoOptions(c.cls, o) == 0) return false;
+	return (cd.tier == 1 && c.lv >= 15) || (cd.tier == 2 && c.lv >= 35);
+}
+
+int EvoPartnersNeeded(const CharData& main) { return ClassInfo(main.cls).tier >= 2 ? 2 : 1; }
+
+bool EvoPartnerEligible(const CharData& main, const CharData& p)
+{
+	if (!p.used || &main == &p || main.uid == p.uid) return false;
+	return p.lv >= (ClassInfo(main.cls).tier >= 2 ? 15 : 5);
+}
+
+bool EvoGroupSatisfied(int g, const CharData* ps, int n)
+{
+	if (g < 0) return true;
+	for (int i = 0; i < n; i++) if (ClassInfo(ps[i].cls).group == g) return true;
+	return false;
+}
+
+void EvoApply(CharData& c, int target, const CharData* ps, int n)
+{
+	const ClassDef& a = ClassInfo(c.cls);
+	const ClassDef& b = ClassInfo(target);
+	for (int s = 0; s < S_COUNT; s++) {
+		int d = b.base[s] - a.base[s];
+		if (d > 0) c.stat[s] += d;
+		if (s == S_MOV) c.stat[s] = max(c.stat[s], b.base[s]);
+		for (int i = 0; i < n && s != S_MOV; i++) c.stat[s] += ps[i].stat[s] / 10;
+	}
+	c.cls = target;
+	int inherited = 0;
+	for (int i = 0; i < n && inherited < 2; i++) {
+		for (int sk = 0; sk < SKL_COUNT && inherited < 2; sk++) {
+			if (SkillInfo(sk).enemyOnly || !CharHasSkill(ps[i], sk) || CharHasSkill(c, sk)) continue;
+			c.skills |= (1ull << sk);
+			inherited++;
+		}
+	}
+	for (int i = 0; i < 6; i++)
+		if (b.learn[i].skill >= 0 && b.learn[i].lv <= c.lv) c.skills |= (1ull << b.learn[i].skill);
+}
+
+// ============================================================ ユニット
+static bool IsMon(const Unit& u) { return u.monster >= 0; }
+
+int UnitStat(const Unit& u, int s)
+{
+	int v = u.ch.stat[s];
+	if (s == S_DEF && u.buffDef > 0) v = v * 13 / 10;
+	if ((s == S_DEF || s == S_RES) && u.defDown > 0) v = v * 75 / 100;
+	if ((s == S_AGI) && u.buffAgi > 0) v = v * 13 / 10;
+	if ((s == S_STR || s == S_MAG) && u.buffAtk > 0) v = v * 125 / 100;
+	if (s == S_DEF && UnitHasSkill(u, SKL_P_IRON)) v = v * 115 / 100;
+	return v;
+}
+int UnitMove(const Unit& u) { return u.ch.stat[S_MOV]; }
+int UnitJump(const Unit& u) { return IsMon(u) ? MonsterInfo(u.monster).jump : ClassInfo(u.ch.cls).jump; }
+int UnitMoveType(const Unit& u) { return IsMon(u) ? MonsterInfo(u.monster).moveType : ClassInfo(u.ch.cls).moveType; }
+int UnitRangeMin(const Unit& u) { return IsMon(u) ? MonsterInfo(u.monster).rMin : ClassInfo(u.ch.cls).rMin; }
+int UnitRangeMax(const Unit& u) { return IsMon(u) ? MonsterInfo(u.monster).rMax : ClassInfo(u.ch.cls).rMax; }
+int UnitMagAttack(const Unit& u) { return IsMon(u) ? MonsterInfo(u.monster).magAttack : ClassInfo(u.ch.cls).magAttack; }
+int UnitWeaponPow(const Unit& u) { return IsMon(u) ? MonsterInfo(u.monster).weaponPow + u.ch.lv / 6 : ClassInfo(u.ch.cls).weaponPow + u.ch.lv / 8; }
+int UnitAttackStyle(const Unit& u) { return IsMon(u) ? MonsterInfo(u.monster).attackStyle : ClassInfo(u.ch.cls).attackStyle; }
+int UnitNameTx(const Unit& u) { return IsMon(u) ? MonsterInfo(u.monster).nameTx : -1; }
+const wchar_t* UnitName(const Unit& u) { return IsMon(u) ? TT(MonsterInfo(u.monster).nameTx) : u.ch.name; }
+bool UnitHasSkill(const Unit& u, int s) { return CharHasSkill(u.ch, s); }
+
+void MakeEnemy(Unit& u, int monster, int lv, int boss, Rng& r)
+{
+	memset(&u, 0, sizeof(u));
+	const MonsterDef& md = MonsterInfo(monster);
+	u.alive = 1;
+	u.team = TEAM_ENEMY;
+	u.rosterIdx = -1;
+	u.monster = monster;
+	u.boss = boss;
+	u.ch.used = 1;
+	u.ch.cls = -1;
+	u.ch.lv = Clampi(lv, 1, 99);
+	for (int s = 0; s < S_COUNT; s++) {
+		int g = md.grow[s];
+		int v = md.base[s];
+		if (s == S_HP || s == S_MP) v += g * (u.ch.lv - 1) / 10;
+		else if (s != S_MOV) v += g * (u.ch.lv - 1) / 100;
+		if (s != S_MOV && s != S_MP) v += r.Range(-1, 1);
+		u.ch.stat[s] = max(s == S_MP ? 0 : 1, v);
+	}
+	if (boss) {
+		u.ch.stat[S_HP] = u.ch.stat[S_HP] * 3 / 2;
+		u.ch.stat[S_STR] += 2; u.ch.stat[S_MAG] += 2; u.ch.stat[S_DEF] += 2; u.ch.stat[S_RES] += 2;
+	}
+	for (int i = 0; i < 3; i++) {
+		int sk = md.skills[i];
+		if (sk < 0) continue;
+		int need = i == 0 ? 1 : (i == 1 ? 8 : 15);
+		if (u.ch.lv >= need || boss) u.ch.skills |= (1ull << sk);
+	}
+	if (u.ch.lv >= 30) u.ch.skills |= (1ull << SKL_P_IRON);
+	if (u.ch.lv >= 45) u.ch.skills |= (1ull << SKL_P_CRIT);
+	u.hp = u.ch.stat[S_HP];
+	u.mp = u.ch.stat[S_MP];
+}
+
+// ============================================================ 経路
+int Dist(int ax, int az, int bx, int bz) { return abs(ax - bx) + abs(az - bz); }
+
+bool CanStep(const Map& m, int fx, int fz, int tx, int tz, int moveType, int jump)
+{
+	if (!Map::In(tx, tz)) return false;
+	const Cell& t = m.At(tx, tz);
+	if (moveType == MV_FLY) return TerrainInfo(t.t).flyOk != 0;
+	if (TerrainInfo(t.t).costFoot >= 99) return false;
+	const Cell& f = m.At(fx, fz);
+	return abs((int)t.h - (int)f.h) <= jump;
+}
+
+static int EnterCost(const Map& m, int x, int z, int moveType)
+{
+	if (moveType == MV_FLY) return 1;
+	return TerrainInfo(m.At(x, z).t).costFoot;
+}
+
+void ComputeReach(const Battle& b, int ui, Reach& out)
+{
+	const Unit& u = b.u[ui];
+	for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) { out.cost[z][x] = -1; out.from[z][x] = -1; out.canStop[z][x] = 0; }
+	const int mv = UnitMove(u), mt = UnitMoveType(u), jp = UnitJump(u);
+	// 小さい盤なので単純ダイクストラ（行動範囲内のみ）
+	static int qx[MAPN * MAPN], qz[MAPN * MAPN];
+	int qn = 0;
+	out.cost[u.z][u.x] = 0;
+	qx[qn] = u.x; qz[qn] = u.z; qn++;
+	static const int dx[4] = { 1, -1, 0, 0 }, dz[4] = { 0, 0, 1, -1 };
+	while (qn > 0) {
+		int bi = 0;
+		for (int i = 1; i < qn; i++) if (out.cost[qz[i]][qx[i]] < out.cost[qz[bi]][qx[bi]]) bi = i;
+		int x = qx[bi], z = qz[bi];
+		qx[bi] = qx[qn - 1]; qz[bi] = qz[qn - 1]; qn--;
+		int c0 = out.cost[z][x];
+		for (int k = 0; k < 4; k++) {
+			int nx = x + dx[k], nz = z + dz[k];
+			if (!CanStep(b.map, x, z, nx, nz, mt, jp)) continue;
+			int o = b.UnitAt(nx, nz);
+			if (o >= 0 && b.u[o].team != u.team) continue;
+			int nc = c0 + EnterCost(b.map, nx, nz, mt);
+			if (nc > mv) continue;
+			if (out.cost[nz][nx] >= 0 && out.cost[nz][nx] <= nc) continue;
+			bool inq = out.cost[nz][nx] >= 0;
+			out.cost[nz][nx] = (short)nc;
+			out.from[nz][nx] = (short)(z * MAPN + x);
+			if (!inq) { qx[qn] = nx; qz[qn] = nz; qn++; }
+			else {
+				bool found = false;
+				for (int i = 0; i < qn; i++) if (qx[i] == nx && qz[i] == nz) found = true;
+				if (!found) { qx[qn] = nx; qz[qn] = nz; qn++; }
+			}
+		}
+	}
+	for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) {
+		if (out.cost[z][x] < 0) continue;
+		int o = b.UnitAt(x, z);
+		out.canStop[z][x] = (o < 0 || o == ui) ? 1 : 0;
+	}
+}
+
+int ReachPath(const Reach& r, int sx, int sz, int tx, int tz, int* outXZ, int maxN)
+{
+	if (!Map::In(tx, tz) || r.cost[tz][tx] < 0) return 0;
+	int tmp[MAPN * 2], n = 0;
+	int x = tx, z = tz;
+	while (n < (int)_countof(tmp)) {
+		tmp[n++] = z * MAPN + x;
+		if (x == sx && z == sz) break;
+		int p = r.from[z][x];
+		if (p < 0) break;
+		x = p % MAPN; z = p / MAPN;
+	}
+	int out = 0;
+	for (int i = n - 1; i >= 0 && out < maxN; i--) outXZ[out++] = tmp[i];
+	return out;
+}
+
+bool LineOfSight(const Map& m, int ax, int az, int bx, int bz)
+{
+	float ya = m.StandY(ax, az) + .6f, yb = m.StandY(bx, bz) + .6f;
+	int steps = max(abs(bx - ax), abs(bz - az)) * 2;
+	if (steps <= 2) return true;
+	for (int i = 1; i < steps; i++) {
+		float t = (float)i / steps;
+		int x = (int)floorf(ax + (bx - ax) * t + .5f), z = (int)floorf(az + (bz - az) * t + .5f);
+		if ((x == ax && z == az) || (x == bx && z == bz)) continue;
+		const Cell& c = m.At(x, z);
+		if (c.t == T_MOUNTAIN || c.t == T_ROCK) return false;
+		float y = Lerpf(ya, yb, t);
+		if (m.TopY(x, z) > y + .35f) return false;
+	}
+	return true;
+}
+
+bool InAttackRange(const Battle& b, int ax, int az, int rMin, int rMax, int tx, int tz, bool needLos)
+{
+	int d = Dist(ax, az, tx, tz);
+	if (d < rMin || d > rMax) return false;
+	if (d == 1) {
+		int dh = abs((int)b.map.At(ax, az).h - (int)b.map.At(tx, tz).h);
+		const int ta = b.map.At(ax, az).t, tb = b.map.At(tx, tz).t;
+		if (ta == T_CHASM || tb == T_CHASM || ta == T_WATER || tb == T_WATER || ta == T_LAVA || tb == T_LAVA) return true;
+		return dh <= 4;
+	}
+	return !needLos || LineOfSight(b.map, ax, az, tx, tz);
+}
+
+// ============================================================ 戦闘
+static float HeightMod(const Battle& b, const Unit& a, const Unit& d)
+{
+	float dh = (b.map.StandY(a.x, a.z) - b.map.StandY(d.x, d.z)) / kHStep;
+	return 1.f + Clampf(dh * .05f, -.15f, .25f);
+}
+
+static float DirMod(const Unit& a, const Unit& d)
+{
+	float ang = atan2f((float)(a.x - d.x), (float)(a.z - d.z));
+	float diff = fabsf(WrapAngle(ang - d.face));
+	if (diff > 2.3f) return 1.25f;
+	if (diff > 1.2f) return 1.1f;
+	return 1.f;
+}
+
+static int TerrainDefPct(const Battle& b, const Unit& d)
+{
+	if (UnitMoveType(d) == MV_FLY) return 0;
+	return TerrainInfo(b.map.At(d.x, d.z).t).defPct;
+}
+static int TerrainAvoPct(const Battle& b, const Unit& d)
+{
+	if (UnitMoveType(d) == MV_FLY) return 5;
+	return TerrainInfo(b.map.At(d.x, d.z).t).avoPct;
+}
+
+static void StrikeCalc(const Battle& b, const Unit& a, const Unit& d, int skill, int& dmg, int& hit, int& crit)
+{
+	const SkillDef* sd = skill >= 0 ? &SkillInfo(skill) : NULL;
+	bool magic = sd ? (sd->kind == SK_MAGIC) : (UnitMagAttack(a) != 0);
+	int tdef = TerrainDefPct(b, d), tavo = TerrainAvoPct(b, d);
+	float dm;
+	if (magic) {
+		int atk = UnitStat(a, S_MAG) + (sd ? sd->power : UnitWeaponPow(a));
+		if (UnitHasSkill(a, SKL_P_SPELL)) atk = atk * 115 / 100;
+		float df = UnitStat(d, S_RES) * (1.f + tdef * .005f);
+		dm = atk - df * .8f;
+		hit = 90 + UnitStat(a, S_DEX) - UnitStat(d, S_AGI) - tavo / 2 + (sd ? 10 : 0);
+		hit = Clampi(hit, 30, 100);
+		crit = 0;
+	} else {
+		int atk = UnitStat(a, S_STR) + UnitWeaponPow(a);
+		if (sd && skill == SKL_HOLYBLADE) atk += UnitStat(a, S_MAG) / 2;
+		if (UnitHasSkill(a, SKL_P_MIGHT)) atk = atk * 115 / 100;
+		float mult = sd ? sd->power / 100.f : 1.f;
+		float df = UnitStat(d, S_DEF) * (1.f + tdef * .01f);
+		if (sd && sd->effect == EF_IGNDEF) df *= .5f;
+		dm = atk * mult - df;
+		int evade = UnitStat(d, S_AGI) * 2 + UnitStat(d, S_LUK) / 2 + tavo + (UnitHasSkill(d, SKL_P_EVADE) ? 15 : 0);
+		hit = 80 + UnitStat(a, S_DEX) * 2 + UnitStat(a, S_LUK) / 2 - evade + (sd ? 10 : 0);
+		hit = Clampi(hit, 5, 99);
+		crit = UnitStat(a, S_DEX) / 2 + UnitStat(a, S_LUK) / 3 - UnitStat(d, S_LUK) / 3 + (sd ? sd->critBonus : 0)
+			+ (UnitHasSkill(a, SKL_P_CRIT) ? 10 : 0);
+		crit = Clampi(crit, 0, sd ? 80 : 50);
+	}
+	dm *= HeightMod(b, a, d) * DirMod(a, d);
+	dmg = max(1, (int)roundf(dm));
+}
+
+static bool CanCounter(const Battle& b, const Unit& d, const Unit& a)
+{
+	if (!d.alive || d.hp <= 0) return false;
+	return InAttackRange(b, d.x, d.z, UnitRangeMin(d), UnitRangeMax(d), a.x, a.z, true);
+}
+
+void CalcForecast(const Battle& b, int ai, int di, int skill, Forecast& f)
+{
+	memset(&f, 0, sizeof(f));
+	const Unit& a = b.u[ai];
+	const Unit& d = b.u[di];
+	StrikeCalc(b, a, d, skill, f.dmg, f.hit, f.crit);
+	const SkillDef* sd = skill >= 0 ? &SkillInfo(skill) : NULL;
+	f.hits = sd ? max(1, sd->hits) : ((UnitStat(a, S_AGI) - UnitStat(d, S_AGI) >= 5) ? 2 : 1);
+	bool single = !sd || sd->area == 0;
+	f.canCounter = single && a.team != d.team && CanCounter(b, d, a);
+	if (f.canCounter) {
+		StrikeCalc(b, d, a, -1, f.cdmg, f.chit, f.ccrit);
+		f.chits = (UnitStat(d, S_AGI) - UnitStat(a, S_AGI) >= 5) ? 2 : 1;
+	}
+}
+
+int SkillCastRangeMin(const Unit& u, int skill)
+{
+	const SkillDef& s = SkillInfo(skill);
+	return s.rMax < 0 ? UnitRangeMin(u) : s.rMin;
+}
+int SkillCastRangeMax(const Unit& u, int skill)
+{
+	const SkillDef& s = SkillInfo(skill);
+	return s.rMax < 0 ? UnitRangeMax(u) : s.rMax;
+}
+
+bool SkillUsable(const Battle& b, int ui, int skill)
+{
+	const Unit& u = b.u[ui];
+	const SkillDef& s = SkillInfo(skill);
+	if (s.kind == SK_PASSIVE) return false;
+	return UnitHasSkill(u, skill) && u.mp >= s.mp;
+}
+
+int SkillTargets(const Battle& b, int caster, int skill, int cx, int cz, int* out, int maxOut)
+{
+	const Unit& c = b.u[caster];
+	const SkillDef& s = SkillInfo(skill);
+	bool friendly = (s.kind == SK_HEAL || s.kind == SK_BUFF);
+	int n = 0;
+	for (int i = 0; i < b.nUnits && n < maxOut; i++) {
+		const Unit& t = b.u[i];
+		if (!t.alive) continue;
+		bool ally = (t.team == c.team);
+		if (friendly != ally) continue;
+		if (Dist(t.x, t.z, cx, cz) > s.area) continue;
+		if (s.rMax == 0 && i == caster) continue;
+		out[n++] = i;
+	}
+	return n;
+}
+
+int ExpForAction(const Unit& a, const Unit& d, int killed, int stage)
+{
+	int dl = d.ch.lv - a.ch.lv;
+	int e = 10 + dl * 3;
+	if (killed) e += 30 + dl * 5 + (d.boss ? 40 : 0);
+	e = Clampi(e, 1, 100);
+	float f = 1.f + (stage - 1) * .025f;
+	return Clampi((int)roundf(e * f), 1, 100);
+}
+
+static void ApplyEffect(Battle& b, Unit& a, Unit& d, int effect)
+{
+	switch (effect) {
+	case EF_SLOW: d.ct = max(0, d.ct - 400); break;
+	case EF_DEFDOWN: d.buffDef = 0; d.defDown = 3; break;
+	case EF_POISON: d.poison = 3; break;
+	case EF_BUFF_DEF: d.buffDef = 3; break;
+	case EF_BUFF_AGI: d.buffAgi = 3; break;
+	case EF_BUFF_ATK: d.buffAtk = 3; break;
+	default: break;
+	}
+	(void)b; (void)a;
+}
+
+int ResolveAttack(Battle& b, int ai, int di, int skill, Rng& r, Strike* out, int maxOut)
+{
+	int n = 0;
+	Unit& a = b.u[ai];
+	const SkillDef* sd = skill >= 0 ? &SkillInfo(skill) : NULL;
+	if (sd) a.mp = max(0, a.mp - sd->mp);
+	// 範囲・回復・補助
+	if (sd && (sd->area > 0 || sd->kind == SK_HEAL || sd->kind == SK_BUFF)) {
+		int targets[MAX_UNITS];
+		int cx = b.u[di].x, cz = b.u[di].z;
+		if (sd->rMax == 0) { cx = a.x; cz = a.z; }
+		int nt = SkillTargets(b, ai, skill, cx, cz, targets, MAX_UNITS);
+		for (int k = 0; k < nt && n < maxOut; k++) {
+			Unit& d = b.u[targets[k]];
+			Strike s = {};
+			s.attacker = ai; s.defender = targets[k]; s.skill = skill;
+			if (sd->kind == SK_HEAL) {
+				int amt = UnitStat(a, S_MAG) + sd->power;
+				int before = d.hp;
+				d.hp = min(d.ch.stat[S_HP], d.hp + amt);
+				s.dmg = -(d.hp - before);
+				s.hit = 1;
+			} else if (sd->kind == SK_BUFF) {
+				ApplyEffect(b, a, d, sd->effect);
+				s.hit = 1;
+			} else {
+				int dmg, hit, crit;
+				StrikeCalc(b, a, d, skill, dmg, hit, crit);
+				s.hit = (int)(r.Next() % 100) < hit;
+				if (s.hit) {
+					s.crit = (int)(r.Next() % 100) < crit;
+					s.dmg = s.crit ? dmg * 2 : dmg;
+					d.hp -= s.dmg;
+					if (sd->effect != EF_NONE) ApplyEffect(b, a, d, sd->effect);
+					if (d.hp <= 0) { d.hp = 0; s.kill = 1; }
+				}
+			}
+			out[n++] = s;
+		}
+		return n;
+	}
+	// 単体（通常・物理スキル・単体魔法）＋反撃
+	Unit& d = b.u[di];
+	Forecast f;
+	CalcForecast(b, ai, di, skill, f);
+	int aLeft = f.hits, dLeft = f.canCounter ? f.chits : 0;
+	int turn = 0;
+	while ((aLeft > 0 || dLeft > 0) && n < maxOut) {
+		bool atkTurn = (turn % 2 == 0) ? aLeft > 0 : dLeft <= 0;
+		turn++;
+		Unit& x = atkTurn ? a : d;
+		Unit& y = atkTurn ? d : a;
+		if (x.hp <= 0 || y.hp <= 0) break;
+		int sk = atkTurn ? skill : -1;
+		int dmg, hit, crit;
+		StrikeCalc(b, x, y, sk, dmg, hit, crit);
+		Strike s = {};
+		s.attacker = atkTurn ? ai : di;
+		s.defender = atkTurn ? di : ai;
+		s.skill = sk;
+		s.counter = atkTurn ? 0 : 1;
+		s.hit = (int)(r.Next() % 100) < hit;
+		if (s.hit) {
+			s.crit = (int)(r.Next() % 100) < crit;
+			s.dmg = s.crit ? dmg * 2 : dmg;
+			y.hp -= s.dmg;
+			if (sk >= 0 && SkillInfo(sk).effect == EF_DRAIN) {
+				int h = s.dmg / 2;
+				x.hp = min(x.ch.stat[S_HP], x.hp + h);
+				s.drain = h;
+			}
+			if (sk >= 0 && SkillInfo(sk).effect != EF_NONE && SkillInfo(sk).effect != EF_DRAIN && SkillInfo(sk).effect != EF_IGNDEF)
+				ApplyEffect(b, x, y, SkillInfo(sk).effect);
+			if (y.hp <= 0) { y.hp = 0; s.kill = 1; }
+		}
+		out[n++] = s;
+		if (atkTurn) aLeft--; else dLeft--;
+		if (s.kill) break;
+	}
+	return n;
+}
+
+// ============================================================ 戦闘全体
+void Battle::RebuildOcc()
+{
+	memset(occ, 0, sizeof(occ));
+	for (int i = 0; i < nUnits; i++)
+		if (u[i].alive && Map::In(u[i].x, u[i].z)) occ[u[i].z][u[i].x] = i + 1;
+}
+
+int Battle::AliveCount(int team) const
+{
+	int n = 0;
+	for (int i = 0; i < nUnits; i++) if (u[i].alive && u[i].team == team) n++;
+	return n;
+}
+
+static int Speed(const Unit& u)
+{
+	int s = 10 + UnitStat(u, S_AGI);
+	if (UnitHasSkill(u, SKL_P_SWIFT)) s = s * 12 / 10;
+	return s;
+}
+
+int Battle::NextActor()
+{
+	for (int guard = 0; guard < 100000; guard++) {
+		int best = -1;
+		for (int i = 0; i < nUnits; i++) {
+			if (!u[i].alive || u[i].ct < 1000) continue;
+			if (best < 0 || u[i].ct > u[best].ct || (u[i].ct == u[best].ct && u[i].team < u[best].team)) best = i;
+		}
+		if (best >= 0) return best;
+		for (int i = 0; i < nUnits; i++) if (u[i].alive) u[i].ct += Speed(u[i]);
+	}
+	return -1;
+}
+
+int Battle::PredictOrder(int* out, int n, int acting) const
+{
+	int ct[MAX_UNITS];
+	for (int i = 0; i < nUnits; i++) ct[i] = u[i].ct;
+	if (acting >= 0 && acting < nUnits) ct[acting] = max(0, ct[acting] - 1000);
+	int got = 0;
+	for (int guard = 0; guard < 100000 && got < n; guard++) {
+		int best = -1;
+		for (int i = 0; i < nUnits; i++) {
+			if (!u[i].alive || ct[i] < 1000) continue;
+			if (best < 0 || ct[i] > ct[best] || (ct[i] == ct[best] && u[i].team < u[best].team)) best = i;
+		}
+		if (best >= 0) { out[got++] = best; ct[best] -= 1000; continue; }
+		bool any = false;
+		for (int i = 0; i < nUnits; i++) if (u[i].alive) { ct[i] += Speed(u[i]); any = true; }
+		if (!any) break;
+	}
+	return got;
+}
+
+static int PickMonster(int stage, Rng& r)
+{
+	int tot = 0;
+	for (int i = 0; i < M_COUNT; i++) if (kMon[i].minStage <= stage) tot += kMon[i].weight + (stage - kMon[i].minStage > 10 ? 0 : 0);
+	int v = r.Range(0, max(0, tot - 1));
+	for (int i = 0; i < M_COUNT; i++) {
+		if (kMon[i].minStage > stage) continue;
+		v -= kMon[i].weight;
+		if (v < 0) return i;
+	}
+	return M_SLIME;
+}
+
+void SetupBattle(Battle& b, int stage, DWORD seed, const CharData* party, const int* rosterIdx, int nParty)
+{
+	memset(&b, 0, sizeof(b));
+	stage = Clampi(stage, 1, 100);
+	b.stage = stage;
+	GenerateMap(b.map, stage, seed);
+	Rng r(seed ^ 0xA5A5A5A5u);
+	int n = 0;
+	const float faceToE = atan2f((float)(b.map.eStartX[0] - b.map.pStartX[0]), (float)(b.map.eStartZ[0] - b.map.pStartZ[0]));
+	for (int i = 0; i < nParty && i < MAX_PARTY; i++) {
+		Unit& u = b.u[n];
+		memset(&u, 0, sizeof(u));
+		u.alive = 1;
+		u.team = TEAM_PLAYER;
+		u.rosterIdx = rosterIdx[i];
+		u.monster = -1;
+		u.ch = party[i];
+		u.hp = u.ch.stat[S_HP];
+		u.mp = u.ch.stat[S_MP];
+		u.x = b.map.pStartX[i]; u.z = b.map.pStartZ[i];
+		u.face = faceToE;
+		u.ct = r.Range(0, 300) + u.ch.stat[S_AGI] * 8;
+		u.hpShow = (float)u.hp;
+		n++;
+	}
+	int ne = min((int)MAX_ENEMY, 4 + stage / 8);
+	int baseLv = 1 + (int)((stage - 1) * .9f);
+	for (int i = 0; i < ne; i++) {
+		Unit& u = b.u[n];
+		bool boss = (i == ne - 1);
+		int mon = (boss && stage % 10 == 0) ? M_DRAGON : PickMonster(stage, r);
+		int lv = baseLv + r.Range(-1, 1) + (boss ? 3 : 0);
+		if (stage <= 2) lv = max(1, lv - 1);
+		MakeEnemy(u, mon, lv, boss ? 1 : 0, r);
+		u.x = b.map.eStartX[i]; u.z = b.map.eStartZ[i];
+		u.face = faceToE + 3.14159f;
+		u.ct = r.Range(0, 300) + u.ch.stat[S_AGI] * 8;
+		u.hpShow = (float)u.hp;
+		n++;
+	}
+	b.nUnits = n;
+	b.RebuildOcc();
+}
+
+void FinishAction(Battle& b, int ui, int moved, int acted)
+{
+	Unit& u = b.u[ui];
+	int cost = (moved && acted) ? 1000 : (moved || acted) ? 800 : 600;
+	u.ct = max(0, u.ct - cost);
+	b.turnCount++;
+}
+
+int TurnStartEffects(Battle& b, int ui, int* healOut, int* poisonOut)
+{
+	Unit& u = b.u[ui];
+	*healOut = 0; *poisonOut = 0;
+	if (UnitHasSkill(u, SKL_P_REGEN) && u.hp < u.ch.stat[S_HP]) {
+		int h = max(1, u.ch.stat[S_HP] / 10);
+		int before = u.hp;
+		u.hp = min(u.ch.stat[S_HP], u.hp + h);
+		*healOut = u.hp - before;
+	}
+	if (u.poison > 0) {
+		int d = max(1, u.ch.stat[S_HP] * 8 / 100);
+		u.hp = max(1, u.hp - d);
+		*poisonOut = d;
+		u.poison--;
+	}
+	if (u.buffDef > 0) u.buffDef--;
+	if (u.buffAgi > 0) u.buffAgi--;
+	if (u.buffAtk > 0) u.buffAtk--;
+	if (u.defDown > 0) u.defDown--;
+	return 0;
+}
+
+// ============================================================ AI
+static void DistanceField(const Battle& b, int ui, short (*df)[MAPN])
+{
+	const Unit& u = b.u[ui];
+	const int mt = UnitMoveType(u), jp = UnitJump(u);
+	for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) df[z][x] = 30000;
+	static int qx[MAPN * MAPN * 4], qz[MAPN * MAPN * 4];
+	int qh = 0, qt = 0;
+	for (int i = 0; i < b.nUnits; i++) {
+		const Unit& t = b.u[i];
+		if (!t.alive || t.team == u.team) continue;
+		df[t.z][t.x] = 0;
+		qx[qt] = t.x; qz[qt] = t.z; qt++;
+	}
+	static const int dx[4] = { 1, -1, 0, 0 }, dz[4] = { 0, 0, 1, -1 };
+	// 0-1 ではないので緩和 BFS（反復）
+	while (qh < qt) {
+		int x = qx[qh], z = qz[qh]; qh++;
+		for (int k = 0; k < 4; k++) {
+			int nx = x + dx[k], nz = z + dz[k];
+			if (!Map::In(nx, nz)) continue;
+			if (!CanStep(b.map, nx, nz, x, z, mt, jp)) continue;
+			int c = df[z][x] + EnterCost(b.map, x, z, mt);
+			if (c < df[nz][nx]) {
+				df[nz][nx] = (short)c;
+				if (qt < (int)_countof(qx)) { qx[qt] = nx; qz[qt] = nz; qt++; }
+			}
+		}
+	}
+}
+
+void AiDecide(const Battle& b, int ui, AiPlan& p, Rng& r)
+{
+	const Unit& u = b.u[ui];
+	p.moveX = u.x; p.moveZ = u.z; p.target = -1; p.skill = -1; p.castX = u.x; p.castZ = u.z;
+	static Reach rc;
+	ComputeReach(b, ui, rc);
+	float best = -1e9f;
+	Battle& bb = const_cast<Battle&>(b);
+	Unit& um = bb.u[ui];
+	const int ox = u.x, oz = u.z;
+	for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) {
+		if (rc.cost[z][x] < 0 || !rc.canStop[z][x]) continue;
+		um.x = x; um.z = z;
+		float place = TerrainInfo(b.map.At(x, z).t).defPct * .25f - rc.cost[z][x] * .05f;
+		// 通常攻撃
+		for (int i = 0; i < b.nUnits; i++) {
+			const Unit& t = b.u[i];
+			if (!t.alive || t.team == u.team) continue;
+			if (!InAttackRange(b, x, z, UnitRangeMin(u), UnitRangeMax(u), t.x, t.z, true)) continue;
+			Forecast f;
+			CalcForecast(b, ui, i, -1, f);
+			float exp = f.dmg * f.hits * f.hit / 100.f;
+			float sc = exp + (f.dmg * f.hits >= t.hp ? 40.f : 0) - (f.canCounter ? f.cdmg * f.chits * f.chit / 100.f * .5f : 0) + place;
+			sc += (1.f - (float)t.hp / max(1, t.ch.stat[S_HP])) * 8.f;
+			if (sc > best) { best = sc; p.moveX = x; p.moveZ = z; p.target = i; p.skill = -1; p.castX = t.x; p.castZ = t.z; }
+		}
+		// スキル
+		for (int s = 0; s < SKL_COUNT; s++) {
+			if (!SkillUsable(b, ui, s)) continue;
+			const SkillDef& sd = SkillInfo(s);
+			int rmin = SkillCastRangeMin(u, s), rmax = SkillCastRangeMax(u, s);
+			for (int i = 0; i < b.nUnits; i++) {
+				const Unit& t = b.u[i];
+				if (!t.alive) continue;
+				bool friendly = sd.kind == SK_HEAL || sd.kind == SK_BUFF;
+				if (friendly != (t.team == u.team)) continue;
+				int tx = t.x, tz = t.z;
+				if (sd.rMax == 0) { tx = x; tz = z; }
+				else if (!InAttackRange(b, x, z, rmin, rmax, tx, tz, sd.kind != SK_HEAL && sd.kind != SK_BUFF)) continue;
+				float sc = place;
+				if (sd.kind == SK_HEAL) {
+					int targets[MAX_UNITS];
+					int nt = SkillTargets(b, ui, s, tx, tz, targets, MAX_UNITS);
+					float h = 0;
+					for (int k = 0; k < nt; k++) {
+						const Unit& q = b.u[targets[k]];
+						int miss = q.ch.stat[S_HP] - q.hp;
+						if (q.hp * 100 / max(1, q.ch.stat[S_HP]) < 65) h += min(miss, UnitStat(u, S_MAG) + sd.power);
+					}
+					if (h <= 0) continue;
+					sc += h * 1.2f;
+				} else if (sd.kind == SK_BUFF) {
+					continue;
+				} else {
+					int targets[MAX_UNITS];
+					int nt = SkillTargets(b, ui, s, tx, tz, targets, MAX_UNITS);
+					if (sd.area == 0) { targets[0] = i; nt = 1; }
+					float tot = 0;
+					for (int k = 0; k < nt; k++) {
+						Forecast f;
+						CalcForecast(b, ui, targets[k], s, f);
+						const Unit& q = b.u[targets[k]];
+						tot += f.dmg * f.hits * f.hit / 100.f + (f.dmg * f.hits >= q.hp ? 40.f : 0);
+					}
+					if (tot <= 0) continue;
+					sc += tot - sd.mp * .4f;
+				}
+				sc += r.F(0, 1.5f);
+				if (sc > best) { best = sc; p.moveX = x; p.moveZ = z; p.target = i; p.skill = s; p.castX = tx; p.castZ = tz; }
+			}
+		}
+	}
+	um.x = ox; um.z = oz;
+	if (p.target >= 0) return;
+	// ボスは近づかれるまで待機
+	if (u.boss) {
+		int nearest = 999;
+		for (int i = 0; i < b.nUnits; i++) if (b.u[i].alive && b.u[i].team != u.team) nearest = min(nearest, Dist(u.x, u.z, b.u[i].x, b.u[i].z));
+		if (nearest > 10) return;
+	}
+	static short df[MAPN][MAPN];
+	DistanceField(b, ui, df);
+	int bd = df[u.z][u.x];
+	float bs = -1e9f;
+	for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) {
+		if (rc.cost[z][x] < 0 || !rc.canStop[z][x]) continue;
+		int d = df[z][x];
+		if (d >= 30000) continue;
+		float sc = -d * 10.f + TerrainInfo(b.map.At(x, z).t).defPct * .2f + r.F(0, .5f);
+		if (UnitRangeMax(u) >= 2 && d <= 1) sc -= 15.f;
+		if (sc > bs) { bs = sc; p.moveX = x; p.moveZ = z; }
+	}
+	if (bs < -1e8f || df[p.moveZ][p.moveX] > bd) { p.moveX = u.x; p.moveZ = u.z; }
+}
+
+// ============================================================ セーブ
+static const DWORD kSaveMagic = 0x31434154; // 'TAC1'
+static LPCTSTR kSaveLeaf = _T("oggYSEDbgmu_tactics.dat");
+
+void SaveDefaults(SaveData& s)
+{
+	memset(&s, 0, sizeof(s));
+	s.magic = kSaveMagic;
+	s.version = 1;
+	for (int i = 0; i < MAX_PARTY; i++) s.party[i] = -1;
+	s.stageSel = 1;
+	s.camSpeed = 1;
+	s.quality = 1;
+	s.showGrid = 1;
+	s.uidNext = 1;
+}
+
+bool SaveLoad(SaveData& s)
+{
+	SaveDefaults(s);
+	CString path = DatArc_Path(kSaveLeaf);
+	FILE* fp = NULL;
+	if (_tfopen_s(&fp, path, _T("rb")) != 0 || !fp) return false;
+	SaveData t;
+	size_t rd = fread(&t, 1, sizeof(t), fp);
+	fclose(fp);
+	if (rd != sizeof(t) || t.magic != kSaveMagic || t.version != 1) return false;
+	s = t;
+	for (int i = 0; i < MAX_ROSTER; i++) {
+		CharData& c = s.roster[i];
+		c.name[NAME_LEN - 1] = 0;
+		if (!c.used) continue;
+		c.cls = Clampi(c.cls, 0, C_PLAYER_COUNT - 1);
+		c.lv = Clampi(c.lv, 1, 99);
+		c.body = Clampi(c.body, 0, B_COUNT - 1);
+		c.hair = Clampi(c.hair, 0, HAIR_STYLES - 1);
+		c.hairColor = Clampi(c.hairColor, 0, HAIR_COLORS - 1);
+		c.outfit = Clampi(c.outfit, 0, OUTFIT_COLORS - 1);
+	}
+	for (int i = 0; i < MAX_PARTY; i++)
+		if (s.party[i] < -1 || s.party[i] >= MAX_ROSTER || (s.party[i] >= 0 && !s.roster[s.party[i]].used)) s.party[i] = -1;
+	s.stageCleared = Clampi(s.stageCleared, 0, 100);
+	s.stageSel = Clampi(s.stageSel, 1, min(100, s.stageCleared + 1));
+	if (s.uidNext == 0) s.uidNext = 1;
+	return true;
+}
+
+bool SaveWrite(const SaveData& s)
+{
+	CString path = DatArc_Path(kSaveLeaf);
+	FILE* fp = NULL;
+	if (_tfopen_s(&fp, path, _T("wb")) != 0 || !fp) return false;
+	bool ok = fwrite(&s, 1, sizeof(s), fp) == sizeof(s);
+	fclose(fp);
+	if (ok) DatArc_Commit(kSaveLeaf);
+	return ok;
+}
+
+// ============================================================ 名前
+static const wchar_t* const kNamesJaM[] = { L"アルス", L"レオン", L"カイル", L"ガルド", L"ユリウス", L"ロラン", L"ジーク", L"セシル", L"ハロルド", L"ラグナ", L"エリク", L"トール" };
+static const wchar_t* const kNamesJaF[] = { L"リリア", L"セリス", L"ミーナ", L"エルザ", L"ソフィア", L"ルナ", L"アイリス", L"フィオナ", L"ノエル", L"クレア", L"シエラ", L"ティナ" };
+static const wchar_t* const kNamesLaM[] = { L"Arus", L"Leon", L"Kyle", L"Gard", L"Julius", L"Roland", L"Sieg", L"Cecil", L"Harold", L"Ragna", L"Erik", L"Thor" };
+static const wchar_t* const kNamesLaF[] = { L"Lilia", L"Celes", L"Mina", L"Elsa", L"Sophia", L"Luna", L"Iris", L"Fiona", L"Noel", L"Claire", L"Sierra", L"Tina" };
+static const wchar_t* const kNamesKoM[] = { L"아루스", L"레온", L"카일", L"가르드", L"율리우스", L"롤랑", L"지크", L"세실", L"해럴드", L"라그나", L"에릭", L"토르" };
+static const wchar_t* const kNamesKoF[] = { L"릴리아", L"셀리스", L"미나", L"엘자", L"소피아", L"루나", L"아이리스", L"피오나", L"노엘", L"클레어", L"시에라", L"티나" };
+static const wchar_t* const kNamesZhM[] = { L"阿尔斯", L"雷昂", L"凯尔", L"加尔德", L"尤里乌斯", L"罗兰", L"齐格", L"塞西尔", L"哈罗德", L"拉格纳", L"埃里克", L"托尔" };
+static const wchar_t* const kNamesZhF[] = { L"莉莉娅", L"塞莉丝", L"米娜", L"艾尔莎", L"索菲亚", L"露娜", L"艾莉丝", L"菲奥娜", L"诺艾尔", L"克蕾尔", L"希艾拉", L"蒂娜" };
+static const wchar_t* const kNamesArM[] = { L"آروس", L"ليون", L"كايل", L"غارد", L"يوليوس", L"رولان", L"زيغ", L"سيسيل", L"هارولد", L"راغنا", L"إريك", L"ثور" };
+static const wchar_t* const kNamesArF[] = { L"ليليا", L"سيليس", L"مينا", L"إلسا", L"صوفيا", L"لونا", L"إيريس", L"فيونا", L"نويل", L"كلير", L"سييرا", L"تينا" };
+static const wchar_t* const kNamesRuM[] = { L"Арус", L"Леон", L"Кайл", L"Гард", L"Юлиус", L"Роланд", L"Зиг", L"Сесил", L"Гарольд", L"Рагна", L"Эрик", L"Тор" };
+static const wchar_t* const kNamesRuF[] = { L"Лилия", L"Селес", L"Мина", L"Эльза", L"София", L"Луна", L"Ирис", L"Фиона", L"Ноэль", L"Клэр", L"Сиерра", L"Тина" };
+
+void RandomName(wchar_t* out, int gender, Rng& r)
+{
+	const wchar_t* key = ::LangPick14(L"ja", L"la", L"la", L"la", L"la", L"ko", L"zh", L"ar", L"ru", L"la", L"la", L"la", L"la", L"la");
+	const wchar_t* const* tbl;
+	if (!wcscmp(key, L"ja")) tbl = gender ? kNamesJaF : kNamesJaM;
+	else if (!wcscmp(key, L"ko")) tbl = gender ? kNamesKoF : kNamesKoM;
+	else if (!wcscmp(key, L"zh")) tbl = gender ? kNamesZhF : kNamesZhM;
+	else if (!wcscmp(key, L"ar")) tbl = gender ? kNamesArF : kNamesArM;
+	else if (!wcscmp(key, L"ru")) tbl = gender ? kNamesRuF : kNamesRuM;
+	else tbl = gender ? kNamesLaF : kNamesLaM;
+	wcsncpy_s(out, NAME_LEN, tbl[r.Range(0, 11)], _TRUNCATE);
+}
+
+} // namespace otac

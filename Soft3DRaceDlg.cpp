@@ -7243,40 +7243,7 @@ void CSoft3DRaceDlg::RenderScene()
 			nav(c.x+fxw*1.05f, c.y+0.10f, c.z+fzw*1.05f, ir, ig, ib, 0.055f);
 		}
 	}
-	// HQ: トンネル内ライトシャフト（末尾に置き additive 描画）
-	{
-		const UINT shaftBeg = nBand + nWorld + nCraft + nTrans;
-		if ((m_phase == PHASE_RACE || m_phase == PHASE_COUNTDOWN || m_phase == PHASE_FINISH)
-			&& m_camTunnelT > 0.12f && !m_lookback) {
-			float sunR=1.f, sunG=.92f, sunB=.72f;
-			if (m_themeActive==THEME_NIGHT){ sunR=.45f; sunG=.55f; sunB=.95f; }
-			else if (m_themeActive==THEME_UNDER){ sunR=.35f; sunG=.75f; sunB=.9f; }
-			else if (m_themeActive==THEME_MESA){ sunR=1.f; sunG=.7f; sunB=.4f; }
-			float rx = ax - cx, ry = ay - cy, rz = az - cz; S3rNorm3(rx,ry,rz);
-			float ux=0,uy=1,uz=0;
-			float ssx=uy*rz-uz*ry, ssy=uz*rx-ux*rz, ssz=ux*ry-uy*rx; S3rNorm3(ssx,ssy,ssz);
-			float u2x=ry*ssz-rz*ssy, u2y=rz*ssx-rx*ssz, u2z=rx*ssy-ry*ssx;
-			const float tk = m_camTunnelT;
-			for (int i=0;i<7;i++){
-				float t = (float)i / 6.f;
-				float along = 4.f + t * 28.f;
-				float side = ((i%3)-1) * 1.1f;
-				float px = pl.x + noseX * along + (-noseZ) * side;
-				float py = pl.y + 2.2f + noseY * along * 0.35f + sinf(m_anim*1.5f+(float)i)*.4f;
-				float pz = pl.z + noseZ * along + noseX * side;
-				float hs = 0.35f + t * 1.8f;
-				float vs = 6.f + t * 14.f;
-				float a = (0.10f + 0.12f * (1.f-t)) * tk;
-				float x0=px-ssx*hs-u2x*vs, y0=py-ssy*hs-u2y*vs, z0=pz-ssz*hs-u2z*vs;
-				float x1=px+ssx*hs-u2x*vs, y1=py+ssy*hs-u2y*vs, z1=pz+ssz*hs-u2z*vs;
-				float x2=px+ssx*hs+u2x*vs, y2=py+ssy*hs+u2y*vs, z2=pz+ssz*hs+u2z*vs;
-				float x3=px-ssx*hs+u2x*vs, y3=py-ssy*hs+u2y*vs, z3=pz+ssz*hs+u2z*vs;
-				put(x0,y0,z0,-rx,-ry,-rz,0,0,sunR,sunG,sunB,a); put(x1,y1,z1,-rx,-ry,-rz,1,0,sunR,sunG,sunB,a); put(x2,y2,z2,-rx,-ry,-rz,1,1,sunR,sunG,sunB,a);
-				put(x0,y0,z0,-rx,-ry,-rz,0,0,sunR,sunG,sunB,a); put(x2,y2,z2,-rx,-ry,-rz,1,1,sunR,sunG,sunB,a); put(x3,y3,z3,-rx,-ry,-rz,0,1,sunR,sunG,sunB,a);
-			}
-			nShaft = (nBand + nWorld + nCraft + nTrans) - shaftBeg;
-		}
-	}
+	// トンネル縦光は地形テクスチャの巨大な板になり自機を隠すので出さない。
 
 	UINT craftDrawN = 0;
 	int craftMeshOf[S3R_MAX_CRAFT];

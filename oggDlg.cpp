@@ -30645,8 +30645,9 @@ UINT TheadLoop(LPVOID)
 		/* 再生中 / Soft3D 表示中は vblank 待ち。停止中は UI コアを空ける。 */
 		extern BOOL IsSoft3DMazeOpen();
 		extern BOOL IsSoft3DRaceOpen();
+		extern BOOL IsOmakeTacticsOpen();
 		const int needFast = (playy != 0
-			|| IsSoft3DMazeOpen() || IsSoft3DRaceOpen()) ? 1 : 0;
+			|| IsSoft3DMazeOpen() || IsSoft3DRaceOpen() || IsOmakeTacticsOpen()) ? 1 : 0;
 
 		extern CMediaPlayerDlg* mp;
 		CMediaPlayerDlg* pMp = mp;
@@ -30732,7 +30733,8 @@ void timerog1(UINT nIDEvent)
 		{
 			extern BOOL IsSoft3DMazeActive();
 			extern BOOL IsSoft3DRaceActive();
-			if (IsSoft3DMazeActive() || IsSoft3DRaceActive())
+			extern BOOL IsOmakeTacticsActive();
+			if (IsSoft3DMazeActive() || IsSoft3DRaceActive() || IsOmakeTacticsActive())
 				return;
 		}
 		if (maini)
@@ -33072,6 +33074,9 @@ BOOL COggDlg::PreTranslateMessage(MSG* pMsg)
 			return TRUE;
 		extern BOOL Soft3DRacePreTranslate(MSG*);
 		if (Soft3DRacePreTranslate(pMsg))
+			return TRUE;
+		extern BOOL OmakeTacticsPreTranslate(MSG*);
+		if (OmakeTacticsPreTranslate(pMsg))
 			return TRUE;
 		extern CMediaPlayerDlg* mp;
 		if (mp && ::IsWindow(mp->GetSafeHwnd()) && mp->RelayPreTranslateMessage(pMsg))
@@ -35792,7 +35797,8 @@ LRESULT COggDlg::OnHotKey(WPARAM wp, LPARAM a)
 	// Soft3D 迷路／空中レース操作中は上下＝音量／左右＝シークのグローバルホットキーを無効化
 	extern BOOL IsSoft3DMazeActive();
 	extern BOOL IsSoft3DRaceActive();
-	if (IsSoft3DMazeActive() || IsSoft3DRaceActive())
+	extern BOOL IsOmakeTacticsActive();
+	if (IsSoft3DMazeActive() || IsSoft3DRaceActive() || IsOmakeTacticsActive())
 		return 0;
 
 	std::unique_lock<std::mutex> hscroll_lock(cl2);
@@ -35927,7 +35933,8 @@ void COggDlg::OnActivate(UINT nState, CWnd * pWndOther, BOOL bMinimized)
 	else {
 		extern BOOL IsSoft3DMazeActive();
 		extern BOOL IsSoft3DRaceActive();
-		if (!IsSoft3DMazeActive() && !IsSoft3DRaceActive()) {
+		extern BOOL IsOmakeTacticsActive();
+		if (!IsSoft3DMazeActive() && !IsSoft3DRaceActive() && !IsOmakeTacticsActive()) {
 			RegisterHotKey(GetSafeHwnd(), ID_HOTKEY0, 0, VK_UP);
 			RegisterHotKey(GetSafeHwnd(), ID_HOTKEY1, 0, VK_DOWN);
 			RegisterHotKey(GetSafeHwnd(), ID_HOTKEY2, 0, VK_RIGHT);

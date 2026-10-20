@@ -18,6 +18,7 @@ for %%F in (
   gpu_vs_rect gpu_ps_rect gpu_vs_piano gpu_cs_hex gpu_cs_glyph
   maze_vst maze_hst maze_dst maze_psw maze_vss maze_pss maze_vsh maze_psh maze_vsq maze_ssr maze_dofp maze_fin maze_psline maze_psmirf maze_pscloud maze_csfx maze_gsw maze_vsskin
   race_vst race_hst race_dst race_psb race_vss race_pss race_vsh race_psh race_vsq race_ssr race_dofp race_fin race_csnoise race_psc race_psline race_pst race_vssi race_psw race_pscloud race_gsw race_vsw
+  tac_vss tac_vsk tac_psm tac_pso tac_psov tac_vsh tac_psh tac_vsp tac_psp tac_vsq tac_pssky
 ) do if not exist res\cso\%%F.cso goto :needfxc
 powershell -NoProfile -Command "if (-not (Get-Item -ErrorAction SilentlyContinue res\cso\*.cso)) { exit 1 }; $h = @(Get-Item shaders\*.hlsl); $c = @(Get-Item res\cso\*.cso); if (($c | Measure-Object LastWriteTime -Minimum).Minimum -ge ($h | Measure-Object LastWriteTime -Maximum).Maximum) { exit 0 } else { exit 1 }"
 if not errorlevel 1 (
@@ -120,6 +121,29 @@ if errorlevel 1 exit /b 1
 call :cc gs_5_0 GSW shaders\soft3d_race.hlsl race_GSW race_gsw
 if errorlevel 1 exit /b 1
 call :cc vs_5_0 VSW shaders\soft3d_race.hlsl race_VSW race_vsw
+if errorlevel 1 exit /b 1
+
+call :cc vs_5_0 VSS shaders\omake_tactics.hlsl tac_VSS tac_vss
+if errorlevel 1 exit /b 1
+call :cc vs_5_0 VSK shaders\omake_tactics.hlsl tac_VSK tac_vsk
+if errorlevel 1 exit /b 1
+call :cc ps_5_0 PSM shaders\omake_tactics.hlsl tac_PSM tac_psm
+if errorlevel 1 exit /b 1
+call :cc ps_5_0 PSO shaders\omake_tactics.hlsl tac_PSO tac_pso
+if errorlevel 1 exit /b 1
+call :cc ps_5_0 PSOV shaders\omake_tactics.hlsl tac_PSOV tac_psov
+if errorlevel 1 exit /b 1
+call :cc vs_5_0 VSH shaders\omake_tactics.hlsl tac_VSH tac_vsh
+if errorlevel 1 exit /b 1
+call :cc ps_5_0 PSH shaders\omake_tactics.hlsl tac_PSH tac_psh
+if errorlevel 1 exit /b 1
+call :cc vs_5_0 VSP shaders\omake_tactics.hlsl tac_VSP tac_vsp
+if errorlevel 1 exit /b 1
+call :cc ps_5_0 PSP shaders\omake_tactics.hlsl tac_PSP tac_psp
+if errorlevel 1 exit /b 1
+call :cc vs_5_0 VSQ shaders\omake_tactics.hlsl tac_VSQ tac_vsq
+if errorlevel 1 exit /b 1
+call :cc ps_5_0 PSSKY shaders\omake_tactics.hlsl tac_PSSKY tac_pssky
 if errorlevel 1 exit /b 1
 
 echo cso ok
