@@ -1,5 +1,6 @@
 #include "stdafx.h"
 #include "OmakeTacticsGame.h"
+#include "OmakeTacticsAudio.h"
 #include <math.h>
 #include <stdio.h>
 
@@ -516,7 +517,9 @@ BOOL Game::Btn(int id, float x, float y, float w, float h, const wchar_t* label,
 	BOOL foc = m_navMode && m_focusId == id;
 	BOOL fire = FALSE;
 	if (en && ClickIn(x, y, w, h)) fire = TRUE;
+	else if (!en && ClickIn(x, y, w, h)) TacSfx(TS_ERROR);
 	if (en && m_activateId == id) { fire = TRUE; m_activateId = -1; }
+	if (fire) TacSfx(TS_CONFIRM);
 	DWORD top, bot;
 	if (!en) { top = RGBA8(58, 58, 66, 210); bot = RGBA8(38, 38, 46, 210); }
 	else if (sel) { top = RGBA8(240, 200, 100); bot = RGBA8(176, 122, 40); }
@@ -552,6 +555,7 @@ int Game::Sel(int id, float x, float y, float w, float h, const wchar_t* label, 
 	}
 	if (foc && m_selDelta) { d = m_selDelta; m_selDelta = 0; }
 	if (m_activateId == id) { d = 1; m_activateId = -1; }
+	if (d) TacSfx(TS_CURSOR);
 	m_r.HudRectGrad(x, y, w, h, (hov || foc) ? RGBA8(64, 78, 130, 236) : RGBA8(34, 40, 70, 230), RGBA8(20, 24, 44, 236));
 	m_r.HudFrame(x, y, w, h, U(1), (hov || foc) ? RGBA8(255, 232, 150) : RGBA8(120, 104, 74));
 	if (foc) m_r.HudFrame(x - U(2), y - U(2), w + U(4), h + U(4), U(2), RGBA8(255, 220, 120, 180));
@@ -587,7 +591,7 @@ void Game::NavMove(int dx, int dy)
 		float sc = along + ortho * 2.2f;
 		if (sc < best) { best = sc; bestId = b.id; }
 	}
-	if (bestId >= 0) m_focusId = bestId;
+	if (bestId >= 0 && bestId != m_focusId) { m_focusId = bestId; TacSfx(TS_CURSOR); }
 }
 
 void Game::NavConfirm()

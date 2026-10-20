@@ -344,6 +344,7 @@ IDR_CSO_TAC_VSQ         RCDATA                  "res\\cso\\tac_vsq.cso"
 IDR_CSO_TAC_PSSKY       RCDATA                  "res\\cso\\tac_pssky.cso"
 
 IDR_TAC_ASSETS          RCDATA                  "res\\tactics\\tac_assets.bin"
+IDR_TAC_SFX             RCDATA                  "res\\tactics\\tac_sfx.bin"
 
 IDR_CSO_RACE_VST        RCDATA                  "res\\cso\\race_vst.cso"
 

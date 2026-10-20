@@ -1,5 +1,6 @@
 #include "stdafx.h"
 #include "OmakeTacticsGame.h"
+#include "OmakeTacticsAudio.h"
 #include <math.h>
 #include <stdio.h>
 
@@ -205,6 +206,7 @@ void Game::BeginTurn()
 	swprintf_s(b, L"%s  %s", TT(u.team == TEAM_PLAYER ? TX_BT_TURN_PLAYER : TX_BT_TURN_ENEMY), nm);
 	AddBanner(b, NULL, u.team == TEAM_PLAYER ? RGBA8(140, 200, 255) : RGBA8(255, 140, 130), 2, 1.3f);
 	m_lastTeam = u.team;
+	TacSfx(u.team == TEAM_PLAYER ? TS_TURN_P : TS_TURN_E);
 	if (u.team == TEAM_PLAYER) {
 		m_phase = PH_P_MOVE;
 		m_cx = u.x; m_cz = u.z;
@@ -230,6 +232,7 @@ BOOL Game::CheckBattleOver()
 	m_phase = PH_OVER;
 	m_overT = 0;
 	AddBanner(TT(win ? TX_BT_VICTORY : TX_BT_DEFEAT), win && m_bossDown ? TT(TX_BT_BOSS) : NULL, win ? RGBA8(255, 226, 120) : RGBA8(190, 160, 220), 1, 2.8f);
+	TacSfx(win ? TS_WIN : TS_LOSE);
 	if (win) {
 		for (int i = 0; i < m_b.nUnits; i++) if (m_b.u[i].alive && m_b.u[i].team == TEAM_PLAYER) ActorPlay(m_act[i], CL_CHEER, 1, .2f);
 		for (int i = 0; i < m_b.nUnits; i++) {
@@ -408,7 +411,12 @@ void Game::UpdateHover()
 		BOOL overUi = FALSE;
 		for (auto& b : m_btnsPrev) if (m_mx >= b.x && m_my >= b.y && m_mx < b.x + b.w && m_my < b.y + b.h) overUi = TRUE;
 		int cx, cz;
-		if (!overUi && PickCell((float)m_mx, (float)m_my, cx, cz)) { m_cx = cx; m_cz = cz; m_cursorValid = TRUE; }
+		if (!overUi && PickCell((float)m_mx, (float)m_my, cx, cz)) {
+			if (m_cursorValid && (cx != m_cx || cz != m_cz)
+				&& (m_phase == PH_P_MOVE || m_phase == PH_P_TARGET || m_phase == PH_P_SKILLTARGET))
+				TacSfx(TS_CURSOR);
+			m_cx = cx; m_cz = cz; m_cursorValid = TRUE;
+		}
 	}
 	m_hoverUnit = m_cursorValid ? m_b.UnitAt(m_cx, m_cz) : -1;
 	m_pathN = 0;
@@ -488,6 +496,7 @@ void Game::OpenCommand()
 {
 	m_phase = PH_P_CMD;
 	m_phaseT = 0;
+	TacSfx(TS_OPEN);
 	m_navMode = TRUE;
 	m_focusId = HasAttackTarget(m_cur) ? ID_BT_ATTACK : ID_BT_WAIT;
 	ComputeOverlays();
@@ -521,6 +530,7 @@ void Game::BattleConfirmCursor()
 			}
 		}
 		AddPopup(CellCenter(m_cx, m_cz) + v3(0, .5f, 0), L"×", RGBA8(255, 120, 110), 1);
+		TacSfx(TS_ERROR);
 		return;
 	}
 	if (m_phase == PH_P_TARGET) {
@@ -534,6 +544,7 @@ void Game::BattleConfirmCursor()
 			int tg[MAX_UNITS];
 			if (SkillTargets(m_b, m_cur, m_cmdSkill, u.x, u.z, tg, MAX_UNITS) == 0) {
 				AddBanner(TT(TX_BT_NOTARGET), NULL, RGBA8(255, 180, 160), 2, 1.4f);
+				TacSfx(TS_ERROR);
 				return;
 			}
 			BeginAttack(m_cur, m_cur, m_cmdSkill, u.x, u.z);
@@ -541,7 +552,7 @@ void Game::BattleConfirmCursor()
 		}
 		int t = m_b.UnitAt(m_cx, m_cz);
 		if (CanTarget(m_cur, t, m_cmdSkill)) BeginAttack(m_cur, t, m_cmdSkill, m_cx, m_cz);
-		else AddPopup(CellCenter(m_cx, m_cz) + v3(0, .5f, 0), L"×", RGBA8(255, 120, 110), 1);
+		else { AddPopup(CellCenter(m_cx, m_cz) + v3(0, .5f, 0), L"×", RGBA8(255, 120, 110), 1); TacSfx(TS_ERROR); }
 	}
 }
 
@@ -560,11 +571,13 @@ void Game::BattleClick(int x, int y)
 
 void Game::BattleCancel()
 {
+	int sounded = 0;
 	switch (m_phase) {
 	case PH_P_MOVE:
 		if (m_cur >= 0 && (m_cx != m_b.u[m_cur].x || m_cz != m_b.u[m_cur].z)) {
 			m_cx = m_b.u[m_cur].x; m_cz = m_b.u[m_cur].z; m_camPan = v3(0, 0, 0); UpdateHover();
 		} else { m_phaseBeforeMenu = m_phase; m_phase = PH_MENU; m_menuConfirm = 0; m_navMode = TRUE; m_focusId = ID_BT_M_RESUME; }
+		sounded = 1;
 		break;
 	case PH_P_CMD:
 		if (m_moved && m_cur >= 0) {
@@ -580,27 +593,33 @@ void Game::BattleCancel()
 		if (m_cur >= 0) { m_cx = m_b.u[m_cur].x; m_cz = m_b.u[m_cur].z; }
 		ComputeOverlays();
 		m_navMode = FALSE;
+		sounded = 1;
 		break;
 	case PH_P_SKILLS:
 		m_phase = PH_P_CMD; m_focusId = ID_BT_SKILL; m_navMode = TRUE;
+		sounded = 1;
 		break;
 	case PH_P_TARGET:
-		if (m_target >= 0 && !m_moved) { m_target = -1; m_phase = PH_P_MOVE; ComputeOverlays(); break; }
+		if (m_target >= 0 && !m_moved) { m_target = -1; m_phase = PH_P_MOVE; ComputeOverlays(); sounded = 1; break; }
 		OpenCommand();
+		sounded = 1;
 		break;
 	case PH_P_SKILLTARGET:
 		m_phase = PH_P_SKILLS; m_navMode = TRUE; m_focusId = ID_BT_SK0 + max(0, m_cmdSkill);
 		ComputeOverlays();
+		sounded = 1;
 		break;
 	case PH_MENU:
 		if (m_menuConfirm) m_menuConfirm = 0;
 		else m_phase = m_phaseBeforeMenu;
+		sounded = 1;
 		break;
 	case PH_LEVELUP:
 		m_lvT = 99.f;
 		break;
 	default: break;
 	}
+	if (sounded) TacSfx(TS_CANCEL);
 }
 
 // ============================================================ 移動
@@ -627,6 +646,14 @@ void Game::UpdateMove(float dt)
 	m_moveT += dt * speed;
 	int seg = (int)m_moveT;
 	BOOL fly = UnitMoveType(u) == MV_FLY;
+	{
+		static int stepSeg = -999;
+		if (seg != stepSeg) {
+			if (stepSeg >= 0 && seg > stepSeg && !fly) TacSfx(TS_STEP);
+			stepSeg = seg;
+		}
+		if (seg >= m_moveN - 1) stepSeg = -999;
+	}
 	if (seg >= m_moveN - 1) {
 		int last = m_movePts[m_moveN - 1];
 		u.x = last % MAPN; u.z = last / MAPN;
@@ -737,6 +764,15 @@ void Game::BeginAttack(int ui, int target, int skill, int cx, int cz)
 	}
 	m_phase = PH_ACTION;
 	m_phaseT = 0;
+	{
+		int style = ClassInfo(a.ch.cls).attackStyle;
+		const SkillDef* sd = skill >= 0 ? &SkillInfo(skill) : NULL;
+		if (sd && sd->kind == SK_HEAL) TacSfx(TS_HEAL);
+		else if (sd && sd->kind == SK_BUFF) TacSfx(TS_BUFF);
+		else if (sd && sd->kind == SK_MAGIC) TacSfx(TS_CAST);
+		else if (style == AS_SHOOT || style == AS_SHOOT1) TacSfx(TS_BOW);
+		else TacSfx(TS_SWING);
+	}
 	m_proj.active = 0;
 	m_ovDirty = TRUE;
 	memset(m_ovMove, 0, sizeof(m_ovMove));
@@ -799,16 +835,19 @@ void Game::SeqImpact(const SeqStep& st)
 			m_dispHp[d] = min((float)du.ch.stat[S_HP], m_dispHp[d] - h.dmg);
 			swprintf_s(s, L"+%d", -h.dmg);
 			pop(s, RGBA8(120, 255, 150), 0, 0);
+			TacSfx(TS_HEAL);
 			if (visible || !cutView) ElementFx(EL_NONE, SK_HEAL, mid, mid, FALSE);
 			continue;
 		}
 		if (kind == SK_BUFF) {
 			pop(TT(TX_BT_BUFF), RGBA8(150, 210, 255), 1, 0);
+			TacSfx(TS_BUFF);
 			if (visible || !cutView) ElementFx(EL_NONE, SK_BUFF, mid, mid, FALSE);
 			continue;
 		}
 		if (!h.hit) {
 			pop(TT(TX_BT_MISS), RGBA8(200, 220, 255), 1, 0);
+			TacSfx(TS_MISS);
 			if (visible && du.alive) ActorPlay(m_act[d], CL_DODGE, 0, .08f);
 			continue;
 		}
@@ -821,12 +860,14 @@ void Game::SeqImpact(const SeqStep& st)
 		swprintf_s(s, L"%d", h.dmg);
 		if (h.crit) {
 			pop(TT(TX_BT_CRITICAL), RGBA8(255, 230, 80), 2, 0);
+			TacSfx(TS_CRIT);
 			pop(s, RGBA8(255, 220, 60), 2, .12f);
 			Shake(.6f);
 			if (cutView) m_flashWhite = 1.f;
 		} else {
 			pop(s, kind == SK_MAGIC ? RGBA8(200, 170, 255) : RGBA8(255, 255, 255), 0, 0);
 			Shake(.22f);
+			TacSfx(TS_HIT);
 		}
 		if (visible || !cutView) {
 			ElementFx(el, kind, ActorPos(h.attacker), mid, h.crit || cutView);
@@ -834,6 +875,7 @@ void Game::SeqImpact(const SeqStep& st)
 		}
 		du.flash = 1.f;
 		if (h.kill) {
+			TacSfx(TS_DEATH);
 			if (visible || !cutView) ActorPlay(m_act[d], CL_DEATH, 0, .08f);
 			m_dieT[d] = 0;
 			if (!visible) ActorPlay(m_act[d], CL_DEATH, 0, .08f);
@@ -1018,7 +1060,7 @@ void Game::FinishSeq()
 	}
 	m_b.RebuildOcc();
 	AwardExp();
-	if (m_lvqN > 0) { m_phase = PH_LEVELUP; m_lvqCur = 0; m_lvT = 0; m_navMode = TRUE; m_focusId = ID_BT_LVOK; }
+	if (m_lvqN > 0) { m_phase = PH_LEVELUP; m_lvqCur = 0; m_lvT = 0; m_navMode = TRUE; m_focusId = ID_BT_LVOK; TacSfx(TS_LEVEL); }
 	else FinishUnitTurn(1);
 }
 

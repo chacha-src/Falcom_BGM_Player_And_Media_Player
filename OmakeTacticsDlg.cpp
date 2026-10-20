@@ -3,6 +3,7 @@
 #include "ogg.h"
 #include "OmakeTacticsDlg.h"
 #include "OmakeTactics.h"
+#include "OmakeTacticsAudio.h"
 #include "oggDlg.h"
 #define DIRECTINPUT_VERSION 0x0800
 #include <dinput.h>
@@ -292,6 +293,7 @@ BOOL COmakeTacticsDlg::OnInitDialog()
 	m_viewW = rc.Width();
 	m_viewH = rc.Height();
 	m_gameOk = m_game.Init(m_view.GetSafeHwnd(), m_viewW, m_viewH);
+	TacAudioStart(m_hWnd);
 
 	QueryPerformanceFrequency(&m_qpf);
 	QueryPerformanceCounter(&m_last);
@@ -346,6 +348,7 @@ void COmakeTacticsDlg::OnTimer(UINT_PTR id)
 	float dt = m_qpf.QuadPart ? (float)((double)(now.QuadPart - m_last.QuadPart) / (double)m_qpf.QuadPart) : .016f;
 	m_last = now;
 	if (dt < 0) dt = 0;
+	TacAudioPump();
 	if (IsIconic()) return;
 	PollPad(dt);
 	m_game.Tick(dt);
@@ -429,6 +432,7 @@ void COmakeTacticsDlg::OnDestroy()
 {
 	m_destroying = TRUE;
 	KillTimer(TAC_TIMER);
+	TacAudioStop();
 	StoreWindowRect();
 	m_game.Persist();
 	m_game.Shutdown();

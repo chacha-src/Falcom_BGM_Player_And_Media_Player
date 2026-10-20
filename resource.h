@@ -2308,6 +2308,7 @@
 #define IDR_CSO_TAC_PSP                 4879
 #define IDR_CSO_TAC_VSQ                 4880
 #define IDR_CSO_TAC_PSSKY               4881
+#define IDR_TAC_SFX                     4882
 #define ID_MP_OMAKETACTICS              33770
 
 // Next default values for new objects

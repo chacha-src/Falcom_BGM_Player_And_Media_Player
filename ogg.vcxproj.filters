@@ -543,6 +543,9 @@
     <ClCompile Include="OmakeTacticsText.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="OmakeTacticsAudio.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="OmakeTacticsDlg.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -1907,6 +1910,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="OmakeTacticsText.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="OmakeTacticsAudio.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="OmakeTacticsDlg.h">

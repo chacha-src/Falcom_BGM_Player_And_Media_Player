@@ -27,6 +27,7 @@ static const TCHAR* UPDATE_URL_FALLBACK = _T("https://ppp.oohara.jp/download/ogg
 static const TCHAR* TARGET_EXE_NAME = _T("oggYSEDbgm_uni_avx2.exe");
 static const TCHAR* TARGET_HOST_EXE_NAME = _T("ogghost32.exe");
 static const TCHAR* TARGET_CHM_NAME = _T("oggYSEDbgm_uni_avx2.chm");
+static const TCHAR* TARGET_TAC_OGG = _T("tactics.ogg");
 static const TCHAR* TARGET_D3D_NAME = _T("d3dcompiler_47.dll");
 
 // 配布 ZIP / 展開 EXE の下限（空・404 HTML・途中切断を弾く）
@@ -36,6 +37,7 @@ static const ULONGLONG UPDATE_MAIN_EXE_MIN_BYTES = 1000000ULL; // oggYSEDbgm_uni
 static const ULONGLONG UPDATE_HOST_EXE_MIN_BYTES = 20000ULL;   // ogghost32.exe
 static const ULONGLONG UPDATE_CHM_MIN_BYTES = 20000ULL;        // oggYSEDbgm_uni_avx2.chm（任意・無くても更新成功）
 static const ULONGLONG UPDATE_D3D_MIN_BYTES = 100000ULL;       // d3dcompiler_47.dll（任意・無くても更新成功）
+static const ULONGLONG UPDATE_TAC_OGG_MIN_BYTES = 256ULL;      // tactics.ogg（任意・無くても更新成功）
 
 // コンパイル時間ではなく、現在動いている実行ファイルの実際の更新日時を取得するように変更いたしましたわ
 // これにより、ファイルの一部だけをビルドした際の「時間が過去のままになる落とし穴」を完全に回避いたします
@@ -957,6 +959,7 @@ static bool DoManualUpdateToDownloads(const CString& updateUrl, time_t serverTim
 	// ヘルプ CHM は任意（古い ZIP には無い）。あれば一緒に展開
 	ExtractZipToDir(zipPath, destDir, TARGET_CHM_NAME, UPDATE_CHM_MIN_BYTES, false);
 	ExtractZipToDir(zipPath, destDir, TARGET_D3D_NAME, UPDATE_D3D_MIN_BYTES, true);
+	ExtractZipToDir(zipPath, destDir, TARGET_TAC_OGG, UPDATE_TAC_OGG_MIN_BYTES, false);
 	{
 		TCHAR staleHost[MAX_PATH];
 		_stprintf_s(staleHost, _T("%s\\KpiHost64.exe"), destDir);
@@ -992,59 +995,59 @@ static bool DoManualUpdateToDownloads(const CString& updateUrl, time_t serverTim
 	UpdateBusyAlert(LL14(
 		L"自動更新に失敗したため、更新ファイルを「ダウンロード」フォルダへ展開しました。\n"
 		L"本プログラムを終了し、展開先の oggYSEDbgm_uni_avx2.exe と ogghost32.exe\n"
-		L"（あれば oggYSEDbgm_uni_avx2.chm も）をインストールフォルダへ上書きコピーしてください。\n"
+		L"（あれば oggYSEDbgm_uni_avx2.chm と tactics.ogg も）をインストールフォルダへ上書きコピーしてください。\n"
 		L"（エクスプローラでフォルダを開きました）",
 		L"Automatic update failed, so the update files were extracted to your Downloads folder.\n"
 		L"Please quit this program, then copy oggYSEDbgm_uni_avx2.exe and ogghost32.exe\n"
-		L"(and oggYSEDbgm_uni_avx2.chm if present) over the ones in the install folder.\n"
+		L"(and oggYSEDbgm_uni_avx2.chm and tactics.ogg if present) over the ones in the install folder.\n"
 		L"(The folder was opened in Explorer.)",
 		L"La mise a jour automatique a echoue ; les fichiers ont ete extraits dans Telechargements.\n"
 		L"Quittez ce programme, puis copiez oggYSEDbgm_uni_avx2.exe et ogghost32.exe\n"
-		L"(et oggYSEDbgm_uni_avx2.chm s'il est present) par-dessus ceux du dossier d'installation.\n"
+		L"(et oggYSEDbgm_uni_avx2.chm et tactics.ogg s'ils sont presents) par-dessus ceux du dossier d'installation.\n"
 		L"(Le dossier a ete ouvert dans l'Explorateur.)",
 		L"Aggiornamento automatico non riuscito; i file sono stati estratti in Download.\n"
 		L"Chiudi questo programma, quindi copia oggYSEDbgm_uni_avx2.exe e ogghost32.exe\n"
-		L"(e oggYSEDbgm_uni_avx2.chm se presente) sopra quelli nella cartella di installazione.\n"
+		L"(e oggYSEDbgm_uni_avx2.chm e tactics.ogg se presenti) sopra quelli nella cartella di installazione.\n"
 		L"(La cartella e stata aperta in Esplora risorse.)",
 		L"La actualizacion automatica fallo; los archivos se extrajeron en Descargas.\n"
 		L"Cierre este programa y copie oggYSEDbgm_uni_avx2.exe y ogghost32.exe\n"
-		L"(y oggYSEDbgm_uni_avx2.chm si existe) sobre los del folder de instalacion.\n"
+		L"(y oggYSEDbgm_uni_avx2.chm y tactics.ogg si existen) sobre los del folder de instalacion.\n"
 		L"(Se abrio la carpeta en el Explorador.)",
 		L"자동 업데이트에 실패하여 업데이트 파일을 다운로드 폴더에 풀었습니다.\n"
 		L"이 프로그램을 종료한 뒤 oggYSEDbgm_uni_avx2.exe 와 ogghost32.exe\n"
-		L"(있으면 oggYSEDbgm_uni_avx2.chm 도) 설치 폴더에 덮어쓰기로 복사하세요.\n"
+		L"(있으면 oggYSEDbgm_uni_avx2.chm 과 tactics.ogg 도) 설치 폴더에 덮어쓰기로 복사하세요.\n"
 		L"(탐색기에서 폴더를 열었습니다)",
 		L"自动更新失败，已将更新文件解压到“下载”文件夹。\n"
 		L"请退出本程序，然后将 oggYSEDbgm_uni_avx2.exe 与 ogghost32.exe\n"
-		L"（如有 oggYSEDbgm_uni_avx2.chm 也一并）覆盖复制到安装文件夹。\n"
+		L"（如有 oggYSEDbgm_uni_avx2.chm 与 tactics.ogg 也一并）覆盖复制到安装文件夹。\n"
 		L"（已在资源管理器中打开该文件夹）",
 		L"فشل التحديث التلقائي، وتم استخراج ملفات التحديث إلى مجلد التنزيلات.\n"
 		L"يرجى إنهاء هذا البرنامج ثم نسخ oggYSEDbgm_uni_avx2.exe و ogghost32.exe\n"
-		L"(و oggYSEDbgm_uni_avx2.chm إن وُجد) فوق الملفات في مجلد التثبيت.\n"
+		L"(و oggYSEDbgm_uni_avx2.chm و tactics.ogg إن وُجدا) فوق الملفات في مجلد التثبيت.\n"
 		L"(تم فتح المجلد في المستكشف)",
 		L"Автообновление не удалось; файлы распакованы в папку Загрузки.\n"
 		L"Закройте программу и скопируйте oggYSEDbgm_uni_avx2.exe и ogghost32.exe\n"
-		L"(и oggYSEDbgm_uni_avx2.chm при наличии) поверх файлов в папке установки.\n"
+		L"(и oggYSEDbgm_uni_avx2.chm и tactics.ogg при наличии) поверх файлов в папке установки.\n"
 		L"(Папка открыта в Проводнике.)",
 		L"Automatisches Update fehlgeschlagen; Dateien wurden nach Downloads entpackt.\n"
 		L"Beenden Sie das Programm und kopieren Sie oggYSEDbgm_uni_avx2.exe und ogghost32.exe\n"
-		L"(sowie oggYSEDbgm_uni_avx2.chm falls vorhanden) uber die Dateien im Installationsordner.\n"
+		L"(sowie oggYSEDbgm_uni_avx2.chm und tactics.ogg falls vorhanden) uber die Dateien im Installationsordner.\n"
 		L"(Der Ordner wurde im Explorer geoffnet.)",
 		L"A atualizacao automatica falhou; os arquivos foram extraidos em Downloads.\n"
 		L"Encerre este programa e copie oggYSEDbgm_uni_avx2.exe e ogghost32.exe\n"
-		L"(e oggYSEDbgm_uni_avx2.chm se houver) sobre os da pasta de instalacao.\n"
+		L"(e oggYSEDbgm_uni_avx2.chm e tactics.ogg se houver) sobre os da pasta de instalacao.\n"
 		L"(A pasta foi aberta no Explorer.)",
 		L"Automatische update mislukt; bestanden zijn uitgepakt in Downloads.\n"
 		L"Sluit dit programma en kopieer oggYSEDbgm_uni_avx2.exe en ogghost32.exe\n"
-		L"(en oggYSEDbgm_uni_avx2.chm indien aanwezig) over die in de installatiemap.\n"
+		L"(en oggYSEDbgm_uni_avx2.chm en tactics.ogg indien aanwezig) over die in de installatiemap.\n"
 		L"(De map is geopend in Verkenner.)",
 		L"Automatyczna aktualizacja nie powiodla sie; pliki rozpakowano do Pobrane.\n"
 		L"Zamknij program i skopiuj oggYSEDbgm_uni_avx2.exe oraz ogghost32.exe\n"
-		L"(oraz oggYSEDbgm_uni_avx2.chm jesli jest) na pliki w folderze instalacji.\n"
+		L"(oraz oggYSEDbgm_uni_avx2.chm i tactics.ogg jesli sa) na pliki w folderze instalacji.\n"
 		L"(Folder otwarto w Eksploratorze.)",
 		L"Otomatik guncelleme basarisiz; dosyalar Indirilenler klasorune acildi.\n"
 		L"Bu programi kapatip oggYSEDbgm_uni_avx2.exe ve ogghost32.exe dosyalarini\n"
-		L"(varsa oggYSEDbgm_uni_avx2.chm de) kurulum klasorundekilerin uzerine kopyalayin.\n"
+		L"(varsa oggYSEDbgm_uni_avx2.chm ve tactics.ogg de) kurulum klasorundekilerin uzerine kopyalayin.\n"
 		L"(Klasor Gezgin'de acildi.)"));
 	return true;
 }
@@ -1594,6 +1597,7 @@ bool DoUpdateAndRestart()
 	// オフラインヘルプ CHM（ZIP に含まれていれば展開。無くても更新は続行）
 	ExtractZipToDir(zipPath, extractDir, TARGET_CHM_NAME, UPDATE_CHM_MIN_BYTES, false);
 	ExtractZipToDir(zipPath, extractDir, TARGET_D3D_NAME, UPDATE_D3D_MIN_BYTES, true);
+	ExtractZipToDir(zipPath, extractDir, TARGET_TAC_OGG, UPDATE_TAC_OGG_MIN_BYTES, false);
 	{
 		TCHAR staleHost[MAX_PATH];
 		_stprintf_s(staleHost, _T("%s\\KpiHost64.exe"), extractDir);
@@ -1690,6 +1694,7 @@ bool DoUpdateAndRestart()
 	CStringA targetHostExeA(TARGET_HOST_EXE_NAME);
 	CStringA targetChmA(TARGET_CHM_NAME);
 	CStringA targetD3dA(TARGET_D3D_NAME);
+	CStringA targetOggA(TARGET_TAC_OGG);
 	CStringA targetExePathA(targetExePath);  // 新しく作る正しい名前のファイル
 	CStringA targetHostExePathA(targetHostExePath); // 新しいホストexe
 	CStringA targetChmPathA = targetExePathA;
@@ -1707,6 +1712,14 @@ bool DoUpdateAndRestart()
 			targetD3dPathA = targetD3dPathA.Left(slashD3d + 1) + targetD3dA;
 		else
 			targetD3dPathA = targetD3dA;
+	}
+	CStringA targetOggPathA = targetExePathA;
+	{
+		const int slashOgg = targetOggPathA.ReverseFind('\\');
+		if (slashOgg >= 0)
+			targetOggPathA = targetOggPathA.Left(slashOgg + 1) + targetOggA;
+		else
+			targetOggPathA = targetOggA;
 	}
 
 	// 実行ファイルがある正しいフォルダのパスを抜き出しますわ
@@ -1774,6 +1787,7 @@ bool DoUpdateAndRestart()
 		"if errorlevel 1 goto retry\r\n"
 		"if exist \"%s\\%s\" copy /y \"%s\\%s\" \"%s\" >nul 2>&1\r\n"
 		"if exist \"%s\\%s\" copy /y \"%s\\%s\" \"%s\" >nul 2>&1\r\n"
+		"if exist \"%s\\%s\" copy /y \"%s\\%s\" \"%s\" >nul 2>&1\r\n"
 		"del /f /q \"%s\\KpiHost64.exe\" >nul 2>&1\r\n"
 		"goto :eof\r\n"
 		":retry\r\n"
@@ -1794,6 +1808,7 @@ bool DoUpdateAndRestart()
 		(LPCSTR)extractDirA, (LPCSTR)targetExeA, (LPCSTR)targetExePathA,          // 本体 上書き
 		(LPCSTR)extractDirA, (LPCSTR)targetChmA, (LPCSTR)extractDirA, (LPCSTR)targetChmA, (LPCSTR)targetChmPathA, // CHM（あれば・失敗してもOK）
 		(LPCSTR)extractDirA, (LPCSTR)targetD3dA, (LPCSTR)extractDirA, (LPCSTR)targetD3dA, (LPCSTR)targetD3dPathA,  // d3dcompiler（あれば）
+		(LPCSTR)extractDirA, (LPCSTR)targetOggA, (LPCSTR)extractDirA, (LPCSTR)targetOggA, (LPCSTR)targetOggPathA, // tactics.ogg（あれば）
 		(LPCSTR)exeDirA                                                   // 旧 KpiHost64.exe 削除
 	);
 
