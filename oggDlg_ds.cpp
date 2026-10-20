@@ -7687,11 +7687,14 @@ static void AggregateNoteClasses(float* bassClass, float* midClass, float* highC
 			int iv = (pc - octaveMaxNote[oct] % 12 + 12) % 12;
 			float r = (octaveMax[oct] > 0.f) ? strength / octaveMax[oct] : 0.f;
 			if (iv == 7 && r < 0.4f)  strength *= 0.4f;
+			// 完全4度は基音の低い倍音ではない。弱い4度は5度の第7倍音などで、sus4 に誤る。
+			else if (iv == 5 && r < 0.32f) strength *= 0.35f;
 			else if (iv == 4 && r < 0.3f)  strength *= 0.6f;
 			else if (iv == 2 && r < 0.35f) strength *= 0.3f;
 			else if (iv == 9 && r < 0.3f)  strength *= 0.5f;
 			else if (iv == 11 && r < 0.25f) strength *= 0.4f;
 		}
+		// k の周波数は MIDI(k+12)。低 C0–B2、中 C3–B4、高 C5 以上。全は三帯域の和。
 		if (note < 36)       bassClass[pc] += strength;
 		else if (note < 60)  midClass[pc] += strength;
 		else                 highClass[pc] += strength;
@@ -8012,8 +8015,8 @@ void AnalyzeMusicKey(const double* bufferL, const double* bufferR, int sampleCou
 	g_prevRMS = g_prevRMS * 0.7f + currentRMS * 0.3f;
 
 	// ===== Goertzel によるノート強度計算 =====
-	// 低域(MIDI 0-51): 4096点 (精度優先、低周波数分解能確保)
-	// 高域(MIDI 52-107): 2048点 (速度優先、高周波は短窓でOK)
+	// ビン k の音は MIDI(k+12)。k=0 は C0、k=57 は A4。
+	// C0〜D#4 (k 0..51) は 4096 点。E4 以上は 2048 点。
 	const int LOW_LIMIT = 52;
 	const int LOW_N = (totalSamples >= 4096) ? 4096 : totalSamples;
 	const int LOW_S = totalSamples - LOW_N;

@@ -74,3 +74,7 @@ int ScTransposeFmChannel(ScEvent* ev, int evCount, int ch, int semis);
 int ScTransposeFmAll(ScEvent* ev, int evCount, int semis);
 int ScScaleDurSelected(ScEvent* ev, int evCount, const ScStaffUi* u, int mul, int div);
 int ScBulkPropsSelected(ScEvent* ev, int evCount, const ScStaffUi* u, int vel, int gate, int applyVel, int applyGate);
+/* 選択があれば選択、無ければ part の音符を quant ティック格子へ。strength 1..100、quantLen=1 で長さも揃える。 */
+int ScQuantizeNotes(ScEvent* ev, int evCount, const ScStaffUi* u, int part,
+	int quant, int strength, int quantLen);
+const wchar_t* ScQuantizeStatusText(int quantLen, int moved);

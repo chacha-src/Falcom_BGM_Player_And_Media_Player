@@ -835,6 +835,11 @@ void ActorFromChar(Actor& a, const Library& lib, const Renderer& r, const CharDa
 	a.rig = r.models[a.model].rig;
 	a.female = c.gender == 1;
 	a.scale = a.female ? .40f : .43f;
+	{
+		int tier = ClassInfo(c.cls).tier;
+		if (tier > 1) a.scale *= 1.f + (tier - 1) * .02f;
+		if (tier >= 5) a.hue += .04f * (tier - 4);
+	}
 	a.hue = OutfitHue(c.outfit);
 	a.hairCol = HairColor(c.hairColor);
 	a.hair = Clampi(c.hair, 0, HAIR_STYLES - 1);

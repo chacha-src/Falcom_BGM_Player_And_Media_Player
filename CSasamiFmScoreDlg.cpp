@@ -514,16 +514,32 @@ void CSasamiFmScoreDlg::OnKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags)
 	if (ctrl && (nChar == VK_UP || nChar == VK_DOWN)) {
 		HistPush();
 		const int semis = (nChar == VK_UP) ? 1 : -1;
-		if (ScTransposeSelected(m_doc.ev, m_doc.evCount, &m_ui, semis))
+		if (ScTransposeFmSelected(m_doc.ev, m_doc.evCount, &m_ui, semis)) {
+			PushDocToText();
 			InvalidateRect(m_bodyRc, FALSE);
+		}
 		return;
 	}
 	if (ctrl && (nChar == VK_LEFT || nChar == VK_RIGHT)) {
 		HistPush();
 		const int mul = (nChar == VK_RIGHT) ? 2 : 1;
 		const int div = (nChar == VK_RIGHT) ? 1 : 2;
-		if (ScScaleDurSelected(m_doc.ev, m_doc.evCount, &m_ui, mul, div))
+		if (ScScaleDurSelected(m_doc.ev, m_doc.evCount, &m_ui, mul, div)) {
+			PushDocToText();
 			InvalidateRect(m_bodyRc, FALSE);
+		}
+		return;
+	}
+	if (!ctrl && (nChar == 'Q' || nChar == 'q')) {
+		HistPush();
+		const int n = ScQuantizeNotes(m_doc.ev, m_doc.evCount, &m_ui, m_curCh,
+			ScStaffPlaceQuant(&m_ui), 100, shift);
+		if (n) {
+			RefreshStrip();
+			PushDocToText();
+			InvalidateRect(m_bodyRc, FALSE);
+		}
+		m_status.SetWindowText(ScQuantizeStatusText(shift, n));
 		return;
 	}
 	if (nChar == VK_HOME && !ctrl) {
@@ -726,9 +742,17 @@ BOOL CSasamiFmScoreDlg::PreTranslateMessage(MSG* pMsg)
 	if (m_tooltip.GetSafeHwnd())
 		m_tooltip.RelayEvent(pMsg);
 	if (pMsg->message == WM_KEYDOWN) {
-		if (pMsg->wParam == VK_SPACE || pMsg->wParam == VK_HOME) {
+		const int ctrlNow = (GetKeyState(VK_CONTROL) & 0x8000) ? 1 : 0;
+		const int arrow = (pMsg->wParam == VK_UP || pMsg->wParam == VK_DOWN
+			|| pMsg->wParam == VK_LEFT || pMsg->wParam == VK_RIGHT);
+		if (pMsg->wParam == VK_SPACE || pMsg->wParam == VK_HOME
+			|| (!ctrlNow && (pMsg->wParam == 'Q' || pMsg->wParam == 'q'))
+			|| (ctrlNow && arrow)) {
 			CWnd* f = GetFocus();
-			const BOOL inEdit = (f && f->IsKindOf(RUNTIME_CLASS(CEdit)));
+			wchar_t cls[16] = {};
+			if (f) ::GetClassNameW(f->GetSafeHwnd(), cls, 16);
+			const BOOL inEdit = (_wcsicmp(cls, L"Edit") == 0 || _wcsicmp(cls, L"ComboBox") == 0
+				|| _wcsnicmp(cls, L"RichEdit", 8) == 0);
 			if (!inEdit) {
 				OnKeyDown((UINT)pMsg->wParam, 1, 0);
 				return TRUE;
@@ -1691,6 +1715,20 @@ void CSasamiFmScoreDlg::OnLButtonDown(UINT nFlags, CPoint point)
 		savedata.sasamiFmPartMask = ScStaffPackPartMask(&m_ui);
 		InvalidateRect(m_bodyRc, FALSE);
 	}
+	{
+		int msTr = -1;
+		const int ms = ScStaffHitMuteSolo(m_trackRc, &m_ui, point, &msTr);
+		if (ms && msTr >= 0) {
+			if (ms == 1) m_ui.mute[msTr] ^= 1;
+			else if (nFlags & MK_CONTROL) {
+				const int was = m_ui.solo[msTr];
+				for (int i = 0; i < 32; i++) m_ui.solo[i] = 0;
+				m_ui.solo[msTr] = was ? 0 : 1;
+			} else m_ui.solo[msTr] ^= 1;
+			InvalidateRect(m_trackRc, FALSE);
+			return;
+		}
+	}
 	int gaugeZone = SC_GAUGE_NONE;
 	const int gaugeTrack = ScStaffHitGauge(m_trackRc, &m_ui, point, &gaugeZone);
 	if (gaugeTrack >= 0 && gaugeZone != SC_GAUGE_NONE) {
@@ -1925,6 +1963,13 @@ void CSasamiFmScoreDlg::OnLButtonDblClk(UINT nFlags, CPoint point)
 	if (capH > 0 && point.y >= 0 && point.y < capH) {
 		CCustomBlurDialogExBase::OnLButtonDblClk(nFlags, point);
 		return;
+	}
+	{
+		int msTr = -1;
+		if (ScStaffHitMuteSolo(m_trackRc, &m_ui, point, &msTr)) {
+			OnLButtonDown(nFlags, point);
+			return;
+		}
 	}
 	int tempoCol = 0, tempoBpm = 0;
 	if (ScStaffHitGlobalTempoBand(m_gridRc, &m_ui, point, &tempoCol, &tempoBpm, m_doc.ev, m_doc.evCount)) {

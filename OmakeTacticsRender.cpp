@@ -36,7 +36,7 @@ Renderer::Renderer()
 	m_view = m_proj = m_vp = MIdent();
 	m_eye = v3(0, 10, -10);
 	m_time = 0;
-	m_hwnd = NULL; m_wait = NULL; m_lost = FALSE;
+	m_hwnd = NULL; m_wait = NULL; m_lost = FALSE; m_presented = FALSE;
 	m_w = m_h = 0; m_quality = 1; m_msaa = 1; m_lastHr = S_OK; m_failStage = 0; m_assetsOk = FALSE; m_pass = PASS_MAIN;
 	m_dev = NULL; m_ctx = NULL; m_swap = NULL; m_bbRtv = NULL; m_bb = NULL; m_msTex = NULL; m_msRtv = NULL; m_dsTex = NULL; m_dsv = NULL;
 	m_shTex = NULL; m_shDsv = NULL; m_shSrv = NULL; m_shSize = 0;
@@ -107,6 +107,7 @@ void Renderer::Release()
 BOOL Renderer::Init(HWND hwnd, int quality)
 {
 	Release();
+	m_presented = FALSE;
 	m_hwnd = hwnd;
 	m_quality = Clampi(quality, 0, 2);
 	m_failStage = 1;
@@ -230,9 +231,23 @@ BOOL Renderer::Resize(int w, int h)
 	return CreateTargets();
 }
 
+BOOL Renderer::RefreshSurface()
+{
+	if (!m_swap || !m_ctx) return FALSE;
+	ReleaseTargets();
+	m_ctx->ClearState();
+	m_ctx->Flush();
+	DXGI_SWAP_CHAIN_DESC1 d = {};
+	m_swap->GetDesc1(&d);
+	HRESULT hr = m_swap->ResizeBuffers(0, m_w, m_h, DXGI_FORMAT_UNKNOWN, d.Flags);
+	m_presented = FALSE;
+	if (FAILED(hr)) { m_lastHr = hr; m_lost = TRUE; return FALSE; }
+	return CreateTargets();
+}
+
 BOOL Renderer::FrameReady()
 {
-	if (!m_wait) return TRUE;
+	if (!m_wait || !m_presented) return TRUE;
 	return WaitForSingleObject(m_wait, 0) == WAIT_OBJECT_0;
 }
 
@@ -1158,14 +1173,14 @@ void Renderer::DrawWater()
 	m_ctx->OMSetDepthStencilState(m_dsWrite, 0);
 }
 
-void Renderer::DrawOverlayQuads(const std::vector<VtxS>& q, int cursorStyle)
+void Renderer::DrawOverlayQuads(const VtxS* q, int n, int cursorStyle)
 {
-	if (q.empty() || m_pass == PASS_SHADOW) return;
-	size_t bytes = q.size() * sizeof(VtxS);
+	if (!q || n <= 0 || m_pass == PASS_SHADOW) return;
+	size_t bytes = (size_t)n * sizeof(VtxS);
 	if (bytes > m_vbDynBytes) return;
 	D3D11_MAPPED_SUBRESOURCE ms;
 	if (FAILED(m_ctx->Map(m_vbDyn, 0, D3D11_MAP_WRITE_DISCARD, 0, &ms))) return;
-	memcpy(ms.pData, q.data(), bytes);
+	memcpy(ms.pData, q, bytes);
 	m_ctx->Unmap(m_vbDyn, 0);
 	DrawParams dp;
 	dp.mode = (float)cursorStyle;
@@ -1179,7 +1194,7 @@ void Renderer::DrawOverlayQuads(const std::vector<VtxS>& q, int cursorStyle)
 	m_ctx->RSSetState(m_rsNone);
 	m_ctx->OMSetDepthStencilState(m_dsRead, 0);
 	m_ctx->OMSetBlendState(m_bsAlpha, NULL, 0xFFFFFFFF);
-	m_ctx->Draw((UINT)q.size(), 0);
+	m_ctx->Draw((UINT)n, 0);
 	m_ctx->OMSetDepthStencilState(m_dsWrite, 0);
 	m_ctx->OMSetBlendState(m_bsOpaque, NULL, 0xFFFFFFFF);
 }
@@ -1207,15 +1222,17 @@ void Renderer::DrawRibbon(const std::vector<VtxP>& v)
 	m_ctx->OMSetBlendState(m_bsOpaque, NULL, 0xFFFFFFFF);
 }
 
-void Renderer::DrawParticles(const std::vector<Particle>& ps)
+void Renderer::DrawParticles(const Particle* ps, int nPart)
 {
-	if (ps.empty() || m_pass == PASS_SHADOW) return;
+	if (!ps || nPart <= 0 || m_pass == PASS_SHADOW) return;
 	V3 right = Norm(v3(m_view.m[0], m_view.m[4], m_view.m[8]));
 	V3 up = Norm(v3(m_view.m[1], m_view.m[5], m_view.m[9]));
 	V3 fwd = Norm(v3(m_view.m[2], m_view.m[6], m_view.m[10]));
-	static std::vector<VtxP> v[2];
-	v[0].clear(); v[1].clear();
-	for (const auto& p : ps) {
+	enum { PV = 16384 };
+	static VtxP buf[2][PV];
+	int vn[2] = { 0, 0 };
+	for (int pi = 0; pi < nPart; pi++) {
+		const Particle& p = ps[pi];
 		if (p.life <= 0) continue;
 		float t = 1.f - p.life / max(1e-4f, p.max);
 		float sz = Lerpf(p.size, p.size1, t);
@@ -1239,16 +1256,17 @@ void Renderer::DrawParticles(const std::vector<Particle>& ps)
 			q[k].u = uv[k][0]; q[k].v = uv[k][1]; q[k].shape = (float)p.shape;
 			q[k].c[0] = p.r; q[k].c[1] = p.g; q[k].c[2] = p.b; q[k].c[3] = a;
 		}
-		auto& dst = v[p.add ? 1 : 0];
-		dst.push_back(q[0]); dst.push_back(q[1]); dst.push_back(q[2]);
-		dst.push_back(q[0]); dst.push_back(q[2]); dst.push_back(q[3]);
+		int bi = p.add ? 1 : 0;
+		if (vn[bi] + 6 > PV) continue;
+		buf[bi][vn[bi]++] = q[0]; buf[bi][vn[bi]++] = q[1]; buf[bi][vn[bi]++] = q[2];
+		buf[bi][vn[bi]++] = q[0]; buf[bi][vn[bi]++] = q[2]; buf[bi][vn[bi]++] = q[3];
 	}
 	for (int b = 0; b < 2; b++) {
-		if (v[b].empty()) continue;
-		size_t bytes = min(v[b].size() * sizeof(VtxP), (size_t)m_vbDynBytes);
+		if (vn[b] <= 0) continue;
+		size_t bytes = min((size_t)vn[b] * sizeof(VtxP), (size_t)m_vbDynBytes);
 		D3D11_MAPPED_SUBRESOURCE ms;
 		if (FAILED(m_ctx->Map(m_vbDyn, 0, D3D11_MAP_WRITE_DISCARD, 0, &ms))) return;
-		memcpy(ms.pData, v[b].data(), bytes);
+		memcpy(ms.pData, buf[b], bytes);
 		m_ctx->Unmap(m_vbDyn, 0);
 		UINT st = sizeof(VtxP), off = 0;
 		m_ctx->IASetVertexBuffers(0, 1, &m_vbDyn, &st, &off);
@@ -1613,8 +1631,8 @@ void Renderer::FlushHud()
 	m_ctx->PSSetShaderResources(0, 1, &m_hudSrv);
 	const size_t maxV = 6 * 4096;
 	size_t off = 0;
-	while (off < m_hud.size()) {
-		size_t n = min(maxV, m_hud.size() - off);
+	while (off < (size_t)m_hud.size()) {
+		size_t n = min(maxV, (size_t)m_hud.size() - off);
 		D3D11_MAPPED_SUBRESOURCE ms;
 		if (FAILED(m_ctx->Map(m_vbHud, 0, D3D11_MAP_WRITE_DISCARD, 0, &ms))) break;
 		memcpy(ms.pData, m_hud.data() + off, n * sizeof(VtxH));
@@ -1633,6 +1651,7 @@ void Renderer::HudPush(float x, float y, float w, float h, float u0, float v0, f
 {
 	if (!srv) srv = m_srv[TEX_WHITE];
 	if (srv != m_hudSrv) { FlushHud(); m_hudSrv = srv; }
+	if (m_hud.size() + 6 > 24576) FlushHud();
 	VtxH a = { x, y, u0, v0, c0 }, b = { x + w, y, u1, v0, c0 }, c = { x + w, y + h, u1, v1, c1 }, d = { x, y + h, u0, v1, c1 };
 	m_hud.push_back(a); m_hud.push_back(b); m_hud.push_back(c);
 	m_hud.push_back(a); m_hud.push_back(c); m_hud.push_back(d);
@@ -1744,7 +1763,13 @@ void Renderer::EndHud() { FlushHud(); }
 void Renderer::Present()
 {
 	if (!m_swap) return;
-	HRESULT hr = m_swap->Present(1, 0);
+	const BOOL vis = m_hwnd && ::IsWindowVisible(m_hwnd);
+	/* 表示前の Present(1) はフレームが退役せず、クリックまで描画が止まる */
+	const UINT flags = m_presented ? 0u : DXGI_PRESENT_DO_NOT_WAIT;
+	const UINT interval = m_presented ? 1u : 0u;
+	HRESULT hr = m_swap->Present(interval, flags);
+	if (hr == DXGI_ERROR_WAS_STILL_DRAWING) return;
+	if (SUCCEEDED(hr) && vis) m_presented = TRUE;
 	if (hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_DEVICE_RESET) { m_lost = TRUE; m_lastHr = hr; }
 }
 

@@ -14,6 +14,9 @@ void EnsureD3dCompilerAvailable();
 /* exe 隣に ogghost32.exe が無いとき更新 ZIP から展開→KpiHost32 削除→再起動（成功時は exit） */
 void EnsureOggHost32Available();
 
+/* exe 隣に tactics.ogg が無いときサーバの単体ファイルを取得して置く（失敗しても起動は続ける） */
+void EnsureTacticsOggAvailable();
+
 // メイン画面表示後の定期更新チェックスレッドを開始
 void StartUpdateCheckThread(HWND hNotifyWnd);
 

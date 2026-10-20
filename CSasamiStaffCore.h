@@ -376,6 +376,9 @@ int ScStaffIsExtendedChannelView(const ScStaffUi* u);
 void ScStaffSetChannelView16(ScStaffUi* u);
 void ScStaffSetChannelViewAll(ScStaffUi* u);
 int ScStaffHitPartEnable(const CRect& trackRc, const ScStaffUi* u, CPoint pt, int* outTrack);
+void ScStaffMuteSoloRects(const CRect& trackRc, int rowTop, CRect* mRc, CRect* sRc);
+/* 0 = miss, 1 = M chip, 2 = S chip. */
+int ScStaffHitMuteSolo(const CRect& trackRc, const ScStaffUi* u, CPoint pt, int* outTrack);
 /* Hit Tone lane (0) or Exc/SysEx lane (1) on staff grid or left track Tone/Prog gauge bands. */
 int ScStaffHitToneExcLane(const CRect& grid, const ScStaffUi* u, CPoint pt, int* outTrack, int* outLane,
 	const CRect* trackCol = NULL);

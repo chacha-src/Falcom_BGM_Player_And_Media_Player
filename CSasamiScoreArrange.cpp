@@ -566,6 +566,61 @@ int ScScaleDurSelected(ScEvent* ev, int evCount, const ScStaffUi* u, int mul, in
 	return n;
 }
 
+const wchar_t* ScQuantizeStatusText(int quantLen, int moved)
+{
+	if (!moved)
+		return LL14(L"クオンタイズ: 動かす音符がありません", L"Quantize: nothing to move",
+			L"Quantifier : rien à déplacer", L"Quantizza: niente da spostare", L"Cuantizar: nada que mover",
+			L"퀀타이즈: 옮길 음표 없음", L"量化：没有可移动的音符", L"تكميم: لا شيء للتحريك",
+			L"Квантизация: нечего двигать", L"Quantisieren: nichts zu verschieben", L"Quantizar: nada a mover",
+			L"Kwantiseren: niets te verplaatsen", L"Kwantyzacja: nic do przesunięcia", L"Kuantize: taşınacak nota yok");
+	if (quantLen)
+		return LL14(L"クオンタイズ（位置＋長さ）。Ctrl+Z で戻せます", L"Quantized start + length (Ctrl+Z to undo)",
+			L"Quantifié début + durée (Ctrl+Z)", L"Quantizzato inizio + durata (Ctrl+Z)", L"Cuantizado inicio + duración (Ctrl+Z)",
+			L"퀀타이즈(위치+길이). Ctrl+Z로 되돌림", L"已量化（位置+长度），Ctrl+Z 撤销", L"تكميم البداية والطول (Ctrl+Z)",
+			L"Квантизация начала и длины (Ctrl+Z)", L"Start + Länge quantisiert (Strg+Z)", L"Quantizado início + duração (Ctrl+Z)",
+			L"Start + lengte gekwantiseerd (Ctrl+Z)", L"Kwantyzacja startu i długości (Ctrl+Z)", L"Başlangıç + uzunluk kuantize (Ctrl+Z)");
+	return LL14(L"クオンタイズ（位置）。Shift+Q で長さも。Ctrl+Z で戻せます", L"Quantized start (Shift+Q also length; Ctrl+Z to undo)",
+		L"Début quantifié (Maj+Q durée aussi)", L"Inizio quantizzato (Maiusc+Q anche durata)", L"Inicio cuantizado (Mayús+Q también duración)",
+		L"퀀타이즈(위치). Shift+Q는 길이도", L"已量化位置（Shift+Q 同时量化长度）", L"تكميم البداية (Shift+Q للطول)",
+		L"Квантизация начала (Shift+Q и длины)", L"Start quantisiert (Umschalt+Q auch Länge)", L"Início quantizado (Shift+Q também duração)",
+		L"Start gekwantiseerd (Shift+Q ook lengte)", L"Kwantyzacja startu (Shift+Q także długość)", L"Başlangıç kuantize (Shift+Q uzunluk da)");
+}
+
+int ScQuantizeNotes(ScEvent* ev, int evCount, const ScStaffUi* u, int part,
+	int quant, int strength, int quantLen)
+{
+	if (!ev || !u || quant < 1) return 0;
+	if (strength < 1) strength = 1;
+	if (strength > 100) strength = 100;
+	const int useSel = (u->nSel > 0 || u->selEv >= 0) ? 1 : 0;
+	int n = 0;
+	for (int i = 0; i < evCount; i++) {
+		ScEvent& e = ev[i];
+		if (!NoteKindOk(e.kind)) continue;
+		if (useSel ? !IsSel(u, i) : (int)e.ch != part) continue;
+		const int t = (int)e.tick;
+		const int grid = ((t + quant / 2) / quant) * quant;
+		const int nt = t + ((grid - t) * strength) / 100;
+		int moved = 0;
+		if (nt != t && nt >= 0) {
+			e.tick = (uint32_t)nt;
+			moved = 1;
+		}
+		if (quantLen && e.dur > 0) {
+			int d = (((int)e.dur + quant / 2) / quant) * quant;
+			if (d < quant) d = quant;
+			if (d > 65535) d = 65535;
+			if (d != (int)e.dur) {
+				e.dur = (uint16_t)d;
+				moved = 1;
+			}
+		}
+		if (moved) n++;
+	}
+	return n;
+}
+
 int ScBulkPropsSelected(ScEvent* ev, int evCount, const ScStaffUi* u, int vel, int gate, int applyVel, int applyGate)
 {
 	if (!ev || !u) return 0;

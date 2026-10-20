@@ -2468,6 +2468,7 @@ BOOL COggApp::InitInstance()
 	OfflineHelpEnsureAvailable();
 	EnsureD3dCompilerAvailable();
 	EnsureOggHost32Available();
+	EnsureTacticsOggAvailable();
 
 	// 起動時のモード選択(ファルコムbgm特化型画面 / メディアプレイヤー画面)
 	if (savedata.startupAsk) {

@@ -619,7 +619,7 @@ static void NotifySiteDownloadCount(const CString& zipUrl)
 }
 
 // ZIP をダウンロード。HTTP 200・最低サイズを満たさない場合は失敗（途中ファイルは削除）
-static bool HttpDownloadToFile(const CString& url, const CString& localPath)
+static bool HttpDownloadToFile(const CString& url, const CString& localPath, ULONGLONG minBytes = UPDATE_ZIP_MIN_BYTES, bool countDownload = true)
 {
 	DeleteFile(localPath);
 
@@ -664,7 +664,7 @@ static bool HttpDownloadToFile(const CString& url, const CString& localPath)
 		if (HttpQueryInfoA(hConnect, HTTP_QUERY_CONTENT_LENGTH, lenBuf, &lenBufLen, NULL))
 		{
 			contentLen = (ULONGLONG)_atoi64(lenBuf);
-			if (contentLen > 0 && contentLen < UPDATE_ZIP_MIN_BYTES)
+			if (contentLen > 0 && contentLen < minBytes)
 			{
 				InternetCloseHandle(hConnect);
 				InternetCloseHandle(hInternet);
@@ -703,13 +703,14 @@ static bool HttpDownloadToFile(const CString& url, const CString& localPath)
 	InternetCloseHandle(hConnect);
 	InternetCloseHandle(hInternet);
 
-	if (!readOk || total < UPDATE_ZIP_MIN_BYTES || (contentLen > 0 && total != contentLen))
+	if (!readOk || total < minBytes || (contentLen > 0 && total != contentLen))
 	{
 		DeleteFile(localPath);
 		return false;
 	}
 	/* サイトの ogg ページと同じ ZIP なので DL 回数も上げる */
-	NotifySiteDownloadCount(url);
+	if (countDownload)
+		NotifySiteDownloadCount(url);
 	return true;
 }
 
@@ -1869,6 +1870,79 @@ static CString D3dCompilerExeBesidePath()
 	else
 		dir.Empty();
 	return dir + TARGET_D3D_NAME;
+}
+
+static const TCHAR* TACTICS_OGG_URL = _T("https://ppp.oohara.jp/download/tactics.ogg");
+static const ULONGLONG TACTICS_OGG_MIN_BYTES = 1024ULL;
+
+static bool FileStartsWithOggS(const CString& path)
+{
+	if (GetPathFileSize(path) < TACTICS_OGG_MIN_BYTES)
+		return false;
+	CFile f;
+	if (!f.Open(path, CFile::modeRead | CFile::shareDenyNone))
+		return false;
+	char mag[4] = {};
+	const UINT n = f.Read(mag, 4);
+	f.Close();
+	return n == 4 && memcmp(mag, "OggS", 4) == 0;
+}
+
+static CString TacticsOggBesideExe()
+{
+	TCHAR exePath[MAX_PATH] = { 0 };
+	GetModuleFileName(NULL, exePath, MAX_PATH);
+	CString dir(exePath);
+	const int slash = dir.ReverseFind(_T('\\'));
+	if (slash >= 0)
+		dir = dir.Left(slash + 1);
+	else
+		dir.Empty();
+	return dir + _T("tactics.ogg");
+}
+
+void EnsureTacticsOggAvailable()
+{
+	const CString dest = TacticsOggBesideExe();
+	if (dest.IsEmpty() || FileStartsWithOggS(dest))
+		return;
+	DWORD dwFlags = 0;
+	if (!InternetGetConnectedState(&dwFlags, 0))
+		return;
+
+	TCHAR tempPath[MAX_PATH] = { 0 };
+	GetTempPath(MAX_PATH, tempPath);
+	CString tmp;
+	tmp.Format(_T("%stactics_fetch.ogg"), tempPath);
+	if (!HttpDownloadToFile(TACTICS_OGG_URL, tmp, TACTICS_OGG_MIN_BYTES, false) || !FileStartsWithOggS(tmp)) {
+		DeleteFile(tmp);
+		return;
+	}
+	SetFileAttributes(dest, FILE_ATTRIBUTE_NORMAL);
+	if (CopyFile(tmp, dest, FALSE) && FileStartsWithOggS(dest)) {
+		DeleteFile(tmp);
+		return;
+	}
+	/* Program Files など書込不可のときだけ、コピーだけを昇格して行う。再起動はしない。 */
+	TCHAR batPath[MAX_PATH] = { 0 };
+	_stprintf_s(batPath, _T("%stactics_ogg_place.bat"), tempPath);
+	CFile bat;
+	if (!bat.Open(batPath, CFile::modeCreate | CFile::modeWrite | CFile::shareExclusive)) {
+		DeleteFile(tmp);
+		return;
+	}
+	CStringA srcA(tmp);
+	CStringA destA(dest);
+	CStringA batA;
+	batA.Format(
+		"@echo off\r\n"
+		"copy /y \"%s\" \"%s\" >nul 2>&1\r\n"
+		"del /f /q \"%s\" >nul 2>&1\r\n"
+		"del \"%%~f0\"\r\n",
+		(LPCSTR)srcA, (LPCSTR)destA, (LPCSTR)srcA);
+	bat.Write(batA, batA.GetLength());
+	bat.Close();
+	ShellExecute(NULL, _T("runas"), batPath, NULL, tempPath, SW_HIDE);
 }
 
 void EnsureD3dCompilerAvailable()

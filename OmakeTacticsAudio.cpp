@@ -280,7 +280,7 @@ static int TacEnsureBuf(HWND hwnd)
 	DSBUFFERDESC d = {};
 	d.dwSize = sizeof(d);
 	d.dwFlags = DSBCAPS_CTRLVOLUME | DSBCAPS_GLOBALFOCUS | DSBCAPS_GETCURRENTPOSITION2 | DSBCAPS_LOCSOFTWARE;
-	d.dwBufferBytes = TAC_RATE * 4 / 4;
+	d.dwBufferBytes = TAC_RATE * 4 * 2;
 	d.dwBufferBytes &= ~3u;
 	d.lpwfxFormat = &wfx;
 	if (FAILED(s_ds->CreateSoundBuffer(&d, &s_buf, NULL)) || !s_buf) return 0;
@@ -303,13 +303,12 @@ static int TacPullBgm(short& L, short& R)
 	const int ch = s_bgmCh < 1 ? 1 : s_bgmCh;
 	if (s_bpos + ch > s_bhave) {
 		ogg_int64_t pos = ov_pcm_tell(&s_vf);
-		if (pos >= s_loopB || pos < 0) {
-			if (ov_pcm_seek_lap(&s_vf, s_loopA) != 0) ov_pcm_seek(&s_vf, s_loopA);
-		}
+		if (pos >= s_loopB || pos < 0)
+			ov_pcm_seek(&s_vf, s_loopA);
 		int bs = 0;
 		long r = ov_read(&s_vf, (char*)s_bpcm, (int)sizeof(s_bpcm), 0, 2, 1, &bs);
 		if (r <= 0) {
-			if (ov_pcm_seek_lap(&s_vf, s_loopA) != 0) ov_pcm_seek(&s_vf, s_loopA);
+			ov_pcm_seek(&s_vf, s_loopA);
 			r = ov_read(&s_vf, (char*)s_bpcm, (int)sizeof(s_bpcm), 0, 2, 1, &bs);
 			if (r <= 0) return 0;
 		}
@@ -383,10 +382,11 @@ static void TacMix(short* dst, int frames)
 		}
 	}
 	if (s_bgm) {
-		const float g = 0.72f;
+		const float g = 0.42f;
+		short holdL = 0, holdR = 0;
 		for (int f = 0; f < frames; f++) {
-			short L = 0, R = 0;
-			if (!TacPullBgmOut(L, R)) break;
+			short L = holdL, R = holdR;
+			if (TacPullBgmOut(L, R)) { holdL = L; holdR = R; }
 			int l = (int)dst[f * 2] + (int)(L * g);
 			int r = (int)dst[f * 2 + 1] + (int)(R * g);
 			if (l > 32767) l = 32767; if (l < -32768) l = -32768;
@@ -444,30 +444,37 @@ void TacSfx(int id)
 void TacAudioPump()
 {
 	if (!s_buf || !s_bytes) return;
-	DWORD play = 0, w = 0;
-	int room;
-	if (!s_started) {
-		room = (int)s_bytes / 2;
-	} else {
-		if (FAILED(s_buf->GetCurrentPosition(&play, &w))) return;
-		room = (int)play - (int)s_write;
-		if (room < 0) room += (int)s_bytes;
-		room -= 256;
-		if (room < 512) return;
-		if (room > (int)s_bytes / 2) room = (int)s_bytes / 2;
-	}
-	room &= ~3;
-	if (room < 4) return;
-	static short tmp[TAC_RATE];
-	if (room / 2 > (int)(sizeof(tmp) / sizeof(tmp[0]))) room = (int)sizeof(tmp);
-	room &= ~3;
-	TacMix(tmp, room / 4);
-	void* p1 = NULL; void* p2 = NULL; DWORD n1 = 0, n2 = 0;
-	if (SUCCEEDED(s_buf->Lock(s_write, (DWORD)room, &p1, &n1, &p2, &n2, 0))) {
+	static short tmp[TAC_RATE * 2];
+	const int chunkMax = (int)sizeof(tmp);
+	const int target = (int)s_bytes - (TAC_RATE * 4 / 5);
+	for (int pass = 0; pass < 4; pass++) {
+		DWORD play = 0, wrt = 0;
+		if (s_started) {
+			if (FAILED(s_buf->GetCurrentPosition(&play, &wrt))) return;
+		}
+		int queued = (int)s_write - (int)play;
+		if (queued < 0) queued += (int)s_bytes;
+		if (s_started && queued > (int)s_bytes - 8192) {
+			s_buf->Stop();
+			s_buf->GetCurrentPosition(&play, &wrt);
+			s_write = play;
+			s_started = 0;
+			queued = 0;
+		}
+		int need = target - queued;
+		if (need < 4096) break;
+		if (need > chunkMax) need = chunkMax;
+		int freeB = (int)s_bytes - queued - 2048;
+		if (need > freeB) need = freeB;
+		need &= ~3;
+		if (need < 4) break;
+		TacMix(tmp, need / 4);
+		void* p1 = NULL; void* p2 = NULL; DWORD n1 = 0, n2 = 0;
+		if (FAILED(s_buf->Lock(s_write, (DWORD)need, &p1, &n1, &p2, &n2, 0))) break;
 		if (p1 && n1) memcpy(p1, tmp, n1);
 		if (p2 && n2) memcpy(p2, (char*)tmp + n1, n2);
 		s_buf->Unlock(p1, n1, p2, n2);
-		s_write = (s_write + (DWORD)room) % s_bytes;
+		s_write = (s_write + (DWORD)need) % s_bytes;
 	}
 	if (!s_started) {
 		s_buf->Play(0, 0, DSBPLAY_LOOPING);

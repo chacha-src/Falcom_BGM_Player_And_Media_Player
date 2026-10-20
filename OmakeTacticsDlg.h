@@ -67,6 +67,7 @@ protected:
 	otac::Game m_game;
 	BOOL m_gameOk = FALSE;
 	BOOL m_destroying = FALSE;
+	BOOL m_swapShown = FALSE;
 	LARGE_INTEGER m_qpf = {}, m_last = {};
 	int m_viewW = 0, m_viewH = 0;
 };

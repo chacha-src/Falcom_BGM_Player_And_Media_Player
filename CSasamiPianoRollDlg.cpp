@@ -1566,6 +1566,38 @@ void CSasamiPianoRollDlg::OnKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags)
 	if (ctrl && (nChar == 'T' || nChar == 't') && m_ev && m_evCount && m_ui) {
 		HistPushOwner(); ScStaffTieSelected(m_ev, *m_evCount, m_ui); AfterEdit();
 	}
+	if (ctrl && (nChar == VK_UP || nChar == VK_DOWN) && m_ev && m_evCount && m_ui) {
+		HistPushOwner();
+		const int semis = ((nChar == VK_UP) ? 1 : -1) * (shift ? 12 : 1);
+		const int n = m_isFm ? ScTransposeFmSelected(m_ev, *m_evCount, m_ui, semis)
+			: ScTransposeSelected(m_ev, *m_evCount, m_ui, semis);
+		if (n) {
+			AfterEdit();
+			if (m_status.GetSafeHwnd())
+				m_status.SetWindowText(LL14(L"選択を移調（Shift でオクターブ）", L"Transpose selection (Shift = octave)", L"Transposer sélection (Maj = octave)", L"Trasponi selezione (Maiusc = ottava)", L"Transponer selección (Mayús = octava)", L"선택 이조 (Shift=옥타브)", L"移调选区（Shift=八度）", L"نقل التحديد (Shift = أوكتاف)", L"Транспонировать (Shift = октава)", L"Auswahl transponieren (Umschalt = Oktave)", L"Transpor seleção (Shift = oitava)", L"Selectie transponeren (Shift = octaaf)", L"Transponuj (Shift = oktawa)", L"Seçimi transpoze (Shift = oktav)"));
+		}
+		return;
+	}
+	if (ctrl && (nChar == VK_LEFT || nChar == VK_RIGHT) && m_ev && m_evCount && m_ui) {
+		HistPushOwner();
+		const int mul = (nChar == VK_RIGHT) ? 2 : 1;
+		const int div = (nChar == VK_RIGHT) ? 1 : 2;
+		if (ScScaleDurSelected(m_ev, *m_evCount, m_ui, mul, div)) {
+			AfterEdit();
+			if (m_status.GetSafeHwnd())
+				m_status.SetWindowText(LL14(L"音価を伸縮", L"Scale duration", L"Échelle durée", L"Scala durata", L"Escalar duración", L"음가 신축", L"缩放时值", L"مقياس المدة", L"Масштаб длительности", L"Dauer skalieren", L"Escalar duração", L"Duur schalen", L"Skaluj czas trwania", L"Süreyi ölçekle"));
+		}
+		return;
+	}
+	if (!ctrl && (nChar == 'Q' || nChar == 'q') && m_ev && m_evCount && m_ui && m_curPart) {
+		HistPushOwner();
+		const int n = ScQuantizeNotes(m_ev, *m_evCount, m_ui, *m_curPart,
+			ScStaffPlaceQuant(m_ui), 100, shift);
+		if (n) AfterEdit();
+		if (m_status.GetSafeHwnd())
+			m_status.SetWindowText(ScQuantizeStatusText(shift, n));
+		return;
+	}
 	(void)nRepCnt; (void)nFlags;
 }
 

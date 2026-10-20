@@ -118,24 +118,25 @@ struct EqPat { const wchar_t* name; int w[12]; float bonus; };
 
 static const EqPat kPats[] = {
 	{ L"",                                    { 3,0,0,0,2,0,0,1,0,0,0,0 }, 0.5f },
-	{ L"!@C0066bbm!@C000000",                 { 3,0,0,2,0,0,0,1,0,0,0,0 }, 0.5f },
-	{ L"!@Cff55005!@C000000",                 { 3,0,0,0,0,0,0,2,0,0,0,0 }, 0.4f },
-	{ L"!@C8844ccsus!@Cff55004!@C000000",     { 3,0,0,0,0,3,0,1,0,0,0,0 }, 0.4f },
-	{ L"!@C8844ccsus!@Cff55002!@C000000",     { 3,0,3,0,0,0,0,1,0,0,0,0 }, 0.4f },
-	{ L"!@Caa7744dim!@C000000",               { 3,0,0,2,0,0,2,0,0,0,0,0 }, 0.3f },
-	{ L"!@Ccc4400aug!@C000000",               { 3,0,0,0,2,0,0,0,2,0,0,0 }, 0.3f },
-	{ L"!@Cff55007!@C000000",                 { 3,0,0,0,2,0,0,1,0,0,2,0 }, 0.3f },
-	{ L"!@C00aa77M!@Cff55007!@C000000",       { 3,0,0,0,2,0,0,1,0,0,0,2 }, 0.3f },
-	{ L"!@C0066bbm!@Cff55007!@C000000",       { 3,0,0,2,0,0,0,1,0,0,2,0 }, 0.3f },
-	{ L"!@Cff55006!@C000000",                 { 3,0,0,0,2,0,0,1,0,2,0,0 }, 0.2f },
-	{ L"!@C0066bbm!@Cff55006!@C000000",       { 3,0,0,2,0,0,0,1,0,2,0,0 }, 0.2f },
-	{ L"!@Cbb7733add!@Cff55009!@C000000",     { 3,0,2,0,2,0,0,1,0,0,0,0 }, 0.2f },
-	{ L"!@Cff55007!@C8844ccsus!@Cff55004!@C000000", { 3,0,0,0,0,2,0,1,0,0,2,0 }, 0.2f },
-	{ L"!@C0066bbm!@Cff55007!@Cdd2222b!@Cff55005!@C000000", { 3,0,0,2,0,0,2,0,0,0,2,0 }, 0.2f },
-	{ L"!@Caa7744dim!@Cff55007!@C000000",     { 3,0,0,2,0,0,2,0,0,2,0,0 }, 0.2f },
-	{ L"!@Cff55009!@C000000",                 { 3,0,2,0,2,0,0,1,0,0,2,0 }, -0.5f },
-	{ L"!@C00aa77M!@Cff55009!@C000000",       { 3,0,2,0,2,0,0,1,0,0,0,2 }, -0.5f },
-	{ L"!@C0066bbm!@Cff55009!@C000000",       { 3,0,2,2,0,0,0,1,0,0,2,0 }, -0.5f },
+	{ L"!@C0066BBm!@C000000",                 { 3,0,0,2,0,0,0,1,0,0,0,0 }, 0.5f },
+	{ L"!@CFF55005!@C000000",                 { 3,0,0,0,0,0,0,2,0,0,0,0 }, 0.4f },
+	// sus は3度の代わり。4度をルートと同じ3にすると、5度の第7倍音程度のFでメジャーに勝つ。
+	{ L"!@C8844CCsus!@CFF55004!@C000000",     { 3,0,0,0,0,2,0,2,0,0,0,0 }, 0.4f },
+	{ L"!@C8844CCsus!@CFF55002!@C000000",     { 3,0,2,0,0,0,0,2,0,0,0,0 }, 0.4f },
+	{ L"!@CAA7744dim!@C000000",               { 3,0,0,2,0,0,2,0,0,0,0,0 }, 0.3f },
+	{ L"!@CCC4400aug!@C000000",               { 3,0,0,0,2,0,0,0,2,0,0,0 }, 0.3f },
+	{ L"!@CFF55007!@C000000",                 { 3,0,0,0,2,0,0,1,0,0,2,0 }, 0.3f },
+	{ L"!@C00AA77M!@CFF55007!@C000000",       { 3,0,0,0,2,0,0,1,0,0,0,2 }, 0.3f },
+	{ L"!@C0066BBm!@CFF55007!@C000000",       { 3,0,0,2,0,0,0,1,0,0,2,0 }, 0.3f },
+	{ L"!@CFF55006!@C000000",                 { 3,0,0,0,2,0,0,1,0,2,0,0 }, 0.2f },
+	{ L"!@C0066BBm!@CFF55006!@C000000",       { 3,0,0,2,0,0,0,1,0,2,0,0 }, 0.2f },
+	{ L"!@CBB7733add!@CFF55009!@C000000",     { 3,0,2,0,2,0,0,1,0,0,0,0 }, 0.2f },
+	{ L"!@CFF55007!@C8844CCsus!@CFF55004!@C000000", { 3,0,0,0,0,2,0,1,0,0,2,0 }, 0.2f },
+	{ L"!@C0066BBm!@CFF55007!@CDD2222b!@CFF55005!@C000000", { 3,0,0,2,0,0,2,0,0,0,2,0 }, 0.2f },
+	{ L"!@CAA7744dim!@CFF55007!@C000000",     { 3,0,0,2,0,0,2,0,0,2,0,0 }, 0.2f },
+	{ L"!@CFF55009!@C000000",                 { 3,0,2,0,2,0,0,1,0,0,2,0 }, -0.5f },
+	{ L"!@C00AA77M!@CFF55009!@C000000",       { 3,0,2,0,2,0,0,1,0,0,0,2 }, -0.5f },
+	{ L"!@C0066BBm!@CFF55009!@C000000",       { 3,0,2,2,0,0,0,1,0,0,2,0 }, -0.5f },
 };
 
 static const wchar_t* kNote[12] = {
@@ -284,6 +285,8 @@ void EqKeyEstimateChord(const float* noteClass12, float threshold, const wchar_t
 				if (n[(root + 2) % 12] < 0.2f) sc -= 5.f;
 			} else {
 				if (req > 0 && (float)matched / (float)req < 0.4f) sc -= 3.f;
+				// 構成音が欠けた上位コード（Cm を D#6、C5 を Gsus4）に勝たせない。
+				if (matched < req) sc -= 4.f * (float)(req - matched);
 				if (req == 4) {
 					int tension = -1;
 					for (int x = 11; x >= 1; --x) {
@@ -299,8 +302,24 @@ void EqKeyEstimateChord(const float* noteClass12, float threshold, const wchar_t
 					}
 				}
 			}
+			// sus4 / 7sus4 / sus2 は、その音が3度より明らかに強いときだけ。
+			// 3度が残っている和音を Csus4 と出すと、帯域ごとの表示が「c , <csus4>」に見える。
+			if (kPats[c].w[5] > 0 && kPats[c].w[3] == 0 && kPats[c].w[4] == 0) {
+				const float fourthN = n[(root + 5) % 12];
+				const float fifthN = n[(root + 7) % 12];
+				const float thN = (n[(root + 3) % 12] > n[(root + 4) % 12]) ? n[(root + 3) % 12] : n[(root + 4) % 12];
+				if (fourthN < 0.36f || fifthN < 0.40f || thN + 0.25f >= fourthN) sc -= 7.f;
+			}
+			if (kPats[c].w[2] > 0 && kPats[c].w[3] == 0 && kPats[c].w[4] == 0 && kPats[c].w[5] == 0) {
+				const float secondN = n[(root + 2) % 12];
+				const float fifthN = n[(root + 7) % 12];
+				const float thN = (n[(root + 3) % 12] > n[(root + 4) % 12]) ? n[(root + 3) % 12] : n[(root + 4) % 12];
+				if (secondN < 0.36f || fifthN < 0.40f || thN + 0.25f >= secondN) sc -= 7.f;
+			}
 			sc -= (float)(active - matched) * 1.0f;
 			sc += kPats[c].bonus;
+			// ルートが他の構成音より明らかに弱いときは、そのルートの sus に吸い寄せない。
+			if (n[root] < 0.62f) sc -= (0.62f - n[root]) * 16.f;
 			if (req == 3) sc += 1.2f;
 			if (req == 4) sc += 0.5f;
 			if (req >= 5) sc -= 1.0f;
@@ -344,7 +363,11 @@ void EqKeyEstimateChord(const float* noteClass12, float threshold, const wchar_t
 	const int winRoot = cands[0].root;
 	const float third = (n[(winRoot + 3) % 12] > n[(winRoot + 4) % 12]) ? n[(winRoot + 3) % 12] : n[(winRoot + 4) % 12];
 	const float fifth = n[(winRoot + 7) % 12];
-	if (cands[0].complexity <= 3 && fifth > 0.35f && third < 0.18f && n[winRoot] > 0.35f) {
+	const float second = n[(winRoot + 2) % 12];
+	const float fourth = n[(winRoot + 5) % 12];
+	// 3度が無く5度だけ、というのがパワー。4度や2度が立っている sus はここに落とさない。
+	if (cands[0].complexity <= 3 && fifth > 0.35f && third < 0.18f
+		&& second < 0.36f && fourth < 0.36f && n[winRoot] > 0.35f) {
 		WCopy(out, outCap, kNote[winRoot]);
 		WCat(out, outCap, L"!@B!@I[Power]!@B!@I");
 		return;
@@ -357,6 +380,11 @@ void EqKeyEstimateChord(const float* noteClass12, float threshold, const wchar_t
 		if (cands[0].score - cands[i].score > 2.0f) break;
 		if (cands[i].score < cands[0].score * 0.62f) continue;
 		if (wcscmp(cands[i].name, out) == 0) continue;
+		if ((wcsstr(out, L"sus") != nullptr) != (wcsstr(cands[i].name, L"sus") != nullptr)) continue;
+		// メジャー/マイナーの横にパワーの「5」だけを並べると C, C5 になる。
+		if (wcsstr(cands[i].name, L"FF55005") && !wcsstr(cands[i].name, L"sus") && !wcsstr(cands[i].name, L"m")
+			&& !wcsstr(out, L"FF55005"))
+			continue;
 		if (wcsstr(cands[i].name, L"9") && cands[0].score - cands[i].score > 1.2f) continue;
 		WCat(out, outCap, L", ");
 		WCat(out, outCap, cands[i].name);

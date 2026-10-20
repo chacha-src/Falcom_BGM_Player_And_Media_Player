@@ -8,6 +8,33 @@
 
 namespace otac {
 
+// 実行中に伸びない固定配列（new/delete を避ける）
+template<typename T, int CAP>
+struct Fix {
+	T v[CAP];
+	int n;
+	Fix() : n(0) {}
+	void clear() { n = 0; }
+	int size() const { return n; }
+	bool empty() const { return n == 0; }
+	T* begin() { return v; }
+	T* end() { return v + n; }
+	const T* begin() const { return v; }
+	const T* end() const { return v + n; }
+	T* data() { return v; }
+	T& operator[](int i) { return v[i]; }
+	const T& operator[](int i) const { return v[i]; }
+	T& back() { return v[n - 1]; }
+	const T& back() const { return v[n - 1]; }
+	void push_back(const T& a) { if (n < CAP) v[n++] = a; }
+	void pop_back() { if (n > 0) n--; }
+	void eraseAt(int i) {
+		if (i < 0 || i >= n) return;
+		for (int k = i; k < n - 1; k++) v[k] = v[k + 1];
+		n--;
+	}
+};
+
 // ---------------- 数学（行ベクトル・左手系） ----------------
 struct V3 { float x, y, z; };
 inline V3 v3(float x, float y, float z) { V3 r = { x, y, z }; return r; }
@@ -61,7 +88,7 @@ struct Rng {
 // ---------------- 地形 ----------------
 enum Terrain {
 	T_PLAIN, T_FOREST, T_HILL, T_MOUNTAIN, T_WATER, T_CHASM, T_LAVA,
-	T_SAND, T_SNOW, T_SWAMP, T_ROAD, T_BRIDGE, T_RUINS, T_ROCK, T_COUNT
+	T_SAND, T_SNOW, T_SWAMP, T_ROAD, T_BRIDGE, T_RUINS, T_ROCK, T_DOOR, T_COUNT
 };
 struct TerrainDef {
 	int nameTx;
@@ -83,11 +110,25 @@ enum PropKind {
 	PK_GRAVE, PK_TENT, PK_BARREL, PK_CRATE, PK_LANTERN, PK_PUMPKIN, PK_FLAG, PK_HILLTREES
 };
 
+enum Gimmick { GM_NONE = 0, GM_HEAL = 1, GM_MIGHT = 2, GM_WARP = 3, GM_CHEST = 4 };
+
 struct Cell {
 	BYTE t;      // Terrain
 	BYTE h;      // 高さ段
 	BYTE prop;   // PropKind
 	BYTE var;    // 小物のバリエーション／回転
+	BYTE gimm;   // Gimmick
+	BYTE gparam; // ワープ組番号
+};
+
+enum { MAX_GROUPS = 200, GRP_CAP = 15 };
+
+struct MapGroup {
+	short ax, az;
+	BYTE n;
+	BYTE boss;
+	short x[GRP_CAP];
+	short z[GRP_CAP];
 };
 
 struct Map {
@@ -96,8 +137,10 @@ struct Map {
 	DWORD seed;
 	Cell c[MAPN][MAPN];   // [z][x]
 	int pStartX[5], pStartZ[5];
-	int eStartX[10], eStartZ[10];
+	int eStartX[10], eStartZ[10]; // カメラ用。先頭は最寄りの敵拠点
 	int nP, nE;
+	MapGroup grp[MAX_GROUPS];
+	int nGrp;
 	Cell& At(int x, int z) { return c[z][x]; }
 	const Cell& At(int x, int z) const { return c[z][x]; }
 	static bool In(int x, int z) { return x >= 0 && z >= 0 && x < MAPN && z < MAPN; }
@@ -123,8 +166,10 @@ enum ClassId {
 	C_SOLDIER, C_FIGHTER, C_ARCHER, C_THIEF, C_MAGE, C_CLERIC,
 	C_PALADIN, C_RUNEKNIGHT, C_BERSERKER, C_SNIPER, C_ASSASSIN, C_WIZARD, C_BISHOP, C_SKYKNIGHT,
 	C_HERO, C_ARCHMAGE, C_SAINT, C_PHANTOM, C_DRAGONLORD,
+	C_ALCHEMIST, C_ARCHALCHEMIST,
 	C_PLAYER_COUNT
 };
+enum { TAC_LV_MAX = 999, TAC_STAGE_MAX = 9999, TAC_RANK_LINES = 6, TAC_RANK_N = 7 };
 
 struct LearnDef { int lv; int skill; };
 struct ClassDef {
@@ -145,6 +190,11 @@ struct ClassDef {
 	LearnDef learn[6];
 };
 const ClassDef& ClassInfo(int c);
+int PromoteLevel(int tier);
+int ExpToNext(int lv);
+int NextPromoteClass(int cls);
+bool IsUltimateSkill(int skill);
+enum { IT_ORE = 0, IT_HERB, IT_CRYSTAL, IT_SHARD, IT_ELIXIR, IT_MIGHT, IT_DELAY, IT_COUNT = 7 };
 
 enum SkillKind { SK_PHYS, SK_MAGIC, SK_HEAL, SK_BUFF, SK_PASSIVE };
 enum Element { EL_NONE, EL_FIRE, EL_ICE, EL_THUNDER, EL_HOLY, EL_DARK, EL_WIND, EL_EARTH, EL_POISON };
@@ -155,7 +205,11 @@ enum SkillId {
 	SKL_HEAL, SKL_HIGHHEAL, SKL_HEALALL, SKL_PROTECT, SKL_HASTE, SKL_BLESS,
 	SKL_P_EVADE, SKL_P_MIGHT, SKL_P_SPELL, SKL_P_IRON, SKL_P_SWIFT, SKL_P_REGEN, SKL_P_CRIT,
 	SKL_E_VENOM, SKL_E_BREATH, SKL_E_CRUSH, SKL_E_DRAIN, SKL_E_SPIT, SKL_E_QUAKE,
-	SKL_COUNT
+	SKL_REFRESH,
+	SKL_CLEAVE, SKL_SNIPE, SKL_VENOMEDGE, SKL_SANCTUARY, SKL_SMITE, SKL_GRAVITY, SKL_WARCRY,
+	SKL_RENEW, SKL_MIRROR, SKL_GODSLASH, SKL_RUIN, SKL_APOC, SKL_TRANSMUTE,
+	SKL_ART0,
+	SKL_COUNT = SKL_ART0 + 104
 };
 struct SkillDef {
 	int nameTx, descTx;
@@ -170,11 +224,11 @@ struct SkillDef {
 	int effect;      // 追加効果
 	int enemyOnly;
 };
-enum SkillEffect { EF_NONE, EF_SLOW, EF_DEFDOWN, EF_POISON, EF_DRAIN, EF_IGNDEF, EF_BUFF_DEF, EF_BUFF_AGI, EF_BUFF_ATK };
+enum SkillEffect { EF_NONE, EF_SLOW, EF_DEFDOWN, EF_POISON, EF_DRAIN, EF_IGNDEF, EF_BUFF_DEF, EF_BUFF_AGI, EF_BUFF_ATK, EF_REACT };
 const SkillDef& SkillInfo(int s);
 
 // ---------------- キャラクタ（セーブ対象） ----------------
-enum { MAX_ROSTER = 20, MAX_PARTY = 5, MAX_ENEMY = 10, NAME_LEN = 16 };
+enum { MAX_ROSTER = 20, MAX_PARTY = 5, MAX_ENEMY = 640, NAME_LEN = 16 };
 enum Body { B_KNIGHT, B_BARBARIAN, B_MAGE, B_ROGUE, B_ROGUE_HOOD, B_COUNT };
 enum { HAIR_STYLES = 6, HAIR_COLORS = 10, OUTFIT_COLORS = 10 };
 
@@ -199,6 +253,7 @@ void CharRecalcInit(CharData& c);                  // 新規作成時の初期�
 int  CharLevelUp(CharData& c, Rng& r, int gains[S_COUNT]);   // 戻り: 新規習得スキル id or -1
 int  CharLearnAt(const CharData& c, int lv);       // その Lv で覚えるスキル
 bool CharHasSkill(const CharData& c, int s);
+void CharGiveSkill(CharData& c, int s);
 
 // 進化
 struct EvoOption { int target; int needGroup; };   // needGroup=-1 で不問
@@ -246,6 +301,9 @@ struct Unit {
 	int ct;
 	float face;          // 向き（ラジアン）
 	int buffDef, buffAgi, buffAtk, poison, defDown;   // 残りターン
+	int mulTurns;        // マス効果: この間ステータス倍
+	int alert;           // 1=行動順に入る（味方は常に 1。敵拠点は接近で起床）
+	int grp;             // 敵拠点番号（味方は -1）
 	int expGained;
 	int levelsGained;
 	int skillLearned[4];
@@ -304,6 +362,12 @@ struct Forecast {
 	int hits;               // 攻撃回数（追撃込み）
 	int cdmg, chit, ccrit, chits;   // 反撃
 	int canCounter;
+	int face;               // 0=正面 1=側面 2=背面
+	int tri;                // 武器相性 -1/0/+1
+	int bowFly;             // 弓対飛行
+	int delay;              // 命中時に削る CT
+	int follow;             // 隣接追撃する味方。-1=なし
+	int fdmg;               // 追撃のダメージ
 };
 void CalcForecast(const Battle& b, int a, int d, int skill, Forecast& f);
 int  ResolveAttack(Battle& b, int a, int d, int skill, Rng& r, Strike* out, int maxOut);
@@ -326,12 +390,21 @@ struct Battle {
 	int UnitAt(int x, int z) const { return Map::In(x, z) ? occ[z][x] - 1 : -1; }
 	int AliveCount(int team) const;
 	int NextActor();          // CT を進めて次の行動者を返す
-	int PredictOrder(int* out, int n, int acting = -1) const;   // acting: 手番中のユニット（行動済みとして予測）
+	// acting の手番終了後（CT を cost 消費）の並び。insertAt はそのユニットが次に入る位置
+	int PredictOrder(int* out, int n, int acting = -1, int cost = 1000, int* insertAt = NULL) const;
 };
 
 void SetupBattle(Battle& b, int stage, DWORD seed, const CharData* party, const int* rosterIdx, int nParty);
 void FinishAction(Battle& b, int ui, int moved, int acted);
 int  TurnStartEffects(Battle& b, int ui, int* healOut, int* poisonOut);
+void WakeGroup(Battle& b, int grp);
+void WakeNearPlayers(Battle& b, int rad);
+int  ApplyTile(Battle& b, int ui);   // 停止マスのギミック。Gimmick を返す。0=なし
+bool CanOpenDoor(const Unit& u);
+int  AdjDoor(const Battle& b, int ui, int* ox, int* oz);
+void OpenDoor(Battle& b, int x, int z);
+bool CanShove(const Battle& b, int ui, int ti, int* outX, int* outZ);
+void DoShove(Battle& b, int ui, int ti);
 
 // ---------------- AI ----------------
 struct AiPlan {
@@ -358,7 +431,8 @@ struct SaveData {
 	int battleAnim;            // 0=フル 1=短縮
 	DWORD uidNext;
 	int winSizeVer;            // 2 未満なら保存サイズを使わず既定サイズで開く
-	int reserved[29];
+	int itemN[8];              // 旧 reserved の先頭。鉱石・薬草・結晶・欠片・回復薬・剛力薬・遅延弾
+	int reserved[21];
 };
 #pragma pack(pop)
 void SaveDefaults(SaveData& s);

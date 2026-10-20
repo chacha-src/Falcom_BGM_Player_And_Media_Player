@@ -635,12 +635,12 @@ namespace Cfg
         return f;
     }
 
-    // メロディ帯の 16 分は 1 フレームで点灯させる。低音と C7 以上だけ 2 フレーム
-    // （単発ノイズの抑止）。3 フレームだと 16 分と高音スタッカートが消える。
+    // オンセットの裏付けが無い新規ノートは 2 フレーム続いたときだけ点灯する。
+    // 1 フレームの単発ピックを点けると VisGap で数フレーム引き延ばされ、細切れの棒になる。
+    // 立ち上がりのある 16 分は呼び出し側の strongMidOnset で 1 フレーム点灯のまま。
     static int AttackFramesForKey(int keyIndex)
     {
-        if (keyIndex >= PianoRoll108::BASS_END && keyIndex < PianoRoll108::EDGE_HI)
-            return 1;
+        (void)keyIndex;
         return 2;
     }
 
@@ -4612,22 +4612,21 @@ void CPianoRoll::DrawHistoryGrid(CDC& dc, int width, int yFrom, int yTo) const
     dc.SelectObject(oldPen);
 }
 
+// 行は全行同じ高さ。s*rollH/120 の割り付けだと 3px と 4px が混ざり、
+// ScrollDC で流した古い行と全面再構成の行位置が上へ行くほど食い違う。
+// 120 行で rollH 以上を覆うピッチにし、上端からはみ出す古い行は描かない。
 int CPianoRoll::HistoryRowPitch(int rollH) const
 {
-    int yTop, yBot;
-    GetHistoryRowBounds(rollH, 0, yTop, yBot);
-    return max(1, yBot - yTop);
+    if (rollH <= 0) return 1;
+    const int maxRows = (int)MAX_HISTORY;
+    return max(1, (rollH + maxRows - 1) / maxRows);
 }
 
 int CPianoRoll::HistoryScrollPx(int rollH, int rowsToScroll) const
 {
     if (rowsToScroll <= 0 || rollH <= 0) return 0;
-    const int maxRows = (int)MAX_HISTORY;
-    if (rowsToScroll >= maxRows) return rollH;
-    int yTop0, yBot0, yTopN, yBotN;
-    GetHistoryRowBounds(rollH, 0, yTop0, yBot0);
-    GetHistoryRowBounds(rollH, rowsToScroll, yTopN, yBotN);
-    return yTop0 - yTopN;
+    const int px = rowsToScroll * HistoryRowPitch(rollH);
+    return (px > rollH) ? rollH : px;
 }
 
 void CPianoRoll::GetHistoryRowBounds(int rollH, int rowFromBottom, int& yTop, int& yBot) const
@@ -4637,13 +4636,14 @@ void CPianoRoll::GetHistoryRowBounds(int rollH, int rowFromBottom, int& yTop, in
         yTop = yBot = 0;
         return;
     }
-    const int maxRows = (int)MAX_HISTORY;
-    const int s = maxRows - 1 - rowFromBottom;
-    yTop = s * rollH / maxRows;
-    yBot = (s + 1) * rollH / maxRows;
+    const int pitch = HistoryRowPitch(rollH);
+    yBot = rollH - rowFromBottom * pitch;
+    yTop = yBot - pitch;
+    if (yBot <= 0) {
+        yTop = yBot = 0;
+        return;
+    }
     if (yTop < 0) yTop = 0;
-    if (yBot > rollH) yBot = rollH;
-    if (yBot <= yTop) yBot = yTop + 1;
 }
 
 void CPianoRoll::DrawHistoryRowAt(CDC& dc, int width, int yTop, int yBot, const NoteFrame& frame) const
@@ -4701,10 +4701,11 @@ void CPianoRoll::DrawHistoryArea(CDC& dc, int width, int rollH, int histCount, c
 {
     dc.FillSolidRect(0, 0, width, rollH, RGB(20, 20, 20));
     DrawHistoryGrid(dc, width, 0, rollH);
-    // row0=live（DrawPlayheadRow）。row r>=1 には hist[r-1]（PushFrame で row0 に入った直前フレーム）
+    // row0=live（DrawPlayheadRow）。live は hist[0] と同じ時刻なので row r>=1 は hist[r]。
+    // hist[r-1] にするとスクロール経路より 1 行下へずれ、全面再構成のたびに履歴が跳ぶ。
     if (!hist) return;
     for (int r = 1; r < histCount && r < (int)MAX_HISTORY; ++r)
-        DrawHistoryRow(dc, width, rollH, r, hist[r - 1]);
+        DrawHistoryRow(dc, width, rollH, r, hist[r]);
 
     DrawPitchTransitions(dc, width, rollH, histCount, hist);
 }
@@ -4721,8 +4722,8 @@ void CPianoRoll::DrawPitchTransitions(CDC& dc, int width, int rollH, int histCou
     CGdiObject* pOldBrush = dc.SelectStockObject(DC_BRUSH);
     CGdiObject* pOldPen = dc.SelectStockObject(DC_PEN);
     for (int r = 1; r + 1 < maxR; ++r) {
-        const NoteFrame& fNew = hist[r - 1]; // 下(新しい)行 = row r
-        const NoteFrame& fOld = hist[r];     // 上(古い)行 = row r+1
+        const NoteFrame& fNew = hist[r];     // 下(新しい)行 = row r
+        const NoteFrame& fOld = hist[r + 1]; // 上(古い)行 = row r+1
         int yTopNew, yBotNew, yTopOld, yBotOld;
         GetHistoryRowBounds(rollH, r, yTopNew, yBotNew);
         GetHistoryRowBounds(rollH, r + 1, yTopOld, yBotOld);
@@ -4779,8 +4780,7 @@ void CPianoRoll::DrawPlayheadRow(CDC& dc, int width, int rollH, const NoteFrame&
     DrawHistoryRowAt(dc, width, yTop, yBot, live);
 }
 
-// 1行分を ScrollDC で繰り上げ、空いた帯に live を描く。
-// 複数行まとめは見かけのジャンプになるので n は 1 に固定。
+// 保留行数ぶん ScrollDC で繰り上げ、空いた帯に hist[1..n-1] と live を描く。
 // 旧: scratch へ全面 BitBlt×2。重く、遅延時に 3 行飛ばしでガクついた。
 bool CPianoRoll::TryAdvanceRollBuffer(int width, int rollH, int histCount, const NoteFrame* hist,
     int pendingCount, const NoteFrame& live)
@@ -4792,10 +4792,12 @@ bool CPianoRoll::TryAdvanceRollBuffer(int width, int rollH, int histCount, const
     if (!m_rollDC.GetSafeHdc())
         return false;
 
-    (void)histCount;
-    (void)hist;
-    (void)pendingCount;
-    const int n = 1;
+    // 速度 125% 以上では 1 描画の間に 2 行以上入る。1 行だけ流して残りを捨てると、
+    // 画面の時間密度がリングと変わり、全面再構成のたびに上側の履歴が詰まって見える。
+    int n = pendingCount;
+    if (n < 1) n = 1;
+    if (n > histCount) n = (histCount > 0) ? histCount : 1;
+    if (n > 1 && !hist) n = 1;
 
     const int scrollPx = HistoryScrollPx(rollH, n);
     const int preserveH = rollH - scrollPx;
@@ -4816,12 +4818,16 @@ bool CPianoRoll::TryAdvanceRollBuffer(int width, int rollH, int histCount, const
         m_rollScratchDC.BitBlt(0, 0, width, preserveH, &m_rollDC, 0, scrollPx, SRCCOPY);
         m_rollScratchDC.FillSolidRect(0, yBandTop, width, rollH - yBandTop, RGB(20, 20, 20));
         DrawHistoryGrid(m_rollScratchDC, width, yBandTop, rollH);
+        for (int r = 1; r < n; ++r)
+            DrawHistoryRow(m_rollScratchDC, width, rollH, r, hist[r]);
         DrawPlayheadRow(m_rollScratchDC, width, rollH, live);
         m_rollDC.BitBlt(0, 0, width, rollH, &m_rollScratchDC, 0, 0, SRCCOPY);
     }
     else {
         m_rollDC.FillSolidRect(0, yBandTop, width, rollH - yBandTop, RGB(20, 20, 20));
         DrawHistoryGrid(m_rollDC, width, yBandTop, rollH);
+        for (int r = 1; r < n; ++r)
+            DrawHistoryRow(m_rollDC, width, rollH, r, hist[r]);
         DrawPlayheadRow(m_rollDC, width, rollH, live);
     }
 
@@ -6502,10 +6508,19 @@ void CPianoRoll::OnPaint()
         didRollUpdate = true;
         didRollScroll = false;
     }
-    // 1行/Present。複数行まとめと同一 vsync の追い付きはスクロールが跳ぶ。
     else if (pending > 0 && m_rollReady) {
-        const int n = 1;
-            if (TryAdvanceRollBuffer(w, rollH, 0, nullptr, n, m_paintLiveSnap)) {
+        int n = pending;
+        int histHead = 0;
+        if (TryEnterCriticalSection(&m_cs)) {
+            n = m_framesPending;
+            CopyHistorySnapshot(m_paintHistSnap, (n > 0) ? n : 1, histHead);
+            LeaveCriticalSection(&m_cs);
+        }
+        else {
+            n = 1;
+        }
+        if (n < 1) n = 1;
+            if (TryAdvanceRollBuffer(w, rollH, histHead, m_paintHistSnap, n, m_paintLiveSnap)) {
             if (TryEnterCriticalSection(&m_cs)) {
                 m_framesPending -= n;
                 if (m_framesPending < 0) m_framesPending = 0;

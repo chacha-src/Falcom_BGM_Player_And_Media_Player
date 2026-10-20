@@ -10,7 +10,8 @@ static const float PI = 3.14159265f;
 
 // UI ID
 enum {
-	ID_BASE_SORTIE = 100, ID_BASE_CREATE, ID_BASE_PARTY, ID_BASE_EVOLVE, ID_BASE_CLOSE, ID_BASE_STAGE, ID_BASE_QUALITY, ID_BASE_ANIM,
+	ID_BASE_SORTIE = 100, ID_BASE_CREATE, ID_BASE_PARTY, ID_BASE_EVOLVE, ID_BASE_CLOSE, ID_BASE_STAGE, ID_BASE_QUALITY, ID_BASE_ANIM, ID_BASE_CODEX,
+	ID_CDX_PREV = 180, ID_CDX_NEXT, ID_CDX_GROW, ID_CDX_ALCH, ID_CDX_SKILL, ID_CDX_REC0,
 	ID_BASE_GRID, ID_BASE_HELP, ID_BASE_SLOT0 = 120,
 	ID_CR_NAME = 200, ID_CR_RANDOM, ID_CR_GENDER, ID_CR_LINEAGE, ID_CR_CLASS, ID_CR_BODY, ID_CR_HAIR, ID_CR_HAIRCOL, ID_CR_OUTFIT,
 	ID_CR_HAT, ID_CR_CAPE, ID_CR_OK, ID_CR_BACK,
@@ -61,6 +62,7 @@ Game::Game()
 	m_mx = m_my = 0;
 	m_mouseSeen = FALSE;
 	m_lDown = m_rDown = m_mDown = FALSE;
+	m_downUi = FALSE;
 	m_downX = m_downY = 0;
 	m_click = m_rclick = FALSE;
 	m_clickX = m_clickY = 0;
@@ -76,6 +78,10 @@ Game::Game()
 	m_padRepeat = 0; m_padDirPrev = -1;
 	m_fastFwd = FALSE;
 	m_showHelp = FALSE;
+	m_codex = 0;
+	m_codexPage = 0;
+	m_skillPage = 0;
+	m_ult = FALSE;
 	m_confirmDelete = 0;
 	m_camTarget = m_camGoal = v3(32, 0, 32);
 	m_camYaw = m_camYawGoal = PI * .25f;
@@ -192,6 +198,11 @@ void Game::Resize(int w, int h)
 	m_w = max(8, w); m_h = max(8, h);
 	m_ui = Clampf(min(m_w / 1280.f, m_h / 720.f), .62f, 2.2f);
 	if (m_r.Ready()) m_r.Resize(m_w, m_h);
+}
+
+void Game::RefreshSurface()
+{
+	if (m_r.Ready()) m_r.RefreshSurface();
 }
 
 void Game::Persist()
@@ -328,7 +339,8 @@ void Game::RenderFrame()
 void Game::OnMouseMove(int x, int y)
 {
 	if (m_lDown && m_screen == SC_CREATE && m_previewDrag) m_previewYaw += (x - m_mx) * .012f;
-	if (m_rDown || m_mDown) {
+	BOOL scout = m_lDown && !m_downUi && m_screen == SC_BATTLE && (m_phase == PH_P_MOVE || m_phase == PH_P_TARGET || m_phase == PH_P_SKILLTARGET || m_phase == PH_P_SHOVE || m_phase == PH_P_CMD || m_phase == PH_P_SKILLS);
+	if (m_rDown || m_mDown || scout) {
 		int dx = x - m_dragLastX, dy = y - m_dragLastY;
 		m_dragDist += fabsf((float)dx) + fabsf((float)dy);
 		if (m_rDown && m_dragDist > 6) {
@@ -337,7 +349,7 @@ void Game::OnMouseMove(int x, int y)
 			m_camYaw = m_camYawGoal;
 			m_camPitch = Clampf(m_camPitch + dy * .004f, .45f, 1.35f);
 		}
-		if (m_mDown) {
+		if (m_mDown || (scout && m_dragDist > 6)) {
 			m_dragPan = TRUE;
 			float s = m_camDist * .0022f;
 			V3 right = v3(-cosf(m_camYaw), 0, sinf(m_camYaw));
@@ -355,6 +367,9 @@ void Game::OnMouseDown(int btn, int x, int y)
 	m_mx = x; m_my = y; m_mouseSeen = TRUE; m_navMode = FALSE;
 	if (btn == 0) {
 		m_lDown = TRUE; m_downX = x; m_downY = y;
+		m_dragLastX = x; m_dragLastY = y; m_dragDist = 0; m_dragPan = FALSE;
+		m_downUi = FALSE;
+		for (auto& b : m_btnsPrev) if (x >= b.x && y >= b.y && x < b.x + b.w && y < b.y + b.h) m_downUi = TRUE;
 		m_previewDrag = (m_screen == SC_CREATE && x > m_w * .46f && x < m_w * .78f);
 	}
 	if (btn == 1) { m_rDown = TRUE; m_dragRot = FALSE; m_dragDist = 0; m_dragLastX = x; m_dragLastY = y; }
@@ -407,10 +422,11 @@ void Game::OnKey(int vk, BOOL down)
 	}
 	if (m_showHelp) {
 		if (vk == VK_ESCAPE || vk == VK_RETURN || vk == VK_F1 || vk == 'H' || vk == VK_SPACE) m_showHelp = FALSE;
+		if (m_codex && (vk == VK_ESCAPE || vk == VK_RETURN || vk == VK_SPACE)) { m_codex = 0; return; }
 		return;
 	}
 	if (vk == VK_F1 || vk == 'H') { m_showHelp = TRUE; return; }
-	BOOL battleMap = m_screen == SC_BATTLE && (m_phase == PH_P_MOVE || m_phase == PH_P_TARGET || m_phase == PH_P_SKILLTARGET);
+	BOOL battleMap = m_screen == SC_BATTLE && (m_phase == PH_P_MOVE || m_phase == PH_P_TARGET || m_phase == PH_P_SKILLTARGET || m_phase == PH_P_SHOVE);
 	switch (vk) {
 	case VK_LEFT: case 'A': if (battleMap) MoveCursor(-1, 0); else NavMove(-1, 0); break;
 	case VK_RIGHT: case 'D': if (battleMap) MoveCursor(1, 0); else NavMove(1, 0); break;
@@ -445,7 +461,7 @@ void Game::OnPad(const PadState& p, float dt)
 	float ax = p.lx, ay = p.ly;
 	if (p.hat >= 0) { static const int hx[8] = { 0, 1, 1, 1, 0, -1, -1, -1 }, hy[8] = { -1, -1, 0, 1, 1, 1, 0, -1 }; ax = (float)hx[p.hat]; ay = (float)hy[p.hat]; }
 	if (fabsf(ax) > .55f || fabsf(ay) > .55f) dir = fabsf(ax) > fabsf(ay) ? (ax > 0 ? 1 : 3) : (ay > 0 ? 2 : 0);
-	BOOL battleMap = m_screen == SC_BATTLE && (m_phase == PH_P_MOVE || m_phase == PH_P_TARGET || m_phase == PH_P_SKILLTARGET) && !m_showHelp;
+	BOOL battleMap = m_screen == SC_BATTLE && (m_phase == PH_P_MOVE || m_phase == PH_P_TARGET || m_phase == PH_P_SKILLTARGET || m_phase == PH_P_SHOVE) && !m_showHelp;
 	if (dir >= 0) {
 		BOOL fire = FALSE;
 		if (dir != m_padDirPrev) { fire = TRUE; m_padRepeat = .32f; }
@@ -652,7 +668,7 @@ void Game::DrawPopups(float)
 		Popup& p = m_popups[i];
 		if (p.delay > 0) { p.delay -= dt; ++i; continue; }
 		p.t += dt;
-		if (p.t >= p.life) { m_popups.erase(m_popups.begin() + i); continue; }
+		if (p.t >= p.life) { m_popups.eraseAt((int)i); continue; }
 		float sx, sy;
 		if (m_r.ProjectToScreen(p.p, sx, sy)) {
 			float u = p.t / p.life;
@@ -674,7 +690,7 @@ void Game::DrawBanners(float)
 	for (size_t i = 0; i < m_banners.size();) {
 		Banner& b = m_banners[i];
 		b.t += dt;
-		if (b.t >= b.life) { m_banners.erase(m_banners.begin() + i); continue; }
+		if (b.t >= b.life) { m_banners.eraseAt((int)i); continue; }
 		float in = Smooth01(b.t / .25f), out = 1.f - Smooth01((b.t - (b.life - .3f)) / .3f);
 		float a = in * out;
 		if (b.style == 0) {
@@ -826,7 +842,6 @@ void Game::Burst(V3 p, int n, float spd, float size, float life, float r, float 
 		q.drag = 1.6f;
 		m_parts.push_back(q);
 	}
-	if (m_parts.size() > 3000) m_parts.erase(m_parts.begin(), m_parts.begin() + (m_parts.size() - 3000));
 }
 
 void Game::UpdateParticles(float dt)
@@ -909,7 +924,7 @@ void Game::ElementFx(int el, int kind, V3 from, V3 to, BOOL big)
 void Game::BuildShowcase()
 {
 	if (!m_loaded) return;
-	int st = Clampi(m_save.stageSel, 1, 100);
+	int st = Clampi(m_save.stageSel, 1, TAC_STAGE_MAX);
 	if (!m_showBuilt) {
 		GenerateMap(m_showMap, st <= 1 ? 1 : st, 777u + st * 31u);
 		m_r.BuildTerrain(m_showMap);
@@ -988,11 +1003,118 @@ void Game::DrawShowcase3D()
 		d.outline = .014f;
 		ActorDraw(m_r, m_lib, a, ActorWorld(a, m_showPos[i], face), d, m_time);
 	}
-	m_r.DrawParticles(m_parts);
+	m_r.DrawParticles(m_parts.data(), m_parts.size());
+}
+
+void Game::DrawCodex()
+{
+	float x = U(30), y = U(24), w = (float)m_w - U(60), h = (float)m_h - U(48);
+	Panel(x, y, w, h);
+	const wchar_t* title = m_codex == 2 ? TT(TX_CDX_GROW) : (m_codex == 3 ? TT(TX_CDX_ALCH) : TT(TX_CDX_SKILL));
+	m_r.HudText(title, x + w * .5f, y + U(28), U(22), RGBA8(255, 226, 150), 1, 1);
+	float yy = y + U(58);
+	if (m_codex == 1) {
+		int list[SKL_COUNT], n = 0;
+		for (int s = 0; s < SKL_COUNT; s++) if (!SkillInfo(s).enemyOnly) list[n++] = s;
+		int per = 7;
+		int pages = max(1, (n + per - 1) / per);
+		if (m_codexPage >= pages) m_codexPage = pages - 1;
+		int a = m_codexPage * per, b = min(n, a + per);
+		for (int i = a; i < b; i++) {
+			const SkillDef& sd = SkillInfo(list[i]);
+			wchar_t how[160] = L"";
+			for (int c = 0; c < C_PLAYER_COUNT && how[0] == 0; c++) {
+				const ClassDef& cd = ClassInfo(c);
+				for (int k = 0; k < 6; k++) if (cd.learn[k].skill == list[i]) {
+					swprintf_s(how, L"%s  Lv%d", TT(cd.nameTx), cd.learn[k].lv);
+				}
+			}
+			if (list[i] >= SKL_ART0) {
+				int k = list[i] - SKL_ART0;
+				int g = k / 26;
+				int lv = (k % 26) + 7;
+				swprintf_s(how, L"%s  Lv%d", TT(TX_G_MELEE + g), lv);
+			}
+			for (int line = 0; line < TAC_RANK_LINES && how[0] == 0; line++) {
+				for (int r = 0; r < TAC_RANK_N && how[0] == 0; r++) {
+					const ClassDef& cd = ClassInfo(C_PLAYER_COUNT + line * TAC_RANK_N + r);
+					for (int k = 0; k < 6; k++) if (cd.learn[k].skill == list[i] && cd.learn[k].lv > 0) {
+						swprintf_s(how, L"%s  Lv%d", TT(cd.nameTx), cd.learn[k].lv);
+						break;
+					}
+				}
+			}
+			wchar_t row[220];
+			swprintf_s(row, L"%s   MP%d   %s", TT(sd.nameTx), sd.mp, how);
+			m_r.HudText(row, x + U(24), yy, U(16), RGBA8(240, 240, 245), 0, 1);
+			m_r.HudText(TT(sd.descTx), x + U(36), yy + U(18), U(13), RGBA8(190, 200, 220), 0, 0);
+			yy += U(40);
+		}
+		wchar_t pg[32];
+		swprintf_s(pg, L"%d / %d", m_codexPage + 1, pages);
+		m_r.HudText(pg, x + w * .5f, y + h - U(78), U(14), RGBA8(220, 220, 220), 1, 0);
+		if (Btn(ID_CDX_PREV, x + U(24), y + h - U(56), U(140), U(36), L"◀")) m_codexPage = (m_codexPage + pages - 1) % pages;
+		if (Btn(ID_CDX_NEXT, x + U(180), y + h - U(56), U(140), U(36), L"▶")) m_codexPage = (m_codexPage + 1) % pages;
+	} else if (m_codex == 2) {
+		static const int showLv[] = { 1, 15, 35, 55, 78, 105, 140, 180, 230, 290, 400, 999 };
+		m_r.HudText(TT(TX_CDX_EXP), x + U(24), yy, U(16), RGBA8(255, 226, 150), 0, 1);
+		yy += U(26);
+		for (int i = 0; i < 12; i++) {
+			int lv = showLv[i];
+			wchar_t row[96];
+			swprintf_s(row, L"Lv %d    %s %d", lv, TT(TX_CDX_NEXT), ExpToNext(lv));
+			m_r.HudText(row, x + U(36), yy, U(15), RGBA8(230, 230, 240), 0, 0);
+			yy += U(22);
+		}
+		yy += U(8);
+		m_r.HudText(TT(TX_CDX_JOB), x + U(24), yy, U(16), RGBA8(255, 226, 150), 0, 1);
+		yy += U(24);
+		for (int t = 1; t <= 9; t++) {
+			wchar_t row[96];
+			swprintf_s(row, L"%d → %d    Lv %d", t, t + 1, PromoteLevel(t));
+			m_r.HudText(row, x + U(36), yy, U(15), RGBA8(230, 230, 240), 0, 0);
+			yy += U(20);
+		}
+	} else {
+		struct Rec { int a, an, b, bn, c, cn; int out, on; };
+		static const Rec rec[4] = {
+			{ IT_ORE, 2, -1, 0, -1, 0, IT_ELIXIR, 1 },
+			{ IT_HERB, 2, IT_ORE, 1, -1, 0, IT_MIGHT, 1 },
+			{ IT_CRYSTAL, 1, IT_ORE, 2, -1, 0, IT_DELAY, 1 },
+			{ IT_SHARD, 1, IT_CRYSTAL, 1, IT_HERB, 1, IT_ELIXIR, 2 },
+		};
+		static const int nm[IT_COUNT] = { TX_IT_ORE, TX_IT_HERB, TX_IT_CRYSTAL, TX_IT_SHARD, TX_IT_ELIXIR, TX_IT_MIGHT, TX_IT_DELAY };
+		for (int i = 0; i < IT_COUNT; i++) {
+			wchar_t row[96];
+			swprintf_s(row, L"%s  %d", TT(nm[i]), m_save.itemN[i]);
+			m_r.HudText(row, x + U(24) + (i % 2) * U(280), yy + (i / 2) * U(24), U(16), RGBA8(230, 230, 240), 0, 0);
+		}
+		yy += U(100);
+		for (int r = 0; r < 4; r++) {
+			const Rec& rc = rec[r];
+			BOOL ok = m_save.itemN[rc.a] >= rc.an && (rc.b < 0 || m_save.itemN[rc.b] >= rc.bn) && (rc.c < 0 || m_save.itemN[rc.c] >= rc.cn);
+			wchar_t row[160];
+			swprintf_s(row, L"%s x%d → %s x%d", TT(nm[rc.a]), rc.an, TT(nm[rc.out]), rc.on);
+			if (Btn(ID_CDX_REC0 + r, x + U(24), yy, w - U(48), U(36), row, ok, FALSE, U(15))) {
+				m_save.itemN[rc.a] -= rc.an;
+				if (rc.b >= 0) m_save.itemN[rc.b] -= rc.bn;
+				if (rc.c >= 0) m_save.itemN[rc.c] -= rc.cn;
+				m_save.itemN[rc.out] += rc.on;
+				TacSfx(TS_CONFIRM);
+				Persist();
+			}
+			yy += U(42);
+		}
+	}
+	if (Btn(ID_CDX_GROW, x + U(340), y + h - U(56), U(150), U(36), TT(TX_CDX_GROW))) { m_codex = 2; }
+	if (Btn(ID_CDX_ALCH, x + U(500), y + h - U(56), U(150), U(36), TT(TX_CDX_ALCH))) { m_codex = 3; }
+	if (Btn(ID_CDX_SKILL, x + U(660), y + h - U(56), U(150), U(36), TT(TX_CDX_SKILL))) { m_codex = 1; m_codexPage = 0; }
+	if (Btn(ID_BASE_CLOSE, x + w - U(180), y + h - U(56), U(150), U(36), TT(TX_BASE_CLOSE))) m_codex = 0;
 }
 
 void Game::DrawBaseUi()
 {
+	if (m_codex) { DrawCodex(); return; }
 	float pw = U(330), ph = (float)m_h - U(40);
 	float x = U(20), y = U(20);
 	Panel(x, y, pw, ph);
@@ -1000,11 +1122,13 @@ void Game::DrawBaseUi()
 	float by = y + U(74);
 	float bw = pw - U(40), bh = U(44), bx = x + U(20);
 	wchar_t st[64];
-	swprintf_s(st, L"%d / 100", m_save.stageSel);
+	swprintf_s(st, L"%d / %d", m_save.stageSel, TAC_STAGE_MAX);
 	int d = Sel(ID_BASE_STAGE, bx, by, bw, U(40), TT(TX_BASE_STAGE), st);
 	if (d) {
-		int mx = min(100, m_save.stageCleared + 1);
-		m_save.stageSel = Clampi(m_save.stageSel + d, 1, mx);
+		int step = m_keyShift ? 100 : 10;
+		if ((GetKeyState(VK_CONTROL) & 0x8000) == 0 && !m_keyShift) step = 1;
+		int mx = min(TAC_STAGE_MAX, m_save.stageCleared + 1);
+		m_save.stageSel = Clampi(m_save.stageSel + d * step, 1, mx);
 	}
 	by += U(46);
 	wchar_t cl[64];
@@ -1018,7 +1142,9 @@ void Game::DrawBaseUi()
 	by += bh + U(8);
 	if (Btn(ID_BASE_CREATE, bx, by, bw, bh, TT(TX_BASE_CREATE), RosterCount() < MAX_ROSTER)) { EnterCreate(-1); return; }
 	by += bh + U(8);
-	if (Btn(ID_BASE_EVOLVE, bx, by, bw, bh, TT(TX_BASE_EVOLVE), RosterCount() > 1)) { EnterEvolve(); return; }
+	if (Btn(ID_BASE_EVOLVE, bx, by, bw, bh, TT(TX_BASE_EVOLVE), RosterCount() > 0)) { EnterEvolve(); return; }
+	by += bh + U(8);
+	if (Btn(ID_BASE_CODEX, bx, by, bw, bh, TT(TX_BASE_CODEX))) { m_codex = 1; m_codexPage = 0; return; }
 	by += bh + U(18);
 	static const int qtx[3] = { TX_SET_Q_LOW, TX_SET_Q_STD, TX_SET_Q_HIGH };
 	if (int q = Sel(ID_BASE_QUALITY, bx, by, bw, U(36), TT(TX_SET_QUALITY), TT(qtx[Clampi(m_save.quality, 0, 2)]))) {
@@ -1136,7 +1262,7 @@ void Game::DrawCreate3D()
 	dp.outline = .01f;
 	dp.rim = .55f;
 	ActorDraw(m_r, m_lib, a, ActorWorld(a, pos + v3(0, a.hover + sinf(m_time * 2.f) * .03f * (a.hover > 0), 0), PI + m_previewYaw), dp, m_time);
-	m_r.DrawParticles(m_parts);
+	m_r.DrawParticles(m_parts.data(), m_parts.size());
 }
 
 void Game::DrawCreateUi()
@@ -1184,7 +1310,7 @@ void Game::DrawCreateUi()
 		if (int d = Sel(ID_CR_CLASS, bx, yy, bw, rh, TT(TX_CR_CLASS), ClassName(m_edit.cls))) {
 			ci = (ci + d + n) % n;
 			m_edit.cls = lst[ci];
-			static const int bodyFor[C_PLAYER_COUNT] = { B_KNIGHT, B_BARBARIAN, B_ROGUE, B_ROGUE_HOOD, B_MAGE, B_MAGE };
+			static const int bodyFor[6] = { B_KNIGHT, B_BARBARIAN, B_ROGUE, B_ROGUE_HOOD, B_MAGE, B_MAGE };
 			if (m_edit.cls < 6) m_edit.body = bodyFor[m_edit.cls];
 			changed = TRUE;
 		}
@@ -1576,7 +1702,7 @@ void Game::DrawResultUi()
 	float bw = U(200);
 	if (m_victory && m_battleStage < 100) {
 		if (Btn(ID_RS_NEXT, x + w * .5f - bw * 1.5f - U(12), by, bw, U(42), TT(TX_BT_NEXT), PartyCount() > 0, FALSE, U(17), RGBA8(170, 60, 50, 240))) {
-			m_save.stageSel = Clampi(m_battleStage + 1, 1, min(100, m_save.stageCleared + 1));
+			m_save.stageSel = Clampi(m_battleStage + 1, 1, min(TAC_STAGE_MAX, m_save.stageCleared + 1));
 			StartBattle(m_save.stageSel);
 			return;
 		}

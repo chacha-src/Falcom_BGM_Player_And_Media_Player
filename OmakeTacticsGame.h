@@ -3,7 +3,6 @@
 
 #include "OmakeTacticsModels.h"
 #include "OmakeTacticsText.h"
-#include <vector>
 
 namespace otac {
 
@@ -51,7 +50,7 @@ struct SeqStep {
 };
 
 enum Phase {
-	PH_NONE, PH_INTRO, PH_NEXT, PH_P_MOVE, PH_MOVING, PH_P_CMD, PH_P_SKILLS, PH_P_TARGET, PH_P_SKILLTARGET,
+	PH_NONE, PH_INTRO, PH_NEXT, PH_P_MOVE, PH_MOVING, PH_P_CMD, PH_P_SKILLS, PH_P_TARGET, PH_P_SKILLTARGET, PH_P_SHOVE,
 	PH_ACTION, PH_E_SHOW, PH_E_MOVE, PH_END, PH_LEVELUP, PH_OVER, PH_MENU
 };
 
@@ -70,6 +69,7 @@ public:
 	BOOL Init(HWND view, int w, int h);
 	void Shutdown();
 	void Resize(int w, int h);
+	void RefreshSurface();
 	void Tick(float dt);
 	BOOL WantsClose() const { return m_wantClose; }
 	void ClearClose() { m_wantClose = FALSE; }
@@ -123,6 +123,7 @@ private:
 	void BuildShowcase();
 	void UpdateBase(float dt);
 	void DrawBaseUi();
+	void DrawCodex();
 	void DrawShowcase3D();
 	int PartyCount() const;
 	int RosterCount() const;
@@ -222,10 +223,10 @@ private:
 	int m_downX, m_downY;
 	BOOL m_click, m_rclick;
 	int m_clickX, m_clickY;
-	BOOL m_dragRot, m_dragPan;
+	BOOL m_dragRot, m_dragPan, m_downUi;
 	int m_dragLastX, m_dragLastY;
 	float m_dragDist;
-	std::vector<UiBtn> m_btns, m_btnsPrev;
+	Fix<UiBtn, 96> m_btns, m_btnsPrev;
 	int m_focusId, m_activateId;
 	BOOL m_navMode;
 	int m_selDelta;     // フォーカス中セレクタの左右入力
@@ -236,6 +237,10 @@ private:
 	int m_padDirPrev;
 	BOOL m_fastFwd;
 	BOOL m_showHelp;
+	int m_codex;             // 0=閉 1=スキル 2=成長
+	int m_codexPage;
+	int m_skillPage;
+	BOOL m_ult;
 	int m_confirmDelete;
 
 	// カメラ
@@ -246,9 +251,9 @@ private:
 	V3 m_eye;
 
 	// 共通演出
-	std::vector<Particle> m_parts;
-	std::vector<Popup> m_popups;
-	std::vector<Banner> m_banners;
+	Fix<Particle, 4096> m_parts;
+	Fix<Popup, 64> m_popups;
+	Fix<Banner, 12> m_banners;
 
 	// ポートレート
 	int m_portraitKey[Renderer::PORTRAIT_N];
@@ -299,7 +304,7 @@ private:
 	int m_target;
 	BYTE m_ovMove[MAPN][MAPN];
 	BYTE m_ovAtk[MAPN][MAPN];
-	std::vector<VtxS> m_ovQuads;
+	Fix<VtxS, 12288> m_ovQuads;
 	BOOL m_ovDirty;
 	int m_path[MAPN * 4];
 	int m_pathN;
@@ -331,7 +336,7 @@ private:
 	int m_cutA, m_cutD;
 	V3 m_cutPosA, m_cutPosD;
 	float m_flashWhite;
-	std::vector<Popup> m_deferPopups;
+	Fix<Popup, 64> m_deferPopups;
 	int m_expGain[MAX_UNITS];
 	LevelUpInfo m_lvq[MAX_PARTY * 4];
 	int m_lvqN, m_lvqCur;

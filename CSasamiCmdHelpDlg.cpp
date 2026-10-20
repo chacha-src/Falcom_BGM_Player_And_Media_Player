@@ -711,7 +711,12 @@ void CSasamiCmdHelpDlg::PaintChapter(CDC& dc, int chapter, int maxTextW, int& ou
 		y = SchDrawSyncFlowDiagram(dc, L, y, maxTextW - L * 2, lh);
 		y = SchTitle(dc, boldFont, L, titleLh, y, L"ショートカット");
 		y = SchDrawCmd(dc, accentFont, L, y, lh, L"Delete / Backspace", L"… 選択音符・マーク削除。");
-		y = SchDrawCmd(dc, accentFont, L, y, lh, L"Ctrl+Z / Y", L"… Undo / Redo（譜面）。");
+		y = SchDrawCmd(dc, accentFont, L, y, lh, L"Ctrl+Z / Y", L"… Undo / Redo（譜面・ロール共通、200 段）。");
+		y = SchDrawCmd(dc, accentFont, L, y, lh, L"Ctrl+↑ / ↓", L"… 選択を半音移調（ロールは Shift でオクターブ）。");
+		y = SchDrawCmd(dc, accentFont, L, y, lh, L"Ctrl+← / →", L"… 選択の音価を ½ / ×2。");
+		y = SchDrawCmd(dc, accentFont, L, y, lh, L"Q / Shift+Q", L"… クオンタイズ（配置音価の格子へ。Shift で長さも）。選択が無ければ現在パート全体。");
+		y = SchDrawCmd(dc, accentFont, L, y, lh, L"M / S チップ", L"… トラック欄でミュート／ソロ。Ctrl+S で単独ソロ。");
+		y = SchDrawCmd(dc, accentFont, L, y, lh, L"鍵盤 STEP", L"… ソフト鍵盤からマーカー位置へステップ入力。Space 休符、BS 戻る。");
 		y = SchDrawCmd(dc, accentFont, L, y, lh, L"マウスホイール", L"… 譜面スクロール（縦）。");
 		y = SchTitle(dc, boldFont, L, titleLh, y, L"出力形式（再掲）");
 		{
@@ -781,7 +786,12 @@ void CSasamiCmdHelpDlg::CopyChapterText(int chapter)
 		add(L"FM parts #1-10, Voice editor, Save As FPY/FPY2, Text sync.");
 	} else if (chapter == kTabScore3) {
 		add(L"[Score3 — sync & shortcuts]");
-		add(L"Text <-> Score sync, Delete/Backspace, Ctrl+Z/Y.");
+		add(L"Text <-> Score sync, Delete/Backspace, Ctrl+Z/Y (200 steps).");
+		cmd(L"Ctrl+Up/Down", L"transpose selection (roll: Shift = octave)");
+		cmd(L"Ctrl+Left/Right", L"halve / double selected durations");
+		cmd(L"Q / Shift+Q", L"quantize start (Shift: also length); whole part if nothing selected");
+		cmd(L"M / S chips", L"mute / solo in track column (Ctrl+S = exclusive solo)");
+		cmd(L"Keyboard STEP", L"step-enter from soft keyboard; Space = rest, BS = back");
 		add(L"See Common tab for output formats.");
 	}
 

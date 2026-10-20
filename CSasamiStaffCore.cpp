@@ -3108,6 +3108,12 @@ static void ScStaffLaneFillColors(int toneCfg, int excUsed, COLORREF* toneBg, CO
 	}
 }
 
+void ScStaffMuteSoloRects(const CRect& trackRc, int rowTop, CRect* mRc, CRect* sRc)
+{
+	if (mRc) mRc->SetRect(trackRc.left + 134, rowTop + 1, trackRc.left + 154, rowTop + 16);
+	if (sRc) sRc->SetRect(trackRc.left + 157, rowTop + 1, trackRc.left + 177, rowTop + 16);
+}
+
 void ScStaffPaintTracks(CDC& dc, const CRect& rc, const ScStaffUi* u, int curTrack,
 	const ScEvent* ev, int evCount)
 {
@@ -3148,11 +3154,17 @@ void ScStaffPaintTracks(CDC& dc, const CRect& rc, const ScStaffUi* u, int curTra
 		dc.Draw3dRect(clefBox, RGB(160, 120, 40), RGB(160, 120, 40));
 		dc.SetTextColor(RGB(100, 60, 20));
 		dc.DrawText(clefTag, clefBox, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
-		if (u->mute[i] || u->solo[i]) {
-			wchar_t ms[8];
-			_snwprintf_s(ms, _TRUNCATE, L"%s%s", u->mute[i] ? L"M" : L"", u->solo[i] ? L"S" : L"");
-			dc.SetTextColor(RGB(140, 40, 40));
-			dc.TextOut(rc.left + 132, y + 2, ms);
+		{
+			CRect mRc, sRc;
+			ScStaffMuteSoloRects(rc, y, &mRc, &sRc);
+			dc.FillSolidRect(mRc, u->mute[i] ? RGB(230, 90, 60) : RGB(232, 234, 240));
+			dc.Draw3dRect(mRc, RGB(150, 150, 165), RGB(150, 150, 165));
+			dc.SetTextColor(u->mute[i] ? RGB(255, 255, 255) : RGB(120, 120, 135));
+			dc.DrawText(L"M", mRc, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+			dc.FillSolidRect(sRc, u->solo[i] ? RGB(240, 200, 40) : RGB(232, 234, 240));
+			dc.Draw3dRect(sRc, RGB(150, 150, 165), RGB(150, 150, 165));
+			dc.SetTextColor(u->solo[i] ? RGB(60, 40, 0) : RGB(120, 120, 135));
+			dc.DrawText(L"S", sRc, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
 		}
 
 		const int gaugeH = u->visible[i] ? SC_PART_GAUGE_H : 0;
@@ -5530,6 +5542,23 @@ void ScStaffSetChannelViewAll(ScStaffUi* u)
 	if (!u) return;
 	for (int i = 0; i < u->trackCount; i++)
 		u->visible[i] = 1;
+}
+
+int ScStaffHitMuteSolo(const CRect& trackRc, const ScStaffUi* u, CPoint pt, int* outTrack)
+{
+	if (outTrack) *outTrack = -1;
+	if (!u || !trackRc.PtInRect(pt)) return 0;
+	const int tr = ScStaffHitTrack(trackRc, u, pt);
+	if (tr < 0) return 0;
+	const int rowTop = ScStaffTrackRowTop(trackRc, u, tr);
+	if (rowTop < 0) return 0;
+	CRect mRc, sRc;
+	ScStaffMuteSoloRects(trackRc, rowTop, &mRc, &sRc);
+	int hit = 0;
+	if (mRc.PtInRect(pt)) hit = 1;
+	else if (sRc.PtInRect(pt)) hit = 2;
+	if (hit && outTrack) *outTrack = tr;
+	return hit;
 }
 
 int ScStaffHitPartEnable(const CRect& trackRc, const ScStaffUi* u, CPoint pt, int* outTrack)

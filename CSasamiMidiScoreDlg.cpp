@@ -389,9 +389,17 @@ BOOL CSasamiMidiScoreDlg::PreTranslateMessage(MSG* pMsg)
 	if (m_tooltip.GetSafeHwnd())
 		m_tooltip.RelayEvent(pMsg);
 	if (pMsg->message == WM_KEYDOWN) {
-		if (pMsg->wParam == VK_SPACE || pMsg->wParam == VK_HOME) {
+		const int ctrlNow = (GetKeyState(VK_CONTROL) & 0x8000) ? 1 : 0;
+		const int arrow = (pMsg->wParam == VK_UP || pMsg->wParam == VK_DOWN
+			|| pMsg->wParam == VK_LEFT || pMsg->wParam == VK_RIGHT);
+		if (pMsg->wParam == VK_SPACE || pMsg->wParam == VK_HOME
+			|| (!ctrlNow && (pMsg->wParam == 'Q' || pMsg->wParam == 'q'))
+			|| (ctrlNow && arrow)) {
 			CWnd* f = GetFocus();
-			const BOOL inEdit = (f && f->IsKindOf(RUNTIME_CLASS(CEdit)));
+			wchar_t cls[16] = {};
+			if (f) ::GetClassNameW(f->GetSafeHwnd(), cls, 16);
+			const BOOL inEdit = (_wcsicmp(cls, L"Edit") == 0 || _wcsicmp(cls, L"ComboBox") == 0
+				|| _wcsnicmp(cls, L"RichEdit", 8) == 0);
 			if (!inEdit) {
 				OnKeyDown((UINT)pMsg->wParam, 1, 0);
 				return TRUE;
@@ -1891,6 +1899,20 @@ void CSasamiMidiScoreDlg::OnLButtonDown(UINT nFlags, CPoint point)
 			InvalidateRect(m_bodyRc, FALSE);
 			return;
 		}
+		int msTr = -1;
+		const int ms = ScStaffHitMuteSolo(m_trackRc, &m_ui, point, &msTr);
+		if (ms && msTr >= 0) {
+			if (ms == 1) m_ui.mute[msTr] ^= 1;
+			else if (nFlags & MK_CONTROL) {
+				/* Ctrl+S chip = exclusive solo, like most DAWs. */
+				const int was = m_ui.solo[msTr];
+				for (int i = 0; i < 32; i++) m_ui.solo[i] = 0;
+				m_ui.solo[msTr] = was ? 0 : 1;
+			} else m_ui.solo[msTr] ^= 1;
+			ApplyMuteSoloToLive();
+			InvalidateRect(m_trackRc, FALSE);
+			return;
+		}
 		if (zone == SC_GAUGE_CLEF) {
 			m_ui.clef[tr] = (m_ui.clef[tr] + 1) % 4; /* G -> F -> Grand -> Drum */
 			m_curCh = tr;
@@ -2143,6 +2165,13 @@ void CSasamiMidiScoreDlg::OnLButtonDblClk(UINT nFlags, CPoint point)
 	if (capH > 0 && point.y >= 0 && point.y < capH) {
 		CCustomBlurDialogExBase::OnLButtonDblClk(nFlags, point);
 		return;
+	}
+	{
+		int msTr = -1;
+		if (ScStaffHitMuteSolo(m_trackRc, &m_ui, point, &msTr)) {
+			OnLButtonDown(nFlags, point);
+			return;
+		}
 	}
 	int tempoCol = 0, tempoBpm = 0;
 	if (ScStaffHitGlobalTempoBand(m_gridRc, &m_ui, point, &tempoCol, &tempoBpm, m_doc.ev, m_doc.evCount)) {
@@ -3826,7 +3855,7 @@ void CSasamiMidiScoreDlg::OnContextMenu(CWnd* pWnd, CPoint point)
 		ApplyMuteSoloToLive();
 		InvalidateRect(m_trackRc, FALSE);
 	}
-	else if (tr >= 0 && cmd == 9002) { m_ui.solo[tr] ^= 1; InvalidateRect(m_trackRc, FALSE); }
+	else if (tr >= 0 && cmd == 9002) { m_ui.solo[tr] ^= 1; ApplyMuteSoloToLive(); InvalidateRect(m_trackRc, FALSE); }
 	else if (tr >= 0 && cmd == 9003) {
 		if (ScVstShowPartMenu(this, tr + 1, point, &m_doc.bind)) {
 			RefreshProgLabels();
@@ -3985,6 +4014,18 @@ void CSasamiMidiScoreDlg::OnKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags)
 		}
 		return;
 	}
+	if (!ctrl && (nChar == 'Q' || nChar == 'q')) {
+		HistPush();
+		const int n = ScQuantizeNotes(m_doc.ev, m_doc.evCount, &m_ui, m_curCh,
+			ScStaffPlaceQuant(&m_ui), 100, shift);
+		if (n) {
+			RefreshStrip();
+			PushDocToText();
+			InvalidateRect(m_bodyRc, FALSE);
+		}
+		m_status.SetWindowText(ScQuantizeStatusText(shift, n));
+		return;
+	}
 	if (nChar == VK_HOME && !ctrl) {
 		m_ui.markerTick = 0;
 		m_status.SetWindowText(LL14(L"マーカー→0 (Home)。Spaceで先頭から再生。", L"Marker → 0 (Home). Space plays from start.", L"Marqueur → 0 (Home).", L"Marcatore → 0 (Home).", L"Marcador → 0 (Home).", L"마커→0 (Home).", L"标记→0 (Home)。", L"علامة → 0.", L"Маркер → 0.", L"Markierung → 0.", L"Marcador → 0.", L"Markering → 0.", L"Znacznik → 0.", L"İşaret → 0."));
@@ -4128,6 +4169,7 @@ void CSasamiMidiScoreDlg::OnDestroy()
 	KillTimer(9122);
 	m_ui.previewActive = 0;
 	ScScoreMidiInShutdown(&m_midiIn);
+	ScSoftKeyDetach(this);
 	CCustomBlurDialogExBase::OnDestroy();
 }
 void CSasamiMidiScoreDlg::PostNcDestroy()
@@ -4315,13 +4357,61 @@ void CSasamiMidiScoreDlg::SetStripCcAtTick(int kind, uint32_t tick, int value0to
 	ScStaffApplyStripToDocMidi(&m_doc, m_curCh, &m_ui);
 }
 
-LRESULT CSasamiMidiScoreDlg::OnScoreMidi(WPARAM w, LPARAM)
+LRESULT CSasamiMidiScoreDlg::OnScoreMidi(WPARAM w, LPARAM l)
 {
 	const DWORD msg = (DWORD)w;
 	const int st = (int)(msg & 0xF0);
 	const int data1 = (int)((msg >> 8) & 0xFF);
 	const int data2 = (int)((msg >> 16) & 0xFF);
 	const int part = m_curCh + 1;
+	const int softStep = (int)l;
+	if (softStep) {
+		ScSoftKeySetPart(m_curCh);
+		const int dur = m_ui.placeDur > 0 ? m_ui.placeDur : SC_PPQN;
+		if (softStep == SC_SOFTKEY_STEP_REST) {
+			m_ui.markerTick += (uint32_t)dur;
+		} else if (softStep == SC_SOFTKEY_STEP_BACK) {
+			const uint32_t back = m_ui.markerTick >= (uint32_t)dur ? m_ui.markerTick - (uint32_t)dur : 0;
+			HistPush();
+			ScStaffSelClear(&m_ui);
+			int n = 0;
+			for (int i = 0; i < m_doc.evCount; i++) {
+				const ScEvent& e = m_doc.ev[i];
+				if (e.kind == SC_EV_NOTE && e.ch == (uint8_t)m_curCh && e.tick == back) continue;
+				m_doc.ev[n++] = e;
+			}
+			m_doc.evCount = n;
+			m_ui.markerTick = back;
+			RefreshStrip();
+			PushDocToText();
+		} else if (softStep == SC_SOFTKEY_STEP_NOTE && st == 0x90 && data2 > 0) {
+			HistPush();
+			if (m_ui.chordMode && m_ui.chordVoices >= 2) {
+				ScChordPlaceAt(m_doc.ev, &m_doc.evCount, SC_EV_MAX, m_curCh,
+					m_ui.markerTick, data1, dur, data2, 100, m_ui.chordType, m_ui.chordVoices,
+					SC_EV_NOTE, 0);
+			} else {
+				ScMidiAddNote(&m_doc, m_ui.markerTick, m_curCh, data1, dur, data2);
+			}
+			m_ui.markerTick += (uint32_t)dur;
+			VstLiveAuditionNote(part, data1, data2, 200);
+			RefreshStrip();
+			PushDocToText();
+		}
+		{
+			const int pxBeat = m_ui.pxBeat > 0 ? m_ui.pxBeat : SC_PX_BEAT_DEFAULT;
+			const int margin = ScStaffClefMarginPx(&m_ui, m_doc.ev, m_doc.evCount);
+			const int x = (int)((m_ui.markerTick * (uint32_t)pxBeat) / SC_PPQN) + margin;
+			const int viewW = m_gridRc.Width();
+			if (viewW > 80 && (x < m_ui.scrollX + margin || x > m_ui.scrollX + viewW - 40)) {
+				m_ui.scrollX = max(0, x - viewW / 3);
+				UpdateScrollBars();
+			}
+		}
+		InvalidateRect(m_bodyRc, FALSE);
+		if (m_rollRc.Width() > 0) InvalidateRect(m_rollRc, FALSE);
+		return 0;
+	}
 
 	if (st == 0xB0) {
 		const int sk = ScStaffStripKindFromCc(data1);
@@ -4771,7 +4861,7 @@ void CSasamiMidiScoreDlg::OnBnClickedPatt()
 
 void CSasamiMidiScoreDlg::OnBnClickedKey()
 {
-	ScSoftKeyOpen(this);
+	ScSoftKeyOpen(this, this, m_curCh);
 }
 
 void CSasamiMidiScoreDlg::OnBnClickedRoll()

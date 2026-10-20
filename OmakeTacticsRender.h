@@ -190,8 +190,8 @@ public:
 	void DrawAttach(const Attach& a, const Pose& p, int joint, const M4& world, const DrawParams& dp, const M4* extra = NULL);
 	void DrawTerrain();
 	void DrawWater();
-	void DrawOverlayQuads(const std::vector<VtxS>& q, int cursorStyle);
-	void DrawParticles(const std::vector<Particle>& ps);
+	void DrawOverlayQuads(const VtxS* q, int n, int cursorStyle);
+	void DrawParticles(const Particle* ps, int n);
 	void DrawRibbon(const std::vector<VtxP>& v);
 
 	// 地形
@@ -220,6 +220,7 @@ public:
 	void Present();
 	void EndFrameTextGc();
 	BOOL FrameReady();             // 待機オブジェクト（ブロックしない）
+	BOOL RefreshSurface();         // 表示後にスワップチェインを付け直す
 	BOOL DeviceLost() const { return m_lost; }
 
 	BOOL ProjectToScreen(V3 p, float& sx, float& sy) const;
@@ -250,6 +251,7 @@ private:
 	HWND m_hwnd;
 	HANDLE m_wait;
 	BOOL m_lost;
+	BOOL m_presented;
 	int m_w, m_h;
 	int m_quality;
 	int m_msaa;
@@ -344,7 +346,7 @@ private:
 	M4 m_lightVP;
 
 	// HUD
-	std::vector<VtxH> m_hud;
+	Fix<VtxH, 24576> m_hud;
 	ID3D11ShaderResourceView* m_hudSrv;
 	std::map<std::wstring, TextSprite> m_text;
 	BOOL m_inPortrait;

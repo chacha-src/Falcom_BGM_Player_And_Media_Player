@@ -370,7 +370,10 @@ void COmakeTacticsDlg::OnSize(UINT nType, int cx, int cy)
 void COmakeTacticsDlg::OnShowWindow(BOOL bShow, UINT nStatus)
 {
 	CCustomBlurDialogBase::OnShowWindow(bShow, nStatus);
-	if (bShow) LayoutView();
+	if (bShow) {
+		LayoutView();
+		if (m_gameOk) m_game.RefreshSurface();
+	}
 }
 
 void COmakeTacticsDlg::OnGetMinMaxInfo(MINMAXINFO* mmi)
@@ -383,6 +386,11 @@ void COmakeTacticsDlg::OnGetMinMaxInfo(MINMAXINFO* mmi)
 void COmakeTacticsDlg::OnActivate(UINT nState, CWnd* pWndOther, BOOL bMinimized)
 {
 	CCustomBlurDialogBase::OnActivate(nState, pWndOther, bMinimized);
+	if (nState != WA_INACTIVE && !bMinimized && m_gameOk && !m_swapShown) {
+		m_swapShown = TRUE;
+		LayoutView();
+		m_game.RefreshSurface();
+	}
 	if (nState != WA_INACTIVE && m_view.GetSafeHwnd()) m_view.SetFocus();
 	if (nState == WA_INACTIVE && m_gameOk) {
 		static const int keys[] = { VK_SHIFT, VK_CONTROL, VK_LEFT, VK_RIGHT, VK_UP, VK_DOWN, 'W', 'A', 'S', 'D' };
