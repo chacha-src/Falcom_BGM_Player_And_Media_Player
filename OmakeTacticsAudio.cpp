@@ -57,6 +57,9 @@ static int s_pausedMain;
 static DWORD s_cursorAt;
 static int s_bgmPct = 6;
 static int s_sePct = 8;
+static wchar_t s_bgmPath[MAX_PATH];
+static int s_bgmScene = -1;
+static int s_bgmFade;
 
 static int SeDb(int pct)
 {
@@ -263,16 +266,61 @@ static void TacReadLoop(OggVorbis_File& vf)
 	if (s_loopB <= s_loopA) s_loopB = ov_pcm_total(&vf, -1);
 }
 
-static int TacOpenBgm()
+static int TacOggOk(const wchar_t* path)
 {
-	s_bgm = 0;
-	s_bhave = s_bpos = 0;
+	if (!path || !path[0]) return 0;
+	WIN32_FILE_ATTRIBUTE_DATA a;
+	if (!GetFileAttributesExW(path, GetFileExInfoStandard, &a)) return 0;
+	if (a.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) return 0;
+	ULONGLONG sz = ((ULONGLONG)a.nFileSizeHigh << 32) | a.nFileSizeLow;
+	if (sz < 256) return 0;
+	FILE* fp = _wfopen(path, L"rb");
+	if (!fp) return 0;
+	unsigned char m[4] = {};
+	size_t n = fread(m, 1, 4, fp);
+	fclose(fp);
+	return n == 4 && m[0] == 'O' && m[1] == 'g' && m[2] == 'g' && m[3] == 'S';
+}
+
+// exe\tacticsbgm を作り、旧 exe 直下の tactics.ogg があればここへ移す。
+static int TacBgmDir(wchar_t* dir, int cch)
+{
 	wchar_t exe[MAX_PATH];
 	if (!GetModuleFileNameW(NULL, exe, MAX_PATH)) return 0;
 	wchar_t* sl = wcsrchr(exe, L'\\');
 	if (!sl) return 0;
-	wcscpy_s(sl + 1, MAX_PATH - (int)(sl + 1 - exe), L"tactics.ogg");
-	FILE* fp = _wfopen(exe, L"rb");
+	*sl = 0;
+	if (swprintf_s(dir, cch, L"%s\\tacticsbgm", exe) < 0) return 0;
+	CreateDirectoryW(dir, NULL);
+	wchar_t oldp[MAX_PATH], neu[MAX_PATH];
+	swprintf_s(oldp, L"%s\\tactics.ogg", exe);
+	swprintf_s(neu, L"%s\\tactics.ogg", dir);
+	if (!TacOggOk(neu) && TacOggOk(oldp)) {
+		DeleteFileW(neu);
+		if (!MoveFileW(oldp, neu)) {
+			if (CopyFileW(oldp, neu, FALSE))
+				DeleteFileW(oldp);
+		}
+	}
+	return 1;
+}
+
+static const wchar_t* TacBgmFile(int scene)
+{
+	switch (scene) {
+	case TAC_BGM_GAME: return L"tacticsgame.ogg";
+	case TAC_BGM_WIN: return L"tacticsgamewin.ogg";
+	case TAC_BGM_SHOP: return L"tacticsshop.ogg";
+	case TAC_BGM_MAKE: return L"tacticsmake.ogg";
+	default: return L"tactics.ogg";
+	}
+}
+
+static int TacOpenBgmPath(const wchar_t* path)
+{
+	s_bgm = 0;
+	s_bhave = s_bpos = 0;
+	FILE* fp = _wfopen(path, L"rb");
 	if (!fp) return 0;
 	ov_callbacks cb;
 	cb.read_func = BgmRead;
@@ -293,12 +341,91 @@ static int TacOpenBgm()
 	return 1;
 }
 
+static void TacCloseBgm();
+static void TacPauseMain(int pause);
+
+// 再生位置の直後だけ残し、先読みしてある旧曲を消す。効果音バッファは触らない。
+static void TacDropQueuedBgm()
+{
+	if (!s_buf || !s_bytes || !s_started) return;
+	DWORD play = 0, wrt = 0;
+	if (FAILED(s_buf->GetCurrentPosition(&play, &wrt))) return;
+	DWORD lead = (DWORD)(TAC_RATE * 4 / 30);
+	lead &= ~3u;
+	if (lead < 64 || lead >= s_bytes) return;
+	void* p1 = NULL; void* p2 = NULL; DWORD n1 = 0, n2 = 0;
+	if (SUCCEEDED(s_buf->Lock(play, lead, &p1, &n1, &p2, &n2, 0))) {
+		int sample = 0;
+		const int total = (int)(lead / 2);
+		short* parts[2] = { (short*)p1, (short*)p2 };
+		DWORD ns[2] = { n1, n2 };
+		for (int part = 0; part < 2; part++) {
+			if (!parts[part] || ns[part] < 2) continue;
+			int count = (int)(ns[part] / 2);
+			for (int i = 0; i < count; i++) {
+				float g = total > 1 ? (float)(total - sample) / (float)total : 0.f;
+				if (g < 0.f) g = 0.f;
+				parts[part][i] = (short)((float)parts[part][i] * g);
+				sample++;
+			}
+		}
+		s_buf->Unlock(p1, n1, p2, n2);
+	}
+	DWORD start = (play + lead) % s_bytes;
+	DWORD silence = (s_bytes - lead) & ~3u;
+	p1 = p2 = NULL; n1 = n2 = 0;
+	if (silence >= 4 && SUCCEEDED(s_buf->Lock(start, silence, &p1, &n1, &p2, &n2, 0))) {
+		if (p1 && n1) memset(p1, 0, n1);
+		if (p2 && n2) memset(p2, 0, n2);
+		s_buf->Unlock(p1, n1, p2, n2);
+	}
+	s_write = start;
+	s_bgmFade = TAC_RATE / 40;
+}
+
+void TacBgmScene(int scene)
+{
+	if (scene < 0 || scene >= TAC_BGM_N) scene = TAC_BGM_HUB;
+	if (scene == s_bgmScene) return;
+	wchar_t dir[MAX_PATH];
+	if (!TacBgmDir(dir, MAX_PATH)) return;
+	wchar_t want[MAX_PATH], hub[MAX_PATH];
+	swprintf_s(want, L"%s\\%s", dir, TacBgmFile(scene));
+	swprintf_s(hub, L"%s\\tactics.ogg", dir);
+	const wchar_t* use = want;
+	if (scene != TAC_BGM_HUB && !TacOggOk(want))
+		use = hub;
+	if (!TacOggOk(use)) {
+		if (s_bgm) TacCloseBgm();
+		s_bgmPath[0] = 0;
+		s_bgmScene = scene;
+		return;
+	}
+	if (s_bgm && _wcsicmp(s_bgmPath, use) == 0) {
+		s_bgmScene = scene;
+		return;
+	}
+	int had = s_bgm;
+	TacCloseBgm();
+	if (!TacOpenBgmPath(use)) {
+		s_bgmPath[0] = 0;
+		s_bgmScene = scene;
+		return;
+	}
+	wcscpy_s(s_bgmPath, use);
+	s_bgmScene = scene;
+	if (had) TacDropQueuedBgm();
+	if (!had && s_started) TacPauseMain(1);
+}
+
 static void TacCloseBgm()
 {
 	if (s_bgm) ov_clear(&s_vf);
 	s_bgm = 0;
 	s_bhave = s_bpos = 0;
 	s_bPrimed = 0;
+	s_bgmPath[0] = 0;
+	s_bgmScene = -1;
 }
 
 static void TacPauseMain(int pause)
@@ -415,11 +542,19 @@ static void TacMix(short* dst, int frames)
 {
 	for (int i = 0; i < frames * 2; i++) dst[i] = 0;
 	if (s_bgm) {
-		const float g = 0.07f * (float)s_bgmPct;
+		const float g0 = 0.07f * (float)s_bgmPct;
+		const int fadeN = TAC_RATE / 40;
 		short holdL = 0, holdR = 0;
 		for (int f = 0; f < frames; f++) {
 			short L = holdL, R = holdR;
 			if (TacPullBgmOut(L, R)) { holdL = L; holdR = R; }
+			float g = g0;
+			if (s_bgmFade > 0 && fadeN > 0) {
+				float in = 1.f - (float)s_bgmFade / (float)fadeN;
+				if (in < 0.f) in = 0.f;
+				g *= in;
+				s_bgmFade--;
+			}
 			int l = (int)dst[f * 2] + (int)(L * g);
 			int r = (int)dst[f * 2 + 1] + (int)(R * g);
 			if (l > 32767) l = 32767; if (l < -32768) l = -32768;
@@ -433,7 +568,8 @@ static void TacMix(short* dst, int frames)
 void TacAudioStart(void* hwnd)
 {
 	TacLoadPack();
-	int bgm = TacOpenBgm();
+	TacBgmScene(TAC_BGM_HUB);
+	int bgm = s_bgm;
 	if (!TacEnsureBuf((HWND)hwnd)) {
 		if (bgm) TacCloseBgm();
 		return;

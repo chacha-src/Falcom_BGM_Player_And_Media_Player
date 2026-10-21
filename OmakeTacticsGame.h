@@ -71,6 +71,7 @@ public:
 	void Resize(int w, int h);
 	void RefreshSurface();
 	void Tick(float dt);
+	void SyncBgm();
 	BOOL WantsClose() const { return m_wantClose; }
 	void ClearClose() { m_wantClose = FALSE; }
 	SaveData& Save() { return m_save; }
@@ -95,6 +96,8 @@ private:
 	void RenderActorPortrait(int slot, Actor& a, DWORD bg0, DWORD bg1);
 	void InvalidatePortraits();
 	void DrawPortrait(int slot, float x, float y, float s, DWORD frame);
+	int RosterPortrait(int roster) const;
+	void PrepareMenuPortraits();
 	void ShadowAndMain(int scene);
 	void DrawScene(int scene);
 
@@ -133,11 +136,13 @@ private:
 	void UpdateBase(float dt);
 	void DrawBaseUi();
 	void DrawShop();
-	float DrawSoundOpts(float x, float y, float w);
+	float DrawSoundOpts(float x, float y, float w, float k);
 	void ApplyAudio();
 	void DrawCodex();
 	void DrawShowcase3D();
 	int PartyCount() const;
+	int PartyCap() const;
+	int RosterCap() const;
 	int RosterCount() const;
 
 	// キャラクタ作成
@@ -359,6 +364,12 @@ private:
 	TacLog m_log[24];
 	int m_logN;
 	float m_orderBottom;
+	int m_ordSnap[8];
+	int m_ordFrom[8];
+	int m_ordSnapN;
+	int m_ordLeave;
+	float m_ordAnimT;
+	int m_rosterPage;
 	int m_cutStage;      // 0=覆う 1=技名 2=攻防 3=覆う 4=マップへ
 	float m_cutStageT;
 	int m_cutA, m_cutD;

@@ -5473,6 +5473,12 @@ LRESULT CAnalyzerDlg::OnRefreshChildren(WPARAM, LPARAM)
 
 void CAnalyzerDlg::OnShowWindow(BOOL bShow, UINT nStatus)
 {
+	// 所有者の最小化/復帰は、メインがこのスレッドの完了を待っている最中に届く。
+	if (nStatus == SW_PARENTCLOSING || nStatus == SW_PARENTOPENING) {
+		if (bShow)
+			CCC_InvalidateCaptionBar(m_hWnd);
+		return;
+	}
 	CCustomBlurDialogExBase::OnShowWindow(bShow, nStatus);
 	if (bShow)
 		CCC_InvalidateCaptionBar(m_hWnd);
@@ -5486,13 +5492,14 @@ void CAnalyzerDlg::OnShowWindow(BOOL bShow, UINT nStatus)
 
 BOOL CAnalyzerDlg::Create(UINT nIDTemplate, CWnd* pParentWnd)
 {
-	// 描画・ティックをメイン UI(timerp/バナー)と分けるため、窓は専用 UI スレッドで作る。
-	// 親をメイン窓にすると、操作のたびに描画スレッドへ同期メッセージが入り落ちる。
+	// 生成と OnInitDialog は専用 UI スレッド。初期化後に所有者だけメインへ付ける。
+	// イコライザーと同じ所有なので、復帰とアクティブ化で前面へ連れてこられる。
 	BOOL ok = FALSE;
 	VizUi::Invoke(VIZ_UI_ANALYZER, [&]() {
 		CWnd* owner = VizUi::ThreadOwner(VIZ_UI_ANALYZER);
 		ok = CCustomBlurDialogExBase::Create(nIDTemplate, owner);
-		(void)pParentWnd;
+		if (ok)
+			VizUi::AttachAppOwner(m_hWnd, pParentWnd ? pParentWnd->GetSafeHwnd() : NULL);
 	});
 	return ok;
 }

@@ -210,6 +210,22 @@ void Invoke(int slot, const std::function<void()>& fn)
 	::SendMessageW(sink, kInvokeMsg, 0, reinterpret_cast<LPARAM>(&fn));
 }
 
+void AttachAppOwner(HWND hwnd, HWND appOwner)
+{
+	if (!hwnd || !appOwner || !::IsWindow(hwnd) || !::IsWindow(appOwner))
+		return;
+	if (::GetWindowThreadProcessId(hwnd, NULL) != ::GetCurrentThreadId())
+		return;
+	if ((::GetWindowLongW(hwnd, GWL_STYLE) & WS_CHILD) != 0)
+		return;
+	if (::GetWindowLongPtrW(hwnd, GWLP_HWNDPARENT) == (LONG_PTR)appOwner)
+		return;
+	::SetWindowLongPtrW(hwnd, GWLP_HWNDPARENT, (LONG_PTR)appOwner);
+	// 所有者キャッシュを更新しないと、アクティブ化で前面へ連れてこない。
+	::SetWindowPos(hwnd, NULL, 0, 0, 0, 0,
+		SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+}
+
 CWnd* ThreadOwner(int slot)
 {
 	if (slot < 0 || slot >= VIZ_UI_SLOTS)

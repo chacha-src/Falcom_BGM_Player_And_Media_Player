@@ -21,11 +21,13 @@ namespace VizUi {
 	// Runs fn on the slot's UI thread and waits (starts the thread on first use).
 	// Falls back to running fn on the caller when the thread cannot be started.
 	void Invoke(int slot, const std::function<void()>& fn);
-	// Hidden popup on the slot thread. Use this as the dialog owner.
-	// A main-thread HWND must not own a viz-thread window: activation and
-	// song changes then SendMessage into the paint stack and crash.
-	// Call only from that slot's thread (inside Invoke). NULL if unavailable.
+	// Hidden popup on the slot thread. Create the dialog with this owner so
+	// OnInitDialog stays on the viz thread. Call only from that thread.
 	CWnd* ThreadOwner(int slot);
+	// After Create returns: owner becomes the app window (same as the equalizer).
+	// The window procedure stays on the viz thread. Activation then lifts this
+	// window with the app. Call only from the viz thread, before Show.
+	void AttachAppOwner(HWND hwnd, HWND appOwner);
 	// hwnd lives on a viz thread other than the caller: run fn there, wait, return true.
 	// Otherwise returns false without running fn.
 	bool MarshalToOwner(HWND hwnd, const std::function<void()>& fn);

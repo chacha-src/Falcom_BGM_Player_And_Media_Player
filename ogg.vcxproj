@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003" DefaultTargets="Build" ToolsVersion="14.0">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="uni_2026_de|Win32">
@@ -1615,6 +1615,19 @@ if errorlevel 1 exit /b 1</Command>
     <None Include="res\cso\race_pscloud.cso" />
     <None Include="res\cso\race_gsw.cso" />
     <None Include="res\cso\race_vsw.cso" />
+    <None Include="res\cso\tac_psh.cso" />
+    <None Include="res\cso\tac_psm.cso" />
+    <None Include="res\cso\tac_pso.cso" />
+    <None Include="res\cso\tac_psov.cso" />
+    <None Include="res\cso\tac_psp.cso" />
+    <None Include="res\cso\tac_pssky.cso" />
+    <None Include="res\cso\tac_vsh.cso" />
+    <None Include="res\cso\tac_vsk.cso" />
+    <None Include="res\cso\tac_vsp.cso" />
+    <None Include="res\cso\tac_vsq.cso" />
+    <None Include="res\cso\tac_vss.cso" />
+    <None Include="res\tactics\tac_assets.bin" />
+    <None Include="res\tactics\tac_sfx.bin" />
     <None Include="shaders\compile_shaders.cmd" />
     <None Include="shaders\gpu_hex.hlsl" />
     <None Include="shaders\gpu_piano.hlsl" />
@@ -2542,6 +2555,7 @@ if errorlevel 1 exit /b 1</Command>
     <Image Include="res\s3tex\r_water.png" />
     <Image Include="res\s3tex\r_water_d.png" />
     <Image Include="res\s3tex\r_wood.png" />
+    <Image Include="res\ui_icons\tactics.ico" />
     <Image Include="res\ui_score\clef_g.ico" />
     <Image Include="res\ui_score\note_eighth.ico" />
     <Image Include="res\ui_score\note_half.ico" />

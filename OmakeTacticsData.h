@@ -136,7 +136,7 @@ struct Map {
 	int stage;
 	DWORD seed;
 	Cell c[MAPN][MAPN];   // [z][x]
-	int pStartX[5], pStartZ[5];
+	int pStartX[10], pStartZ[10]; // MAX_PARTY と一致。static_assert で固定
 	int eStartX[10], eStartZ[10]; // カメラ用。先頭は最寄りの敵拠点
 	int nP, nE;
 	MapGroup grp[MAX_GROUPS];
@@ -231,7 +231,8 @@ enum SkillEffect { EF_NONE, EF_SLOW, EF_DEFDOWN, EF_POISON, EF_DRAIN, EF_IGNDEF,
 const SkillDef& SkillInfo(int s);
 
 // ---------------- キャラクタ（セーブ対象） ----------------
-enum { MAX_ROSTER = 20, MAX_PARTY = 5, MAX_ENEMY = 640, NAME_LEN = 16 };
+enum { MAX_ROSTER = 100, MAX_PARTY = 10, MAX_ENEMY = 640, NAME_LEN = 16 };
+static_assert(MAX_PARTY == 10, "Map::pStart は 10 枠");
 enum Body { B_KNIGHT, B_BARBARIAN, B_MAGE, B_ROGUE, B_ROGUE_HOOD, B_COUNT };
 enum { HAIR_STYLES = 6, HAIR_COLORS = 10, OUTFIT_COLORS = 10 };
 
@@ -376,7 +377,7 @@ struct Forecast {
 	int fdmg;               // 追撃のダメージ
 };
 void CalcForecast(const Battle& b, int a, int d, int skill, Forecast& f);
-int  ResolveAttack(Battle& b, int a, int d, int skill, Rng& r, Strike* out, int maxOut);
+int  ResolveAttack(Battle& b, int a, int d, int skill, Rng& r, Strike* out, int maxOut, int cx, int cz);
 int  SkillTargets(const Battle& b, int caster, int skill, int cx, int cz, int* out, int maxOut);
 bool SkillUsable(const Battle& b, int ui, int skill);
 int  SkillCastRangeMin(const Unit& u, int skill);
@@ -445,7 +446,10 @@ struct SaveData {
 	int gearN;
 	int gearId[12];            // 所持武具。0 は空。番号は Gear 表の 1 始まり
 	int reserved[4];
+	int partyCap;              // 5..10。店の編成拡張券
+	int rosterCap;             // 20,40,60,80,100。店の名簿の頁
 };
+// version 1 は名簿 20・編成 5 の旧サイズ。version 2 が現行。読込は両方受け、書き出しは 2。
 #pragma pack(pop)
 void SaveDefaults(SaveData& s);
 bool SaveLoad(SaveData& s);

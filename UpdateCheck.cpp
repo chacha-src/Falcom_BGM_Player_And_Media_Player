@@ -27,7 +27,7 @@ static const TCHAR* UPDATE_URL_FALLBACK = _T("https://ppp.oohara.jp/download/ogg
 static const TCHAR* TARGET_EXE_NAME = _T("oggYSEDbgm_uni_avx2.exe");
 static const TCHAR* TARGET_HOST_EXE_NAME = _T("ogghost32.exe");
 static const TCHAR* TARGET_CHM_NAME = _T("oggYSEDbgm_uni_avx2.chm");
-static const TCHAR* TARGET_TAC_OGG = _T("tactics.ogg");
+static const TCHAR* TARGET_TAC_OGG = _T("tactics.ogg"); // 直下にあれば tacticsbgm へ入れる既知名の代表
 static const TCHAR* TARGET_D3D_NAME = _T("d3dcompiler_47.dll");
 
 // 配布 ZIP / 展開 EXE の下限（空・404 HTML・途中切断を弾く）
@@ -875,6 +875,130 @@ static bool ExtractZipToDir(const CString& zipPath, const CString& destDir, cons
 	return bFound;
 }
 
+static bool TacBgmWantedW(const wchar_t* name)
+{
+	if (!name || !name[0]) return false;
+	const wchar_t* file = name;
+	for (const wchar_t* p = name; *p; ++p)
+		if (*p == L'\\' || *p == L'/') file = p + 1;
+	if (!file[0]) return false;
+	const size_t n = wcslen(file);
+	if (n < 5 || _wcsicmp(file + n - 4, L".ogg") != 0) return false;
+	for (const wchar_t* s = name; *s; ++s) {
+		if (_wcsnicmp(s, L"tacticsbgm", 10) != 0) continue;
+		if (s != name && s[-1] != L'\\' && s[-1] != L'/') continue;
+		if (s[10] == L'\\' || s[10] == L'/') return true;
+	}
+	return _wcsicmp(file, TARGET_TAC_OGG) == 0
+		|| _wcsicmp(file, L"tacticsgame.ogg") == 0
+		|| _wcsicmp(file, L"tacticsgamewin.ogg") == 0
+		|| _wcsicmp(file, L"tacticsshop.ogg") == 0
+		|| _wcsicmp(file, L"tacticsmake.ogg") == 0;
+}
+
+static bool WriteTacOggBytes(const CString& dir, const wchar_t* fileOnly, const void* data, size_t sz)
+{
+	if (!fileOnly || !fileOnly[0] || !data || sz < UPDATE_TAC_OGG_MIN_BYTES || sz > 64ull * 1024ull * 1024ull) return false;
+	if (wcschr(fileOnly, L'\\') || wcschr(fileOnly, L'/')) return false;
+	if (memcmp(data, "OggS", 4) != 0) return false;
+	CString out = dir + _T("\\") + CString(fileOnly);
+	DeleteFile(out);
+	CFile outFile;
+	if (!outFile.Open(out, CFile::modeCreate | CFile::modeWrite | CFile::shareExclusive)) return false;
+	bool ok = true;
+	try {
+		outFile.Write(data, (UINT)sz);
+	}
+	catch (CFileException* e) {
+		e->Delete();
+		ok = false;
+	}
+	outFile.Close();
+	if (!ok) DeleteFile(out);
+	return ok;
+}
+
+// 書庫内の tacticsbgm\*.ogg（無ければ直下の既知 ogg）を destDir\tacticsbgm へ出す。無くても更新は成功。
+static void ExtractTacticsBgm(const CString& zipPath, const CString& destDir)
+{
+	CString bgmDir = destDir;
+	if (!bgmDir.IsEmpty() && bgmDir.Right(1) != _T("\\"))
+		bgmDir += _T("\\");
+	bgmDir += _T("tacticsbgm");
+	CreateDirectory(bgmDir, NULL);
+
+	if (SevenZipPathIs7zW(zipPath)) {
+		SevenZipArc a;
+		if (!SevenZipOpenW(&a, zipPath)) return;
+		for (UInt32 i = 0; i < a.db.NumFiles; i++) {
+			if (SzArEx_IsDir(&a.db, i)) continue;
+			wchar_t name[1024] = {};
+			if (!SevenZipFileNameW(&a, i, name, 1024) || !TacBgmWantedW(name)) continue;
+			const wchar_t* file = name;
+			for (const wchar_t* p = name; *p; ++p)
+				if (*p == L'\\' || *p == L'/') file = p + 1;
+			const Byte* data = NULL;
+			size_t sz = 0;
+			if (!SevenZipExtractIndex(&a, i, &data, &sz)) continue;
+			WriteTacOggBytes(bgmDir, file, data, sz);
+		}
+		SevenZipClose(&a);
+		return;
+	}
+
+	zlib_filefunc64_def ffunc;
+#ifdef USEWIN32IOAPI
+	fill_win32_filefunc64W(&ffunc);
+#endif
+	unzFile uf;
+#ifdef USEWIN32IOAPI
+	uf = unzOpen2_64(zipPath, &ffunc);
+#else
+	uf = unzOpen64(CT2A(zipPath));
+#endif
+	if (!uf) return;
+	unz_global_info64 gi;
+	if (unzGetGlobalInfo64(uf, &gi) != UNZ_OK) { unzClose(uf); return; }
+	for (ZPOS64_T i = 0; i < gi.number_entry; i++) {
+		char filename_inzip[1024];
+		unz_file_info64 fi;
+		if (unzGetCurrentFileInfo64(uf, &fi, filename_inzip, sizeof(filename_inzip), NULL, 0, NULL, 0) != UNZ_OK) break;
+		CString full((LPCTSTR)CA2T(filename_inzip, CP_UTF8));
+		if (!TacBgmWantedW(full)) {
+			if ((ZPOS64_T)(i + 1) < gi.number_entry) unzGoToNextFile(uf);
+			continue;
+		}
+		const wchar_t* file = full;
+		for (const wchar_t* p = full; *p; ++p)
+			if (*p == L'\\' || *p == L'/') file = p + 1;
+		if (unzOpenCurrentFile(uf) != UNZ_OK) {
+			if ((ZPOS64_T)(i + 1) < gi.number_entry) unzGoToNextFile(uf);
+			continue;
+		}
+		const ULONGLONG need = fi.uncompressed_size;
+		unsigned char* buf = NULL;
+		bool ok = false;
+		if (need >= UPDATE_TAC_OGG_MIN_BYTES && need <= 64ull * 1024ull * 1024ull) {
+			buf = (unsigned char*)malloc((size_t)need);
+			if (buf) {
+				ULONGLONG got = 0;
+				while (got < need) {
+					int n = unzReadCurrentFile(uf, buf + got, (unsigned)(need - got > 8192 ? 8192 : need - got));
+					if (n < 0) { got = 0; break; }
+					if (n == 0) break;
+					got += (ULONGLONG)n;
+				}
+				ok = got == need;
+			}
+		}
+		unzCloseCurrentFile(uf);
+		if (ok) WriteTacOggBytes(bgmDir, file, buf, (size_t)need);
+		free(buf);
+		if ((ZPOS64_T)(i + 1) < gi.number_entry) unzGoToNextFile(uf);
+	}
+	unzClose(uf);
+}
+
 // 前回の自動更新が成功していればフラグを消し、失敗のままなら true
 static bool UpdateAttemptStillFailed(time_t exeTime)
 {
@@ -960,7 +1084,7 @@ static bool DoManualUpdateToDownloads(const CString& updateUrl, time_t serverTim
 	// ヘルプ CHM は任意（古い ZIP には無い）。あれば一緒に展開
 	ExtractZipToDir(zipPath, destDir, TARGET_CHM_NAME, UPDATE_CHM_MIN_BYTES, false);
 	ExtractZipToDir(zipPath, destDir, TARGET_D3D_NAME, UPDATE_D3D_MIN_BYTES, true);
-	ExtractZipToDir(zipPath, destDir, TARGET_TAC_OGG, UPDATE_TAC_OGG_MIN_BYTES, false);
+	ExtractTacticsBgm(zipPath, destDir);
 	{
 		TCHAR staleHost[MAX_PATH];
 		_stprintf_s(staleHost, _T("%s\\KpiHost64.exe"), destDir);
@@ -996,59 +1120,59 @@ static bool DoManualUpdateToDownloads(const CString& updateUrl, time_t serverTim
 	UpdateBusyAlert(LL14(
 		L"自動更新に失敗したため、更新ファイルを「ダウンロード」フォルダへ展開しました。\n"
 		L"本プログラムを終了し、展開先の oggYSEDbgm_uni_avx2.exe と ogghost32.exe\n"
-		L"（あれば oggYSEDbgm_uni_avx2.chm と tactics.ogg も）をインストールフォルダへ上書きコピーしてください。\n"
+		L"（あれば oggYSEDbgm_uni_avx2.chm と tacticsbgm フォルダも）をインストールフォルダへ上書きコピーしてください。\n"
 		L"（エクスプローラでフォルダを開きました）",
 		L"Automatic update failed, so the update files were extracted to your Downloads folder.\n"
 		L"Please quit this program, then copy oggYSEDbgm_uni_avx2.exe and ogghost32.exe\n"
-		L"(and oggYSEDbgm_uni_avx2.chm and tactics.ogg if present) over the ones in the install folder.\n"
+		L"(and oggYSEDbgm_uni_avx2.chm and the tacticsbgm folder if present) into the install folder.\n"
 		L"(The folder was opened in Explorer.)",
 		L"La mise a jour automatique a echoue ; les fichiers ont ete extraits dans Telechargements.\n"
 		L"Quittez ce programme, puis copiez oggYSEDbgm_uni_avx2.exe et ogghost32.exe\n"
-		L"(et oggYSEDbgm_uni_avx2.chm et tactics.ogg s'ils sont presents) par-dessus ceux du dossier d'installation.\n"
+		L"(et oggYSEDbgm_uni_avx2.chm et le dossier tacticsbgm s'ils sont presents) dans le dossier d'installation.\n"
 		L"(Le dossier a ete ouvert dans l'Explorateur.)",
 		L"Aggiornamento automatico non riuscito; i file sono stati estratti in Download.\n"
 		L"Chiudi questo programma, quindi copia oggYSEDbgm_uni_avx2.exe e ogghost32.exe\n"
-		L"(e oggYSEDbgm_uni_avx2.chm e tactics.ogg se presenti) sopra quelli nella cartella di installazione.\n"
+		L"(e oggYSEDbgm_uni_avx2.chm e la cartella tacticsbgm se presenti) nella cartella di installazione.\n"
 		L"(La cartella e stata aperta in Esplora risorse.)",
 		L"La actualizacion automatica fallo; los archivos se extrajeron en Descargas.\n"
 		L"Cierre este programa y copie oggYSEDbgm_uni_avx2.exe y ogghost32.exe\n"
-		L"(y oggYSEDbgm_uni_avx2.chm y tactics.ogg si existen) sobre los del folder de instalacion.\n"
+		L"(y oggYSEDbgm_uni_avx2.chm y la carpeta tacticsbgm si existen) sobre el folder de instalacion.\n"
 		L"(Se abrio la carpeta en el Explorador.)",
 		L"자동 업데이트에 실패하여 업데이트 파일을 다운로드 폴더에 풀었습니다.\n"
 		L"이 프로그램을 종료한 뒤 oggYSEDbgm_uni_avx2.exe 와 ogghost32.exe\n"
-		L"(있으면 oggYSEDbgm_uni_avx2.chm 과 tactics.ogg 도) 설치 폴더에 덮어쓰기로 복사하세요.\n"
+		L"(있으면 oggYSEDbgm_uni_avx2.chm 과 tacticsbgm 폴더도) 설치 폴더에 덮어쓰기로 복사하세요.\n"
 		L"(탐색기에서 폴더를 열었습니다)",
 		L"自动更新失败，已将更新文件解压到“下载”文件夹。\n"
 		L"请退出本程序，然后将 oggYSEDbgm_uni_avx2.exe 与 ogghost32.exe\n"
-		L"（如有 oggYSEDbgm_uni_avx2.chm 与 tactics.ogg 也一并）覆盖复制到安装文件夹。\n"
+		L"（如有 oggYSEDbgm_uni_avx2.chm 与 tacticsbgm 文件夹也一并）覆盖复制到安装文件夹。\n"
 		L"（已在资源管理器中打开该文件夹）",
 		L"فشل التحديث التلقائي، وتم استخراج ملفات التحديث إلى مجلد التنزيلات.\n"
 		L"يرجى إنهاء هذا البرنامج ثم نسخ oggYSEDbgm_uni_avx2.exe و ogghost32.exe\n"
-		L"(و oggYSEDbgm_uni_avx2.chm و tactics.ogg إن وُجدا) فوق الملفات في مجلد التثبيت.\n"
+		L"(و oggYSEDbgm_uni_avx2.chm ومجلد tacticsbgm إن وُجدا) فوق الملفات في مجلد التثبيت.\n"
 		L"(تم فتح المجلد في المستكشف)",
 		L"Автообновление не удалось; файлы распакованы в папку Загрузки.\n"
 		L"Закройте программу и скопируйте oggYSEDbgm_uni_avx2.exe и ogghost32.exe\n"
-		L"(и oggYSEDbgm_uni_avx2.chm и tactics.ogg при наличии) поверх файлов в папке установки.\n"
+		L"(и oggYSEDbgm_uni_avx2.chm и папку tacticsbgm при наличии) поверх файлов в папке установки.\n"
 		L"(Папка открыта в Проводнике.)",
 		L"Automatisches Update fehlgeschlagen; Dateien wurden nach Downloads entpackt.\n"
 		L"Beenden Sie das Programm und kopieren Sie oggYSEDbgm_uni_avx2.exe und ogghost32.exe\n"
-		L"(sowie oggYSEDbgm_uni_avx2.chm und tactics.ogg falls vorhanden) uber die Dateien im Installationsordner.\n"
+		L"(sowie oggYSEDbgm_uni_avx2.chm und den Ordner tacticsbgm falls vorhanden) uber die Dateien im Installationsordner.\n"
 		L"(Der Ordner wurde im Explorer geoffnet.)",
 		L"A atualizacao automatica falhou; os arquivos foram extraidos em Downloads.\n"
 		L"Encerre este programa e copie oggYSEDbgm_uni_avx2.exe e ogghost32.exe\n"
-		L"(e oggYSEDbgm_uni_avx2.chm e tactics.ogg se houver) sobre os da pasta de instalacao.\n"
+		L"(e oggYSEDbgm_uni_avx2.chm e a pasta tacticsbgm se houver) sobre os da pasta de instalacao.\n"
 		L"(A pasta foi aberta no Explorer.)",
 		L"Automatische update mislukt; bestanden zijn uitgepakt in Downloads.\n"
 		L"Sluit dit programma en kopieer oggYSEDbgm_uni_avx2.exe en ogghost32.exe\n"
-		L"(en oggYSEDbgm_uni_avx2.chm en tactics.ogg indien aanwezig) over die in de installatiemap.\n"
+		L"(en oggYSEDbgm_uni_avx2.chm en de map tacticsbgm indien aanwezig) over die in de installatiemap.\n"
 		L"(De map is geopend in Verkenner.)",
 		L"Automatyczna aktualizacja nie powiodla sie; pliki rozpakowano do Pobrane.\n"
 		L"Zamknij program i skopiuj oggYSEDbgm_uni_avx2.exe oraz ogghost32.exe\n"
-		L"(oraz oggYSEDbgm_uni_avx2.chm i tactics.ogg jesli sa) na pliki w folderze instalacji.\n"
+		L"(oraz oggYSEDbgm_uni_avx2.chm i folder tacticsbgm jesli sa) na pliki w folderze instalacji.\n"
 		L"(Folder otwarto w Eksploratorze.)",
 		L"Otomatik guncelleme basarisiz; dosyalar Indirilenler klasorune acildi.\n"
 		L"Bu programi kapatip oggYSEDbgm_uni_avx2.exe ve ogghost32.exe dosyalarini\n"
-		L"(varsa oggYSEDbgm_uni_avx2.chm ve tactics.ogg de) kurulum klasorundekilerin uzerine kopyalayin.\n"
+		L"(varsa oggYSEDbgm_uni_avx2.chm ve tacticsbgm klasoru de) kurulum klasorundekilerin uzerine kopyalayin.\n"
 		L"(Klasor Gezgin'de acildi.)"));
 	return true;
 }
@@ -1598,7 +1722,7 @@ bool DoUpdateAndRestart()
 	// オフラインヘルプ CHM（ZIP に含まれていれば展開。無くても更新は続行）
 	ExtractZipToDir(zipPath, extractDir, TARGET_CHM_NAME, UPDATE_CHM_MIN_BYTES, false);
 	ExtractZipToDir(zipPath, extractDir, TARGET_D3D_NAME, UPDATE_D3D_MIN_BYTES, true);
-	ExtractZipToDir(zipPath, extractDir, TARGET_TAC_OGG, UPDATE_TAC_OGG_MIN_BYTES, false);
+	ExtractTacticsBgm(zipPath, extractDir);
 	{
 		TCHAR staleHost[MAX_PATH];
 		_stprintf_s(staleHost, _T("%s\\KpiHost64.exe"), extractDir);
@@ -1695,7 +1819,6 @@ bool DoUpdateAndRestart()
 	CStringA targetHostExeA(TARGET_HOST_EXE_NAME);
 	CStringA targetChmA(TARGET_CHM_NAME);
 	CStringA targetD3dA(TARGET_D3D_NAME);
-	CStringA targetOggA(TARGET_TAC_OGG);
 	CStringA targetExePathA(targetExePath);  // 新しく作る正しい名前のファイル
 	CStringA targetHostExePathA(targetHostExePath); // 新しいホストexe
 	CStringA targetChmPathA = targetExePathA;
@@ -1714,15 +1837,6 @@ bool DoUpdateAndRestart()
 		else
 			targetD3dPathA = targetD3dA;
 	}
-	CStringA targetOggPathA = targetExePathA;
-	{
-		const int slashOgg = targetOggPathA.ReverseFind('\\');
-		if (slashOgg >= 0)
-			targetOggPathA = targetOggPathA.Left(slashOgg + 1) + targetOggA;
-		else
-			targetOggPathA = targetOggA;
-	}
-
 	// 実行ファイルがある正しいフォルダのパスを抜き出しますわ
 	CStringA exeDirA = targetExePathA;
 	int slashPos = exeDirA.ReverseFind('\\');
@@ -1788,7 +1902,8 @@ bool DoUpdateAndRestart()
 		"if errorlevel 1 goto retry\r\n"
 		"if exist \"%s\\%s\" copy /y \"%s\\%s\" \"%s\" >nul 2>&1\r\n"
 		"if exist \"%s\\%s\" copy /y \"%s\\%s\" \"%s\" >nul 2>&1\r\n"
-		"if exist \"%s\\%s\" copy /y \"%s\\%s\" \"%s\" >nul 2>&1\r\n"
+		"if not exist \"%s\\tacticsbgm\" mkdir \"%s\\tacticsbgm\" >nul 2>&1\r\n"
+		"if exist \"%s\\tacticsbgm\\*.ogg\" copy /y \"%s\\tacticsbgm\\*.ogg\" \"%s\\tacticsbgm\\\" >nul 2>&1\r\n"
 		"del /f /q \"%s\\KpiHost64.exe\" >nul 2>&1\r\n"
 		"goto :eof\r\n"
 		":retry\r\n"
@@ -1809,7 +1924,7 @@ bool DoUpdateAndRestart()
 		(LPCSTR)extractDirA, (LPCSTR)targetExeA, (LPCSTR)targetExePathA,          // 本体 上書き
 		(LPCSTR)extractDirA, (LPCSTR)targetChmA, (LPCSTR)extractDirA, (LPCSTR)targetChmA, (LPCSTR)targetChmPathA, // CHM（あれば・失敗してもOK）
 		(LPCSTR)extractDirA, (LPCSTR)targetD3dA, (LPCSTR)extractDirA, (LPCSTR)targetD3dA, (LPCSTR)targetD3dPathA,  // d3dcompiler（あれば）
-		(LPCSTR)extractDirA, (LPCSTR)targetOggA, (LPCSTR)extractDirA, (LPCSTR)targetOggA, (LPCSTR)targetOggPathA, // tactics.ogg（あれば）
+		(LPCSTR)exeDirA, (LPCSTR)exeDirA, (LPCSTR)extractDirA, (LPCSTR)extractDirA, (LPCSTR)exeDirA, // tacticsbgm\*.ogg
 		(LPCSTR)exeDirA                                                   // 旧 KpiHost64.exe 削除
 	);
 
@@ -1888,22 +2003,52 @@ static bool FileStartsWithOggS(const CString& path)
 	return n == 4 && memcmp(mag, "OggS", 4) == 0;
 }
 
-static CString TacticsOggBesideExe()
+static CString ExeFolder()
 {
 	TCHAR exePath[MAX_PATH] = { 0 };
 	GetModuleFileName(NULL, exePath, MAX_PATH);
 	CString dir(exePath);
 	const int slash = dir.ReverseFind(_T('\\'));
 	if (slash >= 0)
-		dir = dir.Left(slash + 1);
-	else
-		dir.Empty();
-	return dir + _T("tactics.ogg");
+		return dir.Left(slash);
+	return CString();
+}
+
+static CString TacticsBgmFolder()
+{
+	const CString exe = ExeFolder();
+	if (exe.IsEmpty()) return CString();
+	return exe + _T("\\tacticsbgm");
+}
+
+static CString TacticsOggInBgmFolder()
+{
+	const CString dir = TacticsBgmFolder();
+	if (dir.IsEmpty()) return CString();
+	return dir + _T("\\tactics.ogg");
+}
+
+static void EnsureTacticsBgmFolder()
+{
+	const CString dir = TacticsBgmFolder();
+	const CString exe = ExeFolder();
+	if (dir.IsEmpty()) return;
+	CreateDirectory(dir, NULL);
+	const CString dest = dir + _T("\\tactics.ogg");
+	const CString old = exe + _T("\\tactics.ogg");
+	if (!FileStartsWithOggS(dest) && FileStartsWithOggS(old)) {
+		DeleteFile(dest);
+		if (!MoveFile(old, dest)) {
+			if (CopyFile(old, dest, FALSE))
+				DeleteFile(old);
+		}
+	}
 }
 
 void EnsureTacticsOggAvailable()
 {
-	const CString dest = TacticsOggBesideExe();
+	EnsureTacticsBgmFolder();
+	const CString dest = TacticsOggInBgmFolder();
 	if (dest.IsEmpty() || FileStartsWithOggS(dest))
 		return;
 	DWORD dwFlags = 0;

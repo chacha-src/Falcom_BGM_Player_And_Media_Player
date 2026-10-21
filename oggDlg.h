@@ -461,7 +461,6 @@ public:
 	afx_msg void OnSetFocus(CWnd* pOldWnd);
 	afx_msg int OnMouseActivate(CWnd* pDesktopWnd, UINT nHitTest, UINT message);
 	afx_msg void OnActivateApp(BOOL bActive, DWORD dwThreadID);
-	void RaisePianoAnalyzerToFront();
 	afx_msg BOOL OnNcActivate(BOOL bActive);
 	CCustomStatic m_lrc;
 	CCustomSliderCtrl m_tempo_sl;

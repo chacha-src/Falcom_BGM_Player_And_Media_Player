@@ -6820,6 +6820,13 @@ void CPianoRoll::OnMove(int x, int y)
 
 void CPianoRoll::OnShowWindow(BOOL bShow, UINT nStatus)
 {
+    // 所有者の最小化/復帰は、メインが viz スレッドの完了を待っている最中に届く。
+    // ここで DWM 再適用すると位置変更が往復して落ちる。帯の描き直しだけにする。
+    if (nStatus == SW_PARENTCLOSING || nStatus == SW_PARENTOPENING) {
+        if (bShow)
+            InvalidateCaptionChrome();
+        return;
+    }
     CCustomBlurDialogExBase::OnShowWindow(bShow, nStatus);
 #if CCUSTOM_AERO_SUPPORT
     // 基底側で Apply/Refresh 済み。内容の再同期のみ行う。
@@ -6841,13 +6848,15 @@ void CPianoRoll::OnShowWindow(BOOL bShow, UINT nStatus)
 
 BOOL CPianoRoll::Create(UINT nIDTemplate, CWnd* pParentWnd)
 {
-    // 描画・ティックをメイン UI(timerp/バナー)と分けるため、窓は専用 UI スレッドで作る。
-    // 親をメイン窓にすると、曲選択やクリックのたびに描画スレッドへ同期メッセージが入り落ちる。
+    // 生成と OnInitDialog は専用 UI スレッド。初期化が終わってから
+    // 所有者だけメインへ付ける。イコライザーと同じ所有なので、最小化復帰と
+    // アプリのアクティブ化でウィンドウマネージャが前面へ連れてくる。
     BOOL ok = FALSE;
     VizUi::Invoke(VIZ_UI_PIANO, [&]() {
         CWnd* owner = VizUi::ThreadOwner(VIZ_UI_PIANO);
         ok = CCustomBlurDialogExBase::Create(nIDTemplate, owner);
-        (void)pParentWnd;
+        if (ok)
+            VizUi::AttachAppOwner(m_hWnd, pParentWnd ? pParentWnd->GetSafeHwnd() : NULL);
     });
     return ok;
 }

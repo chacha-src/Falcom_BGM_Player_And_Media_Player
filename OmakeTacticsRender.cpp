@@ -835,6 +835,59 @@ BOOL Renderer::LoadAssets()
 	return TRUE;
 }
 
+// packed=0 は頂点9 float。packed=1 は位置・法線 int16 と色バイト（TACP / TACQ）。
+static BOOL ReadColorMesh(Reader& rd, int packed, std::vector<VtxS>& v, std::vector<WORD>& idx)
+{
+	UINT nv = rd.U32(), ni = rd.U32();
+	if (!nv || !ni || nv > 200000 || ni > 400000) { rd.bad = true; return FALSE; }
+	v.resize(nv);
+	if (!packed) {
+		const float* vb = (const float*)rd.Bytes((size_t)nv * 9 * 4);
+		const WORD* ib = (const WORD*)rd.Bytes((size_t)ni * 2);
+		rd.Align4();
+		if (!vb || !ib) return FALSE;
+		for (UINT k = 0; k < nv; k++) {
+			const float* q = vb + k * 9;
+			VtxS& d = v[k];
+			d.p[0] = q[0]; d.p[1] = q[1]; d.p[2] = -q[2];
+			d.n[0] = q[3]; d.n[1] = q[4]; d.n[2] = -q[5];
+			d.uv[0] = 0; d.uv[1] = 0;
+			int r = (int)(q[6] * 255.f), g = (int)(q[7] * 255.f), b = (int)(q[8] * 255.f);
+			d.c = RGBA8(r, g, b);
+		}
+		idx.assign(ib, ib + ni);
+	} else {
+		float emin[3], emax[3], mid[3], half[3];
+		for (int a = 0; a < 3; a++) emin[a] = rd.F32();
+		for (int a = 0; a < 3; a++) emax[a] = rd.F32();
+		for (int a = 0; a < 3; a++) {
+			mid[a] = (emin[a] + emax[a]) * 0.5f;
+			half[a] = (emax[a] - emin[a]) * 0.5f;
+		}
+		const short* ps = (const short*)rd.Bytes((size_t)nv * 6);
+		const short* ns = (const short*)rd.Bytes((size_t)nv * 6);
+		const BYTE* rgb = rd.Bytes((size_t)nv * 3);
+		rd.Align4();
+		const WORD* ib = (const WORD*)rd.Bytes((size_t)ni * 2);
+		rd.Align4();
+		if (!ps || !ns || !rgb || !ib) return FALSE;
+		for (UINT k = 0; k < nv; k++) {
+			VtxS& d = v[k];
+			d.p[0] = mid[0] + (ps[k * 3] / 32767.f) * half[0];
+			d.p[1] = mid[1] + (ps[k * 3 + 1] / 32767.f) * half[1];
+			d.p[2] = -(mid[2] + (ps[k * 3 + 2] / 32767.f) * half[2]);
+			d.n[0] = ns[k * 3] / 32767.f;
+			d.n[1] = ns[k * 3 + 1] / 32767.f;
+			d.n[2] = -(ns[k * 3 + 2] / 32767.f);
+			d.uv[0] = 0; d.uv[1] = 0;
+			d.c = RGBA8(rgb[k * 3], rgb[k * 3 + 1], rgb[k * 3 + 2]);
+		}
+		idx.assign(ib, ib + ni);
+	}
+	for (UINT k = 0; k + 2 < ni; k += 3) std::swap(idx[k + 1], idx[k + 2]);
+	return TRUE;
+}
+
 void Renderer::LoadCreaturePack()
 {
 	for (auto& c : m_creatures) c.Release();
@@ -846,7 +899,9 @@ void Renderer::LoadCreaturePack()
 	HGLOBAL hg = LoadResource(hm, rs);
 	const BYTE* data = hg ? (const BYTE*)LockResource(hg) : NULL;
 	DWORD size = SizeofResource(hm, rs);
-	if (!data || size < 8 || memcmp(data, "TACM", 4) != 0) return;
+	if (!data || size < 8) return;
+	const int packed = memcmp(data, "TACP", 4) == 0;
+	if (!packed && memcmp(data, "TACM", 4) != 0) return;
 	Reader rd(data + 4, size - 4);
 	UINT n = rd.U32();
 	if (n > 256) return;
@@ -854,26 +909,11 @@ void Renderer::LoadCreaturePack()
 	for (UINT i = 0; i < n; i++) {
 		char name[32];
 		rd.Name(name, 32);
-		UINT nv = rd.U32(), ni = rd.U32();
-		if (!nv || !ni || nv > 200000 || ni > 400000) { rd.bad = true; break; }
-		const float* vb = (const float*)rd.Bytes((size_t)nv * 9 * 4);
-		const WORD* ib = (const WORD*)rd.Bytes((size_t)ni * 2);
-		rd.Align4();
-		if (!vb || !ib) break;
-		std::vector<VtxS> v(nv);
-		for (UINT k = 0; k < nv; k++) {
-			const float* q = vb + k * 9;
-			VtxS& d = v[k];
-			d.p[0] = q[0]; d.p[1] = q[1]; d.p[2] = -q[2];
-			d.n[0] = q[3]; d.n[1] = q[4]; d.n[2] = -q[5];
-			d.uv[0] = 0; d.uv[1] = 0;
-			int r = (int)(q[6] * 255.f), g = (int)(q[7] * 255.f), b = (int)(q[8] * 255.f);
-			d.c = RGBA8(r, g, b);
-		}
-		std::vector<WORD> idx(ib, ib + ni);
-		for (UINT k = 0; k + 2 < ni; k += 3) std::swap(idx[k + 1], idx[k + 2]);
+		std::vector<VtxS> v;
+		std::vector<WORD> idx;
+		if (!ReadColorMesh(rd, packed, v, idx)) break;
 		GpuMesh gm;
-		if (!MakeMesh(gm, v.data(), sizeof(VtxS), nv, idx.data(), ni)) continue;
+		if (!MakeMesh(gm, v.data(), sizeof(VtxS), (UINT)v.size(), idx.data(), (UINT)idx.size())) continue;
 		gm.tex = TEX_WHITE;
 		m_creatures.push_back(gm);
 	}
@@ -896,7 +936,9 @@ void Renderer::LoadGearPack()
 	HGLOBAL hg = LoadResource(hm, rs);
 	const BYTE* data = hg ? (const BYTE*)LockResource(hg) : NULL;
 	DWORD size = SizeofResource(hm, rs);
-	if (!data || size < 8 || memcmp(data, "TACG", 4) != 0) return;
+	if (!data || size < 8) return;
+	const int packed = memcmp(data, "TACQ", 4) == 0;
+	if (!packed && memcmp(data, "TACG", 4) != 0) return;
 	Reader rd(data + 4, size - 4);
 	UINT n = rd.U32();
 	if (n > 256) return;
@@ -904,26 +946,11 @@ void Renderer::LoadGearPack()
 	for (UINT i = 0; i < n; i++) {
 		char name[32];
 		rd.Name(name, 32);
-		UINT nv = rd.U32(), ni = rd.U32();
-		if (!nv || !ni || nv > 200000 || ni > 400000) { rd.bad = true; break; }
-		const float* vb = (const float*)rd.Bytes((size_t)nv * 9 * 4);
-		const WORD* ib = (const WORD*)rd.Bytes((size_t)ni * 2);
-		rd.Align4();
-		if (!vb || !ib) break;
-		std::vector<VtxS> v(nv);
-		for (UINT k = 0; k < nv; k++) {
-			const float* q = vb + k * 9;
-			VtxS& d = v[k];
-			d.p[0] = q[0]; d.p[1] = q[1]; d.p[2] = -q[2];
-			d.n[0] = q[3]; d.n[1] = q[4]; d.n[2] = -q[5];
-			d.uv[0] = 0; d.uv[1] = 0;
-			int r = (int)(q[6] * 255.f), g = (int)(q[7] * 255.f), b = (int)(q[8] * 255.f);
-			d.c = RGBA8(r, g, b);
-		}
-		std::vector<WORD> idx(ib, ib + ni);
-		for (UINT k = 0; k + 2 < ni; k += 3) std::swap(idx[k + 1], idx[k + 2]);
+		std::vector<VtxS> v;
+		std::vector<WORD> idx;
+		if (!ReadColorMesh(rd, packed, v, idx)) break;
 		GpuMesh gm;
-		if (!MakeMesh(gm, v.data(), sizeof(VtxS), nv, idx.data(), ni)) continue;
+		if (!MakeMesh(gm, v.data(), sizeof(VtxS), (UINT)v.size(), idx.data(), (UINT)idx.size())) continue;
 		gm.tex = TEX_WHITE;
 		m_gear.push_back(gm);
 	}

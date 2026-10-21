@@ -1002,40 +1002,40 @@ static const ClassDef kClass[C_PLAYER_COUNT] = {
 	  { 19, 4, 5, 3, 1, 3, 10, 8, 8, 6 }, { 38, 10, 40, 25, 5, 25, 65, 55, 55, 0 }, L6F(1, SKL_VITAL, 2, SKL_P_EVADE, 3, SKL_STITCH, 4, SKL_P_SWIFT, 5, SKL_VENOMEDGE, 6, SKL_DOUBLE) },
 	{ TX_CL_MAGE, TX_CLD_MAGE, 1, 1, G_MAGIC, MV_FOOT, 2, 1, 2, 1, 4, WL_STAFF, AS_CAST,
 	  { 17, 14, 1, 2, 9, 7, 6, 6, 4, 4 }, { 30, 60, 5, 20, 65, 45, 40, 40, 35, 0 }, L6F(1, SKL_FIRE, 2, SKL_THUNDER, 3, SKL_BLIZZARD, 4, SKL_GRAVITY, 5, SKL_P_SPELL, 6, SKL_DARKNESS) },
-	{ TX_CL_CLERIC, TX_CLD_CLERIC, 1, 1, G_HOLY, MV_FOOT, 2, 1, 2, 1, 2, WL_WAND_BOOK, AS_CAST,
-	  { 18, 16, 2, 3, 7, 9, 5, 5, 6, 4 }, { 32, 65, 10, 22, 50, 60, 35, 35, 45, 0 }, L6F(1, SKL_HEAL, 2, SKL_PROTECT, 3, SKL_REFRESH, 4, SKL_HIGHHEAL, 5, SKL_BLESS, 6, SKL_HEALALL) },
+	{ TX_CL_CLERIC, TX_CLD_CLERIC, 1, 1, G_HOLY, MV_FOOT, 2, 1, 2, 1, 4, WL_WAND_BOOK, AS_CAST,
+	  { 18, 16, 2, 3, 7, 9, 5, 5, 6, 4 }, { 32, 65, 10, 22, 50, 60, 35, 35, 45, 0 }, L6F(1, SKL_HEAL, 1, SKL_SMITE, 2, SKL_PROTECT, 4, SKL_HOLY, 5, SKL_HIGHHEAL, 6, SKL_REFRESH) },
 
 	{ TX_CL_PALADIN, TX_CLD_PALADIN, 2, 0, G_HOLY, MV_FOOT, 2, 1, 1, 0, 8, WL_SWORD_BADGE, AS_SLASH,
-	  { 34, 10, 11, 11, 4, 7, 7, 8, 6, 5 }, { 55, 25, 55, 60, 15, 40, 35, 45, 40, 0 }, L6(15, SKL_PROTECT, 20, SKL_HOLYBLADE, 26, SKL_P_IRON, 32, SKL_HEAL) },
+	  { 34, 10, 11, 11, 4, 7, 7, 8, 6, 5 }, { 55, 25, 55, 60, 15, 40, 35, 45, 40, 0 }, L6F(15, SKL_HOLYBLADE, 18, SKL_PROTECT, 22, SKL_SMITE, 26, SKL_P_IRON, 30, SKL_HEAL, 34, SKL_BLESS) },
 	{ TX_CL_RUNEKNIGHT, TX_CLD_RUNEKNIGHT, 2, 1, G_MAGIC, MV_FOOT, 2, 1, 1, 0, 7, WL_SWORD_BOOK, AS_SLASH,
-	  { 30, 16, 10, 8, 10, 8, 8, 8, 5, 5 }, { 48, 40, 45, 40, 45, 40, 40, 40, 35, 0 }, L6(15, SKL_RUNEBLADE, 18, SKL_FIRE, 24, SKL_THUNDER, 30, SKL_P_SPELL) },
+	  { 30, 16, 10, 8, 10, 8, 8, 8, 5, 5 }, { 48, 40, 45, 40, 45, 40, 40, 40, 35, 0 }, L6F(15, SKL_RUNEBLADE, 18, SKL_FIRE, 22, SKL_THUNDER, 26, SKL_BLIZZARD, 30, SKL_P_SPELL, 34, SKL_DARKNESS) },
 	{ TX_CL_BERSERKER, TX_CLD_BERSERKER, 2, 0, G_MELEE, MV_FOOT, 2, 1, 1, 0, 10, WL_AXES, AS_SLASH,
-	  { 40, 4, 15, 6, 0, 3, 8, 7, 3, 5 }, { 70, 5, 75, 30, 0, 15, 40, 40, 25, 0 }, L6(15, SKL_DOUBLE, 18, SKL_WHIRL, 24, SKL_P_MIGHT, 30, SKL_DRAGONFANG) },
+	  { 40, 4, 15, 6, 0, 3, 8, 7, 3, 5 }, { 70, 5, 75, 30, 0, 15, 40, 40, 25, 0 }, L6F(15, SKL_DOUBLE, 18, SKL_WHIRL, 22, SKL_WARCRY, 26, SKL_P_MIGHT, 30, SKL_DRAGONFANG, 34, SKL_CLEAVE) },
 	{ TX_CL_SNIPER, TX_CLD_SNIPER, 2, 0, G_SWIFT, MV_FOOT, 2, 2, 4, 0, 7, WL_CROSSBOW2, AS_SHOOT,
-	  { 26, 6, 9, 5, 1, 5, 9, 14, 7, 5 }, { 42, 15, 50, 30, 5, 30, 50, 70, 45, 0 }, L6(15, SKL_PIERCE, 18, SKL_ARROWRAIN, 24, SKL_P_CRIT, 30, SKL_VITAL) },
+	  { 26, 6, 9, 5, 1, 5, 9, 14, 7, 5 }, { 42, 15, 50, 30, 5, 30, 50, 70, 45, 0 }, L6(15, SKL_PIERCE, 18, SKL_ARROWRAIN, 24, SKL_P_CRIT, 30, SKL_SNIPE) },
 	{ TX_CL_ASSASSIN, TX_CLD_ASSASSIN, 2, 0, G_SWIFT, MV_FOOT, 3, 1, 1, 0, 7, WL_KNIVES, AS_STAB,
-	  { 24, 8, 9, 5, 2, 5, 14, 12, 10, 6 }, { 40, 20, 50, 25, 10, 30, 70, 60, 55, 0 }, L6(15, SKL_ASSASSINATE, 18, SKL_P_EVADE, 24, SKL_STITCH, 30, SKL_P_SWIFT) },
+	  { 24, 8, 9, 5, 2, 5, 14, 12, 10, 6 }, { 40, 20, 50, 25, 10, 30, 70, 60, 55, 0 }, L6(15, SKL_ASSASSINATE, 18, SKL_VENOMEDGE, 24, SKL_P_EVADE, 30, SKL_P_SWIFT) },
 	{ TX_CL_WIZARD, TX_CLD_WIZARD, 2, 1, G_MAGIC, MV_FOOT, 2, 1, 3, 1, 6, WL_STAFF, AS_CAST,
-	  { 22, 26, 1, 4, 15, 11, 8, 8, 5, 4 }, { 32, 70, 5, 22, 75, 50, 40, 40, 35, 0 }, L6(15, SKL_BLIZZARD, 18, SKL_THUNDER, 24, SKL_METEOR, 30, SKL_P_SPELL) },
+	  { 22, 26, 1, 4, 15, 11, 8, 8, 5, 4 }, { 32, 70, 5, 22, 75, 50, 40, 40, 35, 0 }, L6F(15, SKL_BLIZZARD, 18, SKL_THUNDER, 22, SKL_GRAVITY, 26, SKL_METEOR, 30, SKL_DARKNESS, 34, SKL_P_SPELL) },
 	{ TX_CL_BISHOP, TX_CLD_BISHOP, 2, 1, G_HOLY, MV_FOOT, 2, 1, 2, 1, 4, WL_WAND_BOOK, AS_CAST,
-	  { 24, 28, 3, 5, 12, 14, 7, 7, 8, 4 }, { 35, 70, 10, 25, 55, 65, 35, 35, 50, 0 }, { { 15, SKL_HIGHHEAL }, { 18, SKL_HOLY }, { 20, SKL_REFRESH }, { 24, SKL_HEALALL }, { 30, SKL_P_REGEN }, { 0, -1 } } },
+	  { 24, 28, 3, 5, 12, 14, 7, 7, 8, 4 }, { 35, 70, 10, 25, 55, 65, 35, 35, 50, 0 }, { { 15, SKL_SMITE }, { 16, SKL_HOLY }, { 20, SKL_HIGHHEAL }, { 24, SKL_HEALALL }, { 28, SKL_BLESS }, { 32, SKL_P_REGEN } } },
 	{ TX_CL_SKYKNIGHT, TX_CLD_SKYKNIGHT, 2, 0, G_SWIFT, MV_FLY, 9, 1, 1, 0, 7, WL_SWORD_SPIKE, AS_STAB,
-	  { 28, 8, 10, 7, 3, 8, 11, 9, 7, 7 }, { 45, 20, 50, 35, 10, 40, 60, 50, 45, 0 }, L6(15, SKL_VITAL, 18, SKL_P_EVADE, 24, SKL_HASTE, 30, SKL_DRAGONFANG) },
+	  { 28, 8, 10, 7, 3, 8, 11, 9, 7, 7 }, { 45, 20, 50, 35, 10, 40, 60, 50, 45, 0 }, L6F(15, SKL_VITAL, 18, SKL_PIERCE, 22, SKL_P_EVADE, 26, SKL_HASTE, 30, SKL_DRAGONFANG, 34, SKL_SNIPE) },
 
 	{ TX_CL_HERO, TX_CLD_HERO, 3, 0, G_MELEE, MV_FOOT, 3, 1, 1, 0, 12, WL_SWORD2, AS_CHOP2,
-	  { 46, 14, 17, 13, 6, 10, 12, 13, 10, 6 }, { 60, 30, 65, 50, 20, 40, 50, 55, 50, 0 }, L6(35, SKL_BRAVE, 38, SKL_P_CRIT, 44, SKL_HOLYBLADE, 50, SKL_P_REGEN) },
+	  { 46, 14, 17, 13, 6, 10, 12, 13, 10, 6 }, { 60, 30, 65, 50, 20, 40, 50, 55, 50, 0 }, L6F(35, SKL_BRAVE, 38, SKL_P_CRIT, 42, SKL_HOLYBLADE, 46, SKL_P_REGEN, 50, SKL_GODSLASH, 54, SKL_CLEAVE) },
 	{ TX_CL_ARCHMAGE, TX_CLD_ARCHMAGE, 3, 1, G_MAGIC, MV_FOOT, 2, 1, 3, 1, 9, WL_STAFF, AS_CAST,
-	  { 30, 40, 2, 7, 22, 16, 10, 10, 8, 5 }, { 38, 80, 5, 25, 85, 55, 45, 45, 40, 0 }, L6(35, SKL_METEOR, 38, SKL_HOLY, 44, SKL_DARKNESS, 50, SKL_HASTE) },
+	  { 30, 40, 2, 7, 22, 16, 10, 10, 8, 5 }, { 38, 80, 5, 25, 85, 55, 45, 45, 40, 0 }, L6F(35, SKL_METEOR, 38, SKL_HOLY, 42, SKL_DARKNESS, 46, SKL_HASTE, 50, SKL_APOC, 54, SKL_P_SPELL) },
 	{ TX_CL_SAINT, TX_CLD_SAINT, 3, 1, G_HOLY, MV_FOOT, 2, 1, 2, 1, 6, WL_WAND_BOOK, AS_CAST,
-	  { 32, 42, 4, 8, 17, 22, 9, 9, 12, 5 }, { 40, 80, 10, 30, 60, 75, 40, 40, 60, 0 }, { { 35, SKL_HEALALL }, { 36, SKL_REFRESH }, { 38, SKL_HOLY }, { 44, SKL_BLESS }, { 50, SKL_P_REGEN }, { 0, -1 } } },
+	  { 32, 42, 4, 8, 17, 22, 9, 9, 12, 5 }, { 40, 80, 10, 30, 60, 75, 40, 40, 60, 0 }, { { 35, SKL_HOLY }, { 36, SKL_HEALALL }, { 40, SKL_SANCTUARY }, { 44, SKL_BLESS }, { 48, SKL_RENEW }, { 52, SKL_P_REGEN } } },
 	{ TX_CL_PHANTOM, TX_CLD_PHANTOM, 3, 0, G_SWIFT, MV_FOOT, 4, 1, 2, 0, 9, WL_CROSS_KNIFE, AS_SHOOT1,
-	  { 32, 12, 13, 8, 4, 8, 18, 16, 14, 7 }, { 45, 25, 55, 30, 15, 35, 80, 65, 65, 0 }, L6(35, SKL_ASSASSINATE, 38, SKL_ARROWRAIN, 44, SKL_P_SWIFT, 50, SKL_P_EVADE) },
+	  { 32, 12, 13, 8, 4, 8, 18, 16, 14, 7 }, { 45, 25, 55, 30, 15, 35, 80, 65, 65, 0 }, L6F(35, SKL_ASSASSINATE, 38, SKL_SNIPE, 42, SKL_ARROWRAIN, 46, SKL_VENOMEDGE, 50, SKL_P_SWIFT, 54, SKL_P_EVADE) },
 	{ TX_CL_DRAGONLORD, TX_CLD_DRAGONLORD, 3, 0, G_MELEE, MV_FLY, 9, 1, 1, 0, 12, WL_SWORD2, AS_CHOP2,
-	  { 44, 12, 16, 14, 5, 10, 12, 11, 8, 7 }, { 60, 25, 65, 55, 10, 40, 45, 45, 40, 0 }, L6(35, SKL_DRAGONFANG, 38, SKL_WHIRL, 44, SKL_P_IRON, 50, SKL_BRAVE) },
+	  { 44, 12, 16, 14, 5, 10, 12, 11, 8, 7 }, { 60, 25, 65, 55, 10, 40, 45, 45, 40, 0 }, L6F(35, SKL_DRAGONFANG, 38, SKL_WHIRL, 42, SKL_P_IRON, 46, SKL_BRAVE, 50, SKL_GODSLASH, 54, SKL_CLEAVE) },
 	{ TX_CL_ALCHEMIST, TX_CLD_ALCHEMIST, 2, 1, G_MAGIC, MV_FOOT, 2, 1, 2, 1, 5, WL_STAFF, AS_CAST,
-	  { 24, 22, 4, 5, 12, 10, 8, 9, 7, 4 }, { 36, 55, 15, 28, 55, 50, 40, 45, 40, 0 }, { { 15, SKL_TRANSMUTE }, { 18, SKL_RENEW }, { 22, SKL_MIRROR }, { 28, SKL_SANCTUARY }, { 0, -1 }, { 0, -1 } } },
+	  { 24, 22, 4, 5, 12, 10, 8, 9, 7, 4 }, { 36, 55, 15, 28, 55, 50, 40, 45, 40, 0 }, { { 15, SKL_GRAVITY }, { 18, SKL_TRANSMUTE }, { 22, SKL_RENEW }, { 26, SKL_MIRROR }, { 30, SKL_FIRE }, { 34, SKL_SANCTUARY } } },
 	{ TX_CL_ARCHALCHEMIST, TX_CLD_ARCHALCHEMIST, 3, 1, G_MAGIC, MV_FOOT, 2, 1, 3, 1, 8, WL_STAFF, AS_CAST,
-	  { 32, 36, 6, 8, 18, 16, 10, 12, 10, 5 }, { 42, 70, 20, 32, 70, 60, 45, 50, 50, 0 }, { { 35, SKL_RUIN }, { 40, SKL_APOC }, { 48, SKL_TRANSMUTE }, { 55, SKL_P_SPELL }, { 0, -1 }, { 0, -1 } } },
+	  { 32, 36, 6, 8, 18, 16, 10, 12, 10, 5 }, { 42, 70, 20, 32, 70, 60, 45, 50, 50, 0 }, { { 35, SKL_RUIN }, { 40, SKL_APOC }, { 46, SKL_SANCTUARY }, { 52, SKL_P_SPELL }, { 0, -1 }, { 0, -1 } } },
 };
 #undef L6
 #undef L6F
@@ -1043,10 +1043,10 @@ static const int kLineParent[TAC_RANK_LINES] = { C_HERO, C_ARCHMAGE, C_SAINT, C_
 static const int kExtSkill[TAC_RANK_LINES][TAC_RANK_N] = {
 	{ SKL_GODSLASH, SKL_CLEAVE, SKL_WARCRY, SKL_SMITE, SKL_GODSLASH, SKL_APOC, SKL_RUIN },
 	{ SKL_RUIN, SKL_GRAVITY, SKL_APOC, SKL_MIRROR, SKL_SANCTUARY, SKL_RUIN, SKL_APOC },
-	{ SKL_SANCTUARY, SKL_RENEW, SKL_SMITE, SKL_MIRROR, SKL_WARCRY, SKL_SANCTUARY, SKL_APOC },
+	{ SKL_HOLY, SKL_RENEW, SKL_SMITE, SKL_MIRROR, SKL_WARCRY, SKL_SANCTUARY, SKL_APOC },
 	{ SKL_SNIPE, SKL_VENOMEDGE, SKL_CLEAVE, SKL_GRAVITY, SKL_GODSLASH, SKL_SNIPE, SKL_RUIN },
 	{ SKL_APOC, SKL_CLEAVE, SKL_SMITE, SKL_GODSLASH, SKL_RUIN, SKL_WARCRY, SKL_APOC },
-	{ SKL_TRANSMUTE, SKL_RENEW, SKL_MIRROR, SKL_RUIN, SKL_SANCTUARY, SKL_APOC, SKL_GRAVITY },
+	{ SKL_RUIN, SKL_RENEW, SKL_MIRROR, SKL_GRAVITY, SKL_SANCTUARY, SKL_APOC, SKL_DARKNESS },
 };
 static ClassDef s_ext[TAC_RANK_LINES * TAC_RANK_N];
 static int s_extOk = 0;
@@ -1434,8 +1434,15 @@ int CharLevelUp(CharData& c, Rng& r, int gains[S_COUNT])
 	}
 	c.lv++;
 	int sk = CharLearnAt(c, c.lv);
-	if (sk >= 0 && !CharHasSkill(c, sk)) { CharGiveSkill(c, sk); return sk; }
-	return -1;
+	int learned = -1;
+	if (sk >= 0 && !CharHasSkill(c, sk)) { CharGiveSkill(c, sk); learned = sk; }
+	for (int i = 0; i < 6; i++) {
+		int o = cd.learn[i].skill;
+		if (o < 0 || o == sk || cd.learn[i].lv != c.lv || CharHasSkill(c, o)) continue;
+		CharGiveSkill(c, o);
+		if (learned < 0) learned = o;
+	}
+	return learned;
 }
 
 // ============================================================ 進化
@@ -1919,18 +1926,20 @@ static void ApplyEffect(Battle& b, Unit& a, Unit& d, int effect)
 	(void)b; (void)a;
 }
 
-int ResolveAttack(Battle& b, int ai, int di, int skill, Rng& r, Strike* out, int maxOut)
+int ResolveAttack(Battle& b, int ai, int di, int skill, Rng& r, Strike* out, int maxOut, int cx, int cz)
 {
 	int n = 0;
 	Unit& a = b.u[ai];
 	const SkillDef* sd = skill >= 0 ? &SkillInfo(skill) : NULL;
 	if (sd) a.mp = max(0, a.mp - sd->mp);
-	// 範囲・回復・補助
+	// 範囲・回復・補助。範囲技は指定マスを中心にする（空マスでも可）
 	if (sd && (sd->area > 0 || sd->kind == SK_HEAL || sd->kind == SK_BUFF)) {
 		int targets[MAX_UNITS];
-		int cx = b.u[di].x, cz = b.u[di].z;
-		if (sd->rMax == 0) { cx = a.x; cz = a.z; }
-		int nt = SkillTargets(b, ai, skill, cx, cz, targets, MAX_UNITS);
+		int cx0, cz0;
+		if (sd->rMax == 0) { cx0 = a.x; cz0 = a.z; }
+		else if (Map::In(cx, cz)) { cx0 = cx; cz0 = cz; }
+		else { cx0 = b.u[di].x; cz0 = b.u[di].z; }
+		int nt = SkillTargets(b, ai, skill, cx0, cz0, targets, MAX_UNITS);
 		for (int k = 0; k < nt && n < maxOut; k++) {
 			Unit& d = b.u[targets[k]];
 			Strike s = {};
@@ -2859,7 +2868,7 @@ void SaveDefaults(SaveData& s)
 {
 	memset(&s, 0, sizeof(s));
 	s.magic = kSaveMagic;
-	s.version = 1;
+	s.version = 2;
 	for (int i = 0; i < MAX_PARTY; i++) s.party[i] = -1;
 	s.stageSel = 1;
 	s.camSpeed = 1;
@@ -2869,7 +2878,24 @@ void SaveDefaults(SaveData& s)
 	s.bgmVol = 6;
 	s.seVol = 8;
 	s.optInit = 1;
+	s.partyCap = 5;
+	s.rosterCap = 20;
 }
+
+#pragma pack(push, 4)
+struct SaveV1 {
+	DWORD magic;
+	int version;
+	CharData roster[20];
+	int party[5];
+	int stageCleared, stageSel, winX, winY, winW, winH;
+	int camSpeed, quality, showGrid, battleAnim;
+	DWORD uidNext;
+	int winSizeVer;
+	int itemN[8];
+	int bgmVol, seVol, optInit, gold, gearN, gearId[12], reserved[4];
+};
+#pragma pack(pop)
 
 bool SaveLoad(SaveData& s)
 {
@@ -2877,17 +2903,46 @@ bool SaveLoad(SaveData& s)
 	CString path = DatArc_Path(kSaveLeaf);
 	FILE* fp = NULL;
 	if (_tfopen_s(&fp, path, _T("rb")) != 0 || !fp) return false;
-	SaveData t;
-	size_t rd = fread(&t, 1, sizeof(t), fp);
+	fseek(fp, 0, SEEK_END);
+	long sz = ftell(fp);
+	fseek(fp, 0, SEEK_SET);
+	BOOL got = FALSE;
+	if (sz == (long)sizeof(SaveV1)) {
+		SaveV1 o;
+		if (fread(&o, 1, sizeof(o), fp) == sizeof(o) && o.magic == kSaveMagic && o.version == 1) {
+			s.magic = o.magic;
+			s.version = 2;
+			for (int i = 0; i < 20; i++) s.roster[i] = o.roster[i];
+			for (int i = 0; i < 5; i++) s.party[i] = o.party[i];
+			s.stageCleared = o.stageCleared; s.stageSel = o.stageSel;
+			s.winX = o.winX; s.winY = o.winY; s.winW = o.winW; s.winH = o.winH;
+			s.camSpeed = o.camSpeed; s.quality = o.quality; s.showGrid = o.showGrid; s.battleAnim = o.battleAnim;
+			s.uidNext = o.uidNext; s.winSizeVer = o.winSizeVer;
+			for (int i = 0; i < 8; i++) s.itemN[i] = o.itemN[i];
+			s.bgmVol = o.bgmVol; s.seVol = o.seVol; s.optInit = o.optInit;
+			s.gold = o.gold; s.gearN = o.gearN;
+			for (int i = 0; i < 12; i++) s.gearId[i] = o.gearId[i];
+			for (int i = 0; i < 4; i++) s.reserved[i] = o.reserved[i];
+			s.partyCap = 5;
+			s.rosterCap = 20;
+			got = TRUE;
+		}
+	} else if (sz == (long)sizeof(SaveData)) {
+		SaveData t;
+		if (fread(&t, 1, sizeof(t), fp) == sizeof(t) && t.magic == kSaveMagic && t.version == 2) {
+			s = t;
+			got = TRUE;
+		}
+	}
 	fclose(fp);
-	if (rd != sizeof(t) || t.magic != kSaveMagic || t.version != 1) return false;
-	s = t;
+	if (!got) return false;
 	for (int i = 0; i < MAX_ROSTER; i++) {
 		CharData& c = s.roster[i];
 		c.name[NAME_LEN - 1] = 0;
 		if (!c.used) continue;
 		c.cls = Clampi(c.cls, 0, C_PLAYER_COUNT - 1);
-		c.lv = Clampi(c.lv, 1, 99);
+		c.lv = Clampi(c.lv, 1, TAC_LV_MAX);
+		GrantReached(c);
 		c.body = Clampi(c.body, 0, B_COUNT - 1);
 		c.hair = Clampi(c.hair, 0, HAIR_STYLES - 1);
 		c.hairColor = Clampi(c.hairColor, 0, HAIR_COLORS - 1);
@@ -2902,6 +2957,9 @@ bool SaveLoad(SaveData& s)
 	if (s.optInit != 1) { s.bgmVol = 6; s.seVol = 8; s.optInit = 1; }
 	else { s.bgmVol = Clampi(s.bgmVol, 0, 10); s.seVol = Clampi(s.seVol, 0, 10); }
 	if (s.gold < 0) s.gold = 0;
+	if (s.partyCap < 5 || s.partyCap > MAX_PARTY) s.partyCap = 5;
+	if (s.rosterCap < 20 || s.rosterCap > MAX_ROSTER || (s.rosterCap % 20) != 0) s.rosterCap = 20;
+	for (int i = s.partyCap; i < MAX_PARTY; i++) s.party[i] = -1;
 	s.gearN = Clampi(s.gearN, 0, GEAR_STASH);
 	for (int i = 0; i < s.gearN; i++) if (s.gearId[i] < 1 || s.gearId[i] > kGearN) s.gearId[i] = 1;
 	TrophyLoad();

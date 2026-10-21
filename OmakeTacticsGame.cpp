@@ -21,7 +21,8 @@ enum {
 	ID_CR_NAME = 200, ID_CR_RANDOM, ID_CR_GENDER, ID_CR_LINEAGE, ID_CR_CLASS, ID_CR_BODY, ID_CR_HAIR, ID_CR_HAIRCOL, ID_CR_OUTFIT,
 	ID_CR_HAT, ID_CR_CAPE, ID_CR_OK, ID_CR_BACK,
 	ID_PT_CARD0 = 300, ID_PT_DEPLOY = 340, ID_PT_EDIT, ID_PT_DELETE, ID_PT_YES, ID_PT_NO, ID_PT_BACK, ID_PT_NEW,
-	ID_EV_MAIN0 = 400, ID_EV_TGT0 = 430, ID_EV_PART0 = 440, ID_EV_DO = 470, ID_EV_BACK,
+	ID_PT_PAGE_PREV = 360, ID_PT_PAGE_NEXT,
+	ID_EV_MAIN0 = 1000, ID_EV_TGT0 = 1200, ID_EV_PART0 = 1300, ID_EV_DO = 1500, ID_EV_BACK,
 	ID_RS_NEXT = 700, ID_RS_RETRY, ID_RS_BASE,
 	ID_HELP_CLOSE = 900
 };
@@ -94,6 +95,10 @@ Game::Game()
 	m_shopPage = 0;
 	m_shopKind = 0;
 	m_itemAim = -1;
+	m_rosterPage = 0;
+	m_ordSnapN = 0;
+	m_ordLeave = -1;
+	m_ordAnimT = 0;
 	for (int i = 0; i < Renderer::PORTRAIT_N; i++) m_ptSlotUnit[i] = -1;
 	for (int i = 0; i < MAX_UNITS; i++) m_ptForUnit[i] = -1;
 	m_ult = FALSE;
@@ -234,33 +239,51 @@ void Game::ApplyAudio()
 	TacAudioSetVol(m_save.bgmVol, m_save.seVol);
 }
 
-float Game::DrawSoundOpts(float x, float y, float w)
+float Game::DrawSoundOpts(float x, float y, float w, float k)
 {
+	if (k < .4f) k = .4f;
+	float rh = U(32) * k, step = U(34) * k;
 	wchar_t v[16];
 	swprintf_s(v, L"%d", m_save.bgmVol * 10);
-	if (int d = Sel(ID_OPT_BGM, x, y, w, U(32), TT(TX_SET_BGM), v)) {
+	if (int d = Sel(ID_OPT_BGM, x, y, w, rh, TT(TX_SET_BGM), v)) {
 		m_save.bgmVol = Clampi(m_save.bgmVol + d, 0, 10);
 		ApplyAudio();
 	}
-	y += U(34);
+	y += step;
 	swprintf_s(v, L"%d", m_save.seVol * 10);
-	if (int d = Sel(ID_OPT_SE, x, y, w, U(32), TT(TX_SET_SE), v)) {
+	if (int d = Sel(ID_OPT_SE, x, y, w, rh, TT(TX_SET_SE), v)) {
 		m_save.seVol = Clampi(m_save.seVol + d, 0, 10);
 		ApplyAudio();
 		TacSfx(TS_CONFIRM);
 	}
-	y += U(34);
+	y += step;
 	static const int camTx[3] = { TX_SET_SLOW, TX_SET_Q_STD, TX_SET_FAST };
 	int c = Clampi(m_save.camSpeed, 0, 2);
-	if (int d = Sel(ID_OPT_CAM, x, y, w, U(32), TT(TX_SET_CAM), TT(camTx[c])))
+	if (int d = Sel(ID_OPT_CAM, x, y, w, rh, TT(TX_SET_CAM), TT(camTx[c])))
 		m_save.camSpeed = (c + d + 3) % 3;
-	return y + U(34);
+	return y + step;
 }
 
+int Game::PartyCap() const
+{
+	int c = m_save.partyCap;
+	if (c < 5) c = 5;
+	if (c > MAX_PARTY) c = MAX_PARTY;
+	return c;
+}
+int Game::RosterCap() const
+{
+	int c = m_save.rosterCap;
+	if (c < 20) c = 20;
+	if (c > MAX_ROSTER) c = MAX_ROSTER;
+	c -= c % 20;
+	if (c < 20) c = 20;
+	return c;
+}
 int Game::PartyCount() const
 {
-	int n = 0;
-	for (int i = 0; i < MAX_PARTY; i++) if (m_save.party[i] >= 0) n++;
+	int n = 0, cap = PartyCap();
+	for (int i = 0; i < cap; i++) if (m_save.party[i] >= 0) n++;
 	return n;
 }
 int Game::RosterCount() const
@@ -306,9 +329,30 @@ void Game::Tick(float dt)
 	}
 	UpdateParticles(m_screen == SC_BATTLE ? gdt : dt);
 	if (m_evFlash > 0) m_evFlash = max(0.f, m_evFlash - dt);
+	SyncBgm();
 	if (!m_r.Ready()) return;
 	if (!m_r.FrameReady()) return;
 	RenderFrame();
+}
+
+// 拠点=tactics.ogg、戦闘=tacticsgame、残敵1〜2かつ開幕より減っていれば tacticsgamewin、
+// 店=tacticsshop、作成・編成・進化=tacticsmake。無い曲は TacBgmScene が tactics.ogg にする。
+void Game::SyncBgm()
+{
+	int scene = TAC_BGM_HUB;
+	if (m_screen == SC_BATTLE) {
+		int alive = m_b.AliveCount(TEAM_ENEMY);
+		int all = 0;
+		for (int i = 0; i < m_b.nUnits; i++)
+			if (m_b.u[i].team == TEAM_ENEMY) all++;
+		const int closing = (m_victory == 1) || (alive > 0 && alive <= 2 && all > alive && m_b.AliveCount(TEAM_PLAYER) > 0);
+		scene = closing ? TAC_BGM_WIN : TAC_BGM_GAME;
+	} else if (m_shop) {
+		scene = TAC_BGM_SHOP;
+	} else if (m_screen == SC_CREATE || m_screen == SC_PARTY || m_screen == SC_EVOLVE) {
+		scene = TAC_BGM_MAKE;
+	}
+	TacBgmScene(scene);
 }
 
 void Game::SetupCamera(V3 target, float yaw, float pitch, float dist, float fov)
@@ -328,6 +372,7 @@ void Game::RenderFrame()
 	if (m_screen == SC_BATTLE && m_fastFwd) m_renderDt *= 2.f;
 	m_r.BeginFrame();
 	if (m_screen == SC_BATTLE) AssignBattlePortraits();
+	else if (m_loaded) PrepareMenuPortraits();
 	if (m_loaded) RenderPortraits();
 	switch (m_screen) {
 	case SC_BASE: case SC_PARTY: case SC_EVOLVE: case SC_RESULT:
@@ -811,12 +856,23 @@ void Game::DrawBanners(float)
 void Game::DrawHelpOverlay()
 {
 	m_r.HudRect(0, 0, (float)m_w, (float)m_h, RGBA8(0, 0, 0, 150));
-	float w = min((float)m_w - U(60), U(820)), h = min((float)m_h - U(60), U(560));
-	float x = (m_w - w) * .5f, y = (m_h - h) * .5f;
+	float margin = max(8.f, min(U(24), m_h * .04f));
+	float w = min((float)m_w - margin * 2.f, U(820));
+	float h = min((float)m_h - margin * 2.f, U(560));
+	if (w < 120.f) w = (float)m_w - 8.f;
+	if (h < 100.f) h = (float)m_h - 8.f;
+	float x = ((float)m_w - w) * .5f, y = ((float)m_h - h) * .5f;
 	Panel(x, y, w, h);
-	m_r.HudText(TT(TX_BT_HELP), x + w * .5f, y + U(30), U(24), RGBA8(255, 226, 150), 1, 1);
-	m_r.HudTextBox(TT(TX_HELP_TEXT), x + U(28), y + U(60), w - U(56), h - U(130), U(15), RGBA8(236, 236, 240));
-	if (Btn(ID_HELP_CLOSE, x + w * .5f - U(80), y + h - U(56), U(160), U(38), TT(TX_BASE_CLOSE))) m_showHelp = FALSE;
+	float title = min(U(24), h * .06f);
+	float btnH = min(U(38), max(22.f, h * .1f));
+	float btnW = min(U(160), w * .46f);
+	float btnY = y + h - btnH - max(6.f, h * .03f);
+	m_r.HudText(TT(TX_BT_HELP), x + w * .5f, y + title + 6.f, title, RGBA8(255, 226, 150), 1, 1);
+	float boxY = y + title * 2.f + 10.f;
+	float boxH = btnY - boxY - 8.f;
+	if (boxH < 24.f) boxH = 24.f;
+	m_r.HudTextBox(TT(TX_HELP_TEXT), x + max(8.f, w * .04f), boxY, w - max(16.f, w * .08f), boxH, min(U(15), h * .035f), RGBA8(236, 236, 240));
+	if (Btn(ID_HELP_CLOSE, x + w * .5f - btnW * .5f, btnY, btnW, btnH, TT(TX_BASE_CLOSE))) m_showHelp = FALSE;
 }
 
 void Game::DrawStatLines(const CharData& c, float x, float y, float w, const int* gains, int hpCur, int mpCur)
@@ -904,6 +960,47 @@ void Game::RenderPortraits()
 		}
 		budget--;
 	}
+}
+
+int Game::RosterPortrait(int roster) const
+{
+	if (roster < 0) return -1;
+	int want = roster + 1;
+	for (int s = 0; s < Renderer::PORTRAIT_N; s++) if (m_portraitWant[s] == want) return s;
+	return -1;
+}
+
+void Game::PrepareMenuPortraits()
+{
+	int idx[Renderer::PORTRAIT_N];
+	int n = 0;
+	auto add = [&](int r) {
+		if (r < 0 || r >= MAX_ROSTER || n >= Renderer::PORTRAIT_N) return;
+		if (!m_save.roster[r].used) return;
+		for (int i = 0; i < n; i++) if (idx[i] == r) return;
+		idx[n++] = r;
+	};
+	if (m_screen == SC_BASE) {
+		int cap = PartyCap();
+		for (int i = 0; i < cap; i++) add(m_save.party[i]);
+	} else if (m_screen == SC_PARTY) {
+		add(m_partySel);
+		int begin = m_rosterPage * 20;
+		int cap = RosterCap();
+		for (int i = 0; i < 20 && begin + i < cap; i++) add(begin + i);
+	} else if (m_screen == SC_EVOLVE) {
+		add(m_evMain);
+		add(m_evPartner[0]);
+		add(m_evPartner[1]);
+		int cap = RosterCap();
+		for (int i = 0; i < cap; i++) add(i);
+	} else if (m_screen == SC_RESULT) {
+		for (int i = 0; i < m_resultN; i++) add(m_resultRoster[i]);
+	} else if (m_screen == SC_CREATE && m_editIdx >= 0) {
+		add(m_editIdx);
+	}
+	for (int s = 0; s < Renderer::PORTRAIT_N; s++)
+		m_portraitWant[s] = s < n ? idx[s] + 1 : 0;
 }
 
 void Game::DrawPortrait(int slot, float x, float y, float s, DWORD frame)
@@ -1349,6 +1446,8 @@ void Game::DrawShop()
 	if (m_shopKind == 3) {
 		n = TrophyList(ids, 512);
 	} else if (m_shopKind == 2) {
+		ids[n++] = -1;
+		ids[n++] = -2;
 		for (int i = 0; i < GoodCount() && n < 512; i++) ids[n++] = i;
 	} else {
 		for (int i = 0; i < GearCount() && n < 512; i++) {
@@ -1375,6 +1474,23 @@ void Game::DrawShop()
 			swprintf_s(row, L"%s  x%d  %dG", nm, ct, price);
 			if (Btn(ID_SHOP_BUY0 + s, x + U(16), yy, w * .62f, U(30), row, TRUE, FALSE, U(13))) {
 				if (TrophySell(m_save, ids[ix])) { TacSfx(TS_CONFIRM); Persist(); return; }
+			}
+		} else if (m_shopKind == 2 && ids[ix] < 0) {
+			BOOL partyT = ids[ix] == -1;
+			int cap = partyT ? PartyCap() : RosterCap();
+			int maxCap = partyT ? MAX_PARTY : MAX_ROSTER;
+			int price = 0;
+			if (cap < maxCap) price = partyT ? 800 + (cap - 5) * 350 : 1600 + ((cap - 20) / 20) * 600;
+			if (cap >= maxCap) swprintf_s(row, L"%s  MAX", TT(partyT ? TX_TICKET_PT : TX_TICKET_RS));
+			else if (partyT) swprintf_s(row, L"%s  %dG  (%d→%d)", TT(TX_TICKET_PT), price, cap, cap + 1);
+			else swprintf_s(row, L"%s  %dG  (%d→%d)", TT(TX_TICKET_RS), price, cap, cap + 20);
+			ok = cap < maxCap && m_save.gold >= price;
+			if (Btn(ID_SHOP_BUY0 + s, x + U(16), yy, w * .62f, U(30), row, ok, FALSE, U(13))) {
+				m_save.gold -= price;
+				if (partyT) m_save.partyCap = cap + 1;
+				else m_save.rosterCap = cap + 20;
+				TacSfx(TS_CONFIRM);
+				Persist();
 			}
 		} else if (m_shopKind == 2) {
 			const GoodDef* gd = GoodAt(ids[ix]);
@@ -1434,65 +1550,81 @@ void Game::DrawBaseUi()
 {
 	if (m_codex) { DrawCodex(); return; }
 	if (m_shop) { DrawShop(); return; }
-	float pw = U(330), ph = (float)m_h - U(40);
-	float x = U(20), y = U(20);
+	float margin = max(8.f, min(U(20), (float)m_w * .02f));
+	float pw = min(U(330), (float)m_w - margin * 2.f);
+	float ph = min((float)m_h - margin * 2.f, (float)m_h - 8.f);
+	float x = margin, y = margin;
+	if (x + pw > m_w) pw = (float)m_w - x - 4.f;
+	if (y + ph > m_h) ph = (float)m_h - y - 4.f;
 	Panel(x, y, pw, ph);
-	m_r.HudText(TT(TX_TITLE), x + pw * .5f, y + U(36), U(24), RGBA8(255, 226, 150), 1, 1);
-	float by = y + U(74);
-	float bw = pw - U(40), bh = U(44), bx = x + U(20);
+	float titleH = min(U(24), ph * .045f);
+	m_r.HudText(TT(TX_TITLE), x + pw * .5f, y + titleH + 8.f, titleH, RGBA8(255, 226, 150), 1, 1);
+	float helpH = min(U(40), max(24.f, ph * .07f));
+	float helpY = y + ph - helpH - max(6.f, ph * .015f);
+	float top = y + titleH * 2.f + 14.f;
+	float midRoom = helpY - top - 4.f;
+	float midNeed = U(636);
+	float k = midNeed > 1.f ? min(1.f, midRoom / midNeed) : 1.f;
+	if (k < .42f) k = .42f;
+	auto Ku = [&](float px) { return U(px) * k; };
+	float by = top;
+	float bw = pw - max(16.f, pw * .1f), bh = Ku(44), bx = x + (pw - bw) * .5f;
 	wchar_t st[64];
 	swprintf_s(st, L"%d / %d", m_save.stageSel, TAC_STAGE_MAX);
-	int d = Sel(ID_BASE_STAGE, bx, by, bw, U(40), TT(TX_BASE_STAGE), st);
+	int d = Sel(ID_BASE_STAGE, bx, by, bw, Ku(40), TT(TX_BASE_STAGE), st);
 	if (d) {
 		int step = m_keyShift ? 100 : 10;
 		if ((GetKeyState(VK_CONTROL) & 0x8000) == 0 && !m_keyShift) step = 1;
 		int mx = min(TAC_STAGE_MAX, m_save.stageCleared + 1);
 		m_save.stageSel = Clampi(m_save.stageSel + d * step, 1, mx);
 	}
-	by += U(46);
+	by += Ku(46);
 	wchar_t cl[64];
 	swprintf_s(cl, L"%s: %d    %s %d", TT(TX_BASE_CLEARED), m_save.stageCleared, TT(TX_GOLD), m_save.gold);
-	m_r.HudText(cl, bx + U(4), by + U(8), U(14), RGBA8(200, 200, 210), 0, 0);
-	by += U(28);
+	m_r.HudText(cl, bx + U(4), by + Ku(8), min(U(14), Ku(16)), RGBA8(200, 200, 210), 0, 0);
+	by += Ku(28);
 	int np = PartyCount();
-	if (Btn(ID_BASE_SORTIE, bx, by, bw, bh + U(8), TT(TX_BASE_SORTIE), np > 0, FALSE, U(22), RGBA8(170, 60, 50, 240))) {
+	if (Btn(ID_BASE_SORTIE, bx, by, bw, bh + Ku(8), TT(TX_BASE_SORTIE), np > 0, FALSE, min(U(22), bh * .5f), RGBA8(170, 60, 50, 240))) {
 		ProbeSuspend();
 		if (m_midStage == m_save.stageSel || m_autoStage == m_save.stageSel) { m_sortieAsk = 1; return; }
 		StartBattle(m_save.stageSel);
 		return;
 	}
-	by += bh + U(18);
+	by += bh + Ku(18);
 	if (Btn(ID_BASE_PARTY, bx, by, bw, bh, TT(TX_BASE_PARTY), RosterCount() > 0)) { EnterParty(); return; }
-	by += bh + U(8);
-	if (Btn(ID_BASE_CREATE, bx, by, bw, bh, TT(TX_BASE_CREATE), RosterCount() < MAX_ROSTER)) { EnterCreate(-1); return; }
-	by += bh + U(8);
+	by += bh + Ku(8);
+	if (Btn(ID_BASE_CREATE, bx, by, bw, bh, TT(TX_BASE_CREATE), RosterCount() < RosterCap())) { EnterCreate(-1); return; }
+	by += bh + Ku(8);
 	if (Btn(ID_BASE_EVOLVE, bx, by, bw, bh, TT(TX_BASE_EVOLVE), RosterCount() > 0)) { EnterEvolve(); return; }
-	by += bh + U(8);
+	by += bh + Ku(8);
 	if (Btn(ID_BASE_CODEX, bx, by, bw, bh, TT(TX_BASE_CODEX))) { m_codex = 1; m_codexPage = 0; return; }
-	by += bh + U(8);
+	by += bh + Ku(8);
 	if (Btn(ID_BASE_SHOP, bx, by, bw, bh, TT(TX_SHOP))) {
 		m_shop = 1; m_shopPage = 0; m_shopKind = 0;
-		for (int i = 0; i < MAX_PARTY; i++) {
+		int cap = PartyCap();
+		for (int i = 0; i < cap; i++) {
 			int r = m_save.party[i];
 			if (r >= 0 && m_save.roster[r].used) { m_shopLine = ClassLine(m_save.roster[r].cls); break; }
 		}
 		return;
 	}
-	by += bh + U(18);
+	by += bh + Ku(18);
 	static const int qtx[3] = { TX_SET_Q_LOW, TX_SET_Q_STD, TX_SET_Q_HIGH };
-	if (int q = Sel(ID_BASE_QUALITY, bx, by, bw, U(36), TT(TX_SET_QUALITY), TT(qtx[Clampi(m_save.quality, 0, 2)]))) {
+	if (int q = Sel(ID_BASE_QUALITY, bx, by, bw, Ku(36), TT(TX_SET_QUALITY), TT(qtx[Clampi(m_save.quality, 0, 2)]))) {
 		m_save.quality = (m_save.quality + q + 3) % 3;
 		m_r.SetQuality(m_save.quality);
 		InvalidatePortraits();
 	}
-	by += U(40);
-	if (Sel(ID_BASE_ANIM, bx, by, bw, U(36), TT(TX_SET_ANIM), TT(m_save.battleAnim ? TX_SET_ANIM_SHORT : TX_SET_ANIM_FULL))) m_save.battleAnim = !m_save.battleAnim;
-	by += U(40);
-	if (Sel(ID_BASE_GRID, bx, by, bw, U(36), TT(TX_SET_GRID), TT(m_save.showGrid ? TX_CR_ON : TX_CR_OFF))) m_save.showGrid = !m_save.showGrid;
-	by += U(40);
-	by = DrawSoundOpts(bx, by, bw);
-	if (Btn(ID_BASE_HELP, bx, by, bw * .48f, bh, TT(TX_BT_HELP))) m_showHelp = TRUE;
-	if (Btn(ID_BASE_CLOSE, bx + bw * .52f, by, bw * .48f, bh, TT(TX_BASE_CLOSE))) { Persist(); m_wantClose = TRUE; }
+	by += Ku(40);
+	if (Sel(ID_BASE_ANIM, bx, by, bw, Ku(36), TT(TX_SET_ANIM), TT(m_save.battleAnim ? TX_SET_ANIM_SHORT : TX_SET_ANIM_FULL))) m_save.battleAnim = !m_save.battleAnim;
+	by += Ku(40);
+	if (Sel(ID_BASE_GRID, bx, by, bw, Ku(36), TT(TX_SET_GRID), TT(m_save.showGrid ? TX_CR_ON : TX_CR_OFF))) m_save.showGrid = !m_save.showGrid;
+	by += Ku(40);
+	by = DrawSoundOpts(bx, by, bw, k);
+	if (by > helpY) helpY = min(by, y + ph - helpH - 4.f);
+	if (helpY + helpH > y + ph - 2.f) helpY = y + ph - helpH - 2.f;
+	if (Btn(ID_BASE_HELP, bx, helpY, bw * .48f, helpH, TT(TX_BT_HELP))) m_showHelp = TRUE;
+	if (Btn(ID_BASE_CLOSE, bx + bw * .52f, helpY, bw * .48f, helpH, TT(TX_BASE_CLOSE))) { Persist(); m_wantClose = TRUE; }
 	// ヒント
 	const wchar_t* hint = NULL;
 	if (RosterCount() == 0) hint = TT(TX_BASE_HINT_NOCHAR);
@@ -1521,26 +1653,37 @@ void Game::DrawBaseUi()
 		m_r.HudPanel(hx, m_h - U(90), hw, U(44), RGBA8(20, 20, 40, 220), RGBA8(255, 210, 120, (int)(255 * pulse)));
 		m_r.HudText(hint, hx + hw * .5f, m_h - U(68), U(18), RGBA8(255, 236, 190), 1, 1);
 	}
-	// 出撃メンバー
-	float cw = U(118), chh = U(150);
-	float total = cw * MAX_PARTY + U(10) * (MAX_PARTY - 1);
-	float cx0 = x + pw + ((float)m_w - x - pw - total) * .5f;
+	// 出撃メンバー（5 人で 1 段、拡張後は 2 段）
+	int cap = PartyCap();
+	int cols = 5;
+	int rows = (cap + cols - 1) / cols;
+	float gap = U(10);
+	float availW = (float)m_w - x - pw - U(28);
+	float cw = min(U(118), (availW - gap * (cols - 1)) / cols);
+	if (cw < 48.f) cw = 48.f;
+	float chh = min(U(150), ((float)m_h - U(56)) / rows - gap);
+	if (chh < 64.f) chh = 64.f;
+	float total = cw * cols + gap * (cols - 1);
+	float cx0 = x + pw + max(8.f, ((float)m_w - x - pw - total) * .5f);
 	float cy = U(24);
 	m_r.HudText(TT(TX_PT_DEPLOY), cx0, cy + U(10), U(16), RGBA8(255, 226, 150), 0, 1);
 	cy += U(24);
-	for (int i = 0; i < MAX_PARTY; i++) {
-		float cx = cx0 + i * (cw + U(10));
+	for (int i = 0; i < cap; i++) {
+		int col = i % cols, row = i / cols;
+		float cx = cx0 + col * (cw + gap);
+		float ry = cy + row * (chh + gap);
 		int r = m_save.party[i];
-		m_r.HudPanel(cx, cy, cw, chh, RGBA8(16, 20, 36, 200), RGBA8(150, 128, 86));
+		m_r.HudPanel(cx, ry, cw, chh, RGBA8(16, 20, 36, 200), RGBA8(150, 128, 86));
 		if (r >= 0 && m_save.roster[r].used) {
 			const CharData& c = m_save.roster[r];
-			DrawPortrait(r, cx + U(11), cy + U(8), cw - U(22), RGBA8(120, 160, 255));
-			m_r.HudText(c.name, cx + cw * .5f, cy + U(112), U(14), RGBA8(255, 255, 255), 1, 1);
+			float ps = min(cw - U(16), chh * .55f);
+			DrawPortrait(RosterPortrait(r), cx + (cw - ps) * .5f, ry + U(6), ps, RGBA8(120, 160, 255));
+			m_r.HudText(c.name, cx + cw * .5f, ry + ps + U(16), min(U(14), chh * .1f), RGBA8(255, 255, 255), 1, 1);
 			wchar_t l[64];
 			swprintf_s(l, L"%s %s %d", ClassName(c.cls), TT(TX_MISC_LV), c.lv);
-			m_r.HudText(l, cx + cw * .5f, cy + U(132), U(12), RGBA8(210, 210, 200), 1, 0);
+			m_r.HudText(l, cx + cw * .5f, ry + ps + U(32), min(U(12), chh * .08f), RGBA8(210, 210, 200), 1, 0);
 		} else {
-			m_r.HudText(L"—", cx + cw * .5f, cy + chh * .5f, U(22), RGBA8(120, 120, 130), 1, 0);
+			m_r.HudText(L"—", cx + cw * .5f, ry + chh * .5f, U(22), RGBA8(120, 120, 130), 1, 0);
 		}
 	}
 }
@@ -1715,7 +1858,7 @@ void Game::DrawCreateUi()
 	if (Btn(ID_CR_OK, bx, fy, bw * .58f, U(42), TT(isNew ? TX_CR_CREATE : TX_CR_SAVE), nameOk, FALSE, U(19), RGBA8(60, 130, 70, 240))) {
 		if (isNew) {
 			int slot = -1;
-			for (int i = 0; i < MAX_ROSTER; i++) if (!m_save.roster[i].used) { slot = i; break; }
+			for (int i = 0; i < RosterCap(); i++) if (!m_save.roster[i].used) { slot = i; break; }
 			if (slot >= 0) {
 				CharData c = m_edit;
 				c.used = 1;
@@ -1723,7 +1866,10 @@ void Game::DrawCreateUi()
 				c.uid = m_save.uidNext++;
 				CharRecalcInit(c);
 				m_save.roster[slot] = c;
-				for (int i = 0; i < MAX_PARTY; i++) if (m_save.party[i] < 0) { m_save.party[i] = slot; break; }
+				if (PartyCount() < PartyCap()) {
+					int pcap = PartyCap();
+					for (int i = 0; i < pcap; i++) if (m_save.party[i] < 0) { m_save.party[i] = slot; break; }
+				}
 				Persist();
 				m_partySel = slot;
 			}
@@ -1755,23 +1901,25 @@ void Game::EnterParty()
 		m_partySel = -1;
 		for (int i = 0; i < MAX_ROSTER; i++) if (m_save.roster[i].used) { m_partySel = i; break; }
 	}
-	for (int i = 0; i < Renderer::PORTRAIT_N; i++) m_portraitWant[i] = (i < MAX_ROSTER) ? i + 1 : 0;
-	m_focusId = ID_PT_CARD0 + max(0, m_partySel);
+	if (m_partySel >= 0) m_rosterPage = m_partySel / 20;
+	m_focusId = ID_PT_CARD0 + (m_partySel >= 0 ? m_partySel % 20 : 0);
 	BuildShowcase();
 }
 
 void Game::TogglePartyMember(int idx)
 {
-	for (int i = 0; i < MAX_PARTY; i++) if (m_save.party[i] == idx) {
+	int cap = PartyCap();
+	for (int i = 0; i < cap; i++) if (m_save.party[i] == idx) {
 		m_save.party[i] = -1;
 		int k = 0;
 		int tmp[MAX_PARTY];
-		for (int j = 0; j < MAX_PARTY; j++) if (m_save.party[j] >= 0) tmp[k++] = m_save.party[j];
+		for (int j = 0; j < cap; j++) if (m_save.party[j] >= 0) tmp[k++] = m_save.party[j];
 		for (int j = 0; j < MAX_PARTY; j++) m_save.party[j] = j < k ? tmp[j] : -1;
 		BuildShowcase();
 		return;
 	}
-	for (int i = 0; i < MAX_PARTY; i++) if (m_save.party[i] < 0) { m_save.party[i] = idx; BuildShowcase(); return; }
+	if (PartyCount() >= cap) { AddBanner(TT(TX_PT_HINT), NULL, RGBA8(255, 200, 150), 2, 2.f); return; }
+	for (int i = 0; i < cap; i++) if (m_save.party[i] < 0) { m_save.party[i] = idx; BuildShowcase(); return; }
 	AddBanner(TT(TX_PT_HINT), NULL, RGBA8(255, 200, 150), 2, 2.f);
 }
 
@@ -1791,43 +1939,61 @@ void Game::DeleteRoster(int idx)
 
 void Game::DrawPartyUi()
 {
-	float x = U(20), y = U(20);
-	float gw = min((float)m_w * .6f, U(760)), gh = (float)m_h - U(40);
+	float x = max(8.f, min(U(20), (float)m_w * .02f));
+	float y = max(8.f, min(U(20), (float)m_h * .02f));
+	float gw = min((float)m_w * .6f, min(U(760), (float)m_w - x - U(200)));
+	float gh = (float)m_h - y * 2.f;
+	if (gw < 200.f) gw = min(200.f, (float)m_w - 16.f);
 	Panel(x, y, gw, gh);
 	m_r.HudText(TT(TX_PT_TITLE), x + U(20), y + U(26), U(22), RGBA8(255, 226, 150), 0, 1);
-	wchar_t cnt[64];
-	swprintf_s(cnt, L"%s %d/%d   %s %d/%d", TT(TX_BASE_ROSTER), RosterCount(), MAX_ROSTER, TT(TX_PT_DEPLOY), PartyCount(), MAX_PARTY);
+	int rCap = RosterCap(), pCap = PartyCap();
+	int pages = max(1, (rCap + 19) / 20);
+	if (m_rosterPage < 0) m_rosterPage = 0;
+	if (m_rosterPage >= pages) m_rosterPage = pages - 1;
+	int begin = m_rosterPage * 20;
+	wchar_t cnt[80];
+	swprintf_s(cnt, L"%s %d/%d   %s %d/%d", TT(TX_BASE_ROSTER), RosterCount(), rCap, TT(TX_PT_DEPLOY), PartyCount(), pCap);
 	m_r.HudText(cnt, x + gw - U(20), y + U(26), U(14), RGBA8(220, 220, 220), 2, 0);
 	int cols = 5;
 	float pad = U(14);
 	float cw = (gw - pad * 2 - U(8) * (cols - 1)) / cols;
 	float ch = min(cw * 1.28f, (gh - U(130)) / 4.f - U(8));
 	float ps = min(cw - U(16), ch - U(44));
-	for (int i = 0; i < MAX_ROSTER; i++) {
-		float cx = x + pad + (i % cols) * (cw + U(8));
-		float cy = y + U(52) + (i / cols) * (ch + U(8));
+	for (int local = 0; local < 20; local++) {
+		int i = begin + local;
+		if (i >= rCap) break;
+		float cx = x + pad + (local % cols) * (cw + U(8));
+		float cy = y + U(52) + (local / cols) * (ch + U(8));
 		const CharData& c = m_save.roster[i];
 		if (!c.used) {
-			if (Btn(ID_PT_CARD0 + i, cx, cy, cw, ch, L"+", RosterCount() < MAX_ROSTER, FALSE, U(28), RGBA8(30, 40, 60, 160))) { EnterCreate(-1); return; }
+			if (Btn(ID_PT_CARD0 + local, cx, cy, cw, ch, L"+", RosterCount() < rCap, FALSE, U(28), RGBA8(30, 40, 60, 160))) { EnterCreate(-1); return; }
 			continue;
 		}
 		BOOL inParty = FALSE;
-		for (int p = 0; p < MAX_PARTY; p++) if (m_save.party[p] == i) inParty = TRUE;
-		if (Btn(ID_PT_CARD0 + i, cx, cy, cw, ch, L"", TRUE, m_partySel == i, 0, inParty ? RGBA8(50, 80, 140, 240) : 0)) {
+		for (int p = 0; p < pCap; p++) if (m_save.party[p] == i) inParty = TRUE;
+		if (Btn(ID_PT_CARD0 + local, cx, cy, cw, ch, L"", TRUE, m_partySel == i, 0, inParty ? RGBA8(50, 80, 140, 240) : 0)) {
 			if (m_partySel == i) TogglePartyMember(i);
 			m_partySel = i;
 			m_confirmDelete = 0;
 		}
-		DrawPortrait(i, cx + (cw - ps) * .5f, cy + U(6), ps, inParty ? RGBA8(120, 180, 255) : RGBA8(110, 100, 80));
+		DrawPortrait(RosterPortrait(i), cx + (cw - ps) * .5f, cy + U(6), ps, inParty ? RGBA8(120, 180, 255) : RGBA8(110, 100, 80));
 		m_r.HudText(c.name, cx + cw * .5f, cy + U(6) + ps + U(12), U(13), m_partySel == i ? RGBA8(40, 24, 8) : RGBA8(255, 255, 255), 1, 1, m_partySel != i);
 		wchar_t l[48];
 		swprintf_s(l, L"%s%d", TT(TX_MISC_LV), c.lv);
 		m_r.HudText(l, cx + cw * .5f, cy + U(6) + ps + U(28), U(11), m_partySel == i ? RGBA8(60, 40, 10) : RGBA8(210, 210, 200), 1, 0, m_partySel != i);
 		if (inParty) m_r.HudText(L"★", cx + U(12), cy + U(14), U(14), RGBA8(255, 220, 90), 1, 1);
 	}
-	m_r.HudText(TT(TX_PT_HINT), x + gw * .5f, y + gh - U(64), U(13), RGBA8(210, 210, 220), 1, 0);
+	if (pages > 1) {
+		wchar_t pg[32];
+		swprintf_s(pg, L"%d / %d", m_rosterPage + 1, pages);
+		if (Btn(ID_PT_PAGE_PREV, x + gw * .5f - U(110), y + gh - U(92), U(36), U(28), L"◀")) { m_rosterPage = (m_rosterPage + pages - 1) % pages; InvalidatePortraits(); return; }
+		m_r.HudText(pg, x + gw * .5f, y + gh - U(78), U(13), RGBA8(230, 230, 240), 1, 1);
+		if (Btn(ID_PT_PAGE_NEXT, x + gw * .5f + U(74), y + gh - U(92), U(36), U(28), L"▶")) { m_rosterPage = (m_rosterPage + 1) % pages; InvalidatePortraits(); return; }
+	} else {
+		m_r.HudText(TT(TX_PT_HINT), x + gw * .5f, y + gh - U(64), U(13), RGBA8(210, 210, 220), 1, 0);
+	}
 	if (Btn(ID_PT_BACK, x + gw - U(180), y + gh - U(46), U(160), U(36), TT(TX_CR_BACK))) { Persist(); EnterBase(); return; }
-	if (Btn(ID_PT_NEW, x + U(20), y + gh - U(46), U(200), U(36), TT(TX_BASE_CREATE), RosterCount() < MAX_ROSTER)) { EnterCreate(-1); return; }
+	if (Btn(ID_PT_NEW, x + U(20), y + gh - U(46), U(200), U(36), TT(TX_BASE_CREATE), RosterCount() < rCap)) { EnterCreate(-1); return; }
 	// 詳細
 	float dx = x + gw + U(14), dw = (float)m_w - dx - U(20);
 	if (dw < U(220) || m_partySel < 0) return;
@@ -1835,7 +2001,7 @@ void Game::DrawPartyUi()
 	if (!c.used) return;
 	Panel(dx, y, dw, gh);
 	float ps2 = min(U(110), dw * .4f);
-	DrawPortrait(m_partySel, dx + U(14), y + U(14), ps2, RGBA8(200, 170, 110));
+	DrawPortrait(RosterPortrait(m_partySel), dx + U(14), y + U(14), ps2, RGBA8(200, 170, 110));
 	m_r.HudText(c.name, dx + ps2 + U(26), y + U(30), U(20), RGBA8(255, 255, 255), 0, 1);
 	m_r.HudText(ClassName(c.cls), dx + ps2 + U(26), y + U(56), U(15), RGBA8(255, 226, 150), 0, 1);
 	wchar_t l[96];
@@ -1965,7 +2131,7 @@ void Game::DrawEvolveUi()
 		if (Btn(ID_EV_MAIN0 + i, c0 + rowH, ry, colW - rowH, rowH - U(6), l, TRUE, m_evMain == i, U(14))) {
 			m_evMain = i; m_evTarget = -1; m_evPartner[0] = m_evPartner[1] = -1; m_evPick = 1;
 		}
-		DrawPortrait(i, c0, ry, rowH - U(6), RGBA8(150, 130, 90));
+		DrawPortrait(RosterPortrait(i), c0, ry, rowH - U(6), RGBA8(150, 130, 90));
 		ry += rowH;
 	}
 	if (!nElig) m_r.HudTextBox(TT(TX_EV_NONE_ELIGIBLE), c0, top + U(30), colW, U(80), U(15), RGBA8(200, 200, 200));
@@ -2030,7 +2196,7 @@ void Game::DrawEvolveUi()
 					else m_evPartner[need - 1] = i;
 				}
 			}
-			DrawPortrait(i, c2, py, rowH - U(6), RGBA8(150, 130, 90));
+			DrawPortrait(RosterPortrait(i), c2, py, rowH - U(6), RGBA8(150, 130, 90));
 			py += rowH;
 		}
 		CharData ps[2];
@@ -2059,7 +2225,7 @@ void Game::DrawResultUi()
 		int r = m_resultRoster[i];
 		if (r < 0 || !m_save.roster[r].used) continue;
 		const CharData& c = m_save.roster[r];
-		DrawPortrait(r, x + U(30), ry, rowH - U(8), RGBA8(120, 160, 255));
+		DrawPortrait(RosterPortrait(r), x + U(30), ry, rowH - U(8), RGBA8(120, 160, 255));
 		m_r.HudText(c.name, x + U(30) + rowH + U(4), ry + rowH * .28f, U(17), RGBA8(255, 255, 255), 0, 1);
 		m_r.HudText(ClassName(c.cls), x + U(30) + rowH + U(4), ry + rowH * .62f, U(13), RGBA8(255, 226, 150), 0, 0);
 		wchar_t l[96];
@@ -2073,7 +2239,7 @@ void Game::DrawResultUi()
 	}
 	float by = y + h - U(60);
 	float bw = U(200);
-	if (m_victory && m_battleStage < 100) {
+	if (m_victory && m_battleStage < TAC_STAGE_MAX) {
 		if (Btn(ID_RS_NEXT, x + w * .5f - bw * 1.5f - U(12), by, bw, U(42), TT(TX_BT_NEXT), PartyCount() > 0, FALSE, U(17), RGBA8(170, 60, 50, 240))) {
 			m_save.stageSel = Clampi(m_battleStage + 1, 1, min(TAC_STAGE_MAX, m_save.stageCleared + 1));
 			StartBattle(m_save.stageSel);
