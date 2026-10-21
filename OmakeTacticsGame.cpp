@@ -22,9 +22,12 @@ enum {
 	ID_CR_HAT, ID_CR_CAPE, ID_CR_OK, ID_CR_BACK,
 	ID_PT_CARD0 = 300, ID_PT_DEPLOY = 340, ID_PT_EDIT, ID_PT_DELETE, ID_PT_YES, ID_PT_NO, ID_PT_BACK, ID_PT_NEW,
 	ID_PT_PAGE_PREV = 360, ID_PT_PAGE_NEXT,
+	ID_PT_ACC0 = 366, ID_PT_ACC1, ID_PT_BEAD0, ID_PT_BEAD1,
+	ID_EQ_NONE = 1860, ID_EQ_ROW0, ID_EQ_PREV = 1880, ID_EQ_NEXT, ID_EQ_CLOSE,
 	ID_EV_MAIN0 = 1000, ID_EV_TGT0 = 1200, ID_EV_PART0 = 1300, ID_EV_DO = 1500, ID_EV_BACK,
 	ID_RS_NEXT = 700, ID_RS_RETRY, ID_RS_BASE,
-	ID_HELP_CLOSE = 900
+	ID_HELP_CLOSE = 900,
+	ID_BASE_REROLL = 940
 };
 
 void ThemeEnv(int th, Env& e)
@@ -96,6 +99,8 @@ Game::Game()
 	m_shopKind = 0;
 	m_itemAim = -1;
 	m_rosterPage = 0;
+	m_mapSeed = 0;
+	m_mapSeedStage = -1;
 	m_ordSnapN = 0;
 	m_ordLeave = -1;
 	m_ordAnimT = 0;
@@ -123,6 +128,8 @@ Game::Game()
 	m_lineage = 0;
 	m_previewDrag = FALSE;
 	m_partySel = -1;
+	m_eqPick = 0;
+	m_eqPage = 0;
 	m_evMain = m_evTarget = -1;
 	m_evPartner[0] = m_evPartner[1] = -1;
 	m_evPick = 0;
@@ -152,6 +159,7 @@ Game::Game()
 	memset(&m_proj, 0, sizeof(m_proj));
 	m_cutStageT = 0;
 	m_cutA = m_cutD = -1;
+	m_cutAllyN = m_cutFoeN = 0;
 	m_seqCaster = m_seqPrimary = -1;
 	m_seqSkill = -1;
 	m_battleStage = 1;
@@ -335,18 +343,20 @@ void Game::Tick(float dt)
 	RenderFrame();
 }
 
-// 拠点=tactics.ogg、戦闘=tacticsgame、残敵1〜2かつ開幕より減っていれば tacticsgamewin、
-// 店=tacticsshop、作成・編成・進化=tacticsmake。無い曲は TacBgmScene が tactics.ogg にする。
+// 拠点=tactics.ogg、戦闘=tacticsgame、勝利確定（ボス撃破・残敵0・残敵1〜2）は tacticsgamewin。
+// レベルアップ中も勝敗が付いていれば勝利曲のまま。店=tacticsshop、作成・編成・進化=tacticsmake。
 void Game::SyncBgm()
 {
 	int scene = TAC_BGM_HUB;
 	if (m_screen == SC_BATTLE) {
 		int alive = m_b.AliveCount(TEAM_ENEMY);
+		int players = m_b.AliveCount(TEAM_PLAYER);
 		int all = 0;
 		for (int i = 0; i < m_b.nUnits; i++)
 			if (m_b.u[i].team == TEAM_ENEMY) all++;
-		const int closing = (m_victory == 1) || (alive > 0 && alive <= 2 && all > alive && m_b.AliveCount(TEAM_PLAYER) > 0);
-		scene = closing ? TAC_BGM_WIN : TAC_BGM_GAME;
+		const int fightWon = (m_victory == 1) || (m_bossDown && players > 0) || (alive == 0 && all > 0 && players > 0);
+		const int fewLeft = alive > 0 && alive <= 2 && all > alive && players > 0;
+		scene = (fightWon || fewLeft) ? TAC_BGM_WIN : TAC_BGM_GAME;
 	} else if (m_shop) {
 		scene = TAC_BGM_SHOP;
 	} else if (m_screen == SC_CREATE || m_screen == SC_PARTY || m_screen == SC_EVOLVE) {
@@ -726,7 +736,8 @@ void Game::NavBack()
 	switch (m_screen) {
 	case SC_CREATE: if (m_textFocus) m_textFocus = 0; else EnterParty(); break;
 	case SC_PARTY:
-		if (m_confirmDelete) m_confirmDelete = 0;
+		if (m_eqPick) m_eqPick = 0;
+		else if (m_confirmDelete) m_confirmDelete = 0;
 		else EnterBase();
 		break;
 	case SC_EVOLVE:
@@ -886,11 +897,13 @@ void Game::DrawStatLines(const CharData& c, float x, float y, float w, const int
 		if (s == S_HP && hpCur >= 0) swprintf_s(v, L"%d/%d", hpCur, c.stat[s]);
 		else if (s == S_MP && mpCur >= 0) swprintf_s(v, L"%d/%d", mpCur, c.stat[s]);
 		else swprintf_s(v, L"%d", c.stat[s]);
-		m_r.HudText(v, sx + w * .5f - U(14), sy + lh * .5f, U(15), RGBA8(250, 250, 250), 2, 1);
+		float edge = sx + w * .5f - U(4);
+		float numEdge = (gains && gains[s] != 0) ? edge - U(46) : edge;
+		m_r.HudText(v, numEdge, sy + lh * .5f, U(15), RGBA8(250, 250, 250), 2, 1);
 		if (gains && gains[s] != 0) {
 			wchar_t g[16];
 			swprintf_s(g, L"%+d", gains[s]);
-			m_r.HudText(g, sx + w * .5f - U(10), sy + lh * .5f, U(13), gains[s] > 0 ? RGBA8(120, 255, 140) : RGBA8(255, 120, 110), 0, 1);
+			m_r.HudText(g, edge, sy + lh * .5f, U(13), gains[s] > 0 ? RGBA8(120, 255, 140) : RGBA8(255, 120, 110), 2, 1);
 		}
 	}
 }
@@ -1226,12 +1239,25 @@ void Game::StrikeFx(int skill, int el, int kind, int atkStyle, V3 from, V3 to, B
 }
 
 // ============================================================ 拠点
+void Game::RollMapSeed(int stage, BOOL force)
+{
+	stage = Clampi(stage, 1, TAC_STAGE_MAX);
+	if (!force && m_mapSeed != 0 && m_mapSeedStage == stage) return;
+	DWORD s = m_rng.Next() ^ GetTickCount() ^ (DWORD)(stage * 2654435761u) ^ (DWORD)(m_time * 1000.f);
+	if (s == 0 || s == m_mapSeed) s ^= 0x9E3779B9u;
+	if (s == 0) s = 1;
+	m_mapSeed = s;
+	m_mapSeedStage = stage;
+	m_showBuilt = FALSE;
+}
+
 void Game::BuildShowcase()
 {
 	if (!m_loaded) return;
 	int st = Clampi(m_save.stageSel, 1, TAC_STAGE_MAX);
-	if (!m_showBuilt) {
-		GenerateMap(m_showMap, st <= 1 ? 1 : st, 777u + st * 31u);
+	RollMapSeed(st, FALSE);
+	if (!m_showBuilt || m_showStage != st) {
+		GenerateMap(m_showMap, st, m_mapSeed);
 		m_r.BuildTerrain(m_showMap);
 		m_showBuilt = TRUE;
 		m_showStage = st;
@@ -1273,6 +1299,10 @@ void Game::UpdateBase(float dt)
 
 void Game::DrawShowcase3D()
 {
+	if (m_screen != SC_BATTLE && m_screen != SC_RESULT) {
+		int st = Clampi(m_save.stageSel, 1, TAC_STAGE_MAX);
+		if (!m_showBuilt || m_showStage != st) BuildShowcase();
+	}
 	Env e;
 	ThemeEnv(m_showMap.theme, e);
 	V3 c = v3(32, 0, 32);
@@ -1437,10 +1467,19 @@ void Game::DrawShop()
 		tx += U(114);
 	}
 	float ky = y + U(74);
-	if (Btn(ID_SHOP_KIND0, x + U(16), ky, U(120), U(28), TT(TX_SHOP_WPN), TRUE, m_shopKind == 0, U(13))) { m_shopKind = 0; m_shopPage = 0; }
-	if (Btn(ID_SHOP_KIND0 + 1, x + U(144), ky, U(120), U(28), TT(TX_SHOP_ARM), TRUE, m_shopKind == 1, U(13))) { m_shopKind = 1; m_shopPage = 0; }
-	if (Btn(ID_SHOP_KIND0 + 2, x + U(272), ky, U(120), U(28), TT(TX_SHOP_GOODS), TRUE, m_shopKind == 2, U(13))) { m_shopKind = 2; m_shopPage = 0; }
-	if (Btn(ID_SHOP_KIND0 + 3, x + U(400), ky, U(140), U(28), TT(TX_SHOP_PART), TRUE, m_shopKind == 3, U(13))) { m_shopKind = 3; m_shopPage = 0; }
+	float sellX = x + w * .66f;
+	float tab0 = x + U(16);
+	float gap = U(6);
+	float avail = sellX - tab0 - U(12);
+	float bw = (avail - gap * 5.f) / 6.f;
+	if (bw < U(8)) bw = U(8);
+	float kfs = bw < U(90) ? U(11) : U(13);
+	static const int kindTx[6] = { TX_SHOP_WPN, TX_SHOP_ARM, TX_SHOP_GOODS, TX_SHOP_PART, TX_SHOP_ACC, TX_SHOP_BEAD };
+	for (int i = 0; i < 6; i++) {
+		if (Btn(ID_SHOP_KIND0 + i, tab0 + (bw + gap) * i, ky, bw, U(28), TT(kindTx[i]), TRUE, m_shopKind == i, kfs)) {
+			m_shopKind = i; m_shopPage = 0;
+		}
+	}
 	const int per = 8;
 	int ids[512], n = 0;
 	if (m_shopKind == 3) {
@@ -1448,7 +1487,12 @@ void Game::DrawShop()
 	} else if (m_shopKind == 2) {
 		ids[n++] = -1;
 		ids[n++] = -2;
+		ids[n++] = -3;
 		for (int i = 0; i < GoodCount() && n < 512; i++) ids[n++] = i;
+	} else if (m_shopKind == 4) {
+		for (int i = 0; i < AccCount() && n < 512; i++) ids[n++] = i;
+	} else if (m_shopKind == 5) {
+		for (int i = 0; i < CRAFT_N && n < 512; i++) if (i / CRAFT_PER_LINE == m_shopLine) ids[n++] = i;
 	} else {
 		for (int i = 0; i < GearCount() && n < 512; i++) {
 			const GearDef* g = GearOf(i + 1);
@@ -1475,7 +1519,7 @@ void Game::DrawShop()
 			if (Btn(ID_SHOP_BUY0 + s, x + U(16), yy, w * .62f, U(30), row, TRUE, FALSE, U(13))) {
 				if (TrophySell(m_save, ids[ix])) { TacSfx(TS_CONFIRM); Persist(); return; }
 			}
-		} else if (m_shopKind == 2 && ids[ix] < 0) {
+		} else if (m_shopKind == 2 && (ids[ix] == -1 || ids[ix] == -2)) {
 			BOOL partyT = ids[ix] == -1;
 			int cap = partyT ? PartyCap() : RosterCap();
 			int maxCap = partyT ? MAX_PARTY : MAX_ROSTER;
@@ -1491,6 +1535,31 @@ void Game::DrawShop()
 				else m_save.rosterCap = cap + 20;
 				TacSfx(TS_CONFIRM);
 				Persist();
+			}
+		} else if (m_shopKind == 2 && ids[ix] == -3) {
+			int price = 250;
+			swprintf_s(row, L"%s  %dG  x%d", TT(TX_STONE), price, StoneCount());
+			ok = m_save.gold >= price && StoneCount() < 999;
+			if (Btn(ID_SHOP_BUY0 + s, x + U(16), yy, w * .62f, U(30), row, ok, FALSE, U(13))) {
+				m_save.gold -= price;
+				StoneAdd(1);
+				TacSfx(TS_CONFIRM);
+				Persist();
+			}
+		} else if (m_shopKind == 4) {
+			swprintf_s(row, L"%s  %dG", AccName(ids[ix] + 1), AccPrice(ids[ix]));
+			ok = m_save.gold >= AccPrice(ids[ix]);
+			if (Btn(ID_SHOP_BUY0 + s, x + U(16), yy, w * .62f, U(30), row, ok, FALSE, U(13))) {
+				if (AccBuy(m_save, ids[ix])) { TacSfx(TS_CONFIRM); Persist(); }
+			}
+		} else if (m_shopKind == 5) {
+			BOOL ougi = IsCraftSuper(CRAFT_BASE + ids[ix]);
+			int cost = ougi ? 6 : 2;
+			BOOL open = !ougi || CraftSuperUnlockedBest(m_save) >= (ids[ix] % CRAFT_PER_LINE) - 9;
+			swprintf_s(row, L"%s  %s%d%s", CraftName(ids[ix]), TT(TX_STONE), cost, BeadHave(ids[ix]) ? L"  ✓" : L"");
+			ok = open && StoneCount() >= cost;
+			if (Btn(ID_SHOP_BUY0 + s, x + U(16), yy, w * .62f, U(30), row, ok, FALSE, U(13))) {
+				if (BeadBuy(m_save, ids[ix])) { TacSfx(TS_CONFIRM); Persist(); }
 			}
 		} else if (m_shopKind == 2) {
 			const GoodDef* gd = GoodAt(ids[ix]);
@@ -1575,8 +1644,14 @@ void Game::DrawBaseUi()
 	if (d) {
 		int step = m_keyShift ? 100 : 10;
 		if ((GetKeyState(VK_CONTROL) & 0x8000) == 0 && !m_keyShift) step = 1;
+		int prev = m_save.stageSel;
 		int mx = min(TAC_STAGE_MAX, m_save.stageCleared + 1);
 		m_save.stageSel = Clampi(m_save.stageSel + d * step, 1, mx);
+		if (m_save.stageSel != prev) {
+			m_mapSeed = 0;
+			m_mapSeedStage = -1;
+			m_showBuilt = FALSE;
+		}
 	}
 	by += Ku(46);
 	wchar_t cl[64];
@@ -1661,7 +1736,7 @@ void Game::DrawBaseUi()
 	float availW = (float)m_w - x - pw - U(28);
 	float cw = min(U(118), (availW - gap * (cols - 1)) / cols);
 	if (cw < 48.f) cw = 48.f;
-	float chh = min(U(150), ((float)m_h - U(56)) / rows - gap);
+	float chh = min(U(150), ((float)m_h - U(120)) / rows - gap);
 	if (chh < 64.f) chh = 64.f;
 	float total = cw * cols + gap * (cols - 1);
 	float cx0 = x + pw + max(8.f, ((float)m_w - x - pw - total) * .5f);
@@ -1684,6 +1759,21 @@ void Game::DrawBaseUi()
 			m_r.HudText(l, cx + cw * .5f, ry + ps + U(32), min(U(12), chh * .08f), RGBA8(210, 210, 200), 1, 0);
 		} else {
 			m_r.HudText(L"—", cx + cw * .5f, ry + chh * .5f, U(22), RGBA8(120, 120, 130), 1, 0);
+		}
+	}
+	if (!m_sortieAsk) {
+		float bw2 = min(U(220), max(120.f, (float)m_w * .2f));
+		float bh2 = U(38);
+		float bx2 = (float)m_w - bw2 - max(8.f, U(16));
+		float by2 = (float)m_h - bh2 - max(8.f, U(16));
+		m_r.HudText(TT(ThemeNameTx(m_showMap.theme)), bx2 + bw2 * .5f, by2 - U(14), U(13), RGBA8(255, 236, 190), 1, 1);
+		if (Btn(ID_BASE_REROLL, bx2, by2, bw2, bh2, TT(TX_MAP_REROLL))) {
+			m_mapSeed = 0;
+			m_mapSeedStage = -1;
+			m_showBuilt = FALSE;
+			BuildShowcase();
+			TacSfx(TS_CONFIRM);
+			return;
 		}
 	}
 }
@@ -1894,8 +1984,11 @@ void Game::DrawCreateUi()
 // ============================================================ 編成
 void Game::EnterParty()
 {
+	for (int i = 0; i < MAX_ROSTER; i++)
+		if (m_save.roster[i].used) CharGrantReached(m_save.roster[i]);
 	m_screen = SC_PARTY;
 	m_confirmDelete = 0;
+	m_eqPick = 0;
 	m_textFocus = 0;
 	if (m_partySel < 0 || !m_save.roster[m_partySel].used) {
 		m_partySel = -1;
@@ -1918,9 +2011,16 @@ void Game::TogglePartyMember(int idx)
 		BuildShowcase();
 		return;
 	}
-	if (PartyCount() >= cap) { AddBanner(TT(TX_PT_HINT), NULL, RGBA8(255, 200, 150), 2, 2.f); return; }
+	if (PartyCount() >= cap) {
+		wchar_t hint[180];
+		swprintf_s(hint, TT(TX_PT_HINT), cap);
+		AddBanner(hint, NULL, RGBA8(255, 200, 150), 2, 2.f);
+		return;
+	}
 	for (int i = 0; i < cap; i++) if (m_save.party[i] < 0) { m_save.party[i] = idx; BuildShowcase(); return; }
-	AddBanner(TT(TX_PT_HINT), NULL, RGBA8(255, 200, 150), 2, 2.f);
+	wchar_t hint[180];
+	swprintf_s(hint, TT(TX_PT_HINT), cap);
+	AddBanner(hint, NULL, RGBA8(255, 200, 150), 2, 2.f);
 }
 
 void Game::DeleteRoster(int idx)
@@ -1937,8 +2037,145 @@ void Game::DeleteRoster(int idx)
 	BuildShowcase();
 }
 
+void Game::DrawEquipLayer()
+{
+	if (m_eqPick < 1 || m_partySel < 0 || m_partySel >= MAX_ROSTER || !m_save.roster[m_partySel].used) { m_eqPick = 0; return; }
+	CharData& c = m_save.roster[m_partySel];
+	int kind = m_eqPick;
+	m_r.HudRect(0, 0, (float)m_w, (float)m_h, RGBA8(0, 0, 0, 150));
+	float pw = min(U(640), (float)m_w - U(40));
+	float ph = min(U(540), (float)m_h - U(32));
+	float px = ((float)m_w - pw) * .5f, py = ((float)m_h - ph) * .5f;
+	if (m_click && !Hit(px, py, pw, ph)) { m_eqPick = 0; m_click = FALSE; TacSfx(TS_CANCEL); return; }
+	Panel(px, py, pw, ph);
+
+	const wchar_t* title = TT(TX_GEAR_WPN);
+	wchar_t cur[96];
+	wcscpy_s(cur, TT(TX_PT_NONE));
+	int ids[96], n = 0, curId = 0;
+	BOOL gear = kind <= 2;
+	if (kind <= 2) {
+		int gk = kind == 1 ? 0 : 1;
+		int line = ClassLine(c.cls);
+		title = TT(gk ? TX_GEAR_ARM : TX_GEAR_WPN);
+		int eq = c.reserved[gk ? 7 : 6];
+		if (eq > 0) wcscpy_s(cur, GearName(eq));
+		for (int i = 0; i < m_save.gearN && n < 96; i++) {
+			const GearDef* g = GearOf(m_save.gearId[i]);
+			if (!g || g->kind != gk || g->line != line) continue;
+			ids[n++] = i;
+		}
+	} else if (kind <= 4) {
+		int slot = kind - 3;
+		title = TT(TX_ACC);
+		curId = EquippedAccId(c, slot);
+		if (curId > 0) wcscpy_s(cur, AccName(curId));
+		for (int i = 0; i < AccCount() && n < 96; i++)
+			if (AccSpare(c, slot, i) > 0 || i + 1 == curId) ids[n++] = i + 1;
+	} else {
+		int slot = kind - 5;
+		title = TT(TX_BEAD);
+		curId = EquippedBeadId(c, slot);
+		if (curId > 0) wcscpy_s(cur, CraftName(curId - 1));
+		for (int i = 0; i < CRAFT_N && n < 96; i++)
+			if (BeadSpare(c, slot, i) > 0 || i + 1 == curId) ids[n++] = i + 1;
+	}
+	m_r.HudText(title, px + pw * .5f, py + U(22), U(20), RGBA8(255, 226, 150), 1, 1);
+	m_r.HudText(cur, px + pw * .5f, py + U(46), U(14), RGBA8(220, 220, 230), 1, 0);
+
+	float listTop = py + U(62), listBot = py + ph - U(58);
+	int per = (int)((listBot - listTop) / U(36)) - 1;
+	if (per < 3) per = 3;
+	if (per > 8) per = 8;
+	int pages = max(1, (n + per - 1) / per);
+	if (m_eqPage >= pages) m_eqPage = pages - 1;
+	if (m_eqPage < 0) m_eqPage = 0;
+	float yy = listTop;
+	BOOL noneSel = gear ? (c.reserved[kind == 1 ? 6 : 7] <= 0) : (curId <= 0);
+	if (Btn(ID_EQ_NONE, px + U(16), yy, pw - U(32), U(32), TT(TX_PT_NONE), TRUE, noneSel, U(14))) {
+		BOOL ok = TRUE;
+		if (gear) {
+			int sl = kind == 1 ? 6 : 7;
+			if (c.reserved[sl] > 0) {
+				if (!StashAdd(m_save, c.reserved[sl])) ok = FALSE;
+				else c.reserved[sl] = 0;
+			}
+			if (ok) { Persist(); InvalidatePortraits(); BuildShowcase(); }
+		} else if (kind <= 4) {
+			ok = EquipAccId(c, kind - 3, 0);
+			if (ok) Persist();
+		} else {
+			ok = EquipBeadId(c, kind - 5, 0);
+			if (ok) Persist();
+		}
+		if (ok) m_eqPick = 0;
+		else TacSfx(TS_ERROR);
+		return;
+	}
+	yy += U(36);
+	int a = m_eqPage * per, b = min(n, a + per);
+	for (int s = 0; s < per; s++) {
+		int ix = a + s;
+		if (ix >= b) break;
+		wchar_t row[180];
+		BOOL sel = FALSE;
+		if (gear) {
+			const GearDef* g = GearOf(m_save.gearId[ids[ix]]);
+			if (!g) continue;
+			swprintf_s(row, L"%s   %s+%d %s+%d %s+%d %s+%d", GearName(m_save.gearId[ids[ix]]),
+				TT(TX_ST_STR), g->str, TT(TX_ST_MAG), g->mag, TT(TX_ST_DEF), g->def, TT(TX_ST_RES), g->res);
+		} else if (kind <= 4) {
+			int id = ids[ix];
+			sel = id == curId;
+			wchar_t st[96];
+			st[0] = 0;
+			for (int stat = S_STR; stat <= S_LUK; stat++) {
+				int v = AccStat(id, stat);
+				if (!v) continue;
+				wchar_t bit[24];
+				swprintf_s(bit, L" %s+%d", TT(StatNameTx(stat)), v);
+				wcscat_s(st, bit);
+			}
+			swprintf_s(row, L"%s  x%d%s", AccName(id), max(1, AccSpare(c, kind - 3, id - 1)), st);
+		} else {
+			int id = ids[ix];
+			sel = id == curId;
+			BOOL ougi = IsCraftSuper(CRAFT_BASE + id - 1);
+			swprintf_s(row, L"%s  %s%d%s  x%d", CraftName(id - 1), TT(TX_CP), CraftCpCost(id - 1), ougi ? L" ★" : L"", max(1, BeadSpare(c, kind - 5, id - 1)));
+		}
+		if (Btn(ID_EQ_ROW0 + s, px + U(16), yy, pw - U(32), U(32), row, TRUE, sel, U(13))) {
+			BOOL ok = TRUE;
+			if (gear) {
+				GearEquip(c, m_save, ids[ix]);
+				Persist(); InvalidatePortraits(); BuildShowcase();
+			} else if (kind <= 4) {
+				ok = EquipAccId(c, kind - 3, ids[ix]);
+				if (ok) Persist();
+			} else {
+				ok = EquipBeadId(c, kind - 5, ids[ix]);
+				if (ok) Persist();
+			}
+			if (ok) m_eqPick = 0;
+			else TacSfx(TS_ERROR);
+			return;
+		}
+		yy += U(36);
+	}
+	wchar_t pg[32];
+	swprintf_s(pg, L"%d / %d", m_eqPage + 1, pages);
+	if (pages > 1 && Btn(ID_EQ_PREV, px + U(16), py + ph - U(46), U(64), U(32), L"◀")) m_eqPage = (m_eqPage + pages - 1) % pages;
+	m_r.HudText(pg, px + U(120), py + ph - U(30), U(14), RGBA8(220, 220, 230), 0, 1);
+	if (pages > 1 && Btn(ID_EQ_NEXT, px + U(168), py + ph - U(46), U(64), U(32), L"▶")) m_eqPage = (m_eqPage + 1) % pages;
+	if (Btn(ID_EQ_CLOSE, px + pw - U(170), py + ph - U(46), U(150), U(32), TT(TX_BASE_CLOSE))) m_eqPick = 0;
+	m_activateId = -1;
+}
+
 void Game::DrawPartyUi()
 {
+	BOOL modal = m_eqPick != 0;
+	BOOL savedClick = m_click;
+	int savedAct = m_activateId;
+	if (modal) { m_click = FALSE; m_activateId = -1; }
 	float x = max(8.f, min(U(20), (float)m_w * .02f));
 	float y = max(8.f, min(U(20), (float)m_h * .02f));
 	float gw = min((float)m_w * .6f, min(U(760), (float)m_w - x - U(200)));
@@ -1990,13 +2227,18 @@ void Game::DrawPartyUi()
 		m_r.HudText(pg, x + gw * .5f, y + gh - U(78), U(13), RGBA8(230, 230, 240), 1, 1);
 		if (Btn(ID_PT_PAGE_NEXT, x + gw * .5f + U(74), y + gh - U(92), U(36), U(28), L"▶")) { m_rosterPage = (m_rosterPage + 1) % pages; InvalidatePortraits(); return; }
 	} else {
-		m_r.HudText(TT(TX_PT_HINT), x + gw * .5f, y + gh - U(64), U(13), RGBA8(210, 210, 220), 1, 0);
+		wchar_t hint[180];
+		swprintf_s(hint, TT(TX_PT_HINT), pCap);
+		m_r.HudText(hint, x + gw * .5f, y + gh - U(64), U(13), RGBA8(210, 210, 220), 1, 0);
 	}
 	if (Btn(ID_PT_BACK, x + gw - U(180), y + gh - U(46), U(160), U(36), TT(TX_CR_BACK))) { Persist(); EnterBase(); return; }
 	if (Btn(ID_PT_NEW, x + U(20), y + gh - U(46), U(200), U(36), TT(TX_BASE_CREATE), RosterCount() < rCap)) { EnterCreate(-1); return; }
 	// 詳細
 	float dx = x + gw + U(14), dw = (float)m_w - dx - U(20);
-	if (dw < U(220) || m_partySel < 0) return;
+	if (dw < U(220) || m_partySel < 0) {
+		if (modal) m_eqPick = 0;
+		return;
+	}
 	CharData& c = m_save.roster[m_partySel];
 	if (!c.used) return;
 	Panel(dx, y, dw, gh);
@@ -2005,9 +2247,11 @@ void Game::DrawPartyUi()
 	m_r.HudText(c.name, dx + ps2 + U(26), y + U(30), U(20), RGBA8(255, 255, 255), 0, 1);
 	m_r.HudText(ClassName(c.cls), dx + ps2 + U(26), y + U(56), U(15), RGBA8(255, 226, 150), 0, 1);
 	wchar_t l[96];
-	swprintf_s(l, L"%s %d   %s %d/100", TT(TX_MISC_LV), c.lv, TT(TX_MISC_EXP), c.exp);
+	int need = ExpToNext(c.lv);
+	int left = c.lv >= TAC_LV_MAX ? 0 : max(0, need - c.exp);
+	swprintf_s(l, L"%s %d   %s %d/%d  %s %d", TT(TX_MISC_LV), c.lv, TT(TX_MISC_EXP), c.exp, need, TT(TX_EXP_LEFT), left);
 	m_r.HudText(l, dx + ps2 + U(26), y + U(80), U(14), RGBA8(220, 220, 220), 0, 0);
-	Bar(dx + ps2 + U(26), y + U(94), dw - ps2 - U(44), U(8), c.exp / 100.f, RGBA8(120, 200, 255), RGBA8(60, 120, 220));
+	Bar(dx + ps2 + U(26), y + U(94), dw - ps2 - U(44), U(8), need > 0 ? c.exp / (float)need : 0.f, RGBA8(120, 200, 255), RGBA8(60, 120, 220));
 	swprintf_s(l, L"%s %d  /  %s %d", TT(TX_BT_DEFEATED), c.kills, TT(TX_BT_STAGE), c.battles);
 	m_r.HudText(l, dx + ps2 + U(26), y + U(114), U(12), RGBA8(190, 190, 190), 0, 0);
 	float sy = y + ps2 + U(28);
@@ -2032,37 +2276,36 @@ void Game::DrawPartyUi()
 		const GearDef* wpn = GearOf(c.reserved[6]);
 		const GearDef* arm = GearOf(c.reserved[7]);
 		wchar_t gl[96];
-		int line = ClassLine(c.cls);
 		swprintf_s(gl, L"%s: %s", TT(TX_GEAR_WPN), wpn ? GearName(c.reserved[6]) : TT(TX_PT_NONE));
-		if (Btn(ID_PT_WPN, dx + U(14), y + gh - U(148), dw * .48f, U(32), gl, TRUE, FALSE, U(12))) {
-			int ix = -1;
-			for (int i = 0; i < m_save.gearN; i++) { const GearDef* g = GearOf(m_save.gearId[i]); if (g && g->kind == 0 && g->line == line) { ix = i; break; } }
-			if (ix >= 0) GearEquip(c, m_save, ix);
-			else if (c.reserved[6] > 0 && StashAdd(m_save, c.reserved[6])) c.reserved[6] = 0;
-			Persist(); InvalidatePortraits(); BuildShowcase();
-		}
+		if (Btn(ID_PT_WPN, dx + U(14), y + gh - U(220), dw * .48f, U(26), gl, TRUE, FALSE, U(11))) { m_eqPick = 1; m_eqPage = 0; m_focusId = ID_EQ_NONE; }
 		swprintf_s(gl, L"%s: %s", TT(TX_GEAR_ARM), arm ? GearName(c.reserved[7]) : TT(TX_PT_NONE));
-		if (Btn(ID_PT_ARM, dx + dw * .52f, y + gh - U(148), dw * .46f, U(32), gl, TRUE, FALSE, U(12))) {
-			int ix = -1;
-			for (int i = 0; i < m_save.gearN; i++) { const GearDef* g = GearOf(m_save.gearId[i]); if (g && g->kind == 1 && g->line == line) { ix = i; break; } }
-			if (ix >= 0) GearEquip(c, m_save, ix);
-			else if (c.reserved[7] > 0 && StashAdd(m_save, c.reserved[7])) c.reserved[7] = 0;
-			Persist(); InvalidatePortraits(); BuildShowcase();
-		}
+		if (Btn(ID_PT_ARM, dx + dw * .52f, y + gh - U(220), dw * .46f, U(26), gl, TRUE, FALSE, U(11))) { m_eqPick = 2; m_eqPage = 0; m_focusId = ID_EQ_NONE; }
+		swprintf_s(gl, L"%s1: %s", TT(TX_ACC), EquippedAccName(c, 0));
+		if (Btn(ID_PT_ACC0, dx + U(14), y + gh - U(190), dw * .48f, U(26), gl, TRUE, FALSE, U(11))) { m_eqPick = 3; m_eqPage = 0; m_focusId = ID_EQ_NONE; }
+		swprintf_s(gl, L"%s2: %s", TT(TX_ACC), EquippedAccName(c, 1));
+		if (Btn(ID_PT_ACC1, dx + dw * .52f, y + gh - U(190), dw * .46f, U(26), gl, TRUE, FALSE, U(11))) { m_eqPick = 4; m_eqPage = 0; m_focusId = ID_EQ_NONE; }
+		swprintf_s(gl, L"%s1: %s", TT(TX_BEAD), EquippedBeadName(c, 0));
+		if (Btn(ID_PT_BEAD0, dx + U(14), y + gh - U(160), dw * .48f, U(26), gl, TRUE, FALSE, U(11))) { m_eqPick = 5; m_eqPage = 0; m_focusId = ID_EQ_NONE; }
+		swprintf_s(gl, L"%s2: %s", TT(TX_BEAD), EquippedBeadName(c, 1));
+		if (Btn(ID_PT_BEAD1, dx + dw * .52f, y + gh - U(160), dw * .46f, U(26), gl, TRUE, FALSE, U(11))) { m_eqPick = 6; m_eqPage = 0; m_focusId = ID_EQ_NONE; }
 	}
-	float by = y + gh - U(98);
+	float by = y + gh - U(120);
 	BOOL inParty = FALSE;
 	for (int p = 0; p < MAX_PARTY; p++) if (m_save.party[p] == m_partySel) inParty = TRUE;
 	if (m_confirmDelete) {
 		m_r.HudText(TT(TX_PT_DELETE_Q), dx + dw * .5f, by + U(10), U(15), RGBA8(255, 170, 160), 1, 1);
-		if (Btn(ID_PT_YES, dx + U(14), by + U(30), dw * .5f - U(20), U(38), TT(TX_PT_YES), TRUE, FALSE, 0, RGBA8(170, 50, 40, 240))) { DeleteRoster(m_partySel); m_confirmDelete = 0; return; }
+		if (Btn(ID_PT_YES, dx + U(14), by + U(30), dw * .5f - U(20), U(38), TT(TX_PT_YES), TRUE, FALSE, 0, RGBA8(170, 50, 40, 240))) { DeleteRoster(m_partySel); m_confirmDelete = 0; m_eqPick = 0; return; }
 		if (Btn(ID_PT_NO, dx + dw * .5f + U(6), by + U(30), dw * .5f - U(20), U(38), TT(TX_PT_NO))) m_confirmDelete = 0;
-		return;
+	} else {
+		float bw3 = (dw - U(28) - U(16)) / 3.f;
+		if (Btn(ID_PT_DEPLOY, dx + U(14), by + U(30), bw3, U(38), TT(TX_PT_DEPLOY), TRUE, inParty, U(14))) TogglePartyMember(m_partySel);
+		if (Btn(ID_PT_EDIT, dx + U(14) + bw3 + U(8), by + U(30), bw3, U(38), TT(TX_CR_EDIT), TRUE, FALSE, U(14))) { m_eqPick = 0; EnterCreate(m_partySel); return; }
+		if (Btn(ID_PT_DELETE, dx + U(14) + (bw3 + U(8)) * 2, by + U(30), bw3, U(38), TT(TX_PT_DELETE), TRUE, FALSE, U(14), RGBA8(120, 40, 36, 230))) m_confirmDelete = 1;
 	}
-	float bw3 = (dw - U(28) - U(16)) / 3.f;
-	if (Btn(ID_PT_DEPLOY, dx + U(14), by + U(30), bw3, U(38), TT(TX_PT_DEPLOY), TRUE, inParty, U(14))) TogglePartyMember(m_partySel);
-	if (Btn(ID_PT_EDIT, dx + U(14) + bw3 + U(8), by + U(30), bw3, U(38), TT(TX_CR_EDIT), TRUE, FALSE, U(14))) { EnterCreate(m_partySel); return; }
-	if (Btn(ID_PT_DELETE, dx + U(14) + (bw3 + U(8)) * 2, by + U(30), bw3, U(38), TT(TX_PT_DELETE), TRUE, FALSE, U(14), RGBA8(120, 40, 36, 230))) m_confirmDelete = 1;
+	if (m_eqPick) {
+		if (modal) { m_click = savedClick; m_activateId = savedAct; }
+		DrawEquipLayer();
+	}
 }
 
 // ============================================================ 進化
@@ -2232,9 +2475,11 @@ void Game::DrawResultUi()
 		if (c.lv > m_resultLv0[i]) swprintf_s(l, L"%s %d → %d", TT(TX_MISC_LV), m_resultLv0[i], c.lv);
 		else swprintf_s(l, L"%s %d", TT(TX_MISC_LV), c.lv);
 		m_r.HudText(l, x + w * .5f, ry + rowH * .3f, U(16), c.lv > m_resultLv0[i] ? RGBA8(140, 255, 150) : RGBA8(230, 230, 230), 1, 1);
-		swprintf_s(l, L"%s +%d", TT(TX_BT_EXP), m_resultExp[i]);
+		int need = ExpToNext(c.lv);
+		int left = c.lv >= TAC_LV_MAX ? 0 : max(0, need - c.exp);
+		swprintf_s(l, L"%s +%d  %s %d", TT(TX_BT_EXP), m_resultExp[i], TT(TX_EXP_LEFT), left);
 		m_r.HudText(l, x + w * .5f, ry + rowH * .64f, U(13), RGBA8(200, 220, 255), 1, 0);
-		Bar(x + w * .66f, ry + rowH * .4f, w * .28f, U(10), c.exp / 100.f, RGBA8(120, 200, 255), RGBA8(60, 120, 220));
+		Bar(x + w * .66f, ry + rowH * .4f, w * .28f, U(10), need > 0 ? c.exp / (float)need : 0.f, RGBA8(120, 200, 255), RGBA8(60, 120, 220));
 		ry += rowH;
 	}
 	float by = y + h - U(60);

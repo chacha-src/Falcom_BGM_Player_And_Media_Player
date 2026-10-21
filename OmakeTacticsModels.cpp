@@ -488,7 +488,7 @@ static void ProcAnim(int look, int clip, float t, Q4* rot, V3* tr, PoseMods& mod
 		float sq = 1.f, lift = 0, fwd = 0, shake = 0;
 		switch (kind) {
 		case PK_IDLE: sq = 1.f + .07f * sinf(t * 4.f); break;
-		case PK_MOVE: { float ph = fmodf(t / .6f, 1.f); lift = sinf(ph * PI) * .22f; sq = ph < .15f ? 1.f - .25f * sinf(ph / .15f * PI) : 1.f + .12f * sinf(ph * PI); } break;
+		case PK_MOVE: { float ph = fmodf(t / .42f, 1.f); lift = sinf(ph * PI) * .42f; sq = ph < .2f ? 1.f - .4f * sinf(ph / .2f * PI) : 1.f + .22f * sinf(ph * PI); } break;
 		case PK_ATTACK: { float a = AtkCurve(u); sq = 1.f - a * .25f; fwd = max(0.f, a) * .45f; lift = max(0.f, a) * .15f; } break;
 		case PK_CAST: sq = 1.f + .2f * sinf(u * PI * 3.f) * (1 - u); break;
 		case PK_HIT: sq = 1.f - .3f * sinf(u * PI); shake = sinf(u * 40.f) * .05f * (1 - u); break;
@@ -510,7 +510,11 @@ static void ProcAnim(int look, int clip, float t, Q4* rot, V3* tr, PoseMods& mod
 		rot[BJ_WL] = wl; rot[BJ_WR] = wr;
 		rot[BJ_WL2] = QZ(flap * .35f); rot[BJ_WR2] = QZ(-flap * .35f);
 		V3 root = v3(0, bob, 0);
-		if (kind == PK_MOVE) rot[BJ_BODY] = QX(-.25f);
+		if (kind == PK_MOVE) {
+			float ph = t * 12.f;
+			rot[BJ_BODY] = QX(-.4f + sinf(ph) * .18f);
+			root.y += fabsf(sinf(ph)) * .1f;
+		}
 		if (kind == PK_ATTACK) { float a = AtkCurve(u); root.z = -max(0.f, a) * .55f; root.y -= max(0.f, a) * .2f; rot[BJ_BODY] = QX(-a * .5f); rot[BJ_HEAD] = QX(-a * .3f); }
 		if (kind == PK_CAST) rot[BJ_HEAD] = QX(-sinf(u * PI) * .4f);
 		if (kind == PK_HIT) { root.z = sinf(u * PI) * .25f; rot[BJ_BODY] = QX(sinf(u * PI) * .5f); }
@@ -528,6 +532,13 @@ static void ProcAnim(int look, int clip, float t, Q4* rot, V3* tr, PoseMods& mod
 		rot[WJ_NECK] = QX(sinf(t * 2.f) * .05f);
 		V3 root = v3(0, -flap * .06f, 0);
 		rot[WJ_LL] = QX(.3f); rot[WJ_LR] = QX(.3f);
+		if (kind == PK_MOVE) {
+			float ph = t * 9.f;
+			rot[WJ_LL] = QX(.25f + sinf(ph) * .4f);
+			rot[WJ_LR] = QX(.25f - sinf(ph) * .4f);
+			root.y += fabsf(sinf(ph)) * .1f;
+			rot[WJ_BODY] = QX(sinf(ph) * .08f);
+		}
 		if (kind == PK_ATTACK) {
 			float a = AtkCurve(u);
 			rot[WJ_NECK] = QX(-a * .55f); rot[WJ_HEAD] = QX(-a * .25f);
@@ -550,11 +561,11 @@ static void ProcAnim(int look, int clip, float t, Q4* rot, V3* tr, PoseMods& mod
 		rot[GJ_TORSO] = QX(br * .03f);
 		rot[GJ_AL] = QZ(.08f + br * .03f); rot[GJ_AR] = QZ(-.08f - br * .03f);
 		if (kind == PK_MOVE) {
-			float ph = t / .6f * 2.f * PI;
-			rot[GJ_LL] = QX(sinf(ph) * .45f); rot[GJ_LR] = QX(-sinf(ph) * .45f);
-			rot[GJ_AL] = QX(-sinf(ph) * .35f); rot[GJ_AR] = QX(sinf(ph) * .35f);
-			rot[GJ_TORSO] = QZ(sinf(ph) * .06f);
-			root.y = fabsf(cosf(ph)) * .04f;
+			float ph = t * 7.f;
+			rot[GJ_LL] = QX(sinf(ph) * .75f); rot[GJ_LR] = QX(-sinf(ph) * .75f);
+			rot[GJ_AL] = QX(-sinf(ph) * .5f); rot[GJ_AR] = QX(sinf(ph) * .5f);
+			rot[GJ_TORSO] = QZ(sinf(ph) * .08f);
+			root.y = fabsf(cosf(ph)) * .1f;
 		}
 		if (kind == PK_ATTACK) {
 			float a = AtkCurve(u);
@@ -829,6 +840,7 @@ static void AddWeapons(Actor& a, const Renderer& r, int wl)
 void ActorFromChar(Actor& a, const Library& lib, const Renderer& r, const CharData& c)
 {
 	ActorInit(a);
+	a.gait = GAIT_BIPED;
 	a.body = Clampi(c.body, 0, B_COUNT - 1);
 	a.model = lib.bodyModel[a.body];
 	if (a.model < 0) return;
@@ -915,6 +927,7 @@ void ActorFromChar(Actor& a, const Library& lib, const Renderer& r, const CharDa
 void ActorFromMonster(Actor& a, const Library& lib, const Renderer& r, int monster, int boss)
 {
 	ActorInit(a);
+	a.gait = MonsterGait(monster);
 	const MonsterDef& md = MonsterInfo(monster);
 	a.look = md.look;
 	DWORD t = md.tint;
@@ -1022,7 +1035,8 @@ void ActorPose(Actor& a, const Library& lib, const Renderer& r)
 
 M4 ActorWorld(const Actor& a, V3 pos, float face)
 {
-	return MMul(MMul(MScale(a.scale, a.scale, a.scale), MRotY(face + PI)), MTrans(pos.x, pos.y, pos.z));
+	float lean = -a.recoil * .72f;
+	return MMul(MMul(MMul(MScale(a.scale, a.scale, a.scale), MRotX(lean)), MRotY(face + PI)), MTrans(pos.x, pos.y, pos.z));
 }
 
 V3 ActorJointWorld(const Actor& a, const M4& world, int which)
@@ -1067,11 +1081,61 @@ int CastClipFor(int kind)
 	return CL_CAST_SHOOT;
 }
 
+static M4 LocoXform(const Actor& a, float time)
+{
+	BOOL moving = a.clip == CL_WALK || a.clip == CL_RUN;
+	float clk = moving ? a.t : time * .35f;
+	if (!moving) {
+		float bob = sinf(time * 2.2f) * (a.hover > 0.f || a.gait == GAIT_FLY ? .08f : .02f);
+		return MTrans(0, bob, 0);
+	}
+	switch (a.gait) {
+	case GAIT_TROT: {
+		float s = sinf(clk * 14.f);
+		return MMul(MRotX(s * .22f), MTrans(0, fabsf(s) * .16f, 0));
+	}
+	case GAIT_BOUNCE: {
+		float s = sinf(clk * 7.f);
+		float ysc = 1.f + (s > 0.f ? s * .2f : s * .34f);
+		float xz = 1.f / sqrtf(max(.25f, ysc));
+		return MMul(MScale(xz, ysc, xz), MTrans(0, max(0.f, s) * .34f, 0));
+	}
+	case GAIT_FLY: {
+		float s = sinf(clk * 12.f);
+		return MMul(MRotX(s * .16f), MTrans(0, s * .1f, 0));
+	}
+	case GAIT_SCUTTLE: {
+		float s = sinf(clk * 18.f);
+		return MMul(MRotZ(s * .1f), MTrans(s * .05f, fabsf(s) * .06f, 0));
+	}
+	case GAIT_SLITHER: {
+		float s = sinf(clk * 8.f);
+		return MMul(MRotY(s * .28f), MTrans(s * .14f, fabsf(cosf(clk * 8.f)) * .04f, 0));
+	}
+	case GAIT_WADDLE: {
+		float s = sinf(clk * 10.f);
+		return MMul(MRotZ(s * .18f), MTrans(0, fabsf(s) * .1f, 0));
+	}
+	case GAIT_STOMP: {
+		float s = sinf(clk * 6.f);
+		float step = max(0.f, s);
+		return MMul(MRotX(step * .14f), MTrans(0, step * .12f, 0));
+	}
+	case GAIT_FISH: {
+		float s = sinf(clk * 11.f);
+		return MMul(MRotY(s * .24f), MTrans(s * .07f, sinf(clk * 5.f) * .05f, 0));
+	}
+	default: {
+		float s = sinf(clk * 10.f);
+		return MMul(MRotZ(s * .07f), MTrans(0, fabsf(s) * .11f, 0));
+	}
+	}
+}
+
 void ActorDraw(Renderer& r, const Library& lib, Actor& a, const M4& world, const DrawParams& dp, float time)
 {
 	if (a.proc == 2) {
-		float bob = sinf(time * 2.2f) * (a.hover > 0.f ? .08f : .03f);
-		M4 w = MMul(MTrans(0, bob, 0), world);
+		M4 w = MMul(LocoXform(a, time), world);
 		DrawParams d = dp;
 		d.tint = dp.tint;
 		r.DrawCreature(a.model, w, d);
@@ -1081,6 +1145,9 @@ void ActorDraw(Renderer& r, const Library& lib, Actor& a, const M4& world, const
 	if (!a.poseValid) ActorPose(a, lib, r);
 	if (!a.poseValid) return;
 	const Model& m = r.models[a.model];
+	M4 drawW = world;
+	if ((a.clip == CL_WALK || a.clip == CL_RUN) && (a.rig < 0 || a.rig >= 4 || lib.clipMap[a.rig][a.clip] < 0 || lib.clipMap[a.rig][a.clip] == lib.clipMap[a.rig][CL_IDLE]))
+		drawW = MMul(LocoXform(a, time), world);
 	DrawParams d = dp;
 	d.tint = dp.tint;
 	if (a.tint != 0xFFFFFFFF) {
@@ -1089,13 +1156,13 @@ void ActorDraw(Renderer& r, const Library& lib, Actor& a, const M4& world, const
 		d.tint = RGBA8(rr, gg, bb, (dp.tint >> 24) & 255);
 	}
 	d.hue = dp.hue + a.hue;
-	r.DrawSkinned(m, a.pose, world, d);
+	r.DrawSkinned(m, a.pose, drawW, d);
 	DrawParams da = d;
 	da.hue = (a.proc || a.rig == 1) ? dp.hue : dp.hue + a.hue * .5f;
 	for (int i = 0; i < a.nAtt; i++)
-		r.DrawAttach(r.attaches[a.att[i]], a.pose, a.attJ[i], world, da);
+		r.DrawAttach(r.attaches[a.att[i]], a.pose, a.attJ[i], drawW, da);
 	for (int i = 0; i < a.nGear; i++) if (a.gearJ[i] >= 0 && a.gearJ[i] < a.pose.nJ)
-		r.DrawGear(a.gearM[i], MMul(a.pose.global[a.gearJ[i]], world), da);
+		r.DrawGear(a.gearM[i], MMul(a.pose.global[a.gearJ[i]], drawW), da);
 	if (!a.proc && a.hair > 0 && m.headJ >= 0) {
 		const GpuMesh& h = lib.hair[a.body][a.hair];
 		if (h.vb) {
@@ -1105,7 +1172,7 @@ void ActorDraw(Renderer& r, const Library& lib, Actor& a, const M4& world, const
 			int hb = ((a.hairCol >> 16) & 255) * ((dp.tint >> 16) & 255) / 255;
 			dh.tint = RGBA8(hr, hg, hb, al);
 			dh.hue = 0;
-			r.DrawStatic(h, MMul(a.pose.global[m.headJ], world), dh);
+			r.DrawStatic(h, MMul(a.pose.global[m.headJ], drawW), dh);
 		}
 	}
 	if (a.wings && m.chestJ >= 0) {
@@ -1117,7 +1184,7 @@ void ActorDraw(Renderer& r, const Library& lib, Actor& a, const M4& world, const
 			M4 fl = MRotZ(s * flap);
 			M4 base = MMul(MMul(MRotY(s * -.55f), MRotZ(s * .35f)), MTrans(s * .18f, 1.12f, .32f));
 			M4 ex = MMul(MMul(fl, base), m.invBind[m.chestJ]);
-			M4 w = MMul(ex, MMul(a.pose.global[m.chestJ], world));
+			M4 w = MMul(ex, MMul(a.pose.global[m.chestJ], drawW));
 			DrawParams dw = dp;
 			dw.hue = 0;
 			r.DrawStatic(lib.wing[dr][side], w, dw);

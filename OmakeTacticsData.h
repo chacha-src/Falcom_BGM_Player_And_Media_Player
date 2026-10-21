@@ -256,6 +256,7 @@ struct CharData {
 void CharRecalcInit(CharData& c);                  // 新規作成時の初期能力
 int  CharLevelUp(CharData& c, Rng& r, int gains[S_COUNT]);   // 戻り: 新規習得スキル id or -1
 int  CharLearnAt(const CharData& c, int lv);       // その Lv で覚えるスキル
+void CharGrantReached(CharData& c);                // 現在Lvまでに習得表へ載った技を付与
 bool CharHasSkill(const CharData& c, int s);
 void CharGiveSkill(CharData& c, int s);
 
@@ -274,6 +275,7 @@ enum MonsterId {
 	M_GOLEM, M_WYVERN, M_DARK_KNIGHT, M_DRAGON, M_COUNT
 };
 enum Look { LK_KAYKIT, LK_SLIME, LK_BAT, LK_WYVERN, LK_GOLEM, LK_MESH };
+enum Gait { GAIT_BIPED, GAIT_TROT, GAIT_BOUNCE, GAIT_FLY, GAIT_SCUTTLE, GAIT_SLITHER, GAIT_WADDLE, GAIT_STOMP, GAIT_FISH };
 struct MonsterDef {
 	int nameTx;
 	int look;          // Look
@@ -293,6 +295,7 @@ struct MonsterDef {
 };
 const MonsterDef& MonsterInfo(int m);
 const wchar_t* MonsterLabel(int m);
+int MonsterGait(int monster);
 
 // ---------------- 戦闘中ユニット ----------------
 enum Team { TEAM_PLAYER, TEAM_ENEMY };
@@ -316,6 +319,9 @@ struct Unit {
 	int skillLearned[4];
 	int nLearned;
 	int killed;          // 戦闘不能
+	int cp;              // 0..200。ステージをまたいで保持
+	int craftEq[2];      // 0=空。戦技 id（CRAFT_BASE+）
+	int accEq[2];        // 0=空。装飾 id
 	// 表示用
 	float px, py, pz;
 	float hpShow;
@@ -373,11 +379,12 @@ struct Forecast {
 	int tri;                // 武器相性 -1/0/+1
 	int bowFly;             // 弓対飛行
 	int delay;              // 命中時に削る CT
-	int follow;             // 隣接追撃する味方。-1=なし
-	int fdmg;               // 追撃のダメージ
+	int follow;             // 武器射程にいる味方の人数。-1=なし（実戦は各自 1/2）
+	int fdmg;
 };
 void CalcForecast(const Battle& b, int a, int d, int skill, Forecast& f);
 int  ResolveAttack(Battle& b, int a, int d, int skill, Rng& r, Strike* out, int maxOut, int cx, int cz);
+int  AppendAssists(Battle& b, Rng& r, Strike* out, int n, int maxOut);
 int  SkillTargets(const Battle& b, int caster, int skill, int cx, int cz, int* out, int maxOut);
 bool SkillUsable(const Battle& b, int ui, int skill);
 int  SkillCastRangeMin(const Unit& u, int skill);
@@ -492,6 +499,41 @@ const GoodDef* GoodAt(int i);
 int GoodHave(const SaveData& s, int i);
 bool GoodBuy(SaveData& s, int i);
 bool GoodTake(SaveData& s, int i);
+
+enum { CRAFT_BASE = 100000, CRAFT_PER_LINE = 14, CRAFT_LINES = 6, CRAFT_N = 84, CP_MAX = 200 };
+bool IsCraftId(int skill);
+bool IsCraftSuper(int skill);
+int CraftCpCost(int index);
+const wchar_t* CraftName(int skill);
+int CraftSuperUnlocked(int cls);
+int CraftSuperUnlockedBest(const SaveData& s);
+int CraftLineOf(int skill);
+int StoneCount();
+void StoneAdd(int d);
+bool BeadHave(int index);
+bool BeadBuy(const SaveData& s, int index);
+int AccCount();
+const wchar_t* AccName(int id);
+int AccPrice(int index);
+int AccStat(int id, int stat);
+bool AccBuy(SaveData& s, int index);
+void EquipNextAcc(CharData& c, int slot);
+void EquipNextBead(CharData& c, int slot);
+int EquippedAccId(const CharData& c, int slot);
+int EquippedBeadId(const CharData& c, int slot);
+int AccSpare(const CharData& c, int slot, int index);
+int BeadSpare(const CharData& c, int slot, int index);
+bool EquipAccId(CharData& c, int slot, int id);
+bool EquipBeadId(CharData& c, int slot, int bead);
+const wchar_t* EquippedAccName(const CharData& c, int slot);
+const wchar_t* EquippedBeadName(const CharData& c, int slot);
+void CraftBindUnit(Unit& u);
+void CraftSaveUnit(const Unit& u);
+void CraftLoad();
+void CraftSave();
+void CraftPrune(const SaveData& s);
+bool DropCraftLoot(int monster, int boss, Rng& r, wchar_t* name, int nameN);
+int BattleHeightSteps(const Battle& b, int ax, int az, int dx, int dz);
 
 void RandomName(wchar_t* out, int gender, Rng& r);
 

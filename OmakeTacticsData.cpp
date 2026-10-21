@@ -993,13 +993,13 @@ void GenerateMap(Map& m, int stage, DWORD seed)
 static const ClassDef kClass[C_PLAYER_COUNT] = {
 	// name, desc, tier, magic, group, move, jump, rMin, rMax, mag, pow, look, style, base[10], grow[10], learn
 	{ TX_CL_SOLDIER, TX_CLD_SOLDIER, 1, 0, G_MELEE, MV_FOOT, 2, 1, 1, 0, 5, WL_SWORD_SHIELD, AS_SLASH,
-	  { 24, 4, 7, 6, 1, 2, 6, 6, 4, 5 }, { 45, 10, 55, 50, 5, 25, 40, 45, 35, 0 }, L6F(1, SKL_POWER, 2, SKL_BASH, 3, SKL_P_IRON, 4, SKL_VITAL, 5, SKL_CLEAVE, 6, SKL_DOUBLE) },
+	{ 24, 8, 7, 6, 1, 2, 6, 6, 4, 5 }, { 45, 20, 55, 50, 5, 25, 40, 45, 35, 0 }, L6F(1, SKL_POWER, 2, SKL_BASH, 3, SKL_P_IRON, 4, SKL_VITAL, 5, SKL_CLEAVE, 6, SKL_DOUBLE) },
 	{ TX_CL_FIGHTER, TX_CLD_FIGHTER, 1, 0, G_MELEE, MV_FOOT, 2, 1, 1, 0, 7, WL_AXE2, AS_CHOP2,
-	  { 28, 2, 9, 4, 0, 1, 5, 5, 3, 5 }, { 55, 5, 65, 35, 0, 15, 35, 40, 30, 0 }, L6F(1, SKL_POWER, 2, SKL_P_MIGHT, 3, SKL_DOUBLE, 4, SKL_WHIRL, 5, SKL_BASH, 6, SKL_CLEAVE) },
-	{ TX_CL_ARCHER, TX_CLD_ARCHER, 1, 0, G_SWIFT, MV_FOOT, 2, 2, 3, 0, 5, WL_CROSSBOW2, AS_SHOOT,
-	  { 20, 4, 6, 3, 1, 3, 7, 9, 5, 5 }, { 40, 10, 45, 30, 5, 25, 50, 60, 40, 0 }, L6F(1, SKL_PIERCE, 2, SKL_P_CRIT, 3, SKL_ARROWRAIN, 4, SKL_STITCH, 5, SKL_SNIPE, 6, SKL_VITAL) },
+	{ 28, 8, 9, 4, 0, 1, 5, 5, 3, 5 }, { 55, 25, 65, 35, 0, 15, 35, 40, 30, 0 }, L6F(1, SKL_POWER, 2, SKL_P_MIGHT, 3, SKL_DOUBLE, 4, SKL_WHIRL, 5, SKL_BASH, 6, SKL_CLEAVE) },
+	{ TX_CL_ARCHER, TX_CLD_ARCHER, 1, 0, G_SWIFT, MV_FOOT, 2, 2, 5, 0, 5, WL_CROSSBOW2, AS_SHOOT,
+	  { 20, 12, 6, 3, 1, 3, 7, 9, 5, 5 }, { 40, 25, 45, 30, 5, 25, 50, 60, 40, 0 }, L6F(1, SKL_PIERCE, 2, SKL_P_CRIT, 3, SKL_ARROWRAIN, 4, SKL_STITCH, 5, SKL_SNIPE, 6, SKL_VITAL) },
 	{ TX_CL_THIEF, TX_CLD_THIEF, 1, 0, G_SWIFT, MV_FOOT, 3, 1, 1, 0, 4, WL_KNIVES, AS_STAB,
-	  { 19, 4, 5, 3, 1, 3, 10, 8, 8, 6 }, { 38, 10, 40, 25, 5, 25, 65, 55, 55, 0 }, L6F(1, SKL_VITAL, 2, SKL_P_EVADE, 3, SKL_STITCH, 4, SKL_P_SWIFT, 5, SKL_VENOMEDGE, 6, SKL_DOUBLE) },
+	{ 19, 10, 5, 3, 1, 3, 10, 8, 8, 6 }, { 38, 20, 40, 25, 5, 25, 65, 55, 55, 0 }, L6F(1, SKL_VITAL, 2, SKL_P_EVADE, 3, SKL_STITCH, 4, SKL_P_SWIFT, 5, SKL_VENOMEDGE, 6, SKL_DOUBLE) },
 	{ TX_CL_MAGE, TX_CLD_MAGE, 1, 1, G_MAGIC, MV_FOOT, 2, 1, 2, 1, 4, WL_STAFF, AS_CAST,
 	  { 17, 14, 1, 2, 9, 7, 6, 6, 4, 4 }, { 30, 60, 5, 20, 65, 45, 40, 40, 35, 0 }, L6F(1, SKL_FIRE, 2, SKL_THUNDER, 3, SKL_BLIZZARD, 4, SKL_GRAVITY, 5, SKL_P_SPELL, 6, SKL_DARKNESS) },
 	{ TX_CL_CLERIC, TX_CLD_CLERIC, 1, 1, G_HOLY, MV_FOOT, 2, 1, 2, 1, 4, WL_WAND_BOOK, AS_CAST,
@@ -1010,9 +1010,9 @@ static const ClassDef kClass[C_PLAYER_COUNT] = {
 	{ TX_CL_RUNEKNIGHT, TX_CLD_RUNEKNIGHT, 2, 1, G_MAGIC, MV_FOOT, 2, 1, 1, 0, 7, WL_SWORD_BOOK, AS_SLASH,
 	  { 30, 16, 10, 8, 10, 8, 8, 8, 5, 5 }, { 48, 40, 45, 40, 45, 40, 40, 40, 35, 0 }, L6F(15, SKL_RUNEBLADE, 18, SKL_FIRE, 22, SKL_THUNDER, 26, SKL_BLIZZARD, 30, SKL_P_SPELL, 34, SKL_DARKNESS) },
 	{ TX_CL_BERSERKER, TX_CLD_BERSERKER, 2, 0, G_MELEE, MV_FOOT, 2, 1, 1, 0, 10, WL_AXES, AS_SLASH,
-	  { 40, 4, 15, 6, 0, 3, 8, 7, 3, 5 }, { 70, 5, 75, 30, 0, 15, 40, 40, 25, 0 }, L6F(15, SKL_DOUBLE, 18, SKL_WHIRL, 22, SKL_WARCRY, 26, SKL_P_MIGHT, 30, SKL_DRAGONFANG, 34, SKL_CLEAVE) },
-	{ TX_CL_SNIPER, TX_CLD_SNIPER, 2, 0, G_SWIFT, MV_FOOT, 2, 2, 4, 0, 7, WL_CROSSBOW2, AS_SHOOT,
-	  { 26, 6, 9, 5, 1, 5, 9, 14, 7, 5 }, { 42, 15, 50, 30, 5, 30, 50, 70, 45, 0 }, L6(15, SKL_PIERCE, 18, SKL_ARROWRAIN, 24, SKL_P_CRIT, 30, SKL_SNIPE) },
+	  { 40, 12, 15, 6, 0, 3, 8, 7, 3, 5 }, { 70, 20, 75, 30, 0, 15, 40, 40, 25, 0 }, L6F(15, SKL_DOUBLE, 18, SKL_WHIRL, 22, SKL_WARCRY, 26, SKL_P_MIGHT, 30, SKL_DRAGONFANG, 34, SKL_CLEAVE) },
+	{ TX_CL_SNIPER, TX_CLD_SNIPER, 2, 0, G_SWIFT, MV_FOOT, 2, 2, 6, 0, 7, WL_CROSSBOW2, AS_SHOOT,
+	  { 26, 16, 9, 5, 1, 5, 9, 14, 7, 5 }, { 42, 25, 50, 30, 5, 30, 50, 70, 45, 0 }, L6(15, SKL_PIERCE, 18, SKL_ARROWRAIN, 24, SKL_P_CRIT, 30, SKL_SNIPE) },
 	{ TX_CL_ASSASSIN, TX_CLD_ASSASSIN, 2, 0, G_SWIFT, MV_FOOT, 3, 1, 1, 0, 7, WL_KNIVES, AS_STAB,
 	  { 24, 8, 9, 5, 2, 5, 14, 12, 10, 6 }, { 40, 20, 50, 25, 10, 30, 70, 60, 55, 0 }, L6(15, SKL_ASSASSINATE, 18, SKL_VENOMEDGE, 24, SKL_P_EVADE, 30, SKL_P_SWIFT) },
 	{ TX_CL_WIZARD, TX_CLD_WIZARD, 2, 1, G_MAGIC, MV_FOOT, 2, 1, 3, 1, 6, WL_STAFF, AS_CAST,
@@ -1028,7 +1028,7 @@ static const ClassDef kClass[C_PLAYER_COUNT] = {
 	  { 30, 40, 2, 7, 22, 16, 10, 10, 8, 5 }, { 38, 80, 5, 25, 85, 55, 45, 45, 40, 0 }, L6F(35, SKL_METEOR, 38, SKL_HOLY, 42, SKL_DARKNESS, 46, SKL_HASTE, 50, SKL_APOC, 54, SKL_P_SPELL) },
 	{ TX_CL_SAINT, TX_CLD_SAINT, 3, 1, G_HOLY, MV_FOOT, 2, 1, 2, 1, 6, WL_WAND_BOOK, AS_CAST,
 	  { 32, 42, 4, 8, 17, 22, 9, 9, 12, 5 }, { 40, 80, 10, 30, 60, 75, 40, 40, 60, 0 }, { { 35, SKL_HOLY }, { 36, SKL_HEALALL }, { 40, SKL_SANCTUARY }, { 44, SKL_BLESS }, { 48, SKL_RENEW }, { 52, SKL_P_REGEN } } },
-	{ TX_CL_PHANTOM, TX_CLD_PHANTOM, 3, 0, G_SWIFT, MV_FOOT, 4, 1, 2, 0, 9, WL_CROSS_KNIFE, AS_SHOOT1,
+	{ TX_CL_PHANTOM, TX_CLD_PHANTOM, 3, 0, G_SWIFT, MV_FOOT, 4, 1, 4, 0, 9, WL_CROSS_KNIFE, AS_SHOOT1,
 	  { 32, 12, 13, 8, 4, 8, 18, 16, 14, 7 }, { 45, 25, 55, 30, 15, 35, 80, 65, 65, 0 }, L6F(35, SKL_ASSASSINATE, 38, SKL_SNIPE, 42, SKL_ARROWRAIN, 46, SKL_VENOMEDGE, 50, SKL_P_SWIFT, 54, SKL_P_EVADE) },
 	{ TX_CL_DRAGONLORD, TX_CLD_DRAGONLORD, 3, 0, G_MELEE, MV_FLY, 9, 1, 1, 0, 12, WL_SWORD2, AS_CHOP2,
 	  { 44, 12, 16, 14, 5, 10, 12, 11, 8, 7 }, { 60, 25, 65, 55, 10, 40, 45, 45, 40, 0 }, L6F(35, SKL_DRAGONFANG, 38, SKL_WHIRL, 42, SKL_P_IRON, 46, SKL_BRAVE, 50, SKL_GODSLASH, 54, SKL_CLEAVE) },
@@ -1116,6 +1116,7 @@ int NextPromoteClass(int cls)
 }
 bool IsUltimateSkill(int skill)
 {
+	if (skill >= CRAFT_BASE && skill < CRAFT_BASE + CRAFT_N) return IsCraftSuper(skill);
 	switch (skill) {
 	case SKL_DRAGONFANG: case SKL_BRAVE: case SKL_METEOR: case SKL_ASSASSINATE:
 	case SKL_GODSLASH: case SKL_RUIN: case SKL_APOC: return true;
@@ -1221,8 +1222,10 @@ static void BuildArts()
 	}
 	s_artOk = 1;
 }
+static const SkillDef& CraftSkillRef(int index);
 const SkillDef& SkillInfo(int s)
 {
+	if (s >= CRAFT_BASE && s < CRAFT_BASE + CRAFT_N) return CraftSkillRef(s - CRAFT_BASE);
 	if (s == SKL_RAISE) {
 		static const SkillDef raise = { TX_SK_RAISE, TX_SKD_RAISE, SK_HEAL, 12, 0, 1, 2, 0, EL_HOLY, 1, 0, EF_RAISE, 0 };
 		return raise;
@@ -1348,6 +1351,40 @@ const wchar_t* MonsterLabel(int m)
 	return TT(d.nameTx);
 }
 
+static int NameGait(const wchar_t* n)
+{
+	if (!n) return GAIT_BIPED;
+	if (wcsstr(n, L"Blob") || wcsstr(n, L"Glub") || wcsstr(n, L"Mush") || wcsstr(n, L"Squid") || wcsstr(n, L"Ghost") || wcsstr(n, L"Cactoro"))
+		return GAIT_BOUNCE;
+	if (wcsstr(n, L"Snake") || wcsstr(n, L"Worm")) return GAIT_SLITHER;
+	if (wcsstr(n, L"Spider") || wcsstr(n, L"Wasp") || wcsstr(n, L"Bee") || wcsstr(n, L"Armabee")) return GAIT_SCUTTLE;
+	if (wcsstr(n, L"Frog") || wcsstr(n, L"Chicken") || wcsstr(n, L"Birb") || wcsstr(n, L"Pigeon")) return GAIT_WADDLE;
+	if (wcsstr(n, L"Gole")) return GAIT_STOMP;
+	if (wcsstr(n, L"Fish") || wcsstr(n, L"Shark") || wcsstr(n, L"Whale") || wcsstr(n, L"Dolphin") || wcsstr(n, L"Manta")
+		|| wcsstr(n, L"Tang") || wcsstr(n, L"Koi") || wcsstr(n, L"Tuna") || wcsstr(n, L"Tetra") || wcsstr(n, L"Piranha")
+		|| wcsstr(n, L"Puffer") || wcsstr(n, L"Goldfish") || wcsstr(n, L"Betta") || wcsstr(n, L"Snapper") || wcsstr(n, L"Grouper")
+		|| wcsstr(n, L"Gramma") || wcsstr(n, L"Idol") || wcsstr(n, L"Humphead") || wcsstr(n, L"Sword") || wcsstr(n, L"Turbot")
+		|| wcsstr(n, L"Clown") || wcsstr(n, L"Angler"))
+		return GAIT_FISH;
+	if (wcsstr(n, L"Horse") || wcsstr(n, L"Donkey") || wcsstr(n, L"Bull") || wcsstr(n, L"Cow") || wcsstr(n, L"Deer")
+		|| wcsstr(n, L"Stag") || wcsstr(n, L"Alpaca") || wcsstr(n, L"Alpa") || wcsstr(n, L"Fox") || wcsstr(n, L"Wolf")
+		|| wcsstr(n, L"Husky") || wcsstr(n, L"Shiba") || wcsstr(n, L"Bunny") || wcsstr(n, L"Cat") || wcsstr(n, L"Rat")
+		|| wcsstr(n, L"Dino") || wcsstr(n, L"saurus") || wcsstr(n, L"Trex") || wcsstr(n, L"Tricera") || wcsstr(n, L"Veloci")
+		|| wcsstr(n, L"Dragon"))
+		return GAIT_TROT;
+	return GAIT_BIPED;
+}
+
+int MonsterGait(int monster)
+{
+	const MonsterDef& md = MonsterInfo(monster);
+	if (md.look == LK_SLIME) return GAIT_BOUNCE;
+	if (md.look == LK_GOLEM) return GAIT_STOMP;
+	if (md.look == LK_BAT || md.look == LK_WYVERN || md.moveType == MV_FLY) return GAIT_FLY;
+	if (md.look == LK_MESH && md.model >= 0 && md.model < kImportN) return NameGait(kImportName[md.model]);
+	return GAIT_BIPED;
+}
+
 
 // ============================================================ キャラ
 static int PaceSkill(int cls, int lv)
@@ -1360,7 +1397,7 @@ static int PaceSkill(int cls, int lv)
 	return SKL_ART0 + g * 26 + (lv - 7);
 }
 
-static void GrantReached(CharData& c)
+void CharGrantReached(CharData& c)
 {
 	const ClassDef& cd = ClassInfo(c.cls);
 	for (int i = 0; i < 6; i++)
@@ -1372,6 +1409,7 @@ static void GrantReached(CharData& c)
 		if (sk >= 0) CharGiveSkill(c, sk);
 	}
 	if (cd.group == G_HOLY && c.lv >= 7) CharGiveSkill(c, SKL_RAISE);
+	if (c.stat[S_MP] < cd.base[S_MP]) c.stat[S_MP] = cd.base[S_MP];
 }
 
 void CharRecalcInit(CharData& c)
@@ -1383,7 +1421,7 @@ void CharRecalcInit(CharData& c)
 	c.exp = 0;
 	c.skills = 0;
 	memset(c.reserved, 0, sizeof(c.reserved));
-	GrantReached(c);
+	CharGrantReached(c);
 }
 
 void CharGiveSkill(CharData& c, int s)
@@ -1525,7 +1563,7 @@ void EvoApply(CharData& c, int target, const CharData* ps, int n)
 			inherited++;
 		}
 	}
-	GrantReached(c);
+	CharGrantReached(c);
 }
 
 // ============================================================ ユニット
@@ -1540,6 +1578,7 @@ int UnitStat(const Unit& u, int s)
 	if (w && s == S_MAG) v += w->mag;
 	if (a && s == S_DEF) v += a->def;
 	if (a && s == S_RES) v += a->res;
+	v += AccStat(u.accEq[0], s) + AccStat(u.accEq[1], s);
 	if (s == S_DEF && u.buffDef > 0) v = v * 13 / 10;
 	if ((s == S_DEF || s == S_RES) && u.defDown > 0) v = v * 75 / 100;
 	if ((s == S_AGI) && u.buffAgi > 0) v = v * 13 / 10;
@@ -1603,6 +1642,20 @@ void MakeEnemy(Unit& u, int monster, int lv, int boss, Rng& r)
 	if (u.ch.lv >= 45) CharGiveSkill(u.ch, SKL_P_CRIT);
 	u.hp = u.ch.stat[S_HP];
 	u.mp = u.ch.stat[S_MP];
+	u.cp = boss ? 30 : 0;
+	{
+		int line = monster % 6;
+		if (monster >= 0 && monster < M_COUNT) {
+			static const int kLine[M_COUNT] = { 5, 0, 1, 2, 3, 4, 5, 1, 0, 0, 0 };
+			line = kLine[monster];
+		} else line = MonsterDropLine(monster);
+		if (line < 0 || line >= CRAFT_LINES) line = 0;
+		int a = (monster * 3) % 10;
+		int b = (monster * 5 + 1) % 10;
+		if (b == a) b = (b + 3) % 10;
+		u.craftEq[0] = CRAFT_BASE + line * CRAFT_PER_LINE + a;
+		u.craftEq[1] = CRAFT_BASE + line * CRAFT_PER_LINE + ((boss || u.ch.lv >= 18) ? 10 : b);
+	}
 }
 
 // ============================================================ 経路
@@ -1715,13 +1768,17 @@ bool InAttackRange(const Battle& b, int ax, int az, int rMin, int rMax, int tx, 
 }
 
 // ============================================================ 戦闘
+enum { WT_NONE = 0, WT_SWORD, WT_LANCE, WT_AXE, WT_BOW };
+static int WeaponOf(const Unit& u);
 static float HeightMod(const Battle& b, const Unit& a, const Unit& d)
 {
 	float dh = (b.map.StandY(a.x, a.z) - b.map.StandY(d.x, d.z)) / kHStep;
-	return 1.f + Clampf(dh * .05f, -.15f, .25f);
+	bool bow = WeaponOf(a) == WT_BOW || UnitAttackStyle(a) == AS_SHOOT || UnitAttackStyle(a) == AS_SHOOT1;
+	float per = bow ? .12f : .06f;
+	float lo = bow ? -.28f : -.16f;
+	float hi = bow ? .48f : .24f;
+	return 1.f + Clampf(dh * per, lo, hi);
 }
-
-enum { WT_NONE = 0, WT_SWORD, WT_LANCE, WT_AXE, WT_BOW };
 
 static int WeaponOf(const Unit& u)
 {
@@ -1802,6 +1859,14 @@ static void StrikeCalc(const Battle& b, const Unit& a, const Unit& d, int skill,
 		crit = Clampi(crit, 0, sd ? 80 : 50);
 	}
 	dm *= HeightMod(b, a, d) * DirMod(a, d);
+	{
+		float dh = (b.map.StandY(a.x, a.z) - b.map.StandY(d.x, d.z)) / kHStep;
+		int steps = (int)(dh >= 0 ? dh + .5f : dh - .5f);
+		if (steps > 4) steps = 4;
+		if (steps < -4) steps = -4;
+		bool bow = WeaponOf(a) == WT_BOW || UnitAttackStyle(a) == AS_SHOOT || UnitAttackStyle(a) == AS_SHOOT1;
+		hit += steps * (bow ? 8 : 3);
+	}
 	int face = FacingOf(a, d);
 	if (!magic) {
 		if (face == 2) hit += 20;
@@ -1837,16 +1902,15 @@ void CalcForecast(const Battle& b, int ai, int di, int skill, Forecast& f)
 	f.delay = (a.team != d.team) ? 500 : 0;
 	f.follow = -1;
 	f.fdmg = 0;
-	if (a.team != d.team) {
-		int best = -1, bs = -1;
+	if (a.team == TEAM_PLAYER && d.team != TEAM_PLAYER) {
+		int n = 0;
 		for (int i = 0; i < b.nUnits; i++) {
 			const Unit& m = b.u[i];
-			if (i == ai || !m.alive || m.team != a.team) continue;
-			if (Dist(m.x, m.z, a.x, a.z) != 1) continue;
-			int s = UnitStat(m, S_STR) + UnitStat(m, S_MAG) / 2;
-			if (s > bs) { bs = s; best = i; }
+			if (i == ai || !m.alive || m.hp <= 0 || m.team != TEAM_PLAYER) continue;
+			if (!InAttackRange(b, m.x, m.z, UnitRangeMin(m), UnitRangeMax(m), d.x, d.z, true)) continue;
+			n++;
 		}
-		if (best >= 0) { f.follow = best; f.fdmg = max(1, bs / 2 + 2); }
+		if (n > 0) f.follow = n;
 	}
 	const SkillDef* sd = skill >= 0 ? &SkillInfo(skill) : NULL;
 	f.hits = sd ? max(1, sd->hits) : ((UnitStat(a, S_AGI) - UnitStat(d, S_AGI) >= 5) ? 2 : 1);
@@ -1872,6 +1936,18 @@ int SkillCastRangeMax(const Unit& u, int skill)
 bool SkillUsable(const Battle& b, int ui, int skill)
 {
 	const Unit& u = b.u[ui];
+	if (IsCraftId(skill)) {
+		BOOL have = FALSE;
+		for (int i = 0; i < 2; i++) if (u.craftEq[i] == skill) have = TRUE;
+		if (!have) return false;
+		const SkillDef& s = SkillInfo(skill);
+		if (s.kind == SK_PASSIVE) return false;
+		if (IsCraftSuper(skill) && u.cp < 100) return false;
+		int cost = 0;
+		int idx = skill - CRAFT_BASE;
+		if (idx >= 0 && idx < CRAFT_N) cost = CraftCpCost(idx);
+		return u.cp >= cost;
+	}
 	const SkillDef& s = SkillInfo(skill);
 	if (s.kind == SK_PASSIVE) return false;
 	return UnitHasSkill(u, skill) && u.mp >= s.mp;
@@ -1895,7 +1971,7 @@ int SkillTargets(const Battle& b, int caster, int skill, int cx, int cz, int* ou
 		bool ally = (t.team == c.team);
 		if (friendly != ally) continue;
 		if (Dist(t.x, t.z, cx, cz) > s.area) continue;
-		if (s.rMax == 0 && i == caster) continue;
+		if (s.rMax == 0 && i == caster && s.kind != SK_HEAL && s.kind != SK_BUFF) continue;
 		out[n++] = i;
 	}
 	return n;
@@ -1926,12 +2002,24 @@ static void ApplyEffect(Battle& b, Unit& a, Unit& d, int effect)
 	(void)b; (void)a;
 }
 
+static void AddCp(Unit& u, int n)
+{
+	if (n < 1) return;
+	if (u.cp < 0) u.cp = 0;
+	int c = u.cp + n;
+	if (c > CP_MAX) c = CP_MAX;
+	u.cp = c;
+}
+
 int ResolveAttack(Battle& b, int ai, int di, int skill, Rng& r, Strike* out, int maxOut, int cx, int cz)
 {
 	int n = 0;
 	Unit& a = b.u[ai];
 	const SkillDef* sd = skill >= 0 ? &SkillInfo(skill) : NULL;
-	if (sd) a.mp = max(0, a.mp - sd->mp);
+	if (sd) {
+		if (IsCraftId(skill)) a.cp = max(0, a.cp - CraftCpCost(skill - CRAFT_BASE));
+		else a.mp = max(0, a.mp - sd->mp);
+	}
 	// 範囲・回復・補助。範囲技は指定マスを中心にする（空マスでも可）
 	if (sd && (sd->area > 0 || sd->kind == SK_HEAL || sd->kind == SK_BUFF)) {
 		int targets[MAX_UNITS];
@@ -1955,10 +2043,12 @@ int ResolveAttack(Battle& b, int ai, int di, int skill, Rng& r, Strike* out, int
 					s.hit = 1;
 				} else {
 					int amt = UnitStat(a, S_MAG) + sd->power;
+					if (IsCraftId(skill)) amt = max(UnitStat(a, S_MAG), (UnitStat(a, S_STR) + UnitStat(a, S_MAG)) / 2) + sd->power;
 					int before = d.hp;
 					d.hp = min(d.ch.stat[S_HP], d.hp + amt);
 					s.dmg = -(d.hp - before);
 					s.hit = 1;
+					AddCp(a, 4);
 				}
 			} else if (sd->kind == SK_BUFF) {
 				ApplyEffect(b, a, d, sd->effect);
@@ -1971,6 +2061,8 @@ int ResolveAttack(Battle& b, int ai, int di, int skill, Rng& r, Strike* out, int
 					s.crit = (int)(r.Next() % 100) < crit;
 					s.dmg = s.crit ? dmg * 2 : dmg;
 					d.hp -= s.dmg;
+					AddCp(a, 5 + s.dmg / 12);
+					AddCp(d, 7 + s.dmg / 8);
 					if (sd->effect != EF_NONE) ApplyEffect(b, a, d, sd->effect);
 					if (d.hp <= 0) { d.hp = 0; s.kill = 1; }
 					if (a.team != d.team) d.ct = max(0, d.ct - 500);
@@ -2005,6 +2097,8 @@ int ResolveAttack(Battle& b, int ai, int di, int skill, Rng& r, Strike* out, int
 			s.crit = (int)(r.Next() % 100) < crit;
 			s.dmg = s.crit ? dmg * 2 : dmg;
 			y.hp -= s.dmg;
+			AddCp(x, 5 + s.dmg / 12);
+			AddCp(y, 7 + s.dmg / 8);
 			if (sk >= 0 && SkillInfo(sk).effect == EF_DRAIN) {
 				int h = s.dmg / 2;
 				x.hp = min(x.ch.stat[S_HP], x.hp + h);
@@ -2019,24 +2113,63 @@ int ResolveAttack(Battle& b, int ai, int di, int skill, Rng& r, Strike* out, int
 		if (atkTurn) aLeft--; else dLeft--;
 		if (s.kill) break;
 	}
-	if (n < maxOut && d.hp > 0 && a.team != d.team) {
-		int best = -1, bs = -1;
-		for (int i = 0; i < b.nUnits; i++) {
-			Unit& m = b.u[i];
-			if (i == ai || !m.alive || m.team != a.team) continue;
-			if (Dist(m.x, m.z, a.x, a.z) != 1) continue;
-			int sc = UnitStat(m, S_STR) + UnitStat(m, S_MAG) / 2;
-			if (sc > bs) { bs = sc; best = i; }
+	return n;
+}
+
+int AppendAssists(Battle& b, Rng& r, Strike* out, int n, int maxOut)
+{
+	if (!out || n <= 0 || n >= maxOut) return n;
+	int ai = -1;
+	int foes[8];
+	int nf = 0;
+	for (int k = 0; k < n; k++) {
+		const Strike& s = out[k];
+		if (s.counter) continue;
+		if (s.attacker < 0 || s.attacker >= b.nUnits) continue;
+		if (b.u[s.attacker].team != TEAM_PLAYER) continue;
+		if (s.skill >= 0) {
+			int kind = SkillInfo(s.skill).kind;
+			if (kind == SK_HEAL || kind == SK_BUFF || kind == SK_PASSIVE) continue;
 		}
-		if (best >= 0) {
-			int fd = max(1, bs / 2 + 2);
-			Strike s = {};
-			s.attacker = best; s.defender = di; s.skill = -1; s.hit = 1; s.dmg = fd;
-			d.hp -= fd;
-			if (d.hp <= 0) { d.hp = 0; s.kill = 1; }
-			d.ct = max(0, d.ct - 200);
-			out[n++] = s;
+		if (ai < 0) ai = s.attacker;
+		if (s.defender < 0 || s.defender >= b.nUnits) continue;
+		if (b.u[s.defender].team == TEAM_PLAYER) continue;
+		BOOL have = FALSE;
+		for (int i = 0; i < nf; i++) if (foes[i] == s.defender) have = TRUE;
+		if (!have && nf < 8) foes[nf++] = s.defender;
+	}
+	if (ai < 0 || nf == 0) return n;
+	for (int i = 0; i < b.nUnits && n < maxOut; i++) {
+		if (i == ai) continue;
+		Unit& m = b.u[i];
+		if (!m.alive || m.hp <= 0 || m.team != TEAM_PLAYER) continue;
+		int di = -1;
+		for (int f = 0; f < nf; f++) {
+			Unit& e = b.u[foes[f]];
+			if (e.hp <= 0 || !e.alive) continue;
+			if (!InAttackRange(b, m.x, m.z, UnitRangeMin(m), UnitRangeMax(m), e.x, e.z, true)) continue;
+			di = foes[f];
+			break;
 		}
+		if (di < 0) continue;
+		if ((r.Next() & 1u) != 0) continue;
+		Unit& y = b.u[di];
+		if (y.hp <= 0) continue;
+		int dmg, hit, crit;
+		StrikeCalc(b, m, y, -1, dmg, hit, crit);
+		Strike s = {};
+		s.attacker = i;
+		s.defender = di;
+		s.skill = -1;
+		s.hit = (int)(r.Next() % 100) < hit;
+		if (s.hit) {
+			s.crit = (int)(r.Next() % 100) < crit;
+			s.dmg = s.crit ? dmg * 2 : dmg;
+			y.hp -= s.dmg;
+			if (y.hp <= 0) { y.hp = 0; s.kill = 1; }
+			y.ct = max(0, y.ct - (500 + (s.crit ? 250 : 0)));
+		}
+		out[n++] = s;
 	}
 	return n;
 }
@@ -2133,9 +2266,10 @@ void SetupBattle(Battle& b, int stage, DWORD seed, const CharData* party, const 
 		u.rosterIdx = rosterIdx[i];
 		u.monster = -1;
 		u.ch = party[i];
-		GrantReached(u.ch);
+		CharGrantReached(u.ch);
 		u.hp = u.ch.stat[S_HP];
 		u.mp = u.ch.stat[S_MP];
+		CraftBindUnit(u);
 		u.x = b.map.pStartX[i]; u.z = b.map.pStartZ[i];
 		u.face = faceToE;
 		u.ct = r.Range(0, 300) + u.ch.stat[S_AGI] * 8;
@@ -2176,16 +2310,6 @@ void SetupBattle(Battle& b, int stage, DWORD seed, const CharData* party, const 
 	b.nUnits = n;
 	b.RebuildOcc();
 	WakeNearPlayers(b, 8);
-	int nearGrp = -1, nearD = 9999;
-	for (int e = 0; e < b.nUnits; e++) {
-		if (!b.u[e].alive || b.u[e].team != TEAM_ENEMY || b.u[e].grp < 0) continue;
-		for (int p = 0; p < b.nUnits; p++) {
-			if (!b.u[p].alive || b.u[p].team != TEAM_PLAYER) continue;
-			int d = Dist(b.u[e].x, b.u[e].z, b.u[p].x, b.u[p].z);
-			if (d < nearD) { nearD = d; nearGrp = b.u[e].grp; }
-		}
-	}
-	if (nearGrp >= 0) WakeGroup(b, nearGrp);
 }
 
 void FinishAction(Battle& b, int ui, int moved, int acted)
@@ -2241,6 +2365,32 @@ void WakeNearPlayers(Battle& b, int rad)
 		}
 	}
 	for (int g = 0; g < MAX_GROUPS; g++) if (wake[g]) WakeGroup(b, g);
+	// 近い順に2拠点。3つ目は2つ目から8マス以内なら同じ戦いに入れる
+	struct GD { int grp; int dist; } gd[MAX_GROUPS];
+	int ng = 0;
+	BYTE seen[MAX_GROUPS];
+	memset(seen, 0, sizeof(seen));
+	for (int e = 0; e < b.nUnits; e++) {
+		const Unit& u = b.u[e];
+		if (!u.alive || u.team != TEAM_ENEMY || u.grp < 0 || u.grp >= MAX_GROUPS) continue;
+		int best = 9999;
+		for (int p = 0; p < b.nUnits; p++) {
+			if (!b.u[p].alive || b.u[p].team != TEAM_PLAYER) continue;
+			best = min(best, Dist(u.x, u.z, b.u[p].x, b.u[p].z));
+		}
+		if (best >= 9999) continue;
+		if (!seen[u.grp]) { seen[u.grp] = 1; gd[ng].grp = u.grp; gd[ng].dist = best; ng++; }
+		else for (int i = 0; i < ng; i++) if (gd[i].grp == u.grp && best < gd[i].dist) gd[i].dist = best;
+	}
+	for (int i = 1; i < ng; i++) {
+		GD t = gd[i];
+		int j = i;
+		while (j > 0 && gd[j - 1].dist > t.dist) { gd[j] = gd[j - 1]; j--; }
+		gd[j] = t;
+	}
+	int wakeN = min(2, ng);
+	if (ng >= 3 && gd[2].dist <= gd[1].dist + 8) wakeN = 3;
+	for (int i = 0; i < wakeN; i++) WakeGroup(b, gd[i].grp);
 }
 
 int ApplyTile(Battle& b, int ui)
@@ -2387,6 +2537,8 @@ void AiDecide(const Battle& b, int ui, AiPlan& p, Rng& r)
 	static Reach rc;
 	ComputeReach(b, ui, rc);
 	float best = -1e9f;
+	BOOL tryArt = (r.Next() % 100) < 36;
+	BOOL tryOugi = (r.Next() % 100) < 14;
 	Battle& bb = const_cast<Battle&>(b);
 	Unit& um = bb.u[ui];
 	const int ox = u.x, oz = u.z;
@@ -2449,6 +2601,37 @@ void AiDecide(const Battle& b, int ui, AiPlan& p, Rng& r)
 				}
 				sc += r.F(0, 1.5f);
 				if (sc > best) { best = sc; p.moveX = x; p.moveZ = z; p.target = i; p.skill = s; p.castX = tx; p.castZ = tz; }
+			}
+		}
+		for (int ck = 0; ck < 2; ck++) {
+			int cs = u.craftEq[ck];
+			if (cs < CRAFT_BASE) continue;
+			BOOL ougi = IsCraftSuper(cs);
+			if (ougi ? !tryOugi : !tryArt) continue;
+			if (!SkillUsable(b, ui, cs)) continue;
+			const SkillDef& csd = SkillInfo(cs);
+			int rmin = SkillCastRangeMin(u, cs), rmax = SkillCastRangeMax(u, cs);
+			for (int i = 0; i < b.nUnits; i++) {
+				const Unit& t = b.u[i];
+				if (!t.alive) continue;
+				bool friendly = csd.kind == SK_HEAL || csd.kind == SK_BUFF;
+				if (friendly != (t.team == u.team)) continue;
+				int tx = t.x, tz = t.z;
+				if (csd.rMax == 0) { tx = x; tz = z; }
+				else if (!InAttackRange(b, x, z, rmin, rmax, tx, tz, !friendly)) continue;
+				float sc = place;
+				if (friendly) {
+					int targets[8];
+					int nt = SkillTargets(b, ui, cs, tx, tz, targets, 8);
+					if (nt <= 0) continue;
+					sc += nt * (ougi ? 14.f : 9.f);
+				} else {
+					Forecast f;
+					CalcForecast(b, ui, i, cs, f);
+					if (f.dmg <= 0) continue;
+					sc += f.dmg * f.hit / 100.f * (ougi ? .4f : .6f);
+				}
+				if (sc > best) { best = sc; p.moveX = x; p.moveZ = z; p.target = i; p.skill = cs; p.castX = tx; p.castZ = tz; }
 			}
 		}
 	}
@@ -2940,9 +3123,10 @@ bool SaveLoad(SaveData& s)
 		CharData& c = s.roster[i];
 		c.name[NAME_LEN - 1] = 0;
 		if (!c.used) continue;
-		c.cls = Clampi(c.cls, 0, C_PLAYER_COUNT - 1);
+		int clsMax = C_PLAYER_COUNT + TAC_RANK_LINES * TAC_RANK_N - 1;
+		c.cls = Clampi(c.cls, 0, clsMax);
 		c.lv = Clampi(c.lv, 1, TAC_LV_MAX);
-		GrantReached(c);
+		CharGrantReached(c);
 		c.body = Clampi(c.body, 0, B_COUNT - 1);
 		c.hair = Clampi(c.hair, 0, HAIR_STYLES - 1);
 		c.hairColor = Clampi(c.hairColor, 0, HAIR_COLORS - 1);
@@ -2963,6 +3147,7 @@ bool SaveLoad(SaveData& s)
 	s.gearN = Clampi(s.gearN, 0, GEAR_STASH);
 	for (int i = 0; i < s.gearN; i++) if (s.gearId[i] < 1 || s.gearId[i] > kGearN) s.gearId[i] = 1;
 	TrophyLoad();
+	CraftLoad();
 	return true;
 }
 
@@ -2973,7 +3158,7 @@ bool SaveWrite(const SaveData& s)
 	if (_tfopen_s(&fp, path, _T("wb")) != 0 || !fp) return false;
 	bool ok = fwrite(&s, 1, sizeof(s), fp) == sizeof(s);
 	fclose(fp);
-	if (ok) { TrophySave(); DatArc_Commit(kSaveLeaf); }
+	if (ok) { TrophySave(); CraftPrune(s); CraftSave(); DatArc_Commit(kSaveLeaf); }
 	return ok;
 }
 
@@ -3003,5 +3188,8 @@ void RandomName(wchar_t* out, int gender, Rng& r)
 	else tbl = gender ? kNamesLaF : kNamesLaM;
 	wcsncpy_s(out, NAME_LEN, tbl[r.Range(0, 11)], _TRUNCATE);
 }
+
+#include "tactics_src/craft_cat.inc"
+#include "tactics_src/craft_fns.inc"
 
 } // namespace otac

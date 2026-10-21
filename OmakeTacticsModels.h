@@ -45,11 +45,14 @@ struct Actor {
 	DWORD tint;
 	float height;       // 頭上（ワールド）
 	float hover;        // 浮遊高さ
+	int gait;           // Gait。移動の足取り
 	PoseMods mods;
 	int clip, prev;
 	float t, pt, blend, blendDur;
 	int loop, ploop;
 	float animSpeed;
+	float recoil;       // 被ダメの仰け反り 0..1
+	float recoilX, recoilZ;
 	Pose pose;
 	int poseValid;
 	const void* modelPtr;   // ActorPose 時に設定

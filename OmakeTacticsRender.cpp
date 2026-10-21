@@ -1030,6 +1030,7 @@ void Renderer::EvalPose(const Model& m, int ca, float ta, int la, int cb, float 
 		if (g && j == g->hips) {
 			if (A) t = SampleH(*A, ta, la);
 			if (B && blend < 1.f) t = Lerp(SampleH(*B, tb, lb), t, blend);
+			if (la && A && !A->hips.empty()) { t.x = A->hips[0].x; t.z = A->hips[0].z; }
 		}
 		V3 s = m.restS[j];
 		if (mods && mods->any) { s.x *= mods->scale[j].x; s.y *= mods->scale[j].y; s.z *= mods->scale[j].z; }

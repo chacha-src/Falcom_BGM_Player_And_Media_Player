@@ -133,6 +133,7 @@ private:
 	int BattlePortrait(int unit) const;
 	void AssignBattlePortraits();
 	void BuildShowcase();
+	void RollMapSeed(int stage, BOOL force);
 	void UpdateBase(float dt);
 	void DrawBaseUi();
 	void DrawShop();
@@ -155,6 +156,7 @@ private:
 	// 編成
 	void EnterParty();
 	void DrawPartyUi();
+	void DrawEquipLayer();
 	void TogglePartyMember(int idx);
 	void DeleteRoster(int idx);
 
@@ -203,12 +205,16 @@ private:
 	void DrawCommandMenu();
 	void UseConsumable(int good, int target);
 	void DrawLevelUp();
+	void AdvanceLevelUp();
 	void DrawCutIn3D();
 	void DrawCutInUi();
 	void ActorForUnit(int ui);
 	V3 ActorPos(int ui) const;
 	float ActorFace(int ui) const;
 	BOOL UnitInArena(int ui) const;
+	BOOL CutFind(int ui, int* side, int* idx) const;
+	V3 CutStand(int side, int idx) const;
+	void GatherCut();
 
 	// 演出
 	void Burst(V3 p, int n, float spd, float size, float life, float r, float g, float b, int shape, int add, float grav, float stretch = 0, float upBias = 0, float size1 = -1);
@@ -293,6 +299,8 @@ private:
 	Map m_showMap;
 	BOOL m_showBuilt;
 	int m_showStage;
+	DWORD m_mapSeed;
+	int m_mapSeedStage;
 	Actor m_showAct[MAX_PARTY];
 	int m_showN;
 	V3 m_showPos[MAX_PARTY];
@@ -308,6 +316,8 @@ private:
 
 	// 編成
 	int m_partySel;
+	int m_eqPick;      // 0=閉 1=武器 2=防具 3,4=装飾 5,6=技珠
+	int m_eqPage;
 
 	// 進化
 	int m_evMain, m_evTarget;
@@ -373,6 +383,8 @@ private:
 	int m_cutStage;      // 0=覆う 1=技名 2=攻防 3=覆う 4=マップへ
 	float m_cutStageT;
 	int m_cutA, m_cutD;
+	int m_cutAlly[6], m_cutFoe[6];
+	int m_cutAllyN, m_cutFoeN;
 	V3 m_cutPosA, m_cutPosD;
 	float m_flashWhite;
 	Fix<Popup, 64> m_deferPopups;

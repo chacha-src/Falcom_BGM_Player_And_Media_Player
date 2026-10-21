@@ -13,6 +13,7 @@ enum {
 	ID_BT_ATTACK = 500, ID_BT_SKILL, ID_BT_WAIT, ID_BT_UNDO, ID_BT_BACK, ID_BT_LVOK, ID_BT_SHOVE, ID_BT_DOOR, ID_BT_ITEM,
 	ID_BT_SKPREV = 510, ID_BT_SKNEXT,
 	ID_BT_SK0 = 520,
+	ID_BT_CRAFT0 = 800, ID_BT_CRAFT1,
 	ID_BT_M_RESUME = 900, ID_BT_M_HELP, ID_BT_M_RETREAT, ID_BT_M_YES, ID_BT_M_NO, ID_BT_MENU, ID_BT_M_SAVE = 906, ID_BT_M_OPT,
 	ID_BT_OPT_Q = 920, ID_BT_OPT_ANIM, ID_BT_OPT_GRID,
 	ID_BT_IT0 = 960, ID_BT_ITT0 = 980
@@ -263,6 +264,7 @@ void Game::ResumeBattle(int kind)
 	m_showBuilt = FALSE;
 	for (int i = 0; i < m_b.nUnits; i++) {
 		Unit& u = m_b.u[i];
+		if (u.team == TEAM_PLAYER) CharGrantReached(u.ch);
 		ActorForUnit(i);
 		m_faceShow[i] = u.face;
 		m_dispHp[i] = u.hpShow;
@@ -367,7 +369,8 @@ void Game::StartBattle(int stage)
 	}
 	if (!n) return;
 	stage = Clampi(stage, 1, TAC_STAGE_MAX);
-	DWORD seed = m_rng.Next() ^ GetTickCount() ^ (DWORD)(stage * 2654435761u);
+	RollMapSeed(stage, FALSE);
+	DWORD seed = m_mapSeed;
 	SetupBattle(m_b, stage, seed, chars, idx, n);
 	m_battleStage = stage;
 	m_logN = 0;
@@ -441,9 +444,11 @@ void Game::EndBattle(int victory)
 		if (u.team != TEAM_PLAYER) continue;
 		if (u.rosterIdx < 0 || u.rosterIdx >= MAX_ROSTER) continue;
 		CharData c = u.ch;
+		CharGrantReached(c);
 		c.used = 1;
 		c.battles++;
 		m_save.roster[u.rosterIdx] = c;
+		CraftSaveUnit(u);
 		for (int k = 0; k < m_resultN; k++) if (m_resultRoster[k] == u.rosterIdx) m_resultExp[k] = m_expGain[i];
 	}
 	if (victory) {
@@ -973,6 +978,7 @@ void Game::BattleCancel()
 		break;
 	case PH_P_SKILLTARGET:
 		m_phase = PH_P_SKILLS; m_navMode = TRUE; m_focusId = ID_BT_SK0 + max(0, m_cmdSkill);
+		if (IsCraftId(m_cmdSkill)) m_focusId = ID_BT_CRAFT0 + (m_b.u[m_cur].craftEq[1] == m_cmdSkill ? 1 : 0);
 		ComputeOverlays();
 		sounded = 1;
 		break;
@@ -982,7 +988,8 @@ void Game::BattleCancel()
 		sounded = 1;
 		break;
 	case PH_LEVELUP:
-		m_lvT = 99.f;
+		AdvanceLevelUp();
+		sounded = 1;
 		break;
 	default: break;
 	}
@@ -1002,14 +1009,22 @@ void Game::StartMove(int ui, int tx, int tz, int next)
 	m_phaseT = 0;
 	m_pathN = 0;
 	m_camPan = v3(0, 0, 0);
-	if (m_moveN > 1) ActorPlay(m_act[ui], m_moveN > 3 ? CL_RUN : CL_WALK, 1, .12f);
+	if (m_moveN > 1) {
+		int clip = m_moveN > 3 ? CL_RUN : CL_WALK;
+		ActorPlay(m_act[ui], clip, 1, .1f);
+		float tileRate = m_save.battleAnim ? 5.2f : 2.6f;
+		if (m_act[ui].gait == GAIT_BIPED)
+			m_act[ui].animSpeed = tileRate * (clip == CL_RUN ? .8f : 1.f);
+		else
+			m_act[ui].animSpeed = clip == CL_RUN ? 2.4f : 1.8f;
+	}
 }
 
 void Game::UpdateMove(float dt)
 {
 	int ui = m_moveUnit;
 	Unit& u = m_b.u[ui];
-	float speed = m_save.battleAnim ? 7.5f : 5.f;
+	float speed = m_save.battleAnim ? 5.2f : 2.6f;
 	m_moveT += dt * speed;
 	int seg = (int)m_moveT;
 	BOOL fly = UnitMoveType(u) == MV_FLY;
@@ -1052,6 +1067,7 @@ void Game::UpdateMove(float dt)
 			TacSfx(TS_CONFIRM);
 		}
 		WakeNearPlayers(m_b, 9);
+		m_act[ui].animSpeed = 1.f;
 		ActorPlay(m_act[ui], CL_IDLE, 1, .15f);
 		int next = m_moveNext;
 		if (u.team == TEAM_PLAYER) {
@@ -1117,11 +1133,12 @@ void Game::BeginAttack(int ui, int target, int skill, int cx, int cz)
 	}
 	for (int i = 0; i < m_b.nUnits; i++) { m_preHp[i] = m_b.u[i].hp; m_dispHp[i] = (float)m_b.u[i].hp; }
 	m_strkN = ResolveAttack(m_b, ui, target, skill, m_rng, m_strk, 32, cx, cz);
+	m_strkN = AppendAssists(m_b, m_rng, m_strk, m_strkN, 32);
 	m_seqN = 0;
 	BOOL multi = skill >= 0 && (SkillInfo(skill).area > 0 || SkillInfo(skill).kind == SK_HEAL || SkillInfo(skill).kind == SK_BUFF);
 	for (int i = 0; i < m_strkN && m_seqN < 24; i++) {
 		const Strike& s = m_strk[i];
-		if (multi && m_seqN > 0) {
+		if (multi && m_seqN > 0 && s.attacker == m_seq[m_seqN - 1].attacker && !s.counter) {
 			SeqStep& p = m_seq[m_seqN - 1];
 			if (p.nHits < MAX_UNITS) { p.hits[p.nHits++] = s; continue; }
 		}
@@ -1144,7 +1161,7 @@ void Game::BeginAttack(int ui, int target, int skill, int cx, int cz)
 	m_seqImpact = 0;
 	m_ult = IsUltimateSkill(skill) || (anyCrit && skill >= 0);
 	m_seqCut = m_ult || (!m_save.battleAnim && (skill >= 0 || anyCrit));
-	if (m_ult) m_flashWhite = 0.35f;
+	if (m_ult) m_flashWhite = IsCraftSuper(skill) ? 1.f : 0.35f;
 	if (skill == SKL_TRANSMUTE && m_save.itemN[IT_ORE] > 0) m_save.itemN[IT_ORE]--;
 	m_deferPopups.clear();
 	if (m_seqCut) {
@@ -1152,10 +1169,14 @@ void Game::BeginAttack(int ui, int target, int skill, int cx, int cz)
 		m_cutStageT = 0;
 		m_cutA = ui;
 		m_cutD = (m_seqPrimary == ui) ? -1 : m_seqPrimary;
-		m_cutPosA = m_cutD < 0 ? v3(0, 0, 0) : v3(-1.25f, 0, 0);
-		m_cutPosD = v3(1.25f, 0, 0);
-	} else if (skill >= 0) {
-		AddBanner(TT(SkillInfo(skill).nameTx), NULL, ElemColor(SkillInfo(skill).element), 2, 1.4f);
+		GatherCut();
+		int side = 0, idx = 0;
+		m_cutPosA = CutFind(m_cutA, &side, &idx) ? CutStand(side, idx) : v3(0, 0, 0);
+		m_cutPosD = (m_cutD >= 0 && CutFind(m_cutD, &side, &idx)) ? CutStand(side, idx) : v3(1.25f, 0, 0);
+	} else {
+		m_cutAllyN = m_cutFoeN = 0;
+		if (skill >= 0)
+			AddBanner(IsCraftId(skill) ? CraftName(skill) : TT(SkillInfo(skill).nameTx), NULL, ElemColor(SkillInfo(skill).element), 2, 1.4f);
 	}
 	m_phase = PH_ACTION;
 	m_phaseT = 0;
@@ -1175,29 +1196,75 @@ void Game::BeginAttack(int ui, int target, int skill, int cx, int cz)
 	memset(m_ovAtk, 0, sizeof(m_ovAtk));
 }
 
+BOOL Game::CutFind(int ui, int* side, int* idx) const
+{
+	for (int i = 0; i < m_cutAllyN; i++) if (m_cutAlly[i] == ui) { if (side) *side = 0; if (idx) *idx = i; return TRUE; }
+	for (int i = 0; i < m_cutFoeN; i++) if (m_cutFoe[i] == ui) { if (side) *side = 1; if (idx) *idx = i; return TRUE; }
+	return FALSE;
+}
+
+V3 Game::CutStand(int side, int idx) const
+{
+	if (m_cutFoeN <= 0) {
+		float n = (float)max(1, m_cutAllyN);
+		float x = (idx - (n - 1.f) * .5f) * .9f;
+		return v3(x, 0, (idx % 2) ? .22f : -.22f);
+	}
+	float x = (side == 0 ? -1.15f : 1.15f) + (side == 0 ? -1.f : 1.f) * idx * .82f;
+	float z = (idx % 2) ? .3f : -.14f;
+	return v3(x, 0, side == 0 ? z : -z);
+}
+
+void Game::GatherCut()
+{
+	m_cutAllyN = m_cutFoeN = 0;
+	auto add = [&](int id) {
+		if (id < 0 || id >= m_b.nUnits) return;
+		int* arr = m_b.u[id].team == TEAM_PLAYER ? m_cutAlly : m_cutFoe;
+		int& n = m_b.u[id].team == TEAM_PLAYER ? m_cutAllyN : m_cutFoeN;
+		if (n >= 6) return;
+		for (int i = 0; i < n; i++) if (arr[i] == id) return;
+		arr[n++] = id;
+	};
+	add(m_cutA);
+	if (m_cutD >= 0) add(m_cutD);
+	for (int k = 0; k < m_strkN; k++) { add(m_strk[k].attacker); add(m_strk[k].defender); }
+}
+
 V3 Game::ActorPos(int ui) const
 {
+	float kb = m_act[ui].recoil * .42f;
 	if (m_seqCut && m_cutStage >= 1 && m_cutStage <= 3) {
-		if (ui == m_cutA) return m_cutPosA + v3(m_lunge[ui], m_b.u[ui].hover, 0);
-		if (ui == m_cutD) return m_cutPosD - v3(m_lunge[ui], -m_b.u[ui].hover, 0);
+		int side = 0, idx = 0;
+		if (CutFind(ui, &side, &idx)) {
+			V3 p = CutStand(side, idx);
+			float lx = m_lunge[ui];
+			p.x += side == 0 ? (lx - kb) : -(lx + kb);
+			p.y += m_b.u[ui].hover;
+			return p;
+		}
 	}
 	const Unit& u = m_b.u[ui];
+	const Actor& a = m_act[ui];
 	float f = m_faceShow[ui];
-	return v3(u.px + sinf(f) * m_lunge[ui], u.py + u.hover, u.pz + cosf(f) * m_lunge[ui]);
+	return v3(u.px + sinf(f) * m_lunge[ui] + a.recoilX * kb, u.py + u.hover, u.pz + cosf(f) * m_lunge[ui] + a.recoilZ * kb);
 }
 
 float Game::ActorFace(int ui) const
 {
 	if (m_seqCut && m_cutStage >= 1 && m_cutStage <= 3) {
-		if (ui == m_cutA) return m_cutD < 0 ? PI - .45f : PI * .5f;
-		if (ui == m_cutD) return -PI * .5f;
+		int side = 0, idx = 0;
+		if (CutFind(ui, &side, &idx)) {
+			if (m_cutFoeN <= 0) return PI - .45f;
+			return side == 0 ? PI * .5f : -PI * .5f;
+		}
 	}
 	return m_faceShow[ui];
 }
 
 BOOL Game::UnitInArena(int ui) const
 {
-	return ui == m_cutA || ui == m_cutD;
+	return CutFind(ui, NULL, NULL);
 }
 
 void Game::SeqImpact(const SeqStep& st)
@@ -1211,8 +1278,11 @@ void Game::SeqImpact(const SeqStep& st)
 		int d = h.defender;
 		Unit& du = m_b.u[d];
 		BOOL visible = !cutView || UnitInArena(d);
-		V3 head = ActorPos(d) + v3(0, m_act[d].height * .9f + .1f, 0);
-		V3 mid = ActorPos(d) + v3(0, m_act[d].height * .5f, 0);
+		float visH = m_act[d].height;
+		if (cutView && visH > 1.32f) visH = 1.32f;
+		float zPop = cutView ? -.48f : 0.f;
+		V3 head = ActorPos(d) + v3(0, visH * .9f + .12f, zPop);
+		V3 mid = ActorPos(d) + v3(0, visH * .5f, cutView ? -.22f : 0.f);
 		if (!cutView || !visible) {
 			V3 mp = v3(du.px, du.py + du.hover, du.pz);
 			head = mp + v3(0, m_act[d].height * .9f + .1f, 0);
@@ -1265,7 +1335,7 @@ void Game::SeqImpact(const SeqStep& st)
 		if (h.drain > 0) {
 			m_dispHp[h.attacker] = min((float)m_b.u[h.attacker].ch.stat[S_HP], m_dispHp[h.attacker] + h.drain);
 			swprintf_s(s, L"+%d", h.drain);
-			AddPopup(ActorPos(h.attacker) + v3(0, m_act[h.attacker].height + .1f, 0), s, RGBA8(120, 255, 150), 0, .25f);
+			AddPopup(ActorPos(h.attacker) + v3(0, min(m_act[h.attacker].height, cutView ? 1.32f : m_act[h.attacker].height) + .1f, cutView ? -.4f : 0.f), s, RGBA8(120, 255, 150), 0, .25f);
 		}
 		swprintf_s(s, L"%d", h.dmg);
 		if (h.crit) {
@@ -1287,17 +1357,25 @@ void Game::SeqImpact(const SeqStep& st)
 			wchar_t an[40], dn[40], line[96];
 			UnitTitle(m_b.u[h.attacker], an, 40);
 			UnitTitle(du, dn, 40);
-			const wchar_t* sk = sd ? TT(sd->nameTx) : TT(TX_BT_ATTACK);
+			const wchar_t* sk = sd ? (IsCraftId(st.skill) ? CraftName(st.skill) : TT(sd->nameTx)) : TT(TX_BT_ATTACK);
 			swprintf_s(line, L"%s  %s  %s  %d%s", an, sk, dn, h.dmg, h.crit ? L" !" : L"");
 			AddLog(line, h.crit ? RGBA8(255, 220, 80) : RGBA8(235, 235, 240));
 		}
 		du.flash = 1.f;
+		{
+			float dx = du.px - m_b.u[h.attacker].px, dz = du.pz - m_b.u[h.attacker].pz;
+			float len = sqrtf(dx * dx + dz * dz);
+			if (len < .05f) { dx = -sinf(du.face); dz = -cosf(du.face); len = 1.f; }
+			m_act[d].recoilX = dx / len;
+			m_act[d].recoilZ = dz / len;
+			m_act[d].recoil = h.crit ? 1.f : .75f;
+		}
 		if (h.kill) {
 			TacSfx(TS_DEATH);
 			if (visible || !cutView) ActorPlay(m_act[d], CL_DEATH, 0, .08f);
 			m_dieT[d] = 0;
 			if (!visible) ActorPlay(m_act[d], CL_DEATH, 0, .08f);
-		} else if (visible || !cutView) {
+		} else {
 			ActorPlay(m_act[d], h.crit ? CL_HIT_B : CL_HIT_A, 0, .06f);
 		}
 		if (sd && sd->effect != EF_NONE && sd->effect != EF_DRAIN && sd->effect != EF_IGNDEF && !h.kill) {
@@ -1336,8 +1414,8 @@ void Game::UpdateSeq(float dt)
 			return;
 		}
 		if (m_cutStage == 1) {
-			float need = m_ult ? 2.15f : (m_seqSkill >= 0 ? 1.05f : .45f);
-			if (m_ult && m_seqSkill >= 0) {
+			float need = IsCraftSuper(m_seqSkill) ? 3.2f : (m_ult ? 2.15f : (m_seqSkill >= 0 ? 1.05f : .45f));
+			if (IsCraftSuper(m_seqSkill) || (m_ult && m_seqSkill >= 0)) {
 				const SkillDef& sd = SkillInfo(m_seqSkill);
 				if (((int)(m_cutStageT * 8.f) & 1) == 0)
 					Burst(m_cutPosA + v3(0, 1.1f, 0), 4, 3.f, .2f, .4f, (ElemColor(sd.element) & 255) / 255.f, ((ElemColor(sd.element) >> 8) & 255) / 255.f, ((ElemColor(sd.element) >> 16) & 255) / 255.f, 3, 1, -1.f, 0, .6f);
@@ -1524,6 +1602,11 @@ void Game::FinishSeq()
 					AddPopup(v3(u.px, u.py + 1.7f + di * .35f, u.pz), line, RGBA8(255, 186, 96), 1);
 					AddLog(line, RGBA8(255, 186, 96));
 				}
+				wchar_t loot[80];
+				if (DropCraftLoot(u.monster, u.boss, m_rng, loot, 80)) {
+					AddPopup(v3(u.px, u.py + 2.1f, u.pz), loot, RGBA8(190, 170, 255), 1);
+					AddLog(loot, RGBA8(190, 170, 255));
+				}
 			}
 			for (int k = 0; k < m_strkN; k++) {
 				if (m_strk[k].defender == i && m_strk[k].kill) {
@@ -1567,15 +1650,6 @@ void Game::AwardExp()
 		if (u.team != TEAM_PLAYER || !gain[i]) continue;
 		int g = min(100, gain[i]);
 		m_expGain[i] += g;
-		wchar_t s[48];
-		swprintf_s(s, L"%s +%d", TT(TX_MISC_EXP), g);
-		AddPopup(v3(u.px, u.py + m_act[i].height + .45f, u.pz), s, RGBA8(150, 210, 255), 1, .3f);
-		{
-			wchar_t nm[40], line[80];
-			UnitTitle(u, nm, 40);
-			swprintf_s(line, L"%s  %s", nm, s);
-			AddLog(line, RGBA8(150, 210, 255));
-		}
 		u.ch.exp += g;
 		while (u.ch.exp >= ExpToNext(u.ch.lv) && u.ch.lv < TAC_LV_MAX && m_lvqN < MAX_PARTY * 4) {
 			u.ch.exp -= ExpToNext(u.ch.lv);
@@ -1591,6 +1665,17 @@ void Game::AwardExp()
 			u.levelsGained++;
 		}
 		if (u.ch.lv >= TAC_LV_MAX) u.ch.exp = 0;
+		{
+			wchar_t s[64];
+			int need = ExpToNext(u.ch.lv);
+			int left = u.ch.lv >= TAC_LV_MAX ? 0 : max(0, need - u.ch.exp);
+			swprintf_s(s, L"%s +%d  %s %d", TT(TX_MISC_EXP), g, TT(TX_EXP_LEFT), left);
+			AddPopup(v3(u.px, u.py + m_act[i].height + .45f, u.pz), s, RGBA8(150, 210, 255), 1, .3f);
+			wchar_t nm[40], line[96];
+			UnitTitle(u, nm, 40);
+			swprintf_s(line, L"%s  %s", nm, s);
+			AddLog(line, RGBA8(150, 210, 255));
+		}
 		m_dispHp[i] = (float)u.hp;
 	}
 }
@@ -1615,6 +1700,8 @@ void Game::UpdateUnitsVisual(float dt)
 		u.hpShow = Lerpf(u.hpShow, targetHp, Clampf(dt * 5.f, 0, 1));
 		if (fabsf(u.hpShow - targetHp) < .05f) u.hpShow = targetHp;
 		u.flash = max(0.f, u.flash - dt * 3.f);
+		BOOL holdRecoil = m_seqCut && m_cutStage >= 1 && m_cutStage <= 3 && !UnitInArena(i);
+		if (a.recoil > 0 && !holdRecoil) a.recoil = max(0.f, a.recoil - dt * (a.recoil > .55f ? 1.15f : 2.5f));
 		if (m_dieT[i] >= 0) {
 			m_dieT[i] += dt;
 			if (m_dieT[i] > .9f) {
@@ -1683,12 +1770,7 @@ void Game::UpdateBattle(float dt)
 		if (m_phaseT > .22f) { m_phase = PH_NEXT; m_phaseT = 0; }
 		break;
 	case PH_LEVELUP:
-		m_lvT += dt;
-		if (m_lvT > 3.2f) {
-			m_lvqCur++;
-			m_lvT = 0;
-			if (m_lvqCur >= m_lvqN) { m_lvqN = 0; FinishUnitTurn(1); }
-		}
+		if (m_lvT < 1.f) m_lvT += dt;
 		break;
 	case PH_OVER:
 		m_overT += dt;
@@ -1824,13 +1906,16 @@ void Game::DrawCutIn3D()
 	if (m_cutStage == 1 && m_seqSkill >= 0) {
 		float u = Smooth01(m_cutStageT / 1.05f);
 		V3 a = m_cutPosA;
-		look = a + v3(0, m_act[m_cutA].height * .6f, 0);
+		float h = m_act[m_cutA].height;
+		if (h > 1.32f) h = 1.32f;
+		look = a + v3(0, h * .6f, 0);
 		eye = look + v3(Lerpf(1.6f, 1.1f, u), Lerpf(.1f, .25f, u), Lerpf(-1.2f, -.9f, u));
 	} else {
-		float s = m_cutD < 0 ? .75f : 1.f;
+		int spread = max(m_cutAllyN, m_cutFoeN);
 		look = v3(0, .55f, 0);
 		float sw = sinf(t * .4f) * .35f;
-		eye = v3(.3f + sw, 1.05f, -3.5f * s);
+		float dist = (m_cutFoeN <= 0 ? 2.8f : 3.8f) + max(0, spread - 1) * .75f;
+		eye = v3(.3f + sw, 1.05f, -dist);
 		if (m_shake > .3f) { eye = Lerp(eye, look, .12f); }
 	}
 	if (m_shake > 0) look = look + v3(m_rng.F(-1, 1), m_rng.F(-1, 1), 0) * (m_shake * .03f);
@@ -1840,17 +1925,28 @@ void Game::DrawCutIn3D()
 	m_r.SetFog(10.f, 40.f, 0, e.skyBot);
 	m_r.SetAmbient(e.ambSky, e.ambGnd, e.amb + .1f, e.hard);
 	m_r.SetLight(Norm(v3(-.4f, .8f, -.45f)), v3(0, 0, 0), 5.f);
-	int ids[2] = { m_cutA, m_cutD };
-	for (int k = 0; k < 2; k++) if (ids[k] >= 0) ActorPose(m_act[ids[k]], m_lib, m_r);
+	int ids[12];
+	int nId = 0;
+	for (int i = 0; i < m_cutAllyN && nId < 12; i++) ids[nId++] = m_cutAlly[i];
+	for (int i = 0; i < m_cutFoeN && nId < 12; i++) ids[nId++] = m_cutFoe[i];
+	if (nId == 0 && m_cutA >= 0) ids[nId++] = m_cutA;
+	auto cutWorld = [&](int id) {
+		const Actor& ac = m_act[id];
+		float sc = ac.scale;
+		if (ac.height > 1.32f) sc *= 1.32f / ac.height;
+		V3 p = ActorPos(id);
+		return MMul(MMul(MScale(sc, sc, sc), MRotY(ActorFace(id) + PI)), MTrans(p.x, p.y, p.z));
+	};
+	for (int k = 0; k < nId; k++) if (ids[k] >= 0) ActorPose(m_act[ids[k]], m_lib, m_r);
 	DrawParams gp;
 	gp.tint = e.ground;
 	gp.rim = 0;
 	M4 gw = MMul(MScale(9.f, .02f, 9.f), MTrans(0, -.02f, 0));
 	m_r.BeginShadowPass();
-	for (int k = 0; k < 2; k++) {
+	for (int k = 0; k < nId; k++) {
 		if (ids[k] < 0) continue;
 		DrawParams dp;
-		ActorDraw(m_r, m_lib, m_act[ids[k]], ActorWorld(m_act[ids[k]], ActorPos(ids[k]), ActorFace(ids[k])), dp, m_time);
+		ActorDraw(m_r, m_lib, m_act[ids[k]], cutWorld(ids[k]), dp, m_time);
 	}
 	m_r.BeginMainPass();
 	DWORD top = e.skyTop, bot = e.skyBot;
@@ -1860,7 +1956,7 @@ void Game::DrawCutIn3D()
 	}
 	m_r.DrawSky(top, bot, 1, RGBA8(255, 255, 255));
 	m_r.DrawStatic(m_lib.orb, gw, gp);
-	for (int k = 0; k < 2; k++) {
+	for (int k = 0; k < nId; k++) {
 		if (ids[k] < 0) continue;
 		const Unit& u = m_b.u[ids[k]];
 		DrawParams dp;
@@ -1868,7 +1964,7 @@ void Game::DrawCutIn3D()
 		dp.flash = u.flash;
 		dp.dissolve = u.dissolve;
 		dp.rim = .55f;
-		ActorDraw(m_r, m_lib, m_act[ids[k]], ActorWorld(m_act[ids[k]], ActorPos(ids[k]), ActorFace(ids[k])), dp, m_time);
+		ActorDraw(m_r, m_lib, m_act[ids[k]], cutWorld(ids[k]), dp, m_time);
 	}
 	m_r.DrawParticles(m_parts.data(), m_parts.size());
 }
@@ -1893,6 +1989,11 @@ void Game::DrawUnitPanel(const Unit& u, float x, float y, float w, BOOL big)
 	float by = y + U(52);
 	swprintf_s(l, L"%s %d/%d", TT(TX_ST_HP), (int)(u.hpShow + .5f), u.ch.stat[S_HP]);
 	m_r.HudText(l, tx, by + U(6), U(12), RGBA8(230, 230, 230), 0, 0);
+	{
+		wchar_t cp[32];
+		swprintf_s(cp, L"%s %d", TT(TX_CP), u.cp);
+		m_r.HudText(cp, tx + tw, by + U(6), U(12), u.cp >= 100 ? RGBA8(255, 214, 80) : RGBA8(210, 170, 70), 2, 0);
+	}
 	float frac = u.hpShow / max(1, u.ch.stat[S_HP]);
 	Bar(tx, by + U(14), tw, U(10), frac, frac > .5f ? RGBA8(120, 240, 120) : (frac > .25f ? RGBA8(240, 210, 80) : RGBA8(255, 90, 70)), RGBA8(40, 120, 50), u.hpShow / max(1, u.ch.stat[S_HP]) + .0f);
 	by += U(28);
@@ -1913,8 +2014,10 @@ void Game::DrawUnitPanel(const Unit& u, float x, float y, float w, BOOL big)
 		if (u.team == TEAM_ENEMY && !u.alert) { wcscat_s(st, TT(TX_BT_ASLEEP)); wcscat_s(st, L" "); }
 		if (u.defDown > 0) { wcscat_s(st, TT(TX_ST_DEF)); wcscat_s(st, L"↓ "); }
 		if (u.team == TEAM_PLAYER) {
-			wchar_t ex[32];
-			swprintf_s(ex, L"%s %d", TT(TX_MISC_EXP), u.ch.exp);
+			wchar_t ex[64];
+			int need = ExpToNext(u.ch.lv);
+			int left = u.ch.lv >= TAC_LV_MAX ? 0 : max(0, need - u.ch.exp);
+			swprintf_s(ex, L"%s %d/%d  %s %d  %s %d", TT(TX_MISC_EXP), u.ch.exp, need, TT(TX_EXP_LEFT), left, TT(TX_CP), u.cp);
 			wcscat_s(st, ex);
 		}
 		m_r.HudText(st, tx, by + U(6), U(11), RGBA8(200, 230, 255), 0, 0);
@@ -2143,10 +2246,15 @@ void Game::DrawForecast()
 		if (f.tri > 0) { wcscat_s(extra, L"  "); wcscat_s(extra, TT(TX_BT_TRI_ADV)); }
 		if (f.tri < 0) { wcscat_s(extra, L"  "); wcscat_s(extra, TT(TX_BT_TRI_DIS)); }
 		if (f.bowFly) { wcscat_s(extra, L"  "); wcscat_s(extra, TT(TX_BT_BOWFLY)); }
+		{
+			int hs = BattleHeightSteps(m_b, a.x, a.z, d.x, d.z);
+			if (hs > 0) { wcscat_s(extra, L"  "); wcscat_s(extra, TT(TX_HIGH)); }
+			else if (hs < 0) { wcscat_s(extra, L"  "); wcscat_s(extra, TT(TX_LOW)); }
+		}
 		if (f.delay > 0) { wcscat_s(extra, L"  "); wcscat_s(extra, TT(TX_BT_DELAY)); }
-		if (f.follow >= 0) {
+		if (f.follow > 0) {
 			wchar_t bit[48];
-			swprintf_s(bit, L"  %s %d", TT(TX_BT_FOLLOW), f.fdmg);
+			swprintf_s(bit, L"  %s ×%d", TT(TX_BT_FOLLOW), f.follow);
 			wcscat_s(extra, bit);
 		}
 		m_r.HudText(extra, x + w * .5f, y + U(160), U(13), RGBA8(255, 230, 170), 1, 0);
@@ -2269,36 +2377,49 @@ void Game::DrawCommandMenu()
 		BOOL canDoor = CanOpenDoor(u) && AdjDoor(m_b, m_cur, NULL, NULL) > 0;
 		int haveItem = ConsumableCount(m_save);
 		int n = (m_moved ? 4 : 3) + (canShove ? 1 : 0) + (canDoor ? 1 : 0) + (haveItem > 0 ? 1 : 0);
-		Panel(x - U(8), y - U(8), w + U(16), bh * n + U(6) * (n - 1) + U(16));
+		float cw = U(320);
+		x = min(x, m_w - cw - U(16));
+		Panel(x - U(8), y - U(8), cw + U(16), bh * n + U(6) * (n - 1) + U(88));
 		BOOL hasSkill = FALSE;
 		for (int s = 0; s < SKL_COUNT; s++) if (UnitHasSkill(u, s) && SkillInfo(s).kind != SK_PASSIVE) hasSkill = TRUE;
+		BOOL hasCraft = u.craftEq[0] >= CRAFT_BASE || u.craftEq[1] >= CRAFT_BASE;
 		float yy = y;
-		if (Btn(ID_BT_ATTACK, x, yy, w, bh, TT(TX_BT_ATTACK), HasAttackTarget(m_cur))) {
+		int desc = -1;
+		auto mark = [&](int id, float by, int tx) {
+			if ((m_navMode && m_focusId == id) || (!m_navMode && m_mouseSeen && Hit(x, by, cw, bh))) desc = tx;
+		};
+		mark(ID_BT_ATTACK, yy, TX_BTD_ATTACK);
+		if (Btn(ID_BT_ATTACK, x, yy, cw, bh, TT(TX_BT_ATTACK), HasAttackTarget(m_cur))) {
 			m_phase = PH_P_TARGET; m_target = -1; ComputeOverlays(); m_navMode = FALSE;
 			for (int i = 0; i < m_b.nUnits; i++) if (CanTarget(m_cur, i, -1)) { m_cx = m_b.u[i].x; m_cz = m_b.u[i].z; m_cursorValid = TRUE; break; }
 		}
 		yy += bh + U(6);
-		if (Btn(ID_BT_SKILL, x, yy, w, bh, TT(TX_BT_SKILL), hasSkill)) { m_phase = PH_P_SKILLS; m_skillPage = 0; m_navMode = TRUE; m_focusId = ID_BT_SK0; }
+		mark(ID_BT_SKILL, yy, TX_BTD_SKILL);
+		if (Btn(ID_BT_SKILL, x, yy, cw, bh, hasCraft ? TT(TX_CRAFT) : TT(TX_BT_SKILL), hasSkill || hasCraft)) { m_phase = PH_P_SKILLS; m_skillPage = 0; m_navMode = TRUE; m_focusId = hasCraft ? ID_BT_CRAFT0 : ID_BT_SK0; }
 		yy += bh + U(6);
-		if (Btn(ID_BT_WAIT, x, yy, w, bh, TT(TX_BT_WAIT))) { FinishUnitTurn(0); return; }
+		mark(ID_BT_WAIT, yy, TX_BTD_WAIT);
+		if (Btn(ID_BT_WAIT, x, yy, cw, bh, TT(TX_BT_WAIT))) { FinishUnitTurn(0); return; }
 		yy += bh + U(6);
 		{
 			int have = ConsumableCount(m_save);
 			wchar_t lb[64];
 			swprintf_s(lb, L"%s %d", TT(TX_BT_ITEM), have);
-			if (have > 0 && Btn(ID_BT_ITEM, x, yy, w, bh, lb)) {
+			if (have > 0) mark(ID_BT_ITEM, yy, TX_BTD_ITEM);
+			if (have > 0 && Btn(ID_BT_ITEM, x, yy, cw, bh, lb)) {
 				m_phase = PH_P_ITEM; m_itemAim = -1; m_navMode = TRUE; m_focusId = ID_BT_IT0;
 				return;
 			}
 			if (have > 0) yy += bh + U(6);
 		}
-		if (canShove && Btn(ID_BT_SHOVE, x, yy, w, bh, TT(TX_BT_SHOVE))) {
+		if (canShove) mark(ID_BT_SHOVE, yy, TX_BTD_SHOVE);
+		if (canShove && Btn(ID_BT_SHOVE, x, yy, cw, bh, TT(TX_BT_SHOVE))) {
 			m_phase = PH_P_SHOVE; m_navMode = FALSE;
 			for (int i = 0; i < m_b.nUnits; i++) if (CanShove(m_b, m_cur, i, NULL, NULL)) { m_cx = m_b.u[i].x; m_cz = m_b.u[i].z; m_cursorValid = TRUE; break; }
 			return;
 		}
 		if (canShove) yy += bh + U(6);
-		if (canDoor && Btn(ID_BT_DOOR, x, yy, w, bh, TT(TX_BT_DOOR))) {
+		if (canDoor) mark(ID_BT_DOOR, yy, TX_BTD_DOOR);
+		if (canDoor && Btn(ID_BT_DOOR, x, yy, cw, bh, TT(TX_BT_DOOR))) {
 			int ox, oz;
 			if (AdjDoor(m_b, m_cur, &ox, &oz) > 0) {
 				OpenDoor(m_b, ox, oz);
@@ -2309,10 +2430,15 @@ void Game::DrawCommandMenu()
 			return;
 		}
 		if (canDoor) yy += bh + U(6);
-		if (m_moved && Btn(ID_BT_UNDO, x, yy, w, bh, TT(TX_BT_UNDO))) BattleCancel();
+		if (m_moved) mark(ID_BT_UNDO, yy, TX_BTD_UNDO);
+		if (m_moved && Btn(ID_BT_UNDO, x, yy, cw, bh, TT(TX_BT_UNDO))) BattleCancel();
+		float boxTop = (m_moved ? yy + bh : yy - U(6)) + U(8);
+		if (desc >= 0) m_r.HudTextBox(TT(desc), x, boxTop, cw, U(62), U(13), RGBA8(230, 230, 236));
 		return;
 	}
 	if (m_phase == PH_P_SKILLS) {
+		int crafts[2], nc = 0;
+		for (int i = 0; i < 2; i++) if (u.craftEq[i] >= CRAFT_BASE) crafts[nc++] = i;
 		int list[SKL_COUNT];
 		int n = 0;
 		for (int s = 0; s < SKL_COUNT; s++) if (UnitHasSkill(u, s) && SkillInfo(s).kind != SK_PASSIVE) list[n++] = s;
@@ -2322,14 +2448,42 @@ void Game::DrawCommandMenu()
 		if (m_skillPage >= pages) m_skillPage = pages - 1;
 		int a = m_skillPage * per, b = min(n, a + per);
 		int shown = b - a;
-		float sw = U(340);
-		float rows = (float)(shown + 1 + (pages > 1 ? 1 : 0));
+		float sw = U(360);
+		float rows = (float)(shown + nc + 1 + (pages > 1 ? 1 : 0));
 		x = min(x, m_w - sw - U(200));
 		y = min(y, m_h - (bh * rows + U(160)));
 		if (y < U(8)) y = U(8);
 		Panel(x - U(8), y - U(8), sw + U(16), (bh + U(4)) * rows + U(90));
 		float yy = y;
 		int hov = -1;
+		int hovCraft = -1;
+		for (int k = 0; k < nc; k++) {
+			int slot = crafts[k];
+			int s = u.craftEq[slot];
+			const SkillDef& sd = SkillInfo(s);
+			BOOL ougi = IsCraftSuper(s);
+			wchar_t l[96];
+			swprintf_s(l, L"%s  %s%d%s", CraftName(s), TT(TX_CP), CraftCpCost(s - CRAFT_BASE), ougi ? L" ★" : L"");
+			BOOL ok = SkillUsable(m_b, m_cur, s);
+			if ((m_navMode && m_focusId == ID_BT_CRAFT0 + slot) || (!m_navMode && Hit(x, yy, sw, bh))) hovCraft = s;
+			DWORD col = ougi ? RGBA8(130, 90, 24, 240) : (sd.kind == SK_HEAL || sd.kind == SK_BUFF ? RGBA8(40, 100, 70, 240) : RGBA8(92, 68, 28, 235));
+			if (Btn(ID_BT_CRAFT0 + slot, x, yy, sw, bh, l, ok, FALSE, U(15), col)) {
+				m_cmdSkill = s;
+				m_phase = PH_P_SKILLTARGET;
+				ComputeOverlays();
+				m_navMode = FALSE;
+				m_cursorValid = FALSE;
+				if (sd.rMax != 0) {
+					for (int i = 0; i < m_b.nUnits; i++) if (CanTarget(m_cur, i, s)) { m_cx = m_b.u[i].x; m_cz = m_b.u[i].z; m_cursorValid = TRUE; break; }
+					if (!m_cursorValid && sd.area > 0) {
+						for (int z = 0; z < MAPN && !m_cursorValid; z++) for (int xx = 0; xx < MAPN; xx++)
+							if (m_ovAtk[z][xx]) { m_cx = xx; m_cz = z; m_cursorValid = TRUE; break; }
+					}
+				} else { m_cx = u.x; m_cz = u.z; m_cursorValid = TRUE; }
+				return;
+			}
+			yy += bh + U(4);
+		}
 		for (int k = a; k < b; k++) {
 			int s = list[k];
 			const SkillDef& sd = SkillInfo(s);
@@ -2365,7 +2519,12 @@ void Game::DrawCommandMenu()
 		}
 		if (Btn(ID_BT_BACK, x, yy, sw, bh, TT(TX_CR_BACK))) BattleCancel();
 		yy += bh + U(6);
-		if (hov >= 0) {
+		if (hovCraft >= 0) {
+			const SkillDef& sd = SkillInfo(hovCraft);
+			wchar_t l[96];
+			swprintf_s(l, L"%s %d-%d  %s%d  %s %d", TT(TX_MISC_RANGE), sd.rMin, sd.rMax, TT(TX_MISC_AREA), sd.area, TT(TX_CP), CraftCpCost(hovCraft - CRAFT_BASE));
+			m_r.HudText(l, x, yy + U(8), U(12), RGBA8(255, 210, 120), 0, 0);
+		} else if (hov >= 0) {
 			const SkillDef& sd = SkillInfo(hov);
 			wchar_t l[96];
 			swprintf_s(l, L"%s %d-%d  %s%d  %s", TT(TX_MISC_RANGE), sd.rMax < 0 ? UnitRangeMin(u) : sd.rMin, sd.rMax < 0 ? UnitRangeMax(u) : sd.rMax, TT(TX_MISC_AREA), sd.area, u.mp < sd.mp ? TT(TX_BT_NOMP) : L"");
@@ -2398,7 +2557,17 @@ void Game::DrawLevelUp()
 		m_r.HudText(l, x + w * .5f, yy + U(10), U(15), RGBA8(255, 226, 150), 1, 1);
 		yy += U(22);
 	}
-	if (Btn(ID_BT_LVOK, x + w * .5f - U(60), y + h - U(46), U(120), U(34), L"OK")) m_lvT = 99.f;
+	if (Btn(ID_BT_LVOK, x + w * .5f - U(60), y + h - U(46), U(120), U(34), L"OK")) AdvanceLevelUp();
+}
+
+void Game::AdvanceLevelUp()
+{
+	m_lvqCur++;
+	m_lvT = 0;
+	if (m_lvqCur >= m_lvqN) {
+		m_lvqN = 0;
+		FinishUnitTurn(1);
+	} else TacSfx(TS_LEVEL);
 }
 
 void Game::DrawCutInUi()
@@ -2415,23 +2584,27 @@ void Game::DrawCutInUi()
 		// 上下の帯
 		m_r.HudRect(0, 0, (float)m_w, U(56), RGBA8(0, 0, 0, 200));
 		m_r.HudRect(0, (float)m_h - U(56), (float)m_w, U(56), RGBA8(0, 0, 0, 200));
-		auto hpBox = [&](int ui, float x, int align) {
+		auto hpBox = [&](int ui, float x, int align, float y) {
 			if (ui < 0) return;
 			const Unit& u = m_b.u[ui];
-			float w = U(330);
+			float w = U(280);
 			float bx = align ? x - w : x;
 			wchar_t nm[64];
 			UnitTitle(u, nm, 64);
 			DWORD fc = u.team == TEAM_PLAYER ? RGBA8(110, 170, 255) : RGBA8(255, 110, 100);
-			m_r.HudText(nm, align ? bx + w : bx, (float)m_h - U(40), U(17), fc, align ? 2 : 0, 1);
+			m_r.HudText(nm, align ? bx + w : bx, y, U(14), fc, align ? 2 : 0, 1);
 			float frac = u.hpShow / max(1, u.ch.stat[S_HP]);
-			Bar(bx, (float)m_h - U(24), w, U(12), frac, frac > .5f ? RGBA8(120, 240, 120) : (frac > .25f ? RGBA8(240, 210, 80) : RGBA8(255, 90, 70)), RGBA8(40, 120, 50));
-			wchar_t l[32];
-			swprintf_s(l, L"%d", (int)(u.hpShow + .5f));
-			m_r.HudText(l, align ? bx - U(10) : bx + w + U(10), (float)m_h - U(18), U(18), RGBA8(255, 255, 255), align ? 2 : 0, 1);
+			Bar(bx, y + U(14), w, U(8), frac, frac > .5f ? RGBA8(120, 240, 120) : (frac > .25f ? RGBA8(240, 210, 80) : RGBA8(255, 90, 70)), RGBA8(40, 120, 50));
 		};
-		hpBox(m_cutA, U(70), 0);
-		hpBox(m_cutD, (float)m_w - U(70), 1);
+		auto col = [&](const int* id, int n, int align) {
+			if (n < 1) return;
+			float row = U(n > 3 ? 16.f : 22.f);
+			float y0 = (float)m_h - U(12) - n * row;
+			for (int i = 0; i < n; i++)
+				hpBox(id[i], align ? (float)m_w - U(16) : U(16), align, y0 + i * row);
+		};
+		col(m_cutAlly, m_cutAllyN, 0);
+		col(m_cutFoe, m_cutFoeN, 1);
 		if (m_seqSkill >= 0) {
 			const SkillDef& sd = SkillInfo(m_seqSkill);
 			DWORD ec = ElemColor(sd.element);
@@ -2440,19 +2613,23 @@ void Game::DrawCutInUi()
 			float a = u * (m_cutStage == 1 ? out : 0.f);
 			if (m_cutStage == 2) a = max(0.f, 1.f - m_cutStageT * 2.f) * 0;
 			if (m_cutStage == 1) {
-				float by = m_h * (m_ult ? .42f : .6f), bh = m_ult ? U(120) : U(84);
+				BOOL ougi = IsCraftSuper(m_seqSkill);
+				const wchar_t* title = IsCraftId(m_seqSkill) ? CraftName(m_seqSkill) : TT(sd.nameTx);
+				float by = m_h * (ougi ? .36f : (m_ult ? .42f : .6f)), bh2 = ougi ? U(150) : (m_ult ? U(120) : U(84));
 				float slide = (1.f - u) * m_w;
-				m_r.HudRectGrad(-slide, by, (float)m_w, bh, RGBA8(0, 0, 0, (int)(200 * a)), RGBA8((ec & 255) / 3, ((ec >> 8) & 255) / 3, ((ec >> 16) & 255) / 3, (int)(220 * a)));
-				m_r.HudRect(-slide, by, (float)m_w, U(3), RGBA8(ec & 255, (ec >> 8) & 255, (ec >> 16) & 255, (int)(255 * a)));
-				m_r.HudRect(slide, by + bh - U(3), (float)m_w, U(3), RGBA8(ec & 255, (ec >> 8) & 255, (ec >> 16) & 255, (int)(255 * a)));
-				m_r.HudText(TT(sd.nameTx), m_w * .56f + slide * .5f, by + bh * .45f, m_ult ? U(64) : U(44), ec, 1, 1, 1, a);
-				if (m_ult) m_r.HudText(TT(TX_BT_ULT), m_w * .56f, by + U(16), U(18), RGBA8(255, 230, 140), 1, 1, 1, a);
+				m_r.HudRectGrad(-slide, by, (float)m_w, bh2, RGBA8(0, 0, 0, (int)(200 * a)), RGBA8((ec & 255) / 3, ((ec >> 8) & 255) / 3, ((ec >> 16) & 255) / 3, (int)(220 * a)));
+				m_r.HudRect(-slide, by, (float)m_w, ougi ? U(6) : U(3), RGBA8(ec & 255, (ec >> 8) & 255, (ec >> 16) & 255, (int)(255 * a)));
+				m_r.HudRect(slide, by + bh2 - U(3), (float)m_w, ougi ? U(6) : U(3), RGBA8(ec & 255, (ec >> 8) & 255, (ec >> 16) & 255, (int)(255 * a)));
+				m_r.HudText(title, m_w * .56f + slide * .5f, by + bh2 * .45f, ougi ? U(78) : (m_ult ? U(64) : U(44)), ec, 1, 1, 1, a);
+				if (ougi) m_r.HudText(TT(TX_OUGI), m_w * .56f, by + U(18), U(22), RGBA8(255, 220, 80), 1, 1, 1, a);
+				else if (m_ult) m_r.HudText(TT(TX_BT_ULT), m_w * .56f, by + U(16), U(18), RGBA8(255, 230, 140), 1, 1, 1, a);
 				wchar_t nm[64];
 				UnitTitle(m_b.u[m_cutA], nm, 64);
-				m_r.HudText(nm, m_w * .56f - slide * .5f, by + bh * .85f, U(15), RGBA8(255, 255, 255), 1, 0, 1, a);
+				m_r.HudText(nm, m_w * .56f - slide * .5f, by + bh2 * .85f, U(15), RGBA8(255, 255, 255), 1, 0, 1, a);
 			}
 			if (m_cutStage == 2) {
-				m_r.HudText(TT(sd.nameTx), U(24), U(28), U(20), ec, 0, 1);
+				const wchar_t* title = IsCraftId(m_seqSkill) ? CraftName(m_seqSkill) : TT(sd.nameTx);
+				m_r.HudText(title, U(24), U(28), U(20), ec, 0, 1);
 			}
 		}
 	}
@@ -2535,6 +2712,12 @@ void Game::DrawBattleUi()
 			m_r.HudRect(sx - bw * .5f - 1, sy + U(5), bw + 2, U(4), RGBA8(8, 8, 12, 200));
 			m_r.HudRect(sx - bw * .5f, sy + U(6), bw * Clampf(mf, 0, 1), U(3), u.alive ? RGBA8(80, 150, 255) : RGBA8(90, 100, 120));
 		}
+		{
+			float cf = (float)u.cp / (float)CP_MAX;
+			float cy = sy + (u.ch.stat[S_MP] > 0 ? U(10) : U(5));
+			m_r.HudRect(sx - bw * .5f - 1, cy, bw + 2, U(4), RGBA8(8, 8, 12, 200));
+			m_r.HudRect(sx - bw * .5f, cy + 1, bw * Clampf(cf, 0, 1), U(3), u.cp >= 100 ? RGBA8(255, 210, 70) : RGBA8(210, 160, 50));
+		}
 	}
 	if (m_phase == PH_P_SKILLTARGET && m_cmdSkill >= 0 && m_cursorValid) {
 		const SkillDef& sd = SkillInfo(m_cmdSkill);
@@ -2595,9 +2778,16 @@ void Game::DrawBattleUi()
 		}
 		if (tx >= 0) {
 			float y = U(92);
-			m_r.HudText(TT(tx), m_w * .5f, y, U(16), RGBA8(255, 255, 255), 1, 1);
+			const wchar_t* hs = TT(tx);
+			BOOL wide = (m_phase == PH_P_MOVE);
+			float tw = wide ? min((float)m_w - U(64), U(980)) : min((float)m_w - U(48), m_r.TextWidth(hs, U(16), 1) + U(40));
+			float th = wide ? U(58) : U(40);
+			float tx0 = ((float)m_w - tw) * .5f;
+			m_r.HudPanel(tx0, y - U(22), tw, th, RGBA8(16, 20, 36, 220), RGBA8(150, 128, 86));
+			if (wide) m_r.HudTextBox(hs, tx0 + U(14), y - U(14), tw - U(28), U(42), U(15), RGBA8(255, 255, 255), 1);
+			else m_r.HudText(hs, m_w * .5f, y, U(16), RGBA8(255, 255, 255), 1, 1);
 			if (m_phase == PH_P_MOVE || m_phase == PH_P_TARGET || m_phase == PH_P_SKILLTARGET)
-				m_r.HudText(TT(TX_BT_HINT_KEYS), m_w * .5f, y + U(22), U(12), RGBA8(210, 210, 220), 1, 0);
+				m_r.HudText(TT(TX_BT_HINT_KEYS), m_w * .5f, y + (wide ? U(44) : U(28)), U(12), RGBA8(210, 210, 220), 1, 0);
 		}
 	}
 	if (m_phase == PH_MENU) {

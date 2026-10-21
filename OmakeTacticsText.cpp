@@ -1003,7 +1003,7 @@ R(TX_BASE_ROSTER, L"仲間", L"Roster", L"Compagnons", L"Compagni", L"Compañero
 R(TX_BASE_HINT_NOCHAR, L"まずはキャラクタを作成しましょう", L"Start by creating a character", L"Commencez par créer un personnage", L"Inizia creando un personaggio", L"Empieza creando un personaje", L"먼저 캐릭터를 만들어 보세요", L"先来创建一个角色吧", L"ابدأ بإنشاء شخصية", L"Сначала создайте персонажа", L"Erstelle zuerst einen Charakter", L"Comece criando um personagem", L"Maak eerst een personage", L"Najpierw utwórz postać", L"Önce bir karakter oluşturun")
 R(TX_BASE_HINT_NOPARTY, L"編成で出撃メンバーを選んでください", L"Choose your sortie members in Party", L"Choisissez les membres de la sortie dans Équipe", L"Scegli i membri della sortita in Squadra", L"Elige a los miembros en Grupo", L"편성에서 출격 멤버를 선택하세요", L"请在编队中选择出击成员", L"اختر أعضاء الانطلاق من قائمة الفريق", L"Выберите бойцов в разделе «Отряд»", L"Wähle im Trupp die Mitglieder zum Ausrücken", L"Escolha os membros em Grupo", L"Kies je leden bij Groep", L"Wybierz członków w menu Drużyna", L"Takım menüsünden sefer üyelerini seçin")
 R(TX_BASE_CLEARED, L"クリア済み", L"Cleared", L"Terminé", L"Completato", L"Superado", L"클리어", L"已通关", L"مكتملة", L"Пройдено", L"Geschafft", L"Concluída", L"Voltooid", L"Ukończono", L"Tamamlandı")
-R(TX_BASE_FULL, L"仲間は20人までです", L"You can have up to 20 companions", L"Vous pouvez avoir jusqu'à 20 compagnons", L"Puoi avere fino a 20 compagni", L"Puedes tener hasta 20 compañeros", L"동료는 20명까지입니다", L"同伴最多20人", L"يمكنك امتلاك 20 رفيقًا كحد أقصى", L"Можно иметь не более 20 соратников", L"Du kannst bis zu 20 Gefährten haben", L"Você pode ter até 20 companheiros", L"Je kunt maximaal 20 metgezellen hebben", L"Możesz mieć maksymalnie 20 towarzyszy", L"En fazla 20 yoldaşınız olabilir")
+R(TX_BASE_FULL, L"名簿がいっぱいです（最大100人。商店で頁を増やせます）", L"The roster is full (max 100; buy a page at the shop)", L"Le registre est plein (100 max ; achetez une page à la boutique)", L"L'albo è pieno (max 100; compra una pagina in bottega)", L"La lista está llena (máx. 100; compra una página en la tienda)", L"명부가 가득 찼습니다 (최대 100명. 상점에서 페이지를 늘릴 수 있습니다)", L"名册已满（最多100人。可在商店增加页数）", L"السجل ممتلئ (الحد 100؛ اشترِ صفحة من المتجر)", L"Список полон (макс. 100; страницу можно купить в лавке)", L"Die Liste ist voll (max. 100; eine Seite gibt es im Laden)", L"O rol está cheio (máx. 100; compre uma página na loja)", L"De namenlijst is vol (max. 100; koop een pagina in de winkel)", L"Rejestr jest pełny (maks. 100; stronę kupisz w sklepie)", L"Kayıt dolu (en fazla 100; dükkândan sayfa alınır)")
 // ---------------------------------------------------------------- キャラクタ作成
 R(TX_CR_TITLE, L"キャラクタ作成", L"Character Creation", L"Création de personnage", L"Creazione personaggio", L"Creación de personaje", L"캐릭터 생성", L"角色创建", L"إنشاء الشخصية", L"Создание персонажа", L"Charaktererstellung", L"Criação de personagem", L"Personage maken", L"Tworzenie postaci", L"Karakter oluşturma")
 R(TX_CR_NAME, L"名前", L"Name", L"Nom", L"Nome", L"Nombre", L"이름", L"名字", L"الاسم", L"Имя", L"Name", L"Nome", L"Naam", L"Imię", L"İsim")
@@ -1042,20 +1042,20 @@ R(TX_HAIR_BOB, L"ボブ", L"Bob", L"Carré", L"Caschetto", L"Melena corta", L"�
 // ---------------------------------------------------------------- 編成
 R(TX_PT_TITLE, L"編成", L"Party", L"Équipe", L"Squadra", L"Grupo", L"편성", L"编队", L"الفريق", L"Отряд", L"Trupp", L"Grupo", L"Groep", L"Drużyna", L"Takım")
 R(TX_PT_HINT,
-	L"カードをクリックで出撃メンバーに追加・解除（最大5人）",
-	L"Click a card to add or remove it from the sortie (up to 5)",
-	L"Cliquez sur une carte pour l'ajouter ou la retirer de la sortie (5 max)",
-	L"Clicca una carta per aggiungerla o toglierla dalla sortita (max 5)",
-	L"Haz clic en una carta para añadirla o quitarla (máx. 5)",
-	L"카드를 클릭해 출격 멤버에 추가·해제 (최대 5명)",
-	L"点击卡片加入或移出出击成员（最多5人）",
-	L"انقر على بطاقة لإضافتها أو إزالتها من الانطلاق (5 كحد أقصى)",
-	L"Нажмите на карточку, чтобы добавить или убрать бойца (до 5)",
-	L"Karte anklicken, um sie hinzuzufügen oder zu entfernen (max. 5)",
-	L"Clique em um cartão para adicioná-lo ou removê-lo (máx. 5)",
-	L"Klik op een kaart om toe te voegen of te verwijderen (max. 5)",
-	L"Kliknij kartę, aby dodać lub usunąć członka (maks. 5)",
-	L"Sefere eklemek veya çıkarmak için karta tıklayın (en fazla 5)")
+	L"カードをクリックで出撃メンバーに追加・解除（最大%d人）",
+	L"Click a card to add or remove it from the sortie (up to %d)",
+	L"Cliquez sur une carte pour l'ajouter ou la retirer de la sortie (%d max)",
+	L"Clicca una carta per aggiungerla o toglierla dalla sortita (max %d)",
+	L"Haz clic en una carta para añadirla o quitarla (máx. %d)",
+	L"카드를 클릭해 출격 멤버에 추가·해제 (최대 %d명)",
+	L"点击卡片加入或移出出击成员（最多%d人）",
+	L"انقر على بطاقة لإضافتها أو إزالتها من الانطلاق (%d كحد أقصى)",
+	L"Нажмите на карточку, чтобы добавить или убрать бойца (до %d)",
+	L"Karte anklicken, um sie hinzuzufügen oder zu entfernen (max. %d)",
+	L"Clique em um cartão para adicioná-lo ou removê-lo (máx. %d)",
+	L"Klik op een kaart om toe te voegen of te verwijderen (max. %d)",
+	L"Kliknij kartę, aby dodać lub usunąć członka (maks. %d)",
+	L"Sefere eklemek veya çıkarmak için karta tıklayın (en fazla %d)")
 R(TX_PT_DELETE, L"削除", L"Delete", L"Supprimer", L"Elimina", L"Eliminar", L"삭제", L"删除", L"حذف", L"Удалить", L"Löschen", L"Excluir", L"Verwijderen", L"Usuń", L"Sil")
 R(TX_PT_DELETE_Q, L"本当に削除しますか？", L"Really delete?", L"Vraiment supprimer ?", L"Eliminare davvero?", L"¿Eliminar de verdad?", L"정말 삭제하시겠습니까?", L"确定要删除吗？", L"هل تريد الحذف حقًا؟", L"Удалить на самом деле?", L"Wirklich löschen?", L"Excluir mesmo?", L"Echt verwijderen?", L"Na pewno usunąć?", L"Gerçekten silinsin mi?")
 R(TX_PT_YES, L"はい", L"Yes", L"Oui", L"Sì", L"Sí", L"예", L"是", L"نعم", L"Да", L"Ja", L"Sim", L"Ja", L"Tak", L"Evet")
@@ -1070,20 +1070,20 @@ R(TX_EV_TARGET, L"進化先", L"Evolve Into", L"Évoluer en", L"Evolve in", L"Ev
 R(TX_EV_PARTNER, L"素材キャラ", L"Partner Characters", L"Personnages partenaires", L"Personaggi partner", L"Personajes compañeros", L"재료 캐릭터", L"素材角色", L"الشخصيات المساندة", L"Персонажи-материал", L"Partner-Charaktere", L"Personagens parceiros", L"Partnerpersonages", L"Postacie-partnerzy", L"Ortak karakterler")
 R(TX_EV_DO, L"進化する", L"Evolve", L"Faire évoluer", L"Evolvi", L"Evolucionar", L"진화하기", L"进化", L"طوّر", L"Развить", L"Entwickeln", L"Evoluir", L"Evolueren", L"Ewoluuj", L"Evrilt")
 R(TX_EV_HINT_MAIN,
-	L"Lv15で1段階目、Lv35で2段階目の進化が可能",
-	L"First evolution at Lv15, second at Lv35",
-	L"Première évolution au niv. 15, seconde au niv. 35",
-	L"Prima evoluzione al Lv15, seconda al Lv35",
-	L"Primera evolución en Nv15, segunda en Nv35",
-	L"Lv15에서 1단계, Lv35에서 2단계 진화 가능",
-	L"Lv15可进行第1阶段进化，Lv35可进行第2阶段进化",
-	L"التطور الأول عند المستوى 15، والثاني عند المستوى 35",
-	L"Первая эволюция на ур. 15, вторая на ур. 35",
-	L"Erste Entwicklung ab Lv15, zweite ab Lv35",
-	L"Primeira evolução no Nv15, segunda no Nv35",
-	L"Eerste evolutie op Lv15, tweede op Lv35",
-	L"Pierwsza ewolucja na poz. 15, druga na poz. 35",
-	L"İlk evrim Sv15'te, ikincisi Sv35'te")
+	L"Lv15は素材1体、Lv35は素材2体。以降はLv55・78・105・140・180・230・290で素材なし",
+	L"Lv15 needs 1 partner, Lv35 needs 2. Later: Lv55, 78, 105, 140, 180, 230, 290, no partner",
+	L"Niv. 15 : 1 partenaire, niv. 35 : 2. Ensuite niv. 55, 78, 105, 140, 180, 230, 290 sans partenaire",
+	L"Lv15: 1 partner, Lv35: 2. Poi Lv55, 78, 105, 140, 180, 230, 290 senza partner",
+	L"Nv15: 1 compañero, Nv35: 2. Luego Nv55, 78, 105, 140, 180, 230, 290 sin compañero",
+	L"Lv15는 재료 1명, Lv35는 2명. 이후 Lv55·78·105·140·180·230·290은 재료 없음",
+	L"Lv15需素材1名，Lv35需2名。之后Lv55、78、105、140、180、230、290无需素材",
+	L"المستوى 15 شريك واحد، و35 شريكان. بعدها 55 و78 و105 و140 و180 و230 و290 بلا شريك",
+	L"Ур. 15 — 1 материал, ур. 35 — 2. Дальше ур. 55, 78, 105, 140, 180, 230, 290 без материала",
+	L"Lv15: 1 Partner, Lv35: 2. Danach Lv55, 78, 105, 140, 180, 230, 290 ohne Partner",
+	L"Nv15: 1 parceiro, Nv35: 2. Depois Nv55, 78, 105, 140, 180, 230, 290 sem parceiro",
+	L"Lv15: 1 partner, Lv35: 2. Daarna Lv55, 78, 105, 140, 180, 230, 290 zonder partner",
+	L"Poz. 15: 1 partner, poz. 35: 2. Dalej poz. 55, 78, 105, 140, 180, 230, 290 bez partnera",
+	L"Sv15: 1 ortak, Sv35: 2 ortak. Sonrası Sv55, 78, 105, 140, 180, 230, 290 ortaksız")
 R(TX_EV_HINT_PARTNER,
 	L"素材キャラは消滅します。能力の一部とスキルを引き継ぎます",
 	L"Partners will be lost. Some of their stats and skills are inherited",
@@ -1121,20 +1121,20 @@ R(TX_BT_STATUS, L"ステータス", L"Status", L"Statut", L"Stato", L"Estado", L
 R(TX_BT_ORDER, L"行動順", L"Turn Order", L"Ordre des tours", L"Ordine dei turni", L"Orden de turnos", L"행동 순서", L"行动顺序", L"ترتيب الأدوار", L"Порядок ходов", L"Zugreihenfolge", L"Ordem dos turnos", L"Beurtvolgorde", L"Kolejność tur", L"Sıra düzeni")
 R(TX_BT_STAGE, L"ステージ", L"Stage", L"Niveau", L"Livello", L"Fase", L"스테이지", L"关卡", L"المرحلة", L"Этап", L"Stufe", L"Fase", L"Level", L"Etap", L"Bölüm")
 R(TX_BT_HINT_MOVE,
-	L"青いマスをクリックで移動／敵をクリックで接近して攻撃。左ドラッグで地図を見渡す",
-	L"Click a blue cell to move / an enemy to attack. Left-drag to look around the map",
-	L"Cliquez une case bleue pour avancer / un ennemi pour attaquer. Glisser gauche : regarder la carte",
-	L"Clicca una casella blu per muoverti / un nemico per attaccare. Trascina a sinistra per guardare la mappa",
-	L"Clic en una casilla azul para moverte / en un enemigo para atacar. Arrastra con el izquierdo para mirar el mapa",
-	L"파란 칸을 클릭해 이동 / 적을 클릭하면 공격. 왼쪽 드래그로 지도를 둘러봅니다",
-	L"点击蓝色格子移动／点击敌人攻击。按住左键拖动来查看地图",
-	L"انقر على خانة زرقاء للتحرك / على عدو للهجوم. اسحب بالزر الأيسر لرؤية الخريطة",
-	L"Синяя клетка — идти, враг — атаковать. Левая кнопка: осмотреть карту",
-	L"Blaues Feld: bewegen / Feind: angreifen. Links ziehen, um die Karte zu überblicken",
-	L"Clique numa casa azul para mover / num inimigo para atacar. Arraste com o esquerdo para ver o mapa",
-	L"Klik op een blauw vak om te bewegen / op een vijand om aan te vallen. Sleep met links om de kaart te zien",
-	L"Niebieskie pole: ruch / wróg: atak. Przeciągnij lewym przyciskiem, aby rozejrzeć się po mapie",
-	L"Mavi kareye tıklayınca hareket, düşmana tıklayınca saldırı. Sol tuşla sürükleyerek haritaya bakın")
+	L"移動先をクリックしてください。パッドは移動先で決定（A／○）。敵クリックで接近して攻撃。左ドラッグで見渡す",
+	L"Click a destination. On a pad, press Confirm (A / ○) on it. Click an enemy to close in and attack. Left-drag looks around",
+	L"Cliquez la destination. À la manette, Valider (A / ○) sur la case. Un ennemi : approcher et attaquer. Glisser gauche : regarder",
+	L"Clicca la destinazione. Con il pad, Conferma (A / ○) sulla casella. Un nemico: avvicinati e attacca. Trascina a sinistra per guardare",
+	L"Haz clic en el destino. Con el mando, Confirmar (A / ○) en la casilla. Un enemigo: acércate y ataca. Arrastra con el izquierdo para mirar",
+	L"이동할 칸을 클릭하세요. 패드는 그 칸에서 결정(A／○). 적을 클릭하면 접근해 공격. 왼쪽 드래그로 둘러보기",
+	L"请点击移动目的地。手柄请在目的地上按确定（A／○）。点击敌人则接近并攻击。按住左键拖动查看地图",
+	L"انقر على الوجهة. على يد التحكم اضغط تأكيد (A / ○) على الخانة. النقر على عدو يقترب ويهاجم. اسحب بالزر الأيسر للنظر",
+	L"Щёлкните клетку назначения. На геймпаде — подтверждение (A / ○) на ней. Враг: подойти и атаковать. ЛКМ: осмотр",
+	L"Klicke das Zielfeld. Am Pad dort Bestätigen (A / ○). Feind anklicken: heran und angreifen. Links ziehen: umsehen",
+	L"Clique no destino. No comando, Confirmar (A / ○) na casa. Inimigo: aproximar e atacar. Arraste com o esquerdo para olhar",
+	L"Klik op de bestemming. Op een pad: Bevestigen (A / ○) op het vak. Vijand: naderen en aanvallen. Sleep met links om te kijken",
+	L"Kliknij pole docelowe. Na padzie zatwierdź (A / ○) na nim. Wróg: podejść i atakować. Przeciągnij lewym, aby rozejrzeć się",
+	L"Hedef kareye tıklayın. Kolda orada Onay (A / ○). Düşman: yaklaşıp saldırın. Sol tuşla sürükleyerek bakın")
 R(TX_BT_HINT_TARGET, L"攻撃する対象を選択", L"Choose a target to attack", L"Choisissez une cible à attaquer", L"Scegli un bersaglio da attaccare", L"Elige un objetivo para atacar", L"공격할 대상을 선택", L"选择攻击目标", L"اختر هدفًا للهجوم", L"Выберите цель атаки", L"Wähle ein Angriffsziel", L"Escolha um alvo para atacar", L"Kies een doelwit om aan te vallen", L"Wybierz cel ataku", L"Saldırılacak hedefi seçin")
 R(TX_BT_HINT_ENEMY, L"敵の行動中…", L"Enemy is acting…", L"L'ennemi agit…", L"Il nemico agisce…", L"El enemigo actúa…", L"적이 행동 중…", L"敌人行动中…", L"العدو يتحرك…", L"Враг действует…", L"Der Feind handelt…", L"O inimigo está agindo…", L"De vijand handelt…", L"Wróg działa…", L"Düşman hareket ediyor…")
 R(TX_BT_FORECAST, L"戦闘予測", L"Battle Forecast", L"Prévision de combat", L"Previsione scontro", L"Previsión de combate", L"전투 예측", L"战斗预测", L"توقع المعركة", L"Прогноз боя", L"Kampfprognose", L"Previsão de combate", L"Gevechtsvoorspelling", L"Prognoza walki", L"Savaş tahmini")
@@ -1197,182 +1197,182 @@ R(TX_HELP_TEXT,
 	L"・移動後に「攻撃」「スキル」「待機」を選びます。行動前なら移動を戻せます。\n"
 	L"・必殺の一撃やスキル・魔法ではカットイン演出が入ります（設定で短縮できます）。\n"
 	L"・ボスを倒すか敵を全滅させると勝利。味方が全滅すると敗北です。\n"
-	L"【マウス】 左クリック: 選択・決定　右クリック: 戻る　右ドラッグ: 視点回転　中ドラッグ: 視点移動　ホイール: ズーム\n"
-	L"【キーボード】 矢印/WASD: カーソル　Enter/Space/Z: 決定　Esc/X: 戻る　Q/E: 回転　PgUp/PgDn: ズーム　Tab: ユニット切替　Shift: 早送り　F1/H: この画面\n"
-	L"【パッド】 左スティック/十字キー: カーソル　A: 決定　B: 戻る　LB/RB: 回転　右スティック: 視点　トリガー: ズーム　X: 早送り　Y: 中央へ　Start: メニュー　Back: 操作説明\n"
+	L"【マウス】 左クリック: 選択・決定　左ドラッグ: 地図を見渡す　右クリック: 戻る　右ドラッグ: 視点回転　中ドラッグ: 視点移動　ホイール: ズーム\n"
+	L"【キーボード】 矢印/WASD: カーソル　Enter/Space/Z: 決定　Esc/X: 戻る　Q/E: 回転　PgUp/PgDn: ズーム　Tab: ユニット切替　R: 視点を戻す　Shift: 早送り　F1/H: この画面\n"
+	L"【パッド】 左スティック/十字キー: カーソル　A: 決定　B: 戻る　LB/RB: 回転　右スティック: 視点　トリガー: ズーム　X: 早送り　Y: 中央へ　Start: 戻る　Back: 操作説明\n"
 	L"【育成】\n"
-	L"・敵を倒すと経験値を得てレベルアップ。一定のレベルでスキルを覚えます。\n"
-	L"・Lv15で上位クラスへ（素材1体）、Lv35でさらに最上位クラスへ（素材2体）進化できます。\n"
-	L"・ステージは1～100。先へ進むほど敵が強くなり、得られる経験値も増えます。",
+	L"・攻撃・回復・補助で経験値を得てレベルアップ。一定のレベルでスキルを覚えます。\n"
+	L"・Lv15で上位クラスへ（素材1体）、Lv35で最上位クラスへ（素材2体）。その後はLv55・78・105・140・180・230・290で進化し、素材は不要です。\n"
+	L"・ステージは1～9999。先へ進むほど敵が強くなり、得られる経験値も増えます。",
 	L"[Basics]\n"
 	L"- Turn order depends on agility and is shown in \"Turn Order\" at the top right. Fast units can cut in and act more often.\n"
 	L"- Blue cells show the movement range, red cells the attack range. During enemy turns their movement range is shown too.\n"
 	L"- After moving, choose Attack, Skill or Wait. You can undo the move before acting.\n"
 	L"- Critical hits, skills and spells play a cut-in scene (can be shortened in settings).\n"
 	L"- Win by defeating the boss or all enemies. You lose if all allies fall.\n"
-	L"[Mouse] Left click: select/confirm  Right click: back  Right drag: rotate view  Middle drag: pan  Wheel: zoom\n"
-	L"[Keyboard] Arrows/WASD: cursor  Enter/Space/Z: confirm  Esc/X: back  Q/E: rotate  PgUp/PgDn: zoom  Tab: next unit  Shift: fast forward  F1/H: this screen\n"
-	L"[Gamepad] Left stick/D-pad: cursor  A: confirm  B: back  LB/RB: rotate  Right stick: view  Triggers: zoom  X: fast forward  Y: recenter  Start: menu  Back: controls\n"
+	L"[Mouse] Left click: select/confirm  Left drag: look around the map  Right click: back  Right drag: rotate view  Middle drag: pan  Wheel: zoom\n"
+	L"[Keyboard] Arrows/WASD: cursor  Enter/Space/Z: confirm  Esc/X: back  Q/E: rotate  PgUp/PgDn: zoom  Tab: next unit  R: recenter view  Shift: fast forward  F1/H: this screen\n"
+	L"[Gamepad] Left stick/D-pad: cursor  A: confirm  B: back  LB/RB: rotate  Right stick: view  Triggers: zoom  X: fast forward  Y: recenter  Start: back  Back: controls\n"
 	L"[Growth]\n"
-	L"- Defeat enemies to gain EXP and level up. Skills are learned at certain levels.\n"
-	L"- At Lv15 evolve to an advanced class (1 partner), at Lv35 to a master class (2 partners).\n"
-	L"- Stages run from 1 to 100. Enemies grow stronger and give more EXP as you advance.",
+	L"- Attacks, healing and buffs grant EXP and levels. Skills are learned at certain levels.\n"
+	L"- Lv15: advanced class (1 partner). Lv35: master class (2 partners). Then Lv55, 78, 105, 140, 180, 230 and 290, with no partner.\n"
+	L"- Stages run from 1 to 9999. Enemies grow stronger and give more EXP as you advance.",
 	L"[Bases]\n"
 	L"- L'ordre des tours dépend de l'agilité et s'affiche dans « Ordre des tours » en haut à droite. Les unités rapides s'intercalent et agissent plus souvent.\n"
 	L"- Les cases bleues indiquent le déplacement, les rouges la portée d'attaque. Pendant le tour ennemi, sa portée de déplacement est aussi affichée.\n"
 	L"- Après le déplacement, choisissez Attaquer, Compétence ou Attendre. Vous pouvez annuler le déplacement avant d'agir.\n"
 	L"- Les coups critiques, compétences et sorts déclenchent une cinématique (raccourcissable dans les réglages).\n"
 	L"- Vainquez le boss ou tous les ennemis pour gagner. Vous perdez si tous vos alliés tombent.\n"
-	L"[Souris] Clic gauche : choisir/valider  Clic droit : retour  Glisser droit : tourner la vue  Glisser milieu : déplacer  Molette : zoom\n"
-	L"[Clavier] Flèches/WASD : curseur  Entrée/Espace/Z : valider  Échap/X : retour  Q/E : tourner  PgPréc/PgSuiv : zoom  Tab : unité suivante  Maj : avance rapide  F1/H : cet écran\n"
-	L"[Manette] Stick gauche/croix : curseur  A : valider  B : retour  LB/RB : tourner  Stick droit : vue  Gâchettes : zoom  X : avance rapide  Y : recentrer  Start : menu  Back : commandes\n"
+	L"[Souris] Clic gauche : choisir/valider  Glisser gauche : regarder la carte  Clic droit : retour  Glisser droit : tourner la vue  Glisser milieu : déplacer  Molette : zoom\n"
+	L"[Clavier] Flèches/WASD : curseur  Entrée/Espace/Z : valider  Échap/X : retour  Q/E : tourner  PgPréc/PgSuiv : zoom  Tab : unité suivante  R : recentrer  Maj : avance rapide  F1/H : cet écran\n"
+	L"[Manette] Stick gauche/croix : curseur  A : valider  B : retour  LB/RB : tourner  Stick droit : vue  Gâchettes : zoom  X : avance rapide  Y : recentrer  Start : retour  Back : commandes\n"
 	L"[Progression]\n"
-	L"- Vainquez des ennemis pour gagner de l'EXP et monter de niveau. Des compétences s'apprennent à certains niveaux.\n"
-	L"- Au niv. 15, évoluez vers une classe avancée (1 partenaire), au niv. 35 vers une classe ultime (2 partenaires).\n"
-	L"- Les niveaux vont de 1 à 100. Les ennemis deviennent plus forts et donnent plus d'EXP au fil de la progression.",
+	L"- Attaques, soins et soutiens donnent de l'EXP et des niveaux. Des compétences s'apprennent à certains niveaux.\n"
+	L"- Niv. 15 : classe avancée (1 partenaire). Niv. 35 : classe ultime (2 partenaires). Puis niv. 55, 78, 105, 140, 180, 230 et 290, sans partenaire.\n"
+	L"- Les niveaux vont de 1 à 9999. Les ennemis deviennent plus forts et donnent plus d'EXP au fil de la progression.",
 	L"[Basi]\n"
 	L"- L'ordine dei turni dipende dall'agilità ed è mostrato in \"Ordine dei turni\" in alto a destra. Le unità veloci si inseriscono e agiscono più spesso.\n"
 	L"- Le caselle blu indicano il movimento, quelle rosse la portata d'attacco. Durante il turno nemico viene mostrato anche il suo movimento.\n"
 	L"- Dopo il movimento scegli Attacca, Abilità o Attendi. Puoi annullare il movimento prima di agire.\n"
 	L"- Colpi critici, abilità e magie mostrano una scena speciale (accorciabile nelle impostazioni).\n"
 	L"- Vinci sconfiggendo il boss o tutti i nemici. Perdi se cadono tutti gli alleati.\n"
-	L"[Mouse] Clic sinistro: scegli/conferma  Clic destro: indietro  Trascina destro: ruota vista  Trascina centrale: sposta  Rotella: zoom\n"
-	L"[Tastiera] Frecce/WASD: cursore  Invio/Spazio/Z: conferma  Esc/X: indietro  Q/E: ruota  PagSu/PagGiù: zoom  Tab: unità successiva  Maiusc: avanti veloce  F1/H: questa schermata\n"
-	L"[Gamepad] Stick sinistro/croce: cursore  A: conferma  B: indietro  LB/RB: ruota  Stick destro: vista  Grilletti: zoom  X: avanti veloce  Y: ricentra  Start: menu  Back: comandi\n"
+	L"[Mouse] Clic sinistro: scegli/conferma  Trascina sinistro: guarda la mappa  Clic destro: indietro  Trascina destro: ruota vista  Trascina centrale: sposta  Rotella: zoom\n"
+	L"[Tastiera] Frecce/WASD: cursore  Invio/Spazio/Z: conferma  Esc/X: indietro  Q/E: ruota  PagSu/PagGiù: zoom  Tab: unità successiva  R: ricentra  Maiusc: avanti veloce  F1/H: questa schermata\n"
+	L"[Gamepad] Stick sinistro/croce: cursore  A: conferma  B: indietro  LB/RB: ruota  Stick destro: vista  Grilletti: zoom  X: avanti veloce  Y: ricentra  Start: indietro  Back: comandi\n"
 	L"[Crescita]\n"
-	L"- Sconfiggi i nemici per ottenere ESP e salire di livello. Le abilità si imparano a certi livelli.\n"
-	L"- Al Lv15 evolvi in una classe avanzata (1 partner), al Lv35 in una classe suprema (2 partner).\n"
-	L"- I livelli vanno da 1 a 100. Avanzando i nemici diventano più forti e danno più ESP.",
+	L"- Attacchi, cure e supporti danno ESP e livelli. Le abilità si imparano a certi livelli.\n"
+	L"- Lv15: classe avanzata (1 partner). Lv35: classe suprema (2 partner). Poi Lv55, 78, 105, 140, 180, 230 e 290, senza partner.\n"
+	L"- I livelli vanno da 1 a 9999. Avanzando i nemici diventano più forti e danno più ESP.",
 	L"[Básico]\n"
 	L"- El orden de turnos depende de la agilidad y se muestra en «Orden de turnos» arriba a la derecha. Las unidades rápidas se adelantan y actúan más a menudo.\n"
 	L"- Las casillas azules indican el movimiento y las rojas el alcance de ataque. En el turno enemigo también se muestra su movimiento.\n"
 	L"- Tras moverte, elige Atacar, Habilidad o Esperar. Puedes deshacer el movimiento antes de actuar.\n"
 	L"- Los críticos, habilidades y hechizos muestran una escena especial (se puede acortar en los ajustes).\n"
 	L"- Ganas al derrotar al jefe o a todos los enemigos. Pierdes si caen todos tus aliados.\n"
-	L"[Ratón] Clic izquierdo: elegir/confirmar  Clic derecho: volver  Arrastrar derecho: girar vista  Arrastrar central: desplazar  Rueda: zoom\n"
-	L"[Teclado] Flechas/WASD: cursor  Intro/Espacio/Z: confirmar  Esc/X: volver  Q/E: girar  RePág/AvPág: zoom  Tab: siguiente unidad  Mayús: avance rápido  F1/H: esta pantalla\n"
-	L"[Mando] Stick izquierdo/cruceta: cursor  A: confirmar  B: volver  LB/RB: girar  Stick derecho: vista  Gatillos: zoom  X: avance rápido  Y: centrar  Start: menú  Back: controles\n"
+	L"[Ratón] Clic izquierdo: elegir/confirmar  Arrastrar izquierdo: mirar el mapa  Clic derecho: volver  Arrastrar derecho: girar vista  Arrastrar central: desplazar  Rueda: zoom\n"
+	L"[Teclado] Flechas/WASD: cursor  Intro/Espacio/Z: confirmar  Esc/X: volver  Q/E: girar  RePág/AvPág: zoom  Tab: siguiente unidad  R: centrar vista  Mayús: avance rápido  F1/H: esta pantalla\n"
+	L"[Mando] Stick izquierdo/cruceta: cursor  A: confirmar  B: volver  LB/RB: girar  Stick derecho: vista  Gatillos: zoom  X: avance rápido  Y: centrar  Start: volver  Back: controles\n"
 	L"[Progreso]\n"
-	L"- Derrota enemigos para ganar EXP y subir de nivel. Las habilidades se aprenden en ciertos niveles.\n"
-	L"- En Nv15 evoluciona a una clase avanzada (1 compañero) y en Nv35 a una clase maestra (2 compañeros).\n"
-	L"- Las fases van de 1 a 100. Al avanzar, los enemigos son más fuertes y dan más EXP.",
+	L"- Ataques, curaciones y mejoras dan EXP y niveles. Las habilidades se aprenden en ciertos niveles.\n"
+	L"- Nv15: clase avanzada (1 compañero). Nv35: clase maestra (2 compañeros). Luego Nv55, 78, 105, 140, 180, 230 y 290, sin compañero.\n"
+	L"- Las fases van de 1 a 9999. Al avanzar, los enemigos son más fuertes y dan más EXP.",
 	L"[기본]\n"
 	L"- 행동 순서는 민첩으로 정해지며 오른쪽 위의 '행동 순서'에 표시됩니다. 빠른 캐릭터는 끼어들어 더 자주 행동합니다.\n"
 	L"- 파란 칸은 이동 범위, 빨간 칸은 공격 범위입니다. 적의 차례에는 적의 이동 범위도 표시됩니다.\n"
 	L"- 이동 후 '공격' '스킬' '대기'를 고릅니다. 행동 전이라면 이동을 되돌릴 수 있습니다.\n"
 	L"- 필살의 일격이나 스킬·마법에서는 컷인 연출이 들어갑니다 (설정에서 단축 가능).\n"
 	L"- 보스를 쓰러뜨리거나 적을 전멸시키면 승리. 아군이 전멸하면 패배입니다.\n"
-	L"[마우스] 왼쪽 클릭: 선택·결정  오른쪽 클릭: 돌아가기  오른쪽 드래그: 시점 회전  가운데 드래그: 시점 이동  휠: 줌\n"
-	L"[키보드] 방향키/WASD: 커서  Enter/Space/Z: 결정  Esc/X: 돌아가기  Q/E: 회전  PgUp/PgDn: 줌  Tab: 유닛 전환  Shift: 빨리 감기  F1/H: 이 화면\n"
-	L"[패드] 왼쪽 스틱/십자키: 커서  A: 결정  B: 돌아가기  LB/RB: 회전  오른쪽 스틱: 시점  트리거: 줌  X: 빨리 감기  Y: 중앙으로  Start: 메뉴  Back: 조작 설명\n"
+	L"[마우스] 왼쪽 클릭: 선택·결정  왼쪽 드래그: 지도 둘러보기  오른쪽 클릭: 돌아가기  오른쪽 드래그: 시점 회전  가운데 드래그: 시점 이동  휠: 줌\n"
+	L"[키보드] 방향키/WASD: 커서  Enter/Space/Z: 결정  Esc/X: 돌아가기  Q/E: 회전  PgUp/PgDn: 줌  Tab: 유닛 전환  R: 시점 복귀  Shift: 빨리 감기  F1/H: 이 화면\n"
+	L"[패드] 왼쪽 스틱/십자키: 커서  A: 결정  B: 돌아가기  LB/RB: 회전  오른쪽 스틱: 시점  트리거: 줌  X: 빨리 감기  Y: 중앙으로  Start: 돌아가기  Back: 조작 설명\n"
 	L"[육성]\n"
-	L"- 적을 쓰러뜨리면 경험치를 얻어 레벨 업. 일정 레벨에서 스킬을 익힙니다.\n"
-	L"- Lv15에서 상위 클래스로 (재료 1명), Lv35에서 최상위 클래스로 (재료 2명) 진화할 수 있습니다.\n"
-	L"- 스테이지는 1~100. 앞으로 갈수록 적이 강해지고 얻는 경험치도 늘어납니다.",
+	L"- 공격·회복·보조로 경험치를 얻어 레벨 업. 일정 레벨에서 스킬을 익힙니다.\n"
+	L"- Lv15에서 상위 클래스 (재료 1명), Lv35에서 최상위 클래스 (재료 2명). 이후 Lv55·78·105·140·180·230·290에서 진화하며 재료는 필요 없습니다.\n"
+	L"- 스테이지는 1~9999. 앞으로 갈수록 적이 강해지고 얻는 경험치도 늘어납니다.",
 	L"【基本】\n"
 	L"・行动顺序由敏捷决定，显示在右上角的“行动顺序”中。敏捷高的角色会插队，更频繁地行动。\n"
 	L"・蓝色格子为移动范围，红色格子为攻击范围。敌方回合时也会显示敌人的移动范围。\n"
 	L"・移动后选择“攻击”“技能”或“待机”。行动前可以撤销移动。\n"
 	L"・必杀一击、技能和魔法会播放特写演出（可在设置中缩短）。\n"
 	L"・击败首领或全灭敌人即为胜利。我方全灭则失败。\n"
-	L"【鼠标】左键：选择・确定　右键：返回　右键拖动：旋转视角　中键拖动：移动视角　滚轮：缩放\n"
-	L"【键盘】方向键/WASD：光标　Enter/Space/Z：确定　Esc/X：返回　Q/E：旋转　PgUp/PgDn：缩放　Tab：切换单位　Shift：快进　F1/H：本画面\n"
-	L"【手柄】左摇杆/十字键：光标　A：确定　B：返回　LB/RB：旋转　右摇杆：视角　扳机：缩放　X：快进　Y：回到中心　Start：菜单　Back：操作说明\n"
+	L"【鼠标】左键：选择・确定　左键拖动：查看地图　右键：返回　右键拖动：旋转视角　中键拖动：移动视角　滚轮：缩放\n"
+	L"【键盘】方向键/WASD：光标　Enter/Space/Z：确定　Esc/X：返回　Q/E：旋转　PgUp/PgDn：缩放　Tab：切换单位　R：视角回中　Shift：快进　F1/H：本画面\n"
+	L"【手柄】左摇杆/十字键：光标　A：确定　B：返回　LB/RB：旋转　右摇杆：视角　扳机：缩放　X：快进　Y：回到中心　Start：返回　Back：操作说明\n"
 	L"【培养】\n"
-	L"・击败敌人可获得经验值并升级。达到一定等级会习得技能。\n"
-	L"・Lv15可进化为高级职业（素材1名），Lv35可进化为最高级职业（素材2名）。\n"
-	L"・关卡为1～100。越往后敌人越强，获得的经验值也越多。",
+	L"・攻击、治疗和辅助都会获得经验值并升级。达到一定等级会习得技能。\n"
+	L"・Lv15进化为高级职业（素材1名），Lv35进化为最高级职业（素材2名）。之后在Lv55、78、105、140、180、230、290进化，无需素材。\n"
+	L"・关卡为1～9999。越往后敌人越强，获得的经验值也越多。",
 	L"[الأساسيات]\n"
 	L"- يتحدد ترتيب الأدوار بالرشاقة ويظهر في «ترتيب الأدوار» أعلى اليمين. الوحدات السريعة تتقدم وتتحرك أكثر.\n"
 	L"- الخانات الزرقاء مدى الحركة والحمراء مدى الهجوم. في دور العدو يظهر مدى حركته أيضًا.\n"
 	L"- بعد الحركة اختر هجوم أو مهارة أو انتظار. يمكنك التراجع عن الحركة قبل الفعل.\n"
 	L"- الضربات الحاسمة والمهارات والتعاويذ تعرض مشهدًا خاصًا (يمكن تقصيره من الإعدادات).\n"
 	L"- تفوز بهزيمة الزعيم أو جميع الأعداء، وتخسر إذا سقط جميع حلفائك.\n"
-	L"[الفأرة] نقر أيسر: اختيار/تأكيد  نقر أيمن: رجوع  سحب أيمن: تدوير العرض  سحب أوسط: تحريك  العجلة: تكبير\n"
-	L"[لوحة المفاتيح] الأسهم/WASD: المؤشر  Enter/Space/Z: تأكيد  Esc/X: رجوع  Q/E: تدوير  PgUp/PgDn: تكبير  Tab: الوحدة التالية  Shift: تسريع  F1/H: هذه الشاشة\n"
-	L"[ذراع التحكم] العصا اليسرى/الأسهم: المؤشر  A: تأكيد  B: رجوع  LB/RB: تدوير  العصا اليمنى: العرض  الزنادان: تكبير  X: تسريع  Y: توسيط  Start: القائمة  Back: التحكم\n"
+	L"[الفأرة] نقر أيسر: اختيار/تأكيد  سحب أيسر: النظر إلى الخريطة  نقر أيمن: رجوع  سحب أيمن: تدوير العرض  سحب أوسط: تحريك  العجلة: تكبير\n"
+	L"[لوحة المفاتيح] الأسهم/WASD: المؤشر  Enter/Space/Z: تأكيد  Esc/X: رجوع  Q/E: تدوير  PgUp/PgDn: تكبير  Tab: الوحدة التالية  R: توسيط العرض  Shift: تسريع  F1/H: هذه الشاشة\n"
+	L"[ذراع التحكم] العصا اليسرى/الأسهم: المؤشر  A: تأكيد  B: رجوع  LB/RB: تدوير  العصا اليمنى: العرض  الزنادان: تكبير  X: تسريع  Y: توسيط  Start: رجوع  Back: التحكم\n"
 	L"[التطوير]\n"
-	L"- اهزم الأعداء لتكسب الخبرة وترتقي بالمستوى. تُتعلم المهارات عند مستويات معينة.\n"
-	L"- عند المستوى 15 تتطور إلى فئة متقدمة (شريك واحد)، وعند 35 إلى فئة عليا (شريكان).\n"
-	L"- المراحل من 1 إلى 100. كلما تقدمت ازداد الأعداء قوة وازدادت الخبرة.",
+	L"- الهجوم والعلاج والدعم تمنح الخبرة والمستويات. تُتعلم المهارات عند مستويات معينة.\n"
+	L"- المستوى 15 فئة متقدمة (شريك واحد)، و35 فئة عليا (شريكان). ثم 55 و78 و105 و140 و180 و230 و290 بلا شريك.\n"
+	L"- المراحل من 1 إلى 9999. كلما تقدمت ازداد الأعداء قوة وازدادت الخبرة.",
 	L"[Основы]\n"
 	L"- Порядок ходов зависит от ловкости и показан в «Порядке ходов» справа вверху. Быстрые бойцы вклиниваются и ходят чаще.\n"
 	L"- Синие клетки — дальность хода, красные — дальность атаки. В ход врага показывается и его дальность хода.\n"
 	L"- После перемещения выберите «Атака», «Навык» или «Ждать». До действия ход можно отменить.\n"
 	L"- Критические удары, навыки и заклинания показывают вставку (можно сократить в настройках).\n"
 	L"- Победа — убить босса или всех врагов. Поражение — если пали все союзники.\n"
-	L"[Мышь] ЛКМ: выбор/подтверждение  ПКМ: назад  Перетаскивание ПКМ: поворот  Перетаскивание СКМ: сдвиг  Колесо: масштаб\n"
-	L"[Клавиатура] Стрелки/WASD: курсор  Enter/Space/Z: подтвердить  Esc/X: назад  Q/E: поворот  PgUp/PgDn: масштаб  Tab: следующий боец  Shift: ускорение  F1/H: этот экран\n"
-	L"[Геймпад] Левый стик/крестовина: курсор  A: подтвердить  B: назад  LB/RB: поворот  Правый стик: обзор  Курки: масштаб  X: ускорение  Y: центрировать  Start: меню  Back: управление\n"
+	L"[Мышь] ЛКМ: выбор/подтверждение  Перетаскивание ЛКМ: осмотр карты  ПКМ: назад  Перетаскивание ПКМ: поворот  Перетаскивание СКМ: сдвиг  Колесо: масштаб\n"
+	L"[Клавиатура] Стрелки/WASD: курсор  Enter/Space/Z: подтвердить  Esc/X: назад  Q/E: поворот  PgUp/PgDn: масштаб  Tab: следующий боец  R: вернуть обзор  Shift: ускорение  F1/H: этот экран\n"
+	L"[Геймпад] Левый стик/крестовина: курсор  A: подтвердить  B: назад  LB/RB: поворот  Правый стик: обзор  Курки: масштаб  X: ускорение  Y: центрировать  Start: назад  Back: управление\n"
 	L"[Развитие]\n"
-	L"- Побеждайте врагов, чтобы получать опыт и уровни. Навыки изучаются на определённых уровнях.\n"
-	L"- На ур. 15 — эволюция в продвинутый класс (1 материал), на ур. 35 — в высший класс (2 материала).\n"
-	L"- Этапы с 1 по 100. Чем дальше, тем сильнее враги и больше опыта.",
+	L"- Атаки, лечение и поддержка дают опыт и уровни. Навыки изучаются на определённых уровнях.\n"
+	L"- Ур. 15 — продвинутый класс (1 материал), ур. 35 — высший (2 материала). Дальше ур. 55, 78, 105, 140, 180, 230 и 290 без материала.\n"
+	L"- Этапы с 1 по 9999. Чем дальше, тем сильнее враги и больше опыта.",
 	L"[Grundlagen]\n"
 	L"- Die Zugreihenfolge hängt von der Gewandtheit ab und wird oben rechts unter „Zugreihenfolge“ angezeigt. Schnelle Einheiten schieben sich dazwischen und handeln öfter.\n"
 	L"- Blaue Felder zeigen die Bewegungs-, rote die Angriffsreichweite. Im Zug des Feindes wird auch dessen Reichweite angezeigt.\n"
 	L"- Nach dem Bewegen Angriff, Fertigkeit oder Warten wählen. Vor der Aktion kann die Bewegung zurückgenommen werden.\n"
 	L"- Kritische Treffer, Fertigkeiten und Zauber zeigen eine Zwischensequenz (in den Einstellungen kürzbar).\n"
 	L"- Sieg durch Besiegen des Bosses oder aller Feinde. Niederlage, wenn alle Verbündeten fallen.\n"
-	L"[Maus] Linksklick: wählen/bestätigen  Rechtsklick: zurück  Rechts ziehen: Ansicht drehen  Mitte ziehen: verschieben  Rad: Zoom\n"
-	L"[Tastatur] Pfeile/WASD: Cursor  Enter/Leertaste/Z: bestätigen  Esc/X: zurück  Q/E: drehen  Bild↑/Bild↓: Zoom  Tab: nächste Einheit  Umschalt: Vorspulen  F1/H: diese Hilfe\n"
-	L"[Gamepad] Linker Stick/Steuerkreuz: Cursor  A: bestätigen  B: zurück  LB/RB: drehen  Rechter Stick: Ansicht  Trigger: Zoom  X: Vorspulen  Y: zentrieren  Start: Menü  Back: Steuerung\n"
+	L"[Maus] Linksklick: wählen/bestätigen  Links ziehen: Karte umsehen  Rechtsklick: zurück  Rechts ziehen: Ansicht drehen  Mitte ziehen: verschieben  Rad: Zoom\n"
+	L"[Tastatur] Pfeile/WASD: Cursor  Enter/Leertaste/Z: bestätigen  Esc/X: zurück  Q/E: drehen  Bild↑/Bild↓: Zoom  Tab: nächste Einheit  R: Ansicht zurück  Umschalt: Vorspulen  F1/H: diese Hilfe\n"
+	L"[Gamepad] Linker Stick/Steuerkreuz: Cursor  A: bestätigen  B: zurück  LB/RB: drehen  Rechter Stick: Ansicht  Trigger: Zoom  X: Vorspulen  Y: zentrieren  Start: zurück  Back: Steuerung\n"
 	L"[Entwicklung]\n"
-	L"- Besiege Feinde, um EP zu sammeln und aufzusteigen. Fertigkeiten werden auf bestimmten Stufen erlernt.\n"
-	L"- Ab Lv15 Entwicklung zur fortgeschrittenen Klasse (1 Partner), ab Lv35 zur Meisterklasse (2 Partner).\n"
-	L"- Es gibt die Stufen 1 bis 100. Je weiter du kommst, desto stärker werden die Feinde und desto mehr EP gibt es.",
+	L"- Angriffe, Heilung und Unterstützung geben EP und Stufen. Fertigkeiten werden auf bestimmten Stufen erlernt.\n"
+	L"- Ab Lv15 fortgeschrittene Klasse (1 Partner), ab Lv35 Meisterklasse (2 Partner). Danach Lv55, 78, 105, 140, 180, 230 und 290 ohne Partner.\n"
+	L"- Es gibt die Stufen 1 bis 9999. Je weiter du kommst, desto stärker werden die Feinde und desto mehr EP gibt es.",
 	L"[Básico]\n"
 	L"- A ordem dos turnos depende da agilidade e aparece em \"Ordem dos turnos\" no canto superior direito. Unidades rápidas passam à frente e agem mais vezes.\n"
 	L"- Casas azuis mostram o alcance de movimento, vermelhas o de ataque. No turno inimigo, o movimento dele também aparece.\n"
 	L"- Depois de mover, escolha Atacar, Habilidade ou Esperar. É possível desfazer o movimento antes de agir.\n"
 	L"- Críticos, habilidades e magias exibem uma cena especial (pode ser encurtada nas configurações).\n"
 	L"- Vença derrotando o chefe ou todos os inimigos. Você perde se todos os aliados caírem.\n"
-	L"[Mouse] Clique esquerdo: escolher/confirmar  Clique direito: voltar  Arrastar direito: girar visão  Arrastar meio: mover  Roda: zoom\n"
-	L"[Teclado] Setas/WASD: cursor  Enter/Espaço/Z: confirmar  Esc/X: voltar  Q/E: girar  PgUp/PgDn: zoom  Tab: próxima unidade  Shift: acelerar  F1/H: esta tela\n"
-	L"[Controle] Analógico esquerdo/direcional: cursor  A: confirmar  B: voltar  LB/RB: girar  Analógico direito: visão  Gatilhos: zoom  X: acelerar  Y: centralizar  Start: menu  Back: controles\n"
+	L"[Mouse] Clique esquerdo: escolher/confirmar  Arrastar esquerdo: ver o mapa  Clique direito: voltar  Arrastar direito: girar visão  Arrastar meio: mover  Roda: zoom\n"
+	L"[Teclado] Setas/WASD: cursor  Enter/Espaço/Z: confirmar  Esc/X: voltar  Q/E: girar  PgUp/PgDn: zoom  Tab: próxima unidade  R: recentralizar  Shift: acelerar  F1/H: esta tela\n"
+	L"[Controle] Analógico esquerdo/direcional: cursor  A: confirmar  B: voltar  LB/RB: girar  Analógico direito: visão  Gatilhos: zoom  X: acelerar  Y: centralizar  Start: voltar  Back: controles\n"
 	L"[Evolução]\n"
-	L"- Derrote inimigos para ganhar EXP e subir de nível. Habilidades são aprendidas em certos níveis.\n"
-	L"- No Nv15 evolua para uma classe avançada (1 parceiro), no Nv35 para uma classe suprema (2 parceiros).\n"
-	L"- As fases vão de 1 a 100. Quanto mais avança, mais fortes ficam os inimigos e mais EXP eles dão.",
+	L"- Ataques, curas e apoio dão EXP e níveis. Habilidades são aprendidas em certos níveis.\n"
+	L"- Nv15: classe avançada (1 parceiro). Nv35: classe suprema (2 parceiros). Depois Nv55, 78, 105, 140, 180, 230 e 290, sem parceiro.\n"
+	L"- As fases vão de 1 a 9999. Quanto mais avança, mais fortes ficam os inimigos e mais EXP eles dão.",
 	L"[Basis]\n"
 	L"- De beurtvolgorde hangt af van behendigheid en staat rechtsboven bij 'Beurtvolgorde'. Snelle eenheden dringen voor en handelen vaker.\n"
 	L"- Blauwe vakken tonen het bewegingsbereik, rode het aanvalsbereik. Tijdens de vijandelijke beurt wordt ook hun bereik getoond.\n"
 	L"- Kies na het bewegen Aanval, Vaardigheid of Wachten. Vóór de actie kun je de beweging ongedaan maken.\n"
 	L"- Kritieke treffers, vaardigheden en spreuken tonen een tussenscène (in te korten via instellingen).\n"
 	L"- Je wint door de baas of alle vijanden te verslaan. Je verliest als alle bondgenoten vallen.\n"
-	L"[Muis] Linksklik: kiezen/bevestigen  Rechtsklik: terug  Rechts slepen: beeld draaien  Middel slepen: verschuiven  Wiel: zoom\n"
-	L"[Toetsenbord] Pijlen/WASD: cursor  Enter/Spatie/Z: bevestigen  Esc/X: terug  Q/E: draaien  PgUp/PgDn: zoom  Tab: volgende eenheid  Shift: versnellen  F1/H: dit scherm\n"
-	L"[Gamepad] Linkerstick/D-pad: cursor  A: bevestigen  B: terug  LB/RB: draaien  Rechterstick: beeld  Triggers: zoom  X: versnellen  Y: centreren  Start: menu  Back: besturing\n"
+	L"[Muis] Linksklik: kiezen/bevestigen  Links slepen: kaart bekijken  Rechtsklik: terug  Rechts slepen: beeld draaien  Middel slepen: verschuiven  Wiel: zoom\n"
+	L"[Toetsenbord] Pijlen/WASD: cursor  Enter/Spatie/Z: bevestigen  Esc/X: terug  Q/E: draaien  PgUp/PgDn: zoom  Tab: volgende eenheid  R: beeld terug  Shift: versnellen  F1/H: dit scherm\n"
+	L"[Gamepad] Linkerstick/D-pad: cursor  A: bevestigen  B: terug  LB/RB: draaien  Rechterstick: beeld  Triggers: zoom  X: versnellen  Y: centreren  Start: terug  Back: besturing\n"
 	L"[Groei]\n"
-	L"- Versla vijanden om EP te verdienen en een level te stijgen. Vaardigheden leer je op bepaalde levels.\n"
-	L"- Op Lv15 evolueer je naar een gevorderde klasse (1 partner), op Lv35 naar een meesterklasse (2 partners).\n"
-	L"- Er zijn levels 1 tot 100. Hoe verder je komt, hoe sterker de vijanden en hoe meer EP.",
+	L"- Aanvallen, genezen en steun geven EP en levels. Vaardigheden leer je op bepaalde levels.\n"
+	L"- Op Lv15 een gevorderde klasse (1 partner), op Lv35 een meesterklasse (2 partners). Daarna Lv55, 78, 105, 140, 180, 230 en 290, zonder partner.\n"
+	L"- Er zijn levels 1 tot 9999. Hoe verder je komt, hoe sterker de vijanden en hoe meer EP.",
 	L"[Podstawy]\n"
 	L"- Kolejność tur zależy od zwinności i widać ją w „Kolejności tur” w prawym górnym rogu. Szybkie jednostki wskakują przed innych i działają częściej.\n"
 	L"- Niebieskie pola to zasięg ruchu, czerwone — zasięg ataku. W turze wroga widać także jego zasięg ruchu.\n"
 	L"- Po ruchu wybierz Atak, Umiejętność lub Czekaj. Przed akcją możesz cofnąć ruch.\n"
 	L"- Trafienia krytyczne, umiejętności i czary pokazują przerywnik (można skrócić w ustawieniach).\n"
 	L"- Wygrywasz, pokonując bossa lub wszystkich wrogów. Przegrywasz, gdy padną wszyscy sojusznicy.\n"
-	L"[Mysz] LPM: wybór/zatwierdź  PPM: wstecz  Przeciąganie PPM: obrót widoku  Przeciąganie ŚPM: przesuwanie  Kółko: zoom\n"
-	L"[Klawiatura] Strzałki/WASD: kursor  Enter/Spacja/Z: zatwierdź  Esc/X: wstecz  Q/E: obrót  PgUp/PgDn: zoom  Tab: następna jednostka  Shift: przyspieszenie  F1/H: ten ekran\n"
-	L"[Pad] Lewa gałka/krzyżak: kursor  A: zatwierdź  B: wstecz  LB/RB: obrót  Prawa gałka: widok  Spusty: zoom  X: przyspieszenie  Y: wyśrodkuj  Start: menu  Back: sterowanie\n"
+	L"[Mysz] LPM: wybór/zatwierdź  Przeciąganie LPM: rozejrzyj się po mapie  PPM: wstecz  Przeciąganie PPM: obrót widoku  Przeciąganie ŚPM: przesuwanie  Kółko: zoom\n"
+	L"[Klawiatura] Strzałki/WASD: kursor  Enter/Spacja/Z: zatwierdź  Esc/X: wstecz  Q/E: obrót  PgUp/PgDn: zoom  Tab: następna jednostka  R: widok na środek  Shift: przyspieszenie  F1/H: ten ekran\n"
+	L"[Pad] Lewa gałka/krzyżak: kursor  A: zatwierdź  B: wstecz  LB/RB: obrót  Prawa gałka: widok  Spusty: zoom  X: przyspieszenie  Y: wyśrodkuj  Start: wstecz  Back: sterowanie\n"
 	L"[Rozwój]\n"
-	L"- Pokonuj wrogów, aby zdobywać PD i awansować. Umiejętności poznaje się na określonych poziomach.\n"
-	L"- Na poz. 15 ewolucja do klasy zaawansowanej (1 partner), na poz. 35 do klasy mistrzowskiej (2 partnerów).\n"
-	L"- Etapy od 1 do 100. Im dalej, tym silniejsi wrogowie i więcej PD.",
+	L"- Ataki, leczenie i wsparcie dają PD i poziomy. Umiejętności poznaje się na określonych poziomach.\n"
+	L"- Poz. 15: klasa zaawansowana (1 partner). Poz. 35: klasa mistrzowska (2 partnerów). Potem poz. 55, 78, 105, 140, 180, 230 i 290, bez partnera.\n"
+	L"- Etapy od 1 do 9999. Im dalej, tym silniejsi wrogowie i więcej PD.",
 	L"[Temel]\n"
 	L"- Sıra düzeni çevikliğe bağlıdır ve sağ üstteki \"Sıra düzeni\"nde gösterilir. Hızlı birimler araya girip daha sık hareket eder.\n"
 	L"- Mavi kareler hareket menzilini, kırmızı kareler saldırı menzilini gösterir. Düşman sırasında onun hareket menzili de gösterilir.\n"
 	L"- Hareketten sonra Saldırı, Yetenek veya Bekle'yi seçin. Eylemden önce hareketi geri alabilirsiniz.\n"
 	L"- Kritik vuruşlar, yetenekler ve büyüler ara sahne gösterir (ayarlardan kısaltılabilir).\n"
 	L"- Patronu veya tüm düşmanları yenerek kazanırsınız. Tüm müttefikler düşerse kaybedersiniz.\n"
-	L"[Fare] Sol tık: seç/onayla  Sağ tık: geri  Sağ sürükle: görüşü döndür  Orta sürükle: kaydır  Tekerlek: yakınlaştır\n"
-	L"[Klavye] Oklar/WASD: imleç  Enter/Boşluk/Z: onayla  Esc/X: geri  Q/E: döndür  PgUp/PgDn: yakınlaştır  Tab: sonraki birim  Shift: hızlandır  F1/H: bu ekran\n"
-	L"[Oyun kolu] Sol çubuk/yön tuşları: imleç  A: onayla  B: geri  LB/RB: döndür  Sağ çubuk: görüş  Tetikler: yakınlaştır  X: hızlandır  Y: ortala  Start: menü  Back: kontroller\n"
+	L"[Fare] Sol tık: seç/onayla  Sol sürükle: haritaya bak  Sağ tık: geri  Sağ sürükle: görüşü döndür  Orta sürükle: kaydır  Tekerlek: yakınlaştır\n"
+	L"[Klavye] Oklar/WASD: imleç  Enter/Boşluk/Z: onayla  Esc/X: geri  Q/E: döndür  PgUp/PgDn: yakınlaştır  Tab: sonraki birim  R: görüşü ortala  Shift: hızlandır  F1/H: bu ekran\n"
+	L"[Oyun kolu] Sol çubuk/yön tuşları: imleç  A: onayla  B: geri  LB/RB: döndür  Sağ çubuk: görüş  Tetikler: yakınlaştır  X: hızlandır  Y: ortala  Start: geri  Back: kontroller\n"
 	L"[Gelişim]\n"
-	L"- Düşmanları yenerek TP kazanın ve seviye atlayın. Yetenekler belirli seviyelerde öğrenilir.\n"
-	L"- Sv15'te ileri sınıfa (1 ortak), Sv35'te usta sınıfa (2 ortak) evrilebilirsiniz.\n"
-	L"- Bölümler 1'den 100'e kadardır. İlerledikçe düşmanlar güçlenir ve daha fazla TP verir.")
+	L"- Saldırı, iyileştirme ve destek TP ve seviye kazandırır. Yetenekler belirli seviyelerde öğrenilir.\n"
+	L"- Sv15 ileri sınıf (1 ortak), Sv35 usta sınıf (2 ortak). Sonra Sv55, 78, 105, 140, 180, 230 ve 290, ortak gerekmez.\n"
+	L"- Bölümler 1'den 9999'a kadardır. İlerledikçe düşmanlar güçlenir ve daha fazla TP verir.")
 // ---------------------------------------------------------------- その他
 R(TX_MISC_LV, L"Lv", L"Lv", L"Niv.", L"Lv", L"Nv", L"Lv", L"Lv", L"مستوى", L"Ур.", L"Lv", L"Nv", L"Lv", L"Poz.", L"Sv")
 R(TX_MISC_EXP, L"EXP", L"EXP", L"EXP", L"ESP", L"EXP", L"EXP", L"EXP", L"خبرة", L"Опыт", L"EP", L"EXP", L"EP", L"PD", L"TP")
@@ -1430,7 +1430,7 @@ R(TX_BT_TRI_ADV, L"有利", L"Advantage", L"Avantage", L"Vantaggio", L"Ventaja",
 R(TX_BT_TRI_DIS, L"不利", L"Disadvantage", L"Désavantage", L"Svantaggio", L"Desventaja", L"불리", L"不利", L"ضعف", L"Невыгода", L"Nachteil", L"Desvantagem", L"Nadeel", L"Wada", L"Zayıf")
 R(TX_BT_BOWFLY, L"対飛行", L"Anti-air", L"Antiaérien", L"Antiaereo", L"Antiaéreo", L"대비행", L"对飞行", L"ضد الطيران", L"Против полёта", L"Gegen Flug", L"Antiaéreo", L"Tegen vliegen", L"Przeciw lotowi", L"Uçuşa karşı")
 R(TX_BT_DELAY, L"ディレイ", L"Delay", L"Retard", L"Ritardo", L"Retraso", L"지연", L"延迟", L"تأخير", L"Задержка", L"Verzögerung", L"Atraso", L"Vertraging", L"Opóźnienie", L"Gecikme")
-R(TX_BT_FOLLOW, L"隣接追撃", L"Follow-up", L"Poursuite", L"Incalzare", L"Seguimiento", L"인접 추격", L"相邻追击", L"مطاردة مجاورة", L"Добивание", L"Nachsetzen", L"Perseguição", L"Vervolg", L"Dogrywka", L"Takip")
+R(TX_BT_FOLLOW, L"追撃", L"Follow-up", L"Poursuite", L"Incalzare", L"Seguimiento", L"추격", L"追击", L"مطاردة", L"Добивание", L"Nachsetzen", L"Perseguição", L"Vervolg", L"Dogrywka", L"Takip")
 R(TX_BT_SHOVE, L"体当たり", L"Shove", L"Poussée", L"Spinta", L"Empujón", L"몸통박치기", L"撞击", L"دفعة", L"Толчок", L"Stoß", L"Empurrão", L"Duw", L"Pchnięcie", L"İtme")
 R(TX_BT_DOOR, L"扉を開ける", L"Open Door", L"Ouvrir la porte", L"Apri la porta", L"Abrir la puerta", L"문을 연다", L"开门", L"افتح الباب", L"Открыть дверь", L"Tür öffnen", L"Abrir a porta", L"Deur openen", L"Otwórz drzwi", L"Kapıyı aç")
 R(TX_TER_DOOR, L"扉", L"Door", L"Porte", L"Porta", L"Puerta", L"문", L"门", L"باب", L"Дверь", L"Tür", L"Porta", L"Deur", L"Drzwi", L"Kapı")
@@ -1473,6 +1473,25 @@ R(TX_TICKET_PT, L"編成拡張券", L"Party slot ticket", L"Billet d'escouade", 
 R(TX_TICKET_RS, L"名簿の頁", L"Roster page", L"Page de registre", L"Pagina d'albo", L"Página de lista", L"명부 페이지", L"名册书页", L"صفحة السجل", L"Страница списка", L"Listenblatt", L"Página do rol", L"Namenlijst", L"Strona rejestru", L"Kayıt sayfası")
 R(TX_MISC_AREA, L"範囲", L"Area", L"Zone", L"Area", L"Área", L"범위", L"范围", L"نطاق", L"Область", L"Fläche", L"Área", L"Gebied", L"Obszar", L"Alan")
 R(TX_BT_AOEN, L"対象", L"Targets", L"Cibles", L"Bersagli", L"Objetivos", L"대상", L"目标", L"أهداف", L"Цели", L"Ziele", L"Alvos", L"Doelen", L"Cele", L"Hedef")
+R(TX_EXP_LEFT, L"あと", L"left", L"reste", L"manca", L"falta", L"남음", L"还差", L"متبق", L"ещё", L"noch", L"falta", L"nog", L"brakuje", L"kaldı")
+R(TX_MAP_REROLL, L"別のマップ", L"Another map", L"Autre carte", L"Altra mappa", L"Otro mapa", L"다른 맵", L"另一张地图", L"خريطة أخرى", L"Другая карта", L"Andere Karte", L"Outro mapa", L"Andere kaart", L"Inna mapa", L"Başka harita")
+R(TX_BTD_ATTACK, L"射程内の敵へ通常攻撃します。", L"A basic attack on an enemy in range.", L"Attaque normale sur un ennemi à portée.", L"Attacco normale a un nemico nel raggio.", L"Ataque normal a un enemigo a alcance.", L"사거리 안의 적에게 일반 공격.", L"对射程内的敌人进行普通攻击。", L"هجوم عادي على عدو ضمن المدى.", L"Обычная атака по врагу в зоне досягаемости.", L"Normaler Angriff auf einen Feind in Reichweite.", L"Ataque normal a um inimigo no alcance.", L"Gewone aanval op een vijand binnen bereik.", L"Zwykły atak na wroga w zasięgu.", L"Menzildeki düşmana normal saldırı.")
+R(TX_BTD_SKILL, L"覚えた技を選びます。MPを使います。", L"Choose a learned skill. It spends MP.", L"Choisit une technique apprise. Coûte des PM.", L"Scegli un'abilità appresa. Consuma PM.", L"Elige una habilidad aprendida. Gasta PM.", L"배운 기술을 고릅니다. MP를 씁니다.", L"选择已学技能。消耗MP。", L"اختر مهارة مكتسبة. تستهلك النقاط.", L"Выберите изученный приём. Тратит ОМ.", L"Wählt eine erlernte Fertigkeit. Kostet MP.", L"Escolha uma habilidade aprendida. Gasta PM.", L"Kies een geleerde vaardigheid. Kost MP.", L"Wybierz znaną umiejętność. Zużywa PM.", L"Öğrenilmiş yeteneği seçer. MP harcar.")
+R(TX_BTD_WAIT, L"この場で手番を終えます。", L"End this turn where you stand.", L"Termine le tour sur place.", L"Termina il turno sul posto.", L"Termina el turno en el sitio.", L"그 자리에서 차례를 끝냅니다.", L"就地结束本回合。", L"أنهِ الدور مكانك.", L"Завершить ход на месте.", L"Beendet den Zug an Ort und Stelle.", L"Encerra o turno no lugar.", L"Beëindig de beurt ter plaatse.", L"Kończy turę w miejscu.", L"Turunu yerinde bitirir.")
+R(TX_BTD_ITEM, L"所持している道具を使います。", L"Use an item you are carrying.", L"Utilise un objet transporté.", L"Usa un oggetto che possiedi.", L"Usa un objeto que llevas.", L"가진 도구를 사용합니다.", L"使用携带的道具。", L"استخدم أداة تحملها.", L"Использовать предмет из сумки.", L"Benutzt einen mitgeführten Gegenstand.", L"Usa um item que você carrega.", L"Gebruik een voorwerp dat je bij je hebt.", L"Użyj niesionego przedmiotu.", L"Taşıdığın eşyayı kullanır.")
+R(TX_BTD_SHOVE, L"隣のユニットを空いているマスへ1マス押し出します。自分より力の大きい敵は押せません。谷や溶岩へ落とすと大ダメージです。", L"Pushes an adjacent unit one open tile. A stronger enemy will not budge. A fall into a chasm or lava hurts badly.", L"Pousse une unité voisine d'une case libre. Un ennemi plus fort ne bouge pas. Un gouffre ou la lave blesse fort.", L"Spinge un'unità vicina di una casella libera. Un nemico più forte non si muove. Un baratro o la lava fanno molto male.", L"Empuja una unidad vecina una casilla libre. Un enemigo más fuerte no se mueve. Caer a un abismo o lava duele mucho.", L"옆의 유닛을 빈 칸으로 1칸 밀어냅니다. 자신보다 힘센 적은 밀 수 없습니다. 골짜기나 용암이면 큰 피해.", L"把相邻单位推到空格一格。比自己更有力的敌人推不动。掉进谷或熔岩会受到重伤。", L"يدفع وحدة مجاورة خانة فارغة. العدو الأقوى لا يتحرك. السقوط في هاوية أو حمم يؤلم كثيرًا.", L"Толкает соседа на свободную клетку. Более сильный враг не сдвинется. Пропасть или лава наносят тяжёлый урон.", L"Schiebt eine benachbarte Einheit ein freies Feld. Ein stärkerer Feind bleibt. Abgrund oder Lava tun sehr weh.", L"Empurra uma unidade vizinha uma casa livre. Um inimigo mais forte não sai. Cair num abismo ou lava dói muito.", L"Duw een naburige eenheid één leeg vak. Een sterkere vijand wijkt niet. Een kloof of lava doet veel pijn.", L"Popycha sąsiednią jednostkę na wolne pole. Silniejszy wróg nie drgnie. Przepaść lub lawa bardzo bolą.", L"Bitişik birimi boş kareye bir adım iter. Daha güçlü düşman kımıldamaz. Uçurum veya lav ağır hasar verir.")
+R(TX_BTD_DOOR, L"盗賊系が隣の扉を開けます。手番を終えます。", L"A thief line opens an adjacent door and ends the turn.", L"Une lignée de voleur ouvre une porte voisine et finit le tour.", L"Una classe ladra apre una porta vicina e chiude il turno.", L"Un linaje ladrón abre una puerta vecina y termina el turno.", L"도적 계열이 옆의 문을 열고 차례를 끝냅니다.", L"盗贼系打开相邻的门，并结束回合。", L"سلالة اللصوص تفتح بابًا مجاورًا وتنهي الدور.", L"Ветвь вора открывает соседнюю дверь и завершает ход.", L"Eine Diebeslinie öffnet eine benachbarte Tür und beendet den Zug.", L"Uma linhagem ladina abre uma porta vizinha e encerra o turno.", L"Een dievenlijn opent een naburige deur en beëindigt de beurt.", L"Linia złodzieja otwiera sąsiednie drzwi i kończy turę.", L"Hırsız soyu bitişik kapıyı açar ve turu bitirir.")
+R(TX_BTD_UNDO, L"移動する前の位置へ戻します。", L"Return to the tile you stood on before moving.", L"Revient à la case d'avant le déplacement.", L"Torna alla casella prima dello spostamento.", L"Vuelve a la casilla de antes de moverte.", L"이동하기 전의 칸으로 돌아갑니다.", L"回到移动前的格子。", L"عد إلى الخانة قبل التحرك.", L"Вернуться на клетку до хода.", L"Zurück auf das Feld vor der Bewegung.", L"Volta à casa de antes do movimento.", L"Terug naar het vak van vóór de beweging.", L"Wraca na pole sprzed ruchu.", L"Hareketten önceki kareye döner.")
+R(TX_CP, L"CP", L"CP", L"CP", L"CP", L"CP", L"CP", L"CP", L"CP", L"CP", L"CP", L"CP", L"CP", L"CP", L"CP")
+R(TX_CRAFT, L"戦技", L"Battle art", L"Technique", L"Tecnica", L"Técnica", L"전투기", L"战技", L"أسلوب قتال", L"Приём", L"Kampfkunst", L"Técnica", L"Krijgskunst", L"Sztuka walki", L"Savaş sanatı")
+R(TX_OUGI, L"奥義", L"Secret art", L"Art secret", L"Arte segreta", L"Arte secreto", L"오의", L"奥义", L"فن خفي", L"Тайный приём", L"Geheimkunst", L"Arte secreta", L"Geheime kunst", L"Sztuka tajemna", L"Gizli sanat")
+R(TX_STONE, L"魔石", L"Magestone", L"Pierre magique", L"Pietra magica", L"Piedra mágica", L"마석", L"魔石", L"حجر سحري", L"Магический камень", L"Magistein", L"Pedra mágica", L"Magisteen", L"Magiczny kamień", L"Büyütaşı")
+R(TX_BEAD, L"技珠", L"Art bead", L"Perle d'art", L"Perla d'arte", L"Cuenta de arte", L"기술구슬", L"技珠", L"خرزة فن", L"Бусина приёма", L"Kunstperle", L"Conta de arte", L"Kunstkraal", L"Koralik sztuki", L"Sanat boncuğu")
+R(TX_ACC, L"装飾", L"Trinket", L"Bijou", L"Ninnolo", L"Abalorio", L"장식", L"饰品", L"حلية", L"Украшение", L"Schmuck", L"Adorno", L"Sieraad", L"Ozdoba", L"Süs")
+R(TX_SHOP_ACC, L"装飾", L"Trinkets", L"Bijoux", L"Ninnoli", L"Abalorios", L"장식", L"饰品", L"حلي", L"Украшения", L"Schmuck", L"Adornos", L"Sieraden", L"Ozdoby", L"Süsler")
+R(TX_SHOP_BEAD, L"技珠", L"Art beads", L"Perles d'art", L"Perle d'arte", L"Cuentas de arte", L"기술구슬", L"技珠", L"خرز الفن", L"Бусины", L"Kunstperlen", L"Contas de arte", L"Kunstkralen", L"Koraliki", L"Sanat boncukları")
+R(TX_HIGH, L"高所", L"High ground", L"Hauteur", L"Altura", L"Altura", L"고지", L"高处", L"مرتفع", L"Высота", L"Hochstand", L"Alto", L"Hoogte", L"Wysokość", L"Yüksek")
+R(TX_LOW, L"低所", L"Low ground", L"Bas", L"Basso", L"Bajo", L"저지", L"低处", L"منخفض", L"Низина", L"Tieflage", L"Baixo", L"Laagte", L"Nizina", L"Alçak")
 R(TX_CL_ALCHEMIST, L"錬金師", L"Alchemist", L"Alchimiste", L"Alchimista", L"Alquimista", L"연금술사", L"炼金师", L"خيميائي", L"Алхимик", L"Alchemist", L"Alquimista", L"Alchemist", L"Alchemik", L"Simyacı")
 R(TX_CL_ARCHALCHEMIST, L"大錬金師", L"Archalchemist", L"Archalchimiste", L"Arcialchimista", L"Arquialquimista", L"대연금술사", L"大炼金师", L"خيميائي أعظم", L"Архиалхимик", L"Erzalchemist", L"Arquialquimista", L"Aartsalchemist", L"Arcyalchemik", L"Baş simyacı")
 R(TX_CLD_ALCHEMIST, L"石と薬草を薬と武具の力に変える。", L"Turns ore and herbs into medicine and might.", L"Change minerai et herbes en remèdes et en force.", L"Trasforma minerali ed erbe in cure e potenza.", L"Convierte mineral y hierbas en medicina y poder.", L"광석과 약초를 약과 힘으로 바꾼다.", L"把矿石和药草炼成药与力量。", L"يحوّل الخام والأعشاب إلى دواء وقوة.", L"Превращает руду и травы в зелья и силу.", L"Wandelt Erz und Kräuter in Tränke und Kraft.", L"Transforma minério e ervas em cura e força.", L"Maakt van erts en kruiden drank en kracht.", L"Zmienia rudę i zioła w lek i siłę.", L"Cevher ve otu ilaç ile güce çevirir.")
