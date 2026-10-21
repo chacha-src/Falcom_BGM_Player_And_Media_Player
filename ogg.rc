@@ -347,6 +347,7 @@ IDR_TAC_ASSETS          RCDATA                  "res\\tactics\\tac_assets.bin"
 
 IDR_TAC_SFX             RCDATA                  "res\\tactics\\tac_sfx.bin"
 IDR_TAC_MON             RCDATA                  "res\\tactics\\tac_mon.bin"
+IDR_TAC_GEAR            RCDATA                  "res\\tactics\\tac_gear.bin"
 
 IDR_CSO_RACE_VST        RCDATA                  "res\\cso\\race_vst.cso"
 

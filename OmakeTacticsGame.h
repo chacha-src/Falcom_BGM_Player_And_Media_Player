@@ -51,7 +51,7 @@ struct SeqStep {
 
 enum Phase {
 	PH_NONE, PH_INTRO, PH_NEXT, PH_P_MOVE, PH_MOVING, PH_P_CMD, PH_P_SKILLS, PH_P_TARGET, PH_P_SKILLTARGET, PH_P_SHOVE,
-	PH_ACTION, PH_E_SHOW, PH_E_MOVE, PH_END, PH_LEVELUP, PH_OVER, PH_MENU
+	PH_ACTION, PH_E_SHOW, PH_E_MOVE, PH_END, PH_LEVELUP, PH_OVER, PH_MENU, PH_P_ITEM
 };
 
 struct LevelUpInfo {
@@ -113,6 +113,8 @@ private:
 	void DrawPopups(float dt);
 	void AddBanner(const wchar_t* s, const wchar_t* sub, DWORD col, int style, float life);
 	void AddPopup(V3 p, const wchar_t* s, DWORD col, int style, float delay = 0);
+	void AddLog(const wchar_t* s, DWORD col);
+	void DrawBattleLog();
 	void DrawHelpOverlay();
 	void DrawStatLines(const CharData& c, float x, float y, float w, const int* gains, int hpCur, int mpCur);
 	const wchar_t* ClassName(int cls) const;
@@ -130,6 +132,7 @@ private:
 	void BuildShowcase();
 	void UpdateBase(float dt);
 	void DrawBaseUi();
+	void DrawShop();
 	float DrawSoundOpts(float x, float y, float w);
 	void ApplyAudio();
 	void DrawCodex();
@@ -193,6 +196,7 @@ private:
 	void DrawForecast();
 	void DrawMinimap(float x, float y, float s);
 	void DrawCommandMenu();
+	void UseConsumable(int good, int target);
 	void DrawLevelUp();
 	void DrawCutIn3D();
 	void DrawCutInUi();
@@ -204,6 +208,7 @@ private:
 	// 演出
 	void Burst(V3 p, int n, float spd, float size, float life, float r, float g, float b, int shape, int add, float grav, float stretch = 0, float upBias = 0, float size1 = -1);
 	void ElementFx(int element, int kind, V3 from, V3 to, BOOL big);
+	void StrikeFx(int skill, int el, int kind, int atkStyle, V3 from, V3 to, BOOL big);
 	void UpdateParticles(float dt);
 	void Shake(float s) { m_shake = max(m_shake, s); }
 
@@ -273,6 +278,11 @@ private:
 	int m_sortieAsk;
 	int m_midStage;
 	int m_autoStage;
+	int m_shop;
+	int m_shopLine;
+	int m_shopPage;
+	int m_shopKind;
+	int m_itemAim;
 
 	// 拠点の背景
 	Map m_showMap;
@@ -344,7 +354,11 @@ private:
 	Strike m_strk[32];
 	int m_strkN;
 	float m_stepL, m_stepTi;
-	struct Proj { int active; float t, launch, dur; int el, kind, arrow, self; } m_proj;
+	struct Proj { int active; float t, launch, dur; int el, kind, arrow, self, style, skill; } m_proj;
+	struct TacLog { wchar_t s[80]; DWORD col; };
+	TacLog m_log[24];
+	int m_logN;
+	float m_orderBottom;
 	int m_cutStage;      // 0=覆う 1=技名 2=攻防 3=覆う 4=マップへ
 	float m_cutStageT;
 	int m_cutA, m_cutD;

@@ -143,6 +143,9 @@ public:
 	afx_msg void OnDestroy();
 	afx_msg void OnClose();
 	afx_msg void OnSize(UINT nType, int cx, int cy);
+	afx_msg void OnActivate(UINT nState, CWnd* pWndOther, BOOL bMinimized);
+	afx_msg void OnActivateApp(BOOL bActive, DWORD dwThreadID);
+	afx_msg LRESULT OnRefreshChildren(WPARAM wParam, LPARAM lParam);
 	afx_msg void OnBnClickedHelp();
 	CCustomStandardButton m_help;
 	CCustomSliderCtrl m_reverb;

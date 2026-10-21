@@ -35914,6 +35914,8 @@ void COggDlg::OnActivate(UINT nState, CWnd * pWndOther, BOOL bMinimized)
 {
 
 	CCustomBlurDialogBase::OnActivate(nState, pWndOther, bMinimized);
+	if ((nState == WA_ACTIVE || nState == WA_CLICKACTIVE) && !bMinimized)
+		RaisePianoAnalyzerToFront();
 	int l = 5;
 	if (plw && savedata.playerMode != 1) {
 		if ((nState == WA_ACTIVE || nState == WA_CLICKACTIVE) && bMinimized == 0 && pl->m_saisyo.GetCheck()) {
@@ -38478,9 +38480,32 @@ int COggDlg::OnMouseActivate(CWnd * pDesktopWnd, UINT nHitTest, UINT message)
 }
 
 int npap = 0;
+
+// EQ はメインの所有窓なので、復帰・アクティブと同時に前面へ出る。
+// ピアノロールとアナライザーは描画スレッドの所有で、その並びには入らない。
+// 親をメインに戻すとスレッドをまたぐ同期で落ちるので、Z 順だけ合わせる。
+static void RaiseVizUiToFront(HWND h, BOOL topmost)
+{
+	if (!h || !::IsWindow(h) || !::IsWindowVisible(h) || ::IsIconic(h))
+		return;
+	::SetWindowPos(h, topmost ? HWND_TOPMOST : HWND_TOP, 0, 0, 0, 0,
+		SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER
+		| SWP_ASYNCWINDOWPOS | SWP_NOSENDCHANGING);
+}
+
+void COggDlg::RaisePianoAnalyzerToFront()
+{
+	if (m_PianoRollDlg)
+		RaiseVizUiToFront(m_PianoRollDlg->GetSafeHwnd(), savedata.pianorolltopmost != 0);
+	if (m_AnalyzerDlg)
+		RaiseVizUiToFront(m_AnalyzerDlg->GetSafeHwnd(), savedata.analyzertopmost != 0);
+}
+
 void COggDlg::OnActivateApp(BOOL bActive, DWORD dwThreadID)
 {
 	CCustomBlurDialogBase::OnActivateApp(bActive, dwThreadID);
+	if (bActive)
+		RaisePianoAnalyzerToFront();
 
 	// アプリ非アクティブ時は必ずホットキーを解除する。
 	// WM_ACTIVATEはフォーカスを失ったウィンドウにのみ送られるため、

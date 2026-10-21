@@ -36,6 +36,7 @@ struct Actor {
 	int look;
 	int body;
 	int att[6], attJ[6], nAtt;
+	int gearM[4], gearJ[4], nGear;
 	int hair;
 	DWORD hairCol;
 	int wings;

@@ -15,6 +15,9 @@ enum {
 	ID_BASE_GRID, ID_BASE_HELP, ID_BASE_SLOT0 = 120,
 	ID_SORTIE_START = 160, ID_SORTIE_MID, ID_SORTIE_AUTO, ID_SORTIE_CANCEL,
 	ID_OPT_BGM = 190, ID_OPT_SE, ID_OPT_CAM,
+	ID_BASE_SHOP = 210, ID_SHOP_CLOSE, ID_SHOP_BUY0 = 220, ID_SHOP_SELL0 = 250,
+	ID_SHOP_PREV = 270, ID_SHOP_NEXT, ID_SHOP_LINE0 = 272, ID_SHOP_KIND0 = 278,
+	ID_PT_WPN = 348, ID_PT_ARM,
 	ID_CR_NAME = 200, ID_CR_RANDOM, ID_CR_GENDER, ID_CR_LINEAGE, ID_CR_CLASS, ID_CR_BODY, ID_CR_HAIR, ID_CR_HAIRCOL, ID_CR_OUTFIT,
 	ID_CR_HAT, ID_CR_CAPE, ID_CR_OK, ID_CR_BACK,
 	ID_PT_CARD0 = 300, ID_PT_DEPLOY = 340, ID_PT_EDIT, ID_PT_DELETE, ID_PT_YES, ID_PT_NO, ID_PT_BACK, ID_PT_NEW,
@@ -86,6 +89,11 @@ Game::Game()
 	m_sortieAsk = 0;
 	m_midStage = 0;
 	m_autoStage = 0;
+	m_shop = 0;
+	m_shopLine = 0;
+	m_shopPage = 0;
+	m_shopKind = 0;
+	m_itemAim = -1;
 	for (int i = 0; i < Renderer::PORTRAIT_N; i++) m_ptSlotUnit[i] = -1;
 	for (int i = 0; i < MAX_UNITS; i++) m_ptForUnit[i] = -1;
 	m_ult = FALSE;
@@ -142,6 +150,8 @@ Game::Game()
 	m_seqCaster = m_seqPrimary = -1;
 	m_seqSkill = -1;
 	m_battleStage = 1;
+	m_logN = 0;
+	m_orderBottom = 0;
 	m_overT = 0;
 	m_moveUnit = -1;
 	SaveDefaults(m_save);
@@ -694,6 +704,44 @@ void Game::AddBanner(const wchar_t* s, const wchar_t* sub, DWORD col, int style,
 	m_banners.push_back(b);
 }
 
+void Game::AddLog(const wchar_t* s, DWORD col)
+{
+	if (!s || !s[0]) return;
+	if (m_logN >= 24) {
+		memmove(&m_log[0], &m_log[1], sizeof(m_log[0]) * 23);
+		m_logN = 23;
+	}
+	TacLog& L = m_log[m_logN++];
+	wcsncpy_s(L.s, s, _TRUNCATE);
+	L.col = col;
+}
+void Game::DrawBattleLog()
+{
+	float ms = U(236);
+	float lh = U(132);
+	float lx = U(386);
+	float lw = (float)m_w - ms - U(28) - lx;
+	if (lw < U(220)) lw = U(220);
+	float top = (float)m_h - U(146);
+	m_r.HudRect(lx, top, lw, lh, RGBA8(6, 10, 18, 150));
+	m_r.HudFrame(lx, top, lw, lh, U(1.5f), RGBA8(220, 190, 120, 180));
+	m_r.HudText(TT(TX_BT_LOG), lx + U(12), top + U(16), U(14), RGBA8(255, 226, 150), 0, 1);
+	float y = top + U(34);
+	int n = m_logN;
+	int first = 0;
+	float row = U(18);
+	int fit = (int)((lh - U(44)) / row);
+	if (fit < 1) fit = 1;
+	if (n > fit) first = n - fit;
+	for (int i = first; i < n; i++) {
+		int age = n - 1 - i;
+		int a = age == 0 ? 255 : (age < 4 ? 210 : 150);
+		DWORD c = m_log[i].col;
+		DWORD col = RGBA8(c & 255, (c >> 8) & 255, (c >> 16) & 255, a);
+		m_r.HudText(m_log[i].s, lx + U(12), y + U(8), U(13), col, 0, 0);
+		y += row;
+	}
+}
 void Game::AddPopup(V3 p, const wchar_t* s, DWORD col, int style, float delay)
 {
 	Popup q = {};
@@ -907,9 +955,18 @@ void Game::ElementFx(int el, int kind, V3 from, V3 to, BOOL big)
 	int n = (int)(24 * k);
 	switch (el) {
 	case EL_FIRE:
-		Burst(to, n, 3.2f * k, .32f * k, .7f, 1.f, .5f, .15f, 0, 1, -1.5f, 0, .6f, .05f);
-		Burst(to, n / 2, 4.5f * k, .1f, .9f, 1.f, .8f, .3f, 3, 1, 3.f, .06f, .8f);
-		Burst(to, 3, .4f, 1.0f * k, .45f, 1.f, .6f, .2f, 1, 1, 0, 0, 0, 1.8f * k);
+		for (int i = 0; i < 8; i++) {
+			Particle q = {};
+			q.p = to + v3(m_rng.F(-.45f, .45f), .05f, m_rng.F(-.45f, .45f));
+			q.v = v3(m_rng.F(-.4f, .4f), m_rng.F(1.4f, 3.2f), m_rng.F(-.4f, .4f));
+			q.life = q.max = m_rng.F(0.7f, 1.35f);
+			q.size = .28f * k; q.size1 = .06f;
+			q.r = 1; q.g = m_rng.F(.25f, .55f); q.b = .05f; q.a = 1;
+			q.shape = 5; q.add = 1; q.grav = -0.4f; q.drag = .6f;
+			m_parts.push_back(q);
+		}
+		Burst(to, n, 2.2f * k, .16f, .8f, 1.f, .75f, .2f, 0, 1, -2.2f, 0, 1.1f, .04f);
+		Burst(to + v3(0, .05f, 0), 2, .2f, 1.1f * k, .55f, 1.f, .35f, .05f, 1, 1, 0, 0, 0, 1.6f * k);
 		break;
 	case EL_ICE:
 		Burst(to, n, 3.f * k, .22f * k, .9f, .6f, .85f, 1.f, 2, 1, 2.f, 0, .4f);
@@ -917,16 +974,24 @@ void Game::ElementFx(int el, int kind, V3 from, V3 to, BOOL big)
 		Burst(to, 2, .2f, .9f * k, .5f, .7f, .9f, 1.f, 1, 1, 0, 0, 0, 1.6f * k);
 		break;
 	case EL_THUNDER:
-		for (int i = 0; i < 6; i++) {
-			Particle q = {};
-			q.p = to + v3(m_rng.F(-.3f, .3f), 4.f, m_rng.F(-.3f, .3f));
-			q.v = v3(m_rng.F(-1, 1), -40.f, m_rng.F(-1, 1));
-			q.life = q.max = .18f; q.size = .12f; q.size1 = .08f;
-			q.r = 1; q.g = .95f; q.b = .5f; q.a = 1; q.shape = 3; q.add = 1; q.stretch = .1f;
-			m_parts.push_back(q);
+		for (int bolt = 0; bolt < (big ? 3 : 2); bolt++) {
+			float ox = m_rng.F(-.7f, .7f), oz = m_rng.F(-.7f, .7f);
+			for (int s = 0; s < 7; s++) {
+				Particle q = {};
+				float y = 5.2f - s * .72f;
+				q.p = to + v3(ox + m_rng.F(-.18f, .18f), y, oz + m_rng.F(-.18f, .18f));
+				q.v = v3(0, -6.f, 0);
+				q.life = q.max = .16f + s * .02f;
+				q.size = .22f; q.size1 = .08f;
+				q.r = .85f; q.g = .92f; q.b = 1.f; q.a = 1;
+				q.shape = 6; q.add = 1; q.stretch = .04f; q.drag = 0;
+				m_parts.push_back(q);
+			}
 		}
-		Burst(to, n, 6.f * k, .1f, .45f, 1.f, 1.f, .6f, 3, 1, 0, .04f);
-		Burst(to, 2, .1f, 1.2f * k, .3f, 1.f, 1.f, .7f, 0, 1, 0, 0, 0, 2.f * k);
+		Burst(to, 3, .15f, 1.4f * k, .22f, .9f, .95f, 1.f, 1, 1, 0, 0, 0, 2.2f * k);
+		Burst(to, n, 7.f * k, .08f, .35f, 1.f, 1.f, .75f, 3, 1, 1.f, .02f, .2f);
+		m_flashWhite = max(m_flashWhite, big ? .85f : .45f);
+		m_shake = max(m_shake, big ? .7f : .35f);
 		break;
 	case EL_HOLY:
 		Burst(to, n, 2.f * k, .18f, 1.2f, 1.f, .95f, .7f, 2, 1, -2.5f, 0, 1.f);
@@ -961,6 +1026,106 @@ void Game::ElementFx(int el, int kind, V3 from, V3 to, BOOL big)
 		break;
 	}
 	(void)from;
+}
+
+void Game::StrikeFx(int skill, int el, int kind, int atkStyle, V3 from, V3 to, BOOL big)
+{
+	float k = big ? 1.5f : 1.f;
+	auto slash = [&](float yaw) {
+		for (int i = 0; i < 7; i++) {
+			Particle q = {};
+			float a = yaw + (i - 3) * .22f;
+			q.p = to + v3(sinf(a) * .15f, .35f + i * .02f, cosf(a) * .15f);
+			q.v = v3(sinf(a) * 3.5f, .2f, cosf(a) * 3.5f);
+			q.life = q.max = .28f; q.size = .34f * k; q.size1 = .08f;
+			q.r = 1; q.g = .95f; q.b = .8f; q.a = 1; q.shape = 4; q.add = 1;
+			m_parts.push_back(q);
+		}
+	};
+	if (skill == SKL_THUNDER || skill == SKL_SMITE || (el == EL_THUNDER && kind != SK_PHYS)) {
+		ElementFx(EL_THUNDER, SK_MAGIC, from, to, big); return;
+	}
+	if (skill == SKL_METEOR || skill == SKL_APOC) {
+		for (int i = 0; i < 6; i++) {
+			Particle q = {};
+			q.p = to + v3(m_rng.F(-1.2f, 1.2f), 4.5f, m_rng.F(-1.2f, 1.2f));
+			q.v = v3(0, -9.f, 0);
+			q.life = q.max = .45f; q.size = .4f; q.size1 = .1f;
+			q.r = 1; q.g = .4f; q.b = .08f; q.a = 1; q.shape = 5; q.add = 1; q.grav = 4.f;
+			m_parts.push_back(q);
+		}
+		ElementFx(EL_FIRE, SK_MAGIC, from, to, TRUE); return;
+	}
+	if (skill == SKL_BLIZZARD || skill == SKL_GRAVITY && el == EL_ICE) {
+		for (int i = 0; i < 16; i++) {
+			Particle q = {};
+			q.p = to + v3(m_rng.F(-1.6f, 1.6f), m_rng.F(1.5f, 3.5f), m_rng.F(-1.6f, 1.6f));
+			q.v = v3(m_rng.F(-.4f, .4f), -2.5f, m_rng.F(-.4f, .4f));
+			q.life = q.max = .8f; q.size = .16f; q.size1 = .04f;
+			q.r = .75f; q.g = .9f; q.b = 1; q.a = 1; q.shape = 7; q.add = 1; q.grav = 3.f;
+			m_parts.push_back(q);
+		}
+		ElementFx(EL_ICE, kind, from, to, big); return;
+	}
+	if (skill == SKL_ARROWRAIN) {
+		for (int i = 0; i < 10; i++) {
+			Particle q = {};
+			q.p = to + v3(m_rng.F(-1.4f, 1.4f), 3.2f, m_rng.F(-1.4f, 1.4f));
+			q.v = v3(0, -8.f, 0);
+			q.life = q.max = .35f; q.size = .08f; q.size1 = .04f;
+			q.r = .9f; q.g = .85f; q.b = .6f; q.a = 1; q.shape = 3; q.add = 1; q.stretch = .05f;
+			m_parts.push_back(q);
+		}
+		return;
+	}
+	if (skill == SKL_WHIRL || skill == SKL_CLEAVE || atkStyle == AS_SPIN) {
+		Burst(to, 3, .2f, .9f * k, .4f, 1, .95f, .85f, 1, 1, 0, 0, 0, 1.8f * k);
+		slash(0); slash(2.1f); return;
+	}
+	if (kind == SK_HEAL || skill == SKL_HEAL || skill == SKL_HIGHHEAL || skill == SKL_HEALALL || skill == SKL_RENEW || skill == SKL_RAISE) {
+		ElementFx(EL_NONE, SK_HEAL, from, to, big); return;
+	}
+	if (kind == SK_BUFF) { ElementFx(el == EL_NONE ? EL_HOLY : el, SK_BUFF, from, to, big); return; }
+	if (kind == SK_MAGIC || atkStyle == AS_CAST) { ElementFx(el == EL_NONE ? EL_HOLY : el, SK_MAGIC, from, to, big); return; }
+	if (atkStyle == AS_CHOP2 || skill == SKL_BASH || skill == SKL_POWER) {
+		for (int i = 0; i < 6; i++) {
+			Particle q = {};
+			q.p = to + v3(m_rng.F(-.2f, .2f), 1.6f - i * .05f, m_rng.F(-.2f, .2f));
+			q.v = v3(0, -4.f, 0);
+			q.life = q.max = .22f; q.size = .4f; q.size1 = .08f;
+			q.r = 1; q.g = .9f; q.b = .7f; q.a = 1; q.shape = 3; q.add = 1; q.stretch = .06f;
+			m_parts.push_back(q);
+		}
+		Burst(to, 8, 3.f, .1f, .3f, .8f, .75f, .65f, 0, 0, 6.f, 0, .4f);
+		return;
+	}
+	if (atkStyle == AS_STAB || skill == SKL_PIERCE || skill == SKL_ASSASSINATE || skill == SKL_STITCH) {
+		V3 dir = Norm(to - from);
+		for (int i = 0; i < 6; i++) {
+			Particle q = {};
+			q.p = Lerp(from, to, .3f + i * .1f);
+			q.v = dir * 6.f;
+			q.life = q.max = .16f; q.size = .12f; q.size1 = .04f;
+			q.r = 1; q.g = .95f; q.b = .85f; q.a = 1; q.shape = 3; q.add = 1; q.stretch = .03f;
+			m_parts.push_back(q);
+		}
+		return;
+	}
+	if (atkStyle == AS_SHOOT || atkStyle == AS_SHOOT1) {
+		Burst(to, 6, 2.f, .08f, .25f, 1, .9f, .6f, 3, 1, 1.f, .04f);
+		return;
+	}
+	if (atkStyle == AS_PUNCH) {
+		Burst(to, 2, .1f, .7f * k, .25f, 1, .85f, .6f, 1, 1, 0, 0, 0, 1.4f);
+		Burst(to, 10, 4.f, .08f, .3f, 1, .8f, .55f, 0, 0, 2.f, 0, .3f);
+		return;
+	}
+	if (atkStyle == AS_BITE) {
+		Burst(to, 12, 2.5f, .12f, .35f, .9f, .2f, .15f, 0, 1, 1.f, 0, .2f);
+		return;
+	}
+	slash(atan2f(to.x - from.x, to.z - from.z));
+	Burst(to, 6, 3.f, .08f, .25f, 1, .95f, .85f, 3, 1, 2.f, .04f);
 }
 
 // ============================================================ 拠点
@@ -1074,7 +1239,8 @@ void Game::DrawCodex()
 					swprintf_s(how, L"%s  Lv%d", TT(cd.nameTx), cd.learn[k].lv);
 				}
 			}
-			if (list[i] >= SKL_ART0) {
+			if (list[i] == SKL_RAISE) swprintf_s(how, L"%s  Lv7", TT(TX_G_HOLY));
+			if (list[i] >= SKL_ART0 && list[i] < SKL_ARTN) {
 				int k = list[i] - SKL_ART0;
 				int g = k / 26;
 				int lv = (k % 26) + 7;
@@ -1157,9 +1323,117 @@ void Game::DrawCodex()
 	if (Btn(ID_BASE_CLOSE, x + w - U(180), y + h - U(56), U(150), U(36), TT(TX_BASE_CLOSE))) m_codex = 0;
 }
 
+void Game::DrawShop()
+{
+	float w = min((float)m_w - U(40), U(980)), h = (float)m_h - U(30);
+	float x = ((float)m_w - w) * .5f, y = U(16);
+	Panel(x, y, w, h);
+	wchar_t title[96];
+	swprintf_s(title, L"%s    %s %d", TT(TX_SHOP), TT(TX_GOLD), m_save.gold);
+	m_r.HudText(title, x + w * .5f, y + U(22), U(20), RGBA8(255, 226, 150), 1, 1);
+	static const int lineCls[6] = { C_SOLDIER, C_FIGHTER, C_ARCHER, C_THIEF, C_MAGE, C_CLERIC };
+	float tx = x + U(16);
+	for (int i = 0; i < 6; i++) {
+		if (Btn(ID_SHOP_LINE0 + i, tx, y + U(40), U(108), U(28), ClassName(lineCls[i]), TRUE, m_shopLine == i, U(12))) {
+			m_shopLine = i; m_shopPage = 0; if (m_shopKind == 2) m_shopKind = 0;
+		}
+		tx += U(114);
+	}
+	float ky = y + U(74);
+	if (Btn(ID_SHOP_KIND0, x + U(16), ky, U(120), U(28), TT(TX_SHOP_WPN), TRUE, m_shopKind == 0, U(13))) { m_shopKind = 0; m_shopPage = 0; }
+	if (Btn(ID_SHOP_KIND0 + 1, x + U(144), ky, U(120), U(28), TT(TX_SHOP_ARM), TRUE, m_shopKind == 1, U(13))) { m_shopKind = 1; m_shopPage = 0; }
+	if (Btn(ID_SHOP_KIND0 + 2, x + U(272), ky, U(120), U(28), TT(TX_SHOP_GOODS), TRUE, m_shopKind == 2, U(13))) { m_shopKind = 2; m_shopPage = 0; }
+	if (Btn(ID_SHOP_KIND0 + 3, x + U(400), ky, U(140), U(28), TT(TX_SHOP_PART), TRUE, m_shopKind == 3, U(13))) { m_shopKind = 3; m_shopPage = 0; }
+	const int per = 8;
+	int ids[512], n = 0;
+	if (m_shopKind == 3) {
+		n = TrophyList(ids, 512);
+	} else if (m_shopKind == 2) {
+		for (int i = 0; i < GoodCount() && n < 512; i++) ids[n++] = i;
+	} else {
+		for (int i = 0; i < GearCount() && n < 512; i++) {
+			const GearDef* g = GearOf(i + 1);
+			if (!g || g->line != m_shopLine || g->kind != m_shopKind) continue;
+			if (m_save.stageCleared < g->stage) continue;
+			ids[n++] = i;
+		}
+	}
+	int pages = max(1, (n + per - 1) / per);
+	if (m_shopPage >= pages) m_shopPage = pages - 1;
+	if (m_shopPage < 0) m_shopPage = 0;
+	float yy = ky + U(36);
+	int a = m_shopPage * per, b = min(n, a + per);
+	for (int s = 0; s < per; s++) {
+		int ix = a + s;
+		if (ix >= b) break;
+		wchar_t row[180];
+		BOOL ok = FALSE;
+		if (m_shopKind == 3) {
+			wchar_t nm[80];
+			int ct = 0, price = 0;
+			TrophyNameOf(ids[ix], nm, 80, &ct, &price);
+			swprintf_s(row, L"%s  x%d  %dG", nm, ct, price);
+			if (Btn(ID_SHOP_BUY0 + s, x + U(16), yy, w * .62f, U(30), row, TRUE, FALSE, U(13))) {
+				if (TrophySell(m_save, ids[ix])) { TacSfx(TS_CONFIRM); Persist(); return; }
+			}
+		} else if (m_shopKind == 2) {
+			const GoodDef* gd = GoodAt(ids[ix]);
+			swprintf_s(row, L"%s  %dG  x%d", TT(gd->nameTx), gd->price, GoodHave(m_save, ids[ix]));
+			ok = m_save.gold >= gd->price && GoodHave(m_save, ids[ix]) < 99;
+			if (Btn(ID_SHOP_BUY0 + s, x + U(16), yy, w * .62f, U(30), row, ok, FALSE, U(13))) {
+				if (GoodBuy(m_save, ids[ix])) { TacSfx(TS_CONFIRM); Persist(); }
+			}
+		} else {
+			const GearDef* g = GearOf(ids[ix] + 1);
+			swprintf_s(row, L"%s  %dG  %s+%d %s+%d %s+%d %s+%d", GearName(ids[ix] + 1), g->price,
+				TT(TX_ST_STR), g->str, TT(TX_ST_MAG), g->mag, TT(TX_ST_DEF), g->def, TT(TX_ST_RES), g->res);
+			ok = m_save.gold >= g->price && m_save.gearN < GEAR_STASH;
+			if (Btn(ID_SHOP_BUY0 + s, x + U(16), yy, w * .62f, U(30), row, ok, FALSE, U(13))) {
+				if (GearBuy(m_save, ids[ix])) { TacSfx(TS_CONFIRM); Persist(); }
+			}
+		}
+		yy += U(34);
+	}
+	wchar_t pg[32];
+	swprintf_s(pg, L"%d / %d", m_shopPage + 1, pages);
+	if (pages > 1 && Btn(ID_SHOP_PREV, x + U(16), y + h - U(48), U(64), U(32), L"◀")) m_shopPage = (m_shopPage + pages - 1) % pages;
+	m_r.HudText(pg, x + U(150), y + h - U(32), U(14), RGBA8(220, 220, 230), 0, 1);
+	if (pages > 1 && Btn(ID_SHOP_NEXT, x + U(200), y + h - U(48), U(64), U(32), L"▶")) m_shopPage = (m_shopPage + 1) % pages;
+	float sy = ky + U(36);
+	m_r.HudText(TT(TX_SHOP_SELL), x + w * .66f, ky + U(8), U(15), RGBA8(255, 220, 170), 0, 1);
+	if (m_shopKind == 2) {
+		int shown = 0;
+		for (int i = 0; i < GoodCount() && shown < 8; i++) {
+			int have = GoodHave(m_save, i);
+			if (have < 1) continue;
+			const GoodDef* gd = GoodAt(i);
+			wchar_t row[96];
+			swprintf_s(row, L"%s x%d  %dG", TT(gd->nameTx), have, max(1, gd->price / 2));
+			if (Btn(ID_SHOP_SELL0 + i, x + w * .66f, sy, w * .32f, U(30), row, TRUE, FALSE, U(12))) {
+				if (GoodTake(m_save, i)) { m_save.gold += max(1, gd->price / 2); TacSfx(TS_CONFIRM); Persist(); return; }
+			}
+			sy += U(34);
+			shown++;
+		}
+	} else {
+		for (int i = 0; i < m_save.gearN && i < GEAR_STASH; i++) {
+			const GearDef* g = GearOf(m_save.gearId[i]);
+			if (!g) continue;
+			wchar_t row[96];
+			swprintf_s(row, L"%s  %dG", GearName(m_save.gearId[i]), max(1, g->price / 2));
+			if (Btn(ID_SHOP_SELL0 + i, x + w * .66f, sy, w * .32f, U(30), row, TRUE, FALSE, U(12))) {
+				if (GearSellAt(m_save, i)) { TacSfx(TS_CONFIRM); Persist(); return; }
+			}
+			sy += U(34);
+		}
+	}
+	if (Btn(ID_SHOP_CLOSE, x + w - U(170), y + h - U(48), U(150), U(32), TT(TX_CR_BACK))) { Persist(); m_shop = 0; }
+}
+
 void Game::DrawBaseUi()
 {
 	if (m_codex) { DrawCodex(); return; }
+	if (m_shop) { DrawShop(); return; }
 	float pw = U(330), ph = (float)m_h - U(40);
 	float x = U(20), y = U(20);
 	Panel(x, y, pw, ph);
@@ -1177,7 +1451,7 @@ void Game::DrawBaseUi()
 	}
 	by += U(46);
 	wchar_t cl[64];
-	swprintf_s(cl, L"%s: %d", TT(TX_BASE_CLEARED), m_save.stageCleared);
+	swprintf_s(cl, L"%s: %d    %s %d", TT(TX_BASE_CLEARED), m_save.stageCleared, TT(TX_GOLD), m_save.gold);
 	m_r.HudText(cl, bx + U(4), by + U(8), U(14), RGBA8(200, 200, 210), 0, 0);
 	by += U(28);
 	int np = PartyCount();
@@ -1195,6 +1469,15 @@ void Game::DrawBaseUi()
 	if (Btn(ID_BASE_EVOLVE, bx, by, bw, bh, TT(TX_BASE_EVOLVE), RosterCount() > 0)) { EnterEvolve(); return; }
 	by += bh + U(8);
 	if (Btn(ID_BASE_CODEX, bx, by, bw, bh, TT(TX_BASE_CODEX))) { m_codex = 1; m_codexPage = 0; return; }
+	by += bh + U(8);
+	if (Btn(ID_BASE_SHOP, bx, by, bw, bh, TT(TX_SHOP))) {
+		m_shop = 1; m_shopPage = 0; m_shopKind = 0;
+		for (int i = 0; i < MAX_PARTY; i++) {
+			int r = m_save.party[i];
+			if (r >= 0 && m_save.roster[r].used) { m_shopLine = ClassLine(m_save.roster[r].cls); break; }
+		}
+		return;
+	}
 	by += bh + U(18);
 	static const int qtx[3] = { TX_SET_Q_LOW, TX_SET_Q_STD, TX_SET_Q_HIGH };
 	if (int q = Sel(ID_BASE_QUALITY, bx, by, bw, U(36), TT(TX_SET_QUALITY), TT(qtx[Clampi(m_save.quality, 0, 2)]))) {
@@ -1548,7 +1831,7 @@ void Game::DrawPartyUi()
 	// 詳細
 	float dx = x + gw + U(14), dw = (float)m_w - dx - U(20);
 	if (dw < U(220) || m_partySel < 0) return;
-	const CharData& c = m_save.roster[m_partySel];
+	CharData& c = m_save.roster[m_partySel];
 	if (!c.used) return;
 	Panel(dx, y, dw, gh);
 	float ps2 = min(U(110), dw * .4f);
@@ -1579,6 +1862,28 @@ void Game::DrawPartyUi()
 	}
 	if (!ns) m_r.HudText(TT(TX_PT_NONE), dx + U(20), sy + U(9), U(13), RGBA8(160, 160, 170), 0, 0);
 	// 操作
+	{
+		const GearDef* wpn = GearOf(c.reserved[6]);
+		const GearDef* arm = GearOf(c.reserved[7]);
+		wchar_t gl[96];
+		int line = ClassLine(c.cls);
+		swprintf_s(gl, L"%s: %s", TT(TX_GEAR_WPN), wpn ? GearName(c.reserved[6]) : TT(TX_PT_NONE));
+		if (Btn(ID_PT_WPN, dx + U(14), y + gh - U(148), dw * .48f, U(32), gl, TRUE, FALSE, U(12))) {
+			int ix = -1;
+			for (int i = 0; i < m_save.gearN; i++) { const GearDef* g = GearOf(m_save.gearId[i]); if (g && g->kind == 0 && g->line == line) { ix = i; break; } }
+			if (ix >= 0) GearEquip(c, m_save, ix);
+			else if (c.reserved[6] > 0 && StashAdd(m_save, c.reserved[6])) c.reserved[6] = 0;
+			Persist(); InvalidatePortraits(); BuildShowcase();
+		}
+		swprintf_s(gl, L"%s: %s", TT(TX_GEAR_ARM), arm ? GearName(c.reserved[7]) : TT(TX_PT_NONE));
+		if (Btn(ID_PT_ARM, dx + dw * .52f, y + gh - U(148), dw * .46f, U(32), gl, TRUE, FALSE, U(12))) {
+			int ix = -1;
+			for (int i = 0; i < m_save.gearN; i++) { const GearDef* g = GearOf(m_save.gearId[i]); if (g && g->kind == 1 && g->line == line) { ix = i; break; } }
+			if (ix >= 0) GearEquip(c, m_save, ix);
+			else if (c.reserved[7] > 0 && StashAdd(m_save, c.reserved[7])) c.reserved[7] = 0;
+			Persist(); InvalidatePortraits(); BuildShowcase();
+		}
+	}
 	float by = y + gh - U(98);
 	BOOL inParty = FALSE;
 	for (int p = 0; p < MAX_PARTY; p++) if (m_save.party[p] == m_partySel) inParty = TRUE;

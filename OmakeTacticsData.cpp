@@ -169,6 +169,7 @@ static const TerrainDef kTerrain[T_COUNT] = {
 	{ TX_TER_RUINS,    2, 1, 10, 10 },
 	{ TX_TER_ROCK,     99, 0, 0, 0 },
 	{ TX_TER_DOOR,     99, 0, 0, 0 },
+	{ TX_TER_VOID,     99, 0, 0, 0 },
 };
 const TerrainDef& TerrainInfo(int t) { return kTerrain[Clampi(t, 0, T_COUNT - 1)]; }
 int ThemeNameTx(int th) { return TX_TH_PLAINS + Clampi(th, 0, TH_COUNT - 1); }
@@ -178,7 +179,7 @@ float Map::TopY(int x, int z) const
 {
 	if (!In(x, z)) return 0;
 	const Cell& c = At(x, z);
-	if (c.t == T_CHASM) return -3.2f;
+	if (c.t == T_CHASM || c.t == T_VOID) return -3.2f;
 	return c.h * kHStep;
 }
 
@@ -424,6 +425,109 @@ static void PickDeploy(Map& m, int ax, int az, int* outX, int* outZ, int want, i
 	for (int i = got; i < want; i++) { outX[i] = outX[got ? i % got : 0]; outZ[i] = outZ[got ? i % got : 0]; }
 }
 
+static int MapSpan(int stage)
+{
+	int s = 18 + (int)(sqrtf((float)max(1, stage - 1)) * 2.4f);
+	if (stage >= 80) s += (stage - 80) / 20;
+	if (stage >= 200) s += (stage - 200) / 35;
+	return Clampi(s, 18, 56);
+}
+
+// 正規化座標 -1..1。中身の詰まった形だけ。輪や細い帯は広いマップだけ。
+static bool ShapeInside(int kind, float x, float y)
+{
+	float r2 = x * x + y * y;
+	switch (kind) {
+	case 1: { // 三日月
+		float b = (x - 0.55f) * (x - 0.55f) + y * y;
+		return r2 < 1.f && b > 0.62f;
+	}
+	case 2: { // ひょうたん
+		float a = (x + 0.40f) * (x + 0.40f) + y * y;
+		float b = (x - 0.40f) * (x - 0.40f) + y * y;
+		return a < 0.40f || b < 0.40f || (fabsf(x) < 0.46f && fabsf(y) < 0.30f);
+	}
+	case 3: { // ブーツ
+		bool shaft = x > -0.08f && x < 0.78f && y > -0.95f && y < 0.42f;
+		bool toe = x > -0.95f && x < 0.2f && y > -1.05f && y < -0.18f;
+		return shaft || toe;
+	}
+	case 4: { // ハート
+		float a = x * x + y * y - 1.f;
+		return a * a * a - x * x * y * y * y < 0.f;
+	}
+	case 5: // 十字
+		return (fabsf(x) < 0.42f && fabsf(y) < 1.02f) || (fabsf(y) < 0.42f && fabsf(x) < 1.02f);
+	case 6: { // きのこ
+		bool cap = (x * x) / 1.05f + (y - 0.28f) * (y - 0.28f) / 0.5f < 1.f && y > -0.02f;
+		bool stem = fabsf(x) < 0.30f && y > -1.02f && y < 0.4f;
+		return cap || stem;
+	}
+	case 7: // 輪（穴あき）
+		return r2 < 1.f && r2 > 0.20f;
+	case 8: { // くねった細長い島
+		float wave = 0.38f * sinf(x * 3.2f);
+		return fabsf(x) < 1.02f && fabsf(y - wave) < 0.40f;
+	}
+	case 9: { // 鍵穴
+		bool head = x * x + (y - 0.38f) * (y - 0.38f) < 0.46f;
+		bool stem = fabsf(x) < 0.26f && y < 0.5f && y > -1.02f;
+		return head || stem;
+	}
+	default:
+		return r2 < 1.f;
+	}
+}
+
+static int StampShape(Map& m, int stage, Rng& r, int& pax, int& paz)
+{
+	int span = MapSpan(stage);
+	int kindMax = span >= 30 ? 9 : (span >= 24 ? 6 : 5);
+	int kind = r.Range(0, kindMax);
+	float rot = r.F(0, 6.2831853f);
+	float cs = cosf(rot), sn = sinf(rot);
+	float half = span * 0.5f;
+	int cx0 = MAPN / 2, cz0 = MAPN / 2;
+	static BYTE mask[MAPN][MAPN];
+	auto build = [&](int k, bool nibble) {
+		int n = 0;
+		for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) {
+			float dx = x + 0.5f - cx0, dz = z + 0.5f - cz0;
+			float lx = (dx * cs + dz * sn) / half;
+			float ly = (-dx * sn + dz * cs) / half;
+			bool in = ShapeInside(k, lx, ly);
+			if (in && nibble) {
+				bool rim = !ShapeInside(k, lx * 0.84f, ly * 0.84f);
+				float noise = Fbm(m.seed + 17, x * 0.23f, z * 0.23f, 2);
+				if (rim && noise < 0.38f) in = false;
+			}
+			mask[z][x] = in ? 1 : 0;
+			if (in) n++;
+		}
+		return n;
+	};
+	if (build(kind, kind <= 5) < 120) build(0, false);
+	for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) {
+		if (mask[z][x]) continue;
+		Cell& c = m.c[z][x];
+		c.t = T_VOID; c.h = 0; c.prop = PK_NONE; c.gimm = 0; c.gparam = 0;
+	}
+	int bestS = 999999, bx = cx0, bz = cz0;
+	for (int z = 2; z < MAPN - 2; z++) for (int x = 2; x < MAPN - 2; x++) {
+		if (!mask[z][x]) continue;
+		int nbr = 0;
+		for (int dz = -2; dz <= 2; dz++) for (int dx = -2; dx <= 2; dx++)
+			if (Map::In(x + dx, z + dz) && mask[z + dz][x + dx]) nbr++;
+		if (nbr < 12) continue;
+		float dx = x + 0.5f - cx0, dz = z + 0.5f - cz0;
+		float lx = (dx * cs + dz * sn) / half;
+		int sc = (int)(lx * 100.f) - nbr;
+		if (sc < bestS) { bestS = sc; bx = x; bz = z; }
+	}
+	pax = bx; paz = bz;
+	return span;
+}
+
 void GenerateMap(Map& m, int stage, DWORD seed)
 {
 	memset(&m, 0, sizeof(m));
@@ -545,10 +649,9 @@ void GenerateMap(Map& m, int stage, DWORD seed)
 		}
 	}
 
-	// 5) 味方拠点（地図の中央寄り）。敵は対岸の一点に固めない
-	float ang = r.F(0, 6.283f);
-	int pax = Clampi((int)(MAPN / 2 + cosf(ang) * 8), 6, MAPN - 7);
-	int paz = Clampi((int)(MAPN / 2 + sinf(ang) * 8), 6, MAPN - 7);
+	// 5) 地図の外形を切ってから、太い側に味方拠点
+	int pax = MAPN / 2, paz = MAPN / 2;
+	int span = StampShape(m, stage, r, pax, paz);
 	int eax = pax, eaz = paz;
 	for (int pass = 0; pass < 2; pass++) {
 		int ax = pass ? eax : pax, az = pass ? eaz : paz;
@@ -557,7 +660,7 @@ void GenerateMap(Map& m, int stage, DWORD seed)
 		if (m.c[az][ax].t == T_CHASM) hh = 2;
 		int rad = pass ? 4 : 3;
 		for (int z = az - rad; z <= az + rad; z++) for (int x = ax - rad; x <= ax + rad; x++) {
-			if (!Map::In(x, z)) continue;
+			if (!Map::In(x, z) || m.c[z][x].t == T_VOID) continue;
 			Cell& c = m.c[z][x];
 			c.t = (BYTE)(tp.ground == T_SAND ? T_SAND : (tp.ground == T_SNOW ? T_SNOW : T_PLAIN));
 			int d = max(abs(x - ax), abs(z - az));
@@ -570,6 +673,7 @@ void GenerateMap(Map& m, int stage, DWORD seed)
 	int np = CarveRoad(m, pax, paz, eax, eaz, px, pz, MAPN * 4);
 	for (int i = 0; i < np; i++) {
 		Cell& c = m.c[pz[i]][px[i]];
+		if (c.t == T_VOID) continue;
 		if (c.t == T_WATER || c.t == T_LAVA || c.t == T_CHASM) {
 			int hh = i > 0 ? m.c[pz[i - 1]][px[i - 1]].h : 2;
 			c.t = T_BRIDGE; c.h = (BYTE)Clampi(hh, 1, MAXH);
@@ -604,6 +708,7 @@ void GenerateMap(Map& m, int stage, DWORD seed)
 		// 保険: 経路の段差を 0 に、障害物を除去
 		for (int i = 0; i < np; i++) {
 			Cell& c = m.c[pz[i]][px[i]];
+			if (c.t == T_VOID) continue;
 			if (!FootPassable(c.t)) c.t = (BYTE)(c.t == T_WATER || c.t == T_LAVA || c.t == T_CHASM ? T_BRIDGE : T_ROAD);
 			if (i > 0) c.h = m.c[pz[i - 1]][px[i - 1]].h;
 			if (c.h < 1) c.h = 1;
@@ -622,24 +727,41 @@ void GenerateMap(Map& m, int stage, DWORD seed)
 		int order[MAPN * MAPN];
 		int nc = 0;
 		for (int z = 3; z < MAPN - 3; z++) for (int x = 3; x < MAPN - 3; x++) {
-			if (!FootPassable(m.c[z][x].t)) continue;
-			if (Dist(x, z, pax, paz) < 7) continue;
+			int t = m.c[z][x].t;
+			if (t == T_VOID || t == T_WATER || t == T_LAVA || t == T_CHASM) continue;
+			if (Dist(x, z, pax, paz) < 5) continue;
 			order[nc++] = z * MAPN + x;
 		}
-		for (int i = nc - 1; i > 0; i--) {
-			int j = r.Range(0, i);
-			int tmp = order[i]; order[i] = order[j]; order[j] = tmp;
-		}
 		int budget = MAX_ENEMY;
-		int hi = Clampi(stage >= 200 ? 10 + (stage - 200) / 80 : 4 + stage / 8, 4, GRP_CAP);
-		const int gap = stage >= 400 ? 5 : (stage >= 120 ? 6 : 8);
-		for (int i = 0; i < nc && m.nGrp < MAX_GROUPS && budget >= 3; i++) {
-			int x = order[i] % MAPN, z = order[i] / MAPN;
-			bool crowded = false;
-			for (int gi = 0; gi < m.nGrp; gi++)
-				if (Dist(x, z, m.grp[gi].ax, m.grp[gi].az) < gap) { crowded = true; break; }
-			if (crowded) continue;
-			int want = r.Range(3, hi);
+		int maxGrp = 2, lo = 3, hi = 3;
+		if (stage <= 1) { maxGrp = 2; lo = 3; hi = 3; }
+		else if (stage <= 4) { maxGrp = 3; lo = 3; hi = 3; }
+		else if (stage <= 12) { maxGrp = 4; lo = 3; hi = 4; }
+		else if (stage < 40) { maxGrp = 5 + stage / 10; lo = 3; hi = 4 + stage / 15; }
+		else if (stage < 120) { maxGrp = 8 + stage / 12; lo = 3; hi = min(GRP_CAP, 5 + stage / 12); }
+		else { maxGrp = MAX_GROUPS; lo = 3; hi = Clampi(stage >= 200 ? 10 + (stage - 200) / 80 : 8, 4, GRP_CAP); }
+		const int gap = stage <= 4 ? 5 : (stage < 40 ? 6 : 7);
+		static BYTE tried[MAPN][MAPN];
+		memset(tried, 0, sizeof(tried));
+		int guardPick = 0;
+		while (m.nGrp < maxGrp && m.nGrp < MAX_GROUPS && budget >= 3 && guardPick < 80) {
+			guardPick++;
+			int target = 6 + m.nGrp * max(5, span / 3);
+			int bestI = -1, bestS = 999999;
+			for (int i = 0; i < nc; i++) {
+				int x = order[i] % MAPN, z = order[i] / MAPN;
+				if (tried[z][x]) continue;
+				bool crowded = false;
+				for (int gi = 0; gi < m.nGrp; gi++)
+					if (Dist(x, z, m.grp[gi].ax, m.grp[gi].az) < gap) { crowded = true; break; }
+				if (crowded) continue;
+				int sc = abs(Dist(x, z, pax, paz) - target);
+				if (sc < bestS) { bestS = sc; bestI = i; }
+			}
+			if (bestI < 0) break;
+			int x = order[bestI] % MAPN, z = order[bestI] / MAPN;
+			tried[z][x] = 1;
+			int want = r.Range(lo, max(lo, hi));
 			if (want > budget) want = budget;
 			MapGroup& g = m.grp[m.nGrp];
 			g.ax = (short)x; g.az = (short)z; g.boss = 0; g.n = 0;
@@ -651,7 +773,7 @@ void GenerateMap(Map& m, int stage, DWORD seed)
 					int nx = x + dx, nz = z + dz;
 					if (!Map::In(nx, nz)) continue;
 					Cell& c = m.c[nz][nx];
-					if (c.t == T_WATER || c.t == T_LAVA) continue;
+					if (c.t == T_WATER || c.t == T_LAVA || c.t == T_VOID || c.t == T_CHASM) continue;
 					c.t = (BYTE)(tp.ground == T_SAND ? T_SAND : (tp.ground == T_SNOW ? T_SNOW : T_PLAIN));
 					c.h = (BYTE)Clampi(max(abs(dx), abs(dz)) < 2 ? hh : (hh + c.h) / 2, 1, MAXH);
 				}
@@ -717,6 +839,7 @@ void GenerateMap(Map& m, int stage, DWORD seed)
 			int np2 = CarveRoad(m, bx, bz, m.grp[best].ax, m.grp[best].az, rx, rz, MAPN * 4);
 			for (int i = 0; i < np2; i++) {
 				Cell& c = m.c[rz[i]][rx[i]];
+				if (c.t == T_VOID) continue;
 				if (c.t == T_WATER || c.t == T_LAVA || c.t == T_CHASM) c.t = T_BRIDGE;
 				else if (c.t == T_MOUNTAIN || c.t == T_ROCK) c.t = (BYTE)(tp.road ? T_ROAD : tp.ground);
 				else if (tp.road && c.t != T_BRIDGE && c.t != T_RUINS) c.t = T_ROAD;
@@ -761,11 +884,11 @@ void GenerateMap(Map& m, int stage, DWORD seed)
 		int tx = Clampi(pax + 2, 1, MAPN - 2), tz = Clampi(paz - 2, 1, MAPN - 2);
 		bool used = false;
 		for (int i = 0; i < MAX_PARTY; i++) if (m.pStartX[i] == tx && m.pStartZ[i] == tz) used = true;
-		if (!used) { m.c[tz][tx].t = T_ROCK; m.c[tz][tx].prop = PK_TENT; }
+		if (!used && m.c[tz][tx].t != T_VOID) { m.c[tz][tx].t = T_ROCK; m.c[tz][tx].prop = PK_TENT; }
 		int fx = Clampi(pax - 2, 1, MAPN - 2), fz = Clampi(paz + 2, 1, MAPN - 2);
 		used = false;
 		for (int i = 0; i < MAX_PARTY; i++) if (m.pStartX[i] == fx && m.pStartZ[i] == fz) used = true;
-		if (!used) { m.c[fz][fx].t = T_ROCK; m.c[fz][fx].prop = PK_FLAG; }
+		if (!used && m.c[fz][fx].t != T_VOID) { m.c[fz][fx].t = T_ROCK; m.c[fz][fx].prop = PK_FLAG; }
 		for (int k = 0; k < 3 && m.nGrp > 0; k++) {
 			const MapGroup& g0 = m.grp[0];
 			int cx = Clampi(g0.ax + r.Range(-4, 4), 1, MAPN - 2), cz = Clampi(g0.az + r.Range(-4, 4), 1, MAPN - 2);
@@ -802,8 +925,8 @@ void GenerateMap(Map& m, int stage, DWORD seed)
 			}
 			return -1;
 		};
-		int nHeal = Clampi(4 + stage / 15, 4, 10);
-		int nMight = Clampi(3 + stage / 20, 3, 8);
+		int nHeal = Clampi(span / 8, 1, 8);
+		int nMight = Clampi(span / 10, 1, 6);
 		for (int i = 0; i < nHeal; i++) {
 			int s = take(4);
 			if (s < 0) break;
@@ -814,14 +937,15 @@ void GenerateMap(Map& m, int stage, DWORD seed)
 			if (s < 0) break;
 			m.c[s / MAPN][s % MAPN].gimm = GM_MIGHT;
 		}
-		int nPair = Clampi(4 + stage / 12, 4, 8);
+		int nPair = Clampi(span / 16, 0, 6);
+		int warpSep = max(6, span / 3);
 		for (int id = 0; id < nPair; id++) {
 			int a = take(6);
 			int b = -1;
 			for (int i = usedS; i < ns; i++) {
 				int x = spots[i] % MAPN, z = spots[i] / MAPN;
 				if (m.c[z][x].gimm) continue;
-				if (a >= 0 && Dist(x, z, a % MAPN, a / MAPN) < 14) continue;
+				if (a >= 0 && Dist(x, z, a % MAPN, a / MAPN) < warpSep) continue;
 				b = z * MAPN + x;
 				spots[i] = spots[usedS];
 				usedS++;
@@ -831,7 +955,7 @@ void GenerateMap(Map& m, int stage, DWORD seed)
 			m.c[a / MAPN][a % MAPN].gimm = GM_WARP; m.c[a / MAPN][a % MAPN].gparam = (BYTE)id;
 			m.c[b / MAPN][b % MAPN].gimm = GM_WARP; m.c[b / MAPN][b % MAPN].gparam = (BYTE)id;
 		}
-		int nChest = Clampi(3 + stage / 18, 3, 8);
+		int nChest = Clampi(span / 10, 1, 6);
 		for (int i = 0; i < nChest; i++) {
 			int s = take(5);
 			if (s < 0) break;
@@ -840,7 +964,7 @@ void GenerateMap(Map& m, int stage, DWORD seed)
 			c.gparam = (BYTE)r.Range(0, 2);
 			c.prop = PK_CRATE;
 		}
-		int nDoor = Clampi(2 + stage / 25, 2, 6);
+		int nDoor = Clampi(span / 14, 0, 4);
 		for (int i = 0; i < nDoor; i++) {
 			int s = take(8);
 			if (s < 0) break;
@@ -996,7 +1120,7 @@ bool IsUltimateSkill(int skill)
 	case SKL_DRAGONFANG: case SKL_BRAVE: case SKL_METEOR: case SKL_ASSASSINATE:
 	case SKL_GODSLASH: case SKL_RUIN: case SKL_APOC: return true;
 	default:
-		if (skill >= SKL_ART0 && skill < SKL_COUNT) {
+		if (skill >= SKL_ART0 && skill < SKL_ARTN) {
 			int lv = (skill - SKL_ART0) % 26;
 			return (lv % 8) == 1 && lv >= 16;
 		}
@@ -1062,12 +1186,12 @@ static const SkillDef kSkill[] = {
 };
 static_assert(sizeof(kSkill) / sizeof(kSkill[0]) == SKL_ART0, "base skill table");
 
-static SkillDef s_art[SKL_COUNT - SKL_ART0];
+static SkillDef s_art[SKL_ARTN - SKL_ART0];
 static int s_artOk = 0;
 static void BuildArts()
 {
 	if (s_artOk) return;
-	for (int i = 0; i < SKL_COUNT - SKL_ART0; i++) {
+	for (int i = 0; i < SKL_ARTN - SKL_ART0; i++) {
 		SkillDef& d = s_art[i];
 		memset(&d, 0, sizeof(d));
 		int lv = i % 26;
@@ -1099,7 +1223,11 @@ static void BuildArts()
 }
 const SkillDef& SkillInfo(int s)
 {
-	if (s >= SKL_ART0 && s < SKL_COUNT) {
+	if (s == SKL_RAISE) {
+		static const SkillDef raise = { TX_SK_RAISE, TX_SKD_RAISE, SK_HEAL, 12, 0, 1, 2, 0, EL_HOLY, 1, 0, EF_RAISE, 0 };
+		return raise;
+	}
+	if (s >= SKL_ART0 && s < SKL_ARTN) {
 		BuildArts();
 		return s_art[s - SKL_ART0];
 	}
@@ -1134,6 +1262,13 @@ static const MonsterDef kMon[M_COUNT] = {
 };
 
 #include "tactics_src/mon_species.inc"
+#include "tactics_src/mon_names.inc"
+static const wchar_t* ImportLocName(int model)
+{
+	if (model < 0 || model >= kImportN) return L"?";
+	const wchar_t* const* s = kImportLoc[model];
+	return LangPick14(s[0], s[1], s[2], s[3], s[4], s[5], s[6], s[7], s[8], s[9], s[10], s[11], s[12], s[13]);
+}
 
 static MonsterDef s_monImp[160];
 static int s_monImpOk = 0;
@@ -1209,7 +1344,7 @@ const MonsterDef& MonsterInfo(int m)
 const wchar_t* MonsterLabel(int m)
 {
 	const MonsterDef& d = MonsterInfo(m);
-	if (d.look == LK_MESH && d.model >= 0 && d.model < kImportN) return kImportName[d.model];
+	if (d.look == LK_MESH && d.model >= 0 && d.model < kImportN) return ImportLocName(d.model);
 	return TT(d.nameTx);
 }
 
@@ -1236,6 +1371,7 @@ static void GrantReached(CharData& c)
 		int sk = PaceSkill(c.cls, lv);
 		if (sk >= 0) CharGiveSkill(c, sk);
 	}
+	if (cd.group == G_HOLY && c.lv >= 7) CharGiveSkill(c, SKL_RAISE);
 }
 
 void CharRecalcInit(CharData& c)
@@ -1256,7 +1392,7 @@ void CharGiveSkill(CharData& c, int s)
 	if (s < 64) { c.skills |= 1ull << s; return; }
 	int i = s - 64;
 	int w = i >> 5;
-	if (w >= 0 && w < 8) c.reserved[w] |= (int)(1u << (i & 31));
+	if (w >= 0 && w < 6) c.reserved[w] |= (int)(1u << (i & 31));
 }
 
 bool CharHasSkill(const CharData& c, int s)
@@ -1265,7 +1401,7 @@ bool CharHasSkill(const CharData& c, int s)
 	if (s < 64) return (c.skills & (1ull << s)) != 0;
 	int i = s - 64;
 	int w = i >> 5;
-	if (w < 0 || w >= 8) return false;
+	if (w < 0 || w >= 6) return false;
 	return (c.reserved[w] & (int)(1u << (i & 31))) != 0;
 }
 
@@ -1273,6 +1409,7 @@ int CharLearnAt(const CharData& c, int lv)
 {
 	const ClassDef& cd = ClassInfo(c.cls);
 	for (int i = 0; i < 6; i++) if (cd.learn[i].skill >= 0 && cd.learn[i].lv == lv) return cd.learn[i].skill;
+	if (cd.group == G_HOLY && lv == 7) return SKL_RAISE;
 	return PaceSkill(c.cls, lv);
 }
 
@@ -1390,6 +1527,12 @@ static bool IsMon(const Unit& u) { return u.monster >= 0; }
 int UnitStat(const Unit& u, int s)
 {
 	int v = u.ch.stat[s];
+	const GearDef* w = GearOf(u.ch.reserved[6]);
+	const GearDef* a = GearOf(u.ch.reserved[7]);
+	if (w && s == S_STR) v += w->str;
+	if (w && s == S_MAG) v += w->mag;
+	if (a && s == S_DEF) v += a->def;
+	if (a && s == S_RES) v += a->res;
 	if (s == S_DEF && u.buffDef > 0) v = v * 13 / 10;
 	if ((s == S_DEF || s == S_RES) && u.defDown > 0) v = v * 75 / 100;
 	if ((s == S_AGI) && u.buffAgi > 0) v = v * 13 / 10;
@@ -1735,6 +1878,12 @@ int SkillTargets(const Battle& b, int caster, int skill, int cx, int cz, int* ou
 	int n = 0;
 	for (int i = 0; i < b.nUnits && n < maxOut; i++) {
 		const Unit& t = b.u[i];
+		if (s.effect == EF_RAISE) {
+			if (t.alive || !t.killed || t.team != c.team) continue;
+			if (Dist(t.x, t.z, cx, cz) > max(0, s.area)) continue;
+			out[n++] = i;
+			continue;
+		}
 		if (!t.alive) continue;
 		bool ally = (t.team == c.team);
 		if (friendly != ally) continue;
@@ -1787,11 +1936,21 @@ int ResolveAttack(Battle& b, int ai, int di, int skill, Rng& r, Strike* out, int
 			Strike s = {};
 			s.attacker = ai; s.defender = targets[k]; s.skill = skill;
 			if (sd->kind == SK_HEAL) {
-				int amt = UnitStat(a, S_MAG) + sd->power;
-				int before = d.hp;
-				d.hp = min(d.ch.stat[S_HP], d.hp + amt);
-				s.dmg = -(d.hp - before);
-				s.hit = 1;
+				if (sd->effect == EF_RAISE) {
+					d.alive = 1;
+					d.killed = 0;
+					d.hp = max(1, d.ch.stat[S_HP] * 45 / 100);
+					d.dissolve = 0;
+					d.ct = max(d.ct, 200);
+					s.dmg = -d.hp;
+					s.hit = 1;
+				} else {
+					int amt = UnitStat(a, S_MAG) + sd->power;
+					int before = d.hp;
+					d.hp = min(d.ch.stat[S_HP], d.hp + amt);
+					s.dmg = -(d.hp - before);
+					s.hit = 1;
+				}
 			} else if (sd->kind == SK_BUFF) {
 				ApplyEffect(b, a, d, sd->effect);
 				s.hit = 1;
@@ -2007,7 +2166,17 @@ void SetupBattle(Battle& b, int stage, DWORD seed, const CharData* party, const 
 	}
 	b.nUnits = n;
 	b.RebuildOcc();
-	WakeNearPlayers(b, 9);
+	WakeNearPlayers(b, 8);
+	int nearGrp = -1, nearD = 9999;
+	for (int e = 0; e < b.nUnits; e++) {
+		if (!b.u[e].alive || b.u[e].team != TEAM_ENEMY || b.u[e].grp < 0) continue;
+		for (int p = 0; p < b.nUnits; p++) {
+			if (!b.u[p].alive || b.u[p].team != TEAM_PLAYER) continue;
+			int d = Dist(b.u[e].x, b.u[e].z, b.u[p].x, b.u[p].z);
+			if (d < nearD) { nearD = d; nearGrp = b.u[e].grp; }
+		}
+	}
+	if (nearGrp >= 0) WakeGroup(b, nearGrp);
 }
 
 void FinishAction(Battle& b, int ui, int moved, int acted)
@@ -2297,9 +2466,394 @@ void AiDecide(const Battle& b, int ui, AiPlan& p, Rng& r)
 	if (bs < -1e8f || df[p.moveZ][p.moveX] > bd) { p.moveX = u.x; p.moveZ = u.z; }
 }
 
+// ============================================================ 武具（生成表: tactics_src/gear_catalog.inc）
+#include "tactics_src/gear_catalog.inc"
+int GearCount() { return kGearN; }
+const GearDef* GearOf(int id)
+{
+	if (id < 1 || id > kGearN) return NULL;
+	return &kGear[id - 1];
+}
+const wchar_t* GearName(int id)
+{
+	if (id < 1 || id > kGearN) return L"?";
+	const wchar_t* const* s = kGearNm[id - 1];
+	return LangPick14(s[0], s[1], s[2], s[3], s[4], s[5], s[6], s[7], s[8], s[9], s[10], s[11], s[12], s[13]);
+}
+int ClassLine(int cls)
+{
+	switch (cls) {
+	case C_SOLDIER: case C_PALADIN: case C_HERO: case C_SKYKNIGHT: case C_DRAGONLORD: case C_RUNEKNIGHT: return 0;
+	case C_FIGHTER: case C_BERSERKER: return 1;
+	case C_ARCHER: case C_SNIPER: case C_PHANTOM: return 2;
+	case C_THIEF: case C_ASSASSIN: return 3;
+	case C_MAGE: case C_WIZARD: case C_ARCHMAGE: case C_ALCHEMIST: case C_ARCHALCHEMIST: return 4;
+	default: return 5;
+	}
+}
+int ItemExtraGet(const SaveData& s, int i)
+{
+	if (i < 0 || i >= IX_N) return 0;
+	unsigned v = (unsigned)s.reserved[i >> 1];
+	return (int)((v >> ((i & 1) * 16)) & 0xFFFF);
+}
+void ItemExtraAdd(SaveData& s, int i, int d)
+{
+	if (i < 0 || i >= IX_N) return;
+	int c = ItemExtraGet(s, i) + d;
+	if (c < 0) c = 0;
+	if (c > 60000) c = 60000;
+	unsigned shift = (unsigned)((i & 1) * 16);
+	unsigned mask = 0xFFFFu << shift;
+	unsigned v = (unsigned)s.reserved[i >> 1];
+	v = (v & ~mask) | ((unsigned)c << shift);
+	s.reserved[i >> 1] = (int)v;
+}
+int ConsumableCount(const SaveData& s)
+{
+	int n = s.itemN[IT_ELIXIR] + s.itemN[IT_MIGHT] + s.itemN[IT_DELAY] + s.itemN[IT_RAISE];
+	for (int i = 0; i < IX_N; i++) n += ItemExtraGet(s, i);
+	return n;
+}
+int MonsterDropLine(int monster)
+{
+	const wchar_t* n = MonsterLabel(monster);
+	if (!n) return 0;
+	struct Hit { const wchar_t* k; int line; };
+	static const Hit hit[] = {
+		{ L"Dragon", 0 }, { L"Tribal", 0 }, { L"Shark", 0 }, { L"Bull", 0 },
+		{ L"Orc", 1 }, { L"Gole", 1 }, { L"Yeti", 1 }, { L"Trex", 1 }, { L"Stego", 1 }, { L"Tricera", 1 }, { L"Dino", 1 }, { L"Wolf", 1 }, { L"Whale", 1 }, { L"Stag", 1 },
+		{ L"Spider", 2 }, { L"Wasp", 2 }, { L"Birb", 2 }, { L"Pigeon", 2 }, { L"Hywirl", 2 }, { L"Fish", 2 }, { L"fish", 2 }, { L"Manta", 2 }, { L"Wasp", 2 },
+		{ L"Ghost", 3 }, { L"Ninja", 3 }, { L"Fox", 3 }, { L"Raptor", 3 }, { L"Snake", 3 }, { L"Rat", 3 }, { L"Cat", 3 },
+		{ L"Wizard", 4 }, { L"Demon", 4 }, { L"Alien", 4 }, { L"Mush", 4 },
+		{ L"Blob", 5 }, { L"Glub", 5 }, { L"Cactoro", 5 }, { L"Frog", 5 }, { L"Bunny", 5 },
+	};
+	for (int i = 0; i < (int)(sizeof(hit) / sizeof(hit[0])); i++) if (wcsstr(n, hit[i].k)) return hit[i].line;
+	return monster % 6;
+}
+bool StashAdd(SaveData& s, int id)
+{
+	if (id < 1 || id > kGearN || s.gearN < 0 || s.gearN >= GEAR_STASH) return false;
+	s.gearId[s.gearN++] = id;
+	return true;
+}
+void StashRemoveAt(SaveData& s, int index)
+{
+	if (index < 0 || index >= s.gearN) return;
+	for (int i = index; i < s.gearN - 1; i++) s.gearId[i] = s.gearId[i + 1];
+	s.gearN--;
+	s.gearId[s.gearN] = 0;
+}
+bool GearBuy(SaveData& s, int index)
+{
+	if (index < 0 || index >= kGearN) return false;
+	if (s.stageCleared < kGear[index].stage) return false;
+	if (s.gold < kGear[index].price) return false;
+	if (!StashAdd(s, index + 1)) return false;
+	s.gold -= kGear[index].price;
+	return true;
+}
+bool GearSellAt(SaveData& s, int index)
+{
+	if (index < 0 || index >= s.gearN) return false;
+	const GearDef* g = GearOf(s.gearId[index]);
+	if (!g) return false;
+	s.gold += max(1, g->price / 2);
+	StashRemoveAt(s, index);
+	return true;
+}
+void GearEquip(CharData& c, SaveData& s, int stashIndex)
+{
+	if (stashIndex < 0 || stashIndex >= s.gearN) return;
+	int id = s.gearId[stashIndex];
+	const GearDef* g = GearOf(id);
+	if (!g) return;
+	int slot = g->kind ? 7 : 6;
+	int old = c.reserved[slot];
+	c.reserved[slot] = id;
+	StashRemoveAt(s, stashIndex);
+	if (old > 0) StashAdd(s, old);
+}
+int GearTryDrop(SaveData& s, int stage, int monster, Rng& r)
+{
+	int pool[512], n = 0;
+	int gate = stage <= 1 ? 0 : stage;
+	int line = MonsterDropLine(monster);
+	for (int i = 0; i < kGearN && n < 512; i++) if (kGear[i].line == line && kGear[i].stage <= gate) pool[n++] = i;
+	if (n < 1) {
+		for (int i = 0; i < kGearN && n < 512; i++) if (kGear[i].stage <= gate) pool[n++] = i;
+	}
+	if (n < 1) return -1;
+	int gi = pool[r.Range(0, n - 1)];
+	if (!StashAdd(s, gi + 1)) {
+		s.gold += max(1, kGear[gi].price / 3);
+		return -1;
+	}
+	return gi + 1;
+}
+bool DropConsumable(SaveData& s, int monster, Rng& r)
+{
+	int line = MonsterDropLine(monster);
+	switch (line) {
+	case 0: s.itemN[IT_MIGHT]++; break;
+	case 1: ItemExtraAdd(s, IX_ATK, 1); break;
+	case 2: s.itemN[IT_DELAY]++; break;
+	case 3: s.itemN[IT_RAISE]++; break;
+	case 4: ItemExtraAdd(s, IX_ETHER, 1); break;
+	default: s.itemN[IT_ELIXIR]++; break;
+	}
+	if (r.Chance(45)) {
+		int k = r.Range(0, IX_N - 1);
+		ItemExtraAdd(s, k, 1);
+	}
+	return true;
+}
+static const GoodDef kGood[] = {
+	{ 40, IT_ELIXIR, -1, TX_IT_ELIXIR, 1 },
+	{ 70, IT_MIGHT, -1, TX_IT_MIGHT, 1 },
+	{ 55, IT_DELAY, -1, TX_IT_DELAY, 0 },
+	{ 160, IT_RAISE, -1, TX_IT_RAISE, 0 },
+	{ 90, -1, IX_FULL, TX_IT_FULL, 1 },
+	{ 80, -1, IX_ATK, TX_IT_ATK, 1 },
+	{ 80, -1, IX_DEF, TX_IT_DEF, 1 },
+	{ 80, -1, IX_AGI, TX_IT_AGI, 1 },
+	{ 60, -1, IX_SLOW, TX_IT_SLOW, 0 },
+	{ 60, -1, IX_VENOM, TX_IT_VENOM, 0 },
+	{ 50, -1, IX_CURE, TX_IT_CURE, 1 },
+	{ 70, -1, IX_ETHER, TX_IT_ETHER, 1 },
+};
+int GoodCount() { return (int)(sizeof(kGood) / sizeof(kGood[0])); }
+const GoodDef* GoodAt(int i) { return (i >= 0 && i < GoodCount()) ? &kGood[i] : NULL; }
+int GoodHave(const SaveData& s, int i)
+{
+	const GoodDef* g = GoodAt(i);
+	if (!g) return 0;
+	if (g->item >= 0) return s.itemN[g->item];
+	return ItemExtraGet(s, g->extra);
+}
+bool GoodBuy(SaveData& s, int i)
+{
+	const GoodDef* g = GoodAt(i);
+	if (!g || s.gold < g->price || GoodHave(s, i) >= 99) return false;
+	s.gold -= g->price;
+	if (g->item >= 0) s.itemN[g->item]++;
+	else ItemExtraAdd(s, g->extra, 1);
+	return true;
+}
+bool GoodTake(SaveData& s, int i)
+{
+	if (GoodHave(s, i) < 1) return false;
+	const GoodDef* g = GoodAt(i);
+	if (g->item >= 0) s.itemN[g->item]--;
+	else ItemExtraAdd(s, g->extra, -1);
+	return true;
+}
+
 // ============================================================ セーブ
 static const DWORD kSaveMagic = 0x31434154; // 'TAC1'
 static LPCTSTR kSaveLeaf = _T("oggYSEDbgmu_tactics.dat");
+
+// 敵部位。セーブ本体の大きさは変えず、別ファイルに積む。
+static const int kTrophyN = 40;
+static unsigned short g_trophy[40];
+static const DWORD kTrophyMagic = 0x54525054u;
+static LPCTSTR kTrophyLeaf = _T("oggYSEDbgmu_tac_part.dat");
+
+static void TrophyLoad()
+{
+	memset(g_trophy, 0, sizeof(g_trophy));
+	CString path = DatArc_Path(kTrophyLeaf);
+	FILE* fp = NULL;
+	if (_tfopen_s(&fp, path, _T("rb")) != 0 || !fp) return;
+	DWORD magic = 0; int ver = 0;
+	if (fread(&magic, 4, 1, fp) == 1 && fread(&ver, 4, 1, fp) == 1 && magic == kTrophyMagic && ver == 1)
+		fread(g_trophy, sizeof(g_trophy), 1, fp);
+	fclose(fp);
+}
+static void TrophySave()
+{
+	CString path = DatArc_Path(kTrophyLeaf);
+	FILE* fp = NULL;
+	if (_tfopen_s(&fp, path, _T("wb")) != 0 || !fp) return;
+	int ver = 1;
+	fwrite(&kTrophyMagic, 4, 1, fp);
+	fwrite(&ver, 4, 1, fp);
+	fwrite(g_trophy, sizeof(g_trophy), 1, fp);
+	fclose(fp);
+	DatArc_Commit(kTrophyLeaf);
+}
+static int TrophyId(unsigned short s) { return s & 1023; }
+static int TrophyCt(unsigned short s) { return (s >> 10) & 63; }
+static unsigned short TrophyPack(int id, int ct)
+{
+	if (ct < 0) ct = 0;
+	if (ct > 63) ct = 63;
+	return (unsigned short)((ct << 10) | (id & 1023));
+}
+static void SpeciesParts(int monster, int part[3])
+{
+	part[0] = 0; part[1] = 1; part[2] = 8;
+	const MonsterDef& md = MonsterInfo(monster);
+	if (md.look == LK_MESH && md.model >= 0 && md.model < kImportN) {
+		int i = md.model;
+		if (i == 0 || i == 67 || i == 68) { part[0] = 0; part[1] = 5; part[2] = 1; return; }
+		if (i == 1 || i == 2 || i == 3 || i == 9) { part[0] = 0; part[1] = 2; part[2] = 1; return; }
+		if (i == 4 || i == 6) { part[0] = 0; part[1] = 3; part[2] = 4; return; }
+		if (i == 5 || i == 7 || i == 8 || i == 10 || i == 75) { part[0] = 0; part[1] = 6; part[2] = 7; return; }
+		if (i == 44) { part[0] = 16; part[1] = 1; part[2] = 8; return; }
+		if (i == 47 || i == 48 || i == 50 || i == 52 || i == 78) { part[0] = 0; part[1] = 8; part[2] = 6; return; }
+		if (i == 49) { part[0] = 0; part[1] = 21; part[2] = 8; return; }
+		if (i == 51) { part[0] = 0; part[1] = 2; part[2] = 1; return; }
+		if (i == 53 || i == 82) { part[0] = 0; part[1] = 16; part[2] = 1; return; }
+		if (i == 54 || i == 73) { part[0] = 0; part[1] = 7; part[2] = 8; return; }
+		if (i == 55 || i == 56) { part[0] = 1; part[1] = 6; part[2] = 17; return; }
+		if (i == 57) { part[0] = 18; part[1] = 6; part[2] = 17; return; }
+		if (i == 58 || i == 69 || i == 70) { part[0] = 9; part[1] = 19; part[2] = 17; return; }
+		if (i == 59 || i == 65) { part[0] = 15; part[1] = 8; part[2] = 1; return; }
+		if (i == 25 || i == 37 || i == 64) { part[0] = 12; part[1] = 6; part[2] = 14; return; }
+		if ((i >= 11 && i <= 46) || (i >= 60 && i <= 63) || i == 81) { part[0] = 12; part[1] = 13; part[2] = 8; return; }
+		if (i == 66) { part[0] = 16; part[1] = 31; part[2] = 28; return; }
+		if (i == 71 || i == 76 || i == 99) { part[0] = 11; part[1] = 9; part[2] = 10; return; }
+		if (i == 72 || i == 77) { part[0] = 2; part[1] = 20; part[2] = 24; return; }
+		if (i == 74) { part[0] = 19; part[1] = 26; part[2] = 25; return; }
+		if (i == 79 || i == 80) { part[0] = 22; part[1] = 23; part[2] = 6; return; }
+		if (i == 83 || i == 84) { part[0] = 24; part[1] = 8; part[2] = 28; return; }
+		if (i == 85 || i == 86 || i == 89 || i == 90 || i == 100) { part[0] = 16; part[1] = 28; part[2] = 1; return; }
+		if (i == 87 || i == 88) { part[0] = 27; part[1] = 28; part[2] = 8; return; }
+		if (i == 91) { part[0] = 9; part[1] = 20; part[2] = 28; return; }
+		if (i == 92) { part[0] = 0; part[1] = 20; part[2] = 6; return; }
+		if (i == 93 || i == 94 || i == 95) { part[0] = 25; part[1] = 26; part[2] = 16; return; }
+		if (i == 96) { part[0] = 19; part[1] = 1; part[2] = 24; return; }
+		if (i == 97 || i == 98) { part[0] = 0; part[1] = 6; part[2] = 1; return; }
+		if (i == 101) { part[0] = 30; part[1] = 31; part[2] = 10; return; }
+		if (i == 102) { part[0] = 6; part[1] = 9; part[2] = 8; return; }
+		if (i == 103) { part[0] = 26; part[1] = 16; part[2] = 28; return; }
+		if (i == 104) { part[0] = 7; part[1] = 6; part[2] = 29; return; }
+		return;
+	}
+	switch (monster) {
+	case M_SLIME: part[0] = 16; part[1] = 28; part[2] = 1; break;
+	case M_POISON_SLIME: part[0] = 16; part[1] = 17; part[2] = 28; break;
+	case M_SKEL_MINION: part[0] = 8; part[1] = 6; part[2] = 24; break;
+	case M_SKEL_WARRIOR: part[0] = 8; part[1] = 6; part[2] = 2; break;
+	case M_SKEL_ARCHER: part[0] = 8; part[1] = 6; part[2] = 9; break;
+	case M_BAT: part[0] = 0; part[1] = 9; part[2] = 6; break;
+	case M_LICH: part[0] = 8; part[1] = 24; part[2] = 28; break;
+	case M_GOLEM: part[0] = 27; part[1] = 28; part[2] = 8; break;
+	case M_WYVERN: part[0] = 22; part[1] = 6; part[2] = 9; break;
+	case M_DARK_KNIGHT: part[0] = 8; part[1] = 6; part[2] = 24; break;
+	case M_DRAGON: part[0] = 22; part[1] = 23; part[2] = 6; break;
+	default: break;
+	}
+}
+static int TrophyKey(int monster, int which)
+{
+	const MonsterDef& md = MonsterInfo(monster);
+	int base = (md.look == LK_MESH && md.model >= 0 && md.model < kImportN) ? md.model : (200 + Clampi(monster, 0, 40));
+	return base * 3 + (which % 3) + 1;
+}
+static void TrophySplit(int key, int& monsterKey, int& which)
+{
+	int k = key - 1;
+	if (k < 0) k = 0;
+	which = k % 3;
+	monsterKey = k / 3;
+}
+static const wchar_t* TrophyMonName(int monsterKey)
+{
+	if (monsterKey >= 0 && monsterKey < kImportN) return ImportLocName(monsterKey);
+	int m = monsterKey - 200;
+	if (m < 0 || m >= M_COUNT) return L"?";
+	return TT(MonsterInfo(m).nameTx);
+}
+static void TrophyWriteName(wchar_t* name, int nameN, int key)
+{
+	int mk = 0, which = 0;
+	TrophySplit(key, mk, which);
+	int part[3];
+	int mon = (mk >= 0 && mk < kImportN) ? (M_COUNT + mk) : (mk - 200);
+	SpeciesParts(mon, part);
+	const wchar_t* mn = TrophyMonName(mk);
+	const wchar_t* pn = TT(TX_PART_FIRST + part[which]);
+	int lang = savedata.lang;
+	if (lang == 0) swprintf_s(name, nameN, L"%sの%s", mn, pn);
+	else if (lang == 6) swprintf_s(name, nameN, L"%s的%s", mn, pn);
+	else if (lang == 2 || lang == 4 || lang == 10) swprintf_s(name, nameN, L"%s de %s", pn, mn);
+	else if (lang == 3) swprintf_s(name, nameN, L"%s di %s", pn, mn);
+	else if (lang == 9) swprintf_s(name, nameN, L"%s von %s", pn, mn);
+	else if (lang == 11) swprintf_s(name, nameN, L"%s van %s", pn, mn);
+	else swprintf_s(name, nameN, L"%s %s", mn, pn);
+}
+
+static int TrophyPrice(int which) { return 8 + which * 5; }
+
+static int TrophyStore(int key, int* goldOut)
+{
+	int price = 8;
+	int mk = 0, which = 0;
+	TrophySplit(key, mk, which);
+	price = TrophyPrice(which);
+	for (int i = 0; i < kTrophyN; i++) {
+		if (TrophyId(g_trophy[i]) != key) continue;
+		int ct = TrophyCt(g_trophy[i]);
+		if (ct >= 63) { if (goldOut) *goldOut += price; return 1; }
+		g_trophy[i] = TrophyPack(key, ct + 1);
+		return 1;
+	}
+	for (int i = 0; i < kTrophyN; i++) {
+		if (TrophyId(g_trophy[i]) != 0) continue;
+		g_trophy[i] = TrophyPack(key, 1);
+		return 1;
+	}
+	if (goldOut) *goldOut += price;
+	return 1;
+}
+
+int DropTrophy(int monster, int boss, Rng& r, wchar_t* name, int nameN, int* goldOut)
+{
+	if (name && nameN > 0) name[0] = 0;
+	if (goldOut) *goldOut = 0;
+	int part[3];
+	SpeciesParts(monster, part);
+	int which = r.Range(0, 2);
+	int key = TrophyKey(monster, which);
+	int gold = 0;
+	TrophyStore(key, &gold);
+	if (name && nameN > 0) TrophyWriteName(name, nameN, key);
+	if (goldOut) *goldOut = gold;
+	(void)boss;
+	(void)part;
+	return 1;
+}
+int TrophyList(int* slots, int max)
+{
+	int n = 0;
+	for (int i = 0; i < kTrophyN && n < max; i++) if (TrophyId(g_trophy[i]) > 0 && TrophyCt(g_trophy[i]) > 0) slots[n++] = i;
+	return n;
+}
+bool TrophySell(SaveData& s, int slot)
+{
+	if (slot < 0 || slot >= kTrophyN) return false;
+	int id = TrophyId(g_trophy[slot]);
+	int ct = TrophyCt(g_trophy[slot]);
+	if (id <= 0 || ct <= 0) return false;
+	int mk = 0, which = 0;
+	TrophySplit(id, mk, which);
+	s.gold += max(1, TrophyPrice(which) * ct / 2);
+	g_trophy[slot] = 0;
+	return true;
+}
+void TrophyNameOf(int slot, wchar_t* name, int nameN, int* count, int* price)
+{
+	if (slot < 0 || slot >= kTrophyN) { if (name && nameN) name[0] = 0; return; }
+	int id = TrophyId(g_trophy[slot]);
+	int ct = TrophyCt(g_trophy[slot]);
+	if (count) *count = ct;
+	int mk = 0, which = 0;
+	TrophySplit(id, mk, which);
+	if (price) *price = max(1, TrophyPrice(which) * ct / 2);
+	if (name && nameN > 0) TrophyWriteName(name, nameN, id);
+}
 
 void SaveDefaults(SaveData& s)
 {
@@ -2347,6 +2901,10 @@ bool SaveLoad(SaveData& s)
 	s.camSpeed = Clampi(s.camSpeed, 0, 2);
 	if (s.optInit != 1) { s.bgmVol = 6; s.seVol = 8; s.optInit = 1; }
 	else { s.bgmVol = Clampi(s.bgmVol, 0, 10); s.seVol = Clampi(s.seVol, 0, 10); }
+	if (s.gold < 0) s.gold = 0;
+	s.gearN = Clampi(s.gearN, 0, GEAR_STASH);
+	for (int i = 0; i < s.gearN; i++) if (s.gearId[i] < 1 || s.gearId[i] > kGearN) s.gearId[i] = 1;
+	TrophyLoad();
 	return true;
 }
 
@@ -2357,7 +2915,7 @@ bool SaveWrite(const SaveData& s)
 	if (_tfopen_s(&fp, path, _T("wb")) != 0 || !fp) return false;
 	bool ok = fwrite(&s, 1, sizeof(s), fp) == sizeof(s);
 	fclose(fp);
-	if (ok) DatArc_Commit(kSaveLeaf);
+	if (ok) { TrophySave(); DatArc_Commit(kSaveLeaf); }
 	return ok;
 }
 

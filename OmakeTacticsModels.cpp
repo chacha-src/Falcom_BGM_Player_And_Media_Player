@@ -847,12 +847,42 @@ void ActorFromChar(Actor& a, const Library& lib, const Renderer& r, const CharDa
 	if (a.body == B_ROGUE_HOOD) a.hair = 0;
 	if (c.hat && a.body == B_KNIGHT) a.hair = 0;
 	const ClassDef& cd = ClassInfo(c.cls);
-	AddWeapons(a, r, cd.weaponLook);
-	if (c.hat) {
+	const GearDef* gw = GearOf(c.reserved[6]);
+	const GearDef* ga = GearOf(c.reserved[7]);
+	auto gearMeshOk = [&](int m) { return m >= 0 && m < r.GearCount(); };
+	auto addGearMesh = [&](int mesh, int jointKind) {
+		if (!gearMeshOk(mesh) || a.nGear >= 4 || a.rig < 0) return;
+		int j = -1;
+		if (jointKind == 2) j = r.models[a.model].headJ;
+		else if (jointKind == 3) j = r.models[a.model].chestJ;
+		else j = r.rigs[a.rig].Find(jointKind == 1 ? "handslot.l" : "handslot.r");
+		if (j < 0 && jointKind == 3) j = r.rigs[a.rig].Find("chest");
+		if (j < 0 && jointKind == 2) j = r.rigs[a.rig].Find("head");
+		if (j < 0) return;
+		a.gearM[a.nGear] = mesh;
+		a.gearJ[a.nGear] = j;
+		a.nGear++;
+	};
+	auto addGearPiece = [&](const GearDef* g, int slot) {
+		if (!g) return;
+		const char* att = slot ? g->att1 : g->att0;
+		int mesh = slot ? g->mesh1 : g->mesh0;
+		int joint = slot ? g->joint1 : g->joint0;
+		if (att && att[0]) AddAtt(a, r, att);
+		else addGearMesh(mesh, joint);
+	};
+	bool customWep = gw && (gw->att0 || gw->att1 || gearMeshOk(gw->mesh0) || gearMeshOk(gw->mesh1));
+	if (customWep) { addGearPiece(gw, 0); addGearPiece(gw, 1); }
+	else AddWeapons(a, r, cd.weaponLook);
+	if (ga) { addGearPiece(ga, 0); addGearPiece(ga, 1); }
+	bool namedHead = ga && ga->att1 && (strstr(ga->att1, "Helmet") || strstr(ga->att1, "Hat") || strstr(ga->att1, "Crown"));
+	bool helm = namedHead || (ga && ga->joint1 == 2 && gearMeshOk(ga->mesh1));
+	bool capeOn = ga && ga->att1 && strstr(ga->att1, "Cape");
+	if (c.hat && !helm) {
 		static const char* const hats[B_COUNT] = { "Knight_Helmet", "Barbarian_Hat", "Mage_Hat", NULL, NULL };
 		if (hats[a.body]) AddAtt(a, r, hats[a.body]);
 	}
-	if (c.cape) {
+	if (c.cape && !capeOn) {
 		static const char* const capes[B_COUNT] = { "Knight_Cape", "Barbarian_Cape", "Mage_Cape", "Rogue_Cape", "Rogue_Cape" };
 		AddAtt(a, r, capes[a.body]);
 	}
@@ -1064,6 +1094,8 @@ void ActorDraw(Renderer& r, const Library& lib, Actor& a, const M4& world, const
 	da.hue = (a.proc || a.rig == 1) ? dp.hue : dp.hue + a.hue * .5f;
 	for (int i = 0; i < a.nAtt; i++)
 		r.DrawAttach(r.attaches[a.att[i]], a.pose, a.attJ[i], world, da);
+	for (int i = 0; i < a.nGear; i++) if (a.gearJ[i] >= 0 && a.gearJ[i] < a.pose.nJ)
+		r.DrawGear(a.gearM[i], MMul(a.pose.global[a.gearJ[i]], world), da);
 	if (!a.proc && a.hair > 0 && m.headJ >= 0) {
 		const GpuMesh& h = lib.hair[a.body][a.hair];
 		if (h.vb) {

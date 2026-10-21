@@ -1246,6 +1246,10 @@ void CCC_CaptionDisableHostGlass(HWND hWnd);
 // AcrylicCaption ホストの帯ガラスを再適用（WS_EX_LAYERED を剥がしてから）
 void CCC_CaptionEnsureHostAcrylic(HWND hWnd);
 void CCC_CaptionPaint(CDC& dc, HWND hDlg);
+// 帯だけ無効化。paint キャッシュも落とす（最小化復帰で画素が消えてもタイトルを描き直す）
+void CCC_InvalidateCaptionBar(HWND hDlg);
+// CCC_PostRefreshKids の保留フラグを外す。同期 Redraw をしない窓が使う
+void CCC_AckRefreshChildren(HWND hWnd);
 void CCC_NkBlitR(CDC* pDC, const CRect& rc);
 void CCC_NkBlitW(CDC* pDC, HWND hWnd);
 void CCC_CaptionPaintGdi(CDC& dc, HWND hDlg);

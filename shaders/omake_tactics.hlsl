@@ -263,9 +263,17 @@ float4 PSP(POut i) : SV_Target
 		a = max(s, saturate(1. - r * 2.2));
 	}
 	else if (shape < 3.5) a = saturate(1. - abs(q.y) * 1.2) * saturate(1. - abs(q.x));
-	else {
+	else if (shape < 4.5) {
 		float arc = saturate(1. - abs(r - 0.8) * 7.) * step(0, q.y) * saturate(q.y * 3.);
 		a = arc;
+	} else if (shape < 5.5) {
+		float tongue = saturate(1. - abs(q.x) * (1.4 + max(q.y, 0) * 2.2));
+		a = tongue * saturate(0.85 - q.y) * step(-1.0, q.y);
+	} else if (shape < 6.5) {
+		float jag = q.x - sin(q.y * 22.0) * 0.28;
+		a = saturate(1. - abs(jag) * 7.) * saturate(1. - abs(q.y));
+	} else {
+		a = saturate(1. - (abs(q.x) + abs(q.y)) * 1.2);
 	}
 	return float4(i.c.rgb * a * i.c.a, a * i.c.a);
 }

@@ -544,6 +544,9 @@ BEGIN_MESSAGE_MAP(CEqualizer, CCustomBlurDialogExBase)
 	ON_WM_DESTROY()
 	ON_WM_CLOSE()
 	ON_WM_SIZE()
+	ON_WM_ACTIVATE()
+	ON_WM_ACTIVATEAPP()
+	ON_MESSAGE(CCC_MSG_REFRESH_CHILDREN, OnRefreshChildren)
 	ON_MESSAGE(WM_EQ_KEY_UPDATE, OnEqKeyUpdate)
 	ON_MESSAGE(WM_UITICK_VSYNC, OnUiTick)
 	ON_BN_CLICKED(IDOK3, OnBnClickedOk3)
@@ -1343,6 +1346,41 @@ void CEqualizer::OnSize(UINT nType, int cx, int cy)
 		LayoutHelpBtn();
 		LayoutToneColumns();
 	}
+}
+
+static void EqInvalidateChildren(HWND hWnd)
+{
+	if (!hWnd || !::IsWindow(hWnd))
+		return;
+	for (HWND h = ::GetWindow(hWnd, GW_CHILD); h; h = ::GetWindow(h, GW_HWNDNEXT)) {
+		if (::IsWindowVisible(h))
+			::InvalidateRect(h, NULL, FALSE);
+	}
+}
+
+void CEqualizer::OnActivate(UINT nState, CWnd* pWndOther, BOOL bMinimized)
+{
+	// 基底は RedrawWindow(ERASE|ALLCHILDREN) と子の UPDATENOW を行う。
+	// 帯を消したあとキャプション描画と入れ子になり、タイトルが空欄になるか落ちる。
+	UNREFERENCED_PARAMETER(nState);
+	UNREFERENCED_PARAMETER(pWndOther);
+	if (!bMinimized)
+		CCC_InvalidateCaptionBar(m_hWnd);
+}
+
+void CEqualizer::OnActivateApp(BOOL bActive, DWORD dwThreadID)
+{
+	UNREFERENCED_PARAMETER(bActive);
+	UNREFERENCED_PARAMETER(dwThreadID);
+	CCC_InvalidateCaptionBar(m_hWnd);
+}
+
+LRESULT CEqualizer::OnRefreshChildren(WPARAM, LPARAM)
+{
+	CCC_AckRefreshChildren(m_hWnd);
+	CCC_InvalidateCaptionBar(m_hWnd);
+	EqInvalidateChildren(m_hWnd);
+	return 0;
 }
 
 void CEqualizer::LayoutHelpBtn()

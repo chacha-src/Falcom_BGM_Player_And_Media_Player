@@ -2310,6 +2310,7 @@
 #define IDR_CSO_TAC_PSSKY               4881
 #define IDR_TAC_SFX                     4882
 #define IDR_TAC_MON                     4883
+#define IDR_TAC_GEAR                    4884
 #define ID_MP_OMAKETACTICS              33770
 #define IDD_SASAMI_AUTO_ARRANGE         4900
 #define IDC_SAA_STYLE                   4901

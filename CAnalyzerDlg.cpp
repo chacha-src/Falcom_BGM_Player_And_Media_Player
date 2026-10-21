@@ -854,6 +854,9 @@ BEGIN_MESSAGE_MAP(CAnalyzerDlg, CCustomBlurDialogExBase)
 	ON_WM_CLOSE()
 	ON_WM_DESTROY()
 	ON_WM_SHOWWINDOW()
+	ON_WM_ACTIVATE()
+	ON_WM_ACTIVATEAPP()
+	ON_MESSAGE(CCC_MSG_REFRESH_CHILDREN, OnRefreshChildren)
 	ON_WM_ERASEBKGND()
 	ON_WM_CONTEXTMENU()
 	ON_BN_CLICKED(IDC_AN_HELP, OnBnClickedHelp)
@@ -5081,6 +5084,16 @@ void CAnalyzerDlg::PresentSoft3DBot(CDC& dc, const CRect& pane)
 
 void CAnalyzerDlg::OnPaint()
 {
+	if (::GetProp(m_hWnd, _T("CCC_INPAINT"))) {
+		ValidateRect(NULL);
+		InterlockedExchange(&m_presentPosted, 0);
+		return;
+	}
+	::SetProp(m_hWnd, _T("CCC_INPAINT"), (HANDLE)1);
+	struct InPaintGuard {
+		HWND h;
+		~InPaintGuard() { if (h) ::RemoveProp(h, _T("CCC_INPAINT")); }
+	} inPaintGuard{ m_hWnd };
 	CPaintDC dc(this);
 	CRect rcFull;
 	GetClientRect(&rcFull);
@@ -5428,9 +5441,41 @@ void CAnalyzerDlg::OnSize(UINT nType, int cx, int cy)
 			CCC_InvalidateRectMinusOverlay(m_hWnd, cr);
 	}
 }
+void CAnalyzerDlg::OnActivate(UINT nState, CWnd* pWndOther, BOOL bMinimized)
+{
+	// 基底の全面 ERASE + 子 UPDATENOW は専用 UI スレッドの OnPaint と入れ子になり落ちる。
+	// 最小化復帰で捨てられた帯は、帯だけ無効化して描き直す。
+	UNREFERENCED_PARAMETER(nState);
+	UNREFERENCED_PARAMETER(pWndOther);
+	if (!bMinimized)
+		CCC_InvalidateCaptionBar(m_hWnd);
+}
+
+void CAnalyzerDlg::OnActivateApp(BOOL bActive, DWORD dwThreadID)
+{
+	UNREFERENCED_PARAMETER(bActive);
+	UNREFERENCED_PARAMETER(dwThreadID);
+	CCC_InvalidateCaptionBar(m_hWnd);
+}
+
+LRESULT CAnalyzerDlg::OnRefreshChildren(WPARAM, LPARAM)
+{
+	CCC_AckRefreshChildren(m_hWnd);
+	CCC_InvalidateCaptionBar(m_hWnd);
+	if (::IsWindow(m_hWnd)) {
+		for (HWND h = ::GetWindow(m_hWnd, GW_CHILD); h; h = ::GetWindow(h, GW_HWNDNEXT)) {
+			if (::IsWindowVisible(h))
+				::InvalidateRect(h, NULL, FALSE);
+		}
+	}
+	return 0;
+}
+
 void CAnalyzerDlg::OnShowWindow(BOOL bShow, UINT nStatus)
 {
 	CCustomBlurDialogExBase::OnShowWindow(bShow, nStatus);
+	if (bShow)
+		CCC_InvalidateCaptionBar(m_hWnd);
 #if CCUSTOM_AERO_SUPPORT
 	// 基底側で Apply/Refresh 済み。ここでは内容再描画のみ。
 	if (bShow && CCC_IsAeroEnabled())

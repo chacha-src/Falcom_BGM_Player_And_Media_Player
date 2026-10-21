@@ -88,7 +88,7 @@ struct Rng {
 // ---------------- 地形 ----------------
 enum Terrain {
 	T_PLAIN, T_FOREST, T_HILL, T_MOUNTAIN, T_WATER, T_CHASM, T_LAVA,
-	T_SAND, T_SNOW, T_SWAMP, T_ROAD, T_BRIDGE, T_RUINS, T_ROCK, T_DOOR, T_COUNT
+	T_SAND, T_SNOW, T_SWAMP, T_ROAD, T_BRIDGE, T_RUINS, T_ROCK, T_DOOR, T_VOID, T_COUNT
 };
 struct TerrainDef {
 	int nameTx;
@@ -194,7 +194,8 @@ int PromoteLevel(int tier);
 int ExpToNext(int lv);
 int NextPromoteClass(int cls);
 bool IsUltimateSkill(int skill);
-enum { IT_ORE = 0, IT_HERB, IT_CRYSTAL, IT_SHARD, IT_ELIXIR, IT_MIGHT, IT_DELAY, IT_COUNT = 7 };
+enum { IT_ORE = 0, IT_HERB, IT_CRYSTAL, IT_SHARD, IT_ELIXIR, IT_MIGHT, IT_DELAY, IT_COUNT = 7, IT_RAISE = 7 };
+enum { IX_FULL = 0, IX_ATK, IX_DEF, IX_AGI, IX_SLOW, IX_VENOM, IX_CURE, IX_ETHER, IX_N };
 
 enum SkillKind { SK_PHYS, SK_MAGIC, SK_HEAL, SK_BUFF, SK_PASSIVE };
 enum Element { EL_NONE, EL_FIRE, EL_ICE, EL_THUNDER, EL_HOLY, EL_DARK, EL_WIND, EL_EARTH, EL_POISON };
@@ -209,7 +210,9 @@ enum SkillId {
 	SKL_CLEAVE, SKL_SNIPE, SKL_VENOMEDGE, SKL_SANCTUARY, SKL_SMITE, SKL_GRAVITY, SKL_WARCRY,
 	SKL_RENEW, SKL_MIRROR, SKL_GODSLASH, SKL_RUIN, SKL_APOC, SKL_TRANSMUTE,
 	SKL_ART0,
-	SKL_COUNT = SKL_ART0 + 104
+	SKL_ARTN = SKL_ART0 + 104,
+	SKL_RAISE,
+	SKL_COUNT
 };
 struct SkillDef {
 	int nameTx, descTx;
@@ -224,7 +227,7 @@ struct SkillDef {
 	int effect;      // 追加効果
 	int enemyOnly;
 };
-enum SkillEffect { EF_NONE, EF_SLOW, EF_DEFDOWN, EF_POISON, EF_DRAIN, EF_IGNDEF, EF_BUFF_DEF, EF_BUFF_AGI, EF_BUFF_ATK, EF_REACT };
+enum SkillEffect { EF_NONE, EF_SLOW, EF_DEFDOWN, EF_POISON, EF_DRAIN, EF_IGNDEF, EF_BUFF_DEF, EF_BUFF_AGI, EF_BUFF_ATK, EF_REACT, EF_RAISE };
 const SkillDef& SkillInfo(int s);
 
 // ---------------- キャラクタ（セーブ対象） ----------------
@@ -438,12 +441,53 @@ struct SaveData {
 	int bgmVol;                // 0..10。optInit が 0 の旧セーブは読込時に既定
 	int seVol;
 	int optInit;               // 1=音量を初期化済み
-	int reserved[18];
+	int gold;
+	int gearN;
+	int gearId[12];            // 所持武具。0 は空。番号は Gear 表の 1 始まり
+	int reserved[4];
 };
 #pragma pack(pop)
 void SaveDefaults(SaveData& s);
 bool SaveLoad(SaveData& s);
 bool SaveWrite(const SaveData& s);
+
+enum { GEAR_STASH = 12 };
+struct GearDef {
+	int line;     // 0剣 1斧 2弓 3短 4杖 5聖
+	int kind;     // 0=武器 1=防具
+	int price;
+	int str, mag, def, res;
+	int stage;
+	int mesh0, mesh1;
+	int joint0, joint1;
+	const char* att0;
+	const char* att1;
+};
+int GearCount();
+const GearDef* GearOf(int id);
+const wchar_t* GearName(int id);
+int ClassLine(int cls);
+int ItemExtraGet(const SaveData& s, int i);
+void ItemExtraAdd(SaveData& s, int i, int d);
+int ConsumableCount(const SaveData& s);
+bool StashAdd(SaveData& s, int id);
+void StashRemoveAt(SaveData& s, int index);
+bool GearBuy(SaveData& s, int index);
+bool GearSellAt(SaveData& s, int index);
+void GearEquip(CharData& c, SaveData& s, int stashIndex);
+int GearTryDrop(SaveData& s, int stage, int monster, Rng& r);
+int MonsterDropLine(int monster);
+bool DropConsumable(SaveData& s, int monster, Rng& r);
+int DropTrophy(int monster, int boss, Rng& r, wchar_t* name, int nameN, int* goldOut);
+int TrophyList(int* slots, int max);
+bool TrophySell(SaveData& s, int slot);
+void TrophyNameOf(int slot, wchar_t* name, int nameN, int* count, int* price);
+struct GoodDef { int price; int item; int extra; int nameTx; int self; };
+int GoodCount();
+const GoodDef* GoodAt(int i);
+int GoodHave(const SaveData& s, int i);
+bool GoodBuy(SaveData& s, int i);
+bool GoodTake(SaveData& s, int i);
 
 void RandomName(wchar_t* out, int gender, Rng& r);
 

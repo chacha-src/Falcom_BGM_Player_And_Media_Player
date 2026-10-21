@@ -6617,11 +6617,30 @@ static HBRUSH CCC_LiveBrush(int slot, COLORREF c)
     return s[slot].h;
 }
 
+static BOOL CCC_CaptionHostSkipsSyncRefresh(HWND hwnd)
+{
+    CWnd* pw = CWnd::FromHandlePermanent(hwnd);
+    if (!pw)
+        return FALSE;
+    const CRuntimeClass* rc = pw->GetRuntimeClass();
+    if (!rc || !rc->m_lpszClassName)
+        return FALSE;
+    // 同期 ERASE+UPDATENOW は OnPaint と入れ子になり、帯の画素も消したままキャッシュで描き戻さない。
+    return strcmp(rc->m_lpszClassName, "CEqualizer") == 0
+        || strcmp(rc->m_lpszClassName, "CAnalyzerDlg") == 0
+        || strcmp(rc->m_lpszClassName, "CPianoRoll") == 0;
+}
+
 static BOOL CALLBACK CCC_RefreshThemedEnum(HWND hwnd, LPARAM pid)
 {
     DWORD wpid = 0;
-    ::GetWindowThreadProcessId(hwnd, &wpid);
+    const DWORD tid = ::GetWindowThreadProcessId(hwnd, &wpid);
     if (wpid != (DWORD)pid || !::IsWindowVisible(hwnd)) return TRUE;
+    // 他スレッドへ ERASE/UPDATENOW を送るとアナライザ専用 UI と相互 Send で固まる。
+    if (tid != ::GetCurrentThreadId() || CCC_CaptionHostSkipsSyncRefresh(hwnd)) {
+        ::RedrawWindow(hwnd, NULL, NULL, RDW_INVALIDATE | RDW_ALLCHILDREN | RDW_NOERASE);
+        return TRUE;
+    }
     ::RedrawWindow(hwnd, NULL, NULL, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_FRAME);
     CCC_RefreshKids(hwnd);
     return TRUE;
@@ -20214,6 +20233,12 @@ void CCC_PostRefreshKids(HWND hWnd)
         ::RemoveProp(hWnd, CCC_RefreshKidsPropName());
 }
 
+void CCC_AckRefreshChildren(HWND hWnd)
+{
+    if (hWnd)
+        ::RemoveProp(hWnd, CCC_RefreshKidsPropName());
+}
+
 void CCC_InvalidateKidsIfHostFullPaint(CWnd* pWnd)
 {
     if (!pWnd || !pWnd->m_hWnd)
@@ -21494,6 +21519,50 @@ static int CCC_CaptionTitleIconSize(int barH)
 	return isz;
 }
 
+static CRITICAL_SECTION g_capDibCs;
+static INIT_ONCE g_capDibOnce = INIT_ONCE_STATIC_INIT;
+static BOOL CALLBACK CCC_CapDibCsInit(PINIT_ONCE, PVOID, PVOID*)
+{
+    ::InitializeCriticalSection(&g_capDibCs);
+    return TRUE;
+}
+struct CCC_CapDibLock {
+    CCC_CapDibLock()
+    {
+        ::InitOnceExecuteOnce(&g_capDibOnce, CCC_CapDibCsInit, NULL, NULL);
+        ::EnterCriticalSection(&g_capDibCs);
+    }
+    ~CCC_CapDibLock() { ::LeaveCriticalSection(&g_capDibCs); }
+};
+
+void CCC_InvalidateCaptionBar(HWND hDlg)
+{
+    if (!hDlg || !::IsWindow(hDlg))
+        return;
+    CCC_CaptionEntry* e = CCC_FindCaption(hDlg);
+    if (e)
+        e->paintValid = FALSE;
+    const int capH = e && e->height > 0 ? e->height : CCC_GetCustomCaptionHeight(hDlg);
+    if (capH <= 0)
+        return;
+    RECT cr = {};
+    ::GetClientRect(hDlg, &cr);
+    if (cr.bottom > capH)
+        cr.bottom = capH;
+    if (cr.right > cr.left && cr.bottom > cr.top)
+        ::InvalidateRect(hDlg, &cr, FALSE);
+    for (HWND h = ::GetWindow(hDlg, GW_CHILD); h; h = ::GetWindow(h, GW_HWNDNEXT)) {
+        if (!::IsWindowVisible(h))
+            continue;
+        RECT wr = {};
+        if (!::GetWindowRect(h, &wr))
+            continue;
+        ::MapWindowPoints(NULL, hDlg, reinterpret_cast<POINT*>(&wr), 2);
+        if (wr.top < capH)
+            ::InvalidateRect(h, NULL, FALSE);
+    }
+}
+
 // カスタム帯。本文だけの再描画（60fps）では帯クリップ外なら触らない。
 // アクリル帯は ClearRect(α=0)+タイトル。EnsureBackdrop は毎フレーム呼ばない。
 // ClearRect はボタン画素も消すので最後に ChromeNow で載せ直す。
@@ -21532,22 +21601,9 @@ void CCC_CaptionPaint(CDC& dc, HWND hDlg)
     CCC_CaptionGetTitleRight(hDlg, e, titleRight);
     const BOOL hadIcon = hIcon ? TRUE : FALSE;
 
-    // 本文込みの再描画（ピアノ/MP/アナライザの60fps）では帯の見た目が同じなら触らない。
-    // 帯だけの Invalidate（活性切替・タイトル変更）は clip が帯内なので描く。
-    BOOL clipBody = TRUE;
-    {
-        CRect clip;
-        if (dc.GetClipBox(&clip) != ERROR && !clip.IsRectEmpty()) {
-            if (clip.bottom <= bar.bottom + 1)
-                clipBody = FALSE;
-        }
-    }
-    if (clipBody && e->paintValid
-        && e->paintW == bar.Width() && e->paintH == bar.Height()
-        && e->paintActive == active && e->paintHadIcon == hadIcon
-        && e->paintTitleRight == titleRight
-        && wcscmp(e->paintTitle, title) == 0)
-        return;
+    // 帯に掛かるクリップは必ず描く。最小化や全面消去で画素が消えても
+    // タイトル文字列が同じだとキャッシュを信じて空欄のままになる。
+    // 60fps の本文更新は上で帯の外なら return している。
 
 #if CCUSTOM_AERO_SUPPORT
     if (bAcrylicCap) {
@@ -21559,8 +21615,13 @@ void CCC_CaptionPaint(CDC& dc, HWND hDlg)
 
         const int w = bar.Width();
         const int h = bar.Height();
-        static CCC_ChromaBlitCache s_capDib;
-        if (s_capDib.Ensure(dc.GetSafeHdc(), w, h) && s_capDib.pBits && s_capDib.hdcDib) {
+        BOOL drewDib = FALSE;
+        {
+            // メイン UI とアナライザ専用 UI が同時に帯を描く。共有 DIB を排他する。
+            // ChromeNow は子の UPDATENOW を含むのでロックの外で行う。
+            CCC_CapDibLock dibLock;
+            static CCC_ChromaBlitCache s_capDib;
+            if (s_capDib.Ensure(dc.GetSafeHdc(), w, h) && s_capDib.pBits && s_capDib.hdcDib) {
             ::ZeroMemory(s_capDib.pBits, static_cast<size_t>(w) * static_cast<size_t>(h) * 4u);
             HDC hdcMem = s_capDib.hdcDib;
 
@@ -21611,8 +21672,12 @@ void CCC_CaptionPaint(CDC& dc, HWND hDlg)
                     ::BitBlt(dc.GetSafeHdc(), 0, 0, w, h, hdcMem, 0, 0, SRCCOPY);
                 }
             }
-            CCC_ClearLockPlateOnCaption(hDlg, dc.GetSafeHdc());
-            CCC_CaptionPaintChromeNow(hDlg);
+            drewDib = TRUE;
+            }
+        }
+        CCC_ClearLockPlateOnCaption(hDlg, dc.GetSafeHdc());
+        CCC_CaptionPaintChromeNow(hDlg);
+        if (drewDib) {
             e->paintValid = TRUE;
             e->paintActive = active;
             e->paintHadIcon = hadIcon;
@@ -21624,10 +21689,6 @@ void CCC_CaptionPaint(CDC& dc, HWND hDlg)
                 if (!title[ti]) break;
             }
             e->paintTitle[511] = 0;
-        }
-        else {
-            CCC_ClearLockPlateOnCaption(hDlg, dc.GetSafeHdc());
-            CCC_CaptionPaintChromeNow(hDlg);
         }
         return;
     }
@@ -25191,6 +25252,16 @@ void CCustomBlurDialogExBase::OnPaint()
         CCC_PostRefreshKids(m_hWnd);
         return;
     }
+    // 子の RDW_UPDATENOW から同じ窓の OnPaint に戻ると溢れる。入れ子は捨てる。
+    if (::GetProp(m_hWnd, _T("CCC_INPAINT"))) {
+        ValidateRect(NULL);
+        return;
+    }
+    ::SetProp(m_hWnd, _T("CCC_INPAINT"), (HANDLE)1);
+    struct InPaintGuard {
+        HWND h;
+        ~InPaintGuard() { if (h) ::RemoveProp(h, _T("CCC_INPAINT")); }
+    } inPaintGuard{ m_hWnd };
     CCC_InvalidateKidsIfHostFullPaint(this);
     CPaintDC dc(this);
 #if CCUSTOM_AERO_SUPPORT
