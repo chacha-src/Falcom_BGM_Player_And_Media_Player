@@ -30,3 +30,4 @@ void TacAudioStart(void* hwnd);
 void TacAudioStop();
 void TacAudioPump();
 void TacSfx(int id);
+void TacAudioSetVol(int bgm, int se);

@@ -890,12 +890,27 @@ void ActorFromMonster(Actor& a, const Library& lib, const Renderer& r, int monst
 	DWORD t = md.tint;
 	a.tint = RGBA8((t >> 16) & 255, (t >> 8) & 255, t & 255);
 	float bs = boss ? 1.15f : 1.f;
+	if (md.look == LK_MESH) {
+		a.proc = 2;
+		a.model = md.model;
+		a.rig = -1;
+		a.scale = md.scale * bs;
+		a.height = 1.7f * a.scale;
+		a.hover = md.moveType == MV_FLY ? .4f : 0;
+		return;
+	}
 	if (md.look == LK_KAYKIT) {
 		int mi = md.model;
+		int body = -1;
+		if (mi >= 100 && mi < 104) mi = lib.skelModel[mi - 100];
+		else if (mi >= 104 && mi < 104 + B_COUNT) { body = mi - 104; mi = lib.bodyModel[body]; }
 		a.model = (mi >= 0 && mi < (int)r.models.size()) ? mi : lib.skelModel[1];
 		a.rig = r.models[a.model].rig;
 		a.scale = .43f * md.scale * bs;
-		switch (md.weaponLook) {
+		if (body >= 0) {
+			AddWeapons(a, r, md.weaponLook);
+			if (md.moveType == MV_FLY) { a.wings = 1; a.hover = .35f; }
+		} else switch (md.weaponLook) {
 		case 1: AddAtt(a, r, "Skeleton_Blade"); break;
 		case 2: AddAtt(a, r, "Skeleton_Axe"); AddAtt(a, r, "Skeleton_Shield_Small_A"); break;
 		case 3: AddAtt(a, r, "Skeleton_Crossbow"); AddAtt(a, r, "Skeleton_Rogue_Hood"); AddAtt(a, r, "Skeleton_Rogue_Cape"); break;
@@ -948,6 +963,7 @@ BOOL ActorClipDone(const Actor& a, const Library& lib, const Renderer& r)
 void ActorPose(Actor& a, const Library& lib, const Renderer& r)
 {
 	a.poseValid = 0;
+	if (a.proc == 2) { a.poseValid = 1; return; }
 	if (a.model < 0 || a.model >= (int)r.models.size()) return;
 	const Model& m = r.models[a.model];
 	a.modelPtr = &m;
@@ -1023,6 +1039,14 @@ int CastClipFor(int kind)
 
 void ActorDraw(Renderer& r, const Library& lib, Actor& a, const M4& world, const DrawParams& dp, float time)
 {
+	if (a.proc == 2) {
+		float bob = sinf(time * 2.2f) * (a.hover > 0.f ? .08f : .03f);
+		M4 w = MMul(MTrans(0, bob, 0), world);
+		DrawParams d = dp;
+		d.tint = dp.tint;
+		r.DrawCreature(a.model, w, d);
+		return;
+	}
 	if (a.model < 0 || a.model >= (int)r.models.size()) return;
 	if (!a.poseValid) ActorPose(a, lib, r);
 	if (!a.poseValid) return;

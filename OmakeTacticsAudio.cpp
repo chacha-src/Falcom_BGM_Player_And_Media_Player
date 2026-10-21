@@ -55,6 +55,29 @@ static float s_bFrac;
 static int s_bPrimed;
 static int s_pausedMain;
 static DWORD s_cursorAt;
+static int s_bgmPct = 6;
+static int s_sePct = 8;
+
+static int SeDb(int pct)
+{
+	if (pct <= 0) return -10000;
+	if (pct >= 10) return 0;
+	int db = (int)(4000.f * log10f(pct / 10.f));
+	if (db < -10000) db = -10000;
+	return db;
+}
+
+void TacAudioSetVol(int bgm, int se)
+{
+	if (bgm < 0) bgm = 0;
+	if (bgm > 10) bgm = 10;
+	if (se < 0) se = 0;
+	if (se > 10) se = 10;
+	s_bgmPct = bgm;
+	s_sePct = se;
+	int db = SeDb(se);
+	for (int i = 0; i < TAC_VOICES; i++) if (s_voice[i].buf) s_voice[i].buf->SetVolume(db);
+}
 
 static const float kGain[TS_N] = {
 	0.28f, 0.42f, 0.40f, 0.45f, 0.40f,
@@ -392,7 +415,7 @@ static void TacMix(short* dst, int frames)
 {
 	for (int i = 0; i < frames * 2; i++) dst[i] = 0;
 	if (s_bgm) {
-		const float g = 0.42f;
+		const float g = 0.07f * (float)s_bgmPct;
 		short holdL = 0, holdR = 0;
 		for (int f = 0; f < frames; f++) {
 			short L = holdL, R = holdR;
@@ -455,7 +478,7 @@ static int TacSfxBuf(TacVoice& v, int frames)
 	d.dwBufferBytes = bytes;
 	d.lpwfxFormat = &wfx;
 	if (FAILED(s_ds->CreateSoundBuffer(&d, &v.buf, NULL)) || !v.buf) return 0;
-	v.buf->SetVolume(-400);
+	v.buf->SetVolume(SeDb(s_sePct));
 	v.frames = frames;
 	return 1;
 }

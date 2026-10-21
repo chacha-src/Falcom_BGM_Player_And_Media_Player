@@ -269,7 +269,7 @@ enum MonsterId {
 	M_SLIME, M_SKEL_MINION, M_SKEL_WARRIOR, M_SKEL_ARCHER, M_BAT, M_LICH, M_POISON_SLIME,
 	M_GOLEM, M_WYVERN, M_DARK_KNIGHT, M_DRAGON, M_COUNT
 };
-enum Look { LK_KAYKIT, LK_SLIME, LK_BAT, LK_WYVERN, LK_GOLEM };
+enum Look { LK_KAYKIT, LK_SLIME, LK_BAT, LK_WYVERN, LK_GOLEM, LK_MESH };
 struct MonsterDef {
 	int nameTx;
 	int look;          // Look
@@ -284,8 +284,11 @@ struct MonsterDef {
 	int weight;
 	float scale;
 	DWORD tint;        // 0x00RRGGBB 乗算
+	int maxStage;      // 0=上限なし。これを超えたステージには出さない
+	int nameB;         // 0未満なら nameTx だけ。0以上なら「形容 + 種族」
 };
 const MonsterDef& MonsterInfo(int m);
+const wchar_t* MonsterLabel(int m);
 
 // ---------------- 戦闘中ユニット ----------------
 enum Team { TEAM_PLAYER, TEAM_ENEMY };
@@ -432,7 +435,10 @@ struct SaveData {
 	DWORD uidNext;
 	int winSizeVer;            // 2 未満なら保存サイズを使わず既定サイズで開く
 	int itemN[8];              // 旧 reserved の先頭。鉱石・薬草・結晶・欠片・回復薬・剛力薬・遅延弾
-	int reserved[21];
+	int bgmVol;                // 0..10。optInit が 0 の旧セーブは読込時に既定
+	int seVol;
+	int optInit;               // 1=音量を初期化済み
+	int reserved[18];
 };
 #pragma pack(pop)
 void SaveDefaults(SaveData& s);

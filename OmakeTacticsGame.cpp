@@ -13,6 +13,8 @@ enum {
 	ID_BASE_SORTIE = 100, ID_BASE_CREATE, ID_BASE_PARTY, ID_BASE_EVOLVE, ID_BASE_CLOSE, ID_BASE_STAGE, ID_BASE_QUALITY, ID_BASE_ANIM, ID_BASE_CODEX,
 	ID_CDX_PREV = 180, ID_CDX_NEXT, ID_CDX_GROW, ID_CDX_ALCH, ID_CDX_SKILL, ID_CDX_REC0,
 	ID_BASE_GRID, ID_BASE_HELP, ID_BASE_SLOT0 = 120,
+	ID_SORTIE_START = 160, ID_SORTIE_MID, ID_SORTIE_AUTO, ID_SORTIE_CANCEL,
+	ID_OPT_BGM = 190, ID_OPT_SE, ID_OPT_CAM,
 	ID_CR_NAME = 200, ID_CR_RANDOM, ID_CR_GENDER, ID_CR_LINEAGE, ID_CR_CLASS, ID_CR_BODY, ID_CR_HAIR, ID_CR_HAIRCOL, ID_CR_OUTFIT,
 	ID_CR_HAT, ID_CR_CAPE, ID_CR_OK, ID_CR_BACK,
 	ID_PT_CARD0 = 300, ID_PT_DEPLOY = 340, ID_PT_EDIT, ID_PT_DELETE, ID_PT_YES, ID_PT_NO, ID_PT_BACK, ID_PT_NEW,
@@ -81,6 +83,11 @@ Game::Game()
 	m_codex = 0;
 	m_codexPage = 0;
 	m_skillPage = 0;
+	m_sortieAsk = 0;
+	m_midStage = 0;
+	m_autoStage = 0;
+	for (int i = 0; i < Renderer::PORTRAIT_N; i++) m_ptSlotUnit[i] = -1;
+	for (int i = 0; i < MAX_UNITS; i++) m_ptForUnit[i] = -1;
 	m_ult = FALSE;
 	m_confirmDelete = 0;
 	m_camTarget = m_camGoal = v3(32, 0, 32);
@@ -147,6 +154,7 @@ BOOL Game::Init(HWND view, int w, int h)
 	m_hwnd = view;
 	m_w = max(8, w); m_h = max(8, h);
 	SaveLoad(m_save);
+	ApplyAudio();
 	m_rng = Rng(GetTickCount() ^ 0x5EED1234u);
 	m_screen = SC_LOADING;
 	m_loadFrames = 0;
@@ -165,6 +173,7 @@ BOOL Game::LoadEverything()
 
 void Game::Shutdown()
 {
+	WaitSuspend();
 	ReleaseLibrary(m_lib);
 	m_r.Release();
 	m_loaded = FALSE;
@@ -210,6 +219,34 @@ void Game::Persist()
 	SaveWrite(m_save);
 }
 
+void Game::ApplyAudio()
+{
+	TacAudioSetVol(m_save.bgmVol, m_save.seVol);
+}
+
+float Game::DrawSoundOpts(float x, float y, float w)
+{
+	wchar_t v[16];
+	swprintf_s(v, L"%d", m_save.bgmVol * 10);
+	if (int d = Sel(ID_OPT_BGM, x, y, w, U(32), TT(TX_SET_BGM), v)) {
+		m_save.bgmVol = Clampi(m_save.bgmVol + d, 0, 10);
+		ApplyAudio();
+	}
+	y += U(34);
+	swprintf_s(v, L"%d", m_save.seVol * 10);
+	if (int d = Sel(ID_OPT_SE, x, y, w, U(32), TT(TX_SET_SE), v)) {
+		m_save.seVol = Clampi(m_save.seVol + d, 0, 10);
+		ApplyAudio();
+		TacSfx(TS_CONFIRM);
+	}
+	y += U(34);
+	static const int camTx[3] = { TX_SET_SLOW, TX_SET_Q_STD, TX_SET_FAST };
+	int c = Clampi(m_save.camSpeed, 0, 2);
+	if (int d = Sel(ID_OPT_CAM, x, y, w, U(32), TT(TX_SET_CAM), TT(camTx[c])))
+		m_save.camSpeed = (c + d + 3) % 3;
+	return y + U(34);
+}
+
 int Game::PartyCount() const
 {
 	int n = 0;
@@ -228,7 +265,12 @@ const wchar_t* Game::ClassName(int cls) const { return TT(ClassInfo(cls).nameTx)
 void Game::UnitTitle(const Unit& u, wchar_t* out, int n) const
 {
 	if (u.team == TEAM_PLAYER) swprintf_s(out, n, L"%s", u.ch.name);
-	else swprintf_s(out, n, L"%s%s", u.boss ? L"★" : L"", TT(MonsterInfo(u.monster).nameTx));
+	else {
+		const MonsterDef& md = MonsterInfo(u.monster);
+		if (md.look == LK_MESH) swprintf_s(out, n, L"%s%s", u.boss ? L"★" : L"", MonsterLabel(u.monster));
+		else if (md.nameB >= 0) swprintf_s(out, n, L"%s%s %s", u.boss ? L"★" : L"", TT(md.nameTx), TT(md.nameB));
+		else swprintf_s(out, n, L"%s%s", u.boss ? L"★" : L"", TT(md.nameTx));
+	}
 }
 
 // ============================================================ メインループ
@@ -275,6 +317,7 @@ void Game::RenderFrame()
 	m_lastRenderTime = m_time;
 	if (m_screen == SC_BATTLE && m_fastFwd) m_renderDt *= 2.f;
 	m_r.BeginFrame();
+	if (m_screen == SC_BATTLE) AssignBattlePortraits();
 	if (m_loaded) RenderPortraits();
 	switch (m_screen) {
 	case SC_BASE: case SC_PARTY: case SC_EVOLVE: case SC_RESULT:
@@ -790,7 +833,7 @@ void Game::RenderActorPortrait(int slot, Actor& a, DWORD bg0, DWORD bg1)
 
 void Game::RenderPortraits()
 {
-	int budget = 3;
+	int budget = 8;
 	for (int s = 0; s < Renderer::PORTRAIT_N && budget > 0; s++) {
 		int want = m_portraitWant[s];
 		if (want == m_portraitKey[s]) continue;
@@ -949,6 +992,8 @@ void Game::EnterBase()
 	m_screen = SC_BASE;
 	m_focusId = ID_BASE_SORTIE;
 	m_confirmDelete = 0;
+	m_sortieAsk = 0;
+	ProbeSuspend();
 	for (int i = 0; i < Renderer::PORTRAIT_N; i++) m_portraitWant[i] = (i < MAX_ROSTER) ? i + 1 : 0;
 	InvalidatePortraits();
 	BuildShowcase();
@@ -1136,7 +1181,12 @@ void Game::DrawBaseUi()
 	m_r.HudText(cl, bx + U(4), by + U(8), U(14), RGBA8(200, 200, 210), 0, 0);
 	by += U(28);
 	int np = PartyCount();
-	if (Btn(ID_BASE_SORTIE, bx, by, bw, bh + U(8), TT(TX_BASE_SORTIE), np > 0, FALSE, U(22), RGBA8(170, 60, 50, 240))) { StartBattle(m_save.stageSel); return; }
+	if (Btn(ID_BASE_SORTIE, bx, by, bw, bh + U(8), TT(TX_BASE_SORTIE), np > 0, FALSE, U(22), RGBA8(170, 60, 50, 240))) {
+		ProbeSuspend();
+		if (m_midStage == m_save.stageSel || m_autoStage == m_save.stageSel) { m_sortieAsk = 1; return; }
+		StartBattle(m_save.stageSel);
+		return;
+	}
 	by += bh + U(18);
 	if (Btn(ID_BASE_PARTY, bx, by, bw, bh, TT(TX_BASE_PARTY), RosterCount() > 0)) { EnterParty(); return; }
 	by += bh + U(8);
@@ -1156,13 +1206,31 @@ void Game::DrawBaseUi()
 	if (Sel(ID_BASE_ANIM, bx, by, bw, U(36), TT(TX_SET_ANIM), TT(m_save.battleAnim ? TX_SET_ANIM_SHORT : TX_SET_ANIM_FULL))) m_save.battleAnim = !m_save.battleAnim;
 	by += U(40);
 	if (Sel(ID_BASE_GRID, bx, by, bw, U(36), TT(TX_SET_GRID), TT(m_save.showGrid ? TX_CR_ON : TX_CR_OFF))) m_save.showGrid = !m_save.showGrid;
-	by += U(48);
+	by += U(40);
+	by = DrawSoundOpts(bx, by, bw);
 	if (Btn(ID_BASE_HELP, bx, by, bw * .48f, bh, TT(TX_BT_HELP))) m_showHelp = TRUE;
 	if (Btn(ID_BASE_CLOSE, bx + bw * .52f, by, bw * .48f, bh, TT(TX_BASE_CLOSE))) { Persist(); m_wantClose = TRUE; }
 	// ヒント
 	const wchar_t* hint = NULL;
 	if (RosterCount() == 0) hint = TT(TX_BASE_HINT_NOCHAR);
 	else if (np == 0) hint = TT(TX_BASE_HINT_NOPARTY);
+	if (m_sortieAsk) {
+		m_r.HudRect(0, 0, (float)m_w, (float)m_h, RGBA8(0, 0, 0, 140));
+		float w = U(420), h = U(280);
+		float sx = (m_w - w) * .5f, sy = (m_h - h) * .5f;
+		Panel(sx, sy, w, h);
+		m_r.HudText(TT(TX_SV_PICK), sx + w * .5f, sy + U(36), U(22), RGBA8(255, 226, 150), 1, 1);
+		float bx2 = sx + U(40), bw2 = w - U(80), bh2 = U(42), yy = sy + U(64);
+		BOOL mid = m_midStage == m_save.stageSel;
+		BOOL aut = m_autoStage == m_save.stageSel;
+		if (Btn(ID_SORTIE_START, bx2, yy, bw2, bh2, TT(TX_SV_FROMSTART))) { m_sortieAsk = 0; StartBattle(m_save.stageSel); return; }
+		yy += bh2 + U(8);
+		if (Btn(ID_SORTIE_MID, bx2, yy, bw2, bh2, TT(TX_SV_FROMMID), mid)) { m_sortieAsk = 0; ResumeBattle(1); return; }
+		yy += bh2 + U(8);
+		if (Btn(ID_SORTIE_AUTO, bx2, yy, bw2, bh2, TT(TX_SV_FROMAUTO), aut)) { m_sortieAsk = 0; ResumeBattle(2); return; }
+		yy += bh2 + U(8);
+		if (Btn(ID_SORTIE_CANCEL, bx2, yy, bw2, bh2, TT(TX_CR_BACK))) m_sortieAsk = 0;
+	}
 	if (hint) {
 		float hw = m_r.TextWidth(hint, U(18), 1) + U(40);
 		float hx = x + pw + (m_w - x - pw - hw) * .5f;

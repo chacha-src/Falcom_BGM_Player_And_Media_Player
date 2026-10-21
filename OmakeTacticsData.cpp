@@ -1110,29 +1110,109 @@ const SkillDef& SkillInfo(int s)
 // name, look, model, wlook, move, jump, rMin, rMax, mag, pow, style, base, grow, skills, minStage, weight, scale, tint
 static const MonsterDef kMon[M_COUNT] = {
 	{ TX_MO_SLIME, LK_SLIME, -1, 0, MV_FOOT, 1, 1, 1, 0, 3, AS_BITE,
-	  { 22, 4, 6, 4, 0, 4, 3, 4, 2, 3 }, { 60, 5, 40, 40, 0, 30, 20, 30, 20, 0 }, { SKL_E_SPIT, -1, -1 }, 1, 10, 1.0f, 0x60E070 },
+	  { 22, 4, 6, 4, 0, 4, 3, 4, 2, 3 }, { 60, 5, 40, 40, 0, 30, 20, 30, 20, 0 }, { SKL_E_SPIT, -1, -1 }, 1, 10, 1.0f, 0x60E070, 16, -1 },
 	{ TX_MO_SKEL_MINION, LK_KAYKIT, 6, 1, MV_FOOT, 2, 1, 1, 0, 4, AS_SLASH,
-	  { 18, 0, 6, 3, 0, 1, 5, 5, 2, 4 }, { 45, 0, 45, 30, 0, 15, 35, 40, 20, 0 }, { -1, -1, -1 }, 1, 10, 1.0f, 0xFFFFFF },
+	  { 18, 0, 6, 3, 0, 1, 5, 5, 2, 4 }, { 45, 0, 45, 30, 0, 15, 35, 40, 20, 0 }, { -1, -1, -1 }, 1, 10, 1.0f, 0xFFFFFF, 18, -1 },
 	{ TX_MO_SKEL_WARRIOR, LK_KAYKIT, 5, 2, MV_FOOT, 2, 1, 1, 0, 6, AS_CHOP2,
-	  { 26, 6, 9, 7, 0, 2, 4, 6, 2, 4 }, { 55, 10, 55, 50, 0, 20, 30, 40, 20, 0 }, { SKL_E_CRUSH, -1, -1 }, 3, 8, 1.0f, 0xFFFFFF },
+	  { 26, 6, 9, 7, 0, 2, 4, 6, 2, 4 }, { 55, 10, 55, 50, 0, 20, 30, 40, 20, 0 }, { SKL_E_CRUSH, -1, -1 }, 3, 8, 1.0f, 0xFFFFFF, 24, -1 },
 	{ TX_MO_SKEL_ARCHER, LK_KAYKIT, 7, 3, MV_FOOT, 2, 2, 3, 0, 5, AS_SHOOT,
-	  { 18, 0, 7, 3, 0, 3, 6, 8, 3, 4 }, { 40, 0, 45, 25, 0, 20, 40, 55, 25, 0 }, { -1, -1, -1 }, 4, 7, 1.0f, 0xFFFFFF },
+	  { 18, 0, 7, 3, 0, 3, 6, 8, 3, 4 }, { 40, 0, 45, 25, 0, 20, 40, 55, 25, 0 }, { -1, -1, -1 }, 4, 7, 1.0f, 0xFFFFFF, 28, -1 },
 	{ TX_MO_BAT, LK_BAT, -1, 0, MV_FLY, 9, 1, 1, 0, 4, AS_BITE,
-	  { 15, 6, 6, 2, 0, 3, 11, 7, 6, 6 }, { 35, 10, 40, 20, 0, 25, 60, 45, 40, 0 }, { SKL_E_DRAIN, -1, -1 }, 5, 6, 1.0f, 0x806070 },
+	  { 15, 6, 6, 2, 0, 3, 11, 7, 6, 6 }, { 35, 10, 40, 20, 0, 25, 60, 45, 40, 0 }, { SKL_E_DRAIN, -1, -1 }, 5, 6, 1.0f, 0x806070, 32, -1 },
 	{ TX_MO_LICH, LK_KAYKIT, 8, 4, MV_FOOT, 2, 1, 3, 1, 4, AS_CAST,
-	  { 20, 20, 1, 3, 8, 8, 5, 6, 4, 4 }, { 40, 50, 5, 25, 60, 50, 30, 40, 30, 0 }, { SKL_FIRE, SKL_DARKNESS, SKL_HEAL }, 8, 5, 1.0f, 0xD8C8FF },
+	  { 20, 20, 1, 3, 8, 8, 5, 6, 4, 4 }, { 40, 50, 5, 25, 60, 50, 30, 40, 30, 0 }, { SKL_FIRE, SKL_DARKNESS, SKL_HEAL }, 8, 5, 1.0f, 0xD8C8FF, 40, -1 },
 	{ TX_MO_POISON_SLIME, LK_SLIME, -1, 0, MV_FOOT, 1, 1, 1, 0, 5, AS_BITE,
-	  { 28, 8, 8, 6, 0, 6, 4, 5, 3, 3 }, { 65, 10, 45, 45, 0, 35, 25, 35, 20, 0 }, { SKL_E_VENOM, SKL_E_SPIT, -1 }, 12, 6, 1.15f, 0xB070E0 },
+	  { 28, 8, 8, 6, 0, 6, 4, 5, 3, 3 }, { 65, 10, 45, 45, 0, 35, 25, 35, 20, 0 }, { SKL_E_VENOM, SKL_E_SPIT, -1 }, 12, 6, 1.15f, 0xB070E0, 36, -1 },
 	{ TX_MO_GOLEM, LK_GOLEM, -1, 0, MV_FOOT, 1, 1, 1, 0, 8, AS_PUNCH,
-	  { 40, 8, 12, 14, 0, 4, 2, 5, 1, 3 }, { 75, 10, 60, 70, 0, 25, 10, 30, 10, 0 }, { SKL_E_QUAKE, -1, -1 }, 15, 4, 1.0f, 0xFFFFFF },
+	  { 40, 8, 12, 14, 0, 4, 2, 5, 1, 3 }, { 75, 10, 60, 70, 0, 25, 10, 30, 10, 0 }, { SKL_E_QUAKE, -1, -1 }, 15, 4, 1.0f, 0xFFFFFF, 48, -1 },
 	{ TX_MO_WYVERN, LK_WYVERN, -1, 0, MV_FLY, 9, 1, 1, 0, 8, AS_BITE,
-	  { 34, 12, 12, 8, 6, 6, 9, 8, 5, 6 }, { 60, 20, 60, 45, 20, 30, 45, 40, 30, 0 }, { SKL_E_BREATH, -1, -1 }, 20, 4, 1.0f, 0x7AA060 },
+	  { 34, 12, 12, 8, 6, 6, 9, 8, 5, 6 }, { 60, 20, 60, 45, 20, 30, 45, 40, 30, 0 }, { SKL_E_BREATH, -1, -1 }, 20, 4, 1.0f, 0x7AA060, 60, -1 },
 	{ TX_MO_DARK_KNIGHT, LK_KAYKIT, 5, 5, MV_FOOT, 2, 1, 1, 0, 9, AS_SLASH,
-	  { 36, 10, 14, 13, 2, 8, 7, 9, 4, 5 }, { 60, 10, 65, 60, 10, 35, 35, 45, 25, 0 }, { SKL_E_CRUSH, SKL_BASH, -1 }, 30, 4, 1.12f, 0x8070A0 },
+	  { 36, 10, 14, 13, 2, 8, 7, 9, 4, 5 }, { 60, 10, 65, 60, 10, 35, 35, 45, 25, 0 }, { SKL_E_CRUSH, SKL_BASH, -1 }, 30, 4, 1.12f, 0x8070A0, 70, -1 },
 	{ TX_MO_DRAGON, LK_WYVERN, -1, 0, MV_FLY, 9, 1, 1, 0, 12, AS_BITE,
-	  { 70, 30, 18, 14, 14, 12, 8, 10, 8, 5 }, { 90, 40, 70, 55, 60, 45, 35, 40, 30, 0 }, { SKL_E_BREATH, SKL_E_CRUSH, -1 }, 999, 0, 1.75f, 0xE05040 },
+	  { 70, 30, 18, 14, 14, 12, 8, 10, 8, 5 }, { 90, 40, 70, 55, 60, 45, 35, 40, 30, 0 }, { SKL_E_BREATH, SKL_E_CRUSH, -1 }, 80, 1, 1.75f, 0xE05040, 0, -1 },
 };
-const MonsterDef& MonsterInfo(int m) { return kMon[Clampi(m, 0, M_COUNT - 1)]; }
+
+#include "tactics_src/mon_species.inc"
+
+static MonsterDef s_monImp[160];
+static int s_monImpOk = 0;
+
+static void EnsureMonsters()
+{
+	if (s_monImpOk) return;
+	for (int i = 0; i < kImportN && i < 160; i++) {
+		MonsterDef& d = s_monImp[i];
+		memset(&d, 0, sizeof(d));
+		d.look = LK_MESH;
+		d.model = i;
+		d.nameTx = TX_MO_SLIME;
+		d.nameB = -1;
+		d.moveType = kImportFly[i] ? MV_FLY : MV_FOOT;
+		d.jump = d.moveType == MV_FLY ? 9 : 2;
+		d.rMin = 1;
+		d.rMax = (i % 5 == 0) ? 2 : 1;
+		d.magAttack = (i % 7 == 0) ? 1 : 0;
+		d.weaponPow = 4 + (i % 9);
+		d.attackStyle = d.magAttack ? AS_CAST : (d.moveType == MV_FLY ? AS_BITE : AS_SLASH);
+		int tier = i / 12;
+		d.base[S_HP] = 20 + tier * 6 + (i % 5) * 2;
+		d.base[S_MP] = d.magAttack ? 14 + tier : 2;
+		d.base[S_STR] = 5 + tier + (i % 4);
+		d.base[S_DEF] = 3 + tier;
+		d.base[S_MAG] = d.magAttack ? 6 + tier : 1;
+		d.base[S_RES] = 3 + tier / 2;
+		d.base[S_AGI] = 4 + (d.moveType == MV_FLY ? 3 : 0) + (i % 3);
+		d.base[S_DEX] = 4 + (i % 4);
+		d.base[S_LUK] = 2 + (i % 3);
+		d.base[S_MOV] = d.moveType == MV_FLY ? 6 : 4;
+		d.grow[S_HP] = 45 + tier * 4;
+		d.grow[S_STR] = 40 + tier * 2;
+		d.grow[S_DEF] = 30 + tier;
+		d.grow[S_MAG] = d.magAttack ? 50 : 5;
+		d.grow[S_RES] = 25;
+		d.grow[S_AGI] = 30;
+		d.grow[S_DEX] = 25;
+		d.grow[S_MP] = d.magAttack ? 40 : 5;
+		d.skills[0] = d.magAttack ? SKL_FIRE : (d.moveType == MV_FLY ? SKL_E_DRAIN : SKL_E_CRUSH);
+		d.skills[1] = (i % 4 == 0) ? SKL_E_VENOM : -1;
+		d.skills[2] = -1;
+		d.minStage = 1;
+		d.maxStage = 0;
+		d.weight = 8;
+		d.scale = 1.f;
+		d.tint = 0xFFFFFF;
+	}
+	s_monImpOk = 1;
+}
+
+static int ImportPick(int stage, Rng& r, int bias)
+{
+	EnsureMonsters();
+	int n = kImportN;
+	if (n < 1) return M_SLIME;
+	int origin = ((stage - 1) / 4) % n;
+	int idx = origin + bias;
+	if (idx >= n) idx -= n;
+	if (idx < 0) idx += n;
+	return M_COUNT + idx;
+}
+
+const MonsterDef& MonsterInfo(int m)
+{
+	EnsureMonsters();
+	if (m >= M_COUNT && m < M_COUNT + kImportN) return s_monImp[m - M_COUNT];
+	if (m < 0 || m >= M_COUNT) m = 0;
+	return kMon[m];
+}
+
+const wchar_t* MonsterLabel(int m)
+{
+	const MonsterDef& d = MonsterInfo(m);
+	if (d.look == LK_MESH && d.model >= 0 && d.model < kImportN) return kImportName[d.model];
+	return TT(d.nameTx);
+}
+
 
 // ============================================================ キャラ
 static int PaceSkill(int cls, int lv)
@@ -1327,7 +1407,16 @@ int UnitMagAttack(const Unit& u) { return IsMon(u) ? MonsterInfo(u.monster).magA
 int UnitWeaponPow(const Unit& u) { return IsMon(u) ? MonsterInfo(u.monster).weaponPow + u.ch.lv / 6 : ClassInfo(u.ch.cls).weaponPow + u.ch.lv / 8; }
 int UnitAttackStyle(const Unit& u) { return IsMon(u) ? MonsterInfo(u.monster).attackStyle : ClassInfo(u.ch.cls).attackStyle; }
 int UnitNameTx(const Unit& u) { return IsMon(u) ? MonsterInfo(u.monster).nameTx : -1; }
-const wchar_t* UnitName(const Unit& u) { return IsMon(u) ? TT(MonsterInfo(u.monster).nameTx) : u.ch.name; }
+const wchar_t* UnitName(const Unit& u)
+{
+	if (!IsMon(u)) return u.ch.name;
+	const MonsterDef& md = MonsterInfo(u.monster);
+	if (md.look == LK_MESH) return MonsterLabel(u.monster);
+	if (md.nameB < 0) return TT(md.nameTx);
+	static wchar_t buf[96];
+	swprintf_s(buf, L"%s %s", TT(md.nameTx), TT(md.nameB));
+	return buf;
+}
 bool UnitHasSkill(const Unit& u, int s) { return CharHasSkill(u.ch, s); }
 
 void MakeEnemy(Unit& u, int monster, int lv, int boss, Rng& r)
@@ -1848,15 +1937,15 @@ int Battle::PredictOrder(int* out, int n, int acting, int cost, int* insertAt) c
 
 static int PickMonster(int stage, Rng& r)
 {
-	int tot = 0;
-	for (int i = 0; i < M_COUNT; i++) if (kMon[i].minStage <= stage) tot += kMon[i].weight + (stage - kMon[i].minStage > 10 ? 0 : 0);
-	int v = r.Range(0, max(0, tot - 1));
-	for (int i = 0; i < M_COUNT; i++) {
-		if (kMon[i].minStage > stage) continue;
-		v -= kMon[i].weight;
-		if (v < 0) return i;
-	}
+	if (kImportN >= 80) return ImportPick(stage, r, r.Range(0, 11));
 	return M_SLIME;
+}
+
+static int BossMonster(int stage, Rng& r)
+{
+	if (stage >= 200 && (stage % 40) == 0) return M_DRAGON;
+	if (kImportN >= 80) return ImportPick(stage, r, 8);
+	return PickMonster(stage, r);
 }
 
 void SetupBattle(Battle& b, int stage, DWORD seed, const CharData* party, const int* rosterIdx, int nParty)
@@ -1890,13 +1979,13 @@ void SetupBattle(Battle& b, int stage, DWORD seed, const CharData* party, const 
 	int baseLv = stage <= 100 ? 1 + (stage - 1) * 9 / 10 : Clampi(90 + (stage - 100) * 6 / 5, 1, TAC_LV_MAX);
 	for (int g = 0; g < b.map.nGrp && n < MAX_UNITS; g++) {
 		const MapGroup& grp = b.map.grp[g];
-		int mon = (grp.boss && stage % 10 == 0) ? M_DRAGON : PickMonster(stage, r);
+		int mon = grp.boss ? BossMonster(stage, r) : PickMonster(stage, r);
 		for (int k = 0; k < grp.n && n < MAX_UNITS; k++) {
 			Unit& u = b.u[n];
 			bool boss = grp.boss && k == 0;
 			int lv = baseLv + r.Range(-1, 1) + (boss ? 3 : 0) + (grp.boss ? 1 : 0);
 			if (stage <= 2) lv = max(1, lv - 1);
-			int use = boss && stage % 10 == 0 ? M_DRAGON : (k == 0 ? mon : PickMonster(stage, r));
+			int use = k == 0 ? mon : PickMonster(stage, r);
 			MakeEnemy(u, use, lv, boss ? 1 : 0, r);
 			if (stage > 100) {
 				int mul = 100 + (stage - 100) / 4;
@@ -2223,6 +2312,9 @@ void SaveDefaults(SaveData& s)
 	s.quality = 1;
 	s.showGrid = 1;
 	s.uidNext = 1;
+	s.bgmVol = 6;
+	s.seVol = 8;
+	s.optInit = 1;
 }
 
 bool SaveLoad(SaveData& s)
@@ -2249,9 +2341,12 @@ bool SaveLoad(SaveData& s)
 	}
 	for (int i = 0; i < MAX_PARTY; i++)
 		if (s.party[i] < -1 || s.party[i] >= MAX_ROSTER || (s.party[i] >= 0 && !s.roster[s.party[i]].used)) s.party[i] = -1;
-	s.stageCleared = Clampi(s.stageCleared, 0, 100);
-	s.stageSel = Clampi(s.stageSel, 1, min(100, s.stageCleared + 1));
+	s.stageCleared = Clampi(s.stageCleared, 0, TAC_STAGE_MAX);
+	s.stageSel = Clampi(s.stageSel, 1, min(TAC_STAGE_MAX, s.stageCleared + 1));
 	if (s.uidNext == 0) s.uidNext = 1;
+	s.camSpeed = Clampi(s.camSpeed, 0, 2);
+	if (s.optInit != 1) { s.bgmVol = 6; s.seVol = 8; s.optInit = 1; }
+	else { s.bgmVol = Clampi(s.bgmVol, 0, 10); s.seVol = Clampi(s.seVol, 0, 10); }
 	return true;
 }
 

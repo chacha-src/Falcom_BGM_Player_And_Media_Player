@@ -82,6 +82,8 @@ void Renderer::Release()
 	attaches.clear();
 	rigs.clear();
 	statics.clear();
+	for (auto& c : m_creatures) c.Release();
+	m_creatures.clear();
 	m_assetsOk = FALSE;
 	ReleaseTargets();
 	TAC_REL(m_shSrv); TAC_REL(m_shDsv); TAC_REL(m_shTex);
@@ -825,8 +827,59 @@ BOOL Renderer::LoadAssets()
 		for (UINT k = 0; k + 2 < ni; k += 3) std::swap(s.i[k + 1], s.i[k + 2]);
 	}
 	if (rd.bad) return FALSE;
+	LoadCreaturePack();
 	m_assetsOk = TRUE;
 	return TRUE;
+}
+
+void Renderer::LoadCreaturePack()
+{
+	for (auto& c : m_creatures) c.Release();
+	m_creatures.clear();
+	HMODULE hm = AfxGetResourceHandle();
+	HRSRC rs = FindResource(hm, MAKEINTRESOURCE(IDR_TAC_MON), RT_RCDATA);
+	if (!rs) { hm = GetModuleHandle(NULL); rs = FindResource(hm, MAKEINTRESOURCE(IDR_TAC_MON), RT_RCDATA); }
+	if (!rs) return;
+	HGLOBAL hg = LoadResource(hm, rs);
+	const BYTE* data = hg ? (const BYTE*)LockResource(hg) : NULL;
+	DWORD size = SizeofResource(hm, rs);
+	if (!data || size < 8 || memcmp(data, "TACM", 4) != 0) return;
+	Reader rd(data + 4, size - 4);
+	UINT n = rd.U32();
+	if (n > 256) return;
+	m_creatures.reserve(n);
+	for (UINT i = 0; i < n; i++) {
+		char name[32];
+		rd.Name(name, 32);
+		UINT nv = rd.U32(), ni = rd.U32();
+		if (!nv || !ni || nv > 200000 || ni > 400000) { rd.bad = true; break; }
+		const float* vb = (const float*)rd.Bytes((size_t)nv * 9 * 4);
+		const WORD* ib = (const WORD*)rd.Bytes((size_t)ni * 2);
+		rd.Align4();
+		if (!vb || !ib) break;
+		std::vector<VtxS> v(nv);
+		for (UINT k = 0; k < nv; k++) {
+			const float* q = vb + k * 9;
+			VtxS& d = v[k];
+			d.p[0] = q[0]; d.p[1] = q[1]; d.p[2] = -q[2];
+			d.n[0] = q[3]; d.n[1] = q[4]; d.n[2] = -q[5];
+			d.uv[0] = 0; d.uv[1] = 0;
+			int r = (int)(q[6] * 255.f), g = (int)(q[7] * 255.f), b = (int)(q[8] * 255.f);
+			d.c = RGBA8(r, g, b);
+		}
+		std::vector<WORD> idx(ib, ib + ni);
+		for (UINT k = 0; k + 2 < ni; k += 3) std::swap(idx[k + 1], idx[k + 2]);
+		GpuMesh gm;
+		if (!MakeMesh(gm, v.data(), sizeof(VtxS), nv, idx.data(), ni)) continue;
+		gm.tex = TEX_WHITE;
+		m_creatures.push_back(gm);
+	}
+}
+
+void Renderer::DrawCreature(int i, const M4& world, const DrawParams& dp)
+{
+	if (i < 0 || i >= (int)m_creatures.size()) return;
+	DrawStatic(m_creatures[i], world, dp);
 }
 
 int Renderer::FindModel(const char* n) const { for (int i = 0; i < (int)models.size(); i++) if (!strcmp(models[i].name, n)) return i; return -1; }
@@ -1579,7 +1632,12 @@ void Renderer::BuildMinimap(const Map& m)
 		case T_RUINS: r = 170; g = 165; b = 150; break;
 		case T_ROCK: r = 90; g = 88; b = 86; break;
 		}
-		float sh = .75f + c.h * .035f;
+		float sh = .82f + c.h * .04f;
+		if (c.gimm == GM_HEAL) { r = 80; g = 230; b = 120; sh = 1.f; }
+		else if (c.gimm == GM_MIGHT) { r = 255; g = 200; b = 60; sh = 1.f; }
+		else if (c.gimm == GM_WARP) { r = 80; g = 210; b = 255; sh = 1.f; }
+		else if (c.gimm == GM_CHEST) { r = 230; g = 180; b = 50; sh = 1.f; }
+		else if (c.t == T_DOOR) { r = 150; g = 100; b = 50; sh = 1.f; }
 		px[(size_t)z * MAPN + x] = BGRA((int)(r * sh), (int)(g * sh), (int)(b * sh));
 	}
 	MakeTex(m_dev, m_ctx, px.data(), MAPN, MAPN, FALSE, &m_texMini, &m_srvMini);

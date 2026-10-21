@@ -120,9 +120,18 @@ private:
 
 	// 拠点
 	void EnterBase();
+	void ProbeSuspend();
+	void QueueSuspend(int kind);
+	void ResumeBattle(int kind);
+	void DropSuspend(int kind);
+	void WaitSuspend();
+	int BattlePortrait(int unit) const;
+	void AssignBattlePortraits();
 	void BuildShowcase();
 	void UpdateBase(float dt);
 	void DrawBaseUi();
+	float DrawSoundOpts(float x, float y, float w);
+	void ApplyAudio();
 	void DrawCodex();
 	void DrawShowcase3D();
 	int PartyCount() const;
@@ -258,7 +267,12 @@ private:
 	// ポートレート
 	int m_portraitKey[Renderer::PORTRAIT_N];
 	int m_portraitWant[Renderer::PORTRAIT_N];
+	int m_ptSlotUnit[Renderer::PORTRAIT_N];
+	int m_ptForUnit[MAX_UNITS];
 	Actor m_ptActor;
+	int m_sortieAsk;
+	int m_midStage;
+	int m_autoStage;
 
 	// 拠点の背景
 	Map m_showMap;

@@ -1,6 +1,7 @@
 #include "stdafx.h"
 #include "OmakeTacticsGame.h"
 #include "OmakeTacticsAudio.h"
+#include "DatArchive.h"
 #include <math.h>
 #include <stdio.h>
 
@@ -12,7 +13,8 @@ enum {
 	ID_BT_ATTACK = 500, ID_BT_SKILL, ID_BT_WAIT, ID_BT_UNDO, ID_BT_BACK, ID_BT_LVOK, ID_BT_SHOVE, ID_BT_DOOR, ID_BT_ITEM,
 	ID_BT_SKPREV = 510, ID_BT_SKNEXT,
 	ID_BT_SK0 = 520,
-	ID_BT_M_RESUME = 900, ID_BT_M_HELP, ID_BT_M_RETREAT, ID_BT_M_YES, ID_BT_M_NO, ID_BT_MENU
+	ID_BT_M_RESUME = 900, ID_BT_M_HELP, ID_BT_M_RETREAT, ID_BT_M_YES, ID_BT_M_NO, ID_BT_MENU, ID_BT_M_SAVE = 906, ID_BT_M_OPT,
+	ID_BT_OPT_Q = 920, ID_BT_OPT_ANIM, ID_BT_OPT_GRID
 };
 
 static float AngLerp(float a, float b, float t)
@@ -62,6 +64,287 @@ void Game::ActorForUnit(int i)
 	m_act[i].t = m_rng.F(0, 2);
 }
 
+static const TCHAR* kSnapMid = _T("oggYSEDbgmu_tac_mid.dat");
+static const TCHAR* kSnapAuto = _T("oggYSEDbgmu_tac_auto.dat");
+static const DWORD kSnapMagic = 0x31504153u;
+
+struct TacSnap {
+	DWORD magic;
+	int version;
+	int kind;
+	int stage;
+	DWORD rng;
+	int cur, turnOpen, phase, moved, x0, z0, cx, cz;
+	float face0;
+	float camYaw, camPitch, camDist, camX, camY, camZ;
+	int itemN[8];
+	int resultN, resultLv0[MAX_PARTY], resultExp[MAX_PARTY], resultRoster[MAX_PARTY];
+	int expGain[MAX_UNITS];
+	int bossDown;
+	AiPlan ai;
+	Battle b;
+};
+
+static CRITICAL_SECTION g_snapCs;
+static volatile LONG g_snapCsOk = 0;
+static TacSnap* g_qMid = NULL;
+static TacSnap* g_qAuto = NULL;
+static HANDLE g_snapTh = NULL;
+static HANDLE g_snapEv = NULL;
+static volatile LONG g_snapBusy = 0;
+static volatile LONG g_snapStop = 0;
+
+static void SnapLock()
+{
+	if (!g_snapCsOk) { InitializeCriticalSection(&g_snapCs); g_snapCsOk = 1; }
+	EnterCriticalSection(&g_snapCs);
+}
+static void SnapUnlock() { LeaveCriticalSection(&g_snapCs); }
+
+static void SnapWrite(TacSnap* job)
+{
+	if (!job) return;
+	const TCHAR* leaf = job->kind == 1 ? kSnapMid : kSnapAuto;
+	CString path = DatArc_Path(leaf);
+	FILE* fp = NULL;
+	if (_tfopen_s(&fp, path, _T("wb")) == 0 && fp) {
+		fwrite(job, 1, sizeof(*job), fp);
+		fclose(fp);
+		DatArc_Commit(leaf);
+	}
+	delete job;
+}
+
+static DWORD WINAPI SnapThread(void*)
+{
+	for (;;) {
+		WaitForSingleObject(g_snapEv, INFINITE);
+		if (g_snapStop) break;
+		for (;;) {
+			SnapLock();
+			TacSnap* mid = g_qMid; g_qMid = NULL;
+			TacSnap* aut = g_qAuto; g_qAuto = NULL;
+			if (mid || aut) g_snapBusy = 1;
+			SnapUnlock();
+			if (!mid && !aut) { g_snapBusy = 0; break; }
+			SnapWrite(mid);
+			SnapWrite(aut);
+			g_snapBusy = 0;
+		}
+	}
+	return 0;
+}
+
+static void SnapKick()
+{
+	if (!g_snapTh) {
+		g_snapEv = CreateEvent(NULL, FALSE, FALSE, NULL);
+		g_snapTh = CreateThread(NULL, 0, SnapThread, NULL, 0, NULL);
+	}
+	if (g_snapEv) SetEvent(g_snapEv);
+}
+
+void Game::WaitSuspend()
+{
+	for (;;) {
+		SnapLock();
+		int pending = g_qMid || g_qAuto || g_snapBusy;
+		SnapUnlock();
+		if (!pending) break;
+		Sleep(10);
+	}
+}
+
+static int ProbeLeaf(const TCHAR* leaf)
+{
+	if (!DatArc_Exists(leaf)) return 0;
+	CString path = DatArc_Path(leaf);
+	FILE* fp = NULL;
+	if (_tfopen_s(&fp, path, _T("rb")) != 0 || !fp) return 0;
+	DWORD magic = 0; int ver = 0, kind = 0, stage = 0;
+	size_t n = fread(&magic, 1, sizeof(magic), fp);
+	n += fread(&ver, 1, sizeof(ver), fp);
+	n += fread(&kind, 1, sizeof(kind), fp);
+	n += fread(&stage, 1, sizeof(stage), fp);
+	fclose(fp);
+	if (n < sizeof(magic) + sizeof(ver) * 3 || magic != kSnapMagic || ver != 1) return 0;
+	return stage > 0 ? stage : 0;
+}
+
+void Game::ProbeSuspend()
+{
+	WaitSuspend();
+	m_midStage = ProbeLeaf(kSnapMid);
+	m_autoStage = ProbeLeaf(kSnapAuto);
+}
+
+void Game::DropSuspend(int kind)
+{
+	WaitSuspend();
+	DatArc_FlushSuspend(TRUE);
+	if (kind == 0 || kind == 1) { DatArc_Delete(kSnapMid); m_midStage = 0; }
+	if (kind == 0 || kind == 2) { DatArc_Delete(kSnapAuto); m_autoStage = 0; }
+	DatArc_FlushSuspend(FALSE);
+}
+
+void Game::QueueSuspend(int kind)
+{
+	if (m_screen != SC_BATTLE || m_b.nUnits < 1) return;
+	TacSnap* s = new TacSnap();
+	memset(s, 0, sizeof(*s));
+	s->magic = kSnapMagic;
+	s->version = 1;
+	s->kind = kind;
+	s->stage = m_battleStage;
+	s->rng = m_rng.s;
+	s->cur = m_cur;
+	s->turnOpen = m_turnOpen ? 1 : 0;
+	s->phase = (m_phase == PH_MENU) ? (int)m_phaseBeforeMenu : (int)m_phase;
+	if (s->phase != PH_P_MOVE && s->phase != PH_P_CMD && s->phase != PH_P_SKILLS && s->phase != PH_P_TARGET
+		&& s->phase != PH_P_SKILLTARGET && s->phase != PH_P_SHOVE && s->phase != PH_E_SHOW)
+		s->phase = PH_P_MOVE;
+	s->moved = m_moved;
+	s->x0 = m_curX0; s->z0 = m_curZ0; s->face0 = m_curFace0;
+	s->cx = m_cx; s->cz = m_cz;
+	s->camYaw = m_camYawGoal; s->camPitch = m_camPitch; s->camDist = m_camDistGoal;
+	s->camX = m_camGoal.x; s->camY = m_camGoal.y; s->camZ = m_camGoal.z;
+	for (int i = 0; i < 8; i++) s->itemN[i] = m_save.itemN[i];
+	s->resultN = m_resultN;
+	for (int i = 0; i < MAX_PARTY; i++) {
+		s->resultLv0[i] = m_resultLv0[i];
+		s->resultExp[i] = m_resultExp[i];
+		s->resultRoster[i] = m_resultRoster[i];
+	}
+	for (int i = 0; i < MAX_UNITS; i++) s->expGain[i] = m_expGain[i];
+	s->bossDown = m_bossDown;
+	s->ai = m_ai;
+	s->b = m_b;
+	SnapLock();
+	if (kind == 1) { delete g_qMid; g_qMid = s; m_midStage = m_battleStage; }
+	else { delete g_qAuto; g_qAuto = s; m_autoStage = m_battleStage; }
+	SnapUnlock();
+	SnapKick();
+}
+
+void Game::ResumeBattle(int kind)
+{
+	WaitSuspend();
+	const TCHAR* leaf = kind == 1 ? kSnapMid : kSnapAuto;
+	TacSnap* s = new TacSnap();
+	memset(s, 0, sizeof(*s));
+	CString path = DatArc_Path(leaf);
+	FILE* fp = NULL;
+	int ok = 0;
+	if (_tfopen_s(&fp, path, _T("rb")) == 0 && fp) {
+		ok = fread(s, 1, sizeof(*s), fp) == sizeof(*s) && s->magic == kSnapMagic && s->version == 1 && s->stage == m_save.stageSel;
+		fclose(fp);
+	}
+	if (!ok) { delete s; StartBattle(m_save.stageSel); return; }
+	m_b = s->b;
+	m_b.RebuildOcc();
+	m_rng.s = s->rng ? s->rng : 1;
+	m_battleStage = s->stage;
+	for (int i = 0; i < 8; i++) m_save.itemN[i] = s->itemN[i];
+	m_resultN = s->resultN;
+	for (int i = 0; i < MAX_PARTY; i++) {
+		m_resultLv0[i] = s->resultLv0[i];
+		m_resultExp[i] = s->resultExp[i];
+		m_resultRoster[i] = s->resultRoster[i];
+	}
+	for (int i = 0; i < MAX_UNITS; i++) m_expGain[i] = s->expGain[i];
+	m_bossDown = s->bossDown;
+	m_ai = s->ai;
+	m_r.BuildTerrain(m_b.map);
+	m_r.BuildMinimap(m_b.map);
+	m_showBuilt = FALSE;
+	for (int i = 0; i < m_b.nUnits; i++) {
+		Unit& u = m_b.u[i];
+		ActorForUnit(i);
+		m_faceShow[i] = u.face;
+		m_dispHp[i] = u.hpShow;
+		m_dieT[i] = u.alive ? -1.f : 99.f;
+		m_lunge[i] = 0;
+	}
+	for (int s2 = 0; s2 < Renderer::PORTRAIT_N; s2++) { m_portraitWant[s2] = 0; m_ptSlotUnit[s2] = -1; }
+	for (int i = 0; i < MAX_UNITS; i++) m_ptForUnit[i] = -1;
+	InvalidatePortraits();
+	m_cur = s->cur;
+	m_turnOpen = s->turnOpen ? TRUE : FALSE;
+	m_moved = s->moved;
+	m_curX0 = s->x0; m_curZ0 = s->z0; m_curFace0 = s->face0;
+	m_cx = s->cx; m_cz = s->cz; m_cursorValid = TRUE;
+	m_camYaw = m_camYawGoal = s->camYaw;
+	m_camPitch = s->camPitch;
+	m_camDist = m_camDistGoal = s->camDist > 1.f ? s->camDist : 14.f;
+	m_camTarget = m_camGoal = v3(s->camX, s->camY, s->camZ);
+	m_camPan = v3(0, 0, 0);
+	m_parts.clear(); m_popups.clear(); m_banners.clear(); m_deferPopups.clear();
+	m_seqCut = FALSE; m_cutStage = 0; m_victory = 0; m_hoverUnit = -1;
+	m_lvqN = m_lvqCur = 0; m_menuConfirm = 0; m_proj.active = 0;
+	m_screen = SC_BATTLE;
+	m_phase = (Phase)s->phase;
+	m_phaseT = 0;
+	m_phaseBeforeMenu = m_phase;
+	memset(m_ovMove, 0, sizeof(m_ovMove));
+	memset(m_ovAtk, 0, sizeof(m_ovAtk));
+	if (m_cur >= 0 && m_cur < m_b.nUnits && m_b.u[m_cur].alive && m_b.u[m_cur].team == TEAM_PLAYER)
+		ComputeReach(m_b, m_cur, m_reach);
+	ComputeOverlays();
+	UpdateHover();
+	int loadedKind = kind;
+	delete s;
+	DropSuspend(loadedKind);
+	wchar_t t[64];
+	swprintf_s(t, L"%s %d", TT(TX_BT_STAGE), m_battleStage);
+	AddBanner(t, TT(loadedKind == 1 ? TX_SV_FROMMID : TX_SV_FROMAUTO), RGBA8(255, 226, 150), 0, 2.f);
+}
+
+int Game::BattlePortrait(int unit) const
+{
+	if (m_screen != SC_BATTLE) return unit;
+	if (unit < 0 || unit >= MAX_UNITS) return -1;
+	return m_ptForUnit[unit];
+}
+
+void Game::AssignBattlePortraits()
+{
+	BYTE need[MAX_UNITS];
+	memset(need, 0, sizeof(need));
+	for (int i = 0; i < m_b.nUnits; i++) if (m_b.u[i].alive && m_b.u[i].team == TEAM_PLAYER) need[i] = 1;
+	if (m_cur >= 0 && m_cur < m_b.nUnits) need[m_cur] = 1;
+	if (m_hoverUnit >= 0 && m_hoverUnit < m_b.nUnits) need[m_hoverUnit] = 1;
+	int order[12];
+	int acting = (m_turnOpen && m_cur >= 0 && m_cur < m_b.nUnits && m_b.u[m_cur].alive) ? m_cur : -1;
+	int n = m_b.PredictOrder(order, 8, acting, 1000, NULL);
+	for (int i = 0; i < n; i++) if (order[i] >= 0 && order[i] < m_b.nUnits) need[order[i]] = 1;
+	if (m_lvqCur >= 0 && m_lvqCur < m_lvqN) {
+		int u = m_lvq[m_lvqCur].unit;
+		if (u >= 0 && u < m_b.nUnits) need[u] = 1;
+	}
+	for (int s = 0; s < Renderer::PORTRAIT_N; s++) {
+		int u = m_ptSlotUnit[s];
+		if (u < 0 || u >= m_b.nUnits || !need[u]) {
+			if (u >= 0 && u < MAX_UNITS) m_ptForUnit[u] = -1;
+			m_ptSlotUnit[s] = -1;
+			m_portraitWant[s] = 0;
+		} else {
+			m_ptForUnit[u] = s;
+			need[u] = 2;
+			int want = 100 + u;
+			if (m_portraitWant[s] != want) m_portraitWant[s] = want;
+		}
+	}
+	for (int u = 0; u < m_b.nUnits; u++) {
+		if (need[u] != 1) continue;
+		int slot = -1;
+		for (int s = 0; s < Renderer::PORTRAIT_N; s++) if (m_ptSlotUnit[s] < 0) { slot = s; break; }
+		if (slot < 0) break;
+		m_ptSlotUnit[slot] = u;
+		m_ptForUnit[u] = slot;
+		m_portraitWant[slot] = 100 + u;
+	}
+}
+
 // ============================================================ 開始・終了
 void Game::StartBattle(int stage)
 {
@@ -96,7 +379,8 @@ void Game::StartBattle(int stage)
 		m_expGain[i] = 0;
 		m_lunge[i] = 0;
 	}
-	for (int s = 0; s < Renderer::PORTRAIT_N; s++) m_portraitWant[s] = s < m_b.nUnits ? 100 + s : 0;
+	for (int s = 0; s < Renderer::PORTRAIT_N; s++) { m_portraitWant[s] = 0; m_ptSlotUnit[s] = -1; }
+	for (int i = 0; i < MAX_UNITS; i++) m_ptForUnit[i] = -1;
 	InvalidatePortraits();
 	m_resultN = n;
 	for (int i = 0; i < n; i++) { m_resultRoster[i] = idx[i]; m_resultLv0[i] = chars[i].lv; m_resultExp[i] = 0; }
@@ -157,6 +441,7 @@ void Game::EndBattle(int victory)
 	if (victory) {
 		m_save.stageCleared = max(m_save.stageCleared, m_battleStage);
 		m_save.stageSel = Clampi(m_battleStage + 1, 1, min(TAC_STAGE_MAX, m_save.stageCleared + 1));
+		DropSuspend(0);
 	}
 	Persist();
 	m_victory = victory;
@@ -221,6 +506,7 @@ void Game::BeginTurn()
 	m_phaseT = 0;
 	ComputeOverlays();
 	UpdateHover();
+	QueueSuspend(2);
 }
 
 BOOL Game::CheckBattleOver()
@@ -1241,9 +1527,10 @@ void Game::UpdateCamera(float dt)
 	focus = focus + m_camPan;
 	focus.x = Clampf(focus.x, 0, (float)MAPN);
 	focus.z = Clampf(focus.z, 0, (float)MAPN);
-	float k = Clampf(dt * 4.5f, 0, 1);
+	float sp = m_save.camSpeed <= 0 ? .55f : (m_save.camSpeed >= 2 ? 1.75f : 1.f);
+	float k = Clampf(dt * 4.5f * sp, 0, 1);
 	m_camTarget = Lerp(m_camTarget, focus, k);
-	m_camYaw = AngLerp(m_camYaw, m_camYawGoal, Clampf(dt * 6.f, 0, 1));
+	m_camYaw = AngLerp(m_camYaw, m_camYawGoal, Clampf(dt * 6.f * sp, 0, 1));
 	m_camDist = Lerpf(m_camDist, m_camDistGoal, Clampf(dt * (m_phase == PH_INTRO ? 2.2f : 5.f), 0, 1));
 }
 
@@ -1473,7 +1760,7 @@ void Game::DrawUnitPanel(const Unit& u, float x, float y, float w, BOOL big)
 	Panel(x, y, w, h);
 	float ps = h - U(20);
 	DWORD fc = u.team == TEAM_PLAYER ? RGBA8(110, 170, 255) : (u.boss ? RGBA8(255, 200, 60) : RGBA8(255, 100, 90));
-	DrawPortrait(ui, x + U(10), y + U(10), ps, fc);
+		DrawPortrait(BattlePortrait(ui), x + U(10), y + U(10), ps, fc);
 	float tx = x + ps + U(20), tw = w - ps - U(30);
 	wchar_t nm[64];
 	UnitTitle(u, nm, 64);
@@ -1542,7 +1829,7 @@ void Game::DrawTurnOrder()
 		if (ghost) fc = RGBA8(255, 210, 90);
 		if (now) m_r.HudRect(x + U(4), ry, w - U(8), rh - U(4), RGBA8(255, 220, 120, 60));
 		if (ghost) m_r.HudRect(x + U(4), ry, w - U(8), rh - U(4), RGBA8(255, 190, 60, 50));
-		DrawPortrait(ui, x + U(8), ry + U(2), rh - U(8), fc);
+		DrawPortrait(BattlePortrait(ui), x + U(8), ry + U(2), rh - U(8), fc);
 		wchar_t nm[64];
 		UnitTitle(u, nm, 64);
 		m_r.HudText(nm, x + rh + U(6), ry + rh * .32f, U(12), ghost ? RGBA8(255, 230, 150) : (now ? RGBA8(255, 240, 180) : RGBA8(240, 240, 240)), 0, now || ghost);
@@ -1564,18 +1851,28 @@ void Game::DrawTurnOrder()
 
 void Game::DrawMinimap(float x, float y, float s)
 {
-	m_r.HudRect(x - U(4), y - U(4), s + U(8), s + U(8), RGBA8(10, 10, 20, 200));
+	m_r.HudRect(x - U(6), y - U(6), s + U(12), s + U(12), RGBA8(8, 10, 16, 230));
 	if (m_r.MinimapSrv()) m_r.HudImage(m_r.MinimapSrv(), x, y, s, s, 0, 0, 1, 1, 0xFFFFFFFF);
-	m_r.HudFrame(x - U(4), y - U(4), s + U(8), s + U(8), U(1.5f), RGBA8(196, 168, 108));
+	m_r.HudFrame(x - U(6), y - U(6), s + U(12), s + U(12), U(2.5f), RGBA8(220, 190, 120));
 	float cs = s / MAPN;
+	for (int g = 8; g < MAPN; g += 8) {
+		m_r.HudRect(x + g * cs, y, U(1), s, RGBA8(255, 255, 255, 28));
+		m_r.HudRect(x, y + g * cs, s, U(1), RGBA8(255, 255, 255, 28));
+	}
+	float rad = Clampf(m_camDist * .42f, 5.f, 16.f);
+	float vx = Clampf(m_camTarget.x, 0, (float)MAPN);
+	float vz = Clampf(m_camTarget.z, 0, (float)MAPN);
+	m_r.HudFrame(x + (vx - rad) * cs, y + (vz - rad) * cs, rad * 2.f * cs, rad * 2.f * cs, U(1.5f), RGBA8(255, 255, 255, 180));
 	for (int i = 0; i < m_b.nUnits; i++) {
 		const Unit& u = m_b.u[i];
 		if (!u.alive) continue;
-		DWORD c = u.team == TEAM_PLAYER ? RGBA8(80, 170, 255) : (u.boss ? RGBA8(255, 210, 60) : RGBA8(255, 70, 60));
-		float d = i == m_cur ? cs * 3.f + U(2) * sinf(m_time * 6.f) : cs * 2.2f;
-		m_r.HudRect(x + (u.px) * cs - d * .5f, y + (u.pz) * cs - d * .5f, d, d, c);
+		DWORD c = u.team == TEAM_PLAYER ? RGBA8(90, 190, 255) : (u.boss ? RGBA8(255, 220, 70) : (u.alert ? RGBA8(255, 70, 60) : RGBA8(140, 50, 50)));
+		float d = i == m_cur ? cs * 4.2f : (u.team == TEAM_PLAYER ? cs * 3.4f : cs * 2.8f);
+		float dx = x + u.px * cs - d * .5f, dy = y + u.pz * cs - d * .5f;
+		m_r.HudRect(dx - U(1), dy - U(1), d + U(2), d + U(2), RGBA8(10, 10, 14, 220));
+		m_r.HudRect(dx, dy, d, d, c);
 	}
-	if (m_cursorValid) m_r.HudFrame(x + m_cx * cs - cs, y + m_cz * cs - cs, cs * 3, cs * 3, 1, RGBA8(255, 255, 255));
+	if (m_cursorValid) m_r.HudFrame(x + m_cx * cs - cs, y + m_cz * cs - cs, cs * 3, cs * 3, U(1.5f), RGBA8(255, 255, 255));
 	static const DWORD kWc[8] = {
 		RGBA8(255, 80, 80), RGBA8(80, 160, 255), RGBA8(255, 210, 60), RGBA8(80, 230, 120),
 		RGBA8(200, 80, 255), RGBA8(80, 230, 230), RGBA8(255, 140, 40), RGBA8(255, 120, 180)
@@ -1805,7 +2102,7 @@ void Game::DrawLevelUp()
 	y += (1.f - in) * U(40);
 	Panel(x, y, w, h, in);
 	m_r.HudText(TT(TX_BT_LEVELUP), x + w * .5f, y + U(30), U(28), RGBA8(255, 230, 100), 1, 1, 1, in);
-	DrawPortrait(L.unit, x + U(18), y + U(56), U(80), RGBA8(110, 170, 255));
+	DrawPortrait(BattlePortrait(L.unit), x + U(18), y + U(56), U(80), RGBA8(110, 170, 255));
 	m_r.HudText(u.ch.name, x + U(112), y + U(72), U(18), RGBA8(255, 255, 255), 0, 1);
 	wchar_t l[64];
 	swprintf_s(l, L"%s %d → %d", TT(TX_MISC_LV), L.oldLv, L.newLv);
@@ -1915,8 +2212,8 @@ void Game::DrawBattleUi()
 		}
 	}
 	if (m_b.nUnits > 0) DrawTurnOrder();
-	float ms = U(150);
-	DrawMinimap((float)m_w - ms - U(18), (float)m_h - ms - U(18), ms);
+	float ms = U(236);
+	DrawMinimap((float)m_w - ms - U(16), (float)m_h - ms - U(16), ms);
 	if (m_cur >= 0 && m_phase != PH_OVER && m_phase != PH_INTRO) DrawUnitPanel(m_b.u[m_cur], U(14), (float)m_h - U(146), U(360), TRUE);
 	if (m_hoverUnit >= 0 && m_hoverUnit != m_cur && m_phase != PH_ACTION && m_b.u[m_hoverUnit].alive)
 		DrawUnitPanel(m_b.u[m_hoverUnit], U(386), (float)m_h - U(118), U(320), FALSE);
@@ -1966,15 +2263,40 @@ void Game::DrawBattleUi()
 	}
 	if (m_phase == PH_MENU) {
 		m_r.HudRect(0, 0, (float)m_w, (float)m_h, RGBA8(0, 0, 0, 120));
-		float w = U(320), h = m_menuConfirm ? U(190) : U(220);
+		float w = m_menuConfirm == 2 ? U(420) : U(320);
+		float h = m_menuConfirm == 1 ? U(190) : (m_menuConfirm == 2 ? U(430) : U(314));
 		float x = (m_w - w) * .5f, y = (m_h - h) * .5f;
 		Panel(x, y, w, h);
 		m_r.HudText(TT(TX_BT_MENU), x + w * .5f, y + U(26), U(20), RGBA8(255, 226, 150), 1, 1);
 		float bx = x + U(30), bw = w - U(60), bh = U(40);
 		if (!m_menuConfirm) {
-			if (Btn(ID_BT_M_RESUME, bx, y + U(50), bw, bh, TT(TX_BT_RESUME))) m_phase = m_phaseBeforeMenu;
-			if (Btn(ID_BT_M_HELP, bx, y + U(98), bw, bh, TT(TX_BT_HELP))) m_showHelp = TRUE;
-			if (Btn(ID_BT_M_RETREAT, bx, y + U(146), bw, bh, TT(TX_BT_RETREAT), TRUE, FALSE, 0, RGBA8(140, 50, 40, 240))) { m_menuConfirm = 1; m_focusId = ID_BT_M_NO; }
+			BOOL quiet = m_phaseBeforeMenu == PH_P_MOVE || m_phaseBeforeMenu == PH_P_CMD || m_phaseBeforeMenu == PH_P_SKILLS
+				|| m_phaseBeforeMenu == PH_P_TARGET || m_phaseBeforeMenu == PH_P_SKILLTARGET || m_phaseBeforeMenu == PH_P_SHOVE
+				|| m_phaseBeforeMenu == PH_E_SHOW;
+			if (Btn(ID_BT_M_RESUME, bx, y + U(48), bw, bh, TT(TX_BT_RESUME))) m_phase = m_phaseBeforeMenu;
+			if (Btn(ID_BT_M_SAVE, bx, y + U(94), bw, bh, TT(TX_SV_MID), quiet)) {
+				QueueSuspend(1);
+				AddBanner(TT(TX_SV_SAVED), NULL, RGBA8(255, 226, 150), 0, 1.6f);
+				m_phase = m_phaseBeforeMenu;
+			}
+			if (Btn(ID_BT_M_OPT, bx, y + U(140), bw, bh, TT(TX_SET_OPEN))) { m_menuConfirm = 2; m_focusId = ID_BT_OPT_Q; }
+			if (Btn(ID_BT_M_HELP, bx, y + U(186), bw, bh, TT(TX_BT_HELP))) m_showHelp = TRUE;
+			if (Btn(ID_BT_M_RETREAT, bx, y + U(232), bw, bh, TT(TX_BT_RETREAT), TRUE, FALSE, 0, RGBA8(140, 50, 40, 240))) { m_menuConfirm = 1; m_focusId = ID_BT_M_NO; }
+		} else if (m_menuConfirm == 2) {
+			static const int qtx[3] = { TX_SET_Q_LOW, TX_SET_Q_STD, TX_SET_Q_HIGH };
+			float oy = y + U(48);
+			if (int q = Sel(ID_BT_OPT_Q, bx, oy, bw, U(32), TT(TX_SET_QUALITY), TT(qtx[Clampi(m_save.quality, 0, 2)]))) {
+				m_save.quality = (m_save.quality + q + 3) % 3;
+				m_r.SetQuality(m_save.quality);
+				InvalidatePortraits();
+			}
+			oy += U(34);
+			if (Sel(ID_BT_OPT_ANIM, bx, oy, bw, U(32), TT(TX_SET_ANIM), TT(m_save.battleAnim ? TX_SET_ANIM_SHORT : TX_SET_ANIM_FULL))) m_save.battleAnim = !m_save.battleAnim;
+			oy += U(34);
+			if (Sel(ID_BT_OPT_GRID, bx, oy, bw, U(32), TT(TX_SET_GRID), TT(m_save.showGrid ? TX_CR_ON : TX_CR_OFF))) m_save.showGrid = !m_save.showGrid;
+			oy += U(36);
+			oy = DrawSoundOpts(bx, oy, bw);
+			if (Btn(ID_BT_M_RESUME, bx, oy + U(6), bw, bh, TT(TX_CR_BACK))) m_menuConfirm = 0;
 		} else {
 			m_r.HudTextBox(TT(TX_BT_RETREAT_Q), bx, y + U(50), bw, U(60), U(14), RGBA8(255, 220, 210));
 			if (Btn(ID_BT_M_YES, bx, y + U(126), bw * .47f, bh, TT(TX_PT_YES), TRUE, FALSE, 0, RGBA8(140, 50, 40, 240))) { EndBattle(0); return; }

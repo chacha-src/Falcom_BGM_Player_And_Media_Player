@@ -155,13 +155,17 @@ public:
 
 	// アセット
 	BOOL LoadAssets();
+	void LoadCreaturePack();
 	std::vector<Rig> rigs;
 	std::vector<Model> models;
 	std::vector<Attach> attaches;
 	std::vector<StaticSrc> statics;
+	std::vector<GpuMesh> m_creatures;
 	int FindModel(const char* n) const;
 	int FindAttach(const char* n) const;
 	int FindStatic(const char* n) const;
+	int CreatureCount() const { return (int)m_creatures.size(); }
+	void DrawCreature(int i, const M4& world, const DrawParams& dp);
 	int AddProcModel(const Model& m, const std::vector<VtxK>& v, const std::vector<WORD>& idx);
 	BOOL MakeMesh(GpuMesh& out, const void* v, UINT stride, UINT nv, const WORD* idx, UINT ni, BOOL dynamic = FALSE);
 	BOOL MakeMesh32(GpuMesh& out, const void* v, UINT stride, UINT nv, const UINT* idx, UINT ni);

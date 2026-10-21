@@ -53,6 +53,16 @@ static BYTE* g_arcMap = NULL;
 static ULONGLONG g_arcMapSize = 0;
 static int g_flushSuspend = 0;
 static BOOL g_flushDirty = FALSE;
+static CRITICAL_SECTION g_arcCs;
+static volatile LONG g_arcCsInit = 0;
+
+struct DatArcLock {
+	BOOL on;
+	DatArcLock() : on(FALSE) {
+		if (g_arcCsInit) { EnterCriticalSection(&g_arcCs); on = TRUE; }
+	}
+	~DatArcLock() { if (on) LeaveCriticalSection(&g_arcCs); }
+};
 
 static void DatArc_FreeMap()
 {
@@ -565,6 +575,10 @@ static BOOL DatArc_MigrateLooseFromExeDir()
 
 BOOL DatArc_Init(LPCTSTR exeDirWithSlash)
 {
+	if (!g_arcCsInit) {
+		InitializeCriticalSection(&g_arcCs);
+		g_arcCsInit = 1;
+	}
 	g_ready = FALSE;
 	g_n = 0;
 	DatArc_FreeMap();
@@ -641,6 +655,7 @@ BOOL DatArc_Init(LPCTSTR exeDirWithSlash)
 
 void DatArc_Shutdown()
 {
+	DatArcLock lk;
 	g_flushSuspend = 0;
 	if (g_ready)
 		DatArc_FlushAll();
@@ -656,12 +671,14 @@ LPCTSTR DatArc_StageDir()
 
 void DatArc_Chdir()
 {
+	DatArcLock lk;
 	if (g_stageDir[0])
 		_tchdir(g_stageDir);
 }
 
 CString DatArc_Path(LPCTSTR leaf)
 {
+	DatArcLock lk;
 	if (!leaf || !leaf[0])
 		return CString();
 	if (g_ready) {
@@ -680,6 +697,7 @@ CString DatArc_Path(LPCTSTR leaf)
 
 BOOL DatArc_Exists(LPCTSTR leaf)
 {
+	DatArcLock lk;
 	if (!leaf || !leaf[0]) return FALSE;
 	if (g_ready) {
 		if (DatArc_FindIndex(leaf) >= 0) return TRUE;
@@ -692,6 +710,7 @@ BOOL DatArc_Exists(LPCTSTR leaf)
 
 BOOL DatArc_Commit(LPCTSTR leaf)
 {
+	DatArcLock lk;
 	if (!g_ready || !leaf || !leaf[0]) return FALSE;
 	if (!DatArc_IsPackableLeaf(leaf)) return FALSE;
 	DatArc_AddIndex(leaf);
@@ -709,6 +728,7 @@ BOOL DatArc_Commit(LPCTSTR leaf)
 
 void DatArc_InvalidateLeaf(LPCTSTR leaf)
 {
+	DatArcLock lk;
 	if (!g_ready || !leaf || !leaf[0]) return;
 	const int i = DatArc_FindIndex(leaf);
 	if (i >= 0) g_ent[i].stageFpValid = 0;
@@ -716,6 +736,7 @@ void DatArc_InvalidateLeaf(LPCTSTR leaf)
 
 BOOL DatArc_Delete(LPCTSTR leaf)
 {
+	DatArcLock lk;
 	if (!g_ready || !leaf || !leaf[0]) return FALSE;
 	CString path = DatArc_StagePath(leaf);
 	::SetFileAttributes(path, FILE_ATTRIBUTE_NORMAL);
@@ -735,6 +756,7 @@ BOOL DatArc_Delete(LPCTSTR leaf)
 
 BOOL DatArc_Rename(LPCTSTR fromLeaf, LPCTSTR toLeaf)
 {
+	DatArcLock lk;
 	if (!g_ready || !fromLeaf || !toLeaf) return FALSE;
 	CString from = DatArc_StagePath(fromLeaf);
 	CString to = DatArc_StagePath(toLeaf);
@@ -762,6 +784,7 @@ BOOL DatArc_Rename(LPCTSTR fromLeaf, LPCTSTR toLeaf)
 
 BOOL DatArc_FlushAll()
 {
+	DatArcLock lk;
 	if (!g_ready) return FALSE;
 	if (g_flushSuspend > 0) {
 		g_flushDirty = TRUE;
@@ -775,6 +798,7 @@ BOOL DatArc_FlushAll()
 
 void DatArc_FlushSuspend(BOOL suspend)
 {
+	DatArcLock lk;
 	if (suspend) {
 		++g_flushSuspend;
 		return;
