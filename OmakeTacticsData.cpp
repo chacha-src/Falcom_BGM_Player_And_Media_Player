@@ -1032,7 +1032,7 @@ void GenerateMap(Map& m, int stage, DWORD seed)
 // ============================================================ クラス
 #define L6(a,b,c,d,e,f,g,h) { {a,b},{c,d},{e,f},{g,h},{0,-1},{0,-1} }
 #define L6F(a,b,c,d,e,f,g,h,i,j,k,l) { {a,b},{c,d},{e,f},{g,h},{i,j},{k,l} }
-static const ClassDef kClass[C_PLAYER_COUNT] = {
+static ClassDef kClass[C_PLAYER_COUNT] = {
 	// name, desc, tier, magic, group, move, jump, rMin, rMax, mag, pow, look, style, base[10], grow[10], learn
 	{ TX_CL_SOLDIER, TX_CLD_SOLDIER, 1, 0, G_MELEE, MV_FOOT, 2, 1, 1, 0, 5, WL_SWORD_SHIELD, AS_SLASH,
 	{ 24, 8, 7, 6, 1, 2, 6, 6, 4, 5 }, { 45, 20, 55, 50, 5, 25, 40, 45, 35, 0 }, L6F(1, SKL_POWER, 2, SKL_BASH, 3, SKL_P_IRON, 4, SKL_VITAL, 5, SKL_CLEAVE, 6, SKL_DOUBLE) },
@@ -1092,9 +1092,101 @@ static const int kExtSkill[TAC_RANK_LINES][TAC_RANK_N] = {
 };
 static ClassDef s_ext[TAC_RANK_LINES * TAC_RANK_N];
 static int s_extOk = 0;
+// 後半 10 能力と移動の成長。表の 0 は未設定なので、職の傾向から一度だけ埋める。
+static void FillUnitSheet(int* base, int* grow, int group, int magic, int fly, int jump, int rMax)
+{
+	if (grow[S_MOV] == 0) {
+		if (fly) grow[S_MOV] = 10;
+		else if (base[S_MOV] <= 2) grow[S_MOV] = 4;
+		else if (group == G_SWIFT) grow[S_MOV] = 14;
+		else if (magic) grow[S_MOV] = 6;
+		else grow[S_MOV] = 8;
+	}
+	if (base[S_JMP] == 0 && grow[S_JMP] == 0) {
+		base[S_JMP] = max(1, jump);
+		grow[S_JMP] = fly ? 3 : (group == G_SWIFT ? 6 : 4);
+	}
+	if (base[S_HIT] == 0 && grow[S_HIT] == 0) {
+		base[S_HIT] = 4 + base[S_DEX] / 4;
+		grow[S_HIT] = 18 + (group == G_SWIFT ? 16 : 0) + (magic ? 6 : 0);
+	}
+	if (base[S_AVO] == 0 && grow[S_AVO] == 0) {
+		base[S_AVO] = base[S_AGI] / 4 + (group == G_SWIFT ? 3 : 0);
+		grow[S_AVO] = group == G_SWIFT ? 16 : (fly ? 12 : 6);
+	}
+	if (base[S_CRT] == 0 && grow[S_CRT] == 0) {
+		base[S_CRT] = base[S_LUK] / 4 + ((group == G_SWIFT && !magic) ? 3 : 0);
+		grow[S_CRT] = (rMax >= 4 || (group == G_SWIFT && !magic)) ? 14 : 5;
+	}
+	if (base[S_GRD] == 0 && grow[S_GRD] == 0) {
+		base[S_GRD] = base[S_DEF] >= 8 ? 4 : base[S_DEF] / 5;
+		grow[S_GRD] = base[S_DEF] >= 8 ? 8 : 3;
+	}
+	if (base[S_RCV] == 0 && grow[S_RCV] == 0) {
+		base[S_RCV] = (group == G_HOLY) ? 2 : 0;
+		grow[S_RCV] = (group == G_HOLY) ? 8 : 2;
+	}
+	if (base[S_MPR] == 0 && grow[S_MPR] == 0) {
+		base[S_MPR] = magic ? 1 : 0;
+		grow[S_MPR] = magic ? 8 : 2;
+	}
+	if (base[S_CPL] == 0 && grow[S_CPL] == 0) {
+		base[S_CPL] = 2;
+		grow[S_CPL] = 8 + (group == G_MELEE ? 4 : 0);
+	}
+	if (base[S_RNG] == 0 && grow[S_RNG] == 0) {
+		base[S_RNG] = 0;
+		grow[S_RNG] = (rMax >= 4) ? 4 : (magic ? 3 : 1);
+	}
+	if (base[S_PEN] == 0 && grow[S_PEN] == 0) {
+		base[S_PEN] = (!magic && base[S_STR] >= 9) ? 4 : 0;
+		grow[S_PEN] = (!magic && base[S_STR] >= 9) ? 10 : 4;
+	}
+}
+static int s_sheet = 0;
+static void EnsureSheets()
+{
+	if (s_sheet) return;
+	s_sheet = 1;
+	for (int i = 0; i < C_PLAYER_COUNT; i++) {
+		ClassDef& d = kClass[i];
+		FillUnitSheet(d.base, d.grow, d.group, d.magic, d.moveType == MV_FLY, d.jump, d.rMax);
+	}
+	auto put = [](int cls, int slot, int lv, int sk) {
+		kClass[cls].learn[slot].lv = lv;
+		kClass[cls].learn[slot].skill = sk;
+	};
+	put(C_SOLDIER, 6, 8, SKL_CRESCENT);
+	put(C_FIGHTER, 6, 8, SKL_CRESCENT);
+	put(C_ARCHER, 6, 8, SKL_SHOWER);
+	put(C_ARCHER, 7, 12, SKL_SHINE);
+	put(C_MAGE, 6, 8, SKL_FROSTFIELD);
+	put(C_PALADIN, 6, 32, SKL_CRESCENT);
+	put(C_RUNEKNIGHT, 6, 28, SKL_THUNDERFIELD);
+	put(C_BERSERKER, 6, 28, SKL_GRANDSLASH);
+	put(C_SNIPER, 4, 22, SKL_SHOWER);
+	put(C_SNIPER, 5, 28, SKL_SHINE);
+	put(C_WIZARD, 6, 30, SKL_THUNDERFIELD);
+	put(C_WIZARD, 7, 36, SKL_STORM);
+	put(C_BISHOP, 6, 30, SKL_NOVA);
+	put(C_HERO, 6, 48, SKL_GRANDSLASH);
+	put(C_ARCHMAGE, 6, 44, SKL_STORM);
+	put(C_SAINT, 6, 46, SKL_NOVA);
+	put(C_PHANTOM, 6, 44, SKL_SHOWER);
+	put(C_PHANTOM, 7, 50, SKL_SHINE);
+	put(C_DRAGONLORD, 6, 46, SKL_GRANDSLASH);
+	put(C_ALCHEMIST, 6, 28, SKL_FROSTFIELD);
+	put(C_ALCHEMIST, 7, 32, SKL_THUNDERFIELD);
+	put(C_ARCHALCHEMIST, 4, 44, SKL_STORM);
+	put(C_ARCHALCHEMIST, 5, 50, SKL_FROSTFIELD);
+	for (int c = 0; c < C_PLAYER_COUNT; c++)
+		for (int s = 0; s < LEARN_N; s++)
+			if (kClass[c].learn[s].lv <= 0) kClass[c].learn[s].skill = -1;
+}
 static void BuildExt()
 {
 	if (s_extOk) return;
+	EnsureSheets();
 	for (int line = 0; line < TAC_RANK_LINES; line++) {
 		const ClassDef& p = kClass[kLineParent[line]];
 		for (int r = 0; r < TAC_RANK_N; r++) {
@@ -1105,7 +1197,12 @@ static void BuildExt()
 			d.nameTx = TX_RK_FIRST + line * TAC_RANK_N + r;
 			d.descTx = TX_RK_LINE0 + line;
 			d.weaponPow = p.weaponPow + r * 2;
-			for (int s = 0; s < S_COUNT; s++) if (s != S_MOV) d.base[s] = p.base[s] + r * (s == S_HP || s == S_MP ? 4 : 1);
+			for (int s = 0; s < S_COUNT; s++) {
+				if (s == S_MOV) continue;
+				if (s >= S_JMP) d.base[s] = p.base[s] + (r + 1) / 2;
+				else d.base[s] = p.base[s] + r * (s == S_HP || s == S_MP ? 4 : 1);
+			}
+			d.base[S_MOV] = p.base[S_MOV] + (r + 1) / 2;
 			int arrive = PromoteLevel(rank - 1);
 			d.learn[0].lv = arrive; d.learn[0].skill = kExtSkill[line][r];
 			int g = p.group;
@@ -1122,6 +1219,7 @@ static void BuildExt()
 }
 const ClassDef& ClassInfo(int c)
 {
+	EnsureSheets();
 	if (c >= 0 && c < C_PLAYER_COUNT) return kClass[c];
 	BuildExt();
 	int i = c - C_PLAYER_COUNT;
@@ -1161,7 +1259,8 @@ bool IsUltimateSkill(int skill)
 	if (skill >= CRAFT_BASE && skill < CRAFT_BASE + CRAFT_N) return IsCraftSuper(skill);
 	switch (skill) {
 	case SKL_DRAGONFANG: case SKL_BRAVE: case SKL_METEOR: case SKL_ASSASSINATE:
-	case SKL_GODSLASH: case SKL_RUIN: case SKL_APOC: return true;
+	case SKL_GODSLASH: case SKL_RUIN: case SKL_APOC:
+	case SKL_SHINE: case SKL_GRANDSLASH: case SKL_STORM: case SKL_NOVA: return true;
 	default:
 		if (skill >= SKL_ART0 && skill < SKL_ARTN) {
 			int lv = (skill - SKL_ART0) % 26;
@@ -1189,7 +1288,7 @@ static const SkillDef kSkill[] = {
 	{ TX_SK_FIRE, TX_SKD_FIRE, SK_MAGIC, 4, 8, 1, 3, 0, EL_FIRE, 1, 0, EF_NONE, 0 },
 	{ TX_SK_BLIZZARD, TX_SKD_BLIZZARD, SK_MAGIC, 8, 11, 1, 3, 1, EL_ICE, 1, 0, EF_NONE, 0 },
 	{ TX_SK_THUNDER, TX_SKD_THUNDER, SK_MAGIC, 8, 14, 1, 4, 0, EL_THUNDER, 1, 0, EF_NONE, 0 },
-	{ TX_SK_METEOR, TX_SKD_METEOR, SK_MAGIC, 20, 22, 2, 5, 2, EL_FIRE, 1, 0, EF_NONE, 0 },
+	{ TX_SK_METEOR, TX_SKD_METEOR, SK_MAGIC, 20, 18, 2, 6, 3, EL_FIRE, 1, 0, EF_NONE, 0 },
 	{ TX_SK_RUNEBLADE, TX_SKD_RUNEBLADE, SK_MAGIC, 6, 12, 1, 1, 0, EL_THUNDER, 1, 0, EF_NONE, 0 },
 	{ TX_SK_HOLY, TX_SKD_HOLY, SK_MAGIC, 14, 18, 1, 3, 0, EL_HOLY, 1, 0, EF_NONE, 0 },
 	{ TX_SK_DARKNESS, TX_SKD_DARKNESS, SK_MAGIC, 10, 16, 1, 3, 0, EL_DARK, 1, 0, EF_DEFDOWN, 0 },
@@ -1224,10 +1323,22 @@ static const SkillDef kSkill[] = {
 	{ TX_SK_MIRROR, TX_SKD_MIRROR, SK_BUFF, 8, 0, 0, 2, 0, EL_ICE, 1, 0, EF_BUFF_DEF, 0 },
 	{ TX_SK_GODSLASH, TX_SKD_GODSLASH, SK_PHYS, 22, 300, -1, -1, 0, EL_HOLY, 1, 20, EF_NONE, 0 },
 	{ TX_SK_RUIN, TX_SKD_RUIN, SK_MAGIC, 24, 30, 1, 4, 1, EL_DARK, 1, 0, EF_DEFDOWN, 0 },
-	{ TX_SK_APOC, TX_SKD_APOC, SK_MAGIC, 28, 26, 0, 0, 2, EL_FIRE, 1, 0, EF_NONE, 0 },
+	{ TX_SK_APOC, TX_SKD_APOC, SK_MAGIC, 28, 20, 0, 0, 3, EL_FIRE, 1, 0, EF_NONE, 0 },
 	{ TX_SK_TRANSMUTE, TX_SKD_TRANSMUTE, SK_BUFF, 4, 0, 0, 1, 0, EL_EARTH, 1, 0, EF_BUFF_ATK, 0 },
 };
 static_assert(sizeof(kSkill) / sizeof(kSkill[0]) == SKL_ART0, "base skill table");
+
+static const SkillDef kWide[] = {
+	{ TX_SK_SHOWER, TX_SKD_SHOWER, SK_PHYS, 14, 70, 2, 6, 2, EL_WIND, 1, 0, EF_NONE, 0 },
+	{ TX_SK_SHINE, TX_SKD_SHINE, SK_PHYS, 16, 62, 2, 6, 4, EL_HOLY, 1, 0, EF_NONE, 0 },
+	{ TX_SK_CRESCENT, TX_SKD_CRESCENT, SK_PHYS, 10, 95, 0, 0, 2, EL_WIND, 1, 0, EF_NONE, 0 },
+	{ TX_SK_GRANDSLASH, TX_SKD_GRANDSLASH, SK_PHYS, 16, 80, 0, 0, 4, EL_NONE, 1, 0, EF_NONE, 0 },
+	{ TX_SK_STORM, TX_SKD_STORM, SK_MAGIC, 26, 14, 2, 6, 4, EL_FIRE, 1, 0, EF_NONE, 0 },
+	{ TX_SK_FROSTFIELD, TX_SKD_FROSTFIELD, SK_MAGIC, 14, 9, 1, 4, 2, EL_ICE, 1, 0, EF_NONE, 0 },
+	{ TX_SK_THUNDERFIELD, TX_SKD_THUNDERFIELD, SK_MAGIC, 16, 11, 1, 5, 2, EL_THUNDER, 1, 0, EF_NONE, 0 },
+	{ TX_SK_NOVA, TX_SKD_NOVA, SK_MAGIC, 18, 12, 0, 0, 4, EL_HOLY, 1, 0, EF_NONE, 0 },
+};
+static_assert(sizeof(kWide) / sizeof(kWide[0]) == SKL_COUNT - (SKL_RAISE + 1), "wide skill table");
 
 static SkillDef s_art[SKL_ARTN - SKL_ART0];
 static int s_artOk = 0;
@@ -1276,12 +1387,13 @@ const SkillDef& SkillInfo(int s)
 		BuildArts();
 		return s_art[s - SKL_ART0];
 	}
+	if (s > SKL_RAISE && s < SKL_COUNT) return kWide[s - (SKL_RAISE + 1)];
 	return kSkill[Clampi(s, 0, SKL_ART0 - 1)];
 }
 
 // ============================================================ モンスター
 // name, look, model, wlook, move, jump, rMin, rMax, mag, pow, style, base, grow, skills, minStage, weight, scale, tint
-static const MonsterDef kMon[M_COUNT] = {
+static MonsterDef kMon[M_COUNT] = {
 	{ TX_MO_SLIME, LK_SLIME, -1, 0, MV_FOOT, 1, 1, 1, 0, 3, AS_BITE,
 	  { 22, 4, 6, 4, 0, 4, 3, 4, 2, 3 }, { 60, 5, 40, 40, 0, 30, 20, 30, 20, 0 }, { SKL_E_SPIT, -1, -1 }, 1, 10, 1.0f, 0x60E070, 16, -1 },
 	{ TX_MO_SKEL_MINION, LK_KAYKIT, 6, 1, MV_FOOT, 2, 1, 1, 0, 4, AS_SLASH,
@@ -1291,19 +1403,19 @@ static const MonsterDef kMon[M_COUNT] = {
 	{ TX_MO_SKEL_ARCHER, LK_KAYKIT, 7, 3, MV_FOOT, 2, 2, 3, 0, 5, AS_SHOOT,
 	  { 18, 0, 7, 3, 0, 3, 6, 8, 3, 4 }, { 40, 0, 45, 25, 0, 20, 40, 55, 25, 0 }, { -1, -1, -1 }, 4, 7, 1.0f, 0xFFFFFF, 28, -1 },
 	{ TX_MO_BAT, LK_BAT, -1, 0, MV_FLY, 9, 1, 1, 0, 4, AS_BITE,
-	  { 15, 6, 6, 2, 0, 3, 11, 7, 6, 6 }, { 35, 10, 40, 20, 0, 25, 60, 45, 40, 0 }, { SKL_E_DRAIN, -1, -1 }, 5, 6, 1.0f, 0x806070, 32, -1 },
+	{ 15, 6, 6, 2, 0, 3, 11, 7, 6, 7 }, { 35, 10, 40, 20, 0, 25, 60, 45, 40, 0 }, { SKL_E_DRAIN, -1, -1 }, 5, 6, 1.0f, 0x806070, 32, -1 },
 	{ TX_MO_LICH, LK_KAYKIT, 8, 4, MV_FOOT, 2, 1, 3, 1, 4, AS_CAST,
-	  { 20, 20, 1, 3, 8, 8, 5, 6, 4, 4 }, { 40, 50, 5, 25, 60, 50, 30, 40, 30, 0 }, { SKL_FIRE, SKL_DARKNESS, SKL_HEAL }, 8, 5, 1.0f, 0xD8C8FF, 40, -1 },
+	{ 20, 20, 1, 3, 8, 8, 5, 6, 4, 3 }, { 40, 50, 5, 25, 60, 50, 30, 40, 30, 0 }, { SKL_FIRE, SKL_DARKNESS, SKL_HEAL }, 8, 5, 1.0f, 0xD8C8FF, 40, -1 },
 	{ TX_MO_POISON_SLIME, LK_SLIME, -1, 0, MV_FOOT, 1, 1, 1, 0, 5, AS_BITE,
 	  { 28, 8, 8, 6, 0, 6, 4, 5, 3, 3 }, { 65, 10, 45, 45, 0, 35, 25, 35, 20, 0 }, { SKL_E_VENOM, SKL_E_SPIT, -1 }, 12, 6, 1.15f, 0xB070E0, 36, -1 },
 	{ TX_MO_GOLEM, LK_GOLEM, -1, 0, MV_FOOT, 1, 1, 1, 0, 8, AS_PUNCH,
-	  { 40, 8, 12, 14, 0, 4, 2, 5, 1, 3 }, { 75, 10, 60, 70, 0, 25, 10, 30, 10, 0 }, { SKL_E_QUAKE, -1, -1 }, 15, 4, 1.0f, 0xFFFFFF, 48, -1 },
+	{ 40, 8, 12, 14, 0, 4, 2, 5, 1, 2 }, { 75, 10, 60, 70, 0, 25, 10, 30, 10, 0 }, { SKL_E_QUAKE, -1, -1 }, 15, 4, 1.0f, 0xFFFFFF, 48, -1 },
 	{ TX_MO_WYVERN, LK_WYVERN, -1, 0, MV_FLY, 9, 1, 1, 0, 8, AS_BITE,
 	  { 34, 12, 12, 8, 6, 6, 9, 8, 5, 6 }, { 60, 20, 60, 45, 20, 30, 45, 40, 30, 0 }, { SKL_E_BREATH, -1, -1 }, 20, 4, 1.0f, 0x7AA060, 60, -1 },
 	{ TX_MO_DARK_KNIGHT, LK_KAYKIT, 5, 5, MV_FOOT, 2, 1, 1, 0, 9, AS_SLASH,
 	  { 36, 10, 14, 13, 2, 8, 7, 9, 4, 5 }, { 60, 10, 65, 60, 10, 35, 35, 45, 25, 0 }, { SKL_E_CRUSH, SKL_BASH, -1 }, 30, 4, 1.12f, 0x8070A0, 70, -1 },
 	{ TX_MO_DRAGON, LK_WYVERN, -1, 0, MV_FLY, 9, 1, 1, 0, 12, AS_BITE,
-	  { 70, 30, 18, 14, 14, 12, 8, 10, 8, 5 }, { 90, 40, 70, 55, 60, 45, 35, 40, 30, 0 }, { SKL_E_BREATH, SKL_E_CRUSH, -1 }, 80, 1, 1.75f, 0xE05040, 0, -1 },
+	{ 70, 30, 18, 14, 14, 12, 8, 10, 8, 6 }, { 90, 40, 70, 55, 60, 45, 35, 40, 30, 0 }, { SKL_E_BREATH, SKL_E_CRUSH, -1 }, 80, 1, 1.75f, 0xE05040, 0, -1 },
 };
 
 #include "tactics_src/mon_species.inc"
@@ -1320,7 +1432,11 @@ static int s_monImpOk = 0;
 
 static void EnsureMonsters()
 {
-	if (s_monImpOk) return;
+	if (!s_monImpOk) {
+	for (int i = 0; i < M_COUNT; i++) {
+		MonsterDef& d = kMon[i];
+		FillUnitSheet(d.base, d.grow, G_MELEE, d.magAttack, d.moveType == MV_FLY, d.jump, d.rMax);
+	}
 	for (int i = 0; i < kImportN && i < 160; i++) {
 		MonsterDef& d = s_monImp[i];
 		memset(&d, 0, sizeof(d));
@@ -1345,7 +1461,8 @@ static void EnsureMonsters()
 		d.base[S_AGI] = 4 + (d.moveType == MV_FLY ? 3 : 0) + (i % 3);
 		d.base[S_DEX] = 4 + (i % 4);
 		d.base[S_LUK] = 2 + (i % 3);
-		d.base[S_MOV] = d.moveType == MV_FLY ? 6 : 4;
+		d.base[S_MOV] = d.moveType == MV_FLY ? (6 + (i % 3)) : (d.magAttack ? (3 + (i % 2)) : ((i % 5 == 0) ? 2 : ((i % 3 == 0) ? 5 : 4)));
+		FillUnitSheet(d.base, d.grow, d.magAttack ? G_MAGIC : (d.moveType == MV_FLY ? G_SWIFT : G_MELEE), d.magAttack, d.moveType == MV_FLY, d.jump, d.rMax);
 		d.grow[S_HP] = 45 + tier * 4;
 		d.grow[S_STR] = 40 + tier * 2;
 		d.grow[S_DEF] = 30 + tier;
@@ -1362,6 +1479,7 @@ static void EnsureMonsters()
 		d.weight = 8;
 		d.scale = 1.f;
 		d.tint = 0xFFFFFF;
+	}
 	}
 	s_monImpOk = 1;
 }
@@ -1380,6 +1498,7 @@ static int ImportPick(int stage, Rng& r, int bias)
 
 const MonsterDef& MonsterInfo(int m)
 {
+	EnsureSheets();
 	EnsureMonsters();
 	if (m >= M_COUNT && m < M_COUNT + kImportN) return s_monImp[m - M_COUNT];
 	if (m < 0 || m >= M_COUNT) m = 0;
@@ -1433,7 +1552,7 @@ static int PaceSkill(int cls, int lv)
 {
 	if (lv < 7 || lv > 32) return -1;
 	const ClassDef& cd = ClassInfo(cls);
-	for (int i = 0; i < 6; i++) if (cd.learn[i].skill >= 0 && cd.learn[i].lv == lv) return -1;
+	for (int i = 0; i < LEARN_N; i++) if (cd.learn[i].skill >= 0 && cd.learn[i].lv == lv) return -1;
 	int g = cd.group;
 	if (g < 0 || g >= G_COUNT) g = 0;
 	return SKL_ART0 + g * 26 + (lv - 7);
@@ -1442,7 +1561,7 @@ static int PaceSkill(int cls, int lv)
 void CharGrantReached(CharData& c)
 {
 	const ClassDef& cd = ClassInfo(c.cls);
-	for (int i = 0; i < 6; i++)
+	for (int i = 0; i < LEARN_N; i++)
 		if (cd.learn[i].skill >= 0 && cd.learn[i].lv > 0 && cd.learn[i].lv <= c.lv)
 			CharGiveSkill(c, cd.learn[i].skill);
 	int hi = c.lv < 32 ? c.lv : 32;
@@ -1464,6 +1583,37 @@ void CharRecalcInit(CharData& c)
 	c.skills = 0;
 	memset(c.reserved, 0, sizeof(c.reserved));
 	CharGrantReached(c);
+}
+
+static int MoveCap(int moveType) { return moveType == MV_FLY ? 14 : 12; }
+static int StatFloor(int s)
+{
+	if (s == S_MP || s == S_MAG || s == S_RES || s == S_RCV || s == S_MPR || s == S_CPL || s == S_RNG || s == S_PEN || s == S_GRD || s == S_HIT || s == S_AVO || s == S_CRT) return 0;
+	return 1;
+}
+// 現在の職とレベルから能力を期待値で組み直す。技・装備・経験値はそのまま。
+void CharRecalcProgress(CharData& c)
+{
+	if (!c.used) return;
+	const ClassDef& cd = ClassInfo(c.cls);
+	int lv = Clampi(c.lv, 1, TAC_LV_MAX);
+	int steps = lv - 1;
+	for (int s = 0; s < S_COUNT; s++) {
+		int v = cd.base[s];
+		if (s == S_HP || s == S_MP) v += (cd.grow[s] / 10) * steps;
+		else v += cd.grow[s] * steps / 100;
+		c.stat[s] = max(StatFloor(s), v);
+	}
+	if (c.gender == 1) {
+		c.stat[S_AGI] += 1;
+		c.stat[S_RES] += 1;
+		c.stat[S_STR] = max(1, c.stat[S_STR] - 1);
+	}
+	int cap = MoveCap(cd.moveType);
+	if (c.stat[S_MOV] > cap) c.stat[S_MOV] = cap;
+	if (c.stat[S_JMP] > 12) c.stat[S_JMP] = 12;
+	if (c.stat[S_RNG] > 3) c.stat[S_RNG] = 3;
+	c.lv = lv;
 }
 
 void CharGiveSkill(CharData& c, int s)
@@ -1488,7 +1638,7 @@ bool CharHasSkill(const CharData& c, int s)
 int CharLearnAt(const CharData& c, int lv)
 {
 	const ClassDef& cd = ClassInfo(c.cls);
-	for (int i = 0; i < 6; i++) if (cd.learn[i].skill >= 0 && cd.learn[i].lv == lv) return cd.learn[i].skill;
+	for (int i = 0; i < LEARN_N; i++) if (cd.learn[i].skill >= 0 && cd.learn[i].lv == lv) return cd.learn[i].skill;
 	if (cd.group == G_HOLY && lv == 7) return SKL_RAISE;
 	return PaceSkill(c.cls, lv);
 }
@@ -1501,11 +1651,19 @@ int CharLevelUp(CharData& c, Rng& r, int gains[S_COUNT])
 		int g = cd.grow[s], add = 0;
 		if (s == S_HP || s == S_MP) {
 			add = g / 10 + ((int)(r.Next() % 10) < g % 10 ? 1 : 0);
-		} else if (s != S_MOV) {
+		} else {
 			add = g / 100 + ((int)(r.Next() % 100) < g % 100 ? 1 : 0);
 		}
 		gains[s] = add;
 		c.stat[s] += add;
+		if (s == S_MOV) {
+			int cap = MoveCap(cd.moveType);
+			if (c.stat[s] > cap) { gains[s] -= c.stat[s] - cap; c.stat[s] = cap; }
+		} else if (s == S_JMP && c.stat[s] > 12) {
+			gains[s] -= c.stat[s] - 12; c.stat[s] = 12;
+		} else if (s == S_RNG && c.stat[s] > 3) {
+			gains[s] -= c.stat[s] - 3; c.stat[s] = 3;
+		}
 		if (s != S_HP && s != S_MP) total += add;
 	}
 	if (total == 0) {
@@ -1516,7 +1674,7 @@ int CharLevelUp(CharData& c, Rng& r, int gains[S_COUNT])
 	int sk = CharLearnAt(c, c.lv);
 	int learned = -1;
 	if (sk >= 0 && !CharHasSkill(c, sk)) { CharGiveSkill(c, sk); learned = sk; }
-	for (int i = 0; i < 6; i++) {
+	for (int i = 0; i < LEARN_N; i++) {
 		int o = cd.learn[i].skill;
 		if (o < 0 || o == sk || cd.learn[i].lv != c.lv || CharHasSkill(c, o)) continue;
 		CharGiveSkill(c, o);
@@ -1627,13 +1785,30 @@ int UnitStat(const Unit& u, int s)
 	if ((s == S_STR || s == S_MAG) && u.buffAtk > 0) v = v * 125 / 100;
 	if (u.mulTurns > 0 && (s == S_STR || s == S_MAG || s == S_DEF || s == S_RES || s == S_AGI)) v *= 2;
 	if (s == S_DEF && UnitHasSkill(u, SKL_P_IRON)) v = v * 115 / 100;
+	if (s == S_MOV) {
+		int cap = MoveCap(UnitMoveType(u));
+		if (v > cap) v = cap;
+		if (v < 1) v = 1;
+	} else if (s == S_JMP) {
+		if (v > 12) v = 12;
+		if (v < 1) v = 1;
+	} else if (s == S_RNG) {
+		if (v > 3) v = 3;
+		if (v < 0) v = 0;
+	}
 	return v;
 }
-int UnitMove(const Unit& u) { return u.ch.stat[S_MOV]; }
-int UnitJump(const Unit& u) { return IsMon(u) ? MonsterInfo(u.monster).jump : ClassInfo(u.ch.cls).jump; }
+int UnitMove(const Unit& u) { return UnitStat(u, S_MOV); }
+int UnitJump(const Unit& u) { return UnitStat(u, S_JMP); }
 int UnitMoveType(const Unit& u) { return IsMon(u) ? MonsterInfo(u.monster).moveType : ClassInfo(u.ch.cls).moveType; }
 int UnitRangeMin(const Unit& u) { return IsMon(u) ? MonsterInfo(u.monster).rMin : ClassInfo(u.ch.cls).rMin; }
-int UnitRangeMax(const Unit& u) { return IsMon(u) ? MonsterInfo(u.monster).rMax : ClassInfo(u.ch.cls).rMax; }
+int UnitRangeMax(const Unit& u)
+{
+	int r = (IsMon(u) ? MonsterInfo(u.monster).rMax : ClassInfo(u.ch.cls).rMax) + UnitStat(u, S_RNG);
+	if (r < 1) r = 1;
+	if (r > 9) r = 9;
+	return r;
+}
 int UnitMagAttack(const Unit& u) { return IsMon(u) ? MonsterInfo(u.monster).magAttack : ClassInfo(u.ch.cls).magAttack; }
 int UnitWeaponPow(const Unit& u) { return IsMon(u) ? MonsterInfo(u.monster).weaponPow + u.ch.lv / 6 : ClassInfo(u.ch.cls).weaponPow + u.ch.lv / 8; }
 int UnitAttackStyle(const Unit& u) { return IsMon(u) ? MonsterInfo(u.monster).attackStyle : ClassInfo(u.ch.cls).attackStyle; }
@@ -1666,13 +1841,22 @@ void MakeEnemy(Unit& u, int monster, int lv, int boss, Rng& r)
 		int g = md.grow[s];
 		int v = md.base[s];
 		if (s == S_HP || s == S_MP) v += g * (u.ch.lv - 1) / 10;
-		else if (s != S_MOV) v += g * (u.ch.lv - 1) / 100;
-		if (s != S_MOV && s != S_MP) v += r.Range(-1, 1);
-		u.ch.stat[s] = max(s == S_MP ? 0 : 1, v);
+		else v += g * (u.ch.lv - 1) / 100;
+		if (s != S_MOV && s != S_JMP && s != S_RNG && s != S_MP) v += r.Range(-1, 1);
+		u.ch.stat[s] = max(StatFloor(s), v);
+	}
+	{
+		int cap = MoveCap(md.moveType);
+		if (u.ch.stat[S_MOV] > cap) u.ch.stat[S_MOV] = cap;
+		if (u.ch.stat[S_JMP] > 12) u.ch.stat[S_JMP] = 12;
+		if (u.ch.stat[S_RNG] > 3) u.ch.stat[S_RNG] = 3;
 	}
 	if (boss) {
 		u.ch.stat[S_HP] = u.ch.stat[S_HP] * 3 / 2;
 		u.ch.stat[S_STR] += 2; u.ch.stat[S_MAG] += 2; u.ch.stat[S_DEF] += 2; u.ch.stat[S_RES] += 2;
+		u.ch.stat[S_MOV] = min(MoveCap(md.moveType), u.ch.stat[S_MOV] + 1);
+		u.ch.stat[S_GRD] += 2;
+		u.ch.stat[S_PEN] += 2;
 	}
 	for (int i = 0; i < 3; i++) {
 		int sk = md.skills[i];
@@ -1692,11 +1876,11 @@ void MakeEnemy(Unit& u, int monster, int lv, int boss, Rng& r)
 			line = kLine[monster];
 		} else line = MonsterDropLine(monster);
 		if (line < 0 || line >= CRAFT_LINES) line = 0;
-		int a = (monster * 3) % 10;
-		int b = (monster * 5 + 1) % 10;
-		if (b == a) b = (b + 3) % 10;
+		int a = (monster * 3) % CRAFT_NORM;
+		int b = (monster * 5 + 1) % CRAFT_NORM;
+		if (b == a) b = (b + 3) % CRAFT_NORM;
 		u.craftEq[0] = CRAFT_BASE + line * CRAFT_PER_LINE + a;
-		u.craftEq[1] = CRAFT_BASE + line * CRAFT_PER_LINE + ((boss || u.ch.lv >= 18) ? 10 : b);
+		u.craftEq[1] = CRAFT_BASE + line * CRAFT_PER_LINE + ((boss || u.ch.lv >= 18) ? CRAFT_NORM : b);
 	}
 }
 
@@ -1896,7 +2080,7 @@ static void StrikeCalc(const Battle& b, const Unit& a, const Unit& d, int skill,
 		int evade = UnitStat(d, S_AGI) * 2 + UnitStat(d, S_LUK) / 2 + tavo + (UnitHasSkill(d, SKL_P_EVADE) ? 15 : 0);
 		hit = 80 + UnitStat(a, S_DEX) * 2 + UnitStat(a, S_LUK) / 2 - evade + (sd ? 10 : 0);
 		hit = Clampi(hit, 5, 99);
-		crit = UnitStat(a, S_DEX) / 2 + UnitStat(a, S_LUK) / 3 - UnitStat(d, S_LUK) / 3 + (sd ? sd->critBonus : 0)
+		crit = UnitStat(a, S_DEX) / 2 + UnitStat(a, S_LUK) / 3 + UnitStat(a, S_CRT) - UnitStat(d, S_LUK) / 3 + (sd ? sd->critBonus : 0)
 			+ (UnitHasSkill(a, SKL_P_CRIT) ? 10 : 0);
 		crit = Clampi(crit, 0, sd ? 80 : 50);
 	}
@@ -1918,11 +2102,21 @@ static void StrikeCalc(const Battle& b, const Unit& a, const Unit& d, int skill,
 		if (face == 2) hit += 10;
 		else if (face == 0) hit -= 8;
 	}
+	hit += UnitStat(a, S_HIT);
+	hit -= UnitStat(d, S_AVO);
 	int tri = TriRel(WeaponOf(a), WeaponOf(d));
 	if (tri > 0) { hit += 15; dm *= 1.1f; }
 	if (tri < 0) { hit -= 15; dm *= 0.9f; }
 	if (WeaponOf(a) == WT_BOW && UnitMoveType(d) == MV_FLY) { hit += 20; dm *= 1.15f; }
 	hit = Clampi(hit, magic ? 20 : 5, magic ? 100 : 99);
+	{
+		int pen = UnitStat(a, S_PEN);
+		if (pen > 40) pen = 40;
+		if (pen > 0 && !magic) dm *= (100 - pen) / 100.f;
+		int grd = UnitStat(d, S_GRD);
+		if (grd > 30) grd = 30;
+		if (grd > 0) dm *= (100 - grd) / 100.f;
+	}
 	dmg = max(1, (int)roundf(dm));
 }
 
@@ -2053,6 +2247,7 @@ static void ApplyEffect(Battle& b, Unit& a, Unit& d, int effect)
 static void AddCp(Unit& u, int n)
 {
 	if (n < 1) return;
+	n += max(0, UnitStat(u, S_CPL) / 4);
 	if (u.cp < 0) u.cp = 0;
 	int c = u.cp + n;
 	if (c > CP_MAX) c = CP_MAX;
@@ -2377,6 +2572,17 @@ int TurnStartEffects(Battle& b, int ui, int* healOut, int* poisonOut)
 		int before = u.hp;
 		u.hp = min(u.ch.stat[S_HP], u.hp + h);
 		*healOut = u.hp - before;
+	}
+	{
+		int rcv = UnitStat(u, S_RCV);
+		if (rcv > 0 && u.hp < u.ch.stat[S_HP]) {
+			int h = max(1, u.ch.stat[S_HP] * rcv / 100);
+			int before = u.hp;
+			u.hp = min(u.ch.stat[S_HP], u.hp + h);
+			*healOut += u.hp - before;
+		}
+		int mpr = UnitStat(u, S_MPR);
+		if (mpr > 0 && u.ch.stat[S_MP] > 0) u.mp = min(u.ch.stat[S_MP], u.mp + mpr);
 	}
 	if (u.poison > 0) {
 		int d = max(1, u.ch.stat[S_HP] * 8 / 100);
@@ -2752,6 +2958,33 @@ const wchar_t* GearName(int id)
 	if (id < 1 || id > kGearN) return L"?";
 	const wchar_t* const* s = kGearNm[id - 1];
 	return LangPick14(s[0], s[1], s[2], s[3], s[4], s[5], s[6], s[7], s[8], s[9], s[10], s[11], s[12], s[13]);
+}
+const wchar_t* GearRole(const GearDef* g)
+{
+	if (!g || g->line < 0 || g->line > 5) return L"";
+	static const int wpn[6] = { TX_GD_W0, TX_GD_W1, TX_GD_W2, TX_GD_W3, TX_GD_W4, TX_GD_W5 };
+	static const int arm[6] = { TX_GD_A0, TX_GD_A1, TX_GD_A2, TX_GD_A3, TX_GD_A4, TX_GD_A5 };
+	if (g->kind == 0) return TT(wpn[g->line]);
+	if (g->kind == 1) return TT(arm[g->line]);
+	return L"";
+}
+const wchar_t* GoodDesc(int i)
+{
+	const GoodDef* g = GoodAt(i);
+	if (!g) return L"";
+	if (g->item == IT_ELIXIR) return TT(TX_ITD_ELIXIR);
+	if (g->item == IT_MIGHT) return TT(TX_ITD_MIGHT);
+	if (g->item == IT_DELAY) return TT(TX_ITD_DELAY);
+	if (g->item == IT_RAISE) return TT(TX_ITD_RAISE);
+	if (g->extra == IX_FULL) return TT(TX_ITD_FULL);
+	if (g->extra == IX_ATK) return TT(TX_ITD_ATK);
+	if (g->extra == IX_DEF) return TT(TX_ITD_DEF);
+	if (g->extra == IX_AGI) return TT(TX_ITD_AGI);
+	if (g->extra == IX_SLOW) return TT(TX_ITD_SLOW);
+	if (g->extra == IX_VENOM) return TT(TX_ITD_VENOM);
+	if (g->extra == IX_CURE) return TT(TX_ITD_CURE);
+	if (g->extra == IX_ETHER) return TT(TX_ITD_ETHER);
+	return L"";
 }
 int ClassLine(int cls)
 {
@@ -3132,7 +3365,7 @@ void SaveDefaults(SaveData& s)
 {
 	memset(&s, 0, sizeof(s));
 	s.magic = kSaveMagic;
-	s.version = 2;
+	s.version = 3;
 	for (int i = 0; i < MAX_PARTY; i++) s.party[i] = -1;
 	s.stageSel = 1;
 	s.camSpeed = 1;
@@ -3147,10 +3380,37 @@ void SaveDefaults(SaveData& s)
 }
 
 #pragma pack(push, 4)
+struct CharSave10 {
+	wchar_t name[NAME_LEN];
+	int used;
+	int gender;
+	int cls;
+	int lv;
+	int exp;
+	int stat[10];
+	unsigned __int64 skills;
+	int body, hair, hairColor, outfit, hat, cape;
+	int kills, battles;
+	DWORD uid;
+	int reserved[8];
+};
+struct SaveV2 {
+	DWORD magic;
+	int version;
+	CharSave10 roster[MAX_ROSTER];
+	int party[MAX_PARTY];
+	int stageCleared, stageSel, winX, winY, winW, winH;
+	int camSpeed, quality, showGrid, battleAnim;
+	DWORD uidNext;
+	int winSizeVer;
+	int itemN[8];
+	int bgmVol, seVol, optInit, gold, gearN, gearId[12], reserved[4];
+	int partyCap, rosterCap;
+};
 struct SaveV1 {
 	DWORD magic;
 	int version;
-	CharData roster[20];
+	CharSave10 roster[20];
 	int party[5];
 	int stageCleared, stageSel, winX, winY, winW, winH;
 	int camSpeed, quality, showGrid, battleAnim;
@@ -3161,6 +3421,44 @@ struct SaveV1 {
 };
 #pragma pack(pop)
 
+static void CopyChar10(CharData& d, const CharSave10& o)
+{
+	memset(&d, 0, sizeof(d));
+	wcsncpy_s(d.name, o.name, _TRUNCATE);
+	d.used = o.used;
+	d.gender = o.gender;
+	d.cls = o.cls;
+	d.lv = o.lv;
+	d.exp = o.exp;
+	d.skills = o.skills;
+	d.body = o.body;
+	d.hair = o.hair;
+	d.hairColor = o.hairColor;
+	d.outfit = o.outfit;
+	d.hat = o.hat;
+	d.cape = o.cape;
+	d.kills = o.kills;
+	d.battles = o.battles;
+	d.uid = o.uid;
+	for (int i = 0; i < 8; i++) d.reserved[i] = o.reserved[i];
+}
+static void CopySaveTail(SaveData& s, int stageCleared, int stageSel, int winX, int winY, int winW, int winH,
+	int camSpeed, int quality, int showGrid, int battleAnim, DWORD uidNext, int winSizeVer,
+	const int* itemN, int bgmVol, int seVol, int optInit, int gold, int gearN, const int* gearId, const int* reserved,
+	int partyCap, int rosterCap)
+{
+	s.stageCleared = stageCleared; s.stageSel = stageSel;
+	s.winX = winX; s.winY = winY; s.winW = winW; s.winH = winH;
+	s.camSpeed = camSpeed; s.quality = quality; s.showGrid = showGrid; s.battleAnim = battleAnim;
+	s.uidNext = uidNext; s.winSizeVer = winSizeVer;
+	for (int i = 0; i < 8; i++) s.itemN[i] = itemN[i];
+	s.bgmVol = bgmVol; s.seVol = seVol; s.optInit = optInit;
+	s.gold = gold; s.gearN = gearN;
+	for (int i = 0; i < 12; i++) s.gearId[i] = gearId[i];
+	for (int i = 0; i < 4; i++) s.reserved[i] = reserved[i];
+	s.partyCap = partyCap;
+	s.rosterCap = rosterCap;
+}
 bool SaveLoad(SaveData& s)
 {
 	SaveDefaults(s);
@@ -3171,35 +3469,41 @@ bool SaveLoad(SaveData& s)
 	long sz = ftell(fp);
 	fseek(fp, 0, SEEK_SET);
 	BOOL got = FALSE;
+	BOOL recalc = FALSE;
 	if (sz == (long)sizeof(SaveV1)) {
 		SaveV1 o;
 		if (fread(&o, 1, sizeof(o), fp) == sizeof(o) && o.magic == kSaveMagic && o.version == 1) {
 			s.magic = o.magic;
-			s.version = 2;
-			for (int i = 0; i < 20; i++) s.roster[i] = o.roster[i];
+			for (int i = 0; i < 20; i++) CopyChar10(s.roster[i], o.roster[i]);
 			for (int i = 0; i < 5; i++) s.party[i] = o.party[i];
-			s.stageCleared = o.stageCleared; s.stageSel = o.stageSel;
-			s.winX = o.winX; s.winY = o.winY; s.winW = o.winW; s.winH = o.winH;
-			s.camSpeed = o.camSpeed; s.quality = o.quality; s.showGrid = o.showGrid; s.battleAnim = o.battleAnim;
-			s.uidNext = o.uidNext; s.winSizeVer = o.winSizeVer;
-			for (int i = 0; i < 8; i++) s.itemN[i] = o.itemN[i];
-			s.bgmVol = o.bgmVol; s.seVol = o.seVol; s.optInit = o.optInit;
-			s.gold = o.gold; s.gearN = o.gearN;
-			for (int i = 0; i < 12; i++) s.gearId[i] = o.gearId[i];
-			for (int i = 0; i < 4; i++) s.reserved[i] = o.reserved[i];
-			s.partyCap = 5;
-			s.rosterCap = 20;
+			CopySaveTail(s, o.stageCleared, o.stageSel, o.winX, o.winY, o.winW, o.winH,
+				o.camSpeed, o.quality, o.showGrid, o.battleAnim, o.uidNext, o.winSizeVer,
+				o.itemN, o.bgmVol, o.seVol, o.optInit, o.gold, o.gearN, o.gearId, o.reserved, 5, 20);
 			got = TRUE;
+			recalc = TRUE;
+		}
+	} else if (sz == (long)sizeof(SaveV2)) {
+		SaveV2 o;
+		if (fread(&o, 1, sizeof(o), fp) == sizeof(o) && o.magic == kSaveMagic && o.version == 2) {
+			s.magic = o.magic;
+			for (int i = 0; i < MAX_ROSTER; i++) CopyChar10(s.roster[i], o.roster[i]);
+			for (int i = 0; i < MAX_PARTY; i++) s.party[i] = o.party[i];
+			CopySaveTail(s, o.stageCleared, o.stageSel, o.winX, o.winY, o.winW, o.winH,
+				o.camSpeed, o.quality, o.showGrid, o.battleAnim, o.uidNext, o.winSizeVer,
+				o.itemN, o.bgmVol, o.seVol, o.optInit, o.gold, o.gearN, o.gearId, o.reserved, o.partyCap, o.rosterCap);
+			got = TRUE;
+			recalc = TRUE;
 		}
 	} else if (sz == (long)sizeof(SaveData)) {
 		SaveData t;
-		if (fread(&t, 1, sizeof(t), fp) == sizeof(t) && t.magic == kSaveMagic && t.version == 2) {
+		if (fread(&t, 1, sizeof(t), fp) == sizeof(t) && t.magic == kSaveMagic && t.version == 3) {
 			s = t;
 			got = TRUE;
 		}
 	}
 	fclose(fp);
 	if (!got) return false;
+	s.version = 3;
 	for (int i = 0; i < MAX_ROSTER; i++) {
 		CharData& c = s.roster[i];
 		c.name[NAME_LEN - 1] = 0;
@@ -3207,6 +3511,7 @@ bool SaveLoad(SaveData& s)
 		int clsMax = C_PLAYER_COUNT + TAC_RANK_LINES * TAC_RANK_N - 1;
 		c.cls = Clampi(c.cls, 0, clsMax);
 		c.lv = Clampi(c.lv, 1, TAC_LV_MAX);
+		if (recalc) CharRecalcProgress(c);
 		CharGrantReached(c);
 		c.body = Clampi(c.body, 0, B_COUNT - 1);
 		c.hair = Clampi(c.hair, 0, HAIR_STYLES - 1);

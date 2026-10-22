@@ -28,6 +28,14 @@ static const TCHAR* TARGET_EXE_NAME = _T("oggYSEDbgm_uni_avx2.exe");
 static const TCHAR* TARGET_HOST_EXE_NAME = _T("ogghost32.exe");
 static const TCHAR* TARGET_CHM_NAME = _T("oggYSEDbgm_uni_avx2.chm");
 static const TCHAR* TARGET_TAC_OGG = _T("tactics.ogg"); // 直下にあれば tacticsbgm へ入れる既知名の代表
+static const TCHAR* TACTICS_OGG_URL_BASE = _T("https://ppp.oohara.jp/download/");
+static const TCHAR* kTacOggNames[] = {
+	_T("tactics.ogg"),
+	_T("tacticsgame.ogg"),
+	_T("tacticsgamewin.ogg"),
+	_T("tacticsshop.ogg"),
+	_T("tacticsmake.ogg"),
+};
 static const TCHAR* TARGET_D3D_NAME = _T("d3dcompiler_47.dll");
 
 // 配布 ZIP / 展開 EXE の下限（空・404 HTML・途中切断を弾く）
@@ -918,6 +926,9 @@ static bool WriteTacOggBytes(const CString& dir, const wchar_t* fileOnly, const 
 	return ok;
 }
 
+// 書庫に無かった曲は、後段で https://ppp.oohara.jp/download/ の単体ファイルを足す。
+static void FillMissingTacOggs(const CString& destDir);
+
 // 書庫内の tacticsbgm\*.ogg（無ければ直下の既知 ogg）を destDir\tacticsbgm へ出す。無くても更新は成功。
 static void ExtractTacticsBgm(const CString& zipPath, const CString& destDir)
 {
@@ -1085,6 +1096,7 @@ static bool DoManualUpdateToDownloads(const CString& updateUrl, time_t serverTim
 	ExtractZipToDir(zipPath, destDir, TARGET_CHM_NAME, UPDATE_CHM_MIN_BYTES, false);
 	ExtractZipToDir(zipPath, destDir, TARGET_D3D_NAME, UPDATE_D3D_MIN_BYTES, true);
 	ExtractTacticsBgm(zipPath, destDir);
+	FillMissingTacOggs(destDir);
 	{
 		TCHAR staleHost[MAX_PATH];
 		_stprintf_s(staleHost, _T("%s\\KpiHost64.exe"), destDir);
@@ -1723,6 +1735,7 @@ bool DoUpdateAndRestart()
 	ExtractZipToDir(zipPath, extractDir, TARGET_CHM_NAME, UPDATE_CHM_MIN_BYTES, false);
 	ExtractZipToDir(zipPath, extractDir, TARGET_D3D_NAME, UPDATE_D3D_MIN_BYTES, true);
 	ExtractTacticsBgm(zipPath, extractDir);
+	FillMissingTacOggs(extractDir);
 	{
 		TCHAR staleHost[MAX_PATH];
 		_stprintf_s(staleHost, _T("%s\\KpiHost64.exe"), extractDir);
@@ -1857,6 +1870,23 @@ bool DoUpdateAndRestart()
 		cmdArgsA.Replace("%", "%%");
 	}
 
+	// 宛先を「フォルダ\」にすると \" が引用を壊し、フォルダ新設時に曲がコピーされない。
+	// 曲ごとにファイル名まで指定する。書庫にあれば展開済み、無ければ単体取得済み。
+	CStringA tacCopyA;
+	tacCopyA.Format(
+		"if not exist \"%s\\tacticsbgm\" mkdir \"%s\\tacticsbgm\" >nul 2>&1\r\n",
+		(LPCSTR)exeDirA, (LPCSTR)exeDirA);
+	for (int ti = 0; ti < (int)(sizeof(kTacOggNames) / sizeof(kTacOggNames[0])); ++ti) {
+		CStringA nm(kTacOggNames[ti]);
+		CStringA one;
+		one.Format(
+			"if exist \"%s\\tacticsbgm\\%s\" copy /y \"%s\\tacticsbgm\\%s\" \"%s\\tacticsbgm\\%s\" >nul 2>&1\r\n",
+			(LPCSTR)extractDirA, (LPCSTR)nm,
+			(LPCSTR)extractDirA, (LPCSTR)nm,
+			(LPCSTR)exeDirA, (LPCSTR)nm);
+		tacCopyA += one;
+	}
+
 	// 命令書は二段構えでございます。
 	//   ランチャー部（常に通常権限）… プロセス終了待ち→書込可否を判定→
 	//                                 書込可なら worker を同じ権限で実行、
@@ -1902,8 +1932,7 @@ bool DoUpdateAndRestart()
 		"if errorlevel 1 goto retry\r\n"
 		"if exist \"%s\\%s\" copy /y \"%s\\%s\" \"%s\" >nul 2>&1\r\n"
 		"if exist \"%s\\%s\" copy /y \"%s\\%s\" \"%s\" >nul 2>&1\r\n"
-		"if not exist \"%s\\tacticsbgm\" mkdir \"%s\\tacticsbgm\" >nul 2>&1\r\n"
-		"if exist \"%s\\tacticsbgm\\*.ogg\" copy /y \"%s\\tacticsbgm\\*.ogg\" \"%s\\tacticsbgm\\\" >nul 2>&1\r\n"
+		"%s"
 		"del /f /q \"%s\\KpiHost64.exe\" >nul 2>&1\r\n"
 		"goto :eof\r\n"
 		":retry\r\n"
@@ -1924,7 +1953,7 @@ bool DoUpdateAndRestart()
 		(LPCSTR)extractDirA, (LPCSTR)targetExeA, (LPCSTR)targetExePathA,          // 本体 上書き
 		(LPCSTR)extractDirA, (LPCSTR)targetChmA, (LPCSTR)extractDirA, (LPCSTR)targetChmA, (LPCSTR)targetChmPathA, // CHM（あれば・失敗してもOK）
 		(LPCSTR)extractDirA, (LPCSTR)targetD3dA, (LPCSTR)extractDirA, (LPCSTR)targetD3dA, (LPCSTR)targetD3dPathA,  // d3dcompiler（あれば）
-		(LPCSTR)exeDirA, (LPCSTR)exeDirA, (LPCSTR)extractDirA, (LPCSTR)extractDirA, (LPCSTR)exeDirA, // tacticsbgm\*.ogg
+		(LPCSTR)tacCopyA,                                            // tacticsbgm の各 ogg をファイル名指定で上書き
 		(LPCSTR)exeDirA                                                   // 旧 KpiHost64.exe 削除
 	);
 
@@ -1987,7 +2016,6 @@ static CString D3dCompilerExeBesidePath()
 	return dir + TARGET_D3D_NAME;
 }
 
-static const TCHAR* TACTICS_OGG_URL = _T("https://ppp.oohara.jp/download/tactics.ogg");
 static const ULONGLONG TACTICS_OGG_MIN_BYTES = 1024ULL;
 
 static bool FileStartsWithOggS(const CString& path)
@@ -2028,19 +2056,78 @@ static CString TacticsOggInBgmFolder()
 	return dir + _T("\\tactics.ogg");
 }
 
+static time_t FileWriteTimeUtc(const CString& path)
+{
+	WIN32_FILE_ATTRIBUTE_DATA a;
+	if (!GetFileAttributesEx(path, GetFileExInfoStandard, &a))
+		return 0;
+	ULARGE_INTEGER ull;
+	ull.LowPart = a.ftLastWriteTime.dwLowDateTime;
+	ull.HighPart = a.ftLastWriteTime.dwHighDateTime;
+	return (time_t)((ull.QuadPart - 116444736000000000ULL) / 10000000ULL);
+}
+
+static void SetFileWriteTimeUtc(const CString& path, time_t t)
+{
+	if (t <= 0) return;
+	HANDLE h = CreateFile(path, FILE_WRITE_ATTRIBUTES, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, NULL);
+	if (h == INVALID_HANDLE_VALUE) return;
+	ULARGE_INTEGER ull;
+	ull.QuadPart = ((ULONGLONG)t * 10000000ULL) + 116444736000000000ULL;
+	FILETIME ft;
+	ft.dwLowDateTime = ull.LowPart;
+	ft.dwHighDateTime = ull.HighPart;
+	SetFileTime(h, &ft, &ft, &ft);
+	CloseHandle(h);
+}
+
+// 書庫側に曲が無い（旧 zip/7z）とき、download/ の単体ファイルで埋める。ある曲は書庫のまま。
+static void FillMissingTacOggs(const CString& destDir)
+{
+	if (destDir.IsEmpty()) return;
+	CString bgm = destDir;
+	if (bgm.Right(1) != _T("\\"))
+		bgm += _T("\\");
+	bgm += _T("tacticsbgm");
+	CreateDirectory(bgm, NULL);
+	TCHAR tempPath[MAX_PATH] = { 0 };
+	GetTempPath(MAX_PATH, tempPath);
+	for (int i = 0; i < (int)(sizeof(kTacOggNames) / sizeof(kTacOggNames[0])); ++i) {
+		const CString dest = bgm + _T("\\") + kTacOggNames[i];
+		if (FileStartsWithOggS(dest))
+			continue;
+		const CString url = CString(TACTICS_OGG_URL_BASE) + kTacOggNames[i];
+		CString tmp;
+		tmp.Format(_T("%stacbgm_fill_%d.ogg"), tempPath, i);
+		if (!HttpDownloadToFile(url, tmp, TACTICS_OGG_MIN_BYTES, false) || !FileStartsWithOggS(tmp)) {
+			DeleteFile(tmp);
+			continue;
+		}
+		SetFileWriteTimeUtc(tmp, HttpGetLastModified(url));
+		SetFileAttributes(dest, FILE_ATTRIBUTE_NORMAL);
+		DeleteFile(dest);
+		if (!MoveFile(tmp, dest)) {
+			if (CopyFile(tmp, dest, FALSE))
+				DeleteFile(tmp);
+		}
+	}
+}
+
 static void EnsureTacticsBgmFolder()
 {
 	const CString dir = TacticsBgmFolder();
 	const CString exe = ExeFolder();
 	if (dir.IsEmpty()) return;
 	CreateDirectory(dir, NULL);
-	const CString dest = dir + _T("\\tactics.ogg");
-	const CString old = exe + _T("\\tactics.ogg");
-	if (!FileStartsWithOggS(dest) && FileStartsWithOggS(old)) {
-		DeleteFile(dest);
-		if (!MoveFile(old, dest)) {
-			if (CopyFile(old, dest, FALSE))
-				DeleteFile(old);
+	for (int i = 0; i < (int)(sizeof(kTacOggNames) / sizeof(kTacOggNames[0])); ++i) {
+		const CString dest = dir + _T("\\") + kTacOggNames[i];
+		const CString old = exe + _T("\\") + kTacOggNames[i];
+		if (!FileStartsWithOggS(dest) && FileStartsWithOggS(old)) {
+			DeleteFile(dest);
+			if (!MoveFile(old, dest)) {
+				if (CopyFile(old, dest, FALSE))
+					DeleteFile(old);
+			}
 		}
 	}
 }
@@ -2048,8 +2135,8 @@ static void EnsureTacticsBgmFolder()
 void EnsureTacticsOggAvailable()
 {
 	EnsureTacticsBgmFolder();
-	const CString dest = TacticsOggInBgmFolder();
-	if (dest.IsEmpty() || FileStartsWithOggS(dest))
+	const CString dir = TacticsBgmFolder();
+	if (dir.IsEmpty())
 		return;
 	DWORD dwFlags = 0;
 	if (!InternetGetConnectedState(&dwFlags, 0))
@@ -2057,35 +2144,56 @@ void EnsureTacticsOggAvailable()
 
 	TCHAR tempPath[MAX_PATH] = { 0 };
 	GetTempPath(MAX_PATH, tempPath);
-	CString tmp;
-	tmp.Format(_T("%stactics_fetch.ogg"), tempPath);
-	if (!HttpDownloadToFile(TACTICS_OGG_URL, tmp, TACTICS_OGG_MIN_BYTES, false) || !FileStartsWithOggS(tmp)) {
-		DeleteFile(tmp);
-		return;
+	CStringA batBody = "@echo off\r\n";
+	int pending = 0;
+	for (int i = 0; i < (int)(sizeof(kTacOggNames) / sizeof(kTacOggNames[0])); ++i) {
+		const CString dest = dir + _T("\\") + kTacOggNames[i];
+		const CString url = CString(TACTICS_OGG_URL_BASE) + kTacOggNames[i];
+		const time_t server = HttpGetLastModified(url);
+		if (server == 0)
+			continue;
+		const time_t local = FileWriteTimeUtc(dest);
+		if (FileStartsWithOggS(dest) && local + 2 >= server)
+			continue;
+		CString tmp;
+		tmp.Format(_T("%stacbgm_%d.ogg"), tempPath, i);
+		if (!HttpDownloadToFile(url, tmp, TACTICS_OGG_MIN_BYTES, false) || !FileStartsWithOggS(tmp)) {
+			DeleteFile(tmp);
+			continue;
+		}
+		SetFileWriteTimeUtc(tmp, server);
+		SetFileAttributes(dest, FILE_ATTRIBUTE_NORMAL);
+		if (CopyFile(tmp, dest, FALSE) && FileStartsWithOggS(dest)) {
+			SetFileWriteTimeUtc(dest, server);
+			DeleteFile(tmp);
+			continue;
+		}
+		CStringA srcA(tmp);
+		CStringA destA(dest);
+		CStringA line;
+		line.Format(
+			"copy /y \"%s\" \"%s\" >nul 2>&1\r\n"
+			"del /f /q \"%s\" >nul 2>&1\r\n",
+			(LPCSTR)srcA, (LPCSTR)destA, (LPCSTR)srcA);
+		batBody += line;
+		pending++;
 	}
-	SetFileAttributes(dest, FILE_ATTRIBUTE_NORMAL);
-	if (CopyFile(tmp, dest, FALSE) && FileStartsWithOggS(dest)) {
-		DeleteFile(tmp);
+	if (pending < 1)
 		return;
+	{
+		CStringA dirA(dir);
+		CStringA mk;
+		mk.Format("if not exist \"%s\" mkdir \"%s\" >nul 2>&1\r\n", (LPCSTR)dirA, (LPCSTR)dirA);
+		batBody = CStringA("@echo off\r\n") + mk + batBody.Mid(11);
 	}
 	/* Program Files など書込不可のときだけ、コピーだけを昇格して行う。再起動はしない。 */
 	TCHAR batPath[MAX_PATH] = { 0 };
 	_stprintf_s(batPath, _T("%stactics_ogg_place.bat"), tempPath);
 	CFile bat;
-	if (!bat.Open(batPath, CFile::modeCreate | CFile::modeWrite | CFile::shareExclusive)) {
-		DeleteFile(tmp);
+	if (!bat.Open(batPath, CFile::modeCreate | CFile::modeWrite | CFile::shareExclusive))
 		return;
-	}
-	CStringA srcA(tmp);
-	CStringA destA(dest);
-	CStringA batA;
-	batA.Format(
-		"@echo off\r\n"
-		"copy /y \"%s\" \"%s\" >nul 2>&1\r\n"
-		"del /f /q \"%s\" >nul 2>&1\r\n"
-		"del \"%%~f0\"\r\n",
-		(LPCSTR)srcA, (LPCSTR)destA, (LPCSTR)srcA);
-	bat.Write(batA, batA.GetLength());
+	batBody += "del \"%~f0\"\r\n";
+	bat.Write(batBody, batBody.GetLength());
 	bat.Close();
 	ShellExecute(NULL, _T("runas"), batPath, NULL, tempPath, SW_HIDE);
 }

@@ -151,7 +151,12 @@ struct Map {
 void GenerateMap(Map& m, int stage, DWORD seed);
 
 // ---------------- 能力値・クラス・スキル ----------------
-enum Stat { S_HP, S_MP, S_STR, S_DEF, S_MAG, S_RES, S_AGI, S_DEX, S_LUK, S_MOV, S_COUNT };
+enum Stat {
+	S_HP, S_MP, S_STR, S_DEF, S_MAG, S_RES, S_AGI, S_DEX, S_LUK, S_MOV,
+	S_JMP, S_HIT, S_AVO, S_CRT, S_GRD, S_RCV, S_MPR, S_CPL, S_RNG, S_PEN,
+	S_COUNT
+};
+static_assert(S_COUNT == 20, "能力は 20 種");
 int StatNameTx(int s);
 
 enum MoveType { MV_FOOT, MV_FLY };
@@ -171,6 +176,7 @@ enum ClassId {
 };
 enum { TAC_LV_MAX = 999, TAC_STAGE_MAX = 9999, TAC_RANK_LINES = 6, TAC_RANK_N = 7 };
 
+enum { LEARN_N = 10 };
 struct LearnDef { int lv; int skill; };
 struct ClassDef {
 	int nameTx;
@@ -187,7 +193,7 @@ struct ClassDef {
 	int attackStyle;
 	int base[S_COUNT];
 	int grow[S_COUNT]; // 成長率 %（HP/MP は ×10 で 1 レベルあたり期待値）
-	LearnDef learn[6];
+	LearnDef learn[LEARN_N];
 };
 const ClassDef& ClassInfo(int c);
 int PromoteLevel(int tier);
@@ -212,6 +218,7 @@ enum SkillId {
 	SKL_ART0,
 	SKL_ARTN = SKL_ART0 + 104,
 	SKL_RAISE,
+	SKL_SHOWER, SKL_SHINE, SKL_CRESCENT, SKL_GRANDSLASH, SKL_STORM, SKL_FROSTFIELD, SKL_THUNDERFIELD, SKL_NOVA,
 	SKL_COUNT
 };
 struct SkillDef {
@@ -254,6 +261,7 @@ struct CharData {
 #pragma pack(pop)
 
 void CharRecalcInit(CharData& c);                  // 新規作成時の初期能力
+void CharRecalcProgress(CharData& c);              // 現在Lvの期待値で能力を組み直す
 int  CharLevelUp(CharData& c, Rng& r, int gains[S_COUNT]);   // 戻り: 新規習得スキル id or -1
 int  CharLearnAt(const CharData& c, int lv);       // その Lv で覚えるスキル
 void CharGrantReached(CharData& c);                // 現在Lvまでに習得表へ載った技を付与
@@ -458,7 +466,7 @@ struct SaveData {
 	int partyCap;              // 5..10。店の編成拡張券
 	int rosterCap;             // 20,40,60,80,100。店の名簿の頁
 };
-// version 1 は名簿 20・編成 5 の旧サイズ。version 2 が現行。読込は両方受け、書き出しは 2。
+// version 1 は名簿 20・編成 5。version 2 は能力 10 種。version 3 が能力 20 種。読込は全部受け、書き出しは 3。
 #pragma pack(pop)
 void SaveDefaults(SaveData& s);
 bool SaveLoad(SaveData& s);
@@ -479,6 +487,8 @@ struct GearDef {
 int GearCount();
 const GearDef* GearOf(int id);
 const wchar_t* GearName(int id);
+const wchar_t* GearRole(const GearDef* g);
+const wchar_t* GoodDesc(int i);
 int ClassLine(int cls);
 int ItemExtraGet(const SaveData& s, int i);
 void ItemExtraAdd(SaveData& s, int i, int d);
@@ -502,7 +512,7 @@ int GoodHave(const SaveData& s, int i);
 bool GoodBuy(SaveData& s, int i);
 bool GoodTake(SaveData& s, int i);
 
-enum { CRAFT_BASE = 100000, CRAFT_PER_LINE = 14, CRAFT_LINES = 6, CRAFT_N = 84, CP_MAX = 200 };
+enum { CRAFT_BASE = 100000, CRAFT_NORM = 15, CRAFT_SUPER_N = 6, CRAFT_PER_LINE = 21, CRAFT_LINES = 6, CRAFT_N = 126, CP_MAX = 200 };
 bool IsCraftId(int skill);
 bool IsCraftSuper(int skill);
 int CraftCpCost(int index);
@@ -515,7 +525,11 @@ int CraftLineOf(int skill);
 int StoneCount();
 void StoneAdd(int d);
 bool BeadHave(int index);
+int BeadCount(int index);
+int CraftStoneCost(int index);
+int CraftSuperNeed(int index);
 bool BeadBuy(const SaveData& s, int index);
+bool BeadSell(int index);
 int AccCount();
 const wchar_t* AccName(int id);
 int AccPrice(int index);

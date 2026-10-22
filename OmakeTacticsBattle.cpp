@@ -12,6 +12,7 @@ static const float PI = 3.14159265f;
 enum {
 	ID_BT_ATTACK = 500, ID_BT_SKILL, ID_BT_WAIT, ID_BT_UNDO, ID_BT_BACK, ID_BT_LVOK, ID_BT_SHOVE, ID_BT_DOOR, ID_BT_ITEM, ID_BT_CLIMB,
 	ID_BT_SKPREV = 510, ID_BT_SKNEXT,
+	ID_BT_STAT = 515,
 	ID_BT_SK0 = 520,
 	ID_BT_CRAFT0 = 800, ID_BT_CRAFT1,
 	ID_BT_M_RESUME = 900, ID_BT_M_HELP, ID_BT_M_RETREAT, ID_BT_M_YES, ID_BT_M_NO, ID_BT_MENU, ID_BT_M_SAVE = 906, ID_BT_M_OPT,
@@ -985,6 +986,7 @@ void Game::BattleCancel()
 		sounded = 1;
 		break;
 	case PH_P_CMD:
+		if (m_statOpen) { m_statOpen = 0; sounded = 1; break; }
 		if (m_moved && m_cur >= 0) {
 			Unit& u = m_b.u[m_cur];
 			u.x = m_curX0; u.z = m_curZ0; u.face = m_curFace0;
@@ -2564,7 +2566,22 @@ void Game::DrawCommandMenu()
 				if (CanTerrace(m_b, m_cur, u.x + cdx[k], u.z + cdz[k])) canClimb = TRUE;
 		}
 		int haveItem = ConsumableCount(m_save);
-		int n = (m_moved ? 4 : 3) + (canShove ? 1 : 0) + (canDoor ? 1 : 0) + (canClimb ? 1 : 0) + (haveItem > 0 ? 1 : 0);
+		int n = (m_moved ? 4 : 3) + (canShove ? 1 : 0) + (canDoor ? 1 : 0) + (canClimb ? 1 : 0) + (haveItem > 0 ? 1 : 0) + 1;
+		if (m_statOpen) {
+			float pw = min(U(640), (float)m_w - U(40));
+			float ph = min(U(280), (float)m_h - U(40));
+			float px = ((float)m_w - pw) * .5f, py = ((float)m_h - ph) * .5f;
+			Panel(px, py, pw, ph);
+			wchar_t nm[64];
+			UnitTitle(u, nm, 64);
+			m_r.HudText(nm, px + U(16), py + U(22), U(18), RGBA8(255, 255, 255), 0, 1);
+			m_r.HudText(TT(TX_BT_STATUS), px + pw - U(16), py + U(22), U(16), RGBA8(255, 226, 150), 2, 1);
+			CharData view = u.ch;
+			for (int s = 0; s < S_COUNT; s++) view.stat[s] = UnitStat(u, s);
+			DrawStatLines(view, px + U(16), py + U(48), pw - U(32), NULL, u.hp, u.mp);
+			if (Btn(ID_BT_BACK, px + pw - U(170), py + ph - U(44), U(150), U(32), TT(TX_CR_BACK))) m_statOpen = 0;
+			return;
+		}
 		float cw = U(320);
 		x = min(x, m_w - cw - U(16));
 		Panel(x - U(8), y - U(8), cw + U(16), bh * n + U(6) * (n - 1) + U(88));
@@ -2630,6 +2647,8 @@ void Game::DrawCommandMenu()
 			return;
 		}
 		if (canClimb) yy += bh + U(6);
+		if (Btn(ID_BT_STAT, x, yy, cw, bh, TT(TX_BT_STATUS))) { m_statOpen = 1; m_navMode = TRUE; m_focusId = ID_BT_BACK; return; }
+		yy += bh + U(6);
 		if (m_moved) mark(ID_BT_UNDO, yy, TX_BTD_UNDO);
 		if (m_moved && Btn(ID_BT_UNDO, x, yy, cw, bh, TT(TX_BT_UNDO))) BattleCancel();
 		float boxTop = (m_moved ? yy + bh : yy - U(6)) + U(8);
@@ -2753,8 +2772,8 @@ void Game::DrawLevelUp()
 	wchar_t l[64];
 	swprintf_s(l, L"%s %d → %d", TT(TX_MISC_LV), L.oldLv, L.newLv);
 	m_r.HudText(l, x + U(112), y + U(100), U(16), RGBA8(140, 255, 150), 0, 1);
-	DrawStatLines(u.ch, x + U(20), y + U(146), w - U(40), L.gains, -1, -1);
-	float yy = y + U(146) + U(22) * 5 + U(6);
+	float statH = DrawStatLines(u.ch, x + U(20), y + U(146), w - U(40), L.gains, -1, -1);
+	float yy = y + U(146) + statH + U(6);
 	for (int k = 0; k < L.nLearned; k++) {
 		swprintf_s(l, L"%s: %s", TT(TX_BT_LEARNED), TT(SkillInfo(L.learned[k]).nameTx));
 		m_r.HudText(l, x + w * .5f, yy + U(10), U(15), RGBA8(255, 226, 150), 1, 1);

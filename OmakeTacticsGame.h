@@ -119,7 +119,8 @@ private:
 	void AddLog(const wchar_t* s, DWORD col);
 	void DrawBattleLog();
 	void DrawHelpOverlay();
-	void DrawStatLines(const CharData& c, float x, float y, float w, const int* gains, int hpCur, int mpCur);
+	float DrawStatLines(const CharData& c, float x, float y, float w, const int* gains, int hpCur, int mpCur);
+	void DrawStatTip();
 	const wchar_t* ClassName(int cls) const;
 	void UnitTitle(const Unit& u, wchar_t* out, int n) const;
 
@@ -296,6 +297,8 @@ private:
 	int m_shopKind;
 	int m_itemAim;
 	int m_itemPage;
+	int m_statTip;     // ホバー中の能力。-1 で無し
+	int m_statOpen;    // 戦闘コマンドのステータス表示
 
 	// 拠点の背景
 	Map m_showMap;
