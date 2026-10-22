@@ -98,6 +98,7 @@ Game::Game()
 	m_shopPage = 0;
 	m_shopKind = 0;
 	m_itemAim = -1;
+	m_itemPage = 0;
 	m_rosterPage = 0;
 	m_mapSeed = 0;
 	m_mapSeedStage = -1;
@@ -745,6 +746,7 @@ void Game::NavBack()
 		else EnterBase();
 		break;
 	case SC_BATTLE: BattleCancel(); break;
+	case SC_BASE: if (m_sortieAsk) m_sortieAsk = 0; break;
 	default: break;
 	}
 }
@@ -1506,6 +1508,7 @@ void Game::DrawShop()
 	if (m_shopPage < 0) m_shopPage = 0;
 	float yy = ky + U(36);
 	int a = m_shopPage * per, b = min(n, a + per);
+	int hovBead = -1;
 	for (int s = 0; s < per; s++) {
 		int ix = a + s;
 		if (ix >= b) break;
@@ -1556,8 +1559,9 @@ void Game::DrawShop()
 			BOOL ougi = IsCraftSuper(CRAFT_BASE + ids[ix]);
 			int cost = ougi ? 6 : 2;
 			BOOL open = !ougi || CraftSuperUnlockedBest(m_save) >= (ids[ix] % CRAFT_PER_LINE) - 9;
-			swprintf_s(row, L"%s  %s%d%s", CraftName(ids[ix]), TT(TX_STONE), cost, BeadHave(ids[ix]) ? L"  ✓" : L"");
+			swprintf_s(row, L"%s  %s  %s%d%s", CraftName(ids[ix]), CraftShapeName(SkillInfo(CRAFT_BASE + ids[ix]).area), TT(TX_STONE), cost, BeadHave(ids[ix]) ? L"  ✓" : L"");
 			ok = open && StoneCount() >= cost;
+			if (Hit(x + U(16), yy, w * .62f, U(30)) || (m_navMode && m_focusId == ID_SHOP_BUY0 + s)) hovBead = ids[ix];
 			if (Btn(ID_SHOP_BUY0 + s, x + U(16), yy, w * .62f, U(30), row, ok, FALSE, U(13))) {
 				if (BeadBuy(m_save, ids[ix])) { TacSfx(TS_CONFIRM); Persist(); }
 			}
@@ -1578,6 +1582,10 @@ void Game::DrawShop()
 			}
 		}
 		yy += U(34);
+	}
+	if (m_shopKind == 5 && hovBead >= 0) {
+		float by = y + h - U(112);
+		if (by > yy + U(4)) m_r.HudTextBox(CraftDesc(hovBead), x + U(16), by, w * .6f, U(56), U(13), RGBA8(210, 220, 235));
 	}
 	wchar_t pg[32];
 	swprintf_s(pg, L"%d / %d", m_shopPage + 1, pages);
@@ -1619,6 +1627,11 @@ void Game::DrawBaseUi()
 {
 	if (m_codex) { DrawCodex(); return; }
 	if (m_shop) { DrawShop(); return; }
+	// 開始メニューは出撃カードより後に描く。それまでは下のボタンを押させない。
+	BOOL modal = m_sortieAsk != 0;
+	BOOL savedClick = m_click;
+	int savedAct = m_activateId;
+	if (modal) { m_click = FALSE; m_activateId = -1; }
 	float margin = max(8.f, min(U(20), (float)m_w * .02f));
 	float pw = min(U(330), (float)m_w - margin * 2.f);
 	float ph = min((float)m_h - margin * 2.f, (float)m_h - 8.f);
@@ -1661,7 +1674,7 @@ void Game::DrawBaseUi()
 	int np = PartyCount();
 	if (Btn(ID_BASE_SORTIE, bx, by, bw, bh + Ku(8), TT(TX_BASE_SORTIE), np > 0, FALSE, min(U(22), bh * .5f), RGBA8(170, 60, 50, 240))) {
 		ProbeSuspend();
-		if (m_midStage == m_save.stageSel || m_autoStage == m_save.stageSel) { m_sortieAsk = 1; return; }
+		if (m_midStage == m_save.stageSel || m_autoStage == m_save.stageSel) { m_sortieAsk = 1; m_focusId = ID_SORTIE_START; return; }
 		StartBattle(m_save.stageSel);
 		return;
 	}
@@ -1704,23 +1717,6 @@ void Game::DrawBaseUi()
 	const wchar_t* hint = NULL;
 	if (RosterCount() == 0) hint = TT(TX_BASE_HINT_NOCHAR);
 	else if (np == 0) hint = TT(TX_BASE_HINT_NOPARTY);
-	if (m_sortieAsk) {
-		m_r.HudRect(0, 0, (float)m_w, (float)m_h, RGBA8(0, 0, 0, 140));
-		float w = U(420), h = U(280);
-		float sx = (m_w - w) * .5f, sy = (m_h - h) * .5f;
-		Panel(sx, sy, w, h);
-		m_r.HudText(TT(TX_SV_PICK), sx + w * .5f, sy + U(36), U(22), RGBA8(255, 226, 150), 1, 1);
-		float bx2 = sx + U(40), bw2 = w - U(80), bh2 = U(42), yy = sy + U(64);
-		BOOL mid = m_midStage == m_save.stageSel;
-		BOOL aut = m_autoStage == m_save.stageSel;
-		if (Btn(ID_SORTIE_START, bx2, yy, bw2, bh2, TT(TX_SV_FROMSTART))) { m_sortieAsk = 0; StartBattle(m_save.stageSel); return; }
-		yy += bh2 + U(8);
-		if (Btn(ID_SORTIE_MID, bx2, yy, bw2, bh2, TT(TX_SV_FROMMID), mid)) { m_sortieAsk = 0; ResumeBattle(1); return; }
-		yy += bh2 + U(8);
-		if (Btn(ID_SORTIE_AUTO, bx2, yy, bw2, bh2, TT(TX_SV_FROMAUTO), aut)) { m_sortieAsk = 0; ResumeBattle(2); return; }
-		yy += bh2 + U(8);
-		if (Btn(ID_SORTIE_CANCEL, bx2, yy, bw2, bh2, TT(TX_CR_BACK))) m_sortieAsk = 0;
-	}
 	if (hint) {
 		float hw = m_r.TextWidth(hint, U(18), 1) + U(40);
 		float hx = x + pw + (m_w - x - pw - hw) * .5f;
@@ -1775,6 +1771,26 @@ void Game::DrawBaseUi()
 			TacSfx(TS_CONFIRM);
 			return;
 		}
+	}
+	if (modal) {
+		m_btns.clear();
+		m_click = savedClick;
+		m_activateId = savedAct;
+		m_r.HudRect(0, 0, (float)m_w, (float)m_h, RGBA8(0, 0, 0, 140));
+		float w = U(420), h = U(280);
+		float sx = (m_w - w) * .5f, sy = (m_h - h) * .5f;
+		Panel(sx, sy, w, h);
+		m_r.HudText(TT(TX_SV_PICK), sx + w * .5f, sy + U(36), U(22), RGBA8(255, 226, 150), 1, 1);
+		float bx2 = sx + U(40), bw2 = w - U(80), bh2 = U(42), yy = sy + U(64);
+		BOOL mid = m_midStage == m_save.stageSel;
+		BOOL aut = m_autoStage == m_save.stageSel;
+		if (Btn(ID_SORTIE_START, bx2, yy, bw2, bh2, TT(TX_SV_FROMSTART))) { m_sortieAsk = 0; StartBattle(m_save.stageSel); return; }
+		yy += bh2 + U(8);
+		if (Btn(ID_SORTIE_MID, bx2, yy, bw2, bh2, TT(TX_SV_FROMMID), mid)) { m_sortieAsk = 0; ResumeBattle(1); return; }
+		yy += bh2 + U(8);
+		if (Btn(ID_SORTIE_AUTO, bx2, yy, bw2, bh2, TT(TX_SV_FROMAUTO), aut)) { m_sortieAsk = 0; ResumeBattle(2); return; }
+		yy += bh2 + U(8);
+		if (Btn(ID_SORTIE_CANCEL, bx2, yy, bw2, bh2, TT(TX_CR_BACK))) m_sortieAsk = 0;
 	}
 }
 
@@ -2083,7 +2099,8 @@ void Game::DrawEquipLayer()
 	m_r.HudText(title, px + pw * .5f, py + U(22), U(20), RGBA8(255, 226, 150), 1, 1);
 	m_r.HudText(cur, px + pw * .5f, py + U(46), U(14), RGBA8(220, 220, 230), 1, 0);
 
-	float listTop = py + U(62), listBot = py + ph - U(58);
+	BOOL beadPick = kind >= 5;
+	float listTop = py + U(62), listBot = py + ph - U(58) - (beadPick ? U(48) : 0);
 	int per = (int)((listBot - listTop) / U(36)) - 1;
 	if (per < 3) per = 3;
 	if (per > 8) per = 8;
@@ -2114,6 +2131,7 @@ void Game::DrawEquipLayer()
 	}
 	yy += U(36);
 	int a = m_eqPage * per, b = min(n, a + per);
+	int hovBead = -1;
 	for (int s = 0; s < per; s++) {
 		int ix = a + s;
 		if (ix >= b) break;
@@ -2141,7 +2159,8 @@ void Game::DrawEquipLayer()
 			int id = ids[ix];
 			sel = id == curId;
 			BOOL ougi = IsCraftSuper(CRAFT_BASE + id - 1);
-			swprintf_s(row, L"%s  %s%d%s  x%d", CraftName(id - 1), TT(TX_CP), CraftCpCost(id - 1), ougi ? L" ★" : L"", max(1, BeadSpare(c, kind - 5, id - 1)));
+			swprintf_s(row, L"%s  %s  %s%d%s  x%d", CraftName(id - 1), CraftShapeName(SkillInfo(CRAFT_BASE + id - 1).area), TT(TX_CP), CraftCpCost(id - 1), ougi ? L" ★" : L"", max(1, BeadSpare(c, kind - 5, id - 1)));
+			if (Hit(px + U(16), yy, pw - U(32), U(32)) || (m_navMode && m_focusId == ID_EQ_ROW0 + s)) hovBead = id;
 		}
 		if (Btn(ID_EQ_ROW0 + s, px + U(16), yy, pw - U(32), U(32), row, TRUE, sel, U(13))) {
 			BOOL ok = TRUE;
@@ -2160,6 +2179,10 @@ void Game::DrawEquipLayer()
 			return;
 		}
 		yy += U(36);
+	}
+	if (beadPick) {
+		int show = hovBead > 0 ? hovBead : curId;
+		if (show > 0) m_r.HudTextBox(CraftDesc(show - 1), px + U(16), py + ph - U(96), pw - U(32), U(44), U(12), RGBA8(210, 220, 235));
 	}
 	wchar_t pg[32];
 	swprintf_s(pg, L"%d / %d", m_eqPage + 1, pages);

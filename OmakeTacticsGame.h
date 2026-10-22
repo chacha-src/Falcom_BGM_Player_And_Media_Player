@@ -174,6 +174,7 @@ private:
 	void BattleClick(int x, int y);
 	void BattleCancel();
 	void BattleConfirmCursor();
+	void ApplyTerrace(int tx, int tz);
 	void MoveCursor(int dx, int dz);
 	void UpdateHover();
 	BOOL PickCell(float sx, float sy, int& cx, int& cz) const;
@@ -294,6 +295,7 @@ private:
 	int m_shopPage;
 	int m_shopKind;
 	int m_itemAim;
+	int m_itemPage;
 
 	// 拠点の背景
 	Map m_showMap;

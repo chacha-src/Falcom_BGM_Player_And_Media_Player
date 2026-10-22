@@ -266,7 +266,7 @@ BOOL COmakeTacticsDlg::OnInitDialog()
 	SaveData sv;
 	SaveDefaults(sv);
 	SaveLoad(sv);
-	if (sv.winSizeVer >= 2 && sv.winW >= 640 && sv.winH >= 420) {
+	if (sv.winSizeVer >= 3 && sv.winW >= 640 && sv.winH >= 420) {
 		CRect r(sv.winX, sv.winY, sv.winX + sv.winW, sv.winY + sv.winH);
 		CRect vs(::GetSystemMetrics(SM_XVIRTUALSCREEN), ::GetSystemMetrics(SM_YVIRTUALSCREEN),
 			::GetSystemMetrics(SM_XVIRTUALSCREEN) + ::GetSystemMetrics(SM_CXVIRTUALSCREEN),
@@ -275,11 +275,17 @@ BOOL COmakeTacticsDlg::OnInitDialog()
 		if (inter.IntersectRect(&r, &vs) && inter.Width() > 120 && inter.Height() > 80)
 			SetWindowPos(NULL, r.left, r.top, r.Width(), r.Height(), SWP_NOZORDER | SWP_NOACTIVATE);
 	} else {
+		// Per-Monitor V2 なので rcWork は物理ピクセル。4K / 2K / 1.5K とも拡大率に関わらず作業領域の7割。
 		HMONITOR mon = ::MonitorFromWindow(m_hWnd, MONITOR_DEFAULTTONEAREST);
 		MONITORINFO mi = { sizeof(mi) };
 		if (::GetMonitorInfo(mon, &mi)) {
 			const CRect wa(mi.rcWork);
-			const int w = max(800, wa.Width() * 86 / 100), h = max(560, wa.Height() * 88 / 100);
+			int w = wa.Width() * 7 / 10;
+			int h = wa.Height() * 7 / 10;
+			if (w < 800) w = min(800, wa.Width());
+			if (h < 560) h = min(560, wa.Height());
+			if (w > wa.Width()) w = wa.Width();
+			if (h > wa.Height()) h = wa.Height();
 			SetWindowPos(NULL, wa.left + (wa.Width() - w) / 2, wa.top + (wa.Height() - h) / 2, w, h,
 				SWP_NOZORDER | SWP_NOACTIVATE);
 		}
@@ -327,7 +333,7 @@ void COmakeTacticsDlg::StoreWindowRect()
 	if (r.Width() < 200 || r.Height() < 150) return;
 	SaveData& s = m_game.Save();
 	s.winX = r.left; s.winY = r.top; s.winW = r.Width(); s.winH = r.Height();
-	s.winSizeVer = 2;
+	s.winSizeVer = 3;
 }
 
 void COmakeTacticsDlg::PollPad(float dt)

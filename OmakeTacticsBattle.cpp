@@ -10,7 +10,7 @@ namespace otac {
 static const float PI = 3.14159265f;
 
 enum {
-	ID_BT_ATTACK = 500, ID_BT_SKILL, ID_BT_WAIT, ID_BT_UNDO, ID_BT_BACK, ID_BT_LVOK, ID_BT_SHOVE, ID_BT_DOOR, ID_BT_ITEM,
+	ID_BT_ATTACK = 500, ID_BT_SKILL, ID_BT_WAIT, ID_BT_UNDO, ID_BT_BACK, ID_BT_LVOK, ID_BT_SHOVE, ID_BT_DOOR, ID_BT_ITEM, ID_BT_CLIMB,
 	ID_BT_SKPREV = 510, ID_BT_SKNEXT,
 	ID_BT_SK0 = 520,
 	ID_BT_CRAFT0 = 800, ID_BT_CRAFT1,
@@ -580,6 +580,13 @@ void Game::ComputeOverlays()
 				m_ovAtk[tz][tx] = 1;
 			}
 		}
+		if (m_phase == PH_P_MOVE && u.team == TEAM_PLAYER) {
+			static const int cdx[4] = { 1, -1, 0, 0 }, cdz[4] = { 0, 0, 1, -1 };
+			for (int k = 0; k < 4; k++) {
+				int tx = u.x + cdx[k], tz = u.z + cdz[k];
+				if (CanTerrace(m_b, m_cur, tx, tz)) m_ovAtk[tz][tx] = 5;
+			}
+		}
 	} else if (m_phase == PH_P_TARGET || m_phase == PH_P_CMD) {
 		int rmin = UnitRangeMin(u), rmax = UnitRangeMax(u);
 		for (int dz = -rmax; dz <= rmax; dz++) for (int dx = -rmax; dx <= rmax; dx++) {
@@ -667,6 +674,7 @@ void Game::BuildOverlayQuads()
 			case 2: c = RGBA8(255, 90, 60, 70); break;
 			case 3: c = RGBA8(255, 200, 60, 150); break;
 			case 4: c = RGBA8(90, 255, 150, 130); break;
+			case 5: c = RGBA8(255, 228, 170, 170); break;
 			default: c = RGBA8(255, 80, 60, 125); break;
 			}
 			if (showMove && u.team != TEAM_PLAYER) c = RGBA8(255, 120, 60, 90);
@@ -724,6 +732,18 @@ BOOL Game::PickCell(float sx, float sy, int& cx, int& cz) const
 	return FALSE;
 }
 
+// 死者は占有マスに残さない。蘇生だけ座標で拾う。
+static int CorpseAt(const Battle& b, int x, int z)
+{
+	if (!Map::In(x, z)) return -1;
+	for (int i = 0; i < b.nUnits; i++) {
+		const Unit& u = b.u[i];
+		if (u.alive || !u.killed || u.x != x || u.z != z) continue;
+		return i;
+	}
+	return -1;
+}
+
 void Game::UpdateHover()
 {
 	if (m_screen != SC_BATTLE) return;
@@ -739,6 +759,8 @@ void Game::UpdateHover()
 		}
 	}
 	m_hoverUnit = m_cursorValid ? m_b.UnitAt(m_cx, m_cz) : -1;
+	if (m_hoverUnit < 0 && m_cursorValid && m_phase == PH_P_SKILLTARGET && m_cmdSkill >= 0 && SkillInfo(m_cmdSkill).effect == EF_RAISE)
+		m_hoverUnit = CorpseAt(m_b, m_cx, m_cz);
 	m_pathN = 0;
 	if (m_phase == PH_P_MOVE && m_cur >= 0 && m_cursorValid) {
 		const Unit& u = m_b.u[m_cur];
@@ -841,6 +863,7 @@ void Game::BattleConfirmCursor()
 			FinishUnitTurn(1);
 			return;
 		}
+		if (CanTerrace(m_b, m_cur, m_cx, m_cz)) { ApplyTerrace(m_cx, m_cz); return; }
 		if (m_cx == u.x && m_cz == u.z) { OpenCommand(); return; }
 		if (m_reach.cost[m_cz][m_cx] >= 0 && m_reach.canStop[m_cz][m_cx]) {
 			m_moved = 1;
@@ -914,9 +937,28 @@ void Game::BattleConfirmCursor()
 			return;
 		}
 		int t = m_b.UnitAt(m_cx, m_cz);
+		if (sd.effect == EF_RAISE && (t < 0 || m_b.u[t].alive)) {
+			int c = CorpseAt(m_b, m_cx, m_cz);
+			if (c >= 0) t = c;
+		}
 		if (CanTarget(m_cur, t, m_cmdSkill)) BeginAttack(m_cur, t, m_cmdSkill, m_cx, m_cz);
 		else { AddPopup(CellCenter(m_cx, m_cz) + v3(0, .5f, 0), L"×", RGBA8(255, 120, 110), 1); TacSfx(TS_ERROR); }
 	}
+}
+
+void Game::ApplyTerrace(int tx, int tz)
+{
+	if (m_cur < 0 || !CanTerrace(m_b, m_cur, tx, tz)) { TacSfx(TS_ERROR); return; }
+	DoTerrace(m_b, m_cur, tx, tz);
+	m_r.BuildTerrain(m_b.map);
+	m_r.BuildMinimap(m_b.map);
+	const Cell& c = m_b.map.At(tx, tz);
+	wchar_t s[48];
+	swprintf_s(s, L"%s  H%d", TT(TX_BT_CLIMB), (int)c.h);
+	AddPopup(CellCenter(tx, tz) + v3(0, .8f, 0), s, RGBA8(230, 210, 160), 1);
+	TacSfx(TS_HIT);
+	ComputeOverlays();
+	FinishUnitTurn(1);
 }
 
 void Game::BattleClick(int x, int y)
@@ -1830,6 +1872,8 @@ void Game::DrawBattle3D()
 			else cc = RGBA8(140, 230, 255, 255);
 		} else {
 			int t = m_b.UnitAt(m_cx, m_cz);
+			if (t < 0 && m_phase == PH_P_SKILLTARGET && m_cmdSkill >= 0 && SkillInfo(m_cmdSkill).effect == EF_RAISE)
+				t = CorpseAt(m_b, m_cx, m_cz);
 			BOOL ok = m_cur >= 0 && (m_phase == PH_P_TARGET ? CanTarget(m_cur, t, -1) : (m_cmdSkill >= 0 && (SkillInfo(m_cmdSkill).rMax == 0 || CanTarget(m_cur, t, m_cmdSkill))));
 			cc = ok ? RGBA8(255, 210, 80, 255) : RGBA8(255, 70, 60, 230);
 		}
@@ -2126,22 +2170,109 @@ void Game::DrawMinimap(float x, float y, float s)
 	if (x0 > x1) { x0 = 0; z0 = 0; x1 = MAPN - 1; z1 = MAPN - 1; }
 	x0 = max(0, x0 - 1); z0 = max(0, z0 - 1);
 	x1 = min(MAPN - 1, x1 + 1); z1 = min(MAPN - 1, z1 + 1);
-	int bw = x1 - x0 + 1, bh = z1 - z0 + 1;
-	float cs = s / (float)max(bw, bh);
-	float ox = x + (s - bw * cs) * .5f, oy = y + (s - bh * cs) * .5f;
-	if (m_r.MinimapSrv())
-		m_r.HudImage(m_r.MinimapSrv(), ox, oy, bw * cs, bh * cs, x0 / (float)MAPN, z0 / (float)MAPN, (x1 + 1) / (float)MAPN, (z1 + 1) / (float)MAPN, 0xFFFFFFFF);
+	// 画面右 = ミニマップ右、画面奥 = ミニマップ上。ワールド +X を右に置くとカメラ向きで左右が反転する。
+	const float yaw = m_camYaw;
+	const float rx = -cosf(yaw), rz = sinf(yaw);
+	const float fx = -sinf(yaw), fz = -cosf(yaw);
+	auto proj = [&](float wx, float wz, float& u, float& v) {
+		u = wx * rx + wz * rz;
+		v = wx * fx + wz * fz;
+	};
+	const float wx0 = (float)x0, wz0 = (float)z0, wx1 = (float)(x1 + 1), wz1 = (float)(z1 + 1);
+	float cu[4], cv[4];
+	proj(wx0, wz0, cu[0], cv[0]);
+	proj(wx1, wz0, cu[1], cv[1]);
+	proj(wx1, wz1, cu[2], cv[2]);
+	proj(wx0, wz1, cu[3], cv[3]);
+	float umin = cu[0], umax = cu[0], vmin = cv[0], vmax = cv[0];
+	for (int i = 1; i < 4; i++) {
+		if (cu[i] < umin) umin = cu[i];
+		if (cu[i] > umax) umax = cu[i];
+		if (cv[i] < vmin) vmin = cv[i];
+		if (cv[i] > vmax) vmax = cv[i];
+	}
+	float span = max(umax - umin, vmax - vmin);
+	if (span < 1.f) span = 1.f;
+	const float cs = s / span;
+	const float tw = (umax - umin) * cs, th = (vmax - vmin) * cs;
+	const float ox = x + (s - tw) * .5f, oy = y + (s - th) * .5f;
+	auto toScreen = [&](float wx, float wz, float& sx, float& sy) {
+		float u, v;
+		proj(wx, wz, u, v);
+		sx = ox + (u - umin) * cs;
+		sy = oy + (vmax - v) * cs;
+	};
+	if (m_r.MinimapSrv()) {
+		float xy[8], uv[8];
+		const float corn[4][2] = { { wx0, wz0 }, { wx1, wz0 }, { wx1, wz1 }, { wx0, wz1 } };
+		const float usu[4] = { wx0 / (float)MAPN, wx1 / (float)MAPN, wx1 / (float)MAPN, wx0 / (float)MAPN };
+		const float usv[4] = { wz0 / (float)MAPN, wz0 / (float)MAPN, wz1 / (float)MAPN, wz1 / (float)MAPN };
+		for (int i = 0; i < 4; i++) {
+			toScreen(corn[i][0], corn[i][1], xy[i * 2], xy[i * 2 + 1]);
+			uv[i * 2] = usu[i];
+			uv[i * 2 + 1] = usv[i];
+		}
+		m_r.HudQuad(m_r.MinimapSrv(), xy, uv, 0xFFFFFFFF);
+	}
 	m_r.HudFrame(x - U(6), y - U(6), s + U(12), s + U(12), U(2.5f), RGBA8(220, 190, 120));
-	for (int g = ((x0 + 3) / 4) * 4; g <= x1; g += 4)
-		m_r.HudRect(ox + (g - x0) * cs, oy, U(1), bh * cs, RGBA8(255, 255, 255, 28));
-	for (int g = ((z0 + 3) / 4) * 4; g <= z1; g += 4)
-		m_r.HudRect(ox, oy + (g - z0) * cs, bw * cs, U(1), RGBA8(255, 255, 255, 28));
+	auto dots = [&](float xA, float yA, float xB, float yB, int steps, float th, DWORD col) {
+		const float L = x, T = y, R = x + s, B = y + s;
+		auto code = [&](float px, float py) {
+			int c = 0;
+			if (px < L) c |= 1;
+			if (px > R) c |= 2;
+			if (py < T) c |= 4;
+			if (py > B) c |= 8;
+			return c;
+		};
+		int c0 = code(xA, yA), c1 = code(xB, yB);
+		for (int guard = 0; guard < 8; guard++) {
+			if (!(c0 | c1)) break;
+			if (c0 & c1) return;
+			int c = c0 ? c0 : c1;
+			float nx, ny;
+			if (c & 3) {
+				float dx = xB - xA;
+				if (fabsf(dx) < 1e-4f) return;
+				float edge = (c & 1) ? L : R;
+				ny = yA + (yB - yA) * (edge - xA) / dx;
+				nx = edge;
+			} else {
+				float dy = yB - yA;
+				if (fabsf(dy) < 1e-4f) return;
+				float edge = (c & 4) ? T : B;
+				nx = xA + (xB - xA) * (edge - yA) / dy;
+				ny = edge;
+			}
+			if (c == c0) { xA = nx; yA = ny; c0 = code(xA, yA); }
+			else { xB = nx; yB = ny; c1 = code(xB, yB); }
+		}
+		if (c0 | c1) return;
+		if (steps < 1) steps = 1;
+		for (int i = 0; i <= steps; i++) {
+			float t = i / (float)steps;
+			float px = xA + (xB - xA) * t, py = yA + (yB - yA) * t;
+			if (px < L || px > R || py < T || py > B) continue;
+			m_r.HudRect(px - th, py - th, th * 2.f, th * 2.f, col);
+		}
+	};
+	for (int g = ((x0 + 3) / 4) * 4; g <= x1; g += 4) {
+		float ax, ay, bx, by;
+		toScreen((float)g, wz0, ax, ay);
+		toScreen((float)g, wz1, bx, by);
+		dots(ax, ay, bx, by, 16, 0.7f, RGBA8(255, 255, 255, 28));
+	}
+	for (int g = ((z0 + 3) / 4) * 4; g <= z1; g += 4) {
+		float ax, ay, bx, by;
+		toScreen(wx0, (float)g, ax, ay);
+		toScreen(wx1, (float)g, bx, by);
+		dots(ax, ay, bx, by, 16, 0.7f, RGBA8(255, 255, 255, 28));
+	}
 	{
-		// 画面四隅を注視面（足元の高さ）へ落とした範囲。斜めカメラの見える地面そのもの
 		float gy = m_camTarget.y;
 		float sxv[4] = { 0, (float)m_w, (float)m_w, 0 };
 		float syv[4] = { 0, 0, (float)m_h, (float)m_h };
-		float gx[4], gz[4];
+		float sxp[4], syp[4];
 		BOOL ok = TRUE;
 		for (int i = 0; i < 4; i++) {
 			V3 org, dir;
@@ -2149,23 +2280,13 @@ void Game::DrawMinimap(float x, float y, float s)
 			if (fabsf(dir.y) < 1e-4f) { ok = FALSE; break; }
 			float t = (gy - org.y) / dir.y;
 			if (t < 0.02f) { ok = FALSE; break; }
-			gx[i] = org.x + dir.x * t;
-			gz[i] = org.z + dir.z * t;
+			toScreen(org.x + dir.x * t, org.z + dir.z * t, sxp[i], syp[i]);
 		}
-		auto seg = [&](float ax, float az, float bx, float bz) {
-			float xA = ox + (ax - x0) * cs, yA = oy + (az - z0) * cs;
-			float xB = ox + (bx - x0) * cs, yB = oy + (bz - z0) * cs;
-			int steps = 18;
-			for (int s = 0; s <= steps; s++) {
-				float t = s / (float)steps;
-				m_r.HudRect(xA + (xB - xA) * t - 1.f, yA + (yB - yA) * t - 1.f, 2.f, 2.f, RGBA8(255, 255, 255, 210));
-			}
-		};
 		if (ok) {
-			seg(gx[0], gz[0], gx[1], gz[1]);
-			seg(gx[1], gz[1], gx[2], gz[2]);
-			seg(gx[2], gz[2], gx[3], gz[3]);
-			seg(gx[3], gz[3], gx[0], gz[0]);
+			dots(sxp[0], syp[0], sxp[1], syp[1], 18, 1.f, RGBA8(255, 255, 255, 210));
+			dots(sxp[1], syp[1], sxp[2], syp[2], 18, 1.f, RGBA8(255, 255, 255, 210));
+			dots(sxp[2], syp[2], sxp[3], syp[3], 18, 1.f, RGBA8(255, 255, 255, 210));
+			dots(sxp[3], syp[3], sxp[0], syp[0], 18, 1.f, RGBA8(255, 255, 255, 210));
 		}
 	}
 	for (int i = 0; i < m_b.nUnits; i++) {
@@ -2173,11 +2294,23 @@ void Game::DrawMinimap(float x, float y, float s)
 		if (!u.alive) continue;
 		DWORD c = u.team == TEAM_PLAYER ? RGBA8(90, 190, 255) : (u.boss ? RGBA8(255, 220, 70) : (u.alert ? RGBA8(255, 70, 60) : RGBA8(140, 50, 50)));
 		float d = max(cs * .72f, i == m_cur ? cs * .95f : cs * .78f);
-		float dx = ox + (u.px - (float)x0) * cs - d * .5f, dy = oy + (u.pz - (float)z0) * cs - d * .5f;
-		m_r.HudRect(dx - U(1), dy - U(1), d + U(2), d + U(2), RGBA8(10, 10, 14, 220));
-		m_r.HudRect(dx, dy, d, d, c);
+		float sx, sy;
+		toScreen(u.px, u.pz, sx, sy);
+		m_r.HudRect(sx - d * .5f - U(1), sy - d * .5f - U(1), d + U(2), d + U(2), RGBA8(10, 10, 14, 220));
+		m_r.HudRect(sx - d * .5f, sy - d * .5f, d, d, c);
 	}
-	if (m_cursorValid) m_r.HudFrame(ox + (m_cx - x0) * cs, oy + (m_cz - z0) * cs, cs, cs, max(1.f, cs * .12f), RGBA8(255, 255, 255));
+	if (m_cursorValid) {
+		float cxy[8];
+		toScreen((float)m_cx, (float)m_cz, cxy[0], cxy[1]);
+		toScreen((float)(m_cx + 1), (float)m_cz, cxy[2], cxy[3]);
+		toScreen((float)(m_cx + 1), (float)(m_cz + 1), cxy[4], cxy[5]);
+		toScreen((float)m_cx, (float)(m_cz + 1), cxy[6], cxy[7]);
+		float th = max(1.f, cs * .12f);
+		dots(cxy[0], cxy[1], cxy[2], cxy[3], 6, th, RGBA8(255, 255, 255));
+		dots(cxy[2], cxy[3], cxy[4], cxy[5], 6, th, RGBA8(255, 255, 255));
+		dots(cxy[4], cxy[5], cxy[6], cxy[7], 6, th, RGBA8(255, 255, 255));
+		dots(cxy[6], cxy[7], cxy[0], cxy[1], 6, th, RGBA8(255, 255, 255));
+	}
 	static const DWORD kWc[8] = {
 		RGBA8(255, 80, 80), RGBA8(80, 160, 255), RGBA8(255, 210, 60), RGBA8(80, 230, 120),
 		RGBA8(200, 80, 255), RGBA8(80, 230, 230), RGBA8(255, 140, 40), RGBA8(255, 120, 180)
@@ -2191,14 +2324,10 @@ void Game::DrawMinimap(float x, float y, float s)
 			else { bx = xx; bz = z; }
 		}
 		if (ax < 0 || bx < 0) continue;
-		float wx0 = ox + (ax + .5f - x0) * cs, wy0 = oy + (az + .5f - z0) * cs;
-		float wx1 = ox + (bx + .5f - x0) * cs, wy1 = oy + (bz + .5f - z0) * cs;
-		int steps = 8;
-		for (int s = 0; s <= steps; s++) {
-			float t = s / (float)steps;
-			float px = wx0 + (wx1 - wx0) * t, py = wy0 + (wy1 - wy0) * t;
-			m_r.HudRect(px - 1.5f, py - 1.5f, 3, 3, kWc[id]);
-		}
+		float xA, yA, xB, yB;
+		toScreen(ax + .5f, az + .5f, xA, yA);
+		toScreen(bx + .5f, bz + .5f, xB, yB);
+		dots(xA, yA, xB, yB, 8, 1.5f, kWc[id]);
 	}
 }
 
@@ -2329,45 +2458,98 @@ void Game::DrawCommandMenu()
 	}
 	if (m_phase == PH_P_ITEM) {
 		float iw = U(280);
+		float gap = U(6), margin = U(10);
+		auto place = [&](int rows) {
+			float ph = bh * rows + gap * max(0, rows - 1) + U(16);
+			float topMin = margin + U(8);
+			float topMax = (float)m_h - margin - ph + U(8);
+			if (topMax < topMin) topMax = topMin;
+			y = Clampf(y, topMin, topMax);
+			float xMax = (float)m_w - iw - margin;
+			if (xMax < margin) xMax = margin;
+			x = Clampf(x, margin, xMax);
+			Panel(x - U(8), y - U(8), iw + U(16), ph);
+		};
+		auto rowsThatFit = [&](int want, int chrome) {
+			float avail = (float)m_h - margin * 2 - U(16);
+			int fit = (int)((avail + gap) / (bh + gap));
+			if (fit < chrome + 3) fit = chrome + 3;
+			int per = fit - chrome;
+			if (per > want) per = want;
+			if (per < 1) per = 1;
+			return per;
+		};
 		if (m_itemAim < 0) {
 			int list[16], ln = 0;
-			for (int i = 0; i < GoodCount() && ln < 12; i++) if (GoodHave(m_save, i) > 0) list[ln++] = i;
-			Panel(x - U(8), y - U(8), iw + U(16), bh * (ln + 1) + U(6) * ln + U(16));
+			for (int i = 0; i < GoodCount() && ln < 16; i++) if (GoodHave(m_save, i) > 0) list[ln++] = i;
+			int per = rowsThatFit(ln, 1);
+			int pages = max(1, (ln + per - 1) / per);
+			if (pages > 1) per = rowsThatFit(ln, 2);
+			pages = max(1, (ln + max(1, per) - 1) / max(1, per));
+			if (m_itemPage >= pages) m_itemPage = pages - 1;
+			if (m_itemPage < 0) m_itemPage = 0;
+			int a = m_itemPage * per, b = min(ln, a + per);
+			int shown = b - a;
+			place(shown + 1 + (pages > 1 ? 1 : 0));
 			float yy = y;
-			for (int k = 0; k < ln; k++) {
+			for (int k = a; k < b; k++) {
 				const GoodDef* gd = GoodAt(list[k]);
 				wchar_t lb[80];
 				swprintf_s(lb, L"%s  x%d", TT(gd->nameTx), GoodHave(m_save, list[k]));
-				if (Btn(ID_BT_IT0 + k, x, yy, iw, bh, lb, TRUE, FALSE, U(14))) {
+				if (Btn(ID_BT_IT0 + (k - a), x, yy, iw, bh, lb, TRUE, FALSE, U(14))) {
 					if (gd->self) UseConsumable(list[k], -1);
-					else m_itemAim = list[k];
+					else { m_itemAim = list[k]; m_itemPage = 0; }
 					return;
 				}
-				yy += bh + U(6);
+				yy += bh + gap;
+			}
+			if (pages > 1) {
+				wchar_t pg[32];
+				swprintf_s(pg, L"%d / %d", m_itemPage + 1, pages);
+				if (Btn(ID_BT_SKPREV, x, yy, U(64), bh, L"◀")) m_itemPage = (m_itemPage + pages - 1) % pages;
+				m_r.HudText(pg, x + iw * .5f, yy + bh * .5f, U(14), RGBA8(230, 230, 240), 1, 1);
+				if (Btn(ID_BT_SKNEXT, x + iw - U(64), yy, U(64), bh, L"▶")) m_itemPage = (m_itemPage + 1) % pages;
+				yy += bh + gap;
 			}
 			if (Btn(ID_BT_BACK, x, yy, iw, bh, TT(TX_CR_BACK))) BattleCancel();
 			return;
 		}
 		const GoodDef* gd = GoodAt(m_itemAim);
-		int tg[12], tn = 0;
-		for (int i = 0; i < m_b.nUnits && tn < 12; i++) {
+		int tg[64], tn = 0;
+		for (int i = 0; i < m_b.nUnits && tn < 64; i++) {
 			const Unit& t = m_b.u[i];
 			int dist = max(abs(u.x - t.x), abs(u.z - t.z));
 			if (gd && gd->item == IT_RAISE) {
 				if (t.team == TEAM_PLAYER && !t.alive && t.killed && dist <= 2 && dist > 0) tg[tn++] = i;
 			} else if (t.team == TEAM_ENEMY && t.alive && dist <= 3 && dist > 0) tg[tn++] = i;
 		}
-		Panel(x - U(8), y - U(8), iw + U(16), bh * (tn + 2) + U(6) * (tn + 1) + U(16));
+		int per = rowsThatFit(max(1, tn), 2);
+		int pages = max(1, (max(1, tn) + per - 1) / per);
+		if (pages > 1) per = rowsThatFit(tn, 3);
+		pages = tn < 1 ? 1 : max(1, (tn + max(1, per) - 1) / max(1, per));
+		if (m_itemPage >= pages) m_itemPage = pages - 1;
+		if (m_itemPage < 0) m_itemPage = 0;
+		int a = m_itemPage * per, b = min(tn, a + per);
+		int shown = max(0, b - a);
+		place(shown + 2 + (pages > 1 ? 1 : 0) + (tn < 1 ? 1 : 0));
 		m_r.HudText(gd ? TT(gd->nameTx) : L"?", x + U(8), y + U(12), U(15), RGBA8(255, 226, 150), 0, 1);
 		float yy = y + bh;
-		for (int k = 0; k < tn; k++) {
+		for (int k = a; k < b; k++) {
 			wchar_t nm[64];
 			UnitTitle(m_b.u[tg[k]], nm, 64);
-			if (Btn(ID_BT_ITT0 + k, x, yy, iw, bh, nm, TRUE, FALSE, U(14))) { UseConsumable(m_itemAim, tg[k]); return; }
-			yy += bh + U(6);
+			if (Btn(ID_BT_ITT0 + (k - a), x, yy, iw, bh, nm, TRUE, FALSE, U(14))) { UseConsumable(m_itemAim, tg[k]); return; }
+			yy += bh + gap;
 		}
 		if (tn < 1) { m_r.HudText(TT(TX_BT_NOTARGET), x + U(8), yy, U(14), RGBA8(255, 180, 160), 0, 1); yy += bh; }
-		if (Btn(ID_BT_BACK, x, yy, iw, bh, TT(TX_CR_BACK))) { m_itemAim = -1; return; }
+		if (pages > 1) {
+			wchar_t pg[32];
+			swprintf_s(pg, L"%d / %d", m_itemPage + 1, pages);
+			if (Btn(ID_BT_SKPREV, x, yy, U(64), bh, L"◀")) m_itemPage = (m_itemPage + pages - 1) % pages;
+			m_r.HudText(pg, x + iw * .5f, yy + bh * .5f, U(14), RGBA8(230, 230, 240), 1, 1);
+			if (Btn(ID_BT_SKNEXT, x + iw - U(64), yy, U(64), bh, L"▶")) m_itemPage = (m_itemPage + 1) % pages;
+			yy += bh + gap;
+		}
+		if (Btn(ID_BT_BACK, x, yy, iw, bh, TT(TX_CR_BACK))) { m_itemAim = -1; m_itemPage = 0; return; }
 		return;
 	}
 	if (m_phase == PH_P_CMD) {
@@ -2375,8 +2557,14 @@ void Game::DrawCommandMenu()
 		BOOL canShove = FALSE;
 		for (int i = 0; i < m_b.nUnits; i++) if (CanShove(m_b, m_cur, i, &dx, &dz)) canShove = TRUE;
 		BOOL canDoor = CanOpenDoor(u) && AdjDoor(m_b, m_cur, NULL, NULL) > 0;
+		BOOL canClimb = FALSE;
+		{
+			static const int cdx[4] = { 1, -1, 0, 0 }, cdz[4] = { 0, 0, 1, -1 };
+			for (int k = 0; k < 4 && !canClimb; k++)
+				if (CanTerrace(m_b, m_cur, u.x + cdx[k], u.z + cdz[k])) canClimb = TRUE;
+		}
 		int haveItem = ConsumableCount(m_save);
-		int n = (m_moved ? 4 : 3) + (canShove ? 1 : 0) + (canDoor ? 1 : 0) + (haveItem > 0 ? 1 : 0);
+		int n = (m_moved ? 4 : 3) + (canShove ? 1 : 0) + (canDoor ? 1 : 0) + (canClimb ? 1 : 0) + (haveItem > 0 ? 1 : 0);
 		float cw = U(320);
 		x = min(x, m_w - cw - U(16));
 		Panel(x - U(8), y - U(8), cw + U(16), bh * n + U(6) * (n - 1) + U(88));
@@ -2406,7 +2594,7 @@ void Game::DrawCommandMenu()
 			swprintf_s(lb, L"%s %d", TT(TX_BT_ITEM), have);
 			if (have > 0) mark(ID_BT_ITEM, yy, TX_BTD_ITEM);
 			if (have > 0 && Btn(ID_BT_ITEM, x, yy, cw, bh, lb)) {
-				m_phase = PH_P_ITEM; m_itemAim = -1; m_navMode = TRUE; m_focusId = ID_BT_IT0;
+				m_phase = PH_P_ITEM; m_itemAim = -1; m_itemPage = 0; m_navMode = TRUE; m_focusId = ID_BT_IT0;
 				return;
 			}
 			if (have > 0) yy += bh + U(6);
@@ -2430,6 +2618,18 @@ void Game::DrawCommandMenu()
 			return;
 		}
 		if (canDoor) yy += bh + U(6);
+		if (canClimb) mark(ID_BT_CLIMB, yy, TX_BTD_CLIMB);
+		if (canClimb && Btn(ID_BT_CLIMB, x, yy, cw, bh, TT(TX_BT_CLIMB))) {
+			int tx = -1, tz = -1;
+			if (m_cursorValid && CanTerrace(m_b, m_cur, m_cx, m_cz)) { tx = m_cx; tz = m_cz; }
+			else {
+				static const int cdx[4] = { 1, -1, 0, 0 }, cdz[4] = { 0, 0, 1, -1 };
+				for (int k = 0; k < 4; k++) if (CanTerrace(m_b, m_cur, u.x + cdx[k], u.z + cdz[k])) { tx = u.x + cdx[k]; tz = u.z + cdz[k]; break; }
+			}
+			if (tx >= 0) ApplyTerrace(tx, tz);
+			return;
+		}
+		if (canClimb) yy += bh + U(6);
 		if (m_moved) mark(ID_BT_UNDO, yy, TX_BTD_UNDO);
 		if (m_moved && Btn(ID_BT_UNDO, x, yy, cw, bh, TT(TX_BT_UNDO))) BattleCancel();
 		float boxTop = (m_moved ? yy + bh : yy - U(6)) + U(8);
@@ -2463,7 +2663,7 @@ void Game::DrawCommandMenu()
 			const SkillDef& sd = SkillInfo(s);
 			BOOL ougi = IsCraftSuper(s);
 			wchar_t l[96];
-			swprintf_s(l, L"%s  %s%d%s", CraftName(s), TT(TX_CP), CraftCpCost(s - CRAFT_BASE), ougi ? L" ★" : L"");
+			swprintf_s(l, L"%s  %s  %s%d%s", CraftName(s), CraftShapeName(sd.area), TT(TX_CP), CraftCpCost(s - CRAFT_BASE), ougi ? L" ★" : L"");
 			BOOL ok = SkillUsable(m_b, m_cur, s);
 			if ((m_navMode && m_focusId == ID_BT_CRAFT0 + slot) || (!m_navMode && Hit(x, yy, sw, bh))) hovCraft = s;
 			DWORD col = ougi ? RGBA8(130, 90, 24, 240) : (sd.kind == SK_HEAL || sd.kind == SK_BUFF ? RGBA8(40, 100, 70, 240) : RGBA8(92, 68, 28, 235));
@@ -2522,8 +2722,11 @@ void Game::DrawCommandMenu()
 		if (hovCraft >= 0) {
 			const SkillDef& sd = SkillInfo(hovCraft);
 			wchar_t l[96];
-			swprintf_s(l, L"%s %d-%d  %s%d  %s %d", TT(TX_MISC_RANGE), sd.rMin, sd.rMax, TT(TX_MISC_AREA), sd.area, TT(TX_CP), CraftCpCost(hovCraft - CRAFT_BASE));
+			int r0 = sd.rMax < 0 ? UnitRangeMin(u) : sd.rMin;
+			int r1 = sd.rMax < 0 ? UnitRangeMax(u) : sd.rMax;
+			swprintf_s(l, L"%s %d-%d  %s  %s %d", TT(TX_MISC_RANGE), r0, r1, CraftShapeName(sd.area), TT(TX_CP), CraftCpCost(hovCraft - CRAFT_BASE));
 			m_r.HudText(l, x, yy + U(8), U(12), RGBA8(255, 210, 120), 0, 0);
+			m_r.HudTextBox(CraftDesc(hovCraft), x, yy + U(18), sw, U(64), U(12), RGBA8(230, 230, 236));
 		} else if (hov >= 0) {
 			const SkillDef& sd = SkillInfo(hov);
 			wchar_t l[96];
@@ -2753,6 +2956,8 @@ void Game::DrawBattleUi()
 			swprintf_s(l, L"%s  %s  %s %d", TT(TX_BT_TERRAIN), TT(td.nameTx), gm, (int)c.gparam + 1);
 		else if (c.gimm)
 			swprintf_s(l, L"%s  %s  %s", TT(TX_BT_TERRAIN), TT(td.nameTx), gm);
+		else if (m_cur >= 0 && CanTerrace(m_b, m_cur, m_cx, m_cz))
+			swprintf_s(l, L"%s  %s  H%d   %s", TT(TX_BT_TERRAIN), TT(td.nameTx), (int)c.h, TT(TX_BT_CLIMB));
 		else
 			swprintf_s(l, L"%s  %s  %s+%d%%  AVO+%d%%  H%d", TT(TX_BT_TERRAIN), TT(td.nameTx), TT(TX_ST_DEF), td.defPct, td.avoPct, c.h);
 		float tw = m_r.TextWidth(l, U(13), 0) + U(24);

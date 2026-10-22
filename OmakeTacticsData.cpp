@@ -399,6 +399,49 @@ static bool FootReachable(const Map& m, int sx, int sz, int tx, int tz)
 	return false;
 }
 
+// 山や段差で拠点まで行けないとき、空白の外は通さず、道筋だけ1段差にならす。
+static void EnsureClimbPath(Map& m, int sx, int sz, int tx, int tz)
+{
+	if (!Map::In(sx, sz) || !Map::In(tx, tz)) return;
+	if (FootReachable(m, sx, sz, tx, tz)) return;
+	static int prev[MAPN][MAPN];
+	static BYTE seen[MAPN][MAPN];
+	memset(seen, 0, sizeof(seen));
+	for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) prev[z][x] = -1;
+	static int qx[MAPN * MAPN], qz[MAPN * MAPN];
+	int qh = 0, qt = 0;
+	qx[qt] = sx; qz[qt] = sz; qt++;
+	seen[sz][sx] = 1;
+	static const int dx[4] = { 1, -1, 0, 0 }, dz[4] = { 0, 0, 1, -1 };
+	bool found = false;
+	while (qh < qt) {
+		int x = qx[qh], z = qz[qh]; qh++;
+		if (x == tx && z == tz) { found = true; break; }
+		for (int k = 0; k < 4; k++) {
+			int nx = x + dx[k], nz = z + dz[k];
+			if (!Map::In(nx, nz) || seen[nz][nx]) continue;
+			if (m.c[nz][nx].t == T_VOID) continue;
+			seen[nz][nx] = 1;
+			prev[nz][nx] = z * MAPN + x;
+			qx[qt] = nx; qz[qt] = nz; qt++;
+		}
+	}
+	if (!found) return;
+	int x = tx, z = tz, guard = MAPN * MAPN;
+	while (guard-- > 0 && !(x == sx && z == sz)) {
+		int p = prev[z][x];
+		if (p < 0) break;
+		int px = p % MAPN, pz = p / MAPN;
+		Cell& c = m.c[z][x];
+		Cell& f = m.c[pz][px];
+		if (c.t == T_WATER || c.t == T_LAVA || c.t == T_CHASM) c.t = T_BRIDGE;
+		else if (c.t == T_MOUNTAIN || c.t == T_ROCK || c.t == T_DOOR) { c.t = T_HILL; c.prop = PK_NONE; }
+		if ((int)c.h > (int)f.h + 1) c.h = (BYTE)(f.h + 1);
+		if ((int)c.h + 1 < (int)f.h) c.h = (BYTE)max(1, (int)f.h - 1);
+		x = px; z = pz;
+	}
+}
+
 static void PickDeploy(Map& m, int ax, int az, int* outX, int* outZ, int want, int spacing, const BYTE (*taken)[MAPN])
 {
 	static BYTE seen[MAPN][MAPN];
@@ -979,11 +1022,10 @@ void GenerateMap(Map& m, int stage, DWORD seed)
 			}
 		}
 	}
-	if (m.nE > 0 && !FootReachable(m, m.pStartX[0], m.pStartZ[0], m.eStartX[0], m.eStartZ[0])) {
-		for (int i = 0; i < np; i++) {
-			Cell& c = m.c[pz[i]][px[i]];
-			if (!FootPassable(c.t)) { c.t = T_ROAD; c.prop = PK_NONE; }
-		}
+	if (m.nP > 0) {
+		EnsureClimbPath(m, m.pStartX[0], m.pStartZ[0], pax, paz);
+		for (int g = 0; g < m.nGrp; g++)
+			EnsureClimbPath(m, m.pStartX[0], m.pStartZ[0], m.grp[g].ax, m.grp[g].az);
 	}
 }
 
@@ -1980,11 +2022,17 @@ int SkillTargets(const Battle& b, int caster, int skill, int cx, int cz, int* ou
 int ExpForAction(const Unit& a, const Unit& d, int killed, int stage)
 {
 	int dl = d.ch.lv - a.ch.lv;
-	int e = 10 + dl * 3;
-	if (killed) e += 30 + dl * 5 + (d.boss ? 40 : 0);
-	e = Clampi(e, 1, 100);
+	// 相手が低いと 10+差*3 が 1 まで落ちていた。当たった攻撃は最低 12。
+	int e = 14 + dl * 2;
+	if (e < 12) e = 12;
+	if (killed) {
+		int kb = 32 + dl * 4 + (d.boss ? 40 : 0);
+		if (kb < 24) kb = 24;
+		e += kb;
+	}
+	e = Clampi(e, 12, 100);
 	float f = 1.f + (stage - 1) * .025f;
-	return Clampi((int)roundf(e * f), 1, 100);
+	return Clampi((int)roundf(e * f), 12, 100);
 }
 
 static void ApplyEffect(Battle& b, Unit& a, Unit& d, int effect)
@@ -2458,6 +2506,39 @@ void OpenDoor(Battle& b, int x, int z)
 	Cell& c = b.map.At(x, z);
 	c.t = T_ROAD;
 	c.prop = PK_NONE;
+}
+
+bool CanTerrace(const Battle& b, int ui, int tx, int tz)
+{
+	if (ui < 0 || ui >= b.nUnits || !Map::In(tx, tz)) return false;
+	const Unit& u = b.u[ui];
+	if (!u.alive || u.team != TEAM_PLAYER) return false;
+	if (Dist(u.x, u.z, tx, tz) != 1) return false;
+	if (b.UnitAt(tx, tz) >= 0) return false;
+	const Cell& c = b.map.At(tx, tz);
+	if (c.t == T_VOID || c.t == T_WATER || c.t == T_LAVA || c.t == T_CHASM || c.t == T_DOOR) return false;
+	int jump = max(1, UnitJump(u));
+	int mt = UnitMoveType(u) == MV_FLY ? MV_FOOT : UnitMoveType(u);
+	if (CanStep(b.map, u.x, u.z, tx, tz, mt, jump)) return false;
+	bool wall = (c.t == T_MOUNTAIN || c.t == T_ROCK);
+	bool cliff = abs((int)c.h - (int)b.map.At(u.x, u.z).h) > jump;
+	return wall || cliff;
+}
+
+void DoTerrace(Battle& b, int ui, int tx, int tz)
+{
+	if (!CanTerrace(b, ui, tx, tz)) return;
+	const Unit& u = b.u[ui];
+	Cell& c = b.map.At(tx, tz);
+	int sh = (int)b.map.At(u.x, u.z).h;
+	if ((int)c.h > sh) { if (c.h > 1) c.h--; }
+	else if ((int)c.h < sh) c.h++;
+	if (c.h < 1) c.h = 1;
+	int jump = max(1, UnitJump(u));
+	if ((c.t == T_MOUNTAIN || c.t == T_ROCK) && abs((int)c.h - sh) <= jump) {
+		c.t = T_HILL;
+		c.prop = PK_NONE;
+	}
 }
 
 bool CanShove(const Battle& b, int ui, int ti, int* outX, int* outZ)

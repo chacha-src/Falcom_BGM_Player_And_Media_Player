@@ -220,6 +220,7 @@ public:
 	void HudFrame(float x, float y, float w, float h, float t, DWORD c);
 	void HudPanel(float x, float y, float w, float h, DWORD fill, DWORD border, float alpha = 1.f);
 	void HudImage(ID3D11ShaderResourceView* srv, float x, float y, float w, float h, float u0, float v0, float u1, float v1, DWORD c);
+	void HudQuad(ID3D11ShaderResourceView* srv, const float* xy, const float* uv, DWORD c);
 	// align: 0=左 1=中央 2=右。戻り値: 描画幅
 	float HudText(const wchar_t* s, float x, float y, float px, DWORD c, int align = 0, int bold = 0, int shadow = 1, float alpha = 1.f);
 	float TextWidth(const wchar_t* s, float px, int bold = 0);

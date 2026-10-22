@@ -1627,6 +1627,8 @@ if errorlevel 1 exit /b 1</Command>
     <None Include="res\cso\tac_vsq.cso" />
     <None Include="res\cso\tac_vss.cso" />
     <None Include="res\tactics\tac_assets.bin" />
+    <None Include="res\tactics\tac_gear.bin" />
+    <None Include="res\tactics\tac_mon.bin" />
     <None Include="res\tactics\tac_sfx.bin" />
     <None Include="shaders\compile_shaders.cmd" />
     <None Include="shaders\gpu_hex.hlsl" />

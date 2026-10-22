@@ -1386,6 +1386,9 @@
     <ClCompile Include="ZmusicEngine.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="KpilistDetail.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="ogg.rc">
@@ -2804,6 +2807,29 @@
     <None Include="shaders\gpu_rect.hlsl" />
     <None Include="shaders\soft3d_maze.hlsl" />
     <None Include="shaders\soft3d_race.hlsl" />
+    <None Include="res\cso\tac_psh.cso" />
+    <None Include="res\cso\tac_psm.cso" />
+    <None Include="res\cso\tac_pso.cso" />
+    <None Include="res\cso\tac_psov.cso" />
+    <None Include="res\cso\tac_psp.cso" />
+    <None Include="res\cso\tac_pssky.cso" />
+    <None Include="res\cso\tac_vsh.cso" />
+    <None Include="res\cso\tac_vsk.cso" />
+    <None Include="res\cso\tac_vsp.cso" />
+    <None Include="res\cso\tac_vsq.cso" />
+    <None Include="res\cso\tac_vss.cso" />
+    <None Include="res\tactics\tac_assets.bin">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="res\tactics\tac_sfx.bin">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="res\tactics\tac_mon.bin">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="res\tactics\tac_gear.bin">
+      <Filter>Resource Files</Filter>
+    </None>
   </ItemGroup>
   <ItemGroup>
     <Text Include="codec\APPLE_LICENSE.txt">
@@ -2869,6 +2895,9 @@
       <Filter>Resource Files</Filter>
     </Image>
     <Image Include="res\ui_score\tool_erase.ico">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="res\ui_icons\tactics.ico">
       <Filter>Resource Files</Filter>
     </Image>
   </ItemGroup>

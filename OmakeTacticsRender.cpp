@@ -1830,6 +1830,22 @@ void Renderer::HudImage(ID3D11ShaderResourceView* srv, float x, float y, float w
 	HudPush(x, y, w, h, u0, v0, u1, v1, c, c, srv);
 }
 
+void Renderer::HudQuad(ID3D11ShaderResourceView* srv, const float* xy, const float* uv, DWORD c)
+{
+	if (!xy || !uv) return;
+	if (!srv) srv = m_srv[TEX_WHITE];
+	if (srv != m_hudSrv) { FlushHud(); m_hudSrv = srv; }
+	if (m_hud.size() + 6 > 24576) FlushHud();
+	VtxH p[4];
+	for (int i = 0; i < 4; i++) {
+		p[i].x = xy[i * 2]; p[i].y = xy[i * 2 + 1];
+		p[i].u = uv[i * 2]; p[i].v = uv[i * 2 + 1];
+		p[i].c = c;
+	}
+	m_hud.push_back(p[0]); m_hud.push_back(p[1]); m_hud.push_back(p[2]);
+	m_hud.push_back(p[0]); m_hud.push_back(p[2]); m_hud.push_back(p[3]);
+}
+
 TextSprite* Renderer::GetText(const wchar_t* s, float px, int bold, int shadow, int box, float boxW, float boxH)
 {
 	if (!s || !s[0]) return NULL;

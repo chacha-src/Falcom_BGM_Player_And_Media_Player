@@ -417,6 +417,8 @@ int  ApplyTile(Battle& b, int ui);   // 停止マスのギミック。Gimmick �
 bool CanOpenDoor(const Unit& u);
 int  AdjDoor(const Battle& b, int ui, int* ox, int* oz);
 void OpenDoor(Battle& b, int x, int z);
+bool CanTerrace(const Battle& b, int ui, int tx, int tz);
+void DoTerrace(Battle& b, int ui, int tx, int tz);
 bool CanShove(const Battle& b, int ui, int ti, int* outX, int* outZ);
 void DoShove(Battle& b, int ui, int ti);
 
@@ -444,7 +446,7 @@ struct SaveData {
 	int showGrid;
 	int battleAnim;            // 0=フル 1=短縮
 	DWORD uidNext;
-	int winSizeVer;            // 2 未満なら保存サイズを使わず既定サイズで開く
+	int winSizeVer;            // 3 未満なら保存サイズを使わず、作業領域の7割で開く
 	int itemN[8];              // 旧 reserved の先頭。鉱石・薬草・結晶・欠片・回復薬・剛力薬・遅延弾
 	int bgmVol;                // 0..10。optInit が 0 の旧セーブは読込時に既定
 	int seVol;
@@ -505,6 +507,8 @@ bool IsCraftId(int skill);
 bool IsCraftSuper(int skill);
 int CraftCpCost(int index);
 const wchar_t* CraftName(int skill);
+const wchar_t* CraftShapeName(int area);
+const wchar_t* CraftDesc(int skill);
 int CraftSuperUnlocked(int cls);
 int CraftSuperUnlockedBest(const SaveData& s);
 int CraftLineOf(int skill);
