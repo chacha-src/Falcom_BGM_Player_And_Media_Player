@@ -312,6 +312,14 @@ static const wchar_t* TacBgmFile(int scene)
 	case TAC_BGM_WIN: return L"tacticsgamewin.ogg";
 	case TAC_BGM_SHOP: return L"tacticsshop.ogg";
 	case TAC_BGM_MAKE: return L"tacticsmake.ogg";
+	case TAC_BGM_PLAINS: return L"tacticsgameplains.ogg";
+	case TAC_BGM_CANYON: return L"tacticsgamecanyon.ogg";
+	case TAC_BGM_FOREST: return L"tacticsgameforest.ogg";
+	case TAC_BGM_SNOW: return L"tacticsgamesnow.ogg";
+	case TAC_BGM_DESERT: return L"tacticsgamedesert.ogg";
+	case TAC_BGM_VOLCANO: return L"tacticsgamevolcano.ogg";
+	case TAC_BGM_SWAMP: return L"tacticsgameswamp.ogg";
+	case TAC_BGM_RUINS: return L"tacticsgameruins.ogg";
 	default: return L"tactics.ogg";
 	}
 }
@@ -389,12 +397,16 @@ void TacBgmScene(int scene)
 	if (scene == s_bgmScene) return;
 	wchar_t dir[MAX_PATH];
 	if (!TacBgmDir(dir, MAX_PATH)) return;
-	wchar_t want[MAX_PATH], hub[MAX_PATH];
+	wchar_t want[MAX_PATH], game[MAX_PATH], hub[MAX_PATH];
 	swprintf_s(want, L"%s\\%s", dir, TacBgmFile(scene));
+	swprintf_s(game, L"%s\\tacticsgame.ogg", dir);
 	swprintf_s(hub, L"%s\\tactics.ogg", dir);
 	const wchar_t* use = want;
-	if (scene != TAC_BGM_HUB && !TacOggOk(want))
-		use = hub;
+	if (!TacOggOk(want) && scene != TAC_BGM_HUB) {
+		const int theme = scene >= TAC_BGM_PLAINS && scene <= TAC_BGM_RUINS;
+		if (theme && TacOggOk(game)) use = game;
+		else use = hub;
+	}
 	if (!TacOggOk(use)) {
 		if (s_bgm) TacCloseBgm();
 		s_bgmPath[0] = 0;

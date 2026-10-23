@@ -17,7 +17,9 @@ enum {
 	ID_BT_CRAFT0 = 800, ID_BT_CRAFT1,
 	ID_BT_M_RESUME = 900, ID_BT_M_HELP, ID_BT_M_RETREAT, ID_BT_M_YES, ID_BT_M_NO, ID_BT_MENU, ID_BT_M_SAVE = 906, ID_BT_M_OPT,
 	ID_BT_OPT_Q = 920, ID_BT_OPT_ANIM, ID_BT_OPT_GRID,
-	ID_BT_IT0 = 960, ID_BT_ITT0 = 980
+	ID_BT_IT0 = 960, ID_BT_ITT0 = 980,
+	ID_BT_PROMO0 = 740, ID_BT_PROMO_LATER = 748,
+	ID_BT_EQ0 = 750, ID_BT_EQNONE = 754, ID_BT_EQROW = 755, ID_BT_EQPREV = 764, ID_BT_EQNEXT = 765
 };
 
 static float AngLerp(float a, float b, float t)
@@ -287,7 +289,7 @@ void Game::ResumeBattle(int kind)
 	m_camPan = v3(0, 0, 0);
 	m_parts.clear(); m_popups.clear(); m_banners.clear(); m_deferPopups.clear();
 	m_seqCut = FALSE; m_cutStage = 0; m_victory = 0; m_hoverUnit = -1;
-	m_lvqN = m_lvqCur = 0; m_menuConfirm = 0; m_proj.active = 0;
+	m_lvqN = m_lvqCur = 0; m_promoAsk = 0; m_menuConfirm = 0; m_proj.active = 0;
 	m_screen = SC_BATTLE;
 	m_phase = (Phase)s->phase;
 	m_phaseT = 0;
@@ -425,6 +427,7 @@ void Game::StartBattle(int stage)
 	m_lastTeam = -1;
 	m_hoverUnit = -1;
 	m_lvqN = m_lvqCur = 0;
+	m_promoAsk = 0;
 	m_menuConfirm = 0;
 	m_proj.active = 0;
 	m_screen = SC_BATTLE;
@@ -692,11 +695,11 @@ void Game::BuildOverlayQuads()
 	// スキル効果範囲
 	if (m_phase == PH_P_SKILLTARGET && m_cmdSkill >= 0 && m_cursorValid) {
 		const SkillDef& sd = SkillInfo(m_cmdSkill);
-		if (sd.area > 0 && sd.rMax > 0 && m_ovAtk[m_cz][m_cx]) {
-			for (int dz = -sd.area; dz <= sd.area; dz++) for (int dx = -sd.area; dx <= sd.area; dx++) {
-				if (abs(dx) + abs(dz) > sd.area) continue;
-				int tx = m_cx + dx, tz = m_cz + dz;
-				if (Map::In(tx, tz)) quad(tx, tz, RGBA8(255, 210, 70, 170), .045f);
+		if ((sd.area > 0 || sd.shape != SH_RADIUS) && sd.rMax > 0 && m_ovAtk[m_cz][m_cx]) {
+			int len = sd.area > 0 ? sd.area : 1;
+			for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) {
+				if (!ShapeCell(sd.shape, len, u.x, u.z, m_cx, m_cz, x, z)) continue;
+				quad(x, z, RGBA8(255, 210, 70, 170), .045f);
 			}
 		}
 	}
@@ -846,6 +849,8 @@ void Game::OpenCommand()
 {
 	m_phase = PH_P_CMD;
 	m_phaseT = 0;
+	m_statOpen = 0;
+	m_statEq = 0;
 	TacSfx(TS_OPEN);
 	m_navMode = TRUE;
 	m_focusId = HasAttackTarget(m_cur) ? ID_BT_ATTACK : ID_BT_WAIT;
@@ -986,7 +991,7 @@ void Game::BattleCancel()
 		sounded = 1;
 		break;
 	case PH_P_CMD:
-		if (m_statOpen) { m_statOpen = 0; sounded = 1; break; }
+		if (m_statOpen) { m_statOpen = 0; m_statEq = 0; sounded = 1; break; }
 		if (m_moved && m_cur >= 0) {
 			Unit& u = m_b.u[m_cur];
 			u.x = m_curX0; u.z = m_curZ0; u.face = m_curFace0;
@@ -1056,11 +1061,11 @@ void Game::StartMove(int ui, int tx, int tz, int next)
 	if (m_moveN > 1) {
 		int clip = m_moveN > 3 ? CL_RUN : CL_WALK;
 		ActorPlay(m_act[ui], clip, 1, .1f);
-		float tileRate = m_save.battleAnim ? 5.2f : 2.6f;
+		float tileRate = (m_save.battleAnim ? 5.2f : 2.6f) * 1.5f;
 		if (m_act[ui].gait == GAIT_BIPED)
 			m_act[ui].animSpeed = tileRate * (clip == CL_RUN ? .8f : 1.f);
 		else
-			m_act[ui].animSpeed = clip == CL_RUN ? 2.4f : 1.8f;
+			m_act[ui].animSpeed = (clip == CL_RUN ? 2.4f : 1.8f) * 1.5f;
 	}
 }
 
@@ -1068,7 +1073,7 @@ void Game::UpdateMove(float dt)
 {
 	int ui = m_moveUnit;
 	Unit& u = m_b.u[ui];
-	float speed = m_save.battleAnim ? 5.2f : 2.6f;
+	float speed = (m_save.battleAnim ? 5.2f : 2.6f) * 1.5f;
 	m_moveT += dt * speed;
 	int seg = (int)m_moveT;
 	BOOL fly = UnitMoveType(u) == MV_FLY;
@@ -1674,6 +1679,7 @@ void Game::FinishSeq()
 void Game::AwardExp()
 {
 	m_lvqN = 0;
+	m_promoAsk = 0;
 	int gain[MAX_UNITS] = {};
 	for (int k = 0; k < m_strkN; k++) {
 		const Strike& s = m_strk[k];
@@ -1692,20 +1698,28 @@ void Game::AwardExp()
 	for (int i = 0; i < m_b.nUnits; i++) {
 		Unit& u = m_b.u[i];
 		if (u.team != TEAM_PLAYER || !gain[i]) continue;
-		int g = min(100, gain[i]);
+		int g = gain[i];
+		if (g > 999) g = 999;
 		m_expGain[i] += g;
 		u.ch.exp += g;
-		while (u.ch.exp >= ExpToNext(u.ch.lv) && u.ch.lv < TAC_LV_MAX && m_lvqN < MAX_PARTY * 4) {
+		while (u.ch.exp >= ExpToNext(u.ch.lv) && u.ch.lv < TAC_LV_MAX) {
 			u.ch.exp -= ExpToNext(u.ch.lv);
-			LevelUpInfo& L = m_lvq[m_lvqN++];
-			memset(&L, 0, sizeof(L));
-			L.unit = i;
-			L.oldLv = u.ch.lv;
-			int learned = CharLevelUp(u.ch, m_rng, L.gains);
-			L.newLv = u.ch.lv;
-			if (learned >= 0) L.learned[L.nLearned++] = learned;
-			u.hp = min(u.ch.stat[S_HP], u.hp + L.gains[S_HP]);
-			u.mp = min(u.ch.stat[S_MP], u.mp + L.gains[S_MP]);
+			int gains[S_COUNT];
+			int* gp = gains;
+			int learnedBuf[4];
+			int nLearn = 0;
+			LevelUpInfo* Lp = NULL;
+			if (m_lvqN < MAX_PARTY * 4) {
+				Lp = &m_lvq[m_lvqN++];
+				memset(Lp, 0, sizeof(*Lp));
+				Lp->unit = i;
+				Lp->oldLv = u.ch.lv;
+				gp = Lp->gains;
+			}
+			nLearn = CharLevelUp(u.ch, m_rng, gp, Lp ? Lp->learned : learnedBuf, 4);
+			if (Lp) { Lp->nLearned = nLearn; Lp->newLv = u.ch.lv; }
+			u.hp = min(u.ch.stat[S_HP], u.hp + gp[S_HP]);
+			u.mp = min(u.ch.stat[S_MP], u.mp + gp[S_MP]);
 			u.levelsGained++;
 		}
 		if (u.ch.lv >= TAC_LV_MAX) u.ch.exp = 0;
@@ -2027,26 +2041,31 @@ void Game::DrawUnitPanel(const Unit& u, float x, float y, float w, BOOL big)
 	float tx = x + ps + U(20), tw = w - ps - U(30);
 	wchar_t nm[64];
 	UnitTitle(u, nm, 64);
-	m_r.HudText(nm, tx, y + U(18), U(big ? 17.f : 15.f), RGBA8(255, 255, 255), 0, 1);
-	wchar_t l[96];
-	if (u.team == TEAM_PLAYER) swprintf_s(l, L"%s  %s%d", ClassName(u.ch.cls), TT(TX_MISC_LV), u.ch.lv);
-	else swprintf_s(l, L"%s%d%s", TT(TX_MISC_LV), u.ch.lv, UnitMoveType(u) == MV_FLY ? L"  ✈" : L"");
-	m_r.HudText(l, tx, y + U(38), U(13), RGBA8(255, 226, 150), 0, 0);
+	m_r.HudText(nm, tx, y + U(16), U(big ? 17.f : 15.f), RGBA8(255, 255, 255), 0, 1);
+	wchar_t l[128];
+	if (u.team == TEAM_PLAYER) {
+		int need = ExpToNext(u.ch.lv);
+		int showExp = u.ch.lv >= TAC_LV_MAX ? 0 : u.ch.exp;
+		int showNeed = u.ch.lv >= TAC_LV_MAX ? 0 : need;
+		swprintf_s(l, L"%s%d  %s  %s %d/%d", TT(TX_MISC_LV), u.ch.lv, ClassName(u.ch.cls), TT(TX_MISC_EXP), showExp, showNeed);
+	} else swprintf_s(l, L"%s%d  %s%s", TT(TX_MISC_LV), u.ch.lv, ClassName(u.ch.cls), UnitMoveType(u) == MV_FLY ? L"  ✈" : L"");
+	m_r.HudText(l, tx, y + U(36), U(13), RGBA8(255, 226, 150), 0, 0);
 	float by = y + U(52);
+	float bw = tw * .36f;
 	swprintf_s(l, L"%s %d/%d", TT(TX_ST_HP), (int)(u.hpShow + .5f), u.ch.stat[S_HP]);
-	m_r.HudText(l, tx, by + U(6), U(12), RGBA8(230, 230, 230), 0, 0);
+	m_r.HudText(l, tx, by + U(2), U(12), RGBA8(230, 230, 230), 0, 0);
 	{
 		wchar_t cp[32];
 		swprintf_s(cp, L"%s %d", TT(TX_CP), u.cp);
-		m_r.HudText(cp, tx + tw, by + U(6), U(12), u.cp >= 100 ? RGBA8(255, 214, 80) : RGBA8(210, 170, 70), 2, 0);
+		m_r.HudText(cp, tx + tw - bw - U(8), by + U(2), U(12), u.cp >= 100 ? RGBA8(255, 214, 80) : RGBA8(210, 170, 70), 2, 0);
 	}
 	float frac = u.hpShow / max(1, u.ch.stat[S_HP]);
-	Bar(tx, by + U(14), tw, U(10), frac, frac > .5f ? RGBA8(120, 240, 120) : (frac > .25f ? RGBA8(240, 210, 80) : RGBA8(255, 90, 70)), RGBA8(40, 120, 50), u.hpShow / max(1, u.ch.stat[S_HP]) + .0f);
-	by += U(28);
+	Bar(tx + tw - bw, by + U(4), bw, U(8), frac, frac > .5f ? RGBA8(120, 240, 120) : (frac > .25f ? RGBA8(240, 210, 80) : RGBA8(255, 90, 70)), RGBA8(40, 120, 50));
+	by += U(20);
 	if (u.ch.stat[S_MP] > 0) {
 		swprintf_s(l, L"%s %d/%d", TT(TX_ST_MP), u.mp, u.ch.stat[S_MP]);
-		m_r.HudText(l, tx, by + U(4), U(12), RGBA8(220, 220, 240), 0, 0);
-		Bar(tx + tw * .45f, by, tw * .55f, U(8), (float)u.mp / max(1, u.ch.stat[S_MP]), RGBA8(110, 170, 255), RGBA8(40, 70, 170));
+		m_r.HudText(l, tx, by + U(2), U(12), RGBA8(220, 220, 240), 0, 0);
+		Bar(tx + tw - bw, by + U(4), bw, U(7), (float)u.mp / max(1, u.ch.stat[S_MP]), RGBA8(110, 170, 255), RGBA8(40, 70, 170));
 	}
 	if (big) {
 		by += U(18);
@@ -2059,13 +2078,6 @@ void Game::DrawUnitPanel(const Unit& u, float x, float y, float w, BOOL big)
 		if (u.buffDef > 0 || u.buffAgi > 0 || u.buffAtk > 0 || u.mulTurns > 0) { wcscat_s(st, TT(TX_BT_BUFF)); wcscat_s(st, L" "); }
 		if (u.team == TEAM_ENEMY && !u.alert) { wcscat_s(st, TT(TX_BT_ASLEEP)); wcscat_s(st, L" "); }
 		if (u.defDown > 0) { wcscat_s(st, TT(TX_ST_DEF)); wcscat_s(st, L"↓ "); }
-		if (u.team == TEAM_PLAYER) {
-			wchar_t ex[64];
-			int need = ExpToNext(u.ch.lv);
-			int left = u.ch.lv >= TAC_LV_MAX ? 0 : max(0, need - u.ch.exp);
-			swprintf_s(ex, L"%s %d/%d  %s %d  %s %d", TT(TX_MISC_EXP), u.ch.exp, need, TT(TX_EXP_LEFT), left, TT(TX_CP), u.cp);
-			wcscat_s(st, ex);
-		}
 		m_r.HudText(st, tx, by + U(6), U(11), RGBA8(200, 230, 255), 0, 0);
 	}
 }
@@ -2447,6 +2459,125 @@ void Game::UseConsumable(int good, int target)
 	FinishUnitTurn(1);
 }
 
+void Game::DrawBattleStatus()
+{
+	if (m_cur < 0 || m_cur >= m_b.nUnits) { m_statOpen = 0; m_statEq = 0; return; }
+	Unit& u = m_b.u[m_cur];
+	float pw = min(U(640.f), (float)m_w - U(40));
+	float ph = min(U(520.f), (float)m_h - U(40));
+	float px = ((float)m_w - pw) * .5f, py = ((float)m_h - ph) * .5f;
+	Panel(px, py, pw, ph);
+	wchar_t nm[64];
+	UnitTitle(u, nm, 64);
+	m_r.HudText(nm, px + U(16), py + U(22), U(18), RGBA8(255, 255, 255), 0, 1);
+	m_r.HudText(TT(TX_BT_STATUS), px + pw - U(16), py + U(22), U(16), RGBA8(255, 226, 150), 2, 1);
+	auto syncCraft = [&]() {
+		int cp = u.cp;
+		for (int k = 0; k < 2; k++) {
+			int b = EquippedBeadId(u.ch, k);
+			u.craftEq[k] = b >= 1 ? CRAFT_BASE + b - 1 : 0;
+		}
+		u.cp = cp;
+	};
+	auto syncGear = [&]() {
+		if (u.rosterIdx >= 0 && u.rosterIdx < MAX_ROSTER) {
+			m_save.roster[u.rosterIdx].reserved[6] = u.ch.reserved[6];
+			m_save.roster[u.rosterIdx].reserved[7] = u.ch.reserved[7];
+		}
+		float t = m_act[m_cur].t;
+		ActorForUnit(m_cur);
+		m_act[m_cur].t = t;
+	};
+	if (m_statEq >= 1 && m_statEq <= 4) {
+		int gearKind = m_statEq <= 2 ? (m_statEq == 1 ? 0 : 1) : -1;
+		int beadSlot = m_statEq - 3;
+		const wchar_t* title = gearKind < 0 ? TT(TX_BEAD) : TT(gearKind ? TX_GEAR_ARM : TX_GEAR_WPN);
+		m_r.HudText(title, px + pw * .5f, py + U(48), U(16), RGBA8(255, 226, 150), 1, 1);
+		int ids[96], n = 0;
+		int line = ClassLine(u.ch.cls);
+		if (gearKind >= 0) {
+			for (int i = 0; i < m_save.gearN && n < 96; i++) {
+				const GearDef* g = GearOf(m_save.gearId[i]);
+				if (!g || g->kind != gearKind || g->line != line) continue;
+				ids[n++] = i;
+			}
+		} else {
+			int other = EquippedBeadId(u.ch, beadSlot ^ 1);
+			int cur = EquippedBeadId(u.ch, beadSlot);
+			for (int i = 0; i < CRAFT_N && n < 96; i++) {
+				if (i + 1 == other) continue;
+				if (BeadSpare(u.ch, beadSlot, i) > 0 || cur == i + 1) ids[n++] = i + 1;
+			}
+		}
+		const int per = 6;
+		int pages = max(1, (n + per - 1) / per);
+		if (m_statEqPage >= pages) m_statEqPage = pages - 1;
+		if (m_statEqPage < 0) m_statEqPage = 0;
+		float yy = py + U(70);
+		if (Btn(ID_BT_EQNONE, px + U(16), yy, pw - U(32), U(32), TT(TX_PT_NONE))) {
+			if (gearKind >= 0) {
+				int sl = gearKind ? 7 : 6;
+				if (u.ch.reserved[sl] <= 0) return;
+				if (!StashAdd(m_save, u.ch.reserved[sl])) { TacSfx(TS_ERROR); return; }
+				u.ch.reserved[sl] = 0;
+				syncGear();
+			} else {
+				EquipBeadId(u.ch, beadSlot, 0);
+				syncCraft();
+			}
+			Persist();
+			return;
+		}
+		yy += U(36);
+		int a = m_statEqPage * per;
+		int b = min(n, a + per);
+		for (int s = 0; s < b - a; s++) {
+			int ix = a + s;
+			wchar_t row[180];
+			if (gearKind >= 0) swprintf_s(row, L"%s", GearName(m_save.gearId[ids[ix]]));
+			else {
+				const SkillDef& sd = SkillInfo(CRAFT_BASE + ids[ix] - 1);
+				swprintf_s(row, L"%s  %s  %s%d", CraftName(ids[ix] - 1), CraftShapeName(sd.area, sd.shape), TT(TX_CP), CraftCpCost(ids[ix] - 1));
+			}
+			if (Btn(ID_BT_EQROW + s, px + U(16), yy, pw - U(32), U(32), row, TRUE, FALSE, U(13))) {
+				if (gearKind >= 0) { GearEquip(u.ch, m_save, ids[ix]); syncGear(); }
+				else if (!EquipBeadId(u.ch, beadSlot, ids[ix])) { TacSfx(TS_ERROR); return; }
+				else syncCraft();
+				Persist();
+				TacSfx(TS_CONFIRM);
+				return;
+			}
+			yy += U(36);
+		}
+		if (pages > 1) {
+			wchar_t pg[32];
+			swprintf_s(pg, L"%d / %d", m_statEqPage + 1, pages);
+			if (Btn(ID_BT_EQPREV, px + U(16), py + ph - U(46), U(64), U(32), L"◀")) m_statEqPage = (m_statEqPage + pages - 1) % pages;
+			m_r.HudText(pg, px + U(120), py + ph - U(30), U(14), RGBA8(220, 220, 230), 0, 1);
+			if (Btn(ID_BT_EQNEXT, px + U(168), py + ph - U(46), U(64), U(32), L"▶")) m_statEqPage = (m_statEqPage + 1) % pages;
+		}
+		if (Btn(ID_BT_BACK, px + pw - U(170), py + ph - U(46), U(150), U(32), TT(TX_CR_BACK))) m_statEq = 0;
+		return;
+	}
+	CharData view = u.ch;
+	for (int s = 0; s < S_COUNT; s++) view.stat[s] = UnitStat(u, s);
+	DrawStatLines(view, px + U(16), py + U(48), pw - U(32), NULL, u.hp, u.mp);
+	float yy = py + ph - U(168);
+	const GearDef* wpn = GearOf(u.ch.reserved[6]);
+	const GearDef* arm = GearOf(u.ch.reserved[7]);
+	wchar_t gl[96];
+	swprintf_s(gl, L"%s: %s", TT(TX_GEAR_WPN), wpn ? GearName(u.ch.reserved[6]) : TT(TX_PT_NONE));
+	if (Btn(ID_BT_EQ0, px + U(16), yy, pw * .48f, U(32), gl, TRUE, FALSE, U(12))) { m_statEq = 1; m_statEqPage = 0; }
+	swprintf_s(gl, L"%s: %s", TT(TX_GEAR_ARM), arm ? GearName(u.ch.reserved[7]) : TT(TX_PT_NONE));
+	if (Btn(ID_BT_EQ0 + 1, px + pw * .52f, yy, pw * .44f, U(32), gl, TRUE, FALSE, U(12))) { m_statEq = 2; m_statEqPage = 0; }
+	yy += U(36);
+	swprintf_s(gl, L"%s1: %s", TT(TX_BEAD), EquippedBeadName(u.ch, 0));
+	if (Btn(ID_BT_EQ0 + 2, px + U(16), yy, pw * .48f, U(32), gl, TRUE, FALSE, U(12))) { m_statEq = 3; m_statEqPage = 0; }
+	swprintf_s(gl, L"%s2: %s", TT(TX_BEAD), EquippedBeadName(u.ch, 1));
+	if (Btn(ID_BT_EQ0 + 3, px + pw * .52f, yy, pw * .44f, U(32), gl, TRUE, FALSE, U(12))) { m_statEq = 4; m_statEqPage = 0; }
+	if (Btn(ID_BT_BACK, px + pw - U(170), py + ph - U(46), U(150), U(32), TT(TX_CR_BACK))) { m_statOpen = 0; m_statEq = 0; }
+}
+
 void Game::DrawCommandMenu()
 {
 	if (m_cur < 0) return;
@@ -2567,21 +2698,7 @@ void Game::DrawCommandMenu()
 		}
 		int haveItem = ConsumableCount(m_save);
 		int n = (m_moved ? 4 : 3) + (canShove ? 1 : 0) + (canDoor ? 1 : 0) + (canClimb ? 1 : 0) + (haveItem > 0 ? 1 : 0) + 1;
-		if (m_statOpen) {
-			float pw = min(U(640), (float)m_w - U(40));
-			float ph = min(U(280), (float)m_h - U(40));
-			float px = ((float)m_w - pw) * .5f, py = ((float)m_h - ph) * .5f;
-			Panel(px, py, pw, ph);
-			wchar_t nm[64];
-			UnitTitle(u, nm, 64);
-			m_r.HudText(nm, px + U(16), py + U(22), U(18), RGBA8(255, 255, 255), 0, 1);
-			m_r.HudText(TT(TX_BT_STATUS), px + pw - U(16), py + U(22), U(16), RGBA8(255, 226, 150), 2, 1);
-			CharData view = u.ch;
-			for (int s = 0; s < S_COUNT; s++) view.stat[s] = UnitStat(u, s);
-			DrawStatLines(view, px + U(16), py + U(48), pw - U(32), NULL, u.hp, u.mp);
-			if (Btn(ID_BT_BACK, px + pw - U(170), py + ph - U(44), U(150), U(32), TT(TX_CR_BACK))) m_statOpen = 0;
-			return;
-		}
+		if (m_statOpen) { DrawBattleStatus(); return; }
 		float cw = U(320);
 		x = min(x, m_w - cw - U(16));
 		Panel(x - U(8), y - U(8), cw + U(16), bh * n + U(6) * (n - 1) + U(88));
@@ -2682,7 +2799,7 @@ void Game::DrawCommandMenu()
 			const SkillDef& sd = SkillInfo(s);
 			BOOL ougi = IsCraftSuper(s);
 			wchar_t l[96];
-			swprintf_s(l, L"%s  %s  %s%d%s", CraftName(s), CraftShapeName(sd.area), TT(TX_CP), CraftCpCost(s - CRAFT_BASE), ougi ? L" ★" : L"");
+			swprintf_s(l, L"%s  %s  %s%d%s", CraftName(s), CraftShapeName(sd.area, sd.shape), TT(TX_CP), CraftCpCost(s - CRAFT_BASE), ougi ? L" ★" : L"");
 			BOOL ok = SkillUsable(m_b, m_cur, s);
 			if ((m_navMode && m_focusId == ID_BT_CRAFT0 + slot) || (!m_navMode && Hit(x, yy, sw, bh))) hovCraft = s;
 			DWORD col = ougi ? RGBA8(130, 90, 24, 240) : (sd.kind == SK_HEAL || sd.kind == SK_BUFF ? RGBA8(40, 100, 70, 240) : RGBA8(92, 68, 28, 235));
@@ -2707,7 +2824,8 @@ void Game::DrawCommandMenu()
 			int s = list[k];
 			const SkillDef& sd = SkillInfo(s);
 			wchar_t l[96];
-			if (sd.area > 0) swprintf_s(l, L"%s  MP%d  %s%d", TT(sd.nameTx), sd.mp, TT(TX_MISC_AREA), sd.area);
+			if (sd.shape == SH_LINE || sd.shape == SH_FAN) swprintf_s(l, L"%s  MP%d  %s%d", TT(sd.nameTx), sd.mp, CraftShapeName(sd.area, sd.shape), sd.area);
+			else if (sd.area > 0) swprintf_s(l, L"%s  MP%d  %s%d", TT(sd.nameTx), sd.mp, TT(TX_MISC_AREA), sd.area);
 			else swprintf_s(l, L"%s   MP %d", TT(sd.nameTx), sd.mp);
 			BOOL ok = SkillUsable(m_b, m_cur, s);
 			if ((m_navMode && m_focusId == ID_BT_SK0 + s) || (!m_navMode && Hit(x, yy, sw, bh))) hov = s;
@@ -2743,7 +2861,7 @@ void Game::DrawCommandMenu()
 			wchar_t l[96];
 			int r0 = sd.rMax < 0 ? UnitRangeMin(u) : sd.rMin;
 			int r1 = sd.rMax < 0 ? UnitRangeMax(u) : sd.rMax;
-			swprintf_s(l, L"%s %d-%d  %s  %s %d", TT(TX_MISC_RANGE), r0, r1, CraftShapeName(sd.area), TT(TX_CP), CraftCpCost(hovCraft - CRAFT_BASE));
+			swprintf_s(l, L"%s %d-%d  %s  %s %d", TT(TX_MISC_RANGE), r0, r1, CraftShapeName(sd.area, sd.shape), TT(TX_CP), CraftCpCost(hovCraft - CRAFT_BASE));
 			m_r.HudText(l, x, yy + U(8), U(12), RGBA8(255, 210, 120), 0, 0);
 			m_r.HudTextBox(CraftDesc(hovCraft), x, yy + U(18), sw, U(64), U(12), RGBA8(230, 230, 236));
 		} else if (hov >= 0) {
@@ -2756,8 +2874,46 @@ void Game::DrawCommandMenu()
 	}
 }
 
+void Game::DrawPromoteOffer()
+{
+	if (m_lvqCur < 0 || m_lvqCur >= m_lvqN) return;
+	const LevelUpInfo& L = m_lvq[m_lvqCur];
+	if (L.unit < 0 || L.unit >= m_b.nUnits) return;
+	Unit& u = m_b.u[L.unit];
+	EvoOption opt[4];
+	int no = EvoOptions(u.ch.cls, opt);
+	float w = min(U(520), (float)m_w - U(40));
+	float h = U(120) + no * U(48) + U(56);
+	float x = (m_w - w) * .5f, y = (m_h - h) * .5f;
+	Panel(x, y, w, h);
+	m_r.HudText(TT(TX_EV_JOB), x + w * .5f, y + U(28), U(26), RGBA8(255, 226, 150), 1, 1);
+	wchar_t who[96];
+	swprintf_s(who, L"%s  %s%d", u.ch.name, TT(TX_MISC_LV), u.ch.lv);
+	m_r.HudText(who, x + w * .5f, y + U(54), U(15), RGBA8(230, 230, 240), 1, 0);
+	float ty = y + U(78);
+	for (int k = 0; k < no; k++) {
+		if (Btn(ID_BT_PROMO0 + k, x + U(24), ty, w - U(48), U(40), ClassName(opt[k].target), TRUE, FALSE, U(16))) {
+			int oldHp = u.ch.stat[S_HP], oldMp = u.ch.stat[S_MP];
+			EvoApply(u.ch, opt[k].target, NULL, 0);
+			u.hp = min(u.ch.stat[S_HP], u.hp + max(0, u.ch.stat[S_HP] - oldHp));
+			u.mp = min(u.ch.stat[S_MP], u.mp + max(0, u.ch.stat[S_MP] - oldMp));
+			float t = m_act[L.unit].t;
+			ActorForUnit(L.unit);
+			m_act[L.unit].t = t;
+			m_dispHp[L.unit] = (float)u.hp;
+			InvalidatePortraits();
+			AddBanner(TT(TX_EV_DONE), ClassName(u.ch.cls), RGBA8(255, 226, 120), 1, 2.2f);
+			AdvanceLevelUp();
+			return;
+		}
+		ty += U(48);
+	}
+	if (Btn(ID_BT_PROMO_LATER, x + w * .5f - U(110), y + h - U(50), U(220), U(36), TT(TX_EV_LATER))) AdvanceLevelUp();
+}
+
 void Game::DrawLevelUp()
 {
+	if (m_promoAsk) { DrawPromoteOffer(); return; }
 	if (m_lvqCur >= m_lvqN) return;
 	const LevelUpInfo& L = m_lvq[m_lvqCur];
 	const Unit& u = m_b.u[L.unit];
@@ -2784,10 +2940,27 @@ void Game::DrawLevelUp()
 
 void Game::AdvanceLevelUp()
 {
+	if (m_promoAsk) {
+		m_promoAsk = 0;
+	} else if (m_lvqCur >= 0 && m_lvqCur < m_lvqN) {
+		const LevelUpInfo& L = m_lvq[m_lvqCur];
+		if (L.unit >= 0 && L.unit < m_b.nUnits) {
+			const CharData& c = m_b.u[L.unit].ch;
+			int gate = PromoteLevel(ClassInfo(c.cls).tier);
+			EvoOption opt[4];
+			if (L.oldLv < gate && L.newLv >= gate && EvoOptions(c.cls, opt) > 0) {
+				m_promoAsk = 1;
+				m_navMode = TRUE;
+				m_focusId = ID_BT_PROMO0;
+				return;
+			}
+		}
+	}
 	m_lvqCur++;
 	m_lvT = 0;
 	if (m_lvqCur >= m_lvqN) {
 		m_lvqN = 0;
+		m_promoAsk = 0;
 		FinishUnitTurn(1);
 	} else TacSfx(TS_LEVEL);
 }
@@ -2957,9 +3130,10 @@ void Game::DrawBattleUi()
 	else m_orderBottom = U(14);
 	float ms = U(236);
 	DrawMinimap((float)m_w - ms - U(16), (float)m_h - ms - U(16), ms);
-	if (m_cur >= 0 && m_phase != PH_OVER && m_phase != PH_INTRO) DrawUnitPanel(m_b.u[m_cur], U(14), (float)m_h - U(146), U(360), TRUE);
+	float lw = min(U(500.f), (float)m_w * .46f);
+	if (m_cur >= 0 && m_phase != PH_OVER && m_phase != PH_INTRO) DrawUnitPanel(m_b.u[m_cur], U(14), (float)m_h - U(146), lw, TRUE);
 	if (m_hoverUnit >= 0 && m_hoverUnit != m_cur && m_phase != PH_ACTION && m_b.u[m_hoverUnit].alive)
-		DrawUnitPanel(m_b.u[m_hoverUnit], U(386), (float)m_h - U(270), U(320), FALSE);
+		DrawUnitPanel(m_b.u[m_hoverUnit], U(14) + lw + U(10), (float)m_h - U(270), U(320), FALSE);
 	DrawBattleLog();
 	// 地形情報
 	if (m_cursorValid && (m_phase == PH_P_MOVE || m_phase == PH_P_TARGET || m_phase == PH_P_SKILLTARGET)) {

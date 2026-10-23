@@ -219,20 +219,24 @@ enum SkillId {
 	SKL_ARTN = SKL_ART0 + 104,
 	SKL_RAISE,
 	SKL_SHOWER, SKL_SHINE, SKL_CRESCENT, SKL_GRANDSLASH, SKL_STORM, SKL_FROSTFIELD, SKL_THUNDERFIELD, SKL_NOVA,
+	SKL_LINESLASH, SKL_FANSLASH, SKL_ARROWLINE, SKL_ARROWFAN,
+	SKL_FIREBEAM, SKL_ICEBEAM, SKL_THUNDERBEAM, SKL_HEALBEAM, SKL_HEALFAN,
 	SKL_COUNT
 };
+enum { SH_RADIUS = 0, SH_LINE = 1, SH_FAN = 2 };
 struct SkillDef {
 	int nameTx, descTx;
 	int kind;
 	int mp;
 	int power;       // 物理: 倍率%、魔法/回復: 威力
 	int rMin, rMax;  // 0=自分中心
-	int area;        // 範囲半径（0=単体）
+	int area;        // 半径、または直線・扇の長さ
 	int element;
 	int hits;
 	int critBonus;
 	int effect;      // 追加効果
 	int enemyOnly;
+	int shape = SH_RADIUS;
 };
 enum SkillEffect { EF_NONE, EF_SLOW, EF_DEFDOWN, EF_POISON, EF_DRAIN, EF_IGNDEF, EF_BUFF_DEF, EF_BUFF_AGI, EF_BUFF_ATK, EF_REACT, EF_RAISE };
 const SkillDef& SkillInfo(int s);
@@ -262,7 +266,7 @@ struct CharData {
 
 void CharRecalcInit(CharData& c);                  // 新規作成時の初期能力
 void CharRecalcProgress(CharData& c);              // 現在Lvの期待値で能力を組み直す
-int  CharLevelUp(CharData& c, Rng& r, int gains[S_COUNT]);   // 戻り: 新規習得スキル id or -1
+int  CharLevelUp(CharData& c, Rng& r, int gains[S_COUNT], int* learned = NULL, int learnedMax = 0);   // learned あり: 習得数。無し: 最初のスキル id or -1
 int  CharLearnAt(const CharData& c, int lv);       // その Lv で覚えるスキル
 void CharGrantReached(CharData& c);                // 現在Lvまでに習得表へ載った技を付与
 bool CharHasSkill(const CharData& c, int s);
@@ -394,6 +398,7 @@ void CalcForecast(const Battle& b, int a, int d, int skill, Forecast& f);
 int  ResolveAttack(Battle& b, int a, int d, int skill, Rng& r, Strike* out, int maxOut, int cx, int cz);
 int  AppendAssists(Battle& b, Rng& r, Strike* out, int n, int maxOut);
 int  SkillTargets(const Battle& b, int caster, int skill, int cx, int cz, int* out, int maxOut);
+bool ShapeCell(int shape, int area, int ax, int az, int cx, int cz, int tx, int tz);
 bool SkillUsable(const Battle& b, int ui, int skill);
 int  SkillCastRangeMin(const Unit& u, int skill);
 int  SkillCastRangeMax(const Unit& u, int skill);
@@ -504,6 +509,7 @@ bool DropConsumable(SaveData& s, int monster, Rng& r);
 int DropTrophy(int monster, int boss, Rng& r, wchar_t* name, int nameN, int* goldOut);
 int TrophyList(int* slots, int max);
 bool TrophySell(SaveData& s, int slot);
+bool TrophySellAll(SaveData& s);
 void TrophyNameOf(int slot, wchar_t* name, int nameN, int* count, int* price);
 struct GoodDef { int price; int item; int extra; int nameTx; int self; };
 int GoodCount();
@@ -512,12 +518,12 @@ int GoodHave(const SaveData& s, int i);
 bool GoodBuy(SaveData& s, int i);
 bool GoodTake(SaveData& s, int i);
 
-enum { CRAFT_BASE = 100000, CRAFT_NORM = 15, CRAFT_SUPER_N = 6, CRAFT_PER_LINE = 21, CRAFT_LINES = 6, CRAFT_N = 126, CP_MAX = 200 };
+enum { CRAFT_BASE = 100000, CRAFT_NORM = 15, CRAFT_SUPER_N = 6, CRAFT_PER_LINE = 21, CRAFT_LINES = 7, CRAFT_N = 147, CP_MAX = 200 };
 bool IsCraftId(int skill);
 bool IsCraftSuper(int skill);
 int CraftCpCost(int index);
 const wchar_t* CraftName(int skill);
-const wchar_t* CraftShapeName(int area);
+const wchar_t* CraftShapeName(int area, int shape = 0);
 const wchar_t* CraftDesc(int skill);
 int CraftSuperUnlocked(int cls);
 int CraftSuperUnlockedBest(const SaveData& s);

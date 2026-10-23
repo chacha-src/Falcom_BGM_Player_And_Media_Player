@@ -57,6 +57,7 @@ protected:
 	afx_msg void OnClose();
 	afx_msg void OnGetMinMaxInfo(MINMAXINFO* mmi);
 	afx_msg void OnActivate(UINT nState, CWnd* pWndOther, BOOL bMinimized);
+	afx_msg BOOL OnMouseWheel(UINT nFlags, short zDelta, CPoint pt);
 	DECLARE_MESSAGE_MAP()
 
 	void LayoutView();

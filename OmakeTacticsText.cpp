@@ -1100,20 +1100,20 @@ R(TX_EV_TARGET, L"進化先", L"Evolve Into", L"Évoluer en", L"Evolve in", L"Ev
 R(TX_EV_PARTNER, L"素材キャラ", L"Partner Characters", L"Personnages partenaires", L"Personaggi partner", L"Personajes compañeros", L"재료 캐릭터", L"素材角色", L"الشخصيات المساندة", L"Персонажи-материал", L"Partner-Charaktere", L"Personagens parceiros", L"Partnerpersonages", L"Postacie-partnerzy", L"Ortak karakterler")
 R(TX_EV_DO, L"進化する", L"Evolve", L"Faire évoluer", L"Evolvi", L"Evolucionar", L"진화하기", L"进化", L"طوّر", L"Развить", L"Entwickeln", L"Evoluir", L"Evolueren", L"Ewoluuj", L"Evrilt")
 R(TX_EV_HINT_MAIN,
-	L"Lv15は素材1体、Lv35は素材2体。以降はLv55・78・105・140・180・230・290で素材なし",
-	L"Lv15 needs 1 partner, Lv35 needs 2. Later: Lv55, 78, 105, 140, 180, 230, 290, no partner",
-	L"Niv. 15 : 1 partenaire, niv. 35 : 2. Ensuite niv. 55, 78, 105, 140, 180, 230, 290 sans partenaire",
-	L"Lv15: 1 partner, Lv35: 2. Poi Lv55, 78, 105, 140, 180, 230, 290 senza partner",
-	L"Nv15: 1 compañero, Nv35: 2. Luego Nv55, 78, 105, 140, 180, 230, 290 sin compañero",
-	L"Lv15는 재료 1명, Lv35는 2명. 이후 Lv55·78·105·140·180·230·290은 재료 없음",
-	L"Lv15需素材1名，Lv35需2名。之后Lv55、78、105、140、180、230、290无需素材",
-	L"المستوى 15 شريك واحد، و35 شريكان. بعدها 55 و78 و105 و140 و180 و230 و290 بلا شريك",
-	L"Ур. 15 — 1 материал, ур. 35 — 2. Дальше ур. 55, 78, 105, 140, 180, 230, 290 без материала",
-	L"Lv15: 1 Partner, Lv35: 2. Danach Lv55, 78, 105, 140, 180, 230, 290 ohne Partner",
-	L"Nv15: 1 parceiro, Nv35: 2. Depois Nv55, 78, 105, 140, 180, 230, 290 sem parceiro",
-	L"Lv15: 1 partner, Lv35: 2. Daarna Lv55, 78, 105, 140, 180, 230, 290 zonder partner",
-	L"Poz. 15: 1 partner, poz. 35: 2. Dalej poz. 55, 78, 105, 140, 180, 230, 290 bez partnera",
-	L"Sv15: 1 ortak, Sv35: 2 ortak. Sonrası Sv55, 78, 105, 140, 180, 230, 290 ortaksız")
+	L"素材は不要です。Lv15・35・55・78・105・140・180・230・290で転職できます。戦闘のレベルアップ直後にも選べます",
+	L"No partner is needed. Change class at Lv15, 35, 55, 78, 105, 140, 180, 230 and 290, also right after a battle level-up",
+	L"Aucun partenaire n'est requis. Changez de classe aux niv. 15, 35, 55, 78, 105, 140, 180, 230 et 290, ou juste après une montée de niveau",
+	L"Nessun partner. Cambia classe a Lv15, 35, 55, 78, 105, 140, 180, 230 e 290, anche subito dopo un livello in battaglia",
+	L"No hace falta compañero. Cambia de clase en Nv15, 35, 55, 78, 105, 140, 180, 230 y 290, también tras subir de nivel",
+	L"재료는 필요 없습니다. Lv15·35·55·78·105·140·180·230·290에 전직합니다. 전투 레벨업 직후에도 고릅니다",
+	L"不需要素材。Lv15、35、55、78、105、140、180、230、290可转职，战斗升级后也能选",
+	L"لا حاجة لشريك. غيّر الفئة عند 15 و35 و55 و78 و105 و140 و180 و230 و290، وأيضًا بعد رفع المستوى في المعركة",
+	L"Материал не нужен. Смена класса на ур. 15, 35, 55, 78, 105, 140, 180, 230 и 290, и сразу после уровня в бою",
+	L"Kein Partner nötig. Klassenwechsel bei Lv15, 35, 55, 78, 105, 140, 180, 230 und 290, auch direkt nach einem Levelaufstieg",
+	L"Sem parceiro. Mude de classe nos Nv15, 35, 55, 78, 105, 140, 180, 230 e 290, também logo após subir de nível",
+	L"Geen partner nodig. Wissel van klasse op Lv15, 35, 55, 78, 105, 140, 180, 230 en 290, ook direct na een level",
+	L"Partner nie jest potrzebny. Zmiana klasy na poz. 15, 35, 55, 78, 105, 140, 180, 230 i 290, także tuż po poziomie w walce",
+	L"Ortak gerekmez. Sv15, 35, 55, 78, 105, 140, 180, 230 ve 290'da sınıf değişir, savaşta seviye sonrası da seçilir")
 R(TX_EV_HINT_PARTNER,
 	L"素材キャラは消滅します。能力の一部とスキルを引き継ぎます",
 	L"Partners will be lost. Some of their stats and skills are inherited",
@@ -1232,7 +1232,7 @@ R(TX_HELP_TEXT,
 	L"【パッド】 左スティック/十字キー: カーソル　A: 決定　B: 戻る　LB/RB: 回転　右スティック: 視点　トリガー: ズーム　X: 早送り　Y: 中央へ　Start: 戻る　Back: 操作説明\n"
 	L"【育成】\n"
 	L"・攻撃・回復・補助で経験値を得てレベルアップ。一定のレベルでスキルを覚えます。\n"
-	L"・Lv15で上位クラスへ（素材1体）、Lv35で最上位クラスへ（素材2体）。その後はLv55・78・105・140・180・230・290で進化し、素材は不要です。\n"
+	L"・Lv15・35・55・78・105・140・180・230・290で転職できます。素材は不要です。戦闘でレベルアップした直後にも選べ、後回しにもできます。\n"
 	L"・ステージは1～9999。先へ進むほど敵が強くなり、得られる経験値も増えます。",
 	L"[Basics]\n"
 	L"- Turn order depends on agility and is shown in \"Turn Order\" at the top right. Fast units can cut in and act more often.\n"
@@ -1245,7 +1245,7 @@ R(TX_HELP_TEXT,
 	L"[Gamepad] Left stick/D-pad: cursor  A: confirm  B: back  LB/RB: rotate  Right stick: view  Triggers: zoom  X: fast forward  Y: recenter  Start: back  Back: controls\n"
 	L"[Growth]\n"
 	L"- Attacks, healing and buffs grant EXP and levels. Skills are learned at certain levels.\n"
-	L"- Lv15: advanced class (1 partner). Lv35: master class (2 partners). Then Lv55, 78, 105, 140, 180, 230 and 290, with no partner.\n"
+	L"- Change class at Lv15, 35, 55, 78, 105, 140, 180, 230 and 290. No partner is needed. You can also choose right after a battle level-up, or later.\n"
 	L"- Stages run from 1 to 9999. Enemies grow stronger and give more EXP as you advance.",
 	L"[Bases]\n"
 	L"- L'ordre des tours dépend de l'agilité et s'affiche dans « Ordre des tours » en haut à droite. Les unités rapides s'intercalent et agissent plus souvent.\n"
@@ -1258,7 +1258,7 @@ R(TX_HELP_TEXT,
 	L"[Manette] Stick gauche/croix : curseur  A : valider  B : retour  LB/RB : tourner  Stick droit : vue  Gâchettes : zoom  X : avance rapide  Y : recentrer  Start : retour  Back : commandes\n"
 	L"[Progression]\n"
 	L"- Attaques, soins et soutiens donnent de l'EXP et des niveaux. Des compétences s'apprennent à certains niveaux.\n"
-	L"- Niv. 15 : classe avancée (1 partenaire). Niv. 35 : classe ultime (2 partenaires). Puis niv. 55, 78, 105, 140, 180, 230 et 290, sans partenaire.\n"
+	L"- Changement de classe aux niv. 15, 35, 55, 78, 105, 140, 180, 230 et 290. Aucun partenaire. Aussi juste après un niveau, ou plus tard.\n"
 	L"- Les niveaux vont de 1 à 9999. Les ennemis deviennent plus forts et donnent plus d'EXP au fil de la progression.",
 	L"[Basi]\n"
 	L"- L'ordine dei turni dipende dall'agilità ed è mostrato in \"Ordine dei turni\" in alto a destra. Le unità veloci si inseriscono e agiscono più spesso.\n"
@@ -1271,7 +1271,7 @@ R(TX_HELP_TEXT,
 	L"[Gamepad] Stick sinistro/croce: cursore  A: conferma  B: indietro  LB/RB: ruota  Stick destro: vista  Grilletti: zoom  X: avanti veloce  Y: ricentra  Start: indietro  Back: comandi\n"
 	L"[Crescita]\n"
 	L"- Attacchi, cure e supporti danno ESP e livelli. Le abilità si imparano a certi livelli.\n"
-	L"- Lv15: classe avanzata (1 partner). Lv35: classe suprema (2 partner). Poi Lv55, 78, 105, 140, 180, 230 e 290, senza partner.\n"
+	L"- Cambio classe a Lv15, 35, 55, 78, 105, 140, 180, 230 e 290. Nessun partner. Si può scegliere anche subito dopo un livello in battaglia, o più tardi.\n"
 	L"- I livelli vanno da 1 a 9999. Avanzando i nemici diventano più forti e danno più ESP.",
 	L"[Básico]\n"
 	L"- El orden de turnos depende de la agilidad y se muestra en «Orden de turnos» arriba a la derecha. Las unidades rápidas se adelantan y actúan más a menudo.\n"
@@ -1284,7 +1284,7 @@ R(TX_HELP_TEXT,
 	L"[Mando] Stick izquierdo/cruceta: cursor  A: confirmar  B: volver  LB/RB: girar  Stick derecho: vista  Gatillos: zoom  X: avance rápido  Y: centrar  Start: volver  Back: controles\n"
 	L"[Progreso]\n"
 	L"- Ataques, curaciones y mejoras dan EXP y niveles. Las habilidades se aprenden en ciertos niveles.\n"
-	L"- Nv15: clase avanzada (1 compañero). Nv35: clase maestra (2 compañeros). Luego Nv55, 78, 105, 140, 180, 230 y 290, sin compañero.\n"
+	L"- Cambio de clase en Nv15, 35, 55, 78, 105, 140, 180, 230 y 290. Sin compañero. También justo después de subir de nivel, o más tarde.\n"
 	L"- Las fases van de 1 a 9999. Al avanzar, los enemigos son más fuertes y dan más EXP.",
 	L"[기본]\n"
 	L"- 행동 순서는 민첩으로 정해지며 오른쪽 위의 '행동 순서'에 표시됩니다. 빠른 캐릭터는 끼어들어 더 자주 행동합니다.\n"
@@ -1297,7 +1297,7 @@ R(TX_HELP_TEXT,
 	L"[패드] 왼쪽 스틱/십자키: 커서  A: 결정  B: 돌아가기  LB/RB: 회전  오른쪽 스틱: 시점  트리거: 줌  X: 빨리 감기  Y: 중앙으로  Start: 돌아가기  Back: 조작 설명\n"
 	L"[육성]\n"
 	L"- 공격·회복·보조로 경험치를 얻어 레벨 업. 일정 레벨에서 스킬을 익힙니다.\n"
-	L"- Lv15에서 상위 클래스 (재료 1명), Lv35에서 최상위 클래스 (재료 2명). 이후 Lv55·78·105·140·180·230·290에서 진화하며 재료는 필요 없습니다.\n"
+	L"- Lv15·35·55·78·105·140·180·230·290에 전직합니다. 재료는 필요 없습니다. 전투 레벨업 직후에도 고르거나, 나중에 할 수 있습니다.\n"
 	L"- 스테이지는 1~9999. 앞으로 갈수록 적이 강해지고 얻는 경험치도 늘어납니다.",
 	L"【基本】\n"
 	L"・行动顺序由敏捷决定，显示在右上角的“行动顺序”中。敏捷高的角色会插队，更频繁地行动。\n"
@@ -1310,7 +1310,7 @@ R(TX_HELP_TEXT,
 	L"【手柄】左摇杆/十字键：光标　A：确定　B：返回　LB/RB：旋转　右摇杆：视角　扳机：缩放　X：快进　Y：回到中心　Start：返回　Back：操作说明\n"
 	L"【培养】\n"
 	L"・攻击、治疗和辅助都会获得经验值并升级。达到一定等级会习得技能。\n"
-	L"・Lv15进化为高级职业（素材1名），Lv35进化为最高级职业（素材2名）。之后在Lv55、78、105、140、180、230、290进化，无需素材。\n"
+	L"・Lv15、35、55、78、105、140、180、230、290可转职。不需要素材。战斗升级后立刻可选，也可以以后再选。\n"
 	L"・关卡为1～9999。越往后敌人越强，获得的经验值也越多。",
 	L"[الأساسيات]\n"
 	L"- يتحدد ترتيب الأدوار بالرشاقة ويظهر في «ترتيب الأدوار» أعلى اليمين. الوحدات السريعة تتقدم وتتحرك أكثر.\n"
@@ -1323,7 +1323,7 @@ R(TX_HELP_TEXT,
 	L"[ذراع التحكم] العصا اليسرى/الأسهم: المؤشر  A: تأكيد  B: رجوع  LB/RB: تدوير  العصا اليمنى: العرض  الزنادان: تكبير  X: تسريع  Y: توسيط  Start: رجوع  Back: التحكم\n"
 	L"[التطوير]\n"
 	L"- الهجوم والعلاج والدعم تمنح الخبرة والمستويات. تُتعلم المهارات عند مستويات معينة.\n"
-	L"- المستوى 15 فئة متقدمة (شريك واحد)، و35 فئة عليا (شريكان). ثم 55 و78 و105 و140 و180 و230 و290 بلا شريك.\n"
+	L"- تغيير الفئة عند 15 و35 و55 و78 و105 و140 و180 و230 و290. بلا شريك. يمكن الاختيار بعد رفع المستوى في المعركة أو لاحقًا.\n"
 	L"- المراحل من 1 إلى 9999. كلما تقدمت ازداد الأعداء قوة وازدادت الخبرة.",
 	L"[Основы]\n"
 	L"- Порядок ходов зависит от ловкости и показан в «Порядке ходов» справа вверху. Быстрые бойцы вклиниваются и ходят чаще.\n"
@@ -1336,7 +1336,7 @@ R(TX_HELP_TEXT,
 	L"[Геймпад] Левый стик/крестовина: курсор  A: подтвердить  B: назад  LB/RB: поворот  Правый стик: обзор  Курки: масштаб  X: ускорение  Y: центрировать  Start: назад  Back: управление\n"
 	L"[Развитие]\n"
 	L"- Атаки, лечение и поддержка дают опыт и уровни. Навыки изучаются на определённых уровнях.\n"
-	L"- Ур. 15 — продвинутый класс (1 материал), ур. 35 — высший (2 материала). Дальше ур. 55, 78, 105, 140, 180, 230 и 290 без материала.\n"
+	L"- Смена класса на ур. 15, 35, 55, 78, 105, 140, 180, 230 и 290. Материал не нужен. Можно выбрать сразу после уровня в бою или позже.\n"
 	L"- Этапы с 1 по 9999. Чем дальше, тем сильнее враги и больше опыта.",
 	L"[Grundlagen]\n"
 	L"- Die Zugreihenfolge hängt von der Gewandtheit ab und wird oben rechts unter „Zugreihenfolge“ angezeigt. Schnelle Einheiten schieben sich dazwischen und handeln öfter.\n"
@@ -1349,7 +1349,7 @@ R(TX_HELP_TEXT,
 	L"[Gamepad] Linker Stick/Steuerkreuz: Cursor  A: bestätigen  B: zurück  LB/RB: drehen  Rechter Stick: Ansicht  Trigger: Zoom  X: Vorspulen  Y: zentrieren  Start: zurück  Back: Steuerung\n"
 	L"[Entwicklung]\n"
 	L"- Angriffe, Heilung und Unterstützung geben EP und Stufen. Fertigkeiten werden auf bestimmten Stufen erlernt.\n"
-	L"- Ab Lv15 fortgeschrittene Klasse (1 Partner), ab Lv35 Meisterklasse (2 Partner). Danach Lv55, 78, 105, 140, 180, 230 und 290 ohne Partner.\n"
+	L"- Klassenwechsel bei Lv15, 35, 55, 78, 105, 140, 180, 230 und 290. Kein Partner. Auch direkt nach einem Levelaufstieg, oder später.\n"
 	L"- Es gibt die Stufen 1 bis 9999. Je weiter du kommst, desto stärker werden die Feinde und desto mehr EP gibt es.",
 	L"[Básico]\n"
 	L"- A ordem dos turnos depende da agilidade e aparece em \"Ordem dos turnos\" no canto superior direito. Unidades rápidas passam à frente e agem mais vezes.\n"
@@ -1362,7 +1362,7 @@ R(TX_HELP_TEXT,
 	L"[Controle] Analógico esquerdo/direcional: cursor  A: confirmar  B: voltar  LB/RB: girar  Analógico direito: visão  Gatilhos: zoom  X: acelerar  Y: centralizar  Start: voltar  Back: controles\n"
 	L"[Evolução]\n"
 	L"- Ataques, curas e apoio dão EXP e níveis. Habilidades são aprendidas em certos níveis.\n"
-	L"- Nv15: classe avançada (1 parceiro). Nv35: classe suprema (2 parceiros). Depois Nv55, 78, 105, 140, 180, 230 e 290, sem parceiro.\n"
+	L"- Mudança de classe nos Nv15, 35, 55, 78, 105, 140, 180, 230 e 290. Sem parceiro. Também logo após subir de nível, ou mais tarde.\n"
 	L"- As fases vão de 1 a 9999. Quanto mais avança, mais fortes ficam os inimigos e mais EXP eles dão.",
 	L"[Basis]\n"
 	L"- De beurtvolgorde hangt af van behendigheid en staat rechtsboven bij 'Beurtvolgorde'. Snelle eenheden dringen voor en handelen vaker.\n"
@@ -1375,7 +1375,7 @@ R(TX_HELP_TEXT,
 	L"[Gamepad] Linkerstick/D-pad: cursor  A: bevestigen  B: terug  LB/RB: draaien  Rechterstick: beeld  Triggers: zoom  X: versnellen  Y: centreren  Start: terug  Back: besturing\n"
 	L"[Groei]\n"
 	L"- Aanvallen, genezen en steun geven EP en levels. Vaardigheden leer je op bepaalde levels.\n"
-	L"- Op Lv15 een gevorderde klasse (1 partner), op Lv35 een meesterklasse (2 partners). Daarna Lv55, 78, 105, 140, 180, 230 en 290, zonder partner.\n"
+	L"- Klassewissel op Lv15, 35, 55, 78, 105, 140, 180, 230 en 290. Geen partner. Ook direct na een level, of later.\n"
 	L"- Er zijn levels 1 tot 9999. Hoe verder je komt, hoe sterker de vijanden en hoe meer EP.",
 	L"[Podstawy]\n"
 	L"- Kolejność tur zależy od zwinności i widać ją w „Kolejności tur” w prawym górnym rogu. Szybkie jednostki wskakują przed innych i działają częściej.\n"
@@ -1388,7 +1388,7 @@ R(TX_HELP_TEXT,
 	L"[Pad] Lewa gałka/krzyżak: kursor  A: zatwierdź  B: wstecz  LB/RB: obrót  Prawa gałka: widok  Spusty: zoom  X: przyspieszenie  Y: wyśrodkuj  Start: wstecz  Back: sterowanie\n"
 	L"[Rozwój]\n"
 	L"- Ataki, leczenie i wsparcie dają PD i poziomy. Umiejętności poznaje się na określonych poziomach.\n"
-	L"- Poz. 15: klasa zaawansowana (1 partner). Poz. 35: klasa mistrzowska (2 partnerów). Potem poz. 55, 78, 105, 140, 180, 230 i 290, bez partnera.\n"
+	L"- Zmiana klasy na poz. 15, 35, 55, 78, 105, 140, 180, 230 i 290. Bez partnera. Także tuż po poziomie w walce albo później.\n"
 	L"- Etapy od 1 do 9999. Im dalej, tym silniejsi wrogowie i więcej PD.",
 	L"[Temel]\n"
 	L"- Sıra düzeni çevikliğe bağlıdır ve sağ üstteki \"Sıra düzeni\"nde gösterilir. Hızlı birimler araya girip daha sık hareket eder.\n"
@@ -1401,7 +1401,7 @@ R(TX_HELP_TEXT,
 	L"[Oyun kolu] Sol çubuk/yön tuşları: imleç  A: onayla  B: geri  LB/RB: döndür  Sağ çubuk: görüş  Tetikler: yakınlaştır  X: hızlandır  Y: ortala  Start: geri  Back: kontroller\n"
 	L"[Gelişim]\n"
 	L"- Saldırı, iyileştirme ve destek TP ve seviye kazandırır. Yetenekler belirli seviyelerde öğrenilir.\n"
-	L"- Sv15 ileri sınıf (1 ortak), Sv35 usta sınıf (2 ortak). Sonra Sv55, 78, 105, 140, 180, 230 ve 290, ortak gerekmez.\n"
+	L"- Sv15, 35, 55, 78, 105, 140, 180, 230 ve 290'da sınıf değişir. Ortak gerekmez. Savaşta seviye sonrası da seçilir, sonra da bırakılabilir.\n"
 	L"- Bölümler 1'den 9999'a kadardır. İlerledikçe düşmanlar güçlenir ve daha fazla TP verir.")
 // ---------------------------------------------------------------- その他
 R(TX_MISC_LV, L"Lv", L"Lv", L"Niv.", L"Lv", L"Nv", L"Lv", L"Lv", L"مستوى", L"Ур.", L"Lv", L"Nv", L"Lv", L"Poz.", L"Sv")
@@ -1526,6 +1526,8 @@ R(TX_HIGH, L"高所", L"High ground", L"Hauteur", L"Altura", L"Altura", L"고지
 R(TX_LOW, L"低所", L"Low ground", L"Bas", L"Basso", L"Bajo", L"저지", L"低处", L"منخفض", L"Низина", L"Tieflage", L"Baixo", L"Laagte", L"Nizina", L"Alçak")
 R(TX_SHAPE_ONE, L"単体", L"Single", L"Cible unique", L"Singolo", L"Único", L"단일", L"单体", L"فردي", L"Одиночная", L"Einzel", L"Único", L"Enkel", L"Pojedynczy", L"Tek")
 R(TX_SHAPE_WIDE, L"広域", L"Wide", L"Large zone", L"Area ampia", L"Área amplia", L"광역", L"广域", L"نطاق واسع", L"Широкая", L"Weit", L"Área ampla", L"Wijd", L"Szeroka", L"Geniş")
+R(TX_EV_JOB, L"転職", L"Class Change", L"Changement de classe", L"Cambio classe", L"Cambio de clase", L"전직", L"转职", L"تغيير الفئة", L"Смена класса", L"Klassenwechsel", L"Mudança de classe", L"Klassewissel", L"Zmiana klasy", L"Sınıf değişimi")
+R(TX_EV_LATER, L"後で選ぶ", L"Choose Later", L"Choisir plus tard", L"Scegli dopo", L"Elegir después", L"나중에 고르기", L"以后再选", L"اختر لاحقًا", L"Выбрать позже", L"Später wählen", L"Escolher depois", L"Later kiezen", L"Wybierz później", L"Sonra seç")
 R(TX_CL_ALCHEMIST, L"錬金師", L"Alchemist", L"Alchimiste", L"Alchimista", L"Alquimista", L"연금술사", L"炼金师", L"خيميائي", L"Алхимик", L"Alchemist", L"Alquimista", L"Alchemist", L"Alchemik", L"Simyacı")
 R(TX_CL_ARCHALCHEMIST, L"大錬金師", L"Archalchemist", L"Archalchimiste", L"Arcialchimista", L"Arquialquimista", L"대연금술사", L"大炼金师", L"خيميائي أعظم", L"Архиалхимик", L"Erzalchemist", L"Arquialquimista", L"Aartsalchemist", L"Arcyalchemik", L"Baş simyacı")
 R(TX_CLD_ALCHEMIST, L"石と薬草を薬と武具の力に変える。", L"Turns ore and herbs into medicine and might.", L"Change minerai et herbes en remèdes et en force.", L"Trasforma minerali ed erbe in cure e potenza.", L"Convierte mineral y hierbas en medicina y poder.", L"광석과 약초를 약과 힘으로 바꾼다.", L"把矿石和药草炼成药与力量。", L"يحوّل الخام والأعشاب إلى دواء وقوة.", L"Превращает руду и травы в зелья и силу.", L"Wandelt Erz und Kräuter in Tränke und Kraft.", L"Transforma minério e ervas em cura e força.", L"Maakt van erts en kruiden drank en kracht.", L"Zmienia rudę i zioła w lek i siłę.", L"Cevher ve otu ilaç ile güce çevirir.")
@@ -1947,6 +1949,29 @@ R(TX_GD_A2, L"弓兵系統の軽装。動きを残した守り。上昇値は行
 R(TX_GD_A3, L"盗賊系統の軽装。回避寄りの守り。上昇値は行の数値。", L"Light armor for the thief line. Protection that favors evasion. Bonuses are on the row.", L"Armure légère de la lignée voleur. Protection tournée vers l'esquive. Les bonus sont sur la ligne.", L"Armatura leggera della linea ladro. Protezione orientata allo schivare. I bonus sono sulla riga.", L"Armadura ligera de la línea ladrón. Protección orientada a esquivar. Las bonificaciones están en la fila.", L"도적 계열의 경장. 회피 쪽의 수비. 상승치는 줄의 수치.", L"盗贼系的轻甲。偏向闪避的防护。加成见本行数值。", L"درع خفيف لخط اللص. حماية تميل إلى التهرب. الزيادات في السطر.", L"Лёгкая броня линии вора. Защита в пользу уклонения. Бонусы в строке.", L"Leichte Rüstung der Diebeslinie. Schutz zugunsten des Ausweichens. Boni stehen in der Zeile.", L"Armadura leve da linha ladrão. Proteção voltada à esquiva. Os bônus estão na linha.", L"Licht harnas van de dievenlijn. Bescherming die ontwijken begunstigt. Bonussen staan op de rij.", L"Lekka zbroja linii złodzieja. Ochrona sprzyjająca unikom. Premie są w wierszu.", L"Hırsız soyunun hafif zırhı. Kaçınmaya yönelik koruma. Artışlar satırda.")
 R(TX_GD_A4, L"魔導系統のローブ。魔法の被ダメージを減らす。上昇値は行の数値。", L"Robe for the mage line. Lowers magic damage taken. Bonuses are on the row.", L"Robe de la lignée mage. Réduit les dégâts magiques subis. Les bonus sont sur la ligne.", L"Veste della linea mago. Riduce i danni magici subiti. I bonus sono sulla riga.", L"Túnica de la línea mago. Reduce el daño mágico recibido. Las bonificaciones están en la fila.", L"마도 계열의 로브. 받는 마법 피해를 줄인다. 상승치는 줄의 수치.", L"魔导系的法袍。减少受到的魔法伤害。加成见本行数值。", L"رداء خط الساحر. يقلل الضرر السحري المتلقى. الزيادات في السطر.", L"Мантия линии мага. Снижает получаемый магический урон. Бонусы в строке.", L"Robe der Magierlinie. Senkt erlittenen magischen Schaden. Boni stehen in der Zeile.", L"Manto da linha mago. Reduz o dano mágico recebido. Os bônus estão na linha.", L"Gewaad van de magiërlijn. Verlaagt ontvangen magische schade. Bonussen staan op de rij.", L"Szata linii maga. Zmniejsza otrzymywane obrażenia magiczne. Premie są w wierszu.", L"Büyücü soyunun cübbesi. Alınan büyü hasarını azaltır. Artışlar satırda.")
 R(TX_GD_A5, L"僧侶系統の聖衣。魔法への守り。上昇値は行の数値。", L"Vestment for the cleric line. Protection against magic. Bonuses are on the row.", L"Habits de la lignée clerc. Protection contre la magie. Les bonus sont sur la ligne.", L"Vesti della linea chierico. Protezione dalla magia. I bonus sono sulla riga.", L"Vestidura de la línea clérigo. Protección contra la magia. Las bonificaciones están en la fila.", L"성직 계열의 성의. 마법에 대한 수비. 상승치는 줄의 수치.", L"僧侣系的圣衣。对魔法的防护。加成见本行数值。", L"حلة خط الكاهن. حماية من السحر. الزيادات في السطر.", L"Облачение линии клирика. Защита от магии. Бонусы в строке.", L"Gewand der Klerikerlinie. Schutz gegen Magie. Boni stehen in der Zeile.", L"Vestes da linha clérigo. Proteção contra magia. Os bônus estão na linha.", L"Gewaad van de geestelijkenlijn. Bescherming tegen magie. Bonussen staan op de rij.", L"Szata linii kleryka. Ochrona przed magią. Premie są w wierszu.", L"Rahip soyunun kutsal giysisi. Büyülere karşı koruma. Artışlar satırda.")
+R(TX_SHAPE_LINE, L"直線", L"Line", L"Ligne", L"Linea", L"Línea", L"직선", L"直线", L"خط", L"Линия", L"Linie", L"Linha", L"Lijn", L"Linia", L"Çizgi")
+R(TX_SHAPE_FAN, L"扇", L"Fan", L"Éventail", L"Ventaglio", L"Abanico", L"부채", L"扇形", L"مروحة", L"Веер", L"Fächer", L"Leque", L"Waaier", L"Wachlarz", L"Yelpaze")
+R(TX_SK_LINESLASH, L"裂空斬", L"Rending Line", L"Entaille linéaire", L"Taglio lineare", L"Tajo lineal", L"열공참", L"裂空斩", L"قطع خطي", L"Линейный удар", L"Linienhieb", L"Corte linear", L"Lijnhouw", L"Cięcie liniowe", L"Çizgi Kesiği")
+R(TX_SK_FANSLASH, L"扇斬", L"Fan Slash", L"Entaille en éventail", L"Fendente a ventaglio", L"Tajo en abanico", L"부채베기", L"扇斩", L"قطع مروحي", L"Веерный удар", L"Fächerhieb", L"Corte em leque", L"Waaierhouw", L"Cięcie wachlarzowe", L"Yelpaze Kesiği")
+R(TX_SK_ARROWLINE, L"アローライン", L"Arrow Line", L"Ligne de flèches", L"Linea di frecce", L"Línea de flechas", L"애로우 라인", L"箭列", L"صف سهام", L"Линия стрел", L"Pfeillinie", L"Linha de flechas", L"Pijlenlijn", L"Linia strzał", L"Ok Hattı")
+R(TX_SK_ARROWFAN, L"アローファン", L"Arrow Fan", L"Éventail de flèches", L"Ventaglio di frecce", L"Abanico de flechas", L"애로우 팬", L"扇形箭", L"مروحة سهام", L"Веер стрел", L"Pfeilfächer", L"Leque de flechas", L"Pijlenwaaier", L"Wachlarz strzał", L"Ok Yelpazesi")
+R(TX_SK_FIREBEAM, L"ファイアビーム", L"Fire Beam", L"Rayon de feu", L"Raggio di fuoco", L"Rayo de fuego", L"파이어 빔", L"火焰射线", L"شعاع النار", L"Огненный луч", L"Feuerstrahl", L"Raio de fogo", L"Vuurstraal", L"Promień ognia", L"Ateş Işını")
+R(TX_SK_ICEBEAM, L"アイスビーム", L"Ice Beam", L"Rayon de glace", L"Raggio di ghiaccio", L"Rayo de hielo", L"아이스 빔", L"冰霜射线", L"شعاع الجليد", L"Ледяной луч", L"Eisstrahl", L"Raio de gelo", L"IJsstraal", L"Promień lodu", L"Buz Işını")
+R(TX_SK_THUNDERBEAM, L"サンダービーム", L"Thunder Beam", L"Rayon de tonnerre", L"Raggio di tuono", L"Rayo de trueno", L"썬더 빔", L"雷电射线", L"شعاع الرعد", L"Громовой луч", L"Donnerstrahl", L"Raio de trovão", L"Donderstraal", L"Promień gromu", L"Yıldırım Işını")
+R(TX_SK_HEALBEAM, L"ヒールビーム", L"Heal Beam", L"Rayon de soin", L"Raggio curativo", L"Rayo sanador", L"힐 빔", L"治疗射线", L"شعاع الشفاء", L"Луч исцеления", L"Heilstrahl", L"Raio de cura", L"Heelstraal", L"Promień leczenia", L"Şifa Işını")
+R(TX_SK_HEALFAN, L"ヒールファン", L"Heal Fan", L"Éventail de soin", L"Ventaglio curativo", L"Abanico sanador", L"힐 팬", L"治疗扇", L"مروحة الشفاء", L"Веер исцеления", L"Heilfächer", L"Leque de cura", L"Heelwaaier", L"Wachlarz leczenia", L"Şifa Yelpazesi")
+R(TX_SKD_LINESLASH, L"正面4マスを直線に斬る。二次職以降。単体の剣技より威力は低い。", L"A 4-tile line ahead. Learned from tier 2. Weaker than a single slash.", L"Ligne de 4 cases devant soi. Dès le second rang. Plus faible qu'un coup unique.", L"Linea di 4 caselle in avanti. Dal secondo rango. Più debole di un colpo singolo.", L"Línea de 4 casillas al frente. Desde el segundo rango. Más débil que un tajo único.", L"정면 4칸을 직선으로 벤다. 2차 전직 이후. 단일 검기보다 위력이 낮다.", L"斩击前方4格的直线。二次职业以后。威力低于单体剑技。", L"خط من 4 خانات للأمام. من الرتبة الثانية. أضعف من ضربة واحدة.", L"Линия на 4 клетки вперёд. Со второго ранга. Слабее одиночного удара.", L"Linie über 4 Felder nach vorn. Ab Rang 2. Schwächer als ein Einzelschlag.", L"Linha de 4 casas à frente. A partir do segundo posto. Mais fraco que um corte único.", L"Lijn van 4 vakken vooruit. Vanaf de tweede rang. Zwakker dan een enkele houw.", L"Linia 4 pól do przodu. Od drugiej rangi. Słabsze niż pojedyncze cięcie.", L"İleriye 4 karelik çizgi. İkinci rütbeden. Tek kılıçtan zayıf.")
+R(TX_SKD_FANSLASH, L"正面へ広がる扇状に斬る。二次職以降。端へいくほど幅が広がる。", L"A fan of cuts spreading ahead. From tier 2. It widens with distance.", L"Éventail de coups vers l'avant. Dès le second rang. Il s'élargit avec la distance.", L"Ventaglio di colpi in avanti. Dal secondo rango. Si allarga con la distanza.", L"Abanico de tajos hacia delante. Desde el segundo rango. Se abre con la distancia.", L"정면으로 퍼지는 부채꼴로 벤다. 2차 전직 이후. 멀수록 폭이 넓어진다.", L"向前展开的扇形斩击。二次职业以后。越远越宽。", L"قطع مروحي يتسع للأمام. من الرتبة الثانية. يتسع مع المسافة.", L"Веер ударов вперёд. Со второго ранга. Шире с расстоянием.", L"Fächer von Hieben nach vorn. Ab Rang 2. Wird mit der Distanz breiter.", L"Leque de cortes à frente. A partir do segundo posto. Alarga com a distância.", L"Waaier van houwen vooruit. Vanaf de tweede rang. Wordt breder met de afstand.", L"Wachlarz cięć do przodu. Od drugiej rangi. Szerszy wraz z odległością.", L"İleriye açılan yelpaze kesişi. İkinci rütbeden. Uzaklaştıkça genişler.")
+R(TX_SKD_ARROWLINE, L"狙いの方向へ5マス、矢を一直線に放つ。二次職以降。", L"Arrows in a 5-tile line along your aim. From tier 2.", L"Flèches en ligne de 5 cases dans la visée. Dès le second rang.", L"Frecce in linea di 5 caselle nella mira. Dal secondo rango.", L"Flechas en línea de 5 casillas en la mira. Desde el segundo rango.", L"조준 방향으로 5칸, 화살을 일직선으로 쏜다. 2차 전직 이후.", L"沿瞄准方向射出5格直线箭。二次职业以后。", L"سهام في خط من 5 خانات مع التصويب. من الرتبة الثانية.", L"Стрелы линией на 5 клеток по прицелу. Со второго ранга.", L"Pfeile in einer Linie von 5 Feldern in Zielrichtung. Ab Rang 2.", L"Flechas em linha de 5 casas na mira. A partir do segundo posto.", L"Pijlen in een lijn van 5 vakken in de richtrichting. Vanaf de tweede rang.", L"Strzały w linii 5 pól we wskazanym kierunku. Od drugiej rangi.", L"Nişan yönünde 5 karelik düz ok. İkinci rütbeden.")
+R(TX_SKD_ARROWFAN, L"狙いの方向へ広がる扇状に矢を放つ。二次職以降。", L"Arrows in a fan along your aim. From tier 2.", L"Flèches en éventail dans la visée. Dès le second rang.", L"Frecce a ventaglio nella mira. Dal secondo rango.", L"Flechas en abanico en la mira. Desde el segundo rango.", L"조준 방향으로 퍼지는 부채꼴로 화살을 쏜다. 2차 전직 이후.", L"沿瞄准方向射出扇形箭。二次职业以后。", L"سهام مروحية مع التصويب. من الرتبة الثانية.", L"Стрелы веером по прицелу. Со второго ранга.", L"Pfeile als Fächer in Zielrichtung. Ab Rang 2.", L"Flechas em leque na mira. A partir do segundo posto.", L"Pijlen in een waaier in de richtrichting. Vanaf de tweede rang.", L"Strzały wachlarzem we wskazanym kierunku. Od drugiej rangi.", L"Nişan yönünde yelpaze ok. İkinci rütbeden.")
+R(TX_SKD_FIREBEAM, L"ファイアの上位。狙いの方向へ5マス、炎を直線に走らせる。二次職以降。", L"A higher Fire. A 5-tile line of flame along your aim. From tier 2.", L"Feu supérieur. Ligne de flammes de 5 cases. Dès le second rang.", L"Fuoco superiore. Linea di fiamme di 5 caselle. Dal secondo rango.", L"Fuego superior. Línea de llamas de 5 casillas. Desde el segundo rango.", L"파이어의 상위. 조준 방향으로 5칸, 불길을 직선으로 달리게 한다. 2차 전직 이후.", L"火焰的上位。沿瞄准方向放出5格直线火焰。二次职业以后。", L"نار أعلى. خط لهب من 5 خانات. من الرتبة الثانية.", L"Старший огонь. Линия пламени на 5 клеток. Со второго ранга.", L"Höheres Feuer. Flammenlinie über 5 Felder. Ab Rang 2.", L"Fogo superior. Linha de chamas de 5 casas. A partir do segundo posto.", L"Hoger vuur. Vlammenlijn van 5 vakken. Vanaf de tweede rang.", L"Wyższy ogień. Linia płomieni na 5 pól. Od drugiej rangi.", L"Ateşin üstü. 5 karelik alev çizgisi. İkinci rütbeden.")
+R(TX_SKD_ICEBEAM, L"冷気を直線に走らせ、当たった敵の行動を遅らせる。二次職以降。", L"A line of cold that slows whoever it hits. From tier 2.", L"Ligne de froid qui ralentit les touchés. Dès le second rang.", L"Linea di gelo che rallenta i colpiti. Dal secondo rango.", L"Línea de frío que ralentiza a los alcanzados. Desde el segundo rango.", L"냉기를 직선으로 달리게 하고, 맞은 적의 행동을 늦춘다. 2차 전직 이후.", L"直线释放寒气，命中的敌人行动延迟。二次职业以后。", L"خط برد يبطئ من يصيبه. من الرتبة الثانية.", L"Линия холода, замедляющая задетых. Со второго ранга.", L"Kältelinie, die Getroffene verlangsamt. Ab Rang 2.", L"Linha de frio que atrasa os atingidos. A partir do segundo posto.", L"Koudelijn die geraakten vertraagt. Vanaf de tweede rang.", L"Linia zimna, która spowalnia trafionych. Od drugiej rangi.", L"Düz soğuk, vuranların hızını keser. İkinci rütbeden.")
+R(TX_SKD_THUNDERBEAM, L"雷を直線に落とす。ファイアビームと同じく二次職以降の魔法。", L"Drops thunder in a line. A tier-2 spell, like Fire Beam.", L"Foudre en ligne. Sort du second rang, comme le rayon de feu.", L"Tuono in linea. Magia del secondo rango, come il raggio di fuoco.", L"Trueno en línea. Magia del segundo rango, como el rayo de fuego.", L"번개를 직선으로 떨어뜨린다. 파이어 빔과 같이 2차 전직 이후의 마법.", L"直线落下雷电。与火焰射线同为二次职业以后的魔法。", L"رعد في خط. سحر الرتبة الثانية مثل شعاع النار.", L"Гром линией. Заклинание второго ранга, как огненный луч.", L"Donner in einer Linie. Zauber ab Rang 2, wie der Feuerstrahl.", L"Trovão em linha. Magia do segundo posto, como o raio de fogo.", L"Donder in een lijn. Tover vanaf de tweede rang, zoals de vuurstraal.", L"Grom w linii. Zaklęcie drugiej rangi, jak promień ognia.", L"Düz yıldırım. Ateş ışını gibi ikinci rütbe büyüsü.")
+R(TX_SKD_HEALBEAM, L"味方を直線に癒す。ヒールの上位で、二次職以降。", L"Heals allies in a line. A higher Heal, from tier 2.", L"Soigne les alliés en ligne. Soin supérieur, dès le second rang.", L"Cura gli alleati in linea. Cura superiore, dal secondo rango.", L"Cura aliados en línea. Cura superior, desde el segundo rango.", L"아군을 직선으로 치유한다. 힐의 상위이며 2차 전직 이후.", L"沿直线治疗同伴。治疗的上位，二次职业以后。", L"يشفي الحلفاء في خط. شفاء أعلى من الرتبة الثانية.", L"Лечит союзников линией. Старшее лечение со второго ранга.", L"Heilt Verbündete in einer Linie. Höhere Heilung ab Rang 2.", L"Cura aliados em linha. Cura superior, a partir do segundo posto.", L"Geneest bondgenoten in een lijn. Hogere heling vanaf de tweede rang.", L"Leczy sojuszników w linii. Wyższe leczenie od drugiej rangi.", L"Dostları düz hatta iyileştirir. Şifanın üstü, ikinci rütbeden.")
+R(TX_SKD_HEALFAN, L"味方を扇状に癒す。遠ざかるほど幅が広がる。二次職以降。", L"Heals allies in a widening fan. From tier 2.", L"Soigne les alliés en éventail qui s'élargit. Dès le second rang.", L"Cura gli alleati in un ventaglio che si allarga. Dal secondo rango.", L"Cura aliados en un abanico que se abre. Desde el segundo rango.", L"아군을 부채꼴로 치유한다. 멀수록 폭이 넓어진다. 2차 전직 이후.", L"以逐渐变宽的扇形治疗同伴。二次职业以后。", L"يشفي الحلفاء في مروحة تتسع. من الرتبة الثانية.", L"Лечит союзников расширяющимся веером. Со второго ранга.", L"Heilt Verbündete in einem breiter werdenden Fächer. Ab Rang 2.", L"Cura aliados num leque que alarga. A partir do segundo posto.", L"Geneest bondgenoten in een waaier die breder wordt. Vanaf de tweede rang.", L"Leczy sojuszników rozszerzającym się wachlarzem. Od drugiej rangi.", L"Dostları genişleyen yelpazeyle iyileştirir. İkinci rütbeden.")
+R(TX_SHOP_FREE, L"汎用", L"General", L"Général", L"Generale", L"General", L"범용", L"通用", L"عام", L"Общие", L"Allgemein", L"Geral", L"Algemeen", L"Ogólne", L"Genel")
+R(TX_EQ_ASK, L"装備しますか？", L"Equip now?", L"Équiper maintenant ?", L"Equipaggiare ora?", L"¿Equipar ahora?", L"장착할까요?", L"现在装备吗？", L"تجهّز الآن؟", L"Надеть сейчас?", L"Jetzt anlegen?", L"Equipar agora?", L"Nu aantrekken?", L"Założyć teraz?", L"Şimdi kuşanılsın mı?")
+R(TX_SHOP_SELLALL, L"一括売却", L"Sell All", L"Tout vendre", L"Vendi tutto", L"Vender todo", L"일괄 판매", L"全部出售", L"بيع الكل", L"Продать всё", L"Alles verkaufen", L"Vender tudo", L"Alles verkopen", L"Sprzedaj wszystko", L"Tümünü sat")
 
 };
 

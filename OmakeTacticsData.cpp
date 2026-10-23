@@ -1179,6 +1179,36 @@ static void EnsureSheets()
 	put(C_ALCHEMIST, 7, 32, SKL_THUNDERFIELD);
 	put(C_ARCHALCHEMIST, 4, 44, SKL_STORM);
 	put(C_ARCHALCHEMIST, 5, 50, SKL_FROSTFIELD);
+	put(C_PALADIN, 8, 20, SKL_LINESLASH);
+	put(C_PALADIN, 9, 36, SKL_HEALBEAM);
+	put(C_RUNEKNIGHT, 8, 20, SKL_THUNDERBEAM);
+	put(C_RUNEKNIGHT, 9, 36, SKL_FIREBEAM);
+	put(C_BERSERKER, 8, 20, SKL_FANSLASH);
+	put(C_BERSERKER, 9, 36, SKL_LINESLASH);
+	put(C_SNIPER, 6, 20, SKL_ARROWLINE);
+	put(C_SNIPER, 7, 32, SKL_ARROWFAN);
+	put(C_ASSASSIN, 6, 20, SKL_LINESLASH);
+	put(C_ASSASSIN, 7, 26, SKL_FANSLASH);
+	put(C_WIZARD, 8, 20, SKL_FIREBEAM);
+	put(C_WIZARD, 9, 28, SKL_ICEBEAM);
+	put(C_BISHOP, 7, 18, SKL_HEALBEAM);
+	put(C_BISHOP, 8, 26, SKL_HEALFAN);
+	put(C_SKYKNIGHT, 6, 20, SKL_LINESLASH);
+	put(C_SKYKNIGHT, 7, 28, SKL_FANSLASH);
+	put(C_ALCHEMIST, 8, 20, SKL_FIREBEAM);
+	put(C_ALCHEMIST, 9, 36, SKL_HEALBEAM);
+	put(C_HERO, 7, 40, SKL_LINESLASH);
+	put(C_HERO, 8, 56, SKL_FANSLASH);
+	put(C_ARCHMAGE, 7, 40, SKL_FIREBEAM);
+	put(C_ARCHMAGE, 8, 48, SKL_THUNDERBEAM);
+	put(C_SAINT, 7, 38, SKL_HEALBEAM);
+	put(C_SAINT, 8, 50, SKL_HEALFAN);
+	put(C_PHANTOM, 8, 40, SKL_ARROWLINE);
+	put(C_PHANTOM, 9, 48, SKL_ARROWFAN);
+	put(C_DRAGONLORD, 7, 40, SKL_LINESLASH);
+	put(C_DRAGONLORD, 8, 48, SKL_FANSLASH);
+	put(C_ARCHALCHEMIST, 6, 40, SKL_FIREBEAM);
+	put(C_ARCHALCHEMIST, 7, 48, SKL_ICEBEAM);
 	for (int c = 0; c < C_PLAYER_COUNT; c++)
 		for (int s = 0; s < LEARN_N; s++)
 			if (kClass[c].learn[s].lv <= 0) kClass[c].learn[s].skill = -1;
@@ -1337,6 +1367,15 @@ static const SkillDef kWide[] = {
 	{ TX_SK_FROSTFIELD, TX_SKD_FROSTFIELD, SK_MAGIC, 14, 9, 1, 4, 2, EL_ICE, 1, 0, EF_NONE, 0 },
 	{ TX_SK_THUNDERFIELD, TX_SKD_THUNDERFIELD, SK_MAGIC, 16, 11, 1, 5, 2, EL_THUNDER, 1, 0, EF_NONE, 0 },
 	{ TX_SK_NOVA, TX_SKD_NOVA, SK_MAGIC, 18, 12, 0, 0, 4, EL_HOLY, 1, 0, EF_NONE, 0 },
+	{ TX_SK_LINESLASH, TX_SKD_LINESLASH, SK_PHYS, 10, 100, 1, 1, 4, EL_WIND, 1, 0, EF_NONE, 0, SH_LINE },
+	{ TX_SK_FANSLASH, TX_SKD_FANSLASH, SK_PHYS, 12, 80, 1, 1, 3, EL_NONE, 1, 0, EF_NONE, 0, SH_FAN },
+	{ TX_SK_ARROWLINE, TX_SKD_ARROWLINE, SK_PHYS, 10, 90, 2, 6, 5, EL_WIND, 1, 0, EF_NONE, 0, SH_LINE },
+	{ TX_SK_ARROWFAN, TX_SKD_ARROWFAN, SK_PHYS, 12, 75, 2, 6, 3, EL_WIND, 1, 0, EF_NONE, 0, SH_FAN },
+	{ TX_SK_FIREBEAM, TX_SKD_FIREBEAM, SK_MAGIC, 12, 10, 1, 4, 5, EL_FIRE, 1, 0, EF_NONE, 0, SH_LINE },
+	{ TX_SK_ICEBEAM, TX_SKD_ICEBEAM, SK_MAGIC, 14, 9, 1, 4, 5, EL_ICE, 1, 0, EF_SLOW, 0, SH_LINE },
+	{ TX_SK_THUNDERBEAM, TX_SKD_THUNDERBEAM, SK_MAGIC, 14, 12, 1, 4, 4, EL_THUNDER, 1, 0, EF_NONE, 0, SH_LINE },
+	{ TX_SK_HEALBEAM, TX_SKD_HEALBEAM, SK_HEAL, 12, 14, 1, 3, 4, EL_HOLY, 1, 0, EF_NONE, 0, SH_LINE },
+	{ TX_SK_HEALFAN, TX_SKD_HEALFAN, SK_HEAL, 14, 12, 1, 2, 3, EL_HOLY, 1, 0, EF_NONE, 0, SH_FAN },
 };
 static_assert(sizeof(kWide) / sizeof(kWide[0]) == SKL_COUNT - (SKL_RAISE + 1), "wide skill table");
 
@@ -1643,7 +1682,7 @@ int CharLearnAt(const CharData& c, int lv)
 	return PaceSkill(c.cls, lv);
 }
 
-int CharLevelUp(CharData& c, Rng& r, int gains[S_COUNT])
+int CharLevelUp(CharData& c, Rng& r, int gains[S_COUNT], int* learned, int learnedMax)
 {
 	const ClassDef& cd = ClassInfo(c.cls);
 	int total = 0;
@@ -1671,16 +1710,21 @@ int CharLevelUp(CharData& c, Rng& r, int gains[S_COUNT])
 		gains[s]++; c.stat[s]++;
 	}
 	c.lv++;
-	int sk = CharLearnAt(c, c.lv);
-	int learned = -1;
-	if (sk >= 0 && !CharHasSkill(c, sk)) { CharGiveSkill(c, sk); learned = sk; }
-	for (int i = 0; i < LEARN_N; i++) {
-		int o = cd.learn[i].skill;
-		if (o < 0 || o == sk || cd.learn[i].lv != c.lv || CharHasSkill(c, o)) continue;
-		CharGiveSkill(c, o);
-		if (learned < 0) learned = o;
+	int got[8], ng = 0;
+	auto take = [&](int sk) {
+		if (sk < 0 || ng >= 8 || CharHasSkill(c, sk)) return;
+		for (int i = 0; i < ng; i++) if (got[i] == sk) return;
+		CharGiveSkill(c, sk);
+		got[ng++] = sk;
+	};
+	take(CharLearnAt(c, c.lv));
+	for (int i = 0; i < LEARN_N; i++) if (cd.learn[i].lv == c.lv) take(cd.learn[i].skill);
+	if (learned && learnedMax > 0) {
+		int n = ng < learnedMax ? ng : learnedMax;
+		for (int i = 0; i < n; i++) learned[i] = got[i];
+		return n;
 	}
-	return learned;
+	return ng > 0 ? got[0] : -1;
 }
 
 // ============================================================ 進化
@@ -1724,11 +1768,9 @@ bool EvoMainEligible(const CharData& c)
 	return c.lv >= PromoteLevel(cd.tier);
 }
 
-int EvoPartnersNeeded(const CharData& main)
+int EvoPartnersNeeded(const CharData&)
 {
-	int t = ClassInfo(main.cls).tier;
-	if (t >= 3) return 0;
-	return t >= 2 ? 2 : 1;
+	return 0;
 }
 
 bool EvoPartnerEligible(const CharData& main, const CharData& p)
@@ -1755,6 +1797,7 @@ void EvoApply(CharData& c, int target, const CharData* ps, int n)
 		for (int i = 0; i < n && s != S_MOV; i++) c.stat[s] += ps[i].stat[s] / 10;
 	}
 	c.cls = target;
+	// 転職前に覚えたスキルはそのまま残し、新しい職業で到達している分を足す。
 	int inherited = 0;
 	for (int i = 0; i < n && inherited < 2; i++) {
 		for (int sk = 0; sk < SKL_COUNT && inherited < 2; sk++) {
@@ -2189,6 +2232,37 @@ bool SkillUsable(const Battle& b, int ui, int skill)
 	return UnitHasSkill(u, skill) && u.mp >= s.mp;
 }
 
+bool ShapeCell(int shape, int area, int ax, int az, int cx, int cz, int tx, int tz)
+{
+	if (shape != SH_LINE && shape != SH_FAN)
+		return Dist(tx, tz, cx, cz) <= max(0, area);
+	int dx = cx - ax, dz = cz - az;
+	if (dx == 0 && dz == 0) return false;
+	int sx = (abs(dx) * 2 < abs(dz)) ? 0 : (dx > 0 ? 1 : -1);
+	int sz = (abs(dz) * 2 < abs(dx)) ? 0 : (dz > 0 ? 1 : -1);
+	if (sx == 0 && sz == 0) return false;
+	int len = area > 0 ? area : 1;
+	int ox = tx - ax, oz = tz - az;
+	int along, side;
+	if (sx != 0 && sz != 0) {
+		int adx = ox * sx, adz = oz * sz;
+		if (adx < 1 || adz < 1) return false;
+		along = adx < adz ? adx : adz;
+		side = adx > adz ? adx - adz : adz - adx;
+	} else if (sx != 0) {
+		along = ox * sx;
+		side = oz < 0 ? -oz : oz;
+	} else {
+		along = oz * sz;
+		side = ox < 0 ? -ox : ox;
+	}
+	if (along < 1 || along > len) return false;
+	if (shape == SH_LINE) return side == 0;
+	int wide = along - 1;
+	if (wide > 2) wide = 2;
+	return side <= wide;
+}
+
 int SkillTargets(const Battle& b, int caster, int skill, int cx, int cz, int* out, int maxOut)
 {
 	const Unit& c = b.u[caster];
@@ -2206,7 +2280,7 @@ int SkillTargets(const Battle& b, int caster, int skill, int cx, int cz, int* ou
 		if (!t.alive) continue;
 		bool ally = (t.team == c.team);
 		if (friendly != ally) continue;
-		if (Dist(t.x, t.z, cx, cz) > s.area) continue;
+		if (!ShapeCell(s.shape, s.area, c.x, c.z, cx, cz, t.x, t.z)) continue;
 		if (s.rMax == 0 && i == caster && s.kind != SK_HEAL && s.kind != SK_BUFF) continue;
 		out[n++] = i;
 	}
@@ -2225,8 +2299,11 @@ int ExpForAction(const Unit& a, const Unit& d, int killed, int stage)
 		e += kb;
 	}
 	e = Clampi(e, 12, 100);
+	int stageLv = stage <= 100 ? 1 + (stage - 1) * 9 / 10 : Clampi(90 + (stage - 100) * 6 / 5, 1, TAC_LV_MAX);
+	int gap = stageLv - a.ch.lv;
 	float f = 1.f + (stage - 1) * .025f;
-	return Clampi((int)roundf(e * f), 12, 100);
+	if (gap > 0) f += gap * (0.12f + (stage - 1) * 0.012f);
+	return Clampi((int)roundf(e * f), 12, 999);
 }
 
 static void ApplyEffect(Battle& b, Unit& a, Unit& d, int effect)
@@ -3348,6 +3425,12 @@ bool TrophySell(SaveData& s, int slot)
 	s.gold += max(1, TrophyPrice(which) * ct / 2);
 	g_trophy[slot] = 0;
 	return true;
+}
+bool TrophySellAll(SaveData& s)
+{
+	bool any = false;
+	for (int i = 0; i < kTrophyN; i++) if (TrophySell(s, i)) any = true;
+	return any;
 }
 void TrophyNameOf(int slot, wchar_t* name, int nameN, int* count, int* price)
 {

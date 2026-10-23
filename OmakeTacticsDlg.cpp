@@ -181,6 +181,11 @@ void CTacView::Up(int btn, CPoint pt)
 }
 void CTacView::OnMouseMove(UINT, CPoint pt)
 {
+	if (GetFocus() != this) {
+		CWnd* par = GetParent();
+		HWND fg = ::GetForegroundWindow();
+		if (fg == m_hWnd || (par && fg == par->GetSafeHwnd())) SetFocus();
+	}
 	if (m_owner && m_owner->GameReady()) m_owner->GameRef().OnMouseMove(pt.x, pt.y);
 }
 void CTacView::OnLButtonDown(UINT, CPoint pt) { Down(0, pt); }
@@ -237,6 +242,7 @@ BEGIN_MESSAGE_MAP(COmakeTacticsDlg, CCustomBlurDialogBase)
 	ON_WM_CLOSE()
 	ON_WM_GETMINMAXINFO()
 	ON_WM_ACTIVATE()
+	ON_WM_MOUSEWHEEL()
 END_MESSAGE_MAP()
 
 COmakeTacticsDlg::COmakeTacticsDlg(CWnd* pParent)
@@ -436,8 +442,35 @@ BOOL COmakeTacticsDlg::HandleKeyMessage(MSG* pMsg)
 	return FALSE;
 }
 
+// フリップのスワップチェインを子HWNDに張ると、ホイールがビューに届かず親へ送られる。
+// ダイアログが握ってゲームへ渡す。カーソルがこの窓の上なら、フォーカスが親でも渡す。
+static BOOL TacTakeWheel(COmakeTacticsDlg* dlg, MSG* pMsg)
+{
+	if (!dlg || !pMsg || pMsg->message != WM_MOUSEWHEEL || !dlg->GameReady()) return FALSE;
+	HWND tac = dlg->GetSafeHwnd();
+	if (!tac) return FALSE;
+	BOOL over = (pMsg->hwnd == tac || ::IsChild(tac, pMsg->hwnd));
+	if (!over) {
+		POINT pt;
+		pt.x = (short)LOWORD(pMsg->lParam);
+		pt.y = (short)HIWORD(pMsg->lParam);
+		HWND under = ::WindowFromPoint(pt);
+		over = under && (under == tac || ::IsChild(tac, under));
+	}
+	if (!over) return FALSE;
+	dlg->GameRef().OnWheel((short)GET_WHEEL_DELTA_WPARAM(pMsg->wParam));
+	return TRUE;
+}
+
+BOOL COmakeTacticsDlg::OnMouseWheel(UINT, short zDelta, CPoint)
+{
+	if (m_gameOk) m_game.OnWheel(zDelta);
+	return TRUE;
+}
+
 BOOL COmakeTacticsDlg::PreTranslateMessage(MSG* pMsg)
 {
+	if (TacTakeWheel(this, pMsg)) return TRUE;
 	if (HandleKeyMessage(pMsg)) return TRUE;
 	return CCustomBlurDialogBase::PreTranslateMessage(pMsg);
 }
@@ -524,5 +557,6 @@ BOOL IsOmakeTacticsActive()
 BOOL OmakeTacticsPreTranslate(MSG* pMsg)
 {
 	if (!IsOmakeTacticsOpen() || !pMsg) return FALSE;
+	if (TacTakeWheel(g_tac, pMsg)) return TRUE;
 	return g_tac->HandleKeyMessage(pMsg);
 }

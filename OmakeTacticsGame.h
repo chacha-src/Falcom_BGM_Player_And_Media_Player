@@ -207,6 +207,9 @@ private:
 	void DrawCommandMenu();
 	void UseConsumable(int good, int target);
 	void DrawLevelUp();
+	void DrawBattleStatus();
+	void DrawShopFit();
+	void DrawPromoteOffer();
 	void AdvanceLevelUp();
 	void DrawCutIn3D();
 	void DrawCutInUi();
@@ -294,7 +297,14 @@ private:
 	int m_shop;
 	int m_shopLine;
 	int m_shopPage;
+	int m_shopSellPage;
 	int m_shopKind;
+	int m_shopBack;
+	int m_shopFit;
+	int m_shopFitId;
+	int m_shopFitPage;
+	int m_statEq;
+	int m_statEqPage;
 	int m_itemAim;
 	int m_itemPage;
 	int m_statTip;     // ホバー中の能力。-1 で無し
@@ -328,6 +338,8 @@ private:
 	int m_evMain, m_evTarget;
 	int m_evPartner[2];
 	int m_evPick;      // 0=本体 1=進化先 2=素材
+	int m_evMainPage, m_evMainPages;
+	int m_evPartPage, m_evPartPages;
 	float m_evFlash;
 
 	// 戦闘
@@ -396,6 +408,7 @@ private:
 	int m_expGain[MAX_UNITS];
 	LevelUpInfo m_lvq[MAX_PARTY * 4];
 	int m_lvqN, m_lvqCur;
+	int m_promoAsk;
 	float m_lvT;
 	int m_battleStage;
 	int m_victory;

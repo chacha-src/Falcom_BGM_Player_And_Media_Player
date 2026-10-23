@@ -35,6 +35,14 @@ static const TCHAR* kTacOggNames[] = {
 	_T("tacticsgamewin.ogg"),
 	_T("tacticsshop.ogg"),
 	_T("tacticsmake.ogg"),
+	_T("tacticsgameplains.ogg"),
+	_T("tacticsgamecanyon.ogg"),
+	_T("tacticsgameforest.ogg"),
+	_T("tacticsgamesnow.ogg"),
+	_T("tacticsgamedesert.ogg"),
+	_T("tacticsgamevolcano.ogg"),
+	_T("tacticsgameswamp.ogg"),
+	_T("tacticsgameruins.ogg"),
 };
 static const TCHAR* TARGET_D3D_NAME = _T("d3dcompiler_47.dll");
 
@@ -897,11 +905,9 @@ static bool TacBgmWantedW(const wchar_t* name)
 		if (s != name && s[-1] != L'\\' && s[-1] != L'/') continue;
 		if (s[10] == L'\\' || s[10] == L'/') return true;
 	}
-	return _wcsicmp(file, TARGET_TAC_OGG) == 0
-		|| _wcsicmp(file, L"tacticsgame.ogg") == 0
-		|| _wcsicmp(file, L"tacticsgamewin.ogg") == 0
-		|| _wcsicmp(file, L"tacticsshop.ogg") == 0
-		|| _wcsicmp(file, L"tacticsmake.ogg") == 0;
+	for (int i = 0; i < (int)(sizeof(kTacOggNames) / sizeof(kTacOggNames[0])); ++i)
+		if (_wcsicmp(file, kTacOggNames[i]) == 0) return true;
+	return false;
 }
 
 static bool WriteTacOggBytes(const CString& dir, const wchar_t* fileOnly, const void* data, size_t sz)
