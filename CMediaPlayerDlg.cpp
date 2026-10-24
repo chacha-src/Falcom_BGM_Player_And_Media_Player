@@ -3465,7 +3465,9 @@ void CMediaPlayerDlg::DoLayout()
 	if (delW < (int)(16 * s)) delW = (int)(16 * s);
 	int delX = moveRight - moveClusterW - delGap - delW;
 	if (delX < 0) delX = 0;
-	if (m_itemdel.GetSafeHwnd()) {
+	extern int OggInPlayOpen();
+	const BOOL holdOpenFace = OggInPlayOpen();
+	if (m_itemdel.GetSafeHwnd() && !holdOpenFace) {
 		MoveCtl(&m_itemdel, delX, by4, delW, tbH);
 		m_itemdel.ShowWindow(SW_SHOW);
 		if (!liveResize) {
@@ -3610,17 +3612,17 @@ void CMediaPlayerDlg::DoLayout()
 	if (libOpen || histOpen) {
 		const int gapT = (int)(3 * s);
 		const int third = (libPanel - gapT * 2) / 3;
-		if (m_libToggle.GetSafeHwnd()) {
+		if (m_libToggle.GetSafeHwnd() && !holdOpenFace) {
 			MoveCtl(&m_libToggle, M + gPad, listY, third, togH);
 			m_libToggle.ShowWindow(SW_SHOW);
 			m_libToggle.SetWindowText(libOpen ? L"≪ Lib" : L"Lib");
 		}
-		if (m_histToggle.GetSafeHwnd()) {
+		if (m_histToggle.GetSafeHwnd() && !holdOpenFace) {
 			MoveCtl(&m_histToggle, M + gPad + third + gapT, listY, third, togH);
 			m_histToggle.ShowWindow(SW_SHOW);
 			m_histToggle.SetWindowText(histOpen ? L"≪ Hist" : L"Hist");
 		}
-		if (m_tempToggle.GetSafeHwnd()) {
+		if (m_tempToggle.GetSafeHwnd() && !holdOpenFace) {
 			MoveCtl(&m_tempToggle, M + gPad + (third + gapT) * 2, listY, third, togH);
 			m_tempToggle.ShowWindow(SW_SHOW);
 			m_tempToggle.SetWindowText(L"Temp");
@@ -3629,17 +3631,17 @@ void CMediaPlayerDlg::DoLayout()
 		}
 	}
 	else {
-		if (m_libToggle.GetSafeHwnd()) {
+		if (m_libToggle.GetSafeHwnd() && !holdOpenFace) {
 			MoveCtl(&m_libToggle, M + gPad, listY, libRail, togH);
 			m_libToggle.ShowWindow(SW_SHOW);
 			m_libToggle.SetWindowText(L"Lib");
 		}
-		if (m_histToggle.GetSafeHwnd()) {
+		if (m_histToggle.GetSafeHwnd() && !holdOpenFace) {
 			MoveCtl(&m_histToggle, M + gPad, listY + togH + (int)(2 * s), libRail, togH);
 			m_histToggle.ShowWindow(SW_SHOW);
 			m_histToggle.SetWindowText(L"Hist");
 		}
-		if (m_tempToggle.GetSafeHwnd()) {
+		if (m_tempToggle.GetSafeHwnd() && !holdOpenFace) {
 			MoveCtl(&m_tempToggle, M + gPad, listY + (togH + (int)(2 * s)) * 2, libRail, togH);
 			m_tempToggle.ShowWindow(SW_SHOW);
 			m_tempToggle.SetWindowText(L"Temp");
@@ -9480,6 +9482,17 @@ void CMediaPlayerDlg::OnEditRedo()
 	pl->RedoLastEdit();
 }
 
+void MpInvalidateOpeningButtons()
+{
+	extern CMediaPlayerDlg* mp;
+	if (!mp || !::IsWindow(mp->GetSafeHwnd())) return;
+	CWnd* w[4] = { &mp->m_libToggle, &mp->m_histToggle, &mp->m_tempToggle, &mp->m_itemdel };
+	for (int i = 0; i < 4; ++i) {
+		if (w[i]->GetSafeHwnd())
+			w[i]->Invalidate(FALSE);
+	}
+}
+
 void CMediaPlayerDlg::EnsureLibControls()
 {
 	CRect rc(0, 0, 40, 20);
@@ -9493,26 +9506,32 @@ void CMediaPlayerDlg::EnsureLibControls()
 	}
 	if (!m_libToggle.GetSafeHwnd()) {
 		m_libToggle.Create(_T("Lib"), WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | WS_TABSTOP, rc, this, IDC_MP_LIBTOGGLE);
-		m_libToggle.SetGradation(RGB(230, 240, 255), RGB(190, 210, 240), 0, FALSE);
-		m_libToggle.SetFlat(TRUE); // 狭いレール: 2px白枠が白抜けに見えるのを防ぐ
-		m_libToggle.SetAeroMode(TRUE); // アクリル下地を透かす（ラベル風）
 		createdLibChild = TRUE;
+	}
+	if (m_libToggle.GetSafeHwnd()) {
+		m_libToggle.SetGradation(RGB(230, 240, 255), RGB(190, 210, 240), 0, TRUE);
+		m_libToggle.SetFlat(FALSE);
+		m_libToggle.SetAeroMode(FALSE);
 	}
 	if (!m_histToggle.GetSafeHwnd()) {
 		m_histToggle.Create(_T("Hist"), WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | WS_TABSTOP, rc, this, IDC_MP_HISTTOGGLE);
-		m_histToggle.SetGradation(RGB(255, 240, 230), RGB(240, 200, 170), 0, FALSE);
-		m_histToggle.SetFlat(TRUE);
-		m_histToggle.SetAeroMode(TRUE);
 		createdLibChild = TRUE;
+	}
+	if (m_histToggle.GetSafeHwnd()) {
+		m_histToggle.SetGradation(RGB(255, 240, 230), RGB(240, 200, 170), 0, TRUE);
+		m_histToggle.SetFlat(FALSE);
+		m_histToggle.SetAeroMode(FALSE);
 	}
 	if (!m_tempToggle.GetSafeHwnd()) {
 		m_tempToggle.Create(_T("Temp"), WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | WS_TABSTOP, rc, this, IDC_MP_TEMPTOGGLE);
-		m_tempToggle.SetGradation(RGB(235, 255, 235), RGB(180, 230, 180), 0, FALSE);
-		m_tempToggle.SetFlat(TRUE);
-		m_tempToggle.SetAeroMode(TRUE);
 		MpMakePushToggle(&m_tempToggle);
 		m_tempToggle.SetCheck(savedata.mpTempOpen ? BST_CHECKED : BST_UNCHECKED);
 		createdLibChild = TRUE;
+	}
+	if (m_tempToggle.GetSafeHwnd()) {
+		m_tempToggle.SetGradation(RGB(235, 255, 235), RGB(180, 230, 180), 0, TRUE);
+		m_tempToggle.SetFlat(FALSE);
+		m_tempToggle.SetAeroMode(FALSE);
 	}
 	if (!m_libAddRoot.GetSafeHwnd()) {
 		m_libAddRoot.Create(LL14(L"ルート追加", L"Add root", L"Aj. racine", L"Agg. radice", L"Anadir raiz", L"루트 추가", L"添加根", L"إضافة جذر", L"Добавить корень", L"Wurzel +", L"Add raiz", L"Wortel +", L"Dodaj korzen", L"Kok +"),

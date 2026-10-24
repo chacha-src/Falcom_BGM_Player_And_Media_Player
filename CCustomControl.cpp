@@ -420,6 +420,53 @@ static void DlgOnPaintAero(CWnd* pWnd, BOOL bAeroEnabled)
 #define DTT_GLOWSIZE   0x00000800
 #define DTT_COMPOSITED 0x00002000
 #endif
+#include <emmintrin.h>
+
+/* 可視化窓は専用 UI スレッドで同時に塗る。プロセス共通 DIB を Ensure で捨てると
+   他スレッドの画素ループが解放済み pBits を書いて AV になる。
+   スレッドローカル＋使用中フラグで、ネストした再描画も同じ DIB を破棄しない。 */
+struct CCC_PoolSlot {
+    CCC_ChromaBlitCache cache;
+    COLORREF tag;
+    int busy;
+    CCC_PoolSlot() : tag(0xFFFFFFFFu), busy(0) {}
+    ~CCC_PoolSlot() { cache.Release(); }
+};
+
+struct CCC_PoolHold {
+    int* busy;
+    explicit CCC_PoolHold(CCC_PoolSlot* s) : busy(s ? &s->busy : nullptr) {}
+    ~CCC_PoolHold() { if (busy) *busy = 0; }
+};
+
+template <int N>
+static CCC_PoolSlot* CCC_AcquirePoolSlot(CCC_PoolSlot* slots, unsigned* next, HDC hdc, int w, int h)
+{
+    CCC_PoolSlot* slot = nullptr;
+    for (int i = 0; i < N; ++i) {
+        if (!slots[i].busy && slots[i].cache.pBits
+            && slots[i].cache.dibW == w && slots[i].cache.dibH == h) {
+            slot = &slots[i];
+            break;
+        }
+    }
+    if (!slot) {
+        for (int n = 0; n < N; ++n) {
+            CCC_PoolSlot& s = slots[(*next)++ % N];
+            if (!s.busy) { slot = &s; break; }
+        }
+        if (!slot) return nullptr;
+        slot->busy = 1;
+        if (!slot->cache.Ensure(hdc, w, h)) {
+            slot->busy = 0;
+            return nullptr;
+        }
+        slot->tag = 0xFFFFFFFFu;
+        return slot;
+    }
+    slot->busy = 1;
+    return slot;
+}
 
 // 矩形を α=255 の不透明色で塗る（REDIRECTIONBITMAP_ALPHA 時の素 FillRect 透過を防ぐ）
 static void CCC_FillRectOpaqueBits(HDC hdc, const RECT& rc, COLORREF clr)
@@ -430,45 +477,30 @@ static void CCC_FillRectOpaqueBits(HDC hdc, const RECT& rc, COLORREF clr)
 
     // 再利用DIB + AlphaBlend（毎フレ BeginBufferedPaint + 画素ループを避ける）
     {
-        static CCC_ChromaBlitCache s_fillCaches[4]; // サイズ別 4 スロット（交互サイズで破棄しない）
-        static COLORREF s_fillClr[4] = { 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu };
-        static unsigned s_fillNext = 0;
-        CCC_ChromaBlitCache* pCache = nullptr;
-        unsigned hit = 0;
-        for (unsigned i = 0; i < 4; ++i) {
-            if (s_fillCaches[i].pBits && s_fillCaches[i].dibW == w && s_fillCaches[i].dibH == h) {
-                pCache = &s_fillCaches[i];
-                hit = i;
-                break;
-            }
-        }
-        if (!pCache) {
-            hit = (s_fillNext++) % 4;
-            pCache = &s_fillCaches[hit];
-            if (!pCache->Ensure(hdc, w, h))
-                pCache = nullptr;
-            else
-                s_fillClr[hit] = 0xFFFFFFFFu;
-        }
-        if (pCache && pCache->pBits && pCache->hdcDib) {
-            if (s_fillClr[hit] != clr) {
+        static thread_local CCC_PoolSlot s_fillCaches[4];
+        static thread_local unsigned s_fillNext = 0;
+        CCC_PoolSlot* pSlot = CCC_AcquirePoolSlot<4>(s_fillCaches, &s_fillNext, hdc, w, h);
+        CCC_PoolHold hold(pSlot);
+        if (pSlot && pSlot->cache.pBits && pSlot->cache.hdcDib) {
+            if (pSlot->tag != clr) {
                 const UINT32 px = 0xFF000000u // A=255 不透明。DIB は 0xAARRGGBB
                     | ((UINT32)GetRValue(clr) << 16)
                     | ((UINT32)GetGValue(clr) << 8)
                     | (UINT32)GetBValue(clr);
-                UINT32* p = (UINT32*)pCache->pBits;
+                UINT32* p = (UINT32*)pSlot->cache.pBits;
                 const int n = w * h;
                 int i = 0;
+#pragma loop(no_vector)
                 for (; i + 3 < n; i += 4) {
                     p[i] = px; p[i + 1] = px; p[i + 2] = px; p[i + 3] = px;
                 }
                 for (; i < n; ++i)
                     p[i] = px;
-                s_fillClr[hit] = clr;
+                pSlot->tag = clr;
             }
             const BLENDFUNCTION bf = { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
             if (::GdiAlphaBlend(hdc, rc.left, rc.top, w, h,
-                    pCache->hdcDib, 0, 0, w, h, bf))
+                    pSlot->cache.hdcDib, 0, 0, w, h, bf))
                 return;
         }
     }
@@ -735,17 +767,20 @@ BOOL CCC_ChromaBlitCache::FillOpaqueRect(int x, int y, int rw, int rh, COLORREF 
 // 矩形の α を強制 255。オーバーレイ焼き込み後の「ガラスに穴」防止。
 void CCC_ChromaBlitCache::MakeRectOpaque(int x, int y, int rw, int rh)
 {
-    if (!pBits || rw <= 0 || rh <= 0 || dibW <= 0) return;
-    if (x < 0 || y < 0 || x + rw > dibW || y + rh > dibH) return;
+    if (!pBits || rw <= 0 || rh <= 0 || dibW <= 0 || dibH <= 0) return;
+    if (x < 0 || y < 0 || x >= dibW || y >= dibH) return;
+    if (rw > dibW - x) rw = dibW - x;
+    if (rh > dibH - y) rh = dibH - y;
     UINT32* base = (UINT32*)pBits;
+    const __m128i mask = _mm_set1_epi32((int)0xFF000000);
     for (int row = 0; row < rh; ++row) {
-        UINT32* p = base + (size_t)(y + row) * (size_t)dibW + x;
+        UINT32* p = base + (size_t)(y + row) * (size_t)dibW + (size_t)x;
         int col = 0;
-        for (; col + 3 < rw; col += 4) {
-            p[col] |= 0xFF000000u;
-            p[col + 1] |= 0xFF000000u;
-            p[col + 2] |= 0xFF000000u;
-            p[col + 3] |= 0xFF000000u;
+        /* 非アラインの 16byte だけ。AVX2 の自動ベクトル化は行末を 32byte で読み、
+           確保サイズがページ境界ちょうど（1920x1080 など）だと AV になる。 */
+        for (; col + 4 <= rw; col += 4) {
+            const __m128i v = _mm_loadu_si128(reinterpret_cast<const __m128i*>(p + col));
+            _mm_storeu_si128(reinterpret_cast<__m128i*>(p + col), _mm_or_si128(v, mask));
         }
         for (; col < rw; ++col)
             p[col] |= 0xFF000000u;
@@ -883,44 +918,29 @@ void CCC_FillRectAlpha(HDC hdc, const RECT& rc, COLORREF clr, BYTE alpha)
 		return;
 	}
 
-	static CCC_ChromaBlitCache s_aCaches[4];
-	static COLORREF s_aClr[4] = { 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu };
-	static unsigned s_aNext = 0;
-	CCC_ChromaBlitCache* pCache = nullptr;
-	unsigned hit = 0;
-	for (unsigned i = 0; i < 4; ++i) {
-		if (s_aCaches[i].pBits && s_aCaches[i].dibW == w && s_aCaches[i].dibH == h) {
-			pCache = &s_aCaches[i];
-			hit = i;
-			break;
-		}
-	}
-	if (!pCache) {
-		hit = (s_aNext++) % 4;
-		pCache = &s_aCaches[hit];
-		if (!pCache->Ensure(hdc, w, h))
-			pCache = nullptr;
-		else
-			s_aClr[hit] = 0xFFFFFFFFu;
-	}
-	if (pCache && pCache->pBits && pCache->hdcDib) {
-		if (s_aClr[hit] != clr) {
+	static thread_local CCC_PoolSlot s_aCaches[4];
+	static thread_local unsigned s_aNext = 0;
+	CCC_PoolSlot* pSlot = CCC_AcquirePoolSlot<4>(s_aCaches, &s_aNext, hdc, w, h);
+	CCC_PoolHold hold(pSlot);
+	if (pSlot && pSlot->cache.pBits && pSlot->cache.hdcDib) {
+		if (pSlot->tag != clr) {
 			const UINT32 px = 0xFF000000u
 				| ((UINT32)GetRValue(clr) << 16)
 				| ((UINT32)GetGValue(clr) << 8)
 				| (UINT32)GetBValue(clr);
-			UINT32* p = (UINT32*)pCache->pBits;
+			UINT32* p = (UINT32*)pSlot->cache.pBits;
 			const int n = w * h;
 			int i = 0;
+#pragma loop(no_vector)
 			for (; i + 3 < n; i += 4) {
 				p[i] = px; p[i + 1] = px; p[i + 2] = px; p[i + 3] = px;
 			}
 			for (; i < n; ++i)
 				p[i] = px;
-			s_aClr[hit] = clr;
+			pSlot->tag = clr;
 		}
 		const BLENDFUNCTION bf = { AC_SRC_OVER, 0, alpha, 0 };
-		if (::GdiAlphaBlend(hdc, rc.left, rc.top, w, h, pCache->hdcDib, 0, 0, w, h, bf))
+		if (::GdiAlphaBlend(hdc, rc.left, rc.top, w, h, pSlot->cache.hdcDib, 0, 0, w, h, bf))
 			return;
 		return;
 	}
@@ -975,34 +995,33 @@ static void CCC_BlitToRectOpaque(HDC hdcDest, const RECT& rect, HDC hdcSrc, int 
 {
     if (destW <= 0 || destH <= 0 || !hdcDest || !hdcSrc) return;
 
-    static CCC_ChromaBlitCache s_opaqueCaches[8]; // バナー等の複数サイズ共存
-    static unsigned s_opaqueNext = 0;
-    CCC_ChromaBlitCache* pCache = nullptr;
-    for (auto& c : s_opaqueCaches) {
-        if (c.pBits && c.dibW == destW && c.dibH == destH) {
-            pCache = &c;
-            break;
-        }
-    }
-    if (!pCache) {
-        pCache = &s_opaqueCaches[s_opaqueNext++ % 8];
-        if (!pCache->Ensure(hdcDest, destW, destH))
-            pCache = nullptr;
-    }
-    if (pCache && pCache->pBits && pCache->hdcDib) {
-        ::SetStretchBltMode(pCache->hdcDib, COLORONCOLOR);
+    static thread_local CCC_PoolSlot s_opaqueCaches[8]; // バナー等の複数サイズ共存
+    static thread_local unsigned s_opaqueNext = 0;
+    CCC_PoolSlot* pSlot = CCC_AcquirePoolSlot<8>(s_opaqueCaches, &s_opaqueNext, hdcDest, destW, destH);
+    CCC_PoolHold hold(pSlot);
+    if (pSlot && pSlot->cache.pBits && pSlot->cache.hdcDib) {
+        ::SetStretchBltMode(pSlot->cache.hdcDib, COLORONCOLOR);
         if (bStretch && (destW != srcW || destH != srcH))
-            ::StretchBlt(pCache->hdcDib, 0, 0, destW, destH, hdcSrc, srcX, srcY, srcW, srcH, SRCCOPY);
+            ::StretchBlt(pSlot->cache.hdcDib, 0, 0, destW, destH, hdcSrc, srcX, srcY, srcW, srcH, SRCCOPY);
         else
-            ::BitBlt(pCache->hdcDib, 0, 0, destW, destH, hdcSrc, srcX, srcY, SRCCOPY);
-        pCache->MakeRectOpaque(0, 0, destW, destH);
+            ::BitBlt(pSlot->cache.hdcDib, 0, 0, destW, destH, hdcSrc, srcX, srcY, SRCCOPY);
+        pSlot->cache.MakeRectOpaque(0, 0, destW, destH);
         const BLENDFUNCTION bf = { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
         if (::GdiAlphaBlend(hdcDest, rect.left, rect.top, destW, destH,
-                pCache->hdcDib, 0, 0, destW, destH, bf))
+                pSlot->cache.hdcDib, 0, 0, destW, destH, bf))
             return;
+        /* プラグイン読込中は AC_SRC_ALPHA が失敗する。素の BitBlt は α=0 のままなので
+           Lib/Hist/Temp はガラスに抜け、アイコン付きの曲削除は黒マスクだけ残る。
+           AlphaFormat=0 は全面を不透明として合成する。 */
+        const BLENDFUNCTION bfSolid = { AC_SRC_OVER, 0, 255, 0 };
+        if (::GdiAlphaBlend(hdcDest, rect.left, rect.top, destW, destH,
+                pSlot->cache.hdcDib, 0, 0, destW, destH, bfSolid))
+            return;
+        ::BitBlt(hdcDest, rect.left, rect.top, destW, destH, pSlot->cache.hdcDib, 0, 0, SRCCOPY);
+        return;
     }
 
-    /* Print/Snip 中の BeginBufferedPaint は落ちる。不透明面へは素の BitBlt で足りる。 */
+    /* キャッシュが取れないとき。α 付きの素 BitBlt はガラス上で抜けるので不透明合成を先にする。 */
     ::SetStretchBltMode(hdcDest, COLORONCOLOR);
     if (bStretch)
         ::StretchBlt(hdcDest, rect.left, rect.top, destW, destH, hdcSrc, srcX, srcY, srcW, srcH, SRCCOPY);
@@ -1061,22 +1080,14 @@ void CCC_BlitStretchNF(HDC hdcDest, int x, int y, int destW, int destH,
     // バナー/ジャケット/曲情報パネルなど複数サイズの呼び出し元が共有するため、
     // 1本だと Ensure の作り直しが毎フレーム交互に起きる。サイズ一致スロットを
     // 使い、無ければラウンドロビンで置き換える小さなプールにする。
-    static CCC_ChromaBlitCache s_nfCaches[4];
-    static unsigned s_nfNext = 0;
-    CCC_ChromaBlitCache* pCache = nullptr;
-    for (auto& c : s_nfCaches) {
-        if (c.dibW == destW && c.dibH == destH) { pCache = &c; break; }
-    }
-    if (!pCache) {
-        for (auto& c : s_nfCaches) {
-            if (!c.hDib) { pCache = &c; break; } // 未使用スロット優先
-        }
-    }
-    if (!pCache)
-        pCache = &s_nfCaches[(s_nfNext++) % _countof(s_nfCaches)];
+    static thread_local CCC_PoolSlot s_nfCaches[4];
+    static thread_local unsigned s_nfNext = 0;
+    CCC_PoolSlot* pSlot = (destW > 0 && destH > 0)
+        ? CCC_AcquirePoolSlot<4>(s_nfCaches, &s_nfNext, hdcDest, destW, destH) : nullptr;
+    CCC_PoolHold hold(pSlot);
     RECT rect = { x, y, x + destW, y + destH };
-    if (destW > 0 && destH > 0 &&
-        CCC_BlitChromaCachedRect(hdcDest, rect, hdcSrc, srcX, srcY, destW, destH, srcW, srcH, clrKey, *pCache))
+    if (pSlot &&
+        CCC_BlitChromaCachedRect(hdcDest, rect, hdcSrc, srcX, srcY, destW, destH, srcW, srcH, clrKey, pSlot->cache))
         return;
     if (!CCC_BlitChromaNFRect(hdcDest, rect, hdcSrc, srcX, srcY, destW, destH, srcW, srcH, clrKey, TRUE))
         CCC_BlitToRectChroma(hdcDest, rect, hdcSrc, srcX, srcY, destW, destH, srcW, srcH, clrKey, TRUE);
@@ -1093,10 +1104,14 @@ void CCC_BlitChroma(HDC hdcDest, int x, int y, int w, int h, HDC hdcSrc, int src
 void CCC_BlitChromaNF(HDC hdcDest, int x, int y, int w, int h, HDC hdcSrc, int srcX, int srcY, COLORREF clrKey)
 {
     // UI スレッド想定。DIB を再利用して毎フレーム CreateDIBSection を避ける。
-    static CCC_ChromaBlitCache s_nfCache;
+    static thread_local CCC_PoolSlot s_nfCache;
+    static thread_local unsigned s_nfOnce = 0;
+    CCC_PoolSlot* pSlot = (w > 0 && h > 0)
+        ? CCC_AcquirePoolSlot<1>(&s_nfCache, &s_nfOnce, hdcDest, w, h) : nullptr;
+    CCC_PoolHold hold(pSlot);
     RECT rect = { x, y, x + w, y + h };
-    if (w > 0 && h > 0 &&
-        CCC_BlitChromaCachedRect(hdcDest, rect, hdcSrc, srcX, srcY, w, h, w, h, clrKey, s_nfCache))
+    if (pSlot &&
+        CCC_BlitChromaCachedRect(hdcDest, rect, hdcSrc, srcX, srcY, w, h, w, h, clrKey, pSlot->cache))
         return;
     if (!CCC_BlitChromaNFRect(hdcDest, rect, hdcSrc, srcX, srcY, w, h, w, h, clrKey, FALSE))
         CCC_BlitChroma(hdcDest, x, y, w, h, hdcSrc, srcX, srcY, clrKey);
@@ -1182,14 +1197,14 @@ static void DrawGradientBackground(CDC* pDC, const CRect& rect, COLORREF cS, COL
     v[0].Red = (COLOR16)(GetRValue(cA) << 8);
     v[0].Green = (COLOR16)(GetGValue(cA) << 8);
     v[0].Blue = (COLOR16)(GetBValue(cA) << 8);
-    v[0].Alpha = 0;
+    v[0].Alpha = 0xFF00;
 
     v[1].x = rect.right;
     v[1].y = rect.bottom;
     v[1].Red = (COLOR16)(GetRValue(cB) << 8);
     v[1].Green = (COLOR16)(GetGValue(cB) << 8);
     v[1].Blue = (COLOR16)(GetBValue(cB) << 8);
-    v[1].Alpha = 0;
+    v[1].Alpha = 0xFF00;
 
     GRADIENT_RECT gr = { 0, 1 };
     ::GradientFill(pDC->GetSafeHdc(), v, 2, &gr, 1, bH ? GRADIENT_FILL_RECT_H : GRADIENT_FILL_RECT_V);
@@ -15051,6 +15066,10 @@ void CCustomStandardButton::PostNcDestroy()
 // 無効角度は正規化。即再描画。
 void CCustomStandardButton::SetGradation(COLORREF s, COLORREF e, int d, BOOL en)
 {
+    int dir = d % 360;
+    if (dir < 0) dir += 360;
+    if (m_clrGradStart == s && m_clrGradEnd == e && m_nGradDirection == dir && m_bGradEnable == en)
+        return;
     m_clrGradStart = s;
     m_clrGradEnd = e;
     m_nGradDirection = d % 360;
@@ -15157,6 +15176,9 @@ void CCustomStandardButton::EnsureAutoGlyph()
 // chrome ボタンはスパークル無し。
 void CCustomStandardButton::SetFlat(BOOL bFlat)
 {
+    bFlat = bFlat ? TRUE : FALSE;
+    if (m_bFlat == bFlat)
+        return;
     m_bFlat = bFlat;
     if (GetSafeHwnd()) {
         CCC_ButtonSoftTimerSync(m_hWnd, m_bFlat);
@@ -15168,6 +15190,9 @@ void CCustomStandardButton::SetFlat(BOOL bFlat)
 // 親の隙間再描画も忘れない。
 void CCustomStandardButton::SetAeroMode(BOOL b)
 {
+    b = b ? TRUE : FALSE;
+    if (m_bAeroMode == b)
+        return;
     m_bAeroMode = b ? TRUE : FALSE;
     if (GetSafeHwnd()) {
         Invalidate(FALSE);
@@ -15210,11 +15235,6 @@ void CCustomStandardButton::PaintClient(CDC& dc, const CRect& r)
 {
     if (r.Width() <= 0 || r.Height() <= 0) return;
     EnsureAutoGlyph();
-    CDC mDC;
-    CBitmap mB;
-    mDC.CreateCompatibleDC(&dc);
-    mB.CreateCompatibleBitmap(&dc, r.Width(), r.Height());
-    CBitmap* ob = mDC.SelectObject(&mB);
 
     BOOL bP = (GetState() & BST_PUSHED) != 0;
     BOOL bF = (GetFocus() == this);
@@ -15225,31 +15245,44 @@ void CCustomStandardButton::PaintClient(CDC& dc, const CRect& r)
     if (bPushLike && (GetCheck() == BST_CHECKED)) bP = TRUE;
     const BOOL bShowFlow = m_bMouseOver;
 #if CCUSTOM_AERO_SUPPORT
-    // キャプション帯だけクロマ。本文ボタンは HostNeeds で不透明（x64 ガラスで消える）
-    const BOOL bAeroTrans = CCC_UseTransPaint(m_hWnd, m_bAeroMode);
+    // キャプション帯だけクロマ。本文(Lib/Hist/Temp 含む)は渡された DC へ直接描く。
+    // 中間の互換ビットマップは演奏開始前に中身が白/黒のまま残り、顔が消える。
+    const BOOL bAeroTrans = CCC_UseTransPaint(m_hWnd, m_bAeroMode)
+        && CCC_IsCaptionChromeCtrl(m_hWnd);
 #else
     const BOOL bAeroTrans = FALSE;
 #endif
+
+    CDC memDC;
+    CBitmap memBmp;
+    CBitmap* ob = NULL;
+    CDC* pDraw = &dc;
+    if (bAeroTrans
+        && memDC.CreateCompatibleDC(&dc)
+        && memBmp.CreateCompatibleBitmap(&dc, r.Width(), r.Height())) {
+        ob = memDC.SelectObject(&memBmp);
+        pDraw = &memDC;
+    }
 
     // 無効時もカスタムの質感(グラデ/サテン/ツヤ/装飾)は描く。ただし彩度を落とし、
     // 最後にやわらかいグレーヴェールを重ねて「無効」であることを明確に伝える。
     // アクリル透過(Lib/Hist 等): 背景はクロマ、ホバー/押下のみ薄いティントを載せる。
     if (bAeroTrans)
     {
-        mDC.FillSolidRect(&r, CCC_AERO_CHROMA_KEY);
+        pDraw->FillSolidRect(&r, CCC_AERO_CHROMA_KEY);
         if (bP)
-            mDC.FillSolidRect(&r, bD ? CCC_Desaturate(CCC_UiTheme().hotBot, 68) : CCC_UiTheme().hotBot);
+            pDraw->FillSolidRect(&r, bD ? CCC_Desaturate(CCC_UiTheme().hotBot, 68) : CCC_UiTheme().hotBot);
         else if (m_bMouseOver)
-            mDC.FillSolidRect(&r, bD ? CCC_Desaturate(CCC_UiTheme().hotTop, 68) : CCC_UiTheme().hotTop);
+            pDraw->FillSolidRect(&r, bD ? CCC_Desaturate(CCC_UiTheme().hotTop, 68) : CCC_UiTheme().hotTop);
     }
     else
     {
     COLORREF bg = bP ? COLOR_BUTTON_PUSHED : (m_bMouseOver ? COLOR_BUTTON_HOVER : COLOR_BUTTON_BG);
     if (bD) bg = CCC_Desaturate(bg, 68);
     if (m_bFlat)
-        mDC.FillSolidRect(&r, bg);
+        pDraw->FillSolidRect(&r, bg);
     else if (m_bGradEnable) {
-        mDC.FillSolidRect(&r, CCC_ClrDialogBg());
+        pDraw->FillSolidRect(&r, CCC_ClrDialogBg());
         CRect plate = r;
         plate.DeflateRect(1, 1);
         CRgn clip;
@@ -15264,21 +15297,21 @@ void CCustomStandardButton::PaintClient(CDC& dc, const CRect& r)
         else
             have = clip.CreateRectRgnIndirect(&plate);
         if (have)
-            mDC.SelectClipRgn(&clip);
-        DrawGradientBackground(&mDC, plate,
+            pDraw->SelectClipRgn(&clip);
+        DrawGradientBackground(pDraw, plate,
             bD ? CCC_Desaturate(m_clrGradStart, 68) : m_clrGradStart,
             bD ? CCC_Desaturate(m_clrGradEnd, 68) : m_clrGradEnd,
             m_nGradDirection);
         if (have)
-            mDC.SelectClipRgn(NULL);
-        CCC_StrokeThemedPlate(&mDC, plate, bP, FALSE);
+            pDraw->SelectClipRgn(NULL);
+        CCC_StrokeThemedPlate(pDraw, plate, bP, FALSE);
     }
     else {
-        mDC.FillSolidRect(&r, CCC_ClrDialogBg());
+        pDraw->FillSolidRect(&r, CCC_ClrDialogBg());
         CRect plate = r;
         plate.DeflateRect(1, 1);
-        CCC_FillThemedPlate(&mDC, plate, bg, bP);
-        CCC_StrokeThemedPlate(&mDC, plate, bP, FALSE);
+        CCC_FillThemedPlate(pDraw, plate, bg, bP);
+        CCC_StrokeThemedPlate(pDraw, plate, bP, FALSE);
     }
     }
 
@@ -15289,18 +15322,18 @@ void CCustomStandardButton::PaintClient(CDC& dc, const CRect& r)
         if (bP) rg.OffsetRect(1, 1);
         const BOOL bPlate = !m_bFlat && !m_bGradEnable;
         if (!bPlate && CCC_ThemeFaceOf().gloss > 0)
-            DrawGlossHighlight(&mDC, rg, m_bFlat ? 4 : 8);
+            DrawGlossHighlight(pDraw, rg, m_bFlat ? 4 : 8);
         if (!bPlate && !m_bFlat && CCC_ThemeFaceOf().jelly)
-            DrawJellyEdges(&mDC, rg, 8, CCC_UiTheme().ribbonEdge);
+            DrawJellyEdges(pDraw, rg, 8, CCC_UiTheme().ribbonEdge);
         // Soft3D: つやのあるテーマだけ。平坦ボタンとキャプション帯は載せない。
         if (!m_bFlat && CCC_ThemeFaceOf().gloss >= 6 && !CCC_IsCaptionChromeCtrl(m_hWnd) && r.Width() >= 24 && r.Height() >= 16)
         {
             const int tick = (int)(::GetTickCount64() / 80) + (int)(m_nAnimTick / 2);
             if (r.Width() >= 36 && r.Height() >= 20)
-                DrawSoftJkBackdrop(&mDC, rg, tick, m_bMouseOver || bP);
+                DrawSoftJkBackdrop(pDraw, rg, tick, m_bMouseOver || bP);
             else {
                 const int cs = min(12, min(r.Width(), r.Height()) / 2);
-                DrawSoftJkChip(&mDC,
+                DrawSoftJkChip(pDraw,
                     CRect(rg.right - cs - 2, rg.top + 2, rg.right - 2, rg.top + 2 + cs),
                     tick, m_bMouseOver || bP);
             }
@@ -15309,7 +15342,7 @@ void CCustomStandardButton::PaintClient(CDC& dc, const CRect& r)
         // 大きめのボタンは裾に透けレースの色気を(アイコン平坦ボタンは省略=はみ出し防止)
         if (!m_bFlat && !m_hIconIn && r.Width() >= 64 && r.Height() >= 26)
             if (CCC_ThemeFaceOf().lace)
-                DrawLaceScallop(&mDC, r.left + 8, r.bottom - 6, r.right - 8, 3, CCC_UiTheme().accent2);
+                DrawLaceScallop(pDraw, r.left + 8, r.bottom - 6, r.right - 8, 3, CCC_UiTheme().accent2);
 
         // ホバー時: とろみハイライトがスーッと流れる(押下トグル上でもホバー中は表示)
         // 点はホバー終了後も残点が消えるまで描画
@@ -15318,7 +15351,7 @@ void CCustomStandardButton::PaintClient(CDC& dc, const CRect& r)
             const int W = r.Width();
             const int H = r.Height();
             CRgn rgn; rgn.CreateRoundRectRgn(r.left, r.top, r.right + 1, r.bottom + 1, 16, 16);
-            mDC.SelectClipRgn(&rgn);
+            pDraw->SelectClipRgn(&rgn);
             if (bShowFlow)
             {
                 const int bandW = max(10, W / 4);
@@ -15326,7 +15359,7 @@ void CCustomStandardButton::PaintClient(CDC& dc, const CRect& r)
                 const UINT hoverTick = (UINT)(::GetTickCount64() / 33ull);
                 const int pos = (int)((hoverTick * 7) % (UINT)max(1, period));
                 CRect band(r.left + pos - bandW, r.top, r.left + pos, r.bottom);
-                FillRectAlpha(&mDC, band, RGB(255, 255, 255), bP ? 48 : 72);
+                FillRectAlpha(pDraw, band, RGB(255, 255, 255), bP ? 48 : 72);
             }
             const int cy = r.top + H / 2;
             for (int di = 0; di < m_nSparkleN; ++di)
@@ -15338,10 +15371,10 @@ void CCustomStandardButton::PaintClient(CDC& dc, const CRect& r)
                 const int sy = cy + yoff;
                 if (sy < r.top + 2 || sy > r.bottom - 2) continue;
                 const int sz = (di == 0) ? 4 : 2;
-                DrawShine(&mDC, sx, sy, sz, sz);
-                DrawSparkle(&mDC, sx, sy, max(1, sz - 1), COLOR_SPARKLE);
+                DrawShine(pDraw, sx, sy, sz, sz);
+                DrawSparkle(pDraw, sx, sy, max(1, sz - 1), COLOR_SPARKLE);
             }
-            mDC.SelectClipRgn(NULL);
+            pDraw->SelectClipRgn(NULL);
         }
         // フォーカス: 鼓動のようにほのかに明滅
         if (bF)
@@ -15349,55 +15382,55 @@ void CCustomStandardButton::PaintClient(CDC& dc, const CRect& r)
             const UINT hoverTick = (UINT)(::GetTickCount64() / 33ull);
             const double ph = (hoverTick % 44) / 44.0 * 6.2831853;
             const int a = 24 + (int)(26 * (0.5 + 0.5 * sin(ph)));
-            FillRectAlpha(&mDC, r, COLOR_BUTTON_HOVER, a);
+            FillRectAlpha(pDraw, r, COLOR_BUTTON_HOVER, a);
         }
 
         if (!m_bFlat && !m_hIconIn)
         {
             if (CCC_ThemeSilk()) {
-                DrawDecorations(&mDC, r, 0, bP);
-                DrawSparkle(&mDC, r.left + 9, r.top + 9, 3, COLOR_SPARKLE);
-                DrawSparkle(&mDC, r.right - 9, r.bottom - 9, 3, COLOR_SPARKLE);
+                DrawDecorations(pDraw, r, 0, bP);
+                DrawSparkle(pDraw, r.left + 9, r.top + 9, 3, COLOR_SPARKLE);
+                DrawSparkle(pDraw, r.right - 9, r.bottom - 9, 3, COLOR_SPARKLE);
                 const int by = r.top + r.Height() * 64 / 100;
                 const int bx = max(10, r.Width() / 6);
-                DrawBlush(&mDC, r.left + bx, by, max(6, r.Width() / 10), max(3, r.Height() / 7));
-                DrawBlush(&mDC, r.right - bx, by, max(6, r.Width() / 10), max(3, r.Height() / 7));
+                DrawBlush(pDraw, r.left + bx, by, max(6, r.Width() / 10), max(3, r.Height() / 7));
+                DrawBlush(pDraw, r.right - bx, by, max(6, r.Width() / 10), max(3, r.Height() / 7));
                 if (CCC_UiThemeId() == CCC_UI_THEME_GAL) {
                     const int gs = min(12, min(r.Width(), r.Height()) / 4);
                     if (gs >= 6)
-                        DrawThemeMotif(&mDC, CRect(r.right - 2 - gs, r.top + 2, r.right - 2, r.top + 2 + gs), CCC_UiTheme().accent2);
+                        DrawThemeMotif(pDraw, CRect(r.right - 2 - gs, r.top + 2, r.right - 2, r.top + 2 + gs), CCC_UiTheme().accent2);
                 }
             } else {
                 const int ms = min(14, min(r.Width(), r.Height()) / 3);
                 if (ms >= 6) {
-                    DrawThemeMotif(&mDC, CRect(r.left + 2, r.top + 2, r.left + 2 + ms, r.top + 2 + ms), CCC_UiTheme().accent);
-                    DrawThemeMotif(&mDC, CRect(r.right - 2 - ms, r.bottom - 2 - ms, r.right - 2, r.bottom - 2), CCC_UiTheme().accent2);
+                    DrawThemeMotif(pDraw, CRect(r.left + 2, r.top + 2, r.left + 2 + ms, r.top + 2 + ms), CCC_UiTheme().accent);
+                    DrawThemeMotif(pDraw, CRect(r.right - 2 - ms, r.bottom - 2 - ms, r.right - 2, r.bottom - 2), CCC_UiTheme().accent2);
                 }
             }
             if (m_bMouseOver && !bP)
             {
                 const UINT hoverTick = (UINT)(::GetTickCount64() / 33ull);
                 const float ang = sinf((float)hoverTick * 0.08f) * 14.f;
-                DrawThemeOrnament(&mDC, CRect(r.Width() / 2 - 11, r.top + 2, r.Width() / 2 + 11, r.top + 16), CCC_UiTheme().accent2, ang);
+                DrawThemeOrnament(pDraw, CRect(r.Width() / 2 - 11, r.top + 2, r.Width() / 2 + 11, r.top + 16), CCC_UiTheme().accent2, ang);
                 if (CCC_ThemeSilk())
-                    DrawSoftJkKnot(&mDC, CRect(r.Width() / 2 - 10, r.top + 1, r.Width() / 2 + 10, r.top + 18), (int)hoverTick);
-                DrawSparkle(&mDC, r.right - 10, r.top + 10, 4, CCC_UiTheme().accent2);
-                DrawSparkle(&mDC, r.left + 12, r.bottom - 10, 3, CCC_UiTheme().accent);
+                    DrawSoftJkKnot(pDraw, CRect(r.Width() / 2 - 10, r.top + 1, r.Width() / 2 + 10, r.top + 18), (int)hoverTick);
+                DrawSparkle(pDraw, r.right - 10, r.top + 10, 4, CCC_UiTheme().accent2);
+                DrawSparkle(pDraw, r.left + 12, r.bottom - 10, 3, CCC_UiTheme().accent);
             }
             if (bP)
             {
-                DrawSparkle(&mDC, r.Width() / 2, r.top + 8, 4, CCC_UiTheme().accent2);
-                DrawThemeMotif(&mDC, CRect(r.left + 8, r.Height() / 2 - 6, r.left + 20, r.Height() / 2 + 6), CCC_UiTheme().accent);
-                DrawThemeMotif(&mDC, CRect(r.right - 20, r.Height() / 2 - 6, r.right - 8, r.Height() / 2 + 6), CCC_UiTheme().accent);
+                DrawSparkle(pDraw, r.Width() / 2, r.top + 8, 4, CCC_UiTheme().accent2);
+                DrawThemeMotif(pDraw, CRect(r.left + 8, r.Height() / 2 - 6, r.left + 20, r.Height() / 2 + 6), CCC_UiTheme().accent);
+                DrawThemeMotif(pDraw, CRect(r.right - 20, r.Height() / 2 - 6, r.right - 8, r.Height() / 2 + 6), CCC_UiTheme().accent);
                 const UINT hoverTick = (UINT)(::GetTickCount64() / 33ull);
                 const float ang = sinf((float)hoverTick * 0.1f) * 10.f;
-                DrawThemeOrnament(&mDC, CRect(r.Width() / 2 - 10, r.bottom - 15, r.Width() / 2 + 10, r.bottom - 2), CCC_UiTheme().accent2, ang);
+                DrawThemeOrnament(pDraw, CRect(r.Width() / 2 - 10, r.bottom - 15, r.Width() / 2 + 10, r.bottom - 2), CCC_UiTheme().accent2, ang);
             }
         }
         else
         {
             if (m_bMouseOver && m_hIconIn)
-                FillRectAlpha(&mDC, r, RGB(255, 255, 255), 36);
+                FillRectAlpha(pDraw, r, RGB(255, 255, 255), 36);
             // アイコン／平坦ボタンにも隅のアクセント。中央の絵は潰さない
             if (r.Width() >= 16 && r.Height() >= 14)
             {
@@ -15407,7 +15440,7 @@ void CCustomStandardButton::PaintClient(CDC& dc, const CRect& r)
                 {
                     const int x = r.right - s - 2;
                     const int y = r.top + 2;
-                    DrawThemeMotif(&mDC, CRect(x, y, x + s, y + s), th.accent);
+                    DrawThemeMotif(pDraw, CRect(x, y, x + s, y + s), th.accent);
                 }
             }
         }
@@ -15415,25 +15448,25 @@ void CCustomStandardButton::PaintClient(CDC& dc, const CRect& r)
 
     // 無効: 装飾の質感は残しつつ、やわらかいグレーのヴェールで沈めて「押せない」ことを明示。
     if (bD && !bAeroTrans)
-        FillRectAlpha(&mDC, r, RGB(232, 232, 232), 122);
+        FillRectAlpha(pDraw, r, RGB(232, 232, 232), 122);
 
     if (!bAeroTrans)
     {
     if (m_bFlat) {
         CPen pEdge(PS_SOLID, 1, CCC_UiTheme().edge);
-        CPen* op = mDC.SelectObject(&pEdge);
-        mDC.SelectStockObject(NULL_BRUSH);
-        mDC.Rectangle(&r);
-        mDC.SelectObject(op);
+        CPen* op = pDraw->SelectObject(&pEdge);
+        pDraw->SelectStockObject(NULL_BRUSH);
+        pDraw->Rectangle(&r);
+        pDraw->SelectObject(op);
     } else if (m_bGradEnable) {
-        CCC_StrokeThemedPlate(&mDC, r, bP, FALSE);
+        CCC_StrokeThemedPlate(pDraw, r, bP, FALSE);
     }
 
     if (bF && !bD)
     {
         CRect rf = r;
         rf.DeflateRect(m_bFlat ? 2 : 4, m_bFlat ? 2 : 4);
-        mDC.DrawFocusRect(&rf);
+        pDraw->DrawFocusRect(&rf);
     }
     }
     else if (bF && !bD)
@@ -15441,7 +15474,7 @@ void CCustomStandardButton::PaintClient(CDC& dc, const CRect& r)
         // 透過時は枠なし・フォーカスは点線のみ（白枠が不透明板に見えるのを防ぐ）
         CRect rf = r;
         rf.DeflateRect(1, 1);
-        mDC.DrawFocusRect(&rf);
+        pDraw->DrawFocusRect(&rf);
     }
 
     // アイコン。ラベル付きはアイコン+文字を一塊にして中央。狭いときはアイコンのみ中央。
@@ -15455,10 +15488,10 @@ void CCustomStandardButton::PaintClient(CDC& dc, const CRect& r)
     int iconRight = r.left;
 
     CFont* pF = GetFont();
-    CFont* pOF = mDC.SelectObject(pF ? pF : (CFont*)mDC.SelectStockObject(DEFAULT_GUI_FONT));
+    CFont* pOF = pDraw->SelectObject(pF ? pF : (CFont*)pDraw->SelectStockObject(DEFAULT_GUI_FONT));
     CSize te(0, 0);
     if (!s.IsEmpty() && !glyphOnly)
-        te = CCC_MeasureFitText(&mDC, s, CCC_TextHasBreak(s));
+        te = CCC_MeasureFitText(pDraw, s, CCC_TextHasBreak(s));
 
     if (hDraw)
     {
@@ -15497,7 +15530,11 @@ void CCustomStandardButton::PaintClient(CDC& dc, const CRect& r)
             iconRight = ix + iw;
         }
         if (bP) { ix += 1; iy += 1; }
-        ::DrawIconEx(mDC.GetSafeHdc(), ix, iy, hDraw, iw, ih, 0, NULL, DI_NORMAL);
+        // 32bpp DIB へ DI_NORMAL するとマスクだけ黒く残る（曲削除が黒板になる）。
+        const COLORREF iconBg = m_bGradEnable ? m_clrGradStart : (COLORREF)COLOR_BUTTON_BG;
+        HBRUSH brIcon = ::CreateSolidBrush(iconBg);
+        ::DrawIconEx(pDraw->GetSafeHdc(), ix, iy, hDraw, iw, ih, 0, brIcon, DI_NORMAL);
+        if (brIcon) ::DeleteObject(brIcon);
     }
 
     COLORREF inkBg = bP ? COLOR_BUTTON_PUSHED : (m_bMouseOver ? COLOR_BUTTON_HOVER : COLOR_BUTTON_BG);
@@ -15508,33 +15545,71 @@ void CCustomStandardButton::PaintClient(CDC& dc, const CRect& r)
             (GetBValue(a) + GetBValue(bcol)) / 2);
     }
     if (!s.IsEmpty() && !hDraw)
-        DrawSmartText(&mDC, r, s, bD, bP, inkBg);
+        DrawSmartText(pDraw, r, s, bD, bP, inkBg);
     else if (drawLabel)
     {
         CRect tr = r;
         tr.left = iconRight + 3;
         tr.DeflateRect(2, 1);
-        DrawSmartText2(&mDC, tr, s, DT_LEFT | DT_VCENTER | DT_NOPREFIX, bD, bP, inkBg);
+        DrawSmartText2(pDraw, tr, s, DT_LEFT | DT_VCENTER | DT_NOPREFIX, bD, bP, inkBg);
     }
-    mDC.SelectObject(pOF);
+    pDraw->SelectObject(pOF);
 
     if (!bD && !(CCC_Nk() && CCC_NkSkip(m_hWnd)))
-        CCC_NkBlit(&mDC, r, bAeroTrans);
+        CCC_NkBlit(pDraw, r, bAeroTrans);
 
 #if CCUSTOM_AERO_SUPPORT
-    if (bAeroTrans) {
+    if (pDraw != &dc) {
         int ox = 0, oy = 0;
         CCC_NkOff(ox, oy);
         CCC_BlitChromaTrans(dc.GetSafeHdc(), ox, oy, r.Width(), r.Height(),
-            mDC.GetSafeHdc(), 0, 0, CCC_AERO_CHROMA_KEY);
-    } else
-#endif
-    {
-        CCC_NkBlt(dc.GetSafeHdc(), r.Width(), r.Height(), mDC.GetSafeHdc(), COLOR_BUTTON_BG);
+            pDraw->GetSafeHdc(), 0, 0, CCC_AERO_CHROMA_KEY);
+        pDraw->SelectObject(ob);
     }
-    mDC.SelectObject(ob);
-    mB.DeleteObject();
-    mDC.DeleteDC();
+#endif
+}
+
+// Lib/Hist/Temp/曲削除。play() 中に 32bpp DIB へ直接描くと α=0 でガラスに抜け、
+// 曲削除のアイコンマスクだけ黒く残る。画面互換ビットマップに描いてから不透明合成する。
+static BOOL CCC_IsMpOpeningButton(HWND hWnd)
+{
+    switch (::GetDlgCtrlID(hWnd)) {
+    case IDC_MP_LIBTOGGLE:
+    case IDC_MP_HISTTOGGLE:
+    case IDC_MP_TEMPTOGGLE:
+    case IDC_MP_ITEMDEL:
+        return TRUE;
+    default:
+        return FALSE;
+    }
+}
+
+static void CCC_PaintStdButtonSolid(CCustomStandardButton* p, HDC hdcDst, int w, int h)
+{
+    if (!p || !hdcDst || w <= 0 || h <= 0)
+        return;
+    HDC scr = ::GetDC(NULL);
+    HDC mem = scr ? ::CreateCompatibleDC(scr) : NULL;
+    HBITMAP bmp = (scr && mem) ? ::CreateCompatibleBitmap(scr, w, h) : NULL;
+    if (!bmp) {
+        if (mem) ::DeleteDC(mem);
+        if (scr) ::ReleaseDC(NULL, scr);
+        CDC dc;
+        dc.Attach(hdcDst);
+        p->PaintClient(dc, CRect(0, 0, w, h));
+        dc.Detach();
+        return;
+    }
+    HGDIOBJ old = ::SelectObject(mem, bmp);
+    CDC dc;
+    dc.Attach(mem);
+    p->PaintClient(dc, CRect(0, 0, w, h));
+    dc.Detach();
+    ::BitBlt(hdcDst, 0, 0, w, h, mem, 0, 0, SRCCOPY);
+    ::SelectObject(mem, old);
+    ::DeleteObject(bmp);
+    ::DeleteDC(mem);
+    ::ReleaseDC(NULL, scr);
 }
 
 // ガラス上では GDI が α=0 のまま合成され消えるので、全面不透明にして出す。
@@ -15547,18 +15622,40 @@ void CCustomStandardButton::PaintOpaqueClient(CDC& dc)
     if (r.Width() <= 0 || r.Height() <= 0)
         return;
 
-    // dffb3db 以降のキャプション常時アクリル: BeginBufferedPaint 連打を避けて AlphaBlend
+    if (CCC_IsMpOpeningButton(m_hWnd)) {
+        RECT rr = { 0, 0, r.Width(), r.Height() };
+        HDC scr = ::GetDC(NULL);
+        CDC mem;
+        CBitmap bmp;
+        if (scr && mem.CreateCompatibleDC(CDC::FromHandle(scr))
+            && bmp.CreateCompatibleBitmap(CDC::FromHandle(scr), r.Width(), r.Height())) {
+            CBitmap* old = mem.SelectObject(&bmp);
+            PaintClient(mem, r);
+            CCC_BlitToRectOpaque(dc.GetSafeHdc(), rr, mem.GetSafeHdc(), 0, 0,
+                r.Width(), r.Height(), r.Width(), r.Height(), FALSE);
+            mem.SelectObject(old);
+            ::ReleaseDC(NULL, scr);
+            return;
+        }
+        if (scr) ::ReleaseDC(NULL, scr);
+    }
+
+    // 互換ビットマップは演奏開始前に白/黒の空板になる。32bpp DIB に描いてから合成する。
     RECT rr = { 0, 0, r.Width(), r.Height() };
+    void* pBits = nullptr;
+    HBITMAP hDib = CCC_CreateAlphaDib32(dc.GetSafeHdc(), r.Width(), r.Height(), &pBits);
     CDC mDC;
-    CBitmap mB;
-    if (mDC.CreateCompatibleDC(&dc) && mB.CreateCompatibleBitmap(&dc, r.Width(), r.Height())) {
-        HGDIOBJ ob = mDC.SelectObject(mB);
+    if (hDib && pBits && mDC.CreateCompatibleDC(&dc)) {
+        HGDIOBJ ob = mDC.SelectObject(hDib);
         PaintClient(mDC, r);
         CCC_BlitToRectOpaque(dc.GetSafeHdc(), rr, mDC.GetSafeHdc(), 0, 0,
             r.Width(), r.Height(), r.Width(), r.Height(), FALSE);
         mDC.SelectObject(ob);
+        ::DeleteObject(hDib);
         return;
     }
+    if (hDib)
+        ::DeleteObject(hDib);
 
     BP_PAINTPARAMS params = { sizeof(BP_PAINTPARAMS) };
     params.dwFlags = BPPF_ERASE;
@@ -15591,7 +15688,8 @@ void CCustomStandardButton::RepaintClient()
         return;
 #if CCUSTOM_AERO_SUPPORT
     // キャプション帯だけクロマ。本文は不透明パス（x64 ガラスで素 BitBlt が消える）
-    if (CCC_UseTransPaint(m_hWnd, m_bAeroMode) && CCC_IsWin11())
+    if (CCC_UseTransPaint(m_hWnd, m_bAeroMode) && CCC_IsWin11()
+        && CCC_IsCaptionChromeCtrl(m_hWnd))
     {
         CClientDC dc(this);
         PaintClient(dc, r);
@@ -15616,8 +15714,14 @@ void CCustomStandardButton::RepaintClient()
 // CPaintDC。経路分岐は aero / ホストガラス / 通常。
 void CCustomStandardButton::OnPaint()
 {
+    extern int OggInPlayOpen();
+    if (OggInPlayOpen() && CCC_IsMpOpeningButton(m_hWnd)) {
+        ValidateRect(NULL);
+        return;
+    }
 #if CCUSTOM_AERO_SUPPORT
-    if (CCC_UseTransPaint(m_hWnd, m_bAeroMode) && CCC_IsWin11())
+    if (CCC_UseTransPaint(m_hWnd, m_bAeroMode) && CCC_IsWin11()
+        && CCC_IsCaptionChromeCtrl(m_hWnd))
     {
         CPaintDC dc(this);
         CRect r;
@@ -15644,13 +15748,17 @@ void CCustomStandardButton::OnPaint()
 // fixer の BufferedPaint 先。戻り 0。
 LRESULT CCustomStandardButton::OnPrintClient(WPARAM wParam, LPARAM)
 {
+    extern int OggInPlayOpen();
+    if (OggInPlayOpen() && CCC_IsMpOpeningButton(m_hWnd))
+        return 0;
     CDC* pDC = CDC::FromHandle((HDC)wParam);
     if (pDC)
     {
         CRect r;
         GetClientRect(&r);
 #if CCUSTOM_AERO_SUPPORT
-        if (CCC_UseTransPaint(m_hWnd, m_bAeroMode) && CCC_IsWin11())
+        if (CCC_UseTransPaint(m_hWnd, m_bAeroMode) && CCC_IsWin11()
+            && CCC_IsCaptionChromeCtrl(m_hWnd))
             PaintClient(*pDC, r);
         else if (CCC_IsWin11() && (CCC_IsAeroEnabled() || CCC_HostNeedsChildOpaque(m_hWnd)
             || CCC_CaptionOnlyHostGlass(m_hWnd)
@@ -15667,6 +15775,9 @@ LRESULT CCustomStandardButton::OnPrintClient(WPARAM wParam, LPARAM)
 // 状態だけ更新してからカスタムで描き直す。
 LRESULT CCustomStandardButton::OnBmSetState(WPARAM wParam, LPARAM)
 {
+    extern int OggInPlayOpen();
+    if (OggInPlayOpen() && CCC_IsMpOpeningButton(m_hWnd))
+        return 0;
     // テーマ無効時、Default の押下描画は空/白になり、アクリル上では完全透過に見える。
     // 状態だけ更新してからカスタムで描き直す。
     const LRESULT lr = Default();
@@ -15680,9 +15791,13 @@ LRESULT CCustomStandardButton::OnBmSetState(WPARAM wParam, LPARAM)
 // TRUE で既定塗りを止める。
 BOOL CCustomStandardButton::OnEraseBkgnd(CDC* pDC)
 {
+    extern int OggInPlayOpen();
+    if (OggInPlayOpen() && CCC_IsMpOpeningButton(m_hWnd))
+        return TRUE;
 #if CCUSTOM_AERO_SUPPORT
     // キャプション帯の透過ボタン: 消去で不透明塗りをしない（親アクリルを残す）
-    if (CCC_UseTransPaint(m_hWnd, m_bAeroMode) && CCC_IsWin11())
+    if (CCC_UseTransPaint(m_hWnd, m_bAeroMode) && CCC_IsWin11()
+        && CCC_IsCaptionChromeCtrl(m_hWnd))
         return TRUE;
     // 空返し禁止: ERASE だけの更新だとアクリル上で完全透過のまま残る（ホバーで復帰する現象）
     if (CCC_IsWin11() && (CCC_IsAeroEnabled() || CCC_HostNeedsChildOpaque(m_hWnd)
@@ -19132,6 +19247,25 @@ private:
         UINT_PTR uIdSubclass, DWORD_PTR dwRefData)
     {
         CCustomOpaqueFixer* pThis = (CCustomOpaqueFixer*)dwRefData;
+        /* play() 中は Lib/Hist/Temp/曲削除の既定ボタン描画がガラスで消える。顔は残す。 */
+        extern int OggInPlayOpen();
+        if (OggInPlayOpen() && CCC_IsMpOpeningButton(hWnd)) {
+            switch (uMsg) {
+            case WM_ERASEBKGND:
+                return TRUE;
+            case WM_PAINT:
+                ::ValidateRect(hWnd, NULL);
+                return 0;
+            case WM_SETTEXT:
+                return ::DefWindowProcW(hWnd, uMsg, wParam, lParam);
+            case WM_PRINT:
+            case WM_PRINTCLIENT:
+            case BM_SETSTATE:
+                return 0;
+            default:
+                break;
+            }
+        }
         switch (uMsg)
         {
         case WM_ERASEBKGND:
@@ -19547,6 +19681,14 @@ private:
                 if (::GdiAlphaBlend(hDestDC, 0, 0, width, height,
                         m_dib.hdcDib, 0, 0, width, height, bf))
                     return;
+                /* AC_SRC_ALPHA が失敗すると BeginBufferedPaint が空の白/黒板になる。
+                   描き済み DIB を不透明合成して終わる。 */
+                const BLENDFUNCTION bfSolid = { AC_SRC_OVER, 0, 255, 0 };
+                if (::GdiAlphaBlend(hDestDC, 0, 0, width, height,
+                        m_dib.hdcDib, 0, 0, width, height, bfSolid))
+                    return;
+                ::BitBlt(hDestDC, 0, 0, width, height, m_dib.hdcDib, 0, 0, SRCCOPY);
+                return;
             }
         }
 
@@ -19804,7 +19946,12 @@ static BOOL CCC_PaintChildDirect(HWND hWnd, HDC hdcBuf)
     {
         // fixer の DIB へ素の PaintClient。α=255 は直後の MakeRectOpaque が担う。
         // ここで PaintOpaqueClient すると AlphaBlend が二重になりボタンが重い。
-        p->PaintClient(dc, r);
+        // 4ボタンは画面互換面に描いてからコピーする。32bpp DIB 直描きは
+        // play() 中に α=0（透過）とアイコンの黒マスクだけになる。
+        if (CCC_IsMpOpeningButton(hWnd))
+            CCC_PaintStdButtonSolid(p, hdcBuf, r.Width(), r.Height());
+        else
+            p->PaintClient(dc, r);
         painted = TRUE;
     }
     else if (auto* pEdit = dynamic_cast<CCustomEdit*>(pw))

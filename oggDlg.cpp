@@ -808,6 +808,7 @@ static inline bool IsPlaybackStopRequested()
 
 // play/stop/stop1 の DoEvent 再入でデコーダを二重解放しないためのガード（UI スレッド専用）
 static bool s_inPlay = false;
+int OggInPlayOpen() { return s_inPlay ? 1 : 0; }
 static bool s_inStop1 = false;
 /* 曲を開き直すたびに増やす。終端の PostMessage は開始時の値を載せ、
    次曲が既に始まっていたらそのメッセージでは止めない。 */
@@ -12071,6 +12072,8 @@ void COggDlg::play()
 		COggDlg* dlg;
 		~ClearInPlay() {
 			s_inPlay = false;
+			extern void MpInvalidateOpeningButtons();
+			MpInvalidateOpeningButtons();
 			if (dlg && InterlockedCompareExchange(&g_appExiting, 0, 0)
 				&& ::IsWindow(dlg->GetSafeHwnd()))
 				dlg->PostMessage(WM_COMMAND, MAKEWPARAM(IDOK, BN_CLICKED), 0);

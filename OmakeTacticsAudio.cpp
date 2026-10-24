@@ -60,6 +60,30 @@ static int s_sePct = 8;
 static wchar_t s_bgmPath[MAX_PATH];
 static int s_bgmScene = -1;
 static int s_bgmFade;
+static float s_tempo = 1.f;
+static float s_tempoGoal = 1.f;
+static int s_bgmOut = 0;
+static int s_bgmOutTotal = 0;
+static CRITICAL_SECTION s_cs;
+static LONG s_csInit;
+static HANDLE s_th;
+static volatile LONG s_run;
+
+static void TacCsInit()
+{
+	if (s_csInit == 2) return;
+	if (InterlockedCompareExchange(&s_csInit, 1, 0) == 0) {
+		InitializeCriticalSection(&s_cs);
+		InterlockedExchange(&s_csInit, 2);
+	} else {
+		while (s_csInit != 2) Sleep(0);
+	}
+}
+
+struct TacLock {
+	TacLock() { TacCsInit(); EnterCriticalSection(&s_cs); }
+	~TacLock() { LeaveCriticalSection(&s_cs); }
+};
 
 static int SeDb(int pct)
 {
@@ -72,6 +96,7 @@ static int SeDb(int pct)
 
 void TacAudioSetVol(int bgm, int se)
 {
+	TacLock lk;
 	if (bgm < 0) bgm = 0;
 	if (bgm > 10) bgm = 10;
 	if (se < 0) se = 0;
@@ -393,41 +418,48 @@ static void TacDropQueuedBgm()
 
 void TacBgmScene(int scene)
 {
-	if (scene < 0 || scene >= TAC_BGM_N) scene = TAC_BGM_HUB;
-	if (scene == s_bgmScene) return;
-	wchar_t dir[MAX_PATH];
-	if (!TacBgmDir(dir, MAX_PATH)) return;
-	wchar_t want[MAX_PATH], game[MAX_PATH], hub[MAX_PATH];
-	swprintf_s(want, L"%s\\%s", dir, TacBgmFile(scene));
-	swprintf_s(game, L"%s\\tacticsgame.ogg", dir);
-	swprintf_s(hub, L"%s\\tactics.ogg", dir);
-	const wchar_t* use = want;
-	if (!TacOggOk(want) && scene != TAC_BGM_HUB) {
-		const int theme = scene >= TAC_BGM_PLAINS && scene <= TAC_BGM_RUINS;
-		if (theme && TacOggOk(game)) use = game;
-		else use = hub;
-	}
-	if (!TacOggOk(use)) {
-		if (s_bgm) TacCloseBgm();
-		s_bgmPath[0] = 0;
+	int pauseMain = 0;
+	{
+		TacLock lk;
+		if (scene < 0 || scene >= TAC_BGM_N) scene = TAC_BGM_HUB;
+		if (scene == s_bgmScene) return;
+		wchar_t dir[MAX_PATH];
+		if (!TacBgmDir(dir, MAX_PATH)) return;
+		wchar_t want[MAX_PATH], game[MAX_PATH], hub[MAX_PATH];
+		swprintf_s(want, L"%s\\%s", dir, TacBgmFile(scene));
+		swprintf_s(game, L"%s\\tacticsgame.ogg", dir);
+		swprintf_s(hub, L"%s\\tactics.ogg", dir);
+		const wchar_t* use = want;
+		if (!TacOggOk(want) && scene != TAC_BGM_HUB) {
+			const int theme = scene >= TAC_BGM_PLAINS && scene <= TAC_BGM_RUINS;
+			if (theme && TacOggOk(game)) use = game;
+			else use = hub;
+		}
+		if (!TacOggOk(use)) {
+			if (s_bgm) TacCloseBgm();
+			s_bgmPath[0] = 0;
+			s_bgmScene = scene;
+			return;
+		}
+		if (s_bgm && _wcsicmp(s_bgmPath, use) == 0) {
+			s_bgmScene = scene;
+			return;
+		}
+		int had = s_bgm;
+		TacCloseBgm();
+		if (!TacOpenBgmPath(use)) {
+			s_bgmPath[0] = 0;
+			s_bgmScene = scene;
+			return;
+		}
+		wcscpy_s(s_bgmPath, use);
 		s_bgmScene = scene;
-		return;
+		s_bgmOut = 0;
+		s_bgmOutTotal = 0;
+		if (had) TacDropQueuedBgm();
+		if (!had && s_started) pauseMain = 1;
 	}
-	if (s_bgm && _wcsicmp(s_bgmPath, use) == 0) {
-		s_bgmScene = scene;
-		return;
-	}
-	int had = s_bgm;
-	TacCloseBgm();
-	if (!TacOpenBgmPath(use)) {
-		s_bgmPath[0] = 0;
-		s_bgmScene = scene;
-		return;
-	}
-	wcscpy_s(s_bgmPath, use);
-	s_bgmScene = scene;
-	if (had) TacDropQueuedBgm();
-	if (!had && s_started) TacPauseMain(1);
+	if (pauseMain) TacPauseMain(1);
 }
 
 static void TacCloseBgm()
@@ -472,7 +504,8 @@ static int TacEnsureBuf(HWND hwnd)
 	DSBUFFERDESC d = {};
 	d.dwSize = sizeof(d);
 	d.dwFlags = DSBCAPS_CTRLVOLUME | DSBCAPS_GLOBALFOCUS | DSBCAPS_GETCURRENTPOSITION2 | DSBCAPS_LOCSOFTWARE;
-	d.dwBufferBytes = TAC_RATE * 4 * 2;
+	// ステレオ 16bit で 0.5 秒。先読みは約 0.3 秒に保ち、曲切替の遅れを増やさない。
+	d.dwBufferBytes = TAC_RATE * 2;
 	d.dwBufferBytes &= ~3u;
 	d.lpwfxFormat = &wfx;
 	if (FAILED(s_ds->CreateSoundBuffer(&d, &s_buf, NULL)) || !s_buf) return 0;
@@ -527,7 +560,7 @@ static int TacPullBgm(short& L, short& R)
 
 static int TacPullBgmOut(short& L, short& R)
 {
-	float step = (float)s_bgmRate / (float)TAC_RATE;
+	float step = (float)s_bgmRate / (float)TAC_RATE * s_tempo;
 	if (step < 0.05f) step = 1.f;
 	if (!s_bPrimed) {
 		if (!TacPullBgm(s_bCurL, s_bCurR)) return 0;
@@ -550,9 +583,30 @@ static int TacPullBgmOut(short& L, short& R)
 	return 1;
 }
 
+void TacBgmTempo(float goal)
+{
+	TacLock lk;
+	if (goal < 1.f) goal = 1.f;
+	if (goal > 2.f) goal = 2.f;
+	s_tempoGoal = goal;
+}
+
+void TacBgmFadeOut()
+{
+	TacLock lk;
+	if (!s_bgm || s_bgmOutTotal > 0) return;
+	s_bgmOutTotal = TAC_RATE * 2;
+	s_bgmOut = s_bgmOutTotal;
+}
+
 static void TacMix(short* dst, int frames)
 {
 	for (int i = 0; i < frames * 2; i++) dst[i] = 0;
+	if (frames > 0 && s_tempo != s_tempoGoal) {
+		float dt = (float)frames / (float)TAC_RATE;
+		float k = 1.f - expf(-dt / 1.35f);
+		s_tempo += (s_tempoGoal - s_tempo) * k;
+	}
 	if (s_bgm) {
 		const float g0 = 0.07f * (float)s_bgmPct;
 		const int fadeN = TAC_RATE / 40;
@@ -567,6 +621,12 @@ static void TacMix(short* dst, int frames)
 				g *= in;
 				s_bgmFade--;
 			}
+			if (s_bgmOutTotal > 0) {
+				if (s_bgmOut > 0) {
+					g *= (float)s_bgmOut / (float)s_bgmOutTotal;
+					s_bgmOut--;
+				} else g = 0.f;
+			}
 			int l = (int)dst[f * 2] + (int)(L * g);
 			int r = (int)dst[f * 2 + 1] + (int)(R * g);
 			if (l > 32767) l = 32767; if (l < -32768) l = -32768;
@@ -577,21 +637,55 @@ static void TacMix(short* dst, int frames)
 	}
 }
 
+static DWORD WINAPI TacAudioThread(LPVOID)
+{
+	SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL);
+	while (InterlockedCompareExchange(&s_run, 0, 0)) {
+		{
+			TacLock lk;
+			TacAudioPump();
+		}
+		Sleep(4);
+	}
+	return 0;
+}
+
+int TacAudioOnThread()
+{
+	return s_th != NULL && s_run != 0;
+}
+
 void TacAudioStart(void* hwnd)
 {
+	TacCsInit();
 	TacLoadPack();
 	TacBgmScene(TAC_BGM_HUB);
 	int bgm = s_bgm;
 	if (!TacEnsureBuf((HWND)hwnd)) {
-		if (bgm) TacCloseBgm();
+		if (bgm) {
+			TacLock lk;
+			TacCloseBgm();
+		}
 		return;
+	}
+	if (!s_th) {
+		InterlockedExchange(&s_run, 1);
+		s_th = CreateThread(NULL, 0, TacAudioThread, NULL, 0, NULL);
+		if (!s_th) InterlockedExchange(&s_run, 0);
 	}
 	if (bgm) TacPauseMain(1);
 }
 
 void TacAudioStop()
 {
+	InterlockedExchange(&s_run, 0);
+	if (s_th) {
+		WaitForSingleObject(s_th, 5000);
+		CloseHandle(s_th);
+		s_th = NULL;
+	}
 	TacPauseMain(0);
+	TacLock lk;
 	for (int i = 0; i < TAC_VOICES; i++) {
 		if (s_voice[i].buf) { s_voice[i].buf->Stop(); s_voice[i].buf->Release(); s_voice[i].buf = NULL; }
 	}
@@ -633,6 +727,7 @@ static int TacSfxBuf(TacVoice& v, int frames)
 
 void TacSfx(int id)
 {
+	TacLock lk;
 	if (id < 0 || id >= TS_N || !s_clip[id].play || !s_ds) return;
 	if (id == TS_CURSOR) {
 		DWORD n = GetTickCount();
@@ -678,13 +773,9 @@ void TacAudioPump()
 		}
 		int queued = (int)s_write - (int)play;
 		if (queued < 0) queued += (int)s_bytes;
-		if (s_started && queued > (int)s_bytes - 8192) {
-			s_buf->Stop();
-			s_buf->GetCurrentPosition(&play, &wrt);
-			s_write = play;
-			s_started = 0;
-			queued = 0;
-		}
+		// アクティブ切替で再生位置が戻って見える。ここで Stop すると音が飛ぶので、この周は書かない。
+		if (s_started && queued > (int)s_bytes - 8192)
+			return;
 		int need = target - queued;
 		if (need < 4096) break;
 		if (need > chunkMax) need = chunkMax;

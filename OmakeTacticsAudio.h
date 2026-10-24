@@ -47,6 +47,10 @@ enum TacBgmId {
 void TacAudioStart(void* hwnd);
 void TacAudioStop();
 void TacAudioPump();
+// 1 なら供給は TIME_CRITICAL の専用スレッド。UI タイマーは呼ばない。
+int TacAudioOnThread();
 void TacSfx(int id);
 void TacAudioSetVol(int bgm, int se);
 void TacBgmScene(int scene);
+void TacBgmTempo(float goal);
+void TacBgmFadeOut();

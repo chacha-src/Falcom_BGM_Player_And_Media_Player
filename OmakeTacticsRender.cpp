@@ -84,6 +84,8 @@ void Renderer::Release()
 	statics.clear();
 	for (auto& c : m_creatures) c.Release();
 	m_creatures.clear();
+	m_skins.clear();
+	ReleaseAvatarCache();
 	for (auto& c : m_gear) c.Release();
 	m_gear.clear();
 	m_assetsOk = FALSE;
@@ -669,11 +671,11 @@ static void ModelSetupJoints(Model& m, const Rig* r)
 {
 	m.headJ = m.chestJ = m.handR = m.handL = m.hipsJ = -1;
 	if (!r) return;
-	m.headJ = r->Find("head");
-	m.chestJ = r->Find("chest");
-	m.handR = r->Find("handslot.r");
-	m.handL = r->Find("handslot.l");
-	m.hipsJ = r->Find("hips");
+	m.headJ = r->Find("head"); if (m.headJ < 0) m.headJ = r->Find("Head");
+	m.chestJ = r->Find("chest"); if (m.chestJ < 0) m.chestJ = r->Find("Chest");
+	m.handR = r->Find("handslot.r"); if (m.handR < 0) m.handR = r->Find("Hand.R");
+	m.handL = r->Find("handslot.l"); if (m.handL < 0) m.handL = r->Find("Hand.L");
+	m.hipsJ = r->Find("hips"); if (m.hipsJ < 0) m.hipsJ = r->Find("Hips");
 }
 
 BOOL Renderer::LoadAssets()
@@ -798,6 +800,14 @@ BOOL Renderer::LoadAssets()
 			d.uv[0] = s[6]; d.uv[1] = s[7];
 			d.c = 0xFFFFFFFF;
 		}
+		if (strstr(a.name, "Cape")) {
+			// 法線は背中の外（+Z）を向き、正面の光が当たらず外側が黒くなる。光の来る -Z へ向ける。
+			for (UINT k = 0; k < nv; k++) {
+				v[k].n[0] = -v[k].n[0];
+				v[k].n[1] = -v[k].n[1];
+				v[k].n[2] = -v[k].n[2];
+			}
+		}
 		std::vector<WORD> idx(ib, ib + ni);
 		for (UINT k = 0; k + 2 < ni; k += 3) std::swap(idx[k + 1], idx[k + 2]);
 		if (!MakeMesh(a.mesh, v.data(), sizeof(VtxS), nv, idx.data(), ni)) return FALSE;
@@ -831,6 +841,8 @@ BOOL Renderer::LoadAssets()
 	if (rd.bad) return FALSE;
 	LoadCreaturePack();
 	LoadGearPack();
+	LoadFacePack();
+	LoadAvatarPack();
 	m_assetsOk = TRUE;
 	return TRUE;
 }
@@ -892,6 +904,8 @@ void Renderer::LoadCreaturePack()
 {
 	for (auto& c : m_creatures) c.Release();
 	m_creatures.clear();
+	m_skins.clear();
+	ReleaseAvatarCache();
 	HMODULE hm = AfxGetResourceHandle();
 	HRSRC rs = FindResource(hm, MAKEINTRESOURCE(IDR_TAC_MON), RT_RCDATA);
 	if (!rs) { hm = GetModuleHandle(NULL); rs = FindResource(hm, MAKEINTRESOURCE(IDR_TAC_MON), RT_RCDATA); }
@@ -900,6 +914,209 @@ void Renderer::LoadCreaturePack()
 	const BYTE* data = hg ? (const BYTE*)LockResource(hg) : NULL;
 	DWORD size = SizeofResource(hm, rs);
 	if (!data || size < 8) return;
+	if (memcmp(data, "TACK", 4) == 0) {
+		Reader rd(data + 4, size - 4);
+		UINT n = rd.U32();
+		if (n > 256) return;
+		m_creatures.reserve(n);
+		m_skins.reserve(n);
+		for (UINT i = 0; i < n; i++) {
+			char name[32];
+			rd.Name(name, 32);
+			UINT nJ = rd.U32();
+			if (nJ < 1 || nJ > MAXJ) return;
+			Rig g;
+			g.nJ = (int)nJ;
+			g.hips = 0;
+			for (UINT j = 0; j < nJ; j++) { rd.Name(g.names[j], 24); g.parent[j] = rd.I32(); }
+			UINT nc = rd.U32();
+			if (nc > 16) return;
+			g.clips.resize(nc);
+			for (UINT c = 0; c < nc; c++) {
+				Clip& cl = g.clips[c];
+				rd.Name(cl.name, 32);
+				cl.nFrames = (int)rd.U32(); cl.fps = rd.F32(); g.hips = (int)rd.U32();
+				if (cl.nFrames <= 0 || cl.nFrames > 64) return;
+				const short* q = (const short*)rd.Bytes((size_t)cl.nFrames * nJ * 8);
+				const float* h = (const float*)rd.Bytes((size_t)cl.nFrames * 12);
+				if (!q || !h) return;
+				cl.q.resize((size_t)cl.nFrames * nJ);
+				for (size_t k = 0; k < cl.q.size(); k++) {
+					Q4 v = { -q[k * 4] / 32767.f, -q[k * 4 + 1] / 32767.f, q[k * 4 + 2] / 32767.f, q[k * 4 + 3] / 32767.f };
+					float l = sqrtf(v.x * v.x + v.y * v.y + v.z * v.z + v.w * v.w);
+					if (l > 1e-6f) { v.x /= l; v.y /= l; v.z /= l; v.w /= l; }
+					cl.q[k] = v;
+				}
+				cl.hips.resize(cl.nFrames);
+				for (int f = 0; f < cl.nFrames; f++) cl.hips[f] = v3(h[f * 3], h[f * 3 + 1], -h[f * 3 + 2]);
+			}
+			Model m;
+			strncpy_s(m.name, name, 31);
+			m.rig = (int)rigs.size();
+			m.tex = TEX_WHITE;
+			m.nJ = (int)nJ;
+			for (UINT j = 0; j < nJ; j++) {
+				m.parent[j] = g.parent[j];
+				float t[10];
+				for (int k = 0; k < 10; k++) t[k] = rd.F32();
+				m.restT[j] = v3(t[0], t[1], -t[2]);
+				Q4 qq = { -t[3], -t[4], t[5], t[6] };
+				float l = sqrtf(qq.x * qq.x + qq.y * qq.y + qq.z * qq.z + qq.w * qq.w);
+				if (l > 1e-6f) { qq.x /= l; qq.y /= l; qq.z /= l; qq.w /= l; }
+				m.restR[j] = qq;
+				m.restS[j] = v3(t[7], t[8], t[9]);
+			}
+			for (int k = 0; k < 16; k++) m.top.m[k] = rd.F32();
+			FlipM(m.top);
+			for (UINT j = 0; j < nJ; j++) { for (int k = 0; k < 16; k++) m.invBind[j].m[k] = rd.F32(); FlipM(m.invBind[j]); }
+			UINT nv = rd.U32(), ni = rd.U32();
+			if (!nv || !ni || nv > 70000 || ni > 200000) return;
+			float emin[3], emax[3], mid[3], half[3];
+			for (int a = 0; a < 3; a++) emin[a] = rd.F32();
+			for (int a = 0; a < 3; a++) emax[a] = rd.F32();
+			for (int a = 0; a < 3; a++) { mid[a] = (emin[a] + emax[a]) * 0.5f; half[a] = (emax[a] - emin[a]) * 0.5f; }
+			const short* ps = (const short*)rd.Bytes((size_t)nv * 6);
+			const short* ns = (const short*)rd.Bytes((size_t)nv * 6);
+			const BYTE* rgb = rd.Bytes((size_t)nv * 3);
+			const BYTE* jj = rd.Bytes((size_t)nv * 4);
+			const BYTE* ww = rd.Bytes((size_t)nv * 4);
+			rd.Align4();
+			const WORD* ib = (const WORD*)rd.Bytes((size_t)ni * 2);
+			rd.Align4();
+			if (!ps || !ns || !rgb || !jj || !ww || !ib) return;
+			CreatureSkin skin;
+			skin.model = (int)models.size();
+			skin.bind.resize(nv);
+			std::vector<VtxS> poseV(nv);
+			std::vector<WORD> idx(ib, ib + ni);
+			for (UINT k = 0; k + 2 < ni; k += 3) std::swap(idx[k + 1], idx[k + 2]);
+			for (UINT k = 0; k < nv; k++) {
+				CSkinV& d = skin.bind[k];
+				d.p[0] = mid[0] + (ps[k * 3] / 32767.f) * half[0];
+				d.p[1] = mid[1] + (ps[k * 3 + 1] / 32767.f) * half[1];
+				d.p[2] = -(mid[2] + (ps[k * 3 + 2] / 32767.f) * half[2]);
+				d.n[0] = ns[k * 3] / 32767.f;
+				d.n[1] = ns[k * 3 + 1] / 32767.f;
+				d.n[2] = -(ns[k * 3 + 2] / 32767.f);
+				d.c = RGBA8(rgb[k * 3], rgb[k * 3 + 1], rgb[k * 3 + 2]);
+				for (int c = 0; c < 4; c++) { d.j[c] = jj[k * 4 + c]; d.w[c] = ww[k * 4 + c]; }
+				VtxS& s = poseV[k];
+				s.p[0] = d.p[0]; s.p[1] = d.p[1]; s.p[2] = d.p[2];
+				s.n[0] = d.n[0]; s.n[1] = d.n[1]; s.n[2] = d.n[2];
+				s.uv[0] = s.uv[1] = 0;
+				s.c = d.c;
+			}
+			if (strncmp(name, "Hum", 3) == 0) {
+				// ファイル上の法線は、Z 反転した面から取り直した内側向きが 6 割。
+				// そのままカリングすると外側が消え、口腔と手の内側だけが見える。
+				for (UINT k = 0; k < nv; k++) {
+					skin.bind[k].n[0] = -skin.bind[k].n[0];
+					skin.bind[k].n[1] = -skin.bind[k].n[1];
+					skin.bind[k].n[2] = -skin.bind[k].n[2];
+					poseV[k].n[0] = skin.bind[k].n[0];
+					poseV[k].n[1] = skin.bind[k].n[1];
+					poseV[k].n[2] = skin.bind[k].n[2];
+				}
+				for (UINT k = 0; k + 2 < ni; k += 3) std::swap(idx[k + 1], idx[k + 2]);
+			}
+			int headJ = -1;
+			for (UINT j = 0; j < nJ; j++) if (strcmp(g.names[j], "Head") == 0) { headJ = (int)j; break; }
+			if (strncmp(name, "Hum", 3) == 0 && headJ >= 0) {
+				// 頭蓋は頭ボーンに全重みで乗る一色の塊（帽子・目は別色）。その色の頂点だけで測る。
+				M4 bh = MInverse(m.invBind[headJ]);
+				float ox = bh.m[12], oy = bh.m[13], oz = bh.m[14];
+				std::vector<UINT> hv;
+				std::map<DWORD, int> colN;
+				for (UINT k = 0; k < nv; k++) {
+					int best = 0, bw = -1;
+					for (int c = 0; c < 4; c++) if ((int)skin.bind[k].w[c] > bw) { bw = skin.bind[k].w[c]; best = skin.bind[k].j[c]; }
+					if (best != headJ || bw < 255) continue;
+					hv.push_back(k);
+					colN[skin.bind[k].c & 0x00FFFFFFu]++;
+				}
+				DWORD skinC = 0; int skinN = 0;
+				for (auto& kv : colN) if (kv.second > skinN) { skinN = kv.second; skinC = kv.first; }
+				std::vector<V3> sk;
+				for (UINT k : hv) if ((skin.bind[k].c & 0x00FFFFFFu) == skinC)
+					sk.push_back(v3(skin.bind[k].p[0] - ox, skin.bind[k].p[1] - oy, skin.bind[k].p[2] - oz));
+				BOOL haveSk = FALSE;
+				V3 skLo = v3(0, 0, 0), skHi = v3(0, 0, 0);
+				if (sk.size() > 80) {
+					V3 lo = sk[0], hi = sk[0];
+					for (const V3& q : sk) {
+						lo = v3(min(lo.x, q.x), min(lo.y, q.y), min(lo.z, q.z));
+						hi = v3(max(hi.x, q.x), max(hi.y, q.y), max(hi.z, q.z));
+					}
+					haveSk = TRUE;
+					skLo = v3(lo.x + ox - 0.01f, lo.y + oy - 0.01f, lo.z + oz - 0.01f);
+					skHi = v3(hi.x + ox + 0.01f, hi.y + oy + 0.01f, hi.z + oz + 0.01f);
+					// 頭頂と後頭に接する楕円体から始め、眉より上・顔より後ろの頭蓋がすべて入るまで広げる。
+					float R = (hi.x - lo.x) * .5f;
+					V3 cr = v3(R, R * 1.12f, min((hi.z - lo.z) * .5f, R * 1.25f));
+					V3 cc = v3((lo.x + hi.x) * .5f, hi.y - cr.y, hi.z - cr.z);
+					float s = 1.f;
+					for (const V3& q : sk) {
+						V3 d = v3((q.x - cc.x) / cr.x, (q.y - cc.y) / cr.y, (q.z - cc.z) / cr.z);
+						if (d.y > -0.2f && d.z > -0.6f) s = max(s, Len(d));
+					}
+					cr = cr * (s * 1.04f);
+					m.headMin[0] = cc.x - cr.x; m.headMin[1] = cc.y - cr.y; m.headMin[2] = cc.z - cr.z;
+					m.headMax[0] = cc.x + cr.x; m.headMax[1] = cc.y + cr.y; m.headMax[2] = cc.z + cr.z;
+				} else {
+					m.headMin[0] = -0.10f; m.headMin[1] = 0.02f; m.headMin[2] = -0.01f;
+					m.headMax[0] = 0.10f; m.headMax[1] = 0.14f; m.headMax[2] = 0.11f;
+				}
+				// 服の色替えは「その服の主な染め色」だけに掛ける。肌・顔・目・金具・革は元の色のまま。
+				auto hsv = [](DWORD c, float& h, float& s, float& v) {
+					float r = (c & 255) / 255.f, g = ((c >> 8) & 255) / 255.f, b = ((c >> 16) & 255) / 255.f;
+					float mx = max(r, max(g, b)), mn = min(r, min(g, b)), dl = mx - mn;
+					v = mx; s = mx > 1e-4f ? dl / mx : 0.f; h = 0.f;
+					if (dl > 1e-5f) {
+						if (mx == r) h = fmodf((g - b) / dl + 6.f, 6.f);
+						else if (mx == g) h = (b - r) / dl + 2.f;
+						else h = (r - g) / dl + 4.f;
+						h *= 60.f;
+					}
+				};
+				int sr = skinC & 255, sg = (skinC >> 8) & 255, sb = (skinC >> 16) & 255;
+				std::vector<BYTE> dyeable(nv, 0);
+				float hist[12] = {};
+				for (UINT k = 0; k < nv; k++) {
+					const CSkinV& b = skin.bind[k];
+					int r = b.c & 255, gg = (b.c >> 8) & 255, bb = (b.c >> 16) & 255;
+					if (abs(r - sr) < 16 && abs(gg - sg) < 16 && abs(bb - sb) < 16) continue;
+					if (haveSk && b.p[0] > skLo.x && b.p[0] < skHi.x && b.p[1] > skLo.y && b.p[1] < skHi.y && b.p[2] > skLo.z && b.p[2] < skHi.z) continue;
+					float h, s, v;
+					hsv(b.c, h, s, v);
+					if (s < 0.22f || v < 0.08f) continue;
+					dyeable[k] = 1;
+					hist[Clampi((int)(h / 30.f), 0, 11)] += 1.f;
+				}
+				// 0〜60°は革・金具・ブーツの土色。染め布の色が少しでもあればそちらを主とする。
+				int earth = hist[1] > hist[0] ? 1 : 0, dyed = 2;
+				for (int q = 3; q < 12; q++) if (hist[q] > hist[dyed]) dyed = q;
+				int domBin = hist[dyed] >= hist[earth] * 0.25f && hist[dyed] > 0.f ? dyed : earth;
+				float domH = domBin * 30.f + 15.f;
+				skin.cloth.assign(nv, 0);
+				for (UINT k = 0; k < nv; k++) if (dyeable[k]) {
+					float h, s, v;
+					hsv(skin.bind[k].c, h, s, v);
+					float dh = fabsf(h - domH);
+					if (dh > 180.f) dh = 360.f - dh;
+					if (dh < 40.f) skin.cloth[k] = 1;
+				}
+			}
+			GpuMesh gm;
+			if (!MakeMesh(gm, poseV.data(), sizeof(VtxS), nv, idx.data(), ni)) return;
+			gm.tex = TEX_WHITE;
+			m_creatures.push_back(gm);
+			ModelSetupJoints(m, &g);
+			rigs.push_back(g);
+			models.push_back(m);
+			m_skins.push_back(std::move(skin));
+		}
+		return;
+	}
 	const int packed = memcmp(data, "TACP", 4) == 0;
 	if (!packed && memcmp(data, "TACM", 4) != 0) return;
 	Reader rd(data + 4, size - 4);
@@ -923,6 +1140,94 @@ void Renderer::DrawCreature(int i, const M4& world, const DrawParams& dp)
 {
 	if (i < 0 || i >= (int)m_creatures.size()) return;
 	DrawStatic(m_creatures[i], world, dp);
+}
+
+void Renderer::DrawSkinnedCreature(int i, const Pose& pose, const M4& world, const DrawParams& dp)
+{
+	int slot = -1;
+	for (int k = 0; k < (int)m_skins.size(); k++) if (m_skins[k].model == i) { slot = k; break; }
+	if (slot < 0 || m_skins[slot].bind.empty() || slot >= (int)m_creatures.size()) return;
+	SkinAndDraw(m_skins[slot], m_creatures[slot], NULL, NULL, 0.f, pose, world, dp);
+}
+
+void Renderer::SkinAndDraw(const CreatureSkin& src, GpuMesh& base, const float* bx, const float* bn, float bt, const Pose& pose, const M4& world, const DrawParams& dp)
+{
+	std::vector<VtxS> v(src.bind.size());
+	const float* bd = bt > 0.f ? bx : (bt < 0.f ? bn : NULL);
+	const float ba = fabsf(bt);
+	const BOOL dye = fabsf(dp.clothHue) > 1e-3f && src.cloth.size() == src.bind.size();
+	float hc = cosf(dp.clothHue), hs = sinf(dp.clothHue);
+	auto rotHue = [&](DWORD c) -> DWORD {
+		// シェーダの HueRotate と同じ式（灰色軸まわりの回転）
+		const float k = 0.57735f;
+		float r = (c & 255) / 255.f, g = ((c >> 8) & 255) / 255.f, b = ((c >> 16) & 255) / 255.f;
+		float kd = k * (r + g + b) * k * (1.f - hc);
+		float cx = k * (b - g), cy = k * (r - b), cz = k * (g - r);
+		float nr = r * hc + cx * hs + kd, ng = g * hc + cy * hs + kd, nb = b * hc + cz * hs + kd;
+		auto q = [](float x) { int v = (int)(x * 255.f + .5f); return v < 0 ? 0 : (v > 255 ? 255 : v); };
+		return (c & 0xFF000000u) | (DWORD)q(nr) | ((DWORD)q(ng) << 8) | ((DWORD)q(nb) << 16);
+	};
+	const FaceSet* fs = (dp.face > 0 && src.faceSet >= 0 && dp.face < m_faces[src.faceSet].nFace) ? &m_faces[src.faceSet] : NULL;
+	for (size_t k = 0; k < src.bind.size(); k++) {
+		CSkinV b = src.bind[k];
+		if (bd) {
+			b.p[0] += bd[k * 3] * ba;
+			b.p[1] += bd[k * 3 + 1] * ba;
+			b.p[2] += bd[k * 3 + 2] * ba;
+		}
+		if (fs && (int)k >= src.faceStart && (int)k < src.faceStart + src.faceN) {
+			size_t q = (size_t)dp.face * fs->nv + (k - src.faceStart);
+			const float* L = src.faceLin;
+			const short* d = &fs->d[q * 3];
+			float dx = d[0] * (0.25f / 32767.f), dy = d[1] * (0.25f / 32767.f), dz = d[2] * (0.25f / 32767.f);
+			b.p[0] += L[0] * dx + L[1] * dy + L[2] * dz;
+			b.p[1] += L[3] * dx + L[4] * dy + L[5] * dz;
+			b.p[2] += L[6] * dx + L[7] * dy + L[8] * dz;
+			const signed char* n = &fs->n[q * 4];
+			float nx = n[0] / 127.f, ny = n[1] / 127.f, nz = n[2] / 127.f;
+			b.n[0] = L[0] * nx + L[1] * ny + L[2] * nz;
+			b.n[1] = L[3] * nx + L[4] * ny + L[5] * nz;
+			b.n[2] = L[6] * nx + L[7] * ny + L[8] * nz;
+			b.c = fs->c[q];
+		}
+		M4 acc;
+		memset(acc.m, 0, sizeof(acc.m));
+		for (int c = 0; c < 4; c++) {
+			float w = b.w[c] / 255.f;
+			int j = b.j[c];
+			if (w <= 0.f || j < 0 || j >= pose.nJ) continue;
+			for (int e = 0; e < 16; e++) acc.m[e] += pose.palette[j].m[e] * w;
+		}
+		V3 p = MXformPt(acc, v3(b.p[0], b.p[1], b.p[2]));
+		V3 n = MXformDir(acc, v3(b.n[0], b.n[1], b.n[2]));
+		float nl = sqrtf(n.x * n.x + n.y * n.y + n.z * n.z);
+		if (nl > 1e-6f) { n.x /= nl; n.y /= nl; n.z /= nl; }
+		VtxS& d = v[k];
+		d.p[0] = p.x; d.p[1] = p.y; d.p[2] = p.z;
+		d.n[0] = n.x; d.n[1] = n.y; d.n[2] = n.z;
+		d.uv[0] = d.uv[1] = 0;
+		d.c = (dye && src.cloth[k]) ? rotHue(b.c) : b.c;
+		if (dp.hairJoint >= 0) {
+			int hw = 0;
+			for (int c = 0; c < 4; c++) if (b.j[c] == dp.hairJoint && b.w[c] > hw) hw = b.w[c];
+			if (hw > 10) d.c = dp.hairTint;
+		}
+	}
+	if ((UINT)(v.size() * sizeof(VtxS)) > m_vbDynBytes || !m_vbDyn) {
+		DrawStatic(base, world, dp);
+		return;
+	}
+	D3D11_MAPPED_SUBRESOURCE ms;
+	if (FAILED(m_ctx->Map(m_vbDyn, 0, D3D11_MAP_WRITE_DISCARD, 0, &ms))) return;
+	memcpy(ms.pData, v.data(), v.size() * sizeof(VtxS));
+	m_ctx->Unmap(m_vbDyn, 0);
+	ID3D11Buffer* saved = base.vb;
+	base.vb = m_vbDyn;
+	UINT savedStride = base.stride;
+	base.stride = sizeof(VtxS);
+	DrawStatic(base, world, dp);
+	base.vb = saved;
+	base.stride = savedStride;
 }
 
 void Renderer::LoadGearPack()
@@ -954,6 +1259,287 @@ void Renderer::LoadGearPack()
 		gm.tex = TEX_WHITE;
 		m_gear.push_back(gm);
 	}
+}
+
+void Renderer::LoadFacePack()
+{
+	for (int g = 0; g < 2; g++) m_faces[g] = FaceSet();
+	HMODULE hm = AfxGetResourceHandle();
+	HRSRC rs = FindResource(hm, MAKEINTRESOURCE(IDR_TAC_FACE), RT_RCDATA);
+	if (!rs) { hm = GetModuleHandle(NULL); rs = FindResource(hm, MAKEINTRESOURCE(IDR_TAC_FACE), RT_RCDATA); }
+	if (!rs) return;
+	HGLOBAL hg = LoadResource(hm, rs);
+	const BYTE* data = hg ? (const BYTE*)LockResource(hg) : NULL;
+	DWORD size = SizeofResource(hm, rs);
+	if (!data || size < 8 || memcmp(data, "TACF", 4) != 0) return;
+	Reader rd(data + 4, size - 4);
+	UINT ng = rd.U32();
+	if (ng != 2) return;
+	for (UINT g = 0; g < ng; g++) {
+		UINT nf = rd.U32(), nv = rd.U32();
+		if (nf == 0 || nf > 32 || nv == 0 || nv > 20000) return;
+		FaceSet& fs = m_faces[g];
+		fs.d.resize((size_t)nf * nv * 3);
+		fs.n.resize((size_t)nf * nv * 4);
+		fs.c.resize((size_t)nf * nv);
+		for (UINT f = 0; f < nf; f++) {
+			const BYTE* d = rd.Bytes((size_t)nv * 6);
+			const BYTE* n = rd.Bytes((size_t)nv * 4);
+			const BYTE* c = rd.Bytes((size_t)nv * 4);
+			if (!d || !n || !c) { fs = FaceSet(); return; }
+			memcpy(&fs.d[(size_t)f * nv * 3], d, (size_t)nv * 6);
+			memcpy(&fs.n[(size_t)f * nv * 4], n, (size_t)nv * 4);
+			for (UINT k = 0; k < nv; k++) fs.c[(size_t)f * nv + k] = RGBA8(c[k * 4], c[k * 4 + 1], c[k * 4 + 2]);
+		}
+		fs.nFace = (int)nf;
+		fs.nv = (int)nv;
+	}
+	UINT nm = rd.U32();
+	if (nm > 64) return;
+	for (UINT i = 0; i < nm; i++) {
+		char name[32];
+		rd.Name(name, 32);
+		UINT g = rd.U32(), start = rd.U32(), nv = rd.U32();
+		float lin[9];
+		for (int k = 0; k < 9; k++) lin[k] = rd.F32();
+		if (g > 1 || (int)nv != m_faces[g].nv) continue;
+		for (CreatureSkin& s : m_skins) {
+			if (s.model < 0 || s.model >= (int)models.size() || strcmp(models[s.model].name, name) != 0) continue;
+			if ((size_t)start + nv != s.bind.size()) break;
+			s.faceSet = (int)g;
+			s.faceStart = (int)start;
+			s.faceN = (int)nv;
+			memcpy(s.faceLin, lin, sizeof(lin));
+			break;
+		}
+	}
+}
+
+static bool ReadAvaMesh(Reader& rd, Renderer::AvaMesh& m)
+{
+	UINT nv = rd.U32();
+	if (nv == 0 || nv > 65535) return false;
+	float lo[3], hi[3];
+	for (int a = 0; a < 3; a++) lo[a] = rd.F32();
+	for (int a = 0; a < 3; a++) hi[a] = rd.F32();
+	const BYTE* ps = rd.Bytes((size_t)nv * 6);
+	const BYTE* ns = rd.Bytes((size_t)nv * 4);
+	const BYTE* cs = rd.Bytes((size_t)nv * 4);
+	const BYTE* js = rd.Bytes((size_t)nv * 4);
+	const BYTE* ws = rd.Bytes((size_t)nv * 4);
+	if (!ps || !ns || !cs || !js || !ws) return false;
+	m.v.resize(nv);
+	m.cloth.resize(nv);
+	for (UINT k = 0; k < nv; k++) {
+		Renderer::CSkinV& d = m.v[k];
+		short q[3];
+		memcpy(q, ps + k * 6, 6);
+		for (int a = 0; a < 3; a++) {
+			float mid = (lo[a] + hi[a]) * .5f, half = (hi[a] - lo[a]) * .5f;
+			d.p[a] = mid + q[a] / 32767.f * half;
+			d.n[a] = (signed char)ns[k * 4 + a] / 127.f;
+		}
+		d.c = RGBA8(cs[k * 4], cs[k * 4 + 1], cs[k * 4 + 2]);
+		m.cloth[k] = cs[k * 4 + 3] ? 1 : 0;
+		for (int c = 0; c < 4; c++) { d.j[c] = js[k * 4 + c]; d.w[c] = ws[k * 4 + c]; }
+	}
+	if (rd.U32()) {
+		const BYTE* dx = rd.Bytes((size_t)nv * 6);
+		const BYTE* dn = rd.Bytes((size_t)nv * 6);
+		if (!dx || !dn) return false;
+		m.dmax.resize((size_t)nv * 3);
+		m.dmin.resize((size_t)nv * 3);
+		for (size_t k = 0; k < (size_t)nv * 3; k++) {
+			short a, b;
+			memcpy(&a, dx + k * 2, 2);
+			memcpy(&b, dn + k * 2, 2);
+			m.dmax[k] = a * (0.1f / 32767.f);
+			m.dmin[k] = b * (0.1f / 32767.f);
+		}
+	}
+	return !rd.bad;
+}
+
+static bool ReadWords(Reader& rd, std::vector<WORD>& out, size_t n)
+{
+	const BYTE* p = rd.Bytes(n * 2);
+	if (!p) return false;
+	out.resize(n);
+	if (n) memcpy(out.data(), p, n * 2);
+	return true;
+}
+
+void Renderer::ReleaseAvatarCache()
+{
+	for (AvaCache& c : m_avaCache) c.gm.Release();
+	m_avaCache.clear();
+}
+
+void Renderer::LoadAvatarPack()
+{
+	ReleaseAvatarCache();
+	m_avaSeg.clear();
+	m_avaCos.clear();
+	m_avaModels.clear();
+	for (int g = 0; g < 2; g++) m_avaBody[g] = AvaBody();
+	HMODULE hm = AfxGetResourceHandle();
+	HRSRC rs = FindResource(hm, MAKEINTRESOURCE(IDR_TAC_AVA), RT_RCDATA);
+	if (!rs) { hm = GetModuleHandle(NULL); rs = FindResource(hm, MAKEINTRESOURCE(IDR_TAC_AVA), RT_RCDATA); }
+	if (!rs) return;
+	HGLOBAL hg = LoadResource(hm, rs);
+	const BYTE* data = hg ? (const BYTE*)LockResource(hg) : NULL;
+	DWORD size = SizeofResource(hm, rs);
+	if (!data || size < 8 || memcmp(data, "TACV", 4) != 0) return;
+	Reader rd(data + 4, size - 4);
+	UINT ns = rd.U32();
+	if (ns == 0 || ns > 32) return;
+	for (UINT s = 0; s < ns; s++) {
+		char nm[24];
+		rd.Name(nm, 24);
+		m_avaSeg.push_back(nm);
+	}
+	UINT nm = rd.U32();
+	if (nm > 64) { m_avaSeg.clear(); return; }
+	for (UINT i = 0; i < nm; i++) {
+		AvaModel am;
+		rd.Name(am.name, 32);
+		am.gender = (int)rd.U32();
+		const BYTE* p = rd.Bytes((size_t)ns * 12 * 4);
+		if (!p || am.gender < 0 || am.gender > 1) { m_avaSeg.clear(); m_avaModels.clear(); return; }
+		am.M.resize((size_t)ns * 12);
+		memcpy(am.M.data(), p, (size_t)ns * 12 * 4);
+		m_avaModels.push_back(am);
+	}
+	for (int g = 0; g < 2; g++) {
+		AvaBody& b = m_avaBody[g];
+		b.nFace = (int)rd.U32();
+		bool ok = ReadAvaMesh(rd, b.m);
+		UINT nb = ok ? rd.U32() : 0, ne = ok ? rd.U32() : 0;
+		ok = ok && ReadWords(rd, b.bodyTri, (size_t)nb * 3) && ReadWords(rd, b.extraTri, (size_t)ne * 3);
+		if (!ok || b.nFace < 0 || b.nFace > (int)b.m.v.size()) { m_avaSeg.clear(); m_avaModels.clear(); m_avaBody[0] = m_avaBody[1] = AvaBody(); return; }
+	}
+	UINT na = rd.U32();
+	if (na > 256) return;
+	for (UINT i = 0; i < na; i++) {
+		AvaCos c;
+		rd.Name(c.name, 32);
+		c.gender = (int)rd.U32();
+		if (c.gender < 0 || c.gender > 1 || !ReadAvaMesh(rd, c.m)) break;
+		UINT nt = rd.U32();
+		if (!ReadWords(rd, c.tri, (size_t)nt * 3)) break;
+		size_t nk = (m_avaBody[c.gender].bodyTri.size() / 3 + 7) / 8;
+		const BYTE* kp = rd.Bytes(nk);
+		if (!kp) break;
+		c.keep.assign(kp, kp + nk);
+		if (m_avaBody[c.gender].m.v.size() + c.m.v.size() > 65535) continue;
+		m_avaCos.push_back(std::move(c));
+	}
+}
+
+int Renderer::AvatarCount(int gender) const
+{
+	int n = 0;
+	for (const AvaCos& c : m_avaCos) if (c.gender == gender) n++;
+	return n;
+}
+
+BOOL Renderer::DrawAvatar(int model, int avatar, int bust, const Pose& pose, const M4& world, const DrawParams& dp)
+{
+	if (model < 0 || model >= (int)models.size() || avatar <= 0 || m_avaSeg.empty()) return FALSE;
+	const Model& md = models[model];
+	const AvaModel* am = NULL;
+	for (const AvaModel& x : m_avaModels) if (!strcmp(x.name, md.name)) { am = &x; break; }
+	if (!am || md.rig < 0 || md.rig >= (int)rigs.size()) return FALSE;
+	int ci = -1;
+	for (int k = 0, n = 0; k < (int)m_avaCos.size(); k++) if (m_avaCos[k].gender == am->gender && ++n == avatar) { ci = k; break; }
+	if (ci < 0) return FALSE;
+	AvaCache* ac = NULL;
+	for (AvaCache& x : m_avaCache) if (x.model == model && x.cos == ci) { ac = &x; break; }
+	if (!ac) {
+		const AvaBody& body = m_avaBody[am->gender];
+		const AvaCos& cos = m_avaCos[ci];
+		const Rig& rg = rigs[md.rig];
+		const int ns = (int)m_avaSeg.size();
+		std::vector<int> segJ(ns);
+		for (int s = 0; s < ns; s++) {
+			int j = rg.Find(m_avaSeg[s].c_str());
+			segJ[s] = j >= 0 ? j : (md.hipsJ >= 0 ? md.hipsJ : 0);
+		}
+		AvaCache nc;
+		nc.model = model;
+		nc.cos = ci;
+		CreatureSkin& sk = nc.skin;
+		sk.model = model;
+		const size_t nb = body.m.v.size(), nv = nb + cos.m.v.size();
+		sk.bind.resize(nv);
+		sk.cloth.resize(nv);
+		const BOOL hasBust = !body.m.dmax.empty() && !cos.m.dmax.empty();
+		if (hasBust) { nc.bx.resize(nv * 3); nc.bn.resize(nv * 3); }
+		for (size_t k = 0; k < nv; k++) {
+			const BOOL isBody = k < nb;
+			const AvaMesh& src = isBody ? body.m : cos.m;
+			const size_t q = isBody ? k : k - nb;
+			const CSkinV& s = src.v[q];
+			float A[12] = {};
+			for (int c = 0; c < 4; c++) {
+				float w = s.w[c] / 255.f;
+				if (w <= 0.f || s.j[c] >= ns) continue;
+				const float* Ms = &am->M[(size_t)s.j[c] * 12];
+				for (int e = 0; e < 12; e++) A[e] += Ms[e] * w;
+			}
+			auto lin = [&](const float* x, float* o) {
+				o[0] = A[0] * x[0] + A[1] * x[1] + A[2] * x[2];
+				o[1] = A[4] * x[0] + A[5] * x[1] + A[6] * x[2];
+				o[2] = A[8] * x[0] + A[9] * x[1] + A[10] * x[2];
+			};
+			CSkinV& d = sk.bind[k];
+			lin(s.p, d.p);
+			d.p[0] += A[3]; d.p[1] += A[7]; d.p[2] += A[11];
+			lin(s.n, d.n);
+			float nl = sqrtf(d.n[0] * d.n[0] + d.n[1] * d.n[1] + d.n[2] * d.n[2]);
+			if (nl > 1e-6f) { d.n[0] /= nl; d.n[1] /= nl; d.n[2] /= nl; }
+			d.c = s.c;
+			for (int c = 0; c < 4; c++) {
+				d.j[c] = (unsigned char)(s.j[c] < ns ? segJ[s.j[c]] : segJ[0]);
+				d.w[c] = s.w[c];
+			}
+			sk.cloth[k] = src.cloth[q];
+			if (hasBust) {
+				lin(&src.dmax[q * 3], &nc.bx[k * 3]);
+				lin(&src.dmin[q * 3], &nc.bn[k * 3]);
+			}
+		}
+		std::vector<WORD> idx;
+		idx.reserve(body.bodyTri.size() + body.extraTri.size() + cos.tri.size());
+		for (size_t t = 0; t * 3 < body.bodyTri.size(); t++)
+			if (t / 8 < cos.keep.size() && (cos.keep[t / 8] >> (t & 7)) & 1) idx.insert(idx.end(), &body.bodyTri[t * 3], &body.bodyTri[t * 3] + 3);
+		idx.insert(idx.end(), body.extraTri.begin(), body.extraTri.end());
+		for (WORD w : cos.tri) idx.push_back((WORD)(w + nb));
+		for (const CreatureSkin& hs : m_skins) if (hs.model == model && hs.faceSet == am->gender && hs.faceN == body.nFace) {
+			sk.faceSet = hs.faceSet;
+			sk.faceStart = 0;
+			sk.faceN = body.nFace;
+			memcpy(sk.faceLin, hs.faceLin, sizeof(sk.faceLin));
+			break;
+		}
+		std::vector<VtxS> pv(nv);
+		for (size_t k = 0; k < nv; k++) {
+			const CSkinV& b = sk.bind[k];
+			VtxS& s = pv[k];
+			s.p[0] = b.p[0]; s.p[1] = b.p[1]; s.p[2] = b.p[2];
+			s.n[0] = b.n[0]; s.n[1] = b.n[1]; s.n[2] = b.n[2];
+			s.uv[0] = s.uv[1] = 0;
+			s.c = b.c;
+		}
+		if (!MakeMesh(nc.gm, pv.data(), sizeof(VtxS), (UINT)nv, idx.data(), (UINT)idx.size())) return FALSE;
+		nc.gm.tex = TEX_WHITE;
+		m_avaCache.push_back(std::move(nc));
+		ac = &m_avaCache.back();
+	}
+	// 大きい側は MH の最大カップの 7 割まで。満量だと胸が尖り、胸元の布が反り返る。
+	const float bt = Clampf((bust - 2) * (bust > 2 ? .35f : .5f), -1.f, 1.f);
+	SkinAndDraw(ac->skin, ac->gm, ac->bx.empty() ? NULL : ac->bx.data(), ac->bn.empty() ? NULL : ac->bn.data(), bt, pose, world, dp);
+	return TRUE;
 }
 
 void Renderer::DrawGear(int i, const M4& world, const DrawParams& dp)
@@ -1228,10 +1814,12 @@ void Renderer::DrawStatic(const GpuMesh& m, const M4& world, const DrawParams& d
 	if (dp.outline > 0 && !alpha) {
 		SetObj(world, dp, dp.outline);
 		BindForPass(FALSE, TRUE);
+		if (dp.twoSided) m_ctx->RSSetState(m_rsNone);
 		m_ctx->DrawIndexed(m.nIdx, 0, 0);
 	}
 	SetObj(world, dp, 0);
 	BindForPass(FALSE, FALSE);
+	if (dp.twoSided) m_ctx->RSSetState(m_rsNone);
 	m_ctx->DrawIndexed(m.nIdx, 0, 0);
 	if (alpha) m_ctx->OMSetBlendState(m_bsOpaque, NULL, 0xFFFFFFFF);
 }

@@ -114,7 +114,12 @@ struct DrawParams {
 	float rim;
 	float sway;
 	DWORD outlineColor;
-	DrawParams() : tint(0xFFFFFFFF), outline(0), mode(0), emissive(0), hue(0), dissolve(0), flash(0), rim(.35f), sway(0), outlineColor(0xFF201814) {}
+	int twoSided;
+	int hairJoint;
+	DWORD hairTint;
+	float clothHue;      // 人間の服の染め色だけを CPU スキニング時に回す
+	int face;            // 人間の顔の型（0=既定）
+	DrawParams() : tint(0xFFFFFFFF), outline(0), mode(0), emissive(0), hue(0), dissolve(0), flash(0), rim(.35f), sway(0), outlineColor(0xFF201814), twoSided(0), hairJoint(-1), hairTint(0xFFFFFFFF), clothHue(0), face(0) {}
 };
 
 enum Pass { PASS_SHADOW, PASS_MAIN, PASS_PORTRAIT };
@@ -163,12 +168,43 @@ public:
 	std::vector<StaticSrc> statics;
 	std::vector<GpuMesh> m_creatures;
 	std::vector<GpuMesh> m_gear;
+	struct CSkinV { float p[3], n[3]; DWORD c; unsigned char j[4], w[4]; };
+	struct CreatureSkin {
+		int model; std::vector<CSkinV> bind; std::vector<BYTE> cloth;
+		int faceSet, faceStart, faceN; float faceLin[9];   // 顔の型を載せる頭の頂点範囲
+		CreatureSkin() : model(-1), faceSet(-1), faceStart(0), faceN(0) {}
+	};
+	std::vector<CreatureSkin> m_skins;
+	// 顔の型（性別ごと）。頭の頂点ごとの位置差・法線・色
+	struct FaceSet { int nFace, nv; std::vector<short> d; std::vector<signed char> n; std::vector<DWORD> c; FaceSet() : nFace(0), nv(0) {} };
+	FaceSet m_faces[2];
+	void LoadFacePack();
+	int FaceCount(int gender) const { return (gender >= 0 && gender < 2 && m_faces[gender].nFace > 0) ? m_faces[gender].nFace : 1; }
+	// アバター（人間の体と衣装を丸ごと差し替える）。頂点は共通の体の空間で持ち、j は区間番号。
+	// モデルごとの区間行列で各人間の骨へ移し、初回の描画で頂点を作って保持する。
+	struct AvaMesh { std::vector<CSkinV> v; std::vector<BYTE> cloth; std::vector<float> dmax, dmin; };
+	struct AvaBody { int nFace; AvaMesh m; std::vector<WORD> bodyTri, extraTri; AvaBody() : nFace(0) {} };
+	struct AvaCos { char name[32]; int gender; AvaMesh m; std::vector<WORD> tri; std::vector<BYTE> keep; };
+	struct AvaModel { char name[32]; int gender; std::vector<float> M; };
+	struct AvaCache { int model, cos; CreatureSkin skin; std::vector<float> bx, bn; GpuMesh gm; };
+	std::vector<std::string> m_avaSeg;
+	AvaBody m_avaBody[2];
+	std::vector<AvaCos> m_avaCos;
+	std::vector<AvaModel> m_avaModels;
+	std::vector<AvaCache> m_avaCache;
+	void LoadAvatarPack();
+	void ReleaseAvatarCache();
+	int AvatarCount(int gender) const;
+	// avatar は性別ごとに 1 から。作れないときは FALSE（呼び手が元の体を描く）。
+	BOOL DrawAvatar(int model, int avatar, int bust, const Pose& pose, const M4& world, const DrawParams& dp);
+	void SkinAndDraw(const CreatureSkin& src, GpuMesh& base, const float* bx, const float* bn, float bt, const Pose& pose, const M4& world, const DrawParams& dp);
 	int FindModel(const char* n) const;
 	int FindAttach(const char* n) const;
 	int FindStatic(const char* n) const;
 	int CreatureCount() const { return (int)m_creatures.size(); }
-	int GearCount() const { return (int)m_gear.size(); }
-	void DrawCreature(int i, const M4& world, const DrawParams& dp);
+	int CreatureModel(int i) const { return (i >= 0 && i < (int)m_skins.size()) ? m_skins[i].model : -1; }
+	void DrawSkinnedCreature(int i, const Pose& pose, const M4& world, const DrawParams& dp);
+	int GearCount() const { return (int)m_gear.size(); }	void DrawCreature(int i, const M4& world, const DrawParams& dp);
 	void DrawGear(int i, const M4& world, const DrawParams& dp);
 	int AddProcModel(const Model& m, const std::vector<VtxK>& v, const std::vector<WORD>& idx);
 	BOOL MakeMesh(GpuMesh& out, const void* v, UINT stride, UINT nv, const WORD* idx, UINT ni, BOOL dynamic = FALSE);

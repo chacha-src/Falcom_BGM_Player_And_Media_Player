@@ -360,7 +360,7 @@ void COmakeTacticsDlg::OnTimer(UINT_PTR id)
 	float dt = m_qpf.QuadPart ? (float)((double)(now.QuadPart - m_last.QuadPart) / (double)m_qpf.QuadPart) : .016f;
 	m_last = now;
 	if (dt < 0) dt = 0;
-	TacAudioPump();
+	if (!TacAudioOnThread()) TacAudioPump();
 	if (IsIconic()) return;
 	PollPad(dt);
 	m_game.Tick(dt);

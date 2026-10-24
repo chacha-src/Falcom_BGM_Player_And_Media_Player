@@ -123,7 +123,9 @@ float3 ToonLight(float3 albedo, float3 n, float3 w, float sh)
 	float d = smoothstep(-0.02, 0.02 + 0.25 * (1. - hard), ndl) * sh;
 	float3 amb = lerp(GndAmb.rgb, SkyAmb.rgb, saturate(n.y * .5 + .5)) * SkyAmb.w;
 	float3 sun = float3(1.0, 0.96, 0.88);
-	return albedo * (amb + sun * d * 0.82 + sun * saturate(ndl) * sh * 0.18);
+	// 光と反対の面は環境光だけだと黒に落ちる。マントの外側など、影側にも布の色を残す。
+	float bounce = saturate(-ndl) * 0.85;
+	return albedo * (amb * (1.0 + bounce) + sun * d * 0.82 + sun * saturate(ndl) * sh * 0.18 + sun * bounce * 0.38);
 }
 
 float4 PSM(PSIn i) : SV_Target
@@ -154,6 +156,12 @@ float4 PSM(PSIn i) : SV_Target
 		col += SkyAmb.rgb * fr * 0.6 + sp;
 		float foam = smoothstep(0.82, 0.95, wv);
 		col = lerp(col, float3(0.9, 0.95, 1), foam * 0.35);
+		float murk = saturate(albedo.g - albedo.b);
+		float bub = smoothstep(0.78, 0.93, fbm2(q * 4.6 + float2(0, t * 0.35)));
+		col = lerp(col, col * float3(0.62, 0.78, 0.48), murk * 0.55);
+		col += float3(0.75, 0.9, 0.65) * bub * murk * 0.35;
+		float caust = fbm2(q * 6.0 + float2(t * 0.15, -t * 0.1));
+		col += albedo * caust * (0.12 + murk * 0.08);
 		float d = length(Eye.xyz - i.w), fg = saturate((d - Fog.x) / max(0.01, Fog.y - Fog.x));
 		return float4(lerp(col, FogColor.rgb, fg * fg), lerp(0.72, 0.92, fr) * alpha);
 	}
@@ -165,7 +173,9 @@ float4 PSM(PSIn i) : SV_Target
 		float g = fbm2(q * 2.7 - float2(t * 0.21, 0));
 		float crack = smoothstep(0.45, 0.62, abs(f - g) * 2.4);
 		float3 hot = lerp(float3(1, 0.85, 0.3), float3(1, 0.3, 0.05), f);
+		float vein = smoothstep(0.52, 0.74, fbm2(q * 1.25 + float2(t * 0.16, t * 0.05)));
 		float3 col = lerp(hot * (1.6 + 0.4 * sin(t * 2.0 + f * 9.)), float3(0.18, 0.05, 0.03), crack * 0.8);
+		col += float3(1.0, 0.45, 0.08) * vein * (1. - crack) * 0.85;
 		return float4(col, 1);
 	}
 	float sh = ShadowAt(i.w, n);
@@ -175,8 +185,11 @@ float4 PSM(PSIn i) : SV_Target
 		float2 g = abs(frac(i.w.xz) - 0.5);
 		float e = smoothstep(0.455, 0.5, max(g.x, g.y));
 		col *= 1. - e * 0.28;
-		float grain = fbm2(i.w.xz * 4.0) - 0.5;
-		col *= 1. + grain * 0.12;
+		float grain = fbm2(i.w.xz * 3.4) - 0.5;
+		float patch = fbm2(i.w.xz * 0.33 + 3.7);
+		col *= 0.9 + grain * 0.1 + patch * 0.12;
+		col = lerp(col, col * float3(0.78, 0.92, 0.7), saturate(patch - 0.42) * 0.4);
+		col *= 1. - saturate(1. - n.y) * 0.15;
 	}
 	float rim = pow(1. - saturate(dot(n, v)), 3.) * Extra.z;
 	col += rim * float3(1, 0.95, 0.85) * (0.4 + 0.6 * sh);

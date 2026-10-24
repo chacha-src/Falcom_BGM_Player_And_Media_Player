@@ -148,7 +148,7 @@ struct Map {
 	float StandY(int x, int z) const;    // ユニットの足元
 };
 
-void GenerateMap(Map& m, int stage, DWORD seed);
+void GenerateMap(Map& m, int stage, DWORD seed, int theme = -1);
 
 // ---------------- 能力値・クラス・スキル ----------------
 enum Stat {
@@ -245,7 +245,7 @@ const SkillDef& SkillInfo(int s);
 enum { MAX_ROSTER = 100, MAX_PARTY = 10, MAX_ENEMY = 640, NAME_LEN = 16 };
 static_assert(MAX_PARTY == 10, "Map::pStart は 10 枠");
 enum Body { B_KNIGHT, B_BARBARIAN, B_MAGE, B_ROGUE, B_ROGUE_HOOD, B_COUNT };
-enum { HAIR_STYLES = 6, HAIR_COLORS = 10, OUTFIT_COLORS = 10 };
+enum { HAIR_STYLES = 8, HAIR_COLORS = 10, OUTFIT_COLORS = 10, HT_N = 5, BUST_N = 5, FIG_N = 3 };
 
 #pragma pack(push, 4)
 struct CharData {
@@ -263,6 +263,21 @@ struct CharData {
 	int reserved[8];
 };
 #pragma pack(pop)
+
+// outfit の上位ビットに身長・胸・体型。既存セーブは 0 なので普通体型。
+inline int CharOutfit(const CharData& c) { return c.outfit & 255; }
+inline int CharHt(const CharData& c) { int v = (c.outfit >> 8) & 15; return v ? Clampi(v - 1, 0, HT_N - 1) : 2; }
+inline int CharBust(const CharData& c) { int v = (c.outfit >> 12) & 15; return v ? Clampi(v - 1, 0, BUST_N - 1) : 2; }
+inline int CharFig(const CharData& c) { int v = (c.outfit >> 16) & 7; return v ? Clampi(v - 1, 0, FIG_N - 1) : 1; }
+inline void CharSetOutfit(CharData& c, int v) { c.outfit = (c.outfit & ~255) | (Clampi(v, 0, OUTFIT_COLORS - 1) & 255); }
+inline void CharSetHt(CharData& c, int v) { c.outfit = (c.outfit & ~(15 << 8)) | ((Clampi(v, 0, HT_N - 1) + 1) << 8); }
+inline void CharSetBust(CharData& c, int v) { c.outfit = (c.outfit & ~(15 << 12)) | ((Clampi(v, 0, BUST_N - 1) + 1) << 12); }
+inline void CharSetFig(CharData& c, int v) { c.outfit = (c.outfit & ~(7 << 16)) | ((Clampi(v, 0, FIG_N - 1) + 1) << 16); }
+// 顔の型 (bit 19-22, 0=既定) とアバター (bit 23-28, 0=なし)
+inline int CharFace(const CharData& c) { return (c.outfit >> 19) & 15; }
+inline void CharSetFace(CharData& c, int v) { c.outfit = (c.outfit & ~(15 << 19)) | ((Clampi(v, 0, 15)) << 19); }
+inline int CharAvatar(const CharData& c) { return (c.outfit >> 23) & 63; }
+inline void CharSetAvatar(CharData& c, int v) { c.outfit = (c.outfit & ~(63 << 23)) | ((Clampi(v, 0, 63)) << 23); }
 
 void CharRecalcInit(CharData& c);                  // 新規作成時の初期能力
 void CharRecalcProgress(CharData& c);              // 現在Lvの期待値で能力を組み直す
@@ -402,7 +417,7 @@ bool ShapeCell(int shape, int area, int ax, int az, int cx, int cz, int tx, int 
 bool SkillUsable(const Battle& b, int ui, int skill);
 int  SkillCastRangeMin(const Unit& u, int skill);
 int  SkillCastRangeMax(const Unit& u, int skill);
-int  ExpForAction(const Unit& a, const Unit& d, int killed, int stage);
+int  ExpForAction(const Unit& a, const Unit& d, int dmg, int stage);
 
 // ---------------- 戦闘全体 ----------------
 enum { MAX_UNITS = MAX_PARTY + MAX_ENEMY };
@@ -421,7 +436,7 @@ struct Battle {
 	int PredictOrder(int* out, int n, int acting = -1, int cost = 1000, int* insertAt = NULL) const;
 };
 
-void SetupBattle(Battle& b, int stage, DWORD seed, const CharData* party, const int* rosterIdx, int nParty);
+void SetupBattle(Battle& b, int stage, DWORD seed, const CharData* party, const int* rosterIdx, int nParty, int theme = -1);
 void FinishAction(Battle& b, int ui, int moved, int acted);
 int  TurnStartEffects(Battle& b, int ui, int* healOut, int* poisonOut);
 void WakeGroup(Battle& b, int grp);

@@ -17,6 +17,9 @@ struct Library {
 	int procModel[5];
 	int clipMap[4][CL_COUNT];
 	GpuMesh hair[B_COUNT][HAIR_STYLES];
+	GpuMesh humHair[4][HAIR_STYLES];
+	int humHairModel[4];
+	int humHairN;
 	GpuMesh wing[2][2];     // [羽根/竜][左/右]
 	GpuMesh crown;
 	GpuMesh ring;
@@ -37,10 +40,14 @@ struct Actor {
 	int body;
 	int att[6], attJ[6], nAtt;
 	int gearM[4], gearJ[4], nGear;
+	int wepAtt, wepGear;  // att/gear のうち先頭から武器の数（アバター時はこれだけ描く）
 	int hair;
 	DWORD hairCol;
 	int wings;
 	int female;
+	int face;           // 顔の型
+	int avatar;         // アバター (0=なし)
+	int bust;           // 胸の段階
 	float scale, hue;
 	DWORD tint;
 	float height;       // 頭上（ワールド）

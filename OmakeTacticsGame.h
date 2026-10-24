@@ -82,6 +82,9 @@ public:
 	void OnMouseUp(int btn, int x, int y);
 	void OnWheel(int delta);
 	void OnKey(int vk, BOOL down);
+	void ZoomCam(float mul);
+	void ResetCamDist();
+	void ApplyZoomHold(float dt = 0.f);
 	void OnChar(wchar_t ch);
 	void OnPad(const PadState& p, float dt);
 	BOOL WantsTextInput() const { return m_textFocus != 0; }
@@ -265,17 +268,23 @@ private:
 	PadState m_padPrev;
 	float m_padRepeat;
 	int m_padDirPrev;
+	int m_padTrig;
 	BOOL m_fastFwd;
 	BOOL m_showHelp;
 	int m_codex;             // 0=閉 1=スキル 2=成長
 	int m_codexPage;
 	int m_skillPage;
+	int m_skillTab;          // 0攻撃 1回復 2クラフト
 	BOOL m_ult;
 	int m_confirmDelete;
 
 	// カメラ
 	V3 m_camTarget, m_camGoal;
 	float m_camYaw, m_camYawGoal, m_camPitch, m_camDist, m_camDistGoal;
+	BOOL m_zoomHold;
+	float m_zoomDist;
+	int m_wheelSign;
+	float m_wheelTime;
 	V3 m_camPan;
 	float m_shake;
 	V3 m_eye;
@@ -314,6 +323,8 @@ private:
 	Map m_showMap;
 	BOOL m_showBuilt;
 	int m_showStage;
+	int m_showTheme;
+	int m_themeSel;
 	DWORD m_mapSeed;
 	int m_mapSeedStage;
 	Actor m_showAct[MAX_PARTY];

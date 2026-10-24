@@ -161,8 +161,8 @@ static const TerrainDef kTerrain[T_COUNT] = {
 	{ TX_TER_WATER,    99, 1, 0, 0 },
 	{ TX_TER_CHASM,    99, 1, 0, 0 },
 	{ TX_TER_LAVA,     99, 1, 0, 0 },
-	{ TX_TER_SAND,     3, 1, 0, 5 },
-	{ TX_TER_SNOW,     3, 1, 0, 5 },
+	{ TX_TER_SAND,     2, 1, 0, 5 },
+	{ TX_TER_SNOW,     2, 1, 0, 5 },
 	{ TX_TER_SWAMP,    4, 1, -10, -10 },
 	{ TX_TER_ROAD,     1, 1, 0, 0 },
 	{ TX_TER_BRIDGE,   1, 1, 0, 0 },
@@ -571,14 +571,15 @@ static int StampShape(Map& m, int stage, Rng& r, int& pax, int& paz)
 	return span;
 }
 
-void GenerateMap(Map& m, int stage, DWORD seed)
+void GenerateMap(Map& m, int stage, DWORD seed, int theme)
 {
 	memset(&m, 0, sizeof(m));
 	Rng r(seed);
 	m.seed = seed;
 	m.stage = stage;
 	int th;
-	if (stage <= 1) th = TH_PLAINS;
+	if (theme >= 0 && theme < TH_COUNT) th = theme;
+	else if (stage <= 1) th = TH_PLAINS;
 	else if (stage % 10 == 0) th = (stage / 10) & 1 ? TH_VOLCANO : TH_RUINS;
 	else th = r.Range(0, TH_COUNT - 1);
 	m.theme = th;
@@ -854,6 +855,38 @@ void GenerateMap(Map& m, int stage, DWORD seed)
 			for (int gi = 0; gi < m.nGrp; gi++) {
 				int d = Dist(m.grp[gi].ax, m.grp[gi].az, pax, paz);
 				if (d > fd) { fd = d; farI = gi; }
+			}
+			int minBoss = max(14, span / 3);
+			if (fd < minBoss) {
+				int bx = m.grp[farI].ax, bz = m.grp[farI].az, best = fd;
+				for (int z = 3; z < MAPN - 3; z++) for (int x = 3; x < MAPN - 3; x++) {
+					int t = m.c[z][x].t;
+					if (t == T_VOID || t == T_WATER || t == T_LAVA || t == T_CHASM) continue;
+					int d = Dist(x, z, pax, paz);
+					if (d > best) { best = d; bx = x; bz = z; }
+				}
+				if (best > fd + 3) {
+					MapGroup& g = m.grp[farI];
+					short ox[GRP_CAP], oz[GRP_CAP];
+					int on = g.n;
+					for (int k = 0; k < on && k < GRP_CAP; k++) { ox[k] = g.x[k]; oz[k] = g.z[k]; taken[oz[k]][ox[k]] = 0; }
+					int xs[GRP_CAP], zs[GRP_CAP];
+					PickDeploy(m, bx, bz, xs, zs, on, 1, taken);
+					int nn = 0;
+					for (int k = 0; k < on && nn < GRP_CAP; k++) {
+						if (taken[zs[k]][xs[k]]) continue;
+						taken[zs[k]][xs[k]] = 1;
+						g.x[nn] = (short)xs[k];
+						g.z[nn] = (short)zs[k];
+						nn++;
+					}
+					if (nn >= 3) { g.n = nn; g.ax = (short)bx; g.az = (short)bz; }
+					else {
+						for (int k = 0; k < nn; k++) taken[g.z[k]][g.x[k]] = 0;
+						g.n = on;
+						for (int k = 0; k < on && k < GRP_CAP; k++) { g.x[k] = ox[k]; g.z[k] = oz[k]; taken[oz[k]][ox[k]] = 1; }
+					}
+				}
 			}
 			m.grp[farI].boss = 1;
 		}
@@ -1312,13 +1345,13 @@ static const SkillDef kSkill[] = {
 	{ TX_SK_BASH, TX_SKD_BASH, SK_PHYS, 5, 120, -1, -1, 0, EL_EARTH, 1, 0, EF_DEFDOWN, 0 },
 	{ TX_SK_DRAGONFANG, TX_SKD_DRAGONFANG, SK_PHYS, 14, 220, -1, -1, 0, EL_FIRE, 1, 10, EF_NONE, 0 },
 	{ TX_SK_HOLYBLADE, TX_SKD_HOLYBLADE, SK_PHYS, 12, 170, -1, -1, 0, EL_HOLY, 1, 5, EF_NONE, 0 },
-	{ TX_SK_ARROWRAIN, TX_SKD_ARROWRAIN, SK_PHYS, 12, 90, 2, 5, 1, EL_WIND, 1, 0, EF_NONE, 0 },
+	{ TX_SK_ARROWRAIN, TX_SKD_ARROWRAIN, SK_PHYS, 12, 145, 2, 5, 1, EL_WIND, 1, 0, EF_NONE, 0 },
 	{ TX_SK_ASSASSINATE, TX_SKD_ASSASSINATE, SK_PHYS, 12, 200, -1, -1, 0, EL_DARK, 1, 25, EF_NONE, 0 },
 	{ TX_SK_BRAVE, TX_SKD_BRAVE, SK_PHYS, 18, 260, -1, -1, 0, EL_HOLY, 1, 15, EF_NONE, 0 },
 	{ TX_SK_FIRE, TX_SKD_FIRE, SK_MAGIC, 4, 8, 1, 3, 0, EL_FIRE, 1, 0, EF_NONE, 0 },
 	{ TX_SK_BLIZZARD, TX_SKD_BLIZZARD, SK_MAGIC, 8, 11, 1, 3, 1, EL_ICE, 1, 0, EF_NONE, 0 },
 	{ TX_SK_THUNDER, TX_SKD_THUNDER, SK_MAGIC, 8, 14, 1, 4, 0, EL_THUNDER, 1, 0, EF_NONE, 0 },
-	{ TX_SK_METEOR, TX_SKD_METEOR, SK_MAGIC, 20, 18, 2, 6, 3, EL_FIRE, 1, 0, EF_NONE, 0 },
+	{ TX_SK_METEOR, TX_SKD_METEOR, SK_MAGIC, 20, 28, 2, 6, 3, EL_FIRE, 1, 0, EF_NONE, 0 },
 	{ TX_SK_RUNEBLADE, TX_SKD_RUNEBLADE, SK_MAGIC, 6, 12, 1, 1, 0, EL_THUNDER, 1, 0, EF_NONE, 0 },
 	{ TX_SK_HOLY, TX_SKD_HOLY, SK_MAGIC, 14, 18, 1, 3, 0, EL_HOLY, 1, 0, EF_NONE, 0 },
 	{ TX_SK_DARKNESS, TX_SKD_DARKNESS, SK_MAGIC, 10, 16, 1, 3, 0, EL_DARK, 1, 0, EF_DEFDOWN, 0 },
@@ -1343,7 +1376,7 @@ static const SkillDef kSkill[] = {
 	{ TX_SK_E_QUAKE, TX_SKD_E_QUAKE, SK_PHYS, 8, 130, 0, 0, 1, EL_EARTH, 1, 0, EF_NONE, 1 },
 	{ TX_SK_REFRESH, TX_SKD_REFRESH, SK_BUFF, 8, 0, 1, 1, 0, EL_HOLY, 1, 0, EF_REACT, 0 },
 	{ TX_SK_CLEAVE, TX_SKD_CLEAVE, SK_PHYS, 8, 110, 0, 0, 1, EL_NONE, 1, 0, EF_NONE, 0 },
-	{ TX_SK_SNIPE, TX_SKD_SNIPE, SK_PHYS, 7, 140, 2, 6, 0, EL_WIND, 1, 25, EF_NONE, 0 },
+	{ TX_SK_SNIPE, TX_SKD_SNIPE, SK_PHYS, 7, 185, 2, 6, 0, EL_WIND, 1, 25, EF_NONE, 0 },
 	{ TX_SK_VENOMEDGE, TX_SKD_VENOMEDGE, SK_PHYS, 6, 100, -1, -1, 0, EL_POISON, 1, 0, EF_POISON, 0 },
 	{ TX_SK_SANCTUARY, TX_SKD_SANCTUARY, SK_HEAL, 14, 16, 0, 0, 2, EL_HOLY, 1, 0, EF_NONE, 0 },
 	{ TX_SK_SMITE, TX_SKD_SMITE, SK_MAGIC, 10, 16, 1, 3, 0, EL_HOLY, 1, 10, EF_NONE, 0 },
@@ -1352,25 +1385,25 @@ static const SkillDef kSkill[] = {
 	{ TX_SK_RENEW, TX_SKD_RENEW, SK_HEAL, 12, 40, 0, 2, 0, EL_HOLY, 1, 0, EF_NONE, 0 },
 	{ TX_SK_MIRROR, TX_SKD_MIRROR, SK_BUFF, 8, 0, 0, 2, 0, EL_ICE, 1, 0, EF_BUFF_DEF, 0 },
 	{ TX_SK_GODSLASH, TX_SKD_GODSLASH, SK_PHYS, 22, 300, -1, -1, 0, EL_HOLY, 1, 20, EF_NONE, 0 },
-	{ TX_SK_RUIN, TX_SKD_RUIN, SK_MAGIC, 24, 30, 1, 4, 1, EL_DARK, 1, 0, EF_DEFDOWN, 0 },
-	{ TX_SK_APOC, TX_SKD_APOC, SK_MAGIC, 28, 20, 0, 0, 3, EL_FIRE, 1, 0, EF_NONE, 0 },
+	{ TX_SK_RUIN, TX_SKD_RUIN, SK_MAGIC, 24, 40, 1, 4, 1, EL_DARK, 1, 0, EF_DEFDOWN, 0 },
+	{ TX_SK_APOC, TX_SKD_APOC, SK_MAGIC, 28, 36, 0, 0, 3, EL_FIRE, 1, 0, EF_NONE, 0 },
 	{ TX_SK_TRANSMUTE, TX_SKD_TRANSMUTE, SK_BUFF, 4, 0, 0, 1, 0, EL_EARTH, 1, 0, EF_BUFF_ATK, 0 },
 };
 static_assert(sizeof(kSkill) / sizeof(kSkill[0]) == SKL_ART0, "base skill table");
 
 static const SkillDef kWide[] = {
-	{ TX_SK_SHOWER, TX_SKD_SHOWER, SK_PHYS, 14, 70, 2, 6, 2, EL_WIND, 1, 0, EF_NONE, 0 },
-	{ TX_SK_SHINE, TX_SKD_SHINE, SK_PHYS, 16, 62, 2, 6, 4, EL_HOLY, 1, 0, EF_NONE, 0 },
+	{ TX_SK_SHOWER, TX_SKD_SHOWER, SK_PHYS, 14, 135, 2, 6, 2, EL_WIND, 1, 0, EF_NONE, 0 },
+	{ TX_SK_SHINE, TX_SKD_SHINE, SK_PHYS, 16, 120, 2, 6, 4, EL_HOLY, 1, 0, EF_NONE, 0 },
 	{ TX_SK_CRESCENT, TX_SKD_CRESCENT, SK_PHYS, 10, 95, 0, 0, 2, EL_WIND, 1, 0, EF_NONE, 0 },
 	{ TX_SK_GRANDSLASH, TX_SKD_GRANDSLASH, SK_PHYS, 16, 80, 0, 0, 4, EL_NONE, 1, 0, EF_NONE, 0 },
-	{ TX_SK_STORM, TX_SKD_STORM, SK_MAGIC, 26, 14, 2, 6, 4, EL_FIRE, 1, 0, EF_NONE, 0 },
+	{ TX_SK_STORM, TX_SKD_STORM, SK_MAGIC, 26, 24, 2, 6, 4, EL_FIRE, 1, 0, EF_NONE, 0 },
 	{ TX_SK_FROSTFIELD, TX_SKD_FROSTFIELD, SK_MAGIC, 14, 9, 1, 4, 2, EL_ICE, 1, 0, EF_NONE, 0 },
 	{ TX_SK_THUNDERFIELD, TX_SKD_THUNDERFIELD, SK_MAGIC, 16, 11, 1, 5, 2, EL_THUNDER, 1, 0, EF_NONE, 0 },
-	{ TX_SK_NOVA, TX_SKD_NOVA, SK_MAGIC, 18, 12, 0, 0, 4, EL_HOLY, 1, 0, EF_NONE, 0 },
+	{ TX_SK_NOVA, TX_SKD_NOVA, SK_MAGIC, 18, 22, 0, 0, 4, EL_HOLY, 1, 0, EF_NONE, 0 },
 	{ TX_SK_LINESLASH, TX_SKD_LINESLASH, SK_PHYS, 10, 100, 1, 1, 4, EL_WIND, 1, 0, EF_NONE, 0, SH_LINE },
 	{ TX_SK_FANSLASH, TX_SKD_FANSLASH, SK_PHYS, 12, 80, 1, 1, 3, EL_NONE, 1, 0, EF_NONE, 0, SH_FAN },
-	{ TX_SK_ARROWLINE, TX_SKD_ARROWLINE, SK_PHYS, 10, 90, 2, 6, 5, EL_WIND, 1, 0, EF_NONE, 0, SH_LINE },
-	{ TX_SK_ARROWFAN, TX_SKD_ARROWFAN, SK_PHYS, 12, 75, 2, 6, 3, EL_WIND, 1, 0, EF_NONE, 0, SH_FAN },
+	{ TX_SK_ARROWLINE, TX_SKD_ARROWLINE, SK_PHYS, 10, 155, 2, 6, 5, EL_WIND, 1, 0, EF_NONE, 0, SH_LINE },
+	{ TX_SK_ARROWFAN, TX_SKD_ARROWFAN, SK_PHYS, 12, 140, 2, 6, 3, EL_WIND, 1, 0, EF_NONE, 0, SH_FAN },
 	{ TX_SK_FIREBEAM, TX_SKD_FIREBEAM, SK_MAGIC, 12, 10, 1, 4, 5, EL_FIRE, 1, 0, EF_NONE, 0, SH_LINE },
 	{ TX_SK_ICEBEAM, TX_SKD_ICEBEAM, SK_MAGIC, 14, 9, 1, 4, 5, EL_ICE, 1, 0, EF_SLOW, 0, SH_LINE },
 	{ TX_SK_THUNDERBEAM, TX_SKD_THUNDERBEAM, SK_MAGIC, 14, 12, 1, 4, 4, EL_THUNDER, 1, 0, EF_NONE, 0, SH_LINE },
@@ -1435,17 +1468,17 @@ const SkillDef& SkillInfo(int s)
 static MonsterDef kMon[M_COUNT] = {
 	{ TX_MO_SLIME, LK_SLIME, -1, 0, MV_FOOT, 1, 1, 1, 0, 3, AS_BITE,
 	  { 22, 4, 6, 4, 0, 4, 3, 4, 2, 3 }, { 60, 5, 40, 40, 0, 30, 20, 30, 20, 0 }, { SKL_E_SPIT, -1, -1 }, 1, 10, 1.0f, 0x60E070, 16, -1 },
-	{ TX_MO_SKEL_MINION, LK_KAYKIT, 6, 1, MV_FOOT, 2, 1, 1, 0, 4, AS_SLASH,
+	{ TX_MO_SKEL_MINION, LK_KAYKIT, 6, 1, MV_FOOT, 2, 1, 2, 0, 4, AS_STAB,
 	  { 18, 0, 6, 3, 0, 1, 5, 5, 2, 4 }, { 45, 0, 45, 30, 0, 15, 35, 40, 20, 0 }, { -1, -1, -1 }, 1, 10, 1.0f, 0xFFFFFF, 18, -1 },
 	{ TX_MO_SKEL_WARRIOR, LK_KAYKIT, 5, 2, MV_FOOT, 2, 1, 1, 0, 6, AS_CHOP2,
 	  { 26, 6, 9, 7, 0, 2, 4, 6, 2, 4 }, { 55, 10, 55, 50, 0, 20, 30, 40, 20, 0 }, { SKL_E_CRUSH, -1, -1 }, 3, 8, 1.0f, 0xFFFFFF, 24, -1 },
-	{ TX_MO_SKEL_ARCHER, LK_KAYKIT, 7, 3, MV_FOOT, 2, 2, 3, 0, 5, AS_SHOOT,
+	{ TX_MO_SKEL_ARCHER, LK_KAYKIT, 7, 3, MV_FOOT, 2, 2, 4, 0, 5, AS_SHOOT,
 	  { 18, 0, 7, 3, 0, 3, 6, 8, 3, 4 }, { 40, 0, 45, 25, 0, 20, 40, 55, 25, 0 }, { -1, -1, -1 }, 4, 7, 1.0f, 0xFFFFFF, 28, -1 },
 	{ TX_MO_BAT, LK_BAT, -1, 0, MV_FLY, 9, 1, 1, 0, 4, AS_BITE,
 	{ 15, 6, 6, 2, 0, 3, 11, 7, 6, 7 }, { 35, 10, 40, 20, 0, 25, 60, 45, 40, 0 }, { SKL_E_DRAIN, -1, -1 }, 5, 6, 1.0f, 0x806070, 32, -1 },
 	{ TX_MO_LICH, LK_KAYKIT, 8, 4, MV_FOOT, 2, 1, 3, 1, 4, AS_CAST,
 	{ 20, 20, 1, 3, 8, 8, 5, 6, 4, 3 }, { 40, 50, 5, 25, 60, 50, 30, 40, 30, 0 }, { SKL_FIRE, SKL_DARKNESS, SKL_HEAL }, 8, 5, 1.0f, 0xD8C8FF, 40, -1 },
-	{ TX_MO_POISON_SLIME, LK_SLIME, -1, 0, MV_FOOT, 1, 1, 1, 0, 5, AS_BITE,
+	{ TX_MO_POISON_SLIME, LK_SLIME, -1, 0, MV_FOOT, 1, 2, 2, 0, 5, AS_SHOOT1,
 	  { 28, 8, 8, 6, 0, 6, 4, 5, 3, 3 }, { 65, 10, 45, 45, 0, 35, 25, 35, 20, 0 }, { SKL_E_VENOM, SKL_E_SPIT, -1 }, 12, 6, 1.15f, 0xB070E0, 36, -1 },
 	{ TX_MO_GOLEM, LK_GOLEM, -1, 0, MV_FOOT, 1, 1, 1, 0, 8, AS_PUNCH,
 	{ 40, 8, 12, 14, 0, 4, 2, 5, 1, 2 }, { 75, 10, 60, 70, 0, 25, 10, 30, 10, 0 }, { SKL_E_QUAKE, -1, -1 }, 15, 4, 1.0f, 0xFFFFFF, 48, -1 },
@@ -1466,18 +1499,92 @@ static const wchar_t* ImportLocName(int model)
 	return LangPick14(s[0], s[1], s[2], s[3], s[4], s[5], s[6], s[7], s[8], s[9], s[10], s[11], s[12], s[13]);
 }
 
-static MonsterDef s_monImp[160];
+enum { IMP_CAP = 256, POOL_FAN = 0, POOL_BEAST = 1, POOL_FISH = 2, POOL_HUM = 3 };
+static MonsterDef s_monImp[IMP_CAP];
 static int s_monImpOk = 0;
+static int s_poolN[4];
+static int s_poolI[4][IMP_CAP];
+
+static int HasW(const wchar_t* n, const wchar_t* k)
+{
+	return n && k && wcsstr(n, k) != NULL;
+}
+
+static int ImportPool(const wchar_t* n)
+{
+	if (HasW(n, L"Hum")) return POOL_HUM;
+	if (HasW(n, L"Cactoro") || HasW(n, L"Blob") || HasW(n, L"Glub") || HasW(n, L"Mush") || HasW(n, L"Gole")
+		|| HasW(n, L"Ghost") || HasW(n, L"Demon") || HasW(n, L"Orc") || HasW(n, L"Wizard") || HasW(n, L"Ninja")
+		|| HasW(n, L"Dragon") || HasW(n, L"Alien") || HasW(n, L"Yeti") || HasW(n, L"Squid") || HasW(n, L"Hywirl")
+		|| HasW(n, L"Armabee") || HasW(n, L"Monk") || HasW(n, L"Tribal"))
+		return POOL_FAN;
+	if (HasW(n, L"Fish") || HasW(n, L"Shark") || HasW(n, L"Tang") || HasW(n, L"Koi") || HasW(n, L"Tuna")
+		|| HasW(n, L"Tetra") || HasW(n, L"Piranha") || HasW(n, L"Puffer") || HasW(n, L"Goldfish")
+		|| HasW(n, L"Betta") || HasW(n, L"Snapper") || HasW(n, L"Grouper") || HasW(n, L"Gramma")
+		|| HasW(n, L"Idol") || HasW(n, L"Humphead") || HasW(n, L"Sword") || HasW(n, L"Turbot")
+		|| HasW(n, L"Clown") || HasW(n, L"Angler") || HasW(n, L"Whale") || HasW(n, L"Dolphin")
+		|| HasW(n, L"Manta") || HasW(n, L"Catfish") || HasW(n, L"Lionfish") || HasW(n, L"Mandarin")
+		|| HasW(n, L"Sunfish") || HasW(n, L"FlowerHorn") || HasW(n, L"Flatfish") || HasW(n, L"Cowfish")
+		|| HasW(n, L"Worm"))
+		return POOL_FISH;
+	if (HasW(n, L"Horse") || HasW(n, L"Donkey") || HasW(n, L"Bull") || HasW(n, L"Cow") || HasW(n, L"Deer")
+		|| HasW(n, L"Stag") || HasW(n, L"Alpaca") || HasW(n, L"Fox") || HasW(n, L"Wolf") || HasW(n, L"Husky")
+		|| HasW(n, L"Shiba") || HasW(n, L"Bunny") || HasW(n, L"Cat") || HasW(n, L"Rat") || HasW(n, L"Dino")
+		|| HasW(n, L"saurus") || HasW(n, L"Trex") || HasW(n, L"Tricera") || HasW(n, L"Veloci")
+		|| HasW(n, L"Frog") || HasW(n, L"Snake") || HasW(n, L"Spider") || HasW(n, L"Wasp")
+		|| HasW(n, L"Chicken") || HasW(n, L"Birb") || HasW(n, L"Pigeon") || HasW(n, L"Alpaking"))
+		return POOL_BEAST;
+	return POOL_FAN;
+}
+
+static int HumanoidFan(const wchar_t* n)
+{
+	return HasW(n, L"Orc") || HasW(n, L"Ninja") || HasW(n, L"Tribal") || HasW(n, L"Wizard")
+		|| HasW(n, L"Demon") || HasW(n, L"Alien") || HasW(n, L"Yeti") || HasW(n, L"Monk")
+		|| HasW(n, L"Ghost");
+}
+
+static void ApplyImportRole(MonsterDef& d, const wchar_t* n, int i)
+{
+	int role = 0;
+	if (ImportPool(n) == POOL_FAN && HumanoidFan(n)) {
+		if (HasW(n, L"Wizard") || HasW(n, L"Ghost")) role = 4;
+		else if (HasW(n, L"Demon")) role = (i & 1) ? 4 : 1;
+		else if (HasW(n, L"Ninja")) role = 2;
+		else if (HasW(n, L"Tribal")) role = 3;
+		else if (HasW(n, L"Orc")) role = (i & 1) ? 2 : 1;
+		else role = (i % 3 == 0) ? 3 : ((i % 3 == 1) ? 2 : 0);
+	} else if (ImportPool(n) == POOL_FAN && (i % 4 == 0)) role = 2;
+	else if ((i % 13) == 0) role = 2;
+	switch (role) {
+	case 1:
+		d.rMin = 1; d.rMax = 2; d.attackStyle = AS_STAB; d.weaponLook = 1; d.magAttack = 0; break;
+	case 2:
+		d.rMin = 2; d.rMax = 3; d.attackStyle = AS_SHOOT1; d.weaponLook = (i & 1) ? 3 : 4; d.magAttack = 0; break;
+	case 3:
+		d.rMin = 2; d.rMax = 4; d.attackStyle = AS_SHOOT; d.weaponLook = 2; d.magAttack = 0; break;
+	case 4:
+		d.rMin = 1; d.rMax = 3; d.attackStyle = AS_CAST; d.weaponLook = 0; d.magAttack = 1; break;
+	default:
+		d.rMin = 1; d.rMax = 1;
+		d.attackStyle = d.moveType == MV_FLY ? AS_BITE : AS_SLASH;
+		d.weaponLook = 0; d.magAttack = 0;
+		break;
+	}
+}
 
 static void EnsureMonsters()
 {
 	if (!s_monImpOk) {
+	for (int p = 0; p < 4; p++) s_poolN[p] = 0;
 	for (int i = 0; i < M_COUNT; i++) {
 		MonsterDef& d = kMon[i];
 		FillUnitSheet(d.base, d.grow, G_MELEE, d.magAttack, d.moveType == MV_FLY, d.jump, d.rMax);
 	}
-	for (int i = 0; i < kImportN && i < 160; i++) {
+	int nImp = kImportN < IMP_CAP ? kImportN : IMP_CAP;
+	for (int i = 0; i < nImp; i++) {
 		MonsterDef& d = s_monImp[i];
+		const wchar_t* nm = kImportName[i];
 		memset(&d, 0, sizeof(d));
 		d.look = LK_MESH;
 		d.model = i;
@@ -1485,11 +1592,8 @@ static void EnsureMonsters()
 		d.nameB = -1;
 		d.moveType = kImportFly[i] ? MV_FLY : MV_FOOT;
 		d.jump = d.moveType == MV_FLY ? 9 : 2;
-		d.rMin = 1;
-		d.rMax = (i % 5 == 0) ? 2 : 1;
-		d.magAttack = (i % 7 == 0) ? 1 : 0;
 		d.weaponPow = 4 + (i % 9);
-		d.attackStyle = d.magAttack ? AS_CAST : (d.moveType == MV_FLY ? AS_BITE : AS_SLASH);
+		ApplyImportRole(d, nm, i);
 		int tier = i / 12;
 		d.base[S_HP] = 20 + tier * 6 + (i % 5) * 2;
 		d.base[S_MP] = d.magAttack ? 14 + tier : 2;
@@ -1498,10 +1602,14 @@ static void EnsureMonsters()
 		d.base[S_MAG] = d.magAttack ? 6 + tier : 1;
 		d.base[S_RES] = 3 + tier / 2;
 		d.base[S_AGI] = 4 + (d.moveType == MV_FLY ? 3 : 0) + (i % 3);
-		d.base[S_DEX] = 4 + (i % 4);
+		d.base[S_DEX] = 4 + (d.attackStyle == AS_SHOOT || d.attackStyle == AS_SHOOT1 ? 3 : 0) + (i % 4);
 		d.base[S_LUK] = 2 + (i % 3);
-		d.base[S_MOV] = d.moveType == MV_FLY ? (6 + (i % 3)) : (d.magAttack ? (3 + (i % 2)) : ((i % 5 == 0) ? 2 : ((i % 3 == 0) ? 5 : 4)));
-		FillUnitSheet(d.base, d.grow, d.magAttack ? G_MAGIC : (d.moveType == MV_FLY ? G_SWIFT : G_MELEE), d.magAttack, d.moveType == MV_FLY, d.jump, d.rMax);
+		if (d.attackStyle == AS_SHOOT) d.base[S_MOV] = 3 + (i % 2);
+		else if (d.magAttack) d.base[S_MOV] = 3 + (i % 2);
+		else if (d.moveType == MV_FLY) d.base[S_MOV] = 6 + (i % 3);
+		else d.base[S_MOV] = (i % 3 == 0) ? 5 : 4;
+		int grp = d.magAttack ? G_MAGIC : (d.attackStyle == AS_SHOOT || d.attackStyle == AS_SHOOT1 ? G_SWIFT : (d.moveType == MV_FLY ? G_SWIFT : G_MELEE));
+		FillUnitSheet(d.base, d.grow, grp, d.magAttack, d.moveType == MV_FLY, d.jump, d.rMax);
 		d.grow[S_HP] = 45 + tier * 4;
 		d.grow[S_STR] = 40 + tier * 2;
 		d.grow[S_DEF] = 30 + tier;
@@ -1510,7 +1618,10 @@ static void EnsureMonsters()
 		d.grow[S_AGI] = 30;
 		d.grow[S_DEX] = 25;
 		d.grow[S_MP] = d.magAttack ? 40 : 5;
-		d.skills[0] = d.magAttack ? SKL_FIRE : (d.moveType == MV_FLY ? SKL_E_DRAIN : SKL_E_CRUSH);
+		if (d.magAttack) d.skills[0] = SKL_FIRE;
+		else if (d.attackStyle == AS_SHOOT) d.skills[0] = SKL_SNIPE;
+		else if (d.moveType == MV_FLY) d.skills[0] = SKL_E_DRAIN;
+		else d.skills[0] = SKL_E_CRUSH;
 		d.skills[1] = (i % 4 == 0) ? SKL_E_VENOM : -1;
 		d.skills[2] = -1;
 		d.minStage = 1;
@@ -1518,28 +1629,18 @@ static void EnsureMonsters()
 		d.weight = 8;
 		d.scale = 1.f;
 		d.tint = 0xFFFFFF;
+		int pool = ImportPool(nm);
+		if (pool != POOL_HUM && s_poolN[pool] < IMP_CAP) s_poolI[pool][s_poolN[pool]++] = M_COUNT + i;
 	}
 	}
 	s_monImpOk = 1;
-}
-
-static int ImportPick(int stage, Rng& r, int bias)
-{
-	EnsureMonsters();
-	int n = kImportN;
-	if (n < 1) return M_SLIME;
-	int origin = ((stage - 1) / 4) % n;
-	int idx = origin + bias;
-	if (idx >= n) idx -= n;
-	if (idx < 0) idx += n;
-	return M_COUNT + idx;
 }
 
 const MonsterDef& MonsterInfo(int m)
 {
 	EnsureSheets();
 	EnsureMonsters();
-	if (m >= M_COUNT && m < M_COUNT + kImportN) return s_monImp[m - M_COUNT];
+	if (m >= M_COUNT && m < M_COUNT + kImportN && (m - M_COUNT) < IMP_CAP) return s_monImp[m - M_COUNT];
 	if (m < 0 || m >= M_COUNT) m = 0;
 	return kMon[m];
 }
@@ -1943,7 +2044,11 @@ bool CanStep(const Map& m, int fx, int fz, int tx, int tz, int moveType, int jum
 static int EnterCost(const Map& m, int x, int z, int moveType)
 {
 	if (moveType == MV_FLY) return 2;
-	return TerrainInfo(m.At(x, z).t).costFoot;
+	const Cell& c = m.At(x, z);
+	int cost = TerrainInfo(c.t).costFoot;
+	// 砂漠・雪原の地面は歩ける。柔らかい吹きだまりだけ足を取る。
+	if ((c.t == T_SAND || c.t == T_SNOW) && (c.var % 5) == 0) cost = 3;
+	return cost;
 }
 
 void ComputeReach(const Battle& b, int ui, Reach& out)
@@ -2287,23 +2392,23 @@ int SkillTargets(const Battle& b, int caster, int skill, int cx, int cz, int* ou
 	return n;
 }
 
-int ExpForAction(const Unit& a, const Unit& d, int killed, int stage)
+int ExpForAction(const Unit& a, const Unit& d, int dmg, int stage)
 {
 	int dl = d.ch.lv - a.ch.lv;
-	// 相手が低いと 10+差*3 が 1 まで落ちていた。当たった攻撃は最低 12。
-	int e = 14 + dl * 2;
-	if (e < 12) e = 12;
-	if (killed) {
-		int kb = 32 + dl * 4 + (d.boss ? 40 : 0);
-		if (kb < 24) kb = 24;
-		e += kb;
-	}
-	e = Clampi(e, 12, 100);
+	float lv = 1.f + dl * 0.08f;
+	if (lv < 0.35f) lv = 0.35f;
+	if (lv > 2.2f) lv = 2.2f;
+	int hp = d.ch.stat[S_HP];
+	float frac = (dmg > 0 && hp > 0) ? (float)dmg / (float)hp : 0.f;
+	if (frac > 1.f) frac = 1.f;
+	int e = (int)roundf((8.f + 24.f * frac) * lv);
+	if (d.boss) e = e * 5 / 4;
+	e = Clampi(e, 3, 80);
 	int stageLv = stage <= 100 ? 1 + (stage - 1) * 9 / 10 : Clampi(90 + (stage - 100) * 6 / 5, 1, TAC_LV_MAX);
 	int gap = stageLv - a.ch.lv;
 	float f = 1.f + (stage - 1) * .025f;
 	if (gap > 0) f += gap * (0.12f + (stage - 1) * 0.012f);
-	return Clampi((int)roundf(e * f), 12, 999);
+	return Clampi((int)roundf(e * f), 3, 999);
 }
 
 static void ApplyEffect(Battle& b, Unit& a, Unit& d, int effect)
@@ -2556,25 +2661,73 @@ int Battle::PredictOrder(int* out, int n, int acting, int cost, int* insertAt) c
 	return got;
 }
 
+static int PickPool(int pool, Rng& r)
+{
+	int n = s_poolN[pool];
+	if (n <= 0) return -1;
+	return s_poolI[pool][r.Range(0, n - 1)];
+}
+
+static int PickClassic(int stage, Rng& r)
+{
+	int ids[M_COUNT];
+	int n = 0, wsum = 0;
+	for (int i = 0; i < M_COUNT; i++) {
+		if (kMon[i].minStage > stage) continue;
+		if (kMon[i].maxStage > 0 && stage > kMon[i].maxStage) continue;
+		int w = kMon[i].weight > 0 ? kMon[i].weight : 1;
+		ids[n++] = i;
+		wsum += w;
+	}
+	if (n <= 0 || wsum <= 0) return M_SLIME;
+	int roll = r.Range(0, wsum - 1);
+	for (int i = 0; i < n; i++) {
+		int w = kMon[ids[i]].weight > 0 ? kMon[ids[i]].weight : 1;
+		if (roll < w) return ids[i];
+		roll -= w;
+	}
+	return ids[0];
+}
+
 static int PickMonster(int stage, Rng& r)
 {
-	if (kImportN >= 80) return ImportPick(stage, r, r.Range(0, 11));
-	return M_SLIME;
+	EnsureMonsters();
+	int roll = r.Range(0, 99);
+	int pool = POOL_FAN;
+	if (stage < 25) {
+		if (roll < 48) return PickClassic(stage, r);
+		if (roll < 84) pool = POOL_FAN;
+		else if (roll < 96) pool = POOL_BEAST;
+		else pool = stage >= 10 ? POOL_FISH : POOL_FAN;
+	} else {
+		if (roll < 28) return PickClassic(stage, r);
+		if (roll < 70) pool = POOL_FAN;
+		else if (roll < 88) pool = POOL_BEAST;
+		else pool = POOL_FISH;
+	}
+	int id = PickPool(pool, r);
+	if (id < 0) return PickClassic(stage, r);
+	return id;
 }
 
 static int BossMonster(int stage, Rng& r)
 {
-	if (stage >= 200 && (stage % 40) == 0) return M_DRAGON;
-	if (kImportN >= 80) return ImportPick(stage, r, 8);
-	return PickMonster(stage, r);
+	EnsureMonsters();
+	if (stage >= 80 && (stage % 20) == 0) return M_DRAGON;
+	if (stage >= 24 && r.Range(0, 3) == 0) return M_WYVERN;
+	if (stage >= 16 && r.Range(0, 3) == 0) return M_GOLEM;
+	if (stage >= 30 && r.Range(0, 2) == 0) return M_DARK_KNIGHT;
+	int id = PickPool(POOL_FAN, r);
+	if (id >= 0 && r.Range(0, 1) == 0) return id;
+	return PickClassic(stage, r);
 }
 
-void SetupBattle(Battle& b, int stage, DWORD seed, const CharData* party, const int* rosterIdx, int nParty)
+void SetupBattle(Battle& b, int stage, DWORD seed, const CharData* party, const int* rosterIdx, int nParty, int theme)
 {
 	memset(&b, 0, sizeof(b));
 	stage = Clampi(stage, 1, TAC_STAGE_MAX);
 	b.stage = stage;
-	GenerateMap(b.map, stage, seed);
+	GenerateMap(b.map, stage, seed, theme);
 	Rng r(seed ^ 0xA5A5A5A5u);
 	int n = 0;
 	const float faceToE = atan2f((float)(b.map.eStartX[0] - b.map.pStartX[0]), (float)(b.map.eStartZ[0] - b.map.pStartZ[0]));
@@ -3599,7 +3752,7 @@ bool SaveLoad(SaveData& s)
 		c.body = Clampi(c.body, 0, B_COUNT - 1);
 		c.hair = Clampi(c.hair, 0, HAIR_STYLES - 1);
 		c.hairColor = Clampi(c.hairColor, 0, HAIR_COLORS - 1);
-		c.outfit = Clampi(c.outfit, 0, OUTFIT_COLORS - 1);
+		CharSetOutfit(c, Clampi(CharOutfit(c), 0, OUTFIT_COLORS - 1));
 	}
 	for (int i = 0; i < MAX_PARTY; i++)
 		if (s.party[i] < -1 || s.party[i] >= MAX_ROSTER || (s.party[i] >= 0 && !s.roster[s.party[i]].used)) s.party[i] = -1;
