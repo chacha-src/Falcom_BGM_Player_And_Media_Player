@@ -27,13 +27,15 @@ enum {
 	ID_CR_HAT, ID_CR_CAPE, ID_CR_OK, ID_CR_BACK, ID_CR_HEIGHT, ID_CR_BUST, ID_CR_FIG, ID_CR_FACE, ID_CR_AVATAR,
 	ID_PT_CARD0 = 300, ID_PT_DEPLOY = 340, ID_PT_EDIT, ID_PT_DELETE, ID_PT_YES, ID_PT_NO, ID_PT_BACK, ID_PT_NEW,
 	ID_PT_PAGE_PREV = 360, ID_PT_PAGE_NEXT,
-	ID_PT_ACC0 = 366, ID_PT_ACC1, ID_PT_BEAD0, ID_PT_BEAD1,
+	ID_PT_ACC0 = 366, ID_PT_ACC1, ID_PT_BEAD0, ID_PT_BEAD1, ID_PT_PAS0 = 370, ID_PT_PAS1,
 	ID_EQ_NONE = 1860, ID_EQ_ROW0, ID_EQ_PREV = 1880, ID_EQ_NEXT, ID_EQ_CLOSE,
 	ID_EV_MAIN0 = 1000, ID_EV_TGT0 = 1200, ID_EV_PART0 = 1300, ID_EV_DO = 1500, ID_EV_BACK,
 	ID_EV_PART_PREV = 1510, ID_EV_PART_NEXT, ID_EV_MAIN_PREV, ID_EV_MAIN_NEXT,
 	ID_RS_NEXT = 700, ID_RS_RETRY, ID_RS_BASE,
 	ID_HELP_CLOSE = 900,
-	ID_BASE_REROLL = 940, ID_BASE_THEME
+	ID_BASE_REROLL = 940, ID_BASE_THEME,
+	ID_BASE_SAVESLOT = 947,
+	ID_SLOT_ROW0 = 981, ID_SLOT_USE = 991, ID_SLOT_REN, ID_SLOT_COPY, ID_SLOT_DEL, ID_SLOT_BACK, ID_SLOT_YES, ID_SLOT_NO
 };
 
 void ThemeEnv(int th, Env& e)
@@ -112,6 +114,11 @@ Game::Game()
 	m_shopHold = 0;
 	m_partyBack = 0;
 	m_baseOpt = 0;
+	m_slotUi = 0;
+	m_slotPick = 0;
+	m_slotDest = -1;
+	m_slotEdit[0] = 0;
+	for (int si = 0; si < TAC_SLOT_N; si++) m_slotClear[si] = -1;
 	m_createFromParty = 0;
 	m_evFromParty = 0;
 	m_evJump = 0;
@@ -485,7 +492,7 @@ void Game::RenderFrame()
 	if (m_showHelp) DrawHelpOverlay();
 	else if (m_statTip >= 0) DrawStatTip();
 	if (m_evFlash > 0) m_r.HudRect(0, 0, (float)m_w, (float)m_h, RGBA8(255, 255, 255, (int)(m_evFlash * 200)));
-	if (m_screen == SC_BATTLE && m_click && !m_showHelp) {
+	if (m_screen == SC_BATTLE && m_click && !m_showHelp && !m_slotUi) {
 		m_click = FALSE;
 		BattleClick(m_clickX, m_clickY);
 	}
@@ -575,7 +582,7 @@ void Game::ZoomCam(float mul)
 		m_zoomHold = TRUE;
 		m_zoomDist = m_camDist;
 	}
-	m_zoomDist = Clampf(m_zoomDist * mul, 5.f, 32.f);
+	m_zoomDist = Clampf(m_zoomDist * mul, 5.f, 72.f);
 	m_camDistGoal = m_zoomDist;
 }
 
@@ -617,6 +624,15 @@ void Game::OnWheel(int delta)
 
 void Game::OnChar(wchar_t ch)
 {
+	if (m_textFocus == 2) {
+		size_t n = wcslen(m_slotEdit);
+		if (ch == 8) { if (n > 0) m_slotEdit[n - 1] = 0; return; }
+		if (ch == 13) { CommitSlotName(); return; }
+		if (ch == 27 || ch == 9) { m_textFocus = 0; return; }
+		if (ch < 32) return;
+		if (n + 1 < TAC_SLOT_NAME) { m_slotEdit[n] = ch; m_slotEdit[n + 1] = 0; }
+		return;
+	}
 	if (!m_textFocus || m_screen != SC_CREATE) return;
 	size_t n = wcslen(m_edit.name);
 	if (ch == 8) { if (n > 0) m_edit.name[n - 1] = 0; return; }
@@ -629,6 +645,11 @@ void Game::OnKey(int vk, BOOL down)
 {
 	if (vk == VK_SHIFT) { m_keyShift = down; m_fastFwd = down; }
 	if (!down) return;
+	if (m_textFocus == 2) {
+		if (vk == VK_RETURN) CommitSlotName();
+		else if (vk == VK_ESCAPE) m_textFocus = 0;
+		return;
+	}
 	if (m_textFocus && m_screen == SC_CREATE) {
 		if (vk == VK_RETURN || vk == VK_ESCAPE || vk == VK_TAB) m_textFocus = 0;
 		return;
@@ -639,6 +660,18 @@ void Game::OnKey(int vk, BOOL down)
 		return;
 	}
 	if (vk == VK_F1 || vk == 'H') { m_showHelp = TRUE; return; }
+	if (m_slotUi) {
+		switch (vk) {
+		case VK_LEFT: case 'A': NavMove(-1, 0); break;
+		case VK_RIGHT: case 'D': NavMove(1, 0); break;
+		case VK_UP: case 'W': NavMove(0, -1); break;
+		case VK_DOWN: case 'S': NavMove(0, 1); break;
+		case VK_RETURN: case VK_SPACE: case 'Z': NavConfirm(); break;
+		case VK_ESCAPE: case VK_BACK: case 'X': NavBack(); break;
+		default: break;
+		}
+		return;
+	}
 	BOOL battleMap = m_screen == SC_BATTLE && (m_phase == PH_P_MOVE || m_phase == PH_P_TARGET || m_phase == PH_P_SKILLTARGET || m_phase == PH_P_SHOVE);
 	switch (vk) {
 	case VK_LEFT: case 'A': if (battleMap) MoveCursor(-1, 0); else NavMove(-1, 0); break;
@@ -674,7 +707,7 @@ void Game::OnPad(const PadState& p, float dt)
 	float ax = p.lx, ay = p.ly;
 	if (p.hat >= 0) { static const int hx[8] = { 0, 1, 1, 1, 0, -1, -1, -1 }, hy[8] = { -1, -1, 0, 1, 1, 1, 0, -1 }; ax = (float)hx[p.hat]; ay = (float)hy[p.hat]; }
 	if (fabsf(ax) > .55f || fabsf(ay) > .55f) dir = fabsf(ax) > fabsf(ay) ? (ax > 0 ? 1 : 3) : (ay > 0 ? 2 : 0);
-	BOOL battleMap = m_screen == SC_BATTLE && (m_phase == PH_P_MOVE || m_phase == PH_P_TARGET || m_phase == PH_P_SKILLTARGET || m_phase == PH_P_SHOVE) && !m_showHelp;
+	BOOL battleMap = m_slotUi == 0 && m_screen == SC_BATTLE && (m_phase == PH_P_MOVE || m_phase == PH_P_TARGET || m_phase == PH_P_SKILLTARGET || m_phase == PH_P_SHOVE) && !m_showHelp;
 	if (dir >= 0) {
 		BOOL fire = FALSE;
 		if (dir != m_padDirPrev) { fire = TRUE; m_padRepeat = .32f; }
@@ -844,6 +877,13 @@ void Game::NavConfirm()
 void Game::NavBack()
 {
 	if (m_showHelp) { m_showHelp = FALSE; return; }
+	if (m_slotUi) {
+		if (m_textFocus) { m_textFocus = 0; return; }
+		if (m_slotUi == 5) m_slotUi = 4;
+		else if (m_slotUi > 1) m_slotUi = 1;
+		else m_slotUi = 0;
+		return;
+	}
 	switch (m_screen) {
 	case SC_CREATE:
 		if (m_textFocus) m_textFocus = 0;
@@ -897,14 +937,9 @@ void Game::AddLog(const wchar_t* s, DWORD col)
 	wcsncpy_s(L.s, s, _TRUNCATE);
 	L.col = col;
 }
-void Game::DrawBattleLog()
+void Game::DrawBattleLog(float lx, float top, float lw, float lh)
 {
-	float ms = U(236);
-	float lh = U(132);
-	float lx = U(386);
-	float lw = (float)m_w - ms - U(28) - lx;
-	if (lw < U(220)) lw = U(220);
-	float top = (float)m_h - U(146);
+	if (lw < U(80) || lh < U(40)) return;
 	m_r.HudRect(lx, top, lw, lh, RGBA8(6, 10, 18, 150));
 	m_r.HudFrame(lx, top, lw, lh, U(1.5f), RGBA8(220, 190, 120, 180));
 	m_r.HudText(TT(TX_BT_LOG), lx + U(12), top + U(16), U(14), RGBA8(255, 226, 150), 0, 1);
@@ -1097,7 +1132,7 @@ void Game::RenderActorPortrait(int slot, Actor& a, DWORD bg0, DWORD bg1)
 	m_r.SetLight(Norm(v3(.42f, .84f, -.40f)), look, 3.5f);
 	m_r.SetShadowEnabled(TRUE);
 	DrawParams dp;
-	dp.outline = .008f;
+	dp.outline = .0035f;
 	dp.rim = .58f;
 	m_r.BeginShadowPass();
 	ActorDraw(m_r, m_lib, a, world, dp, 0);
@@ -1537,6 +1572,19 @@ void Game::DrawCodex()
 				}
 			}
 			if (list[i] == SKL_RAISE) swprintf_s(how, L"%s  Lv7", TT(TX_G_HOLY));
+			if (list[i] >= SKL_AREAHEAL0 && list[i] < SKL_COUNT) {
+				int rad = SkillInfo(list[i]).area;
+				int show = -1, showTier = 99;
+				for (int c = 0; c <= C_SHADOW; c++) {
+					const ClassDef& cd = ClassInfo(c);
+					if (cd.group != G_HOLY || cd.tier < 3 || cd.tier - 1 < rad) continue;
+					if (cd.tier < showTier) { showTier = cd.tier; show = c; }
+				}
+				if (show >= 0) {
+					const wchar_t* more = rad <= 3 ? LangPick14(L"・他職も3まで", L", others to 3", L", autres jusqu'à 3", L", altri fino a 3", L", otros hasta 3", L", 다른 직업도 3까지", L"，其他职到3", L"، غيرهم حتى 3", L", прочие до 3", L", andere bis 3", L", outros até 3", L", anderen tot 3", L", inne do 3", L", diğerleri 3'e") : L"";
+					swprintf_s(how, L"%s  Lv%d%s", TT(ClassInfo(show).nameTx), PromoteLevel(showTier - 1), more);
+				}
+			}
 			if (list[i] >= SKL_ART0 && list[i] < SKL_ARTN) {
 				int k = list[i] - SKL_ART0;
 				int g = k / 26;
@@ -1563,9 +1611,13 @@ void Game::DrawCodex()
 				}
 			}
 			wchar_t row[220];
-			swprintf_s(row, L"%s   MP%d   %s", TT(sd.nameTx), sd.mp, how);
+			swprintf_s(row, L"%s   MP%d   %s", SkillLabel(list[i]), sd.mp, how);
 			m_r.HudText(row, x + U(24), yy, U(16), RGBA8(240, 240, 245), 0, 1);
-			m_r.HudText(TT(sd.descTx), x + U(36), yy + U(18), U(13), RGBA8(190, 200, 220), 0, 0);
+			wchar_t attr[120], desc[420];
+			SkillAttrText(sd, attr, 120);
+			if (attr[0]) swprintf_s(desc, L"%s  %s", TT(sd.descTx), attr);
+			else wcscpy_s(desc, TT(sd.descTx));
+			m_r.HudText(desc, x + U(36), yy + U(18), U(13), RGBA8(190, 200, 220), 0, 0);
 			yy += U(40);
 		}
 		wchar_t pg[32];
@@ -1574,7 +1626,7 @@ void Game::DrawCodex()
 		if (Btn(ID_CDX_PREV, x + U(24), y + h - U(56), U(140), U(36), L"◀")) m_codexPage = (m_codexPage + pages - 1) % pages;
 		if (Btn(ID_CDX_NEXT, x + U(180), y + h - U(56), U(140), U(36), L"▶")) m_codexPage = (m_codexPage + 1) % pages;
 	} else if (m_codex == 2) {
-		static const int showLv[] = { 1, 15, 35, 55, 78, 105, 140, 180, 230, 290, 400, 999 };
+		static const int showLv[] = { 1, 15, 35, 55, 78, 105, 140, 180, 230, 290, 1000, 9999 };
 		m_r.HudText(TT(TX_CDX_EXP), x + U(24), yy, U(16), RGBA8(255, 226, 150), 0, 1);
 		yy += U(26);
 		for (int i = 0; i < 12; i++) {
@@ -1774,7 +1826,7 @@ void Game::DrawShopAsk()
 void Game::DrawShopFit()
 {
 	if (m_shopFit == 5) { DrawShopArm(); return; }
-	if (m_shopFit < 1 || m_shopFit > 4) return;
+	if (!((m_shopFit >= 1 && m_shopFit <= 4) || m_shopFit == 11)) return;
 	m_r.HudRect(0, 0, (float)m_w, (float)m_h, RGBA8(0, 0, 0, 150));
 	float pw = min(U(640.f), (float)m_w - U(40));
 	float ph = min(U(520.f), (float)m_h - U(32));
@@ -1794,6 +1846,7 @@ void Game::DrawShopFit()
 			fitGear = GearOf(m_save.gearId[m_shopFitId]);
 		}
 	} else if (m_shopFit == 3) wcscpy_s(item, AccName(m_shopFitId));
+	else if (m_shopFit == 11) wcscpy_s(item, PasName(m_shopFitId + 1));
 	else wcscpy_s(item, CraftName(m_shopFitId));
 	m_r.HudText(item, px + pw * .5f, py + U(46), U(14), RGBA8(230, 230, 240), 1, 0);
 	int who[MAX_ROSTER], n = 0;
@@ -1820,6 +1873,10 @@ void Game::DrawShopFit()
 			swprintf_s(row, L"%s  %s  %s", c.name, ClassName(c.cls), cur);
 		} else if (m_shopFit == 3) {
 			swprintf_s(row, L"%s  %s  %s / %s", c.name, ClassName(c.cls), EquippedAccName(c, 0), EquippedAccName(c, 1));
+		} else if (m_shopFit == 11) {
+			int pid = m_shopFitId + 1;
+			if (EquippedPasId(c, 0) == pid || EquippedPasId(c, 1) == pid) ok = FALSE;
+			swprintf_s(row, L"%s  %s  %s / %s", c.name, ClassName(c.cls), EquippedPasName(c, 0), EquippedPasName(c, 1));
 		} else {
 			int bead = m_shopFitId + 1;
 			if (EquippedBeadId(c, 0) == bead || EquippedBeadId(c, 1) == bead) ok = FALSE;
@@ -1846,6 +1903,13 @@ void Game::DrawShopFit()
 				}
 				int slot = EquippedAccId(c, 0) > 0 && EquippedAccId(c, 1) <= 0 ? 1 : 0;
 				done = EquipAccId(c, slot, m_shopFitId);
+			} else if (m_shopFit == 11) {
+				if (m_shopHold) {
+					if (!PasBuy(m_save, m_shopFitId)) { TacSfx(TS_ERROR); return; }
+					m_shopHold = 0;
+				}
+				int slot = EquippedPasId(c, 0) > 0 && EquippedPasId(c, 1) <= 0 ? 1 : 0;
+				done = EquipPasId(c, slot, m_shopFitId + 1);
 			} else {
 				if (m_shopHold) {
 					if (!BeadBuy(m_save, m_shopFitId)) { TacSfx(TS_ERROR); return; }
@@ -1871,9 +1935,10 @@ void Game::DrawShopFit()
 		yy += U(40);
 	}
 	if (n < 1) m_r.HudText(TT(TX_SHOP_NOWEAR), px + pw * .5f, py + U(120), U(16), RGBA8(255, 180, 160), 1, 1);
-	BOOL keep = m_shopHold && m_shopFit <= 2 && n > 0;
+	BOOL keep = m_shopHold && ((m_shopFit <= 2 && n > 0) || m_shopFit == 11);
 	if (keep && Btn(ID_SHOP_FIT_KEEP, px + U(16), py + ph - U(86), pw - U(200), U(32), TT(TX_SHOP_KEEP))) {
-		if (!GearBuy(m_save, m_shopFitId)) { TacSfx(TS_ERROR); return; }
+		BOOL bought = m_shopFit == 11 ? PasBuy(m_save, m_shopFitId) : GearBuy(m_save, m_shopFitId);
+		if (!bought) { TacSfx(TS_ERROR); return; }
 		TacSfx(TS_CONFIRM);
 		Persist();
 		m_shopFit = 0;
@@ -1923,7 +1988,7 @@ void Game::DrawShop()
 		int id = i < 6 ? ID_SHOP_LINE0 + i : ID_SHOP_FREE;
 		if (Btn(id, tx, y + U(40), step - U(4), U(28), lab, TRUE, m_shopLine == i, U(12))) {
 			m_shopLine = i; m_shopPage = 0; m_shopSellPage = 0;
-			if (i == 6) m_shopKind = 5;
+			if (i == 6) { if (m_shopKind != 4 && m_shopKind != 6) m_shopKind = 5; }
 			else if (m_shopKind == 2) m_shopKind = 0;
 		}
 		tx += step;
@@ -1933,11 +1998,11 @@ void Game::DrawShop()
 	float tab0 = x + U(16);
 	float gap = U(6);
 	float avail = sellX - tab0 - U(12);
-	float bw = (avail - gap * 5.f) / 6.f;
+	static const int kindTx[7] = { TX_SHOP_WPN, TX_SHOP_ARM, TX_SHOP_GOODS, TX_SHOP_PART, TX_SHOP_ACC, TX_SHOP_BEAD, TX_SHOP_PAS };
+	float bw = (avail - gap * 6.f) / 7.f;
 	if (bw < U(8)) bw = U(8);
-	float kfs = bw < U(90) ? U(11) : U(13);
-	static const int kindTx[6] = { TX_SHOP_WPN, TX_SHOP_ARM, TX_SHOP_GOODS, TX_SHOP_PART, TX_SHOP_ACC, TX_SHOP_BEAD };
-	for (int i = 0; i < 6; i++) {
+	float kfs = bw < U(72) ? U(10) : U(12);
+	for (int i = 0; i < 7; i++) {
 		if (Btn(ID_SHOP_KIND0 + i, tab0 + (bw + gap) * i, ky, bw, U(28), TT(kindTx[i]), TRUE, m_shopKind == i, kfs)) {
 			m_shopKind = i; m_shopPage = 0; m_shopSellPage = 0;
 		}
@@ -1962,6 +2027,8 @@ void Game::DrawShop()
 		for (int i = 0; i < AccCount() && n < 512; i++) ids[n++] = i;
 	} else if (m_shopKind == 5) {
 		for (int i = 0; i < CRAFT_N && n < 512; i++) if (i / CRAFT_PER_LINE == m_shopLine) ids[n++] = i;
+	} else if (m_shopKind == 6) {
+		for (int i = 0; i < PasCount() && n < 512; i++) ids[n++] = i;
 	} else {
 		for (int i = 0; i < GearCount() && n < 512; i++) {
 			const GearDef* g = GearOf(i + 1);
@@ -2064,6 +2131,14 @@ void Game::DrawShop()
 				m_shopHold = 1; m_shopFit = 4; m_shopFitId = ids[ix]; m_shopFitPage = 0;
 				TacSfx(TS_OPEN); return;
 			}
+		} else if (m_shopKind == 6) {
+			swprintf_s(row, L"%s  %dG  x%d", PasName(ids[ix] + 1), PasPrice(ids[ix]), PasHave(ids[ix]));
+			ok = m_save.gold >= PasPrice(ids[ix]) && PasHave(ids[ix]) < 99;
+			takeHover(ID_SHOP_BUY0 + s, yy, PasDesc(ids[ix] + 1));
+			if (Btn(ID_SHOP_BUY0 + s, x + U(16), yy, w * .62f, rowH, row, ok, FALSE, U(13))) {
+				m_shopHold = 1; m_shopFit = 11; m_shopFitId = ids[ix]; m_shopFitPage = 0;
+				TacSfx(TS_OPEN); return;
+			}
 		} else if (m_shopKind == 2) {
 			const GoodDef* gd = GoodAt(ids[ix]);
 			swprintf_s(row, L"%s  %dG  x%d", TT(gd->nameTx), gd->price, GoodHave(m_save, ids[ix]));
@@ -2160,6 +2235,8 @@ void Game::DrawShop()
 	int on = 0;
 	if (m_shopKind == 5) {
 		for (int i = 0; i < CRAFT_N && on < CRAFT_N; i++) if (BeadCount(i) > 0) sellIds[on++] = i;
+	} else if (m_shopKind == 6) {
+		for (int i = 0; i < PasCount() && on < CRAFT_N; i++) if (PasHave(i) > 0) sellIds[on++] = i;
 	} else if (m_shopKind == 2) {
 		for (int i = 0; i < GoodCount() && on < CRAFT_N; i++) if (GoodHave(m_save, i) > 0) sellIds[on++] = i;
 	} else if (m_shopKind == 0 || m_shopKind == 1) {
@@ -2175,6 +2252,12 @@ void Game::DrawShop()
 		if (m_shopKind == 5) {
 			int back = max(1, CraftStoneCost(id) / 2);
 			swprintf_s(row, L"%s x%d  %s%d", CraftName(id), BeadCount(id), TT(TX_STONE), back);
+		} else if (m_shopKind == 6) {
+			swprintf_s(row, L"%s x%d  %dG", PasName(id + 1), PasHave(id), max(1, PasPrice(id) / 2));
+			if (Hit(x + w * .66f, sy, w * .32f, U(30)) || (m_navMode && m_focusId == ID_SHOP_SELL0 + (s - sa))) {
+				wcscpy_s(hovHold, PasDesc(id + 1));
+				hov = hovHold;
+			}
 		} else if (m_shopKind == 2) {
 			const GoodDef* gd = GoodAt(id);
 			if (!gd) { sy += U(34); continue; }
@@ -2194,7 +2277,10 @@ void Game::DrawShop()
 		if (Btn(ID_SHOP_SELL0 + (s - sa), x + w * .66f, sy, w * .32f, U(30), row, TRUE, FALSE, U(12))) {
 			BOOL sold = FALSE;
 			if (m_shopKind == 5) sold = BeadSell(id);
-			else if (m_shopKind == 2) {
+			else if (m_shopKind == 6) {
+				int back = max(1, PasPrice(id) / 2);
+				if (PasSell(id)) { m_save.gold += back; sold = TRUE; }
+			} else if (m_shopKind == 2) {
 				const GoodDef* gd = GoodAt(id);
 				if (gd && GoodTake(m_save, id)) { m_save.gold += max(1, gd->price / 2); sold = TRUE; }
 			} else sold = GearSellAt(m_save, id);
@@ -2241,8 +2327,252 @@ void Game::DrawShop()
 	}
 }
 
+static void KeepAppSettings(SaveData& dst, const SaveData& src)
+{
+	dst.winX = src.winX; dst.winY = src.winY; dst.winW = src.winW; dst.winH = src.winH;
+	dst.winSizeVer = src.winSizeVer;
+	dst.camSpeed = src.camSpeed;
+	dst.quality = src.quality;
+	dst.showGrid = src.showGrid;
+	dst.battleAnim = src.battleAnim;
+	dst.bgmVol = src.bgmVol;
+	dst.seVol = src.seVol;
+	dst.optInit = src.optInit;
+}
+
+void Game::OpenSlotPanel()
+{
+	m_slotUi = 1;
+	m_slotPick = SlotCurrent();
+	m_slotDest = -1;
+	m_textFocus = 0;
+	m_slotEdit[0] = 0;
+	RefreshSlotPeek();
+	m_focusId = ID_SLOT_ROW0 + m_slotPick;
+}
+
+void Game::RefreshSlotPeek()
+{
+	int cur = SlotCurrent();
+	for (int i = 0; i < TAC_SLOT_N; i++)
+		m_slotClear[i] = (i == cur) ? m_save.stageCleared : SlotPeekClear(i);
+}
+
+void Game::CommitSlotName()
+{
+	if (m_textFocus != 2) return;
+	m_textFocus = 0;
+	SlotRename(m_slotPick, m_slotEdit);
+}
+
+void Game::FlushCurrentSlot()
+{
+	if (m_screen == SC_BATTLE) {
+		QueueSuspend(1);
+		WaitSuspend();
+	} else WaitSuspend();
+	SaveWrite(m_save);
+}
+
+void Game::AdoptActiveSlot(BOOL leaveBattle)
+{
+	SaveData keep = m_save;
+	if (!SaveLoad(m_save)) {
+		SaveDefaults(m_save);
+		KeepAppSettings(m_save, keep);
+		SlotClearRuntime();
+	}
+	ApplyAudio();
+	m_r.SetQuality(m_save.quality);
+	if (leaveBattle || m_screen == SC_BATTLE || m_screen == SC_RESULT) EnterBase();
+	else {
+		ProbeSuspend();
+		for (int i = 0; i < Renderer::PORTRAIT_N; i++) m_portraitWant[i] = (i < MAX_ROSTER) ? i + 1 : 0;
+		InvalidatePortraits();
+		BuildShowcase();
+	}
+	RefreshSlotPeek();
+}
+
+void Game::SwitchToSlot(int to)
+{
+	if (to < 0 || to >= TAC_SLOT_N || to == SlotCurrent()) return;
+	BOOL battle = m_screen == SC_BATTLE;
+	FlushCurrentSlot();
+	SlotSelect(to);
+	AdoptActiveSlot(battle);
+	m_slotUi = 1;
+	m_slotPick = to;
+	m_textFocus = 0;
+	wchar_t sn[TAC_SLOT_NAME];
+	SlotTitle(to, sn, TAC_SLOT_NAME);
+	AddBanner(sn, TT(TX_SLOT), RGBA8(255, 226, 150), 0, 1.6f);
+}
+
+void Game::DeletePickedSlot()
+{
+	int slot = m_slotPick;
+	if (slot < 0 || slot >= TAC_SLOT_N) { m_slotUi = 1; return; }
+	BOOL cur = slot == SlotCurrent();
+	WaitSuspend();
+	SlotWipe(slot);
+	SlotRename(slot, L"");
+	if (cur) {
+		SaveData keep = m_save;
+		SlotClearRuntime();
+		SaveDefaults(m_save);
+		KeepAppSettings(m_save, keep);
+		SaveWrite(m_save);
+		if (m_screen == SC_BATTLE || m_screen == SC_RESULT) EnterBase();
+		else {
+			ProbeSuspend();
+			for (int i = 0; i < Renderer::PORTRAIT_N; i++) m_portraitWant[i] = (i < MAX_ROSTER) ? i + 1 : 0;
+			InvalidatePortraits();
+			BuildShowcase();
+		}
+	}
+	m_slotUi = 1;
+	m_textFocus = 0;
+	RefreshSlotPeek();
+}
+
+void Game::CopyPickedSlot()
+{
+	int from = m_slotPick;
+	int to = m_slotDest;
+	if (from < 0 || to < 0 || from >= TAC_SLOT_N || to >= TAC_SLOT_N || from == to) { m_slotUi = 1; return; }
+	BOOL battle = m_screen == SC_BATTLE;
+	if (from == SlotCurrent()) FlushCurrentSlot();
+	else WaitSuspend();
+	if (!SlotCopyFiles(from, to)) { TacSfx(TS_ERROR); m_slotUi = 1; return; }
+	if (to == SlotCurrent()) AdoptActiveSlot(battle);
+	else RefreshSlotPeek();
+	m_slotUi = 1;
+	m_textFocus = 0;
+	m_slotPick = to;
+	wchar_t dn[TAC_SLOT_NAME];
+	SlotTitle(to, dn, TAC_SLOT_NAME);
+	AddBanner(TT(TX_SLOT_COPIED), dn, RGBA8(255, 226, 150), 0, 1.6f);
+}
+
+void Game::DrawSlotUi()
+{
+	m_r.HudRect(0, 0, (float)m_w, (float)m_h, RGBA8(0, 0, 0, 150));
+	float w = min(U(760.f), (float)m_w - U(24));
+	float h = min(U(640.f), (float)m_h - U(24));
+	if (w < U(280)) w = (float)m_w - 8.f;
+	if (h < U(220)) h = (float)m_h - 8.f;
+	float x = ((float)m_w - w) * .5f;
+	float y = ((float)m_h - h) * .5f;
+	Panel(x, y, w, h);
+	float pad = U(18);
+	int mode = m_slotUi;
+	const wchar_t* title = mode == 4 ? TT(TX_SLOT_COPYTO) : TT(TX_SLOT);
+	m_r.HudText(title, x + w * .5f, y + U(28), U(20), RGBA8(255, 226, 150), 1, 1);
+	if (mode == 1 || mode == 4) {
+		if (mode == 4) {
+			wchar_t sn[TAC_SLOT_NAME], sub[96];
+			SlotTitle(m_slotPick, sn, TAC_SLOT_NAME);
+			swprintf_s(sub, L"%s  %s", TT(TX_SLOT_COPY), sn);
+			m_r.HudText(sub, x + w * .5f, y + U(52), U(14), RGBA8(220, 220, 230), 1, 0);
+		}
+		float btnH = U(38);
+		float btnY = y + h - pad - btnH;
+		float top = y + (mode == 4 ? U(70) : U(52));
+		float rowH = (btnY - U(8) - top) / (float)TAC_SLOT_N;
+		if (rowH > U(44)) rowH = U(44);
+		if (rowH < U(22)) rowH = U(22);
+		for (int i = 0; i < TAC_SLOT_N; i++) {
+			wchar_t nm[TAC_SLOT_NAME];
+			SlotTitle(i, nm, TAC_SLOT_NAME);
+			BOOL editing = m_textFocus == 2 && i == m_slotPick && mode == 1;
+			wchar_t info[48];
+			if (m_slotClear[i] < 0) wcsncpy_s(info, TT(TX_SLOT_EMPTY), _TRUNCATE);
+			else swprintf_s(info, L"%s %d", TT(TX_BASE_STAGE), m_slotClear[i]);
+			wchar_t line[160];
+			swprintf_s(line, L"%d   %s%s    %s%s%s", i + 1,
+				editing ? m_slotEdit : nm, editing ? L"_" : L"",
+				info, (i == SlotCurrent()) ? L"    " : L"", (i == SlotCurrent()) ? TT(TX_SLOT_NOW) : L"");
+			BOOL en = !(mode == 4 && i == m_slotPick);
+			BOOL sel = i == m_slotPick;
+			if (Btn(ID_SLOT_ROW0 + i, x + pad, top + rowH * i, w - pad * 2.f, rowH - U(3), line, en, sel, U(15))) {
+				if (mode == 4) {
+					m_slotDest = i;
+					m_slotUi = 5;
+					m_focusId = ID_SLOT_NO;
+				} else {
+					if (m_textFocus == 2 && m_slotPick != i) CommitSlotName();
+					m_slotPick = i;
+				}
+			}
+		}
+		float gap = U(6);
+		float bx = x + pad;
+		float bw = w - pad * 2.f;
+		if (mode == 4) {
+			if (Btn(ID_SLOT_BACK, bx, btnY, bw, btnH, TT(TX_CR_BACK))) { m_slotUi = 1; m_textFocus = 0; }
+		} else {
+			float bw5 = (bw - gap * 4.f) / 5.f;
+			BOOL cur = m_slotPick == SlotCurrent();
+			if (Btn(ID_SLOT_USE, bx, btnY, bw5, btnH, cur ? TT(TX_SLOT_NOW) : TT(TX_SLOT_USE), !cur, FALSE, U(14))) {
+				if (m_textFocus == 2) CommitSlotName();
+				SwitchToSlot(m_slotPick);
+			}
+			if (Btn(ID_SLOT_REN, bx + (bw5 + gap), btnY, bw5, btnH, TT(TX_SLOT_REN), TRUE, m_textFocus == 2, U(14))) {
+				SlotTitle(m_slotPick, m_slotEdit, TAC_SLOT_NAME);
+				m_textFocus = 2;
+			}
+			if (Btn(ID_SLOT_COPY, bx + (bw5 + gap) * 2.f, btnY, bw5, btnH, TT(TX_SLOT_COPY), TRUE, FALSE, U(14))) {
+				if (m_textFocus == 2) CommitSlotName();
+				m_slotUi = 4;
+				m_slotDest = -1;
+				m_focusId = ID_SLOT_ROW0;
+			}
+			if (Btn(ID_SLOT_DEL, bx + (bw5 + gap) * 3.f, btnY, bw5, btnH, TT(TX_PT_DELETE), TRUE, FALSE, U(14), RGBA8(140, 50, 40, 240))) {
+				if (m_textFocus == 2) CommitSlotName();
+				m_slotUi = 2;
+				m_focusId = ID_SLOT_NO;
+			}
+			if (Btn(ID_SLOT_BACK, bx + (bw5 + gap) * 4.f, btnY, bw5, btnH, TT(TX_CR_BACK), TRUE, FALSE, U(14))) {
+				if (m_textFocus == 2) CommitSlotName();
+				m_slotUi = 0;
+				m_textFocus = 0;
+			}
+		}
+	} else {
+		wchar_t src[TAC_SLOT_NAME], dst[TAC_SLOT_NAME], head[120];
+		SlotTitle(m_slotPick, src, TAC_SLOT_NAME);
+		if (mode == 5) {
+			SlotTitle(m_slotDest, dst, TAC_SLOT_NAME);
+			swprintf_s(head, L"%s   →   %s", src, dst);
+		} else wcsncpy_s(head, src, _TRUNCATE);
+		const wchar_t* body = TT(TX_SLOT_WARN1);
+		if (mode == 3) body = TT(TX_SLOT_WARN2);
+		else if (mode == 5) body = TT(TX_SLOT_COPYQ);
+		m_r.HudText(head, x + w * .5f, y + U(78), U(18), RGBA8(255, 236, 190), 1, 1);
+		m_r.HudTextBox(body, x + pad, y + U(110), w - pad * 2.f, U(110), U(16), RGBA8(255, 220, 210));
+		float bh = U(40);
+		float by = y + h - pad - bh;
+		float bw = (w - pad * 2.f - U(10)) * .5f;
+		DWORD yesCol = (mode == 3) ? RGBA8(140, 50, 40, 240) : 0;
+		if (Btn(ID_SLOT_YES, x + pad, by, bw, bh, TT(TX_PT_YES), TRUE, FALSE, 0, yesCol)) {
+			if (mode == 2) { m_slotUi = 3; m_focusId = ID_SLOT_NO; }
+			else if (mode == 3) DeletePickedSlot();
+			else if (mode == 5) CopyPickedSlot();
+		}
+		if (Btn(ID_SLOT_NO, x + pad + bw + U(10), by, bw, bh, TT(TX_PT_NO))) {
+			m_slotUi = (mode == 5) ? 4 : 1;
+			m_focusId = ID_SLOT_BACK;
+		}
+	}
+	m_click = FALSE;
+	m_rclick = FALSE;
+	m_activateId = -1;
+}
+
 void Game::DrawBaseUi()
 {
+	if (m_slotUi) { DrawSlotUi(); return; }
 	if (m_codex) { DrawCodex(); return; }
 	if (m_shop) { DrawShop(); return; }
 	// 開始メニューは出撃カードより後に描く。それまでは下のボタンを押させない。
@@ -2263,7 +2593,7 @@ void Game::DrawBaseUi()
 	float helpY = y + ph - helpH - max(6.f, ph * .015f);
 	float top = y + titleH * 2.f + 14.f;
 	float midRoom = helpY - top - 4.f;
-	float midNeed = m_baseOpt ? U(560) : U(340);
+	float midNeed = m_baseOpt ? U(620) : U(400);
 	float k = midNeed > 1.f ? min(1.f, midRoom / midNeed) : 1.f;
 	if (k < .42f) k = .42f;
 	auto Ku = [&](float px) { return U(px) * k; };
@@ -2316,6 +2646,13 @@ void Game::DrawBaseUi()
 	by += bh + Ku(8);
 	if (Btn(ID_BASE_CODEX, bx, by, halfW, bh, TT(TX_BASE_CODEX), TRUE, FALSE, hfs)) { m_codex = 1; m_codexPage = 0; return; }
 	if (Btn(ID_BASE_SET, bx + halfW + gapb, by, halfW, bh, TT(TX_SET_OPEN), TRUE, m_baseOpt != 0, hfs)) m_baseOpt = !m_baseOpt;
+	by += bh + Ku(8);
+	{
+		wchar_t sn[TAC_SLOT_NAME], sb[80];
+		SlotTitle(SlotCurrent(), sn, TAC_SLOT_NAME);
+		swprintf_s(sb, L"%s  %s", TT(TX_SLOT), sn);
+		if (Btn(ID_BASE_SAVESLOT, bx, by, bw, bh, sb, TRUE, FALSE, hfs)) { OpenSlotPanel(); return; }
+	}
 	by += bh + Ku(12);
 	if (m_baseOpt) {
 		static const int qtx[3] = { TX_SET_Q_LOW, TX_SET_Q_STD, TX_SET_Q_HIGH };
@@ -2754,6 +3091,7 @@ void Game::DrawEquipLayer()
 	wcscpy_s(cur, TT(TX_PT_NONE));
 	int ids[96], n = 0, curId = 0;
 	BOOL gear = kind <= 2;
+	BOOL pasPick = kind >= 7;
 	if (kind <= 2) {
 		int gk = kind == 1 ? 0 : 1;
 		title = TT(gk ? TX_GEAR_ARM : TX_GEAR_WPN);
@@ -2771,6 +3109,13 @@ void Game::DrawEquipLayer()
 		if (curId > 0) wcscpy_s(cur, AccName(curId));
 		for (int i = 0; i < AccCount() && n < 96; i++)
 			if (AccSpare(c, slot, i) > 0 || i + 1 == curId) ids[n++] = i + 1;
+	} else if (kind >= 7) {
+		int slot = kind - 7;
+		title = TT(TX_PAS);
+		curId = EquippedPasId(c, slot);
+		if (curId > 0) wcscpy_s(cur, PasName(curId));
+		for (int i = 0; i < PasCount() && n < 96; i++)
+			if (PasSpare(c, slot, i) > 0 || i + 1 == curId) ids[n++] = i + 1;
 	} else {
 		int slot = kind - 5;
 		title = TT(TX_BEAD);
@@ -2782,8 +3127,8 @@ void Game::DrawEquipLayer()
 	m_r.HudText(title, px + pw * .5f, py + U(22), U(20), RGBA8(255, 226, 150), 1, 1);
 	m_r.HudText(cur, px + pw * .5f, py + U(46), U(14), RGBA8(220, 220, 230), 1, 0);
 
-	BOOL beadPick = kind >= 5;
-	float listTop = py + U(62), listBot = py + ph - U(58) - (beadPick ? U(48) : 0);
+	BOOL beadPick = kind >= 5 && kind <= 6;
+	float listTop = py + U(62), listBot = py + ph - U(58) - ((beadPick || pasPick) ? U(48) : 0);
 	int per = (int)((listBot - listTop) / U(36)) - 1;
 	if (per < 3) per = 3;
 	if (per > 8) per = 8;
@@ -2803,6 +3148,9 @@ void Game::DrawEquipLayer()
 			if (ok) { Persist(); InvalidatePortraits(); BuildShowcase(); }
 		} else if (kind <= 4) {
 			ok = EquipAccId(c, kind - 3, 0);
+			if (ok) Persist();
+		} else if (kind >= 7) {
+			ok = EquipPasId(c, kind - 7, 0);
 			if (ok) Persist();
 		} else {
 			ok = EquipBeadId(c, kind - 5, 0);
@@ -2838,6 +3186,11 @@ void Game::DrawEquipLayer()
 				wcscat_s(st, bit);
 			}
 			swprintf_s(row, L"%s  x%d%s", AccName(id), max(1, AccSpare(c, kind - 3, id - 1)), st);
+		} else if (kind >= 7) {
+			int id = ids[ix];
+			sel = id == curId;
+			swprintf_s(row, L"%s  x%d", PasName(id), max(1, PasSpare(c, kind - 7, id - 1)));
+			if (Hit(px + U(16), yy, pw - U(32), U(32)) || (m_navMode && m_focusId == ID_EQ_ROW0 + s)) hovBead = id;
 		} else {
 			int id = ids[ix];
 			sel = id == curId;
@@ -2856,6 +3209,9 @@ void Game::DrawEquipLayer()
 			} else if (kind <= 4) {
 				ok = EquipAccId(c, kind - 3, ids[ix]);
 				if (ok) Persist();
+			} else if (kind >= 7) {
+				ok = EquipPasId(c, kind - 7, ids[ix]);
+				if (ok) Persist();
 			} else {
 				ok = EquipBeadId(c, kind - 5, ids[ix]);
 				if (ok) Persist();
@@ -2866,9 +3222,9 @@ void Game::DrawEquipLayer()
 		}
 		yy += U(36);
 	}
-	if (beadPick) {
+	if (beadPick || pasPick) {
 		int show = hovBead > 0 ? hovBead : curId;
-		if (show > 0) m_r.HudTextBox(CraftDesc(show - 1), px + U(16), py + ph - U(96), pw - U(32), U(44), U(12), RGBA8(210, 220, 235));
+		if (show > 0) m_r.HudTextBox(pasPick ? PasDesc(show) : CraftDesc(show - 1), px + U(16), py + ph - U(96), pw - U(32), U(44), U(12), RGBA8(210, 220, 235));
 	}
 	wchar_t pg[32];
 	swprintf_s(pg, L"%d / %d", m_eqPage + 1, pages);
@@ -2992,7 +3348,7 @@ void Game::DrawPartyUi()
 		sks[ns++] = s;
 	}
 	float skillTop = sy;
-	float skillBot = y + gh - U(228);
+	float skillBot = y + gh - U(268);
 	if (skillBot < skillTop + U(16)) skillBot = skillTop + U(16);
 	if (!ns) {
 		m_r.HudText(TT(TX_PT_NONE), dx + U(20), skillTop + U(9), U(13), RGBA8(160, 160, 170), 0, 0);
@@ -3018,8 +3374,8 @@ void Game::DrawPartyUi()
 			else if (sd.area <= 0) wcscpy_s(tag, TT(TX_SHAPE_ONE));
 			else if (sd.area == 1) wcscpy_s(tag, TT(TX_MISC_AREA));
 			else swprintf_s(tag, L"%s%d", TT(TX_SHAPE_WIDE), sd.area);
-			if (sd.kind == SK_PASSIVE) swprintf_s(sl, L"%s (%s)", TT(sd.nameTx), tag);
-			else swprintf_s(sl, L"%s %s MP%d", TT(sd.nameTx), tag, sd.mp);
+			if (sd.kind == SK_PASSIVE) swprintf_s(sl, L"%s (%s)", SkillLabel(sks[i]), tag);
+			else swprintf_s(sl, L"%s %s MP%d", SkillLabel(sks[i]), tag, sd.mp);
 			m_r.HudText(sl, dx + U(10) + col * colW, cy, fs, RGBA8(236, 236, 240), 0, 0);
 		}
 	}
@@ -3029,17 +3385,21 @@ void Game::DrawPartyUi()
 		const GearDef* arm = GearOf(c.reserved[7]);
 		wchar_t gl[96];
 		swprintf_s(gl, L"%s: %s", TT(TX_GEAR_WPN), wpn ? GearName(c.reserved[6]) : TT(TX_PT_NONE));
-		if (Btn(ID_PT_WPN, dx + U(14), y + gh - U(220), dw * .48f, U(26), gl, TRUE, FALSE, U(11))) { m_eqPick = 1; m_eqPage = 0; m_focusId = ID_EQ_NONE; }
+		if (Btn(ID_PT_WPN, dx + U(14), y + gh - U(252), dw * .48f, U(26), gl, TRUE, FALSE, U(11))) { m_eqPick = 1; m_eqPage = 0; m_focusId = ID_EQ_NONE; }
 		swprintf_s(gl, L"%s: %s", TT(TX_GEAR_ARM), arm ? GearName(c.reserved[7]) : TT(TX_PT_NONE));
-		if (Btn(ID_PT_ARM, dx + dw * .52f, y + gh - U(220), dw * .46f, U(26), gl, TRUE, FALSE, U(11))) { m_eqPick = 2; m_eqPage = 0; m_focusId = ID_EQ_NONE; }
+		if (Btn(ID_PT_ARM, dx + dw * .52f, y + gh - U(252), dw * .46f, U(26), gl, TRUE, FALSE, U(11))) { m_eqPick = 2; m_eqPage = 0; m_focusId = ID_EQ_NONE; }
 		swprintf_s(gl, L"%s1: %s", TT(TX_ACC), EquippedAccName(c, 0));
-		if (Btn(ID_PT_ACC0, dx + U(14), y + gh - U(190), dw * .48f, U(26), gl, TRUE, FALSE, U(11))) { m_eqPick = 3; m_eqPage = 0; m_focusId = ID_EQ_NONE; }
+		if (Btn(ID_PT_ACC0, dx + U(14), y + gh - U(222), dw * .48f, U(26), gl, TRUE, FALSE, U(11))) { m_eqPick = 3; m_eqPage = 0; m_focusId = ID_EQ_NONE; }
 		swprintf_s(gl, L"%s2: %s", TT(TX_ACC), EquippedAccName(c, 1));
-		if (Btn(ID_PT_ACC1, dx + dw * .52f, y + gh - U(190), dw * .46f, U(26), gl, TRUE, FALSE, U(11))) { m_eqPick = 4; m_eqPage = 0; m_focusId = ID_EQ_NONE; }
+		if (Btn(ID_PT_ACC1, dx + dw * .52f, y + gh - U(222), dw * .46f, U(26), gl, TRUE, FALSE, U(11))) { m_eqPick = 4; m_eqPage = 0; m_focusId = ID_EQ_NONE; }
 		swprintf_s(gl, L"%s1: %s", TT(TX_BEAD), EquippedBeadName(c, 0));
-		if (Btn(ID_PT_BEAD0, dx + U(14), y + gh - U(160), dw * .48f, U(26), gl, TRUE, FALSE, U(11))) { m_eqPick = 5; m_eqPage = 0; m_focusId = ID_EQ_NONE; }
+		if (Btn(ID_PT_BEAD0, dx + U(14), y + gh - U(192), dw * .48f, U(26), gl, TRUE, FALSE, U(11))) { m_eqPick = 5; m_eqPage = 0; m_focusId = ID_EQ_NONE; }
 		swprintf_s(gl, L"%s2: %s", TT(TX_BEAD), EquippedBeadName(c, 1));
-		if (Btn(ID_PT_BEAD1, dx + dw * .52f, y + gh - U(160), dw * .46f, U(26), gl, TRUE, FALSE, U(11))) { m_eqPick = 6; m_eqPage = 0; m_focusId = ID_EQ_NONE; }
+		if (Btn(ID_PT_BEAD1, dx + dw * .52f, y + gh - U(192), dw * .46f, U(26), gl, TRUE, FALSE, U(11))) { m_eqPick = 6; m_eqPage = 0; m_focusId = ID_EQ_NONE; }
+		swprintf_s(gl, L"%s1: %s", TT(TX_PAS), EquippedPasName(c, 0));
+		if (Btn(ID_PT_PAS0, dx + U(14), y + gh - U(162), dw * .48f, U(26), gl, TRUE, FALSE, U(11))) { m_eqPick = 7; m_eqPage = 0; m_focusId = ID_EQ_NONE; }
+		swprintf_s(gl, L"%s2: %s", TT(TX_PAS), EquippedPasName(c, 1));
+		if (Btn(ID_PT_PAS1, dx + dw * .52f, y + gh - U(162), dw * .46f, U(26), gl, TRUE, FALSE, U(11))) { m_eqPick = 8; m_eqPage = 0; m_focusId = ID_EQ_NONE; }
 	}
 	float by = y + gh - U(120);
 	if (!m_confirmDelete && Btn(ID_PT_EVO, dx + U(14), by - U(6), dw - U(28), U(28), TT(TX_BASE_EVOLVE), TRUE, FALSE, U(13))) {

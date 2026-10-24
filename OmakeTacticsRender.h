@@ -248,7 +248,7 @@ public:
 	ID3D11ShaderResourceView* MinimapSrv() { return m_srvMini; }
 
 	// ポートレート
-	enum { PORTRAIT_N = 24, PORTRAIT_PX = 96 };
+	enum { PORTRAIT_N = 24, PORTRAIT_PX = 256 };
 	BOOL BeginPortrait(int slot);
 	void EndPortrait();
 	ID3D11ShaderResourceView* PortraitSrv() { return m_srvPortrait; }

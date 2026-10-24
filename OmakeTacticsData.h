@@ -174,7 +174,7 @@ enum ClassId {
 	C_ALCHEMIST, C_ARCHALCHEMIST,
 	C_PLAYER_COUNT
 };
-enum { TAC_LV_MAX = 999, TAC_STAGE_MAX = 9999, TAC_RANK_LINES = 8, TAC_RANK_N = 7 };
+enum { TAC_LV_MAX = 9999, TAC_ENEMY_LV_MAX = 99999, TAC_STAGE_MAX = 9999, TAC_RANK_LINES = 8, TAC_RANK_N = 7 };
 // ファイター・シーフの3次職。既存の順位 ID を動かさないため、ランク枠の後ろに置く。
 enum { C_GLADIATOR = C_PLAYER_COUNT + TAC_RANK_LINES * TAC_RANK_N, C_SHADOW = C_GLADIATOR + 1 };
 
@@ -206,7 +206,10 @@ enum { IT_ORE = 0, IT_HERB, IT_CRYSTAL, IT_SHARD, IT_ELIXIR, IT_MIGHT, IT_DELAY,
 enum { IX_FULL = 0, IX_ATK, IX_DEF, IX_AGI, IX_SLOW, IX_VENOM, IX_CURE, IX_ETHER, IX_N };
 
 enum SkillKind { SK_PHYS, SK_MAGIC, SK_HEAL, SK_BUFF, SK_PASSIVE };
-enum Element { EL_NONE, EL_FIRE, EL_ICE, EL_THUNDER, EL_HOLY, EL_DARK, EL_WIND, EL_EARTH, EL_POISON };
+enum Element {
+	EL_NONE, EL_FIRE, EL_ICE, EL_THUNDER, EL_HOLY, EL_DARK, EL_WIND, EL_EARTH, EL_POISON,
+	EL_PHYS, EL_MAGIC, EL_MELEE, EL_RANGE
+};
 enum SkillId {
 	SKL_POWER, SKL_DOUBLE, SKL_WHIRL, SKL_PIERCE, SKL_STITCH, SKL_VITAL, SKL_BASH, SKL_DRAGONFANG,
 	SKL_HOLYBLADE, SKL_ARROWRAIN, SKL_ASSASSINATE, SKL_BRAVE,
@@ -227,7 +230,10 @@ enum SkillId {
 	SKL_FISTGOD, SKL_WARLORD, SKL_BREAKKING, SKL_STEELGOD, SKL_HEGEFIST, SKL_PEERLESS, SKL_ENDFIST,
 	SKL_SHADOWSTEP, SKL_SMOKESCREEN, SKL_VITALSTAB, SKL_BACKCUT, SKL_NIGHTRUN, SKL_SILENTKILL, SKL_DAGGERRAIN, SKL_DEATHMARK,
 	SKL_GHOSTHAND, SKL_SHADEEMP, SKL_TRACELESS, SKL_NIGHTEMP, SKL_VOIDTHIEF, SKL_LASTNIGHT, SKL_ETERNIGHT,
-	SKL_COUNT
+	SKL_ESUNA, SKL_PURIFY, SKL_CLEANCUT,
+	SKL_AREAHEAL0,
+	SKL_AREARAISE0 = SKL_AREAHEAL0 + 8,
+	SKL_COUNT = SKL_AREARAISE0 + 8
 };
 enum { SH_RADIUS = 0, SH_LINE = 1, SH_FAN = 2 };
 struct SkillDef {
@@ -244,8 +250,17 @@ struct SkillDef {
 	int enemyOnly;
 	int shape = SH_RADIUS;
 };
-enum SkillEffect { EF_NONE, EF_SLOW, EF_DEFDOWN, EF_POISON, EF_DRAIN, EF_IGNDEF, EF_BUFF_DEF, EF_BUFF_AGI, EF_BUFF_ATK, EF_REACT, EF_RAISE };
+enum SkillEffect {
+	EF_NONE, EF_SLOW, EF_DEFDOWN, EF_POISON, EF_DRAIN, EF_IGNDEF, EF_BUFF_DEF, EF_BUFF_AGI, EF_BUFF_ATK, EF_REACT, EF_RAISE,
+	EF_SLEEP, EF_CONFUSE, EF_STUN, EF_CLEANSE
+};
+const wchar_t* ElemWord(int el);
+const wchar_t* EffectWord(int ef);
+const wchar_t* WeakLabel();
+void SkillAttrText(const SkillDef& sd, wchar_t* out, int cap);
+void MonsterWeakText(int monster, wchar_t* out, int cap);
 const SkillDef& SkillInfo(int s);
+const wchar_t* SkillLabel(int s);
 
 // ---------------- キャラクタ（セーブ対象） ----------------
 enum { MAX_ROSTER = 100, MAX_PARTY = 10, MAX_ENEMY = 640, NAME_LEN = 16 };
@@ -325,6 +340,7 @@ struct MonsterDef {
 	DWORD tint;        // 0x00RRGGBB 乗算
 	int maxStage;      // 0=上限なし。これを超えたステージには出さない
 	int nameB;         // 0未満なら nameTx だけ。0以上なら「形容 + 種族」
+	int weak[2];       // 弱点。0 はなし。属性か、物理・魔法・近距離・遠距離
 };
 const MonsterDef& MonsterInfo(int m);
 const wchar_t* MonsterLabel(int m);
@@ -343,7 +359,8 @@ struct Unit {
 	int x, z;
 	int ct;
 	float face;          // 向き（ラジアン）
-	int buffDef, buffAgi, buffAtk, poison, defDown;   // 残りターン
+	int buffDef, buffAgi, buffAtk, poison, slow, defDown;   // 残りターン。毒・鈍足・防御低下は1〜3
+	int sleep, confuse, stun;   // 睡眠は1、混乱は残り行動、スタンは1で次の手番を飛ばす
 	int mulTurns;        // マス効果: この間ステータス倍
 	int alert;           // 1=行動順に入る（味方は常に 1。敵拠点は接近で起床）
 	int grp;             // 敵拠点番号（味方は -1）
@@ -355,6 +372,8 @@ struct Unit {
 	int cp;              // 0..200。ステージをまたいで保持
 	int craftEq[2];      // 0=空。戦技 id（CRAFT_BASE+）
 	int accEq[2];        // 0=空。装飾 id
+	int pasEq[2];        // 0=空。パッシブ id
+	int pasUsed;         // 1=不屈をこの戦闘で使った
 	// 表示用
 	float px, py, pz;
 	float hpShow;
@@ -402,6 +421,7 @@ struct Strike {
 	int kill;
 	int counter;       // 反撃
 	int drain;
+	int landed;        // 状態異常が今回新たに付いた
 };
 struct Forecast {
 	int dmg, hit, crit;     // 1 回あたり
@@ -414,6 +434,7 @@ struct Forecast {
 	int delay;              // 命中時に削る CT
 	int follow;             // 武器射程にいる味方の人数。-1=なし（実戦は各自 1/2）
 	int fdmg;
+	int weak;               // 弱点の一致数。1で2倍、2で4倍
 };
 void CalcForecast(const Battle& b, int a, int d, int skill, Forecast& f);
 int  ResolveAttack(Battle& b, int a, int d, int skill, Rng& r, Strike* out, int maxOut, int cx, int cz);
@@ -462,8 +483,10 @@ struct AiPlan {
 	int target;       // -1=攻撃しない
 	int skill;        // -1=通常
 	int castX, castZ;
+	int wild;         // 0=通常 1=混乱（敵味方問わず） 2=自分を攻撃
 };
 void AiDecide(const Battle& b, int ui, AiPlan& p, Rng& r);
+void ConfusePlan(const Battle& b, int ui, AiPlan& p, Rng& r);
 
 // ---------------- セーブ ----------------
 #pragma pack(push, 4)
@@ -580,11 +603,52 @@ bool EquipAccId(CharData& c, int slot, int id);
 bool EquipBeadId(CharData& c, int slot, int bead);
 const wchar_t* EquippedAccName(const CharData& c, int slot);
 const wchar_t* EquippedBeadName(const CharData& c, int slot);
+enum PasFx {
+	PAS_NONE = 0,
+	PAS_FLY, PAS_NOPOISON, PAS_NOCONFUSE, PAS_NOSLEEP, PAS_NOSTUN, PAS_NOSLOW, PAS_NODOWN,
+	PAS_STR, PAS_MAG, PAS_DEF, PAS_RES, PAS_MOV, PAS_JMP, PAS_RNG,
+	PAS_REGEN, PAS_MP, PAS_CRIT, PAS_EVADE, PAS_EXP, PAS_HEAL,
+	PAS_FIRE, PAS_ICE, PAS_THUNDER, PAS_HOLY, PAS_DARK,
+	PAS_CP, PAS_GUARD, PAS_OPEN, PAS_ALLAIL
+};
+int PasCount();
+const wchar_t* PasName(int id);
+const wchar_t* PasDesc(int id);
+int PasPrice(int index);
+int PasHave(int index);
+bool PasBuy(SaveData& s, int index);
+bool PasSell(int index);
+int EquippedPasId(const CharData& c, int slot);
+const wchar_t* EquippedPasName(const CharData& c, int slot);
+int PasSpare(const CharData& c, int slot, int index);
+bool EquipPasId(CharData& c, int slot, int id);
+bool UnitHasPas(const Unit& u, int fx);
+bool UnitResistsEffect(const Unit& u, int effect);
+inline bool UnitAilmentHeld(const Unit& u)
+{
+	return u.slow > 0 || u.sleep > 0 || u.stun > 0 || u.confuse > 0;
+}
 void CraftBindUnit(Unit& u);
 void CraftSaveUnit(const Unit& u);
 void CraftLoad();
 void CraftSave();
+void CraftReset();
 void CraftPrune(const SaveData& s);
+enum { TAC_SLOT_N = 10, TAC_SLOT_NAME = 24 };
+void SlotBoot();
+int SlotCurrent();
+void SlotTitle(int slot, wchar_t* out, int n);
+void SlotRename(int slot, const wchar_t* name);
+void SlotSelect(int slot);
+void SlotWipe(int slot);
+void SlotClearRuntime();
+bool SlotCopyFiles(int from, int to);
+int SlotPeekClear(int slot);
+const TCHAR* TacLeafSave();
+const TCHAR* TacLeafPart();
+const TCHAR* TacLeafCraft();
+const TCHAR* TacLeafMid();
+const TCHAR* TacLeafAuto();
 bool DropCraftLoot(int monster, int boss, Rng& r, wchar_t* name, int nameN);
 int BattleHeightSteps(const Battle& b, int ax, int az, int dx, int dz);
 

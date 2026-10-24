@@ -1248,6 +1248,13 @@ static void EnsureSheets()
 	put(C_DRAGONLORD, 8, 48, SKL_FANSLASH);
 	put(C_ARCHALCHEMIST, 6, 40, SKL_FIREBEAM);
 	put(C_ARCHALCHEMIST, 7, 48, SKL_ICEBEAM);
+	put(C_CLERIC, 6, 3, SKL_ESUNA);
+	put(C_BISHOP, 9, 22, SKL_PURIFY);
+	put(C_SAINT, 9, 42, SKL_PURIFY);
+	put(C_ARCHALCHEMIST, 8, 42, SKL_PURIFY);
+	put(C_SOLDIER, 7, 7, SKL_CLEANCUT);
+	put(C_PALADIN, 7, 24, SKL_CLEANCUT);
+	put(C_HERO, 9, 44, SKL_CLEANCUT);
 	for (int c = 0; c < C_PLAYER_COUNT; c++)
 		for (int s = 0; s < LEARN_N; s++)
 			if (kClass[c].learn[s].lv <= 0) kClass[c].learn[s].skill = -1;
@@ -1382,19 +1389,19 @@ static const SkillDef kSkill[] = {
 	{ TX_SK_PIERCE, TX_SKD_PIERCE, SK_PHYS, 6, 110, -1, -1, 0, EL_NONE, 1, 0, EF_IGNDEF, 0 },
 	{ TX_SK_STITCH, TX_SKD_STITCH, SK_PHYS, 6, 100, -1, -1, 0, EL_DARK, 1, 0, EF_SLOW, 0 },
 	{ TX_SK_VITAL, TX_SKD_VITAL, SK_PHYS, 5, 120, -1, -1, 0, EL_NONE, 1, 40, EF_NONE, 0 },
-	{ TX_SK_BASH, TX_SKD_BASH, SK_PHYS, 5, 120, -1, -1, 0, EL_EARTH, 1, 0, EF_DEFDOWN, 0 },
+	{ TX_SK_BASH, TX_SKD_BASH, SK_PHYS, 5, 120, -1, -1, 0, EL_EARTH, 1, 0, EF_STUN, 0 },
 	{ TX_SK_DRAGONFANG, TX_SKD_DRAGONFANG, SK_PHYS, 14, 220, -1, -1, 0, EL_FIRE, 1, 10, EF_NONE, 0 },
 	{ TX_SK_HOLYBLADE, TX_SKD_HOLYBLADE, SK_PHYS, 12, 170, -1, -1, 0, EL_HOLY, 1, 5, EF_NONE, 0 },
 	{ TX_SK_ARROWRAIN, TX_SKD_ARROWRAIN, SK_PHYS, 12, 145, 2, 5, 1, EL_WIND, 1, 0, EF_NONE, 0 },
 	{ TX_SK_ASSASSINATE, TX_SKD_ASSASSINATE, SK_PHYS, 12, 200, -1, -1, 0, EL_DARK, 1, 25, EF_NONE, 0 },
 	{ TX_SK_BRAVE, TX_SKD_BRAVE, SK_PHYS, 18, 260, -1, -1, 0, EL_HOLY, 1, 15, EF_NONE, 0 },
 	{ TX_SK_FIRE, TX_SKD_FIRE, SK_MAGIC, 4, 8, 1, 3, 0, EL_FIRE, 1, 0, EF_NONE, 0 },
-	{ TX_SK_BLIZZARD, TX_SKD_BLIZZARD, SK_MAGIC, 8, 11, 1, 3, 1, EL_ICE, 1, 0, EF_NONE, 0 },
-	{ TX_SK_THUNDER, TX_SKD_THUNDER, SK_MAGIC, 8, 14, 1, 4, 0, EL_THUNDER, 1, 0, EF_NONE, 0 },
+	{ TX_SK_BLIZZARD, TX_SKD_BLIZZARD, SK_MAGIC, 8, 11, 1, 3, 1, EL_ICE, 1, 0, EF_SLEEP, 0 },
+	{ TX_SK_THUNDER, TX_SKD_THUNDER, SK_MAGIC, 8, 14, 1, 4, 0, EL_THUNDER, 1, 0, EF_STUN, 0 },
 	{ TX_SK_METEOR, TX_SKD_METEOR, SK_MAGIC, 20, 28, 2, 6, 3, EL_FIRE, 1, 0, EF_NONE, 0 },
 	{ TX_SK_RUNEBLADE, TX_SKD_RUNEBLADE, SK_MAGIC, 6, 12, 1, 1, 0, EL_THUNDER, 1, 0, EF_NONE, 0 },
 	{ TX_SK_HOLY, TX_SKD_HOLY, SK_MAGIC, 14, 18, 1, 3, 0, EL_HOLY, 1, 0, EF_NONE, 0 },
-	{ TX_SK_DARKNESS, TX_SKD_DARKNESS, SK_MAGIC, 10, 16, 1, 3, 0, EL_DARK, 1, 0, EF_DEFDOWN, 0 },
+	{ TX_SK_DARKNESS, TX_SKD_DARKNESS, SK_MAGIC, 10, 16, 1, 3, 0, EL_DARK, 1, 0, EF_CONFUSE, 0 },
 	{ TX_SK_HEAL, TX_SKD_HEAL, SK_HEAL, 4, 12, 0, 2, 0, EL_HOLY, 1, 0, EF_NONE, 0 },
 	{ TX_SK_HIGHHEAL, TX_SKD_HIGHHEAL, SK_HEAL, 9, 26, 0, 3, 0, EL_HOLY, 1, 0, EF_NONE, 0 },
 	{ TX_SK_HEALALL, TX_SKD_HEALALL, SK_HEAL, 16, 18, 0, 3, 2, EL_HOLY, 1, 0, EF_NONE, 0 },
@@ -1410,10 +1417,10 @@ static const SkillDef kSkill[] = {
 	{ TX_SK_P_CRIT, TX_SKD_P_CRIT, SK_PASSIVE, 0, 0, 0, 0, 0, EL_NONE, 0, 0, EF_NONE, 0 },
 	{ TX_SK_E_VENOM, TX_SKD_E_VENOM, SK_PHYS, 4, 120, 1, 1, 0, EL_POISON, 1, 0, EF_POISON, 1 },
 	{ TX_SK_E_BREATH, TX_SKD_E_BREATH, SK_MAGIC, 8, 16, 1, 3, 1, EL_FIRE, 1, 0, EF_NONE, 1 },
-	{ TX_SK_E_CRUSH, TX_SKD_E_CRUSH, SK_PHYS, 5, 160, -1, -1, 0, EL_EARTH, 1, 0, EF_NONE, 1 },
+	{ TX_SK_E_CRUSH, TX_SKD_E_CRUSH, SK_PHYS, 0, 160, -1, -1, 0, EL_EARTH, 1, 0, EF_STUN, 1 },
 	{ TX_SK_E_DRAIN, TX_SKD_E_DRAIN, SK_PHYS, 5, 100, 1, 1, 0, EL_DARK, 1, 0, EF_DRAIN, 1 },
-	{ TX_SK_E_SPIT, TX_SKD_E_SPIT, SK_PHYS, 3, 90, 1, 2, 0, EL_POISON, 1, 0, EF_SLOW, 1 },
-	{ TX_SK_E_QUAKE, TX_SKD_E_QUAKE, SK_PHYS, 8, 130, 0, 0, 1, EL_EARTH, 1, 0, EF_NONE, 1 },
+	{ TX_SK_E_SPIT, TX_SKD_E_SPIT, SK_PHYS, 0, 90, 1, 2, 0, EL_POISON, 1, 0, EF_SLEEP, 1 },
+	{ TX_SK_E_QUAKE, TX_SKD_E_QUAKE, SK_PHYS, 0, 130, 0, 0, 1, EL_EARTH, 1, 0, EF_STUN, 1 },
 	{ TX_SK_REFRESH, TX_SKD_REFRESH, SK_BUFF, 8, 0, 1, 1, 0, EL_HOLY, 1, 0, EF_REACT, 0 },
 	{ TX_SK_CLEAVE, TX_SKD_CLEAVE, SK_PHYS, 8, 110, 0, 0, 1, EL_NONE, 1, 0, EF_NONE, 0 },
 	{ TX_SK_SNIPE, TX_SKD_SNIPE, SK_PHYS, 7, 185, 2, 6, 0, EL_WIND, 1, 25, EF_NONE, 0 },
@@ -1437,16 +1444,16 @@ static const SkillDef kWide[] = {
 	{ TX_SK_CRESCENT, TX_SKD_CRESCENT, SK_PHYS, 10, 95, 0, 0, 2, EL_WIND, 1, 0, EF_NONE, 0 },
 	{ TX_SK_GRANDSLASH, TX_SKD_GRANDSLASH, SK_PHYS, 16, 80, 0, 0, 4, EL_NONE, 1, 0, EF_NONE, 0 },
 	{ TX_SK_STORM, TX_SKD_STORM, SK_MAGIC, 26, 24, 2, 6, 4, EL_FIRE, 1, 0, EF_NONE, 0 },
-	{ TX_SK_FROSTFIELD, TX_SKD_FROSTFIELD, SK_MAGIC, 14, 9, 1, 4, 2, EL_ICE, 1, 0, EF_NONE, 0 },
-	{ TX_SK_THUNDERFIELD, TX_SKD_THUNDERFIELD, SK_MAGIC, 16, 11, 1, 5, 2, EL_THUNDER, 1, 0, EF_NONE, 0 },
+	{ TX_SK_FROSTFIELD, TX_SKD_FROSTFIELD, SK_MAGIC, 14, 9, 1, 4, 2, EL_ICE, 1, 0, EF_SLEEP, 0 },
+	{ TX_SK_THUNDERFIELD, TX_SKD_THUNDERFIELD, SK_MAGIC, 16, 11, 1, 5, 2, EL_THUNDER, 1, 0, EF_STUN, 0 },
 	{ TX_SK_NOVA, TX_SKD_NOVA, SK_MAGIC, 18, 22, 0, 0, 4, EL_HOLY, 1, 0, EF_NONE, 0 },
 	{ TX_SK_LINESLASH, TX_SKD_LINESLASH, SK_PHYS, 10, 100, 1, 1, 4, EL_WIND, 1, 0, EF_NONE, 0, SH_LINE },
 	{ TX_SK_FANSLASH, TX_SKD_FANSLASH, SK_PHYS, 12, 80, 1, 1, 3, EL_NONE, 1, 0, EF_NONE, 0, SH_FAN },
 	{ TX_SK_ARROWLINE, TX_SKD_ARROWLINE, SK_PHYS, 10, 155, 2, 6, 5, EL_WIND, 1, 0, EF_NONE, 0, SH_LINE },
 	{ TX_SK_ARROWFAN, TX_SKD_ARROWFAN, SK_PHYS, 12, 140, 2, 6, 3, EL_WIND, 1, 0, EF_NONE, 0, SH_FAN },
 	{ TX_SK_FIREBEAM, TX_SKD_FIREBEAM, SK_MAGIC, 12, 10, 1, 4, 5, EL_FIRE, 1, 0, EF_NONE, 0, SH_LINE },
-	{ TX_SK_ICEBEAM, TX_SKD_ICEBEAM, SK_MAGIC, 14, 9, 1, 4, 5, EL_ICE, 1, 0, EF_SLOW, 0, SH_LINE },
-	{ TX_SK_THUNDERBEAM, TX_SKD_THUNDERBEAM, SK_MAGIC, 14, 12, 1, 4, 4, EL_THUNDER, 1, 0, EF_NONE, 0, SH_LINE },
+	{ TX_SK_ICEBEAM, TX_SKD_ICEBEAM, SK_MAGIC, 14, 9, 1, 4, 5, EL_ICE, 1, 0, EF_SLEEP, 0, SH_LINE },
+	{ TX_SK_THUNDERBEAM, TX_SKD_THUNDERBEAM, SK_MAGIC, 14, 12, 1, 4, 4, EL_THUNDER, 1, 0, EF_STUN, 0, SH_LINE },
 	{ TX_SK_HEALBEAM, TX_SKD_HEALBEAM, SK_HEAL, 12, 14, 1, 3, 4, EL_HOLY, 1, 0, EF_NONE, 0, SH_LINE },
 	{ TX_SK_HEALFAN, TX_SKD_HEALFAN, SK_HEAL, 14, 12, 1, 2, 3, EL_HOLY, 1, 0, EF_NONE, 0, SH_FAN },
 	{ TX_SK_RAMPAGE, TX_SKD_RAMPAGE, SK_PHYS, 8, 70, -1, -1, 0, EL_NONE, 3, 0, EF_NONE, 0 },
@@ -1479,8 +1486,11 @@ static const SkillDef kWide[] = {
 	{ TX_SK_VOIDTHIEF, TX_SKD_VOIDTHIEF, SK_PHYS, 16, 200, -1, -1, 0, EL_DARK, 1, 15, EF_DEFDOWN, 0 },
 	{ TX_SK_LASTNIGHT, TX_SKD_LASTNIGHT, SK_PHYS, 20, 170, 0, 0, 2, EL_DARK, 1, 10, EF_NONE, 0 },
 	{ TX_SK_ETERNIGHT, TX_SKD_ETERNIGHT, SK_PHYS, 26, 340, -1, -1, 0, EL_DARK, 1, 30, EF_IGNDEF, 0 },
+	{ TX_SK_ESUNA, TX_SKD_ESUNA, SK_HEAL, 6, 8, 0, 2, 0, EL_HOLY, 1, 0, EF_CLEANSE, 0 },
+	{ TX_SK_PURIFY, TX_SKD_PURIFY, SK_HEAL, 14, 6, 0, 0, 2, EL_HOLY, 1, 0, EF_CLEANSE, 0 },
+	{ TX_SK_CLEANCUT, TX_SKD_CLEANCUT, SK_HEAL, 4, 6, 0, 1, 0, EL_HOLY, 1, 0, EF_CLEANSE, 0 },
 };
-static_assert(sizeof(kWide) / sizeof(kWide[0]) == SKL_COUNT - (SKL_RAISE + 1), "wide skill table");
+static_assert(sizeof(kWide) / sizeof(kWide[0]) == SKL_AREAHEAL0 - (SKL_RAISE + 1), "wide skill table");
 
 static SkillDef s_art[SKL_ARTN - SKL_ART0];
 static int s_artOk = 0;
@@ -1517,6 +1527,41 @@ static void BuildArts()
 	}
 	s_artOk = 1;
 }
+static SkillDef s_area[16];
+static int s_areaOk = 0;
+static void BuildAreaSupport()
+{
+	if (s_areaOk) return;
+	for (int i = 0; i < 8; i++) {
+		int rad = 2 + i;
+		SkillDef& h = s_area[i];
+		memset(&h, 0, sizeof(h));
+		h.nameTx = TX_SK_AREAHEAL;
+		h.descTx = TX_SKD_AREAHEAL;
+		h.kind = SK_HEAL;
+		h.mp = 8 + rad * 5;
+		h.power = 12 + rad * 3;
+		h.rMin = 0;
+		h.rMax = rad;
+		h.area = rad;
+		h.element = EL_HOLY;
+		h.hits = 1;
+		SkillDef& z = s_area[8 + i];
+		memset(&z, 0, sizeof(z));
+		z.nameTx = TX_SK_AREARAISE;
+		z.descTx = TX_SKD_AREARAISE;
+		z.kind = SK_HEAL;
+		z.mp = 14 + rad * 8;
+		z.power = 0;
+		z.rMin = 0;
+		z.rMax = rad;
+		z.area = rad;
+		z.element = EL_HOLY;
+		z.hits = 1;
+		z.effect = EF_RAISE;
+	}
+	s_areaOk = 1;
+}
 static const SkillDef& CraftSkillRef(int index);
 const SkillDef& SkillInfo(int s)
 {
@@ -1529,8 +1574,22 @@ const SkillDef& SkillInfo(int s)
 		BuildArts();
 		return s_art[s - SKL_ART0];
 	}
-	if (s > SKL_RAISE && s < SKL_COUNT) return kWide[s - (SKL_RAISE + 1)];
+	if (s >= SKL_AREAHEAL0 && s < SKL_COUNT) {
+		BuildAreaSupport();
+		return s_area[s - SKL_AREAHEAL0];
+	}
+	if (s > SKL_RAISE && s < SKL_AREAHEAL0) return kWide[s - (SKL_RAISE + 1)];
 	return kSkill[Clampi(s, 0, SKL_ART0 - 1)];
+}
+const wchar_t* SkillLabel(int s)
+{
+	const SkillDef& sd = SkillInfo(s);
+	if (s >= SKL_AREAHEAL0 && s < SKL_COUNT && sd.area > 0) {
+		static wchar_t buf[80];
+		swprintf_s(buf, L"%s%d", TT(sd.nameTx), sd.area);
+		return buf;
+	}
+	return TT(sd.nameTx);
 }
 
 // ============================================================ モンスター
@@ -1643,13 +1702,88 @@ static void ApplyImportRole(MonsterDef& d, const wchar_t* n, int i)
 	}
 }
 
+static int NameHas(const wchar_t* n, const wchar_t* k)
+{
+	return n && k && wcsstr(n, k) != NULL;
+}
+static void SetWeak(MonsterDef& d, int a, int b)
+{
+	d.weak[0] = a;
+	d.weak[1] = b;
+}
+static void WeakFromName(MonsterDef& d, const wchar_t* n)
+{
+	if (!n) { SetWeak(d, EL_FIRE, EL_MELEE); return; }
+	if (NameHas(n, L"Dragon")) SetWeak(d, EL_ICE, EL_RANGE);
+	else if (NameHas(n, L"Ghost")) SetWeak(d, EL_HOLY, EL_FIRE);
+	else if (NameHas(n, L"Demon")) SetWeak(d, EL_HOLY, EL_ICE);
+	else if (NameHas(n, L"Wizard") || NameHas(n, L"Witch")) SetWeak(d, EL_PHYS, EL_MELEE);
+	else if (NameHas(n, L"Golem")) SetWeak(d, EL_THUNDER, EL_MAGIC);
+	else if (NameHas(n, L"Yeti")) SetWeak(d, EL_FIRE, EL_MAGIC);
+	else if (NameHas(n, L"Ninja")) SetWeak(d, EL_HOLY, EL_RANGE);
+	else if (NameHas(n, L"Mush") || NameHas(n, L"Spider") || NameHas(n, L"Cactoro")) SetWeak(d, EL_FIRE, EL_WIND);
+	else if (NameHas(n, L"Blob") || NameHas(n, L"Glub")) SetWeak(d, EL_FIRE, EL_ICE);
+	else if (NameHas(n, L"Alien")) SetWeak(d, EL_HOLY, EL_THUNDER);
+	else if (NameHas(n, L"Orc")) SetWeak(d, EL_HOLY, EL_MAGIC);
+	else if (NameHas(n, L"King")) SetWeak(d, EL_THUNDER, EL_MAGIC);
+	else if (NameHas(n, L"Shark") || NameHas(n, L"Whale") || NameHas(n, L"Piranha") || NameHas(n, L"Fish") || NameHas(n, L"Tang") || NameHas(n, L"Koi") || NameHas(n, L"Tuna") || NameHas(n, L"Dolphin") || NameHas(n, L"Manta") || NameHas(n, L"Squid") || NameHas(n, L"Angler"))
+		SetWeak(d, EL_THUNDER, EL_ICE);
+	else if (NameHas(n, L"Snake") || NameHas(n, L"Frog") || NameHas(n, L"Worm")) SetWeak(d, EL_ICE, EL_FIRE);
+	else if (NameHas(n, L"Wasp") || NameHas(n, L"Birb") || NameHas(n, L"Pigeon") || NameHas(n, L"Hywirl") || NameHas(n, L"Armabee") || NameHas(n, L"Chicken"))
+		SetWeak(d, EL_WIND, EL_RANGE);
+	else if (NameHas(n, L"Trex") || NameHas(n, L"Dino") || NameHas(n, L"Raptor")) SetWeak(d, EL_ICE, EL_MAGIC);
+	else if (NameHas(n, L"Stego") || NameHas(n, L"Tricera")) SetWeak(d, EL_THUNDER, EL_MAGIC);
+	else if (NameHas(n, L"Apatosaurus") || NameHas(n, L"Parasaurolophus")) SetWeak(d, EL_FIRE, EL_RANGE);
+	else if (NameHas(n, L"Wolf") || NameHas(n, L"Fox") || NameHas(n, L"Husky") || NameHas(n, L"Shiba") || NameHas(n, L"Cat") || NameHas(n, L"Rat") || NameHas(n, L"Bunny"))
+		SetWeak(d, EL_FIRE, EL_MELEE);
+	else if (NameHas(n, L"Bull") || NameHas(n, L"Cow") || NameHas(n, L"Deer") || NameHas(n, L"Stag") || NameHas(n, L"Horse") || NameHas(n, L"Donkey") || NameHas(n, L"Alpaca"))
+		SetWeak(d, EL_FIRE, EL_MELEE);
+	else if (NameHas(n, L"Tribal")) SetWeak(d, EL_HOLY, EL_MELEE);
+	else if (NameHas(n, L"Hum")) SetWeak(d, EL_THUNDER, EL_MAGIC);
+	else {
+		static const int pair[10][2] = {
+			{ EL_FIRE, EL_ICE }, { EL_THUNDER, EL_RANGE }, { EL_HOLY, EL_DARK }, { EL_WIND, EL_MELEE },
+			{ EL_EARTH, EL_MAGIC }, { EL_POISON, EL_FIRE }, { EL_ICE, EL_PHYS }, { EL_MAGIC, EL_RANGE },
+			{ EL_DARK, EL_HOLY }, { EL_PHYS, EL_MELEE }
+		};
+		int h = 0;
+		for (const wchar_t* p = n; *p; ++p) h = h * 17 + (int)*p;
+		if (h < 0) h = -h;
+		SetWeak(d, pair[h % 10][0], pair[h % 10][1]);
+	}
+}
+static int AilmentFor(const wchar_t* n, int i)
+{
+	if (NameHas(n, L"Spider") || NameHas(n, L"Ghost") || NameHas(n, L"Mush") || NameHas(n, L"Frog") || NameHas(n, L"Snake") || NameHas(n, L"Puffer") || NameHas(n, L"Blob") || NameHas(n, L"Wasp"))
+		return SKL_E_SPIT;
+	if (NameHas(n, L"Wizard") || NameHas(n, L"Witch") || NameHas(n, L"Demon") || NameHas(n, L"Alien") || NameHas(n, L"Ninja") || NameHas(n, L"Skull"))
+		return SKL_DARKNESS;
+	if (NameHas(n, L"Golem") || NameHas(n, L"Bull") || NameHas(n, L"Trex") || NameHas(n, L"Orc") || NameHas(n, L"Dragon") || NameHas(n, L"Yeti") || NameHas(n, L"Stego") || NameHas(n, L"Tricera") || NameHas(n, L"Raptor"))
+		return SKL_E_CRUSH;
+	int k = i % 4;
+	if (k == 0) return SKL_E_SPIT;
+	if (k == 1) return SKL_E_CRUSH;
+	if (k == 2) return SKL_DARKNESS;
+	return -1;
+}
 static void EnsureMonsters()
 {
 	if (!s_monImpOk) {
 	for (int p = 0; p < 4; p++) s_poolN[p] = 0;
+	static const int kClassicWeak[M_COUNT][2] = {
+		{ EL_FIRE, EL_ICE }, { EL_HOLY, EL_FIRE }, { EL_HOLY, EL_MAGIC }, { EL_HOLY, EL_MELEE },
+		{ EL_WIND, EL_RANGE }, { EL_HOLY, EL_MELEE }, { EL_FIRE, EL_ICE }, { EL_THUNDER, EL_MAGIC },
+		{ EL_ICE, EL_RANGE }, { EL_HOLY, EL_THUNDER }, { EL_ICE, EL_RANGE }
+	};
 	for (int i = 0; i < M_COUNT; i++) {
 		MonsterDef& d = kMon[i];
 		FillUnitSheet(d.base, d.grow, G_MELEE, d.magAttack, d.moveType == MV_FLY, d.jump, d.rMax);
+		d.weak[0] = kClassicWeak[i][0];
+		d.weak[1] = kClassicWeak[i][1];
+		if (i == M_SKEL_MINION && d.skills[0] < 0) d.skills[0] = SKL_E_SPIT;
+		if (i == M_SKEL_ARCHER && d.skills[0] < 0) d.skills[0] = SKL_E_SPIT;
+		if (i == M_BAT && d.skills[1] < 0) d.skills[1] = SKL_E_SPIT;
+		if (i == M_WYVERN && d.skills[1] < 0) d.skills[1] = SKL_E_CRUSH;
 	}
 	int nImp = kImportN < IMP_CAP ? kImportN : IMP_CAP;
 	for (int i = 0; i < nImp; i++) {
@@ -1694,6 +1828,11 @@ static void EnsureMonsters()
 		else d.skills[0] = SKL_E_CRUSH;
 		d.skills[1] = (i % 4 == 0) ? SKL_E_VENOM : -1;
 		d.skills[2] = -1;
+		{
+			int ail = AilmentFor(nm, i);
+			if (ail >= 0 && ail != d.skills[0] && ail != d.skills[1]) d.skills[2] = ail;
+		}
+		WeakFromName(d, nm);
 		d.minStage = 1;
 		d.maxStage = 0;
 		d.weight = 8;
@@ -1768,6 +1907,8 @@ static int PaceSkill(int cls, int lv)
 	return SKL_ART0 + g * 26 + (lv - 7);
 }
 
+static int SupportAreaCap(const ClassDef& cd);
+static void CharTakeSkill(CharData& c, int s);
 void CharGrantReached(CharData& c)
 {
 	const ClassDef& cd = ClassInfo(c.cls);
@@ -1780,6 +1921,20 @@ void CharGrantReached(CharData& c)
 		if (sk >= 0) CharGiveSkill(c, sk);
 	}
 	if (cd.group == G_HOLY && c.lv >= 7) CharGiveSkill(c, SKL_RAISE);
+	{
+		int cap = SupportAreaCap(cd);
+		for (int rad = 2; rad <= 9; rad++) {
+			int heal = SKL_AREAHEAL0 + (rad - 2);
+			int raise = SKL_AREARAISE0 + (rad - 2);
+			if (rad == cap) {
+				CharGiveSkill(c, heal);
+				CharGiveSkill(c, raise);
+			} else {
+				CharTakeSkill(c, heal);
+				CharTakeSkill(c, raise);
+			}
+		}
+	}
 	if (c.stat[S_MP] < cd.base[S_MP]) c.stat[S_MP] = cd.base[S_MP];
 }
 
@@ -1833,6 +1988,22 @@ void CharGiveSkill(CharData& c, int s)
 	int i = s - 64;
 	int w = i >> 5;
 	if (w >= 0 && w < 6) c.reserved[w] |= (int)(1u << (i & 31));
+}
+static void CharTakeSkill(CharData& c, int s)
+{
+	if (s < 0 || s >= 320) return;
+	if (s < 64) { c.skills &= ~(1ull << s); return; }
+	int i = s - 64;
+	int w = i >> 5;
+	if (w >= 0 && w < 6) c.reserved[w] &= ~(int)(1u << (i & 31));
+}
+static int SupportAreaCap(const ClassDef& cd)
+{
+	if (cd.tier < 3) return 0;
+	int rad = cd.tier - 1;
+	if (rad > 9) rad = 9;
+	if (cd.group != G_HOLY && rad > 3) rad = 3;
+	return rad;
 }
 
 bool CharHasSkill(const CharData& c, int s)
@@ -1996,25 +2167,40 @@ int UnitStat(const Unit& u, int s)
 	if (s == S_DEF && u.buffDef > 0) v = v * 13 / 10;
 	if ((s == S_DEF || s == S_RES) && u.defDown > 0) v = v * 75 / 100;
 	if ((s == S_AGI) && u.buffAgi > 0) v = v * 13 / 10;
+	if (s == S_AGI && u.slow > 0) v = v * 75 / 100;
 	if ((s == S_STR || s == S_MAG) && u.buffAtk > 0) v = v * 125 / 100;
 	if (u.mulTurns > 0 && (s == S_STR || s == S_MAG || s == S_DEF || s == S_RES || s == S_AGI)) v *= 2;
 	if (s == S_DEF && UnitHasSkill(u, SKL_P_IRON)) v = v * 115 / 100;
+	if (s == S_STR && UnitHasPas(u, PAS_STR)) v = v * 110 / 100;
+	if (s == S_MAG && UnitHasPas(u, PAS_MAG)) v = v * 110 / 100;
+	if (s == S_DEF && UnitHasPas(u, PAS_DEF)) v = v * 110 / 100;
+	if (s == S_RES && UnitHasPas(u, PAS_RES)) v = v * 110 / 100;
+	if (s == S_MOV && UnitHasPas(u, PAS_MOV)) v += 1;
+	if (s == S_JMP && UnitHasPas(u, PAS_JMP)) v += 2;
+	if (s == S_RNG && UnitHasPas(u, PAS_RNG)) v += 1;
 	if (s == S_MOV) {
 		int cap = MoveCap(UnitMoveType(u));
 		if (v > cap) v = cap;
 		if (v < 1) v = 1;
 	} else if (s == S_JMP) {
-		if (v > 12) v = 12;
+		int cap = UnitHasPas(u, PAS_JMP) ? 14 : 12;
+		if (v > cap) v = cap;
 		if (v < 1) v = 1;
 	} else if (s == S_RNG) {
-		if (v > 3) v = 3;
+		int cap = UnitHasPas(u, PAS_RNG) ? 4 : 3;
+		if (v > cap) v = cap;
 		if (v < 0) v = 0;
 	}
 	return v;
 }
 int UnitMove(const Unit& u) { return UnitStat(u, S_MOV); }
 int UnitJump(const Unit& u) { return UnitStat(u, S_JMP); }
-int UnitMoveType(const Unit& u) { return IsMon(u) ? MonsterInfo(u.monster).moveType : ClassInfo(u.ch.cls).moveType; }
+int UnitMoveType(const Unit& u)
+{
+	int mt = IsMon(u) ? MonsterInfo(u.monster).moveType : ClassInfo(u.ch.cls).moveType;
+	if (UnitHasPas(u, PAS_FLY)) mt = MV_FLY;
+	return mt;
+}
 int UnitRangeMin(const Unit& u) { return IsMon(u) ? MonsterInfo(u.monster).rMin : ClassInfo(u.ch.cls).rMin; }
 int UnitRangeMax(const Unit& u)
 {
@@ -2050,7 +2236,7 @@ void MakeEnemy(Unit& u, int monster, int lv, int boss, Rng& r)
 	u.boss = boss;
 	u.ch.used = 1;
 	u.ch.cls = -1;
-	u.ch.lv = Clampi(lv, 1, TAC_LV_MAX);
+	u.ch.lv = Clampi(lv, 1, TAC_ENEMY_LV_MAX);
 	for (int s = 0; s < S_COUNT; s++) {
 		int g = md.grow[s];
 		int v = md.base[s];
@@ -2076,6 +2262,8 @@ void MakeEnemy(Unit& u, int monster, int lv, int boss, Rng& r)
 		int sk = md.skills[i];
 		if (sk < 0) continue;
 		int need = i == 0 ? 1 : (i == 1 ? 8 : 15);
+		if (sk == SKL_E_SPIT || sk == SKL_E_CRUSH || sk == SKL_E_QUAKE || sk == SKL_DARKNESS || sk == SKL_BASH)
+			need = 1;
 		if (u.ch.lv >= need || boss) CharGiveSkill(u.ch, sk);
 	}
 	if (u.ch.lv >= 30) CharGiveSkill(u.ch, SKL_P_IRON);
@@ -2273,6 +2461,33 @@ static int TerrainAvoPct(const Battle& b, const Unit& d)
 	return TerrainInfo(b.map.At(d.x, d.z).t).avoPct;
 }
 
+static int WeakHitsOf(const Unit& a, const Unit& d, int skill)
+{
+	if (d.team != TEAM_ENEMY || &a == &d) return 0;
+	const SkillDef* sd = skill >= 0 ? &SkillInfo(skill) : NULL;
+	int magic = sd ? (sd->kind == SK_MAGIC) : (UnitMagAttack(a) != 0);
+	int el = sd ? sd->element : EL_NONE;
+	int ranged;
+	if (magic) ranged = 1;
+	else if (sd && sd->rMax >= 0) ranged = (sd->rMin >= 2 || sd->rMax >= 2) ? 1 : 0;
+	else ranged = (UnitRangeMax(a) >= 2 || WeaponOf(a) == WT_BOW || UnitAttackStyle(a) == AS_SHOOT || UnitAttackStyle(a) == AS_SHOOT1) ? 1 : 0;
+	const MonsterDef& md = MonsterInfo(d.monster);
+	int ws[2] = { md.weak[0], md.weak[1] };
+	int n = 0;
+	for (int i = 0; i < 2; i++) {
+		int w = ws[i];
+		if (w == EL_NONE || (i == 1 && w == ws[0])) continue;
+		int hit = 0;
+		if (w >= EL_FIRE && w <= EL_POISON && w == el) hit = 1;
+		else if (w == EL_MAGIC && magic) hit = 1;
+		else if (w == EL_PHYS && !magic) hit = 1;
+		else if (w == EL_RANGE && ranged) hit = 1;
+		else if (w == EL_MELEE && !ranged) hit = 1;
+		if (hit) n++;
+	}
+	return n;
+}
+
 static void StrikeCalc(const Battle& b, const Unit& a, const Unit& d, int skill, int& dmg, int& hit, int& crit)
 {
 	const SkillDef* sd = skill >= 0 ? &SkillInfo(skill) : NULL;
@@ -2295,11 +2510,11 @@ static void StrikeCalc(const Battle& b, const Unit& a, const Unit& d, int skill,
 		float df = UnitStat(d, S_DEF) * (1.f + tdef * .01f);
 		if (sd && sd->effect == EF_IGNDEF) df *= .5f;
 		dm = atk * mult - df;
-		int evade = UnitStat(d, S_AGI) * 2 + UnitStat(d, S_LUK) / 2 + tavo + (UnitHasSkill(d, SKL_P_EVADE) ? 15 : 0);
+		int evade = UnitStat(d, S_AGI) * 2 + UnitStat(d, S_LUK) / 2 + tavo + (UnitHasSkill(d, SKL_P_EVADE) ? 15 : 0) + (UnitHasPas(d, PAS_EVADE) ? 12 : 0);
 		hit = 80 + UnitStat(a, S_DEX) * 2 + UnitStat(a, S_LUK) / 2 - evade + (sd ? 10 : 0);
 		hit = Clampi(hit, 5, 99);
 		crit = UnitStat(a, S_DEX) / 2 + UnitStat(a, S_LUK) / 3 + UnitStat(a, S_CRT) - UnitStat(d, S_LUK) / 3 + (sd ? sd->critBonus : 0)
-			+ (UnitHasSkill(a, SKL_P_CRIT) ? 10 : 0);
+			+ (UnitHasSkill(a, SKL_P_CRIT) ? 10 : 0) + (UnitHasPas(a, PAS_CRIT) ? 10 : 0);
 		crit = Clampi(crit, 0, sd ? 80 : 50);
 	}
 	dm *= HeightMod(b, a, d) * DirMod(a, d);
@@ -2335,6 +2550,18 @@ static void StrikeCalc(const Battle& b, const Unit& a, const Unit& d, int skill,
 		if (grd > 30) grd = 30;
 		if (grd > 0) dm *= (100 - grd) / 100.f;
 	}
+	{
+		int wh = WeakHitsOf(a, d, skill);
+		if (wh >= 1) dm *= 2.f;
+		if (wh >= 2) dm *= 2.f;
+	}
+	{
+		int el = sd ? sd->element : EL_NONE;
+		if ((el == EL_FIRE && UnitHasPas(d, PAS_FIRE)) || (el == EL_ICE && UnitHasPas(d, PAS_ICE))
+			|| (el == EL_THUNDER && UnitHasPas(d, PAS_THUNDER)) || (el == EL_HOLY && UnitHasPas(d, PAS_HOLY))
+			|| (el == EL_DARK && UnitHasPas(d, PAS_DARK)))
+			dm *= .7f;
+	}
 	dmg = max(1, (int)roundf(dm));
 }
 
@@ -2350,10 +2577,11 @@ void CalcForecast(const Battle& b, int ai, int di, int skill, Forecast& f)
 	const Unit& a = b.u[ai];
 	const Unit& d = b.u[di];
 	StrikeCalc(b, a, d, skill, f.dmg, f.hit, f.crit);
+	f.weak = WeakHitsOf(a, d, skill);
 	f.face = FacingOf(a, d);
 	f.tri = TriRel(WeaponOf(a), WeaponOf(d));
 	f.bowFly = (WeaponOf(a) == WT_BOW && UnitMoveType(d) == MV_FLY) ? 1 : 0;
-	f.delay = (a.team != d.team) ? 500 : 0;
+	f.delay = (a.team != d.team && !UnitHasPas(d, PAS_NOSLOW) && !UnitAilmentHeld(d)) ? 500 : 0;
 	f.follow = -1;
 	f.fdmg = 0;
 	if (a.team == TEAM_PLAYER && d.team != TEAM_PLAYER) {
@@ -2464,41 +2692,89 @@ int SkillTargets(const Battle& b, int caster, int skill, int cx, int cz, int* ou
 
 int ExpForAction(const Unit& a, const Unit& d, int dmg, int stage)
 {
+	if (stage < 1) stage = 1;
 	int dl = d.ch.lv - a.ch.lv;
-	float lv = 1.f + dl * 0.08f;
-	if (lv < 0.35f) lv = 0.35f;
-	if (lv > 2.2f) lv = 2.2f;
+	/* レベル差。格下でもゼロにはしない。上にはキャップしない。 */
+	double lvK = 1.0 + (double)dl * 0.12;
+	if (lvK < 0.2) lvK = 0.2;
 	int hp = d.ch.stat[S_HP];
-	float frac = (dmg > 0 && hp > 0) ? (float)dmg / (float)hp : 0.f;
-	if (frac > 1.f) frac = 1.f;
-	int e = (int)roundf((8.f + 24.f * frac) * lv);
-	if (d.boss) e = e * 5 / 4;
-	e = Clampi(e, 3, 80);
-	int stageLv = stage <= 100 ? 1 + (stage - 1) * 9 / 10 : Clampi(90 + (stage - 100) * 6 / 5, 1, TAC_LV_MAX);
-	int gap = stageLv - a.ch.lv;
-	float f = 1.f + (stage - 1) * .025f;
-	if (gap > 0) f += gap * (0.12f + (stage - 1) * 0.012f);
-	return Clampi((int)roundf(e * f), 3, 999);
+	double frac = 0.0;
+	if (dmg > 0 && hp > 0) {
+		frac = (double)dmg / (double)hp;
+		if (frac > 1.0) frac = 1.0;
+	}
+	/* ダメージ割合・レベル差・ステージ番号。共闘は AwardExp。1 行動の上限は設けない。 */
+	double e = (12.0 + (double)stage) * (0.35 + 0.65 * frac) * lvK;
+	if (d.boss) e *= 1.25;
+	if (e < 1.0) return 1;
+	if (e > 2000000000.0) return 2000000000;
+	return (int)(e + 0.5);
 }
 
-static void ApplyEffect(Battle& b, Unit& a, Unit& d, int effect)
+/* ステージ1で Lv1、19で 30、以後同じ傾き。9999で約1.6万。 */
+static int StageEnemyLevel(int stage)
 {
+	stage = Clampi(stage, 1, TAC_STAGE_MAX);
+	return 1 + (stage - 1) * 29 / 18;
+}
+
+static bool TurnFx(int effect)
+{
+	return effect == EF_SLOW || effect == EF_SLEEP || effect == EF_STUN || effect == EF_CONFUSE;
+}
+
+// すでに付いている異常は伸ばさない。鈍足・睡眠・スタン・混乱は、動けるようになるまで重ねない。
+static bool ApplyEffect(Battle& b, Unit& a, Unit& d, int effect, Rng& r)
+{
+	int turns = r.Range(1, 3);
 	switch (effect) {
-	case EF_SLOW: d.ct = max(0, d.ct - 400); break;
-	case EF_DEFDOWN: d.buffDef = 0; d.defDown = 3; break;
-	case EF_POISON: d.poison = 3; break;
-	case EF_BUFF_DEF: d.buffDef = 3; break;
-	case EF_BUFF_AGI: d.buffAgi = 3; break;
-	case EF_BUFF_ATK: d.buffAtk = 3; break;
-	case EF_REACT: if (d.alive && d.team == a.team && d.ct < 1000) d.ct = 1300; break;
+	case EF_SLOW:
+		if (UnitHasPas(d, PAS_NOSLOW) || UnitAilmentHeld(d)) return false;
+		d.slow = turns;
+		d.ct = max(0, d.ct - 400);
+		return true;
+	case EF_DEFDOWN:
+		if (UnitHasPas(d, PAS_NODOWN) || d.defDown > 0) return false;
+		d.buffDef = 0;
+		d.defDown = turns;
+		return true;
+	case EF_POISON:
+		if (UnitHasPas(d, PAS_NOPOISON) || d.poison > 0) return false;
+		d.poison = turns;
+		return true;
+	case EF_SLEEP:
+		if (UnitHasPas(d, PAS_NOSLEEP) || UnitAilmentHeld(d)) return false;
+		d.sleep = 1;
+		return true;
+	case EF_CONFUSE:
+		if (UnitHasPas(d, PAS_NOCONFUSE) || UnitAilmentHeld(d)) return false;
+		d.confuse = 2;
+		return true;
+	case EF_STUN:
+		if (UnitHasPas(d, PAS_NOSTUN) || UnitAilmentHeld(d)) return false;
+		d.stun = 1;
+		return true;
+	case EF_CLEANSE: {
+		bool had = d.poison > 0 || d.sleep > 0 || d.confuse > 0 || d.stun > 0 || d.slow > 0 || d.defDown > 0;
+		d.poison = d.sleep = d.confuse = d.stun = d.slow = d.defDown = 0;
+		return had;
+	}
+	case EF_BUFF_DEF: d.buffDef = 3; return true;
+	case EF_BUFF_AGI: d.buffAgi = 3; return true;
+	case EF_BUFF_ATK: d.buffAtk = 3; return true;
+	case EF_REACT:
+		if (d.alive && d.team == a.team && d.ct < 1000) { d.ct = 1300; return true; }
+		return false;
 	default: break;
 	}
-	(void)b; (void)a;
+	(void)b; (void)a; (void)turns;
+	return false;
 }
 
 static void AddCp(Unit& u, int n)
 {
 	if (n < 1) return;
+	if (UnitHasPas(u, PAS_CP)) n = n * 3 / 2;
 	n += max(0, UnitStat(u, S_CPL) / 4);
 	if (u.cp < 0) u.cp = 0;
 	int c = u.cp + n;
@@ -2539,14 +2815,16 @@ int ResolveAttack(Battle& b, int ai, int di, int skill, Rng& r, Strike* out, int
 				} else {
 					int amt = UnitStat(a, S_MAG) + sd->power;
 					if (IsCraftId(skill)) amt = max(UnitStat(a, S_MAG), (UnitStat(a, S_STR) + UnitStat(a, S_MAG)) / 2) + sd->power;
+					if (UnitHasPas(a, PAS_HEAL)) amt = amt * 125 / 100;
 					int before = d.hp;
 					d.hp = min(d.ch.stat[S_HP], d.hp + amt);
 					s.dmg = -(d.hp - before);
 					s.hit = 1;
+					if (sd->effect == EF_CLEANSE) s.landed = ApplyEffect(b, a, d, sd->effect, r) ? 1 : 0;
 					AddCp(a, 4);
 				}
 			} else if (sd->kind == SK_BUFF) {
-				ApplyEffect(b, a, d, sd->effect);
+				s.landed = ApplyEffect(b, a, d, sd->effect, r) ? 1 : 0;
 				s.hit = 1;
 			} else {
 				int dmg, hit, crit;
@@ -2558,9 +2836,14 @@ int ResolveAttack(Battle& b, int ai, int di, int skill, Rng& r, Strike* out, int
 					d.hp -= s.dmg;
 					AddCp(a, 5 + s.dmg / 12);
 					AddCp(d, 7 + s.dmg / 8);
-					if (sd->effect != EF_NONE) ApplyEffect(b, a, d, sd->effect);
-					if (d.hp <= 0) { d.hp = 0; s.kill = 1; }
-					if (a.team != d.team) d.ct = max(0, d.ct - 500);
+					bool held = UnitAilmentHeld(d);
+					if (s.dmg > 0 && !(held && TurnFx(sd->effect))) d.sleep = 0;
+					if (sd->effect != EF_NONE) s.landed = ApplyEffect(b, a, d, sd->effect, r) ? 1 : 0;
+					if (d.hp <= 0) {
+						if (!d.pasUsed && UnitHasPas(d, PAS_GUARD)) { d.hp = 1; d.pasUsed = 1; }
+						else { d.hp = 0; d.sleep = d.confuse = d.stun = d.poison = d.slow = 0; s.kill = 1; }
+					}
+					if (a.team != d.team && !held && !UnitHasPas(d, PAS_NOSLOW)) d.ct = max(0, d.ct - 500);
 				}
 			}
 			out[n++] = s;
@@ -2599,10 +2882,16 @@ int ResolveAttack(Battle& b, int ai, int di, int skill, Rng& r, Strike* out, int
 				x.hp = min(x.ch.stat[S_HP], x.hp + h);
 				s.drain = h;
 			}
-			if (sk >= 0 && SkillInfo(sk).effect != EF_NONE && SkillInfo(sk).effect != EF_DRAIN && SkillInfo(sk).effect != EF_IGNDEF)
-				ApplyEffect(b, x, y, SkillInfo(sk).effect);
-			if (y.hp <= 0) { y.hp = 0; s.kill = 1; }
-			if (x.team != y.team) y.ct = max(0, y.ct - (500 + (s.crit ? 250 : 0)));
+			bool held = UnitAilmentHeld(y);
+			int fx = (sk >= 0) ? SkillInfo(sk).effect : EF_NONE;
+			if (s.dmg > 0 && !(held && TurnFx(fx))) y.sleep = 0;
+			if (fx != EF_NONE && fx != EF_DRAIN && fx != EF_IGNDEF)
+				s.landed = ApplyEffect(b, x, y, fx, r) ? 1 : 0;
+			if (y.hp <= 0) {
+				if (!y.pasUsed && UnitHasPas(y, PAS_GUARD)) { y.hp = 1; y.pasUsed = 1; }
+				else { y.hp = 0; y.sleep = y.confuse = y.stun = y.poison = y.slow = 0; s.kill = 1; }
+			}
+			if (x.team != y.team && !held && !UnitHasPas(y, PAS_NOSLOW)) y.ct = max(0, y.ct - (500 + (s.crit ? 250 : 0)));
 		}
 		out[n++] = s;
 		if (atkTurn) aLeft--; else dLeft--;
@@ -2662,7 +2951,7 @@ int AppendAssists(Battle& b, Rng& r, Strike* out, int n, int maxOut)
 			s.dmg = s.crit ? dmg * 2 : dmg;
 			y.hp -= s.dmg;
 			if (y.hp <= 0) { y.hp = 0; s.kill = 1; }
-			y.ct = max(0, y.ct - (500 + (s.crit ? 250 : 0)));
+			if (!UnitAilmentHeld(y) && !UnitHasPas(y, PAS_NOSLOW)) y.ct = max(0, y.ct - (500 + (s.crit ? 250 : 0)));
 		}
 		out[n++] = s;
 	}
@@ -2816,12 +3105,13 @@ void SetupBattle(Battle& b, int stage, DWORD seed, const CharData* party, const 
 		u.x = b.map.pStartX[i]; u.z = b.map.pStartZ[i];
 		u.face = faceToE;
 		u.ct = r.Range(0, 300) + u.ch.stat[S_AGI] * 8;
+		if (UnitHasPas(u, PAS_OPEN)) u.ct += 250;
 		u.hpShow = (float)u.hp;
 		u.grp = -1;
 		u.alert = 1;
 		n++;
 	}
-	int baseLv = stage <= 100 ? 1 + (stage - 1) * 9 / 10 : Clampi(90 + (stage - 100) * 6 / 5, 1, TAC_LV_MAX);
+	int baseLv = StageEnemyLevel(stage);
 	for (int g = 0; g < b.map.nGrp && n < MAX_UNITS; g++) {
 		const MapGroup& grp = b.map.grp[g];
 		int mon = grp.boss ? BossMonster(stage, r) : PickMonster(stage, r);
@@ -2832,15 +3122,6 @@ void SetupBattle(Battle& b, int stage, DWORD seed, const CharData* party, const 
 			if (stage <= 2) lv = max(1, lv - 1);
 			int use = k == 0 ? mon : PickMonster(stage, r);
 			MakeEnemy(u, use, lv, boss ? 1 : 0, r);
-			if (stage > 100) {
-				int mul = 100 + (stage - 100) / 4;
-				if (mul > 450) mul = 450;
-				u.ch.stat[S_HP] = max(1, u.ch.stat[S_HP] * mul / 100);
-				u.ch.stat[S_STR] += (stage - 100) / 25;
-				u.ch.stat[S_MAG] += (stage - 100) / 25;
-				u.ch.stat[S_DEF] += (stage - 100) / 40;
-				u.ch.stat[S_RES] += (stage - 100) / 40;
-			}
 			u.x = grp.x[k]; u.z = grp.z[k];
 			u.face = faceToE + 3.14159f;
 			u.ct = r.Range(0, 280) + u.ch.stat[S_AGI] * 6;
@@ -2867,8 +3148,9 @@ int TurnStartEffects(Battle& b, int ui, int* healOut, int* poisonOut)
 {
 	Unit& u = b.u[ui];
 	*healOut = 0; *poisonOut = 0;
-	if (UnitHasSkill(u, SKL_P_REGEN) && u.hp < u.ch.stat[S_HP]) {
-		int h = max(1, u.ch.stat[S_HP] / 10);
+	int regenPct = UnitHasSkill(u, SKL_P_REGEN) ? 10 : (UnitHasPas(u, PAS_REGEN) ? 8 : 0);
+	if (regenPct && u.hp < u.ch.stat[S_HP]) {
+		int h = max(1, u.ch.stat[S_HP] * regenPct / 100);
 		int before = u.hp;
 		u.hp = min(u.ch.stat[S_HP], u.hp + h);
 		*healOut = u.hp - before;
@@ -2882,14 +3164,22 @@ int TurnStartEffects(Battle& b, int ui, int* healOut, int* poisonOut)
 			*healOut += u.hp - before;
 		}
 		int mpr = UnitStat(u, S_MPR);
+		if (UnitHasPas(u, PAS_MP)) mpr += 4;
 		if (mpr > 0 && u.ch.stat[S_MP] > 0) u.mp = min(u.ch.stat[S_MP], u.mp + mpr);
 	}
+	if (UnitHasPas(u, PAS_NOPOISON)) u.poison = 0;
+	if (UnitHasPas(u, PAS_NOSLOW)) u.slow = 0;
+	if (UnitHasPas(u, PAS_NODOWN)) u.defDown = 0;
+	if (UnitHasPas(u, PAS_NOSLEEP)) u.sleep = 0;
+	if (UnitHasPas(u, PAS_NOCONFUSE)) u.confuse = 0;
+	if (UnitHasPas(u, PAS_NOSTUN)) u.stun = 0;
 	if (u.poison > 0) {
-		int d = max(1, u.ch.stat[S_HP] * 8 / 100);
+		int d = max(1, u.ch.stat[S_HP] * 5 / 100);
 		u.hp = max(1, u.hp - d);
 		*poisonOut = d;
 		u.poison--;
 	}
+	if (u.slow > 0) u.slow--;
 	if (u.buffDef > 0) u.buffDef--;
 	if (u.buffAgi > 0) u.buffAgi--;
 	if (u.buffAtk > 0) u.buffAtk--;
@@ -3118,10 +3408,58 @@ static void DistanceField(const Battle& b, int ui, short (*df)[MAPN])
 	}
 }
 
+void ConfusePlan(const Battle& b, int ui, AiPlan& p, Rng& r)
+{
+	const Unit& u = b.u[ui];
+	p.moveX = u.x; p.moveZ = u.z; p.target = -1; p.skill = -1; p.castX = u.x; p.castZ = u.z; p.wild = 1;
+	static Reach rc;
+	ComputeReach(b, ui, rc);
+	int roll = (int)(r.Next() % 100);
+	int want = 0;
+	if (roll < 45) want = 1;
+	else if (roll < 70) want = 2;
+	else if (roll < 85) want = 3;
+	int pick = -1;
+	if (want == 1 || want == 2) {
+		int ids[MAX_UNITS], n = 0;
+		for (int i = 0; i < b.nUnits; i++) {
+			const Unit& t = b.u[i];
+			if (i == ui || !t.alive || t.hp <= 0) continue;
+			int foe = t.team != u.team;
+			if (want == 1 && foe) ids[n++] = i;
+			if (want == 2 && !foe) ids[n++] = i;
+		}
+		if (n > 0) pick = ids[r.Next() % n];
+	}
+	if (want == 3) p.wild = 2;
+	int best = -999999, bx = u.x, bz = u.z;
+	int any = 0;
+	for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) {
+		if (rc.cost[z][x] < 0 || !rc.canStop[z][x]) continue;
+		any = 1;
+		int sc = (int)(r.Next() % 7);
+		if (pick >= 0) {
+			const Unit& t = b.u[pick];
+			if (InAttackRange(b, x, z, UnitRangeMin(u), UnitRangeMax(u), t.x, t.z, true)) sc += 1000;
+			else sc -= Dist(x, z, t.x, t.z) * 4;
+		}
+		if (sc > best) { best = sc; bx = x; bz = z; }
+	}
+	if (any) { p.moveX = bx; p.moveZ = bz; }
+	if (pick >= 0) {
+		p.target = pick;
+		p.castX = b.u[pick].x;
+		p.castZ = b.u[pick].z;
+		p.wild = 1;
+	}
+}
+
 void AiDecide(const Battle& b, int ui, AiPlan& p, Rng& r)
 {
 	const Unit& u = b.u[ui];
-	p.moveX = u.x; p.moveZ = u.z; p.target = -1; p.skill = -1; p.castX = u.x; p.castZ = u.z;
+	p.moveX = u.x; p.moveZ = u.z; p.target = -1; p.skill = -1; p.castX = u.x; p.castZ = u.z; p.wild = 0;
+	if (u.sleep > 0 || u.stun > 0) return;
+	if (u.confuse > 0) { ConfusePlan(b, ui, p, r); return; }
 	static Reach rc;
 	ComputeReach(b, ui, rc);
 	float best = -1e9f;
@@ -3168,6 +3506,7 @@ void AiDecide(const Battle& b, int ui, AiPlan& p, Rng& r)
 						const Unit& q = b.u[targets[k]];
 						int miss = q.ch.stat[S_HP] - q.hp;
 						if (q.hp * 100 / max(1, q.ch.stat[S_HP]) < 65) h += min(miss, UnitStat(u, S_MAG) + sd.power);
+						if (sd.effect == EF_CLEANSE && (q.poison > 0 || q.sleep > 0 || q.confuse > 0 || q.stun > 0 || q.slow > 0 || q.defDown > 0)) h += 48;
 					}
 					if (h <= 0) continue;
 					sc += h * 1.2f;
@@ -3213,6 +3552,12 @@ void AiDecide(const Battle& b, int ui, AiPlan& p, Rng& r)
 					int nt = SkillTargets(b, ui, cs, tx, tz, targets, 8);
 					if (nt <= 0) continue;
 					sc += nt * (ougi ? 14.f : 9.f);
+					if (csd.effect == EF_CLEANSE) {
+						for (int k = 0; k < nt; k++) {
+							const Unit& q = b.u[targets[k]];
+							if (q.poison > 0 || q.sleep > 0 || q.confuse > 0 || q.stun > 0 || q.slow > 0 || q.defDown > 0) sc += 36.f;
+						}
+					}
 				} else {
 					Forecast f;
 					CalcForecast(b, ui, i, cs, f);
@@ -3536,18 +3881,216 @@ bool GoodTake(SaveData& s, int i)
 
 // ============================================================ セーブ
 static const DWORD kSaveMagic = 0x31434154; // 'TAC1'
-static LPCTSTR kSaveLeaf = _T("oggYSEDbgmu_tactics.dat");
 
 // 敵部位。セーブ本体の大きさは変えず、別ファイルに積む。
 static const int kTrophyN = 40;
 static unsigned short g_trophy[40];
 static const DWORD kTrophyMagic = 0x54525054u;
-static LPCTSTR kTrophyLeaf = _T("oggYSEDbgmu_tac_part.dat");
+
+// セーブスロット。0 番は従来のファイル名のまま（いまの進行がスロット1）。
+enum { SLF_SAVE = 0, SLF_PART, SLF_CRAFT, SLF_MID, SLF_AUTO, SLF_N };
+static const TCHAR* kSlotBookLeaf = _T("oggYSEDbgmu_tac_slots.dat");
+static const DWORD kSlotMagic = 0x544C5354u;
+static int g_slot = 0;
+static wchar_t g_slotName[TAC_SLOT_N][TAC_SLOT_NAME];
+static bool g_slotReady = false;
+static TCHAR g_leafSave[96];
+static TCHAR g_leafPart[96];
+static TCHAR g_leafCraft[96];
+static TCHAR g_leafMid[96];
+static TCHAR g_leafAuto[96];
+
+struct SlotBook {
+	DWORD magic;
+	int version;
+	int current;
+	wchar_t name[TAC_SLOT_N][TAC_SLOT_NAME];
+};
+
+static void SlotLeaf(TCHAR* out, int cap, int kind, int slot)
+{
+	const TCHAR* base =
+		kind == SLF_PART ? _T("oggYSEDbgmu_tac_part") :
+		kind == SLF_CRAFT ? _T("oggYSEDbgmu_tac_craft") :
+		kind == SLF_MID ? _T("oggYSEDbgmu_tac_mid") :
+		kind == SLF_AUTO ? _T("oggYSEDbgmu_tac_auto") :
+		_T("oggYSEDbgmu_tactics");
+	if (slot <= 0) _stprintf_s(out, cap, _T("%s.dat"), base);
+	else _stprintf_s(out, cap, _T("%s_s%d.dat"), base, slot + 1);
+}
+static void SlotApply()
+{
+	SlotLeaf(g_leafSave, 96, SLF_SAVE, g_slot);
+	SlotLeaf(g_leafPart, 96, SLF_PART, g_slot);
+	SlotLeaf(g_leafCraft, 96, SLF_CRAFT, g_slot);
+	SlotLeaf(g_leafMid, 96, SLF_MID, g_slot);
+	SlotLeaf(g_leafAuto, 96, SLF_AUTO, g_slot);
+}
+static void SlotDefaultName(wchar_t* out, int n, int slot)
+{
+	const wchar_t* p = LangPick14(
+		L"スロット", L"Slot ", L"Slot ", L"Slot ", L"Ranura ",
+		L"슬롯 ", L"存档", L"خانة ", L"Слот ", L"Slot ",
+		L"Slot ", L"Slot ", L"Slot ", L"Yuva ");
+	swprintf_s(out, n, L"%s%d", p, slot + 1);
+}
+static void SlotWriteBook()
+{
+	SlotBook b = {};
+	b.magic = kSlotMagic;
+	b.version = 1;
+	b.current = g_slot;
+	memcpy(b.name, g_slotName, sizeof(g_slotName));
+	CString path = DatArc_Path(kSlotBookLeaf);
+	FILE* fp = NULL;
+	if (_tfopen_s(&fp, path, _T("wb")) != 0 || !fp) return;
+	fwrite(&b, 1, sizeof(b), fp);
+	fclose(fp);
+	DatArc_Commit(kSlotBookLeaf);
+}
+void SlotBoot()
+{
+	if (g_slotReady) return;
+	g_slotReady = true;
+	memset(g_slotName, 0, sizeof(g_slotName));
+	g_slot = 0;
+	CString path = DatArc_Path(kSlotBookLeaf);
+	FILE* fp = NULL;
+	bool got = false;
+	if (_tfopen_s(&fp, path, _T("rb")) == 0 && fp) {
+		SlotBook b = {};
+		if (fread(&b, 1, sizeof(b), fp) == sizeof(b) && b.magic == kSlotMagic && b.version == 1) {
+			if (b.current >= 0 && b.current < TAC_SLOT_N) g_slot = b.current;
+			memcpy(g_slotName, b.name, sizeof(g_slotName));
+			for (int i = 0; i < TAC_SLOT_N; i++) g_slotName[i][TAC_SLOT_NAME - 1] = 0;
+			got = true;
+		}
+		fclose(fp);
+	}
+	SlotApply();
+	if (!got) SlotWriteBook();
+}
+int SlotCurrent() { SlotBoot(); return g_slot; }
+void SlotTitle(int slot, wchar_t* out, int n)
+{
+	SlotBoot();
+	if (!out || n < 2) return;
+	if (slot < 0 || slot >= TAC_SLOT_N) { out[0] = 0; return; }
+	if (g_slotName[slot][0]) wcsncpy_s(out, n, g_slotName[slot], _TRUNCATE);
+	else SlotDefaultName(out, n, slot);
+}
+void SlotRename(int slot, const wchar_t* name)
+{
+	SlotBoot();
+	if (slot < 0 || slot >= TAC_SLOT_N) return;
+	wchar_t tmp[TAC_SLOT_NAME];
+	tmp[0] = 0;
+	if (name) wcsncpy_s(tmp, name, _TRUNCATE);
+	wchar_t def[TAC_SLOT_NAME];
+	SlotDefaultName(def, TAC_SLOT_NAME, slot);
+	if (!tmp[0] || wcscmp(tmp, def) == 0) g_slotName[slot][0] = 0;
+	else wcsncpy_s(g_slotName[slot], tmp, _TRUNCATE);
+	SlotWriteBook();
+}
+void SlotSelect(int slot)
+{
+	SlotBoot();
+	if (slot < 0 || slot >= TAC_SLOT_N) return;
+	g_slot = slot;
+	SlotApply();
+	SlotWriteBook();
+}
+void SlotWipe(int slot)
+{
+	SlotBoot();
+	if (slot < 0 || slot >= TAC_SLOT_N) return;
+	DatArc_FlushSuspend(TRUE);
+	for (int k = 0; k < SLF_N; k++) {
+		TCHAR leaf[96];
+		SlotLeaf(leaf, 96, k, slot);
+		DatArc_Delete(leaf);
+	}
+	DatArc_FlushSuspend(FALSE);
+}
+void SlotClearRuntime()
+{
+	memset(g_trophy, 0, sizeof(g_trophy));
+	CraftReset();
+}
+static bool CopyOneLeaf(const TCHAR* from, const TCHAR* to)
+{
+	if (!from || !from[0] || !to || !to[0]) return false;
+	if (!DatArc_Exists(from)) {
+		DatArc_Delete(to);
+		return true;
+	}
+	CString sp = DatArc_Path(from);
+	CString dp = DatArc_Path(to);
+	FILE* in = NULL;
+	if (_tfopen_s(&in, sp, _T("rb")) != 0 || !in) return false;
+	fseek(in, 0, SEEK_END);
+	long sz = ftell(in);
+	fseek(in, 0, SEEK_SET);
+	if (sz < 0 || sz > 64 * 1024 * 1024) { fclose(in); return false; }
+	BYTE* buf = sz ? new BYTE[(size_t)sz] : NULL;
+	bool rd = !sz || (buf && fread(buf, 1, (size_t)sz, in) == (size_t)sz);
+	fclose(in);
+	if (!rd) { delete[] buf; return false; }
+	FILE* out = NULL;
+	if (_tfopen_s(&out, dp, _T("wb")) != 0 || !out) { delete[] buf; return false; }
+	bool ok = !sz || fwrite(buf, 1, (size_t)sz, out) == (size_t)sz;
+	fclose(out);
+	delete[] buf;
+	if (!ok) return false;
+	return DatArc_Commit(to) != FALSE;
+}
+bool SlotCopyFiles(int from, int to)
+{
+	SlotBoot();
+	if (from < 0 || to < 0 || from >= TAC_SLOT_N || to >= TAC_SLOT_N || from == to) return false;
+	DatArc_FlushSuspend(TRUE);
+	bool ok = true;
+	for (int k = 0; k < SLF_N; k++) {
+		TCHAR a[96], b[96];
+		SlotLeaf(a, 96, k, from);
+		SlotLeaf(b, 96, k, to);
+		if (!CopyOneLeaf(a, b)) ok = false;
+	}
+	DatArc_FlushSuspend(FALSE);
+	return ok;
+}
+int SlotPeekClear(int slot)
+{
+	SlotBoot();
+	if (slot < 0 || slot >= TAC_SLOT_N) return -1;
+	TCHAR leaf[96];
+	SlotLeaf(leaf, 96, SLF_SAVE, slot);
+	if (!DatArc_Exists(leaf)) return -1;
+	CString path = DatArc_Path(leaf);
+	FILE* fp = NULL;
+	if (_tfopen_s(&fp, path, _T("rb")) != 0 || !fp) return -1;
+	fseek(fp, 0, SEEK_END);
+	long sz = ftell(fp);
+	fseek(fp, 0, SEEK_SET);
+	int clear = 0;
+	if (sz == (long)sizeof(SaveData)) {
+		static SaveData peek;
+		if (fread(&peek, 1, sizeof(peek), fp) == sizeof(peek) && peek.magic == kSaveMagic)
+			clear = peek.stageCleared < 0 ? 0 : peek.stageCleared;
+	}
+	fclose(fp);
+	return clear;
+}
+const TCHAR* TacLeafSave() { SlotBoot(); return g_leafSave; }
+const TCHAR* TacLeafPart() { SlotBoot(); return g_leafPart; }
+const TCHAR* TacLeafCraft() { SlotBoot(); return g_leafCraft; }
+const TCHAR* TacLeafMid() { SlotBoot(); return g_leafMid; }
+const TCHAR* TacLeafAuto() { SlotBoot(); return g_leafAuto; }
 
 static void TrophyLoad()
 {
 	memset(g_trophy, 0, sizeof(g_trophy));
-	CString path = DatArc_Path(kTrophyLeaf);
+	CString path = DatArc_Path(TacLeafPart());
 	FILE* fp = NULL;
 	if (_tfopen_s(&fp, path, _T("rb")) != 0 || !fp) return;
 	DWORD magic = 0; int ver = 0;
@@ -3557,7 +4100,7 @@ static void TrophyLoad()
 }
 static void TrophySave()
 {
-	CString path = DatArc_Path(kTrophyLeaf);
+	CString path = DatArc_Path(TacLeafPart());
 	FILE* fp = NULL;
 	if (_tfopen_s(&fp, path, _T("wb")) != 0 || !fp) return;
 	int ver = 1;
@@ -3565,7 +4108,7 @@ static void TrophySave()
 	fwrite(&ver, 4, 1, fp);
 	fwrite(g_trophy, sizeof(g_trophy), 1, fp);
 	fclose(fp);
-	DatArc_Commit(kTrophyLeaf);
+	DatArc_Commit(TacLeafPart());
 }
 static int TrophyId(unsigned short s) { return s & 1023; }
 static int TrophyCt(unsigned short s) { return (s >> 10) & 63; }
@@ -3847,7 +4390,7 @@ static void CopySaveTail(SaveData& s, int stageCleared, int stageSel, int winX, 
 bool SaveLoad(SaveData& s)
 {
 	SaveDefaults(s);
-	CString path = DatArc_Path(kSaveLeaf);
+	CString path = DatArc_Path(TacLeafSave());
 	FILE* fp = NULL;
 	if (_tfopen_s(&fp, path, _T("rb")) != 0 || !fp) return false;
 	fseek(fp, 0, SEEK_END);
@@ -3923,12 +4466,12 @@ bool SaveLoad(SaveData& s)
 
 bool SaveWrite(const SaveData& s)
 {
-	CString path = DatArc_Path(kSaveLeaf);
+	CString path = DatArc_Path(TacLeafSave());
 	FILE* fp = NULL;
 	if (_tfopen_s(&fp, path, _T("wb")) != 0 || !fp) return false;
 	bool ok = fwrite(&s, 1, sizeof(s), fp) == sizeof(s);
 	fclose(fp);
-	if (ok) { TrophySave(); CraftPrune(s); CraftSave(); DatArc_Commit(kSaveLeaf); }
+	if (ok) { TrophySave(); CraftPrune(s); CraftSave(); DatArc_Commit(TacLeafSave()); }
 	return ok;
 }
 
@@ -3960,6 +4503,79 @@ void RandomName(wchar_t* out, int gender, Rng& r)
 }
 
 #include "tactics_src/craft_cat.inc"
+#include "tactics_src/passive_cat.inc"
 #include "tactics_src/craft_fns.inc"
+
+const wchar_t* ElemWord(int el)
+{
+	switch (el) {
+	case EL_PHYS: return LangPick14(L"物理", L"Physical", L"Physique", L"Fisico", L"Físico", L"물리", L"物理", L"جسدي", L"Физика", L"Physisch", L"Físico", L"Fysiek", L"Fizyczny", L"Fiziksel");
+	case EL_MAGIC: return LangPick14(L"魔法", L"Magic", L"Magie", L"Magia", L"Magia", L"마법", L"魔法", L"سحر", L"Магия", L"Magie", L"Magia", L"Magie", L"Magia", L"Büyü");
+	case EL_MELEE: return LangPick14(L"近距離", L"Melee", L"Mêlée", L"Mischia", L"Cuerpo", L"근거리", L"近战", L"قرب", L"Ближний", L"Nah", L"Corpo", L"Dichtbij", L"Wręcz", L"Yakın");
+	case EL_RANGE: return LangPick14(L"遠距離", L"Ranged", L"Distance", L"Distanza", L"Distancia", L"원거리", L"远程", L"بعيد", L"Дальний", L"Fern", L"Distância", L"Ver", L"Dystans", L"Uzak");
+	default: return CraftElWord(el);
+	}
+}
+const wchar_t* EffectWord(int ef)
+{
+	switch (ef) {
+	case EF_SLEEP: return LangPick14(L"睡眠", L"Sleep", L"Sommeil", L"Sonno", L"Sueño", L"수면", L"睡眠", L"نوم", L"Сон", L"Schlaf", L"Sono", L"Slaap", L"Sen", L"Uyku");
+	case EF_CONFUSE: return LangPick14(L"混乱", L"Confuse", L"Confusion", L"Confusione", L"Confusión", L"혼란", L"混乱", L"ارتباك", L"Смятение", L"Wirren", L"Confusão", L"Verwarring", L"Chaos", L"Şaşkın");
+	case EF_STUN: return LangPick14(L"スタン", L"Stun", L"Étourdi", L"Stordito", L"Aturdimiento", L"기절", L"硬直", L"صعقة", L"Оглушение", L"Betäubung", L"Atordoar", L"Verdoving", L"Ogłuszenie", L"Sersem");
+	case EF_POISON: return LangPick14(L"毒", L"Poison", L"Poison", L"Veleno", L"Veneno", L"독", L"毒", L"سم", L"Яд", L"Gift", L"Veneno", L"Gif", L"Trucizna", L"Zehir");
+	case EF_SLOW: return LangPick14(L"鈍足", L"Slow", L"Lenteur", L"Lentezza", L"Lentitud", L"둔화", L"迟缓", L"بطء", L"Замедление", L"Langsam", L"Lentidão", L"Traag", L"Spowolnienie", L"Yavaş");
+	case EF_DEFDOWN: return LangPick14(L"防御低下", L"Def down", L"Déf. basse", L"Dif. bassa", L"Def. baja", L"방어 저하", L"防御下降", L"دفاع منخفض", L"Ослабление", L"Abwehr runter", L"Def. baixa", L"Ver. omlaag", L"Obrona w dół", L"Savunma düşüş");
+	case EF_CLEANSE: return LangPick14(L"状態回復", L"Cleanse", L"Purge", L"Purifica", L"Purifica", L"상태 회복", L"状态恢复", L"تطهير", L"Очищение", L"Läutern", L"Purificar", L"Zuiveren", L"Oczyszczenie", L"Arınma");
+	default: return NULL;
+	}
+}
+const wchar_t* WeakLabel()
+{
+	return LangPick14(L"弱点", L"Weak", L"Faiblesse", L"Debolezza", L"Debilidad", L"약점", L"弱点", L"ضعف", L"Слабость", L"Schwäche", L"Fraqueza", L"Zwakte", L"Słabość", L"Zayıf");
+}
+static void JoinBits(wchar_t* out, int cap, const wchar_t** bits, int n)
+{
+	out[0] = 0;
+	for (int i = 0; i < n; i++) {
+		if (!bits[i] || !bits[i][0]) continue;
+		if (out[0]) wcscat_s(out, cap, L"・");
+		wcscat_s(out, cap, bits[i]);
+	}
+}
+void SkillAttrText(const SkillDef& sd, wchar_t* out, int cap)
+{
+	if (!out || cap < 2) return;
+	out[0] = 0;
+	if (sd.kind == SK_PASSIVE) return;
+	const wchar_t* bits[4];
+	int n = 0;
+	const wchar_t* el = ElemWord(sd.element);
+	if (el) bits[n++] = el;
+	if (sd.kind != SK_HEAL && sd.kind != SK_BUFF) {
+		int magic = sd.kind == SK_MAGIC;
+		bits[n++] = ElemWord(magic ? EL_MAGIC : EL_PHYS);
+		if (magic || sd.rMin >= 2 || sd.rMax >= 2) bits[n++] = ElemWord(EL_RANGE);
+		else if (sd.rMax < 0) bits[n++] = LangPick14(L"武器間合い", L"weapon range", L"portée d'arme", L"portata arma", L"alcance de arma", L"무기 사거리", L"武器距离", L"مدى السلاح", L"дальность оружия", L"Waffenreichweite", L"alcance da arma", L"wapenbereik", L"zasięg broni", L"silah menzili");
+		else bits[n++] = ElemWord(EL_MELEE);
+	}
+	static wchar_t ail[64];
+	ail[0] = 0;
+	if (sd.effect == EF_POISON) swprintf_s(ail, L"%s 1-3 HP5%%", EffectWord(EF_POISON));
+	else if (sd.effect == EF_SLOW || sd.effect == EF_DEFDOWN) swprintf_s(ail, L"%s 1-3", EffectWord(sd.effect));
+	const wchar_t* ew = ail[0] ? ail : EffectWord(sd.effect);
+	if (ew) bits[n++] = ew;
+	JoinBits(out, cap, bits, n);
+}
+void MonsterWeakText(int monster, wchar_t* out, int cap)
+{
+	if (!out || cap < 2) return;
+	const MonsterDef& md = MonsterInfo(monster);
+	const wchar_t* a = ElemWord(md.weak[0]);
+	const wchar_t* b = ElemWord(md.weak[1]);
+	const wchar_t* none = LangPick14(L"なし", L"None", L"Aucune", L"Nessuna", L"Ninguna", L"없음", L"无", L"لا شيء", L"Нет", L"Keine", L"Nenhuma", L"Geen", L"Brak", L"Yok");
+	if (a && b) swprintf_s(out, cap, L"%s %s・%s", WeakLabel(), a, b);
+	else if (a || b) swprintf_s(out, cap, L"%s %s", WeakLabel(), a ? a : b);
+	else swprintf_s(out, cap, L"%s %s", WeakLabel(), none);
+}
 
 } // namespace otac

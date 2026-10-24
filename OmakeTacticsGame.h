@@ -120,7 +120,7 @@ private:
 	void AddBanner(const wchar_t* s, const wchar_t* sub, DWORD col, int style, float life);
 	void AddPopup(V3 p, const wchar_t* s, DWORD col, int style, float delay = 0, float life = 0);
 	void AddLog(const wchar_t* s, DWORD col);
-	void DrawBattleLog();
+	void DrawBattleLog(float x, float y, float w, float h);
 	void DrawHelpOverlay();
 	float DrawStatLines(const CharData& c, float x, float y, float w, const int* gains, int hpCur, int mpCur);
 	void DrawStatTip();
@@ -140,6 +140,15 @@ private:
 	void RollMapSeed(int stage, BOOL force);
 	void UpdateBase(float dt);
 	void DrawBaseUi();
+	void OpenSlotPanel();
+	void DrawSlotUi();
+	void RefreshSlotPeek();
+	void CommitSlotName();
+	void FlushCurrentSlot();
+	void AdoptActiveSlot(BOOL leaveBattle);
+	void SwitchToSlot(int to);
+	void DeletePickedSlot();
+	void CopyPickedSlot();
 	void DrawShop();
 	float DrawSoundOpts(float x, float y, float w, float k);
 	void ApplyAudio();
@@ -197,6 +206,7 @@ private:
 	void FinishSeq();
 	void AwardExp();
 	void FinishUnitTurn(int acted);
+	void ConfuseSelf(int ui);
 	BOOL CheckBattleOver();
 	void ComputeOverlays();
 	void BuildOverlayQuads();
@@ -317,6 +327,11 @@ private:
 	int m_shopHold;
 	int m_partyBack;
 	int m_baseOpt;
+	int m_slotUi;                         // 0=閉 1=一覧 2=削除1 3=削除2 4=コピー先 5=コピー確認
+	int m_slotPick;
+	int m_slotDest;
+	int m_slotClear[TAC_SLOT_N];
+	wchar_t m_slotEdit[TAC_SLOT_NAME];
 	int m_createFromParty;
 	int m_evFromParty;
 	int m_evJump;
