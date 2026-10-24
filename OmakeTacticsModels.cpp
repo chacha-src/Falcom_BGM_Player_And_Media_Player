@@ -10,7 +10,8 @@ static const char* const kClipNames[CL_COUNT] = {
 	"Idle", "Walking_A", "Running_A", "1H_Melee_Attack_Chop", "1H_Melee_Attack_Slice_Diagonal", "1H_Melee_Attack_Stab",
 	"2H_Melee_Attack_Chop", "2H_Melee_Attack_Spin", "1H_Ranged_Shoot", "2H_Ranged_Shoot",
 	"Spellcast_Shoot", "Spellcast_Raise", "Spellcast_Long", "Hit_A", "Hit_B", "Death_A", "Cheer", "Block", "Dodge_Backward", "2H_Melee_Idle",
-	"Throw", "Unarmed_Melee_Attack_Punch_A", "Jump_Full_Short", "Interact", "Taunt", "Spawn_Ground", "Use_Item"
+	"Throw", "Unarmed_Melee_Attack_Punch_A", "Jump_Full_Short", "Interact", "Taunt", "Spawn_Ground", "Use_Item",
+	"Idle_GlanceL", "Idle_GlanceR", "Idle_Look", "Idle_Stretch", "Idle_Shift", "Idle_Cross"
 };
 
 static int Pal(int row, int col) { return row * 16 + col; }
@@ -867,6 +868,11 @@ static void AddAtt(Actor& a, const Renderer& r, const char* name)
 static void ActorInit(Actor& a)
 {
 	memset(&a, 0, sizeof(a));
+	static unsigned seq = 1;
+	seq = seq * 1664525u + 1013904223u;
+	a.idleSeed = ((seq >> 8) & 0xffffff) / 16777216.f;
+	if (a.idleSeed < 0.05f) a.idleSeed = 0.05f;
+	a.idleOfs = a.idleSeed * 1.6f;
 	a.model = -1;
 	a.hair = 0;
 	a.scale = 1;
@@ -1125,6 +1131,7 @@ void ActorPlay(Actor& a, int clip, int loop, float blendTime)
 	a.clip = clip; a.t = 0; a.loop = loop;
 	a.blendDur = max(.001f, blendTime);
 	a.blend = blendTime <= 0 ? 1.f : 0.f;
+	if (loop && clip == CL_IDLE && a.proc == 3) a.t = a.idleOfs;
 }
 
 void ActorUpdate(Actor& a, float dt)
@@ -1138,21 +1145,21 @@ static int MonsterClip(const Renderer& r, int rig, int clip)
 {
 	if (rig < 0 || rig >= (int)r.rigs.size()) return -1;
 	const Rig& g = r.rigs[rig];
-	const char* n = "Idle";
-	switch (clip) {
-	case CL_WALK: n = "Walking_A"; break;
-	case CL_RUN: n = "Running_A"; break;
-	case CL_DEATH: n = "Death_A"; break;
-	case CL_HIT_A: case CL_HIT_B: case CL_DODGE: n = "Hit_A"; break;
-	default:
-		if (clip != CL_IDLE && clip != CL_CHEER && clip != CL_TAUNT && clip != CL_SPAWN && clip != CL_USE && clip != CL_INTERACT && clip != CL_JUMP && clip != CL_BLOCK && clip != CL_2H_IDLE)
-			n = "1H_Melee_Attack_Chop";
+	int want = clip;
+	if (want == CL_DODGE || want == CL_HIT_B) want = CL_HIT_A;
+	if (want == CL_THROW) want = CL_1H_SHOOT;
+	if (want == CL_PUNCH) want = CL_1H_STAB;
+	if (want == CL_CAST_LONG) want = CL_CAST_SHOOT;
+	int c = (want >= 0 && want < CL_COUNT) ? g.FindClip(kClipNames[want]) : -1;
+	if (c >= 0) return c;
+	switch (want) {
+	case CL_WALK: case CL_RUN: c = g.FindClip("Walking_A"); break;
+	case CL_1H_CHOP: case CL_1H_SLICE: case CL_1H_STAB: case CL_2H_CHOP: case CL_2H_SPIN:
+	case CL_1H_SHOOT: case CL_2H_SHOOT: case CL_CAST_SHOOT: case CL_CAST_RAISE: case CL_CAST_LONG:
+		c = g.FindClip("1H_Melee_Attack_Slice_Diagonal");
+		if (c < 0) c = g.FindClip("1H_Melee_Attack_Chop");
 		break;
-	}
-	int c = g.FindClip(n);
-	if (c < 0) {
-		if (clip == CL_WALK || clip == CL_RUN) c = g.FindClip("Walking_A");
-		else c = g.FindClip("Idle");
+	default: c = g.FindClip("Idle"); break;
 	}
 	if (c < 0) c = g.FindClip("Idle");
 	return c;
@@ -1181,6 +1188,26 @@ BOOL ActorClipDone(const Actor& a, const Library& lib, const Renderer& r)
 void ActorPose(Actor& a, const Library& lib, const Renderer& r)
 {
 	a.poseValid = 0;
+	if (a.proc == 3 && a.loop && a.model >= 0 && (a.clip == CL_IDLE || (a.clip >= CL_IDLE_GLANCE_L && a.clip <= CL_IDLE_CROSS))) {
+		float len = ActorClipLen(a, lib, r, a.clip);
+		if (len > 0.05f && a.t >= len) {
+			int next = CL_IDLE;
+			if (a.clip == CL_IDLE) {
+				a.idleSeed = fmodf(a.idleSeed * 12.9898f + 0.173f, 1.f);
+				if (a.idleSeed < 0.f) a.idleSeed += 1.f;
+				float s = a.idleSeed;
+				if (s < 0.55f) next = CL_IDLE;
+				else if (s < 0.64f) next = CL_IDLE_GLANCE_L;
+				else if (s < 0.73f) next = CL_IDLE_GLANCE_R;
+				else if (s < 0.82f) next = CL_IDLE_LOOK;
+				else if (s < 0.90f) next = CL_IDLE_STRETCH;
+				else if (s < 0.96f) next = CL_IDLE_SHIFT;
+				else next = CL_IDLE_CROSS;
+			}
+			if (next == a.clip) a.t = fmodf(a.t, len);
+			else ActorPlay(a, next, 1, .35f);
+		}
+	}
 	if (a.proc == 3) {
 		if (a.model < 0 || a.model >= (int)r.models.size()) return;
 		const Model& m = r.models[a.model];

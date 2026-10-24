@@ -930,7 +930,7 @@ void Renderer::LoadCreaturePack()
 			g.hips = 0;
 			for (UINT j = 0; j < nJ; j++) { rd.Name(g.names[j], 24); g.parent[j] = rd.I32(); }
 			UINT nc = rd.U32();
-			if (nc > 16) return;
+			if (nc > 32) return;
 			g.clips.resize(nc);
 			for (UINT c = 0; c < nc; c++) {
 				Clip& cl = g.clips[c];

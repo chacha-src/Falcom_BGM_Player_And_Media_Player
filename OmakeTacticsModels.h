@@ -8,7 +8,9 @@ namespace otac {
 enum ClipId {
 	CL_IDLE, CL_WALK, CL_RUN, CL_1H_CHOP, CL_1H_SLICE, CL_1H_STAB, CL_2H_CHOP, CL_2H_SPIN, CL_1H_SHOOT, CL_2H_SHOOT,
 	CL_CAST_SHOOT, CL_CAST_RAISE, CL_CAST_LONG, CL_HIT_A, CL_HIT_B, CL_DEATH, CL_CHEER, CL_BLOCK, CL_DODGE, CL_2H_IDLE,
-	CL_THROW, CL_PUNCH, CL_JUMP, CL_INTERACT, CL_TAUNT, CL_SPAWN, CL_USE, CL_COUNT
+	CL_THROW, CL_PUNCH, CL_JUMP, CL_INTERACT, CL_TAUNT, CL_SPAWN, CL_USE,
+	CL_IDLE_GLANCE_L, CL_IDLE_GLANCE_R, CL_IDLE_LOOK, CL_IDLE_STRETCH, CL_IDLE_SHIFT, CL_IDLE_CROSS,
+	CL_COUNT
 };
 
 struct Library {
@@ -58,6 +60,8 @@ struct Actor {
 	float t, pt, blend, blendDur;
 	int loop, ploop;
 	float animSpeed;
+	float idleOfs;      // 待機の開始位置（秒）。全員が同じ拍で動かないようにする
+	float idleSeed;     // 次の待機の種類を決める
 	float recoil;       // 被ダメの仰け反り 0..1
 	float recoilX, recoilZ;
 	Pose pose;

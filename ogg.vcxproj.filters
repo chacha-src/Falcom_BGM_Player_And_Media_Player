@@ -2830,6 +2830,12 @@
     <None Include="res\tactics\tac_gear.bin">
       <Filter>Resource Files</Filter>
     </None>
+    <None Include="res\tactics\tac_ava.bin">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="res\tactics\tac_face.bin">
+      <Filter>Resource Files</Filter>
+    </None>
   </ItemGroup>
   <ItemGroup>
     <Text Include="codec\APPLE_LICENSE.txt">

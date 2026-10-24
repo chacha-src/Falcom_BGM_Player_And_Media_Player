@@ -1451,6 +1451,24 @@ void Game::SeqImpact(const SeqStep& st)
 	}
 }
 
+static float ClipWindup(int clip)
+{
+	switch (clip) {
+	case CL_2H_SHOOT: case CL_1H_SHOOT: case CL_THROW: return 0.26f;
+	case CL_CAST_SHOOT: case CL_CAST_LONG: return 0.36f;
+	case CL_CAST_RAISE: return 0.32f;
+	case CL_2H_CHOP: case CL_1H_CHOP: return 0.30f;
+	case CL_2H_SPIN: return 0.16f;
+	default: return 0.22f;
+	}
+}
+
+static int CutClipFor(const Unit& u, const SkillDef* sd, int variant)
+{
+	if (sd && sd->kind != SK_PHYS) return CastClipFor(sd->kind);
+	return AttackClipFor(UnitAttackStyle(u), variant);
+}
+
 void Game::UpdateSeq(float dt)
 {
 	if (m_seqCut) {
@@ -1460,8 +1478,17 @@ void Game::UpdateSeq(float dt)
 				m_cutStage = 1; m_cutStageT = 0;
 				m_lunge[m_cutA] = 0;
 				if (m_cutD >= 0) m_lunge[m_cutD] = 0;
-				ActorPlay(m_act[m_cutA], m_seqSkill >= 0 && SkillInfo(m_seqSkill).kind != SK_PHYS ? CL_IDLE : CL_2H_IDLE, 1, 0);
-				if (m_cutD >= 0) ActorPlay(m_act[m_cutD], CL_IDLE, 1, 0);
+				{
+					const SkillDef* sd0 = (m_seqN > 0 && m_seq[0].skill >= 0) ? &SkillInfo(m_seq[0].skill) : NULL;
+					int clip = CutClipFor(m_b.u[m_cutA], sd0, sd0 ? 1 : 0);
+					Actor& ca = m_act[m_cutA];
+					ActorPlay(ca, clip, 0, .06f);
+					float full = ActorClipLen(ca, m_lib, m_r, clip);
+					float need = IsCraftSuper(m_seqSkill) ? 3.2f : (m_ult ? 2.15f : (m_seqSkill >= 0 ? 1.05f : .45f));
+					float wind = full * ClipWindup(clip);
+					ca.animSpeed = Clampf(wind / max(0.25f, need), 0.12f, 1.15f);
+				}
+				if (m_cutD >= 0) ActorPlay(m_act[m_cutD], CL_IDLE, 1, .15f);
 				if (m_seqSkill >= 0) {
 					const SkillDef& sd = SkillInfo(m_seqSkill);
 					Burst(m_cutPosA + v3(0, .1f, 0), 30, 2.f, .14f, 1.2f, (ElemColor(sd.element) & 255) / 255.f, ((ElemColor(sd.element) >> 8) & 255) / 255.f, ((ElemColor(sd.element) >> 16) & 255) / 255.f, 2, 1, -2.5f, 0, 1.5f);
@@ -1528,8 +1555,10 @@ void Game::UpdateSeq(float dt)
 	BOOL magicNormal = !sd && style == AS_CAST;
 	if (m_seqT == 0) {
 		int clip = cast ? CastClipFor(sd->kind) : AttackClipFor(style, sd ? 1 : (m_seqCur & 1));
-		aa.animSpeed = cast ? 1.35f : 1.2f;
-		ActorPlay(aa, clip, 0, .08f);
+		BOOL held = m_seqCut && m_cutStage == 2 && aa.clip == clip && aa.t > 0.05f;
+		if (!held) ActorPlay(aa, clip, 0, .08f);
+		aa.animSpeed = cast ? 1.0f : 1.05f;
+		if (held) aa.t = ActorClipLen(aa, m_lib, m_r, clip) * ClipWindup(clip);
 		m_stepL = ActorClipLen(aa, m_lib, m_r, clip) / aa.animSpeed;
 		m_stepTi = m_stepL * (cast || magicNormal ? .5f : .42f);
 		if (ranged || cast || magicNormal) {
@@ -1566,6 +1595,7 @@ void Game::UpdateSeq(float dt)
 			DWORD c = ElemColor(sd->element);
 			Burst(ActorPos(A) + v3(0, .05f, 0), 1, 0, .5f, .9f, (c & 255) / 255.f, ((c >> 8) & 255) / 255.f, ((c >> 16) & 255) / 255.f, 1, 1, 0, 0, 0, 1.3f);
 		}
+		if (held) m_seqT = aa.t / max(0.05f, aa.animSpeed);
 	}
 	m_seqT += dt;
 	BOOL melee = !ranged && !cast && !magicNormal;
@@ -2000,7 +2030,8 @@ void Game::DrawCutIn3D()
 		eye = look + v3(Lerpf(1.6f, 1.1f, u), Lerpf(.1f, .25f, u), Lerpf(-1.2f, -.9f, u));
 	} else if (m_cutStage == 2 || m_cutStage == 3) {
 		float u = m_cutStage == 2 ? m_cutStageT : m_cutStageT + 1.1f;
-		float ang = -0.35f + u * 0.85f;
+		// 自キャラは -X。正方向に回すと敵が手前に来るので、反対へ回す。
+		float ang = -0.35f - u * 0.85f;
 		int spread = max(m_cutAllyN, m_cutFoeN);
 		look = v3(0, .72f, 0);
 		float dist = (m_cutFoeN <= 0 ? 2.6f : 3.35f) + max(0, spread - 1) * .55f;
