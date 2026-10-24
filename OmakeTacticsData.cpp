@@ -1114,7 +1114,9 @@ static ClassDef kClass[C_PLAYER_COUNT] = {
 };
 #undef L6
 #undef L6F
-static const int kLineParent[TAC_RANK_LINES] = { C_HERO, C_ARCHMAGE, C_SAINT, C_PHANTOM, C_DRAGONLORD, C_ARCHALCHEMIST };
+static const int kLineParent[TAC_RANK_LINES] = {
+	C_HERO, C_ARCHMAGE, C_SAINT, C_PHANTOM, C_DRAGONLORD, C_ARCHALCHEMIST, C_GLADIATOR, C_SHADOW
+};
 static const int kExtSkill[TAC_RANK_LINES][TAC_RANK_N] = {
 	{ SKL_GODSLASH, SKL_CLEAVE, SKL_WARCRY, SKL_SMITE, SKL_GODSLASH, SKL_APOC, SKL_RUIN },
 	{ SKL_RUIN, SKL_GRAVITY, SKL_APOC, SKL_MIRROR, SKL_SANCTUARY, SKL_RUIN, SKL_APOC },
@@ -1122,9 +1124,13 @@ static const int kExtSkill[TAC_RANK_LINES][TAC_RANK_N] = {
 	{ SKL_SNIPE, SKL_VENOMEDGE, SKL_CLEAVE, SKL_GRAVITY, SKL_GODSLASH, SKL_SNIPE, SKL_RUIN },
 	{ SKL_APOC, SKL_CLEAVE, SKL_SMITE, SKL_GODSLASH, SKL_RUIN, SKL_WARCRY, SKL_APOC },
 	{ SKL_RUIN, SKL_RENEW, SKL_MIRROR, SKL_GRAVITY, SKL_SANCTUARY, SKL_APOC, SKL_DARKNESS },
+	{ SKL_FISTGOD, SKL_WARLORD, SKL_BREAKKING, SKL_STEELGOD, SKL_HEGEFIST, SKL_PEERLESS, SKL_ENDFIST },
+	{ SKL_GHOSTHAND, SKL_SHADEEMP, SKL_TRACELESS, SKL_NIGHTEMP, SKL_VOIDTHIEF, SKL_LASTNIGHT, SKL_ETERNIGHT },
 };
 static ClassDef s_ext[TAC_RANK_LINES * TAC_RANK_N];
+static ClassDef s_third[2];
 static int s_extOk = 0;
+static int s_thirdOk = 0;
 // 後半 10 能力と移動の成長。表の 0 は未設定なので、職の傾向から一度だけ埋める。
 static void FillUnitSheet(int* base, int* grow, int group, int magic, int fly, int jump, int rMax)
 {
@@ -1246,12 +1252,42 @@ static void EnsureSheets()
 		for (int s = 0; s < LEARN_N; s++)
 			if (kClass[c].learn[s].lv <= 0) kClass[c].learn[s].skill = -1;
 }
+static void BuildThird()
+{
+	if (s_thirdOk) return;
+	EnsureSheets();
+	auto fill = [](ClassDef& d, const ClassDef& src, int nameTx, int descTx, int weaponPow, const int* base, const int* grow, const int* lv, const int* sk) {
+		d = src;
+		d.tier = 3;
+		d.nameTx = nameTx;
+		d.descTx = descTx;
+		d.weaponPow = weaponPow;
+		for (int s = 0; s < 10; s++) { d.base[s] = base[s]; d.grow[s] = grow[s]; }
+		for (int s = S_JMP; s <= S_PEN; s++) { d.base[s] = 0; d.grow[s] = 0; }
+		FillUnitSheet(d.base, d.grow, d.group, d.magic, d.moveType == MV_FLY, d.jump, d.rMax);
+		for (int i = 0; i < 8; i++) { d.learn[i].lv = lv[i]; d.learn[i].skill = sk[i]; }
+		for (int i = 8; i < LEARN_N; i++) { d.learn[i].lv = 0; d.learn[i].skill = -1; }
+	};
+	static const int bG[10] = { 48, 10, 18, 8, 0, 4, 10, 9, 4, 6 };
+	static const int gG[10] = { 75, 18, 80, 32, 0, 18, 45, 42, 28, 8 };
+	static const int lvG[8] = { 35, 38, 42, 46, 50, 54, 48, 52 };
+	static const int skG[8] = { SKL_RAMPAGE, SKL_EARTHREND, SKL_BLOODAXE, SKL_IRONHOWL, SKL_COLOSSMASH, SKL_ARENAKING, SKL_WARDRUM, SKL_AXEWHIRL };
+	static const int bS[10] = { 30, 10, 12, 6, 3, 6, 16, 14, 12, 7 };
+	static const int gS[10] = { 44, 22, 55, 28, 12, 32, 75, 62, 60, 14 };
+	static const int lvS[8] = { 35, 38, 42, 46, 50, 54, 48, 52 };
+	static const int skS[8] = { SKL_SHADOWSTEP, SKL_SMOKESCREEN, SKL_VITALSTAB, SKL_BACKCUT, SKL_NIGHTRUN, SKL_SILENTKILL, SKL_DAGGERRAIN, SKL_DEATHMARK };
+	fill(s_third[0], kClass[C_BERSERKER], TX_CL_GLADIATOR, TX_CLD_GLADIATOR, 12, bG, gG, lvG, skG);
+	fill(s_third[1], kClass[C_ASSASSIN], TX_CL_SHADOW, TX_CLD_SHADOW, 9, bS, gS, lvS, skS);
+	s_thirdOk = 1;
+}
 static void BuildExt()
 {
 	if (s_extOk) return;
 	EnsureSheets();
+	BuildThird();
 	for (int line = 0; line < TAC_RANK_LINES; line++) {
-		const ClassDef& p = kClass[kLineParent[line]];
+		int parent = kLineParent[line];
+		const ClassDef& p = parent == C_GLADIATOR ? s_third[0] : (parent == C_SHADOW ? s_third[1] : kClass[parent]);
 		for (int r = 0; r < TAC_RANK_N; r++) {
 			ClassDef& d = s_ext[line * TAC_RANK_N + r];
 			d = p;
@@ -1285,6 +1321,8 @@ const ClassDef& ClassInfo(int c)
 	EnsureSheets();
 	if (c >= 0 && c < C_PLAYER_COUNT) return kClass[c];
 	BuildExt();
+	if (c == C_GLADIATOR) return s_third[0];
+	if (c == C_SHADOW) return s_third[1];
 	int i = c - C_PLAYER_COUNT;
 	if (i < 0 || i >= TAC_RANK_LINES * TAC_RANK_N) return kClass[0];
 	return s_ext[i];
@@ -1306,7 +1344,7 @@ int NextPromoteClass(int cls)
 {
 	const ClassDef& cd = ClassInfo(cls);
 	if (cd.tier >= 10 || cd.tier < 3) return -1;
-	if (cls >= C_PLAYER_COUNT) {
+	if (cls >= C_PLAYER_COUNT && cls < C_PLAYER_COUNT + TAC_RANK_LINES * TAC_RANK_N) {
 		int i = cls - C_PLAYER_COUNT;
 		int line = i / TAC_RANK_N;
 		int r = i % TAC_RANK_N;
@@ -1323,7 +1361,9 @@ bool IsUltimateSkill(int skill)
 	switch (skill) {
 	case SKL_DRAGONFANG: case SKL_BRAVE: case SKL_METEOR: case SKL_ASSASSINATE:
 	case SKL_GODSLASH: case SKL_RUIN: case SKL_APOC:
-	case SKL_SHINE: case SKL_GRANDSLASH: case SKL_STORM: case SKL_NOVA: return true;
+	case SKL_SHINE: case SKL_GRANDSLASH: case SKL_STORM: case SKL_NOVA:
+	case SKL_ARENAKING: case SKL_PEERLESS: case SKL_ENDFIST:
+	case SKL_SILENTKILL: case SKL_LASTNIGHT: case SKL_ETERNIGHT: return true;
 	default:
 		if (skill >= SKL_ART0 && skill < SKL_ARTN) {
 			int lv = (skill - SKL_ART0) % 26;
@@ -1409,6 +1449,36 @@ static const SkillDef kWide[] = {
 	{ TX_SK_THUNDERBEAM, TX_SKD_THUNDERBEAM, SK_MAGIC, 14, 12, 1, 4, 4, EL_THUNDER, 1, 0, EF_NONE, 0, SH_LINE },
 	{ TX_SK_HEALBEAM, TX_SKD_HEALBEAM, SK_HEAL, 12, 14, 1, 3, 4, EL_HOLY, 1, 0, EF_NONE, 0, SH_LINE },
 	{ TX_SK_HEALFAN, TX_SKD_HEALFAN, SK_HEAL, 14, 12, 1, 2, 3, EL_HOLY, 1, 0, EF_NONE, 0, SH_FAN },
+	{ TX_SK_RAMPAGE, TX_SKD_RAMPAGE, SK_PHYS, 8, 70, -1, -1, 0, EL_NONE, 3, 0, EF_NONE, 0 },
+	{ TX_SK_EARTHREND, TX_SKD_EARTHREND, SK_PHYS, 10, 130, 0, 0, 1, EL_EARTH, 1, 0, EF_DEFDOWN, 0 },
+	{ TX_SK_BLOODAXE, TX_SKD_BLOODAXE, SK_PHYS, 8, 130, -1, -1, 0, EL_DARK, 1, 0, EF_DRAIN, 0 },
+	{ TX_SK_IRONHOWL, TX_SKD_IRONHOWL, SK_BUFF, 8, 0, 0, 0, 1, EL_NONE, 1, 0, EF_BUFF_DEF, 0 },
+	{ TX_SK_COLOSSMASH, TX_SKD_COLOSSMASH, SK_PHYS, 14, 220, -1, -1, 0, EL_EARTH, 1, 10, EF_IGNDEF, 0 },
+	{ TX_SK_ARENAKING, TX_SKD_ARENAKING, SK_PHYS, 16, 120, 1, 1, 3, EL_NONE, 1, 10, EF_NONE, 0, SH_FAN },
+	{ TX_SK_WARDRUM, TX_SKD_WARDRUM, SK_BUFF, 10, 0, 0, 0, 2, EL_FIRE, 1, 0, EF_BUFF_ATK, 0 },
+	{ TX_SK_AXEWHIRL, TX_SKD_AXEWHIRL, SK_PHYS, 12, 100, 1, 1, 3, EL_NONE, 1, 0, EF_NONE, 0, SH_FAN },
+	{ TX_SK_FISTGOD, TX_SKD_FISTGOD, SK_PHYS, 16, 250, -1, -1, 0, EL_HOLY, 1, 15, EF_NONE, 0 },
+	{ TX_SK_WARLORD, TX_SKD_WARLORD, SK_PHYS, 14, 150, 1, 1, 4, EL_NONE, 1, 0, EF_NONE, 0, SH_LINE },
+	{ TX_SK_BREAKKING, TX_SKD_BREAKKING, SK_PHYS, 16, 140, 1, 1, 3, EL_EARTH, 1, 0, EF_IGNDEF, 0, SH_FAN },
+	{ TX_SK_STEELGOD, TX_SKD_STEELGOD, SK_PHYS, 18, 160, 0, 0, 2, EL_EARTH, 1, 0, EF_DEFDOWN, 0 },
+	{ TX_SK_HEGEFIST, TX_SKD_HEGEFIST, SK_PHYS, 18, 160, -1, -1, 0, EL_NONE, 2, 10, EF_NONE, 0 },
+	{ TX_SK_PEERLESS, TX_SKD_PEERLESS, SK_PHYS, 22, 90, -1, -1, 0, EL_NONE, 4, 15, EF_NONE, 0 },
+	{ TX_SK_ENDFIST, TX_SKD_ENDFIST, SK_PHYS, 28, 360, -1, -1, 0, EL_HOLY, 1, 25, EF_IGNDEF, 0 },
+	{ TX_SK_SHADOWSTEP, TX_SKD_SHADOWSTEP, SK_PHYS, 6, 140, -1, -1, 0, EL_WIND, 1, 30, EF_NONE, 0 },
+	{ TX_SK_SMOKESCREEN, TX_SKD_SMOKESCREEN, SK_BUFF, 8, 0, 0, 0, 1, EL_WIND, 1, 0, EF_BUFF_AGI, 0 },
+	{ TX_SK_VITALSTAB, TX_SKD_VITALSTAB, SK_PHYS, 8, 120, -1, -1, 0, EL_POISON, 1, 20, EF_POISON, 0 },
+	{ TX_SK_BACKCUT, TX_SKD_BACKCUT, SK_PHYS, 10, 170, -1, -1, 0, EL_DARK, 1, 15, EF_IGNDEF, 0 },
+	{ TX_SK_NIGHTRUN, TX_SKD_NIGHTRUN, SK_PHYS, 12, 150, 1, 2, 5, EL_DARK, 1, 0, EF_NONE, 0, SH_LINE },
+	{ TX_SK_SILENTKILL, TX_SKD_SILENTKILL, SK_PHYS, 16, 280, -1, -1, 0, EL_DARK, 1, 35, EF_IGNDEF, 0 },
+	{ TX_SK_DAGGERRAIN, TX_SKD_DAGGERRAIN, SK_PHYS, 12, 110, 1, 3, 3, EL_WIND, 1, 10, EF_NONE, 0, SH_FAN },
+	{ TX_SK_DEATHMARK, TX_SKD_DEATHMARK, SK_PHYS, 8, 90, 1, 2, 0, EL_DARK, 1, 0, EF_DEFDOWN, 0 },
+	{ TX_SK_GHOSTHAND, TX_SKD_GHOSTHAND, SK_PHYS, 10, 110, -1, -1, 0, EL_WIND, 2, 20, EF_NONE, 0 },
+	{ TX_SK_SHADEEMP, TX_SKD_SHADEEMP, SK_PHYS, 14, 130, 1, 2, 3, EL_DARK, 1, 10, EF_NONE, 0, SH_FAN },
+	{ TX_SK_TRACELESS, TX_SKD_TRACELESS, SK_BUFF, 10, 0, 0, 0, 2, EL_WIND, 1, 0, EF_BUFF_AGI, 0 },
+	{ TX_SK_NIGHTEMP, TX_SKD_NIGHTEMP, SK_PHYS, 16, 160, 1, 3, 5, EL_DARK, 1, 0, EF_POISON, 0, SH_LINE },
+	{ TX_SK_VOIDTHIEF, TX_SKD_VOIDTHIEF, SK_PHYS, 16, 200, -1, -1, 0, EL_DARK, 1, 15, EF_DEFDOWN, 0 },
+	{ TX_SK_LASTNIGHT, TX_SKD_LASTNIGHT, SK_PHYS, 20, 170, 0, 0, 2, EL_DARK, 1, 10, EF_NONE, 0 },
+	{ TX_SK_ETERNIGHT, TX_SKD_ETERNIGHT, SK_PHYS, 26, 340, -1, -1, 0, EL_DARK, 1, 30, EF_IGNDEF, 0 },
 };
 static_assert(sizeof(kWide) / sizeof(kWide[0]) == SKL_COUNT - (SKL_RAISE + 1), "wide skill table");
 
@@ -1838,10 +1908,10 @@ static const EvoRow kEvo[] = {
 	{ C_MAGE,       { { C_WIZARD, -1 }, { C_ALCHEMIST, -1 }, { C_RUNEKNIGHT, G_MELEE }, { C_BISHOP, G_HOLY } } },
 	{ C_CLERIC,     { { C_BISHOP, -1 }, { C_PALADIN, G_MELEE }, { C_WIZARD, G_MAGIC }, { -1, -1 } } },
 	{ C_PALADIN,    { { C_HERO, -1 }, { C_SAINT, G_HOLY }, { C_DRAGONLORD, G_SWIFT }, { -1, -1 } } },
-	{ C_BERSERKER,  { { C_HERO, -1 }, { C_DRAGONLORD, G_SWIFT }, { -1, -1 }, { -1, -1 } } },
+	{ C_BERSERKER,  { { C_GLADIATOR, -1 }, { C_HERO, -1 }, { C_DRAGONLORD, G_SWIFT }, { -1, -1 } } },
 	{ C_RUNEKNIGHT, { { C_HERO, -1 }, { C_ARCHMAGE, G_MAGIC }, { -1, -1 }, { -1, -1 } } },
 	{ C_SNIPER,     { { C_PHANTOM, -1 }, { C_DRAGONLORD, G_MELEE }, { -1, -1 }, { -1, -1 } } },
-	{ C_ASSASSIN,   { { C_PHANTOM, -1 }, { C_HERO, G_MELEE }, { -1, -1 }, { -1, -1 } } },
+	{ C_ASSASSIN,   { { C_SHADOW, -1 }, { C_PHANTOM, -1 }, { C_HERO, G_MELEE }, { -1, -1 } } },
 	{ C_SKYKNIGHT,  { { C_DRAGONLORD, -1 }, { C_HERO, G_MELEE }, { C_PHANTOM, G_SWIFT }, { -1, -1 } } },
 	{ C_WIZARD,     { { C_ARCHMAGE, -1 }, { C_SAINT, G_HOLY }, { -1, -1 }, { -1, -1 } } },
 	{ C_BISHOP,     { { C_SAINT, -1 }, { C_ARCHMAGE, G_MAGIC }, { -1, -1 }, { -1, -1 } } },
@@ -2919,7 +2989,8 @@ int ApplyTile(Battle& b, int ui)
 bool CanOpenDoor(const Unit& u)
 {
 	int c = u.ch.cls;
-	return c == C_THIEF || c == C_ASSASSIN || c == C_PHANTOM;
+	if (c == C_PHANTOM) return true;
+	return ClassLine(c) == 3;
 }
 
 int AdjDoor(const Battle& b, int ui, int* ox, int* oz)
@@ -3218,6 +3289,13 @@ const wchar_t* GoodDesc(int i)
 }
 int ClassLine(int cls)
 {
+	// 4次以降は親職と同じ系統の装備を使う。系統は店のタブと一致する。
+	if (cls == C_GLADIATOR) return 1;
+	if (cls == C_SHADOW) return 3;
+	if (cls >= C_PLAYER_COUNT && cls < C_PLAYER_COUNT + TAC_RANK_LINES * TAC_RANK_N) {
+		int line = (cls - C_PLAYER_COUNT) / TAC_RANK_N;
+		return ClassLine(kLineParent[line]);
+	}
 	switch (cls) {
 	case C_SOLDIER: case C_PALADIN: case C_HERO: case C_SKYKNIGHT: case C_DRAGONLORD: case C_RUNEKNIGHT: return 0;
 	case C_FIGHTER: case C_BERSERKER: return 1;
@@ -3226,6 +3304,19 @@ int ClassLine(int cls)
 	case C_MAGE: case C_WIZARD: case C_ARCHMAGE: case C_ALCHEMIST: case C_ARCHALCHEMIST: return 4;
 	default: return 5;
 	}
+}
+int ClassTier(int cls)
+{
+	int t = ClassInfo(cls).tier;
+	if (t < 1) return 1;
+	if (t > 10) return 10;
+	return t;
+}
+bool GearCanWear(int cls, const GearDef* g)
+{
+	if (!g) return false;
+	int need = g->req > 0 ? g->req : 1;
+	return ClassLine(cls) == g->line && ClassTier(cls) >= need;
 }
 int ItemExtraGet(const SaveData& s, int i)
 {
@@ -3283,7 +3374,6 @@ void StashRemoveAt(SaveData& s, int index)
 bool GearBuy(SaveData& s, int index)
 {
 	if (index < 0 || index >= kGearN) return false;
-	if (s.stageCleared < kGear[index].stage) return false;
 	if (s.gold < kGear[index].price) return false;
 	if (!StashAdd(s, index + 1)) return false;
 	s.gold -= kGear[index].price;
@@ -3298,12 +3388,65 @@ bool GearSellAt(SaveData& s, int index)
 	StashRemoveAt(s, index);
 	return true;
 }
+static int GearPower(const GearDef* g)
+{
+	if (!g) return 0;
+	if (g->kind == 0) return g->str + g->mag;
+	return g->def + g->res;
+}
+bool GearIsSurplus(const SaveData& s, int gearId)
+{
+	const GearDef* g = GearOf(gearId);
+	if (!g || g->line < 0 || g->line > 5) return false;
+	int score = GearPower(g);
+	int slot = g->kind ? 7 : 6;
+	for (int i = 0; i < MAX_ROSTER; i++) {
+		const CharData& c = s.roster[i];
+		if (!c.used || !GearCanWear(c.cls, g)) continue;
+		int have = 0;
+		if (c.reserved[slot] > 0) {
+			const GearDef* e = GearOf(c.reserved[slot]);
+			if (e && e->kind == g->kind) have = GearPower(e);
+		}
+		if (score > have) return false;
+	}
+	return true;
+}
+int GearSellSurplus(SaveData& s)
+{
+	int n = 0;
+	for (int i = s.gearN - 1; i >= 0; i--) {
+		if (!GearIsSurplus(s, s.gearId[i])) continue;
+		if (GearSellAt(s, i)) n++;
+	}
+	return n;
+}
+int GearBestUpgrade(const SaveData& s, int roster, int kind)
+{
+	if (roster < 0 || roster >= MAX_ROSTER || !s.roster[roster].used) return -1;
+	if (kind < 0 || kind > 1) return -1;
+	const CharData& c = s.roster[roster];
+	int slot = kind ? 7 : 6;
+	int have = 0;
+	if (c.reserved[slot] > 0) {
+		const GearDef* e = GearOf(c.reserved[slot]);
+		if (e && e->kind == kind) have = GearPower(e);
+	}
+	int bestI = -1, best = have;
+	for (int i = 0; i < s.gearN && i < GEAR_STASH; i++) {
+		const GearDef* g = GearOf(s.gearId[i]);
+		if (!g || g->kind != kind || !GearCanWear(c.cls, g)) continue;
+		int sc = GearPower(g);
+		if (sc > best) { best = sc; bestI = i; }
+	}
+	return bestI;
+}
 void GearEquip(CharData& c, SaveData& s, int stashIndex)
 {
 	if (stashIndex < 0 || stashIndex >= s.gearN) return;
 	int id = s.gearId[stashIndex];
 	const GearDef* g = GearOf(id);
-	if (!g) return;
+	if (!g || !GearCanWear(c.cls, g)) return;
 	int slot = g->kind ? 7 : 6;
 	int old = c.reserved[slot];
 	c.reserved[slot] = id;
@@ -3327,21 +3470,27 @@ int GearTryDrop(SaveData& s, int stage, int monster, Rng& r)
 	}
 	return gi + 1;
 }
-bool DropConsumable(SaveData& s, int monster, Rng& r)
+bool DropConsumable(SaveData& s, int monster, Rng& r, wchar_t* name, int nameN)
 {
 	int line = MonsterDropLine(monster);
+	int tx = TX_IT_ELIXIR;
 	switch (line) {
-	case 0: s.itemN[IT_MIGHT]++; break;
-	case 1: ItemExtraAdd(s, IX_ATK, 1); break;
-	case 2: s.itemN[IT_DELAY]++; break;
-	case 3: s.itemN[IT_RAISE]++; break;
-	case 4: ItemExtraAdd(s, IX_ETHER, 1); break;
+	case 0: s.itemN[IT_MIGHT]++; tx = TX_IT_MIGHT; break;
+	case 1: ItemExtraAdd(s, IX_ATK, 1); tx = TX_IT_ATK; break;
+	case 2: s.itemN[IT_DELAY]++; tx = TX_IT_DELAY; break;
+	case 3: s.itemN[IT_RAISE]++; tx = TX_IT_RAISE; break;
+	case 4: ItemExtraAdd(s, IX_ETHER, 1); tx = TX_IT_ETHER; break;
 	default: s.itemN[IT_ELIXIR]++; break;
 	}
+	wchar_t buf[96];
+	wcscpy_s(buf, TT(tx));
 	if (r.Chance(45)) {
 		int k = r.Range(0, IX_N - 1);
 		ItemExtraAdd(s, k, 1);
+		wcscat_s(buf, L"  ");
+		wcscat_s(buf, TT(TX_IT_FULL + k));
 	}
+	if (name && nameN > 0) wcsncpy_s(name, nameN, buf, _TRUNCATE);
 	return true;
 }
 static const GoodDef kGood[] = {
@@ -3744,8 +3893,7 @@ bool SaveLoad(SaveData& s)
 		CharData& c = s.roster[i];
 		c.name[NAME_LEN - 1] = 0;
 		if (!c.used) continue;
-		int clsMax = C_PLAYER_COUNT + TAC_RANK_LINES * TAC_RANK_N - 1;
-		c.cls = Clampi(c.cls, 0, clsMax);
+		c.cls = Clampi(c.cls, 0, C_SHADOW);
 		c.lv = Clampi(c.lv, 1, TAC_LV_MAX);
 		if (recalc) CharRecalcProgress(c);
 		CharGrantReached(c);

@@ -725,16 +725,9 @@ static int TacSfxBuf(TacVoice& v, int frames)
 	return 1;
 }
 
-void TacSfx(int id)
+static void TacSfxPlay(const short* pcm, int frames)
 {
-	TacLock lk;
-	if (id < 0 || id >= TS_N || !s_clip[id].play || !s_ds) return;
-	if (id == TS_CURSOR) {
-		DWORD n = GetTickCount();
-		if (s_cursorAt && (DWORD)(n - s_cursorAt) < 40) return;
-		s_cursorAt = n;
-	}
-	const TacClip& clip = s_clip[id];
+	if (!pcm || frames < 1 || !s_ds) return;
 	int slot = -1;
 	int steal = 0;
 	DWORD stealAt = 0;
@@ -748,16 +741,76 @@ void TacSfx(int id)
 	}
 	if (slot < 0) slot = steal;
 	TacVoice& v = s_voice[slot];
-	if (!TacSfxBuf(v, clip.playN)) return;
+	if (!TacSfxBuf(v, frames)) return;
 	v.buf->Stop();
 	void* p1 = NULL; void* p2 = NULL; DWORD n1 = 0, n2 = 0;
-	DWORD bytes = (DWORD)clip.playN * 4;
+	DWORD bytes = (DWORD)frames * 4;
 	if (FAILED(v.buf->Lock(0, bytes, &p1, &n1, &p2, &n2, 0))) return;
-	if (p1 && n1) memcpy(p1, clip.play, n1);
-	if (p2 && n2) memcpy(p2, (char*)clip.play + n1, n2);
+	if (p1 && n1) memcpy(p1, pcm, n1);
+	if (p2 && n2) memcpy(p2, (char*)pcm + n1, n2);
 	v.buf->Unlock(p1, n1, p2, n2);
 	v.buf->SetCurrentPosition(0);
 	v.buf->Play(0, 0, 0);
+}
+
+void TacSfx(int id)
+{
+	TacLock lk;
+	if (id < 0 || id >= TS_N || !s_clip[id].play || !s_ds) return;
+	if (id == TS_CURSOR) {
+		DWORD n = GetTickCount();
+		if (s_cursorAt && (DWORD)(n - s_cursorAt) < 40) return;
+		s_cursorAt = n;
+	}
+	TacSfxPlay(s_clip[id].play, s_clip[id].playN);
+}
+
+void TacSfxCast(int element)
+{
+	TacLock lk;
+	if (!s_ds || !s_clip[TS_CAST].play || s_clip[TS_CAST].playN < 8) return;
+	enum { kNone = 0, kFire, kIce, kThunder, kHoly, kDark, kWind, kEarth, kPoison };
+	static const float kPitch[] = { 1.f, 0.78f, 1.40f, 1.68f, 1.16f, 0.64f, 1.52f, 0.72f, 1.02f };
+	int el = element;
+	if (el < kNone || el > kPoison) el = kNone;
+	float pitch = kPitch[el];
+	const TacClip& clip = s_clip[TS_CAST];
+	int outN = (int)(clip.playN / pitch);
+	if (outN < 8) outN = 8;
+	if (outN > 65536) outN = 65536;
+	static short tmp[65536 * 2];
+	int prevL = 0, prevR = 0;
+	for (int i = 0; i < outN; i++) {
+		float src = i * pitch;
+		int i0 = (int)src;
+		float fr = src - i0;
+		if (i0 < 0) i0 = 0;
+		if (i0 >= clip.playN - 1) {
+			tmp[i * 2] = tmp[i * 2 + 1] = 0;
+			continue;
+		}
+		for (int ch = 0; ch < 2; ch++) {
+			int a = clip.play[i0 * 2 + ch];
+			int b = clip.play[(i0 + 1) * 2 + ch];
+			int s = a + (int)((b - a) * fr);
+			int prev = ch ? prevR : prevL;
+			if (el == kFire) {
+				if (s > 9000) s = 9000 + (s - 9000) / 4;
+				if (s < -9000) s = -9000 + (s + 9000) / 4;
+			} else if (el == kIce) s = s + s / 5;
+			else if (el == kThunder) { if ((i & 3) == 0) s += ((i * 29) & 4095) - 2048; }
+			else if (el == kDark) s = (s + prev) / 2;
+			else if (el == kEarth) s = (s + 3 * prev) / 4;
+			else if (el == kWind) s = s + (s - prev) / 2;
+			else if (el == kPoison) s = s * (10 + (i & 15)) / 18;
+			else if (el == kHoly) s = s + s / 8;
+			if (s > 32767) s = 32767;
+			if (s < -32768) s = -32768;
+			tmp[i * 2 + ch] = (short)s;
+			if (ch) prevR = s; else prevL = s;
+		}
+	}
+	TacSfxPlay(tmp, outN);
 }
 
 void TacAudioPump()

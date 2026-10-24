@@ -35,6 +35,8 @@ public:
 	BOOL InitDx();
 	void ReleaseDx();
 	BOOL ResizeDx(int w, int h);
+	BOOL ResizeDxCore(int w, int h);
+	DWORD m_presentStall;
 	BOOL EnsureSceneTargets(int w, int h);
 	void PresentFrame();
 	void NoteContextLost(HRESULT hr);

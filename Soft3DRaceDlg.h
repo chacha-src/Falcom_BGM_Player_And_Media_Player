@@ -40,6 +40,8 @@ public:
 	BOOL PushDefaultVBPart(ID3D11Buffer** arr, UINT* nArr, int& parts, const void* verts, UINT nVerts);
 	BOOL UploadDefaultIB(ID3D11Buffer** dst, UINT* nOut, const UINT* idx, UINT nIdx);
 	BOOL ResizeDx(int w, int h);
+	BOOL ResizeDxCore(int w, int h);
+	DWORD m_presentStall;
 	int m_dxFailStage; // InitDx 失敗段階（デバッグ用）
 	HRESULT m_dxFailHr;
 	BOOL EnsureSceneTargets(int w, int h);

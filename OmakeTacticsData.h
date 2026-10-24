@@ -174,7 +174,9 @@ enum ClassId {
 	C_ALCHEMIST, C_ARCHALCHEMIST,
 	C_PLAYER_COUNT
 };
-enum { TAC_LV_MAX = 999, TAC_STAGE_MAX = 9999, TAC_RANK_LINES = 6, TAC_RANK_N = 7 };
+enum { TAC_LV_MAX = 999, TAC_STAGE_MAX = 9999, TAC_RANK_LINES = 8, TAC_RANK_N = 7 };
+// ファイター・シーフの3次職。既存の順位 ID を動かさないため、ランク枠の後ろに置く。
+enum { C_GLADIATOR = C_PLAYER_COUNT + TAC_RANK_LINES * TAC_RANK_N, C_SHADOW = C_GLADIATOR + 1 };
 
 enum { LEARN_N = 10 };
 struct LearnDef { int lv; int skill; };
@@ -221,6 +223,10 @@ enum SkillId {
 	SKL_SHOWER, SKL_SHINE, SKL_CRESCENT, SKL_GRANDSLASH, SKL_STORM, SKL_FROSTFIELD, SKL_THUNDERFIELD, SKL_NOVA,
 	SKL_LINESLASH, SKL_FANSLASH, SKL_ARROWLINE, SKL_ARROWFAN,
 	SKL_FIREBEAM, SKL_ICEBEAM, SKL_THUNDERBEAM, SKL_HEALBEAM, SKL_HEALFAN,
+	SKL_RAMPAGE, SKL_EARTHREND, SKL_BLOODAXE, SKL_IRONHOWL, SKL_COLOSSMASH, SKL_ARENAKING, SKL_WARDRUM, SKL_AXEWHIRL,
+	SKL_FISTGOD, SKL_WARLORD, SKL_BREAKKING, SKL_STEELGOD, SKL_HEGEFIST, SKL_PEERLESS, SKL_ENDFIST,
+	SKL_SHADOWSTEP, SKL_SMOKESCREEN, SKL_VITALSTAB, SKL_BACKCUT, SKL_NIGHTRUN, SKL_SILENTKILL, SKL_DAGGERRAIN, SKL_DEATHMARK,
+	SKL_GHOSTHAND, SKL_SHADEEMP, SKL_TRACELESS, SKL_NIGHTEMP, SKL_VOIDTHIEF, SKL_LASTNIGHT, SKL_ETERNIGHT,
 	SKL_COUNT
 };
 enum { SH_RADIUS = 0, SH_LINE = 1, SH_FAN = 2 };
@@ -499,6 +505,7 @@ struct GearDef {
 	int price;
 	int str, mag, def, res;
 	int stage;
+	int req;      // 必要職段 1..10。この段以上の同系統だけ装備できる
 	int mesh0, mesh1;
 	int joint0, joint1;
 	const char* att0;
@@ -510,6 +517,8 @@ const wchar_t* GearName(int id);
 const wchar_t* GearRole(const GearDef* g);
 const wchar_t* GoodDesc(int i);
 int ClassLine(int cls);
+int ClassTier(int cls);
+bool GearCanWear(int cls, const GearDef* g);
 int ItemExtraGet(const SaveData& s, int i);
 void ItemExtraAdd(SaveData& s, int i, int d);
 int ConsumableCount(const SaveData& s);
@@ -517,10 +526,15 @@ bool StashAdd(SaveData& s, int id);
 void StashRemoveAt(SaveData& s, int index);
 bool GearBuy(SaveData& s, int index);
 bool GearSellAt(SaveData& s, int index);
+// 装着中の同じ種類以下、または誰も就いていない系統なら true。
+bool GearIsSurplus(const SaveData& s, int gearId);
+int GearSellSurplus(SaveData& s);
+// 所持の中で、そのキャラの装着より高い同じ系統・種類。無ければ -1。
+int GearBestUpgrade(const SaveData& s, int roster, int kind);
 void GearEquip(CharData& c, SaveData& s, int stashIndex);
 int GearTryDrop(SaveData& s, int stage, int monster, Rng& r);
 int MonsterDropLine(int monster);
-bool DropConsumable(SaveData& s, int monster, Rng& r);
+bool DropConsumable(SaveData& s, int monster, Rng& r, wchar_t* name = NULL, int nameN = 0);
 int DropTrophy(int monster, int boss, Rng& r, wchar_t* name, int nameN, int* goldOut);
 int TrophyList(int* slots, int max);
 bool TrophySell(SaveData& s, int slot);

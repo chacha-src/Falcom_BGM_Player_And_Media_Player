@@ -20,6 +20,8 @@ struct Library {
 	int clipMap[4][CL_COUNT];
 	GpuMesh hair[B_COUNT][HAIR_STYLES];
 	GpuMesh humHair[4][HAIR_STYLES];
+	std::vector<VtxS> humHairV[4][HAIR_STYLES]; // 頭の骨の空間。αが小さいほど根元から遠い
+	V3 humHairPivot[4][HAIR_STYLES];            // 垂れる髪の付け根（後頭部の生え際）
 	int humHairModel[4];
 	int humHairN;
 	GpuMesh wing[2][2];     // [羽根/竜][左/右]

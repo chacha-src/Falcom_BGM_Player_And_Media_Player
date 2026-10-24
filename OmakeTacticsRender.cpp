@@ -36,7 +36,7 @@ Renderer::Renderer()
 	m_view = m_proj = m_vp = MIdent();
 	m_eye = v3(0, 10, -10);
 	m_time = 0;
-	m_hwnd = NULL; m_wait = NULL; m_lost = FALSE; m_presented = FALSE;
+	m_hwnd = NULL; m_wait = NULL; m_lost = FALSE; m_presented = FALSE; m_waitStuck = 0; m_lastRebind = 0;
 	m_w = m_h = 0; m_quality = 1; m_msaa = 1; m_lastHr = S_OK; m_failStage = 0; m_assetsOk = FALSE; m_pass = PASS_MAIN;
 	m_dev = NULL; m_ctx = NULL; m_swap = NULL; m_bbRtv = NULL; m_bb = NULL; m_msTex = NULL; m_msRtv = NULL; m_dsTex = NULL; m_dsv = NULL;
 	m_shTex = NULL; m_shDsv = NULL; m_shSrv = NULL; m_shSize = 0;
@@ -88,6 +88,7 @@ void Renderer::Release()
 	ReleaseAvatarCache();
 	for (auto& c : m_gear) c.Release();
 	m_gear.clear();
+	m_gearBow.clear();
 	m_assetsOk = FALSE;
 	ReleaseTargets();
 	TAC_REL(m_shSrv); TAC_REL(m_shDsv); TAC_REL(m_shTex);
@@ -114,6 +115,8 @@ BOOL Renderer::Init(HWND hwnd, int quality)
 {
 	Release();
 	m_presented = FALSE;
+	m_waitStuck = 0;
+	m_lastRebind = 0;
 	m_hwnd = hwnd;
 	m_quality = Clampi(quality, 0, 2);
 	m_failStage = 1;
@@ -247,6 +250,7 @@ BOOL Renderer::RefreshSurface()
 	m_swap->GetDesc1(&d);
 	HRESULT hr = m_swap->ResizeBuffers(0, m_w, m_h, DXGI_FORMAT_UNKNOWN, d.Flags);
 	m_presented = FALSE;
+	m_waitStuck = 0;
 	if (FAILED(hr)) { m_lastHr = hr; m_lost = TRUE; return FALSE; }
 	return CreateTargets();
 }
@@ -254,7 +258,21 @@ BOOL Renderer::RefreshSurface()
 BOOL Renderer::FrameReady()
 {
 	if (!m_wait || !m_presented) return TRUE;
-	return WaitForSingleObject(m_wait, 0) == WAIT_OBJECT_0;
+	if (WaitForSingleObject(m_wait, 0) == WAIT_OBJECT_0) {
+		m_waitStuck = 0;
+		return TRUE;
+	}
+	/* 表示直後はフレームが退役せず、ここで描画を止めるとクリックまで空のままになる */
+	const DWORD now = GetTickCount();
+	if (!m_waitStuck) m_waitStuck = now ? now : 1;
+	if (now - m_waitStuck < 120) return FALSE;
+	m_presented = FALSE;
+	m_waitStuck = 0;
+	if (now - m_lastRebind > 400) {
+		m_lastRebind = now;
+		RefreshSurface();
+	}
+	return TRUE;
 }
 
 // ============================================================ シェーダ・状態
@@ -1234,6 +1252,7 @@ void Renderer::LoadGearPack()
 {
 	for (auto& c : m_gear) c.Release();
 	m_gear.clear();
+	m_gearBow.clear();
 	HMODULE hm = AfxGetResourceHandle();
 	HRSRC rs = FindResource(hm, MAKEINTRESOURCE(IDR_TAC_GEAR), RT_RCDATA);
 	if (!rs) { hm = GetModuleHandle(NULL); rs = FindResource(hm, MAKEINTRESOURCE(IDR_TAC_GEAR), RT_RCDATA); }
@@ -1258,6 +1277,7 @@ void Renderer::LoadGearPack()
 		if (!MakeMesh(gm, v.data(), sizeof(VtxS), (UINT)v.size(), idx.data(), (UINT)idx.size())) continue;
 		gm.tex = TEX_WHITE;
 		m_gear.push_back(gm);
+		m_gearBow.push_back(strstr(name, "Bow") != NULL ? 1 : 0);
 	}
 }
 
@@ -1392,7 +1412,7 @@ void Renderer::LoadAvatarPack()
 	if (!data || size < 8 || memcmp(data, "TACV", 4) != 0) return;
 	Reader rd(data + 4, size - 4);
 	UINT ns = rd.U32();
-	if (ns == 0 || ns > 32) return;
+	if (ns == 0 || ns > 64) return;
 	for (UINT s = 0; s < ns; s++) {
 		char nm[24];
 		rd.Name(nm, 24);
@@ -1408,6 +1428,11 @@ void Renderer::LoadAvatarPack()
 		if (!p || am.gender < 0 || am.gender > 1) { m_avaSeg.clear(); m_avaModels.clear(); return; }
 		am.M.resize((size_t)ns * 12);
 		memcpy(am.M.data(), p, (size_t)ns * 12 * 4);
+		for (UINT s = 0; s < ns; s++) {
+			char jn[24];
+			rd.Name(jn, 24);
+			am.joint.push_back(jn);
+		}
 		m_avaModels.push_back(am);
 	}
 	for (int g = 0; g < 2; g++) {
@@ -1462,7 +1487,7 @@ BOOL Renderer::DrawAvatar(int model, int avatar, int bust, const Pose& pose, con
 		const int ns = (int)m_avaSeg.size();
 		std::vector<int> segJ(ns);
 		for (int s = 0; s < ns; s++) {
-			int j = rg.Find(m_avaSeg[s].c_str());
+			int j = rg.Find(s < (int)am->joint.size() ? am->joint[s].c_str() : m_avaSeg[s].c_str());
 			segJ[s] = j >= 0 ? j : (md.hipsJ >= 0 ? md.hipsJ : 0);
 		}
 		AvaCache nc;
@@ -1792,6 +1817,19 @@ void Renderer::DrawSky(DWORD top, DWORD bottom, int lines, DWORD lineColor)
 	m_ctx->OMSetBlendState(m_bsOpaque, NULL, 0xFFFFFFFF);
 	m_ctx->Draw(3, 0);
 	m_ctx->OMSetDepthStencilState(m_dsWrite, 0);
+}
+
+void Renderer::DrawStaticVerts(const GpuMesh& m, const VtxS* v, UINT nv, const M4& world, const DrawParams& dp)
+{
+	if (!m.ib || !v || !nv || !m_vbDyn || nv * sizeof(VtxS) > m_vbDynBytes) { DrawStatic(m, world, dp); return; }
+	D3D11_MAPPED_SUBRESOURCE ms;
+	if (FAILED(m_ctx->Map(m_vbDyn, 0, D3D11_MAP_WRITE_DISCARD, 0, &ms))) return;
+	memcpy(ms.pData, v, nv * sizeof(VtxS));
+	m_ctx->Unmap(m_vbDyn, 0);
+	GpuMesh d = m;
+	d.vb = m_vbDyn;
+	d.stride = sizeof(VtxS);
+	DrawStatic(d, world, dp);
 }
 
 void Renderer::DrawStatic(const GpuMesh& m, const M4& world, const DrawParams& dp)
@@ -2509,12 +2547,24 @@ void Renderer::Present()
 {
 	if (!m_swap) return;
 	const BOOL vis = m_hwnd && ::IsWindowVisible(m_hwnd);
-	/* 表示前の Present(1) はフレームが退役せず、クリックまで描画が止まる */
-	const UINT flags = m_presented ? 0u : DXGI_PRESENT_DO_NOT_WAIT;
-	const UINT interval = m_presented ? 1u : 0u;
-	HRESULT hr = m_swap->Present(interval, flags);
-	if (hr == DXGI_ERROR_WAS_STILL_DRAWING) return;
-	if (SUCCEEDED(hr) && vis) m_presented = TRUE;
+	/* Present(1) は未合成の HWND でフレームが退役せず、UI スレッドがクリックまで止まる。
+	   キャプションの WM_PAINT もその間来ない。常に待たない。 */
+	HRESULT hr = m_swap->Present(0, DXGI_PRESENT_DO_NOT_WAIT);
+	if (hr == DXGI_ERROR_WAS_STILL_DRAWING) {
+		const DWORD now = GetTickCount();
+		if (vis && now - m_lastRebind > 150) {
+			m_lastRebind = now;
+			m_presented = FALSE;
+			m_waitStuck = 0;
+			RefreshSurface();
+		}
+		return;
+	}
+	if (hr == DXGI_STATUS_OCCLUDED) return;
+	if (SUCCEEDED(hr) && vis) {
+		m_presented = TRUE;
+		m_waitStuck = 0;
+	}
 	if (hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_DEVICE_RESET) { m_lost = TRUE; m_lastHr = hr; }
 }
 

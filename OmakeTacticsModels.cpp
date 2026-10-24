@@ -595,7 +595,7 @@ static const DWORD kHairCol[HAIR_COLORS] = {
 DWORD HairColor(int i) { DWORD c = kHairCol[Clampi(i, 0, HAIR_COLORS - 1)]; return RGBA8((c >> 16) & 255, (c >> 8) & 255, c & 255); }
 float OutfitHue(int i) { return Clampi(i, 0, OUTFIT_COLORS - 1) * (2.f * PI / OUTFIT_COLORS); }
 
-static void BuildHair(Renderer& r, const Model& m, int style, GpuMesh& out, float drop = 1.f)
+static void BuildHair(Renderer& r, const Model& m, int style, GpuMesh& out, float drop = 1.f, std::vector<VtxS>* cpu = NULL, V3* pivot = NULL)
 {
 	if (style <= 0 || m.headJ < 0) return;
 	M4 bind = MInverse(m.invBind[m.headJ]);
@@ -695,10 +695,15 @@ static void BuildHair(Renderer& r, const Model& m, int style, GpuMesh& out, floa
 			int a = 255 - (int)(t * t * 170.f);
 			g.col[i] = (g.col[i] & 0x00FFFFFFu) | ((DWORD)a << 24);
 		}
+		if (pivot) *pivot = MXformPt(m.invBind[m.headJ], v3(cc.x, root, cc.z));
 	}
 	g.Transform(m.invBind[m.headJ]);
 	GeoToStatic(r, g, out);
 	out.tex = r.TexWhite();
+	if (cpu) {
+		cpu->clear();
+		if (out.vb) g.ToStatic(*cpu);
+	}
 }
 
 // 人体用。原点は後頭部、+Y 上、+Z 後ろ。板ではなく束で垂らす。
@@ -819,7 +824,7 @@ BOOL BuildLibrary(Renderer& r, Library& lib)
 		if (strncmp(r.models[i].name, "Hum", 3) != 0 || r.models[i].headJ < 0) continue;
 		int slot = lib.humHairN++;
 		lib.humHairModel[slot] = i;
-		for (int s = 1; s < HAIR_STYLES; s++) BuildHair(r, r.models[i], s, lib.humHair[slot][s], 2.2f);
+		for (int s = 1; s < HAIR_STYLES; s++) BuildHair(r, r.models[i], s, lib.humHair[slot][s], 2.2f, &lib.humHairV[slot][s], &lib.humHairPivot[slot][s]);
 	}
 	for (int d = 0; d < 2; d++) for (int l = 0; l < 2; l++) BuildWing(r, d, l, lib.wing[d][l]);
 	BuildCrown(r, lib.crown);
@@ -832,7 +837,7 @@ BOOL BuildLibrary(Renderer& r, Library& lib)
 void ReleaseLibrary(Library& lib)
 {
 	for (int b = 0; b < B_COUNT; b++) for (int s = 0; s < HAIR_STYLES; s++) lib.hair[b][s].Release();
-	for (int i = 0; i < 4; i++) for (int s = 0; s < HAIR_STYLES; s++) lib.humHair[i][s].Release();
+	for (int i = 0; i < 4; i++) for (int s = 0; s < HAIR_STYLES; s++) { lib.humHair[i][s].Release(); lib.humHairV[i][s].clear(); }
 	lib.humHairN = 0;
 	for (int d = 0; d < 2; d++) for (int l = 0; l < 2; l++) lib.wing[d][l].Release();
 	lib.crown.Release();
@@ -1376,7 +1381,7 @@ static M4 FitWorld(const M4& g, V3 y, V3 z, V3 at, float sx, float sy, float sz)
 	return MMul(MScale(sx, sy, sz), MMul(MBasis(x, oy, oz, at), MInverse(g)));
 }
 
-static M4 HumanGearFit(const Pose& pose, int joint, const char* name, const char* jointName, const M4& bindG, const M4* armorD = NULL)
+static M4 HumanGearFit(const Pose& pose, int joint, const char* name, const char* jointName, const M4& bindG, const M4* armorD = NULL, BOOL bowMesh = FALSE, const V3* gripLocal = NULL)
 {
 	if (joint < 0 || joint >= pose.nJ) return MScale(0.4f, 0.4f, 0.4f);
 	const M4& g = pose.global[joint];
@@ -1412,15 +1417,32 @@ static M4 HumanGearFit(const Pose& pose, int joint, const char* name, const char
 		M4 D = MMul(MScale(0.20f, 0.36f, 0.36f), MTrans(0.f, 1.10f, -0.05f));
 		return onBind(D);
 	}
-	V3 out = v3(pos.x, 0, pos.z);
-	if (Len(out) < 1e-4f) out = v3(pos.x >= 0.f ? 1.f : -1.f, 0, 0);
+	V3 out = v3(bindG.m[12], 0, bindG.m[14]);
+	if (Len(out) < 1e-4f) out = v3(bindG.m[12] >= 0.f ? 1.f : -1.f, 0, 0);
 	out = Norm(out);
-	V3 finger = v3(g.m[4], g.m[5], g.m[6]);
-	V3 palm = pos + finger * 0.07f;
-	V3 fwd = Norm(face + v3(0, -0.18f, 0));
-	if (shield) return FitWorld(g, up, back, palm + out * 0.05f, 0.28f, 0.28f, 0.28f);
-	if (book) return FitWorld(g, up, face, palm, 0.40f, 0.40f, 0.40f);
-	return FitWorld(g, fwd, up, palm, 0.36f, 0.36f, 0.36f);
+	V3 along = Norm(v3(g.m[4], g.m[5], g.m[6]));   // 手首から指先
+	V3 dorsal = Norm(v3(g.m[8], g.m[9], g.m[10])); // +Z は手の甲
+	// 甲の上ではなく、曲がった指の中（掌側）に柄を通す。拳の大きさは体型で違うので中指の関節から取る。
+	V3 grip = gripLocal ? MXformPt(g, *gripLocal) - dorsal * 0.01f : pos + along * 0.135f - dorsal * 0.045f;
+	V3 palm = pos + along * 0.07f;
+	// 静止姿勢での向きを手の骨に乗せて運ぶ。振りかぶれば刃も手首と一緒に回る。
+	const V3 bx = Norm(v3(bindG.m[0], bindG.m[1], bindG.m[2])), by = Norm(v3(bindG.m[4], bindG.m[5], bindG.m[6])), bz = Norm(v3(bindG.m[8], bindG.m[9], bindG.m[10]));
+	const V3 cx = Norm(v3(g.m[0], g.m[1], g.m[2])), cy = along, cz = dorsal;
+	auto carry = [&](V3 w) { return cx * Dot(bx, w) + cy * Dot(by, w) + cz * Dot(bz, w); };
+	if (shield) return FitWorld(g, carry(up), carry(back), palm + carry(out) * 0.05f, 0.28f, 0.28f, 0.28f);
+	if (book) return FitWorld(g, carry(up), carry(face), palm, 0.40f, 0.40f, 0.40f);
+	if (bowMesh) {
+		// 弓は握りの線（拳の指の付け根の並び）に沿って立て、弦（メッシュ +X）を射手側へ。握りは弓の中央。
+		V3 y = Norm(carry(face)), x = Norm(carry(up));
+		return FitWorld(g, y, Cross(x, y), grip - y * 0.09f, 0.36f, 0.36f, 0.36f);
+	}
+	if (NameHas(name, "Crossbow")) {
+		// 弩は銃床を前腕に沿わせる。下げた手では下を、構えた腕では前を向く。
+		V3 down = Norm(by - face * Dot(by, face));
+		return FitWorld(g, carry(down), carry(face), grip, 0.36f, 0.36f, 0.36f);
+	}
+	// 剣の柄は掌を斜めに横切る。腕を前へ出すと刃は前上がりになる。
+	return FitWorld(g, Norm(carry(Norm(face + v3(0, -0.6f, 0)))), carry(up), grip, 0.36f, 0.36f, 0.36f);
 }
 
 void ActorDraw(Renderer& r, const Library& lib, Actor& a, const M4& world, const DrawParams& dp, float time)
@@ -1451,11 +1473,34 @@ void ActorDraw(Renderer& r, const Library& lib, Actor& a, const M4& world, const
 			if (humM && j >= 0 && j < humM->nJ) return MInverse(humM->invBind[j]);
 			return a.pose.global[j];
 		};
+		// 握りの中心＝その手の中指の関節の平均（手の骨の空間）。
+		auto gripOf = [&](int j, const char* jn, V3& out) -> BOOL {
+			if (!humM || !jn || j < 0 || j >= humM->nJ || a.rig < 0 || a.rig >= (int)r.rigs.size()) return FALSE;
+			const char* dot = strrchr(jn, '.');
+			if (!dot || !(NameHas(jn, "Hand") || NameHas(jn, "hand"))) return FALSE;
+			const Rig& rg = r.rigs[a.rig];
+			V3 s = v3(0, 0, 0);
+			int n = 0;
+			for (int k = 1; k <= 4; k++) {
+				char nm[24];
+				sprintf_s(nm, "Middle%d%s", k, dot);
+				int mj = rg.Find(nm);
+				if (mj < 0 || mj >= humM->nJ) continue;
+				M4 b = MInverse(humM->invBind[mj]);
+				s = s + v3(b.m[12], b.m[13], b.m[14]);
+				n++;
+			}
+			if (n < 2) return FALSE;
+			out = MXformPt(humM->invBind[j], s * (1.f / n));
+			return TRUE;
+		};
 		for (int i = 0; i < nAtt; i++) {
 			const char* nm = r.attaches[a.att[i]].name;
 			const char* jn = (hum && a.rig >= 0 && a.attJ[i] >= 0 && a.attJ[i] < r.rigs[a.rig].nJ) ? r.rigs[a.rig].names[a.attJ[i]] : NULL;
 			if (hum) {
-				M4 fit = HumanGearFit(a.pose, a.attJ[i], nm, jn, bindOf(a.attJ[i]));
+				V3 gl;
+				BOOL hasGrip = gripOf(a.attJ[i], jn, gl);
+				M4 fit = HumanGearFit(a.pose, a.attJ[i], nm, jn, bindOf(a.attJ[i]), NULL, FALSE, hasGrip ? &gl : NULL);
 				DrawParams dc = da;
 				if (NameHas(nm, "Cape")) dc.twoSided = 1;
 				r.DrawAttach(r.attaches[a.att[i]], a.pose, a.attJ[i], world, dc, &fit);
@@ -1495,7 +1540,9 @@ void ActorDraw(Renderer& r, const Library& lib, Actor& a, const M4& world, const
 					armorD = MMul(MScale(sx, sy, sz), MTrans(0.f, (top + bot) * .5f, ch.z - 0.05f));
 					pd = &armorD;
 				}
-				M4 fit = HumanGearFit(a.pose, a.gearJ[i], NULL, jn, bindOf(a.gearJ[i]), pd);
+				V3 gl;
+				BOOL hasGrip = gripOf(a.gearJ[i], jn, gl);
+				M4 fit = HumanGearFit(a.pose, a.gearJ[i], NULL, jn, bindOf(a.gearJ[i]), pd, r.GearIsBow(a.gearM[i]), hasGrip ? &gl : NULL);
 				r.DrawGear(a.gearM[i], MMul(MMul(fit, a.pose.global[a.gearJ[i]]), world), da);
 			} else r.DrawGear(a.gearM[i], MMul(a.pose.global[a.gearJ[i]], world), da);
 		}
@@ -1517,8 +1564,39 @@ void ActorDraw(Renderer& r, const Library& lib, Actor& a, const M4& world, const
 				int hg = lit(((a.hairCol >> 8) & 255) * ((dp.tint >> 8) & 255) / 255);
 				int hb = lit(((a.hairCol >> 16) & 255) * ((dp.tint >> 16) & 255) / 255);
 				dh.tint = RGBA8(hr, hg, hb, al);
-				// 髪は頭の骨に固定する。向きの遅れで殻を回すと頭皮が出る。
-				r.DrawStatic(lib.humHair[slot][style], MMul(a.pose.global[humM->headJ], world), dh);
+				// 頭蓋の殻は頭の骨に固定する（ずらすと頭皮が出る）。
+				// 垂れた髪は付け根を軸に頭の傾きを戻し、仰いでも下へ垂れる。αが小さいほど根元から遠い。
+				const M4& H = a.pose.global[humM->headJ];
+				const std::vector<VtxS>& hv = lib.humHairV[slot][style];
+				if (hv.empty()) r.DrawStatic(lib.humHair[slot][style], MMul(H, world), dh);
+				else {
+					V3 cur = Norm(MXformDir(H, MXformDir(humM->invBind[humM->headJ], v3(0, -1, 0))));
+					V3 ax = Cross(cur, v3(0, -1, 0));
+					float sl = Len(ax);
+					float ang = atan2f(sl, -cur.y) * .9f;
+					ax = sl > 1e-5f ? ax * (1.f / sl) : v3(1, 0, 0);
+					const float cs = cosf(ang), sn = sinf(ang);
+					auto rot = [&](V3 v) { return v * cs + Cross(ax, v) * sn + ax * (Dot(ax, v) * (1.f - cs)); };
+					const V3 piv = MXformPt(H, lib.humHairPivot[slot][style]);
+					static std::vector<VtxS> buf;
+					buf.resize(hv.size());
+					for (size_t k = 0; k < hv.size(); k++) {
+						const VtxS& s = hv[k];
+						VtxS& d = buf[k];
+						d = s;
+						V3 p = MXformPt(H, v3(s.p[0], s.p[1], s.p[2]));
+						V3 n = MXformDir(H, v3(s.n[0], s.n[1], s.n[2]));
+						float t = sqrtf(Clampf((255.f - (float)(s.c >> 24)) / 170.f, 0.f, 1.f));
+						float w = Clampf(t * 1.8f, 0.f, 1.f);
+						if (w > 0.f) {
+							p = Lerp(p, piv + rot(p - piv), w);
+							n = Norm(Lerp(n, rot(n), w));
+						}
+						d.p[0] = p.x; d.p[1] = p.y; d.p[2] = p.z;
+						d.n[0] = n.x; d.n[1] = n.y; d.n[2] = n.z;
+					}
+					r.DrawStaticVerts(lib.humHair[slot][style], buf.data(), (UINT)buf.size(), world, dh);
+				}
 			}
 		}
 		return;

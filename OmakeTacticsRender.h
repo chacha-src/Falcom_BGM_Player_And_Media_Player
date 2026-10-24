@@ -168,6 +168,7 @@ public:
 	std::vector<StaticSrc> statics;
 	std::vector<GpuMesh> m_creatures;
 	std::vector<GpuMesh> m_gear;
+	std::vector<BYTE> m_gearBow;
 	struct CSkinV { float p[3], n[3]; DWORD c; unsigned char j[4], w[4]; };
 	struct CreatureSkin {
 		int model; std::vector<CSkinV> bind; std::vector<BYTE> cloth;
@@ -185,7 +186,7 @@ public:
 	struct AvaMesh { std::vector<CSkinV> v; std::vector<BYTE> cloth; std::vector<float> dmax, dmin; };
 	struct AvaBody { int nFace; AvaMesh m; std::vector<WORD> bodyTri, extraTri; AvaBody() : nFace(0) {} };
 	struct AvaCos { char name[32]; int gender; AvaMesh m; std::vector<WORD> tri; std::vector<BYTE> keep; };
-	struct AvaModel { char name[32]; int gender; std::vector<float> M; };
+	struct AvaModel { char name[32]; int gender; std::vector<float> M; std::vector<std::string> joint; };
 	struct AvaCache { int model, cos; CreatureSkin skin; std::vector<float> bx, bn; GpuMesh gm; };
 	std::vector<std::string> m_avaSeg;
 	AvaBody m_avaBody[2];
@@ -204,7 +205,8 @@ public:
 	int CreatureCount() const { return (int)m_creatures.size(); }
 	int CreatureModel(int i) const { return (i >= 0 && i < (int)m_skins.size()) ? m_skins[i].model : -1; }
 	void DrawSkinnedCreature(int i, const Pose& pose, const M4& world, const DrawParams& dp);
-	int GearCount() const { return (int)m_gear.size(); }	void DrawCreature(int i, const M4& world, const DrawParams& dp);
+	int GearCount() const { return (int)m_gear.size(); }
+	BOOL GearIsBow(int i) const { return i >= 0 && i < (int)m_gearBow.size() && m_gearBow[i]; }	void DrawCreature(int i, const M4& world, const DrawParams& dp);
 	void DrawGear(int i, const M4& world, const DrawParams& dp);
 	int AddProcModel(const Model& m, const std::vector<VtxK>& v, const std::vector<WORD>& idx);
 	BOOL MakeMesh(GpuMesh& out, const void* v, UINT stride, UINT nv, const WORD* idx, UINT ni, BOOL dynamic = FALSE);
@@ -230,6 +232,8 @@ public:
 	Pass CurPass() const { return m_pass; }
 
 	void DrawStatic(const GpuMesh& m, const M4& world, const DrawParams& dp);
+	// m の索引で、頂点だけ v に差し替えて描く（毎フレーム CPU で動かす髪など）。
+	void DrawStaticVerts(const GpuMesh& m, const VtxS* v, UINT nv, const M4& world, const DrawParams& dp);
 	void DrawSkinned(const Model& m, const Pose& p, const M4& world, const DrawParams& dp);
 	void DrawAttach(const Attach& a, const Pose& p, int joint, const M4& world, const DrawParams& dp, const M4* extra = NULL);
 	void DrawTerrain();
@@ -297,6 +301,8 @@ private:
 	HANDLE m_wait;
 	BOOL m_lost;
 	BOOL m_presented;
+	DWORD m_waitStuck;   // 退役待ちが始まった時刻。0 は待ちなし
+	DWORD m_lastRebind;  // 未合成のまま付け直した時刻
 	int m_w, m_h;
 	int m_quality;
 	int m_msaa;

@@ -309,7 +309,6 @@ BOOL COmakeTacticsDlg::OnInitDialog()
 
 	QueryPerformanceFrequency(&m_qpf);
 	QueryPerformanceCounter(&m_last);
-	SetTimer(TAC_TIMER, 8, NULL);
 	CCC_BringDialogToForeground(this);
 	m_view.SetFocus();
 	return FALSE;
@@ -385,6 +384,10 @@ void COmakeTacticsDlg::OnShowWindow(BOOL bShow, UINT nStatus)
 	if (bShow) {
 		LayoutView();
 		if (m_gameOk) m_game.RefreshSurface();
+		SetWindowText(TacCaption());
+		CCC_InvalidateCaptionBar(m_hWnd);
+		QueryPerformanceCounter(&m_last);
+		SetTimer(TAC_TIMER, 8, NULL);
 	}
 }
 

@@ -50,6 +50,8 @@ void TacAudioPump();
 // 1 なら供給は TIME_CRITICAL の専用スレッド。UI タイマーは呼ばない。
 int TacAudioOnThread();
 void TacSfx(int id);
+// 魔法の詠唱。属性ごとに高さと音色を変えた TS_CAST。
+void TacSfxCast(int element);
 void TacAudioSetVol(int bgm, int se);
 void TacBgmScene(int scene);
 void TacBgmTempo(float goal);

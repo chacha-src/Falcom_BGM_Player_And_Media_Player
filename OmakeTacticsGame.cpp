@@ -19,6 +19,9 @@ enum {
 	ID_SHOP_PREV = 270, ID_SHOP_NEXT, ID_SHOP_LINE0 = 272, ID_SHOP_KIND0 = 278,
 	ID_PT_SHOP = 362,
 	ID_SHOP_FREE = 1890, ID_SHOP_SELLALL, ID_SHOP_FIT_NO, ID_SHOP_FIT_PREV, ID_SHOP_FIT_NEXT, ID_SHOP_FIT0,
+	ID_SHOP_SELLJUNK = 1920, ID_SHOP_ARM0 = 1930, ID_SHOP_ARM_SELL = 1948, ID_SHOP_ARM_NO = 1949,
+	ID_SHOP_ASK_YES = 1950, ID_SHOP_ASK_NO, ID_SHOP_FIT_KEEP, ID_SHOP_TO_PARTY, ID_SHOP_DET0 = 1960,
+	ID_BASE_SET = 945, ID_PT_EVO = 363,
 	ID_PT_WPN = 348, ID_PT_ARM,
 	ID_CR_NAME = 200, ID_CR_RANDOM, ID_CR_GENDER, ID_CR_LINEAGE, ID_CR_CLASS, ID_CR_BODY, ID_CR_HAIR, ID_CR_HAIRCOL, ID_CR_OUTFIT,
 	ID_CR_HAT, ID_CR_CAPE, ID_CR_OK, ID_CR_BACK, ID_CR_HEIGHT, ID_CR_BUST, ID_CR_FIG, ID_CR_FACE, ID_CR_AVATAR,
@@ -106,6 +109,12 @@ Game::Game()
 	m_shopFit = 0;
 	m_shopFitId = 0;
 	m_shopFitPage = 0;
+	m_shopHold = 0;
+	m_partyBack = 0;
+	m_baseOpt = 0;
+	m_createFromParty = 0;
+	m_evFromParty = 0;
+	m_evJump = 0;
 	m_statEq = 0;
 	m_statEqPage = 0;
 	m_itemAim = -1;
@@ -836,18 +845,32 @@ void Game::NavBack()
 {
 	if (m_showHelp) { m_showHelp = FALSE; return; }
 	switch (m_screen) {
-	case SC_CREATE: if (m_textFocus) m_textFocus = 0; else EnterParty(); break;
+	case SC_CREATE:
+		if (m_textFocus) m_textFocus = 0;
+		else if (m_createFromParty) { m_createFromParty = 0; EnterParty(); }
+		else EnterBase();
+		break;
 	case SC_PARTY:
 		if (m_eqPick) m_eqPick = 0;
 		else if (m_confirmDelete) m_confirmDelete = 0;
+		else if (m_partyBack && m_shop) { m_partyBack = 0; m_screen = SC_BASE; }
 		else EnterBase();
 		break;
 	case SC_EVOLVE:
 		if (m_evPick > 0) { m_evPick--; if (m_evPick == 0) m_evTarget = -1; m_evPartner[0] = m_evPartner[1] = -1; }
+		else if (m_evFromParty) { m_evFromParty = 0; EnterParty(); }
 		else EnterBase();
 		break;
 	case SC_BATTLE: BattleCancel(); break;
-	case SC_BASE: if (m_sortieAsk) m_sortieAsk = 0; break;
+	case SC_BASE:
+		if (m_sortieAsk) m_sortieAsk = 0;
+		else if (m_codex) m_codex = 0;
+		else if (m_shop && (m_shopHold || m_shopFit)) { m_shopHold = 0; m_shopFit = 0; }
+		else if (m_shop) {
+			m_shop = 0; m_shopHold = 0; m_shopFit = 0; m_partyBack = 0;
+			if (m_shopBack) { m_shopBack = 0; EnterParty(); }
+		} else if (m_baseOpt) m_baseOpt = 0;
+		break;
 	default: break;
 	}
 }
@@ -901,12 +924,12 @@ void Game::DrawBattleLog()
 		y += row;
 	}
 }
-void Game::AddPopup(V3 p, const wchar_t* s, DWORD col, int style, float delay)
+void Game::AddPopup(V3 p, const wchar_t* s, DWORD col, int style, float delay, float life)
 {
 	Popup q = {};
 	q.p = p;
 	wcsncpy_s(q.s, s, _TRUNCATE);
-	q.col = col; q.style = style; q.life = style == 2 ? 1.6f : 1.25f; q.delay = delay;
+	q.col = col; q.style = style; q.life = life > 0 ? life : (style == 2 ? 1.6f : 1.25f); q.delay = delay;
 	q.size = style == 2 ? 1.35f : 1.f;
 	m_popups.push_back(q);
 }
@@ -1416,6 +1439,10 @@ void Game::BuildShowcase()
 void Game::EnterBase()
 {
 	m_screen = SC_BASE;
+	m_shop = 0;
+	m_shopFit = 0;
+	m_shopHold = 0;
+	m_partyBack = 0;
 	m_shopBack = 0;
 	m_focusId = ID_BASE_SORTIE;
 	m_confirmDelete = 0;
@@ -1516,6 +1543,16 @@ void Game::DrawCodex()
 				int lv = (k % 26) + 7;
 				swprintf_s(how, L"%s  Lv%d", TT(TX_G_MELEE + g), lv);
 			}
+			if (how[0] == 0) {
+				int extra[2] = { C_GLADIATOR, C_SHADOW };
+				for (int e = 0; e < 2 && how[0] == 0; e++) {
+					const ClassDef& cd = ClassInfo(extra[e]);
+					for (int k = 0; k < LEARN_N; k++) if (cd.learn[k].skill == list[i] && cd.learn[k].lv > 0) {
+						swprintf_s(how, L"%s  Lv%d", TT(cd.nameTx), cd.learn[k].lv);
+						break;
+					}
+				}
+			}
 			for (int line = 0; line < TAC_RANK_LINES && how[0] == 0; line++) {
 				for (int r = 0; r < TAC_RANK_N && how[0] == 0; r++) {
 					const ClassDef& cd = ClassInfo(C_PLAYER_COUNT + line * TAC_RANK_N + r);
@@ -1593,21 +1630,166 @@ void Game::DrawCodex()
 	if (Btn(ID_BASE_CLOSE, x + w - U(180), y + h - U(56), U(150), U(36), TT(TX_BASE_CLOSE))) m_codex = 0;
 }
 
+void Game::DrawShopArm()
+{
+	m_r.HudRect(0, 0, (float)m_w, (float)m_h, RGBA8(0, 0, 0, 150));
+	float pw = min(U(720.f), (float)m_w - U(40));
+	float ph = min(U(560.f), (float)m_h - U(32));
+	float px = ((float)m_w - pw) * .5f, py = ((float)m_h - ph) * .5f;
+	if (m_click && !Hit(px, py, pw, ph)) { m_shopFit = 0; m_click = FALSE; return; }
+	Panel(px, py, pw, ph);
+	m_r.HudText(TT(TX_SHOP_ARM_ASK), px + pw * .5f, py + U(22), U(18), RGBA8(255, 226, 150), 1, 1);
+	struct Arm { int who, kind, stash, have; };
+	Arm row[MAX_ROSTER * 2];
+	int n = 0;
+	for (int i = 0; i < MAX_ROSTER; i++) if (m_save.roster[i].used) {
+		for (int k = 0; k < 2; k++) {
+			int st = GearBestUpgrade(m_save, i, k);
+			if (st < 0 || n >= MAX_ROSTER * 2) continue;
+			int have = 0;
+			int id = m_save.roster[i].reserved[k ? 7 : 6];
+			if (id > 0) {
+				const GearDef* e = GearOf(id);
+				if (e) have = (e->kind == 0) ? e->str + e->mag : e->def + e->res;
+			}
+			row[n].who = i; row[n].kind = k; row[n].stash = st; row[n].have = have;
+			n++;
+		}
+	}
+	for (int a = 1; a < n; a++) {
+		Arm v = row[a];
+		int b = a;
+		while (b > 0 && row[b - 1].have > v.have) { row[b] = row[b - 1]; b--; }
+		row[b] = v;
+	}
+	const int per = 6;
+	int pages = max(1, (n + per - 1) / per);
+	if (m_shopFitPage >= pages) m_shopFitPage = pages - 1;
+	if (m_shopFitPage < 0) m_shopFitPage = 0;
+	float yy = py + U(52);
+	int base = m_shopFitPage * per;
+	for (int s = 0; s < per && base + s < n; s++) {
+		const Arm& ar = row[base + s];
+		CharData& c = m_save.roster[ar.who];
+		const GearDef* ng = GearOf(m_save.gearId[ar.stash]);
+		const wchar_t* cur = TT(TX_PT_NONE);
+		if (c.reserved[ar.kind ? 7 : 6] > 0) cur = GearName(c.reserved[ar.kind ? 7 : 6]);
+		wchar_t lab[180];
+		swprintf_s(lab, L"%s  %s  %s → %s", c.name, ClassName(c.cls), cur, ng ? GearName(m_save.gearId[ar.stash]) : L"?");
+		if (Btn(ID_SHOP_ARM0 + s, px + U(16), yy, pw - U(32), U(36), lab, TRUE, FALSE, U(13))) {
+			GearEquip(c, m_save, ar.stash);
+			Persist();
+			InvalidatePortraits();
+			return;
+		}
+		yy += U(40);
+	}
+	if (pages > 1) {
+		wchar_t pg[32];
+		swprintf_s(pg, L"%d / %d", m_shopFitPage + 1, pages);
+		if (Btn(ID_SHOP_FIT_PREV, px + U(16), py + ph - U(46), U(64), U(32), L"◀")) m_shopFitPage = (m_shopFitPage + pages - 1) % pages;
+		m_r.HudText(pg, px + U(120), py + ph - U(30), U(14), RGBA8(220, 220, 230), 0, 1);
+		if (Btn(ID_SHOP_FIT_NEXT, px + U(168), py + ph - U(46), U(64), U(32), L"▶")) m_shopFitPage = (m_shopFitPage + 1) % pages;
+	}
+	BOOL junk = FALSE;
+	for (int i = 0; i < m_save.gearN && !junk; i++) if (GearIsSurplus(m_save, m_save.gearId[i])) junk = TRUE;
+	if (Btn(ID_SHOP_ARM_SELL, px + pw - U(360), py + ph - U(46), U(170), U(32), TT(TX_SHOP_ARM_SELL), junk, FALSE, U(13))) {
+		int sold = GearSellSurplus(m_save);
+		if (sold > 0) Persist();
+		BOOL still = FALSE;
+		for (int i = 0; i < MAX_ROSTER && !still; i++) if (m_save.roster[i].used) {
+			if (GearBestUpgrade(m_save, i, 0) >= 0 || GearBestUpgrade(m_save, i, 1) >= 0) still = TRUE;
+		}
+		if (!still) m_shopFit = 0;
+		if (sold <= 0) TacSfx(TS_ERROR);
+		return;
+	}
+	if (Btn(ID_SHOP_ARM_NO, px + pw - U(180), py + ph - U(46), U(160), U(32), TT(TX_EV_LATER))) m_shopFit = 0;
+}
+
+void Game::DrawShopAsk()
+{
+	m_r.HudRect(0, 0, (float)m_w, (float)m_h, RGBA8(0, 0, 0, 150));
+	float pw = min(U(460.f), (float)m_w - U(40));
+	float ph = U(210);
+	float px = ((float)m_w - pw) * .5f, py = ((float)m_h - ph) * .5f;
+	if (m_click && !Hit(px, py, pw, ph)) { m_shopHold = 0; m_shopFit = 0; m_click = FALSE; return; }
+	Panel(px, py, pw, ph);
+	wchar_t line[160];
+	line[0] = 0;
+	BOOL ok = FALSE;
+	if (m_shopFit == 6) {
+		const GoodDef* gd = GoodAt(m_shopFitId);
+		if (gd) {
+			swprintf_s(line, L"%s  %dG", TT(gd->nameTx), gd->price);
+			ok = m_save.gold >= gd->price && GoodHave(m_save, m_shopFitId) < 99;
+		}
+	} else if (m_shopFit == 7 || m_shopFit == 8) {
+		BOOL partyT = m_shopFit == 7;
+		int cap = partyT ? PartyCap() : RosterCap();
+		int maxCap = partyT ? MAX_PARTY : MAX_ROSTER;
+		int price = 0;
+		if (cap < maxCap) price = partyT ? 800 + (cap - 5) * 350 : 1600 + ((cap - 20) / 20) * 600;
+		swprintf_s(line, L"%s  %dG", TT(partyT ? TX_TICKET_PT : TX_TICKET_RS), price);
+		ok = cap < maxCap && m_save.gold >= price;
+	} else if (m_shopFit == 9) {
+		swprintf_s(line, L"%s  250G", TT(TX_STONE));
+		ok = m_save.gold >= 250 && StoneCount() < 999;
+	}
+	m_r.HudText(line, px + pw * .5f, py + U(48), U(16), RGBA8(240, 240, 245), 1, 1);
+	m_r.HudText(TT(TX_SHOP_ASK), px + pw * .5f, py + U(84), U(20), RGBA8(255, 226, 150), 1, 1);
+	float bw = (pw - U(48)) * .5f;
+	if (Btn(ID_SHOP_ASK_YES, px + U(16), py + ph - U(64), bw, U(40), TT(TX_PT_YES), ok, FALSE, U(16))) {
+		BOOL done = FALSE;
+		if (m_shopFit == 6) done = GoodBuy(m_save, m_shopFitId);
+		else if (m_shopFit == 7 || m_shopFit == 8) {
+			BOOL partyT = m_shopFit == 7;
+			int cap = partyT ? PartyCap() : RosterCap();
+			int maxCap = partyT ? MAX_PARTY : MAX_ROSTER;
+			int price = partyT ? 800 + (cap - 5) * 350 : 1600 + ((cap - 20) / 20) * 600;
+			if (cap < maxCap && m_save.gold >= price) {
+				m_save.gold -= price;
+				if (partyT) m_save.partyCap = cap + 1;
+				else m_save.rosterCap = cap + 20;
+				done = TRUE;
+			}
+		} else if (m_shopFit == 9 && m_save.gold >= 250 && StoneCount() < 999) {
+			m_save.gold -= 250;
+			StoneAdd(1);
+			done = TRUE;
+		}
+		if (!done) { TacSfx(TS_ERROR); return; }
+		TacSfx(TS_CONFIRM);
+		Persist();
+		m_shopHold = 0;
+		m_shopFit = 0;
+		return;
+	}
+	if (Btn(ID_SHOP_ASK_NO, px + U(24) + bw, py + ph - U(64), bw, U(40), TT(TX_PT_NO))) {
+		m_shopHold = 0;
+		m_shopFit = 0;
+	}
+}
+
 void Game::DrawShopFit()
 {
-	if (m_shopFit < 1) return;
+	if (m_shopFit == 5) { DrawShopArm(); return; }
+	if (m_shopFit < 1 || m_shopFit > 4) return;
 	m_r.HudRect(0, 0, (float)m_w, (float)m_h, RGBA8(0, 0, 0, 150));
 	float pw = min(U(640.f), (float)m_w - U(40));
 	float ph = min(U(520.f), (float)m_h - U(32));
 	float px = ((float)m_w - pw) * .5f, py = ((float)m_h - ph) * .5f;
-	if (m_click && !Hit(px, py, pw, ph)) { m_shopFit = 0; m_click = FALSE; return; }
+	if (m_click && !Hit(px, py, pw, ph)) { m_shopFit = 0; m_shopHold = 0; m_click = FALSE; return; }
 	Panel(px, py, pw, ph);
 	m_r.HudText(TT(TX_EQ_ASK), px + pw * .5f, py + U(22), U(18), RGBA8(255, 226, 150), 1, 1);
 	wchar_t item[96];
 	wcscpy_s(item, TT(TX_PT_NONE));
 	const GearDef* fitGear = NULL;
 	if (m_shopFit <= 2) {
-		if (m_shopFitId >= 0 && m_shopFitId < m_save.gearN) {
+		if (m_shopHold) {
+			fitGear = GearOf(m_shopFitId + 1);
+			if (fitGear) wcscpy_s(item, GearName(m_shopFitId + 1));
+		} else if (m_shopFitId >= 0 && m_shopFitId < m_save.gearN) {
 			wcscpy_s(item, GearName(m_save.gearId[m_shopFitId]));
 			fitGear = GearOf(m_save.gearId[m_shopFitId]);
 		}
@@ -1615,7 +1797,11 @@ void Game::DrawShopFit()
 	else wcscpy_s(item, CraftName(m_shopFitId));
 	m_r.HudText(item, px + pw * .5f, py + U(46), U(14), RGBA8(230, 230, 240), 1, 0);
 	int who[MAX_ROSTER], n = 0;
-	for (int i = 0; i < MAX_ROSTER && n < MAX_ROSTER; i++) if (m_save.roster[i].used) who[n++] = i;
+	for (int i = 0; i < MAX_ROSTER && n < MAX_ROSTER; i++) {
+		if (!m_save.roster[i].used) continue;
+		if (m_shopHold && m_shopFit <= 2 && (!fitGear || !GearCanWear(m_save.roster[i].cls, fitGear))) continue;
+		who[n++] = i;
+	}
 	const int per = 6;
 	int pages = max(1, (n + per - 1) / per);
 	if (m_shopFitPage >= pages) m_shopFitPage = pages - 1;
@@ -1630,7 +1816,7 @@ void Game::DrawShopFit()
 			int slot = (fitGear && fitGear->kind) ? 7 : 6;
 			const wchar_t* cur = TT(TX_PT_NONE);
 			if (c.reserved[slot] > 0) cur = GearName(c.reserved[slot]);
-			if (fitGear && ClassLine(c.cls) != fitGear->line) ok = FALSE;
+			if (fitGear && !GearCanWear(c.cls, fitGear)) ok = FALSE;
 			swprintf_s(row, L"%s  %s  %s", c.name, ClassName(c.cls), cur);
 		} else if (m_shopFit == 3) {
 			swprintf_s(row, L"%s  %s  %s / %s", c.name, ClassName(c.cls), EquippedAccName(c, 0), EquippedAccName(c, 1));
@@ -1639,14 +1825,32 @@ void Game::DrawShopFit()
 			if (EquippedBeadId(c, 0) == bead || EquippedBeadId(c, 1) == bead) ok = FALSE;
 			swprintf_s(row, L"%s  %s  %s / %s", c.name, ClassName(c.cls), EquippedBeadName(c, 0), EquippedBeadName(c, 1));
 		}
-		if (Btn(ID_SHOP_FIT0 + s, px + U(16), yy, pw - U(32), U(36), row, ok, FALSE, U(13))) {
+		float nameW = pw - U(118);
+		if (Btn(ID_SHOP_FIT0 + s, px + U(16), yy, nameW, U(36), row, ok, FALSE, U(13))) {
 			BOOL done = FALSE;
 			if (m_shopFit <= 2) {
-				if (ok) { GearEquip(c, m_save, m_shopFitId); done = TRUE; }
+				if (!ok) { TacSfx(TS_ERROR); return; }
+				int stash = m_shopFitId;
+				if (m_shopHold) {
+					if (!GearBuy(m_save, m_shopFitId)) { TacSfx(TS_ERROR); return; }
+					stash = m_save.gearN - 1;
+					m_shopHold = 0;
+					m_shopFitId = stash;
+				}
+				GearEquip(c, m_save, stash);
+				done = TRUE;
 			} else if (m_shopFit == 3) {
+				if (m_shopHold) {
+					if (!AccBuy(m_save, m_shopFitId - 1)) { TacSfx(TS_ERROR); return; }
+					m_shopHold = 0;
+				}
 				int slot = EquippedAccId(c, 0) > 0 && EquippedAccId(c, 1) <= 0 ? 1 : 0;
 				done = EquipAccId(c, slot, m_shopFitId);
 			} else {
+				if (m_shopHold) {
+					if (!BeadBuy(m_save, m_shopFitId)) { TacSfx(TS_ERROR); return; }
+					m_shopHold = 0;
+				}
 				int slot = EquippedBeadId(c, 0) > 0 && EquippedBeadId(c, 1) <= 0 ? 1 : 0;
 				done = EquipBeadId(c, slot, m_shopFitId + 1);
 			}
@@ -1655,9 +1859,26 @@ void Game::DrawShopFit()
 			Persist();
 			InvalidatePortraits();
 			m_shopFit = 0;
+			m_shopHold = 0;
+			return;
+		}
+		if (Btn(ID_SHOP_DET0 + s, px + U(22) + nameW, yy, U(78), U(36), TT(TX_SHOP_DETAIL), TRUE, FALSE, U(12))) {
+			m_partySel = who[a + s];
+			m_partyBack = 1;
+			EnterParty();
 			return;
 		}
 		yy += U(40);
+	}
+	if (n < 1) m_r.HudText(TT(TX_SHOP_NOWEAR), px + pw * .5f, py + U(120), U(16), RGBA8(255, 180, 160), 1, 1);
+	BOOL keep = m_shopHold && m_shopFit <= 2 && n > 0;
+	if (keep && Btn(ID_SHOP_FIT_KEEP, px + U(16), py + ph - U(86), pw - U(200), U(32), TT(TX_SHOP_KEEP))) {
+		if (!GearBuy(m_save, m_shopFitId)) { TacSfx(TS_ERROR); return; }
+		TacSfx(TS_CONFIRM);
+		Persist();
+		m_shopFit = 0;
+		m_shopHold = 0;
+		return;
 	}
 	if (pages > 1) {
 		wchar_t pg[32];
@@ -1666,12 +1887,25 @@ void Game::DrawShopFit()
 		m_r.HudText(pg, px + U(120), py + ph - U(30), U(14), RGBA8(220, 220, 230), 0, 1);
 		if (Btn(ID_SHOP_FIT_NEXT, px + U(168), py + ph - U(46), U(64), U(32), L"▶")) m_shopFitPage = (m_shopFitPage + 1) % pages;
 	}
-	if (Btn(ID_SHOP_FIT_NO, px + pw - U(180), py + ph - U(46), U(160), U(32), TT(TX_EV_LATER))) m_shopFit = 0;
+	if (Btn(ID_SHOP_FIT_NO, px + pw - U(180), py + ph - U(46), U(160), U(32), TT(TX_EV_LATER))) { m_shopFit = 0; m_shopHold = 0; }
+}
+
+static BOOL GearListBefore(int a, int b)
+{
+	const GearDef* ga = GearOf(a + 1);
+	const GearDef* gb = GearOf(b + 1);
+	int ra = ga && ga->req > 0 ? ga->req : 1;
+	int rb = gb && gb->req > 0 ? gb->req : 1;
+	if (ra != rb) return ra < rb;
+	int pa = ga ? ga->price : 0;
+	int pb = gb ? gb->price : 0;
+	if (pa != pb) return pa < pb;
+	return a < b;
 }
 
 void Game::DrawShop()
 {
-	BOOL fit = m_shopFit > 0;
+	BOOL fit = m_shopFit > 0 || m_shopHold > 0;
 	BOOL savedClick = m_click;
 	int savedAct = m_activateId;
 	if (fit) { m_click = FALSE; m_activateId = -1; }
@@ -1708,7 +1942,14 @@ void Game::DrawShop()
 			m_shopKind = i; m_shopPage = 0; m_shopSellPage = 0;
 		}
 	}
-	const int per = 8;
+	const BOOL gearTab = (m_shopKind == 0 || m_shopKind == 1);
+	const float rowH = gearTab ? U(50.f) : U(30.f);
+	const float rowStep = gearTab ? U(54.f) : U(34.f);
+	float listTop = ky + U(36);
+	float listBot = y + h - U(56);
+	int per = (int)((listBot - listTop) / rowStep);
+	if (per > 8) per = 8;
+	if (per < 3) per = 3;
 	int ids[512], n = 0;
 	if (m_shopKind == 3) {
 		n = TrophyList(ids, 512);
@@ -1725,8 +1966,13 @@ void Game::DrawShop()
 		for (int i = 0; i < GearCount() && n < 512; i++) {
 			const GearDef* g = GearOf(i + 1);
 			if (!g || g->line != m_shopLine || g->kind != m_shopKind) continue;
-			if (m_save.stageCleared < g->stage) continue;
 			ids[n++] = i;
+		}
+		for (int i = 1; i < n; i++) {
+			int v = ids[i];
+			int j = i;
+			while (j > 0 && GearListBefore(v, ids[j - 1])) { ids[j] = ids[j - 1]; j--; }
+			ids[j] = v;
 		}
 	}
 	int pages = max(1, (n + per - 1) / per);
@@ -1741,7 +1987,7 @@ void Game::DrawShop()
 	float rowX = x + U(16), rowW = w * .62f;
 	auto takeHover = [&](int btn, float hy, const wchar_t* text) {
 		if (!text || !text[0]) return;
-		if (Hit(rowX, hy, rowW, U(30)) || (m_navMode && m_focusId == btn)) {
+		if (Hit(rowX, hy, rowW, rowH) || (m_navMode && m_focusId == btn)) {
 			wcscpy_s(hovHold, text);
 			hov = hovHold;
 		}
@@ -1756,7 +2002,7 @@ void Game::DrawShop()
 			int ct = 0, price = 0;
 			TrophyNameOf(ids[ix], nm, 80, &ct, &price);
 			swprintf_s(row, L"%s  x%d  %dG", nm, ct, price);
-			if (Btn(ID_SHOP_BUY0 + s, x + U(16), yy, w * .62f, U(30), row, TRUE, FALSE, U(13))) {
+			if (Btn(ID_SHOP_BUY0 + s, x + U(16), yy, w * .62f, rowH, row, TRUE, FALSE, U(13))) {
 				if (TrophySell(m_save, ids[ix])) { TacSfx(TS_CONFIRM); Persist(); return; }
 			}
 		} else if (m_shopKind == 2 && (ids[ix] == -1 || ids[ix] == -2)) {
@@ -1770,23 +2016,18 @@ void Game::DrawShop()
 			else swprintf_s(row, L"%s  %dG  (%d→%d)", TT(TX_TICKET_RS), price, cap, cap + 20);
 			ok = cap < maxCap && m_save.gold >= price;
 			takeHover(ID_SHOP_BUY0 + s, yy, TT(partyT ? TX_ITD_PT : TX_ITD_RS));
-			if (Btn(ID_SHOP_BUY0 + s, x + U(16), yy, w * .62f, U(30), row, ok, FALSE, U(13))) {
-				m_save.gold -= price;
-				if (partyT) m_save.partyCap = cap + 1;
-				else m_save.rosterCap = cap + 20;
-				TacSfx(TS_CONFIRM);
-				Persist();
+			if (Btn(ID_SHOP_BUY0 + s, x + U(16), yy, w * .62f, rowH, row, ok, FALSE, U(13))) {
+				m_shopHold = 2; m_shopFit = partyT ? 7 : 8; m_shopFitId = 0;
+				TacSfx(TS_OPEN); return;
 			}
 		} else if (m_shopKind == 2 && ids[ix] == -3) {
 			int price = 250;
 			swprintf_s(row, L"%s  %dG  x%d", TT(TX_STONE), price, StoneCount());
 			ok = m_save.gold >= price && StoneCount() < 999;
 			takeHover(ID_SHOP_BUY0 + s, yy, TT(TX_ITD_STONE));
-			if (Btn(ID_SHOP_BUY0 + s, x + U(16), yy, w * .62f, U(30), row, ok, FALSE, U(13))) {
-				m_save.gold -= price;
-				StoneAdd(1);
-				TacSfx(TS_CONFIRM);
-				Persist();
+			if (Btn(ID_SHOP_BUY0 + s, x + U(16), yy, w * .62f, rowH, row, ok, FALSE, U(13))) {
+				m_shopHold = 2; m_shopFit = 9; m_shopFitId = 0;
+				TacSfx(TS_OPEN); return;
 			}
 		} else if (m_shopKind == 4) {
 			swprintf_s(row, L"%s  %dG", AccName(ids[ix] + 1), AccPrice(ids[ix]));
@@ -1803,11 +2044,9 @@ void Game::DrawShop()
 				swprintf_s(hovBuf, L"%s%s", TT(TX_ACC), bits);
 				takeHover(ID_SHOP_BUY0 + s, yy, hovBuf);
 			}
-			if (Btn(ID_SHOP_BUY0 + s, x + U(16), yy, w * .62f, U(30), row, ok, FALSE, U(13))) {
-				if (AccBuy(m_save, ids[ix])) {
-					m_shopFit = 3; m_shopFitId = ids[ix] + 1; m_shopFitPage = 0;
-					TacSfx(TS_CONFIRM); Persist(); return;
-				}
+			if (Btn(ID_SHOP_BUY0 + s, x + U(16), yy, w * .62f, rowH, row, ok, FALSE, U(13))) {
+				m_shopHold = 1; m_shopFit = 3; m_shopFitId = ids[ix] + 1; m_shopFitPage = 0;
+				TacSfx(TS_OPEN); return;
 			}
 		} else if (m_shopKind == 5) {
 			int cost = CraftStoneCost(ids[ix]);
@@ -1821,19 +2060,18 @@ void Game::DrawShop()
 			}
 			ok = open && StoneCount() >= cost && have < 99;
 			takeHover(ID_SHOP_BUY0 + s, yy, CraftDesc(ids[ix]));
-			if (Btn(ID_SHOP_BUY0 + s, x + U(16), yy, w * .62f, U(30), row, ok, FALSE, U(13))) {
-				if (BeadBuy(m_save, ids[ix])) {
-					m_shopFit = 4; m_shopFitId = ids[ix]; m_shopFitPage = 0;
-					TacSfx(TS_CONFIRM); Persist(); return;
-				}
+			if (Btn(ID_SHOP_BUY0 + s, x + U(16), yy, w * .62f, rowH, row, ok, FALSE, U(13))) {
+				m_shopHold = 1; m_shopFit = 4; m_shopFitId = ids[ix]; m_shopFitPage = 0;
+				TacSfx(TS_OPEN); return;
 			}
 		} else if (m_shopKind == 2) {
 			const GoodDef* gd = GoodAt(ids[ix]);
 			swprintf_s(row, L"%s  %dG  x%d", TT(gd->nameTx), gd->price, GoodHave(m_save, ids[ix]));
 			ok = m_save.gold >= gd->price && GoodHave(m_save, ids[ix]) < 99;
 			takeHover(ID_SHOP_BUY0 + s, yy, GoodDesc(ids[ix]));
-			if (Btn(ID_SHOP_BUY0 + s, x + U(16), yy, w * .62f, U(30), row, ok, FALSE, U(13))) {
-				if (GoodBuy(m_save, ids[ix])) { TacSfx(TS_CONFIRM); Persist(); }
+			if (Btn(ID_SHOP_BUY0 + s, x + U(16), yy, w * .62f, rowH, row, ok, FALSE, U(13))) {
+				m_shopHold = 2; m_shopFit = 6; m_shopFitId = ids[ix];
+				TacSfx(TS_OPEN); return;
 			}
 		} else {
 			const GearDef* g = GearOf(ids[ix] + 1);
@@ -1841,14 +2079,50 @@ void Game::DrawShop()
 				TT(TX_ST_STR), g->str, TT(TX_ST_MAG), g->mag, TT(TX_ST_DEF), g->def, TT(TX_ST_RES), g->res);
 			ok = m_save.gold >= g->price && m_save.gearN < GEAR_STASH;
 			takeHover(ID_SHOP_BUY0 + s, yy, GearRole(g));
-			if (Btn(ID_SHOP_BUY0 + s, x + U(16), yy, w * .62f, U(30), row, ok, FALSE, U(13))) {
-				if (GearBuy(m_save, ids[ix])) {
-					m_shopFit = g->kind ? 2 : 1; m_shopFitId = m_save.gearN - 1; m_shopFitPage = 0;
-					TacSfx(TS_CONFIRM); Persist(); return;
-				}
+			if (Btn(ID_SHOP_BUY0 + s, x + U(16), yy, w * .62f, rowH, L"", ok, FALSE, U(13))) {
+				m_shopHold = 1; m_shopFit = g->kind ? 2 : 1; m_shopFitId = ids[ix]; m_shopFitPage = 0;
+				TacSfx(TS_OPEN); return;
 			}
+			m_r.HudText(row, x + U(16) + w * .31f, yy + rowH * .34f, U(13),
+				ok ? RGBA8(246, 242, 232) : RGBA8(140, 140, 150), 1, 1);
+			wchar_t users[200];
+			users[0] = 0;
+			auto addUser = [&](int cls) -> bool {
+				wchar_t tmp[200];
+				wcscpy_s(tmp, users);
+				if (tmp[0]) wcscat_s(tmp, L"・");
+				wcscat_s(tmp, ClassName(cls));
+				if (m_r.TextWidth(tmp, U(11), 0) > w * .62f - U(24)) {
+					if (users[0]) wcscat_s(users, L"…");
+					return false;
+				}
+				wcscpy_s(users, tmp);
+				return true;
+			};
+			int whoC[40], whoT[40], nw = 0;
+			int need = g->req > 0 ? g->req : 1;
+			auto pushWho = [&](int c) {
+				if (nw >= 40 || ClassLine(c) != g->line) return;
+				int t = ClassTier(c);
+				if (t < need) return;
+				whoC[nw] = c; whoT[nw] = t; nw++;
+			};
+			for (int c = 0; c < C_PLAYER_COUNT; c++) pushWho(c);
+			for (int c = C_PLAYER_COUNT; c < C_PLAYER_COUNT + TAC_RANK_LINES * TAC_RANK_N; c++) pushWho(c);
+			pushWho(C_GLADIATOR);
+			pushWho(C_SHADOW);
+			for (int i = 1; i < nw; i++) {
+				int vc = whoC[i], vt = whoT[i], j = i;
+				while (j > 0 && (whoT[j - 1] > vt || (whoT[j - 1] == vt && whoC[j - 1] > vc))) {
+					whoC[j] = whoC[j - 1]; whoT[j] = whoT[j - 1]; j--;
+				}
+				whoC[j] = vc; whoT[j] = vt;
+			}
+			for (int i = 0; i < nw; i++) if (!addUser(whoC[i])) break;
+			if (users[0])
+				m_r.HudText(users, x + U(16) + w * .31f, yy + rowH * .74f, U(11), RGBA8(186, 198, 220), 1, 1);
 		}
-		yy += U(34);
+		yy += rowStep;
 	}
 	wchar_t pg[32];
 	swprintf_s(pg, L"%d / %d", m_shopPage + 1, pages);
@@ -1857,6 +2131,27 @@ void Game::DrawShop()
 	if (pages > 1 && Btn(ID_SHOP_NEXT, x + U(200), y + h - U(48), U(64), U(32), L"▶")) m_shopPage = (m_shopPage + 1) % pages;
 	float sy = ky + U(36);
 	m_r.HudText(TT(TX_SHOP_SELL), x + w * .66f, ky + U(8), U(15), RGBA8(255, 220, 170), 0, 1);
+	{
+		wchar_t cap[40];
+		swprintf_s(cap, TT(TX_SHOP_CAP), m_save.gearN, GEAR_STASH);
+		m_r.HudText(cap, x + w - U(16), ky + U(8), U(13), RGBA8(255, 214, 150), 2, 0);
+	}
+	if (gearTab) {
+		BOOL need = FALSE;
+		for (int i = 0; i < MAX_ROSTER && !need; i++) if (m_save.roster[i].used) {
+			if (GearBestUpgrade(m_save, i, 0) >= 0 || GearBestUpgrade(m_save, i, 1) >= 0) need = TRUE;
+		}
+		BOOL junk = FALSE;
+		for (int i = 0; i < m_save.gearN && !junk; i++) if (GearIsSurplus(m_save, m_save.gearId[i])) junk = TRUE;
+		BOOL en = need || junk;
+		if (Btn(ID_SHOP_SELLJUNK, x + w * .66f, sy, w * .32f, U(28), TT(TX_SHOP_SELLSURP), en, FALSE, U(12))) {
+			if (need) { m_shopFit = 5; m_shopFitPage = 0; return; }
+			if (GearSellSurplus(m_save) > 0) { Persist(); return; }
+			TacSfx(TS_ERROR);
+		}
+		if (Hit(x + w * .66f, sy, w * .32f, U(28)) || (m_navMode && m_focusId == ID_SHOP_SELLJUNK)) hov = TT(TX_SHOP_SURP_D);
+		sy += U(34);
+	}
 	float sellBot = y + h - U(96);
 	int sp = (int)((sellBot - sy) / U(34));
 	if (sp > 8) sp = 8;
@@ -1925,16 +2220,24 @@ void Game::DrawShop()
 			TacSfx(TS_ERROR);
 		}
 	}
+	if (Btn(ID_SHOP_TO_PARTY, x + w * .42f, y + h - U(48), U(150), U(32), TT(TX_BASE_PARTY), RosterCount() > 0, FALSE, U(13))) {
+		m_partyBack = 1;
+		EnterParty();
+		return;
+	}
 	if (Btn(ID_SHOP_CLOSE, x + w - U(170), y + h - U(48), U(150), U(32), TT(TX_CR_BACK))) {
 		Persist();
 		m_shop = 0;
 		m_shopFit = 0;
+		m_shopHold = 0;
+		m_partyBack = 0;
 		if (m_shopBack) { m_shopBack = 0; EnterParty(); }
 	}
 	if (fit) {
 		m_click = savedClick;
 		m_activateId = savedAct;
-		DrawShopFit();
+		if (m_shopHold == 2) DrawShopAsk();
+		else DrawShopFit();
 	}
 }
 
@@ -1960,7 +2263,7 @@ void Game::DrawBaseUi()
 	float helpY = y + ph - helpH - max(6.f, ph * .015f);
 	float top = y + titleH * 2.f + 14.f;
 	float midRoom = helpY - top - 4.f;
-	float midNeed = U(636);
+	float midNeed = m_baseOpt ? U(560) : U(340);
 	float k = midNeed > 1.f ? min(1.f, midRoom / midNeed) : 1.f;
 	if (k < .42f) k = .42f;
 	auto Ku = [&](float px) { return U(px) * k; };
@@ -1993,17 +2296,13 @@ void Game::DrawBaseUi()
 		StartBattle(m_save.stageSel);
 		return;
 	}
-	by += bh + Ku(18);
-	if (Btn(ID_BASE_PARTY, bx, by, bw, bh, TT(TX_BASE_PARTY), RosterCount() > 0)) { EnterParty(); return; }
-	by += bh + Ku(8);
-	if (Btn(ID_BASE_CREATE, bx, by, bw, bh, TT(TX_BASE_CREATE), RosterCount() < RosterCap())) { EnterCreate(-1); return; }
-	by += bh + Ku(8);
-	if (Btn(ID_BASE_EVOLVE, bx, by, bw, bh, TT(TX_BASE_EVOLVE), RosterCount() > 0)) { EnterEvolve(); return; }
-	by += bh + Ku(8);
-	if (Btn(ID_BASE_CODEX, bx, by, bw, bh, TT(TX_BASE_CODEX))) { m_codex = 1; m_codexPage = 0; return; }
-	by += bh + Ku(8);
-	if (Btn(ID_BASE_SHOP, bx, by, bw, bh, TT(TX_SHOP))) {
-		m_shop = 1; m_shopPage = 0; m_shopSellPage = 0; m_shopKind = 0;
+	by += bh + Ku(14);
+	float gapb = Ku(8);
+	float halfW = (bw - gapb) * .5f;
+	float hfs = min(U(15), bh * .36f);
+	if (Btn(ID_BASE_PARTY, bx, by, halfW, bh, TT(TX_BASE_PARTY), RosterCount() > 0, FALSE, hfs)) { EnterParty(); return; }
+	if (Btn(ID_BASE_SHOP, bx + halfW + gapb, by, halfW, bh, TT(TX_SHOP), TRUE, FALSE, hfs)) {
+		m_shop = 1; m_shopPage = 0; m_shopSellPage = 0; m_shopKind = 0; m_shopHold = 0; m_shopFit = 0; m_partyBack = 0;
 		int cap = PartyCap();
 		for (int i = 0; i < cap; i++) {
 			int r = m_save.party[i];
@@ -2011,19 +2310,27 @@ void Game::DrawBaseUi()
 		}
 		return;
 	}
-	by += bh + Ku(18);
-	static const int qtx[3] = { TX_SET_Q_LOW, TX_SET_Q_STD, TX_SET_Q_HIGH };
-	if (int q = Sel(ID_BASE_QUALITY, bx, by, bw, Ku(36), TT(TX_SET_QUALITY), TT(qtx[Clampi(m_save.quality, 0, 2)]))) {
-		m_save.quality = (m_save.quality + q + 3) % 3;
-		m_r.SetQuality(m_save.quality);
-		InvalidatePortraits();
+	by += bh + Ku(8);
+	if (Btn(ID_BASE_CREATE, bx, by, halfW, bh, TT(TX_BASE_CREATE), RosterCount() < RosterCap(), FALSE, hfs)) { m_createFromParty = 0; EnterCreate(-1); return; }
+	if (Btn(ID_BASE_EVOLVE, bx + halfW + gapb, by, halfW, bh, TT(TX_BASE_EVOLVE), RosterCount() > 0, FALSE, hfs)) { m_evFromParty = 0; EnterEvolve(); return; }
+	by += bh + Ku(8);
+	if (Btn(ID_BASE_CODEX, bx, by, halfW, bh, TT(TX_BASE_CODEX), TRUE, FALSE, hfs)) { m_codex = 1; m_codexPage = 0; return; }
+	if (Btn(ID_BASE_SET, bx + halfW + gapb, by, halfW, bh, TT(TX_SET_OPEN), TRUE, m_baseOpt != 0, hfs)) m_baseOpt = !m_baseOpt;
+	by += bh + Ku(12);
+	if (m_baseOpt) {
+		static const int qtx[3] = { TX_SET_Q_LOW, TX_SET_Q_STD, TX_SET_Q_HIGH };
+		if (int q = Sel(ID_BASE_QUALITY, bx, by, bw, Ku(36), TT(TX_SET_QUALITY), TT(qtx[Clampi(m_save.quality, 0, 2)]))) {
+			m_save.quality = (m_save.quality + q + 3) % 3;
+			m_r.SetQuality(m_save.quality);
+			InvalidatePortraits();
+		}
+		by += Ku(40);
+		if (Sel(ID_BASE_ANIM, bx, by, bw, Ku(36), TT(TX_SET_ANIM), TT(m_save.battleAnim ? TX_SET_ANIM_SHORT : TX_SET_ANIM_FULL))) m_save.battleAnim = !m_save.battleAnim;
+		by += Ku(40);
+		if (Sel(ID_BASE_GRID, bx, by, bw, Ku(36), TT(TX_SET_GRID), TT(m_save.showGrid ? TX_CR_ON : TX_CR_OFF))) m_save.showGrid = !m_save.showGrid;
+		by += Ku(40);
+		by = DrawSoundOpts(bx, by, bw, k);
 	}
-	by += Ku(40);
-	if (Sel(ID_BASE_ANIM, bx, by, bw, Ku(36), TT(TX_SET_ANIM), TT(m_save.battleAnim ? TX_SET_ANIM_SHORT : TX_SET_ANIM_FULL))) m_save.battleAnim = !m_save.battleAnim;
-	by += Ku(40);
-	if (Sel(ID_BASE_GRID, bx, by, bw, Ku(36), TT(TX_SET_GRID), TT(m_save.showGrid ? TX_CR_ON : TX_CR_OFF))) m_save.showGrid = !m_save.showGrid;
-	by += Ku(40);
-	by = DrawSoundOpts(bx, by, bw, k);
 	if (by > helpY) helpY = min(by, y + ph - helpH - 4.f);
 	if (helpY + helpH > y + ph - 2.f) helpY = y + ph - helpH - 2.f;
 	if (Btn(ID_BASE_HELP, bx, helpY, bw * .48f, helpH, TT(TX_BT_HELP))) m_showHelp = TRUE;
@@ -2366,7 +2673,11 @@ void Game::DrawCreateUi()
 		EnterParty();
 		return;
 	}
-	if (Btn(ID_CR_BACK, bx + bw * .62f, fy, bw * .38f, U(42), TT(TX_CR_BACK))) { EnterParty(); return; }
+	if (Btn(ID_CR_BACK, bx + bw * .62f, fy, bw * .38f, U(42), TT(TX_CR_BACK))) {
+		if (m_createFromParty) { m_createFromParty = 0; EnterParty(); return; }
+		EnterBase();
+		return;
+	}
 	m_r.HudText(TT(TX_CR_PREVIEW_HINT), m_w * .62f, m_h - U(28), U(13), RGBA8(220, 220, 230), 1, 0);
 }
 
@@ -2445,13 +2756,12 @@ void Game::DrawEquipLayer()
 	BOOL gear = kind <= 2;
 	if (kind <= 2) {
 		int gk = kind == 1 ? 0 : 1;
-		int line = ClassLine(c.cls);
 		title = TT(gk ? TX_GEAR_ARM : TX_GEAR_WPN);
 		int eq = c.reserved[gk ? 7 : 6];
 		if (eq > 0) wcscpy_s(cur, GearName(eq));
 		for (int i = 0; i < m_save.gearN && n < 96; i++) {
 			const GearDef* g = GearOf(m_save.gearId[i]);
-			if (!g || g->kind != gk || g->line != line) continue;
+			if (!g || g->kind != gk || !GearCanWear(c.cls, g)) continue;
 			ids[n++] = i;
 		}
 	} else if (kind <= 4) {
@@ -2602,7 +2912,7 @@ void Game::DrawPartyUi()
 		float cy = y + U(52) + (local / cols) * (ch + U(8));
 		const CharData& c = m_save.roster[i];
 		if (!c.used) {
-			if (Btn(ID_PT_CARD0 + local, cx, cy, cw, ch, L"+", RosterCount() < rCap, FALSE, U(28), RGBA8(30, 40, 60, 160))) { EnterCreate(-1); return; }
+			if (Btn(ID_PT_CARD0 + local, cx, cy, cw, ch, L"+", RosterCount() < rCap, FALSE, U(28), RGBA8(30, 40, 60, 160))) { m_createFromParty = 1; EnterCreate(-1); return; }
 			continue;
 		}
 		BOOL inParty = FALSE;
@@ -2630,15 +2940,22 @@ void Game::DrawPartyUi()
 		swprintf_s(hint, TT(TX_PT_HINT), pCap);
 		m_r.HudText(hint, x + gw * .5f, y + gh - U(64), U(13), RGBA8(210, 210, 220), 1, 0);
 	}
-	if (Btn(ID_PT_BACK, x + gw - U(180), y + gh - U(46), U(160), U(36), TT(TX_CR_BACK))) { Persist(); EnterBase(); return; }
-	if (Btn(ID_PT_NEW, x + U(20), y + gh - U(46), U(160), U(36), TT(TX_BASE_CREATE), RosterCount() < rCap)) { EnterCreate(-1); return; }
+	if (Btn(ID_PT_BACK, x + gw - U(180), y + gh - U(46), U(160), U(36), TT(TX_CR_BACK))) {
+		Persist();
+		if (m_partyBack && m_shop) { m_partyBack = 0; m_screen = SC_BASE; m_focusId = ID_SHOP_CLOSE; return; }
+		EnterBase();
+		return;
+	}
+	if (Btn(ID_PT_NEW, x + U(20), y + gh - U(46), U(160), U(36), TT(TX_BASE_CREATE), RosterCount() < rCap)) { m_createFromParty = 1; EnterCreate(-1); return; }
 	if (Btn(ID_PT_SHOP, x + U(190), y + gh - U(46), U(140), U(36), TT(TX_SHOP))) {
+		if (m_shop) { m_partyBack = 0; m_screen = SC_BASE; m_focusId = ID_SHOP_CLOSE; return; }
 		m_shopBack = 1;
 		m_shop = 1;
 		m_shopPage = 0;
 		m_shopSellPage = 0;
 		m_shopKind = 0;
 		m_shopFit = 0;
+		m_shopHold = 0;
 		if (m_partySel >= 0 && m_save.roster[m_partySel].used) m_shopLine = ClassLine(m_save.roster[m_partySel].cls);
 		m_screen = SC_BASE;
 		return;
@@ -2725,6 +3042,17 @@ void Game::DrawPartyUi()
 		if (Btn(ID_PT_BEAD1, dx + dw * .52f, y + gh - U(160), dw * .46f, U(26), gl, TRUE, FALSE, U(11))) { m_eqPick = 6; m_eqPage = 0; m_focusId = ID_EQ_NONE; }
 	}
 	float by = y + gh - U(120);
+	if (!m_confirmDelete && Btn(ID_PT_EVO, dx + U(14), by - U(6), dw - U(28), U(28), TT(TX_BASE_EVOLVE), TRUE, FALSE, U(13))) {
+		m_evFromParty = 1;
+		int sel = m_partySel;
+		EnterEvolve();
+		m_evJump = 1;
+		if (sel >= 0 && m_save.roster[sel].used && EvoMainEligible(m_save.roster[sel])) {
+			EvoOption opt[4];
+			if (EvoOptions(m_save.roster[sel].cls, opt) > 0) { m_evMain = sel; m_evPick = 1; }
+		}
+		return;
+	}
 	BOOL inParty = FALSE;
 	for (int p = 0; p < MAX_PARTY; p++) if (m_save.party[p] == m_partySel) inParty = TRUE;
 	if (m_confirmDelete) {
@@ -2734,7 +3062,7 @@ void Game::DrawPartyUi()
 	} else {
 		float bw3 = (dw - U(28) - U(16)) / 3.f;
 		if (Btn(ID_PT_DEPLOY, dx + U(14), by + U(30), bw3, U(38), TT(TX_PT_DEPLOY), TRUE, inParty, U(14))) TogglePartyMember(m_partySel);
-		if (Btn(ID_PT_EDIT, dx + U(14) + bw3 + U(8), by + U(30), bw3, U(38), TT(TX_CR_EDIT), TRUE, FALSE, U(14))) { m_eqPick = 0; EnterCreate(m_partySel); return; }
+		if (Btn(ID_PT_EDIT, dx + U(14) + bw3 + U(8), by + U(30), bw3, U(38), TT(TX_CR_EDIT), TRUE, FALSE, U(14))) { m_eqPick = 0; m_createFromParty = 1; EnterCreate(m_partySel); return; }
 		if (Btn(ID_PT_DELETE, dx + U(14) + (bw3 + U(8)) * 2, by + U(30), bw3, U(38), TT(TX_PT_DELETE), TRUE, FALSE, U(14), RGBA8(120, 40, 36, 230))) m_confirmDelete = 1;
 	}
 	if (m_eqPick) {
@@ -2750,6 +3078,7 @@ void Game::EnterEvolve()
 	m_evMain = -1; m_evTarget = -1;
 	m_evPartner[0] = m_evPartner[1] = -1;
 	m_evPick = 0;
+	m_evJump = 0;
 	m_evMainPage = 0;
 	m_evPartPage = 0;
 	for (int i = 0; i < Renderer::PORTRAIT_N; i++) m_portraitWant[i] = (i < MAX_ROSTER) ? i + 1 : 0;
@@ -2829,6 +3158,12 @@ void Game::DrawEvolveUi()
 		if (fitMain < 1) fitMain = 1;
 		mainPages = (nElig + fitMain - 1) / fitMain;
 		if (mainPages < 1) mainPages = 1;
+	}
+	if (m_evJump && m_evMain >= 0) {
+		int at = -1;
+		for (int i = 0; i < nElig; i++) if (mains[i] == m_evMain) at = i;
+		if (at >= 0) m_evMainPage = at / fitMain;
+		m_evJump = 0;
 	}
 	if (m_evMainPage >= mainPages) m_evMainPage = mainPages - 1;
 	if (m_evMainPage < 0) m_evMainPage = 0;
@@ -2977,7 +3312,11 @@ void Game::DrawEvolveUi()
 		if (n >= need && !ok) m_r.HudText(TT(TX_EV_NEED_GROUP), c2 + colW * .5f, y + h - U(72), U(13), RGBA8(255, 150, 140), 1, 1);
 		if (Btn(ID_EV_DO, c2, y + h - U(56), colW * .6f, U(40), TT(TX_EV_DO), ok, FALSE, U(18), RGBA8(150, 90, 200, 240))) { DoEvolve(); return; }
 	} else m_evPartPages = 1;
-	if (Btn(ID_EV_BACK, x + w - U(160) - U(20), y + h - U(56), U(160), U(40), TT(TX_CR_BACK))) { EnterBase(); return; }
+	if (Btn(ID_EV_BACK, x + w - U(160) - U(20), y + h - U(56), U(160), U(40), TT(TX_CR_BACK))) {
+		if (m_evFromParty) { m_evFromParty = 0; EnterParty(); return; }
+		EnterBase();
+		return;
+	}
 }
 
 // ============================================================ 結果

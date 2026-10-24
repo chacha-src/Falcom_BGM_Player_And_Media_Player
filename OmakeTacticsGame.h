@@ -118,7 +118,7 @@ private:
 	void DrawBanners(float dt);
 	void DrawPopups(float dt);
 	void AddBanner(const wchar_t* s, const wchar_t* sub, DWORD col, int style, float life);
-	void AddPopup(V3 p, const wchar_t* s, DWORD col, int style, float delay = 0);
+	void AddPopup(V3 p, const wchar_t* s, DWORD col, int style, float delay = 0, float life = 0);
 	void AddLog(const wchar_t* s, DWORD col);
 	void DrawBattleLog();
 	void DrawHelpOverlay();
@@ -212,6 +212,8 @@ private:
 	void DrawLevelUp();
 	void DrawBattleStatus();
 	void DrawShopFit();
+	void DrawShopAsk();
+	void DrawShopArm();
 	void DrawPromoteOffer();
 	void AdvanceLevelUp();
 	void DrawCutIn3D();
@@ -312,6 +314,12 @@ private:
 	int m_shopFit;
 	int m_shopFitId;
 	int m_shopFitPage;
+	int m_shopHold;
+	int m_partyBack;
+	int m_baseOpt;
+	int m_createFromParty;
+	int m_evFromParty;
+	int m_evJump;
 	int m_statEq;
 	int m_statEqPage;
 	int m_itemAim;

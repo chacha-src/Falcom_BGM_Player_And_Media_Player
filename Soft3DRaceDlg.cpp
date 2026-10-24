@@ -1093,7 +1093,7 @@ BEGIN_MESSAGE_MAP(CS3rView, CCustomStatic)
 END_MESSAGE_MAP()
 
 CS3rView::CS3rView()
-	: m_ready(FALSE), m_scFlags(0), m_vw(0), m_vh(0), m_dev(NULL), m_imm(NULL), m_swap(NULL), m_bbRtv(NULL)
+	: m_presentStall(0), m_ready(FALSE), m_scFlags(0), m_vw(0), m_vh(0), m_dev(NULL), m_imm(NULL), m_swap(NULL), m_bbRtv(NULL)
 	, m_dsTex(NULL), m_dsv(NULL), m_dsSrv(NULL), m_sceneTex(NULL), m_sceneRtv(NULL), m_sceneSrv(NULL)
 	, m_postTex(NULL), m_postRtv(NULL), m_postSrv(NULL), m_shadowTex(NULL), m_shadowDsv(NULL), m_shadowSrv(NULL)
 	, m_rearTex(NULL), m_rearRtv(NULL), m_srvRear(NULL), m_rearDs(NULL), m_rearDsv(NULL)
@@ -1619,6 +1619,10 @@ BOOL CS3rView::EnsureSceneTargets(int w,int h)
 BOOL CS3rView::ResizeDx(int w,int h)
 {
 	Soft3DDxGuard g;
+	return ResizeDxCore(w, h);
+}
+BOOL CS3rView::ResizeDxCore(int w,int h)
+{
 	if(!m_swap||!m_dev||!m_imm||w<1||h<1)return FALSE;
 	m_ready=FALSE;
 	m_imm->OMSetRenderTargets(0,NULL,NULL);
@@ -1659,8 +1663,19 @@ void CS3rView::PresentFrame()
 #define DXGI_PRESENT_DO_NOT_WAIT 0x00000008UL
 #endif
 	const HRESULT hr = m_swap->Present(0, DXGI_PRESENT_DO_NOT_WAIT);
-	if (hr == DXGI_ERROR_WAS_STILL_DRAWING || hr == DXGI_STATUS_OCCLUDED)
+	if (hr == DXGI_ERROR_WAS_STILL_DRAWING || hr == DXGI_STATUS_OCCLUDED) {
+		/* 表示前に積んだフリップは退役せず、クリックか移動まで画面が空のままになる */
+		const DWORD now = GetTickCount();
+		if (!m_presentStall) m_presentStall = now ? now : 1;
+		if (hr == DXGI_ERROR_WAS_STILL_DRAWING && now - m_presentStall > 150) {
+			m_presentStall = now;
+			CRect rc;
+			GetClientRect(&rc);
+			ResizeDxCore(max(8, rc.Width()), max(8, rc.Height()));
+		}
 		return;
+	}
+	m_presentStall = 0;
 	if (FAILED(hr)) NoteContextLost(hr);
 }
 void CS3rView::ReleaseClearTexture(){S3R_RELEASE(m_srvClear);S3R_RELEASE(m_texClear);m_clearTexW=m_clearTexH=0;}
@@ -8377,6 +8392,7 @@ BOOL CSoft3DRaceDlg::OnInitDialog()
 	m_lastTick = GetTickCount();
 	m_inTick = 0;
 	Soft3DLoopEnsure();
+	CCC_InvalidateCaptionBar(m_hWnd);
 	return TRUE;
 }
 
