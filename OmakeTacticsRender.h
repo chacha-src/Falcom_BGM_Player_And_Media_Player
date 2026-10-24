@@ -173,7 +173,8 @@ public:
 	struct CreatureSkin {
 		int model; std::vector<CSkinV> bind; std::vector<BYTE> cloth;
 		int faceSet, faceStart, faceN; float faceLin[9];   // 顔の型を載せる頭の頂点範囲
-		CreatureSkin() : model(-1), faceSet(-1), faceStart(0), faceN(0) {}
+		float extX, extY, extZ, extR;   // モデル空間の中心と半径。肖像の枠に全身を収める
+		CreatureSkin() : model(-1), faceSet(-1), faceStart(0), faceN(0), extX(0), extY(0), extZ(0), extR(0) {}
 	};
 	std::vector<CreatureSkin> m_skins;
 	// 顔の型（性別ごと）。頭の頂点ごとの位置差・法線・色
@@ -203,6 +204,7 @@ public:
 	int FindAttach(const char* n) const;
 	int FindStatic(const char* n) const;
 	int CreatureCount() const { return (int)m_creatures.size(); }
+	BOOL CreatureExtent(int model, float& cx, float& cy, float& cz, float& rad) const;
 	int CreatureModel(int i) const { return (i >= 0 && i < (int)m_skins.size()) ? m_skins[i].model : -1; }
 	void DrawSkinnedCreature(int i, const Pose& pose, const M4& world, const DrawParams& dp);
 	int GearCount() const { return (int)m_gear.size(); }

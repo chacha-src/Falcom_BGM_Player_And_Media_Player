@@ -1124,6 +1124,21 @@ void Renderer::LoadCreaturePack()
 					if (dh < 40.f) skin.cloth[k] = 1;
 				}
 			}
+			if (!skin.bind.empty()) {
+				float mn[3] = { skin.bind[0].p[0], skin.bind[0].p[1], skin.bind[0].p[2] };
+				float mx[3] = { mn[0], mn[1], mn[2] };
+				for (const CSkinV& b : skin.bind) {
+					for (int k = 0; k < 3; k++) {
+						if (b.p[k] < mn[k]) mn[k] = b.p[k];
+						if (b.p[k] > mx[k]) mx[k] = b.p[k];
+					}
+				}
+				float hx = (mx[0] - mn[0]) * .5f, hy = (mx[1] - mn[1]) * .5f, hz = (mx[2] - mn[2]) * .5f;
+				skin.extX = (mn[0] + mx[0]) * .5f;
+				skin.extY = (mn[1] + mx[1]) * .5f;
+				skin.extZ = (mn[2] + mx[2]) * .5f;
+				skin.extR = max(hx, max(hy, hz));
+			}
 			GpuMesh gm;
 			if (!MakeMesh(gm, poseV.data(), sizeof(VtxS), nv, idx.data(), ni)) return;
 			gm.tex = TEX_WHITE;
@@ -2353,6 +2368,16 @@ void Renderer::BuildMinimap(const Map& m)
 }
 
 // ============================================================ ポートレート
+BOOL Renderer::CreatureExtent(int model, float& cx, float& cy, float& cz, float& rad) const
+{
+	for (const auto& s : m_skins) {
+		if (s.model != model || s.extR <= 0.02f) continue;
+		cx = s.extX; cy = s.extY; cz = s.extZ; rad = s.extR;
+		return TRUE;
+	}
+	return FALSE;
+}
+
 BOOL Renderer::BeginPortrait(int slot)
 {
 	if (!m_ptRtv || !m_ptDsv || slot < 0 || slot >= PORTRAIT_N) return FALSE;

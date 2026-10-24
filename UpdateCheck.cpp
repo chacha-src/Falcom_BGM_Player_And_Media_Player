@@ -43,6 +43,8 @@ static const TCHAR* kTacOggNames[] = {
 	_T("tacticsgamevolcano.ogg"),
 	_T("tacticsgameswamp.ogg"),
 	_T("tacticsgameruins.ogg"),
+	_T("tacticsgamedanger.ogg"),
+	_T("tacticsgameclear.ogg"),
 };
 static const TCHAR* TARGET_D3D_NAME = _T("d3dcompiler_47.dll");
 

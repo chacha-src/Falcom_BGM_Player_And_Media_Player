@@ -41,6 +41,8 @@ enum TacBgmId {
 	TAC_BGM_VOLCANO, // tacticsgamevolcano.ogg
 	TAC_BGM_SWAMP,   // tacticsgameswamp.ogg
 	TAC_BGM_RUINS,   // tacticsgameruins.ogg
+	TAC_BGM_DANGER,  // tacticsgamedanger.ogg（味方HPが低いあいだ）
+	TAC_BGM_CLEAR,   // tacticsgameclear.ogg（勝利）
 	TAC_BGM_N
 };
 
@@ -54,5 +56,6 @@ void TacSfx(int id);
 void TacSfxCast(int element);
 void TacAudioSetVol(int bgm, int se);
 void TacBgmScene(int scene);
+int TacBgmHas(int scene);
 void TacBgmTempo(float goal);
 void TacBgmFadeOut();

@@ -345,8 +345,20 @@ static const wchar_t* TacBgmFile(int scene)
 	case TAC_BGM_VOLCANO: return L"tacticsgamevolcano.ogg";
 	case TAC_BGM_SWAMP: return L"tacticsgameswamp.ogg";
 	case TAC_BGM_RUINS: return L"tacticsgameruins.ogg";
+	case TAC_BGM_DANGER: return L"tacticsgamedanger.ogg";
+	case TAC_BGM_CLEAR: return L"tacticsgameclear.ogg";
 	default: return L"tactics.ogg";
 	}
+}
+
+int TacBgmHas(int scene)
+{
+	if (scene < 0 || scene >= TAC_BGM_N) return 0;
+	wchar_t dir[MAX_PATH];
+	if (!TacBgmDir(dir, MAX_PATH)) return 0;
+	wchar_t path[MAX_PATH];
+	swprintf_s(path, L"%s\\%s", dir, TacBgmFile(scene));
+	return TacOggOk(path);
 }
 
 static int TacOpenBgmPath(const wchar_t* path)

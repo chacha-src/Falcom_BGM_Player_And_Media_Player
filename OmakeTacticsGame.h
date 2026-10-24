@@ -96,7 +96,7 @@ private:
 	void RenderFrame();
 	void SetupCamera(V3 target, float yaw, float pitch, float dist, float fov);
 	void RenderPortraits();
-	void RenderActorPortrait(int slot, Actor& a, DWORD bg0, DWORD bg1);
+	void RenderActorPortrait(int slot, Actor& a, DWORD bg0, DWORD bg1, int fitBody = 0);
 	void InvalidatePortraits();
 	void DrawPortrait(int slot, float x, float y, float s, DWORD frame);
 	int RosterPortrait(int roster) const;

@@ -2347,6 +2347,7 @@ void Game::DrawUnitPanel(const Unit& u, float x, float y, float w, BOOL big)
 		m_r.HudText(l, tx, by + U(6), sfs, RGBA8(210, 210, 220), 0, 0);
 		by += U(16);
 		wchar_t st[160] = L"";
+		if (!(m_seqCut && m_cutStage == 0)) {
 		wchar_t bit[40];
 		if (u.poison > 0) { swprintf_s(bit, L"%s%d ", TT(TX_BT_POISON), u.poison); wcscat_s(st, bit); }
 		if (u.slow > 0) { swprintf_s(bit, L"%s%d ", EffectWord(EF_SLOW), u.slow); wcscat_s(st, bit); }
@@ -2356,6 +2357,7 @@ void Game::DrawUnitPanel(const Unit& u, float x, float y, float w, BOOL big)
 		if (u.stun > 0) { swprintf_s(bit, L"%s ", EffectWord(EF_STUN)); wcscat_s(st, bit); }
 		if (u.buffDef > 0 || u.buffAgi > 0 || u.buffAtk > 0 || u.mulTurns > 0) { wcscat_s(st, TT(TX_BT_BUFF)); wcscat_s(st, L" "); }
 		if (u.team == TEAM_ENEMY && !u.alert) { wcscat_s(st, TT(TX_BT_ASLEEP)); wcscat_s(st, L" "); }
+		}
 		m_r.HudText(st, tx, by + U(6), U(11), RGBA8(200, 230, 255), 0, 0);
 	}
 }
@@ -3582,7 +3584,7 @@ void Game::DrawBattleUi()
 			m_r.HudRect(sx - bw * .5f - 1, cy, bw + 2, U(4), RGBA8(8, 8, 12, 200));
 			m_r.HudRect(sx - bw * .5f, cy + 1, bw * Clampf(cf, 0, 1), U(3), u.cp >= 100 ? RGBA8(255, 210, 70) : RGBA8(210, 160, 50));
 		}
-		if (u.alive && (u.sleep > 0 || u.confuse > 0 || u.stun > 0 || u.poison > 0 || u.slow > 0 || u.defDown > 0)) {
+		if (!(m_seqCut && m_cutStage == 0) && u.alive && (u.sleep > 0 || u.confuse > 0 || u.stun > 0 || u.poison > 0 || u.slow > 0 || u.defDown > 0)) {
 			const wchar_t* bbl = L"!";
 			DWORD bc = RGBA8(160, 110, 20);
 			float fs = U(15);

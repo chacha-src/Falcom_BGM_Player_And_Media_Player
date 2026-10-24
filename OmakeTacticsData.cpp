@@ -2568,6 +2568,7 @@ static void StrikeCalc(const Battle& b, const Unit& a, const Unit& d, int skill,
 static bool CanCounter(const Battle& b, const Unit& d, const Unit& a)
 {
 	if (!d.alive || d.hp <= 0) return false;
+	if (d.sleep > 0 || d.stun > 0) return false;
 	return InAttackRange(b, d.x, d.z, UnitRangeMin(d), UnitRangeMax(d), a.x, a.z, true);
 }
 
@@ -2862,6 +2863,7 @@ int ResolveAttack(Battle& b, int ai, int di, int skill, Rng& r, Strike* out, int
 		Unit& x = atkTurn ? a : d;
 		Unit& y = atkTurn ? d : a;
 		if (x.hp <= 0 || y.hp <= 0) break;
+		if (!atkTurn && (d.sleep > 0 || d.stun > 0)) { dLeft = 0; continue; }
 		int sk = atkTurn ? skill : -1;
 		int dmg, hit, crit;
 		StrikeCalc(b, x, y, sk, dmg, hit, crit);

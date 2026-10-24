@@ -384,46 +384,49 @@ void Game::Tick(float dt)
 
 static_assert(TAC_BGM_RUINS - TAC_BGM_PLAINS + 1 == TH_COUNT, "地形BGM");
 // 拠点=tactics.ogg。戦闘は地形ごとの tacticsgame*.ogg、無ければ tacticsgame.ogg。
-// 勝利確定（ボス撃破・残敵0・残敵が初期の1/3以下）は tacticsgamewin。店=tacticsshop、作成・編成・進化=tacticsmake。
+// 味方HPが最大の1/6以下で tacticsgamedanger。戻ったら地形曲へ。
+// 残敵が初期の1/3以下は tacticsgamewin。勝利確定とリザルトは tacticsgameclear。
+// 店=tacticsshop、作成・編成・進化=tacticsmake。テンポは変えない。
 void Game::SyncBgm()
 {
 	if (m_screen == SC_BATTLE && m_phase == PH_OVER && !m_victory) {
 		TacBgmFadeOut();
 		return;
 	}
+	static int danger = 0;
+	if (m_screen != SC_BATTLE) danger = 0;
 	int scene = TAC_BGM_HUB;
-	if (m_screen == SC_BATTLE) {
+	if (m_screen == SC_BATTLE || (m_screen == SC_RESULT && m_victory)) {
 		int alive = m_b.AliveCount(TEAM_ENEMY);
 		int players = m_b.AliveCount(TEAM_PLAYER);
 		int all = 0;
-		for (int i = 0; i < m_b.nUnits; i++)
-			if (m_b.u[i].team == TEAM_ENEMY) all++;
-		const int fightWon = (m_victory == 1) || (m_bossDown && players > 0) || (alive == 0 && all > 0 && players > 0);
+		int hp = 0, mx = 0;
+		for (int i = 0; i < m_b.nUnits; i++) {
+			const Unit& u = m_b.u[i];
+			if (u.team == TEAM_ENEMY) all++;
+			if (u.team != TEAM_PLAYER || !u.alive) continue;
+			hp += u.hp;
+			mx += max(1, u.ch.stat[S_HP]);
+		}
+		const int fightWon = (m_victory == 1) || (m_screen == SC_RESULT) || (m_bossDown && players > 0) || (alive == 0 && all > 0 && players > 0);
 		const int fewLeft = alive > 0 && all > 0 && alive * 3 <= all && players > 0;
 		int th = Clampi(m_b.map.theme, 0, TH_COUNT - 1);
-		scene = (fightWon || fewLeft) ? TAC_BGM_WIN : (TAC_BGM_PLAINS + th);
+		scene = TAC_BGM_PLAINS + th;
+		if (fewLeft) scene = TAC_BGM_WIN;
+		if (fightWon) scene = TacBgmHas(TAC_BGM_CLEAR) ? TAC_BGM_CLEAR : TAC_BGM_WIN;
+		if (m_screen == SC_BATTLE && m_phase != PH_OVER && !fightWon && mx > 0) {
+			float r = (float)hp / (float)mx;
+			if (r <= (1.f / 6.f)) danger = 1;
+			else if (r >= 0.25f) danger = 0;
+			if (danger && TacBgmHas(TAC_BGM_DANGER)) scene = TAC_BGM_DANGER;
+		}
 	} else if (m_shop) {
 		scene = TAC_BGM_SHOP;
 	} else if (m_screen == SC_CREATE || m_screen == SC_PARTY || m_screen == SC_EVOLVE) {
 		scene = TAC_BGM_MAKE;
 	}
 	TacBgmScene(scene);
-	float tempo = 1.f;
-	if (m_screen == SC_BATTLE && m_phase != PH_OVER) {
-		int hp = 0, mx = 0;
-		for (int i = 0; i < m_b.nUnits; i++) {
-			const Unit& u = m_b.u[i];
-			if (u.team != TEAM_PLAYER || !u.alive) continue;
-			hp += u.hp;
-			mx += max(1, u.ch.stat[S_HP]);
-		}
-		if (mx > 0) {
-			float r = (float)hp / (float)mx;
-			if (r <= (1.f / 6.f)) tempo = 1.f + ((1.f / 6.f) - r) / (1.f / 6.f);
-			if (tempo > 2.f) tempo = 2.f;
-		}
-	}
-	TacBgmTempo(tempo);
+	TacBgmTempo(1.f);
 }
 
 void Game::SetupCamera(V3 target, float yaw, float pitch, float dist, float fov)
@@ -1100,7 +1103,7 @@ void Game::InvalidatePortraits()
 	for (int i = 0; i < Renderer::PORTRAIT_N; i++) m_portraitKey[i] = -1;
 }
 
-void Game::RenderActorPortrait(int slot, Actor& a, DWORD bg0, DWORD bg1)
+void Game::RenderActorPortrait(int slot, Actor& a, DWORD bg0, DWORD bg1, int fitBody)
 {
 	ActorPlay(a, CL_IDLE, 1, 0);
 	a.t = .4f;
@@ -1109,7 +1112,27 @@ void Game::RenderActorPortrait(int slot, Actor& a, DWORD bg0, DWORD bg1)
 	V3 look;
 	float d;
 	V3 eye;
-	if (a.proc == 3) {
+	BOOL body = FALSE;
+	float midY = a.height * .5f;
+	float rad = a.height * 1.05f;
+	look = v3(0, midY, 0);
+	if (fitBody) {
+		float cx = 0, cy = 0, cz = 0, cr = 0;
+		if (a.proc == 3 && m_r.CreatureExtent(a.model, cx, cy, cz, cr)) {
+			midY = cy * a.scale;
+			rad = max(.25f, cr * a.scale);
+			look = v3(cx * a.scale, midY, cz * a.scale);
+			body = TRUE;
+		} else if (a.height >= 1.15f || a.proc == 2) {
+			look = v3(0, midY, 0);
+			body = TRUE;
+		}
+	}
+	if (body) {
+		d = rad * 1.28f / tanf(.3f);
+		if (fitBody && !(a.proc == 3)) look = v3(0, midY, 0);
+		eye = look + v3(d * .2f, d * .05f, -d);
+	} else if (a.proc == 3) {
 		look = ActorJointWorld(a, world, 0);
 		d = a.height * .62f;
 		eye = look + v3(d * .08f, d * .02f, -d);
@@ -1124,7 +1147,7 @@ void Game::RenderActorPortrait(int slot, Actor& a, DWORD bg0, DWORD bg1)
 		eye = look + v3(d * .3f, d * .12f, -d);
 	}
 	M4 view = MLookAtLH(eye, look, v3(0, 1, 0));
-	M4 proj = MPerspLH(.6f, 1.f, .05f, 50.f);
+	M4 proj = MPerspLH(.6f, 1.f, .05f, max(50.f, d * 4.f));
 	if (!m_r.BeginPortrait(slot)) return;
 	m_r.SetCamera(view, proj, eye, m_time);
 	m_r.SetFog(500.f, 1000.f, 0, RGBA8(0, 0, 0));
@@ -1157,7 +1180,7 @@ void Game::RenderPortraits()
 				RenderActorPortrait(s, m_ptActor, RGBA8(70, 110, 190), RGBA8(20, 30, 70));
 			} else {
 				ActorFromMonster(m_ptActor, m_lib, m_r, u.monster, u.boss);
-				RenderActorPortrait(s, m_ptActor, u.boss ? RGBA8(200, 140, 40) : RGBA8(180, 60, 60), RGBA8(50, 14, 20));
+				RenderActorPortrait(s, m_ptActor, u.boss ? RGBA8(200, 140, 40) : RGBA8(180, 60, 60), RGBA8(50, 14, 20), 1);
 			}
 		} else if (want >= 1 && want <= MAX_ROSTER) {
 			const CharData& c = m_save.roster[want - 1];
