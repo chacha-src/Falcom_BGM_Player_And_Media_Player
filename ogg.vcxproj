@@ -1615,6 +1615,10 @@ if errorlevel 1 exit /b 1</Command>
     <None Include="res\cso\race_pscloud.cso" />
     <None Include="res\cso\race_gsw.cso" />
     <None Include="res\cso\race_vsw.cso" />
+    <None Include="res\cso\tac_csskin.cso" />
+    <None Include="res\cso\tac_psbloom.cso" />
+    <None Include="res\cso\tac_psblur.cso" />
+    <None Include="res\cso\tac_psgrade.cso" />
     <None Include="res\cso\tac_psh.cso" />
     <None Include="res\cso\tac_psm.cso" />
     <None Include="res\cso\tac_pso.cso" />

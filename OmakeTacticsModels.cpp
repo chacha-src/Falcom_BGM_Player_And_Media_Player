@@ -18,11 +18,11 @@ static int Pal(int row, int col) { return row * 16 + col; }
 
 // ============================================================ ジオメトリ組立
 struct Geo {
-	std::vector<V3> p, n;
-	std::vector<int> pal, b0, b1;
-	std::vector<float> w1;
-	std::vector<DWORD> col;
-	std::vector<WORD> idx;
+	Buf<V3> p, n;
+	Buf<int> pal, b0, b1;
+	Buf<float> w1;
+	Buf<DWORD> col;
+	Buf<WORD> idx;
 	int curBone, curBone2;
 	float curW2;
 	int curPal;
@@ -48,7 +48,7 @@ struct Geo {
 	void Ellipsoid(const M4& xf, V3 r, int seg, int rings, F keep)
 	{
 		int base = (int)p.size();
-		std::vector<int> ok((seg + 1) * (rings + 1));
+		Buf<int> ok((seg + 1) * (rings + 1));
 		for (int i = 0; i <= rings; i++) {
 			float th = PI * i / rings;
 			for (int j = 0; j <= seg; j++) {
@@ -72,6 +72,32 @@ struct Geo {
 		Ellipsoid(xf, r, seg, rings, [](V3) { return true; });
 	}
 	void Sphere(V3 c, V3 r, int seg = 12, int rings = 8) { Ellipsoid(MTrans(c.x, c.y, c.z), r, seg, rings); }
+	// 背中に沿う髪の束。center は長さ方向、halfW は左右の半幅、thick は厚み。+Z が外側。
+	void Lock(const V3* center, int rows, const float* halfW, float thick)
+	{
+		const int cols = 5;
+		if (!center || !halfW || rows < 2) return;
+		int base = (int)p.size();
+			for (int i = 0; i < rows; i++) {
+				for (int layer = 0; layer < 2; layer++) {
+					// 内側は中心線（頭と服の外）、外側だけ +Z へ厚みを足す。中にめり込まない。
+					float s = layer ? thick : 0.f;
+					V3 nrm = layer ? v3(0, 0, 1) : v3(0, 0, -1);
+				for (int j = 0; j < cols; j++) {
+					float u = (j / (float)(cols - 1)) * 2.f - 1.f;
+					V(center[i] + v3(u * halfW[i], 0, s), nrm);
+				}
+			}
+		}
+		for (int i = 0; i < rows - 1; i++) for (int layer = 0; layer < 2; layer++) for (int j = 0; j < cols - 1; j++) {
+			int a = base + (i * 2 + layer) * cols + j;
+			int b = a + 1;
+			int c = base + ((i + 1) * 2 + layer) * cols + j;
+			int d = c + 1;
+			if (layer) { T(a, c, b); T(b, c, d); }
+			else { T(a, b, c); T(b, d, c); }
+		}
+	}
 	// a→b に沿った楕円体
 	void Limb(V3 a, V3 b, float ra, float rb = -1)
 	{
@@ -156,7 +182,7 @@ struct Geo {
 		for (size_t i = 0; i < p.size(); i++) { p[i].x = -p[i].x; n[i].x = -n[i].x; }
 		for (size_t i = 0; i + 2 < idx.size(); i += 3) std::swap(idx[i + 1], idx[i + 2]);
 	}
-	void ToSkinned(std::vector<VtxK>& out) const
+	void ToSkinned(Buf<VtxK>& out) const
 	{
 		out.resize(p.size());
 		for (size_t i = 0; i < p.size(); i++) {
@@ -172,7 +198,7 @@ struct Geo {
 			} else v.w[0] = 255;
 		}
 	}
-	void ToStatic(std::vector<VtxS>& out) const
+	void ToStatic(Buf<VtxS>& out) const
 	{
 		out.resize(p.size());
 		for (size_t i = 0; i < p.size(); i++) {
@@ -189,7 +215,7 @@ struct Geo {
 static BOOL GeoToStatic(Renderer& r, const Geo& g, GpuMesh& out)
 {
 	if (g.p.empty() || g.idx.empty() || g.p.size() > 65535) return FALSE;
-	std::vector<VtxS> v;
+	Buf<VtxS> v;
 	g.ToStatic(v);
 	if (!r.MakeMesh(out, v.data(), sizeof(VtxS), (UINT)v.size(), g.idx.data(), (UINT)g.idx.size())) return FALSE;
 	out.tex = r.TexWhite();
@@ -276,7 +302,7 @@ static int MakeSlime(Renderer& r)
 	g.Sphere(v3(-.16f, .46f, -.375f), v3(.025f, .03f, .015f), 6, 4);
 	g.curPal = Pal(14, 5);
 	g.Sphere(v3(.18f, .52f, -.2f), v3(.06f, .04f, .04f), 6, 4);
-	std::vector<VtxK> v;
+	Buf<VtxK> v;
 	g.ToSkinned(v);
 	return r.AddProcModel(m, v, g.idx);
 }
@@ -322,7 +348,7 @@ static int MakeBat(Renderer& r)
 	g.curBone = BJ_BODY; g.curPal = Pal(0, 3);
 	g.Cone(v3(.06f, .8f, 0), v3(.07f, .7f, -.02f), .03f, 5);
 	g.Cone(v3(-.06f, .8f, 0), v3(-.07f, .7f, -.02f), .03f, 5);
-	std::vector<VtxK> v;
+	Buf<VtxK> v;
 	g.ToSkinned(v);
 	return r.AddProcModel(m, v, g.idx);
 }
@@ -398,7 +424,7 @@ static int MakeWyvern(Renderer& r)
 		g.Tri2(el, tip, f1);
 		g.Tri2(el, f1, f2);
 	}
-	std::vector<VtxK> v;
+	Buf<VtxK> v;
 	g.ToSkinned(v);
 	return r.AddProcModel(m, v, g.idx);
 }
@@ -440,7 +466,7 @@ static int MakeGolem(Renderer& r)
 		g.curPal = dark;
 		g.Box(v3(s * .24f, .03f, -.04f), v3(.17f, .04f, .21f));
 	}
-	std::vector<VtxK> v;
+	Buf<VtxK> v;
 	g.ToSkinned(v);
 	return r.AddProcModel(m, v, g.idx);
 }
@@ -595,7 +621,7 @@ static const DWORD kHairCol[HAIR_COLORS] = {
 DWORD HairColor(int i) { DWORD c = kHairCol[Clampi(i, 0, HAIR_COLORS - 1)]; return RGBA8((c >> 16) & 255, (c >> 8) & 255, c & 255); }
 float OutfitHue(int i) { return Clampi(i, 0, OUTFIT_COLORS - 1) * (2.f * PI / OUTFIT_COLORS); }
 
-static void BuildHair(Renderer& r, const Model& m, int style, GpuMesh& out, float drop = 1.f, std::vector<VtxS>* cpu = NULL, V3* pivot = NULL)
+static void BuildHair(Renderer& r, const Model& m, int style, GpuMesh& out, float drop = 1.f, Buf<VtxS>* cpu = NULL, V3* pivot = NULL)
 {
 	if (style <= 0 || m.headJ < 0) return;
 	M4 bind = MInverse(m.invBind[m.headJ]);
@@ -610,10 +636,54 @@ static void BuildHair(Renderer& r, const Model& m, int style, GpuMesh& out, floa
 	}
 	Geo g;
 	g.curCol = 0xFFFFFFFF;
-	// 人間の箱は読込時に頭蓋へ合わせた髪の殻そのもの。
-	float capS = humHair ? 1.f : (style == 1 ? 1.06f : 1.08f);
-	V3 capR = v3(rr.x * capS, rr.y * capS, rr.z * capS);
-	V3 cc = humHair ? c : c + v3(0, rr.y * .05f, rr.z * .04f);
+	V3 capR = v3(rr.x * 1.08f, rr.y * 1.02f, rr.z * 1.15f);
+	V3 cc = c;
+	// 人間は頭蓋の大きさで髪型を作り分ける。顔は -Z。目の前は開けておく。
+	if (humHair && rr.x < 0.16f && rr.y < 0.22f) {
+		const float rx = rr.x, ry = rr.y, rz = rr.z;
+		auto capKeep = [](V3 d) { return !(d.z < -0.05f && d.y < 0.42f); };
+		if (style == 1) {
+			g.Ellipsoid(MTrans(c.x, c.y, c.z), capR, 18, 12, capKeep);
+			for (int k = 0; k < 5; k++) {
+				float a = -0.4f + k * 0.2f;
+				V3 d = Norm(v3(sinf(a), 0.82f, 0.25f));
+				V3 b = c + v3(d.x * capR.x, d.y * capR.y, d.z * capR.z) * 0.95f;
+				g.Sphere(b + v3(0, ry * 0.22f, 0), v3(rx * 0.16f, ry * 0.22f, rz * 0.16f), 6, 4);
+			}
+		} else if (style == 5) {
+			g.Ellipsoid(MTrans(c.x, c.y - ry * 0.05f, c.z + rz * 0.15f), v3(rx * 1.25f, ry * 0.95f, rz * 1.35f), 16, 10, [](V3 d) { return d.z > -0.25f; });
+		} else {
+			g.Ellipsoid(MTrans(c.x, c.y + ry * 0.05f, c.z + rz * 0.08f), capR, 16, 10, capKeep);
+		}
+		// 束の中心は後頭の外。描画時に、着ている服の背面よりさらに後ろへ出す。
+		auto addHang = [&](float hang, int nLock, float xSpread, float width) {
+			const int rows = 16;
+			for (int s = 0; s < nLock; s++) {
+				float u = nLock <= 1 ? 0.f : ((s + 0.5f) / (float)nLock) * 2.f - 1.f;
+				V3 line[16];
+				float hw[16];
+				for (int i = 0; i < rows; i++) {
+					float t = i / (float)(rows - 1);
+					float y = c.y - t * hang;
+					// 付け根は頭蓋の後ろ。下へ行くほど服の背面に合わせ、描画側で足りない分を出す。
+					float z = c.z + rr.z * 1.05f + t * 0.03f;
+					float x = c.x + u * xSpread * (1.f + t * 0.12f);
+					line[i] = v3(x, y, z);
+					hw[i] = width * (1.f - t * 0.22f);
+				}
+				g.Lock(line, rows, hw, 0.018f);
+			}
+		};
+		if (style == 2) addHang(0.40f, 3, rx * 0.90f, rx * 0.34f);
+		if (style == 3) addHang(0.50f, 1, 0.f, rx * 0.42f);
+		if (style == 4) addHang(0.48f, 2, rx * 1.35f, rx * 0.30f);
+		if (style == 6) addHang(0.54f, 4, rx * 1.05f, rx * 0.32f);
+		if (style == 7) addHang(0.64f, 5, rx * 1.15f, rx * 0.30f);
+	} else {
+	// KayKit など、頭の箱に被せる殻。
+	float capS = style == 1 ? 1.06f : 1.08f;
+	capR = v3(rr.x * capS, rr.y * capS, rr.z * capS);
+	cc = c + v3(0, rr.y * .05f, rr.z * .04f);
 	float lowBack = style == 5 ? -.72f : (style == 2 ? -.45f : -.3f);
 	g.Ellipsoid(MTrans(cc.x, cc.y, cc.z), capR, 20, 14, [lowBack, humHair](V3 d) {
 		// true の面を残す。人間は額の生え際より下の顔だけ抜く。
@@ -677,7 +747,8 @@ static void BuildHair(Renderer& r, const Model& m, int style, GpuMesh& out, floa
 			g.Ellipsoid(MTrans(p.x, p.y, p.z), v3(w, hang * .18f, rr.z * Lerpf(.42f, .28f, t)), 14, 8);
 		}
 	}
-	if (drop > 1.01f) {
+	}
+	if (drop > 1.01f && !humHair) {
 		float crown = cc.y;
 		for (size_t i = 0; i < g.p.size(); i++) {
 			float dy = crown - g.p[i].y;
@@ -695,15 +766,21 @@ static void BuildHair(Renderer& r, const Model& m, int style, GpuMesh& out, floa
 			int a = 255 - (int)(t * t * 170.f);
 			g.col[i] = (g.col[i] & 0x00FFFFFFu) | ((DWORD)a << 24);
 		}
-		if (pivot) *pivot = MXformPt(m.invBind[m.headJ], v3(cc.x, root, cc.z));
+		if (pivot) *pivot = MXformPt(m.invBind[m.headJ], c);
+	}
+	// CPU 側は頭蓋中心からの差分（モデル軸）。頭ボーンのローカル軸はモデルと揃っていない。
+	if (cpu) {
+		cpu->clear();
+		g.ToStatic(*cpu);
+		for (size_t i = 0; i < cpu->size(); i++) {
+			(*cpu)[i].p[0] -= c.x;
+			(*cpu)[i].p[1] -= c.y;
+			(*cpu)[i].p[2] -= c.z;
+		}
 	}
 	g.Transform(m.invBind[m.headJ]);
 	GeoToStatic(r, g, out);
 	out.tex = r.TexWhite();
-	if (cpu) {
-		cpu->clear();
-		if (out.vb) g.ToStatic(*cpu);
-	}
 }
 
 // 人体用。原点は後頭部、+Y 上、+Z 後ろ。板ではなく束で垂らす。
@@ -820,7 +897,7 @@ BOOL BuildLibrary(Renderer& r, Library& lib)
 	for (int b = 0; b < B_COUNT; b++)
 		for (int s = 1; s < HAIR_STYLES; s++) BuildHair(r, r.models[lib.bodyModel[b]], s, lib.hair[b][s]);
 	lib.humHairN = 0;
-	for (int i = 0; i < (int)r.models.size() && lib.humHairN < 4; i++) {
+	for (int i = 0; i < (int)r.models.size() && lib.humHairN < HUM_HAIR_N; i++) {
 		if (strncmp(r.models[i].name, "Hum", 3) != 0 || r.models[i].headJ < 0) continue;
 		int slot = lib.humHairN++;
 		lib.humHairModel[slot] = i;
@@ -830,6 +907,9 @@ BOOL BuildLibrary(Renderer& r, Library& lib)
 	BuildCrown(r, lib.crown);
 	BuildRing(r, lib.ring);
 	BuildOrb(r, lib.orb);
+	// ステージ入場でモンスターをこの印の直後へ読み直す。手続き4体は印より前に残す。
+	// 印の位置だと骨を差し替えられ、メッシュだけがタイルの赤丸から外れて巨大になる。
+	r.m_keepModels = (int)r.models.size();
 	lib.ready = 1;
 	return TRUE;
 }
@@ -837,7 +917,7 @@ BOOL BuildLibrary(Renderer& r, Library& lib)
 void ReleaseLibrary(Library& lib)
 {
 	for (int b = 0; b < B_COUNT; b++) for (int s = 0; s < HAIR_STYLES; s++) lib.hair[b][s].Release();
-	for (int i = 0; i < 4; i++) for (int s = 0; s < HAIR_STYLES; s++) { lib.humHair[i][s].Release(); lib.humHairV[i][s].clear(); }
+	for (int i = 0; i < HUM_HAIR_N; i++) for (int s = 0; s < HAIR_STYLES; s++) { lib.humHair[i][s].Release(); lib.humHairV[i][s].clear(); }
 	lib.humHairN = 0;
 	for (int d = 0; d < 2; d++) for (int l = 0; l < 2; l++) lib.wing[d][l].Release();
 	lib.crown.Release();
@@ -881,6 +961,7 @@ static void ActorInit(Actor& a)
 	a.model = -1;
 	a.hair = 0;
 	a.scale = 1;
+	a.htScale = 1.f;
 	a.tint = 0xFFFFFFFF;
 	a.height = 1.f;
 	a.clip = CL_IDLE; a.prev = CL_IDLE;
@@ -911,15 +992,20 @@ void ActorFromChar(Actor& a, const Library& lib, const Renderer& r, const CharDa
 {
 	ActorInit(a);
 	a.gait = GAIT_BIPED;
-	a.body = Clampi(c.body, 0, B_COUNT - 1);
+	a.body = CharBody(c);
 	a.model = lib.bodyModel[a.body];
 	if (a.model < 0) return;
 	a.rig = r.models[a.model].rig;
 	a.female = c.gender == 1;
 	a.scale = a.female ? .40f : .43f;
 	{
-		const char* hum = a.female ? ((a.body == B_MAGE) ? "HumWitch" : "HumMedieval") : ((a.body == B_KNIGHT) ? "HumKing" : "HumAdventurer");
-		int hi = r.FindModel(hum);
+		char humName[16];
+		sprintf_s(humName, a.female ? "HumF%d" : "HumM%d", CharModel(c));
+		int hi = r.FindModel(humName);
+		if (hi < 0) {
+			const char* old = a.female ? ((a.body == B_MAGE) ? "HumWitch" : "HumMedieval") : ((a.body == B_KNIGHT) ? "HumKing" : "HumAdventurer");
+			hi = r.FindModel(old);
+		}
 		if (hi >= 0 && r.models[hi].nJ > 8) {
 			a.proc = 3;
 			a.model = hi;
@@ -940,7 +1026,6 @@ void ActorFromChar(Actor& a, const Library& lib, const Renderer& r, const CharDa
 	a.bust = a.female ? CharBust(c) : 2;
 	a.hairCol = HairColor(c.hairColor);
 	a.hair = Clampi(c.hair, 0, HAIR_STYLES - 1);
-	if (a.female && a.hair == 0) a.hair = 2;
 	if (!a.avatar) {
 		if (a.body == B_ROGUE_HOOD) a.hair = 0;
 		if (c.hat && a.body == B_KNIGHT) a.hair = 0;
@@ -980,12 +1065,6 @@ void ActorFromChar(Actor& a, const Library& lib, const Renderer& r, const CharDa
 	bool customWep = gw && (gw->att0 || gw->att1 || gearMeshOk(gw->mesh0) || gearMeshOk(gw->mesh1));
 	if (customWep) { addGearPiece(gw, 0); addGearPiece(gw, 1); }
 	else AddWeapons(a, r, cd.weaponLook);
-	a.wepAtt = a.nAtt;
-	a.wepGear = a.nGear;
-	if (ga) {
-		if (!(builtInHat && isHeadGear(ga->att0, ga->joint0))) addGearPiece(ga, 0);
-		if (!(builtInHat && isHeadGear(ga->att1, ga->joint1))) addGearPiece(ga, 1);
-	}
 	bool namedHead = ga && ga->att1 && (strstr(ga->att1, "Helmet") || strstr(ga->att1, "Hat") || strstr(ga->att1, "Crown"));
 	bool helm = namedHead || (ga && ga->joint1 == 2 && gearMeshOk(ga->mesh1));
 	bool capeOn = ga && ga->att1 && strstr(ga->att1, "Cape");
@@ -996,6 +1075,13 @@ void ActorFromChar(Actor& a, const Library& lib, const Renderer& r, const CharDa
 	if (c.cape && !capeOn) {
 		static const char* const capes[B_COUNT] = { "Knight_Cape", "Barbarian_Cape", "Mage_Cape", "Rogue_Cape", "Rogue_Cape" };
 		AddAtt(a, r, capes[a.body]);
+	}
+	a.wepAtt = a.nAtt;
+	a.wepGear = a.nGear;
+	// アバターの服を着ているあいだは、兜・鎧・体型マントを重ねない。帽子とマントの切替は残す。
+	if (ga && !a.avatar) {
+		if (!(builtInHat && isHeadGear(ga->att0, ga->joint0))) addGearPiece(ga, 0);
+		if (!(builtInHat && isHeadGear(ga->att1, ga->joint1))) addGearPiece(ga, 1);
 	}
 	if (c.cls == C_SKYKNIGHT) a.wings = 1;
 	if (c.cls == C_DRAGONLORD) a.wings = 2;
@@ -1021,7 +1107,10 @@ void ActorFromChar(Actor& a, const Library& lib, const Renderer& r, const CharDa
 	}
 	{
 		static const float kHt[HT_N] = { .86f, .93f, 1.f, 1.08f, 1.16f };
-		a.scale *= kHt[CharHt(c)];
+		a.htScale = kHt[CharHt(c)];
+		a.avaTint = AvaClothTint(CharAvaCol(c));
+		// 人間は CS が身長を掛ける。手続きメッシュはワールド倍率のまま。
+		if (a.proc != 3) a.scale *= a.htScale;
 	}
 	if (m.rig >= 0 && m.rig < (int)r.rigs.size()) {
 		const Rig& g = r.rigs[m.rig];
@@ -1050,7 +1139,7 @@ void ActorFromChar(Actor& a, const Library& lib, const Renderer& r, const CharDa
 			mulOwn("chest", kBx[b], 1.04f + (b - 2) * .03f, kBz[b]);
 		}
 	}
-	a.height = (a.proc == 3 ? 1.75f : 2.35f) * a.scale;
+	a.height = (a.proc == 3 ? 1.75f : 2.35f) * a.scale * (a.proc == 3 && a.htScale > 0.05f ? a.htScale : 1.f);
 	a.hover = a.wings ? .35f : 0;
 	if (a.proc == 3 && a.rig >= 0 && a.rig < (int)r.rigs.size()) {
 		int hj = r.rigs[a.rig].Find("Hair");
@@ -1064,6 +1153,10 @@ void ActorFromChar(Actor& a, const Library& lib, const Renderer& r, const CharDa
 				{ 1.08f, 0.16f, 1.04f },
 				{ 1.00f, 0.95f, 1.00f },
 				{ 1.04f, 1.08f, 1.04f },
+				{ 1.00f, 1.00f, 1.00f },
+				{ 1.00f, 1.00f, 1.00f },
+				{ 1.00f, 1.00f, 1.00f },
+				{ 1.00f, 1.00f, 1.00f },
 			};
 			int s = Clampi(a.hair, 0, HAIR_STYLES - 1);
 			a.mods.scale[hj] = v3(kHair[s][0], kHair[s][1], kHair[s][2]);
@@ -1094,6 +1187,7 @@ void ActorFromMonster(Actor& a, const Library& lib, const Renderer& r, int monst
 			a.mods.Reset(r.models[mi].nJ);
 		} else {
 			a.proc = 2;
+			a.model = -1;
 			a.rig = -1;
 		}
 		return;
@@ -1381,7 +1475,7 @@ static M4 FitWorld(const M4& g, V3 y, V3 z, V3 at, float sx, float sy, float sz)
 	return MMul(MScale(sx, sy, sz), MMul(MBasis(x, oy, oz, at), MInverse(g)));
 }
 
-static M4 HumanGearFit(const Pose& pose, int joint, const char* name, const char* jointName, const M4& bindG, const M4* armorD = NULL, BOOL bowMesh = FALSE, const V3* gripLocal = NULL)
+static M4 HumanGearFit(const Pose& pose, int joint, const char* name, const char* jointName, const M4& bindG, const M4* armorD = NULL, BOOL bowMesh = FALSE, const V3* gripLocal = NULL, BOOL neo = FALSE)
 {
 	if (joint < 0 || joint >= pose.nJ) return MScale(0.4f, 0.4f, 0.4f);
 	const M4& g = pose.global[joint];
@@ -1400,7 +1494,12 @@ static M4 HumanGearFit(const Pose& pose, int joint, const char* name, const char
 	BOOL hand = NameHas(jointName, "Hand") || NameHas(jointName, "hand");
 	if (hat || crown || (head && !hand)) {
 		float sc = hat ? 0.20f : 0.30f;
-		return FitWorld(g, up, back, pos + up * (hat ? 0.10f : 0.08f), sc, sc, sc);
+		float lift = hat ? 0.10f : 0.08f;
+		// 新しい頭は小さく、王冠の底が関節より 19cm 上に作ってある。頭頂は関節の約 20cm 上。
+		if (neo) { sc = hat ? 0.10f : 0.18f; lift = hat ? 0.02f : 0.f; }
+		M4 place = FitWorld(g, up, back, pos + up * lift, sc, sc, sc);
+		if (neo && crown && !hat) return MMul(MRotX(-1.5707963f), place);
+		return place;
 	}
 	// バインド姿勢のモデル空間へ置いてから、関節の動きだけ乗せる。
 	auto onBind = [&](const M4& modelSpace) { return MMul(modelSpace, MInverse(bindG)); };
@@ -1463,12 +1562,29 @@ void ActorDraw(Renderer& r, const Library& lib, Actor& a, const M4& world, const
 			// 唇の合わせ目と耳の内側は片面だと抜けて見える。
 			d.twoSided = 1;
 		}
-		const BOOL ava = hum && a.avatar > 0 && r.DrawAvatar(a.model, a.avatar, a.bust, a.pose, world, d);
-		if (!ava) r.DrawSkinnedCreature(a.model, a.pose, world, d);
+		float hs = a.htScale > 0.05f ? a.htScale : 1.f;
+		d.bodyScale = hs;
+		// アバター色は着ている衣装だけ。素体へ渡すと肌まで染まる。
+		d.clothTint = 0;
+		// 体の頂点は CS が掛ける。武具と髪は同じ倍率をモデル原点から掛ける。
+		M4 wGear = world;
+		if (hs < 0.999f || hs > 1.001f) wGear = MMul(MScale(hs, hs, hs), world);
+		const Model* humM = (hum && a.model >= 0 && a.model < (int)r.models.size()) ? &r.models[a.model] : NULL;
+		BOOL digitBody = FALSE;
+		if (humM && (strncmp(humM->name, "HumF", 4) == 0 || strncmp(humM->name, "HumM", 4) == 0) && humM->name[4] >= '0' && humM->name[4] <= '9') digitBody = TRUE;
+		d.hideMeshHair = (hum && a.hair > 0) ? 1 : 0;
+		BOOL ava = FALSE;
+		if (hum && a.avatar > 0) {
+			d.clothTint = a.avaTint;
+			ava = r.DrawAvatar(a.model, a.avatar, a.bust, a.pose, world, d);
+		}
+		if (!ava) {
+			d.clothTint = 0;
+			r.DrawSkinnedCreature(a.model, a.pose, world, d);
+		}
 		const int nAtt = ava ? a.wepAtt : a.nAtt, nGear = ava ? a.wepGear : a.nGear;
 		DrawParams da = dp;
 		if (hum) da.rim = 0.06f;
-		const Model* humM = (hum && a.model >= 0 && a.model < (int)r.models.size()) ? &r.models[a.model] : NULL;
 		auto bindOf = [&](int j) -> M4 {
 			if (humM && j >= 0 && j < humM->nJ) return MInverse(humM->invBind[j]);
 			return a.pose.global[j];
@@ -1494,18 +1610,6 @@ void ActorDraw(Renderer& r, const Library& lib, Actor& a, const M4& world, const
 			out = MXformPt(humM->invBind[j], s * (1.f / n));
 			return TRUE;
 		};
-		for (int i = 0; i < nAtt; i++) {
-			const char* nm = r.attaches[a.att[i]].name;
-			const char* jn = (hum && a.rig >= 0 && a.attJ[i] >= 0 && a.attJ[i] < r.rigs[a.rig].nJ) ? r.rigs[a.rig].names[a.attJ[i]] : NULL;
-			if (hum) {
-				V3 gl;
-				BOOL hasGrip = gripOf(a.attJ[i], jn, gl);
-				M4 fit = HumanGearFit(a.pose, a.attJ[i], nm, jn, bindOf(a.attJ[i]), NULL, FALSE, hasGrip ? &gl : NULL);
-				DrawParams dc = da;
-				if (NameHas(nm, "Cape")) dc.twoSided = 1;
-				r.DrawAttach(r.attaches[a.att[i]], a.pose, a.attJ[i], world, dc, &fit);
-			} else r.DrawAttach(r.attaches[a.att[i]], a.pose, a.attJ[i], world, da);
-		}
 		auto bindPt = [&](const char* nm, V3& out) -> BOOL {
 			if (!humM || a.rig < 0 || a.rig >= (int)r.rigs.size()) return FALSE;
 			const Rig& rg = r.rigs[a.rig];
@@ -1516,12 +1620,34 @@ void ActorDraw(Renderer& r, const Library& lib, Actor& a, const M4& world, const
 			}
 			return FALSE;
 		};
+		for (int i = 0; i < nAtt; i++) {
+			const char* nm = r.attaches[a.att[i]].name;
+			const char* jn = (hum && a.rig >= 0 && a.attJ[i] >= 0 && a.attJ[i] < r.rigs[a.rig].nJ) ? r.rigs[a.rig].names[a.attJ[i]] : NULL;
+			if (hum) {
+				V3 gl;
+				BOOL hasGrip = gripOf(a.attJ[i], jn, gl);
+				M4 fit = HumanGearFit(a.pose, a.attJ[i], nm, jn, bindOf(a.attJ[i]), NULL, FALSE, hasGrip ? &gl : NULL, digitBody);
+				if (digitBody && nm && NameHas(nm, "Cape")) {
+					V3 nk;
+					if (bindPt("Neck", nk)) {
+						// 布の上端 y=0.26 を首の高さへ。+Z が背中。
+						const float s = 0.38f;
+						M4 D = MMul(MScale(s, s, s), MTrans(0.f, nk.y - 0.26f * s, nk.z + 0.05f));
+						fit = MMul(D, MInverse(bindOf(a.attJ[i])));
+					}
+				}
+				DrawParams dc = da;
+				if (NameHas(nm, "Cape")) dc.twoSided = 1;
+				r.DrawAttach(r.attaches[a.att[i]], a.pose, a.attJ[i], wGear, dc, &fit);
+			} else r.DrawAttach(r.attaches[a.att[i]], a.pose, a.attJ[i], wGear, da);
+		}
 		for (int i = 0; i < nGear; i++) if (a.gearJ[i] >= 0 && a.gearJ[i] < a.pose.nJ) {
 			const char* jn = (hum && a.rig >= 0 && a.gearJ[i] < r.rigs[a.rig].nJ) ? r.rigs[a.rig].names[a.gearJ[i]] : NULL;
 			if (hum) {
 				M4 armorD;
 				const M4* pd = NULL;
 				V3 nk, ab, ua, ch;
+				BOOL neoB = digitBody;
 				if (jn && NameHas(jn, "Chest") && bindPt("Neck", nk) && bindPt("Abdomen", ab) && bindPt("UpperArm.R", ua) && bindPt("Chest", ch)) {
 					// 襟は首の付け根、裾は腹、肩当ては上腕の外、胸板は胸骨の前。
 					// メッシュは胴の柱が高さ 1・中心が原点。幅 1.52・奥行 0.81 の金属鎧を基準に、各鎧の形はそのまま。
@@ -1537,66 +1663,138 @@ void ActorDraw(Renderer& r, const Library& lib, Actor& a, const M4& world, const
 						sz *= kArmZ[b];
 						sx *= kArmX[b];
 					}
-					armorD = MMul(MScale(sx, sy, sz), MTrans(0.f, (top + bot) * .5f, ch.z - 0.05f));
+					// 新しい体は胸の厚みが半分ほど。肩の外側と胸の前に浮く分を胴へ戻す。
+					if (neoB) {
+						sx = 2.f * (fabsf(ua.x) + 0.02f) / 1.52f;
+						sz = 0.20f / 0.81f;
+						// 胸の骨より 11cm 前だと、鎧の殻が胴を包まず胸の前に立つ。
+						armorD = MMul(MScale(sx, sy, sz), MTrans(0.f, (top + bot) * .5f, ch.z - 0.03f));
+					} else armorD = MMul(MScale(sx, sy, sz), MTrans(0.f, (top + bot) * .5f, ch.z - 0.05f));
 					pd = &armorD;
 				}
 				V3 gl;
 				BOOL hasGrip = gripOf(a.gearJ[i], jn, gl);
-				M4 fit = HumanGearFit(a.pose, a.gearJ[i], NULL, jn, bindOf(a.gearJ[i]), pd, r.GearIsBow(a.gearM[i]), hasGrip ? &gl : NULL);
-				r.DrawGear(a.gearM[i], MMul(MMul(fit, a.pose.global[a.gearJ[i]]), world), da);
-			} else r.DrawGear(a.gearM[i], MMul(a.pose.global[a.gearJ[i]], world), da);
+				M4 fit = HumanGearFit(a.pose, a.gearJ[i], NULL, jn, bindOf(a.gearJ[i]), pd, r.GearIsBow(a.gearM[i]), hasGrip ? &gl : NULL, neoB);
+				r.DrawGear(a.gearM[i], MMul(MMul(fit, a.pose.global[a.gearJ[i]]), wGear), da);
+			} else r.DrawGear(a.gearM[i], MMul(a.pose.global[a.gearJ[i]], wGear), da);
 		}
 		if (hum && humM && a.hair > 0 && humM->headJ >= 0) {
+			DrawParams dh0 = dp;
+			dh0.rim = 0.04f;
+			dh0.hue = 0;
+			dh0.outline = 0;
+			dh0.twoSided = 1;
+			dh0.sway = 0.f;
+			dh0.emissive = 0.f;
+			{
+				int al = (dp.tint >> 24) & 255;
+				auto lit = [](int c) { int v = (int)(c / 1.42f); return v < 0 ? 0 : (v > 255 ? 255 : v); };
+				int hr = lit((a.hairCol & 255) * (dp.tint & 255) / 255);
+				int hg = lit(((a.hairCol >> 8) & 255) * ((dp.tint >> 8) & 255) / 255);
+				int hb = lit(((a.hairCol >> 16) & 255) * ((dp.tint >> 16) & 255) / 255);
+				dh0.tint = RGBA8(hr, hg, hb, al);
+			}
+			// 人間の付け替え髪はコンピュートで頭へ載せ、選んだ型以外は潰し、先だけ揺らす。
+			if (!r.DrawHumanHair(a.model, Clampi(a.hair, 1, HAIR_STYLES - 1), humM->headJ, a.pose, wGear, dh0, a.avatar) && !digitBody) {
+			int style = Clampi(a.hair, 1, HAIR_STYLES - 1);
 			int slot = -1;
 			for (int s = 0; s < lib.humHairN; s++) if (lib.humHairModel[s] == a.model) { slot = s; break; }
-			int style = Clampi(a.hair, 1, HAIR_STYLES - 1);
-			if (slot >= 0 && lib.humHair[slot][style].vb) {
+			const GpuMesh* mesh = (slot >= 0) ? &lib.humHair[slot][style] : NULL;
+			const Buf<VtxS>* hv = (slot >= 0) ? &lib.humHairV[slot][style] : NULL;
+			V3 piv = (slot >= 0) ? lib.humHairPivot[slot][style] : v3(0, 0, 0);
+			// 起動時の枠に入らなかった体でも、今のモデルで作り直して同じ経路で描く。
+			static int fbModel = -2;
+			static GpuMesh fbMesh[HAIR_STYLES];
+			static Buf<VtxS> fbV[HAIR_STYLES];
+			static V3 fbP[HAIR_STYLES];
+			if (!mesh || !mesh->vb || !hv || hv->empty()) {
+				if (fbModel != a.model) {
+					for (int s = 1; s < HAIR_STYLES; s++) {
+						fbMesh[s].Release();
+						fbV[s].clear();
+						BuildHair(r, *humM, s, fbMesh[s], 2.2f, &fbV[s], &fbP[s]);
+					}
+					fbModel = a.model;
+				}
+				if (fbMesh[style].vb && !fbV[style].empty()) {
+					mesh = &fbMesh[style];
+					hv = &fbV[style];
+					piv = fbP[style];
+				}
+			}
+			if (mesh && mesh->vb && hv && !hv->empty()) {
 				DrawParams dh = dp;
 				dh.rim = 0.04f;
 				dh.hue = 0;
 				dh.outline = 0;
 				dh.twoSided = 1;
-				// 揺れは頂点αの分だけ（頭蓋の殻は 0）。一律の揺れを足すと殻ごと動き頭皮が見える。
 				dh.sway = 0.f;
+				dh.emissive = 0.f;
 				int al = (dp.tint >> 24) & 255;
 				auto lit = [](int c) { int v = (int)(c / 1.42f); return v < 0 ? 0 : (v > 255 ? 255 : v); };
 				int hr = lit((a.hairCol & 255) * (dp.tint & 255) / 255);
 				int hg = lit(((a.hairCol >> 8) & 255) * ((dp.tint >> 8) & 255) / 255);
 				int hb = lit(((a.hairCol >> 16) & 255) * ((dp.tint >> 16) & 255) / 255);
 				dh.tint = RGBA8(hr, hg, hb, al);
-				// 頭蓋の殻は頭の骨に固定する（ずらすと頭皮が出る）。
-				// 垂れた髪は付け根を軸に頭の傾きを戻し、仰いでも下へ垂れる。αが小さいほど根元から遠い。
+				// 差分はモデルの右・上・後ろ。頭ボーンの軸は横を向いているので、姿勢からモデル軸を戻して載せる。
 				const M4& H = a.pose.global[humM->headJ];
-				const std::vector<VtxS>& hv = lib.humHairV[slot][style];
-				if (hv.empty()) r.DrawStatic(lib.humHair[slot][style], MMul(H, world), dh);
-				else {
-					V3 cur = Norm(MXformDir(H, MXformDir(humM->invBind[humM->headJ], v3(0, -1, 0))));
-					V3 ax = Cross(cur, v3(0, -1, 0));
-					float sl = Len(ax);
-					float ang = atan2f(sl, -cur.y) * .9f;
-					ax = sl > 1e-5f ? ax * (1.f / sl) : v3(1, 0, 0);
-					const float cs = cosf(ang), sn = sinf(ang);
-					auto rot = [&](V3 v) { return v * cs + Cross(ax, v) * sn + ax * (Dot(ax, v) * (1.f - cs)); };
-					const V3 piv = MXformPt(H, lib.humHairPivot[slot][style]);
-					static std::vector<VtxS> buf;
-					buf.resize(hv.size());
-					for (size_t k = 0; k < hv.size(); k++) {
-						const VtxS& s = hv[k];
-						VtxS& d = buf[k];
-						d = s;
-						V3 p = MXformPt(H, v3(s.p[0], s.p[1], s.p[2]));
-						V3 n = MXformDir(H, v3(s.n[0], s.n[1], s.n[2]));
-						float t = sqrtf(Clampf((255.f - (float)(s.c >> 24)) / 170.f, 0.f, 1.f));
-						float w = Clampf(t * 1.8f, 0.f, 1.f);
-						if (w > 0.f) {
-							p = Lerp(p, piv + rot(p - piv), w);
-							n = Norm(Lerp(n, rot(n), w));
-						}
-						d.p[0] = p.x; d.p[1] = p.y; d.p[2] = p.z;
-						d.n[0] = n.x; d.n[1] = n.y; d.n[2] = n.z;
-					}
-					r.DrawStaticVerts(lib.humHair[slot][style], buf.data(), (UINT)buf.size(), world, dh);
+				const M4& IB = humM->invBind[humM->headJ];
+				V3 up = Norm(MXformDir(H, MXformDir(IB, v3(0, 1, 0))));
+				V3 back = Norm(MXformDir(H, MXformDir(IB, v3(0, 0, 1))));
+				back = Norm(back - up * Dot(back, up));
+				V3 right = Norm(Cross(up, back));
+				V3 skull = MXformPt(H, piv);
+				static Buf<VtxS> buf;
+				buf.resize(hv->size());
+				float y0 = 1e9f, y1 = -1e9f;
+				for (size_t k = 0; k < hv->size(); k++) {
+					const VtxS& s = (*hv)[k];
+					VtxS& d = buf[k];
+					d = s;
+					V3 o = v3(s.p[0], s.p[1], s.p[2]);
+					V3 p = skull + right * o.x + up * o.y + back * o.z;
+					V3 n = Norm(right * s.n[0] + up * s.n[1] + back * s.n[2]);
+					d.p[0] = p.x; d.p[1] = p.y; d.p[2] = p.z;
+					d.n[0] = n.x; d.n[1] = n.y; d.n[2] = n.z;
+					d.c = (s.c & 0xFF000000u) | 0x00FFFFFFu;
+					if (p.y < y0) y0 = p.y;
+					if (p.y > y1) y1 = p.y;
 				}
+				// 束ごと後ろへずらす。内側の頂点が服の背面より 2cm 外に出るまで、その高さの断面をまとめて動かす。
+				if (a.avatar > 0 && y1 > y0 + 0.02f) {
+					const int NB = 24;
+					float push[24];
+					int hit[24];
+					for (int i = 0; i < NB; i++) { push[i] = 0.f; hit[i] = 0; }
+					float dy = (y1 - y0) / (float)(NB - 1);
+					for (size_t k = 0; k < buf.size(); k++) {
+						float surf = r.AvatarClothBack(a.model, a.avatar, buf[k].p[1]);
+						if (surf < -10.f) continue;
+						float need = surf + 0.020f - buf[k].p[2];
+						int b = (int)((buf[k].p[1] - y0) / dy + 0.5f);
+						if (b < 0) b = 0;
+						if (b >= NB) b = NB - 1;
+						hit[b] = 1;
+						if (need > push[b]) push[b] = need;
+					}
+					for (int i = 1; i < NB - 1; i++) if (hit[i]) {
+						float m = push[i - 1] > push[i + 1] ? push[i - 1] : push[i + 1];
+						if (push[i] < m - 0.01f) push[i] = m - 0.01f;
+					}
+					for (size_t k = 0; k < buf.size(); k++) {
+						int b = (int)((buf[k].p[1] - y0) / dy + 0.5f);
+						if (b < 0) b = 0;
+						if (b >= NB) b = NB - 1;
+						buf[k].p[2] += push[b];
+					}
+				}
+				for (size_t k = 0; k < buf.size(); k++) if (buf[k].n[2] > 0.f) {
+					buf[k].p[0] += buf[k].n[0] * 0.004f;
+					buf[k].p[1] += buf[k].n[1] * 0.004f;
+					buf[k].p[2] += buf[k].n[2] * 0.004f;
+				}
+				r.DrawStaticVerts(*mesh, buf.data(), (UINT)buf.size(), wGear, dh);
+			}
 			}
 		}
 		return;

@@ -61,6 +61,24 @@ V3 Game::UnitGroundPos(const Unit& u) const
 	return p;
 }
 
+void Game::LoadBattleCast()
+{
+	int ids[128];
+	int n = 0;
+	for (int i = 0; i < m_b.nUnits; i++) {
+		const Unit& u = m_b.u[i];
+		if (u.team == TEAM_PLAYER || u.monster < 0) continue;
+		const MonsterDef& md = MonsterInfo(u.monster);
+		if (md.look != LK_MESH || md.model < 0) continue;
+		int have = 0;
+		for (int k = 0; k < n; k++) if (ids[k] == md.model) { have = 1; break; }
+		if (have) continue;
+		if (n >= 128) break;
+		ids[n++] = md.model;
+	}
+	m_r.LoadBattleCreatures(ids, n);
+}
+
 void Game::ActorForUnit(int i)
 {
 	Unit& u = m_b.u[i];
@@ -287,7 +305,7 @@ void Game::ResumeBattle(int kind)
 	m_camPitch = s->camPitch;
 	m_zoomHold = FALSE;
 	m_wheelSign = 0;
-	m_camDist = m_camDistGoal = m_zoomDist = s->camDist > 1.f ? s->camDist : 14.f;
+	m_camDist = m_camDistGoal = m_zoomDist = s->camDist > 1.f ? s->camDist : 18.f;
 	m_camTarget = m_camGoal = v3(s->camX, s->camY, s->camZ);
 	m_camPan = v3(0, 0, 0);
 	m_parts.clear(); m_popups.clear(); m_banners.clear(); m_deferPopups.clear();
@@ -378,6 +396,7 @@ void Game::StartBattle(int stage)
 	RollMapSeed(stage, FALSE);
 	DWORD seed = m_mapSeed;
 	SetupBattle(m_b, stage, seed, chars, idx, n, m_themeSel);
+	LoadBattleCast();
 	m_battleStage = stage;
 	m_logN = 0;
 	m_r.BuildTerrain(m_b.map);
@@ -415,7 +434,7 @@ void Game::StartBattle(int stage)
 	m_zoomHold = FALSE;
 	m_wheelSign = 0;
 	m_camDist = 40.f;
-	m_camDistGoal = 14.f;
+	m_camDistGoal = 18.f;
 	m_zoomDist = 40.f;
 	m_camTarget = v3(MAPN * .5f, 2.f, MAPN * .5f);
 	m_camGoal = v3(px + .5f, m_b.map.StandY((int)px, (int)pz), pz + .5f);
@@ -1257,15 +1276,18 @@ void Game::BeginAttack(int ui, int target, int skill, int cx, int cz)
 		if (!sd || (sd->kind != SK_HEAL && sd->kind != SK_BUFF)) FaceTowards(target, a.x, a.z);
 	}
 	for (int i = 0; i < m_b.nUnits; i++) { m_preHp[i] = m_b.u[i].hp; m_dispHp[i] = (float)m_b.u[i].hp; }
-	m_strkN = ResolveAttack(m_b, ui, target, skill, m_rng, m_strk, 32, cx, cz);
-	m_strkN = AppendAssists(m_b, m_rng, m_strk, m_strkN, 32);
+	m_strkN = ResolveAttack(m_b, ui, target, skill, m_rng, m_strk, 96, cx, cz);
+	m_strkN = AppendAssists(m_b, m_rng, m_strk, m_strkN, 96);
 	m_seqN = 0;
-	BOOL multi = skill >= 0 && (SkillInfo(skill).area > 0 || SkillInfo(skill).kind == SK_HEAL || SkillInfo(skill).kind == SK_BUFF);
 	for (int i = 0; i < m_strkN && m_seqN < 24; i++) {
 		const Strike& s = m_strk[i];
-		if (multi && m_seqN > 0 && s.attacker == m_seq[m_seqN - 1].attacker && !s.counter) {
+		// 同じ段だけまとめる。段が違うときは振り直しなので、1対1でも段の数だけ当たる。
+		if (m_seqN > 0 && s.attacker == m_seq[m_seqN - 1].attacker && s.counter == m_seq[m_seqN - 1].counter
+			&& s.skill == m_seq[m_seqN - 1].skill && m_seq[m_seqN - 1].nHits > 0 && m_seq[m_seqN - 1].nHits < MAX_UNITS
+			&& m_seq[m_seqN - 1].hits[0].volley == s.volley) {
 			SeqStep& p = m_seq[m_seqN - 1];
-			if (p.nHits < MAX_UNITS) { p.hits[p.nHits++] = s; continue; }
+			p.hits[p.nHits++] = s;
+			continue;
 		}
 		SeqStep& st = m_seq[m_seqN++];
 		st.attacker = s.attacker; st.defender = s.defender; st.skill = s.skill; st.counter = s.counter;
@@ -1307,7 +1329,7 @@ void Game::BeginAttack(int ui, int target, int skill, int cx, int cz)
 	m_phaseT = 0;
 	if (target >= 0 && target < m_b.nUnits) WakeGroup(m_b, m_b.u[target].grp);
 	{
-		int style = UnitAttackStyle(a);
+		int style = UnitMotionStyle(a, skill);
 		const SkillDef* sd = skill >= 0 ? &SkillInfo(skill) : NULL;
 		if (sd && sd->kind == SK_HEAL) TacSfx(TS_HEAL);
 		else if (sd && sd->kind == SK_BUFF) TacSfx(TS_BUFF);
@@ -1392,7 +1414,7 @@ BOOL Game::UnitInArena(int ui) const
 	return CutFind(ui, NULL, NULL);
 }
 
-void Game::SeqImpact(const SeqStep& st)
+void Game::SeqImpact(const SeqStep& st, int volley)
 {
 	BOOL cutView = m_seqCut && m_cutStage >= 1 && m_cutStage <= 3;
 	const SkillDef* sd = st.skill >= 0 ? &SkillInfo(st.skill) : NULL;
@@ -1400,6 +1422,7 @@ void Game::SeqImpact(const SeqStep& st)
 	int kind = sd ? sd->kind : SK_PHYS;
 	for (int k = 0; k < st.nHits; k++) {
 		const Strike& h = st.hits[k];
+		if (h.volley != volley) continue;
 		int d = h.defender;
 		Unit& du = m_b.u[d];
 		BOOL visible = !cutView || UnitInArena(d);
@@ -1412,6 +1435,10 @@ void Game::SeqImpact(const SeqStep& st)
 			V3 mp = v3(du.px, du.py + du.hover, du.pz);
 			head = mp + v3(0, m_act[d].height * .9f + .1f, 0);
 			mid = mp + v3(0, m_act[d].height * .5f, 0);
+		}
+		if (h.volley > 0) {
+			head.y += h.volley * 0.46f;
+			head.x += (h.volley & 1) ? 0.26f : -0.22f;
 		}
 		wchar_t s[48];
 		auto pop = [&](const wchar_t* txt, DWORD col, int style, float delay) {
@@ -1445,6 +1472,13 @@ void Game::SeqImpact(const SeqStep& st)
 			continue;
 		}
 		if (!h.hit) {
+			BOOL landed = FALSE;
+			for (int q = 0; q < st.nHits; q++) if (st.hits[q].defender == d && st.hits[q].hit) landed = TRUE;
+			if (!landed) {
+				m_act[d].recoil = 0.f;
+				int cc = m_act[d].clip;
+				if (cc == CL_HIT_A || cc == CL_HIT_B || cc == CL_DODGE) ActorPlay(m_act[d], CL_IDLE, 1, .1f);
+			}
 			pop(TT(TX_BT_MISS), RGBA8(200, 220, 255), 1, 0);
 			{
 				wchar_t an[40], dn[40], line[96];
@@ -1463,6 +1497,7 @@ void Game::SeqImpact(const SeqStep& st)
 			AddPopup(ActorPos(h.attacker) + v3(0, min(m_act[h.attacker].height, cutView ? 1.32f : m_act[h.attacker].height) + .1f, cutView ? -.4f : 0.f), s, RGBA8(120, 255, 150), 0, .25f);
 		}
 		swprintf_s(s, L"%d", h.dmg);
+		BOOL followDead = h.overkill && !h.kill && du.hp <= 0;
 		if (h.crit) {
 			pop(TT(TX_BT_CRITICAL), RGBA8(255, 230, 80), 2, 0);
 			TacSfx(TS_CRIT);
@@ -1476,17 +1511,20 @@ void Game::SeqImpact(const SeqStep& st)
 			else TacSfx(TS_HIT);
 		}
 		if (visible || !cutView) {
-			StrikeFx(st.skill, el, kind, UnitAttackStyle(m_b.u[h.attacker]), ActorPos(h.attacker), mid, h.crit || cutView);
+			StrikeFx(st.skill, el, kind, UnitMotionStyle(m_b.u[h.attacker], st.skill), ActorPos(h.attacker), mid, h.crit || cutView);
 			if (h.crit) Burst(mid, 30, 7.f, .09f, .5f, 1.f, .95f, .6f, 3, 1, 3.f, .06f, .2f);
 		}
 		{
-			wchar_t an[40], dn[40], line[96];
+			wchar_t an[40], dn[40], line[160];
 			UnitTitle(m_b.u[h.attacker], an, 40);
 			UnitTitle(du, dn, 40);
 			const wchar_t* sk = sd ? (IsCraftId(st.skill) ? CraftName(st.skill) : SkillLabel(st.skill)) : TT(TX_BT_ATTACK);
 			swprintf_s(line, L"%s  %s  %s  %d%s", an, sk, dn, h.dmg, h.crit ? L" !" : L"");
-			AddLog(line, h.crit ? RGBA8(255, 220, 80) : RGBA8(235, 235, 240));
+			if (h.overkill) { wcscat_s(line, L"  "); wcscat_s(line, TT(TX_BT_OVERKILL)); }
+			AddLog(line, h.overkill ? RGBA8(255, 170, 80) : (h.crit ? RGBA8(255, 220, 80) : RGBA8(235, 235, 240)));
 		}
+		if (h.overkill) pop(TT(TX_BT_OVERKILL), RGBA8(255, 170, 80), 1, h.crit ? .28f : .14f);
+		if (!followDead) {
 		du.flash = 1.f;
 		{
 			float dx = du.px - m_b.u[h.attacker].px, dz = du.pz - m_b.u[h.attacker].pz;
@@ -1504,7 +1542,8 @@ void Game::SeqImpact(const SeqStep& st)
 		} else {
 			ActorPlay(m_act[d], h.crit ? CL_HIT_B : CL_HIT_A, 0, .06f);
 		}
-		if (sd && sd->effect != EF_NONE && sd->effect != EF_DRAIN && sd->effect != EF_IGNDEF && !h.kill) {
+		}
+		if (!followDead && sd && sd->effect != EF_NONE && sd->effect != EF_DRAIN && sd->effect != EF_IGNDEF && !h.kill) {
 			int tx = -1;
 			switch (sd->effect) {
 			case EF_POISON: tx = TX_BT_POISON; break;
@@ -1537,20 +1576,16 @@ static float ClipWindup(int clip)
 }
 
 // 弓を装備していれば弦を引く。既定の弩は両手で構えて撃つ。
-static int UnitAttackClip(const Unit& u, int variant)
+static int UnitAttackClip(const Unit& u, int variant, int skill)
 {
-	int style = UnitAttackStyle(u);
-	if (style == AS_SHOOT && u.monster < 0) {
-		const GearDef* g = GearOf(u.ch.reserved[6]);
-		if (!g || g->line != 2) return CL_1H_SHOOT;
-	}
-	return AttackClipFor(style, variant);
+	return AttackClipFor(UnitMotionStyle(u, skill), variant);
 }
 
-static int CutClipFor(const Unit& u, const SkillDef* sd, int variant)
+static int CutClipFor(const Unit& u, int skill, int variant)
 {
+	const SkillDef* sd = skill >= 0 ? &SkillInfo(skill) : NULL;
 	if (sd && sd->kind != SK_PHYS) return CastClipFor(sd->kind);
-	return UnitAttackClip(u, variant);
+	return UnitAttackClip(u, variant, skill);
 }
 
 void Game::UpdateSeq(float dt)
@@ -1563,8 +1598,8 @@ void Game::UpdateSeq(float dt)
 				m_lunge[m_cutA] = 0;
 				if (m_cutD >= 0) m_lunge[m_cutD] = 0;
 				{
-					const SkillDef* sd0 = (m_seqN > 0 && m_seq[0].skill >= 0) ? &SkillInfo(m_seq[0].skill) : NULL;
-					int clip = CutClipFor(m_b.u[m_cutA], sd0, sd0 ? 1 : 0);
+					int sk0 = (m_seqN > 0) ? m_seq[0].skill : -1;
+					int clip = CutClipFor(m_b.u[m_cutA], sk0, sk0 >= 0 ? 1 : 0);
 					Actor& ca = m_act[m_cutA];
 					ActorPlay(ca, clip, 0, .06f);
 					float full = ActorClipLen(ca, m_lib, m_r, clip);
@@ -1634,15 +1669,24 @@ void Game::UpdateSeq(float dt)
 	const Unit& au = m_b.u[A];
 	const SkillDef* sd = st.skill >= 0 ? &SkillInfo(st.skill) : NULL;
 	BOOL cast = sd && sd->kind != SK_PHYS;
-	int style = UnitAttackStyle(au);
+	int style = UnitMotionStyle(au, st.skill);
 	BOOL ranged = !cast && (style == AS_SHOOT || style == AS_SHOOT1 || (Dist(au.x, au.z, m_b.u[D].x, m_b.u[D].z) > 1 && style != AS_CAST));
 	BOOL magicNormal = !sd && style == AS_CAST;
+	int minV = 0, maxV = 0;
+	BOOL seenV = FALSE;
+	for (int k = 0; k < st.nHits; k++) {
+		int v = st.hits[k].volley;
+		if (!seenV || v < minV) minV = v;
+		if (!seenV || v > maxV) maxV = v;
+		seenV = TRUE;
+	}
+	int span = maxV - minV;
+	BOOL follow = seenV && minV > 0 && span == 0 && !st.counter;
 	if (m_seqT == 0) {
-		int clip = cast ? CastClipFor(sd->kind) : UnitAttackClip(au, sd ? 1 : (m_seqCur & 1));
-		BOOL held = m_seqCut && m_cutStage == 2 && aa.clip == clip && aa.t > 0.05f;
-		if (!held) ActorPlay(aa, clip, 0, .08f);
+		int clip = cast ? CastClipFor(sd->kind) : UnitAttackClip(au, sd ? 1 : (m_seqCur & 1), st.skill);
+		BOOL held = m_seqCut && m_cutStage == 2 && aa.clip == clip && aa.t > 0.05f && !follow;
+		if (!held) ActorPlay(aa, clip, 0, follow ? .04f : .08f);
 		aa.animSpeed = cast ? 1.0f : 1.05f;
-		if (held) aa.t = ActorClipLen(aa, m_lib, m_r, clip) * ClipWindup(clip);
 		m_stepL = ActorClipLen(aa, m_lib, m_r, clip) / aa.animSpeed;
 		m_stepTi = m_stepL * (cast || magicNormal ? .5f : .42f);
 		if (ranged || cast || magicNormal) {
@@ -1679,7 +1723,19 @@ void Game::UpdateSeq(float dt)
 			DWORD c = ElemColor(sd->element);
 			Burst(ActorPos(A) + v3(0, .05f, 0), 1, 0, .5f, .9f, (c & 255) / 255.f, ((c >> 8) & 255) / 255.f, ((c >> 16) & 255) / 255.f, 1, 1, 0, 0, 0, 1.3f);
 		}
-		if (held) m_seqT = aa.t / max(0.05f, aa.animSpeed);
+		if (held || follow) {
+			float wind = ClipWindup(clip) * (follow ? 0.55f : 1.f);
+			aa.t = ActorClipLen(aa, m_lib, m_r, clip) * wind;
+			m_seqT = aa.t / max(0.05f, aa.animSpeed);
+			if (follow && m_proj.active) m_proj.t = m_seqT;
+		}
+		if (follow) {
+			if (sd && sd->kind == SK_HEAL) TacSfx(TS_HEAL);
+			else if (sd && sd->kind == SK_BUFF) TacSfx(TS_BUFF);
+			else if (sd && sd->kind == SK_MAGIC) TacSfxCast(sd->element);
+			else if (style == AS_SHOOT || style == AS_SHOOT1) TacSfx(TS_BOW);
+			else TacSfx(TS_SWING);
+		}
 	}
 	m_seqT += dt;
 	BOOL melee = !ranged && !cast && !magicNormal;
@@ -1735,16 +1791,27 @@ void Game::UpdateSeq(float dt)
 			}
 		}
 	}
-	if (!m_seqImpact && m_seqT >= m_stepTi) {
-		m_seqImpact = 1;
-		SeqImpact(st);
+	const float kGap = 0.42f;
+	if (m_seqT >= m_stepTi) {
+		int due = min(span, (int)((m_seqT - m_stepTi) / kGap));
+		while (m_seqImpact <= due) {
+			SeqImpact(st, minV + m_seqImpact);
+			m_seqImpact++;
+		}
 	}
 	BOOL kill = FALSE;
 	for (int k = 0; k < st.nHits; k++) if (st.hits[k].kill) kill = TRUE;
-	float endT = max(m_stepL * .9f, m_stepTi + .5f) + (kill ? .55f : .1f);
+	float endT = follow
+		? (m_stepTi + 0.46f + (kill ? .55f : 0.f))
+		: (max(m_stepL * .9f, m_stepTi + .5f + span * kGap) + (kill ? .55f : .1f));
 	if (m_seqT >= endT) {
 		aa.animSpeed = 1.f;
-		if (m_b.u[A].hp > 0 || m_dispHp[A] > 0) ActorPlay(aa, CL_IDLE, 1, .15f);
+		BOOL chain = FALSE;
+		if (m_seqCur + 1 < m_seqN) {
+			const SeqStep& nx = m_seq[m_seqCur + 1];
+			chain = nx.attacker == A && nx.skill == st.skill && !nx.counter && nx.nHits > 0 && nx.hits[0].volley > 0;
+		}
+		if (!chain && (m_b.u[A].hp > 0 || m_dispHp[A] > 0)) ActorPlay(aa, CL_IDLE, 1, .15f);
 		m_lunge[A] = 0;
 		m_seqCur++;
 		m_seqT = 0;
@@ -1796,7 +1863,9 @@ void Game::FinishSeq()
 				if (chance > 92) chance = 92;
 				for (int r = 0; r < rolls; r++) {
 					if (!m_rng.Chance(chance)) continue;
+					int beforeN = m_save.gearN;
 					int gid = GearTryDrop(m_save, m_battleStage, u.monster, m_rng);
+					if (m_save.gearN >= GEAR_STASH && (gid > 0 || beforeN >= GEAR_STASH)) m_stashFull = 1;
 					if (gid > 0) {
 						AddPopup(v3(u.px, u.py + 1.3f + r * .35f, u.pz), GearName(gid), RGBA8(180, 255, 190), 1, .12f * r, 3.6f);
 						AddLog(GearName(gid), RGBA8(180, 255, 190));
@@ -1869,7 +1938,10 @@ void Game::AwardExp()
 			e = healed > 0 ? (16 + min(18, healed / 3)) : 6;
 		} else if (s.skill >= 0 && SkillInfo(s.skill).kind == SK_BUFF) e = 12;
 		else if (!s.hit) e = 1;
-		else e = ExpForAction(a, d, s.dmg, m_battleStage);
+		else {
+			e = ExpForAction(a, d, s.dmg, m_battleStage);
+			if (s.overkill && e > 1) e *= 2;
+		}
 		if (s.hit && e > 1 && d.team == TEAM_ENEMY) {
 			int coop = PlayerCoop(m_b, m_strk, m_strkN, s.defender);
 			if (coop >= 2) {
@@ -2018,6 +2090,7 @@ void Game::UpdateCamera(float dt)
 
 void Game::UpdateBattle(float dt)
 {
+	if (m_stashFull) { UpdateUnitsVisual(dt); return; }
 	m_phaseT += dt;
 	UpdateUnitsVisual(dt);
 	switch (m_phase) {
@@ -2686,6 +2759,10 @@ void Game::DrawForecast()
 			swprintf_s(bit, L"  %s ×%d", TT(TX_BT_FOLLOW), f.follow);
 			wcscat_s(extra, bit);
 		}
+		if (d.hp > 0 && ((long long)f.dmg >= (long long)d.hp * 2 || (f.hits > 1 && f.dmg >= d.hp))) {
+			wcscat_s(extra, L"  ");
+			wcscat_s(extra, TT(TX_BT_OVERKILL));
+		}
 		m_r.HudText(extra, x + w * .5f, y + U(160), U(13), RGBA8(255, 230, 170), 1, 0);
 	}
 	int after = max(0, d.hp - f.dmg * f.hits);
@@ -3084,10 +3161,12 @@ void Game::DrawCommandMenu()
 		yy += bh + U(6);
 		mark(ID_BT_SKILL, yy, TX_BTD_SKILL);
 		if (Btn(ID_BT_SKILL, x, yy, cw, bh, TT(TX_BT_SKILL), hasSkill || hasCraft)) {
+			int ri = u.rosterIdx;
+			if (ri >= 0 && ri < MAX_ROSTER) { m_skillTab = m_skMemoTab[ri]; m_skillPage = m_skMemoPage[ri]; }
 			if (hasCraft && !hasSkill) m_skillTab = 2;
 			else if (m_skillTab == 2 && !hasCraft) m_skillTab = 0;
 			if (m_skillTab < 0 || m_skillTab > 2) m_skillTab = 0;
-			m_phase = PH_P_SKILLS; m_skillPage = 0; m_navMode = TRUE; m_focusId = ID_BT_SKTAB + m_skillTab;
+			m_phase = PH_P_SKILLS; m_navMode = TRUE; m_focusId = ID_BT_SKTAB + m_skillTab;
 		}
 		yy += bh + U(6);
 		mark(ID_BT_STAT, yy, TX_BTD_STATUS);
@@ -3146,6 +3225,12 @@ void Game::DrawCommandMenu()
 	}
 	if (m_phase == PH_P_SKILLS) {
 		if (m_skillTab < 0 || m_skillTab > 2) m_skillTab = 0;
+		auto keepSkill = [&]() {
+			int ri = u.rosterIdx;
+			if (ri < 0 || ri >= MAX_ROSTER) return;
+			m_skMemoTab[ri] = m_skillTab;
+			m_skMemoPage[ri] = m_skillPage;
+		};
 		int crafts[2], nc = 0;
 		if (m_skillTab == 2)
 			for (int i = 0; i < 2; i++) if (u.craftEq[i] >= CRAFT_BASE) crafts[nc++] = i;
@@ -3186,6 +3271,7 @@ void Game::DrawCommandMenu()
 			if (Btn(ID_BT_SKTAB + t, x + (tw + gap) * t, y, tw, tabH, TT(tabTx[t]), TRUE, m_skillTab == t, U(13), col)) {
 				m_skillTab = t;
 				m_skillPage = 0;
+				keepSkill();
 				return;
 			}
 		}
@@ -3274,6 +3360,7 @@ void Game::DrawCommandMenu()
 			else wcscpy_s(desc, TT(sd.descTx));
 			m_r.HudTextBox(desc, x, yy + U(18), sw, U(48), U(12), RGBA8(230, 230, 236));
 		}
+		keepSkill();
 	}
 }
 
@@ -3466,6 +3553,13 @@ void Game::DrawCutInUi()
 
 void Game::DrawBattleUi()
 {
+	if (m_stashFull) {
+		m_shopFit = 5;
+		DrawShopFit();
+		if (m_shopFit != 5) m_stashFull = 0;
+		m_click = FALSE;
+		return;
+	}
 	if (m_slotUi) { DrawSlotUi(); return; }
 	if (m_seqCut && m_cutStage >= 1 && m_cutStage <= 3) {
 		DrawCutInUi();

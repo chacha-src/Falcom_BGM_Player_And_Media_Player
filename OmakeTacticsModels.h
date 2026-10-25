@@ -19,10 +19,10 @@ struct Library {
 	int procModel[5];
 	int clipMap[4][CL_COUNT];
 	GpuMesh hair[B_COUNT][HAIR_STYLES];
-	GpuMesh humHair[4][HAIR_STYLES];
-	std::vector<VtxS> humHairV[4][HAIR_STYLES]; // 頭の骨の空間。αが小さいほど根元から遠い
-	V3 humHairPivot[4][HAIR_STYLES];            // 垂れる髪の付け根（後頭部の生え際）
-	int humHairModel[4];
+	GpuMesh humHair[HUM_HAIR_N][HAIR_STYLES];
+	Buf<VtxS> humHairV[HUM_HAIR_N][HAIR_STYLES]; // 頭の骨の空間。αが小さいほど根元から遠い
+	V3 humHairPivot[HUM_HAIR_N][HAIR_STYLES];            // 垂れる髪の付け根（後頭部の生え際）
+	int humHairModel[HUM_HAIR_N];
 	int humHairN;
 	GpuMesh wing[2][2];     // [羽根/竜][左/右]
 	GpuMesh crown;
@@ -52,6 +52,8 @@ struct Actor {
 	int face;           // 顔の型
 	int avatar;         // アバター (0=なし)
 	int bust;           // 胸の段階
+	float htScale;      // 身長。体は CS、武具と髪は同じ倍率
+	DWORD avaTint;      // 0 は服の染め色のまま
 	float scale, hue;
 	DWORD tint;
 	float height;       // 頭上（ワールド）

@@ -18,7 +18,7 @@ for %%F in (
   gpu_vs_rect gpu_ps_rect gpu_vs_piano gpu_cs_hex gpu_cs_glyph
   maze_vst maze_hst maze_dst maze_psw maze_vss maze_pss maze_vsh maze_psh maze_vsq maze_ssr maze_dofp maze_fin maze_psline maze_psmirf maze_pscloud maze_csfx maze_gsw maze_vsskin
   race_vst race_hst race_dst race_psb race_vss race_pss race_vsh race_psh race_vsq race_ssr race_dofp race_fin race_csnoise race_psc race_psline race_pst race_vssi race_psw race_pscloud race_gsw race_vsw
-  tac_vss tac_vsk tac_psm tac_pso tac_psov tac_vsh tac_psh tac_vsp tac_psp tac_vsq tac_pssky
+  tac_vss tac_vsk tac_psm tac_pso tac_psov tac_vsh tac_psh tac_vsp tac_psp tac_vsq tac_pssky tac_csskin tac_psbloom tac_psblur tac_psgrade tac_psui tac_psg0 tac_psg1 tac_psg2 tac_psg3 tac_psg4 tac_psg5 tac_psg6 tac_psg7 tac_psprop tac_pswater tac_pslava
 ) do if not exist res\cso\%%F.cso goto :needfxc
 powershell -NoProfile -Command "if (-not (Get-Item -ErrorAction SilentlyContinue res\cso\*.cso)) { exit 1 }; $h = @(Get-Item shaders\*.hlsl); $c = @(Get-Item res\cso\*.cso); if (($c | Measure-Object LastWriteTime -Minimum).Minimum -ge ($h | Measure-Object LastWriteTime -Maximum).Maximum) { exit 0 } else { exit 1 }"
 if not errorlevel 1 (
@@ -144,6 +144,37 @@ if errorlevel 1 exit /b 1
 call :cc vs_5_0 VSQ shaders\omake_tactics.hlsl tac_VSQ tac_vsq
 if errorlevel 1 exit /b 1
 call :cc ps_5_0 PSSKY shaders\omake_tactics.hlsl tac_PSSKY tac_pssky
+if errorlevel 1 exit /b 1
+call :cc cs_5_0 CSSkin shaders\omake_tactics_skin.hlsl tac_CSSkin tac_csskin
+if errorlevel 1 exit /b 1
+call :cc ps_5_0 PSBloom shaders\omake_tactics.hlsl tac_PSBloom tac_psbloom
+if errorlevel 1 exit /b 1
+call :cc ps_5_0 PSBlur shaders\omake_tactics.hlsl tac_PSBlur tac_psblur
+if errorlevel 1 exit /b 1
+call :cc ps_5_0 PSGrade shaders\omake_tactics.hlsl tac_PSGrade tac_psgrade
+call :cc ps_5_0 PSUI shaders\omake_tactics.hlsl tac_PSUI tac_psui
+if errorlevel 1 exit /b 1
+call :cc ps_5_0 PSG0 shaders\omake_tactics.hlsl tac_PSG0 tac_psg0
+if errorlevel 1 exit /b 1
+call :cc ps_5_0 PSG1 shaders\omake_tactics.hlsl tac_PSG1 tac_psg1
+if errorlevel 1 exit /b 1
+call :cc ps_5_0 PSG2 shaders\omake_tactics.hlsl tac_PSG2 tac_psg2
+if errorlevel 1 exit /b 1
+call :cc ps_5_0 PSG3 shaders\omake_tactics.hlsl tac_PSG3 tac_psg3
+if errorlevel 1 exit /b 1
+call :cc ps_5_0 PSG4 shaders\omake_tactics.hlsl tac_PSG4 tac_psg4
+if errorlevel 1 exit /b 1
+call :cc ps_5_0 PSG5 shaders\omake_tactics.hlsl tac_PSG5 tac_psg5
+if errorlevel 1 exit /b 1
+call :cc ps_5_0 PSG6 shaders\omake_tactics.hlsl tac_PSG6 tac_psg6
+if errorlevel 1 exit /b 1
+call :cc ps_5_0 PSG7 shaders\omake_tactics.hlsl tac_PSG7 tac_psg7
+if errorlevel 1 exit /b 1
+call :cc ps_5_0 PSProp shaders\omake_tactics.hlsl tac_PSProp tac_psprop
+if errorlevel 1 exit /b 1
+call :cc ps_5_0 PSWater shaders\omake_tactics.hlsl tac_PSWater tac_pswater
+if errorlevel 1 exit /b 1
+call :cc ps_5_0 PSLava shaders\omake_tactics.hlsl tac_PSLava tac_pslava
 if errorlevel 1 exit /b 1
 
 echo cso ok

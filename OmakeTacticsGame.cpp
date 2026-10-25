@@ -24,7 +24,7 @@ enum {
 	ID_BASE_SET = 945, ID_PT_EVO = 363,
 	ID_PT_WPN = 348, ID_PT_ARM,
 	ID_CR_NAME = 200, ID_CR_RANDOM, ID_CR_GENDER, ID_CR_LINEAGE, ID_CR_CLASS, ID_CR_BODY, ID_CR_HAIR, ID_CR_HAIRCOL, ID_CR_OUTFIT,
-	ID_CR_HAT, ID_CR_CAPE, ID_CR_OK, ID_CR_BACK, ID_CR_HEIGHT, ID_CR_BUST, ID_CR_FIG, ID_CR_FACE, ID_CR_AVATAR,
+	ID_CR_HAT, ID_CR_CAPE, ID_CR_OK, ID_CR_BACK, ID_CR_HEIGHT, ID_CR_BUST, ID_CR_FIG, ID_CR_FACE, ID_CR_AVATAR, ID_CR_AVACOL, ID_CR_MODEL,
 	ID_PT_CARD0 = 300, ID_PT_DEPLOY = 340, ID_PT_EDIT, ID_PT_DELETE, ID_PT_YES, ID_PT_NO, ID_PT_BACK, ID_PT_NEW,
 	ID_PT_PAGE_PREV = 360, ID_PT_PAGE_NEXT,
 	ID_PT_ACC0 = 366, ID_PT_ACC1, ID_PT_BEAD0, ID_PT_BEAD1, ID_PT_PAS0 = 370, ID_PT_PAS1,
@@ -99,6 +99,9 @@ Game::Game()
 	m_codexPage = 0;
 	m_skillPage = 0;
 	m_skillTab = 0;
+	memset(m_skMemoTab, 0, sizeof(m_skMemoTab));
+	memset(m_skMemoPage, 0, sizeof(m_skMemoPage));
+	m_stashFull = 0;
 	m_sortieAsk = 0;
 	m_midStage = 0;
 	m_autoStage = 0;
@@ -141,9 +144,9 @@ Game::Game()
 	m_camTarget = m_camGoal = v3(32, 0, 32);
 	m_camYaw = m_camYawGoal = PI * .25f;
 	m_camPitch = .9f;
-	m_camDist = m_camDistGoal = 13.f;
+	m_camDist = m_camDistGoal = 18.f;
 	m_zoomHold = FALSE;
-	m_zoomDist = 13.f;
+	m_zoomDist = 18.f;
 	m_wheelSign = 0;
 	m_wheelTime = -1.f;
 	m_camPan = v3(0, 0, 0);
@@ -161,6 +164,8 @@ Game::Game()
 	memset(&m_edit, 0, sizeof(m_edit));
 	m_editIdx = -1;
 	m_previewYaw = 0;
+	m_previewPitch = .18f;
+	m_previewZoom = 1.f;
 	m_lineage = 0;
 	m_previewDrag = FALSE;
 	m_partySel = -1;
@@ -254,6 +259,7 @@ BOOL Game::Recover()
 	if (m_screen == SC_BATTLE || m_screen == SC_RESULT) {
 		m_r.BuildTerrain(m_b.map);
 		m_r.BuildMinimap(m_b.map);
+		LoadBattleCast();
 		for (int i = 0; i < m_b.nUnits; i++) ActorForUnit(i);
 		m_showBuilt = FALSE;
 	} else {
@@ -512,7 +518,10 @@ void Game::RenderFrame()
 // ============================================================ 入力
 void Game::OnMouseMove(int x, int y)
 {
-	if (m_lDown && m_screen == SC_CREATE && m_previewDrag) m_previewYaw += (x - m_mx) * .012f;
+	if (m_lDown && m_screen == SC_CREATE && m_previewDrag) {
+		m_previewYaw += (x - m_mx) * .012f;
+		m_previewPitch = Clampf(m_previewPitch + (y - m_my) * .005f, -1.05f, 1.15f);
+	}
 	BOOL scout = m_lDown && !m_downUi && m_screen == SC_BATTLE && (m_phase == PH_P_MOVE || m_phase == PH_P_TARGET || m_phase == PH_P_SKILLTARGET || m_phase == PH_P_SHOVE || m_phase == PH_P_CMD || m_phase == PH_P_SKILLS);
 	if (m_rDown || m_mDown || scout) {
 		int dx = x - m_dragLastX, dy = y - m_dragLastY;
@@ -593,12 +602,21 @@ void Game::ResetCamDist()
 {
 	m_zoomHold = FALSE;
 	m_wheelSign = 0;
-	float d = (m_screen == SC_BASE) ? 9.f : 14.f;
+	float d = (m_screen == SC_BASE) ? 12.f : 18.f;
 	m_camDist = m_camDistGoal = m_zoomDist = d;
 }
 
 void Game::OnWheel(int delta)
 {
+	if (m_screen == SC_CREATE) {
+		if (delta == 0 || m_mx < m_w * .40f) return;
+		int sign = delta > 0 ? 1 : -1;
+		if (m_wheelSign && sign != m_wheelSign && (m_time - m_wheelTime) < .35f) return;
+		m_wheelSign = sign;
+		m_wheelTime = m_time;
+		m_previewZoom = Clampf(m_previewZoom * powf(.88f, (float)delta / 120.f), .38f, 2.6f);
+		return;
+	}
 	if (m_screen == SC_BATTLE || m_screen == SC_BASE) {
 		if (delta == 0) return;
 		int sign = delta > 0 ? 1 : -1;
@@ -764,11 +782,7 @@ BOOL Game::ClickIn(float x, float y, float w, float h)
 void Game::Panel(float x, float y, float w, float h, float alpha)
 {
 	alpha = Clampf(alpha, 0.f, 1.f);
-	int a0 = (int)(210.f * alpha);
-	int a1 = (int)(220.f * alpha);
-	m_r.HudRectGrad(x, y, w, h, RGBA8(24, 28, 52, a0), RGBA8(12, 14, 28, a1));
-	m_r.HudFrame(x, y, w, h, U(1.5f), RGBA8(196, 168, 108, (int)(255 * alpha)));
-	m_r.HudFrame(x + U(3), y + U(3), w - U(6), h - U(6), U(1), RGBA8(110, 92, 60, (int)(160 * alpha)));
+	m_r.HudGlass(x, y, w, h, RGBA8(22, 26, 48, (int)(206.f * alpha)), RGBA8(196, 168, 108, (int)(230.f * alpha)), alpha);
 }
 
 void Game::Bar(float x, float y, float w, float h, float frac, DWORD c0, DWORD c1, float ghost)
@@ -797,9 +811,12 @@ BOOL Game::Btn(int id, float x, float y, float w, float h, const wchar_t* label,
 	else if (hov || foc) { top = RGBA8(96, 118, 186); bot = RGBA8(52, 64, 120); }
 	else if (tint) { top = tint; bot = RGBA8((tint & 255) / 2, ((tint >> 8) & 255) / 2, ((tint >> 16) & 255) / 2, 235); }
 	else { top = RGBA8(58, 66, 104, 238); bot = RGBA8(30, 34, 62, 238); }
-	m_r.HudRectGrad(x, y, w, h, top, bot);
-	m_r.HudRect(x + 2, y + 2, w - 4, h * .35f, RGBA8(255, 255, 255, en ? 22 : 8));
-	m_r.HudFrame(x, y, w, h, U(1.5f), (hov || foc) ? RGBA8(255, 232, 150) : RGBA8(150, 128, 86));
+	DWORD fill = RGBA8(
+		((top & 255) + (bot & 255)) / 2,
+		(((top >> 8) & 255) + ((bot >> 8) & 255)) / 2,
+		(((top >> 16) & 255) + ((bot >> 16) & 255)) / 2,
+		(top >> 24) & 255);
+	m_r.HudGlass(x, y, w, h, fill, (hov || foc) ? RGBA8(255, 232, 150) : RGBA8(150, 128, 86), 1.f);
 	if (foc) {
 		float pulse = .5f + .5f * sinf(m_time * 6.f);
 		m_r.HudFrame(x - U(3), y - U(3), w + U(6), h + U(6), U(2), RGBA8(255, 220, 120, (int)(120 + 120 * pulse)));
@@ -827,8 +844,7 @@ int Game::Sel(int id, float x, float y, float w, float h, const wchar_t* label, 
 	if (foc && m_selDelta) { d = m_selDelta; m_selDelta = 0; }
 	if (m_activateId == id) { d = 1; m_activateId = -1; }
 	if (d) TacSfx(TS_CURSOR);
-	m_r.HudRectGrad(x, y, w, h, (hov || foc) ? RGBA8(64, 78, 130, 236) : RGBA8(34, 40, 70, 230), RGBA8(20, 24, 44, 236));
-	m_r.HudFrame(x, y, w, h, U(1), (hov || foc) ? RGBA8(255, 232, 150) : RGBA8(120, 104, 74));
+	m_r.HudGlass(x, y, w, h, (hov || foc) ? RGBA8(64, 78, 130, 236) : RGBA8(34, 40, 70, 230), (hov || foc) ? RGBA8(255, 232, 150) : RGBA8(120, 104, 74), 1.f);
 	if (foc) m_r.HudFrame(x - U(2), y - U(2), w + U(4), h + U(4), U(2), RGBA8(255, 220, 120, 180));
 	m_r.HudText(label, x + U(10), y + h * .5f, U(15), RGBA8(220, 210, 180), 0, 0);
 	BOOL hl = hov && m_mx < vx + vw * .5f, hr = hov && m_mx >= vx + vw * .5f;
@@ -904,7 +920,10 @@ void Game::NavBack()
 		else if (m_evFromParty) { m_evFromParty = 0; EnterParty(); }
 		else EnterBase();
 		break;
-	case SC_BATTLE: BattleCancel(); break;
+	case SC_BATTLE:
+		if (m_stashFull) { m_stashFull = 0; m_shopFit = 0; break; }
+		BattleCancel();
+		break;
 	case SC_BASE:
 		if (m_sortieAsk) m_sortieAsk = 0;
 		else if (m_codex) m_codex = 0;
@@ -1134,7 +1153,9 @@ void Game::RenderActorPortrait(int slot, Actor& a, DWORD bg0, DWORD bg1, int fit
 		eye = look + v3(d * .2f, d * .05f, -d);
 	} else if (a.proc == 3) {
 		look = ActorJointWorld(a, world, 0);
-		d = a.height * .62f;
+		float ht = a.htScale > 0.05f ? a.htScale : 1.f;
+		look.x *= ht; look.y *= ht; look.z *= ht;
+		d = (a.height / ht) * .62f;
 		eye = look + v3(d * .08f, d * .02f, -d);
 	} else if (!a.proc) {
 		look = ActorJointWorld(a, world, 0);
@@ -1496,6 +1517,7 @@ void Game::BuildShowcase()
 
 void Game::EnterBase()
 {
+	m_r.LoadBattleCreatures(NULL, 0);
 	m_screen = SC_BASE;
 	m_shop = 0;
 	m_shopFit = 0;
@@ -1511,7 +1533,7 @@ void Game::EnterBase()
 	BuildShowcase();
 	m_zoomHold = FALSE;
 	m_wheelSign = 0;
-	m_camDistGoal = m_camDist = m_zoomDist = 9.f;
+	m_camDistGoal = m_camDist = m_zoomDist = 12.f;
 	m_camPitch = .5f;
 }
 
@@ -2819,6 +2841,8 @@ void Game::EnterCreate(int editIdx)
 		RandomName(m_edit.name, m_edit.gender, m_rng);
 	}
 	m_previewYaw = 0;
+	m_previewPitch = .18f;
+	m_previewZoom = 1.f;
 	m_focusId = ID_CR_NAME;
 	RefreshPreview();
 }
@@ -2834,11 +2858,13 @@ void Game::DrawCreate3D()
 {
 	V3 pos = v3(0, -50.f, 0);
 	Actor& a = m_preview;
-	float h = a.height + a.hover;
+	float ht = a.htScale > 0.05f ? a.htScale : 1.f;
+	float h = a.height / ht + a.hover;
 	V3 look = pos + v3(0, h * .52f, 0);
-	float dist = h * 2.9f;
+	float dist = h * 2.9f * m_previewZoom;
 	float yaw = PI;
-	V3 dir = v3(sinf(yaw) * cosf(.18f), sinf(.18f), cosf(yaw) * cosf(.18f));
+	float pitch = Clampf(m_previewPitch, -1.05f, 1.15f);
+	V3 dir = v3(sinf(yaw) * cosf(pitch), sinf(pitch), cosf(yaw) * cosf(pitch));
 	V3 eye = look + dir * dist;
 	V3 right = Norm(Cross(v3(0, 1, 0), dir * -1.f));
 	V3 shift = right * (-dist * .14f);
@@ -2889,6 +2915,10 @@ void Game::DrawCreateUi()
 	BOOL changed = FALSE;
 	if (int d = Sel(ID_CR_GENDER, bx, yy, bw, rh, TT(TX_CR_GENDER), TT(m_edit.gender ? TX_CR_FEMALE : TX_CR_MALE))) { (void)d; m_edit.gender = !m_edit.gender; CharSetAvatar(m_edit, 0); changed = TRUE; }
 	yy += rh + gap;
+	if (int d = Sel(ID_CR_MODEL, bx, yy, bw, rh, TT(TX_CR_MODEL), TT(TX_MDL_0 + CharModel(m_edit)))) {
+		CharSetModel(m_edit, (CharModel(m_edit) + d + MODEL_N) % MODEL_N); changed = TRUE;
+	}
+	yy += rh + gap;
 	BOOL isNew = m_editIdx < 0;
 	if (isNew) {
 		if (Sel(ID_CR_LINEAGE, bx, yy, bw, rh, TT(TX_CR_LINEAGE), TT(m_lineage ? TX_CR_MAGIC : TX_CR_WARRIOR))) {
@@ -2896,7 +2926,7 @@ void Game::DrawCreateUi()
 			int lst[4];
 			CreateClassList(lst);
 			m_edit.cls = lst[0];
-			m_edit.body = m_lineage ? B_MAGE : B_KNIGHT;
+			CharSetBody(m_edit, m_lineage ? B_MAGE : B_KNIGHT);
 			changed = TRUE;
 		}
 		yy += rh + gap;
@@ -2908,13 +2938,13 @@ void Game::DrawCreateUi()
 			ci = (ci + d + n) % n;
 			m_edit.cls = lst[ci];
 			static const int bodyFor[6] = { B_KNIGHT, B_BARBARIAN, B_ROGUE, B_ROGUE_HOOD, B_MAGE, B_MAGE };
-			if (m_edit.cls < 6) m_edit.body = bodyFor[m_edit.cls];
+			if (m_edit.cls < 6) CharSetBody(m_edit, bodyFor[m_edit.cls]);
 			changed = TRUE;
 		}
 		yy += rh + gap;
 	}
 	static const int bodyTx[B_COUNT] = { TX_BODY_KNIGHT, TX_BODY_BARBARIAN, TX_BODY_MAGE, TX_BODY_ROGUE, TX_BODY_HOODED };
-	if (int d = Sel(ID_CR_BODY, bx, yy, bw, rh, TT(TX_CR_BODY), TT(bodyTx[m_edit.body]))) { m_edit.body = (m_edit.body + d + B_COUNT) % B_COUNT; changed = TRUE; }
+	if (int d = Sel(ID_CR_BODY, bx, yy, bw, rh, TT(TX_CR_BODY), TT(bodyTx[CharBody(m_edit)]))) { CharSetBody(m_edit, (CharBody(m_edit) + d + B_COUNT) % B_COUNT); changed = TRUE; }
 	yy += rh + gap;
 	{
 		int nf = Clampi(m_r.FaceCount(m_edit.gender ? 1 : 0), 1, 6);
@@ -2926,7 +2956,7 @@ void Game::DrawCreateUi()
 	yy += rh + gap;
 	{
 		const int g = m_edit.gender ? 1 : 0;
-		const int nMax = g ? TX_AVA_F17 - TX_AVA_F0 + 1 : TX_AVA_M11 - TX_AVA_M0 + 1;
+		const int nMax = g ? TX_AVA_F20 - TX_AVA_F0 + 1 : TX_AVA_M12 - TX_AVA_M0 + 1;
 		int n = Clampi(m_r.AvatarCount(g), 0, nMax) + 1;
 		int av = Clampi(CharAvatar(m_edit), 0, n - 1);
 		int tx = av == 0 ? TX_AVA_NONE : (g ? TX_AVA_F0 : TX_AVA_M0) + av - 1;
@@ -2936,9 +2966,18 @@ void Game::DrawCreateUi()
 	}
 	yy += rh + gap;
 	{
+		int col = CharAvaCol(m_edit);
+		if (int d = Sel(ID_CR_AVACOL, bx, yy, bw, rh, TT(TX_CR_AVACOL), TT(TX_AVC_0 + col))) {
+			CharSetAvaCol(m_edit, (col + d + 8) % 8); changed = TRUE;
+		}
+		DWORD tc = AvaClothTint(col);
+		if (tc) m_r.HudRect(bx + bw * .4f + U(26), yy + U(9), U(16), rh - U(18), tc | 0xFF000000);
+	}
+	yy += rh + gap;
+	{
 		static const int kHairTx[HAIR_STYLES] = {
 			TX_HAIR_DEFAULT, TX_HAIR_SHORT, TX_HAIR_LONG, TX_HAIR_PONY, TX_HAIR_TWIN, TX_HAIR_BOB,
-			TX_HAIR_STRAIGHT, TX_HAIR_WAIST
+			TX_HAIR_STRAIGHT, TX_HAIR_WAIST, TX_HAIR_AFRO, TX_HAIR_UPDO, TX_HAIR_BUN, TX_HAIR_FEATHER
 		};
 		if (int d = Sel(ID_CR_HAIR, bx, yy, bw, rh, TT(TX_CR_HAIR), TT(kHairTx[Clampi(m_edit.hair, 0, HAIR_STYLES - 1)]))) {
 			m_edit.hair = (m_edit.hair + d + HAIR_STYLES) % HAIR_STYLES; changed = TRUE;

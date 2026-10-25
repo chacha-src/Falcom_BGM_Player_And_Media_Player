@@ -33,6 +33,78 @@ struct Fix {
 		for (int k = i; k < n - 1; k++) v[k] = v[k + 1];
 		n--;
 	}
+	void resize(int nn) { if (nn < 0) nn = 0; if (nn > CAP) nn = CAP; n = nn; }
+	void reserve(int) {}
+};
+
+// 可変長の中身は、起動時に一度だけ確保したarenaから切り出す。pushのたびに new しない。
+enum { TAC_ARENA = 512 * 1024 * 1024 };
+void* TacArenaAlloc(size_t bytes, size_t align);
+int TacArenaBad();
+
+template<typename T>
+struct Buf {
+	T* p;
+	int n, cap;
+	Buf() : p(0), n(0), cap(0) {}
+	explicit Buf(int nn) : p(0), n(0), cap(0) { resize(nn); }
+	Buf(int nn, const T& fill) : p(0), n(0), cap(0) { this->fill(nn, fill); }
+	template<class It>
+	Buf(It a, It b, decltype(*a)* = 0) : p(0), n(0), cap(0) { assign(a, b); }
+	int size() const { return n; }
+	bool empty() const { return n == 0; }
+	T* data() { return p; }
+	const T* data() const { return p; }
+	T* begin() { return p; }
+	T* end() { return p ? p + n : 0; }
+	const T* begin() const { return p; }
+	const T* end() const { return p ? p + n : 0; }
+	T& operator[](int i) { return p[i]; }
+	const T& operator[](int i) const { return p[i]; }
+	T& back() { return p[n - 1]; }
+	const T& back() const { return p[n - 1]; }
+	void clear() { n = 0; }
+	void reset() { p = 0; n = 0; cap = 0; }
+	void reserve(int nn) { grow(nn); }
+	void push_back(const T& a) { if (n >= cap) grow(n + 1); if (p && n < cap) p[n++] = a; }
+	void swap(Buf& o) { T* tp = p; int tn = n, tc = cap; p = o.p; n = o.n; cap = o.cap; o.p = tp; o.n = tn; o.cap = tc; }
+	void pop_back() { if (n > 0) n--; }
+	void resize(int nn) {
+		if (nn < 0) nn = 0;
+		if (nn > cap) grow(nn);
+		if (nn > cap) nn = cap;
+		if (p && nn > n) memset(p + n, 0, (size_t)(nn - n) * sizeof(T));
+		n = nn;
+	}
+	void resize(int nn, const T& fillv) {
+		int old = n;
+		resize(nn);
+		for (int i = old; i < n; i++) p[i] = fillv;
+	}
+	void fill(int nn, const T& fillv) {
+		resize(nn);
+		for (int i = 0; i < n; i++) p[i] = fillv;
+	}
+	template<class It>
+	void assign(It a, It b) {
+		int nn = (int)(b - a);
+		if (nn < 0) nn = 0;
+		resize(nn);
+		for (int i = 0; i < n; i++) p[i] = a[i];
+	}
+	void grow(int nn) {
+		if (nn <= cap) return;
+		int nc = cap > 0 ? cap : 8;
+		while (nc < nn) {
+			if (nc > 0x3fffffff) { nc = nn; break; }
+			nc *= 2;
+		}
+		T* np = (T*)TacArenaAlloc((size_t)nc * sizeof(T), 16);
+		if (!np) return;
+		if (p && n > 0) memcpy(np, p, (size_t)n * sizeof(T));
+		p = np;
+		cap = nc;
+	}
 };
 
 // ---------------- 数学（行ベクトル・左手系） ----------------
@@ -266,7 +338,7 @@ const wchar_t* SkillLabel(int s);
 enum { MAX_ROSTER = 100, MAX_PARTY = 10, MAX_ENEMY = 640, NAME_LEN = 16 };
 static_assert(MAX_PARTY == 10, "Map::pStart は 10 枠");
 enum Body { B_KNIGHT, B_BARBARIAN, B_MAGE, B_ROGUE, B_ROGUE_HOOD, B_COUNT };
-enum { HAIR_STYLES = 8, HAIR_COLORS = 10, OUTFIT_COLORS = 10, HT_N = 5, BUST_N = 5, FIG_N = 3 };
+enum { HAIR_STYLES = 12, HAIR_COLORS = 10, OUTFIT_COLORS = 10, HT_N = 5, BUST_N = 5, FIG_N = 3, MODEL_N = 5, HUM_HAIR_N = 16 };
 
 #pragma pack(push, 4)
 struct CharData {
@@ -285,7 +357,13 @@ struct CharData {
 };
 #pragma pack(pop)
 
-// outfit の上位ビットに身長・胸・体型。既存セーブは 0 なので普通体型。
+// body の下位 8bit が体型。bit 8-11 がモデル番号。既存セーブは番号 0。
+inline int CharBody(const CharData& c) { return Clampi(c.body & 255, 0, B_COUNT - 1); }
+inline int CharModel(const CharData& c) { return Clampi((c.body >> 8) & 15, 0, MODEL_N - 1); }
+inline void CharSetBody(CharData& c, int v) { c.body = (c.body & ~255) | (Clampi(v, 0, B_COUNT - 1) & 255); }
+inline void CharSetModel(CharData& c, int v) { c.body = (c.body & ~(15 << 8)) | ((Clampi(v, 0, MODEL_N - 1) & 15) << 8); }
+
+// outfit の上位ビットに身長・胸・体型・顔・アバター・アバター色。既存セーブは 0 なので普通体型、色は染め色のまま。
 inline int CharOutfit(const CharData& c) { return c.outfit & 255; }
 inline int CharHt(const CharData& c) { int v = (c.outfit >> 8) & 15; return v ? Clampi(v - 1, 0, HT_N - 1) : 2; }
 inline int CharBust(const CharData& c) { int v = (c.outfit >> 12) & 15; return v ? Clampi(v - 1, 0, BUST_N - 1) : 2; }
@@ -299,6 +377,17 @@ inline int CharFace(const CharData& c) { return (c.outfit >> 19) & 15; }
 inline void CharSetFace(CharData& c, int v) { c.outfit = (c.outfit & ~(15 << 19)) | ((Clampi(v, 0, 15)) << 19); }
 inline int CharAvatar(const CharData& c) { return (c.outfit >> 23) & 63; }
 inline void CharSetAvatar(CharData& c, int v) { c.outfit = (c.outfit & ~(63 << 23)) | ((Clampi(v, 0, 63)) << 23); }
+// アバター色 (bit 29-31)。0 は服の染め色のまま。符号ビットを含むので unsigned で読む。
+inline int CharAvaCol(const CharData& c) { return (int)(((unsigned)c.outfit >> 29) & 7u); }
+inline void CharSetAvaCol(CharData& c, int v) {
+	unsigned u = (unsigned)c.outfit;
+	u = (u & ~(7u << 29)) | (((unsigned)Clampi(v, 0, 7) & 7u) << 29);
+	c.outfit = (int)u;
+}
+inline DWORD AvaClothTint(int col) {
+	static const DWORD k[8] = { 0, 0xFF3C32E6u, 0xFFE65A28u, 0xFF46A01Eu, 0xFF1EC8F0u, 0xFFDC3CA0u, 0xFFAA78F5u, 0xFFFAFAFAu };
+	return k[Clampi(col, 0, 7)];
+}
 
 void CharRecalcInit(CharData& c);                  // 新規作成時の初期能力
 void CharRecalcProgress(CharData& c);              // 現在Lvの期待値で能力を組み直す
@@ -391,6 +480,7 @@ int UnitRangeMax(const Unit& u);
 int UnitMagAttack(const Unit& u);
 int UnitWeaponPow(const Unit& u);
 int UnitAttackStyle(const Unit& u);
+int UnitMotionStyle(const Unit& u, int skill);   // 通常攻撃は装備。スキルは優先し、装備と合うときだけその武器の動き
 int UnitNameTx(const Unit& u);          // 敵の種族名など（味方は -1）
 const wchar_t* UnitName(const Unit& u);
 bool UnitHasSkill(const Unit& u, int s);
@@ -422,6 +512,8 @@ struct Strike {
 	int counter;       // 反撃
 	int drain;
 	int landed;        // 状態異常が今回新たに付いた
+	int volley;        // 多段の何射目か。同じ射は同時に着弾する
+	int overkill;      // 残HPの2倍以上、またはトドメ後の段
 };
 struct Forecast {
 	int dmg, hit, crit;     // 1 回あたり

@@ -202,7 +202,7 @@ private:
 	BOOL CanTarget(int ui, int target, int skill) const;
 	void BeginAttack(int ui, int target, int skill, int cx, int cz);
 	void UpdateSeq(float dt);
-	void SeqImpact(const SeqStep& st);
+	void SeqImpact(const SeqStep& st, int volley);
 	void FinishSeq();
 	void AwardExp();
 	void FinishUnitTurn(int acted);
@@ -229,6 +229,7 @@ private:
 	void DrawCutIn3D();
 	void DrawCutInUi();
 	void ActorForUnit(int ui);
+	void LoadBattleCast();
 	V3 ActorPos(int ui) const;
 	float ActorFace(int ui) const;
 	BOOL UnitInArena(int ui) const;
@@ -287,6 +288,9 @@ private:
 	int m_codexPage;
 	int m_skillPage;
 	int m_skillTab;          // 0攻撃 1回復 2クラフト
+	int m_skMemoTab[MAX_ROSTER];
+	int m_skMemoPage[MAX_ROSTER];
+	int m_stashFull;         // 戦闘中に所持が12になった。不要売却のレイヤー
 	BOOL m_ult;
 	int m_confirmDelete;
 
@@ -360,6 +364,8 @@ private:
 	int m_editIdx;     // -1=新規
 	Actor m_preview;
 	float m_previewYaw;
+	float m_previewPitch;
+	float m_previewZoom;
 	int m_lineage;
 	BOOL m_previewDrag;
 
@@ -417,7 +423,7 @@ private:
 	float m_dieT[MAX_UNITS];
 	float m_faceShow[MAX_UNITS];
 	float m_lunge[MAX_UNITS];
-	Strike m_strk[32];
+	Strike m_strk[96];
 	int m_strkN;
 	float m_stepL, m_stepTi;
 	struct Proj { int active; float t, launch, dur; int el, kind, arrow, self, style, skill; } m_proj;

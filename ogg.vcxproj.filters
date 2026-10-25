@@ -2836,6 +2836,10 @@
     <None Include="res\tactics\tac_face.bin">
       <Filter>Resource Files</Filter>
     </None>
+    <None Include="res\cso\tac_csskin.cso" />
+    <None Include="res\cso\tac_psbloom.cso" />
+    <None Include="res\cso\tac_psblur.cso" />
+    <None Include="res\cso\tac_psgrade.cso" />
   </ItemGroup>
   <ItemGroup>
     <Text Include="codec\APPLE_LICENSE.txt">

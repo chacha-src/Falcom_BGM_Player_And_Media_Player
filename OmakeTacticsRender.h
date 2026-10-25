@@ -3,9 +3,6 @@
 
 #include <d3d11.h>
 #include <dxgi1_2.h>
-#include <vector>
-#include <map>
-#include <string>
 #include "OmakeTacticsData.h"
 
 namespace otac {
@@ -42,8 +39,8 @@ struct Clip {
 	char name[32];
 	int nFrames;
 	float fps;
-	std::vector<Q4> q;    // nFrames*nJ
-	std::vector<V3> hips; // nFrames
+	Buf<Q4> q;    // nFrames*nJ
+	Buf<V3> hips; // nFrames
 	float Duration() const { return nFrames > 1 ? (nFrames - 1) / fps : 0.f; }
 };
 
@@ -52,9 +49,10 @@ struct Rig {
 	char names[MAXJ][24];
 	int parent[MAXJ];
 	int hips;
-	std::vector<Clip> clips;
+	Fix<Clip, 40> clips;
 	int Find(const char* n) const;
 	int FindClip(const char* n) const;
+	Rig() : nJ(0), hips(0) { memset(names, 0, sizeof(names)); memset(parent, 0, sizeof(parent)); }
 };
 
 struct Model {
@@ -68,7 +66,7 @@ struct Model {
 	V3 restS[MAXJ];
 	M4 top;
 	M4 invBind[MAXJ];
-	std::vector<GpuMesh> parts;
+	Buf<GpuMesh> parts;
 	float headMin[3], headMax[3];  // 頭部（頭ボーン基準）
 	int headJ, chestJ, handR, handL, hipsJ;
 };
@@ -84,8 +82,8 @@ struct StaticSrc {
 	char name[32];
 	int tex;
 	float bb[6];
-	std::vector<VtxS> v;
-	std::vector<WORD> i;
+	Buf<VtxS> v;
+	Buf<WORD> i;
 };
 
 struct Pose {
@@ -116,10 +114,13 @@ struct DrawParams {
 	DWORD outlineColor;
 	int twoSided;
 	int hairJoint;
+	int hideMeshHair;    // 1 ならメッシュに焼き込まれた髪を描かない（選んだ髪型を被せる）
 	DWORD hairTint;
 	float clothHue;      // 人間の服の染め色だけを CPU スキニング時に回す
 	int face;            // 人間の顔の型（0=既定）
-	DrawParams() : tint(0xFFFFFFFF), outline(0), mode(0), emissive(0), hue(0), dissolve(0), flash(0), rim(.35f), sway(0), outlineColor(0xFF201814), twoSided(0), hairJoint(-1), hairTint(0xFFFFFFFF), clothHue(0), face(0) {}
+	float bodyScale;     // 身長。CS がスキン後の位置へ掛ける
+	DWORD clothTint;     // 0 以外なら服をこの色へ。元の明暗と色相差は残す
+	DrawParams() : tint(0xFFFFFFFF), outline(0), mode(0), emissive(0), hue(0), dissolve(0), flash(0), rim(.35f), sway(0), outlineColor(0xFF201814), twoSided(0), hairJoint(-1), hideMeshHair(0), hairTint(0xFFFFFFFF), clothHue(0), face(0), bodyScale(1.f), clothTint(0) {}
 };
 
 enum Pass { PASS_SHADOW, PASS_MAIN, PASS_PORTRAIT };
@@ -162,55 +163,106 @@ public:
 	BOOL LoadAssets();
 	void LoadCreaturePack();
 	void LoadGearPack();
-	std::vector<Rig> rigs;
-	std::vector<Model> models;
-	std::vector<Attach> attaches;
-	std::vector<StaticSrc> statics;
-	std::vector<GpuMesh> m_creatures;
-	std::vector<GpuMesh> m_gear;
-	std::vector<BYTE> m_gearBow;
+	Fix<Rig, 192> rigs;
+	Fix<Model, 192> models;
+	Fix<Attach, 64> attaches;
+	Fix<StaticSrc, 48> statics;
+	Fix<GpuMesh, 160> m_creatures;
+	// カタログは索引だけ持つ。GPU に載せるのは人型と、今の戦闘に出る種だけ。
+	enum { MON_CATALOG = 1024 };
+	int m_monN;
+	int m_monOff[MON_CATALOG];
+	int m_monModel[MON_CATALOG];
+	unsigned char m_monBody[MON_CATALOG];
+	int m_keepModels, m_keepRigs, m_keepCreatures;
+	const BYTE* m_monBytes;
+	DWORD m_monBytesN;
+	void LoadBattleCreatures(const int* pack, int n);
+	Fix<GpuMesh, 256> m_gear;
+	Fix<BYTE, 256> m_gearBow;
 	struct CSkinV { float p[3], n[3]; DWORD c; unsigned char j[4], w[4]; };
 	struct CreatureSkin {
-		int model; std::vector<CSkinV> bind; std::vector<BYTE> cloth;
+		int model; Buf<CSkinV> bind; Buf<BYTE> cloth;
 		int faceSet, faceStart, faceN; float faceLin[9];   // 顔の型を載せる頭の頂点範囲
+		int faceSynth;                                   // 1 = デジット頭。顔の型は目印から作る
+		float faceEye[2][3], faceNose[3], faceChin[3], faceHalf, faceCx;
+		Buf<WORD> headTri;   // このメッシュ自身の頭と髪。アバターは素体の頭を隠してこれを載せる
+		Buf<BYTE> meshHair;  // 1 = 焼き込みの髪。髪型を選んだときはこの頂点を含む面を描かない
+		ID3D11Buffer* baldIB = NULL;
+		UINT baldN = 0;
 		float extX, extY, extZ, extR;   // モデル空間の中心と半径。肖像の枠に全身を収める
-		CreatureSkin() : model(-1), faceSet(-1), faceStart(0), faceN(0), extX(0), extY(0), extZ(0), extR(0) {}
+		int bustNip[2] = { -1, -1 };    // 左右の乳首頂点。服の胸を楕円面へ載せる基準
+		Buf<unsigned char> bustR; // 1=左 2=右 3=両方。胸の布だけ
+		ID3D11Buffer* bindSB = NULL;
+		ID3D11ShaderResourceView* bindSRV = NULL;
+		ID3D11Buffer* outVB = NULL;
+		ID3D11UnorderedAccessView* outUAV = NULL;
+		ID3D11Buffer* faceSB = NULL;
+		ID3D11ShaderResourceView* faceSRV = NULL;
+		int faceGot = -1;
+		int gpuNv = 0;
+		float nip[2][4] = {};
+		float bustLag[3] = {};
+		float bustVel[3] = {};
+		float bustPrev[3] = {};
+		int bustPrevOk = 0;
+		unsigned bustFrame = 0;
+		CreatureSkin() : model(-1), faceSet(-1), faceStart(0), faceN(0), faceSynth(0), faceHalf(0), faceCx(0), extX(0), extY(0), extZ(0), extR(0) {}
 	};
-	std::vector<CreatureSkin> m_skins;
+	Fix<CreatureSkin, 160> m_skins;
 	// 顔の型（性別ごと）。頭の頂点ごとの位置差・法線・色
-	struct FaceSet { int nFace, nv; std::vector<short> d; std::vector<signed char> n; std::vector<DWORD> c; FaceSet() : nFace(0), nv(0) {} };
+	struct FaceSet { int nFace, nv; Buf<short> d; Buf<signed char> n; Buf<DWORD> c; FaceSet() : nFace(0), nv(0) {} };
 	FaceSet m_faces[2];
 	void LoadFacePack();
+	void BindFaceSynth(CreatureSkin& s, int first, int count);
+	void UpdateFaceSynth(CreatureSkin& src, int face);
 	int FaceCount(int gender) const { return (gender >= 0 && gender < 2 && m_faces[gender].nFace > 0) ? m_faces[gender].nFace : 1; }
 	// アバター（人間の体と衣装を丸ごと差し替える）。頂点は共通の体の空間で持ち、j は区間番号。
 	// モデルごとの区間行列で各人間の骨へ移し、初回の描画で頂点を作って保持する。
-	struct AvaMesh { std::vector<CSkinV> v; std::vector<BYTE> cloth; std::vector<float> dmax, dmin; };
-	struct AvaBody { int nFace; AvaMesh m; std::vector<WORD> bodyTri, extraTri; AvaBody() : nFace(0) {} };
-	struct AvaCos { char name[32]; int gender; AvaMesh m; std::vector<WORD> tri; std::vector<BYTE> keep; };
-	struct AvaModel { char name[32]; int gender; std::vector<float> M; std::vector<std::string> joint; };
-	struct AvaCache { int model, cos; CreatureSkin skin; std::vector<float> bx, bn; GpuMesh gm; };
-	std::vector<std::string> m_avaSeg;
+	struct AvaMesh { Buf<CSkinV> v; Buf<BYTE> cloth; Buf<float> dmax, dmin; };
+	struct AvaBody { int nFace; AvaMesh m; Buf<WORD> bodyTri, extraTri; AvaBody() : nFace(0) {} };
+	struct AvaCos { char name[32]; int gender; AvaMesh m; Buf<WORD> tri; Buf<BYTE> keep; };
+	struct AvaModel { char name[32]; int gender; Buf<float> M; char joint[64][24]; int nJoint; AvaModel() : gender(0), nJoint(0) { name[0] = 0; memset(joint, 0, sizeof(joint)); } };
+	struct AvaCache {
+		int model, cos; CreatureSkin skin; Buf<float> bx, bn; Buf<WORD> tri; GpuMesh gm;
+		// 衣装の背中の外面。髪をこの Z より後ろへ出す。
+		float backY0, backDy, backZ[32];
+		int backN;
+		AvaCache() : model(0), cos(0), backY0(0), backDy(0), backN(0) { for (int i = 0; i < 32; i++) backZ[i] = 0; }
+	};
+	char m_avaSeg[64][24];
+	int m_avaSegN;
 	AvaBody m_avaBody[2];
-	std::vector<AvaCos> m_avaCos;
-	std::vector<AvaModel> m_avaModels;
-	std::vector<AvaCache> m_avaCache;
+	Fix<AvaCos, 256> m_avaCos;
+	Fix<AvaModel, 64> m_avaModels;
+	Fix<AvaCache, 128> m_avaCache;
 	void LoadAvatarPack();
 	void ReleaseAvatarCache();
 	int AvatarCount(int gender) const;
 	// avatar は性別ごとに 1 から。作れないときは FALSE（呼び手が元の体を描く）。
 	BOOL DrawAvatar(int model, int avatar, int bust, const Pose& pose, const M4& world, const DrawParams& dp);
-	void SkinAndDraw(const CreatureSkin& src, GpuMesh& base, const float* bx, const float* bn, float bt, const Pose& pose, const M4& world, const DrawParams& dp);
+	// 着ている衣装の、その高さでの背中の外面（モデル空間の +Z）。無ければ -1e9。
+	float AvatarClothBack(int model, int avatar, float y);
+	BOOL DrawHumanHair(int model, int style, int headJ, const Pose& pose, const M4& world, const DrawParams& dp, int avatar);
+	void EnsureScalp(int model, int headJ);
+	void LoadHairPack();
+	void ReleaseHair();
+	void SkinAndDraw(CreatureSkin& src, GpuMesh& base, const float* bx, const float* bn, float bt, const Pose& pose, const M4& world, const DrawParams& dp, const WORD* tri = NULL, int nTri = 0);
 	int FindModel(const char* n) const;
 	int FindAttach(const char* n) const;
 	int FindStatic(const char* n) const;
 	int CreatureCount() const { return (int)m_creatures.size(); }
 	BOOL CreatureExtent(int model, float& cx, float& cy, float& cz, float& rad) const;
-	int CreatureModel(int i) const { return (i >= 0 && i < (int)m_skins.size()) ? m_skins[i].model : -1; }
+	int CreatureModel(int i) const {
+		if (m_monN > 0) return (i >= 0 && i < m_monN) ? m_monModel[i] : -1;
+		return (i >= 0 && i < (int)m_skins.size()) ? m_skins[i].model : -1;
+	}
 	void DrawSkinnedCreature(int i, const Pose& pose, const M4& world, const DrawParams& dp);
 	int GearCount() const { return (int)m_gear.size(); }
-	BOOL GearIsBow(int i) const { return i >= 0 && i < (int)m_gearBow.size() && m_gearBow[i]; }	void DrawCreature(int i, const M4& world, const DrawParams& dp);
+	BOOL GearIsBow(int i) const { return i >= 0 && i < (int)m_gearBow.size() && m_gearBow[i]; }
+	void DrawCreature(int i, const M4& world, const DrawParams& dp);
 	void DrawGear(int i, const M4& world, const DrawParams& dp);
-	int AddProcModel(const Model& m, const std::vector<VtxK>& v, const std::vector<WORD>& idx);
+	int AddProcModel(const Model& m, const Buf<VtxK>& v, const Buf<WORD>& idx);
 	BOOL MakeMesh(GpuMesh& out, const void* v, UINT stride, UINT nv, const WORD* idx, UINT ni, BOOL dynamic = FALSE);
 	BOOL MakeMesh32(GpuMesh& out, const void* v, UINT stride, UINT nv, const UINT* idx, UINT ni);
 
@@ -242,7 +294,7 @@ public:
 	void DrawWater();
 	void DrawOverlayQuads(const VtxS* q, int n, int cursorStyle);
 	void DrawParticles(const Particle* ps, int n);
-	void DrawRibbon(const std::vector<VtxP>& v);
+	void DrawRibbon(const Buf<VtxP>& v);
 
 	// 地形
 	BOOL BuildTerrain(const Map& m);
@@ -261,6 +313,7 @@ public:
 	void HudRectGrad(float x, float y, float w, float h, DWORD top, DWORD bottom);
 	void HudFrame(float x, float y, float w, float h, float t, DWORD c);
 	void HudPanel(float x, float y, float w, float h, DWORD fill, DWORD border, float alpha = 1.f);
+	void HudGlass(float x, float y, float w, float h, DWORD fill, DWORD border, float alpha = 1.f);
 	void HudImage(ID3D11ShaderResourceView* srv, float x, float y, float w, float h, float u0, float v0, float u1, float v1, DWORD c);
 	void HudQuad(ID3D11ShaderResourceView* srv, const float* xy, const float* uv, DWORD c);
 	// align: 0=左 1=中央 2=右。戻り値: 描画幅
@@ -290,6 +343,7 @@ private:
 	BOOL CreateStates();
 	BOOL CreateTargets();
 	void ReleaseTargets();
+	BOOL ApplyPost();
 	BOOL CreateProcTextures();
 	BOOL LoadPngTex(const BYTE* data, UINT len, int slot);
 	TextSprite* GetText(const wchar_t* s, float px, int bold, int shadow, int box, float boxW, float boxH);
@@ -297,6 +351,10 @@ private:
 	void UpdateFrameCB();
 	void SetObj(const M4& world, const DrawParams& dp, float outlineW);
 	void BindForPass(BOOL skinned, BOOL outline);
+	void ReleaseSkinGpu(CreatureSkin& src);
+	BOOL EnsureSkinGpu(CreatureSkin& src, const float* bx, const float* bn);
+	void UpdateFaceGpu(CreatureSkin& src, int face);
+	BOOL GpuSkinAndDraw(CreatureSkin& src, const float* bx, const float* bn, float bt, float amt, const Pose& pose, const M4& world, const DrawParams& dp, GpuMesh& base);
 	void HudPush(float x, float y, float w, float h, float u0, float v0, float u1, float v1, DWORD c0, DWORD c1, ID3D11ShaderResourceView* srv);
 
 	HWND m_hwnd;
@@ -322,6 +380,16 @@ private:
 	ID3D11RenderTargetView* m_msRtv;
 	ID3D11Texture2D* m_dsTex;
 	ID3D11DepthStencilView* m_dsv;
+	ID3D11Texture2D* m_sceneTex;
+	ID3D11RenderTargetView* m_sceneRtv;
+	ID3D11ShaderResourceView* m_sceneSrv;
+	ID3D11Texture2D* m_blA;
+	ID3D11RenderTargetView* m_blARtv;
+	ID3D11ShaderResourceView* m_blASrv;
+	ID3D11Texture2D* m_blB;
+	ID3D11RenderTargetView* m_blBRtv;
+	ID3D11ShaderResourceView* m_blBSrv;
+	int m_blW, m_blH;
 	ID3D11Texture2D* m_shTex;
 	ID3D11DepthStencilView* m_shDsv;
 	ID3D11ShaderResourceView* m_shSrv;
@@ -343,6 +411,39 @@ private:
 	ID3D11PixelShader* m_psP;
 	ID3D11VertexShader* m_vsQ;
 	ID3D11PixelShader* m_psSky;
+	ID3D11PixelShader* m_psBloom;
+	ID3D11PixelShader* m_psBlur;
+	ID3D11PixelShader* m_psGrade;
+	ID3D11PixelShader* m_psUi;
+	ID3D11PixelShader* m_psGround[8];
+	ID3D11PixelShader* m_psProp;
+	ID3D11PixelShader* m_psWater;
+	ID3D11PixelShader* m_psLava;
+	ID3D11PixelShader* m_psOverride;
+	ID3D11Texture2D* m_groundTex;
+	ID3D11ShaderResourceView* m_groundSrv;
+	ID3D11Texture2D* m_matTex;
+	ID3D11ShaderResourceView* m_matSrv;
+	ID3D11ComputeShader* m_csSkin;
+	ID3D11Buffer* m_cbSkinBone;
+	ID3D11Buffer* m_cbSkinParm;
+	ID3D11Buffer* m_cbHairCloth;
+	ID3D11Buffer* m_faceDummy;
+	ID3D11ShaderResourceView* m_faceDummySRV;
+	ID3D11Buffer* m_hairSB;
+	ID3D11ShaderResourceView* m_hairBind;
+	ID3D11Buffer* m_hairVB;
+	ID3D11UnorderedAccessView* m_hairUAV;
+	ID3D11Texture2D* m_hairTex;
+	ID3D11ShaderResourceView* m_hairSrv;
+	GpuMesh m_hairDraw;
+	UINT m_hairNv;
+	ID3D11Buffer* m_scalpSB;
+	ID3D11ShaderResourceView* m_scalpSRV;
+	int m_scalpModel;
+	int m_scalpN;
+	Buf<VtxS> m_capBind;
+	GpuMesh m_capDraw;
 	ID3D11InputLayout* m_ilS;
 	ID3D11InputLayout* m_ilK;
 	ID3D11InputLayout* m_ilH;
@@ -387,9 +488,10 @@ private:
 	GpuMesh m_terrain;
 	GpuMesh m_water;
 	GpuMesh m_lava;
-	struct PropBatch { GpuMesh mesh; float hue; };
-	std::vector<PropBatch> m_props;
+	struct PropBatch { GpuMesh mesh; float hue; float mat; };
+	Fix<PropBatch, 16> m_props;
 	DWORD m_waterColor;
+	int m_theme;
 
 	// フレーム定数
 	struct FrameCB {
@@ -401,7 +503,9 @@ private:
 	// HUD
 	Fix<VtxH, 24576> m_hud;
 	ID3D11ShaderResourceView* m_hudSrv;
-	std::map<std::wstring, TextSprite> m_text;
+	enum { TAC_TEXTN = 512, TAC_TEXTK = 192 };
+	struct TextSlot { wchar_t key[TAC_TEXTK]; TextSprite sp; int live; };
+	TextSlot m_text[TAC_TEXTN];
 	BOOL m_inPortrait;
 	int m_portraitSlot;
 };
