@@ -2140,7 +2140,10 @@ void Renderer::SkinAndDraw(CreatureSkin& src, GpuMesh& base, const float* bx, co
 		~BaldHold() { if (on) { mesh.ib = ib; mesh.nIdx = n; } }
 	} hold(base, src, dp);
 	const float amtGpu = bx ? exp2f(bt) : 0.f;
-	if (GpuSkinAndDraw(src, bx, bn, bt, amtGpu, pose, world, dp, base)) return;
+	// 頂点が数センチで骨格側に倍率があるメッシュは、計算シェーダだとタイル上に残らない。
+	// 肖像もマップも、ここのスキン結果（身長およそ 1.7）をそのまま描く。
+	const BOOL boneScale = !bx && src.extR > 0.f && src.extR < 0.2f;
+	if (!boneScale && GpuSkinAndDraw(src, bx, bn, bt, amtGpu, pose, world, dp, base)) return;
 	static Buf<VtxS> v;
 	v.resize((int)src.bind.size());
 	if (!v.data() || v.size() < (int)src.bind.size()) return;
@@ -4197,6 +4200,48 @@ BOOL Renderer::CreatureExtent(int model, float& cx, float& cy, float& cz, float&
 		return TRUE;
 	}
 	return FALSE;
+}
+
+BOOL Renderer::CreaturePosedExtent(int model, const Pose& pose, float& cx, float& cy, float& cz, float& rad) const
+{
+	if (pose.nJ <= 0) return FALSE;
+	int nj = pose.nJ;
+	if (nj > MAXJ) nj = MAXJ;
+	float mn[3] = { 1e9f, 1e9f, 1e9f };
+	float mx[3] = { -1e9f, -1e9f, -1e9f };
+	int hit = 0;
+	for (const auto& s : m_skins) {
+		if (s.model != model || s.bind.empty()) continue;
+		for (const CSkinV& v : s.bind) {
+			M4 acc;
+			memset(&acc, 0, sizeof(acc));
+			float ws = 0.f;
+			for (int c = 0; c < 4; c++) {
+				int j = v.j[c];
+				float w = v.w[c] / 255.f;
+				if (w <= 0.f || j < 0 || j >= nj) continue;
+				const float* bm = pose.palette[j].m;
+				for (int k = 0; k < 16; k++) acc.m[k] += bm[k] * w;
+				ws += w;
+			}
+			if (ws < 0.01f) continue;
+			V3 p = MXformPt(acc, v3(v.p[0], v.p[1], v.p[2]));
+			if (p.x < mn[0]) mn[0] = p.x;
+			if (p.y < mn[1]) mn[1] = p.y;
+			if (p.z < mn[2]) mn[2] = p.z;
+			if (p.x > mx[0]) mx[0] = p.x;
+			if (p.y > mx[1]) mx[1] = p.y;
+			if (p.z > mx[2]) mx[2] = p.z;
+			hit++;
+		}
+	}
+	if (hit < 8 || mx[0] <= mn[0]) return FALSE;
+	float hx = (mx[0] - mn[0]) * .5f, hy = (mx[1] - mn[1]) * .5f, hz = (mx[2] - mn[2]) * .5f;
+	cx = (mn[0] + mx[0]) * .5f;
+	cy = (mn[1] + mx[1]) * .5f;
+	cz = (mn[2] + mx[2]) * .5f;
+	rad = max(hx, max(hy, hz));
+	return rad > 1e-4f;
 }
 
 BOOL Renderer::BeginPortrait(int slot)

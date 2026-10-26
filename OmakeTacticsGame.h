@@ -230,6 +230,8 @@ private:
 	void DrawCutInUi();
 	void ActorForUnit(int ui);
 	void LoadBattleCast();
+	// 読み込み済みの輸入メッシュを、まだ結んでいない敵アクターへ付け直す。
+	void BindImportedActors();
 	V3 ActorPos(int ui) const;
 	float ActorFace(int ui) const;
 	BOOL UnitInArena(int ui) const;
@@ -287,7 +289,7 @@ private:
 	int m_codex;             // 0=閉 1=スキル 2=成長
 	int m_codexPage;
 	int m_skillPage;
-	int m_skillTab;          // 0攻撃 1回復 2クラフト
+	int m_skillTab;          // 0攻撃 1回復 2クラフト 3陣形
 	int m_skMemoTab[MAX_ROSTER];
 	int m_skMemoPage[MAX_ROSTER];
 	int m_stashFull;         // 戦闘中に所持が12になった。不要売却のレイヤー
@@ -324,6 +326,7 @@ private:
 	int m_shopPage;
 	int m_shopSellPage;
 	int m_shopKind;
+	int m_shopSuper;   // 技珠店: 0=通常戦技 1=奥義
 	int m_shopBack;
 	int m_shopFit;
 	int m_shopFitId;
@@ -345,6 +348,7 @@ private:
 	int m_itemPage;
 	int m_statTip;     // ホバー中の能力。-1 で無し
 	int m_statOpen;    // 戦闘コマンドのステータス表示
+	int m_statWho;     // 表示中のユニット。負なら行動中
 
 	// 拠点の背景
 	Map m_showMap;
@@ -371,7 +375,7 @@ private:
 
 	// 編成
 	int m_partySel;
-	int m_eqPick;      // 0=閉 1=武器 2=防具 3,4=装飾 5,6=技珠
+	int m_eqPick;      // 0=閉 1=武器 2=防具 3,4=装飾 5,6,9=戦技 10=奥義 7,8=パッシブ
 	int m_eqPage;
 
 	// 進化
@@ -451,6 +455,7 @@ private:
 	int m_promoAsk;
 	float m_lvT;
 	int m_battleStage;
+	int m_importBind;
 	int m_victory;
 	float m_overT;
 	int m_resultLv0[MAX_PARTY], m_resultExp[MAX_PARTY];

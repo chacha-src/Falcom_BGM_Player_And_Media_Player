@@ -4,6 +4,7 @@
 #include "OmakeTacticsData.h"
 #include "DatArchive.h"
 #include <stdio.h>
+#include <math.h>
 
 namespace otac {
 
@@ -1405,10 +1406,10 @@ static const SkillDef kSkill[] = {
 	{ TX_SK_VITAL, TX_SKD_VITAL, SK_PHYS, 5, 120, -1, -1, 0, EL_NONE, 1, 40, EF_NONE, 0 },
 	{ TX_SK_BASH, TX_SKD_BASH, SK_PHYS, 5, 120, -1, -1, 0, EL_EARTH, 1, 0, EF_STUN, 0 },
 	{ TX_SK_DRAGONFANG, TX_SKD_DRAGONFANG, SK_PHYS, 14, 220, -1, -1, 0, EL_FIRE, 1, 10, EF_NONE, 0 },
-	{ TX_SK_HOLYBLADE, TX_SKD_HOLYBLADE, SK_PHYS, 12, 170, -1, -1, 0, EL_HOLY, 1, 5, EF_NONE, 0 },
+	{ TX_SK_HOLYBLADE, TX_SKD_HOLYBLADE, SK_PHYS, 10, 130, 1, 2, 1, EL_HOLY, 1, 5, EF_NONE, 0 },
 	{ TX_SK_ARROWRAIN, TX_SKD_ARROWRAIN, SK_PHYS, 12, 145, 2, 5, 1, EL_WIND, 2, 0, EF_NONE, 0 },
-	{ TX_SK_ASSASSINATE, TX_SKD_ASSASSINATE, SK_PHYS, 12, 200, -1, -1, 0, EL_DARK, 1, 25, EF_NONE, 0 },
-	{ TX_SK_BRAVE, TX_SKD_BRAVE, SK_PHYS, 18, 260, -1, -1, 0, EL_HOLY, 1, 15, EF_NONE, 0 },
+	{ TX_SK_ASSASSINATE, TX_SKD_ASSASSINATE, SK_PHYS, 12, 160, -1, -1, 0, EL_DARK, 1, 20, EF_POISON, 0 },
+	{ TX_SK_BRAVE, TX_SKD_BRAVE, SK_PHYS, 16, 140, -1, -1, 0, EL_HOLY, 2, 20, EF_NONE, 0 },
 	{ TX_SK_FIRE, TX_SKD_FIRE, SK_MAGIC, 4, 8, 1, 3, 0, EL_FIRE, 1, 0, EF_NONE, 0 },
 	{ TX_SK_BLIZZARD, TX_SKD_BLIZZARD, SK_MAGIC, 8, 11, 1, 3, 1, EL_ICE, 1, 0, EF_SLEEP, 0 },
 	{ TX_SK_THUNDER, TX_SKD_THUNDER, SK_MAGIC, 8, 14, 1, 4, 0, EL_THUNDER, 1, 0, EF_STUN, 0 },
@@ -1436,15 +1437,15 @@ static const SkillDef kSkill[] = {
 	{ TX_SK_E_SPIT, TX_SKD_E_SPIT, SK_PHYS, 0, 90, 1, 2, 0, EL_POISON, 1, 0, EF_SLEEP, 1 },
 	{ TX_SK_E_QUAKE, TX_SKD_E_QUAKE, SK_PHYS, 0, 130, 0, 0, 1, EL_EARTH, 1, 0, EF_STUN, 1 },
 	{ TX_SK_REFRESH, TX_SKD_REFRESH, SK_BUFF, 8, 0, 1, 1, 0, EL_HOLY, 1, 0, EF_REACT, 0 },
-	{ TX_SK_CLEAVE, TX_SKD_CLEAVE, SK_PHYS, 8, 110, 0, 0, 1, EL_NONE, 1, 0, EF_NONE, 0 },
+	{ TX_SK_CLEAVE, TX_SKD_CLEAVE, SK_PHYS, 8, 115, 0, 0, 1, EL_NONE, 1, 0, EF_DEFDOWN, 0 },
 	{ TX_SK_SNIPE, TX_SKD_SNIPE, SK_PHYS, 7, 185, 2, 6, 0, EL_WIND, 1, 25, EF_NONE, 0 },
-	{ TX_SK_VENOMEDGE, TX_SKD_VENOMEDGE, SK_PHYS, 6, 100, -1, -1, 0, EL_POISON, 1, 0, EF_POISON, 0 },
+	{ TX_SK_VENOMEDGE, TX_SKD_VENOMEDGE, SK_PHYS, 6, 95, 1, 2, 0, EL_POISON, 1, 0, EF_POISON, 0 },
 	{ TX_SK_SANCTUARY, TX_SKD_SANCTUARY, SK_HEAL, 14, 16, 0, 0, 2, EL_HOLY, 1, 0, EF_NONE, 0 },
 	{ TX_SK_SMITE, TX_SKD_SMITE, SK_MAGIC, 10, 16, 1, 3, 0, EL_HOLY, 1, 10, EF_NONE, 0 },
 	{ TX_SK_GRAVITY, TX_SKD_GRAVITY, SK_MAGIC, 12, 12, 1, 3, 1, EL_EARTH, 1, 0, EF_SLOW, 0 },
 	{ TX_SK_WARCRY, TX_SKD_WARCRY, SK_BUFF, 8, 0, 0, 0, 1, EL_FIRE, 1, 0, EF_BUFF_ATK, 0 },
 	{ TX_SK_RENEW, TX_SKD_RENEW, SK_HEAL, 12, 40, 0, 2, 0, EL_HOLY, 1, 0, EF_NONE, 0 },
-	{ TX_SK_MIRROR, TX_SKD_MIRROR, SK_BUFF, 8, 0, 0, 2, 0, EL_ICE, 1, 0, EF_BUFF_DEF, 0 },
+	{ TX_SK_MIRROR, TX_SKD_MIRROR, SK_BUFF, 8, 0, 0, 0, 1, EL_ICE, 1, 0, EF_BUFF_DEF, 0 },
 	{ TX_SK_GODSLASH, TX_SKD_GODSLASH, SK_PHYS, 22, 300, -1, -1, 0, EL_HOLY, 1, 20, EF_NONE, 0 },
 	{ TX_SK_RUIN, TX_SKD_RUIN, SK_MAGIC, 24, 40, 1, 4, 1, EL_DARK, 1, 0, EF_DEFDOWN, 0 },
 	{ TX_SK_APOC, TX_SKD_APOC, SK_MAGIC, 28, 36, 0, 0, 3, EL_FIRE, 1, 0, EF_NONE, 0 },
@@ -1455,7 +1456,7 @@ static_assert(sizeof(kSkill) / sizeof(kSkill[0]) == SKL_ART0, "base skill table"
 static const SkillDef kWide[] = {
 	{ TX_SK_SHOWER, TX_SKD_SHOWER, SK_PHYS, 14, 135, 2, 6, 2, EL_WIND, 3, 0, EF_NONE, 0 },
 	{ TX_SK_SHINE, TX_SKD_SHINE, SK_PHYS, 16, 120, 2, 6, 4, EL_HOLY, 3, 0, EF_NONE, 0 },
-	{ TX_SK_CRESCENT, TX_SKD_CRESCENT, SK_PHYS, 10, 95, 0, 0, 2, EL_WIND, 1, 0, EF_NONE, 0 },
+	{ TX_SK_CRESCENT, TX_SKD_CRESCENT, SK_PHYS, 10, 100, 0, 0, 2, EL_WIND, 1, 0, EF_SLOW, 0 },
 	{ TX_SK_GRANDSLASH, TX_SKD_GRANDSLASH, SK_PHYS, 16, 80, 0, 0, 4, EL_NONE, 1, 0, EF_NONE, 0 },
 	{ TX_SK_STORM, TX_SKD_STORM, SK_MAGIC, 26, 24, 2, 6, 4, EL_FIRE, 1, 0, EF_NONE, 0 },
 	{ TX_SK_FROSTFIELD, TX_SKD_FROSTFIELD, SK_MAGIC, 14, 9, 1, 4, 2, EL_ICE, 1, 0, EF_SLEEP, 0 },
@@ -1477,7 +1478,7 @@ static const SkillDef kWide[] = {
 	{ TX_SK_COLOSSMASH, TX_SKD_COLOSSMASH, SK_PHYS, 14, 220, -1, -1, 0, EL_EARTH, 1, 10, EF_IGNDEF, 0 },
 	{ TX_SK_ARENAKING, TX_SKD_ARENAKING, SK_PHYS, 16, 120, 1, 1, 3, EL_NONE, 1, 10, EF_NONE, 0, SH_FAN },
 	{ TX_SK_WARDRUM, TX_SKD_WARDRUM, SK_BUFF, 10, 0, 0, 0, 2, EL_FIRE, 1, 0, EF_BUFF_ATK, 0 },
-	{ TX_SK_AXEWHIRL, TX_SKD_AXEWHIRL, SK_PHYS, 12, 100, 1, 1, 3, EL_NONE, 1, 0, EF_NONE, 0, SH_FAN },
+	{ TX_SK_AXEWHIRL, TX_SKD_AXEWHIRL, SK_PHYS, 12, 75, 1, 1, 3, EL_NONE, 2, 0, EF_NONE, 0, SH_FAN },
 	{ TX_SK_FISTGOD, TX_SKD_FISTGOD, SK_PHYS, 16, 250, -1, -1, 0, EL_HOLY, 1, 15, EF_NONE, 0 },
 	{ TX_SK_WARLORD, TX_SKD_WARLORD, SK_PHYS, 14, 150, 1, 1, 4, EL_NONE, 1, 0, EF_NONE, 0, SH_LINE },
 	{ TX_SK_BREAKKING, TX_SKD_BREAKKING, SK_PHYS, 16, 140, 1, 1, 3, EL_EARTH, 1, 0, EF_IGNDEF, 0, SH_FAN },
@@ -1505,7 +1506,23 @@ static const SkillDef kWide[] = {
 	{ TX_SK_CLEANCUT, TX_SKD_CLEANCUT, SK_HEAL, 4, 6, 0, 1, 0, EL_HOLY, 1, 0, EF_CLEANSE, 0 },
 };
 static_assert(sizeof(kWide) / sizeof(kWide[0]) == SKL_AREAHEAL0 - (SKL_RAISE + 1), "wide skill table");
+static const SkillDef kForm[] = {
+	{ TX_SK_WING, TX_SKD_WING, SK_PHYS, 6, 145, 1, 1, 0, EL_NONE, 1, 0, EF_NONE, 0, SH_RADIUS, FM_WING },
+	{ TX_SK_CROSS, TX_SKD_CROSS, SK_PHYS, 8, 180, 1, 1, 0, EL_NONE, 1, 5, EF_NONE, 0, SH_RADIUS, FM_CROSS },
+	{ TX_SK_WALL, TX_SKD_WALL, SK_PHYS, 10, 110, 1, 1, 2, EL_NONE, 1, 0, EF_NONE, 0, SH_FAN, FM_WALL },
+	{ TX_SK_BACK, TX_SKD_BACK, SK_PHYS, 8, 140, 1, 1, 4, EL_WIND, 1, 0, EF_NONE, 0, SH_LINE, FM_BACK },
+	{ TX_SK_TRI, TX_SKD_TRI, SK_PHYS, 10, 120, 1, 1, 3, EL_NONE, 1, 0, EF_NONE, 0, SH_FAN, FM_TRI },
+	{ TX_SK_CHAIN, TX_SKD_CHAIN, SK_PHYS, 14, 240, 1, 1, 0, EL_NONE, 1, 10, EF_NONE, 0, SH_RADIUS, FM_CHAIN },
+	{ TX_SK_DIA, TX_SKD_DIA, SK_PHYS, 10, 125, 1, 1, 2, EL_HOLY, 1, 0, EF_NONE, 0, SH_FAN, FM_DIA },
+	{ TX_SK_SQUARE, TX_SKD_SQUARE, SK_PHYS, 12, 140, 0, 0, 1, EL_EARTH, 1, 0, EF_NONE, 0, SH_RADIUS, FM_SQUARE },
+	{ TX_SK_ECHELON, TX_SKD_ECHELON, SK_PHYS, 12, 155, 2, 5, 5, EL_WIND, 2, 0, EF_NONE, 0, SH_LINE, FM_ECHELON },
+	{ TX_SK_CIRCLE, TX_SKD_CIRCLE, SK_MAGIC, 16, 18, 0, 0, 2, EL_HOLY, 1, 0, EF_NONE, 0, SH_RADIUS, FM_CIRCLE },
+	{ TX_SK_PAIR, TX_SKD_PAIR, SK_HEAL, 8, 22, 0, 0, 1, EL_HOLY, 1, 0, EF_NONE, 0, SH_RADIUS, FM_PAIR },
+	{ TX_SK_PINCER, TX_SKD_PINCER, SK_PHYS, 10, 200, -1, -1, 0, EL_NONE, 1, 20, EF_NONE, 0, SH_RADIUS, FM_PINCER },
+};
+static_assert(sizeof(kForm) / sizeof(kForm[0]) == SKL_FORMN - SKL_FORM0, "form skill table");
 
+static const int kPaceLv[8] = { 9, 12, 16, 20, 23, 26, 29, 32 };
 static SkillDef s_art[SKL_ARTN - SKL_ART0];
 static int s_artOk = 0;
 static void BuildArts()
@@ -1538,6 +1555,28 @@ static void BuildArts()
 		else if (pat == 7) { d.kind = SK_PHYS; d.power = 100 + lv * 2; d.rMin = -1; d.rMax = -1; d.effect = EF_POISON; d.element = EL_POISON; }
 		if (pat == 0 && lv >= 16) d.effect = EF_DEFDOWN;
 		if (pat == 2 && lv >= 20) d.effect = EF_IGNDEF;
+	}
+	for (int g = 0; g < G_COUNT; g++) {
+		for (int role = 0; role < 8; role++) {
+			int local = kPaceLv[role] - 7;
+			SkillDef& d = s_art[g * 26 + local];
+			int el = 1 + ((local + g * 3) % 8);
+			memset(&d, 0, sizeof(d));
+			d.nameTx = TX_ART_FIRST + g * 26 + local;
+			d.descTx = TX_ARD_AREA + role;
+			d.element = el;
+			d.hits = 1;
+			d.enemyOnly = 0;
+			d.shape = SH_RADIUS;
+			if (role == 0) { d.kind = SK_MAGIC; d.mp = 6; d.power = 10; d.rMin = 1; d.rMax = 4; d.area = 1; }
+			else if (role == 1) { d.kind = SK_HEAL; d.mp = 6; d.power = 18; d.rMin = 0; d.rMax = 2; d.element = EL_HOLY; }
+			else if (role == 2) { d.kind = SK_MAGIC; d.mp = 14; d.power = 16; d.rMin = 2; d.rMax = 5; d.area = 2; }
+			else if (role == 3) { d.kind = SK_BUFF; d.mp = 8; d.rMin = 0; d.rMax = 0; d.area = 1; d.effect = EF_BUFF_AGI; d.element = EL_WIND; }
+			else if (role == 4) { d.kind = SK_MAGIC; d.mp = 12; d.power = 13; d.rMin = 1; d.rMax = 5; d.area = 5; d.shape = SH_LINE; }
+			else if (role == 5) { d.kind = SK_PHYS; d.mp = 12; d.power = 85; d.rMin = 1; d.rMax = 1; d.area = 3; d.hits = 2; d.critBonus = 10; d.shape = SH_FAN; }
+			else if (role == 6) { d.kind = SK_MAGIC; d.mp = 14; d.power = 11; d.rMin = 1; d.rMax = 4; d.area = 2; d.effect = EF_SLOW; }
+			else { d.kind = SK_MAGIC; d.mp = 22; d.power = 22; d.rMin = 0; d.rMax = 0; d.area = 3; d.effect = EF_STUN; }
+		}
 	}
 	s_artOk = 1;
 }
@@ -1588,17 +1627,56 @@ const SkillDef& SkillInfo(int s)
 		BuildArts();
 		return s_art[s - SKL_ART0];
 	}
-	if (s >= SKL_AREAHEAL0 && s < SKL_COUNT) {
+	if (s >= SKL_FORM0 && s < SKL_FORMN) return kForm[s - SKL_FORM0];
+	if (s >= SKL_AREAHEAL0 && s < SKL_FORM0) {
 		BuildAreaSupport();
 		return s_area[s - SKL_AREAHEAL0];
 	}
 	if (s > SKL_RAISE && s < SKL_AREAHEAL0) return kWide[s - (SKL_RAISE + 1)];
 	return kSkill[Clampi(s, 0, SKL_ART0 - 1)];
 }
+static const wchar_t* ArtElName(int el)
+{
+	switch (el) {
+	case EL_FIRE: return LangPick14(L"ファイア", L"Fire", L"Feu", L"Fuoco", L"Fuego", L"파이어", L"火焰", L"نار", L"Огонь", L"Feuer", L"Fogo", L"Vuur", L"Ogień", L"Ateş");
+	case EL_ICE: return LangPick14(L"アイス", L"Ice", L"Glace", L"Ghiaccio", L"Hielo", L"아이스", L"冰", L"جليد", L"Лёд", L"Eis", L"Gelo", L"IJs", L"Lód", L"Buz");
+	case EL_THUNDER: return LangPick14(L"サンダー", L"Thunder", L"Tonnerre", L"Tuono", L"Trueno", L"썬더", L"雷", L"رعد", L"Гром", L"Donner", L"Trovão", L"Donder", L"Grom", L"Yıldırım");
+	case EL_HOLY: return LangPick14(L"ホーリー", L"Holy", L"Sacré", L"Sacro", L"Sagrado", L"홀리", L"圣", L"مقدس", L"Святость", L"Heilig", L"Sagrado", L"Heilig", L"Świętość", L"Kutsal");
+	case EL_DARK: return LangPick14(L"ダーク", L"Dark", L"Ténèbres", L"Oscurità", L"Oscuridad", L"다크", L"暗", L"ظلام", L"Тьма", L"Dunkel", L"Trevas", L"Donker", L"Mrok", L"Karanlık");
+	case EL_WIND: return LangPick14(L"ウィンド", L"Wind", L"Vent", L"Vento", L"Viento", L"윈드", L"风", L"ريح", L"Ветер", L"Wind", L"Vento", L"Wind", L"Wiatr", L"Rüzgar");
+	case EL_EARTH: return LangPick14(L"アース", L"Earth", L"Terre", L"Terra", L"Tierra", L"어스", L"地", L"أرض", L"Земля", L"Erde", L"Terra", L"Aarde", L"Ziemia", L"Toprak");
+	case EL_POISON: return LangPick14(L"ポイズン", L"Poison", L"Poison", L"Veleno", L"Veneno", L"포이즌", L"毒", L"سم", L"Яд", L"Gift", L"Veneno", L"Gif", L"Trucizna", L"Zehir");
+	default: return L"";
+	}
+}
+static const wchar_t* ArtRoleName(int role)
+{
+	switch (role) {
+	case 0: return LangPick14(L"エリア", L"Area", L"Zone", L"Area", L"Área", L"에어리어", L"范围", L"نطاق", L"Область", L"Fläche", L"Área", L"Gebied", L"Obszar", L"Alan");
+	case 1: return LangPick14(L"ヒール", L"Heal", L"Soin", L"Cura", L"Cura", L"힐", L"治疗", L"شفاء", L"Лечение", L"Heilung", L"Cura", L"Genezing", L"Leczenie", L"Şifa");
+	case 2: return LangPick14(L"ワイド", L"Wide", L"Large", L"Ampia", L"Amplia", L"와이드", L"广域", L"واسع", L"Широкая", L"Weit", L"Ampla", L"Wijd", L"Szeroka", L"Geniş");
+	case 3: return LangPick14(L"ヘイスト", L"Haste", L"Hâte", L"Rapidità", L"Prisa", L"헤이스트", L"加速", L"تسريع", L"Ускорение", L"Hast", L"Pressa", L"Haast", L"Przyspieszenie", L"Hız");
+	case 4: return LangPick14(L"ビーム", L"Beam", L"Rayon", L"Raggio", L"Rayo", L"빔", L"射线", L"شعاع", L"Луч", L"Strahl", L"Raio", L"Straal", L"Promień", L"Işın");
+	case 5: return LangPick14(L"ファン", L"Fan", L"Éventail", L"Ventaglio", L"Abanico", L"팬", L"扇形", L"مروحة", L"Веер", L"Fächer", L"Leque", L"Waaier", L"Wachlarz", L"Yelpaze");
+	case 6: return LangPick14(L"スロウ", L"Slow", L"Lenteur", L"Lentezza", L"Lentitud", L"슬로우", L"迟缓", L"بطء", L"Замедление", L"Langsam", L"Lentidão", L"Traag", L"Spowolnienie", L"Yavaş");
+	default: return LangPick14(L"ノヴァ", L"Nova", L"Nova", L"Nova", L"Nova", L"노바", L"新星", L"نوفا", L"Нова", L"Nova", L"Nova", L"Nova", L"Nowa", L"Nova");
+	}
+}
 const wchar_t* SkillLabel(int s)
 {
+	if (s >= SKL_ART0 && s < SKL_ARTN) {
+		int role = PaceRoleOfLv((s - SKL_ART0) % 26 + 7);
+		if (role >= 0) {
+			static wchar_t buf[80];
+			const wchar_t* el = ArtElName(SkillInfo(s).element);
+			const wchar_t* roleW = ArtRoleName(role);
+			if (el && el[0]) swprintf_s(buf, L"%s・%s", el, roleW);
+			else wcscpy_s(buf, roleW);
+			return buf;
+		}
+	}
 	const SkillDef& sd = SkillInfo(s);
-	if (s >= SKL_AREAHEAL0 && s < SKL_COUNT && sd.area > 0) {
+	if (s >= SKL_AREAHEAL0 && s < SKL_FORM0 && sd.area > 0) {
 		static wchar_t buf[80];
 		swprintf_s(buf, L"%s%d", TT(sd.nameTx), sd.area);
 		return buf;
@@ -1924,11 +2002,16 @@ int MonsterGait(int monster)
 
 
 // ============================================================ キャラ
+// 7〜32 の間に、役割の違う技を8つだけ覚える。同じ型の下位は入れない。
+int PaceRoleOfLv(int lv)
+{
+	for (int i = 0; i < 8; i++) if (kPaceLv[i] == lv) return i;
+	return -1;
+}
 static int PaceSkill(int cls, int lv)
 {
-	if (lv < 7 || lv > 32) return -1;
+	if (PaceRoleOfLv(lv) < 0) return -1;
 	const ClassDef& cd = ClassInfo(cls);
-	for (int i = 0; i < LEARN_N; i++) if (cd.learn[i].skill >= 0 && cd.learn[i].lv == lv) return -1;
 	int g = cd.group;
 	if (g < 0 || g >= G_COUNT) g = 0;
 	return SKL_ART0 + g * 26 + (lv - 7);
@@ -1939,6 +2022,7 @@ static void CharTakeSkill(CharData& c, int s);
 void CharGrantReached(CharData& c)
 {
 	const ClassDef& cd = ClassInfo(c.cls);
+	for (int i = 0; i < SKL_ARTN - SKL_ART0; i++) CharTakeSkill(c, SKL_ART0 + i);
 	for (int i = 0; i < LEARN_N; i++)
 		if (cd.learn[i].skill >= 0 && cd.learn[i].lv > 0 && cd.learn[i].lv <= c.lv)
 			CharGiveSkill(c, cd.learn[i].skill);
@@ -2087,6 +2171,7 @@ int CharLevelUp(CharData& c, Rng& r, int gains[S_COUNT], int* learned, int learn
 		got[ng++] = sk;
 	};
 	take(CharLearnAt(c, c.lv));
+	take(PaceSkill(c.cls, c.lv));
 	for (int i = 0; i < LEARN_N; i++) if (cd.learn[i].lv == c.lv) take(cd.learn[i].skill);
 	if (learned && learnedMax > 0) {
 		int n = ng < learnedMax ? ng : learnedMax;
@@ -2272,6 +2357,17 @@ int UnitMotionStyle(const Unit& u, int skill)
 	int gear = GearMotion(GearOf(u.ch.reserved[6]));
 	int wear = gear >= 0 ? gear : UnitAttackStyle(u);
 	if (skill < 0) return wear;
+	if (IsFormSkill(skill)) {
+		switch (FormOf(skill)) {
+		case FM_CROSS: case FM_WALL: case FM_SQUARE: return AS_SPIN;
+		case FM_BACK: case FM_CHAIN: return AS_STAB;
+		case FM_TRI: return AS_CHOP2;
+		case FM_ECHELON: return AS_SHOOT;
+		case FM_CIRCLE: case FM_PAIR: return AS_CAST;
+		case FM_DIA: return AS_SLASH;
+		default: return AS_SLASH;
+		}
+	}
 	const SkillDef& sd = SkillInfo(skill);
 	if (sd.kind == SK_MAGIC || sd.kind == SK_HEAL || sd.kind == SK_BUFF) return AS_CAST;
 	if (sd.kind != SK_PHYS) return wear;
@@ -2292,7 +2388,11 @@ const wchar_t* UnitName(const Unit& u)
 	swprintf_s(buf, L"%s %s", TT(md.nameTx), TT(md.nameB));
 	return buf;
 }
-bool UnitHasSkill(const Unit& u, int s) { return CharHasSkill(u.ch, s); }
+bool UnitHasSkill(const Unit& u, int s)
+{
+	if (IsFormSkill(s)) return u.team == TEAM_PLAYER && !IsMon(u);
+	return CharHasSkill(u.ch, s);
+}
 
 void MakeEnemy(Unit& u, int monster, int lv, int boss, Rng& r)
 {
@@ -2350,8 +2450,16 @@ void MakeEnemy(Unit& u, int monster, int lv, int boss, Rng& r)
 		int a = (monster * 3) % CRAFT_NORM;
 		int b = (monster * 5 + 1) % CRAFT_NORM;
 		if (b == a) b = (b + 3) % CRAFT_NORM;
+		int cslot = (a + 7) % CRAFT_NORM;
+		if (cslot == a || cslot == b) cslot = (cslot + 1) % CRAFT_NORM;
 		u.craftEq[0] = CRAFT_BASE + line * CRAFT_PER_LINE + a;
-		u.craftEq[1] = CRAFT_BASE + line * CRAFT_PER_LINE + ((boss || u.ch.lv >= 18) ? CRAFT_NORM : b);
+		u.craftEq[1] = CRAFT_BASE + line * CRAFT_PER_LINE + b;
+		u.craftEq[2] = CRAFT_BASE + line * CRAFT_PER_LINE + cslot;
+		u.craftEq[3] = 0;
+		if (boss || u.ch.lv >= 18) {
+			int sk = boss ? 5 : (u.ch.lv >= 30 ? 2 : 0);
+			u.craftEq[3] = CRAFT_BASE + line * CRAFT_PER_LINE + CRAFT_NORM + sk;
+		}
 	}
 }
 
@@ -2688,12 +2796,183 @@ int SkillCastRangeMax(const Unit& u, int skill)
 	return s.rMax < 0 ? UnitRangeMax(u) : s.rMax;
 }
 
+bool IsFormSkill(int skill) { return skill >= SKL_FORM0 && skill < SKL_FORMN; }
+int FormOf(int skill) { return IsFormSkill(skill) ? SkillInfo(skill).form : FM_NONE; }
+
+static void FormAim(const Unit& u, int tx, int tz, int& fx, int& fz)
+{
+	if (tx != u.x || tz != u.z) {
+		int x = tx - u.x, z = tz - u.z;
+		fx = (abs(x) * 2 < abs(z)) ? 0 : (x > 0 ? 1 : -1);
+		fz = (abs(z) * 2 < abs(x)) ? 0 : (z > 0 ? 1 : -1);
+		if (fx == 0 && fz == 0) fz = 1;
+		return;
+	}
+	float s = sinf(u.face), c = cosf(u.face);
+	fx = (int)floorf(s >= 0.f ? s + 0.5f : s - 0.5f);
+	fz = (int)floorf(c >= 0.f ? c + 0.5f : c - 0.5f);
+	if (fx > 1) fx = 1; else if (fx < -1) fx = -1;
+	if (fz > 1) fz = 1; else if (fz < -1) fz = -1;
+	if (fx == 0 && fz == 0) fz = 1;
+	if (abs(fx) != abs(fz)) {
+		if (abs(fx) > abs(fz)) fz = 0;
+		else fx = 0;
+	}
+}
+
+static int FormAllyAt(const Battle& b, int x, int z, int team, int self)
+{
+	if (!Map::In(x, z)) return -1;
+	int i = b.UnitAt(x, z);
+	if (i < 0 || i == self) return -1;
+	if (!b.u[i].alive || b.u[i].team != team) return -1;
+	return i;
+}
+
+static int FormPush(int* out, int n, int maxOut, int id)
+{
+	if (id < 0 || n >= maxOut) return n;
+	for (int i = 0; i < n; i++) if (out[i] == id) return n;
+	out[n++] = id;
+	return n;
+}
+
+static int FormNeed(int form)
+{
+	switch (form) {
+	case FM_WING: case FM_BACK: case FM_PAIR: return 1;
+	case FM_CROSS: case FM_WALL: case FM_TRI: case FM_CHAIN: case FM_DIA: case FM_ECHELON: case FM_PINCER: return 2;
+	case FM_SQUARE: case FM_CIRCLE: return 3;
+	default: return 1;
+	}
+}
+
+int FormMembers(const Battle& b, int ui, int skill, int tx, int tz, int* out, int maxOut)
+{
+	int n = 0;
+	if (!IsFormSkill(skill) || ui < 0 || ui >= b.nUnits) return 0;
+	const Unit& u = b.u[ui];
+	int form = FormOf(skill);
+	int fx, fz;
+	FormAim(u, tx, tz, fx, fz);
+	int lx = -fz, lz = fx;
+	int bx = -fx, bz = -fz;
+	auto at = [&](int x, int z) { return FormAllyAt(b, x, z, u.team, ui); };
+	auto add = [&](int id) { n = FormPush(out, n, maxOut, id); };
+	switch (form) {
+	case FM_WING:
+		add(at(u.x + lx, u.z + lz));
+		add(at(u.x - lx, u.z - lz));
+		break;
+	case FM_CROSS: case FM_WALL:
+		add(at(u.x + lx, u.z + lz));
+		add(at(u.x - lx, u.z - lz));
+		break;
+	case FM_BACK:
+		add(at(u.x + bx, u.z + bz));
+		break;
+	case FM_TRI:
+		add(at(u.x + bx + lx, u.z + bz + lz));
+		add(at(u.x + bx - lx, u.z + bz - lz));
+		break;
+	case FM_CHAIN:
+		add(at(u.x + bx, u.z + bz));
+		add(at(u.x + bx * 2, u.z + bz * 2));
+		break;
+	case FM_DIA:
+		add(at(u.x + fx + lx, u.z + fz + lz));
+		add(at(u.x + fx - lx, u.z + fz - lz));
+		break;
+	case FM_SQUARE:
+		add(at(u.x + 1, u.z)); add(at(u.x - 1, u.z)); add(at(u.x, u.z + 1)); add(at(u.x, u.z - 1));
+		break;
+	case FM_ECHELON: {
+		int L = at(u.x + lx, u.z + lz), BL = at(u.x + bx + lx, u.z + bz + lz);
+		int R = at(u.x - lx, u.z - lz), BR = at(u.x + bx - lx, u.z + bz - lz);
+		if (L >= 0 && BL >= 0) { add(L); add(BL); }
+		if (R >= 0 && BR >= 0) { add(R); add(BR); }
+		break;
+	}
+	case FM_CIRCLE:
+		for (int dz = -1; dz <= 1; dz++) for (int dx = -1; dx <= 1; dx++) {
+			if (dx == 0 && dz == 0) continue;
+			add(at(u.x + dx, u.z + dz));
+		}
+		break;
+	case FM_PAIR:
+		add(at(u.x + 1, u.z)); add(at(u.x - 1, u.z)); add(at(u.x, u.z + 1)); add(at(u.x, u.z - 1));
+		break;
+	case FM_PINCER:
+		add(at(tx + lx, tz + lz));
+		add(at(tx - lx, tz - lz));
+		break;
+	default: break;
+	}
+	return n;
+}
+
+bool FormFits(const Battle& b, int ui, int skill, int tx, int tz)
+{
+	if (!IsFormSkill(skill) || ui < 0 || ui >= b.nUnits) return false;
+	int mem[8];
+	int n = FormMembers(b, ui, skill, tx, tz, mem, 8);
+	int form = FormOf(skill);
+	if (form == FM_WING) return n >= 1;
+	if (form == FM_CROSS || form == FM_WALL) return n >= 2;
+	if (form == FM_ECHELON) return n >= 2;
+	if (form == FM_SQUARE || form == FM_CIRCLE) return n >= 3;
+	if (form == FM_PAIR) return n >= 1;
+	return n >= FormNeed(form);
+}
+
+int FormBoostPct(const Battle& b, int ui, int skill, int tx, int tz)
+{
+	if (!IsFormSkill(skill)) return 100;
+	int mem[8];
+	int n = FormMembers(b, ui, skill, tx, tz, mem, 8);
+	int extra = n - FormNeed(FormOf(skill));
+	if (extra < 0) extra = 0;
+	if (extra > 3) extra = 3;
+	return 100 + extra * 15;
+}
+
+static bool FormReady(const Battle& b, int ui, int skill)
+{
+	const Unit& u = b.u[ui];
+	const SkillDef& sd = SkillInfo(skill);
+	if (sd.rMax == 0) {
+		if (!FormFits(b, ui, skill, u.x, u.z)) return false;
+		int tg[4];
+		return SkillTargets(b, ui, skill, u.x, u.z, tg, 4) > 0;
+	}
+	int rmin = SkillCastRangeMin(u, skill), rmax = SkillCastRangeMax(u, skill);
+	for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) {
+		int d = abs(x - u.x) + abs(z - u.z);
+		if (d < rmin || d > rmax) continue;
+		if (!FormFits(b, ui, skill, x, z)) continue;
+		if (sd.area == 0) {
+			int t = b.UnitAt(x, z);
+			if (t < 0 || !b.u[t].alive || b.u[t].team == u.team) continue;
+			if (!InAttackRange(b, u.x, u.z, rmin, rmax, x, z, true)) continue;
+		} else {
+			int tg[4];
+			if (SkillTargets(b, ui, skill, x, z, tg, 4) == 0) continue;
+		}
+		return true;
+	}
+	return false;
+}
+
 bool SkillUsable(const Battle& b, int ui, int skill)
 {
 	const Unit& u = b.u[ui];
+	if (IsFormSkill(skill)) {
+		if (!UnitHasSkill(u, skill) || u.mp < SkillInfo(skill).mp) return false;
+		return FormReady(b, ui, skill);
+	}
 	if (IsCraftId(skill)) {
 		BOOL have = FALSE;
-		for (int i = 0; i < 2; i++) if (u.craftEq[i] == skill) have = TRUE;
+		for (int i = 0; i < CRAFT_SLOT_N; i++) if (u.craftEq[i] == skill) have = TRUE;
 		if (!have) return false;
 		const SkillDef& s = SkillInfo(skill);
 		if (s.kind == SK_PASSIVE) return false;
@@ -2743,6 +3022,7 @@ int SkillTargets(const Battle& b, int caster, int skill, int cx, int cz, int* ou
 {
 	const Unit& c = b.u[caster];
 	const SkillDef& s = SkillInfo(skill);
+	if (IsFormSkill(skill) && !FormFits(b, caster, skill, cx, cz)) return 0;
 	bool friendly = (s.kind == SK_HEAL || s.kind == SK_BUFF);
 	int n = 0;
 	for (int i = 0; i < b.nUnits && n < maxOut; i++) {
@@ -2750,6 +3030,7 @@ int SkillTargets(const Battle& b, int caster, int skill, int cx, int cz, int* ou
 		if (s.effect == EF_RAISE) {
 			if (t.alive || !t.killed || t.team != c.team) continue;
 			if (Dist(t.x, t.z, cx, cz) > max(0, s.area)) continue;
+			if (b.UnitAt(t.x, t.z) >= 0) continue;
 			out[n++] = i;
 			continue;
 		}
@@ -2855,15 +3136,41 @@ static void AddCp(Unit& u, int n)
 	u.cp = c;
 }
 
+// 相手がかなり上のレベルのとき、味方は半分の確率で HP1 で踏みとどまる。
+static BOOL GutsHold(Unit& def, const Unit& atk, Rng& r)
+{
+	if (def.team != TEAM_PLAYER || atk.team == def.team) return FALSE;
+	int dl = def.ch.lv > 0 ? def.ch.lv : 1;
+	int al = atk.ch.lv;
+	if (al < dl + 8) return FALSE;
+	if (al * 2 < dl * 3) return FALSE;
+	if (!r.Chance(50)) return FALSE;
+	def.hp = 1;
+	return TRUE;
+}
+
 int ResolveAttack(Battle& b, int ai, int di, int skill, Rng& r, Strike* out, int maxOut, int cx, int cz)
 {
 	int n = 0;
 	Unit& a = b.u[ai];
 	const SkillDef* sd = skill >= 0 ? &SkillInfo(skill) : NULL;
 	if (sd) {
-		if (IsCraftId(skill)) a.cp = max(0, a.cp - CraftCpCost(skill - CRAFT_BASE));
+		if (IsCraftId(skill)) {
+			if (IsCraftSuper(skill)) a.cp = 0;
+			else a.cp = max(0, a.cp - CraftCpCost(skill - CRAFT_BASE));
+		}
 		else a.mp = max(0, a.mp - sd->mp);
+		if (IsFormSkill(skill) && FormOf(skill) == FM_SQUARE) {
+			int mem[8];
+			int nm = FormMembers(b, ai, skill, a.x, a.z, mem, 8);
+			a.buffDef = max(a.buffDef, 3);
+			for (int i = 0; i < nm; i++) b.u[mem[i]].buffDef = max(b.u[mem[i]].buffDef, 3);
+		}
 	}
+	auto scaleForm = [&](int dmg, int tx, int tz) -> int {
+		if (dmg <= 0 || !IsFormSkill(skill)) return dmg;
+		return (int)((long long)dmg * FormBoostPct(b, ai, skill, tx, tz) / 100);
+	};
 	// 範囲・回復・補助。範囲技は指定マスを中心にする（空マスでも可）
 	if (sd && (sd->area > 0 || sd->kind == SK_HEAL || sd->kind == SK_BUFF)) {
 		int targets[MAX_UNITS];
@@ -2877,7 +3184,7 @@ int ResolveAttack(Battle& b, int ai, int di, int skill, Rng& r, Strike* out, int
 		for (int k = 0; k < nt && n < maxOut; k++) {
 			Unit& d = b.u[targets[k]];
 			bool corpse = d.hp <= 0;
-			if (corpse && (sd->kind == SK_HEAL || sd->kind == SK_BUFF)) continue;
+			if (corpse && sd->effect != EF_RAISE && (sd->kind == SK_HEAL || sd->kind == SK_BUFF)) continue;
 			Strike s = {};
 			s.attacker = ai; s.defender = targets[k]; s.skill = skill; s.volley = wave;
 			if (sd->kind == SK_HEAL) {
@@ -2893,6 +3200,7 @@ int ResolveAttack(Battle& b, int ai, int di, int skill, Rng& r, Strike* out, int
 					int amt = UnitStat(a, S_MAG) + sd->power;
 					if (IsCraftId(skill)) amt = max(UnitStat(a, S_MAG), (UnitStat(a, S_STR) + UnitStat(a, S_MAG)) / 2) + sd->power;
 					if (UnitHasPas(a, PAS_HEAL)) amt = amt * 125 / 100;
+					amt = amt * FormBoostPct(b, ai, skill, cx0, cz0) / 100;
 					int before = d.hp;
 					d.hp = min(d.ch.stat[S_HP], d.hp + amt);
 					s.dmg = -(d.hp - before);
@@ -2910,13 +3218,13 @@ int ResolveAttack(Battle& b, int ai, int di, int skill, Rng& r, Strike* out, int
 					s.hit = 1;
 					s.overkill = 1;
 					s.crit = (int)(r.Next() % 100) < crit;
-					s.dmg = s.crit ? dmg * 2 : dmg;
+					s.dmg = scaleForm(s.crit ? dmg * 2 : dmg, cx0, cz0);
 					AddCp(a, 5 + s.dmg / 12);
 				} else {
 				s.hit = (int)(r.Next() % 100) < hit;
 				if (s.hit) {
 					s.crit = (int)(r.Next() % 100) < crit;
-					s.dmg = s.crit ? dmg * 2 : dmg;
+					s.dmg = scaleForm(s.crit ? dmg * 2 : dmg, cx0, cz0);
 					if ((long long)s.dmg >= (long long)d.hp * 2) s.overkill = 1;
 					d.hp -= s.dmg;
 					AddCp(a, 5 + s.dmg / 12);
@@ -2926,6 +3234,7 @@ int ResolveAttack(Battle& b, int ai, int di, int skill, Rng& r, Strike* out, int
 					if (sd->effect != EF_NONE) s.landed = ApplyEffect(b, a, d, sd->effect, r) ? 1 : 0;
 					if (d.hp <= 0) {
 						if (!d.pasUsed && UnitHasPas(d, PAS_GUARD)) { d.hp = 1; d.pasUsed = 1; }
+						else if (GutsHold(d, a, r)) s.guts = 1;
 						else { d.hp = 0; d.sleep = d.confuse = d.stun = d.poison = d.slow = 0; s.kill = 1; }
 					}
 					if (a.team != d.team && !held && !UnitHasPas(d, PAS_NOSLOW)) d.ct = max(0, d.ct - 500);
@@ -2961,13 +3270,13 @@ int ResolveAttack(Battle& b, int ai, int di, int skill, Rng& r, Strike* out, int
 			s.hit = 1;
 			s.overkill = 1;
 			s.crit = (int)(r.Next() % 100) < crit;
-			s.dmg = s.crit ? dmg * 2 : dmg;
+			s.dmg = atkTurn ? scaleForm(s.crit ? dmg * 2 : dmg, y.x, y.z) : (s.crit ? dmg * 2 : dmg);
 			AddCp(x, 5 + s.dmg / 12);
 		} else {
 		s.hit = (int)(r.Next() % 100) < hit;
 		if (s.hit) {
 			s.crit = (int)(r.Next() % 100) < crit;
-			s.dmg = s.crit ? dmg * 2 : dmg;
+			s.dmg = atkTurn ? scaleForm(s.crit ? dmg * 2 : dmg, y.x, y.z) : (s.crit ? dmg * 2 : dmg);
 			if ((long long)s.dmg >= (long long)y.hp * 2) s.overkill = 1;
 			y.hp -= s.dmg;
 			AddCp(x, 5 + s.dmg / 12);
@@ -2984,6 +3293,7 @@ int ResolveAttack(Battle& b, int ai, int di, int skill, Rng& r, Strike* out, int
 				s.landed = ApplyEffect(b, x, y, fx, r) ? 1 : 0;
 			if (y.hp <= 0) {
 				if (!y.pasUsed && UnitHasPas(y, PAS_GUARD)) { y.hp = 1; y.pasUsed = 1; }
+				else if (GutsHold(y, x, r)) s.guts = 1;
 				else { y.hp = 0; y.sleep = y.confuse = y.stun = y.poison = y.slow = 0; s.kill = 1; }
 			}
 			if (x.team != y.team && !held && !UnitHasPas(y, PAS_NOSLOW)) y.ct = max(0, y.ct - (500 + (s.crit ? 250 : 0)));
@@ -3055,7 +3365,10 @@ int AppendAssists(Battle& b, Rng& r, Strike* out, int n, int maxOut)
 			s.dmg = s.crit ? dmg * 2 : dmg;
 			if ((long long)s.dmg >= (long long)y.hp * 2) s.overkill = 1;
 			y.hp -= s.dmg;
-			if (y.hp <= 0) { y.hp = 0; s.kill = 1; }
+			if (y.hp <= 0) {
+				if (GutsHold(y, m, r)) s.guts = 1;
+				else { y.hp = 0; s.kill = 1; }
+			}
 			if (!UnitAilmentHeld(y) && !UnitHasPas(y, PAS_NOSLOW)) y.ct = max(0, y.ct - (500 + (s.crit ? 250 : 0)));
 		}
 		out[n++] = s;
@@ -3593,9 +3906,14 @@ void AiDecide(const Battle& b, int ui, AiPlan& p, Rng& r)
 			if (!InAttackRange(b, x, z, UnitRangeMin(u), UnitRangeMax(u), t.x, t.z, true)) continue;
 			Forecast f;
 			CalcForecast(b, ui, i, -1, f);
+			// トドメと残HPだけでは選ばない。近い相手、手強い相手、その場の揺らぎも同じ重さで見る。
 			float exp = f.dmg * f.hits * f.hit / 100.f;
-			float sc = exp + (f.dmg * f.hits >= t.hp ? 40.f : 0) - (f.canCounter ? f.cdmg * f.chits * f.chit / 100.f * .5f : 0) + place;
-			sc += (1.f - (float)t.hp / max(1, t.ch.stat[S_HP])) * 8.f;
+			float sc = exp * .55f + (f.dmg * f.hits >= t.hp ? 12.f : 0.f);
+			sc += t.ch.lv * .35f;
+			sc += (1.f - (float)t.hp / max(1, t.ch.stat[S_HP])) * 4.f;
+			sc -= (f.canCounter ? f.cdmg * f.chits * f.chit / 100.f * .35f : 0.f);
+			sc -= Dist(ox, oz, t.x, t.z) * 2.5f;
+			sc += place + r.F(0, 14.f);
 			if (sc > best) { best = sc; p.moveX = x; p.moveZ = z; p.target = i; p.skill = -1; p.castX = t.x; p.castZ = t.z; }
 		}
 		// スキル
@@ -3635,16 +3953,17 @@ void AiDecide(const Battle& b, int ui, AiPlan& p, Rng& r)
 						Forecast f;
 						CalcForecast(b, ui, targets[k], s, f);
 						const Unit& q = b.u[targets[k]];
-						tot += f.dmg * f.hits * f.hit / 100.f + (f.dmg * f.hits >= q.hp ? 40.f : 0);
+						tot += f.dmg * f.hits * f.hit / 100.f * .55f + (f.dmg * f.hits >= q.hp ? 12.f : 0.f);
+						tot += q.ch.lv * .2f - Dist(ox, oz, q.x, q.z) * 1.6f;
 					}
 					if (tot <= 0) continue;
 					sc += tot - sd.mp * .4f;
 				}
-				sc += r.F(0, 1.5f);
+				sc += r.F(0, 10.f);
 				if (sc > best) { best = sc; p.moveX = x; p.moveZ = z; p.target = i; p.skill = s; p.castX = tx; p.castZ = tz; }
 			}
 		}
-		for (int ck = 0; ck < 2; ck++) {
+		for (int ck = 0; ck < CRAFT_SLOT_N; ck++) {
 			int cs = u.craftEq[ck];
 			if (cs < CRAFT_BASE) continue;
 			BOOL ougi = IsCraftSuper(cs);
@@ -3676,7 +3995,8 @@ void AiDecide(const Battle& b, int ui, AiPlan& p, Rng& r)
 					Forecast f;
 					CalcForecast(b, ui, i, cs, f);
 					if (f.dmg <= 0) continue;
-					sc += f.dmg * f.hit / 100.f * (ougi ? .4f : .6f);
+					sc += f.dmg * f.hit / 100.f * (ougi ? .25f : .35f);
+					sc += t.ch.lv * .25f - Dist(ox, oz, t.x, t.z) * 1.8f + r.F(0, 10.f);
 				}
 				if (sc > best) { best = sc; p.moveX = x; p.moveZ = z; p.target = i; p.skill = cs; p.castX = tx; p.castZ = tz; }
 			}
@@ -3953,18 +4273,18 @@ bool DropConsumable(SaveData& s, int monster, Rng& r, wchar_t* name, int nameN)
 	return true;
 }
 static const GoodDef kGood[] = {
-	{ 40, IT_ELIXIR, -1, TX_IT_ELIXIR, 1 },
-	{ 70, IT_MIGHT, -1, TX_IT_MIGHT, 1 },
+	{ 40, IT_ELIXIR, -1, TX_IT_ELIXIR, 0 },
+	{ 70, IT_MIGHT, -1, TX_IT_MIGHT, 0 },
 	{ 55, IT_DELAY, -1, TX_IT_DELAY, 0 },
 	{ 160, IT_RAISE, -1, TX_IT_RAISE, 0 },
-	{ 90, -1, IX_FULL, TX_IT_FULL, 1 },
-	{ 80, -1, IX_ATK, TX_IT_ATK, 1 },
-	{ 80, -1, IX_DEF, TX_IT_DEF, 1 },
-	{ 80, -1, IX_AGI, TX_IT_AGI, 1 },
+	{ 90, -1, IX_FULL, TX_IT_FULL, 0 },
+	{ 80, -1, IX_ATK, TX_IT_ATK, 0 },
+	{ 80, -1, IX_DEF, TX_IT_DEF, 0 },
+	{ 80, -1, IX_AGI, TX_IT_AGI, 0 },
 	{ 60, -1, IX_SLOW, TX_IT_SLOW, 0 },
 	{ 60, -1, IX_VENOM, TX_IT_VENOM, 0 },
-	{ 50, -1, IX_CURE, TX_IT_CURE, 1 },
-	{ 70, -1, IX_ETHER, TX_IT_ETHER, 1 },
+	{ 50, -1, IX_CURE, TX_IT_CURE, 0 },
+	{ 70, -1, IX_ETHER, TX_IT_ETHER, 0 },
 };
 int GoodCount() { return (int)(sizeof(kGood) / sizeof(kGood[0])); }
 const GoodDef* GoodAt(int i) { return (i >= 0 && i < GoodCount()) ? &kGood[i] : NULL; }

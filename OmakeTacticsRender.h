@@ -190,7 +190,7 @@ public:
 		Buf<BYTE> meshHair;  // 1 = 焼き込みの髪。髪型を選んだときはこの頂点を含む面を描かない
 		ID3D11Buffer* baldIB = NULL;
 		UINT baldN = 0;
-		float extX, extY, extZ, extR;   // モデル空間の中心と半径。肖像の枠に全身を収める
+		float extX, extY, extZ, extR;   // バインド頂点の中心と半径
 		int bustNip[2] = { -1, -1 };    // 左右の乳首頂点。服の胸を楕円面へ載せる基準
 		Buf<unsigned char> bustR; // 1=左 2=右 3=両方。胸の布だけ
 		ID3D11Buffer* bindSB = NULL;
@@ -253,6 +253,8 @@ public:
 	int FindStatic(const char* n) const;
 	int CreatureCount() const { return (int)m_creatures.size(); }
 	BOOL CreatureExtent(int model, float& cx, float& cy, float& cz, float& rad) const;
+	// 今のポーズでスキンしたメッシュの中心と半径（モデル空間）。肖像の枠はこれをワールドへ変換して使う。
+	BOOL CreaturePosedExtent(int model, const Pose& pose, float& cx, float& cy, float& cz, float& rad) const;
 	int CreatureModel(int i) const {
 		if (m_monN > 0) return (i >= 0 && i < m_monN) ? m_monModel[i] : -1;
 		return (i >= 0 && i < (int)m_skins.size()) ? m_skins[i].model : -1;

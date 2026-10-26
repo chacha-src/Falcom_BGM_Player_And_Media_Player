@@ -305,9 +305,28 @@ enum SkillId {
 	SKL_ESUNA, SKL_PURIFY, SKL_CLEANCUT,
 	SKL_AREAHEAL0,
 	SKL_AREARAISE0 = SKL_AREAHEAL0 + 8,
-	SKL_COUNT = SKL_AREARAISE0 + 8
+	SKL_FORM0 = SKL_AREARAISE0 + 8,
+	SKL_FORM_WING = SKL_FORM0,
+	SKL_FORM_CROSS,
+	SKL_FORM_WALL,
+	SKL_FORM_BACK,
+	SKL_FORM_TRI,
+	SKL_FORM_CHAIN,
+	SKL_FORM_DIA,
+	SKL_FORM_SQUARE,
+	SKL_FORM_ECHELON,
+	SKL_FORM_CIRCLE,
+	SKL_FORM_PAIR,
+	SKL_FORM_PINCER,
+	SKL_FORMN,
+	SKL_COUNT = SKL_FORMN
 };
 enum { SH_RADIUS = 0, SH_LINE = 1, SH_FAN = 2 };
+enum FormKind {
+	FM_NONE = 0,
+	FM_WING, FM_CROSS, FM_WALL, FM_BACK, FM_TRI, FM_CHAIN,
+	FM_DIA, FM_SQUARE, FM_CIRCLE, FM_PAIR, FM_PINCER, FM_ECHELON
+};
 struct SkillDef {
 	int nameTx, descTx;
 	int kind;
@@ -321,6 +340,7 @@ struct SkillDef {
 	int effect;      // 追加効果
 	int enemyOnly;
 	int shape = SH_RADIUS;
+	int form = FM_NONE;
 };
 enum SkillEffect {
 	EF_NONE, EF_SLOW, EF_DEFDOWN, EF_POISON, EF_DRAIN, EF_IGNDEF, EF_BUFF_DEF, EF_BUFF_AGI, EF_BUFF_ATK, EF_REACT, EF_RAISE,
@@ -333,6 +353,7 @@ void SkillAttrText(const SkillDef& sd, wchar_t* out, int cap);
 void MonsterWeakText(int monster, wchar_t* out, int cap);
 const SkillDef& SkillInfo(int s);
 const wchar_t* SkillLabel(int s);
+int PaceRoleOfLv(int lv);
 
 // ---------------- キャラクタ（セーブ対象） ----------------
 enum { MAX_ROSTER = 100, MAX_PARTY = 10, MAX_ENEMY = 640, NAME_LEN = 16 };
@@ -459,7 +480,7 @@ struct Unit {
 	int nLearned;
 	int killed;          // 戦闘不能
 	int cp;              // 0..200。ステージをまたいで保持
-	int craftEq[2];      // 0=空。戦技 id（CRAFT_BASE+）
+	int craftEq[4];      // 0=空。0..2 は通常戦技、3 は奥義。id は CRAFT_BASE+
 	int accEq[2];        // 0=空。装飾 id
 	int pasEq[2];        // 0=空。パッシブ id
 	int pasUsed;         // 1=不屈をこの戦闘で使った
@@ -514,6 +535,7 @@ struct Strike {
 	int landed;        // 状態異常が今回新たに付いた
 	int volley;        // 多段の何射目か。同じ射は同時に着弾する
 	int overkill;      // 残HPの2倍以上、またはトドメ後の段
+	int guts;          // 1=レベル差で根性。HP1で残った
 };
 struct Forecast {
 	int dmg, hit, crit;     // 1 回あたり
@@ -534,6 +556,11 @@ int  AppendAssists(Battle& b, Rng& r, Strike* out, int n, int maxOut);
 int  SkillTargets(const Battle& b, int caster, int skill, int cx, int cz, int* out, int maxOut);
 bool ShapeCell(int shape, int area, int ax, int az, int cx, int cz, int tx, int tz);
 bool SkillUsable(const Battle& b, int ui, int skill);
+bool IsFormSkill(int skill);
+int  FormOf(int skill);
+bool FormFits(const Battle& b, int ui, int skill, int tx, int tz);
+int  FormMembers(const Battle& b, int ui, int skill, int tx, int tz, int* out, int maxOut);
+int  FormBoostPct(const Battle& b, int ui, int skill, int tx, int tz);
 int  SkillCastRangeMin(const Unit& u, int skill);
 int  SkillCastRangeMax(const Unit& u, int skill);
 int  ExpForAction(const Unit& a, const Unit& d, int dmg, int stage);
@@ -662,10 +689,11 @@ int GoodHave(const SaveData& s, int i);
 bool GoodBuy(SaveData& s, int i);
 bool GoodTake(SaveData& s, int i);
 
-enum { CRAFT_BASE = 100000, CRAFT_NORM = 15, CRAFT_SUPER_N = 6, CRAFT_PER_LINE = 21, CRAFT_LINES = 7, CRAFT_N = 147, CP_MAX = 200 };
+enum { CRAFT_BASE = 100000, CRAFT_NORM = 15, CRAFT_SUPER_N = 6, CRAFT_PER_LINE = 21, CRAFT_LINES = 7, CRAFT_N = 147, CP_MAX = 200, CRAFT_SLOT_N = 4 };
 bool IsCraftId(int skill);
 bool IsCraftSuper(int skill);
 int CraftCpCost(int index);
+void CraftCostText(int index, wchar_t* out, int cap);
 const wchar_t* CraftName(int skill);
 const wchar_t* CraftShapeName(int area, int shape = 0);
 const wchar_t* CraftDesc(int skill);

@@ -472,7 +472,7 @@ static int MakeGolem(Renderer& r)
 }
 
 // 手続きアニメ（clip 種別ごと）
-enum { PK_IDLE, PK_MOVE, PK_ATTACK, PK_CAST, PK_HIT, PK_DEATH, PK_CHEER };
+enum { PK_IDLE, PK_MOVE, PK_ATTACK, PK_CAST, PK_HIT, PK_DEATH, PK_CHEER, PK_RISE };
 static int ProcKind(int clip)
 {
 	switch (clip) {
@@ -482,13 +482,14 @@ static int ProcKind(int clip)
 	case CL_CAST_SHOOT: case CL_CAST_RAISE: case CL_CAST_LONG: return PK_CAST;
 	case CL_HIT_A: case CL_HIT_B: case CL_DODGE: return PK_HIT;
 	case CL_DEATH: return PK_DEATH;
-	case CL_CHEER: case CL_TAUNT: case CL_INTERACT: case CL_USE: case CL_SPAWN: return PK_CHEER;
+	case CL_SPAWN: return PK_RISE;
+	case CL_CHEER: case CL_TAUNT: case CL_INTERACT: case CL_USE: return PK_CHEER;
 	}
 	return PK_IDLE;
 }
 static float ProcLen(int kind)
 {
-	static const float L[] = { 2.f, .6f, .9f, 1.2f, .5f, 1.2f, 1.4f };
+	static const float L[] = { 2.f, .6f, .9f, 1.2f, .5f, 1.2f, 1.4f, 1.05f };
 	return L[kind];
 }
 static int ProcLoops(int kind) { return kind == PK_IDLE || kind == PK_MOVE; }
@@ -522,9 +523,11 @@ static void ProcAnim(int look, int clip, float t, Q4* rot, V3* tr, PoseMods& mod
 		case PK_HIT: sq = 1.f - .3f * sinf(u * PI); shake = sinf(u * 40.f) * .05f * (1 - u); break;
 		case PK_DEATH: sq = Lerpf(1.f, .12f, Smooth01(u)); break;
 		case PK_CHEER: { float ph = fmodf(u * 3.f, 1.f); lift = sinf(ph * PI) * .3f; sq = 1.f + .15f * sinf(ph * PI); } break;
+		case PK_RISE: { float k = 1.f - Smooth01(u); sq = Lerpf(1.f, .12f, k); lift = sinf(Smooth01(u) * PI) * .28f; } break;
 		}
 		float xz = 1.f / sqrtf(max(.1f, sq));
 		if (kind == PK_DEATH) xz = Lerpf(1.f, 1.6f, Smooth01(u));
+		if (kind == PK_RISE) xz = Lerpf(1.f, 1.6f, 1.f - Smooth01(u));
 		mods.scale[SJ_BODY] = v3(xz, sq, xz);
 		mods.any = 1;
 		tr[SJ_ROOT] = v3(shake, lift, -fwd);
@@ -547,6 +550,13 @@ static void ProcAnim(int look, int clip, float t, Q4* rot, V3* tr, PoseMods& mod
 		if (kind == PK_CAST) rot[BJ_HEAD] = QX(-sinf(u * PI) * .4f);
 		if (kind == PK_HIT) { root.z = sinf(u * PI) * .25f; rot[BJ_BODY] = QX(sinf(u * PI) * .5f); }
 		if (kind == PK_DEATH) { root.y -= Smooth01(u) * .85f; rot[BJ_BODY] = QX(Smooth01(u) * 1.5f); rot[BJ_WL] = QZ(-.4f); rot[BJ_WR] = QZ(.4f); }
+		if (kind == PK_RISE) {
+			float k = 1.f - Smooth01(u);
+			root.y = -k * .85f + sinf(Smooth01(u) * PI) * .16f;
+			rot[BJ_BODY] = QX(k * 1.5f);
+			rot[BJ_WL] = QZ(Lerpf(flap * .75f, -.4f, k));
+			rot[BJ_WR] = QZ(Lerpf(-flap * .75f, .4f, k));
+		}
 		if (kind == PK_CHEER) root.y += sinf(u * PI * 2.f) * .15f;
 		tr[BJ_ROOT] = root;
 		return;
@@ -579,6 +589,13 @@ static void ProcAnim(int look, int clip, float t, Q4* rot, V3* tr, PoseMods& mod
 		}
 		if (kind == PK_HIT) { rot[WJ_BODY] = QX(sinf(u * PI) * .3f); root.z = sinf(u * PI) * .2f; }
 		if (kind == PK_DEATH) { float k = Smooth01(u); rot[WJ_BODY] = QZ(k * 1.1f); root.y -= k * .6f; rot[WJ_WL] = QZ(-.6f * k); rot[WJ_WR] = QZ(.2f); }
+		if (kind == PK_RISE) {
+			float k = 1.f - Smooth01(u);
+			rot[WJ_BODY] = QZ(k * 1.1f);
+			root.y = -k * .6f + sinf(Smooth01(u) * PI) * .12f;
+			rot[WJ_WL] = QMul(QY(.15f * (1.f - k)), QZ(-.6f * k));
+			rot[WJ_WR] = QMul(QY(-.15f * (1.f - k)), QZ(.2f * k));
+		}
 		if (kind == PK_CHEER) { rot[WJ_NECK] = QX(-sinf(u * PI) * .6f); rot[WJ_JAW] = QX(sinf(u * PI) * .6f); }
 		tr[WJ_ROOT] = root;
 		return;
@@ -609,6 +626,13 @@ static void ProcAnim(int look, int clip, float t, Q4* rot, V3* tr, PoseMods& mod
 		}
 		if (kind == PK_HIT) { rot[GJ_TORSO] = QX(sinf(u * PI) * .3f); root.z = sinf(u * PI) * .12f; }
 		if (kind == PK_DEATH) { float k = Smooth01(u); rot[GJ_HIPS] = QX(-k * 1.35f); root.y = -k * .3f; root.z = -k * .3f; }
+		if (kind == PK_RISE) {
+			float k = 1.f - Smooth01(u);
+			rot[GJ_HIPS] = QX(-k * 1.35f);
+			rot[GJ_TORSO] = QX((1.f - k) * .08f);
+			root.y = -k * .3f + sinf(Smooth01(u) * PI) * .08f;
+			root.z = -k * .3f;
+		}
 		if (kind == PK_CHEER) { float k = sinf(u * PI); rot[GJ_AL] = QX(-k * 2.6f); rot[GJ_AR] = QX(-k * 2.6f); }
 		tr[GJ_ROOT] = root;
 	}
@@ -1580,6 +1604,7 @@ void ActorDraw(Renderer& r, const Library& lib, Actor& a, const M4& world, const
 		}
 		if (!ava) {
 			d.clothTint = 0;
+			if (!hum) d.twoSided = 1;
 			r.DrawSkinnedCreature(a.model, a.pose, world, d);
 		}
 		const int nAtt = ava ? a.wepAtt : a.nAtt, nGear = ava ? a.wepGear : a.nGear;
