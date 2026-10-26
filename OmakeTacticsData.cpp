@@ -2394,6 +2394,42 @@ bool UnitHasSkill(const Unit& u, int s)
 	return CharHasSkill(u.ch, s);
 }
 
+// 足の半幅。タイル中心から 0.5 が端。
+// 輸入メッシュは休息姿勢の下半身で測る。ブロブフィッシュは 1.68 で 2x2。
+// 半幅 1.05 まで（猫や忍者、ゴーレム級の足）は 1。そこから 2.15 までは 2。胴が 2x2 の外まで出るものは 3。
+static float ClassicFoot(int look)
+{
+	switch (look) {
+	case LK_SLIME: return 0.42f;
+	case LK_BAT: return 0.18f;
+	case LK_WYVERN: return 0.28f;
+	case LK_GOLEM: return 0.42f;
+	default: return 0.20f;
+	}
+}
+static int SpanFromHalf(float half)
+{
+	if (half > 2.15f) return 3;
+	if (half > 1.05f) return 2;
+	return 1;
+}
+static int HumanoidImport(const wchar_t* nm)
+{
+	if (!nm || wcsncmp(nm, L"Hum", 3) != 0 || !nm[3]) return 0;
+	return nm[3] >= L'A' && nm[3] <= L'Z';
+}
+static int MonsterSpan(const MonsterDef& md, int boss)
+{
+	float sc = md.scale * (boss ? 1.15f : 1.f);
+	float half = ClassicFoot(md.look);
+	if (md.look == LK_MESH) {
+		float f = TacMonsterFoot(md.model);
+		if (f > 0.01f) half = f;
+		if (md.model >= 0 && md.model < kImportN && HumanoidImport(kImportName[md.model])) half = 0.2f;
+	}
+	return SpanFromHalf(half * sc);
+}
+
 void MakeEnemy(Unit& u, int monster, int lv, int boss, Rng& r)
 {
 	memset(&u, 0, sizeof(u));
@@ -2440,6 +2476,7 @@ void MakeEnemy(Unit& u, int monster, int lv, int boss, Rng& r)
 	u.hp = u.ch.stat[S_HP];
 	u.mp = u.ch.stat[S_MP];
 	u.cp = boss ? 30 : 0;
+	u.span = MonsterSpan(md, boss);
 	{
 		int line = monster % 6;
 		if (monster >= 0 && monster < M_COUNT) {
@@ -2486,11 +2523,68 @@ static int EnterCost(const Map& m, int x, int z, int moveType)
 	return cost;
 }
 
+// 原点を (x,z) から (nx,nz) へ 1 マス動かす。足跡の全セルが通れるときだけ。
+// 1x1 は従来どおり味方のマスを通過できる。2x2 以上は誰とも重ならない。
+static bool FootStep(const Battle& b, int ui, int x, int z, int nx, int nz)
+{
+	const Unit& u = b.u[ui];
+	int s = UnitSpan(u);
+	int mt = UnitMoveType(u), jp = UnitJump(u);
+	for (int iz = 0; iz < s; iz++) for (int ix = 0; ix < s; ix++) {
+		int sx = x + ix, sz = z + iz, tx = nx + ix, tz = nz + iz;
+		if (!Map::In(sx, sz) || !CanStep(b.map, sx, sz, tx, tz, mt, jp)) return false;
+		int o = b.UnitAt(tx, tz);
+		if (o < 0 || o == ui) continue;
+		if (b.u[o].team != u.team) return false;
+		if (s > 1) return false;
+	}
+	return true;
+}
+
+static int FootCost(const Battle& b, int ui, int x, int z)
+{
+	const Unit& u = b.u[ui];
+	int s = UnitSpan(u);
+	int mt = UnitMoveType(u);
+	int c = 0;
+	for (int iz = 0; iz < s; iz++) for (int ix = 0; ix < s; ix++) {
+		if (!Map::In(x + ix, z + iz)) return 99;
+		int e = EnterCost(b.map, x + ix, z + iz, mt);
+		if (e > c) c = e;
+	}
+	return c;
+}
+
+static bool FootCanStop(const Battle& b, int ui, int x, int z)
+{
+	const Unit& u = b.u[ui];
+	int s = UnitSpan(u);
+	for (int iz = 0; iz < s; iz++) for (int ix = 0; ix < s; ix++) {
+		if (!Map::In(x + ix, z + iz)) return false;
+		int o = b.UnitAt(x + ix, z + iz);
+		if (o >= 0 && o != ui) return false;
+	}
+	return true;
+}
+
+static bool FootTerrain(const Battle& b, int ui, int x, int z, int nx, int nz)
+{
+	const Unit& u = b.u[ui];
+	int s = UnitSpan(u);
+	int mt = UnitMoveType(u), jp = UnitJump(u);
+	if (s <= 1) return CanStep(b.map, x, z, nx, nz, mt, jp);
+	for (int iz = 0; iz < s; iz++) for (int ix = 0; ix < s; ix++) {
+		if (!Map::In(x + ix, z + iz)) return false;
+		if (!CanStep(b.map, x + ix, z + iz, nx + ix, nz + iz, mt, jp)) return false;
+	}
+	return true;
+}
+
 void ComputeReach(const Battle& b, int ui, Reach& out)
 {
 	const Unit& u = b.u[ui];
 	for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) { out.cost[z][x] = -1; out.from[z][x] = -1; out.canStop[z][x] = 0; }
-	const int mv = UnitMove(u) * 2, mt = UnitMoveType(u), jp = UnitJump(u);
+	const int mv = UnitMove(u) * 2;
 	// 小さい盤なので単純ダイクストラ（行動範囲内のみ）
 	static int qx[MAPN * MAPN], qz[MAPN * MAPN];
 	int qn = 0;
@@ -2505,10 +2599,8 @@ void ComputeReach(const Battle& b, int ui, Reach& out)
 		int c0 = out.cost[z][x];
 		for (int k = 0; k < 4; k++) {
 			int nx = x + dx[k], nz = z + dz[k];
-			if (!CanStep(b.map, x, z, nx, nz, mt, jp)) continue;
-			int o = b.UnitAt(nx, nz);
-			if (o >= 0 && b.u[o].team != u.team) continue;
-			int nc = c0 + EnterCost(b.map, nx, nz, mt);
+			if (!FootStep(b, ui, x, z, nx, nz)) continue;
+			int nc = c0 + FootCost(b, ui, nx, nz);
 			if (nc > mv) continue;
 			if (out.cost[nz][nx] >= 0 && out.cost[nz][nx] <= nc) continue;
 			bool inq = out.cost[nz][nx] >= 0;
@@ -2524,8 +2616,7 @@ void ComputeReach(const Battle& b, int ui, Reach& out)
 	}
 	for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) {
 		if (out.cost[z][x] < 0) continue;
-		int o = b.UnitAt(x, z);
-		out.canStop[z][x] = (o < 0 || o == ui) ? 1 : 0;
+		out.canStop[z][x] = FootCanStop(b, ui, x, z) ? 1 : 0;
 	}
 }
 
@@ -2576,6 +2667,60 @@ bool InAttackRange(const Battle& b, int ax, int az, int rMin, int rMax, int tx, 
 	return !needLos || LineOfSight(b.map, ax, az, tx, tz);
 }
 
+static int FootDist(int ax, int az, int as, int bx, int bz, int bs)
+{
+	if (as < 1) as = 1;
+	if (bs < 1) bs = 1;
+	int best = 9999;
+	for (int az1 = 0; az1 < as; az1++) for (int ax1 = 0; ax1 < as; ax1++)
+		for (int bz1 = 0; bz1 < bs; bz1++) for (int bx1 = 0; bx1 < bs; bx1++) {
+			int d = abs((ax + ax1) - (bx + bx1)) + abs((az + az1) - (bz + bz1));
+			if (d < best) best = d;
+		}
+	return best;
+}
+
+bool InRangeOfUnit(const Battle& b, const Unit& a, int ax, int az, int rMin, int rMax, const Unit& t, bool needLos)
+{
+	int sa = UnitSpan(a), st = UnitSpan(t);
+	for (int az1 = 0; az1 < sa; az1++) for (int ax1 = 0; ax1 < sa; ax1++)
+		for (int tz = 0; tz < st; tz++) for (int tx = 0; tx < st; tx++)
+			if (InAttackRange(b, ax + ax1, az + az1, rMin, rMax, t.x + tx, t.z + tz, needLos))
+				return true;
+	return false;
+}
+
+static bool AimFoot(const Battle& b, const Unit& a, int ax, int az, int rMin, int rMax, const Unit& t, bool needLos, int& ox, int& oz)
+{
+	int sa = UnitSpan(a), st = UnitSpan(t);
+	int best = 9999;
+	bool ok = false;
+	for (int az1 = 0; az1 < sa; az1++) for (int ax1 = 0; ax1 < sa; ax1++)
+		for (int tz = 0; tz < st; tz++) for (int tx = 0; tx < st; tx++) {
+			int x = ax + ax1, z = az + az1, cx = t.x + tx, cz = t.z + tz;
+			if (!InAttackRange(b, x, z, rMin, rMax, cx, cz, needLos)) continue;
+			int d = Dist(x, z, cx, cz);
+			if (d < best) { best = d; ox = cx; oz = cz; ok = true; }
+		}
+	return ok;
+}
+
+static bool UnitOnShape(const SkillDef& s, const Unit& c, int cx, int cz, const Unit& t)
+{
+	int sp = UnitSpan(t);
+	for (int dz = 0; dz < sp; dz++) for (int dx = 0; dx < sp; dx++)
+		if (ShapeCell(s.shape, s.area, c.x, c.z, cx, cz, t.x + dx, t.z + dz)) return true;
+	return false;
+}
+
+static bool FootClear(const Battle& b, const Unit& t)
+{
+	int s = UnitSpan(t);
+	for (int dz = 0; dz < s; dz++) for (int dx = 0; dx < s; dx++)
+		if (b.UnitAt(t.x + dx, t.z + dz) >= 0) return false;
+	return true;
+}
+
 // ============================================================ 戦闘
 enum { WT_NONE = 0, WT_SWORD, WT_LANCE, WT_AXE, WT_BOW };
 static int WeaponOf(const Unit& u);
@@ -2612,7 +2757,9 @@ static int TriRel(int aw, int dw)
 
 static int FacingOf(const Unit& a, const Unit& d)
 {
-	float ang = atan2f((float)(a.x - d.x), (float)(a.z - d.z));
+	float ax = a.x + (UnitSpan(a) - 1) * 0.5f, az = a.z + (UnitSpan(a) - 1) * 0.5f;
+	float dx = d.x + (UnitSpan(d) - 1) * 0.5f, dz = d.z + (UnitSpan(d) - 1) * 0.5f;
+	float ang = atan2f(ax - dx, az - dz);
 	float diff = fabsf(WrapAngle(ang - d.face));
 	if (diff > 2.3f) return 2;
 	if (diff > 1.2f) return 1;
@@ -2749,7 +2896,7 @@ static bool CanCounter(const Battle& b, const Unit& d, const Unit& a)
 {
 	if (!d.alive || d.hp <= 0) return false;
 	if (d.sleep > 0 || d.stun > 0) return false;
-	return InAttackRange(b, d.x, d.z, UnitRangeMin(d), UnitRangeMax(d), a.x, a.z, true);
+	return InRangeOfUnit(b, d, d.x, d.z, UnitRangeMin(d), UnitRangeMax(d), a, true);
 }
 
 void CalcForecast(const Battle& b, int ai, int di, int skill, Forecast& f)
@@ -2770,7 +2917,7 @@ void CalcForecast(const Battle& b, int ai, int di, int skill, Forecast& f)
 		for (int i = 0; i < b.nUnits; i++) {
 			const Unit& m = b.u[i];
 			if (i == ai || !m.alive || m.hp <= 0 || m.team != TEAM_PLAYER) continue;
-			if (!InAttackRange(b, m.x, m.z, UnitRangeMin(m), UnitRangeMax(m), d.x, d.z, true)) continue;
+			if (!InRangeOfUnit(b, m, m.x, m.z, UnitRangeMin(m), UnitRangeMax(m), d, true)) continue;
 			n++;
 		}
 		if (n > 0) f.follow = n;
@@ -2798,6 +2945,77 @@ int SkillCastRangeMax(const Unit& u, int skill)
 
 bool IsFormSkill(int skill) { return skill >= SKL_FORM0 && skill < SKL_FORMN; }
 int FormOf(int skill) { return IsFormSkill(skill) ? SkillInfo(skill).form : FM_NONE; }
+
+static int FormPushMark(FormMark* o, int n, int cap, int side, int fwd, int absolute, int onFoe, int group, int foe)
+{
+	if (!o || n >= cap) return n;
+	o[n].side = side; o[n].fwd = fwd; o[n].absolute = absolute; o[n].onFoe = onFoe; o[n].group = group; o[n].foe = foe;
+	return n + 1;
+}
+int FormMarks(int form, FormMark* out, int cap)
+{
+	int n = 0;
+	switch (form) {
+	case FM_WING:
+	case FM_CROSS:
+	case FM_WALL:
+		n = FormPushMark(out, n, cap, -1, 0, 0, 0, -1, 0);
+		n = FormPushMark(out, n, cap, 1, 0, 0, 0, -1, 0);
+		break;
+	case FM_BACK:
+		n = FormPushMark(out, n, cap, 0, -1, 0, 0, -1, 0);
+		break;
+	case FM_TRI:
+		n = FormPushMark(out, n, cap, -1, -1, 0, 0, 0, 0);
+		n = FormPushMark(out, n, cap, 1, -1, 0, 0, 0, 0);
+		break;
+	case FM_CHAIN:
+		n = FormPushMark(out, n, cap, 0, -1, 0, 0, 0, 0);
+		n = FormPushMark(out, n, cap, 0, -2, 0, 0, 0, 0);
+		break;
+	case FM_DIA:
+		n = FormPushMark(out, n, cap, -1, 1, 0, 0, 0, 0);
+		n = FormPushMark(out, n, cap, 1, 1, 0, 0, 0, 0);
+		break;
+	case FM_SQUARE:
+	case FM_PAIR:
+		n = FormPushMark(out, n, cap, 1, 0, 1, 0, -1, 0);
+		n = FormPushMark(out, n, cap, -1, 0, 1, 0, -1, 0);
+		n = FormPushMark(out, n, cap, 0, 1, 1, 0, -1, 0);
+		n = FormPushMark(out, n, cap, 0, -1, 1, 0, -1, 0);
+		break;
+	case FM_ECHELON:
+		n = FormPushMark(out, n, cap, -1, 0, 0, 0, 0, 0);
+		n = FormPushMark(out, n, cap, -1, -1, 0, 0, 0, 0);
+		n = FormPushMark(out, n, cap, 1, 0, 0, 0, 1, 0);
+		n = FormPushMark(out, n, cap, 1, -1, 0, 0, 1, 0);
+		break;
+	case FM_CIRCLE:
+		for (int dz = -1; dz <= 1; dz++) for (int dx = -1; dx <= 1; dx++) {
+			if (dx == 0 && dz == 0) continue;
+			n = FormPushMark(out, n, cap, dx, dz, 1, 0, -1, 0);
+		}
+		break;
+	case FM_PINCER:
+		n = FormPushMark(out, n, cap, 0, 1, 0, 1, -1, 1);
+		n = FormPushMark(out, n, cap, -1, 1, 0, 1, 0, 0);
+		n = FormPushMark(out, n, cap, 1, 1, 0, 1, 0, 0);
+		break;
+	default: break;
+	}
+	return n;
+}
+static void FormAim(const Unit& u, int tx, int tz, int& fx, int& fz);
+void FormMarkPos(const Unit& u, int tx, int tz, const FormMark& m, int& ox, int& oz)
+{
+	if (m.absolute) { ox = u.x + m.side; oz = u.z + m.fwd; return; }
+	int fx, fz;
+	FormAim(u, tx, tz, fx, fz);
+	int rx = fz, rz = -fx;
+	if (m.onFoe) { ox = tx + m.side * rx; oz = tz + m.side * rz; return; }
+	ox = u.x + m.fwd * fx + m.side * rx;
+	oz = u.z + m.fwd * fz + m.side * rz;
+}
 
 static void FormAim(const Unit& u, int tx, int tz, int& fx, int& fz)
 {
@@ -3029,15 +3247,15 @@ int SkillTargets(const Battle& b, int caster, int skill, int cx, int cz, int* ou
 		const Unit& t = b.u[i];
 		if (s.effect == EF_RAISE) {
 			if (t.alive || !t.killed || t.team != c.team) continue;
-			if (Dist(t.x, t.z, cx, cz) > max(0, s.area)) continue;
-			if (b.UnitAt(t.x, t.z) >= 0) continue;
+			if (FootDist(cx, cz, 1, t.x, t.z, UnitSpan(t)) > max(0, s.area)) continue;
+			if (!FootClear(b, t)) continue;
 			out[n++] = i;
 			continue;
 		}
 		if (!t.alive) continue;
 		bool ally = (t.team == c.team);
 		if (friendly != ally) continue;
-		if (!ShapeCell(s.shape, s.area, c.x, c.z, cx, cz, t.x, t.z)) continue;
+		if (!UnitOnShape(s, c, cx, cz, t)) continue;
 		if (s.rMax == 0 && i == caster && s.kind != SK_HEAL && s.kind != SK_BUFF) continue;
 		out[n++] = i;
 	}
@@ -3345,7 +3563,7 @@ int AppendAssists(Battle& b, Rng& r, Strike* out, int n, int maxOut)
 		for (int f = 0; f < nf; f++) {
 			Unit& e = b.u[foes[f]];
 			if (e.hp <= 0 || !e.alive) continue;
-			if (!InAttackRange(b, m.x, m.z, UnitRangeMin(m), UnitRangeMax(m), e.x, e.z, true)) continue;
+			if (!InRangeOfUnit(b, m, m.x, m.z, UnitRangeMin(m), UnitRangeMax(m), e, true)) continue;
 			di = foes[f];
 			break;
 		}
@@ -3380,8 +3598,16 @@ int AppendAssists(Battle& b, Rng& r, Strike* out, int n, int maxOut)
 void Battle::RebuildOcc()
 {
 	memset(occ, 0, sizeof(occ));
-	for (int i = 0; i < nUnits; i++)
-		if (u[i].alive && Map::In(u[i].x, u[i].z)) occ[u[i].z][u[i].x] = i + 1;
+	for (int i = 0; i < nUnits; i++) {
+		if (!u[i].alive) continue;
+		int s = UnitSpan(u[i]);
+		for (int dz = 0; dz < s; dz++) for (int dx = 0; dx < s; dx++) {
+			int x = u[i].x + dx, z = u[i].z + dz;
+			if (!Map::In(x, z)) continue;
+			if (occ[z][x] != 0) continue;
+			occ[z][x] = i + 1;
+		}
+	}
 }
 
 int Battle::AliveCount(int team) const
@@ -3508,6 +3734,51 @@ static int BossMonster(int stage, Rng& r)
 	return PickClassic(stage, r);
 }
 
+static bool FootFits(const Battle& b, int ui, int ax, int az)
+{
+	const Unit& u = b.u[ui];
+	int s = UnitSpan(u);
+	int mt = UnitMoveType(u);
+	int jp = max(1, UnitJump(u));
+	int hmin = 99, hmax = -99;
+	for (int dz = 0; dz < s; dz++) for (int dx = 0; dx < s; dx++) {
+		int x = ax + dx, z = az + dz;
+		if (!Map::In(x, z)) return false;
+		int o = b.UnitAt(x, z);
+		if (o >= 0 && o != ui) return false;
+		const Cell& c = b.map.At(x, z);
+		if (mt == MV_FLY) {
+			if (!TerrainInfo(c.t).flyOk) return false;
+		} else {
+			if (TerrainInfo(c.t).costFoot >= 99) return false;
+			int h = (int)c.h;
+			if (h < hmin) hmin = h;
+			if (h > hmax) hmax = h;
+		}
+	}
+	if (mt != MV_FLY && hmax - hmin > jp) return false;
+	return true;
+}
+
+static bool PlaceFoot(Battle& b, int ui, int gx, int gz)
+{
+	Unit& u = b.u[ui];
+	int s = UnitSpan(u);
+	int rad = s <= 1 ? 6 : 12;
+	int best = 99999, bx = -1, bz = -1;
+	for (int dz = -rad; dz <= rad; dz++) for (int dx = -rad; dx <= rad; dx++) {
+		int ax = gx + dx, az = gz + dz;
+		if (!FootFits(b, ui, ax, az)) continue;
+		int contains = (gx >= ax && gx < ax + s && gz >= az && gz < az + s) ? 0 : 1000;
+		int rank = contains + abs(dx) + abs(dz);
+		if (rank < best) { best = rank; bx = ax; bz = az; }
+	}
+	if (bx < 0) return false;
+	u.x = bx;
+	u.z = bz;
+	return true;
+}
+
 void SetupBattle(Battle& b, int stage, DWORD seed, const CharData* party, const int* rosterIdx, int nParty, int theme)
 {
 	memset(&b, 0, sizeof(b));
@@ -3529,6 +3800,7 @@ void SetupBattle(Battle& b, int stage, DWORD seed, const CharData* party, const 
 		u.hp = u.ch.stat[S_HP];
 		u.mp = u.ch.stat[S_MP];
 		CraftBindUnit(u);
+		u.span = 1;
 		u.x = b.map.pStartX[i]; u.z = b.map.pStartZ[i];
 		u.face = faceToE;
 		u.ct = r.Range(0, 300) + u.ch.stat[S_AGI] * 8;
@@ -3538,6 +3810,8 @@ void SetupBattle(Battle& b, int stage, DWORD seed, const CharData* party, const 
 		u.alert = 1;
 		n++;
 	}
+	b.nUnits = n;
+	b.RebuildOcc();
 	int baseLv = StageEnemyLevel(stage);
 	for (int g = 0; g < b.map.nGrp && n < MAX_UNITS; g++) {
 		const MapGroup& grp = b.map.grp[g];
@@ -3549,13 +3823,15 @@ void SetupBattle(Battle& b, int stage, DWORD seed, const CharData* party, const 
 			if (stage <= 2) lv = max(1, lv - 1);
 			int use = k == 0 ? mon : PickMonster(stage, r);
 			MakeEnemy(u, use, lv, boss ? 1 : 0, r);
-			u.x = grp.x[k]; u.z = grp.z[k];
 			u.face = faceToE + 3.14159f;
 			u.ct = r.Range(0, 280) + u.ch.stat[S_AGI] * 6;
 			u.hpShow = (float)u.hp;
 			u.grp = g;
 			u.alert = 0;
+			if (!PlaceFoot(b, n, grp.x[k], grp.z[k])) continue;
 			n++;
+			b.nUnits = n;
+			b.RebuildOcc();
 		}
 	}
 	b.nUnits = n;
@@ -3632,7 +3908,7 @@ void WakeNearPlayers(Battle& b, int rad)
 		for (int e = 0; e < b.nUnits; e++) {
 			const Unit& d = b.u[e];
 			if (!d.alive || d.team != TEAM_ENEMY || d.grp < 0 || d.alert) continue;
-			if (Dist(a.x, a.z, d.x, d.z) <= rad) wake[d.grp] = 1;
+			if (FootDist(a.x, a.z, UnitSpan(a), d.x, d.z, UnitSpan(d)) <= rad) wake[d.grp] = 1;
 		}
 	}
 	for (int g = 0; g < MAX_GROUPS; g++) if (wake[g]) WakeGroup(b, g);
@@ -3647,7 +3923,7 @@ void WakeNearPlayers(Battle& b, int rad)
 		int best = 9999;
 		for (int p = 0; p < b.nUnits; p++) {
 			if (!b.u[p].alive || b.u[p].team != TEAM_PLAYER) continue;
-			best = min(best, Dist(u.x, u.z, b.u[p].x, b.u[p].z));
+			best = min(best, FootDist(u.x, u.z, UnitSpan(u), b.u[p].x, b.u[p].z, UnitSpan(b.u[p])));
 		}
 		if (best >= 9999) continue;
 		if (!seen[u.grp]) { seen[u.grp] = 1; gd[ng].grp = u.grp; gd[ng].dist = best; ng++; }
@@ -3668,7 +3944,15 @@ int ApplyTile(Battle& b, int ui)
 {
 	Unit& u = b.u[ui];
 	if (!Map::In(u.x, u.z)) return 0;
-	const Cell& c = b.map.At(u.x, u.z);
+	int hx = u.x, hz = u.z;
+	int s = UnitSpan(u);
+	bool got = false;
+	for (int dz = 0; dz < s && !got; dz++) for (int dx = 0; dx < s && !got; dx++) {
+		int x = u.x + dx, z = u.z + dz;
+		if (!Map::In(x, z)) continue;
+		if (b.map.At(x, z).gimm != GM_NONE) { hx = x; hz = z; got = true; }
+	}
+	const Cell& c = b.map.At(hx, hz);
 	if (c.gimm == GM_HEAL) {
 		int add = max(1, u.ch.stat[S_HP] * 30 / 100);
 		u.hp = min(u.ch.stat[S_HP], u.hp + add);
@@ -3684,19 +3968,30 @@ int ApplyTile(Battle& b, int ui)
 		u.hp = min(u.ch.stat[S_HP], u.hp + add);
 		if (thief || c.gparam == 2) u.mulTurns = max(u.mulTurns, 3);
 		if (thief || c.gparam == 1) u.expGained += 12;
-		b.map.At(u.x, u.z).gimm = GM_NONE;
-		b.map.At(u.x, u.z).prop = PK_NONE;
+		b.map.At(hx, hz).gimm = GM_NONE;
+		b.map.At(hx, hz).prop = PK_NONE;
 		return GM_CHEST;
 	}
 	if (c.gimm == GM_WARP) {
 		int ox = -1, oz = -1;
 		for (int z = 0; z < MAPN && ox < 0; z++) for (int x = 0; x < MAPN; x++) {
 			const Cell& o = b.map.At(x, z);
-			if (o.gimm == GM_WARP && o.gparam == c.gparam && (x != u.x || z != u.z)) { ox = x; oz = z; break; }
+			if (o.gimm == GM_WARP && o.gparam == c.gparam && (x != hx || z != hz)) { ox = x; oz = z; break; }
 		}
 		if (ox < 0) return 0;
-		if (b.UnitAt(ox, oz) >= 0) return 0;
-		u.x = ox; u.z = oz;
+		if (s <= 1) {
+			if (b.UnitAt(ox, oz) >= 0) return 0;
+			u.x = ox; u.z = oz;
+		} else {
+			int ax = -1, az = -1, best = 999;
+			for (int dz = 0; dz < s; dz++) for (int dx = 0; dx < s; dx++) {
+				int px = ox - dx, pz = oz - dz;
+				if (!FootFits(b, ui, px, pz)) continue;
+				if (dx + dz < best) { best = dx + dz; ax = px; az = pz; }
+			}
+			if (ax < 0) return 0;
+			u.x = ax; u.z = az;
+		}
 		b.RebuildOcc();
 		return GM_WARP;
 	}
@@ -3771,18 +4066,32 @@ bool CanShove(const Battle& b, int ui, int ti, int* outX, int* outZ)
 	const Unit& a = b.u[ui];
 	const Unit& d = b.u[ti];
 	if (!a.alive || !d.alive) return false;
-	if (Dist(a.x, a.z, d.x, d.z) != 1) return false;
+	int s = UnitSpan(d);
+	if (FootDist(a.x, a.z, UnitSpan(a), d.x, d.z, s) != 1) return false;
 	if (d.team != a.team) {
 		if (d.boss) return false;
 		if (UnitStat(a, S_STR) + 1 < UnitStat(d, S_STR)) return false;
 	}
-	int dx = d.x - a.x, dz = d.z - a.z;
-	int nx = d.x + dx, nz = d.z + dz;
-	if (!Map::In(nx, nz)) return false;
-	if (b.UnitAt(nx, nz) >= 0) return false;
-	int t = b.map.At(nx, nz).t;
-	bool pit = (t == T_CHASM || t == T_LAVA);
-	if (!pit && TerrainInfo(t).costFoot >= 99) return false;
+	int pdx = 0, pdz = 0;
+	int sa = UnitSpan(a);
+	for (int az = 0; az < sa && pdx == 0 && pdz == 0; az++)
+		for (int ax = 0; ax < sa && pdx == 0 && pdz == 0; ax++)
+			for (int iz = 0; iz < s && pdx == 0 && pdz == 0; iz++)
+				for (int ix = 0; ix < s; ix++) {
+					int ddx = (d.x + ix) - (a.x + ax), ddz = (d.z + iz) - (a.z + az);
+					if (abs(ddx) + abs(ddz) == 1) { pdx = ddx; pdz = ddz; }
+				}
+	if (pdx == 0 && pdz == 0) return false;
+	int nx = d.x + pdx, nz = d.z + pdz;
+	for (int iz = 0; iz < s; iz++) for (int ix = 0; ix < s; ix++) {
+		int x = nx + ix, z = nz + iz;
+		if (!Map::In(x, z)) return false;
+		int o = b.UnitAt(x, z);
+		if (o >= 0 && o != ti) return false;
+		int t = b.map.At(x, z).t;
+		bool pit = (t == T_CHASM || t == T_LAVA);
+		if (!pit && TerrainInfo(t).costFoot >= 99) return false;
+	}
 	if (outX) *outX = nx;
 	if (outZ) *outZ = nz;
 	return true;
@@ -3793,10 +4102,15 @@ void DoShove(Battle& b, int ui, int ti)
 	int nx, nz;
 	if (!CanShove(b, ui, ti, &nx, &nz)) return;
 	Unit& d = b.u[ti];
-	int t = b.map.At(nx, nz).t;
 	d.x = nx; d.z = nz;
 	d.face = atan2f((float)(d.x - b.u[ui].x), (float)(d.z - b.u[ui].z));
-	if (t == T_CHASM || t == T_LAVA) {
+	int pit = 0;
+	int s = UnitSpan(d);
+	for (int iz = 0; iz < s && !pit; iz++) for (int ix = 0; ix < s; ix++) {
+		int t = b.map.At(d.x + ix, d.z + iz).t;
+		if (t == T_CHASM || t == T_LAVA) pit = 1;
+	}
+	if (pit) {
 		int dmg = max(1, d.ch.stat[S_HP] * 40 / 100);
 		d.hp = max(0, d.hp - dmg);
 		if (d.hp <= 0) { d.hp = 0; d.alive = 0; d.killed = 1; }
@@ -3808,15 +4122,19 @@ void DoShove(Battle& b, int ui, int ti)
 static void DistanceField(const Battle& b, int ui, short (*df)[MAPN])
 {
 	const Unit& u = b.u[ui];
-	const int mt = UnitMoveType(u), jp = UnitJump(u);
 	for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) df[z][x] = 30000;
 	static int qx[MAPN * MAPN * 4], qz[MAPN * MAPN * 4];
 	int qh = 0, qt = 0;
 	for (int i = 0; i < b.nUnits; i++) {
 		const Unit& t = b.u[i];
 		if (!t.alive || t.team == u.team) continue;
-		df[t.z][t.x] = 0;
-		qx[qt] = t.x; qz[qt] = t.z; qt++;
+		int s = UnitSpan(t);
+		for (int dz = 0; dz < s; dz++) for (int dx = 0; dx < s; dx++) {
+			int x = t.x + dx, z = t.z + dz;
+			if (!Map::In(x, z) || df[z][x] == 0) continue;
+			df[z][x] = 0;
+			qx[qt] = x; qz[qt] = z; qt++;
+		}
 	}
 	static const int dx[4] = { 1, -1, 0, 0 }, dz[4] = { 0, 0, 1, -1 };
 	// 0-1 ではないので緩和 BFS（反復）
@@ -3825,8 +4143,8 @@ static void DistanceField(const Battle& b, int ui, short (*df)[MAPN])
 		for (int k = 0; k < 4; k++) {
 			int nx = x + dx[k], nz = z + dz[k];
 			if (!Map::In(nx, nz)) continue;
-			if (!CanStep(b.map, nx, nz, x, z, mt, jp)) continue;
-			int c = df[z][x] + EnterCost(b.map, x, z, mt);
+			if (!FootTerrain(b, ui, nx, nz, x, z)) continue;
+			int c = df[z][x] + FootCost(b, ui, x, z);
 			if (c < df[nz][nx]) {
 				df[nz][nx] = (short)c;
 				if (qt < (int)_countof(qx)) { qx[qt] = nx; qz[qt] = nz; qt++; }
@@ -3867,8 +4185,8 @@ void ConfusePlan(const Battle& b, int ui, AiPlan& p, Rng& r)
 		int sc = (int)(r.Next() % 7);
 		if (pick >= 0) {
 			const Unit& t = b.u[pick];
-			if (InAttackRange(b, x, z, UnitRangeMin(u), UnitRangeMax(u), t.x, t.z, true)) sc += 1000;
-			else sc -= Dist(x, z, t.x, t.z) * 4;
+			if (InRangeOfUnit(b, u, x, z, UnitRangeMin(u), UnitRangeMax(u), t, true)) sc += 1000;
+			else sc -= FootDist(x, z, UnitSpan(u), t.x, t.z, UnitSpan(t)) * 4;
 		}
 		if (sc > best) { best = sc; bx = x; bz = z; }
 	}
@@ -3903,7 +4221,8 @@ void AiDecide(const Battle& b, int ui, AiPlan& p, Rng& r)
 		for (int i = 0; i < b.nUnits; i++) {
 			const Unit& t = b.u[i];
 			if (!t.alive || t.team == u.team) continue;
-			if (!InAttackRange(b, x, z, UnitRangeMin(u), UnitRangeMax(u), t.x, t.z, true)) continue;
+			int ax = t.x, az = t.z;
+			if (!AimFoot(b, u, x, z, UnitRangeMin(u), UnitRangeMax(u), t, true, ax, az)) continue;
 			Forecast f;
 			CalcForecast(b, ui, i, -1, f);
 			// トドメと残HPだけでは選ばない。近い相手、手強い相手、その場の揺らぎも同じ重さで見る。
@@ -3912,9 +4231,9 @@ void AiDecide(const Battle& b, int ui, AiPlan& p, Rng& r)
 			sc += t.ch.lv * .35f;
 			sc += (1.f - (float)t.hp / max(1, t.ch.stat[S_HP])) * 4.f;
 			sc -= (f.canCounter ? f.cdmg * f.chits * f.chit / 100.f * .35f : 0.f);
-			sc -= Dist(ox, oz, t.x, t.z) * 2.5f;
+			sc -= FootDist(ox, oz, UnitSpan(u), t.x, t.z, UnitSpan(t)) * 2.5f;
 			sc += place + r.F(0, 14.f);
-			if (sc > best) { best = sc; p.moveX = x; p.moveZ = z; p.target = i; p.skill = -1; p.castX = t.x; p.castZ = t.z; }
+			if (sc > best) { best = sc; p.moveX = x; p.moveZ = z; p.target = i; p.skill = -1; p.castX = ax; p.castZ = az; }
 		}
 		// スキル
 		for (int s = 0; s < SKL_COUNT; s++) {
@@ -3928,7 +4247,7 @@ void AiDecide(const Battle& b, int ui, AiPlan& p, Rng& r)
 				if (friendly != (t.team == u.team)) continue;
 				int tx = t.x, tz = t.z;
 				if (sd.rMax == 0) { tx = x; tz = z; }
-				else if (!InAttackRange(b, x, z, rmin, rmax, tx, tz, sd.kind != SK_HEAL && sd.kind != SK_BUFF)) continue;
+				else if (!AimFoot(b, u, x, z, rmin, rmax, t, sd.kind != SK_HEAL && sd.kind != SK_BUFF, tx, tz)) continue;
 				float sc = place;
 				if (sd.kind == SK_HEAL) {
 					int targets[MAX_UNITS];
@@ -3978,7 +4297,7 @@ void AiDecide(const Battle& b, int ui, AiPlan& p, Rng& r)
 				if (friendly != (t.team == u.team)) continue;
 				int tx = t.x, tz = t.z;
 				if (csd.rMax == 0) { tx = x; tz = z; }
-				else if (!InAttackRange(b, x, z, rmin, rmax, tx, tz, !friendly)) continue;
+				else if (!AimFoot(b, u, x, z, rmin, rmax, t, !friendly, tx, tz)) continue;
 				float sc = place;
 				if (friendly) {
 					int targets[8];
@@ -4007,7 +4326,7 @@ void AiDecide(const Battle& b, int ui, AiPlan& p, Rng& r)
 	// ボスは近づかれるまで待機
 	if (u.boss) {
 		int nearest = 999;
-		for (int i = 0; i < b.nUnits; i++) if (b.u[i].alive && b.u[i].team != u.team) nearest = min(nearest, Dist(u.x, u.z, b.u[i].x, b.u[i].z));
+		for (int i = 0; i < b.nUnits; i++) if (b.u[i].alive && b.u[i].team != u.team) nearest = min(nearest, FootDist(u.x, u.z, UnitSpan(u), b.u[i].x, b.u[i].z, UnitSpan(b.u[i])));
 		if (nearest > 10) return;
 	}
 	static short df[MAPN][MAPN];

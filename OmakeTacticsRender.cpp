@@ -1088,13 +1088,77 @@ static BOOL IsBodyName(const char* n)
 	return FALSE;
 }
 
-static BOOL SkipTackRec(Reader& rd, char* name)
+static float g_tacFoot[1024];
+
+float TacMonsterFoot(int id)
 {
+	if (id < 0 || id >= 1024) return 0.f;
+	return g_tacFoot[id];
+}
+
+// バインド座標は数センチ。描画は休息姿勢の骨スケールで身長約 1.7 まで伸びる。
+// その姿勢で、高さの下 45%（腹や足。翼や腕は入らない）の半幅を返す。
+static float PosedFootHalf(UINT nJ, const int* parent, const V3* restT, const Q4* restR, const V3* restS,
+	const M4& top, const M4* inv, UINT nv, const short* ps, const BYTE* jj, const BYTE* ww,
+	float mid0, float mid1, float mid2, float hx, float hy, float hz)
+{
+	static M4 glob[MAXJ], pal[MAXJ];
+	for (UINT j = 0; j < nJ; j++) {
+		M4 loc = MTRS(restT[j], restR[j], restS[j]);
+		int pa = parent[j];
+		const M4& up = (pa >= 0 && pa < (int)j) ? glob[pa] : top;
+		glob[j] = MMul(loc, up);
+		pal[j] = MMul(inv[j], glob[j]);
+	}
+	auto Skin = [&](UINT k, float& ox, float& oy, float& oz) {
+		float x = mid0 + (ps[k * 3] / 32767.f) * hx;
+		float y = mid1 + (ps[k * 3 + 1] / 32767.f) * hy;
+		float z = -(mid2 + (ps[k * 3 + 2] / 32767.f) * hz);
+		ox = oy = oz = 0.f;
+		float tw = 0.f;
+		for (int c = 0; c < 4; c++) {
+			float w = ww[k * 4 + c] / 255.f;
+			unsigned j = jj[k * 4 + c];
+			if (w <= 0.f || j >= nJ) continue;
+			V3 p = MXformPt(pal[j], v3(x, y, z));
+			ox += p.x * w; oy += p.y * w; oz += p.z * w;
+			tw += w;
+		}
+		if (tw <= 0.f) { ox = x; oy = y; oz = z; }
+	};
+	float y0 = 1e9f, y1 = -1e9f;
+	for (UINT k = 0; k < nv; k++) {
+		float x, y, z;
+		Skin(k, x, y, z);
+		if (y < y0) y0 = y;
+		if (y > y1) y1 = y;
+	}
+	float cut = y0 + (y1 - y0) * 0.45f;
+	float mx = 0.f;
+	for (UINT k = 0; k < nv; k++) {
+		float x, y, z;
+		Skin(k, x, y, z);
+		if (y > cut) continue;
+		float h = fabsf(x) > fabsf(z) ? fabsf(x) : fabsf(z);
+		if (h > mx) mx = h;
+	}
+	return mx;
+}
+
+// 目録用。描画と同じ休息姿勢で、地面側の胴体がタイルからどれだけ出るかを測る。
+static BOOL SkipTackRec(Reader& rd, char* name, float* foot)
+{
+	if (foot) *foot = 0.f;
 	rd.Name(name, 32);
 	if (rd.bad) return FALSE;
 	UINT nJ = rd.U32();
 	if (nJ < 1 || nJ > MAXJ) return FALSE;
-	for (UINT j = 0; j < nJ; j++) { char tmp[24]; rd.Name(tmp, 24); rd.I32(); }
+	static int parent[MAXJ];
+	static V3 restT[MAXJ];
+	static Q4 restR[MAXJ];
+	static V3 restS[MAXJ];
+	static M4 inv[MAXJ];
+	for (UINT j = 0; j < nJ; j++) { char tmp[24]; rd.Name(tmp, 24); parent[j] = rd.I32(); }
 	UINT nc = rd.U32();
 	if (nc > 32) return FALSE;
 	for (UINT c = 0; c < nc; c++) {
@@ -1105,17 +1169,33 @@ static BOOL SkipTackRec(Reader& rd, char* name)
 		if (!rd.Bytes((size_t)nf * nJ * 8)) return FALSE;
 		if (!rd.Bytes((size_t)nf * 12)) return FALSE;
 	}
-	for (UINT j = 0; j < nJ; j++) for (int k = 0; k < 10; k++) rd.F32();
-	for (int k = 0; k < 16; k++) rd.F32();
-	for (UINT j = 0; j < nJ; j++) for (int k = 0; k < 16; k++) rd.F32();
+	for (UINT j = 0; j < nJ; j++) {
+		float t[10];
+		for (int k = 0; k < 10; k++) t[k] = rd.F32();
+		restT[j] = v3(t[0], t[1], -t[2]);
+		Q4 qq = { -t[3], -t[4], t[5], t[6] };
+		float l = sqrtf(qq.x * qq.x + qq.y * qq.y + qq.z * qq.z + qq.w * qq.w);
+		if (l > 1e-6f) { qq.x /= l; qq.y /= l; qq.z /= l; qq.w /= l; }
+		restR[j] = qq;
+		restS[j] = v3(t[7], t[8], t[9]);
+	}
+	M4 top;
+	for (int k = 0; k < 16; k++) top.m[k] = rd.F32();
+	FlipM(top);
+	for (UINT j = 0; j < nJ; j++) { for (int k = 0; k < 16; k++) inv[j].m[k] = rd.F32(); FlipM(inv[j]); }
 	UINT nv = rd.U32(), ni = rd.U32();
 	if (!nv || !ni || nv > 70000 || ni > 200000) return FALSE;
-	for (int a = 0; a < 6; a++) rd.F32();
-	if (!rd.Bytes((size_t)nv * 6)) return FALSE;
+	float emin[3], emax[3], mid[3], halfv[3];
+	for (int a = 0; a < 3; a++) emin[a] = rd.F32();
+	for (int a = 0; a < 3; a++) emax[a] = rd.F32();
+	for (int a = 0; a < 3; a++) { mid[a] = (emin[a] + emax[a]) * 0.5f; halfv[a] = (emax[a] - emin[a]) * 0.5f; }
+	const short* ps = (const short*)rd.Bytes((size_t)nv * 6);
 	if (!rd.Bytes((size_t)nv * 6)) return FALSE;
 	if (!rd.Bytes((size_t)nv * 3)) return FALSE;
-	if (!rd.Bytes((size_t)nv * 4)) return FALSE;
-	if (!rd.Bytes((size_t)nv * 4)) return FALSE;
+	const BYTE* jj = rd.Bytes((size_t)nv * 4);
+	const BYTE* ww = rd.Bytes((size_t)nv * 4);
+	if (ps && jj && ww && foot)
+		*foot = PosedFootHalf(nJ, parent, restT, restR, restS, top, inv, nv, ps, jj, ww, mid[0], mid[1], mid[2], halfv[0], halfv[1], halfv[2]);
 	rd.Align4();
 	if (!rd.Bytes((size_t)ni * 2)) return FALSE;
 	rd.Align4();
@@ -1569,11 +1649,14 @@ void Renderer::LoadCreaturePack()
 		m_monBytesN = size;
 		if (n > (UINT)MON_CATALOG) n = (UINT)MON_CATALOG;
 		m_monN = 0;
+		memset(g_tacFoot, 0, sizeof(g_tacFoot));
 		for (UINT i = 0; i < n; i++) {
 			if (rd.o > 0x7fffffff) break;
 			m_monOff[i] = (int)(4 + rd.o);
 			char name[32];
-			if (!SkipTackRec(rd, name)) break;
+			float foot = 0.f;
+			if (!SkipTackRec(rd, name, &foot)) break;
+			if (i < 1024) g_tacFoot[i] = foot;
 			m_monBody[i] = (unsigned char)(IsBodyName(name) ? 1 : 0);
 			m_monModel[i] = -1;
 			m_monN++;

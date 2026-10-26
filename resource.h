@@ -1879,6 +1879,9 @@
 #define IDR_CSO_RACE_PSCLOUD            4851
 #define IDR_CSO_RACE_GSW                4852
 #define IDR_CSO_RACE_VSW                4853
+#define IDR_CSO_MAZE_CSSUB              4854
+#define IDR_CSO_RACE_CSGRIDC            4855
+#define IDR_CSO_RACE_CSGRIDW            4856
 #define IDC_CAP_CLOSE                   12000
 #define IDC_CAP_MIN                     12001
 #define IDC_CAP_MAX                     12002

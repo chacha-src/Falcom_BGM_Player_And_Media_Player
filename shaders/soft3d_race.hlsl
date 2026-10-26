@@ -249,3 +249,131 @@ float n=fbm(uv*8.+Misc.w*.22);float n2=fbm(uv*22.-Misc.w*.48);
 float snow=smoothstep(.48,1.,frac(uv.x*48.+uv.y*14.-Misc.w*1.55+n*2.));
 float frost=saturate(n*n2*1.05+pow(saturate(1.-length(uv-.5)*1.6),2.)*.08);
 NoiseOut[p]=float4(n,n2,snow,frost);}
+// 地形と水面。高さは CPU の物理と同じバッファを読み、頂点だけ GPU で出す。
+cbuffer GridCB:register(b2){
+float4 GOrigin; // x0,z0,step,gN
+float4 GHm;     // hmX0,hmZ0,hmStep,hmN
+float4 GCol;    // r,g,b, refineR
+float4 GLim;    // tunR, axis, maxVert, water
+float4 GWater;  // wy, depthRef, wr, wg
+float4 GWater2; // wb, 0,0,0
+};
+StructuredBuffer<float> Hm:register(t8);
+StructuredBuffer<float> HmRaw:register(t9);
+StructuredBuffer<float> HmPath:register(t10);
+StructuredBuffer<uint> GridBase:register(t11);
+RWByteAddressBuffer GridCnt:register(u1);
+RWByteAddressBuffer GridVtx:register(u2);
+float GridSamp(StructuredBuffer<float> hm,float x,float z){
+float u=(x-GHm.x)/max(GHm.z,1e-4),v=(z-GHm.y)/max(GHm.z,1e-4);
+int i=(int)floor(u),j=(int)floor(v);float fu=u-(float)i,fv=v-(float)j;
+int n=(int)GHm.w;if(n<2)n=2;
+if(i<0){i=0;fu=0;}if(j<0){j=0;fv=0;}
+if(i>=n-1){i=n-2;fu=1;}if(j>=n-1){j=n-2;fv=1;}
+float h00=hm[j*n+i],h10=hm[j*n+i+1],h01=hm[(j+1)*n+i],h11=hm[(j+1)*n+i+1];
+float hx0=h00+(h10-h00)*fu,hx1=h01+(h11-h01)*fu;return hx0+(hx1-hx0)*fv;}
+float3 GridNrm(float x,float y,float z){float l=sqrt(x*x+y*y+z*z);if(l<1e-6)return float3(0,1,0);return float3(x/l,y/l,z/l);}
+void GridStore(uint vi,float3 p,float3 n,float2 uv,float4 c){
+uint o=vi*48u;
+GridVtx.Store(o+0,asuint(p.x));GridVtx.Store(o+4,asuint(p.y));GridVtx.Store(o+8,asuint(p.z));
+GridVtx.Store(o+12,asuint(n.x));GridVtx.Store(o+16,asuint(n.y));GridVtx.Store(o+20,asuint(n.z));
+GridVtx.Store(o+24,asuint(uv.x));GridVtx.Store(o+28,asuint(uv.y));
+GridVtx.Store(o+32,asuint(c.x));GridVtx.Store(o+36,asuint(c.y));GridVtx.Store(o+40,asuint(c.z));GridVtx.Store(o+44,asuint(c.w));}
+uint GridCellCount(uint gx,uint gz,int water){
+float step=GOrigin.z;float xa=GOrigin.x+gx*step,za=GOrigin.y+gz*step;float xb=xa+step,zb=za+step;
+float y00=GridSamp(Hm,xa,za),y10=GridSamp(Hm,xb,za),y11=GridSamp(Hm,xb,zb),y01=GridSamp(Hm,xa,zb);
+if(water){
+float wy=GWater.x;float ymin=min(min(y00,y10),min(y11,y01));
+return (ymin<=wy+0.08)?6u:0u;}
+float dmin=GridSamp(HmPath,xa,za);
+dmin=min(dmin,GridSamp(HmPath,xb,za));
+dmin=min(dmin,GridSamp(HmPath,xb,zb));
+dmin=min(dmin,GridSamp(HmPath,xa,zb));
+int sub=1;float refine=GCol.w,tun=GLim.x,axis=GLim.y;
+if(dmin<refine){
+float yspan=abs(GridSamp(HmRaw,xa,za)-y00);
+if(axis<=1.0)sub=(yspan>5.0)?6:3;else sub=(yspan>5.0)?2:1;
+if(dmin<tun*1.4)sub=max(sub,(axis<=1.0)?8:3);}
+if(sub<1)sub=1;if(sub>8)sub=8;
+uint n=0u;
+float us=(xb-xa)/(float)sub,vs=(zb-za)/(float)sub;
+[loop]for(int iz=0;iz<sub;iz++)[loop]for(int ix=0;ix<sub;ix++){
+float xA=xa+us*(float)ix,zA=za+vs*(float)iz,xB=xA+us,zB=zA+vs;
+float gy00=GridSamp(Hm,xA,zA),gy10=GridSamp(Hm,xB,zA),gy11=GridSamp(Hm,xB,zB),gy01=GridSamp(Hm,xA,zB);
+float r00=GridSamp(HmRaw,xA,zA),r10=GridSamp(HmRaw,xB,zA),r11=GridSamp(HmRaw,xB,zB),r01=GridSamp(HmRaw,xA,zB);
+float pd=GridSamp(HmPath,xA,zA);
+pd=min(pd,GridSamp(HmPath,xB,zA));pd=min(pd,GridSamp(HmPath,xB,zB));pd=min(pd,GridSamp(HmPath,xA,zB));
+float pdC=GridSamp(HmPath,(xA+xB)*0.5,(zA+zB)*0.5);
+float tunW=tun*1.20;
+int hole=(pdC<tunW||pd<tunW*0.96)?1:0;
+n+=6u;
+float cap=min(min(r00-gy00,r10-gy10),min(r11-gy11,r01-gy01));
+if(!hole&&cap>4.2&&pd>tunW*0.98)n+=6u;}
+return n;}
+void GridWriteCell(uint gx,uint gz,uint base,int water){
+float step=GOrigin.z;float xa=GOrigin.x+gx*step,za=GOrigin.y+gz*step;float xb=xa+step,zb=za+step;
+float4 col=float4(GCol.rgb,1);
+if(water){
+float wy=GWater.x;float depthRef=max(GWater.y,1e-3);
+float y00=GridSamp(Hm,xa,za),y10=GridSamp(Hm,xb,za),y11=GridSamp(Hm,xb,zb),y01=GridSamp(Hm,xa,zb);
+float a00=saturate((wy-y00)/depthRef),a10=saturate((wy-y10)/depthRef),a11=saturate((wy-y11)/depthRef),a01=saturate((wy-y01)/depthRef);
+float3 c=float3(GWater.z,GWater.w,GWater2.x);
+uint s=base;
+GridStore(s+0,float3(xa,wy,za),float3(0,1,0),float2(0,0),float4(c,a00));
+GridStore(s+1,float3(xb,wy,za),float3(0,1,0),float2(1,0),float4(c,a10));
+GridStore(s+2,float3(xb,wy,zb),float3(0,1,0),float2(1,1),float4(c,a11));
+GridStore(s+3,float3(xa,wy,za),float3(0,1,0),float2(0,0),float4(c,a00));
+GridStore(s+4,float3(xb,wy,zb),float3(0,1,0),float2(1,1),float4(c,a11));
+GridStore(s+5,float3(xa,wy,zb),float3(0,1,0),float2(0,1),float4(c,a01));
+return;}
+float gN=max(GOrigin.w,1);
+float u0=(float)gx/gN,v0=(float)gz/gN,u1=(float)(gx+1)/gN,v1=(float)(gz+1)/gN;
+float dmin=GridSamp(HmPath,xa,za);
+dmin=min(dmin,GridSamp(HmPath,xb,za));dmin=min(dmin,GridSamp(HmPath,xb,zb));dmin=min(dmin,GridSamp(HmPath,xa,zb));
+int sub=1;float refine=GCol.w,tun=GLim.x,axis=GLim.y;
+float y00c=GridSamp(Hm,xa,za);
+if(dmin<refine){
+float yspan=abs(GridSamp(HmRaw,xa,za)-y00c);
+if(axis<=1.0)sub=(yspan>5.0)?6:3;else sub=(yspan>5.0)?2:1;
+if(dmin<tun*1.4)sub=max(sub,(axis<=1.0)?8:3);}
+if(sub<1)sub=1;if(sub>8)sub=8;
+float us=(u1-u0)/(float)sub,vs=(v1-v0)/(float)sub,xs=(xb-xa)/(float)sub,zs=(zb-za)/(float)sub;
+uint s=base;
+[loop]for(int iz=0;iz<sub;iz++)[loop]for(int ix=0;ix<sub;ix++){
+float xA=xa+xs*(float)ix,zA=za+zs*(float)iz,xB=xA+xs,zB=zA+zs;
+float uu0=u0+us*(float)ix,vv0=v0+vs*(float)iz,uu1=u0+us*(float)(ix+1),vv1=v0+vs*(float)(iz+1);
+float gy00=GridSamp(Hm,xA,zA),gy10=GridSamp(Hm,xB,zA),gy11=GridSamp(Hm,xB,zB),gy01=GridSamp(Hm,xA,zB);
+float nx=(gy00-gy10)+(gy01-gy11),nz=(gy00-gy01)+(gy10-gy11),ny=(xB-xA)*2.0;
+float3 nn=GridNrm(nx,ny,nz);
+GridStore(s+0,float3(xA,gy00,zA),nn,float2(uu0,vv0),col);
+GridStore(s+1,float3(xA,gy01,zB),nn,float2(uu0,vv1),col);
+GridStore(s+2,float3(xB,gy11,zB),nn,float2(uu1,vv1),col);
+GridStore(s+3,float3(xA,gy00,zA),nn,float2(uu0,vv0),col);
+GridStore(s+4,float3(xB,gy11,zB),nn,float2(uu1,vv1),col);
+GridStore(s+5,float3(xB,gy10,zA),nn,float2(uu1,vv0),col);
+s+=6u;
+float r00=GridSamp(HmRaw,xA,zA),r10=GridSamp(HmRaw,xB,zA),r11=GridSamp(HmRaw,xB,zB),r01=GridSamp(HmRaw,xA,zB);
+float pd=GridSamp(HmPath,xA,zA);
+pd=min(pd,GridSamp(HmPath,xB,zA));pd=min(pd,GridSamp(HmPath,xB,zB));pd=min(pd,GridSamp(HmPath,xA,zB));
+float pdC=GridSamp(HmPath,(xA+xB)*0.5,(zA+zB)*0.5);
+float tunW=tun*1.20;
+int hole=(pdC<tunW||pd<tunW*0.96)?1:0;
+float cap=min(min(r00-gy00,r10-gy10),min(r11-gy11,r01-gy01));
+if(!hole&&cap>4.2&&pd>tunW*0.98){
+float cxn=(r10-r00)+(r11-r01),czn=(r01-r00)+(r11-r10),cyn=(xB-xA)*2.0;
+float3 cn=GridNrm(cxn,cyn,czn);
+GridStore(s+0,float3(xA,r00,zA),cn,float2(uu0,vv0),col);
+GridStore(s+1,float3(xA,r01,zB),cn,float2(uu0,vv1),col);
+GridStore(s+2,float3(xB,r11,zB),cn,float2(uu1,vv1),col);
+GridStore(s+3,float3(xA,r00,zA),cn,float2(uu0,vv0),col);
+GridStore(s+4,float3(xB,r11,zB),cn,float2(uu1,vv1),col);
+GridStore(s+5,float3(xB,r10,zA),cn,float2(uu1,vv0),col);
+s+=6u;}}}
+[numthreads(8,8,1)]void CSGridCount(uint3 id:SV_DispatchThreadID){
+uint gN=(uint)GOrigin.w;if(id.x>=gN||id.y>=gN)return;
+uint n=GridCellCount(id.x,id.y,(int)GLim.w);
+GridCnt.Store((id.y*gN+id.x)*4u,n);}
+[numthreads(8,8,1)]void CSGridWrite(uint3 id:SV_DispatchThreadID){
+uint gN=(uint)GOrigin.w;if(id.x>=gN||id.y>=gN)return;
+uint idx=id.y*gN+id.x;uint b=GridBase[idx];if(b==0xffffffffu)return;
+GridWriteCell(id.x,id.y,b,(int)GLim.w);}

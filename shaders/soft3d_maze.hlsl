@@ -215,3 +215,40 @@ float drip=col*smoothstep(.12,.95,frac(uv.y*8.-t*1.38+n2));
 float rain=smoothstep(.55,1.,frac(uv.x*42.+n*2.1))*smoothstep(.1,.92,frac(uv.y*16.-t*2.05+n2));
 float spark=pow(saturate(n*n2),3.);float sky=saturate(.12+n*.55+(1.-uv.y)*.42);
 FxOut[p]=float4(drip,rain,spark,sky);}
+// 床・階段の四角を密度分割する。CPU は 1 面 1 ジョブだけ渡し、頂点はここが書く。
+struct QJ{float4 a;float4 b;float4 c;float4 d;float4 nrm;float4 col;float4 pack;uint4 base;};
+cbuffer SubN:register(b2){uint nSubJobs;uint3 subPad;};
+StructuredBuffer<QJ> SubIn:register(t8);
+RWByteAddressBuffer SubOut:register(u1);
+void SubStore(uint vi,float3 p,float3 n,float2 uv,float4 c){
+uint o=vi*48u;
+SubOut.Store(o+0,asuint(p.x));SubOut.Store(o+4,asuint(p.y));SubOut.Store(o+8,asuint(p.z));
+SubOut.Store(o+12,asuint(n.x));SubOut.Store(o+16,asuint(n.y));SubOut.Store(o+20,asuint(n.z));
+SubOut.Store(o+24,asuint(uv.x));SubOut.Store(o+28,asuint(uv.y));
+SubOut.Store(o+32,asuint(c.x));SubOut.Store(o+36,asuint(c.y));SubOut.Store(o+40,asuint(c.z));SubOut.Store(o+44,asuint(c.w));}
+float3 SubAt(QJ q,float t,float s){
+float3 xa=lerp(q.a.xyz,q.b.xyz,t);float3 xb=lerp(q.d.xyz,q.c.xyz,t);return lerp(xa,xb,s);}
+void SubUvWorld(float3 p,float3 n,out float u,out float vv){
+if(abs(n.y)>0.65){u=p.x*0.52;vv=p.z*0.52;}
+else if(abs(n.x)>0.65){u=p.z*0.52;vv=p.y*0.78;}
+else{u=p.x*0.52;vv=p.y*0.78;}}
+[numthreads(64,1,1)]void CSSub(uint id:SV_DispatchThreadID){
+if(id>=nSubJobs)return;
+QJ q=SubIn[id];int sd=(int)(q.nrm.w+0.5);if(sd<1)sd=1;if(sd>16)sd=16;
+uint slot=q.base.x;float3 n=q.nrm.xyz;int world=(q.pack.x>0.5);
+for(int j=0;j<sd;j++)for(int i=0;i<sd;i++){
+float t0=(float)i/(float)sd,t1=(float)(i+1)/(float)sd;
+float s0=(float)j/(float)sd,s1=(float)(j+1)/(float)sd;
+float3 p00=SubAt(q,t0,s0),p10=SubAt(q,t1,s0),p11=SubAt(q,t1,s1),p01=SubAt(q,t0,s1);
+float u00,v00,u10,v10,u11,v11,u01,v01;
+if(world){SubUvWorld(p00,n,u00,v00);SubUvWorld(p10,n,u10,v10);SubUvWorld(p11,n,u11,v11);SubUvWorld(p01,n,u01,v01);}
+else{
+float u0=t0,v0=s0,u1=t1,v1=s1;
+u00=u0;v00=v1;u10=u1;v10=v1;u11=u1;v11=v0;u01=u0;v01=v0;}
+SubStore(slot+0,p00,n,float2(u00,v00),q.col);
+SubStore(slot+1,p10,n,float2(u10,v10),q.col);
+SubStore(slot+2,p11,n,float2(u11,v11),q.col);
+SubStore(slot+3,p00,n,float2(u00,v00),q.col);
+SubStore(slot+4,p11,n,float2(u11,v11),q.col);
+SubStore(slot+5,p01,n,float2(u01,v01),q.col);
+slot+=6u;}}

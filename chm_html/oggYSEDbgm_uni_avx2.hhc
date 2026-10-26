@@ -328,6 +328,10 @@
 			    <param name="Local" value="ja\race.htm">
 			    </OBJECT>
 			<LI> <OBJECT type="text/sitemap">
+			    <param name="Name" value="おまけ：タクティクス">
+			    <param name="Local" value="ja\tactics.htm">
+			    </OBJECT>
+			<LI> <OBJECT type="text/sitemap">
 			    <param name="Name" value="おまけ：昔マシンのサウンド">
 			    <param name="Local" value="ja\cemu.htm">
 			    </OBJECT>
@@ -716,6 +720,10 @@
 			<LI> <OBJECT type="text/sitemap">
 			    <param name="Name" value="Bonus: the aerial race">
 			    <param name="Local" value="en\race.htm">
+			    </OBJECT>
+			<LI> <OBJECT type="text/sitemap">
+			    <param name="Name" value="Bonus: tactics">
+			    <param name="Local" value="en\tactics.htm">
 			    </OBJECT>
 			<LI> <OBJECT type="text/sitemap">
 			    <param name="Name" value="Bonus: old-machine sound">

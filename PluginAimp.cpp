@@ -656,7 +656,7 @@ int PluginAimp_Read(BYTE* dst, int bytesWanted)
 				tIdle = GetTickCount();
 				continue;
 			}
-			if (eof) break;
+			if (eof) { extern volatile LONG g_plugReadEof; InterlockedExchange(&g_plugReadEof, 1); break; }
 			const DWORD idleCap = (g_oggUiThreadId != 0 && GetCurrentThreadId() == g_oggUiThreadId)
 				? 800u : 5000u;
 			if (GetTickCount() - tIdle > idleCap) break;

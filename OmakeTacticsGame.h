@@ -218,6 +218,7 @@ private:
 	void DrawForecast();
 	void DrawMinimap(float x, float y, float s);
 	void DrawCommandMenu();
+	void DrawFormGuide(int skill, int tx, int tz, float avoidX, float avoidY, float avoidW, float avoidH);
 	void UseConsumable(int good, int target);
 	void DrawLevelUp();
 	void DrawBattleStatus();
@@ -288,6 +289,8 @@ private:
 	BOOL m_showHelp;
 	int m_codex;             // 0=閉 1=スキル 2=成長
 	int m_codexPage;
+	int m_codexJob;          // 0=全職。以降は職、末尾は陣形
+	int m_codexSort;         // 0職 1名前 2MP 3習得
 	int m_skillPage;
 	int m_skillTab;          // 0攻撃 1回復 2クラフト 3陣形
 	int m_skMemoTab[MAX_ROSTER];

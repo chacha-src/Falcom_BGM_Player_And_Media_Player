@@ -14,6 +14,7 @@ enum {
 	ID_CDX_PREV = 180, ID_CDX_NEXT, ID_CDX_GROW, ID_CDX_ALCH, ID_CDX_SKILL, ID_CDX_REC0,
 	ID_BASE_GRID, ID_BASE_HELP, ID_BASE_SLOT0 = 120,
 	ID_SORTIE_START = 160, ID_SORTIE_MID, ID_SORTIE_AUTO, ID_SORTIE_CANCEL,
+	ID_CDX_JOB = 164, ID_CDX_SORT,
 	ID_OPT_BGM = 190, ID_OPT_SE, ID_OPT_CAM,
 	ID_BASE_SHOP = 210, ID_SHOP_CLOSE, ID_SHOP_BUY0 = 220, ID_SHOP_SELL0 = 250,
 	ID_SHOP_PREV = 270, ID_SHOP_NEXT, ID_SHOP_LINE0 = 272, ID_SHOP_KIND0 = 278,
@@ -98,6 +99,8 @@ Game::Game()
 	m_showHelp = FALSE;
 	m_codex = 0;
 	m_codexPage = 0;
+	m_codexJob = 0;
+	m_codexSort = 0;
 	m_skillPage = 0;
 	m_skillTab = 0;
 	memset(m_skMemoTab, 0, sizeof(m_skMemoTab));
@@ -1615,6 +1618,181 @@ void Game::DrawShowcase3D()
 	m_r.DrawParticles(m_parts.data(), m_parts.size());
 }
 
+struct CodexHit {
+	int skill, lv, mp, key;
+	wchar_t how[160];
+	wchar_t name[80];
+};
+static int s_codexSort;
+static int CodexAreaCap(const ClassDef& cd)
+{
+	if (cd.tier < 3) return 0;
+	int rad = cd.tier - 1;
+	if (rad > 9) rad = 9;
+	if (cd.group != G_HOLY && rad > 3) rad = 3;
+	return rad;
+}
+static int CodexJobKey(int cls)
+{
+	const ClassDef& cd = ClassInfo(cls);
+	int g = cd.group;
+	if (g < 0 || g >= G_COUNT) g = 0;
+	int tier = cd.tier;
+	if (tier < 0) tier = 0;
+	if (tier > 12) tier = 12;
+	int id = cls < 0 ? 0 : cls;
+	if (id > 200) id = 200;
+	return g * 100000 + tier * 1000 + id;
+}
+static int CodexLearnLv(int cls, int skill)
+{
+	const ClassDef& cd = ClassInfo(cls);
+	int lv = 0;
+	for (int k = 0; k < LEARN_N; k++)
+		if (cd.learn[k].skill == skill && cd.learn[k].lv > 0) lv = cd.learn[k].lv;
+	if (lv > 0) return lv;
+	if (skill == SKL_RAISE && cd.group == G_HOLY) return 7;
+	if (skill >= SKL_ART0 && skill < SKL_ARTN) {
+		int g = (skill - SKL_ART0) / 26;
+		int alv = (skill - SKL_ART0) % 26 + 7;
+		if (cd.group == g && PaceRoleOfLv(alv) >= 0) return alv;
+	}
+	if (skill >= SKL_AREAHEAL0 && skill < SKL_FORM0) {
+		int cap = CodexAreaCap(cd);
+		if (cap >= 2 && (skill == SKL_AREAHEAL0 + (cap - 2) || skill == SKL_AREARAISE0 + (cap - 2)))
+			return PromoteLevel(cd.tier - 1);
+	}
+	return 0;
+}
+static int CodexJobList(int* dst, int cap)
+{
+	struct E { int cls, g, tier; };
+	E e[40];
+	int n = 0;
+	for (int c = 0; c < C_PLAYER_COUNT; c++) {
+		if (n >= 40) break;
+		const ClassDef& cd = ClassInfo(c);
+		e[n].cls = c; e[n].g = cd.group < 0 ? 0 : cd.group; e[n].tier = cd.tier; n++;
+	}
+	int extra[2] = { C_GLADIATOR, C_SHADOW };
+	for (int i = 0; i < 2 && n < 40; i++) {
+		const ClassDef& cd = ClassInfo(extra[i]);
+		e[n].cls = extra[i]; e[n].g = cd.group < 0 ? 0 : cd.group; e[n].tier = cd.tier; n++;
+	}
+	for (int i = 1; i < n; i++) {
+		E v = e[i];
+		int j = i;
+		while (j > 0) {
+			const E& p = e[j - 1];
+			if (!(p.g > v.g || (p.g == v.g && (p.tier > v.tier || (p.tier == v.tier && p.cls > v.cls))))) break;
+			e[j] = p;
+			j--;
+		}
+		e[j] = v;
+	}
+	if (n > cap) n = cap;
+	for (int i = 0; i < n; i++) dst[i] = e[i].cls;
+	return n;
+}
+static void CodexFillHow(int skill, wchar_t* how, int howN, int* key, int* lv)
+{
+	how[0] = 0;
+	*key = 0;
+	*lv = 0;
+	for (int c = 0; c < C_PLAYER_COUNT && how[0] == 0; c++) {
+		int got = 0;
+		const ClassDef& cd = ClassInfo(c);
+		for (int k = 0; k < LEARN_N; k++) if (cd.learn[k].skill == skill && cd.learn[k].lv > 0) got = cd.learn[k].lv;
+		if (got > 0) {
+			swprintf_s(how, howN, L"%s  Lv%d", TT(cd.nameTx), got);
+			*key = CodexJobKey(c);
+			*lv = got;
+		}
+	}
+	if (skill == SKL_RAISE) {
+		swprintf_s(how, howN, L"%s  Lv7", TT(TX_G_HOLY));
+		*key = G_HOLY * 100000 + 7;
+		*lv = 7;
+	}
+	if (IsFormSkill(skill)) {
+		swprintf_s(how, howN, L"%s", TT(TX_SK_TAB_FORM));
+		*key = 900000;
+		*lv = skill - SKL_FORM0;
+	}
+	if (skill >= SKL_AREAHEAL0 && skill < SKL_FORM0) {
+		int rad = SkillInfo(skill).area;
+		int show = -1, showTier = 99;
+		for (int c = 0; c <= C_SHADOW; c++) {
+			const ClassDef& cd = ClassInfo(c);
+			if (cd.group != G_HOLY || cd.tier < 3 || cd.tier - 1 < rad) continue;
+			if (cd.tier < showTier) { showTier = cd.tier; show = c; }
+		}
+		if (show >= 0) {
+			const wchar_t* more = rad <= 3 ? LangPick14(L"・他職も3まで", L", others to 3", L", autres jusqu'à 3", L", altri fino a 3", L", otros hasta 3", L", 다른 직업도 3까지", L"，其他职到3", L"، غيرهم حتى 3", L", прочие до 3", L", andere bis 3", L", outros até 3", L", anderen tot 3", L", inne do 3", L", diğerleri 3'e") : L"";
+			swprintf_s(how, howN, L"%s  Lv%d%s", TT(ClassInfo(show).nameTx), PromoteLevel(showTier - 1), more);
+			*key = CodexJobKey(show);
+			*lv = PromoteLevel(showTier - 1);
+		}
+	}
+	if (skill >= SKL_ART0 && skill < SKL_ARTN) {
+		int k = skill - SKL_ART0;
+		int g = k / 26;
+		int alv = (k % 26) + 7;
+		if (g < 0 || g >= G_COUNT) g = 0;
+		swprintf_s(how, howN, L"%s  Lv%d", TT(TX_G_MELEE + g), alv);
+		*key = g * 100000 + 80000 + alv;
+		*lv = alv;
+	}
+	if (how[0] == 0) {
+		int extra[2] = { C_GLADIATOR, C_SHADOW };
+		for (int e = 0; e < 2 && how[0] == 0; e++) {
+			const ClassDef& cd = ClassInfo(extra[e]);
+			for (int k = 0; k < LEARN_N; k++) if (cd.learn[k].skill == skill && cd.learn[k].lv > 0) {
+				swprintf_s(how, howN, L"%s  Lv%d", TT(cd.nameTx), cd.learn[k].lv);
+				*key = CodexJobKey(extra[e]);
+				*lv = cd.learn[k].lv;
+				break;
+			}
+		}
+	}
+	for (int line = 0; line < TAC_RANK_LINES && how[0] == 0; line++) {
+		for (int r = 0; r < TAC_RANK_N && how[0] == 0; r++) {
+			int cls = C_PLAYER_COUNT + line * TAC_RANK_N + r;
+			const ClassDef& cd = ClassInfo(cls);
+			for (int k = 0; k < LEARN_N; k++) if (cd.learn[k].skill == skill && cd.learn[k].lv > 0) {
+				swprintf_s(how, howN, L"%s  Lv%d", TT(cd.nameTx), cd.learn[k].lv);
+				*key = CodexJobKey(cls);
+				*lv = cd.learn[k].lv;
+				break;
+			}
+		}
+	}
+}
+static int CmpCodex(const void* pa, const void* pb)
+{
+	const CodexHit* a = (const CodexHit*)pa;
+	const CodexHit* b = (const CodexHit*)pb;
+	int c = 0;
+	if (s_codexSort == 1) c = wcscmp(a->name, b->name);
+	else if (s_codexSort == 2) c = (a->mp > b->mp) - (a->mp < b->mp);
+	else if (s_codexSort == 3) c = (a->lv > b->lv) - (a->lv < b->lv);
+	else c = (a->key > b->key) - (a->key < b->key);
+	if (!c && s_codexSort != 3) c = (a->lv > b->lv) - (a->lv < b->lv);
+	if (!c && s_codexSort != 1) c = wcscmp(a->name, b->name);
+	if (!c) c = (a->skill > b->skill) - (a->skill < b->skill);
+	return c;
+}
+static const wchar_t* CodexWord(int w)
+{
+	switch (w) {
+	case 0: return LangPick14(L"職", L"Job", L"Classe", L"Classe", L"Clase", L"직업", L"职业", L"الوظيفة", L"Класс", L"Klasse", L"Classe", L"Klasse", L"Klasa", L"Sınıf");
+	case 1: return LangPick14(L"すべて", L"All", L"Tous", L"Tutti", L"Todos", L"전체", L"全部", L"الكل", L"Все", L"Alle", L"Todos", L"Alles", L"Wszystkie", L"Tümü");
+	case 2: return LangPick14(L"並び", L"Sort", L"Tri", L"Ordine", L"Orden", L"정렬", L"排序", L"الترتيب", L"Порядок", L"Sortierung", L"Ordem", L"Sortering", L"Kolejność", L"Sıra");
+	case 3: return LangPick14(L"名前", L"Name", L"Nom", L"Nome", L"Nombre", L"이름", L"名称", L"الاسم", L"Имя", L"Name", L"Nome", L"Naam", L"Nazwa", L"Ad");
+	default: return LangPick14(L"習得", L"Learned", L"Acquis", L"Appreso", L"Aprendido", L"습득", L"习得", L"الاكتساب", L"Изучение", L"Erlernt", L"Aprendido", L"Geleerd", L"Nauka", L"Öğrenim");
+	}
+}
+
 void Game::DrawCodex()
 {
 	float x = U(30), y = U(24), w = (float)m_w - U(60), h = (float)m_h - U(48);
@@ -1623,67 +1801,65 @@ void Game::DrawCodex()
 	m_r.HudText(title, x + w * .5f, y + U(28), U(22), RGBA8(255, 226, 150), 1, 1);
 	float yy = y + U(58);
 	if (m_codex == 1) {
-		int list[SKL_COUNT], n = 0;
-		for (int s = 0; s < SKL_COUNT; s++) {
+		int jobs[40];
+		int nJob = CodexJobList(jobs, 40);
+		int slots = nJob + 2;
+		if (m_codexJob < 0 || m_codexJob >= slots) m_codexJob = 0;
+		if (m_codexSort < 0 || m_codexSort > 3) m_codexSort = 0;
+		const wchar_t* jn = CodexWord(1);
+		if (m_codexJob == nJob + 1) jn = TT(TX_SK_TAB_FORM);
+		else if (m_codexJob > 0) jn = TT(ClassInfo(jobs[m_codexJob - 1]).nameTx);
+		const wchar_t* sn = m_codexSort == 1 ? CodexWord(3) : (m_codexSort == 2 ? L"MP" : (m_codexSort == 3 ? CodexWord(4) : CodexWord(0)));
+		float jw = min(U(460.f), (w - U(48)) * .56f);
+		float sw = min(U(280.f), w - U(48) - jw - U(12));
+		int dj = Sel(ID_CDX_JOB, x + U(24), y + U(50), jw, U(36), CodexWord(0), jn);
+		int ds = Sel(ID_CDX_SORT, x + U(24) + jw + U(12), y + U(50), sw, U(36), CodexWord(2), sn);
+		if (dj) { m_codexJob = (m_codexJob + dj + slots) % slots; m_codexPage = 0; }
+		if (ds) { m_codexSort = (m_codexSort + ds + 4) % 4; m_codexPage = 0; }
+		int want = m_codexJob > 0 && m_codexJob <= nJob ? jobs[m_codexJob - 1] : -1;
+		int wantForm = m_codexJob == nJob + 1;
+		static CodexHit hits[SKL_COUNT];
+		int n = 0;
+		for (int s = 0; s < SKL_COUNT && n < SKL_COUNT; s++) {
 			if (SkillInfo(s).enemyOnly) continue;
 			if (s >= SKL_ART0 && s < SKL_ARTN && PaceRoleOfLv((s - SKL_ART0) % 26 + 7) < 0) continue;
-			list[n++] = s;
+			CodexHit& h = hits[n];
+			h.skill = s;
+			h.mp = SkillInfo(s).mp;
+			wcscpy_s(h.name, SkillLabel(s));
+			if (wantForm) {
+				if (!IsFormSkill(s)) continue;
+				swprintf_s(h.how, L"%s", TT(TX_SK_TAB_FORM));
+				h.lv = s - SKL_FORM0;
+				h.key = 0;
+			} else if (want >= 0) {
+				int lv = CodexLearnLv(want, s);
+				if (lv <= 0 || IsFormSkill(s)) continue;
+				swprintf_s(h.how, L"%s  Lv%d", TT(ClassInfo(want).nameTx), lv);
+				h.lv = lv;
+				h.key = 0;
+			} else {
+				CodexFillHow(s, h.how, 160, &h.key, &h.lv);
+			}
+			n++;
 		}
-		int per = 7;
+		s_codexSort = m_codexSort;
+		if (n > 1) qsort(hits, n, sizeof(CodexHit), CmpCodex);
+		float listTop = y + U(98);
+		float listBot = y + h - U(96);
+		int per = (int)((listBot - listTop) / U(40));
+		if (per < 3) per = 3;
+		if (per > 7) per = 7;
 		int pages = max(1, (n + per - 1) / per);
+		if (m_codexPage < 0) m_codexPage = 0;
 		if (m_codexPage >= pages) m_codexPage = pages - 1;
 		int a = m_codexPage * per, b = min(n, a + per);
+		yy = listTop;
+		if (n == 0) m_r.HudText(TT(TX_PT_NONE), x + U(24), yy, U(16), RGBA8(190, 200, 220), 0, 1);
 		for (int i = a; i < b; i++) {
-			const SkillDef& sd = SkillInfo(list[i]);
-			wchar_t how[160] = L"";
-			for (int c = 0; c < C_PLAYER_COUNT && how[0] == 0; c++) {
-				const ClassDef& cd = ClassInfo(c);
-				for (int k = 0; k < LEARN_N; k++) if (cd.learn[k].skill == list[i] && cd.learn[k].lv > 0) {
-					swprintf_s(how, L"%s  Lv%d", TT(cd.nameTx), cd.learn[k].lv);
-				}
-			}
-			if (list[i] == SKL_RAISE) swprintf_s(how, L"%s  Lv7", TT(TX_G_HOLY));
-			if (IsFormSkill(list[i])) swprintf_s(how, L"%s", TT(TX_SK_TAB_FORM));
-			if (list[i] >= SKL_AREAHEAL0 && list[i] < SKL_FORM0) {
-				int rad = SkillInfo(list[i]).area;
-				int show = -1, showTier = 99;
-				for (int c = 0; c <= C_SHADOW; c++) {
-					const ClassDef& cd = ClassInfo(c);
-					if (cd.group != G_HOLY || cd.tier < 3 || cd.tier - 1 < rad) continue;
-					if (cd.tier < showTier) { showTier = cd.tier; show = c; }
-				}
-				if (show >= 0) {
-					const wchar_t* more = rad <= 3 ? LangPick14(L"・他職も3まで", L", others to 3", L", autres jusqu'à 3", L", altri fino a 3", L", otros hasta 3", L", 다른 직업도 3까지", L"，其他职到3", L"، غيرهم حتى 3", L", прочие до 3", L", andere bis 3", L", outros até 3", L", anderen tot 3", L", inne do 3", L", diğerleri 3'e") : L"";
-					swprintf_s(how, L"%s  Lv%d%s", TT(ClassInfo(show).nameTx), PromoteLevel(showTier - 1), more);
-				}
-			}
-			if (list[i] >= SKL_ART0 && list[i] < SKL_ARTN) {
-				int k = list[i] - SKL_ART0;
-				int g = k / 26;
-				int lv = (k % 26) + 7;
-				swprintf_s(how, L"%s  Lv%d", TT(TX_G_MELEE + g), lv);
-			}
-			if (how[0] == 0) {
-				int extra[2] = { C_GLADIATOR, C_SHADOW };
-				for (int e = 0; e < 2 && how[0] == 0; e++) {
-					const ClassDef& cd = ClassInfo(extra[e]);
-					for (int k = 0; k < LEARN_N; k++) if (cd.learn[k].skill == list[i] && cd.learn[k].lv > 0) {
-						swprintf_s(how, L"%s  Lv%d", TT(cd.nameTx), cd.learn[k].lv);
-						break;
-					}
-				}
-			}
-			for (int line = 0; line < TAC_RANK_LINES && how[0] == 0; line++) {
-				for (int r = 0; r < TAC_RANK_N && how[0] == 0; r++) {
-					const ClassDef& cd = ClassInfo(C_PLAYER_COUNT + line * TAC_RANK_N + r);
-					for (int k = 0; k < LEARN_N; k++) if (cd.learn[k].skill == list[i] && cd.learn[k].lv > 0) {
-						swprintf_s(how, L"%s  Lv%d", TT(cd.nameTx), cd.learn[k].lv);
-						break;
-					}
-				}
-			}
-			wchar_t row[220];
-			swprintf_s(row, L"%s   MP%d   %s", SkillLabel(list[i]), sd.mp, how);
+			const SkillDef& sd = SkillInfo(hits[i].skill);
+			wchar_t row[240];
+			swprintf_s(row, L"%s   MP%d   %s", hits[i].name, hits[i].mp, hits[i].how);
 			m_r.HudText(row, x + U(24), yy, U(16), RGBA8(240, 240, 245), 0, 1);
 			wchar_t attr[120], desc[420];
 			SkillAttrText(sd, attr, 120);

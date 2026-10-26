@@ -1047,6 +1047,8 @@ CS3mView::CS3mView()
 	, m_rsSolid(NULL), m_rsShadow(NULL), m_rsNoCull(NULL), m_dssWrite(NULL), m_dssRead(NULL), m_dssOff(NULL), m_bsOpaque(NULL), m_bsAlpha(NULL)
 	, m_bsAdd(NULL), m_dragging(0), m_dragTurnAcc(0), m_dragDidTurn(0)
 {
+	m_csSub = NULL; m_vbSub = NULL; m_uavSub = NULL; m_bufSubIn = NULL; m_srvSubIn = NULL; m_cbSub = NULL;
+	m_subJobs = NULL; m_subDrawN = 0;
 	for (int i = 0; i < S3M_THEME_N; i++) {
 		m_texBrick[i] = NULL; m_srvBrick[i] = NULL;
 		m_texBrickD[i] = NULL; m_srvBrickD[i] = NULL;
@@ -1131,7 +1133,89 @@ BOOL CS3mView::CreateShaders()
 	hr|=m_dev->CreateInputLayout(iskin,5,bskin->GetBufferPointer(),bskin->GetBufferSize(),&m_ilSkin);
 	hr|=m_dev->CreateInputLayout(ih,3,b[6]->GetBufferPointer(),b[6]->GetBufferSize(),&m_ilHud);
 	for(int i=0;i<11;i++) S3M_RELEASE(b[i]); S3M_RELEASE(bf); S3M_RELEASE(bline); S3M_RELEASE(bmirf); S3M_RELEASE(bcloud); S3M_RELEASE(bcs); S3M_RELEASE(bgs); S3M_RELEASE(bskin);
+	{
+		ID3DBlob* bsub = NULL;
+		if (SUCCEEDED(Soft3DLoadCso(L"maze", "CSSub", "cs_5_0", IDR_CSO_MAZE_CSSUB, L"soft3d_maze.hlsl", (void**)&bsub)) && bsub) {
+			m_dev->CreateComputeShader(bsub->GetBufferPointer(), bsub->GetBufferSize(), NULL, &m_csSub);
+			bsub->Release();
+		}
+	}
 	return SUCCEEDED(hr);
+}
+
+struct S3mSubJob {
+	float a[4], b[4], c[4], d[4];
+	float nrm[4];
+	float col[4];
+	float pack[4];
+	unsigned base, p0, p1, p2;
+};
+static const UINT kS3mSubJobs = 32768;
+static const UINT kS3mSubVerts = 1048576;
+
+BOOL CS3mView::EnsureSubGpu()
+{
+	if (!m_dev || !m_csSub) return FALSE;
+	if (!m_subJobs) {
+		m_subJobs = new (std::nothrow) BYTE[(size_t)kS3mSubJobs * sizeof(S3mSubJob)];
+		if (!m_subJobs) return FALSE;
+	}
+	if (!m_cbSub) {
+		D3D11_BUFFER_DESC bd = {};
+		bd.ByteWidth = 16; bd.Usage = D3D11_USAGE_DYNAMIC; bd.BindFlags = D3D11_BIND_CONSTANT_BUFFER; bd.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+		if (FAILED(m_dev->CreateBuffer(&bd, NULL, &m_cbSub))) return FALSE;
+	}
+	if (!m_bufSubIn) {
+		D3D11_BUFFER_DESC bd = {};
+		bd.ByteWidth = kS3mSubJobs * (UINT)sizeof(S3mSubJob);
+		bd.Usage = D3D11_USAGE_DEFAULT; bd.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+		bd.MiscFlags = D3D11_RESOURCE_MISC_BUFFER_STRUCTURED; bd.StructureByteStride = (UINT)sizeof(S3mSubJob);
+		if (FAILED(m_dev->CreateBuffer(&bd, NULL, &m_bufSubIn))) return FALSE;
+		D3D11_SHADER_RESOURCE_VIEW_DESC sd = {};
+		sd.Format = DXGI_FORMAT_UNKNOWN; sd.ViewDimension = D3D11_SRV_DIMENSION_BUFFER; sd.Buffer.NumElements = kS3mSubJobs;
+		if (FAILED(m_dev->CreateShaderResourceView(m_bufSubIn, &sd, &m_srvSubIn))) return FALSE;
+	}
+	if (!m_vbSub) {
+		const UINT bytes = kS3mSubVerts * 48u;
+		D3D11_BUFFER_DESC bd = {};
+		bd.ByteWidth = bytes; bd.Usage = D3D11_USAGE_DEFAULT;
+		bd.BindFlags = D3D11_BIND_VERTEX_BUFFER | D3D11_BIND_UNORDERED_ACCESS;
+		bd.MiscFlags = D3D11_RESOURCE_MISC_BUFFER_ALLOW_RAW_VIEWS;
+		if (FAILED(m_dev->CreateBuffer(&bd, NULL, &m_vbSub))) return FALSE;
+		D3D11_UNORDERED_ACCESS_VIEW_DESC ud = {};
+		ud.Format = DXGI_FORMAT_R32_TYPELESS; ud.ViewDimension = D3D11_UAV_DIMENSION_BUFFER;
+		ud.Buffer.Flags = D3D11_BUFFER_UAV_FLAG_RAW; ud.Buffer.NumElements = bytes / 4u;
+		if (FAILED(m_dev->CreateUnorderedAccessView(m_vbSub, &ud, &m_uavSub))) return FALSE;
+	}
+	return m_vbSub && m_uavSub && m_srvSubIn && m_cbSub;
+}
+
+BOOL CS3mView::DispatchSubmesh(const void* jobs, UINT nJobs, UINT nVerts)
+{
+	m_subDrawN = 0;
+	if (!jobs || !m_imm || nJobs < 1 || nVerts < 6) return FALSE;
+	if (nJobs > kS3mSubJobs || nVerts > kS3mSubVerts) return FALSE;
+	if (!EnsureSubGpu()) return FALSE;
+	D3D11_BOX box = {};
+	box.right = nJobs * (UINT)sizeof(S3mSubJob); box.bottom = 1; box.back = 1;
+	m_imm->UpdateSubresource(m_bufSubIn, 0, &box, jobs, box.right, 0);
+	D3D11_MAPPED_SUBRESOURCE map = {};
+	if (FAILED(m_imm->Map(m_cbSub, 0, D3D11_MAP_WRITE_DISCARD, 0, &map))) return FALSE;
+	UINT cbv[4] = { nJobs, 0, 0, 0 };
+	memcpy(map.pData, cbv, sizeof(cbv));
+	m_imm->Unmap(m_cbSub, 0);
+	m_imm->CSSetShader(m_csSub, NULL, 0);
+	m_imm->CSSetConstantBuffers(2, 1, &m_cbSub);
+	m_imm->CSSetShaderResources(8, 1, &m_srvSubIn);
+	m_imm->CSSetUnorderedAccessViews(1, 1, &m_uavSub, NULL);
+	m_imm->Dispatch((nJobs + 63u) / 64u, 1, 1);
+	ID3D11UnorderedAccessView* nu = NULL; ID3D11ShaderResourceView* ns = NULL; ID3D11Buffer* nb = NULL;
+	m_imm->CSSetUnorderedAccessViews(1, 1, &nu, NULL);
+	m_imm->CSSetShaderResources(8, 1, &ns);
+	m_imm->CSSetConstantBuffers(2, 1, &nb);
+	m_imm->CSSetShader(NULL, NULL, 0);
+	m_subDrawN = nVerts;
+	return TRUE;
 }
 
 BOOL CS3mView::CreateProcTextures()
@@ -1896,6 +1980,8 @@ void CS3mView::ReleaseDx()
 	delete[] m_cpuDynScratch; m_cpuDynScratch = NULL; m_cpuDynScratchBytes = 0;
 	delete[] m_cpuSkinScratch; m_cpuSkinScratch = NULL; m_cpuSkinScratchBytes = 0;
 	delete[] m_cpuHudScratch; m_cpuHudScratch = NULL; m_cpuHudScratchBytes = 0;
+	delete[] m_subJobs; m_subJobs = NULL; m_subDrawN = 0;
+	S3M_RELEASE(m_uavSub); S3M_RELEASE(m_vbSub); S3M_RELEASE(m_srvSubIn); S3M_RELEASE(m_bufSubIn); S3M_RELEASE(m_cbSub); S3M_RELEASE(m_csSub);
 	S3M_RELEASE(m_uavFx);S3M_RELEASE(m_srvFx);S3M_RELEASE(m_texFx);
 	S3M_RELEASE(m_psFinal);S3M_RELEASE(m_psDof);S3M_RELEASE(m_psSsr);S3M_RELEASE(m_vsPost);S3M_RELEASE(m_psHudLine);S3M_RELEASE(m_psHud);S3M_RELEASE(m_vsHud);S3M_RELEASE(m_psCloud);S3M_RELEASE(m_psMirF);S3M_RELEASE(m_psSolid);S3M_RELEASE(m_vsSkin);S3M_RELEASE(m_vsSolid);S3M_RELEASE(m_psWall);S3M_RELEASE(m_gsWind);S3M_RELEASE(m_dsTess);S3M_RELEASE(m_hsTess);S3M_RELEASE(m_vsTess);S3M_RELEASE(m_csFx);
 	S3M_RELEASE(m_shadowSrv);S3M_RELEASE(m_shadowDsv);S3M_RELEASE(m_shadowTex);
@@ -6000,7 +6086,7 @@ void CSoft3DMazeDlg::RenderScene()
 		maxSkin=sv?(m_view.m_vbSkinBytes/sizeof(S3MSkinVertex)):0;
 		if(maxSkin>24000u)maxSkin=24000u;
 	}
-	UINT floorBeg=0,nFloor=0,wallBeg=0,nWall=0,transBeg=0,nTrans=0;int phase=0;
+	UINT floorBeg=0,nFloor=0,wallBeg=0,nWall=0,transBeg=0,nTrans=0;int phase=0,nLay=0;
 	// 頂点が足りなければCPUスクラッチを倍々拡張（描画欠け防止）。上限≈64MB
 	const UINT kDynVertCap=kS3mMaxDynBytes/sizeof(S3MVertex);
 	auto ensureDynCap=[&](UINT needVerts)->BOOL{
@@ -6032,11 +6118,34 @@ void CSoft3DMazeDlg::RenderScene()
 	auto tri=[&](float x0,float y0,float z0,float x1,float y1,float z1,float x2,float y2,float z2,float nx,float ny,float nz,float u0,float v0,float u1,float v1,float u2,float v2,float r,float g,float b,float a){put(x0,y0,z0,nx,ny,nz,u0,v0,r,g,b,a);put(x1,y1,z1,nx,ny,nz,u1,v1,r,g,b,a);put(x2,y2,z2,nx,ny,nz,u2,v2,r,g,b,a);};
 	auto quadUV=[&](float x0,float y0,float z0,float x1,float y1,float z1,float x2,float y2,float z2,float x3,float y3,float z3,float nx,float ny,float nz,float u0,float v0,float u1,float v1,float r,float g,float b,float a){
 		tri(x0,y0,z0,x1,y1,z1,x2,y2,z2,nx,ny,nz,u0,v1,u1,v1,u1,v0,r,g,b,a);tri(x0,y0,z0,x2,y2,z2,x3,y3,z3,nx,ny,nz,u0,v1,u1,v0,u0,v0,r,g,b,a);};
+	const BOOL subOn = m_view.EnsureSubGpu() ? TRUE : FALSE;
+	m_view.m_subDrawN = 0;
+	S3mSubJob* subJobs = subOn ? (S3mSubJob*)m_view.m_subJobs : NULL;
+	UINT nSubJobs = 0, nSubVerts = 0;
+	UINT subBeg[4] = {}, subCnt[4] = {};
+	auto queueSub=[&](float x0,float y0,float z0,float x1,float y1,float z1,float x2,float y2,float z2,float x3,float y3,float z3,float nx,float ny,float nz,int world,float u0,float v0,float u1,float v1,float r,float g,float b,float a,int sd)->BOOL{
+		if(!subJobs||phase!=0||sd<2||nLay<0||nLay>=4)return FALSE;
+		const UINT add=(UINT)sd*(UINT)sd*6u;
+		if(nSubJobs>=kS3mSubJobs||nSubVerts+add>kS3mSubVerts)return FALSE;
+		S3mSubJob& j=subJobs[nSubJobs++];
+		j.a[0]=x0;j.a[1]=y0;j.a[2]=z0;j.a[3]=v1;
+		j.b[0]=x1;j.b[1]=y1;j.b[2]=z1;j.b[3]=0;
+		j.c[0]=x2;j.c[1]=y2;j.c[2]=z2;j.c[3]=0;
+		j.d[0]=x3;j.d[1]=y3;j.d[2]=z3;j.d[3]=0;
+		j.nrm[0]=nx;j.nrm[1]=ny;j.nrm[2]=nz;j.nrm[3]=(float)sd;
+		j.col[0]=r;j.col[1]=g;j.col[2]=b;j.col[3]=a;
+		j.pack[0]=world?1.f:0.f;j.pack[1]=u0;j.pack[2]=v0;j.pack[3]=u1;
+		j.base=nSubVerts;j.p0=j.p1=j.p2=0;
+		nSubVerts+=add;
+		return TRUE;
+	};
 	auto quad=[&](float x0,float y0,float z0,float x1,float y1,float z1,float x2,float y2,float z2,float x3,float y3,float z3,float nx,float ny,float nz,float r,float g,float b,float a){
 		const float cx=(x0+x1+x2+x3)*.25f,cy=(y0+y1+y2+y3)*.25f,cz=(z0+z1+z2+z3)*.25f;
 		if(nx*(ex-cx)+ny*(eyeY-cy)+nz*(ez-cz)<=0.f)return;
 		const int sd=S3MeshAxisMul();
-		const int sdQ=(sd>16)?16:sd;
+		int sdQ=(sd>16)?16:sd;
+		if(phase!=0)sdQ=1;
+		if(sdQ>1&&queueSub(x0,y0,z0,x1,y1,z1,x2,y2,z2,x3,y3,z3,nx,ny,nz,0,0,0,1,1,r,g,b,a,sdQ))return;
 		if(sdQ<=1){quadUV(x0,y0,z0,x1,y1,z1,x2,y2,z2,x3,y3,z3,nx,ny,nz,0,0,1,1,r,g,b,a);return;}
 		auto at=[&](float t,float s,float& x,float& y,float& z){
 			float xa=x0+(x1-x0)*t,ya=y0+(y1-y0)*t,za=z0+(z1-z0)*t;
@@ -6061,7 +6170,9 @@ void CSoft3DMazeDlg::RenderScene()
 		const float cx=(x0+x1+x2+x3)*.25f,cy=(y0+y1+y2+y3)*.25f,cz=(z0+z1+z2+z3)*.25f;
 		if(nx*(ex-cx)+ny*(eyeY-cy)+nz*(ez-cz)<=0.f)return;
 		const int sd=S3MeshAxisMul();
-		const int sdQ=(sd>16)?16:sd;
+		int sdQ=(sd>16)?16:sd;
+		if(phase!=0)sdQ=1;
+		if(sdQ>1&&queueSub(x0,y0,z0,x1,y1,z1,x2,y2,z2,x3,y3,z3,nx,ny,nz,1,0,0,1,1,r,g,b,a,sdQ))return;
 		float ua,va,ub,vb,uc,vc,ud,vd;
 		if(sdQ<=1){
 			uvAt(x0,y0,z0,ua,va);uvAt(x1,y1,z1,ub,vb);uvAt(x2,y2,z2,uc,vc);uvAt(x3,y3,z3,ud,vd);
@@ -6229,7 +6340,7 @@ void CSoft3DMazeDlg::RenderScene()
 	const BOOL stairMove=(m_floorFx==FLOORFX_IN);
 	const int stairDir=stairMove?((m_stairTo>m_stairFrom)?1:-1):0;
 	struct Layer{UINT fBeg,nF,mfBeg,nMF,wBeg,nW,mwBeg,nMW;int th;};
-	Layer layers[4];int nLay=0;
+	Layer layers[4];nLay=0;
 	auto themeFloorRGB=[&](int th,float k,float& r,float& g,float& b){
 		if(th<=0){r=.94f*k;g=.80f*k;b=.58f*k;}
 		else if(th==1){r=.68f*k;g=.84f*k;b=.96f*k;}
@@ -6494,6 +6605,7 @@ void CSoft3DMazeDlg::RenderScene()
 		float wr,wg,wb;themeWallTint(L.th,wr,wg,wb);
 		// --- 床（ソリッド）---
 		L.fBeg=nFloor+nWall+nTrans;
+		if(nLay>=0&&nLay<4)subBeg[nLay]=nSubVerts;
 		phase=0;
 		UINT f0=nFloor;
 		for(int z=az0;z<=az1;z++)for(int x=ax0;x<=ax1;x++){
@@ -6527,6 +6639,7 @@ void CSoft3DMazeDlg::RenderScene()
 			}
 		}
 		L.nF=nFloor-f0;
+		if(nLay>=0&&nLay<4)subCnt[nLay]=nSubVerts-subBeg[nLay];
 		L.mfBeg=nFloor+nWall+nTrans;
 		UINT mf0=nFloor;
 		for(int z=az0;z<=az1;z++)for(int x=ax0;x<=ax1;x++){
@@ -7361,6 +7474,12 @@ void CSoft3DMazeDlg::RenderScene()
 			dc->PSSetShaderResources(0,1,&m_view.m_srvFloor[L.th]);
 			if(colorPass){ID3D11ShaderResourceView* fd=m_view.m_srvFloorD[L.th]?m_view.m_srvFloorD[L.th]:m_view.m_srvFloor[L.th];dc->PSSetShaderResources(1,1,&fd);}
 			if(skipSlot!=2 && skipSlot!=3 && L.nF)dc->Draw(L.nF,L.fBeg);
+			if(skipSlot!=2 && skipSlot!=3 && li<4 && subCnt[li] && m_view.m_subDrawN && m_view.m_vbSub){
+				UINT ss=(UINT)sizeof(S3MVertex), oo=0;
+				dc->IASetVertexBuffers(0,1,&m_view.m_vbSub,&ss,&oo);
+				dc->Draw(subCnt[li], subBeg[li]);
+				dc->IASetVertexBuffers(0,1,&m_view.m_vbDyn,&stride,&off);
+			}
 			if(skipSlot!=1 && skipSlot!=3 && L.nMF){
 				if(!colorPass || forMirrorRt) dc->Draw(L.nMF,L.mfBeg);
 			}
@@ -7430,6 +7549,12 @@ void CSoft3DMazeDlg::RenderScene()
 		dc->Draw(n,beg);
 		dc->GSSetShader(NULL,NULL,0);
 	};
+	if(nSubJobs>0){
+		if(!m_view.DispatchSubmesh(subJobs,nSubJobs,nSubVerts)){
+			m_view.m_subDrawN=0;
+			for(int i=0;i<4;i++)subCnt[i]=0;
+		}
+	}
 	S3MMat fxRefVP[CS3mView::S3M_MIRROR_FX_N];
 	// --- 1パス目: シャドウマップ（不透明＋半透明すべて深度描画）---
 	{S3MMat camVP=cb.viewProj;

@@ -53,11 +53,32 @@ V3 Game::CellCenter(int x, int z) const
 
 V3 Game::UnitGroundPos(const Unit& u) const
 {
-	V3 p = CellCenter(u.x, u.z);
-	const Cell& c = m_b.map.At(u.x, u.z);
+	int s = UnitSpan(u);
+	if (s <= 1) {
+		V3 p = CellCenter(u.x, u.z);
+		const Cell& c = m_b.map.At(u.x, u.z);
+		if (UnitMoveType(u) == MV_FLY) {
+			if (c.t == T_CHASM) p.y = 0;
+			p.y = max(p.y, m_b.map.TopY(u.x, u.z));
+		}
+		return p;
+	}
+	float y = -100.f;
+	BOOL chasm = FALSE;
+	for (int dz = 0; dz < s; dz++) for (int dx = 0; dx < s; dx++) {
+		int x = u.x + dx, z = u.z + dz;
+		if (!Map::In(x, z)) continue;
+		if (m_b.map.At(x, z).t == T_CHASM) chasm = TRUE;
+		y = max(y, m_b.map.StandY(x, z));
+	}
+	if (y < -50.f) y = 0;
+	V3 p = v3((float)u.x + s * 0.5f, y, (float)u.z + s * 0.5f);
 	if (UnitMoveType(u) == MV_FLY) {
-		if (c.t == T_CHASM) p.y = 0;
-		p.y = max(p.y, m_b.map.TopY(u.x, u.z));
+		if (chasm) p.y = 0;
+		for (int dz = 0; dz < s; dz++) for (int dx = 0; dx < s; dx++) {
+			int x = u.x + dx, z = u.z + dz;
+			if (Map::In(x, z)) p.y = max(p.y, m_b.map.TopY(x, z));
+		}
 	}
 	return p;
 }
@@ -813,6 +834,22 @@ void Game::BuildOverlayQuads()
 			}
 		}
 	}
+	if (m_phase == PH_P_SKILLTARGET && m_cmdSkill >= 0 && IsFormSkill(m_cmdSkill)) {
+		int tx = u.x, tz = u.z;
+		if (m_cursorValid) { tx = m_cx; tz = m_cz; }
+		FormMark mk[12];
+		int nm = FormMarks(FormOf(m_cmdSkill), mk, 12);
+		for (int i = 0; i < nm; i++) {
+			if (mk[i].foe) continue;
+			if (mk[i].onFoe && tx == u.x && tz == u.z) continue;
+			int ox, oz;
+			FormMarkPos(u, tx, tz, mk[i], ox, oz);
+			if (!Map::In(ox, oz) || (ox == u.x && oz == u.z)) continue;
+			int who = m_b.UnitAt(ox, oz);
+			BOOL filled = who >= 0 && who != m_cur && m_b.u[who].alive && m_b.u[who].team == u.team;
+			quad(ox, oz, filled ? RGBA8(70, 210, 110, 200) : RGBA8(240, 190, 50, 170), .055f);
+		}
+	}
 	// グリッド（カーソル周辺）
 	if (m_save.showGrid && m_cursorValid && (m_phase == PH_P_MOVE || m_phase == PH_P_TARGET || m_phase == PH_P_SKILLTARGET)) {
 		for (int dz = -4; dz <= 4; dz++) for (int dx = -4; dx <= 4; dx++) {
@@ -852,7 +889,9 @@ static int CorpseAt(const Battle& b, int x, int z)
 	if (!Map::In(x, z)) return -1;
 	for (int i = 0; i < b.nUnits; i++) {
 		const Unit& u = b.u[i];
-		if (u.alive || !u.killed || u.team != TEAM_PLAYER || u.x != x || u.z != z) continue;
+		if (u.alive || !u.killed || u.team != TEAM_PLAYER) continue;
+		int s = UnitSpan(u);
+		if (x < u.x || z < u.z || x >= u.x + s || z >= u.z + s) continue;
 		return i;
 	}
 	return -1;
@@ -936,24 +975,34 @@ BOOL Game::CanTarget(int ui, int t, int skill) const
 	const Unit& d = m_b.u[t];
 	if (skill >= 0 && SkillInfo(skill).effect == EF_RAISE) {
 		if (d.alive || !d.killed || d.team != u.team) return FALSE;
-		if (m_b.UnitAt(d.x, d.z) >= 0) return FALSE;
-		int dist = Dist(u.x, u.z, d.x, d.z);
+		int s = UnitSpan(d);
+		for (int dz = 0; dz < s; dz++) for (int dx = 0; dx < s; dx++)
+			if (m_b.UnitAt(d.x + dx, d.z + dz) >= 0) return FALSE;
+		int dist = 9999;
+		int sa = UnitSpan(u);
+		for (int az = 0; az < sa; az++) for (int ax = 0; ax < sa; ax++)
+			for (int dz = 0; dz < s; dz++) for (int dx = 0; dx < s; dx++)
+				dist = min(dist, abs((u.x + ax) - (d.x + dx)) + abs((u.z + az) - (d.z + dz)));
 		int rmin = SkillCastRangeMin(u, skill), rmax = SkillCastRangeMax(u, skill);
 		return dist >= rmin && dist <= rmax;
 	}
 	if (!d.alive) return FALSE;
 	if (skill < 0) {
 		if (d.team == u.team) return FALSE;
-		return InAttackRange(m_b, u.x, u.z, UnitRangeMin(u), UnitRangeMax(u), d.x, d.z, true);
+		return InRangeOfUnit(m_b, u, u.x, u.z, UnitRangeMin(u), UnitRangeMax(u), d, true);
 	}
 	const SkillDef& sd = SkillInfo(skill);
 	BOOL friendly = sd.kind == SK_HEAL || sd.kind == SK_BUFF;
 	if (friendly != (d.team == u.team)) return FALSE;
 	if (sd.effect == EF_REACT && (t == ui || d.ct >= 1000)) return FALSE;
 	int rmin = SkillCastRangeMin(u, skill), rmax = SkillCastRangeMax(u, skill);
-	int dist = Dist(u.x, u.z, d.x, d.z);
-	if (dist < rmin || dist > rmax) return FALSE;
-	if (!friendly && !InAttackRange(m_b, u.x, u.z, rmin, rmax, d.x, d.z, true)) return FALSE;
+	if (friendly) {
+		int dist = 9999, sa = UnitSpan(u), sdn = UnitSpan(d);
+		for (int az = 0; az < sa; az++) for (int ax = 0; ax < sa; ax++)
+			for (int dz = 0; dz < sdn; dz++) for (int dx = 0; dx < sdn; dx++)
+				dist = min(dist, abs((u.x + ax) - (d.x + dx)) + abs((u.z + az) - (d.z + dz)));
+		if (dist < rmin || dist > rmax) return FALSE;
+	} else if (!InRangeOfUnit(m_b, u, u.x, u.z, rmin, rmax, d, true)) return FALSE;
 	if (IsFormSkill(skill) && !FormFits(m_b, ui, skill, d.x, d.z)) return FALSE;
 	return TRUE;
 }
@@ -1277,7 +1326,7 @@ void Game::UpdateMove(float dt)
 				BOOL ok = sd ? (sd->rMax == 0 || CanTarget(ui, m_ai.target, m_ai.skill)) : CanTarget(ui, m_ai.target, -1);
 				if (!ok && m_ai.wild && m_ai.skill < 0 && m_ai.target != ui) {
 					const Unit& t = m_b.u[m_ai.target];
-					ok = t.alive && InAttackRange(m_b, u.x, u.z, UnitRangeMin(u), UnitRangeMax(u), t.x, t.z, true);
+					ok = t.alive && InRangeOfUnit(m_b, u, u.x, u.z, UnitRangeMin(u), UnitRangeMax(u), t, true);
 				}
 				if (ok) { BeginAttack(ui, m_ai.target, m_ai.skill, m_ai.castX, m_ai.castZ); return; }
 			}
@@ -1289,6 +1338,8 @@ void Game::UpdateMove(float dt)
 	int a = m_movePts[seg], b = m_movePts[seg + 1];
 	int ax = a % MAPN, az = a / MAPN, bx = b % MAPN, bz = b / MAPN;
 	V3 pa = CellCenter(ax, az), pb = CellCenter(bx, bz);
+	float off = (UnitSpan(u) - 1) * 0.5f;
+	pa.x += off; pa.z += off; pb.x += off; pb.z += off;
 	if (fly) {
 		pa.y = max(pa.y, m_b.map.TopY(ax, az)); pb.y = max(pb.y, m_b.map.TopY(bx, bz));
 		if (m_b.map.At(ax, az).t == T_CHASM) pa.y = 0;
@@ -2201,7 +2252,7 @@ void Game::UpdateBattle(float dt)
 				BOOL ok = sd ? (sd->rMax == 0 || CanTarget(m_cur, m_ai.target, m_ai.skill)) : CanTarget(m_cur, m_ai.target, -1);
 				if (!ok && m_ai.wild && m_ai.skill < 0 && m_ai.target != m_cur && m_b.u[m_ai.target].alive) {
 					const Unit& t = m_b.u[m_ai.target];
-					ok = InAttackRange(m_b, u.x, u.z, UnitRangeMin(u), UnitRangeMax(u), t.x, t.z, true);
+					ok = InRangeOfUnit(m_b, u, u.x, u.z, UnitRangeMin(u), UnitRangeMax(u), t, true);
 				}
 				if (ok) BeginAttack(m_cur, m_ai.target, m_ai.skill, m_ai.castX, m_ai.castZ);
 				else FinishUnitTurn(m_ai.wild ? 1 : 0);
@@ -2320,8 +2371,20 @@ void Game::DrawBattle3D()
 		if (!u.alive) tc = RGBA8(170, 176, 190, 120);
 		rp.tint = tc;
 		float s = active ? 1.f + .06f * sinf(m_time * 5.f) : .85f;
-		V3 g = v3(u.px, u.py + .05f, u.pz);
-		m_r.DrawStatic(m_lib.ring, MMul(MMul(MScale(s, 1, s), MRotY(m_time * (active ? 1.2f : .3f))), MTrans(g.x, g.y, g.z)), rp);
+		int sp = UnitSpan(u);
+		if (sp <= 1) {
+			V3 g = v3(u.px, u.py + .05f, u.pz);
+			m_r.DrawStatic(m_lib.ring, MMul(MMul(MScale(s, 1, s), MRotY(m_time * (active ? 1.2f : .3f))), MTrans(g.x, g.y, g.z)), rp);
+		} else {
+			float sc = s * 0.72f;
+			for (int dz = 0; dz < sp; dz++) for (int dx = 0; dx < sp; dx++) {
+				int x = u.x + dx, z = u.z + dz;
+				if (!Map::In(x, z)) continue;
+				V3 g = CellCenter(x, z);
+				g.y += .05f;
+				m_r.DrawStatic(m_lib.ring, MMul(MMul(MScale(sc, 1, sc), MRotY(m_time * (active ? 1.2f : .3f))), MTrans(g.x, g.y, g.z)), rp);
+			}
+		}
 	}
 	for (int i = 0; i < m_b.nUnits; i++) {
 		const Unit& u = m_b.u[i];
@@ -2838,35 +2901,6 @@ void Game::DrawForecast()
 	side(a, x + w * .25f, f.dmg, f.hit, f.crit, f.hits, TRUE, d.hp);
 	side(d, x + w * .75f, f.cdmg, f.chit, f.ccrit, f.chits, f.canCounter, a.hp);
 	m_r.HudText(L"VS", x + w * .5f, y + U(70), U(20), RGBA8(255, 226, 150), 1, 1);
-	{
-		const wchar_t* face = TT(f.face == 2 ? TX_BT_FACE_BACK : (f.face == 1 ? TX_BT_FACE_SIDE : TX_BT_FACE_FRONT));
-		wchar_t extra[220];
-		wcscpy_s(extra, face);
-		if (f.tri > 0) { wcscat_s(extra, L"  "); wcscat_s(extra, TT(TX_BT_TRI_ADV)); }
-		if (f.tri < 0) { wcscat_s(extra, L"  "); wcscat_s(extra, TT(TX_BT_TRI_DIS)); }
-		if (f.bowFly) { wcscat_s(extra, L"  "); wcscat_s(extra, TT(TX_BT_BOWFLY)); }
-		if (f.weak > 0) {
-			wchar_t bit[48];
-			swprintf_s(bit, L"  %s ×%d", WeakLabel(), f.weak >= 2 ? 4 : 2);
-			wcscat_s(extra, bit);
-		}
-		{
-			int hs = BattleHeightSteps(m_b, a.x, a.z, d.x, d.z);
-			if (hs > 0) { wcscat_s(extra, L"  "); wcscat_s(extra, TT(TX_HIGH)); }
-			else if (hs < 0) { wcscat_s(extra, L"  "); wcscat_s(extra, TT(TX_LOW)); }
-		}
-		if (f.delay > 0) { wcscat_s(extra, L"  "); wcscat_s(extra, TT(TX_BT_DELAY)); }
-		if (f.follow > 0) {
-			wchar_t bit[48];
-			swprintf_s(bit, L"  %s ×%d", TT(TX_BT_FOLLOW), f.follow);
-			wcscat_s(extra, bit);
-		}
-		if (d.hp > 0 && ((long long)f.dmg >= (long long)d.hp * 2 || (f.hits > 1 && f.dmg >= d.hp))) {
-			wcscat_s(extra, L"  ");
-			wcscat_s(extra, TT(TX_BT_OVERKILL));
-		}
-		m_r.HudText(extra, x + w * .5f, y + U(160), U(13), RGBA8(255, 230, 170), 1, 0);
-	}
 	int after = max(0, d.hp - f.dmg * f.hits);
 	wchar_t l[64];
 	swprintf_s(l, L"%d → %d", d.hp, after);
@@ -2886,7 +2920,11 @@ static BOOL ItemHarms(const GoodDef* g)
 static BOOL ItemThrowOk(const GoodDef* g, const Unit& src, const Unit& t)
 {
 	if (!g) return FALSE;
-	int dist = max(abs(src.x - t.x), abs(src.z - t.z));
+	int dist = 9999;
+	int sa = UnitSpan(src), st = UnitSpan(t);
+	for (int az = 0; az < sa; az++) for (int ax = 0; ax < sa; ax++)
+		for (int dz = 0; dz < st; dz++) for (int dx = 0; dx < st; dx++)
+			dist = min(dist, max(abs((src.x + ax) - (t.x + dx)), abs((src.z + az) - (t.z + dz))));
 	if (dist > kItemThrow) return FALSE;
 	if (g->item == IT_RAISE)
 		return t.team == src.team && !t.alive && t.killed && dist >= 1;
@@ -2902,7 +2940,12 @@ void Game::UseConsumable(int good, int target)
 	if (target < 0 || target >= m_b.nUnits) return;
 	Unit& self = m_b.u[m_cur];
 	if (!ItemThrowOk(g, self, m_b.u[target])) return;
-	if (g->item == IT_RAISE && m_b.UnitAt(m_b.u[target].x, m_b.u[target].z) >= 0) return;
+	if (g->item == IT_RAISE) {
+		const Unit& corpse = m_b.u[target];
+		int s = UnitSpan(corpse);
+		for (int dz = 0; dz < s; dz++) for (int dx = 0; dx < s; dx++)
+			if (m_b.UnitAt(corpse.x + dx, corpse.z + dz) >= 0) return;
+	}
 	if (!GoodTake(m_save, good)) return;
 	Unit* dst = &m_b.u[target];
 	if (g->item == IT_ELIXIR) {
@@ -3150,6 +3193,137 @@ void Game::DrawBattleStatus()
 	if (Btn(ID_BT_BACK, px + pw - U(170), py + ph - U(46), U(150), U(32), TT(TX_CR_BACK))) { m_statOpen = 0; m_statEq = 0; }
 }
 
+static const wchar_t* FormRuleText(int form)
+{
+	switch (form) {
+	case FM_WING: return LangPick14(L"向いている左右の、どちらかに味方がいれば使える。", L"An ally on either side of where you face.", L"Un allié d'un côté ou de l'autre, dans le sens du regard.", L"Un alleato su uno dei due lati, nel verso in cui guardi.", L"Un aliado a un lado u otro, hacia donde miras.", L"바라보는 좌우 어느 쪽에 아군이 있으면 쓸 수 있다.", L"面朝方向的左右任一侧有同伴即可使用。", L"حليف على أحد الجانبين في اتجاه نظرك.", L"Союзник слева или справа от взгляда.", L"Ein Verbündeter auf einer Seite deiner Blickrichtung.", L"Um aliado num dos lados, para onde olhas.", L"Een bondgenoot aan een van beide zijden van je blik.", L"Sojusznik po lewej lub prawej stronie spojrzenia.", L"Baktığın yönün iki yanından birinde yoldaş varsa kullanılır.");
+	case FM_CROSS: return LangPick14(L"向いている左右の、両方に味方がいると使える。", L"Allies on both sides of where you face.", L"Des alliés des deux côtés, dans le sens du regard.", L"Alleati su entrambi i lati, nel verso in cui guardi.", L"Aliados a ambos lados, hacia donde miras.", L"바라보는 좌우 양쪽에 아군이 있으면 쓸 수 있다.", L"面朝方向的左右两侧都有同伴才能使用。", L"حليفان على الجانبين في اتجاه نظرك.", L"Союзники по обе стороны взгляда.", L"Verbündete auf beiden Seiten deiner Blickrichtung.", L"Aliados nos dois lados, para onde olhas.", L"Bondgenoten aan beide zijden van je blik.", L"Sojusznicy po obu stronach spojrzenia.", L"Baktığın yönün iki yanında da yoldaş varsa kullanılır.");
+	case FM_WALL: return LangPick14(L"向いている左右の、両方に味方がいると使える。", L"Allies on both sides of where you face.", L"Des alliés des deux côtés, dans le sens du regard.", L"Alleati su entrambi i lati, nel verso in cui guardi.", L"Aliados a ambos lados, hacia donde miras.", L"바라보는 좌우 양쪽에 아군이 있으면 쓸 수 있다.", L"面朝方向的左右两侧都有同伴才能使用。", L"حليفان على الجانبين في اتجاه نظرك.", L"Союзники по обе стороны взгляда.", L"Verbündete auf beiden Seiten deiner Blickrichtung.", L"Aliados nos dois lados, para onde olhas.", L"Bondgenoten aan beide zijden van je blik.", L"Sojusznicy po obu stronach spojrzenia.", L"Baktığın yönün iki yanında da yoldaş varsa kullanılır.");
+	case FM_BACK: return LangPick14(L"向いている真後ろに味方がいれば使える。", L"An ally directly behind where you face.", L"Un allié juste derrière, dans le sens du regard.", L"Un alleato proprio dietro, nel verso in cui guardi.", L"Un aliado justo detrás, hacia donde miras.", L"바라보는 바로 뒤에 아군이 있으면 쓸 수 있다.", L"面朝方向的正后方有同伴即可使用。", L"حليف خلفك مباشرة في اتجاه نظرك.", L"Союзник прямо за спиной по взгляду.", L"Ein Verbündeter direkt hinter deiner Blickrichtung.", L"Um aliado logo atrás, para onde olhas.", L"Een bondgenoot recht achter je blik.", L"Sojusznik tuż za plecami, w stronę spojrzenia.", L"Baktığın yönün tam arkasında yoldaş varsa kullanılır.");
+	case FM_TRI: return LangPick14(L"真後ろの左右、両方に味方がいると使える。", L"Allies on both rear diagonals.", L"Des alliés sur les deux diagonales arrière.", L"Alleati sulle due diagonali dietro.", L"Aliados en las dos diagonales traseras.", L"바로 뒤의 좌우 양쪽에 아군이 있으면 쓸 수 있다.", L"正后方的左右两侧都有同伴才能使用。", L"حليفان على قطري الخلف.", L"Союзники на обеих задних диагоналях.", L"Verbündete auf beiden hinteren Diagonalen.", L"Aliados nas duas diagonais de trás.", L"Bondgenoten op beide schuine vakken achter je.", L"Sojusznicy na obu tylnych skosach.", L"Tam arkanın iki çaprazında da yoldaş varsa kullanılır.");
+	case FM_CHAIN: return LangPick14(L"真後ろに味方が2人、縦に並ぶと使える。", L"Two allies in a column directly behind you.", L"Deux alliés en colonne juste derrière.", L"Due alleati in colonna proprio dietro.", L"Dos aliados en columna justo detrás.", L"바로 뒤에 아군 2명이 세로로 서면 쓸 수 있다.", L"正后方有两名同伴排成一列才能使用。", L"حليفان في عمود خلفك مباشرة.", L"Два союзника колонной прямо за спиной.", L"Zwei Verbündete in einer Kolonne direkt hinter dir.", L"Dois aliados em coluna logo atrás.", L"Twee bondgenoten in een rij recht achter je.", L"Dwóch sojuszników w kolumnie tuż za plecami.", L"Tam arkanda iki yoldaş alt alta durursa kullanılır.");
+	case FM_DIA: return LangPick14(L"前方の左右、両方に味方がいると使える。", L"Allies on both front diagonals.", L"Des alliés sur les deux diagonales avant.", L"Alleati sulle due diagonali davanti.", L"Aliados en las dos diagonales delanteras.", L"전방 좌우 양쪽에 아군이 있으면 쓸 수 있다.", L"前方左右两侧都有同伴才能使用。", L"حليفان على قطري الأمام.", L"Союзники на обеих передних диагоналях.", L"Verbündete auf beiden vorderen Diagonalen.", L"Aliados nas duas diagonais da frente.", L"Bondgenoten op beide schuine vakken voor je.", L"Sojusznicy na obu przednich skosach.", L"Ön çaprazların ikisinde de yoldaş varsa kullanılır.");
+	case FM_SQUARE: return LangPick14(L"上下左右の4方向のうち、3方向に味方がいると使える。", L"Allies on three of the four sides around you.", L"Des alliés sur trois des quatre côtés.", L"Alleati su tre dei quattro lati.", L"Aliados en tres de los cuatro lados.", L"상하좌우 네 방향 중 세 방향에 아군이 있으면 쓸 수 있다.", L"上下左右四个方向中有三个方向有同伴才能使用。", L"حلفاء على ثلاثة من الجوانب الأربعة.", L"Союзники с трёх из четырёх сторон.", L"Verbündete auf drei der vier Seiten.", L"Aliados em três dos quatro lados.", L"Bondgenoten aan drie van de vier zijden.", L"Sojusznicy z trzech z czterech stron.", L"Dört yönden üçünde yoldaş varsa kullanılır.");
+	case FM_ECHELON: return LangPick14(L"左右どちらかで、隣とその斜め後ろに味方がいると使える。黄と水色は別の組。", L"One side: the neighbor and the ally diagonally behind. Gold and cyan are different pairs.", L"Un côté : le voisin et l'allié en diagonale derrière. Or et cyan sont deux paires.", L"Un lato: il vicino e l'alleato in diagonale dietro. Oro e ciano sono due coppie.", L"Un lado: el vecino y el aliado en diagonal detrás. Oro y cian son dos pares.", L"좌우 한쪽에서 옆과 그 대각선 뒤에 아군이 있으면 쓸 수 있다. 노랑과 청록은 다른 조.", L"左右任一侧，旁边和斜后方都有同伴才能使用。黄与青是两组。", L"جانب واحد: المجاور ومن خلفه بقطر. الذهبي والأزرق زوجان.", L"Одна сторона: сосед и союзник по диагонали сзади. Золото и циан — разные пары.", L"Eine Seite: der Nachbar und der Verbündete schräg dahinter. Gold und Cyan sind zwei Paare.", L"Um lado: o vizinho e o aliado na diagonal atrás. Ouro e ciano são pares diferentes.", L"Eén kant: de buur en de bondgenoot schuin erachter. Goud en cyaan zijn twee paren.", L"Jedna strona: sąsiad i sojusznik po skosie z tyłu. Złoty i cyjan to dwie pary.", L"Bir yanda komşu ve onun çapraz arkasında yoldaş varsa kullanılır. Sarı ve camgöbeği ayrı çifttir.");
+	case FM_CIRCLE: return LangPick14(L"周囲8マスのうち、3マス以上に味方がいると使える。", L"Allies on at least three of the eight tiles around you.", L"Des alliés sur au moins trois des huit cases autour.", L"Alleati su almeno tre delle otto caselle intorno.", L"Aliados en al menos tres de las ocho casillas de alrededor.", L"주위 8칸 중 3칸 이상에 아군이 있으면 쓸 수 있다.", L"周围8格中至少3格有同伴才能使用。", L"حلفاء في ثلاث من المربعات الثمانية حولك على الأقل.", L"Союзники хотя бы на трёх из восьми клеток вокруг.", L"Verbündete auf mindestens drei der acht Felder um dich.", L"Aliados em pelo menos três das oito casas à volta.", L"Bondgenoten op minstens drie van de acht vakken om je heen.", L"Sojusznicy na co najmniej trzech z ośmiu pól wokół.", L"Çevrendeki sekiz kareden en az üçünde yoldaş varsa kullanılır.");
+	case FM_PAIR: return LangPick14(L"上下左右のどこかに味方がいれば使える。", L"An ally on any of the four sides.", L"Un allié sur l'un des quatre côtés.", L"Un alleato su uno dei quattro lati.", L"Un aliado en cualquiera de los cuatro lados.", L"상하좌우 어디에든 아군이 있으면 쓸 수 있다.", L"上下左右任一方向有同伴即可使用。", L"حليف على أي جانب من الأربعة.", L"Союзник с любой из четырёх сторон.", L"Ein Verbündeter auf einer der vier Seiten.", L"Um aliado em qualquer um dos quatro lados.", L"Een bondgenoot aan een van de vier zijden.", L"Sojusznik przy dowolnym z czterech boków.", L"Dört yönden herhangi birinde yoldaş varsa kullanılır.");
+	case FM_PINCER: return LangPick14(L"狙った敵の左右、両方に味方がいると使える。", L"Allies on both sides of the foe you aim at.", L"Des alliés des deux côtés de l'ennemi visé.", L"Alleati ai due lati del nemico mirato.", L"Aliados a ambos lados del enemigo apuntado.", L"노린 적의 좌우 양쪽에 아군이 있으면 쓸 수 있다.", L"瞄准的敌人左右两侧都有同伴才能使用。", L"حليفان على جانبي العدو المستهدف.", L"Союзники с обеих сторон цели.", L"Verbündete auf beiden Seiten des anvisierten Gegners.", L"Aliados nos dois lados do inimigo mirado.", L"Bondgenoten aan beide zijden van de gekozen vijand.", L"Sojusznicy po obu stronach wskazanego wroga.", L"Nişan aldığın düşmanın iki yanında da yoldaş varsa kullanılır.");
+	default: return L"";
+	}
+}
+
+void Game::DrawFormGuide(int skill, int tx, int tz, float avoidX, float avoidY, float avoidW, float avoidH)
+{
+	if (m_cur < 0 || !IsFormSkill(skill)) return;
+	const Unit& u = m_b.u[m_cur];
+	int form = FormOf(skill);
+	FormMark mk[12];
+	int nm = FormMarks(form, mk, 12);
+	int fwdHi = 1, fwdLo = -1, absolute = 1;
+	for (int i = 0; i < nm; i++) {
+		if (mk[i].fwd > fwdHi) fwdHi = mk[i].fwd;
+		if (mk[i].fwd < fwdLo) fwdLo = mk[i].fwd;
+		if (!mk[i].absolute) absolute = 0;
+	}
+	int nRow = fwdHi - fwdLo + 1;
+	if (nRow < 3) nRow = 3;
+	const float cs = U(34), gap = U(4);
+	float gridW = cs * 3 + gap * 2;
+	float gridH = cs * nRow + gap * (nRow - 1);
+	float pw = U(340);
+	float top = absolute ? U(82) : U(98);
+	float ph = top + gridH + U(58);
+	float px = ((float)m_w - pw) * .5f;
+	float py = (float)m_h - ph - U(28);
+	if (avoidW > 1.f) {
+		float ax1 = avoidX + avoidW, ay1 = avoidY + avoidH;
+		BOOL hit = px < ax1 && px + pw > avoidX && py < ay1 && py + ph > avoidY;
+		if (hit) {
+			if (avoidX > (float)m_w * .5f) px = U(16);
+			else px = (float)m_w - pw - U(16);
+		}
+	}
+	if (px < U(8)) px = U(8);
+	if (py < U(8)) py = U(8);
+	Panel(px, py, pw, ph, .94f);
+	m_r.HudText(SkillLabel(skill), px + pw * .5f, py + U(18), U(16), RGBA8(255, 226, 150), 1, 1);
+	m_r.HudTextBox(FormRuleText(form), px + U(12), py + U(32), pw - U(24), U(40), U(12), RGBA8(220, 226, 236));
+	if (!absolute) m_r.HudText(LangPick14(L"▲ 前", L"▲ Front", L"▲ Avant", L"▲ Avanti", L"▲ Frente", L"▲ 앞", L"▲ 前", L"▲ أمام", L"▲ Вперёд", L"▲ Vorn", L"▲ Frente", L"▲ Voor", L"▲ Przód", L"▲ Ön"), px + pw * .5f, py + U(80), U(13), RGBA8(255, 220, 140), 1, 1);
+	float gx = px + (pw - gridW) * .5f;
+	float gy = py + top;
+	BOOL aimed = (tx != u.x || tz != u.z);
+	for (int row = 0; row < nRow; row++) {
+		for (int col = 0; col < 3; col++) {
+			float cx = gx + col * (cs + gap);
+			float cy = gy + row * (cs + gap);
+			int side = col - 1;
+			int fwd = fwdHi - row;
+			int mark = -1;
+			for (int i = 0; i < nm; i++) if (mk[i].side == side && mk[i].fwd == fwd) { mark = i; break; }
+			BOOL self = (side == 0 && fwd == 0);
+			DWORD fill = RGBA8(18, 22, 34, 180);
+			DWORD frame = RGBA8(70, 74, 90);
+			const wchar_t* lab = L"";
+			DWORD tc = RGBA8(230, 230, 236);
+			if (self) {
+				fill = RGBA8(46, 96, 170, 230);
+				frame = RGBA8(180, 210, 255);
+				lab = LangPick14(L"自", L"You", L"Soi", L"Te", L"Tú", L"나", L"自", L"أنت", L"Вы", L"Du", L"Você", L"Jij", L"Ty", L"Sen");
+			} else if (mark >= 0) {
+				BOOL foe = mk[mark].foe;
+				BOOL filled = FALSE;
+				if (!foe && !(mk[mark].onFoe && !aimed)) {
+					int ox, oz;
+					FormMarkPos(u, tx, tz, mk[mark], ox, oz);
+					int who = Map::In(ox, oz) ? m_b.UnitAt(ox, oz) : -1;
+					filled = who >= 0 && who != m_cur && m_b.u[who].alive && m_b.u[who].team == u.team;
+				}
+				if (foe && aimed) {
+					int who = Map::In(tx, tz) ? m_b.UnitAt(tx, tz) : -1;
+					filled = who >= 0 && m_b.u[who].alive && m_b.u[who].team != u.team;
+				}
+				if (foe) {
+					fill = filled ? RGBA8(170, 56, 52, 235) : RGBA8(90, 32, 32, 220);
+					frame = RGBA8(255, 140, 130);
+					lab = LangPick14(L"敵", L"Foe", L"Enn.", L"Nem.", L"Enem.", L"적", L"敌", L"عدو", L"Враг", L"Feind", L"Inim.", L"Vijand", L"Wróg", L"Düşman");
+				} else if (filled) {
+					fill = RGBA8(42, 140, 74, 235);
+					frame = RGBA8(160, 240, 180);
+					lab = LangPick14(L"味", L"Ally", L"Allié", L"All.", L"Aliado", L"아군", L"友", L"حليف", L"Союз", L"Freund", L"Aliado", L"Bondg.", L"Sojusz", L"Yoldaş");
+				} else {
+					fill = RGBA8(48, 40, 18, 220);
+					frame = mk[mark].group == 1 ? RGBA8(90, 210, 220) : RGBA8(240, 196, 70);
+					lab = L"";
+				}
+			}
+			m_r.HudRect(cx, cy, cs, cs, fill);
+			m_r.HudFrame(cx, cy, cs, cs, U(2), frame);
+			if (lab[0]) m_r.HudText(lab, cx + cs * .5f, cy + cs * .5f, U(13), tc, 1, 1);
+		}
+	}
+	BOOL here = FALSE;
+	if (form == FM_PINCER) here = aimed && FormFits(m_b, m_cur, skill, tx, tz);
+	else here = FormFits(m_b, m_cur, skill, tx, tz);
+	BOOL any = SkillUsable(m_b, m_cur, skill);
+	const wchar_t* st;
+	DWORD sc;
+	if (u.mp < SkillInfo(skill).mp) {
+		st = TT(TX_BT_NOMP); sc = RGBA8(255, 150, 140);
+	} else if (here) {
+		int pct = FormBoostPct(m_b, m_cur, skill, tx, tz);
+		st = pct > 100
+			? LangPick14(L"陣形は揃っている。味方が多いほど強い。", L"Formation ready. More allies raise the power.", L"Formation prête. Plus d'alliés, plus de puissance.", L"Formazione pronta. Più alleati, più potenza.", L"Formación lista. Más aliados, más poder.", L"진형이 갖춰졌다. 아군이 많을수록 강하다.", L"阵形已齐。同伴越多越强。", L"التشكيل جاهز. مزيد من الحلفاء يرفع القوة.", L"Строй собран. Больше союзников — выше сила.", L"Formation steht. Mehr Verbündete erhöhen die Kraft.", L"Formação pronta. Mais aliados, mais poder.", L"Formatie klaar. Meer bondgenoten verhogen de kracht.", L"Szyk gotowy. Więcej sojuszników zwiększa siłę.", L"Düzen tamam. Yoldaş arttıkça güç artar.")
+			: LangPick14(L"陣形は揃っている。", L"Formation ready.", L"Formation prête.", L"Formazione pronta.", L"Formación lista.", L"진형이 갖춰졌다.", L"阵形已齐。", L"التشكيل جاهز.", L"Строй собран.", L"Formation steht.", L"Formação pronta.", L"Formatie klaar.", L"Szyk gotowy.", L"Düzen tamam.");
+		sc = RGBA8(140, 230, 160);
+	} else if (any && !absolute) {
+		st = LangPick14(L"別の向きなら使える。", L"It works if you face another way.", L"Ça marche dans une autre direction.", L"Funziona in un'altra direzione.", L"Sirve si miras hacia otro lado.", L"다른 방향이면 쓸 수 있다.", L"换个朝向就能使用。", L"يعمل إن واجهت جهة أخرى.", L"Сработает, если повернуться иначе.", L"Es klappt in einer anderen Richtung.", L"Funciona se olhares para outro lado.", L"Het werkt als je een andere kant op kijkt.", L"Zadziała, jeśli zwrócisz się inaczej.", L"Başka yöne bakarsan kullanılır.");
+		sc = RGBA8(255, 214, 120);
+	} else {
+		st = TT(TX_FORM_NEED); sc = RGBA8(255, 160, 140);
+	}
+	m_r.HudTextBox(st, px + U(12), py + ph - U(52), pw - U(24), U(40), U(13), sc);
+}
+
 void Game::DrawCommandMenu()
 {
 	if (m_cur < 0) return;
@@ -3222,7 +3396,14 @@ void Game::DrawCommandMenu()
 		int tg[64], tn = 0;
 		for (int i = 0; i < m_b.nUnits && tn < 64; i++) {
 			if (gd && ItemThrowOk(gd, u, m_b.u[i])) {
-				if (gd->item == IT_RAISE && m_b.UnitAt(m_b.u[i].x, m_b.u[i].z) >= 0) continue;
+				if (gd->item == IT_RAISE) {
+					const Unit& corpse = m_b.u[i];
+					int s = UnitSpan(corpse);
+					BOOL blocked = FALSE;
+					for (int dz = 0; dz < s && !blocked; dz++) for (int dx = 0; dx < s; dx++)
+						if (m_b.UnitAt(corpse.x + dx, corpse.z + dz) >= 0) blocked = TRUE;
+					if (blocked) continue;
+				}
 				tg[tn++] = i;
 			}
 		}
@@ -3505,6 +3686,7 @@ void Game::DrawCommandMenu()
 			if (attr[0]) swprintf_s(desc, L"%s  %s", TT(sd.descTx), attr);
 			else wcscpy_s(desc, TT(sd.descTx));
 			m_r.HudTextBox(desc, x, yy + U(18), sw, U(48), U(12), RGBA8(230, 230, 236));
+			if (IsFormSkill(hov)) DrawFormGuide(hov, u.x, u.z, x - U(8), y - U(8), sw + U(16), ph);
 		}
 		keepSkill();
 	}
@@ -3852,16 +4034,90 @@ void Game::DrawBattleUi()
 			m_r.HudText(bbl, sx, byb + U(8), fs, bc, 1, 1);
 		}
 	}
-	if (m_phase == PH_P_SKILLTARGET && m_cmdSkill >= 0 && m_cursorValid) {
+	if (m_phase == PH_P_SKILLTARGET && m_cmdSkill >= 0 && m_cursorValid && m_cur >= 0) {
 		const SkillDef& sd = SkillInfo(m_cmdSkill);
-		if (sd.area > 0) {
+		const Unit& atk = m_b.u[m_cur];
+		wchar_t count[48] = L"";
+		BOOL showCount = sd.area > 0;
+		if (showCount) {
 			int tg[MAX_UNITS];
 			int nt = SkillTargets(m_b, m_cur, m_cmdSkill, m_cx, m_cz, tg, MAX_UNITS);
-			wchar_t lab[48];
-			swprintf_s(lab, L"%s %d", TT(TX_BT_AOEN), nt);
-			float sx, sy;
-			if (m_r.ProjectToScreen(CellCenter(m_cx, m_cz) + v3(0, 1.15f, 0), sx, sy))
-				m_r.HudText(lab, sx, sy - U(16), U(15), nt > 0 ? RGBA8(255, 230, 120) : RGBA8(255, 140, 120), 1, 1);
+			swprintf_s(count, L"%s %d", TT(TX_BT_AOEN), nt);
+		}
+		wchar_t tags[10][48];
+		int nt = 0;
+		int def = m_b.UnitAt(m_cx, m_cz);
+		BOOL hostile = def >= 0 && m_b.u[def].alive && m_b.u[def].team != atk.team && sd.kind != SK_HEAL && sd.kind != SK_BUFF;
+		if (hostile && CanTarget(m_cur, def, m_cmdSkill)) {
+			Forecast f;
+			CalcForecast(m_b, m_cur, def, m_cmdSkill, f);
+			const Unit& d = m_b.u[def];
+			wcscpy_s(tags[nt++], TT(f.face == 2 ? TX_BT_FACE_BACK : (f.face == 1 ? TX_BT_FACE_SIDE : TX_BT_FACE_FRONT)));
+			if (f.tri > 0) wcscpy_s(tags[nt++], TT(TX_BT_TRI_ADV));
+			if (f.tri < 0) wcscpy_s(tags[nt++], TT(TX_BT_TRI_DIS));
+			if (f.bowFly) wcscpy_s(tags[nt++], TT(TX_BT_BOWFLY));
+			if (f.weak > 0) {
+				swprintf_s(tags[nt], L"%s ×%d", WeakLabel(), f.weak >= 2 ? 4 : 2);
+				nt++;
+			}
+			int hs = BattleHeightSteps(m_b, atk.x, atk.z, d.x, d.z);
+			if (hs > 0) wcscpy_s(tags[nt++], TT(TX_HIGH));
+			else if (hs < 0) wcscpy_s(tags[nt++], TT(TX_LOW));
+			if (f.delay > 0) wcscpy_s(tags[nt++], TT(TX_BT_DELAY));
+			if (f.follow > 0 && nt < 10) {
+				swprintf_s(tags[nt], L"%s ×%d", TT(TX_BT_FOLLOW), f.follow);
+				nt++;
+			}
+			if (nt < 10 && d.hp > 0 && ((long long)f.dmg >= (long long)d.hp * 2 || (f.hits > 1 && f.dmg >= d.hp)))
+				wcscpy_s(tags[nt++], TT(TX_BT_OVERKILL));
+		}
+		wchar_t lines[2][160];
+		lines[0][0] = lines[1][0] = 0;
+		int nLine = 0;
+		float tagPx = U(13);
+		float maxW = U(340);
+		for (int i = 0; i < nt; i++) {
+			wchar_t trial[160];
+			if (nLine == 0 && !lines[0][0]) wcscpy_s(trial, tags[i]);
+			else swprintf_s(trial, L"%s  %s", lines[nLine], tags[i]);
+			if (lines[nLine][0] && m_r.TextWidth(trial, tagPx, 0) > maxW && nLine < 1) {
+				nLine = 1;
+				wcscpy_s(lines[1], tags[i]);
+			} else wcscpy_s(lines[nLine], trial);
+		}
+		if (lines[0][0]) nLine++;
+		float sx, sy;
+		if ((showCount || nLine > 0) && m_r.ProjectToScreen(CellCenter(m_cx, m_cz) + v3(0, 1.15f, 0), sx, sy)) {
+			float countPx = U(15);
+			float countH = countPx * 1.6f + 6.f;
+			float tagH = tagPx * 1.6f + 6.f;
+			float gap = U(4);
+			float block = 0;
+			if (showCount) block += countH;
+			if (nLine > 0) block += (showCount ? gap : 0.f) + nLine * tagH + (nLine - 1) * gap;
+			float fw = min(U(520.f), (float)m_w - U(16));
+			float fh = min(U(176.f), max(U(120.f), (float)m_h * .38f));
+			float fx = ((float)m_w - fw) * .5f, fy = U(8);
+			float top = sy - U(10) - block;
+			BOOL underForecast = top < fy + fh && sx > fx - U(40) && sx < fx + fw + U(40);
+			if (underForecast || top < U(4)) top = sy + U(20);
+			float y = top;
+			if (showCount) {
+				int nShown = 0;
+				if (count[0]) {
+					const wchar_t* p = count;
+					while (*p && (*p < L'0' || *p > L'9')) p++;
+					nShown = _wtoi(p);
+				}
+				m_r.HudText(count, sx, y + countH * .5f, countPx, nShown > 0 ? RGBA8(255, 230, 120) : RGBA8(255, 140, 120), 1, 1);
+				y += countH;
+				if (nLine > 0) y += gap;
+			}
+			for (int i = 0; i < nLine; i++) {
+				m_r.HudText(lines[i], sx, y + tagH * .5f, tagPx, RGBA8(255, 230, 170), 1, 0);
+				y += tagH;
+				if (i + 1 < nLine) y += gap;
+			}
 		}
 	}
 	if (m_b.nUnits > 0) DrawTurnOrder();
@@ -3914,6 +4170,11 @@ void Game::DrawBattleUi()
 	}
 	if (m_phase == PH_P_TARGET || m_phase == PH_P_SKILLTARGET) DrawForecast();
 	if (m_phase == PH_P_CMD || m_phase == PH_P_SKILLS || m_phase == PH_P_ITEM) DrawCommandMenu();
+	if (m_phase == PH_P_SKILLTARGET && m_cur >= 0 && IsFormSkill(m_cmdSkill)) {
+		int tx = m_b.u[m_cur].x, tz = m_b.u[m_cur].z;
+		if (m_cursorValid) { tx = m_cx; tz = m_cz; }
+		DrawFormGuide(m_cmdSkill, tx, tz, 0, 0, 0, 0);
+	}
 	if (m_statOpen && m_phase != PH_P_CMD && m_phase != PH_ACTION && m_phase != PH_MOVING && m_phase != PH_E_MOVE && m_phase != PH_INTRO && m_phase != PH_OVER && m_phase != PH_LEVELUP) DrawBattleStatus();
 	if (m_phase == PH_LEVELUP) DrawLevelUp();
 	// ヒント

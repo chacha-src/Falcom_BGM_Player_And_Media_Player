@@ -467,6 +467,7 @@ struct Unit {
 	CharData ch;         // 戦闘中の能力（敵も同形式）
 	int hp, mp;
 	int x, z;
+	int span;            // 1..3。原点 (x,z) から span×span。味方は 1
 	int ct;
 	float face;          // 向き（ラジアン）
 	int buffDef, buffAgi, buffAtk, poison, slow, defDown;   // 残りターン。毒・鈍足・防御低下は1〜3
@@ -492,6 +493,13 @@ struct Unit {
 	float hover;
 };
 
+inline int UnitSpan(const Unit& u)
+{
+	int s = u.span;
+	if (s < 1) s = 1;
+	if (s > 3) s = 3;
+	return s;
+}
 int UnitStat(const Unit& u, int s);     // バフ込み
 int UnitMove(const Unit& u);
 int UnitJump(const Unit& u);
@@ -520,7 +528,9 @@ int  ReachPath(const Reach& r, int sx, int sz, int tx, int tz, int* outXZ, int m
 bool CanStep(const Map& m, int fromX, int fromZ, int toX, int toZ, int moveType, int jump);
 bool LineOfSight(const Map& m, int ax, int az, int bx, int bz);
 bool InAttackRange(const Battle& b, int ax, int az, int rMin, int rMax, int tx, int tz, bool needLos);
+bool InRangeOfUnit(const Battle& b, const Unit& a, int ax, int az, int rMin, int rMax, const Unit& t, bool needLos);
 int  Dist(int ax, int az, int bx, int bz);
+float TacMonsterFoot(int packIndex);   // 輸入メッシュの休息姿勢での下半身の半幅。未計測は 0
 
 // ---------------- 戦闘計算 ----------------
 struct Strike {
@@ -561,6 +571,10 @@ int  FormOf(int skill);
 bool FormFits(const Battle& b, int ui, int skill, int tx, int tz);
 int  FormMembers(const Battle& b, int ui, int skill, int tx, int tz, int* out, int maxOut);
 int  FormBoostPct(const Battle& b, int ui, int skill, int tx, int tz);
+// 陣形の見取り図。side/fwd は向き基準（absolute のときは地図の dx,dz）。onFoe は狙ったマス基準。
+struct FormMark { int side, fwd, absolute, onFoe, group, foe; };
+int  FormMarks(int form, FormMark* out, int cap);
+void FormMarkPos(const Unit& u, int tx, int tz, const FormMark& m, int& ox, int& oz);
 int  SkillCastRangeMin(const Unit& u, int skill);
 int  SkillCastRangeMax(const Unit& u, int skill);
 int  ExpForAction(const Unit& a, const Unit& d, int dmg, int stage);

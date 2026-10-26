@@ -869,7 +869,7 @@ int PluginWinamp_Read(BYTE* dst, int bytesWanted)
 				tIdle = GetTickCount();
 				continue;
 			}
-			if (eof) break;
+			if (eof) { extern volatile LONG g_plugReadEof; InterlockedExchange(&g_plugReadEof, 1); break; }
 			// 0 をすぐ返すと曲終端になる。UI は最初の PCM だけ短く待つ。
 			// 5 秒待ちは再生スレッドだけ（UI だとバナーが止まったままになる）。
 			extern DWORD g_oggUiThreadId;
@@ -908,7 +908,11 @@ int PluginWinamp_Read(BYTE* dst, int bytesWanted)
 			continue;
 		}
 		// リングが空。EOF 通知済み／出力クローズ済みなら本当に終端
-		if (InterlockedCompareExchange(&g_waEof, 0, 0)) break;
+		if (InterlockedCompareExchange(&g_waEof, 0, 0)) {
+			extern volatile LONG g_plugReadEof;
+			InterlockedExchange(&g_plugReadEof, 1);
+			break;
+		}
 		if (!g_waPlaying) break;
 		if (GetTickCount() - tIdle > 5000) break; // デコーダ無応答の保険
 		{

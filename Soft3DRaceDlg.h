@@ -109,6 +109,24 @@ public:
 	ID3D11PixelShader* m_psDof;
 	ID3D11PixelShader* m_psFinal;
 	ID3D11ComputeShader* m_csNoise;
+	ID3D11ComputeShader* m_csGridCount;
+	ID3D11ComputeShader* m_csGridWrite;
+	ID3D11Buffer* m_vbTerrGpu;
+	ID3D11UnorderedAccessView* m_uavTerrGpu;
+	ID3D11Buffer* m_vbWaterGpu;
+	ID3D11UnorderedAccessView* m_uavWaterGpu;
+	ID3D11Buffer* m_hmBuf[3];
+	ID3D11ShaderResourceView* m_hmSrv[3];
+	ID3D11Buffer* m_gridCB;
+	ID3D11Buffer* m_gridCnt;
+	ID3D11UnorderedAccessView* m_uavGridCnt;
+	ID3D11Buffer* m_gridCntStage;
+	ID3D11Buffer* m_gridBase;
+	ID3D11ShaderResourceView* m_srvGridBase;
+	UINT m_gpuTerrVerts;
+	UINT m_gpuWaterVerts;
+	int m_gpuTerrOn;
+	int m_gpuWaterOn;
 	ID3D11InputLayout* m_ilPatch;
 	ID3D11InputLayout* m_ilSolid;
 	ID3D11InputLayout* m_ilInst;
@@ -225,6 +243,11 @@ public:
 	BOOL CreateShaders();
 	BOOL CreateProcTextures();
 	BOOL BakeNoiseCS();
+	BOOL DispatchHeightGrid(int water, int gN, float x0, float z0, float step,
+		const float* hm, const float* hmRaw, const float* hmPath,
+		float hmX0, float hmZ0, float hmStep,
+		float cr, float cg, float cb, float refineR, float tunR, float axis,
+		float wy, float depthRef, float wr, float wg, float wb);
 	BOOL BakeClearTexture(const wchar_t* text, float alpha);
 	void ReleaseClearTexture();
 	BOOL BakeHudTexture(const wchar_t* text);

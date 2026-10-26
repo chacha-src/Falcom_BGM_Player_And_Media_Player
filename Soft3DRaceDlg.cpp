@@ -1128,6 +1128,13 @@ CS3rView::CS3rView()
 	, m_bsOpaque(NULL), m_bsAlpha(NULL), m_bsAdd(NULL)
 	, m_dxFailStage(0), m_dxFailHr(S_OK)
 {
+	m_csGridCount = NULL; m_csGridWrite = NULL;
+	m_vbTerrGpu = NULL; m_uavTerrGpu = NULL; m_vbWaterGpu = NULL; m_uavWaterGpu = NULL;
+	m_gridCB = NULL; m_gridCnt = NULL; m_uavGridCnt = NULL; m_gridCntStage = NULL; m_gridBase = NULL; m_srvGridBase = NULL;
+	m_hmBuf[0] = m_hmBuf[1] = m_hmBuf[2] = NULL;
+	m_hmSrv[0] = m_hmSrv[1] = m_hmSrv[2] = NULL;
+	m_gpuTerrVerts = m_gpuWaterVerts = 0;
+	m_gpuTerrOn = m_gpuWaterOn = 0;
 	for (int i = 0; i < S3R_THEME_N; i++) {
 		m_texTheme[i] = NULL; m_srvTheme[i] = NULL;
 		m_texThemeD[i] = NULL; m_srvThemeD[i] = NULL;
@@ -1195,6 +1202,17 @@ BOOL CS3rView::CreateShaders()
 	if(FAILED(hr=m_dev->CreatePixelShader(b[10]->GetBufferPointer(),b[10]->GetBufferSize(),NULL,&m_psDof))) goto fail_sh;
 	if(FAILED(hr=m_dev->CreatePixelShader(b[11]->GetBufferPointer(),b[11]->GetBufferSize(),NULL,&m_psFinal))) goto fail_sh;
 	if(FAILED(hr=m_dev->CreateComputeShader(bcs->GetBufferPointer(),bcs->GetBufferSize(),NULL,&m_csNoise))) goto fail_sh;
+	{
+		ID3DBlob* bgc=NULL,*bgw=NULL;
+		if(SUCCEEDED(Soft3DLoadCso(L"race","CSGridCount","cs_5_0",IDR_CSO_RACE_CSGRIDC,L"soft3d_race.hlsl",(void**)&bgc))&&bgc){
+			m_dev->CreateComputeShader(bgc->GetBufferPointer(),bgc->GetBufferSize(),NULL,&m_csGridCount);
+			bgc->Release();
+		}
+		if(SUCCEEDED(Soft3DLoadCso(L"race","CSGridWrite","cs_5_0",IDR_CSO_RACE_CSGRIDW,L"soft3d_race.hlsl",(void**)&bgw))&&bgw){
+			m_dev->CreateComputeShader(bgw->GetBufferPointer(),bgw->GetBufferSize(),NULL,&m_csGridWrite);
+			bgw->Release();
+		}
+	}
 	D3D11_INPUT_ELEMENT_DESC il[]={{"POSITION",0,DXGI_FORMAT_R32G32B32_FLOAT,0,0,D3D11_INPUT_PER_VERTEX_DATA,0},
 		{"NORMAL",0,DXGI_FORMAT_R32G32B32_FLOAT,0,12,D3D11_INPUT_PER_VERTEX_DATA,0},
 		{"TEXCOORD",0,DXGI_FORMAT_R32G32_FLOAT,0,24,D3D11_INPUT_PER_VERTEX_DATA,0},
@@ -1219,6 +1237,7 @@ BOOL CS3rView::CreateShaders()
 	for(int i=0;i<12;i++) S3R_RELEASE(b[i]); S3R_RELEASE(bcs); S3R_RELEASE(bcraft); S3R_RELEASE(bline); S3R_RELEASE(bterr); S3R_RELEASE(binst); S3R_RELEASE(bwater); S3R_RELEASE(bcloud); S3R_RELEASE(bgs); S3R_RELEASE(bvsW);
 	return TRUE;
 fail_sh:
+	S3R_RELEASE(m_csGridWrite); S3R_RELEASE(m_csGridCount);
 	m_dxFailHr = hr;
 	for(int i=0;i<12;i++) S3R_RELEASE(b[i]); S3R_RELEASE(bcs); S3R_RELEASE(bcraft); S3R_RELEASE(bline); S3R_RELEASE(bterr); S3R_RELEASE(binst); S3R_RELEASE(bwater); S3R_RELEASE(bcloud); S3R_RELEASE(bgs); S3R_RELEASE(bvsW);
 	return FALSE;
@@ -2011,6 +2030,12 @@ void CS3rView::ReleaseDx()
 	Soft3DDxGuard g;
 	m_ready=FALSE;if(m_imm){m_imm->ClearState();m_imm->Flush();}
 	ReleaseClearTexture();ReleaseHudTexture();ReleaseGaugeTexture();ReleaseStandingsTexture();ReleaseBubbleTexture();ReleaseItemLabTexture();
+	m_gpuTerrOn=m_gpuWaterOn=0; m_gpuTerrVerts=m_gpuWaterVerts=0;
+	S3R_RELEASE(m_srvGridBase); S3R_RELEASE(m_gridBase); S3R_RELEASE(m_gridCntStage); S3R_RELEASE(m_uavGridCnt); S3R_RELEASE(m_gridCnt); S3R_RELEASE(m_gridCB);
+	S3R_RELEASE(m_uavWaterGpu); S3R_RELEASE(m_vbWaterGpu); S3R_RELEASE(m_uavTerrGpu); S3R_RELEASE(m_vbTerrGpu);
+	S3R_RELEASE(m_hmSrv[0]); S3R_RELEASE(m_hmSrv[1]); S3R_RELEASE(m_hmSrv[2]);
+	S3R_RELEASE(m_hmBuf[0]); S3R_RELEASE(m_hmBuf[1]); S3R_RELEASE(m_hmBuf[2]);
+	S3R_RELEASE(m_csGridWrite); S3R_RELEASE(m_csGridCount);
 	S3R_RELEASE(m_uavNoise);S3R_RELEASE(m_srvNoise);S3R_RELEASE(m_texNoise);
 	S3R_RELEASE(m_srvWood);S3R_RELEASE(m_texWood);S3R_RELEASE(m_srvItem);S3R_RELEASE(m_texItem);
 	S3R_RELEASE(m_srvSky4);S3R_RELEASE(m_texSky4);S3R_RELEASE(m_srvSky3);S3R_RELEASE(m_texSky3);
@@ -6069,6 +6094,145 @@ void CSoft3DRaceDlg::EnsureStandingsBake()
 	m_standDirty = 0;
 }
 
+BOOL CS3rView::DispatchHeightGrid(int water, int gN, float x0, float z0, float step,
+	const float* hm, const float* hmRaw, const float* hmPath,
+	float hmX0, float hmZ0, float hmStep,
+	float cr, float cg, float cb, float refineR, float tunR, float axis,
+	float wy, float depthRef, float wr, float wg, float wb)
+{
+	const int hmN = 161;
+	const UINT kCells = 1200u * 1200u;
+	if (!m_dev || !m_imm || !m_csGridCount || !m_csGridWrite) return FALSE;
+	if (!hm || !hmRaw || !hmPath || gN < 2 || gN > 1200 || step < 1e-4f) return FALSE;
+	auto makeSrvF = [&](int slot, const float* src)->BOOL {
+		if (!m_hmBuf[slot]) {
+			D3D11_BUFFER_DESC bd = {};
+			bd.ByteWidth = (UINT)(hmN * hmN) * (UINT)sizeof(float);
+			bd.Usage = D3D11_USAGE_DEFAULT; bd.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+			bd.MiscFlags = D3D11_RESOURCE_MISC_BUFFER_STRUCTURED; bd.StructureByteStride = (UINT)sizeof(float);
+			if (FAILED(m_dev->CreateBuffer(&bd, NULL, &m_hmBuf[slot]))) return FALSE;
+			D3D11_SHADER_RESOURCE_VIEW_DESC sd = {};
+			sd.Format = DXGI_FORMAT_UNKNOWN; sd.ViewDimension = D3D11_SRV_DIMENSION_BUFFER;
+			sd.Buffer.NumElements = (UINT)(hmN * hmN);
+			if (FAILED(m_dev->CreateShaderResourceView(m_hmBuf[slot], &sd, &m_hmSrv[slot]))) return FALSE;
+		}
+		m_imm->UpdateSubresource(m_hmBuf[slot], 0, NULL, src, 0, 0);
+		return TRUE;
+	};
+	if (!makeSrvF(0, hm) || !makeSrvF(1, hmRaw) || !makeSrvF(2, hmPath)) return FALSE;
+	if (!m_gridCB) {
+		D3D11_BUFFER_DESC bd = {};
+		bd.ByteWidth = 96; bd.Usage = D3D11_USAGE_DYNAMIC; bd.BindFlags = D3D11_BIND_CONSTANT_BUFFER; bd.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+		if (FAILED(m_dev->CreateBuffer(&bd, NULL, &m_gridCB))) return FALSE;
+	}
+	if (!m_gridCnt) {
+		D3D11_BUFFER_DESC bd = {};
+		bd.ByteWidth = kCells * 4u; bd.Usage = D3D11_USAGE_DEFAULT;
+		bd.BindFlags = D3D11_BIND_UNORDERED_ACCESS; bd.MiscFlags = D3D11_RESOURCE_MISC_BUFFER_ALLOW_RAW_VIEWS;
+		if (FAILED(m_dev->CreateBuffer(&bd, NULL, &m_gridCnt))) return FALSE;
+		D3D11_UNORDERED_ACCESS_VIEW_DESC ud = {};
+		ud.Format = DXGI_FORMAT_R32_TYPELESS; ud.ViewDimension = D3D11_UAV_DIMENSION_BUFFER;
+		ud.Buffer.Flags = D3D11_BUFFER_UAV_FLAG_RAW; ud.Buffer.NumElements = kCells;
+		if (FAILED(m_dev->CreateUnorderedAccessView(m_gridCnt, &ud, &m_uavGridCnt))) return FALSE;
+		bd.BindFlags = 0; bd.CPUAccessFlags = D3D11_CPU_ACCESS_READ; bd.Usage = D3D11_USAGE_STAGING; bd.MiscFlags = 0;
+		if (FAILED(m_dev->CreateBuffer(&bd, NULL, &m_gridCntStage))) return FALSE;
+	}
+	if (!m_gridBase) {
+		D3D11_BUFFER_DESC bd = {};
+		bd.ByteWidth = kCells * 4u; bd.Usage = D3D11_USAGE_DEFAULT; bd.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+		bd.MiscFlags = D3D11_RESOURCE_MISC_BUFFER_STRUCTURED; bd.StructureByteStride = 4;
+		if (FAILED(m_dev->CreateBuffer(&bd, NULL, &m_gridBase))) return FALSE;
+		D3D11_SHADER_RESOURCE_VIEW_DESC sd = {};
+		sd.Format = DXGI_FORMAT_UNKNOWN; sd.ViewDimension = D3D11_SRV_DIMENSION_BUFFER; sd.Buffer.NumElements = kCells;
+		if (FAILED(m_dev->CreateShaderResourceView(m_gridBase, &sd, &m_srvGridBase))) return FALSE;
+	}
+	ID3D11Buffer*& vb = water ? m_vbWaterGpu : m_vbTerrGpu;
+	ID3D11UnorderedAccessView*& uav = water ? m_uavWaterGpu : m_uavTerrGpu;
+	if (!vb) {
+		const UINT want = water ? 2097152u : 6291456u;
+		for (UINT nv = want; nv >= 1048576u; nv >>= 1) {
+			const UINT bytes = nv * 48u;
+			D3D11_BUFFER_DESC bd = {};
+			bd.ByteWidth = bytes; bd.Usage = D3D11_USAGE_DEFAULT;
+			bd.BindFlags = D3D11_BIND_VERTEX_BUFFER | D3D11_BIND_UNORDERED_ACCESS;
+			bd.MiscFlags = D3D11_RESOURCE_MISC_BUFFER_ALLOW_RAW_VIEWS;
+			if (FAILED(m_dev->CreateBuffer(&bd, NULL, &vb)) || !vb) { vb = NULL; continue; }
+			D3D11_UNORDERED_ACCESS_VIEW_DESC ud = {};
+			ud.Format = DXGI_FORMAT_R32_TYPELESS; ud.ViewDimension = D3D11_UAV_DIMENSION_BUFFER;
+			ud.Buffer.Flags = D3D11_BUFFER_UAV_FLAG_RAW; ud.Buffer.NumElements = bytes / 4u;
+			if (FAILED(m_dev->CreateUnorderedAccessView(vb, &ud, &uav)) || !uav) {
+				if (vb) vb->Release(); vb = NULL; uav = NULL; continue;
+			}
+			break;
+		}
+		if (!vb || !uav) return FALSE;
+	}
+	D3D11_BUFFER_DESC vbDesc = {};
+	vb->GetDesc(&vbDesc);
+	const UINT capV = vbDesc.ByteWidth / 48u;
+	struct CB {
+		float ox, oz, st, gn, hx, hz, hs, hn, r, g, b, refine, tun, ax, cap, wmode, wy, depth, wr, wg, wb, p0, p1, p2;
+	} gcb = {};
+	gcb.ox = x0; gcb.oz = z0; gcb.st = step; gcb.gn = (float)gN;
+	gcb.hx = hmX0; gcb.hz = hmZ0; gcb.hs = hmStep; gcb.hn = (float)hmN;
+	gcb.r = cr; gcb.g = cg; gcb.b = cb; gcb.refine = refineR;
+	gcb.tun = tunR; gcb.ax = axis; gcb.cap = (float)capV; gcb.wmode = water ? 1.f : 0.f;
+	gcb.wy = wy; gcb.depth = depthRef; gcb.wr = wr; gcb.wg = wg; gcb.wb = wb;
+	D3D11_MAPPED_SUBRESOURCE map = {};
+	if (FAILED(m_imm->Map(m_gridCB, 0, D3D11_MAP_WRITE_DISCARD, 0, &map))) return FALSE;
+	memcpy(map.pData, &gcb, sizeof(gcb));
+	m_imm->Unmap(m_gridCB, 0);
+	ID3D11ShaderResourceView* srvs[4] = { m_hmSrv[0], m_hmSrv[1], m_hmSrv[2], NULL };
+	const UINT nCell = (UINT)gN * (UINT)gN;
+	const UINT groups = ((UINT)gN + 7u) / 8u;
+	m_imm->CSSetShader(m_csGridCount, NULL, 0);
+	m_imm->CSSetConstantBuffers(2, 1, &m_gridCB);
+	m_imm->CSSetShaderResources(8, 3, srvs);
+	m_imm->CSSetUnorderedAccessViews(1, 1, &m_uavGridCnt, NULL);
+	m_imm->Dispatch(groups, groups, 1);
+	ID3D11UnorderedAccessView* nu = NULL;
+	m_imm->CSSetUnorderedAccessViews(1, 1, &nu, NULL);
+	m_imm->CopyResource(m_gridCntStage, m_gridCnt);
+	if (FAILED(m_imm->Map(m_gridCntStage, 0, D3D11_MAP_READ, 0, &map))) return FALSE;
+	const UINT* counts = (const UINT*)map.pData;
+	UINT* bases = new (std::nothrow) UINT[nCell];
+	if (!bases) { m_imm->Unmap(m_gridCntStage, 0); return FALSE; }
+	UINT sum = 0;
+	int fit = 1;
+	for (UINT i = 0; i < nCell; i++) {
+		UINT c = counts[i];
+		if (!c) { bases[i] = 0xffffffffu; continue; }
+		if (sum + c > capV) { fit = 0; break; }
+		bases[i] = sum;
+		sum += c;
+	}
+	m_imm->Unmap(m_gridCntStage, 0);
+	if (!fit || (!water && sum < 3)) {
+		delete[] bases;
+		m_imm->CSSetShader(NULL, NULL, 0);
+		return FALSE;
+	}
+	D3D11_BOX box = {};
+	box.right = nCell * 4u; box.bottom = 1; box.back = 1;
+	m_imm->UpdateSubresource(m_gridBase, 0, &box, bases, box.right, 0);
+	delete[] bases;
+	srvs[3] = m_srvGridBase;
+	m_imm->CSSetShader(m_csGridWrite, NULL, 0);
+	m_imm->CSSetConstantBuffers(2, 1, &m_gridCB);
+	m_imm->CSSetShaderResources(8, 4, srvs);
+	m_imm->CSSetUnorderedAccessViews(2, 1, &uav, NULL);
+	m_imm->Dispatch(groups, groups, 1);
+	m_imm->CSSetUnorderedAccessViews(2, 1, &nu, NULL);
+	ID3D11ShaderResourceView* ns4[4] = { NULL, NULL, NULL, NULL };
+	ID3D11Buffer* nb = NULL;
+	m_imm->CSSetShaderResources(8, 4, ns4);
+	m_imm->CSSetConstantBuffers(2, 1, &nb);
+	m_imm->CSSetShader(NULL, NULL, 0);
+	if (water) m_gpuWaterVerts = sum;
+	else m_gpuTerrVerts = sum;
+	return TRUE;
+}
+
 void CSoft3DRaceDlg::BakeStaticMeshes()
 {
 	if (!m_view.m_ready || m_knotN < 4 || !m_view.m_dev) return;
@@ -6284,6 +6448,13 @@ void CSoft3DRaceDlg::BakeStaticMeshes()
 	};
 	const float refineR = m_bandHalf * 3.8f;
 	n = 0;
+	m_view.m_gpuTerrOn = 0;
+	if (m_hmReady && m_view.DispatchHeightGrid(0, gN, x0, z0, step, m_hm, m_hmRaw, m_hmPathDist,
+		m_hmX0, m_hmZ0, m_hmStep, gr, gg, gb, refineR, S3rTunR(m_bandHalf), (float)axis,
+		0.f, 1.f, 0.f, 0.f, 0.f)) {
+		m_view.m_gpuTerrOn = 1;
+	}
+	if (!m_view.m_gpuTerrOn)
 	for (int gz=0; gz<gN; gz++) {
 		for (int gx=0; gx<gN; gx++) {
 			float xa = x0 + gx * step, za = z0 + gz * step;
@@ -6384,6 +6555,10 @@ void CSoft3DRaceDlg::BakeStaticMeshes()
 				}
 			}
 		}
+	}
+	if (m_view.m_gpuTerrOn && m_view.m_vbTerrParts < 1) {
+		m_view.m_vbTerrParts = 1;
+		m_view.m_vbTerrN[0] = 0;
 	}
 	beginMesh(m_view.m_vbScenery, m_view.m_vbSceneryN, &m_view.m_vbSceneryParts, 3);
 
@@ -6528,6 +6703,17 @@ void CSoft3DRaceDlg::BakeStaticMeshes()
 		else if (m_themeActive==THEME_NIGHT){wr=.10f;wg=.16f;wb=.28f;}
 		float wy = m_waterY + 0.18f;
 		const float depthRef = 9.f * max(1.f, m_bandHalf / 7.2f);
+		m_view.m_gpuWaterOn = 0;
+		if (m_hmReady && m_view.DispatchHeightGrid(1, wN, wx0, wz0, wStep, m_hm, m_hmRaw, m_hmPathDist,
+			m_hmX0, m_hmZ0, m_hmStep, wr, wg, wb, 0.f, S3rTunR(m_bandHalf), (float)axis,
+			wy, depthRef, wr, wg, wb)) {
+			m_view.m_gpuWaterOn = 1;
+			if (m_view.m_vbWaterParts < 1) {
+				m_view.m_vbWaterParts = 1;
+				m_view.m_vbWaterN[0] = 0;
+			}
+		}
+		if (!m_view.m_gpuWaterOn)
 		for (int gz=0; gz<wN; gz++) for (int gx=0; gx<wN; gx++) {
 			float xa = wx0 + gx * wStep, za = wz0 + gz * wStep;
 			float xb = xa + wStep, zb = za + wStep;
@@ -7356,6 +7542,19 @@ void CSoft3DRaceDlg::RenderScene()
 		dc->IASetVertexBuffers(0,1,&vb,&st,&of);
 	};
 	auto drawParts=[&](ID3D11Buffer** vb, UINT* nn, int parts, UINT align){
+		if (vb == m_view.m_vbTerr && m_view.m_gpuTerrOn && m_view.m_vbTerrGpu && m_view.m_gpuTerrVerts >= 3) {
+			bindMesh(m_view.m_vbTerrGpu);
+			UINT d = m_view.m_gpuTerrVerts; d -= d % 3u;
+			if (d >= 3) dc->Draw(d, 0);
+		}
+		if (vb == m_view.m_vbWater && m_view.m_gpuWaterOn) {
+			if (m_view.m_vbWaterGpu && m_view.m_gpuWaterVerts >= 3) {
+				bindMesh(m_view.m_vbWaterGpu);
+				UINT d = m_view.m_gpuWaterVerts; d -= d % 3u;
+				if (d >= 3) dc->Draw(d, 0);
+			}
+			return;
+		}
 		for (int i = 0; i < parts; i++) {
 			if (!vb[i] || nn[i] < align) continue;
 			UINT d = nn[i];

@@ -5678,6 +5678,7 @@ int g_outBytesPerFrame = 4;
 int ru2 = 0, ru;
 int lo, loc, endf, ps = 0, locs;
 int poss = 0, poss2 = 0, poss3 = 0, poss4 = 0, poss5 = 0, poss6 = 0, loopcnt, pl_no;
+volatile LONG g_plugReadEof = 0;
 
 // OGG+RB: デコード位置（入力 PCM サンプル）。playb は出力側、こちらは ov_read 進行用。
 __int64 g_oggPcmDecodePos = 0;
@@ -12157,6 +12158,7 @@ void COggDlg::play()
 		_tchdir(tmp_savedir);
 	}
 	loopcnt = 0;
+	InterlockedExchange(&g_plugReadEof, 0);
 	CString fl;
 	wavbit_sample_Hz = 44100;
 	loop3 = 0; fade1 = 0;
@@ -21700,6 +21702,10 @@ static bool WantPlaybackLoop()
 	const int dm = ActiveDecodeMode();
 	const bool realLoop = PlaybackHasRealLoopPoint();
 	if (savedata.saveloop != 0) {
+		/* Winamp/XMPlay/AIMP/ZMUSIC は終端でデコードスレッドが死ぬ。
+		   ここで先頭へシークすると最後のバッファを連打したまま頭に戻る。曲として止める。 */
+		if (IsForeignPluginMode(dm) || dm == MODE_ZMUSIC)
+			return false;
 		if (xfadeRun && !realLoop) {
 			if (InterlockedCompareExchange(&g_xfLoopCountActive, 0, 0))
 				return true;
@@ -22679,51 +22685,63 @@ int playwavkpi(BYTE* bw, int old, int l1, int l2)
 			}
 		}
 	}
+	if (l1 > 0)
+		wl += PlaybackCcWrite(bw + old, (UINT)l1);
+	if (l2 > 0)
+		wl += PlaybackCcWrite(bw, (UINT)l2);
 	return l1 + l2;
 }
 
 static int playwavForeignPull(BYTE* bw, int old, int l1, int l2, int (*readfn)(BYTE*, int), int (*seek0)(), int fmtVolMode)
 {
 	if (!readfn) return 0;
+	(void)seek0;
 	// 生PCMを equaliser へ。Winamp/XMPlay/AIMP は winampvol、ZMUSIC 等は kpivol。SPC は掛けない。
 	EqualiserSetFormatVolContext(fmtVolMode, FALSE);
 	const bool exporting = (wavExportPath.GetLength() > 0 || g_isWavExportRendering);
+	auto foreignStop = [&](int got) {
+		if (exporting) {
+			fade1 = 1;
+			return;
+		}
+		if (savedata.saverenzoku == 0)
+			fade1 = 1;
+		else
+			endflg = 1;
+		(void)got;
+	};
+	auto foreignDone = [&](int got) -> bool {
+		if (InterlockedCompareExchange(&g_plugReadEof, 0, 0))
+			return true;
+		const int total = (loop2 > 0) ? (loop1 + loop2) : 0;
+		if (total <= 8) return false;
+		const int pos = (poss5 > 0) ? poss5 : (int)playb;
+		if (got <= 0)
+			return pos > ((wavbit_sample_Hz > 0) ? wavbit_sample_Hz : 44100);
+		return pos >= total;
+	};
 	int rrr = readfn(bw + old, l1);
 	{
 		const int bpf = PcmOutBytesPerFrame();
 		if (bpf > 0)
 			AdvanceOutAndSrcPos(rrr / bpf);
 	}
-	if (l1 != rrr) {
+	if (foreignDone(rrr)) {
+		if (rrr < l1)
+			ZeroMemory(bw + old + rrr, (SIZE_T)(l1 - rrr));
+		l1 = rrr;
+		foreignStop(rrr);
+	}
+	else if (l1 != rrr) {
 		if (!WantPlaybackLoop() && !exporting) {
 			if (rrr < l1)
 				ZeroMemory(bw + old + rrr, (SIZE_T)(l1 - rrr));
 			if (PlaybackShortMeansEof(rrr)) {
 				l1 = rrr;
-				if (savedata.saverenzoku == 0)
-					fade1 = 1;
-				else
-					endflg = 1;
+				foreignStop(rrr);
 			}
 		}
 		else if (!WantPlaybackLoop() && exporting && rrr <= 0 && fade1) {
-			l1 = rrr;
-		}
-		else if (WantPlaybackLoop() && !exporting && PlaybackShortMeansEof(rrr)) {
-			PlaybackNoteLoop(loop1);
-			if (seek0) seek0();
-			kpi_silence_bytes = 0; kpi_heard_audio = 0;
-			poss2 = poss3 = poss4 = poss6 = 0; poss5 = loop1;
-			cnt3 = 0;
-			RubberBand_DestroyBank(0);
-			reset = TRUE;
-			const int got = readfn(bw + old + rrr, l1 - rrr);
-			{
-				const int bpf = PcmOutBytesPerFrame();
-				if (bpf > 0)
-					AdvanceOutAndSrcPos(got / bpf);
-			}
-			rrr += got;
 			l1 = rrr;
 		}
 		else {
@@ -22745,36 +22763,22 @@ static int playwavForeignPull(BYTE* bw, int old, int l1, int l2, int (*readfn)(B
 			if (bpf > 0)
 				AdvanceOutAndSrcPos(rrr / bpf);
 		}
-		if (l2 != rrr) {
+		if (foreignDone(rrr)) {
+			if (rrr < l2)
+				ZeroMemory(bw + rrr, (SIZE_T)(l2 - rrr));
+			l2 = rrr;
+			foreignStop(rrr);
+		}
+		else if (l2 != rrr) {
 			if (!WantPlaybackLoop() && !exporting) {
 				if (rrr < l2)
 					ZeroMemory(bw + rrr, (SIZE_T)(l2 - rrr));
 				if (PlaybackShortMeansEof(rrr)) {
 					l2 = rrr;
-					if (savedata.saverenzoku == 0)
-						fade1 = 1;
-					else
-						endflg = 1;
+					foreignStop(rrr);
 				}
 			}
 			else if (!WantPlaybackLoop() && exporting && rrr <= 0 && fade1) {
-				l2 = rrr;
-			}
-			else if (WantPlaybackLoop() && !exporting && PlaybackShortMeansEof(rrr)) {
-				PlaybackNoteLoop(loop1);
-				if (seek0) seek0();
-				kpi_silence_bytes = 0; kpi_heard_audio = 0;
-				poss2 = poss3 = poss4 = poss6 = 0; poss5 = loop1;
-				cnt3 = 0;
-				RubberBand_DestroyBank(0);
-				reset = TRUE;
-				const int got = readfn(bw + rrr, l2 - rrr);
-				{
-					const int bpf = PcmOutBytesPerFrame();
-					if (bpf > 0)
-						AdvanceOutAndSrcPos(got / bpf);
-				}
-				rrr += got;
 				l2 = rrr;
 			}
 			else {
@@ -22790,6 +22794,10 @@ static int playwavForeignPull(BYTE* bw, int old, int l1, int l2, int (*readfn)(B
 			reset = FALSE;
 		}
 	}
+	if (l1 > 0)
+		wl += PlaybackCcWrite(bw + old, (UINT)l1);
+	if (l2 > 0)
+		wl += PlaybackCcWrite(bw, (UINT)l2);
 	return l1 + l2;
 }
 
@@ -23562,6 +23570,7 @@ int playwavvst(BYTE* bw, int old, int l1, int l2)
 		EqualiserSetFormatVolContext(1, FALSE);
 		equaliser(bw + old, rrr, reset);
 		if (og) og->FeedPianoRoll(bw + old, rrr);
+		wl += PlaybackCcWrite(bw + old, (UINT)rrr);
 		reset = FALSE;
 	}
 	else if (vstHitEnd(0)) {
@@ -23612,6 +23621,7 @@ int playwavvst(BYTE* bw, int old, int l1, int l2)
 			EqualiserSetFormatVolContext(1, FALSE);
 			equaliser(bw, r2, reset);
 			if (og) og->FeedPianoRoll(bw, r2);
+			wl += PlaybackCcWrite(bw, (UINT)r2);
 			reset = FALSE;
 		}
 		else if (vstHitEnd(0)) {

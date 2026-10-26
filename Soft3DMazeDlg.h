@@ -97,6 +97,14 @@ public:
 	ID3D11PixelShader* m_psDof;
 	ID3D11PixelShader* m_psFinal;
 	ID3D11ComputeShader* m_csFx;
+	ID3D11ComputeShader* m_csSub;
+	ID3D11Buffer* m_vbSub;
+	ID3D11UnorderedAccessView* m_uavSub;
+	ID3D11Buffer* m_bufSubIn;
+	ID3D11ShaderResourceView* m_srvSubIn;
+	ID3D11Buffer* m_cbSub;
+	BYTE* m_subJobs;
+	UINT m_subDrawN;
 	ID3D11Texture2D* m_texFx;
 	ID3D11ShaderResourceView* m_srvFx;
 	ID3D11UnorderedAccessView* m_uavFx;
@@ -188,6 +196,8 @@ public:
 	ID3D11BlendState* m_bsAdd;
 
 	BOOL CreateShaders();
+	BOOL EnsureSubGpu();
+	BOOL DispatchSubmesh(const void* jobs, UINT nJobs, UINT nVerts);
 	BOOL CreateProcTextures();
 	BOOL BakeClearTexture(const wchar_t* text, float alpha);
 	void ReleaseClearTexture();
