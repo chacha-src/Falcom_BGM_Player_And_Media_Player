@@ -1,20 +1,46 @@
 # -*- coding: utf-8 -*-
 """CC0 Quaternius glb → res/tactics/tac_mon.bin（骨格＋待機・歩行クリップ）"""
 import os, sys, struct
+from io import BytesIO
 import numpy as np
+from PIL import Image
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from tac_convert import Gltf, prim_arrays, parents_of, node_global, node_trs, node_local, trs_mat, pack_name, sample_channel, qmul, mat_to_quat
 
 SRC = os.path.join(os.path.dirname(__file__), "mon_glb")
 OUT = os.path.join(os.path.dirname(__file__), "..", "res", "tactics", "tac_mon.bin")
 INC = os.path.join(os.path.dirname(__file__), "mon_species.inc")
-FPS = 12.0
-MAX_F = 16
+FPS = 24.0
+MAX_F = 32
+
+
+def albedo_rgb(g, mat, uv, nvert):
+    """ベースカラーテクスチャを頂点色へ焼く。無ければ材質色。"""
+    pbr = (mat or {}).get("pbrMetallicRoughness") or {}
+    factor = np.array((pbr.get("baseColorFactor") or [1, 1, 1, 1])[:3], np.float32)
+    if float(np.max(factor)) < 1e-4:
+        factor = np.array([0.75, 0.75, 0.75], np.float32)
+    tex = pbr.get("baseColorTexture")
+    if not tex or uv is None or len(uv) != nvert:
+        return np.tile(factor, (nvert, 1))
+    try:
+        src = g.j["textures"][tex["index"]].get("source")
+        raw = g.image_bytes(src)
+        im = Image.open(BytesIO(raw)).convert("RGBA")
+        img = np.asarray(im).astype(np.float32) / 255.0
+        h, w = img.shape[0], img.shape[1]
+        u = np.mod(uv[:, 0].astype(np.float32), 1.0)
+        v = np.mod(1.0 - uv[:, 1].astype(np.float32), 1.0)
+        x = np.clip((u * (w - 1)).astype(np.int32), 0, w - 1)
+        y = np.clip((v * (h - 1)).astype(np.int32), 0, h - 1)
+        return np.clip(img[y, x, :3] * factor, 0, 1)
+    except Exception:
+        return np.tile(factor, (nvert, 1))
 
 
 def disp_name(fn):
     stem = os.path.splitext(fn)[0]
-    for pre in ("q_", "ani_", "din_", "eas_", "fis_", "cut_", "zhum_"):
+    for pre in ("gob_", "q_", "ani_", "din_", "eas_", "fis_", "cut_", "zhum_"):
         if stem.startswith(pre):
             stem = stem[len(pre):]
             break
@@ -24,7 +50,9 @@ def disp_name(fn):
 def is_fly(fn, disp):
     if fn.startswith("cut_") or fn.startswith("fis_"):
         return 1
-    for k in ("Dragon", "Wasp", "Ghost", "Birb", "Pigeon", "Hywirl"):
+    for k in ("Dragon", "Wyvern", "Wasp", "Ghost", "Birb", "Pigeon", "Hywirl",
+              "Eagle", "Hawk", "Owl", "Bat", "Bee", "Moth", "Butterfly", "Dragonfly",
+              "Manta", "Gryphon", "Avian", "Crow", "Raven", "Gull", "Swallow", "Finch"):
         if k in disp:
             return 1
     return 0
@@ -199,9 +227,24 @@ def ortho3(R):
 
 
 def chain_globals(top, locals_m, parents):
-    G = [None] * len(locals_m)
-    for ji in range(len(locals_m)):
-        G[ji] = (top @ locals_m[ji]) if parents[ji] < 0 else (G[parents[ji]] @ locals_m[ji])
+    nJ = len(locals_m)
+    G = [None] * nJ
+    pending = list(range(nJ))
+    for _guard in range(nJ + 2):
+        if not pending:
+            break
+        nxt = []
+        for ji in pending:
+            p = parents[ji]
+            if p < 0:
+                G[ji] = top @ locals_m[ji]
+            elif G[p] is not None:
+                G[ji] = G[p] @ locals_m[ji]
+            else:
+                nxt.append(ji)
+        pending = nxt
+    for ji in pending:
+        G[ji] = top @ locals_m[ji]
     return G
 
 
@@ -299,6 +342,24 @@ def bake_human(names, parents, rest, top, ibm, pos, nrm, jn, wt, hair_mask=None,
         t = locals_m[ia][:3, 3].copy()
         sc = np.maximum(np.linalg.norm(locals_m[ia][:3, :3], axis=0), 1e-8)
         locals_m[ia] = trs_mat(t, mat_to_quat(ortho3(local_R)), sc)
+    for side in ("L", "R"):
+        fore = "LowerArm." + side
+        hand = "Hand." + side
+        if fore not in name_i or hand not in name_i:
+            continue
+        G = chain_globals(top, locals_m, parents)
+        ia, ic = name_i[fore], name_i[hand]
+        direction = G[ic][:3, 3] - G[ia][:3, 3]
+        outward = 0.18 if direction[0] >= 0 else -0.18
+        delta = q_from_to(direction, np.array([outward, -1.0, 0.02]))
+        R = trs_mat([0, 0, 0], delta, [1, 1, 1])[:3, :3]
+        new_world = R @ ortho3(G[ia][:3, :3])
+        ip = parents[ia]
+        parent_R = np.eye(3) if ip < 0 else ortho3(G[ip][:3, :3])
+        local_R = np.linalg.inv(parent_R) @ new_world
+        t = locals_m[ia][:3, 3].copy()
+        sc = np.maximum(np.linalg.norm(locals_m[ia][:3, :3], axis=0), 1e-8)
+        locals_m[ia] = trs_mat(t, mat_to_quat(ortho3(local_R)), sc)
     # 指を握る。開いたまま武器を添えると掴んで見えない。
     def rxm(a):
         c, s = np.cos(a), np.sin(a)
@@ -326,6 +387,94 @@ def bake_human(names, parents, rest, top, ibm, pos, nrm, jn, wt, hair_mask=None,
                 extra = rym(ay) @ extra
             t = locals_m[ii][:3, 3].copy()
             locals_m[ii] = trs_mat(t, mat_to_quat(ortho3(R @ extra)), scn)
+    # モジュラー体は歩きの途中で止まっている。足とつま先（PT）の親は Root で、膝を回しても足首は動かない。
+    # 靴の区間だけ揃えても、骨は歩いたままなので体型の拡縮（骨のローカル XZ）がふくらはぎをせん断する。
+    # スキンの前に、両股を同じ奥行きへ寄せ、膝と足首をその真下へ下ろし、骨の Y を脚の向きに合わせる。
+    # 左右の足首の Z が近い体（既に立っている）は触らない。
+    def _set_world(ji, world_pos=None, rot=None):
+        if ji is None:
+            return
+        Gnow = chain_globals(top, locals_m, parents)
+        desired = Gnow[ji].copy()
+        if world_pos is not None:
+            desired[:3, 3] = np.asarray(world_pos, np.float64)
+        if rot is not None:
+            desired[:3, :3] = rot
+        ip = parents[ji]
+        parent = top if ip < 0 else Gnow[ip]
+        locals_m[ji] = np.linalg.inv(parent) @ desired
+    def _aim_y(ji, y_dir):
+        if ji is None:
+            return
+        y_dir = np.asarray(y_dir, np.float64)
+        if float(np.linalg.norm(y_dir)) < 1e-5:
+            return
+        Gnow = chain_globals(top, locals_m, parents)
+        cur = Gnow[ji][:3, :3]
+        cy = cur[:, 1]
+        if float(np.linalg.norm(cy)) < 1e-5:
+            return
+        delta = q_from_to(cy, y_dir)
+        R = trs_mat([0, 0, 0], delta, [1, 1, 1])[:3, :3]
+        _set_world(ji, rot=R @ cur)
+    if "Foot.L" in name_i and "Foot.R" in name_i:
+        G0 = chain_globals(top, locals_m, parents)
+        zL = float(G0[name_i["Foot.L"]][2, 3])
+        zR = float(G0[name_i["Foot.R"]][2, 3])
+        if abs(zL - zR) > 0.05:
+            uls = [name_i.get("UpperLeg." + s) for s in ("L", "R")]
+            if uls[0] is not None and uls[1] is not None:
+                zMid = (float(G0[uls[0]][2, 3]) + float(G0[uls[1]][2, 3])) * 0.5
+                for ul in uls:
+                    p = G0[ul][:3, 3]
+                    _set_world(ul, np.array([p[0], p[1], zMid]))
+            for side in ("L", "R"):
+                ul = name_i.get("UpperLeg." + side)
+                ll = name_i.get("LowerLeg." + side)
+                if ul is None or ll is None:
+                    continue
+                Gn = chain_globals(top, locals_m, parents)
+                hip = Gn[ul][:3, 3]
+                knee = Gn[ll][:3, 3]
+                thigh = float(np.linalg.norm(knee - hip))
+                _set_world(ll, hip + np.array([0.0, -thigh, 0.0]))
+            for side in ("L", "R"):
+                ll = name_i.get("LowerLeg." + side)
+                ft = name_i.get("Foot." + side)
+                if ll is None or ft is None:
+                    continue
+                Gn = chain_globals(top, locals_m, parents)
+                knee = Gn[ll][:3, 3]
+                ank = Gn[ft][:3, 3].copy()
+                shin = float(np.linalg.norm(ank - knee))
+                new_ank = knee + np.array([0.0, -shin, 0.0])
+                delta = new_ank - ank
+                _set_world(ft, new_ank)
+                # 同じ側のつま先だけ。反対の足は兄弟でも動かさない。
+                suf = "." + side
+                for ji, nm in enumerate(names):
+                    if ji == ft or not str(nm).endswith(suf):
+                        continue
+                    if str(nm).startswith("UpperLeg") or str(nm).startswith("LowerLeg"):
+                        continue
+                    p = Gn[ji][:3, 3]
+                    if float(np.linalg.norm(p - ank)) < 0.45:
+                        _set_world(ji, p + delta)
+            for side in ("L", "R"):
+                ul = name_i.get("UpperLeg." + side)
+                ll = name_i.get("LowerLeg." + side)
+                ft = name_i.get("Foot." + side)
+                Gn = chain_globals(top, locals_m, parents)
+                # 親を回すと子の位置がずれる。膝と足首は置いた場所へ戻す。足の向きはそのまま。
+                if ul is not None and ll is not None:
+                    knee = Gn[ll][:3, 3].copy()
+                    _aim_y(ul, knee - Gn[ul][:3, 3])
+                    _set_world(ll, knee)
+                if ll is not None and ft is not None:
+                    Gn = chain_globals(top, locals_m, parents)
+                    ank = Gn[ft][:3, 3].copy()
+                    _aim_y(ll, ank - Gn[ll][:3, 3])
+                    _set_world(ft, ank)
     G = chain_globals(top, locals_m, parents)
     skinM = [G[ji] @ ibm[ji] for ji in range(nJ)]
     acc, nn = skin_cloud(pos, nrm, jn, wt, skinM)
@@ -392,6 +541,54 @@ def bake_human(names, parents, rest, top, ibm, pos, nrm, jn, wt, hair_mask=None,
     jn = np.array(jn, np.int32, copy=True)
     wt = np.array(wt, np.float64, copy=True)
     nJ = len(names)
+    def _ortho_axes(y_axis, z_hint):
+        y = np.asarray(y_axis, np.float64)
+        y = y / max(float(np.linalg.norm(y)), 1e-8)
+        z = np.asarray(z_hint, np.float64)
+        z = z - y * float(np.dot(y, z))
+        if float(np.linalg.norm(z)) < 1e-6:
+            z = np.array([0.0, 0.0, 1.0])
+            z = z - y * float(np.dot(y, z))
+        z = z / max(float(np.linalg.norm(z)), 1e-8)
+        x = np.cross(y, z)
+        x = x / max(float(np.linalg.norm(x)), 1e-8)
+        z = np.cross(x, y)
+        return np.stack([x, y, z], 1)
+    # 武器は手の +Y を指先、+Z を甲として置く。ソースの骨軸のままでは本が腰に浮く。
+    for side, sgn in (("L", -1.0), ("R", 1.0)):
+        hand = name_i.get("Hand." + side)
+        if hand is None:
+            continue
+        mid = name_i.get("Middle1." + side)
+        along = (joints_p[mid] - joints_p[hand]) if mid is not None else np.array([0.0, -1.0, 0.0])
+        if float(np.linalg.norm(along)) < 1e-4:
+            along = np.array([0.0, -1.0, 0.0])
+        outward = np.array([joints_p[hand][0], 0.0, 0.0])
+        if abs(float(outward[0])) < 1e-4:
+            outward[0] = sgn
+        joints_R[hand] = _ortho_axes(along, outward)
+    for side in ("L", "R"):
+        hand = name_i.get("Hand." + side)
+        if hand is None:
+            continue
+        R = joints_R[hand]
+        origin = joints_p[hand]
+        y = R[:, 1]
+        x = R[:, 0]
+        for i, pre in enumerate(("Index", "Middle", "Ring", "Pinky")):
+            lat = (i - 1.5) * 0.014
+            for k in range(1, 4):
+                ji = name_i.get("%s%d.%s" % (pre, k, side))
+                if ji is None:
+                    continue
+                joints_p[ji] = origin + y * (0.018 * k) + x * lat
+                joints_R[ji] = R
+        for k, lat, fwd in ((2, 0.016, 0.012), (3, 0.022, 0.020)):
+            ji = name_i.get("Thumb%d.%s" % (k, side))
+            if ji is None:
+                continue
+            joints_p[ji] = origin + y * fwd + x * lat
+            joints_R[ji] = R
     world = []
     for ji in range(nJ):
         M = np.eye(4)
@@ -818,6 +1015,59 @@ def borrow_human_clips(names, rest):
     return out, hips
 
 
+def _attach_head_xf(rec, female):
+    """髪とアバターの頭区間を、このメッシュの頭蓋の箱へ合わせる。魔女の頭の変換を流用すると後頭部に垂れる。"""
+    import mh_avatar
+    pos = rec["pos"].astype(np.float64).copy()
+    pos[:, 2] *= -1
+    names = rec["names"]
+    if "Head" not in names:
+        return
+    head_i = names.index("Head")
+    w8 = np.asarray(rec["w8"])
+    dom = np.asarray(rec["jn"])[np.arange(len(pos)), np.argmax(w8, axis=1)]
+    hv = dom == head_i
+    if int(hv.sum()) < 30:
+        return
+    box = pos[hv]
+    y0, y1 = float(box[:, 1].min()), float(box[:, 1].max())
+    skull = hv & (pos[:, 1] >= y0 + 0.30 * (y1 - y0))
+    if int(skull.sum()) < 20:
+        skull = hv
+    box_lo = pos[skull].min(0)
+    box_hi = pos[skull].max(0)
+    skin = mh_avatar.CUTE_SKIN if female else mh_avatar.MALE_SKIN
+    f = mh_avatar.face_source(1 if female else 0, skin)
+    acc = np.asarray(f["pos"], np.float64)
+    kind = np.asarray(f["kind"])
+    face_pts = acc[kind > 0]
+    if len(face_pts) < 8:
+        return
+    origin = face_pts.mean(0)
+    eye = acc[kind == 2]
+    fwd = (eye.mean(0) if len(eye) else face_pts[np.argmax(face_pts[:, 2])]) - origin
+    fwd[1] = 0
+    fl = float(np.linalg.norm(fwd))
+    fwd = fwd / fl if fl > 1e-8 else np.array([0.0, 0.0, -1.0])
+    yaw = trs_mat([0, 0, 0], q_from_to(fwd, np.array([0.0, 0.0, -1.0])), [1, 1, 1])[:3, :3]
+    acc = (yaw @ acc.T).T
+    sk = (kind != 3) & (kind != 4)
+    if int(sk.sum()) < 8:
+        sk = np.ones(len(acc), dtype=bool)
+    lo = acc[sk].min(0)
+    hi = acc[sk].max(0)
+    sc = float(box_hi[1] - box_lo[1]) / max(float(hi[1] - lo[1]), 1e-4)
+    # 高さだけだと男性の頭蓋より髪が細く、頭頂が禿げる。幅も足りるようにする。
+    sw = float(box_hi[0] - box_lo[0]) / max(float(hi[0] - lo[0]), 1e-4)
+    if sw > sc:
+        sc = sw
+    mid = (lo + hi) * 0.5
+    acc = (acc - mid) * sc
+    tgt = (box_lo + box_hi) * 0.5
+    off = np.array([float(tgt[0]), float(box_hi[1]) - float(acc[sk, 1].max()), float(tgt[2])])
+    rec["head_xf"] = dict(yaw=yaw, mid=mid, sc=float(sc), off=off)
+
+
 def load_one(path):
     g = Gltf(path)
     j = g.j
@@ -887,10 +1137,8 @@ def load_one(path):
                 nrm = (nrm @ n3.T).astype(np.float32)
                 nrm /= np.maximum(np.linalg.norm(nrm, axis=1, keepdims=True), 1e-8)
             mat = j["materials"][pr.get("material", 0)] if j.get("materials") else {}
-            col = mat.get("pbrMetallicRoughness", {}).get("baseColorFactor", [0.75, 0.75, 0.75, 1])
-            rgb = np.array(col[:3], np.float32)
-            if float(rgb.max()) < 1e-4:
-                rgb = np.array([0.7, 0.7, 0.7], np.float32)
+            baked = albedo_rgb(g, mat, uv, len(pos))
+            rgb = baked[0].copy()
             mat_name = (mat.get("name") or "").lower()
             node_name = (n.get("name") or "").lower()
             is_brow = "eyebrow" in mat_name
@@ -904,11 +1152,25 @@ def load_one(path):
                 rawc = g.acc(pr["attributes"]["COLOR_0"]).astype(np.float32)
                 if rawc.ndim == 2 and rawc.shape[0] == len(pos) and rawc.shape[1] >= 3:
                     colv = np.clip(rawc[:, :3], 0, 1)
-            if colv is not None:
+            human_body = "zhum_" in os.path.basename(path)
+            if colv is not None and human_body:
                 # 焼き込み済みの sRGB。順光の白飛びだけ抑える。
                 lit = np.array([1.421, 1.336, 1.219], np.float32)
                 C.append(np.clip(colv / lit, 0, 1))
+            elif not human_body:
+                if colv is not None:
+                    painted = np.clip(colv, 0, 1)
+                    if float(np.std(painted)) > 0.02:
+                        C.append(painted)
+                    else:
+                        C.append(np.clip(baked * np.maximum(painted, 0.15), 0, 1))
+                else:
+                    C.append(baked)
             else:
+                pbr = mat.get("pbrMetallicRoughness") or {}
+                rgb = np.array((pbr.get("baseColorFactor") or [0.75, 0.75, 0.75])[:3], np.float32)
+                if float(rgb.max()) < 1e-4:
+                    rgb = np.array([0.7, 0.7, 0.7], np.float32)
                 if is_eye:
                     rgb = np.array([0.10, 0.07, 0.05], np.float32)
                 elif is_brow:
@@ -992,6 +1254,23 @@ def load_one(path):
                 rec["head_n"] = up["head_n"]
                 rec["head_keep"] = up["head_keep"]
                 print("hi-head", base, len(rec["pos"]))
+        elif new_body and base[9] in "12":
+            # モジュラー頭は十数面で、アバターに載せると顔が板になり髪が目を覆う。
+            import _hi_splice
+            up = _hi_splice.upgrade(rec, base[8] == "F")
+            if isinstance(up, dict) and "rec_pos" in up and len(up["rec_pos"]) <= 65000:
+                rec["pos"] = up["rec_pos"]
+                rec["nrm"] = up["rec_nrm"]
+                rec["col"] = up["rec_col"]
+                rec["idx"] = up["rec_idx"]
+                rec["jn"] = up["rec_jn"]
+                rec["w8"] = up["rec_w8"]
+                rec["head_xf"] = up["head_xf"]
+                print("hi-head", base, len(rec["pos"]))
+            else:
+                _attach_head_xf(rec, base[8] == "F")
+        elif new_body:
+            _attach_head_xf(rec, base[8] == "F")
         return rec
     # バインド姿勢の身長を 1.7、足を地面へ。頂点と逆バインドはそのまま、親変換だけ合わせる。
     step = max(1, len(pos) // 800)
@@ -1000,8 +1279,22 @@ def load_one(path):
     acc = np.zeros((len(sel), 3), np.float64)
     locals_m = [trs_mat(np.array(t, np.float64), np.array(r, np.float64), np.array(s, np.float64)) for t, r, s in rest]
     G = [None] * nJ
-    for ji in range(nJ):
-        G[ji] = (top @ locals_m[ji]) if parents[ji] < 0 else (G[parents[ji]] @ locals_m[ji])
+    pending = list(range(nJ))
+    for _guard in range(nJ + 2):
+        if not pending:
+            break
+        nxt = []
+        for ji in pending:
+            p = parents[ji]
+            if p < 0:
+                G[ji] = top @ locals_m[ji]
+            elif G[p] is not None:
+                G[ji] = G[p] @ locals_m[ji]
+            else:
+                nxt.append(ji)
+        pending = nxt
+    for ji in pending:
+        G[ji] = top @ locals_m[ji]
     skinM = [G[ji] @ ibm[ji] for ji in range(nJ)]
     for k in range(4):
         ji = jn[sel, k]
@@ -1021,12 +1314,12 @@ def load_one(path):
     top = S @ top
     clips = []
     want = [
-        ("Idle", ("idle",), ("hit", "death", "jump", "attack")),
-        ("Walking_A", ("walk", "swimming_normal", "flying_idle", "swim"), ("fast", "attack")),
+        ("Idle", ("idle",), ("hit", "death", "dead", "jump", "attack", "hurt")),
+        ("Walking_A", ("walk", "move", "swimming_normal", "flying_idle", "swim"), ("fast", "attack")),
         ("Running_A", ("run", "gallop", "fast_flying", "swimming_fast"), ()),
-        ("1H_Melee_Attack_Chop", ("attack", "bite", "punch", "headbutt", "kick"), ("death",)),
-        ("Hit_A", ("hit",), ("death",)),
-        ("Death_A", ("death",), ()),
+        ("1H_Melee_Attack_Chop", ("attack", "bite", "punch", "headbutt", "kick", "sting", "pounce"), ("death", "dead")),
+        ("Hit_A", ("hit", "hurt"), ("death", "dead")),
+        ("Death_A", ("death", "dead"), ()),
     ]
     node_to_j = jset
     for cname, keys, ban in want:

@@ -1,5 +1,6 @@
 #include "stdafx.h"
 #include "OmakeTacticsAudio.h"
+#include "OmakeTacticsData.h"
 #include "resource.h"
 #include "oggDlg.h"
 #include <vorbis/vorbisfile.h>
@@ -9,8 +10,9 @@
 #include <stdlib.h>
 #include <string.h>
 
-// 効果音は Kenney (www.kenney.nl) Interface / Impact / RPG Audio。CC0。
-// WAV をモノラル Ogg Vorbis にして res/tactics/tac_sfx.bin にパックしてある。
+// 効果音は短い MML（1〜3 音）を内蔵 FM / SSG で鳴らす。容量のため Ogg は使わない。
+// 音の型は公開メニュー／RPG 効果音の定石（上昇=決定、下降=キャンセル、SSG 矩形=ブザー、
+// 低音 FM=打撃）に合わせ、音色は場面ごとに @0〜@7 で固定する。
 
 extern COggDlg* og;
 extern int plf;
@@ -108,10 +110,24 @@ void TacAudioSetVol(int bgm, int se)
 }
 
 static const float kGain[TS_N] = {
-	0.28f, 0.42f, 0.40f, 0.45f, 0.40f,
-	0.50f, 0.50f, 0.22f, 0.48f, 0.46f,
-	0.50f, 0.55f, 0.70f, 0.32f, 0.48f,
-	0.46f, 0.62f, 0.62f, 0.58f, 0.55f
+	0.27f, 0.46f, 0.38f, 0.40f, 0.43f,
+	0.49f, 0.43f, 0.16f, 0.40f, 0.38f,
+	0.43f, 0.49f, 0.57f, 0.27f, 0.40f,
+	0.40f, 0.46f, 0.54f, 0.48f, 0.49f,
+	0.40f, 0.38f, 0.43f, 0.40f, 0.38f,
+	0.35f, 0.40f, 0.35f, 0.32f, 0.46f,
+	0.40f, 0.46f,
+	0.46f, 0.42f, 0.46f, 0.42f, 0.44f, 0.40f, 0.46f, 0.40f,
+	0.42f, 0.42f, 0.44f,
+	0.44f, 0.40f, 0.44f, 0.42f, 0.42f,
+	0.46f,
+	0.50f, 0.44f, 0.48f, 0.44f, 0.46f, 0.42f, 0.50f, 0.42f,
+	0.40f, 0.42f, 0.46f,
+	0.48f, 0.54f,
+	0.28f, 0.26f,
+	0.44f, 0.40f, 0.36f, 0.36f, 0.38f, 0.36f, 0.42f,
+	0.46f, 0.50f, 0.40f,
+	0.48f, 0.46f, 0.38f, 0.40f, 0.40f
 };
 
 static size_t TacRead(void* dst, size_t sz, size_t nm, void* h)
@@ -197,6 +213,398 @@ static int TacDecodeMem(const unsigned char* p, size_t n, TacClip& out)
 }
 
 static void TacBake(int id);
+
+// YM2612 系 4op と SSG。1〜3 音の短い効果音用。コーラスと残響は足さない。
+// @0 ベル @1 電子ピアノ @2 笛 @3 低音打撃 @4 金管 @5 金属クリック @6 SSG矩形 @7 SSGノイズ
+static float FmSin(float cyc)
+{
+	float x = cyc - (float)(int)cyc;
+	if (x < 0.f) x += 1.f;
+	return sinf(x * 6.2831853f);
+}
+struct FmVoice { float mul[4]; float lvl[4]; int alg; float fb; float atk; float dec; float sus; float rel; };
+static const FmVoice kFmVoice[8] = {
+	{ { 12.f, 1.f, 1.f, 1.f }, { 0.18f, 0.42f, 0.16f, 0.88f }, 0, 0.10f, 0.001f, 0.055f, 0.08f, 0.05f },
+	{ { 1.f, 1.f, 2.f, 1.f }, { 0.28f, 0.46f, 0.16f, 0.86f }, 1, 0.08f, 0.004f, 0.07f, 0.32f, 0.06f },
+	{ { 1.f, 1.f, 1.f, 1.f }, { 0.06f, 0.08f, 0.10f, 0.90f }, 2, 0.03f, 0.008f, 0.10f, 0.50f, 0.09f },
+	{ { 0.5f, 1.f, 1.f, 1.f }, { 0.32f, 0.38f, 0.16f, 0.92f }, 0, 0.16f, 0.002f, 0.09f, 0.22f, 0.07f },
+	{ { 1.f, 1.f, 1.f, 1.f }, { 0.24f, 0.36f, 0.18f, 0.84f }, 1, 0.14f, 0.005f, 0.09f, 0.36f, 0.08f },
+	{ { 8.f, 1.f, 2.f, 1.f }, { 0.14f, 0.36f, 0.12f, 0.78f }, 0, 0.06f, 0.001f, 0.028f, 0.04f, 0.035f },
+	{ { 1.f, 1.f, 1.f, 1.f }, { 0.f, 0.f, 0.f, 0.5f }, 2, 0.f, 0.001f, 0.04f, 0.12f, 0.04f },
+	{ { 1.f, 1.f, 1.f, 1.f }, { 0.f, 0.f, 0.f, 0.5f }, 2, 0.f, 0.001f, 0.03f, 0.08f, 0.04f },
+};
+struct MmlEv { int t0; int n; float hz; int voice; float vol; int pan; int ssg; };
+
+static float FmEnv(const FmVoice& v, float t, float dur)
+{
+	float rel = v.rel > 0.01f ? v.rel : 0.04f;
+	if (t < 0.f) return 0.f;
+	if (t < v.atk) return v.atk > 0.f ? t / v.atk : 1.f;
+	if (t < v.atk + v.dec) {
+		float u = (t - v.atk) / (v.dec > 0.f ? v.dec : 0.01f);
+		return 1.f - (1.f - v.sus) * u;
+	}
+	if (t < dur) return v.sus;
+	float u = (t - dur) / rel;
+	if (u >= 1.f) return 0.f;
+	return v.sus * (1.f - u);
+}
+static void FmAdd(float* L, float* R, int total, const MmlEv& ev, unsigned& noise)
+{
+	const FmVoice& v = kFmVoice[ev.voice & 7];
+	float rel = ev.ssg ? 0.04f : (v.rel > 0.01f ? v.rel : 0.04f);
+	int n = ev.n + (int)(rel * (float)TAC_RATE);
+	if (ev.t0 >= total) return;
+	if (ev.t0 + n > total) n = total - ev.t0;
+	float g = ev.vol;
+	float dur = (float)ev.n / (float)TAC_RATE;
+	if (ev.ssg) {
+		float sq = 0.f;
+		int nclk = 0;
+		for (int i = 0; i < n; i++) {
+			float t = (float)i / (float)TAC_RATE;
+			float env;
+			if (t < 0.002f) env = t / 0.002f;
+			else {
+				float tau = dur * 0.42f;
+				if (tau < 0.012f) tau = 0.012f;
+				env = expf(-(t - 0.002f) / tau);
+			}
+			if (t > dur + rel) env = 0.f;
+			else if (t > dur) env *= 1.f - (t - dur) / rel;
+			if (env <= 0.001f) continue;
+			float s = 0.f;
+			if (ev.ssg == 1) {
+				sq += ev.hz / (float)TAC_RATE;
+				if (sq >= 1.f) sq -= 1.f;
+				s = (sq < 0.5f ? 0.20f : -0.20f) * env;
+			} else {
+				if (++nclk >= 10) {
+					unsigned bit = ((noise >> 0) ^ (noise >> 3)) & 1u;
+					noise = (noise >> 1) | (bit << 16);
+					nclk = 0;
+				}
+				s = ((noise & 1u) ? 0.12f : -0.12f) * env;
+			}
+			L[ev.t0 + i] += s * g;
+			R[ev.t0 + i] += s * g;
+		}
+		return;
+	}
+	float ph[4] = { 0, 0, 0, 0 };
+	float fb = 0.f;
+	for (int i = 0; i < n; i++) {
+		float t = (float)i / (float)TAC_RATE;
+		float env = FmEnv(v, t, dur);
+		if (env <= 0.f) continue;
+		float m0 = FmSin(ph[0] + fb * v.fb) * v.lvl[0];
+		ph[0] += ev.hz * v.mul[0] / (float)TAC_RATE;
+		float m1 = FmSin(ph[1] + m0) * v.lvl[1];
+		ph[1] += ev.hz * v.mul[1] / (float)TAC_RATE;
+		float in2 = v.alg == 0 ? m1 : 0.f;
+		float m2 = FmSin(ph[2] + in2) * v.lvl[2];
+		ph[2] += ev.hz * v.mul[2] / (float)TAC_RATE;
+		float in3 = v.alg == 0 ? m2 : (v.alg == 1 ? m1 : 0.f);
+		float m3 = FmSin(ph[3] + in3) * v.lvl[3];
+		ph[3] += ev.hz * v.mul[3] / (float)TAC_RATE;
+		fb = m0;
+		float a = v.alg == 2 ? (m0 + m1 + m2 + m3) * 0.22f : (v.alg == 1 ? (m1 + m3) * 0.38f : m3 * 0.78f + m1 * 0.08f);
+		float s = a * env;
+		L[ev.t0 + i] += s * g;
+		R[ev.t0 + i] += s * g;
+	}
+}
+static int MmlSemi(char n)
+{
+	switch (n) {
+	case 'c': return 0;
+	case 'd': return 2;
+	case 'e': return 4;
+	case 'f': return 5;
+	case 'g': return 7;
+	case 'a': return 9;
+	case 'b': return 11;
+	default: return -1;
+	}
+}
+static int MmlNum(const char* s, int& i, int fb)
+{
+	if (s[i] < '0' || s[i] > '9') return fb;
+	int v = 0;
+	while (s[i] >= '0' && s[i] <= '9') { v = v * 10 + (s[i] - '0'); i++; }
+	return v > 0 ? v : fb;
+}
+static int MmlSamples(int tempo, int len, int dotted)
+{
+	if (len < 1) len = 8;
+	if (tempo < 40) tempo = 40;
+	double sec = (4.0 / (double)len) * (60.0 / (double)tempo);
+	if (dotted) sec *= 1.5;
+	int n = (int)(sec * (double)TAC_RATE);
+	return n < 1 ? 1 : n;
+}
+static int MmlTrack(const char* s, int track, MmlEv* ev, int nEv, int cap)
+{
+	(void)track;
+	int tempo = 150, len = 16, oct = 4, voice = 1;
+	float vol = 0.55f;
+	int cursor = 0;
+	int chord = 0, chordAt = 0, chordEnd = 0;
+	int pan = 0;
+	for (int i = 0; s[i];) {
+		char c = s[i];
+		if (c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '&') { i++; continue; }
+		if (c >= 'A' && c <= 'Z') c = (char)(c - 'A' + 'a');
+		if (c == '[') { chord = 1; chordAt = cursor; chordEnd = cursor; i++; continue; }
+		if (c == ']') {
+			i++;
+			int had = (s[i] >= '0' && s[i] <= '9');
+			int ln = MmlNum(s, i, len);
+			int dot = 0;
+			if (s[i] == '.') { dot = 1; i++; }
+			if (had) {
+				int dur = MmlSamples(tempo, ln, dot);
+				for (int k = nEv; k-- > 0;) {
+					if (ev[k].t0 != chordAt) break;
+					ev[k].n = dur;
+				}
+				cursor = chordAt + dur;
+			} else cursor = chordEnd;
+			chord = 0;
+			continue;
+		}
+		if (c == 't') { i++; tempo = MmlNum(s, i, tempo); continue; }
+		if (c == 'l') { i++; len = MmlNum(s, i, len); continue; }
+		if (c == 'o') { i++; oct = MmlNum(s, i, oct); if (oct < 1) oct = 1; if (oct > 7) oct = 7; continue; }
+		if (c == 'v') { i++; vol = (float)MmlNum(s, i, 12) / 15.f; if (vol > 1.f) vol = 1.f; continue; }
+		if (c == '@') { i++; voice = MmlNum(s, i, voice); continue; }
+		if (c == '>') { if (oct < 7) oct++; i++; continue; }
+		if (c == '<') { if (oct > 1) oct--; i++; continue; }
+		if (c == 'r' || c == 'p') {
+			i++;
+			int ln = MmlNum(s, i, len);
+			int dot = 0;
+			if (s[i] == '.') { dot = 1; i++; }
+			int dur = MmlSamples(tempo, ln, dot);
+			if (!chord) cursor += dur;
+			continue;
+		}
+		int semi = MmlSemi(c);
+		if (semi < 0) { i++; continue; }
+		i++;
+		if (s[i] == '+' || s[i] == '#') { semi++; i++; }
+		else if (s[i] == '-') { semi--; i++; }
+		int ln = MmlNum(s, i, len);
+		int dot = 0;
+		if (s[i] == '.') { dot = 1; i++; }
+		int dur = MmlSamples(tempo, ln, dot);
+		if (nEv < cap) {
+			MmlEv& e = ev[nEv++];
+			e.t0 = chord ? chordAt : cursor;
+			e.n = dur;
+			int midi = (oct + 1) * 12 + semi;
+			e.hz = 440.f * powf(2.f, (midi - 69) / 12.f);
+			e.voice = voice & 7;
+			e.vol = vol;
+			e.pan = pan;
+			e.ssg = (voice == 6) ? 1 : (voice == 7 ? 2 : 0);
+		}
+		if (chord) {
+			int end = chordAt + dur;
+			if (end > chordEnd) chordEnd = end;
+		} else cursor += dur;
+	}
+	return nEv;
+}
+static short* MmlMix(const char* src, int& frames, float gain)
+{
+	MmlEv ev[48];
+	int nEv = 0;
+	int track = 0;
+	const char* p = src ? src : "";
+	while (*p && track < 3) {
+		const char* bar = strchr(p, '|');
+		int len = bar ? (int)(bar - p) : (int)strlen(p);
+		char buf[256];
+		if (len > 254) len = 254;
+		memcpy(buf, p, (size_t)len);
+		buf[len] = 0;
+		nEv = MmlTrack(buf, track, ev, nEv, 48);
+		if (!bar) break;
+		p = bar + 1;
+		track++;
+	}
+	int total = (int)(0.04f * TAC_RATE);
+	for (int i = 0; i < nEv; i++) {
+		int end = ev[i].t0 + ev[i].n + (int)(0.08f * TAC_RATE);
+		if (end > total) total = end;
+	}
+	int cap = TAC_RATE * 4;
+	if (total > cap) total = cap;
+	if (total < 8) total = 8;
+	float* L = (float*)calloc((size_t)total, sizeof(float));
+	float* R = (float*)calloc((size_t)total, sizeof(float));
+	short* dst = (short*)malloc((size_t)total * 2 * sizeof(short));
+	if (!L || !R || !dst) { free(L); free(R); free(dst); frames = 0; return NULL; }
+	unsigned noise = 0x1FFFFu;
+	for (int i = 0; i < nEv; i++) FmAdd(L, R, total, ev[i], noise);
+	float pk = 0.05f;
+	for (int i = 0; i < total; i++) {
+		float a = fabsf(L[i]);
+		float b = fabsf(R[i]);
+		if (a > pk) pk = a;
+		if (b > pk) pk = b;
+	}
+	if (gain < 0.04f) gain = 0.04f;
+	if (gain > 0.85f) gain = 0.85f;
+	float sc = (gain * 17000.f) / pk;
+	for (int i = 0; i < total; i++) {
+		float l = L[i] * sc;
+		float r = R[i] * sc;
+		if (l > 32767.f) l = 32767.f;
+		if (l < -32768.f) l = -32768.f;
+		if (r > 32767.f) r = 32767.f;
+		if (r < -32768.f) r = -32768.f;
+		dst[i * 2] = (short)l;
+		dst[i * 2 + 1] = (short)r;
+	}
+	free(L);
+	free(R);
+	frames = total;
+	return dst;
+}
+static const char* const kMml[TS_N] = {
+	"t200 l32 o6 v8 @5 e",
+	"t168 l16 o5 v10 @0 c e g",
+	"t150 l16 o5 v9 @1 e c",
+	"t110 l8 o3 v9 @6 c c",
+	"t160 l16 o4 v10 @2 c e g",
+	"t150 l16 o4 v11 @4 c g",
+	"t130 l16 o3 v10 @3 a e",
+	"t220 l64 o3 v6 @7 c",
+	"t180 l32 o3 v11 @3 a | t180 l32 o2 v5 @7 c",
+	"t170 l16 o5 v9 @5 e c",
+	"t140 l16 o5 v9 @2 e g b",
+	"t150 l16 o2 v11 @3 c | t150 l32 o3 v5 @7 c",
+	"t160 l16 o4 v11 @4 c e g",
+	"t180 l32 o6 v7 @5 c e",
+	"t140 l16 o5 v9 @2 e g >c",
+	"t150 l16 o5 v9 @0 g b >e",
+	"t90 l8 o3 v10 @3 a f c",
+	"t128 l8 o4 v11 @4 c e g >c4 <g8 >c2 | t128 l8 o5 v9 @0 e g b >e4 c8 e2",
+	"t100 l8 o4 v10 @4 e- c <a-4 g-2 | t100 l8 o3 v9 @3 e- c <a-4 g-2",
+	"t150 l16 o5 v10 @0 c e g",
+	"t160 l16 o4 v10 @1 c e",
+	"t170 l16 o5 v9 @0 e >c",
+	"t160 l16 o4 v10 @4 c g",
+	"t155 l16 o5 v9 @2 d f a",
+	"t165 l16 o4 v9 @1 g >c",
+	"t150 l16 o4 v9 @1 c a",
+	"t145 l16 o5 v9 @2 e g b",
+	"t140 l16 o4 v8 @3 d g",
+	"t170 l32 o5 v8 @5 g",
+	"t150 l16 o5 v10 @0 c e g",
+	"t100 l8 o2 v10 @3 c g",
+	"t140 l16 o3 v10 @3 d | t140 l32 o2 v5 @7 c",
+	"t140 l16 o3 v10 @4 c e | t140 l32 o2 v6 @7 c",
+	"t170 l16 o6 v8 @0 g e c",
+	"t200 l32 o5 v10 @5 c e g",
+	"t140 l16 o5 v9 @2 e g >c",
+	"t90 l8 o3 v10 @3 e- c",
+	"t180 l16 o6 v8 @5 e a",
+	"t100 l8 o2 v11 @3 c g",
+	"t120 l16 o4 v8 @6 e- g-",
+	"t150 l16 o5 v9 @2 c e g",
+	"t150 l16 o5 v9 @0 e g b",
+	"t120 l8 o4 v10 @2 c e g",
+	"t150 l16 o2 v11 @3 g | t150 l32 o2 v5 @7 c",
+	"t190 l32 o4 v10 @5 b",
+	"t160 l16 o2 v11 @3 d",
+	"t180 l32 o3 v10 @3 a e",
+	"t170 l32 o3 v10 @3 f | t170 l32 o2 v5 @7 c",
+	"t150 l16 o4 v10 @4 c e g",
+	"t120 l8 o2 v11 @4 c | t120 l16 o3 v6 @7 c",
+	"t180 l16 o6 v9 @0 c e",
+	"t200 l32 o5 v10 @5 g c e",
+	"t150 l16 o5 v9 @2 g >c",
+	"t90 l8 o2 v11 @3 e-",
+	"t180 l16 o6 v8 @5 a e",
+	"t100 l8 o2 v12 @3 c g",
+	"t110 l16 o3 v9 @6 e- c",
+	"t180 l32 o5 v9 @5 c",
+	"t190 l32 o4 v10 @5 e",
+	"t150 l16 o2 v11 @3 c",
+	"t140 l16 o4 v11 @4 c g",
+	"t130 l8 o4 v11 @4 c e g",
+	"t180 l32 o6 v7 @5 e c",
+	"t190 l32 o6 v6 @5 a",
+	"t120 l8 o5 v10 @2 c e g",
+	"t160 l16 o5 v9 @0 e g",
+	"t110 l16 o3 v8 @6 e-",
+	"t130 l16 o5 v8 @0 e- c",
+	"t140 l16 o4 v9 @6 c e",
+	"t160 l16 o5 v8 @5 c",
+	"t140 l16 o5 v9 @2 g e c",
+	"t160 l16 o6 v10 @0 e g >c",
+	"t130 l8 o4 v11 @4 c e g",
+	"t170 l16 o5 v9 @0 e >c",
+	"t150 l8 o4 v11 @4 g >c4 | t150 l16 o3 v10 @3 c g",
+	"t150 l16 o4 v11 @4 c >c | t150 l16 o5 v8 @0 e g",
+	"t140 l16 o5 v8 @6 e- g- c",
+	"t80 l8 o3 v9 @1 g e c",
+	"t110 l8 o3 v10 @3 a f",
+};
+static void TacSynthAll()
+{
+	for (int id = 0; id < TS_N; id++) {
+		int frames = 0;
+		short* pcm = MmlMix(kMml[id], frames, kGain[id]);
+		if (!pcm) continue;
+		TacClip& c = s_clip[id];
+		free(c.pcm);
+		c.pcm = NULL;
+		free(c.play);
+		c.play = pcm;
+		c.playN = frames;
+		c.n = frames;
+		c.rate = TAC_RATE;
+	}
+}
+static int CastId(int element)
+{
+	switch (element) {
+	case otac::EL_FIRE: return TS_CAST_FIRE;
+	case otac::EL_ICE: return TS_CAST_ICE;
+	case otac::EL_THUNDER: return TS_CAST_THUNDER;
+	case otac::EL_HOLY: return TS_CAST_HOLY;
+	case otac::EL_DARK: return TS_CAST_DARK;
+	case otac::EL_WIND: return TS_CAST_WIND;
+	case otac::EL_EARTH: return TS_CAST_EARTH;
+	case otac::EL_POISON: return TS_CAST_POISON;
+	case otac::EL_RANGE: return TS_BOW;
+	case otac::EL_MELEE: case otac::EL_PHYS: return TS_SWING;
+	default: return TS_CAST;
+	}
+}
+static int HitId(int element, int style)
+{
+	switch (element) {
+	case otac::EL_FIRE: return TS_HIT_FIRE;
+	case otac::EL_ICE: return TS_HIT_ICE;
+	case otac::EL_THUNDER: return TS_HIT_THUNDER;
+	case otac::EL_HOLY: return TS_HIT_HOLY;
+	case otac::EL_DARK: return TS_HIT_DARK;
+	case otac::EL_WIND: return TS_HIT_WIND;
+	case otac::EL_EARTH: return TS_HIT_EARTH;
+	case otac::EL_POISON: return TS_HIT_POISON;
+	default: break;
+	}
+	if (style == otac::AS_SHOOT || style == otac::AS_SHOOT1) return TS_HIT_RANGE;
+	if (style == otac::AS_STAB) return TS_HIT_STAB;
+	if (style == otac::AS_PUNCH) return TS_HIT_PUNCH;
+	return TS_HIT;
+}
+
 
 static void TacLoadPack()
 {
@@ -671,6 +1079,7 @@ void TacAudioStart(void* hwnd)
 {
 	TacCsInit();
 	TacLoadPack();
+	TacSynthAll();
 	TacBgmScene(TAC_BGM_HUB);
 	int bgm = s_bgm;
 	if (!TacEnsureBuf((HWND)hwnd)) {
@@ -692,7 +1101,12 @@ void TacAudioStop()
 {
 	InterlockedExchange(&s_run, 0);
 	if (s_th) {
-		WaitForSingleObject(s_th, 5000);
+		// ポンプがロックを持ったまま戻らないときに、ここで同じロックを取ると
+		// UI が死ぬ。窓は先に隠れているので、プロセスだけが exe を掴んで残る。
+		if (WaitForSingleObject(s_th, 2000) != WAIT_OBJECT_0) {
+			TacPauseMain(0);
+			return;
+		}
 		CloseHandle(s_th);
 		s_th = NULL;
 	}
@@ -779,50 +1193,66 @@ void TacSfx(int id)
 
 void TacSfxCast(int element)
 {
-	TacLock lk;
-	if (!s_ds || !s_clip[TS_CAST].play || s_clip[TS_CAST].playN < 8) return;
-	enum { kNone = 0, kFire, kIce, kThunder, kHoly, kDark, kWind, kEarth, kPoison };
-	static const float kPitch[] = { 1.f, 0.78f, 1.40f, 1.68f, 1.16f, 0.64f, 1.52f, 0.72f, 1.02f };
-	int el = element;
-	if (el < kNone || el > kPoison) el = kNone;
-	float pitch = kPitch[el];
-	const TacClip& clip = s_clip[TS_CAST];
-	int outN = (int)(clip.playN / pitch);
-	if (outN < 8) outN = 8;
-	if (outN > 65536) outN = 65536;
-	static short tmp[65536 * 2];
-	int prevL = 0, prevR = 0;
-	for (int i = 0; i < outN; i++) {
-		float src = i * pitch;
-		int i0 = (int)src;
-		float fr = src - i0;
-		if (i0 < 0) i0 = 0;
-		if (i0 >= clip.playN - 1) {
-			tmp[i * 2] = tmp[i * 2 + 1] = 0;
-			continue;
-		}
-		for (int ch = 0; ch < 2; ch++) {
-			int a = clip.play[i0 * 2 + ch];
-			int b = clip.play[(i0 + 1) * 2 + ch];
-			int s = a + (int)((b - a) * fr);
-			int prev = ch ? prevR : prevL;
-			if (el == kFire) {
-				if (s > 9000) s = 9000 + (s - 9000) / 4;
-				if (s < -9000) s = -9000 + (s + 9000) / 4;
-			} else if (el == kIce) s = s + s / 5;
-			else if (el == kThunder) { if ((i & 3) == 0) s += ((i * 29) & 4095) - 2048; }
-			else if (el == kDark) s = (s + prev) / 2;
-			else if (el == kEarth) s = (s + 3 * prev) / 4;
-			else if (el == kWind) s = s + (s - prev) / 2;
-			else if (el == kPoison) s = s * (10 + (i & 15)) / 18;
-			else if (el == kHoly) s = s + s / 8;
-			if (s > 32767) s = 32767;
-			if (s < -32768) s = -32768;
-			tmp[i * 2 + ch] = (short)s;
-			if (ch) prevR = s; else prevL = s;
-		}
+	TacSfx(CastId(element));
+}
+
+void TacSfxMotion(int skill, int kind, int element, int style)
+{
+	if (otac::IsCraftId(skill)) {
+		TacSfx(otac::IsCraftSuper(skill) ? TS_CRAFT_ULT : TS_CRAFT_SW);
+		return;
 	}
-	TacSfxPlay(tmp, outN);
+	if (kind == otac::SK_HEAL) {
+		if (skill >= 0 && otac::SkillInfo(skill).effect == otac::EF_RAISE) TacSfx(TS_CAST_RAISE);
+		else TacSfx(TS_CAST_HEAL);
+		return;
+	}
+	if (kind == otac::SK_BUFF) { TacSfx(TS_CAST_BUFF); return; }
+	if (kind == otac::SK_MAGIC) { TacSfxCast(element); return; }
+	if (style == otac::AS_SHOOT || style == otac::AS_SHOOT1) { TacSfx(TS_BOW); return; }
+	if (style == otac::AS_CHOP2) { TacSfx(TS_SW_CHOP); return; }
+	if (style == otac::AS_STAB) { TacSfx(TS_SW_STAB); return; }
+	if (style == otac::AS_PUNCH) { TacSfx(TS_SW_PUNCH); return; }
+	if (style == otac::AS_SPIN) { TacSfx(TS_SW_SPIN); return; }
+	if (style == otac::AS_BITE) { TacSfx(TS_SW_BITE); return; }
+	if (style == otac::AS_CAST) { TacSfxCast(element); return; }
+	TacSfx(TS_SWING);
+}
+
+void TacSfxHit(int skill, int kind, int element, int style, int ally)
+{
+	if (otac::IsCraftId(skill)) {
+		TacSfx(otac::IsCraftSuper(skill) ? TS_CRAFT_ULT : TS_CRAFT_HIT);
+		return;
+	}
+	if (kind == otac::SK_HEAL) {
+		if (skill >= 0 && otac::SkillInfo(skill).effect == otac::EF_RAISE) TacSfx(TS_RAISE);
+		else TacSfx(TS_HEAL);
+		return;
+	}
+	if (kind == otac::SK_BUFF) { TacSfx(TS_BUFF); return; }
+	if (kind == otac::SK_MAGIC) { TacSfx(HitId(element, style)); return; }
+	if (ally) { TacSfx(TS_HURT); return; }
+	TacSfx(HitId(element, style));
+}
+
+void TacSfxMiss(int kind, int style)
+{
+	if (kind == otac::SK_MAGIC || kind == otac::SK_HEAL || kind == otac::SK_BUFF) { TacSfx(TS_MISS_MAGIC); return; }
+	if (style == otac::AS_SHOOT || style == otac::AS_SHOOT1) { TacSfx(TS_MISS_RANGE); return; }
+	TacSfx(TS_MISS);
+}
+
+void TacSfxStatus(int effect, int blocked)
+{
+	if (blocked) { TacSfx(TS_BLOCK); return; }
+	if (effect == otac::EF_POISON) TacSfx(TS_POISON);
+	else if (effect == otac::EF_SLEEP) TacSfx(TS_SLEEP);
+	else if (effect == otac::EF_STUN) TacSfx(TS_STUN);
+	else if (effect == otac::EF_CONFUSE) TacSfx(TS_CONFUSE);
+	else if (effect == otac::EF_SLOW) TacSfx(TS_SLOW);
+	else if (effect == otac::EF_DEFDOWN) TacSfx(TS_DEFDOWN);
+	else if (effect == otac::EF_CLEANSE) TacSfx(TS_CLEANSE);
 }
 
 void TacAudioPump()

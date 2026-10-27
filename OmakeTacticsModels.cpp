@@ -302,6 +302,12 @@ static int MakeSlime(Renderer& r)
 	g.Sphere(v3(-.16f, .46f, -.375f), v3(.025f, .03f, .015f), 6, 4);
 	g.curPal = Pal(14, 5);
 	g.Sphere(v3(.18f, .52f, -.2f), v3(.06f, .04f, .04f), 6, 4);
+	g.curPal = Pal(13, 2);
+	g.Sphere(v3(0, .2f, -.3f), v3(.09f, .03f, .04f), 8, 4);
+	g.curPal = Pal(14, 8);
+	g.Sphere(v3(.24f, .32f, -.08f), v3(.05f, .04f, .04f), 6, 4);
+	g.Sphere(v3(-.2f, .28f, .1f), v3(.045f, .035f, .04f), 6, 4);
+	g.Sphere(v3(.08f, .48f, .16f), v3(.04f, .03f, .035f), 6, 4);
 	Buf<VtxK> v;
 	g.ToSkinned(v);
 	return r.AddProcModel(m, v, g.idx);
@@ -395,6 +401,8 @@ static int MakeWyvern(Renderer& r)
 	g.Limb(v3(0, .84f, .95f), v3(0, .78f, 1.45f), .08f, .03f);
 	g.curPal = horn;
 	g.Cone(v3(0, .78f, 1.4f), v3(0, .8f, 1.62f), .07f, 4);
+	g.Cone(v3(.04f, .82f, 1.48f), v3(.1f, .9f, 1.58f), .03f, 4);
+	g.Cone(v3(-.04f, .82f, 1.48f), v3(-.1f, .9f, 1.58f), .03f, 4);
 	// 脚
 	for (int side = 0; side < 2; side++) {
 		float s = side == 0 ? 1.f : -1.f;
@@ -435,36 +443,46 @@ static int MakeGolem(Renderer& r)
 	BuildProcRig(m, "proc_golem", kGolJ, GJ_N);
 	m.headJ = GJ_HEAD;
 	Geo g;
-	const int stone = Pal(0, 9), dark = Pal(0, 6), moss = Pal(6, 5), eye = Pal(4, 8);
-	M4 tilt = MRotY(.08f);
+	const int stone = Pal(0, 9), dark = Pal(0, 6), moss = Pal(6, 5), eye = Pal(4, 8), crack = Pal(1, 4);
 	g.curBone = GJ_HIPS; g.curPal = dark;
-	g.Box(v3(0, .58f, 0), v3(.36f, .14f, .26f));
+	g.Sphere(v3(0, .40f, 0), v3(.32f, .16f, .26f), 12, 8);
+	g.curPal = stone;
+	g.Sphere(v3(-.18f, .26f, .04f), v3(.14f, .10f, .12f), 10, 6);
+	g.Sphere(v3(.16f, .24f, -.02f), v3(.13f, .09f, .12f), 10, 6);
 	g.curBone = GJ_TORSO; g.curPal = stone;
-	g.Box(v3(0, 1.0f, 0), v3(.5f, .3f, .34f), &tilt);
+	g.Sphere(v3(0, .92f, .02f), v3(.40f, .30f, .28f), 14, 10);
+	g.Sphere(v3(.06f, 1.16f, .06f), v3(.26f, .18f, .20f), 12, 8);
 	g.curPal = moss;
-	g.Box(v3(0, 1.31f, .05f), v3(.44f, .04f, .28f));
-	g.Box(v3(.3f, 1.25f, -.15f), v3(.12f, .06f, .12f));
-	g.curPal = Pal(4, 8);
-	g.Box(v3(0, 1.02f, -.35f), v3(.1f, .1f, .02f));
-	g.curBone = GJ_HEAD; g.curPal = stone;
-	g.Box(v3(0, 1.48f, -.05f), v3(.2f, .16f, .2f));
+	g.Sphere(v3(-.14f, 1.24f, .10f), v3(.10f, .05f, .08f), 8, 5);
+	g.curPal = crack;
+	g.Sphere(v3(.22f, .82f, -.16f), v3(.07f, .09f, .05f), 8, 5);
+	g.curPal = stone;
+	g.Sphere(v3(-.34f, 1.18f, .04f), v3(.12f, .1f, .12f), 8, 6);
+	g.Sphere(v3(.36f, 1.14f, -.02f), v3(.11f, .09f, .11f), 8, 6);
 	g.curPal = eye;
-	g.Box(v3(.08f, 1.5f, -.26f), v3(.045f, .03f, .015f));
-	g.Box(v3(-.08f, 1.5f, -.26f), v3(.045f, .03f, .015f));
+	g.Sphere(v3(0, .96f, -.24f), v3(.05f, .07f, .035f), 8, 5);
+	g.curBone = GJ_HEAD; g.curPal = stone;
+	g.Sphere(v3(0, 1.50f, -.02f), v3(.20f, .16f, .18f), 12, 8);
+	g.Sphere(v3(.04f, 1.66f, .04f), v3(.10f, .07f, .10f), 8, 6);
+	g.curPal = dark;
+	g.Sphere(v3(0, 1.44f, -.16f), v3(.05f, .025f, .04f), 6, 4);
+	g.curPal = eye;
+	g.Sphere(v3(.07f, 1.52f, -.16f), v3(.04f, .03f, .025f), 6, 4);
+	g.Sphere(v3(-.07f, 1.52f, -.16f), v3(.04f, .03f, .025f), 6, 4);
 	for (int side = 0; side < 2; side++) {
 		float s = side == 0 ? 1.f : -1.f;
 		g.curBone = side == 0 ? GJ_AL : GJ_AR; g.curPal = stone;
-		g.Box(v3(s * .62f, 1.18f, 0), v3(.2f, .18f, .2f));
-		g.curPal = dark;
-		g.Box(v3(s * .6f, .98f, 0), v3(.12f, .14f, .12f));
-		g.curBone = side == 0 ? GJ_FL : GJ_FR; g.curPal = stone;
-		g.Box(v3(s * .62f, .66f, -.02f), v3(.17f, .22f, .17f));
+		g.Sphere(v3(s * .52f, 1.10f, 0), v3(.18f, .14f, .16f), 10, 7);
 		g.curPal = moss;
-		g.Box(v3(s * .62f, .88f, -.02f), v3(.18f, .03f, .18f));
-		g.curBone = side == 0 ? GJ_LL : GJ_LR; g.curPal = stone;
-		g.Box(v3(s * .24f, .24f, 0), v3(.15f, .24f, .17f));
+		g.Sphere(v3(s * .58f, 1.20f, .06f), v3(.05f, .035f, .04f), 6, 4);
+		g.curBone = side == 0 ? GJ_FL : GJ_FR; g.curPal = stone;
+		g.Sphere(v3(s * .62f, .70f, -.02f), v3(.15f, .18f, .15f), 10, 7);
 		g.curPal = dark;
-		g.Box(v3(s * .24f, .03f, -.04f), v3(.17f, .04f, .21f));
+		g.Sphere(v3(s * .74f, .58f, -.10f), v3(.09f, .07f, .07f), 8, 5);
+		g.curBone = side == 0 ? GJ_LL : GJ_LR; g.curPal = stone;
+		g.Sphere(v3(s * .20f, .26f, 0), v3(.15f, .20f, .15f), 10, 7);
+		g.curPal = dark;
+		g.Sphere(v3(s * .22f, .05f, .04f), v3(.16f, .05f, .20f), 8, 5);
 	}
 	Buf<VtxK> v;
 	g.ToSkinned(v);
@@ -531,6 +549,12 @@ static void ProcAnim(int look, int clip, float t, Q4* rot, V3* tr, PoseMods& mod
 		mods.scale[SJ_BODY] = v3(xz, sq, xz);
 		mods.any = 1;
 		tr[SJ_ROOT] = v3(shake, lift, -fwd);
+		float wob = sinf(t * 3.2f);
+		rot[SJ_BODY] = QX(wob * .06f + (kind == PK_ATTACK ? max(0.f, AtkCurve(u)) * .35f : 0.f));
+		tr[SJ_TOP] = v3(sinf(t * 5.1f) * .03f, wob * .04f, cosf(t * 4.2f) * .02f);
+		if (kind == PK_CAST) tr[SJ_TOP].y += sinf(u * PI * 4.f) * .08f;
+		if (kind == PK_HIT) rot[SJ_BODY] = QZ(sinf(u * PI) * .4f);
+		if (kind == PK_DEATH) rot[SJ_BODY] = QX(Smooth01(u) * .8f);
 		return;
 	}
 	if (look == LK_BAT) {
@@ -546,7 +570,14 @@ static void ProcAnim(int look, int clip, float t, Q4* rot, V3* tr, PoseMods& mod
 			rot[BJ_BODY] = QX(-.4f + sinf(ph) * .18f);
 			root.y += fabsf(sinf(ph)) * .1f;
 		}
-		if (kind == PK_ATTACK) { float a = AtkCurve(u); root.z = -max(0.f, a) * .55f; root.y -= max(0.f, a) * .2f; rot[BJ_BODY] = QX(-a * .5f); rot[BJ_HEAD] = QX(-a * .3f); }
+		if (kind == PK_ATTACK) {
+			float a = AtkCurve(u);
+			root.z = -max(0.f, a) * .7f; root.y -= max(0.f, a) * .28f;
+			rot[BJ_BODY] = QX(-a * .7f); rot[BJ_HEAD] = QX(-a * .45f);
+			rot[BJ_WL] = QZ(Lerpf(flap * .75f, 1.1f, max(0.f, a)));
+			rot[BJ_WR] = QZ(Lerpf(-flap * .75f, -1.1f, max(0.f, a)));
+		}
+		rot[BJ_HEAD] = QMul(rot[BJ_HEAD], QY(sinf(t * 2.4f) * .12f));
 		if (kind == PK_CAST) rot[BJ_HEAD] = QX(-sinf(u * PI) * .4f);
 		if (kind == PK_HIT) { root.z = sinf(u * PI) * .25f; rot[BJ_BODY] = QX(sinf(u * PI) * .5f); }
 		if (kind == PK_DEATH) { root.y -= Smooth01(u) * .85f; rot[BJ_BODY] = QX(Smooth01(u) * 1.5f); rot[BJ_WL] = QZ(-.4f); rot[BJ_WR] = QZ(.4f); }
@@ -566,7 +597,7 @@ static void ProcAnim(int look, int clip, float t, Q4* rot, V3* tr, PoseMods& mod
 		float flap = sinf(t * flapSp);
 		rot[WJ_WL] = QMul(QY(.15f), QZ(flap * .55f + .1f)); rot[WJ_WR] = QMul(QY(-.15f), QZ(-flap * .55f - .1f));
 		rot[WJ_WL2] = QZ(flap * .3f); rot[WJ_WR2] = QZ(-flap * .3f);
-		rot[WJ_T1] = QY(sinf(t * 1.7f) * .25f); rot[WJ_T2] = QY(sinf(t * 1.7f - .8f) * .35f);
+		rot[WJ_T1] = QY(sinf(t * 1.7f) * .32f); rot[WJ_T2] = QMul(QY(sinf(t * 1.7f - .9f) * .55f), QX(sinf(t * 2.3f) * .12f));
 		rot[WJ_NECK] = QX(sinf(t * 2.f) * .05f);
 		V3 root = v3(0, -flap * .06f, 0);
 		rot[WJ_LL] = QX(.3f); rot[WJ_LR] = QX(.3f);
@@ -579,9 +610,12 @@ static void ProcAnim(int look, int clip, float t, Q4* rot, V3* tr, PoseMods& mod
 		}
 		if (kind == PK_ATTACK) {
 			float a = AtkCurve(u);
-			rot[WJ_NECK] = QX(-a * .55f); rot[WJ_HEAD] = QX(-a * .25f);
-			rot[WJ_JAW] = QX(max(0.f, a) * .5f + (u < .4f ? Smooth01(u / .4f) * .4f : 0));
-			root.z = -max(0.f, a) * .35f;
+			rot[WJ_NECK] = QX(-a * .8f); rot[WJ_HEAD] = QX(-a * .4f);
+			rot[WJ_JAW] = QX(max(0.f, a) * .9f + (u < .4f ? Smooth01(u / .4f) * .5f : 0));
+			rot[WJ_WL] = QMul(rot[WJ_WL], QZ(max(0.f, a) * .4f));
+			rot[WJ_WR] = QMul(rot[WJ_WR], QZ(-max(0.f, a) * .4f));
+			root.z = -max(0.f, a) * .5f;
+			root.y += max(0.f, -a) * .12f;
 		}
 		if (kind == PK_CAST) {
 			float k = sinf(u * PI);
@@ -606,18 +640,27 @@ static void ProcAnim(int look, int clip, float t, Q4* rot, V3* tr, PoseMods& mod
 		rot[GJ_TORSO] = QX(br * .03f);
 		rot[GJ_AL] = QZ(.08f + br * .03f); rot[GJ_AR] = QZ(-.08f - br * .03f);
 		if (kind == PK_MOVE) {
-			float ph = t * 7.f;
-			rot[GJ_LL] = QX(sinf(ph) * .75f); rot[GJ_LR] = QX(-sinf(ph) * .75f);
-			rot[GJ_AL] = QX(-sinf(ph) * .5f); rot[GJ_AR] = QX(sinf(ph) * .5f);
-			rot[GJ_TORSO] = QZ(sinf(ph) * .04f);
-			root.y = fabsf(cosf(ph)) * .03f;
+			float ph = t * 6.2f;
+			float step = sinf(ph);
+			rot[GJ_LL] = QX(step * .95f); rot[GJ_LR] = QX(-step * .95f);
+			rot[GJ_AL] = QX(-step * .55f); rot[GJ_AR] = QX(step * .55f);
+			rot[GJ_FL] = QX(max(0.f, -step) * .6f); rot[GJ_FR] = QX(max(0.f, step) * .6f);
+			rot[GJ_TORSO] = QMul(QZ(step * .06f), QY(step * .05f));
+			rot[GJ_HIPS] = QY(-step * .08f);
+			rot[GJ_HEAD] = QX(-step * .06f);
+			root.y = fabsf(cosf(ph)) * .05f;
 		}
 		if (kind == PK_ATTACK) {
 			float a = AtkCurve(u);
-			rot[GJ_AR] = QX(-1.9f * max(0.f, -a * 2.f) + max(0.f, a) * -1.4f);
-			rot[GJ_FR] = QX(-a * .5f);
-			rot[GJ_TORSO] = QMul(QY(-a * .35f), QX(-max(0.f, a) * .25f));
-			root.z = -max(0.f, a) * .2f;
+			float wind = max(0.f, -a);
+			float hit = max(0.f, a);
+			rot[GJ_AR] = QX(-2.2f * wind - 1.6f * hit);
+			rot[GJ_FR] = QX(-hit * .9f);
+			rot[GJ_AL] = QX(-wind * .4f);
+			rot[GJ_TORSO] = QMul(QY(-a * .5f), QX(-hit * .4f + wind * .3f));
+			rot[GJ_HEAD] = QX(wind * .3f - hit * .2f);
+			root.z = -hit * .28f;
+			root.y = wind * .06f;
 		}
 		if (kind == PK_CAST) {
 			float k = sinf(u * PI);
@@ -1096,7 +1139,7 @@ void ActorFromChar(Actor& a, const Library& lib, const Renderer& r, const CharDa
 		static const char* const hats[B_COUNT] = { "Knight_Helmet", "Barbarian_Hat", "Mage_Hat", NULL, NULL };
 		if (hats[a.body]) AddAtt(a, r, hats[a.body]);
 	}
-	if (c.cape && !capeOn) {
+	if (c.cape && !capeOn && !a.avatar) {
 		static const char* const capes[B_COUNT] = { "Knight_Cape", "Barbarian_Cape", "Mage_Cape", "Rogue_Cape", "Rogue_Cape" };
 		AddAtt(a, r, capes[a.body]);
 	}
@@ -1144,20 +1187,42 @@ void ActorFromChar(Actor& a, const Library& lib, const Renderer& r, const CharDa
 			a.mods.own[j].x *= x; a.mods.own[j].y *= y; a.mods.own[j].z *= z;
 			a.mods.any = 1;
 		};
-		static const float kFigX[FIG_N] = { .84f, 1.f, 1.18f };
-		static const float kFigZ[FIG_N] = { .86f, 1.f, 1.16f };
 		int fig = CharFig(c);
-		float fx = kFigX[fig], fz = kFigZ[fig];
-		mulOwn("Hips", fx * 1.02f, 1.f, fz); mulOwn("hips", fx * 1.02f, 1.f, fz);
-		mulOwn("Chest", fx, 1.f, fz); mulOwn("chest", fx, 1.f, fz);
-		mulOwn("Abdomen", fx, 1.f, fz); mulOwn("abdomen", fx, 1.f, fz);
-		mulOwn("Torso", fx, 1.f, fz); mulOwn("torso", fx, 1.f, fz);
-		mulOwn("Spine", fx, 1.f, fz); mulOwn("spine", fx, 1.f, fz);
-		mulOwn("UpperLeg.L", fx, 1.f, fx); mulOwn("upperleg.l", fx, 1.f, fx);
-		mulOwn("UpperLeg.R", fx, 1.f, fx); mulOwn("upperleg.r", fx, 1.f, fx);
+		const int woman = a.female ? 1 : 0;
+		static const float kBody[2][FIG_N] = {
+			{ 0.90f, 0.98f, 1.08f, 1.18f, 1.30f },
+			{ 0.86f, 0.94f, 1.04f, 1.14f, 1.24f },
+		};
+		static const float kWaist[2][FIG_N] = {
+			{ 0.92f, 0.98f, 1.06f, 1.14f, 1.22f },
+			{ 0.70f, 0.80f, 0.92f, 1.04f, 1.16f },
+		};
+		static const float kArm[2][FIG_N] = {
+			{ 0.84f, 0.94f, 1.08f, 1.18f, 1.32f },
+			{ 0.76f, 0.86f, 0.96f, 1.06f, 1.14f },
+		};
+		static const float kLeg[2][FIG_N] = {
+			{ 0.90f, 0.98f, 1.06f, 1.12f, 1.18f },
+			{ 0.80f, 0.88f, 0.98f, 1.06f, 1.14f },
+		};
+		float bd = kBody[woman][fig], ws = kWaist[woman][fig], lm = kArm[woman][fig], lg = kLeg[woman][fig];
+		float chest = woman ? bd * 0.98f : bd * 1.06f;
+		mulOwn("Hips", bd, 1.f, bd * (woman ? 1.04f : 1.f)); mulOwn("hips", bd, 1.f, bd * (woman ? 1.04f : 1.f));
+		mulOwn("Chest", chest, 1.f, bd); mulOwn("chest", chest, 1.f, bd);
+		mulOwn("Abdomen", ws, 1.f, ws * 0.96f); mulOwn("abdomen", ws, 1.f, ws * 0.96f);
+		mulOwn("Torso", ws, 1.f, ws); mulOwn("torso", ws, 1.f, ws);
+		mulOwn("Spine", ws, 1.f, ws * 0.94f); mulOwn("spine", ws, 1.f, ws * 0.94f);
+		mulOwn("UpperLeg.L", lg, 1.f, lg); mulOwn("upperleg.l", lg, 1.f, lg);
+		mulOwn("UpperLeg.R", lg, 1.f, lg); mulOwn("upperleg.r", lg, 1.f, lg);
+		mulOwn("LowerLeg.L", lg, 1.f, lg); mulOwn("lowerleg.l", lg, 1.f, lg);
+		mulOwn("LowerLeg.R", lg, 1.f, lg); mulOwn("lowerleg.r", lg, 1.f, lg);
+		mulOwn("UpperArm.L", lm, 1.f, lm); mulOwn("upperarm.l", lm, 1.f, lm);
+		mulOwn("UpperArm.R", lm, 1.f, lm); mulOwn("upperarm.r", lm, 1.f, lm);
+		mulOwn("LowerArm.L", lm, 1.f, lm); mulOwn("lowerarm.l", lm, 1.f, lm);
+		mulOwn("LowerArm.R", lm, 1.f, lm); mulOwn("lowerarm.r", lm, 1.f, lm);
 		if (a.female && !a.avatar) {
-			static const float kBx[BUST_N] = { .90f, .97f, 1.10f, 1.32f, 1.58f };
-			static const float kBz[BUST_N] = { .88f, .96f, 1.14f, 1.46f, 1.82f };
+			static const float kBx[BUST_N] = { .94f, .98f, 1.04f, 1.10f, 1.16f };
+			static const float kBz[BUST_N] = { .96f, 1.00f, 1.06f, 1.12f, 1.20f };
 			int b = CharBust(c);
 			mulOwn("Chest", kBx[b], 1.04f + (b - 2) * .03f, kBz[b]);
 			mulOwn("chest", kBx[b], 1.04f + (b - 2) * .03f, kBz[b]);
@@ -1553,7 +1618,25 @@ static M4 HumanGearFit(const Pose& pose, int joint, const char* name, const char
 	const V3 cx = Norm(v3(g.m[0], g.m[1], g.m[2])), cy = along, cz = dorsal;
 	auto carry = [&](V3 w) { return cx * Dot(bx, w) + cy * Dot(by, w) + cz * Dot(bz, w); };
 	if (shield) return FitWorld(g, carry(up), carry(back), palm + carry(out) * 0.05f, 0.28f, 0.28f, 0.28f);
-	if (book) return FitWorld(g, carry(up), carry(face), palm, 0.40f, 0.40f, 0.40f);
+	if (book) {
+		if (neo) {
+			// 底が原点。指の方向へ背を立て、厚みは掌側。向きは静止の手で決め、振りは関節が運ぶ。
+			// 今の手の軸で毎フレーム向け直すと、待機で本が腰の横へ寝て板になる。
+			const float sc = 0.15f;
+			V3 bpos = v3(bindG.m[12], bindG.m[13], bindG.m[14]);
+			V3 balong = Norm(v3(bindG.m[4], bindG.m[5], bindG.m[6]));
+			V3 bdorsal = Norm(v3(bindG.m[8], bindG.m[9], bindG.m[10]));
+			V3 hold = bpos + balong * 0.02f - bdorsal * 0.012f;
+			return FitWorld(bindG, balong, bdorsal * -1.f, hold, sc * 0.75f, sc, sc * 0.42f);
+		}
+		return FitWorld(g, carry(up), carry(face), palm, 0.40f, 0.40f, 0.40f);
+	}
+	if (neo && NameHas(name, "Wand")) {
+		V3 bpos = v3(bindG.m[12], bindG.m[13], bindG.m[14]);
+		V3 balong = Norm(v3(bindG.m[4], bindG.m[5], bindG.m[6]));
+		V3 bdorsal = Norm(v3(bindG.m[8], bindG.m[9], bindG.m[10]));
+		return FitWorld(bindG, balong, up, bpos + balong * 0.04f - bdorsal * 0.015f, 0.22f, 0.22f, 0.22f);
+	}
 	if (bowMesh) {
 		// 弓は握りの線（拳の指の付け根の並び）に沿って立て、弦（メッシュ +X）を射手側へ。握りは弓の中央。
 		V3 y = Norm(carry(face)), x = Norm(carry(up));
@@ -1596,18 +1679,30 @@ void ActorDraw(Renderer& r, const Library& lib, Actor& a, const M4& world, const
 		const Model* humM = (hum && a.model >= 0 && a.model < (int)r.models.size()) ? &r.models[a.model] : NULL;
 		BOOL digitBody = FALSE;
 		if (humM && (strncmp(humM->name, "HumF", 4) == 0 || strncmp(humM->name, "HumM", 4) == 0) && humM->name[4] >= '0' && humM->name[4] <= '9') digitBody = TRUE;
+		if (digitBody) {
+			int ix = humM->name[4] - '0';
+			if (ix >= 0 && ix <= 2) d.skinTone = ix + 1;
+		}
 		d.hideMeshHair = (hum && a.hair > 0) ? 1 : 0;
 		BOOL ava = FALSE;
-		if (hum && a.avatar > 0) {
+		// 白人の素体は裸体。性別を切り替えるとアバターは 0 に戻るので、未選択のときは既定の服を着せる。
+		// 男性は 9 番（tucked shirt・ズボン・靴）、女性は 12 番（スーツ・ブーツ）。肩当てとマントは残す。
+		int avaId = a.avatar;
+		BOOL bareBase = FALSE;
+		if (humM && avaId <= 0) {
+			if (strcmp(humM->name, "HumM0") == 0) { avaId = 9; bareBase = TRUE; }
+			else if (strcmp(humM->name, "HumF0") == 0) { avaId = 12; bareBase = TRUE; }
+		}
+		if (hum && avaId > 0) {
 			d.clothTint = a.avaTint;
-			ava = r.DrawAvatar(a.model, a.avatar, a.bust, a.pose, world, d);
+			ava = r.DrawAvatar(a.model, avaId, a.bust, a.pose, world, d);
 		}
 		if (!ava) {
 			d.clothTint = 0;
 			if (!hum) d.twoSided = 1;
 			r.DrawSkinnedCreature(a.model, a.pose, world, d);
 		}
-		const int nAtt = ava ? a.wepAtt : a.nAtt, nGear = ava ? a.wepGear : a.nGear;
+		const int nAtt = (ava && !bareBase) ? a.wepAtt : a.nAtt, nGear = (ava && !bareBase) ? a.wepGear : a.nGear;
 		DrawParams da = dp;
 		if (hum) da.rim = 0.06f;
 		auto bindOf = [&](int j) -> M4 {

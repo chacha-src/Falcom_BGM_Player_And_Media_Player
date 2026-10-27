@@ -107,6 +107,7 @@ private:
 	// UI
 	float U(float v) const { return v * m_ui; }
 	BOOL Btn(int id, float x, float y, float w, float h, const wchar_t* label, BOOL enabled = TRUE, BOOL selected = FALSE, float px = 0, DWORD tint = 0);
+	void UiOk();
 	int Sel(int id, float x, float y, float w, float h, const wchar_t* label, const wchar_t* value);
 	BOOL Hit(float x, float y, float w, float h) const;
 	BOOL ClickIn(float x, float y, float w, float h);
@@ -134,6 +135,7 @@ private:
 	void ResumeBattle(int kind);
 	void DropSuspend(int kind);
 	void WaitSuspend();
+	void ShutdownSnap();
 	int BattlePortrait(int unit) const;
 	void AssignBattlePortraits();
 	void BuildShowcase();
@@ -153,6 +155,10 @@ private:
 	float DrawSoundOpts(float x, float y, float w, float k);
 	void ApplyAudio();
 	void DrawCodex();
+	void DrawMonCodex();
+	void DrawCodexTabs();
+	void DrawMonStage();
+	void EnsureMonPreview();
 	void DrawShowcase3D();
 	int PartyCount() const;
 	int PartyCap() const;
@@ -287,8 +293,13 @@ private:
 	int m_padTrig;
 	BOOL m_fastFwd;
 	BOOL m_showHelp;
-	int m_codex;             // 0=閉 1=スキル 2=成長
+	int m_codex;             // 0=閉 1=スキル 2=成長 3=錬金 4=敵
 	int m_codexPage;
+	int m_monSel;
+	float m_monYaw;
+	int m_monShown;
+	BOOL m_monDrag;
+	Actor m_monAct;
 	int m_codexJob;          // 0=全職。以降は職、末尾は陣形
 	int m_codexSort;         // 0職 1名前 2MP 3習得
 	int m_skillPage;
@@ -325,6 +336,7 @@ private:
 	int m_midStage;
 	int m_autoStage;
 	int m_shop;
+	int m_btnSfx; // 次の Btn の決定音。-1 は場面別、-2 は鳴らさない
 	int m_shopLine;
 	int m_shopPage;
 	int m_shopSellPage;

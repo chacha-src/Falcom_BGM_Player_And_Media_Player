@@ -309,7 +309,10 @@ BOOL COmakeTacticsDlg::OnInitDialog()
 
 	QueryPerformanceFrequency(&m_qpf);
 	QueryPerformanceCounter(&m_last);
+	SetTimer(TAC_TIMER, 8, NULL);
 	CCC_BringDialogToForeground(this);
+	ShowWindow(SW_SHOW);
+	SetForegroundWindow();
 	m_view.SetFocus();
 	return FALSE;
 }
@@ -530,6 +533,8 @@ void OpenOmakeTacticsModeless(CWnd* p)
 		return;
 	}
 	g_tac->ShowWindow(SW_SHOW);
+	g_tac->SetForegroundWindow();
+	g_tac->BringWindowToTop();
 	// 操作中は矢印グローバルホットキー（音量／シーク）を止める
 	if (og && ::IsWindow(og->GetSafeHwnd())) {
 		::UnregisterHotKey(og->GetSafeHwnd(), 8000);

@@ -1383,6 +1383,9 @@
     <ClCompile Include="simd_audio_avx512.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="simd_audio_avx10.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="ZmusicEngine.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -2840,6 +2843,24 @@
     <None Include="res\cso\tac_psbloom.cso" />
     <None Include="res\cso\tac_psblur.cso" />
     <None Include="res\cso\tac_psgrade.cso" />
+    <None Include="res\cso\tac_psg0.cso" />
+    <None Include="res\cso\tac_psg1.cso" />
+    <None Include="res\cso\tac_psg2.cso" />
+    <None Include="res\cso\tac_psg3.cso" />
+    <None Include="res\cso\tac_psg4.cso" />
+    <None Include="res\cso\tac_psg5.cso" />
+    <None Include="res\cso\tac_psg6.cso" />
+    <None Include="res\cso\tac_psg7.cso" />
+    <None Include="res\cso\tac_pslava.cso" />
+    <None Include="res\cso\tac_psprop.cso" />
+    <None Include="res\cso\tac_psui.cso" />
+    <None Include="res\cso\tac_pswater.cso" />
+    <None Include="res\tactics\tac_hair.bin">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="res\cso\maze_cssub.cso" />
+    <None Include="res\cso\race_csgridc.cso" />
+    <None Include="res\cso\race_csgridw.cso" />
   </ItemGroup>
   <ItemGroup>
     <Text Include="codec\APPLE_LICENSE.txt">
@@ -2910,5 +2931,8 @@
     <Image Include="res\ui_icons\tactics.ico">
       <Filter>Resource Files</Filter>
     </Image>
+    <Image Include="res\tactics\tac_detail.png" />
+    <Image Include="res\tactics\tac_hair.png" />
+    <Image Include="res\tactics\tac_mat.png" />
   </ItemGroup>
 </Project>

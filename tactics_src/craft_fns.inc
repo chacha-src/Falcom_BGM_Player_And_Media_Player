@@ -238,7 +238,9 @@ const wchar_t* CraftDesc(int skill)
 int CraftLineOf(int skill)
 {
 	int i = CraftIndexOf(skill);
-	return (i < 0 || i >= CRAFT_N) ? -1 : i / CRAFT_PER_LINE;
+	if (i < 0 || i >= CRAFT_N) return -1;
+	if (i >= CRAFT_LEGACY) i -= CRAFT_LEGACY;
+	return i / CRAFT_PER_LINE;
 }
 // 奥義の解放数。下位職で 1、転職で段が上がるごとに +1（最大 4）。敵は全解放。
 int CraftSuperUnlocked(int cls)
@@ -262,17 +264,21 @@ static bool CraftSuperOpen(int index, int cls)
 // ---------------- 保存 ----------------
 #pragma pack(push, 4)
 struct CraftRecV4 { DWORD uid; short cp; unsigned char bead[2], acc[2], pas[2]; };
-struct CraftRec { DWORD uid; short cp; unsigned char bead[4], acc[2], pas[2], pad[2]; };  // bead 0..2=戦技 3=奥義。1 始まり。0 は空
+struct CraftRecV5 { DWORD uid; short cp; unsigned char bead[4], acc[2], pas[2], pad[2]; };
+struct CraftRec { DWORD uid; short cp; unsigned short bead[4]; unsigned char acc[2], pas[2]; };  // bead 0..2=戦技 3=奥義。1 始まり。0 は空
 struct CraftStore {
 	int stones;
 	unsigned char beadN[CRAFT_N];
-	unsigned char accN[32];
-	unsigned char pasN[32];
+	unsigned char accN[64];
+	unsigned char pasN[64];
+	unsigned char goodN[16];
 	CraftRec rec[128];
 };
 #pragma pack(pop)
 static_assert(sizeof(CraftRecV4) == 12, "旧戦技記録は 12 バイト");
-static_assert(sizeof(CraftRec) == 16, "戦技記録は 16 バイト");
+static_assert(sizeof(CraftRecV5) == 16, "戦技記録 v5 は 16 バイト");
+static_assert(sizeof(CraftRec) == 20, "戦技記録は 20 バイト");
+static_assert(CRAFT_N == CRAFT_LEGACY * 2, "戦技は旧表の倍。先頭 147 は動かさない");
 static_assert(sizeof(((CraftStore*)0)->rec) / sizeof(CraftRec) >= MAX_ROSTER, "戦技記録は名簿以上");
 
 static CraftStore g_craft;
@@ -299,6 +305,17 @@ static void CopyRecV4(CraftRec& d, const CraftRecV4& s)
 	d.cp = s.cp;
 	d.bead[0] = s.bead[0];
 	d.bead[1] = s.bead[1];
+	d.acc[0] = s.acc[0];
+	d.acc[1] = s.acc[1];
+	d.pas[0] = s.pas[0];
+	d.pas[1] = s.pas[1];
+}
+static void CopyRecV5(CraftRec& d, const CraftRecV5& s)
+{
+	memset(&d, 0, sizeof(d));
+	d.uid = s.uid;
+	d.cp = s.cp;
+	for (int k = 0; k < 4; k++) d.bead[k] = s.bead[k];
 	d.acc[0] = s.acc[0];
 	d.acc[1] = s.acc[1];
 	d.pas[0] = s.pas[0];
@@ -331,11 +348,24 @@ void CraftLoad()
 	FILE* fp = NULL;
 	if (_tfopen_s(&fp, path, _T("rb")) != 0 || !fp) return;
 	DWORD magic = 0; int ver = 0;
-	if (fread(&magic, 4, 1, fp) == 1 && fread(&ver, 4, 1, fp) == 1 && magic == kCraftMagic && ver == 5) {
+	if (fread(&magic, 4, 1, fp) == 1 && fread(&ver, 4, 1, fp) == 1 && magic == kCraftMagic && ver == 6) {
 		if (fread(&g_craft, sizeof(g_craft), 1, fp) != 1) memset(&g_craft, 0, sizeof(g_craft));
+	} else if (magic == kCraftMagic && ver == 5) {
+#pragma pack(push, 4)
+		struct Store5 { int stones; unsigned char beadN[147]; unsigned char accN[32]; unsigned char pasN[32]; CraftRecV5 rec[128]; };
+#pragma pack(pop)
+		Store5 old5;
+		memset(&old5, 0, sizeof(old5));
+		if (fread(&old5, sizeof(old5), 1, fp) == 1) {
+			g_craft.stones = old5.stones;
+			memcpy(g_craft.beadN, old5.beadN, sizeof(old5.beadN));
+			memcpy(g_craft.accN, old5.accN, sizeof(old5.accN));
+			memcpy(g_craft.pasN, old5.pasN, sizeof(old5.pasN));
+			for (int i = 0; i < 128; i++) CopyRecV5(g_craft.rec[i], old5.rec[i]);
+		}
 	} else if (magic == kCraftMagic && ver == 4) {
 #pragma pack(push, 4)
-		struct Store4 { int stones; unsigned char beadN[CRAFT_N]; unsigned char accN[32]; unsigned char pasN[32]; CraftRecV4 rec[128]; };
+		struct Store4 { int stones; unsigned char beadN[147]; unsigned char accN[32]; unsigned char pasN[32]; CraftRecV4 rec[128]; };
 #pragma pack(pop)
 		Store4 old4;
 		memset(&old4, 0, sizeof(old4));
@@ -348,7 +378,7 @@ void CraftLoad()
 		}
 	} else if (magic == kCraftMagic && ver == 3) {
 #pragma pack(push, 4)
-		struct Store3 { int stones; unsigned char beadN[CRAFT_N]; unsigned char accN[32]; CraftRecV4 rec[128]; };
+		struct Store3 { int stones; unsigned char beadN[147]; unsigned char accN[32]; CraftRecV4 rec[128]; };
 #pragma pack(pop)
 		Store3 old;
 		memset(&old, 0, sizeof(old));
@@ -388,7 +418,7 @@ void CraftLoad()
 				int b = g_craft.rec[i].bead[k];
 				if (b < 1) continue;
 				int n = RemapCraftV1(b - 1);
-				g_craft.rec[i].bead[k] = (n >= 0) ? (unsigned char)(n + 1) : 0;
+				g_craft.rec[i].bead[k] = (n >= 0) ? (unsigned short)(n + 1) : 0;
 			}
 		}
 	}
@@ -410,7 +440,7 @@ void CraftSave()
 	CString path = DatArc_Path(TacLeafCraft());
 	FILE* fp = NULL;
 	if (_tfopen_s(&fp, path, _T("wb")) != 0 || !fp) return;
-	int ver = 5;
+	int ver = 6;
 	fwrite(&kCraftMagic, 4, 1, fp);
 	fwrite(&ver, 4, 1, fp);
 	fwrite(&g_craft, sizeof(g_craft), 1, fp);
@@ -522,7 +552,7 @@ void EquipNextBead(CharData& c, int slot)
 		next = v;
 		break;
 	}
-	r->bead[slot] = (unsigned char)next;
+	r->bead[slot] = (unsigned short)next;
 }
 void EquipNextAcc(CharData& c, int slot)
 {
@@ -574,7 +604,7 @@ int BeadSpare(const CharData& c, int slot, int index)
 	if (slot < 0 || slot >= CRAFT_SLOT_N || index < 0 || index >= CRAFT_N) return 0;
 	if (!BeadFitsSlot(slot, index + 1)) return 0;
 	const CraftRec* r = FindRec(c.uid, false);
-	if (r) for (int k = 0; k < CRAFT_SLOT_N; k++) if (k != slot && r->bead[k] == (unsigned char)(index + 1)) return 0;
+	if (r) for (int k = 0; k < CRAFT_SLOT_N; k++) if (k != slot && r->bead[k] == (unsigned short)(index + 1)) return 0;
 	return max(0, (int)g_craft.beadN[index] - BeadInUse(index, r, slot));
 }
 bool EquipAccId(CharData& c, int slot, int id)
@@ -594,11 +624,24 @@ bool EquipBeadId(CharData& c, int slot, int bead)
 	if (!r) return false;
 	if (bead <= 0) { r->bead[slot] = 0; return true; }
 	if (bead > CRAFT_N || !BeadFitsSlot(slot, bead) || (r->bead[slot] != bead && BeadSpare(c, slot, bead - 1) < 1)) return false;
-	r->bead[slot] = (unsigned char)bead;
+	r->bead[slot] = (unsigned short)bead;
 	return true;
 }
 
 // ---------------- 魔石・技珠 ----------------
+int CraftGoodGet(int i)
+{
+	if (i < 0 || i >= (int)sizeof(g_craft.goodN)) return 0;
+	return g_craft.goodN[i];
+}
+void CraftGoodAdd(int i, int d)
+{
+	if (i < 0 || i >= (int)sizeof(g_craft.goodN)) return;
+	int c = (int)g_craft.goodN[i] + d;
+	if (c < 0) c = 0;
+	if (c > 99) c = 99;
+	g_craft.goodN[i] = (unsigned char)c;
+}
 int StoneCount() { return g_craft.stones; }
 void StoneAdd(int d) { g_craft.stones = Clampi(g_craft.stones + d, 0, kStoneMax); }
 bool BeadHave(int index) { return index >= 0 && index < CRAFT_N && g_craft.beadN[index] > 0; }
@@ -619,8 +662,10 @@ int CraftStoneCost(int index)
 int CraftSuperNeed(int index)
 {
 	if (index < 0 || index >= CRAFT_N) return 99;
-	if (index / CRAFT_PER_LINE >= 6) return 0;
-	int k = index % CRAFT_PER_LINE;
+	int folded = index;
+	if (folded >= CRAFT_LEGACY) folded -= CRAFT_LEGACY;
+	if (folded / CRAFT_PER_LINE >= 6) return 0;
+	int k = folded % CRAFT_PER_LINE;
 	return k < CRAFT_NORM ? 0 : k - CRAFT_NORM + 1;
 }
 bool BeadBuy(const SaveData& s, int index)
@@ -641,7 +686,7 @@ bool BeadSell(int index)
 		for (int i = 0; i < 128; i++) {
 			CraftRec& r = g_craft.rec[i];
 			if (!r.uid) continue;
-			for (int k = 0; k < CRAFT_SLOT_N; k++) if (r.bead[k] == (unsigned char)(index + 1)) { r.bead[k] = 0; i = 128; break; }
+			for (int k = 0; k < CRAFT_SLOT_N; k++) if (r.bead[k] == (unsigned short)(index + 1)) { r.bead[k] = 0; i = 128; break; }
 		}
 	}
 	if (g_craft.beadN[index] <= BeadInUse(index, NULL, -1)) return false;

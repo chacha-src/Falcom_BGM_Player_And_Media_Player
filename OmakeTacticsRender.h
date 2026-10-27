@@ -120,7 +120,8 @@ struct DrawParams {
 	int face;            // 人間の顔の型（0=既定）
 	float bodyScale;     // 身長。CS がスキン後の位置へ掛ける
 	DWORD clothTint;     // 0 以外なら服をこの色へ。元の明暗と色相差は残す
-	DrawParams() : tint(0xFFFFFFFF), outline(0), mode(0), emissive(0), hue(0), dissolve(0), flash(0), rim(.35f), sway(0), outlineColor(0xFF201814), twoSided(0), hairJoint(-1), hideMeshHair(0), hairTint(0xFFFFFFFF), clothHue(0), face(0), bodyScale(1.f), clothTint(0) {}
+	int skinTone;        // 0無し 1白人 2アジア人 3黒人。服と髪は変えない
+	DrawParams() : tint(0xFFFFFFFF), outline(0), mode(0), emissive(0), hue(0), dissolve(0), flash(0), rim(.35f), sway(0), outlineColor(0xFF201814), twoSided(0), hairJoint(-1), hideMeshHair(0), hairTint(0xFFFFFFFF), clothHue(0), face(0), bodyScale(1.f), clothTint(0), skinTone(0) {}
 };
 
 enum Pass { PASS_SHADOW, PASS_MAIN, PASS_PORTRAIT };
@@ -440,6 +441,10 @@ private:
 	ID3D11ShaderResourceView* m_hairSrv;
 	GpuMesh m_hairDraw;
 	UINT m_hairNv;
+	float m_hairCap[16][3];
+	int m_hairCapN[16];
+	float m_scalpCrown[3];
+	int m_scalpCrownOk;
 	ID3D11Buffer* m_scalpSB;
 	ID3D11ShaderResourceView* m_scalpSRV;
 	int m_scalpModel;

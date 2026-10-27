@@ -51,6 +51,10 @@ Renderer::Renderer()
 	m_groundTex = NULL; m_groundSrv = NULL; m_matTex = NULL; m_matSrv = NULL;
 	m_csSkin = NULL; m_cbSkinBone = m_cbSkinParm = m_cbHairCloth = m_faceDummy = NULL; m_faceDummySRV = NULL;
 	m_hairSB = m_hairVB = NULL; m_hairBind = m_hairSrv = NULL; m_hairUAV = NULL; m_hairTex = NULL; m_hairNv = 0;
+	memset(m_hairCap, 0, sizeof(m_hairCap));
+	memset(m_hairCapN, 0, sizeof(m_hairCapN));
+	memset(m_scalpCrown, 0, sizeof(m_scalpCrown));
+	m_scalpCrownOk = 0;
 	m_scalpSB = NULL; m_scalpSRV = NULL; m_scalpModel = -1; m_scalpN = 0;
 	m_ilS = m_ilK = m_ilH = m_ilP = NULL;
 	m_cbFrame = m_cbObj = m_cbBones = m_vbHud = m_vbDyn = NULL; m_vbDynBytes = 0;
@@ -835,6 +839,8 @@ static void ModelSetupJoints(Model& m, const Rig* r)
 	m.hipsJ = r->Find("hips"); if (m.hipsJ < 0) m.hipsJ = r->Find("Hips");
 }
 
+static int g_avaNeedReset = 0;
+
 BOOL Renderer::LoadAssets()
 {
 	if (m_assetsOk) return TRUE;
@@ -1474,6 +1480,39 @@ static BOOL FillCreature(Renderer& R, Reader& rd, int packIndex, int slot)
 				s.uv[0] = s.uv[1] = 0;
 				s.c = d.c;
 			}
+			if (nv > 0) {
+				double sum = 0;
+				for (UINT k = 0; k < nv; k++) {
+					DWORD c = skin.bind[k].c;
+					sum += (c & 255) * 0.30 + ((c >> 8) & 255) * 0.59 + ((c >> 16) & 255) * 0.11;
+				}
+				if (sum / (double)nv < 18.0) {
+					unsigned hsh = 2166136261u;
+					for (const char* s = name; s && *s; ++s) hsh = hsh * 16777619u ^ (unsigned char)*s;
+					float hue = (float)(hsh % 360) * 0.0174533f;
+					float br = 0.55f + 0.25f * sinf(hue);
+					float bg = 0.42f + 0.22f * sinf(hue + 2.1f);
+					float bb = 0.32f + 0.18f * sinf(hue + 4.2f);
+					float y0 = 1e9f, y1 = -1e9f;
+					for (UINT k = 0; k < nv; k++) {
+						float y = skin.bind[k].p[1];
+						if (y < y0) y0 = y;
+						if (y > y1) y1 = y;
+					}
+					float span = y1 - y0;
+					if (span < 0.02f) span = 0.02f;
+					for (UINT k = 0; k < nv; k++) {
+						float t = (skin.bind[k].p[1] - y0) / span;
+						if (t < 0.f) t = 0.f;
+						if (t > 1.f) t = 1.f;
+						float shade = 0.45f + 0.7f * t;
+						auto q = [](float x) { int v = (int)(x * 255.f + .5f); return v < 0 ? 0 : (v > 255 ? 255 : v); };
+						DWORD c = (DWORD)q(br * shade) | ((DWORD)q(bg * shade) << 8) | ((DWORD)q(bb * shade) << 16) | 0xFF000000u;
+						skin.bind[k].c = c;
+						poseV[k].c = c;
+					}
+				}
+			}
 			if (strncmp(name, "Hum", 3) == 0) {
 				// ファイル上の法線は、Z 反転した面から取り直した内側向きが 6 割。
 				// そのままカリングすると外側が消え、口腔と手の内側だけが見える。
@@ -1822,6 +1861,9 @@ void Renderer::BindFaceSynth(CreatureSkin& s, int first, int count)
 	const BOOL fem = strncmp(nm, "HumF", 4) == 0;
 	const BOOL mal = strncmp(nm, "HumM", 4) == 0;
 	if ((!fem && !mal) || nm[4] < '0' || nm[4] > '9') return;
+	s.faceSet = -1;
+	s.faceN = 0;
+	s.faceSynth = 0;
 	const int headJ = models[s.model].headJ;
 	if (headJ < 0) return;
 	const int nv = (int)s.bind.size();
@@ -2150,6 +2192,7 @@ BOOL Renderer::GpuSkinAndDraw(CreatureSkin& src, const float* bx, const float* b
 		}
 		prm.jig[0] = src.bustLag[0]; prm.jig[1] = src.bustLag[1]; prm.jig[2] = src.bustLag[2];
 	}
+	prm.jig[3] = (float)dp.skinTone;
 	memcpy(prm.nip0, src.nip[0], sizeof(prm.nip0));
 	memcpy(prm.nip1, src.nip[1], sizeof(prm.nip1));
 	prm.bust[0] = amt;
@@ -2189,18 +2232,6 @@ BOOL Renderer::GpuSkinAndDraw(CreatureSkin& src, const float* bx, const float* b
 	m_ctx->CSSetShaderResources(0, 3, nos);
 	m_ctx->CSSetConstantBuffers(0, 3, nob);
 	m_ctx->CSSetShader(NULL, NULL, 0);
-	if (bx) {
-		static float loggedBt = 100.f;
-		if (loggedBt != bt) {
-			loggedBt = bt;
-			FILE* fp = NULL;
-			fopen_s(&fp, "C:\\PROJECTS\\APPLICATION3\\ogg_binary\\bust_run.txt", "w");
-			if (fp) {
-				fprintf(fp, "cs bt=%.2f amt=%.2f nipSign=%.0f,%.0f nv=%d\n", bt, amt, src.nip[0][3], src.nip[1][3], src.gpuNv);
-				fclose(fp);
-			}
-		}
-	}
 	ID3D11Buffer* saved = base.vb;
 	UINT savedStride = base.stride;
 	base.vb = src.outVB;
@@ -2289,7 +2320,6 @@ void Renderer::SkinAndDraw(CreatureSkin& src, GpuMesh& base, const float* bx, co
 			if (z < bestZ[s]) { bestZ[s] = z; nipI[s] = i; }
 		}
 	}
-	int moundN = 0;
 	for (size_t k = 0; k < src.bind.size(); k++) {
 		CSkinV b = src.bind[k];
 		const float ox = b.p[0], oy = b.p[1], oz = b.p[2];
@@ -2299,41 +2329,36 @@ void Renderer::SkinAndDraw(CreatureSkin& src, GpuMesh& base, const float* bx, co
 				int ni = nipI[s];
 				if (ni < 0) continue;
 				float cx = src.bind[ni].p[0], cy = src.bind[ni].p[1], cz = src.bind[ni].p[2];
-				float x = ox - cx, y = oy - cy + 0.010f * amt, z = oz - cz;
+				float x = ox - cx, y = oy - cy + 0.006f * amt, z = oz - cz;
+				const float up = 0.046f, dn = 0.162f;
+				if (y > up || y < -dn || z > 0.055f) continue;
+				float down = -y / dn; if (down < 0.f) down = 0.f; if (down > 1.f) down = 1.f;
+				float upf = y / up; if (upf < 0.f) upf = 0.f; if (upf > 1.f) upf = 1.f;
+				float rad = y > 0.f ? (0.078f + (0.052f - 0.078f) * upf) : (0.078f + (0.112f - 0.078f) * down);
 				float r2 = x * x + y * y;
-				if (!(r2 < 0.010f && z < 0.05f && fabsf(y) < 0.085f)) continue;
+				if (!(r2 < rad * rad)) continue;
 				float r = sqrtf(r2);
-				float dy = y / 0.100f;
-				float t = r / 0.100f;
-				float w = powf(1.f - t * t, 1.35f);
-				if (dy > 0.12f) {
-					float fade = 1.f - (dy - 0.12f) / 0.40f;
-					if (fade < 0.f) fade = 0.f;
-					w *= fade;
-				}
-				float low = -dy;
-				if (low < 0.f) low = 0.f;
-				if (low > 0.55f) low = 0.55f;
-				float H = 0.0448f * (1.f + 0.70f * low) * amt;
-				float killT = (0.100f - r) / 0.08f;
-				if (killT < 0.f) killT = 0.f;
-				if (killT > 1.f) killT = 1.f;
-				float kill = killT * killT * (3.f - 2.f * killT);
-				float pull = w > kill ? w : kill;
+				float t = r / rad;
+				float bell = powf(1.f - t * t, 1.15f);
+				float vy = y > 0.f ? powf(1.f - upf, 1.6f) : powf(1.f - down, 0.65f);
+				float w = bell * vy;
+				float crestArg = (down - 0.28f) / 0.42f;
+				float crest = expf(-crestArg * crestArg);
+				if (y > 0.f) crest *= 0.55f;
+				float H = 0.026f * crest * amt;
+				float pull = w * 0.42f;
 				float signx = cx < 0.f ? -1.f : 1.f;
-				b.p[0] = ox + signx * 0.014f * w * amt;
-				b.p[1] = oy - 0.020f * w * amt;
+				b.p[0] = ox + signx * 0.008f * w * amt;
+				b.p[1] = oy - 0.014f * w * amt * (0.35f + down);
 				b.p[2] = oz + (cz - oz) * pull - H * w;
-				float slope = t < 0.f ? 0.f : (t > 1.f ? 1.f : t);
-				float dnx = (r > 1e-5f ? x / r : signx) * slope;
-				float dny = (r > 1e-5f ? y / r : 0.f) * slope;
+				float dnx = (r > 1e-5f ? x / r : signx) * t;
+				float dny = (r > 1e-5f ? y / r : 0.f) * t - (0.12f + 0.50f * down);
 				float dl = sqrtf(dnx * dnx + dny * dny + 1.f);
 				dnx /= dl; dny /= dl;
-				b.n[0] = b.n[0] * (1.f - pull) + dnx * pull;
-				b.n[1] = b.n[1] * (1.f - pull) + dny * pull;
-				b.n[2] = b.n[2] * (1.f - pull) + (-1.f / dl) * pull;
+				b.n[0] = b.n[0] * (1.f - w) + dnx * w;
+				b.n[1] = b.n[1] * (1.f - w) + dny * w;
+				b.n[2] = b.n[2] * (1.f - w) + (-1.f / dl) * w;
 				placed = 1;
-				moundN++;
 			}
 		}
 		if (bd && !placed) {
@@ -2379,20 +2404,6 @@ void Renderer::SkinAndDraw(CreatureSkin& src, GpuMesh& base, const float* bx, co
 			int hw = 0;
 			for (int c = 0; c < 4; c++) if (b.j[c] == dp.hairJoint && b.w[c] > hw) hw = b.w[c];
 			if (hw > 10) d.c = dp.hairTint;
-		}
-	}
-	if (bx) {
-		static float loggedBt = 100.f;
-		static int loggedN = -1;
-		if (loggedBt != bt || loggedN != moundN) {
-			loggedBt = bt;
-			loggedN = moundN;
-			FILE* fp = NULL;
-			fopen_s(&fp, "C:\\PROJECTS\\APPLICATION3\\ogg_binary\\bust_run.txt", "w");
-			if (fp) {
-				fprintf(fp, "skin bt=%.2f amt=%.2f nip=%d,%d moved=%d nv=%d\n", bt, amt, nipI[0], nipI[1], moundN, (int)src.bind.size());
-				fclose(fp);
-			}
 		}
 	}
 	// 胸の差分を足したあとの面から法線を作り直す。元の法線のままだと膨らみが板の突起に見える。
@@ -2690,6 +2701,7 @@ static void ShapeBust(Buf<Renderer::CSkinV>& bind, Buf<BYTE>& cloth, Buf<float>&
 	}
 	if (!hasN[0] || !hasN[1]) { nipI[0] = nipI[1] = -1; return; }
 	side.fill(nv0, 0);
+	if ((int)side.size() < nv0 || !side.data()) { nipI[0] = nipI[1] = -1; return; }
 	for (int i = (int)nb; i < nv0; i++) {
 		for (int s = 0; s < 2; s++) {
 			float x = at(i, 0) - nip[s][0], y = at(i, 1) - nip[s][1], z = at(i, 2) - nip[s][2];
@@ -2863,25 +2875,47 @@ BOOL Renderer::DrawAvatar(int model, int avatar, int bust, const Pose& pose, con
 	AvaCache* ac = NULL;
 	for (AvaCache& x : m_avaCache) if (x.model == model && x.cos == ci) { ac = &x; break; }
 	if (!ac) {
+		if (g_avaNeedReset || m_avaCache.size() >= 32 || TacAvaBad()) { g_avaNeedReset = 1; return FALSE; }
 		const AvaBody& body = m_avaBody[am->gender];
 		const AvaCos& cos = m_avaCos[ci];
 		const Rig& rg = rigs[md.rig];
 		const int ns = m_avaSegN;
-		Buf<int> segJ(ns);
+		Buf<int> segJ;
+		segJ.arena = 1;
+		segJ.resize(ns);
+		if (segJ.size() < ns) { g_avaNeedReset = 1; return FALSE; }
 		for (int s = 0; s < ns; s++) {
 			int j = rg.Find(s < am->nJoint ? am->joint[s] : m_avaSeg[s]);
 			segJ[s] = j >= 0 ? j : (md.hipsJ >= 0 ? md.hipsJ : 0);
 		}
 		AvaCache nc;
+		nc.skin.bind.arena = 1;
+		nc.skin.cloth.arena = 1;
+		nc.skin.headTri.arena = 1;
+		nc.skin.meshHair.arena = 1;
+		nc.skin.bustR.arena = 1;
+		nc.bx.arena = 1;
+		nc.bn.arena = 1;
+		nc.tri.arena = 1;
 		nc.model = model;
 		nc.cos = ci;
 		CreatureSkin& sk = nc.skin;
 		sk.model = model;
+		// 顔検出が途中で戻っても、範囲が未初期化のまま残らないようにする。残すと男性の頭で描画が落ちる。
+		sk.faceSet = -1;
+		sk.faceStart = 0;
+		sk.faceN = 0;
+		sk.faceSynth = 0;
+		sk.faceGot = -1;
 		const size_t nb = body.m.v.size(), nv = nb + cos.m.v.size();
 		sk.bind.resize(nv);
 		sk.cloth.resize(nv);
 		const BOOL hasBust = !body.m.dmax.empty() && !cos.m.dmax.empty();
 		if (hasBust) { nc.bx.resize(nv * 3); nc.bn.resize(nv * 3); }
+		if ((size_t)sk.bind.size() < nv || (size_t)sk.cloth.size() < nv || (hasBust && ((size_t)nc.bx.size() < nv * 3 || (size_t)nc.bn.size() < nv * 3))) {
+			g_avaNeedReset = 1;
+			return FALSE;
+		}
 		for (size_t k = 0; k < nv; k++) {
 			const BOOL isBody = k < nb;
 			const AvaMesh& src = isBody ? body.m : cos.m;
@@ -2926,6 +2960,8 @@ BOOL Renderer::DrawAvatar(int model, int avatar, int bust, const Pose& pose, con
 		}
 		Buf<BYTE> mhHead;
 		Buf<int> headMap;
+		mhHead.arena = 1;
+		headMap.arena = 1;
 		int nAdd = 0;
 		if (own && !mhFace && headSeg >= 0) {
 			headMap.fill((int)own->bind.size(), -1);
@@ -2947,6 +2983,7 @@ BOOL Renderer::DrawAvatar(int model, int avatar, int bust, const Pose& pose, con
 			}
 		}
 		Buf<WORD> idx;
+		idx.arena = 1;
 		idx.reserve(body.bodyTri.size() + body.extraTri.size() + cos.tri.size() + (graft ? own->headTri.size() : 0));
 		for (size_t t = 0; t * 3 < body.bodyTri.size(); t++) {
 			if (t / 8 >= cos.keep.size() || !((cos.keep[t / 8] >> (t & 7)) & 1)) continue;
@@ -2991,7 +3028,8 @@ BOOL Renderer::DrawAvatar(int model, int avatar, int bust, const Pose& pose, con
 			}
 			for (size_t t = 0; t + 2 < own->headTri.size(); t += 3) {
 				int a = own->headTri[t], b = own->headTri[t + 1], c = own->headTri[t + 2];
-				if (a < 0 || b < 0 || c < 0 || a >= (int)headMap.size() || headMap[a] < 0 || headMap[b] < 0 || headMap[c] < 0) continue;
+				if (a < 0 || b < 0 || c < 0 || a >= (int)headMap.size() || b >= (int)headMap.size() || c >= (int)headMap.size()
+					|| headMap[a] < 0 || headMap[b] < 0 || headMap[c] < 0) continue;
 				idx.push_back((WORD)(base + headMap[a]));
 				idx.push_back((WORD)(base + headMap[b]));
 				idx.push_back((WORD)(base + headMap[c]));
@@ -3000,6 +3038,26 @@ BOOL Renderer::DrawAvatar(int model, int avatar, int bust, const Pose& pose, con
 		}
 		if (hasBust)
 			ShapeBust(sk.bind, sk.cloth, nc.bx, nc.bn, idx, nb, sk.bustNip, sk.bustR, graft ? &sk.meshHair : NULL);
+		// 長さゼロの骨や、16bit に収まらない索引は、ここで落として素体に戻す。GPU へ渡すと装置が落ちる。
+		for (size_t k = 0; k < sk.bind.size(); k++) {
+			const float* p = sk.bind[k].p;
+			if (p[0] != p[0] || p[1] != p[1] || p[2] != p[2]) return FALSE;
+			if (fabsf(p[0]) > 12.f || fabsf(p[1]) > 12.f || fabsf(p[2]) > 12.f) return FALSE;
+		}
+		{
+			Buf<WORD> kept;
+			kept.arena = 1;
+			kept.reserve(idx.size());
+			const int nvm = (int)sk.bind.size();
+			for (size_t t = 0; t + 2 < idx.size(); t += 3) {
+				int a = idx[t], b = idx[t + 1], c = idx[t + 2];
+				if ((unsigned)a >= (unsigned)nvm || (unsigned)b >= (unsigned)nvm || (unsigned)c >= (unsigned)nvm) continue;
+				kept.push_back((WORD)a); kept.push_back((WORD)b); kept.push_back((WORD)c);
+			}
+			idx.swap(kept);
+		}
+		if (TacAvaBad()) { g_avaNeedReset = 1; return FALSE; }
+		if (idx.size() < 3 || sk.bind.size() > 65535) return FALSE;
 		if (!graft) for (const CreatureSkin& hs : m_skins) if (hs.model == model && hs.faceSet == am->gender && hs.faceN == body.nFace) {
 			sk.faceSet = hs.faceSet;
 			sk.faceStart = 0;
@@ -3086,6 +3144,30 @@ void Renderer::LoadHairPack()
 		g.bx[0] = s[6]; g.bx[1] = s[7];
 		g.pack[0] = 0xFFFFFFFFu;
 	}
+	memset(m_hairCap, 0, sizeof(m_hairCap));
+	memset(m_hairCapN, 0, sizeof(m_hairCapN));
+	{
+		float top[16];
+		double sx[16], sz[16];
+		for (int s = 0; s < 16; s++) { top[s] = -1e9f; sx[s] = sz[s] = 0; }
+		for (UINT i = 0; i < nv; i++) {
+			int s = (int)(rec[i * 10 + 9] + 0.5f);
+			if (s < 1 || s > 15) continue;
+			if (rec[i * 10 + 1] > top[s]) top[s] = rec[i * 10 + 1];
+		}
+		for (UINT i = 0; i < nv; i++) {
+			int s = (int)(rec[i * 10 + 9] + 0.5f);
+			if (s < 1 || s > 15 || rec[i * 10 + 1] < top[s] - 0.14f) continue;
+			sx[s] += rec[i * 10];
+			sz[s] += rec[i * 10 + 2];
+			m_hairCapN[s]++;
+		}
+		for (int s = 1; s <= 15; s++) if (m_hairCapN[s] >= 8) {
+			m_hairCap[s][0] = (float)(sx[s] / m_hairCapN[s]);
+			m_hairCap[s][1] = top[s];
+			m_hairCap[s][2] = (float)(sz[s] / m_hairCapN[s]);
+		}
+	}
 	D3D11_BUFFER_DESC bd = {};
 	bd.ByteWidth = nv * 80u;
 	bd.Usage = D3D11_USAGE_IMMUTABLE;
@@ -3159,6 +3241,7 @@ void Renderer::EnsureScalp(int model, int headJ)
 {
 	if (model == m_scalpModel && m_scalpSRV) return;
 	m_scalpN = 0;
+	m_scalpCrownOk = 0;
 	m_capDraw.Release();
 	m_capBind.clear();
 	if (!m_dev || !m_ctx || headJ < 0) return;
@@ -3182,6 +3265,21 @@ void Renderer::EnsureScalp(int model, int headJ)
 		cand.push_back(q);
 	}
 	if (cand.size() < 8) { m_scalpModel = model; return; }
+	{
+		float yTop = -1e9f;
+		for (int i = 0; i < cand.size(); i++) if (cand[i].p[1] > yTop) yTop = cand[i].p[1];
+		double sx = 0, sz = 0;
+		int n = 0;
+		for (int i = 0; i < cand.size(); i++) if (cand[i].p[1] > yTop - 0.035f) {
+			sx += cand[i].p[0]; sz += cand[i].p[2]; n++;
+		}
+		if (n >= 4) {
+			m_scalpCrown[0] = (float)(sx / n);
+			m_scalpCrown[1] = yTop;
+			m_scalpCrown[2] = (float)(sz / n);
+			m_scalpCrownOk = 1;
+		}
+	}
 	Buf<Pt> keep;
 	const float gap2 = 0.013f * 0.013f;
 	for (int i = 0; i < cand.size() && keep.size() < 512; i++) {
@@ -3322,6 +3420,7 @@ BOOL Renderer::DrawHumanHair(int model, int style, int headJ, const Pose& pose, 
 	int nj = pose.nJ;
 	if (nj > 63) nj = 63;
 	if (headJ >= nj) return FALSE;
+	EnsureScalp(model, headJ);
 	D3D11_MAPPED_SUBRESOURCE ms;
 	if (FAILED(m_ctx->Map(m_cbSkinBone, 0, D3D11_MAP_WRITE_DISCARD, 0, &ms))) return FALSE;
 	memset(ms.pData, 0, 64u * (unsigned)MAXJ);
@@ -3333,6 +3432,18 @@ BOOL Renderer::DrawHumanHair(int model, int style, int headJ, const Pose& pose, 
 	slot[4] = seg[1]; slot[5] = seg[5]; slot[6] = seg[9]; slot[7] = 0.f;
 	slot[8] = seg[2]; slot[9] = seg[6]; slot[10] = seg[10]; slot[11] = 0.f;
 	slot[12] = seg[3]; slot[13] = seg[7]; slot[14] = seg[11]; slot[15] = 1.f;
+	// 頭の区間は顔の箱で平行移動している。男性の顔は髪より中心が高く、笠が顎まで落ちて頭頂が禿げる。
+	// 女性はそのままで合っている。男性だけ、女性と同じく笠の天辺を頭の関節の 22cm 上へ載せる。
+	if (!am->gender && style <= 15 && m_hairCapN[style] >= 8 && headJ < md.nJ) {
+		M4 bind = MInverse(md.invBind[headJ]);
+		float cx = m_hairCap[style][0], cy = m_hairCap[style][1], cz = m_hairCap[style][2];
+		float rx = seg[0] * cx + seg[1] * cy + seg[2] * cz;
+		float ry = seg[4] * cx + seg[5] * cy + seg[6] * cz;
+		float rz = seg[8] * cx + seg[9] * cy + seg[10] * cz;
+		slot[12] = bind.m[12] - rx;
+		slot[13] = bind.m[13] + 0.22f - ry;
+		slot[14] = bind.m[14] - rz;
+	}
 	m_ctx->Unmap(m_cbSkinBone, 0);
 	float cloth[36];
 	memset(cloth, 0, sizeof(cloth));
@@ -3360,7 +3471,6 @@ BOOL Renderer::DrawHumanHair(int model, int style, int headJ, const Pose& pose, 
 	prm.nip0[2] = m_time;
 	prm.bust[0] = -1.f;
 	prm.info[1] = (float)nj;
-	EnsureScalp(model, headJ);
 	prm.extra[1] = m_hairNv;
 	prm.extra[2] = (m_scalpSRV && m_scalpModel == model) ? (unsigned)m_scalpN : 0u;
 	if (FAILED(m_ctx->Map(m_cbSkinParm, 0, D3D11_MAP_WRITE_DISCARD, 0, &ms))) return FALSE;
@@ -3548,6 +3658,11 @@ void Renderer::UpdateFrameCB()
 
 void Renderer::BeginFrame()
 {
+	if (g_avaNeedReset) {
+		g_avaNeedReset = 0;
+		ReleaseAvatarCache();
+		TacAvaReset();
+	}
 	m_frame++;
 	m_ctx->VSSetConstantBuffers(0, 1, &m_cbFrame);
 	m_ctx->PSSetConstantBuffers(0, 1, &m_cbFrame);
@@ -3744,7 +3859,7 @@ void Renderer::DrawStatic(const GpuMesh& m, const M4& world, const DrawParams& d
 	if (dp.outline > 0 && !alpha) {
 		SetObj(world, dp, dp.outline);
 		BindForPass(FALSE, TRUE);
-		if (dp.twoSided) m_ctx->RSSetState(m_rsNone);
+		// 輪郭は表を捨てて膨らませた裏面だけ残す。両面にすると殻が本体を覆い、敵が黒く見える。
 		m_ctx->DrawIndexed(m.nIdx, 0, 0);
 	}
 	SetObj(world, dp, 0);

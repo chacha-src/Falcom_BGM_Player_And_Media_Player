@@ -318,6 +318,8 @@ BYTE bufkpim[OUTPUT_BUFFER_SIZE * OUTPUT_BUFFER_NUM * 3];
 
 extern IGraphBuilder* pGraphBuilder;
 extern IMediaControl* pMediaControl;
+extern IMediaSeeking* pMediaSeeking;
+extern double TempoPlaybackRateFromPos(int tempoPos);
 
 extern CString wavExportPath;
 extern int wavExportLoopCount;
@@ -1454,7 +1456,17 @@ UINT HandleNotifications(LPVOID)
 				douOn = (chk == BST_CHECKED) ? 1 : 0;
 		}
 		if (douOn && pGraphBuilder && pMediaControl) {
-			if (timeee > 900 && dougainit == 0) {
+			/* 900ms はテンポ 100 のソース時刻。速いテンポでは壁時計を 1/rate にしないと動画が遅れて始まる。 */
+			double rate = TempoPlaybackRateFromPos(tempo);
+			if (rate < 0.05) rate = 0.05;
+			const int waitMs = (int)(900.0 / rate + 0.5);
+			if (timeee > waitMs && dougainit == 0) {
+				if (pMediaSeeking) {
+					double vr = rate;
+					if (vr < 0.1) vr = 0.1;
+					if (vr > 4.0) vr = 4.0;
+					pMediaSeeking->SetRate(vr);
+				}
 				pMediaControl->Run();
 				dougainit = 1;
 			}

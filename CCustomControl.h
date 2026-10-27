@@ -1011,6 +1011,26 @@ private:
     BOOL m_bNoParentInvalidate;            // TRUE なら SetText 時に親 Invalidate しない
     BOOL m_bSolidFill;                     // カスタム不透明背景
     COLORREF m_clrSolidFill;
+    // 同一内容の再描画はバックストアを出すだけ（親 Invalidate のたびに影付き文字を組み直さない）
+    BOOL m_pixReady;
+    CString m_pixText;
+    CRect m_pixRect;
+    UINT m_pixDpi;
+    int m_pixWide;
+    int m_pixKeep;
+    int m_pixTheme;
+    BOOL m_pixTrans;
+    COLORREF m_pixFill;
+    BOOL m_pixGradEn;
+    COLORREF m_pixGradS;
+    COLORREF m_pixGradE;
+    int m_pixGradDir;
+    BOOL m_pixShEn;
+    COLORREF m_pixSh;
+    int m_pixShDir;
+    int m_pixShDist;
+    int m_pixShBlur;
+    LOGFONT m_pixFont;
 #if CCUSTOM_AERO_SUPPORT
     // 共有 s_nfCache のサイズ thrash を避ける（EQ コード行など固定サイズ静的ラベル向け）
     CCC_ChromaBlitCache m_chromaCache;

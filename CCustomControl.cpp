@@ -8111,8 +8111,13 @@ CCustomStatic::CCustomStatic()
     m_strCachedText(_T("")), m_strText(_T("")), m_nCachedDpi(0), m_nCachedWide(0),
     m_backstoreW(0), m_backstoreH(0), m_segCount(0), m_strSegSource(_T("")),
     m_bAeroMode(FALSE), m_bNoParentInvalidate(FALSE),
-    m_bSolidFill(FALSE), m_clrSolidFill(COLOR_DIALOG_BG)
-{}
+    m_bSolidFill(FALSE), m_clrSolidFill(COLOR_DIALOG_BG),
+    m_pixReady(FALSE), m_pixDpi(0), m_pixWide(0), m_pixKeep(0), m_pixTheme(0),
+    m_pixTrans(FALSE), m_pixFill(0), m_pixGradEn(FALSE), m_pixGradS(0), m_pixGradE(0),
+    m_pixGradDir(0), m_pixShEn(FALSE), m_pixSh(0), m_pixShDir(0), m_pixShDist(0), m_pixShBlur(0)
+{
+    memset(&m_pixFont, 0, sizeof(m_pixFont));
+}
 
 // バックストアとクロマキャッシュを解放。
 CCustomStatic::~CCustomStatic()
@@ -8394,6 +8399,7 @@ void CCustomStatic::DrawClient(CDC& dc)
         m_memBackstore.CreateCompatibleBitmap(&dc, rw, rh);
         m_backstoreW = rw;
         m_backstoreH = rh;
+        m_pixReady = FALSE;
     }
     CBitmap* ob = memDC.SelectObject(&m_memBackstore);
 
@@ -8406,6 +8412,70 @@ void CCustomStatic::DrawClient(CDC& dc)
     COLORREF clrFill = bTrans ? CCC_AERO_CHROMA_KEY : COLOR_DIALOG_BG;
     if (!bTrans && m_bSolidFill)
         clrFill = m_clrSolidFill;
+
+    LOGFONT lfKey = {};
+    if (CFont* pKeyFont = GetFont())
+        pKeyFont->GetLogFont(&lfKey);
+    else if (CFont* d = CFont::FromHandle((HFONT)GetStockObject(DEFAULT_GUI_FONT)))
+        d->GetLogFont(&lfKey);
+    const UINT dpiNow = CCC_GetControlDpi(m_hWnd);
+    const int themeNow = CCC_UiThemeId();
+    const BOOL pixSame = m_pixReady && !CCC_Nk()
+        && m_pixText == m_strText
+        && m_pixRect == rect
+        && m_pixDpi == dpiNow
+        && m_pixWide == (m_bPreferWideMode ? 1 : 0)
+        && m_pixKeep == (m_bKeepFontHeight ? 1 : 0)
+        && m_pixTheme == themeNow
+        && m_pixTrans == bTrans
+        && m_pixFill == clrFill
+        && m_pixGradEn == m_bGradEnable
+        && m_pixGradS == m_clrGradStart
+        && m_pixGradE == m_clrGradEnd
+        && m_pixGradDir == m_nGradDirection
+        && m_pixShEn == m_bShadowEnable
+        && m_pixSh == m_clrShadow
+        && m_pixShDir == m_nShadowDirection
+        && m_pixShDist == m_nShadowDistance
+        && m_pixShBlur == m_nShadowBlur
+        && memcmp(&m_pixFont, &lfKey, sizeof(LOGFONT)) == 0;
+    if (pixSame) {
+        if (bTrans)
+            blitTrans(memDC.GetSafeHdc());
+        else
+            dc.BitBlt(0, 0, rw, rh, &memDC, 0, 0, SRCCOPY);
+        memDC.SelectObject(ob);
+        memDC.DeleteDC();
+        return;
+    }
+    if (CCC_Nk())
+        m_pixReady = FALSE;
+    auto rememberPix = [&]() {
+        if (CCC_Nk()) {
+            m_pixReady = FALSE;
+            return;
+        }
+        m_pixReady = TRUE;
+        m_pixText = m_strText;
+        m_pixRect = rect;
+        m_pixDpi = dpiNow;
+        m_pixWide = m_bPreferWideMode ? 1 : 0;
+        m_pixKeep = m_bKeepFontHeight ? 1 : 0;
+        m_pixTheme = themeNow;
+        m_pixTrans = bTrans;
+        m_pixFill = clrFill;
+        m_pixGradEn = m_bGradEnable;
+        m_pixGradS = m_clrGradStart;
+        m_pixGradE = m_clrGradEnd;
+        m_pixGradDir = m_nGradDirection;
+        m_pixShEn = m_bShadowEnable;
+        m_pixSh = m_clrShadow;
+        m_pixShDir = m_nShadowDirection;
+        m_pixShDist = m_nShadowDistance;
+        m_pixShBlur = m_nShadowBlur;
+        m_pixFont = lfKey;
+    };
+
     memDC.FillSolidRect(&rect, clrFill);
 
     if (m_strText.IsEmpty())
@@ -8414,6 +8484,7 @@ void CCustomStatic::DrawClient(CDC& dc)
             blitTrans(memDC.GetSafeHdc());
         else
             dc.BitBlt(0, 0, rw, rh, &memDC, 0, 0, SRCCOPY);
+        rememberPix();
         memDC.SelectObject(ob);
         memDC.DeleteDC();
         return;
@@ -8719,6 +8790,7 @@ void CCustomStatic::DrawClient(CDC& dc)
     else
         CCC_NkBlt(dc.GetSafeHdc(), rw, rh, memDC.GetSafeHdc(), COLOR_DIALOG_BG);
 
+    rememberPix();
     memDC.SelectObject(ob);
     memDC.DeleteDC();
 }

@@ -38,19 +38,24 @@ struct Fix {
 };
 
 // 可変長の中身は、起動時に一度だけ確保したarenaから切り出す。pushのたびに new しない。
-enum { TAC_ARENA = 512 * 1024 * 1024 };
+enum { TAC_ARENA = 512 * 1024 * 1024, TAC_AVA_ARENA = 192 * 1024 * 1024 };
 void* TacArenaAlloc(size_t bytes, size_t align);
 int TacArenaBad();
+// アバターの生成だけは捨てて作り直せる領域。本体の arena は戻せないので、衣装を切り替えると埋まって落ちていた。
+void* TacAvaAlloc(size_t bytes, size_t align);
+void TacAvaReset();
+int TacAvaBad();
 
 template<typename T>
 struct Buf {
 	T* p;
 	int n, cap;
-	Buf() : p(0), n(0), cap(0) {}
-	explicit Buf(int nn) : p(0), n(0), cap(0) { resize(nn); }
-	Buf(int nn, const T& fill) : p(0), n(0), cap(0) { this->fill(nn, fill); }
+	int arena;   // 0=本体 1=アバター（TacAvaReset で捨てる）
+	Buf() : p(0), n(0), cap(0), arena(0) {}
+	explicit Buf(int nn) : p(0), n(0), cap(0), arena(0) { resize(nn); }
+	Buf(int nn, const T& fill) : p(0), n(0), cap(0), arena(0) { this->fill(nn, fill); }
 	template<class It>
-	Buf(It a, It b, decltype(*a)* = 0) : p(0), n(0), cap(0) { assign(a, b); }
+	Buf(It a, It b, decltype(*a)* = 0) : p(0), n(0), cap(0), arena(0) { assign(a, b); }
 	int size() const { return n; }
 	bool empty() const { return n == 0; }
 	T* data() { return p; }
@@ -67,7 +72,7 @@ struct Buf {
 	void reset() { p = 0; n = 0; cap = 0; }
 	void reserve(int nn) { grow(nn); }
 	void push_back(const T& a) { if (n >= cap) grow(n + 1); if (p && n < cap) p[n++] = a; }
-	void swap(Buf& o) { T* tp = p; int tn = n, tc = cap; p = o.p; n = o.n; cap = o.cap; o.p = tp; o.n = tn; o.cap = tc; }
+	void swap(Buf& o) { T* tp = p; int tn = n, tc = cap, ta = arena; p = o.p; n = o.n; cap = o.cap; arena = o.arena; o.p = tp; o.n = tn; o.cap = tc; o.arena = ta; }
 	void pop_back() { if (n > 0) n--; }
 	void resize(int nn) {
 		if (nn < 0) nn = 0;
@@ -99,7 +104,7 @@ struct Buf {
 			if (nc > 0x3fffffff) { nc = nn; break; }
 			nc *= 2;
 		}
-		T* np = (T*)TacArenaAlloc((size_t)nc * sizeof(T), 16);
+		T* np = (T*)(arena ? TacAvaAlloc((size_t)nc * sizeof(T), 16) : TacArenaAlloc((size_t)nc * sizeof(T), 16));
 		if (!np) return;
 		if (p && n > 0) memcpy(np, p, (size_t)n * sizeof(T));
 		p = np;
@@ -319,7 +324,10 @@ enum SkillId {
 	SKL_FORM_PAIR,
 	SKL_FORM_PINCER,
 	SKL_FORMN,
-	SKL_COUNT = SKL_FORMN
+	SKL_GALE = SKL_FORMN,
+	SKL_MIASMA,
+	SKL_ELFIRE, SKL_ELICE, SKL_ELTHUNDER, SKL_ELHOLY, SKL_ELDARK, SKL_ELWIND, SKL_ELEATH, SKL_ELPOISON,
+	SKL_COUNT
 };
 enum { SH_RADIUS = 0, SH_LINE = 1, SH_FAN = 2 };
 enum FormKind {
@@ -359,7 +367,7 @@ int PaceRoleOfLv(int lv);
 enum { MAX_ROSTER = 100, MAX_PARTY = 10, MAX_ENEMY = 640, NAME_LEN = 16 };
 static_assert(MAX_PARTY == 10, "Map::pStart は 10 枠");
 enum Body { B_KNIGHT, B_BARBARIAN, B_MAGE, B_ROGUE, B_ROGUE_HOOD, B_COUNT };
-enum { HAIR_STYLES = 12, HAIR_COLORS = 10, OUTFIT_COLORS = 10, HT_N = 5, BUST_N = 5, FIG_N = 3, MODEL_N = 5, HUM_HAIR_N = 16 };
+enum { HAIR_STYLES = 12, HAIR_COLORS = 10, OUTFIT_COLORS = 10, HT_N = 5, BUST_N = 5, FIG_N = 5, MODEL_N = 5, HUM_HAIR_N = 16 };
 
 #pragma pack(push, 4)
 struct CharData {
@@ -455,6 +463,15 @@ struct MonsterDef {
 const MonsterDef& MonsterInfo(int m);
 const wchar_t* MonsterLabel(int m);
 int MonsterGait(int monster);
+int MonsterCatalog(int* out, int cap);
+bool MonsterKnown(int id, int stageCleared);
+int FoeKills(int monster);
+void FoeNoteKill(int monster);
+int FoeMasteryPct(int kills);
+const wchar_t* FoeSlainWord();
+const wchar_t* FoeMasteryWord();
+int MonsterDebut(int id);
+void MonsterPreview(int id, int* lv, int* stat);
 
 // ---------------- 戦闘中ユニット ----------------
 enum Team { TEAM_PLAYER, TEAM_ENEMY };
@@ -703,7 +720,7 @@ int GoodHave(const SaveData& s, int i);
 bool GoodBuy(SaveData& s, int i);
 bool GoodTake(SaveData& s, int i);
 
-enum { CRAFT_BASE = 100000, CRAFT_NORM = 15, CRAFT_SUPER_N = 6, CRAFT_PER_LINE = 21, CRAFT_LINES = 7, CRAFT_N = 147, CP_MAX = 200, CRAFT_SLOT_N = 4 };
+enum { CRAFT_BASE = 100000, CRAFT_NORM = 15, CRAFT_SUPER_N = 6, CRAFT_PER_LINE = 21, CRAFT_LINES = 7, CRAFT_LEGACY = 147, CRAFT_N = 294, CP_MAX = 200, CRAFT_SLOT_N = 4 };
 bool IsCraftId(int skill);
 bool IsCraftSuper(int skill);
 int CraftCpCost(int index);
@@ -743,7 +760,11 @@ enum PasFx {
 	PAS_STR, PAS_MAG, PAS_DEF, PAS_RES, PAS_MOV, PAS_JMP, PAS_RNG,
 	PAS_REGEN, PAS_MP, PAS_CRIT, PAS_EVADE, PAS_EXP, PAS_HEAL,
 	PAS_FIRE, PAS_ICE, PAS_THUNDER, PAS_HOLY, PAS_DARK,
-	PAS_CP, PAS_GUARD, PAS_OPEN, PAS_ALLAIL
+	PAS_CP, PAS_GUARD, PAS_OPEN, PAS_ALLAIL,
+	PAS_STR2, PAS_MAG2, PAS_DEF2, PAS_RES2, PAS_MOV2, PAS_JMP2, PAS_RNG2,
+	PAS_REGEN2, PAS_MP2, PAS_CRIT2, PAS_EVADE2, PAS_EXP2, PAS_HEAL2,
+	PAS_FIRE2, PAS_ICE2, PAS_THUNDER2, PAS_HOLY2, PAS_DARK2,
+	PAS_CP2, PAS_OPEN2, PAS_AGI, PAS_LUK, PAS_RCV, PAS_CPL, PAS_HIT, PAS_AVO, PAS_PEN, PAS_WAKE
 };
 int PasCount();
 const wchar_t* PasName(int id);
@@ -764,6 +785,8 @@ inline bool UnitAilmentHeld(const Unit& u)
 }
 void CraftBindUnit(Unit& u);
 void CraftSaveUnit(const Unit& u);
+int CraftGoodGet(int i);
+void CraftGoodAdd(int i, int d);
 void CraftLoad();
 void CraftSave();
 void CraftReset();

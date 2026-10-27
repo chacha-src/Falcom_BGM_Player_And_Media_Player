@@ -499,6 +499,10 @@ if errorlevel 1 exit /b 1</Command>
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <EnableEnhancedInstructionSet Condition="'$(Platform)'=='x64'">AdvancedVectorExtensions512</EnableEnhancedInstructionSet>
     </ClCompile>
+    <ClCompile Include="simd_audio_avx10.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <EnableEnhancedInstructionSet Condition="'$(Platform)'=='x64'">AdvancedVectorExtensions512</EnableEnhancedInstructionSet>
+    </ClCompile>
     <ClCompile Include="Vst3Host.cpp" />
     <ClCompile Include="VstMidiEngine.cpp" />
     <ClCompile Include="Sf2Vst2.cpp">
@@ -1576,6 +1580,7 @@ if errorlevel 1 exit /b 1</Command>
     <None Include="res\cso\gpu_ps_rect.cso" />
     <None Include="res\cso\gpu_vs_piano.cso" />
     <None Include="res\cso\gpu_vs_rect.cso" />
+    <None Include="res\cso\maze_cssub.cso" />
     <None Include="res\cso\maze_vst.cso" />
     <None Include="res\cso\maze_hst.cso" />
     <None Include="res\cso\maze_dst.cso" />
@@ -1594,6 +1599,8 @@ if errorlevel 1 exit /b 1</Command>
     <None Include="res\cso\maze_csfx.cso" />
     <None Include="res\cso\maze_gsw.cso" />
     <None Include="res\cso\maze_vsskin.cso" />
+    <None Include="res\cso\race_csgridc.cso" />
+    <None Include="res\cso\race_csgridw.cso" />
     <None Include="res\cso\race_vst.cso" />
     <None Include="res\cso\race_hst.cso" />
     <None Include="res\cso\race_dst.cso" />

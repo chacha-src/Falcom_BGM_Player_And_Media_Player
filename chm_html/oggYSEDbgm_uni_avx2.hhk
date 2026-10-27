@@ -982,6 +982,11 @@
 		<param name="Local" value="en\midi-monitor.htm">
 		</OBJECT>
 	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="guts">
+		<param name="Name" value="English: Bonus: tactics">
+		<param name="Local" value="en\tactics.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
 		<param name="Name" value="hot cues">
 		<param name="Name" value="English: Playing with the DJ pad">
 		<param name="Local" value="en\djpad.htm">
@@ -1149,6 +1154,11 @@
 		<param name="Local" value="ja\analyzer.htm">
 		<param name="Name" value="English: Waveform and spectrum analyzer">
 		<param name="Local" value="en\analyzer.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="level up">
+		<param name="Name" value="English: Bonus: tactics">
+		<param name="Local" value="en\tactics.htm">
 		</OBJECT>
 	<LI> <OBJECT type="text/sitemap">
 		<param name="Name" value="libFLAC">
@@ -1533,6 +1543,11 @@
 		<param name="Local" value="en\pianoroll.htm">
 		</OBJECT>
 	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="near victory">
+		<param name="Name" value="English: Bonus: tactics">
+		<param name="Local" value="en\tactics.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
 		<param name="Name" value="Neo Geo">
 		<param name="Name" value="日本語: CEmu：アーケード">
 		<param name="Local" value="ja\cemu-arcade.htm">
@@ -1903,6 +1918,11 @@
 		<param name="Local" value="en\index.htm">
 		</OBJECT>
 	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="raise">
+		<param name="Name" value="English: Bonus: tactics">
+		<param name="Local" value="en\tactics.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
 		<param name="Name" value="Reading the seek bar">
 		<param name="Name" value="English: Reading the seek bar">
 		<param name="Local" value="en\mp-seek.htm">
@@ -2230,6 +2250,15 @@
 		<param name="Local" value="en\vst.htm">
 		</OBJECT>
 	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="sound effects">
+		<param name="Name" value="English: Bonus: tactics">
+		<param name="Local" value="en\tactics.htm">
+		<param name="Name" value="English: Bonus: the maze">
+		<param name="Local" value="en\maze.htm">
+		<param name="Name" value="English: Bonus: the aerial race">
+		<param name="Local" value="en\race.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
 		<param name="Name" value="sound meter">
 		<param name="Name" value="English: The sound meter">
 		<param name="Local" value="en\soundmeter.htm">
@@ -2340,6 +2369,20 @@
 		</OBJECT>
 	<LI> <OBJECT type="text/sitemap">
 		<param name="Name" value="tacticsbgm">
+		<param name="Name" value="日本語: おまけ：タクティクス">
+		<param name="Local" value="ja\tactics.htm">
+		<param name="Name" value="English: Bonus: tactics">
+		<param name="Local" value="en\tactics.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="tacticsgamedanger">
+		<param name="Name" value="日本語: おまけ：タクティクス">
+		<param name="Local" value="ja\tactics.htm">
+		<param name="Name" value="English: Bonus: tactics">
+		<param name="Local" value="en\tactics.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="tacticsgamewin">
 		<param name="Name" value="日本語: おまけ：タクティクス">
 		<param name="Local" value="ja\tactics.htm">
 		<param name="Name" value="English: Bonus: tactics">
@@ -3511,11 +3554,21 @@
 		<param name="Local" value="ja\formats.htm">
 		</OBJECT>
 	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="レイズ">
+		<param name="Name" value="日本語: おまけ：タクティクス">
+		<param name="Local" value="ja\tactics.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
 		<param name="Name" value="レコード">
 		<param name="Name" value="日本語: アナログ起こし台">
 		<param name="Local" value="ja\digitize.htm">
 		<param name="Name" value="日本語: DJパッドで遊ぶ">
 		<param name="Local" value="ja\djpad.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="レベルアップ">
+		<param name="Name" value="日本語: おまけ：タクティクス">
+		<param name="Local" value="ja\tactics.htm">
 		</OBJECT>
 	<LI> <OBJECT type="text/sitemap">
 		<param name="Name" value="レンダリング設定">
@@ -3610,6 +3663,15 @@
 		<param name="Local" value="ja\formats.htm">
 		</OBJECT>
 	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="効果音">
+		<param name="Name" value="日本語: おまけ：タクティクス">
+		<param name="Local" value="ja\tactics.htm">
+		<param name="Name" value="日本語: おまけ：迷路">
+		<param name="Local" value="ja\maze.htm">
+		<param name="Name" value="日本語: おまけ：空中レース">
+		<param name="Local" value="ja\race.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
 		<param name="Name" value="動画">
 		<param name="Name" value="日本語: 動画を再生する">
 		<param name="Local" value="ja\video.htm">
@@ -3622,6 +3684,11 @@
 		<param name="Name" value="動画を再生する">
 		<param name="Name" value="日本語: 動画を再生する">
 		<param name="Local" value="ja\video.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="勝利目前">
+		<param name="Name" value="日本語: おまけ：タクティクス">
+		<param name="Local" value="ja\tactics.htm">
 		</OBJECT>
 	<LI> <OBJECT type="text/sitemap">
 		<param name="Name" value="取り込み">
@@ -3759,6 +3826,11 @@
 		<param name="Name" value="書庫">
 		<param name="Name" value="日本語: スマートプレイリストと書庫ツリー">
 		<param name="Local" value="ja\smart-lib.htm">
+		</OBJECT>
+	<LI> <OBJECT type="text/sitemap">
+		<param name="Name" value="根性">
+		<param name="Name" value="日本語: おまけ：タクティクス">
+		<param name="Local" value="ja\tactics.htm">
 		</OBJECT>
 	<LI> <OBJECT type="text/sitemap">
 		<param name="Name" value="標準命令">

@@ -210,13 +210,19 @@ static void BindOnce()
 {
 	if (g_bound) return;
 	const CpuIsa& isa = CpuIsaGet();
-	if (isa.avx512) {
+	if (isa.avx10_512) {
+		g_peak = SimdFloatPeakMean_AVX10;
+		g_f2i = SimdFloatToInt16_AVX10;
+		g_d2i = SimdDoubleToInt16Kbpsf2_AVX10;
+		g_i32 = SimdI16CopySatFromI32_AVX10;
+		g_mix = SimdMixI16Sat_AVX10;
+	} else if (isa.avx512) {
 		g_peak = SimdFloatPeakMean_AVX512;
 		g_f2i = SimdFloatToInt16_AVX512;
 		g_d2i = SimdDoubleToInt16Kbpsf2_AVX512;
 		g_i32 = SimdI16CopySatFromI32_AVX512;
 		g_mix = SimdMixI16Sat_AVX512;
-	} else if (isa.avx2) {
+	} else if (isa.avx2 || isa.avx10) {
 		g_peak = PeakMean_AVX2;
 		g_f2i = FloatToI16_AVX2;
 		g_i32 = I32ToI16_AVX2;

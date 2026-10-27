@@ -797,17 +797,44 @@ def build_costume(gb, parts):
 
 # ------------------------------------------------------------ retarget onto a game skeleton
 def _rot_from_to(a, b):
-    a = a / np.linalg.norm(a); b = b / np.linalg.norm(b)
+    a = np.asarray(a, np.float64); b = np.asarray(b, np.float64)
+    na = float(np.linalg.norm(a)); nb = float(np.linalg.norm(b))
+    if na < 1e-8 or nb < 1e-8:
+        return np.eye(3)
+    a = a / na; b = b / nb
     v = np.cross(a, b); c = float(a @ b)
     if np.linalg.norm(v) < 1e-9:
         return np.eye(3) if c > 0 else -np.eye(3)
     K = np.array([[0, -v[2], v[1]], [v[2], 0, -v[0]], [-v[1], v[0], 0]])
-    return np.eye(3) + K + K @ K * (1.0 / (1.0 + c))
+    den = 1.0 + c
+    if abs(den) < 1e-8:
+        return -np.eye(3)
+    return np.eye(3) + K + K @ K * (1.0 / den)
 
 
-def _seg_mat(A, B, a, b, s_lat, s_dep):
-    D = (B - A) / np.linalg.norm(B - A)
-    L = np.linalg.norm(b - a) / np.linalg.norm(B - A)
+def _seg_mat(A, B, a, b, s_lat, s_dep, length_clip=None):
+    den = float(np.linalg.norm(B - A))
+    if den < 1e-6:
+        M = np.eye(4)
+        M[:3, 3] = np.asarray(a, np.float64)
+        return M
+    D = (B - A) / den
+    tlen = float(np.linalg.norm(np.asarray(b - a, np.float64)))
+    if tlen < 1e-6:
+        M = np.eye(4)
+        M[:3, 3] = np.asarray(a, np.float64)
+        return M
+    L = tlen / den
+    # 胸の頂点は骨の根元（バスト）に集まり、襟は骨の先にある。
+    # 相手の Chest→Neck が短いと、骨の長さ比のまま掛けるとバストごと縦に潰れる。
+    # 腹は逆に元の区間が 7cm しかなく、2 倍へ伸ばすと腰の前へ腹が張り出す。
+    # 白人の体で形が残る範囲（身長比の 0.60〜1.55）へ揃える。腕と脚は長さを守るのでここには入れない。
+    if length_clip is not None:
+        lo, hi = length_clip
+        if L < lo:
+            L = lo
+        elif L > hi:
+            L = hi
     ex = np.array([1.0, 0, 0]) - D[0] * D
     if np.linalg.norm(ex) < 1e-6:
         ex = np.array([0, 0, 1.0]) - D[2] * D
@@ -821,16 +848,32 @@ def _seg_mat(A, B, a, b, s_lat, s_dep):
     return M
 
 
+def _unit(v, fallback):
+    v = np.asarray(v, np.float64)
+    n = float(np.linalg.norm(v))
+    if n >= 1e-6:
+        return v / n
+    f = np.asarray(fallback, np.float64)
+    n = float(np.linalg.norm(f))
+    if n >= 1e-6:
+        return f / n
+    return np.array([1.0, 0.0, 0.0])
+
+
 def _seg_mat_framed(A, B, LA, a, b, la, s_lat, s_dep):
     """A->B を a->b へ。横軸 LA を la へ合わせてロールも決める（手のひらと指）。"""
-    D = (B - A) / np.linalg.norm(B - A)
-    d = (b - a) / np.linalg.norm(b - a)
-    E = LA - D * float(LA @ D); E /= np.linalg.norm(E)
-    e = la - d * float(la @ d); e /= np.linalg.norm(e)
+    # 指が一点に潰れていると横軸が消えて行列が非数になり、アバター選択で描画が落ちる。
+    D = _unit(B - A, np.array([0.0, -1.0, 0.0]))
+    d = _unit(b - a, D)
+    E = LA - D * float(np.dot(LA, D))
+    E = _unit(E, np.array([1.0, 0.0, 0.0]) - D * D[0])
+    e = la - d * float(np.dot(la, d))
+    e = _unit(e, np.array([1.0, 0.0, 0.0]) - d * d[0])
     F0 = np.stack([D, E, np.cross(D, E)], 1)
     F1 = np.stack([d, e, np.cross(d, e)], 1)
     R = F1 @ F0.T
-    L = np.linalg.norm(b - a) / np.linalg.norm(B - A)
+    den = float(np.linalg.norm(np.asarray(B - A, np.float64)))
+    L = float(np.linalg.norm(np.asarray(b - a, np.float64))) / den if den > 1e-6 else 1.0
     S = F0 @ np.diag([L, s_lat, s_dep]) @ F0.T
     M = np.eye(4)
     M[:3, :3] = R @ S
@@ -842,7 +885,10 @@ def model_segments(gb, qj, head_xf, foot_tip_z):
     """qj: game joint name -> bind position (render space). returns (len(SEGS), 4, 4)"""
     sk = load_skel(gb.v)
     J = lambda n, part="head": to_render(sk[n][part][None], gb.ground)[0]
-    g = qj["Neck"][1] / J("neck01")[1]
+    neck_mh = float(J("neck01")[1])
+    g = float(qj["Neck"][1]) / neck_mh if abs(neck_mh) > 1e-4 else 1.0
+    if not np.isfinite(g) or g < 0.4 or g > 2.5:
+        g = 1.0
     M = {}
     lin = head_xf["sc"] * np.asarray(head_xf["yaw"], np.float64)
     Mh = np.eye(4); Mh[:3, :3] = lin; Mh[:3, 3] = head_xf["off"] - head_xf["sc"] * head_xf["mid"]
@@ -858,10 +904,32 @@ def model_segments(gb, qj, head_xf, foot_tip_z):
             ("Abdomen", "spine04", "spine03", "Abdomen", "Torso", 0.6 * rh + 0.4 * rs),
             ("Torso", "spine03", "spine02", "Torso", "Chest", 0.3 * rh + 0.7 * rs),
             ("Chest", "spine02", "neck01", "Chest", "Neck", rs)]
+    # 胴の区間は関節を結ぶ斜めの軸で伸ばすと、腹の骨が後ろへ傾いた体で
+    # バスト（腹の骨に乗っている）が奥へ引き込まれ、胸が潰れて腰が前へ残る。
+    # 長さは上下の差だけを使い、前後と左右は傾きを混ぜない。
+    def _upright(p, q):
+        q = np.array(q, np.float64)
+        q[0] = p[0]
+        q[2] = p[2]
+        return q
+    clip = (0.60 * g, 1.55 * g)
     for s, a0, b0, qa, qb, lat in tors:
-        M[s] = _seg_mat(J(a0), J(b0), qj[qa], qj[qb], lat, 0.5 * (lat + g))
+        A, B = J(a0), J(b0)
+        a, b = qj[qa], qj[qb]
+        M[s] = _seg_mat(A, _upright(A, B), a, _upright(a, b), lat, 0.5 * (lat + g), clip)
     nc = 0.5 * (g + head_xf["sc"])
     M["Neck"] = _seg_mat(J("neck01"), J("head"), qj["Neck"], hx(J("head")), nc, nc)
+    # 歩きの途中で止めた骨は、左右の足の Z が 5cm 以上ずれる。
+    # 両方のつま先を全足頂点の最小 Z へ向けると、後ろの靴だけが 1m の板になる。
+    # ずれたときだけ、腰の下へ揃えて短い靴を前へ出す。揃っている体はそのまま。
+    zL = float(qj["Foot.L"][2]); zR = float(qj["Foot.R"][2])
+    split = abs(zL - zR) > 0.05
+    z_plant = (zL + zR) * 0.5
+    def _stand(p):
+        p = np.array(p, np.float64)
+        if split:
+            p[2] = z_plant
+        return p
     for side, sg in (("L", -1.0), ("R", 1.0)):
         off_a = np.array([sg * da, 0, 0]); off_h = np.array([sg * dh, 0, 0])
         M["Shoulder." + side] = _seg_mat(J("clavicle." + side), J("upperarm01." + side), qj["Shoulder." + side] + off_a * 0.5, qj["UpperArm." + side] + off_a, rs, rs)
@@ -874,27 +942,57 @@ def model_segments(gb, qj, head_xf, foot_tip_z):
         kn_q = {f: G(f + "1") for f in FINGERS}
         lat_mh = kn_mh["Pinky"] - kn_mh["Index"]
         lat_q = kn_q["Pinky"] - kn_q["Index"]
-        wl = np.linalg.norm(lat_q) / np.linalg.norm(lat_mh)
+        lat_n = float(np.linalg.norm(lat_mh))
+        wl = float(np.linalg.norm(lat_q) / lat_n) if lat_n > 1e-6 else 1.0
+        if not np.isfinite(wl) or wl < 0.25 or wl > 2.5:
+            wl = 1.0
         M["Hand." + side] = _seg_mat_framed(J("wrist." + side), kn_mh["Middle"], lat_mh,
                                             qj["Hand." + side], kn_q["Middle"], lat_q, wl, g)
         for k, f in enumerate(FINGERS):
             mh = [J(f"finger{k + 2}-{i}." + side) for i in (1, 2, 3)] + [J(f"finger{k + 2}-3." + side, "tail")]
             q = [G(f"{f}{i}") for i in (1, 2, 3)]
-            q.append(q[2] + (q[2] - q[1]) * (np.linalg.norm(mh[3] - mh[2]) / np.linalg.norm(mh[2] - mh[1])))
+            den_f = float(np.linalg.norm(mh[2] - mh[1]))
+            ext = (float(np.linalg.norm(mh[3] - mh[2])) / den_f) if den_f > 1e-6 else 1.0
+            if not np.isfinite(ext) or ext > 3.0:
+                ext = 1.0
+            q.append(q[2] + (q[2] - q[1]) * ext)
             for i in range(3):
                 M[f"{f}{i + 1}." + side] = _seg_mat_framed(mh[i], mh[i + 1], lat_mh, q[i], q[i + 1], lat_q, wl, g)
         t_mh = [J("finger1-1." + side), J("finger1-2." + side), J("finger1-3." + side, "tail")]
         t2, t3 = qj["Thumb2." + side], qj["Thumb3." + side]
-        t4 = t3 + (t3 - t2) * min(1.0, np.linalg.norm(t_mh[2] - t_mh[1]) / np.linalg.norm(t_mh[1] - t_mh[0]))
+        den_t = float(np.linalg.norm(t_mh[1] - t_mh[0]))
+        ext_t = min(1.0, float(np.linalg.norm(t_mh[2] - t_mh[1])) / den_t) if den_t > 1e-6 else 1.0
+        if not np.isfinite(ext_t):
+            ext_t = 1.0
+        t4 = t3 + (t3 - t2) * ext_t
         M["Thumb2." + side] = _seg_mat_framed(t_mh[0], t_mh[1], lat_mh, t2, t3, lat_q, wl, g)
         M["Thumb3." + side] = _seg_mat_framed(t_mh[1], t_mh[2], lat_mh, t3, t4, lat_q, wl, g)
         ank_mh = J("foot." + side)
-        ank = np.array([qj["Foot." + side][0], ank_mh[1] * g, qj["Foot." + side][2]])
         toe_mh = J("toe3-1." + side, "tail")
-        toe = np.array([qj["Foot." + side][0], toe_mh[1] * g, foot_tip_z])
-        M["UpperLeg." + side] = _seg_mat(J("upperleg01." + side), J("lowerleg01." + side), qj["UpperLeg." + side] + off_h, qj["LowerLeg." + side] + off_h, g, g)
-        M["LowerLeg." + side] = _seg_mat(J("lowerleg01." + side), ank_mh, qj["LowerLeg." + side] + off_h, ank + off_h, g, g)
-        M["Foot." + side] = _seg_mat(ank_mh, toe_mh, ank + off_h, toe + off_h, g, g)
+        if split:
+            ank = _stand(qj["Foot." + side])
+            ank[1] = float(ank_mh[1]) * g
+            shoe = float(np.linalg.norm(toe_mh - ank_mh))
+            if not np.isfinite(shoe) or shoe < 0.06 or shoe > 0.18:
+                shoe = 0.13
+            drop = (float(toe_mh[1]) - float(ank_mh[1])) * g
+            if not np.isfinite(drop) or drop > 0.02 or drop < -0.06:
+                drop = -0.01
+            toe = ank + np.array([0.0, drop, -shoe])
+            hip = _stand(qj["UpperLeg." + side] + off_h)
+            knee = _stand(qj["LowerLeg." + side] + off_h)
+        else:
+            ank = np.array([qj["Foot." + side][0], ank_mh[1] * g, qj["Foot." + side][2]])
+            toe = np.array([qj["Foot." + side][0], toe_mh[1] * g, foot_tip_z])
+            hip = qj["UpperLeg." + side] + off_h
+            knee = qj["LowerLeg." + side] + off_h
+        M["UpperLeg." + side] = _seg_mat(J("upperleg01." + side), J("lowerleg01." + side), hip, knee, g, g)
+        # すねの正面は -Z、靴の甲は +Y。方向だけ合わせるとロールが自由で、片足が内側へ寝て見える。
+        knee_mh = J("lowerleg01." + side)
+        M["LowerLeg." + side] = _seg_mat_framed(knee_mh, ank_mh, knee_mh + np.array([0.0, 0.0, -1.0]),
+                                                knee, ank + off_h, knee + np.array([0.0, 0.0, -1.0]), g, g)
+        M["Foot." + side] = _seg_mat_framed(ank_mh, toe_mh, ank_mh + np.array([0.0, 1.0, 0.0]),
+                                            ank + off_h, toe + off_h, ank + off_h + np.array([0.0, 1.0, 0.0]), g, g)
     return np.array([M[s] for s in SEGS])
 
 

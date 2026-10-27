@@ -2,6 +2,7 @@
 //
 //#define _DLL
 #include "stdafx.h"
+#include "cpu_isa.h"
 int flacmode = 0;
 #include "kmp_pi.h"
 #include "kpi_decoder.h"
@@ -1115,6 +1116,8 @@ static CString BuildCpuInstructionListString()
 		if (CPUInfo[1] & (1 << 5))  avx2 += L"AVX2 ";
 		if (CPUInfo[1] & (1 << 16))  avx2 += L"AVX512 ";
 	}
+	if (CpuIsaHasAvx10())
+		avx2 += L"AVX10 ";
 	{
 		CString gpu = BuildGpuInfoString();
 		if (!gpu.IsEmpty()) {
@@ -7475,6 +7478,8 @@ BOOL COggDlg::OnInitDialog()
 		if (CPUInfo[1] & (1 << 5))  avx2 = LL14(L"AVX2対応", L"AVX2 supported", L"AVX2 pris en charge", L"AVX2 supportato", L"AVX2 compatible", L"AVX2 지원", L"AVX2 支持", L"AVX2 مدعوم", L"AVX2 поддерживается", L"AVX2 unterstützt", L"AVX2 suportado", L"AVX2 ondersteund", L"AVX2 obsługiwane", L"AVX2 destekleniyor");
 		if (CPUInfo[1] & (1 << 16))  avx2 = LL14(L"AVX512対応", L"AVX512 supported", L"AVX512 pris en charge", L"AVX512 supportato", L"AVX512 compatible", L"AVX512 지원", L"AVX512 支持", L"AVX512 مدعوم", L"AVX512 поддерживается", L"AVX512 unterstützt", L"AVX512 suportado", L"AVX512 ondersteund", L"AVX512 obsługiwane", L"AVX512 destekleniyor");
 	}
+	if (CpuIsaHasAvx10())
+		avx2 = LL14(L"AVX10対応", L"AVX10 supported", L"AVX10 pris en charge", L"AVX10 supportato", L"AVX10 compatible", L"AVX10 지원", L"AVX10 支持", L"AVX10 مدعوم", L"AVX10 поддерживается", L"AVX10 unterstützt", L"AVX10 suportado", L"AVX10 ondersteund", L"AVX10 obsługiwane", L"AVX10 destekleniyor");
 	s.Format(_T("%s / %s"), cpus, avx2);
 	s.Trim();
 	m_cpu.SetWindowText(s);
@@ -7504,6 +7509,8 @@ BOOL COggDlg::OnInitDialog()
 		if (CPUInfo[1] & (1 << 5))  avx2 += "AVX2 ";
 		if (CPUInfo[1] & (1 << 16))  avx2 += "AVX512 ";
 	}
+	if (CpuIsaHasAvx10())
+		avx2 += "AVX10 ";
 	/* GPU(DXGI)列挙は起動をブロックするため DeferredHeavy へ。ここでは命令一覧のみ。 */
 	m_os3.SetWindowText(avx2);
 
@@ -22521,6 +22528,14 @@ int readadpcmarc(CFile& adpcmf, char* bw, int len)
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
+extern int readme;
+// 終端サイクルの実バイト。0 のままだと DS は「直前までの書込み」で切り、最後のバッファが聴こえない。
+static void PlaybackMarkRealEnd(int realBytes)
+{
+	if (realBytes > 0 && (readme <= 0 || realBytes > readme))
+		readme = realBytes;
+}
+
 int playwavkpi(BYTE* bw, int old, int l1, int l2)
 {
 	// x64 KPI は別プロセス経由でデコードするため、この時点で kpidec==NULL になり得る
@@ -22586,11 +22601,14 @@ int playwavkpi(BYTE* bw, int old, int l1, int l2)
 			AdvanceOutAndSrcPos(rrr / bpf);
 	}
 	if (l1 != rrr) {
+		const int fadeBefore = fade1;
 		const int wrapped = kpiTakeLoop(bw + old, rrr, l1);
 		if (wrapped >= 0) {
 			if (wrapped < l1)
 				ZeroMemory(bw + old + wrapped, (SIZE_T)(l1 - wrapped));
 			l1 = wrapped;
+			if (fade1 && !fadeBefore)
+				PlaybackMarkRealEnd(l1);
 		}
 		// 書き出し中は秒数上限で止める。短い返却を即 EOF にすると RB プライミングで失敗する。
 		else if (!WantPlaybackLoop() && !exporting) {
@@ -22599,6 +22617,7 @@ int playwavkpi(BYTE* bw, int old, int l1, int l2)
 			// 途中のリング/RB短読みは終端にしない（DSD/MP3 と同じ）。真欠落だけ fade。
 			if (PlaybackShortMeansEof(rrr)) {
 				l1 = rrr;
+				PlaybackMarkRealEnd(l1);
 				if (savedata.saverenzoku == 0)
 					fade1 = 1;
 				else
@@ -22641,17 +22660,21 @@ int playwavkpi(BYTE* bw, int old, int l1, int l2)
 				AdvanceOutAndSrcPos(rrr / bpf);
 		}
 		if (l2 != rrr) {
+			const int fadeBefore = fade1;
 			const int wrapped = kpiTakeLoop(bw, rrr, l2);
 			if (wrapped >= 0) {
 				if (wrapped < l2)
 					ZeroMemory(bw + wrapped, (SIZE_T)(l2 - wrapped));
 				l2 = wrapped;
+				if (fade1 && !fadeBefore)
+					PlaybackMarkRealEnd(l1 + ((l2 > 0) ? l2 : 0));
 			}
 			else if (!WantPlaybackLoop() && !exporting) {
 				if (rrr < l2)
 					ZeroMemory(bw + rrr, (SIZE_T)(l2 - rrr));
 				if (PlaybackShortMeansEof(rrr)) {
 					l2 = rrr;
+					PlaybackMarkRealEnd(l1 + ((l2 > 0) ? l2 : 0));
 					if (savedata.saverenzoku == 0)
 						fade1 = 1;
 					else
@@ -22699,19 +22722,20 @@ static int playwavForeignPull(BYTE* bw, int old, int l1, int l2, int (*readfn)(B
 	// 生PCMを equaliser へ。Winamp/XMPlay/AIMP は winampvol、ZMUSIC 等は kpivol。SPC は掛けない。
 	EqualiserSetFormatVolContext(fmtVolMode, FALSE);
 	const bool exporting = (wavExportPath.GetLength() > 0 || g_isWavExportRendering);
-	auto foreignStop = [&](int got) {
+	auto foreignStop = [&](int already, int got) {
 		if (exporting) {
 			fade1 = 1;
 			return;
 		}
+		PlaybackMarkRealEnd(already + ((got > 0) ? got : 0));
 		if (savedata.saverenzoku == 0)
 			fade1 = 1;
 		else
 			endflg = 1;
-		(void)got;
 	};
-	auto foreignDone = [&](int got) -> bool {
-		if (InterlockedCompareExchange(&g_plugReadEof, 0, 0))
+	auto foreignDone = [&](int got, int want) -> bool {
+		// 満杯のバッファはまだ実音声。EOF フラグだけでは切らない（リングを聴き切ってから止める）。
+		if (got < want && InterlockedCompareExchange(&g_plugReadEof, 0, 0))
 			return true;
 		const int total = (loop2 > 0) ? (loop1 + loop2) : 0;
 		if (total <= 8) return false;
@@ -22726,11 +22750,11 @@ static int playwavForeignPull(BYTE* bw, int old, int l1, int l2, int (*readfn)(B
 		if (bpf > 0)
 			AdvanceOutAndSrcPos(rrr / bpf);
 	}
-	if (foreignDone(rrr)) {
+	if (foreignDone(rrr, l1)) {
 		if (rrr < l1)
 			ZeroMemory(bw + old + rrr, (SIZE_T)(l1 - rrr));
 		l1 = rrr;
-		foreignStop(rrr);
+		foreignStop(0, rrr);
 	}
 	else if (l1 != rrr) {
 		if (!WantPlaybackLoop() && !exporting) {
@@ -22738,7 +22762,7 @@ static int playwavForeignPull(BYTE* bw, int old, int l1, int l2, int (*readfn)(B
 				ZeroMemory(bw + old + rrr, (SIZE_T)(l1 - rrr));
 			if (PlaybackShortMeansEof(rrr)) {
 				l1 = rrr;
-				foreignStop(rrr);
+				foreignStop(0, rrr);
 			}
 		}
 		else if (!WantPlaybackLoop() && exporting && rrr <= 0 && fade1) {
@@ -22763,11 +22787,11 @@ static int playwavForeignPull(BYTE* bw, int old, int l1, int l2, int (*readfn)(B
 			if (bpf > 0)
 				AdvanceOutAndSrcPos(rrr / bpf);
 		}
-		if (foreignDone(rrr)) {
+		if (foreignDone(rrr, l2)) {
 			if (rrr < l2)
 				ZeroMemory(bw + rrr, (SIZE_T)(l2 - rrr));
 			l2 = rrr;
-			foreignStop(rrr);
+			foreignStop(l1, rrr);
 		}
 		else if (l2 != rrr) {
 			if (!WantPlaybackLoop() && !exporting) {
@@ -22775,7 +22799,7 @@ static int playwavForeignPull(BYTE* bw, int old, int l1, int l2, int (*readfn)(B
 					ZeroMemory(bw + rrr, (SIZE_T)(l2 - rrr));
 				if (PlaybackShortMeansEof(rrr)) {
 					l2 = rrr;
-					foreignStop(rrr);
+					foreignStop(l1, rrr);
 				}
 			}
 			else if (!WantPlaybackLoop() && exporting && rrr <= 0 && fade1) {
@@ -23555,6 +23579,7 @@ int playwavvst(BYTE* bw, int old, int l1, int l2)
 				}
 			} else {
 				l1 = rrr;
+				PlaybackMarkRealEnd(l1);
 				VstMarkPlaybackEof();
 			}
 		}
@@ -23607,6 +23632,7 @@ int playwavvst(BYTE* bw, int old, int l1, int l2)
 					}
 				} else {
 					l2 = r2;
+					PlaybackMarkRealEnd(l1 + ((l2 > 0) ? l2 : 0));
 					VstMarkPlaybackEof();
 				}
 			}
@@ -23759,6 +23785,7 @@ int playwavcemu(BYTE* bw, int old, int l1, int l2)
 			}
 			else {
 				l1 = rrr;
+				PlaybackMarkRealEnd(l1);
 				CEmuMarkPlaybackEof();
 			}
 		}
@@ -23799,6 +23826,7 @@ int playwavcemu(BYTE* bw, int old, int l1, int l2)
 				}
 				else {
 					l2 = r2;
+					PlaybackMarkRealEnd(l1 + ((l2 > 0) ? l2 : 0));
 					CEmuMarkPlaybackEof();
 				}
 			}
@@ -35116,12 +35144,71 @@ void COggDlg::OnButton5()
 }
 
 
-int COggDlg::moji(CString s, int x, int y, COLORREF rgb)
+struct BannerGlyph {
+	CString key;
+	COLORREF rgb;
+	HFONT font;
+	int x, y;
+	int textCx;
+	int bw, bh;
+	HBITMAP bmp;
+};
+static BannerGlyph g_bannerGlyph[12];
+static int g_bannerGlyphPos = 0;
+static HDC g_bannerGlyphDc = NULL;
+
+static BannerGlyph* BannerGlyphFind(const CString& key, COLORREF rgb, HFONT font, int x, int y)
+{
+	for (int i = 0; i < 12; ++i) {
+		BannerGlyph& g = g_bannerGlyph[i];
+		if (g.bmp && g.font == font && g.rgb == rgb && g.x == x && g.y == y && g.key == key)
+			return &g;
+	}
+	return NULL;
+}
+
+static void BannerGlyphBlit(HDC dst, int dx, int dy, const BannerGlyph& g, DWORD rop)
+{
+	if (!g_bannerGlyphDc || !g.bmp || !dst) return;
+	HGDIOBJ old = ::SelectObject(g_bannerGlyphDc, g.bmp);
+	::BitBlt(dst, dx, dy, g.bw, g.bh, g_bannerGlyphDc, 0, 0, rop);
+	::SelectObject(g_bannerGlyphDc, old);
+}
+
+static void BannerGlyphStore(HDC src, int bw, int bh, const CString& key, COLORREF rgb, HFONT font, int x, int y, int textCx)
+{
+	if (!src || bw <= 0 || bh <= 0) return;
+	BannerGlyph& g = g_bannerGlyph[g_bannerGlyphPos];
+	g_bannerGlyphPos = (g_bannerGlyphPos + 1) % 12;
+	if (!g_bannerGlyphDc)
+		g_bannerGlyphDc = ::CreateCompatibleDC(src);
+	if (!g_bannerGlyphDc) return;
+	if (g.bmp && (g.bw != bw || g.bh != bh)) {
+		::DeleteObject(g.bmp);
+		g.bmp = NULL;
+	}
+	if (!g.bmp)
+		g.bmp = ::CreateCompatibleBitmap(src, bw, bh);
+	if (!g.bmp) return;
+	HGDIOBJ old = ::SelectObject(g_bannerGlyphDc, g.bmp);
+	::BitBlt(g_bannerGlyphDc, 0, 0, bw, bh, src, 0, 0, SRCCOPY);
+	::SelectObject(g_bannerGlyphDc, old);
+	g.key = key;
+	g.rgb = rgb;
+	g.font = font;
+	g.x = x;
+	g.y = y;
+	g.textCx = textCx;
+	g.bw = bw;
+	g.bh = bh;
+}
+
+int COggDlg::moji(const CString& s, int x, int y, COLORREF rgb)
 {
 	return mojiPx(s, x * 4, y, rgb);
 }
 
-int COggDlg::mojiPx(CString s, int x_px, int y, COLORREF rgb)
+int COggDlg::mojiPx(const CString& s, int x_px, int y, COLORREF rgb)
 {
 	HFONT fo;
 	SIZE szinfo;
@@ -35133,6 +35220,12 @@ int COggDlg::mojiPx(CString s, int x_px, int y, COLORREF rgb)
 	double factor = 1.0 - (0.7 * m_jacketFocus);
 	rgb = RGB((BYTE)(r * factor), (BYTE)(g * factor), (BYTE)(b * factor));
 
+	if (BannerGlyph* hit = BannerGlyphFind(s, rgb, (HFONT)hFont, x_px, y)) {
+		SelectObject(dc, fo);
+		if (Ms2DrawDue(ms2))
+			BannerGlyphBlit(dc.GetSafeHdc(), x_px, y * 4, *hit, SRCINVERT);
+		return hit->textCx;
+	}
 	GetTextExtentPoint32(dc, s, s.GetLength(), &szinfo);
 	SelectObject(dc, fo);
 	if (!Ms2DrawDue(ms2))
@@ -35148,11 +35241,12 @@ int COggDlg::mojiPx(CString s, int x_px, int y, COLORREF rgb)
 	SetBkMode(dcsub, TRANSPARENT);
 	dcsub.TextOut(0, 0, s, s.GetLength());
 	SelectObject(dcsub, fo);
+	BannerGlyphStore(dcsub.GetSafeHdc(), tw, th, s, rgb, (HFONT)hFont, x_px, y, szinfo.cx);
 	dc.BitBlt(x_px, y * 4, tw, th, &dcsub, 0, 0, SRCINVERT);
 	return szinfo.cx;
 }
 
-int COggDlg::mojisub(CString s, int x, int y, COLORREF rgb)
+int COggDlg::mojisub(const CString& s, int x, int y, COLORREF rgb)
 {
 	CRect rect;
 	HFONT fo;
@@ -35169,12 +35263,20 @@ int COggDlg::mojisub(CString s, int x, int y, COLORREF rgb)
 	SetBkColor(dcsub, RGB(0, 0, 0));
 	SetBkMode(dcsub, TRANSPARENT);
 	szinfo = dcsub.GetOutputTextExtent(s);
+	const int subSlot = y + 100000;
+	if (BannerGlyph* hit = BannerGlyphFind(s, rgb, (HFONT)hFont, x, subSlot)) {
+		if (Ms2DrawDue(ms2)) {
+			BannerGlyphBlit(dcsub.GetSafeHdc(), 0, 0, *hit, SRCCOPY);
+			SelectObject(dcsub, fo);
+		}
+		return hit->textCx;
+	}
 	if (Ms2DrawDue(ms2)) {
-		if (szinfo.cx < (MDC + 8) * 4)
-			dcsub.FillSolidRect(0, 0, (MDC + 8) * 4, 30 * 4, RGB(0, 0, 0));
-		else
-			dcsub.FillSolidRect(0, 0, (szinfo.cx + MDC + 8) * 4, 30 * 4, RGB(0, 0, 0));
+		const int subW = (szinfo.cx < (MDC + 8) * 4) ? ((MDC + 8) * 4) : ((szinfo.cx + MDC + 8) * 4);
+		const int subH = 30 * 4;
+		dcsub.FillSolidRect(0, 0, subW, subH, RGB(0, 0, 0));
 		dcsub.TextOut(x * 4, y * 4, s, s.GetLength());
+		BannerGlyphStore(dcsub.GetSafeHdc(), subW, subH, s, rgb, (HFONT)hFont, x, subSlot, szinfo.cx);
 		SelectObject(dcsub, fo);
 	}
 	return szinfo.cx;
