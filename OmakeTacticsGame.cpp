@@ -192,6 +192,7 @@ Game::Game()
 	m_phase = m_phaseBeforeMenu = PH_NONE;
 	m_phaseT = 0;
 	m_cur = -1;
+	m_cmdFaced = 0;
 	m_hoverUnit = -1;
 	m_cursorValid = FALSE;
 	m_cx = m_cz = 0;

@@ -10,9 +10,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-// 効果音は短い MML（1〜3 音）を内蔵 FM / SSG で鳴らす。容量のため Ogg は使わない。
-// 音の型は公開メニュー／RPG 効果音の定石（上昇=決定、下降=キャンセル、SSG 矩形=ブザー、
-// 低音 FM=打撃）に合わせ、音色は場面ごとに @0〜@7 で固定する。
+// 効果音は短い MML（最大3パート）を YM2203 相当の 4op FM と SSG で鳴らす。Ogg は使わない。
+// 音色は場面ごと。ベル・金管・打撃・属性・斬撃を分け、同じ上昇アルペジオを使い回さない。
 
 extern COggDlg* og;
 extern int plf;
@@ -110,24 +109,24 @@ void TacAudioSetVol(int bgm, int se)
 }
 
 static const float kGain[TS_N] = {
-	0.27f, 0.46f, 0.38f, 0.40f, 0.43f,
-	0.49f, 0.43f, 0.16f, 0.40f, 0.38f,
-	0.43f, 0.49f, 0.57f, 0.27f, 0.40f,
-	0.40f, 0.46f, 0.54f, 0.48f, 0.49f,
-	0.40f, 0.38f, 0.43f, 0.40f, 0.38f,
-	0.35f, 0.40f, 0.35f, 0.32f, 0.46f,
-	0.40f, 0.46f,
-	0.46f, 0.42f, 0.46f, 0.42f, 0.44f, 0.40f, 0.46f, 0.40f,
-	0.42f, 0.42f, 0.44f,
-	0.44f, 0.40f, 0.44f, 0.42f, 0.42f,
-	0.46f,
-	0.50f, 0.44f, 0.48f, 0.44f, 0.46f, 0.42f, 0.50f, 0.42f,
-	0.40f, 0.42f, 0.46f,
-	0.48f, 0.54f,
-	0.28f, 0.26f,
-	0.44f, 0.40f, 0.36f, 0.36f, 0.38f, 0.36f, 0.42f,
-	0.46f, 0.50f, 0.40f,
-	0.48f, 0.46f, 0.38f, 0.40f, 0.40f
+	0.22f, 0.48f, 0.40f, 0.44f, 0.46f,
+	0.52f, 0.46f, 0.28f, 0.50f, 0.44f,
+	0.46f, 0.55f, 0.62f, 0.30f, 0.44f,
+	0.42f, 0.50f, 0.56f, 0.46f, 0.50f,
+	0.42f, 0.46f, 0.48f, 0.40f, 0.46f,
+	0.40f, 0.48f, 0.32f, 0.36f, 0.50f,
+	0.44f, 0.52f,
+	0.50f, 0.44f, 0.54f, 0.48f, 0.46f, 0.42f, 0.50f, 0.42f,
+	0.44f, 0.42f, 0.50f,
+	0.52f, 0.46f, 0.52f, 0.48f, 0.50f,
+	0.50f,
+	0.56f, 0.48f, 0.58f, 0.50f, 0.50f, 0.46f, 0.56f, 0.46f,
+	0.46f, 0.50f, 0.54f,
+	0.54f, 0.62f,
+	0.30f, 0.28f,
+	0.50f, 0.44f, 0.38f, 0.36f, 0.46f, 0.48f, 0.46f,
+	0.48f, 0.54f, 0.46f,
+	0.52f, 0.50f, 0.40f, 0.40f, 0.46f
 };
 
 static size_t TacRead(void* dst, size_t sz, size_t nm, void* h)
@@ -214,25 +213,56 @@ static int TacDecodeMem(const unsigned char* p, size_t n, TacClip& out)
 
 static void TacBake(int id);
 
-// YM2612 系 4op と SSG。1〜3 音の短い効果音用。コーラスと残響は足さない。
-// @0 ベル @1 電子ピアノ @2 笛 @3 低音打撃 @4 金管 @5 金属クリック @6 SSG矩形 @7 SSGノイズ
+// YM2203 相当。FM は 4 オペレータ、SSG は矩形とノイズ。コーラスと残響は足さない。
+// kind: 0=FM 1=矩形 2=ノイズ 3=矩形+ノイズ。sweep は音の長さで動く半音。
+// @0 ベル @1 エレピ @2 笛 @3 打撃 @4 金管 @5 金属 @6 矩形 @7 ノイズ
+// @8 木琴 @9 ハープ @10 炎 @11 氷 @12 雷 @13 聖 @14 闇 @15 地 @16 毒
+// @17 斬 @18 突 @19 殴 @20 弓 @21 硬貨 @22 盾 @23 細矩形
 static float FmSin(float cyc)
 {
 	float x = cyc - (float)(int)cyc;
 	if (x < 0.f) x += 1.f;
 	return sinf(x * 6.2831853f);
 }
-struct FmVoice { float mul[4]; float lvl[4]; int alg; float fb; float atk; float dec; float sus; float rel; };
-static const FmVoice kFmVoice[8] = {
-	{ { 12.f, 1.f, 1.f, 1.f }, { 0.18f, 0.42f, 0.16f, 0.88f }, 0, 0.10f, 0.001f, 0.055f, 0.08f, 0.05f },
-	{ { 1.f, 1.f, 2.f, 1.f }, { 0.28f, 0.46f, 0.16f, 0.86f }, 1, 0.08f, 0.004f, 0.07f, 0.32f, 0.06f },
-	{ { 1.f, 1.f, 1.f, 1.f }, { 0.06f, 0.08f, 0.10f, 0.90f }, 2, 0.03f, 0.008f, 0.10f, 0.50f, 0.09f },
-	{ { 0.5f, 1.f, 1.f, 1.f }, { 0.32f, 0.38f, 0.16f, 0.92f }, 0, 0.16f, 0.002f, 0.09f, 0.22f, 0.07f },
-	{ { 1.f, 1.f, 1.f, 1.f }, { 0.24f, 0.36f, 0.18f, 0.84f }, 1, 0.14f, 0.005f, 0.09f, 0.36f, 0.08f },
-	{ { 8.f, 1.f, 2.f, 1.f }, { 0.14f, 0.36f, 0.12f, 0.78f }, 0, 0.06f, 0.001f, 0.028f, 0.04f, 0.035f },
-	{ { 1.f, 1.f, 1.f, 1.f }, { 0.f, 0.f, 0.f, 0.5f }, 2, 0.f, 0.001f, 0.04f, 0.12f, 0.04f },
-	{ { 1.f, 1.f, 1.f, 1.f }, { 0.f, 0.f, 0.f, 0.5f }, 2, 0.f, 0.001f, 0.03f, 0.08f, 0.04f },
+struct FmVoice {
+	float mul[4];
+	float lvl[4];
+	int alg;
+	float fb;
+	float atk, dec, sus, rel;
+	int kind;
+	float duty;
+	float sweep;
+	float nz;
+	int nper;
 };
+static const FmVoice kFmVoice[] = {
+	{ { 14.f, 1.f, 1.01f, 1.f }, { 0.42f, 0.55f, 0.72f, 0.80f }, 3, 0.28f, 0.001f, 0.045f, 0.06f, 0.06f, 0, 0.50f, 0.f, 0.f, 0 },
+	{ { 1.f, 1.f, 14.f, 1.f }, { 0.32f, 0.88f, 0.18f, 0.70f }, 1, 0.10f, 0.003f, 0.08f, 0.28f, 0.07f, 0, 0.50f, 0.f, 0.f, 0 },
+	{ { 1.f, 2.f, 1.f, 1.f }, { 0.16f, 0.82f, 0.08f, 0.55f }, 0, 0.06f, 0.010f, 0.07f, 0.55f, 0.08f, 0, 0.50f, 0.f, 0.f, 0 },
+	{ { 0.5f, 1.f, 1.f, 1.f }, { 0.72f, 0.60f, 0.18f, 0.90f }, 0, 0.36f, 0.001f, 0.045f, 0.06f, 0.05f, 0, 0.50f, -5.f, 0.28f, 8 },
+	{ { 1.f, 1.f, 1.f, 1.007f }, { 0.48f, 0.82f, 0.28f, 0.86f }, 1, 0.24f, 0.006f, 0.07f, 0.42f, 0.08f, 0, 0.50f, 0.f, 0.f, 0 },
+	{ { 7.f, 1.f, 11.f, 1.f }, { 0.55f, 0.42f, 0.50f, 0.62f }, 3, 0.18f, 0.001f, 0.016f, 0.02f, 0.028f, 0, 0.50f, 0.f, 0.10f, 2 },
+	{ { 1.f, 1.f, 1.f, 1.f }, { 0.f, 0.f, 0.f, 0.f }, 0, 0.f, 0.001f, 0.02f, 0.85f, 0.03f, 1, 0.50f, 0.f, 0.f, 0 },
+	{ { 1.f, 1.f, 1.f, 1.f }, { 0.f, 0.f, 0.f, 0.f }, 0, 0.f, 0.001f, 0.02f, 0.08f, 0.03f, 2, 0.50f, 0.f, 0.f, 16 },
+	{ { 3.5f, 1.f, 1.f, 1.f }, { 0.46f, 0.92f, 0.08f, 0.16f }, 0, 0.08f, 0.001f, 0.07f, 0.04f, 0.05f, 0, 0.50f, 0.f, 0.f, 0 },
+	{ { 1.f, 1.f, 2.f, 1.004f }, { 0.14f, 0.86f, 0.10f, 0.48f }, 1, 0.06f, 0.002f, 0.12f, 0.16f, 0.10f, 0, 0.50f, 0.f, 0.f, 0 },
+	{ { 1.f, 1.f, 2.f, 3.f }, { 0.50f, 0.62f, 0.38f, 0.78f }, 3, 0.40f, 0.001f, 0.06f, 0.08f, 0.05f, 0, 0.50f, 4.f, 0.32f, 3 },
+	{ { 1.f, 1.f, 7.f, 1.f }, { 0.18f, 0.72f, 0.32f, 0.50f }, 3, 0.10f, 0.004f, 0.16f, 0.22f, 0.12f, 0, 0.50f, 0.f, 0.f, 0 },
+	{ { 1.f, 1.f, 1.f, 1.f }, { 0.f, 0.f, 0.f, 0.f }, 0, 0.f, 0.001f, 0.01f, 0.06f, 0.02f, 3, 0.28f, -8.f, 0.f, 2 },
+	{ { 2.f, 1.f, 1.f, 1.005f }, { 0.28f, 0.80f, 0.14f, 0.68f }, 1, 0.14f, 0.005f, 0.10f, 0.32f, 0.10f, 0, 0.50f, 0.f, 0.f, 0 },
+	{ { 1.5f, 1.f, 0.5f, 1.f }, { 0.48f, 0.74f, 0.28f, 0.55f }, 0, 0.28f, 0.003f, 0.10f, 0.22f, 0.08f, 0, 0.50f, -6.f, 0.12f, 12 },
+	{ { 0.5f, 1.f, 1.f, 1.f }, { 0.78f, 0.90f, 0.14f, 0.36f }, 0, 0.22f, 0.001f, 0.08f, 0.08f, 0.06f, 0, 0.50f, -7.f, 0.42f, 14 },
+	{ { 1.f, 1.04f, 2.f, 1.f }, { 0.32f, 0.58f, 0.36f, 0.66f }, 2, 0.16f, 0.005f, 0.08f, 0.32f, 0.08f, 0, 0.50f, -2.f, 0.06f, 18 },
+	{ { 1.f, 1.f, 2.f, 1.f }, { 0.38f, 0.48f, 0.22f, 0.66f }, 1, 0.18f, 0.001f, 0.05f, 0.04f, 0.04f, 0, 0.50f, -12.f, 0.38f, 4 },
+	{ { 3.f, 1.f, 1.f, 1.f }, { 0.42f, 0.82f, 0.08f, 0.24f }, 0, 0.10f, 0.001f, 0.028f, 0.02f, 0.03f, 0, 0.50f, 3.f, 0.18f, 3 },
+	{ { 0.5f, 1.f, 1.f, 1.f }, { 0.82f, 0.95f, 0.16f, 0.28f }, 0, 0.32f, 0.001f, 0.04f, 0.05f, 0.04f, 0, 0.50f, -4.f, 0.34f, 6 },
+	{ { 1.f, 1.f, 3.f, 1.f }, { 0.18f, 0.84f, 0.22f, 0.36f }, 1, 0.08f, 0.001f, 0.09f, 0.02f, 0.06f, 0, 0.50f, -2.f, 0.06f, 0 },
+	{ { 10.f, 1.f, 14.f, 1.f }, { 0.36f, 0.52f, 0.42f, 0.64f }, 3, 0.14f, 0.001f, 0.028f, 0.02f, 0.045f, 0, 0.50f, 0.f, 0.f, 0 },
+	{ { 1.f, 1.f, 6.f, 1.f }, { 0.32f, 0.74f, 0.38f, 0.78f }, 1, 0.16f, 0.001f, 0.05f, 0.14f, 0.08f, 0, 0.50f, 0.f, 0.14f, 2 },
+	{ { 1.f, 1.f, 1.f, 1.f }, { 0.f, 0.f, 0.f, 0.f }, 0, 0.f, 0.001f, 0.02f, 0.25f, 0.02f, 1, 0.22f, 0.f, 0.f, 0 },
+};
+enum { TAC_FM_N = (int)(sizeof(kFmVoice) / sizeof(kFmVoice[0])) };
 struct MmlEv { int t0; int n; float hz; int voice; float vol; int pan; int ssg; };
 
 static float FmEnv(const FmVoice& v, float t, float dur)
@@ -249,43 +279,61 @@ static float FmEnv(const FmVoice& v, float t, float dur)
 	if (u >= 1.f) return 0.f;
 	return v.sus * (1.f - u);
 }
+static void FmNoise(unsigned& noise, int& clk, int per)
+{
+	if (per < 1) per = 1;
+	if (++clk < per) return;
+	clk = 0;
+	unsigned bit = ((noise >> 0) ^ (noise >> 3)) & 1u;
+	noise = (noise >> 1) | (bit << 16);
+}
 static void FmAdd(float* L, float* R, int total, const MmlEv& ev, unsigned& noise)
 {
-	const FmVoice& v = kFmVoice[ev.voice & 7];
-	float rel = ev.ssg ? 0.04f : (v.rel > 0.01f ? v.rel : 0.04f);
+	int vi = ev.voice;
+	if (vi < 0 || vi >= TAC_FM_N) vi = 0;
+	const FmVoice& v = kFmVoice[vi];
+	float rel = v.rel > 0.01f ? v.rel : 0.04f;
 	int n = ev.n + (int)(rel * (float)TAC_RATE);
 	if (ev.t0 >= total) return;
 	if (ev.t0 + n > total) n = total - ev.t0;
 	float g = ev.vol;
 	float dur = (float)ev.n / (float)TAC_RATE;
-	if (ev.ssg) {
+	if (dur < 0.01f) dur = 0.01f;
+	if (v.kind != 0) {
 		float sq = 0.f;
 		int nclk = 0;
+		float duty = v.duty;
+		if (duty < 0.08f) duty = 0.08f;
+		if (duty > 0.5f) duty = 0.5f;
 		for (int i = 0; i < n; i++) {
 			float t = (float)i / (float)TAC_RATE;
+			float u = t / dur;
+			if (u > 1.f) u = 1.f;
+			float hz = ev.hz * powf(2.f, (v.sweep * u) / 12.f);
 			float env;
-			if (t < 0.002f) env = t / 0.002f;
+			if (v.sus >= 0.45f) {
+				env = t < 0.002f ? t / 0.002f : 1.f;
+			} else if (t < 0.002f) env = t / 0.002f;
 			else {
-				float tau = dur * 0.42f;
-				if (tau < 0.012f) tau = 0.012f;
+				float tau = dur * 0.38f;
+				if (tau < 0.010f) tau = 0.010f;
 				env = expf(-(t - 0.002f) / tau);
 			}
 			if (t > dur + rel) env = 0.f;
 			else if (t > dur) env *= 1.f - (t - dur) / rel;
 			if (env <= 0.001f) continue;
 			float s = 0.f;
-			if (ev.ssg == 1) {
-				sq += ev.hz / (float)TAC_RATE;
+			if (v.kind == 1 || v.kind == 3) {
+				sq += hz / (float)TAC_RATE;
 				if (sq >= 1.f) sq -= 1.f;
-				s = (sq < 0.5f ? 0.20f : -0.20f) * env;
-			} else {
-				if (++nclk >= 10) {
-					unsigned bit = ((noise >> 0) ^ (noise >> 3)) & 1u;
-					noise = (noise >> 1) | (bit << 16);
-					nclk = 0;
-				}
-				s = ((noise & 1u) ? 0.12f : -0.12f) * env;
+				s += (sq < duty ? 0.48f : -0.48f);
 			}
+			if (v.kind == 2 || v.kind == 3) {
+				int per = v.nper > 0 ? v.nper : 8;
+				FmNoise(noise, nclk, per);
+				s += (noise & 1u) ? 0.32f : -0.32f;
+			}
+			s *= env;
 			L[ev.t0 + i] += s * g;
 			R[ev.t0 + i] += s * g;
 		}
@@ -293,25 +341,51 @@ static void FmAdd(float* L, float* R, int total, const MmlEv& ev, unsigned& nois
 	}
 	float ph[4] = { 0, 0, 0, 0 };
 	float fb = 0.f;
+	int nclk = 0;
 	for (int i = 0; i < n; i++) {
 		float t = (float)i / (float)TAC_RATE;
 		float env = FmEnv(v, t, dur);
 		if (env <= 0.f) continue;
-		float m0 = FmSin(ph[0] + fb * v.fb) * v.lvl[0];
-		ph[0] += ev.hz * v.mul[0] / (float)TAC_RATE;
-		float m1 = FmSin(ph[1] + m0) * v.lvl[1];
-		ph[1] += ev.hz * v.mul[1] / (float)TAC_RATE;
-		float in2 = v.alg == 0 ? m1 : 0.f;
-		float m2 = FmSin(ph[2] + in2) * v.lvl[2];
-		ph[2] += ev.hz * v.mul[2] / (float)TAC_RATE;
-		float in3 = v.alg == 0 ? m2 : (v.alg == 1 ? m1 : 0.f);
-		float m3 = FmSin(ph[3] + in3) * v.lvl[3];
-		ph[3] += ev.hz * v.mul[3] / (float)TAC_RATE;
-		fb = m0;
-		float a = v.alg == 2 ? (m0 + m1 + m2 + m3) * 0.22f : (v.alg == 1 ? (m1 + m3) * 0.38f : m3 * 0.78f + m1 * 0.08f);
-		float s = a * env;
-		L[ev.t0 + i] += s * g;
-		R[ev.t0 + i] += s * g;
+		float u = t / dur;
+		if (u > 1.f) u = 1.f;
+		float hz = ev.hz * powf(2.f, (v.sweep * u) / 12.f);
+		float o0 = FmSin(ph[0] + fb * v.fb) * v.lvl[0];
+		float o1, o2, o3, a;
+		if (v.alg == 2) {
+			o1 = FmSin(ph[1]) * v.lvl[1];
+			o2 = FmSin(ph[2]) * v.lvl[2];
+			o3 = FmSin(ph[3]) * v.lvl[3];
+			a = (o0 + o1 + o2 + o3) * 0.30f;
+		} else if (v.alg == 3) {
+			o1 = FmSin(ph[1] + o0) * v.lvl[1];
+			o2 = FmSin(ph[2] + o0) * v.lvl[2];
+			o3 = FmSin(ph[3] + o0 * 0.65f) * v.lvl[3];
+			a = (o1 + o2 + o3) * 0.42f;
+		} else if (v.alg == 1) {
+			o1 = FmSin(ph[1] + o0) * v.lvl[1];
+			o2 = FmSin(ph[2]) * v.lvl[2];
+			o3 = FmSin(ph[3] + o2) * v.lvl[3];
+			a = (o1 + o3) * 0.50f;
+		} else {
+			o1 = FmSin(ph[1] + o0) * v.lvl[1];
+			o2 = FmSin(ph[2] + o1) * v.lvl[2];
+			o3 = FmSin(ph[3] + o2) * v.lvl[3];
+			a = o3 * 0.92f;
+		}
+		ph[0] += hz * v.mul[0] / (float)TAC_RATE;
+		ph[1] += hz * v.mul[1] / (float)TAC_RATE;
+		ph[2] += hz * v.mul[2] / (float)TAC_RATE;
+		ph[3] += hz * v.mul[3] / (float)TAC_RATE;
+		fb = o0;
+		if (v.nz > 0.001f) {
+			int per = v.nper > 0 ? v.nper : 4;
+			FmNoise(noise, nclk, per);
+			float nenv = expf(-t / 0.018f);
+			a += ((noise & 1u) ? 0.36f : -0.36f) * v.nz * nenv;
+		}
+		float s = a * env * g;
+		L[ev.t0 + i] += s;
+		R[ev.t0 + i] += s;
 	}
 }
 static int MmlSemi(char n)
@@ -404,10 +478,12 @@ static int MmlTrack(const char* s, int track, MmlEv* ev, int nEv, int cap)
 			e.n = dur;
 			int midi = (oct + 1) * 12 + semi;
 			e.hz = 440.f * powf(2.f, (midi - 69) / 12.f);
-			e.voice = voice & 7;
+			if (voice < 0) voice = 0;
+			if (voice >= TAC_FM_N) voice = TAC_FM_N - 1;
+			e.voice = voice;
 			e.vol = vol;
 			e.pan = pan;
-			e.ssg = (voice == 6) ? 1 : (voice == 7 ? 2 : 0);
+			e.ssg = kFmVoice[voice].kind;
 		}
 		if (chord) {
 			int end = chordAt + dur;
@@ -474,85 +550,85 @@ static short* MmlMix(const char* src, int& frames, float gain)
 	return dst;
 }
 static const char* const kMml[TS_N] = {
-	"t200 l32 o6 v8 @5 e",
-	"t168 l16 o5 v10 @0 c e g",
-	"t150 l16 o5 v9 @1 e c",
-	"t110 l8 o3 v9 @6 c c",
-	"t160 l16 o4 v10 @2 c e g",
-	"t150 l16 o4 v11 @4 c g",
-	"t130 l16 o3 v10 @3 a e",
-	"t220 l64 o3 v6 @7 c",
-	"t180 l32 o3 v11 @3 a | t180 l32 o2 v5 @7 c",
-	"t170 l16 o5 v9 @5 e c",
-	"t140 l16 o5 v9 @2 e g b",
-	"t150 l16 o2 v11 @3 c | t150 l32 o3 v5 @7 c",
-	"t160 l16 o4 v11 @4 c e g",
-	"t180 l32 o6 v7 @5 c e",
-	"t140 l16 o5 v9 @2 e g >c",
-	"t150 l16 o5 v9 @0 g b >e",
-	"t90 l8 o3 v10 @3 a f c",
-	"t128 l8 o4 v11 @4 c e g >c4 <g8 >c2 | t128 l8 o5 v9 @0 e g b >e4 c8 e2",
-	"t100 l8 o4 v10 @4 e- c <a-4 g-2 | t100 l8 o3 v9 @3 e- c <a-4 g-2",
-	"t150 l16 o5 v10 @0 c e g",
-	"t160 l16 o4 v10 @1 c e",
-	"t170 l16 o5 v9 @0 e >c",
-	"t160 l16 o4 v10 @4 c g",
-	"t155 l16 o5 v9 @2 d f a",
-	"t165 l16 o4 v9 @1 g >c",
-	"t150 l16 o4 v9 @1 c a",
-	"t145 l16 o5 v9 @2 e g b",
-	"t140 l16 o4 v8 @3 d g",
-	"t170 l32 o5 v8 @5 g",
-	"t150 l16 o5 v10 @0 c e g",
-	"t100 l8 o2 v10 @3 c g",
-	"t140 l16 o3 v10 @3 d | t140 l32 o2 v5 @7 c",
-	"t140 l16 o3 v10 @4 c e | t140 l32 o2 v6 @7 c",
-	"t170 l16 o6 v8 @0 g e c",
-	"t200 l32 o5 v10 @5 c e g",
-	"t140 l16 o5 v9 @2 e g >c",
-	"t90 l8 o3 v10 @3 e- c",
-	"t180 l16 o6 v8 @5 e a",
-	"t100 l8 o2 v11 @3 c g",
-	"t120 l16 o4 v8 @6 e- g-",
-	"t150 l16 o5 v9 @2 c e g",
-	"t150 l16 o5 v9 @0 e g b",
-	"t120 l8 o4 v10 @2 c e g",
-	"t150 l16 o2 v11 @3 g | t150 l32 o2 v5 @7 c",
-	"t190 l32 o4 v10 @5 b",
-	"t160 l16 o2 v11 @3 d",
-	"t180 l32 o3 v10 @3 a e",
-	"t170 l32 o3 v10 @3 f | t170 l32 o2 v5 @7 c",
-	"t150 l16 o4 v10 @4 c e g",
-	"t120 l8 o2 v11 @4 c | t120 l16 o3 v6 @7 c",
-	"t180 l16 o6 v9 @0 c e",
-	"t200 l32 o5 v10 @5 g c e",
-	"t150 l16 o5 v9 @2 g >c",
-	"t90 l8 o2 v11 @3 e-",
-	"t180 l16 o6 v8 @5 a e",
-	"t100 l8 o2 v12 @3 c g",
-	"t110 l16 o3 v9 @6 e- c",
-	"t180 l32 o5 v9 @5 c",
-	"t190 l32 o4 v10 @5 e",
-	"t150 l16 o2 v11 @3 c",
-	"t140 l16 o4 v11 @4 c g",
-	"t130 l8 o4 v11 @4 c e g",
-	"t180 l32 o6 v7 @5 e c",
-	"t190 l32 o6 v6 @5 a",
-	"t120 l8 o5 v10 @2 c e g",
-	"t160 l16 o5 v9 @0 e g",
-	"t110 l16 o3 v8 @6 e-",
-	"t130 l16 o5 v8 @0 e- c",
-	"t140 l16 o4 v9 @6 c e",
-	"t160 l16 o5 v8 @5 c",
-	"t140 l16 o5 v9 @2 g e c",
-	"t160 l16 o6 v10 @0 e g >c",
-	"t130 l8 o4 v11 @4 c e g",
-	"t170 l16 o5 v9 @0 e >c",
-	"t150 l8 o4 v11 @4 g >c4 | t150 l16 o3 v10 @3 c g",
-	"t150 l16 o4 v11 @4 c >c | t150 l16 o5 v8 @0 e g",
-	"t140 l16 o5 v8 @6 e- g- c",
-	"t80 l8 o3 v9 @1 g e c",
-	"t110 l8 o3 v10 @3 a f",
+	"t220 l64 o6 v8 @5 e",
+	"t168 l16 o5 v12 @0 c e g",
+	"t150 l16 o5 v10 @1 g e c",
+	"t100 l8 o2 v12 @6 c <g",
+	"t150 l16 o4 v11 @4 c e g",
+	"t140 l8 o3 v12 @4 c g >e",
+	"t120 l8 o3 v11 @14 e- c <a-",
+	"t200 l32 o2 v10 @3 c | t200 l32 o1 v7 @7 c",
+	"t180 l16 o4 v12 @17 c | t180 l32 o3 v8 @7 c",
+	"t160 l16 o5 v11 @20 e c | t200 l64 o6 v6 @5 e",
+	"t150 l16 o5 v10 @13 c e g",
+	"t140 l16 o2 v12 @3 c | t160 l32 o3 v7 @7 c",
+	"t150 l16 o2 v13 @3 c | t190 l32 o6 v9 @0 c e g",
+	"t200 l16 o5 v6 @7 c e",
+	"t140 l16 o5 v10 @9 c e g >c",
+	"t150 l16 o5 v9 @2 e g b",
+	"t80 l8 o3 v12 @14 a f c <g",
+	"t128 l8 o4 v12 @4 c e g >c4 <g8 >c2 | t128 l8 o5 v9 @0 e g b >e4 c8 e2",
+	"t90 l8 o3 v11 @14 e- c <a- g-2",
+	"t150 l16 o5 v11 @0 c e g >c",
+	"t160 l16 o5 v10 @0 c e g",
+	"t200 l32 o6 v12 @21 e a",
+	"t170 l16 o4 v11 @4 c g",
+	"t150 l16 o5 v9 @9 c e g",
+	"t200 l32 o4 v12 @5 c | t200 l64 o3 v8 @22 g",
+	"t170 l16 o6 v10 @21 a e c",
+	"t160 l16 o5 v10 @13 c e g | t200 l32 o6 v7 @0 g",
+	"t180 l32 o5 v7 @23 e",
+	"t160 l16 o4 v8 @1 c e",
+	"t150 l16 o5 v11 @8 c e g >c | t190 l32 o6 v8 @21 e",
+	"t90 l8 o2 v9 @7 c | t180 l32 o4 v11 @5 r16 c",
+	"t130 l16 o2 v12 @19 c | t140 l16 o3 v8 @14 e- c",
+	"t150 l16 o4 v12 @10 c e g | t160 l32 o3 v7 @7 c",
+	"t140 l16 o6 v10 @11 e g >c",
+	"t200 l32 o3 v12 @12 c g c",
+	"t140 l16 o5 v11 @13 [ceg] e >c",
+	"t110 l8 o3 v11 @14 e- c <g",
+	"t170 l16 o5 v9 @2 c e g >e | t180 l16 o5 v6 @7 c",
+	"t100 l8 o2 v12 @15 c g",
+	"t120 l16 o4 v9 @16 e- f e-",
+	"t140 l16 o5 v10 @9 e g >c",
+	"t150 l16 o5 v9 @2 g b >d",
+	"t130 l8 o4 v11 @13 c e g >c",
+	"t120 l8 o3 v12 @17 c | t140 l16 o2 v8 @7 c",
+	"t200 l32 o4 v12 @18 e | t200 l64 o5 v6 @5 e",
+	"t150 l16 o2 v12 @19 c",
+	"t160 l16 o4 v11 @17 c e c | t160 l16 o3 v7 @7 c e",
+	"t180 l32 o2 v12 @19 c c | t200 l32 o3 v8 @7 c",
+	"t160 l16 o5 v10 @13 e g >c | t180 l16 o4 v7 @17 c",
+	"t150 l16 o3 v12 @10 c | t160 l32 o2 v8 @7 c",
+	"t170 l32 o6 v11 @11 e g",
+	"t220 l64 o3 v13 @12 c e c",
+	"t160 l16 o5 v11 @13 [ceg]",
+	"t100 l8 o2 v12 @14 e- c",
+	"t180 l16 o5 v9 @2 e c | t180 l16 o5 v6 @7 c",
+	"t110 l8 o2 v13 @15 c",
+	"t130 l16 o4 v9 @16 e- g- e-",
+	"t160 l16 o4 v11 @20 c | t180 l32 o3 v8 @3 c",
+	"t190 l32 o4 v12 @18 e",
+	"t140 l16 o2 v13 @19 c",
+	"t150 l16 o4 v11 @13 c e | t150 l16 o3 v8 @10 c",
+	"t120 l8 o4 v12 @4 c e g >c | t140 l16 o5 v9 @13 e g >c",
+	"t160 l16 o5 v7 @16 e- c",
+	"t200 l32 o5 v6 @7 c e",
+	"t130 l8 o4 v11 @9 c e g >c | t160 l16 o6 v8 @0 e g",
+	"t170 l16 o6 v9 @11 c e g",
+	"t110 l16 o4 v8 @16 e- f e- f",
+	"t80 l8 o5 v8 @9 e c <g",
+	"t140 l16 o3 v12 @22 c | t160 l32 o2 v8 @3 c",
+	"t150 l16 o4 v12 @22 c g e",
+	"t160 l16 o4 v10 @2 c e g >c >e",
+	"t160 l16 o5 v11 @0 c e g >e",
+	"t120 l8 o4 v12 @4 c e g >c4 | t140 l16 o5 v8 @0 e g >c",
+	"t170 l16 o6 v11 @21 e g | t160 l16 o5 v8 @8 c e",
+	"t130 l8 o3 v12 @4 c g >e | t150 l16 o5 v8 @0 c e g",
+	"t140 l8 o3 v12 @4 c e g",
+	"t150 l16 o4 v9 @16 c f+ c",
+	"t70 l8 o3 v9 @1 g e c",
+	"t120 l16 o3 v11 @22 c <g | t140 l32 o2 v7 @7 c",
 };
 static void TacSynthAll()
 {

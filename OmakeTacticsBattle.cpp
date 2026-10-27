@@ -608,6 +608,7 @@ void Game::BeginTurn()
 	m_curX0 = u.x; m_curZ0 = u.z; m_curFace0 = u.face;
 	m_moved = 0;
 	m_cmdSkill = -1;
+	m_cmdFaced = 0;
 	m_target = -1;
 	m_pathN = 0;
 	ComputeReach(m_b, ui, m_reach);
@@ -939,6 +940,7 @@ void Game::UpdateHover()
 	if (m_hoverUnit >= 0 && !m_b.u[m_hoverUnit].alive && m_b.u[m_hoverUnit].team != TEAM_PLAYER) m_hoverUnit = -1;
 	if (m_hoverUnit < 0 && m_cursorValid)
 		m_hoverUnit = CorpseAt(m_b, m_cx, m_cz);
+	if (m_phase == PH_P_SKILLTARGET) AimFormFace();
 	m_pathN = 0;
 	if (m_phase == PH_P_MOVE && m_cur >= 0 && m_cursorValid) {
 		const Unit& u = m_b.u[m_cur];
@@ -1220,12 +1222,14 @@ void Game::BattleCancel()
 		sounded = 1;
 		break;
 	case PH_P_SKILLTARGET:
+		if (m_cmdFaced && m_cur >= 0) m_b.u[m_cur].face = m_cmdFace0;
+		m_cmdFaced = 0;
 		m_phase = PH_P_SKILLS; m_navMode = TRUE; m_focusId = ID_BT_SK0 + max(0, m_cmdSkill);
 		if (IsCraftId(m_cmdSkill)) {
 			int slot = 0;
 			for (int i = 0; i < CRAFT_SLOT_N; i++) if (m_b.u[m_cur].craftEq[i] == m_cmdSkill) slot = i;
 			m_focusId = ID_BT_CRAFT0 + slot;
-		}
+		} else if (IsFormSkill(m_cmdSkill)) m_focusId = ID_BT_FORM0 + (m_cmdSkill - SKL_FORM0);
 		ComputeOverlays();
 		sounded = 1;
 		break;
@@ -1400,15 +1404,73 @@ void Game::FaceTowards(int ui, int tx, int tz)
 	u.face = atan2f((float)(tx - u.x), (float)(tz - u.z));
 }
 
+void Game::AimFormFace()
+{
+	if (m_cur < 0 || m_cmdSkill < 0 || !IsFormSkill(m_cmdSkill)) return;
+	int form = FormOf(m_cmdSkill);
+	if (form == FM_NONE || form == FM_CIRCLE || form == FM_SQUARE || form == FM_PAIR) return;
+	Unit& u = m_b.u[m_cur];
+	int fx, fz;
+	if (m_cursorValid && (m_cx != u.x || m_cz != u.z) && FormFits(m_b, m_cur, m_cmdSkill, m_cx, m_cz)) {
+		FormDir(m_cx - u.x, m_cz - u.z, fx, fz);
+		u.face = atan2f((float)fx, (float)fz);
+		return;
+	}
+	if (FormPickAim(m_b, m_cur, m_cmdSkill, fx, fz))
+		u.face = atan2f((float)fx, (float)fz);
+}
+
+void Game::PickSkillCursor(int skill)
+{
+	if (m_cur < 0) return;
+	const Unit& u = m_b.u[m_cur];
+	const SkillDef& sd = SkillInfo(skill);
+	m_cursorValid = FALSE;
+	int wantX = 0, wantZ = 1;
+	BOOL want = IsFormSkill(skill) && FormPickAim(m_b, m_cur, skill, wantX, wantZ);
+	if (sd.rMax != 0) {
+		if (want) {
+			for (int i = 0; i < m_b.nUnits; i++) {
+				if (!CanTarget(m_cur, i, skill)) continue;
+				int ax, az;
+				FormDir(m_b.u[i].x - u.x, m_b.u[i].z - u.z, ax, az);
+				if (ax != wantX || az != wantZ) continue;
+				m_cx = m_b.u[i].x; m_cz = m_b.u[i].z; m_cursorValid = TRUE; break;
+			}
+		}
+		if (!m_cursorValid) {
+			for (int i = 0; i < m_b.nUnits; i++) if (CanTarget(m_cur, i, skill)) { m_cx = m_b.u[i].x; m_cz = m_b.u[i].z; m_cursorValid = TRUE; break; }
+		}
+		if (!m_cursorValid && sd.area > 0) {
+			if (want) {
+				for (int z = 0; z < MAPN && !m_cursorValid; z++) for (int x = 0; x < MAPN; x++) {
+					if (!m_ovAtk[z][x]) continue;
+					int ax, az;
+					FormDir(x - u.x, z - u.z, ax, az);
+					if (ax != wantX || az != wantZ) continue;
+					m_cx = x; m_cz = z; m_cursorValid = TRUE; break;
+				}
+			}
+			if (!m_cursorValid) {
+				for (int z = 0; z < MAPN && !m_cursorValid; z++) for (int x = 0; x < MAPN; x++)
+					if (m_ovAtk[z][x]) { m_cx = x; m_cz = z; m_cursorValid = TRUE; break; }
+			}
+		}
+	} else { m_cx = u.x; m_cz = u.z; m_cursorValid = TRUE; }
+}
+
 // ============================================================ アクション
 void Game::BeginAttack(int ui, int target, int skill, int cx, int cz)
 {
 	Unit& a = m_b.u[ui];
+	m_cmdFaced = 0;
 	if (Map::In(cx, cz) && (cx != a.x || cz != a.z)) FaceTowards(ui, cx, cz);
 	else if (target != ui) FaceTowards(ui, m_b.u[target].x, m_b.u[target].z);
-	if (target != ui) {
-		const SkillDef* sd = skill >= 0 ? &SkillInfo(skill) : NULL;
-		if (!sd || (sd->kind != SK_HEAL && sd->kind != SK_BUFF)) FaceTowards(target, a.x, a.z);
+	if (IsFormSkill(skill)) {
+		int fx, fz;
+		if (Map::In(cx, cz) && (cx != a.x || cz != a.z)) FormDir(cx - a.x, cz - a.z, fx, fz);
+		else if (!FormPickAim(m_b, ui, skill, fx, fz)) FormDir(0, 1, fx, fz);
+		a.face = atan2f((float)fx, (float)fz);
 	}
 	for (int i = 0; i < m_b.nUnits; i++) { m_preHp[i] = m_b.u[i].hp; m_dispHp[i] = (float)m_b.u[i].hp; }
 	m_strkN = ResolveAttack(m_b, ui, target, skill, m_rng, m_strk, 96, cx, cz);
@@ -3606,6 +3668,11 @@ void Game::DrawFormGuide(int skill, int tx, int tz, float avoidX, float avoidY, 
 	float gx = px + (pw - gridW) * .5f;
 	float gy = py + top;
 	BOOL aimed = (tx != u.x || tz != u.z);
+	Unit view = u;
+	if (!absolute && !aimed) {
+		int fx, fz;
+		if (FormPickAim(m_b, m_cur, skill, fx, fz)) view.face = atan2f((float)fx, (float)fz);
+	}
 	for (int row = 0; row < nRow; row++) {
 		for (int col = 0; col < 3; col++) {
 			float cx = gx + col * (cs + gap);
@@ -3628,7 +3695,7 @@ void Game::DrawFormGuide(int skill, int tx, int tz, float avoidX, float avoidY, 
 				BOOL filled = FALSE;
 				if (!foe && !(mk[mark].onFoe && !aimed)) {
 					int ox, oz;
-					FormMarkPos(u, tx, tz, mk[mark], ox, oz);
+					FormMarkPos(view, tx, tz, mk[mark], ox, oz);
 					int who = Map::In(ox, oz) ? m_b.UnitAt(ox, oz) : -1;
 					filled = who >= 0 && who != m_cur && m_b.u[who].alive && m_b.u[who].team == u.team;
 				}
@@ -3655,10 +3722,11 @@ void Game::DrawFormGuide(int skill, int tx, int tz, float avoidX, float avoidY, 
 			if (lab[0]) m_r.HudText(lab, cx + cs * .5f, cy + cs * .5f, U(13), tc, 1, 1);
 		}
 	}
-	BOOL here = FALSE;
-	if (form == FM_PINCER) here = aimed && FormFits(m_b, m_cur, skill, tx, tz);
-	else here = FormFits(m_b, m_cur, skill, tx, tz);
 	BOOL any = SkillUsable(m_b, m_cur, skill);
+	BOOL here = FALSE;
+	if (form == FM_PINCER) here = aimed ? FormFits(m_b, m_cur, skill, tx, tz) : any;
+	else if (!aimed && !absolute) here = any;
+	else here = FormFits(m_b, m_cur, skill, tx, tz);
 	const wchar_t* st;
 	DWORD sc;
 	if (u.mp < SkillInfo(skill).mp) {
@@ -3669,8 +3737,11 @@ void Game::DrawFormGuide(int skill, int tx, int tz, float avoidX, float avoidY, 
 			? LangPick14(L"陣形は揃っている。味方が多いほど強い。", L"Formation ready. More allies raise the power.", L"Formation prête. Plus d'alliés, plus de puissance.", L"Formazione pronta. Più alleati, più potenza.", L"Formación lista. Más aliados, más poder.", L"진형이 갖춰졌다. 아군이 많을수록 강하다.", L"阵形已齐。同伴越多越强。", L"التشكيل جاهز. مزيد من الحلفاء يرفع القوة.", L"Строй собран. Больше союзников — выше сила.", L"Formation steht. Mehr Verbündete erhöhen die Kraft.", L"Formação pronta. Mais aliados, mais poder.", L"Formatie klaar. Meer bondgenoten verhogen de kracht.", L"Szyk gotowy. Więcej sojuszników zwiększa siłę.", L"Düzen tamam. Yoldaş arttıkça güç artar.")
 			: LangPick14(L"陣形は揃っている。", L"Formation ready.", L"Formation prête.", L"Formazione pronta.", L"Formación lista.", L"진형이 갖춰졌다.", L"阵形已齐。", L"التشكيل جاهز.", L"Строй собран.", L"Formation steht.", L"Formação pronta.", L"Formatie klaar.", L"Szyk gotowy.", L"Düzen tamam.");
 		sc = RGBA8(140, 230, 160);
+	} else if (any && form == FM_PINCER) {
+		st = LangPick14(L"別の敵なら挟める。", L"Another foe can be pinched.", L"Un autre ennemi peut être pris en tenaille.", L"Un altro nemico può essere preso.", L"Otro enemigo se puede pinzar.", L"다른 적이야 끼울 수 있다.", L"换个敌人就能夹击。", L"عدو آخر يمكن قصّه.", L"Другого врага можно зажать.", L"Ein anderer Gegner lässt sich klemmen.", L"Outro inimigo pode ser pinçado.", L"Een andere vijand kan worden geklemd.", L"Innego wroga da się ścisnąć.", L"Başka düşman kıskaca alınır.");
+		sc = RGBA8(255, 214, 120);
 	} else if (any && !absolute) {
-		st = LangPick14(L"別の向きなら使える。", L"It works if you face another way.", L"Ça marche dans une autre direction.", L"Funziona in un'altra direzione.", L"Sirve si miras hacia otro lado.", L"다른 방향이면 쓸 수 있다.", L"换个朝向就能使用。", L"يعمل إن واجهت جهة أخرى.", L"Сработает, если повернуться иначе.", L"Es klappt in einer anderen Richtung.", L"Funciona se olhares para outro lado.", L"Het werkt als je een andere kant op kijkt.", L"Zadziała, jeśli zwrócisz się inaczej.", L"Başka yöne bakarsan kullanılır.");
+		st = LangPick14(L"別のマスを狙えば使える。発動時にその向きを向く。", L"Aim another tile. It turns that way when used.", L"Visez une autre case. Ça tourne à l'activation.", L"Mira un'altra casella. Si gira all'uso.", L"Apunta otra casilla. Gira al usarse.", L"다른 칸을 노리면 쓸 수 있다. 쓸 때 그 방향을 본다.", L"瞄准其他格子即可。发动时会转向。", L"صوّب خانة أخرى. يستدير عند الاستخدام.", L"Целиться в другую клетку. Повернётся при использовании.", L"Ein anderes Feld anvisieren. Dreht sich beim Einsatz.", L"Mira outra casa. Vira ao usar.", L"Richt op een ander vak. Draait bij gebruik.", L"Wskaż inne pole. Obraca się przy użyciu.", L"Başka kareye nişan al. Kullanınca o yöne döner.");
 		sc = RGBA8(255, 214, 120);
 	} else {
 		st = TT(TX_FORM_NEED); sc = RGBA8(255, 160, 140);
@@ -4006,16 +4077,9 @@ void Game::DrawCommandMenu()
 			if (Btn(ID_BT_CRAFT0 + slot, x, yy, sw, bh, l, ok, FALSE, U(15), col)) {
 				m_cmdSkill = s;
 				m_phase = PH_P_SKILLTARGET;
-				ComputeOverlays();
 				m_navMode = FALSE;
-				m_cursorValid = FALSE;
-				if (sd.rMax != 0) {
-					for (int i = 0; i < m_b.nUnits; i++) if (CanTarget(m_cur, i, s)) { m_cx = m_b.u[i].x; m_cz = m_b.u[i].z; m_cursorValid = TRUE; break; }
-					if (!m_cursorValid && sd.area > 0) {
-						for (int z = 0; z < MAPN && !m_cursorValid; z++) for (int xx = 0; xx < MAPN; xx++)
-							if (m_ovAtk[z][xx]) { m_cx = xx; m_cz = z; m_cursorValid = TRUE; break; }
-					}
-				} else { m_cx = u.x; m_cz = u.z; m_cursorValid = TRUE; }
+				ComputeOverlays();
+				PickSkillCursor(s);
 				return;
 			}
 			yy += bh + U(4);
@@ -4034,16 +4098,11 @@ void Game::DrawCommandMenu()
 			if (Btn(bid, x, yy, sw, bh, l, ok, FALSE, U(15), scol)) {
 				m_cmdSkill = s;
 				m_phase = PH_P_SKILLTARGET;
-				ComputeOverlays();
 				m_navMode = FALSE;
-				m_cursorValid = FALSE;
-				if (sd.rMax != 0) {
-					for (int i = 0; i < m_b.nUnits; i++) if (CanTarget(m_cur, i, s)) { m_cx = m_b.u[i].x; m_cz = m_b.u[i].z; m_cursorValid = TRUE; break; }
-					if (!m_cursorValid && sd.area > 0) {
-						for (int z = 0; z < MAPN && !m_cursorValid; z++) for (int xx = 0; xx < MAPN; xx++)
-							if (m_ovAtk[z][xx]) { m_cx = xx; m_cz = z; m_cursorValid = TRUE; break; }
-					}
-				} else { m_cx = u.x; m_cz = u.z; m_cursorValid = TRUE; }
+				if (IsFormSkill(s) && !m_cmdFaced) { m_cmdFace0 = u.face; m_cmdFaced = 1; }
+				ComputeOverlays();
+				PickSkillCursor(s);
+				AimFormFace();
 				return;
 			}
 			yy += bh + U(4);
@@ -4476,7 +4535,14 @@ void Game::DrawBattleUi()
 			int hs = BattleHeightSteps(m_b, atk.x, atk.z, d.x, d.z);
 			if (hs > 0) wcscpy_s(tags[nt++], TT(TX_HIGH));
 			else if (hs < 0) wcscpy_s(tags[nt++], TT(TX_LOW));
-			if (f.delay > 0) wcscpy_s(tags[nt++], TT(TX_BT_DELAY));
+			{
+				const wchar_t* ew = EffectWord(sd.effect);
+				if (ew && nt < 10) {
+					if (UnitResistsEffect(d, sd.effect))
+						wcscpy_s(tags[nt++], LangPick14(L"無効", L"Blocked", L"Bloqué", L"Annullato", L"Anulado", L"무효", L"无效", L"مُبطل", L"Блок", L"Geblockt", L"Anulado", L"Geblokkeerd", L"Zablokowane", L"Geçersiz"));
+					else wcscpy_s(tags[nt++], ew);
+				}
+			}
 			if (f.follow > 0 && nt < 10) {
 				swprintf_s(tags[nt], L"%s ×%d", TT(TX_BT_FOLLOW), f.follow);
 				nt++;

@@ -3079,7 +3079,11 @@ void CalcForecast(const Battle& b, int ai, int di, int skill, Forecast& f)
 	f.face = FacingOf(a, d);
 	f.tri = TriRel(WeaponOf(a), WeaponOf(d));
 	f.bowFly = (WeaponOf(a) == WT_BOW && UnitMoveType(d) == MV_FLY) ? 1 : 0;
-	f.delay = (a.team != d.team && !UnitHasPas(d, PAS_NOSLOW) && !UnitAilmentHeld(d)) ? 500 : 0;
+	f.delay = 0;
+	if (skill >= 0) {
+		int fx = SkillInfo(skill).effect;
+		if (fx == EF_SLOW && a.team != d.team && !UnitHasPas(d, PAS_NOSLOW) && !UnitAilmentHeld(d)) f.delay = 400;
+	}
 	f.follow = -1;
 	f.fdmg = 0;
 	if (a.team == TEAM_PLAYER && d.team != TEAM_PLAYER) {
@@ -3176,7 +3180,23 @@ int FormMarks(int form, FormMark* out, int cap)
 	}
 	return n;
 }
-static void FormAim(const Unit& u, int tx, int tz, int& fx, int& fz);
+void FormDir(int dx, int dz, int& fx, int& fz)
+{
+	if (dx == 0 && dz == 0) { fx = 0; fz = 1; return; }
+	if (abs(dx) > abs(dz)) { fx = dx > 0 ? 1 : -1; fz = 0; }
+	else { fx = 0; fz = dz > 0 ? 1 : -1; }
+}
+static void FormAim(const Unit& u, int tx, int tz, int& fx, int& fz)
+{
+	if (tx != u.x || tz != u.z) {
+		FormDir(tx - u.x, tz - u.z, fx, fz);
+		return;
+	}
+	float s = sinf(u.face), c = cosf(u.face);
+	int dx = (int)floorf(s >= 0.f ? s + 0.5f : s - 0.5f);
+	int dz = (int)floorf(c >= 0.f ? c + 0.5f : c - 0.5f);
+	FormDir(dx, dz, fx, fz);
+}
 void FormMarkPos(const Unit& u, int tx, int tz, const FormMark& m, int& ox, int& oz)
 {
 	if (m.absolute) { ox = u.x + m.side; oz = u.z + m.fwd; return; }
@@ -3186,27 +3206,6 @@ void FormMarkPos(const Unit& u, int tx, int tz, const FormMark& m, int& ox, int&
 	if (m.onFoe) { ox = tx + m.side * rx; oz = tz + m.side * rz; return; }
 	ox = u.x + m.fwd * fx + m.side * rx;
 	oz = u.z + m.fwd * fz + m.side * rz;
-}
-
-static void FormAim(const Unit& u, int tx, int tz, int& fx, int& fz)
-{
-	if (tx != u.x || tz != u.z) {
-		int x = tx - u.x, z = tz - u.z;
-		fx = (abs(x) * 2 < abs(z)) ? 0 : (x > 0 ? 1 : -1);
-		fz = (abs(z) * 2 < abs(x)) ? 0 : (z > 0 ? 1 : -1);
-		if (fx == 0 && fz == 0) fz = 1;
-		return;
-	}
-	float s = sinf(u.face), c = cosf(u.face);
-	fx = (int)floorf(s >= 0.f ? s + 0.5f : s - 0.5f);
-	fz = (int)floorf(c >= 0.f ? c + 0.5f : c - 0.5f);
-	if (fx > 1) fx = 1; else if (fx < -1) fx = -1;
-	if (fz > 1) fz = 1; else if (fz < -1) fz = -1;
-	if (fx == 0 && fz == 0) fz = 1;
-	if (abs(fx) != abs(fz)) {
-		if (abs(fx) > abs(fz)) fz = 0;
-		else fx = 0;
-	}
 }
 
 static int FormAllyAt(const Battle& b, int x, int z, int team, int self)
@@ -3314,6 +3313,38 @@ bool FormFits(const Battle& b, int ui, int skill, int tx, int tz)
 	return n >= FormNeed(form);
 }
 
+bool FormPickAim(const Battle& b, int ui, int skill, int& fx, int& fz)
+{
+	if (!IsFormSkill(skill) || ui < 0 || ui >= b.nUnits) return false;
+	const Unit& u = b.u[ui];
+	int curx, curz;
+	FormAim(u, u.x, u.z, curx, curz);
+	fx = curx; fz = curz;
+	const SkillDef& sd = SkillInfo(skill);
+	if (sd.rMax == 0) return FormFits(b, ui, skill, u.x, u.z);
+	int rmin = SkillCastRangeMin(u, skill), rmax = SkillCastRangeMax(u, skill);
+	BOOL friendly = sd.kind == SK_HEAL || sd.kind == SK_BUFF;
+	int ok[4] = { 0, 0, 0, 0 };
+	static const int kD[4][2] = { { 0, 1 }, { 1, 0 }, { 0, -1 }, { -1, 0 } };
+	auto idx = [](int x, int z) -> int {
+		for (int i = 0; i < 4; i++) if (kD[i][0] == x && kD[i][1] == z) return i;
+		return 0;
+	};
+	for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) {
+		int d = abs(x - u.x) + abs(z - u.z);
+		if (d < rmin || d > rmax) continue;
+		if (!FormFits(b, ui, skill, x, z)) continue;
+		if (!friendly && !InAttackRange(b, u.x, u.z, rmin, rmax, x, z, true)) continue;
+		int ax, az;
+		FormAim(u, x, z, ax, az);
+		ok[idx(ax, az)] = 1;
+	}
+	int ci = idx(curx, curz);
+	if (ok[ci]) { fx = kD[ci][0]; fz = kD[ci][1]; return true; }
+	for (int i = 0; i < 4; i++) if (ok[i]) { fx = kD[i][0]; fz = kD[i][1]; return true; }
+	return false;
+}
+
 int FormBoostPct(const Battle& b, int ui, int skill, int tx, int tz)
 {
 	if (!IsFormSkill(skill)) return 100;
@@ -3327,29 +3358,8 @@ int FormBoostPct(const Battle& b, int ui, int skill, int tx, int tz)
 
 static bool FormReady(const Battle& b, int ui, int skill)
 {
-	const Unit& u = b.u[ui];
-	const SkillDef& sd = SkillInfo(skill);
-	if (sd.rMax == 0) {
-		if (!FormFits(b, ui, skill, u.x, u.z)) return false;
-		int tg[4];
-		return SkillTargets(b, ui, skill, u.x, u.z, tg, 4) > 0;
-	}
-	int rmin = SkillCastRangeMin(u, skill), rmax = SkillCastRangeMax(u, skill);
-	for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) {
-		int d = abs(x - u.x) + abs(z - u.z);
-		if (d < rmin || d > rmax) continue;
-		if (!FormFits(b, ui, skill, x, z)) continue;
-		if (sd.area == 0) {
-			int t = b.UnitAt(x, z);
-			if (t < 0 || !b.u[t].alive || b.u[t].team == u.team) continue;
-			if (!InAttackRange(b, u.x, u.z, rmin, rmax, x, z, true)) continue;
-		} else {
-			int tg[4];
-			if (SkillTargets(b, ui, skill, x, z, tg, 4) == 0) continue;
-		}
-		return true;
-	}
-	return false;
+	int fx, fz;
+	return FormPickAim(b, ui, skill, fx, fz);
 }
 
 bool SkillUsable(const Battle& b, int ui, int skill)
@@ -5574,6 +5584,8 @@ void SkillAttrText(const SkillDef& sd, wchar_t* out, int cap)
 	ail[0] = 0;
 	if (sd.effect == EF_POISON) swprintf_s(ail, L"%s 1-3 HP5%%", EffectWord(EF_POISON));
 	else if (sd.effect == EF_SLOW || sd.effect == EF_DEFDOWN) swprintf_s(ail, L"%s 1-3", EffectWord(sd.effect));
+	else if (sd.effect == EF_SLEEP || sd.effect == EF_STUN) swprintf_s(ail, L"%s 1", EffectWord(sd.effect));
+	else if (sd.effect == EF_CONFUSE) swprintf_s(ail, L"%s 2", EffectWord(EF_CONFUSE));
 	const wchar_t* ew = ail[0] ? ail : EffectWord(sd.effect);
 	if (ew && n < 5) bits[n++] = ew;
 	static wchar_t hitn[40];

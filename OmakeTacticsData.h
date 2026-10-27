@@ -589,6 +589,8 @@ bool SkillUsable(const Battle& b, int ui, int skill);
 bool IsFormSkill(int skill);
 int  FormOf(int skill);
 bool FormFits(const Battle& b, int ui, int skill, int tx, int tz);
+bool FormPickAim(const Battle& b, int ui, int skill, int& fx, int& fz);
+void FormDir(int dx, int dz, int& fx, int& fz);
 int  FormMembers(const Battle& b, int ui, int skill, int tx, int tz, int* out, int maxOut);
 int  FormBoostPct(const Battle& b, int ui, int skill, int tx, int tz);
 // 陣形の見取り図。side/fwd は向き基準（absolute のときは地図の dx,dz）。onFoe は狙ったマス基準。

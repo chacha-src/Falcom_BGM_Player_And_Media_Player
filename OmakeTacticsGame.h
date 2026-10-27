@@ -219,6 +219,8 @@ private:
 	void UpdateCamera(float dt);
 	void UpdateUnitsVisual(float dt);
 	void FaceTowards(int ui, int tx, int tz);
+	void AimFormFace();
+	void PickSkillCursor(int skill);
 	void DrawTurnOrder();
 	void DrawUnitPanel(const Unit& u, float x, float y, float w, BOOL big);
 	void DrawForecast();
@@ -420,6 +422,8 @@ private:
 	BOOL m_cursorValid;
 	int m_hoverUnit;
 	int m_cmdSkill;      // 選択中スキル（-1=通常）
+	float m_cmdFace0;    // 陣形で向く前の向き。取消で戻す
+	int m_cmdFaced;
 	int m_target;
 	BYTE m_ovMove[MAPN][MAPN];
 	BYTE m_ovAtk[MAPN][MAPN];
