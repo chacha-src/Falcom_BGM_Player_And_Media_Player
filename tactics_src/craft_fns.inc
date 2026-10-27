@@ -793,6 +793,16 @@ bool EquipPasId(CharData& c, int slot, int id)
 	r->pas[slot] = (unsigned char)id;
 	return true;
 }
+bool CharHasPas(const CharData& c, int fx)
+{
+	if (fx <= PAS_NONE) return false;
+	for (int k = 0; k < 2; k++) {
+		int id = EquippedPasId(c, k);
+		if (id < 1 || id > kPasN) continue;
+		if (kPasRow[id - 1].fx == fx) return true;
+	}
+	return false;
+}
 bool UnitHasPas(const Unit& u, int fx)
 {
 	if (fx <= PAS_NONE) return false;

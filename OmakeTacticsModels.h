@@ -58,6 +58,7 @@ struct Actor {
 	DWORD tint;
 	float height;       // 頭上（ワールド）
 	float hover;        // 浮遊高さ
+	float flap;         // 1 で移動中のはばたき。0 は待機の羽ばたき
 	int gait;           // Gait。移動の足取り
 	PoseMods mods;
 	int clip, prev;

@@ -1257,14 +1257,20 @@ void Game::StartMove(int ui, int tx, int tz, int next)
 	m_phaseT = 0;
 	m_pathN = 0;
 	m_camPan = v3(0, 0, 0);
+	m_act[ui].flap = 0.f;
 	if (m_moveN > 1) {
-		int clip = m_moveN > 3 ? CL_RUN : CL_WALK;
-		ActorPlay(m_act[ui], clip, 1, .1f);
-		float tileRate = (m_save.battleAnim ? 5.2f : 2.6f) * 1.5f;
-		if (m_act[ui].gait == GAIT_BIPED)
-			m_act[ui].animSpeed = tileRate * (clip == CL_RUN ? .8f : 1.f);
-		else
-			m_act[ui].animSpeed = (clip == CL_RUN ? 2.4f : 1.8f) * 1.5f;
+		BOOL fly = UnitMoveType(u) == MV_FLY && (m_act[ui].wings > 0 || u.team == TEAM_PLAYER);
+		if (fly) {
+			if (m_act[ui].wings == 0) m_act[ui].wings = 1;
+			if (m_act[ui].hover < .2f) m_act[ui].hover = .35f;
+			m_act[ui].flap = 1.f;
+			ActorPlay(m_act[ui], CL_IDLE, 1, .12f);
+			m_act[ui].animSpeed = 1.f;
+		} else {
+			int clip = m_moveN > 3 ? CL_RUN : CL_WALK;
+			ActorPlay(m_act[ui], clip, 1, .1f);
+			m_act[ui].animSpeed = clip == CL_RUN ? 1.15f : 1.f;
+		}
 	}
 }
 
@@ -1272,10 +1278,10 @@ void Game::UpdateMove(float dt)
 {
 	int ui = m_moveUnit;
 	Unit& u = m_b.u[ui];
+	BOOL fly = UnitMoveType(u) == MV_FLY;
 	float speed = (m_save.battleAnim ? 5.2f : 2.6f) * 1.5f;
 	m_moveT += dt * speed;
 	int seg = (int)m_moveT;
-	BOOL fly = UnitMoveType(u) == MV_FLY;
 	{
 		static int stepSeg = -999;
 		if (seg != stepSeg) {
@@ -1333,6 +1339,7 @@ void Game::UpdateMove(float dt)
 		}
 		WakeNearPlayers(m_b, 9);
 		m_act[ui].animSpeed = 1.f;
+		m_act[ui].flap = 0.f;
 		ActorPlay(m_act[ui], CL_IDLE, 1, .15f);
 		int next = m_moveNext;
 		if (u.team == TEAM_PLAYER && m_ai.wild == 0) {
@@ -1377,7 +1384,7 @@ void Game::UpdateMove(float dt)
 		if (dh > 0) yl = Lerpf(pa.y, pb.y, Smooth01(min(1.f, f * 1.6f)));
 		p.y = yl + sinf(f * PI) * hop;
 	} else if (fly) {
-		p.y = Lerpf(pa.y, pb.y, Smooth01(f));
+		p.y = Lerpf(pa.y, pb.y, Smooth01(f)) + sinf(f * 6.2831853f * 2.f) * 0.045f;
 	}
 	u.px = p.x; u.py = p.y; u.pz = p.z;
 	u.face = atan2f((float)(bx - ax), (float)(bz - az));
@@ -2681,6 +2688,22 @@ void Game::DrawCutIn3D()
 		if (m_shake > .3f) { eye = Lerp(eye, look, .12f); }
 	}
 	if (m_shake > 0) look = look + v3(m_rng.F(-1, 1), m_rng.F(-1, 1), 0) * (m_shake * .03f);
+	// 飛行は足元が浮く。カメラは地上の立ち位置のままなので、その分だけ頭が上に切れる。
+	{
+		float lift = 0.f;
+		auto take = [&](int id) {
+			if (id < 0 || id >= m_b.nUnits) return;
+			float h = m_b.u[id].hover;
+			if (h > lift) lift = h;
+		};
+		for (int i = 0; i < m_cutAllyN; i++) take(m_cutAlly[i]);
+		for (int i = 0; i < m_cutFoeN; i++) take(m_cutFoe[i]);
+		take(m_cutA);
+		if (m_cutD >= 0) take(m_cutD);
+		if (lift > 1.2f) lift = 1.2f;
+		look.y += lift;
+		eye.y += lift;
+	}
 	M4 view = MLookAtLH(eye, look, v3(0, 1, 0));
 	M4 proj = MPerspLH(.75f, (float)m_w / max(1, m_h), .05f, 120.f);
 	m_r.SetCamera(view, proj, eye, m_time);

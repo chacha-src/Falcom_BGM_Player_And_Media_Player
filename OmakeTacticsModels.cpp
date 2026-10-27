@@ -850,23 +850,43 @@ static void BuildHair(Renderer& r, const Model& m, int style, GpuMesh& out, floa
 	out.tex = r.TexWhite();
 }
 
-// 人体用。原点は後頭部、+Y 上、+Z 後ろ。板ではなく束で垂らす。
+// 背中に生やす翼。原点は肩、+X が翼端。羽軸・次列風切・初列風切・雨覆。
 static void BuildWing(Renderer& r, int dragon, int left, GpuMesh& out)
 {
 	Geo g;
 	if (!dragon) {
-		g.curCol = RGBA8(250, 250, 255);
-		g.Limb(v3(0, 0, 0), v3(.55f, .18f, 0), .05f, .035f);
-		for (int k = 0; k < 7; k++) {
-			float a = .35f - k * .17f;
-			float L = .95f - k * .07f;
-			V3 st = v3(.08f + k * .07f, .1f - k * .01f, .01f * k);
-			V3 d = v3(cosf(a), sinf(a), 0);
-			V3 c = st + d * (L * .5f);
-			M4 rm = MRotZ(a);
+		auto feather = [&](V3 st, float ang, float len, float wide, DWORD col) {
+			V3 d = v3(cosf(ang), sinf(ang), 0);
+			V3 c = st + d * (len * .5f);
+			M4 rm = MRotZ(ang);
 			rm.m[12] = c.x; rm.m[13] = c.y; rm.m[14] = c.z;
-			g.curCol = k < 3 ? RGBA8(255, 255, 255) : RGBA8(226, 236, 255);
-			g.Ellipsoid(rm, v3(L * .5f, .075f, .022f), 10, 6);
+			g.curCol = col;
+			g.Ellipsoid(rm, v3(len * .5f, wide, wide * .28f), 8, 4);
+		};
+		g.curCol = RGBA8(214, 198, 164);
+		g.Sphere(v3(0, 0, 0), v3(.08f, .07f, .06f), 8, 6);
+		V3 elbow = v3(.40f, .12f, .03f), wrist = v3(.82f, .02f, .06f);
+		g.Limb(v3(0, 0, 0), elbow, .058f, .040f);
+		g.Limb(elbow, wrist, .038f, .022f);
+		for (int k = 0; k < 7; k++) {
+			float t = k / 6.f;
+			V3 st = v3(0.10f + t * .62f, 0.08f - t * .04f, 0.02f + t * .03f);
+			float ang = -0.20f - t * 0.95f;
+			float L = 0.48f + (1.f - t) * 0.22f;
+			DWORD col = k < 3 ? RGBA8(248, 244, 236) : RGBA8(232, 226, 214);
+			feather(st, ang, L, 0.058f, col);
+		}
+		for (int k = 0; k < 8; k++) {
+			float ang = 0.62f - k * 0.16f;
+			float L = 0.98f - fabsf(k - 5.f) * 0.07f;
+			V3 st = wrist + v3(-0.04f + k * 0.015f, 0.02f, 0.01f);
+			DWORD col = k < 5 ? RGBA8(255, 252, 246) : RGBA8(198, 208, 220);
+			feather(st, ang, L, 0.050f - k * 0.002f, col);
+		}
+		for (int k = 0; k < 6; k++) {
+			float t = k / 5.f;
+			V3 st = v3(0.16f + t * .58f, 0.12f - t * .02f, 0.045f);
+			feather(st, 0.28f - t * 0.55f, 0.30f - t * 0.04f, 0.040f, RGBA8(255, 255, 250));
 		}
 	} else {
 		V3 sh = v3(0, 0, 0), el = v3(.6f, .25f, .02f), tip = v3(1.25f, .05f, .1f);
@@ -1150,7 +1170,7 @@ void ActorFromChar(Actor& a, const Library& lib, const Renderer& r, const CharDa
 		if (!(builtInHat && isHeadGear(ga->att0, ga->joint0))) addGearPiece(ga, 0);
 		if (!(builtInHat && isHeadGear(ga->att1, ga->joint1))) addGearPiece(ga, 1);
 	}
-	if (c.cls == C_SKYKNIGHT) a.wings = 1;
+	if (c.cls == C_SKYKNIGHT || CharHasPas(c, PAS_FLY)) a.wings = 1;
 	if (c.cls == C_DRAGONLORD) a.wings = 2;
 	if (cd.tier >= 3) a.scale *= 1.06f;
 	const Model& m = r.models[a.model];
@@ -1651,6 +1671,36 @@ static M4 HumanGearFit(const Pose& pose, int joint, const char* name, const char
 	return FitWorld(g, Norm(carry(Norm(face + v3(0, -0.6f, 0)))), carry(up), grip, 0.36f, 0.36f, 0.36f);
 }
 
+static void DrawActorWings(Renderer& r, const Library& lib, Actor& a, const M4& world, const DrawParams& dp, float time, BOOL human)
+{
+	if (!a.wings || !a.poseValid) return;
+	if (a.model < 0 || a.model >= (int)r.models.size()) return;
+	const Model& m = r.models[a.model];
+	int cj = m.chestJ;
+	if (cj < 0 || cj >= m.nJ || cj >= a.pose.nJ) return;
+	int dr = a.wings == 2 ? 1 : 0;
+	float flapSp = a.flap > 0.5f ? 11.f : (a.hover > 0.f ? 5.2f : 2.2f);
+	float ph = sinf(time * flapSp);
+	float amp = a.flap > 0.5f ? 0.82f : (dr ? 0.38f : 0.52f);
+	float flap = (ph >= 0.f ? ph : ph * 0.35f) * amp;
+	float y = human ? 1.32f : 1.12f;
+	float z = human ? 0.16f : 0.32f;
+	float x = human ? 0.14f : 0.18f;
+	float yaw = human ? -0.40f : -0.55f;
+	float rest = human ? 0.20f : 0.35f;
+	for (int side = 0; side < 2; side++) {
+		float s = side == 0 ? 1.f : -1.f;
+		M4 fl = MRotZ(s * flap);
+		M4 base = MMul(MMul(MRotY(s * yaw), MRotZ(s * rest)), MTrans(s * x, y, z));
+		M4 ex = MMul(MMul(fl, base), m.invBind[cj]);
+		M4 w = MMul(ex, MMul(a.pose.global[cj], world));
+		DrawParams dw = dp;
+		dw.hue = 0;
+		dw.twoSided = 1;
+		r.DrawStatic(lib.wing[dr][side], w, dw);
+	}
+}
+
 void ActorDraw(Renderer& r, const Library& lib, Actor& a, const M4& world, const DrawParams& dp, float time)
 {
 	if (a.proc == 3) {
@@ -1919,6 +1969,7 @@ void ActorDraw(Renderer& r, const Library& lib, Actor& a, const M4& world, const
 			}
 			}
 		}
+		DrawActorWings(r, lib, a, wGear, dp, time, TRUE);
 		return;
 	}
 	if (a.proc == 2) {
@@ -1962,21 +2013,7 @@ void ActorDraw(Renderer& r, const Library& lib, Actor& a, const M4& world, const
 			r.DrawStatic(h, MMul(a.pose.global[m.headJ], drawW), dh);
 		}
 	}
-	if (a.wings && m.chestJ >= 0) {
-		int dr = a.wings == 2 ? 1 : 0;
-		float flapSp = a.hover > 0 ? 6.f : 2.f;
-		float flap = sinf(time * flapSp) * (dr ? .35f : .45f);
-		for (int side = 0; side < 2; side++) {
-			float s = side == 0 ? 1.f : -1.f;
-			M4 fl = MRotZ(s * flap);
-			M4 base = MMul(MMul(MRotY(s * -.55f), MRotZ(s * .35f)), MTrans(s * .18f, 1.12f, .32f));
-			M4 ex = MMul(MMul(fl, base), m.invBind[m.chestJ]);
-			M4 w = MMul(ex, MMul(a.pose.global[m.chestJ], drawW));
-			DrawParams dw = dp;
-			dw.hue = 0;
-			r.DrawStatic(lib.wing[dr][side], w, dw);
-		}
-	}
+	DrawActorWings(r, lib, a, drawW, dp, time, FALSE);
 }
 
 } // namespace otac

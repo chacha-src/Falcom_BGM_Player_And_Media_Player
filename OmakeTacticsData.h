@@ -780,6 +780,7 @@ int EquippedPasId(const CharData& c, int slot);
 const wchar_t* EquippedPasName(const CharData& c, int slot);
 int PasSpare(const CharData& c, int slot, int index);
 bool EquipPasId(CharData& c, int slot, int id);
+bool CharHasPas(const CharData& c, int fx);
 bool UnitHasPas(const Unit& u, int fx);
 bool UnitResistsEffect(const Unit& u, int effect);
 inline bool UnitAilmentHeld(const Unit& u)
