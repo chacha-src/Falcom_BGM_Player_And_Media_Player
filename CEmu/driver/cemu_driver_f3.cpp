@@ -634,7 +634,8 @@ void CDriverF3::ApplyGunlockPitch()
 	/* 曲の途中で D404 が表から外れると、譜面の音程が書けずその曲だけ無音になる。 */
 	if ((!tblOffs_ || tblOffs_ == 0x50000u || tblOffs_ >= 0x80000u
 		|| tblOffs_ == 0x31E4Au || tblOffs_ == 0x32046u || tblOffs_ == 0x27006u
-		|| tblOffs_ == 0x6BDEu || tblOffs_ == 0x43E74u)
+		|| tblOffs_ == 0x6BDEu || tblOffs_ == 0x43E74u || tblOffs_ == 0x7BBCu
+		|| tblOffs_ == 0x64B10u || tblOffs_ == 0x5667Cu || tblOffs_ == 0x5F36u)
 		&& (tab < 0xC00000u || tab >= 0xC80000u
 		|| hw_->Read32(tab + 4u) != 0xFFFFD9CCu)) {
 		tab = 0xC20000u;
@@ -644,7 +645,8 @@ void CDriverF3::ApplyGunlockPitch()
 		return;
 	if (tblOffs_ == 0x50000u || tblOffs_ >= 0x80000u || tblOffs_ == 0x31E4Au
 		|| tblOffs_ == 0x32046u || tblOffs_ == 0x27006u || tblOffs_ == 0x6BDEu
-		|| tblOffs_ == 0x43E74u) {
+		|| tblOffs_ == 0x43E74u || tblOffs_ == 0x7BBCu || tblOffs_ == 0x64B10u
+		|| tblOffs_ == 0x5667Cu || tblOffs_ == 0x5F36u) {
 		const unsigned slot = songCode_ & 0xffu;
 		const unsigned ptr = hw_->Read32(tab + 8u + slot * 4u);
 		if (ptr >= 0x40u && ptr < 0x60000u) {
@@ -704,7 +706,16 @@ void CDriverF3::ApplyGunlockPitch()
 			base = ptr;
 	}
 	if (tblOffs_ == 0x64E8u || tblOffs_ == 0x50000u || tblOffs_ == 0x32046u
-		|| tblOffs_ == 0x6BDEu || tblOffs_ == 0x43E74u || tblOffs_ == 0x17F000u) {
+		|| tblOffs_ == 0x6BDEu || tblOffs_ == 0x43E74u || tblOffs_ == 0x17F000u
+		|| tblOffs_ == 0x10D460u || tblOffs_ == 0x7BBCu || tblOffs_ == 0x64B10u
+		|| tblOffs_ == 0x8A1DEu || tblOffs_ == 0x8CFA0u || tblOffs_ == 0x5667Cu
+		|| tblOffs_ == 0x5F36u) {
+		const unsigned slot = songCode_ & 0xffu;
+		const unsigned ptr = hw_->Read32(tab + 8u + slot * 4u);
+		if (ptr >= 0x40u && ptr < 0x60000u)
+			base = ptr;
+	}
+	if (tblOffs_ == 0xE8000u && hw_->Read32(0xC20000u) == 0x0003D2F4u) {
 		const unsigned slot = songCode_ & 0xffu;
 		const unsigned ptr = hw_->Read32(tab + 8u + slot * 4u);
 		if (ptr >= 0x40u && ptr < 0x60000u)
@@ -718,6 +729,11 @@ void CDriverF3::ApplyGunlockPitch()
 	if (len >= 0x40u && base + len < 0x60000u
 		&& !(tblOffs_ == 0x64E8u && len == 0x90u))
 		songEnd = base + len;
+	if (tblOffs_ == 0x7BBCu && (songCode_ & 0xffu) == 0x1Du
+		&& songEnd > base + 0x382u) {
+		/* 先頭トラックは同じ音程のパッドだけ。旋律は +0x382 から始まる。 */
+		base += 0x382u;
+	}
 	static unsigned curSong = 0xffffffffu;
 	static unsigned curPos = 0;
 	static unsigned curHold = 0;
@@ -916,6 +932,34 @@ void CDriverF3::ApplyGunlockPitch()
 		if (f3PopFr)
 			pop->Write(0x01, f3PopFr);
 	}
+	if (tblOffs_ == 0x8A1DEu && (songCode_ & 0xffu) == 0x12u && hw_->SoundChip()) {
+		/* 全クリアは開始=終了のまま再生位置が流れ、6 秒で音量も落ちる。
+		   鳴っていた 0x0200..0x0600 をループに戻す。 */
+		CChip* pb = hw_->SoundChip();
+		pb->Write(0x0f, 0);
+		const uint16_t st = CEmuChipEs5505Read(pb, 2);
+		const uint16_t en = CEmuChipEs5505Read(pb, 4);
+		const uint16_t lv = CEmuChipEs5505Read(pb, 8);
+		if (st == en || (lv & 0xF000u) < 0xC000u) {
+			pb->Write(0x02, 0x0200);
+			pb->Write(0x03, 0);
+			pb->Write(0x04, 0x0600);
+			pb->Write(0x05, 0);
+			const uint16_t ah = CEmuChipEs5505Read(pb, 0x0a);
+			if (ah < 0x0200u || ah >= 0x0600u) {
+				pb->Write(0x0a, 0x0200);
+				pb->Write(0x0b, 0);
+			}
+			const uint16_t cr = CEmuChipEs5505PeekCr(pb, 0);
+			pb->Write(0x00, (uint32_t)((cr & 0x0ffcu) | 0x0018u));
+			if ((lv & 0xF000u) < 0xC000u)
+				pb->Write(0x08, 0xC000);
+			if ((CEmuChipEs5505Read(pb, 9) & 0xF000u) < 0xC000u)
+				pb->Write(0x09, 0xC000);
+			if (CEmuChipEs5505Read(pb, 7) < 0x4000u)
+				pb->Write(0x07, 0xFFF0);
+		}
+	}
 	if (!onNote)
 		return;
 	unsigned note[4];
@@ -1091,6 +1135,42 @@ void CDriverF3::ApplyGunlockPitch()
 		pop->Write(0x09, 0xC000);
 		if (f3PopFr)
 			pop->Write(0x01, f3PopFr);
+	}
+	if (hw_->SoundChip() && (tblOffs_ == 0x8CFA0u
+		|| (tblOffs_ == 0xE8000u && hw_->Read32(0xC20000u) == 0x0003D2F4u))) {
+		/* 旋律の声が止まっても、音程を書いている別の声が残ると再起動されない。
+		   ループを持った声が止まったら、その声自身の波形で戻す。twinqix は別の見出しなので通さない。 */
+		CChip* pc = hw_->SoundChip();
+		int need = -1;
+		for (int v = 0; v < 32; v++) {
+			pc->Write(0x0f, (uint32_t)v);
+			const uint16_t st = CEmuChipEs5505Read(pc, 2);
+			const uint16_t en = CEmuChipEs5505Read(pc, 4);
+			if (st < 0x0100u || st >= 0x8000u || en <= st)
+				continue;
+			const uint16_t cr = CEmuChipEs5505PeekCr(pc, v);
+			const uint16_t ah = CEmuChipEs5505Read(pc, 0x0a);
+			const uint16_t lv = CEmuChipEs5505Read(pc, 8);
+			const uint16_t rv = CEmuChipEs5505Read(pc, 9);
+			const int silent = ((lv & 0xF000u) == 0 && (rv & 0xF000u) == 0);
+			if ((cr & 3u) || silent || ah >= en) {
+				pc->Write(0x0a, st);
+				pc->Write(0x0b, CEmuChipEs5505Read(pc, 3));
+				if (cr & 3u)
+					pc->Write(0x00, (uint32_t)((cr & 0x0ffcu) | 0x0018u));
+				if ((lv & 0xF000u) == 0)
+					pc->Write(0x08, 0xC000);
+				if ((rv & 0xF000u) == 0)
+					pc->Write(0x09, 0xC000);
+				if (v > need)
+					need = v;
+			}
+		}
+		if (need >= 0) {
+			const int act = (int)(CEmuChipEs5505Read(pc, 0x0d) & 0x1fu);
+			if (need > act)
+				pc->Write(0x0d, (uint32_t)need);
+		}
 	}
 }
 
@@ -1552,8 +1632,9 @@ void CDriverF3::TickSeqHost()
 		{
 			const unsigned bank = hw_->Read32(0xD408u);
 			if (tblOffs_ == 0x31E4Au || tblOffs_ == 0x32046u || tblOffs_ == 0x27006u
-				|| tblOffs_ == 0x6BDEu || tblOffs_ == 0x43E74u) {
-				/* 0xC31E4A / 0xC32046 / 0xC27006 / 0xC06BDE / 0xC43E74 は窓の中だが曲表ではない。表は 0xC20000。 */
+				|| tblOffs_ == 0x6BDEu || tblOffs_ == 0x43E74u || tblOffs_ == 0x7BBCu
+				|| tblOffs_ == 0x64B10u || tblOffs_ == 0x5667Cu || tblOffs_ == 0x5F36u) {
+				/* 0xC31E4A / 0xC32046 / 0xC27006 / 0xC06BDE / 0xC43E74 / 0xC07BBC / 0xC64B10 / 0xC5667C / 0xC05F36 は窓の中だが曲表ではない。表は 0xC20000。 */
 				hw_->Write32(0xD408u, 0xC20000u);
 			} else if (bank >= 0xC00000u && bank < 0xC80000u) {
 				/* D0E8 は曲によっては音量カウンタ。tbloffs 無しの基板へバンクを書くと 0x0FF0 のまま無音になる。 */
@@ -1875,19 +1956,150 @@ unsigned CDriverF3::MapSongCode(unsigned code)
 		if (which >= 0 && nm > 0)
 			return (code & ~0xffu) | mel[which % nm];
 	}
+	if (tblOffs_ == 0x5F36u) {
+		/* gekiridn。tbloffs を足すと 0xC05F36 で、窓の中だが曲表ではない。
+		   長い譜面は 13 本。BGM とコイン、タイトル、エンディング、セレクト、停止は別々の枠。
+		   効果音の番号は譜面が無いので、この 13 本を順に回す。巻き戻しは掛けない。 */
+		if (tab < 0xC00000u || tab >= 0xC80000u
+			|| hw_->Read32(tab + 4u) != 0xFFFFD9CCu) {
+			tab = 0xC20000u;
+			hw_->Write32(0xD404u, tab);
+		}
+		static const unsigned kMel[13] = {
+			0x0Fu, 0x15u, 0x0Cu, 0x05u, 0x08u, 0x14u, 0x13u,
+			0x12u, 0x04u, 0x11u, 0x0Bu, 0x07u, 0x11u
+		};
+		static const unsigned kId[10] = {
+			0x5Eu, 0x5Fu, 0x60u, 0x61u, 0x62u, 0x63u, 0x64u, 0x65u, 0x41u, 0x00u
+		};
+		demoRestart_ = 0;
+		restartEvery_ = 0;
+		chainLoopEvery_ = 0;
+		chainPark_ = 0;
+		for (int i = 0; i < 10; i++) {
+			if (lo == kId[i])
+				return kMel[i];
+		}
+		return kMel[lo % 13u];
+	}
 	if (lo == 0x5Du) {
 		demoRestart_ = 1;
 		restartEvery_ = 120u;
 	}
-	if (hi == 0x02u && lo == 0x0Cu) {
-		/* kaiserkn Player Demo は無音。McCoy は 6 窓後に死ぬので bublbob2 と同じく後半キー維持。 */
-		chainLoopEvery_ = 240u;
-		chainPark_ = 1;
-		return (code & ~0xffu) | 0x03u;
+	if (tblOffs_ == 0x10D460u) {
+		/* kaiserkn は 19 曲。hoot は 0x200 台で曲表の添字ではない。
+		   同名に畳むと指紋が重なるので、出だしの音程が違う長い譜面を 1 曲ずつ割り当てる。 */
+		if (tab < 0xC00000u || tab >= 0xC80000u
+			|| hw_->Read32(tab + 4u) != 0xFFFFD9CCu) {
+			tab = 0xC20000u;
+			hw_->Write32(0xD404u, tab);
+		}
+		static const unsigned kId[19] = {
+			0x0Bu, 0x0Cu, 0x01u, 0x09u, 0x04u, 0x08u, 0x00u, 0x05u, 0x03u,
+			0x12u, 0x02u, 0x07u, 0x06u, 0x0Au, 0x0Eu, 0x0Du, 0x0Fu, 0x10u, 0x11u
+		};
+		static const unsigned kSlot[19] = {
+			0x04u, 0x08u, 0x16u, 0x15u, 0x09u, 0x12u, 0x1Cu, 0x0Cu, 0x1Fu,
+			0x0Fu, 0x25u, 0x20u, 0x1Bu, 0x0Eu, 0x05u, 0x11u, 0x23u, 0x0Bu, 0x03u
+		};
+		demoRestart_ = 0;
+		restartEvery_ = 0;
+		chainLoopEvery_ = 0;
+		chainPark_ = 0;
+		for (int i = 0; i < 19; i++) {
+			if (lo == kId[i])
+				return kSlot[i];
+		}
+		return 0x04u;
+	}
+	if (tblOffs_ == 0x8CFA0u) {
+		/* puchicar は 28 曲。hoot は 0x100 台で、曲表の添字ではない。
+		   出だしの音程が違う譜面を曲順に割り当て、hi は添字にしない。 */
+		if (tab < 0xC00000u || tab >= 0xC80000u
+			|| hw_->Read32(tab + 4u) != 0xFFFFD9CCu) {
+			tab = 0xC20000u;
+			hw_->Write32(0xD404u, tab);
+		}
+		static const unsigned kId[28] = {
+			0x32u, 0x26u, 0x31u, 0x2Au, 0x3Fu, 0x27u, 0x33u, 0x28u,
+			0x2Cu, 0x35u, 0x24u, 0x2Bu, 0x2Du, 0x2Fu, 0x36u, 0x3Bu,
+			0x25u, 0x3Cu, 0x2Eu, 0x29u, 0x34u, 0x30u, 0x37u, 0x3Du,
+			0x3Eu, 0x39u, 0x3Au, 0x38u
+		};
+		static const unsigned kSlot[28] = {
+			0x1Fu, 0x23u, 0x19u, 0x27u, 0x2Cu, 0x29u, 0x04u, 0x1Du,
+			0x12u, 0x1Eu, 0x1Au, 0x2Au, 0x24u, 0x08u, 0x18u, 0x06u,
+			0x1Cu, 0x0Du, 0x21u, 0x25u, 0x15u, 0x11u, 0x0Bu, 0x2Fu,
+			0x17u, 0x26u, 0x2Eu, 0x28u
+		};
+		demoRestart_ = 0;
+		restartEvery_ = 0;
+		chainLoopEvery_ = 0;
+		chainPark_ = 0;
+		for (int i = 0; i < 28; i++) {
+			if (lo == kId[i])
+				return kSlot[i];
+		}
+		return 0x1Fu;
+	}
+	if (tblOffs_ == 0xE8000u && hw_->Read32(0xC20000u) == 0x0003D2F4u) {
+		/* bublbob2 は 24 曲。同じ tbloffs の twinqix（0x0000714A）はここを通さない。
+		   0x9B / 0x9F / 0xA0 の巻き戻しはこの後ろなので、先に別々の譜面へ割り当てて戻る。 */
+		if (tab < 0xC00000u || tab >= 0xC80000u
+			|| hw_->Read32(tab + 4u) != 0xFFFFD9CCu) {
+			tab = 0xC20000u;
+			hw_->Write32(0xD404u, tab);
+		}
+		static const unsigned kId[24] = {
+			0x9Bu, 0x9Fu, 0xA0u, 0x98u, 0x90u, 0x91u, 0x92u, 0x96u,
+			0x99u, 0x94u, 0xAAu, 0xA7u, 0xA8u, 0x9Cu, 0x95u, 0x9Eu,
+			0xA2u, 0xA3u, 0xA4u, 0x9Du, 0x97u, 0xA5u, 0xA9u, 0x0Du
+		};
+		static const unsigned kSlot[24] = {
+			0x0Au, 0x0Bu, 0x23u, 0x20u, 0x17u, 0x18u, 0x10u, 0x14u,
+			0x15u, 0x0Eu, 0x1Cu, 0x0Fu, 0x1Du, 0x07u, 0x09u, 0x1Au,
+			0x13u, 0x11u, 0x08u, 0x06u, 0x21u, 0x1Bu, 0x19u, 0x05u
+		};
+		demoRestart_ = 0;
+		restartEvery_ = 0;
+		chainLoopEvery_ = 0;
+		chainPark_ = 0;
+		for (int i = 0; i < 24; i++) {
+			if (lo == kId[i])
+				return kSlot[i];
+		}
+		return 0x0Au;
 	}
 	if (lo == 0x9Bu) {
 		/* bubblem スキップランチ / bublbob2 アトラクトは 2 窓で止まる。チェイン頭へ戻してループ。 */
 		chainLoopEvery_ = 90u;
+	}
+	if (tblOffs_ == 0x64B10u) {
+		/* spcinv95 は 19 曲。短い効果音枠を飛ばし、譜面を曲順に割り当てる。
+		   tbloffs を足すと 0xC64B10 になり、窓の中だが曲表ではない。 */
+		if (tab < 0xC00000u || tab >= 0xC80000u
+			|| hw_->Read32(tab + 4u) != 0xFFFFD9CCu) {
+			tab = 0xC20000u;
+			hw_->Write32(0xD404u, tab);
+		}
+		static const unsigned kSpc[19] = {
+			0x99u, 0xBEu, 0x97u, 0x90u, 0x9Cu, 0x9Du, 0x94u, 0x9Eu, 0xB9u, 0xBCu,
+			0xBDu, 0x9Fu, 0x98u, 0x91u, 0x95u, 0x96u, 0x08u, 0x09u, 0x1Au
+		};
+		unsigned mel[24];
+		int nm = 0;
+		for (unsigned i = 1; i < 0x40u && nm < 24; i++) {
+			const unsigned p = hw_->Read32(tab + 8u + i * 4u);
+			if (p < 0x40u || p >= 0x20000u) continue;
+			if (hw_->Read16(tab + p + 2u) < 0x100u) continue;
+			mel[nm++] = i;
+		}
+		int which = -1;
+		for (int i = 0; i < 19; i++) {
+			if (lo == kSpc[i]) { which = i; break; }
+		}
+		if (which >= 0 && nm > 0)
+			return (code & ~0xffu) | mel[which % nm];
 	}
 	if (lo == 0x9Fu) {
 		/* bublbob2 Opening イントロは 1 窓。通常面 BGM へ回してループ。 */
@@ -1904,21 +2116,6 @@ unsigned CDriverF3::MapSongCode(unsigned code)
 		demoRestart_ = 1;
 		restartEvery_ = 120u;
 		return MapSongCode((code & ~0xffu) | 0x94u);
-	}
-	if (tblOffs_ == 0x64B10u && lo == 0xBEu) {
-		/* spcinv95 Player Select。フォールバックでループ曲に乗る。 */
-		chainLoopEvery_ = 90u;
-		chainPark_ = 1;
-		demoRestart_ = 1;
-		restartEvery_ = 90u;
-	}
-	if (tblOffs_ == 0x64B10u && lo == 0x97u) {
-		/* spcinv95 Round Start。表 0x0B (0x1851E) は長い BGM。0xBE は slot 0x07。 */
-		chainLoopEvery_ = 90u;
-		chainPark_ = 1;
-		demoRestart_ = 1;
-		restartEvery_ = 90u;
-		return 0x0Bu;
 	}
 	if (hi == 0 && lo >= 0x7Du && lo <= 0x88u) {
 		if (tblOffs_ == 0xF3176u) {
@@ -1939,20 +2136,72 @@ unsigned CDriverF3::MapSongCode(unsigned code)
 		demoRestart_ = 1;
 		restartEvery_ = 90u;
 	}
+	if (tblOffs_ == 0x7BBCu) {
+		/* elvactr は 26 曲。hoot の下位バイトは空の効果音枠を指す。
+		   出だしの音程が違う譜面を曲順に割り当て、hi は添字にしない。
+		   tbloffs を足すと 0xC07BBC になり、窓の中だが曲表ではない。 */
+		if (tab < 0xC00000u || tab >= 0xC80000u
+			|| hw_->Read32(tab + 4u) != 0xFFFFD9CCu) {
+			tab = 0xC20000u;
+			hw_->Write32(0xD404u, tab);
+		}
+		static const unsigned kId[26] = {
+			0xC6u, 0xC7u, 0xCFu, 0xC2u, 0xD1u, 0xCDu, 0xCAu, 0xCEu, 0xD0u, 0xC3u,
+			0xC9u, 0xD3u, 0xD2u, 0xC8u, 0xC5u, 0xC4u, 0xD4u, 0xD7u, 0xD8u, 0xD9u,
+			0xDAu, 0xDBu, 0xCBu, 0xCCu, 0xC1u, 0xD6u
+		};
+		static const unsigned kSlot[26] = {
+			0x21u, 0x24u, 0x23u, 0x19u, 0x1Au, 0x05u, 0x26u, 0x12u, 0x31u, 0x11u,
+			0x16u, 0x20u, 0x2Du, 0x2Cu, 0x08u, 0x0Du, 0x30u, 0x17u, 0x27u, 0x09u,
+			0x07u, 0x0Au, 0x29u, 0x0Bu, 0x06u, 0x1Eu
+		};
+		demoRestart_ = 0;
+		restartEvery_ = 0;
+		chainLoopEvery_ = 0;
+		chainPark_ = 0;
+		for (int i = 0; i < 26; i++) {
+			if (lo == kId[i])
+				return kSlot[i];
+		}
+		return 0x21u;
+	}
+	if (tblOffs_ == 0x5667Cu) {
+		/* quizhuhu は 38 曲。hoot は 0x100 台で、空枠を指す。
+		   出だしの音程が違う譜面を曲順に割り当て、hi は添字にしない。
+		   tbloffs を足すと 0xC5667C になり、窓の中だが曲表ではない。 */
+		if (tab < 0xC00000u || tab >= 0xC80000u
+			|| hw_->Read32(tab + 4u) != 0xFFFFD9CCu) {
+			tab = 0xC20000u;
+			hw_->Write32(0xD404u, tab);
+		}
+		static const unsigned kId[38] = {
+			0x00u, 0x01u, 0x0Au, 0x0Bu, 0x0Cu, 0x0Du, 0x0Eu, 0x0Fu, 0x10u, 0x11u,
+			0x12u, 0x13u, 0x19u, 0x1Bu, 0x1Cu, 0x1Du, 0x1Eu, 0x1Fu, 0x20u, 0x21u,
+			0x2Cu, 0x2Eu, 0x09u, 0x2Bu, 0x17u, 0x28u, 0x02u, 0x03u, 0x08u, 0x14u,
+			0x1Au, 0x22u, 0x25u, 0x27u, 0x23u, 0x2Fu, 0x26u, 0x2Du
+		};
+		static const unsigned kSlot[38] = {
+			0x68u, 0x6Cu, 0x1Eu, 0x13u, 0x05u, 0x12u, 0x11u, 0x16u, 0x3Bu, 0x1Fu,
+			0x19u, 0x0Cu, 0x2Bu, 0x1Cu, 0x14u, 0x17u, 0x0Du, 0x2Fu, 0x28u, 0x2Cu,
+			0x04u, 0x18u, 0x25u, 0x0Eu, 0x20u, 0x23u, 0x2Eu, 0x1Au, 0x10u, 0x1Bu,
+			0x0Fu, 0x26u, 0x32u, 0x21u, 0x27u, 0x08u, 0x07u, 0x06u
+		};
+		demoRestart_ = 0;
+		restartEvery_ = 0;
+		chainLoopEvery_ = 0;
+		chainPark_ = 0;
+		for (int i = 0; i < 38; i++) {
+			if (lo == kId[i])
+				return kSlot[i];
+		}
+		return 0x68u;
+	}
 	if (hi == 0x01u && lo == 0xC7u) {
 		chainLoopEvery_ = 90u;
 		chainPark_ = 1;
 		demoRestart_ = 1;
 		restartEvery_ = 90u;
 		return MapSongCode(0x01C0u);
-	}
-	if (tblOffs_ == 0x7BBCu && hi == 0x01u && lo == 0xCFu) {
-		/* 0xCC の ptr $0000000A はゴミ。表 0x27 (0x15568) が長い BGM。 */
-		chainLoopEvery_ = 90u;
-		chainPark_ = 1;
-		demoRestart_ = 1;
-		restartEvery_ = 90u;
-		return 0x0127u;
 	}
 	if (hi == 0x01u && lo == 0x0Au) {
 		/* quizhuhu 0x10A は ROM 空スロット。0xBE と同じく高番号フォールバック。 */
@@ -2193,19 +2442,47 @@ unsigned CDriverF3::MapSongCode(unsigned code)
 			return (code & ~0xffu) | mel[which % nm];
 		}
 	}
-	if (tblOffs_ == 0x8A1DEu && hi == 0 && lo == 0x36u) {
-		chainLoopEvery_ = 90u;
-		chainPark_ = 1;
-		demoRestart_ = 1;
-		restartEvery_ = 90u;
-		return 0x19u;
-	}
-	if (tblOffs_ == 0x8A1DEu && hi == 0 && lo == 0x37u) {
-		chainLoopEvery_ = 90u;
-		chainPark_ = 1;
-		demoRestart_ = 1;
-		restartEvery_ = 90u;
-		return 0x0Fu;
+	if (tblOffs_ == 0x8A1DEu) {
+		/* pbobble2o は譜面が 19 本。BGM1/BGM2 の hurry は別譜面、
+		   残りの hurry は元の BGM を使う。0x8A1DE は窓の外なので表は 0xC20000。 */
+		if (tab < 0xC00000u || tab >= 0xC80000u
+			|| hw_->Read32(tab + 4u) != 0xFFFFD9CCu) {
+			tab = 0xC20000u;
+			hw_->Write32(0xD404u, tab);
+		}
+		static const unsigned kUniq[19] = {
+			0x38u, 0x36u, 0x37u, 0x31u, 0x35u, 0x32u, 0x33u, 0x3Du, 0x3Cu, 0x39u,
+			0x34u, 0x3Au, 0x3Bu, 0x3Fu, 0x3Eu, 0x41u, 0x45u, 0x42u, 0x46u
+		};
+		static const unsigned kFrom[8] = {
+			0x43u, 0x47u, 0x49u, 0x4Bu, 0x44u, 0x48u, 0x4Au, 0x4Cu
+		};
+		static const unsigned kTo[8] = {
+			0x33u, 0x33u, 0x39u, 0x39u, 0x34u, 0x34u, 0x3Au, 0x3Au
+		};
+		unsigned mel[24];
+		int nm = 0;
+		for (unsigned i = 1; i < 0x40u && nm < 24; i++) {
+			const unsigned p = hw_->Read32(tab + 8u + i * 4u);
+			if (p < 0x40u || p >= 0x20000u) continue;
+			if (hw_->Read16(tab + p + 2u) < 0x100u) continue;
+			mel[nm++] = i;
+		}
+		unsigned want = lo;
+		for (int i = 0; i < 8; i++) {
+			if (lo == kFrom[i]) { want = kTo[i]; break; }
+		}
+		int which = -1;
+		for (int i = 0; i < 19; i++) {
+			if (want == kUniq[i]) { which = i; break; }
+		}
+		if (which >= 0 && nm > 0) {
+			demoRestart_ = 0;
+			restartEvery_ = 0;
+			chainLoopEvery_ = 0;
+			chainPark_ = 0;
+			return (code & ~0xffu) | mel[which % nm];
+		}
 	}
 	if (tblOffs_ == 0x32046u) {
 		/* pbobble3 の hoot 番号は曲表の添字ではない。長い譜面を曲順に割り当てる。

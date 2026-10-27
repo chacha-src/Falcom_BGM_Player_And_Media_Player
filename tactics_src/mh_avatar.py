@@ -576,8 +576,12 @@ SEGS += [f"{f}{i}.{s}" for s in ("L", "R") for f in FINGERS for i in (1, 2, 3)] 
 
 
 def seg_joint_names(qj):
-    """正規の区間名 -> そのモデルの関節名。男性は指の付け根が 2、女性は 1 から番号が振られている。"""
-    base = 1 if "Index1.R" in qj else 2
+    """正規の区間名 -> そのモデルの関節名。指の付け根が 1 番の体と、1 番が無いか手首にある中手骨の根で 2 番の体がある。"""
+    base = 2
+    if "Index1.R" in qj and "Hand.R" in qj:
+        d1 = float(np.linalg.norm(qj["Index1.R"] - qj["Hand.R"]))
+        d2 = float(np.linalg.norm(qj["Index2.R"] - qj["Index1.R"])) if "Index2.R" in qj else 0.0
+        base = 1 if d1 > 0.5 * d2 else 2
     out = []
     for s in SEGS:
         m = re.match(r"(Index|Middle|Ring|Pinky)(\d)\.([LR])$", s)

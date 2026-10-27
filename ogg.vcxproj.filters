@@ -2840,6 +2840,9 @@
       <Filter>Resource Files</Filter>
     </None>
     <None Include="res\cso\tac_csskin.cso" />
+    <None Include="res\cso\tac_csclths.cso" />
+    <None Include="res\cso\tac_csclthr.cso" />
+    <None Include="res\cso\tac_csclthw.cso" />
     <None Include="res\cso\tac_psbloom.cso" />
     <None Include="res\cso\tac_psblur.cso" />
     <None Include="res\cso\tac_psgrade.cso" />

@@ -85,7 +85,7 @@ V3 Game::UnitGroundPos(const Unit& u) const
 
 void Game::LoadBattleCast()
 {
-	int ids[128];
+	int ids[256];
 	int n = 0;
 	for (int i = 0; i < m_b.nUnits; i++) {
 		const Unit& u = m_b.u[i];
@@ -95,7 +95,7 @@ void Game::LoadBattleCast()
 		int have = 0;
 		for (int k = 0; k < n; k++) if (ids[k] == md.model) { have = 1; break; }
 		if (have) continue;
-		if (n >= 128) break;
+		if (n >= 256) break;
 		ids[n++] = md.model;
 	}
 	m_r.LoadBattleCreatures(ids, n);
@@ -103,27 +103,30 @@ void Game::LoadBattleCast()
 
 void Game::BindImportedActors()
 {
-	BOOL stale = FALSE;
+	BOOL missing = FALSE, need = FALSE;
 	for (int i = 0; i < m_b.nUnits; i++) {
 		const Unit& u = m_b.u[i];
 		if (u.team == TEAM_PLAYER || u.monster < 0) continue;
 		const MonsterDef& md = MonsterInfo(u.monster);
 		if (md.look != LK_MESH || md.model < 0) continue;
-		if (m_act[i].proc == 3 && m_act[i].model >= 0) continue;
-		if (!m_importBind && m_r.CreatureModel(md.model) < 0) {
-			m_importBind = 1;
-			LoadBattleCast();
-		}
-		if (m_r.CreatureModel(md.model) >= 0) stale = TRUE;
+		int mi = m_r.CreatureModel(md.model);
+		if (mi < 0) missing = TRUE;
+		else if (m_act[i].proc != 3 || m_act[i].model != mi) need = TRUE;
 	}
-	if (!stale) return;
+	if (missing && !m_importBind) {
+		m_importBind = 1;
+		LoadBattleCast();
+		need = TRUE;
+	}
+	if (!need) return;
 	for (int i = 0; i < m_b.nUnits; i++) {
 		const Unit& u = m_b.u[i];
 		if (u.team == TEAM_PLAYER || u.monster < 0) continue;
 		const MonsterDef& md = MonsterInfo(u.monster);
 		if (md.look != LK_MESH || md.model < 0) continue;
-		if (m_act[i].proc == 3 && m_act[i].model >= 0) continue;
-		if (m_r.CreatureModel(md.model) < 0) continue;
+		int mi = m_r.CreatureModel(md.model);
+		if (mi < 0) continue;
+		if (m_act[i].proc == 3 && m_act[i].model == mi) continue;
 		ActorForUnit(i);
 	}
 	InvalidatePortraits();
@@ -132,13 +135,6 @@ void Game::BindImportedActors()
 void Game::ActorForUnit(int i)
 {
 	Unit& u = m_b.u[i];
-	if (u.team != TEAM_PLAYER && u.monster >= 0) {
-		const MonsterDef& md = MonsterInfo(u.monster);
-		if (md.look == LK_MESH && md.model >= 0 && m_r.CreatureModel(md.model) < 0 && !m_importBind) {
-			m_importBind = 1;
-			LoadBattleCast();
-		}
-	}
 	if (u.team == TEAM_PLAYER) ActorFromChar(m_act[i], m_lib, m_r, u.ch);
 	else ActorFromMonster(m_act[i], m_lib, m_r, u.monster, u.boss);
 	if (UnitMoveType(u) == MV_FLY && m_act[i].hover < .2f) m_act[i].hover = .35f;
@@ -358,17 +354,24 @@ void Game::ResumeBattle(int kind)
 	m_ai = s->ai;
 	m_ordSnapN = 0;
 	m_ordLeave = -1;
+	m_importBind = 0;
+	LoadBattleCast();
+	m_importBind = 1;
 	m_r.BuildTerrain(m_b.map);
 	m_r.BuildMinimap(m_b.map);
 	m_showBuilt = FALSE;
-	m_importBind = 0;
-	LoadBattleCast();
 	for (int i = 0; i < m_b.nUnits; i++) {
 		Unit& u = m_b.u[i];
 		if (u.team == TEAM_PLAYER) CharGrantReached(u.ch);
 		ActorForUnit(i);
+		V3 p = UnitGroundPos(u);
+		u.px = p.x; u.py = p.y; u.pz = p.z;
+		u.hover = m_act[i].hover;
+		if (u.alive) u.dissolve = 0;
+		u.flash = 0;
 		m_faceShow[i] = u.face;
-		m_dispHp[i] = u.hpShow;
+		m_dispHp[i] = (float)u.hp;
+		u.hpShow = (float)u.hp;
 		m_dieT[i] = u.alive ? -1.f : 99.f;
 		m_lunge[i] = 0;
 	}
@@ -387,6 +390,7 @@ void Game::ResumeBattle(int kind)
 	m_camDist = m_camDistGoal = m_zoomDist = s->camDist > 1.f ? s->camDist : 18.f;
 	m_camTarget = m_camGoal = v3(s->camX, s->camY, s->camZ);
 	m_camPan = v3(0, 0, 0);
+	m_surveyN = 0;
 	m_parts.clear(); m_popups.clear(); m_banners.clear(); m_deferPopups.clear();
 	m_seqCut = FALSE; m_cutStage = 0; m_victory = 0; m_hoverUnit = -1;
 	m_lvqN = m_lvqCur = 0; m_promoAsk = 0; m_menuConfirm = 0; m_proj.active = 0;
@@ -477,6 +481,7 @@ void Game::StartBattle(int stage)
 	SetupBattle(m_b, stage, seed, chars, idx, n, m_themeSel);
 	m_importBind = 0;
 	LoadBattleCast();
+	m_importBind = 1;
 	m_battleStage = stage;
 	m_logN = 0;
 	m_r.BuildTerrain(m_b.map);
@@ -513,11 +518,33 @@ void Game::StartBattle(int stage)
 	m_camPitch = .92f;
 	m_zoomHold = FALSE;
 	m_wheelSign = 0;
-	m_camDist = 40.f;
-	m_camDistGoal = 18.f;
-	m_zoomDist = 40.f;
-	m_camTarget = v3(MAPN * .5f, 2.f, MAPN * .5f);
+	m_camDist = 34.f;
+	m_camDistGoal = 26.f;
+	m_zoomDist = 34.f;
 	m_camGoal = v3(px + .5f, m_b.map.StandY((int)px, (int)pz), pz + .5f);
+	// 開戦前に戦場を区画ごとに見て回る。敵の側から蛇行し、自軍の区画で終わってから手番に入る。
+	// 区画の行は偶数なので、自軍に近い列から始めると最後も自軍の列に戻る。
+	{
+		const int nb = MAPN / SURVEY_BLK;
+		const BOOL nearX0 = px < MAPN * .5f, nearZ0 = pz < MAPN * .5f;
+		m_surveyN = 0;
+		for (int r = 0; r < nb; r++) {
+			const int bz = nearZ0 ? nb - 1 - r : r;
+			for (int c = 0; c < nb; c++) {
+				const int step = (r & 1) ? nb - 1 - c : c;
+				const int bx = nearX0 ? step : nb - 1 - step;
+				float sx = 0, sy = 0, sz = 0;
+				int n = 0;
+				for (int z = bz * SURVEY_BLK; z < (bz + 1) * SURVEY_BLK; z++)
+					for (int x = bx * SURVEY_BLK; x < (bx + 1) * SURVEY_BLK; x++) {
+						if (m_b.map.At(x, z).t == T_VOID) continue;
+						sx += x + .5f; sy += m_b.map.StandY(x, z); sz += z + .5f; n++;
+					}
+				if (n > 0 && m_surveyN < SURVEY_MAX) m_surveyPt[m_surveyN++] = v3(sx / n, sy / n, sz / n);
+			}
+		}
+	}
+	m_camTarget = m_surveyN > 0 ? m_surveyPt[0] : v3(MAPN * .5f, 2.f, MAPN * .5f);
 	m_camPan = v3(0, 0, 0);
 	m_parts.clear();
 	m_popups.clear();
@@ -693,14 +720,14 @@ void Game::ConfuseSelf(int ui)
 	TacSfx(u.team == TEAM_PLAYER ? TS_HURT : TS_HIT);
 	if (u.hp <= 0) {
 		u.hp = 0;
-		u.alive = 0;
-		u.killed = 1;
 		u.confuse = 0;
 		u.stun = 0;
-		if (m_dieT[ui] < 0) { m_dieT[ui] = 0; ActorPlay(m_act[ui], CL_DEATH, 0, .1f); }
-		if (u.team == TEAM_ENEMY && u.boss) m_bossDown = 1;
-		TacSfx(TS_DEATH);
-	} else ActorPlay(m_act[ui], CL_HIT_A, 0, .06f);
+		TacSfx(u.team == TEAM_PLAYER ? TS_FALL : TS_DEATH);
+		m_strkN = 0;
+		FinishSeq();
+		return;
+	}
+	ActorPlay(m_act[ui], CL_HIT_A, 0, .06f);
 	FinishUnitTurn(1);
 }
 
@@ -1089,21 +1116,37 @@ void Game::BattleConfirmCursor()
 		if (CanShove(m_b, m_cur, t, NULL, NULL)) {
 			int nx, nz;
 			CanShove(m_b, m_cur, t, &nx, &nz);
-			DoShove(m_b, m_cur, t);
 			Unit& d = m_b.u[t];
+			int hp0 = d.hp;
+			DoShove(m_b, m_cur, t);
 			V3 p = UnitGroundPos(d);
 			d.px = p.x; d.py = p.y; d.pz = p.z;
 			AddPopup(p + v3(0, m_act[t].height, 0), TT(TX_BT_SHOVE), RGBA8(255, 220, 140), 1);
-			TacSfx(d.team == TEAM_PLAYER ? TS_HURT : TS_HIT);
-			if (d.hp <= 0) {
-				d.alive = 0;
-				d.killed = 1;
-				if (m_dieT[t] < 0) m_dieT[t] = 0;
-				ActorPlay(m_act[t], CL_DEATH, 0, .08f);
-				m_b.RebuildOcc();
-			}
 			WakeNearPlayers(m_b, 9);
-			FinishUnitTurn(1);
+			if (d.hp >= hp0) {
+				TacSfx(d.team == TEAM_PLAYER ? TS_HURT : TS_HIT);
+				FinishUnitTurn(1);
+				return;
+			}
+			// 奈落・溶岩へ落とした分は通常の命中と同じく撃破処理・報酬・経験値を通す。
+			wchar_t s[24];
+			swprintf_s(s, L"%d", hp0 - d.hp);
+			AddPopup(p + v3(0, m_act[t].height + .3f, 0), s, RGBA8(255, 255, 255), 0, .15f);
+			Strike& sk = m_strk[0];
+			memset(&sk, 0, sizeof(sk));
+			sk.attacker = m_cur; sk.defender = t; sk.skill = -1;
+			sk.dmg = hp0 - d.hp; sk.hit = 1; sk.kill = d.hp <= 0;
+			m_strkN = 1;
+			d.flash = 1.f;
+			if (d.hp <= 0) {
+				d.alive = 1;
+				d.killed = 0;
+				TacSfx(d.team == TEAM_PLAYER ? TS_FALL : TS_DEATH);
+			} else {
+				TacSfx(d.team == TEAM_PLAYER ? TS_HURT : TS_HIT);
+				ActorPlay(m_act[t], CL_HIT_A, 0, .06f);
+			}
+			FinishSeq();
 		} else TacSfx(TS_ERROR);
 		return;
 	}
@@ -1164,6 +1207,7 @@ void Game::ApplyTerrace(int tx, int tz)
 void Game::BattleClick(int x, int y)
 {
 	if (m_statOpen) return;
+	if (m_phase == PH_INTRO) { m_phaseT = max(m_phaseT, m_surveyN * .5f); return; }
 	if (m_phase != PH_P_MOVE && m_phase != PH_P_TARGET && m_phase != PH_P_SKILLTARGET && m_phase != PH_P_SHOVE) return;
 	if (y > m_h - U(150) && x < U(720)) return;
 	if (x > m_w - U(190)) return;
@@ -1613,7 +1657,8 @@ void Game::LayoutSpecialCut()
 		float dz = (float)(m_b.u[id].z - u.z);
 		float fwd = dx * ex + dz * ez;
 		float lat = dx * ez - dz * ex;
-		m_cutAllyPos[i] = v3(-1.2f + fwd * .92f, 0, lat * .92f);
+		// 前に出た仲間が敵の立ち位置に重ならないよう、前後と左右を舞台に収める。
+		m_cutAllyPos[i] = v3(Clampf(-1.2f + fwd * .92f, -3.2f, .45f), 0, Clampf(lat * .92f, -1.7f, 1.7f));
 	}
 }
 
@@ -1643,8 +1688,12 @@ void Game::PoseFormAllies()
 	for (int i = 0; i < m_cutAllyN; i++) {
 		int id = m_cutAlly[i];
 		if (id == m_cutA || id < 0 || m_dieT[id] >= 0) continue;
-		ActorPlay(m_act[id], allyClip, 0, .12f);
-		m_act[id].animSpeed = .32f;
+		Actor& ac = m_act[id];
+		ActorPlay(ac, allyClip, 0, .12f);
+		ac.skillPose = m_seqSkill;
+		// 技名のあいだは構えで止め、攻防に入ったら主役と同時に振り下ろす。
+		float wind = ActorClipLen(ac, m_lib, m_r, allyClip) * ActorWindup(ac, m_r, allyClip);
+		ac.animSpeed = Clampf(wind / max(0.25f, CutIntroLen()), 0.12f, 1.15f);
 		m_b.u[id].flash = 1.f;
 	}
 }
@@ -1703,7 +1752,7 @@ V3 Game::ActorPos(int ui) const
 		if (CutFind(ui, &side, &idx)) {
 			V3 p = CutStand(side, idx);
 			float lx = m_lunge[ui];
-			p.x += side == 0 ? (lx - kb) : -(lx + kb);
+			p.x += side == 0 ? (lx - kb) : (kb - lx);
 			p.y += m_b.u[ui].hover;
 			return p;
 		}
@@ -1737,6 +1786,9 @@ void Game::SeqImpact(const SeqStep& st, int volley)
 	const SkillDef* sd = st.skill >= 0 ? &SkillInfo(st.skill) : NULL;
 	int el = sd ? sd->element : EL_NONE;
 	int kind = sd ? sd->kind : SK_PHYS;
+	// 範囲技で同じ音を的の数だけ重ねると割れるので、一度の着弾では種類ごとに一回だけ鳴らす。
+	int heard = 0;
+	auto sfxOnce = [&](int bit) { if (heard & bit) return FALSE; heard |= bit; return TRUE; };
 	for (int k = 0; k < st.nHits; k++) {
 		const Strike& h = st.hits[k];
 		if (h.volley != volley) continue;
@@ -1786,14 +1838,14 @@ void Game::SeqImpact(const SeqStep& st, int volley)
 				swprintf_s(line, L"%s  %s  %+d", an, dn, -h.dmg);
 				AddLog(line, RGBA8(120, 255, 160));
 			}
-			TacSfxHit(st.skill, kind, el, UnitMotionStyle(m_b.u[h.attacker], st.skill), 0);
-			if (sd && sd->effect == EF_CLEANSE && h.landed) TacSfxStatus(EF_CLEANSE, 0);
+			if (sfxOnce(1)) TacSfxHit(st.skill, kind, el, UnitMotionStyle(m_b.u[h.attacker], st.skill), 0);
+			if (sd && sd->effect == EF_CLEANSE && h.landed && sfxOnce(2)) TacSfxStatus(EF_CLEANSE, 0);
 			if (visible || !cutView) ElementFx(EL_NONE, SK_HEAL, mid, mid, FALSE);
 			continue;
 		}
 		if (kind == SK_BUFF) {
 			pop(TT(TX_BT_BUFF), RGBA8(150, 210, 255), 1, 0);
-			TacSfx(TS_BUFF);
+			if (sfxOnce(1)) TacSfx(TS_BUFF);
 			if (visible || !cutView) ElementFx(EL_NONE, SK_BUFF, mid, mid, FALSE);
 			continue;
 		}
@@ -1813,7 +1865,7 @@ void Game::SeqImpact(const SeqStep& st, int volley)
 				swprintf_s(line, L"%s  %s  %s", an, dn, TT(TX_BT_MISS));
 				AddLog(line, RGBA8(180, 200, 230));
 			}
-			TacSfxMiss(kind, UnitMotionStyle(m_b.u[h.attacker], st.skill));
+			if (sfxOnce(4)) TacSfxMiss(kind, UnitMotionStyle(m_b.u[h.attacker], st.skill));
 			continue;
 		}
 		m_dispHp[d] = max(0.f, m_dispHp[d] - h.dmg);
@@ -1827,14 +1879,15 @@ void Game::SeqImpact(const SeqStep& st, int volley)
 		BOOL followDead = h.overkill && !h.kill && du.hp <= 0;
 		if (h.crit) {
 			pop(TT(TX_BT_CRITICAL), RGBA8(255, 230, 80), 2, 0);
-			TacSfx(TS_CRIT);
+			if (sfxOnce(8)) TacSfx(TS_CRIT);
 			pop(s, RGBA8(255, 220, 60), 2, .12f);
 			Shake(.6f);
 			if (cutView) m_flashWhite = 1.f;
 		} else {
 			pop(s, kind == SK_MAGIC ? RGBA8(200, 170, 255) : RGBA8(255, 255, 255), 0, 0);
 			Shake(.22f);
-			TacSfxHit(st.skill, kind, el, UnitMotionStyle(m_b.u[h.attacker], st.skill), du.team == TEAM_PLAYER);
+			BOOL ally = du.team == TEAM_PLAYER;
+			if (sfxOnce(ally && kind != SK_MAGIC ? 16 : 32)) TacSfxHit(st.skill, kind, el, UnitMotionStyle(m_b.u[h.attacker], st.skill), ally);
 		}
 		if (visible || !cutView) {
 			StrikeFx(st.skill, el, kind, UnitMotionStyle(m_b.u[h.attacker], st.skill), ActorPos(h.attacker), mid, h.crit || cutView);
@@ -1851,7 +1904,7 @@ void Game::SeqImpact(const SeqStep& st, int volley)
 			AddLog(line, h.guts ? RGBA8(255, 210, 120) : (h.overkill ? RGBA8(255, 170, 80) : (h.crit ? RGBA8(255, 220, 80) : RGBA8(235, 235, 240))));
 		}
 		if (h.overkill) pop(TT(TX_BT_OVERKILL), RGBA8(255, 170, 80), 1, h.crit ? .28f : .14f);
-		if (h.guts) { pop(TT(TX_BT_GUTS), RGBA8(255, 196, 96), 1, .22f); TacSfx(TS_GUTS); }
+		if (h.guts) { pop(TT(TX_BT_GUTS), RGBA8(255, 196, 96), 1, .22f); if (sfxOnce(64)) TacSfx(TS_GUTS); }
 		if (!followDead) {
 		du.flash = 1.f;
 		{
@@ -1863,10 +1916,10 @@ void Game::SeqImpact(const SeqStep& st, int volley)
 			m_act[d].recoil = h.crit ? 1.f : .75f;
 		}
 		if (h.kill) {
-			TacSfx(TS_DEATH);
-			if (visible || !cutView) ActorPlay(m_act[d], CL_DEATH, 0, .08f);
+			if (du.team == TEAM_PLAYER) { if (sfxOnce(128)) TacSfx(TS_FALL); }
+			else if (sfxOnce(256)) TacSfx(TS_DEATH);
+			ActorPlay(m_act[d], CL_DEATH, 0, .08f);
 			m_dieT[d] = 0;
-			if (!visible) ActorPlay(m_act[d], CL_DEATH, 0, .08f);
 		} else {
 			ActorPlay(m_act[d], h.crit ? CL_HIT_B : CL_HIT_A, 0, .06f);
 		}
@@ -1886,21 +1939,9 @@ void Game::SeqImpact(const SeqStep& st, int volley)
 				else if (ail) swprintf_s(e, L"%s", ail);
 				else swprintf_s(e, L"%s%s", TT(tx), sd->effect == EF_DEFDOWN ? L"↓" : L"");
 				pop(e, blocked ? RGBA8(180, 220, 255) : RGBA8(220, 160, 255), 1, .35f);
-				TacSfxStatus(sd->effect, blocked ? 1 : 0);
+				if (sfxOnce(blocked ? 512 : 1024)) TacSfxStatus(sd->effect, blocked ? 1 : 0);
 			}
 		}
-	}
-}
-
-static float ClipWindup(int clip)
-{
-	switch (clip) {
-	case CL_2H_SHOOT: case CL_1H_SHOOT: case CL_THROW: return 0.26f;
-	case CL_CAST_SHOOT: case CL_CAST_LONG: return 0.36f;
-	case CL_CAST_RAISE: return 0.32f;
-	case CL_2H_CHOP: case CL_1H_CHOP: return 0.30f;
-	case CL_2H_SPIN: return 0.16f;
-	default: return 0.22f;
 	}
 }
 
@@ -1913,6 +1954,10 @@ static int UnitAttackClip(const Unit& u, int variant, int skill)
 static int CutClipFor(const Unit& u, int skill, int variant)
 {
 	const SkillDef* sd = skill >= 0 ? &SkillInfo(skill) : NULL;
+	if (sd && IsFormSkill(skill)) {
+		if (FormOf(skill) == FM_CIRCLE) return CL_CAST_LONG;
+		if (FormOf(skill) == FM_PAIR) return CL_CAST_RAISE;
+	}
 	if (sd && sd->kind != SK_PHYS) return CastClipFor(sd->kind);
 	return UnitAttackClip(u, variant, skill);
 }
@@ -1931,9 +1976,10 @@ void Game::UpdateSeq(float dt)
 					int clip = CutClipFor(m_b.u[m_cutA], sk0, sk0 >= 0 ? 1 : 0);
 					Actor& ca = m_act[m_cutA];
 					ActorPlay(ca, clip, 0, .06f);
+					ca.skillPose = sk0;
 					float full = ActorClipLen(ca, m_lib, m_r, clip);
 					float need = CutIntroLen();
-					float wind = full * ClipWindup(clip);
+					float wind = full * ActorWindup(ca, m_r, clip);
 					ca.animSpeed = Clampf(wind / max(0.25f, need), 0.12f, 1.15f);
 				}
 				if (m_cutD >= 0) ActorPlay(m_act[m_cutD], CL_IDLE, 1, .15f);
@@ -1944,10 +1990,12 @@ void Game::UpdateSeq(float dt)
 					Burst(m_cutPosA + v3(0, .05f, 0), 2, 0, .8f, 1.f, 1.f, 1.f, 1.f, 1, 1, 0, 0, 0, 1.6f);
 				}
 				{
+					// 技名の間は詠唱か技の閃きだけ。振りの音は攻防で振り下ろすときに鳴らす。
 					int sk = m_seqSkill;
 					int style = UnitMotionStyle(m_b.u[m_cutA], sk);
 					const SkillDef* sd = sk >= 0 ? &SkillInfo(sk) : NULL;
-					TacSfxMotion(sk, sd ? sd->kind : SK_PHYS, sd ? sd->element : EL_NONE, style);
+					if (sd && sd->kind != SK_PHYS) TacSfxMotion(sk, sd->kind, sd->element, style);
+					else if (sk >= 0) TacSfx(TS_CRAFT_SW);
 				}
 			}
 			return;
@@ -1984,6 +2032,7 @@ void Game::UpdateSeq(float dt)
 				m_deferPopups.clear();
 				for (int i = 0; i < m_b.nUnits; i++) m_lunge[i] = 0;
 				for (int i = 0; i < m_b.nUnits; i++) {
+					m_act[i].animSpeed = 1.f;
 					if (m_dieT[i] >= 0 && m_b.u[i].hp <= 0) continue;
 					ActorPlay(m_act[i], CL_IDLE, 1, .1f);
 				}
@@ -2047,12 +2096,18 @@ void Game::UpdateSeq(float dt)
 			}
 			for (int i = 0; i < nm; i++) {
 				if (mem[i] == A || m_dieT[mem[i]] >= 0) continue;
-				ActorPlay(m_act[mem[i]], allyClip, 0, .1f);
+				Actor& ma = m_act[mem[i]];
+				BOOL posed = m_seqCut && m_cutStage == 2 && ma.clip == allyClip && ma.t > 0.05f;
+				if (posed) ma.t = ActorClipLen(ma, m_lib, m_r, allyClip) * ActorWindup(ma, m_r, allyClip);
+				else ActorPlay(ma, allyClip, 0, .1f);
+				ma.animSpeed = 1.05f;
+				ma.skillPose = st.skill;
 				m_b.u[mem[i]].flash = 1.f;
 			}
 		}
 		BOOL held = m_seqCut && m_cutStage == 2 && aa.clip == clip && aa.t > 0.05f && !follow;
 		if (!held) ActorPlay(aa, clip, 0, follow ? .04f : .08f);
+		aa.skillPose = st.skill;
 		aa.animSpeed = cast ? 1.0f : 1.05f;
 		m_stepL = ActorClipLen(aa, m_lib, m_r, clip) / aa.animSpeed;
 		m_stepTi = m_stepL * (cast || magicNormal ? .5f : .42f);
@@ -2091,16 +2146,25 @@ void Game::UpdateSeq(float dt)
 			Burst(ActorPos(A) + v3(0, .05f, 0), 1, 0, .5f, .9f, (c & 255) / 255.f, ((c >> 8) & 255) / 255.f, ((c >> 16) & 255) / 255.f, 1, 1, 0, 0, 0, 1.3f);
 		}
 		if (held || follow) {
-			float wind = ClipWindup(clip) * (follow ? 0.55f : 1.f);
+			float wind = ActorWindup(aa, m_r, clip) * (follow ? 0.55f : 1.f);
 			aa.t = ActorClipLen(aa, m_lib, m_r, clip) * wind;
 			m_seqT = aa.t / max(0.05f, aa.animSpeed);
 			if (follow && m_proj.active) m_proj.t = m_seqT;
 		}
-		TacSfxMotion(st.skill, sd ? sd->kind : SK_PHYS, sd ? sd->element : EL_NONE, style);
+		if (!(held && cast && m_seqCur == 0)) {
+			if (!cast && IsCraftId(st.skill)) TacSfxMotion(-1, SK_PHYS, EL_NONE, style);
+			else TacSfxMotion(st.skill, sd ? sd->kind : SK_PHYS, sd ? sd->element : EL_NONE, style);
+		}
 	}
 	m_seqT += dt;
 	BOOL melee = !ranged && !cast && !magicNormal;
-	float maxL = (m_seqCut && m_cutStage == 2) ? (m_cutD >= 0 ? 1.55f : 0) : .32f;
+	float maxL = .32f;
+	if (m_seqCut && m_cutStage == 2) {
+		int sa = 0, ia = 0, sdf = 0, idf = 0;
+		maxL = 0.f;
+		if (A != D && CutFind(A, &sa, &ia) && CutFind(D, &sdf, &idf) && sa != sdf)
+			maxL = Clampf(fabsf(CutStand(sa, ia).x - CutStand(sdf, idf).x) - .8f, 0.f, 4.f);
+	}
 	if (melee && A != D) {
 		float u0 = m_stepTi * .35f, u1 = m_stepTi;
 		float l = 0;
@@ -2450,6 +2514,7 @@ void Game::UpdateUnitsVisual(float dt)
 			}
 		}
 		if (!a.loop && a.clip != CL_DEATH && ActorClipDone(a, m_lib, m_r) && !(m_phase == PH_ACTION && i == (m_seqCur < m_seqN ? m_seq[m_seqCur].attacker : -1))) {
+			a.animSpeed = 1.f;
 			ActorPlay(a, (m_phase == PH_OVER && m_victory && u.team == TEAM_PLAYER) ? CL_CHEER : CL_IDLE, 1, .2f);
 		}
 	}
@@ -2467,8 +2532,19 @@ void Game::UpdateCamera(float dt)
 		}
 	}
 	if (m_phase == PH_INTRO) {
-		float t = Smooth01(m_phaseT / 2.f);
-		focus = Lerp(v3(MAPN * .5f, 2.f, MAPN * .5f), m_camGoal, t);
+		// 各区画は 0.5 秒。前半で次の区画へ寄せ、残りは止めて見せる。最後に自軍へ戻って寄る。
+		const float tEnd = m_surveyN * .5f;
+		if (m_phaseT < tEnd) {
+			int i = (int)(m_phaseT / .5f);
+			if (i > m_surveyN - 1) i = m_surveyN - 1;
+			float f = Smooth01(Clampf((m_phaseT - i * .5f) / .22f, 0, 1));
+			focus = Lerp(m_surveyPt[i > 0 ? i - 1 : 0], m_surveyPt[i], f);
+			m_camDistGoal = 26.f;
+		} else {
+			V3 from = m_surveyN > 0 ? m_surveyPt[m_surveyN - 1] : v3(MAPN * .5f, 2.f, MAPN * .5f);
+			focus = Lerp(from, m_camGoal, Smooth01((m_phaseT - tEnd) / 1.2f));
+			m_camDistGoal = 18.f;
+		}
 	}
 	BOOL playerSel = m_phase == PH_P_MOVE || m_phase == PH_P_TARGET || m_phase == PH_P_SKILLTARGET || m_phase == PH_P_SHOVE || m_phase == PH_P_CMD || m_phase == PH_P_SKILLS || m_phase == PH_P_ITEM || m_phase == PH_MENU;
 	if (!playerSel) m_camPan = m_camPan * expf(-dt * 4.f);
@@ -2476,7 +2552,7 @@ void Game::UpdateCamera(float dt)
 	focus.x = Clampf(focus.x, 0, (float)MAPN);
 	focus.z = Clampf(focus.z, 0, (float)MAPN);
 	float sp = m_save.camSpeed <= 0 ? .55f : (m_save.camSpeed >= 2 ? 1.75f : 1.f);
-	float k = Clampf(dt * 4.5f * sp, 0, 1);
+	float k = Clampf(dt * (m_phase == PH_INTRO ? 9.f : 4.5f * sp), 0, 1);
 	m_camTarget = Lerp(m_camTarget, focus, k);
 	m_camYaw = AngLerp(m_camYaw, m_camYawGoal, Clampf(dt * 6.f * sp, 0, 1));
 	if (m_zoomHold) ApplyZoomHold(dt);
@@ -2490,7 +2566,7 @@ void Game::UpdateBattle(float dt)
 	UpdateUnitsVisual(dt);
 	switch (m_phase) {
 	case PH_INTRO:
-		if (m_phaseT > 2.2f) { m_phase = PH_NEXT; m_phaseT = 0; }
+		if (m_phaseT > m_surveyN * .5f + 1.4f) { m_phase = PH_NEXT; m_phaseT = 0; }
 		break;
 	case PH_NEXT: BeginTurn(); break;
 	case PH_MOVING: case PH_E_MOVE: UpdateMove(dt); break;
@@ -4703,6 +4779,15 @@ void Game::DrawBattleUi()
 			else m_r.HudText(hs, tx0 + tw * .5f, top + U(16), U(16), RGBA8(255, 255, 255), 1, 1);
 			if (keys) m_r.HudTextBox(TT(TX_BT_HINT_KEYS), tx0 + U(12), top + textH + U(6), tw - U(24), keysH, U(12), RGBA8(210, 210, 220), 0);
 		}
+	}
+	if (m_phase == PH_INTRO && m_surveyN > 0 && m_phaseT < m_surveyN * .5f) {
+		wchar_t hs[160];
+		swprintf_s(hs, TT(TX_BT_SURVEY), m_b.AliveCount(TEAM_ENEMY));
+		float tw = m_r.TextWidth(hs, U(16), 1) + U(48);
+		float tx0 = ((float)m_w - tw) * .5f, top = (float)m_h - U(96);
+		m_r.HudPanel(tx0, top, tw, U(50), RGBA8(16, 20, 36, 150), RGBA8(150, 128, 86));
+		m_r.HudText(hs, tx0 + tw * .5f, top + U(17), U(16), RGBA8(255, 255, 255), 1, 1);
+		Bar(tx0 + U(16), top + U(34), tw - U(32), U(6), m_phaseT / (m_surveyN * .5f), RGBA8(255, 200, 110), RGBA8(255, 236, 170));
 	}
 	if (m_phase == PH_MENU) {
 		m_r.HudRect(0, 0, (float)m_w, (float)m_h, RGBA8(0, 0, 0, 120));

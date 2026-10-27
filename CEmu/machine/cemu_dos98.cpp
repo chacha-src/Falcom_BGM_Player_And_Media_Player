@@ -66,6 +66,8 @@ CEmuDos98::CEmuDos98()
 	findNext_ = 0;
 	allocStrategy_ = 0;
 	pcAtBios_ = 0;
+	clampSeg_ = 0;
+	clampWant_ = 0;
 }
 
 CEmuDos98::~CEmuDos98()
@@ -109,6 +111,8 @@ void CEmuDos98::Reset()
 	findPat_[0] = 0;
 	findNext_ = 0;
 	allocStrategy_ = 0;
+	clampSeg_ = 0;
+	clampWant_ = 0;
 }
 
 /* CEmuDos98::UpperCopy の実装 */
@@ -136,6 +140,38 @@ static int DosStemEq(const char* file, const char* stem)
 	return _strnicmp(file, stem, n) == 0;
 }
 
+/* "A:\S0/mscdat.mo" → "S0\MSCDAT.MO"。ドライブ・先頭の \ と .\ を落とす。 */
+static void DosNormPath(const char* in, char* out, int cap)
+{
+	if (!out || cap <= 0) return;
+	out[0] = 0;
+	if (!in) return;
+	if (in[0] && in[1] == ':') in += 2;
+	for (;;) {
+		if (in[0] == '\\' || in[0] == '/') { in++; continue; }
+		if (in[0] == '.' && (in[1] == '\\' || in[1] == '/')) { in += 2; continue; }
+		break;
+	}
+	int j = 0;
+	for (int i = 0; in[i] && j < cap - 1; i++) {
+		char c = in[i];
+		if (c >= 'a' && c <= 'z') c = (char)(c - 'a' + 'A');
+		if (c == '/') c = '\\';
+		out[j++] = c;
+	}
+	out[j] = 0;
+}
+
+static const char* DosPathBase(const char* s)
+{
+	const char* base = s;
+	for (const char* p = s; *p; p++) {
+		if (*p == '\\' || *p == '/' || *p == ':')
+			base = p + 1;
+	}
+	return base;
+}
+
 /* CEmuDos98::FindFile の実装 */
 const CEmuDos98File* CEmuDos98::FindFile(const char* name) const
 {
@@ -146,8 +182,21 @@ const CEmuDos98File* CEmuDos98::FindFile(const char* name) const
 		if (*p == '\\' || *p == '/' || *p == ':')
 			base = p + 1;
 	}
+	/* 同名がディレクトリ違いで複数あるカタログだけ "S0\MSCDAT.MO" で載る。パス付き要求はそれを先に引く。 */
+	if (base != up) {
+		char norm[DOS98_NAME];
+		DosNormPath(name, norm, (int)sizeof(norm));
+		for (int i = 0; i < fileCount_; i++) {
+			if (strchr(files_[i].name, '\\') && _stricmp(files_[i].name, norm) == 0)
+				return &files_[i];
+		}
+	}
 	for (int i = 0; i < fileCount_; i++) {
 		if (_stricmp(files_[i].name, up) == 0 || _stricmp(files_[i].name, base) == 0)
+			return &files_[i];
+	}
+	for (int i = 0; i < fileCount_; i++) {
+		if (strchr(files_[i].name, '\\') && _stricmp(DosPathBase(files_[i].name), base) == 0)
 			return &files_[i];
 	}
 	/* カタログ conin は拡張子無し（ABIKO MUSIC01 → MUSIC01.MUS） */
@@ -208,15 +257,18 @@ CEmuDos98File* CEmuDos98::FindFileMut(const char* name)
 }
 
 /* CEmuDos98::AddFile の実装 */
-void CEmuDos98::AddFile(const char* name, const unsigned char* data, unsigned size)
+void CEmuDos98::AddFile(const char* name, const unsigned char* data, unsigned size, int keepDir)
 {
 	if (!name || fileCount_ >= DOS98_FILE_MAX) return;
 	/* size==0 は許可（HOOT の NULL 音色番兵）。そのとき data は NULL でよい。 */
 	if (size > 0 && !data) return;
 	char up[DOS98_NAME];
-	UpperCopy(up, (int)sizeof(up), name);
+	if (keepDir)
+		DosNormPath(name, up, (int)sizeof(up));
+	else
+		UpperCopy(up, (int)sizeof(up), name);
 	const char* base = up;
-	for (const char* p = up; *p; p++) {
+	for (const char* p = up; *p && !keepDir; p++) {
 		if (*p == '\\' || *p == '/' || *p == ':')
 			base = p + 1;
 	}
@@ -253,8 +305,21 @@ void CEmuDos98::SetHandle(uint16_t handle, const char* name)
 {
 	if (handle >= DOS98_HANDLE_MAX || !name) return;
 	handles_[handle].used = 1;
+	handles_[handle].pos = 0;
+	if (handle >= nextHandle_)
+		nextHandle_ = (uint16_t)(handle + 1);
+	/* ディレクトリ付きで載ったファイルはそのまま結ぶ。他はベース名だけ。 */
+	if (strchr(name, '/') || strchr(name, '\\')) {
+		char norm[DOS98_NAME];
+		DosNormPath(name, norm, (int)sizeof(norm));
+		for (int i = 0; i < fileCount_; i++) {
+			if (strchr(files_[i].name, '\\') && _stricmp(files_[i].name, norm) == 0) {
+				strncpy_s(handles_[handle].name, norm, _TRUNCATE);
+				return;
+			}
+		}
+	}
 	UpperCopy(handles_[handle].name, DOS98_NAME, name);
-	/* ベース名のみ */
 	char* base = handles_[handle].name;
 	for (char* p = handles_[handle].name; *p; p++) {
 		if (*p == '\\' || *p == '/' || *p == ':')
@@ -448,6 +513,50 @@ static int DosInArena(uint16_t seg)
 	return seg > DOS98_ARENA_START && seg < DOS98_ARENA_END;
 }
 
+/* AH=48 が溢れたときだけ呼ぶ。hoot の DOS は TPA が広く、グルーは 512-576KB を一括確保して
+   EXE を 4B03 で載せる（triplew/xenon2/tirnan）。失敗のまま返すと AX=0008 がロード先になり
+   IVT を潰す。まず tiny COM の 64KB 保持を要求どおりに戻し、それでも足りなければ末尾の空き
+   ブロックをテキスト VRAM 側へ伸ばす。メモリスイッチ（A3FE:0002）には届かせない。 */
+int CEmuDos98::AllocOverflow(uint8_t* mem, uint16_t paras, uint16_t* outSeg)
+{
+	static const uint16_t kOverflowEnd = 0xA3FE;
+	if (clampSeg_ && DosInArena(clampSeg_)) {
+		const uint16_t mcb = (uint16_t)(clampSeg_ - 1);
+		const unsigned l = DosLin(mcb, 0);
+		const uint8_t sig = mem[l];
+		const uint16_t owner = Rd16(mem, l + 1);
+		const uint16_t size = Rd16(mem, l + 3);
+		if ((sig == (uint8_t)'M' || sig == (uint8_t)'Z') && owner
+			&& size == 0x1000u && clampWant_ + 1u < size) {
+			WriteMcb(mem, (uint16_t)(mcb + 1 + clampWant_),
+				sig == (uint8_t)'Z' ? (uint8_t)'Z' : (uint8_t)'M', 0,
+				(uint16_t)(size - clampWant_ - 1));
+			WriteMcb(mem, mcb, (uint8_t)'M', owner, clampWant_);
+			Coalesce(mem);
+		}
+		clampSeg_ = 0;
+		if (Alloc(mem, paras, pspSeg_, outSeg))
+			return 1;
+	}
+	uint16_t seg = DOS98_ARENA_START;
+	for (int guard = 0; guard < 256; guard++) {
+		const unsigned l = DosLin(seg, 0);
+		const uint8_t sig = mem[l];
+		const uint16_t owner = Rd16(mem, l + 1);
+		const uint16_t size = Rd16(mem, l + 3);
+		if (sig == (uint8_t)'Z') {
+			if (owner != 0 || (unsigned)seg + 1u + paras > kOverflowEnd)
+				return 0;
+			WriteMcb(mem, seg, (uint8_t)'Z', 0, (uint16_t)(kOverflowEnd - seg - 1));
+			return Alloc(mem, paras, pspSeg_, outSeg);
+		}
+		if (sig != (uint8_t)'M')
+			return 0;
+		seg = (uint16_t)(seg + 1 + size);
+	}
+	return 0;
+}
+
 /* CEmuDos98::Coalesce の実装 */
 void CEmuDos98::Coalesce(uint8_t* mem) const
 {
@@ -497,8 +606,11 @@ int CEmuDos98::Resize(uint8_t* mem, uint16_t dataSeg, uint16_t paras, uint16_t* 
 			const unsigned fr = DosLin(np2_reg_get(NP2_R_SS),
 				np2_reg_get(NP2_R_SP));
 			const uint16_t callerCs = Rd16(mem, fr + 2);
-			if (dataSeg == callerCs && paras < 0x1000u && size >= 0x1000u)
+			if (dataSeg == callerCs && paras < 0x1000u && size >= 0x1000u) {
+				clampSeg_ = dataSeg;
+				clampWant_ = paras < 0x10u ? (uint16_t)0x10u : paras;
 				paras = 0x1000u;
+			}
 		}
 		if (size >= (uint16_t)(paras + 1)) {
 			const uint16_t remSeg = (uint16_t)(mcb + 1 + paras);
@@ -1183,7 +1295,37 @@ void CEmuDos98::Int18()
 }
 
 /* CEmuDos98::Int21 の実装 */
+/* CEMU_PC98_DOSTRACE=<path>: INT 21 の入口レジスタと戻り（CF/AX）を先頭 400 件だけ書く。 */
 CEmuDos98Result CEmuDos98::Int21(uint8_t* mem)
+{
+	static const char* path = NULL;
+	static int checked = 0;
+	static int lines = 0;
+	if (!checked) { checked = 1; path = getenv("CEMU_PC98_DOSTRACE"); }
+	if (!path || !path[0] || lines >= 400)
+		return Int21Body(mem);
+	const uint16_t ax = np2_reg_get(NP2_R_AX), bx = np2_reg_get(NP2_R_BX);
+	const uint16_t cx = np2_reg_get(NP2_R_CX), dx = np2_reg_get(NP2_R_DX);
+	const uint16_t ds = np2_reg_get(NP2_R_DS), es = np2_reg_get(NP2_R_ES);
+	char name[DOS98_NAME];
+	name[0] = 0;
+	const uint8_t ah = (uint8_t)(ax >> 8);
+	if (ah == 0x3C || ah == 0x3D || ah == 0x4B || ah == 0x4E || ah == 0x41 || ah == 0x43)
+		ReadCstr(mem, ds, dx, name, (int)sizeof(name));
+	const CEmuDos98Result r = Int21Body(mem);
+	FILE* f = NULL;
+	if (fopen_s(&f, path, lines ? "a" : "w") == 0 && f) {
+		fprintf(f, "AX=%04X BX=%04X CX=%04X DX=%04X DS=%04X ES=%04X psp=%04X %s -> r=%d CF=%d AX=%04X BX=%04X\n",
+			ax, bx, cx, dx, ds, es, pspSeg_, name, (int)r,
+			(np2_reg_get(NP2_R_FLAGS) & FLAG_CF) ? 1 : 0,
+			np2_reg_get(NP2_R_AX), np2_reg_get(NP2_R_BX));
+		fclose(f);
+	}
+	lines++;
+	return r;
+}
+
+CEmuDos98Result CEmuDos98::Int21Body(uint8_t* mem)
 {
 	const uint8_t f = Ah();
 	switch (f) {
@@ -1421,7 +1563,8 @@ CEmuDos98Result CEmuDos98::Int21(uint8_t* mem)
 	case 0x48: {
 		const uint16_t paras = np2_reg_get(NP2_R_BX);
 		uint16_t seg = 0;
-		if (Alloc(mem, paras, pspSeg_, &seg)) {
+		if (Alloc(mem, paras, pspSeg_, &seg)
+			|| (paras >= 0x4000u && paras != 0xFFFFu && AllocOverflow(mem, paras, &seg))) {
 			np2_reg_set(NP2_R_AX, seg);
 			SetCf(0);
 		} else {
@@ -1635,7 +1778,7 @@ int CEmuDos98::FindMatch(uint8_t* mem)
 {
 	for (; findNext_ < fileCount_; findNext_++) {
 		char up[DOS98_NAME];
-		UpperCopy(up, (int)sizeof(up), files_[findNext_].name);
+		UpperCopy(up, (int)sizeof(up), DosPathBase(files_[findNext_].name));
 		if (!Dos98NameMatch(findPat_, up)) continue;
 		const unsigned d = DosLin(dtaSeg_, dtaOff_);
 		memset(mem + d, 0, 0x2B);
@@ -1650,6 +1793,29 @@ int CEmuDos98::FindMatch(uint8_t* mem)
 		return 1;
 	}
 	return 0;
+}
+
+/* lin の DIV/IDIV/AAM の長さ（セグメント上書き込み、16 ビット番地）。除算でなければ 0。 */
+static uint16_t DosDivInsnLen(const uint8_t* mem, unsigned lin)
+{
+	unsigned n = 0;
+	while (n < 4 && lin + n < 0x200000u) {
+		const uint8_t p = mem[lin + n];
+		if (p != 0x26 && p != 0x2E && p != 0x36 && p != 0x3E) break;
+		n++;
+	}
+	if (lin + n + 2 >= 0x200000u) return 0;
+	const uint8_t op = mem[lin + n];
+	if (op == 0xD4) return (uint16_t)(n + 2);
+	if (op != 0xF6 && op != 0xF7) return 0;
+	const uint8_t modrm = mem[lin + n + 1];
+	const unsigned reg = (modrm >> 3) & 7u;
+	if (reg != 6 && reg != 7) return 0;
+	const unsigned mod = modrm >> 6;
+	unsigned len = n + 2;
+	if (mod == 1) len += 1;
+	else if (mod == 2 || (mod == 0 && (modrm & 7u) == 6)) len += 2;
+	return (uint16_t)len;
 }
 
 /* CEmuDos98::ServiceInt の実装 */
@@ -1667,10 +1833,35 @@ CEmuDos98Result CEmuDos98::ServiceInt(uint8_t* mem, uint8_t vec)
 		trapVec_ = vec;
 		trapIp_ = Rd16(mem, f);
 		trapCs_ = Rd16(mem, f + 2);
+		if (const char* tp = getenv("CEMU_PC98_DOSTRACE")) {
+			FILE* tf = NULL;
+			if (tp[0] && fopen_s(&tf, tp, "a") == 0 && tf) {
+				const unsigned tl = DosLin(trapCs_, trapIp_);
+				fprintf(tf, "TRAP%02X %04X:%04X DS=%04X ES=%04X SS:SP=%04X:%04X", vec, trapCs_, trapIp_,
+					np2_reg_get(NP2_R_DS), np2_reg_get(NP2_R_ES), np2_reg_get(NP2_R_SS), np2_reg_get(NP2_R_SP));
+				for (unsigned i = 0; i < 12 && tl + i < 0x200000u; i++)
+					fprintf(tf, " %02X", mem[tl + i]);
+				fputc('\n', tf);
+				fclose(tf);
+			}
+		}
 		/* IBM BIOS の IRET が #UD/#DE を同じ IP へ戻すと CPU がライブロック（s201 CODE.COM dosmiss=int06）。悪いバイトのあと再開する DOS abort stub のように故障オペコードを飛ばす。 */
 		if (pcAtBios_ && (vec == 0x06 || vec == 0x00)) {
 			const uint16_t skip = (vec == 0x00) ? 2u : 1u;
 			Wr16(mem, f, (uint16_t)(trapIp_ + skip));
+		}
+	}
+	if (!pcAtBios_ && vec == 0x00 && mem) {
+		/* MXDRV は DS を曲セグメントのまま div byte [0CDA] を実行し、除数が 0 のまま戻る。286 は故障命令へ戻すので同じ場所で無限に再実行される。この命令だけ V30 式に 1 つ進める。AAM や別変位の割り算はポルタメントとして再実行のまま残し、対応済み曲の波形を変えない。 */
+		const unsigned f = DosLin(np2_reg_get(NP2_R_SS), np2_reg_get(NP2_R_SP));
+		const uint16_t ip = Rd16(mem, f);
+		const uint16_t cs = Rd16(mem, f + 2);
+		const unsigned il = DosLin(cs, ip);
+		if (il + 4 < 0x200000u && mem[il] == 0xF6 && mem[il + 1] == 0x36
+			&& mem[il + 2] == 0xDA && mem[il + 3] == 0x0C) {
+			const uint16_t len = DosDivInsnLen(mem, il);
+			if (len)
+				Wr16(mem, f, (uint16_t)(ip + len));
 		}
 	}
 	if (!pcAtBios_ && vec == 0x06 && CEmuPc98ValkyKeepIrq0() && mem) {

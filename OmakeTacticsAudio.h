@@ -82,6 +82,7 @@ enum TacSfxId {
 	TS_CONFUSE,
 	TS_SLOW,
 	TS_DEFDOWN,
+	TS_FALL,      // 味方が倒れた
 	TS_N
 };
 

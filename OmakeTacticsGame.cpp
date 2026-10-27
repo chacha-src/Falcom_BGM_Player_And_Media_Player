@@ -33,6 +33,7 @@ enum {
 	ID_EQ_NONE = 1860, ID_EQ_ROW0, ID_EQ_PREV = 1880, ID_EQ_NEXT, ID_EQ_CLOSE,
 	ID_EV_MAIN0 = 1000, ID_EV_TGT0 = 1200, ID_EV_PART0 = 1300, ID_EV_DO = 1500, ID_EV_BACK,
 	ID_EV_PART_PREV = 1510, ID_EV_PART_NEXT, ID_EV_MAIN_PREV, ID_EV_MAIN_NEXT,
+	ID_CR_MOT0 = 1550, ID_MON_MOT0 = 1560,
 	ID_RS_NEXT = 700, ID_RS_RETRY, ID_RS_BASE,
 	ID_HELP_CLOSE = 900,
 	ID_BASE_REROLL = 940, ID_BASE_THEME,
@@ -102,6 +103,7 @@ Game::Game()
 	m_monSel = 0;
 	m_monYaw = 0;
 	m_monShown = -2;
+	m_monMot = 0;
 	m_monDrag = FALSE;
 	m_codexJob = 0;
 	m_codexSort = 0;
@@ -153,6 +155,7 @@ Game::Game()
 	m_ult = FALSE;
 	m_confirmDelete = 0;
 	m_camTarget = m_camGoal = v3(32, 0, 32);
+	m_surveyN = 0;
 	m_camYaw = m_camYawGoal = PI * .25f;
 	m_camPitch = .9f;
 	m_camDist = m_camDistGoal = 18.f;
@@ -177,8 +180,11 @@ Game::Game()
 	m_previewYaw = 0;
 	m_previewPitch = .18f;
 	m_previewZoom = 1.f;
+	m_previewPan = v3(0, 0, 0);
 	m_lineage = 0;
 	m_previewDrag = FALSE;
+	m_previewPanDrag = FALSE;
+	m_previewMot = 0;
 	m_partySel = -1;
 	m_eqPick = 0;
 	m_eqPage = 0;
@@ -248,6 +254,19 @@ BOOL Game::LoadEverything()
 {
 	if (!m_r.LoadAssets()) return FALSE;
 	if (!BuildLibrary(m_r, m_lib)) return FALSE;
+	// 拠点に出すのはパーティ（最大10人）と、その装備。体は読み切ってから画面へ出す。
+	for (int i = 0; i < MAX_PARTY; i++) {
+		int ri = m_save.party[i];
+		if (ri < 0 || ri >= MAX_ROSTER || !m_save.roster[ri].used) continue;
+		const CharData& c = m_save.roster[ri];
+		char nm[16];
+		sprintf_s(nm, c.gender == 1 ? "HumF%d" : "HumM%d", CharModel(c));
+		m_r.EnsureBody(nm);
+	}
+	m_r.LoadGearPack();
+	m_r.LoadFacePack();
+	m_r.LoadAvatarPack();
+	m_r.LoadHairPack();
 	m_loaded = TRUE;
 	return TRUE;
 }
@@ -271,9 +290,11 @@ BOOL Game::Recover()
 	if (!LoadEverything()) return FALSE;
 	InvalidatePortraits();
 	if (m_screen == SC_BATTLE || m_screen == SC_RESULT) {
+		m_importBind = 0;
+		LoadBattleCast();
+		m_importBind = 1;
 		m_r.BuildTerrain(m_b.map);
 		m_r.BuildMinimap(m_b.map);
-		LoadBattleCast();
 		for (int i = 0; i < m_b.nUnits; i++) ActorForUnit(i);
 		m_showBuilt = FALSE;
 	} else {
@@ -543,12 +564,47 @@ void Game::RenderFrame()
 	m_selDelta = 0;
 }
 
+// 作成プレビューのカメラ。yaw は固定で、傾きだけが動く。right/up は MLookAtLH と同じ基底。
+static float PreviewBodyH(const Actor& a)
+{
+	float ht = a.htScale > 0.05f ? a.htScale : 1.f;
+	return a.height / ht + a.hover;
+}
+
+static void PreviewCamAxes(float pitch, V3& right, V3& up)
+{
+	V3 dir = v3(sinf(PI) * cosf(pitch), sinf(pitch), cosf(PI) * cosf(pitch));
+	V3 fwd = dir * -1.f;
+	right = Norm(Cross(v3(0, 1, 0), fwd));
+	up = Cross(fwd, right);
+	float l = Len(up);
+	up = l > 1e-8f ? up * (1.f / l) : v3(0, 1, 0);
+}
+
+static void ClampPreviewPan(V3& pan, float h)
+{
+	float lim = max(h, .4f) * 1.6f;
+	float l = Len(pan);
+	if (l > lim) pan = pan * (lim / l);
+}
+
 // ============================================================ 入力
 void Game::OnMouseMove(int x, int y)
 {
 	if (m_lDown && m_screen == SC_CREATE && m_previewDrag) {
 		m_previewYaw += (x - m_mx) * .012f;
 		m_previewPitch = Clampf(m_previewPitch + (y - m_my) * .005f, -1.05f, 1.15f);
+	}
+	if (m_mDown && m_screen == SC_CREATE && m_previewPanDrag) {
+		float dx = (float)(x - m_mx), dy = (float)(y - m_my);
+		float h = PreviewBodyH(m_preview);
+		float dist = h * 2.9f * m_previewZoom;
+		float worldPerPx = 2.f * dist * tanf(.55f * .5f) / (float)max(1, m_h);
+		V3 right, up;
+		PreviewCamAxes(Clampf(m_previewPitch, -1.05f, 1.15f), right, up);
+		// 掴んで動かす。マウスを上げるとキャラが上がり、右へ動かすと右へ寄る。
+		m_previewPan = m_previewPan - right * (dx * worldPerPx) + up * (dy * worldPerPx);
+		ClampPreviewPan(m_previewPan, h);
 	}
 	if (m_lDown && m_monDrag) m_monYaw += (x - m_mx) * .012f;
 	BOOL scout = m_lDown && !m_downUi && m_screen == SC_BATTLE && (m_phase == PH_P_MOVE || m_phase == PH_P_TARGET || m_phase == PH_P_SKILLTARGET || m_phase == PH_P_SHOVE || m_phase == PH_P_CMD || m_phase == PH_P_SKILLS);
@@ -561,7 +617,7 @@ void Game::OnMouseMove(int x, int y)
 			m_camYaw = m_camYawGoal;
 			m_camPitch = Clampf(m_camPitch + dy * .004f, .45f, 1.35f);
 		}
-		if (m_mDown || (scout && m_dragDist > 6)) {
+		if ((m_mDown && m_screen != SC_CREATE) || (scout && m_dragDist > 6)) {
 			m_dragPan = TRUE;
 			float s = m_camDist * .0022f;
 			V3 right = v3(-cosf(m_camYaw), 0, sinf(m_camYaw));
@@ -586,7 +642,10 @@ void Game::OnMouseDown(int btn, int x, int y)
 		m_monDrag = (m_screen == SC_BASE && m_codex == 4 && !m_downUi && x > m_w * .48f);
 	}
 	if (btn == 1) { m_rDown = TRUE; m_dragRot = FALSE; m_dragDist = 0; m_dragLastX = x; m_dragLastY = y; }
-	if (btn == 2) { m_mDown = TRUE; m_dragPan = FALSE; m_dragDist = 0; m_dragLastX = x; m_dragLastY = y; }
+	if (btn == 2) {
+		m_mDown = TRUE; m_dragPan = FALSE; m_dragDist = 0; m_dragLastX = x; m_dragLastY = y;
+		m_previewPanDrag = (m_screen == SC_CREATE && x >= m_w * .40f);
+	}
 }
 
 void Game::OnMouseUp(int btn, int x, int y)
@@ -606,7 +665,7 @@ void Game::OnMouseUp(int btn, int x, int y)
 		if (!m_dragRot) { m_rclick = TRUE; NavBack(); }
 		m_dragRot = FALSE;
 	}
-	if (btn == 2) { m_mDown = FALSE; m_dragPan = FALSE; }
+	if (btn == 2) { m_mDown = FALSE; m_dragPan = FALSE; m_previewPanDrag = FALSE; }
 }
 
 void Game::ApplyZoomHold(float dt)
@@ -724,6 +783,10 @@ void Game::OnKey(int vk, BOOL down)
 		}
 		return;
 	}
+	if (m_screen == SC_BATTLE && m_phase == PH_INTRO && (vk == VK_RETURN || vk == VK_SPACE || vk == 'Z' || vk == VK_ESCAPE || vk == VK_BACK || vk == 'X')) {
+		m_phaseT = max(m_phaseT, m_surveyN * .5f);
+		return;
+	}
 	BOOL battleMap = m_screen == SC_BATTLE && (m_phase == PH_P_MOVE || m_phase == PH_P_TARGET || m_phase == PH_P_SKILLTARGET || m_phase == PH_P_SHOVE);
 	switch (vk) {
 	case VK_LEFT: case 'A': if (battleMap) MoveCursor(-1, 0); else NavMove(-1, 0); break;
@@ -771,12 +834,15 @@ void Game::OnPad(const PadState& p, float dt)
 		}
 	}
 	m_padDirPrev = dir;
-	if (pressed(0)) {
-		if (m_showHelp) m_showHelp = FALSE;
-		else if (battleMap && !m_navMode) BattleConfirmCursor();
-		else NavConfirm();
+	if (m_screen == SC_BATTLE && m_phase == PH_INTRO && !m_showHelp && (pressed(0) || pressed(1))) m_phaseT = max(m_phaseT, m_surveyN * .5f);
+	else {
+		if (pressed(0)) {
+			if (m_showHelp) m_showHelp = FALSE;
+			else if (battleMap && !m_navMode) BattleConfirmCursor();
+			else NavConfirm();
+		}
+		if (pressed(1)) { if (m_showHelp) m_showHelp = FALSE; else NavBack(); }
 	}
-	if (pressed(1)) { if (m_showHelp) m_showHelp = FALSE; else NavBack(); }
 	if (pressed(4)) m_camYawGoal -= PI * .5f;
 	if (pressed(5)) m_camYawGoal += PI * .5f;
 	if (pressed(6)) m_showHelp = !m_showHelp;
@@ -1253,10 +1319,6 @@ void Game::RenderPortraits()
 				RenderActorPortrait(s, m_ptActor, RGBA8(70, 110, 190), RGBA8(20, 30, 70));
 			} else {
 				const MonsterDef& md = MonsterInfo(u.monster);
-				if (md.look == LK_MESH && md.model >= 0 && m_r.CreatureModel(md.model) < 0 && !m_importBind) {
-					m_importBind = 1;
-					LoadBattleCast();
-				}
 				ActorFromMonster(m_ptActor, m_lib, m_r, u.monster, u.boss);
 				if (md.look == LK_MESH && m_ptActor.proc != 3) {
 					m_portraitKey[s] = -1;
@@ -1862,6 +1924,9 @@ static const wchar_t* CodexWord(int w)
 	}
 }
 
+static BOOL PreviewAlt(int style);
+static void MonPreviewIn(int id, const Actor& a, int& style, BOOL& fly);
+
 void Game::EnsureMonPreview()
 {
 	static int ids[256];
@@ -1884,7 +1949,10 @@ void Game::EnsureMonPreview()
 		m_r.LoadBattleCreatures(pack, 1);
 	} else m_r.LoadBattleCreatures(NULL, 0);
 	ActorFromMonster(m_monAct, m_lib, m_r, id, 0);
-	ActorPlay(m_monAct, CL_IDLE, 1, 0);
+	int style = 0;
+	BOOL fly = FALSE;
+	MonPreviewIn(id, m_monAct, style, fly);
+	PlayShown(m_monAct, m_monMot, style, CL_IDLE, fly, FALSE, FALSE);
 	m_monShown = id;
 }
 
@@ -2026,6 +2094,18 @@ void Game::DrawMonCodex()
 		L"Sürükleyerek döndürün. Sağ veya Q/E ile bakın.");
 	float hintX = x + w + ((float)m_w - (x + w)) * .5f;
 	m_r.HudText(hint, hintX, U(28), U(13), RGBA8(230, 232, 238), 1, 0);
+	if (n > 0 && MonsterKnown(ids[m_monSel], m_save.stageCleared) && m_monShown == ids[m_monSel]) {
+		int style = 0;
+		BOOL fly = FALSE;
+		MonPreviewIn(ids[m_monSel], m_monAct, style, fly);
+		float rightW = (float)m_w - (x + w);
+		float by = (float)m_h - U(84);
+		int hit = DrawMotRow(ID_MON_MOT0, hintX, by, rightW - U(24), m_monMot, PreviewAlt(style));
+		if (hit >= 0) {
+			m_monMot = hit;
+			PlayShown(m_monAct, m_monMot, style, CL_IDLE, fly, FALSE, TRUE);
+		}
+	}
 	DrawCodexTabs();
 }
 
@@ -3369,15 +3449,73 @@ void Game::EnterCreate(int editIdx)
 	m_previewYaw = 0;
 	m_previewPitch = .18f;
 	m_previewZoom = 1.f;
+	m_previewPan = v3(0, 0, 0);
+	m_previewPanDrag = FALSE;
+	m_previewMot = 0;
 	m_focusId = ID_CR_NAME;
 	RefreshPreview();
+}
+
+static BOOL PreviewAlt(int style)
+{
+	return AttackClipFor(style, 0) != AttackClipFor(style, 1);
+}
+
+static void CharPreviewIn(const CharData& c, const Actor& a, int& style, int& idle, BOOL& fly)
+{
+	const ClassDef& cd = ClassInfo(c.cls);
+	idle = (cd.weaponLook == WL_AXE2 || cd.weaponLook == WL_SWORD2) ? CL_2H_IDLE : CL_IDLE;
+	Unit u;
+	memset(&u, 0, sizeof(u));
+	u.monster = -1;
+	u.ch = c;
+	style = UnitMotionStyle(u, -1);
+	fly = cd.moveType == MV_FLY || a.wings > 0;
+}
+
+static void MonPreviewIn(int id, const Actor& a, int& style, BOOL& fly)
+{
+	const MonsterDef& md = MonsterInfo(id);
+	style = md.attackStyle;
+	fly = md.moveType == MV_FLY || a.wings > 0;
+}
+
+void Game::PlayShown(Actor& a, int& mot, int style, int idleClip, BOOL fly, BOOL giveWings, BOOL restart)
+{
+	if (mot < 0 || mot > 5) mot = 0;
+	if (mot == 5 && !PreviewAlt(style)) mot = 4;
+	ActorPreview(a, m_lib, m_r, mot, style, idleClip, fly, giveWings, restart);
+}
+
+int Game::DrawMotRow(int id0, float cx, float y, float avail, int mot, BOOL alt)
+{
+	static const int tx[6] = { TX_CR_MOT_IDLE, TX_CR_MOT_WALK, TX_CR_MOT_RUN, TX_CR_MOT_READY, TX_CR_MOT_ATK, TX_CR_MOT_ATK2 };
+	int n = alt ? 6 : 5;
+	float gap = U(6);
+	float bh = U(32);
+	if (avail < U(220)) avail = U(220);
+	float bw = (avail - gap * (n - 1)) / n;
+	if (bw > U(108)) bw = U(108);
+	if (bw < U(52)) bw = U(52);
+	float span = bw * n + gap * (n - 1);
+	float x = cx - span * .5f;
+	float px = bw < U(72) ? U(12) : U(14);
+	int hit = -1;
+	for (int i = 0; i < n; i++) {
+		if (Btn(id0 + i, x, y, bw, bh, TT(tx[i]), TRUE, mot == i, px)) hit = i;
+		x += bw + gap;
+	}
+	return hit;
 }
 
 void Game::RefreshPreview()
 {
 	CharData c = m_edit;
 	ActorFromChar(m_preview, m_lib, m_r, c);
-	ActorPlay(m_preview, ClassInfo(c.cls).weaponLook == WL_AXE2 || ClassInfo(c.cls).weaponLook == WL_SWORD2 ? CL_2H_IDLE : CL_IDLE, 1, 0);
+	int style = 0, idle = CL_IDLE;
+	BOOL fly = FALSE;
+	CharPreviewIn(c, m_preview, style, idle, fly);
+	PlayShown(m_preview, m_previewMot, style, idle, fly, TRUE, FALSE);
 }
 
 void Game::DrawCreate3D()
@@ -3386,7 +3524,8 @@ void Game::DrawCreate3D()
 	Actor& a = m_preview;
 	float ht = a.htScale > 0.05f ? a.htScale : 1.f;
 	float h = a.height / ht + a.hover;
-	V3 look = pos + v3(0, h * .52f, 0);
+	ClampPreviewPan(m_previewPan, h);
+	V3 look = pos + v3(0, h * .52f, 0) + m_previewPan;
 	float dist = h * 2.9f * m_previewZoom;
 	float yaw = PI;
 	float pitch = Clampf(m_previewPitch, -1.05f, 1.15f);
@@ -3603,7 +3742,20 @@ void Game::DrawCreateUi()
 		EnterBase();
 		return;
 	}
-	m_r.HudText(TT(TX_CR_PREVIEW_HINT), m_w * .62f, m_h - U(28), U(13), RGBA8(220, 220, 230), 1, 0);
+	{
+		int style = 0, idle = CL_IDLE;
+		BOOL fly = FALSE;
+		CharPreviewIn(m_edit, m_preview, style, idle, fly);
+		float paneL = U(440);
+		float paneW = (float)m_w - paneL;
+		float cx = paneL + paneW * .5f;
+		int hit = DrawMotRow(ID_CR_MOT0, cx, m_h - U(68), paneW - U(24), m_previewMot, PreviewAlt(style));
+		if (hit >= 0) {
+			m_previewMot = hit;
+			PlayShown(m_preview, m_previewMot, style, idle, fly, TRUE, TRUE);
+		}
+		m_r.HudText(TT(TX_CR_PREVIEW_HINT), cx, m_h - U(28), U(13), RGBA8(220, 220, 230), 1, 0);
+	}
 }
 
 // ============================================================ 編成

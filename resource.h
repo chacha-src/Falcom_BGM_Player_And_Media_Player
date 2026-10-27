@@ -2354,13 +2354,16 @@
 #define IDR_TAC_MAT                     4928
 #define IDR_TAC_HAIR                    4929
 #define IDR_TAC_HAIRTEX                 4930
+#define IDR_CSO_TAC_CSCLTHS             4931
+#define IDR_CSO_TAC_CSCLTHR             4932
+#define IDR_CSO_TAC_CSCLTHW             4933
 
 // Next default values for new objects
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NEXT_RESOURCE_VALUE        399
 #define _APS_NEXT_COMMAND_VALUE         33310
-#define _APS_NEXT_CONTROL_VALUE         4931
+#define _APS_NEXT_CONTROL_VALUE         4934
 #define _APS_NEXT_SYMED_VALUE           104
 #endif
 #endif

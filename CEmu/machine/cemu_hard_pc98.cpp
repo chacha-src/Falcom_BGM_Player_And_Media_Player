@@ -40,6 +40,9 @@ int CEmuPc98ValkyKeepIrq0()
 }
 /* FairyDust FMX 3.10（lemmona）も同じ: PIT 校正後のワンショット INT08 @3660 が IRQ0 をマスクし、本物シーケンサ CS:1D60 が tick しない。 */
 static int s_fmxKeepIrq0 = 0;
+/* DSONGS（deflektr）は曲を載せたあと INT 21 で抜ける。ポンプを切ると OPN タイマが止まる。 */
+static int s_dsongsChecked = 0;
+static int s_dsongsKeep = 0;
 /* PMD86 の INT0B は IN A468h bit4 が立つ間 FIFO 処理へ戻る。このプロセスは曲ごとに機械を作り直すがフラグは静的なので Init で毎回下ろす。 */
 static int s_pmd86Board = 0;
 /* IWADRV F.COM カナリア: OUT 18Ah / IN が ymfm ReadData() だと 1 が戻らず INT14 を飛ばす。 */
@@ -1160,16 +1163,33 @@ struct Pc98IpProf {
 	uint64_t total;
 	const char* path;
 
-	Pc98IpProf() : total(0), path(NULL)
+	/* CEMU_PC98_IPWATCH="<linhex>,...": 上位 24 に入らない番地でも、一度でも実行したかを正確に数える */
+	enum { WATCH = 16 };
+	unsigned watchAddr[WATCH];
+	uint64_t watchHits[WATCH];
+	int watchN;
+
+	Pc98IpProf() : total(0), path(NULL), watchN(0)
 	{
 		memset(addr, 0xff, sizeof(addr));
 		memset(hits, 0, sizeof(hits));
+		memset(watchHits, 0, sizeof(watchHits));
+		const char* w = getenv("CEMU_PC98_IPWATCH");
+		while (w && *w && watchN < WATCH) {
+			char* end = NULL;
+			const unsigned long v = strtoul(w, &end, 16);
+			if (end == w) break;
+			watchAddr[watchN++] = (unsigned)v;
+			w = (*end == ',') ? end + 1 : end;
+		}
 	}
 
 	/* Note の実装 */
 	void Note(unsigned lin)
 	{
 		total++;
+		for (int i = 0; i < watchN; i++)
+			if (watchAddr[i] == lin) watchHits[i]++;
 		unsigned h = (lin * 2654435761u) & (SLOTS - 1);
 		for (unsigned i = 0; i < 64; i++) {
 			const unsigned s = (h + i) & (SLOTS - 1);
@@ -1187,7 +1207,12 @@ struct Pc98IpProf {
 		FILE* f = NULL;
 		if (fopen_s(&f, path, "a") != 0 || !f) return;
 		fprintf(f, "IPPROF total=%llu\n", (unsigned long long)total);
-		for (int rank = 0; rank < 24; rank++) {
+		for (int i = 0; i < watchN; i++) {
+			fprintf(f, "  watch %05X %10llu\n", watchAddr[i], (unsigned long long)watchHits[i]);
+			watchHits[i] = 0;
+		}
+		const int topN = getenv("CEMU_PC98_IPTOP") ? atoi(getenv("CEMU_PC98_IPTOP")) : 24;
+		for (int rank = 0; rank < topN; rank++) {
 			int best = -1;
 			for (int s = 0; s < SLOTS; s++)
 				if (hits[s] && (best < 0 || hits[s] > hits[best])) best = s;
@@ -1231,6 +1256,7 @@ struct Pc98CensusPair { uint16_t a; uint8_t d; };
 struct Pc98CensusCounts {
 	unsigned wr, keyOn, tlLive, fnum, timer, irq, pit;
 	unsigned line, svc, noVec, masked, ifOff;
+	unsigned fireA, fireB, pulse;
 	const Pc98CensusPair* tail;
 	unsigned tailN;
 };
@@ -1261,9 +1287,9 @@ void Pc98IvtCensus(const uint8_t* mem, int funcVect, const Pc98CensusCounts& c,
 	FILE* f = NULL;
 	if (fopen_s(&f, path, "a") != 0 || !f) return;
 	fprintf(f, "IVT %-4s funcvect=%02X wr=%u key=%u tl=%u fnum=%u tmr=%u"
-		" irq=%u pit=%u line=%u svc=%u novec=%u mask=%u ifoff=%u hooked=",
+		" irq=%u pit=%u line=%u svc=%u novec=%u mask=%u ifoff=%u fireA=%u fireB=%u pulse=%u hooked=",
 		phase, funcVect, c.wr, c.keyOn, c.tlLive, c.fnum, c.timer, c.irq,
-		c.pit, c.line, c.svc, c.noVec, c.masked, c.ifOff);
+		c.pit, c.line, c.svc, c.noVec, c.masked, c.ifOff, c.fireA, c.fireB, c.pulse);
 	for (unsigned v = 0; v < 256; v++) {
 		const unsigned off = (unsigned)mem[v * 4] | ((unsigned)mem[v * 4 + 1] << 8);
 		const unsigned seg = (unsigned)mem[v * 4 + 2] | ((unsigned)mem[v * 4 + 3] << 8);
@@ -1293,6 +1319,8 @@ void Pc98IvtCensus(const uint8_t* mem, int funcVect, const Pc98CensusCounts& c,
 	c__.pit = pitTickCount_; \
 	c__.line = g_censLine; c__.svc = g_censSvc; c__.noVec = g_censNoVec; \
 	c__.masked = g_censMasked; c__.ifOff = g_censIfOff; \
+	c__.fireA = c__.fireB = c__.pulse = 0; \
+	if (chip_) CEmuChipYm2608GetTimerDebug(chip_, &c__.fireA, &c__.fireB, &c__.pulse); \
 	Pc98CensusPair t__[64]; \
 	c__.tailN = opnTailCount_ < 64 ? opnTailCount_ : 64; \
 	for (unsigned i__ = 0; i__ < c__.tailN; i__++) { \
@@ -3505,6 +3533,34 @@ int CHardPc98::DeliverIrqs()
 					}
 				}
 			}
+			/* DSONGS は ISR の途中で SS=CS / SP=10AF にして STI する。入口 SP には
+			   戻らないのでラッチが残ると次のタイマが届かない。ビジー [10AF]=FF のときだけ。 */
+			{
+				const uint16_t ss = np2_reg_get(NP2_R_SS);
+				const unsigned o0b = (unsigned)mem[0x0B * 4]
+					| ((unsigned)mem[0x0B * 4 + 1] << 8);
+				const unsigned s0b = (unsigned)mem[0x0B * 4 + 2]
+					| ((unsigned)mem[0x0B * 4 + 3] << 8);
+				const unsigned phys = (s0b << 4) + o0b;
+				if (s0b && ss == (uint16_t)s0b && phys + 0x48u < 0x200000u
+					&& mem[phys] == 0x50 && mem[phys + 1] == 0x53
+					&& mem[phys + 2] == 0x51 && mem[phys + 3] == 0x52
+					&& mem[phys + 4] == 0x55 && mem[phys + 5] == 0x56
+					&& mem[phys + 6] == 0x57 && mem[phys + 7] == 0x1E
+					&& mem[phys + 8] == 0x06) {
+					int stack = 0;
+					for (unsigned k = 0; k + 3 < 0x48u; k++) {
+						if (mem[phys + k] == 0xBC && mem[phys + k + 1] == 0xAF
+							&& mem[phys + k + 2] == 0x10) {
+							stack = 1;
+							break;
+						}
+					}
+					const unsigned flag = (s0b << 4) + 0x10AFu;
+					if (stack && flag < 0x200000u && mem[flag] == 0xFF)
+						opnInService_ = 0;
+				}
+			}
 			const uint16_t cs = np2_reg_get(NP2_R_CS);
 			const uint16_t ip = np2_reg_get(NP2_R_IP);
 			const unsigned b = (unsigned)cs << 4;
@@ -5510,6 +5566,50 @@ static void DosCfgFileStem(const char* in, char* out, int outCap)
 	out[n] = 0;
 }
 
+/* "S0/MSCDAT.MO 4096" → "S0\MSCDAT.MO"（大文字、引数を落とす） */
+static void DosRomPath(const char* in, char* out, int cap)
+{
+	if (!out || cap <= 0) return;
+	out[0] = 0;
+	if (!in) return;
+	int j = 0;
+	for (const char* p = in; *p && *p != ' ' && *p != '\t' && j < cap - 1; p++) {
+		char c = *p;
+		if (c >= 'a' && c <= 'z') c = (char)(c - 'a' + 'A');
+		if (c == '/') c = '\\';
+		out[j++] = c;
+	}
+	out[j] = 0;
+}
+
+/* ディレクトリ付きの rom 名で、同じベース名が別パスにもカタログされているとき 1。
+   平坦な DOS 表ではあとから載せた方が勝ち、xenon2 の S0..S5/MSCDAT.MO や DiscStation の
+   各フォルダの SONG.DAT が全部最後の 1 本に化けた。 */
+static int DosRomNameCollides(const CEmuGameEntry* ge, const char* romName)
+{
+	if (!ge || !romName) return 0;
+	char me[DOS98_NAME];
+	DosRomPath(romName, me, (int)sizeof(me));
+	const char* meBase = strrchr(me, '\\');
+	if (!meBase) return 0;
+	meBase++;
+	for (int i = 0; i < ge->romCount; i++) {
+		const CEmuRomEntry* r = &ge->rom[i];
+		if (_stricmp(r->type, "file") != 0 && _stricmp(r->type, "conin") != 0
+			&& _stricmp(r->type, "device") != 0)
+			continue;
+		char other[DOS98_NAME];
+		DosRomPath(r->name, other, (int)sizeof(other));
+		if (!other[0] || _stricmp(other, me) == 0)
+			continue;
+		const char* ob = strrchr(other, '\\');
+		ob = ob ? ob + 1 : other;
+		if (_stricmp(ob, meBase) == 0)
+			return 1;
+	}
+	return 0;
+}
+
 /* DosIsEngineName の実装 */
 static int DosIsEngineName(const char* name)
 {
@@ -5629,6 +5729,14 @@ void CHardPc98::MaterializeDosFiles(CEmuZipFs* fs, const CEmuGameEntry* ge)
 		DosCfgFileStem(r->name, addName, (int)sizeof(addName));
 		/* conin は拡張子無し。zip 先頭が .ONS だと AddFile が既存の .MUS を音色で上書きする
 		   （RIKA01.ONS が RIKA01.MUS より先、RIKA02.MUS は先に居る）。曲は file 側が正。 */
+		if (fileDir[0] && addName[0] && DosRomNameCollides(ge, r->name)) {
+			char qual[DOS98_NAME];
+			_snprintf_s(qual, _TRUNCATE, "%s\\%s", fileDir, addName);
+			if (_stricmp(r->type, "conin") == 0 && dos_.FindFile(qual))
+				continue;
+			dos_.AddFile(qual, data, sz, 1);
+			continue;
+		}
 		if (_stricmp(r->type, "conin") == 0 && addName[0] && dos_.FindFile(addName))
 			continue;
 		if (addName[0])
@@ -5660,7 +5768,8 @@ void CHardPc98::BindDosRomHandles(const CEmuGameEntry* ge)
 			if (off == 0x10)
 				dos_.SetHandleText(0, base);
 		} else
-			dos_.SetHandle((uint16_t)off, base);
+			dos_.SetHandle((uint16_t)off,
+				DosRomNameCollides(ge, r->name) ? r->name : base);
 	}
 }
 
@@ -6005,6 +6114,8 @@ const char* CHardPc98::SelectedDosSong(const CEmuGameEntry* ge, unsigned titleCo
 			const CEmuRomEntry* r = &ge->rom[i];
 			if (_stricmp(r->type, "file") != 0) continue;
 			if (r->offset != want) continue;
+			if (DosRomNameCollides(ge, r->name))
+				return r->name;
 			const char* base = r->name;
 			for (const char* p = r->name; *p; p++) {
 				if (*p == '\\' || *p == '/' || *p == ':')
@@ -6025,6 +6136,8 @@ const char* CHardPc98::SelectedDosSong(const CEmuGameEntry* ge, unsigned titleCo
 		}
 		if (DosIsEngineName(base))
 			continue;
+		if (DosRomNameCollides(ge, r->name))
+			return r->name;
 		return base;
 	}
 	/* Bio_100%/BGML_98 等: 共有バンク 1 本が conin@0x10（hoot stdin）＋ type=file@-1。タイトルコードがそのバンク内トラックを選ぶので、rom offset がタイトルバイトと等しいものは無い。 */
@@ -6068,6 +6181,13 @@ static int DosHandleBoundToOtherFile(const CEmuGameEntry* ge, int handle, const 
 		}
 		if (songFile && _stricmp(base, songFile) == 0)
 			return 0;
+		if (songFile && (strchr(songFile, '/') || strchr(songFile, '\\'))) {
+			char a[DOS98_NAME], b[DOS98_NAME];
+			DosRomPath(r->name, a, (int)sizeof(a));
+			DosRomPath(songFile, b, (int)sizeof(b));
+			if (_stricmp(a, b) == 0)
+				return 0;
+		}
 		return 1;
 	}
 	return 0;
@@ -9908,6 +10028,8 @@ int CHardPc98::BootDos(CEmuZipFs* fs, const CEmuGameEntry* ge, unsigned titleCod
 	slavePicMask_ = 0xff;
 	s_valkyKeepIrq0 = 0;
 	s_fmxKeepIrq0 = 0;
+	s_dsongsChecked = 0;
+	s_dsongsKeep = 0;
 	s_fmxCalibAssist = FmxDosShell(ge) ? 1 : 0;
 	{
 		static const char* kValkyPitBoot[] = { "VALKY_98", "valky", NULL };
@@ -10655,6 +10777,26 @@ void CHardPc98::AdvanceOpnClocks(uint64_t cpuCycles)
 	BootPcmTick(cpuCycles);
 }
 
+/* DSONGS だけ。majoriko は同じ ODQ 糊でもこの文字列を持たない。 */
+static int Pc98DsongsKeep(const uint8_t* mem)
+{
+	if (s_dsongsChecked)
+		return s_dsongsKeep;
+	s_dsongsChecked = 1;
+	s_dsongsKeep = 0;
+	if (!mem) return 0;
+	static const char kMark[] = "Exsisting Sound Data";
+	const unsigned n = (unsigned)sizeof(kMark) - 1u;
+	for (unsigned a = 0x8000u; a + n < 0xA0000u; a++) {
+		if (mem[a] != (uint8_t)kMark[0]) continue;
+		if (memcmp(mem + a, kMark, n) == 0) {
+			s_dsongsKeep = 1;
+			break;
+		}
+	}
+	return s_dsongsKeep;
+}
+
 /* IRQ 配送付きで CPU を endCycle まで進める */
 void CHardPc98::PumpCycles(uint64_t endCycle)
 {
@@ -11133,9 +11275,30 @@ void CHardPc98::PumpCycles(uint64_t endCycle)
 					continue;
 				}
 				/* olteus MAP 音楽は COM/EXE TSR や終了後も tick し続ける。PumpCycles 中断はホストタイマ補助を凍らせた。 */
-				if (res == DOS98_TERMINATED && !olteusMapSeg_)
+				if (res == DOS98_TERMINATED && !olteusMapSeg_) {
+					if (Pc98DsongsKeep(mem)) {
+						dos_.IretReturn(mem);
+						np2_reg_set(NP2_R_FLAGS,
+							(uint16_t)(np2_reg_get(NP2_R_FLAGS) | 0x0200));
+						const uint64_t q = 50;
+						cpuCycles_ += q;
+						TickSide(q);
+						AdvanceOpnClocks(q);
+						continue;
+					}
 					return;
+				}
 				if (res == DOS98_RESIDENT && !olteusMapSeg_) {
+					if (Pc98DsongsKeep(mem)) {
+						dos_.IretReturn(mem);
+						np2_reg_set(NP2_R_FLAGS,
+							(uint16_t)(np2_reg_get(NP2_R_FLAGS) | 0x0200));
+						const uint64_t q = 50;
+						cpuCycles_ += q;
+						TickSide(q);
+						AdvanceOpnClocks(q);
+						continue;
+					}
 					const uint16_t ss = np2_reg_get(NP2_R_SS);
 					const uint16_t sp = np2_reg_get(NP2_R_SP);
 					const unsigned fr = ((unsigned)ss << 4) + (unsigned)sp;
@@ -11225,11 +11388,14 @@ void CHardPc98::RaiseFuncVect()
 	/* FPLAY の曲ロードは今の SS のままレジスタを書く。1tick の途中で再生コマンドを
 	   割らせると SP=125E がエピローグを潰す。MUSE2 は tick 入口でタイマを止め、
 	   糊の AL=11 が「ISR が [149F] を落とすまで」待つ。tick 中にその停止を割らせると
-	   再武装（0880）へ戻れず、タイマは 30h のまま固まる。どちらも tick が終わるまで待つ。
+	   再武装（0880）へ戻れず、タイマは 30h のまま固まる。IWADRV（F.COM / iwaplay）の
+	   ISR は入口で [0717] を立てて出口で落とし、立っている間の tick は 27h を ack せず
+	   IRET する。tick 中に再生コマンドを割らせると [0717] が残り、レベル線のまま
+	   毎命令 ISR へ入って INT EB の音色ロードが進まない。どれも tick が終わるまで待つ。
 	   終わらない ISR は 50ms で諦める。 */
 	{
 		static const char* kFplayWait[] = {
-			"fplay", "cplay", "cplay98", "bplay", "muse", NULL
+			"fplay", "cplay", "cplay98", "bplay", "muse", "iwaplay", NULL
 		};
 		if (DosShellStarts(dosGe_, kFplayWait)) {
 			const uint64_t fplayEnd = cpuCycles_ + (uint64_t)cpuHz_ / 20ull;

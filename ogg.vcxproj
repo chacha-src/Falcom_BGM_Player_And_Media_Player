@@ -1623,6 +1623,9 @@ if errorlevel 1 exit /b 1</Command>
     <None Include="res\cso\race_gsw.cso" />
     <None Include="res\cso\race_vsw.cso" />
     <None Include="res\cso\tac_csskin.cso" />
+    <None Include="res\cso\tac_csclths.cso" />
+    <None Include="res\cso\tac_csclthr.cso" />
+    <None Include="res\cso\tac_csclthw.cso" />
     <None Include="res\cso\tac_psbloom.cso" />
     <None Include="res\cso\tac_psblur.cso" />
     <None Include="res\cso\tac_psg0.cso" />

@@ -1,4 +1,4 @@
-﻿/* .cursor\_k6_gen_support.py が k2 triage 報告から生成。
+/* .cursor\_k6_gen_support.py が k2 triage 報告から生成。
    手で直さない: フル triage のあとジェネレータを再実行。
 
    プローブが選んだ曲がすべて無音でない別々の音として鳴った
@@ -88,7 +88,7 @@
                   + _k2_syn2_report.txt
                   + _k2_ac48_plays.txt
                   + _k2_crush15_report.txt
-   Archives probed: 5085, supported: 4639; MSX +replcart_msx/shiryo_msx/msxfan_msx (_k2_x1msx8full_0.txt _k2_x1msx8fan_0.txt) + x1alba (_k2_x1msx8alba_0.txt)
+   Archives probed: 5085, supported: 4661; MSX +replcart_msx/shiryo_msx/msxfan_msx (_k2_x1msx8full_0.txt _k2_x1msx8fan_0.txt) + x1alba (_k2_x1msx8alba_0.txt)
                   + _k2_ac2s86_report.txt (genpeitd/rthunder/skykiddx/wndrmomo Sys86)
                   + _k2_ac2wsgo_report.txt (pacland/skykid/drgnbstr wsg63701)
                   + bosco wsgz80 (0289 BGM via $8A14 + $0139 id)
@@ -122,7 +122,15 @@
                   + fflush_98 AGUMIX (OPN; songs 1-3 stay audible for the whole 8s window)
                   + qoda_98/qodg_98 QOD (OPN timer lives on INT 15, so INT 0B never ticked)
                   + qodp_98 QOD (same INT 15 timer; STI is the first byte of the ISR)
-                  + _k2_f3arc_plays.txt (f3: arkretrn, bubblem, cbombers, cleopatr, dangcurv, dariusg, dendego, dendego2, dungeonm, groundfx, gunbustr, gunlock, landgear, landmakr, pbobble3, popnpop, pwrgoal, scfinals, sidebs, sidebs2, superchs, tcobra2, trstar, twinqix, undrfire) */
+                  + gdm_0083_98 MMD (OPN and GS; BGM01 and BGM02 are the same bytes, BGM03 stays audible for 8s)
+                  + ds98_13 FPLAY (OPN and beep; root SONG.DAT, 21760 bytes, shared with ds98_10-12)
+                  + triplew_98/tirnan98 AllocOverflow (AH=48 past the arena grows the tail block instead of landing the EXE on the IVT)
+                  + xenon2_98/ds98_14 folder names (qualified member names; ds98_14 root SONG.DAT is byte-identical to ds98_15 and ds98_17)
+                  + pwrsng98 MXDRV (div byte [0CDA] stays 0 so the 286 INT 0 loops; only that instruction advances one)
+                  + btltech_98/clrd3_98/gracer_98/myhomedr_98 iwaplay (the play command waits out the OPN tick)
+                  + mujintou_98 (catalog entry 1 is silent; songs 2-4 play)
+                  + viofight (Taito B YM2203; finite cues requeue the same command, 14/14)
+                  + _k2_f3arc_plays.txt (f3: arkretrn, bubblem, bublbob2, cbombers, cleopatr, dangcurv, dariusg, dendego, dendego2, dungeonm, elvactr, gekiridn, groundfx, gunbustr, gunlock, kaiserkn, landgear, landmakr, pbobble2o, pbobble3, popnpop, puchicar, pwrgoal, quizhuhu, scfinals, sidebs, sidebs2, spcinv95, superchs, tcobra2, trstar, twinqix, undrfire) */
 
 #include "StdAfx.h"
 #include "cemu_support.h"
@@ -611,11 +619,13 @@ static const char* const kSupported[] = {
 	"btlhisch_98",
 	"btlkroad",
 	"btltech68snd",
+	"btltech_98",
 	"bub68snd",
 	"bubble_msx",
 	"bubbledizzy_at",
 	"bubblem",
 	"bubbletr",
+	"bublbob2",
 	"bublbobl",
 	"bublboblp",
 	"bublegum_98",
@@ -760,6 +770,7 @@ static const char* const kSupported[] = {
 	"cleopatr",
 	"close98",
 	"cloth_98",
+	"clrd3_98",
 	"clrd4_98",
 	"cltchitr",
 	"clue_at",
@@ -1216,6 +1227,8 @@ static const char* const kSupported[] = {
 	"ds98_10",
 	"ds98_11",
 	"ds98_12",
+	"ds98_13",
+	"ds98_14",
 	"ds98_15",
 	"ds98_16",
 	"ds98_17",
@@ -1318,6 +1331,7 @@ static const char* const kSupported[] = {
 	"elthlead",
 	"elthlead_msx",
 	"elvact88",
+	"elvactr",
 	"elves98",
 	"elvira2_at",
 	"elvira_at",
@@ -1624,6 +1638,7 @@ static const char* const kSupported[] = {
 	"gbomb68snd",
 	"gbomb_98",
 	"gd_msx",
+	"gdm_0083_98",
 	"gdm_ao_98",
 	"gdm_mo_98",
 	"gdm_roz_98",
@@ -1633,6 +1648,7 @@ static const char* const kSupported[] = {
 	"geki1_msx",
 	"geki2_msx",
 	"gekiniti_98",
+	"gekiridn",
 	"gemini",
 	"gencho",
 	"gencho68snd",
@@ -1735,6 +1751,7 @@ static const char* const kSupported[] = {
 	"gra268snd",
 	"gra68snd",
 	"gra88",
+	"gracer_98",
 	"gradius",
 	"gradius2_msx",
 	"gradius3",
@@ -2100,6 +2117,7 @@ static const char* const kSupported[] = {
 	"kageki",
 	"kagerou_msx",
 	"kaiser_at",
+	"kaiserkn",
 	"kaiunqz",
 	"kaizoku88",
 	"kajitsu68snd",
@@ -2550,6 +2568,7 @@ static const char* const kSupported[] = {
 	"marvlandj",
 	"masaikoj_98",
 	"masao",
+	"masterw",
 	"mastrs98",
 	"masyo_k_98",
 	"matchit",
@@ -2791,6 +2810,7 @@ static const char* const kSupported[] = {
 	"mugenya_98",
 	"mugsmash",
 	"mujinto2_98",
+	"mujintou_98",
 	"mule",
 	"mule_msx",
 	"multies_98",
@@ -2810,6 +2830,7 @@ static const char* const kSupported[] = {
 	"myeyes68snd",
 	"myhero",
 	"myhomed2_98",
+	"myhomedr_98",
 	"mystical_at",
 	"mysticri",
 	"mystwarr",
@@ -3013,6 +3034,7 @@ static const char* const kSupported[] = {
 	"pbaction",
 	"pblue_98",
 	"pbobble",
+	"pbobble2o",
 	"pbobble3",
 	"pbobblen",
 	"pclubys",
@@ -3183,6 +3205,7 @@ static const char* const kSupported[] = {
 	"pt_anth2_98",
 	"ptblank",
 	"ptblank2ua",
+	"puchicar",
 	"pulirula",
 	"pulstar",
 	"punisher",
@@ -3210,6 +3233,7 @@ static const char* const kSupported[] = {
 	"pwrgoal",
 	"pwrinst2",
 	"pwrlg68snd",
+	"pwrsng98",
 	"pwrsngd_98",
 	"pyrotechnica_at",
 	"pzloop2",
@@ -3255,6 +3279,7 @@ static const char* const kSupported[] = {
 	"quizdais",
 	"quizf1",
 	"quizhq",
+	"quizhuhu",
 	"quizkof",
 	"qzchikyu",
 	"qzquest",
@@ -3887,6 +3912,7 @@ static const char* const kSupported[] = {
 	"spatter",
 	"spbactn",
 	"spc68snd",
+	"spcinv95",
 	"spconflict_at",
 	"spcpostn",
 	"spcrusade_at",
@@ -4172,6 +4198,7 @@ static const char* const kSupported[] = {
 	"tir2_98",
 	"tiramisu_98",
 	"tirnan88",
+	"tirnan98",
 	"tirnan_msx",
 	"tkfuzoku_98",
 	"tkmmpzdm",
@@ -4242,6 +4269,7 @@ static const char* const kSupported[] = {
 	"trilogy68snd",
 	"trilogy_98",
 	"triothep",
+	"triplew_98",
 	"triton",
 	"triton2",
 	"triton2_msx",
@@ -4389,6 +4417,7 @@ static const char* const kSupported[] = {
 	"viewpoin",
 	"viewpoin68snd",
 	"vigilant",
+	"viofight",
 	"virgin_d_98",
 	"vision2_98",
 	"visitte_98",
@@ -4630,6 +4659,7 @@ static const char* const kSupported[] = {
 	"xargon_at",
 	"xcomtftd_at",
 	"xcomufo_at",
+	"xenon2_98",
 	"xenon68snd",
 	"xenon_21",
 	"xenon_98",

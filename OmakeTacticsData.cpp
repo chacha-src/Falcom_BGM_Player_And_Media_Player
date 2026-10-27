@@ -12,13 +12,30 @@ static unsigned char g_tacArena[TAC_ARENA];
 static size_t g_tacUsed = 0;
 static int g_tacBad = 0;
 
+// 起動後の読み込みスレッドと描画が、同じ arena から同時に切り出す。
+static CRITICAL_SECTION g_arenaCs[3];
+static volatile LONG g_arenaOnce = 0;
+static void LockArena(int which)
+{
+	if (g_arenaOnce != 2) {
+		if (InterlockedCompareExchange(&g_arenaOnce, 1, 0) == 0) {
+			for (int i = 0; i < 3; i++) InitializeCriticalSection(&g_arenaCs[i]);
+			g_arenaOnce = 2;
+		} else while (g_arenaOnce != 2) Sleep(0);
+	}
+	EnterCriticalSection(&g_arenaCs[which]);
+}
+
 void* TacArenaAlloc(size_t bytes, size_t align)
 {
+	LockArena(0);
 	if (align < 1) align = 1;
 	size_t o = (g_tacUsed + align - 1) & ~(align - 1);
-	if (bytes > TAC_ARENA || o > TAC_ARENA - bytes) { g_tacBad = 1; return 0; }
-	g_tacUsed = o + bytes;
-	return g_tacArena + o;
+	void* r = 0;
+	if (bytes > TAC_ARENA || o > TAC_ARENA - bytes) g_tacBad = 1;
+	else { g_tacUsed = o + bytes; r = g_tacArena + o; }
+	LeaveCriticalSection(&g_arenaCs[0]);
+	return r;
 }
 int TacArenaBad() { return g_tacBad; }
 
@@ -28,27 +45,37 @@ static int g_avaBad = 0;
 
 void* TacAvaAlloc(size_t bytes, size_t align)
 {
+	LockArena(1);
 	if (align < 1) align = 1;
 	size_t o = (g_avaUsed + align - 1) & ~(align - 1);
-	if (bytes > TAC_AVA_ARENA || o > TAC_AVA_ARENA - bytes) { g_avaBad = 1; return 0; }
-	g_avaUsed = o + bytes;
-	return g_avaArena + o;
+	void* r = 0;
+	if (bytes > TAC_AVA_ARENA || o > TAC_AVA_ARENA - bytes) g_avaBad = 1;
+	else { g_avaUsed = o + bytes; r = g_avaArena + o; }
+	LeaveCriticalSection(&g_arenaCs[1]);
+	return r;
 }
-void TacAvaReset() { g_avaUsed = 0; g_avaBad = 0; }
+void TacAvaReset() { LockArena(1); g_avaUsed = 0; g_avaBad = 0; LeaveCriticalSection(&g_arenaCs[1]); }
 int TacAvaBad() { return g_avaBad; }
 
 static unsigned char g_monArena[128 * 1024 * 1024];
 static size_t g_monUsed = 0;
+static size_t g_monKeep = 0;
 
 void* TacMonAlloc(size_t bytes, size_t align)
 {
+	LockArena(2);
 	if (align < 1) align = 1;
 	size_t o = (g_monUsed + align - 1) & ~(align - 1);
-	if (bytes > sizeof(g_monArena) || o > sizeof(g_monArena) - bytes) return 0;
+	void* r = 0;
+	if (bytes > sizeof(g_monArena) || o > sizeof(g_monArena) - bytes) { LeaveCriticalSection(&g_arenaCs[2]); return 0; }
 	g_monUsed = o + bytes;
-	return g_monArena + o;
+	r = g_monArena + o;
+	LeaveCriticalSection(&g_arenaCs[2]);
+	return r;
 }
-void TacMonReset() { g_monUsed = 0; }
+void TacMonReset() { LockArena(2); g_monUsed = g_monKeep; LeaveCriticalSection(&g_arenaCs[2]); }
+void TacMonRestart() { LockArena(2); g_monKeep = 0; g_monUsed = 0; LeaveCriticalSection(&g_arenaCs[2]); }
+void TacMonKeep() { LockArena(2); g_monKeep = g_monUsed; LeaveCriticalSection(&g_arenaCs[2]); }
 
 // ============================================================ 数学
 float WrapAngle(float a)

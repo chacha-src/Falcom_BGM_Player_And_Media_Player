@@ -55,7 +55,7 @@ public:
 	void InstallDosStructures(uint8_t* mem, unsigned memKb = 640,
 		const char* blaster = "BLASTER=A220 I5 D1 H5 T6");
 
-	void AddFile(const char* name, const unsigned char* data, unsigned size);
+	void AddFile(const char* name, const unsigned char* data, unsigned size, int keepDir = 0);
 	void SetHandle(uint16_t handle, const char* name);
 	void SetHandleText(uint16_t handle, const char* text);
 
@@ -136,6 +136,7 @@ private:
 	int Resize(uint8_t* mem, uint16_t dataSeg, uint16_t paras, uint16_t* errMax) const;
 	void BuildPsp(uint8_t* mem, uint16_t pspSeg, uint16_t memTop, const char* tail, uint16_t envSeg) const;
 	CEmuDos98Result Int21(uint8_t* mem);
+	CEmuDos98Result Int21Body(uint8_t* mem);
 	void Int18();
 	void ReadCstr(const uint8_t* mem, uint16_t seg, uint16_t off, char* out, int outCap) const;
 	void SetCf(int on);
@@ -160,6 +161,10 @@ private:
 	int findNext_;
 	uint16_t allocStrategy_;
 	int pcAtBios_;
+	/* Resize の tiny COM 64KB 保持で削られた要求。AH=48 が溢れたときだけ戻す。 */
+	mutable uint16_t clampSeg_;
+	mutable uint16_t clampWant_;
+	int AllocOverflow(uint8_t* mem, uint16_t paras, uint16_t* outSeg);
 
 	enum { kTraceMax = 512 };
 	static int traceDefault_;

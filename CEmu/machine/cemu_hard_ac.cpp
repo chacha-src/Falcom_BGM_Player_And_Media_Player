@@ -11207,8 +11207,11 @@ uint8_t CHardAc::MemRead(uint16_t addr)
 				if (mainIsYm2203_) {
 					st = (uint8_t)(st & 0x7fu);
 					/* cameltrya ISR $01BB は status bit0 待ち。drain が $9000 に 0x0E を残すと
-					   タイマ IRQ 後も bit0=0 のまま固まる。handshake ROM だけ Timer A を立てる。 */
-					if (mem_[0x0b] == 0x3e)
+					   タイマ IRQ 後も bit0=0 のまま固まる。handshake ROM だけ Timer A を立てる。
+					   masterw も毎周 9000 へ 0x0E を書き、ISR が bit0 で回る。0x0B は JP なので上の条件に入らない。 */
+					if (mem_[0x0b] == 0x3e
+						|| (mem_[0x0276] == 0xfb && mem_[0x0277] == 0xf3
+							&& mem_[0x0278] == 0x3a && mem_[0x0279] == 0x26))
 						st = (uint8_t)(st | 0x01u);
 				}
 				return st;

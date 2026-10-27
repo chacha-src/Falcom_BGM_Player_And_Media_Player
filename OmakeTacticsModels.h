@@ -51,7 +51,7 @@ struct Actor {
 	int female;
 	int face;           // 顔の型
 	int avatar;         // アバター (0=なし)
-	int bust;           // 胸の段階
+	int bust;           // 胸の大きさ 0=A〜7=H
 	float htScale;      // 身長。体は CS、武具と髪は同じ倍率
 	DWORD avaTint;      // 0 は服の染め色のまま
 	float scale, hue;
@@ -69,16 +69,26 @@ struct Actor {
 	float idleSeed;     // 次の待機の種類を決める
 	float recoil;       // 被ダメの仰け反り 0..1
 	float recoilX, recoilZ;
+	int skillPose;      // 再生中のスキル。人体はスキル別の型を引く。0 未満は通常攻撃
+	int prevSkill;      // 混ぜ元のクリップを始めたときのスキル
+	int grip[2];        // [右/左] 持ち物の指の型 GRIP_*。GRIP_NONE の手はクリップの指のまま
+	unsigned long long gripMask[2];   // その手の指の骨（ビット = 関節番号）
+	int gripClip;       // 人体の Grip クリップ。無ければ -1
 	Pose pose;
 	int poseValid;
 	const void* modelPtr;   // ActorPose 時に設定
 };
 
-void ActorFromChar(Actor& a, const Library& lib, const Renderer& r, const CharData& c);
+void ActorFromChar(Actor& a, Library& lib, Renderer& r, const CharData& c);
 void ActorFromMonster(Actor& a, const Library& lib, const Renderer& r, int monster, int boss);
 void ActorPlay(Actor& a, int clip, int loop, float blendTime = .15f);
+// kind: 0待機 1歩き 2走り 3構え 4攻撃 5別の攻撃。飛行の歩きと走りは翼を大きく動かす。
+// giveWings は人型だけ。飛行メッシュに翼を足すと体が二重になる。restart は同じループを頭からやり直す。
+void ActorPreview(Actor& a, const Library& lib, const Renderer& r, int kind, int style, int idleClip, BOOL fly, BOOL giveWings, BOOL restart = FALSE);
 void ActorUpdate(Actor& a, float dt);
 float ActorClipLen(const Actor& a, const Library& lib, const Renderer& r, int clip);
+// 構えで止める割合。人体のスキル別の型はその型の構えの時刻。
+float ActorWindup(const Actor& a, const Renderer& r, int clip);
 BOOL ActorClipDone(const Actor& a, const Library& lib, const Renderer& r);
 void ActorPose(Actor& a, const Library& lib, const Renderer& r);
 void ActorDraw(Renderer& r, const Library& lib, Actor& a, const M4& world, const DrawParams& dp, float time);

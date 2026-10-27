@@ -109,24 +109,25 @@ void TacAudioSetVol(int bgm, int se)
 }
 
 static const float kGain[TS_N] = {
-	0.22f, 0.48f, 0.40f, 0.44f, 0.46f,
-	0.52f, 0.46f, 0.28f, 0.50f, 0.44f,
-	0.46f, 0.55f, 0.62f, 0.30f, 0.44f,
-	0.42f, 0.50f, 0.56f, 0.46f, 0.50f,
-	0.42f, 0.46f, 0.48f, 0.40f, 0.46f,
-	0.40f, 0.48f, 0.32f, 0.36f, 0.50f,
-	0.44f, 0.52f,
-	0.50f, 0.44f, 0.54f, 0.48f, 0.46f, 0.42f, 0.50f, 0.42f,
-	0.44f, 0.42f, 0.50f,
-	0.52f, 0.46f, 0.52f, 0.48f, 0.50f,
+	0.20f, 0.44f, 0.36f, 0.38f, 0.40f,
+	0.46f, 0.50f, 0.24f, 0.44f, 0.44f,
+	0.42f, 0.52f, 0.62f, 0.30f, 0.44f,
+	0.42f, 0.56f, 0.56f, 0.46f, 0.50f,
+	0.40f, 0.44f, 0.42f, 0.40f, 0.44f,
+	0.40f, 0.44f, 0.38f, 0.34f, 0.50f,
+	0.44f, 0.50f,
+	0.48f, 0.42f, 0.50f, 0.44f, 0.48f, 0.42f, 0.50f, 0.42f,
+	0.40f, 0.42f, 0.48f,
+	0.48f, 0.44f, 0.40f, 0.46f, 0.48f,
 	0.50f,
-	0.56f, 0.48f, 0.58f, 0.50f, 0.50f, 0.46f, 0.56f, 0.46f,
-	0.46f, 0.50f, 0.54f,
-	0.54f, 0.62f,
-	0.30f, 0.28f,
-	0.50f, 0.44f, 0.38f, 0.36f, 0.46f, 0.48f, 0.46f,
-	0.48f, 0.54f, 0.46f,
-	0.52f, 0.50f, 0.40f, 0.40f, 0.46f
+	0.56f, 0.50f, 0.58f, 0.52f, 0.52f, 0.48f, 0.56f, 0.48f,
+	0.48f, 0.50f, 0.54f,
+	0.58f, 0.62f,
+	0.32f, 0.32f,
+	0.50f, 0.44f, 0.40f, 0.38f, 0.44f, 0.50f, 0.46f,
+	0.46f, 0.54f, 0.46f,
+	0.52f, 0.50f, 0.40f, 0.40f, 0.46f,
+	0.50f
 };
 
 static size_t TacRead(void* dst, size_t sz, size_t nm, void* h)
@@ -215,9 +216,11 @@ static void TacBake(int id);
 
 // YM2203 相当。FM は 4 オペレータ、SSG は矩形とノイズ。コーラスと残響は足さない。
 // kind: 0=FM 1=矩形 2=ノイズ 3=矩形+ノイズ。sweep は音の長さで動く半音。
+// SSG の sus<0 は山なりの包絡（風切り用）。ノイズの粗さは音程に従う。
 // @0 ベル @1 エレピ @2 笛 @3 打撃 @4 金管 @5 金属 @6 矩形 @7 ノイズ
 // @8 木琴 @9 ハープ @10 炎 @11 氷 @12 雷 @13 聖 @14 闇 @15 地 @16 毒
 // @17 斬 @18 突 @19 殴 @20 弓 @21 硬貨 @22 盾 @23 細矩形
+// @24 低い衝撃 @25 パッド @26 鉄琴 @27 風切りノイズ @28 持続ノイズ
 static float FmSin(float cyc)
 {
 	float x = cyc - (float)(int)cyc;
@@ -261,9 +264,14 @@ static const FmVoice kFmVoice[] = {
 	{ { 10.f, 1.f, 14.f, 1.f }, { 0.36f, 0.52f, 0.42f, 0.64f }, 3, 0.14f, 0.001f, 0.028f, 0.02f, 0.045f, 0, 0.50f, 0.f, 0.f, 0 },
 	{ { 1.f, 1.f, 6.f, 1.f }, { 0.32f, 0.74f, 0.38f, 0.78f }, 1, 0.16f, 0.001f, 0.05f, 0.14f, 0.08f, 0, 0.50f, 0.f, 0.14f, 2 },
 	{ { 1.f, 1.f, 1.f, 1.f }, { 0.f, 0.f, 0.f, 0.f }, 0, 0.f, 0.001f, 0.02f, 0.25f, 0.02f, 1, 0.22f, 0.f, 0.f, 0 },
+	{ { 1.f, 1.f, 1.f, 1.f }, { 0.30f, 0.45f, 0.25f, 1.00f }, 0, 0.12f, 0.001f, 0.24f, 0.f, 0.08f, 0, 0.50f, -14.f, 0.30f, 10 },
+	{ { 1.f, 1.f, 2.f, 1.003f }, { 0.12f, 0.62f, 0.10f, 0.55f }, 1, 0.04f, 0.050f, 0.25f, 0.70f, 0.22f, 0, 0.50f, 0.f, 0.f, 0 },
+	{ { 3.5f, 1.f, 2.f, 4.f }, { 0.28f, 0.70f, 0.30f, 0.22f }, 3, 0.06f, 0.001f, 0.55f, 0.f, 0.30f, 0, 0.50f, 0.f, 0.f, 0 },
+	{ { 1.f, 1.f, 1.f, 1.f }, { 0.f, 0.f, 0.f, 0.f }, 0, 0.f, 0.001f, 0.02f, -1.f, 0.02f, 2, 0.50f, 0.f, 0.f, 6 },
+	{ { 1.f, 1.f, 1.f, 1.f }, { 0.f, 0.f, 0.f, 0.f }, 0, 0.f, 0.001f, 0.02f, 0.90f, 0.10f, 2, 0.50f, 0.f, 0.f, 12 },
 };
 enum { TAC_FM_N = (int)(sizeof(kFmVoice) / sizeof(kFmVoice[0])) };
-struct MmlEv { int t0; int n; float hz; int voice; float vol; int pan; int ssg; };
+struct MmlEv { int t0; int n; float hz; int voice; float vol; int pan; int ssg; int bend; float sweep; };
 
 static float FmEnv(const FmVoice& v, float t, float dur)
 {
@@ -297,8 +305,15 @@ static void FmAdd(float* L, float* R, int total, const MmlEv& ev, unsigned& nois
 	if (ev.t0 >= total) return;
 	if (ev.t0 + n > total) n = total - ev.t0;
 	float g = ev.vol;
+	// 2パート目は左、3パート目は右。1パートの音は中央のまま。
+	float bend = (float)ev.pan * 0.08f;
+	if (bend > 0.40f) bend = 0.40f;
+	if (bend < -0.40f) bend = -0.40f;
+	float gL = g * (1.f - (bend > 0.f ? bend : 0.f));
+	float gR = g * (1.f + (bend < 0.f ? bend : 0.f));
 	float dur = (float)ev.n / (float)TAC_RATE;
 	if (dur < 0.01f) dur = 0.01f;
+	float sweep = ev.bend ? ev.sweep : v.sweep;
 	if (v.kind != 0) {
 		float sq = 0.f;
 		int nclk = 0;
@@ -309,9 +324,11 @@ static void FmAdd(float* L, float* R, int total, const MmlEv& ev, unsigned& nois
 			float t = (float)i / (float)TAC_RATE;
 			float u = t / dur;
 			if (u > 1.f) u = 1.f;
-			float hz = ev.hz * powf(2.f, (v.sweep * u) / 12.f);
+			float hz = ev.hz * powf(2.f, (sweep * u) / 12.f);
 			float env;
-			if (v.sus >= 0.45f) {
+			if (v.sus < 0.f) {
+				env = t < dur ? sinf(3.1415927f * sqrtf(u)) : 0.f;
+			} else if (v.sus >= 0.45f) {
 				env = t < 0.002f ? t / 0.002f : 1.f;
 			} else if (t < 0.002f) env = t / 0.002f;
 			else {
@@ -329,13 +346,16 @@ static void FmAdd(float* L, float* R, int total, const MmlEv& ev, unsigned& nois
 				s += (sq < duty ? 0.48f : -0.48f);
 			}
 			if (v.kind == 2 || v.kind == 3) {
-				int per = v.nper > 0 ? v.nper : 8;
+				float fp = (float)(v.nper > 0 ? v.nper : 8) * 261.63f / (hz > 1.f ? hz : 1.f);
+				int per = (int)(fp + 0.5f);
+				if (per < 1) per = 1;
+				if (per > 96) per = 96;
 				FmNoise(noise, nclk, per);
 				s += (noise & 1u) ? 0.32f : -0.32f;
 			}
 			s *= env;
-			L[ev.t0 + i] += s * g;
-			R[ev.t0 + i] += s * g;
+			L[ev.t0 + i] += s * gL;
+			R[ev.t0 + i] += s * gR;
 		}
 		return;
 	}
@@ -348,7 +368,7 @@ static void FmAdd(float* L, float* R, int total, const MmlEv& ev, unsigned& nois
 		if (env <= 0.f) continue;
 		float u = t / dur;
 		if (u > 1.f) u = 1.f;
-		float hz = ev.hz * powf(2.f, (v.sweep * u) / 12.f);
+		float hz = ev.hz * powf(2.f, (sweep * u) / 12.f);
 		float o0 = FmSin(ph[0] + fb * v.fb) * v.lvl[0];
 		float o1, o2, o3, a;
 		if (v.alg == 2) {
@@ -383,9 +403,9 @@ static void FmAdd(float* L, float* R, int total, const MmlEv& ev, unsigned& nois
 			float nenv = expf(-t / 0.018f);
 			a += ((noise & 1u) ? 0.36f : -0.36f) * v.nz * nenv;
 		}
-		float s = a * env * g;
-		L[ev.t0 + i] += s;
-		R[ev.t0 + i] += s;
+		float s = a * env;
+		L[ev.t0 + i] += s * gL;
+		R[ev.t0 + i] += s * gR;
 	}
 }
 static int MmlSemi(char n)
@@ -419,12 +439,13 @@ static int MmlSamples(int tempo, int len, int dotted)
 }
 static int MmlTrack(const char* s, int track, MmlEv* ev, int nEv, int cap)
 {
-	(void)track;
 	int tempo = 150, len = 16, oct = 4, voice = 1;
+	int bend = 0;
+	float sweep = 0.f;
 	float vol = 0.55f;
 	int cursor = 0;
 	int chord = 0, chordAt = 0, chordEnd = 0;
-	int pan = 0;
+	int pan = track == 1 ? -5 : (track == 2 ? 5 : 0);
 	for (int i = 0; s[i];) {
 		char c = s[i];
 		if (c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '&') { i++; continue; }
@@ -451,7 +472,17 @@ static int MmlTrack(const char* s, int track, MmlEv* ev, int nEv, int cap)
 		if (c == 'l') { i++; len = MmlNum(s, i, len); continue; }
 		if (c == 'o') { i++; oct = MmlNum(s, i, oct); if (oct < 1) oct = 1; if (oct > 7) oct = 7; continue; }
 		if (c == 'v') { i++; vol = (float)MmlNum(s, i, 12) / 15.f; if (vol > 1.f) vol = 1.f; continue; }
-		if (c == '@') { i++; voice = MmlNum(s, i, voice); continue; }
+		if (c == '@') { i++; voice = MmlNum(s, i, voice); bend = 0; continue; }
+		if (c == 's') {
+			i++;
+			int neg = 0;
+			if (s[i] == '-') { neg = 1; i++; }
+			int v = 0;
+			while (s[i] >= '0' && s[i] <= '9') { v = v * 10 + (s[i] - '0'); i++; }
+			sweep = (float)(neg ? -v : v);
+			bend = 1;
+			continue;
+		}
 		if (c == '>') { if (oct < 7) oct++; i++; continue; }
 		if (c == '<') { if (oct > 1) oct--; i++; continue; }
 		if (c == 'r' || c == 'p') {
@@ -484,6 +515,8 @@ static int MmlTrack(const char* s, int track, MmlEv* ev, int nEv, int cap)
 			e.vol = vol;
 			e.pan = pan;
 			e.ssg = kFmVoice[voice].kind;
+			e.bend = bend;
+			e.sweep = sweep;
 		}
 		if (chord) {
 			int end = chordAt + dur;
@@ -550,85 +583,94 @@ static short* MmlMix(const char* src, int& frames, float gain)
 	return dst;
 }
 static const char* const kMml[TS_N] = {
-	"t220 l64 o6 v8 @5 e",
-	"t168 l16 o5 v12 @0 c e g",
-	"t150 l16 o5 v10 @1 g e c",
-	"t100 l8 o2 v12 @6 c <g",
-	"t150 l16 o4 v11 @4 c e g",
-	"t140 l8 o3 v12 @4 c g >e",
-	"t120 l8 o3 v11 @14 e- c <a-",
-	"t200 l32 o2 v10 @3 c | t200 l32 o1 v7 @7 c",
-	"t180 l16 o4 v12 @17 c | t180 l32 o3 v8 @7 c",
-	"t160 l16 o5 v11 @20 e c | t200 l64 o6 v6 @5 e",
-	"t150 l16 o5 v10 @13 c e g",
-	"t140 l16 o2 v12 @3 c | t160 l32 o3 v7 @7 c",
-	"t150 l16 o2 v13 @3 c | t190 l32 o6 v9 @0 c e g",
-	"t200 l16 o5 v6 @7 c e",
-	"t140 l16 o5 v10 @9 c e g >c",
-	"t150 l16 o5 v9 @2 e g b",
-	"t80 l8 o3 v12 @14 a f c <g",
-	"t128 l8 o4 v12 @4 c e g >c4 <g8 >c2 | t128 l8 o5 v9 @0 e g b >e4 c8 e2",
-	"t90 l8 o3 v11 @14 e- c <a- g-2",
-	"t150 l16 o5 v11 @0 c e g >c",
-	"t160 l16 o5 v10 @0 c e g",
-	"t200 l32 o6 v12 @21 e a",
-	"t170 l16 o4 v11 @4 c g",
-	"t150 l16 o5 v9 @9 c e g",
-	"t200 l32 o4 v12 @5 c | t200 l64 o3 v8 @22 g",
-	"t170 l16 o6 v10 @21 a e c",
-	"t160 l16 o5 v10 @13 c e g | t200 l32 o6 v7 @0 g",
-	"t180 l32 o5 v7 @23 e",
-	"t160 l16 o4 v8 @1 c e",
-	"t150 l16 o5 v11 @8 c e g >c | t190 l32 o6 v8 @21 e",
-	"t90 l8 o2 v9 @7 c | t180 l32 o4 v11 @5 r16 c",
-	"t130 l16 o2 v12 @19 c | t140 l16 o3 v8 @14 e- c",
-	"t150 l16 o4 v12 @10 c e g | t160 l32 o3 v7 @7 c",
-	"t140 l16 o6 v10 @11 e g >c",
-	"t200 l32 o3 v12 @12 c g c",
-	"t140 l16 o5 v11 @13 [ceg] e >c",
-	"t110 l8 o3 v11 @14 e- c <g",
-	"t170 l16 o5 v9 @2 c e g >e | t180 l16 o5 v6 @7 c",
-	"t100 l8 o2 v12 @15 c g",
-	"t120 l16 o4 v9 @16 e- f e-",
-	"t140 l16 o5 v10 @9 e g >c",
-	"t150 l16 o5 v9 @2 g b >d",
-	"t130 l8 o4 v11 @13 c e g >c",
-	"t120 l8 o3 v12 @17 c | t140 l16 o2 v8 @7 c",
-	"t200 l32 o4 v12 @18 e | t200 l64 o5 v6 @5 e",
-	"t150 l16 o2 v12 @19 c",
-	"t160 l16 o4 v11 @17 c e c | t160 l16 o3 v7 @7 c e",
-	"t180 l32 o2 v12 @19 c c | t200 l32 o3 v8 @7 c",
-	"t160 l16 o5 v10 @13 e g >c | t180 l16 o4 v7 @17 c",
-	"t150 l16 o3 v12 @10 c | t160 l32 o2 v8 @7 c",
-	"t170 l32 o6 v11 @11 e g",
-	"t220 l64 o3 v13 @12 c e c",
-	"t160 l16 o5 v11 @13 [ceg]",
-	"t100 l8 o2 v12 @14 e- c",
-	"t180 l16 o5 v9 @2 e c | t180 l16 o5 v6 @7 c",
-	"t110 l8 o2 v13 @15 c",
-	"t130 l16 o4 v9 @16 e- g- e-",
-	"t160 l16 o4 v11 @20 c | t180 l32 o3 v8 @3 c",
-	"t190 l32 o4 v12 @18 e",
-	"t140 l16 o2 v13 @19 c",
-	"t150 l16 o4 v11 @13 c e | t150 l16 o3 v8 @10 c",
-	"t120 l8 o4 v12 @4 c e g >c | t140 l16 o5 v9 @13 e g >c",
-	"t160 l16 o5 v7 @16 e- c",
-	"t200 l32 o5 v6 @7 c e",
-	"t130 l8 o4 v11 @9 c e g >c | t160 l16 o6 v8 @0 e g",
-	"t170 l16 o6 v9 @11 c e g",
-	"t110 l16 o4 v8 @16 e- f e- f",
-	"t80 l8 o5 v8 @9 e c <g",
-	"t140 l16 o3 v12 @22 c | t160 l32 o2 v8 @3 c",
-	"t150 l16 o4 v12 @22 c g e",
-	"t160 l16 o4 v10 @2 c e g >c >e",
-	"t160 l16 o5 v11 @0 c e g >e",
-	"t120 l8 o4 v12 @4 c e g >c4 | t140 l16 o5 v8 @0 e g >c",
-	"t170 l16 o6 v11 @21 e g | t160 l16 o5 v8 @8 c e",
-	"t130 l8 o3 v12 @4 c g >e | t150 l16 o5 v8 @0 c e g",
-	"t140 l8 o3 v12 @4 c e g",
-	"t150 l16 o4 v9 @16 c f+ c",
-	"t70 l8 o3 v9 @1 g e c",
-	"t120 l16 o3 v11 @22 c <g | t140 l32 o2 v7 @7 c",
+	// UI
+	"t240 l64 o6 v9 @8 c",
+	"t200 l32 o5 v11 @8 g >c16 | t200 l32 o6 v6 @26 r32 c16",
+	"t200 l32 o5 v10 @8 e <a16",
+	"t180 l32 o3 v12 @6 c+ r64 c+16 | t180 l32 o3 v9 @23 c r64 c16",
+	"t240 l32 o4 v8 @27 s14 c16 | t220 l32 o5 v10 @9 r64 c g >c",
+	// 手番。味方は上がる四度、敵は同じ形を半音でずらして沈める。
+	"t150 l16 o4 v12 @4 g8 >c4 | t150 l16 o4 v9 @4 e8 g4 | t150 l16 o3 v10 @24 c8 c4",
+	"t150 l16 o3 v12 @4 d-8 c4 | t150 l16 o3 v9 @4 g8 g-4 | t150 l16 o2 v12 @24 g8 g4",
+	"t240 l64 o3 v9 @24 s-6 g | t240 l64 o4 v5 @7 c",
+	"t180 l16 o4 v11 @27 s14 a | t180 l32 o3 v6 @27 r64 s-6 a",
+	"t220 l32 o3 v12 @20 b- | t220 l16 o5 v8 @27 r64 s-10 c",
+	"t200 l32 o5 v9 @26 c e g >c | t140 l8 o4 v7 @25 s12 c4",
+	"t220 l32 o3 v13 @19 c | t240 l64 o3 v10 @24 g | t240 l64 o5 v7 @7 c",
+	"t180 l32 o3 v14 @24 c16 | t200 l32 o3 v12 @17 g @5 >>c16 | t240 l64 o5 v10 @7 c r64 c32",
+	"t200 l16 o5 v9 @27 s-14 c | t200 l32 o4 v5 @27 r32 s-8 c",
+	"t180 l32 o5 v10 @9 c e g >c e | t140 l8 o5 v6 @25 [ce]4 | t200 l32 o6 v6 @26 r16 g >c",
+	"t200 l32 o4 v10 @4 s2 g >c e g8 | t200 l32 o6 v7 @26 r16 c e g",
+	// 撃破。打撃のあとに破裂ノイズが沈み、霧散する光が上へ抜ける。
+	"t160 l16 o3 v14 @24 c8 | t160 l16 o4 v11 @28 s-12 c8 | t220 l32 o5 v8 r16 @26 g >c e g >c",
+	"t150 l16 o4 v12 @4 g g g >c4. <a-8 b-8 >c2 | t150 l16 o4 v9 @4 e e e g4. e-8 f8 g2 | t150 l16 o3 v10 @4 c c c c4. <a-8 b-8 >c2",
+	"t90 l8 o4 v11 @2 e d c <b4 a2 | t90 o3 v8 @25 [ace]2 [<b>eg+]4. [ace]2",
+	"t220 l32 o5 v11 @26 c e g >c e g >c8 | t220 l32 o4 v8 @4 r16 c8 e8 g8 | t220 l32 o6 v7 @0 r8 r16 c e g",
+	// 場面ごとの決定音
+	"t200 l32 o5 v10 @9 g >d16 | t200 l32 o6 v5 @26 r32 d16",
+	"t200 l32 o6 v11 @21 b >e8 | t200 l32 o5 v6 @26 r32 e8",
+	"t220 l32 o5 v11 @8 c g16 | t240 l64 o6 v6 @5 c",
+	"t200 l32 o5 v10 @1 c e g16 | t200 l32 o4 v6 @25 c8",
+	"t200 l32 o4 v12 @22 g | t240 l64 o5 v8 @5 c r64 g",
+	"t240 l64 o6 v11 @21 e r64 b r32 >e | t240 l64 o6 v7 @21 r32 g+ r64 b",
+	"t220 l32 o4 v10 @16 c e g | t220 l32 o5 v8 @26 r16 c g",
+	"t200 l16 o3 v10 @15 s4 c | t220 l32 o5 v8 @9 r32 c g",
+	"t220 l32 o5 v9 @8 e a",
+	"t160 l16 o3 v10 @22 s4 g | t200 l32 o5 v11 @26 r16 c e g >c8 | t200 l32 o6 v8 @21 r16 r32 e r32 b",
+	"t140 l8 o2 v12 @15 s-3 g | t160 l8 o3 v6 @23 s5 g4 | t200 l32 o3 v10 @24 r8 r16 c",
+	"t220 l32 o3 v13 @19 c | t200 l32 o4 v9 @23 s-7 e16 | t240 l64 o4 v8 @7 c",
+	// 属性ごとの詠唱
+	"t160 l8 o3 v10 @10 s9 c4 | t160 l8 o4 v8 @28 s12 c4 | t220 l32 o5 v6 @26 r8 c g",
+	"t240 l32 o6 v9 @11 c g e b >c | t160 l8 o5 v6 @26 r16 e4 | t200 l8 o6 v4 @27 s-6 c4",
+	"t240 l64 o4 v10 @12 c r64 c r32 c r64 c r32 c | t140 l8 o3 v8 @23 s24 c4 | t200 l16 o5 v6 @28 s12 c4",
+	"t150 l8 o5 v8 @25 [ceg]4 | t220 l32 o6 v9 @26 g >c e g >c | t150 l8 o4 v6 @2 c4",
+	"t130 l8 o2 v12 @14 s-5 c4 | t130 l8 o3 v8 @25 [cg-]4 | t180 l16 o5 v5 @23 s-7 e-8",
+	"t180 l16 o4 v9 @27 s14 c8 s-10 g8 | t220 l32 o6 v6 @2 s5 c e g",
+	"t140 l8 o2 v12 @15 s-3 c4 | t160 l8 o3 v8 @28 s-5 c4 | t200 l16 o3 v8 @24 r8 c",
+	"t220 l32 o4 v10 @16 c e- c f c g- | t160 l16 o3 v6 @25 s-3 c4",
+	"t180 l32 o5 v9 @9 c e g >c | t130 l8 o4 v6 @25 [eg]4 | t200 l32 o6 v5 @26 r16 c e",
+	"t200 l32 o4 v10 @4 s3 c e g >c | t160 l16 o5 v6 @26 r16 c8 | t200 l16 o4 v6 @27 s12 c8",
+	"t110 l8 o4 v9 @25 s5 [ce]4 [gb]4 | t200 l32 o5 v8 @26 c e g >c e g >c | t110 l8 o3 v6 @2 c2",
+	// 型ごとの振り
+	"t160 l16 o3 v12 @27 s-10 g | t180 l32 o4 v7 @27 r64 s8 c",
+	"t240 l32 o5 v10 @27 s18 c | t240 l64 o6 v6 @5 r64 c",
+	"t240 l32 o4 v10 @27 s10 g",
+	"t200 l32 o4 v10 @27 s12 c s-12 g s12 c s-12 g",
+	"t200 l32 o2 v10 @14 s-4 b- | t240 l64 o4 v11 @22 r32 c r64 g",
+	"t200 l32 o5 v10 @5 c g >c | t180 l16 o4 v9 @27 s16 c8 | t200 l32 o4 v8 @4 r32 g >c",
+	// 属性・型ごとの命中
+	"t180 l16 o3 v13 @24 c | t180 l16 o4 v11 @28 s-12 g8 | t200 l32 o4 v9 @10 s-5 c16",
+	"t240 l64 o6 v11 @11 c g e >c <a | t220 l32 o5 v9 @7 c | t200 l32 o3 v8 @24 c",
+	"t240 l64 o5 v12 @12 c c | t180 l16 o3 v12 @24 s-18 c8 | t240 l32 o6 v8 @28 s-20 c16",
+	"t220 l32 o6 v10 @26 c e g >c | t200 l32 o3 v10 @24 c | t200 l32 o5 v7 @13 [ceg]16",
+	"t160 l16 o2 v13 @14 c8 | t160 l16 o3 v9 @25 s-7 [cg-]8 | t220 l32 o3 v9 @24 c",
+	"t220 l32 o5 v11 @27 s-14 c c | t220 l32 o4 v9 @17 r32 g | t240 l64 o5 v6 @7 r32 c",
+	"t160 l16 o3 v13 @15 c | t180 l16 o3 v10 @28 s-8 c8 | t200 l32 o3 v10 @24 r32 c",
+	"t220 l32 o3 v11 @19 c | t220 l32 o4 v9 @16 e- g- e- c",
+	"t240 l64 o4 v12 @18 g | t220 l32 o3 v10 @19 c | t240 l64 o5 v6 @22 c",
+	"t240 l64 o5 v12 @18 c | t220 l32 o3 v9 @17 g | t240 l64 o4 v7 @7 r64 c",
+	"t220 l32 o3 v13 @19 c | t240 l64 o3 v10 @24 c | t240 l64 o4 v7 @7 c",
+	"t180 l16 o3 v14 @24 c8 | t200 l32 o5 v11 @5 c g >c | t200 l32 o4 v10 @17 g r32 @28 s-12 c8",
+	"t140 l8 o3 v14 @24 c4 r16 c4 | t160 l16 o4 v12 @4 c g >c4 | t200 l32 o4 v9 @28 s-14 c8 r16 @26 >>c e g >c",
+	"t220 l32 o5 v9 @11 s-12 g e c | t200 l16 o5 v6 @27 s-8 c",
+	"t220 l16 o6 v9 @27 s-14 c | t240 l64 o4 v6 @18 r16 c",
+	// 状態
+	"t140 l8 o5 v10 @26 [ceg]4 | t140 l8 o4 v8 @25 [cg]2 | t220 l32 o6 v8 @9 c e g >c e",
+	"t220 l32 o6 v10 @26 g e c e g >c | t160 l16 o5 v6 @25 c8 | t200 l16 o5 v5 @27 s12 c8",
+	"t200 l32 o3 v11 @16 c r32 c- | t180 l16 o4 v7 @23 s-4 e-8",
+	"t110 l16 o5 v9 @9 g e c | t110 l8 o4 v6 @25 s-3 e4",
+	"t200 l32 o3 v11 @19 c | t240 l32 o6 v9 @0 c g c g c g",
+	"t200 l32 o4 v13 @22 g | t220 l32 o6 v9 @5 c | t240 l64 o5 v6 @7 c",
+	"t240 l64 o4 v10 @23 s24 c c c c | t200 l16 o5 v7 @26 r16 c8 | t200 l8 o5 v6 @27 s14 c",
+	"t180 l32 o5 v10 @26 g >c e g8 | t180 l16 o4 v7 @25 r16 [ce]4",
+	"t130 l16 o4 v12 @4 c g >c4 e4 | t130 l16 o3 v10 @4 g >e g4 >c4 | t200 l32 o6 v8 @26 r8 c e g >c",
+	"t200 l32 o5 v11 @26 a >c+ e a8 | t200 l32 o6 v7 @21 r32 e",
+	"t120 l8 o3 v12 @4 c4 g2 | t120 l8 o3 v11 @24 c r c c | t120 l8 o3 v9 @4 g4 >d2",
+	"t160 l16 o3 v13 @24 c r32 c | t160 l16 o4 v11 @4 r8 [c+g]8 | t200 l32 o5 v7 @26 r8 c+ g",
+	"t180 l32 o5 v9 @23 s-6 c s6 c s-6 c s6 c | t180 l16 o4 v6 @9 f+ c f+",
+	"t160 l16 o5 v10 @6 s-12 c8 | t160 l16 o4 v6 @25 s-12 g8",
+	"t200 l32 o4 v11 @22 s-5 c | t200 l32 o5 v8 @5 r32 g e c",
+	"t160 l16 o3 v12 @19 c | t120 l8 o4 v9 @2 s-12 e4 | t120 l8 o3 v7 @25 [ca-]4",
 };
 static void TacSynthAll()
 {

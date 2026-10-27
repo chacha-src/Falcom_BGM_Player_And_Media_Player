@@ -48,6 +48,8 @@ int TacAvaBad();
 // 敵一覧と戦闘で載せ替えるモンスター。切り替えるたびに本体 arena へ捨てると、一覧を見たあと戦闘開始で落ちる。
 void* TacMonAlloc(size_t bytes, size_t align);
 void TacMonReset();
+void TacMonRestart(); // 人間ごと捨てて、次の読み込みを先頭から
+void TacMonKeep();    // 今までを人間の分として残し、TacMonReset はそれより後ろだけ捨てる
 
 template<typename T>
 struct Buf {
@@ -370,7 +372,7 @@ int PaceRoleOfLv(int lv);
 enum { MAX_ROSTER = 100, MAX_PARTY = 10, MAX_ENEMY = 640, NAME_LEN = 16 };
 static_assert(MAX_PARTY == 10, "Map::pStart は 10 枠");
 enum Body { B_KNIGHT, B_BARBARIAN, B_MAGE, B_ROGUE, B_ROGUE_HOOD, B_COUNT };
-enum { HAIR_STYLES = 12, HAIR_COLORS = 10, OUTFIT_COLORS = 10, HT_N = 5, BUST_N = 5, FIG_N = 5, MODEL_N = 5, HUM_HAIR_N = 16 };
+enum { HAIR_STYLES = 12, HAIR_COLORS = 10, OUTFIT_COLORS = 10, HT_N = 5, BUST_N = 8, FIG_N = 5, MODEL_N = 7, HUM_HAIR_N = 16 };
 
 #pragma pack(push, 4)
 struct CharData {
@@ -398,11 +400,12 @@ inline void CharSetModel(CharData& c, int v) { c.body = (c.body & ~(15 << 8)) | 
 // outfit の上位ビットに身長・胸・体型・顔・アバター・アバター色。既存セーブは 0 なので普通体型、色は染め色のまま。
 inline int CharOutfit(const CharData& c) { return c.outfit & 255; }
 inline int CharHt(const CharData& c) { int v = (c.outfit >> 8) & 15; return v ? Clampi(v - 1, 0, HT_N - 1) : 2; }
-inline int CharBust(const CharData& c) { int v = (c.outfit >> 12) & 15; return v ? Clampi(v - 1, 0, BUST_N - 1) : 2; }
+// 胸は 0=A〜7=H。bit 12-15 が 8〜15 ならカップ。1〜5 は旧 5 段（控えめ〜巨乳）で、A・B・C・E・G に読み替える。0 は C。
+inline int CharBust(const CharData& c) { int v = (c.outfit >> 12) & 15; if (v >= 8) return v - 8; if (!v) return 2; v = Clampi(v - 1, 0, 4); return v <= 2 ? v : v * 2 - 2; }
 inline int CharFig(const CharData& c) { int v = (c.outfit >> 16) & 7; return v ? Clampi(v - 1, 0, FIG_N - 1) : 1; }
 inline void CharSetOutfit(CharData& c, int v) { c.outfit = (c.outfit & ~255) | (Clampi(v, 0, OUTFIT_COLORS - 1) & 255); }
 inline void CharSetHt(CharData& c, int v) { c.outfit = (c.outfit & ~(15 << 8)) | ((Clampi(v, 0, HT_N - 1) + 1) << 8); }
-inline void CharSetBust(CharData& c, int v) { c.outfit = (c.outfit & ~(15 << 12)) | ((Clampi(v, 0, BUST_N - 1) + 1) << 12); }
+inline void CharSetBust(CharData& c, int v) { c.outfit = (c.outfit & ~(15 << 12)) | ((Clampi(v, 0, BUST_N - 1) + 8) << 12); }
 inline void CharSetFig(CharData& c, int v) { c.outfit = (c.outfit & ~(7 << 16)) | ((Clampi(v, 0, FIG_N - 1) + 1) << 16); }
 // 顔の型 (bit 19-22, 0=既定) とアバター (bit 23-28, 0=なし)
 inline int CharFace(const CharData& c) { return (c.outfit >> 19) & 15; }

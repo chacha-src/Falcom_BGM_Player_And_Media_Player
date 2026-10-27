@@ -319,7 +319,634 @@ def smooth_human_normals(pos, nrm, idx):
     return nrm.astype(np.float32)
 
 
-def bake_human(names, parents, rest, top, ibm, pos, nrm, jn, wt, hair_mask=None, eye_mask=None):
+UAL_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_dl", "ual")
+UAL_FILES = ("UAL1_Standard.glb", "UAL2_Standard.glb")
+# ゲームの骨 → Quaternius Universal Animation Library（CC0、UE マネキンの骨名）。
+# 指は体ごとの番号で retarget_human が足す。髪や装身具の骨は一番近い親に付いて動く。
+UAL_BONE = {"Hips": "pelvis", "Abdomen": "spine_01", "Torso": "spine_02", "Chest": "spine_03", "Neck": "neck_01", "Head": "Head"}
+# 骨の向きを決める子。無ければ次の候補、どれも無ければ親と同じ合わせ方を使う。
+UAL_AIM = {"Hips": ("Abdomen", "Torso"), "Abdomen": ("Torso", "Chest"), "Torso": ("Chest", "Neck"), "Chest": ("Neck", "Head"), "Neck": ("Head",)}
+for _s, _u in (("L", "l"), ("R", "r")):
+    UAL_BONE.update({"Shoulder." + _s: "clavicle_" + _u, "UpperArm." + _s: "upperarm_" + _u, "LowerArm." + _s: "lowerarm_" + _u,
+                     "Hand." + _s: "hand_" + _u, "UpperLeg." + _s: "thigh_" + _u, "LowerLeg." + _s: "calf_" + _u,
+                     "Foot." + _s: "foot_" + _u, "PT." + _s: "ball_" + _u})
+    UAL_AIM.update({"Shoulder." + _s: ("UpperArm." + _s,), "UpperArm." + _s: ("LowerArm." + _s,), "LowerArm." + _s: ("Hand." + _s,),
+                    "Hand." + _s: ("Middle1." + _s, "Index1." + _s), "UpperLeg." + _s: ("LowerLeg." + _s,),
+                    "LowerLeg." + _s: ("Foot." + _s,), "Foot." + _s: ("PT." + _s,)})
+
+# 戦闘は長さの割合で動く。構え（ClipWindup）と命中（物理 0.42）・発射（射撃 0.315、魔法 0.375）を合わせて時間を伸縮する。
+# 区間: (クリップ, 開始秒, 終了秒[, 左右反転, つなぎ秒])。終了がクリップより長いと最後の姿勢で止まる。
+# キー: (割合, 秒) か (割合, ("rdy"|"hit", 探す開始秒, 終了秒))。rdy は武器手が最も遅い瞬間、hit は最も速い瞬間。
+# fem: 女性の体で、腕を体へ寄せ足幅を狭め、歩きの腰を大きく振る。glance: 待機に首の振り向きを重ねる。
+UAL_CLIPS = [
+    ("Idle", [("Idle_Loop", 0, 2.5)], 2.5, 1, None, dict(fem="idle")),
+    ("Idle_GlanceL", [("Idle_Loop", 0, 2.5)], 2.5, 1, None, dict(fem="idle", glance=1)),
+    ("Idle_GlanceR", [("Idle_Loop", 0, 2.5)], 2.5, 1, None, dict(fem="idle", glance=-1)),
+    ("Idle_Look", [("Idle_No_Loop", 0, 2.5)], 2.5, 1, None, dict(fem="idle")),
+    ("Idle_Stretch", [("Idle_Talking_Loop", 0, 2.933)], 2.933, 1, None, dict(fem="idle")),
+    ("Idle_Shift", [("Idle_Loop", 1.25, 2.5, 1, 0), ("Idle_Loop", 0, 1.25, 1, 0)], 2.5, 1, None, dict(fem="idle")),
+    ("Idle_Cross", [("Idle_FoldArms_Loop", 0, 2.5)], 2.5, 1, None, dict(fem="idle")),
+    ("Walking_A", [("Walk_Loop", 0, 1.333)], 1.0, 1, None, dict(fem="walk")),
+    ("Running_A", [("Jog_Fwd_Loop", 0, 0.933)], 0.75, 1, None, dict(fem="run")),
+    ("1H_Melee_Attack_Slice_Diagonal", [("Sword_Regular_A", 0, 0.433), ("Sword_Regular_A_Rec", 0, 0.967, 0, 0.05)], 1.0, 0,
+     [(0.22, ("rdy", 0.0, 0.2)), (0.42, ("hit", 0.12, 0.36))], {}),
+    ("1H_Melee_Attack_Stab", [("Idle_Loop", 0, 0.05), ("Sword_Regular_B", 0, 0.533, 0, 0.22), ("Sword_Regular_B_Rec", 0, 1.033, 0, 0.05)], 1.05, 0,
+     [(0.22, ("rdy", 0.1, 0.3)), (0.42, ("hit", 0.2, 0.5))], {}),
+    ("1H_Melee_Attack_Chop", [("Idle_Loop", 0, 0.05), ("Sword_Attack", 0, 1.25, 0, 0.2), ("Idle_Loop", 0, 0.4, 0, 0.35)], 1.0, 0,
+     [(0.30, ("rdy", 0.15, 0.4)), (0.42, ("hit", 0.3, 0.55))], {}),
+    ("2H_Melee_Attack_Chop", [("Idle_Loop", 0, 0.05), ("Sword_Heavy_Combo", 2.0, 3.4, 0, 0.35), ("Idle_Loop", 0, 0.5, 0, 0.4)], 1.1, 0,
+     [(0.30, ("rdy", 0.3, 0.7)), (0.42, ("hit", 0.45, 0.95))], {}),
+    ("2H_Melee_Attack_Spin", [("Idle_Loop", 0, 0.05), ("Sword_Regular_C", 0, 1.75, 0, 0.25)], 1.2, 0,
+     [(0.16, ("rdy", 0.1, 0.5)), (0.42, ("hit", 0.45, 0.95))], {}),
+    ("2H_Ranged_Shoot", [("Idle_Loop", 0, 0.05), ("Pistol_Aim_Neutral", 0, 0.4, 0, 0.3), ("Pistol_Shoot", 0, 0.633, 0, 0.04),
+                         ("Idle_Loop", 0, 0.5, 0, 0.35)], 1.0, 0, [(0.26, 0.42), (0.315, ("hit", 0.44, 0.56))], {}),
+    ("1H_Ranged_Shoot", [("Spell_Simple_Enter", 0, 0.533, 1), ("Spell_Simple_Shoot", 0, 0.5, 1, 0.04), ("Spell_Simple_Exit", 0, 0.433, 1, 0.04)], 1.0, 0,
+     [(0.26, 0.5), (0.315, 0.6)], {}),
+    ("Spellcast_Shoot", [("Spell_Simple_Enter", 0, 0.533), ("Spell_Simple_Shoot", 0, 0.5, 0, 0.04), ("Spell_Simple_Exit", 0, 0.433, 0, 0.04)], 1.3, 0,
+     [(0.36, 0.53), (0.375, 0.6)], dict(hand="L")),
+    ("Spellcast_Raise", [("Idle_Loop", 0, 0.05), ("Pistol_Aim_Up", 0, 0.7, 0, 0.4), ("Idle_Loop", 0, 0.5, 0, 0.45)], 1.5, 0,
+     [(0.32, 0.45), (0.375, 0.55)], {}),
+    ("Spellcast_Long", [("Spell_Simple_Enter", 0, 0.533), ("Spell_Simple_Idle_Loop", 0, 2.1, 0, 0.04), ("Spell_Simple_Shoot", 0, 0.5, 0, 0.04),
+                        ("Spell_Simple_Exit", 0, 0.433, 0, 0.04)], 2.2, 0, [(0.36, 2.55), (0.375, 2.7)], dict(hand="L")),
+    ("Hit_A", [("Hit_Chest", 0, 0.333), ("Idle_Loop", 0, 0.3, 0, 0.25)], 0.5, 0, None, dict(fem="idle")),
+    ("Hit_B", [("Hit_Head", 0, 0.433), ("Hit_Chest", 0, 0.333, 0, 0.08), ("Idle_Loop", 0, 0.35, 0, 0.3)], 0.75, 0, None, dict(fem="idle")),
+    ("Death_A", [("Death01", 0, 2.4)], 1.6, 0, None, {}),
+    ("Cheer", [("Yes", 0, 2.5)], 2.5, 1, None, dict(fem="idle")),
+    ("2H_Melee_Idle", [("Sword_Idle", 0, 1.667)], 1.667, 1, None, {}),
+    ("Throw", [("OverhandThrow", 0, 1.333)], 1.0, 0, [(0.26, ("rdy", 0.1, 0.32)), (0.315, ("hit", 0.2, 0.45))], {}),
+    ("Unarmed_Melee_Attack_Punch_A", [("Idle_Loop", 0, 0.05), ("Punch_Cross", 0, 1.0, 0, 0.2), ("Idle_Loop", 0, 0.3, 0, 0.3)], 0.9, 0,
+     [(0.22, ("rdy", 0.05, 0.25)), (0.42, ("hit", 0.15, 0.4))], {}),
+    # 蘇生は倒れた姿勢（死亡の終わり）から起き上がる。死亡を逆に再生して腰を落とした所から待機へつなぐ。
+    ("Spawn_Ground", [("Death01", 1.7, 0.75), ("Idle_Loop", 0, 0.6, 0, 0.5)], 1.3, 0, None, dict(ref=("Death01", 0.0))),
+    # スキル用。物理は直線で突進、威力の大技、盾ごとの体当たり。魔法は属性で投げる・地面へ・指す・触れる。
+    ("Skill_Dash", [("Idle_Loop", 0, 0.05), ("Sword_Dash", 0, 1.567, 0, 0.2)], 1.1, 0, [(0.24, ("rdy", 0.1, 0.4)), (0.42, ("hit", 0.25, 0.6))], {}),
+    ("Skill_Heavy", [("Sword_Heavy_Combo", 0, 1.3), ("Idle_Loop", 0, 0.45, 0, 0.4)], 1.2, 0, [(0.24, ("rdy", 0.05, 0.3)), (0.42, ("hit", 0.2, 0.55))], {}),
+    ("Skill_Bash", [("Idle_Loop", 0, 0.05), ("Shield_Dash", 0, 1.1, 0, 0.2)], 1.0, 0, [(0.24, ("rdy", 0.05, 0.3)), (0.42, ("hit", 0.15, 0.5))], dict(hand="L")),
+    ("Cast_Throw", [("OverhandThrow", 0, 1.333)], 1.2, 0, [(0.36, ("rdy", 0.1, 0.32)), (0.375, ("hit", 0.2, 0.45))], {}),
+    ("Cast_Ground", [("Farm_PlantSeed", 0, 2.767)], 1.6, 0, [(0.36, ("rdy", 0.8, 1.4)), (0.375, ("hit", 1.0, 1.6))], {}),
+    ("Cast_Point", [("Idle_Loop", 0, 0.05), ("Pistol_Aim_Up", 0, 0.45, 0, 0.35), ("Pistol_Shoot", 0, 0.633, 0, 0.15),
+                    ("Idle_Loop", 0, 0.5, 0, 0.35)], 1.2, 0, [(0.36, 0.5), (0.375, 0.58)], {}),
+    ("Cast_Heal", [("Interact", 0, 2.0)], 1.5, 0, [(0.32, 0.75), (0.375, 0.93)], dict(hand="L")),
+    ("Cast_Claw", [("Idle_Loop", 0, 0.05), ("Zombie_Scratch", 0, 0.72, 0, 0.2), ("Idle_Loop", 0, 0.55, 0, 0.45)], 1.2, 0,
+     [(0.36, ("rdy", 0.25, 0.55)), (0.375, ("hit", 0.4, 0.7))], {}),
+]
+# 物を持つ手の指（Grip クリップの 1 コマずつ。順はゲームの GRIP_* − 1）。持たない手はクリップの指（捕った動き）のまま。
+# 4 指は付け根・中節・末節の曲げ（度、UAL の拳 Idle_Loop の曲げ軸まわり）。小指側ほど深く、柄を斜めに握り込む。
+# 親指は銃把を握る親指（Pistol_Aim_Neutral の右手、左手は鏡）へ節ごとに寄せる割合。
+UAL_GRIPS = [
+    # 剣・斧・槌・短剣: 径 3cm の柄。人差し指はやや浅く、親指は中指の上へ巻く。
+    ("fist", (70, 66, 38), (78, 70, 40), (84, 68, 40), (90, 64, 38), (1.0, 1.0, 1.0)),
+    # 杖・槍・大鎌: 径 4cm の柄を軽く。
+    ("staff", (58, 56, 32), (65, 60, 34), (72, 58, 34), (78, 55, 32), (0.9, 0.85, 0.8)),
+    # 短杖: 人差し指を杖に沿わせ、親指と中指で挟む。薬指と小指は掌へ。
+    ("wand", (26, 24, 14), (60, 62, 38), (78, 72, 48), (86, 72, 48), (0.8, 0.75, 0.7)),
+    # 弓: 握りへ斜めに。人差し指は軽く、押し手の親指は伸ばし気味。
+    ("bow", (60, 58, 36), (75, 66, 40), (82, 64, 40), (88, 60, 38), (0.9, 0.7, 0.55)),
+    # 弩: 人差し指を引き金に掛け、残りは銃床を握る。
+    ("trigger", (18, 42, 34), (78, 70, 40), (84, 68, 40), (90, 64, 38), (1.0, 1.0, 1.0)),
+    # 本: 背を掌に当て、4 指を表紙へ C の字に回し、親指は裏表紙を押さえる。
+    ("book", (34, 40, 22), (36, 42, 24), (38, 42, 24), (42, 40, 22), (0.6, 0.35, 0.25)),
+    # 盾: 取っ手を固く握る。
+    ("shield", (82, 80, 52), (86, 82, 54), (90, 80, 54), (94, 78, 50), (1.1, 1.1, 1.0)),
+    # 矢・投げ矢: 親指と人差し指の腹で摘まみ、残りは畳む。
+    ("pinch", (44, 52, 30), (70, 72, 48), (80, 72, 48), (88, 70, 46), (0.75, 0.6, 0.45)),
+]
+_UAL = {}
+
+
+def _q2m(q):
+    q = np.asarray(q, np.float64)
+    x, y, z, w = q[..., 0], q[..., 1], q[..., 2], q[..., 3]
+    R = np.empty(q.shape[:-1] + (3, 3))
+    R[..., 0, 0] = 1 - 2 * (y * y + z * z); R[..., 0, 1] = 2 * (x * y - z * w); R[..., 0, 2] = 2 * (x * z + y * w)
+    R[..., 1, 0] = 2 * (x * y + z * w); R[..., 1, 1] = 1 - 2 * (x * x + z * z); R[..., 1, 2] = 2 * (y * z - x * w)
+    R[..., 2, 0] = 2 * (x * z - y * w); R[..., 2, 1] = 2 * (y * z + x * w); R[..., 2, 2] = 1 - 2 * (x * x + y * y)
+    return R
+
+
+def _m2q(R):
+    R = np.asarray(R, np.float64)
+    r00, r11, r22 = R[..., 0, 0], R[..., 1, 1], R[..., 2, 2]
+    q = np.empty(R.shape[:-2] + (4,))
+    q[..., 3] = 0.5 * np.sqrt(np.maximum(0.0, 1.0 + r00 + r11 + r22))
+    q[..., 0] = np.copysign(0.5 * np.sqrt(np.maximum(0.0, 1.0 + r00 - r11 - r22)), R[..., 2, 1] - R[..., 1, 2])
+    q[..., 1] = np.copysign(0.5 * np.sqrt(np.maximum(0.0, 1.0 - r00 + r11 - r22)), R[..., 0, 2] - R[..., 2, 0])
+    q[..., 2] = np.copysign(0.5 * np.sqrt(np.maximum(0.0, 1.0 - r00 - r11 + r22)), R[..., 1, 0] - R[..., 0, 1])
+    return q / np.maximum(np.linalg.norm(q, axis=-1, keepdims=True), 1e-12)
+
+
+def _qlerp(q0, q1, w):
+    """符号を揃えた正規化線形補間。w は q の先頭次元に合わせる。"""
+    d = np.sum(q0 * q1, axis=-1, keepdims=True)
+    q1 = np.where(d < 0, -q1, q1)
+    q = q0 * (1.0 - w) + q1 * w
+    return q / np.maximum(np.linalg.norm(q, axis=-1, keepdims=True), 1e-12)
+
+
+def _rot_axis(axis, ang):
+    axis = np.asarray(axis, np.float64)
+    axis = axis / max(float(np.linalg.norm(axis)), 1e-12)
+    h = 0.5 * float(ang)
+    return _q2m(np.array([axis[0] * np.sin(h), axis[1] * np.sin(h), axis[2] * np.sin(h), np.cos(h)]))
+
+
+def ual_motion():
+    """UAL の骨と静止姿勢、全クリップのキーを一度だけ読み、クリップごとの世界差分を作る。"""
+    if _UAL:
+        return _UAL
+    names = None
+    anims = {}
+    for fn in UAL_FILES:
+        path = os.path.join(UAL_DIR, fn)
+        if not os.path.exists(path):
+            raise SystemExit("UAL が無い: %s  (tactics_src/_dl/fetch_itch.py quaternius universal-animation-library / -2)" % path)
+        g = Gltf(path)
+        j = g.j
+        par = parents_of(j)
+        joints = j["skins"][0]["joints"]
+        nm = [j["nodes"][n].get("name") or "" for n in joints]
+        jset = {n: i for i, n in enumerate(joints)}
+        rt = np.array([node_trs(j["nodes"][n])[0] for n in joints], np.float64)
+        rq = np.array([node_trs(j["nodes"][n])[1] for n in joints], np.float64)
+        if names is None:
+            names = nm
+            parents = [jset.get(par[n], -1) for n in joints]
+            rest_t, rest_q = rt, rq
+            top = node_global(j, par, par[joints[0]]) if par[joints[0]] >= 0 else np.eye(4)
+        elif nm != names or float(np.abs(rt - rest_t).max()) > 1e-3:
+            raise SystemExit("UAL の骨格が %s で違う" % fn)
+        for a in j.get("animations") or []:
+            rot, tra = {}, {}
+            dur = 0.0
+            for c in a["channels"]:
+                ji = jset.get(c["target"].get("node"))
+                if ji is None:
+                    continue
+                s = a["samplers"][c["sampler"]]
+                t = g.acc(s["input"]).reshape(-1).astype(np.float64)
+                v = g.acc(s["output"]).astype(np.float64)
+                if s.get("interpolation") == "CUBICSPLINE":
+                    v = v.reshape(len(t), 3, -1)[:, 1, :]
+                if c["target"]["path"] == "rotation":
+                    rot[ji] = (t, v)
+                elif c["target"]["path"] == "translation":
+                    tra[ji] = (t, v)
+                dur = max(dur, float(t[-1]))
+            anims[a.get("name") or ""] = (dur, rot, tra)
+    order, seen = [], set()
+    while len(order) < len(names):
+        for ji, p in enumerate(parents):
+            if ji not in seen and (p < 0 or p in seen):
+                order.append(ji)
+                seen.add(ji)
+    sc = float(np.linalg.norm(top[:3, 0]))
+    _UAL.update(names=names, idx={n: i for i, n in enumerate(names)}, parents=parents, order=order, anims=anims,
+                rest_t=rest_t, rest_q=rest_q, top_R=ortho3(top[:3, :3]), top_t=top[:3, 3].copy(), top_s=sc, cache={})
+    R0, P0 = _ual_chain(rest_q[None], rest_t[None])
+    _UAL["R0"], _UAL["P0"] = R0[0], P0[0]
+    ix = _UAL["idx"]
+    # 左右の軸と前。反転は骨盤を通る矢状面で映す。前は足首→つま先の水平成分。
+    lr = P0[0, ix["thigh_l"]] - P0[0, ix["thigh_r"]]
+    lr[1] = 0
+    _UAL["lr"] = lr / np.linalg.norm(lr)
+    fwd = (P0[0, ix["ball_l"]] + P0[0, ix["ball_r"]]) - (P0[0, ix["foot_l"]] + P0[0, ix["foot_r"]])
+    fwd[1] = 0
+    fwd /= np.linalg.norm(fwd)
+    # 体は -Z を向いて焼いてある。前をそこへ回す。
+    ang = np.arctan2(fwd[0], fwd[2]) - np.arctan2(0.0, -1.0)
+    _UAL["Y"] = _rot_axis((0.0, 1.0, 0.0), -ang)
+    _UAL["mir"] = [ix.get(n[:-2] + ("_r" if n.endswith("_l") else "_l"), i) if n[-2:] in ("_l", "_r") else i for i, n in enumerate(names)]
+    leg = np.linalg.norm(P0[0, ix["thigh_l"]] - P0[0, ix["calf_l"]]) + np.linalg.norm(P0[0, ix["calf_l"]] - P0[0, ix["foot_l"]])
+    _UAL["leg"] = float(leg)
+    return _UAL
+
+
+def _ual_chain(q, t):
+    """局所 TRS（フレーム, 骨）を世界の回転と位置へ。"""
+    src = _UAL
+    L = _q2m(q)
+    n, nJ = q.shape[0], q.shape[1]
+    R = np.empty((n, nJ, 3, 3))
+    P = np.empty((n, nJ, 3))
+    for ji in src["order"]:
+        p = src["parents"][ji]
+        if p < 0:
+            R[:, ji] = src["top_R"] @ L[:, ji]
+            P[:, ji] = src["top_t"] + src["top_s"] * (t[:, ji] @ src["top_R"].T)
+        else:
+            R[:, ji] = R[:, p] @ L[:, ji]
+            P[:, ji] = P[:, p] + src["top_s"] * np.einsum("nij,nj->ni", R[:, p], t[:, ji])
+    return R, P
+
+
+def _ual_raw(anim, ts, mirror):
+    """クリップを時刻列で引き、静止姿勢からの世界差分（四元数）と関節位置を返す。"""
+    src = _UAL
+    if anim not in src["anims"]:
+        raise SystemExit("UAL にクリップが無い: " + anim)
+    dur, rot, tra = src["anims"][anim]
+    ts = np.clip(np.asarray(ts, np.float64), 0.0, dur)
+    n = len(ts)
+    q = np.repeat(src["rest_q"][None], n, 0)
+    t = np.repeat(src["rest_t"][None], n, 0)
+    for ji, (tt, v) in rot.items():
+        k1 = np.clip(np.searchsorted(tt, ts, side="right"), 0, len(tt) - 1)
+        k0 = np.clip(k1 - 1, 0, len(tt) - 1)
+        span = np.maximum(tt[k1] - tt[k0], 1e-9)
+        w = np.where(k1 == k0, 0.0, np.clip((ts - tt[k0]) / span, 0.0, 1.0))[:, None]
+        q[:, ji] = _qlerp(v[k0], v[k1], w)
+    for ji, (tt, v) in tra.items():
+        t[:, ji] = np.stack([np.interp(ts, tt, v[:, k]) for k in range(3)], 1)
+    R, P = _ual_chain(q, t)
+    D = R @ np.swapaxes(src["R0"], -1, -2)[None]
+    if mirror:
+        lr = src["lr"]
+        M = np.eye(3) - 2.0 * np.outer(lr, lr)
+        mi = src["mir"]
+        c = src["P0"][src["idx"]["pelvis"]]
+        D = M @ D[:, mi] @ M
+        P = c + (P[:, mi] - c) @ M.T
+    return _m2q(D), P
+
+
+def ual_source_clip(spec, nf):
+    """区間をつないで時間を伸縮した、体に依らない差分（体の向きへ回し済み）と骨盤の移動。"""
+    src = ual_motion()
+    key = (spec[0], nf)
+    if key in src["cache"]:
+        return src["cache"][key]
+    name, segs, dur, loop, keys, opt = spec
+    segs = [(s[0], float(s[1]), float(s[2]), int(s[3]) if len(s) > 3 else 0, float(s[4]) if len(s) > 4 else 0.18) for s in segs]
+    # 終了が開始より前の区間は逆再生。
+    starts = np.cumsum([0.0] + [abs(s[2] - s[1]) for s in segs])
+    S = float(starts[-1])
+    ends = []
+
+    def seg_eval(k, local):
+        anim, t0, t1, mir, xf = segs[k]
+        qd, P = _ual_raw(anim, t0 + local * (1.0 if t1 >= t0 else -1.0), mir)
+        if k > 0 and xf > 1e-6:
+            w = np.clip(local / xf, 0.0, 1.0)
+            w = (w * w * (3.0 - 2.0 * w))[:, None]
+            eq, eP = ends[k - 1]
+            qd = _qlerp(np.repeat(eq[None], len(local), 0), qd, w[:, :, None])
+            P = eP[None] * (1.0 - w[:, :, None]) + P * w[:, :, None]
+        return qd, P
+
+    for k, s in enumerate(segs):
+        qd, P = seg_eval(k, np.array([abs(s[2] - s[1])]))
+        ends.append((qd[0], P[0]))
+
+    def sample(sv):
+        sv = np.clip(np.asarray(sv, np.float64), 0.0, S)
+        k = np.clip(np.searchsorted(starts, sv, side="right") - 1, 0, len(segs) - 1)
+        qd = np.empty((len(sv), len(src["names"]), 4))
+        P = np.empty((len(sv), len(src["names"]), 3))
+        for kk in np.unique(k):
+            m = k == kk
+            a, b = seg_eval(int(kk), sv[m] - starts[kk])
+            qd[m], P[m] = a, b
+        return qd, P
+
+    hand = src["idx"]["hand_l" if opt.get("hand") == "L" else "hand_r"]
+    pel = src["idx"]["pelvis"]
+    # 先に命中（最速）を決め、構えはその手前で手が最も遅い瞬間（振りかぶりの頂点）を取る。
+    found = {}
+    for want in ("hit", "rdy"):
+        for i, (u, s) in enumerate(keys or []):
+            if not isinstance(s, tuple) or s[0] != want:
+                continue
+            a, b = float(s[1]), float(s[2])
+            if want == "rdy":
+                nxt = [found.get(k, ks if not isinstance(ks, tuple) else None) for k, (uu, ks) in enumerate(keys) if k > i]
+                nxt = [v for v in nxt if v is not None]
+                if nxt:
+                    b = min(b, nxt[0] - 0.04)
+                a = max(a, 0.04)
+                if b <= a + 1.0 / 90.0:
+                    a = max(0.0, b - 0.2)
+            dense = np.arange(a, b + 1e-9, 1.0 / 90.0)
+            _, P = sample(dense)
+            rel = P[:, hand] - P[:, pel]
+            sp = np.linalg.norm(np.diff(rel, axis=0), axis=1)
+            j = int(np.argmin(sp) if want == "rdy" else np.argmax(sp))
+            found[i] = float(dense[j] + (dense[j + 1] - dense[j]) * 0.5)
+    kp = [(0.0, 0.0)]
+    for i, (u, s) in enumerate(keys or []):
+        s = found[i] if isinstance(s, tuple) else float(s)
+        kp.append((float(u), min(max(s, kp[-1][1] + 1e-3), S)))
+    kp.append((1.0, S))
+    ku = np.array([k[0] for k in kp])
+    ks = np.array([k[1] for k in kp])
+    sv = np.interp(np.linspace(0.0, 1.0, nf), ku, ks)
+    qd, P = sample(sv)
+    Y = src["Y"]
+    D = Y[None, None] @ _q2m(qd) @ Y.T[None, None]
+    p0 = P[0, pel] if not loop else src["P0"][pel]
+    if opt.get("ref"):
+        p0 = _ual_raw(opt["ref"][0], [opt["ref"][1]], 0)[1][0, pel]
+    off = (P[:, pel] - p0) @ Y.T
+    off[:, 1] = (P[:, pel, 1] - src["P0"][pel, 1])
+    if loop:
+        off[:, 0] = 0.0
+        off[:, 2] = 0.0
+    src["cache"][key] = (D, off, kp)
+    return src["cache"][key]
+
+
+def retarget_human(names, parents, hips, world, real_p, female):
+    """UAL の動きを、この体の骨へ世界空間の差分で移す。
+
+    静止姿勢どうしの骨の向き（子への向き＋横の基準）を合わせる回転 A を骨ごとに作り、
+    フレームの姿勢 G = D(t)·A·G0（D は UAL の静止からの世界回転）からローカルを作る。
+    """
+    src = ual_motion()
+    nJ = len(names)
+    ni = {n: i for i, n in enumerate(names)}
+    six = src["idx"]
+    Y = src["Y"]
+    P0 = src["P0"] @ Y.T
+    # 指の番号は体で違う。手首から次の節までの半分より手首に近い 1 番は中手骨の根（モジュラー体は 5 本とも手首の一点）で、
+    # 付け根は 2 番（bake_human と同じ判定）。付け根から 3 節を UAL の 01〜03 へ、中手骨は手の動きで UAL の手→付け根へ向ける。
+    # 親指は手首に近い節から 01 へ。
+    bone = dict(UAL_BONE)
+    aim_of = dict(UAL_AIM)
+    knuckle = {}
+    for s, u in (("L", "l"), ("R", "r")):
+        if "Hand." + s not in ni:
+            continue
+        hp = real_p[ni["Hand." + s]]
+        kb = 2
+        if "Index1." + s in ni:
+            d1 = float(np.linalg.norm(real_p[ni["Index1." + s]] - hp))
+            d2 = float(np.linalg.norm(real_p[ni["Index2." + s]] - real_p[ni["Index1." + s]])) if "Index2." + s in ni else 0.0
+            kb = 1 if d1 > 0.5 * d2 else 2
+        knuckle[s] = kb
+        for f, uf in (("Index", "index"), ("Middle", "middle"), ("Ring", "ring"), ("Pinky", "pinky")):
+            for i in range(3):
+                n = "%s%d.%s" % (f, kb + i, s)
+                bone[n] = "%s_%02d_%s" % (uf, i + 1, u)
+                aim_of[n] = ("%s%d.%s" % (f, kb + i + 1, s),) if i < 2 else ()
+            if kb == 2 and "%s1.%s" % (f, s) in ni:
+                bone["%s1.%s" % (f, s)] = "hand_" + u
+                aim_of["%s1.%s" % (f, s)] = ("%s2.%s" % (f, s),)
+        aim_of["Hand." + s] = ("Middle%d.%s" % (kb, s), "Index%d.%s" % (kb, s))
+        th = [k for k in (1, 2, 3, 4) if "Thumb%d.%s" % (k, s) in ni]
+        if th:
+            t0 = 1 if float(np.linalg.norm(real_p[ni["Thumb%d.%s" % (th[0], s)]] - hp)) < 0.06 else 2
+            th = [k for k in th if t0 + th.index(k) <= 3]
+            for m, k in enumerate(th):
+                bone["Thumb%d.%s" % (k, s)] = "thumb_%02d_%s" % (t0 + m, u)
+                aim_of["Thumb%d.%s" % (k, s)] = ("Thumb%d.%s" % (th[m + 1], s),) if m + 1 < len(th) else ()
+    drive = [six.get(bone.get(n, ""), -1) for n in names]
+    order, seen = [], set()
+    while len(order) < nJ:
+        for ji, p in enumerate(parents):
+            if ji not in seen and (p < 0 or p in seen):
+                order.append(ji)
+                seen.add(ji)
+    G0 = np.array([ortho3(world[ji][:3, :3]) for ji in range(nJ)])
+    fwd = np.array([0.0, 0.0, -1.0])
+
+    def tpos(n):
+        return real_p[ni[n]] if n in ni else None
+
+    def spos(n):
+        s = bone.get(n)
+        return P0[six[s]] if s in six else None
+
+    def lr_of(a, b):
+        t0, t1, s0, s1 = tpos(a), tpos(b), spos(a), spos(b)
+        if t0 is None or t1 is None or s0 is None or s1 is None:
+            return None
+        return t0 - t1, s0 - s1
+
+    lr_leg = lr_of("UpperLeg.L", "UpperLeg.R")
+    if lr_leg is None:
+        raise SystemExit("脚の骨が無い体は UAL を移せない")
+    if float(np.dot(lr_leg[0], lr_leg[1])) <= 0.0:
+        raise SystemExit("体と UAL で左右が逆: %s" % (lr_leg,))
+
+    def frame(d, l):
+        x = d / max(float(np.linalg.norm(d)), 1e-9)
+        y = l - x * float(np.dot(x, l))
+        if float(np.linalg.norm(y)) < 1e-6:
+            y = np.cross(x, (0.0, 0.0, 1.0)) if abs(x[2]) < 0.9 else np.cross(x, (1.0, 0.0, 0.0))
+        y = y / max(float(np.linalg.norm(y)), 1e-9)
+        return np.stack([x, y, np.cross(x, y)], 1)
+
+    # 腰・背骨・首・鎖骨は体ごとに関節の置き方が違う。子への向きを UAL に揃えると、静止で腹や首が 14〜26 度、
+    # 鎖骨が 50 度折れ、肩と腰が人の曲がり方をしない。左右と上だけ合わせ、体の姿勢のまま UAL の回りを乗せる。
+    A_body = frame(np.array([0.0, 1.0, 0.0]), lr_leg[1]) @ frame(np.array([0.0, 1.0, 0.0]), lr_leg[0]).T
+    # 手と指の横は付け根の人差し指−小指、親指はそれと手の向きが張る掌の法線。
+    lat_hand, nrm_hand = {}, {}
+    for s, kb in knuckle.items():
+        l = lr_of("Index%d.%s" % (kb, s), "Pinky%d.%s" % (kb, s))
+        mt, ms = tpos("Middle%d.%s" % (kb, s)), spos("Middle%d.%s" % (kb, s))
+        if l is None or mt is None or ms is None:
+            continue
+        lat_hand[s] = l
+        nrm_hand[s] = (np.cross(mt - real_p[ni["Hand." + s]], l[0]), np.cross(ms - P0[six["hand_" + s.lower()]], l[1]))
+    A = [None] * nJ
+    for ji in order:
+        if drive[ji] < 0:
+            continue
+        n = names[ji]
+        if n in ("Hips", "Abdomen", "Torso", "Chest", "Neck") or n.startswith("Shoulder."):
+            A[ji] = A_body
+            continue
+        aim = None
+        for c in aim_of.get(n, ()):
+            if tpos(c) is not None and spos(c) is not None:
+                aim = c
+                break
+        if aim is None:
+            p = parents[ji]
+            while p >= 0 and A[p] is None:
+                p = parents[p]
+            A[ji] = A[p] if p >= 0 else np.eye(3)
+            continue
+        dt, ds = tpos(aim) - real_p[ji], spos(aim) - P0[drive[ji]]
+        if n.startswith("Foot."):
+            # モジュラー体の PT は IK の極で、つま先ではない（膝の上へ 0.8m 離れて立つ）。足首から前下へ短く伸びないものは
+            # つま先と見なさず、静止の足裏が UAL と同じく平らとして UAL の向きをそのまま使う。
+            shin = float(np.linalg.norm(real_p[ni["LowerLeg." + n[-1]]] - real_p[ji])) if ("LowerLeg." + n[-1]) in ni else 0.4
+            lt, ls = float(np.linalg.norm(dt)), float(np.linalg.norm(ds))
+            if lt > 0.6 * shin or float(np.dot(dt, ds)) < 0.7 * lt * ls:
+                dt = ds.copy()
+        if n.startswith("Thumb"):
+            lat = nrm_hand.get(n[-1], (fwd, fwd))
+        elif n.startswith(("Hand.", "Index", "Middle", "Ring", "Pinky")):
+            lat = lat_hand.get(n[-1], (fwd, fwd))
+        elif n.startswith("Foot."):
+            lat = lr_leg
+        else:
+            lat = (fwd, fwd)
+        A[ji] = frame(ds, lat[1]) @ frame(dt, lat[0]).T
+    follow = list(range(nJ))
+    for ji in range(nJ):
+        p = ji
+        while p >= 0 and drive[p] < 0:
+            p = parents[p]
+        follow[ji] = p
+    kscale = float(np.linalg.norm(real_p[ni["UpperLeg.L"]] - real_p[ni["LowerLeg.L"]])
+                   + np.linalg.norm(real_p[ni["LowerLeg.L"]] - real_p[ni["Foot.L"]])) / src["leg"]
+
+    def subtree(root_name):
+        if root_name not in ni:
+            return []
+        r = ni[root_name]
+        out = []
+        for ji in range(nJ):
+            p = ji
+            while p >= 0 and p != r:
+                p = parents[p]
+            if p == r:
+                out.append(ji)
+        return out
+
+    def inward(top_name, tip_name):
+        """前軸まわりで、先端を体の中心へ寄せる向き（+1/-1）。"""
+        a, b = tpos(top_name), tpos(tip_name)
+        if a is None or b is None:
+            return 0.0
+        v = b - a
+        best, sg = None, 0.0
+        for s in (1.0, -1.0):
+            x = abs(float((a + _rot_axis(fwd, 0.05 * s) @ v)[0]))
+            if best is None or x < best:
+                best, sg = x, s
+        return sg
+
+    up = np.array([0.0, 1.0, 0.0])
+    left_yaw = 1.0 if float(lr_leg[0][0]) < 0 else -1.0
+    neck_set = subtree("Neck") or subtree("Head")
+    head_set = subtree("Head")
+    chest_set = subtree("Chest")
+    hip_i = ni.get("Hips")
+    # 前腕のねじれ。UAL は回内を前腕の骨に載せ（剣の振りで 117 度）、手首にも別に 118 度回す。ねじれ骨の無い体では
+    # 肘か手首の一点で皮が絞られ、腕が雑巾のようにねじれる。肘と手首のねじれの和を半分ずつに分け直す。
+    arm_tw = []
+    for s in ("L", "R"):
+        iu, i_f, ih = ni.get("UpperArm." + s), ni.get("LowerArm." + s), ni.get("Hand." + s)
+        kn = "Middle%d.%s" % (knuckle.get(s, 1), s)
+        if iu is None or i_f is None or ih is None or kn not in ni:
+            continue
+        af = G0[i_f].T @ (real_p[ih] - real_p[i_f])
+        ah = G0[ih].T @ (real_p[ni[kn]] - real_p[ih])
+        arm_tw.append((iu, i_f, ih, af / np.linalg.norm(af), ah / np.linalg.norm(ah), G0[iu].T @ G0[i_f], G0[i_f].T @ G0[ih],
+                       [ji for ji in range(nJ) if follow[ji] == i_f]))
+    # 握りの世界差分（体に依らない）。指のローカルを UAL の静止から作り、鎖でつなぐ。
+    if "grip" not in src["cache"]:
+        nS = len(src["names"])
+        par = src["parents"]
+        Lr = np.array([(src["top_R"] if par[k] < 0 else src["R0"][par[k]]).T @ src["R0"][k] for k in range(nS)])
+        Lsrc = {}
+        for anim, t, mir in (("Idle_Loop", 0.0, 0), ("Pistol_Aim_Neutral", 0.2, 0), ("Pistol_Aim_Neutral", 0.2, 1)):
+            Rw = _q2m(_ual_raw(anim, [t], mir)[0])[0] @ src["R0"]
+            Lsrc[(anim, mir)] = np.array([(src["top_R"] if par[k] < 0 else Rw[par[k]]).T @ Rw[k] for k in range(nS)])
+        DG = np.empty((len(UAL_GRIPS), nS, 3, 3))
+        for g, (gname, fi, fm, fr, fp, tw) in enumerate(UAL_GRIPS):
+            Lg = Lr.copy()
+            for u in ("l", "r"):
+                for uf, ang in (("index", fi), ("middle", fm), ("ring", fr), ("pinky", fp)):
+                    for i in range(3):
+                        k = six["%s_%02d_%s" % (uf, i + 1, u)]
+                        qa = _m2q(Lr[k].T @ Lsrc[("Idle_Loop", 0)][k])
+                        Lg[k] = Lr[k] @ _rot_axis(qa[:3] * (1.0 if qa[3] >= 0 else -1.0), np.radians(ang[i]))
+                for i in range(3):
+                    k = six["thumb_%02d_%s" % (i + 1, u)]
+                    qa = _m2q(Lr[k].T @ Lsrc[("Pistol_Aim_Neutral", 1 if u == "l" else 0)][k])
+                    if qa[3] < 0:
+                        qa = -qa
+                    Lg[k] = Lr[k] @ _rot_axis(qa[:3], 2.0 * np.arctan2(float(np.linalg.norm(qa[:3])), qa[3]) * tw[i])
+            Rg = np.empty((nS, 3, 3))
+            for k in src["order"]:
+                Rg[k] = (src["top_R"] if par[k] < 0 else Rg[par[k]]) @ Lg[k]
+            DG[g] = Y[None] @ (Rg @ np.swapaxes(src["R0"], -1, -2)) @ Y.T[None]
+        src["cache"]["grip"] = DG
+    out = []
+    for spec in UAL_CLIPS + [("Grip", None, 1.0, 0, None, {})]:
+        name, segs, dur, loop, keys, opt = spec
+        if segs is None:
+            D = src["cache"]["grip"]
+            nf = len(D)
+            fps = (nf - 1) / dur
+            off = np.zeros((nf, 3))
+        else:
+            nf = int(min(64, max(2, round(dur * 30.0) + 1)))
+            fps = (nf - 1) / dur
+            D, off, kp = ual_source_clip(spec, nf)
+        u = np.linspace(0.0, 1.0, nf)
+        q = np.zeros((nf, nJ, 4), np.float32)
+        ht = np.zeros((nf, 3), np.float32)
+        fem = opt.get("fem") if female else None
+        glance = opt.get("glance", 0)
+        for f in range(nf):
+            W = np.repeat(np.eye(3)[None], nJ, 0)
+            for ji in range(nJ):
+                d = follow[ji]
+                if d >= 0:
+                    W[ji] = D[f, drive[d]] @ A[d]
+            if glance:
+                e = 0.0 if u[f] < 0.12 or u[f] > 0.9 else (min(1.0, (u[f] - 0.12) / 0.2) if u[f] < 0.62 else max(0.0, 1.0 - (u[f] - 0.62) / 0.28))
+                e = e * e * (3.0 - 2.0 * e)
+                for ids, a in ((chest_set, 0.10), (neck_set, 0.28), (head_set, 0.30)):
+                    Rz = _rot_axis(up, a * e * glance * left_yaw)
+                    for ji in ids:
+                        W[ji] = Rz @ W[ji]
+            if fem:
+                arm_a = 0.07 if fem == "idle" else 0.05
+                leg_a = {"idle": 0.05, "walk": 0.035, "run": 0.025}[fem]
+                for side in ("L", "R"):
+                    s = inward("UpperArm." + side, "Hand." + side)
+                    if s:
+                        Ra = _rot_axis(fwd, arm_a * s)
+                        for ji in subtree("UpperArm." + side):
+                            W[ji] = Ra @ W[ji]
+                    s = inward("UpperLeg." + side, "Foot." + side)
+                    if s:
+                        Rl = _rot_axis(fwd, leg_a * s)
+                        for ji in (ni.get("UpperLeg." + side), ni.get("LowerLeg." + side)):
+                            if ji is not None:
+                                W[ji] = Rl @ W[ji]
+                if fem in ("walk", "run") and hip_i is not None:
+                    lr = W[hip_i] @ (lr_leg[0] / np.linalg.norm(lr_leg[0]))
+                    roll = float(np.arcsin(np.clip(lr[1], -1.0, 1.0)))
+                    yaw = float(np.arctan2(-lr[2], lr[0])) - float(np.arctan2(-lr_leg[0][2], lr_leg[0][0]))
+                    # 体の左が -x だと両方の角が ±180 度のそばにあり、差が 360 度近くへ飛ぶ（歩行の半周期だけ腰が 107 度ねじれた）。
+                    yaw = (yaw + np.pi) % (2.0 * np.pi) - np.pi
+                    W[hip_i] = _rot_axis(up, 0.3 * yaw) @ _rot_axis(fwd, -0.6 * roll * (1.0 if lr_leg[0][0] > 0 else -1.0)) @ W[hip_i]
+            for iu, i_f, ih, af, ah, L0e, L0w, fol in arm_tw:
+                Gf = W[i_f] @ G0[i_f]
+                qe = _m2q(L0e.T @ (W[iu] @ G0[iu]).T @ Gf)
+                qw = _m2q(L0w.T @ Gf.T @ (W[ih] @ G0[ih]))
+                te = (2.0 * np.arctan2(float(np.dot(qe[:3], af)), qe[3]) + np.pi) % (2.0 * np.pi) - np.pi
+                tw = (2.0 * np.arctan2(float(np.dot(qw[:3], ah)), qw[3]) + np.pi) % (2.0 * np.pi) - np.pi
+                Rt = _rot_axis(Gf @ af, 0.5 * (te + tw) - te)
+                for ji in fol:
+                    W[ji] = Rt @ W[ji]
+            G = W @ G0
+            L = np.empty_like(G)
+            for ji in range(nJ):
+                p = parents[ji]
+                L[ji] = G[ji] if p < 0 else G[p].T @ G[ji]
+            lq = _m2q(L)
+            q[f, :, 0] = -lq[:, 0]
+            q[f, :, 1] = -lq[:, 1]
+            q[f, :, 2] = lq[:, 2]
+            q[f, :, 3] = lq[:, 3]
+            t = world[hips][:3, 3] + kscale * off[f]
+            hz = float(np.hypot(t[0] - world[hips][0, 3], t[2] - world[hips][2, 3]))
+            if hz > 0.3:
+                t[0] = world[hips][0, 3] + (t[0] - world[hips][0, 3]) * 0.3 / hz
+                t[2] = world[hips][2, 3] + (t[2] - world[hips][2, 3]) * 0.3 / hz
+            ht[f] = [t[0], t[1], -t[2]]
+        out.append((name, nf, q, ht, float(fps)))
+    return out
+
+
+def bake_human(names, parents, rest, top, ibm, pos, nrm, jn, wt, hair_mask=None, eye_mask=None, female=False):
     """Tポーズのモジュラー人体を、腕を下ろした等身の姿勢に焼き、ローダのZ反転後にその姿勢が出るように返す。"""
     nJ = len(names)
     locals_m = [trs_mat(np.array(t, np.float64), np.array(r, np.float64), np.array(s, np.float64)) for t, r, s in rest]
@@ -368,13 +995,17 @@ def bake_human(names, parents, rest, top, ibm, pos, nrm, jn, wt, hair_mask=None,
         c, s = np.cos(a), np.sin(a)
         return np.array([[c, 0.0, s], [0.0, 1.0, 0.0], [-s, 0.0, c]], np.float64)
     for side in ("L", "R"):
-        curls = (
-            ("Index1.", -1.05, 0.0), ("Index2.", -1.15, 0.0), ("Index3.", -0.75, 0.0),
-            ("Middle1.", -1.10, 0.0), ("Middle2.", -1.20, 0.0), ("Middle3.", -0.80, 0.0),
-            ("Ring1.", -1.15, 0.0), ("Ring2.", -1.20, 0.0), ("Ring3.", -0.75, 0.0),
-            ("Pinky1.", -1.20, 0.0), ("Pinky2.", -1.15, 0.0), ("Pinky3.", -0.70, 0.0),
-            ("Thumb1.", -0.45, 0.55), ("Thumb2.", -0.70, 0.0), ("Thumb3.", -0.40, 0.0),
-        )
+        # 曲げるのは付け根からの 3 節。モジュラー体の 1 番は手首にある中手骨の根で、曲げると掌が折れる。
+        Gk = chain_globals(top, locals_m, parents)
+        kb = 2
+        if "Index1." + side in name_i and "Hand." + side in name_i:
+            d1 = float(np.linalg.norm(Gk[name_i["Index1." + side]][:3, 3] - Gk[name_i["Hand." + side]][:3, 3]))
+            d2 = float(np.linalg.norm(Gk[name_i["Index2." + side]][:3, 3] - Gk[name_i["Index1." + side]][:3, 3])) if "Index2." + side in name_i else 0.0
+            kb = 1 if d1 > 0.5 * d2 else 2
+        curls = []
+        for f, a in (("Index", (-1.05, -1.15, -0.75)), ("Middle", (-1.10, -1.20, -0.80)), ("Ring", (-1.15, -1.20, -0.75)), ("Pinky", (-1.20, -1.15, -0.70))):
+            curls += [("%s%d." % (f, kb + i), a[i], 0.0) for i in range(3)]
+        curls += [("Thumb1.", -0.45, 0.55), ("Thumb2.", -0.70, 0.0), ("Thumb3.", -0.40, 0.0)]
         for pre, ax, ay in curls:
             nm = pre + side
             if nm not in name_i:
@@ -554,6 +1185,7 @@ def bake_human(names, parents, rest, top, ibm, pos, nrm, jn, wt, hair_mask=None,
         x = x / max(float(np.linalg.norm(x)), 1e-8)
         z = np.cross(x, y)
         return np.stack([x, y, z], 1)
+    real_p = np.array(joints_p, np.float64).copy()
     # 武器は手の +Y を指先、+Z を甲として置く。ソースの骨軸のままでは本が腰に浮く。
     for side, sgn in (("L", -1.0), ("R", 1.0)):
         hand = name_i.get("Hand." + side)
@@ -567,28 +1199,43 @@ def bake_human(names, parents, rest, top, ibm, pos, nrm, jn, wt, hair_mask=None,
         if abs(float(outward[0])) < 1e-4:
             outward[0] = sgn
         joints_R[hand] = _ortho_axes(along, outward)
+    # 指の骨は焼いた握りの位置のまま、+Y を次の節、+Z を手の甲に向ける。指は節ごとに曲がるので、軸の原点が
+    # 本当の関節に無いと曲げた所で指が千切れる。モジュラー体の中手骨の根は 5 本とも手首の一点にある。
     for side in ("L", "R"):
         hand = name_i.get("Hand." + side)
         if hand is None:
             continue
-        R = joints_R[hand]
-        origin = joints_p[hand]
-        y = R[:, 1]
-        x = R[:, 0]
-        for i, pre in enumerate(("Index", "Middle", "Ring", "Pinky")):
-            lat = (i - 1.5) * 0.014
-            for k in range(1, 4):
+        dors = joints_R[hand][:, 2]
+        for pre in ("Index", "Middle", "Ring", "Pinky", "Thumb"):
+            for k in range(1, 5):
                 ji = name_i.get("%s%d.%s" % (pre, k, side))
                 if ji is None:
                     continue
-                joints_p[ji] = origin + y * (0.018 * k) + x * lat
-                joints_R[ji] = R
-        for k, lat, fwd in ((2, 0.016, 0.012), (3, 0.022, 0.020)):
-            ji = name_i.get("Thumb%d.%s" % (k, side))
-            if ji is None:
-                continue
-            joints_p[ji] = origin + y * fwd + x * lat
-            joints_R[ji] = R
+                nx = name_i.get("%s%d.%s" % (pre, k + 1, side))
+                along = (joints_p[nx] - joints_p[ji]) if nx is not None else (joints_p[ji] - joints_p[parents[ji]])
+                if float(np.linalg.norm(along)) < 1e-4:
+                    along = joints_R[hand][:, 1]
+                joints_R[ji] = _ortho_axes(along, dors)
+    # モジュラー体は足首とつま先が Root 直下、股が Body 直下。
+    # バインド位置は立って見えるが、歩行は上腿だけ回すので靴の頂点が地面に残り、すねとの間が板になる。
+    # 位置は変えず、白人の体と同じ鎖（腰→腿→膝→足首→つま先）にしてからローカルを作り直す。
+    def _reparent(child, parent):
+        ci = name_i.get(child)
+        pi = name_i.get(parent)
+        if ci is None or pi is None or ci == pi:
+            return
+        p = pi
+        guard = 0
+        while p >= 0 and guard < nJ:
+            if p == ci:
+                return
+            p = parents[p]
+            guard += 1
+        parents[ci] = pi
+    for side in ("L", "R"):
+        _reparent("UpperLeg." + side, "Hips")
+        _reparent("Foot." + side, "LowerLeg." + side)
+        _reparent("PT." + side, "Foot." + side)
     world = []
     for ji in range(nJ):
         M = np.eye(4)
@@ -615,311 +1262,13 @@ def bake_human(names, parents, rest, top, ibm, pos, nrm, jn, wt, hair_mask=None,
     for ji in range(nJ):
         inv_row = np.linalg.inv(world[ji]).T
         ibm_file[ji] = flipm(inv_row).astype(np.float32).reshape(-1)
-    # 待機は呼吸、歩行は手足を逆位相に振る。死亡はルートだけ前に倒す。
     hips = 0
     for i, p in enumerate(parents):
         if p < 0:
             hips = i
             break
-    bind_R = [ortho3(world[ji][:3, :3]) for ji in range(nJ)]
-    swing_j = {}
-    for nm, sign in (("UpperLeg.L", 1.0), ("UpperLeg.R", -1.0), ("UpperArm.L", -1.0), ("UpperArm.R", 1.0)):
-        if nm in name_i:
-            swing_j[name_i[nm]] = sign
-
-    def rot_axis(axis, angle):
-        axis = np.asarray(axis, np.float64)
-        nlen = float(np.linalg.norm(axis))
-        if nlen < 1e-8 or abs(float(angle)) < 1e-6:
-            return np.eye(3)
-        x, y, z = axis / nlen
-        c, s = np.cos(angle), np.sin(angle)
-        C = 1.0 - c
-        return np.array([
-            [c + x * x * C, x * y * C - z * s, x * z * C + y * s],
-            [y * x * C + z * s, c + y * y * C, y * z * C - x * s],
-            [z * x * C - y * s, z * y * C + x * s, c + z * z * C],
-        ], np.float64)
-
-    def bend(R, axis, angle):
-        return rot_axis(np.asarray(R, np.float64).T @ np.asarray(axis, np.float64), angle)
-
-    def sm(t):
-        t = 0.0 if t < 0.0 else (1.0 if t > 1.0 else t)
-        return t * t * (3.0 - 2.0 * t)
-
-    def env(u, a, b, c, d):
-        if u < a or u >= d:
-            return 0.0
-        if u < b:
-            return sm((u - a) / (b - a))
-        if u < c:
-            return 1.0
-        return 1.0 - sm((u - c) / (d - c))
-
-    def swing(u, wind=0.24, hit=0.42):
-        """0 から溜め(-1)、打撃(+1)、戻り(0)。打撃は戦闘のヒット時刻に合わせる。"""
-        if u < wind:
-            return -sm(u / max(1e-6, wind))
-        if u < hit:
-            return -1.0 + 2.0 * sm((u - wind) / (hit - wind))
-        return 1.0 - sm((u - hit) / max(1e-6, 1.0 - hit))
-
-    # 上腕の捻り軸（バインドの肩→肘）。
-    arm_dir = {}
-    for side in ("L", "R"):
-        ua, la = name_i.get("UpperArm." + side), name_i.get("LowerArm." + side)
-        if ua is not None and la is not None:
-            d = joints_p[la] - joints_p[ua]
-            arm_dir[side] = d / max(float(np.linalg.norm(d)), 1e-8)
-
-    def pose_mix(a, b, k):
-        return {key: a.get(key, 0.0) * (1.0 - k) + b.get(key, 0.0) * k for key in set(a) | set(b)}
-
-    def keyed(u, keys):
-        """keys: [(u, pose dict)] を時間で滑らかに補間する。"""
-        if u <= keys[0][0]:
-            return dict(keys[0][1])
-        for (u0, p0), (u1, p1) in zip(keys, keys[1:]):
-            if u <= u1:
-                return pose_mix(p0, p1, sm((u - u0) / max(1e-6, u1 - u0)))
-        return dict(keys[-1][1])
-
-    def gesture(kind, u):
-        """腕は左右とも同じ意味: x=前へ振る, z=外へ開く, t=内へ捻る, y=水平に後ろへ, e=肘, w=手首（刃を起こす）。
-        胸の +X はのけぞり、chestY の + は右肩が前。"""
-        z = dict(xR=0, xL=0, zR=0, zL=0, tR=0, tL=0, yR=0, yL=0, eR=0, eL=0, wR=0, wL=0,
-                 chestX=0, chestY=0, chestZ=0, headX=0, headY=0, hipsY=0, hipY=0, hipZ=0)
-        P = lambda **kw: kw
-        R0 = P()
-        if kind == "idle":
-            pass
-        elif kind == "glanceL":
-            e = env(u, 0.06, 0.28, 0.62, 0.94)
-            z.update(headY=0.58 * e, chestY=0.16 * e)
-        elif kind == "glanceR":
-            e = env(u, 0.06, 0.28, 0.62, 0.94)
-            z.update(headY=-0.58 * e, chestY=-0.16 * e)
-        elif kind == "lookup":
-            e = env(u, 0.08, 0.30, 0.64, 0.94)
-            z.update(headX=0.62 * e, chestX=0.18 * e)
-        elif kind == "stretch":
-            e = env(u, 0.06, 0.30, 0.70, 0.97)
-            z.update(xR=2.75 * e, xL=2.75 * e, zR=-0.12 * e, zL=-0.12 * e, eR=0.15 * e, eL=0.15 * e,
-                     headX=0.26 * e, chestX=0.07 * e, hipY=0.03 * e)
-        elif kind == "shift":
-            e = env(u, 0.08, 0.28, 0.66, 0.95)
-            z.update(chestZ=0.22 * e, headY=0.16 * e, zR=0.62 * e, xR=-0.12 * e, yR=0.3 * e, tR=1.4 * e, eR=1.6 * e, hipY=-0.012 * e)
-        elif kind == "cross":
-            e = env(u, 0.08, 0.28, 0.68, 0.96)
-            z.update(xR=0.42 * e, xL=0.50 * e, zR=0.22 * e, zL=0.22 * e, tR=1.15 * e, tL=1.05 * e,
-                     eR=1.85 * e, eL=1.75 * e, chestX=-0.04 * e)
-        elif kind == "slash":
-            # 右肩の上へ振りかぶり、左腰へ斜めに斬り下ろす。
-            up = P(xR=2.35, zR=0.75, eR=0.95, wR=0.5, chestY=-0.32, hipsY=-0.15, headY=0.2, chestX=0.12, xL=0.35, eL=0.6)
-            hit = P(xR=0.95, zR=-0.35, tR=0.25, eR=0.12, wR=-0.35, chestY=0.36, hipsY=0.2, headY=-0.2, chestX=-0.3, hipZ=0.08, xL=-0.25, eL=0.4)
-            z.update(keyed(u, [(0.0, R0), (0.24, up), (0.42, hit), (0.62, hit), (1.0, R0)]))
-        elif kind == "stab":
-            # 肘を引いて腰に溜め、肩から真っ直ぐ突く。
-            back = P(xR=-0.45, zR=0.18, eR=1.75, wR=-0.4, chestY=-0.25, hipsY=-0.12, chestX=0.12, xL=0.6, eL=0.9)
-            hit = P(xR=1.5, zR=-0.05, eR=0.05, wR=-0.35, chestY=0.28, hipsY=0.15, chestX=-0.35, hipZ=0.12, headX=-0.1, xL=-0.2, eL=0.5)
-            z.update(keyed(u, [(0.0, R0), (0.30, back), (0.42, hit), (0.60, hit), (1.0, R0)]))
-        elif kind in ("chop", "chop2"):
-            # 頭の後ろまで振りかぶって叩きつける。両手なら手を寄せる。
-            if kind == "chop2":
-                up = P(xR=2.75, xL=2.75, zR=-0.1, zL=-0.1, tR=0.35, tL=0.35, eR=1.15, eL=1.15, wR=0.6, wL=0.6,
-                       chestX=0.32, headX=0.15)
-                hit = P(xR=0.75, xL=0.75, zR=-0.32, zL=-0.32, tR=0.45, tL=0.45, eR=0.1, eL=0.1, wR=0.55, wL=0.55,
-                        chestX=-0.6, headX=-0.2, hipY=-0.03, hipZ=0.06)
-            else:
-                up = P(xR=2.8, zR=0.2, eR=1.2, wR=0.6, chestX=0.25, headX=0.12, chestY=-0.12, xL=0.4, zL=0.2, eL=0.5)
-                hit = P(xR=0.8, zR=-0.1, eR=0.1, wR=0.4, chestX=-0.45, headX=-0.15, chestY=0.09, hipY=-0.02, hipZ=0.05, xL=-0.2, eL=0.3)
-            z.update(keyed(u, [(0.0, R0), (0.30, up), (0.44, hit), (0.62, hit), (1.0, R0)]))
-        elif kind == "spin":
-            if u < 0.12:
-                arms, yaw = sm(u / 0.12), 0.0
-            elif u < 0.62:
-                arms, yaw = 1.0, (u - 0.12) / 0.50 * 6.1
-            else:
-                t = sm((u - 0.62) / 0.38); arms, yaw = 1.0 - t, 6.1 * (1.0 - t)
-            z.update(xR=1.35 * arms, xL=1.35 * arms, zR=0.75 * arms, zL=0.75 * arms, eR=0.2 * arms, eL=0.2 * arms,
-                     wR=-0.3 * arms, wL=-0.3 * arms, hipsY=yaw, chestY=yaw * 0.25)
-        elif kind == "bow":
-            # 弓は右手。右肩を的へ向けて右腕を伸ばし、左手で弦を顎まで引く。
-            # 胸の捻りは Chest・Torso・Abdomen・Hips に重なるので合計 約0.93。右腕はその分だけ外へ開くと的を向く。
-            draw = P(chestY=0.42, hipsY=0.2, headY=-0.9, chestX=0.04,
-                     xR=1.64, zR=0.68, eR=0.04,
-                     zL=1.42, yL=0.5, eL=2.9)
-            nock = P(chestY=0.3, hipsY=0.12, headY=-0.62, xR=1.25, zR=0.6, eR=0.15, xL=1.0, zL=-0.1, eL=1.3)
-            rel = P(chestY=0.42, hipsY=0.2, headY=-0.9, chestX=0.02,
-                    xR=1.64, zR=0.68, eR=0.04, zL=1.5, yL=0.95, eL=1.2)
-            z.update(keyed(u, [(0.0, R0), (0.10, nock), (0.18, draw), (0.32, draw), (0.38, rel), (0.56, rel), (1.0, R0)]))
-        elif kind == "shoot":
-            # 弩・投擲は両手で前へ構えて撃つ。
-            aim = P(xR=1.35, xL=1.25, zR=0.05, zL=-0.3, tL=0.3, eR=0.45, eL=0.75, headX=-0.08)
-            kick = P(xR=1.55, xL=1.4, zR=0.05, zL=-0.3, tL=0.3, eR=0.35, eL=0.65, chestX=0.12, headX=-0.02)
-            z.update(keyed(u, [(0.0, R0), (0.18, aim), (0.32, aim), (0.38, kick), (0.50, aim), (1.0, R0)]))
-        elif kind == "cast":
-            # 胸の前で両手を寄せて詠唱し、前へ突き出して放つ。
-            chant = P(xR=0.95, xL=0.95, zR=0.1, zL=0.1, tR=0.7, tL=0.7, eR=1.55, eL=1.55, headX=0.12, chestX=0.06)
-            peak = P(xR=1.1, xL=1.1, zR=0.18, zL=0.18, tR=0.6, tL=0.6, eR=1.45, eL=1.45, headX=0.25, chestX=0.18)
-            thrust = P(xR=1.55, xL=1.55, zR=0.12, zL=0.12, tR=0.15, tL=0.15, eR=0.05, eL=0.05, wR=0.5, wL=0.5,
-                       headX=-0.08, chestX=-0.28, hipZ=0.06)
-            z.update(keyed(u, [(0.0, R0), (0.22, chant), (0.40, peak), (0.50, thrust), (0.66, thrust), (1.0, R0)]))
-        elif kind == "pray":
-            # 胸の前で手を合わせて俯き、両腕を空へ開いて祝福する。
-            pray = P(xR=0.5, xL=0.5, zR=0.08, zL=0.08, tR=1.0, tL=1.0, eR=2.05, eL=2.05, headX=-0.42, chestX=-0.1)
-            bless = P(xR=2.45, xL=2.45, zR=0.55, zL=0.55, eR=0.2, eL=0.2, headX=0.35, chestX=0.2)
-            z.update(keyed(u, [(0.0, R0), (0.18, pray), (0.40, pray), (0.55, bless), (0.70, bless), (1.0, R0)]))
-        elif kind == "hit":
-            h = sm(u / 0.18) if u < 0.18 else 1.0 - sm((u - 0.18) / 0.82)
-            z.update(chestX=0.5 * h, headX=0.55 * h, xR=-0.35 * h, xL=-0.35 * h, zR=0.2 * h, zL=0.2 * h, eR=0.5 * h, eL=0.5 * h, hipY=-0.02 * h)
-        return z
-
-    def clip_quats(nf, kind):
-        q = np.zeros((nf, nJ, 4), np.float32)
-        ht = np.zeros((nf, 3), np.float32)
-        base_t = file_rest[hips][0]
-        for f in range(nf):
-            ph = 2.0 * np.pi * f / max(1, nf - 1)
-            s = float(np.sin(ph))
-            ang = 0.0
-            if kind == "walk":
-                ang = s * 0.48
-            elif kind == "run":
-                ang = s * 0.72
-            for ji in range(nJ):
-                nm = names[ji]
-                extra = np.eye(3)
-                R = bind_R[ji]
-                if kind in ("walk", "run"):
-                    if ji in swing_j:
-                        extra = bend(R, (1.0, 0.0, 0.0), ang * swing_j[ji]) @ extra
-                    if nm.startswith("LowerLeg"):
-                        up = parents[ji]
-                        ta = ang * swing_j.get(up, 0.0)
-                        extra = bend(R, (1.0, 0.0, 0.0), -(0.18 + max(0.0, ta) * 1.35)) @ extra
-                    elif nm.startswith("Foot"):
-                        low = parents[ji]
-                        up = parents[low] if low >= 0 else -1
-                        ta = ang * swing_j.get(up, 0.0)
-                        knee = -(0.18 + max(0.0, ta) * 1.35)
-                        extra = bend(R, (1.0, 0.0, 0.0), -knee * 0.82) @ extra
-                    elif nm == "Hair":
-                        extra = bend(R, (1.0, 0.0, 0.0), np.sin(ph * 2.0) * (0.18 if kind == "walk" else 0.26)) @ bend(R, (0.0, 0.0, 1.0), s * 0.07) @ extra
-                    elif nm == "Chest":
-                        extra = bend(R, (1.0, 0.0, 0.0), -ang * 0.18) @ extra
-                    elif nm == "Hips":
-                        extra = bend(R, (0.0, 1.0, 0.0), ang * 0.14) @ extra
-                elif kind in ("idle", "glanceL", "glanceR", "lookup", "stretch", "shift", "cross", "slash", "stab", "chop", "chop2", "spin", "bow", "shoot", "cast", "pray", "hit"):
-                    g = gesture(kind, f / max(1, nf - 1))
-                    if kind in ("idle", "glanceL", "glanceR", "lookup", "stretch", "shift", "cross"):
-                        br = float(np.sin(ph * (3.0 if kind == "idle" else 1.0)))
-                        g = dict(g)
-                        g["chestX"] = br * 0.045 + g["chestX"]
-                        g["headX"] = br * -0.02 + g["headX"]
-                        if kind == "idle":
-                            g["xR"] = br * 0.05 + g["xR"]
-                            g["xL"] = br * -0.04 + g["xL"]
-                        g["hipY"] = br * 0.007 + g["hipY"]
-                    side = nm[-1] if nm[-2:] in (".L", ".R") else ""
-                    sg = 1.0 if side == "R" else -1.0
-                    if side:
-                        ax_, az_ = g["x" + side], g["z" + side]
-                        # 肩は腕が水平より上へ行った分だけ少し上がる。腕はその残り。
-                        sx_ = 0.22 * max(0.0, ax_ - 1.5)
-                        sz_ = 0.22 * max(0.0, az_ - 1.2)
-                    if nm.startswith("UpperArm.") and side in arm_dir:
-                        # 捻り→外へ開く→前へ振る→水平に後ろへ、の順に世界軸で回す。
-                        extra = (bend(R, (0.0, 1.0, 0.0), g["y" + side] * -sg)
-                                 @ bend(R, (1.0, 0.0, 0.0), ax_ - sx_)
-                                 @ bend(R, (0.0, 0.0, 1.0), (az_ - sz_) * sg)
-                                 @ bend(R, arm_dir[side], g["t" + side] * -sg) @ extra)
-                    elif nm.startswith("LowerArm.") and side:
-                        extra = bend(R, (1.0, 0.0, 0.0), max(0.0, g["e" + side])) @ extra
-                    elif nm.startswith("Hand.") and side:
-                        extra = bend(R, (1.0, 0.0, 0.0), g["w" + side]) @ extra
-                    elif nm.startswith("Shoulder.") and side:
-                        extra = bend(R, (1.0, 0.0, 0.0), sx_) @ bend(R, (0.0, 0.0, 1.0), sz_ * sg) @ extra
-                    elif nm in ("Chest", "Torso"):
-                        sc = 1.0 if nm == "Chest" else 0.55
-                        extra = bend(R, (0.0, 1.0, 0.0), g["chestY"] * sc) @ bend(R, (0.0, 0.0, 1.0), g["chestZ"] * sc) @ bend(R, (1.0, 0.0, 0.0), g["chestX"] * sc) @ extra
-                    elif nm == "Abdomen":
-                        extra = bend(R, (1.0, 0.0, 0.0), g["chestX"] * 0.35) @ bend(R, (0.0, 1.0, 0.0), g["hipsY"] * 0.4) @ extra
-                    elif nm == "Hips":
-                        extra = bend(R, (0.0, 1.0, 0.0), g["hipsY"]) @ extra
-                    elif nm == "Head":
-                        extra = bend(R, (0.0, 1.0, 0.0), g["headY"]) @ bend(R, (1.0, 0.0, 0.0), g["headX"]) @ extra
-                    elif nm == "Hair":
-                        extra = bend(R, (1.0, 0.0, 0.0), -g["headX"] * 0.6) @ bend(R, (0.0, 1.0, 0.0), -g["chestY"] * 0.35) @ extra
-                base = np.array(file_rest[ji][1], np.float64)
-                bq = np.array([-base[0], -base[1], base[2], base[3]], np.float64)
-                eq = np.array(mat_to_quat(ortho3(extra)), np.float64)
-                nq = qmul(bq, eq)
-                nq = nq / max(float(np.linalg.norm(nq)), 1e-8)
-                q[f, ji] = [-float(nq[0]), -float(nq[1]), float(nq[2]), float(nq[3])]
-            if kind in ("idle", "glanceL", "glanceR", "lookup", "stretch", "shift", "cross", "slash", "stab", "chop", "chop2", "spin", "bow", "shoot", "cast", "pray", "hit"):
-                g = gesture(kind, f / max(1, nf - 1))
-                if kind in ("idle", "glanceL", "glanceR", "lookup", "stretch", "shift", "cross"):
-                    g["hipY"] = g["hipY"] + float(np.sin(ph * (3.0 if kind == "idle" else 1.0))) * 0.007
-                ht[f] = [base_t[0], base_t[1] + g["hipY"], base_t[2] + g["hipZ"]]
-            elif kind in ("walk", "run"):
-                lift = 0.035 if kind == "walk" else 0.055
-                ht[f] = [base_t[0], base_t[1] + lift * abs(np.sin(ph * 2.0)), base_t[2]]
-            else:
-                ht[f] = [base_t[0], base_t[1], base_t[2]]
-        return q, ht
-
-    idle_q, idle_h = clip_quats(20, "idle")
-    gl_q, gl_h = clip_quats(18, "glanceL")
-    gr_q, gr_h = clip_quats(18, "glanceR")
-    look_q, look_h = clip_quats(18, "lookup")
-    str_q, str_h = clip_quats(20, "stretch")
-    sh_q, sh_h = clip_quats(18, "shift")
-    cr_q, cr_h = clip_quats(18, "cross")
-    walk_q, walk_h = clip_quats(13, "walk")
-    run_q, run_h = clip_quats(13, "run")
-    slash_q, slash_h = clip_quats(16, "slash")
-    stab_q, stab_h = clip_quats(16, "stab")
-    chop_q, chop_h = clip_quats(16, "chop")
-    chop2_q, chop2_h = clip_quats(16, "chop2")
-    spin_q, spin_h = clip_quats(20, "spin")
-    bow_q, bow_h = clip_quats(16, "bow")
-    shoot_q, shoot_h = clip_quats(16, "shoot")
-    cast_q, cast_h = clip_quats(22, "cast")
-    pray_q, pray_h = clip_quats(22, "pray")
-    hit_q, hit_h = clip_quats(10, "hit")
-    death_q, death_h = clip_quats(9, "rest")
-    for f in range(9):
-        a = 1.15 * f / 8.0
-        base = np.array(file_rest[hips][1], np.float64)
-        bq = np.array([-base[0], -base[1], base[2], base[3]], np.float64)
-        eq = np.array(mat_to_quat(ortho3(bend(bind_R[hips], (1.0, 0.0, 0.0), a))), np.float64)
-        nq = qmul(bq, eq)
-        nq = nq / max(float(np.linalg.norm(nq)), 1e-8)
-        death_q[f, hips] = [-float(nq[0]), -float(nq[1]), float(nq[2]), float(nq[3])]
-    clips = [
-        ("Idle", 20, idle_q, idle_h, 8.0),
-        ("Idle_GlanceL", 18, gl_q, gl_h, 8.0),
-        ("Idle_GlanceR", 18, gr_q, gr_h, 8.0),
-        ("Idle_Look", 18, look_q, look_h, 8.0),
-        ("Idle_Stretch", 20, str_q, str_h, 8.0),
-        ("Idle_Shift", 18, sh_q, sh_h, 8.0),
-        ("Idle_Cross", 18, cr_q, cr_h, 8.0),
-        ("Walking_A", 13, walk_q, walk_h),
-        ("Running_A", 13, run_q, run_h),
-        ("1H_Melee_Attack_Slice_Diagonal", 16, slash_q, slash_h),
-        ("1H_Melee_Attack_Stab", 16, stab_q, stab_h),
-        ("1H_Melee_Attack_Chop", 16, chop_q, chop_h),
-        ("2H_Melee_Attack_Chop", 16, chop2_q, chop2_h),
-        ("2H_Melee_Attack_Spin", 20, spin_q, spin_h),
-        ("2H_Ranged_Shoot", 16, bow_q, bow_h),
-        ("1H_Ranged_Shoot", 16, shoot_q, shoot_h),
-        ("Spellcast_Shoot", 22, cast_q, cast_h, 10.0),
-        ("Spellcast_Raise", 22, pray_q, pray_h, 10.0),
-        ("Hit_A", 10, hit_q, hit_h),
-        ("Death_A", 9, death_q, death_h),
-    ]
+    # 動きは UAL のモーションキャプチャを骨ごとに移す。武器や本の握りは手のバインドのまま付いて行く。
+    clips = retarget_human(names, parents, hips, world, real_p, female)
     top_i = np.eye(4, dtype=np.float32)
     pos_f = acc.astype(np.float32).copy()
     nrm_f = nn.astype(np.float32).copy()
@@ -1215,7 +1564,9 @@ def load_one(path):
     if human:
         hair_mask = np.concatenate(Hm) if Hm else None
         eye_mask = np.concatenate(Em) if Em else None
-        baked = bake_human(names, parents, rest, top, ibm, pos, nrm, jn, wt, hair_mask, eye_mask)
+        bn = os.path.basename(path)
+        female = bn.startswith("zhum_HumF") or "Witch" in bn or "Medieval" in bn
+        baked = bake_human(names, parents, rest, top, ibm, pos, nrm, jn, wt, hair_mask, eye_mask, female)
         if baked is None:
             return None
         jn = baked["jn"]
@@ -1254,7 +1605,7 @@ def load_one(path):
                 rec["head_n"] = up["head_n"]
                 rec["head_keep"] = up["head_keep"]
                 print("hi-head", base, len(rec["pos"]))
-        elif new_body and base[9] in "12":
+        elif new_body and base[9] in "123456":
             # モジュラー頭は十数面で、アバターに載せると顔が板になり髪が目を覆う。
             import _hi_splice
             up = _hi_splice.upgrade(rec, base[8] == "F")
@@ -1397,7 +1748,7 @@ def main():
     digit = [f for f in files if len(f) >= 14 and f.startswith("zhum_Hum") and f[8] in "FM" and f[9].isdigit()]
     order = ["zhum_HumF0.glb", "zhum_HumF1.glb", "zhum_HumF2.glb", "zhum_HumF3.glb",
              "zhum_HumM0.glb", "zhum_HumM1.glb", "zhum_HumM2.glb", "zhum_HumM3.glb",
-             "zhum_HumF4.glb", "zhum_HumM4.glb"]
+             "zhum_HumF4.glb", "zhum_HumM4.glb", "zhum_HumF5.glb", "zhum_HumM5.glb", "zhum_HumF6.glb", "zhum_HumM6.glb"]
     tail = [f for f in order if f in digit] + sorted(f for f in digit if f not in order)
     files = [f for f in files if f not in tail] + tail
     recs, names, srcn = [], [], []

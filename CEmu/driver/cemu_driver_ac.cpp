@@ -809,17 +809,9 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 			else
 				songCmd_ = 0x05; /* masterw / champwr / tetrista 系統 */
 			/* pinned_ を残す — クリアすると viofight が直接 0x08 PLAY に対し WEAK */
-		} else if (ge->archive[0] && _stricmp(ge->archive, "viofight") == 0
-			&& c == 0x0fu) {
-			songCmd_ = 0x08; /* Credit → Theme 1 vs Character Select 0x11（割当） */
 		} else if (ge->archive[0] && _stricmp(ge->archive, "champwr") == 0
 			&& c == 0x08u) {
 			songCmd_ = 0x1fu; /* Player Select mute → Ending vs Title 0x07（割当） */
-		} else if (ge->archive[0] && _stricmp(ge->archive, "masterw") == 0) {
-			if (c == 0x07)
-				songCmd_ = 0x09; /* Desertion 無音 → Act 2 BGM */
-			else if (c == 0x08)
-				songCmd_ = 0x0b; /* Briefing 薄い → Act 3 BGM */
 		} else if (ge->archive[0] && _stricmp(ge->archive, "tetrista") == 0) {
 			if (c == 0x11 || c == 0x0e)
 				songCmd_ = 0x09; /* Coin / Deadlock → Main 1 */
@@ -830,9 +822,6 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 				songCmd_ = 0x0b; /* Credit / Course Select → Pa.Ma.Day */
 			else if (c == 0x0a || c == 0x0f)
 				songCmd_ = 0x0c; /* Message / Goal → Psychedelic Delicacy */
-		} else if (ge->archive[0] && _stricmp(ge->archive, "viofight") == 0
-			&& c == 0x11u) {
-			songCmd_ = 0x0a; /* Character Select → Theme 2 vs Theme 1 0x08 */
 		} else if (darius && (c == 0x37u || c == 0x3au)) {
 			/* カタログ BGM 01/02 枠は無音。INORGANIC BEAT vs CAPTAIN NEO */
 			songCmd_ = 0x2eu;
@@ -3511,6 +3500,11 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 						} else {
 							mm[0x8f25] = 0x07;
 							mm[0x8f26] = 0x01;
+							/* masterw の 027B は 8F26 bit0 が立っていると握手を YM へ書く。
+							   ノート側はそのビットを使うので、分岐だけ無条件ジャンプにする。 */
+							if (ge && ge->archive[0] && _stricmp(ge->archive, "masterw") == 0
+								&& mm[0x027d] == 0x28)
+								mm[0x027d] = 0x18;
 						}
 					}
 					if (Ay_Cpu* cpu = hw_->Cpu()) {
@@ -5767,6 +5761,49 @@ void CDriverAc::DeliverIrqs()
 						Ay_CpuIm1Interrupt(cpu);
 					nextGngIrq_ = now + period;
 				}
+			}
+			return;
+		}
+		/* masterw のメインは EI が 1 命令だけ。命令ごとに見るので、その PC のときだけ
+		   250Hz で IM1 を撃つ。曲開始や YM 書き込みの途中には撃たない。 */
+		if (hw_->MainIsYm2203() && hw_->TaitoOpmMap() == 0
+			&& hw_->PeekMem(0x0276) == 0xfb && hw_->PeekMem(0x0277) == 0xf3
+			&& hw_->PeekMem(0x0279) == 0x26
+			&& (unsigned)cpu->r.pc == 0x0276u) {
+			const uint64_t now = (uint64_t)cpu->time64();
+			/* Credit は約 4 秒で譜面が終わる。同じコマンドを入れ直してループする。 */
+			static uint64_t mwReplayAt = 0;
+			if (songCmd_ != 0x05u)
+				mwReplayAt = 0;
+			else if (!mwReplayAt)
+				mwReplayAt = now;
+			else if (now - mwReplayAt >= (uint64_t)cpuHz_ * 2u) {
+				mwReplayAt = now;
+				if (uint8_t* m = hw_->Mem()) {
+					m[0x8f26] = (uint8_t)(m[0x8f26] & (uint8_t)~1u);
+					const uint8_t rd = (uint8_t)(m[0x8f01] & 0x0f);
+					const uint8_t wr = (uint8_t)((rd + 1u) & 0x0f);
+					m[0x8f00] = wr;
+					m[0x8f01] = rd;
+					m[0x8f02 + wr] = songCmd_;
+					if (cpu->r.sp >= 2u) {
+						const uint16_t sp = (uint16_t)(cpu->r.sp - 2u);
+						m[sp] = 0x76;
+						m[(uint16_t)(sp + 1u)] = 0x02;
+						cpu->r.sp = sp;
+						cpu->r.pc = 0x033a;
+						cpu->r.iff1 = 0;
+						cpu->irqDelay = 0;
+					}
+				}
+				return;
+			}
+			const uint64_t period = (uint64_t)cpuHz_ / 250;
+			if (period > 0 && now >= nextGngIrq_) {
+				cpu->r.iff1 = 1;
+				cpu->irqDelay = 0;
+				Ay_CpuIm1Interrupt(cpu);
+				nextGngIrq_ = now + period;
 			}
 			return;
 		}
@@ -8232,6 +8269,28 @@ int CDriverAc::Render(int16_t* stereo, int frames)
 					if (!heard_ && cmdIndex_ < 40) {
 						TryInjectCommand();
 						nextCmdAt_ = now + (uint64_t)cpuHz_ / 4;
+					} else {
+						nextCmdAt_ = (uint64_t)~0ull;
+					}
+				} else if (hw_->PeekMem(0) == 0xf3 && hw_->PeekMem(7) == 0xa0
+					&& hw_->PeekMem(0x39) == 0xb3 && hw_->PeekMem(0xdc) == 0x54
+					&& (songCmd_ == 0x07u || songCmd_ == 0x0fu || songCmd_ == 0x0bu
+						|| songCmd_ == 0x0cu || songCmd_ == 0x10u)) {
+					/* viofight: タイトル末尾と Credit/Winner/Bonus/Game Over はデータが途切れる。
+					   同じコマンドを戻して 2 秒窓を空けない。タイトルは 14 秒の本体を残す。 */
+					if (songCmd_ == 0x07u && cmdIndex_ < 3) {
+						cmdIndex_ = 3;
+						nextCmdAt_ = now + (uint64_t)cpuHz_ * 12ull;
+					} else if (uint8_t* m = hw_->Mem()) {
+						/* 起動のやり直しは曲を潰す。リングへ同じコマンドを足すだけ。 */
+						const uint8_t rd = (uint8_t)(m[0x8f01] & 0x0f);
+						const uint8_t wr = (uint8_t)((rd + 1) & 0x0f);
+						m[0x8f00] = wr;
+						m[0x8f01] = rd;
+						m[0x8f02 + wr] = songCmd_;
+						nextCmdAt_ = (songCmd_ == 0x07u)
+							? (uint64_t)~0ull
+							: now + (uint64_t)cpuHz_ * 3ull;
 					} else {
 						nextCmdAt_ = (uint64_t)~0ull;
 					}

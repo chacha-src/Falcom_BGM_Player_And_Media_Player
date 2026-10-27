@@ -34,6 +34,11 @@ struct GpuMesh {
 };
 
 enum { MAXJ = 64 };
+// 物を持つ手の指の型。人体の Grip クリップのコマ（値 − 1）と同じ並び（pack_mon.py の UAL_GRIPS）。
+// GRIP_NONE は持たない手で、クリップに捕った指の動きのまま。
+enum { GRIP_NONE, GRIP_FIST, GRIP_STAFF, GRIP_WAND, GRIP_BOW, GRIP_TRIGGER, GRIP_BOOK, GRIP_SHIELD, GRIP_PINCH };
+// 髪を出す頭蓋の表。シェーダの HairCloth と同じ並び。
+enum { SKULL_NA = 16, SKULL_NE = 8 };
 
 struct Clip {
 	char name[32];
@@ -69,6 +74,11 @@ struct Model {
 	Buf<GpuMesh> parts;
 	float headMin[3], headMax[3];  // 頭部（頭ボーン基準）
 	int headJ, chestJ, handR, handL, hipsJ;
+	// 拳メッシュの中心と、肘から拳へ抜ける柄の向き。手の骨の空間。骨の原点は拳からずれている。
+	float palmR[3], palmL[3];
+	float axisR[3], axisL[3];
+	int palmOk;   // bit0=右 bit1=左
+	volatile long live;   // 1 は読み終わった体。予約しただけの枠は 0
 };
 
 struct Attach {
@@ -120,7 +130,7 @@ struct DrawParams {
 	int face;            // 人間の顔の型（0=既定）
 	float bodyScale;     // 身長。CS がスキン後の位置へ掛ける
 	DWORD clothTint;     // 0 以外なら服をこの色へ。元の明暗と色相差は残す
-	int skinTone;        // 0無し 1白人 2アジア人 3黒人。服と髪は変えない
+	int skinTone;        // 0無し 1白人 2アジア人 3黒人 4ラテン系 5中東系 6南アジア系 7ポリネシア系。服と髪は変えない
 	DrawParams() : tint(0xFFFFFFFF), outline(0), mode(0), emissive(0), hue(0), dissolve(0), flash(0), rim(.35f), sway(0), outlineColor(0xFF201814), twoSided(0), hairJoint(-1), hideMeshHair(0), hairTint(0xFFFFFFFF), clothHue(0), face(0), bodyScale(1.f), clothTint(0), skinTone(0) {}
 };
 
@@ -169,18 +179,22 @@ public:
 	Fix<Attach, 64> attaches;
 	Fix<StaticSrc, 48> statics;
 	Fix<GpuMesh, 160> m_creatures;
-	// カタログは索引だけ持つ。GPU に載せるのは人型と、今の戦闘に出る種だけ。
+	// カタログは索引だけ。起動時に読む人型はパーティのもの。残りは作成・戦闘・図鑑でその時に読む。
 	enum { MON_CATALOG = 1024 };
 	int m_monN;
 	int m_monOff[MON_CATALOG];
 	int m_monModel[MON_CATALOG];
 	unsigned char m_monBody[MON_CATALOG];
+	int m_bodySlot[MON_CATALOG];   // 人型パック番号 → 予約した枠。それ以外は -1
+	int m_body0M, m_body0R, m_body0C, m_bodyN;
 	int m_keepModels, m_keepRigs, m_keepCreatures;
+	volatile long m_gearShown, m_avaReady;
+	void EnsureBody(const char* name);
 	const BYTE* m_monBytes;
 	DWORD m_monBytesN;
 	void LoadBattleCreatures(const int* pack, int n);
 	Fix<GpuMesh, 256> m_gear;
-	Fix<BYTE, 256> m_gearBow;
+	Fix<BYTE, 256> m_gearGrip;   // GRIP_*。名前から読込時に決める
 	struct CSkinV { float p[3], n[3]; DWORD c; unsigned char j[4], w[4]; };
 	struct CreatureSkin {
 		int model; Buf<CSkinV> bind; Buf<BYTE> cloth;
@@ -192,8 +206,6 @@ public:
 		ID3D11Buffer* baldIB = NULL;
 		UINT baldN = 0;
 		float extX, extY, extZ, extR;   // バインド頂点の中心と半径
-		int bustNip[2] = { -1, -1 };    // 左右の乳首頂点。服の胸を楕円面へ載せる基準
-		Buf<unsigned char> bustR; // 1=左 2=右 3=両方。胸の布だけ
 		ID3D11Buffer* bindSB = NULL;
 		ID3D11ShaderResourceView* bindSRV = NULL;
 		ID3D11Buffer* outVB = NULL;
@@ -202,13 +214,21 @@ public:
 		ID3D11ShaderResourceView* faceSRV = NULL;
 		int faceGot = -1;
 		int gpuNv = 0;
-		float nip[2][4] = {};
 		float bustLag[3] = {};
 		float bustVel[3] = {};
 		float bustPrev[3] = {};
 		int bustPrevOk = 0;
 		unsigned bustFrame = 0;
-		CreatureSkin() : model(-1), faceSet(-1), faceStart(0), faceN(0), faceSynth(0), faceHalf(0), faceCx(0), extX(0), extY(0), extZ(0), extR(0) {}
+		float crown[3]; // 頭ボーン頂点の天辺。読み込み時に一度測り、描画中はバインドを読み直さない
+		int crownOk;
+		// 頭蓋の外形。中心 skullC から方位 16 × 仰角 8 の向きごとの最大半径。髪のカードをこの外へ出す。
+		float skullC[3];
+		float skullR[SKULL_NA * SKULL_NE];
+		CreatureSkin() : model(-1), faceSet(-1), faceStart(0), faceN(0), faceSynth(0), faceHalf(0), faceCx(0), extX(0), extY(0), extZ(0), extR(0), crownOk(0) {
+			crown[0] = crown[1] = crown[2] = 0;
+			skullC[0] = skullC[1] = skullC[2] = 0;
+			memset(skullR, 0, sizeof(skullR));
+		}
 	};
 	Fix<CreatureSkin, 160> m_skins;
 	// 顔の型（性別ごと）。頭の頂点ごとの位置差・法線・色
@@ -224,12 +244,27 @@ public:
 	struct AvaBody { int nFace; AvaMesh m; Buf<WORD> bodyTri, extraTri; AvaBody() : nFace(0) {} };
 	struct AvaCos { char name[32]; int gender; AvaMesh m; Buf<WORD> tri; Buf<BYTE> keep; };
 	struct AvaModel { char name[32]; int gender; Buf<float> M; char joint[64][24]; int nJoint; AvaModel() : gender(0), nJoint(0) { name[0] = 0; memset(joint, 0, sizeof(joint)); } };
+	// 衣装の布を押し出す脚の形。太もも・すね左右の 4 本で、骨に沿って CLOTH_PT 段・まわり CLOTH_PF 分割の半径。
+	// スカート状の布は腰を囲む格子（周 CLOTH_SECT 個 × 縦 5cm ほどごとの段）で動かす。点は CLOTH_NODES まで（シェーダの NMAX）。
+	enum { CLOTH_SEGS = 4, CLOTH_PT = 10, CLOTH_PF = 16, CLOTH_INST = 48, CLOTH_SECT = 32, CLOTH_NODES = 512 };
+	// cup は胸の大きさ（0=A〜7=H）。形は作るときに焼き、jig は焼いた差分（胸の揺れの重み）。
 	struct AvaCache {
-		int model, cos; CreatureSkin skin; Buf<float> bx, bn; Buf<WORD> tri; GpuMesh gm;
+		int model, cos, cup; CreatureSkin skin; Buf<float> jig; GpuMesh gm;
 		// 衣装の背中の外面。髪をこの Z より後ろへ出す。
 		float backY0, backDy, backZ[32];
 		int backN;
-		AvaCache() : model(0), cos(0), backY0(0), backDy(0), backN(0) { for (int i = 0; i < 32; i++) backZ[i] = 0; }
+		// 布（omake_tactics_cloth.hlsl）。[0] は格子の点 ClothN、[1] は動かす頂点 ClothV、[2] は脚の形の半径。clothN=0 は布を動かさない。
+		// clothAxis はスカートの中心軸（バインドの x, z）。脚が布に入ったら、この軸から外へ押し出す。
+		ID3D11Buffer* clothSB[3]; ID3D11ShaderResourceView* clothSRV[3]; int clothN, clothVN, clothHip; float clothAxis[2];
+		// 脚の形の骨。segJ は [根元の骨, 先の骨]、segG は [0]=根元（xyz と長さ） [1]=骨の向き [2]=前 [3]=横（バインド）。
+		// 0・1 は太もも左右（座ったかどうかもこれで見る）。
+		int segN; int segJ[CLOTH_SEGS][2]; float segG[CLOTH_SEGS][4][4];
+		AvaCache() : model(0), cos(0), cup(0), backY0(0), backDy(0), backN(0), clothN(0), clothVN(0), clothHip(-1), segN(0) {
+			for (int i = 0; i < 32; i++) backZ[i] = 0;
+			for (int b = 0; b < 3; b++) { clothSB[b] = NULL; clothSRV[b] = NULL; }
+			clothAxis[0] = clothAxis[1] = 0.f;
+			memset(segJ, 0, sizeof(segJ)); memset(segG, 0, sizeof(segG));
+		}
 	};
 	char m_avaSeg[64][24];
 	int m_avaSegN;
@@ -241,14 +276,17 @@ public:
 	void ReleaseAvatarCache();
 	int AvatarCount(int gender) const;
 	// avatar は性別ごとに 1 から。作れないときは FALSE（呼び手が元の体を描く）。
-	BOOL DrawAvatar(int model, int avatar, int bust, const Pose& pose, const M4& world, const DrawParams& dp);
+	// cup は 0=A〜BUST_N-1=H。owner は布の揺れを持つキャラ（NULL なら体に沿わせたまま）。
+	BOOL DrawAvatar(int model, int avatar, int cup, const Pose& pose, const M4& world, const DrawParams& dp, const void* owner = NULL);
 	// 着ている衣装の、その高さでの背中の外面（モデル空間の +Z）。無ければ -1e9。
 	float AvatarClothBack(int model, int avatar, float y);
 	BOOL DrawHumanHair(int model, int style, int headJ, const Pose& pose, const M4& world, const DrawParams& dp, int avatar);
 	void EnsureScalp(int model, int headJ);
 	void LoadHairPack();
 	void ReleaseHair();
-	void SkinAndDraw(CreatureSkin& src, GpuMesh& base, const float* bx, const float* bn, float bt, const Pose& pose, const M4& world, const DrawParams& dp, const WORD* tri = NULL, int nTri = 0);
+	// jig は頂点ごとの胸の揺れの重み（焼いた差分）。amt は揺れの倍率。cloth を渡すと、その衣装の布を owner の状態で動かす。
+	void SkinAndDraw(CreatureSkin& src, GpuMesh& base, const float* jig, float amt, const Pose& pose, const M4& world, const DrawParams& dp,
+		AvaCache* cloth = NULL, const void* owner = NULL);
 	int FindModel(const char* n) const;
 	int FindAttach(const char* n) const;
 	int FindStatic(const char* n) const;
@@ -261,8 +299,9 @@ public:
 		return (i >= 0 && i < (int)m_skins.size()) ? m_skins[i].model : -1;
 	}
 	void DrawSkinnedCreature(int i, const Pose& pose, const M4& world, const DrawParams& dp);
-	int GearCount() const { return (int)m_gear.size(); }
-	BOOL GearIsBow(int i) const { return i >= 0 && i < (int)m_gearBow.size() && m_gearBow[i]; }
+	int GearCount() const { return (int)m_gearShown; }
+	BOOL GearIsBow(int i) const { return i >= 0 && i < (int)m_gearGrip.size() && m_gearGrip[i] == GRIP_BOW; }
+	int GearGrip(int i) const { return i >= 0 && i < (int)m_gearGrip.size() ? m_gearGrip[i] : GRIP_NONE; }
 	void DrawCreature(int i, const M4& world, const DrawParams& dp);
 	void DrawGear(int i, const M4& world, const DrawParams& dp);
 	int AddProcModel(const Model& m, const Buf<VtxK>& v, const Buf<WORD>& idx);
@@ -355,9 +394,20 @@ private:
 	void SetObj(const M4& world, const DrawParams& dp, float outlineW);
 	void BindForPass(BOOL skinned, BOOL outline);
 	void ReleaseSkinGpu(CreatureSkin& src);
-	BOOL EnsureSkinGpu(CreatureSkin& src, const float* bx, const float* bn);
+	BOOL EnsureSkinGpu(CreatureSkin& src, const float* jig);
 	void UpdateFaceGpu(CreatureSkin& src, int face);
-	BOOL GpuSkinAndDraw(CreatureSkin& src, const float* bx, const float* bn, float bt, float amt, const Pose& pose, const M4& world, const DrawParams& dp, GpuMesh& base);
+	BOOL GpuSkinAndDraw(CreatureSkin& src, const float* jig, float amt, const Pose& pose, const M4& world, const DrawParams& dp, GpuMesh& base,
+		AvaCache* cloth, const void* owner);
+	// 布の状態はキャラごと。同じ衣装の人が並んでも、影と本描画で二度描いても、1 フレームに 1 歩だけ進める。
+	struct ClothInst {
+		const void* owner; int model, cos, cup, n;
+		ID3D11Buffer* sb; ID3D11UnorderedAccessView* uav;
+		DWORD frame; float time; M4 world; int valid;
+		ClothInst() : owner(NULL), model(-1), cos(-1), cup(-1), n(0), sb(NULL), uav(NULL), frame(0), time(0), valid(0) { world = MIdent(); }
+	};
+	Fix<ClothInst, CLOTH_INST> m_clothInst;
+	void RunCloth(AvaCache& ac, const void* owner, CreatureSkin& src, const Pose& pose, const M4& world, const DrawParams& dp);
+	void ReleaseClothInst();
 	void HudPush(float x, float y, float w, float h, float u0, float v0, float u1, float v1, DWORD c0, DWORD c1, ID3D11ShaderResourceView* srv);
 
 	HWND m_hwnd;
@@ -428,6 +478,8 @@ private:
 	ID3D11Texture2D* m_matTex;
 	ID3D11ShaderResourceView* m_matSrv;
 	ID3D11ComputeShader* m_csSkin;
+	ID3D11ComputeShader* m_csCloth[3];   // 格子を進める・辺を保って押し出す・頂点へ書く
+	ID3D11Buffer* m_cbCloth;
 	ID3D11Buffer* m_cbSkinBone;
 	ID3D11Buffer* m_cbSkinParm;
 	ID3D11Buffer* m_cbHairCloth;
@@ -443,12 +495,8 @@ private:
 	UINT m_hairNv;
 	float m_hairCap[16][3];
 	int m_hairCapN[16];
-	float m_scalpCrown[3];
-	int m_scalpCrownOk;
-	ID3D11Buffer* m_scalpSB;
-	ID3D11ShaderResourceView* m_scalpSRV;
-	int m_scalpModel;
-	int m_scalpN;
+	int m_scalpModel; // m_capDraw を作った体
+	DWORD m_capC;     // 笠の頂点色。髪テクスチャの平均の明るさを根元の影で 8 割にした灰色
 	Buf<VtxS> m_capBind;
 	GpuMesh m_capDraw;
 	ID3D11InputLayout* m_ilS;

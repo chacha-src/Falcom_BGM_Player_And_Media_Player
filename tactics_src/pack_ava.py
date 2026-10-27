@@ -91,12 +91,15 @@ def complete_pose(rec):
         along /= np.linalg.norm(along)
         lat /= max(np.linalg.norm(lat), 1e-6)
         hand = qj["Hand." + side]
+        # 付け根の番号は M.seg_joint_names と同じ判定。1 番が無い体（付け根が 2 番）へ偽の 1 番を足すと、そちらへ指が付く。
+        kb = 2 if ("Index2." + side in qj and ("Index1." + side not in qj or float(np.linalg.norm(qj["Index1." + side] - hand))
+                                              <= 0.5 * float(np.linalg.norm(qj["Index2." + side] - qj["Index1." + side])))) else 1
         for i, name in enumerate(("Index", "Middle", "Ring", "Pinky")):
             basep = hand + along * 0.02 + lat * ((i - 1.5) * 0.012)
-            for k in range(1, 4):
+            for k in range(kb, kb + 3):
                 key = "%s%d.%s" % (name, k, side)
                 if key not in qj:
-                    qj[key] = basep + along * (0.022 * k)
+                    qj[key] = basep + along * (0.022 * (k - kb + 1))
         for k in (2, 3):
             key = "Thumb%d.%s" % (k, side)
             if key not in qj:
@@ -111,7 +114,7 @@ def main():
         fo.write(struct.pack("<I", len(M.SEGS)))
         for s in M.SEGS:
             fo.write(pm.pack_name(s, 24))
-        news = ["zhum_Hum%s%d.glb" % (g, i) for g in ("F", "M") for i in range(3)]
+        news = ["zhum_Hum%s%d.glb" % (g, i) for g in ("F", "M") for i in range(7)]
         models = list(HUMANS) + news
         donors = {}
         fo.write(struct.pack("<I", len(models)))

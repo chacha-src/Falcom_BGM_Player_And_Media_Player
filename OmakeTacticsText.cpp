@@ -1424,7 +1424,7 @@ R(TX_SET_ANIM, L"戦闘演出", L"Battle Scenes", L"Scènes de combat", L"Scene 
 R(TX_SET_ANIM_FULL, L"フル", L"Full", L"Complètes", L"Complete", L"Completas", L"전체", L"完整", L"كاملة", L"Полные", L"Voll", L"Completas", L"Volledig", L"Pełne", L"Tam")
 R(TX_SET_ANIM_SHORT, L"短縮", L"Short", L"Courtes", L"Brevi", L"Cortas", L"단축", L"简短", L"مختصرة", L"Краткие", L"Kurz", L"Curtas", L"Kort", L"Skrócone", L"Kısa")
 R(TX_SET_GRID, L"グリッド", L"Grid", L"Grille", L"Griglia", L"Cuadrícula", L"격자", L"网格", L"الشبكة", L"Сетка", L"Raster", L"Grade", L"Raster", L"Siatka", L"Izgara")
-R(TX_CR_PREVIEW_HINT, L"ドラッグで回転・上下、ホイールで拡大", L"Drag to turn and tilt, wheel to zoom", L"Glisser pour tourner et incliner, molette pour zoomer", L"Trascina per ruotare e inclinare, rotella per lo zoom", L"Arrastra para girar e inclinar, rueda para zoom", L"드래그로 회전·상하, 휠로 확대", L"拖动旋转与俯仰，滚轮缩放", L"اسحب للتدوير والإمالة، العجلة للتكبير", L"Тяните для поворота и наклона, колесо — масштаб", L"Ziehen zum Drehen und Neigen, Rad zum Zoomen", L"Arraste para girar e inclinar, roda para zoom", L"Sleep om te draaien en kantelen, wiel om te zoomen", L"Przeciągnij, aby obracać i pochylać, kółko — zoom", L"Döndürmek ve eğmek için sürükleyin, tekerlek yakınlaştırır")
+R(TX_CR_PREVIEW_HINT, L"ドラッグで回転・上下、ホイールで拡大、中ドラッグで移動", L"Drag to turn and tilt, wheel to zoom, middle-drag to move", L"Glisser pour tourner et incliner, molette pour zoomer, clic molette pour déplacer", L"Trascina per ruotare e inclinare, rotella per lo zoom, tasto centrale per spostare", L"Arrastra para girar e inclinar, rueda para zoom, botón central para mover", L"드래그로 회전·상하, 휠로 확대, 휠 버튼 드래그로 이동", L"拖动旋转与俯仰，滚轮缩放，按住滚轮拖动移动", L"اسحب للتدوير والإمالة، العجلة للتكبير، الزر الأوسط للتحريك", L"Тяните для поворота и наклона, колесо — масштаб, средняя кнопка — сдвиг", L"Ziehen zum Drehen und Neigen, Rad zum Zoomen, Mittelklick zum Verschieben", L"Arraste para girar e inclinar, roda para zoom, botão do meio para mover", L"Sleep om te draaien en kantelen, wiel om te zoomen, middelste knop verplaatst", L"Przeciągnij, aby obracać i pochylać, kółko — zoom, środkowy przycisk przesuwa", L"Döndürmek ve eğmek için sürükleyin, tekerlek yakınlaştırır, tekerlek düğmesi kaydırır")
 R(TX_BT_HINT_CMD, L"コマンドを選択", L"Choose a command", L"Choisissez une commande", L"Scegli un comando", L"Elige un comando", L"명령을 선택", L"选择指令", L"اختر أمرًا", L"Выберите команду", L"Wähle einen Befehl", L"Escolha um comando", L"Kies een opdracht", L"Wybierz polecenie", L"Bir komut seçin")
 R(TX_BT_HINT_SKILL, L"スキルの対象を選択", L"Choose a skill target", L"Choisissez la cible de la compétence", L"Scegli il bersaglio dell'abilità", L"Elige el objetivo de la habilidad", L"스킬 대상을 선택", L"选择技能目标", L"اختر هدف المهارة", L"Выберите цель навыка", L"Wähle ein Ziel für die Fertigkeit", L"Escolha o alvo da habilidade", L"Kies een doelwit voor de vaardigheid", L"Wybierz cel umiejętności", L"Yetenek hedefini seçin")
 R(TX_BT_RESUME, L"戦闘に戻る", L"Resume Battle", L"Reprendre le combat", L"Riprendi la battaglia", L"Volver al combate", L"전투로 돌아가기", L"返回战斗", L"العودة إلى المعركة", L"Вернуться в бой", L"Kampf fortsetzen", L"Voltar à batalha", L"Gevecht hervatten", L"Wróć do walki", L"Savaşa dön")
@@ -2000,11 +2000,14 @@ R(TX_HT_1, L"やや低め", L"Below avg.", L"Un peu petite", L"Sotto media", L"B
 R(TX_HT_2, L"普通", L"Average", L"Moyenne", L"Media", L"Media", L"보통", L"普通", L"متوسط", L"Обычный", L"Mittel", L"Média", L"Gemiddeld", L"Przeciętny", L"Orta")
 R(TX_HT_3, L"高め", L"Tall", L"Grande", L"Alta", L"Alta", L"높음", L"较高", L"طويل", L"Высокий", L"Groß", L"Alta", L"Groot", L"Wysoki", L"Uzun")
 R(TX_HT_4, L"かなり高い", L"Very tall", L"Très grande", L"Molto alta", L"Muy alta", L"매우 높음", L"很高", L"طويل جدا", L"Очень высокий", L"Sehr groß", L"Muito alta", L"Zeer groot", L"Bardzo wysoki", L"Çok uzun")
-R(TX_BUST_0, L"控えめ", L"Petite", L"Petite", L"Piccolo", L"Pequeño", L"작음", L"娇小", L"صغير", L"Маленькая", L"Klein", L"Pequeno", L"Klein", L"Mały", L"Küçük")
-R(TX_BUST_1, L"小さめ", L"Small", L"Petit", L"Ridotto", L"Reducido", L"조금 작음", L"较小", L"أصغر", L"Небольшая", L"Eher klein", L"Menor", L"Iets klein", L"Nieco mały", L"Biraz küçük")
-R(TX_BUST_2, L"普通", L"Average", L"Moyenne", L"Media", L"Media", L"보통", L"普通", L"متوسط", L"Обычная", L"Mittel", L"Média", L"Gemiddeld", L"Przeciętny", L"Orta")
-R(TX_BUST_3, L"大きめ", L"Full", L"Généreuse", L"Piena", L"Llena", L"큼", L"丰满", L"ممتلئ", L"Полная", L"Voll", L"Cheia", L"Vol", L"Pełny", L"Dolu")
-R(TX_BUST_4, L"巨乳", L"Huge", L"Très généreuse", L"Abbondante", L"Muy plena", L"거유", L"巨乳", L"ضخم", L"Пышная", L"Üppig", L"Enorme", L"Enorm", L"Ogromny", L"Çok büyük")
+R(TX_BUST_0, L"貧乳", L"Small", L"Menue", L"Piccola", L"Pequeña", L"빈유", L"贫乳", L"صغيرة", L"Маленькая", L"Klein", L"Pequena", L"Klein", L"Mała", L"Küçük")
+R(TX_BUST_1, L"やや貧乳", L"Slightly small", L"Assez menue", L"Un po' piccola", L"Algo pequeña", L"약간 빈유", L"偏小", L"مائلة للصغر", L"Поменьше", L"Eher klein", L"Um pouco pequena", L"Iets klein", L"Nieco mała", L"Biraz küçük")
+R(TX_BUST_2, L"普通", L"Average", L"Moyenne", L"Media", L"Media", L"보통", L"普通", L"متوسطة", L"Обычная", L"Mittel", L"Média", L"Gemiddeld", L"Przeciętna", L"Orta")
+R(TX_BUST_3, L"やや巨乳", L"Slightly large", L"Assez généreuse", L"Un po' grande", L"Algo grande", L"약간 거유", L"偏大", L"مائلة للكبر", L"Побольше", L"Eher groß", L"Um pouco grande", L"Iets groot", L"Nieco duża", L"Biraz büyük")
+R(TX_BUST_4, L"巨乳", L"Large", L"Généreuse", L"Grande", L"Grande", L"거유", L"巨乳", L"كبيرة", L"Большая", L"Groß", L"Grande", L"Groot", L"Duża", L"Büyük")
+R(TX_BUST_5, L"かなり巨乳", L"Very large", L"Très généreuse", L"Molto grande", L"Muy grande", L"상당히 거유", L"很大", L"كبيرة جدا", L"Очень большая", L"Sehr groß", L"Muito grande", L"Zeer groot", L"Bardzo duża", L"Çok büyük")
+R(TX_BUST_6, L"超巨乳", L"Huge", L"Opulente", L"Enorme", L"Enorme", L"초거유", L"超巨乳", L"ضخمة", L"Огромная", L"Riesig", L"Enorme", L"Enorm", L"Ogromna", L"Devasa")
+R(TX_BUST_7, L"爆乳", L"Massive", L"Plantureuse", L"Massiccia", L"Inmensa", L"폭유", L"爆乳", L"هائلة", L"Громадная", L"Enorm", L"Imensa", L"Massief", L"Olbrzymia", L"Muazzam")
 R(TX_FIG_0, L"痩せ型", L"Slim", L"Mince", L"Magra", L"Delgada", L"마른형", L"瘦型", L"نحيل", L"Худое", L"Schlank", L"Magra", L"Slank", L"Szczupła", L"İnce")
 R(TX_FIG_1, L"普通", L"Average", L"Normale", L"Normale", L"Normal", L"보통", L"普通", L"عادي", L"Обычное", L"Normal", L"Normal", L"Normaal", L"Zwykła", L"Normal")
 R(TX_FIG_2, L"ふくよか", L"Heavy", L"Ronde", L"Piena", L"Robusta", L"통통", L"丰腴", L"ممتلئ", L"Плотное", L"Kräftig", L"Robusta", L"Stevig", L"Krępa", L"Dolgun")
@@ -2179,8 +2182,10 @@ R(TX_CR_MODEL, L"モデル番号", L"Model", L"Modèle", L"Modello", L"Modelo", 
 R(TX_MDL_0, L"1 白人", L"1 White", L"1 Blanc", L"1 Bianco", L"1 Blanco", L"1 백인", L"1 白人", L"1 أبيض", L"1 Белый", L"1 Weiß", L"1 Branco", L"1 Blank", L"1 Biały", L"1 Beyaz")
 R(TX_MDL_1, L"2 アジア人", L"2 Asian", L"2 Asiatique", L"2 Asiatico", L"2 Asiático", L"2 아시아인", L"2 亚洲人", L"2 آسيوي", L"2 Азиат", L"2 Asiat", L"2 Asiático", L"2 Aziaat", L"2 Azjata", L"2 Asyalı")
 R(TX_MDL_2, L"3 黒人", L"3 Black", L"3 Noir", L"3 Nero", L"3 Negro", L"3 흑인", L"3 黑人", L"3 أسود", L"3 Черный", L"3 Schwarz", L"3 Negro", L"3 Zwart", L"3 Czarny", L"3 Siyah")
-R(TX_MDL_3, L"4 ちび", L"4 Chibi", L"4 Chibi", L"4 Chibi", L"4 Chibi", L"4 치비", L"4 小个子", L"4 صغير", L"4 Чиби", L"4 Chibi", L"4 Chibi", L"4 Chibi", L"4 Chibi", L"4 Chibi")
-R(TX_MDL_4, L"5 けもの", L"5 Beast", L"5 Bête", L"5 Bestia", L"5 Bestia", L"5 짐승", L"5 兽人", L"5 وحش", L"5 Зверь", L"5 Tier", L"5 Fera", L"5 Beest", L"5 Bestia", L"5 Yaratık")
+R(TX_MDL_3, L"4 ラテン系", L"4 Latino", L"4 Latino", L"4 Latino", L"4 Latino", L"4 라틴계", L"4 拉丁裔", L"4 لاتيني", L"4 Латиноамериканец", L"4 Latino", L"4 Latino", L"4 Latino", L"4 Latynos", L"4 Latin")
+R(TX_MDL_4, L"5 中東系", L"5 Middle Eastern", L"5 Moyen-Oriental", L"5 Mediorientale", L"5 Medio oriental", L"5 중동계", L"5 中东人", L"5 شرق أوسطي", L"5 Ближневосточный", L"5 Nahöstlich", L"5 Médio-oriental", L"5 Midden-Oosters", L"5 Bliskowschodni", L"5 Orta Doğulu")
+R(TX_MDL_5, L"6 南アジア系", L"6 South Asian", L"6 Sud-asiatique", L"6 Sudasiatico", L"6 Surasiático", L"6 남아시아계", L"6 南亚人", L"6 جنوب آسيوي", L"6 Южноазиатский", L"6 Südasiatisch", L"6 Sul-asiático", L"6 Zuid-Aziatisch", L"6 Południowoazjatycki", L"6 Güney Asyalı")
+R(TX_MDL_6, L"7 ポリネシア系", L"7 Polynesian", L"7 Polynésien", L"7 Polinesiano", L"7 Polinesio", L"7 폴리네시아계", L"7 波利尼西亚人", L"7 بولينيزي", L"7 Полинезиец", L"7 Polynesisch", L"7 Polinésio", L"7 Polynesisch", L"7 Polinezyjczyk", L"7 Polinezyalı")
 R(TX_BT_GUTS, L"根性", L"Guts", L"Cran", L"Tenacia", L"Aguante", L"근성", L"根性", L"صمود", L"Стойкость", L"Zähigkeit", L"Garra", L"Doorzetting", L"Wytrwałość", L"Direnç")
 R(TX_ARD_AREA, L"着弾点の周囲を焼く、狭い範囲の魔法。", L"A small blast around the impact.", L"Une petite explosion autour de l'impact.", L"Una piccola esplosione attorno all'impatto.", L"Una explosión pequeña alrededor del impacto.", L"착탄점 주위를 태우는 좁은 범위의 마법.", L"烧灼命中点周围的小范围魔法。", L"انفجار صغير حول موضع الإصابة.", L"Небольшой взрыв вокруг попадания.", L"Eine kleine Explosion um den Treffer.", L"Uma explosão pequena à volta do impacto.", L"Een kleine explosie rond de inslag.", L"Mały wybuch wokół trafienia.", L"İsabet noktasının çevresinde küçük bir patlama.")
 R(TX_ARD_HEAL, L"味方1人を回復する。", L"Restores one ally.", L"Soigne un allié.", L"Cura un alleato.", L"Cura a un aliado.", L"아군 1명을 회복한다.", L"治疗一名同伴。", L"يشفي حليفًا واحدًا.", L"Лечит одного союзника.", L"Heilt einen Verbündeten.", L"Cura um aliado.", L"Geneest één bondgenoot.", L"Leczy jednego sojusznika.", L"Bir yoldaşı iyileştirir.")
@@ -2248,6 +2253,28 @@ R(TX_SKD_ELDARK, L"武器の間合いで闇属性の連撃。弓なら射撃に�
 R(TX_SKD_ELWIND, L"武器の間合いで風属性の連撃。弓なら射撃になる。", L"A wind volley at weapon range. Bows shoot it.", L"Rafale de vent à portée d'arme. Les arcs tirent.", L"Raffica di vento a portata d'arma. Gli archi sparano.", L"Ráfaga de viento a alcance de arma. Los arcos disparan.", L"무기 사거리의 바람 연격. 활이면 사격.", L"以武器距离打出风连击。弓则为射击。", L"رصاص ريح بمدى السلاح. الأقواس تطلقها.", L"Ветряная очередь на дистанции оружия. Луки стреляют.", L"Windsalve auf Waffenreichweite. Bögen schießen.", L"Rajada de vento no alcance da arma. Arcos disparam.", L"Windsalvo op wapenbereik. Bogen schieten.", L"Wietrzna seria na zasięg broni. Łuki strzelają.", L"Silah menzilinde rüzgar yaylımı. Yaylar atar.")
 R(TX_SKD_ELEATH, L"武器の間合いで地属性の連撃。弓なら射撃になる。", L"An earth volley at weapon range. Bows shoot it.", L"Rafale de terre à portée d'arme. Les arcs tirent.", L"Raffica di terra a portata d'arma. Gli archi sparano.", L"Ráfaga de tierra a alcance de arma. Los arcos disparan.", L"무기 사거리의 땅 연격. 활이면 사격.", L"以武器距离打出地连击。弓则为射击。", L"رصاص أرض بمدى السلاح. الأقواس تطلقها.", L"Земляная очередь на дистанции оружия. Луки стреляют.", L"Erdsalve auf Waffenreichweite. Bögen schießen.", L"Rajada de terra no alcance da arma. Arcos disparam.", L"Aardesalvo op wapenbereik. Bogen schieten.", L"Ziemna seria na zasięg broni. Łuki strzelają.", L"Silah menzilinde toprak yaylımı. Yaylar atar.")
 R(TX_SKD_ELPOISON, L"武器の間合いで毒属性の連撃。毒を付与する。弓なら射撃になる。", L"A poison volley at weapon range. Poisons. Bows shoot it.", L"Rafale de poison à portée d'arme. Empoisonne. Les arcs tirent.", L"Raffica di veleno a portata d'arma. Avvelena. Gli archi sparano.", L"Ráfaga de veneno a alcance de arma. Envenena. Los arcos disparan.", L"무기 사거리의 독 연격. 독을 건다. 활이면 사격.", L"以武器距离打出毒连击并附毒。弓则为射击。", L"رصاص سم بمدى السلاح. يسمّم. الأقواس تطلقها.", L"Ядовитая очередь на дистанции оружия. Отравляет. Луки стреляют.", L"Giftsalve auf Waffenreichweite. Vergiftet. Bögen schießen.", L"Rajada de veneno no alcance da arma. Envenena. Arcos disparam.", L"Gifsalvo op wapenbereik. Vergiftigt. Bogen schieten.", L"Trująca seria na zasięg broni. Zatruwa. Łuki strzelają.", L"Silah menzilinde zehir yaylımı. Zehirler. Yaylar atar.")
+R(TX_CR_MOT_IDLE, L"待機", L"Idle", L"Repos", L"Attesa", L"Reposo", L"대기", L"待机", L"سكون", L"Покой", L"Ruhe", L"Pausa", L"Rust", L"Spokój", L"Bekle")
+R(TX_CR_MOT_WALK, L"歩く", L"Walk", L"Marche", L"Passo", L"Paso", L"걷기", L"行走", L"مشي", L"Шаг", L"Gang", L"Andar", L"Loop", L"Chód", L"Yürü")
+R(TX_CR_MOT_RUN, L"走る", L"Run", L"Course", L"Corsa", L"Corre", L"질주", L"奔跑", L"ركض", L"Бег", L"Lauf", L"Corre", L"Ren", L"Bieg", L"Koş")
+R(TX_CR_MOT_READY, L"構え", L"Ready", L"Garde", L"Guardia", L"Guardia", L"자세", L"架势", L"استعداد", L"Стойка", L"Haltung", L"Guarda", L"Houding", L"Postawa", L"Duruş")
+R(TX_CR_MOT_ATK, L"攻撃", L"Attack", L"Attaque", L"Attacco", L"Ataque", L"공격", L"攻击", L"هجوم", L"Атака", L"Schlag", L"Ataque", L"Aanval", L"Atak", L"Vuruş")
+R(TX_CR_MOT_ATK2, L"別技", L"Alt", L"Autre", L"Altro", L"Otro", L"별기", L"另招", L"أخرى", L"Иная", L"Zweit", L"Outro", L"Ander", L"Inna", L"Diğer")
+// ---------------------------------------------------------------- 開戦前のマップ確認
+R(TX_BT_SURVEY,
+	L"戦場を確認中 — 敵 %d 体　クリック/Enter/A でスキップ",
+	L"Surveying the field — %d enemies  Click/Enter/A to skip",
+	L"Reconnaissance du terrain — %d ennemis  Clic/Entrée/A pour passer",
+	L"Ricognizione del campo — %d nemici  Clic/Invio/A per saltare",
+	L"Reconociendo el campo — %d enemigos  Clic/Intro/A para omitir",
+	L"전장 확인 중 — 적 %d체  클릭/Enter/A로 건너뛰기",
+	L"正在侦察战场 — 敌人 %d 名　点击/Enter/A 跳过",
+	L"استطلاع ساحة المعركة — %d أعداء  انقر/Enter/A للتخطي",
+	L"Осмотр поля боя — врагов: %d  Клик/Enter/A — пропустить",
+	L"Erkunde das Schlachtfeld — %d Feinde  Klick/Enter/A zum Überspringen",
+	L"Reconhecendo o campo — %d inimigos  Clique/Enter/A para pular",
+	L"Slagveld verkennen — %d vijanden  Klik/Enter/A om over te slaan",
+	L"Rozpoznanie pola bitwy — wrogów: %d  Klik/Enter/A, by pominąć",
+	L"Savaş alanı inceleniyor — %d düşman  Atlamak için tıkla/Enter/A")
 
 };
 

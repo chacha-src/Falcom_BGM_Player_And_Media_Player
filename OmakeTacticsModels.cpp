@@ -1,5 +1,6 @@
 #include "stdafx.h"
 #include "OmakeTacticsModels.h"
+#include "OmakeTacticsData.h"
 #include <math.h>
 
 namespace otac {
@@ -1055,6 +1056,8 @@ static void ActorInit(Actor& a)
 	a.loop = a.ploop = 1;
 	a.blend = 1; a.blendDur = .15f;
 	a.animSpeed = 1;
+	a.skillPose = a.prevSkill = -1;
+	a.gripClip = -1;
 }
 
 static void AddWeapons(Actor& a, const Renderer& r, int wl)
@@ -1075,7 +1078,7 @@ static void AddWeapons(Actor& a, const Renderer& r, int wl)
 	}
 }
 
-void ActorFromChar(Actor& a, const Library& lib, const Renderer& r, const CharData& c)
+void ActorFromChar(Actor& a, Library& lib, Renderer& r, const CharData& c)
 {
 	ActorInit(a);
 	a.gait = GAIT_BIPED;
@@ -1088,9 +1091,11 @@ void ActorFromChar(Actor& a, const Library& lib, const Renderer& r, const CharDa
 	{
 		char humName[16];
 		sprintf_s(humName, a.female ? "HumF%d" : "HumM%d", CharModel(c));
+		r.EnsureBody(humName);
 		int hi = r.FindModel(humName);
 		if (hi < 0) {
 			const char* old = a.female ? ((a.body == B_MAGE) ? "HumWitch" : "HumMedieval") : ((a.body == B_KNIGHT) ? "HumKing" : "HumAdventurer");
+			r.EnsureBody(old);
 			hi = r.FindModel(old);
 		}
 		if (hi >= 0 && r.models[hi].nJ > 8) {
@@ -1099,6 +1104,16 @@ void ActorFromChar(Actor& a, const Library& lib, const Renderer& r, const CharDa
 			a.rig = r.models[hi].rig;
 			a.scale = .92f;
 			a.mods.Reset(r.models[hi].nJ);
+		}
+	}
+	if (a.proc == 3 && a.model >= 0 && a.model < (int)r.models.size() && r.models[a.model].headJ >= 0 && lib.humHairN < HUM_HAIR_N) {
+		int have = 0;
+		for (int k = 0; k < lib.humHairN; k++) if (lib.humHairModel[k] == a.model) have = 1;
+		if (!have) {
+			int slot = lib.humHairN++;
+			lib.humHairModel[slot] = a.model;
+			for (int s = 1; s < HAIR_STYLES; s++)
+				BuildHair(r, r.models[a.model], s, lib.humHair[slot][s], 2.2f, &lib.humHairV[slot][s], &lib.humHairPivot[slot][s]);
 		}
 	}
 	{
@@ -1241,11 +1256,13 @@ void ActorFromChar(Actor& a, const Library& lib, const Renderer& r, const CharDa
 		mulOwn("LowerArm.L", lm, 1.f, lm); mulOwn("lowerarm.l", lm, 1.f, lm);
 		mulOwn("LowerArm.R", lm, 1.f, lm); mulOwn("lowerarm.r", lm, 1.f, lm);
 		if (a.female && !a.avatar) {
-			static const float kBx[BUST_N] = { .94f, .98f, 1.04f, 1.10f, 1.16f };
-			static const float kBz[BUST_N] = { .96f, 1.00f, 1.06f, 1.12f, 1.20f };
+			// A〜H。旧 5 段の値は A・B・C・E・G に残し、間を埋める。
+			static const float kBx[BUST_N] = { .94f, .98f, 1.04f, 1.07f, 1.10f, 1.13f, 1.16f, 1.19f };
+			static const float kBy[BUST_N] = { .98f, 1.01f, 1.04f, 1.055f, 1.07f, 1.085f, 1.10f, 1.115f };
+			static const float kBz[BUST_N] = { .96f, 1.00f, 1.06f, 1.09f, 1.12f, 1.16f, 1.20f, 1.24f };
 			int b = CharBust(c);
-			mulOwn("Chest", kBx[b], 1.04f + (b - 2) * .03f, kBz[b]);
-			mulOwn("chest", kBx[b], 1.04f + (b - 2) * .03f, kBz[b]);
+			mulOwn("Chest", kBx[b], kBy[b], kBz[b]);
+			mulOwn("chest", kBx[b], kBy[b], kBz[b]);
 		}
 	}
 	a.height = (a.proc == 3 ? 1.75f : 2.35f) * a.scale * (a.proc == 3 && a.htScale > 0.05f ? a.htScale : 1.f);
@@ -1270,6 +1287,44 @@ void ActorFromChar(Actor& a, const Library& lib, const Renderer& r, const CharDa
 			int s = Clampi(a.hair, 0, HAIR_STYLES - 1);
 			a.mods.scale[hj] = v3(kHair[s][0], kHair[s][1], kHair[s][2]);
 			a.mods.any = 1;
+		}
+	}
+	// 持ち物のある手は、指を物の形に合わせた握り（Grip クリップのコマ）にする。手の骨か、その下の持ち手の骨に付いた物だけ。
+	if (a.proc == 3 && a.rig >= 0 && a.rig < (int)r.rigs.size()) {
+		const Rig& g = r.rigs[a.rig];
+		a.gripClip = g.FindClip("Grip");
+		for (int i = 0; i < a.nAtt + a.nGear && a.gripClip >= 0; i++) {
+			int j = i < a.nAtt ? a.attJ[i] : a.gearJ[i - a.nAtt];
+			int side = -1;
+			for (int p = j; p >= 0 && p < g.nJ && side < 0; p = g.parent[p]) {
+				if (p == m.handR) side = 0;
+				else if (p == m.handL) side = 1;
+			}
+			if (side < 0) continue;
+			int k = GRIP_NONE;
+			if (i < a.nAtt) {
+				const char* nm = r.attaches[a.att[i]].name;
+				if (strstr(nm, "Crossbow")) k = GRIP_TRIGGER;
+				else if (strstr(nm, "Bow")) k = GRIP_BOW;
+				else if (strstr(nm, "book") || strstr(nm, "Book")) k = GRIP_BOOK;
+				else if (strstr(nm, "Shield")) k = GRIP_SHIELD;
+				else if (strstr(nm, "Wand")) k = GRIP_WAND;
+				else if (strstr(nm, "Staff") || strstr(nm, "Spear")) k = GRIP_STAFF;
+				else if (strstr(nm, "Arrow") || strstr(nm, "Dart")) k = GRIP_PINCH;
+				else k = GRIP_FIST;
+			} else k = r.GearGrip(a.gearM[i - a.nAtt]);
+			// 盾と本は持ち手の補助、武器の握りを優先する。
+			if (k != GRIP_NONE && (a.grip[side] == GRIP_NONE || a.grip[side] == GRIP_SHIELD || a.grip[side] == GRIP_BOOK)) a.grip[side] = k;
+		}
+		for (int s = 0; s < 2; s++) {
+			if (!a.grip[s]) continue;
+			for (int j = 0; j < g.nJ && j < 64; j++) {
+				const char* nm = g.names[j];
+				size_t n = strlen(nm);
+				if (n < 3 || nm[n - 2] != '.' || nm[n - 1] != (s ? 'L' : 'R')) continue;
+				if (!strncmp(nm, "Index", 5) || !strncmp(nm, "Middle", 6) || !strncmp(nm, "Ring", 4) || !strncmp(nm, "Pinky", 5) || !strncmp(nm, "Thumb", 5))
+					a.gripMask[s] |= 1ull << j;
+			}
 		}
 	}
 }
@@ -1335,11 +1390,41 @@ void ActorFromMonster(Actor& a, const Library& lib, const Renderer& r, int monst
 void ActorPlay(Actor& a, int clip, int loop, float blendTime)
 {
 	if (clip == a.clip && loop && a.loop) return;
-	a.prev = a.clip; a.pt = a.t; a.ploop = a.loop;
+	a.prev = a.clip; a.pt = a.t; a.ploop = a.loop; a.prevSkill = a.skillPose;
 	a.clip = clip; a.t = 0; a.loop = loop;
 	a.blendDur = max(.001f, blendTime);
 	a.blend = blendTime <= 0 ? 1.f : 0.f;
 	if (loop && clip == CL_IDLE && a.proc == 3) a.t = a.idleOfs;
+}
+
+void ActorPreview(Actor& a, const Library& lib, const Renderer& r, int kind, int style, int idleClip, BOOL fly, BOOL giveWings, BOOL restart)
+{
+	if (kind < 0 || kind > 5) kind = 0;
+	a.animSpeed = kind == 2 ? 1.15f : 1.f;
+	a.skillPose = -1;
+	a.flap = 0.f;
+	if (fly && giveWings && a.wings <= 0) {
+		a.wings = 1;
+		if (a.hover < 0.2f) a.hover = 0.35f;
+	}
+	int clip = idleClip;
+	int loop = 1;
+	float blend = .12f;
+	BOOL hold = FALSE;
+	if (kind == 1 || kind == 2) {
+		clip = kind == 2 ? CL_RUN : CL_WALK;
+		if (fly) a.flap = 1.f;
+	} else if (kind >= 3) {
+		clip = AttackClipFor(style, kind == 5 ? 1 : 0);
+		if (kind == 3) { loop = 0; blend = .05f; hold = TRUE; }
+		else blend = .1f;
+	}
+	if (restart && loop) a.loop = 0;
+	ActorPlay(a, clip, loop, blend);
+	if (hold) {
+		a.t = ActorClipLen(a, lib, r, clip) * ActorWindup(a, r, clip);
+		a.animSpeed = 0.f;
+	}
 }
 
 void ActorUpdate(Actor& a, float dt)
@@ -1349,10 +1434,32 @@ void ActorUpdate(Actor& a, float dt)
 	if (a.blend < 1.f) a.blend = min(1.f, a.blend + dt / a.blendDur);
 }
 
-static int MonsterClip(const Renderer& r, int rig, int clip)
+static int MonsterClip(const Renderer& r, const Model& m, int clip, int skill)
 {
-	if (rig < 0 || rig >= (int)r.rigs.size()) return -1;
-	const Rig& g = r.rigs[rig];
+	if (m.rig < 0 || m.rig >= (int)r.rigs.size()) return -1;
+	const Rig& g = r.rigs[m.rig];
+	// 人体はモーションキャプチャで全部の型を持つので名前どおりに引き、スキルの範囲・効果・威力・属性で別の型に替える。
+	if (strncmp(m.name, "Hum", 3) == 0 && m.name[3] >= 'A' && m.name[3] <= 'Z' && clip >= 0 && clip < CL_COUNT) {
+		const char* alt = NULL;
+		if (skill >= 0 && skill < SKL_COUNT) {
+			const SkillDef& sd = SkillInfo(skill);
+			BOOL melee = clip == CL_1H_SLICE || clip == CL_1H_STAB || clip == CL_1H_CHOP || clip == CL_2H_CHOP || clip == CL_2H_SPIN || clip == CL_PUNCH;
+			if (sd.kind == SK_PHYS && melee) {
+				if (sd.shape == SH_LINE) alt = "Skill_Dash";
+				else if (sd.shape == SH_FAN) alt = "2H_Melee_Attack_Spin";
+				else if (sd.effect == EF_STUN || sd.effect == EF_SLOW || sd.effect == EF_DEFDOWN || sd.effect == EF_IGNDEF) alt = "Skill_Bash";
+				else if (sd.power >= 150) alt = "Skill_Heavy";
+			} else if (sd.kind == SK_MAGIC && clip == CL_CAST_SHOOT) {
+				if (sd.element == EL_FIRE) alt = "Cast_Throw";
+				else if (sd.element == EL_EARTH) alt = "Cast_Ground";
+				else if (sd.element == EL_THUNDER) alt = "Cast_Point";
+				else if (sd.element == EL_DARK) alt = "Cast_Claw";
+			} else if (sd.kind == SK_HEAL && clip == CL_CAST_RAISE) alt = "Cast_Heal";
+		}
+		int c = alt ? g.FindClip(alt) : -1;
+		if (c < 0) c = g.FindClip(kClipNames[clip]);
+		if (c >= 0) return c;
+	}
 	int want = clip;
 	if (want == CL_DODGE || want == CL_HIT_B) want = CL_HIT_A;
 	if (want == CL_THROW) want = CL_1H_SHOOT;
@@ -1373,11 +1480,33 @@ static int MonsterClip(const Renderer& r, int rig, int clip)
 	return c;
 }
 
+// 人体の物理スキルの型（突進・盾・大技）は 0.24 で構え、回転は 0.16。魔法の型は元の型と同じ時刻に作ってある。
+float ActorWindup(const Actor& a, const Renderer& r, int clip)
+{
+	if (a.proc == 3 && a.skillPose >= 0 && a.model >= 0 && a.model < (int)r.models.size()) {
+		const Model& m = r.models[a.model];
+		int ci = MonsterClip(r, m, clip, a.skillPose);
+		if (ci >= 0) {
+			const char* nm = r.rigs[m.rig].clips[ci].name;
+			if (strncmp(nm, "Skill_", 6) == 0) return 0.24f;
+			if (strcmp(nm, kClipNames[CL_2H_SPIN]) == 0) return 0.16f;
+		}
+	}
+	switch (clip) {
+	case CL_2H_SHOOT: case CL_1H_SHOOT: case CL_THROW: return 0.26f;
+	case CL_CAST_SHOOT: case CL_CAST_LONG: return 0.36f;
+	case CL_CAST_RAISE: return 0.32f;
+	case CL_2H_CHOP: case CL_1H_CHOP: return 0.30f;
+	case CL_2H_SPIN: return 0.16f;
+	default: return 0.22f;
+	}
+}
+
 float ActorClipLen(const Actor& a, const Library& lib, const Renderer& r, int clip)
 {
 	if (a.proc == 3) {
 		if (a.model < 0 || a.model >= (int)r.models.size()) return 1.f;
-		int ci = MonsterClip(r, r.models[a.model].rig, clip);
+		int ci = MonsterClip(r, r.models[a.model], clip, a.skillPose);
 		if (ci < 0) return 1.f;
 		return r.rigs[r.models[a.model].rig].clips[ci].Duration();
 	}
@@ -1420,37 +1549,186 @@ void ActorPose(Actor& a, const Library& lib, const Renderer& r)
 		if (a.model < 0 || a.model >= (int)r.models.size()) return;
 		const Model& m = r.models[a.model];
 		a.modelPtr = &m;
-		int ca = MonsterClip(r, m.rig, a.clip);
-		int cb = MonsterClip(r, m.rig, a.prev);
+		int ca = MonsterClip(r, m, a.clip, a.skillPose);
+		int cb = MonsterClip(r, m, a.prev, a.prevSkill);
 		r.EvalPose(m, ca, a.t, a.loop, cb, a.pt, a.ploop, a.blend, &a.mods, a.pose);
+		// 持ち物のある手の指だけ握りの型に替える。素手の指はクリップに捕った動きのまま。
+		if (a.gripClip >= 0 && m.rig >= 0 && m.rig < (int)r.rigs.size() && a.gripClip < (int)r.rigs[m.rig].clips.size() && (a.grip[0] || a.grip[1])) {
+			const Clip& gc = r.rigs[m.rig].clips[a.gripClip];
+			for (int s = 0; s < 2; s++) {
+				if (!a.grip[s] || a.grip[s] > gc.nFrames) continue;
+				const Q4* gq = &gc.q[(size_t)(a.grip[s] - 1) * m.nJ];
+				for (int j = 0; j < m.nJ && j < 64; j++) {
+					if (!(a.gripMask[s] >> j & 1)) continue;
+					V3 sc = m.restS[j];
+					if (a.mods.any) { sc.x *= a.mods.scale[j].x; sc.y *= a.mods.scale[j].y; sc.z *= a.mods.scale[j].z; }
+					a.pose.local[j] = MTRS(m.restT[j], gq[j], sc);
+				}
+			}
+			r.FinishPose(m, a.pose, &a.mods);
+		}
+		a.poseValid = 1;
+	} else if (a.proc == 2) {
 		a.poseValid = 1;
 		return;
-	}
-	if (a.proc == 2) { a.poseValid = 1; return; }
-	if (a.model < 0 || a.model >= (int)r.models.size()) return;
-	const Model& m = r.models[a.model];
-	a.modelPtr = &m;
-	if (a.proc) {
-		Q4 rot[MAXJ], rotB[MAXJ];
-		V3 tr[MAXJ], trB[MAXJ];
-		PoseMods pm, pmB;
-		ProcAnim(a.look, a.clip, a.t, rot, tr, pm, m.nJ);
-		if (a.blend < 1.f) {
-			ProcAnim(a.look, a.prev, a.pt, rotB, trB, pmB, m.nJ);
-			for (int j = 0; j < m.nJ; j++) {
-				rot[j] = QNlerp(rotB[j], rot[j], a.blend);
-				tr[j] = Lerp(trB[j], tr[j], a.blend);
-				pm.scale[j] = Lerp(pmB.scale[j], pm.scale[j], a.blend);
-			}
-			pm.any |= pmB.any;
-		}
-		r.EvalPoseLocal(m, rot, tr, &pm, a.pose);
 	} else {
-		if (a.rig < 0 || a.rig >= 4) return;
-		int ca = lib.clipMap[a.rig][a.clip], cb = lib.clipMap[a.rig][a.prev];
-		r.EvalPose(m, ca, a.t, a.loop, cb, a.pt, a.ploop, a.blend, &a.mods, a.pose);
+		if (a.model < 0 || a.model >= (int)r.models.size()) return;
+		const Model& m = r.models[a.model];
+		a.modelPtr = &m;
+		if (a.proc) {
+			Q4 rot[MAXJ], rotB[MAXJ];
+			V3 tr[MAXJ], trB[MAXJ];
+			PoseMods pm, pmB;
+			ProcAnim(a.look, a.clip, a.t, rot, tr, pm, m.nJ);
+			if (a.blend < 1.f) {
+				ProcAnim(a.look, a.prev, a.pt, rotB, trB, pmB, m.nJ);
+				for (int j = 0; j < m.nJ; j++) {
+					rot[j] = QNlerp(rotB[j], rot[j], a.blend);
+					tr[j] = Lerp(trB[j], tr[j], a.blend);
+					pm.scale[j] = Lerp(pmB.scale[j], pm.scale[j], a.blend);
+				}
+				pm.any |= pmB.any;
+			}
+			r.EvalPoseLocal(m, rot, tr, &pm, a.pose);
+		} else {
+			if (a.rig < 0 || a.rig >= 4) return;
+			int ca = lib.clipMap[a.rig][a.clip], cb = lib.clipMap[a.rig][a.prev];
+			r.EvalPose(m, ca, a.t, a.loop, cb, a.pt, a.ploop, a.blend, &a.mods, a.pose);
+		}
+		a.poseValid = 1;
 	}
-	a.poseValid = 1;
+	// スキルごとに腕の軌道を作る。数種のクリップを使い回すと、詠唱も斬りも同じに見える。
+	// 人体はモーションキャプチャのスキル別の型を引くので、腕を作り直すと捕った動きが消える。
+	BOOL combat = a.clip == CL_1H_CHOP || a.clip == CL_1H_SLICE || a.clip == CL_1H_STAB || a.clip == CL_2H_CHOP || a.clip == CL_2H_SPIN
+		|| a.clip == CL_1H_SHOOT || a.clip == CL_2H_SHOOT || a.clip == CL_CAST_SHOOT || a.clip == CL_CAST_RAISE || a.clip == CL_CAST_LONG
+		|| a.clip == CL_THROW || a.clip == CL_PUNCH;
+	if (!a.poseValid || a.skillPose < 0 || !combat || a.model < 0 || a.model >= (int)r.models.size()) return;
+	const Model& sm = r.models[a.model];
+	if (sm.rig < 0 || sm.rig >= (int)r.rigs.size() || sm.nJ <= 0) return;
+	if (strncmp(sm.name, "Hum", 3) == 0 && sm.name[3] >= 'A' && sm.name[3] <= 'Z') return;
+	const Rig& rg = r.rigs[sm.rig];
+	const SkillDef& sd = SkillInfo(a.skillPose);
+	float len = ActorClipLen(a, lib, r, a.clip);
+	if (len < 0.05f) len = 0.05f;
+	float u = a.t / len;
+	if (u < 0.f) u = 0.f;
+	if (u > 1.f) u = 1.f;
+	int id = a.skillPose;
+	int el = sd.element;
+	if (el < 0) el = 0;
+	int kind = sd.kind;
+	int shape = sd.shape;
+	int ef = sd.effect;
+	if (ef < 0) ef = 0;
+	int pw = sd.power;
+	if (pw < 0) pw = 0;
+	int magic = kind != SK_PHYS;
+	int heal = kind == SK_HEAL || kind == SK_BUFF;
+	int hits = sd.hits;
+	if (hits < 1) hits = 1;
+	if (hits > 6) hits = 6;
+	int shoot = a.clip == CL_1H_SHOOT || a.clip == CL_2H_SHOOT;
+	// ダメージの瞬間は戦闘側の割合に合わせる。射撃は矢を放つ時刻、魔法は詠唱が解ける時刻。
+	float hitU = shoot ? 0.32f : (magic ? 0.40f : 0.42f);
+	float wind = hitU * (0.38f + 0.22f * (float)((id * 3 + el + hits) % 7) / 6.f);
+	if (wind < 0.08f) wind = 0.08f;
+	if (hitU - wind < 0.06f) wind = hitU - 0.06f;
+	float env;
+	if (u < wind) env = -Smooth01(u / wind);
+	else if (u < hitU) env = -1.f + 2.f * Smooth01((u - wind) / (hitU - wind));
+	else env = 1.f - Smooth01((u - hitU) / (1.f - hitU));
+	if (hits > 1 && u > hitU) {
+		float gap = 0.36f;
+		int n = (int)((u - hitU) / gap);
+		if (n < hits - 1) {
+			float local = (u - hitU - n * gap) / gap;
+			float pulse = local < 0.42f ? -Smooth01(local / 0.42f) : Smooth01((local - 0.42f) / 0.58f);
+			env = env * 0.35f + pulse * 0.65f;
+		}
+	}
+	// 同じクリップでも、スキルの番号・属性・範囲・効果・威力で腕の軌道が別になる。
+	auto vary = [&](int salt, float lo, float hi) -> float {
+		unsigned h = (unsigned)(id * 131 + el * 17 + kind * 7 + shape * 11 + ef * 13 + (pw & 255) * 3 + hits * 19 + salt * 97);
+		h ^= h >> 13; h *= 0x5bd1e995u; h ^= h >> 15;
+		return lo + (hi - lo) * ((h & 1023u) / 1023.f);
+	};
+	float xRc, zRc, eRc, tRc, wRc, xRs, zRs, eRs, tRs, wRs;
+	float xLc, zLc, eLc, xLs, zLs, eLs;
+	if (heal) {
+		xRc = vary(1, 0.35f, 0.7f); zRc = vary(2, 0.02f, 0.2f); eRc = vary(3, 1.7f, 2.2f); tRc = vary(4, 0.4f, 1.1f); wRc = vary(5, -0.2f, 0.2f);
+		xRs = vary(6, 2.1f, 2.6f); zRs = vary(7, 0.35f, 0.7f); eRs = vary(8, 0.05f, 0.35f); tRs = vary(9, 0.0f, 0.4f); wRs = vary(10, -0.15f, 0.3f);
+		xLc = xRc; zLc = zRc; eLc = eRc; xLs = xRs; zLs = zRs; eLs = eRs;
+	} else if (magic) {
+		xRc = vary(1, 0.75f, 1.55f); zRc = vary(2, -0.15f, 0.45f); eRc = vary(3, 1.15f, 1.9f); tRc = vary(4, 0.2f, 0.9f); wRc = vary(5, -0.3f, 0.35f);
+		xRs = vary(6, 0.9f, 1.7f); zRs = vary(7, -0.2f, 0.55f); eRs = vary(8, 0.35f, 1.15f); tRs = vary(9, -0.2f, 0.5f); wRs = vary(10, -0.4f, 0.45f);
+		xLc = xRc + vary(11, -0.15f, 0.15f); zLc = zRc; eLc = eRc + vary(12, -0.1f, 0.1f);
+		xLs = xRs + vary(13, -0.2f, 0.2f); zLs = zRs; eLs = eRs;
+	} else if (shape == SH_LINE) {
+		xRc = vary(1, 1.15f, 1.7f); zRc = vary(2, -0.15f, 0.25f); eRc = vary(3, 0.55f, 1.15f); tRc = vary(4, -0.2f, 0.35f); wRc = vary(5, -0.45f, 0.15f);
+		xRs = vary(6, 1.25f, 1.75f); zRs = vary(7, -0.12f, 0.12f); eRs = vary(8, 0.02f, 0.28f); tRs = vary(9, -0.15f, 0.25f); wRs = vary(10, -0.2f, 0.35f);
+		xLc = vary(14, 0.25f, 0.7f); zLc = vary(15, 0.15f, 0.55f); eLc = vary(16, 0.7f, 1.3f);
+		xLs = vary(17, 0.15f, 0.55f); zLs = vary(18, 0.05f, 0.4f); eLs = vary(19, 0.45f, 0.95f);
+	} else if (shape == SH_FAN) {
+		xRc = vary(1, 2.2f, 2.9f); zRc = vary(2, 0.7f, 1.5f); eRc = vary(3, 0.7f, 1.45f); tRc = vary(4, 0.1f, 0.7f); wRc = vary(5, -0.5f, 0.2f);
+		xRs = vary(6, 0.45f, 1.15f); zRs = vary(7, -1.35f, -0.35f); eRs = vary(8, 0.05f, 0.4f); tRs = vary(9, -0.3f, 0.3f); wRs = vary(10, -0.35f, 0.4f);
+		xLc = vary(14, 1.4f, 2.4f); zLc = vary(15, 0.4f, 1.2f); eLc = vary(16, 0.5f, 1.2f);
+		xLs = vary(17, 0.5f, 1.3f); zLs = vary(18, -0.8f, 0.2f); eLs = vary(19, 0.15f, 0.7f);
+	} else {
+		xRc = vary(1, 1.6f, 2.85f); zRc = vary(2, -0.35f, 1.25f); eRc = vary(3, 0.45f, 1.5f); tRc = vary(4, -0.25f, 0.8f); wRc = vary(5, -0.55f, 0.45f);
+		xRs = vary(6, 0.25f, 1.45f); zRs = vary(7, -1.15f, 0.35f); eRs = vary(8, 0.02f, 0.5f); tRs = vary(9, -0.35f, 0.4f); wRs = vary(10, -0.4f, 0.5f);
+		xLc = vary(14, 0.2f, 1.1f); zLc = vary(15, 0.05f, 0.8f); eLc = vary(16, 0.4f, 1.25f);
+		xLs = vary(17, 0.1f, 0.9f); zLs = vary(18, -0.3f, 0.45f); eLs = vary(19, 0.2f, 0.9f);
+	}
+	float wob = sinf(u * 3.14159265f * (1.f + (float)((id + hits) % 4)));
+	xRc += wob * vary(20, -0.08f, 0.08f);
+	zRs += wob * vary(21, -0.06f, 0.06f);
+	auto mix = [&](float chamber, float strike) {
+		if (env < 0.f) return chamber * (-env);
+		return strike * env;
+	};
+	float fade = Smooth01(a.blend);
+	auto putArm = [&](int j, float pitch, float yaw, float roll) {
+		if (j < 0 || j >= sm.nJ || j >= a.pose.nJ) return;
+		M4 rest = MTRS(v3(0, 0, 0), sm.restR[j], sm.restS[j]);
+		M4 sp = MMul(MMul(MRotY(yaw), MRotX(pitch)), MRotZ(roll));
+		M4 S = MMul(rest, sp);
+		S.m[12] = sm.restT[j].x; S.m[13] = sm.restT[j].y; S.m[14] = sm.restT[j].z;
+		M4 C = a.pose.local[j];
+		if (fade < 0.999f) {
+			for (int k = 0; k < 16; k++) S.m[k] = C.m[k] + (S.m[k] - C.m[k]) * fade;
+		}
+		a.pose.local[j] = S;
+	};
+	auto addBone = [&](int j, float pitch, float yaw) {
+		if (j < 0 || j >= a.pose.nJ) return;
+		M4 L = a.pose.local[j];
+		float tx = L.m[12], ty = L.m[13], tz = L.m[14];
+		L.m[12] = L.m[13] = L.m[14] = 0.f;
+		L = MMul(L, MMul(MRotY(yaw * fade), MRotX(pitch * fade)));
+		L.m[12] = tx; L.m[13] = ty; L.m[14] = tz;
+		a.pose.local[j] = L;
+	};
+	float xR = mix(xRc, xRs), zR = mix(zRc, zRs), eR = mix(eRc, eRs), tR = mix(tRc, tRs), wR = mix(wRc, wRs);
+	float xL = mix(xLc, xLs), zL = mix(zLc, zLs), eL = mix(eLc, eLs);
+	if (eR < 0.f) eR = 0.f;
+	if (eL < 0.f) eL = 0.f;
+	int uR = rg.Find("UpperArm.R"), uL = rg.Find("UpperArm.L");
+	int fR = rg.Find("LowerArm.R"), fL = rg.Find("LowerArm.L");
+	int hR = rg.Find("Hand.R"), hL = rg.Find("Hand.L");
+	int sR = rg.Find("Shoulder.R"), sL = rg.Find("Shoulder.L");
+	if (uR >= 0) putArm(uR, xR, tR * -1.f, zR);
+	if (fR >= 0) putArm(fR, eR, 0.f, 0.f);
+	if (hR >= 0) putArm(hR, wR, 0.f, 0.f);
+	if (uL >= 0) putArm(uL, xL, tR, -zL);
+	if (fL >= 0) putArm(fL, eL, 0.f, 0.f);
+	if (hL >= 0) putArm(hL, wR * 0.6f, 0.f, 0.f);
+	float shR = 0.22f * (xR > 1.5f ? xR - 1.5f : 0.f);
+	float shL = 0.22f * (xL > 1.5f ? xL - 1.5f : 0.f);
+	if (sR >= 0) putArm(sR, shR, 0.f, 0.22f * (zR > 1.2f ? zR - 1.2f : 0.f));
+	if (sL >= 0) putArm(sL, shL, 0.f, -0.22f * (zL > 1.2f ? zL - 1.2f : 0.f));
+	addBone(rg.Find("Chest"), mix(heal ? -0.12f : (magic ? 0.08f : 0.24f), heal ? 0.22f : (magic ? -0.22f : -0.38f)) + vary(22, -0.06f, 0.06f), mix(vary(23, -0.18f, 0.18f), zR * 0.22f));
+	addBone(rg.Find("Head"), mix(heal ? -0.4f : (magic ? 0.16f : 0.1f), heal ? 0.28f : (magic ? -0.08f : -0.16f)) + vary(24, -0.05f, 0.05f), mix(vary(25, -0.12f, 0.12f), -zR * 0.12f));
+	r.FinishPose(sm, a.pose, &a.mods);
 }
 
 M4 ActorWorld(const Actor& a, V3 pos, float face)
@@ -1584,7 +1862,7 @@ static M4 FitWorld(const M4& g, V3 y, V3 z, V3 at, float sx, float sy, float sz)
 	return MMul(MScale(sx, sy, sz), MMul(MBasis(x, oy, oz, at), MInverse(g)));
 }
 
-static M4 HumanGearFit(const Pose& pose, int joint, const char* name, const char* jointName, const M4& bindG, const M4* armorD = NULL, BOOL bowMesh = FALSE, const V3* gripLocal = NULL, BOOL neo = FALSE)
+static M4 HumanGearFit(const Pose& pose, int joint, const char* name, const char* jointName, const M4& bindG, const M4* armorD = NULL, BOOL bowMesh = FALSE, const V3* gripLocal = NULL, BOOL neo = FALSE, const V3* axisLocal = NULL)
 {
 	if (joint < 0 || joint >= pose.nJ) return MScale(0.4f, 0.4f, 0.4f);
 	const M4& g = pose.global[joint];
@@ -1646,7 +1924,7 @@ static M4 HumanGearFit(const Pose& pose, int joint, const char* name, const char
 			V3 bpos = v3(bindG.m[12], bindG.m[13], bindG.m[14]);
 			V3 balong = Norm(v3(bindG.m[4], bindG.m[5], bindG.m[6]));
 			V3 bdorsal = Norm(v3(bindG.m[8], bindG.m[9], bindG.m[10]));
-			V3 hold = bpos + balong * 0.02f - bdorsal * 0.012f;
+			V3 hold = gripLocal ? MXformPt(bindG, *gripLocal) - bdorsal * 0.012f : bpos + balong * 0.02f - bdorsal * 0.012f;
 			return FitWorld(bindG, balong, bdorsal * -1.f, hold, sc * 0.75f, sc, sc * 0.42f);
 		}
 		return FitWorld(g, carry(up), carry(face), palm, 0.40f, 0.40f, 0.40f);
@@ -1655,7 +1933,9 @@ static M4 HumanGearFit(const Pose& pose, int joint, const char* name, const char
 		V3 bpos = v3(bindG.m[12], bindG.m[13], bindG.m[14]);
 		V3 balong = Norm(v3(bindG.m[4], bindG.m[5], bindG.m[6]));
 		V3 bdorsal = Norm(v3(bindG.m[8], bindG.m[9], bindG.m[10]));
-		return FitWorld(bindG, balong, up, bpos + balong * 0.04f - bdorsal * 0.015f, 0.22f, 0.22f, 0.22f);
+		if (axisLocal && Len(*axisLocal) > 1e-4f) balong = Norm(MXformDir(bindG, *axisLocal));
+		V3 hold = gripLocal ? MXformPt(bindG, *gripLocal) : bpos + balong * 0.04f - bdorsal * 0.015f;
+		return FitWorld(bindG, balong, up, hold, 0.22f, 0.22f, 0.22f);
 	}
 	if (bowMesh) {
 		// 弓は握りの線（拳の指の付け根の並び）に沿って立て、弦（メッシュ +X）を射手側へ。握りは弓の中央。
@@ -1663,11 +1943,15 @@ static M4 HumanGearFit(const Pose& pose, int joint, const char* name, const char
 		return FitWorld(g, y, Cross(x, y), grip - y * 0.09f, 0.36f, 0.36f, 0.36f);
 	}
 	if (NameHas(name, "Crossbow")) {
-		// 弩は銃床を前腕に沿わせる。下げた手では下を、構えた腕では前を向く。
+		// 弩は銃床を前腕に沿わせる。拳のメッシュを貫く軸があれば、それに乗せる。
+		if (axisLocal && Len(*axisLocal) > 1e-4f)
+			return FitWorld(g, Norm(MXformDir(g, *axisLocal)), dorsal, grip, 0.36f, 0.36f, 0.36f);
 		V3 down = Norm(by - face * Dot(by, face));
 		return FitWorld(g, carry(down), carry(face), grip, 0.36f, 0.36f, 0.36f);
 	}
-	// 剣の柄は掌を斜めに横切る。腕を前へ出すと刃は前上がりになる。
+	// 柄は拳の中を、肘から指先へ抜ける。骨の中指平均はメッシュの拳から外れる。
+	if (axisLocal && Len(*axisLocal) > 1e-4f)
+		return FitWorld(g, Norm(MXformDir(g, *axisLocal)), dorsal, grip, 0.36f, 0.36f, 0.36f);
 	return FitWorld(g, Norm(carry(Norm(face + v3(0, -0.6f, 0)))), carry(up), grip, 0.36f, 0.36f, 0.36f);
 }
 
@@ -1731,7 +2015,7 @@ void ActorDraw(Renderer& r, const Library& lib, Actor& a, const M4& world, const
 		if (humM && (strncmp(humM->name, "HumF", 4) == 0 || strncmp(humM->name, "HumM", 4) == 0) && humM->name[4] >= '0' && humM->name[4] <= '9') digitBody = TRUE;
 		if (digitBody) {
 			int ix = humM->name[4] - '0';
-			if (ix >= 0 && ix <= 2) d.skinTone = ix + 1;
+			if (ix >= 0 && ix < MODEL_N) d.skinTone = ix + 1;
 		}
 		d.hideMeshHair = (hum && a.hair > 0) ? 1 : 0;
 		BOOL ava = FALSE;
@@ -1745,7 +2029,7 @@ void ActorDraw(Renderer& r, const Library& lib, Actor& a, const M4& world, const
 		}
 		if (hum && avaId > 0) {
 			d.clothTint = a.avaTint;
-			ava = r.DrawAvatar(a.model, avaId, a.bust, a.pose, world, d);
+			ava = r.DrawAvatar(a.model, avaId, a.bust, a.pose, world, d, &a);
 		}
 		if (!ava) {
 			d.clothTint = 0;
@@ -1759,8 +2043,20 @@ void ActorDraw(Renderer& r, const Library& lib, Actor& a, const M4& world, const
 			if (humM && j >= 0 && j < humM->nJ) return MInverse(humM->invBind[j]);
 			return a.pose.global[j];
 		};
-		// 握りの中心＝その手の中指の関節の平均（手の骨の空間）。
-		auto gripOf = [&](int j, const char* jn, V3& out) -> BOOL {
+		// 握りの中心は拳のメッシュ。中指の関節は指の付け根から先に並び、柄の通る掌の中からは外れる。
+		auto gripOf = [&](int j, const char* jn, V3& out, V3& axis) -> BOOL {
+			axis = v3(0, 1, 0);
+			if (humM && j >= 0 && (j == humM->handR || j == humM->handL)) {
+				int bit = j == humM->handR ? 1 : 2;
+				if (humM->palmOk & bit) {
+					const float* p = j == humM->handR ? humM->palmR : humM->palmL;
+					const float* ax = j == humM->handR ? humM->axisR : humM->axisL;
+					out = v3(p[0], p[1], p[2]);
+					axis = v3(ax[0], ax[1], ax[2]);
+					if (Len(axis) < 1e-4f) axis = v3(0, 1, 0);
+					return TRUE;
+				}
+			}
 			if (!humM || !jn || j < 0 || j >= humM->nJ || a.rig < 0 || a.rig >= (int)r.rigs.size()) return FALSE;
 			const char* dot = strrchr(jn, '.');
 			if (!dot || !(NameHas(jn, "Hand") || NameHas(jn, "hand"))) return FALSE;
@@ -1794,9 +2090,9 @@ void ActorDraw(Renderer& r, const Library& lib, Actor& a, const M4& world, const
 			const char* nm = r.attaches[a.att[i]].name;
 			const char* jn = (hum && a.rig >= 0 && a.attJ[i] >= 0 && a.attJ[i] < r.rigs[a.rig].nJ) ? r.rigs[a.rig].names[a.attJ[i]] : NULL;
 			if (hum) {
-				V3 gl;
-				BOOL hasGrip = gripOf(a.attJ[i], jn, gl);
-				M4 fit = HumanGearFit(a.pose, a.attJ[i], nm, jn, bindOf(a.attJ[i]), NULL, FALSE, hasGrip ? &gl : NULL, digitBody);
+				V3 gl, ax;
+				BOOL hasGrip = gripOf(a.attJ[i], jn, gl, ax);
+				M4 fit = HumanGearFit(a.pose, a.attJ[i], nm, jn, bindOf(a.attJ[i]), NULL, FALSE, hasGrip ? &gl : NULL, digitBody, hasGrip ? &ax : NULL);
 				if (digitBody && nm && NameHas(nm, "Cape")) {
 					V3 nk;
 					if (bindPt("Neck", nk)) {
@@ -1827,8 +2123,8 @@ void ActorDraw(Renderer& r, const Library& lib, Actor& a, const M4& world, const
 					float sz = 0.29f / 0.81f;
 					if (a.female) {
 						// 胸当ては胸の大きさに合わせて前へ張り出す（体の Chest 拡大と同じ段階）。
-						static const float kArmZ[BUST_N] = { .92f, .97f, 1.06f, 1.22f, 1.40f };
-						static const float kArmX[BUST_N] = { .97f, .99f, 1.02f, 1.06f, 1.10f };
+						static const float kArmZ[BUST_N] = { .92f, .97f, 1.06f, 1.14f, 1.22f, 1.31f, 1.40f, 1.49f };
+						static const float kArmX[BUST_N] = { .97f, .99f, 1.02f, 1.04f, 1.06f, 1.08f, 1.10f, 1.12f };
 						int b = Clampi(a.bust, 0, BUST_N - 1);
 						sz *= kArmZ[b];
 						sx *= kArmX[b];
@@ -1842,9 +2138,9 @@ void ActorDraw(Renderer& r, const Library& lib, Actor& a, const M4& world, const
 					} else armorD = MMul(MScale(sx, sy, sz), MTrans(0.f, (top + bot) * .5f, ch.z - 0.05f));
 					pd = &armorD;
 				}
-				V3 gl;
-				BOOL hasGrip = gripOf(a.gearJ[i], jn, gl);
-				M4 fit = HumanGearFit(a.pose, a.gearJ[i], NULL, jn, bindOf(a.gearJ[i]), pd, r.GearIsBow(a.gearM[i]), hasGrip ? &gl : NULL, neoB);
+				V3 gl, ax;
+				BOOL hasGrip = gripOf(a.gearJ[i], jn, gl, ax);
+				M4 fit = HumanGearFit(a.pose, a.gearJ[i], NULL, jn, bindOf(a.gearJ[i]), pd, r.GearIsBow(a.gearM[i]), hasGrip ? &gl : NULL, neoB, hasGrip ? &ax : NULL);
 				r.DrawGear(a.gearM[i], MMul(MMul(fit, a.pose.global[a.gearJ[i]]), wGear), da);
 			} else r.DrawGear(a.gearM[i], MMul(a.pose.global[a.gearJ[i]], wGear), da);
 		}

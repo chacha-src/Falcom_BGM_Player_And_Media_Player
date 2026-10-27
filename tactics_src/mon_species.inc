@@ -1,4 +1,4 @@
-static const int kImportN = 188;
+static const int kImportN = 192;
 static const wchar_t* const kImportName[kImportN] = {
 	L"Acornweevil",
 	L"AmberElderwood",
@@ -188,6 +188,10 @@ static const wchar_t* const kImportName[kImportN] = {
 	L"HumM3",
 	L"HumF4",
 	L"HumM4",
+	L"HumF5",
+	L"HumM5",
+	L"HumF6",
+	L"HumM6",
 };
 static const unsigned char kImportFly[kImportN] = {
 	0,
@@ -362,6 +366,10 @@ static const unsigned char kImportFly[kImportN] = {
 	0,
 	0,
 	1,
+	0,
+	0,
+	0,
+	0,
 	0,
 	0,
 	0,

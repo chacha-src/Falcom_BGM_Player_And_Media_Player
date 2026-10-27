@@ -170,6 +170,8 @@ private:
 	void DrawCreateUi();
 	void DrawCreate3D();
 	void RefreshPreview();
+	void PlayShown(Actor& a, int& mot, int style, int idleClip, BOOL fly, BOOL giveWings, BOOL restart);
+	int DrawMotRow(int id0, float cx, float y, float avail, int mot, BOOL alt);
 	int CreateClassList(int* out) const;
 
 	// 編成
@@ -304,6 +306,7 @@ private:
 	int m_monSel;
 	float m_monYaw;
 	int m_monShown;
+	int m_monMot;            // 0待機 1歩き 2走り 3構え 4攻撃 5別技
 	BOOL m_monDrag;
 	Actor m_monAct;
 	int m_codexJob;          // 0=全職。以降は職、末尾は陣形
@@ -318,6 +321,10 @@ private:
 
 	// カメラ
 	V3 m_camTarget, m_camGoal;
+	// 開戦前のマップ確認。16x16 マスの区画を蛇行で 0.5 秒ずつ見て、自軍の側で終わる。
+	enum { SURVEY_BLK = 16, SURVEY_MAX = (MAPN / SURVEY_BLK) * (MAPN / SURVEY_BLK) };
+	V3 m_surveyPt[SURVEY_MAX];
+	int m_surveyN;
 	float m_camYaw, m_camYawGoal, m_camPitch, m_camDist, m_camDistGoal;
 	BOOL m_zoomHold;
 	float m_zoomDist;
@@ -391,8 +398,11 @@ private:
 	float m_previewYaw;
 	float m_previewPitch;
 	float m_previewZoom;
+	V3 m_previewPan;
 	int m_lineage;
 	BOOL m_previewDrag;
+	BOOL m_previewPanDrag;
+	int m_previewMot;  // 0待機 1歩き 2走り 3構え 4攻撃 5別技
 
 	// 編成
 	int m_partySel;

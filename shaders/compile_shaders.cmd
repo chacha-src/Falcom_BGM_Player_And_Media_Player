@@ -18,7 +18,7 @@ for %%F in (
   gpu_vs_rect gpu_ps_rect gpu_vs_piano gpu_cs_hex gpu_cs_glyph
   maze_vst maze_hst maze_dst maze_psw maze_vss maze_pss maze_vsh maze_psh maze_vsq maze_ssr maze_dofp maze_fin maze_psline maze_psmirf maze_pscloud maze_csfx maze_gsw maze_vsskin maze_cssub
   race_vst race_hst race_dst race_psb race_vss race_pss race_vsh race_psh race_vsq race_ssr race_dofp race_fin race_csnoise race_psc race_psline race_pst race_vssi race_psw race_pscloud race_gsw race_vsw race_csgridc race_csgridw
-  tac_vss tac_vsk tac_psm tac_pso tac_psov tac_vsh tac_psh tac_vsp tac_psp tac_vsq tac_pssky tac_csskin tac_psbloom tac_psblur tac_psgrade tac_psui tac_psg0 tac_psg1 tac_psg2 tac_psg3 tac_psg4 tac_psg5 tac_psg6 tac_psg7 tac_psprop tac_pswater tac_pslava
+  tac_vss tac_vsk tac_psm tac_pso tac_psov tac_vsh tac_psh tac_vsp tac_psp tac_vsq tac_pssky tac_csskin tac_csclths tac_csclthr tac_csclthw tac_psbloom tac_psblur tac_psgrade tac_psui tac_psg0 tac_psg1 tac_psg2 tac_psg3 tac_psg4 tac_psg5 tac_psg6 tac_psg7 tac_psprop tac_pswater tac_pslava
 ) do if not exist res\cso\%%F.cso goto :needfxc
 powershell -NoProfile -Command "if (-not (Get-Item -ErrorAction SilentlyContinue res\cso\*.cso)) { exit 1 }; $h = @(Get-Item shaders\*.hlsl); $c = @(Get-Item res\cso\*.cso); if (($c | Measure-Object LastWriteTime -Minimum).Minimum -ge ($h | Measure-Object LastWriteTime -Maximum).Maximum) { exit 0 } else { exit 1 }"
 if not errorlevel 1 (
@@ -152,6 +152,12 @@ if errorlevel 1 exit /b 1
 call :cc ps_5_0 PSSKY shaders\omake_tactics.hlsl tac_PSSKY tac_pssky
 if errorlevel 1 exit /b 1
 call :cc cs_5_0 CSSkin shaders\omake_tactics_skin.hlsl tac_CSSkin tac_csskin
+if errorlevel 1 exit /b 1
+call :cc cs_5_0 CSClothStep shaders\omake_tactics_cloth.hlsl tac_CSClothStep tac_csclths
+if errorlevel 1 exit /b 1
+call :cc cs_5_0 CSClothRelax shaders\omake_tactics_cloth.hlsl tac_CSClothRelax tac_csclthr
+if errorlevel 1 exit /b 1
+call :cc cs_5_0 CSClothWrite shaders\omake_tactics_cloth.hlsl tac_CSClothWrite tac_csclthw
 if errorlevel 1 exit /b 1
 call :cc ps_5_0 PSBloom shaders\omake_tactics.hlsl tac_PSBloom tac_psbloom
 if errorlevel 1 exit /b 1
