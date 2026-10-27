@@ -3621,7 +3621,7 @@ void Game::DrawCreateUi()
 	yy += rh + gap;
 	{
 		const int g = m_edit.gender ? 1 : 0;
-		const int nMax = g ? TX_AVA_F20 - TX_AVA_F0 + 1 : TX_AVA_M12 - TX_AVA_M0 + 1;
+		const int nMax = g ? TX_AVA_F31 - TX_AVA_F0 + 1 : TX_AVA_M18 - TX_AVA_M0 + 1;
 		int n = Clampi(m_r.AvatarCount(g), 0, nMax) + 1;
 		int av = Clampi(CharAvatar(m_edit), 0, n - 1);
 		int tx = av == 0 ? TX_AVA_NONE : (g ? TX_AVA_F0 : TX_AVA_M0) + av - 1;

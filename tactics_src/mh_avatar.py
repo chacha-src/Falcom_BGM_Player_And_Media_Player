@@ -407,7 +407,8 @@ def load_clo(item):
     lic = [l for l in t if re.match(r"^#\s*license", l, re.I)]
     c.license = lic[0].split(None, 2)[2].strip() if lic else "?"
     lic = re.sub(r"[^A-Z0-9]", "", c.license.upper())
-    assert lic in ("CC0", "CCBY", "MIT"), (item, c.license)
+    # 「CC BY 4.0」も CC-BY。AGPL の靴やスカートは使わない。
+    assert lic.startswith(("CC0", "CCBY", "MIT")), (item, c.license)
     c.scale = {}
     ref, wts, off, dele = [], [], [], []
     mode = None
@@ -548,6 +549,21 @@ AVATARS_F = [
     ("maid", [("elvs_frilled_party_dress", None), ("elvs_ladies_apron", "white"), ("toigo_ballet_flats", "black")]),
     ("qipao", [("elvs_fashion_stylized_qipoa", None), ("toigo_ballet_flats", "black")]),
     ("goddess", [("elvs_goddess_dress1", None), ("toigo_ballet_flats", "white")]),
+    # MistressSaeko, CC-BY。セーラーの襟とプリーツスカート。テクスチャは配布に残っていなかったので色で塗る。
+    ("sailor", [("saeko_sailor_top", "white"), ("saeko_sailor_skirt", (0.10, 0.13, 0.32)), ("toigo_ballet_flats", "black")]),
+    # 白いセーターと青のプリーツチェック。穴の開いたニットは裾が欠けるので使わない。
+    ("jk", [("janexx_old_female_sweater", "white"), ("elvs_pleated_plaid_mini_skirt", None), ("toigo_ballet_flats", "black")]),
+    # ブレザーのジャケットはパックに無い。学校の上着に見えるニットとカーディガンを 4 種。
+    ("knitpencil", [("mindfront_knitted_sweater_01", (0.20, 0.24, 0.38)), ("elvs_pencil_skirt", (0.16, 0.17, 0.22)), ("toigo_ballet_flats", "black")]),
+    ("knitmidi", [("mindfront_knitted_sweater_01", (0.28, 0.30, 0.34)), ("elvs_gored_midi_skirt", None), ("toigo_ballet_flats", "black")]),
+    ("coat", [("punkduck_winter_coat", None), ("toigo_ballet_flats", "black")]),
+    ("cardjean", [("mindfront_cardigan_long_open_front", None), ("punkduck_female_tight_jeans", None), ("toigo_ankle_boots_female", "black")]),
+    # ギャル。厚底ブーツは AGPL なので、CC0 のブーティにする。
+    ("galcrop", [("punkduck_sleeveless_crop_top", None), ("punkduck_black_mini_skirt", None), ("toigo_stiletto_booties", "black")]),
+    ("galoff", [("punkduck_off-shoulder_long-sleeve_top", None), ("punkduck_female_tight_jeans", None), ("toigo_stiletto_booties", None)]),
+    ("swim", [("mindfront_f_one-piece_swimsuit_01", None)]),
+    ("tube", [("punkduck_tube_dress", None), ("toigo_stiletto_booties", "black")]),
+    ("cocktail", [("punkduck_black_cocktail_dress", None), ("toigo_stiletto_booties", "black")]),
 ]
 AVATARS_M = [
     ("tuxedo", [("toigo_suit_with_dinner_jacket", None), ("toigo_ankle_boots_male", "black")]),
@@ -564,6 +580,13 @@ AVATARS_M = [
     ("crudeharem", [("elvs_crude_t-shirt_male", None), ("toigo_harem_pants", None), ("culturalibre_male_boots", None)]),
     # Elvaerwyn, CC-BY（shirts02）の白シャツに、黒いズボン。
     ("butler", [("elvs_male_shirt_tie_tucked1", "white"), ("toigo_wool_pants", "black"), ("toigo_ankle_boots_male", "black")]),
+    # ワイシャツにネクタイ、紺のスラックス。学ランのジャケットはパックに無い。
+    ("school", [("elvs_male_shirt_tie_tucked1", "white"), ("mindfront_male_trousers_1", (0.15, 0.17, 0.28)), ("toigo_ankle_boots_male", "black")]),
+    ("swim", [("mindfront_male_swimming_trunks_01", None)]),
+    ("polo", [("namuhekam_male_polo_shirt", None), ("punkduck_male_classic_jeans", None), ("toigo_ankle_boots_male", (0.30, 0.19, 0.11))]),
+    ("untuck", [("elvs_male_shirt_untucked_bd1", None), ("mindfront_male_trousers_2", None), ("toigo_mj_cloth_shoes", None)]),
+    ("tankslack", [("elvs_male_tankshirt1", None), ("toigo_wool_pants", (0.22, 0.24, 0.30)), ("toigo_mj_cloth_shoes", None)]),
+    ("tankjean", [("elvs_male_tankshirt1", None), ("punkduck_male_classic_jeans", None), ("toigo_ankle_boots_male", (0.30, 0.19, 0.11))]),
 ]
 
 # MH の骨 -> 区間。区間はゲームの骨 1 本に対応する。
@@ -712,6 +735,16 @@ def build_costume(gb, parts):
     for item, how in parts:
         c = load_clo(item)
         dele.update(int(x) for x in c.delete)
+        # 隠す頂点が書かれていない服は、布から 3.5cm 以内の素体を消す。開いたカーディガンは胸を残す。
+        if len(c.delete) == 0 and item in (
+                "saeko_sailor_top", "saeko_sailor_skirt", "elvs_pencil_skirt", "elvs_gored_midi_skirt",
+                "punkduck_black_mini_skirt", "punkduck_off-shoulder_long-sleeve_top", "janexx_old_female_sweater",
+                "namuhekam_male_polo_shirt", "elvs_male_athletic_tank1", "elvs_male_tankshirt1",
+                "toigo_stiletto_booties"):
+            from scipy.spatial import cKDTree
+            cloth = clo_positions(c, gb.v)
+            dist, _ = cKDTree(cloth).query(gb.v, distance_upper_bound=0.035)
+            dele.update(int(i) for i in np.flatnonzero(np.isfinite(dist) & (dist < 0.035)))
         p = to_render(clo_positions(c, gb.v), gb.ground)
         rgba = clo_colors(c)
         rgb = srgb_to_game(tint(rgba[:, :3], how))
@@ -735,9 +768,9 @@ def build_costume(gb, parts):
     for it, _ in parts:
         if re.search(r"apron", it):
             role.append("apron")
-        elif re.search(r"pants|skirt", it):
+        elif re.search(r"pants|skirt|trouser|jean|short", it):
             role.append("bottom")
-        elif re.search(r"shoe|boot|flats", it):
+        elif re.search(r"shoe|boot|flats|stiletto", it):
             role.append("shoes")
         else:
             role.append("top")
