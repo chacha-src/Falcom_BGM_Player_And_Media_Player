@@ -1388,6 +1388,14 @@ static BOOL FillCreature(Renderer& R, Reader& rd, int packIndex, int slot)
 	GpuMesh& gm = R.m_creatures[cSlot];
 	gm.Release();
 	DropSkinGpu(skin);
+	if (!appending) {
+		skin.bind.arena = 2; skin.cloth.arena = 2; skin.headTri.arena = 2;
+		skin.meshHair.arena = 2; skin.bustR.arena = 2;
+		for (int ci = 0; ci < g.clips.size(); ci++) {
+			g.clips[ci].q.arena = 2;
+			g.clips[ci].hips.arena = 2;
+		}
+	}
 	skin.cloth.clear();
 	skin.faceSet = -1;
 	skin.faceN = 0;
@@ -1408,13 +1416,16 @@ static BOOL FillCreature(Renderer& R, Reader& rd, int packIndex, int slot)
 			g.clips.resize(nc);
 			for (UINT c = 0; c < nc; c++) {
 				Clip& cl = g.clips[c];
+				if (!appending) { cl.q.arena = 2; cl.hips.arena = 2; }
 				rd.Name(cl.name, 32);
 				cl.nFrames = (int)rd.U32(); cl.fps = rd.F32(); g.hips = (int)rd.U32();
 				if (cl.nFrames <= 0 || cl.nFrames > 64) return Bail();
 				const short* q = (const short*)rd.Bytes((size_t)cl.nFrames * nJ * 8);
 				const float* h = (const float*)rd.Bytes((size_t)cl.nFrames * 12);
 				if (!q || !h) return Bail();
-				cl.q.resize((size_t)cl.nFrames * nJ);
+				int qn = cl.nFrames * (int)nJ;
+				cl.q.resize(qn);
+				if (cl.q.size() != qn || !cl.q.data()) return Bail();
 				for (size_t k = 0; k < cl.q.size(); k++) {
 					Q4 v = { -q[k * 4] / 32767.f, -q[k * 4 + 1] / 32767.f, q[k * 4 + 2] / 32767.f, q[k * 4 + 3] / 32767.f };
 					float l = sqrtf(v.x * v.x + v.y * v.y + v.z * v.z + v.w * v.w);
@@ -1422,6 +1433,7 @@ static BOOL FillCreature(Renderer& R, Reader& rd, int packIndex, int slot)
 					cl.q[k] = v;
 				}
 				cl.hips.resize(cl.nFrames);
+				if (cl.hips.size() != cl.nFrames || !cl.hips.data()) return Bail();
 				for (int f = 0; f < cl.nFrames; f++) cl.hips[f] = v3(h[f * 3], h[f * 3 + 1], -h[f * 3 + 2]);
 			}
 			strncpy_s(m.name, name, 31);
@@ -1458,11 +1470,15 @@ static BOOL FillCreature(Renderer& R, Reader& rd, int packIndex, int slot)
 			rd.Align4();
 			if (!ps || !ns || !rgb || !jj || !ww || !ib) return Bail();
 			skin.model = mSlot;
+			if (!appending) skin.bind.arena = 2;
 			skin.bind.resize(nv);
+			if ((int)skin.bind.size() != (int)nv || !skin.bind.data()) return Bail();
 			static Buf<VtxS> poseV;
 			static Buf<WORD> idx;
 			poseV.resize((int)nv);
+			if ((int)poseV.size() != (int)nv || !poseV.data()) return Bail();
 			idx.assign(ib, ib + ni);
+			if ((int)idx.size() != (int)ni) return Bail();
 			for (UINT k = 0; k + 2 < ni; k += 3) std::swap(idx[k + 1], idx[k + 2]);
 			for (UINT k = 0; k < nv; k++) {
 				Renderer::CSkinV& d = skin.bind[k];
@@ -1733,11 +1749,40 @@ void Renderer::LoadCreaturePack()
 void Renderer::LoadBattleCreatures(const int* pack, int n)
 {
 	if (!m_monBytes || m_monN <= 0) return;
-	for (int i = 0; i < m_monN; i++) if (!m_monBody[i]) m_monModel[i] = -1;
-	for (int c = m_keepCreatures; c < (int)m_creatures.size() && c < (int)m_skins.size(); c++) {
-		m_creatures[c].Release();
-		ReleaseSkinGpu(m_skins[c]);
+	if (m_ctx) {
+		ID3D11Buffer* none = NULL;
+		UINT z = 0;
+		m_ctx->IASetVertexBuffers(0, 1, &none, &z, &z);
+		m_ctx->IASetIndexBuffer(NULL, DXGI_FORMAT_R16_UINT, 0);
+		ID3D11ShaderResourceView* nos[4] = {};
+		m_ctx->PSSetShaderResources(0, 4, nos);
+		m_ctx->VSSetShaderResources(0, 4, nos);
+		m_ctx->CSSetShaderResources(0, 3, nos);
+		ID3D11UnorderedAccessView* nou = NULL;
+		m_ctx->CSSetUnorderedAccessViews(0, 1, &nou, NULL);
 	}
+	for (int i = 0; i < m_monN; i++) if (!m_monBody[i]) m_monModel[i] = -1;
+	int nRel = (int)m_creatures.size();
+	if ((int)m_skins.size() > nRel) nRel = (int)m_skins.size();
+	for (int c = m_keepCreatures; c < nRel; c++) {
+		if (c < (int)m_creatures.size()) m_creatures[c].Release();
+		if (c >= (int)m_skins.size()) continue;
+		ReleaseSkinGpu(m_skins[c]);
+		TAC_REL(m_skins[c].baldIB);
+		m_skins[c].baldN = 0;
+		m_skins[c].bind.arena = 2; m_skins[c].bind.reset();
+		m_skins[c].cloth.arena = 2; m_skins[c].cloth.reset();
+		m_skins[c].headTri.arena = 2; m_skins[c].headTri.reset();
+		m_skins[c].meshHair.arena = 2; m_skins[c].meshHair.reset();
+		m_skins[c].bustR.arena = 2; m_skins[c].bustR.reset();
+	}
+	for (int i = m_keepRigs; i < (int)rigs.size(); i++) {
+		for (int c = 0; c < rigs[i].clips.size(); c++) {
+			rigs[i].clips[c].q.arena = 2; rigs[i].clips[c].q.reset();
+			rigs[i].clips[c].hips.arena = 2; rigs[i].clips[c].hips.reset();
+		}
+	}
+	TacMonReset();
 	int slot = 0;
 	int room = 160 - m_keepCreatures;
 	int roomM = 192 - m_keepModels;
@@ -3409,8 +3454,39 @@ void Renderer::EnsureScalp(int model, int headJ)
 
 BOOL Renderer::DrawHumanHair(int model, int style, int headJ, const Pose& pose, const M4& world, const DrawParams& dp, int avatar)
 {
-	if (m_hairNv < 30 || !m_csSkin || !m_hairBind || !m_hairUAV || !m_hairDraw.ib || !m_cbSkinBone || !m_cbSkinParm || !m_cbHairCloth) return FALSE;
-	if (style < 1 || model < 0 || model >= (int)models.size() || headJ < 0 || headJ >= pose.nJ) return FALSE;
+	const BOOL capOnly = style < 1;
+	if (!capOnly && (m_hairNv < 30 || !m_csSkin || !m_hairBind || !m_hairUAV || !m_hairDraw.ib || !m_cbSkinBone || !m_cbSkinParm || !m_cbHairCloth)) return FALSE;
+	if (style < 0 || model < 0 || model >= (int)models.size() || headJ < 0 || headJ >= pose.nJ) return FALSE;
+	if (capOnly) {
+		EnsureScalp(model, headJ);
+		if (!(m_capDraw.ib && m_capBind.size() >= 3)) return FALSE;
+		const M4& B = pose.palette[headJ];
+		static Buf<VtxS> capPosed;
+		capPosed.resize(m_capBind.size());
+		if (capPosed.size() != m_capBind.size()) return FALSE;
+		for (int i = 0; i < m_capBind.size(); i++) {
+			const VtxS& s = m_capBind[i];
+			VtxS d = s;
+			d.p[0] = s.p[0] * B.m[0] + s.p[1] * B.m[4] + s.p[2] * B.m[8] + B.m[12];
+			d.p[1] = s.p[0] * B.m[1] + s.p[1] * B.m[5] + s.p[2] * B.m[9] + B.m[13];
+			d.p[2] = s.p[0] * B.m[2] + s.p[1] * B.m[6] + s.p[2] * B.m[10] + B.m[14];
+			float nx = s.n[0] * B.m[0] + s.n[1] * B.m[4] + s.n[2] * B.m[8];
+			float ny = s.n[0] * B.m[1] + s.n[1] * B.m[5] + s.n[2] * B.m[9];
+			float nz = s.n[0] * B.m[2] + s.n[1] * B.m[6] + s.n[2] * B.m[10];
+			float nl = sqrtf(nx * nx + ny * ny + nz * nz);
+			if (nl > 1e-6f) { nx /= nl; ny /= nl; nz /= nl; }
+			d.n[0] = nx; d.n[1] = ny; d.n[2] = nz;
+			d.c = dp.tint;
+			capPosed[i] = d;
+		}
+		DrawParams dc = dp;
+		dc.outline = 0.f;
+		dc.twoSided = 1;
+		dc.sway = 0.f;
+		dc.rim = 0.02f;
+		DrawStaticVerts(m_capDraw, capPosed.data(), (UINT)capPosed.size(), world, dc);
+		return TRUE;
+	}
 	const Model& md = models[model];
 	const AvaModel* am = NULL;
 	for (const AvaModel& x : m_avaModels) if (!strcmp(x.name, md.name)) { am = &x; break; }

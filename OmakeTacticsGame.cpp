@@ -215,6 +215,7 @@ Game::Game()
 	m_cutStageT = 0;
 	m_cutA = m_cutD = -1;
 	m_cutAllyN = m_cutFoeN = 0;
+	m_cutKind = 0;
 	m_seqCaster = m_seqPrimary = -1;
 	m_seqSkill = -1;
 	m_battleStage = 1;
@@ -403,7 +404,7 @@ void Game::Tick(float dt)
 static_assert(TAC_BGM_RUINS - TAC_BGM_PLAINS + 1 == TH_COUNT, "地形BGM");
 // 拠点=tactics.ogg。戦闘は地形ごとの tacticsgame*.ogg、無ければ tacticsgame.ogg。
 // 味方の現在HP合計が最大合計の1/12以下で tacticsgamedanger。1人だけ低くても切り替えない。合計が1/6以上で地形曲へ戻す。
-// 残敵HPが初期合計の約1/12以下（少人数は1/10、大人数は1/15）で tacticsgamewin。勝利確定とリザルトは tacticsgameclear。
+// 残敵HPが初期合計の約1/12以下（少人数は1/10、大人数は1/15）、または生きているボスが最大HPの1/4以下で tacticsgamewin。勝利確定とリザルトは tacticsgameclear。
 // 店=tacticsshop、作成・編成・進化=tacticsmake。テンポは変えない。
 void Game::SyncBgm()
 {
@@ -420,13 +421,17 @@ void Game::SyncBgm()
 		int all = 0;
 		int hp = 0, mx = 0;
 		int eHp = 0, eMx = 0;
+		int bossLow = 0;
 		for (int i = 0; i < m_b.nUnits; i++) {
 			const Unit& u = m_b.u[i];
 			if (u.team == TEAM_ENEMY) {
 				all++;
 				int em = max(1, u.ch.stat[S_HP]);
 				eMx += em;
-				if (u.alive && u.hp > 0) eHp += u.hp;
+				if (u.alive && u.hp > 0) {
+					eHp += u.hp;
+					if (u.boss && u.hp * 4 <= em) bossLow = 1;
+				}
 			}
 			if (u.team != TEAM_PLAYER) continue;
 			mx += max(1, u.ch.stat[S_HP]);
@@ -436,7 +441,7 @@ void Game::SyncBgm()
 		int winDen = 12;
 		if (all <= 3) winDen = 10;
 		else if (all >= 8) winDen = 15;
-		const int fewLeft = alive > 0 && eMx > 0 && eHp * winDen <= eMx && players > 0;
+		const int fewLeft = alive > 0 && players > 0 && eMx > 0 && (bossLow || eHp * winDen <= eMx);
 		int th = Clampi(m_b.map.theme, 0, TH_COUNT - 1);
 		scene = TAC_BGM_PLAINS + th;
 		if (fewLeft) scene = TAC_BGM_WIN;

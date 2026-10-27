@@ -45,12 +45,15 @@ int TacArenaBad();
 void* TacAvaAlloc(size_t bytes, size_t align);
 void TacAvaReset();
 int TacAvaBad();
+// 敵一覧と戦闘で載せ替えるモンスター。切り替えるたびに本体 arena へ捨てると、一覧を見たあと戦闘開始で落ちる。
+void* TacMonAlloc(size_t bytes, size_t align);
+void TacMonReset();
 
 template<typename T>
 struct Buf {
 	T* p;
 	int n, cap;
-	int arena;   // 0=本体 1=アバター（TacAvaReset で捨てる）
+	int arena;   // 0=本体 1=アバター 2=戦闘モンスター（TacMonReset で捨てる）
 	Buf() : p(0), n(0), cap(0), arena(0) {}
 	explicit Buf(int nn) : p(0), n(0), cap(0), arena(0) { resize(nn); }
 	Buf(int nn, const T& fill) : p(0), n(0), cap(0), arena(0) { this->fill(nn, fill); }
@@ -104,7 +107,7 @@ struct Buf {
 			if (nc > 0x3fffffff) { nc = nn; break; }
 			nc *= 2;
 		}
-		T* np = (T*)(arena ? TacAvaAlloc((size_t)nc * sizeof(T), 16) : TacArenaAlloc((size_t)nc * sizeof(T), 16));
+		T* np = (T*)(arena == 1 ? TacAvaAlloc((size_t)nc * sizeof(T), 16) : arena == 2 ? TacMonAlloc((size_t)nc * sizeof(T), 16) : TacArenaAlloc((size_t)nc * sizeof(T), 16));
 		if (!np) return;
 		if (p && n > 0) memcpy(np, p, (size_t)n * sizeof(T));
 		p = np;

@@ -1435,7 +1435,8 @@ void Game::BeginAttack(int ui, int target, int skill, int cx, int cz)
 	m_seqT = 0;
 	m_seqImpact = 0;
 	m_ult = IsUltimateSkill(skill) || (anyCrit && skill >= 0);
-	m_seqCut = m_ult || (!m_save.battleAnim && (skill >= 0 || anyCrit));
+	m_cutKind = IsCraftId(skill) ? 1 : (IsFormSkill(skill) ? 2 : 0);
+	m_seqCut = m_ult || m_cutKind != 0 || (!m_save.battleAnim && (skill >= 0 || anyCrit));
 	if (m_ult) m_flashWhite = IsCraftSuper(skill) ? 1.f : 0.35f;
 	if (skill == SKL_TRANSMUTE && m_save.itemN[IT_ORE] > 0) m_save.itemN[IT_ORE]--;
 	m_deferPopups.clear();
@@ -1449,6 +1450,7 @@ void Game::BeginAttack(int ui, int target, int skill, int cx, int cz)
 		m_cutPosA = CutFind(m_cutA, &side, &idx) ? CutStand(side, idx) : v3(0, 0, 0);
 		m_cutPosD = (m_cutD >= 0 && CutFind(m_cutD, &side, &idx)) ? CutStand(side, idx) : v3(1.25f, 0, 0);
 	} else {
+		m_cutKind = 0;
 		m_cutAllyN = m_cutFoeN = 0;
 		if (skill >= 0)
 			AddBanner(IsCraftId(skill) ? CraftName(skill) : SkillLabel(skill), NULL, ElemColor(SkillInfo(skill).element), 2, 1.4f);
@@ -1471,6 +1473,10 @@ BOOL Game::CutFind(int ui, int* side, int* idx) const
 
 V3 Game::CutStand(int side, int idx) const
 {
+	if (m_cutKind != 0) {
+		if (side == 0 && idx >= 0 && idx < m_cutAllyN) return m_cutAllyPos[idx];
+		if (side == 1 && idx >= 0 && idx < m_cutFoeN) return m_cutFoePos[idx];
+	}
 	if (m_cutFoeN <= 0) {
 		float n = (float)max(1, m_cutAllyN);
 		float x = (idx - (n - 1.f) * .5f) * .9f;
@@ -1495,6 +1501,129 @@ void Game::GatherCut()
 	add(m_cutA);
 	if (m_cutD >= 0) add(m_cutD);
 	for (int k = 0; k < m_strkN; k++) { add(m_strk[k].attacker); add(m_strk[k].defender); }
+	if (m_cutKind == 2 && m_seqSkill >= 0 && m_cutA >= 0) {
+		int ax = m_b.u[m_cutA].x, az = m_b.u[m_cutA].z;
+		if (m_cutD >= 0) { ax = m_b.u[m_cutD].x; az = m_b.u[m_cutD].z; }
+		int mem[8];
+		int nm = FormMembers(m_b, m_cutA, m_seqSkill, ax, az, mem, 8);
+		for (int i = 0; i < nm; i++) add(mem[i]);
+	}
+	LayoutSpecialCut();
+}
+
+void Game::LayoutSpecialCut()
+{
+	if (m_cutKind == 0) return;
+	for (int i = 0; i < m_cutFoeN; i++) {
+		float z = (i == 0) ? 0.f : ((i & 1) ? .48f : -.36f);
+		float x = 1.55f + i * .78f;
+		if (m_cutKind == 1) x += .4f;
+		m_cutFoePos[i] = v3(x, 0, z);
+	}
+	if (m_cutKind == 1) {
+		for (int i = 0; i < m_cutAllyN; i++) {
+			float z = (i == 0) ? 0.f : ((i & 1) ? .78f : -.78f);
+			float x = (i == 0) ? -.42f : -1.45f - (i - 1) * .2f;
+			m_cutAllyPos[i] = v3(x, 0, z);
+		}
+		return;
+	}
+	if (m_cutA < 0) return;
+	const Unit& u = m_b.u[m_cutA];
+	float ex = sinf(u.face), ez = cosf(u.face);
+	if (m_cutD >= 0) {
+		ex = (float)(m_b.u[m_cutD].x - u.x);
+		ez = (float)(m_b.u[m_cutD].z - u.z);
+	}
+	float elen = sqrtf(ex * ex + ez * ez);
+	if (elen < .01f) { ex = 1.f; ez = 0.f; }
+	else { ex /= elen; ez /= elen; }
+	for (int i = 0; i < m_cutAllyN; i++) {
+		int id = m_cutAlly[i];
+		float dx = (float)(m_b.u[id].x - u.x);
+		float dz = (float)(m_b.u[id].z - u.z);
+		float fwd = dx * ex + dz * ez;
+		float lat = dx * ez - dz * ex;
+		m_cutAllyPos[i] = v3(-1.2f + fwd * .92f, 0, lat * .92f);
+	}
+}
+
+float Game::CutIntroLen() const
+{
+	if (m_cutKind == 1) return IsCraftSuper(m_seqSkill) ? 2.35f : 1.55f;
+	if (m_cutKind == 2) return 1.75f;
+	if (m_ult) return 2.15f;
+	return m_seqSkill >= 0 ? 1.05f : .45f;
+}
+
+void Game::PoseFormAllies()
+{
+	if (m_cutKind != 2 || m_seqSkill < 0 || m_cutA < 0) return;
+	int form = FormOf(m_seqSkill);
+	int allyClip = CL_1H_SLICE;
+	switch (form) {
+	case FM_CROSS: case FM_WALL: case FM_SQUARE: allyClip = CL_2H_SPIN; break;
+	case FM_BACK: case FM_CHAIN: allyClip = CL_1H_STAB; break;
+	case FM_TRI: allyClip = CL_2H_CHOP; break;
+	case FM_DIA: allyClip = CL_1H_CHOP; break;
+	case FM_ECHELON: allyClip = CL_1H_SHOOT; break;
+	case FM_CIRCLE: allyClip = CL_CAST_LONG; break;
+	case FM_PAIR: allyClip = CL_CAST_RAISE; break;
+	default: break;
+	}
+	for (int i = 0; i < m_cutAllyN; i++) {
+		int id = m_cutAlly[i];
+		if (id == m_cutA || id < 0 || m_dieT[id] >= 0) continue;
+		ActorPlay(m_act[id], allyClip, 0, .12f);
+		m_act[id].animSpeed = .32f;
+		m_b.u[id].flash = 1.f;
+	}
+}
+
+void Game::CutDressFx()
+{
+	if (m_cutKind == 0 || m_cutA < 0) return;
+	if (m_cutStage != 1 && m_cutStage != 2) return;
+	const SkillDef* sd = m_seqSkill >= 0 ? &SkillInfo(m_seqSkill) : NULL;
+	DWORD ec = sd ? ElemColor(sd->element) : RGBA8(170, 210, 255);
+	float r = (ec & 255) / 255.f, g = ((ec >> 8) & 255) / 255.f, b = ((ec >> 16) & 255) / 255.f;
+	if (m_cutKind == 1) {
+		BOOL ougi = IsCraftSuper(m_seqSkill);
+		int rings = ougi ? 2 : 1;
+		float spin = m_time * (ougi ? 3.1f : 2.2f);
+		for (int k = 0; k < rings; k++) {
+			float ang = spin + k * PI;
+			float rad = (k == 0 ? 1.05f : 1.55f);
+			V3 p = m_cutPosA + v3(cosf(ang) * rad, .1f + k * .08f, sinf(ang) * rad * .72f);
+			Burst(p, 2, .35f, .15f, .32f, r, g, b, 6, 1, .5f, .02f, .7f);
+		}
+		float col = fmodf(m_cutStageT * .8f, 1.2f);
+		Burst(m_cutPosA + v3(0, .15f + col, 0), 1, .15f, .12f, .4f, 1.f, .92f, .62f, 1, 1, -.15f, 0, 1.1f);
+		if (m_cutStage == 2) {
+			for (int i = 0; i < m_cutFoeN; i++) {
+				float u = fmodf(m_cutStageT * 1.6f + i * .17f, 1.f);
+				V3 p = Lerp(m_cutPosA + v3(0, 1.05f, 0), m_cutFoePos[i] + v3(0, .8f, 0), u);
+				Burst(p, 1, 0, .18f, .16f, r, g, b, 3, 1, 0, .08f, 0);
+			}
+		}
+		return;
+	}
+	V3 home = m_cutAllyN > 0 ? m_cutAllyPos[0] : m_cutPosA;
+	Burst(home + v3(0, .05f, 0), 1, .2f, .1f, .28f, .55f, .82f, 1.f, 2, 1, .3f, 0, .4f);
+	for (int i = 1; i < m_cutAllyN; i++) {
+		float u = fmodf(m_time * .65f + i * .21f, 1.f);
+		V3 p = Lerp(home, m_cutAllyPos[i], u) + v3(0, .12f, 0);
+		Burst(p, 1, 0, .11f, .22f, .45f, .78f, 1.f, 2, 1, 0, 0, .15f);
+		Burst(m_cutAllyPos[i] + v3(0, .04f, 0), 1, .1f, .08f, .25f, 1.f, .86f, .45f, 1, 1, .2f, 0, .3f);
+	}
+	if (m_cutStage == 2) {
+		for (int i = 0; i < m_cutAllyN && i < m_cutFoeN + 1; i++) {
+			V3 from = m_cutAllyPos[i] + v3(0, .9f, 0);
+			V3 to = (m_cutFoeN > 0 ? m_cutFoePos[min(i, m_cutFoeN - 1)] : v3(1.4f, 0, 0)) + v3(0, .7f, 0);
+			float u = fmodf(m_cutStageT * 1.3f + i * .13f, 1.f);
+			Burst(Lerp(from, to, u), 1, 0, .14f, .14f, .7f, .88f, 1.f, 6, 1, 0, .06f, 0);
+		}
+	}
 }
 
 V3 Game::ActorPos(int ui) const
@@ -1734,11 +1863,12 @@ void Game::UpdateSeq(float dt)
 					Actor& ca = m_act[m_cutA];
 					ActorPlay(ca, clip, 0, .06f);
 					float full = ActorClipLen(ca, m_lib, m_r, clip);
-					float need = IsCraftSuper(m_seqSkill) ? 3.2f : (m_ult ? 2.15f : (m_seqSkill >= 0 ? 1.05f : .45f));
+					float need = CutIntroLen();
 					float wind = full * ClipWindup(clip);
 					ca.animSpeed = Clampf(wind / max(0.25f, need), 0.12f, 1.15f);
 				}
 				if (m_cutD >= 0) ActorPlay(m_act[m_cutD], CL_IDLE, 1, .15f);
+				PoseFormAllies();
 				if (m_seqSkill >= 0) {
 					const SkillDef& sd = SkillInfo(m_seqSkill);
 					Burst(m_cutPosA + v3(0, .1f, 0), 30, 2.f, .14f, 1.2f, (ElemColor(sd.element) & 255) / 255.f, ((ElemColor(sd.element) >> 8) & 255) / 255.f, ((ElemColor(sd.element) >> 16) & 255) / 255.f, 2, 1, -2.5f, 0, 1.5f);
@@ -1754,16 +1884,22 @@ void Game::UpdateSeq(float dt)
 			return;
 		}
 		if (m_cutStage == 1) {
-			float need = IsCraftSuper(m_seqSkill) ? 3.2f : (m_ult ? 2.15f : (m_seqSkill >= 0 ? 1.05f : .45f));
-			if (IsCraftSuper(m_seqSkill) || (m_ult && m_seqSkill >= 0)) {
+			float need = CutIntroLen();
+			CutDressFx();
+			if (m_cutKind == 1 || (m_ult && m_seqSkill >= 0)) {
 				const SkillDef& sd = SkillInfo(m_seqSkill);
 				if (((int)(m_cutStageT * 8.f) & 1) == 0)
 					Burst(m_cutPosA + v3(0, 1.1f, 0), 4, 3.f, .2f, .4f, (ElemColor(sd.element) & 255) / 255.f, ((ElemColor(sd.element) >> 8) & 255) / 255.f, ((ElemColor(sd.element) >> 16) & 255) / 255.f, 3, 1, -1.f, 0, .6f);
 			}
 			if (m_cutStageT >= need) {
 				m_cutStage = 2; m_cutStageT = 0; m_seqT = 0; m_seqCur = 0; m_seqImpact = 0;
-				Shake(.45f);
-				Burst(m_cutPosA + v3(0, .05f, 0), 22, 3.4f, .2f, .9f, 1.f, .92f, .7f, 2, 1, .4f, 0, 1.4f);
+				Shake(m_cutKind == 1 ? .7f : .45f);
+				if (m_cutKind == 1) m_flashWhite = IsCraftSuper(m_seqSkill) ? 1.f : .55f;
+				Burst(m_cutPosA + v3(0, .05f, 0), m_cutKind == 1 ? 36 : 22, 3.4f, .2f, .9f, 1.f, .92f, .7f, 2, 1, .4f, 0, 1.4f);
+				if (m_cutKind == 1) Burst(m_cutPosA + v3(0, .2f, 0), 3, 0, 1.4f, .7f, 1.f, .85f, .4f, 1, 1, 0, 0, 0, 2.2f);
+				if (m_cutKind == 2) {
+					for (int i = 0; i < m_cutAllyN; i++) Burst(m_cutAllyPos[i] + v3(0, .08f, 0), 8, 1.6f, .12f, .6f, .5f, .8f, 1.f, 2, 1, .3f, 0, .8f);
+				}
 				if (m_cutD >= 0) {
 					DWORD ec = m_seqSkill >= 0 ? ElemColor(SkillInfo(m_seqSkill).element) : RGBA8(255, 230, 180);
 					Burst(m_cutPosD + v3(0, .8f, 0), 14, 2.2f, .12f, .55f, (ec & 255) / 255.f, ((ec >> 8) & 255) / 255.f, ((ec >> 16) & 255) / 255.f, 3, 1, 1.2f, 0, .5f);
@@ -1786,11 +1922,12 @@ void Game::UpdateSeq(float dt)
 			return;
 		}
 		if (m_cutStage == 4) {
-			if (m_cutStageT >= .3f) { m_seqCut = FALSE; m_cutStage = 0; FinishSeq(); }
+			if (m_cutStageT >= .3f) { m_seqCut = FALSE; m_cutKind = 0; m_cutStage = 0; FinishSeq(); }
 			return;
 		}
 	}
 	// 攻防の再生（マップ・カットイン共通）
+	if (m_seqCut && m_cutStage == 2) CutDressFx();
 	if (m_seqCur >= m_seqN) {
 		m_seqT += dt;
 		if (m_seqT >= .35f) {
@@ -1902,6 +2039,12 @@ void Game::UpdateSeq(float dt)
 		else if (m_seqT < u1) l = Smooth01((m_seqT - u0) / max(.01f, u1 - u0));
 		else l = 1.f - Smooth01((m_seqT - u1 - .15f) / .35f);
 		m_lunge[A] = maxL * Clampf(l, 0, 1);
+		if (m_cutKind == 2 && m_seqCut && m_cutStage == 2) {
+			for (int i = 0; i < m_cutAllyN; i++) {
+				int id = m_cutAlly[i];
+				if (id != A) m_lunge[id] = m_lunge[A] * .8f;
+			}
+		}
 	}
 	if (m_proj.active) {
 		m_proj.t += dt;
@@ -2101,13 +2244,16 @@ void Game::AwardExp()
 			int healed = -s.dmg;
 			if (healed > 0) {
 				e = ExpForAction(a, d, healed, m_battleStage);
-				if (e < 14) e = 14;
-			} else e = 8;
+				e = e * 3 / 2;
+				if (e < 21) e = 21;
+			} else e = 12;
 		} else if (s.skill >= 0 && SkillInfo(s.skill).kind == SK_BUFF) e = 16 + m_battleStage / 2;
 		else if (!s.hit) e = 1;
 		else {
 			e = ExpForAction(a, d, s.dmg, m_battleStage);
 			if (s.overkill && e > 1) e *= 2;
+			e /= 2;
+			if (e < 1) e = 1;
 		}
 		if (s.hit && e > 1 && d.team == TEAM_ENEMY) {
 			int coop = PlayerCoop(m_b, m_strk, m_strkN, s.defender);
@@ -2461,7 +2607,55 @@ void Game::DrawCutIn3D()
 	DWORD ec = sd ? ElemColor(sd->element) : RGBA8(255, 240, 200);
 	V3 look, eye;
 	float t = m_time;
-	if (m_cutStage == 1 && m_seqSkill >= 0) {
+	auto centerOf = [&](const V3* p, int n) {
+		V3 c = v3(0, .7f, 0);
+		if (n <= 0) return c;
+		c = v3(0, 0, 0);
+		for (int i = 0; i < n; i++) c = c + p[i];
+		c = c * (1.f / n);
+		c.y = .72f;
+		return c;
+	};
+	if (m_cutKind == 1) {
+		V3 a = m_cutPosA;
+		float h = m_cutA >= 0 ? m_act[m_cutA].height : 1.f;
+		if (h > 1.32f) h = 1.32f;
+		look = a + v3(0, h * .55f, 0);
+		if (m_cutStage == 1) {
+			float u = Smooth01(m_cutStageT / max(.4f, CutIntroLen()));
+			float ang = t * (IsCraftSuper(m_seqSkill) ? 1.7f : 1.15f);
+			float rad = Lerpf(2.7f, 1.25f, u);
+			float elev = Lerpf(.15f, 1.45f, u);
+			eye = look + v3(cosf(ang) * rad, elev, sinf(ang) * rad);
+		} else if (m_cutStage == 2 || m_cutStage == 3) {
+			float u = m_cutStage == 2 ? m_cutStageT : m_cutStageT + .8f;
+			float ang = -0.9f - u * 1.35f;
+			float dist = Lerpf(4.4f, 2.35f, Smooth01(min(1.f, u)));
+			look = Lerp(a + v3(0, h * .5f, 0), v3(.4f, .8f, 0), Smooth01(min(1.f, u * .7f)));
+			eye = v3(sinf(ang) * dist, Lerpf(2.4f, .85f, Smooth01(min(1.f, u))), -cosf(ang) * dist);
+			if (m_shake > .3f) eye = Lerp(eye, look, .16f);
+		} else {
+			look = a + v3(0, h * .4f, 0);
+			eye = look + v3(1.8f, .35f, -1.4f);
+		}
+	} else if (m_cutKind == 2) {
+		look = centerOf(m_cutAllyPos, m_cutAllyN);
+		if (m_cutFoeN > 0) look = Lerp(look, centerOf(m_cutFoePos, m_cutFoeN), .28f);
+		if (m_cutStage == 1) {
+			float u = Smooth01(m_cutStageT / max(.4f, CutIntroLen()));
+			eye = look + v3(Lerpf(.15f, 2.5f, u), Lerpf(6.2f, 1.7f, u), Lerpf(-.15f, -2.6f, u));
+		} else if (m_cutStage == 2 || m_cutStage == 3) {
+			float u = m_cutStage == 2 ? m_cutStageT : m_cutStageT + 1.f;
+			float ang = -0.2f - u * .7f;
+			int spread = max(m_cutAllyN, m_cutFoeN);
+			float dist = 4.1f + max(0, spread - 1) * .4f;
+			dist = Lerpf(dist + .8f, dist, Smooth01(min(1.f, u)));
+			eye = v3(sinf(ang) * dist, 2.05f + sinf(u) * .08f, -cosf(ang) * dist);
+			if (m_shake > .3f) eye = Lerp(eye, look, .08f);
+		} else {
+			eye = look + v3(.4f, 5.4f, -1.2f);
+		}
+	} else if (m_cutStage == 1 && m_seqSkill >= 0) {
 		float u = Smooth01(m_cutStageT / 1.05f);
 		V3 a = m_cutPosA;
 		float h = m_act[m_cutA].height;
@@ -2522,7 +2716,16 @@ void Game::DrawCutIn3D()
 		top = RGBA8(((ec & 255) * 2) / 5, (((ec >> 8) & 255) * 2) / 5, (((ec >> 16) & 255) * 2) / 5);
 		bot = RGBA8(((ec & 255) * 4) / 5 + 40, (((ec >> 8) & 255) * 4) / 5 + 40, (((ec >> 16) & 255) * 4) / 5 + 40);
 	}
-	m_r.DrawSky(top, bot, 1, RGBA8(255, 255, 255));
+	if (m_cutKind == 2) {
+		top = RGBA8(10, 24, 58);
+		bot = RGBA8(36, 78, 130);
+	} else if (m_cutKind == 1 && sd) {
+		top = RGBA8((ec & 255) / 2, ((ec >> 8) & 255) / 2, ((ec >> 16) & 255) / 2);
+		bot = RGBA8(min(255, (ec & 255) + 30), min(255, ((ec >> 8) & 255) + 24), min(255, ((ec >> 16) & 255) + 16));
+	}
+	int lines = (m_cutStage == 1 && m_cutKind != 0) ? 0 : 1;
+	DWORD lineC = m_cutKind == 2 ? RGBA8(150, 210, 255) : (m_cutKind == 1 ? ec : RGBA8(255, 255, 255));
+	m_r.DrawSky(top, bot, lines, lineC);
 	m_r.DrawStatic(m_lib.orb, gw, gp);
 	for (int k = 0; k < nId; k++) {
 		if (ids[k] < 0) continue;
@@ -2533,6 +2736,44 @@ void Game::DrawCutIn3D()
 		dp.dissolve = u.dissolve;
 		dp.rim = .55f;
 		ActorDraw(m_r, m_lib, m_act[ids[k]], cutWorld(ids[k]), dp, m_time);
+	}
+	if (m_cutKind == 1 && m_cutA >= 0) {
+		BOOL ougi = IsCraftSuper(m_seqSkill);
+		float spin = m_time * (ougi ? 1.6f : 1.05f);
+		float rad = ougi ? 1.35f : 1.05f;
+		int nOrb = ougi ? 8 : 5;
+		DrawParams sig = {};
+		sig.emissive = 1.f;
+		sig.flash = .85f;
+		sig.rim = 1.f;
+		sig.tint = ec;
+		M4 disc = MMul(MScale(rad * 1.15f, .02f, rad * .82f), MTrans(m_cutPosA.x, .04f, m_cutPosA.z));
+		m_r.DrawStatic(m_lib.orb, disc, sig);
+		for (int i = 0; i < nOrb; i++) {
+			float a = spin + i * 6.28318f / nOrb;
+			float y = .35f + sinf(m_time * 2.f + i) * .18f + (i & 1) * .25f;
+			V3 p = m_cutPosA + v3(cosf(a) * rad, y, sinf(a) * rad * .72f);
+			float s = (i & 1) ? .11f : .07f;
+			M4 w = MMul(MScale(s, s, s), MTrans(p.x, p.y, p.z));
+			sig.tint = (i & 1) ? RGBA8(255, 220, 120) : ec;
+			m_r.DrawStatic(m_lib.orb, w, sig);
+		}
+	} else if (m_cutKind == 2 && m_cutAllyN > 0) {
+		DrawParams sig = {};
+		sig.emissive = 1.f;
+		sig.flash = .7f;
+		sig.rim = 1.f;
+		sig.tint = RGBA8(120, 190, 255);
+		V3 home = m_cutAllyPos[0];
+		M4 disc = MMul(MScale(1.6f + m_cutAllyN * .15f, .018f, 1.6f + m_cutAllyN * .15f), MTrans(home.x, .035f, home.z));
+		m_r.DrawStatic(m_lib.orb, disc, sig);
+		for (int i = 0; i < m_cutAllyN; i++) {
+			V3 p = m_cutAllyPos[i];
+			float s = i == 0 ? .16f : .1f;
+			M4 w = MMul(MScale(s, s * .35f, s), MTrans(p.x, .06f, p.z));
+			sig.tint = i == 0 ? RGBA8(255, 214, 120) : RGBA8(90, 180, 255);
+			m_r.DrawStatic(m_lib.orb, w, sig);
+		}
 	}
 	m_r.DrawParticles(m_parts.data(), m_parts.size());
 }
@@ -3940,9 +4181,14 @@ void Game::DrawCutInUi()
 	}
 	BOOL arena = m_cutStage >= 1 && m_cutStage <= 3;
 	if (arena) {
-		// 上下の帯
-		m_r.HudRect(0, 0, (float)m_w, U(56), RGBA8(0, 0, 0, 200));
-		m_r.HudRect(0, (float)m_h - U(56), (float)m_w, U(56), RGBA8(0, 0, 0, 200));
+		float bar = m_cutKind == 1 ? U(84) : (m_cutKind == 2 ? U(70) : U(56));
+		DWORD edge = m_cutKind == 2 ? RGBA8(120, 196, 255) : (m_seqSkill >= 0 ? ElemColor(SkillInfo(m_seqSkill).element) : RGBA8(255, 220, 140));
+		m_r.HudRect(0, 0, (float)m_w, bar, RGBA8(0, 0, 0, m_cutKind ? 230 : 200));
+		m_r.HudRect(0, (float)m_h - bar, (float)m_w, bar, RGBA8(0, 0, 0, m_cutKind ? 230 : 200));
+		if (m_cutKind) {
+			m_r.HudRect(0, bar - U(4), (float)m_w, U(4), edge);
+			m_r.HudRect(0, (float)m_h - bar, (float)m_w, U(4), edge);
+		}
 		auto hpBox = [&](int ui, float x, int align, float y) {
 			if (ui < 0) return;
 			const Unit& u = m_b.u[ui];
@@ -3958,7 +4204,7 @@ void Game::DrawCutInUi()
 		auto col = [&](const int* id, int n, int align) {
 			if (n < 1) return;
 			float row = U(n > 3 ? 16.f : 22.f);
-			float y0 = (float)m_h - U(12) - n * row;
+			float y0 = (float)m_h - bar - U(6) - n * row;
 			for (int i = 0; i < n; i++)
 				hpBox(id[i], align ? (float)m_w - U(16) : U(16), align, y0 + i * row);
 		};
@@ -3966,29 +4212,41 @@ void Game::DrawCutInUi()
 		col(m_cutFoe, m_cutFoeN, 1);
 		if (m_seqSkill >= 0) {
 			const SkillDef& sd = SkillInfo(m_seqSkill);
-			DWORD ec = ElemColor(sd.element);
+			DWORD ec = m_cutKind == 2 ? RGBA8(150, 214, 255) : ElemColor(sd.element);
+			float hold = m_cutKind == 1 ? (IsCraftSuper(m_seqSkill) ? 1.85f : 1.15f) : (m_cutKind == 2 ? 1.35f : .8f);
 			float u = m_cutStage == 1 ? Smooth01(m_cutStageT / .25f) : 1.f;
-			float out = m_cutStage == 1 ? 1.f - Smooth01((m_cutStageT - .8f) / .25f) : 0.f;
+			float out = m_cutStage == 1 ? 1.f - Smooth01((m_cutStageT - hold) / .3f) : 0.f;
 			float a = u * (m_cutStage == 1 ? out : 0.f);
-			if (m_cutStage == 2) a = max(0.f, 1.f - m_cutStageT * 2.f) * 0;
+			if (m_cutStage == 2) a = 0;
 			if (m_cutStage == 1) {
 				BOOL ougi = IsCraftSuper(m_seqSkill);
-				const wchar_t* title = IsCraftId(m_seqSkill) ? CraftName(m_seqSkill) : SkillLabel(m_seqSkill);
-				float by = m_h * (ougi ? .36f : (m_ult ? .42f : .6f)), bh2 = ougi ? U(150) : (m_ult ? U(120) : U(84));
+				BOOL craft = m_cutKind == 1;
+				BOOL form = m_cutKind == 2;
+				const wchar_t* title = craft ? CraftName(m_seqSkill) : SkillLabel(m_seqSkill);
+				float by = m_h * (ougi || form ? .32f : (craft || m_ult ? .4f : .6f));
+				float bh2 = ougi ? U(168) : (form ? U(150) : (craft ? U(132) : (m_ult ? U(120) : U(84))));
 				float slide = (1.f - u) * m_w;
-				m_r.HudRectGrad(-slide, by, (float)m_w, bh2, RGBA8(0, 0, 0, (int)(200 * a)), RGBA8((ec & 255) / 3, ((ec >> 8) & 255) / 3, ((ec >> 16) & 255) / 3, (int)(220 * a)));
-				m_r.HudRect(-slide, by, (float)m_w, ougi ? U(6) : U(3), RGBA8(ec & 255, (ec >> 8) & 255, (ec >> 16) & 255, (int)(255 * a)));
-				m_r.HudRect(slide, by + bh2 - U(3), (float)m_w, ougi ? U(6) : U(3), RGBA8(ec & 255, (ec >> 8) & 255, (ec >> 16) & 255, (int)(255 * a)));
-				m_r.HudText(title, m_w * .56f + slide * .5f, by + bh2 * .45f, ougi ? U(78) : (m_ult ? U(64) : U(44)), ec, 1, 1, 1, a);
-				if (ougi) m_r.HudText(TT(TX_OUGI), m_w * .56f, by + U(18), U(22), RGBA8(255, 220, 80), 1, 1, 1, a);
-				else if (m_ult) m_r.HudText(TT(TX_BT_ULT), m_w * .56f, by + U(16), U(18), RGBA8(255, 230, 140), 1, 1, 1, a);
+				m_r.HudRectGrad(-slide, by, (float)m_w, bh2, RGBA8(0, 0, 0, (int)(210 * a)), RGBA8((ec & 255) / 3, ((ec >> 8) & 255) / 3, ((ec >> 16) & 255) / 3, (int)(230 * a)));
+				float edgeH = (ougi || form || craft) ? U(7) : U(3);
+				m_r.HudRect(-slide, by, (float)m_w, edgeH, RGBA8(ec & 255, (ec >> 8) & 255, (ec >> 16) & 255, (int)(255 * a)));
+				m_r.HudRect(slide, by + bh2 - edgeH, (float)m_w, edgeH, RGBA8(255, 220, 120, (int)(255 * a)));
+				if (craft || form) {
+					float pulse = .5f + .5f * sinf(m_time * 6.f);
+					m_r.HudRect(m_w * .08f - slide, by + U(10), U(8), bh2 - U(20), RGBA8(255, 230, 160, (int)(180 * a * pulse)));
+					m_r.HudRect(m_w * .92f + slide, by + U(10), U(8), bh2 - U(20), RGBA8(255, 230, 160, (int)(180 * a * pulse)));
+				}
+				m_r.HudText(title, m_w * .5f, by + bh2 * .48f, ougi ? U(72) : (form ? U(64) : (craft ? U(58) : (m_ult ? U(64) : U(44)))), ec, 1, 1, 1, a);
+				const wchar_t* kind = ougi ? TT(TX_OUGI) : (craft ? TT(TX_CRAFT) : (form ? TT(TX_SK_TAB_FORM) : (m_ult ? TT(TX_BT_ULT) : NULL)));
+				if (kind) m_r.HudText(kind, m_w * .5f, by + U(22), form || ougi ? U(24) : U(18), form ? RGBA8(255, 220, 130) : RGBA8(255, 226, 150), 1, 1, 1, a);
 				wchar_t nm[64];
 				UnitTitle(m_b.u[m_cutA], nm, 64);
-				m_r.HudText(nm, m_w * .56f - slide * .5f, by + bh2 * .85f, U(15), RGBA8(255, 255, 255), 1, 0, 1, a);
+				m_r.HudText(nm, m_w * .5f, by + bh2 * .82f, U(16), RGBA8(255, 255, 255), 1, 0, 1, a);
 			}
 			if (m_cutStage == 2) {
-				const wchar_t* title = IsCraftId(m_seqSkill) ? CraftName(m_seqSkill) : SkillLabel(m_seqSkill);
-				m_r.HudText(title, U(24), U(28), U(20), ec, 0, 1);
+				const wchar_t* title = m_cutKind == 1 ? CraftName(m_seqSkill) : SkillLabel(m_seqSkill);
+				const wchar_t* kind = m_cutKind == 1 ? (IsCraftSuper(m_seqSkill) ? TT(TX_OUGI) : TT(TX_CRAFT)) : (m_cutKind == 2 ? TT(TX_SK_TAB_FORM) : NULL);
+				if (kind) m_r.HudText(kind, U(24), U(22), U(14), RGBA8(255, 220, 140), 0, 1);
+				m_r.HudText(title, U(24), kind ? U(42) : U(28), U(22), ec, 0, 1);
 			}
 		}
 	}

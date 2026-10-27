@@ -37,6 +37,19 @@ void* TacAvaAlloc(size_t bytes, size_t align)
 void TacAvaReset() { g_avaUsed = 0; g_avaBad = 0; }
 int TacAvaBad() { return g_avaBad; }
 
+static unsigned char g_monArena[128 * 1024 * 1024];
+static size_t g_monUsed = 0;
+
+void* TacMonAlloc(size_t bytes, size_t align)
+{
+	if (align < 1) align = 1;
+	size_t o = (g_monUsed + align - 1) & ~(align - 1);
+	if (bytes > sizeof(g_monArena) || o > sizeof(g_monArena) - bytes) return 0;
+	g_monUsed = o + bytes;
+	return g_monArena + o;
+}
+void TacMonReset() { g_monUsed = 0; }
+
 // ============================================================ 数学
 float WrapAngle(float a)
 {

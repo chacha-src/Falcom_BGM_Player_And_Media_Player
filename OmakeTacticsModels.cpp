@@ -1798,7 +1798,8 @@ void ActorDraw(Renderer& r, const Library& lib, Actor& a, const M4& world, const
 				r.DrawGear(a.gearM[i], MMul(MMul(fit, a.pose.global[a.gearJ[i]]), wGear), da);
 			} else r.DrawGear(a.gearM[i], MMul(a.pose.global[a.gearJ[i]], wGear), da);
 		}
-		if (hum && humM && a.hair > 0 && humM->headJ >= 0) {
+		const BOOL whiteBase = digitBody && humM && humM->name[4] == '0';
+		if (hum && humM && humM->headJ >= 0 && (a.hair > 0 || whiteBase)) {
 			DrawParams dh0 = dp;
 			dh0.rim = 0.04f;
 			dh0.hue = 0;
@@ -1814,8 +1815,9 @@ void ActorDraw(Renderer& r, const Library& lib, Actor& a, const M4& world, const
 				int hb = lit(((a.hairCol >> 16) & 255) * ((dp.tint >> 16) & 255) / 255);
 				dh0.tint = RGBA8(hr, hg, hb, al);
 			}
-			// 人間の付け替え髪はコンピュートで頭へ載せ、選んだ型以外は潰し、先だけ揺らす。
-			if (!r.DrawHumanHair(a.model, Clampi(a.hair, 1, HAIR_STYLES - 1), humM->headJ, a.pose, wGear, dh0, a.avatar) && !digitBody) {
+			// 白人の素体は地肌が頭なので、髪型「標準」(0) でも髪色の地毛を被せる。
+			int hairStyle = a.hair > 0 ? Clampi(a.hair, 1, HAIR_STYLES - 1) : 0;
+			if (!r.DrawHumanHair(a.model, hairStyle, humM->headJ, a.pose, wGear, dh0, a.avatar) && a.hair > 0 && !digitBody) {
 			int style = Clampi(a.hair, 1, HAIR_STYLES - 1);
 			int slot = -1;
 			for (int s = 0; s < lib.humHairN; s++) if (lib.humHairModel[s] == a.model) { slot = s; break; }

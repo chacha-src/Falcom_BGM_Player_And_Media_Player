@@ -235,6 +235,10 @@ private:
 	void AdvanceLevelUp();
 	void DrawCutIn3D();
 	void DrawCutInUi();
+	void LayoutSpecialCut();
+	void PoseFormAllies();
+	void CutDressFx();
+	float CutIntroLen() const;
 	void ActorForUnit(int ui);
 	void LoadBattleCast();
 	// 読み込み済みの輸入メッシュを、まだ結んでいない敵アクターへ付け直す。
@@ -461,6 +465,9 @@ private:
 	int m_cutA, m_cutD;
 	int m_cutAlly[6], m_cutFoe[6];
 	int m_cutAllyN, m_cutFoeN;
+	int m_cutKind;       // 0=通常 1=戦技 2=陣形
+	V3 m_cutAllyPos[6];
+	V3 m_cutFoePos[6];
 	V3 m_cutPosA, m_cutPosD;
 	float m_flashWhite;
 	Fix<Popup, 64> m_deferPopups;
