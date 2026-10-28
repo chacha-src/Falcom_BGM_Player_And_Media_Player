@@ -103,6 +103,59 @@ static void CEmuZipBaseName(const char* path, char* out, int outCap)
 	strncpy_s(out, (size_t)outCap, slash, _TRUNCATE);
 }
 
+/* 高バイトがあり、かつ不正バイトが無ければ UTF-8。Shift-JIS の先行バイトはここで落ちる。 */
+static int CEmuZipMbLooksUtf8(const char* s)
+{
+	if (!s || !s[0]) return 0;
+	for (const unsigned char* p = (const unsigned char*)s; *p; ++p) {
+		if (*p >= 0x80)
+			return MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, s, -1, NULL, 0) > 0;
+	}
+	return 0;
+}
+
+/* ZIP の一般目的ビット 11、または厳密な UTF-8。どちらでもなければ CP932。 */
+static void CEmuZipBytesToWide(const char* fn, unsigned zipFlags, wchar_t* out, int outChars)
+{
+	if (!out || outChars <= 0) return;
+	out[0] = 0;
+	if (!fn || !fn[0]) return;
+	const int wantUtf8 = ((zipFlags & 0x800u) != 0) || CEmuZipMbLooksUtf8(fn);
+	if (wantUtf8 && MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, fn, -1, out, outChars) > 0)
+		return;
+	MultiByteToWideChar(932, 0, fn, -1, out, outChars);
+}
+
+/* 照合は格納時のバイト列に戻す。UTF-8 で読んだ名前を 932 だけで戻すと別物になり二重登録になる。 */
+static void CEmuZipStoredPathA(const wchar_t* stored, const char* raw, char* pathA, int cap)
+{
+	char sj[CEMU_ZIP_PATH];
+	char utf[CEMU_ZIP_PATH];
+	if (!pathA || cap <= 0) return;
+	pathA[0] = 0;
+	if (!stored) return;
+	const int gotSj = WideCharToMultiByte(932, 0, stored, -1, sj, (int)sizeof(sj), NULL, NULL) > 0;
+	const int gotUtf = WideCharToMultiByte(CP_UTF8, 0, stored, -1, utf, (int)sizeof(utf), NULL, NULL) > 0;
+	const char* pick = gotSj ? sj : (gotUtf ? utf : "");
+	if (raw && raw[0] && gotUtf) {
+		int sjHit = 0;
+		char want[CEMU_ROM_NAME];
+		CEmuZipBaseName(raw, want, (int)sizeof(want));
+		if (gotSj) {
+			char base[CEMU_ROM_NAME];
+			CEmuZipBaseName(sj, base, (int)sizeof(base));
+			sjHit = CEmuZipNameMatch(sj, raw) || CEmuZipNameMatch(base, want);
+		}
+		if (!sjHit) {
+			char base[CEMU_ROM_NAME];
+			CEmuZipBaseName(utf, base, (int)sizeof(base));
+			if (CEmuZipNameMatch(utf, raw) || CEmuZipNameMatch(base, want))
+				pick = utf;
+		}
+	}
+	strncpy_s(pathA, (size_t)cap, pick, _TRUNCATE);
+}
+
 static int CEmuZipSeekRel(HANDLE h, __int64 off)
 {
 	LARGE_INTEGER li;
@@ -210,7 +263,7 @@ static int CEmuZipFsHasName(const CEmuZipFs* fs, const char* fn)
 	CEmuZipBaseName(fn, wantBase, (int)sizeof(wantBase));
 	for (int i = 0; i < fs->fileCount; i++) {
 		char pathA[CEMU_ZIP_PATH];
-		WideCharToMultiByte(932, 0, fs->files[i].path, -1, pathA, (int)sizeof(pathA), NULL, NULL);
+		CEmuZipStoredPathA(fs->files[i].path, fn, pathA, (int)sizeof(pathA));
 		char base[CEMU_ROM_NAME];
 		CEmuZipBaseName(pathA, base, (int)sizeof(base));
 		if (CEmuZipNameMatch(pathA, fn) || CEmuZipNameMatch(base, wantBase))
@@ -281,7 +334,7 @@ static int CEmuZipFsAppendRawMissing(CEmuZipFs* fs, const wchar_t* zipPath, int 
 			continue;
 		}
 		CEmuZipFile* ent = &fs->files[fs->fileCount];
-		MultiByteToWideChar(932, 0, fn, -1, ent->path, CEMU_ZIP_PATH);
+		CEmuZipBytesToWide(fn, flags, ent->path, CEMU_ZIP_PATH);
 		ent->size = usz;
 		ent->data = NULL;
 		if (namesOnly) {
@@ -406,7 +459,7 @@ static int CEmuZipFsAppendEx(CEmuZipFs* fs, const wchar_t* zipPath, int namesOnl
 			continue;
 
 		CEmuZipFile* ent = &fs->files[fs->fileCount];
-		MultiByteToWideChar(932, 0, fn, -1, ent->path, CEMU_ZIP_PATH);
+		CEmuZipBytesToWide(fn, (unsigned)fi.flag, ent->path, CEMU_ZIP_PATH);
 		ent->size = (unsigned)fi.uncompressed_size;
 		ent->data = NULL;
 
@@ -478,7 +531,7 @@ static int CEmuZipFsFindIndex(const CEmuZipFs* fs, const char* name)
 	for (int i = 0; i < fs->fileCount; i++) {
 		char fn[CEMU_ROM_NAME];
 		char pathA[CEMU_ZIP_PATH];
-		WideCharToMultiByte(932, 0, fs->files[i].path, -1, pathA, (int)sizeof(pathA), NULL, NULL);
+		CEmuZipStoredPathA(fs->files[i].path, name, pathA, (int)sizeof(pathA));
 		CEmuZipBaseName(pathA, fn, (int)sizeof(fn));
 		/* ディレクトリ付き名 (ran2/patch vs mzz/patch) は
 		   zip 先頭の同名ベースに潰してはいけない。 */
@@ -492,7 +545,7 @@ static int CEmuZipFsFindIndex(const CEmuZipFs* fs, const char* name)
 		char fn[CEMU_ROM_NAME];
 		char fnNoExt[CEMU_ROM_NAME];
 		char pathA[CEMU_ZIP_PATH];
-		WideCharToMultiByte(932, 0, fs->files[i].path, -1, pathA, (int)sizeof(pathA), NULL, NULL);
+		CEmuZipStoredPathA(fs->files[i].path, name, pathA, (int)sizeof(pathA));
 		CEmuZipBaseName(pathA, fn, (int)sizeof(fn));
 		CEmuZipStripExt(fn, fnNoExt, (int)sizeof(fnNoExt));
 		/* 拡張子無しフォールバックはカタログの "MMD2" 用。
@@ -547,7 +600,7 @@ static int CEmuZipFsFindIndexDir(const CEmuZipFs* fs, const char* name, const ch
 	for (int i = 0; i < fs->fileCount; i++) {
 		char fn[CEMU_ROM_NAME];
 		char pathA[CEMU_ZIP_PATH];
-		WideCharToMultiByte(932, 0, fs->files[i].path, -1, pathA, (int)sizeof(pathA), NULL, NULL);
+		CEmuZipStoredPathA(fs->files[i].path, name, pathA, (int)sizeof(pathA));
 		CEmuZipBaseName(pathA, fn, (int)sizeof(fn));
 		if (CEmuZipNameMatch(pathA, name))
 			return i;
@@ -610,7 +663,7 @@ int CEmuZipFsHasExact(const CEmuZipFs* fs, const char* name, unsigned* outSize)
 	for (int i = 0; i < fs->fileCount; i++) {
 		char fn[CEMU_ROM_NAME];
 		char pathA[CEMU_ZIP_PATH];
-		WideCharToMultiByte(932, 0, fs->files[i].path, -1, pathA, (int)sizeof(pathA), NULL, NULL);
+		CEmuZipStoredPathA(fs->files[i].path, name, pathA, (int)sizeof(pathA));
 		CEmuZipBaseName(pathA, fn, (int)sizeof(fn));
 		if (CEmuZipNameMatch(fn, base) || CEmuZipNameMatch(pathA, name)) {
 			if (outSize) *outSize = fs->files[i].size;

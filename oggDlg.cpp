@@ -1114,8 +1114,10 @@ static CString BuildCpuInstructionListString()
 	if (CPUInfo[0] >= 7) {
 		__cpuid(CPUInfo, 0x00000007);
 		if (CPUInfo[1] & (1 << 5))  avx2 += L"AVX2 ";
-		if (CPUInfo[1] & (1 << 16))  avx2 += L"AVX512 ";
 	}
+	/* 表示は実際にカーネルが走るときだけ。AVX10/512 はレガシー AVX512 ビットが無くても同じ経路。 */
+	if (CpuIsaHasAvx512() || CpuIsaHasAvx10_512())
+		avx2 += L"AVX512 ";
 	if (CpuIsaHasAvx10())
 		avx2 += L"AVX10 ";
 	{
@@ -7476,8 +7478,9 @@ BOOL COggDlg::OnInitDialog()
 	if (CPUInfo[0] >= 7) {
 		__cpuid(CPUInfo, 0x00000007);
 		if (CPUInfo[1] & (1 << 5))  avx2 = LL14(L"AVX2対応", L"AVX2 supported", L"AVX2 pris en charge", L"AVX2 supportato", L"AVX2 compatible", L"AVX2 지원", L"AVX2 支持", L"AVX2 مدعوم", L"AVX2 поддерживается", L"AVX2 unterstützt", L"AVX2 suportado", L"AVX2 ondersteund", L"AVX2 obsługiwane", L"AVX2 destekleniyor");
-		if (CPUInfo[1] & (1 << 16))  avx2 = LL14(L"AVX512対応", L"AVX512 supported", L"AVX512 pris en charge", L"AVX512 supportato", L"AVX512 compatible", L"AVX512 지원", L"AVX512 支持", L"AVX512 مدعوم", L"AVX512 поддерживается", L"AVX512 unterstützt", L"AVX512 suportado", L"AVX512 ondersteund", L"AVX512 obsługiwane", L"AVX512 destekleniyor");
 	}
+	if (CpuIsaHasAvx512() || CpuIsaHasAvx10_512())
+		avx2 = LL14(L"AVX512対応", L"AVX512 supported", L"AVX512 pris en charge", L"AVX512 supportato", L"AVX512 compatible", L"AVX512 지원", L"AVX512 支持", L"AVX512 مدعوم", L"AVX512 поддерживается", L"AVX512 unterstützt", L"AVX512 suportado", L"AVX512 ondersteund", L"AVX512 obsługiwane", L"AVX512 destekleniyor");
 	if (CpuIsaHasAvx10())
 		avx2 = LL14(L"AVX10対応", L"AVX10 supported", L"AVX10 pris en charge", L"AVX10 supportato", L"AVX10 compatible", L"AVX10 지원", L"AVX10 支持", L"AVX10 مدعوم", L"AVX10 поддерживается", L"AVX10 unterstützt", L"AVX10 suportado", L"AVX10 ondersteund", L"AVX10 obsługiwane", L"AVX10 destekleniyor");
 	s.Format(_T("%s / %s"), cpus, avx2);
@@ -7507,8 +7510,9 @@ BOOL COggDlg::OnInitDialog()
 	if (CPUInfo[0] >= 7) {
 		__cpuid(CPUInfo, 0x00000007);
 		if (CPUInfo[1] & (1 << 5))  avx2 += "AVX2 ";
-		if (CPUInfo[1] & (1 << 16))  avx2 += "AVX512 ";
 	}
+	if (CpuIsaHasAvx512() || CpuIsaHasAvx10_512())
+		avx2 += "AVX512 ";
 	if (CpuIsaHasAvx10())
 		avx2 += "AVX10 ";
 	/* GPU(DXGI)列挙は起動をブロックするため DeferredHeavy へ。ここでは命令一覧のみ。 */

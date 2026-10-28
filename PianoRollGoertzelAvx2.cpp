@@ -1,5 +1,6 @@
 ﻿#include "stdafx.h"
 #include "PianoRollGoertzelAvx2.h"
+#include "cpu_isa.h"
 #include <immintrin.h>
 #include <cmath>
 
@@ -59,6 +60,32 @@ void PianoRollGoertzelBatchAvx2(
 {
     if (!samples || !coeffs || !rawOut || numSamples <= 0 || keyBegin >= keyEnd)
         return;
+
+#if defined(_M_X64)
+    static int use512 = -1;
+    if (use512 < 0) {
+        const CpuIsa& isa = CpuIsaGet();
+        use512 = (isa.avx512 || isa.avx10_512) ? 1 : 0;
+    }
+    if (use512) {
+        int key = keyBegin;
+        const int end8 = keyEnd - ((keyEnd - keyBegin) & 7);
+        alignas(64) double coeffs8[8];
+        alignas(64) double out8[8];
+        for (; key < end8; key += 8) {
+            for (int k = 0; k < 8; ++k)
+                coeffs8[k] = coeffs[key + k];
+            PianoRollGoertzel8_AVX512(samples, numSamples, coeffs8, out8);
+            for (int k = 0; k < 8; ++k)
+                rawOut[key - keyBegin + k] = out8[k];
+        }
+        for (; key < keyEnd; ++key) {
+            rawOut[key - keyBegin] = GoertzelMagnitudeScalar(
+                samples, numSamples, coeffs[key]);
+        }
+        return;
+    }
+#endif
 
     int key = keyBegin;
     const int end4 = keyEnd - ((keyEnd - keyBegin) & 3);

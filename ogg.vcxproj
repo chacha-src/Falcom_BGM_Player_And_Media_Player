@@ -503,6 +503,14 @@ if errorlevel 1 exit /b 1</Command>
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <EnableEnhancedInstructionSet Condition="'$(Platform)'=='x64'">AdvancedVectorExtensions512</EnableEnhancedInstructionSet>
     </ClCompile>
+    <ClCompile Include="PianoRollGoertzelAvx512.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <EnableEnhancedInstructionSet Condition="'$(Platform)'=='x64'">AdvancedVectorExtensions512</EnableEnhancedInstructionSet>
+    </ClCompile>
+    <ClCompile Include="AnalyzerFftAvx512.cpp">
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <EnableEnhancedInstructionSet Condition="'$(Platform)'=='x64'">AdvancedVectorExtensions512</EnableEnhancedInstructionSet>
+    </ClCompile>
     <ClCompile Include="Vst3Host.cpp" />
     <ClCompile Include="VstMidiEngine.cpp" />
     <ClCompile Include="Sf2Vst2.cpp">

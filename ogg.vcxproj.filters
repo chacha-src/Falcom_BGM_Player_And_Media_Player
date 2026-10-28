@@ -1386,6 +1386,12 @@
     <ClCompile Include="simd_audio_avx10.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="PianoRollGoertzelAvx512.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="AnalyzerFftAvx512.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="ZmusicEngine.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>

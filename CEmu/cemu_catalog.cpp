@@ -138,12 +138,25 @@ static void CEmuDecodeXmlEntitiesW(wchar_t* s)
 	*dst = 0;
 }
 
+/* 高バイトが厳密な UTF-8 なら UTF-8。Shift-JIS の先行バイトはここで落ちる。ASCII は 932。 */
+static int CEmuMbLooksUtf8(const char* s)
+{
+	if (!s || !s[0]) return 0;
+	for (const unsigned char* p = (const unsigned char*)s; *p; ++p) {
+		if (*p >= 0x80)
+			return MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, s, -1, NULL, 0) > 0;
+	}
+	return 0;
+}
+
 static void CEmuSjisToWide(const char* sjis, wchar_t* out, int outChars)
 {
 	if (!out || outChars <= 0) return;
 	out[0] = 0;
 	if (!sjis || !sjis[0]) return;
-	MultiByteToWideChar(932, 0, sjis, -1, out, outChars);
+	const UINT cp = CEmuMbLooksUtf8(sjis) ? CP_UTF8 : 932;
+	if (MultiByteToWideChar(cp, cp == CP_UTF8 ? MB_ERR_INVALID_CHARS : 0, sjis, -1, out, outChars) <= 0)
+		MultiByteToWideChar(932, 0, sjis, -1, out, outChars);
 	CEmuDecodeXmlEntitiesW(out);
 }
 
@@ -1508,8 +1521,9 @@ struct CEmuCatalogFp {
    0x303: CEMU_ROM_MAX 1024 + keep engine files on overflow (night_s USMD).
    0x304: <genre> tag on game entries.
    0x305: readable genre labels (ARPG/Shooter/Adventure, 32-byte field).
-   0x306: title/range の先頭 0 を 8 進にしない（code=\"08\" → 8）。 */
-enum { CEMU_CAT_FP_PARSE_VER = 0x306 };
+   0x306: title/range の先頭 0 を 8 進にしない（code=\"08\" → 8）。
+   0x307: 曲名などは厳密な UTF-8 なら UTF-8、それ以外は CP932。旧キャッシュの文字化けを捨てる。 */
+enum { CEMU_CAT_FP_PARSE_VER = 0x307 };
 
 static int CEmuCatalogMakeFp(const wchar_t* arcZip, const wchar_t* dataRoot,
 	const wchar_t* parent, CEmuCatalogFp* fp)

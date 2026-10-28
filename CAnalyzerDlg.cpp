@@ -11,6 +11,11 @@
 #include <cmath>
 #include <cstring>
 #include <algorithm>
+#include "cpu_isa.h"
+
+#if defined(_M_X64)
+void AnalyzerFftRadix2_AVX512(float* re, float* im, int n);
+#endif
 
 extern COggDlg* og;
 extern int tempo;
@@ -72,6 +77,13 @@ namespace
 
 	void FftRadix2(float* re, float* im, int n)
 	{
+#if defined(_M_X64)
+		if (n >= 64 && (n & (n - 1)) == 0
+			&& (CpuIsaHasAvx512() || CpuIsaHasAvx10_512())) {
+			AnalyzerFftRadix2_AVX512(re, im, n);
+			return;
+		}
+#endif
 		int j = 0;
 		for (int i = 1; i < n; ++i) {
 			int bit = n >> 1;
