@@ -2478,6 +2478,15 @@ int UnitStat(const Unit& u, int s)
 	}
 	return v;
 }
+void CharFightBonus(const CharData& c, int out[S_COUNT])
+{
+	Unit u{};
+	u.monster = -1;
+	u.alive = 1;
+	u.ch = c;
+	CraftBindUnit(u);
+	for (int s = 0; s < S_COUNT; s++) out[s] = UnitStat(u, s) - c.stat[s];
+}
 int UnitMove(const Unit& u) { return UnitStat(u, S_MOV); }
 int UnitJump(const Unit& u) { return UnitStat(u, S_JMP); }
 int UnitMoveType(const Unit& u)
@@ -4029,7 +4038,7 @@ void SetupBattle(Battle& b, int stage, DWORD seed, const CharData* party, const 
 		u.span = 1;
 		u.x = b.map.pStartX[i]; u.z = b.map.pStartZ[i];
 		u.face = faceToE;
-		u.ct = r.Range(0, 300) + u.ch.stat[S_AGI] * 8;
+		u.ct = r.Range(0, 300) + UnitStat(u, S_AGI) * 8;
 		if (UnitHasPas(u, PAS_OPEN2)) u.ct += 400;
 		else if (UnitHasPas(u, PAS_OPEN)) u.ct += 250;
 		u.hpShow = (float)u.hp;
@@ -4051,7 +4060,7 @@ void SetupBattle(Battle& b, int stage, DWORD seed, const CharData* party, const 
 			int use = k == 0 ? mon : PickMonster(stage, r);
 			MakeEnemy(u, use, lv, boss ? 1 : 0, r);
 			u.face = faceToE + 3.14159f;
-			u.ct = r.Range(0, 280) + u.ch.stat[S_AGI] * 6;
+			u.ct = r.Range(0, 280) + UnitStat(u, S_AGI) * 6;
 			u.hpShow = (float)u.hp;
 			u.grp = g;
 			u.alert = 0;
@@ -4448,10 +4457,41 @@ void AiDecide(const Battle& b, int ui, AiPlan& p, Rng& r)
 	Battle& bb = const_cast<Battle&>(b);
 	Unit& um = bb.u[ui];
 	const int ox = u.x, oz = u.z;
+	// 体力半分以下のボスは、踏み込むより距離を取る。射撃が届く位置を優先し、防御を上げる技があれば先に使う。
+	const int cornered = u.boss && u.hp * 2 <= max(1, u.ch.stat[S_HP]);
+	static short nearD[MAPN][MAPN];
+	int farReach = 0;
+	if (cornered) {
+		for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) {
+			nearD[z][x] = 999;
+			if (rc.cost[z][x] < 0 || !rc.canStop[z][x]) continue;
+			int nd = 999;
+			for (int i = 0; i < b.nUnits; i++) {
+				const Unit& t = b.u[i];
+				if (!t.alive || t.team == u.team) continue;
+				nd = min(nd, FootDist(x, z, UnitSpan(u), t.x, t.z, UnitSpan(t)));
+			}
+			nearD[z][x] = (short)nd;
+			if (nd < 999 && nd > farReach) farReach = nd;
+		}
+	}
+	const int room = farReach >= 2;
 	for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) {
 		if (rc.cost[z][x] < 0 || !rc.canStop[z][x]) continue;
 		um.x = x; um.z = z;
 		float place = TerrainInfo(b.map.At(x, z).t).defPct * .25f - rc.cost[z][x] * .05f;
+		const int tileNear = cornered ? (int)nearD[z][x] : 0;
+		if (cornered) {
+			float flee = tileNear * 4.f + place;
+			int rmax = UnitRangeMax(u);
+			if (rmax >= 2) {
+				if (tileNear >= 2 && tileNear <= rmax) flee += 28.f;
+				else if (tileNear > rmax) flee -= (tileNear - rmax) * 3.f;
+			}
+			if (room && tileNear <= 1) flee -= 36.f;
+			flee += r.F(0, 3.f);
+			if (flee > best) { best = flee; p.moveX = x; p.moveZ = z; p.target = -1; p.skill = -1; p.castX = x; p.castZ = z; }
+		}
 		// 通常攻撃
 		for (int i = 0; i < b.nUnits; i++) {
 			const Unit& t = b.u[i];
@@ -4466,7 +4506,17 @@ void AiDecide(const Battle& b, int ui, AiPlan& p, Rng& r)
 			sc += t.ch.lv * .35f;
 			sc += (1.f - (float)t.hp / max(1, t.ch.stat[S_HP])) * 4.f;
 			sc -= (f.canCounter ? f.cdmg * f.chits * f.chit / 100.f * .35f : 0.f);
-			sc -= FootDist(ox, oz, UnitSpan(u), t.x, t.z, UnitSpan(t)) * 2.5f;
+			int gap = FootDist(x, z, UnitSpan(u), t.x, t.z, UnitSpan(t));
+			if (!cornered) sc -= FootDist(ox, oz, UnitSpan(u), t.x, t.z, UnitSpan(t)) * 2.5f;
+			else {
+				sc += tileNear * 4.f;
+				if (room && gap <= 1) sc -= 80.f;
+				else if (gap >= 2) sc += 36.f;
+				int kill = f.dmg * f.hits >= t.hp;
+				int suicide = f.canCounter && f.cdmg * f.chits >= u.hp;
+				if (kill && !suicide) sc += 110.f;
+				if (suicide) sc -= 50.f;
+			}
 			sc += place + r.F(0, 14.f);
 			if (sc > best) { best = sc; p.moveX = x; p.moveZ = z; p.target = i; p.skill = -1; p.castX = ax; p.castZ = az; }
 		}
@@ -4497,21 +4547,37 @@ void AiDecide(const Battle& b, int ui, AiPlan& p, Rng& r)
 					if (h <= 0) continue;
 					sc += h * 1.2f;
 				} else if (sd.kind == SK_BUFF) {
-					continue;
+					if (!cornered || sd.effect != EF_BUFF_DEF || u.buffDef > 0) continue;
+					int targets[MAX_UNITS];
+					int nt = SkillTargets(b, ui, s, tx, tz, targets, MAX_UNITS);
+					int self = 0;
+					for (int k = 0; k < nt; k++) if (targets[k] == ui) self = 1;
+					if (!self) continue;
+					sc += tileNear * 4.f + 120.f;
 				} else {
 					int targets[MAX_UNITS];
 					int nt = SkillTargets(b, ui, s, tx, tz, targets, MAX_UNITS);
 					if (sd.area == 0) { targets[0] = i; nt = 1; }
 					float tot = 0;
+					int kill = 0;
 					for (int k = 0; k < nt; k++) {
 						Forecast f;
 						CalcForecast(b, ui, targets[k], s, f);
 						const Unit& q = b.u[targets[k]];
 						tot += f.dmg * f.hits * f.hit / 100.f * .55f + (f.dmg * f.hits >= q.hp ? 12.f : 0.f);
-						tot += q.ch.lv * .2f - Dist(ox, oz, q.x, q.z) * 1.6f;
+						if (f.dmg * f.hits >= q.hp) kill = 1;
+						if (!cornered) tot += q.ch.lv * .2f - Dist(ox, oz, q.x, q.z) * 1.6f;
+						else tot += q.ch.lv * .2f;
 					}
 					if (tot <= 0) continue;
 					sc += tot - sd.mp * .4f;
+					if (cornered) {
+						int gap = FootDist(x, z, UnitSpan(u), b.u[i].x, b.u[i].z, UnitSpan(b.u[i]));
+						sc += tileNear * 4.f;
+						if (room && gap <= 1) sc -= 80.f;
+						else if (gap >= 2) sc += 36.f;
+						if (kill) sc += 110.f;
+					}
 				}
 				sc += r.F(0, 10.f);
 				if (sc > best) { best = sc; p.moveX = x; p.moveZ = z; p.target = i; p.skill = s; p.castX = tx; p.castZ = tz; }
@@ -4521,9 +4587,10 @@ void AiDecide(const Battle& b, int ui, AiPlan& p, Rng& r)
 			int cs = u.craftEq[ck];
 			if (cs < CRAFT_BASE) continue;
 			BOOL ougi = IsCraftSuper(cs);
-			if (ougi ? !tryOugi : !tryArt) continue;
-			if (!SkillUsable(b, ui, cs)) continue;
 			const SkillDef& csd = SkillInfo(cs);
+			int defBuff = cornered && csd.effect == EF_BUFF_DEF && u.buffDef <= 0;
+			if ((ougi ? !tryOugi : !tryArt) && !defBuff) continue;
+			if (!SkillUsable(b, ui, cs)) continue;
 			int rmin = SkillCastRangeMin(u, cs), rmax = SkillCastRangeMax(u, cs);
 			for (int i = 0; i < b.nUnits; i++) {
 				const Unit& t = b.u[i];
@@ -4539,6 +4606,12 @@ void AiDecide(const Battle& b, int ui, AiPlan& p, Rng& r)
 					int nt = SkillTargets(b, ui, cs, tx, tz, targets, 8);
 					if (nt <= 0) continue;
 					sc += nt * (ougi ? 14.f : 9.f);
+					if (defBuff) {
+						int self = 0;
+						for (int k = 0; k < nt; k++) if (targets[k] == ui) self = 1;
+						if (!self) continue;
+						sc += tileNear * 4.f + 120.f;
+					}
 					if (csd.effect == EF_CLEANSE) {
 						for (int k = 0; k < nt; k++) {
 							const Unit& q = b.u[targets[k]];
@@ -4550,7 +4623,15 @@ void AiDecide(const Battle& b, int ui, AiPlan& p, Rng& r)
 					CalcForecast(b, ui, i, cs, f);
 					if (f.dmg <= 0) continue;
 					sc += f.dmg * f.hit / 100.f * (ougi ? .25f : .35f);
-					sc += t.ch.lv * .25f - Dist(ox, oz, t.x, t.z) * 1.8f + r.F(0, 10.f);
+					if (!cornered) sc += t.ch.lv * .25f - Dist(ox, oz, t.x, t.z) * 1.8f;
+					else {
+						int gap = FootDist(x, z, UnitSpan(u), t.x, t.z, UnitSpan(t));
+						sc += tileNear * 4.f + t.ch.lv * .25f;
+						if (room && gap <= 1) sc -= 80.f;
+						else if (gap >= 2) sc += 36.f;
+						if (f.dmg * f.hits >= t.hp && !(f.canCounter && f.cdmg * f.chits >= u.hp)) sc += 110.f;
+					}
+					sc += r.F(0, 10.f);
 				}
 				if (sc > best) { best = sc; p.moveX = x; p.moveZ = z; p.target = i; p.skill = cs; p.castX = tx; p.castZ = tz; }
 			}
@@ -4558,6 +4639,8 @@ void AiDecide(const Battle& b, int ui, AiPlan& p, Rng& r)
 	}
 	um.x = ox; um.z = oz;
 	if (p.target >= 0) return;
+	// 半減以下は上で距離を取っている。ここで近づくと逃げが消える。
+	if (cornered) return;
 	// ボスは近づかれるまで待機
 	if (u.boss) {
 		int nearest = 999;

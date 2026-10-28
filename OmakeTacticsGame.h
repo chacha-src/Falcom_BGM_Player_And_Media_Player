@@ -125,6 +125,7 @@ private:
 	void DrawHelpOverlay();
 	float DrawStatLines(const CharData& c, float x, float y, float w, const int* gains, int hpCur, int mpCur);
 	void DrawStatTip();
+	void DrawSkillTip();
 	const wchar_t* ClassName(int cls) const;
 	void UnitTitle(const Unit& u, wchar_t* out, int n) const;
 
@@ -375,6 +376,8 @@ private:
 	int m_itemAim;
 	int m_itemPage;
 	int m_statTip;     // ホバー中の能力。-1 で無し
+	int m_skillTip;    // 編成のスキル説明。-1 無し、0 習得、1 戦技・奥義、2 パッシブ
+	int m_skillTipId;
 	int m_statOpen;    // 戦闘コマンドのステータス表示
 	int m_statWho;     // 表示中のユニット。負なら行動中
 

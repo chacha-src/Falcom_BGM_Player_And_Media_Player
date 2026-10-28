@@ -3657,8 +3657,15 @@ void Game::DrawBattleStatus()
 		return;
 	}
 	CharData view = u.ch;
-	for (int s = 0; s < S_COUNT; s++) view.stat[s] = UnitStat(u, s);
-	DrawStatLines(view, px + U(16), py + U(48), pw - U(32), NULL, u.hp, u.mp);
+	int fightPlus[S_COUNT];
+	for (int s = 0; s < S_COUNT; s++) {
+		int fight = UnitStat(u, s);
+		fightPlus[s] = fight - u.ch.stat[s];
+		if (s == S_HP || s == S_MP) view.stat[s] = fight;
+	}
+	fightPlus[S_HP] = 0;
+	fightPlus[S_MP] = 0;
+	DrawStatLines(view, px + U(16), py + U(48), pw - U(32), fightPlus, u.hp, u.mp);
 	float yy = py + ph - U(204);
 	const GearDef* wpn = GearOf(u.ch.reserved[6]);
 	const GearDef* arm = GearOf(u.ch.reserved[7]);

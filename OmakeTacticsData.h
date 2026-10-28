@@ -524,6 +524,7 @@ inline int UnitSpan(const Unit& u)
 	return s;
 }
 int UnitStat(const Unit& u, int s);     // バフ込み
+void CharFightBonus(const CharData& c, int out[S_COUNT]); // 装備・装飾・パッシブで増える分。戦闘の UnitStat と同じ
 int UnitMove(const Unit& u);
 int UnitJump(const Unit& u);
 int UnitMoveType(const Unit& u);

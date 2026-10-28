@@ -142,6 +142,8 @@ Game::Game()
 	m_itemAim = -1;
 	m_itemPage = 0;
 	m_statTip = -1;
+	m_skillTip = -1;
+	m_skillTipId = 0;
 	m_statOpen = 0;
 	m_statWho = -1;
 	m_rosterPage = 0;
@@ -425,9 +427,17 @@ void Game::Tick(float dt)
 
 static_assert(TAC_BGM_RUINS - TAC_BGM_PLAINS + 1 == TH_COUNT, "地形BGM");
 // 拠点=tactics.ogg。戦闘は地形ごとの tacticsgame*.ogg、無ければ tacticsgame.ogg。
-// 味方の現在HP合計が最大合計の1/12以下で tacticsgamedanger。1人だけ低くても切り替えない。合計が1/6以上で地形曲へ戻す。
-// 残敵HPが初期合計の約1/12以下（少人数は1/10、大人数は1/15）、または生きているボスが最大HPの1/4以下で tacticsgamewin。勝利確定とリザルトは tacticsgameclear。
-// 店=tacticsshop、作成・編成・進化=tacticsmake。テンポは変えない。
+// 危険曲はHP割合では入れない。今いる敵が、次の手かその次で届く攻撃（範囲は巻き込んだ人数）で
+// 生きている味方の残HPを何巡で溶かすか。2.2巡以内、かつ全滅が討伐より先なら tacticsgamedanger。
+// 1人だけ削れていても、届く総ダメージがパーティを溶かさないなら鳴らさない。
+// 脅威が離れた、4.5巡以上耐えられる、討伐が全滅より先、のどれかで危険を下ろす。
+// 下ろしたあと勝利目前なら勝利曲、まだ長ければ地形曲。
+// 勝利目前は、決着まで約20手番（おおよそ1〜2分）を切ってから。通常曲を長く残す。
+// 条件は、戦力差で決まる残りHPのラインを下回り、残敵HPが味方残HPの2.5倍以内で、
+// 通常攻撃の見積もりが20手番以内。遠い拠点が残るうちは歩数を足して遅らせる。
+// ボスだけを削るときは、ボスのそばでHPが半分以下、または倒し切るまで十数手番を切ったら鳴らし、雑魚が満タンでも待つ。
+// 一度入ったら見積もりが40手番を超えて盛り返すまで戻さない。開幕（残9割超）は戦曲。
+// 勝利確定とリザルトは tacticsgameclear。店=tacticsshop、作成・編成・進化=tacticsmake。テンポは変えない。
 void Game::SyncBgm()
 {
 	if (m_screen == SC_BATTLE && m_phase == PH_OVER && !m_victory) {
@@ -435,7 +445,8 @@ void Game::SyncBgm()
 		return;
 	}
 	static int danger = 0;
-	if (m_screen != SC_BATTLE) danger = 0;
+	static int winNear = 0;
+	if (m_screen != SC_BATTLE) { danger = 0; winNear = 0; }
 	int scene = TAC_BGM_HUB;
 	if (m_screen == SC_BATTLE || (m_screen == SC_RESULT && m_victory)) {
 		int alive = m_b.AliveCount(TEAM_ENEMY);
@@ -443,36 +454,175 @@ void Game::SyncBgm()
 		int all = 0;
 		int hp = 0, mx = 0;
 		int eHp = 0, eMx = 0;
-		int bossLow = 0;
 		for (int i = 0; i < m_b.nUnits; i++) {
 			const Unit& u = m_b.u[i];
 			if (u.team == TEAM_ENEMY) {
 				all++;
 				int em = max(1, u.ch.stat[S_HP]);
 				eMx += em;
-				if (u.alive && u.hp > 0) {
-					eHp += u.hp;
-					if (u.boss && u.hp * 4 <= em) bossLow = 1;
-				}
+				if (u.alive && u.hp > 0) eHp += u.hp;
 			}
 			if (u.team != TEAM_PLAYER) continue;
 			mx += max(1, u.ch.stat[S_HP]);
 			if (u.alive && u.hp > 0) hp += u.hp;
 		}
 		const int fightWon = (m_victory == 1) || (m_screen == SC_RESULT) || (m_bossDown && players > 0) || (alive == 0 && all > 0 && players > 0);
-		int winDen = 12;
-		if (all <= 3) winDen = 10;
-		else if (all >= 8) winDen = 15;
-		const int fewLeft = alive > 0 && players > 0 && eMx > 0 && (bossLow || eHp * winDen <= eMx);
+		long long hits = 0;
+		int pSpd = 0, eSpd = 0, farDist = 0, bossClose = 0;
+		int pAtk = 0, pN = 0;
+		for (int i = 0; i < m_b.nUnits; i++) {
+			const Unit& u = m_b.u[i];
+			if (!u.alive || u.hp <= 0 || u.team != TEAM_PLAYER) continue;
+			pAtk += max(UnitStat(u, S_STR), UnitStat(u, S_MAG));
+			pSpd += 10 + UnitStat(u, S_AGI);
+			pN++;
+		}
+		int avgAtk = pN > 0 ? pAtk / pN : 1;
+		if (avgAtk < 1) avgAtk = 1;
+		for (int i = 0; i < m_b.nUnits; i++) {
+			const Unit& u = m_b.u[i];
+			if (!u.alive || u.hp <= 0 || u.team != TEAM_ENEMY) continue;
+			int def = UnitStat(u, S_DEF), res = UnitStat(u, S_RES);
+			int soft = min(def, res), hard = max(def, res);
+			int mit = (soft * 2 + hard) / 3;
+			int blow = avgAtk - mit;
+			if (blow < avgAtk / 4) blow = max(1, avgAtk / 4);
+			if (blow < 1) blow = 1;
+			int need = (u.hp + blow - 1) / blow;
+			need = need * 3 / 5;
+			if (need < 1) need = 1;
+			hits += need;
+			eSpd += 10 + UnitStat(u, S_AGI);
+			int best = 999;
+			for (int p = 0; p < m_b.nUnits; p++) {
+				const Unit& a = m_b.u[p];
+				if (!a.alive || a.hp <= 0 || a.team != TEAM_PLAYER) continue;
+				int d = abs(u.x - a.x) + abs(u.z - a.z);
+				if (d < best) best = d;
+			}
+			if (best < 999 && best > farDist) farDist = best;
+			if (u.boss && best <= 14 && u.hp < max(1, u.ch.stat[S_HP])) {
+				int bmax = max(1, u.ch.stat[S_HP]);
+				if (u.hp * 2 <= bmax || need <= 12) bossClose = 1;
+			}
+		}
+		long long enemyTurns = pSpd > 0 ? hits * eSpd / pSpd : hits;
+		int walk = farDist / 6;
+		if (walk > 12) walk = 12;
+		long long turns = hits + enemyTurns + walk;
+		if (turns > 9999) turns = 9999;
+		int odds = eMx / max(1, mx);
+		int remain = 500;
+		if (odds >= 8) remain = 280;
+		else if (odds >= 5) remain = 330;
+		else if (odds >= 3) remain = 400;
+		else if (odds >= 2) remain = 450;
+		const int broken = eMx > 0 && (long long)eHp * 1000 <= (long long)eMx * remain;
+		const int ahead = hp > 0 && (long long)eHp * 2 <= (long long)hp * 5;
+		const int mapEnd = turns <= 20 && broken && ahead;
+		if (eMx <= 0 || hp <= 0 || players <= 0 || alive <= 0) winNear = 0;
+		else if (bossClose || mapEnd) winNear = 1;
+		else if ((long long)eHp * 10 > (long long)eMx * 9 || turns >= 40) winNear = 0;
+		// 届く敵の1巡で入るダメージ。範囲技は当たる味方の人数だけ足す。
+		int pi[MAX_PARTY];
+		int pn = 0;
+		for (int i = 0; i < m_b.nUnits && pn < MAX_PARTY; i++) {
+			const Unit& a = m_b.u[i];
+			if (!a.alive || a.hp <= 0 || a.team != TEAM_PLAYER) continue;
+			pi[pn++] = i;
+		}
+		int nThreat = 0, roundDmg = 0, threatSpd = 0;
+		for (int ei = 0; ei < m_b.nUnits && pn > 0; ei++) {
+			const Unit& e = m_b.u[ei];
+			if (!e.alive || e.hp <= 0 || e.team != TEAM_ENEMY) continue;
+			int nearK = -1, nearGap = 9999;
+			for (int k = 0; k < pn; k++) {
+				const Unit& a = m_b.u[pi[k]];
+				int gap = Dist(e.x, e.z, a.x, a.z);
+				int span = UnitSpan(e) + UnitSpan(a) - 2;
+				if (span > 0 && gap > span) gap -= span;
+				if (gap < nearGap) { nearGap = gap; nearK = k; }
+			}
+			if (nearK < 0) continue;
+			int rmax = UnitRangeMax(e);
+			int step = UnitMove(e);
+			if (step < 1) step = 1;
+			if (!e.alert && nearGap > 9) continue;
+			if (e.boss && nearGap > 10 && nearGap > rmax) continue;
+			if (nearGap > rmax + step) continue;
+			int sks[8];
+			int ns = 0;
+			sks[ns++] = -1;
+			if (e.monster >= 0) {
+				const MonsterDef& md = MonsterInfo(e.monster);
+				for (int s = 0; s < 3 && ns < 8; s++) if (md.skills[s] >= 0) sks[ns++] = md.skills[s];
+			}
+			for (int s = 0; s < 4 && ns < 8; s++) if (e.craftEq[s] >= CRAFT_BASE) sks[ns++] = e.craftEq[s];
+			int bestTot = 0;
+			for (int s = 0; s < ns; s++) {
+				int sk = sks[s];
+				int area = 0, self = 0;
+				if (sk >= 0) {
+					if (!SkillUsable(m_b, ei, sk)) continue;
+					const SkillDef& sd = SkillInfo(sk);
+					if (sd.kind == SK_HEAL || sd.kind == SK_BUFF || sd.kind == SK_PASSIVE) continue;
+					area = sd.area;
+					self = sd.rMax == 0;
+				}
+				Forecast f;
+				CalcForecast(m_b, ei, pi[nearK], sk, f);
+				int one = (int)((long long)f.dmg * max(1, f.hits) * Clampi(f.hit, 0, 100) / 100);
+				if (one < 1) continue;
+				int tmp[MAX_PARTY];
+				for (int k = 0; k < pn; k++) tmp[k] = 0;
+				int tg[16];
+				int nt = 0;
+				if (area > 0) {
+					int cx = m_b.u[pi[nearK]].x, cz = m_b.u[pi[nearK]].z;
+					if (self) { cx = e.x; cz = e.z; }
+					nt = SkillTargets(m_b, ei, sk, cx, cz, tg, 16);
+				}
+				if (nt <= 0) { tg[0] = pi[nearK]; nt = 1; }
+				int tot = 0;
+				for (int t = 0; t < nt; t++) {
+					int uk = -1;
+					for (int k = 0; k < pn; k++) if (pi[k] == tg[t]) uk = k;
+					if (uk < 0 || tmp[uk]) continue;
+					tmp[uk] = one;
+					tot += one;
+				}
+				if (tot > bestTot) bestTot = tot;
+			}
+			if (bestTot <= 0) continue;
+			nThreat++;
+			roundDmg += bestTot;
+			threatSpd += 10 + UnitStat(e, S_AGI);
+		}
+		long long wipeActs = 9999;
+		int wipeRounds100 = 9999;
+		if (nThreat > 0 && roundDmg > 0 && hp > 0) {
+			wipeRounds100 = (int)((long long)hp * 100 / roundDmg);
+			if (wipeRounds100 > 9999) wipeRounds100 = 9999;
+			long long eAct = (long long)wipeRounds100 * nThreat / 100;
+			if (eAct < 1) eAct = 1;
+			long long pAct = threatSpd > 0 ? eAct * pSpd / threatSpd : eAct;
+			wipeActs = eAct + pAct;
+			if (wipeActs > 9999) wipeActs = 9999;
+		}
+		const int dyingFirst = nThreat > 0 && wipeRounds100 <= 220 && wipeActs + 3 < turns;
+		const int turned = nThreat == 0 || wipeRounds100 >= 450 || turns + 3 < wipeActs;
+		if (fightWon) danger = 0;
+		else if (m_screen == SC_BATTLE && m_phase != PH_OVER && players > 0) {
+			if (dyingFirst) danger = 1;
+			else if (turned) danger = 0;
+		}
+		const int fewLeft = winNear != 0;
 		int th = Clampi(m_b.map.theme, 0, TH_COUNT - 1);
 		scene = TAC_BGM_PLAINS + th;
 		if (fewLeft) scene = TAC_BGM_WIN;
 		if (fightWon) scene = TacBgmHas(TAC_BGM_CLEAR) ? TAC_BGM_CLEAR : TAC_BGM_WIN;
-		if (m_screen == SC_BATTLE && m_phase != PH_OVER && !fightWon && mx > 0) {
-			if (hp * 12 <= mx) danger = 1;
-			else if (hp * 6 >= mx) danger = 0;
-			if (danger && TacBgmHas(TAC_BGM_DANGER)) scene = TAC_BGM_DANGER;
-		}
+		if (danger && m_screen == SC_BATTLE && m_phase != PH_OVER && !fightWon && TacBgmHas(TAC_BGM_DANGER))
+			scene = TAC_BGM_DANGER;
 	} else if (m_shop) {
 		scene = TAC_BGM_SHOP;
 	} else if (m_screen == SC_CREATE || m_screen == SC_PARTY || m_screen == SC_EVOLVE) {
@@ -524,6 +674,7 @@ void Game::RenderFrame()
 	m_r.BeginHud();
 	m_btns.clear();
 	m_statTip = -1;
+	m_skillTip = -1;
 	switch (m_screen) {
 	case SC_LOADING:
 		m_r.HudText(TT(TX_TITLE), m_w * .5f, m_h * .42f, U(40), RGBA8(255, 230, 160), 1, 1);
@@ -549,6 +700,7 @@ void Game::RenderFrame()
 	DrawBanners(0);
 	if (m_showHelp) DrawHelpOverlay();
 	else if (m_statTip >= 0) DrawStatTip();
+	else if (m_skillTip >= 0) DrawSkillTip();
 	if (m_evFlash > 0) m_r.HudRect(0, 0, (float)m_w, (float)m_h, RGBA8(255, 255, 255, (int)(m_evFlash * 200)));
 	if (m_screen == SC_BATTLE && m_click && !m_showHelp && !m_slotUi) {
 		m_click = FALSE;
@@ -1196,6 +1348,52 @@ void Game::DrawStatTip()
 	Panel(tx, ty, tw, th);
 	m_r.HudText(TT(StatNameTx(m_statTip)), tx + U(10), ty + U(16), U(14), RGBA8(255, 226, 150), 0, 1);
 	m_r.HudTextBox(TT(TX_SD_HP + m_statTip), tx + U(10), ty + U(32), tw - U(20), U(48), U(13), RGBA8(230, 230, 236));
+}
+
+void Game::DrawSkillTip()
+{
+	if (m_skillTip < 0) return;
+	wchar_t title[96], body[768], extra[160];
+	title[0] = body[0] = extra[0] = 0;
+	if (m_skillTip == 0) {
+		const SkillDef& sd = SkillInfo(m_skillTipId);
+		wcscpy_s(title, SkillLabel(m_skillTipId));
+		wcscpy_s(body, TT(sd.descTx));
+		if (sd.kind != SK_PASSIVE) {
+			wchar_t tag[32];
+			if (sd.shape == SH_LINE || sd.shape == SH_FAN) swprintf_s(tag, L"%s%d", CraftShapeName(sd.area, sd.shape), sd.area);
+			else if (sd.area <= 0) wcscpy_s(tag, TT(TX_SHAPE_ONE));
+			else if (sd.area == 1) wcscpy_s(tag, TT(TX_MISC_AREA));
+			else swprintf_s(tag, L"%s%d", TT(TX_SHAPE_WIDE), sd.area);
+			swprintf_s(extra, L"MP %d   %s", sd.mp, tag);
+		}
+	} else if (m_skillTip == 1) {
+		const SkillDef& sd = SkillInfo(m_skillTipId);
+		wcscpy_s(title, CraftName(m_skillTipId));
+		wcscpy_s(body, CraftDesc(m_skillTipId));
+		wchar_t cp[24];
+		CraftCostText(m_skillTipId - CRAFT_BASE, cp, 24);
+		swprintf_s(extra, L"%s  %s", CraftShapeName(sd.area, sd.shape), cp);
+	} else {
+		wcscpy_s(title, PasName(m_skillTipId));
+		wcscpy_s(body, PasDesc(m_skillTipId));
+	}
+	float tw = min(U(460), (float)m_w - U(16));
+	float th = extra[0] ? U(128) : U(108);
+	float tx = (float)m_mx + U(14);
+	float ty = (float)m_my + U(16);
+	if (tx + tw > (float)m_w - U(6)) tx = (float)m_mx - tw - U(10);
+	if (ty + th > (float)m_h - U(6)) ty = (float)m_my - th - U(8);
+	if (tx < U(4)) tx = U(4);
+	if (ty < U(4)) ty = U(4);
+	Panel(tx, ty, tw, th);
+	m_r.HudText(title, tx + U(10), ty + U(16), U(14), RGBA8(255, 226, 150), 0, 1);
+	float by = ty + U(30);
+	if (extra[0]) {
+		m_r.HudText(extra, tx + U(10), by, U(12), RGBA8(255, 210, 140), 0, 0);
+		by += U(16);
+	}
+	m_r.HudTextBox(body, tx + U(10), by, tw - U(20), th - (by - ty) - U(8), U(13), RGBA8(230, 230, 236));
 }
 
 float Game::DrawStatLines(const CharData& c, float x, float y, float w, const int* gains, int hpCur, int mpCur)
@@ -3985,7 +4183,8 @@ void Game::DrawPartyUi()
 	if (modal) { m_click = FALSE; m_activateId = -1; }
 	float x = max(8.f, min(U(20), (float)m_w * .02f));
 	float y = max(8.f, min(U(20), (float)m_h * .02f));
-	float gw = min((float)m_w * .6f, min(U(760), (float)m_w - x - U(200)));
+	float gw = min((float)m_w * .5f, min(U(640), (float)m_w - x - U(440)));
+	if (gw < U(340)) gw = min((float)m_w * .58f, (float)m_w - x - U(200));
 	float gh = (float)m_h - y * 2.f;
 	if (gw < 200.f) gw = min(200.f, (float)m_w - 16.f);
 	Panel(x, y, gw, gh);
@@ -4068,7 +4267,7 @@ void Game::DrawPartyUi()
 	CharData& c = m_save.roster[m_partySel];
 	if (!c.used) return;
 	Panel(dx, y, dw, gh);
-	float ps2 = min(U(110), dw * .4f);
+	float ps2 = min(U(96), dw * .34f);
 	DrawPortrait(RosterPortrait(m_partySel), dx + U(14), y + U(14), ps2, RGBA8(200, 170, 110));
 	m_r.HudText(c.name, dx + ps2 + U(26), y + U(30), U(20), RGBA8(255, 255, 255), 0, 1);
 	m_r.HudText(ClassName(c.cls), dx + ps2 + U(26), y + U(56), U(15), RGBA8(255, 226, 150), 0, 1);
@@ -4080,76 +4279,126 @@ void Game::DrawPartyUi()
 	Bar(dx + ps2 + U(26), y + U(94), dw - ps2 - U(44), U(8), need > 0 ? c.exp / (float)need : 0.f, RGBA8(120, 200, 255), RGBA8(60, 120, 220));
 	swprintf_s(l, L"%s %d  /  %s %d", TT(TX_BT_DEFEATED), c.kills, TT(TX_BT_STAGE), c.battles);
 	m_r.HudText(l, dx + ps2 + U(26), y + U(114), U(12), RGBA8(190, 190, 190), 0, 0);
-	float sy = y + ps2 + U(28);
-	sy += DrawStatLines(c, dx + U(14), sy, dw - U(28), NULL, -1, -1) + U(10);
-	m_r.HudText(TT(TX_PT_SKILLS), dx + U(14), sy + U(10), U(15), RGBA8(255, 226, 150), 0, 1);
-	sy += U(24);
-	int sks[96], ns = 0;
-	for (int s = 0; s < SKL_COUNT && ns < 96; s++) {
+	float gearH = U(22);
+	float gearGap = U(2);
+	float gearBlock = gearH * 5.f + gearGap * 4.f;
+	float actH = U(36);
+	float evoH = U(26);
+	float bot = y + gh - U(8);
+	float actY = bot - actH;
+	float evoY = actY - U(4) - evoH;
+	float gearY = evoY - U(6) - gearBlock;
+	auto gearRow = [&](int r) { return gearY + r * (gearH + gearGap); };
+	int gearBonus[S_COUNT];
+	CharFightBonus(c, gearBonus);
+	float sy = y + max(ps2 + U(18.f), U(128.f));
+	sy += DrawStatLines(c, dx + U(14), sy, dw - U(28), gearBonus, -1, -1) + U(6);
+	m_r.HudText(TT(TX_PT_SKILLS), dx + U(14), sy + U(4), U(15), RGBA8(255, 226, 150), 0, 1);
+	sy += U(18);
+	struct SkRow { int kind; int id; DWORD col; };
+	SkRow sks[160];
+	int ns = 0;
+	auto pushSk = [&](int kind, int id, DWORD col) { if (ns < 160) sks[ns++] = { kind, id, col }; };
+	for (int s = 0; s < SKL_COUNT; s++) {
 		if (!CharHasSkill(c, s)) continue;
-		if (SkillInfo(s).enemyOnly) continue;
-		sks[ns++] = s;
+		const SkillDef& sd = SkillInfo(s);
+		if (sd.enemyOnly) continue;
+		DWORD col = RGBA8(236, 236, 240);
+		if (sd.kind == SK_PHYS) col = RGBA8(255, 214, 160);
+		else if (sd.kind == SK_MAGIC) col = RGBA8(214, 198, 255);
+		else if (sd.kind == SK_HEAL) col = RGBA8(166, 230, 190);
+		else if (sd.kind == SK_BUFF) col = RGBA8(176, 220, 255);
+		else if (sd.kind == SK_PASSIVE) col = RGBA8(196, 196, 214);
+		pushSk(0, s, col);
+	}
+	for (int slot = 0; slot < 3; slot++) {
+		int id = EquippedBeadId(c, slot);
+		if (id > 0) pushSk(1, CRAFT_BASE + id - 1, RGBA8(255, 206, 120));
+	}
+	{
+		int id = EquippedBeadId(c, 3);
+		if (id > 0) pushSk(1, CRAFT_BASE + id - 1, RGBA8(255, 176, 110));
+	}
+	for (int slot = 0; slot < 2; slot++) {
+		int id = EquippedPasId(c, slot);
+		if (id > 0) pushSk(2, id, RGBA8(150, 214, 255));
 	}
 	float skillTop = sy;
-	float skillBot = y + gh - U(300);
+	float skillBot = gearY - U(6);
 	if (skillBot < skillTop + U(16)) skillBot = skillTop + U(16);
 	if (!ns) {
 		m_r.HudText(TT(TX_PT_NONE), dx + U(20), skillTop + U(9), U(13), RGBA8(160, 160, 170), 0, 0);
 	} else {
 		float avail = skillBot - skillTop;
 		if (avail < U(16)) avail = U(16);
-		int cols = 2;
-		while (cols < 5 && avail / (float)((ns + cols - 1) / cols) < U(14)) cols++;
+		int cols = dw >= U(420) ? 2 : 1;
+		while (cols < 4 && avail / (float)((ns + cols - 1) / cols) < U(16)) cols++;
 		int rows = (ns + cols - 1) / cols;
 		float rowH = avail / (float)rows;
-		if (rowH > U(18)) rowH = U(18);
-		float fs = rowH < U(14) ? U(11) : U(13);
-		float colW = (dw - U(20)) / (float)cols;
+		if (rowH > U(20)) rowH = U(20);
+		float fs = rowH < U(15) ? U(11) : U(13);
+		float colW = (dw - U(16)) / (float)cols;
 		for (int i = 0; i < ns; i++) {
 			int col = i % cols;
 			int row = i / cols;
-			float cy = skillTop + row * rowH + rowH * .5f;
-			const SkillDef& sd = SkillInfo(sks[i]);
-			wchar_t sl[120];
-			wchar_t tag[24];
-			if (sd.kind == SK_PASSIVE) wcscpy_s(tag, TT(TX_MISC_PASSIVE));
-			else if (sd.shape == SH_LINE || sd.shape == SH_FAN) swprintf_s(tag, L"%s%d", CraftShapeName(sd.area, sd.shape), sd.area);
-			else if (sd.area <= 0) wcscpy_s(tag, TT(TX_SHAPE_ONE));
-			else if (sd.area == 1) wcscpy_s(tag, TT(TX_MISC_AREA));
-			else swprintf_s(tag, L"%s%d", TT(TX_SHAPE_WIDE), sd.area);
-			if (sd.kind == SK_PASSIVE) swprintf_s(sl, L"%s (%s)", SkillLabel(sks[i]), tag);
-			else swprintf_s(sl, L"%s %s MP%d", SkillLabel(sks[i]), tag, sd.mp);
-			m_r.HudText(sl, dx + U(10) + col * colW, cy, fs, RGBA8(236, 236, 240), 0, 0);
+			float hx = dx + U(8) + col * colW;
+			float hy = skillTop + row * rowH;
+			float cy = hy + rowH * .5f;
+			BOOL hov = !modal && m_mouseSeen && Hit(hx, hy, colW - U(4), rowH);
+			if (hov) {
+				m_skillTip = sks[i].kind;
+				m_skillTipId = sks[i].id;
+				m_r.HudRect(hx, hy, colW - U(4), rowH, RGBA8(255, 220, 140, 40));
+			}
+			wchar_t sl[140];
+			if (sks[i].kind == 1) {
+				BOOL ougi = IsCraftSuper(sks[i].id);
+				swprintf_s(sl, L"%s %s%s", ougi ? TT(TX_OUGI) : TT(TX_CRAFT), CraftName(sks[i].id), ougi ? L" ★" : L"");
+			} else if (sks[i].kind == 2) {
+				swprintf_s(sl, L"%s %s", TT(TX_PAS), PasName(sks[i].id));
+			} else {
+				const SkillDef& sd = SkillInfo(sks[i].id);
+				wchar_t tag[24];
+				if (sd.kind == SK_PASSIVE) wcscpy_s(tag, TT(TX_MISC_PASSIVE));
+				else if (sd.shape == SH_LINE || sd.shape == SH_FAN) swprintf_s(tag, L"%s%d", CraftShapeName(sd.area, sd.shape), sd.area);
+				else if (sd.area <= 0) wcscpy_s(tag, TT(TX_SHAPE_ONE));
+				else if (sd.area == 1) wcscpy_s(tag, TT(TX_MISC_AREA));
+				else swprintf_s(tag, L"%s%d", TT(TX_SHAPE_WIDE), sd.area);
+				if (sd.kind == SK_PASSIVE) swprintf_s(sl, L"%s (%s)", SkillLabel(sks[i].id), tag);
+				else swprintf_s(sl, L"%s %s MP%d", SkillLabel(sks[i].id), tag, sd.mp);
+			}
+			m_r.HudText(sl, hx + U(2), cy, fs, hov ? RGBA8(255, 244, 210) : sks[i].col, 0, 0);
 		}
 	}
 	// 操作
 	{
+		float c0 = dx + U(10), c1 = dx + dw * .52f;
+		float w0 = dw * .48f - U(4), w1 = dw * .46f;
 		const GearDef* wpn = GearOf(c.reserved[6]);
 		const GearDef* arm = GearOf(c.reserved[7]);
 		wchar_t gl[96];
 		swprintf_s(gl, L"%s: %s", TT(TX_GEAR_WPN), wpn ? GearName(c.reserved[6]) : TT(TX_PT_NONE));
-		if (Btn(ID_PT_WPN, dx + U(14), y + gh - U(284), dw * .48f, U(26), gl, TRUE, FALSE, U(11))) { m_eqPick = 1; m_eqPage = 0; m_focusId = ID_EQ_NONE; }
+		if (Btn(ID_PT_WPN, c0, gearRow(0), w0, gearH, gl, TRUE, FALSE, U(11))) { m_eqPick = 1; m_eqPage = 0; m_focusId = ID_EQ_NONE; }
 		swprintf_s(gl, L"%s: %s", TT(TX_GEAR_ARM), arm ? GearName(c.reserved[7]) : TT(TX_PT_NONE));
-		if (Btn(ID_PT_ARM, dx + dw * .52f, y + gh - U(284), dw * .46f, U(26), gl, TRUE, FALSE, U(11))) { m_eqPick = 2; m_eqPage = 0; m_focusId = ID_EQ_NONE; }
+		if (Btn(ID_PT_ARM, c1, gearRow(0), w1, gearH, gl, TRUE, FALSE, U(11))) { m_eqPick = 2; m_eqPage = 0; m_focusId = ID_EQ_NONE; }
 		swprintf_s(gl, L"%s1: %s", TT(TX_ACC), EquippedAccName(c, 0));
-		if (Btn(ID_PT_ACC0, dx + U(14), y + gh - U(254), dw * .48f, U(26), gl, TRUE, FALSE, U(11))) { m_eqPick = 3; m_eqPage = 0; m_focusId = ID_EQ_NONE; }
+		if (Btn(ID_PT_ACC0, c0, gearRow(1), w0, gearH, gl, TRUE, FALSE, U(11))) { m_eqPick = 3; m_eqPage = 0; m_focusId = ID_EQ_NONE; }
 		swprintf_s(gl, L"%s2: %s", TT(TX_ACC), EquippedAccName(c, 1));
-		if (Btn(ID_PT_ACC1, dx + dw * .52f, y + gh - U(254), dw * .46f, U(26), gl, TRUE, FALSE, U(11))) { m_eqPick = 4; m_eqPage = 0; m_focusId = ID_EQ_NONE; }
+		if (Btn(ID_PT_ACC1, c1, gearRow(1), w1, gearH, gl, TRUE, FALSE, U(11))) { m_eqPick = 4; m_eqPage = 0; m_focusId = ID_EQ_NONE; }
 		swprintf_s(gl, L"%s1: %s", TT(TX_CRAFT), EquippedBeadName(c, 0));
-		if (Btn(ID_PT_BEAD0, dx + U(14), y + gh - U(224), dw * .48f, U(26), gl, TRUE, FALSE, U(11))) { m_eqPick = 5; m_eqPage = 0; m_focusId = ID_EQ_NONE; }
+		if (Btn(ID_PT_BEAD0, c0, gearRow(2), w0, gearH, gl, TRUE, FALSE, U(11))) { m_eqPick = 5; m_eqPage = 0; m_focusId = ID_EQ_NONE; }
 		swprintf_s(gl, L"%s2: %s", TT(TX_CRAFT), EquippedBeadName(c, 1));
-		if (Btn(ID_PT_BEAD1, dx + dw * .52f, y + gh - U(224), dw * .46f, U(26), gl, TRUE, FALSE, U(11))) { m_eqPick = 6; m_eqPage = 0; m_focusId = ID_EQ_NONE; }
+		if (Btn(ID_PT_BEAD1, c1, gearRow(2), w1, gearH, gl, TRUE, FALSE, U(11))) { m_eqPick = 6; m_eqPage = 0; m_focusId = ID_EQ_NONE; }
 		swprintf_s(gl, L"%s3: %s", TT(TX_CRAFT), EquippedBeadName(c, 2));
-		if (Btn(ID_PT_BEAD2, dx + U(14), y + gh - U(194), dw * .48f, U(26), gl, TRUE, FALSE, U(11))) { m_eqPick = 9; m_eqPage = 0; m_focusId = ID_EQ_NONE; }
+		if (Btn(ID_PT_BEAD2, c0, gearRow(3), w0, gearH, gl, TRUE, FALSE, U(11))) { m_eqPick = 9; m_eqPage = 0; m_focusId = ID_EQ_NONE; }
 		swprintf_s(gl, L"%s: %s", TT(TX_OUGI), EquippedBeadName(c, 3));
-		if (Btn(ID_PT_BEAD3, dx + dw * .52f, y + gh - U(194), dw * .46f, U(26), gl, TRUE, FALSE, U(11))) { m_eqPick = 10; m_eqPage = 0; m_focusId = ID_EQ_NONE; }
+		if (Btn(ID_PT_BEAD3, c1, gearRow(3), w1, gearH, gl, TRUE, FALSE, U(11))) { m_eqPick = 10; m_eqPage = 0; m_focusId = ID_EQ_NONE; }
 		swprintf_s(gl, L"%s1: %s", TT(TX_PAS), EquippedPasName(c, 0));
-		if (Btn(ID_PT_PAS0, dx + U(14), y + gh - U(164), dw * .48f, U(26), gl, TRUE, FALSE, U(11))) { m_eqPick = 7; m_eqPage = 0; m_focusId = ID_EQ_NONE; }
+		if (Btn(ID_PT_PAS0, c0, gearRow(4), w0, gearH, gl, TRUE, FALSE, U(11))) { m_eqPick = 7; m_eqPage = 0; m_focusId = ID_EQ_NONE; }
 		swprintf_s(gl, L"%s2: %s", TT(TX_PAS), EquippedPasName(c, 1));
-		if (Btn(ID_PT_PAS1, dx + dw * .52f, y + gh - U(164), dw * .46f, U(26), gl, TRUE, FALSE, U(11))) { m_eqPick = 8; m_eqPage = 0; m_focusId = ID_EQ_NONE; }
+		if (Btn(ID_PT_PAS1, c1, gearRow(4), w1, gearH, gl, TRUE, FALSE, U(11))) { m_eqPick = 8; m_eqPage = 0; m_focusId = ID_EQ_NONE; }
 	}
-	float by = y + gh - U(120);
-	if (!m_confirmDelete && Btn(ID_PT_EVO, dx + U(14), by - U(6), dw - U(28), U(28), TT(TX_BASE_EVOLVE), TRUE, FALSE, U(13))) {
+	if (!m_confirmDelete && Btn(ID_PT_EVO, dx + U(10), evoY, dw - U(20), evoH, TT(TX_BASE_EVOLVE), TRUE, FALSE, U(13))) {
 		m_evFromParty = 1;
 		int sel = m_partySel;
 		EnterEvolve();
@@ -4163,14 +4412,14 @@ void Game::DrawPartyUi()
 	BOOL inParty = FALSE;
 	for (int p = 0; p < MAX_PARTY; p++) if (m_save.party[p] == m_partySel) inParty = TRUE;
 	if (m_confirmDelete) {
-		m_r.HudText(TT(TX_PT_DELETE_Q), dx + dw * .5f, by + U(10), U(15), RGBA8(255, 170, 160), 1, 1);
-		if (Btn(ID_PT_YES, dx + U(14), by + U(30), dw * .5f - U(20), U(38), TT(TX_PT_YES), TRUE, FALSE, 0, RGBA8(170, 50, 40, 240))) { DeleteRoster(m_partySel); m_confirmDelete = 0; m_eqPick = 0; return; }
-		if (Btn(ID_PT_NO, dx + dw * .5f + U(6), by + U(30), dw * .5f - U(20), U(38), TT(TX_PT_NO))) m_confirmDelete = 0;
+		m_r.HudText(TT(TX_PT_DELETE_Q), dx + dw * .5f, evoY + evoH * .5f, U(15), RGBA8(255, 170, 160), 1, 1);
+		if (Btn(ID_PT_YES, dx + U(14), actY, dw * .5f - U(20), actH, TT(TX_PT_YES), TRUE, FALSE, 0, RGBA8(170, 50, 40, 240))) { DeleteRoster(m_partySel); m_confirmDelete = 0; m_eqPick = 0; return; }
+		if (Btn(ID_PT_NO, dx + dw * .5f + U(6), actY, dw * .5f - U(20), actH, TT(TX_PT_NO))) m_confirmDelete = 0;
 	} else {
 		float bw3 = (dw - U(28) - U(16)) / 3.f;
-		if (Btn(ID_PT_DEPLOY, dx + U(14), by + U(30), bw3, U(38), TT(TX_PT_DEPLOY), TRUE, inParty, U(14))) TogglePartyMember(m_partySel);
-		if (Btn(ID_PT_EDIT, dx + U(14) + bw3 + U(8), by + U(30), bw3, U(38), TT(TX_CR_EDIT), TRUE, FALSE, U(14))) { m_eqPick = 0; m_createFromParty = 1; EnterCreate(m_partySel); return; }
-		if (Btn(ID_PT_DELETE, dx + U(14) + (bw3 + U(8)) * 2, by + U(30), bw3, U(38), TT(TX_PT_DELETE), TRUE, FALSE, U(14), RGBA8(120, 40, 36, 230))) m_confirmDelete = 1;
+		if (Btn(ID_PT_DEPLOY, dx + U(14), actY, bw3, actH, TT(TX_PT_DEPLOY), TRUE, inParty, U(14))) TogglePartyMember(m_partySel);
+		if (Btn(ID_PT_EDIT, dx + U(14) + bw3 + U(8), actY, bw3, actH, TT(TX_CR_EDIT), TRUE, FALSE, U(14))) { m_eqPick = 0; m_createFromParty = 1; EnterCreate(m_partySel); return; }
+		if (Btn(ID_PT_DELETE, dx + U(14) + (bw3 + U(8)) * 2, actY, bw3, actH, TT(TX_PT_DELETE), TRUE, FALSE, U(14), RGBA8(120, 40, 36, 230))) m_confirmDelete = 1;
 	}
 	if (m_eqPick) {
 		if (modal) { m_click = savedClick; m_activateId = savedAct; }

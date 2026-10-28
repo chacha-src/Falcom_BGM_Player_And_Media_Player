@@ -101,7 +101,7 @@ enum TacBgmId {
 	TAC_BGM_VOLCANO, // tacticsgamevolcano.ogg
 	TAC_BGM_SWAMP,   // tacticsgameswamp.ogg
 	TAC_BGM_RUINS,   // tacticsgameruins.ogg
-	TAC_BGM_DANGER,  // tacticsgamedanger.ogg（味方HPが低いあいだ）
+	TAC_BGM_DANGER,  // tacticsgamedanger.ogg（届く敵が味方を数巡で溶かすあいだ）
 	TAC_BGM_CLEAR,   // tacticsgameclear.ogg（勝利）
 	TAC_BGM_N
 };
