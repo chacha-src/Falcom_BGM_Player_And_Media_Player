@@ -964,6 +964,12 @@ static void BuildOrb(Renderer& r, GpuMesh& out)
 BOOL BuildLibrary(Renderer& r, Library& lib)
 {
 	ReleaseLibrary(lib);
+	int stepN = 4 + B_COUNT * (HAIR_STYLES - 1) + 4 + 3;
+	int stepI = 0;
+	auto step = [&]() {
+		stepI++;
+		r.LoadPulse(stepI, stepN < stepI ? stepI : stepN);
+	};
 	static const char* const bodies[B_COUNT] = { "Knight", "Barbarian", "Mage", "Rogue", "Rogue_Hooded" };
 	static const char* const skels[4] = { "Skeleton_Warrior", "Skeleton_Minion", "Skeleton_Rogue", "Skeleton_Mage" };
 	for (int i = 0; i < B_COUNT; i++) lib.bodyModel[i] = r.FindModel(bodies[i]);
@@ -978,23 +984,24 @@ BOOL BuildLibrary(Renderer& r, Library& lib)
 			for (int c = 0; c < CL_COUNT; c++) if (lib.clipMap[g][c] < 0) lib.clipMap[g][c] = lib.clipMap[g][CL_IDLE];
 	}
 	lib.procModel[0] = -1;
-	lib.procModel[LK_SLIME] = MakeSlime(r);
-	lib.procModel[LK_BAT] = MakeBat(r);
-	lib.procModel[LK_WYVERN] = MakeWyvern(r);
-	lib.procModel[LK_GOLEM] = MakeGolem(r);
+	lib.procModel[LK_SLIME] = MakeSlime(r); step();
+	lib.procModel[LK_BAT] = MakeBat(r); step();
+	lib.procModel[LK_WYVERN] = MakeWyvern(r); step();
+	lib.procModel[LK_GOLEM] = MakeGolem(r); step();
 	for (int b = 0; b < B_COUNT; b++)
-		for (int s = 1; s < HAIR_STYLES; s++) BuildHair(r, r.models[lib.bodyModel[b]], s, lib.hair[b][s]);
+		for (int s = 1; s < HAIR_STYLES; s++) { BuildHair(r, r.models[lib.bodyModel[b]], s, lib.hair[b][s]); step(); }
 	lib.humHairN = 0;
 	for (int i = 0; i < (int)r.models.size() && lib.humHairN < HUM_HAIR_N; i++) {
 		if (strncmp(r.models[i].name, "Hum", 3) != 0 || r.models[i].headJ < 0) continue;
 		int slot = lib.humHairN++;
 		lib.humHairModel[slot] = i;
-		for (int s = 1; s < HAIR_STYLES; s++) BuildHair(r, r.models[i], s, lib.humHair[slot][s], 2.2f, &lib.humHairV[slot][s], &lib.humHairPivot[slot][s]);
+		stepN += HAIR_STYLES - 1;
+		for (int s = 1; s < HAIR_STYLES; s++) { BuildHair(r, r.models[i], s, lib.humHair[slot][s], 2.2f, &lib.humHairV[slot][s], &lib.humHairPivot[slot][s]); step(); }
 	}
-	for (int d = 0; d < 2; d++) for (int l = 0; l < 2; l++) BuildWing(r, d, l, lib.wing[d][l]);
-	BuildCrown(r, lib.crown);
-	BuildRing(r, lib.ring);
-	BuildOrb(r, lib.orb);
+	for (int d = 0; d < 2; d++) for (int l = 0; l < 2; l++) { BuildWing(r, d, l, lib.wing[d][l]); step(); }
+	BuildCrown(r, lib.crown); step();
+	BuildRing(r, lib.ring); step();
+	BuildOrb(r, lib.orb); step();
 	// ステージ入場でモンスターをこの印の直後へ読み直す。手続き4体は印より前に残す。
 	// 印の位置だと骨を差し替えられ、メッシュだけがタイルの赤丸から外れて巨大になる。
 	r.m_keepModels = (int)r.models.size();
@@ -1112,8 +1119,10 @@ void ActorFromChar(Actor& a, Library& lib, Renderer& r, const CharData& c)
 		if (!have) {
 			int slot = lib.humHairN++;
 			lib.humHairModel[slot] = a.model;
-			for (int s = 1; s < HAIR_STYLES; s++)
+			for (int s = 1; s < HAIR_STYLES; s++) {
 				BuildHair(r, r.models[a.model], s, lib.humHair[slot][s], 2.2f, &lib.humHairV[slot][s], &lib.humHairPivot[slot][s]);
+				r.LoadPulse(s, HAIR_STYLES - 1);
+			}
 		}
 	}
 	{

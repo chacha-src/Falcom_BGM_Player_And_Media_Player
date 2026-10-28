@@ -51,7 +51,7 @@ struct SeqStep {
 
 enum Phase {
 	PH_NONE, PH_INTRO, PH_NEXT, PH_P_MOVE, PH_MOVING, PH_P_CMD, PH_P_SKILLS, PH_P_TARGET, PH_P_SKILLTARGET, PH_P_SHOVE,
-	PH_ACTION, PH_E_SHOW, PH_E_MOVE, PH_END, PH_LEVELUP, PH_OVER, PH_MENU, PH_P_ITEM
+	PH_ACTION, PH_E_SHOW, PH_E_MOVE, PH_END, PH_LEVELUP, PH_OVER, PH_MENU, PH_P_ITEM, PH_P_SUMMON
 };
 
 struct LevelUpInfo {
@@ -92,6 +92,11 @@ public:
 private:
 	// 基盤
 	BOOL LoadEverything();
+	void NoteLoad(int permille);
+	void BeginLoadSpan(int a, int b);
+	BOOL PaintLoadScreen();
+	void DrawLoadHud();
+	static void LoadPulseCb(int cur, int n, void* user);
 	BOOL Recover();
 	void RenderFrame();
 	void SetupCamera(V3 target, float yaw, float pitch, float dist, float fov);
@@ -239,6 +244,8 @@ private:
 	void DrawPromoteOffer();
 	void AdvanceLevelUp();
 	void DrawCutIn3D();
+	void BindSummonCut();
+	void SummonImpactFx();
 	void DrawCutInUi();
 	void LayoutSpecialCut();
 	void PoseFormAllies();
@@ -276,6 +283,11 @@ private:
 	BOOL m_wantClose;
 	BOOL m_loaded;
 	int m_loadFrames;
+	int m_loadPm;
+	int m_loadShown;
+	unsigned m_loadPaint;
+	int m_loadA, m_loadB;
+	BOOL m_loadLive;
 	float m_renderDt, m_lastRenderTime;
 	int m_recoverTries;
 	Rng m_rng;
@@ -314,6 +326,9 @@ private:
 	int m_codexSort;         // 0職 1名前 2MP 3習得
 	int m_skillPage;
 	int m_skillTab;          // 0攻撃 1回復 2クラフト 3陣形
+	int m_skillShape;        // 攻撃: 0全部 1単体 2範囲 3広域
+	int m_skillEl;           // 攻撃: 0全部。1以降は属性
+	int m_skillPreview;      // スキル一覧で指している技。範囲の下描き
 	int m_skMemoTab[MAX_ROSTER];
 	int m_skMemoPage[MAX_ROSTER];
 	int m_stashFull;         // 戦闘中に所持が12になった。不要売却のレイヤー
@@ -352,6 +367,8 @@ private:
 	int m_shop;
 	int m_btnSfx; // 次の Btn の決定音。-1 は場面別、-2 は鳴らさない
 	int m_shopLine;
+	int m_shopTier;          // 武具: 0全部。1..10 はその職段の必要段
+	int m_shopBand;          // 装飾: 0全部 1千未満 2千〜十万未満 3十万以上
 	int m_shopPage;
 	int m_shopSellPage;
 	int m_shopKind;
@@ -361,6 +378,7 @@ private:
 	int m_shopFitId;
 	int m_shopFitPage;
 	int m_shopHold;
+	int m_shopWho;
 	int m_partyBack;
 	int m_baseOpt;
 	int m_slotUi;                         // 0=閉 1=一覧 2=削除1 3=削除2 4=コピー先 5=コピー確認
@@ -482,7 +500,11 @@ private:
 	int m_cutA, m_cutD;
 	int m_cutAlly[6], m_cutFoe[6];
 	int m_cutAllyN, m_cutFoeN;
-	int m_cutKind;       // 0=通常 1=戦技 2=陣形
+	int m_cutKind;       // 0=通常 1=戦技 2=陣形 3=召喚
+	int m_sumOn, m_sumFx, m_sumHit;
+	float m_sumU;
+	V3 m_sumPos, m_sumFrom, m_sumTo;
+	Actor m_sumAct;
 	V3 m_cutAllyPos[6];
 	V3 m_cutFoePos[6];
 	V3 m_cutPosA, m_cutPosD;

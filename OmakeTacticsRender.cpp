@@ -38,7 +38,7 @@ Renderer::Renderer()
 	m_eye = v3(0, 10, -10);
 	m_time = 0;
 	m_hwnd = NULL; m_wait = NULL; m_lost = FALSE; m_presented = FALSE; m_waitStuck = 0; m_lastRebind = 0;
-	m_w = m_h = 0; m_quality = 1; m_msaa = 1; m_lastHr = S_OK; m_failStage = 0; m_assetsOk = FALSE; m_pass = PASS_MAIN;
+	m_w = m_h = 0; m_quality = 1; m_msaa = 1; m_lastHr = S_OK; m_failStage = 0; m_assetsOk = FALSE; m_loadFn = NULL; m_loadUser = NULL; m_pass = PASS_MAIN;
 	m_dev = NULL; m_ctx = NULL; m_swap = NULL; m_bbRtv = NULL; m_bb = NULL; m_msTex = NULL; m_msRtv = NULL; m_dsTex = NULL; m_dsv = NULL;
 	m_sceneTex = NULL; m_sceneRtv = NULL; m_sceneSrv = NULL;
 	m_blA = m_blB = NULL; m_blARtv = m_blBRtv = NULL; m_blASrv = m_blBSrv = NULL; m_blW = m_blH = 0;
@@ -907,11 +907,20 @@ BOOL Renderer::LoadAssets()
 	Reader rd(data + 4, size - 4);
 	UINT ver = rd.U32(), nTex = rd.U32(), nRig = rd.U32(), nMod = rd.U32(), nAtt = rd.U32(), nSt = rd.U32();
 	if (ver != 1 || nTex > 12 || nRig > 8 || nMod > 32 || nAtt > 64 || nSt > 48) return FALSE;
+	int pulseN = (int)(nTex + nRig + nMod + nAtt + nSt + 1);
+	int pulseI = 0;
+	auto pulse = [&]() {
+		pulseI++;
+		if (pulseN < pulseI) pulseN = pulseI;
+		LoadPulse(pulseI, pulseN);
+	};
+	auto reserve = [&](int units) { if (units > 1) pulseN += units - 1; };
 	for (UINT i = 0; i < nTex; i++) {
 		UINT len = rd.U32();
 		const BYTE* b = rd.Bytes(len);
 		rd.Align4();
 		if (!b || !LoadPngTex(b, len, (int)i)) return FALSE;
+		pulse();
 	}
 	rigs.resize(nRig);
 	for (UINT r = 0; r < nRig; r++) {
@@ -923,6 +932,8 @@ BOOL Renderer::LoadAssets()
 		g.hips = 0;
 		if (nc > 40) return FALSE;
 		g.clips.resize(nc);
+		reserve(nc > 0 ? (int)nc : 1);
+		if (nc == 0) pulse();
 		for (UINT c = 0; c < nc; c++) {
 			Clip& cl = g.clips[c];
 			rd.Name(cl.name, 32);
@@ -940,6 +951,7 @@ BOOL Renderer::LoadAssets()
 			}
 			cl.hips.resize(cl.nFrames);
 			for (int f = 0; f < cl.nFrames; f++) cl.hips[f] = v3(h[f * 3], h[f * 3 + 1], -h[f * 3 + 2]);
+			pulse();
 		}
 	}
 	models.resize(nMod);
@@ -963,6 +975,7 @@ BOOL Renderer::LoadAssets()
 		FlipM(m.top);
 		for (int j = 0; j < m.nJ; j++) { for (int k = 0; k < 16; k++) m.invBind[j].m[k] = rd.F32(); FlipM(m.invBind[j]); }
 		UINT np = rd.U32();
+		reserve(np > 0 ? (int)np : 1);
 		m.headMin[0] = m.headMin[1] = m.headMin[2] = 1e9f;
 		m.headMax[0] = m.headMax[1] = m.headMax[2] = -1e9f;
 		ModelSetupJoints(m, &g);
@@ -991,7 +1004,9 @@ BOOL Renderer::LoadAssets()
 			if (!MakeMesh(gm, v.data(), sizeof(VtxK), nv, partIdx.data(), ni)) return FALSE;
 			gm.tex = m.tex; gm.glow = (int)glow;
 			m.parts.push_back(gm);
+			pulse();
 		}
+		if (np == 0) pulse();
 		// 頭部範囲をボーン基準へ
 		if (m.headJ >= 0 && m.headMin[0] < 1e8f) {
 			M4 bindHead = MInverse(m.invBind[m.headJ]);
@@ -1037,6 +1052,7 @@ BOOL Renderer::LoadAssets()
 		for (UINT k = 0; k + 2 < ni; k += 3) std::swap(attIdx[k + 1], attIdx[k + 2]);
 		if (!MakeMesh(a.mesh, v.data(), sizeof(VtxS), nv, attIdx.data(), ni)) return FALSE;
 		a.mesh.tex = a.tex;
+		pulse();
 	}
 	statics.resize(nSt);
 	for (UINT si = 0; si < nSt; si++) {
@@ -1062,10 +1078,12 @@ BOOL Renderer::LoadAssets()
 		}
 		s.i.assign(ib, ib + ni);
 		for (UINT k = 0; k + 2 < ni; k += 3) std::swap(s.i[k + 1], s.i[k + 2]);
+		pulse();
 	}
 	if (rd.bad) return FALSE;
 	// 人型はパーティと、作成・戦闘で使う体だけ後から読む。ここではカタログの位置だけ。
 	LoadCreaturePack();
+	pulse();
 	m_assetsOk = TRUE;
 	return TRUE;
 }
@@ -1591,6 +1609,7 @@ static BOOL FillCreature(Renderer& R, Reader& rd, int packIndex, int slot)
 				d.n[2] = -(ns[k * 3 + 2] / 32767.f);
 				d.c = RGBA8(rgb[k * 3], rgb[k * 3 + 1], rgb[k * 3 + 2]);
 				for (int c = 0; c < 4; c++) { d.j[c] = jj[k * 4 + c]; d.w[c] = ww[k * 4 + c]; }
+				if ((k & 8191u) == 0) R.LoadPulse((int)k, (int)nv > 0 ? (int)nv * 2 : 1);
 				VtxS& s = poseV[k];
 				s.p[0] = d.p[0]; s.p[1] = d.p[1]; s.p[2] = d.p[2];
 				s.n[0] = d.n[0]; s.n[1] = d.n[1]; s.n[2] = d.n[2];
@@ -1776,7 +1795,9 @@ static BOOL FillCreature(Renderer& R, Reader& rd, int packIndex, int slot)
 				skin.extR = max(hx, max(hy, hz));
 			}
 			BuildBaldIB(R.Dev(), skin, idx.data(), ni);
+			R.LoadPulse(1, 2);
 			if (!R.MakeMesh(gm, poseV.data(), sizeof(VtxS), nv, idx.data(), ni)) return Bail();
+			R.LoadPulse(2, 2);
 			gm.tex = R.TexWhite();
 			ModelSetupJoints(m, &g);
 			if (strncmp(name, "Hum", 3) == 0 && m.nJ > 1 && nv > 80) {
@@ -2739,7 +2760,7 @@ void Renderer::LoadGearPack()
 		rd.Name(name, 32);
 		if (!ReadColorMesh(rd, packed, v, idx)) break;
 		GpuMesh gm;
-		if (!MakeMesh(gm, v.data(), sizeof(VtxS), (UINT)v.size(), idx.data(), (UINT)idx.size())) continue;
+		if (!MakeMesh(gm, v.data(), sizeof(VtxS), (UINT)v.size(), idx.data(), (UINT)idx.size())) { LoadPulse((int)i + 1, (int)n); continue; }
 		gm.tex = TEX_WHITE;
 		if ((int)m_gear.size() >= 256) { gm.Release(); break; }
 		m_gear.push_back(gm);
@@ -2754,6 +2775,7 @@ void Renderer::LoadGearPack()
 		else if (strstr(name, "Staff") || strstr(name, "Spear") || strstr(name, "Scythe")) grip = GRIP_STAFF;
 		else if (strstr(name, "Sword") || strstr(name, "Claymore") || strstr(name, "Axe") || strstr(name, "Hammer") || strstr(name, "Dagger") || strstr(name, "Knife") || strstr(name, "Blade")) grip = GRIP_FIST;
 		m_gearGrip.push_back(grip);
+		LoadPulse((int)i + 1, (int)n);
 	}
 	InterlockedExchange(&m_gearShown, (long)m_gear.size());
 }
@@ -2772,9 +2794,11 @@ void Renderer::LoadFacePack()
 	Reader rd(data + 4, size - 4);
 	UINT ng = rd.U32();
 	if (ng != 2) return;
+	int faceI = 0, faceN = (int)ng;
 	for (UINT g = 0; g < ng; g++) {
 		UINT nf = rd.U32(), nv = rd.U32();
 		if (nf == 0 || nf > 32 || nv == 0 || nv > 20000) return;
+		if (faceN < faceI + (int)nf) faceN = faceI + (int)nf;
 		FaceSet& fs = m_faces[g];
 		fs.d.resize((size_t)nf * nv * 3);
 		fs.n.resize((size_t)nf * nv * 4);
@@ -2787,6 +2811,8 @@ void Renderer::LoadFacePack()
 			memcpy(&fs.d[(size_t)f * nv * 3], d, (size_t)nv * 6);
 			memcpy(&fs.n[(size_t)f * nv * 4], n, (size_t)nv * 4);
 			for (UINT k = 0; k < nv; k++) fs.c[(size_t)f * nv + k] = RGBA8(c[k * 4], c[k * 4 + 1], c[k * 4 + 2]);
+			faceI++;
+			LoadPulse(faceI, faceN);
 		}
 		fs.nFace = (int)nf;
 		fs.nv = (int)nv;
@@ -2922,6 +2948,7 @@ void Renderer::LoadAvatarPack()
 	}
 	UINT nm = rd.U32();
 	if (nm > 64) { m_avaSegN = 0; return; }
+	int avSeen = 0, avDen = (int)nm + 16;
 	for (UINT i = 0; i < nm; i++) {
 		AvaModel am;
 		rd.Name(am.name, 32);
@@ -2936,6 +2963,8 @@ void Renderer::LoadAvatarPack()
 			if (am.nJoint < 64) { memcpy(am.joint[am.nJoint], jn, 24); am.joint[am.nJoint][23] = 0; am.nJoint++; }
 		}
 		m_avaModels.push_back(am);
+		avSeen++;
+		LoadPulse(avSeen, avDen);
 	}
 	for (int g = 0; g < 2; g++) {
 		AvaBody& b = m_avaBody[g];
@@ -2944,9 +2973,12 @@ void Renderer::LoadAvatarPack()
 		UINT nb = ok ? rd.U32() : 0, ne = ok ? rd.U32() : 0;
 		ok = ok && ReadWords(rd, b.bodyTri, (size_t)nb * 3) && ReadWords(rd, b.extraTri, (size_t)ne * 3);
 		if (!ok || b.nFace < 0 || b.nFace > (int)b.m.v.size()) { m_avaSegN = 0; m_avaModels.clear(); m_avaBody[0] = m_avaBody[1] = AvaBody(); return; }
+		avSeen++;
+		LoadPulse(avSeen, avDen);
 	}
 	UINT na = rd.U32();
 	if (na > 256) return;
+	if (avDen < avSeen + (int)na) avDen = avSeen + (int)na;
 	for (UINT i = 0; i < na; i++) {
 		AvaCos c;
 		rd.Name(c.name, 32);
@@ -2958,8 +2990,10 @@ void Renderer::LoadAvatarPack()
 		const BYTE* kp = rd.Bytes(nk);
 		if (!kp) break;
 		c.keep.assign(kp, kp + nk);
-		if (m_avaBody[c.gender].m.v.size() + c.m.v.size() > 65535) continue;
+		if (m_avaBody[c.gender].m.v.size() + c.m.v.size() > 65535) { avSeen++; LoadPulse(avSeen, avDen); continue; }
 		m_avaCos.push_back(std::move(c));
+		avSeen++;
+		LoadPulse(avSeen, avDen);
 	}
 	InterlockedExchange(&m_avaReady, 1);
 }
@@ -4754,6 +4788,7 @@ void Renderer::LoadHairPack()
 	memcpy(&ni, data + 8, 4);
 	memcpy(&ns, data + 12, 4);
 	if (nv < 30 || nv > 65000 || ni < 9 || ni > 400000 || (ni % 3) != 0 || ns < 1) return;
+	LoadPulse(1, 4);
 	size_t need = 16ull + (size_t)nv * 40ull + (size_t)ni * 2ull;
 	if (need > size) return;
 	const float* rec = (const float*)(data + 16);
@@ -4796,6 +4831,7 @@ void Renderer::LoadHairPack()
 			m_hairCap[s][2] = (float)(sz[s] / m_hairCapN[s]);
 		}
 	}
+	LoadPulse(2, 4);
 	D3D11_BUFFER_DESC bd = {};
 	bd.ByteWidth = nv * 80u;
 	bd.Usage = D3D11_USAGE_IMMUTABLE;
@@ -4870,6 +4906,7 @@ void Renderer::LoadHairPack()
 	}
 	if (!m_hairSrv) { ReleaseHair(); return; }
 	m_hairNv = nv;
+	LoadPulse(4, 4);
 }
 
 void Renderer::EnsureScalp(int model, int headJ)

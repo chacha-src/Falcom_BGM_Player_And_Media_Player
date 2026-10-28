@@ -1750,7 +1750,9 @@ def main():
              "zhum_HumM0.glb", "zhum_HumM1.glb", "zhum_HumM2.glb", "zhum_HumM3.glb",
              "zhum_HumF4.glb", "zhum_HumM4.glb", "zhum_HumF5.glb", "zhum_HumM5.glb", "zhum_HumF6.glb", "zhum_HumM6.glb"]
     tail = [f for f in order if f in digit] + sorted(f for f in digit if f not in order)
-    files = [f for f in files if f not in tail] + tail
+    # 召喚用 Quaternius は一番後ろ。既存のモデル番号を動かさない。
+    summon = sorted(f for f in files if f.startswith("q_Sum"))
+    files = [f for f in files if f not in tail and f not in summon] + tail + summon
     recs, names, srcn = [], [], []
     for fn in files:
         try:

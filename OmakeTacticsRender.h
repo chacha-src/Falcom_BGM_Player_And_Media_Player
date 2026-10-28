@@ -171,6 +171,9 @@ public:
 	void SetQuality(int q);
 
 	// アセット
+	typedef void (*TacLoadPulseFn)(int cur, int total, void* user);
+	void SetLoadPulse(TacLoadPulseFn fn, void* user) { m_loadFn = fn; m_loadUser = user; }
+	void LoadPulse(int cur, int total) { if (m_loadFn && total > 0) m_loadFn(cur, total, m_loadUser); }
 	BOOL LoadAssets();
 	void LoadCreaturePack();
 	void LoadGearPack();
@@ -422,6 +425,8 @@ private:
 	HRESULT m_lastHr;
 	int m_failStage;
 	BOOL m_assetsOk;
+	TacLoadPulseFn m_loadFn;
+	void* m_loadUser;
 	Pass m_pass;
 
 	ID3D11Device* m_dev;

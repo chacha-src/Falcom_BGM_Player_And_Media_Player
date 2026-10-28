@@ -17,7 +17,21 @@ extern COggDlg* og;
 extern int plf;
 extern int ps;
 
-enum { TAC_RATE = 44100, TAC_VOICES = 12 };
+enum { TAC_RATE = 44100, TAC_VOICES = 12, MIX_MAX = TAC_RATE * 4 };
+
+// 効果音の波形は起動時に一度切る。曲ごとに malloc しない。終了で巻き戻す。
+static unsigned char g_pcm[64 * 1024 * 1024];
+static size_t g_pcmUsed = 0;
+static float g_mixL[MIX_MAX];
+static float g_mixR[MIX_MAX];
+static void* PcmBump(size_t n)
+{
+	size_t o = (g_pcmUsed + 15) & ~(size_t)15;
+	if (n > sizeof(g_pcm) || o > sizeof(g_pcm) - n) return NULL;
+	g_pcmUsed = o + n;
+	return g_pcm + o;
+}
+static void PcmRewind() { g_pcmUsed = 0; }
 
 struct TacMem {
 	const unsigned char* p;
@@ -178,34 +192,29 @@ static int TacDecodeMem(const unsigned char* p, size_t n, TacClip& out)
 	int rate = vi ? (int)vi->rate : TAC_RATE;
 	if (ch < 1) ch = 1;
 	if (rate < 8000) rate = TAC_RATE;
-	short* buf = NULL;
-	int cap = 0, got = 0;
+	ogg_int64_t tot = ov_pcm_total(&vf, -1);
+	if (tot < 1 || tot > TAC_RATE * 30) { ov_clear(&vf); return 0; }
+	int frames = (int)tot;
+	short* buf = (short*)PcmBump((size_t)frames * (size_t)ch * sizeof(short));
+	if (!buf) { ov_clear(&vf); return 0; }
+	int got = 0;
 	int bs = 0;
-	for (;;) {
-		if (got + 4096 > cap) {
-			int nc = cap ? cap * 2 : 16384;
-			short* nb = (short*)realloc(buf, (size_t)nc * sizeof(short));
-			if (!nb) break;
-			buf = nb; cap = nc;
-		}
+	int cap = frames * ch;
+	while (got < cap) {
 		long r = ov_read(&vf, (char*)(buf + got), (cap - got) * (int)sizeof(short), 0, 2, 1, &bs);
 		if (r <= 0) break;
 		got += (int)(r / (int)sizeof(short));
 	}
 	ov_clear(&vf);
-	if (!buf || got < 1) { free(buf); return 0; }
+	if (got < 1) return 0;
 	if (ch > 1) {
-		int frames = got / ch;
-		short* mono = (short*)malloc((size_t)frames * sizeof(short));
-		if (!mono) { free(buf); return 0; }
-		for (int i = 0; i < frames; i++) {
+		int n = got / ch;
+		for (int i = 0; i < n; i++) {
 			int s = 0;
 			for (int c = 0; c < ch; c++) s += buf[i * ch + c];
-			mono[i] = (short)(s / ch);
+			buf[i] = (short)(s / ch);
 		}
-		free(buf);
-		buf = mono;
-		got = frames;
+		got = n;
 	}
 	out.pcm = buf;
 	out.n = got;
@@ -549,13 +558,14 @@ static short* MmlMix(const char* src, int& frames, float gain)
 		int end = ev[i].t0 + ev[i].n + (int)(0.08f * TAC_RATE);
 		if (end > total) total = end;
 	}
-	int cap = TAC_RATE * 4;
-	if (total > cap) total = cap;
+	if (total > MIX_MAX) total = MIX_MAX;
 	if (total < 8) total = 8;
-	float* L = (float*)calloc((size_t)total, sizeof(float));
-	float* R = (float*)calloc((size_t)total, sizeof(float));
-	short* dst = (short*)malloc((size_t)total * 2 * sizeof(short));
-	if (!L || !R || !dst) { free(L); free(R); free(dst); frames = 0; return NULL; }
+	memset(g_mixL, 0, (size_t)total * sizeof(float));
+	memset(g_mixR, 0, (size_t)total * sizeof(float));
+	short* dst = (short*)PcmBump((size_t)total * 2 * sizeof(short));
+	if (!dst) { frames = 0; return NULL; }
+	float* L = g_mixL;
+	float* R = g_mixR;
 	unsigned noise = 0x1FFFFu;
 	for (int i = 0; i < nEv; i++) FmAdd(L, R, total, ev[i], noise);
 	float pk = 0.05f;
@@ -578,8 +588,6 @@ static short* MmlMix(const char* src, int& frames, float gain)
 		dst[i * 2] = (short)l;
 		dst[i * 2 + 1] = (short)r;
 	}
-	free(L);
-	free(R);
 	frames = total;
 	return dst;
 }
@@ -682,9 +690,7 @@ static void TacSynthAll()
 		short* pcm = MmlMix(kMml[id], frames, kGain[id]);
 		if (!pcm) continue;
 		TacClip& c = s_clip[id];
-		free(c.pcm);
 		c.pcm = NULL;
-		free(c.play);
 		c.play = pcm;
 		c.playN = frames;
 		c.n = frames;
@@ -757,7 +763,7 @@ static void TacBake(int id)
 	if (!c.pcm || c.n < 1 || id < 0 || id >= TS_N) return;
 	int frames = (int)((long long)c.n * TAC_RATE / (c.rate > 0 ? c.rate : TAC_RATE));
 	if (frames < 1) frames = 1;
-	short* dst = (short*)malloc((size_t)frames * 2 * sizeof(short));
+	short* dst = (short*)PcmBump((size_t)frames * 2 * sizeof(short));
 	if (!dst) return;
 	float g = kGain[id];
 	for (int f = 0; f < frames; f++) {
@@ -775,7 +781,6 @@ static void TacBake(int id)
 	}
 	c.play = dst;
 	c.playN = frames;
-	free(c.pcm);
 	c.pcm = NULL;
 }
 
@@ -1199,6 +1204,12 @@ int TacAudioOnThread()
 void TacAudioStart(void* hwnd)
 {
 	TacCsInit();
+	PcmRewind();
+	for (int i = 0; i < TS_N; i++) {
+		s_clip[i].pcm = NULL;
+		s_clip[i].play = NULL;
+		s_clip[i].n = s_clip[i].playN = 0;
+	}
 	TacLoadPack();
 	TacSynthAll();
 	TacBgmScene(TAC_BGM_HUB);
@@ -1241,10 +1252,11 @@ void TacAudioStop()
 	s_started = 0;
 	TacCloseBgm();
 	for (int i = 0; i < TS_N; i++) {
-		free(s_clip[i].pcm); s_clip[i].pcm = NULL;
-		free(s_clip[i].play); s_clip[i].play = NULL;
+		s_clip[i].pcm = NULL;
+		s_clip[i].play = NULL;
 		s_clip[i].n = s_clip[i].playN = 0;
 	}
+	PcmRewind();
 	memset(s_voice, 0, sizeof(s_voice));
 }
 

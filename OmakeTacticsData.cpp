@@ -1161,7 +1161,7 @@ static ClassDef kClass[C_PLAYER_COUNT] = {
 	{ TX_CL_ASSASSIN, TX_CLD_ASSASSIN, 2, 0, G_SWIFT, MV_FOOT, 3, 1, 1, 0, 7, WL_KNIVES, AS_STAB,
 	  { 24, 8, 9, 5, 2, 5, 14, 12, 10, 6 }, { 40, 20, 50, 25, 10, 30, 70, 60, 55, 0 }, L6(15, SKL_ASSASSINATE, 18, SKL_VENOMEDGE, 24, SKL_P_EVADE, 30, SKL_P_SWIFT) },
 	{ TX_CL_WIZARD, TX_CLD_WIZARD, 2, 1, G_MAGIC, MV_FOOT, 2, 1, 3, 1, 6, WL_STAFF, AS_CAST,
-	  { 22, 26, 1, 4, 15, 11, 8, 8, 5, 4 }, { 32, 70, 5, 22, 75, 50, 40, 40, 35, 0 }, L6F(15, SKL_BLIZZARD, 18, SKL_THUNDER, 22, SKL_GRAVITY, 26, SKL_METEOR, 30, SKL_DARKNESS, 34, SKL_P_SPELL) },
+	  { 22, 26, 1, 4, 15, 11, 8, 8, 5, 4 }, { 32, 70, 5, 22, 75, 50, 40, 40, 35, 0 }, L6F(15, SKL_BLIZZARD, 18, SKL_THUNDER, 22, SKL_GRAVITY, 26, SKL_THUNDERFIELD, 30, SKL_DARKNESS, 34, SKL_P_SPELL) },
 	{ TX_CL_BISHOP, TX_CLD_BISHOP, 2, 1, G_HOLY, MV_FOOT, 2, 1, 2, 1, 4, WL_WAND_BOOK, AS_CAST,
 	  { 24, 28, 3, 5, 16, 14, 7, 7, 8, 4 }, { 35, 70, 10, 25, 75, 65, 35, 35, 50, 0 }, { { 15, SKL_SMITE }, { 16, SKL_HOLY }, { 20, SKL_HIGHHEAL }, { 24, SKL_HEALALL }, { 28, SKL_BLESS }, { 32, SKL_P_REGEN } } },
 	{ TX_CL_SKYKNIGHT, TX_CLD_SKYKNIGHT, 2, 0, G_SWIFT, MV_FLY, 9, 1, 1, 0, 7, WL_SWORD_SPIKE, AS_STAB,
@@ -1170,7 +1170,7 @@ static ClassDef kClass[C_PLAYER_COUNT] = {
 	{ TX_CL_HERO, TX_CLD_HERO, 3, 0, G_MELEE, MV_FOOT, 3, 1, 1, 0, 12, WL_SWORD2, AS_CHOP2,
 	  { 46, 14, 17, 13, 6, 10, 12, 13, 10, 6 }, { 60, 30, 65, 50, 20, 40, 50, 55, 50, 0 }, L6F(35, SKL_BRAVE, 38, SKL_P_CRIT, 42, SKL_HOLYBLADE, 46, SKL_P_REGEN, 50, SKL_GODSLASH, 54, SKL_CLEAVE) },
 	{ TX_CL_ARCHMAGE, TX_CLD_ARCHMAGE, 3, 1, G_MAGIC, MV_FOOT, 2, 1, 3, 1, 9, WL_STAFF, AS_CAST,
-	  { 30, 40, 2, 7, 22, 16, 10, 10, 8, 5 }, { 38, 80, 5, 25, 85, 55, 45, 45, 40, 0 }, L6F(35, SKL_METEOR, 38, SKL_HOLY, 42, SKL_DARKNESS, 46, SKL_HASTE, 50, SKL_APOC, 54, SKL_P_SPELL) },
+	  { 30, 40, 2, 7, 22, 16, 10, 10, 8, 5 }, { 38, 80, 5, 25, 85, 55, 45, 45, 40, 0 }, L6F(35, SKL_RUIN, 38, SKL_STORM, 42, SKL_NOVA, 46, SKL_METEOR, 50, SKL_APOC, 54, SKL_P_SPELL) },
 	{ TX_CL_SAINT, TX_CLD_SAINT, 3, 1, G_HOLY, MV_FOOT, 2, 1, 2, 1, 6, WL_WAND_BOOK, AS_CAST,
 	  { 32, 42, 4, 8, 24, 22, 9, 9, 12, 5 }, { 40, 80, 10, 30, 85, 75, 40, 40, 60, 0 }, { { 35, SKL_HOLY }, { 36, SKL_HEALALL }, { 40, SKL_SANCTUARY }, { 44, SKL_BLESS }, { 48, SKL_RENEW }, { 52, SKL_P_REGEN } } },
 	{ TX_CL_PHANTOM, TX_CLD_PHANTOM, 3, 0, G_SWIFT, MV_FOOT, 4, 1, 4, 0, 9, WL_CROSS_KNIFE, AS_SHOOT1,
@@ -1178,22 +1178,23 @@ static ClassDef kClass[C_PLAYER_COUNT] = {
 	{ TX_CL_DRAGONLORD, TX_CLD_DRAGONLORD, 3, 0, G_MELEE, MV_FLY, 9, 1, 1, 0, 12, WL_SWORD2, AS_CHOP2,
 	  { 44, 12, 16, 14, 5, 10, 12, 11, 8, 7 }, { 60, 25, 65, 55, 10, 40, 45, 45, 40, 0 }, L6F(35, SKL_DRAGONFANG, 38, SKL_WHIRL, 42, SKL_P_IRON, 46, SKL_BRAVE, 50, SKL_GODSLASH, 54, SKL_CLEAVE) },
 	{ TX_CL_ALCHEMIST, TX_CLD_ALCHEMIST, 2, 1, G_MAGIC, MV_FOOT, 2, 1, 2, 1, 5, WL_STAFF, AS_CAST,
-	  { 24, 22, 4, 5, 12, 10, 8, 9, 7, 4 }, { 36, 55, 15, 28, 55, 50, 40, 45, 40, 0 }, { { 15, SKL_GRAVITY }, { 18, SKL_TRANSMUTE }, { 22, SKL_RENEW }, { 26, SKL_MIRROR }, { 30, SKL_FIRE }, { 34, SKL_SANCTUARY } } },
+	  { 24, 22, 4, 5, 12, 10, 8, 9, 7, 4 }, { 36, 55, 15, 28, 55, 50, 40, 45, 40, 0 }, { { 15, SKL_GRAVITY }, { 18, SKL_TRANSMUTE }, { 22, SKL_HIGHHEAL }, { 26, SKL_MIRROR }, { 30, SKL_FIRE }, { 34, SKL_SANCTUARY } } },
 	{ TX_CL_ARCHALCHEMIST, TX_CLD_ARCHALCHEMIST, 3, 1, G_MAGIC, MV_FOOT, 2, 1, 3, 1, 8, WL_STAFF, AS_CAST,
-	  { 32, 36, 6, 8, 18, 16, 10, 12, 10, 5 }, { 42, 70, 20, 32, 70, 60, 45, 50, 50, 0 }, { { 35, SKL_RUIN }, { 40, SKL_APOC }, { 46, SKL_SANCTUARY }, { 52, SKL_P_SPELL }, { 0, -1 }, { 0, -1 } } },
+	  { 32, 36, 6, 8, 18, 16, 10, 12, 10, 5 }, { 42, 70, 20, 32, 70, 60, 45, 50, 50, 0 }, { { 35, SKL_STORM }, { 40, SKL_RUIN }, { 46, SKL_METEOR }, { 52, SKL_APOC }, { 0, -1 }, { 0, -1 } } },
 };
 #undef L6
 #undef L6F
 static const int kLineParent[TAC_RANK_LINES] = {
 	C_HERO, C_ARCHMAGE, C_SAINT, C_PHANTOM, C_DRAGONLORD, C_ARCHALCHEMIST, C_GLADIATOR, C_SHADOW
 };
+// 段が上がるほど強い技。英雄系に終焉魔法、魔導系に初級は置かない。
 static const int kExtSkill[TAC_RANK_LINES][TAC_RANK_N] = {
-	{ SKL_GODSLASH, SKL_CLEAVE, SKL_WARCRY, SKL_SMITE, SKL_GODSLASH, SKL_APOC, SKL_RUIN },
-	{ SKL_RUIN, SKL_GRAVITY, SKL_APOC, SKL_MIRROR, SKL_SANCTUARY, SKL_RUIN, SKL_APOC },
-	{ SKL_HOLY, SKL_RENEW, SKL_SMITE, SKL_MIRROR, SKL_WARCRY, SKL_SANCTUARY, SKL_APOC },
-	{ SKL_SNIPE, SKL_VENOMEDGE, SKL_CLEAVE, SKL_GRAVITY, SKL_GODSLASH, SKL_SNIPE, SKL_RUIN },
-	{ SKL_APOC, SKL_CLEAVE, SKL_SMITE, SKL_GODSLASH, SKL_RUIN, SKL_WARCRY, SKL_APOC },
-	{ SKL_RUIN, SKL_RENEW, SKL_MIRROR, SKL_GRAVITY, SKL_SANCTUARY, SKL_APOC, SKL_DARKNESS },
+	{ SKL_CLEAVE, SKL_GRANDSLASH, SKL_BRAVE, SKL_GODSLASH, SKL_GODSLASH, SKL_GODSLASH, SKL_GODSLASH },
+	{ SKL_FROSTFIELD, SKL_STORM, SKL_RUIN, SKL_METEOR, SKL_APOC, SKL_APOC, SKL_APOC },
+	{ SKL_HEALALL, SKL_SANCTUARY, SKL_RENEW, SKL_NOVA, SKL_NOVA, SKL_NOVA, SKL_NOVA },
+	{ SKL_PIERCE, SKL_SNIPE, SKL_ARROWRAIN, SKL_ASSASSINATE, SKL_SHINE, SKL_SHINE, SKL_SHINE },
+	{ SKL_WHIRL, SKL_DRAGONFANG, SKL_GRANDSLASH, SKL_BRAVE, SKL_GODSLASH, SKL_GODSLASH, SKL_GODSLASH },
+	{ SKL_FROSTFIELD, SKL_STORM, SKL_RUIN, SKL_METEOR, SKL_APOC, SKL_APOC, SKL_APOC },
 	{ SKL_FISTGOD, SKL_WARLORD, SKL_BREAKKING, SKL_STEELGOD, SKL_HEGEFIST, SKL_PEERLESS, SKL_ENDFIST },
 	{ SKL_GHOSTHAND, SKL_SHADEEMP, SKL_TRACELESS, SKL_NIGHTEMP, SKL_VOIDTHIEF, SKL_LASTNIGHT, SKL_ETERNIGHT },
 };
@@ -1269,7 +1270,7 @@ static void EnsureSheets()
 	put(C_FIGHTER, 6, 8, SKL_CRESCENT);
 	put(C_ARCHER, 6, 8, SKL_SHOWER);
 	put(C_ARCHER, 7, 12, SKL_SHINE);
-	put(C_MAGE, 6, 8, SKL_FROSTFIELD);
+	put(C_MAGE, 6, 8, SKL_PROTECT);
 	put(C_MAGE, 7, 5, SKL_GALE);
 	put(C_PALADIN, 6, 32, SKL_CRESCENT);
 	put(C_RUNEKNIGHT, 6, 28, SKL_THUNDERFIELD);
@@ -1277,10 +1278,10 @@ static void EnsureSheets()
 	put(C_SNIPER, 4, 22, SKL_SHOWER);
 	put(C_SNIPER, 5, 28, SKL_SHINE);
 	put(C_WIZARD, 6, 30, SKL_THUNDERFIELD);
-	put(C_WIZARD, 7, 36, SKL_STORM);
-	put(C_BISHOP, 6, 30, SKL_NOVA);
+	put(C_WIZARD, 7, 24, SKL_HASTE);
+	put(C_BISHOP, 6, 30, SKL_SANCTUARY);
 	put(C_HERO, 6, 48, SKL_GRANDSLASH);
-	put(C_ARCHMAGE, 6, 44, SKL_STORM);
+	put(C_ARCHMAGE, 6, 48, SKL_RENEW);
 	put(C_SAINT, 6, 46, SKL_NOVA);
 	put(C_PHANTOM, 6, 44, SKL_SHOWER);
 	put(C_PHANTOM, 7, 50, SKL_SHINE);
@@ -1288,7 +1289,7 @@ static void EnsureSheets()
 	put(C_ALCHEMIST, 6, 28, SKL_FROSTFIELD);
 	put(C_ALCHEMIST, 7, 32, SKL_THUNDERFIELD);
 	put(C_ARCHALCHEMIST, 4, 44, SKL_STORM);
-	put(C_ARCHALCHEMIST, 5, 50, SKL_FROSTFIELD);
+	put(C_ARCHALCHEMIST, 5, 48, SKL_THUNDERFIELD);
 	put(C_PALADIN, 8, 20, SKL_LINESLASH);
 	put(C_PALADIN, 9, 36, SKL_HEALBEAM);
 	put(C_RUNEKNIGHT, 8, 20, SKL_THUNDERBEAM);
@@ -1381,14 +1382,20 @@ static void BuildExt()
 			}
 			d.base[S_MOV] = p.base[S_MOV] + (r + 1) / 2;
 			int arrive = PromoteLevel(rank - 1);
+			int next = PromoteLevel(rank);
+			if (next >= 9999 || next <= arrive) next = arrive + 60;
 			d.learn[0].lv = arrive; d.learn[0].skill = kExtSkill[line][r];
 			int g = p.group;
 			if (g < 0 || g >= G_COUNT) g = 0;
 			for (int i = 1; i < 6; i++) {
-				int og = (g + i) % G_COUNT;
-				int slot = (r * 4 + i * 5) % 26;
-				d.learn[i].lv = arrive + i * 2;
-				d.learn[i].skill = SKL_ART0 + og * 26 + slot;
+				// 着任から次の転職までの帯に散らす。強い型は高い段だけ。
+				int lv = arrive + (next - arrive) * i / 6;
+				if (lv <= arrive) lv = arrive + i;
+				if (lv >= next) lv = next - 1;
+				int artLv = 8 + r * 2 + i;
+				if (artLv > 25) artLv = 25;
+				d.learn[i].lv = lv;
+				d.learn[i].skill = SKL_ART0 + g * 26 + artLv;
 			}
 		}
 	}
@@ -1417,6 +1424,31 @@ int ExpToNext(int lv)
 	if (lv < 1) lv = 1;
 	if (lv >= TAC_LV_MAX) return 999999;
 	return 70 + lv * 10 + lv * lv / 10;
+}
+const wchar_t* TacNum(int v)
+{
+	static wchar_t buf[8][32];
+	static int slot;
+	wchar_t* out = buf[slot & 7];
+	slot++;
+	unsigned int x;
+	int neg = v < 0;
+	if (neg) x = (unsigned int)(-(v + 1)) + 1u;
+	else x = (unsigned int)v;
+	wchar_t tmp[32];
+	int n = 0, dig = 0;
+	if (x == 0) tmp[n++] = L'0';
+	while (x && n < 30) {
+		if (dig && (dig % 3) == 0) tmp[n++] = L',';
+		tmp[n++] = (wchar_t)(L'0' + (x % 10));
+		x /= 10;
+		dig++;
+	}
+	int i = 0;
+	if (neg && i < 31) out[i++] = L'-';
+	while (n > 0 && i < 31) out[i++] = tmp[--n];
+	out[i] = 0;
+	return out;
 }
 int NextPromoteClass(int cls)
 {
@@ -1672,8 +1704,10 @@ static void BuildAreaSupport()
 	s_areaOk = 1;
 }
 static const SkillDef& CraftSkillRef(int index);
+const SkillDef& SummonSkillRef(int index);
 const SkillDef& SkillInfo(int s)
 {
+	if (IsSummonId(s)) return SummonSkillRef(s - SUMMON_BASE);
 	if (s >= CRAFT_BASE && s < CRAFT_BASE + CRAFT_N) return CraftSkillRef(s - CRAFT_BASE);
 	if (s == SKL_RAISE) {
 		static const SkillDef raise = { TX_SK_RAISE, TX_SKD_RAISE, SK_HEAL, 12, 0, 1, 2, 0, EL_HOLY, 1, 0, EF_RAISE, 0 };
@@ -1736,6 +1770,7 @@ static const wchar_t* ArtRoleName(int role)
 }
 const wchar_t* SkillLabel(int s)
 {
+	if (IsSummonId(s)) return SummonName(s - SUMMON_BASE + 1);
 	if (s >= SKL_ART0 && s < SKL_ARTN) {
 		int role = PaceRoleOfLv((s - SKL_ART0) % 26 + 7);
 		if (role >= 0) {
@@ -1785,6 +1820,7 @@ static MonsterDef kMon[M_COUNT] = {
 
 #include "tactics_src/mon_species.inc"
 #include "tactics_src/mon_names.inc"
+#include "tactics_src/summon.inc"
 static const wchar_t* ImportLocName(int model)
 {
 	if (model < 0 || model >= kImportN) return L"?";
@@ -1966,9 +2002,13 @@ static void EnsureMonsters()
 		if (i == M_WYVERN && d.skills[1] < 0) d.skills[1] = SKL_E_CRUSH;
 	}
 	int nImp = kImportN < IMP_CAP ? kImportN : IMP_CAP;
+	int rosterN = 0;
+	for (int i = 0; i < nImp; i++) if (wcsncmp(kImportName[i], L"Sum", 3) != 0) rosterN++;
+	int rosterI = 0;
 	for (int i = 0; i < nImp; i++) {
 		MonsterDef& d = s_monImp[i];
 		const wchar_t* nm = kImportName[i];
+		BOOL summonOnly = nm && wcsncmp(nm, L"Sum", 3) == 0;
 		memset(&d, 0, sizeof(d));
 		d.look = LK_MESH;
 		d.model = i;
@@ -2013,26 +2053,31 @@ static void EnsureMonsters()
 			if (ail >= 0 && ail != d.skills[0] && ail != d.skills[1]) d.skills[2] = ail;
 		}
 		WeakFromName(d, nm);
-		{
-			// ファイル順に登場帯をずらす。同時に場に出るのはおよそ 48 種。
+		if (summonOnly) {
+			d.minStage = TAC_STAGE_MAX;
+			d.maxStage = 1;
+			d.weight = 0;
+		} else {
+			// ファイル順に登場帯をずらす。同時に場に出るのはおよそ 48 種。召喚専用は数に入れない。
 			const int alive = 48;
-			int band = nImp > 0 ? alive * TAC_STAGE_MAX / nImp : TAC_STAGE_MAX;
+			int band = rosterN > 0 ? alive * TAC_STAGE_MAX / rosterN : TAC_STAGE_MAX;
 			if (band < 600) band = 600;
 			if (band > TAC_STAGE_MAX) band = TAC_STAGE_MAX;
 			int half = band / 2;
 			int center = 1;
-			if (nImp > 1) center = 1 + (int)((long long)i * (TAC_STAGE_MAX - 1) / (nImp - 1));
+			if (rosterN > 1) center = 1 + (int)((long long)rosterI * (TAC_STAGE_MAX - 1) / (rosterN - 1));
 			int start = center - half;
 			if (start < 1) start = 1;
 			int end = center + half;
 			d.minStage = start;
 			d.maxStage = end >= TAC_STAGE_MAX ? 0 : end;
+			rosterI++;
+			d.weight = 8;
 		}
-		d.weight = 8;
 		d.scale = 1.f;
 		d.tint = 0xFFFFFF;
 		int pool = ImportPool(nm);
-		if (pool != POOL_HUM && s_poolN[pool] < IMP_CAP) s_poolI[pool][s_poolN[pool]++] = M_COUNT + i;
+		if (!summonOnly && pool != POOL_HUM && s_poolN[pool] < IMP_CAP) s_poolI[pool][s_poolN[pool]++] = M_COUNT + i;
 	}
 	}
 	s_monImpOk = 1;
@@ -2111,7 +2156,7 @@ bool MonsterKnown(int id, int cleared)
 	EnsureMonsters();
 	if (id >= M_COUNT) {
 		int model = id - M_COUNT;
-		if (model < 0 || model >= kImportN || ImportPool(kImportName[model]) == POOL_HUM) return false;
+		if (model < 0 || model >= kImportN || wcsncmp(kImportName[model], L"Sum", 3) == 0 || ImportPool(kImportName[model]) == POOL_HUM) return false;
 	} else if (id >= M_COUNT) return false;
 	const MonsterDef& d = MonsterInfo(id);
 	int lo = MonsterFirstStage(id);
@@ -2128,7 +2173,7 @@ int MonsterCatalog(int* out, int cap)
 	for (int i = 0; i < M_COUNT && n < cap; i++) out[n++] = i;
 	int nImp = kImportN < IMP_CAP ? kImportN : IMP_CAP;
 	for (int i = 0; i < nImp && n < cap; i++) {
-		if (ImportPool(kImportName[i]) == POOL_HUM) continue;
+		if (wcsncmp(kImportName[i], L"Sum", 3) == 0 || ImportPool(kImportName[i]) == POOL_HUM) continue;
 		out[n++] = M_COUNT + i;
 	}
 	for (int i = 1; i < n; i++) {
@@ -2179,16 +2224,33 @@ void CharGrantReached(CharData& c)
 	}
 	if (cd.group == G_HOLY && c.lv >= 7) CharGiveSkill(c, SKL_RAISE);
 	{
-		static const int kMagicEl[] = { SKL_FIRE, SKL_BLIZZARD, SKL_THUNDER, SKL_HOLY, SKL_DARKNESS, SKL_GRAVITY, SKL_GALE, SKL_MIASMA };
-		static const int kPhysEl[] = { SKL_ELFIRE, SKL_ELICE, SKL_ELTHUNDER, SKL_ELHOLY, SKL_ELDARK, SKL_ELWIND, SKL_ELEATH, SKL_ELPOISON };
 		if (cd.magic && (cd.group == G_HOLY || cd.group == G_MAGIC)) {
-			if (cd.tier >= 2) {
-				for (int i = 0; i < 8; i++) CharGiveSkill(c, kMagicEl[i]);
-			} else if (cd.group == G_MAGIC && c.lv >= 5) {
-				CharGiveSkill(c, SKL_GALE);
+			// 下位の円は二次職の入口、上位の円は三次職に入ってから。
+			if (c.lv >= 8) CharGiveSkill(c, SKL_GALE);
+			if (cd.tier >= 2 && c.lv >= 15) {
+				CharGiveSkill(c, SKL_FIRE);
+				CharGiveSkill(c, SKL_BLIZZARD);
+				CharGiveSkill(c, SKL_THUNDER);
+				CharGiveSkill(c, SKL_HOLY);
 			}
+			if (cd.tier >= 2 && c.lv >= 26) {
+				CharGiveSkill(c, SKL_GRAVITY);
+				CharGiveSkill(c, SKL_DARKNESS);
+			}
+			if (cd.tier >= 3 && c.lv >= 35) CharGiveSkill(c, SKL_MIASMA);
 		} else if (!cd.magic && cd.tier >= 3) {
-			for (int i = 0; i < 8; i++) CharGiveSkill(c, kPhysEl[i]);
+			if (c.lv >= 35) {
+				CharGiveSkill(c, SKL_ELFIRE);
+				CharGiveSkill(c, SKL_ELICE);
+				CharGiveSkill(c, SKL_ELTHUNDER);
+				CharGiveSkill(c, SKL_ELWIND);
+			}
+			if (c.lv >= 48) {
+				CharGiveSkill(c, SKL_ELHOLY);
+				CharGiveSkill(c, SKL_ELDARK);
+				CharGiveSkill(c, SKL_ELEATH);
+				CharGiveSkill(c, SKL_ELPOISON);
+			}
 		}
 	}
 	{
@@ -2299,7 +2361,8 @@ int CharLevelUp(CharData& c, Rng& r, int gains[S_COUNT], int* learned, int learn
 	const ClassDef& cd = ClassInfo(c.cls);
 	int total = 0;
 	for (int s = 0; s < S_COUNT; s++) {
-		int g = cd.grow[s], add = 0;
+		// これからのレベルだけ伸ばす。既存の能力は組み直さない。
+		int g = cd.grow[s] * 2, add = 0;
 		if (s == S_HP || s == S_MP) {
 			add = g / 10 + ((int)(r.Next() % 10) < g % 10 ? 1 : 0);
 		} else {
@@ -2629,6 +2692,8 @@ void MakeEnemy(Unit& u, int monster, int lv, int boss, Rng& r)
 		int v = md.base[s];
 		if (s == S_HP || s == S_MP) v += g * (u.ch.lv - 1) / 10;
 		else v += g * (u.ch.lv - 1) / 100;
+		// 味方のこれから先の成長が倍になった。敵はHPだけ同じ倍率にする。攻撃力は上げない。
+		if (s == S_HP) v *= 2;
 		if (s != S_MOV && s != S_JMP && s != S_RNG && s != S_MP) v += r.Range(-1, 1);
 		u.ch.stat[s] = max(StatFloor(s), v);
 	}
@@ -3021,7 +3086,18 @@ static void StrikeCalc(const Battle& b, const Unit& a, const Unit& d, int skill,
 		float mult = sd ? (150 + sd->power * 5) / 100.f : 1.f;
 		float df = UnitStat(d, S_RES) * (1.f + tdef * .005f);
 		dm = atk * mult - df * .8f;
-		if (sd && sd->hits > 1) dm /= (float)sd->hits;
+		if (sd && IsSummonId(skill)) {
+			// 魔力−魔防だけだと個位数になる。力＋武器と魔力の高い方を使い、その見積もりの半分にする。
+			int phys = UnitStat(a, S_STR) + UnitWeaponPow(a);
+			float offense = (float)(phys > atk ? phys : atk);
+			float pdef = UnitStat(d, S_DEF) * (1.f + tdef * .01f);
+			float mit = pdef < df ? pdef : df;
+			float want = offense * (2.1f + sd->power * 0.02f) - mit * 0.2f;
+			float floorv = offense * 1.6f;
+			if (want < floorv) want = floorv;
+			if (dm < want) dm = want;
+			dm *= 0.5f;
+		} else if (sd && sd->hits > 1) dm /= (float)sd->hits;
 		hit = 96 + UnitStat(a, S_DEX) / 2 - UnitStat(d, S_AGI) / 3 - tavo / 3 + (sd ? 6 : 0);
 		crit = 0;
 	} else {
@@ -3405,6 +3481,15 @@ bool SkillUsable(const Battle& b, int ui, int skill)
 		if (!UnitHasSkill(u, skill) || u.mp < SkillInfo(skill).mp) return false;
 		return FormReady(b, ui, skill);
 	}
+	if (IsSummonId(skill)) {
+		int id = skill - SUMMON_BASE + 1;
+		BOOL have = FALSE;
+		for (int k = 0; k < 2; k++) if (EquippedSummonId(u.ch, k) == id) have = TRUE;
+		if (!have) return false;
+		const SkillDef& s = SkillInfo(skill);
+		if (u.mp < s.mp) return false;
+		return u.hp > SummonHpCost(u, skill);
+	}
 	if (IsCraftId(skill)) {
 		BOOL have = FALSE;
 		for (int i = 0; i < CRAFT_SLOT_N; i++) if (u.craftEq[i] == skill) have = TRUE;
@@ -3613,6 +3698,7 @@ int ResolveAttack(Battle& b, int ai, int di, int skill, Rng& r, Strike* out, int
 			else a.cp = max(0, a.cp - CraftCpCost(skill - CRAFT_BASE));
 		}
 		else a.mp = max(0, a.mp - sd->mp);
+		if (IsSummonId(skill)) a.hp = max(1, a.hp - SummonHpCost(a, skill));
 		if (IsFormSkill(skill) && FormOf(skill) == FM_SQUARE) {
 			int mem[8];
 			int nm = FormMembers(b, ai, skill, a.x, a.z, mem, 8);
@@ -3995,23 +4081,109 @@ static bool FootFits(const Battle& b, int ui, int ax, int az)
 	return true;
 }
 
+static bool FootCanLeave(const Battle& b, int ui, int x, int z)
+{
+	static const int dx[4] = { 1, -1, 0, 0 }, dz[4] = { 0, 0, 1, -1 };
+	for (int k = 0; k < 4; k++)
+		if (FootStep(b, ui, x, z, x + dx[k], z + dz[k])) return true;
+	return false;
+}
+
 static bool PlaceFoot(Battle& b, int ui, int gx, int gz)
 {
 	Unit& u = b.u[ui];
 	int s = UnitSpan(u);
-	int rad = s <= 1 ? 6 : 12;
-	int best = 99999, bx = -1, bz = -1;
+	int rad = s <= 1 ? 8 : 16;
+	int bestLeave = 99999, lx = -1, lz = -1;
+	int bestAny = 99999, ax = -1, az = -1;
+	BOOL needStep = UnitMove(u) >= 1 && UnitMoveType(u) != MV_FLY;
 	for (int dz = -rad; dz <= rad; dz++) for (int dx = -rad; dx <= rad; dx++) {
-		int ax = gx + dx, az = gz + dz;
-		if (!FootFits(b, ui, ax, az)) continue;
-		int contains = (gx >= ax && gx < ax + s && gz >= az && gz < az + s) ? 0 : 1000;
+		int x = gx + dx, z = gz + dz;
+		if (!FootFits(b, ui, x, z)) continue;
+		int contains = (gx >= x && gx < x + s && gz >= z && gz < z + s) ? 0 : 1000;
 		int rank = contains + abs(dx) + abs(dz);
-		if (rank < best) { best = rank; bx = ax; bz = az; }
+		if (rank < bestAny) { bestAny = rank; ax = x; az = z; }
+		if (!needStep || FootCanLeave(b, ui, x, z)) {
+			if (rank < bestLeave) { bestLeave = rank; lx = x; lz = z; }
+		}
 	}
+	int bx = lx >= 0 ? lx : ax;
+	int bz = lx >= 0 ? lz : az;
 	if (bx < 0) return false;
 	u.x = bx;
 	u.z = bz;
 	return true;
+}
+
+static void StampWalk(Cell& c, int h)
+{
+	if (c.t == T_VOID || c.t == T_WATER || c.t == T_LAVA || c.t == T_CHASM
+		|| c.t == T_MOUNTAIN || c.t == T_ROCK || c.t == T_DOOR
+		|| TerrainInfo(c.t).costFoot >= 99)
+		c.t = T_PLAIN;
+	c.h = (BYTE)Clampi(h, 1, MAXH);
+	c.prop = PK_NONE;
+}
+
+// 岩と段差に挟まれて一歩も出られない大型を、味方の方向へ足跡幅の坂で出す。
+static void CarveFootExit(Battle& b, int ui)
+{
+	Unit& u = b.u[ui];
+	int s = UnitSpan(u);
+	int tx = u.x, tz = u.z, best = 99999;
+	for (int i = 0; i < b.nUnits; i++) {
+		if (!b.u[i].alive || b.u[i].team != TEAM_PLAYER) continue;
+		int d = abs(u.x - b.u[i].x) + abs(u.z - b.u[i].z);
+		if (d < best) { best = d; tx = b.u[i].x; tz = b.u[i].z; }
+	}
+	int h = max(1, (int)b.map.At(u.x, u.z).h);
+	int x = u.x, z = u.z;
+	for (int dz = 0; dz < s; dz++) for (int dx = 0; dx < s; dx++) {
+		int cx = x + dx, cz = z + dz;
+		if (!Map::In(cx, cz)) continue;
+		int o = b.UnitAt(cx, cz);
+		if (o >= 0 && o != ui) continue;
+		StampWalk(b.map.c[cz][cx], h);
+	}
+	for (int step = 0; step < 10 && (x != tx || z != tz); step++) {
+		int nx = x, nz = z;
+		if (abs(tx - x) >= abs(tz - z) && tx != x) nx += (tx > x ? 1 : -1);
+		else if (tz != z) nz += (tz > z ? 1 : -1);
+		else break;
+		int nh = h;
+		if (Map::In(nx, nz) && b.map.c[nz][nx].t != T_VOID) nh = (int)b.map.c[nz][nx].h;
+		if (nh > h + 1) nh = h + 1;
+		if (nh < h - 1) nh = h - 1;
+		if (nh < 1) nh = 1;
+		for (int dz = 0; dz < s; dz++) for (int dx = 0; dx < s; dx++) {
+			int cx = nx + dx, cz = nz + dz;
+			if (!Map::In(cx, cz)) continue;
+			int o = b.UnitAt(cx, cz);
+			if (o >= 0 && o != ui) continue;
+			StampWalk(b.map.c[cz][cx], nh);
+		}
+		x = nx; z = nz; h = nh;
+		if (step >= 2 && FootCanLeave(b, ui, u.x, u.z)) break;
+	}
+}
+
+static void RescueStuckFeet(Battle& b)
+{
+	for (int i = 0; i < b.nUnits; i++) {
+		Unit& u = b.u[i];
+		if (!u.alive || u.team != TEAM_ENEMY) continue;
+		if (UnitMove(u) < 1 || UnitMoveType(u) == MV_FLY) continue;
+		if (FootCanLeave(b, i, u.x, u.z)) continue;
+		int gx = u.x, gz = u.z;
+		u.x = -1; u.z = -1;
+		b.RebuildOcc();
+		if (!PlaceFoot(b, i, gx, gz) || !FootCanLeave(b, i, u.x, u.z)) {
+			if (u.x < 0) { u.x = gx; u.z = gz; }
+			b.RebuildOcc();
+			CarveFootExit(b, i);
+		}
+		b.RebuildOcc();
+	}
 }
 
 void SetupBattle(Battle& b, int stage, DWORD seed, const CharData* party, const int* rosterIdx, int nParty, int theme)
@@ -4072,6 +4244,7 @@ void SetupBattle(Battle& b, int stage, DWORD seed, const CharData* party, const 
 	}
 	b.nUnits = n;
 	b.RebuildOcc();
+	RescueStuckFeet(b);
 	WakeNearPlayers(b, 8);
 }
 
@@ -4701,6 +4874,21 @@ const wchar_t* GoodDesc(int i)
 	if (g->extra == IX_VENOM) return TT(TX_ITD_VENOM);
 	if (g->extra == IX_CURE) return TT(TX_ITD_CURE);
 	if (g->extra == IX_ETHER) return TT(TX_ITD_ETHER);
+	switch (g->extra) {
+	case 100: return LangPick14(L"3マス以内の味方の睡眠を解き、HPを最大の15%回復する。", L"Wakes an ally within 3 tiles and restores 15% max HP.", L"Réveille un allié dans 3 cases et rend 15 % des PV max.", L"Sveglia un alleato entro 3 caselle e restituisce il 15% dei PS max.", L"Despierta a un aliado a 3 casillas y recupera el 15% de PV máx.", L"3칸 이내의 아군 수면을 풀고 HP를 최대의 15% 회복한다.", L"解除3格以内同伴的睡眠，并恢复最大HP的15%。", L"يوقظ حليفًا ضمن 3 مربعات ويعيد 15٪ من الصحة القصوى.", L"Будит союзника в 3 клетках и восстанавливает 15% макс. ОЗ.", L"Weckt einen Verbündeten in 3 Feldern und stellt 15 % der max. LP her.", L"Acorda um aliado em até 3 casas e recupera 15% dos PV máx.", L"Wekt een bondgenoot binnen 3 vakken en herstelt 15% van de max. LP.", L"Budzi sojusznika w zasięgu 3 pól i przywraca 15% maks. PŻ.", L"3 kare içindeki yoldaşın uykusunu bozar ve azami CP'nin %15'ini iyileştirir.");
+	case 101: return LangPick14(L"3マス以内の味方の混乱を解く。", L"Clears an ally's confusion within 3 tiles.", L"Dissipe la confusion d'un allié dans 3 cases.", L"Toglie la confusione di un alleato entro 3 caselle.", L"Quita la confusión de un aliado a 3 casillas.", L"3칸 이내의 아군 혼란을 푼다.", L"解除3格以内同伴的混乱。", L"يزيل ارتباك حليف ضمن 3 مربعات.", L"Снимает смятение союзника в пределах 3 клеток.", L"Hebt die Verwirrung eines Verbündeten in 3 Feldern auf.", L"Remove a confusão de um aliado em até 3 casas.", L"Heft de verwarring van een bondgenoot binnen 3 vakken op.", L"Zdejmuje zamęt sojusznika w zasięgu 3 pól.", L"3 kare içindeki yoldaşın kafa karışıklığını siler.");
+	case 102: return LangPick14(L"3マス以内の味方のスタンを解く。", L"Clears an ally's stun within 3 tiles.", L"Dissipe l'étourdissement d'un allié dans 3 cases.", L"Toglie lo stordimento di un alleato entro 3 caselle.", L"Quita el aturdimiento de un aliado a 3 casillas.", L"3칸 이내의 아군 기절을 푼다.", L"解除3格以内同伴的硬直。", L"يزيل صعقة حليف ضمن 3 مربعات.", L"Снимает оглушение союзника в пределах 3 клеток.", L"Hebt die Betäubung eines Verbündeten in 3 Feldern auf.", L"Remove o atordoamento de um aliado em até 3 casas.", L"Heft de verdoving van een bondgenoot binnen 3 vakken op.", L"Zdejmuje ogłuszenie sojusznika w zasięgu 3 pól.", L"3 kare içindeki yoldaşın sersemliğini siler.");
+	case 103: return LangPick14(L"3マス以内の味方の状態異常をすべて消し、HPを最大の20%回復する。", L"Clears every ailment on an ally within 3 tiles and restores 20% max HP.", L"Dissipe tout état d'un allié dans 3 cases et rend 20 % des PV max.", L"Toglie ogni malus a un alleato entro 3 caselle e restituisce il 20% dei PS max.", L"Quita todo estado de un aliado a 3 casillas y recupera el 20% de PV máx.", L"3칸 이내의 아군 상태 이상을 모두 풀고 HP를 최대의 20% 회복한다.", L"解除3格以内同伴的全部异常，并恢复最大HP的20%。", L"يزيل كل الحالات عن حليف ضمن 3 مربعات ويعيد 20٪ من الصحة.", L"Снимает все состояния с союзника в 3 клетках и восстанавливает 20% макс. ОЗ.", L"Hebt alle Zustände eines Verbündeten in 3 Feldern auf und stellt 20 % der max. LP her.", L"Remove todo estado de um aliado em até 3 casas e recupera 20% dos PV máx.", L"Heft alle toestanden van een bondgenoot binnen 3 vakken op en herstelt 20% van de max. LP.", L"Zdejmuje wszystkie stany sojusznika w zasięgu 3 pól i przywraca 20% maks. PŻ.", L"3 kare içindeki yoldaşın tüm durumlarını siler ve azami CP'nin %20'sini iyileştirir.");
+	case 104: return LangPick14(L"3マス以内の味方のMPを全回復する。", L"Fully restores an ally's MP within 3 tiles.", L"Rend tous les PM d'un allié dans 3 cases.", L"Restituisce tutti i PM di un alleato entro 3 caselle.", L"Recupera todos los PM de un aliado a 3 casillas.", L"3칸 이내의 아군 MP를 전부 회복한다.", L"完全恢复3格以内同伴的MP。", L"يعيد كل طاقة حليف ضمن 3 مربعات.", L"Полностью восстанавливает ОМ союзника в пределах 3 клеток.", L"Stellt alle MP eines Verbündeten in 3 Feldern wieder her.", L"Recupera todos os PM de um aliado em até 3 casas.", L"Herstelt alle MP van een bondgenoot binnen 3 vakken.", L"Przywraca wszystkie PM sojusznika w zasięgu 3 pól.", L"3 kare içindeki yoldaşın tüm MP'sini yeniler.");
+	case 105: return LangPick14(L"3マス以内の味方のHPとMPを、それぞれ最大の30%回復する。", L"Restores 30% max HP and MP to an ally within 3 tiles.", L"Rend 30 % des PV et PM max d'un allié dans 3 cases.", L"Restituisce il 30% dei PS e PM max di un alleato entro 3 caselle.", L"Recupera el 30% de PV y PM máx. de un aliado a 3 casillas.", L"3칸 이내의 아군 HP와 MP를 각각 최대의 30% 회복한다.", L"恢复3格以内同伴最大HP和MP的各30%。", L"يعيد 30٪ من الصحة والطاقة القصوى لحليف ضمن 3 مربعات.", L"Восстанавливает 30% макс. ОЗ и ОМ союзнику в 3 клетках.", L"Stellt 30 % der max. LP und MP eines Verbündeten in 3 Feldern her.", L"Recupera 30% dos PV e PM máx. de um aliado em até 3 casas.", L"Herstelt 30% van de max. LP en MP van een bondgenoot binnen 3 vakken.", L"Przywraca 30% maks. PŻ i PM sojusznika w zasięgu 3 pól.", L"3 kare içindeki yoldaşın azami CP ve MP'sinin %30'unu yeniler.");
+	case 106: return LangPick14(L"3マス以内の倒れた味方を起こし、HPを最大の80%にする。", L"Raises a fallen ally within 3 tiles at 80% HP.", L"Relève un allié tombé dans 3 cases, à 80 % des PV.", L"Rialza un alleato caduto entro 3 caselle, all'80% dei PS.", L"Levanta a un aliado caído dentro de 3 casillas, al 80% de PV.", L"3칸 이내의 쓰러진 아군을 일으키고 HP를 최대의 80%로 한다.", L"扶起3格以内倒下的同伴，HP恢复到最大的80%。", L"ينهض حليفًا ساقطًا ضمن 3 مربعات بنسبة 80٪ من الصحة.", L"Поднимает павшего союзника в пределах 3 клеток с 80% ОЗ.", L"Richtet einen gefallenen Verbündeten innerhalb von 3 Feldern mit 80 % LP auf.", L"Ergue um aliado caído em até 3 casas com 80% dos PV.", L"Laat een gevallene binnen 3 vakken opstaan met 80% LP.", L"Podnosi poległego sojusznika w zasięgu 3 pól z 80% PŻ.", L"3 kare içindeki düşmüş yoldaşı %80 CP ile kaldırır.");
+	case 107: return LangPick14(L"1〜3マス先の敵に5ターン毒を与える。毎ターン最大HPの5%。", L"Poisons an enemy 1 to 3 tiles away for 5 turns. 5% max HP each turn.", L"Empoisonne un ennemi à 1–3 cases pour 5 tours. 5 % des PV max par tour.", L"Avvelena un nemico a 1–3 caselle per 5 turni. 5% dei PS max a turno.", L"Envenena a un enemigo a 1–3 casillas durante 5 turnos. 5% de PV máx. por turno.", L"1〜3칸 앞의 적에게 5턴 독을 준다. 매 턴 최대 HP의 5%.", L"使1至3格外的敌人中毒5回合。每回合失去最大HP的5%。", L"يسمم عدوًا على بعد 1–3 مربعات لخمسة أدوار. 5٪ من الصحة كل دور.", L"Отравляет врага в 1–3 клетках на 5 ходов. 5% макс. ОЗ за ход.", L"Vergiftet einen Feind in 1–3 Feldern für 5 Züge. 5 % der max. LP je Zug.", L"Envenena um inimigo a 1–3 casas por 5 turnos. 5% dos PV máx. por turno.", L"Vergiftigt een vijand op 1–3 vakken voor 5 beurten. 5% van de max. LP per beurt.", L"Zatruwa wroga w odległości 1–3 pól na 5 tur. 5% maks. PŻ na turę.", L"1–3 kare ötedeki düşmanı 5 tur zehirler. Her tur azami CP'nin %5'i.");
+	case 108: return LangPick14(L"1〜3マス先の敵の行動順を大きく遅らせ、さらに4ターン鈍足にする。", L"Greatly delays an enemy 1 to 3 tiles away and slows them for 4 turns.", L"Retarde beaucoup un ennemi à 1–3 cases et le ralentit 4 tours.", L"Ritarda molto un nemico a 1–3 caselle e lo rallenta per 4 turni.", L"Retrasa mucho a un enemigo a 1–3 casillas y lo ralentiza 4 turnos.", L"1〜3칸 앞의 적 행동 순서를 크게 늦추고 4턴 둔화시킨다.", L"大幅推迟1至3格外的敌人，并使其迟缓4回合。", L"يؤخر كثيرًا عدوًا على بعد 1–3 مربعات ويبطئه 4 أدوار.", L"Сильно откладывает врага в 1–3 клетках и замедляет на 4 хода.", L"Verzögert einen Feind in 1–3 Feldern stark und verlangsamt ihn 4 Züge.", L"Atrasa muito um inimigo a 1–3 casas e o deixa lento por 4 turnos.", L"Vertraagt een vijand op 1–3 vakken sterk en vertraagt hem 4 beurten.", L"Mocno opóźnia wroga w odległości 1–3 pól i spowalnia go na 4 tury.", L"1–3 kare ötedeki düşmanın sırasını çok geciktirir ve 4 tur yavaşlatır.");
+	case 109: return LangPick14(L"3マス以内の味方の毒を消し、HPを最大の35%回復する。", L"Cures an ally's poison within 3 tiles and restores 35% max HP.", L"Soigne le poison d'un allié dans 3 cases et rend 35 % des PV max.", L"Cura il veleno di un alleato entro 3 caselle e restituisce il 35% dei PS max.", L"Cura el veneno de un aliado a 3 casillas y recupera el 35% de PV máx.", L"3칸 이내의 아군 독을 풀고 HP를 최대의 35% 회복한다.", L"解除3格以内同伴的中毒，并恢复最大HP的35%。", L"يزيل سم حليف ضمن 3 مربعات ويعيد 35٪ من الصحة.", L"Снимает яд с союзника в 3 клетках и восстанавливает 35% макс. ОЗ.", L"Hebt das Gift eines Verbündeten in 3 Feldern auf und stellt 35 % der max. LP her.", L"Cura o veneno de um aliado em até 3 casas e recupera 35% dos PV máx.", L"Heft het gif van een bondgenoot binnen 3 vakken op en herstelt 35% van de max. LP.", L"Zdejmuje truciznę sojusznika w zasięgu 3 pól i przywraca 35% maks. PŻ.", L"3 kare içindeki yoldaşın zehrini siler ve azami CP'nin %35'ini iyileştirir.");
+	case 110: return LangPick14(L"3マス以内の味方を5ターン、守備を30%上げる。", L"Raises an ally's defense by 30% for 5 turns. Within 3 tiles.", L"Défense d'un allié +30 % pendant 5 tours. Portée 3.", L"Difesa di un alleato +30% per 5 turni. Entro 3 caselle.", L"Defensa de un aliado +30% durante 5 turnos. Alcance 3.", L"3칸 이내의 아군을 5턴 동안 수비 30% 올린다.", L"使3格以内的同伴在5回合内防御提高30%。", L"يرفع دفاع حليف 30٪ لخمسة أدوار. ضمن 3 مربعات.", L"Защита союзника +30% на 5 ходов. В пределах 3 клеток.", L"Abwehr eines Verbündeten +30 % für 5 Züge. Reichweite 3.", L"Defesa de um aliado +30% por 5 turnos. Até 3 casas.", L"Verdediging van een bondgenoot +30% gedurende 5 beurten. Binnen 3 vakken.", L"Obrona sojusznika +30% przez 5 tur. Zasięg 3 pól.", L"3 kare içindeki yoldaşın savunmasını 5 tur %30 artırır.");
+	case 111: return LangPick14(L"3マス以内の味方を5ターン素早さ30%上げ、行動順を少し早める。", L"Raises an ally's agility by 30% for 5 turns and hurries their next action. Within 3 tiles.", L"Agilité d'un allié +30 % pendant 5 tours, et son prochain tour avance. Portée 3.", L"Agilità di un alleato +30% per 5 turni, e il prossimo turno arriva prima. Entro 3 caselle.", L"Agilidad de un aliado +30% durante 5 turnos, y su siguiente turno llega antes. Alcance 3.", L"3칸 이내의 아군을 5턴 민첩 30% 올리고 행동 순서를 조금 당긴다.", L"使3格以内的同伴敏捷提高30%共5回合，并略微提前行动。", L"يرفع رشاقة حليف 30٪ لخمسة أدوار ويقرّب دوره. ضمن 3 مربعات.", L"Ловкость союзника +30% на 5 ходов, и следующий ход ближе. В пределах 3 клеток.", L"Beweglichkeit eines Verbündeten +30 % für 5 Züge, und der nächste Zug kommt früher. Reichweite 3.", L"Agilidade de um aliado +30% por 5 turnos e o próximo turno chega antes. Até 3 casas.", L"Behendigheid van een bondgenoot +30% gedurende 5 beurten, en de volgende beurt komt eerder. Binnen 3 vakken.", L"Zwinność sojusznika +30% przez 5 tur i następna tura przychodzi wcześniej. Zasięg 3 pól.", L"3 kare içindeki yoldaşın çevikliğini 5 tur %30 artırır ve sırasını biraz öne alır.");
+	default: break;
+	}
 	return L"";
 }
 int ClassLine(int cls)
@@ -4872,11 +5060,23 @@ void GearEquip(CharData& c, SaveData& s, int stashIndex)
 int GearTryDrop(SaveData& s, int stage, int monster, Rng& r)
 {
 	int pool[512], n = 0;
-	int gate = stage <= 1 ? 0 : stage;
+	if (stage < 1) stage = 1;
+	// 段の必要ステージは二乗で伸びるので、戦闘の進行より新しい武具が店にしか出ない。
+	// ここでは 8 ステージごとに次の段を落とす。同じ段が無ければ一つ下、それでも無ければ到達済みの段。
+	int cap = 1 + stage / 8;
+	if (cap > 10) cap = 10;
 	int line = MonsterDropLine(monster);
-	for (int i = 0; i < kGearN && n < 512; i++) if (kGear[i].line == line && kGear[i].stage <= gate) pool[n++] = i;
-	if (n < 1) {
-		for (int i = 0; i < kGearN && n < 512; i++) if (kGear[i].stage <= gate) pool[n++] = i;
+	for (int pass = 0; pass < 4 && n < 1; pass++) {
+		int wantLine = (pass < 2) ? line : -1;
+		int reqLo = 1, reqHi = cap;
+		if (pass == 0 || pass == 2) reqLo = cap;
+		else if (pass == 1) reqLo = cap > 1 ? cap - 1 : 1;
+		for (int i = 0; i < kGearN && n < 512; i++) {
+			int req = kGear[i].req > 0 ? kGear[i].req : 1;
+			if (wantLine >= 0 && kGear[i].line != wantLine) continue;
+			if (req < reqLo || req > reqHi) continue;
+			pool[n++] = i;
+		}
 	}
 	if (n < 1) return -1;
 	int gi = pool[r.Range(0, n - 1)];

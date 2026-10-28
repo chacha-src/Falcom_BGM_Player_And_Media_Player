@@ -18,11 +18,14 @@ enum {
 	ID_OPT_BGM = 190, ID_OPT_SE, ID_OPT_CAM, ID_MON_TAB,
 	ID_BASE_SHOP = 210, ID_SHOP_CLOSE, ID_SHOP_BUY0 = 220, ID_SHOP_SELL0 = 250,
 	ID_SHOP_PREV = 270, ID_SHOP_NEXT, ID_SHOP_LINE0 = 272, ID_SHOP_KIND0 = 278,
+	ID_SHOP_TIER0 = 1120,
+	ID_SHOP_BAND0 = 1140, ID_SHOP_BAND1, ID_SHOP_BAND2, ID_SHOP_BAND3,
 	ID_PT_SHOP = 362,
 	ID_SHOP_FREE = 1890, ID_SHOP_SELLALL, ID_SHOP_FIT_NO, ID_SHOP_FIT_PREV, ID_SHOP_FIT_NEXT, ID_SHOP_FIT0,
 	ID_SHOP_SELLJUNK = 1920, ID_SHOP_ARM0 = 1930, ID_SHOP_ARM_SELL = 1948, ID_SHOP_ARM_NO = 1949,
 	ID_SHOP_ASK_YES = 1950, ID_SHOP_ASK_NO, ID_SHOP_FIT_KEEP, ID_SHOP_TO_PARTY, ID_SHOP_DET0 = 1960,
-	ID_PT_BEAD2 = 1988, ID_PT_BEAD3, ID_SHOP_ART, ID_SHOP_OUGI,
+	ID_SHOP_SLOT0 = 1984, ID_SHOP_SLOT1, ID_SHOP_SLOT2, ID_SHOP_SLOT_NO,
+	ID_PT_BEAD2 = 1988, ID_PT_BEAD3, ID_SHOP_ART, ID_SHOP_OUGI, ID_PT_SUM0, ID_PT_SUM1,
 	ID_BASE_SET = 945, ID_PT_EVO = 363,
 	ID_PT_WPN = 348, ID_PT_ARM,
 	ID_CR_NAME = 200, ID_CR_RANDOM, ID_CR_GENDER, ID_CR_LINEAGE, ID_CR_CLASS, ID_CR_BODY, ID_CR_HAIR, ID_CR_HAIRCOL, ID_CR_OUTFIT,
@@ -76,6 +79,11 @@ Game::Game()
 	m_wantClose = FALSE;
 	m_loaded = FALSE;
 	m_loadFrames = 0;
+	m_loadPm = 0;
+	m_loadShown = -1;
+	m_loadPaint = 0;
+	m_loadA = m_loadB = 0;
+	m_loadLive = FALSE;
 	m_renderDt = 1.f / 60.f;
 	m_lastRenderTime = 0;
 	m_recoverTries = 0;
@@ -109,6 +117,9 @@ Game::Game()
 	m_codexSort = 0;
 	m_skillPage = 0;
 	m_skillTab = 0;
+	m_skillShape = 0;
+	m_skillEl = 0;
+	m_skillPreview = -1;
 	memset(m_skMemoTab, 0, sizeof(m_skMemoTab));
 	memset(m_skMemoPage, 0, sizeof(m_skMemoPage));
 	m_stashFull = 0;
@@ -118,6 +129,8 @@ Game::Game()
 	m_shop = 0;
 	m_btnSfx = -1;
 	m_shopLine = 0;
+	m_shopTier = 0;
+	m_shopBand = 0;
 	m_shopPage = 0;
 	m_shopSellPage = 0;
 	m_shopKind = 0;
@@ -127,6 +140,11 @@ Game::Game()
 	m_shopFitId = 0;
 	m_shopFitPage = 0;
 	m_shopHold = 0;
+	m_shopWho = -1;
+	m_sumOn = 0;
+	m_sumFx = 0;
+	m_sumHit = 0;
+	m_sumU = 0;
 	m_partyBack = 0;
 	m_baseOpt = 0;
 	m_slotUi = 0;
@@ -252,24 +270,117 @@ BOOL Game::Init(HWND view, int w, int h)
 	return TRUE;
 }
 
+void Game::LoadPulseCb(int cur, int n, void* user)
+{
+	Game* g = (Game*)user;
+	if (!g || n < 1) return;
+	if (cur < 0) cur = 0;
+	if (cur > n) cur = n;
+	int a = g->m_loadA, b = g->m_loadB;
+	if (b < a) b = a;
+	g->NoteLoad(a + (int)((long long)(b - a) * cur / n));
+}
+
+void Game::BeginLoadSpan(int a, int b)
+{
+	if (a < 0) a = 0;
+	if (b > 1000) b = 1000;
+	if (b < a) b = a;
+	m_loadA = a;
+	m_loadB = b;
+	m_r.SetLoadPulse(&Game::LoadPulseCb, this);
+	NoteLoad(a);
+}
+
+void Game::DrawLoadHud()
+{
+	int pct = m_loadPm / 10;
+	if (pct < 0) pct = 0;
+	if (pct > 100) pct = 100;
+	m_r.HudText(TT(TX_TITLE), m_w * .5f, m_h * .38f, U(40), RGBA8(255, 230, 160), 1, 1);
+	wchar_t line[80];
+	swprintf_s(line, L"%s  %d%%", TT(TX_MISC_LOADING), pct);
+	m_r.HudText(line, m_w * .5f, m_h * .50f, U(20), RGBA8(230, 230, 240), 1, 0);
+	float bw = min(U(520.f), (float)m_w * .62f);
+	float bh = U(22);
+	float bx = ((float)m_w - bw) * .5f;
+	float by = m_h * .56f;
+	Bar(bx, by, bw, bh, pct / 100.f, RGBA8(255, 214, 120), RGBA8(196, 120, 48));
+}
+
+BOOL Game::PaintLoadScreen()
+{
+	if (!m_r.Ready() || !m_r.FrameReady()) return FALSE;
+	SetupCamera(v3(0, 0, 0), 0, .3f, 10, .8f);
+	m_r.BeginFrame();
+	m_r.BeginMainPass();
+	m_r.DrawSky(RGBA8(30, 34, 70), RGBA8(90, 70, 110), 0, 0);
+	m_r.BeginHud();
+	DrawLoadHud();
+	m_r.EndHud();
+	m_r.Present();
+	m_r.EndFrameTextGc();
+	return TRUE;
+}
+
+void Game::NoteLoad(int permille)
+{
+	if (!m_loadLive) return;
+	if (permille < m_loadPm) permille = m_loadPm;
+	if (permille > 1000) permille = 1000;
+	m_loadPm = permille;
+	int pct = m_loadPm / 10;
+	unsigned now = GetTickCount();
+	if (pct == m_loadShown && permille < 1000) return;
+	if (permille < 1000 && m_loadShown >= 0 && now - m_loadPaint < 50) return;
+	if (!PaintLoadScreen()) return;
+	m_loadShown = pct;
+	m_loadPaint = now;
+}
+
 BOOL Game::LoadEverything()
 {
-	if (!m_r.LoadAssets()) return FALSE;
-	if (!BuildLibrary(m_r, m_lib)) return FALSE;
-	// 拠点に出すのはパーティ（最大10人）と、その装備。体は読み切ってから画面へ出す。
+	m_loadLive = TRUE;
+	m_loadPm = 0;
+	m_loadShown = -1;
+	m_loadPaint = 0;
+	NoteLoad(0);
+	BeginLoadSpan(0, 300);
+	if (!m_r.LoadAssets()) { m_r.SetLoadPulse(NULL, NULL); m_loadLive = FALSE; return FALSE; }
+	NoteLoad(300);
+	BeginLoadSpan(300, 450);
+	if (!BuildLibrary(m_r, m_lib)) { m_r.SetLoadPulse(NULL, NULL); m_loadLive = FALSE; return FALSE; }
+	NoteLoad(450);
+	int slot[MAX_PARTY], nb = 0;
 	for (int i = 0; i < MAX_PARTY; i++) {
 		int ri = m_save.party[i];
 		if (ri < 0 || ri >= MAX_ROSTER || !m_save.roster[ri].used) continue;
-		const CharData& c = m_save.roster[ri];
+		slot[nb++] = ri;
+	}
+	if (nb < 1) NoteLoad(650);
+	for (int k = 0; k < nb; k++) {
+		BeginLoadSpan(450 + 200 * k / nb, 450 + 200 * (k + 1) / nb);
+		const CharData& c = m_save.roster[slot[k]];
 		char nm[16];
 		sprintf_s(nm, c.gender == 1 ? "HumF%d" : "HumM%d", CharModel(c));
 		m_r.EnsureBody(nm);
+		NoteLoad(m_loadB);
 	}
+	BeginLoadSpan(650, 710);
 	m_r.LoadGearPack();
+	NoteLoad(710);
+	BeginLoadSpan(710, 740);
 	m_r.LoadFacePack();
+	NoteLoad(740);
+	BeginLoadSpan(740, 820);
 	m_r.LoadAvatarPack();
+	NoteLoad(820);
+	BeginLoadSpan(820, 850);
 	m_r.LoadHairPack();
+	NoteLoad(850);
+	m_r.SetLoadPulse(NULL, NULL);
 	m_loaded = TRUE;
+	m_loadLive = FALSE;
 	return TRUE;
 }
 
@@ -403,8 +514,15 @@ void Game::Tick(float dt)
 	m_time += dt;
 	if (m_screen == SC_LOADING) {
 		if (m_loadFrames++ >= 2) {
-			if (!LoadEverything()) m_screen = SC_FAIL;
-			else EnterBase();
+			if (!LoadEverything()) { m_screen = SC_FAIL; m_loadLive = FALSE; }
+			else {
+				m_loadLive = TRUE;
+				BeginLoadSpan(850, 1000);
+				EnterBase();
+				NoteLoad(1000);
+				m_r.SetLoadPulse(NULL, NULL);
+				m_loadLive = FALSE;
+			}
 		}
 	}
 	if (m_r.Ready() && m_r.DeviceLost()) {
@@ -427,16 +545,15 @@ void Game::Tick(float dt)
 
 static_assert(TAC_BGM_RUINS - TAC_BGM_PLAINS + 1 == TH_COUNT, "地形BGM");
 // 拠点=tactics.ogg。戦闘は地形ごとの tacticsgame*.ogg、無ければ tacticsgame.ogg。
-// 危険曲はHP割合では入れない。今いる敵が、次の手かその次で届く攻撃（範囲は巻き込んだ人数）で
-// 生きている味方の残HPを何巡で溶かすか。2.2巡以内、かつ全滅が討伐より先なら tacticsgamedanger。
-// 1人だけ削れていても、届く総ダメージがパーティを溶かさないなら鳴らさない。
-// 脅威が離れた、4.5巡以上耐えられる、討伐が全滅より先、のどれかで危険を下ろす。
-// 下ろしたあと勝利目前なら勝利曲、まだ長ければ地形曲。
+// 危険曲は毎フレーム取り直す。出撃中の味方について、残HPの合計が最大HPの合計の33%未満、
+// または死者が人数の半数以上。攻撃の見積もりでは切り替えない。回復か蘇生で条件を外れたら、
+// その場で地形曲か勝利目前曲へ戻す。
 // 勝利目前は、決着まで約20手番（おおよそ1〜2分）を切ってから。通常曲を長く残す。
 // 雑魚がいる戦はボスを除いて見る。雑魚の残りHPが最大の3割以下、または残り2体以下かつそのHPが最大の4割以下で、
 // 倒し切る見積もりが20手番以内、残HPが味方の2.5倍以内。遠い雑魚は歩数を足して遅らせる。通常曲を長く残す。
 // 開幕（雑魚が最大の85%超）は戦曲。雑魚のHPが半分超まで戻り数が3体以上になるか、見積もりが40手番を超えたら戻す。
-// 雑魚が消えてボスがまだ長いなら地形曲へ戻す。ボス単体は、そばでHPが三分の二以下、または十数手番を切ったら鳴らす。
+// 雑魚が消えてボスがまだ長く、そのボスが元気なら地形曲へ戻す。ボスは、そばでHPが三分の二以下、または十数手番を切ったら鳴らす。
+// 一度鳴り、ボスがまだその状態なら、離れても雑魚が残っていても地形曲へは戻さない。危険曲はこちらより優先する。
 // 勝利確定とリザルトは tacticsgameclear。店=tacticsshop、作成・編成・進化=tacticsmake。テンポは変えない。
 void Game::SyncBgm()
 {
@@ -452,7 +569,7 @@ void Game::SyncBgm()
 		int alive = m_b.AliveCount(TEAM_ENEMY);
 		int players = m_b.AliveCount(TEAM_PLAYER);
 		int all = 0;
-		int hp = 0, mx = 0;
+		int hp = 0, mx = 0, partyN = 0, deadN = 0;
 		int eHp = 0, eMx = 0;
 		int mobHp = 0, mobMx = 0, mobAll = 0;
 		for (int i = 0; i < m_b.nUnits; i++) {
@@ -469,12 +586,14 @@ void Game::SyncBgm()
 				}
 			}
 			if (u.team != TEAM_PLAYER) continue;
+			partyN++;
 			mx += max(1, u.ch.stat[S_HP]);
 			if (u.alive && u.hp > 0) hp += u.hp;
+			else deadN++;
 		}
 		const int fightWon = (m_victory == 1) || (m_screen == SC_RESULT) || (m_bossDown && players > 0) || (alive == 0 && all > 0 && players > 0);
 		long long hits = 0, mobHits = 0;
-		int pSpd = 0, eSpd = 0, farDist = 0, bossClose = 0;
+		int pSpd = 0, eSpd = 0, farDist = 0, bossClose = 0, bossEnding = 0;
 		int mobSpd = 0, mobFar = 0, mobAlive = 0;
 		int pAtk = 0, pN = 0;
 		for (int i = 0; i < m_b.nUnits; i++) {
@@ -513,9 +632,26 @@ void Game::SyncBgm()
 				mobHits += need;
 				mobSpd += 10 + UnitStat(u, S_AGI);
 				if (best < 999 && best > mobFar) mobFar = best;
-			} else if (best <= 14 && u.hp < max(1, u.ch.stat[S_HP])) {
+			} else {
+				int bossNear = best;
+				int sp = UnitSpan(u);
+				if (sp > 1) {
+					bossNear = 999;
+					for (int p = 0; p < m_b.nUnits; p++) {
+						const Unit& a = m_b.u[p];
+						if (!a.alive || a.hp <= 0 || a.team != TEAM_PLAYER) continue;
+						int asp = UnitSpan(a);
+						for (int dz = 0; dz < sp; dz++) for (int dx = 0; dx < sp; dx++)
+							for (int az = 0; az < asp; az++) for (int ax = 0; ax < asp; ax++) {
+								int d = abs((u.x + dx) - (a.x + ax)) + abs((u.z + dz) - (a.z + az));
+								if (d < bossNear) bossNear = d;
+							}
+					}
+				}
 				int bmax = max(1, u.ch.stat[S_HP]);
-				if (u.hp * 3 <= bmax * 2 || need <= 16) bossClose = 1;
+				int wounded = u.hp < bmax && ((long long)u.hp * 3 <= (long long)bmax * 2 || need <= 16);
+				if (wounded) bossEnding = 1;
+				if (bossNear <= 14 && wounded) bossClose = 1;
 			}
 		}
 		long long enemyTurns = pSpd > 0 ? hits * eSpd / pSpd : hits;
@@ -548,100 +684,13 @@ void Game::SyncBgm()
 		const int bossLeft = mobAlive == 0 && !bossClose && turns >= 20;
 		if (eMx <= 0 || hp <= 0 || players <= 0 || alive <= 0) winNear = 0;
 		else if (bossClose || mapEnd || mobThin) winNear = 1;
-		else if (mobRallied || mobDrag || bossOnly || bossLeft) winNear = 0;
-		// 届く敵の1巡で入るダメージ。範囲技は当たる味方の人数だけ足す。
-		int pi[MAX_PARTY];
-		int pn = 0;
-		for (int i = 0; i < m_b.nUnits && pn < MAX_PARTY; i++) {
-			const Unit& a = m_b.u[i];
-			if (!a.alive || a.hp <= 0 || a.team != TEAM_PLAYER) continue;
-			pi[pn++] = i;
-		}
-		int nThreat = 0, roundDmg = 0, threatSpd = 0;
-		for (int ei = 0; ei < m_b.nUnits && pn > 0; ei++) {
-			const Unit& e = m_b.u[ei];
-			if (!e.alive || e.hp <= 0 || e.team != TEAM_ENEMY) continue;
-			int nearK = -1, nearGap = 9999;
-			for (int k = 0; k < pn; k++) {
-				const Unit& a = m_b.u[pi[k]];
-				int gap = Dist(e.x, e.z, a.x, a.z);
-				int span = UnitSpan(e) + UnitSpan(a) - 2;
-				if (span > 0 && gap > span) gap -= span;
-				if (gap < nearGap) { nearGap = gap; nearK = k; }
-			}
-			if (nearK < 0) continue;
-			int rmax = UnitRangeMax(e);
-			int step = UnitMove(e);
-			if (step < 1) step = 1;
-			if (!e.alert && nearGap > 9) continue;
-			if (e.boss && nearGap > 10 && nearGap > rmax) continue;
-			if (nearGap > rmax + step) continue;
-			int sks[8];
-			int ns = 0;
-			sks[ns++] = -1;
-			if (e.monster >= 0) {
-				const MonsterDef& md = MonsterInfo(e.monster);
-				for (int s = 0; s < 3 && ns < 8; s++) if (md.skills[s] >= 0) sks[ns++] = md.skills[s];
-			}
-			for (int s = 0; s < 4 && ns < 8; s++) if (e.craftEq[s] >= CRAFT_BASE) sks[ns++] = e.craftEq[s];
-			int bestTot = 0;
-			for (int s = 0; s < ns; s++) {
-				int sk = sks[s];
-				int area = 0, self = 0;
-				if (sk >= 0) {
-					if (!SkillUsable(m_b, ei, sk)) continue;
-					const SkillDef& sd = SkillInfo(sk);
-					if (sd.kind == SK_HEAL || sd.kind == SK_BUFF || sd.kind == SK_PASSIVE) continue;
-					area = sd.area;
-					self = sd.rMax == 0;
-				}
-				Forecast f;
-				CalcForecast(m_b, ei, pi[nearK], sk, f);
-				int one = (int)((long long)f.dmg * max(1, f.hits) * Clampi(f.hit, 0, 100) / 100);
-				if (one < 1) continue;
-				int tmp[MAX_PARTY];
-				for (int k = 0; k < pn; k++) tmp[k] = 0;
-				int tg[16];
-				int nt = 0;
-				if (area > 0) {
-					int cx = m_b.u[pi[nearK]].x, cz = m_b.u[pi[nearK]].z;
-					if (self) { cx = e.x; cz = e.z; }
-					nt = SkillTargets(m_b, ei, sk, cx, cz, tg, 16);
-				}
-				if (nt <= 0) { tg[0] = pi[nearK]; nt = 1; }
-				int tot = 0;
-				for (int t = 0; t < nt; t++) {
-					int uk = -1;
-					for (int k = 0; k < pn; k++) if (pi[k] == tg[t]) uk = k;
-					if (uk < 0 || tmp[uk]) continue;
-					tmp[uk] = one;
-					tot += one;
-				}
-				if (tot > bestTot) bestTot = tot;
-			}
-			if (bestTot <= 0) continue;
-			nThreat++;
-			roundDmg += bestTot;
-			threatSpd += 10 + UnitStat(e, S_AGI);
-		}
-		long long wipeActs = 9999;
-		int wipeRounds100 = 9999;
-		if (nThreat > 0 && roundDmg > 0 && hp > 0) {
-			wipeRounds100 = (int)((long long)hp * 100 / roundDmg);
-			if (wipeRounds100 > 9999) wipeRounds100 = 9999;
-			long long eAct = (long long)wipeRounds100 * nThreat / 100;
-			if (eAct < 1) eAct = 1;
-			long long pAct = threatSpd > 0 ? eAct * pSpd / threatSpd : eAct;
-			wipeActs = eAct + pAct;
-			if (wipeActs > 9999) wipeActs = 9999;
-		}
-		const int dyingFirst = nThreat > 0 && wipeRounds100 <= 220 && wipeActs + 3 < turns;
-		const int turned = nThreat == 0 || wipeRounds100 >= 450 || turns + 3 < wipeActs;
-		if (fightWon) danger = 0;
-		else if (m_screen == SC_BATTLE && m_phase != PH_OVER && players > 0) {
-			if (dyingFirst) danger = 1;
-			else if (turned) danger = 0;
-		}
+		else if (winNear && bossEnding) {
+			// 瀕死のボスが離れても、雑魚が残っていても、勝利目前を維持する。
+		} else if (mobRallied || mobDrag || bossOnly || bossLeft) winNear = 0;
+		const int lowHp = mx > 0 && (long long)hp * 100 < (long long)mx * 33;
+		const int halfDown = partyN > 0 && deadN * 2 >= partyN;
+		if (fightWon || players <= 0 || m_phase == PH_OVER) danger = 0;
+		else if (m_screen == SC_BATTLE) danger = (lowHp || halfDown) ? 1 : 0;
 		const int fewLeft = winNear != 0;
 		int th = Clampi(m_b.map.theme, 0, TH_COUNT - 1);
 		scene = TAC_BGM_PLAINS + th;
@@ -703,8 +752,7 @@ void Game::RenderFrame()
 	m_skillTip = -1;
 	switch (m_screen) {
 	case SC_LOADING:
-		m_r.HudText(TT(TX_TITLE), m_w * .5f, m_h * .42f, U(40), RGBA8(255, 230, 160), 1, 1);
-		m_r.HudText(TT(TX_MISC_LOADING), m_w * .5f, m_h * .55f, U(20), RGBA8(230, 230, 240), 1, 0);
+		DrawLoadHud();
 		break;
 	case SC_FAIL: {
 		const wchar_t* msg = m_r.Ready() ? TT(TX_MISC_ASSETFAIL) : TT(TX_MISC_DXFAIL);
@@ -1217,9 +1265,12 @@ void Game::NavBack()
 	case SC_BASE:
 		if (m_sortieAsk) m_sortieAsk = 0;
 		else if (m_codex) m_codex = 0;
-		else if (m_shop && (m_shopHold || m_shopFit)) { m_shopHold = 0; m_shopFit = 0; }
+		else if (m_shop && m_shopFit == 13) m_shopFit = 4;
+		else if (m_shop && (m_shopHold || m_shopFit)) { m_shopHold = 0; m_shopFit = 0; m_shopWho = -1; }
+		else if (m_shop && m_shopBand) { m_shopBand = 0; m_shopPage = 0; }
+		else if (m_shop && m_shopTier) { m_shopTier = 0; m_shopPage = 0; }
 		else if (m_shop) {
-			m_shop = 0; m_shopHold = 0; m_shopFit = 0; m_partyBack = 0;
+			m_shop = 0; m_shopHold = 0; m_shopFit = 0; m_shopTier = 0; m_shopBand = 0; m_partyBack = 0; m_shopWho = -1;
 			if (m_shopBack) { m_shopBack = 0; EnterParty(); }
 		} else if (m_baseOpt) m_baseOpt = 0;
 		break;
@@ -1400,9 +1451,12 @@ void Game::DrawSkillTip()
 		wchar_t cp[24];
 		CraftCostText(m_skillTipId - CRAFT_BASE, cp, 24);
 		swprintf_s(extra, L"%s  %s", CraftShapeName(sd.area, sd.shape), cp);
-	} else {
+	} else if (m_skillTip == 2) {
 		wcscpy_s(title, PasName(m_skillTipId));
 		wcscpy_s(body, PasDesc(m_skillTipId));
+	} else {
+		wcscpy_s(title, SummonName(m_skillTipId - SUMMON_BASE + 1));
+		wcscpy_s(body, SummonDesc(m_skillTipId - SUMMON_BASE + 1));
 	}
 	float tw = min(U(460), (float)m_w - U(16));
 	float th = extra[0] ? U(128) : U(108);
@@ -1437,9 +1491,9 @@ float Game::DrawStatLines(const CharData& c, float x, float y, float w, const in
 		}
 		m_r.HudText(TT(StatNameTx(s)), sx, sy + lh * .5f, U(14), hov ? RGBA8(255, 236, 180) : RGBA8(200, 190, 160), 0, 0);
 		wchar_t v[32];
-		if (s == S_HP && hpCur >= 0) swprintf_s(v, L"%d/%d", hpCur, c.stat[s]);
-		else if (s == S_MP && mpCur >= 0) swprintf_s(v, L"%d/%d", mpCur, c.stat[s]);
-		else swprintf_s(v, L"%d", c.stat[s]);
+		if (s == S_HP && hpCur >= 0) swprintf_s(v, L"%s/%s", TacNum(hpCur), TacNum(c.stat[s]));
+		else if (s == S_MP && mpCur >= 0) swprintf_s(v, L"%s/%s", TacNum(mpCur), TacNum(c.stat[s]));
+		else swprintf_s(v, L"%s", TacNum(c.stat[s]));
 		float edge = sx + w / (float)cols - U(4);
 		float numEdge = (gains && gains[s] != 0) ? edge - U(46) : edge;
 		m_r.HudText(v, numEdge, sy + lh * .5f, U(15), RGBA8(250, 250, 250), 2, 1);
@@ -1850,16 +1904,31 @@ void Game::BuildShowcase()
 		m_showStage = st;
 	}
 	m_showN = 0;
+	int want = 0;
 	for (int i = 0; i < MAX_PARTY; i++) {
 		int r = m_save.party[i];
-		if (r < 0 || !m_save.roster[r].used) continue;
+		if (r >= 0 && r < MAX_ROSTER && m_save.roster[r].used) want++;
+	}
+	int got = 0;
+	const int spanA = m_loadA, spanB = m_loadB;
+	const BOOL slicing = m_loadLive && spanB > spanA && want > 0;
+	for (int i = 0; i < MAX_PARTY; i++) {
+		int r = m_save.party[i];
+		if (r < 0 || r >= MAX_ROSTER || !m_save.roster[r].used) continue;
+		if (slicing) {
+			m_loadA = spanA + (spanB - spanA) * got / want;
+			m_loadB = spanA + (spanB - spanA) * (got + 1) / want;
+		}
 		ActorFromChar(m_showAct[m_showN], m_lib, m_r, m_save.roster[r]);
+		if (slicing) NoteLoad(m_loadB);
+		got++;
 		ActorPlay(m_showAct[m_showN], CL_IDLE, 1, 0);
 		m_showAct[m_showN].t = m_rng.F(0, 2);
 		int px = m_showMap.pStartX[i], pz = m_showMap.pStartZ[i];
 		m_showPos[m_showN] = v3(px + .5f, m_showMap.StandY(px, pz) + m_showAct[m_showN].hover, pz + .5f);
 		m_showN++;
 	}
+	if (slicing) { m_loadA = spanA; m_loadB = spanB; }
 }
 
 void Game::EnterBase()
@@ -2590,7 +2659,7 @@ void Game::DrawShopAsk()
 	if (m_shopFit == 6) {
 		const GoodDef* gd = GoodAt(m_shopFitId);
 		if (gd) {
-			swprintf_s(line, L"%s  %dG", TT(gd->nameTx), gd->price);
+			swprintf_s(line, L"%s  %sG", TT(gd->nameTx), TacNum(gd->price));
 			ok = m_save.gold >= gd->price && GoodHave(m_save, m_shopFitId) < 99;
 		}
 	} else if (m_shopFit == 7 || m_shopFit == 8) {
@@ -2599,7 +2668,7 @@ void Game::DrawShopAsk()
 		int maxCap = partyT ? MAX_PARTY : MAX_ROSTER;
 		int price = 0;
 		if (cap < maxCap) price = partyT ? 800 + (cap - 5) * 350 : 1600 + ((cap - 20) / 20) * 600;
-		swprintf_s(line, L"%s  %dG", TT(partyT ? TX_TICKET_PT : TX_TICKET_RS), price);
+		swprintf_s(line, L"%s  %sG", TT(partyT ? TX_TICKET_PT : TX_TICKET_RS), TacNum(price));
 		ok = cap < maxCap && m_save.gold >= price;
 	} else if (m_shopFit == 9) {
 		swprintf_s(line, L"%s  250G", TT(TX_STONE));
@@ -2643,8 +2712,43 @@ void Game::DrawShopAsk()
 
 void Game::DrawShopFit()
 {
+	if (m_shopFit == 13) {
+		if (m_shopWho < 0 || m_shopWho >= MAX_ROSTER || !m_save.roster[m_shopWho].used) { m_shopFit = 4; return; }
+		CharData& c = m_save.roster[m_shopWho];
+		m_r.HudRect(0, 0, (float)m_w, (float)m_h, RGBA8(0, 0, 0, 150));
+		float pw = min(U(520.f), (float)m_w - U(40));
+		float ph = U(280);
+		float px = ((float)m_w - pw) * .5f, py = ((float)m_h - ph) * .5f;
+		if (m_click && !Hit(px, py, pw, ph)) { m_shopFit = 4; m_click = FALSE; return; }
+		Panel(px, py, pw, ph);
+		m_r.HudText(CraftName(m_shopFitId), px + pw * .5f, py + U(28), U(18), RGBA8(255, 226, 150), 1, 1);
+		m_r.HudText(c.name, px + pw * .5f, py + U(52), U(14), RGBA8(230, 230, 240), 1, 0);
+		float bw = pw - U(32);
+		float yy = py + U(72);
+		for (int slot = 0; slot < 3; slot++) {
+			wchar_t row[160];
+			swprintf_s(row, L"%s%d: %s", TT(TX_CRAFT), slot + 1, EquippedBeadName(c, slot));
+			if (Btn(ID_SHOP_SLOT0 + slot, px + U(16), yy, bw, U(36), row, TRUE, FALSE, U(14))) {
+				int bead = m_shopFitId + 1;
+				if (m_shopHold) {
+					if (!BeadBuy(m_save, m_shopFitId)) { TacSfx(TS_ERROR); return; }
+					m_shopHold = 0;
+				}
+				if (!EquipBeadId(c, slot, bead)) { TacSfx(TS_ERROR); return; }
+				TacSfx(TS_OK_EQUIP);
+				Persist();
+				InvalidatePortraits();
+				m_shopFit = 0;
+				m_shopWho = -1;
+				return;
+			}
+			yy += U(42);
+		}
+		if (Btn(ID_SHOP_SLOT_NO, px + U(16), py + ph - U(48), bw, U(32), LangPick14(L"買わない", L"Don't buy", L"Ne pas acheter", L"Non comprare", L"No comprar", L"사지 않기", L"不买", L"عدم الشراء", L"Не покупать", L"Nicht kaufen", L"Não comprar", L"Niet kopen", L"Nie kupuj", L"Alma"))) { m_shopFit = 4; }
+		return;
+	}
 	if (m_shopFit == 5) { DrawShopArm(); return; }
-	if (!((m_shopFit >= 1 && m_shopFit <= 4) || m_shopFit == 11)) return;
+	if (!((m_shopFit >= 1 && m_shopFit <= 4) || m_shopFit == 11 || m_shopFit == 12)) return;
 	m_r.HudRect(0, 0, (float)m_w, (float)m_h, RGBA8(0, 0, 0, 150));
 	float pw = min(U(860.f), (float)m_w - U(40));
 	float ph = (float)m_h - U(32);
@@ -2665,6 +2769,7 @@ void Game::DrawShopFit()
 		}
 	} else if (m_shopFit == 3) wcscpy_s(item, AccName(m_shopFitId));
 	else if (m_shopFit == 11) wcscpy_s(item, PasName(m_shopFitId + 1));
+	else if (m_shopFit == 12) wcscpy_s(item, SummonName(m_shopFitId + 1));
 	else wcscpy_s(item, CraftName(m_shopFitId));
 	m_r.HudText(item, px + pw * .5f, py + U(46), U(14), RGBA8(230, 230, 240), 1, 0);
 	int who[MAX_ROSTER], n = 0;
@@ -2699,10 +2804,23 @@ void Game::DrawShopFit()
 			int pid = m_shopFitId + 1;
 			if (EquippedPasId(c, 0) == pid || EquippedPasId(c, 1) == pid) ok = FALSE;
 			swprintf_s(row, L"%s  %s  %s / %s", c.name, ClassName(c.cls), EquippedPasName(c, 0), EquippedPasName(c, 1));
+		} else if (m_shopFit == 12) {
+			int sid = m_shopFitId + 1;
+			int slot = EquippedSummonId(c, 0) > 0 && EquippedSummonId(c, 1) <= 0 ? 1 : 0;
+			BOOL owned = EquippedSummonId(c, 0) == sid || EquippedSummonId(c, 1) == sid;
+			if (owned && EquippedSummonId(c, 0) == sid && EquippedSummonId(c, 1) == sid) ok = FALSE;
+			else if (!m_shopHold && !owned && SummonSpare(c, slot, m_shopFitId) < 1) ok = FALSE;
+			else if (m_shopHold && m_save.gold < SummonPrice(m_shopFitId) && SummonSpare(c, slot, m_shopFitId) < 1) ok = FALSE;
+			swprintf_s(row, L"%s  %s  %s / %s", c.name, ClassName(c.cls), EquippedSummonName(c, 0), EquippedSummonName(c, 1));
 		} else {
 			int bead = m_shopFitId + 1;
-			if (EquippedBeadId(c, 0) == bead || EquippedBeadId(c, 1) == bead) ok = FALSE;
-			swprintf_s(row, L"%s  %s  %s / %s", c.name, ClassName(c.cls), EquippedBeadName(c, 0), EquippedBeadName(c, 1));
+			BOOL super = IsCraftSuper(CRAFT_BASE + m_shopFitId);
+			if (super) {
+				if (EquippedBeadId(c, 3) == bead) ok = FALSE;
+				swprintf_s(row, L"%s  %s  %s", c.name, ClassName(c.cls), EquippedBeadName(c, 3));
+			} else {
+				swprintf_s(row, L"%s  %s  %s / %s / %s", c.name, ClassName(c.cls), EquippedBeadName(c, 0), EquippedBeadName(c, 1), EquippedBeadName(c, 2));
+			}
 		}
 		float nameW = pw - U(118);
 		m_btnSfx = -2;
@@ -2733,15 +2851,25 @@ void Game::DrawShopFit()
 				}
 				int slot = EquippedPasId(c, 0) > 0 && EquippedPasId(c, 1) <= 0 ? 1 : 0;
 				done = EquipPasId(c, slot, m_shopFitId + 1);
-			} else {
+			} else if (m_shopFit == 12) {
+				if (m_shopHold) {
+					if (SummonSpare(c, 0, m_shopFitId) < 1 && SummonSpare(c, 1, m_shopFitId) < 1) {
+						if (!SummonBuy(m_save, m_shopFitId)) { TacSfx(TS_ERROR); return; }
+					}
+					m_shopHold = 0;
+				}
+				int slot = EquippedSummonId(c, 0) > 0 && EquippedSummonId(c, 1) <= 0 ? 1 : 0;
+				done = EquipSummonId(c, slot, m_shopFitId + 1);
+			} else if (IsCraftSuper(CRAFT_BASE + m_shopFitId)) {
 				if (m_shopHold) {
 					if (!BeadBuy(m_save, m_shopFitId)) { TacSfx(TS_ERROR); return; }
 					m_shopHold = 0;
 				}
-				int bead = m_shopFitId + 1;
-				int slot = IsCraftSuper(CRAFT_BASE + m_shopFitId) ? 3 : 0;
-				if (slot != 3) for (int k = 0; k < 3; k++) if (EquippedBeadId(c, k) <= 0) { slot = k; break; }
-				done = EquipBeadId(c, slot, bead);
+				done = EquipBeadId(c, 3, m_shopFitId + 1);
+			} else {
+				m_shopWho = who[a + s];
+				m_shopFit = 13;
+				return;
 			}
 			if (!done) { TacSfx(TS_ERROR); return; }
 			TacSfx(TS_OK_EQUIP);
@@ -2760,10 +2888,10 @@ void Game::DrawShopFit()
 		yy += U(40);
 	}
 	if (n < 1) m_r.HudText(TT(TX_SHOP_NOWEAR), px + pw * .5f, py + U(120), U(16), RGBA8(255, 180, 160), 1, 1);
-	BOOL keep = m_shopHold && ((m_shopFit <= 2 && n > 0) || m_shopFit == 11);
+	BOOL keep = m_shopHold && ((m_shopFit <= 2 && n > 0) || m_shopFit == 11 || m_shopFit == 12);
 	if (keep) m_btnSfx = -2;
 	if (keep && Btn(ID_SHOP_FIT_KEEP, px + U(16), py + ph - U(86), pw - U(200), U(32), TT(TX_SHOP_KEEP))) {
-		BOOL bought = m_shopFit == 11 ? PasBuy(m_save, m_shopFitId) : GearBuy(m_save, m_shopFitId);
+		BOOL bought = m_shopFit == 12 ? SummonBuy(m_save, m_shopFitId) : (m_shopFit == 11 ? PasBuy(m_save, m_shopFitId) : GearBuy(m_save, m_shopFitId));
 		if (!bought) { TacSfx(TS_ERROR); return; }
 		TacSfx(TS_OK_SHOP);
 		Persist();
@@ -2804,7 +2932,7 @@ void Game::DrawShop()
 	float x = ((float)m_w - w) * .5f, y = U(16);
 	Panel(x, y, w, h);
 	wchar_t title[96];
-	swprintf_s(title, L"%s    %s %d", TT(TX_SHOP), TT(TX_GOLD), m_save.gold);
+	swprintf_s(title, L"%s    %s %s", TT(TX_SHOP), TT(TX_GOLD), TacNum(m_save.gold));
 	m_r.HudText(title, x + w * .5f, y + U(22), U(20), RGBA8(255, 226, 150), 1, 1);
 	static const int lineCls[6] = { C_SOLDIER, C_FIGHTER, C_ARCHER, C_THIEF, C_MAGE, C_CLERIC };
 	float tx = x + U(12);
@@ -2813,8 +2941,8 @@ void Game::DrawShop()
 		const wchar_t* lab = i < 6 ? ClassName(lineCls[i]) : TT(TX_SHOP_FREE);
 		int id = i < 6 ? ID_SHOP_LINE0 + i : ID_SHOP_FREE;
 		if (Btn(id, tx, y + U(40), step - U(4), U(28), lab, TRUE, m_shopLine == i, U(12))) {
-			m_shopLine = i; m_shopPage = 0; m_shopSellPage = 0;
-			if (i == 6) { if (m_shopKind != 4 && m_shopKind != 6) m_shopKind = 5; }
+			m_shopLine = i; m_shopTier = 0; m_shopPage = 0; m_shopSellPage = 0;
+			if (i == 6) { if (m_shopKind != 4 && m_shopKind != 6 && m_shopKind != 7) m_shopKind = 5; }
 			else if (m_shopKind == 2) m_shopKind = 0;
 		}
 		tx += step;
@@ -2825,11 +2953,13 @@ void Game::DrawShop()
 	float gap = U(6);
 	float avail = sellX - tab0 - U(12);
 	static const int kindTx[7] = { TX_SHOP_WPN, TX_SHOP_ARM, TX_SHOP_GOODS, TX_SHOP_PART, TX_SHOP_ACC, TX_SHOP_BEAD, TX_SHOP_PAS };
-	float bw = (avail - gap * 6.f) / 7.f;
+	float bw = (avail - gap * 7.f) / 8.f;
 	if (bw < U(8)) bw = U(8);
-	float kfs = bw < U(72) ? U(10) : U(12);
-	for (int i = 0; i < 7; i++) {
-		if (Btn(ID_SHOP_KIND0 + i, tab0 + (bw + gap) * i, ky, bw, U(28), TT(kindTx[i]), TRUE, m_shopKind == i, kfs)) {
+	float kfs = U(12);
+	if (bw < kfs * 4.6f) kfs = max(U(8.f), bw / 4.6f);
+	for (int i = 0; i < 8; i++) {
+		const wchar_t* klab = i < 7 ? TT(kindTx[i]) : SummonWord();
+		if (Btn(ID_SHOP_KIND0 + i, tab0 + (bw + gap) * i, ky, bw, U(28), klab, TRUE, m_shopKind == i, kfs)) {
 			m_shopKind = i; m_shopPage = 0; m_shopSellPage = 0;
 		}
 	}
@@ -2843,11 +2973,53 @@ void Game::DrawShop()
 		if (Btn(ID_SHOP_OUGI, x + U(24) + fw, listTop, fw, U(28), TT(TX_OUGI), TRUE, m_shopSuper != 0, U(13))) { m_shopSuper = 1; m_shopPage = 0; }
 		listTop += U(34);
 	}
+	if (gearTab && m_shopLine >= 0 && m_shopLine < 6) {
+		static const int tierCls[6][3] = {
+			{ C_SOLDIER, C_PALADIN, C_HERO },
+			{ C_FIGHTER, C_BERSERKER, C_GLADIATOR },
+			{ C_ARCHER, C_SNIPER, C_PHANTOM },
+			{ C_THIEF, C_ASSASSIN, C_SHADOW },
+			{ C_MAGE, C_WIZARD, C_ARCHMAGE },
+			{ C_CLERIC, C_BISHOP, C_SAINT }
+		};
+		static const int rankLine[6] = { 0, 6, 3, 7, 1, 2 };
+		float leftSpan = sellX - (x + U(16)) - U(8);
+		float twb = (leftSpan - gap * 9.f) / 10.f;
+		if (twb < U(8)) twb = U(8);
+		float tfs = U(10);
+		if (twb < tfs * 5.2f) tfs = max(U(8.f), twb / 5.4f);
+		for (int t = 0; t < 10; t++) {
+			int cls = t < 3 ? tierCls[m_shopLine][t] : C_PLAYER_COUNT + rankLine[m_shopLine] * TAC_RANK_N + (t - 3);
+			int on = m_shopTier == t + 1;
+			if (Btn(ID_SHOP_TIER0 + t, x + U(16) + (twb + gap) * t, listTop, twb, U(24), ClassName(cls), TRUE, on, tfs)) {
+				m_shopTier = on ? 0 : t + 1;
+				m_shopPage = 0;
+			}
+		}
+		listTop += U(28);
+	}
+	if (m_shopKind == 4) {
+		const wchar_t* bandL[4] = {
+			LangPick14(L"全", L"All", L"Tous", L"Tutti", L"Todo", L"전체", L"全部", L"الكل", L"Все", L"Alle", L"Tudo", L"Alles", L"Wszystko", L"Tümü"),
+			LangPick14(L"千未満", L"Under 1,000", L"Moins de 1 000", L"Sotto 1.000", L"Menos de 1.000", L"1천 미만", L"千以下", L"أقل من 1000", L"До 1 000", L"Unter 1.000", L"Abaixo de 1.000", L"Onder 1.000", L"Poniżej 1 000", L"1.000 altı"),
+			LangPick14(L"千〜十万", L"1,000–100,000", L"1 000–100 000", L"1.000–100.000", L"1.000–100.000", L"1천–10만", L"千到十万", L"1000–100000", L"1 000–100 000", L"1.000–100.000", L"1.000–100.000", L"1.000–100.000", L"1 000–100 000", L"1.000–100.000"),
+			LangPick14(L"十万以上", L"100,000+", L"100 000+", L"100.000+", L"100.000+", L"10만 이상", L"十万以上", L"100000+", L"100 000+", L"100.000+", L"100.000+", L"100.000+", L"100 000+", L"100.000+")
+		};
+		float bw4 = (sellX - (x + U(16)) - U(8) - gap * 3.f) / 4.f;
+		if (bw4 < U(8)) bw4 = U(8);
+		for (int t = 0; t < 4; t++) {
+			if (Btn(ID_SHOP_BAND0 + t, x + U(16) + (bw4 + gap) * t, listTop, bw4, U(24), bandL[t], TRUE, m_shopBand == t, U(11))) {
+				m_shopBand = t;
+				m_shopPage = 0;
+			}
+		}
+		listTop += U(28);
+	}
 	float listBot = y + h - U(56);
 	int per = (int)((listBot - listTop) / rowStep);
 	if (per > 30) per = 30;
 	if (per < 3) per = 3;
-	int ids[512], n = 0;
+	int ids[1024], n = 0;
 	if (m_shopKind == 3) {
 		n = TrophyList(ids, 512);
 	} else if (m_shopKind == 2) {
@@ -2856,20 +3028,30 @@ void Game::DrawShop()
 		ids[n++] = -3;
 		for (int i = 0; i < GoodCount() && n < 512; i++) ids[n++] = i;
 	} else if (m_shopKind == 4) {
-		for (int i = 0; i < AccCount() && n < 512; i++) ids[n++] = i;
+		for (int i = 0; i < AccCount() && n < 1024; i++) {
+			int price = AccPrice(i);
+			if (m_shopBand == 1 && price >= 1000) continue;
+			if (m_shopBand == 2 && (price < 1000 || price >= 100000)) continue;
+			if (m_shopBand == 3 && price < 100000) continue;
+			ids[n++] = i;
+		}
 	} else if (m_shopKind == 5) {
 		for (int i = 0; i < CRAFT_N && n < 512; i++) {
 			if (CraftLineOf(CRAFT_BASE + i) != m_shopLine) continue;
-			BOOL sup = (i % CRAFT_PER_LINE) >= CRAFT_NORM;
+			BOOL sup = IsCraftSuper(CRAFT_BASE + i);
 			if (sup != (m_shopSuper != 0)) continue;
 			ids[n++] = i;
 		}
 	} else if (m_shopKind == 6) {
 		for (int i = 0; i < PasCount() && n < 512; i++) ids[n++] = i;
+	} else if (m_shopKind == 7) {
+		for (int i = 0; i < SummonCount() && n < 512; i++) ids[n++] = i;
 	} else {
 		for (int i = 0; i < GearCount() && n < 512; i++) {
 			const GearDef* g = GearOf(i + 1);
 			if (!g || g->line != m_shopLine || g->kind != m_shopKind) continue;
+			int need = g->req > 0 ? g->req : 1;
+			if (m_shopTier > 0 && need != m_shopTier) continue;
 			ids[n++] = i;
 		}
 		for (int i = 1; i < n; i++) {
@@ -2884,7 +3066,7 @@ void Game::DrawShop()
 	if (m_shopPage < 0) m_shopPage = 0;
 	float yy = listTop;
 	int a = m_shopPage * per, b = min(n, a + per);
-	wchar_t hovHold[240], hovBuf[240];
+	wchar_t hovHold[360], hovBuf[360];
 	hovHold[0] = 0;
 	hovBuf[0] = 0;
 	const wchar_t* hov = NULL;
@@ -2905,7 +3087,7 @@ void Game::DrawShop()
 			wchar_t nm[80];
 			int ct = 0, price = 0;
 			TrophyNameOf(ids[ix], nm, 80, &ct, &price);
-			swprintf_s(row, L"%s  x%d  %dG", nm, ct, price);
+			swprintf_s(row, L"%s  x%d  %sG", nm, ct, TacNum(price));
 			m_btnSfx = -2;
 			if (Btn(ID_SHOP_BUY0 + s, x + U(16), yy, w * .62f, rowH, row, TRUE, FALSE, U(13))) {
 				if (TrophySell(m_save, ids[ix])) { TacSfx(TS_OK_SELL); Persist(); return; }
@@ -2917,8 +3099,8 @@ void Game::DrawShop()
 			int price = 0;
 			if (cap < maxCap) price = partyT ? 800 + (cap - 5) * 350 : 1600 + ((cap - 20) / 20) * 600;
 			if (cap >= maxCap) swprintf_s(row, L"%s  MAX", TT(partyT ? TX_TICKET_PT : TX_TICKET_RS));
-			else if (partyT) swprintf_s(row, L"%s  %dG  (%d→%d)", TT(TX_TICKET_PT), price, cap, cap + 1);
-			else swprintf_s(row, L"%s  %dG  (%d→%d)", TT(TX_TICKET_RS), price, cap, cap + 20);
+			else if (partyT) swprintf_s(row, L"%s  %sG  (%d→%d)", TT(TX_TICKET_PT), TacNum(price), cap, cap + 1);
+			else swprintf_s(row, L"%s  %sG  (%d→%d)", TT(TX_TICKET_RS), TacNum(price), cap, cap + 20);
 			ok = cap < maxCap && m_save.gold >= price;
 			takeHover(ID_SHOP_BUY0 + s, yy, TT(partyT ? TX_ITD_PT : TX_ITD_RS));
 			if (Btn(ID_SHOP_BUY0 + s, x + U(16), yy, w * .62f, rowH, row, ok, FALSE, U(13))) {
@@ -2927,7 +3109,7 @@ void Game::DrawShop()
 			}
 		} else if (m_shopKind == 2 && ids[ix] == -3) {
 			int price = 250;
-			swprintf_s(row, L"%s  %dG  x%d", TT(TX_STONE), price, StoneCount());
+			swprintf_s(row, L"%s  %sG  x%d", TT(TX_STONE), TacNum(price), StoneCount());
 			ok = m_save.gold >= price && StoneCount() < 999;
 			takeHover(ID_SHOP_BUY0 + s, yy, TT(TX_ITD_STONE));
 			if (Btn(ID_SHOP_BUY0 + s, x + U(16), yy, w * .62f, rowH, row, ok, FALSE, U(13))) {
@@ -2935,7 +3117,7 @@ void Game::DrawShop()
 				TacSfx(TS_OPEN); return;
 			}
 		} else if (m_shopKind == 4) {
-			swprintf_s(row, L"%s  %dG", AccName(ids[ix] + 1), AccPrice(ids[ix]));
+			swprintf_s(row, L"%s  %sG", AccName(ids[ix] + 1), TacNum(AccPrice(ids[ix])));
 			ok = m_save.gold >= AccPrice(ids[ix]);
 			{
 				wchar_t bits[160] = L"";
@@ -2971,16 +3153,24 @@ void Game::DrawShop()
 				TacSfx(TS_OPEN); return;
 			}
 		} else if (m_shopKind == 6) {
-			swprintf_s(row, L"%s  %dG  x%d", PasName(ids[ix] + 1), PasPrice(ids[ix]), PasHave(ids[ix]));
+			swprintf_s(row, L"%s  %sG  x%d", PasName(ids[ix] + 1), TacNum(PasPrice(ids[ix])), PasHave(ids[ix]));
 			ok = m_save.gold >= PasPrice(ids[ix]) && PasHave(ids[ix]) < 99;
 			takeHover(ID_SHOP_BUY0 + s, yy, PasDesc(ids[ix] + 1));
 			if (Btn(ID_SHOP_BUY0 + s, x + U(16), yy, w * .62f, rowH, row, ok, FALSE, U(13))) {
 				m_shopHold = 1; m_shopFit = 11; m_shopFitId = ids[ix]; m_shopFitPage = 0;
 				TacSfx(TS_OPEN); return;
 			}
+		} else if (m_shopKind == 7) {
+			swprintf_s(row, L"%s  %sG  x%d", SummonName(ids[ix] + 1), TacNum(SummonPrice(ids[ix])), SummonHave(ids[ix]));
+			ok = m_save.gold >= SummonPrice(ids[ix]) && SummonHave(ids[ix]) < 99;
+			takeHover(ID_SHOP_BUY0 + s, yy, SummonDesc(ids[ix] + 1));
+			if (Btn(ID_SHOP_BUY0 + s, x + U(16), yy, w * .62f, rowH, row, ok, FALSE, U(13))) {
+				m_shopHold = 1; m_shopFit = 12; m_shopFitId = ids[ix]; m_shopFitPage = 0;
+				TacSfx(TS_OPEN); return;
+			}
 		} else if (m_shopKind == 2) {
 			const GoodDef* gd = GoodAt(ids[ix]);
-			swprintf_s(row, L"%s  %dG  x%d", TT(gd->nameTx), gd->price, GoodHave(m_save, ids[ix]));
+			swprintf_s(row, L"%s  %sG  x%d", TT(gd->nameTx), TacNum(gd->price), GoodHave(m_save, ids[ix]));
 			ok = m_save.gold >= gd->price && GoodHave(m_save, ids[ix]) < 99;
 			takeHover(ID_SHOP_BUY0 + s, yy, GoodDesc(ids[ix]));
 			if (Btn(ID_SHOP_BUY0 + s, x + U(16), yy, w * .62f, rowH, row, ok, FALSE, U(13))) {
@@ -2989,8 +3179,8 @@ void Game::DrawShop()
 			}
 		} else {
 			const GearDef* g = GearOf(ids[ix] + 1);
-			swprintf_s(row, L"%s  %dG  %s+%d %s+%d %s+%d %s+%d", GearName(ids[ix] + 1), g->price,
-				TT(TX_ST_STR), g->str, TT(TX_ST_MAG), g->mag, TT(TX_ST_DEF), g->def, TT(TX_ST_RES), g->res);
+			swprintf_s(row, L"%s  %sG  %s+%s %s+%s %s+%s %s+%s", GearName(ids[ix] + 1), TacNum(g->price),
+				TT(TX_ST_STR), TacNum(g->str), TT(TX_ST_MAG), TacNum(g->mag), TT(TX_ST_DEF), TacNum(g->def), TT(TX_ST_RES), TacNum(g->res));
 			ok = m_save.gold >= g->price && m_save.gearN < GEAR_STASH;
 			takeHover(ID_SHOP_BUY0 + s, yy, GearRole(g));
 			if (Btn(ID_SHOP_BUY0 + s, x + U(16), yy, w * .62f, rowH, L"", ok, FALSE, U(13))) {
@@ -3043,13 +3233,17 @@ void Game::DrawShop()
 	if (pages > 1 && Btn(ID_SHOP_PREV, x + U(16), y + h - U(48), U(64), U(32), L"◀")) m_shopPage = (m_shopPage + pages - 1) % pages;
 	m_r.HudText(pg, x + U(150), y + h - U(32), U(14), RGBA8(220, 220, 230), 0, 1);
 	if (pages > 1 && Btn(ID_SHOP_NEXT, x + U(200), y + h - U(48), U(64), U(32), L"▶")) m_shopPage = (m_shopPage + 1) % pages;
-	float sy = ky + U(36);
-	m_r.HudText(TT(TX_SHOP_SELL), x + w * .66f, ky + U(8), U(15), RGBA8(255, 220, 170), 0, 1);
-	{
-		wchar_t cap[40];
-		swprintf_s(cap, TT(TX_SHOP_CAP), m_save.gearN, GEAR_STASH);
-		m_r.HudText(cap, x + w - U(16), ky + U(8), U(13), RGBA8(255, 214, 150), 2, 0);
-	}
+	float colX = x + w * .66f;
+	float colR = x + w - U(16);
+	float headY = ky + U(42);
+	wchar_t cap[40];
+	swprintf_s(cap, TT(TX_SHOP_CAP), m_save.gearN, GEAR_STASH);
+	float sellW = m_r.TextWidth(TT(TX_SHOP_SELL), U(14), 1);
+	float capW = m_r.TextWidth(cap, U(12), 0);
+	BOOL stackCap = colX + sellW + U(10) > colR - capW;
+	m_r.HudText(TT(TX_SHOP_SELL), colX, headY, U(14), RGBA8(255, 220, 170), 0, 1);
+	m_r.HudText(cap, colR, stackCap ? headY + U(16) : headY, U(12), RGBA8(255, 214, 150), 2, 0);
+	float sy = headY + (stackCap ? U(36) : U(22));
 	if (gearTab) {
 		BOOL need = FALSE;
 		for (int i = 0; i < MAX_ROSTER && !need; i++) if (m_save.roster[i].used) {
@@ -3076,6 +3270,8 @@ void Game::DrawShop()
 		for (int i = 0; i < CRAFT_N && on < CRAFT_N; i++) if (BeadCount(i) > 0) sellIds[on++] = i;
 	} else if (m_shopKind == 6) {
 		for (int i = 0; i < PasCount() && on < CRAFT_N; i++) if (PasHave(i) > 0) sellIds[on++] = i;
+	} else if (m_shopKind == 7) {
+		for (int i = 0; i < SummonCount() && on < CRAFT_N; i++) if (SummonHave(i) > 0) sellIds[on++] = i;
 	} else if (m_shopKind == 2) {
 		for (int i = 0; i < GoodCount() && on < CRAFT_N; i++) if (GoodHave(m_save, i) > 0) sellIds[on++] = i;
 	} else if (m_shopKind == 0 || m_shopKind == 1) {
@@ -3092,22 +3288,28 @@ void Game::DrawShop()
 			int back = max(1, CraftStoneCost(id) / 2);
 			swprintf_s(row, L"%s x%d  %s%d", CraftName(id), BeadCount(id), TT(TX_STONE), back);
 		} else if (m_shopKind == 6) {
-			swprintf_s(row, L"%s x%d  %dG", PasName(id + 1), PasHave(id), max(1, PasPrice(id) / 2));
+			swprintf_s(row, L"%s x%d  %sG", PasName(id + 1), PasHave(id), TacNum(max(1, PasPrice(id) / 2)));
 			if (Hit(x + w * .66f, sy, w * .32f, U(30)) || (m_navMode && m_focusId == ID_SHOP_SELL0 + (s - sa))) {
 				wcscpy_s(hovHold, PasDesc(id + 1));
+				hov = hovHold;
+			}
+		} else if (m_shopKind == 7) {
+			swprintf_s(row, L"%s x%d  %sG", SummonName(id + 1), SummonHave(id), TacNum(max(1, SummonPrice(id) / 2)));
+			if (Hit(x + w * .66f, sy, w * .32f, U(30)) || (m_navMode && m_focusId == ID_SHOP_SELL0 + (s - sa))) {
+				wcscpy_s(hovHold, SummonDesc(id + 1));
 				hov = hovHold;
 			}
 		} else if (m_shopKind == 2) {
 			const GoodDef* gd = GoodAt(id);
 			if (!gd) { sy += U(34); continue; }
-			swprintf_s(row, L"%s x%d  %dG", TT(gd->nameTx), GoodHave(m_save, id), max(1, gd->price / 2));
+			swprintf_s(row, L"%s x%d  %sG", TT(gd->nameTx), GoodHave(m_save, id), TacNum(max(1, gd->price / 2)));
 			if (Hit(x + w * .66f, sy, w * .32f, U(30)) || (m_navMode && m_focusId == ID_SHOP_SELL0 + (s - sa))) {
 				wcscpy_s(hovHold, GoodDesc(id));
 				hov = hovHold;
 			}
 		} else {
 			const GearDef* g = GearOf(m_save.gearId[id]);
-			swprintf_s(row, L"%s  %dG", GearName(m_save.gearId[id]), g ? max(1, g->price / 2) : 1);
+			swprintf_s(row, L"%s  %sG", GearName(m_save.gearId[id]), TacNum(g ? max(1, g->price / 2) : 1));
 			if (g && (Hit(x + w * .66f, sy, w * .32f, U(30)) || (m_navMode && m_focusId == ID_SHOP_SELL0 + (s - sa)))) {
 				const wchar_t* role = GearRole(g);
 				if (role && role[0]) { wcscpy_s(hovHold, role); hov = hovHold; }
@@ -3120,6 +3322,9 @@ void Game::DrawShop()
 			else if (m_shopKind == 6) {
 				int back = max(1, PasPrice(id) / 2);
 				if (PasSell(id)) { m_save.gold += back; sold = TRUE; }
+			} else if (m_shopKind == 7) {
+				int back = max(1, SummonPrice(id) / 2);
+				if (SummonSell(id)) { m_save.gold += back; sold = TRUE; }
 			} else if (m_shopKind == 2) {
 				const GoodDef* gd = GoodAt(id);
 				if (gd && GoodTake(m_save, id)) { m_save.gold += max(1, gd->price / 2); sold = TRUE; }
@@ -3153,11 +3358,18 @@ void Game::DrawShop()
 		return;
 	}
 	if (Btn(ID_SHOP_CLOSE, x + w - U(170), y + h - U(48), U(150), U(32), TT(TX_CR_BACK))) {
+		if (m_shopFit == 13) { m_shopFit = 4; return; }
+		if (m_shopHold || m_shopFit) { m_shopHold = 0; m_shopFit = 0; m_shopWho = -1; return; }
+		if (m_shopBand) { m_shopBand = 0; m_shopPage = 0; return; }
+		if (m_shopTier) { m_shopTier = 0; m_shopPage = 0; return; }
 		Persist();
 		m_shop = 0;
 		m_shopFit = 0;
 		m_shopHold = 0;
+		m_shopTier = 0;
+		m_shopBand = 0;
 		m_partyBack = 0;
+		m_shopWho = -1;
 		if (m_shopBack) { m_shopBack = 0; EnterParty(); }
 	}
 	if (fit) {
@@ -3457,7 +3669,7 @@ void Game::DrawBaseUi()
 	}
 	by += Ku(46);
 	wchar_t cl[64];
-	swprintf_s(cl, L"%s: %d    %s %d", TT(TX_BASE_CLEARED), m_save.stageCleared, TT(TX_GOLD), m_save.gold);
+	swprintf_s(cl, L"%s: %s    %s %s", TT(TX_BASE_CLEARED), TacNum(m_save.stageCleared), TT(TX_GOLD), TacNum(m_save.gold));
 	m_r.HudText(cl, bx + U(4), by + Ku(8), min(U(14), Ku(16)), RGBA8(200, 200, 210), 0, 0);
 	by += Ku(28);
 	int np = PartyCount();
@@ -4057,6 +4269,8 @@ void Game::DrawEquipLayer()
 	BOOL gear = kind <= 2;
 	int beadSlot = kind == 5 ? 0 : kind == 6 ? 1 : kind == 9 ? 2 : kind == 10 ? 3 : -1;
 	BOOL pasPick = kind == 7 || kind == 8;
+	BOOL sumPick = kind == 11 || kind == 12;
+	int sumSlot = kind == 12 ? 1 : 0;
 	if (kind <= 2) {
 		int gk = kind == 1 ? 0 : 1;
 		title = TT(gk ? TX_GEAR_ARM : TX_GEAR_WPN);
@@ -4081,6 +4295,12 @@ void Game::DrawEquipLayer()
 		if (curId > 0) wcscpy_s(cur, PasName(curId));
 		for (int i = 0; i < PasCount() && n < 96; i++)
 			if (PasSpare(c, slot, i) > 0 || i + 1 == curId) ids[n++] = i + 1;
+	} else if (sumPick) {
+		title = SummonWord();
+		curId = EquippedSummonId(c, sumSlot);
+		if (curId > 0) wcscpy_s(cur, SummonName(curId));
+		for (int i = 0; i < SummonCount() && n < 96; i++)
+			if (SummonSpare(c, sumSlot, i) > 0 || i + 1 == curId) ids[n++] = i + 1;
 	} else if (beadSlot >= 0) {
 		title = beadSlot == 3 ? TT(TX_OUGI) : TT(TX_BEAD);
 		curId = EquippedBeadId(c, beadSlot);
@@ -4092,7 +4312,7 @@ void Game::DrawEquipLayer()
 	m_r.HudText(cur, px + pw * .5f, py + U(46), U(14), RGBA8(220, 220, 230), 1, 0);
 
 	BOOL beadPick = beadSlot >= 0;
-	float listTop = py + U(62), listBot = py + ph - U(58) - ((beadPick || pasPick) ? U(48) : 0);
+	float listTop = py + U(62), listBot = py + ph - U(58) - ((beadPick || pasPick || sumPick) ? U(48) : 0);
 	int per = (int)((listBot - listTop) / U(36)) - 1;
 	if (per < 3) per = 3;
 	if (per > 18) per = 18;
@@ -4115,6 +4335,9 @@ void Game::DrawEquipLayer()
 			if (ok) Persist();
 		} else if (pasPick) {
 			ok = EquipPasId(c, kind - 7, 0);
+			if (ok) Persist();
+		} else if (sumPick) {
+			ok = EquipSummonId(c, sumSlot, 0);
 			if (ok) Persist();
 		} else if (beadSlot >= 0) {
 			ok = EquipBeadId(c, beadSlot, 0);
@@ -4155,6 +4378,11 @@ void Game::DrawEquipLayer()
 			sel = id == curId;
 			swprintf_s(row, L"%s  x%d", PasName(id), max(1, PasSpare(c, kind - 7, id - 1)));
 			if (Hit(px + U(16), yy, pw - U(32), U(32)) || (m_navMode && m_focusId == ID_EQ_ROW0 + s)) hovBead = id;
+		} else if (sumPick) {
+			int id = ids[ix];
+			sel = id == curId;
+			swprintf_s(row, L"%s  x%d  %sG", SummonName(id), max(1, SummonSpare(c, sumSlot, id - 1) + (id == curId ? 1 : 0)), TacNum(SummonPrice(id - 1)));
+			if (Hit(px + U(16), yy, pw - U(32), U(32)) || (m_navMode && m_focusId == ID_EQ_ROW0 + s)) hovBead = id;
 		} else if (beadSlot >= 0) {
 			int id = ids[ix];
 			sel = id == curId;
@@ -4178,6 +4406,9 @@ void Game::DrawEquipLayer()
 			} else if (pasPick) {
 				ok = EquipPasId(c, kind - 7, ids[ix]);
 				if (ok) Persist();
+			} else if (sumPick) {
+				ok = EquipSummonId(c, sumSlot, ids[ix]);
+				if (ok) Persist();
 			} else if (beadSlot >= 0) {
 				ok = EquipBeadId(c, beadSlot, ids[ix]);
 				if (ok) Persist();
@@ -4188,9 +4419,12 @@ void Game::DrawEquipLayer()
 		}
 		yy += U(36);
 	}
-	if (beadPick || pasPick) {
+	if (beadPick || pasPick || sumPick) {
 		int show = hovBead > 0 ? hovBead : curId;
-		if (show > 0) m_r.HudTextBox(pasPick ? PasDesc(show) : CraftDesc(show - 1), px + U(16), py + ph - U(96), pw - U(32), U(44), U(12), RGBA8(210, 220, 235));
+		if (show > 0) {
+			const wchar_t* tip = sumPick ? SummonDesc(show) : (pasPick ? PasDesc(show) : CraftDesc(show - 1));
+			m_r.HudTextBox(tip, px + U(16), py + ph - U(96), pw - U(32), U(44), U(12), RGBA8(210, 220, 235));
+		}
 	}
 	wchar_t pg[32];
 	swprintf_s(pg, L"%d / %d", m_eqPage + 1, pages);
@@ -4307,7 +4541,7 @@ void Game::DrawPartyUi()
 	m_r.HudText(l, dx + ps2 + U(26), y + U(114), U(12), RGBA8(190, 190, 190), 0, 0);
 	float gearH = U(22);
 	float gearGap = U(2);
-	float gearBlock = gearH * 5.f + gearGap * 4.f;
+	float gearBlock = gearH * 6.f + gearGap * 5.f;
 	float actH = U(36);
 	float evoH = U(26);
 	float bot = y + gh - U(8);
@@ -4349,6 +4583,10 @@ void Game::DrawPartyUi()
 		int id = EquippedPasId(c, slot);
 		if (id > 0) pushSk(2, id, RGBA8(150, 214, 255));
 	}
+	for (int slot = 0; slot < 2; slot++) {
+		int id = EquippedSummonId(c, slot);
+		if (id > 0) pushSk(3, SUMMON_BASE + id - 1, RGBA8(255, 170, 120));
+	}
 	float skillTop = sy;
 	float skillBot = gearY - U(6);
 	if (skillBot < skillTop + U(16)) skillBot = skillTop + U(16);
@@ -4382,6 +4620,8 @@ void Game::DrawPartyUi()
 				swprintf_s(sl, L"%s %s%s", ougi ? TT(TX_OUGI) : TT(TX_CRAFT), CraftName(sks[i].id), ougi ? L" ★" : L"");
 			} else if (sks[i].kind == 2) {
 				swprintf_s(sl, L"%s %s", TT(TX_PAS), PasName(sks[i].id));
+			} else if (sks[i].kind == 3) {
+				swprintf_s(sl, L"%s %s", SummonWord(), SkillLabel(sks[i].id));
 			} else {
 				const SkillDef& sd = SkillInfo(sks[i].id);
 				wchar_t tag[24];
@@ -4423,6 +4663,10 @@ void Game::DrawPartyUi()
 		if (Btn(ID_PT_PAS0, c0, gearRow(4), w0, gearH, gl, TRUE, FALSE, U(11))) { m_eqPick = 7; m_eqPage = 0; m_focusId = ID_EQ_NONE; }
 		swprintf_s(gl, L"%s2: %s", TT(TX_PAS), EquippedPasName(c, 1));
 		if (Btn(ID_PT_PAS1, c1, gearRow(4), w1, gearH, gl, TRUE, FALSE, U(11))) { m_eqPick = 8; m_eqPage = 0; m_focusId = ID_EQ_NONE; }
+		swprintf_s(gl, L"%s1: %s", SummonWord(), EquippedSummonName(c, 0));
+		if (Btn(ID_PT_SUM0, c0, gearRow(5), w0, gearH, gl, TRUE, FALSE, U(11))) { m_eqPick = 11; m_eqPage = 0; m_focusId = ID_EQ_NONE; }
+		swprintf_s(gl, L"%s2: %s", SummonWord(), EquippedSummonName(c, 1));
+		if (Btn(ID_PT_SUM1, c1, gearRow(5), w1, gearH, gl, TRUE, FALSE, U(11))) { m_eqPick = 12; m_eqPage = 0; m_focusId = ID_EQ_NONE; }
 	}
 	if (!m_confirmDelete && Btn(ID_PT_EVO, dx + U(10), evoY, dw - U(20), evoH, TT(TX_BASE_EVOLVE), TRUE, FALSE, U(13))) {
 		m_evFromParty = 1;
@@ -4727,7 +4971,7 @@ void Game::DrawResultUi()
 		m_r.HudText(l, x + w * .5f, ry + rowH * .3f, U(16), c.lv > m_resultLv0[i] ? RGBA8(140, 255, 150) : RGBA8(230, 230, 230), 1, 1);
 		int need = ExpToNext(c.lv);
 		int left = c.lv >= TAC_LV_MAX ? 0 : max(0, need - c.exp);
-		swprintf_s(l, L"%s +%d  %s %d", TT(TX_BT_EXP), m_resultExp[i], TT(TX_EXP_LEFT), left);
+		swprintf_s(l, L"%s +%s  %s %s", TT(TX_BT_EXP), TacNum(m_resultExp[i]), TT(TX_EXP_LEFT), TacNum(left));
 		m_r.HudText(l, x + w * .5f, ry + rowH * .64f, U(13), RGBA8(200, 220, 255), 1, 0);
 		Bar(x + w * .66f, ry + rowH * .4f, w * .28f, U(10), need > 0 ? c.exp / (float)need : 0.f, RGBA8(120, 200, 255), RGBA8(60, 120, 220));
 		ry += rowH;

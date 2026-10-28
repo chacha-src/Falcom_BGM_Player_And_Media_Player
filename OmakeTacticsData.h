@@ -282,6 +282,7 @@ struct ClassDef {
 const ClassDef& ClassInfo(int c);
 int PromoteLevel(int tier);
 int ExpToNext(int lv);
+const wchar_t* TacNum(int v);
 int NextPromoteClass(int cls);
 bool IsUltimateSkill(int skill);
 enum { IT_ORE = 0, IT_HERB, IT_CRYSTAL, IT_SHARD, IT_ELIXIR, IT_MIGHT, IT_DELAY, IT_COUNT = 7, IT_RAISE = 7 };
@@ -729,7 +730,10 @@ int GoodHave(const SaveData& s, int i);
 bool GoodBuy(SaveData& s, int i);
 bool GoodTake(SaveData& s, int i);
 
-enum { CRAFT_BASE = 100000, CRAFT_NORM = 15, CRAFT_SUPER_N = 6, CRAFT_PER_LINE = 21, CRAFT_LINES = 7, CRAFT_LEGACY = 147, CRAFT_N = 294, CP_MAX = 200, CRAFT_SLOT_N = 4 };
+enum { CRAFT_BASE = 100000, CRAFT_NORM = 15, CRAFT_SUPER_N = 10, CRAFT_PER_LINE = 21, CRAFT_LINES = 7, CRAFT_LEGACY = 147, CRAFT_N = 798, CP_MAX = 200, CRAFT_SLOT_N = 4 };
+enum { SUMMON_BASE = 250000, SUMMON_N = 36 };
+enum { SUM_FX_FIRE = 0, SUM_FX_ICE, SUM_FX_BOLT, SUM_FX_SPIKE, SUM_FX_WIND, SUM_FX_WAVE, SUM_FX_HOLY, SUM_FX_DARK, SUM_FX_MIASMA, SUM_FX_ROAR, SUM_FX_SLEEP, SUM_FX_WEB };
+inline bool IsSummonId(int skill) { return skill >= SUMMON_BASE && skill < SUMMON_BASE + SUMMON_N; }
 bool IsCraftId(int skill);
 bool IsCraftSuper(int skill);
 int CraftCpCost(int index);
@@ -788,6 +792,21 @@ int PasSpare(const CharData& c, int slot, int index);
 bool EquipPasId(CharData& c, int slot, int id);
 bool CharHasPas(const CharData& c, int fx);
 bool UnitHasPas(const Unit& u, int fx);
+const wchar_t* SummonWord();
+int SummonCount();
+const wchar_t* SummonName(int id);
+const wchar_t* SummonDesc(int id);
+int SummonPrice(int index);
+int SummonFx(int index);
+int SummonMesh(int index);
+int SummonHpCost(const Unit& u, int skill);
+int SummonHave(int index);
+bool SummonBuy(SaveData& s, int index);
+bool SummonSell(int index);
+int EquippedSummonId(const CharData& c, int slot);
+const wchar_t* EquippedSummonName(const CharData& c, int slot);
+int SummonSpare(const CharData& c, int slot, int index);
+bool EquipSummonId(CharData& c, int slot, int id);
 bool UnitResistsEffect(const Unit& u, int effect);
 inline bool UnitAilmentHeld(const Unit& u)
 {
@@ -816,7 +835,8 @@ const TCHAR* TacLeafPart();
 const TCHAR* TacLeafCraft();
 const TCHAR* TacLeafMid();
 const TCHAR* TacLeafAuto();
-bool DropCraftLoot(int monster, int boss, Rng& r, wchar_t* name, int nameN);
+bool DropCraftLoot(int monster, int boss, int stage, Rng& r, wchar_t* name, int nameN);
+bool DropExtraLoot(const SaveData& s, int stage, int boss, Rng& r, wchar_t* name, int nameN);
 int BattleHeightSteps(const Battle& b, int ax, int az, int dx, int dz);
 
 void RandomName(wchar_t* out, int gender, Rng& r);
