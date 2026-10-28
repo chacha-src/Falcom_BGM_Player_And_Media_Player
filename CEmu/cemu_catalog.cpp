@@ -1522,8 +1522,10 @@ struct CEmuCatalogFp {
    0x304: <genre> tag on game entries.
    0x305: readable genre labels (ARPG/Shooter/Adventure, 32-byte field).
    0x306: title/range の先頭 0 を 8 進にしない（code=\"08\" → 8）。
-   0x307: 曲名などは厳密な UTF-8 なら UTF-8、それ以外は CP932。旧キャッシュの文字化けを捨てる。 */
-enum { CEMU_CAT_FP_PARSE_VER = 0x307 };
+   照合は下位 3bit を捨てる。0x307 は 0x306 と同じ 0x300 になり、UTF-8 曲名の
+   文字化けキャッシュを捨てられなかった。版は 8 刻みで上げる。
+   0x310: 曲名などは厳密な UTF-8 なら UTF-8、それ以外は CP932。 */
+enum { CEMU_CAT_FP_PARSE_VER = 0x310 };
 
 static int CEmuCatalogMakeFp(const wchar_t* arcZip, const wchar_t* dataRoot,
 	const wchar_t* parent, CEmuCatalogFp* fp)

@@ -12682,6 +12682,35 @@ void PlRefreshMidiPlayModes()
 	if (pl) pl->RefreshMidiPlayModes();
 }
 
+/* 保存済みプレイリストは CP932 誤読の曲名を wchar で持っている。カタログを引き直す。 */
+static void PlRefreshCemuSongTitles(CPlayList* pl)
+{
+	if (!pl || !pl->pc || pl->playcnt <= 0) return;
+	CEmuMgr* mgr = CEmuMgrGet();
+	if (!mgr || !CEmuMgrEnsureCatalog(mgr)) return;
+	for (int i = 0; i < pl->playcnt; i++) {
+		if (pl->pc[i].sub != MODE_CEMU || !pl->pc[i].fol[0]) continue;
+		wchar_t phys[CEMU_ZIP_PATH];
+		unsigned titleIndex1 = 0;
+		if (!CEmuParseVirtualPath(pl->pc[i].fol, phys, (int)_countof(phys), &titleIndex1) || !phys[0])
+			continue;
+		if (titleIndex1 == 0)
+			titleIndex1 = (pl->pc[i].ret2 > 0) ? (unsigned)pl->pc[i].ret2 : 1u;
+		wchar_t zipOut[CEMU_ZIP_PATH];
+		char dataDir[CEMU_DATA_DIR];
+		const CEmuGameEntry* ge = CEmuMgrResolveZip(mgr, phys, zipOut, (int)_countof(zipOut),
+			dataDir, (int)sizeof(dataDir));
+		if (!ge) continue;
+		wchar_t songLabel[CEMU_GAME_NAME];
+		songLabel[0] = 0;
+		CEmuGameTitleAt(ge, (int)titleIndex1 - 1, NULL, songLabel, (int)_countof(songLabel));
+		if (!songLabel[0] || songLabel[0] == L'<' || wcsncmp(songLabel, L"<title", 6) == 0)
+			continue;
+		if (wcscmp(pl->pc[i].name, songLabel) != 0)
+			wcsncpy_s(pl->pc[i].name, songLabel, _TRUNCATE);
+	}
+}
+
 static void PlCemuFillPlaylistRow(const CEmuGameEntry* ge, const wchar_t* zipPhysical,
 	unsigned titleIndex1, playlistdata* p)
 {
@@ -13699,6 +13728,7 @@ void CPlayList::Load(BOOL restoreSavedRow)
 		f.Read(&pnt, 4);
 		f.Close();
 	}
+	PlRefreshCemuSongTitles(this);
 	MpPlaylistNatOrdOnLoaded(playcnt);
 	MpPlaylistApplySavedSort();
 	ClampPlaylistSelectionIndices(this);

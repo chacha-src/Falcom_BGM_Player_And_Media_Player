@@ -5533,6 +5533,7 @@ void Renderer::DrawTerrain()
 	m_psOverride = m_psLava;
 	if (m_lava.vb) {
 		DrawParams lp;
+		lp.mode = 2.f;
 		DrawStatic(m_lava, MIdent(), lp);
 	}
 	m_psOverride = NULL;
@@ -5542,6 +5543,7 @@ void Renderer::DrawWater()
 {
 	if (!m_water.vb || m_pass == PASS_SHADOW) return;
 	DrawParams dp;
+	dp.mode = 1.f;
 	dp.tint = (m_waterColor & 0xFFFFFF) | 0xF0000000;
 	m_ctx->OMSetDepthStencilState(m_dsRead, 0);
 	m_psOverride = m_psWater;
@@ -5790,6 +5792,7 @@ BOOL Renderer::BuildTerrain(const Map& m)
 		if (c.t == T_VOID) continue;
 		float y = m.TopY(x, z);
 		DWORD col = (c.t == T_CHASM) ? RGBAf(.35f, .32f, .33f) : 0xFFFFFFFF;
+		if (c.t == T_WATER) col = 0xFEFFFFFF;
 		if (c.t != T_BRIDGE) {
 			tb.Quad(v3((float)x, y, (float)z), v3((float)x, y, (float)z + 1), v3((float)x + 1, y, (float)z + 1), v3((float)x + 1, y, (float)z), v3(0, 1, 0),
 				0, 0, 1, 1, -1, col);

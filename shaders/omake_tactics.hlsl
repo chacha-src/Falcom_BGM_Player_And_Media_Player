@@ -71,7 +71,15 @@ PSIn VSS(VSIn v)
 	w = Sway(w, (1. - v.c.a) * 4. + Extra.w);
 	if (Params.y > 0.5 && Params.y < 1.5) {
 		float t = Eye.w;
-		w.y += sin(w.x * 1.6 + w.z * 0.7 + t * 1.25) * 0.035 + cos(w.z * 2.0 - t * 0.8) * 0.025;
+		float th = FogColor.a;
+		float amp = 0.045;
+		if (th > 2.5 && th < 3.5) amp = 0.012;
+		else if (th > 5.5 && th < 6.5) amp = 0.022;
+		else if (th > 6.5) amp = 0.01;
+		w.y += sin(w.x * 1.6 + w.z * 0.7 + t * 1.25) * amp + cos(w.z * 2.0 - t * 0.8) * amp * 0.7;
+	} else if (Params.y > 1.5 && Params.y < 2.5) {
+		float t = Eye.w;
+		w.y += sin(w.x * 0.7 + w.z * 0.55 + t * 0.55) * 0.018;
 	}
 	w += n * Params.x;
 	o.w = w; o.n = n; o.uv = v.uv; o.c = v.c;
@@ -238,6 +246,31 @@ float4 PSM(PSIn i) : SV_Target
 	return float4(col, alpha);
 }
 
+float WaveAmp(float th)
+{
+	float amp = 0.16;
+	if (th > 2.5 && th < 3.5) amp = 0.04;
+	else if (th > 5.5 && th < 6.5) amp = 0.07;
+	else if (th > 0.5 && th < 1.5) amp = 0.1;
+	else if (th > 4.5 && th < 5.5) amp = 0.13;
+	else if (th > 6.5) amp = 0.035;
+	return amp;
+}
+
+void WaterWave(float2 xz, float t, float amp, out float h, out float2 dh)
+{
+	float2 d1 = normalize(float2(1.0, 0.25));
+	float2 d2 = normalize(float2(-0.35, 1.0));
+	float2 d3 = normalize(float2(0.2, -1.0));
+	float k1 = 1.35, k2 = 2.4, k3 = 4.1;
+	float f1 = k1 * dot(d1, xz) - t * 1.15;
+	float f2 = k2 * dot(d2, xz) - t * 1.7;
+	float f3 = k3 * dot(d3, xz) - t * 2.3;
+	h = amp * (sin(f1) + 0.55 * sin(f2) + 0.28 * sin(f3));
+	dh = amp * (d1 * k1 * cos(f1) + d2 * k2 * 0.55 * cos(f2) + d3 * k3 * 0.28 * cos(f3));
+	dh += float2(sin(t * 0.65 + xz.x * 0.85), cos(t * 0.5 + xz.y * 0.75)) * amp * 1.4;
+}
+
 float4 PSWater(PSIn i) : SV_Target
 {
 	float3 v = normalize(Eye.xyz - i.w);
@@ -246,19 +279,10 @@ float4 PSWater(PSIn i) : SV_Target
 	float alpha = Tint.a;
 	float t = Eye.w;
 	float thw = FogColor.a;
-	float amp = 0.16;
-	if (thw > 2.5 && thw < 3.5) amp = 0.045;
-	else if (thw > 5.5 && thw < 6.5) amp = 0.07;
-	else if (thw > 0.5 && thw < 1.5) amp = 0.1;
-	float2 d1 = normalize(float2(1.0, 0.25));
-	float2 d2 = normalize(float2(-0.35, 1.0));
-	float2 d3 = normalize(float2(0.2, -1.0));
-	float k1 = 1.35, k2 = 2.4, k3 = 4.1;
-	float f1 = k1 * dot(d1, i.w.xz) - t * 1.15;
-	float f2 = k2 * dot(d2, i.w.xz) - t * 1.7;
-	float f3 = k3 * dot(d3, i.w.xz) - t * 2.3;
-	float h = amp * (sin(f1) + 0.55 * sin(f2) + 0.28 * sin(f3));
-	float2 dh = amp * (d1 * k1 * cos(f1) + d2 * k2 * 0.55 * cos(f2) + d3 * k3 * 0.28 * cos(f3));
+	float amp = WaveAmp(thw);
+	float h;
+	float2 dh;
+	WaterWave(i.w.xz, t, amp, h, dh);
 	float3 wn = normalize(float3(-dh.x, 1, -dh.y));
 	float ndv = saturate(dot(wn, v));
 	float fr = pow(1. - ndv, 4.);
@@ -277,26 +301,39 @@ float4 PSWater(PSIn i) : SV_Target
 	float2 c2 = i.w.xz * 1.3 - t * float2(0.07, 0.12);
 	float caus = saturate(sin(c1.x * 6.2) * sin(c1.y * 5.4) + sin(c2.x * 4.8) * sin(c2.y * 5.1));
 	col += albedo * pow(caus, 2) * 0.18;
-	if (thw > 2.5 && thw < 3.5) col = lerp(col, float3(0.82, 0.92, 1), 0.28);
-	else if (thw > 0.5 && thw < 1.5) col = lerp(col, albedo * float3(0.95, 0.72, 0.45), 0.22);
-	else if (thw > 1.5 && thw < 2.5) col *= float3(0.82, 0.96, 0.78);
-	else if (thw > 5.5 && thw < 6.5) col = lerp(col, albedo * float3(0.45, 0.62, 0.38), 0.35);
-	else if (thw > 6.5) col = lerp(col, SkyAmb.rgb, fr * 0.22);
-	return float4(FogAt(col, i.w), lerp(0.55, 0.94, fr) * alpha);
+	float see = 0.22;
+	if (thw > 2.5 && thw < 3.5) { col = lerp(col, float3(0.82, 0.92, 1), 0.28); see = 0.16; }
+	else if (thw > 0.5 && thw < 1.5) { col = lerp(col, albedo * float3(0.95, 0.72, 0.45), 0.22); see = 0.34; }
+	else if (thw > 1.5 && thw < 2.5) { col *= float3(0.82, 0.96, 0.78); see = 0.26; }
+	else if (thw > 3.5 && thw < 4.5) { col = lerp(col, albedo * float3(0.7, 0.9, 0.88), 0.18); see = 0.2; }
+	else if (thw > 4.5 && thw < 5.5) { col = lerp(col, albedo * float3(0.55, 0.32, 0.22), 0.3); see = 0.4; }
+	else if (thw > 5.5 && thw < 6.5) { col = lerp(col, albedo * float3(0.45, 0.62, 0.38), 0.35); see = 0.42; }
+	else if (thw > 6.5) { col = lerp(col, SkyAmb.rgb, fr * 0.22); see = 0.38; }
+	return float4(FogAt(col, i.w), lerp(see, 0.78, fr) * alpha);
 }
 
-float4 PSLava(PSIn i) : SV_Target
+float3 LavaColor(float2 xz, float t, float3 v)
 {
-	float3 v = normalize(Eye.xyz - i.w);
-	float t = Eye.w;
-	float2 vg = VoronoiGap(i.w.xz * 0.72 + float2(t * 0.06, t * 0.02));
+	float2 vg = VoronoiGap(xz * 0.72 + float2(t * 0.06, t * 0.02));
 	float crack = 1 - smoothstep(0.015, 0.11, vg.y);
 	float pulse = 0.82 + 0.18 * sin(t * 2.2 + vg.x * 9);
 	float3 hot = lerp(float3(1, 0.72, 0.18), float3(1, 0.22, 0.02), saturate(vg.y * 8));
 	float3 col = lerp(float3(0.12, 0.035, 0.02), hot * (1.5 * pulse), crack);
 	float3 H = normalize(normalize(LightDir.xyz) + v);
 	col += hot * pow(saturate(dot(float3(0, 1, 0), H)), 16) * crack * 0.35;
-	return float4(col, 1);
+	return col;
+}
+
+float4 PSLava(PSIn i) : SV_Target
+{
+	float3 v = normalize(Eye.xyz - i.w);
+	float t = Eye.w;
+	float2 o = float2(0.045, 0.02);
+	float3 col = LavaColor(i.w.xz, t, v);
+	col += LavaColor(i.w.xz + o, t, v);
+	col += LavaColor(i.w.xz - o, t, v);
+	col += LavaColor(i.w.xz + float2(-o.y, o.x), t, v);
+	return float4(col * 0.25, 1);
 }
 
 float4 GroundPS(PSIn i, float theme)
@@ -305,6 +342,17 @@ float4 GroundPS(PSIn i, float theme)
 	float3 v = normalize(Eye.xyz - i.w);
 	float cliff = n.y > 0.72 ? 0 : 1;
 	float2 uv = i.w.xz * (cliff > 0.5 ? 0.26 : 0.4);
+	// 水底だけ頂点αを 254 にしてある。水面と同じ波でテクスチャをずらし、底がゆれて見える。
+	float bedCaus = 0;
+	if (i.c.a < 0.999 && cliff < 0.5) {
+		float h;
+		float2 dh;
+		WaterWave(i.w.xz, Eye.w, WaveAmp((float)theme), h, dh);
+		uv += dh * 0.16;
+		float2 c1 = i.w.xz * 0.8 + Eye.w * float2(0.15, 0.05);
+		float2 c2 = i.w.xz * 1.3 - Eye.w * float2(0.07, 0.12);
+		bedCaus = pow(saturate(sin(c1.x * 6.2) * sin(c1.y * 5.4) + sin(c2.x * 4.8) * sin(c2.y * 5.1)), 2);
+	}
 	float4 alb = Ground.Sample(SL, float3(uv, theme));
 	float4 nr = Ground.Sample(SL, float3(uv, theme + 8));
 	float3 albedo = alb.rgb * lerp(0.78, 1, alb.a) * i.c.rgb;
@@ -355,6 +403,14 @@ float4 GroundPS(PSIn i, float theme)
 	float sh = ShadowAt(i.w, n);
 	float3 col = Lit(albedo, nLit, v, rough, f0, sh, 0);
 	col += glow;
+	if (bedCaus > 0) {
+		float3 causCol = float3(0.65, 0.85, 1);
+		if (theme > 4.5 && theme < 5.5) causCol = float3(1, 0.55, 0.25);
+		else if (theme > 5.5 && theme < 6.5) causCol = float3(0.45, 0.85, 0.4);
+		else if (theme > 2.5 && theme < 3.5) causCol = float3(0.85, 0.93, 1);
+		else if (theme > 0.5 && theme < 1.5) causCol = float3(0.9, 0.7, 0.4);
+		col += causCol * bedCaus * 0.35;
+	}
 	if (cliff < 0.5) {
 		float2 g = abs(frac(i.w.xz) - 0.5);
 		float edge = smoothstep(0.475, 0.5, max(g.x, g.y));
@@ -543,6 +599,15 @@ float4 PSSKY(QOut i) : SV_Target
 	return float4(c, 1);
 }
 
+float Mote(float2 uv, float t, float2 vel, float density, float cutoff, float rad)
+{
+	float2 g = uv * density + t * vel;
+	float2 cell = floor(g);
+	float2 f = frac(g) - 0.5;
+	float2 j = hash22(cell) - 0.5;
+	return smoothstep(rad, 0, length(f - j * 0.55)) * step(cutoff, hash21(cell));
+}
+
 // HUD の前。明るいところを抜き、ぼかして、太陽方向へ筋を足す。
 float4 PSBloom(QOut i) : SV_Target
 {
@@ -595,9 +660,47 @@ float4 PSGrade(QOut i) : SV_Target
 	else if (th < 5.5) { grade = float3(1.06, 0.9, 0.8); shaftK = 0.35; }
 	else if (th < 6.5) { grade = float3(0.92, 1.0, 0.9); shaftK = 0.4; }
 	else { grade = float3(0.96, 0.97, 1.04); shaftK = 1.1; }
-	col += shaft / max(wsum, 1e-3) * Extra.w * saturate(1.15 - dist) * 0.5 * shaftK;
+	float3 shaftAdd = shaft / max(wsum, 1e-3) * Extra.w * saturate(1.15 - dist) * 0.5 * shaftK;
+	float gt = Eye.w;
+	float2 px = Screen.zw;
+	float vig = 1;
+	// 0平原の花粉 1峡谷の砂 2森の木漏れ日 3雪 4砂漠のかげろう 5火山の熱 6沼の揺らぎ 7廃墟の塵
+	if (th < 0.5) {
+		col += Mote(i.uv, gt, float2(0.04, 0.015), 26, 0.94, 0.07) * float3(1, 0.96, 0.72);
+	} else if (th < 1.5) {
+		col += Mote(i.uv, gt, float2(0.05, -0.01), 22, 0.93, 0.09) * float3(0.86, 0.68, 0.46) * 0.8;
+	} else if (th < 2.5) {
+		float dap = fbm2(i.uv * 6. + float2(gt * 0.03, gt * 0.01));
+		col *= lerp(0.94, 1.04, dap);
+		col *= 1. - saturate(0.4 - i.uv.y) * 0.16;
+	} else if (th < 3.5) {
+		col += Mote(i.uv, gt, float2(0.35, 3.4), 64, 0.988, 0.05) * float3(0.94, 0.97, 1) * 1.3;
+	} else if (th < 4.5) {
+		float2 h = float2(sin(i.uv.y * 170. + gt * 5.5), 0) * px * 0.8;
+		scene = lerp(scene, Tex.Sample(SL, i.uv + h).rgb, 0.45);
+		col = scene + bloom * Params.y;
+	} else if (th < 5.5) {
+		float2 h = float2(sin(i.uv.y * 130. + gt * 3.6), cos(i.uv.x * 110. - gt * 2.8)) * px * 1.5;
+		float3 a = Tex.Sample(SL, i.uv + h).rgb;
+		float3 b = Tex.Sample(SL, i.uv - h).rgb;
+		float3 c = Tex.Sample(SL, i.uv + float2(h.y, -h.x)).rgb;
+		scene = (scene + a + b + c) * 0.25;
+		col = scene + bloom * Params.y;
+		col += Mote(i.uv, gt, float2(0.15, -2.4), 48, 0.986, 0.045) * float3(1, 0.42, 0.08) * 1.4;
+	} else if (th < 6.5) {
+		float ang = sin(i.uv.x * 10. + gt * 0.25) + cos(i.uv.y * 7. + gt * 0.15);
+		float2 off = float2(sin(ang * 1.2), cos(ang * 0.8)) * px * 1.15;
+		scene = Tex.Sample(SL, i.uv + off).rgb;
+		float3 mist = (Tex.Sample(SL, i.uv + off + px).rgb + Tex.Sample(SL, i.uv + off - px).rgb) * 0.5;
+		scene = lerp(scene, mist, 0.22);
+		col = scene + bloom * Params.y;
+	} else {
+		col += Mote(i.uv, gt, float2(0.02, 0.03), 18, 0.9, 0.1) * float3(0.75, 0.78, 0.85) * 0.7;
+		vig = 1.45;
+	}
+	col += shaftAdd;
 	float2 q = (i.uv - 0.5) * asp;
-	col *= 1. - saturate(dot(q, q) * 1.15) * Extra.z * 0.28;
+	col *= 1. - saturate(dot(q, q) * 1.15) * Extra.z * 0.28 * vig;
 	float y = dot(col, float3(0.2126, 0.7152, 0.0722));
 	col = lerp(y.xxx, col, 1.06);
 	col *= grade;

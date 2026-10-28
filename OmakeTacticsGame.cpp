@@ -433,10 +433,10 @@ static_assert(TAC_BGM_RUINS - TAC_BGM_PLAINS + 1 == TH_COUNT, "地形BGM");
 // 脅威が離れた、4.5巡以上耐えられる、討伐が全滅より先、のどれかで危険を下ろす。
 // 下ろしたあと勝利目前なら勝利曲、まだ長ければ地形曲。
 // 勝利目前は、決着まで約20手番（おおよそ1〜2分）を切ってから。通常曲を長く残す。
-// 条件は、戦力差で決まる残りHPのラインを下回り、残敵HPが味方残HPの2.5倍以内で、
-// 通常攻撃の見積もりが20手番以内。遠い拠点が残るうちは歩数を足して遅らせる。
-// ボスだけを削るときは、ボスのそばでHPが半分以下、または倒し切るまで十数手番を切ったら鳴らし、雑魚が満タンでも待つ。
-// 一度入ったら見積もりが40手番を超えて盛り返すまで戻さない。開幕（残9割超）は戦曲。
+// 雑魚がいる戦はボスを除いて見る。雑魚の残りHPが最大の3割以下、または残り2体以下かつそのHPが最大の4割以下で、
+// 倒し切る見積もりが20手番以内、残HPが味方の2.5倍以内。遠い雑魚は歩数を足して遅らせる。通常曲を長く残す。
+// 開幕（雑魚が最大の85%超）は戦曲。雑魚のHPが半分超まで戻り数が3体以上になるか、見積もりが40手番を超えたら戻す。
+// 雑魚が消えてボスがまだ長いなら地形曲へ戻す。ボス単体は、そばでHPが三分の二以下、または十数手番を切ったら鳴らす。
 // 勝利確定とリザルトは tacticsgameclear。店=tacticsshop、作成・編成・進化=tacticsmake。テンポは変えない。
 void Game::SyncBgm()
 {
@@ -454,6 +454,7 @@ void Game::SyncBgm()
 		int all = 0;
 		int hp = 0, mx = 0;
 		int eHp = 0, eMx = 0;
+		int mobHp = 0, mobMx = 0, mobAll = 0;
 		for (int i = 0; i < m_b.nUnits; i++) {
 			const Unit& u = m_b.u[i];
 			if (u.team == TEAM_ENEMY) {
@@ -461,14 +462,20 @@ void Game::SyncBgm()
 				int em = max(1, u.ch.stat[S_HP]);
 				eMx += em;
 				if (u.alive && u.hp > 0) eHp += u.hp;
+				if (!u.boss) {
+					mobAll++;
+					mobMx += em;
+					if (u.alive && u.hp > 0) mobHp += u.hp;
+				}
 			}
 			if (u.team != TEAM_PLAYER) continue;
 			mx += max(1, u.ch.stat[S_HP]);
 			if (u.alive && u.hp > 0) hp += u.hp;
 		}
 		const int fightWon = (m_victory == 1) || (m_screen == SC_RESULT) || (m_bossDown && players > 0) || (alive == 0 && all > 0 && players > 0);
-		long long hits = 0;
+		long long hits = 0, mobHits = 0;
 		int pSpd = 0, eSpd = 0, farDist = 0, bossClose = 0;
+		int mobSpd = 0, mobFar = 0, mobAlive = 0;
 		int pAtk = 0, pN = 0;
 		for (int i = 0; i < m_b.nUnits; i++) {
 			const Unit& u = m_b.u[i];
@@ -501,9 +508,14 @@ void Game::SyncBgm()
 				if (d < best) best = d;
 			}
 			if (best < 999 && best > farDist) farDist = best;
-			if (u.boss && best <= 14 && u.hp < max(1, u.ch.stat[S_HP])) {
+			if (!u.boss) {
+				mobAlive++;
+				mobHits += need;
+				mobSpd += 10 + UnitStat(u, S_AGI);
+				if (best < 999 && best > mobFar) mobFar = best;
+			} else if (best <= 14 && u.hp < max(1, u.ch.stat[S_HP])) {
 				int bmax = max(1, u.ch.stat[S_HP]);
-				if (u.hp * 2 <= bmax || need <= 12) bossClose = 1;
+				if (u.hp * 3 <= bmax * 2 || need <= 16) bossClose = 1;
 			}
 		}
 		long long enemyTurns = pSpd > 0 ? hits * eSpd / pSpd : hits;
@@ -511,6 +523,16 @@ void Game::SyncBgm()
 		if (walk > 12) walk = 12;
 		long long turns = hits + enemyTurns + walk;
 		if (turns > 9999) turns = 9999;
+		long long mobEnemyTurns = pSpd > 0 ? mobHits * mobSpd / pSpd : mobHits;
+		int mobWalk = mobFar / 6;
+		if (mobWalk > 12) mobWalk = 12;
+		long long mobTurns = mobHits + mobEnemyTurns + mobWalk;
+		if (mobTurns > 9999) mobTurns = 9999;
+		const int mobOpen = mobMx > 0 && (long long)mobHp * 100 > (long long)mobMx * 85;
+		const int mobBroken = mobMx > 0 && (long long)mobHp * 100 <= (long long)mobMx * 30;
+		const int mobFew = mobAll > 0 && mobAlive > 0 && mobAlive <= 2 && (long long)mobHp * 100 <= (long long)mobMx * 40;
+		const int mobAhead = hp > 0 && (long long)mobHp * 2 <= (long long)hp * 5;
+		const int mobThin = mobAll > 0 && mobAlive > 0 && !mobOpen && mobTurns <= 20 && mobAhead && (mobBroken || mobFew);
 		int odds = eMx / max(1, mx);
 		int remain = 500;
 		if (odds >= 8) remain = 280;
@@ -520,9 +542,13 @@ void Game::SyncBgm()
 		const int broken = eMx > 0 && (long long)eHp * 1000 <= (long long)eMx * remain;
 		const int ahead = hp > 0 && (long long)eHp * 2 <= (long long)hp * 5;
 		const int mapEnd = turns <= 20 && broken && ahead;
+		const int mobRallied = mobAll > 0 && (long long)mobHp * 100 > (long long)mobMx * 50 && mobAlive > 2;
+		const int mobDrag = mobAll > 0 && mobTurns >= 40 && !bossClose;
+		const int bossOnly = mobAll == 0 && !bossClose && (turns >= 40 || (eMx > 0 && (long long)eHp * 10 > (long long)eMx * 9));
+		const int bossLeft = mobAlive == 0 && !bossClose && turns >= 20;
 		if (eMx <= 0 || hp <= 0 || players <= 0 || alive <= 0) winNear = 0;
-		else if (bossClose || mapEnd) winNear = 1;
-		else if ((long long)eHp * 10 > (long long)eMx * 9 || turns >= 40) winNear = 0;
+		else if (bossClose || mapEnd || mobThin) winNear = 1;
+		else if (mobRallied || mobDrag || bossOnly || bossLeft) winNear = 0;
 		// 届く敵の1巡で入るダメージ。範囲技は当たる味方の人数だけ足す。
 		int pi[MAX_PARTY];
 		int pn = 0;
