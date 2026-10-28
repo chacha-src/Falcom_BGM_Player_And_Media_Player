@@ -127,7 +127,8 @@ static const float kGain[TS_N] = {
 	0.50f, 0.44f, 0.40f, 0.38f, 0.44f, 0.50f, 0.46f,
 	0.46f, 0.54f, 0.46f,
 	0.52f, 0.50f, 0.40f, 0.40f, 0.46f,
-	0.50f
+	0.50f,
+	0.28f
 };
 
 static size_t TacRead(void* dst, size_t sz, size_t nm, void* h)
@@ -671,6 +672,8 @@ static const char* const kMml[TS_N] = {
 	"t160 l16 o5 v10 @6 s-12 c8 | t160 l16 o4 v6 @25 s-12 g8",
 	"t200 l32 o4 v11 @22 s-5 c | t200 l32 o5 v8 @5 r32 g e c",
 	"t160 l16 o3 v12 @19 c | t120 l8 o4 v9 @2 s-12 e4 | t120 l8 o3 v7 @25 [ca-]4",
+	// 翼で移動。一度だけ。低い音が持ち上がり、あとから息が落ちて残る。
+	"t56 l2 o3 v8 @25 s3 c | t60 l2 o4 v7 @25 s3 [eg] | t76 l4 o5 v5 @2 r4 s-4 g2",
 };
 static void TacSynthAll()
 {

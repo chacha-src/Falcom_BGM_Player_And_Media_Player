@@ -1432,6 +1432,11 @@ void ActorUpdate(Actor& a, float dt)
 	a.t += dt * a.animSpeed;
 	a.pt += dt * a.animSpeed;
 	if (a.blend < 1.f) a.blend = min(1.f, a.blend + dt / a.blendDur);
+	float goal = a.flap > 0.5f ? 1.f : 0.f;
+	float k = 1.f - expf(-dt * 8.f);
+	a.flyLean += (goal - a.flyLean) * k;
+	if (a.flyLean < 0.001f) a.flyLean = 0.f;
+	else if (a.flyLean > 0.999f) a.flyLean = 1.f;
 }
 
 static int MonsterClip(const Renderer& r, const Model& m, int clip, int skill)
@@ -1522,10 +1527,67 @@ BOOL ActorClipDone(const Actor& a, const Library& lib, const Renderer& r)
 	return !a.loop && a.t >= ActorClipLen(a, lib, r, a.clip);
 }
 
+// 翼で飛んでいるあいだ、腰から下だけをモデルの +Z（背中）へ倒す。上半身のクリップはそのまま。
+// 回転は関節の原点まわり。左右で骨のローカル軸が鏡でも、同じ向きに流れる。
+static void SpinJointBack(const Model& m, Pose& pose, int j, float pitch)
+{
+	if (pitch == 0.f || j < 0 || j >= m.nJ || j >= pose.nJ) return;
+	int pa = m.parent[j];
+	if (pa < 0 || pa >= pose.nJ) return;
+	const M4& G = pose.global[j];
+	M4 lin = G;
+	lin.m[12] = lin.m[13] = lin.m[14] = 0.f;
+	lin.m[15] = 1.f;
+	M4 G2 = MMul(lin, MRotX(pitch));
+	G2.m[12] = G.m[12];
+	G2.m[13] = G.m[13];
+	G2.m[14] = G.m[14];
+	G2.m[15] = 1.f;
+	pose.local[j] = MMul(G2, MInverse(pose.global[pa]));
+}
+
+static int HumanJoint(const Renderer& r, const Model& m, const char* a, const char* b)
+{
+	if (m.rig < 0 || m.rig >= (int)r.rigs.size()) return -1;
+	int j = r.rigs[m.rig].Find(a);
+	if (j < 0 && b) j = r.rigs[m.rig].Find(b);
+	if (j < 0 || j >= m.nJ) return -1;
+	return j;
+}
+
+static void ApplyFlyTrail(Actor& a, const Renderer& r)
+{
+	if (a.flyLean < 0.02f || a.proc != 3 || !a.poseValid) return;
+	if (a.clip == CL_1H_CHOP || a.clip == CL_1H_SLICE || a.clip == CL_1H_STAB || a.clip == CL_2H_CHOP || a.clip == CL_2H_SPIN
+		|| a.clip == CL_1H_SHOOT || a.clip == CL_2H_SHOOT || a.clip == CL_CAST_SHOOT || a.clip == CL_CAST_RAISE || a.clip == CL_CAST_LONG
+		|| a.clip == CL_THROW || a.clip == CL_PUNCH || a.clip == CL_HIT_A || a.clip == CL_HIT_B || a.clip == CL_DEATH
+		|| a.clip == CL_BLOCK || a.clip == CL_DODGE) return;
+	if (a.model < 0 || a.model >= (int)r.models.size()) return;
+	const Model& m = r.models[a.model];
+	if (strncmp(m.name, "Hum", 3) != 0) return;
+	int ul = HumanJoint(r, m, "UpperLeg.L", "upperleg.l");
+	int ur = HumanJoint(r, m, "UpperLeg.R", "upperleg.r");
+	if (ul < 0 || ur < 0) return;
+	float w = a.flyLean;
+	SpinJointBack(m, a.pose, ul, -0.95f * w);
+	SpinJointBack(m, a.pose, ur, -0.95f * w);
+	r.FinishPose(m, a.pose, &a.mods);
+	int ll = HumanJoint(r, m, "LowerLeg.L", "lowerleg.l");
+	int lr = HumanJoint(r, m, "LowerLeg.R", "lowerleg.r");
+	SpinJointBack(m, a.pose, ll, -0.40f * w);
+	SpinJointBack(m, a.pose, lr, -0.40f * w);
+	r.FinishPose(m, a.pose, &a.mods);
+	int fl = HumanJoint(r, m, "Foot.L", "foot.l");
+	int fr = HumanJoint(r, m, "Foot.R", "foot.r");
+	SpinJointBack(m, a.pose, fl, 0.50f * w);
+	SpinJointBack(m, a.pose, fr, 0.50f * w);
+	r.FinishPose(m, a.pose, &a.mods);
+}
+
 void ActorPose(Actor& a, const Library& lib, const Renderer& r)
 {
 	a.poseValid = 0;
-	if (a.proc == 3 && a.loop && a.model >= 0 && (a.clip == CL_IDLE || (a.clip >= CL_IDLE_GLANCE_L && a.clip <= CL_IDLE_CROSS))) {
+	if (a.proc == 3 && a.loop && a.flap < 0.5f && a.model >= 0 && (a.clip == CL_IDLE || (a.clip >= CL_IDLE_GLANCE_L && a.clip <= CL_IDLE_CROSS))) {
 		float len = ActorClipLen(a, lib, r, a.clip);
 		if (len > 0.05f && a.t >= len) {
 			int next = CL_IDLE;
@@ -1597,6 +1659,7 @@ void ActorPose(Actor& a, const Library& lib, const Renderer& r)
 		}
 		a.poseValid = 1;
 	}
+	ApplyFlyTrail(a, r);
 	// スキルごとに腕の軌道を作る。数種のクリップを使い回すと、詠唱も斬りも同じに見える。
 	// 人体はモーションキャプチャのスキル別の型を引くので、腕を作り直すと捕った動きが消える。
 	BOOL combat = a.clip == CL_1H_CHOP || a.clip == CL_1H_SLICE || a.clip == CL_1H_STAB || a.clip == CL_2H_CHOP || a.clip == CL_2H_SPIN

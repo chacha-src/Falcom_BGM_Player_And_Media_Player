@@ -83,6 +83,7 @@ enum TacSfxId {
 	TS_SLOW,
 	TS_DEFDOWN,
 	TS_FALL,      // 味方が倒れた
+	TS_FLY,       // 味方が翼で移動しているあいだ
 	TS_N
 };
 

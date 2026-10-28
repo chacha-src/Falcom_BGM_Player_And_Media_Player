@@ -1332,8 +1332,10 @@ void Game::UpdateMove(float dt)
 	int seg = (int)m_moveT;
 	{
 		static int stepSeg = -999;
+		BOOL wing = fly && u.team == TEAM_PLAYER && m_act[ui].wings > 0;
 		if (seg != stepSeg) {
-			if (stepSeg >= 0 && seg > stepSeg && !fly) TacSfx(TS_STEP);
+			if (stepSeg < 0 && wing && m_moveN > 1) TacSfx(TS_FLY);
+			else if (stepSeg >= 0 && seg > stepSeg && !fly) TacSfx(TS_STEP);
 			stepSeg = seg;
 		}
 		if (seg >= m_moveN - 1) stepSeg = -999;
