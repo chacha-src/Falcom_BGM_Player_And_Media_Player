@@ -480,6 +480,7 @@ const wchar_t* FoeSlainWord();
 const wchar_t* FoeMasteryWord();
 int MonsterDebut(int id);
 void MonsterPreview(int id, int* lv, int* stat);
+void MonsterHeldText(int id, wchar_t* out, int cap);
 
 // ---------------- 戦闘中ユニット ----------------
 enum Team { TEAM_PLAYER, TEAM_ENEMY };
@@ -539,6 +540,7 @@ int UnitMotionStyle(const Unit& u, int skill);   // 通常攻撃は装備。ス�
 int UnitNameTx(const Unit& u);          // 敵の種族名など（味方は -1）
 const wchar_t* UnitName(const Unit& u);
 bool UnitHasSkill(const Unit& u, int s);
+void UnitHeldText(const Unit& u, wchar_t* out, int cap);
 
 void MakeEnemy(Unit& u, int monster, int lv, int boss, Rng& r);
 

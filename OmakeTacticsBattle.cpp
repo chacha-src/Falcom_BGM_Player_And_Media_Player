@@ -24,7 +24,8 @@ enum {
 	ID_BT_OPT_Q = 920, ID_BT_OPT_ANIM, ID_BT_OPT_GRID, ID_BT_OPT_THREAT,
 	ID_BT_IT0 = 960, ID_BT_ITT0 = 980,
 	ID_BT_PROMO0 = 740, ID_BT_PROMO_LATER = 748,
-	ID_BT_EQ0 = 750, ID_BT_EQNONE = 754, ID_BT_EQROW = 755, ID_BT_PAS0 = 762, ID_BT_PAS1, ID_BT_EQPREV = 764, ID_BT_EQNEXT = 765, ID_BT_BEAD2 = 766, ID_BT_BEAD3
+	ID_BT_EQ0 = 750, ID_BT_EQNONE = 754, ID_BT_EQROW = 755, ID_BT_PAS0 = 762, ID_BT_PAS1, ID_BT_EQPREV = 764, ID_BT_EQNEXT = 765, ID_BT_BEAD2 = 766, ID_BT_BEAD3,
+	ID_BT_ACC0 = 768, ID_BT_ACC1, ID_BT_EQSUM0, ID_BT_EQSUM1
 };
 
 static float AngLerp(float a, float b, float t)
@@ -3411,7 +3412,13 @@ void Game::DrawCutIn3D()
 void Game::DrawUnitPanel(const Unit& u, float x, float y, float w, BOOL big)
 {
 	int ui = (int)(&u - m_b.u);
-	float h = big ? U(148) : U(112);
+	wchar_t held[360];
+	held[0] = 0;
+	if (u.team == TEAM_ENEMY) UnitHeldText(u, held, 360);
+	float extra = held[0] ? (big ? U(38) : U(30)) : 0;
+	float h = (big ? U(148) : U(112)) + extra;
+	if (extra > 0) y -= extra;
+	if (y < U(8)) y = U(8);
 	Panel(x, y, w, h);
 	float ps = h - U(20);
 	DWORD fc = u.team == TEAM_PLAYER ? RGBA8(110, 170, 255) : (u.boss ? RGBA8(255, 200, 60) : RGBA8(255, 100, 90));
@@ -3511,6 +3518,8 @@ void Game::DrawUnitPanel(const Unit& u, float x, float y, float w, BOOL big)
 		}
 		m_r.HudText(st, tx, by + U(6), U(11), RGBA8(200, 230, 255), 0, 0);
 	}
+	if (held[0])
+		m_r.HudTextBox(held, tx, y + h - extra + U(2), tw, extra - U(4), U(11), RGBA8(186, 214, 255));
 }
 
 void Game::DrawTurnOrder()
@@ -4084,6 +4093,85 @@ void Game::DrawBattleStatus()
 		if (Btn(ID_BT_BACK, px + pw - U(170), py + ph - U(46), U(150), U(32), TT(TX_CR_BACK))) m_statEq = 0;
 		return;
 	}
+	if (m_statEq >= 9 && m_statEq <= 12) {
+		BOOL summon = m_statEq >= 11;
+		int slot = summon ? m_statEq - 11 : m_statEq - 9;
+		m_r.HudText(summon ? SummonWord() : TT(TX_ACC), px + pw * .5f, py + U(48), U(16), RGBA8(255, 226, 150), 1, 1);
+		int ids[96], n = 0;
+		int cur = summon ? EquippedSummonId(u.ch, slot) : EquippedAccId(u.ch, slot);
+		int capN = summon ? SummonCount() : AccCount();
+		for (int i = 0; i < capN && n < 96; i++) {
+			int spare = summon ? SummonSpare(u.ch, slot, i) : AccSpare(u.ch, slot, i);
+			if (spare > 0 || cur == i + 1) ids[n++] = i + 1;
+		}
+		const int per = 6;
+		int pages = max(1, (n + per - 1) / per);
+		if (m_statEqPage >= pages) m_statEqPage = pages - 1;
+		if (m_statEqPage < 0) m_statEqPage = 0;
+		float yy = py + U(70);
+		auto syncAcc = [&]() {
+			for (int k = 0; k < 2; k++) u.accEq[k] = EquippedAccId(u.ch, k);
+			int hpMax = max(1, UnitStat(u, S_HP));
+			int mpMax = max(0, UnitStat(u, S_MP));
+			if (u.hp > hpMax) u.hp = hpMax;
+			if (u.mp > mpMax) u.mp = mpMax;
+			m_dispHp[who] = (float)u.hp;
+			if (who == m_cur && m_phase == PH_P_MOVE) { ComputeReach(m_b, who, m_reach); ComputeOverlays(); }
+		};
+		if (Btn(ID_BT_EQNONE, px + U(16), yy, pw - U(32), U(32), TT(TX_PT_NONE))) {
+			BOOL ok = summon ? EquipSummonId(u.ch, slot, 0) : EquipAccId(u.ch, slot, 0);
+			if (!ok) { TacSfx(TS_ERROR); return; }
+			if (summon) LoadBattleCast();
+			else syncAcc();
+			Persist();
+			return;
+		}
+		yy += U(36);
+		int a = m_statEqPage * per;
+		int b = min(n, a + per);
+		int hov = cur;
+		for (int s = 0; s < b - a; s++) {
+			int id = ids[a + s];
+			wchar_t row[180];
+			if (summon) {
+				int spare = SummonSpare(u.ch, slot, id - 1) + (id == cur ? 1 : 0);
+				swprintf_s(row, L"%s  x%d  %sG", SummonName(id), max(1, spare), TacNum(SummonPrice(id - 1)));
+			} else {
+				wchar_t st[96];
+				st[0] = 0;
+				for (int stat = S_HP; stat < S_COUNT; stat++) {
+					int v = AccStat(id, stat);
+					if (!v) continue;
+					wchar_t bit[24];
+					swprintf_s(bit, L" %s%+d", TT(StatNameTx(stat)), v);
+					if (wcslen(st) + wcslen(bit) < 90) wcscat_s(st, bit);
+				}
+				swprintf_s(row, L"%s  x%d%s", AccName(id), max(1, AccSpare(u.ch, slot, id - 1)), st);
+			}
+			if (Hit(px + U(16), yy, pw - U(32), U(32)) || (m_navMode && m_focusId == ID_BT_EQROW + s)) hov = id;
+			m_btnSfx = -2;
+			if (Btn(ID_BT_EQROW + s, px + U(16), yy, pw - U(32), U(32), row, TRUE, id == cur, U(13))) {
+				BOOL ok = summon ? EquipSummonId(u.ch, slot, id) : EquipAccId(u.ch, slot, id);
+				if (!ok) { TacSfx(TS_ERROR); return; }
+				if (summon) LoadBattleCast();
+				else syncAcc();
+				Persist();
+				TacSfx(TS_OK_EQUIP);
+				return;
+			}
+			yy += U(36);
+		}
+		if (summon && hov > 0) m_r.HudTextBox(SummonDesc(hov), px + U(16), py + ph - U(96), pw - U(32), U(40), U(12), RGBA8(210, 220, 235));
+		if (pages > 1) {
+			wchar_t pg[32];
+			swprintf_s(pg, L"%d / %d", m_statEqPage + 1, pages);
+			if (Btn(ID_BT_EQPREV, px + U(16), py + ph - U(46), U(64), U(32), L"◀")) m_statEqPage = (m_statEqPage + pages - 1) % pages;
+			m_r.HudText(pg, px + U(120), py + ph - U(30), U(14), RGBA8(220, 220, 230), 0, 1);
+			if (Btn(ID_BT_EQNEXT, px + U(168), py + ph - U(46), U(64), U(32), L"▶")) m_statEqPage = (m_statEqPage + 1) % pages;
+		}
+		if (Btn(ID_BT_BACK, px + pw - U(170), py + ph - U(46), U(150), U(32), TT(TX_CR_BACK))) m_statEq = 0;
+		return;
+	}
 	int beadSlot = m_statEq == 3 ? 0 : m_statEq == 4 ? 1 : m_statEq == 7 ? 2 : m_statEq == 8 ? 3 : -1;
 	if (m_statEq == 1 || m_statEq == 2 || beadSlot >= 0) {
 		int gearKind = (m_statEq == 1 || m_statEq == 2) ? (m_statEq == 1 ? 0 : 1) : -1;
@@ -4165,7 +4253,7 @@ void Game::DrawBattleStatus()
 	fightPlus[S_HP] = 0;
 	fightPlus[S_MP] = 0;
 	DrawStatLines(view, px + U(16), py + U(48), pw - U(32), fightPlus, u.hp, u.mp);
-	float yy = py + ph - U(204);
+	float yy = py + ph - U(276);
 	const GearDef* wpn = GearOf(u.ch.reserved[6]);
 	const GearDef* arm = GearOf(u.ch.reserved[7]);
 	wchar_t gl[96];
@@ -4173,6 +4261,11 @@ void Game::DrawBattleStatus()
 	if (Btn(ID_BT_EQ0, px + U(16), yy, pw * .48f, U(32), gl, TRUE, FALSE, U(12))) { m_statEq = 1; m_statEqPage = 0; }
 	swprintf_s(gl, L"%s: %s", TT(TX_GEAR_ARM), arm ? GearName(u.ch.reserved[7]) : TT(TX_PT_NONE));
 	if (Btn(ID_BT_EQ0 + 1, px + pw * .52f, yy, pw * .44f, U(32), gl, TRUE, FALSE, U(12))) { m_statEq = 2; m_statEqPage = 0; }
+	yy += U(36);
+	swprintf_s(gl, L"%s1: %s", TT(TX_ACC), EquippedAccName(u.ch, 0));
+	if (Btn(ID_BT_ACC0, px + U(16), yy, pw * .48f, U(32), gl, TRUE, FALSE, U(12))) { m_statEq = 9; m_statEqPage = 0; }
+	swprintf_s(gl, L"%s2: %s", TT(TX_ACC), EquippedAccName(u.ch, 1));
+	if (Btn(ID_BT_ACC1, px + pw * .52f, yy, pw * .44f, U(32), gl, TRUE, FALSE, U(12))) { m_statEq = 10; m_statEqPage = 0; }
 	yy += U(36);
 	swprintf_s(gl, L"%s1: %s", TT(TX_CRAFT), EquippedBeadName(u.ch, 0));
 	if (Btn(ID_BT_EQ0 + 2, px + U(16), yy, pw * .48f, U(32), gl, TRUE, FALSE, U(12))) { m_statEq = 3; m_statEqPage = 0; }
@@ -4188,6 +4281,11 @@ void Game::DrawBattleStatus()
 	if (Btn(ID_BT_PAS0, px + U(16), yy, pw * .48f, U(32), gl, TRUE, FALSE, U(12))) { m_statEq = 5; m_statEqPage = 0; }
 	swprintf_s(gl, L"%s2: %s", TT(TX_PAS), EquippedPasName(u.ch, 1));
 	if (Btn(ID_BT_PAS1, px + pw * .52f, yy, pw * .44f, U(32), gl, TRUE, FALSE, U(12))) { m_statEq = 6; m_statEqPage = 0; }
+	yy += U(36);
+	swprintf_s(gl, L"%s1: %s", SummonWord(), EquippedSummonName(u.ch, 0));
+	if (Btn(ID_BT_EQSUM0, px + U(16), yy, pw * .48f, U(32), gl, TRUE, FALSE, U(12))) { m_statEq = 11; m_statEqPage = 0; }
+	swprintf_s(gl, L"%s2: %s", SummonWord(), EquippedSummonName(u.ch, 1));
+	if (Btn(ID_BT_EQSUM1, px + pw * .52f, yy, pw * .44f, U(32), gl, TRUE, FALSE, U(12))) { m_statEq = 12; m_statEqPage = 0; }
 	if (Btn(ID_BT_BACK, px + pw - U(170), py + ph - U(46), U(150), U(32), TT(TX_CR_BACK))) { m_statOpen = 0; m_statEq = 0; }
 }
 
@@ -4588,7 +4686,7 @@ void Game::DrawCommandMenu()
 		if ((m_navMode && m_focusId == ID_BT_SUMMON) || (!m_navMode && m_mouseSeen && Hit(x, yy, cw, bh)))
 			descW = hasSum
 				? LangPick14(L"装備した召喚獣を広い範囲に放つ。MPとHPを使う。", L"Loose an equipped summon over a wide area. It spends MP and HP.", L"Lance une invocation équipée sur une large zone. Coûte des PM et des PV.", L"Scatena un'evocazione equipaggiata su un'area ampia. Costa PM e PV.", L"Suelta una invocación equipada en un área amplia. Gasta PM y PV.", L"장착한 소환수를 넓은 범위에 낸다. MP와 HP를 쓴다.", L"放出装备的召唤兽，范围很广。消耗MP和HP。", L"أطلق مستدعى مجهزا على مدى واسع. يستهلك MP وHP.", L"Выпустить надетого призванного по широкой области. Тратит MP и HP.", L"Einen ausgerüsteten Beschworenen über ein weites Feld loslassen. Kostet MP und HP.", L"Solta um invocado equipado numa área larga. Gasta MP e HP.", L"Laat een uitgeruste oproeping over een breed gebied los. Kost MP en HP.", L"Wypuść wyposażone przyzwanie na szeroki obszar. Kosztuje MP i HP.", L"Kuşanılmış çağrıyı geniş alana sal. MP ve HP harcar.")
-				: LangPick14(L"店で買い、編成の召喚枠に付けると使えます。", L"Buy one in the shop, then set it in the party summon slots.", L"Achetez-en une, puis placez-la dans les cases d'invocation.", L"Comprane una, poi mettila negli slot evocazione.", L"Cómprala en la tienda y ponla en las ranuras de invocación.", L"상점에서 사서 편성의 소환 칸에 장착하면 쓸 수 있다.", L"在商店购买后，装到编成的召唤栏即可使用。", L"اشترها من المتجر ثم ضعها في خانات الاستدعاء.", L"Купите в лавке и поставьте в слоты призыва.", L"Im Laden kaufen und in die Beschwörungsplätze legen.", L"Compre na loja e ponha nas vagas de invocação.", L"Koop er een en zet die in de oproepvakken.", L"Kup w sklepie i włóż w pola przyzwania.", L"Dükkandan alıp çağırma yuvalarına takınca kullanılır.");
+				: LangPick14(L"店で買い、編成か戦闘中のステータスの召喚枠に付けると使えます。", L"Buy one in the shop, then set it in the summon slots on the party screen or in battle status.", L"Achetez-en une, puis placez-la dans les cases d'invocation de la formation ou du statut en combat.", L"Comprane una, poi mettila negli slot evocazione della formazione o dello stato in battaglia.", L"Cómprala en la tienda y ponla en las ranuras de invocación de la formación o del estado en combate.", L"상점에서 사서 편성이나 전투 중 스테이터스의 소환 칸에 장착하면 쓸 수 있다.", L"在商店购买后，装到编成或战斗中状态的召唤栏即可使用。", L"اشترها من المتجر ثم ضعها في خانات الاستدعاء في التشكيل أو في حالة القتال.", L"Купите в лавке и поставьте в слоты призыва в отряде или в статусе боя.", L"Im Laden kaufen und in die Beschwörungsplätze der Aufstellung oder des Kampfstatus legen.", L"Compre na loja e ponha nas vagas de invocação da formação ou do estado em batalha.", L"Koop er een en zet die in de oproepvakken van de formatie of de gevechtsstatus.", L"Kup w sklepie i włóż w pola przyzwania w składzie albo w statusie walki.", L"Dükkandan alıp kadro veya savaş durumundaki çağırma yuvalarına takınca kullanılır.");
 		if (Btn(ID_BT_SUMMON, x, yy, cw, bh, SummonWord(), hasSum, FALSE, U(15), RGBA8(120, 64, 28, 235))) {
 			m_phase = PH_P_SUMMON; m_navMode = TRUE; m_focusId = ID_BT_SUM0;
 			return;

@@ -2697,6 +2697,56 @@ bool UnitHasSkill(const Unit& u, int s)
 	return CharHasSkill(u.ch, s);
 }
 
+static void HeldPush(wchar_t* dst, int cap, const wchar_t* name)
+{
+	if (!dst || !name || !name[0] || cap < 4) return;
+	size_t have = wcslen(dst);
+	size_t add = wcslen(name);
+	size_t sep = dst[0] ? 3 : 0;
+	if (have + sep + add + 1 > (size_t)cap) return;
+	if (sep) wcscat_s(dst, (size_t)cap, L" · ");
+	wcscat_s(dst, (size_t)cap, name);
+}
+
+void UnitHeldText(const Unit& u, wchar_t* out, int cap)
+{
+	if (!out || cap < 2) return;
+	out[0] = 0;
+	wchar_t act[160] = L"", pas[80] = L"", cr[160] = L"";
+	for (int s = 0; s < SKL_COUNT; s++) {
+		if (!UnitHasSkill(u, s)) continue;
+		const wchar_t* nm = SkillLabel(s);
+		if (SkillInfo(s).kind == SK_PASSIVE) HeldPush(pas, 80, nm);
+		else HeldPush(act, 160, nm);
+	}
+	for (int i = 0; i < CRAFT_SLOT_N; i++) {
+		int id = u.craftEq[i];
+		if (!IsCraftId(id)) continue;
+		wchar_t nm[64];
+		if (IsCraftSuper(id)) swprintf_s(nm, L"%s★", CraftName(id));
+		else wcscpy_s(nm, CraftName(id));
+		HeldPush(cr, 160, nm);
+	}
+	wchar_t sk[240] = L"";
+	if (act[0] || pas[0]) {
+		wcscpy_s(sk, TT(TX_BT_SKILL));
+		wcscat_s(sk, L" ");
+		if (act[0]) wcscat_s(sk, act);
+		if (act[0] && pas[0]) wcscat_s(sk, L" · ");
+		if (pas[0]) wcscat_s(sk, pas);
+	}
+	wchar_t cf[200] = L"";
+	if (cr[0]) {
+		wcscpy_s(cf, TT(TX_CRAFT));
+		wcscat_s(cf, L" ");
+		wcscat_s(cf, cr);
+	}
+	if (sk[0] && cf[0] && (int)(wcslen(sk) + wcslen(cf) + 5) < cap)
+		swprintf_s(out, (size_t)cap, L"%s    %s", sk, cf);
+	else if (sk[0]) wcscpy_s(out, (size_t)cap, sk);
+	else if (cf[0]) wcscpy_s(out, (size_t)cap, cf);
+}
+
 // 足の半幅。タイル中心から 0.5 が端。
 // 輸入メッシュは休息姿勢の下半身で測る。ブロブフィッシュは 1.68 で 2x2。
 // 半幅 1.05 まで（猫や忍者、ゴーレム級の足）は 1。そこから 2.15 までは 2。胴が 2x2 の外まで出るものは 3。
@@ -2818,6 +2868,19 @@ void MonsterPreview(int id, int* lv, int* stat)
 	MakeEnemy(u, id, level, 0, r);
 	if (lv) *lv = u.ch.lv;
 	if (stat) for (int s = 0; s < S_COUNT; s++) stat[s] = u.ch.stat[s];
+}
+
+void MonsterHeldText(int id, wchar_t* out, int cap)
+{
+	if (!out || cap < 2) return;
+	out[0] = 0;
+	if (id < 0) return;
+	int stage = MonsterFirstStage(id);
+	int level = StageEnemyLevel(stage);
+	Rng r(0xA11CEu ^ (unsigned)id * 17u);
+	Unit u;
+	MakeEnemy(u, id, level, 0, r);
+	UnitHeldText(u, out, cap);
 }
 
 // ============================================================ 経路
