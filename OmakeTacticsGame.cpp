@@ -549,17 +549,12 @@ void Game::Tick(float dt)
 
 static_assert(TAC_BGM_RUINS - TAC_BGM_PLAINS + 1 == TH_COUNT, "地形BGM");
 // 拠点=tactics.ogg。戦闘は地形ごとの tacticsgame*.ogg、無ければ tacticsgame.ogg。
-// 危険曲は毎フレーム取り直す。出撃中の味方について、残HPの合計が最大HPの合計の33%未満、
-// または死者が人数の半数以上。攻撃の見積もりでは切り替えない。回復か蘇生で条件を外れたら、
-// その場で地形曲か勝利目前曲へ戻す。
-// 勝利目前は、決着まで約20手番（おおよそ1〜2分）を切ってから。通常曲を長く残す。
-// 雑魚がいる戦はボスを除いて見る。倒した雑魚の最大HPは分母に残す。残りHPが最大の3割以下、
-// または残り2体以下かつそのHPが最大の4割以下で、倒し切る見積もりが20手番以内、残HPが味方の2.5倍以内。
-// 遠い雑魚は歩数を足して遅らせる。通常曲を長く残す。
-// 開幕（雑魚が最大の85%超）は戦曲。雑魚のHPが半分超まで戻り数が3体以上になるか、見積もりが40手番を超えたら戻す。
-// 雑魚を倒し切ってボスだけになっても分母は残るので割合は戻らない。勝利目前のまま。途中セーブも同じ単位を持つ。
-// ボスは、そばでHPが三分の二以下、または十数手番を切ったら鳴らす。
-// 一度鳴り、ボスがまだその状態なら、離れても雑魚が残っていても地形曲へは戻さない。危険曲はこちらより優先する。
+// 勝利目前は二つのときだけ。距離も匹数も見ない。
+// 敵全体の残りHPが、その最大HP合計の1/4以下。倒した敵の最大HPも分母に残す。
+// または生存しているボスのHPが最大の40%以下。
+// 一度入ったら bgmWin を立て、その戦闘では通常曲へ戻さない。スタンピードで敵が増えても戻さない。
+// 敗北寸前曲は毎フレーム見る。味方の残りHPが最大の33%未満、または死者が人数の半数以上。
+// その条件を外れたら、勝利目前に入っていればそちら、まだなら地形曲。危険曲はラッチしない。
 // 勝利確定とリザルトは tacticsgameclear。店=tacticsshop、作成・編成・進化=tacticsmake。テンポは変えない。
 void Game::SyncBgm()
 {
@@ -568,16 +563,15 @@ void Game::SyncBgm()
 		return;
 	}
 	static int danger = 0;
-	static int winNear = 0;
-	if (m_screen != SC_BATTLE) { danger = 0; winNear = 0; }
+	if (m_screen != SC_BATTLE) danger = 0;
 	int scene = TAC_BGM_HUB;
 	if (m_screen == SC_BATTLE || (m_screen == SC_RESULT && m_victory)) {
 		int alive = m_b.AliveCount(TEAM_ENEMY);
 		int players = m_b.AliveCount(TEAM_PLAYER);
 		int all = 0;
 		int hp = 0, mx = 0, partyN = 0, deadN = 0;
-		int eHp = 0, eMx = 0;
-		int mobHp = 0, mobMx = 0, mobAll = 0;
+		long long eHp = 0, eMx = 0;
+		int bossLow = 0;
 		for (int i = 0; i < m_b.nUnits; i++) {
 			const Unit& u = m_b.u[i];
 			if (u.team == TEAM_ENEMY) {
@@ -585,11 +579,7 @@ void Game::SyncBgm()
 				int em = max(1, u.ch.stat[S_HP]);
 				eMx += em;
 				if (u.alive && u.hp > 0) eHp += u.hp;
-				if (!u.boss) {
-					mobAll++;
-					mobMx += em;
-					if (u.alive && u.hp > 0) mobHp += u.hp;
-				}
+				if (u.boss && u.alive && u.hp > 0 && (long long)u.hp * 5 <= (long long)em * 2) bossLow = 1;
 			}
 			if (u.team != TEAM_PLAYER) continue;
 			partyN++;
@@ -598,106 +588,12 @@ void Game::SyncBgm()
 			else deadN++;
 		}
 		const int fightWon = (m_victory == 1) || (m_screen == SC_RESULT) || (m_bossDown && players > 0) || (alive == 0 && all > 0 && players > 0);
-		long long hits = 0, mobHits = 0;
-		int pSpd = 0, eSpd = 0, farDist = 0, bossClose = 0, bossEnding = 0;
-		int mobSpd = 0, mobFar = 0, mobAlive = 0;
-		int pAtk = 0, pN = 0;
-		for (int i = 0; i < m_b.nUnits; i++) {
-			const Unit& u = m_b.u[i];
-			if (!u.alive || u.hp <= 0 || u.team != TEAM_PLAYER) continue;
-			pAtk += max(UnitStat(u, S_STR), UnitStat(u, S_MAG));
-			pSpd += 10 + UnitStat(u, S_AGI);
-			pN++;
-		}
-		int avgAtk = pN > 0 ? pAtk / pN : 1;
-		if (avgAtk < 1) avgAtk = 1;
-		for (int i = 0; i < m_b.nUnits; i++) {
-			const Unit& u = m_b.u[i];
-			if (!u.alive || u.hp <= 0 || u.team != TEAM_ENEMY) continue;
-			int def = UnitStat(u, S_DEF), res = UnitStat(u, S_RES);
-			int soft = min(def, res), hard = max(def, res);
-			int mit = (soft * 2 + hard) / 3;
-			int blow = avgAtk - mit;
-			if (blow < avgAtk / 4) blow = max(1, avgAtk / 4);
-			if (blow < 1) blow = 1;
-			int need = (u.hp + blow - 1) / blow;
-			need = need * 3 / 5;
-			if (need < 1) need = 1;
-			hits += need;
-			eSpd += 10 + UnitStat(u, S_AGI);
-			int best = 999;
-			for (int p = 0; p < m_b.nUnits; p++) {
-				const Unit& a = m_b.u[p];
-				if (!a.alive || a.hp <= 0 || a.team != TEAM_PLAYER) continue;
-				int d = abs(u.x - a.x) + abs(u.z - a.z);
-				if (d < best) best = d;
-			}
-			if (best < 999 && best > farDist) farDist = best;
-			if (!u.boss) {
-				mobAlive++;
-				mobHits += need;
-				mobSpd += 10 + UnitStat(u, S_AGI);
-				if (best < 999 && best > mobFar) mobFar = best;
-			} else {
-				int bossNear = best;
-				int sp = UnitSpan(u);
-				if (sp > 1) {
-					bossNear = 999;
-					for (int p = 0; p < m_b.nUnits; p++) {
-						const Unit& a = m_b.u[p];
-						if (!a.alive || a.hp <= 0 || a.team != TEAM_PLAYER) continue;
-						int asp = UnitSpan(a);
-						for (int dz = 0; dz < sp; dz++) for (int dx = 0; dx < sp; dx++)
-							for (int az = 0; az < asp; az++) for (int ax = 0; ax < asp; ax++) {
-								int d = abs((u.x + dx) - (a.x + ax)) + abs((u.z + dz) - (a.z + az));
-								if (d < bossNear) bossNear = d;
-							}
-					}
-				}
-				int bmax = max(1, u.ch.stat[S_HP]);
-				int wounded = u.hp < bmax && ((long long)u.hp * 3 <= (long long)bmax * 2 || need <= 16);
-				if (wounded) bossEnding = 1;
-				if (bossNear <= 14 && wounded) bossClose = 1;
-			}
-		}
-		long long enemyTurns = pSpd > 0 ? hits * eSpd / pSpd : hits;
-		int walk = farDist / 6;
-		if (walk > 12) walk = 12;
-		long long turns = hits + enemyTurns + walk;
-		if (turns > 9999) turns = 9999;
-		long long mobEnemyTurns = pSpd > 0 ? mobHits * mobSpd / pSpd : mobHits;
-		int mobWalk = mobFar / 6;
-		if (mobWalk > 12) mobWalk = 12;
-		long long mobTurns = mobHits + mobEnemyTurns + mobWalk;
-		if (mobTurns > 9999) mobTurns = 9999;
-		const int mobOpen = mobMx > 0 && (long long)mobHp * 100 > (long long)mobMx * 85;
-		const int mobBroken = mobMx > 0 && (long long)mobHp * 100 <= (long long)mobMx * 30;
-		const int mobFew = mobAll > 0 && mobAlive > 0 && mobAlive <= 2 && (long long)mobHp * 100 <= (long long)mobMx * 40;
-		const int mobAhead = hp > 0 && (long long)mobHp * 2 <= (long long)hp * 5;
-		// 生存0でも分母は残っている。0%は3割以下なので、ボスだけになってもここが立つ。
-		const int mobThin = mobAll > 0 && !mobOpen && mobTurns <= 20 && mobAhead && (mobBroken || mobFew);
-		int odds = eMx / max(1, mx);
-		int remain = 500;
-		if (odds >= 8) remain = 280;
-		else if (odds >= 5) remain = 330;
-		else if (odds >= 3) remain = 400;
-		else if (odds >= 2) remain = 450;
-		const int broken = eMx > 0 && (long long)eHp * 1000 <= (long long)eMx * remain;
-		const int ahead = hp > 0 && (long long)eHp * 2 <= (long long)hp * 5;
-		const int mapEnd = turns <= 20 && broken && ahead;
-		const int mobRallied = mobAll > 0 && (long long)mobHp * 100 > (long long)mobMx * 50 && mobAlive > 2;
-		const int mobDrag = mobAll > 0 && mobTurns >= 40 && !bossClose;
-		const int bossOnly = mobAll == 0 && !bossClose && (turns >= 40 || (eMx > 0 && (long long)eHp * 10 > (long long)eMx * 9));
-		if (eMx <= 0 || hp <= 0 || players <= 0 || alive <= 0) winNear = 0;
-		else if (bossClose || mapEnd || mobThin) winNear = 1;
-		else if (winNear && bossEnding) {
-			// 瀕死のボスが離れても、雑魚が残っていても、勝利目前を維持する。
-		} else if (mobRallied || mobDrag || bossOnly) winNear = 0;
+		if (m_screen == SC_BATTLE && !fightWon && (bossLow || (eMx > 0 && eHp * 4 <= eMx))) m_b.bgmWin = 1;
 		const int lowHp = mx > 0 && (long long)hp * 100 < (long long)mx * 33;
 		const int halfDown = partyN > 0 && deadN * 2 >= partyN;
 		if (fightWon || players <= 0 || m_phase == PH_OVER) danger = 0;
 		else if (m_screen == SC_BATTLE) danger = (lowHp || halfDown) ? 1 : 0;
-		const int fewLeft = winNear != 0;
+		const int fewLeft = m_b.bgmWin != 0;
 		int th = Clampi(m_b.map.theme, 0, TH_COUNT - 1);
 		scene = TAC_BGM_PLAINS + th;
 		if (fewLeft) scene = TAC_BGM_WIN;

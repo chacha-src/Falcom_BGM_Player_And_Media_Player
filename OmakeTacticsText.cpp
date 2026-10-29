@@ -2303,6 +2303,8 @@ R(TX_GM_FENCE, L"柵", L"Fence", L"Barrière", L"Recinto", L"Valla", L"울타리
 R(TX_GM_DROP, L"落ちる橋", L"Weak bridge", L"Pont fragile", L"Ponte fragile", L"Puente frágil", L"무너지는 다리", L"危桥", L"جسر هش", L"Хрупкий мост", L"Morsche Brücke", L"Ponte frágil", L"Broze brug", L"Kruchy most", L"Çürük köprü")
 R(TX_BT_FENCE, L"柵を壊す", L"Break fence", L"Briser la barrière", L"Rompi il recinto", L"Romper la valla", L"울타리를 부순다", L"拆栅栏", L"اكسر السياج", L"Сломать ограду", L"Zaun einreißen", L"Quebrar a cerca", L"Hek slopen", L"Zburz płot", L"Çiti kır")
 R(TX_BTD_FENCE, L"隣の柵を壊して手番を終えます。", L"Breaks an adjacent fence and ends the turn.", L"Brise une barrière voisine et finit le tour.", L"Rompe un recinto vicino e chiude il turno.", L"Rompe una valla vecina y termina el turno.", L"옆의 울타리를 부수고 차례를 끝냅니다.", L"拆掉相邻的栅栏，并结束回合。", L"يكسر سياجًا مجاورًا وينهي الدور.", L"Ломает соседнюю ограду и завершает ход.", L"Reißt einen benachbarten Zaun ein und beendet den Zug.", L"Quebra uma cerca vizinha e encerra o turno.", L"Sloopt een naburig hek en beëindigt de beurt.", L"Burzy sąsiedni płot i kończy turę.", L"Bitişik çiti kırar ve turu bitirir.")
+R(TX_BT_STAMPEDE, L"スタンピードステージ", L"Stampede Stage", L"Étage de ruée", L"Fase calca", L"Etapa de estampida", L"스탬피드 스테이지", L"狂奔关卡", L"مرحلة الاندفاع", L"Стадия натиска", L"Stampede-Stufe", L"Estágio de estouro", L"Stormloop-etappe", L"Etap naporu", L"İzdiham aşaması")
+R(TX_BT_STAMPEDE_GO, L"スタンピード発生！", L"Stampede!", L"Ruée !", L"Calca!", L"¡Estampida!", L"스탬피드 발생!", L"狂奔来袭！", L"اندفاع!", L"Натиск!", L"Stampede!", L"Estouro!", L"Stormloop!", L"Napór!", L"İzdiham!")
 
 };
 

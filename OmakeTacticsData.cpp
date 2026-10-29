@@ -3213,7 +3213,7 @@ static void StrikeCalc(const Battle& b, const Unit& a, const Unit& d, int skill,
 		float df = UnitStat(d, S_RES) * (1.f + tdef * .005f);
 		dm = atk * mult - df * .8f;
 		if (sd && IsSummonId(skill)) {
-			// 魔力−魔防だけだと個位数になる。力＋武器と魔力の高い方を使い、その見積もりの半分にする。
+			// 魔力−魔防だけだと個位数になる。力＋武器と魔力の高い方を使い、見積もりの半分をさらに 1.5 倍する。
 			int phys = UnitStat(a, S_STR) + UnitWeaponPow(a);
 			float offense = (float)(phys > atk ? phys : atk);
 			float pdef = UnitStat(d, S_DEF) * (1.f + tdef * .01f);
@@ -3222,7 +3222,7 @@ static void StrikeCalc(const Battle& b, const Unit& a, const Unit& d, int skill,
 			float floorv = offense * 1.6f;
 			if (want < floorv) want = floorv;
 			if (dm < want) dm = want;
-			dm *= 0.5f;
+			dm *= 0.5f * 1.5f;
 		} else if (sd && sd->hits > 1) dm /= (float)sd->hits;
 		hit = 96 + UnitStat(a, S_DEX) / 2 - UnitStat(d, S_AGI) / 3 - tavo / 3 + (sd ? 6 : 0);
 		crit = 0;
@@ -4395,13 +4395,116 @@ void SetupBattle(Battle& b, int stage, DWORD seed, const CharData* party, const 
 	b.RebuildOcc();
 	RescueStuckFeet(b);
 	WakeNearPlayers(b, 8, 1);
+	b.stampede = 0;
+	b.stampedeLeft = 0;
+	b.stampedeLine = 0;
+	b.stampedeShow = 0;
+	int foes = b.AliveCount(TEAM_ENEMY);
+	if (foes >= 6 && (seed % 8u) == 3u) {
+		int line = foes / 4;
+		if (line < 2) line = 2;
+		if (line < foes) {
+			b.stampede = 1;
+			b.stampedeLeft = 1 + (int)((seed / 8u) & 1u);
+			b.stampedeLine = line;
+		}
+	}
+}
+
+static int StampedeSpot(Battle& b, int ui, int ax, int az, int ally, int radMax, int needRange)
+{
+	int bestX = -1, bestZ = -1, bestD = 99;
+	for (int rad = 1; rad <= radMax; rad++) {
+		int found = 0;
+		for (int dz = -rad; dz <= rad; dz++) for (int dx = -rad; dx <= rad; dx++) {
+			if (max(abs(dx), abs(dz)) != rad) continue;
+			int x = ax + dx, z = az + dz;
+			if (!FootFits(b, ui, x, z)) continue;
+			if (needRange) {
+				const Unit& u = b.u[ui];
+				int rmin = UnitRangeMin(u);
+				int rmax = max(1, UnitRangeMax(u));
+				if (!InRangeOfUnit(b, u, x, z, rmin, rmax, b.u[ally], true)) continue;
+			}
+			int d = abs(dx) + abs(dz);
+			if (d < bestD) { bestD = d; bestX = x; bestZ = z; found = 1; }
+		}
+		if (found && needRange) break;
+	}
+	if (bestX < 0) return 0;
+	b.u[ui].x = bestX;
+	b.u[ui].z = bestZ;
+	return 1;
+}
+
+int SpawnStampede(Battle& b, Rng& r, int prefer, int* outIdx, int cap)
+{
+	if (!b.stampede || b.stampedeLeft <= 0 || !outIdx || cap <= 0) return 0;
+	int alive = b.AliveCount(TEAM_ENEMY);
+	if (alive <= 0 || alive > b.stampedeLine) return 0;
+	int allies[MAX_PARTY];
+	int na = 0;
+	for (int i = 0; i < b.nUnits && na < MAX_PARTY; i++)
+		if (b.u[i].alive && b.u[i].team == TEAM_PLAYER) allies[na++] = i;
+	if (na <= 0) return 0;
+	int start = 0;
+	for (int i = 0; i < na; i++) if (allies[i] == prefer) { start = i; break; }
+	int want = 3 + r.Range(0, 1);
+	if (want > cap) want = cap;
+	int room = MAX_UNITS - b.nUnits;
+	if (want > room) want = room;
+	if (want <= 0) return 0;
+	int top = 1000;
+	for (int i = 0; i < b.nUnits; i++)
+		if (b.u[i].alive && b.u[i].alert == 1 && b.u[i].ct > top) top = b.u[i].ct;
+	int baseLv = StageEnemyLevel(b.stage);
+	int n = 0;
+	for (int k = 0; k < want; k++) {
+		int ally = allies[(start + k) % na];
+		int mon = -1;
+		for (int t = 0; t < 8; t++) {
+			int id = PickMonster(b.stage, r);
+			if (MonsterSpan(MonsterInfo(id), 0) <= 1) { mon = id; break; }
+		}
+		if (mon < 0) mon = PickClassic(b.stage, r);
+		int ui = b.nUnits;
+		Unit& u = b.u[ui];
+		int lv = baseLv + r.Range(-1, 1);
+		if (b.stage <= 2) lv = max(1, lv - 1);
+		MakeEnemy(u, mon, lv, 0, r);
+		u.span = 1;
+		u.x = -8;
+		u.z = -8;
+		u.alert = 1;
+		u.grp = -1;
+		u.rush = 1;
+		u.ct = top + 240 + (want - k) * 40;
+		b.RebuildOcc();
+		int ax = b.u[ally].x, az = b.u[ally].z;
+		if (!StampedeSpot(b, ui, ax, az, ally, 4, 1) && !StampedeSpot(b, ui, ax, az, ally, 5, 0)) {
+			memset(&u, 0, sizeof(u));
+			continue;
+		}
+		u.face = atan2f((float)(b.u[ally].x - u.x), (float)(b.u[ally].z - u.z));
+		u.hpShow = (float)u.hp;
+		b.nUnits = ui + 1;
+		b.RebuildOcc();
+		outIdx[n++] = ui;
+	}
+	if (n <= 0) return 0;
+	b.stampedeLeft--;
+	b.stampedeShow = 1;
+	return n;
 }
 
 void FinishAction(Battle& b, int ui, int moved, int acted)
 {
 	Unit& u = b.u[ui];
 	int cost = (moved && acted) ? 1000 : (moved || acted) ? 800 : 600;
-	u.ct = max(0, u.ct - cost);
+	if (u.rush) {
+		u.rush = 0;
+		u.ct = max(0, 1000 - cost);
+	} else u.ct = max(0, u.ct - cost);
 	b.turnCount++;
 }
 

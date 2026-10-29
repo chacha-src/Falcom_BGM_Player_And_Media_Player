@@ -220,6 +220,7 @@ private:
 	void FinishSeq();
 	void AwardExp();
 	void FinishUnitTurn(int acted);
+	void RaiseStampede();
 	void ConfuseSelf(int ui);
 	BOOL CheckBattleOver();
 	void ComputeOverlays();

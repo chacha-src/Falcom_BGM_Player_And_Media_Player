@@ -500,6 +500,7 @@ struct Unit {
 	int sleep, confuse, stun;   // 睡眠は1、混乱は残り行動、スタンは1で次の手番を飛ばす
 	int mulTurns;        // マス効果: この間ステータス倍
 	int alert;           // 1=行動順に入る（味方は常に 1。敵拠点は接近で起床）
+	int rush;            // 1=スタンピードの先制。手番が終わると通常の CT に戻す
 	int grp;             // 敵拠点番号（味方は -1）
 	int expGained;
 	int levelsGained;
@@ -622,12 +623,18 @@ struct Battle {
 	int UnitAt(int x, int z) const { return Map::In(x, z) ? occ[z][x] - 1 : -1; }
 	int AliveCount(int team) const;
 	int weather;              // Weather。戦闘中だけ。セーブの大きさは変えない
+	int stampede;             // 1=この戦闘はスタンピードステージ
+	int stampedeLeft;         // 残りの発生回数（1 か 2）
+	int stampedeLine;         // 生存している敵がこの数以下で次の波
+	int stampedeShow;         // 1=湧きを見せているあいだ、次の手番を少し待つ
+	int bgmWin;               // 1=勝利目前に入った。この戦闘では通常曲へ戻さない
 	int NextActor();          // CT を進めて次の行動者を返す
 	// acting の手番終了後（CT を cost 消費）の並び。insertAt はそのユニットが次に入る位置
 	int PredictOrder(int* out, int n, int acting = -1, int cost = 1000, int* insertAt = NULL) const;
 };
 
 void SetupBattle(Battle& b, int stage, DWORD seed, const CharData* party, const int* rosterIdx, int nParty, int theme = -1);
+int SpawnStampede(Battle& b, Rng& r, int prefer, int* outIdx, int cap);
 void FinishAction(Battle& b, int ui, int moved, int acted);
 int  TurnStartEffects(Battle& b, int ui, int* healOut, int* poisonOut);
 void WakeGroup(Battle& b, int grp);

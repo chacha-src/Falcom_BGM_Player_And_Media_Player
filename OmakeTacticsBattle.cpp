@@ -145,6 +145,7 @@ void Game::BindImportedActors()
 		if (mi < 0) continue;
 		if (m_act[i].proc == 3 && m_act[i].model == mi) continue;
 		ActorForUnit(i);
+		if (u.rush && m_b.stampedeShow) ActorPlay(m_act[i], CL_SPAWN, 0, .05f);
 	}
 	InvalidatePortraits();
 }
@@ -413,6 +414,7 @@ void Game::ResumeBattle(int kind)
 		Unit& u = m_b.u[i];
 		if (u.team == TEAM_PLAYER) CharGrantReached(u.ch);
 		ActorForUnit(i);
+		if (u.rush && m_b.stampedeShow) ActorPlay(m_act[i], CL_SPAWN, 0, .05f);
 		V3 p = UnitGroundPos(u);
 		u.px = p.x; u.py = p.y; u.pz = p.z;
 		u.hover = m_act[i].hover;
@@ -618,9 +620,14 @@ void Game::StartBattle(int stage)
 	memset(m_ovAtk, 0, sizeof(m_ovAtk));
 	memset(m_ovThreat, 0, sizeof(m_ovThreat));
 	wchar_t t[64], sub[160];
-	swprintf_s(t, L"%s %d", TT(TX_BT_STAGE), stage);
-	swprintf_s(sub, L"%s  —  %s", TT(ThemeNameTx(m_b.map.theme)), TT(TX_BT_GOAL));
-	AddBanner(t, sub, RGBA8(255, 226, 150), 0, 2.4f);
+	if (m_b.stampede) {
+		swprintf_s(t, L"%s", TT(TX_BT_STAMPEDE));
+		swprintf_s(sub, L"%s %d  —  %s", TT(TX_BT_STAGE), stage, TT(ThemeNameTx(m_b.map.theme)));
+	} else {
+		swprintf_s(t, L"%s %d", TT(TX_BT_STAGE), stage);
+		swprintf_s(sub, L"%s  —  %s", TT(ThemeNameTx(m_b.map.theme)), TT(TX_BT_GOAL));
+	}
+	AddBanner(t, sub, m_b.stampede ? RGBA8(255, 150, 70) : RGBA8(255, 226, 150), 0, 2.4f);
 	TacSfx(TS_START);
 }
 
@@ -852,8 +859,51 @@ void Game::FinishUnitTurn(int acted)
 	if (m_cur >= 0) FinishAction(m_b, m_cur, m_moved, acted);
 	m_turnOpen = FALSE;
 	if (CheckBattleOver()) return;
+	RaiseStampede();
 	m_phase = PH_END;
 	m_phaseT = 0;
+}
+
+void Game::RaiseStampede()
+{
+	int watch = -1;
+	float watchD = 1.0e9f;
+	for (int i = 0; i < m_b.nUnits; i++) {
+		const Unit& a = m_b.u[i];
+		if (!a.alive || a.team != TEAM_PLAYER) continue;
+		float dx = a.px - m_camTarget.x, dz = a.pz - m_camTarget.z;
+		float d = dx * dx + dz * dz;
+		if (d < watchD) { watchD = d; watch = i; }
+	}
+	int idx[8];
+	int n = SpawnStampede(m_b, m_rng, watch, idx, 8);
+	if (n <= 0) return;
+	m_importBind = 0;
+	LoadBattleCast();
+	m_importBind = 1;
+	for (int i = 0; i < n; i++) {
+		int ui = idx[i];
+		Unit& u = m_b.u[ui];
+		ActorForUnit(ui);
+		ActorPlay(m_act[ui], CL_SPAWN, 0, .05f);
+		V3 p = UnitGroundPos(u);
+		u.px = p.x; u.py = p.y; u.pz = p.z;
+		u.hpShow = (float)u.hp;
+		u.dissolve = 0;
+		u.flash = 1.f;
+		u.hover = m_act[ui].hover;
+		m_faceShow[ui] = u.face;
+		m_dispHp[ui] = (float)u.hp;
+		m_dieT[ui] = -1.f;
+		m_expGain[ui] = 0;
+		m_lunge[ui] = 0;
+		Burst(p + v3(0, .15f, 0), 18, 2.4f, .13f, .9f, .9f, .45f, .16f, 0, 1, -.6f, 0, .7f);
+	}
+	m_cur = idx[0];
+	AddBanner(TT(TX_BT_STAMPEDE_GO), NULL, RGBA8(255, 140, 60), 1, 2.2f);
+	AddLog(TT(TX_BT_STAMPEDE_GO), RGBA8(255, 170, 90));
+	TacSfx(TS_START);
+	ComputeOverlays();
 }
 
 // ============================================================ 範囲表示
@@ -2860,7 +2910,11 @@ void Game::UpdateBattle(float dt)
 		}
 	} break;
 	case PH_END:
-		if (m_phaseT > .22f) { m_phase = PH_NEXT; m_phaseT = 0; }
+		if (m_phaseT > (m_b.stampedeShow ? 1.25f : .22f)) {
+			m_b.stampedeShow = 0;
+			m_phase = PH_NEXT;
+			m_phaseT = 0;
+		}
 		break;
 	case PH_LEVELUP:
 		m_lvT += dt;
@@ -3408,17 +3462,175 @@ void Game::DrawCutIn3D()
 	m_r.DrawParticles(m_parts.data(), m_parts.size());
 }
 
+// 区切り（" · " と技能欄の空き）で折り返す。1行の高さは px に少し足す。
+static int WrapHeldLines(Renderer& r, const wchar_t* src, float maxW, float px, wchar_t lines[][120], int maxLines)
+{
+	if (!src || !src[0] || maxLines < 1 || maxW < 8.f) return 0;
+	int nLine = 0;
+	int sepBefore = 0;
+	BOOL more = FALSE;
+	wchar_t cur[120];
+	cur[0] = 0;
+	const wchar_t* p = src;
+	while (*p && nLine < maxLines) {
+		const wchar_t* dot = wcsstr(p, L" · ");
+		const wchar_t* gap = wcsstr(p, L"    ");
+		const wchar_t* br = NULL;
+		int seplen = 0;
+		if (dot && (!gap || dot <= gap)) { br = dot; seplen = 3; }
+		else if (gap) { br = gap; seplen = 4; }
+		size_t n = br ? (size_t)(br - p) : wcslen(p);
+		wchar_t tok[120];
+		if (n > 118) n = 118;
+		memcpy(tok, p, n * sizeof(wchar_t));
+		tok[n] = 0;
+		wchar_t trial[120];
+		if (!cur[0]) wcscpy_s(trial, tok);
+		else swprintf_s(trial, L"%s%s%s", cur, sepBefore == 4 ? L"  " : L" · ", tok);
+		if (cur[0] && r.TextWidth(trial, px, 0) > maxW) {
+			wcscpy_s(lines[nLine++], cur);
+			if (nLine >= maxLines) { cur[0] = 0; more = TRUE; break; }
+			wcscpy_s(cur, tok);
+		} else wcscpy_s(cur, trial);
+		if (!br) { p = L""; break; }
+		sepBefore = seplen;
+		p = br + seplen;
+	}
+	if (cur[0] && nLine < maxLines) wcscpy_s(lines[nLine++], cur);
+	else if (nLine > 0 && (cur[0] || more || (p && *p))) {
+		size_t len = wcslen(lines[nLine - 1]);
+		if (len + 1 < 119) wcscat_s(lines[nLine - 1], L"…");
+	}
+	return nLine;
+}
+
 // ============================================================ HUD（戦闘）
 void Game::DrawUnitPanel(const Unit& u, float x, float y, float w, BOOL big)
 {
 	int ui = (int)(&u - m_b.u);
-	wchar_t held[360];
-	held[0] = 0;
-	if (u.team == TEAM_ENEMY) UnitHeldText(u, held, 360);
-	float extra = held[0] ? (big ? U(38) : U(30)) : 0;
-	float h = (big ? U(148) : U(112)) + extra;
-	if (extra > 0) y -= extra;
-	if (y < U(8)) y = U(8);
+	if (u.team == TEAM_ENEMY) {
+		wchar_t held[480];
+		held[0] = 0;
+		UnitHeldText(u, held, 480);
+		float ps = big ? U(118.f) : U(90.f);
+		float tx = x + ps + U(16);
+		float tw = w - ps - U(28);
+		if (tw < U(72)) tw = U(72);
+		float linePx = U(11);
+		wchar_t skLine[8][120];
+		int nSk = WrapHeldLines(m_r, held, tw, linePx, skLine, 8);
+		wchar_t nm[96], lv[128], wk[96], st[160];
+		UnitTitle(u, nm, 64);
+		if (!u.alive) {
+			wchar_t ko[112];
+			swprintf_s(ko, L"%s  %s", nm, TT(TX_RS_KO));
+			wcscpy_s(nm, ko);
+		}
+		swprintf_s(lv, L"%s%d  %s%s", TT(TX_MISC_LV), u.ch.lv, ClassName(u.ch.cls), UnitMoveType(u) == MV_FLY ? L"  ✈" : L"");
+		MonsterWeakText(u.monster, wk, 96);
+		st[0] = 0;
+		if (big && !(m_seqCut && m_cutStage == 0)) {
+			wchar_t bit[40];
+			if (u.poison > 0) { swprintf_s(bit, L"%s%d ", TT(TX_BT_POISON), u.poison); wcscat_s(st, bit); }
+			if (u.slow > 0) { swprintf_s(bit, L"%s%d ", EffectWord(EF_SLOW), u.slow); wcscat_s(st, bit); }
+			if (u.defDown > 0) { swprintf_s(bit, L"%s%d ", EffectWord(EF_DEFDOWN), u.defDown); wcscat_s(st, bit); }
+			if (u.sleep > 0) { swprintf_s(bit, L"%s ", EffectWord(EF_SLEEP)); wcscat_s(st, bit); }
+			if (u.confuse > 0) { swprintf_s(bit, L"%s%d ", EffectWord(EF_CONFUSE), u.confuse); wcscat_s(st, bit); }
+			if (u.stun > 0) { swprintf_s(bit, L"%s ", EffectWord(EF_STUN)); wcscat_s(st, bit); }
+			if (u.buffDef > 0 || u.buffAgi > 0 || u.buffAtk > 0 || u.mulTurns > 0) { wcscat_s(st, TT(TX_BT_BUFF)); wcscat_s(st, L" "); }
+			if (!u.alert) { wcscat_s(st, TT(TX_BT_ASLEEP)); wcscat_s(st, L" "); }
+		}
+		float gapN = U(big ? 20.f : 18.f);
+		float gapRow = U(16);
+		float gapHp = U(big ? 20.f : 22.f);
+		float gapMp = (!big && u.ch.stat[S_MP] > 0) ? U(20) : 0;
+		float gapStat = big ? U(18) : 0;
+		float gapSt = (big && st[0]) ? U(16) : 0;
+		float gapSk = nSk > 0 ? (U(6) + nSk * U(15)) : 0;
+		float span = U(12) + gapN + gapRow + gapRow + gapHp + gapMp + gapStat + gapSt + gapSk + U(12);
+		float h = max(ps + U(16), span);
+		float bottom = y + (big ? U(148.f) : U(112.f));
+		y = bottom - h;
+		if (y < U(8)) y = U(8);
+		Panel(x, y, w, h);
+		DWORD fc = u.boss ? RGBA8(255, 200, 60) : RGBA8(255, 100, 90);
+		DrawPortrait(BattlePortrait(ui), x + U(10), y + U(8), ps, fc);
+		float cy = y + U(12);
+		m_r.HudText(nm, tx, cy, U(big ? 17.f : 15.f), u.alive ? RGBA8(255, 255, 255) : RGBA8(255, 176, 168), 0, 1);
+		cy += gapN;
+		float lfs = U(13);
+		if (m_r.TextWidth(lv, lfs, 0) > tw) lfs = U(11);
+		m_r.HudText(lv, tx, cy, lfs, RGBA8(255, 226, 150), 0, 0);
+		cy += gapRow;
+		float wfs = U(12);
+		if (m_r.TextWidth(wk, wfs, 0) > tw) wfs = U(10);
+		m_r.HudText(wk, tx, cy, wfs, RGBA8(255, 186, 120), 0, 0);
+		cy += gapRow;
+		if (big) {
+			wchar_t hp[48], mp[48], cp[32];
+			swprintf_s(hp, L"%s %s/%s", TT(TX_ST_HP), TacNum((int)(u.hpShow + .5f)), TacNum(u.ch.stat[S_HP]));
+			mp[0] = 0;
+			if (u.ch.stat[S_MP] > 0) swprintf_s(mp, L"%s %s/%s", TT(TX_ST_MP), TacNum(u.mp), TacNum(u.ch.stat[S_MP]));
+			swprintf_s(cp, L"%s %s", TT(TX_CP), TacNum(u.cp));
+			float fs = U(12);
+			float gap = U(12);
+			float need = m_r.TextWidth(hp, fs, 0) + gap + m_r.TextWidth(cp, fs, 0);
+			if (mp[0]) need += gap + m_r.TextWidth(mp, fs, 0);
+			if (need > tw && need > 1.f) fs *= tw / need;
+			float hx = tx;
+			m_r.HudText(hp, hx, cy, fs, RGBA8(230, 230, 230), 0, 0);
+			hx += m_r.TextWidth(hp, fs, 0) + gap;
+			if (mp[0]) {
+				m_r.HudText(mp, hx, cy, fs, RGBA8(190, 210, 255), 0, 0);
+				hx += m_r.TextWidth(mp, fs, 0) + gap;
+			}
+			m_r.HudText(cp, hx, cy, fs, u.cp >= 100 ? RGBA8(255, 214, 80) : RGBA8(210, 170, 70), 0, 0);
+			cy += gapHp;
+			wchar_t sl[160];
+			swprintf_s(sl, L"%s%s %s%s %s%s %s%s %s%s %s%s", TT(TX_ST_STR), TacNum(UnitStat(u, S_STR)), TT(TX_ST_MAG), TacNum(UnitStat(u, S_MAG)), TT(TX_ST_DEF), TacNum(UnitStat(u, S_DEF)),
+				TT(TX_ST_RES), TacNum(UnitStat(u, S_RES)), TT(TX_ST_AGI), TacNum(UnitStat(u, S_AGI)), TT(TX_ST_MOV), TacNum(UnitStat(u, S_MOV)));
+			float sfs = U(11);
+			float sw = m_r.TextWidth(sl, sfs, 0);
+			if (sw > tw && sw > 1.f) sfs *= tw / sw;
+			m_r.HudText(sl, tx, cy, sfs, RGBA8(210, 210, 220), 0, 0);
+			cy += gapStat;
+			if (st[0]) {
+				m_r.HudText(st, tx, cy, U(11), RGBA8(200, 230, 255), 0, 0);
+				cy += gapSt;
+			}
+		} else {
+			float bw = tw * .36f;
+			wchar_t hp[64];
+			swprintf_s(hp, L"%s %s/%s", TT(TX_ST_HP), TacNum((int)(u.hpShow + .5f)), TacNum(u.ch.stat[S_HP]));
+			float hpFs = U(12);
+			if (m_r.TextWidth(hp, hpFs, 0) > tw - bw - U(40)) hpFs = U(10);
+			m_r.HudText(hp, tx, cy, hpFs, RGBA8(230, 230, 230), 0, 0);
+			wchar_t cp[32];
+			swprintf_s(cp, L"%s %s", TT(TX_CP), TacNum(u.cp));
+			m_r.HudText(cp, tx + tw - bw - U(8), cy, U(12), u.cp >= 100 ? RGBA8(255, 214, 80) : RGBA8(210, 170, 70), 2, 0);
+			float frac = u.hpShow / max(1, u.ch.stat[S_HP]);
+			Bar(tx + tw - bw, cy + U(2), bw, U(8), frac, frac > .5f ? RGBA8(120, 240, 120) : (frac > .25f ? RGBA8(240, 210, 80) : RGBA8(255, 90, 70)), RGBA8(40, 120, 50));
+			cy += gapHp;
+			if (u.ch.stat[S_MP] > 0) {
+				swprintf_s(hp, L"%s %d/%d", TT(TX_ST_MP), u.mp, u.ch.stat[S_MP]);
+				m_r.HudText(hp, tx, cy, U(12), RGBA8(220, 220, 240), 0, 0);
+				Bar(tx + tw - bw, cy + U(2), bw, U(7), (float)u.mp / max(1, u.ch.stat[S_MP]), RGBA8(110, 170, 255), RGBA8(40, 70, 170));
+				cy += gapMp;
+			}
+		}
+		if (nSk > 0) {
+			cy += U(6);
+			for (int i = 0; i < nSk; i++) {
+				float fs = linePx;
+				float lw = m_r.TextWidth(skLine[i], fs, 0);
+				if (lw > tw && lw > 1.f) fs *= tw / lw;
+				m_r.HudText(skLine[i], tx, cy, fs, RGBA8(186, 214, 255), 0, 0);
+				cy += U(15);
+			}
+		}
+		return;
+	}
+	float h = big ? U(148) : U(112);
 	Panel(x, y, w, h);
 	float ps = h - U(20);
 	DWORD fc = u.team == TEAM_PLAYER ? RGBA8(110, 170, 255) : (u.boss ? RGBA8(255, 200, 60) : RGBA8(255, 100, 90));
@@ -3518,8 +3730,6 @@ void Game::DrawUnitPanel(const Unit& u, float x, float y, float w, BOOL big)
 		}
 		m_r.HudText(st, tx, by + U(6), U(11), RGBA8(200, 230, 255), 0, 0);
 	}
-	if (held[0])
-		m_r.HudTextBox(held, tx, y + h - extra + U(2), tw, extra - U(4), U(11), RGBA8(186, 214, 255));
 }
 
 void Game::DrawTurnOrder()
