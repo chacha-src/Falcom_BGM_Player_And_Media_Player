@@ -2860,6 +2860,8 @@
     <None Include="res\cso\tac_psg5.cso" />
     <None Include="res\cso\tac_psg6.cso" />
     <None Include="res\cso\tac_psg7.cso" />
+    <None Include="res\cso\tac_psg8.cso" />
+    <None Include="res\cso\tac_psg9.cso" />
     <None Include="res\cso\tac_pslava.cso" />
     <None Include="res\cso\tac_psprop.cso" />
     <None Include="res\cso\tac_psui.cso" />

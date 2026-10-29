@@ -36,6 +36,8 @@ R(TX_TH_DESERT, L"砂漠", L"Desert", L"Désert", L"Deserto", L"Desierto", L"사
 R(TX_TH_VOLCANO, L"火山", L"Volcano", L"Volcan", L"Vulcano", L"Volcán", L"화산", L"火山", L"البركان", L"Вулкан", L"Vulkan", L"Vulcão", L"Vulkaan", L"Wulkan", L"Yanardağ")
 R(TX_TH_SWAMP, L"湿地帯", L"Marshland", L"Marécages", L"Paludi", L"Marismas", L"습지대", L"湿地", L"الأراضي الرطبة", L"Топи", L"Sumpfland", L"Pantanal", L"Moerasland", L"Mokradła", L"Sulak alan")
 R(TX_TH_RUINS, L"古代遺跡", L"Ancient Ruins", L"Ruines antiques", L"Rovine antiche", L"Ruinas antiguas", L"고대 유적", L"古代遗迹", L"الأطلال القديمة", L"Древние руины", L"Alte Ruinen", L"Ruínas antigas", L"Oude ruïnes", L"Starożytne ruiny", L"Antik harabeler")
+R(TX_TH_SEABED, L"海底", L"Seabed", L"Fond marin", L"Fondale", L"Fondo marino", L"해저", L"海底", L"قاع البحر", L"Морское дно", L"Meeresgrund", L"Fundo do mar", L"Zeebodem", L"Dno morskie", L"Deniz tabanı")
+R(TX_TH_FALLS, L"滝", L"Waterfall", L"Cascade", L"Cascata", L"Cascada", L"폭포", L"瀑布", L"شلال", L"Водопад", L"Wasserfall", L"Cachoeira", L"Waterval", L"Wodospad", L"Şelale")
 // ---------------------------------------------------------------- 能力値
 R(TX_ST_HP, L"HP", L"HP", L"PV", L"PS", L"PV", L"HP", L"HP", L"الصحة", L"ОЗ", L"LP", L"PV", L"LP", L"PŻ", L"CP")
 R(TX_ST_MP, L"MP", L"MP", L"PM", L"PM", L"PM", L"MP", L"MP", L"المانا", L"ОМ", L"MP", L"PM", L"MP", L"PM", L"MP")
@@ -2535,6 +2537,22 @@ R(TX_SKD_AREAX + 14, L"スッゲスティオン。半径8の倒れた味方を�
 R(TX_SET_Q_TINY, L"超軽量", L"Ultra Light", L"Très léger", L"Leggerissima", L"Ultraligera", L"초경량", L"超轻量", L"خفيفة جداً", L"Сверхлёгкое", L"Ultraleicht", L"Ultraleve", L"Ultralicht", L"Ultralight", L"Ultra hafif")
 R(TX_SET_Q_ULTRA, L"超綺麗", L"Ultra Fine", L"Très belle", L"Bellissima", L"Muy bella", L"초고화질", L"超精细", L"فائقة الجمال", L"Прекрасное", L"Wunderschön", L"Lindíssima", L"Prachtig", L"Przepiękna", L"Çok güzel")
 R(TX_SKD_AREAX + 15, L"ワルディング・ボンド。半径9の倒れた味方を起こす。", L"Warding Bond. Raises fallen allies within radius 9.", L"Warding Bond. Relève les alliés tombés dans un rayon 9.", L"Warding Bond. Rialza gli alleati caduti nel raggio 9.", L"Warding Bond. Levanta a los aliados caídos en radio 9.", L"우아르드이느그 브오느드. 반경 9의 쓰러진 아군을 일으킨다.", L"乌阿尔德伊恩格布奥恩德。扶起半径9内倒下的同伴。", L"واردينغ بوند. ينهض الحلفاء الساقطين ضمن نصف قطر 9.", L"Вардинг Бонд. Поднимает павших союзников в радиусе 9.", L"Warding Bond. Richtet gefallene Verbündete im Radius 9 auf.", L"Warding Bond. Ergue aliados caídos no raio 9.", L"Warding Bond. Laat gevallenen binnen straal 9 opstaan.", L"Warding Bond. Podnosi poległych sojuszników w promieniu 9.", L"Warding Bond. Yarıçap 9 içindeki düşmüş yoldaşları kaldırır.")
+R(TX_BT_TOGAME, L"ゲーム画面へ", L"Back to the Game", L"Retour au jeu", L"Torna al gioco", L"Volver al juego", L"게임 화면으로", L"回到游戏画面", L"العودة إلى اللعبة", L"К экрану игры", L"Zum Spiel", L"Voltar ao jogo", L"Terug naar het spel", L"Do gry", L"Oyuna dön")
+R(TX_BT_TOGAME_Q,
+	L"ゲーム画面へ戻りますか？ この戦闘はオートセーブから続けられます。",
+	L"Return to the game? This battle continues from the auto save.",
+	L"Revenir au jeu ? Ce combat reprend depuis la sauvegarde auto.",
+	L"Tornare al gioco? Questa battaglia riprende dal salvataggio auto.",
+	L"¿Volver al juego? Esta batalla sigue desde el autoguardado.",
+	L"게임 화면으로 돌아갈까요? 이 전투는 자동 저장에서 이어집니다.",
+	L"回到游戏画面吗？这场战斗可从自动保存继续。",
+	L"العودة إلى اللعبة؟ تستمر هذه المعركة من الحفظ التلقائي.",
+	L"Вернуться к игре? Этот бой продолжится из автосохранения.",
+	L"Zum Spiel zurück? Dieser Kampf geht aus dem Autospeichern weiter.",
+	L"Voltar ao jogo? Esta batalha continua a partir do autogravar.",
+	L"Terug naar het spel? Dit gevecht gaat verder vanuit de automatische opslag.",
+	L"Wrócić do gry? Ta bitwa będzie kontynuowana z autozapisu.",
+	L"Oyuna dönülsün mü? Bu savaş otomatik kayıttan sürer.")
 
 };
 

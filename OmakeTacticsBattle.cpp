@@ -20,7 +20,7 @@ enum {
 	ID_BT_SUM0 = 1160, ID_BT_SUM1,
 	ID_BT_SK0 = 520,
 	ID_BT_CRAFT0 = 800, ID_BT_CRAFT1, ID_BT_CRAFT2, ID_BT_CRAFT3,
-	ID_BT_M_RESUME = 900, ID_BT_M_HELP, ID_BT_M_RETREAT, ID_BT_M_YES, ID_BT_M_NO, ID_BT_MENU, ID_BT_M_SAVE = 906, ID_BT_M_OPT, ID_BT_M_ZOOM, ID_BT_M_SLOT = 910,
+	ID_BT_M_RESUME = 900, ID_BT_M_HELP, ID_BT_M_RETREAT, ID_BT_M_YES, ID_BT_M_NO, ID_BT_MENU, ID_BT_M_SAVE = 906, ID_BT_M_OPT, ID_BT_M_ZOOM, ID_BT_M_SLOT = 910, ID_BT_M_GAME = 911,
 	ID_BT_OPT_Q = 920, ID_BT_OPT_ANIM, ID_BT_OPT_GRID, ID_BT_OPT_THREAT,
 	ID_BT_IT0 = 960, ID_BT_ITT0 = 980,
 	ID_BT_PROMO0 = 740, ID_BT_PROMO_LATER = 748,
@@ -2981,7 +2981,11 @@ void Game::DrawBattle3D()
 	if (m_shake > 0) target = target + v3(m_rng.F(-1, 1), m_rng.F(-1, 1) * .5f, m_rng.F(-1, 1)) * (m_shake * .08f);
 	ApplyZoomHold();
 	SetupCamera(target, m_camYaw, m_camPitch, m_camDist, .62f);
-	m_r.SetFog(m_camDist * 1.4f, m_camDist * 4.2f + 18.f, .35f, e.fog);
+	{
+		float fogA = m_camDist * 1.4f, fogB = m_camDist * 4.2f + 18.f;
+		if (m_b.map.theme == TH_SEABED) { fogA *= 0.42f; fogB *= 0.5f; }
+		m_r.SetFog(fogA, fogB, .35f, e.fog);
+	}
 	m_r.SetAmbient(e.ambSky, e.ambGnd, e.amb, e.hard);
 	m_r.SetLight(e.light, m_camTarget, min(30.f, m_camDist * 1.35f + 6.f));
 	auto nearCam = [&](const Unit& u) -> BOOL {
@@ -3330,6 +3334,7 @@ void Game::BindSummonCut()
 		m_sumHide = hide;
 		ActorPlay(m_sumAct, CL_IDLE, 1, 0);
 	}
+	TacSfxSummon(0, m_sumFx);
 }
 
 float Game::SummonStrikeNeed() const
@@ -3385,6 +3390,7 @@ void Game::SummonStrike(float dt)
 			m_sumHit = 1;
 			SummonImpactFx();
 			Shake(at == 2 || at == 3 || at == 5 ? 1.05f : .8f);
+			TacSfxSummon(2, m_sumFx);
 			SummonLeave(dt);
 		}
 	} else {
@@ -3478,6 +3484,7 @@ void Game::SummonImpactFx()
 	float g = ((ec >> 8) & 255) / 255.f;
 	float b = ((ec >> 16) & 255) / 255.f;
 	int fx = m_sumFx;
+	TacSfxSummon(1, fx);
 	int nFoe = m_cutFoeN > 0 ? m_cutFoeN : 1;
 	for (int i = 0; i < nFoe; i++) {
 		V3 p = (m_cutFoeN > 0 ? m_cutFoePos[i] : m_sumTo) + v3(0, .25f, 0);
@@ -4651,6 +4658,7 @@ void Game::DrawBattleStatus()
 		m_click = FALSE;
 		if (m_statEq) m_statEq = 0;
 		else { m_statOpen = 0; m_statEq = 0; }
+		TacSfx(TS_CANCEL);
 		return;
 	}
 	Panel(px, py, pw, ph);
@@ -5990,6 +5998,7 @@ void Game::DrawBattleUi()
 				m_navMode = TRUE;
 				m_focusId = ID_BT_BACK;
 				m_click = FALSE;
+				TacSfx(TS_OPEN);
 			}
 			DWORD nc = u.alive ? RGBA8(230, 240, 255) : RGBA8(160, 160, 170);
 			DWORD ic = u.alive ? RGBA8(255, 226, 150) : RGBA8(150, 140, 110);
@@ -6265,8 +6274,8 @@ void Game::DrawBattleUi()
 	}
 	if (m_phase == PH_MENU) {
 		m_r.HudRect(0, 0, (float)m_w, (float)m_h, RGBA8(0, 0, 0, 120));
-		float w = m_menuConfirm == 2 ? U(420) : U(320);
-		float h = m_menuConfirm == 1 ? U(190) : (m_menuConfirm == 2 ? U(470) : U(410));
+		float w = m_menuConfirm == 2 ? U(420) : (m_menuConfirm == 3 ? U(480) : U(320));
+		float h = (m_menuConfirm == 1 || m_menuConfirm == 3) ? U(220) : (m_menuConfirm == 2 ? U(470) : U(460));
 		float x = (m_w - w) * .5f, y = (m_h - h) * .5f;
 		Panel(x, y, w, h);
 		m_r.HudText(TT(TX_BT_MENU), x + w * .5f, y + U(26), U(20), RGBA8(255, 226, 150), 1, 1);
@@ -6285,7 +6294,8 @@ void Game::DrawBattleUi()
 			if (Btn(ID_BT_M_OPT, bx, y + U(186), bw, bh, TT(TX_SET_OPEN))) { m_menuConfirm = 2; m_focusId = ID_BT_OPT_Q; }
 			if (Btn(ID_BT_M_HELP, bx, y + U(232), bw, bh, TT(TX_BT_HELP))) m_showHelp = TRUE;
 			if (Btn(ID_BT_M_ZOOM, bx, y + U(278), bw, bh, TT(TX_BT_ZOOMRESET))) ResetCamDist();
-			if (Btn(ID_BT_M_RETREAT, bx, y + U(324), bw, bh, TT(TX_BT_RETREAT), TRUE, FALSE, 0, RGBA8(140, 50, 40, 240))) { m_menuConfirm = 1; m_focusId = ID_BT_M_NO; }
+			if (Btn(ID_BT_M_GAME, bx, y + U(324), bw, bh, TT(TX_BT_TOGAME), TRUE, FALSE, 0, RGBA8(36, 64, 110, 240))) { m_menuConfirm = 3; m_focusId = ID_BT_M_NO; }
+			if (Btn(ID_BT_M_RETREAT, bx, y + U(370), bw, bh, TT(TX_BT_RETREAT), TRUE, FALSE, 0, RGBA8(140, 50, 40, 240))) { m_menuConfirm = 1; m_focusId = ID_BT_M_NO; }
 		} else if (m_menuConfirm == 2) {
 			float oy = y + U(48);
 			if (int q = Sel(ID_BT_OPT_Q, bx, oy, bw, U(32), TT(TX_SET_QUALITY), TT(TacQualityTx(m_save.quality)))) {
@@ -6305,10 +6315,20 @@ void Game::DrawBattleUi()
 			oy += U(36);
 			oy = DrawSoundOpts(bx, oy, bw, 1.f);
 			if (Btn(ID_BT_M_RESUME, bx, oy + U(6), bw, bh, TT(TX_CR_BACK))) m_menuConfirm = 0;
+		} else if (m_menuConfirm == 3) {
+			m_r.HudTextBox(TT(TX_BT_TOGAME_Q), bx, y + U(50), bw, U(72), U(14), RGBA8(220, 230, 245));
+			if (Btn(ID_BT_M_YES, bx, y + U(140), bw * .47f, bh, TT(TX_PT_YES), TRUE, FALSE, 0, RGBA8(36, 64, 110, 240))) {
+				QueueSuspend(2);
+				WaitSuspend();
+				Persist();
+				m_wantClose = TRUE;
+				return;
+			}
+			if (Btn(ID_BT_M_NO, bx + bw * .53f, y + U(140), bw * .47f, bh, TT(TX_PT_NO))) m_menuConfirm = 0;
 		} else {
 			m_r.HudTextBox(TT(TX_BT_RETREAT_Q), bx, y + U(50), bw, U(60), U(14), RGBA8(255, 220, 210));
-			if (Btn(ID_BT_M_YES, bx, y + U(126), bw * .47f, bh, TT(TX_PT_YES), TRUE, FALSE, 0, RGBA8(140, 50, 40, 240))) { TacSfx(TS_LOSE); EndBattle(0); return; }
-			if (Btn(ID_BT_M_NO, bx + bw * .53f, y + U(126), bw * .47f, bh, TT(TX_PT_NO))) m_menuConfirm = 0;
+			if (Btn(ID_BT_M_YES, bx, y + U(140), bw * .47f, bh, TT(TX_PT_YES), TRUE, FALSE, 0, RGBA8(140, 50, 40, 240))) { TacSfx(TS_LOSE); EndBattle(0); return; }
+			if (Btn(ID_BT_M_NO, bx + bw * .53f, y + U(140), bw * .47f, bh, TT(TX_PT_NO))) m_menuConfirm = 0;
 		}
 	}
 	if (m_seqCut) DrawCutInUi();

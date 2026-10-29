@@ -2348,6 +2348,8 @@
 #define IDR_CSO_TAC_PSG5                4922
 #define IDR_CSO_TAC_PSG6                4923
 #define IDR_CSO_TAC_PSG7                4924
+#define IDR_CSO_TAC_PSG8                4960
+#define IDR_CSO_TAC_PSG9                4961
 #define IDR_CSO_TAC_PSPROP              4925
 #define IDR_CSO_TAC_PSWATER             4926
 #define IDR_CSO_TAC_PSLAVA              4927
@@ -2373,7 +2375,7 @@
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NEXT_RESOURCE_VALUE        399
 #define _APS_NEXT_COMMAND_VALUE         33310
-#define _APS_NEXT_CONTROL_VALUE         4960
+#define _APS_NEXT_CONTROL_VALUE         4962
 #define _APS_NEXT_SYMED_VALUE           104
 #endif
 #endif

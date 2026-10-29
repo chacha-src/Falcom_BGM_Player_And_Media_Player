@@ -191,6 +191,7 @@ private:
 	// 進化
 	void EnterEvolve();
 	void DrawEvolveUi();
+	void DrawEvoCut();
 	void DoEvolve();
 
 	// 戦闘
@@ -362,6 +363,7 @@ private:
 	float m_wheelTime;
 	V3 m_camPan;
 	float m_shake;
+	float m_sceneAcc;
 	V3 m_eye;
 
 	// 共通演出
@@ -456,6 +458,9 @@ private:
 	int m_evMainPage, m_evMainPages;
 	int m_evPartPage, m_evPartPages;
 	float m_evFlash;
+	int m_evoCut;
+	float m_evoT;
+	int m_evoRoster, m_evoFrom, m_evoTo;
 
 	// 戦闘
 	Battle m_b;

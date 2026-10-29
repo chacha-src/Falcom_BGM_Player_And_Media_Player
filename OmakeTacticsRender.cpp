@@ -51,7 +51,7 @@ Renderer::Renderer()
 	m_psBloom = m_psBlur = m_psGrade = m_psGradeTiny = m_psDofH = m_psDofU = m_psUi = NULL;
 	m_vsT = NULL; m_hsT = NULL; m_dsT = NULL;
 	m_psProp = m_psWater = m_psLava = m_psOverride = NULL;
-	for (int gi = 0; gi < 8; gi++) m_psGround[gi] = NULL;
+	for (int gi = 0; gi < TH_COUNT; gi++) m_psGround[gi] = NULL;
 	m_groundTex = NULL; m_groundSrv = NULL; m_matTex = NULL; m_matSrv = NULL;
 	m_csSkin = NULL; m_cbSkinBone = m_cbSkinParm = m_cbHairCloth = m_faceDummy = NULL; m_faceDummySRV = NULL;
 	m_csCloth[0] = m_csCloth[1] = m_csCloth[2] = NULL; m_cbCloth = NULL;
@@ -76,6 +76,7 @@ Renderer::Renderer()
 	m_texMini = NULL; m_srvMini = NULL;
 	m_waterColor = RGBA8(60, 130, 190);
 	m_theme = 0;
+	m_puffN = 0;
 	m_monN = 0; m_monBytes = NULL; m_monBytesN = 0;
 	m_keepModels = m_keepRigs = m_keepCreatures = 0;
 	m_body0M = m_body0R = m_body0C = m_bodyN = 0;
@@ -142,7 +143,7 @@ void Renderer::Release()
 	TAC_REL(m_psBloom); TAC_REL(m_psBlur); TAC_REL(m_psGrade); TAC_REL(m_psGradeTiny);
 	TAC_REL(m_psDofH); TAC_REL(m_psDofU); TAC_REL(m_vsT); TAC_REL(m_hsT); TAC_REL(m_dsT); TAC_REL(m_psUi);
 	TAC_REL(m_psProp); TAC_REL(m_psWater); TAC_REL(m_psLava);
-	for (int gi = 0; gi < 8; gi++) TAC_REL(m_psGround[gi]);
+	for (int gi = 0; gi < TH_COUNT; gi++) TAC_REL(m_psGround[gi]);
 	m_psOverride = NULL;
 	TAC_REL(m_groundSrv); TAC_REL(m_groundTex); TAC_REL(m_matSrv); TAC_REL(m_matTex);
 	TAC_REL(m_csSkin); TAC_REL(m_cbSkinBone); TAC_REL(m_cbSkinParm); TAC_REL(m_cbHairCloth); TAC_REL(m_faceDummySRV); TAC_REL(m_faceDummy);
@@ -451,6 +452,7 @@ BOOL Renderer::CreateShaders()
 		{ "PSG2", IDR_CSO_TAC_PSG2, &m_psGround[2] }, { "PSG3", IDR_CSO_TAC_PSG3, &m_psGround[3] },
 		{ "PSG4", IDR_CSO_TAC_PSG4, &m_psGround[4] }, { "PSG5", IDR_CSO_TAC_PSG5, &m_psGround[5] },
 		{ "PSG6", IDR_CSO_TAC_PSG6, &m_psGround[6] }, { "PSG7", IDR_CSO_TAC_PSG7, &m_psGround[7] },
+		{ "PSG8", IDR_CSO_TAC_PSG8, &m_psGround[8] }, { "PSG9", IDR_CSO_TAC_PSG9, &m_psGround[9] },
 		{ "PSProp", IDR_CSO_TAC_PSPROP, &m_psProp }, { "PSWater", IDR_CSO_TAC_PSWATER, &m_psWater }, { "PSLava", IDR_CSO_TAC_PSLAVA, &m_psLava },
 	};
 	for (auto& d : ps) {
@@ -6436,6 +6438,7 @@ void Renderer::DrawStatic(const GpuMesh& m, const M4& world, const DrawParams& d
 	if (m_psOverride) m_ctx->PSSetShader(m_psOverride, NULL, 0);
 	if (dp.twoSided) m_ctx->RSSetState(m_rsNone);
 	m_ctx->DrawIndexed(m.nIdx, 0, 0);
+	if (dp.twoSided) m_ctx->RSSetState(m_rsBack);
 	if (alpha) m_ctx->OMSetBlendState(m_bsOpaque, NULL, 0xFFFFFFFF);
 }
 
@@ -6483,9 +6486,10 @@ void Renderer::DrawTerrain()
 {
 	DrawParams dp;
 	dp.rim = 0;
-	m_psOverride = (m_theme >= 0 && m_theme < 8 && m_psGround[m_theme]) ? m_psGround[m_theme] : NULL;
+	m_psOverride = (m_theme >= 0 && m_theme < TH_COUNT && m_psGround[m_theme]) ? m_psGround[m_theme] : NULL;
 	if (m_terrain.vb) DrawStatic(m_terrain, MIdent(), dp);
 	m_psOverride = m_psProp;
+	dp.twoSided = 1;
 	for (auto& b : m_props) {
 		dp.emissive = b.mat;
 		dp.hue = 0;
@@ -6507,6 +6511,7 @@ void Renderer::DrawWater()
 	if (!m_water.vb || m_pass == PASS_SHADOW) return;
 	DrawParams dp;
 	dp.mode = 1.f;
+	dp.twoSided = 1;
 	dp.tint = (m_waterColor & 0xFFFFFF) | 0xF0000000;
 	m_ctx->OMSetDepthStencilState(m_dsRead, 0);
 	m_psOverride = m_psWater;
@@ -6640,10 +6645,11 @@ static int TopTile(int t, int theme)
 		case TH_DESERT: return TL_SAND;
 		case TH_VOLCANO: return TL_ASH;
 		case TH_SWAMP: return TL_FOREST;
+		case TH_SEABED: return TL_SAND;
 		default: return TL_GRASS;
 		}
-	case T_FOREST: return theme == TH_SNOW ? TL_SNOW : (theme == TH_DESERT ? TL_SAND : (theme == TH_VOLCANO ? TL_ASH : TL_FOREST));
-	case T_HILL: return theme == TH_SNOW ? TL_SNOW : (theme == TH_VOLCANO ? TL_ASH : (theme == TH_CANYON || theme == TH_DESERT ? TL_DIRT : TL_GRASS));
+	case T_FOREST: return theme == TH_SNOW ? TL_SNOW : (theme == TH_SEABED ? TL_SAND : (theme == TH_DESERT ? TL_SAND : (theme == TH_VOLCANO ? TL_ASH : TL_FOREST)));
+	case T_HILL: return theme == TH_SNOW ? TL_SNOW : (theme == TH_SEABED ? TL_SAND : (theme == TH_VOLCANO ? TL_ASH : (theme == TH_CANYON || theme == TH_DESERT ? TL_DIRT : TL_GRASS)));
 	case T_MOUNTAIN: return theme == TH_SNOW ? TL_SNOW : TL_ROCK;
 	case T_WATER: return TL_BED;
 	case T_CHASM: return TL_ROCK;
@@ -6662,6 +6668,7 @@ static int TopTile(int t, int theme)
 static int SideTile(int t, int theme)
 {
 	if (theme == TH_SNOW && t != T_WATER) return TL_CLIFF_SNOW;
+	if (theme == TH_SEABED && t != T_WATER) return TL_CLIFF_ROCK;
 	if (t == T_MOUNTAIN || t == T_ROCK || t == T_CHASM || theme == TH_VOLCANO || theme == TH_RUINS) return TL_CLIFF_ROCK;
 	return TL_CLIFF_DIRT;
 }
@@ -6682,6 +6689,8 @@ static DWORD ThemeTint(int theme, float var)
 	case TH_VOLCANO: r = 1.0f; g = .86f; b = .82f; break;
 	case TH_CANYON: r = 1.02f; g = .95f; b = .88f; break;
 	case TH_DESERT: r = 1.02f; g = .98f; b = .92f; break;
+	case TH_SEABED: r = .62f; g = .88f; b = 1.0f; break;
+	case TH_FALLS: r = .92f; g = .98f; b = 1.0f; break;
 	default: break;
 	}
 	return RGBAf(Clampf(r * var, 0, 1), Clampf(g * var, 0, 1), Clampf(b * var, 0, 1));
@@ -6743,14 +6752,233 @@ static void AddBox(MeshBuild& mb, V3 c, V3 h, DWORD col, int tile)
 	mb.Quad(p[3], p[2], p[6], p[7], v3(0, 1, 0), 0, 0, 1, 1, tile, col);
 }
 
+static unsigned CellHash(int x, int z, int salt)
+{
+	unsigned h = (unsigned)x * 2246822519u ^ (unsigned)z * 3266489917u ^ (unsigned)salt * 668265263u;
+	h ^= h >> 16;
+	h *= 0x7feb352du;
+	h ^= h >> 15;
+	return h;
+}
+
+static void AddPuff(Renderer::SceneryPuff* p, int& n, int kind, float x, float y, float z, float minD)
+{
+	if (n >= 12) return;
+	float md = minD * minD;
+	for (int i = 0; i < n; i++) {
+		if (p[i].kind != kind) continue;
+		float dx = p[i].x - x, dz = p[i].z - z;
+		if (dx * dx + dz * dz < md) return;
+	}
+	p[n].x = x; p[n].y = y; p[n].z = z; p[n].kind = kind;
+	n++;
+}
+
+static void Blade(MeshBuild& mb, V3 a, V3 b, V3 c, V3 d, DWORD bot, DWORD top)
+{
+	V3 nrm = Norm(Cross(b - a, d - a));
+	mb.Quad(a, b, c, d, nrm, 0, 1, 1, 0, -1, bot);
+	size_t nv = mb.v.size();
+	if (nv >= 4) { mb.v[nv - 2].c = top; mb.v[nv - 1].c = top; }
+	mb.Quad(b, a, d, c, v3(-nrm.x, -nrm.y, -nrm.z), 0, 1, 1, 0, -1, bot);
+	nv = mb.v.size();
+	if (nv >= 4) { mb.v[nv - 2].c = top; mb.v[nv - 1].c = top; }
+}
+
+static void Tuft(MeshBuild& mb, float x, float y, float z, float h, float w, float yaw, DWORD bot, DWORD top)
+{
+	float cs = cosf(yaw), sn = sinf(yaw);
+	V3 r = v3(cs * w, 0, sn * w);
+	V3 q = v3(-sn * w * 0.7f, 0, cs * w * 0.7f);
+	V3 o = v3(x, y, z);
+	V3 tip = v3(cs * h * 0.18f, h, sn * h * 0.18f);
+	size_t from = mb.v.size();
+	Blade(mb, o - r, o + r, o + r + tip, o - r + tip, bot, top);
+	Blade(mb, o - q, o + q, o + q + tip, o - q + tip, bot, top);
+	for (size_t i = from; i < mb.v.size(); i++) {
+		mb.v[i].n[0] *= 0.35f;
+		mb.v[i].n[2] *= 0.35f;
+		mb.v[i].n[1] = 0.92f;
+	}
+}
+
+static void ConeRing(MeshBuild& mb, float x, float y0, float z, float y1, float r0, float r1, DWORD col)
+{
+	const int seg = 7;
+	for (int i = 0; i < seg; i++) {
+		float a0 = i * 6.2831853f / seg, a1 = (i + 1) * 6.2831853f / seg;
+		float c0 = cosf(a0), s0 = sinf(a0), c1 = cosf(a1), s1 = sinf(a1);
+		V3 p0 = v3(x + c0 * r0, y0, z + s0 * r0);
+		V3 p1 = v3(x + c1 * r0, y0, z + s1 * r0);
+		V3 p2 = v3(x + c1 * r1, y1, z + s1 * r1);
+		V3 p3 = v3(x + c0 * r1, y1, z + s0 * r1);
+		mb.Quad(p0, p1, p2, p3, Norm(Cross(p1 - p0, p3 - p0)), 0, 1, 1, 0, -1, col);
+	}
+}
+
+static bool ScenicGround(int t)
+{
+	return t == T_PLAIN || t == T_HILL || t == T_SAND || t == T_SNOW || t == T_SWAMP
+		|| t == T_RUINS || t == T_ROCK || t == T_FOREST;
+}
+
+static bool ScenicSkipProp(int prop)
+{
+	return prop == PK_TENT || prop == PK_FLAG || prop == PK_BARREL || prop == PK_CRATE
+		|| prop == PK_LANTERN || prop == PK_MOUNT || prop == PK_HILLTREES || prop == PK_TREES;
+}
+
+static void ScatterTheme(const Map& m, MeshBuild& mb, MeshBuild& lava, Renderer::SceneryPuff* puff, int& puffN)
+{
+	const int theme = m.theme;
+	struct Cand { int x, z, sc; };
+	Cand cand[24];
+	int cn = 0;
+	for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) {
+		const Cell& c = m.At(x, z);
+		if (theme == TH_VOLCANO && c.t == T_LAVA) {
+			int nb = 0;
+			static const int dx[4] = { 1, -1, 0, 0 }, dz[4] = { 0, 0, 1, -1 };
+			for (int k = 0; k < 4; k++) {
+				int nx = x + dx[k], nz = z + dz[k];
+				if (Map::In(nx, nz) && m.At(nx, nz).t == T_LAVA) nb++;
+			}
+			int sc = nb * 10 + (int)(CellHash(x, z, 5) % 7);
+			if (cn < 24) { cand[cn].x = x; cand[cn].z = z; cand[cn].sc = sc; cn++; }
+			else {
+				int w = 0;
+				for (int i = 1; i < cn; i++) if (cand[i].sc < cand[w].sc) w = i;
+				if (sc > cand[w].sc) { cand[w].x = x; cand[w].z = z; cand[w].sc = sc; }
+			}
+		}
+		if (mb.v.size() > 52000) continue;
+		if (!ScenicGround(c.t) || ScenicSkipProp(c.prop)) continue;
+		if (c.t == T_ROCK && theme != TH_CANYON && theme != TH_RUINS && theme != TH_VOLCANO) continue;
+		unsigned h = CellHash(x, z, theme + 3);
+		float ox = 0.18f + ((h >> 1) & 1023) / 1023.f * 0.64f;
+		float oz = 0.18f + ((h >> 11) & 1023) / 1023.f * 0.64f;
+		if (ox > 0.4f && ox < 0.6f) ox = (ox < 0.5f) ? 0.32f : 0.68f;
+		if (oz > 0.4f && oz < 0.6f) oz = (oz < 0.5f) ? 0.32f : 0.68f;
+		float px = x + ox, pz = z + oz, py = m.StandY(x, z);
+		float yaw = (h & 255) / 255.f * 6.2831853f;
+		float u = (h & 65535) / 65535.f;
+		switch (theme) {
+		case TH_PLAINS:
+			if ((h % 3) != 0) break;
+			{
+				DWORD bot = RGBA8(46, 78, 28), top = RGBA8(110, 176, 58, 72);
+				if ((h % 11) == 0) { bot = RGBA8(64, 88, 30); top = (h & 16) ? RGBA8(236, 196, 64, 90) : RGBA8(228, 120, 156, 90); }
+				Tuft(mb, px, py, pz, 0.22f + u * 0.26f, 0.06f + u * 0.04f, yaw, bot, top);
+				if ((h % 5) == 0) Tuft(mb, px + 0.14f, py, pz - 0.1f, 0.14f + u * 0.12f, 0.045f, yaw + 0.9f, RGBA8(52, 90, 32), RGBA8(130, 186, 64, 80));
+			}
+			break;
+		case TH_CANYON:
+			if ((h % 4) != 0) break;
+			Tuft(mb, px, py, pz, 0.14f + u * 0.12f, 0.055f, yaw, RGBA8(112, 84, 46), RGBA8(176, 146, 82, 100));
+			if ((h % 8) == 0) {
+				AddBox(mb, v3(px, py + 0.05f, pz), v3(0.24f, 0.045f, 0.14f), RGBA8(138, 102, 72), -1);
+				AddBox(mb, v3(px + 0.06f, py + 0.12f, pz - 0.04f), v3(0.12f, 0.03f, 0.08f), RGBA8(156, 118, 84), -1);
+			}
+			break;
+		case TH_FOREST:
+			if ((h % 4) != 0) break;
+			Tuft(mb, px, py, pz, 0.16f + u * 0.1f, 0.11f, yaw, RGBA8(22, 64, 30), RGBA8(46, 118, 46, 64));
+			if ((h % 9) == 0) {
+				AddBox(mb, v3(px, py + 0.05f, pz), v3(0.025f, 0.05f, 0.025f), RGBA8(214, 196, 164), -1);
+				AddBox(mb, v3(px, py + 0.11f, pz), v3(0.08f, 0.028f, 0.08f), (h & 32) ? RGBA8(168, 48, 40) : RGBA8(196, 170, 120), -1);
+			}
+			break;
+		case TH_SNOW:
+			if ((h % 5) != 0) break;
+			AddBox(mb, v3(px, py + 0.035f, pz), v3(0.26f, 0.04f, 0.16f), RGBA8(236, 242, 248), -1);
+			if ((h % 2) == 0) Tuft(mb, px + 0.08f, py, pz, 0.1f + u * 0.06f, 0.035f, yaw, RGBA8(198, 214, 224), RGBA8(246, 250, 255, 150));
+			break;
+		case TH_DESERT:
+			if ((h % 17) == 0 && c.t != T_ROCK) {
+				float sc = 0.85f + u * 0.55f, cs = cosf(yaw), sn = sinf(yaw);
+				DWORD g = RGBA8(62, 108, 56), g2 = RGBA8(84, 136, 66);
+				AddBox(mb, v3(px, py + 0.34f * sc, pz), v3(0.065f * sc, 0.34f * sc, 0.065f * sc), g, -1);
+				AddBox(mb, v3(px + cs * 0.16f * sc, py + 0.48f * sc, pz + sn * 0.16f * sc), v3(0.13f * sc, 0.038f * sc, 0.038f * sc), g2, -1);
+				AddBox(mb, v3(px + cs * 0.26f * sc, py + 0.64f * sc, pz + sn * 0.26f * sc), v3(0.04f * sc, 0.15f * sc, 0.04f * sc), g, -1);
+				AddBox(mb, v3(px - cs * 0.1f * sc, py + 0.34f * sc, pz - sn * 0.1f * sc), v3(0.038f * sc, 0.12f * sc, 0.038f * sc), g2, -1);
+			} else if ((h % 6) == 0) {
+				Tuft(mb, px, py, pz, 0.12f + u * 0.08f, 0.05f, yaw, RGBA8(122, 96, 54), RGBA8(176, 146, 84, 110));
+			}
+			break;
+		case TH_VOLCANO:
+			if ((h % 4) != 0) break;
+			Tuft(mb, px, py, pz, 0.1f + u * 0.08f, 0.045f, yaw, RGBA8(42, 32, 26), RGBA8(78, 52, 36, 120));
+			break;
+		case TH_SWAMP:
+			if ((h % 3) != 0) break;
+			Tuft(mb, px, py, pz, 0.42f + u * 0.32f, 0.028f, yaw, RGBA8(48, 68, 30), RGBA8(132, 138, 58, 55));
+			if ((h % 17) == 0) AddPuff(puff, puffN, 3, px, py + 0.25f, pz, 8.f);
+			break;
+		case TH_RUINS:
+			if ((h % 5) == 0) AddBox(mb, v3(px, py + 0.04f, pz), v3(0.12f, 0.045f, 0.08f), RGBA8(124, 118, 110), -1);
+			if ((h % 4) == 0) Tuft(mb, px, py, pz, 0.18f + u * 0.1f, 0.07f, yaw, RGBA8(28, 70, 32), RGBA8(72, 132, 58, 75));
+			break;
+		case TH_SEABED:
+			if ((h % 4) == 0) {
+				Tuft(mb, px, py, pz, 0.65f + u * 0.55f, 0.035f, yaw, RGBA8(16, 64, 46), RGBA8(36, 150, 86, 36));
+				if ((h % 8) == 0) AddPuff(puff, puffN, 2, px, py + 0.15f, pz, 6.f);
+			}
+			if ((h % 11) == 0) {
+				AddBox(mb, v3(px, py + 0.06f, pz), v3(0.1f, 0.06f, 0.08f), RGBA8(206, 92, 84), -1);
+				AddBox(mb, v3(px + 0.08f, py + 0.1f, pz), v3(0.05f, 0.08f, 0.04f), RGBA8(72, 150, 156), -1);
+			}
+			break;
+		case TH_FALLS: {
+			int wet = 0;
+			static const int dx[4] = { 1, -1, 0, 0 }, dz[4] = { 0, 0, 1, -1 };
+			for (int k = 0; k < 4; k++) {
+				int nx = x + dx[k], nz = z + dz[k];
+				if (Map::In(nx, nz) && m.At(nx, nz).t == T_WATER) wet = 1;
+			}
+			if (wet && (h % 3) == 0) Tuft(mb, px, py, pz, 0.32f + u * 0.2f, 0.03f, yaw, RGBA8(40, 78, 36), RGBA8(150, 176, 72, 60));
+			else if ((h % 4) == 0) Tuft(mb, px, py, pz, 0.08f + u * 0.05f, 0.08f, yaw, RGBA8(36, 86, 38), RGBA8(90, 150, 64, 90));
+			break; }
+		default: break;
+		}
+	}
+	if (theme != TH_VOLCANO) return;
+	int used[24] = {};
+	for (int k = 0; k < 4; k++) {
+		int best = -1;
+		for (int i = 0; i < cn; i++) {
+			if (used[i]) continue;
+			int apart = 1;
+			for (int j = 0; j < cn; j++) if (used[j]) {
+				int dx = cand[i].x - cand[j].x, dz = cand[i].z - cand[j].z;
+				if (dx * dx + dz * dz < 36) apart = 0;
+			}
+			if (!apart) continue;
+			if (best < 0 || cand[i].sc > cand[best].sc) best = i;
+		}
+		if (best < 0) break;
+		used[best] = 1;
+		float cx = cand[best].x + 0.5f, cz = cand[best].z + 0.5f;
+		float base = m.StandY(cand[best].x, cand[best].z) - 0.02f;
+		ConeRing(mb, cx, base, cz, base + 0.55f, 0.42f, 0.30f, RGBA8(48, 30, 26));
+		ConeRing(mb, cx, base + 0.55f, cz, base + 1.05f, 0.30f, 0.18f, RGBA8(32, 22, 20));
+		ConeRing(mb, cx, base + 1.05f, cz, base + 1.32f, 0.18f, 0.28f, RGBA8(96, 40, 20));
+		float iy = base + 1.14f;
+		lava.Quad(v3(cx - 0.14f, iy, cz - 0.14f), v3(cx - 0.14f, iy, cz + 0.14f),
+			v3(cx + 0.14f, iy, cz + 0.14f), v3(cx + 0.14f, iy, cz - 0.14f), v3(0, 1, 0), 0, 0, 1, 1, -1, 0xFFFFFFFF);
+		AddPuff(puff, puffN, 0, cx, base + 1.42f, cz, 6.f);
+	}
+}
+
 BOOL Renderer::BuildTerrain(const Map& m)
 {
-	m_theme = Clampi(m.theme, 0, 7);
+	m_theme = Clampi(m.theme, 0, TH_COUNT - 1);
 	m_terrain.Release(); m_water.Release(); m_lava.Release();
 	for (auto& b : m_props) b.mesh.Release();
 	m_props.clear();
-	static MeshBuild tb, wb, lb, wood;
+	static MeshBuild tb, wb, lb, wood, sceneMb;
 	tb.v.clear(); tb.i.clear(); wb.v.clear(); wb.i.clear(); lb.v.clear(); lb.i.clear(); wood.v.clear(); wood.i.clear();
+	sceneMb.v.clear(); sceneMb.i.clear();
+	m_puffN = 0;
 	tb.v.reserve(80000); tb.i.reserve(120000);
 	const float bottom = -3.2f;
 	for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) {
@@ -6803,6 +7031,14 @@ BOOL Renderer::BuildTerrain(const Map& m)
 				tb.Quad(v3(ex0, yt, ez0), v3(ex1, yt, ez1), v3(ex1, yb, ez1), v3(ex0, yb, ez0), n, 0, v0, 1, v1, -1, sc);
 				yt = yb; seg++;
 			}
+			// 川が高い側にある段差は、どの地形でも滝の面にする。海底の溝は落とさない。
+			if (m.theme != TH_SEABED && c.t == T_WATER && Map::In(nx, nz) && m.At(nx, nz).t != T_VOID && y - ny > 0.9f) {
+				float ox = n.x * 0.06f, oz = n.z * 0.06f;
+				wb.Quad(v3(ex0 + ox, y, ez0 + oz), v3(ex1 + ox, y, ez1 + oz),
+					v3(ex1 + ox, ny + 0.15f, ez1 + oz), v3(ex0 + ox, ny + 0.15f, ez0 + oz),
+					n, 0, 0, 1, 1, -1, 0xFFFFFFFF);
+				AddPuff(m_puff, m_puffN, 1, (ex0 + ex1) * 0.5f + ox, (y + ny) * 0.5f, (ez0 + ez1) * 0.5f + oz, 7.f);
+			}
 		}
 		if (c.t == T_WATER) {
 			float wy = m.StandY(x, z) - .02f;
@@ -6812,6 +7048,7 @@ BOOL Renderer::BuildTerrain(const Map& m)
 			lb.Quad(v3((float)x, ly, (float)z), v3((float)x, ly, z + 1.f), v3(x + 1.f, ly, z + 1.f), v3(x + 1.f, ly, (float)z), v3(0, 1, 0), 0, 0, 1, 1, -1, 0xFFFFFFFF);
 		}
 	}
+	ScatterTheme(m, sceneMb, lb, m_puff, m_puffN);
 	if (!MakeMesh32(m_terrain, tb.v.data(), sizeof(VtxS), (UINT)tb.v.size(), tb.i.data(), (UINT)tb.i.size())) return FALSE;
 	m_terrain.tex = TEX_ATLAS;
 	if (!wb.v.empty()) { MakeMesh32(m_water, wb.v.data(), sizeof(VtxS), (UINT)wb.v.size(), wb.i.data(), (UINT)wb.i.size()); m_water.tex = TEX_WHITE; }
@@ -6820,6 +7057,8 @@ BOOL Renderer::BuildTerrain(const Map& m)
 	case TH_SWAMP: m_waterColor = RGBA8(70, 100, 60); break;
 	case TH_SNOW: m_waterColor = RGBA8(110, 160, 210); break;
 	case TH_DESERT: m_waterColor = RGBA8(50, 150, 170); break;
+	case TH_SEABED: m_waterColor = RGBA8(20, 70, 90); break;
+	case TH_FALLS: m_waterColor = RGBA8(170, 210, 230); break;
 	default: m_waterColor = RGBA8(55, 125, 190); break;
 	}
 
@@ -6918,6 +7157,7 @@ BOOL Renderer::BuildTerrain(const Map& m)
 		flush(pumpMb, texOf(sPump), 3);
 	}
 	flush(wood, TEX_WHITE, 2);
+	flush(sceneMb, TEX_WHITE, 3);
 	BuildMinimap(m);
 	return TRUE;
 }
@@ -6936,6 +7176,8 @@ void Renderer::BuildMinimap(const Map& m)
 			else if (m.theme == TH_DESERT) { r = 220; g = 195; b = 140; }
 			else if (m.theme == TH_VOLCANO) { r = 85; g = 75; b = 72; }
 			else if (m.theme == TH_CANYON) { r = 150; g = 115; b = 80; }
+			else if (m.theme == TH_SEABED) { r = 70; g = 140; b = 120; }
+			else if (m.theme == TH_FALLS) { r = 90; g = 150; b = 80; }
 			else { r = 105; g = 165; b = 80; }
 			break;
 		case T_FOREST: r = 40; g = 100; b = 45; break;

@@ -70,12 +70,14 @@ PSIn VSS(VSIn v)
 	float3 w = mul(float4(v.p, 1), World).xyz;
 	float3 n = normalize(mul(v.n, (float3x3)World));
 	w = Sway(w, (1. - v.c.a) * 4. + Extra.w);
-	if (Params.y > 0.5 && Params.y < 1.5) {
+	if (Params.y > 0.5 && Params.y < 1.5 && n.y > 0.45) {
 		float t = Eye.w;
 		float th = FogColor.a;
 		float amp = 0.045;
 		if (th > 2.5 && th < 3.5) amp = 0.012;
 		else if (th > 5.5 && th < 6.5) amp = 0.022;
+		else if (th > 8.5 && th < 9.5) amp = 0.08;
+		else if (th > 7.5 && th < 8.5) amp = 0.016;
 		else if (th > 6.5) amp = 0.01;
 		w.y += sin(w.x * 1.6 + w.z * 0.7 + t * 1.25) * amp + cos(w.z * 2.0 - t * 0.8) * amp * 0.7;
 	} else if (Params.y > 1.5 && Params.y < 2.5) {
@@ -329,6 +331,8 @@ float WaveAmp(float th)
 	else if (th > 5.5 && th < 6.5) amp = 0.07;
 	else if (th > 0.5 && th < 1.5) amp = 0.1;
 	else if (th > 4.5 && th < 5.5) amp = 0.13;
+	else if (th > 8.5 && th < 9.5) amp = 0.22;
+	else if (th > 7.5 && th < 8.5) amp = 0.05;
 	else if (th > 6.5) amp = 0.035;
 	return amp;
 }
@@ -347,6 +351,24 @@ void WaterWave(float2 xz, float t, float amp, out float h, out float2 dh)
 	dh += float2(sin(t * 0.65 + xz.x * 0.85), cos(t * 0.5 + xz.y * 0.75)) * amp * 1.4;
 }
 
+GOut FallSheet(PSIn i, float thw, float3 albedo, float alpha)
+{
+	float t = Eye.w;
+	float2 flow = float2(i.w.x * 7.0 + i.w.z * 2.2, i.w.y * -3.1 + t * 2.6);
+	float streak = pow(saturate(sin(flow.x) * 0.5 + 0.5), 2);
+	float band = pow(saturate(sin(flow.y * 2.7) * 0.5 + 0.5), 5);
+	float3 body = lerp(albedo * 0.45, float3(0.78, 0.92, 1), 0.62 + streak * 0.3);
+	if (thw > 4.5 && thw < 5.5) body = lerp(body, float3(1, 0.42, 0.1), 0.4);
+	else if (thw > 5.5 && thw < 6.5) body = lerp(body, float3(0.4, 0.62, 0.32), 0.28);
+	else if (thw > 2.5 && thw < 3.5) body = lerp(body, float3(0.86, 0.94, 1), 0.22);
+	else if (thw > 7.5 && thw < 8.5) body = lerp(body, float3(0.12, 0.4, 0.5), 0.5);
+	body += float3(1, 1, 1) * band * 0.5;
+	float mist = saturate(0.85 - i.w.y * 0.22);
+	body = lerp(body, float3(0.92, 0.96, 1), mist * 0.35);
+	float a = saturate(alpha * (0.58 + streak * 0.32));
+	return Emit(float4(FogAt(body, i.w), a), i.w);
+}
+
 GOut PSWater(PSIn i)
 {
 	float3 v = normalize(Eye.xyz - i.w);
@@ -355,6 +377,8 @@ GOut PSWater(PSIn i)
 	float alpha = Tint.a;
 	float t = Eye.w;
 	float thw = FogColor.a;
+	if (i.n.y < 0.35)
+		return FallSheet(i, thw, albedo, alpha);
 	float amp = WaveAmp(thw);
 	float h;
 	float2 dh;
@@ -388,7 +412,15 @@ GOut PSWater(PSIn i)
 	else if (thw > 3.5 && thw < 4.5) { col = lerp(col, albedo * float3(0.7, 0.9, 0.88), 0.18); see = 0.2; }
 	else if (thw > 4.5 && thw < 5.5) { col = lerp(col, albedo * float3(0.55, 0.32, 0.22), 0.3); see = 0.4; }
 	else if (thw > 5.5 && thw < 6.5) { col = lerp(col, albedo * float3(0.45, 0.62, 0.38), 0.35); see = 0.42; }
-	else if (thw > 6.5) { col = lerp(col, SkyAmb.rgb, fr * 0.22); see = 0.38; }
+	else if (thw > 8.5 && thw < 9.5) {
+		float rush = pow(saturate(sin(i.w.z * 2.4 - t * 3.4) * 0.5 + 0.5), 2);
+		col = lerp(col, float3(0.9, 0.97, 1), rush * 0.45);
+		see = 0.26;
+	} else if (thw > 7.5 && thw < 8.5) {
+		col = lerp(col, float3(0.04, 0.22, 0.32), 0.5);
+		col += float3(0.45, 0.85, 1) * pow(caus, 2) * 0.4;
+		see = 0.58;
+	} else if (thw > 6.5) { col = lerp(col, SkyAmb.rgb, fr * 0.22); see = 0.38; }
 	return Emit(float4(FogAt(col, i.w), lerp(see, 0.78, fr) * alpha), i.w);
 }
 
@@ -436,8 +468,12 @@ GOut GroundPS(PSIn i, float theme)
 		float2 c2 = i.w.xz * 1.3 - Eye.w * float2(0.07, 0.12);
 		bedCaus = pow(saturate(sin(c1.x * 6.2) * sin(c1.y * 5.4) + sin(c2.x * 4.8) * sin(c2.y * 5.1)), 2);
 	}
-	float4 alb = Ground.Sample(SL, float3(uv, theme));
-	float4 nr = Ground.Sample(SL, float3(uv, theme + 8));
+	// 配列は 0..7 がアルベド、8..15 が法線。海底と滝は既存スライスを染める。
+	float texTheme = theme;
+	if (theme > 7.5 && theme < 8.5) texTheme = 4;
+	else if (theme > 8.5) texTheme = 1;
+	float4 alb = Ground.Sample(SL, float3(uv, texTheme));
+	float4 nr = Ground.Sample(SL, float3(uv, texTheme + 8));
 	float3 albedo = alb.rgb * lerp(0.78, 1, alb.a) * i.c.rgb;
 	if (cliff > 0.5) albedo *= 0.8;
 	float3 nLit = DetailN(Bump(n, nr.rgb), i.w);
@@ -448,6 +484,8 @@ GOut GroundPS(PSIn i, float theme)
 		rough = 0.82;
 		float3 gdir = float3(0.85, 0, 0.52);
 		glow += float3(0.75, 0.9, 0.55) * Aniso(gdir, normalize(normalize(LightDir.xyz) + v), saturate(dot(nLit, normalize(normalize(LightDir.xyz) + v))), 14) * 0.04;
+		float wind = 0.5 + 0.5 * sin(i.w.x * 0.35 + i.w.z * 0.22 + Eye.w * 0.9);
+		albedo *= 0.9 + wind * 0.12;
 	} else if (theme < 1.5) {
 		rough = 0.58;
 		if (cliff > 0.5) {
@@ -455,17 +493,23 @@ GOut GroundPS(PSIn i, float theme)
 			albedo *= 1 - groove * 0.5;
 			nLit = normalize(nLit + float3(0, cos(i.w.y * 7.2) * 0.4, 0));
 		}
+		float dust = fbm2(i.w.xz * 0.12 + float2(Eye.w * 0.03, Eye.w * 0.01));
+		albedo = lerp(albedo, albedo * float3(1.08, 0.94, 0.82), dust * 0.18);
 	} else if (theme < 2.5) {
 		rough = 0.38;
 		f0 = float3(0.05, 0.055, 0.045);
+		float dapple = pow(saturate(sin(i.w.x * 0.85 + Eye.w * 0.35) * sin(i.w.z * 0.7 - Eye.w * 0.22)), 2);
+		glow += float3(0.65, 0.9, 0.4) * dapple * 0.1;
 	} else if (theme < 3.5) {
 		rough = 0.22;
 		f0 = float3(0.06, 0.065, 0.07);
 		float spark = step(0.993, hash21(floor(i.w.xz * 20 + i.w.y))) * pow(saturate(dot(nLit, normalize(normalize(LightDir.xyz) + v))), 72);
 		glow += float3(0.85, 0.93, 1) * spark;
+		float drift = step(0.99, hash21(floor(i.w.xz * 8 + float2(Eye.w * 0.35, Eye.w * 0.12))));
+		glow += float3(0.95, 0.97, 1) * drift * 0.35;
 	} else if (theme < 4.5) {
 		rough = 0.74;
-		nLit = normalize(nLit + float3(cos(i.w.x * 1.7) * 0.18, 0, 0));
+		nLit = normalize(nLit + float3(cos(i.w.x * 1.7 + Eye.w * 0.6) * 0.18, 0, sin(Eye.w * 0.8 + i.w.z) * 0.06));
 	} else if (theme < 5.5) {
 		rough = 0.55;
 		float2 vg = VoronoiGap(i.w.xz * 0.55 + float2(Eye.w * 0.03, Eye.w * 0.012));
@@ -479,9 +523,33 @@ GOut GroundPS(PSIn i, float theme)
 		float2 c2 = i.w.xz * 0.47 - Eye.w * float2(0.03, 0.06);
 		float caus = saturate(sin(c1.x * 9.1) * sin(c1.y * 8.3) + sin(c2.x * 7.4) * sin(c2.y * 6.2));
 		glow += float3(0.45, 0.9, 0.5) * pow(caus, 2) * 0.28;
+	} else if (theme < 7.5) {
+		rough = 0.46;
+		f0 = float3(0.05, 0.05, 0.055);
+		float2 vg = VoronoiGap(i.w.xz * 0.42);
+		float moss = 1 - smoothstep(0.015, 0.07, vg.y);
+		albedo = lerp(albedo, albedo * float3(0.45, 0.72, 0.4), moss * 0.7);
+		float rune = step(0.988, hash21(floor(i.w.xz * 2.5 + Eye.w * 0.05)));
+		glow += float3(0.65, 0.82, 1) * rune * (1 - cliff) * (0.25 + 0.15 * sin(Eye.w * 1.4));
+	} else if (theme < 8.5) {
+		rough = 0.3;
+		f0 = float3(0.05, 0.07, 0.09);
+		albedo *= lerp(float3(0.45, 0.7, 0.62), float3(0.28, 0.55, 0.78), 0.65);
+		float rip = 0.5 + 0.5 * sin(i.w.x * 2.6 + i.w.z * 0.5 + Eye.w * 0.4);
+		albedo *= 0.82 + rip * 0.2;
+		float2 c1 = i.w.xz * 0.55 + Eye.w * float2(0.08, 0.03);
+		float2 c2 = i.w.xz * 0.9 - Eye.w * float2(0.04, 0.07);
+		float caus = saturate(sin(c1.x * 8.2) * sin(c1.y * 7.1) + sin(c2.x * 5.6) * sin(c2.y * 6.4));
+		glow += float3(0.5, 0.9, 1) * pow(caus, 2) * 0.6 * saturate(n.y);
+		float ray = pow(saturate(0.5 + 0.5 * sin(i.w.x * 0.4 + i.w.z * 0.16 + Eye.w * 0.2)), 6);
+		ray *= pow(saturate(0.5 + 0.5 * sin(i.w.x * 0.15 - Eye.w * 0.1)), 4);
+		glow += float3(0.6, 0.88, 1) * ray * saturate(n.y) * 0.75;
 	} else {
-		rough = 0.4;
-		f0 = float3(0.055, 0.055, 0.06);
+		rough = 0.42;
+		f0 = float3(0.06, 0.065, 0.07);
+		albedo *= float3(0.78, 0.86, 0.9);
+		float spray = pow(saturate(sin(i.w.x * 1.6 + Eye.w * 1.5) * sin(i.w.z * 1.2 - Eye.w * 0.8)), 3);
+		glow += float3(0.85, 0.94, 1) * spray * 0.28;
 	}
 	float sh = ShadowAt(i.w, n);
 	float3 col = Lit(albedo, nLit, v, rough, f0, sh, 0);
@@ -492,6 +560,8 @@ GOut GroundPS(PSIn i, float theme)
 		else if (theme > 5.5 && theme < 6.5) causCol = float3(0.45, 0.85, 0.4);
 		else if (theme > 2.5 && theme < 3.5) causCol = float3(0.85, 0.93, 1);
 		else if (theme > 0.5 && theme < 1.5) causCol = float3(0.9, 0.7, 0.4);
+		else if (theme > 7.5 && theme < 8.5) causCol = float3(0.35, 0.75, 1);
+		else if (theme > 8.5) causCol = float3(0.85, 0.95, 1);
 		col += causCol * bedCaus * 0.35;
 	}
 	if (cliff < 0.5) {
@@ -510,6 +580,8 @@ GOut PSG4(PSIn i) { return GroundPS(i, 4); }
 GOut PSG5(PSIn i) { return GroundPS(i, 5); }
 GOut PSG6(PSIn i) { return GroundPS(i, 6); }
 GOut PSG7(PSIn i) { return GroundPS(i, 7); }
+GOut PSG8(PSIn i) { return GroundPS(i, 8); }
+GOut PSG9(PSIn i) { return GroundPS(i, 9); }
 
 GOut PSProp(PSIn i)
 {

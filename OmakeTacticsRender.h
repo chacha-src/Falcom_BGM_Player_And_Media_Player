@@ -360,6 +360,14 @@ public:
 	BOOL BuildTerrain(const Map& m);
 	void BuildMinimap(const Map& m);
 	ID3D11ShaderResourceView* MinimapSrv() { return m_srvMini; }
+	struct SceneryPuff { float x, y, z; int kind; };
+	int SceneryPuffCount() const { return m_puffN; }
+	SceneryPuff SceneryPuffAt(int i) const
+	{
+		SceneryPuff s = {};
+		if (i >= 0 && i < m_puffN && i < 12) s = m_puff[i];
+		return s;
+	}
 
 	// ポートレート
 	enum { PORTRAIT_N = 24, PORTRAIT_PX = 256 };
@@ -511,7 +519,7 @@ private:
 	ID3D11HullShader* m_hsT;
 	ID3D11DomainShader* m_dsT;
 	ID3D11PixelShader* m_psUi;
-	ID3D11PixelShader* m_psGround[8];
+	ID3D11PixelShader* m_psGround[TH_COUNT];
 	ID3D11PixelShader* m_psProp;
 	ID3D11PixelShader* m_psWater;
 	ID3D11PixelShader* m_psLava;
@@ -611,6 +619,8 @@ private:
 	Fix<PropBatch, 16> m_props;
 	DWORD m_waterColor;
 	int m_theme;
+	SceneryPuff m_puff[12];
+	int m_puffN;
 
 	// フレーム定数
 	struct FrameCB {

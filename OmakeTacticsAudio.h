@@ -87,7 +87,11 @@ enum TacSfxId {
 	TS_HOVER_BASE, // 拠点の項目に乗った
 	TS_HOVER_SHOP, // 店の項目に乗った
 	TS_HOVER_GAME, // 戦闘メニューの項目に乗った
-	TS_N
+	// 召喚。登場・攻撃・退場 × 場面（炎 氷 雷 地 風 水 光 闇 毒 咆哮 眠 糸）。
+	TS_SUM_IN,
+	TS_SUM_ATK = TS_SUM_IN + 12,
+	TS_SUM_OUT = TS_SUM_ATK + 12,
+	TS_N = TS_SUM_OUT + 12
 };
 
 // tacticsbgm 内の曲。地形曲は tacticsgame.ogg、それ以外で無いファイルは tactics.ogg に戻す。
@@ -105,6 +109,8 @@ enum TacBgmId {
 	TAC_BGM_VOLCANO, // tacticsgamevolcano.ogg
 	TAC_BGM_SWAMP,   // tacticsgameswamp.ogg
 	TAC_BGM_RUINS,   // tacticsgameruins.ogg
+	TAC_BGM_SEABED,  // tacticsgameseabed.ogg
+	TAC_BGM_FALLS,   // tacticsgamewaterfall.ogg
 	TAC_BGM_DANGER,  // tacticsgamedanger.ogg（届く敵が味方を数巡で溶かすあいだ）
 	TAC_BGM_CLEAR,   // tacticsgameclear.ogg（勝利）
 	TAC_BGM_N
@@ -116,6 +122,8 @@ void TacAudioPump();
 // 1 なら供給は TIME_CRITICAL の専用スレッド。UI タイマーは呼ばない。
 int TacAudioOnThread();
 void TacSfx(int id);
+// 召喚の登場・攻撃・退場。phase は 0,1,2。fx は SUM_FX_*。
+void TacSfxSummon(int phase, int fx);
 // 魔法の詠唱（属性ごと）。
 void TacSfxCast(int element);
 // 攻撃・詠唱のモーション音。skill<0 は通常攻撃。

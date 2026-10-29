@@ -301,6 +301,8 @@ static const ThemeParam kTheme[TH_COUNT] = {
 	{ 5.0f, .055f, 3, T_PLAIN, .80f, 2, 3, 6, 0, 0 },
 	{ 2.0f, .060f, 2, T_PLAIN, .58f, 3, 1, 2, 0, 1 },
 	{ 3.0f, .050f, 2, T_PLAIN, .70f, 1, 2, 3, 1, 0 },
+	{ 3.2f, .050f, 2, T_PLAIN, .70f, 0, 1, 2, 1, 0 },
+	{ 3.2f, .050f, 2, T_PLAIN, .72f, 0, 2, 3, 1, 0 },
 };
 
 static bool FootPassable(int t) { return TerrainInfo(t).costFoot < 99; }
@@ -641,6 +643,61 @@ static int StampShape(Map& m, int stage, Rng& r, int& pax, int& paz)
 	return span;
 }
 
+#include "tactics_src/fixed_maps.inc"
+
+static int FixedHeight(char ch)
+{
+	switch (ch) {
+	case 'M': return 6;
+	case 'P': case 'W': return 5;
+	case 'h': return 4;
+	case 'k': case 'u': return 3;
+	case 'w': return 1;
+	case ' ': return 0;
+	default: return 2;
+	}
+}
+static int FixedTerrain(char ch)
+{
+	switch (ch) {
+	case 'f': return T_FOREST;
+	case 'h': return T_HILL;
+	case 'M': return T_MOUNTAIN;
+	case 's': return T_SAND;
+	case 'P': return T_PLAIN;
+	case 'W': case 'w': return T_WATER;
+	case 'r': return T_ROAD;
+	case 'B': return T_BRIDGE;
+	case 'u': return T_RUINS;
+	case 'k': return T_ROCK;
+	case ' ': return T_VOID;
+	default: return T_PLAIN;
+	}
+}
+// 海底・滝は固定の地形。味方拠点のまわりだけ歩きやすくする。振り直しは敵の配置だけ動く。
+static int StampFixedStage(Map& m, int th, int& pax, int& paz)
+{
+	const char (*rows)[65] = (th == TH_FALLS) ? kFlMap : kSbMap;
+	pax = (th == TH_FALLS) ? kFlX : kSbX;
+	paz = (th == TH_FALLS) ? kFlZ : kSbZ;
+	for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) {
+		char ch = rows[z][x];
+		Cell& c = m.c[z][x];
+		c.t = (BYTE)FixedTerrain(ch);
+		c.h = (BYTE)FixedHeight(ch);
+		c.prop = PK_NONE;
+		c.gimm = 0;
+		c.gparam = 0;
+		c.var = (BYTE)((x * 17 + z * 31) & 255);
+	}
+	for (int z = paz - 3; z <= paz + 3; z++) for (int x = pax - 3; x <= pax + 3; x++) {
+		if (!Map::In(x, z) || m.c[z][x].t == T_VOID) continue;
+		m.c[z][x].t = (BYTE)(th == TH_SEABED ? T_SAND : T_PLAIN);
+		if (m.c[z][x].h < 2) m.c[z][x].h = 2;
+	}
+	return 28;
+}
+
 void GenerateMap(Map& m, int stage, DWORD seed, int theme)
 {
 	memset(&m, 0, sizeof(m));
@@ -655,6 +712,13 @@ void GenerateMap(Map& m, int stage, DWORD seed, int theme)
 	m.theme = th;
 	const ThemeParam& tp = kTheme[th];
 	const DWORD ns = seed * 7 + 13;
+	int pax = MAPN / 2, paz = MAPN / 2, span = 28;
+	int eax = pax, eaz = paz;
+	if (th == TH_SEABED || th == TH_FALLS) {
+		span = StampFixedStage(m, th, pax, paz);
+		eax = pax;
+		eaz = paz;
+	} else {
 
 	// 1) 高さと基本地面
 	for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) {
@@ -764,9 +828,9 @@ void GenerateMap(Map& m, int stage, DWORD seed, int theme)
 	}
 
 	// 5) 地図の外形を切ってから、太い側に味方拠点
-	int pax = MAPN / 2, paz = MAPN / 2;
-	int span = StampShape(m, stage, r, pax, paz);
-	int eax = pax, eaz = paz;
+	pax = MAPN / 2; paz = MAPN / 2;
+	span = StampShape(m, stage, r, pax, paz);
+	eax = pax; eaz = paz;
 	for (int pass = 0; pass < 2; pass++) {
 		int ax = pass ? eax : pax, az = pass ? eaz : paz;
 		int hh = max(1, (int)m.c[az][ax].h);
@@ -829,6 +893,7 @@ void GenerateMap(Map& m, int stage, DWORD seed, int theme)
 		}
 	}
 
+	}
 	// 7) 味方配置と、地図全体の敵拠点（最大 200。1 拠点 3〜15）
 	static BYTE taken[MAPN][MAPN];
 	memset(taken, 0, sizeof(taken));
@@ -1005,7 +1070,8 @@ void GenerateMap(Map& m, int stage, DWORD seed, int theme)
 		c.prop = PK_NONE;
 		switch (c.t) {
 		case T_FOREST:
-			if (th == TH_SNOW) c.prop = PK_PINE;
+			if (th == TH_SEABED) c.prop = (c.var & 1) ? PK_LILY : PK_ROCK;
+			else if (th == TH_SNOW) c.prop = PK_PINE;
 			else if (th == TH_DESERT || th == TH_VOLCANO) c.prop = PK_DEAD;
 			else if (th == TH_SWAMP) c.prop = (c.var & 3) == 0 ? PK_DEAD : PK_TREE;
 			else c.prop = (c.var & 3) == 0 ? PK_TREES : ((c.var & 7) == 1 ? PK_HILLTREES : PK_TREE);
@@ -1017,7 +1083,7 @@ void GenerateMap(Map& m, int stage, DWORD seed, int theme)
 			else c.prop = PK_ROCK;
 			break;
 		case T_WATER:
-			if ((th == TH_SWAMP || th == TH_PLAINS || th == TH_FOREST) && (c.var % 5) == 0) c.prop = PK_LILY;
+			if ((th == TH_SWAMP || th == TH_PLAINS || th == TH_FOREST || th == TH_FALLS || th == TH_SEABED) && (c.var % 5) == 0) c.prop = PK_LILY;
 			break;
 		case T_RUINS:
 			if ((c.var % 23) == 0) c.prop = PK_LANTERN;

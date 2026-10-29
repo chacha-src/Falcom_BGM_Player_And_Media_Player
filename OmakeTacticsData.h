@@ -181,7 +181,7 @@ struct TerrainDef {
 };
 const TerrainDef& TerrainInfo(int t);
 
-enum Theme { TH_PLAINS, TH_CANYON, TH_FOREST, TH_SNOW, TH_DESERT, TH_VOLCANO, TH_SWAMP, TH_RUINS, TH_COUNT };
+enum Theme { TH_PLAINS, TH_CANYON, TH_FOREST, TH_SNOW, TH_DESERT, TH_VOLCANO, TH_SWAMP, TH_RUINS, TH_SEABED, TH_FALLS, TH_COUNT };
 int ThemeNameTx(int th);
 
 enum { MAPN = 64, MAXH = 12 };

@@ -144,7 +144,10 @@ static const float kGain[TS_N] = {
 	0.62f, 0.73f, 0.39f, 0.35f, 0.57f,
 	0.60f,
 	0.34f,
-	0.30f, 0.32f, 0.30f
+	0.30f, 0.32f, 0.30f,
+	0.86f, 0.80f, 0.90f, 0.88f, 0.78f, 0.88f, 0.82f, 0.84f, 0.76f, 0.92f, 0.68f, 0.74f,
+	1.06f, 0.98f, 1.10f, 1.02f, 0.92f, 1.04f, 0.96f, 1.00f, 0.90f, 1.08f, 0.76f, 0.86f,
+	0.80f, 0.76f, 0.84f, 0.80f, 0.74f, 0.82f, 0.78f, 0.80f, 0.72f, 0.84f, 0.64f, 0.70f
 };
 
 static size_t TacRead(void* dst, size_t sz, size_t nm, void* h)
@@ -732,6 +735,45 @@ static const char* const kMml[TS_N] = {
 	"t240 l64 o6 v8 @35 e | t240 l64 o5 v4 @9 b",
 	"t260 l64 o6 v9 @21 b >e | t260 l64 o7 v3 @32 r64 e",
 	"t200 l64 o4 v9 @34 c | t200 l64 o5 v4 @5 g",
+	// 召喚の登場。炎は下から膨らみ、氷は柱、雷は雨のあと、地は割れ、風は渦、水は寄せ、光は和音、闇は沈み、毒は泡、咆哮は踏み、眠は笛、糸は爪弾き。
+	"t118 l8 o2 v13 @10 s9 c4 e-8 g4 >c8 e-8 g4 c8 | t140 l16 o3 v7 @28 c r c r32 c r c r c r16 c r c r c | t118 l8 o3 v8 @4 r4 s7 g8 >c e- g e-8 c4",
+	"t108 l8 o5 v10 @11 c8 e g >c e g4 e8 c4 | t96 l8 o5 v7 @26 r8 c e g >c e4 | t170 l16 o6 v5 @32 c r8 c r c r8 c r c r8 c",
+	"t108 l8 o3 v12 @12 r8 s16 c c g >c8 e g >c4 | t150 l16 o4 v7 @27 c r c r c r c r c r8 c r c | t190 l32 o6 v7 @5 r4 c r32 c r16 c r32 c r16 c",
+	"t100 l8 o2 v13 @15 s-5 c4. g8 c4 g8 >c4 | t124 l16 o3 v9 @31 c8 c r c r16 c r8 c r c | t112 l8 o3 v7 @34 r8 c g c e- c g4",
+	"t116 l8 o4 v10 @27 s12 c e g >c e g4 e c <g4 | t128 l8 o5 v6 @2 r8 e g a >c e4 | t136 l16 o3 v7 @28 r4 c r c r c r c r8 c4",
+	"t100 l8 o2 v13 @31 c8 c r8 c4 @25 s5 g4 >c4. | t112 l8 o3 v8 @28 s-3 c4. c8 c4 >c4 | t120 l16 o4 v7 @11 r2 c e g >c e g4",
+	"t108 l8 o4 v10 @13 s4 c e g >c4 e g >c4 | t100 l8 o4 v8 @30 r4 [ceg]4 [gbd]4 [ceg]2 | t136 l16 o6 v7 @26 r8 c e g >c e g >c8",
+	"t104 l8 o2 v13 @14 s-6 c4 f-8 a-4 c4 g-8 c4 | t100 l8 o3 v8 @33 r4 e-8 g- a- >c- e-4 | t126 l16 o2 v9 @31 c8 c r8 c r c r16 c r c",
+	"t108 l8 o3 v11 @16 c e- c f c g-4 c8 f4 | t92 l4 o3 v8 @25 r4 s-3 [ce-g-]2 | t156 l16 o4 v7 @7 c r8 c r c r8 c r c r16 c",
+	"t100 l8 o2 v14 @31 c8 c c4 @4 s8 g >c4 e-4 | t104 l8 o3 v10 @4 r8 c8 e g >c e g4 | t118 l16 o3 v7 @28 r8 c r c r c r c r8 c4",
+	"t116 l8 o4 v9 @2 e4. d8 c4 g e c4 | t96 l8 o5 v7 @32 r4 e g c e g4 | t100 l4 o3 v6 @25 r4 [egc]2",
+	"t120 l8 o4 v10 @29 c e- c g c a-4 e- c4 | t156 l32 o5 v7 @23 c r c r c r c r c r c r16 c | t100 l8 o2 v8 @31 r4 c r8 c r c4",
+	// 召喚の攻撃。衝撃を先に置き、その属性の色を重ねる。
+	"t136 l8 o2 v14 @24 c8 @10 s-12 >e-4 g8 >c4 | t176 l32 o4 v9 @7 c c r c c r c c r16 c | t132 l8 o4 v10 @28 s-10 c4. e-8 g4",
+	"t148 l16 o5 v12 @11 c g e c <a g >c8 | t128 l8 o3 v13 @24 c @11 s-6 >e g4 c4 | t176 l32 o6 v8 @7 c c r c c r16 c c",
+	"t150 l16 o2 v14 @24 c8 @12 s-10 >c c g >c e-8 g4 | t168 l32 o5 v10 @7 c c c r c c r c c | t148 l8 o4 v9 @28 s20 c8 c4",
+	"t140 l8 o2 v14 @24 c @15 s-8 >e- c g4 c4 | t148 l16 o3 v11 @31 c8 c r c c r8 c4 | t156 l32 o4 v8 @34 c c r c c r c r16 c",
+	"t158 l16 o5 v12 @27 s-18 c e g c g e c4 | t140 l8 o3 v11 @17 s14 c8 >g e c4 | t172 l32 o6 v8 @28 c r c r c r c r c c",
+	"t132 l8 o2 v14 @24 c8 @28 s-10 >e-4 g4 | t146 l16 o4 v10 @11 c e g >c e g c4 | t154 l32 o3 v9 @7 c c c r c c r16 c8",
+	"t146 l16 o5 v13 @13 c e g >c e g >c4 | t118 l8 o4 v11 @30 [ceg]4 [dfa]4 | t158 l32 o6 v9 @26 c e g >c r16 c4",
+	"t138 l8 o2 v14 @24 c @14 s-10 >e-4 c4 | t128 l16 o3 v10 @33 e- g- a- >c- g- e- c4 | t156 l32 o4 v8 @7 c r c r c r16 c c",
+	"t144 l8 o3 v13 @16 s-8 c e- g-4 c4 | t148 l16 o4 v9 @23 c e- c f c g- c4 | t150 l32 o3 v8 @7 c c r c c r c r16 c",
+	"t130 l8 o2 v14 @24 c @4 s-5 >c4. g8 c4 | t136 l16 o3 v11 @4 c e g >c g e c g4 | t146 l8 o3 v8 @28 s-12 c c4",
+	"t118 l8 o5 v10 @9 c e g >c4 e4 | t110 l8 o4 v8 @2 s-4 e g c4 | t128 l16 o6 v6 @32 c e g c g e c4",
+	"t148 l16 o4 v12 @29 c g e- c <a- g >c4 | t138 l8 o3 v11 @17 s-8 c g4 | t158 l32 o5 v8 @23 c c r c c r c4",
+	// 召喚の退場。頭の休符のあと、炎は吸い込まれ、氷は落ち、雷は昇り、地は閉じ、風は抜け、水は引き、光は昇り、闇は沈み、毒は薄れ、咆哮は落ち、眠は霧へ、糸は締まる。
+	"t112 l8 o3 v11 @10 r4 s-12 >c4 g8 e-4 c2 | t112 l16 o4 v6 @28 r4 c r c r c r c r c | t112 l8 o4 v7 @4 r4 s8 g8 e- c <g4",
+	"t104 l8 o5 v9 @11 r4 >c4 g e c <g4 | t100 l8 o4 v7 @26 r4 c e g4 | t116 l16 o6 v6 @32 r4 c r c r8 c r c r8 c",
+	"t118 l8 o4 v10 @12 r4 s12 c8 e g >c e g >c4 | t136 l16 o6 v6 @5 r4 c r c r c r8 c r c | t108 l4 o3 v7 @25 r2 s6 [cg]4",
+	"t104 l8 o3 v10 @15 r4 s-8 >c4 g e- c <g4 | t104 l8 o2 v9 @31 r4 c r8 c4 | t108 l16 o3 v6 @34 r4 c r c r8 c r c r c",
+	"t120 l8 o4 v9 @27 r4 s10 c e g >c e g >c2 | t126 l8 o5 v6 @2 r2 e g >c4 | t132 l16 o6 v5 @7 r4 c r c r c r8 c r c",
+	"t104 l8 o3 v11 @25 r4 s-6 >c4 g8 e c <g4. | t108 l16 o4 v6 @11 r4 c g e c <g e c4 | t100 l8 o3 v7 @28 r4 s-4 c4 c c2",
+	"t116 l8 o4 v9 @13 r4 s8 c e g >c e g >c4 | t100 l4 o5 v7 @30 r2 [gb>d]2 | t128 l16 o6 v6 @32 r4 c e g >c g e c4",
+	"t104 l8 o3 v11 @14 r4 s-8 >c4 g- e- c <a-4 | t100 l8 o3 v7 @33 r4 e- g- a- >c-4 | t108 l16 o2 v8 @31 r4 c r8 c r c r16 c",
+	"t102 l8 o4 v9 @16 r4 s-6 c e- g- e- c <g-4 | t96 l4 o3 v7 @25 r4 s-4 [ce-g-]2 | t128 l16 o5 v5 @7 r4 c r c r c r8 c",
+	"t108 l8 o3 v11 @4 r4 s-8 >c4 g e c <g4 | t100 l8 o2 v9 @31 r4 c r8 c4 | t110 l16 o3 v6 @28 r4 c r c r c r8 c r c",
+	"t104 l8 o4 v8 @2 r4 s6 e g >c e g >c4 | t100 l8 o5 v6 @32 r4 e g c e4 | t96 l4 o4 v5 @25 r2 [egb]2",
+	"t112 l8 o4 v9 @29 r4 s-8 c e- g c e- g4 | t118 l16 o5 v6 @23 r4 c r c r c r8 c | t100 l8 o2 v7 @31 r4 c4 c2",
 };
 static void TacSynthAll()
 {
@@ -929,6 +971,8 @@ static const wchar_t* TacBgmFile(int scene)
 	case TAC_BGM_VOLCANO: return L"tacticsgamevolcano.ogg";
 	case TAC_BGM_SWAMP: return L"tacticsgameswamp.ogg";
 	case TAC_BGM_RUINS: return L"tacticsgameruins.ogg";
+	case TAC_BGM_SEABED: return L"tacticsgameseabed.ogg";
+	case TAC_BGM_FALLS: return L"tacticsgamewaterfall.ogg";
 	case TAC_BGM_DANGER: return L"tacticsgamedanger.ogg";
 	case TAC_BGM_CLEAR: return L"tacticsgameclear.ogg";
 	default: return L"tactics.ogg";
@@ -1027,7 +1071,7 @@ void TacBgmScene(int scene)
 		swprintf_s(hub, L"%s\\tactics.ogg", dir);
 		const wchar_t* use = want;
 		if (!TacOggOk(want) && scene != TAC_BGM_HUB) {
-			const int theme = scene >= TAC_BGM_PLAINS && scene <= TAC_BGM_RUINS;
+			const int theme = scene >= TAC_BGM_PLAINS && scene <= TAC_BGM_FALLS;
 			if (theme && TacOggOk(game)) use = game;
 			else use = hub;
 		}
@@ -1377,6 +1421,15 @@ void TacSfx(int id)
 		s_hoverAt = n;
 	}
 	TacSfxPlay(s_clip[id].play, s_clip[id].playN);
+}
+
+void TacSfxSummon(int phase, int fx)
+{
+	if (phase < 0) phase = 0;
+	if (phase > 2) phase = 2;
+	if (fx < 0) fx = 0;
+	if (fx > 11) fx = 11;
+	TacSfx(TS_SUM_IN + phase * 12 + fx);
 }
 
 void TacSfxCast(int element)
