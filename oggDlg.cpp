@@ -1559,6 +1559,31 @@ BEGIN_MESSAGE_MAP(CKpiLoadingWnd, CWnd)
 	ON_WM_ERASEBKGND()
 END_MESSAGE_MAP()
 
+// カタログ完了後の「起動処理中」は、ここでバーを戻してから本画面を出す。
+void OggStartupLoadPos(int pos)
+{
+	if (pos < 0) pos = 0;
+	if (pos > 100) pos = 100;
+	CKpiLoadingWnd* w = g_pActiveLoadingWnd;
+	if (!w || !w->GetSafeHwnd()) return;
+	w->SetRange(0, 100);
+	w->SetPos(pos);
+}
+
+void OggFinishStartupLoading()
+{
+	CKpiLoadingWnd* w = g_pActiveLoadingWnd;
+	if (!w) return;
+	g_pActiveLoadingWnd = NULL;
+	g_oggKpiLoading = 0;
+	extern ITaskbarList3* ptl;
+	if (ptl && og && ::IsWindow(og->GetSafeHwnd()))
+		ptl->SetProgressState(og->m_hWnd, TBPF_NOPROGRESS);
+	if (w->GetSafeHwnd())
+		w->DestroyWindow();
+	::SetCursor(::LoadCursor(NULL, IDC_ARROW));
+}
+
 // 1 プラグイン（KPI/外部）処理後の進捗更新＋メッセージポンプ（チラつき・固着防止）
 void OggPluginLoadOnOneFileDone()
 {
@@ -2069,6 +2094,7 @@ BEGIN_MESSAGE_MAP(COggDlg, CCustomBlurDialogBase)
 	ON_MESSAGE(WM_APP + 2, dp2)
 	ON_MESSAGE(WM_APP_KPI_PLUGIN, OnKpiPluginMsg)
 	ON_MESSAGE(WM_APP_CEMU_CATLIST, OnCemuCatListMsg)
+	ON_MESSAGE(WM_APP_CEMU_TITLES, OnCemuTitlesMsg)
 	ON_MESSAGE(WM_TIMERP_VSYNC_TICK, OnTimerpVsyncTick)
 	ON_MESSAGE(WM_SPEANA_TICK, OnSpeanaTick)
 	ON_MESSAGE(WM_ENDPOINT_VOLUME, OnEndpointVolume)
@@ -2135,12 +2161,11 @@ REFTIME aa1, aa2 = 0;
 
 
 //FFT関連設定
-// FFTライブラリ(fft4g.c)
+// 大浦崇 fftsg.c の実数FFT。正弦変換(ddst)はビン間隔が半分で、440Hz が約880Hz に出る。
 #if defined(__cplusplus)
 extern "C" {
 #endif // defined(__cplusplus)
 	void rdft(int, int, double*, int*, double*);
-	void ddst(int, int, double*, int*, double*);
 #if defined(__cplusplus)
 }
 #endif // defined(__cplusplus)
@@ -2155,7 +2180,7 @@ extern "C" {
 #define ABS(N)			( (N)<0 ? -(N) : (N) )
 
 int ipTab2[2 + SQRT_BUFSZ2 * 50];		// FFT sin/cos table  [ >= 2+sqrt(BUFSZH/2) ]
-double wTab2[BUFSZH * 50];		// FFT sin/cos table for ddst()
+double wTab2[BUFSZH * 50];		// FFT sin/cos table for rdft()
 double aFFT2[BUFSZH * 50];			// FFT data
 double aFFT2a[BUFSZH * 50];			// FFT data
 
@@ -7252,9 +7277,9 @@ BOOL COggDlg::OnInitDialog()
 	}
 	pcdl = NULL;
 	CoCreateInstance(CLSID_DestinationList, NULL, CLSCTX_INPROC_SERVER, IID_ICustomDestinationList, (void**)&pcdl);
-	if (pcdl) {
-		RefreshTaskbarJumpList(savedata.playerMode == 1);
-	}
+	/* MP は EnterMediaPlayerMode でもう一度組む。ここで先に組むと起動が二重になる。 */
+	if (pcdl && savedata.playerMode != 1)
+		RefreshTaskbarJumpList(FALSE);
 
 	m_pDlgColor = NULL;
 
@@ -7413,6 +7438,8 @@ BOOL COggDlg::OnInitDialog()
 	loadingWnd.SetPos(0);
 	CEmuMgrEnsureCatalogEx(CEmuMgrGet(), &LoadProg::CB, &loadingWnd);
 	if (haveLoadingWnd) {
+		loadingWnd.SetRange(0, 100);
+		loadingWnd.SetPos(8);
 		loadingWnd.SetStatusText(LL14(
 			L"起動処理中…\n（画面を準備しています）",
 			L"Starting up…\n(Preparing the screen)",
@@ -7446,7 +7473,9 @@ BOOL COggDlg::OnInitDialog()
 	wfx1.nAvgBytesPerSec = wfx1.nSamplesPerSec * wfx1.nBlockAlign;
 	wfx1.cbSize = 0;
 
+	OggStartupLoadPos(12);
 	waveOutOpen(&hwo, WAVE_MAPPER, &wfx1, NULL, NULL, CALLBACK_NULL);
+	OggStartupLoadPos(22);
 
 	/////////////////////////////////
 
@@ -7574,15 +7603,19 @@ BOOL COggDlg::OnInitDialog()
 	// d6b90a5(analyzer 前)と同じ: OnInitDialog 内で同期的に MP へ遷移する。
 	// cb7e594 以降の PostMessage/SetTimer 遅延は DeferredHeavy(更新チェック)より
 	// 後回しになり、KPI〜MP 間で CInvalidArgException が出る順序に変わっていた。
+	OggStartupLoadPos(28);
 	if (savedata.playerMode == 1)
-		EnterMediaPlayerMode(); // 保存済みトグル画面を作ってから MP と同時に表示
+		EnterMediaPlayerMode(); // プレイリストと MP を出してから、保存済みトグル画面を作る
 	else {
+		OggFinishStartupLoading();
+		UpdateWindow();
 		SendMessage(WM_OGG_TOGGLE_SUBUI, 10, 0);
 		SendMessage(WM_OGG_TOGGLE_SUBUI, 20, 0);
 	}
 
-	/* MP/本画面の Create が終わってから読込窓を閉じる（空白を出さない） */
-	if (haveLoadingWnd) {
+	/* MP/本画面の Create が終わってから読込窓を閉じる（空白を出さない）。
+	   EnterMediaPlayerMode が先に閉じた場合はここは何もしない。 */
+	if (haveLoadingWnd && g_pActiveLoadingWnd) {
 		g_pActiveLoadingWnd = NULL;
 		g_oggKpiLoading = 0;
 		if (ptl) ptl->SetProgressState(m_hWnd, TBPF_NOPROGRESS);
@@ -31365,7 +31398,17 @@ LRESULT COggDlg::OnKpiPluginMsg(WPARAM wParam, LPARAM)
 
 LRESULT COggDlg::OnCemuCatListMsg(WPARAM, LPARAM)
 {
+	extern int PlCemuTitleRefreshBusy();
+	if (PlCemuTitleRefreshBusy())
+		return 0;
 	CEmuCatalogListDlg::Show(this);
+	return 0;
+}
+
+LRESULT COggDlg::OnCemuTitlesMsg(WPARAM, LPARAM lp)
+{
+	extern void PlApplyCemuTitleBatch(void* batch);
+	PlApplyCemuTitleBatch((void*)lp);
 	return 0;
 }
 
@@ -34026,6 +34069,14 @@ const double* SpeanaHannTable(int N)
 	return (N == 8192) ? h8192 : h4096;
 }
 
+/* rdft の並び: a[2k],a[2k+1] がビン k の実部・虚部。a[0] は直流、a[1] はナイキスト。 */
+static double SpeanaBinMag(const double* a, int k, int n)
+{
+	if (k <= 0) return fabs(a[0]);
+	if (k >= n / 2) return fabs(a[1]);
+	return hypot(a[2 * k], a[2 * k + 1]);
+}
+
 void SpeanaApplyHann(const double* src, double* dst, int N)
 {
 	const double* h = SpeanaHannTable(N);
@@ -34943,13 +34994,13 @@ void COggDlg::Speana(BOOL bPaintBars, BOOL bFillLevels)
 		const int N = fftSize;
 		if (!stereoSpeana) {
 			SpeanaApplyHann(bufM, aFFT2, N);
-			ipTab2[0] = 0; ddst(N, -1, aFFT2, ipTab2, wTab2);
+			ipTab2[0] = 0; rdft(N, 1, aFFT2, ipTab2, wTab2);
 		}
 		else {
 			SpeanaApplyHann(bufResampled, aFFT2, N);
-			ipTab2[0] = 0; ddst(N, -1, aFFT2, ipTab2, wTab2);
+			ipTab2[0] = 0; rdft(N, 1, aFFT2, ipTab2, wTab2);
 			SpeanaApplyHann(bufResampledR, aFFT2a, N);
-			ipTab2[0] = 0; ddst(N, -1, aFFT2a, ipTab2, wTab2);
+			ipTab2[0] = 0; rdft(N, 1, aFFT2a, ipTab2, wTab2);
 		}
 		aFFT2[0] = 0; aFFT2a[0] = 0; // DCカット
 
@@ -34969,14 +35020,14 @@ void COggDlg::Speana(BOOL bPaintBars, BOOL bFillLevels)
 			dt = 0; dta = 0;
 			if (!stereoSpeana) {
 				for (j = bin_start; j < bin_end; j++) {
-					const double v = fabs(aFFT2[j]);
+					const double v = SpeanaBinMag(aFFT2, j, N);
 					if (dt < v) dt = v;
 				}
 			}
 			else {
 				for (j = bin_start; j < bin_end; j++) {
-					const double vl = fabs(aFFT2[j]);
-					const double vr = fabs(aFFT2a[j]);
+					const double vl = SpeanaBinMag(aFFT2, j, N);
+					const double vr = SpeanaBinMag(aFFT2a, j, N);
 					if (dt < vl) dt = vl;
 					if (dta < vr) dta = vr;
 				}

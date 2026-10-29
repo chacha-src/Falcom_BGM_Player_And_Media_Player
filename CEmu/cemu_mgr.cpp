@@ -198,6 +198,26 @@ int CEmuMgrEnsureCatalogEx(CEmuMgr* m, CEmuCatalogProgressFn progress, void* pro
 	return n;
 }
 
+int CEmuMgrCopySongTitle(CEmuMgr* m, const wchar_t* path, unsigned titleIndex1,
+	wchar_t* name, int nameChars)
+{
+	if (!m || !path || !path[0] || !name || nameChars <= 1) return 0;
+	name[0] = 0;
+	if (titleIndex1 == 0) titleIndex1 = 1;
+	CEmuMgrCatCsInit();
+	EnterCriticalSection(&s_cemuCatCs);
+	wchar_t zipOut[CEMU_ZIP_PATH];
+	char dataDir[CEMU_DATA_DIR];
+	const CEmuGameEntry* ge = CEmuMgrResolveZip(m, path, zipOut, (int)_countof(zipOut),
+		dataDir, (int)sizeof(dataDir));
+	if (ge)
+		CEmuGameTitleAt(ge, (int)titleIndex1 - 1, NULL, name, nameChars);
+	const int ok = (name[0] && name[0] != L'<' && wcsncmp(name, L"<title", 6) != 0) ? 1 : 0;
+	if (!ok) name[0] = 0;
+	LeaveCriticalSection(&s_cemuCatCs);
+	return ok;
+}
+
 /* exe 隣 data\ を既定。Init は起動時 1 回（ルート設定のみ・カタログは遅延） */
 int CEmuMgrInit(CEmuMgr* m, const wchar_t* dataRootOverride)
 {

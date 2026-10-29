@@ -31,6 +31,10 @@ int CEmuMgrReload(CEmuMgr* m, const wchar_t* dataRootOverride);
 const CEmuGameEntry* CEmuMgrResolveZip(CEmuMgr* m, const wchar_t* droppedZip,
 	wchar_t* outZipPath, int outZipChars, char* outDataDir, int outDataDirCap);
 
+/* 曲名だけコピーして返す。カタログ操作は他スレッドと排他。1=名前あり */
+int CEmuMgrCopySongTitle(CEmuMgr* m, const wchar_t* path, unsigned titleIndex1,
+	wchar_t* name, int nameChars);
+
 /* platform 文字列 → data サブフォルダ名 */
 void CEmuMgrPlatformToDataDir(const char* platform, char* out, int outCap);
 

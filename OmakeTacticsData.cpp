@@ -223,14 +223,14 @@ V3 MXformDir(const M4& a, V3 d)
 
 // ============================================================ 地形・テーマ
 static const TerrainDef kTerrain[T_COUNT] = {
-	// costFoot は平地=2。道=1（半分）、森・砂=3、沼=4。飛行は EnterCost で地形を無視する
+	// costFoot は平地=2。道=1、森・丘=3、沼=4、水辺=6。溶岩は歩けるが、手番開始時に最大HPの12%。飛行は EnterCost で地形を無視し、溶岩でも傷まない。
 	{ TX_TER_PLAIN,    2, 1, 0, 0 },
 	{ TX_TER_FOREST,   3, 1, 10, 20 },
 	{ TX_TER_HILL,     3, 1, 15, 10 },
 	{ TX_TER_MOUNTAIN, 99, 0, 0, 0 },
-	{ TX_TER_WATER,    99, 1, 0, 0 },
+	{ TX_TER_WATER,    6, 1, 0, 0 },
 	{ TX_TER_CHASM,    99, 1, 0, 0 },
-	{ TX_TER_LAVA,     99, 1, 0, 0 },
+	{ TX_TER_LAVA,     4, 1, 0, 0 },
 	{ TX_TER_SAND,     2, 1, 0, 5 },
 	{ TX_TER_SNOW,     2, 1, 0, 5 },
 	{ TX_TER_SWAMP,    4, 1, -10, -10 },
@@ -1124,11 +1124,69 @@ void GenerateMap(Map& m, int stage, DWORD seed, int theme)
 				m.c[z][x].t = was;
 			}
 		}
+		int link = 1;
+		static const int ldx[4] = { 1, -1, 0, 0 }, ldz[4] = { 0, 0, 1, -1 };
+		for (int z = 1; z < MAPN - 1 && link <= 4; z++) for (int x = 1; x < MAPN - 1 && link <= 4; x++) {
+			if (m.c[z][x].t != T_DOOR || m.c[z][x].gimm == GM_FENCE || m.c[z][x].gparam) continue;
+			if (!r.Chance(50)) continue;
+			int lx = -1, lz = -1, best = 9999;
+			for (int k = 0; k < 4; k++) {
+				int nx = x + ldx[k], nz = z + ldz[k];
+				if (!Map::In(nx, nz) || m.c[nz][nx].gimm) continue;
+				if (!FootPassable(m.c[nz][nx].t) || m.c[nz][nx].t == T_BRIDGE) continue;
+				int d = abs(nx - m.pStartX[0]) + abs(nz - m.pStartZ[0]);
+				if (d < best) { best = d; lx = nx; lz = nz; }
+			}
+			if (lx < 0) continue;
+			m.c[z][x].gparam = (BYTE)link;
+			m.c[lz][lx].gimm = GM_LEVER;
+			m.c[lz][lx].gparam = (BYTE)link;
+			m.c[lz][lx].prop = PK_LANTERN;
+			link++;
+		}
+		int nFence = Clampi(span / 16, 0, 3);
+		for (int i = 0; i < nFence; i++) {
+			int s = take(6);
+			if (s < 0) break;
+			int x = s % MAPN, z = s / MAPN;
+			if (m.c[z][x].t != T_ROAD && m.c[z][x].t != T_PLAIN && m.c[z][x].t != T_RUINS) continue;
+			if (m.c[z][x].gimm) continue;
+			BYTE was = m.c[z][x].t;
+			m.c[z][x].t = T_DOOR;
+			m.c[z][x].gimm = GM_FENCE;
+			m.c[z][x].gparam = 0;
+			m.c[z][x].prop = PK_NONE;
+			if (m.nE > 0 && !FootReachable(m, m.pStartX[0], m.pStartZ[0], m.eStartX[0], m.eStartZ[0])) {
+				m.c[z][x].t = was;
+				m.c[z][x].gimm = GM_NONE;
+			}
+		}
 	}
 	if (m.nP > 0) {
 		EnsureClimbPath(m, m.pStartX[0], m.pStartZ[0], pax, paz);
 		for (int g = 0; g < m.nGrp; g++)
 			EnsureClimbPath(m, m.pStartX[0], m.pStartZ[0], m.grp[g].ax, m.grp[g].az);
+	}
+	if (m.nP > 0 && m.nE > 0) {
+		int nDrop = 0;
+		for (int z = 1; z < MAPN - 1 && nDrop < 3; z++) for (int x = 1; x < MAPN - 1 && nDrop < 3; x++) {
+			Cell& c = m.c[z][x];
+			if (c.t != T_BRIDGE || c.gimm) continue;
+			if ((((x + z * 13) ^ (int)m.seed) & 3) != 0) continue;
+			bool held = false;
+			for (int i = 0; i < m.nP && !held; i++) if (m.pStartX[i] == x && m.pStartZ[i] == z) held = true;
+			for (int i = 0; i < m.nE && !held; i++) if (m.eStartX[i] == x && m.eStartZ[i] == z) held = true;
+			for (int g = 0; g < m.nGrp && !held; g++) if (m.grp[g].ax == x && m.grp[g].az == z) held = true;
+			if (held) continue;
+			BYTE was = c.t;
+			c.t = T_CHASM;
+			bool ok = FootReachable(m, m.pStartX[0], m.pStartZ[0], m.eStartX[0], m.eStartZ[0]);
+			c.t = was;
+			if (!ok) continue;
+			c.gimm = GM_DROP;
+			c.var = 2;
+			nDrop++;
+		}
 	}
 }
 
@@ -3028,6 +3086,11 @@ static int FacingOf(const Unit& a, const Unit& d)
 	return 0;
 }
 
+int UnitFacing(const Unit& attacker, const Unit& defender)
+{
+	return FacingOf(attacker, defender);
+}
+
 static float DirMod(const Unit& a, const Unit& d)
 {
 	int f = FacingOf(a, d);
@@ -3145,6 +3208,22 @@ static void StrikeCalc(const Battle& b, const Unit& a, const Unit& d, int skill,
 	if (tri > 0) { hit += 15; dm *= 1.1f; }
 	if (tri < 0) { hit -= 15; dm *= 0.9f; }
 	if (WeaponOf(a) == WT_BOW && UnitMoveType(d) == MV_FLY) { hit += 20; dm *= 1.15f; }
+	{
+		bool bow = WeaponOf(a) == WT_BOW || UnitAttackStyle(a) == AS_SHOOT || UnitAttackStyle(a) == AS_SHOOT1;
+		int elw = sd ? sd->element : EL_NONE;
+		if (b.weather == WX_RAIN) {
+			if (elw == EL_FIRE) dm *= 0.75f;
+			else if (elw == EL_THUNDER) dm *= 1.10f;
+			if (bow) hit -= 12;
+		} else if (b.weather == WX_SNOW) {
+			if (elw == EL_ICE) dm *= 1.15f;
+			else if (elw == EL_FIRE) dm *= 0.85f;
+			if (bow) hit -= 8;
+		} else if (b.weather == WX_ASH) {
+			if (elw == EL_FIRE) dm *= 1.12f;
+			if (bow) hit -= 14;
+		}
+	}
 	hit = Clampi(hit, magic ? 62 : 48, magic ? 100 : 99);
 	{
 		int grd = UnitStat(d, S_GRD);
@@ -3950,11 +4029,11 @@ int Battle::NextActor()
 	for (int guard = 0; guard < 100000; guard++) {
 		int best = -1;
 		for (int i = 0; i < nUnits; i++) {
-			if (!u[i].alive || !u[i].alert || u[i].ct < 1000) continue;
+			if (!u[i].alive || u[i].alert != 1 || u[i].ct < 1000) continue;
 			if (best < 0 || u[i].ct > u[best].ct || (u[i].ct == u[best].ct && u[i].team < u[best].team)) best = i;
 		}
 		if (best >= 0) return best;
-		for (int i = 0; i < nUnits; i++) if (u[i].alive && u[i].alert) u[i].ct += Speed(u[i]);
+		for (int i = 0; i < nUnits; i++) if (u[i].alive && u[i].alert == 1) u[i].ct += Speed(u[i]);
 	}
 	return -1;
 }
@@ -3969,7 +4048,7 @@ int Battle::PredictOrder(int* out, int n, int acting, int cost, int* insertAt) c
 	for (int guard = 0; guard < 100000 && got < n; guard++) {
 		int best = -1;
 		for (int i = 0; i < nUnits; i++) {
-			if (!u[i].alive || !u[i].alert || ct[i] < 1000) continue;
+			if (!u[i].alive || u[i].alert != 1 || ct[i] < 1000) continue;
 			if (best < 0 || ct[i] > ct[best] || (ct[i] == ct[best] && u[i].team < u[best].team)) best = i;
 		}
 		if (best >= 0) {
@@ -3979,7 +4058,7 @@ int Battle::PredictOrder(int* out, int n, int acting, int cost, int* insertAt) c
 			continue;
 		}
 		bool any = false;
-		for (int i = 0; i < nUnits; i++) if (u[i].alive && u[i].alert) { ct[i] += Speed(u[i]); any = true; }
+		for (int i = 0; i < nUnits; i++) if (u[i].alive && u[i].alert == 1) { ct[i] += Speed(u[i]); any = true; }
 		if (!any) break;
 	}
 	return got;
@@ -4192,6 +4271,13 @@ void SetupBattle(Battle& b, int stage, DWORD seed, const CharData* party, const 
 	stage = Clampi(stage, 1, TAC_STAGE_MAX);
 	b.stage = stage;
 	GenerateMap(b.map, stage, seed, theme);
+	b.weather = WX_CLEAR;
+	{
+		int th = b.map.theme;
+		if (th == TH_SNOW) b.weather = (seed % 5u) ? WX_SNOW : WX_CLEAR;
+		else if (th == TH_VOLCANO) b.weather = (seed % 4u) ? WX_ASH : WX_CLEAR;
+		else if (th != TH_DESERT && (seed % 3u) == 0) b.weather = WX_RAIN;
+	}
 	Rng r(seed ^ 0xA5A5A5A5u);
 	int n = 0;
 	const float faceToE = atan2f((float)(b.map.eStartX[0] - b.map.pStartX[0]), (float)(b.map.eStartZ[0] - b.map.pStartZ[0]));
@@ -4245,7 +4331,7 @@ void SetupBattle(Battle& b, int stage, DWORD seed, const CharData* party, const 
 	b.nUnits = n;
 	b.RebuildOcc();
 	RescueStuckFeet(b);
-	WakeNearPlayers(b, 8);
+	WakeNearPlayers(b, 8, 1);
 }
 
 void FinishAction(Battle& b, int ui, int moved, int acted)
@@ -4315,10 +4401,23 @@ void WakeGroup(Battle& b, int grp)
 		if (b.u[i].alive && b.u[i].grp == grp) b.u[i].alert = 1;
 }
 
-void WakeNearPlayers(Battle& b, int rad)
+static void MarkGroup(Battle& b, int grp, int immediate, int& newly)
+{
+	if (grp < 0 || grp >= MAX_GROUPS) return;
+	if (immediate) { WakeGroup(b, grp); return; }
+	for (int i = 0; i < b.nUnits; i++) {
+		Unit& u = b.u[i];
+		if (!u.alive || u.grp != grp || u.alert != 0) continue;
+		u.alert = 2;
+		newly++;
+	}
+}
+
+int WakeNearPlayers(Battle& b, int rad, int immediate)
 {
 	BYTE wake[MAX_GROUPS];
 	memset(wake, 0, sizeof(wake));
+	int newly = 0;
 	for (int p = 0; p < b.nUnits; p++) {
 		const Unit& a = b.u[p];
 		if (!a.alive || a.team != TEAM_PLAYER) continue;
@@ -4328,7 +4427,7 @@ void WakeNearPlayers(Battle& b, int rad)
 			if (FootDist(a.x, a.z, UnitSpan(a), d.x, d.z, UnitSpan(d)) <= rad) wake[d.grp] = 1;
 		}
 	}
-	for (int g = 0; g < MAX_GROUPS; g++) if (wake[g]) WakeGroup(b, g);
+	for (int g = 0; g < MAX_GROUPS; g++) if (wake[g]) MarkGroup(b, g, immediate, newly);
 	// 近い順に2拠点。3つ目は2つ目から8マス以内なら同じ戦いに入れる
 	struct GD { int grp; int dist; } gd[MAX_GROUPS];
 	int ng = 0;
@@ -4354,7 +4453,26 @@ void WakeNearPlayers(Battle& b, int rad)
 	}
 	int wakeN = min(2, ng);
 	if (ng >= 3 && gd[2].dist <= gd[1].dist + 8) wakeN = 3;
-	for (int i = 0; i < wakeN; i++) WakeGroup(b, gd[i].grp);
+	for (int i = 0; i < wakeN; i++) MarkGroup(b, gd[i].grp, immediate, newly);
+	return newly;
+}
+
+int LavaHurt(Battle& b, int ui)
+{
+	if (ui < 0 || ui >= b.nUnits) return 0;
+	Unit& u = b.u[ui];
+	if (!u.alive || u.hp <= 0 || UnitMoveType(u) == MV_FLY) return 0;
+	int s = UnitSpan(u);
+	int on = 0;
+	for (int dz = 0; dz < s && !on; dz++) for (int dx = 0; dx < s; dx++) {
+		int x = u.x + dx, z = u.z + dz;
+		if (Map::In(x, z) && b.map.At(x, z).t == T_LAVA) on = 1;
+	}
+	if (!on) return 0;
+	int dmg = max(1, u.ch.stat[S_HP] * 12 / 100);
+	u.hp -= dmg;
+	if (u.hp <= 0) { u.hp = 0; u.alive = 0; u.killed = 1; u.confuse = 0; u.stun = 0; }
+	return dmg;
 }
 
 int ApplyTile(Battle& b, int ui)
@@ -4412,6 +4530,43 @@ int ApplyTile(Battle& b, int ui)
 		b.RebuildOcc();
 		return GM_WARP;
 	}
+	if (c.gimm == GM_LEVER && c.gparam) {
+		int id = c.gparam;
+		for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) {
+			Cell& o = b.map.At(x, z);
+			if (o.t == T_DOOR && o.gimm != GM_FENCE && o.gparam == id) OpenDoor(b, x, z);
+		}
+		b.map.At(hx, hz).gimm = GM_NONE;
+		b.map.At(hx, hz).prop = PK_NONE;
+		return GM_LEVER;
+	}
+	if (c.gimm == GM_DROP && UnitMoveType(u) != MV_FLY) {
+		Cell& cell = b.map.At(hx, hz);
+		if (cell.var > 1) { cell.var--; return 0; }
+		int ax = -1, az = -1;
+		int sp = UnitSpan(u);
+		static const int ddx[4] = { 1, -1, 0, 0 }, ddz[4] = { 0, 0, 1, -1 };
+		for (int k = 0; k < 4 && ax < 0; k++) {
+			int nx = u.x + ddx[k], nz = u.z + ddz[k];
+			bool covers = false;
+			for (int iz = 0; iz < sp && !covers; iz++) for (int ix = 0; ix < sp; ix++)
+				if (nx + ix == hx && nz + iz == hz) covers = true;
+			if (covers || !FootFits(b, ui, nx, nz)) continue;
+			ax = nx; az = nz;
+		}
+		if (ax < 0) return 0;
+		cell.t = T_CHASM;
+		cell.h = 0;
+		cell.gimm = GM_NONE;
+		cell.var = 0;
+		cell.prop = PK_NONE;
+		int dmg = max(1, u.ch.stat[S_HP] * 18 / 100);
+		u.hp -= dmg;
+		if (u.hp <= 0) { u.hp = 0; u.alive = 0; u.killed = 1; u.confuse = 0; u.stun = 0; }
+		else { u.x = ax; u.z = az; }
+		b.RebuildOcc();
+		return GM_DROP;
+	}
 	return 0;
 }
 
@@ -4442,6 +4597,8 @@ void OpenDoor(Battle& b, int x, int z)
 	Cell& c = b.map.At(x, z);
 	c.t = T_ROAD;
 	c.prop = PK_NONE;
+	c.gimm = GM_NONE;
+	c.gparam = 0;
 }
 
 bool CanTerrace(const Battle& b, int ui, int tx, int tz)
@@ -4652,7 +4809,11 @@ void AiDecide(const Battle& b, int ui, AiPlan& p, Rng& r)
 	for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) {
 		if (rc.cost[z][x] < 0 || !rc.canStop[z][x]) continue;
 		um.x = x; um.z = z;
-		float place = TerrainInfo(b.map.At(x, z).t).defPct * .25f - rc.cost[z][x] * .05f;
+		int standT = b.map.At(x, z).t;
+		float place = TerrainInfo(standT).defPct * .25f - rc.cost[z][x] * .05f;
+		if (standT == T_LAVA) place -= 30.f;
+		else if (standT == T_WATER) place -= 2.f;
+		if (b.map.At(x, z).gimm == GM_DROP) place -= 8.f;
 		const int tileNear = cornered ? (int)nearD[z][x] : 0;
 		if (cornered) {
 			float flee = tileNear * 4.f + place;
@@ -5375,6 +5536,7 @@ bool SlotCopyFiles(int from, int to)
 	DatArc_FlushSuspend(FALSE);
 	return ok;
 }
+static int TacPeekClearBytes(FILE* fp, long sz);
 int SlotPeekClear(int slot)
 {
 	SlotBoot();
@@ -5388,12 +5550,7 @@ int SlotPeekClear(int slot)
 	fseek(fp, 0, SEEK_END);
 	long sz = ftell(fp);
 	fseek(fp, 0, SEEK_SET);
-	int clear = 0;
-	if (sz == (long)sizeof(SaveData)) {
-		static SaveData peek;
-		if (fread(&peek, 1, sizeof(peek), fp) == sizeof(peek) && peek.magic == kSaveMagic)
-			clear = peek.stageCleared < 0 ? 0 : peek.stageCleared;
-	}
+	int clear = TacPeekClearBytes(fp, sz);
 	fclose(fp);
 	return clear;
 }
@@ -5620,7 +5777,7 @@ void SaveDefaults(SaveData& s)
 {
 	memset(&s, 0, sizeof(s));
 	s.magic = kSaveMagic;
-	s.version = 3;
+	s.version = 4;
 	for (int i = 0; i < MAX_PARTY; i++) s.party[i] = -1;
 	s.stageSel = 1;
 	s.camSpeed = 1;
@@ -5653,7 +5810,7 @@ struct SaveV2 {
 	DWORD magic;
 	int version;
 	CharSave10 roster[MAX_ROSTER];
-	int party[MAX_PARTY];
+	int party[10];
 	int stageCleared, stageSel, winX, winY, winW, winH;
 	int camSpeed, quality, showGrid, battleAnim;
 	DWORD uidNext;
@@ -5674,7 +5831,45 @@ struct SaveV1 {
 	int itemN[8];
 	int bgmVol, seVol, optInit, gold, gearN, gearId[12], reserved[4];
 };
+// version 3。能力は現行と同じで、編成だけ 10。
+struct SaveV3 {
+	DWORD magic;
+	int version;
+	CharData roster[MAX_ROSTER];
+	int party[10];
+	int stageCleared, stageSel, winX, winY, winW, winH;
+	int camSpeed, quality, showGrid, battleAnim;
+	DWORD uidNext;
+	int winSizeVer;
+	int itemN[8];
+	int bgmVol, seVol, optInit, gold, gearN, gearId[12], reserved[4];
+	int partyCap, rosterCap;
+};
 #pragma pack(pop)
+static_assert(sizeof(SaveData) == sizeof(SaveV3) + 5 * sizeof(int), "編成 15 は version 3 より 5 枠");
+
+static int TacPeekClearBytes(FILE* fp, long sz)
+{
+	if (!fp) return 0;
+	if (sz == (long)sizeof(SaveData)) {
+		SaveData peek;
+		if (fread(&peek, 1, sizeof(peek), fp) == sizeof(peek) && peek.magic == kSaveMagic)
+			return peek.stageCleared < 0 ? 0 : peek.stageCleared;
+	} else if (sz == (long)sizeof(SaveV3)) {
+		SaveV3 peek;
+		if (fread(&peek, 1, sizeof(peek), fp) == sizeof(peek) && peek.magic == kSaveMagic)
+			return peek.stageCleared < 0 ? 0 : peek.stageCleared;
+	} else if (sz == (long)sizeof(SaveV2)) {
+		SaveV2 peek;
+		if (fread(&peek, 1, sizeof(peek), fp) == sizeof(peek) && peek.magic == kSaveMagic)
+			return peek.stageCleared < 0 ? 0 : peek.stageCleared;
+	} else if (sz == (long)sizeof(SaveV1)) {
+		SaveV1 peek;
+		if (fread(&peek, 1, sizeof(peek), fp) == sizeof(peek) && peek.magic == kSaveMagic)
+			return peek.stageCleared < 0 ? 0 : peek.stageCleared;
+	}
+	return 0;
+}
 
 static void CopyChar10(CharData& d, const CharSave10& o)
 {
@@ -5742,23 +5937,34 @@ bool SaveLoad(SaveData& s)
 		if (fread(&o, 1, sizeof(o), fp) == sizeof(o) && o.magic == kSaveMagic && o.version == 2) {
 			s.magic = o.magic;
 			for (int i = 0; i < MAX_ROSTER; i++) CopyChar10(s.roster[i], o.roster[i]);
-			for (int i = 0; i < MAX_PARTY; i++) s.party[i] = o.party[i];
+			for (int i = 0; i < 10; i++) s.party[i] = o.party[i];
 			CopySaveTail(s, o.stageCleared, o.stageSel, o.winX, o.winY, o.winW, o.winH,
 				o.camSpeed, o.quality, o.showGrid, o.battleAnim, o.uidNext, o.winSizeVer,
 				o.itemN, o.bgmVol, o.seVol, o.optInit, o.gold, o.gearN, o.gearId, o.reserved, o.partyCap, o.rosterCap);
 			got = TRUE;
 			recalc = TRUE;
 		}
+	} else if (sz == (long)sizeof(SaveV3)) {
+		SaveV3 o;
+		if (fread(&o, 1, sizeof(o), fp) == sizeof(o) && o.magic == kSaveMagic && o.version == 3) {
+			s.magic = o.magic;
+			for (int i = 0; i < MAX_ROSTER; i++) s.roster[i] = o.roster[i];
+			for (int i = 0; i < 10; i++) s.party[i] = o.party[i];
+			CopySaveTail(s, o.stageCleared, o.stageSel, o.winX, o.winY, o.winW, o.winH,
+				o.camSpeed, o.quality, o.showGrid, o.battleAnim, o.uidNext, o.winSizeVer,
+				o.itemN, o.bgmVol, o.seVol, o.optInit, o.gold, o.gearN, o.gearId, o.reserved, o.partyCap, o.rosterCap);
+			got = TRUE;
+		}
 	} else if (sz == (long)sizeof(SaveData)) {
 		SaveData t;
-		if (fread(&t, 1, sizeof(t), fp) == sizeof(t) && t.magic == kSaveMagic && t.version == 3) {
+		if (fread(&t, 1, sizeof(t), fp) == sizeof(t) && t.magic == kSaveMagic && t.version == 4) {
 			s = t;
 			got = TRUE;
 		}
 	}
 	fclose(fp);
 	if (!got) return false;
-	s.version = 3;
+	s.version = 4;
 	for (int i = 0; i < MAX_ROSTER; i++) {
 		CharData& c = s.roster[i];
 		c.name[NAME_LEN - 1] = 0;

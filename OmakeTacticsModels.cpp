@@ -720,6 +720,22 @@ static void BuildHair(Renderer& r, const Model& m, int style, GpuMesh& out, floa
 			}
 		} else if (style == 5) {
 			g.Ellipsoid(MTrans(c.x, c.y - ry * 0.05f, c.z + rz * 0.15f), v3(rx * 1.25f, ry * 0.95f, rz * 1.35f), 16, 10, [](V3 d) { return d.z > -0.25f; });
+		} else if (style == 8) {
+			g.Ellipsoid(MTrans(c.x, c.y + ry * 0.06f, c.z), v3(rx * 1.55f, ry * 1.32f, rz * 1.45f), 16, 12, capKeep);
+		} else if (style == 9) {
+			g.Ellipsoid(MTrans(c.x, c.y + ry * 0.05f, c.z + rz * 0.08f), capR, 16, 10, capKeep);
+			g.Sphere(c + v3(0, ry * 1.12f, rz * 0.02f), v3(rx * 0.52f, ry * 0.46f, rz * 0.52f), 10, 8);
+			g.curCol = 0xFFC8A060;
+			g.Sphere(c + v3(rx * 0.22f, ry * 0.62f, rz * 0.42f), v3(rx * 0.10f, rx * 0.08f, rx * 0.10f), 6, 4);
+			g.curCol = 0xFFFFFFFF;
+		} else if (style == 10) {
+			g.Ellipsoid(MTrans(c.x, c.y + ry * 0.02f, c.z + rz * 0.06f), capR, 16, 10, capKeep);
+			g.Sphere(c + v3(0, ry * 0.12f, rz * 1.18f), v3(rx * 0.46f, ry * 0.40f, rz * 0.46f), 10, 8);
+			g.curCol = 0xFFC8A060;
+			g.Sphere(c + v3(0, ry * 0.05f, rz * 0.72f), v3(rx * 0.12f, rx * 0.08f, rx * 0.08f), 6, 4);
+			g.curCol = 0xFFFFFFFF;
+		} else if (style == 11) {
+			g.Ellipsoid(MTrans(c.x, c.y + ry * 0.02f, c.z + rz * 0.04f), v3(rx * 0.92f, ry * 0.88f, rz * 1.05f), 14, 10, capKeep);
 		} else {
 			g.Ellipsoid(MTrans(c.x, c.y + ry * 0.05f, c.z + rz * 0.08f), capR, 16, 10, capKeep);
 		}
@@ -747,6 +763,19 @@ static void BuildHair(Renderer& r, const Model& m, int style, GpuMesh& out, floa
 		if (style == 4) addHang(0.48f, 2, rx * 1.35f, rx * 0.30f);
 		if (style == 6) addHang(0.54f, 4, rx * 1.05f, rx * 0.32f);
 		if (style == 7) addHang(0.64f, 5, rx * 1.15f, rx * 0.30f);
+		if (style == 9 || style == 10) {
+			g.curCol = 0xFFC8A060;
+			addHang(0.20f, 2, rx * 0.42f, rx * 0.14f);
+			g.curCol = 0xFFFFFFFF;
+		}
+		if (style == 11) {
+			for (int k = 0; k < 5; k++) {
+				float t = k / 4.f;
+				V3 p = c + v3(rx * 1.20f, ry * (0.35f - t * 1.15f), rz * 0.15f);
+				float sz = rx * Lerpf(0.16f, 0.07f, t);
+				g.Sphere(p, v3(sz, sz * 1.8f, sz), 8, 5);
+			}
+		}
 	} else {
 	// KayKit など、頭の箱に被せる殻。
 	float capS = style == 1 ? 1.06f : 1.08f;
@@ -813,6 +842,28 @@ static void BuildHair(Renderer& r, const Model& m, int style, GpuMesh& out, floa
 			V3 p = c + v3(0, -t * hang * .85f, rr.z * (.55f + t * .35f));
 			float w = Lerpf(w0, w0 * .55f, t);
 			g.Ellipsoid(MTrans(p.x, p.y, p.z), v3(w, hang * .18f, rr.z * Lerpf(.42f, .28f, t)), 14, 8);
+		}
+	}
+	if (style == 8)
+		g.Ellipsoid(MTrans(cc.x, cc.y + rr.y * .08f, cc.z), v3(capR.x * 1.28f, capR.y * 1.18f, capR.z * 1.22f), 16, 12);
+	if (style == 9) {
+		g.Sphere(cc + v3(0, capR.y * .95f, rr.z * .05f), v3(rr.x * .42f, rr.y * .38f, rr.z * .42f), 10, 8);
+		g.curCol = 0xFFC8A060;
+		g.Sphere(cc + v3(rr.x * .2f, capR.y * .35f, rr.z * .55f), v3(rr.x * .1f, rr.x * .08f, rr.x * .08f), 6, 4);
+		g.curCol = 0xFFFFFFFF;
+	}
+	if (style == 10) {
+		g.Sphere(c + v3(0, rr.y * .05f, rr.z * 1.05f), v3(rr.x * .4f, rr.y * .36f, rr.z * .4f), 10, 8);
+		g.curCol = 0xFFC8A060;
+		g.Sphere(c + v3(0, -rr.y * .05f, rr.z * .62f), v3(rr.x * .1f, rr.x * .08f, rr.x * .08f), 6, 4);
+		g.curCol = 0xFFFFFFFF;
+	}
+	if (style == 11) {
+		for (int k = 0; k < 5; k++) {
+			float t = k / 4.f;
+			V3 p = c + v3(rr.x * 1.05f, rr.y * (.3f - t * 1.15f), rr.z * .2f);
+			float sz = Lerpf(.18f, .08f, t) * rr.x;
+			g.Sphere(p, v3(sz, sz * 1.6f, sz), 8, 5);
 		}
 	}
 	}
@@ -1288,10 +1339,10 @@ void ActorFromChar(Actor& a, Library& lib, Renderer& r, const CharData& c)
 				{ 1.08f, 0.16f, 1.04f },
 				{ 1.00f, 0.95f, 1.00f },
 				{ 1.04f, 1.08f, 1.04f },
-				{ 1.00f, 1.00f, 1.00f },
-				{ 1.00f, 1.00f, 1.00f },
-				{ 1.00f, 1.00f, 1.00f },
-				{ 1.00f, 1.00f, 1.00f },
+				{ 1.28f, 0.92f, 1.28f },
+				{ 0.86f, 1.22f, 0.90f },
+				{ 0.92f, 0.78f, 1.12f },
+				{ 0.72f, 0.88f, 1.18f },
 			};
 			int s = Clampi(a.hair, 0, HAIR_STYLES - 1);
 			a.mods.scale[hj] = v3(kHair[s][0], kHair[s][1], kHair[s][2]);
@@ -1475,7 +1526,7 @@ static int MonsterClip(const Renderer& r, const Model& m, int clip, int skill)
 		if (c >= 0) return c;
 	}
 	int want = clip;
-	if (want == CL_DODGE || want == CL_HIT_B) want = CL_HIT_A;
+	if (want == CL_HIT_B) want = CL_HIT_A;
 	if (want == CL_THROW) want = CL_1H_SHOOT;
 	if (want == CL_PUNCH) want = CL_1H_STAB;
 	if (want == CL_CAST_LONG) want = CL_CAST_SHOOT;
@@ -1669,6 +1720,33 @@ void ActorPose(Actor& a, const Library& lib, const Renderer& r)
 		a.poseValid = 1;
 	}
 	ApplyFlyTrail(a, r);
+	if (a.poseValid && (a.clip == CL_DODGE || a.clip == CL_BLOCK) && a.proc == 3 && a.model >= 0 && a.model < (int)r.models.size()) {
+		const Model& rm = r.models[a.model];
+		if (strncmp(rm.name, "Hum", 3) == 0) {
+			float e = a.t / 0.42f;
+			if (e < 0.f) e = 0.f;
+			if (e > 1.f) e = 1.f;
+			float w = sinf(e * 3.14159265f);
+			if (w > 0.02f) {
+				if (a.clip == CL_DODGE) {
+					int abd = HumanJoint(r, rm, "Abdomen", "spine_01");
+					int chest = HumanJoint(r, rm, "Chest", "chest");
+					SpinJointBack(rm, a.pose, abd, -0.35f * w);
+					r.FinishPose(rm, a.pose, &a.mods);
+					SpinJointBack(rm, a.pose, chest, -0.55f * w);
+					r.FinishPose(rm, a.pose, &a.mods);
+				} else {
+					int chest = HumanJoint(r, rm, "Chest", "chest");
+					int al = HumanJoint(r, rm, "UpperArm.L", "upperarm_l");
+					int arj = HumanJoint(r, rm, "UpperArm.R", "upperarm_r");
+					SpinJointBack(rm, a.pose, chest, 0.22f * w);
+					SpinJointBack(rm, a.pose, al, -1.15f * w);
+					SpinJointBack(rm, a.pose, arj, -1.15f * w);
+					r.FinishPose(rm, a.pose, &a.mods);
+				}
+			}
+		}
+	}
 	// スキルごとに腕の軌道を作る。数種のクリップを使い回すと、詠唱も斬りも同じに見える。
 	// 人体はモーションキャプチャのスキル別の型を引くので、腕を作り直すと捕った動きが消える。
 	BOOL combat = a.clip == CL_1H_CHOP || a.clip == CL_1H_SLICE || a.clip == CL_1H_STAB || a.clip == CL_2H_CHOP || a.clip == CL_2H_SPIN

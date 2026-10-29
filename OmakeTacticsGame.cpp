@@ -26,7 +26,7 @@ enum {
 	ID_SHOP_ASK_YES = 1950, ID_SHOP_ASK_NO, ID_SHOP_FIT_KEEP, ID_SHOP_TO_PARTY, ID_SHOP_DET0 = 1960,
 	ID_SHOP_SLOT0 = 1984, ID_SHOP_SLOT1, ID_SHOP_SLOT2, ID_SHOP_SLOT_NO,
 	ID_PT_BEAD2 = 1988, ID_PT_BEAD3, ID_SHOP_ART, ID_SHOP_OUGI, ID_PT_SUM0, ID_PT_SUM1,
-	ID_BASE_SET = 945, ID_PT_EVO = 363,
+	ID_BASE_SET = 945, ID_BASE_THREAT = 949, ID_PT_EVO = 363,
 	ID_PT_WPN = 348, ID_PT_ARM,
 	ID_CR_NAME = 200, ID_CR_RANDOM, ID_CR_GENDER, ID_CR_LINEAGE, ID_CR_CLASS, ID_CR_BODY, ID_CR_HAIR, ID_CR_HAIRCOL, ID_CR_OUTFIT,
 	ID_CR_HAT, ID_CR_CAPE, ID_CR_OK, ID_CR_BACK, ID_CR_HEIGHT, ID_CR_BUST, ID_CR_FIG, ID_CR_FACE, ID_CR_AVATAR, ID_CR_AVACOL, ID_CR_MODEL,
@@ -128,6 +128,10 @@ Game::Game()
 	m_autoStage = 0;
 	m_shop = 0;
 	m_btnSfx = -1;
+	m_uiHover = m_uiHoverCand = -1;
+	m_uiHoverHit = 0;
+	m_uiHoverScreen = -1;
+	m_uiHoverShop = 0;
 	m_shopLine = 0;
 	m_shopTier = 0;
 	m_shopBand = 0;
@@ -748,6 +752,12 @@ void Game::RenderFrame()
 	}
 	m_r.BeginHud();
 	m_btns.clear();
+	if (m_uiHoverScreen != m_screen || m_uiHoverShop != (m_shop != 0)) {
+		m_uiHover = -1;
+		m_uiHoverScreen = m_screen;
+		m_uiHoverShop = m_shop != 0;
+	}
+	m_uiHoverHit = 0;
 	m_statTip = -1;
 	m_skillTip = -1;
 	switch (m_screen) {
@@ -784,6 +794,11 @@ void Game::RenderFrame()
 	m_r.Present();
 	m_r.EndFrameTextGc();
 	m_btnsPrev = m_btns;
+	if (m_uiHoverHit) {
+		if (m_uiHoverCand != m_uiHover && !m_click && m_activateId < 0)
+			TacSfx(UiHoverId());
+		m_uiHover = m_uiHoverCand;
+	} else m_uiHover = -1;
 	m_click = FALSE;
 	m_rclick = FALSE;
 	m_activateId = -1;
@@ -1117,13 +1132,20 @@ void Game::Bar(float x, float y, float w, float h, float frac, DWORD c0, DWORD c
 	m_r.HudFrame(x, y, w, h, 1, RGBA8(0, 0, 0, 200));
 }
 
+int Game::UiHoverId() const
+{
+	if (m_screen == SC_BATTLE) return TS_HOVER_GAME;
+	if (m_shop) return TS_HOVER_SHOP;
+	return TS_HOVER_BASE;
+}
+
 void Game::UiOk()
 {
 	int id = TS_OK_BASE;
 	if (m_screen == SC_BATTLE) id = TS_OK_BATTLE;
 	else if (m_screen == SC_CREATE || m_screen == SC_PARTY || m_screen == SC_EVOLVE) id = TS_OK_MAKE;
 	else if (m_screen == SC_RESULT) id = TS_OK_BASE;
-	else if (m_shop) id = TS_OK_SHOP;
+	else if (m_shop) id = TS_CONFIRM;
 	TacSfx(id);
 }
 
@@ -1135,13 +1157,18 @@ BOOL Game::Btn(int id, float x, float y, float w, float h, const wchar_t* label,
 	m_btns.push_back(b);
 	BOOL hov = !m_navMode && m_mouseSeen && Hit(x, y, w, h);
 	BOOL foc = m_navMode && m_focusId == id;
+	if (hov && en) { m_uiHoverHit = 1; m_uiHoverCand = id; }
 	BOOL fire = FALSE;
 	if (en && ClickIn(x, y, w, h)) fire = TRUE;
 	else if (!en && ClickIn(x, y, w, h)) TacSfx(TS_ERROR);
 	if (en && m_activateId == id) { fire = TRUE; m_activateId = -1; }
 	if (fire) {
+		// 戻る・閉じる・いいえは場面の決定音ではなく取消音にする。
 		if (sfx >= 0) TacSfx(sfx);
-		else if (sfx != -2) UiOk();
+		else if (sfx != -2) {
+			if (label == TT(TX_CR_BACK) || label == TT(TX_BASE_CLOSE) || label == TT(TX_PT_NO)) TacSfx(TS_CANCEL);
+			else UiOk();
+		}
 	}
 	DWORD top, bot;
 	if (!en) { top = RGBA8(58, 58, 66, 210); bot = RGBA8(38, 38, 46, 210); }
@@ -1170,6 +1197,7 @@ int Game::Sel(int id, float x, float y, float w, float h, const wchar_t* label, 
 	m_btns.push_back(b);
 	BOOL hov = !m_navMode && m_mouseSeen && Hit(x, y, w, h);
 	BOOL foc = m_navMode && m_focusId == id;
+	if (hov) { m_uiHoverHit = 1; m_uiHoverCand = id; }
 	int d = 0;
 	float vx = x + w * .4f, vw = w * .6f;
 	if (m_click && m_clickX >= vx && m_clickX < x + w && m_clickY >= y && m_clickY < y + h) {
@@ -1216,7 +1244,7 @@ void Game::NavMove(int dx, int dy)
 		float sc = along + ortho * 2.2f;
 		if (sc < best) { best = sc; bestId = b.id; }
 	}
-	if (bestId >= 0 && bestId != m_focusId) { m_focusId = bestId; TacSfx(TS_CURSOR); }
+	if (bestId >= 0 && bestId != m_focusId) { m_focusId = bestId; m_uiHover = bestId; TacSfx(UiHoverId()); }
 }
 
 void Game::NavConfirm()
@@ -2645,6 +2673,14 @@ void Game::DrawShopArm()
 	if (Btn(ID_SHOP_ARM_NO, px + pw - U(180), py + ph - U(46), U(160), U(32), TT(TX_EV_LATER))) m_shopFit = 0;
 }
 
+// 11体目以降の編成拡張。そのステージをクリアしてから買える。10体までは従来どおり。
+static int PartySlotStage(int cap)
+{
+	static const int kNeed[5] = { 50, 100, 200, 400, 800 };
+	if (cap < 10 || cap >= MAX_PARTY) return 0;
+	return kNeed[cap - 10];
+}
+
 void Game::DrawShopAsk()
 {
 	m_r.HudRect(0, 0, (float)m_w, (float)m_h, RGBA8(0, 0, 0, 150));
@@ -2667,9 +2703,10 @@ void Game::DrawShopAsk()
 		int cap = partyT ? PartyCap() : RosterCap();
 		int maxCap = partyT ? MAX_PARTY : MAX_ROSTER;
 		int price = 0;
+		int need = partyT ? PartySlotStage(cap) : 0;
 		if (cap < maxCap) price = partyT ? 800 + (cap - 5) * 350 : 1600 + ((cap - 20) / 20) * 600;
 		swprintf_s(line, L"%s  %sG", TT(partyT ? TX_TICKET_PT : TX_TICKET_RS), TacNum(price));
-		ok = cap < maxCap && m_save.gold >= price;
+		ok = cap < maxCap && m_save.gold >= price && m_save.stageCleared >= need;
 	} else if (m_shopFit == 9) {
 		swprintf_s(line, L"%s  250G", TT(TX_STONE));
 		ok = m_save.gold >= 250 && StoneCount() < 999;
@@ -2686,7 +2723,8 @@ void Game::DrawShopAsk()
 			int cap = partyT ? PartyCap() : RosterCap();
 			int maxCap = partyT ? MAX_PARTY : MAX_ROSTER;
 			int price = partyT ? 800 + (cap - 5) * 350 : 1600 + ((cap - 20) / 20) * 600;
-			if (cap < maxCap && m_save.gold >= price) {
+			int need = partyT ? PartySlotStage(cap) : 0;
+			if (cap < maxCap && m_save.gold >= price && m_save.stageCleared >= need) {
 				m_save.gold -= price;
 				if (partyT) m_save.partyCap = cap + 1;
 				else m_save.rosterCap = cap + 20;
@@ -2728,6 +2766,7 @@ void Game::DrawShopFit()
 		for (int slot = 0; slot < 3; slot++) {
 			wchar_t row[160];
 			swprintf_s(row, L"%s%d: %s", TT(TX_CRAFT), slot + 1, EquippedBeadName(c, slot));
+			m_btnSfx = -2;
 			if (Btn(ID_SHOP_SLOT0 + slot, px + U(16), yy, bw, U(36), row, TRUE, FALSE, U(14))) {
 				int bead = m_shopFitId + 1;
 				if (m_shopHold) {
@@ -3083,12 +3122,13 @@ void Game::DrawShop()
 		if (ix >= b) break;
 		wchar_t row[180];
 		BOOL ok = FALSE;
+		// 行は確認窓を開く音か売却音を自前で鳴らすので、ボタン側は黙らせる。
+		m_btnSfx = -2;
 		if (m_shopKind == 3) {
 			wchar_t nm[80];
 			int ct = 0, price = 0;
 			TrophyNameOf(ids[ix], nm, 80, &ct, &price);
 			swprintf_s(row, L"%s  x%d  %sG", nm, ct, TacNum(price));
-			m_btnSfx = -2;
 			if (Btn(ID_SHOP_BUY0 + s, x + U(16), yy, w * .62f, rowH, row, TRUE, FALSE, U(13))) {
 				if (TrophySell(m_save, ids[ix])) { TacSfx(TS_OK_SELL); Persist(); return; }
 			}
@@ -3097,12 +3137,16 @@ void Game::DrawShop()
 			int cap = partyT ? PartyCap() : RosterCap();
 			int maxCap = partyT ? MAX_PARTY : MAX_ROSTER;
 			int price = 0;
+			int need = partyT ? PartySlotStage(cap) : 0;
+			BOOL locked = partyT && need > 0 && m_save.stageCleared < need;
 			if (cap < maxCap) price = partyT ? 800 + (cap - 5) * 350 : 1600 + ((cap - 20) / 20) * 600;
 			if (cap >= maxCap) swprintf_s(row, L"%s  MAX", TT(partyT ? TX_TICKET_PT : TX_TICKET_RS));
+			else if (locked) swprintf_s(row, L"%s  %s %d  (%d→%d)", TT(TX_TICKET_PT), TT(TX_BT_STAGE), need, cap, cap + 1);
 			else if (partyT) swprintf_s(row, L"%s  %sG  (%d→%d)", TT(TX_TICKET_PT), TacNum(price), cap, cap + 1);
 			else swprintf_s(row, L"%s  %sG  (%d→%d)", TT(TX_TICKET_RS), TacNum(price), cap, cap + 20);
-			ok = cap < maxCap && m_save.gold >= price;
-			takeHover(ID_SHOP_BUY0 + s, yy, TT(partyT ? TX_ITD_PT : TX_ITD_RS));
+			ok = cap < maxCap && !locked && m_save.gold >= price;
+			if (locked) swprintf_s(hovBuf, L"%s  %s %d", TT(TX_ITD_PT), TT(TX_BT_STAGE), need);
+			takeHover(ID_SHOP_BUY0 + s, yy, locked ? hovBuf : TT(partyT ? TX_ITD_PT : TX_ITD_RS));
 			if (Btn(ID_SHOP_BUY0 + s, x + U(16), yy, w * .62f, rowH, row, ok, FALSE, U(13))) {
 				m_shopHold = 2; m_shopFit = partyT ? 7 : 8; m_shopFitId = 0;
 				TacSfx(TS_OPEN); return;
@@ -3717,7 +3761,9 @@ void Game::DrawBaseUi()
 		by += Ku(40);
 		if (Sel(ID_BASE_ANIM, bx, by, bw, Ku(36), TT(TX_SET_ANIM), TT(m_save.battleAnim ? TX_SET_ANIM_SHORT : TX_SET_ANIM_FULL))) m_save.battleAnim = !m_save.battleAnim;
 		by += Ku(40);
-		if (Sel(ID_BASE_GRID, bx, by, bw, Ku(36), TT(TX_SET_GRID), TT(m_save.showGrid ? TX_CR_ON : TX_CR_OFF))) m_save.showGrid = !m_save.showGrid;
+		if (Sel(ID_BASE_GRID, bx, by, bw, Ku(36), TT(TX_SET_GRID), TT(TacGridOn(m_save) ? TX_CR_ON : TX_CR_OFF))) m_save.showGrid ^= 1;
+		by += Ku(40);
+		if (Sel(ID_BASE_THREAT, bx, by, bw, Ku(36), TT(TX_SET_THREAT), TT(TacThreatOn(m_save) ? TX_CR_ON : TX_CR_OFF))) m_save.showGrid ^= 2;
 		by += Ku(40);
 		by = DrawSoundOpts(bx, by, bw, k);
 	}
@@ -4862,6 +4908,7 @@ void Game::DrawEvolveUi()
 			DrawStatLines(pv, c1, ty + U(22), colW, gains, -1, -1);
 		}
 		if (m_evTarget >= 0 && EvoPartnersNeeded(mc) <= 0) {
+			m_btnSfx = -2;
 			if (Btn(ID_EV_DO, c1, y + h - U(56), colW * .72f, U(40), TT(TX_EV_DO), TRUE, FALSE, U(18), RGBA8(150, 90, 200, 240))) { DoEvolve(); return; }
 		}
 	}
@@ -4937,6 +4984,7 @@ void Game::DrawEvolveUi()
 		for (int k = 0; k < need; k++) if (m_evPartner[k] >= 0) ps[n++] = m_save.roster[m_evPartner[k]];
 		BOOL ok = n >= need && EvoGroupSatisfied(needGroup, ps, n);
 		if (n >= need && !ok) m_r.HudText(TT(TX_EV_NEED_GROUP), c2 + colW * .5f, y + h - U(72), U(13), RGBA8(255, 150, 140), 1, 1);
+		m_btnSfx = -2;
 		if (Btn(ID_EV_DO, c2, y + h - U(56), colW * .6f, U(40), TT(TX_EV_DO), ok, FALSE, U(18), RGBA8(150, 90, 200, 240))) { DoEvolve(); return; }
 	} else m_evPartPages = 1;
 	if (Btn(ID_EV_BACK, x + w - U(160) - U(20), y + h - U(56), U(160), U(40), TT(TX_CR_BACK))) {

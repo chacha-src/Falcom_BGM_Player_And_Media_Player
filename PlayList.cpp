@@ -12683,6 +12683,8 @@ void PlRefreshMidiPlayModes()
 }
 
 /* 保存済みプレイリストは CP932 誤読の曲名を wchar で持っている。カタログを引き直す。 */
+int g_oggSkipCemuTitleRefresh = 0;
+
 static void PlRefreshCemuSongTitles(CPlayList* pl)
 {
 	if (!pl || !pl->pc || pl->playcnt <= 0) return;
@@ -12709,6 +12711,142 @@ static void PlRefreshCemuSongTitles(CPlayList* pl)
 		if (wcscmp(pl->pc[i].name, songLabel) != 0)
 			wcsncpy_s(pl->pc[i].name, songLabel, _TRUNCATE);
 	}
+}
+
+void PlRefreshCemuSongTitlesNow()
+{
+	extern CPlayList* pl;
+	if (!pl) return;
+	PlRefreshCemuSongTitles(pl);
+	if (pl->m_lc.GetSafeHwnd())
+		pl->m_lc.Invalidate(FALSE);
+}
+
+/* 起動後の曲名引き直し。zip を開くので UI を止めない。一覧メニューは終わるまで無効。 */
+#ifndef WM_APP_CEMU_TITLES
+#define WM_APP_CEMU_TITLES (WM_APP + 107)
+#endif
+static volatile LONG g_cemuTitleBusy = 0;
+
+int PlCemuTitleRefreshBusy()
+{
+	return g_cemuTitleBusy != 0;
+}
+
+struct CemuTitleSnap {
+	int index;
+	unsigned titleIndex1;
+	wchar_t fol[1024];
+};
+
+struct CemuTitleFix {
+	int index;
+	wchar_t fol[1024];
+	wchar_t name[1024];
+};
+
+struct CemuTitleWork {
+	HWND hwnd;
+	int n;
+	CemuTitleSnap* rows;
+};
+
+struct CemuTitleBatch {
+	int n;
+	CemuTitleFix* rows;
+};
+
+static UINT __cdecl PlCemuTitleThread(LPVOID param)
+{
+	CemuTitleWork* work = (CemuTitleWork*)param;
+	CemuTitleBatch* batch = new CemuTitleBatch;
+	batch->n = 0;
+	batch->rows = work && work->n > 0 ? new CemuTitleFix[work->n] : NULL;
+	CEmuMgr* mgr = CEmuMgrGet();
+	if (work && batch->rows && mgr) {
+		for (int i = 0; i < work->n; i++) {
+			wchar_t label[1024];
+			label[0] = 0;
+			if (!CEmuMgrCopySongTitle(mgr, work->rows[i].fol, work->rows[i].titleIndex1, label, 1024))
+				continue;
+			CemuTitleFix& f = batch->rows[batch->n++];
+			f.index = work->rows[i].index;
+			wcsncpy_s(f.fol, work->rows[i].fol, _TRUNCATE);
+			wcsncpy_s(f.name, label, _TRUNCATE);
+		}
+	}
+	HWND hwnd = work ? work->hwnd : NULL;
+	if (work) {
+		delete[] work->rows;
+		delete work;
+	}
+	if (!hwnd || !::PostMessage(hwnd, WM_APP_CEMU_TITLES, 0, (LPARAM)batch)) {
+		delete[] batch->rows;
+		delete batch;
+		InterlockedExchange(&g_cemuTitleBusy, 0);
+	}
+	return 0;
+}
+
+void PlStartCemuTitleRefresh()
+{
+	if (InterlockedCompareExchange(&g_cemuTitleBusy, 1, 0) != 0)
+		return;
+	extern CPlayList* pl;
+	extern COggDlg* og;
+	int n = 0;
+	if (pl && pl->pc) {
+		for (int i = 0; i < pl->playcnt; i++)
+			if (pl->pc[i].sub == MODE_CEMU && pl->pc[i].fol[0]) n++;
+	}
+	HWND hwnd = (og && ::IsWindow(og->GetSafeHwnd())) ? og->GetSafeHwnd() : NULL;
+	if (n <= 0 || !hwnd) {
+		InterlockedExchange(&g_cemuTitleBusy, 0);
+		return;
+	}
+	CemuTitleWork* work = new CemuTitleWork;
+	work->hwnd = hwnd;
+	work->n = n;
+	work->rows = new CemuTitleSnap[n];
+	int w = 0;
+	for (int i = 0; i < pl->playcnt && w < n; i++) {
+		if (pl->pc[i].sub != MODE_CEMU || !pl->pc[i].fol[0]) continue;
+		work->rows[w].index = i;
+		work->rows[w].titleIndex1 = (pl->pc[i].ret2 > 0) ? (unsigned)pl->pc[i].ret2 : 1u;
+		wcsncpy_s(work->rows[w].fol, pl->pc[i].fol, _TRUNCATE);
+		w++;
+	}
+	work->n = w;
+	if (!AfxBeginThread(PlCemuTitleThread, work, THREAD_PRIORITY_BELOW_NORMAL)) {
+		delete[] work->rows;
+		delete work;
+		InterlockedExchange(&g_cemuTitleBusy, 0);
+	}
+}
+
+void PlApplyCemuTitleBatch(void* param)
+{
+	CemuTitleBatch* batch = (CemuTitleBatch*)param;
+	extern CPlayList* pl;
+	if (batch && pl && pl->pc) {
+		for (int i = 0; i < batch->n; i++) {
+			const int ix = batch->rows[i].index;
+			if (ix < 0 || ix >= pl->playcnt) continue;
+			if (wcscmp(pl->pc[ix].fol, batch->rows[i].fol) != 0) continue;
+			if (wcscmp(pl->pc[ix].name, batch->rows[i].name) != 0)
+				wcsncpy_s(pl->pc[ix].name, batch->rows[i].name, _TRUNCATE);
+		}
+		if (pl->m_lc.GetSafeHwnd())
+			pl->m_lc.Invalidate(FALSE);
+		extern CMediaPlayerDlg* mp;
+		if (mp && ::IsWindow(mp->GetSafeHwnd()) && ::IsWindow(mp->m_list.GetSafeHwnd()))
+			mp->m_list.Invalidate(FALSE);
+	}
+	if (batch) {
+		delete[] batch->rows;
+		delete batch;
+	}
+	InterlockedExchange(&g_cemuTitleBusy, 0);
 }
 
 static void PlCemuFillPlaylistRow(const CEmuGameEntry* ge, const wchar_t* zipPhysical,
@@ -13728,7 +13866,9 @@ void CPlayList::Load(BOOL restoreSavedRow)
 		f.Read(&pnt, 4);
 		f.Close();
 	}
-	PlRefreshCemuSongTitles(this);
+	extern int g_oggSkipCemuTitleRefresh;
+	if (!g_oggSkipCemuTitleRefresh)
+		PlRefreshCemuSongTitles(this);
 	MpPlaylistNatOrdOnLoaded(playcnt);
 	MpPlaylistApplySavedSort();
 	ClampPlaylistSelectionIndices(this);

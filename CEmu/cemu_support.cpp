@@ -88,7 +88,7 @@
                   + _k2_syn2_report.txt
                   + _k2_ac48_plays.txt
                   + _k2_crush15_report.txt
-   Archives probed: 5085, supported: 4661; MSX +replcart_msx/shiryo_msx/msxfan_msx (_k2_x1msx8full_0.txt _k2_x1msx8fan_0.txt) + x1alba (_k2_x1msx8alba_0.txt)
+   Archives probed: 5085, supported: 4689; MSX +replcart_msx/shiryo_msx/msxfan_msx (_k2_x1msx8full_0.txt _k2_x1msx8fan_0.txt) + x1alba (_k2_x1msx8alba_0.txt)
                   + _k2_ac2s86_report.txt (genpeitd/rthunder/skykiddx/wndrmomo Sys86)
                   + _k2_ac2wsgo_report.txt (pacland/skykid/drgnbstr wsg63701)
                   + bosco wsgz80 (0289 BGM via $8A14 + $0139 id)
@@ -130,6 +130,24 @@
                   + btltech_98/clrd3_98/gracer_98/myhomedr_98 iwaplay (the play command waits out the OPN tick)
                   + mujintou_98 (catalog entry 1 is silent; songs 2-4 play)
                   + viofight (Taito B YM2203; finite cues requeue the same command, 14/14)
+                  + avg2 PMD86 (86; We Moving Of / The Rising Sun / Mystic Muse stay audible for 8s)
+                  + mmaker2_98 NAX (OPN; MM2_01A / MM2_01B / MM2_02A stay audible for 8s)
+                  + sw98 iwaplay (OPN; MAIN / ROOM / TORES stay audible for 8s)
+                  + dires_98 dires.com (OPN; Opening Demo / BGM 1 / BGM 2 stay audible for 8s)
+                  + schwarz3_98 (OPN; pick 1 is catalog 演奏停止, judged on 00-01 / Theme From Schwarzschild III / Operation)
+                  + shangon (Sega YM2151+SegaPCM; sound program at 1000-1FFF is not the PCM mirror, 7/7)
+                  + thndrbld (Sega YM2151+SegaPCM; Timer A wait, program at 1000-1FFF is not the PCM mirror, Round Clear requeues, 8/8)
+                  + houou_98 (OPN; pick 1 is catalog 演奏停止, judged on 01 / 02 / 03)
+                  + mgarts98 (OPN; pick 1 is catalog 演奏停止, judged on MID-GARTS / LA MALHEART / NAVIGATION OF SURCUN)
+                  + outrfm98 NAX (OPN; pick 1 is the voice bank, judged on TITLE / Lusty Rascal / WINNERS)
+                  + guyna98 (OPN; old PMD.COM rejects INT 60 AH=9, Opening / Girls / Project stay audible for 8s)
+                  + usodom_98 (OPN; PIL logo / 悪魔を羨む歌 / 葬奴夢の淫花 stay audible for 8s)
+                  + angie_98 (OPN; PIL logo / TUMBLING LIFE / SWEET SUGAR HEARTS stay audible for 8s)
+                  + sodom_98 (OPN; PIL logo / 絨毯爆撃 / 核地雷 stay audible for 8s)
+                  + gyruss (Konami Z80+AY×5; song ROM was loaded over the program, AY3 port A is the frame timer, Stage Clear and Perfect requeue, 6/6)
+                  + cheryjam_98 (OPN; ロマンス泥棒 / 君の瞳で星をつかまえて / PLEASE stay audible for 8s)
+                  + erect_98 (OPN; MUSIC.BIN 00 / 01 / 02 stay audible for 8s)
+                  + bigprowr (Technos M6502+AY×2; reset is $4003 so the sound ROM starts at $4000, BGM #16 and #18 requeue, 6/6)
                   + _k2_f3arc_plays.txt (f3: arkretrn, bubblem, bublbob2, cbombers, cleopatr, dangcurv, dariusg, dendego, dendego2, dungeonm, elvactr, gekiridn, groundfx, gunbustr, gunlock, kaiserkn, landgear, landmakr, pbobble2o, pbobble3, popnpop, puchicar, pwrgoal, quizhuhu, scfinals, sidebs, sidebs2, spcinv95, superchs, tcobra2, trstar, twinqix, undrfire) */
 
 #include "StdAfx.h"
@@ -256,6 +274,7 @@ static const char* const kSupported[] = {
 	"airc2_98",
 	"airc3_98",
 	"airco22b",
+	"aircomb",
 	"airduel",
 	"airmng2_98",
 	"airmng68snd",
@@ -337,6 +356,7 @@ static const char* const kSupported[] = {
 	"angelus88",
 	"angelus_98",
 	"angelus_msx",
+	"angie_98",
 	"anglhalo_21",
 	"anglhalo_98",
 	"animal_msx",
@@ -428,6 +448,7 @@ static const char* const kSupported[] = {
 	"aurail",
 	"avalon_98",
 	"avengers",
+	"avg2",
 	"avsp",
 	"avspirit",
 	"axis68snd",
@@ -519,6 +540,7 @@ static const char* const kSupported[] = {
 	"bgarnet_98",
 	"bhludy_98",
 	"biblem2",
+	"bigprowr",
 	"bigsea_at",
 	"bigstrik",
 	"bingoc",
@@ -737,6 +759,7 @@ static const char* const kSupported[] = {
 	"chel68snd",
 	"chelnov",
 	"cherrym_98",
+	"cheryjam_98",
 	"chiemi_98",
 	"chilam98",
 	"chimerab",
@@ -804,8 +827,10 @@ static const char* const kSupported[] = {
 	"concert_98",
 	"conjapan_at",
 	"conq1_at",
+	"contcirc",
 	"conti68snd",
 	"conti_98",
+	"contra",
 	"contra_msx",
 	"coolworld_at",
 	"cop01",
@@ -1052,6 +1077,7 @@ static const char* const kSupported[] = {
 	"dios68snd",
 	"dios_msx",
 	"directx268snd",
+	"dires_98",
 	"dires_msx",
 	"dirtdash",
 	"dirtfoxj",
@@ -1059,6 +1085,7 @@ static const char* const kSupported[] = {
 	"diskng2_msx",
 	"dismix1_98",
 	"dismix2_98",
+	"divebomb",
 	"divers_98",
 	"dizzyyolk_at",
 	"djboy",
@@ -1354,6 +1381,7 @@ static const char* const kSupported[] = {
 	"enforce",
 	"entax_98",
 	"eob98",
+	"erect_98",
 	"eregans_98",
 	"erictu_at",
 	"es95_98",
@@ -1734,6 +1762,7 @@ static const char* const kSupported[] = {
 	"goldmedl",
 	"goldnaxe",
 	"golgo13",
+	"gollygho",
 	"golv_msx",
 	"gondo",
 	"goonies88",
@@ -1804,12 +1833,14 @@ static const char* const kSupported[] = {
 	"gururin",
 	"guy_98",
 	"guyframe",
+	"guyna98",
 	"guzzler",
 	"gw68snd",
 	"gwar",
 	"gwarrior",
 	"gyakutam_98",
 	"gyro_88",
+	"gyruss",
 	"h-plus_98",
 	"h_kioku1_21",
 	"h_kioku1_98",
@@ -1854,6 +1885,7 @@ static const char* const kSupported[] = {
 	"hasamu",
 	"hashiri_98",
 	"hatena98",
+	"hatris",
 	"hatris98",
 	"hatukoi_98",
 	"hayaosi1",
@@ -1914,6 +1946,7 @@ static const char* const kSupported[] = {
 	"horshoes",
 	"hotdogst",
 	"houkago_98",
+	"houou_98",
 	"houtei1_98",
 	"houtei1_at",
 	"houtei2_98",
@@ -2642,6 +2675,7 @@ static const char* const kSupported[] = {
 	"mgakuen_98",
 	"mgamescr_98",
 	"mgarms98",
+	"mgarts98",
 	"mgear2_msx",
 	"mgear_msx",
 	"mhard_98",
@@ -2731,6 +2765,7 @@ static const char* const kSupported[] = {
 	"mm4_at",
 	"mm5_at",
 	"mmabtl_msx",
+	"mmaker2_98",
 	"mmaker_98",
 	"mmancp2u",
 	"mmatrix",
@@ -2891,6 +2926,7 @@ static const char* const kSupported[] = {
 	"night_s_98",
 	"night_w_98",
 	"nightsft_98",
+	"nightstr",
 	"nike_msx",
 	"nikki_98",
 	"niko2",
@@ -2985,6 +3021,7 @@ static const char* const kSupported[] = {
 	"otome_98m",
 	"outbr_98",
 	"outfxies",
+	"outrfm98",
 	"outrun",
 	"outrun2_msx",
 	"outrun_msx",
@@ -3614,6 +3651,7 @@ static const char* const kSupported[] = {
 	"schwarz",
 	"schwarz2",
 	"schwarz2_msx",
+	"schwarz3_98",
 	"schwarz_msx",
 	"sci",
 	"scldays_98",
@@ -3723,6 +3761,7 @@ static const char* const kSupported[] = {
 	"shan_98",
 	"shang268snd",
 	"shanghai2_at",
+	"shangon",
 	"shangva",
 	"shannara_at",
 	"sharedem_98",
@@ -3827,6 +3866,7 @@ static const char* const kSupported[] = {
 	"snowm_98",
 	"socbrawl",
 	"soccerss",
+	"sodom_98",
 	"softcon_98",
 	"sol68snd",
 	"solarwinds2_at",
@@ -3923,6 +3963,7 @@ static const char* const kSupported[] = {
 	"spelunk2",
 	"spelunkr",
 	"spf2t",
+	"spidman",
 	"spinlbrk",
 	"spinmast",
 	"spiritofadv_at",
@@ -3991,6 +4032,7 @@ static const char* const kSupported[] = {
 	"strad98",
 	"strader68snd",
 	"strange_98",
+	"stratgyx",
 	"stratof",
 	"strawb68snd",
 	"streetrod2_at",
@@ -4030,6 +4072,7 @@ static const char* const kSupported[] = {
 	"svgaharrier_at",
 	"svghost",
 	"sw68snd",
+	"sw98",
 	"swat",
 	"sweet_e_98",
 	"sweete68snd",
@@ -4175,6 +4218,7 @@ static const char* const kSupported[] = {
 	"thexder_fm7",
 	"thexder_msx",
 	"thincle_98",
+	"thndrbld",
 	"thndrx2",
 	"thndzone",
 	"thotel_98",
@@ -4353,6 +4397,7 @@ static const char* const kSupported[] = {
 	"usagi2_98",
 	"usagi_98",
 	"usas_msx",
+	"usodom_98",
 	"utopia_at",
 	"v_btr_98",
 	"v_ctr_98",

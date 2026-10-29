@@ -171,7 +171,8 @@ namespace PianoRollPeakSpectrum
                 // 3 ビン積分値との大きい方を採る(割り当て先は単一鍵 k のみなので隣鍵へは漏れない)。
                 const float lobe = (m_pow[b - 1] + p + m_pow[b + 1]) / lobeNorm;
                 if (lobe > pkPow) pkPow = lobe;
-                const float snrNeed = (kn < 60) ? (snrLin * 0.70f) : ((kn < 84) ? (snrLin * 0.85f) : snrLin);
+                // 高域の床は中域(350Hz–3.2kHz)からの借り物で、実音より高い。C6 以上に一番きつい S/N を掛けると高音が消える。
+                const float snrNeed = (kn < 60 || kn >= 84) ? (snrLin * 0.70f) : (snrLin * 0.85f);
                 if (pkPow < 1.0e-20f || pkPow <= np0 * snrNeed) continue;
                 m_peakBin[np] = (float)b + delta;
                 m_peakPow[np] = pkPow;

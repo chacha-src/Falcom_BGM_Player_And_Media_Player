@@ -246,6 +246,7 @@ private:
 	void DrawCutIn3D();
 	void BindSummonCut();
 	void SummonImpactFx();
+	void SummonLeave(float dt);
 	void DrawCutInUi();
 	void LayoutSpecialCut();
 	void PoseFormAllies();
@@ -366,6 +367,8 @@ private:
 	int m_autoStage;
 	int m_shop;
 	int m_btnSfx; // 次の Btn の決定音。-1 は場面別、-2 は鳴らさない
+	int m_uiHover, m_uiHoverCand, m_uiHoverHit, m_uiHoverScreen, m_uiHoverShop;
+	int UiHoverId() const;
 	int m_shopLine;
 	int m_shopTier;          // 武具: 0全部。1..10 はその職段の必要段
 	int m_shopBand;          // 装飾: 0全部 1千未満 2千〜十万未満 3十万以上
@@ -458,6 +461,7 @@ private:
 	int m_target;
 	BYTE m_ovMove[MAPN][MAPN];
 	BYTE m_ovAtk[MAPN][MAPN];
+	BYTE m_ovThreat[MAPN][MAPN];
 	Fix<VtxS, 12288> m_ovQuads;
 	BOOL m_ovDirty;
 	int m_path[MAPN * 4];

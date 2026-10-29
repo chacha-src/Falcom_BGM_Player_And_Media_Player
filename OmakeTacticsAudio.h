@@ -84,6 +84,9 @@ enum TacSfxId {
 	TS_DEFDOWN,
 	TS_FALL,      // 味方が倒れた
 	TS_FLY,       // 味方が翼で移動しているあいだ
+	TS_HOVER_BASE, // 拠点の項目に乗った
+	TS_HOVER_SHOP, // 店の項目に乗った
+	TS_HOVER_GAME, // 戦闘メニューの項目に乗った
 	TS_N
 };
 

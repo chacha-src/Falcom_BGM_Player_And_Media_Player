@@ -2894,6 +2894,37 @@ static bool ReadAvaMesh(Reader& rd, Renderer::AvaMesh& m)
 	return !rd.bad;
 }
 
+// 頂点の展開は描く衣装だけ。起動時はバイト列の位置だけ覚える。
+static BOOL PeekAvaMesh(Reader& rd, const BYTE** begin, UINT* bytes, UINT* nvOut)
+{
+	size_t s = rd.o;
+	UINT nv = rd.U32();
+	if (nv == 0 || nv > 65535 || rd.bad) return FALSE;
+	if (!rd.Bytes(24)) return FALSE;
+	if (!rd.Bytes((size_t)nv * 22)) return FALSE;
+	UINT has = rd.U32();
+	if (rd.bad) return FALSE;
+	if (has && !rd.Bytes((size_t)nv * 12)) return FALSE;
+	if (begin) *begin = rd.p + s;
+	if (bytes) *bytes = (UINT)(rd.o - s);
+	if (nvOut) *nvOut = nv;
+	return !rd.bad;
+}
+
+static BOOL EnsureAvaCos(Renderer::AvaCos& c)
+{
+	if (!c.m.v.empty()) return TRUE;
+	if (!c.pending || c.pendingN < 16) return FALSE;
+	Reader rd(c.pending, c.pendingN);
+	if (!ReadAvaMesh(rd, c.m) || c.m.v.empty()) {
+		c.m = Renderer::AvaMesh();
+		c.pending = NULL;
+		return FALSE;
+	}
+	c.pending = NULL;
+	return TRUE;
+}
+
 static bool ReadWords(Reader& rd, Buf<WORD>& out, size_t n)
 {
 	const BYTE* p = rd.Bytes(n * 2);
@@ -2983,14 +3014,21 @@ void Renderer::LoadAvatarPack()
 		AvaCos c;
 		rd.Name(c.name, 32);
 		c.gender = (int)rd.U32();
-		if (c.gender < 0 || c.gender > 1 || !ReadAvaMesh(rd, c.m)) break;
+		c.pending = NULL;
+		c.pendingN = 0;
+		UINT nv = 0;
+		const BYTE* mesh = NULL;
+		UINT meshN = 0;
+		if (c.gender < 0 || c.gender > 1 || !PeekAvaMesh(rd, &mesh, &meshN, &nv)) break;
+		c.pending = mesh;
+		c.pendingN = meshN;
 		UINT nt = rd.U32();
 		if (!ReadWords(rd, c.tri, (size_t)nt * 3)) break;
 		size_t nk = (m_avaBody[c.gender].bodyTri.size() / 3 + 7) / 8;
 		const BYTE* kp = rd.Bytes(nk);
 		if (!kp) break;
 		c.keep.assign(kp, kp + nk);
-		if (m_avaBody[c.gender].m.v.size() + c.m.v.size() > 65535) { avSeen++; LoadPulse(avSeen, avDen); continue; }
+		if (m_avaBody[c.gender].m.v.size() + nv > 65535) { avSeen++; LoadPulse(avSeen, avDen); continue; }
 		m_avaCos.push_back(std::move(c));
 		avSeen++;
 		LoadPulse(avSeen, avDen);
@@ -4335,6 +4373,7 @@ BOOL Renderer::DrawAvatar(int model, int avatar, int cup, const Pose& pose, cons
 	int ci = -1;
 	for (int k = 0, n = 0; k < (int)m_avaCos.size(); k++) if (m_avaCos[k].gender == am->gender && ++n == avatar) { ci = k; break; }
 	if (ci < 0) return FALSE;
+	if (!EnsureAvaCos(m_avaCos[ci])) return FALSE;
 	// 胸の差分が無い体（男性）は大きさで形が変わらないので、一つだけ作る。
 	const int cupK = (!m_avaBody[am->gender].m.dmax.empty() && !m_avaCos[ci].m.dmax.empty()) ? Clampi(cup, 0, BUST_N - 1) : 0;
 	AvaCache* ac = NULL;

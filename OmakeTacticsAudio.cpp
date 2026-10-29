@@ -70,6 +70,7 @@ static float s_bFrac;
 static int s_bPrimed;
 static int s_pausedMain;
 static DWORD s_cursorAt;
+static DWORD s_hoverAt;
 static int s_bgmPct = 6;
 static int s_sePct = 8;
 static wchar_t s_bgmPath[MAX_PATH];
@@ -123,26 +124,27 @@ void TacAudioSetVol(int bgm, int se)
 }
 
 static const float kGain[TS_N] = {
-	0.20f, 0.44f, 0.36f, 0.38f, 0.40f,
-	0.46f, 0.50f, 0.24f, 0.44f, 0.44f,
-	0.42f, 0.52f, 0.62f, 0.30f, 0.44f,
-	0.42f, 0.56f, 0.56f, 0.46f, 0.50f,
-	0.40f, 0.44f, 0.42f, 0.40f, 0.44f,
-	0.40f, 0.44f, 0.38f, 0.34f, 0.50f,
-	0.44f, 0.50f,
-	0.48f, 0.42f, 0.50f, 0.44f, 0.48f, 0.42f, 0.50f, 0.42f,
-	0.40f, 0.42f, 0.48f,
-	0.48f, 0.44f, 0.40f, 0.46f, 0.48f,
-	0.50f,
-	0.56f, 0.50f, 0.58f, 0.52f, 0.52f, 0.48f, 0.56f, 0.48f,
-	0.48f, 0.50f, 0.54f,
-	0.58f, 0.62f,
-	0.32f, 0.32f,
-	0.50f, 0.44f, 0.40f, 0.38f, 0.44f, 0.50f, 0.46f,
-	0.46f, 0.54f, 0.46f,
-	0.52f, 0.50f, 0.40f, 0.40f, 0.46f,
-	0.50f,
-	0.28f
+	0.42f, 0.37f, 0.33f, 0.23f, 0.36f,
+	0.48f, 0.49f, 0.18f, 0.31f, 0.39f,
+	0.46f, 1.05f, 1.08f, 0.20f, 0.51f,
+	0.40f, 0.61f, 0.64f, 0.58f, 0.81f,
+	0.32f, 0.50f, 0.50f, 0.31f, 0.60f,
+	0.43f, 0.54f, 0.40f, 0.31f, 0.72f,
+	0.36f, 1.11f,
+	0.59f, 0.58f, 0.47f, 0.62f, 0.48f, 0.39f, 0.55f, 0.49f,
+	0.47f, 0.49f, 0.49f,
+	0.32f, 0.44f, 0.26f, 0.18f, 0.56f,
+	0.62f,
+	0.85f, 0.98f, 0.97f, 0.83f, 0.73f, 0.89f, 0.73f, 0.82f,
+	0.77f, 0.70f, 0.95f,
+	0.88f, 0.99f,
+	0.45f, 0.21f,
+	0.63f, 0.60f, 0.42f, 0.44f, 1.03f, 1.10f, 0.42f,
+	0.68f, 0.64f, 0.58f,
+	0.62f, 0.73f, 0.39f, 0.35f, 0.57f,
+	0.60f,
+	0.34f,
+	0.30f, 0.32f, 0.30f
 };
 
 static size_t TacRead(void* dst, size_t sz, size_t nm, void* h)
@@ -225,17 +227,31 @@ static int TacDecodeMem(const unsigned char* p, size_t n, TacClip& out)
 static void TacBake(int id);
 
 // YM2203 相当。FM は 4 オペレータ、SSG は矩形とノイズ。コーラスと残響は足さない。
-// kind: 0=FM 1=矩形 2=ノイズ 3=矩形+ノイズ。sweep は音の長さで動く半音。
-// SSG の sus<0 は山なりの包絡（風切り用）。ノイズの粗さは音程に従う。
+// kind: 0=FM 1=矩形 2=ノイズ 3=矩形+ノイズ。sweep は音の長さで動く半音。下げは頭で速く落ちる。
+// 減衰は指数。FM は dec 秒で頭の約 2% まで落ち、離した後は rel で消える。
+// mdec は変調の時間変化（秒）。正は明るさが引き、負は立ち上がる。mfl はその下限。
+// SSG の sus<0 は山なりの包絡（風切り用）。SSG の dec>=0.015 は減衰の時定数。ノイズの粗さは音程に従う。
 // @0 ベル @1 エレピ @2 笛 @3 打撃 @4 金管 @5 金属 @6 矩形 @7 ノイズ
 // @8 木琴 @9 ハープ @10 炎 @11 氷 @12 雷 @13 聖 @14 闇 @15 地 @16 毒
 // @17 斬 @18 突 @19 殴 @20 弓 @21 硬貨 @22 盾 @23 細矩形
 // @24 低い衝撃 @25 パッド @26 鉄琴 @27 風切りノイズ @28 持続ノイズ
+// @29 撥弦 @30 合唱 @31 太鼓 @32 鈴 @33 弦楽 @34 木の打音 @35 クリック
+// 起動時に全音を焼くので sinf は表引きに替える。4096 点の線形補間で FM の濁りは聞こえない。
 static float FmSin(float cyc)
 {
+	static float tab[4097];
+	static int ready = 0;
+	if (!ready) {
+		for (int i = 0; i <= 4096; i++) tab[i] = sinf((float)i * (6.2831853f / 4096.f));
+		ready = 1;
+	}
 	float x = cyc - (float)(int)cyc;
 	if (x < 0.f) x += 1.f;
-	return sinf(x * 6.2831853f);
+	float f = x * 4096.f;
+	int i = (int)f;
+	if (i > 4095) i = 4095;
+	float w = f - (float)i;
+	return tab[i] + (tab[i + 1] - tab[i]) * w;
 }
 struct FmVoice {
 	float mul[4];
@@ -248,55 +264,50 @@ struct FmVoice {
 	float sweep;
 	float nz;
 	int nper;
+	float mdec;
+	float mfl;
 };
 static const FmVoice kFmVoice[] = {
-	{ { 14.f, 1.f, 1.01f, 1.f }, { 0.42f, 0.55f, 0.72f, 0.80f }, 3, 0.28f, 0.001f, 0.045f, 0.06f, 0.06f, 0, 0.50f, 0.f, 0.f, 0 },
-	{ { 1.f, 1.f, 14.f, 1.f }, { 0.32f, 0.88f, 0.18f, 0.70f }, 1, 0.10f, 0.003f, 0.08f, 0.28f, 0.07f, 0, 0.50f, 0.f, 0.f, 0 },
-	{ { 1.f, 2.f, 1.f, 1.f }, { 0.16f, 0.82f, 0.08f, 0.55f }, 0, 0.06f, 0.010f, 0.07f, 0.55f, 0.08f, 0, 0.50f, 0.f, 0.f, 0 },
-	{ { 0.5f, 1.f, 1.f, 1.f }, { 0.72f, 0.60f, 0.18f, 0.90f }, 0, 0.36f, 0.001f, 0.045f, 0.06f, 0.05f, 0, 0.50f, -5.f, 0.28f, 8 },
-	{ { 1.f, 1.f, 1.f, 1.007f }, { 0.48f, 0.82f, 0.28f, 0.86f }, 1, 0.24f, 0.006f, 0.07f, 0.42f, 0.08f, 0, 0.50f, 0.f, 0.f, 0 },
-	{ { 7.f, 1.f, 11.f, 1.f }, { 0.55f, 0.42f, 0.50f, 0.62f }, 3, 0.18f, 0.001f, 0.016f, 0.02f, 0.028f, 0, 0.50f, 0.f, 0.10f, 2 },
-	{ { 1.f, 1.f, 1.f, 1.f }, { 0.f, 0.f, 0.f, 0.f }, 0, 0.f, 0.001f, 0.02f, 0.85f, 0.03f, 1, 0.50f, 0.f, 0.f, 0 },
-	{ { 1.f, 1.f, 1.f, 1.f }, { 0.f, 0.f, 0.f, 0.f }, 0, 0.f, 0.001f, 0.02f, 0.08f, 0.03f, 2, 0.50f, 0.f, 0.f, 16 },
-	{ { 3.5f, 1.f, 1.f, 1.f }, { 0.46f, 0.92f, 0.08f, 0.16f }, 0, 0.08f, 0.001f, 0.07f, 0.04f, 0.05f, 0, 0.50f, 0.f, 0.f, 0 },
-	{ { 1.f, 1.f, 2.f, 1.004f }, { 0.14f, 0.86f, 0.10f, 0.48f }, 1, 0.06f, 0.002f, 0.12f, 0.16f, 0.10f, 0, 0.50f, 0.f, 0.f, 0 },
-	{ { 1.f, 1.f, 2.f, 3.f }, { 0.50f, 0.62f, 0.38f, 0.78f }, 3, 0.40f, 0.001f, 0.06f, 0.08f, 0.05f, 0, 0.50f, 4.f, 0.32f, 3 },
-	{ { 1.f, 1.f, 7.f, 1.f }, { 0.18f, 0.72f, 0.32f, 0.50f }, 3, 0.10f, 0.004f, 0.16f, 0.22f, 0.12f, 0, 0.50f, 0.f, 0.f, 0 },
-	{ { 1.f, 1.f, 1.f, 1.f }, { 0.f, 0.f, 0.f, 0.f }, 0, 0.f, 0.001f, 0.01f, 0.06f, 0.02f, 3, 0.28f, -8.f, 0.f, 2 },
-	{ { 2.f, 1.f, 1.f, 1.005f }, { 0.28f, 0.80f, 0.14f, 0.68f }, 1, 0.14f, 0.005f, 0.10f, 0.32f, 0.10f, 0, 0.50f, 0.f, 0.f, 0 },
-	{ { 1.5f, 1.f, 0.5f, 1.f }, { 0.48f, 0.74f, 0.28f, 0.55f }, 0, 0.28f, 0.003f, 0.10f, 0.22f, 0.08f, 0, 0.50f, -6.f, 0.12f, 12 },
-	{ { 0.5f, 1.f, 1.f, 1.f }, { 0.78f, 0.90f, 0.14f, 0.36f }, 0, 0.22f, 0.001f, 0.08f, 0.08f, 0.06f, 0, 0.50f, -7.f, 0.42f, 14 },
-	{ { 1.f, 1.04f, 2.f, 1.f }, { 0.32f, 0.58f, 0.36f, 0.66f }, 2, 0.16f, 0.005f, 0.08f, 0.32f, 0.08f, 0, 0.50f, -2.f, 0.06f, 18 },
-	{ { 1.f, 1.f, 2.f, 1.f }, { 0.38f, 0.48f, 0.22f, 0.66f }, 1, 0.18f, 0.001f, 0.05f, 0.04f, 0.04f, 0, 0.50f, -12.f, 0.38f, 4 },
-	{ { 3.f, 1.f, 1.f, 1.f }, { 0.42f, 0.82f, 0.08f, 0.24f }, 0, 0.10f, 0.001f, 0.028f, 0.02f, 0.03f, 0, 0.50f, 3.f, 0.18f, 3 },
-	{ { 0.5f, 1.f, 1.f, 1.f }, { 0.82f, 0.95f, 0.16f, 0.28f }, 0, 0.32f, 0.001f, 0.04f, 0.05f, 0.04f, 0, 0.50f, -4.f, 0.34f, 6 },
-	{ { 1.f, 1.f, 3.f, 1.f }, { 0.18f, 0.84f, 0.22f, 0.36f }, 1, 0.08f, 0.001f, 0.09f, 0.02f, 0.06f, 0, 0.50f, -2.f, 0.06f, 0 },
-	{ { 10.f, 1.f, 14.f, 1.f }, { 0.36f, 0.52f, 0.42f, 0.64f }, 3, 0.14f, 0.001f, 0.028f, 0.02f, 0.045f, 0, 0.50f, 0.f, 0.f, 0 },
-	{ { 1.f, 1.f, 6.f, 1.f }, { 0.32f, 0.74f, 0.38f, 0.78f }, 1, 0.16f, 0.001f, 0.05f, 0.14f, 0.08f, 0, 0.50f, 0.f, 0.14f, 2 },
-	{ { 1.f, 1.f, 1.f, 1.f }, { 0.f, 0.f, 0.f, 0.f }, 0, 0.f, 0.001f, 0.02f, 0.25f, 0.02f, 1, 0.22f, 0.f, 0.f, 0 },
-	{ { 1.f, 1.f, 1.f, 1.f }, { 0.30f, 0.45f, 0.25f, 1.00f }, 0, 0.12f, 0.001f, 0.24f, 0.f, 0.08f, 0, 0.50f, -14.f, 0.30f, 10 },
-	{ { 1.f, 1.f, 2.f, 1.003f }, { 0.12f, 0.62f, 0.10f, 0.55f }, 1, 0.04f, 0.050f, 0.25f, 0.70f, 0.22f, 0, 0.50f, 0.f, 0.f, 0 },
-	{ { 3.5f, 1.f, 2.f, 4.f }, { 0.28f, 0.70f, 0.30f, 0.22f }, 3, 0.06f, 0.001f, 0.55f, 0.f, 0.30f, 0, 0.50f, 0.f, 0.f, 0 },
-	{ { 1.f, 1.f, 1.f, 1.f }, { 0.f, 0.f, 0.f, 0.f }, 0, 0.f, 0.001f, 0.02f, -1.f, 0.02f, 2, 0.50f, 0.f, 0.f, 6 },
-	{ { 1.f, 1.f, 1.f, 1.f }, { 0.f, 0.f, 0.f, 0.f }, 0, 0.f, 0.001f, 0.02f, 0.90f, 0.10f, 2, 0.50f, 0.f, 0.f, 12 },
+	{ { 1.4f, 1.f, 2.f, 3.f }, { 0.60f, 0.80f, 0.25f, 0.12f }, 3, 0.04f, 0.001f, 0.40f, 0.f, 0.70f, 0, 0.50f, 0.f, 0.f, 0, 0.20f, 0.20f },
+	{ { 1.f, 1.f, 14.f, 1.f }, { 0.28f, 0.85f, 0.12f, 0.65f }, 1, 0.05f, 0.002f, 0.60f, 0.10f, 0.30f, 0, 0.50f, 0.f, 0.f, 0, 0.05f, 0.25f },
+	{ { 1.f, 1.f, 2.f, 1.f }, { 0.08f, 0.80f, 0.05f, 0.35f }, 1, 0.f, 0.025f, 0.20f, 0.75f, 0.12f, 0, 0.50f, 0.f, 0.12f, 2, -0.06f, 0.40f },
+	{ { 0.5f, 1.f, 1.f, 1.f }, { 0.55f, 0.50f, 0.15f, 0.90f }, 0, 0.30f, 0.001f, 0.16f, 0.f, 0.14f, 0, 0.50f, -7.f, 0.30f, 8, 0.02f, 0.10f },
+	{ { 1.f, 1.f, 1.f, 1.006f }, { 0.45f, 0.85f, 0.30f, 0.80f }, 1, 0.30f, 0.018f, 0.25f, 0.75f, 0.09f, 0, 0.50f, 0.f, 0.f, 0, -0.035f, 0.30f },
+	{ { 7.1f, 1.f, 2.4f, 3.97f }, { 0.55f, 0.60f, 0.35f, 0.30f }, 3, 0.20f, 0.001f, 0.30f, 0.f, 0.35f, 0, 0.50f, 0.f, 0.10f, 2, 0.05f, 0.25f },
+	{ { 1.f, 1.f, 1.f, 1.f }, { 0.f, 0.f, 0.f, 0.f }, 0, 0.f, 0.001f, 0.02f, 0.85f, 0.03f, 1, 0.50f, 0.f, 0.f, 0, 0.f, 0.f },
+	{ { 1.f, 1.f, 1.f, 1.f }, { 0.f, 0.f, 0.f, 0.f }, 0, 0.f, 0.001f, 0.04f, 0.08f, 0.03f, 2, 0.50f, 0.f, 0.f, 16, 0.f, 0.f },
+	{ { 3.5f, 1.f, 1.f, 4.f }, { 0.40f, 0.90f, 0.f, 0.10f }, 1, 0.f, 0.001f, 0.22f, 0.f, 0.18f, 0, 0.50f, 0.f, 0.f, 0, 0.015f, 0.05f },
+	{ { 1.f, 1.f, 2.f, 1.003f }, { 0.22f, 0.90f, 0.08f, 0.45f }, 1, 0.04f, 0.002f, 0.70f, 0.f, 0.35f, 0, 0.50f, 0.f, 0.f, 0, 0.05f, 0.10f },
+	{ { 1.f, 1.f, 2.f, 3.f }, { 0.75f, 0.55f, 0.40f, 0.60f }, 3, 0.85f, 0.006f, 0.30f, 0.30f, 0.14f, 0, 0.50f, 3.f, 0.50f, 3, 0.20f, 0.45f },
+	{ { 6.99f, 1.f, 3.01f, 5.03f }, { 0.32f, 0.70f, 0.30f, 0.25f }, 3, 0.02f, 0.001f, 0.45f, 0.f, 0.35f, 0, 0.50f, 0.f, 0.f, 0, 0.10f, 0.35f },
+	{ { 1.f, 1.f, 1.f, 1.f }, { 0.f, 0.f, 0.f, 0.f }, 0, 0.f, 0.001f, 0.06f, 0.10f, 0.04f, 3, 0.28f, -10.f, 0.f, 2, 0.f, 0.f },
+	{ { 2.f, 1.f, 1.f, 1.006f }, { 0.20f, 0.75f, 0.08f, 0.60f }, 1, 0.03f, 0.030f, 0.35f, 0.60f, 0.35f, 0, 0.50f, 0.f, 0.f, 0, -0.08f, 0.45f },
+	{ { 1.5f, 1.f, 0.5f, 1.f }, { 0.45f, 0.65f, 0.30f, 0.60f }, 0, 0.45f, 0.010f, 0.30f, 0.45f, 0.20f, 0, 0.50f, -5.f, 0.10f, 12, 0.20f, 0.55f },
+	{ { 0.5f, 1.f, 1.f, 1.f }, { 0.75f, 0.85f, 0.20f, 0.45f }, 0, 0.25f, 0.001f, 0.30f, 0.10f, 0.16f, 0, 0.50f, -9.f, 0.45f, 14, 0.05f, 0.20f },
+	{ { 1.f, 1.f, 2.02f, 1.f }, { 0.18f, 0.80f, 0.35f, 0.55f }, 1, 0.10f, 0.004f, 0.10f, 0.30f, 0.06f, 0, 0.50f, 5.f, 0.04f, 18, 0.03f, 0.30f },
+	{ { 1.f, 1.f, 2.f, 1.f }, { 0.40f, 0.50f, 0.25f, 0.60f }, 1, 0.45f, 0.001f, 0.09f, 0.f, 0.10f, 0, 0.50f, -12.f, 0.45f, 3, 0.02f, 0.20f },
+	{ { 3.f, 1.f, 1.f, 1.f }, { 0.45f, 0.80f, 0.10f, 0.30f }, 0, 0.10f, 0.001f, 0.06f, 0.f, 0.07f, 0, 0.50f, 3.f, 0.30f, 2, 0.015f, 0.10f },
+	{ { 0.5f, 1.f, 1.f, 1.f }, { 0.80f, 0.90f, 0.15f, 0.30f }, 0, 0.35f, 0.001f, 0.09f, 0.f, 0.12f, 0, 0.50f, -6.f, 0.40f, 7, 0.015f, 0.10f },
+	{ { 1.f, 1.f, 3.f, 1.f }, { 0.20f, 0.85f, 0.22f, 0.40f }, 1, 0.08f, 0.001f, 0.20f, 0.f, 0.16f, 0, 0.50f, -3.f, 0.05f, 1, 0.03f, 0.10f },
+	{ { 5.f, 1.f, 2.f, 3.f }, { 0.30f, 0.80f, 0.22f, 0.22f }, 3, 0.05f, 0.001f, 0.30f, 0.f, 0.25f, 0, 0.50f, 0.f, 0.f, 0, 0.05f, 0.20f },
+	{ { 1.f, 1.f, 2.76f, 5.4f }, { 0.65f, 0.70f, 0.40f, 0.30f }, 3, 0.20f, 0.001f, 0.25f, 0.f, 0.25f, 0, 0.50f, 0.f, 0.22f, 2, 0.04f, 0.20f },
+	{ { 1.f, 1.f, 1.f, 1.f }, { 0.f, 0.f, 0.f, 0.f }, 0, 0.f, 0.001f, 0.05f, 0.25f, 0.03f, 1, 0.22f, 0.f, 0.f, 0, 0.f, 0.f },
+	{ { 1.f, 1.f, 1.f, 1.f }, { 0.30f, 0.40f, 0.25f, 1.00f }, 0, 0.12f, 0.001f, 0.40f, 0.f, 0.32f, 0, 0.50f, -14.f, 0.30f, 10, 0.03f, 0.10f },
+	{ { 1.f, 1.f, 2.f, 1.004f }, { 0.12f, 0.62f, 0.10f, 0.55f }, 1, 0.04f, 0.060f, 0.40f, 0.70f, 0.35f, 0, 0.50f, 0.f, 0.f, 0, 0.f, 0.f },
+	{ { 3.5f, 1.f, 2.76f, 5.4f }, { 0.18f, 0.75f, 0.20f, 0.10f }, 3, 0.02f, 0.001f, 0.80f, 0.f, 0.50f, 0, 0.50f, 0.f, 0.f, 0, 0.15f, 0.20f },
+	{ { 1.f, 1.f, 1.f, 1.f }, { 0.f, 0.f, 0.f, 0.f }, 0, 0.f, 0.001f, 0.02f, -1.f, 0.02f, 2, 0.50f, 0.f, 0.f, 6, 0.f, 0.f },
+	{ { 1.f, 1.f, 1.f, 1.f }, { 0.f, 0.f, 0.f, 0.f }, 0, 0.f, 0.001f, 0.02f, 0.90f, 0.10f, 2, 0.50f, 0.f, 0.f, 12, 0.f, 0.f },
+	{ { 1.f, 1.f, 3.f, 1.f }, { 0.35f, 0.90f, 0.15f, 0.30f }, 1, 0.10f, 0.001f, 0.35f, 0.f, 0.15f, 0, 0.50f, 0.f, 0.f, 0, 0.025f, 0.05f },
+	{ { 1.f, 1.006f, 2.f, 3.02f }, { 0.55f, 0.50f, 0.25f, 0.12f }, 2, 0.f, 0.080f, 0.30f, 0.80f, 0.35f, 0, 0.50f, 0.f, 0.f, 0, 0.f, 0.f },
+	{ { 0.5f, 1.f, 1.f, 1.f }, { 0.50f, 0.60f, 0.20f, 1.00f }, 0, 0.15f, 0.001f, 0.28f, 0.f, 0.25f, 0, 0.50f, -5.f, 0.22f, 12, 0.02f, 0.10f },
+	{ { 8.f, 1.f, 6.3f, 9.7f }, { 0.45f, 0.55f, 0.35f, 0.30f }, 3, 0.10f, 0.001f, 0.15f, 0.f, 0.10f, 0, 0.50f, 0.f, 0.12f, 1, 0.03f, 0.20f },
+	{ { 1.f, 1.f, 1.f, 1.004f }, { 0.35f, 0.80f, 0.25f, 0.70f }, 1, 0.55f, 0.090f, 0.30f, 0.85f, 0.30f, 0, 0.50f, 0.f, 0.f, 0, -0.10f, 0.50f },
+	{ { 1.5f, 1.f, 3.2f, 1.f }, { 0.30f, 0.85f, 0.20f, 0.40f }, 1, 0.10f, 0.001f, 0.05f, 0.f, 0.06f, 0, 0.50f, -2.f, 0.08f, 2, 0.01f, 0.10f },
+	{ { 4.f, 1.f, 1.f, 2.f }, { 0.25f, 0.80f, 0.f, 0.20f }, 1, 0.f, 0.0005f, 0.02f, 0.f, 0.015f, 0, 0.50f, 0.f, 0.f, 0, 0.005f, 0.10f },
 };
 enum { TAC_FM_N = (int)(sizeof(kFmVoice) / sizeof(kFmVoice[0])) };
 struct MmlEv { int t0; int n; float hz; int voice; float vol; int pan; int ssg; int bend; float sweep; };
 
-static float FmEnv(const FmVoice& v, float t, float dur)
-{
-	float rel = v.rel > 0.01f ? v.rel : 0.04f;
-	if (t < 0.f) return 0.f;
-	if (t < v.atk) return v.atk > 0.f ? t / v.atk : 1.f;
-	if (t < v.atk + v.dec) {
-		float u = (t - v.atk) / (v.dec > 0.f ? v.dec : 0.01f);
-		return 1.f - (1.f - v.sus) * u;
-	}
-	if (t < dur) return v.sus;
-	float u = (t - dur) / rel;
-	if (u >= 1.f) return 0.f;
-	return v.sus * (1.f - u);
-}
 static void FmNoise(unsigned& noise, int& clk, int per)
 {
 	if (per < 1) per = 1;
@@ -330,24 +341,26 @@ static void FmAdd(float* L, float* R, int total, const MmlEv& ev, unsigned& nois
 		float duty = v.duty;
 		if (duty < 0.08f) duty = 0.08f;
 		if (duty > 0.5f) duty = 0.5f;
+		float tau = v.dec >= 0.015f ? v.dec : dur * 0.38f;
+		if (tau < 0.010f) tau = 0.010f;
 		for (int i = 0; i < n; i++) {
 			float t = (float)i / (float)TAC_RATE;
 			float u = t / dur;
 			if (u > 1.f) u = 1.f;
-			float hz = ev.hz * powf(2.f, (sweep * u) / 12.f);
+			float hz = ev.hz;
+			if (sweep != 0.f) hz *= powf(2.f, (sweep * (sweep < 0.f ? u * (2.f - u) : u)) / 12.f);
 			float env;
 			if (v.sus < 0.f) {
 				env = t < dur ? sinf(3.1415927f * sqrtf(u)) : 0.f;
 			} else if (v.sus >= 0.45f) {
 				env = t < 0.002f ? t / 0.002f : 1.f;
 			} else if (t < 0.002f) env = t / 0.002f;
-			else {
-				float tau = dur * 0.38f;
-				if (tau < 0.010f) tau = 0.010f;
-				env = expf(-(t - 0.002f) / tau);
-			}
+			else env = expf(-((t < dur ? t : dur) - 0.002f) / tau);
 			if (t > dur + rel) env = 0.f;
-			else if (t > dur) env *= 1.f - (t - dur) / rel;
+			else if (t > dur) {
+				float r = (t - dur) / rel;
+				env *= expf(-3.f * r) * (1.f - r);
+			}
 			if (env <= 0.001f) continue;
 			float s = 0.f;
 			if (v.kind == 1 || v.kind == 3) {
@@ -372,13 +385,34 @@ static void FmAdd(float* L, float* R, int total, const MmlEv& ev, unsigned& nois
 	float ph[4] = { 0, 0, 0, 0 };
 	float fb = 0.f;
 	int nclk = 0;
+	// 包絡は毎サンプル掛け算で進める。起動時に全部焼くので expf を回さない。
+	int nDur = ev.n;
+	int nAt = (int)(v.atk * (float)TAC_RATE);
+	if (nAt > nDur) nAt = nDur;
+	int nRel = (int)(rel * (float)TAC_RATE);
+	if (nRel < 1) nRel = 1;
+	float dk = expf(-4.f / ((v.dec > 0.001f ? v.dec : 0.01f) * (float)TAC_RATE));
+	float rk = expf(-3.f / (float)nRel);
+	float mk = v.mdec != 0.f ? expf(-1.f / (fabsf(v.mdec) * (float)TAC_RATE)) : 1.f;
+	float nk = expf(-1.f / ((0.012f + v.dec * 0.3f) * (float)TAC_RATE));
+	float dx = 1.f, rx = 1.f, mx = 1.f, nx = 1.f, last = 0.f;
 	for (int i = 0; i < n; i++) {
-		float t = (float)i / (float)TAC_RATE;
-		float env = FmEnv(v, t, dur);
+		float env;
+		if (i < nAt) { env = (float)i / (float)nAt; last = env; }
+		else if (i < nDur) { env = v.sus + (1.f - v.sus) * dx; dx *= dk; last = env; }
+		else {
+			env = last * rx * (1.f - (float)(i - nDur) / (float)nRel);
+			rx *= rk;
+		}
+		float m = v.mdec > 0.f ? v.mfl + (1.f - v.mfl) * mx : (v.mdec < 0.f ? v.mfl + (1.f - v.mfl) * (1.f - mx) : 1.f);
+		mx *= mk;
 		if (env <= 0.f) continue;
-		float u = t / dur;
-		if (u > 1.f) u = 1.f;
-		float hz = ev.hz * powf(2.f, (sweep * u) / 12.f);
+		float hz = ev.hz;
+		if (sweep != 0.f) {
+			float u = (float)i / (float)nDur;
+			if (u > 1.f) u = 1.f;
+			hz *= powf(2.f, (sweep * (sweep < 0.f ? u * (2.f - u) : u)) / 12.f);
+		}
 		float o0 = FmSin(ph[0] + fb * v.fb) * v.lvl[0];
 		float o1, o2, o3, a;
 		if (v.alg == 2) {
@@ -387,19 +421,20 @@ static void FmAdd(float* L, float* R, int total, const MmlEv& ev, unsigned& nois
 			o3 = FmSin(ph[3]) * v.lvl[3];
 			a = (o0 + o1 + o2 + o3) * 0.30f;
 		} else if (v.alg == 3) {
-			o1 = FmSin(ph[1] + o0) * v.lvl[1];
-			o2 = FmSin(ph[2] + o0) * v.lvl[2];
-			o3 = FmSin(ph[3] + o0 * 0.65f) * v.lvl[3];
+			float om = o0 * m;
+			o1 = FmSin(ph[1] + om) * v.lvl[1];
+			o2 = FmSin(ph[2] + om) * v.lvl[2];
+			o3 = FmSin(ph[3] + om * 0.65f) * v.lvl[3];
 			a = (o1 + o2 + o3) * 0.42f;
 		} else if (v.alg == 1) {
-			o1 = FmSin(ph[1] + o0) * v.lvl[1];
+			o1 = FmSin(ph[1] + o0 * m) * v.lvl[1];
 			o2 = FmSin(ph[2]) * v.lvl[2];
-			o3 = FmSin(ph[3] + o2) * v.lvl[3];
+			o3 = FmSin(ph[3] + o2 * m) * v.lvl[3];
 			a = (o1 + o3) * 0.50f;
 		} else {
-			o1 = FmSin(ph[1] + o0) * v.lvl[1];
-			o2 = FmSin(ph[2] + o1) * v.lvl[2];
-			o3 = FmSin(ph[3] + o2) * v.lvl[3];
+			o1 = FmSin(ph[1] + o0 * m) * v.lvl[1];
+			o2 = FmSin(ph[2] + o1 * m) * v.lvl[2];
+			o3 = FmSin(ph[3] + o2 * m) * v.lvl[3];
 			a = o3 * 0.92f;
 		}
 		ph[0] += hz * v.mul[0] / (float)TAC_RATE;
@@ -410,8 +445,8 @@ static void FmAdd(float* L, float* R, int total, const MmlEv& ev, unsigned& nois
 		if (v.nz > 0.001f) {
 			int per = v.nper > 0 ? v.nper : 4;
 			FmNoise(noise, nclk, per);
-			float nenv = expf(-t / 0.018f);
-			a += ((noise & 1u) ? 0.36f : -0.36f) * v.nz * nenv;
+			a += ((noise & 1u) ? 0.36f : -0.36f) * v.nz * nx;
+			nx *= nk;
 		}
 		float s = a * env;
 		L[ev.t0 + i] += s * gL;
@@ -537,25 +572,26 @@ static int MmlTrack(const char* s, int track, MmlEv* ev, int nEv, int cap)
 }
 static short* MmlMix(const char* src, int& frames, float gain)
 {
-	MmlEv ev[48];
+	MmlEv ev[64];
 	int nEv = 0;
 	int track = 0;
 	const char* p = src ? src : "";
 	while (*p && track < 3) {
 		const char* bar = strchr(p, '|');
 		int len = bar ? (int)(bar - p) : (int)strlen(p);
-		char buf[256];
-		if (len > 254) len = 254;
+		char buf[320];
+		if (len > 318) len = 318;
 		memcpy(buf, p, (size_t)len);
 		buf[len] = 0;
-		nEv = MmlTrack(buf, track, ev, nEv, 48);
+		nEv = MmlTrack(buf, track, ev, nEv, 64);
 		if (!bar) break;
 		p = bar + 1;
 		track++;
 	}
 	int total = (int)(0.04f * TAC_RATE);
 	for (int i = 0; i < nEv; i++) {
-		int end = ev[i].t0 + ev[i].n + (int)(0.08f * TAC_RATE);
+		float rel = kFmVoice[ev[i].voice].rel;
+		int end = ev[i].t0 + ev[i].n + (int)((rel > 0.04f ? rel : 0.04f) * TAC_RATE) + 64;
 		if (end > total) total = end;
 	}
 	if (total > MIX_MAX) total = MIX_MAX;
@@ -576,11 +612,19 @@ static short* MmlMix(const char* src, int& frames, float gain)
 		if (b > pk) pk = b;
 	}
 	if (gain < 0.04f) gain = 0.04f;
-	if (gain > 0.85f) gain = 0.85f;
+	if (gain > 1.60f) gain = 1.60f;
 	float sc = (gain * 17000.f) / pk;
+	// 打撃は尖りが強く、頭を揃えると中身が痩せる。12000 を超える分だけ柔らかく潰して 15500 に収める。
+	const float knee = 12000.f, top = 15500.f;
 	for (int i = 0; i < total; i++) {
 		float l = L[i] * sc;
 		float r = R[i] * sc;
+		if (gain > 0.70f) {
+			if (l > knee) l = knee + (top - knee) * tanhf((l - knee) / (top - knee));
+			else if (l < -knee) l = -knee - (top - knee) * tanhf((-l - knee) / (top - knee));
+			if (r > knee) r = knee + (top - knee) * tanhf((r - knee) / (top - knee));
+			else if (r < -knee) r = -knee - (top - knee) * tanhf((-r - knee) / (top - knee));
+		}
 		if (l > 32767.f) l = 32767.f;
 		if (l < -32768.f) l = -32768.f;
 		if (r > 32767.f) r = 32767.f;
@@ -592,96 +636,102 @@ static short* MmlMix(const char* src, int& frames, float gain)
 	return dst;
 }
 static const char* const kMml[TS_N] = {
-	// UI
-	"t240 l64 o6 v9 @8 c",
-	"t200 l32 o5 v11 @8 g >c16 | t200 l32 o6 v6 @26 r32 c16",
-	"t200 l32 o5 v10 @8 e <a16",
-	"t180 l32 o3 v12 @6 c+ r64 c+16 | t180 l32 o3 v9 @23 c r64 c16",
-	"t240 l32 o4 v8 @27 s14 c16 | t220 l32 o5 v10 @9 r64 c g >c",
+	// UI。カーソルは小さなクリック、決定は上がる二音、取消は下がる二音。どれも戦闘の音より奥に置く。
+	"t240 l64 o5 v10 @35 a | t240 l64 o6 v4 @34 e",
+	"t220 l32 o5 v10 @8 g >d16 | t220 l32 o6 v5 @32 r32 d16",
+	"t220 l32 o5 v10 @8 d <a16 | t220 l32 o4 v5 @34 r32 a16",
+	"t200 l32 o3 v10 @23 e- r64 e-16 | t200 l32 o2 v8 @6 a r64 a16",
+	"t240 l32 o5 v6 @27 s12 c16 | t220 l32 o5 v9 @9 r64 c g >c",
 	// 手番。味方は上がる四度、敵は同じ形を半音でずらして沈める。
-	"t150 l16 o4 v12 @4 g8 >c4 | t150 l16 o4 v9 @4 e8 g4 | t150 l16 o3 v10 @24 c8 c4",
-	"t150 l16 o3 v12 @4 d-8 c4 | t150 l16 o3 v9 @4 g8 g-4 | t150 l16 o2 v12 @24 g8 g4",
-	"t240 l64 o3 v9 @24 s-6 g | t240 l64 o4 v5 @7 c",
+	"t160 l16 o4 v12 @4 g8 >c4 | t160 l16 o4 v9 @4 e8 g4 | t160 l16 o3 v10 @31 c8 c4",
+	"t150 l16 o3 v12 @4 d-8 c4 | t150 l16 o3 v9 @33 g8 g-4 | t150 l16 o2 v12 @31 g8 g4",
+	"t240 l64 o3 v10 @31 s-4 a | t240 l64 o5 v4 @7 c",
 	"t180 l16 o4 v11 @27 s14 a | t180 l32 o3 v6 @27 r64 s-6 a",
-	"t220 l32 o3 v12 @20 b- | t220 l16 o5 v8 @27 r64 s-10 c",
+	"t220 l32 o3 v12 @20 b- | t200 l16 o5 v7 @27 r64 s-10 c",
 	"t200 l32 o5 v9 @26 c e g >c | t140 l8 o4 v7 @25 s12 c4",
-	"t220 l32 o3 v13 @19 c | t240 l64 o3 v10 @24 g | t240 l64 o5 v7 @7 c",
-	"t180 l32 o3 v14 @24 c16 | t200 l32 o3 v12 @17 g @5 >>c16 | t240 l64 o5 v10 @7 c r64 c32",
+	"t200 l32 o3 v14 @19 c16 | t200 l32 o2 v12 @24 g16 | t240 l64 o5 v8 @7 c32",
+	"t160 l16 o3 v14 @24 c8 | t200 l32 o3 v12 @17 g @5 >>c8 | t240 l64 o5 v10 @7 c r64 c16",
 	"t200 l16 o5 v9 @27 s-14 c | t200 l32 o4 v5 @27 r32 s-8 c",
-	"t180 l32 o5 v10 @9 c e g >c e | t140 l8 o5 v6 @25 [ce]4 | t200 l32 o6 v6 @26 r16 g >c",
-	"t200 l32 o4 v10 @4 s2 g >c e g8 | t200 l32 o6 v7 @26 r16 c e g",
+	"t180 l32 o5 v10 @9 c e g >c e | t140 l8 o5 v6 @25 [ce]4 | t200 l32 o5 v6 @32 r16 g >c",
+	"t200 l32 o4 v10 @4 g >c e g8 | t200 l32 o6 v6 @26 r16 c e g | t160 l16 o4 v5 @33 [ce]4",
 	// 撃破。打撃のあとに破裂ノイズが沈み、霧散する光が上へ抜ける。
-	"t160 l16 o3 v14 @24 c8 | t160 l16 o4 v11 @28 s-12 c8 | t220 l32 o5 v8 r16 @26 g >c e g >c",
-	"t150 l16 o4 v12 @4 g g g >c4. <a-8 b-8 >c2 | t150 l16 o4 v9 @4 e e e g4. e-8 f8 g2 | t150 l16 o3 v10 @4 c c c c4. <a-8 b-8 >c2",
-	"t90 l8 o4 v11 @2 e d c <b4 a2 | t90 o3 v8 @25 [ace]2 [<b>eg+]4. [ace]2",
-	"t220 l32 o5 v11 @26 c e g >c e g >c8 | t220 l32 o4 v8 @4 r16 c8 e8 g8 | t220 l32 o6 v7 @0 r8 r16 c e g",
+	"t160 l16 o3 v14 @24 c8 | t160 l16 o4 v10 @28 s-12 c8 | t220 l32 o5 v7 r16 @26 g >c e g >c",
+	// 勝利。勝利の曲がすぐ続くので、短い独自の句で締める。
+	"t150 l16 o4 v12 @4 c8 g8 >c8 e8. d16 e4 | t150 l16 o3 v8 @33 [eg]4. [a>c]8. <[gb]16 [g>ce]4 | t150 l16 o2 v11 @31 c8 c8 c8 r8. g16 >c4",
+	// 敗北。下がる笛に暗い和音を添え、二秒ほどで消える。
+	"t120 l8 o4 v11 @2 e d c <b a4. | t120 l8 o3 v8 @33 [ace]4. [<b>eg+]8 [ace]4. | t120 l8 o2 v9 @31 a4. e8 a4.",
+	"t220 l32 o5 v11 @26 c e g >c e g >c8 | t220 l32 o4 v8 @4 r16 c8 e8 g8 | t220 l32 o5 v7 @32 r8 r16 c e g",
 	// 場面ごとの決定音
-	"t200 l32 o5 v10 @9 g >d16 | t200 l32 o6 v5 @26 r32 d16",
-	"t200 l32 o6 v11 @21 b >e8 | t200 l32 o5 v6 @26 r32 e8",
-	"t220 l32 o5 v11 @8 c g16 | t240 l64 o6 v6 @5 c",
+	"t220 l32 o5 v10 @9 g >d16 | t220 l32 o6 v4 @26 r32 d16",
+	"t220 l32 o6 v11 @21 b >e8 | t220 l32 o5 v5 @32 r32 e8",
+	"t220 l32 o5 v11 @34 c g16 | t240 l64 o6 v5 @5 c",
 	"t200 l32 o5 v10 @1 c e g16 | t200 l32 o4 v6 @25 c8",
-	"t200 l32 o4 v12 @22 g | t240 l64 o5 v8 @5 c r64 g",
+	"t200 l32 o4 v12 @22 g | t240 l64 o5 v7 @5 c r64 g",
 	"t240 l64 o6 v11 @21 e r64 b r32 >e | t240 l64 o6 v7 @21 r32 g+ r64 b",
-	"t220 l32 o4 v10 @16 c e g | t220 l32 o5 v8 @26 r16 c g",
-	"t200 l16 o3 v10 @15 s4 c | t220 l32 o5 v8 @9 r32 c g",
-	"t220 l32 o5 v9 @8 e a",
-	"t160 l16 o3 v10 @22 s4 g | t200 l32 o5 v11 @26 r16 c e g >c8 | t200 l32 o6 v8 @21 r16 r32 e r32 b",
-	"t140 l8 o2 v12 @15 s-3 g | t160 l8 o3 v6 @23 s5 g4 | t200 l32 o3 v10 @24 r8 r16 c",
-	"t220 l32 o3 v13 @19 c | t200 l32 o4 v9 @23 s-7 e16 | t240 l64 o4 v8 @7 c",
+	"t200 l32 o4 v11 @5 c r32 c16 | t220 l32 o5 v7 @32 r16 c g",
+	"t200 l16 o3 v8 @27 s6 c | t220 l32 o5 v9 @9 r32 c g >c",
+	"t240 l64 o5 v9 @8 e a",
+	"t160 l16 o3 v10 @34 s3 g | t200 l32 o5 v11 @26 r16 c e g >c8 | t200 l32 o6 v7 @21 r16 r32 e r32 b",
+	"t140 l8 o2 v11 @31 s-3 g | t160 l8 o3 v5 @27 s5 g4 | t200 l32 o3 v10 @34 r8 r16 c",
+	"t220 l32 o3 v14 @19 c16 | t200 l32 o4 v9 @23 s-7 e16 | t240 l64 o4 v7 @7 c",
 	// 属性ごとの詠唱
-	"t160 l8 o3 v10 @10 s9 c4 | t160 l8 o4 v8 @28 s12 c4 | t220 l32 o5 v6 @26 r8 c g",
-	"t240 l32 o6 v9 @11 c g e b >c | t160 l8 o5 v6 @26 r16 e4 | t200 l8 o6 v4 @27 s-6 c4",
-	"t240 l64 o4 v10 @12 c r64 c r32 c r64 c r32 c | t140 l8 o3 v8 @23 s24 c4 | t200 l16 o5 v6 @28 s12 c4",
-	"t150 l8 o5 v8 @25 [ceg]4 | t220 l32 o6 v9 @26 g >c e g >c | t150 l8 o4 v6 @2 c4",
-	"t130 l8 o2 v12 @14 s-5 c4 | t130 l8 o3 v8 @25 [cg-]4 | t180 l16 o5 v5 @23 s-7 e-8",
-	"t180 l16 o4 v9 @27 s14 c8 s-10 g8 | t220 l32 o6 v6 @2 s5 c e g",
-	"t140 l8 o2 v12 @15 s-3 c4 | t160 l8 o3 v8 @28 s-5 c4 | t200 l16 o3 v8 @24 r8 c",
+	"t160 l8 o3 v11 @10 s9 c4 | t160 l8 o4 v7 @28 s12 c4 | t220 l32 o4 v6 @7 r16 c r32 c r16 c",
+	"t240 l32 o5 v9 @11 c g e b >c | t160 l8 o5 v6 @32 r16 e4 | t200 l8 o6 v4 @27 s-6 c4",
+	"t240 l64 o4 v10 @12 c r64 c r32 c r64 c r32 c | t140 l8 o3 v7 @23 s24 c4 | t200 l16 o5 v6 @28 s12 c4",
+	"t150 l8 o4 v9 @30 [ceg]4 | t220 l32 o6 v8 @26 g >c e g >c | t150 l8 o5 v5 @32 r8 c4",
+	"t130 l8 o2 v12 @14 s-5 c4 | t130 l8 o3 v8 @33 [cg-]4 | t180 l16 o5 v5 @23 s-7 e-8",
+	"t180 l16 o4 v10 @27 s14 c8 s-10 g8 | t220 l32 o6 v5 @2 s5 c e g",
+	"t140 l8 o2 v12 @15 s-3 c4 | t160 l8 o3 v7 @28 s-5 c4 | t200 l16 o2 v9 @31 r8 c",
 	"t220 l32 o4 v10 @16 c e- c f c g- | t160 l16 o3 v6 @25 s-3 c4",
-	"t180 l32 o5 v9 @9 c e g >c | t130 l8 o4 v6 @25 [eg]4 | t200 l32 o6 v5 @26 r16 c e",
-	"t200 l32 o4 v10 @4 s3 c e g >c | t160 l16 o5 v6 @26 r16 c8 | t200 l16 o4 v6 @27 s12 c8",
-	"t110 l8 o4 v9 @25 s5 [ce]4 [gb]4 | t200 l32 o5 v8 @26 c e g >c e g >c | t110 l8 o3 v6 @2 c2",
+	"t180 l32 o5 v9 @9 c e g >c | t130 l8 o4 v6 @30 [eg]4 | t200 l32 o5 v5 @32 r16 c e",
+	"t200 l32 o4 v10 @4 c e g >c | t160 l16 o5 v6 @26 r16 c8 | t200 l16 o4 v5 @27 s12 c8",
+	"t110 l8 o4 v9 @30 [ce]4 [gb]4 | t200 l32 o5 v8 @26 c e g >c e g >c | t110 l8 o3 v6 @33 c2",
 	// 型ごとの振り
-	"t160 l16 o3 v12 @27 s-10 g | t180 l32 o4 v7 @27 r64 s8 c",
-	"t240 l32 o5 v10 @27 s18 c | t240 l64 o6 v6 @5 r64 c",
+	"t160 l16 o3 v12 @27 s-10 g | t180 l32 o3 v6 @27 r64 s8 c",
+	"t240 l32 o5 v10 @27 s18 c | t240 l64 o6 v5 @5 r64 c",
 	"t240 l32 o4 v10 @27 s10 g",
-	"t200 l32 o4 v10 @27 s12 c s-12 g s12 c s-12 g",
-	"t200 l32 o2 v10 @14 s-4 b- | t240 l64 o4 v11 @22 r32 c r64 g",
-	"t200 l32 o5 v10 @5 c g >c | t180 l16 o4 v9 @27 s16 c8 | t200 l32 o4 v8 @4 r32 g >c",
-	// 属性・型ごとの命中
-	"t180 l16 o3 v13 @24 c | t180 l16 o4 v11 @28 s-12 g8 | t200 l32 o4 v9 @10 s-5 c16",
-	"t240 l64 o6 v11 @11 c g e >c <a | t220 l32 o5 v9 @7 c | t200 l32 o3 v8 @24 c",
-	"t240 l64 o5 v12 @12 c c | t180 l16 o3 v12 @24 s-18 c8 | t240 l32 o6 v8 @28 s-20 c16",
+	"t200 l32 o4 v8 @27 s12 c s-12 g s12 c s-12 g",
+	"t200 l32 o2 v10 @14 s-4 b- | t240 l64 o4 v11 @34 r32 c r64 g",
+	"t200 l32 o5 v9 @5 c g >c | t180 l16 o4 v9 @27 s16 c8 | t200 l32 o4 v8 @4 r32 g >c",
+	// 属性・型ごとの命中。低い衝撃を芯にして、属性の色を上に重ねる。
+	"t180 l16 o3 v13 @24 c | t180 l16 o4 v10 @28 s-12 g8 | t200 l32 o4 v9 @10 s-5 c16",
+	"t240 l64 o5 v11 @11 c g e >c <a | t220 l32 o5 v8 @7 c | t200 l32 o3 v9 @24 c",
+	"t240 l64 o5 v12 @12 c c | t180 l16 o3 v12 @24 s-18 c8 | t240 l32 o6 v7 @28 s-20 c16",
 	"t220 l32 o6 v10 @26 c e g >c | t200 l32 o3 v10 @24 c | t200 l32 o5 v7 @13 [ceg]16",
-	"t160 l16 o2 v13 @14 c8 | t160 l16 o3 v9 @25 s-7 [cg-]8 | t220 l32 o3 v9 @24 c",
+	"t160 l16 o2 v13 @14 c8 | t160 l16 o3 v8 @33 s-7 [cg-]8 | t220 l32 o3 v9 @24 c",
 	"t220 l32 o5 v11 @27 s-14 c c | t220 l32 o4 v9 @17 r32 g | t240 l64 o5 v6 @7 r32 c",
-	"t160 l16 o3 v13 @15 c | t180 l16 o3 v10 @28 s-8 c8 | t200 l32 o3 v10 @24 r32 c",
-	"t220 l32 o3 v11 @19 c | t220 l32 o4 v9 @16 e- g- e- c",
-	"t240 l64 o4 v12 @18 g | t220 l32 o3 v10 @19 c | t240 l64 o5 v6 @22 c",
-	"t240 l64 o5 v12 @18 c | t220 l32 o3 v9 @17 g | t240 l64 o4 v7 @7 r64 c",
-	"t220 l32 o3 v13 @19 c | t240 l64 o3 v10 @24 c | t240 l64 o4 v7 @7 c",
-	"t180 l16 o3 v14 @24 c8 | t200 l32 o5 v11 @5 c g >c | t200 l32 o4 v10 @17 g r32 @28 s-12 c8",
-	"t140 l8 o3 v14 @24 c4 r16 c4 | t160 l16 o4 v12 @4 c g >c4 | t200 l32 o4 v9 @28 s-14 c8 r16 @26 >>c e g >c",
+	"t160 l16 o3 v13 @15 c | t180 l16 o3 v9 @28 s-8 c8 | t200 l32 o2 v10 @31 r32 c",
+	"t220 l32 o3 v12 @19 c | t220 l32 o4 v9 @16 e- g- e- c | t220 l32 o2 v9 @24 c",
+	"t240 l64 o4 v12 @18 g | t220 l32 o3 v12 @19 c16 | t220 l32 o2 v10 @24 a16",
+	"t240 l64 o5 v12 @18 c | t220 l32 o3 v10 @17 g | t220 l32 o3 v10 @24 c",
+	"t220 l32 o3 v13 @19 c | t240 l64 o2 v11 @24 g | t240 l64 o4 v7 @7 c",
+	"t180 l16 o3 v14 @24 c8 | t200 l32 o5 v10 @5 c g >c | t200 l32 o4 v10 @17 g r32 @28 s-12 c8",
+	"t140 l8 o3 v14 @24 c4 r16 c4 | t160 l16 o4 v11 @4 c g >c4 | t200 l32 o4 v9 @28 s-14 c8 r16 @26 >>c e g >c",
 	"t220 l32 o5 v9 @11 s-12 g e c | t200 l16 o5 v6 @27 s-8 c",
-	"t220 l16 o6 v9 @27 s-14 c | t240 l64 o4 v6 @18 r16 c",
+	"t220 l16 o6 v9 @27 s-14 c | t240 l64 o4 v6 @34 r16 c",
 	// 状態
-	"t140 l8 o5 v10 @26 [ceg]4 | t140 l8 o4 v8 @25 [cg]2 | t220 l32 o6 v8 @9 c e g >c e",
+	"t140 l8 o5 v10 @26 [ceg]4 | t140 l8 o4 v8 @30 [cg]2 | t220 l32 o5 v8 @9 c e g >c e",
 	"t220 l32 o6 v10 @26 g e c e g >c | t160 l16 o5 v6 @25 c8 | t200 l16 o5 v5 @27 s12 c8",
 	"t200 l32 o3 v11 @16 c r32 c- | t180 l16 o4 v7 @23 s-4 e-8",
 	"t110 l16 o5 v9 @9 g e c | t110 l8 o4 v6 @25 s-3 e4",
-	"t200 l32 o3 v11 @19 c | t240 l32 o6 v9 @0 c g c g c g",
+	"t200 l32 o3 v11 @19 c | t240 l32 o5 v8 @32 c g c g c g",
 	"t200 l32 o4 v13 @22 g | t220 l32 o6 v9 @5 c | t240 l64 o5 v6 @7 c",
 	"t240 l64 o4 v10 @23 s24 c c c c | t200 l16 o5 v7 @26 r16 c8 | t200 l8 o5 v6 @27 s14 c",
 	"t180 l32 o5 v10 @26 g >c e g8 | t180 l16 o4 v7 @25 r16 [ce]4",
 	"t130 l16 o4 v12 @4 c g >c4 e4 | t130 l16 o3 v10 @4 g >e g4 >c4 | t200 l32 o6 v8 @26 r8 c e g >c",
 	"t200 l32 o5 v11 @26 a >c+ e a8 | t200 l32 o6 v7 @21 r32 e",
-	"t120 l8 o3 v12 @4 c4 g2 | t120 l8 o3 v11 @24 c r c c | t120 l8 o3 v9 @4 g4 >d2",
+	"t120 l8 o3 v12 @4 c4 g2 | t120 l8 o3 v11 @31 c r c c | t120 l8 o3 v9 @4 g4 >d2",
 	"t160 l16 o3 v13 @24 c r32 c | t160 l16 o4 v11 @4 r8 [c+g]8 | t200 l32 o5 v7 @26 r8 c+ g",
 	"t180 l32 o5 v9 @23 s-6 c s6 c s-6 c s6 c | t180 l16 o4 v6 @9 f+ c f+",
-	"t160 l16 o5 v10 @6 s-12 c8 | t160 l16 o4 v6 @25 s-12 g8",
+	"t160 l16 o5 v10 @1 s-12 c8 | t160 l16 o4 v6 @25 s-12 g8",
 	"t200 l32 o4 v11 @22 s-5 c | t200 l32 o5 v8 @5 r32 g e c",
-	"t160 l16 o3 v12 @19 c | t120 l8 o4 v9 @2 s-12 e4 | t120 l8 o3 v7 @25 [ca-]4",
-	// 翼で移動。一度だけ。低い音が持ち上がり、あとから息が落ちて残る。
-	"t56 l2 o3 v8 @25 s3 c | t60 l2 o4 v7 @25 s3 [eg] | t76 l4 o5 v5 @2 r4 s-4 g2",
+	"t160 l16 o3 v12 @19 c | t120 l8 o4 v9 @2 s-12 e4 | t120 l8 o3 v7 @33 [ca-]4",
+	// 翼で移動。一度だけ。羽ばたき二回の風と鈍い打ちに、浮く和音が短く残る。
+	"t150 l8 o3 v10 @27 s-4 c4 c4 | t150 l8 o2 v8 @31 s-3 c4 c4 | t100 l4 o4 v5 @25 r8 s4 [eg]4",
+	// 項目に乗ったとき。拠点は木のクリック、店は硬貨、戦闘は乾いた低い打鍵。どれも決定音より短い。
+	"t240 l64 o6 v8 @35 e | t240 l64 o5 v4 @9 b",
+	"t260 l64 o6 v9 @21 b >e | t260 l64 o7 v3 @32 r64 e",
+	"t200 l64 o4 v9 @34 c | t200 l64 o5 v4 @5 g",
 };
 static void TacSynthAll()
 {
@@ -1321,6 +1371,11 @@ void TacSfx(int id)
 		if (s_cursorAt && (DWORD)(n - s_cursorAt) < 40) return;
 		s_cursorAt = n;
 	}
+	if (id == TS_HOVER_BASE || id == TS_HOVER_SHOP || id == TS_HOVER_GAME) {
+		DWORD n = GetTickCount();
+		if (s_hoverAt && (DWORD)(n - s_hoverAt) < 48) return;
+		s_hoverAt = n;
+	}
 	TacSfxPlay(s_clip[id].play, s_clip[id].playN);
 }
 
@@ -1331,7 +1386,8 @@ void TacSfxCast(int element)
 
 void TacSfxMotion(int skill, int kind, int element, int style)
 {
-	if (otac::IsCraftId(skill)) {
+	// 奥義でも魔法・回復・強化は種類と属性の音で鳴らす。剣の閃きは物理の奥義だけ。
+	if (otac::IsCraftId(skill) && kind == otac::SK_PHYS) {
 		TacSfx(otac::IsCraftSuper(skill) ? TS_CRAFT_ULT : TS_CRAFT_SW);
 		return;
 	}
@@ -1354,7 +1410,7 @@ void TacSfxMotion(int skill, int kind, int element, int style)
 
 void TacSfxHit(int skill, int kind, int element, int style, int ally)
 {
-	if (otac::IsCraftId(skill)) {
+	if (otac::IsCraftId(skill) && (kind == otac::SK_PHYS || (kind == otac::SK_MAGIC && otac::IsCraftSuper(skill)))) {
 		TacSfx(otac::IsCraftSuper(skill) ? TS_CRAFT_ULT : TS_CRAFT_HIT);
 		return;
 	}

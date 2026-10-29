@@ -971,13 +971,23 @@ namespace PianoRoll108
             // 基音が測れているときだけ部分音を消す。無い基音の逆算で歌を消さない。
             if (eat) consumeSeries(f0);
         };
+        // C6(key 84) 以上は倍音がナイキストに届かない。3本必須のままだと高音は基音になれず、
+        // 2 分の 1・3 分の 1 の高さへ落ちるか消える。
+        auto hitsNeeded = [](int key) -> int {
+            if (key >= O5_HI) return 1;
+            if (key >= MID_END) return 2;
+            return 3;
+        };
         if (prevActive && p.prevF0Hz) {
             for (int key = MUSIC_LOW_FLOOR; key < COUNT; ++key) {
                 if (!prevActive[key] || p.prevF0Hz[key] <= 1.0f) continue;
                 float e = 0.0f, a1 = 0.0f;
                 int h = 0;
                 measureSeries(p.prevF0Hz[key], e, h, a1);
-                if (h < 3 || e < totalE * 0.08f) continue;
+                if (key >= O5_HI) {
+                    if (a1 <= 0.0f) continue;
+                }
+                else if (h < hitsNeeded(key) || e < totalE * 0.08f) continue;
                 if (a1 <= 0.0f && key >= BASS_END) continue;
                 addF0(p.prevF0Hz[key], a1 > 0.0f);
             }
@@ -991,11 +1001,11 @@ namespace PianoRoll108
                 for (int div = 1; div <= 3; ++div) {
                     const float f = phz[i] / (float)div;
                     const int k = KeyFromHzTune(f, p.tuneSemis);
-                    if (k < MUSIC_LOW_FLOOR || k >= 84 || seriesOn[k]) continue;
+                    if (k < MUSIC_LOW_FLOOR || k >= COUNT || seriesOn[k]) continue;
                     float e = 0.0f, a1 = 0.0f;
                     int h = 0;
                     measureSeries(f, e, h, a1);
-                    if (h < 3) continue;
+                    if (h < hitsNeeded(k)) continue;
                     if (a1 <= 0.0f) {
                         if (k >= BASS_END) continue;
                         const int j2 = FindPeakInHzWindow(phz, workAmp, np, hzOrd, f * 2.0f, 42.0f);
@@ -1005,10 +1015,15 @@ namespace PianoRoll108
                     if (e > bestE) { bestE = e; bestF = f; bestH = h; bestA1 = a1; bestEat = a1 > 0.0f; }
                 }
             }
-            if (bestH < 3 || bestF <= 0.0f) break;
+            if (bestH < 1 || bestF <= 0.0f) break;
+            const int bestKey = KeyFromHzTune(bestF, p.tuneSemis);
             // 系列の合計が全体の一部でも、基音自体がフレームの大きい山ならノート。
             // 合計との比だけで切ると、一番大きい歌の山がベースの裾に負ける。
-            if (bestE < totalE * 0.12f && bestA1 < seriesMax * 0.35f) break;
+            // 高音は部分音が少ないので、山そのものが残っていればノートにする。
+            if (bestKey >= O5_HI) {
+                if (bestA1 < seriesMax * 0.12f) break;
+            }
+            else if (bestE < totalE * 0.12f && bestA1 < seriesMax * 0.35f) break;
             addF0(bestF, bestEat);
         }
         for (int i = 0; i + 1 < COUNT; ++i) {

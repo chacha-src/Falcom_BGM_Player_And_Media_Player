@@ -696,6 +696,10 @@ public:
 	/* 21 = Sega Bank Panic / Combat Hawk。音源 CPU 無し。メイン Z80 @ 15.46848/6 + SN76489A×3 同クロック。
 	   ROM 0000-DFFF、RAM E000-FFFF。I/O 00/01/02 = SN、07 bit4 = vblank NMI。曲は attract の LD A,n / CALL 音源入口。 */
 	int BankpSn() const { return (board_ == CEMU_AC_BOARD_TAITO_SJ && vsIoKind_ == 21) ? 1 : 0; }
+	/* 27 = Konami divebomb。前景 Z80 24/4 + SN76489×6 @24/8。ROM 0000-7FFF、RAM E000-FFFF。
+	   I/O 00-05 が SN。VBLANK NMI @0066 が E060 の曲を載せる。E000!=0 の間は音楽を飛ばす。 */
+	int DivebombSn() const { return (board_ == CEMU_AC_BOARD_TAITO_SJ && vsIoKind_ == 27) ? 1 : 0; }
+	CChip* DiveSn(int i) const;
 	/* 22 = Konami gberet。音源 CPU 無し。メイン Z80 18.432/6 + SN76489A /12。
 	   ROM 0000-BFFF、RAM C000-DFFF。F200=SN ラッチ、F400 書で SN へ。曲は D81B、D81A=1。NMI が CALL 7801。 */
 	int GberetSn() const { return (board_ == CEMU_AC_BOARD_TAITO_SJ && vsIoKind_ == 22) ? 1 : 0; }

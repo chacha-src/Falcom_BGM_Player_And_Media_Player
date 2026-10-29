@@ -58,6 +58,8 @@ public:
 	void AddFile(const char* name, const unsigned char* data, unsigned size, int keepDir = 0);
 	void SetHandle(uint16_t handle, const char* name);
 	void SetHandleText(uint16_t handle, const char* text);
+	/* 0 以外なら、ハンドル 0 への大きな AH=3F はパック先頭ではなくその曲だけ返す。 */
+	void SetPilSlice(uint16_t index) { pilSlice_ = index; }
 
 	int ResolveProgram(const char* name, const unsigned char** outData, unsigned* outSize, int* outIsExe) const;
 	int LoadCom(uint8_t* mem, const unsigned char* image, unsigned imageSize, const char* tail);
@@ -148,6 +150,7 @@ private:
 	int fileCount_;
 	CEmuDos98Handle handles_[DOS98_HANDLE_MAX];
 	uint16_t nextHandle_;
+	uint16_t pilSlice_;
 	uint16_t pspSeg_;
 	uint16_t dtaSeg_;
 	uint16_t dtaOff_;

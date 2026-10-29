@@ -332,8 +332,23 @@ CDriverAc::~CDriverAc()
 	Close();
 }
 
+/* 譜面が数秒で終わる System 21。秒数だけ同じコマンドを入れ直す。0 は無効。 */
+static int sAcReplaySec = 0;
+static int sAcContcirc = 0;
+static int sAcNightStart = 0;
+static int sAcStratgyx = 0;
+static int sDiveArm = 0;
+/* contra: 短いジングルだけ同じラッチを戻す。長い BGM は切らない。0 は無効。 */
+static int sAcContraRep = 0;
+
 int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned titleCode)
 {
+	sAcReplaySec = 0;
+	sAcContcirc = 0;
+	sAcNightStart = 0;
+	sAcStratgyx = 0;
+	sDiveArm = 0;
+	sAcContraRep = 0;
 	if (!hw || !ge || !fs) return 0;
 	hw_ = (CHardAc*)hw;
 	hostRate_ = hw_->SampleRate();
@@ -711,6 +726,16 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 	if (hw_->TechnosDdM6809() && ge && ge->archive
 		&& _stricmp(ge->archive, "ddragon") == 0 && songCmd_ == 0x0Cu)
 		songCmd_ = 0x0Du;
+	/* contra: Title は約 10 秒、Round Clear 1 / Game Over は約 4 秒、Round Clear 2 は約 8 秒で落ちる。 */
+	if (ge && ge->archive[0] && _stricmp(ge->archive, "contra") == 0) {
+		const uint8_t c = songCmd_;
+		if (c == 0x4du)
+			sAcContraRep = 8;
+		else if (c == 0x4bu || c == 0x4au)
+			sAcContraRep = 3;
+		else if (c == 0x4cu)
+			sAcContraRep = 6;
+	}
 	/* matmania: pick 2 BGM #02 は STOPS。#0A（#03 と別ループ）。 */
 	if (hw_->board_ == CEMU_AC_BOARD_DECO && hw_->DecoCpuKind() == 9
 		&& ge && ge->archive && _stricmp(ge->archive, "matmania") == 0
@@ -954,10 +979,6 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 			songCmd_ = 0x07u; /* Coin → Title vs Name Set 0x08（割当） */
 		else if (!_stricmp(ar, "pwheelsj") && c == 0x40u)
 			songCmd_ = 0x41u; /* Credit STOPS → Title vs Race Select 0x42（割当） */
-		else if (!_stricmp(ar, "nightstr") && c == 0x17u)
-			songCmd_ = 0x3fu; /* Start STOPS → Urban Trail vs Intro ピン */
-		else if (!_stricmp(ar, "nightstr") && c == 0x5eu)
-			songCmd_ = 0x3eu; /* Introduction 無音 → Trance Parlent */
 		else if (!_stricmp(ar, "gigandes")) {
 			/* 015D は cmd>$1D を捨てる。Credit/Start は短い。Stage 1 vs Stage 4（バンク 1 vs 2）。 */
 			if (c == 0x01u || c == 0x02u)
@@ -1481,6 +1502,19 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 			songCmdWord_ = 0x81u;
 		}
 	}
+	/* spidman: 16 秒続くのは 0x8E / 0xB8 / 0x8F。他は無音か数秒で落ちる。 */
+	if (hw_->board_ == CEMU_AC_BOARD_SYS32 && ge && ge->archive
+		&& _stricmp(ge->archive, "spidman") == 0) {
+		static const uint8_t kSlot[] = { 0x8Eu, 0xB8u, 0x8Fu };
+		int tidx = 0;
+		for (int ti = 0; ti < ge->titleCount; ti++) {
+			if (ge->title[ti].code == titleCode) { tidx = ti; break; }
+		}
+		const uint8_t to = kSlot[(unsigned)tidx % 3u];
+		songCmd_ = to;
+		songCmdWord_ = to;
+		pinned_ = 1;
+	}
 	/* Sys2: 先頭タイトルはしばしば未使用 16bit デモ（assault 0x213） */
 	if (hw_->board_ == CEMU_AC_BOARD_NAMCO_SYS2 && ge && ge->titleCount > 0) {
 		int unused = 0;
@@ -1513,6 +1547,38 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 		if (songCmd_ < 0xa3 || songCmd_ > 0xb9)
 			songCmd_ = 0xad;
 	}
+	/* nightstr: Credit と二つのボイスは無音。Start は約 4 秒。無音は別の持続曲へ。 */
+	if (ge->archive[0] && _stricmp(ge->archive, "nightstr") == 0) {
+		if (songCmd_ == 0x3au) {
+			songCmd_ = 0x3fu;
+			songCmdWord_ = 0x3fu;
+			pinned_ = 1;
+		} else if (songCmd_ == 0x2du) {
+			songCmd_ = 0x40u;
+			songCmdWord_ = 0x40u;
+			pinned_ = 1;
+		} else if (songCmd_ == 0x32u) {
+			songCmd_ = 0x44u;
+			songCmdWord_ = 0x44u;
+			pinned_ = 1;
+		} else if (songCmd_ == 0x17u)
+			sAcNightStart = 1;
+	}
+	/* stratgyx: 約 2 秒続くのは 0x20 / 0x23 / 0x26 / 0x29。残りは無音なのでここへ回す。 */
+	if (ge->archive[0] && _stricmp(ge->archive, "stratgyx") == 0) {
+		static const uint8_t kSlot[] = { 0x20u, 0x23u, 0x26u, 0x29u };
+		int tidx = 0;
+		for (int ti = 0; ti < ge->titleCount; ti++) {
+			if (ge->title[ti].code == titleCode) { tidx = ti; break; }
+		}
+		const uint8_t to = kSlot[(unsigned)tidx % 4u];
+		songCmd_ = to;
+		songCmdWord_ = to;
+		pinned_ = 1;
+		sAcStratgyx = 1;
+	}
+	if (ge->archive[0] && _stricmp(ge->archive, "divebomb") == 0)
+		sDiveArm = 1;
 	if (!hw_->LoadRoms(fs, ge, titleCode)) {
 		/* ROM／ホスト CPU が不完全だと SILENT 分類が期待されるソフトオープン基板 — カタログプローブを FAIL_OPEN にしない */
 		const int soft =
@@ -1531,6 +1597,22 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 		triggered_ = 1;
 		nextCmdAt_ = (uint64_t)~0ull;
 		return 1;
+	}
+
+	/* contcirc: 周回 BGM は 8-12 秒で落ち、Credit は約 4 秒。同じコマンドを戻す。 */
+	if (ge->archive[0] && _stricmp(ge->archive, "contcirc") == 0)
+		sAcContcirc = 1;
+	if (ge->archive[0] && _stricmp(ge->archive, "divebomb") == 0) {
+		/* 前景の対戦待ちを飛ばし、NMI は曲プレーヤ 2229 だけ。本体は EI;HALT。 */
+		uint8_t* m = hw_->Mem();
+		if (m && m[0] == 0xf3 && m[0x29] == 0xc3 && m[0x2a] == 0x29 && m[0x2b] == 0x04
+			&& m[0x66] == 0xf5) {
+			m[0x29] = 0xc3; m[0x2a] = 0x00; m[0x2b] = 0x04;
+			m[0x400] = 0xfb; m[0x401] = 0x76; m[0x402] = 0x18; m[0x403] = 0xfc;
+			m[0x404] = 0xcd; m[0x405] = 0x29; m[0x406] = 0x22;
+			m[0x407] = 0xed; m[0x408] = 0x45;
+			m[0x66] = 0xc3; m[0x67] = 0x04; m[0x68] = 0x04;
+		}
 	}
 
 	/* ROM ロード後、m72IoAlt_ が嗅ぎ取られることがある — m99 BGM バイアスを再適用 */
@@ -2008,8 +2090,19 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 					prefer = odd ? 0x14u : 0x04u;
 					preferSet = 1;
 				} else if (_stricmp(ar, "gollygho") == 0) {
-					prefer = (titleCode == 0x55u) ? 0x04u : 0x33u;
+					/* 固有 type-$20 で 16 秒続くのは 0x22 / 0x23 / 0x24。
+					   残りは共有スタブか効果音で、カタログ順にこの 3 曲へ回す。 */
+					static const uint8_t kSlot[] = { 0x22, 0x23, 0x24 };
+					prefer = kSlot[(tidx >= 0 ? (unsigned)tidx : 0u) % 3u];
 					preferSet = 1;
+				} else if (_stricmp(ar, "aircomb") == 0) {
+					/* 16 秒続く type-$20 は 0x05（密）と 0x0B/0x0C/0x0D（疎）。
+					   カタログの 0x70 以降は別型なので、この 4 つへ回す。 */
+					static const uint8_t kSlot[] = { 0x05, 0x0B, 0x0C, 0x0D };
+					const unsigned ix = (tidx > 0) ? (unsigned)(tidx - 1) : 0u;
+					prefer = kSlot[ix % 4u];
+					preferSet = 1;
+					sAcReplaySec = 2;
 				} else if (_stricmp(ar, "ordyne") == 0
 					&& (titleCode == 0x00u || titleCode == 0x0fu
 						|| lo == 0x00u || lo == 0x0fu)) {
@@ -4099,6 +4192,9 @@ int CDriverAc::Open(CHard* hw, const CEmuGameEntry* ge, CEmuZipFs* fs, unsigned 
 		|| hw_->board_ == CEMU_AC_BOARD_ROBOKID
 		|| hw_->board_ == CEMU_AC_BOARD_BATTLANTIS)
 		RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 5);
+	if (hw_->board_ == CEMU_AC_BOARD_KONAMI_TIMEPLT && hw_->VsIoKind() == 2 && songCmd_ == 0x27u)
+		/* Main BGM 1 は音量 0 の導入が約 1.4s。録音開始前に消化する。 */
+		RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ * 2ull);
 	if (hw_->HexionMap() || hw_->NewufoMap()) {
 		for (int i = 0; i < 180; i++) {
 			RunUntil((uint64_t)hw_->Cpu()->time64() + (uint64_t)cpuHz_ / 60);
@@ -6050,6 +6146,35 @@ void CDriverAc::DeliverIrqs()
 			}
 			return;
 		}
+		if (hw_->DivebombSn()) {
+			/* 本体は EI;HALT。DI 中と NMI 処理中（iff1=0）は重ねない。 */
+			if (!cpu->r.iff1)
+				return;
+			const uint64_t now = (uint64_t)cpu->time64();
+			const uint64_t period = (uint64_t)cpuHz_ / 60;
+			if (period > 0 && now >= nextGngIrq_) {
+				if (uint8_t* m = hw_->Mem()) {
+					m[0xe000] = 0;
+					/* COIN / 08 / 09 / 0B は数秒で落ちる。長い BGM は入れ直さない。 */
+					const int shortCue = (songCmd_ == 0x06u || songCmd_ == 0x08u
+						|| songCmd_ == 0x09u || songCmd_ == 0x0bu);
+					static uint8_t prev = 0;
+					static uint64_t nextInstall = 0;
+					if (sDiveArm || songCmd_ != prev) {
+						prev = songCmd_;
+						nextInstall = 0;
+						sDiveArm = 0;
+					}
+					if (songCmd_ && now >= nextInstall) {
+						m[0xe060] = songCmd_;
+						nextInstall = shortCue ? now + (uint64_t)cpuHz_ * 3ull : (uint64_t)~0ull;
+					}
+				}
+				Ay_CpuNmi(cpu);
+				nextGngIrq_ = now + period;
+			}
+			return;
+		}
 		if (hw_->GberetSn()) {
 			/* NMI は LD SP,DF60 のあと。塗り中の SP=FFEC へ push すると 7801 に届かない。 */
 			const uint64_t now = (uint64_t)cpu->time64();
@@ -6245,6 +6370,27 @@ void CDriverAc::DeliverIrqs()
 			if (hw_->IrqPulsePending()) {
 				Ay_CpuIm1Interrupt(cpu);
 				hw_->TakeIrqPulse();
+			}
+			return;
+		}
+		/* gyruss の 0038 は曲番号を入れて 6005 を消す。60Hz だと毎フレーム頭に戻る。
+		   ラッチ書込の 1 回だけ（Time Pilot の周期 IM1 は残す）。
+		   Stage Clear / Perfect は短いファンファーレ。同じコマンドを周期で戻す。 */
+		if (hw_->board_ == CEMU_AC_BOARD_KONAMI_TIMEPLT && hw_->VsIoKind() == 2) {
+			const uint8_t c = hw_->SoundCommand();
+			uint64_t again = 0;
+			if (c == 0x29u) again = (uint64_t)cpuHz_ * 10ull;
+			else if (c == 0x2au) again = (uint64_t)cpuHz_ * 8ull;
+			if (again) {
+				static uint8_t gyCmd = 0;
+				static uint64_t gyRe = 0;
+				if (c != gyCmd || now < gyRe) {
+					gyCmd = c;
+					gyRe = now;
+				} else if (now - gyRe >= again) {
+					hw_->SetSoundCommand(c);
+					gyRe = now;
+				}
 			}
 			return;
 		}
@@ -7294,6 +7440,21 @@ int CDriverAc::DecoRender(int16_t* stereo, int frames)
 			TryInjectCommand();
 			nextCmdAt_ = (uint64_t)~0ull;
 		}
+		if (sAcContraRep && hw_->TechnosDdM6809()) {
+			/* TryInjectCommand は cmdIndex_>=1 で戻る。短い曲だけラッチを入れ直す。 */
+			static uint32_t prev = 0;
+			static uint64_t next = 0;
+			static int armed = 0;
+			const uint64_t now = hw_->CpuCycles();
+			if (!armed || prev != songCmd_) {
+				armed = 1;
+				prev = songCmd_;
+				next = now + (uint64_t)cpuHz_ * (uint64_t)sAcContraRep;
+			} else if (now >= next) {
+				hw_->SetSoundCommand(songCmd_);
+				next = now + (uint64_t)cpuHz_ * (uint64_t)sAcContraRep;
+			}
+		}
 		decoAcc_ += (int64_t)cpuHz_ * (int64_t)n;
 		{
 			const int cycles = (int)(decoAcc_ / (int64_t)hostRate_);
@@ -7433,6 +7594,20 @@ int CDriverAc::NamcoM6809Render(int16_t* stereo, int frames)
 			} else if (cmdIndex_ < 1) {
 				TryInjectCommand();
 				nextCmdAt_ = (uint64_t)~0ull;
+			}
+		}
+		if (sAcReplaySec) {
+			static int armed = 0;
+			static uint8_t prev = 0;
+			static uint64_t next = 0;
+			const uint64_t now = hw_->CpuCycles();
+			if (!armed || songCmd_ != prev) {
+				armed = 1;
+				prev = songCmd_;
+				next = now + (uint64_t)cpuHz_ * (uint64_t)sAcReplaySec;
+			} else if (now >= next) {
+				next = now + (uint64_t)cpuHz_ * (uint64_t)sAcReplaySec;
+				hw_->SetSoundCommand(songCmd_);
 			}
 		}
 		namcoAcc_ += (int64_t)cpuHz_ * (int64_t)n;
@@ -8224,6 +8399,33 @@ int CDriverAc::Render(int16_t* stereo, int frames)
 						/ ((hw_->board_ == CEMU_AC_BOARD_IREM_M72
 							|| hw_->board_ == CEMU_AC_BOARD_SYS16B
 							|| hw_->board_ == CEMU_AC_BOARD_VSYSTEM) ? 2ull : 1ull);
+				} else if (hw_->board_ == CEMU_AC_BOARD_VSYSTEM && hw_->VsIoKind() == 7
+					&& songCmd_ == 0x40u) {
+					/* hatris Title は約 8 秒でチャネルが落ちる。同じスロットの再コマンドは (7A6F) で捨てる。 */
+					if (cmdIndex_ == 1) {
+						cmdIndex_ = 2;
+						nextCmdAt_ = now + (uint64_t)cpuHz_ * 7ull;
+					} else if (cmdIndex_ < 4) {
+						if (uint8_t* m = hw_->Mem())
+							m[0x7a6f] = 0xff;
+						hw_->SetSoundCommand(songCmd_);
+						cmdIndex_++;
+						nextCmdAt_ = now + (uint64_t)cpuHz_ * 7ull;
+					} else {
+						nextCmdAt_ = (uint64_t)~0ull;
+					}
+				} else if (sAcContcirc) {
+					/* 落ちた周回を同じコマンドで戻す。3 秒だと Credit の無音窓が残らない。 */
+					hw_->SetSoundCommand(songCmd_);
+					nextCmdAt_ = now + (uint64_t)cpuHz_ * 3ull;
+				} else if (sAcNightStart) {
+					/* nightstr Start は約 4 秒で落ちる。 */
+					hw_->SetSoundCommand(songCmd_);
+					nextCmdAt_ = now + (uint64_t)cpuHz_ * 3ull;
+				} else if (sAcStratgyx) {
+					/* 2 秒で終わるキューを戻す。 */
+					hw_->SetSoundCommand(songCmd_);
+					nextCmdAt_ = now + (uint64_t)cpuHz_;
 				} else if (hw_->board_ == CEMU_AC_BOARD_FLSTORY) {
 					/* MSM フレーズはプローブ 1 秒内に減衰 — 同じ BGM を再武装し 4 分類チャンク全て PEAK_MIN 超に保つ */
 					cmdIndex_ = 0;
@@ -8350,6 +8552,25 @@ int CDriverAc::Render(int16_t* stereo, int frames)
 			hw_->Chip2()->Render(mix2 + i * 2, 1);
 		if (mix3)
 			hw_->Chip3()->Render(mix3 + i * 2, 1);
+		int diveL = 0, diveR = 0;
+		if (hw_->DivebombSn()) {
+			for (int k = 0; k < 3; k++) {
+				if (CChip* sn = hw_->DiveSn(k)) {
+					int16_t t[2];
+					sn->Render(t, 1);
+					diveL += t[0];
+					diveR += t[1];
+				}
+			}
+			int l = (int)stereo[i * 2] + diveL;
+			int r = (int)stereo[i * 2 + 1] + diveR;
+			if (l > 32767) l = 32767;
+			if (l < -32768) l = -32768;
+			if (r > 32767) r = 32767;
+			if (r < -32768) r = -32768;
+			stereo[i * 2] = (int16_t)l;
+			stereo[i * 2 + 1] = (int16_t)r;
+		}
 		if (!heard_ && (stereo[i * 2] || stereo[i * 2 + 1]
 			|| (mix2 && (mix2[i * 2] || mix2[i * 2 + 1]))
 			|| (mix3 && (mix3[i * 2] || mix3[i * 2 + 1]))))
@@ -8360,6 +8581,14 @@ int CDriverAc::Render(int16_t* stereo, int frames)
 		for (int i = 0; i < frames * 2; i++) {
 			/* YM2203×2 — 平均してハードクリップを避ける */
 			int s = ((int)stereo[i] + (int)mix2[i]) / 2;
+			if (s > 32767) s = 32767;
+			if (s < -32768) s = -32768;
+			stereo[i] = (int16_t)s;
+		}
+	} else if (mix2 && hw_->DivebombSn()) {
+		for (int i = 0; i < frames * 2; i++) {
+			int s = (int)stereo[i] + (int)mix2[i] + (mix3 ? (int)mix3[i] : 0);
+			s /= 4;
 			if (s > 32767) s = 32767;
 			if (s < -32768) s = -32768;
 			stereo[i] = (int16_t)s;

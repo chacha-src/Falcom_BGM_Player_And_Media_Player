@@ -5699,6 +5699,19 @@ void CHardPc98::MaterializeDosFiles(CEmuZipFs* fs, const CEmuGameEntry* ge)
 			&& (!stem[0] || strcmp(stem, r->name) != 0))
 			data = CEmuZipFsFindDir(fs, r->name, &sz, usePref);
 		unsigned donorSz = 0;
+		/* guyna の PMD.COM は AH=9 が AL=0 を書いて戻るだけ。PMD_98 は読んだ曲を INT60 AH=9 で鳴らすので、この版だと cmp ah,9 で必ず落ちる。同じ糊が動く PMD を兄弟パックから取る。 */
+		if (data && sz > 8 && stem[0] && _stricmp(stem, "PMD.COM") == 0) {
+			static const unsigned char kPmdAh9Stub[] = {
+				0xC6, 0x06, 0xB5, 0x16, 0x00, 0xC3
+			};
+			for (unsigned i = 0; i + sizeof(kPmdAh9Stub) <= sz; i++) {
+				if (memcmp(data + i, kPmdAh9Stub, sizeof(kPmdAh9Stub)) == 0) {
+					data = NULL;
+					sz = 0;
+					break;
+				}
+			}
+		}
 		/* 曲のみ zip（gdm_mo/guyna/kizuato/nekoex）はカタログに PMD_98.COM があっても省略 — 兄弟パックからドライバを取る。 */
 		if ((!data || !sz) && donorBuf && fs->zipPath[0] && DosIsEngineName(r->name)) {
 			char base[DOS98_NAME];
@@ -6455,6 +6468,18 @@ void CHardPc98::BindDosTriggerSong(const CEmuGameEntry* ge, unsigned titleCode)
 		extSong_ = (uint16_t)(titleCode & 0xff);
 		extParam_ = (uint16_t)((titleCode >> 16) & 0xffff);
 	} else if (ge) {
+		int diresShell = 0;
+		for (int i = 0; i < ge->romCount; i++) {
+			if (_stricmp(ge->rom[i].type, "shell") != 0) continue;
+			if (ge->rom[i].name && _stricmp(ge->rom[i].name, "dires") == 0)
+				diresShell = 1;
+		}
+		if (diresShell) {
+			/* dires.com は IN 7E2 の bit0 でデモ／BGM を分け、IN 7E3 を曲番号 0..2、IN 7E4 を効果音にする。
+			   下位バイトだけだと 0x000001 と 0x000101 が同じ BGM になる。 */
+			extSong_ = (uint16_t)(titleCode & 0xffff);
+			extParam_ = (uint16_t)byte2;
+		} else {
 		static const char* kYnsound[] = {
 			"ynsound", "YNSOUND", "yns_98", "YNS_98", NULL
 		};
@@ -6476,6 +6501,7 @@ void CHardPc98::BindDosTriggerSong(const CEmuGameEntry* ge, unsigned titleCode)
 		} else {
 			extSong_ = (uint16_t)(titleCode & 0xff);
 			extParam_ = 0;
+		}
 		}
 		}
 	} else if (byte2 != 0) {
@@ -11433,6 +11459,17 @@ int CHardPc98::TriggerPlay(unsigned titleCode)
 	pumpMusicCycle0_ = cpuCycles_;
 
 	if (isDos_) {
+		{
+			/* usodo_98 はパックを切り出したあとプレイヤがハンドル 0 を全読する。添字があるときだけ曲本体を返す。 */
+			static const char* kPilPack[] = {
+				"usodo", "angie_98", "sodom_98", "cjam_98", "erect_98", NULL
+			};
+			uint16_t slice = 0;
+			const unsigned idx = (titleCode >> 16) & 0xffff;
+			if (dosGe_ && DosShellStarts(dosGe_, kPilPack) && idx > 0 && idx < 64)
+				slice = (uint16_t)idx;
+			dos_.SetPilSlice(slice);
+		}
 		if (!pmdOpnIrq_ && (CEmuPc98GeIsPmd(dosGe_) || CEmuPc98DosHasPmd(dos_)))
 			pmdOpnIrq_ = 1;
 		/* tetrisva: PMD 互換 .S を INT14 で進める。Init で pmdOpnIrq_ を立てると

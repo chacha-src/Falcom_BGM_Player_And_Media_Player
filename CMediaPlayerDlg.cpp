@@ -14998,6 +14998,12 @@ BOOL CMediaPlayerDlg::OnMouseWheel(UINT nFlags, short zDelta, CPoint pt)
 // ファルコム特化型 → メディアプレイヤーモードへ切替。
 // mp を新規生成し og/pl を非表示にする。og は再生エンジンとして裏で動き続ける。
 // DWM アクリル問題対策として mp をトップレベル化(オーナー解除)してから RefreshAeroMode する。
+extern void OggStartupLoadPos(int pos);
+extern void OggFinishStartupLoading();
+extern int g_oggSkipCemuTitleRefresh;
+extern void PlRefreshCemuSongTitlesNow();
+extern void PlStartCemuTitleRefresh();
+
 void EnterMediaPlayerMode(BOOL bConvertCoords)
 {
 	if (!og || !::IsWindow(og->GetSafeHwnd())) return;
@@ -15017,8 +15023,12 @@ void EnterMediaPlayerMode(BOOL bConvertCoords)
 	// プレイリストを必ず生成(裏で生かす)。再生はプレイリスト方式にする。
 	if (!pl) {
 		killw1 = 0;
+		OggStartupLoadPos(36);
+		g_oggSkipCemuTitleRefresh = 1;
 		pl = new CPlayList;
-		if (!pl->Create(og)) {
+		BOOL made = pl->Create(og);
+		g_oggSkipCemuTitleRefresh = 0;
+		if (!made) {
 			delete pl;
 			pl = NULL;
 		}
@@ -15040,6 +15050,7 @@ void EnterMediaPlayerMode(BOOL bConvertCoords)
 	// 孤立窓となり非アクティブでアクリルが落ちるため行わない。タスクバー単独表示は
 	// PreCreateWindow の WS_EX_APPWINDOW で確保する。
 	// TheadLoop が mp メンバを触るため、Create 完了後に初めてグローバルへ載せる。
+	OggStartupLoadPos(58);
 	CMediaPlayerDlg* creating = new CMediaPlayerDlg;
 	if (!creating->Create(og) || !::IsWindow(creating->GetSafeHwnd())) {
 		delete creating;
@@ -15047,14 +15058,16 @@ void EnterMediaPlayerMode(BOOL bConvertCoords)
 		return;
 	}
 	mp = creating;
-	/* MP を出す前に、savedata で開いていたトグル画面を作る。
-	   ここではまだ MP は非表示。戻り後にまとめて表示する。 */
-	if (og && ::IsWindow(og->GetSafeHwnd()))
-		og->SendMessage(WM_OGG_TOGGLE_SUBUI, 10, 0);
+	OggStartupLoadPos(78);
 #if CCUSTOM_AERO_SUPPORT
 	if (savedata.aero == 1)
 		mp->RefreshAeroMode();
 #endif
+
+	// トグル画面は読込窓の裏で作る。表示後に作ると、見えている MP が操作不能になる。
+	if (og && ::IsWindow(og->GetSafeHwnd()))
+		og->SendMessage(WM_OGG_TOGGLE_SUBUI, 10, 0);
+	OggStartupLoadPos(90);
 
 	// 重複防止: プレイリスト/メイン画面/aeroオーバーレイの単独ウィンドウを隠す
 	extern CImageBase* maini;
@@ -15070,7 +15083,6 @@ void EnterMediaPlayerMode(BOOL bConvertCoords)
 
 	if (mp && ::IsWindow(mp->GetSafeHwnd())) {
 		mp->ShowWindow(SW_SHOW);
-		// 生成は手前の SendMessage(10) で済んでいる。ここでは MP と続けて出す。
 		if (og && ::IsWindow(og->GetSafeHwnd()))
 			og->SendMessage(WM_OGG_TOGGLE_SUBUI, 20, 0);
 		// 非表示のままでは EnsureVisible が効かない。表示後に選択行へ戻す。
@@ -15097,6 +15109,10 @@ void EnterMediaPlayerMode(BOOL bConvertCoords)
 			pl->GetWindowRect(&pr);
 			playbase->MoveWindow(&pr);
 		}
+		// 準備が終わってから読込窓を閉じる。Cemu の曲名は裏で直す。
+		OggFinishStartupLoading();
+		::SetCursor(::LoadCursor(NULL, IDC_ARROW));
+		PlStartCemuTitleRefresh();
 	}
 }
 

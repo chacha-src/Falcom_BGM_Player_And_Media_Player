@@ -2150,25 +2150,43 @@ void CCustomPopupMenu::EnsureChromePrefix()
 		wchar_t arc[MAX_PATH] = {};
 		CEmuCatalogGetExeArcdataPath(arc, MAX_PATH);
 		if (arc[0] && GetFileAttributesW(arc) != INVALID_FILE_ATTRIBUTES) {
+			extern int PlCemuTitleRefreshBusy();
+			const BOOL cemuReady = !PlCemuTitleRefreshBusy();
 			AddCommand(CCUSTOM_POPUP_ID_CEMU_LIST,
 				LL14(L"Cemu対応一覧", L"Cemu Supported List", L"Liste compatible Cemu", L"Elenco supportato Cemu",
 					L"Lista compatible Cemu", L"Cemu 대응 목록", L"Cemu 对应一览", L"قائمة Cemu المدعومة",
 					L"Список поддержки Cemu", L"Cemu-Unterstützungsliste", L"Lista suportada Cemu", L"Cemu-ondersteuningslijst",
 					L"Lista obslugi Cemu", L"Cemu destek listesi"),
-				LL14(L"arcdata.7z / zip の対応タイトルを一覧表示します",
-					L"Show titles supported by arcdata.7z/zip",
-					L"Afficher les titres supportes par arcdata.zip",
-					L"Mostra i titoli supportati da arcdata.zip",
-					L"Mostrar titulos compatibles de arcdata.zip",
-					L"arcdata.zip 대응 타이틀을 목록으로 표시",
-					L"显示 arcdata.zip 支持的标题列表",
-					L"عرض العناوين المدعومة في arcdata.zip",
-					L"Показать поддерживаемые названия arcdata.zip",
-					L"Von arcdata.zip unterstützte Titel anzeigen",
-					L"Mostrar titulos suportados por arcdata.zip",
-					L"Toon door arcdata.zip ondersteunde titels",
-					L"Pokaz tytuly obslugiwane przez arcdata.zip",
-					L"arcdata.zip desteklenen basliklari listele"));
+				cemuReady
+					? LL14(L"arcdata.7z / zip の対応タイトルを一覧表示します",
+						L"Show titles supported by arcdata.7z/zip",
+						L"Afficher les titres supportes par arcdata.zip",
+						L"Mostra i titoli supportati da arcdata.zip",
+						L"Mostrar titulos compatibles de arcdata.zip",
+						L"arcdata.zip 대응 타이틀을 목록으로 표시",
+						L"显示 arcdata.zip 支持的标题列表",
+						L"عرض العناوين المدعومة في arcdata.zip",
+						L"Показать поддерживаемые названия arcdata.zip",
+						L"Von arcdata.zip unterstützte Titel anzeigen",
+						L"Mostrar titulos suportados por arcdata.zip",
+						L"Toon door arcdata.zip ondersteunde titels",
+						L"Pokaz tytuly obslugiwane przez arcdata.zip",
+						L"arcdata.zip desteklenen basliklari listele")
+					: LL14(L"Cemuの曲データを読み込み中です。終わるまで一覧は開けません",
+						L"Cemu titles are still loading. The list opens when that finishes",
+						L"Chargement Cemu en cours. La liste s'ouvrira ensuite",
+						L"Caricamento Cemu in corso. L'elenco si aprira dopo",
+						L"Cemu aun carga. La lista se abrira al terminar",
+						L"Cemu 곡 데이터를 읽는 중입니다. 끝나면 목록을 엽니다",
+						L"正在读取 Cemu 曲目。完成后才能打开列表",
+						L"جار تحميل Cemu. تُفتح القائمة بعد الانتهاء",
+						L"Идёт загрузка Cemu. Список откроется после неё",
+						L"Cemu wird geladen. Die Liste öffnet sich danach",
+						L"Cemu ainda carrega. A lista abre ao terminar",
+						L"Cemu laadt nog. De lijst opent daarna",
+						L"Trwa wczytywanie Cemu. Lista otworzy sie po zakonczeniu",
+						L"Cemu yukleniyor. Liste bitince acilir"),
+				cemuReady);
 		}
 	}
 

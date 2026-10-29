@@ -47,6 +47,7 @@ CEmuDos98::CEmuDos98()
 	memset(handles_, 0, sizeof(handles_));
 	fileCount_ = 0;
 	nextHandle_ = 5;
+	pilSlice_ = 0;
 	pspSeg_ = 0;
 	dtaSeg_ = 0;
 	dtaOff_ = 0;
@@ -93,6 +94,7 @@ void CEmuDos98::Reset()
 	FreeFiles();
 	memset(handles_, 0, sizeof(handles_));
 	nextHandle_ = 5;
+	pilSlice_ = 0;
 	pspSeg_ = 0;
 	dtaSeg_ = 0;
 	dtaOff_ = 0;
@@ -1475,6 +1477,36 @@ CEmuDos98Result CEmuDos98::Int21Body(uint8_t* mem)
 	case 0x3F: {
 		const uint16_t h = np2_reg_get(NP2_R_BX);
 		unsigned count = np2_reg_get(NP2_R_CX);
+		/* usodo 系: 糊は 7E4 の添字でパックから 1 曲を切り出すが、プレイヤが続けて CX=FFFF でハンドル 0 を読み直しパックヘッダを USO として鳴らす。大きな読みだけ切り出した曲を返す。 */
+		if (pilSlice_ && h == 0 && count >= 0x8000u && handles_[0].used) {
+			const CEmuDos98File* pk = FindFile(handles_[0].name);
+			if (pk && pk->data && pk->size >= 4) {
+				const unsigned nsong = (unsigned)pk->data[0] | ((unsigned)pk->data[1] << 8);
+				const unsigned table = 2u + nsong * 2u;
+				if (nsong >= 1 && nsong <= 32 && table < pk->size && pilSlice_ <= nsong) {
+					unsigned prev = 0, songLen = 0;
+					for (unsigned i = 0; i < nsong; i++) {
+						const unsigned L = (unsigned)pk->data[2 + i * 2]
+							| ((unsigned)pk->data[3 + i * 2] << 8);
+						if (i + 1 == pilSlice_) songLen = L;
+						else if (i + 1 < pilSlice_) prev += L;
+					}
+					const unsigned dataOff = table + prev;
+					if (songLen >= 8 && dataOff + songLen <= pk->size
+						&& pk->data[dataOff] == 0x01 && pk->data[dataOff + 1] == 0x00) {
+						unsigned ncopy = songLen;
+						if (ncopy > count) ncopy = count;
+						const unsigned dst = DosLin(np2_reg_get(NP2_R_DS), np2_reg_get(NP2_R_DX));
+						if (ncopy && dst + ncopy <= 0x200000u) {
+							memcpy(mem + dst, pk->data + dataOff, ncopy);
+							np2_reg_set(NP2_R_AX, (uint16_t)ncopy);
+							SetCf(0);
+							break;
+						}
+					}
+				}
+			}
+		}
 		/* 1000h 段落の 16bit `SHL CX,4` は 0 にラップ（= 64KB）。fgplay_h／OPNDRV は AH=3F で CX バイトを曲バッファへ読む。0 を「何も読まない」にするとインタプリタが 9A00 の未初期化メモリを走り、最初の FM ノートが固まる。 */
 		if (count == 0)
 			count = 0x10000u;

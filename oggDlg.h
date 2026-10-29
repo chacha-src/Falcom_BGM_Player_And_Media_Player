@@ -428,6 +428,7 @@ public:
 	afx_msg LRESULT OnUpdateAvailable(WPARAM wParam, LPARAM lParam);
 	afx_msg LRESULT OnKpiPluginMsg(WPARAM wParam, LPARAM lParam);
 	afx_msg LRESULT OnCemuCatListMsg(WPARAM wParam, LPARAM lParam);
+	afx_msg LRESULT OnCemuTitlesMsg(WPARAM wParam, LPARAM lParam);
 	CCustomStandardButton d_san1;
 	afx_msg void OnBnClickedButton53();
 	CCustomStandardButton d_san2;
@@ -590,6 +591,9 @@ BOOL OggKpiReloadPlugins(CWnd* owner);
 #endif
 #ifndef WM_APP_CEMU_CATLIST
 #define WM_APP_CEMU_CATLIST (WM_APP + 59) // Cemu対応一覧を開く
+#endif
+#ifndef WM_APP_CEMU_TITLES
+#define WM_APP_CEMU_TITLES (WM_APP + 107) // 裏スレッドの Cemu 曲名をプレイリストへ
 #endif
 
 //{{AFX_INSERT_LOCATION}}

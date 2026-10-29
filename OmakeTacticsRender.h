@@ -245,7 +245,7 @@ public:
 	// モデルごとの区間行列で各人間の骨へ移し、初回の描画で頂点を作って保持する。
 	struct AvaMesh { Buf<CSkinV> v; Buf<BYTE> cloth; Buf<float> dmax, dmin; };
 	struct AvaBody { int nFace; AvaMesh m; Buf<WORD> bodyTri, extraTri; AvaBody() : nFace(0) {} };
-	struct AvaCos { char name[32]; int gender; AvaMesh m; Buf<WORD> tri; Buf<BYTE> keep; };
+	struct AvaCos { char name[32]; int gender; AvaMesh m; Buf<WORD> tri; Buf<BYTE> keep; const BYTE* pending; UINT pendingN; };
 	struct AvaModel { char name[32]; int gender; Buf<float> M; char joint[64][24]; int nJoint; AvaModel() : gender(0), nJoint(0) { name[0] = 0; memset(joint, 0, sizeof(joint)); } };
 	// 衣装の布を押し出す脚の形。太もも・すね左右の 4 本で、骨に沿って CLOTH_PT 段・まわり CLOTH_PF 分割の半径。
 	// スカート状の布は腰を囲む格子（周 CLOTH_SECT 個 × 縦 5cm ほどごとの段）で動かす。点は CLOTH_NODES まで（シェーダの NMAX）。

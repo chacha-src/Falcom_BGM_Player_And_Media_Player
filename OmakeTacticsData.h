@@ -192,7 +192,8 @@ enum PropKind {
 	PK_GRAVE, PK_TENT, PK_BARREL, PK_CRATE, PK_LANTERN, PK_PUMPKIN, PK_FLAG, PK_HILLTREES
 };
 
-enum Gimmick { GM_NONE = 0, GM_HEAL = 1, GM_MIGHT = 2, GM_WARP = 3, GM_CHEST = 4 };
+enum Gimmick { GM_NONE = 0, GM_HEAL = 1, GM_MIGHT = 2, GM_WARP = 3, GM_CHEST = 4, GM_LEVER = 5, GM_FENCE = 6, GM_DROP = 7 };
+enum Weather { WX_CLEAR = 0, WX_RAIN = 1, WX_SNOW = 2, WX_ASH = 3 };
 
 struct Cell {
 	BYTE t;      // Terrain
@@ -218,7 +219,7 @@ struct Map {
 	int stage;
 	DWORD seed;
 	Cell c[MAPN][MAPN];   // [z][x]
-	int pStartX[10], pStartZ[10]; // MAX_PARTY と一致。static_assert で固定
+	int pStartX[15], pStartZ[15]; // MAX_PARTY と一致。static_assert で固定
 	int eStartX[10], eStartZ[10]; // カメラ用。先頭は最寄りの敵拠点
 	int nP, nE;
 	MapGroup grp[MAX_GROUPS];
@@ -370,8 +371,8 @@ const wchar_t* SkillLabel(int s);
 int PaceRoleOfLv(int lv);
 
 // ---------------- キャラクタ（セーブ対象） ----------------
-enum { MAX_ROSTER = 100, MAX_PARTY = 10, MAX_ENEMY = 640, NAME_LEN = 16 };
-static_assert(MAX_PARTY == 10, "Map::pStart は 10 枠");
+enum { MAX_ROSTER = 100, MAX_PARTY = 15, MAX_ENEMY = 640, NAME_LEN = 16 };
+static_assert(MAX_PARTY == 15, "Map::pStart は 15 枠");
 enum Body { B_KNIGHT, B_BARBARIAN, B_MAGE, B_ROGUE, B_ROGUE_HOOD, B_COUNT };
 enum { HAIR_STYLES = 12, HAIR_COLORS = 10, OUTFIT_COLORS = 10, HT_N = 5, BUST_N = 8, FIG_N = 5, MODEL_N = 7, HUM_HAIR_N = 16 };
 
@@ -618,6 +619,7 @@ struct Battle {
 	void RebuildOcc();
 	int UnitAt(int x, int z) const { return Map::In(x, z) ? occ[z][x] - 1 : -1; }
 	int AliveCount(int team) const;
+	int weather;              // Weather。戦闘中だけ。セーブの大きさは変えない
 	int NextActor();          // CT を進めて次の行動者を返す
 	// acting の手番終了後（CT を cost 消費）の並び。insertAt はそのユニットが次に入る位置
 	int PredictOrder(int* out, int n, int acting = -1, int cost = 1000, int* insertAt = NULL) const;
@@ -627,7 +629,9 @@ void SetupBattle(Battle& b, int stage, DWORD seed, const CharData* party, const 
 void FinishAction(Battle& b, int ui, int moved, int acted);
 int  TurnStartEffects(Battle& b, int ui, int* healOut, int* poisonOut);
 void WakeGroup(Battle& b, int grp);
-void WakeNearPlayers(Battle& b, int rad);
+int WakeNearPlayers(Battle& b, int rad, int immediate = 0);
+int LavaHurt(Battle& b, int ui);
+int UnitFacing(const Unit& attacker, const Unit& defender);
 int  ApplyTile(Battle& b, int ui);   // 停止マスのギミック。Gimmick を返す。0=なし
 bool CanOpenDoor(const Unit& u);
 int  AdjDoor(const Battle& b, int ui, int* ox, int* oz);
@@ -660,7 +664,7 @@ struct SaveData {
 	int winX, winY, winW, winH;
 	int camSpeed;
 	int quality;               // 0=軽量 1=標準 2=高
-	int showGrid;
+	int showGrid;              // bit0=グリッド bit1=敵の脅威範囲
 	int battleAnim;            // 0=フル 1=短縮
 	DWORD uidNext;
 	int winSizeVer;            // 3 未満なら保存サイズを使わず、作業領域の7割で開く
@@ -672,11 +676,14 @@ struct SaveData {
 	int gearN;
 	int gearId[12];            // 所持武具。0 は空。番号は Gear 表の 1 始まり
 	int reserved[4];
-	int partyCap;              // 5..10。店の編成拡張券
+	int partyCap;              // 5..15。店の編成拡張券。11体目以降はステージ制限
 	int rosterCap;             // 20,40,60,80,100。店の名簿の頁
 };
-// version 1 は名簿 20・編成 5。version 2 は能力 10 種。version 3 が能力 20 種。読込は全部受け、書き出しは 3。
+// version 1 は名簿 20・編成 5。version 2 は能力 10 種。version 3 が能力 20 種・編成 10。
+// version 4 は編成 15。読込は全部受け、書き出しは 4。
 #pragma pack(pop)
+inline int TacGridOn(const SaveData& s) { return (s.showGrid & 1) != 0; }
+inline int TacThreatOn(const SaveData& s) { return (s.showGrid & 2) != 0; }
 void SaveDefaults(SaveData& s);
 bool SaveLoad(SaveData& s);
 bool SaveWrite(const SaveData& s);
