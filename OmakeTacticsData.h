@@ -260,6 +260,8 @@ enum ClassId {
 enum { TAC_LV_MAX = 9999, TAC_ENEMY_LV_MAX = 99999, TAC_STAGE_MAX = 9999, TAC_RANK_LINES = 8, TAC_RANK_N = 7 };
 // ファイター・シーフの3次職。既存の順位 ID を動かさないため、ランク枠の後ろに置く。
 enum { C_GLADIATOR = C_PLAYER_COUNT + TAC_RANK_LINES * TAC_RANK_N, C_SHADOW = C_GLADIATOR + 1 };
+// 公開一覧の固有職。X of Y は使わない。ID は既存ランクの後ろ。
+enum { C_JOB0 = C_SHADOW + 1 };
 
 enum { LEARN_N = 10 };
 struct LearnDef { int lv; int skill; };
@@ -281,6 +283,9 @@ struct ClassDef {
 	LearnDef learn[LEARN_N];
 };
 const ClassDef& ClassInfo(int c);
+const wchar_t* ClassTitle(int cls);
+const wchar_t* ClassBlurb(int cls);
+int JobCount();
 int PromoteLevel(int tier);
 int ExpToNext(int lv);
 const wchar_t* TacNum(int v);
@@ -717,6 +722,8 @@ const wchar_t* GearRole(const GearDef* g);
 const wchar_t* GoodDesc(int i);
 int ClassLine(int cls);
 int ClassTier(int cls);
+int JobFamOf(int cls);
+int LineParent(int fam);
 bool GearCanWear(int cls, const GearDef* g);
 int ItemExtraGet(const SaveData& s, int i);
 void ItemExtraAdd(SaveData& s, int i, int d);
@@ -731,7 +738,7 @@ int GearSellSurplus(SaveData& s);
 // 所持の中で、そのキャラの装着より高い同じ系統・種類。無ければ -1。
 int GearBestUpgrade(const SaveData& s, int roster, int kind);
 void GearEquip(CharData& c, SaveData& s, int stashIndex);
-int GearTryDrop(SaveData& s, int stage, int monster, Rng& r);
+int GearTryDrop(SaveData& s, int enemyLv, int monster, Rng& r);
 int MonsterDropLine(int monster);
 bool DropConsumable(SaveData& s, int monster, Rng& r, wchar_t* name = NULL, int nameN = 0);
 int DropTrophy(int monster, int boss, Rng& r, wchar_t* name, int nameN, int* goldOut);

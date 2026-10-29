@@ -15,6 +15,7 @@ enum {
 	ID_BASE_GRID, ID_BASE_HELP, ID_BASE_SLOT0 = 120,
 	ID_SORTIE_START = 160, ID_SORTIE_MID, ID_SORTIE_AUTO, ID_SORTIE_CANCEL,
 	ID_CDX_JOB = 164, ID_CDX_SORT,
+	ID_CDX_FAM = 168, ID_CDX_SHAPE0 = 1720, ID_CDX_EL0 = 1730, ID_CDX_JP0 = 1740, ID_CDX_JPREV = 1750, ID_CDX_JNEXT,
 	ID_OPT_BGM = 190, ID_OPT_SE, ID_OPT_CAM, ID_MON_TAB,
 	ID_BASE_SHOP = 210, ID_SHOP_CLOSE, ID_SHOP_BUY0 = 220, ID_SHOP_SELL0 = 250,
 	ID_SHOP_PREV = 270, ID_SHOP_NEXT, ID_SHOP_LINE0 = 272, ID_SHOP_KIND0 = 278,
@@ -33,6 +34,7 @@ enum {
 	ID_PT_CARD0 = 300, ID_PT_DEPLOY = 340, ID_PT_EDIT, ID_PT_DELETE, ID_PT_YES, ID_PT_NO, ID_PT_BACK, ID_PT_NEW,
 	ID_PT_PAGE_PREV = 360, ID_PT_PAGE_NEXT,
 	ID_PT_ACC0 = 366, ID_PT_ACC1, ID_PT_BEAD0, ID_PT_BEAD1, ID_PT_PAS0 = 370, ID_PT_PAS1,
+	ID_PT_SKPREV = 380, ID_PT_SKNEXT,
 	ID_EQ_NONE = 1860, ID_EQ_ROW0, ID_EQ_PREV = 1880, ID_EQ_NEXT, ID_EQ_CLOSE,
 	ID_EV_MAIN0 = 1000, ID_EV_TGT0 = 1200, ID_EV_PART0 = 1300, ID_EV_DO = 1500, ID_EV_BACK,
 	ID_EV_PART_PREV = 1510, ID_EV_PART_NEXT, ID_EV_MAIN_PREV, ID_EV_MAIN_NEXT,
@@ -114,6 +116,10 @@ Game::Game()
 	m_monMot = 0;
 	m_monDrag = FALSE;
 	m_codexJob = 0;
+	m_codexFam = 0;
+	m_codexJobPage = 0;
+	m_codexShape = 0;
+	m_codexEl = 0;
 	m_codexSort = 0;
 	m_skillPage = 0;
 	m_skillTab = 0;
@@ -212,6 +218,9 @@ Game::Game()
 	m_partySel = -1;
 	m_eqPick = 0;
 	m_eqPage = 0;
+	m_partySkPage = 0;
+	m_partySkPages = 1;
+	m_partySkX = m_partySkY = m_partySkW = m_partySkH = 0;
 	m_evMain = m_evTarget = -1;
 	m_evPartner[0] = m_evPartner[1] = -1;
 	m_evPick = 0;
@@ -498,7 +507,28 @@ int Game::RosterCount() const
 	return n;
 }
 
-const wchar_t* Game::ClassName(int cls) const { return TT(ClassInfo(cls).nameTx); }
+const wchar_t* Game::ClassName(int cls) const
+{
+	if (const wchar_t* t = ClassTitle(cls)) return t;
+	return TT(ClassInfo(cls).nameTx);
+}
+float Game::FitTextPx(const wchar_t* s, float maxW, float px, int bold)
+{
+	if (!s || !s[0] || px <= 0.f || maxW <= 1.f) return px;
+	float w = m_r.TextWidth(s, px, bold);
+	if (w <= maxW) return px;
+	float n = px * maxW / w;
+	if (n > px) n = px;
+	float floorPx = min(px, U(6.f));
+	if (n < floorPx) n = floorPx;
+	float w2 = m_r.TextWidth(s, n, bold);
+	if (w2 > maxW && w2 > 1.f) {
+		float n2 = n * maxW / w2;
+		if (n2 < floorPx) n2 = floorPx;
+		if (n2 < n) n = n2;
+	}
+	return n;
+}
 
 void Game::UnitTitle(const Unit& u, wchar_t* out, int n) const
 {
@@ -857,6 +887,13 @@ void Game::OnWheel(int delta)
 		ZoomCam(powf(.88f, (float)delta / 120.f));
 		return;
 	}
+	if (m_screen == SC_PARTY && !m_eqPick && m_partySkPages > 1 && delta != 0
+		&& Hit(m_partySkX, m_partySkY, m_partySkW, m_partySkH)) {
+		int pages = m_partySkPages;
+		m_partySkPage = delta > 0 ? (m_partySkPage + pages - 1) % pages : (m_partySkPage + 1) % pages;
+		TacSfx(TS_CURSOR);
+		return;
+	}
 	if (m_screen == SC_EVOLVE) {
 		float colW = ((float)m_w - U(40) - U(60)) / 3.f;
 		float c0 = U(40);
@@ -1085,7 +1122,10 @@ BOOL Game::Btn(int id, float x, float y, float w, float h, const wchar_t* label,
 		m_r.HudFrame(x - U(3), y - U(3), w + U(6), h + U(6), U(2), RGBA8(255, 220, 120, (int)(120 + 120 * pulse)));
 	}
 	DWORD tc = !en ? RGBA8(140, 140, 150) : (sel ? RGBA8(40, 24, 8) : RGBA8(246, 242, 232));
-	m_r.HudText(label, x + w * .5f, y + h * .5f, px > 0 ? px : U(17), tc, 1, 1, sel ? 0 : 1);
+	float usePx = px > 0 ? px : U(17);
+	int bold = sel ? 0 : 1;
+	usePx = FitTextPx(label, w - U(8), usePx, bold);
+	m_r.HudText(label, x + w * .5f, y + h * .5f, usePx, tc, 1, 1, sel ? 0 : 1);
 	return fire;
 }
 
@@ -1110,11 +1150,11 @@ int Game::Sel(int id, float x, float y, float w, float h, const wchar_t* label, 
 	if (d) TacSfx(TS_CURSOR);
 	m_r.HudGlass(x, y, w, h, (hov || foc) ? RGBA8(64, 78, 130, 236) : RGBA8(34, 40, 70, 230), (hov || foc) ? RGBA8(255, 232, 150) : RGBA8(120, 104, 74), 1.f);
 	if (foc) m_r.HudFrame(x - U(2), y - U(2), w + U(4), h + U(4), U(2), RGBA8(255, 220, 120, 180));
-	m_r.HudText(label, x + U(10), y + h * .5f, U(15), RGBA8(220, 210, 180), 0, 0);
+	m_r.HudText(label, x + U(10), y + h * .5f, FitTextPx(label, w * .36f, U(15), 0), RGBA8(220, 210, 180), 0, 0);
 	BOOL hl = hov && m_mx < vx + vw * .5f, hr = hov && m_mx >= vx + vw * .5f;
 	m_r.HudText(L"◀", vx + U(12), y + h * .5f, U(14), hl ? RGBA8(255, 230, 140) : RGBA8(170, 160, 140), 1, 1);
 	m_r.HudText(L"▶", x + w - U(12), y + h * .5f, U(14), hr ? RGBA8(255, 230, 140) : RGBA8(170, 160, 140), 1, 1);
-	m_r.HudText(value, vx + vw * .5f, y + h * .5f, U(16), RGBA8(255, 255, 255), 1, 1);
+	m_r.HudText(value, vx + vw * .5f, y + h * .5f, FitTextPx(value, vw - U(28), U(16), 1), RGBA8(255, 255, 255), 1, 1);
 	return d;
 }
 
@@ -2077,9 +2117,17 @@ static void CodexFillHow(int skill, wchar_t* how, int howN, int* key, int* lv)
 			if (cd.group != G_HOLY || cd.tier < 3 || cd.tier - 1 < rad) continue;
 			if (cd.tier < showTier) { showTier = cd.tier; show = c; }
 		}
+		for (int i = 0; i < JobCount(); i++) {
+			int c = C_JOB0 + i;
+			const ClassDef& cd = ClassInfo(c);
+			if (cd.group != G_HOLY || cd.tier < 3 || cd.tier - 1 < rad) continue;
+			if (cd.tier < showTier) { showTier = cd.tier; show = c; }
+		}
 		if (show >= 0) {
+			const wchar_t* nm = ClassTitle(show);
+			if (!nm) nm = TT(ClassInfo(show).nameTx);
 			const wchar_t* more = rad <= 3 ? LangPick14(L"・他職も3まで", L", others to 3", L", autres jusqu'à 3", L", altri fino a 3", L", otros hasta 3", L", 다른 직업도 3까지", L"，其他职到3", L"، غيرهم حتى 3", L", прочие до 3", L", andere bis 3", L", outros até 3", L", anderen tot 3", L", inne do 3", L", diğerleri 3'e") : L"";
-			swprintf_s(how, howN, L"%s  Lv%d%s", TT(ClassInfo(show).nameTx), PromoteLevel(showTier - 1), more);
+			swprintf_s(how, howN, L"%s  Lv%d%s", nm, PromoteLevel(showTier - 1), more);
 			*key = CodexJobKey(show);
 			*lv = PromoteLevel(showTier - 1);
 		}
@@ -2117,6 +2165,28 @@ static void CodexFillHow(int skill, wchar_t* how, int howN, int* key, int* lv)
 			}
 		}
 	}
+	if (how[0] == 0) {
+		int show = -1, showLv = 0, showTier = 99, more = 0;
+		for (int i = 0; i < JobCount(); i++) {
+			int cls = C_JOB0 + i;
+			const ClassDef& cd = ClassInfo(cls);
+			int lv = 0;
+			for (int k = 0; k < LEARN_N; k++) if (cd.learn[k].skill == skill && cd.learn[k].lv > 0) lv = cd.learn[k].lv;
+			if (lv <= 0) continue;
+			more++;
+			if (cd.tier < showTier || (cd.tier == showTier && (show < 0 || lv < showLv))) {
+				showTier = cd.tier; show = cls; showLv = lv;
+			}
+		}
+		if (show >= 0) {
+			const wchar_t* nm = ClassTitle(show);
+			if (!nm) nm = TT(ClassInfo(show).nameTx);
+			const wchar_t* extra = more > 1 ? LangPick14(L"・他", L" +", L" +", L" +", L" +", L" 외", L"·其他", L" +", L" +", L" +", L" +", L" +", L" +", L" +") : L"";
+			swprintf_s(how, howN, L"%s  Lv%d%s", nm, showLv, extra);
+			*key = CodexJobKey(show);
+			*lv = showLv;
+		}
+	}
 }
 static int CmpCodex(const void* pa, const void* pb)
 {
@@ -2141,6 +2211,30 @@ static const wchar_t* CodexWord(int w)
 	case 3: return LangPick14(L"名前", L"Name", L"Nom", L"Nome", L"Nombre", L"이름", L"名称", L"الاسم", L"Имя", L"Name", L"Nome", L"Naam", L"Nazwa", L"Ad");
 	default: return LangPick14(L"習得", L"Learned", L"Acquis", L"Appreso", L"Aprendido", L"습득", L"习得", L"الاكتساب", L"Изучение", L"Erlernt", L"Aprendido", L"Geleerd", L"Nauka", L"Öğrenim");
 	}
+}
+static int SkillShapeBucket(const SkillDef& sd)
+{
+	if (sd.shape == SH_LINE) return 4;
+	if (sd.shape == SH_FAN) return 5;
+	if (sd.area >= 6) return 3;
+	if (sd.area <= 0) return 1;
+	return 2;
+}
+static int CodexFamJobs(int fam, int* dst, int cap)
+{
+	int n = 0;
+	auto push = [&](int c) { if (n < cap) dst[n++] = c; };
+	if (fam == 1) {
+		for (int c = 0; c < C_PLAYER_COUNT; c++) push(c);
+		push(C_GLADIATOR);
+		push(C_SHADOW);
+	} else if (fam == 2) {
+		for (int c = C_PLAYER_COUNT; c < C_PLAYER_COUNT + TAC_RANK_LINES * TAC_RANK_N; c++) push(c);
+	} else if (fam >= 3 && fam <= 10) {
+		int want = fam - 3;
+		for (int i = 0; i < JobCount(); i++) if (JobFamOf(C_JOB0 + i) == want) push(C_JOB0 + i);
+	}
+	return n;
 }
 
 static BOOL PreviewAlt(int style);
@@ -2369,41 +2463,144 @@ void Game::DrawCodex()
 	m_r.HudText(title, x + w * .5f, y + U(28), U(22), RGBA8(255, 226, 150), 1, 1);
 	float yy = y + U(58);
 	if (m_codex == 1) {
-		int jobs[40];
-		int nJob = CodexJobList(jobs, 40);
-		int slots = nJob + 2;
-		if (m_codexJob < 0 || m_codexJob >= slots) m_codexJob = 0;
+		if (m_codexFam < 0 || m_codexFam > 10) m_codexFam = 0;
 		if (m_codexSort < 0 || m_codexSort > 3) m_codexSort = 0;
-		const wchar_t* jn = CodexWord(1);
-		if (m_codexJob == nJob + 1) jn = TT(TX_SK_TAB_FORM);
-		else if (m_codexJob > 0) jn = TT(ClassInfo(jobs[m_codexJob - 1]).nameTx);
+		if (m_codexShape < 0 || m_codexShape > 5) m_codexShape = 0;
+		int famJobs[240];
+		int nFam = CodexFamJobs(m_codexFam, famJobs, 240);
+		if (m_codexFam == 0) {
+			if (m_codexJob != 0 && m_codexJob != -1) m_codexJob = 0;
+		} else if (m_codexJob > 0) {
+			BOOL hit = FALSE;
+			for (int i = 0; i < nFam; i++) if (famJobs[i] == m_codexJob) hit = TRUE;
+			if (!hit) m_codexJob = 0;
+		} else if (m_codexJob != 0) m_codexJob = 0;
+		const wchar_t* famName = CodexWord(1);
+		if (m_codexFam == 1) famName = LangPick14(L"初期", L"Base", L"Base", L"Base", L"Base", L"초기", L"初期", L"أساس", L"Начало", L"Basis", L"Base", L"Basis", L"Baza", L"Başlangıç");
+		else if (m_codexFam == 2) famName = LangPick14(L"上位", L"High", L"Haut", L"Alto", L"Alto", L"상위", L"上位", L"عال", L"Высшие", L"Hoch", L"Alto", L"Hoog", L"Wyższe", L"Üst");
+		else if (m_codexFam >= 3) famName = ClassName(LineParent(m_codexFam - 3));
 		const wchar_t* sn = m_codexSort == 1 ? CodexWord(3) : (m_codexSort == 2 ? L"MP" : (m_codexSort == 3 ? CodexWord(4) : CodexWord(0)));
 		float jw = min(U(460.f), (w - U(48)) * .56f);
 		float sw = min(U(280.f), w - U(48) - jw - U(12));
-		int dj = Sel(ID_CDX_JOB, x + U(24), y + U(50), jw, U(36), CodexWord(0), jn);
-		int ds = Sel(ID_CDX_SORT, x + U(24) + jw + U(12), y + U(50), sw, U(36), CodexWord(2), sn);
-		if (dj) { m_codexJob = (m_codexJob + dj + slots) % slots; m_codexPage = 0; }
+		int df = Sel(ID_CDX_FAM, x + U(24), y + U(46), jw, U(32), LangPick14(L"系統", L"Line", L"Lignée", L"Schiera", L"Linaje", L"계열", L"系统", L"السلالة", L"Линия", L"Linie", L"Linhagem", L"Lijn", L"Linia", L"Soy"), famName);
+		int ds = Sel(ID_CDX_SORT, x + U(24) + jw + U(12), y + U(46), sw, U(32), CodexWord(2), sn);
+		if (df) { m_codexFam = (m_codexFam + df + 11) % 11; m_codexJob = 0; m_codexJobPage = 0; m_codexPage = 0; m_codexShape = 0; m_codexEl = 0; }
 		if (ds) { m_codexSort = (m_codexSort + ds + 4) % 4; m_codexPage = 0; }
-		int want = m_codexJob > 0 && m_codexJob <= nJob ? jobs[m_codexJob - 1] : -1;
-		int wantForm = m_codexJob == nJob + 1;
+		float jy = y + U(82);
+		float jh = U(26);
+		float gap = U(4);
+		int slots = m_codexFam == 0 ? 1 : nFam;
+		int perJ = 6;
+		int jPages = max(1, (slots + perJ - 1) / perJ);
+		if (m_codexJobPage < 0) m_codexJobPage = 0;
+		if (m_codexJobPage >= jPages) m_codexJobPage = jPages - 1;
+		float arrowW = U(36);
+		float allW = U(72);
+		float strip = w - U(48) - allW - arrowW * 2.f - gap * 3.f;
+		float bwJ = strip / (float)perJ;
+		if (Btn(ID_CDX_JP0 + 7, x + U(24), jy, allW, jh, CodexWord(1), TRUE, m_codexJob == 0, U(12))) { m_codexJob = 0; m_codexPage = 0; }
+		int ja = m_codexJobPage * perJ;
+		for (int t = 0; t < perJ; t++) {
+			int ix = ja + t;
+			const wchar_t* lab = L"";
+			BOOL en = FALSE;
+			int pick = 0;
+			BOOL on = FALSE;
+			if (m_codexFam == 0) {
+				if (ix == 0) { lab = TT(TX_SK_TAB_FORM); en = TRUE; pick = -1; on = m_codexJob == -1; }
+			} else if (ix < nFam) {
+				lab = ClassName(famJobs[ix]); en = TRUE; pick = famJobs[ix]; on = m_codexJob == pick;
+			}
+			if (!en) continue;
+			if (Btn(ID_CDX_JP0 + t, x + U(24) + allW + gap + (bwJ + gap) * t, jy, bwJ, jh, lab, en, on, U(11))) {
+				m_codexJob = pick; m_codexPage = 0;
+			}
+		}
+		if (jPages > 1 && Btn(ID_CDX_JPREV, x + w - U(24) - arrowW * 2 - gap, jy, arrowW, jh, L"◀")) m_codexJobPage = (m_codexJobPage + jPages - 1) % jPages;
+		if (jPages > 1 && Btn(ID_CDX_JNEXT, x + w - U(24) - arrowW, jy, arrowW, jh, L"▶")) m_codexJobPage = (m_codexJobPage + 1) % jPages;
+		auto jobHas = [&](int s) -> BOOL {
+			if (SkillInfo(s).enemyOnly) return FALSE;
+			if (m_codexJob == -1) return IsFormSkill(s);
+			if (IsFormSkill(s)) return m_codexFam == 0 && m_codexJob == 0;
+			if (m_codexJob > 0) return CodexLearnLv(m_codexJob, s) > 0;
+			if (m_codexFam == 0) return TRUE;
+			for (int i = 0; i < nFam; i++) if (CodexLearnLv(famJobs[i], s) > 0) return TRUE;
+			return FALSE;
+		};
+		int shapeHave[6] = {};
+		int elHave[9] = {};
+		static const int kEl[8] = { EL_FIRE, EL_ICE, EL_THUNDER, EL_HOLY, EL_DARK, EL_WIND, EL_EARTH, EL_POISON };
+		for (int s = 0; s < SKL_COUNT; s++) {
+			if (!jobHas(s) || SkillInfo(s).kind == SK_PASSIVE) continue;
+			const SkillDef& sd = SkillInfo(s);
+			int sh = SkillShapeBucket(sd);
+			if (sh >= 1 && sh <= 5) shapeHave[sh]++;
+			for (int e = 0; e < 8; e++) if (kEl[e] == sd.element) elHave[e + 1]++;
+		}
+		if (m_codexShape && !shapeHave[m_codexShape]) m_codexShape = 0;
+		int curEl = 0;
+		for (int e = 0; e < 8; e++) if (kEl[e] == m_codexEl) curEl = e + 1;
+		if (m_codexEl && !elHave[curEl]) { m_codexEl = 0; curEl = 0; }
+		int shapeOk[6] = { 1, 0, 0, 0, 0, 0 };
+		int elOk[9] = { 1, 0, 0, 0, 0, 0, 0, 0, 0 };
+		for (int s = 0; s < SKL_COUNT; s++) {
+			if (!jobHas(s) || SkillInfo(s).kind == SK_PASSIVE) continue;
+			const SkillDef& sd = SkillInfo(s);
+			int sh = SkillShapeBucket(sd);
+			if (!m_codexEl || sd.element == m_codexEl) if (sh >= 1 && sh <= 5) shapeOk[sh] = 1;
+			if (!m_codexShape || sh == m_codexShape) for (int e = 0; e < 8; e++) if (kEl[e] == sd.element) elOk[e + 1] = 1;
+		}
+		const wchar_t* shapeL[6] = { CodexWord(1), TT(TX_SHAPE_ONE), TT(TX_MISC_AREA), TT(TX_SHAPE_WIDE), TT(TX_SHAPE_LINE), TT(TX_SHAPE_FAN) };
+		float syy = jy + jh + gap;
+		float bwS = (w - U(48) - gap * 5.f) / 6.f;
+		for (int t = 0; t < 6; t++) {
+			if (Btn(ID_CDX_SHAPE0 + t, x + U(24) + (bwS + gap) * t, syy, bwS, jh, shapeL[t], t == 0 || shapeOk[t], m_codexShape == t, U(12))) {
+				m_codexShape = t; m_codexPage = 0;
+			}
+		}
+		syy += jh + gap;
+		const wchar_t* elL[9] = {
+			CodexWord(1),
+			LangPick14(L"火", L"Fi", L"Fe", L"Fu", L"Fu", L"화", L"火", L"ن", L"Ог", L"Fe", L"Fo", L"Vu", L"Og", L"At"),
+			LangPick14(L"氷", L"Ic", L"Gl", L"Gh", L"Hi", L"빙", L"冰", L"ج", L"Лд", L"Ei", L"Ge", L"IJs", L"Ló", L"Bu"),
+			LangPick14(L"雷", L"Th", L"To", L"Tu", L"Tr", L"뢰", L"雷", L"ر", L"Гр", L"Do", L"Tr", L"Do", L"Gr", L"Yı"),
+			LangPick14(L"聖", L"Ho", L"Sa", L"Sa", L"Sa", L"성", L"圣", L"م", L"Св", L"He", L"Sa", L"He", L"Św", L"Ku"),
+			LangPick14(L"闇", L"Da", L"Té", L"Os", L"Os", L"암", L"暗", L"ظ", L"Ть", L"Du", L"Tr", L"Do", L"Mr", L"Ka"),
+			LangPick14(L"風", L"Wi", L"Ve", L"Ve", L"Vi", L"풍", L"风", L"ر", L"Ве", L"Wi", L"Ve", L"Wi", L"Wi", L"Rü"),
+			LangPick14(L"地", L"Ea", L"Te", L"Te", L"Ti", L"지", L"地", L"أ", L"Зе", L"Er", L"Te", L"Aa", L"Zi", L"To"),
+			LangPick14(L"毒", L"Po", L"Po", L"Ve", L"Ve", L"독", L"毒", L"س", L"Яд", L"Gi", L"Ve", L"Gi", L"Tr", L"Ze")
+		};
+		float bwE = (w - U(48) - gap * 8.f) / 9.f;
+		for (int t = 0; t < 9; t++) {
+			int on = t == 0 ? m_codexEl == 0 : m_codexEl == kEl[t - 1];
+			if (Btn(ID_CDX_EL0 + t, x + U(24) + (bwE + gap) * t, syy, bwE, jh, elL[t], t == 0 || elOk[t], on, U(11))) {
+				m_codexEl = t == 0 ? 0 : kEl[t - 1]; m_codexPage = 0;
+			}
+		}
 		static CodexHit hits[SKL_COUNT];
 		int n = 0;
 		for (int s = 0; s < SKL_COUNT && n < SKL_COUNT; s++) {
-			if (SkillInfo(s).enemyOnly) continue;
+			if (!jobHas(s)) continue;
 			if (s >= SKL_ART0 && s < SKL_ARTN && PaceRoleOfLv((s - SKL_ART0) % 26 + 7) < 0) continue;
+			const SkillDef& sd = SkillInfo(s);
+			if (sd.kind == SK_PASSIVE) { if (m_codexShape || m_codexEl) continue; }
+			else {
+				if (m_codexShape && SkillShapeBucket(sd) != m_codexShape) continue;
+				if (m_codexEl && sd.element != m_codexEl) continue;
+			}
 			CodexHit& h = hits[n];
 			h.skill = s;
-			h.mp = SkillInfo(s).mp;
+			h.mp = sd.mp;
 			wcscpy_s(h.name, SkillLabel(s));
-			if (wantForm) {
-				if (!IsFormSkill(s)) continue;
+			if (m_codexJob == -1) {
 				swprintf_s(h.how, L"%s", TT(TX_SK_TAB_FORM));
 				h.lv = s - SKL_FORM0;
 				h.key = 0;
-			} else if (want >= 0) {
-				int lv = CodexLearnLv(want, s);
-				if (lv <= 0 || IsFormSkill(s)) continue;
-				swprintf_s(h.how, L"%s  Lv%d", TT(ClassInfo(want).nameTx), lv);
+			} else if (m_codexJob > 0) {
+				int lv = CodexLearnLv(m_codexJob, s);
+				const wchar_t* nm = ClassTitle(m_codexJob);
+				if (!nm) nm = TT(ClassInfo(m_codexJob).nameTx);
+				swprintf_s(h.how, L"%s  Lv%d", nm, lv);
 				h.lv = lv;
 				h.key = 0;
 			} else {
@@ -2413,33 +2610,33 @@ void Game::DrawCodex()
 		}
 		s_codexSort = m_codexSort;
 		if (n > 1) qsort(hits, n, sizeof(CodexHit), CmpCodex);
-		float listTop = y + U(98);
-		float listBot = y + h - U(96);
-		int per = (int)((listBot - listTop) / U(40));
-		if (per < 3) per = 3;
+		float listTop = syy + jh + U(8);
+		float listBot = y + h - U(64);
+		float rowH = U(68);
+		int per = (int)((listBot - listTop) / rowH);
+		if (per < 2) per = 2;
 		int pages = max(1, (n + per - 1) / per);
 		if (m_codexPage < 0) m_codexPage = 0;
 		if (m_codexPage >= pages) m_codexPage = pages - 1;
 		int a = m_codexPage * per, b = min(n, a + per);
 		yy = listTop;
 		if (n == 0) m_r.HudText(TT(TX_PT_NONE), x + U(24), yy, U(16), RGBA8(190, 200, 220), 0, 1);
+		float textW = w - U(48);
 		for (int i = a; i < b; i++) {
 			const SkillDef& sd = SkillInfo(hits[i].skill);
-			wchar_t row[240];
-			swprintf_s(row, L"%s   MP%d   %s", hits[i].name, hits[i].mp, hits[i].how);
-			m_r.HudText(row, x + U(24), yy, U(16), RGBA8(240, 240, 245), 0, 1);
-			wchar_t attr[120], desc[420];
+			wchar_t attr[120], row[240];
 			SkillAttrText(sd, attr, 120);
-			if (attr[0]) swprintf_s(desc, L"%s  %s", TT(sd.descTx), attr);
-			else wcscpy_s(desc, TT(sd.descTx));
-			m_r.HudText(desc, x + U(36), yy + U(18), U(13), RGBA8(190, 200, 220), 0, 0);
-			yy += U(40);
+			if (attr[0]) m_r.HudText(attr, x + U(24), yy + U(12), FitTextPx(attr, textW, U(13), 1), RGBA8(255, 214, 140), 0, 1);
+			swprintf_s(row, L"%s   MP%d   %s", hits[i].name, hits[i].mp, hits[i].how);
+			m_r.HudText(row, x + U(24), yy + U(32), FitTextPx(row, textW, U(15), 1), RGBA8(240, 240, 245), 0, 1);
+			m_r.HudText(TT(sd.descTx), x + U(36), yy + U(52), FitTextPx(TT(sd.descTx), textW - U(12), U(12), 0), RGBA8(190, 200, 220), 0, 0);
+			yy += rowH;
 		}
 		wchar_t pg[32];
 		swprintf_s(pg, L"%d / %d", m_codexPage + 1, pages);
-		m_r.HudText(pg, x + w * .5f, y + h - U(78), U(14), RGBA8(220, 220, 220), 1, 0);
-		if (Btn(ID_CDX_PREV, x + U(24), y + h - U(56), U(140), U(36), L"◀")) m_codexPage = (m_codexPage + pages - 1) % pages;
-		if (Btn(ID_CDX_NEXT, x + U(180), y + h - U(56), U(140), U(36), L"▶")) m_codexPage = (m_codexPage + 1) % pages;
+		m_r.HudText(pg, x + w * .5f, y + h - U(46), U(14), RGBA8(220, 220, 220), 1, 0);
+		if (Btn(ID_CDX_PREV, x + U(24), y + h - U(40), U(120), U(32), L"◀")) m_codexPage = (m_codexPage + pages - 1) % pages;
+		if (Btn(ID_CDX_NEXT, x + U(156), y + h - U(40), U(120), U(32), L"▶")) m_codexPage = (m_codexPage + 1) % pages;
 	} else if (m_codex == 2) {
 		static const int showLv[] = { 1, 15, 35, 55, 78, 105, 140, 180, 230, 290, 1000, 9999 };
 		m_r.HudText(TT(TX_CDX_EXP), x + U(24), yy, U(16), RGBA8(255, 226, 150), 0, 1);
@@ -3136,7 +3333,7 @@ void Game::DrawShop()
 				m_shopHold = 1; m_shopFit = g->kind ? 2 : 1; m_shopFitId = ids[ix]; m_shopFitPage = 0;
 				TacSfx(TS_OPEN); return;
 			}
-			m_r.HudText(row, x + U(16) + w * .31f, yy + rowH * .34f, U(13),
+			m_r.HudText(row, x + U(16) + w * .31f, yy + rowH * .34f, FitTextPx(row, w * .62f - U(16), U(13), 1),
 				ok ? RGBA8(246, 242, 232) : RGBA8(140, 140, 150), 1, 1);
 			wchar_t users[200];
 			users[0] = 0;
@@ -3152,10 +3349,10 @@ void Game::DrawShop()
 				wcscpy_s(users, tmp);
 				return true;
 			};
-			int whoC[40], whoT[40], nw = 0;
+			int whoC[320], whoT[320], nw = 0;
 			int need = g->req > 0 ? g->req : 1;
 			auto pushWho = [&](int c) {
-				if (nw >= 40 || ClassLine(c) != g->line) return;
+				if (nw >= 320 || ClassLine(c) != g->line) return;
 				int t = ClassTier(c);
 				if (t < need) return;
 				whoC[nw] = c; whoT[nw] = t; nw++;
@@ -3164,16 +3361,18 @@ void Game::DrawShop()
 			for (int c = C_PLAYER_COUNT; c < C_PLAYER_COUNT + TAC_RANK_LINES * TAC_RANK_N; c++) pushWho(c);
 			pushWho(C_GLADIATOR);
 			pushWho(C_SHADOW);
+			for (int i = 0; i < JobCount(); i++) pushWho(C_JOB0 + i);
+			auto tierKey = [&](int t) { return t == need ? 0 : t; };
 			for (int i = 1; i < nw; i++) {
 				int vc = whoC[i], vt = whoT[i], j = i;
-				while (j > 0 && (whoT[j - 1] > vt || (whoT[j - 1] == vt && whoC[j - 1] > vc))) {
+				while (j > 0 && (tierKey(whoT[j - 1]) > tierKey(vt) || (tierKey(whoT[j - 1]) == tierKey(vt) && whoC[j - 1] > vc))) {
 					whoC[j] = whoC[j - 1]; whoT[j] = whoT[j - 1]; j--;
 				}
 				whoC[j] = vc; whoT[j] = vt;
 			}
 			for (int i = 0; i < nw; i++) if (!addUser(whoC[i])) break;
 			if (users[0])
-				m_r.HudText(users, x + U(16) + w * .31f, yy + rowH * .74f, U(11), RGBA8(186, 198, 220), 1, 1);
+				m_r.HudText(users, x + U(16) + w * .31f, yy + rowH * .74f, FitTextPx(users, w * .62f - U(16), U(11), 0), RGBA8(186, 198, 220), 1, 1);
 		}
 		yy += rowStep;
 	}
@@ -4085,7 +4284,7 @@ void Game::DrawCreateUi()
 			wchar_t info[96];
 			swprintf_s(info, L"%s %s  %s %d-%d", TT(cd.magic ? TX_CR_MAGIC : TX_CR_WARRIOR), cd.moveType == MV_FLY ? TT(TX_MISC_FLY) : L"", TT(TX_MISC_RANGE), cd.rMin, cd.rMax);
 			m_r.HudText(info, bx + bw - U(10), yy + U(14), U(13), RGBA8(200, 200, 210), 2, 0);
-			m_r.HudTextBox(TT(cd.descTx), bx + U(10), yy + U(28), bw - U(20), U(40), U(13), RGBA8(226, 226, 232));
+			m_r.HudTextBox(ClassBlurb(m_edit.cls), bx + U(10), yy + U(28), bw - U(20), U(40), U(13), RGBA8(226, 226, 232));
 			if (dh > U(180) && isNew) {
 				CharData t = m_edit;
 				t.lv = 1;
@@ -4157,6 +4356,7 @@ void Game::EnterParty()
 	m_screen = SC_PARTY;
 	m_confirmDelete = 0;
 	m_eqPick = 0;
+	m_partySkPage = 0;
 	m_textFocus = 0;
 	if (m_partySel < 0 || !m_save.roster[m_partySel].used) {
 		m_partySel = -1;
@@ -4430,6 +4630,7 @@ void Game::DrawPartyUi()
 		BOOL inParty = FALSE;
 		for (int p = 0; p < pCap; p++) if (m_save.party[p] == i) inParty = TRUE;
 		if (Btn(ID_PT_CARD0 + local, cx, cy, cw, ch, L"", TRUE, m_partySel == i, 0, inParty ? RGBA8(50, 80, 140, 240) : 0)) {
+			if (m_partySel != i) m_partySkPage = 0;
 			if (m_partySel == i) TogglePartyMember(i);
 			m_partySel = i;
 			m_confirmDelete = 0;
@@ -4507,9 +4708,9 @@ void Game::DrawPartyUi()
 	int gearBonus[S_COUNT];
 	CharFightBonus(c, gearBonus);
 	float sy = y + max(ps2 + U(18.f), U(128.f));
-	sy += DrawStatLines(c, dx + U(14), sy, dw - U(28), gearBonus, -1, -1) + U(6);
-	m_r.HudText(TT(TX_PT_SKILLS), dx + U(14), sy + U(4), U(15), RGBA8(255, 226, 150), 0, 1);
-	sy += U(18);
+	sy += DrawStatLines(c, dx + U(14), sy, dw - U(28), gearBonus, -1, -1) + U(8);
+	m_r.HudText(TT(TX_PT_SKILLS), dx + U(14), sy + U(12), U(16), RGBA8(255, 226, 150), 0, 1);
+	sy += U(26);
 	struct SkRow { int kind; int id; DWORD col; };
 	SkRow sks[160];
 	int ns = 0;
@@ -4544,51 +4745,141 @@ void Game::DrawPartyUi()
 	}
 	float skillTop = sy;
 	float skillBot = gearY - U(6);
-	if (skillBot < skillTop + U(16)) skillBot = skillTop + U(16);
+	if (skillBot < skillTop + U(28)) skillBot = skillTop + U(28);
+	m_partySkX = dx + U(6);
+	m_partySkY = skillTop - U(24);
+	m_partySkW = dw - U(12);
+	m_partySkH = skillBot - m_partySkY;
+	m_partySkPages = 1;
 	if (!ns) {
-		m_r.HudText(TT(TX_PT_NONE), dx + U(20), skillTop + U(9), U(13), RGBA8(160, 160, 170), 0, 0);
+		m_r.HudText(TT(TX_PT_NONE), dx + U(20), skillTop + U(12), U(14), RGBA8(160, 160, 170), 0, 0);
 	} else {
-		float avail = skillBot - skillTop;
-		if (avail < U(16)) avail = U(16);
-		int cols = dw >= U(420) ? 2 : 1;
-		while (cols < 4 && avail / (float)((ns + cols - 1) / cols) < U(16)) cols++;
-		int rows = (ns + cols - 1) / cols;
-		float rowH = avail / (float)rows;
-		if (rowH > U(20)) rowH = U(20);
-		float fs = rowH < U(15) ? U(11) : U(13);
-		float colW = (dw - U(16)) / (float)cols;
+		int buck[10][160];
+		int cnt[10] = {};
+		auto headOf = [&](int i) -> int {
+			if (sks[i].kind == 1) return IsCraftSuper(sks[i].id) ? 7 : 6;
+			if (sks[i].kind == 2) return 8;
+			if (sks[i].kind == 3) return 9;
+			const SkillDef& sd = SkillInfo(sks[i].id);
+			if (sd.kind == SK_PASSIVE) return 5;
+			int sh = SkillShapeBucket(sd);
+			if (sh == 4) return 3;
+			if (sh == 5) return 4;
+			if (sh == 3) return 2;
+			if (sh == 1) return 0;
+			return 1;
+		};
 		for (int i = 0; i < ns; i++) {
-			int col = i % cols;
-			int row = i / cols;
-			float hx = dx + U(8) + col * colW;
-			float hy = skillTop + row * rowH;
-			float cy = hy + rowH * .5f;
-			BOOL hov = !modal && m_mouseSeen && Hit(hx, hy, colW - U(4), rowH);
-			if (hov) {
-				m_skillTip = sks[i].kind;
-				m_skillTipId = sks[i].id;
-				m_r.HudRect(hx, hy, colW - U(4), rowH, RGBA8(255, 220, 140, 40));
+			int h = headOf(i);
+			if (cnt[h] < 160) buck[h][cnt[h]++] = i;
+		}
+		const wchar_t* headNm[10] = {
+			TT(TX_SHAPE_ONE), TT(TX_MISC_AREA), TT(TX_SHAPE_WIDE), TT(TX_SHAPE_LINE), TT(TX_SHAPE_FAN),
+			TT(TX_MISC_PASSIVE), TT(TX_CRAFT), TT(TX_OUGI), TT(TX_PAS), SummonWord()
+		};
+		int cols = dw >= U(360) ? 2 : 1;
+		struct Ln { short head; short n; short si[2]; };
+		Ln all[200];
+		int nAll = 0;
+		for (int h = 0; h < 10 && nAll < 200; h++) {
+			if (!cnt[h]) continue;
+			all[nAll].head = (short)h;
+			all[nAll].n = 0;
+			nAll++;
+			for (int i = 0; i < cnt[h] && nAll < 200; ) {
+				all[nAll].head = -1;
+				all[nAll].n = 0;
+				for (int k = 0; k < cols && i < cnt[h]; k++, i++) all[nAll].si[all[nAll].n++] = (short)buck[h][i];
+				nAll++;
 			}
-			wchar_t sl[140];
-			if (sks[i].kind == 1) {
-				BOOL ougi = IsCraftSuper(sks[i].id);
-				swprintf_s(sl, L"%s %s%s", ougi ? TT(TX_OUGI) : TT(TX_CRAFT), CraftName(sks[i].id), ougi ? L" ★" : L"");
-			} else if (sks[i].kind == 2) {
-				swprintf_s(sl, L"%s %s", TT(TX_PAS), PasName(sks[i].id));
-			} else if (sks[i].kind == 3) {
-				swprintf_s(sl, L"%s %s", SummonWord(), SkillLabel(sks[i].id));
+		}
+		const float rowH = U(24);
+		const float nameFs = U(14);
+		int fit = (int)((skillBot - skillTop) / rowH);
+		if (fit < 1) fit = 1;
+		if (fit > 16) fit = 16;
+		enum { SK_PG = 48, SK_LN = 16 };
+		Ln page[SK_PG][SK_LN];
+		int pageN[SK_PG];
+		memset(pageN, 0, sizeof(pageN));
+		int pi = 0, ln = 0, curH = -1;
+		auto turnPage = [&]() -> bool {
+			pageN[pi] = ln;
+			if (pi + 1 >= SK_PG) return false;
+			pi++;
+			ln = 0;
+			return true;
+		};
+		for (int i = 0; i < nAll; i++) {
+			int repeat = 0;
+			if (all[i].head >= 0) {
+				curH = all[i].head;
+				if (ln > 0 && ln + 1 >= fit && i + 1 < nAll && !turnPage()) break;
+			} else if (ln == 0 && curH >= 0 && fit >= 2) repeat = 1;
+			if (ln > 0 && ln + (repeat ? 2 : 1) > fit) {
+				if (!turnPage()) break;
+				if (all[i].head < 0 && curH >= 0 && fit >= 2) repeat = 1;
+			}
+			if (repeat && ln < SK_LN) { page[pi][ln].head = (short)curH; page[pi][ln].n = 0; ln++; }
+			if (ln < SK_LN) page[pi][ln++] = all[i];
+			if (ln >= fit && i + 1 < nAll && !turnPage()) break;
+		}
+		pageN[pi] = ln;
+		int pages = nAll > 0 ? pi + 1 : 1;
+		if (m_partySkPage >= pages) m_partySkPage = pages - 1;
+		if (m_partySkPage < 0) m_partySkPage = 0;
+		m_partySkPages = pages;
+		if (pages > 1) {
+			wchar_t pg[24];
+			swprintf_s(pg, L"%d / %d", m_partySkPage + 1, pages);
+			float bw = U(28), bh = U(22);
+			float by = skillTop - U(24);
+			float nx = dx + dw - U(14) - bw;
+			float pxb = nx - U(58) - bw;
+			if (Btn(ID_PT_SKPREV, pxb, by, bw, bh, L"◀", TRUE, FALSE, U(13))) { m_partySkPage = (m_partySkPage + pages - 1) % pages; return; }
+			m_r.HudText(pg, (pxb + bw + nx) * .5f, by + bh * .5f, U(13), RGBA8(230, 230, 240), 1, 1);
+			if (Btn(ID_PT_SKNEXT, nx, by, bw, bh, L"▶", TRUE, FALSE, U(13))) { m_partySkPage = (m_partySkPage + 1) % pages; return; }
+		}
+		int pg = m_partySkPage;
+		m_r.HudRect(dx + U(8), skillTop, dw - U(16), min(skillBot - skillTop, rowH * pageN[pg]), RGBA8(8, 12, 24, 110));
+		float colW = (dw - U(20)) / (float)cols;
+		float ysk = skillTop;
+		for (int li = 0; li < pageN[pg]; li++) {
+			const Ln& L = page[pg][li];
+			if (L.head >= 0) {
+				m_r.HudText(headNm[L.head], dx + U(14), ysk + rowH * .5f, U(14), RGBA8(255, 214, 140), 0, 1);
 			} else {
-				const SkillDef& sd = SkillInfo(sks[i].id);
-				wchar_t tag[24];
-				if (sd.kind == SK_PASSIVE) wcscpy_s(tag, TT(TX_MISC_PASSIVE));
-				else if (sd.shape == SH_LINE || sd.shape == SH_FAN) swprintf_s(tag, L"%s%d", CraftShapeName(sd.area, sd.shape), sd.area);
-				else if (sd.area <= 0) wcscpy_s(tag, TT(TX_SHAPE_ONE));
-				else if (sd.area == 1) wcscpy_s(tag, TT(TX_MISC_AREA));
-				else swprintf_s(tag, L"%s%d", TT(TX_SHAPE_WIDE), sd.area);
-				if (sd.kind == SK_PASSIVE) swprintf_s(sl, L"%s (%s)", SkillLabel(sks[i].id), tag);
-				else swprintf_s(sl, L"%s %s MP%d", SkillLabel(sks[i].id), tag, sd.mp);
+				for (int k = 0; k < L.n; k++) {
+					int si = L.si[k];
+					float hx = dx + U(10) + k * colW;
+					BOOL hov = !modal && m_mouseSeen && Hit(hx, ysk, colW - U(6), rowH);
+					if (hov) {
+						m_skillTip = sks[si].kind;
+						m_skillTipId = sks[si].id;
+						m_r.HudRect(hx, ysk, colW - U(6), rowH, RGBA8(255, 220, 140, 48));
+					}
+					wchar_t nm[96], mp[16];
+					nm[0] = mp[0] = 0;
+					BOOL showMp = FALSE;
+					if (sks[si].kind == 1) {
+						BOOL ougi = IsCraftSuper(sks[si].id);
+						swprintf_s(nm, L"%s%s", CraftName(sks[si].id), ougi ? L" ★" : L"");
+					} else if (sks[si].kind == 2) {
+						wcscpy_s(nm, PasName(sks[si].id));
+					} else if (sks[si].kind == 3) {
+						wcscpy_s(nm, SkillLabel(sks[si].id));
+					} else {
+						const SkillDef& sd = SkillInfo(sks[si].id);
+						wcscpy_s(nm, SkillLabel(sks[si].id));
+						if (sd.kind != SK_PASSIVE) { swprintf_s(mp, L"MP%d", sd.mp); showMp = TRUE; }
+					}
+					float mpFs = U(12);
+					float mpW = showMp ? m_r.TextWidth(mp, mpFs, 0) + U(8) : 0;
+					m_r.HudText(nm, hx + U(4), ysk + rowH * .5f, FitTextPx(nm, colW - U(12) - mpW, nameFs, 0), hov ? RGBA8(255, 244, 210) : sks[si].col, 0, 0);
+					if (showMp) m_r.HudText(mp, hx + colW - U(8), ysk + rowH * .5f, mpFs, RGBA8(186, 198, 220), 2, 0);
+				}
 			}
-			m_r.HudText(sl, hx + U(2), cy, fs, hov ? RGBA8(255, 244, 210) : sks[i].col, 0, 0);
+			ysk += rowH;
 		}
 	}
 	// 操作
@@ -4804,7 +5095,7 @@ void Game::DrawEvolveUi()
 		}
 		if (m_evTarget >= 0) {
 			const ClassDef& td = ClassInfo(m_evTarget);
-			m_r.HudTextBox(TT(td.descTx), c1, ty + U(6), colW, U(70), U(13), RGBA8(226, 226, 232));
+			m_r.HudTextBox(ClassBlurb(m_evTarget), c1, ty + U(6), colW, U(70), U(13), RGBA8(226, 226, 232));
 			ty += U(80);
 			m_r.HudText(TT(TX_EV_PREVIEW), c1, ty + U(8), U(14), RGBA8(255, 226, 150), 0, 1);
 			CharData pv = mc;

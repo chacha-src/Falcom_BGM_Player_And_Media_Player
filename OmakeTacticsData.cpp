@@ -1247,12 +1247,12 @@ static const int kLineParent[TAC_RANK_LINES] = {
 };
 // 段が上がるほど強い技。英雄系に終焉魔法、魔導系に初級は置かない。
 static const int kExtSkill[TAC_RANK_LINES][TAC_RANK_N] = {
-	{ SKL_CLEAVE, SKL_GRANDSLASH, SKL_BRAVE, SKL_GODSLASH, SKL_GODSLASH, SKL_GODSLASH, SKL_GODSLASH },
-	{ SKL_FROSTFIELD, SKL_STORM, SKL_RUIN, SKL_METEOR, SKL_APOC, SKL_APOC, SKL_APOC },
-	{ SKL_HEALALL, SKL_SANCTUARY, SKL_RENEW, SKL_NOVA, SKL_NOVA, SKL_NOVA, SKL_NOVA },
-	{ SKL_PIERCE, SKL_SNIPE, SKL_ARROWRAIN, SKL_ASSASSINATE, SKL_SHINE, SKL_SHINE, SKL_SHINE },
-	{ SKL_WHIRL, SKL_DRAGONFANG, SKL_GRANDSLASH, SKL_BRAVE, SKL_GODSLASH, SKL_GODSLASH, SKL_GODSLASH },
-	{ SKL_FROSTFIELD, SKL_STORM, SKL_RUIN, SKL_METEOR, SKL_APOC, SKL_APOC, SKL_APOC },
+	{ SKL_CLEAVE, SKL_GRANDSLASH, SKL_BRAVE, SKL_GODSLASH, SKL_LINESLASH, SKL_FANSLASH, SKL_RAMPAGE },
+	{ SKL_FROSTFIELD, SKL_STORM, SKL_RUIN, SKL_METEOR, SKL_APOC, SKL_THUNDERFIELD, SKL_GRAVITY },
+	{ SKL_HEALALL, SKL_SANCTUARY, SKL_RENEW, SKL_NOVA, SKL_SHOWER, SKL_SHINE, SKL_ESUNA },
+	{ SKL_PIERCE, SKL_SNIPE, SKL_ARROWRAIN, SKL_ASSASSINATE, SKL_ARROWLINE, SKL_ARROWFAN, SKL_CRESCENT },
+	{ SKL_WHIRL, SKL_DRAGONFANG, SKL_EARTHREND, SKL_BLOODAXE, SKL_COLOSSMASH, SKL_IRONHOWL, SKL_AXEWHIRL },
+	{ SKL_TRANSMUTE, SKL_MIASMA, SKL_ELFIRE, SKL_ELICE, SKL_ELTHUNDER, SKL_ELEATH, SKL_ELPOISON },
 	{ SKL_FISTGOD, SKL_WARLORD, SKL_BREAKKING, SKL_STEELGOD, SKL_HEGEFIST, SKL_PEERLESS, SKL_ENDFIST },
 	{ SKL_GHOSTHAND, SKL_SHADEEMP, SKL_TRACELESS, SKL_NIGHTEMP, SKL_VOIDTHIEF, SKL_LASTNIGHT, SKL_ETERNIGHT },
 };
@@ -1441,23 +1441,92 @@ static void BuildExt()
 			d.base[S_MOV] = p.base[S_MOV] + (r + 1) / 2;
 			int arrive = PromoteLevel(rank - 1);
 			int next = PromoteLevel(rank);
-			if (next >= 9999 || next <= arrive) next = arrive + 60;
-			d.learn[0].lv = arrive; d.learn[0].skill = kExtSkill[line][r];
-			int g = p.group;
-			if (g < 0 || g >= G_COUNT) g = 0;
-			for (int i = 1; i < 6; i++) {
-				// 着任から次の転職までの帯に散らす。強い型は高い段だけ。
-				int lv = arrive + (next - arrive) * i / 6;
-				if (lv <= arrive) lv = arrive + i;
-				if (lv >= next) lv = next - 1;
-				int artLv = 8 + r * 2 + i;
-				if (artLv > 25) artLv = 25;
-				d.learn[i].lv = lv;
-				d.learn[i].skill = SKL_ART0 + g * 26 + artLv;
-			}
+			if (next >= 9999 || next <= arrive) next = arrive + 80;
+			int lv = arrive;
+			if (rank >= 9) lv = arrive + (next - arrive) * 4 / 5;
+			else if (rank >= 6) lv = arrive + (next - arrive) / 2;
+			if (lv <= arrive && rank >= 6) lv = arrive + 1;
+			if (lv >= next) lv = next - 1;
+			for (int i = 0; i < LEARN_N; i++) { d.learn[i].lv = 0; d.learn[i].skill = -1; }
+			d.learn[0].lv = lv;
+			d.learn[0].skill = kExtSkill[line][r];
 		}
 	}
 	s_extOk = 1;
+}
+#include "tactics_src/job_catalog.inc"
+static ClassDef s_job[TAC_JOB_N];
+static int s_jobOk = 0;
+static const int kFamSig[8][4] = {
+	{ SKL_HOLYBLADE, SKL_CLEAVE, SKL_BRAVE, SKL_GRANDSLASH },
+	{ SKL_METEOR, SKL_FIRE, SKL_GRAVITY, SKL_RUIN },
+	{ SKL_SNIPE, SKL_ARROWRAIN, SKL_PIERCE, SKL_ARROWLINE },
+	{ SKL_ASSASSINATE, SKL_VITALSTAB, SKL_SHADOWSTEP, SKL_BACKCUT },
+	{ SKL_TRANSMUTE, SKL_RUNEBLADE, SKL_MIASMA, SKL_ELPOISON },
+	{ SKL_HEAL, SKL_SANCTUARY, SKL_RENEW, SKL_ESUNA },
+	{ SKL_FISTGOD, SKL_BASH, SKL_WARLORD, SKL_BREAKKING },
+	{ SKL_GHOSTHAND, SKL_SMOKESCREEN, SKL_NIGHTRUN, SKL_DEATHMARK },
+};
+static void BuildJobs()
+{
+	if (s_jobOk) return;
+	BuildExt();
+	for (int i = 0; i < TAC_JOB_N; i++) {
+		int fam = kJobFam[i];
+		if (fam < 0 || fam >= 8) fam = 0;
+		int parent = kLineParent[fam];
+		const ClassDef& p = ClassInfo(parent);
+		ClassDef& d = s_job[i];
+		d = p;
+		d.tier = kJobTier[i];
+		d.nameTx = -1;
+		d.descTx = TX_CLD_JOB + i;
+		if (kJobFly[i]) d.moveType = MV_FLY;
+		int up = d.tier - 3;
+		if (up < 0) up = 0;
+		d.weaponPow = p.weaponPow + up;
+		for (int s = 0; s < S_COUNT; s++) {
+			if (s == S_MOV) continue;
+			if (s >= S_JMP) d.base[s] = p.base[s] + (up + 1) / 2;
+			else d.base[s] = p.base[s] + up * (s == S_HP || s == S_MP ? 4 : 1);
+		}
+		d.base[S_MOV] = p.base[S_MOV];
+		for (int k = 0; k < LEARN_N; k++) { d.learn[k].lv = 0; d.learn[k].skill = -1; }
+		int arrive = PromoteLevel(d.tier - 1);
+		int next = PromoteLevel(d.tier);
+		if (next >= 9999 || next <= arrive) next = arrive + 80;
+		int skArt = SKL_ART0 + (i % 104);
+		int skFam = kFamSig[fam][i & 3];
+		if (d.tier <= 5) {
+			d.learn[0].lv = arrive; d.learn[0].skill = skFam;
+			int mid = arrive + (next - arrive) / 2;
+			if (mid <= arrive) mid = arrive + 1;
+			if (mid >= next) mid = next - 1;
+			d.learn[1].lv = mid; d.learn[1].skill = skArt;
+		} else if (d.tier <= 8) {
+			int mid = arrive + (next - arrive) / 2;
+			if (mid <= arrive) mid = arrive + 1;
+			if (mid >= next) mid = next - 1;
+			d.learn[0].lv = mid; d.learn[0].skill = skArt;
+		} else {
+			int late = arrive + (next - arrive) * 4 / 5;
+			if (late <= arrive) late = arrive + 1;
+			if (late >= next) late = next - 1;
+			d.learn[0].lv = late; d.learn[0].skill = skArt;
+		}
+	}
+	s_jobOk = 1;
+}
+int JobCount() { return TAC_JOB_N; }
+const wchar_t* ClassTitle(int cls)
+{
+	if (cls < C_JOB0 || cls >= C_JOB0 + TAC_JOB_N) return NULL;
+	const wchar_t* const* s = kJobNm[cls - C_JOB0];
+	return LangPick14(s[0], s[1], s[2], s[3], s[4], s[5], s[6], s[7], s[8], s[9], s[10], s[11], s[12], s[13]);
+}
+const wchar_t* ClassBlurb(int cls)
+{
+	return TT(ClassInfo(cls).descTx);
 }
 const ClassDef& ClassInfo(int c)
 {
@@ -1466,15 +1535,20 @@ const ClassDef& ClassInfo(int c)
 	BuildExt();
 	if (c == C_GLADIATOR) return s_third[0];
 	if (c == C_SHADOW) return s_third[1];
+	if (c >= C_JOB0 && c < C_JOB0 + TAC_JOB_N) {
+		BuildJobs();
+		return s_job[c - C_JOB0];
+	}
 	int i = c - C_PLAYER_COUNT;
 	if (i < 0 || i >= TAC_RANK_LINES * TAC_RANK_N) return kClass[0];
 	return s_ext[i];
 }
 int PromoteLevel(int tier)
 {
-	static const int k[10] = { 0, 15, 35, 55, 78, 105, 140, 180, 230, 290 };
+	// 10次で止めない。最後の段だけが門を閉じる。
+	static const int k[12] = { 0, 15, 35, 55, 78, 105, 140, 180, 230, 290, 370, 470 };
 	if (tier < 1) return 15;
-	if (tier > 9) return 9999;
+	if (tier >= 12) return 9999;
 	return k[tier];
 }
 int ExpToNext(int lv)
@@ -1709,7 +1783,7 @@ static void BuildArts()
 			int el = 1 + ((local + g * 3) % 8);
 			memset(&d, 0, sizeof(d));
 			d.nameTx = TX_ART_FIRST + g * 26 + local;
-			d.descTx = TX_ARD_AREA + role;
+			d.descTx = TX_ARTD_FIRST + g * 26 + local;
 			d.element = el;
 			d.hits = 1;
 			d.enemyOnly = 0;
@@ -1736,7 +1810,7 @@ static void BuildAreaSupport()
 		SkillDef& h = s_area[i];
 		memset(&h, 0, sizeof(h));
 		h.nameTx = TX_SK_AREAHEAL;
-		h.descTx = TX_SKD_AREAHEAL;
+		h.descTx = TX_SKD_AREAX + i;
 		h.kind = SK_HEAL;
 		h.mp = 8 + rad * 5;
 		h.power = 12 + rad * 3;
@@ -1748,7 +1822,7 @@ static void BuildAreaSupport()
 		SkillDef& z = s_area[8 + i];
 		memset(&z, 0, sizeof(z));
 		z.nameTx = TX_SK_AREARAISE;
-		z.descTx = TX_SKD_AREARAISE;
+		z.descTx = TX_SKD_AREAX + 8 + i;
 		z.kind = SK_HEAL;
 		z.mp = 14 + rad * 8;
 		z.power = 0;
@@ -1799,54 +1873,15 @@ const SkillDef& SkillInfo(int s)
 	if (s > SKL_RAISE && s < SKL_AREAHEAL0) return kWide[s - (SKL_RAISE + 1)];
 	return kSkill[Clampi(s, 0, SKL_ART0 - 1)];
 }
-static const wchar_t* ArtElName(int el)
-{
-	switch (el) {
-	case EL_FIRE: return LangPick14(L"ファイア", L"Fire", L"Feu", L"Fuoco", L"Fuego", L"파이어", L"火焰", L"نار", L"Огонь", L"Feuer", L"Fogo", L"Vuur", L"Ogień", L"Ateş");
-	case EL_ICE: return LangPick14(L"アイス", L"Ice", L"Glace", L"Ghiaccio", L"Hielo", L"아이스", L"冰", L"جليد", L"Лёд", L"Eis", L"Gelo", L"IJs", L"Lód", L"Buz");
-	case EL_THUNDER: return LangPick14(L"サンダー", L"Thunder", L"Tonnerre", L"Tuono", L"Trueno", L"썬더", L"雷", L"رعد", L"Гром", L"Donner", L"Trovão", L"Donder", L"Grom", L"Yıldırım");
-	case EL_HOLY: return LangPick14(L"ホーリー", L"Holy", L"Sacré", L"Sacro", L"Sagrado", L"홀리", L"圣", L"مقدس", L"Святость", L"Heilig", L"Sagrado", L"Heilig", L"Świętość", L"Kutsal");
-	case EL_DARK: return LangPick14(L"ダーク", L"Dark", L"Ténèbres", L"Oscurità", L"Oscuridad", L"다크", L"暗", L"ظلام", L"Тьма", L"Dunkel", L"Trevas", L"Donker", L"Mrok", L"Karanlık");
-	case EL_WIND: return LangPick14(L"ウィンド", L"Wind", L"Vent", L"Vento", L"Viento", L"윈드", L"风", L"ريح", L"Ветер", L"Wind", L"Vento", L"Wind", L"Wiatr", L"Rüzgar");
-	case EL_EARTH: return LangPick14(L"アース", L"Earth", L"Terre", L"Terra", L"Tierra", L"어스", L"地", L"أرض", L"Земля", L"Erde", L"Terra", L"Aarde", L"Ziemia", L"Toprak");
-	case EL_POISON: return LangPick14(L"ポイズン", L"Poison", L"Poison", L"Veleno", L"Veneno", L"포이즌", L"毒", L"سم", L"Яд", L"Gift", L"Veneno", L"Gif", L"Trucizna", L"Zehir");
-	default: return L"";
-	}
-}
-static const wchar_t* ArtRoleName(int role)
-{
-	switch (role) {
-	case 0: return LangPick14(L"エリア", L"Area", L"Zone", L"Area", L"Área", L"에어리어", L"范围", L"نطاق", L"Область", L"Fläche", L"Área", L"Gebied", L"Obszar", L"Alan");
-	case 1: return LangPick14(L"ヒール", L"Heal", L"Soin", L"Cura", L"Cura", L"힐", L"治疗", L"شفاء", L"Лечение", L"Heilung", L"Cura", L"Genezing", L"Leczenie", L"Şifa");
-	case 2: return LangPick14(L"ワイド", L"Wide", L"Large", L"Ampia", L"Amplia", L"와이드", L"广域", L"واسع", L"Широкая", L"Weit", L"Ampla", L"Wijd", L"Szeroka", L"Geniş");
-	case 3: return LangPick14(L"ヘイスト", L"Haste", L"Hâte", L"Rapidità", L"Prisa", L"헤이스트", L"加速", L"تسريع", L"Ускорение", L"Hast", L"Pressa", L"Haast", L"Przyspieszenie", L"Hız");
-	case 4: return LangPick14(L"ビーム", L"Beam", L"Rayon", L"Raggio", L"Rayo", L"빔", L"射线", L"شعاع", L"Луч", L"Strahl", L"Raio", L"Straal", L"Promień", L"Işın");
-	case 5: return LangPick14(L"ファン", L"Fan", L"Éventail", L"Ventaglio", L"Abanico", L"팬", L"扇形", L"مروحة", L"Веер", L"Fächer", L"Leque", L"Waaier", L"Wachlarz", L"Yelpaze");
-	case 6: return LangPick14(L"スロウ", L"Slow", L"Lenteur", L"Lentezza", L"Lentitud", L"슬로우", L"迟缓", L"بطء", L"Замедление", L"Langsam", L"Lentidão", L"Traag", L"Spowolnienie", L"Yavaş");
-	default: return LangPick14(L"ノヴァ", L"Nova", L"Nova", L"Nova", L"Nova", L"노바", L"新星", L"نوفا", L"Нова", L"Nova", L"Nova", L"Nova", L"Nowa", L"Nova");
-	}
-}
+#include "tactics_src/area_names.inc"
 const wchar_t* SkillLabel(int s)
 {
 	if (IsSummonId(s)) return SummonName(s - SUMMON_BASE + 1);
-	if (s >= SKL_ART0 && s < SKL_ARTN) {
-		int role = PaceRoleOfLv((s - SKL_ART0) % 26 + 7);
-		if (role >= 0) {
-			static wchar_t buf[80];
-			const wchar_t* el = ArtElName(SkillInfo(s).element);
-			const wchar_t* roleW = ArtRoleName(role);
-			if (el && el[0]) swprintf_s(buf, L"%s・%s", el, roleW);
-			else wcscpy_s(buf, roleW);
-			return buf;
-		}
+	if (s >= SKL_AREAHEAL0 && s < SKL_FORM0) {
+		const wchar_t* const* row = kAreaNm[s - SKL_AREAHEAL0];
+		return LangPick14(row[0], row[1], row[2], row[3], row[4], row[5], row[6], row[7], row[8], row[9], row[10], row[11], row[12], row[13]);
 	}
-	const SkillDef& sd = SkillInfo(s);
-	if (s >= SKL_AREAHEAL0 && s < SKL_FORM0 && sd.area > 0) {
-		static wchar_t buf[80];
-		swprintf_s(buf, L"%s%d", TT(sd.nameTx), sd.area);
-		return buf;
-	}
-	return TT(sd.nameTx);
+	return TT(SkillInfo(s).nameTx);
 }
 
 // ============================================================ モンスター
@@ -2271,10 +2306,14 @@ static void CharTakeSkill(CharData& c, int s);
 void CharGrantReached(CharData& c)
 {
 	const ClassDef& cd = ClassInfo(c.cls);
-	for (int i = 0; i < SKL_ARTN - SKL_ART0; i++) CharTakeSkill(c, SKL_ART0 + i);
+	// 4次以降は着任時に戦技を全部剥がさない。覚える本数は learn 側で遅くする。
+	if (cd.tier <= 3) {
+		for (int i = 0; i < SKL_ARTN - SKL_ART0; i++) CharTakeSkill(c, SKL_ART0 + i);
+	}
 	for (int i = 0; i < LEARN_N; i++)
 		if (cd.learn[i].skill >= 0 && cd.learn[i].lv > 0 && cd.learn[i].lv <= c.lv)
 			CharGiveSkill(c, cd.learn[i].skill);
+	if (cd.tier <= 3) {
 	int hi = c.lv < 32 ? c.lv : 32;
 	for (int lv = 7; lv <= hi; lv++) {
 		int sk = PaceSkill(c.cls, lv);
@@ -2310,6 +2349,7 @@ void CharGrantReached(CharData& c)
 				CharGiveSkill(c, SKL_ELPOISON);
 			}
 		}
+	}
 	}
 	{
 		int cap = SupportAreaCap(cd);
@@ -2464,32 +2504,65 @@ int CharLevelUp(CharData& c, Rng& r, int gains[S_COUNT], int* learned, int learn
 // ============================================================ 進化
 struct EvoRow { int from; EvoOption o[4]; };
 static const EvoRow kEvo[] = {
-	{ C_SOLDIER,    { { C_PALADIN, -1 }, { C_RUNEKNIGHT, G_MAGIC }, { C_SKYKNIGHT, G_SWIFT }, { -1, -1 } } },
-	{ C_FIGHTER,    { { C_BERSERKER, -1 }, { C_PALADIN, G_HOLY }, { C_SKYKNIGHT, G_SWIFT }, { -1, -1 } } },
-	{ C_ARCHER,     { { C_SNIPER, -1 }, { C_ASSASSIN, G_SWIFT }, { C_SKYKNIGHT, G_MELEE }, { -1, -1 } } },
-	{ C_THIEF,      { { C_ASSASSIN, -1 }, { C_SNIPER, G_SWIFT }, { C_SKYKNIGHT, G_MELEE }, { -1, -1 } } },
-	{ C_MAGE,       { { C_WIZARD, -1 }, { C_ALCHEMIST, -1 }, { C_RUNEKNIGHT, G_MELEE }, { C_BISHOP, G_HOLY } } },
-	{ C_CLERIC,     { { C_BISHOP, -1 }, { C_PALADIN, G_MELEE }, { C_WIZARD, G_MAGIC }, { -1, -1 } } },
-	{ C_PALADIN,    { { C_HERO, -1 }, { C_SAINT, G_HOLY }, { C_DRAGONLORD, G_SWIFT }, { -1, -1 } } },
-	{ C_BERSERKER,  { { C_GLADIATOR, -1 }, { C_HERO, -1 }, { C_DRAGONLORD, G_SWIFT }, { -1, -1 } } },
-	{ C_RUNEKNIGHT, { { C_HERO, -1 }, { C_ARCHMAGE, G_MAGIC }, { -1, -1 }, { -1, -1 } } },
-	{ C_SNIPER,     { { C_PHANTOM, -1 }, { C_DRAGONLORD, G_MELEE }, { -1, -1 }, { -1, -1 } } },
-	{ C_ASSASSIN,   { { C_SHADOW, -1 }, { C_PHANTOM, -1 }, { C_HERO, G_MELEE }, { -1, -1 } } },
-	{ C_SKYKNIGHT,  { { C_DRAGONLORD, -1 }, { C_HERO, G_MELEE }, { C_PHANTOM, G_SWIFT }, { -1, -1 } } },
-	{ C_WIZARD,     { { C_ARCHMAGE, -1 }, { C_SAINT, G_HOLY }, { -1, -1 }, { -1, -1 } } },
-	{ C_BISHOP,     { { C_SAINT, -1 }, { C_ARCHMAGE, G_MAGIC }, { -1, -1 }, { -1, -1 } } },
-	{ C_ALCHEMIST,  { { C_ARCHALCHEMIST, -1 }, { C_ARCHMAGE, G_MAGIC }, { -1, -1 }, { -1, -1 } } },
+	{ C_SOLDIER,    { { C_PALADIN, -1 }, { C_RUNEKNIGHT, -1 }, { C_SKYKNIGHT, -1 }, { -1, -1 } } },
+	{ C_FIGHTER,    { { C_BERSERKER, -1 }, { C_PALADIN, -1 }, { C_SKYKNIGHT, -1 }, { C_GLADIATOR, -1 } } },
+	{ C_ARCHER,     { { C_SNIPER, -1 }, { C_ASSASSIN, -1 }, { C_SKYKNIGHT, -1 }, { -1, -1 } } },
+	{ C_THIEF,      { { C_ASSASSIN, -1 }, { C_SNIPER, -1 }, { C_SKYKNIGHT, -1 }, { C_SHADOW, -1 } } },
+	{ C_MAGE,       { { C_WIZARD, -1 }, { C_ALCHEMIST, -1 }, { C_RUNEKNIGHT, -1 }, { C_BISHOP, -1 } } },
+	{ C_CLERIC,     { { C_BISHOP, -1 }, { C_PALADIN, -1 }, { C_WIZARD, -1 }, { C_ALCHEMIST, -1 } } },
+	{ C_PALADIN,    { { C_HERO, -1 }, { C_SAINT, -1 }, { C_DRAGONLORD, -1 }, { -1, -1 } } },
+	{ C_BERSERKER,  { { C_GLADIATOR, -1 }, { C_HERO, -1 }, { C_DRAGONLORD, -1 }, { -1, -1 } } },
+	{ C_RUNEKNIGHT, { { C_HERO, -1 }, { C_ARCHMAGE, -1 }, { C_SAINT, -1 }, { C_ARCHALCHEMIST, -1 } } },
+	{ C_SNIPER,     { { C_PHANTOM, -1 }, { C_HERO, -1 }, { C_SHADOW, -1 }, { C_DRAGONLORD, -1 } } },
+	{ C_ASSASSIN,   { { C_SHADOW, -1 }, { C_PHANTOM, -1 }, { C_HERO, -1 }, { -1, -1 } } },
+	{ C_SKYKNIGHT,  { { C_DRAGONLORD, -1 }, { C_HERO, -1 }, { C_PHANTOM, -1 }, { C_GLADIATOR, -1 } } },
+	{ C_WIZARD,     { { C_ARCHMAGE, -1 }, { C_SAINT, -1 }, { C_ARCHALCHEMIST, -1 }, { -1, -1 } } },
+	{ C_BISHOP,     { { C_SAINT, -1 }, { C_ARCHMAGE, -1 }, { C_HERO, -1 }, { -1, -1 } } },
+	{ C_ALCHEMIST,  { { C_ARCHALCHEMIST, -1 }, { C_ARCHMAGE, -1 }, { C_SAINT, -1 }, { -1, -1 } } },
 };
+
+static int LegacyLine(int cls)
+{
+	if (cls == C_GLADIATOR) return 6;
+	if (cls == C_SHADOW) return 7;
+	if (cls >= C_PLAYER_COUNT && cls < C_PLAYER_COUNT + TAC_RANK_LINES * TAC_RANK_N)
+		return (cls - C_PLAYER_COUNT) / TAC_RANK_N;
+	for (int i = 0; i < TAC_RANK_LINES; i++) if (kLineParent[i] == cls) return i;
+	return -1;
+}
 
 int EvoOptions(int cls, EvoOption out[4])
 {
 	int n = 0;
+	if (cls >= C_JOB0 && cls < C_JOB0 + TAC_JOB_N) {
+		int i = cls - C_JOB0;
+		for (int k = 0; k < 4; k++) {
+			int t = kJobNext[i][k];
+			if (t < 0 || n >= 4) continue;
+			out[n].target = C_JOB0 + t;
+			out[n].needGroup = -1;
+			n++;
+		}
+		return n;
+	}
+	int line = LegacyLine(cls);
+	if (line >= 0) {
+		int tier = ClassInfo(cls).tier;
+		if (tier >= 3 && tier < 12) {
+			for (int k = 0; k < 4; k++) {
+				int t = kLineOffer[line][tier - 3][k];
+				if (t < 0 || n >= 4) continue;
+				out[n].target = C_JOB0 + t;
+				out[n].needGroup = -1;
+				n++;
+			}
+			if (n > 0) return n;
+		}
+	}
 	for (int i = 0; i < (int)_countof(kEvo); i++) {
 		if (kEvo[i].from != cls) continue;
 		for (int k = 0; k < 4; k++) if (kEvo[i].o[k].target >= 0 && n < 4) out[n++] = kEvo[i].o[k];
 	}
-	int nxt = NextPromoteClass(cls);
-	if (nxt >= 0 && n < 4) { EvoOption e; e.target = nxt; e.needGroup = -1; out[n++] = e; }
 	return n;
 }
 
@@ -2531,6 +2604,29 @@ void EvoApply(CharData& c, int target, const CharData* ps, int n)
 		for (int i = 0; i < n && s != S_MOV; i++) c.stat[s] += ps[i].stat[s] / 10;
 	}
 	c.cls = target;
+	// 転職ボーナス。新しい職の傾向。仲間の系統や距離では増減しない。
+	{
+		int bump = 2 + b.tier / 2;
+		if (b.group == G_MELEE) {
+			c.stat[S_STR] += bump;
+			c.stat[S_DEF] += 1;
+			c.stat[S_HP] += 6 + b.tier;
+		} else if (b.group == G_SWIFT) {
+			c.stat[S_AGI] += bump;
+			c.stat[S_DEX] += bump;
+			c.stat[S_HP] += 3;
+		} else if (b.group == G_MAGIC) {
+			c.stat[S_MAG] += bump;
+			c.stat[S_RES] += 1;
+			c.stat[S_MP] += 6 + b.tier;
+		} else {
+			c.stat[S_RES] += bump;
+			c.stat[S_MAG] += 1;
+			c.stat[S_MP] += 4 + b.tier;
+			c.stat[S_HP] += 3;
+		}
+		if (b.moveType == MV_FLY) c.stat[S_JMP] += 1;
+	}
 	// 転職前に覚えたスキルはそのまま残し、新しい職業で到達している分を足す。
 	int inherited = 0;
 	for (int i = 0; i < n && inherited < 2; i++) {
@@ -5218,8 +5314,26 @@ const wchar_t* GoodDesc(int i)
 	}
 	return L"";
 }
+int JobFamOf(int cls)
+{
+	if (cls < C_JOB0 || cls >= C_JOB0 + TAC_JOB_N) return -1;
+	int f = kJobFam[cls - C_JOB0];
+	if (f < 0 || f >= 8) return 0;
+	return f;
+}
+int LineParent(int fam)
+{
+	if (fam < 0 || fam >= TAC_RANK_LINES) return C_HERO;
+	return kLineParent[fam];
+}
 int ClassLine(int cls)
 {
+	if (cls >= C_JOB0 && cls < C_JOB0 + TAC_JOB_N) {
+		static const int gear[8] = { 0, 4, 2, 3, 4, 5, 1, 3 };
+		int fam = kJobFam[cls - C_JOB0];
+		if (fam < 0 || fam >= 8) fam = 0;
+		return gear[fam];
+	}
 	// 4次以降は親職と同じ系統の装備を使う。系統は店のタブと一致する。
 	if (cls == C_GLADIATOR) return 1;
 	if (cls == C_SHADOW) return 3;
@@ -5384,13 +5498,16 @@ void GearEquip(CharData& c, SaveData& s, int stashIndex)
 	StashRemoveAt(s, stashIndex);
 	if (old > 0) StashAdd(s, old);
 }
-int GearTryDrop(SaveData& s, int stage, int monster, Rng& r)
+int GearTryDrop(SaveData& s, int enemyLv, int monster, Rng& r)
 {
 	int pool[512], n = 0;
-	if (stage < 1) stage = 1;
-	// 段の必要ステージは二乗で伸びるので、戦闘の進行より新しい武具が店にしか出ない。
-	// ここでは 8 ステージごとに次の段を落とす。同じ段が無ければ一つ下、それでも無ければ到達済みの段。
-	int cap = 1 + stage / 8;
+	if (enemyLv < 1) enemyLv = 1;
+	// 必要段は転職と同じ閾値。敵がそのレベルで着られる段まで。高い段は売値が跳ねる。
+	int cap = 1;
+	for (int t = 1; t < 10; t++) {
+		if (enemyLv < PromoteLevel(t)) break;
+		cap = t + 1;
+	}
 	if (cap > 10) cap = 10;
 	int line = MonsterDropLine(monster);
 	for (int pass = 0; pass < 4 && n < 1; pass++) {
@@ -6135,7 +6252,7 @@ bool SaveLoad(SaveData& s)
 		CharData& c = s.roster[i];
 		c.name[NAME_LEN - 1] = 0;
 		if (!c.used) continue;
-		c.cls = Clampi(c.cls, 0, C_SHADOW);
+		c.cls = Clampi(c.cls, 0, C_JOB0 + JobCount() - 1);
 		c.lv = Clampi(c.lv, 1, TAC_LV_MAX);
 		if (recalc) CharRecalcProgress(c);
 		CharGrantReached(c);

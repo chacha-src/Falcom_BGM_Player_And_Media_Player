@@ -2608,7 +2608,7 @@ void Game::FinishSeq()
 				for (int r = 0; r < rolls; r++) {
 					if (!m_rng.Chance(chance)) continue;
 					int beforeN = m_save.gearN;
-					int gid = GearTryDrop(m_save, m_battleStage, u.monster, m_rng);
+					int gid = GearTryDrop(m_save, u.ch.lv, u.monster, m_rng);
 					if (m_save.gearN >= GEAR_STASH && (gid > 0 || beforeN >= GEAR_STASH)) m_stashFull = 1;
 					if (gid > 0) {
 						AddPopup(v3(u.px, u.py + 1.3f + r * .35f, u.pz), GearName(gid), RGBA8(180, 255, 190), 1, .12f * r, 3.6f);
@@ -4987,6 +4987,66 @@ void Game::DrawCommandMenu()
 		int crafts[CRAFT_SLOT_N], nc = 0;
 		if (m_skillTab == 2)
 			for (int i = 0; i < CRAFT_SLOT_N; i++) if (u.craftEq[i] >= CRAFT_BASE) crafts[nc++] = i;
+		static const int kSkillEl[8] = { EL_FIRE, EL_ICE, EL_THUNDER, EL_HOLY, EL_DARK, EL_WIND, EL_EARTH, EL_POISON };
+		int shapeOk[6] = { 1, 0, 0, 0, 0, 0 };
+		int elOk[9] = { 1, 0, 0, 0, 0, 0, 0, 0, 0 };
+		auto atkShape = [](const SkillDef& sd) -> int {
+			if (sd.shape == SH_LINE) return 4;
+			if (sd.shape == SH_FAN) return 5;
+			if (sd.area >= 6) return 3;
+			if (sd.area <= 0) return 1;
+			return 2;
+		};
+		auto tabKind = [&](const SkillDef& sd) -> BOOL {
+			if (m_skillTab == 0) return sd.kind == SK_PHYS || sd.kind == SK_MAGIC;
+			if (m_skillTab == 1) return sd.kind == SK_HEAL || sd.kind == SK_BUFF;
+			return FALSE;
+		};
+		if (m_skillTab == 0 || m_skillTab == 1) {
+			int shapeHave[6] = {};
+			int elHave[9] = {};
+			for (int s = 0; s < SKL_COUNT; s++) {
+				if (IsFormSkill(s) || !UnitHasSkill(u, s)) continue;
+				const SkillDef& sd = SkillInfo(s);
+				if (!tabKind(sd)) continue;
+				int sh = atkShape(sd);
+				if (sh >= 1 && sh <= 5) shapeHave[sh]++;
+				for (int e = 0; e < 8; e++) if (kSkillEl[e] == sd.element) elHave[e + 1]++;
+			}
+			if (m_skillShape < 0 || m_skillShape > 5 || (m_skillShape && !shapeHave[m_skillShape])) {
+				m_skillShape = 0;
+				m_skillPage = 0;
+			}
+			int curEl = 0;
+			for (int e = 0; e < 8; e++) if (kSkillEl[e] == m_skillEl) curEl = e + 1;
+			if (m_skillEl && !elHave[curEl]) {
+				m_skillEl = 0;
+				curEl = 0;
+				m_skillPage = 0;
+			}
+			if (m_skillShape && m_skillEl) {
+				int both = 0;
+				for (int s = 0; s < SKL_COUNT; s++) {
+					if (IsFormSkill(s) || !UnitHasSkill(u, s)) continue;
+					const SkillDef& sd = SkillInfo(s);
+					if (!tabKind(sd)) continue;
+					if (atkShape(sd) == m_skillShape && sd.element == m_skillEl) both++;
+				}
+				if (!both) { m_skillEl = 0; m_skillPage = 0; }
+			}
+			for (int s = 0; s < SKL_COUNT; s++) {
+				if (IsFormSkill(s) || !UnitHasSkill(u, s)) continue;
+				const SkillDef& sd = SkillInfo(s);
+				if (!tabKind(sd)) continue;
+				int sh = atkShape(sd);
+				if ((!m_skillEl || sd.element == m_skillEl) && sh >= 1 && sh <= 5) shapeOk[sh] = 1;
+				if (!m_skillShape || sh == m_skillShape) {
+					for (int e = 0; e < 8; e++) if (kSkillEl[e] == sd.element) elOk[e + 1] = 1;
+				}
+			}
+			if (m_focusId >= ID_BT_SHAPE1 && m_focusId <= ID_BT_SHAPE0 + 5 && !shapeOk[m_focusId - ID_BT_SHAPE0]) m_focusId = ID_BT_SHAPE0;
+			if (m_focusId > ID_BT_EL0 && m_focusId <= ID_BT_EL0 + 8 && !elOk[m_focusId - ID_BT_EL0]) m_focusId = ID_BT_EL0;
+		}
 		int list[SKL_COUNT];
 		int n = 0;
 		if (m_skillTab == 3) {
@@ -4998,26 +5058,23 @@ void Game::DrawCommandMenu()
 				if (sd.kind == SK_PASSIVE) continue;
 				if (m_skillTab == 0 && sd.kind != SK_PHYS && sd.kind != SK_MAGIC) continue;
 				if (m_skillTab == 1 && sd.kind != SK_HEAL && sd.kind != SK_BUFF) continue;
-				if (m_skillTab == 0 && m_skillShape) {
-					int wide = sd.area >= 6;
-					int single = sd.area <= 0 && sd.shape == SH_RADIUS;
-					if (m_skillShape == 1 && !single) continue;
-					if (m_skillShape == 2 && (single || wide)) continue;
-					if (m_skillShape == 3 && !wide) continue;
-				}
-				if (m_skillTab == 0 && m_skillEl > 0 && sd.element != m_skillEl) continue;
+				if ((m_skillTab == 0 || m_skillTab == 1) && m_skillShape && atkShape(sd) != m_skillShape) continue;
+				if ((m_skillTab == 0 || m_skillTab == 1) && m_skillEl > 0 && sd.element != m_skillEl) continue;
 				list[n++] = s;
 			}
 		}
 		float gap = U(4);
 		float tabH = max(U(26.f), min(U(32.f), bh));
 		float subH = U(22);
-		int subN = m_skillTab == 0 ? 2 : 0;
+		int subN = (m_skillTab == 0 || m_skillTab == 1) ? 2 : 0;
 		float extra = subN * (subH + gap);
 		float sw = min(U(460.f), max(U(220.f), (float)m_w - U(24)));
+		// 範囲行・属性見出し・説明枠。同じ高さに描くと重なるので、この分をパネルに取る。
+		float descBlock = U(16) + U(16) + U(44) + U(14);
+		float chrome = tabH + gap + extra + (bh + gap) * 2.f + descBlock + U(24);
 		int per = 8;
-		int fit = (int)(((float)m_h - U(150) - tabH - extra) / (bh + gap));
-		if (fit < 3) { bh = max(U(22.f), ((float)m_h - U(150) - tabH - extra) / 4.f - gap); fit = 4; }
+		int fit = (int)(((float)m_h - chrome) / (bh + gap));
+		if (fit < 3) { bh = max(U(22.f), ((float)m_h - chrome) / 5.f - gap); fit = 3; }
 		if (fit < per) per = max(3, fit);
 		int pages = max(1, (n + per - 1) / per);
 		if (m_skillPage < 0) m_skillPage = 0;
@@ -5025,7 +5082,7 @@ void Game::DrawCommandMenu()
 		int a = m_skillPage * per, b = min(n, a + per);
 		int shown = b - a;
 		float rows = (float)(shown + nc + 1 + (pages > 1 ? 1 : 0));
-		float ph = tabH + gap + extra + (bh + gap) * rows + U(78);
+		float ph = tabH + gap + extra + (bh + gap) * rows + descBlock;
 		x = min(max(U(8), x), max(U(8), (float)m_w - sw - U(12)));
 		y = min(y, max(U(8), (float)m_h - ph - U(8)));
 		if (y < U(8)) y = U(8);
@@ -5042,21 +5099,20 @@ void Game::DrawCommandMenu()
 			}
 		}
 		float yy = y + tabH + gap;
-		if (m_skillTab == 0) {
-			const wchar_t* shapeL[4] = {
+		if (m_skillTab == 0 || m_skillTab == 1) {
+			const wchar_t* shapeL[6] = {
 				LangPick14(L"全", L"All", L"Tous", L"Tutti", L"Todo", L"전체", L"全部", L"الكل", L"Все", L"Alle", L"Tudo", L"Alles", L"Wszystko", L"Tümü"),
-				TT(TX_SHAPE_ONE), TT(TX_MISC_AREA), TT(TX_SHAPE_WIDE)
+				TT(TX_SHAPE_ONE), TT(TX_MISC_AREA), TT(TX_SHAPE_WIDE), TT(TX_SHAPE_LINE), TT(TX_SHAPE_FAN)
 			};
-			float bw4 = (sw - gap * 3.f) / 4.f;
-			for (int t = 0; t < 4; t++) {
-				if (Btn(ID_BT_SHAPE0 + t, x + (bw4 + gap) * t, yy, bw4, subH, shapeL[t], TRUE, m_skillShape == t, U(12))) {
+			float bw6 = (sw - gap * 5.f) / 6.f;
+			for (int t = 0; t < 6; t++) {
+				if (Btn(ID_BT_SHAPE0 + t, x + (bw6 + gap) * t, yy, bw6, subH, shapeL[t], t == 0 || shapeOk[t], m_skillShape == t, U(11))) {
 					m_skillShape = t;
 					m_skillPage = 0;
 					return;
 				}
 			}
 			yy += subH + gap;
-			static const int els[8] = { EL_FIRE, EL_ICE, EL_THUNDER, EL_HOLY, EL_DARK, EL_WIND, EL_EARTH, EL_POISON };
 			const wchar_t* elL[9] = {
 				shapeL[0],
 				LangPick14(L"火", L"Fi", L"Fe", L"Fu", L"Fu", L"화", L"火", L"ن", L"Ог", L"Fe", L"Fo", L"Vu", L"Og", L"At"),
@@ -5070,9 +5126,9 @@ void Game::DrawCommandMenu()
 			};
 			float bw9 = (sw - gap * 8.f) / 9.f;
 			for (int t = 0; t < 9; t++) {
-				int on = t == 0 ? m_skillEl == 0 : m_skillEl == els[t - 1];
-				if (Btn(ID_BT_EL0 + t, x + (bw9 + gap) * t, yy, bw9, subH, elL[t], TRUE, on, U(11))) {
-					m_skillEl = t == 0 ? 0 : els[t - 1];
+				int on = t == 0 ? m_skillEl == 0 : m_skillEl == kSkillEl[t - 1];
+				if (Btn(ID_BT_EL0 + t, x + (bw9 + gap) * t, yy, bw9, subH, elL[t], t == 0 || elOk[t], on, U(11))) {
+					m_skillEl = t == 0 ? 0 : kSkillEl[t - 1];
 					m_skillPage = 0;
 					return;
 				}
@@ -5134,12 +5190,16 @@ void Game::DrawCommandMenu()
 			if (Btn(ID_BT_SKNEXT, x + sw - U(64), yy, U(64), bh, L"▶")) m_skillPage = (m_skillPage + 1) % pages;
 			yy += bh + U(4);
 		}
-		const wchar_t* backWord = (m_skillTab == 0 && (m_skillEl || m_skillShape))
+		const wchar_t* backWord = ((m_skillTab == 0 || m_skillTab == 1) && (m_skillEl || m_skillShape))
 			? LangPick14(L"絞り込みを外す", L"Clear filter", L"Retirer le filtre", L"Togli filtro", L"Quitar filtro", L"거르기 해제", L"取消筛选", L"إزالة التصفية", L"Снять фильтр", L"Filter aus", L"Limpar filtro", L"Filter uit", L"Usuń filtr", L"Süzgeci kaldır")
 			: TT(TX_CR_BACK);
 		m_btnSfx = -2;
 		if (Btn(ID_BT_BACK, x, yy, sw, bh, backWord)) BattleCancel();
 		yy += bh + U(6);
+		auto footLine = [&](const wchar_t* s, DWORD col, float& ly) {
+			m_r.HudText(s, x, ly + U(8), FitTextPx(s, sw, U(12), 0), col, 0, 0);
+			ly += U(16);
+		};
 		if (hovCraft >= 0) {
 			const SkillDef& sd = SkillInfo(hovCraft);
 			wchar_t l[96];
@@ -5148,19 +5208,20 @@ void Game::DrawCommandMenu()
 			wchar_t cp[24];
 			CraftCostText(hovCraft - CRAFT_BASE, cp, 24);
 			swprintf_s(l, L"%s %d-%d  %s  %s", TT(TX_MISC_RANGE), r0, r1, CraftShapeName(sd.area, sd.shape), cp);
-			m_r.HudText(l, x, yy + U(8), U(12), RGBA8(255, 210, 120), 0, 0);
-			m_r.HudTextBox(CraftDesc(hovCraft), x, yy + U(18), sw, U(64), U(12), RGBA8(230, 230, 236));
+			float ly = yy + U(4);
+			footLine(l, RGBA8(255, 210, 120), ly);
+			m_r.HudTextBox(CraftDesc(hovCraft), x, ly + U(2), sw, U(40), U(12), RGBA8(230, 230, 236));
 		} else if (hov >= 0) {
 			const SkillDef& sd = SkillInfo(hov);
 			wchar_t l[96];
 			const wchar_t* lack = u.mp < sd.mp ? TT(TX_BT_NOMP) : (IsFormSkill(hov) && !SkillUsable(m_b, m_cur, hov) ? TT(TX_FORM_NEED) : L"");
 			swprintf_s(l, L"%s %d-%d  %s%d  %s", TT(TX_MISC_RANGE), sd.rMax < 0 ? UnitRangeMin(u) : sd.rMin, sd.rMax < 0 ? UnitRangeMax(u) : sd.rMax, TT(TX_MISC_AREA), sd.area, lack);
-			m_r.HudText(l, x, yy + U(8), U(12), RGBA8(255, 226, 150), 0, 0);
-			wchar_t attr[120], desc[420];
+			wchar_t attr[120];
 			SkillAttrText(sd, attr, 120);
-			if (attr[0]) swprintf_s(desc, L"%s  %s", TT(sd.descTx), attr);
-			else wcscpy_s(desc, TT(sd.descTx));
-			m_r.HudTextBox(desc, x, yy + U(18), sw, U(48), U(12), RGBA8(230, 230, 236));
+			float ly = yy + U(4);
+			footLine(l, RGBA8(255, 226, 150), ly);
+			if (attr[0]) footLine(attr, RGBA8(255, 214, 140), ly);
+			m_r.HudTextBox(TT(sd.descTx), x, ly + U(2), sw, U(40), U(12), RGBA8(230, 230, 236));
 			if (IsFormSkill(hov)) DrawFormGuide(hov, u.x, u.z, x - U(8), y - U(8), sw + U(16), ph);
 		}
 		m_skillPreview = hov >= 0 ? hov : hovCraft;
@@ -5188,7 +5249,6 @@ void Game::DrawPromoteOffer()
 	m_r.HudText(who, x + w * .5f, y + U(54), U(15), RGBA8(230, 230, 240), 1, 0);
 	float ty = y + U(78);
 	for (int k = 0; k < no; k++) {
-		const ClassDef& cd = ClassInfo(opt[k].target);
 		m_btnSfx = -2;
 		if (Btn(ID_BT_PROMO0 + k, x + U(16), ty, w - U(32), U(34), ClassName(opt[k].target), TRUE, FALSE, U(16))) {
 			int oldHp = u.ch.stat[S_HP], oldMp = u.ch.stat[S_MP];
@@ -5208,7 +5268,7 @@ void Game::DrawPromoteOffer()
 			AdvanceLevelUp();
 			return;
 		}
-		m_r.HudTextBox(TT(cd.descTx), x + U(20), ty + U(34), w - U(40), max(U(18.f), row - U(40)), U(12), RGBA8(210, 220, 235));
+		m_r.HudTextBox(ClassBlurb(opt[k].target), x + U(20), ty + U(34), w - U(40), max(U(18.f), row - U(40)), U(12), RGBA8(210, 220, 235));
 		ty += row;
 	}
 	if (Btn(ID_BT_PROMO_LATER, x + w * .5f - U(110), y + h - U(50), U(220), U(36), TT(TX_EV_LATER))) AdvanceLevelUp();

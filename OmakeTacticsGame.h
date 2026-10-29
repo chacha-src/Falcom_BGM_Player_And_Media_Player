@@ -112,6 +112,7 @@ private:
 	// UI
 	float U(float v) const { return v * m_ui; }
 	BOOL Btn(int id, float x, float y, float w, float h, const wchar_t* label, BOOL enabled = TRUE, BOOL selected = FALSE, float px = 0, DWORD tint = 0);
+	float FitTextPx(const wchar_t* s, float maxW, float px, int bold = 0);
 	void UiOk();
 	int Sel(int id, float x, float y, float w, float h, const wchar_t* label, const wchar_t* value);
 	BOOL Hit(float x, float y, float w, float h) const;
@@ -324,7 +325,11 @@ private:
 	int m_monMot;            // 0待機 1歩き 2走り 3構え 4攻撃 5別技
 	BOOL m_monDrag;
 	Actor m_monAct;
-	int m_codexJob;          // 0=全職。以降は職、末尾は陣形
+	int m_codexJob;          // 0=その系統の全部。正は職ID。-1は陣形
+	int m_codexFam;          // 0すべて 1初期 2上位 3..10は追加職の系統
+	int m_codexJobPage;
+	int m_codexShape;        // 0全部 1単体 2範囲 3広域 4直線 5扇
+	int m_codexEl;           // 0全部。以降は属性
 	int m_codexSort;         // 0職 1名前 2MP 3習得
 	int m_skillPage;
 	int m_skillTab;          // 0攻撃 1回復 2クラフト 3陣形
@@ -433,6 +438,9 @@ private:
 	int m_partySel;
 	int m_eqPick;      // 0=閉 1=武器 2=防具 3,4=装飾 5,6,9=戦技 10=奥義 7,8=パッシブ
 	int m_eqPage;
+	int m_partySkPage;
+	int m_partySkPages;
+	float m_partySkX, m_partySkY, m_partySkW, m_partySkH;
 
 	// 進化
 	int m_evMain, m_evTarget;
