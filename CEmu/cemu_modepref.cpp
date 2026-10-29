@@ -279,6 +279,18 @@ const CEmuGameEntry* CEmuCatalogFindArchiveForZipMode(const CEmuCatalog* cat,
 		const CEmuGameEntry* pick = cat->entry[modes[i].entryIndex];
 		return pick;
 	}
+	/* "MIDI" は GS/LA/SC-88/GM の総称。ed4 の midiout_type=4 はタグ GS で、
+	   ここで OPNA へ落とすと .M_ の再生が .A_ の曲データと曲名になる。
+	   指定タグ（GS 等）が無いときも OPNA 行は返さない。 */
+	if (CEmuModeIsMidiTag(preferTag)) {
+		for (int i = 0; i < n; i++) {
+			if (!modes[i].isMidi) continue;
+			if (modes[i].entryIndex < 0 || modes[i].entryIndex >= cat->count)
+				continue;
+			return cat->entry[modes[i].entryIndex];
+		}
+		return NULL;
+	}
 	/* タグ無し — 既定の prefer (非 MIDI) へ戻す。 */
 	return CEmuCatalogFindArchiveForZip(cat, archive, dataDirHint, zipFs);
 }
@@ -763,7 +775,7 @@ int CEmuCapturePcatMidiToFile(const wchar_t* zipPath, unsigned titleCode,
 	CDriver* drv = CEmuDriverCreate(ge);
 	int ok = 0;
 	if (hard && drv && hard->hardKind == CHard::KIND_PCAT
-		&& drv->Open(hard, ge, fs, titleCode ? titleCode : 0x10)) {
+		&& drv->Open(hard, ge, fs, titleCode)) {
 		CHardPcat* hw = (CHardPcat*)hard;
 		/* DOS 起動後にリセットして SMF を曲だけにする。ここで TriggerPlay しない —
 		   CDriverPcat::Render が triggered_==0 のとき一度だけ撃つ。

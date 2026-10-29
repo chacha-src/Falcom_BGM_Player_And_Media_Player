@@ -2313,7 +2313,7 @@ void ActorDraw(Renderer& r, const Library& lib, Actor& a, const M4& world, const
 			}
 			// 白人の素体は地肌が頭なので、髪型「標準」(0) でも髪色の地毛を被せる。
 			int hairStyle = a.hair > 0 ? Clampi(a.hair, 1, HAIR_STYLES - 1) : 0;
-			if (!r.DrawHumanHair(a.model, hairStyle, humM->headJ, a.pose, wGear, dh0, a.avatar) && a.hair > 0 && !digitBody) {
+			if (!r.DrawHumanHair(a.model, hairStyle, humM->headJ, a.pose, wGear, dh0, a.avatar, &a) && a.hair > 0 && !digitBody) {
 			int style = Clampi(a.hair, 1, HAIR_STYLES - 1);
 			int slot = -1;
 			for (int s = 0; s < lib.humHairN; s++) if (lib.humHairModel[s] == a.model) { slot = s; break; }

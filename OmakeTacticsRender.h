@@ -247,9 +247,10 @@ public:
 	struct AvaBody { int nFace; AvaMesh m; Buf<WORD> bodyTri, extraTri; AvaBody() : nFace(0) {} };
 	struct AvaCos { char name[32]; int gender; AvaMesh m; Buf<WORD> tri; Buf<BYTE> keep; const BYTE* pending; UINT pendingN; };
 	struct AvaModel { char name[32]; int gender; Buf<float> M; char joint[64][24]; int nJoint; AvaModel() : gender(0), nJoint(0) { name[0] = 0; memset(joint, 0, sizeof(joint)); } };
-	// 衣装の布を押し出す脚の形。太もも・すね左右の 4 本で、骨に沿って CLOTH_PT 段・まわり CLOTH_PF 分割の半径。
-	// スカート状の布は腰を囲む格子（周 CLOTH_SECT 個 × 縦 5cm ほどごとの段）で動かす。点は CLOTH_NODES まで（シェーダの NMAX）。
-	enum { CLOTH_SEGS = 4, CLOTH_PT = 10, CLOTH_PF = 16, CLOTH_INST = 48, CLOTH_SECT = 32, CLOTH_NODES = 512 };
+	// 衣装の布を押し出す脚の形。太もも・すね・足の左右 6 本。骨に沿って CLOTH_PT 段・まわり CLOTH_PF 分割の半径。
+	// スカートは腰を囲む格子（周 CLOTH_SECT × 縦およそ 5cm）。点は CLOTH_NODES まで（シェーダの NMAX）。
+	// 胸と袖は別の SOFT_MAX 点。髪の案内は髪型ごとに HAIR_G 点。
+	enum { CLOTH_SEGS = 6, CLOTH_PT = 10, CLOTH_PF = 16, CLOTH_INST = 48, CLOTH_SECT = 32, CLOTH_NODES = 512, SOFT_MAX = 96, HAIR_A = 24, HAIR_L = 8, HAIR_G = 192, HAIR_INST = 48 };
 	// cup は胸の大きさ（0=A〜7=H）。形は作るときに焼き、jig は焼いた差分（胸の揺れの重み）。
 	struct AvaCache {
 		int model, cos, cup; CreatureSkin skin; Buf<float> jig; GpuMesh gm;
@@ -259,13 +260,27 @@ public:
 		// 布（omake_tactics_cloth.hlsl）。[0] は格子の点 ClothN、[1] は動かす頂点 ClothV、[2] は脚の形の半径。clothN=0 は布を動かさない。
 		// clothAxis はスカートの中心軸（バインドの x, z）。脚が布に入ったら、この軸から外へ押し出す。
 		ID3D11Buffer* clothSB[3]; ID3D11ShaderResourceView* clothSRV[3]; int clothN, clothVN, clothHip; float clothAxis[2];
+		// 胸と袖。softN=0 はタイト（体に沿ったまま）。softBone は 0 胸、1 上腕左、2 前腕左、3 上腕右、4 前腕右。
+		ID3D11Buffer* softSB[2]; ID3D11ShaderResourceView* softSRV[2]; int softN, softVN;
+		int softBone[6];
+		int armJ[4][2];
+		float bustA[2][4];
+		float armA[4][4];
+		float armB[4][4];
 		// 脚の形の骨。segJ は [根元の骨, 先の骨]、segG は [0]=根元（xyz と長さ） [1]=骨の向き [2]=前 [3]=横（バインド）。
-		// 0・1 は太もも左右（座ったかどうかもこれで見る）。
+		// 0・1 は太もも左右（座ったかどうかもこれで見る）。4・5 は足。
 		int segN; int segJ[CLOTH_SEGS][2]; float segG[CLOTH_SEGS][4][4];
-		AvaCache() : model(0), cos(0), cup(0), backY0(0), backDy(0), backN(0), clothN(0), clothVN(0), clothHip(-1), segN(0) {
+		AvaCache() : model(0), cos(0), cup(0), backY0(0), backDy(0), backN(0), clothN(0), clothVN(0), clothHip(-1), softN(0), softVN(0), segN(0) {
 			for (int i = 0; i < 32; i++) backZ[i] = 0;
 			for (int b = 0; b < 3; b++) { clothSB[b] = NULL; clothSRV[b] = NULL; }
+			softSB[0] = softSB[1] = NULL; softSRV[0] = softSRV[1] = NULL;
 			clothAxis[0] = clothAxis[1] = 0.f;
+			for (int i = 0; i < 6; i++) softBone[i] = -1;
+			for (int i = 0; i < 4; i++) armJ[i][0] = armJ[i][1] = -1;
+			memset(bustA, 0, sizeof(bustA));
+			memset(armA, 0, sizeof(armA));
+			memset(armB, 0, sizeof(armB));
+			for (int i = 0; i < 4; i++) armB[i][3] = -1.f;
 			memset(segJ, 0, sizeof(segJ)); memset(segG, 0, sizeof(segG));
 		}
 	};
@@ -283,7 +298,7 @@ public:
 	BOOL DrawAvatar(int model, int avatar, int cup, const Pose& pose, const M4& world, const DrawParams& dp, const void* owner = NULL);
 	// 着ている衣装の、その高さでの背中の外面（モデル空間の +Z）。無ければ -1e9。
 	float AvatarClothBack(int model, int avatar, float y);
-	BOOL DrawHumanHair(int model, int style, int headJ, const Pose& pose, const M4& world, const DrawParams& dp, int avatar);
+	BOOL DrawHumanHair(int model, int style, int headJ, const Pose& pose, const M4& world, const DrawParams& dp, int avatar, const void* owner = NULL);
 	void EnsureScalp(int model, int headJ);
 	void LoadHairPack();
 	void ReleaseHair();
@@ -396,6 +411,7 @@ private:
 	void UpdateFrameCB();
 	void SetObj(const M4& world, const DrawParams& dp, float outlineW);
 	void BindForPass(BOOL skinned, BOOL outline);
+	void ClearTess();
 	void ReleaseSkinGpu(CreatureSkin& src);
 	BOOL EnsureSkinGpu(CreatureSkin& src, const float* jig);
 	void UpdateFaceGpu(CreatureSkin& src, int face);
@@ -405,8 +421,16 @@ private:
 	struct ClothInst {
 		const void* owner; int model, cos, cup, n;
 		ID3D11Buffer* sb; ID3D11UnorderedAccessView* uav;
+		ID3D11Buffer* softSb; ID3D11UnorderedAccessView* softUav;
 		DWORD frame; float time; M4 world; int valid;
-		ClothInst() : owner(NULL), model(-1), cos(-1), cup(-1), n(0), sb(NULL), uav(NULL), frame(0), time(0), valid(0) { world = MIdent(); }
+		float limbPrev[CLOTH_SEGS][3];
+		float handPrev[2][3];
+		int limbOk;
+		ClothInst() : owner(NULL), model(-1), cos(-1), cup(-1), n(0), sb(NULL), uav(NULL), softSb(NULL), softUav(NULL), frame(0), time(0), valid(0), limbOk(0) {
+			world = MIdent();
+			memset(limbPrev, 0, sizeof(limbPrev));
+			memset(handPrev, 0, sizeof(handPrev));
+		}
 	};
 	Fix<ClothInst, CLOTH_INST> m_clothInst;
 	void RunCloth(AvaCache& ac, const void* owner, CreatureSkin& src, const Pose& pose, const M4& world, const DrawParams& dp);
@@ -421,6 +445,7 @@ private:
 	DWORD m_lastRebind;  // 未合成のまま付け直した時刻
 	int m_w, m_h;
 	int m_quality;
+	BOOL m_allowTess;
 	int m_msaa;
 	HRESULT m_lastHr;
 	int m_failStage;
@@ -447,6 +472,13 @@ private:
 	ID3D11Texture2D* m_blB;
 	ID3D11RenderTargetView* m_blBRtv;
 	ID3D11ShaderResourceView* m_blBSrv;
+	ID3D11Texture2D* m_zTex;
+	ID3D11RenderTargetView* m_zRtv;
+	ID3D11Texture2D* m_zRes;
+	ID3D11ShaderResourceView* m_zSrv;
+	ID3D11Texture2D* m_dofTex;
+	ID3D11RenderTargetView* m_dofRtv;
+	ID3D11ShaderResourceView* m_dofSrv;
 	int m_blW, m_blH;
 	ID3D11Texture2D* m_shTex;
 	ID3D11DepthStencilView* m_shDsv;
@@ -472,6 +504,12 @@ private:
 	ID3D11PixelShader* m_psBloom;
 	ID3D11PixelShader* m_psBlur;
 	ID3D11PixelShader* m_psGrade;
+	ID3D11PixelShader* m_psGradeTiny;
+	ID3D11PixelShader* m_psDofH;
+	ID3D11PixelShader* m_psDofU;
+	ID3D11VertexShader* m_vsT;
+	ID3D11HullShader* m_hsT;
+	ID3D11DomainShader* m_dsT;
 	ID3D11PixelShader* m_psUi;
 	ID3D11PixelShader* m_psGround[8];
 	ID3D11PixelShader* m_psProp;
@@ -484,7 +522,9 @@ private:
 	ID3D11ShaderResourceView* m_matSrv;
 	ID3D11ComputeShader* m_csSkin;
 	ID3D11ComputeShader* m_csCloth[3];   // 格子を進める・辺を保って押し出す・頂点へ書く
+	ID3D11ComputeShader* m_csSoft[2];    // 胸と袖を進める・頂点へ書く
 	ID3D11Buffer* m_cbCloth;
+	ID3D11Buffer* m_cbSoft;
 	ID3D11Buffer* m_cbSkinBone;
 	ID3D11Buffer* m_cbSkinParm;
 	ID3D11Buffer* m_cbHairCloth;
@@ -500,6 +540,25 @@ private:
 	UINT m_hairNv;
 	float m_hairCap[16][3];
 	int m_hairCapN[16];
+	ID3D11ComputeShader* m_csHair[2];
+	ID3D11Buffer* m_cbHairSim;
+	ID3D11Buffer* m_hairGuideSB;
+	ID3D11ShaderResourceView* m_hairGuide;
+	ID3D11Buffer* m_hairVertSB;
+	ID3D11ShaderResourceView* m_hairVert;
+	int m_hairV0[16], m_hairVN[16];
+	struct HairInst {
+		const void* owner; int style;
+		ID3D11Buffer* sb; ID3D11UnorderedAccessView* uav; ID3D11ShaderResourceView* srv;
+		DWORD frame; float time; M4 world; int valid;
+		HairInst() : owner(NULL), style(-1), sb(NULL), uav(NULL), srv(NULL), frame(0), time(0), valid(0) { world = MIdent(); }
+	};
+	Fix<HairInst, HAIR_INST> m_hairInst;
+	ID3D11Buffer* m_hairScratchSB;
+	ID3D11UnorderedAccessView* m_hairScratchUAV;
+	ID3D11ShaderResourceView* m_hairScratchSRV;
+	void RunHair(int model, int style, int headJ, const Pose& pose, const M4& world, const void* owner, const M4& place, const M4& pal);
+	void ReleaseHairInst();
 	int m_scalpModel; // m_capDraw を作った体
 	DWORD m_capC;     // 笠の頂点色。髪テクスチャの平均の明るさを根元の影で 8 割にした灰色
 	Buf<VtxS> m_capBind;
@@ -556,7 +615,7 @@ private:
 	// フレーム定数
 	struct FrameCB {
 		M4 vp, lvp;
-		float eye[4], light[4], fog[4], fogColor[4], screen[4], skyAmb[4], gndAmb[4];
+		float eye[4], light[4], fog[4], fogColor[4], screen[4], skyAmb[4], gndAmb[4], q[4];
 	} m_fcb;
 	M4 m_lightVP;
 

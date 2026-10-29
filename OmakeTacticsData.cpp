@@ -1311,6 +1311,19 @@ static void FillUnitSheet(int* base, int* grow, int group, int magic, int fly, i
 		grow[S_PEN] = (!magic && base[S_STR] >= 9) ? 10 : 4;
 	}
 }
+// Lv1 が同Lvの敵の通常攻撃で落ちないよう、初期能力を底上げする。移動は職のまま。
+static void RaiseStartBase(int* base)
+{
+	base[S_HP] += 18;
+	base[S_MP] += 6;
+	base[S_STR] += 3;
+	base[S_DEF] += 3;
+	base[S_MAG] += 3;
+	base[S_RES] += 3;
+	base[S_AGI] += 2;
+	base[S_DEX] += 2;
+	base[S_LUK] += 2;
+}
 static int s_sheet = 0;
 static void EnsureSheets()
 {
@@ -1318,6 +1331,7 @@ static void EnsureSheets()
 	s_sheet = 1;
 	for (int i = 0; i < C_PLAYER_COUNT; i++) {
 		ClassDef& d = kClass[i];
+		RaiseStartBase(d.base);
 		FillUnitSheet(d.base, d.grow, d.group, d.magic, d.moveType == MV_FLY, d.jump, d.rMax);
 	}
 	auto put = [](int cls, int slot, int lv, int sk) {
@@ -1401,6 +1415,7 @@ static void BuildThird()
 		d.weaponPow = weaponPow;
 		for (int s = 0; s < 10; s++) { d.base[s] = base[s]; d.grow[s] = grow[s]; }
 		for (int s = S_JMP; s <= S_PEN; s++) { d.base[s] = 0; d.grow[s] = 0; }
+		RaiseStartBase(d.base);
 		FillUnitSheet(d.base, d.grow, d.group, d.magic, d.moveType == MV_FLY, d.jump, d.rMax);
 		for (int i = 0; i < 8; i++) { d.learn[i].lv = lv[i]; d.learn[i].skill = sk[i]; }
 		for (int i = 8; i < LEARN_N; i++) { d.learn[i].lv = 0; d.learn[i].skill = -1; }
@@ -2638,6 +2653,8 @@ void EvoApply(CharData& c, int target, const CharData* ps, int n)
 	}
 	CharGrantReached(c);
 }
+
+#include "tactics_src/evo_brief.inc"
 
 // ============================================================ ユニット
 static bool IsMon(const Unit& u) { return u.monster >= 0; }
@@ -6182,6 +6199,7 @@ static void CopySaveTail(SaveData& s, int stageCleared, int stageSel, int winX, 
 {
 	s.stageCleared = stageCleared; s.stageSel = stageSel;
 	s.winX = winX; s.winY = winY; s.winW = winW; s.winH = winH;
+	if (quality < 0 || quality > 4) quality = 1;
 	s.camSpeed = camSpeed; s.quality = quality; s.showGrid = showGrid; s.battleAnim = battleAnim;
 	s.uidNext = uidNext; s.winSizeVer = winSizeVer;
 	for (int i = 0; i < 8; i++) s.itemN[i] = itemN[i];
@@ -6256,6 +6274,17 @@ bool SaveLoad(SaveData& s)
 		c.lv = Clampi(c.lv, 1, TAC_LV_MAX);
 		if (recalc) CharRecalcProgress(c);
 		CharGrantReached(c);
+		if (c.lv == 1) {
+			const ClassDef& cd = ClassInfo(c.cls);
+			for (int s = 0; s < S_COUNT; s++) {
+				int floorv = cd.base[s];
+				if (c.gender == 1) {
+					if (s == S_AGI || s == S_RES) floorv += 1;
+					if (s == S_STR) floorv = max(1, floorv - 1);
+				}
+				if (c.stat[s] < floorv) c.stat[s] = floorv;
+			}
+		}
 		{
 			int b = CharBody(c), m = CharModel(c);
 			c.body = 0;

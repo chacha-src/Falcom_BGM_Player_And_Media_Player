@@ -3844,9 +3844,22 @@ int CHardPc98::DeliverIrqs()
 		}
 	}
 	if (vsyncPending_ && (picMask_ & 0x04) == 0 && IvtHooked(PC98_VSYNC_VEC, isDos_)) {
-		vsyncPending_ = 0;
-		np2_interrupt((uint8_t)PC98_VSYNC_VEC);
-		return 1;
+		uint8_t* vm = np2_mem();
+		unsigned voff = 0, vseg = 1;
+		if (vm) {
+			voff = (unsigned)vm[PC98_VSYNC_VEC * 4]
+				| ((unsigned)vm[PC98_VSYNC_VEC * 4 + 1] << 8);
+			vseg = (unsigned)vm[PC98_VSYNC_VEC * 4 + 2]
+				| ((unsigned)vm[PC98_VSYNC_VEC * 4 + 3] << 8);
+		}
+		/* オフセットだけ先に書かれた 0000:025B は IVT そのもの。Brandish の初期化は
+		   INT 0A を 2 命令に分けて書く。その隙間に VSYNC を入れると別名 CS で
+		   ドライバへ戻り、ベクタのセグメントが 0x0516 のまま音楽が始まらない。 */
+		if (vseg != 0 || voff >= 0x400u) {
+			vsyncPending_ = 0;
+			np2_interrupt((uint8_t)PC98_VSYNC_VEC);
+			return 1;
+		}
 	}
 	/* レベルトリガ OPN IRQ（PC88 と同じ）。エッジラッチだけだと前回 DeliverIrqs 後の TickOpn 中のアサートを外す。 */
 	if (chip_ && chip_->Irq() && !opnInService_) {

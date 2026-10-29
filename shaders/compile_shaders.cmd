@@ -18,7 +18,7 @@ for %%F in (
   gpu_vs_rect gpu_ps_rect gpu_vs_piano gpu_cs_hex gpu_cs_glyph
   maze_vst maze_hst maze_dst maze_psw maze_vss maze_pss maze_vsh maze_psh maze_vsq maze_ssr maze_dofp maze_fin maze_psline maze_psmirf maze_pscloud maze_csfx maze_gsw maze_vsskin maze_cssub
   race_vst race_hst race_dst race_psb race_vss race_pss race_vsh race_psh race_vsq race_ssr race_dofp race_fin race_csnoise race_psc race_psline race_pst race_vssi race_psw race_pscloud race_gsw race_vsw race_csgridc race_csgridw
-  tac_vss tac_vsk tac_psm tac_pso tac_psov tac_vsh tac_psh tac_vsp tac_psp tac_vsq tac_pssky tac_csskin tac_csclths tac_csclthr tac_csclthw tac_psbloom tac_psblur tac_psgrade tac_psui tac_psg0 tac_psg1 tac_psg2 tac_psg3 tac_psg4 tac_psg5 tac_psg6 tac_psg7 tac_psprop tac_pswater tac_pslava
+  tac_vss tac_vsk tac_psm tac_pso tac_psov tac_vsh tac_psh tac_vsp tac_psp tac_vsq tac_pssky tac_csskin tac_csclths tac_csclthr tac_csclthw tac_psbloom tac_psblur tac_psgrade tac_psui tac_psg0 tac_psg1 tac_psg2 tac_psg3 tac_psg4 tac_psg5 tac_psg6 tac_psg7 tac_psprop tac_pswater tac_pslava tac_vst tac_hst tac_dst tac_psgrtiny tac_psdofh tac_psdofu tac_cssoft tac_cssoftw tac_cshair tac_cshairw
 ) do if not exist res\cso\%%F.cso goto :needfxc
 powershell -NoProfile -Command "if (-not (Get-Item -ErrorAction SilentlyContinue res\cso\*.cso)) { exit 1 }; $h = @(Get-Item shaders\*.hlsl); $c = @(Get-Item res\cso\*.cso); if (($c | Measure-Object LastWriteTime -Minimum).Minimum -ge ($h | Measure-Object LastWriteTime -Maximum).Maximum) { exit 0 } else { exit 1 }"
 if not errorlevel 1 (
@@ -187,6 +187,26 @@ if errorlevel 1 exit /b 1
 call :cc ps_5_0 PSWater shaders\omake_tactics.hlsl tac_PSWater tac_pswater
 if errorlevel 1 exit /b 1
 call :cc ps_5_0 PSLava shaders\omake_tactics.hlsl tac_PSLava tac_pslava
+if errorlevel 1 exit /b 1
+call :cc vs_5_0 VST shaders\omake_tactics_tess.hlsl tac_VST tac_vst
+if errorlevel 1 exit /b 1
+call :cc hs_5_0 HST shaders\omake_tactics_tess.hlsl tac_HST tac_hst
+if errorlevel 1 exit /b 1
+call :cc ds_5_0 DST shaders\omake_tactics_tess.hlsl tac_DST tac_dst
+if errorlevel 1 exit /b 1
+call :cc ps_5_0 PSGradeTiny shaders\omake_tactics.hlsl tac_PSGradeTiny tac_psgrtiny
+if errorlevel 1 exit /b 1
+call :cc ps_5_0 PSDofH shaders\omake_tactics_dof.hlsl tac_PSDofH tac_psdofh
+if errorlevel 1 exit /b 1
+call :cc ps_5_0 PSDofU shaders\omake_tactics_dof.hlsl tac_PSDofU tac_psdofu
+if errorlevel 1 exit /b 1
+call :cc cs_5_0 CSSoft shaders\omake_tactics_soft.hlsl tac_CSSoft tac_cssoft
+if errorlevel 1 exit /b 1
+call :cc cs_5_0 CSSoftWrite shaders\omake_tactics_soft.hlsl tac_CSSoftWrite tac_cssoftw
+if errorlevel 1 exit /b 1
+call :cc cs_5_0 CSHair shaders\omake_tactics_hair.hlsl tac_CSHair tac_cshair
+if errorlevel 1 exit /b 1
+call :cc cs_5_0 CSHairWrite shaders\omake_tactics_hair.hlsl tac_CSHairWrite tac_cshairw
 if errorlevel 1 exit /b 1
 
 echo cso ok

@@ -4538,9 +4538,20 @@ static int CEmuTryOverlayMidiSfxFromFilen(const wchar_t* openPhys, unsigned titl
 	char stem[CEMU_ARCHIVE_NAME] = {};
 	const CEmuGameEntry* midGe = ge;
 	if (CEmuArchiveStemFromPath(zip, stem, (int)sizeof(stem))) {
+		char modeTag[CEMU_MODE_TAG] = {};
+		if (!CEmuModePrefGet(zip, modeTag, (int)sizeof(modeTag))
+			|| !CEmuModeIsMidiTag(modeTag))
+			strncpy_s(modeTag, "MIDI", _TRUNCATE);
 		const CEmuGameEntry* pick = CEmuCatalogFindArchiveForZipMode(
-			&mgr->catalog, stem, NULL, NULL, "MIDI");
-		if (pick) midGe = pick;
+			&mgr->catalog, stem, NULL, NULL, modeTag);
+		char pickTag[CEMU_MODE_TAG] = {};
+		CEmuModeTagFromEntry(pick, pickTag, (int)sizeof(pickTag));
+		if (!CEmuModeIsMidiTag(pickTag) && _stricmp(modeTag, "MIDI") != 0)
+			pick = CEmuCatalogFindArchiveForZipMode(
+				&mgr->catalog, stem, NULL, NULL, "MIDI");
+		CEmuModeTagFromEntry(pick, pickTag, (int)sizeof(pickTag));
+		if (pick && CEmuModeIsMidiTag(pickTag))
+			midGe = pick;
 	}
 	if (!CEmuGameTitleLooksLikeSfx(midGe, titleIdx)
 		&& !CEmuGameTitleLooksLikeSfx(ge, titleIdx))
@@ -14677,13 +14688,51 @@ open_mode_kpi:
 				{
 					char stem[CEMU_ARCHIVE_NAME] = {};
 					if (CEmuArchiveStemFromPath(openPath, stem, (int)sizeof(stem))) {
+						/* タグは GS/LA/SC-88。総称 "MIDI" だけだと ed4 は
+						   一致せず OPNA（.A_）に落ち、.M_ の曲が .A_ になる。 */
+						const char* want = (modeTag[0] && CEmuModeIsMidiTag(modeTag))
+							? modeTag : "MIDI";
 						const CEmuGameEntry* pick = CEmuCatalogFindArchiveForZipMode(
-							&CEmuMgrGet()->catalog, stem, NULL, NULL, "MIDI");
-						if (pick) midGe = pick;
+							&CEmuMgrGet()->catalog, stem, NULL, NULL, want);
+						char pickTag[CEMU_MODE_TAG] = {};
+						CEmuModeTagFromEntry(pick, pickTag, (int)sizeof(pickTag));
+						if (!CEmuModeIsMidiTag(pickTag) && _stricmp(want, "MIDI") != 0)
+							pick = CEmuCatalogFindArchiveForZipMode(
+								&CEmuMgrGet()->catalog, stem, NULL, NULL, "MIDI");
+						CEmuModeTagFromEntry(pick, pickTag, (int)sizeof(pickTag));
+						if (pick && CEmuModeIsMidiTag(pickTag)) {
+							midGe = pick;
+							/* 保存タグが総称 MIDI のままだと、次の解決が
+							   また OPNA 側の曲名（.A_）を引き得る。 */
+							char stored[CEMU_MODE_TAG] = {};
+							if (CEmuModePrefGet(openPath, stored, (int)sizeof(stored))
+								&& _stricmp(stored, "MIDI") == 0
+								&& pickTag[0] && _stricmp(pickTag, "MIDI") != 0)
+								CEmuModePrefSet(openPath, pickTag);
+						}
 					}
 				}
 				const unsigned capTitle = CEmuGameTitleCodeForIndex(
 					midGe ? midGe : ge, titleIdx);
+				{
+					wchar_t songLabel[CEMU_GAME_NAME];
+					songLabel[0] = 0;
+					CEmuGameTitleAt(midGe ? midGe : ge, (int)titleIdx - 1,
+						NULL, songLabel, (int)_countof(songLabel));
+					if (songLabel[0] == L'<' || wcsncmp(songLabel, L"<title", 6) == 0)
+						songLabel[0] = 0;
+					if (songLabel[0]) {
+						fnn = songLabel;
+						stitle = songLabel;
+						if (pl && pl->pc && plcnt >= 0 && plcnt < pl->playcnt
+							&& pl->pc[plcnt].name[0]
+							&& wcscmp(pl->pc[plcnt].name, songLabel) != 0) {
+							wcsncpy_s(pl->pc[plcnt].name, songLabel, _TRUNCATE);
+							if (pl->m_lc.GetSafeHwnd())
+								pl->m_lc.RedrawItems(plcnt, plcnt);
+						}
+					}
+				}
 				/* Catalog SMF for this title → MIDI monitor (GM/GS/LA maps).
 				   Do not extract "first/largest" .mid — that ignores song select.
 				   ロードは曲を鳴らさない。 */

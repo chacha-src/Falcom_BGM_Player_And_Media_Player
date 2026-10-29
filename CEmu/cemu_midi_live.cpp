@@ -507,8 +507,26 @@ static void LivePushProgramSnapshot(int ofs)
 		if (g_live.haveCc[ch][32])
 			LivePushShort((DWORD)(0xb0 | ch) | (32u << 8)
 				| ((DWORD)g_live.cc[ch][32] << 16), ofs);
+		/* RPN/NRPN は番号を選んでからデータ。CC 番号順だと 6 が 101/100 より
+		   先に出てベンドレンジ 12 が効かず、FMD のスライドが ±2 のままになる。 */
+		static const int kRpnSel[] = { 101, 100, 99, 98 };
+		static const int kDataEnt[] = { 6, 38 };
+		for (int k = 0; k < 4; k++) {
+			const int c = kRpnSel[k];
+			if (!g_live.haveCc[ch][c]) continue;
+			LivePushShort((DWORD)(0xb0 | ch) | ((DWORD)c << 8)
+				| ((DWORD)g_live.cc[ch][c] << 16), ofs);
+		}
+		for (int k = 0; k < 2; k++) {
+			const int c = kDataEnt[k];
+			if (!g_live.haveCc[ch][c]) continue;
+			LivePushShort((DWORD)(0xb0 | ch) | ((DWORD)c << 8)
+				| ((DWORD)g_live.cc[ch][c] << 16), ofs);
+		}
 		for (int c = 1; c < 128; c++) {
-			if (c == 32 || c == 120 || c == 121 || c == 123)
+			if (c == 6 || c == 32 || c == 38
+				|| c == 98 || c == 99 || c == 100 || c == 101
+				|| c == 120 || c == 121 || c == 123)
 				continue;
 			if (!g_live.haveCc[ch][c]) continue;
 			LivePushShort((DWORD)(0xb0 | ch) | ((DWORD)c << 8)
@@ -716,9 +734,13 @@ static void LiveFinishShort(DWORD msg, int frames)
 	/* GM/GS/XG の消化中は後続ショートを出さない。実機も Reset 完了まで無視する。
 	   due は MIDI 時計を保つ。ゲート一点へ揃えるとイントロが走る。 */
 	if (LiveResetHolding()) {
-		if (isNote)
+		/* ピッチベンドはノートと同じ時刻で残す。最後の 1 本だけ残すと
+		   FMD の 0x89 スライドが消えて、スナップショットの値が全音に乗る。 */
+		if (isNote || hi == 0xe0) {
+			if (hi == 0xe0)
+				g_live.havePb[(int)(msg & 0x0f)] = 0;
 			LiveHoldNoteTimed(msg, isOn);
-		else {
+		} else {
 			LiveAdvanceMidiClock();
 			LiveTrackMsg(msg);
 		}
@@ -729,8 +751,10 @@ static void LiveFinishShort(DWORD msg, int frames)
 		LiveHoldNoteTimed(msg, isOn);
 		return;
 	}
-	if (isNote && g_live.holdNotesUntil
+	if ((isNote || hi == 0xe0) && g_live.holdNotesUntil
 		&& g_live.audioSample < g_live.holdNotesUntil) {
+		if (hi == 0xe0)
+			g_live.havePb[(int)(msg & 0x0f)] = 0;
 		LiveHoldNoteTimed(msg, isOn);
 		return;
 	}
@@ -1378,7 +1402,10 @@ int CEmuMidiLiveStartPcat(const wchar_t* zipPath, unsigned titleCode,
 			for (int pass = 0; pass < 2 && !midGe; pass++) {
 				for (int i = 0; i < nm; i++) {
 					if (!modes[i].isMidi) continue;
+					/* 総称 "MIDI" は GS/LA/SC-88 のどれでも合う。
+					   完全一致だけだと ed4（タグ GS）を外して OPNA に落ちる。 */
 					if (pass == 0 && prefer[0]
+						&& _stricmp(prefer, "MIDI") != 0
 						&& _stricmp(modes[i].tag, prefer) != 0)
 						continue;
 					if (modes[i].entryIndex < 0
@@ -1403,9 +1430,13 @@ int CEmuMidiLiveStartPcat(const wchar_t* zipPath, unsigned titleCode,
 		char curTag[CEMU_MODE_TAG] = {};
 		char fromGe[CEMU_MODE_TAG] = {};
 		CEmuModeTagFromEntry(ge, fromGe, (int)sizeof(fromGe));
+		/* 総称 "MIDI" のまま残すと次回 Resolve がタグ GS に当たらず
+		   OPNA（.A_）へ戻る。開いた行の GS/LA/SC-88 を書き戻す。 */
 		if (!CEmuModePrefGet(openZip, curTag, (int)sizeof(curTag))
-			|| !CEmuModeIsMidiTag(curTag)) {
-			if (fromGe[0] && CEmuModeIsMidiTag(fromGe))
+			|| !CEmuModeIsMidiTag(curTag)
+			|| _stricmp(curTag, "MIDI") == 0) {
+			if (fromGe[0] && CEmuModeIsMidiTag(fromGe)
+				&& _stricmp(fromGe, "MIDI") != 0)
 				CEmuModePrefSet(openZip, fromGe);
 		}
 	}
@@ -1420,7 +1451,8 @@ int CEmuMidiLiveStartPcat(const wchar_t* zipPath, unsigned titleCode,
 		|| hard->hardKind == CHard::KIND_PC98
 		|| hard->hardKind == CHard::KIND_X68K);
 	if (!hard || !drv || !okKind
-		|| !drv->Open(hard, ge, fs, titleCode ? titleCode : 0x10)) {
+		/* code 0 は無指定ではない。ed4 の ED400 が 0 で、0x10 に替えると ED416 になる。 */
+		|| !drv->Open(hard, ge, fs, titleCode)) {
 		if (drv) { drv->Close(); CEmuDriverDestroy(drv); }
 		if (hard) CEmuHardDestroy(hard);
 		CEmuZipFsClose(fs);

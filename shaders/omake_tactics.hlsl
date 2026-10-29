@@ -12,6 +12,7 @@ cbuffer Frame : register(b0)
 	float4 Screen;   // w,h,1/w,1/h
 	float4 SkyAmb;   // rgb=空の環境光 w=強さ
 	float4 GndAmb;   // rgb=地面の環境光 w=トゥーン段階の硬さ
+	float4 Q;        // x=段(0軽 1標準 2高 3超綺麗 4超軽量) y=テッセ係数 z=変位 w=被写界
 };
 cbuffer Obj : register(b1)
 {
@@ -112,17 +113,26 @@ float ShadowAt(float3 w, float3 n)
 	float z = sp.z / sp.w - 0.0015;
 	if (any(uv < 0) || any(uv > 1) || z >= 1) return 1;
 	// 12 タップの円盤。影の縁を 3x3 よりなだらかにする。
-	const float2 k[12] = {
+	const float2 k[16] = {
 		float2(-0.326212, -0.405810), float2(-0.840144, -0.073580), float2(-0.695914, 0.457137),
 		float2(-0.203345, 0.620716), float2(0.962340, -0.194983), float2(0.473434, -0.480026),
 		float2(0.519456, 0.767022), float2(0.185461, -0.893124), float2(0.507431, 0.064425),
-		float2(0.896420, 0.412458), float2(-0.321940, -0.932615), float2(-0.791559, -0.597710)
+		float2(0.896420, 0.412458), float2(-0.321940, -0.932615), float2(-0.791559, -0.597710),
+		float2(0.089842, 0.323164), float2(-0.461230, 0.218612), float2(0.248110, 0.553812),
+		float2(-0.118392, -0.210418)
 	};
-	float t = Fog.w * 2.2;
+	// 軽量と標準は従来の12タップ。高画質は同じ数で半径を絞る。超綺麗は16。超軽量は1。
+	int taps = 12;
+	float rad = 2.2;
+	if (Q.x > 3.5) { taps = 1; rad = 0; }
+	else if (Q.x > 2.5) { taps = 16; rad = 1.05; }
+	else if (Q.x > 1.5) { taps = 12; rad = 1.5; }
+	float t = Fog.w * rad;
 	float s = 0;
-	[unroll] for (int i = 0; i < 12; i++)
+	[loop] for (int i = 0; i < taps; i++)
 		s += ShadowMap.SampleCmpLevelZero(SC, uv + k[i] * t, z);
-	return s / 12.;
+	s /= taps;
+	return saturate(s);
 }
 
 float3 HueRotate(float3 c, float a)
@@ -183,8 +193,7 @@ float3 Tri(Texture2DArray tex, float slice, float3 p, float3 n, float scale)
 	return x * w.x + y * w.y + z * w.z;
 }
 
-// ランバート＋GGX。トゥーンの段は使わない。skin>0 は顔のラップだけ。
-float3 Lit(float3 albedo, float3 n, float3 v, float rough, float3 f0, float sh, float skin)
+float3 LitCore(float3 albedo, float3 n, float3 v, float rough, float3 f0, float sh, float skin)
 {
 	float3 l = normalize(LightDir.xyz);
 	float nd = dot(n, l);
@@ -206,6 +215,41 @@ float3 Lit(float3 albedo, float3 n, float3 v, float rough, float3 f0, float sh, 
 	return diff + spec;
 }
 
+float3 LitTiny(float3 albedo, float3 n, float sh)
+{
+	float3 l = normalize(LightDir.xyz);
+	float ndl = saturate(dot(n, l));
+	float3 amb = lerp(GndAmb.rgb, SkyAmb.rgb, saturate(n.y * .5 + .5)) * SkyAmb.w * 0.85;
+	return albedo * (amb + ndl * sh);
+}
+
+float3 Lit(float3 albedo, float3 n, float3 v, float rough, float3 f0, float sh, float skin)
+{
+	if (Q.x > 3.5) return LitTiny(albedo, n, sh);
+	float3 c = LitCore(albedo, n, v, rough, f0, sh, skin);
+	if (Q.x < 1.5) {
+		// 標準だけ、法線の折れに薄い接触陰。軽量は従来のまま。
+		if (Q.x > 0.5) {
+			float g = length(fwidth(n));
+			c *= lerp(1., saturate(1. - g * 2.0), 0.28);
+		}
+		return c;
+	}
+	float3 l = normalize(LightDir.xyz);
+	float3 h = normalize(l + v);
+	float ndl = saturate(dot(n, l));
+	float ndh = saturate(dot(n, h));
+	float sharp = (Q.x > 2.5) ? 56. : 32.;
+	float gain = (Q.x > 2.5) ? 0.1 : 0.05;
+	c += float3(1, 0.97, 0.9) * pow(ndh, sharp) * ndl * sh * gain;
+	if (Q.x > 2.5) {
+		float wrap = saturate(dot(n, l) * 0.5 + 0.5);
+		c += albedo * SkyAmb.rgb * wrap * sh * 0.06;
+		c += albedo * pow(saturate(dot(n, h)), 6.) * ndl * sh * 0.045;
+	}
+	return c;
+}
+
 float3 FogAt(float3 col, float3 w)
 {
 	float d = length(Eye.xyz - w);
@@ -214,9 +258,36 @@ float3 FogAt(float3 col, float3 w)
 	return lerp(col, FogColor.rgb, fg * fg * 0.9);
 }
 
-float4 PSM(PSIn i) : SV_Target
+struct GOut { float4 c : SV_Target0; float z : SV_Target1; };
+GOut Emit(float4 c, float3 w)
+{
+	GOut o;
+	o.c = c;
+	o.z = saturate(length(Eye.xyz - w) / max(Fog.y, 1.));
+	return o;
+}
+GOut EmitZ(float4 c, float z) { GOut o; o.c = c; o.z = z; return o; }
+
+float3 DetailN(float3 n, float3 w)
+{
+	float s = 0;
+	if (Q.x > 1.5 && Q.x < 2.5) s = 0.32;
+	else if (Q.x > 2.5 && Q.x < 3.5) s = 0.85;
+	else return n;
+	float e = 0.14;
+	float2 p = w.xz * (s > 0.5 ? 5.2 : 3.2);
+	float h0 = fbm2(p);
+	float hx = fbm2(p + float2(e, 0));
+	float hz = fbm2(p + float2(0, e));
+	float3 t = normalize(cross(abs(n.y) < 0.92 ? float3(0, 1, 0) : float3(1, 0, 0), n));
+	float3 b = cross(n, t);
+	return normalize(n + (t * (h0 - hx) + b * (h0 - hz)) * s);
+}
+
+GOut PSM(PSIn i)
 {
 	float3 n = normalize(i.n);
+	n = DetailN(n, i.w);
 	float3 v = normalize(Eye.xyz - i.w);
 	float4 tx = Tex.Sample(SL, i.uv);
 	float3 albedo = tx.rgb * i.c.rgb;
@@ -233,7 +304,12 @@ float4 PSM(PSIn i) : SV_Target
 	float3 f0 = lerp(float3(0.04, 0.04, 0.04), float3(0.03, 0.02, 0.015), skin);
 	float3 col = Lit(albedo, n, v, rough, f0, sh, skin * 0.85);
 	float rim = pow(1. - saturate(dot(n, v)), 3.) * Extra.z;
-	col += rim * float3(1, 0.95, 0.85) * (0.35 + 0.65 * sh);
+	float rimK = 1;
+	if (Q.x > 3.5) rimK = 0;
+	else if (Q.x < 0.5) rimK = 1;
+	else if (Q.x > 2.5) rimK = 1.35;
+	else if (Q.x > 1.5) rimK = 1.12;
+	col += rim * rimK * float3(1, 0.95, 0.85) * (0.35 + 0.65 * sh);
 	col += emis;
 	col = FogAt(col, i.w);
 	if (Extra.x > 0.001) {
@@ -243,7 +319,7 @@ float4 PSM(PSIn i) : SV_Target
 		col += float3(1, 0.6, 0.25) * smoothstep(0.08, 0., nz - cut) * 2.;
 	}
 	col = lerp(col, float3(1, 1, 1), Extra.y);
-	return float4(col, alpha);
+	return Emit(float4(col, alpha), i.w);
 }
 
 float WaveAmp(float th)
@@ -271,7 +347,7 @@ void WaterWave(float2 xz, float t, float amp, out float h, out float2 dh)
 	dh += float2(sin(t * 0.65 + xz.x * 0.85), cos(t * 0.5 + xz.y * 0.75)) * amp * 1.4;
 }
 
-float4 PSWater(PSIn i) : SV_Target
+GOut PSWater(PSIn i)
 {
 	float3 v = normalize(Eye.xyz - i.w);
 	float4 tx = Tex.Sample(SL, i.uv);
@@ -283,7 +359,7 @@ float4 PSWater(PSIn i) : SV_Target
 	float h;
 	float2 dh;
 	WaterWave(i.w.xz, t, amp, h, dh);
-	float3 wn = normalize(float3(-dh.x, 1, -dh.y));
+	float3 wn = DetailN(normalize(float3(-dh.x, 1, -dh.y)), i.w);
 	float ndv = saturate(dot(wn, v));
 	float fr = pow(1. - ndv, 4.);
 	float crest = smoothstep(amp * 0.55, amp * 1.35, h);
@@ -295,7 +371,11 @@ float4 PSWater(PSIn i) : SV_Target
 	float3 L = normalize(LightDir.xyz);
 	float3 H = normalize(L + v);
 	float sp = pow(saturate(dot(wn, H)), thw > 2.5 && thw < 3.5 ? 140. : 48.) * saturate(dot(wn, L) * 0.85 + 0.15);
-	col += float3(1, 0.97, 0.88) * sp * (thw > 2.5 && thw < 3.5 ? 1.6 : 0.9);
+	float specK = 1;
+	if (Q.x > 3.5) specK = 0;
+	else if (Q.x > 2.5) specK = 1.4;
+	else if (Q.x > 1.5) specK = 1.15;
+	col += float3(1, 0.97, 0.88) * sp * (thw > 2.5 && thw < 3.5 ? 1.6 : 0.9) * specK;
 	col = lerp(col, float3(0.9, 0.95, 0.98), crest * (thw > 5.5 && thw < 6.5 ? 0.15 : 0.42));
 	float2 c1 = i.w.xz * 0.8 + t * float2(0.15, 0.05);
 	float2 c2 = i.w.xz * 1.3 - t * float2(0.07, 0.12);
@@ -309,7 +389,7 @@ float4 PSWater(PSIn i) : SV_Target
 	else if (thw > 4.5 && thw < 5.5) { col = lerp(col, albedo * float3(0.55, 0.32, 0.22), 0.3); see = 0.4; }
 	else if (thw > 5.5 && thw < 6.5) { col = lerp(col, albedo * float3(0.45, 0.62, 0.38), 0.35); see = 0.42; }
 	else if (thw > 6.5) { col = lerp(col, SkyAmb.rgb, fr * 0.22); see = 0.38; }
-	return float4(FogAt(col, i.w), lerp(see, 0.78, fr) * alpha);
+	return Emit(float4(FogAt(col, i.w), lerp(see, 0.78, fr) * alpha), i.w);
 }
 
 float3 LavaColor(float2 xz, float t, float3 v)
@@ -324,19 +404,22 @@ float3 LavaColor(float2 xz, float t, float3 v)
 	return col;
 }
 
-float4 PSLava(PSIn i) : SV_Target
+GOut PSLava(PSIn i)
 {
 	float3 v = normalize(Eye.xyz - i.w);
 	float t = Eye.w;
-	float2 o = float2(0.045, 0.02);
 	float3 col = LavaColor(i.w.xz, t, v);
-	col += LavaColor(i.w.xz + o, t, v);
-	col += LavaColor(i.w.xz - o, t, v);
-	col += LavaColor(i.w.xz + float2(-o.y, o.x), t, v);
-	return float4(col * 0.25, 1);
+	if (Q.x < 3.5) {
+		float2 o = float2(0.045, 0.02);
+		col += LavaColor(i.w.xz + o, t, v);
+		col += LavaColor(i.w.xz - o, t, v);
+		col += LavaColor(i.w.xz + float2(-o.y, o.x), t, v);
+		col *= 0.25;
+	}
+	return Emit(float4(col, 1), i.w);
 }
 
-float4 GroundPS(PSIn i, float theme)
+GOut GroundPS(PSIn i, float theme)
 {
 	float3 n = normalize(i.n);
 	float3 v = normalize(Eye.xyz - i.w);
@@ -357,7 +440,7 @@ float4 GroundPS(PSIn i, float theme)
 	float4 nr = Ground.Sample(SL, float3(uv, theme + 8));
 	float3 albedo = alb.rgb * lerp(0.78, 1, alb.a) * i.c.rgb;
 	if (cliff > 0.5) albedo *= 0.8;
-	float3 nLit = Bump(n, nr.rgb);
+	float3 nLit = DetailN(Bump(n, nr.rgb), i.w);
 	float rough = 0.7;
 	float3 glow = 0;
 	float3 f0 = float3(0.035, 0.035, 0.035);
@@ -416,19 +499,19 @@ float4 GroundPS(PSIn i, float theme)
 		float edge = smoothstep(0.475, 0.5, max(g.x, g.y));
 		col *= 1. - edge * (theme > 2.5 && theme < 4.5 ? 0.08 : 0.16);
 	}
-	return float4(FogAt(col, i.w), 1);
+	return Emit(float4(FogAt(col, i.w), 1), i.w);
 }
 
-float4 PSG0(PSIn i) : SV_Target { return GroundPS(i, 0); }
-float4 PSG1(PSIn i) : SV_Target { return GroundPS(i, 1); }
-float4 PSG2(PSIn i) : SV_Target { return GroundPS(i, 2); }
-float4 PSG3(PSIn i) : SV_Target { return GroundPS(i, 3); }
-float4 PSG4(PSIn i) : SV_Target { return GroundPS(i, 4); }
-float4 PSG5(PSIn i) : SV_Target { return GroundPS(i, 5); }
-float4 PSG6(PSIn i) : SV_Target { return GroundPS(i, 6); }
-float4 PSG7(PSIn i) : SV_Target { return GroundPS(i, 7); }
+GOut PSG0(PSIn i) { return GroundPS(i, 0); }
+GOut PSG1(PSIn i) { return GroundPS(i, 1); }
+GOut PSG2(PSIn i) { return GroundPS(i, 2); }
+GOut PSG3(PSIn i) { return GroundPS(i, 3); }
+GOut PSG4(PSIn i) { return GroundPS(i, 4); }
+GOut PSG5(PSIn i) { return GroundPS(i, 5); }
+GOut PSG6(PSIn i) { return GroundPS(i, 6); }
+GOut PSG7(PSIn i) { return GroundPS(i, 7); }
 
-float4 PSProp(PSIn i) : SV_Target
+GOut PSProp(PSIn i)
 {
 	float3 n = normalize(i.n);
 	float3 v = normalize(Eye.xyz - i.w);
@@ -465,21 +548,22 @@ float4 PSProp(PSIn i) : SV_Target
 		f0 = float3(0.05, 0.05, 0.055);
 	}
 	albedo *= Tint.rgb;
+	nLit = DetailN(nLit, i.w);
 	float sh = ShadowAt(i.w, n);
 	float3 col = Lit(albedo, nLit, v, rough, f0, sh, 0);
-	return float4(FogAt(col, i.w), Tint.a);
+	return Emit(float4(FogAt(col, i.w), Tint.a), i.w);
 }
 
-float4 PSO(PSIn i) : SV_Target
+GOut PSO(PSIn i)
 {
 	if (Extra.x > 0.001) {
 		float nz = fbm2(i.w.xz * 7. + i.w.y * 5.);
 		clip(nz - (Extra.x * 1.1 - 0.05));
 	}
-	return float4(lerp(OutlineColor.rgb, float3(1, 1, 1), Extra.y), OutlineColor.a * Tint.a);
+	return Emit(float4(lerp(OutlineColor.rgb, float3(1, 1, 1), Extra.y), OutlineColor.a * Tint.a), i.w);
 }
 
-float4 PSOV(PSIn i) : SV_Target
+GOut PSOV(PSIn i)
 {
 	// 移動・攻撃範囲セル。uv=セル内座標
 	float2 g = abs(i.uv - 0.5) * 2.;
@@ -497,7 +581,7 @@ float4 PSOV(PSIn i) : SV_Target
 		a = (frame * (0.55 + corner * 0.45) + 0.12) * i.c.a * Tint.a;
 		c = i.c.rgb * Tint.rgb * (1.2 + corner);
 	}
-	return float4(c, saturate(a));
+	return Emit(float4(c, saturate(a)), i.w);
 }
 
 struct HIn { float2 p : POSITION; float2 uv : TEXCOORD0; float4 c : COLOR0; };
@@ -525,7 +609,7 @@ POut VSP(PIn v)
 	o.uvs = v.uvs; o.c = v.c;
 	return o;
 }
-float4 PSP(POut i) : SV_Target
+GOut PSP(POut i)
 {
 	float2 q = i.uvs.xy * 2. - 1.;
 	float r = length(q);
@@ -551,7 +635,7 @@ float4 PSP(POut i) : SV_Target
 		a = saturate(1. - (abs(q.x) + abs(q.y)) * 1.2);
 	}
 	float hot = saturate(1. - r);
-	return float4(i.c.rgb * (a * i.c.a) * (1. + hot * hot * 0.7), a * i.c.a);
+	return EmitZ(float4(i.c.rgb * (a * i.c.a) * (1. + hot * hot * 0.7), a * i.c.a), 0.22);
 }
 
 struct QOut { float4 pos : SV_POSITION; float2 uv : TEXCOORD0; };
@@ -563,7 +647,7 @@ QOut VSQ(uint id : SV_VertexID)
 	o.uv = p;
 	return o;
 }
-float4 PSSKY(QOut i) : SV_Target
+GOut PSSKY(QOut i)
 {
 	float3 top = Tint.rgb, bot = Extra.rgb;
 	float y = i.uv.y;
@@ -596,7 +680,7 @@ float4 PSSKY(QOut i) : SV_Target
 		float star = step(0.992, hs) * smoothstep(0.78, 0.12, y) * night;
 		c += (0.55 + 0.45 * sin(t * 1.8 + hs * 30.)) * star;
 	}
-	return float4(c, 1);
+	return EmitZ(float4(c, 1), 1);
 }
 
 float Mote(float2 uv, float t, float2 vel, float density, float cutoff, float rad)
@@ -704,7 +788,29 @@ float4 PSGrade(QOut i) : SV_Target
 	float y = dot(col, float3(0.2126, 0.7152, 0.0722));
 	col = lerp(y.xxx, col, 1.06);
 	col *= grade;
+	// 標準は輪郭を少し立てる。高画質は弱く、超綺麗は色ずれを足す。軽量はこの分岐に入らない。
+	if (Q.x > 0.5 && Q.x < 3.5) {
+		float k = (Q.x < 1.5) ? 0.16 : ((Q.x < 2.5) ? 0.08 : 0.04);
+		float3 nb = (Tex.Sample(SL, i.uv + px).rgb + Tex.Sample(SL, i.uv - px).rgb
+			+ Tex.Sample(SL, i.uv + float2(px.x, -px.y)).rgb + Tex.Sample(SL, i.uv + float2(-px.x, px.y)).rgb) * 0.25;
+		col += (col - nb) * k;
+	}
+	if (Q.x > 2.5 && Q.x < 3.5) {
+		float2 ca = (i.uv - 0.5) * px * 2.2;
+		float3 fr = float3(Tex.Sample(SL, i.uv + ca).r, col.g, Tex.Sample(SL, i.uv - ca).b);
+		col = lerp(col, fr, 0.22);
+	}
 	return float4(saturate(col), 1);
+}
+
+float4 PSGradeTiny(QOut i) : SV_Target
+{
+	float3 scene = Tex.Sample(SL, i.uv).rgb;
+	float y = dot(scene, float3(0.25, 0.5, 0.25));
+	scene = lerp(y.xxx, scene, 1.04);
+	float2 q = (i.uv - 0.5) * float2(Screen.x * Screen.w, 1);
+	scene *= 1. - saturate(dot(q, q) * 0.35) * 0.08;
+	return float4(saturate(scene), 1);
 }
 
 // パネル。uv は矩形内 0..1。頂点色が塗り、Tint が縁。

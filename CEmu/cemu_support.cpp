@@ -88,7 +88,7 @@
                   + _k2_syn2_report.txt
                   + _k2_ac48_plays.txt
                   + _k2_crush15_report.txt
-   Archives probed: 5085, supported: 4689; MSX +replcart_msx/shiryo_msx/msxfan_msx (_k2_x1msx8full_0.txt _k2_x1msx8fan_0.txt) + x1alba (_k2_x1msx8alba_0.txt)
+   Archives probed: 5085, supported: 4702; MSX +replcart_msx/shiryo_msx/msxfan_msx (_k2_x1msx8full_0.txt _k2_x1msx8fan_0.txt) + x1alba (_k2_x1msx8alba_0.txt)
                   + _k2_ac2s86_report.txt (genpeitd/rthunder/skykiddx/wndrmomo Sys86)
                   + _k2_ac2wsgo_report.txt (pacland/skykid/drgnbstr wsg63701)
                   + bosco wsgz80 (0289 BGM via $8A14 + $0139 id)
@@ -148,6 +148,12 @@
                   + cheryjam_98 (OPN; ロマンス泥棒 / 君の瞳で星をつかまえて / PLEASE stay audible for 8s)
                   + erect_98 (OPN; MUSIC.BIN 00 / 01 / 02 stay audible for 8s)
                   + bigprowr (Technos M6502+AY×2; reset is $4003 so the sound ROM starts at $4000, BGM #16 and #18 requeue, 6/6)
+                  + br1_98 (OPN/BEEP; VSYNC skips a half-written INT 0A, prologue / RUINS / shop stay audible for 8s)
+                  + disco (Data East M6502+AY×2; latch is IRQ, short cues and NMI rests requeue the same command, 11/11)
+                  + tim_98 (OPN; Theme / Euro / Mirror Images stay audible for 8s, beep is MON_NA)
+                  + para_98 (OPN; Paracelsus songs 14 / 15 / 16 stay audible for 8s, beep rows are SC device switches)
+                  + strush_98 (OPN; STRUSH / OFFICE / SCHOOL stay audible for 8s, MT-32 rows are catalogued as beep)
+                  + kumi_98 (OPN; BGM 01 / 02 / 03 stay audible after the opening 2s)
                   + _k2_f3arc_plays.txt (f3: arkretrn, bubblem, bublbob2, cbombers, cleopatr, dangcurv, dariusg, dendego, dendego2, dungeonm, elvactr, gekiridn, groundfx, gunbustr, gunlock, kaiserkn, landgear, landmakr, pbobble2o, pbobble3, popnpop, puchicar, pwrgoal, quizhuhu, scfinals, sidebs, sidebs2, spcinv95, superchs, tcobra2, trstar, twinqix, undrfire) */
 
 #include "StdAfx.h"
@@ -556,6 +562,7 @@ static const char* const kSupported[] = {
 	"bking_msx",
 	"bktb98",
 	"blackthorne_at",
+	"bladestl",
 	"blassty",
 	"blastoff",
 	"blazeon",
@@ -608,6 +615,7 @@ static const char* const kSupported[] = {
 	"bpoint",
 	"bq68snd",
 	"bq_98",
+	"br1_98",
 	"br1_towns",
 	"br1r_98",
 	"br2_98",
@@ -988,6 +996,7 @@ static const char* const kSupported[] = {
 	"ddragon2",
 	"ddragon3",
 	"ddragon3_at",
+	"ddribble",
 	"ddribble_at",
 	"dds",
 	"dds_fmav",
@@ -1081,6 +1090,7 @@ static const char* const kSupported[] = {
 	"dires_msx",
 	"dirtdash",
 	"dirtfoxj",
+	"disco",
 	"diskng1_msx",
 	"diskng2_msx",
 	"dismix1_98",
@@ -2075,6 +2085,7 @@ static const char* const kSupported[] = {
 	"iuc004_98",
 	"jack_98",
 	"jack_at",
+	"jackal",
 	"jackitd_at",
 	"jagur_msx",
 	"jango188",
@@ -2295,6 +2306,7 @@ static const char* const kSupported[] = {
 	"kugyoku_msx",
 	"kujakuou_msx",
 	"kult_at",
+	"kumi_98",
 	"kungfum",
 	"kungfum_msx",
 	"kuniokun",
@@ -3059,6 +3071,7 @@ static const char* const kSupported[] = {
 	"panicprk",
 	"panicr",
 	"papa_98",
+	"para_98",
 	"paracall_98",
 	"paradice_98",
 	"parena_98",
@@ -3470,6 +3483,7 @@ static const char* const kSupported[] = {
 	"robokid",
 	"robokid68snd",
 	"robowr88",
+	"rockrage",
 	"rocnrope",
 	"rodland",
 	"rogueal",
@@ -3658,6 +3672,7 @@ static const char* const kSupported[] = {
 	"scobra",
 	"scontra",
 	"scotrsht",
+	"scramble",
 	"scrmblf_msx",
 	"scsnd",
 	"sd2snd",
@@ -3882,6 +3897,7 @@ static const char* const kSupported[] = {
 	"sonicbom",
 	"sonicwi2",
 	"sonicwi3",
+	"sonson",
 	"sor_msx",
 	"sorc88",
 	"sorc88ut",
@@ -3957,6 +3973,7 @@ static const char* const kSupported[] = {
 	"spcpostn",
 	"spcrusade_at",
 	"spdball2_at",
+	"spdodgeb",
 	"specforces_at",
 	"speedrcr",
 	"spellcraft_at",
@@ -4043,6 +4060,7 @@ static const char* const kSupported[] = {
 	"striker_at",
 	"strkfgtr",
 	"strodai2_98",
+	"strush_98",
 	"sttmax2_98",
 	"stunrunner_at",
 	"stuntisland_at",
@@ -4230,6 +4248,7 @@ static const char* const kSupported[] = {
 	"thundfox",
 	"tigerh",
 	"tigeroad",
+	"tim_98",
 	"timecris",
 	"timecrs2",
 	"timeplt",

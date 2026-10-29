@@ -3860,9 +3860,8 @@ void Game::DrawBaseUi()
 	}
 	by += bh + Ku(12);
 	if (m_baseOpt) {
-		static const int qtx[3] = { TX_SET_Q_LOW, TX_SET_Q_STD, TX_SET_Q_HIGH };
-		if (int q = Sel(ID_BASE_QUALITY, bx, by, bw, Ku(36), TT(TX_SET_QUALITY), TT(qtx[Clampi(m_save.quality, 0, 2)]))) {
-			m_save.quality = (m_save.quality + q + 3) % 3;
+		if (int q = Sel(ID_BASE_QUALITY, bx, by, bw, Ku(36), TT(TX_SET_QUALITY), TT(TacQualityTx(m_save.quality)))) {
+			m_save.quality = TacQualityAt(TacQualitySlot(m_save.quality) + q);
 			m_r.SetQuality(m_save.quality);
 			InvalidatePortraits();
 		}
@@ -5094,9 +5093,13 @@ void Game::DrawEvolveUi()
 			} else ty += rowH;
 		}
 		if (m_evTarget >= 0) {
-			const ClassDef& td = ClassInfo(m_evTarget);
-			m_r.HudTextBox(ClassBlurb(m_evTarget), c1, ty + U(6), colW, U(70), U(13), RGBA8(226, 226, 232));
-			ty += U(80);
+			wchar_t brief[1024];
+			EvoBrief(m_evTarget, brief, 1024);
+			float foot = y + h - U(64);
+			float blurbH = U(132);
+			if (ty + U(8) + blurbH > foot - U(16)) blurbH = max(U(96.f), foot - U(16) - (ty + U(8)));
+			m_r.HudTextBox(brief, c1, ty + U(6), colW, blurbH, U(14), RGBA8(226, 226, 232));
+			ty += blurbH + U(8);
 			m_r.HudText(TT(TX_EV_PREVIEW), c1, ty + U(8), U(14), RGBA8(255, 226, 150), 0, 1);
 			CharData pv = mc;
 			CharData ps[2];

@@ -34,6 +34,31 @@ static float AngLerp(float a, float b, float t)
 	return a + d * t;
 }
 
+// 死亡中・倒れ終わり。待機や被弾に替えると一度起きてから、蘇生の先頭（倒れた姿勢）でもう一度倒れる。
+static BOOL PoseGround(const Actor& a, const Unit& u, float dieT)
+{
+	if (a.clip == CL_DEATH) return TRUE;
+	if (dieT >= 0.f) return TRUE;
+	if (!u.alive || u.hp <= 0) return TRUE;
+	return FALSE;
+}
+
+// 起き上がりの途中も切らない。蘇生クリップの先頭は倒れた姿勢なので、途中で待機に戻すと落ちてからまた起きる。
+static BOOL PoseKeep(const Actor& a, const Unit& u, float dieT)
+{
+	if (a.clip == CL_SPAWN) return TRUE;
+	return PoseGround(a, u, dieT);
+}
+
+// 既に倒れている体は、落下をもう一度再生せず終わりの姿勢で止める。
+static void HoldCorpse(Actor& a)
+{
+	ActorPlay(a, CL_DEATH, 0, 0.f);
+	a.t = 8.f;
+	a.blend = 1.f;
+	a.animSpeed = 1.f;
+}
+
 static DWORD ElemColor(int el)
 {
 	switch (el) {
@@ -145,7 +170,7 @@ void Game::BindImportedActors()
 		if (mi < 0) continue;
 		if (m_act[i].proc == 3 && m_act[i].model == mi) continue;
 		ActorForUnit(i);
-		if (u.rush && m_b.stampedeShow) ActorPlay(m_act[i], CL_SPAWN, 0, .05f);
+		if (u.alive && u.hp > 0 && u.rush && m_b.stampedeShow) ActorPlay(m_act[i], CL_SPAWN, 0, .05f);
 	}
 	InvalidatePortraits();
 }
@@ -156,8 +181,11 @@ void Game::ActorForUnit(int i)
 	if (u.team == TEAM_PLAYER) ActorFromChar(m_act[i], m_lib, m_r, u.ch);
 	else ActorFromMonster(m_act[i], m_lib, m_r, u.monster, u.boss);
 	if (UnitMoveType(u) == MV_FLY && m_act[i].hover < .2f) m_act[i].hover = .35f;
-	ActorPlay(m_act[i], CL_IDLE, 1, 0);
-	m_act[i].t = m_rng.F(0, 2);
+	if (!u.alive || u.hp <= 0) HoldCorpse(m_act[i]);
+	else {
+		ActorPlay(m_act[i], CL_IDLE, 1, 0);
+		m_act[i].t = m_rng.F(0, 2);
+	}
 }
 
 static const DWORD kSnapMagic = 0x31504153u;
@@ -414,7 +442,7 @@ void Game::ResumeBattle(int kind)
 		Unit& u = m_b.u[i];
 		if (u.team == TEAM_PLAYER) CharGrantReached(u.ch);
 		ActorForUnit(i);
-		if (u.rush && m_b.stampedeShow) ActorPlay(m_act[i], CL_SPAWN, 0, .05f);
+		if (u.alive && u.hp > 0 && u.rush && m_b.stampedeShow) ActorPlay(m_act[i], CL_SPAWN, 0, .05f);
 		V3 p = UnitGroundPos(u);
 		u.px = p.x; u.py = p.y; u.pz = p.z;
 		u.hover = m_act[i].hover;
@@ -724,8 +752,8 @@ void Game::BeginTurn()
 	m_dispHp[ui] = (float)u.hp;
 	if (!u.alive || u.hp <= 0) {
 		u.hp = 0; u.alive = 0; u.killed = 1;
-		ActorPlay(m_act[ui], CL_DEATH, 0, .08f);
-		m_dieT[ui] = 0;
+		if (m_act[ui].clip != CL_DEATH) ActorPlay(m_act[ui], CL_DEATH, 0, .08f);
+		if (m_dieT[ui] < 0) m_dieT[ui] = 0;
 		if (CheckBattleOver()) return;
 		FinishUnitTurn(1);
 		return;
@@ -797,7 +825,7 @@ BOOL Game::CheckBattleOver()
 	AddBanner(TT(win ? TX_BT_VICTORY : TX_BT_DEFEAT), win && m_bossDown ? TT(TX_BT_BOSS) : NULL, win ? RGBA8(255, 226, 120) : RGBA8(190, 160, 220), 1, 2.8f);
 	TacSfx(win ? TS_WIN : TS_LOSE);
 	if (win) {
-		for (int i = 0; i < m_b.nUnits; i++) if (m_b.u[i].alive && m_b.u[i].team == TEAM_PLAYER) ActorPlay(m_act[i], CL_CHEER, 1, .2f);
+		for (int i = 0; i < m_b.nUnits; i++) if (m_b.u[i].alive && m_b.u[i].hp > 0 && !PoseKeep(m_act[i], m_b.u[i], m_dieT[i])) ActorPlay(m_act[i], CL_CHEER, 1, .2f);
 		for (int i = 0; i < m_b.nUnits; i++) {
 			Unit& u = m_b.u[i];
 			if (!u.alive || u.team != TEAM_PLAYER) continue;
@@ -850,8 +878,8 @@ void Game::FinishUnitTurn(int acted)
 			m_dispHp[ui] = (float)u.hp;
 			if (!u.alive || u.hp <= 0) {
 				u.hp = 0; u.alive = 0; u.killed = 1;
-				ActorPlay(m_act[ui], CL_DEATH, 0, .08f);
-				m_dieT[ui] = 0;
+				if (m_act[ui].clip != CL_DEATH) ActorPlay(m_act[ui], CL_DEATH, 0, .08f);
+				if (m_dieT[ui] < 0) m_dieT[ui] = 0;
 				TacSfx(TS_FALL);
 			} else TacSfx(TS_HURT);
 		}
@@ -1563,7 +1591,7 @@ void Game::StartMove(int ui, int tx, int tz, int next)
 	m_pathN = 0;
 	m_camPan = v3(0, 0, 0);
 	m_act[ui].flap = 0.f;
-	if (m_moveN > 1) {
+	if (m_moveN > 1 && !PoseGround(m_act[ui], u, m_dieT[ui])) {
 		BOOL fly = UnitMoveType(u) == MV_FLY && (m_act[ui].wings > 0 || u.team == TEAM_PLAYER);
 		if (fly) {
 			if (m_act[ui].wings == 0) m_act[ui].wings = 1;
@@ -1655,8 +1683,8 @@ void Game::UpdateMove(float dt)
 			m_r.BuildMinimap(m_b.map);
 			if (!u.alive || u.hp <= 0) {
 				u.hp = 0; u.alive = 0; u.killed = 1;
-				ActorPlay(m_act[ui], CL_DEATH, 0, .08f);
-				m_dieT[ui] = 0;
+				if (m_act[ui].clip != CL_DEATH) ActorPlay(m_act[ui], CL_DEATH, 0, .08f);
+				if (m_dieT[ui] < 0) m_dieT[ui] = 0;
 				if (CheckBattleOver()) return;
 				FinishUnitTurn(1);
 				return;
@@ -1665,7 +1693,7 @@ void Game::UpdateMove(float dt)
 		WakeNearPlayers(m_b, 9);
 		m_act[ui].animSpeed = 1.f;
 		m_act[ui].flap = 0.f;
-		ActorPlay(m_act[ui], CL_IDLE, 1, .15f);
+		if (!PoseKeep(m_act[ui], u, m_dieT[ui])) ActorPlay(m_act[ui], CL_IDLE, 1, .15f);
 		int next = m_moveNext;
 		if (u.team == TEAM_PLAYER && m_ai.wild == 0) {
 			if (next == PH_P_TARGET && m_target >= 0) {
@@ -1946,7 +1974,7 @@ float Game::CutIntroLen() const
 {
 	if (m_cutKind == 1) return IsCraftSuper(m_seqSkill) ? 2.35f : 1.55f;
 	if (m_cutKind == 2) return 1.75f;
-	if (m_cutKind == 3) return 1.85f;
+	if (m_cutKind == 3) return 2.45f;
 	if (m_ult) return 2.15f;
 	return m_seqSkill >= 0 ? 1.05f : .45f;
 }
@@ -1968,7 +1996,7 @@ void Game::PoseFormAllies()
 	}
 	for (int i = 0; i < m_cutAllyN; i++) {
 		int id = m_cutAlly[i];
-		if (id == m_cutA || id < 0 || m_dieT[id] >= 0) continue;
+		if (id == m_cutA || id < 0 || PoseKeep(m_act[id], m_b.u[id], m_dieT[id])) continue;
 		Actor& ac = m_act[id];
 		ActorPlay(ac, allyClip, 0, .12f);
 		ac.skillPose = m_seqSkill;
@@ -2133,7 +2161,7 @@ void Game::SeqImpact(const SeqStep& st, int volley)
 		if (!h.hit) {
 			BOOL landed = FALSE;
 			for (int q = 0; q < st.nHits; q++) if (st.hits[q].defender == d && st.hits[q].hit) landed = TRUE;
-			if (!landed) {
+			if (!landed && !PoseGround(m_act[d], du, m_dieT[d])) {
 				m_act[d].recoil = 0.f;
 				ActorPlay(m_act[d], CL_DODGE, 0, .06f);
 			}
@@ -2198,9 +2226,9 @@ void Game::SeqImpact(const SeqStep& st, int volley)
 		if (h.kill) {
 			if (du.team == TEAM_PLAYER) { if (sfxOnce(128)) TacSfx(TS_FALL); }
 			else if (sfxOnce(256)) TacSfx(TS_DEATH);
-			ActorPlay(m_act[d], CL_DEATH, 0, .08f);
-			m_dieT[d] = 0;
-		} else {
+			if (m_act[d].clip != CL_DEATH) ActorPlay(m_act[d], CL_DEATH, 0, .08f);
+			if (m_dieT[d] < 0) m_dieT[d] = 0;
+		} else if (!PoseGround(m_act[d], du, m_dieT[d])) {
 			int guard = !h.crit && kind != SK_MAGIC && UnitFacing(m_b.u[h.attacker], du) == 0;
 			ActorPlay(m_act[d], guard ? CL_BLOCK : (h.crit ? CL_HIT_B : CL_HIT_A), 0, .06f);
 		}
@@ -2263,7 +2291,7 @@ void Game::UpdateSeq(float dt)
 					float wind = full * ActorWindup(ca, m_r, clip);
 					ca.animSpeed = Clampf(wind / max(0.25f, need), 0.12f, 1.15f);
 				}
-				if (m_cutD >= 0) ActorPlay(m_act[m_cutD], CL_IDLE, 1, .15f);
+				if (m_cutD >= 0 && !PoseKeep(m_act[m_cutD], m_b.u[m_cutD], m_dieT[m_cutD])) ActorPlay(m_act[m_cutD], CL_IDLE, 1, .15f);
 				PoseFormAllies();
 				if (m_cutKind == 3) BindSummonCut();
 				if (m_seqSkill >= 0) {
@@ -2290,15 +2318,9 @@ void Game::UpdateSeq(float dt)
 				if (((int)(m_cutStageT * 8.f) & 1) == 0)
 					Burst(m_cutPosA + v3(0, 1.1f, 0), 4, 3.f, .2f, .4f, (ElemColor(sd.element) & 255) / 255.f, ((ElemColor(sd.element) >> 8) & 255) / 255.f, ((ElemColor(sd.element) >> 16) & 255) / 255.f, 3, 1, -1.f, 0, .6f);
 			}
-			if (m_cutKind == 3 && m_sumOn) {
-				float u = Smooth01(m_cutStageT / max(0.2f, need));
-				m_sumU = 0;
-				m_sumPos = m_sumFrom + v3(0, Lerpf(-0.85f, 0.f, u), 0);
-				m_sumAct.animSpeed = 1.f;
-			}
+			if (m_cutKind == 3 && m_sumOn) SummonArrive(dt);
 			if (m_cutStageT >= need) {
 				m_cutStage = 2; m_cutStageT = 0; m_seqT = 0; m_seqCur = 0; m_seqImpact = 0;
-				if (m_cutKind == 3 && m_sumOn) ActorPlay(m_sumAct, CL_RUN, 1, .08f);
 				Shake(m_cutKind == 1 ? .7f : .45f);
 				if (m_cutKind == 1) m_flashWhite = IsCraftSuper(m_seqSkill) ? 1.f : .55f;
 				Burst(m_cutPosA + v3(0, .05f, 0), m_cutKind == 1 ? 36 : 22, 3.4f, .2f, .9f, 1.f, .92f, .7f, 2, 1, .4f, 0, 1.4f);
@@ -2315,8 +2337,8 @@ void Game::UpdateSeq(float dt)
 		}
 		if (m_cutStage == 3) {
 			if (m_cutKind == 3 && m_sumOn) SummonLeave(dt);
-			// 召喚は斬ったあと画面の外まで走る。そのあいだは結果を出さない。
-			if (m_cutStageT >= ((m_cutKind == 3 && m_sumOn) ? 0.95f : 0.3f)) {
+			// 召喚は攻撃のあと、種類ごとの退場が見えるまで結果を出さない。
+			if (m_cutStageT >= ((m_cutKind == 3 && m_sumOn) ? SummonDepartNeed() : 0.3f)) {
 				m_cutStage = 4; m_cutStageT = 0;
 				m_popups.clear();
 				for (auto& p : m_deferPopups) m_popups.push_back(p);
@@ -2324,7 +2346,7 @@ void Game::UpdateSeq(float dt)
 				for (int i = 0; i < m_b.nUnits; i++) m_lunge[i] = 0;
 				for (int i = 0; i < m_b.nUnits; i++) {
 					m_act[i].animSpeed = 1.f;
-					if (m_dieT[i] >= 0 && m_b.u[i].hp <= 0) continue;
+					if (PoseKeep(m_act[i], m_b.u[i], m_dieT[i])) continue;
 					ActorPlay(m_act[i], CL_IDLE, 1, .1f);
 				}
 			}
@@ -2336,28 +2358,29 @@ void Game::UpdateSeq(float dt)
 		}
 	}
 	if (m_seqCut && m_cutStage == 2 && m_cutKind == 3 && m_sumOn) {
-		if (!m_sumHit) {
-			float u = min(1.f, m_cutStageT / 0.72f);
-			m_sumU = u;
-			m_sumPos = Lerp(m_sumFrom, m_sumTo, Smooth01(u));
-			m_sumAct.animSpeed = 1.15f;
-			if (u >= 1.f) {
-				m_sumHit = 1;
-				m_sumU = 1.f;
-				m_sumPos = m_sumTo;
-				ActorPlay(m_sumAct, CL_2H_CHOP, 0, .05f);
-				SummonImpactFx();
-				Shake(.85f);
-			}
-		} else {
-			SummonLeave(dt);
-		}
+		if (!m_sumHit) SummonStrike(dt);
+		else SummonLeave(dt);
 	}
 	// 攻防の再生（マップ・カットイン共通）
 	if (m_seqCut && m_cutStage == 2) CutDressFx();
 	if (m_seqCur >= m_seqN) {
 		m_seqT += dt;
 		if (m_seqT >= .35f) {
+			// 浴びせた瞬間から退場を進めている。他の的のダメージと並行なので、ここで退場を巻き戻さない。
+			if (m_seqCut && m_cutKind == 3 && m_sumOn) {
+				if (!m_sumHit || m_cutStageT < SummonStrikeNeed()) return;
+				m_cutStage = 4; m_cutStageT = 0;
+				m_popups.clear();
+				for (auto& p : m_deferPopups) m_popups.push_back(p);
+				m_deferPopups.clear();
+				for (int i = 0; i < m_b.nUnits; i++) m_lunge[i] = 0;
+				for (int i = 0; i < m_b.nUnits; i++) {
+					m_act[i].animSpeed = 1.f;
+					if (PoseKeep(m_act[i], m_b.u[i], m_dieT[i])) continue;
+					ActorPlay(m_act[i], CL_IDLE, 1, .1f);
+				}
+				return;
+			}
 			if (m_seqCut) { m_cutStage = 3; m_cutStageT = 0; }
 			else FinishSeq();
 		}
@@ -2404,7 +2427,7 @@ void Game::UpdateSeq(float dt)
 			default: break;
 			}
 			for (int i = 0; i < nm; i++) {
-				if (mem[i] == A || m_dieT[mem[i]] >= 0) continue;
+				if (mem[i] == A || PoseKeep(m_act[mem[i]], m_b.u[mem[i]], m_dieT[mem[i]])) continue;
 				Actor& ma = m_act[mem[i]];
 				BOOL posed = m_seqCut && m_cutStage == 2 && ma.clip == allyClip && ma.t > 0.05f;
 				if (posed) ma.t = ActorClipLen(ma, m_lib, m_r, allyClip) * ActorWindup(ma, m_r, allyClip);
@@ -2415,7 +2438,7 @@ void Game::UpdateSeq(float dt)
 			}
 		}
 		BOOL held = m_seqCut && m_cutStage == 2 && aa.clip == clip && aa.t > 0.05f && !follow;
-		if (!held) ActorPlay(aa, clip, 0, follow ? .04f : .08f);
+		if (!held && !PoseGround(aa, au, m_dieT[A])) ActorPlay(aa, clip, 0, follow ? .04f : .08f);
 		aa.skillPose = st.skill;
 		aa.animSpeed = cast ? 1.0f : 1.05f;
 		m_stepL = ActorClipLen(aa, m_lib, m_r, clip) / aa.animSpeed;
@@ -2466,6 +2489,16 @@ void Game::UpdateSeq(float dt)
 		}
 	}
 	m_seqT += dt;
+	// 召喚は息や一撃が乗るまで着弾しない。浴びせた瞬間にダメージを出す。
+	if (m_seqCut && m_cutKind == 3 && m_sumOn && m_cutStage == 2 && m_stepTi > 0.05f) {
+		if (!m_sumHit) {
+			float holdAt = m_stepTi - 0.04f;
+			if (holdAt < 0.02f) holdAt = 0.02f;
+			if (m_seqT > holdAt) m_seqT = holdAt;
+		} else if (m_seqCur == 0 && m_seqImpact == 0 && m_seqT < m_stepTi) {
+			m_seqT = m_stepTi;
+		}
+	}
 	BOOL melee = !ranged && !cast && !magicNormal;
 	float maxL = .32f;
 	if (m_seqCut && m_cutStage == 2) {
@@ -2484,7 +2517,8 @@ void Game::UpdateSeq(float dt)
 		if (m_cutKind == 2 && m_seqCut && m_cutStage == 2) {
 			for (int i = 0; i < m_cutAllyN; i++) {
 				int id = m_cutAlly[i];
-				if (id != A) m_lunge[id] = m_lunge[A] * .8f;
+				if (id != A && !PoseKeep(m_act[id], m_b.u[id], m_dieT[id])) m_lunge[id] = m_lunge[A] * .8f;
+				else if (id != A) m_lunge[id] = 0;
 			}
 		}
 	}
@@ -2551,7 +2585,7 @@ void Game::UpdateSeq(float dt)
 			const SeqStep& nx = m_seq[m_seqCur + 1];
 			chain = nx.attacker == A && nx.skill == st.skill && !nx.counter && nx.nHits > 0 && nx.hits[0].volley > 0;
 		}
-		if (!chain && (m_b.u[A].hp > 0 || m_dispHp[A] > 0)) ActorPlay(aa, CL_IDLE, 1, .15f);
+		if (!chain && !PoseKeep(aa, m_b.u[A], m_dieT[A])) ActorPlay(aa, CL_IDLE, 1, .15f);
 		m_lunge[A] = 0;
 		m_seqCur++;
 		m_seqT = 0;
@@ -2584,7 +2618,7 @@ void Game::FinishSeq()
 		if (u.alive && u.hp > 0 && m_dieT[i] >= 0) {
 			m_dieT[i] = -1;
 			u.dissolve = 0;
-			ActorPlay(m_act[i], CL_IDLE, 1, .15f);
+			if (m_act[i].clip != CL_SPAWN) ActorPlay(m_act[i], CL_SPAWN, 0, .35f);
 		}
 		if (u.alive && u.hp <= 0) {
 			u.alive = 0;
@@ -2822,7 +2856,7 @@ void Game::UpdateUnitsVisual(float dt)
 		u.hpShow = Lerpf(u.hpShow, targetHp, Clampf(dt * 5.f, 0, 1));
 		if (fabsf(u.hpShow - targetHp) < .05f) u.hpShow = targetHp;
 		u.flash = max(0.f, u.flash - dt * 3.f);
-		if (!u.alive && u.team != TEAM_PLAYER && m_dieT[i] < 0) m_dieT[i] = 0;
+		if (!u.alive && m_dieT[i] < 0) m_dieT[i] = 0;
 		BOOL holdRecoil = m_seqCut && m_cutStage >= 1 && m_cutStage <= 3 && !UnitInArena(i);
 		if (a.recoil > 0 && !holdRecoil) a.recoil = max(0.f, a.recoil - dt * (a.recoil > .55f ? 1.15f : 2.5f));
 		if (m_dieT[i] >= 0) {
@@ -2833,9 +2867,12 @@ void Game::UpdateUnitsVisual(float dt)
 				u.dissolve = min(cap, u.dissolve + dt * .9f);
 			}
 		}
-		if (!a.loop && a.clip != CL_DEATH && ActorClipDone(a, m_lib, m_r) && !(m_phase == PH_ACTION && i == (m_seqCur < m_seqN ? m_seq[m_seqCur].attacker : -1))) {
-			a.animSpeed = 1.f;
-			ActorPlay(a, (m_phase == PH_OVER && m_victory && u.team == TEAM_PLAYER) ? CL_CHEER : CL_IDLE, 1, .2f);
+		if ((!u.alive || u.hp <= 0) && a.clip != CL_DEATH && a.clip != CL_SPAWN) HoldCorpse(a);
+		else if (!a.loop && a.clip != CL_DEATH && ActorClipDone(a, m_lib, m_r) && !(m_phase == PH_ACTION && i == (m_seqCur < m_seqN ? m_seq[m_seqCur].attacker : -1))) {
+			if (u.alive && u.hp > 0 && (m_dieT[i] < 0 || a.clip == CL_SPAWN)) {
+				a.animSpeed = 1.f;
+				ActorPlay(a, (m_phase == PH_OVER && m_victory && u.team == TEAM_PLAYER && m_dieT[i] < 0) ? CL_CHEER : CL_IDLE, 1, .2f);
+			}
 		}
 	}
 }
@@ -3069,6 +3106,165 @@ void Game::DrawBattle3D()
 	m_r.DrawParticles(m_parts.data(), m_parts.size());
 }
 
+// 召喚の拍。媒質が生まれて広がり、獣が出て、溜めて撃ち、出口の媒質に入り、媒質が消える。
+// 攻撃の型だけ獣ごとに変える。入り口と退場は属性（炎・津波・地割れ・雨など）で分かれる。
+// 0息 1突進 2叩き 3急降下 4飛びかかり 5咆哮 6薙ぎ 7跳躍 8周回 9突進の溜め
+static const unsigned char kSumAt[SUMMON_N] = {
+	0, 2, 3, 1, 6, 9, 1, 0, 8, 9, 4, 3,
+	5, 9, 6, 2, 5, 6, 7, 0, 8, 4, 2, 7,
+	3, 9, 6, 0, 5, 6, 5, 1, 0, 6, 2, 3,
+};
+static_assert(sizeof(kSumAt) / sizeof(kSumAt[0]) == SUMMON_N, "summon attack");
+
+static const float kSumTau = 6.2831853f;
+static const float kSumPi = 3.14159265f;
+
+static int SumAtOf(int skill)
+{
+	int i = skill - SUMMON_BASE;
+	if (i < 0 || i >= SUMMON_N) i = 0;
+	return kSumAt[i];
+}
+static int SumIndexOf(int skill)
+{
+	int i = skill - SUMMON_BASE;
+	if (i < 0 || i >= SUMMON_N) i = 0;
+	return i;
+}
+static int SumTheater(int fx)
+{
+	switch (fx) {
+	case SUM_FX_FIRE: return 0;
+	case SUM_FX_ICE: return 1;
+	case SUM_FX_BOLT: return 2;
+	case SUM_FX_SPIKE: return 3;
+	case SUM_FX_WIND: return 4;
+	case SUM_FX_WAVE: return 5;
+	case SUM_FX_HOLY: return 6;
+	case SUM_FX_DARK: return 7;
+	case SUM_FX_MIASMA: return 8;
+	case SUM_FX_ROAR: return 9;
+	case SUM_FX_SLEEP: return 10;
+	default: return 11;
+	}
+}
+static float SumAmp(int phase, float u)
+{
+	if (u < 0.f) u = 0.f;
+	if (phase <= 0) {
+		if (u < 0.28f) return 0.08f + 0.42f * (u / 0.28f);
+		if (u < 0.58f) return 0.50f + 0.90f * ((u - 0.28f) / 0.30f);
+		return 1.40f;
+	}
+	if (phase == 1) return 0.72f;
+	float appear = u < 0.25f ? (u / 0.25f) : 1.f;
+	float shrink = u < 0.70f ? 1.f : (1.f - (u - 0.70f) / 0.30f);
+	if (shrink < 0.f) shrink = 0.f;
+	return (0.15f + 1.15f * appear) * shrink;
+}
+static V3 SumFwd(const V3& a, const V3& b)
+{
+	V3 d = v3(b.x - a.x, 0, b.z - a.z);
+	float L = sqrtf(d.x * d.x + d.z * d.z);
+	if (L < 0.05f) return v3(0, 0, 1);
+	return v3(d.x / L, 0, d.z / L);
+}
+static V3 SumRight(const V3& f) { return v3(-f.z, 0, f.x); }
+static void SummonClip(Actor& a, int clip, int loop, float speed)
+{
+	if (a.clip != clip || (loop && !a.loop) || (!loop && a.loop))
+		ActorPlay(a, clip, loop, .08f);
+	a.animSpeed = speed;
+}
+static float SumStrikeSpan() { return 1.35f; }
+static float SumDepartSpan() { return 2.20f; }
+
+static void SumPose(int th, int at, int index, int phase, float u,
+	const V3& from, const V3& to, V3& pos, float& yaw, float& dissolve, int& hidden)
+{
+	if (u < 0.f) u = 0.f;
+	V3 fwd = SumFwd(from, to);
+	V3 right = SumRight(fwd);
+	float sgn = (index & 1) ? 1.f : -1.f;
+	float hover = (at == 0) ? 1.15f : 0.f;
+	if (th == 0 && index == 24) hover = 2.35f;
+	if (th == 0 && index == 27) hover = 1.65f;
+	if (th == 2 && index != 35) hover = 1.2f;
+	if (th == 4) hover = 0.95f;
+	if (th == 5) hover = 0.32f;
+	if (th == 6 && at == 0) hover = 0.75f;
+	if (th == 7 && index == 8) hover = 1.45f;
+	if (th == 8 && index == 20) hover = 1.15f;
+	if (th == 10) hover = 1.1f;
+	V3 home = from + v3(0, hover, 0);
+	if (th == 0 && index == 27) home = from + right * (sgn * 0.35f) + v3(0, hover, 0);
+	V3 start = home;
+	if (th == 0) start = from + v3(0, -0.15f, 0);
+	else if (th == 1 || th == 3 || th == 9 || th == 11) start = from + v3(0, -1.45f, 0);
+	else if (th == 2 || th == 6) start = from + v3(0, 5.4f, 0);
+	else if (th == 4) start = from + right * 2.4f + v3(0, 2.6f, 0);
+	else if (th == 5) start = from - fwd * 5.4f + v3(0, 0.2f, 0);
+	else if (th == 7 || th == 8) start = from + v3(0, -0.85f, 0);
+	else if (th == 10) start = from + v3(0, 2.9f, 0);
+	if (th == 0 && index == 27) start = from + right * (sgn * 2.5f) + v3(0, 2.8f, 0);
+	if (th == 0 && at == 4) { start = from + v3(0, -0.7f, 0); home.y = 0.f; }
+	V3 hit = home + fwd * 0.35f;
+	if (at == 1 || at == 2 || at == 3 || at == 4 || at == 6 || at == 7 || at == 9) hit = to;
+	else if (at == 5) hit = Lerp(home, to, 0.42f);
+	else if (at == 8) hit = to + right * 0.45f;
+	if (th == 5 && at != 0) hit = to + v3(0, 0.2f, 0);
+	V3 exitP = hit;
+	if (th == 0) {
+		float top = home.y > hit.y ? home.y : hit.y;
+		exitP = (at == 0) ? v3(home.x, home.y + 1.55f, home.z) : v3(hit.x, top + 1.7f, hit.z);
+	} else if (th == 1 || th == 3 || th == 9 || th == 11) exitP = v3(hit.x, -1.5f, hit.z);
+	else if (th == 2 || th == 6) exitP = v3(hit.x, 5.6f, hit.z);
+	else if (th == 4 || th == 10) exitP = hit + v3(0, 3.3f, 0);
+	else if (th == 5) exitP = (from - fwd * 4.2f) + v3(0, -0.55f, 0);
+	else if (th == 7) exitP = (index == 8) ? hit + v3(0, 3.2f, 0) : v3(hit.x, -1.2f, hit.z);
+	else if (th == 8) exitP = (index == 20) ? hit + v3(0, 2.8f, 0) : v3(hit.x, -1.15f, hit.z);
+	float em = Smooth01((u - 0.58f) / 0.42f);
+	if (phase <= 0) {
+		pos = Lerp(start, home, em);
+		if (th == 4) {
+			float spin = Smooth01((u - 0.40f) / 0.60f);
+			float ang = u * kSumTau * 1.35f;
+			float rad = Lerpf(2.7f, 0.15f, spin);
+			pos = from + right * (sinf(ang) * rad) + fwd * (cosf(ang) * rad) + v3(0, Lerpf(2.5f, home.y, spin), 0);
+		} else if (th == 5) {
+			pos = Lerp(start, home, Smooth01(u / 0.92f));
+			pos.y = 0.22f + sinf(u * kSumPi) * 0.18f;
+		}
+	} else if (phase == 1) {
+		float uu = u > 1.f ? 1.f : u;
+		float rel = (at == 2) ? Smooth01((uu - 0.62f) / 0.38f) : Smooth01((uu - 0.38f) / 0.62f);
+		pos = Lerp(home, hit, rel);
+		if (at == 3) pos.y = Lerpf(home.y, 0.f, rel) + sinf(rel * kSumPi) * 1.45f;
+		else if (at == 4 || at == 7) pos.y += sinf(rel * kSumPi) * 1.15f;
+		else if (at == 2) pos.y += sinf(rel * kSumPi) * 0.8f;
+		else if (at == 8) pos = pos + right * sinf(rel * kSumTau) * Lerpf(1.5f, 0.15f, rel);
+		else if (at == 6) pos = pos + right * sinf(rel * kSumPi) * 1.1f;
+	} else {
+		float en = Smooth01((u - 0.25f) / 0.47f);
+		pos = Lerp(hit, exitP, en);
+		if (th == 4) pos = pos + right * sinf(u * kSumTau) * (1.f - en) * 0.9f;
+	}
+	yaw = atan2f(fwd.x, fwd.z);
+	if (th == 4 && phase <= 0) yaw += u * 1.4f;
+	dissolve = 0.f;
+	if (th == 0) {
+		if (phase <= 0) dissolve = 1.f - Smooth01((u - 0.52f) / 0.38f);
+		else if (phase >= 2) dissolve = Smooth01((u - 0.28f) / 0.46f);
+	}
+	hidden = 0;
+	if (th == 0) hidden = dissolve > 0.96f ? 1 : 0;
+	else if (phase <= 0) {
+		if (th == 5) hidden = u < 0.20f ? 1 : 0;
+		else if (th == 4) hidden = u < 0.42f ? 1 : 0;
+		else if (th == 2 || th == 6 || th == 10) hidden = em < 0.08f ? 1 : 0;
+		else hidden = (em < 0.12f || pos.y < -0.9f) ? 1 : 0;
+	} else if (phase >= 2) hidden = u > 0.78f ? 1 : 0;
+}
 void Game::BindSummonCut()
 {
 	m_sumOn = 0;
@@ -3121,38 +3317,157 @@ void Game::BindSummonCut()
 	m_sumTo = foe + v3(-dx * 0.55f, 0, -dz * 0.55f);
 	m_sumFrom.y = 0;
 	m_sumTo.y = 0;
-	m_sumPos = m_sumFrom + v3(0, -0.85f, 0);
 	m_sumFx = SummonFx(index);
 	m_sumHit = 0;
 	m_sumU = 0;
 	m_sumOn = 1;
-	ActorPlay(m_sumAct, CL_SPAWN, 0, 0);
+	{
+		float yaw = 0, dis = 1;
+		int hide = 1;
+		SumPose(SumTheater(m_sumFx), SumAtOf(m_seqSkill), index, 0, 0.f, m_sumFrom, m_sumTo, m_sumPos, yaw, dis, hide);
+		m_sumYaw = yaw;
+		m_sumFade = dis;
+		m_sumHide = hide;
+		ActorPlay(m_sumAct, CL_IDLE, 1, 0);
+	}
 }
 
-// 当たったあと、突進の延長で画面の外へ走り抜ける。カメラは敵に残す。
+float Game::SummonStrikeNeed() const
+{
+	return SumStrikeSpan() + SumDepartSpan();
+}
+
+float Game::SummonDepartNeed() const
+{
+	return SumDepartSpan();
+}
+
+void Game::SummonApply(int phase, float u)
+{
+	float yaw = 0, dis = 0;
+	int hide = 0;
+	V3 pos = m_sumPos;
+	SumPose(SumTheater(m_sumFx), SumAtOf(m_seqSkill), SumIndexOf(m_seqSkill), phase, u,
+		m_sumFrom, m_sumTo, pos, yaw, dis, hide);
+	m_sumPos = pos;
+	m_sumYaw = yaw;
+	m_sumFade = dis;
+	m_sumHide = hide;
+	m_sumU = u;
+}
+
+void Game::SummonArrive(float dt)
+{
+	(void)dt;
+	float prev = m_sumU;
+	float u = m_cutStageT / max(0.2f, CutIntroLen());
+	if (u > 1.f) u = 1.f;
+	SummonApply(0, u);
+	SummonClip(m_sumAct, CL_IDLE, 1, 1.f);
+	SummonMedium(0, u);
+	if (prev < 0.9f && u >= 0.9f) Shake(.28f);
+}
+
+void Game::SummonStrike(float dt)
+{
+	(void)dt;
+	float u = m_cutStageT / SumStrikeSpan();
+	int at = SumAtOf(m_seqSkill);
+	if (!m_sumHit) {
+		SummonApply(1, u > 1.f ? 1.f : u);
+		if (u < 0.12f) SummonClip(m_sumAct, CL_IDLE, 1, 1.f);
+		else {
+			if (m_sumAct.clip != CL_1H_CHOP) ActorPlay(m_sumAct, CL_1H_CHOP, 0, .06f);
+			m_sumAct.animSpeed = u < 0.38f ? 0.38f : 1.2f;
+		}
+		SummonMedium(1, u > 1.f ? 1.f : u);
+		if (u >= 1.f) {
+			m_sumHit = 1;
+			SummonImpactFx();
+			Shake(at == 2 || at == 3 || at == 5 ? 1.05f : .8f);
+			SummonLeave(dt);
+		}
+	} else {
+		SummonLeave(dt);
+	}
+}
+
 void Game::SummonLeave(float dt)
 {
-	float t = m_sumU - 1.f + dt;
+	(void)dt;
+	float t = m_cutStageT;
+	if (m_cutStage < 3) t -= SumStrikeSpan();
 	if (t < 0.f) t = 0.f;
-	if (t > 1.15f) t = 1.15f;
-	m_sumU = 1.f + t;
-	if (t < 0.16f) {
-		m_sumPos = m_sumTo;
-		return;
-	}
-	float u = (t - 0.16f) / 0.70f;
+	float u = t / SumDepartSpan();
 	if (u > 1.f) u = 1.f;
-	V3 dir = m_sumTo - m_sumFrom;
-	float len = sqrtf(dir.x * dir.x + dir.z * dir.z);
-	if (len < 0.05f) { dir = v3(1.f, 0.f, 0.f); len = 1.f; }
-	dir.x /= len;
-	dir.y = 0.f;
-	dir.z /= len;
-	m_sumPos = m_sumTo + dir * (u * 9.f);
-	m_sumPos.y = 0.f;
-	if (m_sumAct.clip != CL_RUN)
-		ActorPlay(m_sumAct, CL_RUN, 1, .05f);
-	m_sumAct.animSpeed = 1.65f;
+	SummonApply(2, u);
+	SummonClip(m_sumAct, CL_IDLE, 1, 0.85f);
+	SummonMedium(2, u);
+}
+
+void Game::SummonMedium(int phase, float u)
+{
+	float amp = SumAmp(phase, u);
+	if (amp < 0.04f) return;
+	int th = SumTheater(m_sumFx);
+	V3 fwd = SumFwd(m_sumFrom, m_sumTo);
+	V3 right = SumRight(fwd);
+	V3 gate = m_sumFrom;
+	float sz = 0.12f + amp * 0.22f;
+	if (th == 0) {
+		Burst(gate + v3(0, 0.15f + amp * 0.35f, 0), 2, 0.7f + amp, sz, 0.45f + amp * 0.2f, 1.f, 0.38f, 0.08f, 2, 1, -0.6f, 0.22f, 1.4f);
+		if (phase >= 2) Burst(m_sumPos, 2, 0.5f, sz * 1.1f, 0.4f, 1.f, 0.45f, 0.1f, 2, 1, -0.3f, 0.15f, 1.1f);
+	} else if (th == 1) {
+		Burst(gate + v3(0, amp * 0.8f, 0), 2, 0.5f, sz, 0.6f, 0.75f, 0.9f, 1.f, 3, 1, -1.1f, 0.1f, 0.8f);
+		Burst(gate + v3(sinf(m_time * 4.f) * 1.4f, 3.2f, cosf(m_time * 3.f) * 1.1f), 1, 0.2f, 0.06f, 0.7f, 0.85f, 0.95f, 1.f, 3, 1, 7.f, 0.4f, 0.f);
+	} else if (th == 2) {
+		Burst(gate + v3(0, 3.4f, 0), 1, 2.2f, 0.08f, 0.35f, 0.75f, 0.88f, 1.f, 3, 1, 6.f, 0.8f, 0.f);
+		Burst(gate + v3(sinf(m_time * 5.f) * 2.2f, 3.6f, cosf(m_time * 4.f) * 1.6f), 2, 0.15f, 0.05f, 0.55f, 0.7f, 0.8f, 0.95f, 3, 1, 8.f, 0.35f, 0.f);
+	} else if (th == 3 || th == 11) {
+		for (int i = -2; i <= 2; i++) {
+			V3 p = gate + right * (i * 0.42f * amp) + fwd * ((i & 1) ? 0.35f : -0.2f) * amp;
+			Burst(p + v3(0, 0.05f, 0), 1, 0.8f, 0.1f + amp * 0.06f, 0.4f, 0.45f, 0.32f, 0.18f, 3, 0, 1.4f, 0.05f, 0.6f);
+		}
+	} else if (th == 4) {
+		float ang = m_time * 3.2f;
+		V3 p = gate + right * sinf(ang) * (0.6f + amp) + fwd * cosf(ang) * (0.6f + amp) + v3(0, 0.4f + amp * 0.5f, 0);
+		Burst(p, 2, 1.4f, sz, 0.45f, 0.75f, 0.95f, 0.85f, 6, 1, -0.2f, 0.3f, 0.4f);
+	} else if (th == 5) {
+		float ride = phase <= 0 ? Smooth01(u / 0.92f) : (phase == 1 ? Smooth01((u - 0.38f) / 0.62f) : Smooth01((u - 0.2f) / 0.6f));
+		V3 a = phase <= 0 ? (gate - fwd * 5.2f) : (phase == 1 ? gate : m_sumTo);
+		V3 b = phase <= 0 ? gate : (phase == 1 ? m_sumTo : (gate - fwd * 4.f));
+		V3 c = Lerp(a, b, ride);
+		for (int i = -1; i <= 2; i++)
+			Burst(c + right * (i * 0.7f) + v3(0, 0.25f + amp * 0.65f, 0), 1, 1.1f, 0.16f + amp * 0.1f, 0.4f, 0.2f, 0.5f, 1.f, 1, 1, 1.6f, 0.15f, 0.3f);
+	} else if (th == 6) {
+		Burst(gate + v3(0, amp * 1.1f, 0), 2, 0.6f, sz, 0.55f, 1.f, 0.92f, 0.55f, 2, 1, -1.4f, 0.1f, 1.2f);
+	} else if (th == 7) {
+		Burst(gate + v3(0, 0.2f, 0), 2, 0.5f, sz, 0.6f, 0.28f, 0.08f, 0.45f, 1, 1, 0.3f, 0.1f, 0.2f);
+	} else if (th == 8) {
+		Burst(gate + v3(0, 0.35f + amp * 0.4f, 0), 2, 0.35f, sz * 1.2f, 0.7f, 0.4f, 0.85f, 0.22f, 1, 1, -0.15f, 0.05f, 0.35f);
+	} else if (th == 9) {
+		float rad = 0.4f + amp * 1.3f;
+		Burst(gate + right * sinf(m_time * 2.f) * rad + fwd * cosf(m_time * 2.f) * rad + v3(0, 0.12f, 0), 2, 1.6f, 0.12f, 0.4f, 0.85f, 0.7f, 0.35f, 2, 1, 0.8f, 0.1f, 0.2f);
+	} else {
+		Burst(gate + v3(0, 0.8f + amp * 0.4f, 0), 2, 0.3f, sz, 0.8f, 0.7f, 0.6f, 1.f, 6, 1, -0.25f, 0.05f, 0.3f);
+	}
+	if (phase == 1 && u > 0.2f) {
+		V3 mouth = m_sumPos + v3(0, m_sumAct.height * 0.52f, 0);
+		int nFoe = m_cutFoeN > 0 ? m_cutFoeN : 1;
+		int gathering = u < 0.38f;
+		for (int i = 0; i < nFoe; i++) {
+			V3 foe = (m_cutFoeN > 0 ? m_cutFoePos[i] : m_sumTo) + v3(0, 0.45f, 0);
+			float f = gathering ? 0.08f : (0.25f + 0.65f * fmodf(m_time * 1.6f + i * 0.37f, 1.f));
+			V3 p = Lerp(mouth, foe, f);
+			if (th == 0) Burst(p, 2, gathering ? 0.3f : 1.6f, gathering ? 0.1f : 0.2f, 0.35f, 1.f, 0.4f, 0.08f, 2, 1, -0.15f, 0.35f, 0.4f);
+			else if (th == 1) Burst(p, 1, 1.2f, 0.12f, 0.4f, 0.8f, 0.92f, 1.f, 3, 1, -0.4f, 0.2f, 0.3f);
+			else if (th == 2) Burst(p, 1, 2.4f, 0.07f, 0.25f, 0.8f, 0.9f, 1.f, 3, 1, 2.f, 0.6f, 0.f);
+			else if (th == 5) Burst(foe, 1, 0.8f, 0.16f, 0.35f, 0.25f, 0.55f, 1.f, 1, 1, 0.4f, 0.1f, 0.2f);
+			else if (th == 3) Burst(foe + v3(0, 0.05f, 0), 1, 1.f, 0.1f, 0.3f, 0.5f, 0.36f, 0.2f, 3, 0, -0.2f, 0.05f, 1.2f);
+			else if (th == 8 || th == 10 || th == 11) Burst(p, 1, 0.5f, 0.14f, 0.5f, 0.55f, 0.8f, 0.45f, 1, 1, -0.1f, 0.05f, 0.2f);
+			else if (!gathering) Burst(p, 1, 1.f, 0.1f, 0.3f, 1.f, 0.9f, 0.6f, 2, 1, 0.1f, 0.1f, 0.2f);
+		}
+	}
 }
 
 void Game::SummonImpactFx()
@@ -3215,6 +3530,115 @@ void Game::SummonImpactFx()
 	}
 }
 
+void Game::DrawSummonGate()
+{
+	if (!m_sumOn || m_cutStage >= 4) return;
+	int leaving = m_sumHit && (m_cutStage >= 3 || m_cutStageT >= SumStrikeSpan());
+	int phase = leaving ? 2 : (m_cutStage == 2 ? 1 : 0);
+	float u = 0.f;
+	if (phase == 0) u = m_cutStageT / max(0.2f, CutIntroLen());
+	else if (phase == 1) u = m_cutStageT / SumStrikeSpan();
+	else {
+		float t = m_cutStage >= 3 ? m_cutStageT : (m_cutStageT - SumStrikeSpan());
+		if (t < 0.f) t = 0.f;
+		u = t / SumDepartSpan();
+	}
+	if (u < 0.f) u = 0.f;
+	if (u > 1.f) u = 1.f;
+	float amp = SumAmp(phase, u);
+	if (amp < 0.03f) return;
+	int th = SumTheater(m_sumFx);
+	V3 fwd = SumFwd(m_sumFrom, m_sumTo);
+	float yaw = atan2f(fwd.x, fwd.z);
+	V3 at = m_sumFrom + v3(0, 0.25f, 0);
+	float sx = 0.55f * amp, sy = 0.7f * amp, sz = 0.55f * amp;
+	DWORD tint = RGBA8(255, 140, 40);
+	if (phase >= 2 && th == 0) {
+		float face = 0, dis = 0;
+		int hide = 0;
+		SumPose(th, SumAtOf(m_seqSkill), SumIndexOf(m_seqSkill), 2, 1.f, m_sumFrom, m_sumTo, at, face, dis, hide);
+	}
+	switch (th) {
+	case 0:
+		sx = sz = 0.62f * amp;
+		sy = 0.85f * amp;
+		if (phase < 2) at = m_sumFrom + v3(0, 0.2f + amp * 0.25f, 0);
+		tint = RGBA8(255, 110, 24);
+		break;
+	case 1:
+		sx = sz = 0.28f * amp;
+		sy = 1.55f * amp;
+		at = m_sumFrom + v3(0, sy * 0.45f, 0);
+		tint = RGBA8(186, 224, 255);
+		break;
+	case 2:
+		sx = sz = 0.2f * amp;
+		sy = 2.3f * amp;
+		at = m_sumFrom + v3(0, 1.5f, 0);
+		tint = RGBA8(170, 205, 255);
+		break;
+	case 3:
+	case 11:
+		sx = 1.7f * amp;
+		sy = 0.045f;
+		sz = 0.26f * amp;
+		at = v3((phase >= 2 ? m_sumPos.x : m_sumFrom.x), 0.04f, (phase >= 2 ? m_sumPos.z : m_sumFrom.z));
+		tint = RGBA8(42, 30, 18);
+		break;
+	case 4:
+		sx = sy = sz = 0.75f * amp;
+		at = m_sumPos + v3(0, 0.55f, 0);
+		tint = RGBA8(190, 235, 215);
+		break;
+	case 5: {
+		float ride = phase <= 0 ? Smooth01(u / 0.92f) : (phase == 1 ? Smooth01((u - 0.38f) / 0.62f) : Smooth01((u - 0.2f) / 0.6f));
+		V3 a = phase <= 0 ? (m_sumFrom - fwd * 5.2f) : (phase == 1 ? m_sumFrom : m_sumTo);
+		V3 b = phase <= 0 ? m_sumFrom : (phase == 1 ? m_sumTo : (m_sumFrom - fwd * 4.f));
+		at = Lerp(a, b, ride) + v3(0, 0.3f * amp, 0);
+		sx = 2.5f * amp;
+		sy = 0.75f * amp;
+		sz = 0.42f * amp;
+		tint = RGBA8(36, 108, 230);
+		break;
+	}
+	case 6:
+		sx = sz = 0.38f * amp;
+		sy = 2.1f * amp;
+		at = m_sumFrom + v3(0, 1.15f, 0);
+		tint = RGBA8(255, 228, 150);
+		break;
+	case 7:
+		sx = sz = 1.05f * amp;
+		sy = 0.16f * amp;
+		at = m_sumFrom + v3(0, 0.08f, 0);
+		tint = RGBA8(28, 10, 48);
+		break;
+	case 8:
+		sx = sy = sz = 0.85f * amp;
+		at = m_sumFrom + v3(0, 0.45f, 0);
+		tint = RGBA8(78, 168, 48);
+		break;
+	case 9:
+		sx = sz = 1.35f * amp;
+		sy = 0.07f;
+		at = m_sumFrom + v3(0, 0.05f, 0);
+		tint = RGBA8(150, 118, 72);
+		break;
+	default:
+		sx = sy = sz = 0.6f * amp;
+		at = m_sumFrom + v3(0, 0.85f, 0);
+		tint = RGBA8(168, 146, 235);
+		break;
+	}
+	DrawParams sig = {};
+	sig.emissive = 1.f;
+	sig.flash = .8f;
+	sig.rim = 1.f;
+	sig.tint = tint;
+	M4 w = MMul(MMul(MScale(sx, sy, sz), MRotY(yaw)), MTrans(at.x, at.y, at.z));
+	m_r.DrawStatic(m_lib.orb, w, sig);
+}
+
 void Game::DrawCutIn3D()
 {
 	Env e;
@@ -3272,25 +3696,33 @@ void Game::DrawCutIn3D()
 			eye = look + v3(.4f, 5.4f, -1.2f);
 		}
 	} else if (m_cutKind == 3) {
-		int leaving = m_sumOn && m_sumHit && m_sumU > 1.16f;
+		int leaving = m_cutStage >= 3 || (m_sumHit && m_cutStageT >= SumStrikeSpan());
+		int th = SumTheater(m_sumFx);
 		V3 beast = m_sumOn ? m_sumPos : m_cutPosA;
 		float bh = m_sumOn ? m_sumAct.height : .8f;
-		look = beast + v3(0, bh * .45f, 0);
-		if (leaving)
-			look = (m_cutFoeN > 0 ? centerOf(m_cutFoePos, m_cutFoeN) : m_sumTo) + v3(0, .45f, 0);
-		else if (m_cutFoeN > 0)
-			look = Lerp(look, centerOf(m_cutFoePos, m_cutFoeN), m_sumHit ? .42f : .18f);
+		look = beast + v3(0, min(bh * .42f, 1.1f), 0);
+		V3 foeC = (m_cutFoeN > 0 ? centerOf(m_cutFoePos, m_cutFoeN) : m_sumTo) + v3(0, .4f, 0);
+		V3 fwd = m_sumOn ? SumFwd(m_sumFrom, m_sumTo) : v3(0, 0, 1);
+		if (m_cutStage == 1 && m_sumU < 0.62f) {
+			V3 gate = (th == 5) ? (m_sumFrom - fwd * 2.6f) : m_sumFrom;
+			look = Lerp(gate + v3(0, 0.65f, 0), look, Smooth01((m_sumU - 0.4f) / 0.22f));
+		} else if (!leaving && m_cutFoeN > 0)
+			look = Lerp(look, foeC, m_sumHit ? .3f : .14f);
+		float ang = atan2f(fwd.x, fwd.z);
+		float high = (th == 0 || th == 2 || th == 4 || th == 6) ? 1.7f : 1.2f;
 		if (leaving) {
-			float ang = atan2f(m_sumTo.x - m_sumFrom.x, m_sumTo.z - m_sumFrom.z);
-			eye = look + v3(sinf(ang + 1.15f) * 3.4f, 1.35f, cosf(ang + 1.15f) * 3.4f);
+			float t = m_cutStage >= 3 ? m_cutStageT : (m_cutStageT - SumStrikeSpan());
+			if (t < 0.f) t = 0.f;
+			float u = t / max(0.2f, SummonDepartNeed());
+			if (u > 1.f) u = 1.f;
+			if (u > 0.82f) look = Lerp(look, foeC, (u - 0.82f) / 0.18f * 0.35f);
+			eye = look + v3(sinf(ang + 1.15f) * 3.8f, high + 0.2f, cosf(ang + 1.15f) * 3.8f);
 		} else if (m_cutStage == 1) {
-			float u = Smooth01(m_cutStageT / max(.4f, CutIntroLen()));
-			eye = look + v3(Lerpf(-2.2f, 1.6f, u), Lerpf(1.9f, .95f, u), Lerpf(2.4f, -2.2f, u));
-		} else if (m_cutStage == 2 || m_cutStage == 3) {
-			float u = m_cutStage == 2 ? m_cutStageT : m_cutStageT + .8f;
-			float ang = atan2f(m_sumTo.x - m_sumFrom.x, m_sumTo.z - m_sumFrom.z);
-			float dist = Lerpf(4.8f, 3.15f, Smooth01(min(1.f, u)));
-			eye = look + v3(sinf(ang + 1.15f) * dist, 1.4f, cosf(ang + 1.15f) * dist);
+			float u = m_cutStageT / max(.4f, CutIntroLen());
+			eye = look + v3(Lerpf(-2.6f, 1.9f, u), Lerpf(high + 0.8f, high, u), Lerpf(2.8f, -2.5f, u));
+		} else if (m_cutStage == 2) {
+			float dist = Lerpf(4.8f, 3.2f, Smooth01(min(1.f, m_cutStageT)));
+			eye = look + v3(sinf(ang + 1.15f) * dist, high, cosf(ang + 1.15f) * dist);
 			if (m_shake > .3f) eye = Lerp(eye, look, .12f);
 		} else {
 			eye = look + v3(2.2f, 1.15f, -2.4f);
@@ -3358,8 +3790,7 @@ void Game::DrawCutIn3D()
 	for (int k = 0; k < nId; k++) if (ids[k] >= 0) ActorPose(m_act[ids[k]], m_lib, m_r);
 	if (m_sumOn) ActorPose(m_sumAct, m_lib, m_r);
 	auto sumWorld = [&]() {
-		float yaw = atan2f(m_sumTo.x - m_sumFrom.x, m_sumTo.z - m_sumFrom.z);
-		return ActorWorld(m_sumAct, m_sumPos, yaw);
+		return ActorWorld(m_sumAct, m_sumPos, m_sumYaw);
 	};
 	DrawParams gp;
 	gp.tint = e.ground;
@@ -3371,8 +3802,9 @@ void Game::DrawCutIn3D()
 		DrawParams dp;
 		ActorDraw(m_r, m_lib, m_act[ids[k]], cutWorld(ids[k]), dp, m_time);
 	}
-	if (m_sumOn) {
+	if (m_sumOn && !m_sumHide) {
 		DrawParams dp;
+		dp.dissolve = m_sumFade;
 		ActorDraw(m_r, m_lib, m_sumAct, sumWorld(), dp, m_time);
 	}
 	m_r.BeginMainPass();
@@ -3402,13 +3834,15 @@ void Game::DrawCutIn3D()
 		dp.rim = .55f;
 		ActorDraw(m_r, m_lib, m_act[ids[k]], cutWorld(ids[k]), dp, m_time);
 	}
-	if (m_sumOn) {
+	if (m_sumOn && !m_sumHide) {
 		DrawParams dp;
 		dp.outline = .016f;
 		dp.rim = .7f;
+		dp.dissolve = m_sumFade;
 		ActorDraw(m_r, m_lib, m_sumAct, sumWorld(), dp, m_time);
 	}
-	if (m_sumOn && m_sumHit && (m_sumFx == SUM_FX_ICE || m_sumFx == SUM_FX_HOLY)) {
+	if (m_sumOn) DrawSummonGate();
+	if (m_sumOn && m_sumHit && (m_cutStageT - SumStrikeSpan()) < 0.55f && (m_sumFx == SUM_FX_ICE || m_sumFx == SUM_FX_HOLY)) {
 		DrawParams sig = {};
 		sig.emissive = 1.f;
 		sig.flash = .9f;
@@ -5237,10 +5671,10 @@ void Game::DrawPromoteOffer()
 	Unit& u = m_b.u[L.unit];
 	EvoOption opt[4];
 	int no = EvoOptions(u.ch.cls, opt);
-	float w = min(U(560.f), (float)m_w - U(24));
-	float row = U(78);
+	float w = min(U(760.f), (float)m_w - U(24));
+	float row = U(150);
 	float h = U(108) + no * row + U(56);
-	if (h > (float)m_h - U(16)) { h = (float)m_h - U(16); row = max(U(52.f), (h - U(164)) / max(1, no)); }
+	if (h > (float)m_h - U(16)) { h = (float)m_h - U(16); row = max(U(118.f), (h - U(164)) / max(1, no)); }
 	float x = (m_w - w) * .5f, y = max(U(8), (m_h - h) * .5f);
 	Panel(x, y, w, h, .92f);
 	m_r.HudText(TT(TX_EV_JOB), x + w * .5f, y + U(28), U(26), RGBA8(255, 226, 150), 1, 1);
@@ -5268,7 +5702,9 @@ void Game::DrawPromoteOffer()
 			AdvanceLevelUp();
 			return;
 		}
-		m_r.HudTextBox(ClassBlurb(opt[k].target), x + U(20), ty + U(34), w - U(40), max(U(18.f), row - U(40)), U(12), RGBA8(210, 220, 235));
+		wchar_t brief[1024];
+		EvoBrief(opt[k].target, brief, 1024);
+		m_r.HudTextBox(brief, x + U(20), ty + U(36), w - U(40), max(U(72.f), row - U(44)), U(13), RGBA8(210, 220, 235));
 		ty += row;
 	}
 	if (Btn(ID_BT_PROMO_LATER, x + w * .5f - U(110), y + h - U(50), U(220), U(36), TT(TX_EV_LATER))) AdvanceLevelUp();
@@ -5851,10 +6287,9 @@ void Game::DrawBattleUi()
 			if (Btn(ID_BT_M_ZOOM, bx, y + U(278), bw, bh, TT(TX_BT_ZOOMRESET))) ResetCamDist();
 			if (Btn(ID_BT_M_RETREAT, bx, y + U(324), bw, bh, TT(TX_BT_RETREAT), TRUE, FALSE, 0, RGBA8(140, 50, 40, 240))) { m_menuConfirm = 1; m_focusId = ID_BT_M_NO; }
 		} else if (m_menuConfirm == 2) {
-			static const int qtx[3] = { TX_SET_Q_LOW, TX_SET_Q_STD, TX_SET_Q_HIGH };
 			float oy = y + U(48);
-			if (int q = Sel(ID_BT_OPT_Q, bx, oy, bw, U(32), TT(TX_SET_QUALITY), TT(qtx[Clampi(m_save.quality, 0, 2)]))) {
-				m_save.quality = (m_save.quality + q + 3) % 3;
+			if (int q = Sel(ID_BT_OPT_Q, bx, oy, bw, U(32), TT(TX_SET_QUALITY), TT(TacQualityTx(m_save.quality)))) {
+				m_save.quality = TacQualityAt(TacQualitySlot(m_save.quality) + q);
 				m_r.SetQuality(m_save.quality);
 				InvalidatePortraits();
 			}

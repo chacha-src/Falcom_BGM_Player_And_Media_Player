@@ -3244,6 +3244,21 @@ static void PlApplyCemuModeTag(CPlayList* pl, const char* tag)
 				_snwprintf_s(pl->pc[i].alb, _TRUNCATE, L"%hs (%hs)", ge->platform, tag);
 			else if (ge->platform[0] && ge->subtype[0])
 				_snwprintf_s(pl->pc[i].alb, _TRUNCATE, L"%hs (%hs)", ge->platform, ge->subtype);
+			/* 同じ zip の OPNA は .A_、MIDI(GS) は .M_。モードを変えても
+			   追加時の曲名のままだと、再生で拡張子が入れ替わって見える。 */
+			unsigned titleIndex1 = 1;
+			wchar_t phys[CEMU_ZIP_PATH];
+			phys[0] = 0;
+			CEmuParseVirtualPath(pl->pc[i].fol, phys, (int)_countof(phys), &titleIndex1);
+			if (titleIndex1 == 0)
+				titleIndex1 = (pl->pc[i].ret2 > 0) ? (unsigned)pl->pc[i].ret2 : 1u;
+			wchar_t songLabel[CEMU_GAME_NAME];
+			songLabel[0] = 0;
+			CEmuGameTitleAt(ge, (int)titleIndex1 - 1, NULL, songLabel, (int)_countof(songLabel));
+			if (songLabel[0] && songLabel[0] != L'<'
+				&& wcsncmp(songLabel, L"<title", 6) != 0
+				&& wcscmp(pl->pc[i].name, songLabel) != 0)
+				wcsncpy_s(pl->pc[i].name, songLabel, _TRUNCATE);
 		}
 		/* A MIDI-mode CEmu title plays a temp stub .mid, so filen no longer names
 		   the zip while tagfile still does — without that second compare the

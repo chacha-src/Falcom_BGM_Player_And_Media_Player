@@ -2357,13 +2357,23 @@
 #define IDR_CSO_TAC_CSCLTHS             4931
 #define IDR_CSO_TAC_CSCLTHR             4932
 #define IDR_CSO_TAC_CSCLTHW             4933
+#define IDR_CSO_TAC_VST                 4950
+#define IDR_CSO_TAC_HST                 4951
+#define IDR_CSO_TAC_DST                 4952
+#define IDR_CSO_TAC_PSGRTINY            4953
+#define IDR_CSO_TAC_PSDOFH              4954
+#define IDR_CSO_TAC_PSDOFU              4955
+#define IDR_CSO_TAC_CSSOFT              4956
+#define IDR_CSO_TAC_CSSOFTW             4957
+#define IDR_CSO_TAC_CSHAIR              4958
+#define IDR_CSO_TAC_CSHAIRW             4959
 
 // Next default values for new objects
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NEXT_RESOURCE_VALUE        399
 #define _APS_NEXT_COMMAND_VALUE         33310
-#define _APS_NEXT_CONTROL_VALUE         4934
+#define _APS_NEXT_CONTROL_VALUE         4960
 #define _APS_NEXT_SYMED_VALUE           104
 #endif
 #endif

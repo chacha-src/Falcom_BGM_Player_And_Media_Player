@@ -248,7 +248,14 @@ private:
 	void DrawCutIn3D();
 	void BindSummonCut();
 	void SummonImpactFx();
+	void SummonApply(int phase, float u);
+	void SummonArrive(float dt);
+	void SummonStrike(float dt);
 	void SummonLeave(float dt);
+	void SummonMedium(int phase, float u);
+	void DrawSummonGate();
+	float SummonStrikeNeed() const;
+	float SummonDepartNeed() const;
 	void DrawCutInUi();
 	void LayoutSpecialCut();
 	void PoseFormAllies();
@@ -514,8 +521,8 @@ private:
 	int m_cutAlly[6], m_cutFoe[6];
 	int m_cutAllyN, m_cutFoeN;
 	int m_cutKind;       // 0=通常 1=戦技 2=陣形 3=召喚
-	int m_sumOn, m_sumFx, m_sumHit;
-	float m_sumU;
+	int m_sumOn, m_sumFx, m_sumHit, m_sumHide;
+	float m_sumU, m_sumYaw, m_sumFade;
 	V3 m_sumPos, m_sumFrom, m_sumTo;
 	Actor m_sumAct;
 	V3 m_cutAllyPos[6];

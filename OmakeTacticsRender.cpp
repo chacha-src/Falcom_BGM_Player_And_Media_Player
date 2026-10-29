@@ -38,23 +38,32 @@ Renderer::Renderer()
 	m_eye = v3(0, 10, -10);
 	m_time = 0;
 	m_hwnd = NULL; m_wait = NULL; m_lost = FALSE; m_presented = FALSE; m_waitStuck = 0; m_lastRebind = 0;
-	m_w = m_h = 0; m_quality = 1; m_msaa = 1; m_lastHr = S_OK; m_failStage = 0; m_assetsOk = FALSE; m_loadFn = NULL; m_loadUser = NULL; m_pass = PASS_MAIN;
+	m_w = m_h = 0; m_quality = 1; m_allowTess = TRUE; m_msaa = 1; m_lastHr = S_OK; m_failStage = 0; m_assetsOk = FALSE; m_loadFn = NULL; m_loadUser = NULL; m_pass = PASS_MAIN;
 	m_dev = NULL; m_ctx = NULL; m_swap = NULL; m_bbRtv = NULL; m_bb = NULL; m_msTex = NULL; m_msRtv = NULL; m_dsTex = NULL; m_dsv = NULL;
 	m_sceneTex = NULL; m_sceneRtv = NULL; m_sceneSrv = NULL;
 	m_blA = m_blB = NULL; m_blARtv = m_blBRtv = NULL; m_blASrv = m_blBSrv = NULL; m_blW = m_blH = 0;
+	m_zTex = NULL; m_zRtv = NULL; m_zRes = NULL; m_zSrv = NULL;
+	m_dofTex = NULL; m_dofRtv = NULL; m_dofSrv = NULL;
 	m_shTex = NULL; m_shDsv = NULL; m_shSrv = NULL; m_shSize = 0;
 	m_ptTex = NULL; m_ptRtv = NULL; m_srvPortrait = NULL; m_ptDs = NULL; m_ptDsv = NULL;
 	m_vsS = m_vsK = m_vsH = m_vsP = m_vsQ = NULL;
 	m_psM = m_psO = m_psOV = m_psH = m_psP = m_psSky = NULL;
-	m_psBloom = m_psBlur = m_psGrade = m_psUi = NULL;
+	m_psBloom = m_psBlur = m_psGrade = m_psGradeTiny = m_psDofH = m_psDofU = m_psUi = NULL;
+	m_vsT = NULL; m_hsT = NULL; m_dsT = NULL;
 	m_psProp = m_psWater = m_psLava = m_psOverride = NULL;
 	for (int gi = 0; gi < 8; gi++) m_psGround[gi] = NULL;
 	m_groundTex = NULL; m_groundSrv = NULL; m_matTex = NULL; m_matSrv = NULL;
 	m_csSkin = NULL; m_cbSkinBone = m_cbSkinParm = m_cbHairCloth = m_faceDummy = NULL; m_faceDummySRV = NULL;
 	m_csCloth[0] = m_csCloth[1] = m_csCloth[2] = NULL; m_cbCloth = NULL;
+	m_csSoft[0] = m_csSoft[1] = NULL; m_cbSoft = NULL;
 	m_hairSB = m_hairVB = NULL; m_hairBind = m_hairSrv = NULL; m_hairUAV = NULL; m_hairTex = NULL; m_hairNv = 0;
 	memset(m_hairCap, 0, sizeof(m_hairCap));
 	memset(m_hairCapN, 0, sizeof(m_hairCapN));
+	m_csHair[0] = m_csHair[1] = NULL; m_cbHairSim = NULL;
+	m_hairGuideSB = NULL; m_hairGuide = NULL; m_hairVertSB = NULL; m_hairVert = NULL;
+	m_hairScratchSB = NULL; m_hairScratchUAV = NULL; m_hairScratchSRV = NULL;
+	memset(m_hairV0, 0, sizeof(m_hairV0));
+	memset(m_hairVN, 0, sizeof(m_hairVN));
 	m_scalpModel = -1;
 	m_capC = RGBA8(70, 70, 70);
 	m_ilS = m_ilK = m_ilH = m_ilP = NULL;
@@ -93,6 +102,8 @@ void Renderer::ReleaseTargets()
 	TAC_REL(m_sceneSrv); TAC_REL(m_sceneRtv); TAC_REL(m_sceneTex);
 	TAC_REL(m_blASrv); TAC_REL(m_blARtv); TAC_REL(m_blA);
 	TAC_REL(m_blBSrv); TAC_REL(m_blBRtv); TAC_REL(m_blB);
+	TAC_REL(m_dofSrv); TAC_REL(m_dofRtv); TAC_REL(m_dofTex);
+	TAC_REL(m_zSrv); TAC_REL(m_zRtv); TAC_REL(m_zRes); TAC_REL(m_zTex);
 	TAC_REL(m_dsv); TAC_REL(m_dsTex);
 }
 
@@ -128,7 +139,8 @@ void Renderer::Release()
 	TAC_REL(m_srvPortrait); TAC_REL(m_ptRtv); TAC_REL(m_ptTex); TAC_REL(m_ptDsv); TAC_REL(m_ptDs);
 	TAC_REL(m_vsS); TAC_REL(m_vsK); TAC_REL(m_vsH); TAC_REL(m_vsP); TAC_REL(m_vsQ);
 	TAC_REL(m_psM); TAC_REL(m_psO); TAC_REL(m_psOV); TAC_REL(m_psH); TAC_REL(m_psP); TAC_REL(m_psSky);
-	TAC_REL(m_psBloom); TAC_REL(m_psBlur); TAC_REL(m_psGrade); TAC_REL(m_psUi);
+	TAC_REL(m_psBloom); TAC_REL(m_psBlur); TAC_REL(m_psGrade); TAC_REL(m_psGradeTiny);
+	TAC_REL(m_psDofH); TAC_REL(m_psDofU); TAC_REL(m_vsT); TAC_REL(m_hsT); TAC_REL(m_dsT); TAC_REL(m_psUi);
 	TAC_REL(m_psProp); TAC_REL(m_psWater); TAC_REL(m_psLava);
 	for (int gi = 0; gi < 8; gi++) TAC_REL(m_psGround[gi]);
 	m_psOverride = NULL;
@@ -136,6 +148,8 @@ void Renderer::Release()
 	TAC_REL(m_csSkin); TAC_REL(m_cbSkinBone); TAC_REL(m_cbSkinParm); TAC_REL(m_cbHairCloth); TAC_REL(m_faceDummySRV); TAC_REL(m_faceDummy);
 	for (int ci = 0; ci < 3; ci++) TAC_REL(m_csCloth[ci]);
 	TAC_REL(m_cbCloth);
+	TAC_REL(m_csSoft[0]); TAC_REL(m_csSoft[1]); TAC_REL(m_cbSoft);
+	TAC_REL(m_csHair[0]); TAC_REL(m_csHair[1]); TAC_REL(m_cbHairSim);
 	ReleaseHair();
 	TAC_REL(m_ilS); TAC_REL(m_ilK); TAC_REL(m_ilH); TAC_REL(m_ilP);
 	TAC_REL(m_cbFrame); TAC_REL(m_cbObj); TAC_REL(m_cbBones); TAC_REL(m_vbHud); TAC_REL(m_vbDyn);
@@ -160,7 +174,7 @@ BOOL Renderer::Init(HWND hwnd, int quality)
 	m_waitStuck = 0;
 	m_lastRebind = 0;
 	m_hwnd = hwnd;
-	m_quality = Clampi(quality, 0, 2);
+	m_quality = Clampi(quality, 0, 4);
 	m_failStage = 1;
 	UINT flags = D3D11_CREATE_DEVICE_BGRA_SUPPORT;
 	D3D_FEATURE_LEVEL req = D3D_FEATURE_LEVEL_11_0, got = (D3D_FEATURE_LEVEL)0;
@@ -208,10 +222,20 @@ BOOL Renderer::Init(HWND hwnd, int quality)
 
 void Renderer::SetQuality(int q)
 {
-	q = Clampi(q, 0, 2);
+	q = Clampi(q, 0, 4);
 	if (q == m_quality) return;
 	m_quality = q;
-	if (m_dev) { ReleaseTargets(); TAC_REL(m_shSrv); TAC_REL(m_shDsv); TAC_REL(m_shTex); CreateTargets(); }
+	if (m_dev) {
+		ReleaseTargets(); TAC_REL(m_shSrv); TAC_REL(m_shDsv); TAC_REL(m_shTex); CreateTargets();
+		TAC_REL(m_sLin);
+		D3D11_SAMPLER_DESC ss = {};
+		int an = (m_quality == 4) ? 1 : ((m_quality == 2 || m_quality == 3) ? 16 : 8);
+		ss.Filter = (an <= 1) ? D3D11_FILTER_MIN_MAG_MIP_LINEAR : D3D11_FILTER_ANISOTROPIC;
+		ss.MaxAnisotropy = an;
+		ss.AddressU = ss.AddressV = ss.AddressW = D3D11_TEXTURE_ADDRESS_WRAP;
+		ss.MaxLOD = D3D11_FLOAT32_MAX;
+		m_dev->CreateSamplerState(&ss, &m_sLin);
+	}
 }
 
 static BOOL MakeColorRt(ID3D11Device* dev, int w, int h, ID3D11Texture2D** tex, ID3D11RenderTargetView** rtv, ID3D11ShaderResourceView** srv)
@@ -234,7 +258,7 @@ BOOL Renderer::CreateTargets()
 	HRESULT hr = m_swap->GetBuffer(0, __uuidof(ID3D11Texture2D), (void**)&m_bb);
 	if (FAILED(hr)) { m_lastHr = hr; return FALSE; }
 	if (FAILED(hr = m_dev->CreateRenderTargetView(m_bb, NULL, &m_bbRtv))) { m_lastHr = hr; return FALSE; }
-	int want = m_quality >= 2 ? 8 : (m_quality == 1 ? 4 : 1);
+	int want = (m_quality == 1) ? 4 : ((m_quality == 2 || m_quality == 3) ? 8 : 1);
 	m_msaa = 1;
 	for (int s = want; s >= 2; s /= 2) {
 		UINT ql = 0;
@@ -253,7 +277,11 @@ BOOL Renderer::CreateTargets()
 	td.Format = DXGI_FORMAT_D24_UNORM_S8_UINT; td.BindFlags = D3D11_BIND_DEPTH_STENCIL;
 	if (FAILED(hr = m_dev->CreateTexture2D(&td, NULL, &m_dsTex)) || FAILED(hr = m_dev->CreateDepthStencilView(m_dsTex, NULL, &m_dsv))) { m_lastHr = hr; return FALSE; }
 	if (!m_shTex) {
-		int ss = m_quality >= 2 ? 4096 : (m_quality == 1 ? 2048 : 1024);
+		int ss = 1024;
+		if (m_quality == 4) ss = 512;
+		else if (m_quality == 1) ss = 2048;
+		else if (m_quality == 2) ss = 4096;
+		else if (m_quality == 3) ss = 8192;
 		for (; ss >= 512; ss /= 2) {
 			D3D11_TEXTURE2D_DESC st = {};
 			st.Width = st.Height = ss; st.MipLevels = 1; st.ArraySize = 1; st.SampleDesc.Count = 1;
@@ -277,7 +305,7 @@ BOOL Renderer::CreateTargets()
 		pt.Format = DXGI_FORMAT_D24_UNORM_S8_UINT; pt.BindFlags = D3D11_BIND_DEPTH_STENCIL;
 		if (SUCCEEDED(m_dev->CreateTexture2D(&pt, NULL, &m_ptDs))) m_dev->CreateDepthStencilView(m_ptDs, NULL, &m_ptDsv);
 	}
-	int div = m_quality <= 0 ? 4 : 2;
+	int div = (m_quality <= 0 || m_quality == 4) ? 4 : (m_quality == 3 ? 1 : 2);
 	m_blW = max(8, m_w / div); m_blH = max(8, m_h / div);
 	if (!MakeColorRt(m_dev, m_w, m_h, &m_sceneTex, &m_sceneRtv, &m_sceneSrv)
 		|| !MakeColorRt(m_dev, m_blW, m_blH, &m_blA, &m_blARtv, &m_blASrv)
@@ -285,6 +313,26 @@ BOOL Renderer::CreateTargets()
 		TAC_REL(m_sceneSrv); TAC_REL(m_sceneRtv); TAC_REL(m_sceneTex);
 		TAC_REL(m_blASrv); TAC_REL(m_blARtv); TAC_REL(m_blA);
 		TAC_REL(m_blBSrv); TAC_REL(m_blBRtv); TAC_REL(m_blB);
+	}
+	if (m_quality == 2 || m_quality == 3) {
+		D3D11_TEXTURE2D_DESC zt = {};
+		zt.Width = m_w; zt.Height = m_h; zt.MipLevels = 1; zt.ArraySize = 1;
+		zt.Format = DXGI_FORMAT_R16_FLOAT; zt.SampleDesc.Count = m_msaa;
+		zt.BindFlags = D3D11_BIND_RENDER_TARGET;
+		if (m_msaa == 1) zt.BindFlags |= D3D11_BIND_SHADER_RESOURCE;
+		if (SUCCEEDED(m_dev->CreateTexture2D(&zt, NULL, &m_zTex)) && SUCCEEDED(m_dev->CreateRenderTargetView(m_zTex, NULL, &m_zRtv))) {
+			if (m_msaa == 1) {
+				if (FAILED(m_dev->CreateShaderResourceView(m_zTex, NULL, &m_zSrv))) { TAC_REL(m_zRtv); TAC_REL(m_zTex); }
+			} else {
+				zt.SampleDesc.Count = 1; zt.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+				if (FAILED(m_dev->CreateTexture2D(&zt, NULL, &m_zRes)) || FAILED(m_dev->CreateShaderResourceView(m_zRes, NULL, &m_zSrv))) {
+					TAC_REL(m_zSrv); TAC_REL(m_zRes); TAC_REL(m_zRtv); TAC_REL(m_zTex);
+				}
+			}
+		} else { TAC_REL(m_zRtv); TAC_REL(m_zTex); }
+		if (!MakeColorRt(m_dev, m_w, m_h, &m_dofTex, &m_dofRtv, &m_dofSrv)) {
+			TAC_REL(m_dofSrv); TAC_REL(m_dofRtv); TAC_REL(m_dofTex);
+		}
 	}
 	return TRUE;
 }
@@ -412,6 +460,27 @@ BOOL Renderer::CreateShaders()
 		TAC_REL(b);
 		if (FAILED(hr)) { m_lastHr = hr; return FALSE; }
 	}
+	{
+		ID3DBlob* b = NULL;
+		if (FAILED(Soft3DLoadCso(L"tac", "VST", "vs_5_0", IDR_CSO_TAC_VST, L"omake_tactics_tess.hlsl", (void**)&b)) || !b) { m_lastHr = E_FAIL; return FALSE; }
+		hr = m_dev->CreateVertexShader(b->GetBufferPointer(), b->GetBufferSize(), NULL, &m_vsT); TAC_REL(b);
+		if (FAILED(hr)) { m_lastHr = hr; return FALSE; }
+		if (FAILED(Soft3DLoadCso(L"tac", "HST", "hs_5_0", IDR_CSO_TAC_HST, L"omake_tactics_tess.hlsl", (void**)&b)) || !b) { m_lastHr = E_FAIL; return FALSE; }
+		hr = m_dev->CreateHullShader(b->GetBufferPointer(), b->GetBufferSize(), NULL, &m_hsT); TAC_REL(b);
+		if (FAILED(hr)) { m_lastHr = hr; return FALSE; }
+		if (FAILED(Soft3DLoadCso(L"tac", "DST", "ds_5_0", IDR_CSO_TAC_DST, L"omake_tactics_tess.hlsl", (void**)&b)) || !b) { m_lastHr = E_FAIL; return FALSE; }
+		hr = m_dev->CreateDomainShader(b->GetBufferPointer(), b->GetBufferSize(), NULL, &m_dsT); TAC_REL(b);
+		if (FAILED(hr)) { m_lastHr = hr; return FALSE; }
+		if (FAILED(Soft3DLoadCso(L"tac", "PSGradeTiny", "ps_5_0", IDR_CSO_TAC_PSGRTINY, L"omake_tactics.hlsl", (void**)&b)) || !b) { m_lastHr = E_FAIL; return FALSE; }
+		hr = m_dev->CreatePixelShader(b->GetBufferPointer(), b->GetBufferSize(), NULL, &m_psGradeTiny); TAC_REL(b);
+		if (FAILED(hr)) { m_lastHr = hr; return FALSE; }
+		if (FAILED(Soft3DLoadCso(L"tac", "PSDofH", "ps_5_0", IDR_CSO_TAC_PSDOFH, L"omake_tactics_dof.hlsl", (void**)&b)) || !b) { m_lastHr = E_FAIL; return FALSE; }
+		hr = m_dev->CreatePixelShader(b->GetBufferPointer(), b->GetBufferSize(), NULL, &m_psDofH); TAC_REL(b);
+		if (FAILED(hr)) { m_lastHr = hr; return FALSE; }
+		if (FAILED(Soft3DLoadCso(L"tac", "PSDofU", "ps_5_0", IDR_CSO_TAC_PSDOFU, L"omake_tactics_dof.hlsl", (void**)&b)) || !b) { m_lastHr = E_FAIL; return FALSE; }
+		hr = m_dev->CreatePixelShader(b->GetBufferPointer(), b->GetBufferSize(), NULL, &m_psDofU); TAC_REL(b);
+		if (FAILED(hr)) { m_lastHr = hr; return FALSE; }
+	}
 	(void)sizeof(VSDef);
 	ID3DBlob* bC = NULL;
 	if (SUCCEEDED(LoadBlob("CSSkin", "cs_5_0", IDR_CSO_TAC_CSSKIN, &bC)) && bC) {
@@ -453,10 +522,36 @@ BOOL Renderer::CreateShaders()
 		}
 		D3D11_BUFFER_DESC bd = {};
 		bd.Usage = D3D11_USAGE_DYNAMIC; bd.BindFlags = D3D11_BIND_CONSTANT_BUFFER; bd.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
-		bd.ByteWidth = 192 + 64 * CLOTH_SEGS + 128 * CLOTH_SEGS + 48;
+		bd.ByteWidth = 1504;
 		if (!all || FAILED(m_dev->CreateBuffer(&bd, NULL, &m_cbCloth))) {
 			for (int i = 0; i < 3; i++) TAC_REL(m_csCloth[i]);
 			m_cbCloth = NULL;
+		}
+		static const struct { const char* e; int rid; } sf[2] = {
+			{ "CSSoft", IDR_CSO_TAC_CSSOFT }, { "CSSoftWrite", IDR_CSO_TAC_CSSOFTW } };
+		for (int i = 0; i < 2; i++) {
+			ID3DBlob* b = NULL;
+			if (SUCCEEDED(Soft3DLoadCso(L"tac", sf[i].e, "cs_5_0", sf[i].rid, L"omake_tactics_soft.hlsl", (void**)&b)) && b) {
+				if (FAILED(m_dev->CreateComputeShader(b->GetBufferPointer(), b->GetBufferSize(), NULL, &m_csSoft[i]))) m_csSoft[i] = NULL;
+				TAC_REL(b);
+			}
+		}
+		bd.ByteWidth = 704;
+		if (!m_csSoft[0] || !m_csSoft[1] || FAILED(m_dev->CreateBuffer(&bd, NULL, &m_cbSoft))) {
+			TAC_REL(m_csSoft[0]); TAC_REL(m_csSoft[1]); TAC_REL(m_cbSoft);
+		}
+		static const struct { const char* e; int rid; } hr[2] = {
+			{ "CSHair", IDR_CSO_TAC_CSHAIR }, { "CSHairWrite", IDR_CSO_TAC_CSHAIRW } };
+		for (int i = 0; i < 2; i++) {
+			ID3DBlob* b = NULL;
+			if (SUCCEEDED(Soft3DLoadCso(L"tac", hr[i].e, "cs_5_0", hr[i].rid, L"omake_tactics_hair.hlsl", (void**)&b)) && b) {
+				if (FAILED(m_dev->CreateComputeShader(b->GetBufferPointer(), b->GetBufferSize(), NULL, &m_csHair[i]))) m_csHair[i] = NULL;
+				TAC_REL(b);
+			}
+		}
+		bd.ByteWidth = 576;
+		if (!m_csHair[0] || !m_csHair[1] || FAILED(m_dev->CreateBuffer(&bd, NULL, &m_cbHairSim))) {
+			TAC_REL(m_csHair[0]); TAC_REL(m_csHair[1]); TAC_REL(m_cbHairSim);
 		}
 	}
 	return TRUE;
@@ -480,7 +575,9 @@ BOOL Renderer::CreateStates()
 	if (FAILED(m_dev->CreateBuffer(&bd, NULL, &m_vbDyn))) return FALSE;
 
 	D3D11_SAMPLER_DESC ss = {};
-	ss.Filter = D3D11_FILTER_ANISOTROPIC; ss.MaxAnisotropy = 8;
+	int an = (m_quality == 4) ? 1 : ((m_quality == 2 || m_quality == 3) ? 16 : 8);
+	ss.Filter = (an <= 1) ? D3D11_FILTER_MIN_MAG_MIP_LINEAR : D3D11_FILTER_ANISOTROPIC;
+	ss.MaxAnisotropy = an;
 	ss.AddressU = ss.AddressV = ss.AddressW = D3D11_TEXTURE_ADDRESS_WRAP; ss.MaxLOD = D3D11_FLOAT32_MAX;
 	m_dev->CreateSamplerState(&ss, &m_sLin);
 	ss.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR; ss.MaxAnisotropy = 1;
@@ -509,7 +606,9 @@ BOOL Renderer::CreateStates()
 	m_dev->CreateDepthStencilState(&ds, &m_dsOff);
 
 	D3D11_BLEND_DESC bl = {};
+	bl.IndependentBlendEnable = TRUE;
 	bl.RenderTarget[0].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
+	bl.RenderTarget[1].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
 	m_dev->CreateBlendState(&bl, &m_bsOpaque);
 	auto& t = bl.RenderTarget[0];
 	t.BlendEnable = TRUE; t.BlendOp = t.BlendOpAlpha = D3D11_BLEND_OP_ADD;
@@ -2936,7 +3035,7 @@ static bool ReadWords(Reader& rd, Buf<WORD>& out, size_t n)
 
 void Renderer::ReleaseClothInst()
 {
-	for (ClothInst& c : m_clothInst) { TAC_REL(c.uav); TAC_REL(c.sb); }
+	for (ClothInst& c : m_clothInst) { TAC_REL(c.uav); TAC_REL(c.sb); TAC_REL(c.softUav); TAC_REL(c.softSb); }
 	m_clothInst.clear();
 }
 
@@ -2948,7 +3047,9 @@ void Renderer::ReleaseAvatarCache()
 		ReleaseSkinGpu(c.skin);
 		c.gm.Release();
 		for (int b = 0; b < 3; b++) { TAC_REL(c.clothSRV[b]); TAC_REL(c.clothSB[b]); }
+		for (int b = 0; b < 2; b++) { TAC_REL(c.softSRV[b]); TAC_REL(c.softSB[b]); }
 		c.clothN = c.clothVN = 0;
+		c.softN = c.softVN = 0;
 	}
 	m_avaCache.clear();
 	ReleaseClothInst();
@@ -3694,6 +3795,9 @@ static void FillClothBack(Renderer::AvaCache& nc, const Renderer::CreatureSkin& 
 struct ClothGpuN { float x[4]; float p[4]; unsigned nb[4]; unsigned j[4]; float w[4]; float q[4]; };
 struct ClothGpuV { unsigned a[4]; float w[4]; float p[4]; float n[4]; };
 static_assert(sizeof(ClothGpuN) == 96 && sizeof(ClothGpuV) == 64, "ClothGpu");
+struct SoftGpuN { float x[4]; float p[4]; unsigned nb[4]; float q[4]; };
+struct SoftGpuV { unsigned a[4]; float w[4]; float p[4]; };
+static_assert(sizeof(SoftGpuN) == 64 && sizeof(SoftGpuV) == 48, "SoftGpu");
 
 // 脚の形の半径（PT 段 × PF 分割）を t（骨に沿った割合 -0.15〜1.15）と φ（前から横への角度）で引く。シェーダの Prof と同じ。
 static float ClothProf(const float* P, float t, float phi)
@@ -3737,6 +3841,301 @@ static int UfFind(Buf<int>& p, int x)
 	return x;
 }
 
+static int SegJoint(const int* segJ, const char (*segName)[24], int ns, const char* name)
+{
+	for (int s = 0; s < ns; s++) if (!strcmp(segName[s], name)) return segJ[s];
+	return -1;
+}
+
+// ゆるい胸と袖だけを格子にする。体から 1.2cm 以内の布はタイトなので載せない。
+static void BuildSoft(Renderer::AvaCache& nc, int nb, int n, Renderer::CSkinV* V, const float* moved, const int* root,
+	const BYTE* isSk, const int* segJ, const char (*segName)[24], int ns, const Model& md, float* jig,
+	Buf<SoftGpuN>& nodes, Buf<SoftGpuV>& verts)
+{
+	nodes.clear();
+	verts.clear();
+	nc.softN = nc.softVN = 0;
+	for (int i = 0; i < 6; i++) nc.softBone[i] = -1;
+	for (int i = 0; i < 4; i++) { nc.armJ[i][0] = nc.armJ[i][1] = -1; nc.armA[i][3] = 0.f; nc.armB[i][3] = -1.f; }
+	if (!V || n < 8 || nb <= 0) return;
+	auto joint = [&](const char* name) { return SegJoint(segJ, segName, ns, name); };
+	auto bindPos = [&](int j, float* o) -> BOOL {
+		if (j < 0 || j >= md.nJ) return FALSE;
+		M4 b = MInverse(md.invBind[j]);
+		o[0] = b.m[12]; o[1] = b.m[13]; o[2] = b.m[14];
+		return TRUE;
+	};
+	const int jChest = joint("Chest") >= 0 ? joint("Chest") : joint("Torso");
+	const int jUA[2] = { joint("UpperArm.L"), joint("UpperArm.R") };
+	const int jLA[2] = { joint("LowerArm.L"), joint("LowerArm.R") };
+	const int jHand[2] = { joint("Hand.L"), joint("Hand.R") };
+	nc.softBone[0] = jChest;
+	nc.softBone[1] = jUA[0];
+	nc.softBone[2] = jLA[0] >= 0 ? jLA[0] : jUA[0];
+	nc.softBone[3] = jUA[1];
+	nc.softBone[4] = jLA[1] >= 0 ? jLA[1] : jUA[1];
+	auto armRadius = [&](int ja, int jb, const float* A, const float* B) {
+		V3 ax = v3(B[0] - A[0], B[1] - A[1], B[2] - A[2]);
+		const float L = Len(ax);
+		if (L < 0.05f) return 0.042f;
+		ax = ax * (1.f / L);
+		float r = 0.f;
+		int got = 0;
+		for (int k = 0; k < nb; k++) {
+			const int d = DomJoint(V[k]);
+			if (d != ja && d != jb) continue;
+			int wl = 0;
+			for (int c = 0; c < 4; c++) if ((int)V[k].j[c] == ja || (int)V[k].j[c] == jb) wl += V[k].w[c];
+			if (wl < 180) continue;
+			const V3 q = v3(V[k].p[0] - A[0], V[k].p[1] - A[1], V[k].p[2] - A[2]);
+			const float t = Clampf(Dot(q, ax) / L, 0.f, 1.f);
+			const float dist = Len(q - ax * (t * L));
+			if (dist > 0.12f) continue;
+			if (dist > r) r = dist;
+			got++;
+		}
+		return got >= 6 ? Clampf(r + 0.006f, 0.032f, 0.075f) : 0.042f;
+	};
+	for (int side = 0; side < 2; side++) {
+		float A[3], B[3], H[3];
+		if (jUA[side] >= 0 && jLA[side] >= 0 && bindPos(jUA[side], A) && bindPos(jLA[side], B)) {
+			const int c = side * 2;
+			const float rad = armRadius(jUA[side], jLA[side], A, B);
+			nc.armJ[c][0] = jUA[side]; nc.armJ[c][1] = jLA[side];
+			nc.armA[c][0] = A[0]; nc.armA[c][1] = A[1]; nc.armA[c][2] = A[2]; nc.armA[c][3] = rad;
+			nc.armB[c][0] = B[0]; nc.armB[c][1] = B[1]; nc.armB[c][2] = B[2]; nc.armB[c][3] = rad;
+		}
+		if (jLA[side] >= 0 && jHand[side] >= 0 && bindPos(jLA[side], B) && bindPos(jHand[side], H)) {
+			const int c = side * 2 + 1;
+			const float rad = armRadius(jLA[side], jHand[side], B, H);
+			nc.armJ[c][0] = jLA[side]; nc.armJ[c][1] = jHand[side];
+			nc.armA[c][0] = B[0]; nc.armA[c][1] = B[1]; nc.armA[c][2] = B[2]; nc.armA[c][3] = rad;
+			nc.armB[c][0] = H[0]; nc.armB[c][1] = H[1]; nc.armB[c][2] = H[2]; nc.armB[c][3] = rad;
+		}
+	}
+	const int GX = 8, GY = 5, GN = GX * GY;
+	int chestBase = -1;
+	if (jig && jChest >= 0 && moved && root) {
+		float hipY = 0.9f, cx = 0.f;
+		float pL[3], pR[3];
+		const int ul0 = joint("UpperLeg.L"), ul1 = joint("UpperLeg.R");
+		if (ul0 >= 0 && ul1 >= 0 && bindPos(ul0, pL) && bindPos(ul1, pR)) {
+			hipY = (pL[1] + pR[1]) * 0.5f;
+			cx = (pL[0] + pR[0]) * 0.5f;
+		}
+		float apex[2][3] = {}, apexJ[2][3] = {};
+		int ok[2] = { 0, 0 };
+		for (int k = 0; k < nb; k++) {
+			const float* J = &jig[(size_t)k * 3];
+			if (J[0] * J[0] + J[1] * J[1] + J[2] * J[2] < 0.004f * 0.004f) continue;
+			const float* p = V[k].p;
+			if (p[1] < hipY + 0.15f) continue;
+			const int s = p[0] < cx ? 0 : 1;
+			if (!ok[s] || p[2] < apex[s][2]) {
+				for (int a = 0; a < 3; a++) { apex[s][a] = p[a]; apexJ[s][a] = J[a]; }
+				ok[s] = 1;
+			}
+		}
+		int looseN = 0;
+		float yBot = 1e9f, x0 = 1e9f, x1 = -1e9f;
+		for (int i = 0; i < n; i++) {
+			if (!moved || moved[root[i]] < 0.012f) continue;
+			if (isSk && isSk[i]) continue;
+			const float* p = V[nb + i].p;
+			looseN++;
+			if (p[1] < yBot) yBot = p[1];
+			if (p[0] < x0) x0 = p[0];
+			if (p[0] > x1) x1 = p[0];
+		}
+		if (ok[0] && ok[1] && looseN >= 20 && x1 > x0 + 0.04f) {
+			for (int s = 0; s < 2; s++) {
+				const float jl = sqrtf(apexJ[s][0] * apexJ[s][0] + apexJ[s][1] * apexJ[s][1] + apexJ[s][2] * apexJ[s][2]);
+				nc.bustA[s][0] = apex[s][0]; nc.bustA[s][1] = apex[s][1]; nc.bustA[s][2] = apex[s][2];
+				nc.bustA[s][3] = Clampf(0.038f + jl * 0.45f, 0.04f, 0.085f);
+			}
+			float yTop = (apex[0][1] + apex[1][1]) * 0.5f + 0.015f;
+			if (yBot > yTop - 0.06f) yBot = yTop - 0.08f;
+			x0 -= 0.02f; x1 += 0.02f;
+			Buf<float> acc, wgt;
+			acc.arena = wgt.arena = 1;
+			acc.fill(GN * 3, 0.f); wgt.fill(GN, 0.f);
+			if (acc.size() == GN * 3 && wgt.size() == GN) {
+				for (int i = 0; i < n; i++) {
+					if (moved[root[i]] < 0.012f || (isSk && isSk[i])) continue;
+					const float* p = V[nb + i].p;
+					float u = Clampf((p[0] - x0) / (x1 - x0), 0.f, 1.f) * (float)(GX - 1);
+					float v = Clampf((yTop - p[1]) / (yTop - yBot), 0.f, 1.f) * (float)(GY - 1);
+					int u0 = (int)u; if (u0 > GX - 2) u0 = GX - 2;
+					int v0 = (int)v; if (v0 > GY - 2) v0 = GY - 2;
+					float fu = u - (float)u0, fv = v - (float)v0;
+					const int id[4] = { v0 * GX + u0, v0 * GX + u0 + 1, (v0 + 1) * GX + u0, (v0 + 1) * GX + u0 + 1 };
+					const float w[4] = { (1 - fu) * (1 - fv), fu * (1 - fv), (1 - fu) * fv, fu * fv };
+					for (int e = 0; e < 4; e++) if (w[e] > 0.f) {
+						wgt[id[e]] += w[e];
+						for (int a = 0; a < 3; a++) acc[id[e] * 3 + a] += p[a] * w[e];
+					}
+				}
+				for (int pass = 0; pass < 4; pass++) for (int q = 0; q < GN; q++) if (wgt[q] < 1e-4f) {
+					const int u = q % GX, v = q / GX;
+					const int nbh[4] = { u > 0 ? q - 1 : -1, u < GX - 1 ? q + 1 : -1, v > 0 ? q - GX : -1, v < GY - 1 ? q + GX : -1 };
+					for (int e = 0; e < 4; e++) if (nbh[e] >= 0 && wgt[nbh[e]] > 1e-4f) {
+						wgt[q] = wgt[nbh[e]];
+						for (int a = 0; a < 3; a++) acc[q * 3 + a] = acc[nbh[e] * 3 + a];
+						break;
+					}
+				}
+				chestBase = nodes.size();
+				int chestOk = 1;
+				for (int q = 0; q < GN && nodes.size() < Renderer::SOFT_MAX; q++) {
+					if (wgt[q] < 1e-4f) { chestOk = 0; break; }
+					SoftGpuN o;
+					memset(&o, 0, sizeof(o));
+					const int gy = q / GX;
+					const float t = (float)gy / (float)(GY - 1);
+					o.x[0] = acc[q * 3] / wgt[q]; o.x[1] = acc[q * 3 + 1] / wgt[q]; o.x[2] = acc[q * 3 + 2] / wgt[q];
+					o.x[3] = gy == 0 ? 1.f : 0.f;
+					o.p[0] = 0.02f + 0.045f * t;
+					o.p[1] = 0.11f - 0.07f * t;
+					o.p[2] = 0.30f + 0.70f * t;
+					o.p[3] = 0.f;
+					o.q[0] = 0.022f;
+					o.q[1] = 0.f;
+					const int u = q % GX, v = gy;
+					const int nbh[4] = { v > 0 ? q - GX : -1, v < GY - 1 ? q + GX : -1, u > 0 ? q - 1 : -1, u < GX - 1 ? q + 1 : -1 };
+					for (int e = 0; e < 4; e++) o.nb[e] = nbh[e] >= 0 ? (unsigned)(chestBase + nbh[e]) : 0xFFFFFFFFu;
+					nodes.push_back(o);
+				}
+				if (!chestOk) { nodes.resize(chestBase); chestBase = -1; }
+				if (chestBase >= 0 && nodes.size() >= chestBase + GN) {
+					for (int i = 0; i < n; i++) {
+						if (moved[root[i]] < 0.012f || (isSk && isSk[i])) continue;
+						const float* p = V[nb + i].p;
+						float u = Clampf((p[0] - x0) / (x1 - x0), 0.f, 1.f) * (float)(GX - 1);
+						float v = Clampf((yTop - p[1]) / (yTop - yBot), 0.f, 1.f) * (float)(GY - 1);
+						int u0 = (int)u; if (u0 > GX - 2) u0 = GX - 2;
+						int v0 = (int)v; if (v0 > GY - 2) v0 = GY - 2;
+						float fu = u - (float)u0, fv = v - (float)v0;
+						SoftGpuV o;
+						memset(&o, 0, sizeof(o));
+						o.a[0] = (unsigned)(nb + i);
+						const int id[4] = { chestBase + v0 * GX + u0, chestBase + v0 * GX + u0 + 1, chestBase + (v0 + 1) * GX + u0, chestBase + (v0 + 1) * GX + u0 + 1 };
+						o.a[1] = (unsigned)id[0] | ((unsigned)id[1] << 16);
+						o.a[2] = (unsigned)id[2] | ((unsigned)id[3] << 16);
+						o.a[3] = 0;
+						o.w[0] = (1 - fu) * (1 - fv); o.w[1] = fu * (1 - fv); o.w[2] = (1 - fu) * fv; o.w[3] = fu * fv;
+						o.p[0] = p[0]; o.p[1] = p[1]; o.p[2] = p[2];
+						o.p[3] = Clampf(moved[root[i]] / 0.02f, 0.35f, 1.f);
+						verts.push_back(o);
+						if (jig && o.p[3] > 0.65f) memset(&jig[(size_t)(nb + i) * 3], 0, 12);
+					}
+				} else chestBase = -1;
+			}
+		}
+	}
+	for (int side = 0; side < 2 && nodes.size() + 8 <= Renderer::SOFT_MAX; side++) {
+		float A[3], H[3];
+		if (jUA[side] < 0 || jHand[side] < 0 || !bindPos(jUA[side], A) || !bindPos(jHand[side], H)) continue;
+		const int armJ[3] = { jUA[side], jLA[side] >= 0 ? jLA[side] : jUA[side], jHand[side] };
+		Buf<int> ids;
+		Buf<float> dist;
+		ids.arena = dist.arena = 1;
+		V3 ax = v3(H[0] - A[0], H[1] - A[1], H[2] - A[2]);
+		const float L = Len(ax);
+		if (L < 0.08f) continue;
+		ax = ax * (1.f / L);
+		for (int i = 0; i < n; i++) {
+			if (isSk && isSk[i]) continue;
+			const Renderer::CSkinV& s = V[nb + i];
+			const int d = DomJoint(s);
+			if (d != armJ[0] && d != armJ[1] && d != armJ[2]) continue;
+			int wl = 0;
+			for (int c = 0; c < 4; c++) if ((int)s.j[c] == d) wl += s.w[c];
+			if (wl < 180) continue;
+			const V3 q = v3(s.p[0] - A[0], s.p[1] - A[1], s.p[2] - A[2]);
+			const float t = Dot(q, ax) / L;
+			if (t < -0.05f || t > 1.15f) continue;
+			const float dd = Len(q - ax * (Clampf(t, 0.f, 1.f) * L));
+			if (dd > 0.16f) continue;
+			ids.push_back(i);
+			dist.push_back(dd);
+		}
+		if (ids.size() < 24) continue;
+		Buf<float> sorted;
+		sorted.arena = 1;
+		sorted.resize(dist.size());
+		if (sorted.size() < dist.size()) continue;
+		memcpy(sorted.data(), dist.data(), sizeof(float) * dist.size());
+		qsort(sorted.data(), sorted.size(), sizeof(float), CmpFloat);
+		const float p70 = sorted[sorted.size() * 7 / 10];
+		if (p70 < 0.018f) continue;
+		const int base = nodes.size();
+		const int SN = 8;
+		float sum[8][3];
+		float sw[8];
+		for (int k = 0; k < SN; k++) { sw[k] = 0.f; sum[k][0] = sum[k][1] = sum[k][2] = 0.f; }
+		for (int q = 0; q < ids.size(); q++) {
+			const float* p = V[nb + ids[q]].p;
+			const float t = Clampf(Dot(v3(p[0] - A[0], p[1] - A[1], p[2] - A[2]), ax) / L, 0.f, 1.f);
+			const int b = Clampi((int)(t * (float)(SN - 1) + 0.5f), 0, SN - 1);
+			sw[b] += 1.f;
+			for (int a = 0; a < 3; a++) sum[b][a] += p[a];
+		}
+		for (int k = 0; k < SN; k++) if (sw[k] < 1.f) {
+			const float t = (float)k / (float)(SN - 1);
+			sum[k][0] = A[0] + (H[0] - A[0]) * t;
+			sum[k][1] = A[1] + (H[1] - A[1]) * t;
+			sum[k][2] = A[2] + (H[2] - A[2]) * t;
+			sw[k] = 1.f;
+		}
+		const int boneTop = side == 0 ? 1 : 3;
+		const int boneLow = side == 0 ? 2 : 4;
+		for (int k = 0; k < SN; k++) {
+			SoftGpuN o;
+			memset(&o, 0, sizeof(o));
+			const float t = (float)k / (float)(SN - 1);
+			o.x[0] = sum[k][0] / sw[k]; o.x[1] = sum[k][1] / sw[k]; o.x[2] = sum[k][2] / sw[k];
+			o.x[3] = k == 0 ? 1.f : 0.f;
+			o.p[0] = 0.015f + 0.055f * t;
+			o.p[1] = 0.14f - 0.09f * t;
+			o.p[2] = 0.25f + 0.75f * t;
+			o.p[3] = 1.f;
+			o.q[1] = (float)(t < 0.45f ? boneTop : boneLow);
+			o.q[2] = (float)(side + 1);
+			o.nb[0] = k > 0 ? (unsigned)(base + k - 1) : 0xFFFFFFFFu;
+			o.nb[1] = k < SN - 1 ? (unsigned)(base + k + 1) : 0xFFFFFFFFu;
+			o.nb[2] = o.nb[3] = 0xFFFFFFFFu;
+			nodes.push_back(o);
+		}
+		for (int q = 0; q < ids.size(); q++) {
+			const int i = ids[q];
+			const float* p = V[nb + i].p;
+			const float t = Clampf(Dot(v3(p[0] - A[0], p[1] - A[1], p[2] - A[2]), ax) / L, 0.f, 1.f);
+			const float f = t * (float)(SN - 1);
+			int i0 = (int)f; if (i0 > SN - 2) i0 = SN - 2;
+			const float fr = f - (float)i0;
+			SoftGpuV o;
+			memset(&o, 0, sizeof(o));
+			o.a[0] = (unsigned)(nb + i);
+			o.a[1] = (unsigned)(base + i0) | ((unsigned)(base + i0 + 1) << 16);
+			o.a[2] = o.a[1];
+			o.a[3] = (unsigned)(t < 0.45f ? boneTop : boneLow);
+			o.w[0] = 1.f - fr; o.w[1] = fr;
+			o.p[0] = p[0]; o.p[1] = p[1]; o.p[2] = p[2];
+			o.p[3] = Smooth01((dist[q] - 0.012f) / 0.02f);
+			if (o.p[3] < 0.08f) continue;
+			verts.push_back(o);
+		}
+	}
+	if (nodes.size() >= 4 && verts.size() >= 8) {
+		nc.softN = nodes.size();
+		nc.softVN = verts.size();
+	} else {
+		nodes.clear();
+		verts.clear();
+		nc.softN = nc.softVN = 0;
+	}
+}
+
 // 衣装 [nb, nv) の布の決まりを作る。バインドを書き換えるので、GPU へ載せる前に呼ぶ。
 // ・胸の頂から腰へ垂れる線より奥の布は前へ出し、胸の下に隙間を作る（jig があるとき）。
 // ・股の中央を通って裾まで続く部品（ドレス・スカート・着物）は、腰を囲む細かい格子で動かす。頂点は近い 4 点の
@@ -3744,9 +4143,13 @@ static int UfFind(Buf<int>& p, int x)
 //   最後に頂点を脚の形（prof）の外へ出すので、布は体の線より内へ入らない。
 // ・スカートの下で消してあった脚（素体）を戻す印を expose に付ける。1=脚だが他の服がぴったり覆う 2=見えてよい。
 static void PrepCloth(Renderer::AvaCache& nc, int nb, int nv, const Buf<WORD>& cosTri, const int* segJ, const char (*segName)[24], int ns,
-	const Model& md, float* jig, Buf<ClothGpuN>& nodes, Buf<ClothGpuV>& verts, Buf<float>& prof, Buf<BYTE>& expose)
+	const Model& md, float* jig, Buf<ClothGpuN>& nodes, Buf<ClothGpuV>& verts, Buf<float>& prof, Buf<BYTE>& expose,
+	Buf<SoftGpuN>& softN, Buf<SoftGpuV>& softV)
 {
 	nodes.clear();
+	softN.clear();
+	softV.clear();
+	nc.softN = nc.softVN = 0;
 	verts.clear();
 	prof.clear();
 	expose.clear();
@@ -4004,30 +4407,43 @@ static void PrepCloth(Renderer::AvaCache& nc, int nb, int nv, const Buf<WORD>& c
 	enum { PT = Renderer::CLOTH_PT, PF = Renderer::CLOTH_PF, PN = PT * PF };
 	prof.fill(Renderer::CLOTH_SEGS * PN, 0.f);
 	if (prof.size() < Renderer::CLOTH_SEGS * PN) return;
-	auto addSeg = [&](int ja, int jb) {
-		if (nc.segN >= Renderer::CLOTH_SEGS || ja < 0 || jb < 0 || ja == jb) return;
+	auto addSeg = [&](int ja, int jb, int foot) {
+		if (nc.segN >= Renderer::CLOTH_SEGS || ja < 0 || jb < 0 || (ja == jb && foot != 2)) return;
 		float A[3], B[3];
-		if (!bindPos(ja, A) || !bindPos(jb, B)) return;
+		if (foot == 2) {
+			float S[3];
+			if (!bindPos(ja, A) || !bindPos(jb, S)) return;
+			V3 d = v3(A[0] - S[0], A[1] - S[1], A[2] - S[2]);
+			const float dl = Len(d);
+			d = dl < 0.02f ? v3(0.f, -0.12f, 0.02f) : d * (0.12f / dl);
+			B[0] = A[0] + d.x; B[1] = A[1] + d.y; B[2] = A[2] + d.z;
+		} else if (!bindPos(ja, A) || !bindPos(jb, B)) return;
 		V3 ax = v3(B[0] - A[0], B[1] - A[1], B[2] - A[2]);
-		const float L = Len(ax);
-		if (L < 0.05f) return;
+		float L = Len(ax);
+		if (L < 0.02f || (!foot && L < 0.05f)) return;
 		ax = ax * (1.f / L);
+		// 靴は足首の先まで続く。指の骨が短いとカプセルが甲で終わり、爪先が裾を突き抜ける。22cm まで足す。
+		if (foot && L < 0.22f) L = 0.22f;
 		V3 u = v3(0, 0, -1) - ax * (-ax.z);
 		if (Len(u) < 0.2f) u = v3(1, 0, 0) - ax * ax.x;
 		u = Norm(u);
 		const V3 w = Cross(ax, u);
 		const int s = nc.segN;
 		float* P = &prof[s * PN];
-		for (int k = 0; k < nb; k++) {
+		const int kend = foot ? nv : nb;
+		for (int k = 0; k < kend; k++) {
 			const int d = DomJoint(V[k]);
-			if (d != ja && d != jb) continue;
+			if (foot == 2) { if (d != ja) continue; }
+			else if (d != ja && d != jb) continue;
+			if (k >= nb && !foot) continue;
 			// 腰と混ぜてあるお尻や股の頂点は脚と一緒には回らない。入れると脚を振ったときに無い肉の塊が腰を通り、布を押し潰す。
 			int wl = 0;
 			for (int c = 0; c < 4; c++) if ((int)V[k].j[c] == ja || (int)V[k].j[c] == jb) wl += V[k].w[c];
 			if (wl < 204) continue;
 			const V3 q = v3(V[k].p[0] - A[0], V[k].p[1] - A[1], V[k].p[2] - A[2]);
 			const float t = Dot(q, ax) / L;
-			if (t < -0.15f || t > 1.15f || (d == jb && t > 1.05f)) continue;
+			const float tMax = foot ? 1.55f : 1.15f;
+			if (t < -0.15f || t > tMax || (!foot && d == jb && t > 1.05f)) continue;
 			const V3 rv = q - ax * (t * L);
 			const float dist = Len(rv);
 			if (dist > 0.25f) continue;
@@ -4039,7 +4455,10 @@ static void PrepCloth(Renderer::AvaCache& nc, int nb, int nv, const Buf<WORD>& c
 		}
 		int got = 0;
 		for (int i = 0; i < PN; i++) if (P[i] > 0.f) got++;
-		if (got < PN / 4) { memset(P, 0, sizeof(float) * PN); return; }
+		if (got < PN / 4) {
+			if (!foot) { memset(P, 0, sizeof(float) * PN); return; }
+			for (int i = 0; i < PN; i++) if (P[i] <= 0.f) P[i] = 0.048f;
+		}
 		// 頂点の来なかった区画は、同じ段のまわり、次に上下の段から写す。
 		for (int pass = 0; pass < 4; pass++) for (int ti = 0; ti < PT; ti++) for (int pi = 0; pi < PF; pi++) {
 			float& r = P[ti * PF + pi];
@@ -4047,7 +4466,8 @@ static void PrepCloth(Renderer::AvaCache& nc, int nb, int nv, const Buf<WORD>& c
 			for (int d = 1; d <= PF / 2 && r <= 0.f; d++) r = fmaxf(P[ti * PF + (pi + d) % PF], P[ti * PF + (pi - d + PF) % PF]);
 			if (r <= 0.f && pass > 0) r = fmaxf(ti > 0 ? P[(ti - 1) * PF + pi] : 0.f, ti < PT - 1 ? P[(ti + 1) * PF + pi] : 0.f);
 		}
-		for (int i = 0; i < PN; i++) if (P[i] > 0.f) P[i] += 0.006f;
+		for (int i = 0; i < PN; i++) if (P[i] > 0.f) P[i] += foot ? 0.010f : 0.006f;
+		if (foot) for (int i = 0; i < PN; i++) if (P[i] < 0.04f) P[i] = 0.050f;
 		nc.segJ[s][0] = ja; nc.segJ[s][1] = jb;
 		float* G = &nc.segG[s][0][0];
 		G[0] = A[0]; G[1] = A[1]; G[2] = A[2]; G[3] = L;
@@ -4065,9 +4485,17 @@ static void PrepCloth(Renderer::AvaCache& nc, int nb, int nv, const Buf<WORD>& c
 		G[12] = w.x; G[13] = w.y; G[14] = w.z; G[15] = 0.f;
 		nc.segN++;
 	};
-	for (int s = 0; s < 2; s++) addSeg(jUL[s], jLL[s]);
-	if (nc.segN < 2) return;
-	for (int s = 0; s < 2; s++) addSeg(jLL[s], jFt[s]);
+	for (int s = 0; s < 2; s++) addSeg(jUL[s], jLL[s], 0);
+	if (nc.segN < 2) {
+		BuildSoft(nc, nb, n, V, moved.data(), root.data(), NULL, segJ, segName, ns, md, jig, softN, softV);
+		return;
+	}
+	for (int s = 0; s < 2; s++) addSeg(jLL[s], jFt[s], 0);
+	for (int s = 0; s < 2; s++) {
+		const int toe = jointOf(s == 0 ? "PT.L" : "PT.R");
+		if (toe >= 0) addSeg(jFt[s], toe, 1);
+		else addSeg(jFt[s], jLL[s], 2);
+	}
 	// 脚の形の面からの距離（負なら中）。バインドでの値。
 	auto clearance = [&](const float* p) {
 		float best = 1e9f;
@@ -4092,7 +4520,10 @@ static void PrepCloth(Renderer::AvaCache& nc, int nb, int nv, const Buf<WORD>& c
 	Buf<BYTE> isSk;
 	isSk.arena = 1;
 	isSk.fill(n, 0);
-	if (isSk.size() < n) return;
+	if (isSk.size() < n) {
+		BuildSoft(nc, nb, n, V, moved.data(), root.data(), NULL, segJ, segName, ns, md, jig, softN, softV);
+		return;
+	}
 	float yMin = 1e9f, czSum = 0.f;
 	int czN = 0;
 	for (int i = 0; i < n; i++) {
@@ -4103,6 +4534,7 @@ static void PrepCloth(Renderer::AvaCache& nc, int nb, int nv, const Buf<WORD>& c
 		if (p[1] < y0) { czSum += p[2]; czN++; }
 	}
 	const float span = y0 - yMin;
+	BuildSoft(nc, nb, n, V, moved.data(), root.data(), isSk.data(), segJ, segName, ns, md, jig, softN, softV);
 	if (czN < 32 || span < 0.10f) return;
 	const float cz = czSum / (float)czN;
 	const int K = Renderer::CLOTH_SECT;
@@ -4204,9 +4636,11 @@ static void PrepCloth(Renderer::AvaCache& nc, int nb, int nv, const Buf<WORD>& c
 		o.q[1] = clearance(o.x);   // 下の allowOf で許す深さに直す
 		// 裾ほど遠くまで離れてよく、ゆっくり戻り、重力が効く。
 		const float t = (float)r / (float)M;
-		o.p[0] = 0.02f + 0.25f * t;
-		o.p[1] = 0.30f - 0.22f * t;
-		o.p[2] = 0.3f + 0.7f * t;
+		// 脚に近い点は、当たりとばねが押し合いしてちらつかないよう、離れ幅を足す。
+		// 戻りは裾ほど遅い。足を戻した布は重力と風で降りる。
+		o.p[0] = 0.04f + 0.34f * t + 0.18f * o.q[0];
+		o.p[1] = 0.12f - 0.09f * t;
+		o.p[2] = 0.35f + 0.65f * t;
 		o.p[3] = r == 0 ? 1.f : 0.f;
 		const float* J = &jw[q * NJW];
 		float sum = 0.f;
@@ -4577,7 +5011,10 @@ BOOL Renderer::DrawAvatar(int model, int avatar, int cup, const Pose& pose, cons
 		Buf<float> clothP;
 		Buf<BYTE> expose;
 		clothN.arena = clothV.arena = clothP.arena = expose.arena = 1;
-		if (m_cbCloth) PrepCloth(nc, nbA, nvA, cTri, segJ.data(), m_avaSeg, ns, md, nc.jig.empty() ? NULL : nc.jig.data(), clothN, clothV, clothP, expose);
+		Buf<SoftGpuN> softN;
+		Buf<SoftGpuV> softV;
+		softN.arena = softV.arena = 1;
+		if (m_cbCloth) PrepCloth(nc, nbA, nvA, cTri, segJ.data(), m_avaSeg, ns, md, nc.jig.empty() ? NULL : nc.jig.data(), clothN, clothV, clothP, expose, softN, softV);
 		if (nc.clothN > 0 && expose.size() == nbA) {
 			// スカートの内側の素体（3）は、衣装の作りで残してあっても描かない。
 			{
@@ -4668,28 +5105,74 @@ BOOL Renderer::DrawAvatar(int model, int avatar, int cup, const Pose& pose, cons
 				}
 			}
 		} else nc.clothN = nc.clothVN = 0;
+		if (nc.softN > 0 && nc.softN <= SOFT_MAX && softN.size() == nc.softN && softV.size() == nc.softVN) {
+			const void* src[2] = { softN.data(), softV.data() };
+			const UINT cnt[2] = { (UINT)nc.softN, (UINT)nc.softVN };
+			const UINT stride[2] = { (UINT)sizeof(SoftGpuN), (UINT)sizeof(SoftGpuV) };
+			for (int b = 0; b < 2; b++) {
+				D3D11_BUFFER_DESC bd = {};
+				bd.ByteWidth = cnt[b] * stride[b];
+				bd.Usage = D3D11_USAGE_IMMUTABLE;
+				bd.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+				bd.MiscFlags = D3D11_RESOURCE_MISC_BUFFER_STRUCTURED;
+				bd.StructureByteStride = stride[b];
+				D3D11_SUBRESOURCE_DATA sd = { src[b], 0, 0 };
+				D3D11_SHADER_RESOURCE_VIEW_DESC sv = {};
+				sv.Format = DXGI_FORMAT_UNKNOWN;
+				sv.ViewDimension = D3D11_SRV_DIMENSION_BUFFER;
+				sv.Buffer.NumElements = cnt[b];
+				if (FAILED(m_dev->CreateBuffer(&bd, &sd, &nc.softSB[b])) || FAILED(m_dev->CreateShaderResourceView(nc.softSB[b], &sv, &nc.softSRV[b]))) {
+					for (int k = 0; k < 2; k++) { TAC_REL(nc.softSRV[k]); TAC_REL(nc.softSB[k]); }
+					nc.softN = nc.softVN = 0;
+					break;
+				}
+			}
+		} else nc.softN = nc.softVN = 0;
 		m_avaCache.push_back(std::move(nc));
 		ac = &m_avaCache.back();
 	}
 	// 揺れの倍率。A で 0.55、C でおよそ 1、H で 1.95。
 	SkinAndDraw(ac->skin, ac->gm, ac->jig.empty() ? NULL : ac->jig.data(), 0.55f + 0.2f * (float)ac->cup, pose, world, dp,
-		ac->clothN > 0 ? ac : NULL, owner);
+		(ac->clothN > 0 || ac->softN > 0) ? ac : NULL, owner);
 	return TRUE;
+}
+
+static void TacWind(float time, const M4& world, float amp, float out[3])
+{
+	const float wx = sinf(time * 0.65f) * 0.55f + sinf(time * 0.17f + 1.3f) * 0.35f;
+	const float wz = cosf(time * 0.55f) * 0.45f + sinf(time * 0.23f) * 0.25f;
+	const V3 w = MXformDir(MInverse(world), v3(wx, 0.f, wz));
+	out[0] = w.x * amp; out[1] = w.y * amp; out[2] = w.z * amp;
 }
 
 void Renderer::RunCloth(AvaCache& ac, const void* owner, CreatureSkin& src, const Pose& pose, const M4& world, const DrawParams& dp)
 {
-	if (m_inPortrait || !owner || !ac.clothSRV[0] || !ac.clothSRV[1] || !ac.clothSRV[2] || ac.clothN <= 0 || ac.clothN > CLOTH_NODES || ac.clothVN <= 0
-		|| !src.outUAV || !m_cbCloth || !m_cbSkinBone || !m_csCloth[0] || !m_csCloth[1] || !m_csCloth[2]) return;
-	if (ac.clothHip < 0 || ac.clothHip >= pose.nJ) return;
+	const BOOL canSkirt = !m_inPortrait && owner && src.outUAV && ac.clothN > 0 && ac.clothN <= CLOTH_NODES && ac.clothVN > 0
+		&& ac.clothSRV[0] && ac.clothSRV[1] && ac.clothSRV[2] && m_cbCloth && m_cbSkinBone && m_csCloth[0] && m_csCloth[1] && m_csCloth[2]
+		&& ac.clothHip >= 0 && ac.clothHip < pose.nJ;
+	const BOOL canSoft = !m_inPortrait && owner && src.outUAV && ac.softN > 0 && ac.softN <= SOFT_MAX && ac.softVN > 0
+		&& ac.softSRV[0] && ac.softSRV[1] && m_cbSoft && m_csSoft[0] && m_csSoft[1];
+	if (!canSkirt && !canSoft) return;
 	ClothInst* ci = NULL;
 	for (ClothInst& x : m_clothInst) if (x.owner == owner && x.model == ac.model && x.cos == ac.cos && x.cup == ac.cup) { ci = &x; break; }
 	if (!ci) {
 		// 空きが無ければ、いちばん長く描いていないキャラの分を使い回す。
 		if (m_clothInst.size() < CLOTH_INST) { m_clothInst.push_back(ClothInst()); ci = &m_clothInst.back(); }
 		else { ci = &m_clothInst[0]; for (ClothInst& x : m_clothInst) if (x.frame < ci->frame) ci = &x; }
-		ci->owner = owner; ci->model = ac.model; ci->cos = ac.cos; ci->cup = ac.cup; ci->valid = 0;
+		ci->owner = owner; ci->model = ac.model; ci->cos = ac.cos; ci->cup = ac.cup; ci->valid = 0; ci->limbOk = 0;
 	}
+	const float dtRaw = m_time - ci->time;
+	int reset = !ci->valid;
+	M4 delta = MIdent();
+	if (!reset) {
+		delta = MMul(ci->world, MInverse(world));
+		const float* t = &delta.m[12];
+		if (t[0] * t[0] + t[1] * t[1] + t[2] * t[2] > 1.5f * 1.5f || dtRaw > 0.25f || dtRaw < 0.f) reset = 1;
+	}
+	const BOOL step = reset || (ci->frame != m_frame && dtRaw > 1e-4f);
+	const float hs = dp.bodyScale > 0.05f ? dp.bodyScale : 1.f;
+	const float dt = Clampf(dtRaw > 0.f ? dtRaw : 1.f / 60.f, 1.f / 240.f, 1.f / 20.f);
+	if (canSkirt) {
 	// 今・前・作業・目標からのずれを CLOTH_NODES 個ずつ。
 	if (!ci->uav) {
 		TAC_REL(ci->sb);
@@ -4701,28 +5184,17 @@ void Renderer::RunCloth(AvaCache& ac, const void* owner, CreatureSkin& src, cons
 		bd.BindFlags = D3D11_BIND_UNORDERED_ACCESS;
 		bd.MiscFlags = D3D11_RESOURCE_MISC_BUFFER_STRUCTURED;
 		bd.StructureByteStride = 16;
-		if (FAILED(m_dev->CreateBuffer(&bd, NULL, &ci->sb))) return;
+		if (FAILED(m_dev->CreateBuffer(&bd, NULL, &ci->sb))) ci->sb = NULL;
 		D3D11_UNORDERED_ACCESS_VIEW_DESC ud = {};
 		ud.Format = DXGI_FORMAT_UNKNOWN;
 		ud.ViewDimension = D3D11_UAV_DIMENSION_BUFFER;
 		ud.Buffer.NumElements = (UINT)CLOTH_NODES * 4u;
-		if (FAILED(m_dev->CreateUnorderedAccessView(ci->sb, &ud, &ci->uav))) { TAC_REL(ci->sb); return; }
-		ci->n = CLOTH_NODES;
+		if (!ci->sb || FAILED(m_dev->CreateUnorderedAccessView(ci->sb, &ud, &ci->uav))) { TAC_REL(ci->sb); ci->uav = NULL; }
+		else ci->n = CLOTH_NODES;
 	}
-	const float dtRaw = m_time - ci->time;
-	int reset = !ci->valid;
-	M4 delta = MIdent();
-	if (!reset) {
-		delta = MMul(ci->world, MInverse(world));
-		const float* t = &delta.m[12];
-		// 場面の切り替えや瞬間移動は、揺れを持ち越さずに置き直す。
-		if (t[0] * t[0] + t[1] * t[1] + t[2] * t[2] > 1.5f * 1.5f || dtRaw > 0.25f || dtRaw < 0.f) reset = 1;
-	}
-	const BOOL step = reset || (ci->frame != m_frame && dtRaw > 1e-4f);
-	const float hs = dp.bodyScale > 0.05f ? dp.bodyScale : 1.f;
-	const float dt = Clampf(dtRaw, 1.f / 240.f, 1.f / 20.f);
-	struct CB { M4 delta, hips, hipInv; float seg[CLOTH_SEGS][4][4]; M4 pal[CLOTH_SEGS], inv[CLOTH_SEGS]; unsigned cnt[4]; float sim[4]; float mode[4]; } cb;
-	static_assert(sizeof(CB) == 192 + 64 * CLOTH_SEGS + 128 * CLOTH_SEGS + 48, "ClothParm");
+	if (ci->uav) {
+	struct CB { M4 delta, hips, hipInv; float seg[CLOTH_SEGS][4][4]; M4 pal[CLOTH_SEGS], inv[CLOTH_SEGS]; unsigned cnt[4]; float sim[4]; float mode[4]; float wind[4]; float limb[CLOTH_SEGS][4]; } cb;
+	static_assert(sizeof(CB) == 1504, "ClothParm");
 	memset(&cb, 0, sizeof(cb));
 	cb.delta = delta;
 	cb.hips = pose.palette[ac.clothHip];
@@ -4760,8 +5232,23 @@ void Renderer::RunCloth(AvaCache& ac, const void* owner, CreatureSkin& src, cons
 	cb.sim[1] = dt * 60.f;
 	cb.sim[2] = reset ? 1.f : 0.f;
 	cb.sim[3] = hs;
+	cb.mode[3] = m_time;
+	TacWind(m_time, world, 1.15f, cb.wind);
+	if (step) {
+		for (int s = 0; s < nseg; s++) {
+			const float* G = &ac.segG[s][0][0];
+			const V3 cur = MXformPt(cb.pal[s], v3(G[0], G[1], G[2])) * hs;
+			if (ci->limbOk && !reset) {
+				const V3 prev = MXformPt(delta, v3(ci->limbPrev[s][0], ci->limbPrev[s][1], ci->limbPrev[s][2]));
+				const V3 d = cur - prev;
+				cb.limb[s][0] = d.x; cb.limb[s][1] = d.y; cb.limb[s][2] = d.z; cb.limb[s][3] = Len(d);
+			}
+			ci->limbPrev[s][0] = cur.x; ci->limbPrev[s][1] = cur.y; ci->limbPrev[s][2] = cur.z;
+		}
+		ci->limbOk = 1;
+	}
 	D3D11_MAPPED_SUBRESOURCE ms;
-	if (FAILED(m_ctx->Map(m_cbCloth, 0, D3D11_MAP_WRITE_DISCARD, 0, &ms))) return;
+	if (SUCCEEDED(m_ctx->Map(m_cbCloth, 0, D3D11_MAP_WRITE_DISCARD, 0, &ms))) {
 	memcpy(ms.pData, &cb, sizeof(cb));
 	m_ctx->Unmap(m_cbCloth, 0);
 	// b1 は直前の CSSkin で書いた骨の行列（座ったときに脚へ沿わせる分）。
@@ -4786,12 +5273,110 @@ void Renderer::RunCloth(AvaCache& ac, const void* owner, CreatureSkin& src, cons
 	m_ctx->CSSetShaderResources(0, 3, nos);
 	m_ctx->CSSetConstantBuffers(0, 2, nob);
 	m_ctx->CSSetShader(NULL, NULL, 0);
+	}
+	}
+	}
+	if (canSoft) {
+		if (!ci->softUav) {
+			TAC_REL(ci->softSb);
+			D3D11_BUFFER_DESC bd = {};
+			bd.ByteWidth = (UINT)SOFT_MAX * 2u * 16u;
+			bd.Usage = D3D11_USAGE_DEFAULT;
+			bd.BindFlags = D3D11_BIND_UNORDERED_ACCESS;
+			bd.MiscFlags = D3D11_RESOURCE_MISC_BUFFER_STRUCTURED;
+			bd.StructureByteStride = 16;
+			D3D11_UNORDERED_ACCESS_VIEW_DESC ud = {};
+			ud.Format = DXGI_FORMAT_UNKNOWN;
+			ud.ViewDimension = D3D11_UAV_DIMENSION_BUFFER;
+			ud.Buffer.NumElements = (UINT)SOFT_MAX * 2u;
+			if (SUCCEEDED(m_dev->CreateBuffer(&bd, NULL, &ci->softSb)) && SUCCEEDED(m_dev->CreateUnorderedAccessView(ci->softSb, &ud, &ci->softUav))) {
+			} else { TAC_REL(ci->softUav); TAC_REL(ci->softSb); }
+		}
+		if (ci->softUav) {
+			struct SCB { M4 delta; M4 bone[6]; float sim[4], wind[4], bust[2][4], armA[4][4], armB[4][4], limb[2][4], body[4]; unsigned cnt[4]; } scb;
+			static_assert(sizeof(SCB) == 704, "SoftParm");
+			memset(&scb, 0, sizeof(scb));
+			scb.delta = delta;
+			for (int b = 0; b < 6; b++) {
+				const int j = ac.softBone[b];
+				scb.bone[b] = (j >= 0 && j < pose.nJ) ? pose.palette[j] : MIdent();
+			}
+			scb.sim[0] = dt; scb.sim[1] = dt * 60.f; scb.sim[2] = reset ? 1.f : 0.f; scb.sim[3] = hs;
+			TacWind(m_time, world, 0.90f, scb.wind);
+			const int jChest = ac.softBone[0];
+			const M4 chest = (jChest >= 0 && jChest < pose.nJ) ? pose.palette[jChest] : MIdent();
+			for (int s = 0; s < 2; s++) {
+				const V3 c = MXformPt(chest, v3(ac.bustA[s][0], ac.bustA[s][1], ac.bustA[s][2])) * hs;
+				scb.bust[s][0] = c.x + src.bustLag[0];
+				scb.bust[s][1] = c.y + src.bustLag[1];
+				scb.bust[s][2] = c.z + src.bustLag[2];
+				scb.bust[s][3] = ac.bustA[s][3] * hs;
+			}
+			for (int c = 0; c < 4; c++) {
+				const int ja = ac.armJ[c][0], jb = ac.armJ[c][1];
+				if (ja < 0 || jb < 0 || ja >= pose.nJ || jb >= pose.nJ || ac.armB[c][3] < 0.f) { scb.armB[c][3] = -1.f; continue; }
+				const V3 A = MXformPt(pose.palette[ja], v3(ac.armA[c][0], ac.armA[c][1], ac.armA[c][2])) * hs;
+				const V3 B = MXformPt(pose.palette[jb], v3(ac.armB[c][0], ac.armB[c][1], ac.armB[c][2])) * hs;
+				scb.armA[c][0] = A.x; scb.armA[c][1] = A.y; scb.armA[c][2] = A.z; scb.armA[c][3] = ac.armA[c][3] * hs;
+				scb.armB[c][0] = B.x; scb.armB[c][1] = B.y; scb.armB[c][2] = B.z; scb.armB[c][3] = ac.armB[c][3] * hs;
+			}
+			if (step) {
+				for (int side = 0; side < 2; side++) {
+					const int hj = ac.armJ[side * 2 + 1][1] >= 0 ? ac.armJ[side * 2 + 1][1] : ac.softBone[side == 0 ? 2 : 4];
+					if (hj < 0 || hj >= pose.nJ) continue;
+					const V3 cur = v3(pose.palette[hj].m[12], pose.palette[hj].m[13], pose.palette[hj].m[14]) * hs;
+					if (ci->limbOk && !reset) {
+						const V3 prev = MXformPt(delta, v3(ci->handPrev[side][0], ci->handPrev[side][1], ci->handPrev[side][2]));
+						const V3 d = cur - prev;
+						scb.limb[side][0] = d.x; scb.limb[side][1] = d.y; scb.limb[side][2] = d.z; scb.limb[side][3] = Len(d);
+					}
+					ci->handPrev[side][0] = cur.x; ci->handPrev[side][1] = cur.y; ci->handPrev[side][2] = cur.z;
+				}
+				ci->limbOk = 1;
+			}
+			const V3 spine = v3(chest.m[12], chest.m[13], chest.m[14]) * hs;
+			scb.body[0] = spine.x; scb.body[1] = spine.y; scb.body[2] = spine.z; scb.body[3] = m_time;
+			scb.cnt[0] = (unsigned)ac.softN;
+			scb.cnt[1] = (unsigned)ac.softVN;
+			D3D11_MAPPED_SUBRESOURCE ms;
+			if (SUCCEEDED(m_ctx->Map(m_cbSoft, 0, D3D11_MAP_WRITE_DISCARD, 0, &ms))) {
+				memcpy(ms.pData, &scb, sizeof(scb));
+				m_ctx->Unmap(m_cbSoft, 0);
+				ID3D11Buffer* cb1 = m_cbSoft;
+				m_ctx->CSSetConstantBuffers(0, 1, &cb1);
+				ID3D11ShaderResourceView* sv[2] = { ac.softSRV[0], ac.softSRV[1] };
+				m_ctx->CSSetShaderResources(0, 2, sv);
+				ID3D11UnorderedAccessView* uv[2] = { src.outUAV, ci->softUav };
+				UINT zc[2] = { 0, 0 };
+				m_ctx->CSSetUnorderedAccessViews(0, 2, uv, zc);
+				if (step) {
+					m_ctx->CSSetShader(m_csSoft[0], NULL, 0);
+					m_ctx->Dispatch(1, 1, 1);
+				}
+				m_ctx->CSSetShader(m_csSoft[1], NULL, 0);
+				m_ctx->Dispatch(((UINT)ac.softVN + 63u) / 64u, 1, 1);
+				ID3D11UnorderedAccessView* nou[2] = { NULL, NULL };
+				ID3D11ShaderResourceView* nos[2] = { NULL, NULL };
+				ID3D11Buffer* nob = NULL;
+				m_ctx->CSSetUnorderedAccessViews(0, 2, nou, NULL);
+				m_ctx->CSSetShaderResources(0, 2, nos);
+				m_ctx->CSSetConstantBuffers(0, 1, &nob);
+				m_ctx->CSSetShader(NULL, NULL, 0);
+			}
+		}
+	}
 	ci->frame = m_frame;
 	if (step) {
 		ci->time = m_time;
 		ci->world = world;
 		ci->valid = 1;
 	}
+}
+
+void Renderer::ReleaseHairInst()
+{
+	for (HairInst& h : m_hairInst) { TAC_REL(h.srv); TAC_REL(h.uav); TAC_REL(h.sb); }
+	m_hairInst.clear();
 }
 
 void Renderer::ReleaseHair()
@@ -4804,10 +5389,166 @@ void Renderer::ReleaseHair()
 	m_hairDraw.Release();
 	TAC_REL(m_hairSrv);
 	TAC_REL(m_hairTex);
+	TAC_REL(m_hairGuide);
+	TAC_REL(m_hairGuideSB);
+	TAC_REL(m_hairVert);
+	TAC_REL(m_hairVertSB);
+	TAC_REL(m_hairScratchSRV);
+	TAC_REL(m_hairScratchUAV);
+	TAC_REL(m_hairScratchSB);
+	ReleaseHairInst();
+	for (int s = 0; s < 16; s++) { m_hairV0[s] = 0; m_hairVN[s] = 0; }
 	m_hairNv = 0;
 	m_scalpModel = -1;
 	m_capBind.clear();
 	m_capDraw.Release();
+}
+
+void Renderer::RunHair(int model, int style, int headJ, const Pose& pose, const M4& world, const void* owner, const M4& place, const M4& pal)
+{
+	if (style < 1 || style > 15 || m_hairVN[style] <= 0 || !m_csHair[0] || !m_csHair[1] || !m_cbHairSim || !m_hairGuide || !m_hairVert || !m_hairUAV) return;
+	if (headJ < 0 || headJ >= pose.nJ) return;
+	const BOOL portrait = m_inPortrait || !owner;
+	auto makeState = [&](ID3D11Buffer** sb, ID3D11UnorderedAccessView** uav) -> BOOL {
+		if (*uav) return TRUE;
+		TAC_REL(*sb);
+		D3D11_BUFFER_DESC bd = {};
+		bd.ByteWidth = (UINT)HAIR_G * 2u * 16u;
+		bd.Usage = D3D11_USAGE_DEFAULT;
+		bd.BindFlags = D3D11_BIND_UNORDERED_ACCESS | D3D11_BIND_SHADER_RESOURCE;
+		bd.MiscFlags = D3D11_RESOURCE_MISC_BUFFER_STRUCTURED;
+		bd.StructureByteStride = 16;
+		if (FAILED(m_dev->CreateBuffer(&bd, NULL, sb))) return FALSE;
+		D3D11_UNORDERED_ACCESS_VIEW_DESC ud = {};
+		ud.Format = DXGI_FORMAT_UNKNOWN;
+		ud.ViewDimension = D3D11_UAV_DIMENSION_BUFFER;
+		ud.Buffer.NumElements = (UINT)HAIR_G * 2u;
+		if (FAILED(m_dev->CreateUnorderedAccessView(*sb, &ud, uav))) { TAC_REL(*sb); return FALSE; }
+		return TRUE;
+	};
+	ID3D11UnorderedAccessView* stU = NULL;
+	HairInst* hi = NULL;
+	int reset = 1;
+	M4 delta = MIdent();
+	BOOL step = TRUE;
+	float dt = 1.f / 60.f;
+	if (portrait) {
+		if (!makeState(&m_hairScratchSB, &m_hairScratchUAV)) return;
+		stU = m_hairScratchUAV;
+	} else {
+		for (HairInst& x : m_hairInst) if (x.owner == owner) { hi = &x; break; }
+		if (!hi) {
+			if (m_hairInst.size() < HAIR_INST) { m_hairInst.push_back(HairInst()); hi = &m_hairInst.back(); }
+			else { hi = &m_hairInst[0]; for (HairInst& x : m_hairInst) if (x.frame < hi->frame) hi = &x; }
+			hi->owner = owner; hi->style = -1; hi->valid = 0;
+		}
+		if (hi->style != style) { hi->style = style; hi->valid = 0; }
+		if (!makeState(&hi->sb, &hi->uav)) return;
+		const float dtRaw = m_time - hi->time;
+		reset = !hi->valid;
+		if (!reset) {
+			delta = MMul(hi->world, MInverse(world));
+			const float* t = &delta.m[12];
+			if (t[0] * t[0] + t[1] * t[1] + t[2] * t[2] > 1.5f * 1.5f || dtRaw > 0.25f || dtRaw < 0.f) reset = 1;
+		}
+		step = reset || (hi->frame != m_frame && dtRaw > 1e-4f);
+		dt = Clampf(dtRaw > 0.f ? dtRaw : 1.f / 60.f, 1.f / 240.f, 1.f / 20.f);
+		stU = hi->uav;
+	}
+	struct HCB {
+		M4 delta, head, pal, palInv;
+		float sim[4], wind[4], body[4], capA[8][4], capB[8][4];
+		unsigned cnt[4];
+	} cb;
+	static_assert(sizeof(HCB) == 576, "HairParm");
+	memset(&cb, 0, sizeof(cb));
+	cb.delta = portrait ? MIdent() : delta;
+	cb.head = place;
+	cb.pal = pal;
+	cb.palInv = MInverse(pal);
+	cb.sim[0] = dt;
+	cb.sim[1] = dt * 60.f;
+	cb.sim[2] = (portrait || reset) ? 1.f : 0.f;
+	cb.sim[3] = m_time;
+	TacWind(m_time, world, 0.55f, cb.wind);
+	for (int i = 0; i < 8; i++) { cb.capA[i][3] = -1.f; cb.capB[i][3] = -1.f; }
+	const Model* md = (model >= 0 && model < (int)models.size()) ? &models[model] : NULL;
+	const int rig = md ? md->rig : -1;
+	auto findJ = [&](const char* name) -> int {
+		if (rig < 0 || rig >= (int)rigs.size()) return -1;
+		const int j = rigs[rig].Find(name);
+		return (j >= 0 && j < pose.nJ) ? j : -1;
+	};
+	auto jointOr = [&](const char* name, int fallback) -> int {
+		const int j = findJ(name);
+		if (j >= 0) return j;
+		return (fallback >= 0 && fallback < pose.nJ) ? fallback : -1;
+	};
+	auto at = [&](int j, float* o) -> BOOL {
+		if (j < 0) return FALSE;
+		o[0] = pose.palette[j].m[12]; o[1] = pose.palette[j].m[13]; o[2] = pose.palette[j].m[14];
+		return TRUE;
+	};
+	int nc = 0;
+	auto cap = [&](int ja, int jb, float r0, float r1) {
+		if (nc >= 8) return;
+		float A[3], B[3];
+		if (!at(ja, A) || !at(jb, B)) return;
+		cb.capA[nc][0] = A[0]; cb.capA[nc][1] = A[1]; cb.capA[nc][2] = A[2]; cb.capA[nc][3] = r0;
+		cb.capB[nc][0] = B[0]; cb.capB[nc][1] = B[1]; cb.capB[nc][2] = B[2]; cb.capB[nc][3] = r1;
+		nc++;
+	};
+	const int jNeck = findJ("Neck");
+	const int jChest = jointOr("Chest", md ? md->chestJ : -1);
+	const int jTorso = jChest >= 0 ? jChest : findJ("Torso");
+	const int jHip = jointOr("Hips", md ? md->hipsJ : -1);
+	const int jAb = findJ("Abdomen");
+	const int jHandL = jointOr("Hand.L", md ? md->handL : -1);
+	const int jHandR = jointOr("Hand.R", md ? md->handR : -1);
+	cap(jNeck, headJ, 0.055f, 0.062f);
+	cap(jTorso, jHip >= 0 ? jHip : jAb, 0.105f, 0.100f);
+	cap(findJ("Shoulder.L"), findJ("UpperArm.L"), 0.052f, 0.048f);
+	cap(findJ("Shoulder.R"), findJ("UpperArm.R"), 0.052f, 0.048f);
+	cap(findJ("UpperArm.L"), findJ("LowerArm.L"), 0.046f, 0.040f);
+	cap(findJ("UpperArm.R"), findJ("LowerArm.R"), 0.046f, 0.040f);
+	cap(findJ("LowerArm.L"), jHandL, 0.040f, 0.034f);
+	cap(findJ("LowerArm.R"), jHandR, 0.040f, 0.034f);
+	float body[3] = { pal.m[12], pal.m[13] - 0.18f, pal.m[14] };
+	float tmp[3];
+	if (at(jTorso, tmp)) { body[0] = tmp[0]; body[1] = tmp[1]; body[2] = tmp[2]; }
+	cb.body[0] = body[0]; cb.body[1] = body[1]; cb.body[2] = body[2]; cb.body[3] = 1.f;
+	cb.cnt[0] = (unsigned)m_hairV0[style];
+	cb.cnt[1] = (unsigned)style;
+	cb.cnt[2] = (unsigned)nc;
+	cb.cnt[3] = (unsigned)m_hairVN[style];
+	D3D11_MAPPED_SUBRESOURCE ms;
+	if (FAILED(m_ctx->Map(m_cbHairSim, 0, D3D11_MAP_WRITE_DISCARD, 0, &ms))) return;
+	memcpy(ms.pData, &cb, sizeof(cb));
+	m_ctx->Unmap(m_cbHairSim, 0);
+	ID3D11Buffer* cbs[2] = { m_cbHairSim, m_cbHairCloth };
+	m_ctx->CSSetConstantBuffers(0, 2, cbs);
+	ID3D11ShaderResourceView* sv[2] = { m_hairGuide, m_hairVert };
+	m_ctx->CSSetShaderResources(0, 2, sv);
+	ID3D11UnorderedAccessView* uv[2] = { stU, m_hairUAV };
+	UINT zc[2] = { 0, 0 };
+	m_ctx->CSSetUnorderedAccessViews(0, 2, uv, zc);
+	if (step) {
+		m_ctx->CSSetShader(m_csHair[0], NULL, 0);
+		m_ctx->Dispatch(1, 1, 1);
+	}
+	m_ctx->CSSetShader(m_csHair[1], NULL, 0);
+	m_ctx->Dispatch(((UINT)m_hairVN[style] + 63u) / 64u, 1, 1);
+	ID3D11UnorderedAccessView* nou[2] = { NULL, NULL };
+	ID3D11ShaderResourceView* nos[2] = { NULL, NULL };
+	ID3D11Buffer* nob[2] = { NULL, NULL };
+	m_ctx->CSSetUnorderedAccessViews(0, 2, nou, NULL);
+	m_ctx->CSSetShaderResources(0, 2, nos);
+	m_ctx->CSSetConstantBuffers(0, 2, nob);
+	m_ctx->CSSetShader(NULL, NULL, 0);
+	if (!portrait && hi) {
+		hi->frame = m_frame;
+		if (step) { hi->time = m_time; hi->world = world; hi->valid = 1; }
+	}
 }
 
 void Renderer::LoadHairPack()
@@ -4944,6 +5685,117 @@ void Renderer::LoadHairPack()
 		}
 	}
 	if (!m_hairSrv) { ReleaseHair(); return; }
+	{
+		struct HairGpuG { float p[4]; };
+		struct HairGpuV { unsigned a[4]; float w[4]; float p[4]; };
+		static_assert(sizeof(HairGpuG) == 16 && sizeof(HairGpuV) == 48, "HairGpu");
+		const int HA = HAIR_A, HL = HAIR_L, HG = HAIR_G;
+		Buf<HairGpuG> gd;
+		Buf<HairGpuV> hv;
+		gd.resize(16 * HG);
+		if (gd.size() < 16 * HG) { ReleaseHair(); return; }
+		for (int i = 0; i < gd.size(); i++) { gd[i].p[0] = gd[i].p[1] = gd[i].p[2] = gd[i].p[3] = 0.f; }
+		for (int s = 0; s < 16; s++) { m_hairV0[s] = 0; m_hairVN[s] = 0; }
+		for (int style = 1; style <= 15; style++) {
+			int nSt = 0;
+			float swayMax = 0.f;
+			for (UINT i = 0; i < nv; i++) {
+				const int s = (int)(rec[i * 10 + 9] + 0.5f);
+				if (s != style) continue;
+				nSt++;
+				if (rec[i * 10 + 8] > swayMax) swayMax = rec[i * 10 + 8];
+			}
+			m_hairV0[style] = hv.size();
+			if (nSt < 8 || m_hairCapN[style] < 8) continue;
+			if (swayMax < 1e-4f) swayMax = 1.f;
+			const float cx = m_hairCap[style][0], cy = m_hairCap[style][1], cz = m_hairCap[style][2];
+			float acc[HAIR_G][3];
+			float wgt[HAIR_G];
+			memset(acc, 0, sizeof(acc));
+			memset(wgt, 0, sizeof(wgt));
+			auto binOf = [&](float x, float z, float sway, int* id, float* w) {
+				float u = (atan2f(x - cx, z - cz) + 3.14159265f) * (float)HA / 6.2831853f;
+				if (u < 0.f) u += (float)HA;
+				if (u >= (float)HA) u -= (float)HA;
+				int u0 = (int)u;
+				if (u0 < 0) u0 = 0;
+				if (u0 >= HA) u0 = HA - 1;
+				const float fu = u - (float)u0;
+				const int u1 = (u0 + 1) % HA;
+				float v = Clampf(sway / swayMax, 0.f, 1.f) * (float)(HL - 1);
+				int v0 = (int)v;
+				if (v0 > HL - 2) v0 = HL - 2;
+				if (v0 < 0) v0 = 0;
+				float fv = v - (float)v0;
+				if (sway >= swayMax - 1e-5f) { v0 = HL - 2; fv = 1.f; }
+				id[0] = v0 * HA + u0; id[1] = v0 * HA + u1;
+				id[2] = (v0 + 1) * HA + u0; id[3] = (v0 + 1) * HA + u1;
+				w[0] = (1.f - fu) * (1.f - fv); w[1] = fu * (1.f - fv);
+				w[2] = (1.f - fu) * fv; w[3] = fu * fv;
+			};
+			for (UINT i = 0; i < nv; i++) {
+				if ((int)(rec[i * 10 + 9] + 0.5f) != style) continue;
+				int id[4]; float w[4];
+				binOf(rec[i * 10], rec[i * 10 + 2], rec[i * 10 + 8], id, w);
+				for (int e = 0; e < 4; e++) if (w[e] > 0.f) {
+					wgt[id[e]] += w[e];
+					acc[id[e]][0] += rec[i * 10] * w[e];
+					acc[id[e]][1] += rec[i * 10 + 1] * w[e];
+					acc[id[e]][2] += rec[i * 10 + 2] * w[e];
+				}
+			}
+			for (int pass = 0; pass < 8; pass++) for (int q = 0; q < HG; q++) if (wgt[q] < 1e-5f) {
+				const int ia = q % HA, il = q / HA;
+				const int nbh[4] = { il * HA + (ia + HA - 1) % HA, il * HA + (ia + 1) % HA, il > 0 ? q - HA : -1, il < HL - 1 ? q + HA : -1 };
+				for (int e = 0; e < 4; e++) if (nbh[e] >= 0 && wgt[nbh[e]] > 1e-5f) {
+					wgt[q] = wgt[nbh[e]];
+					acc[q][0] = acc[nbh[e]][0]; acc[q][1] = acc[nbh[e]][1]; acc[q][2] = acc[nbh[e]][2];
+					break;
+				}
+			}
+			for (int q = 0; q < HG; q++) {
+				HairGpuG& g = gd[style * HG + q];
+				if (wgt[q] < 1e-5f) { g.p[0] = cx; g.p[1] = cy; g.p[2] = cz; g.p[3] = 0.f; continue; }
+				g.p[0] = acc[q][0] / wgt[q]; g.p[1] = acc[q][1] / wgt[q]; g.p[2] = acc[q][2] / wgt[q];
+				const float dx = g.p[0] - cx, dy = g.p[1] - cy, dz = g.p[2] - cz;
+				g.p[3] = sqrtf(dx * dx + dy * dy + dz * dz);
+			}
+			for (UINT i = 0; i < nv; i++) {
+				if ((int)(rec[i * 10 + 9] + 0.5f) != style) continue;
+				int id[4]; float w[4];
+				binOf(rec[i * 10], rec[i * 10 + 2], rec[i * 10 + 8], id, w);
+				HairGpuV o;
+				memset(&o, 0, sizeof(o));
+				o.a[0] = i;
+				o.a[1] = (unsigned)id[0] | ((unsigned)id[1] << 16);
+				o.a[2] = (unsigned)id[2] | ((unsigned)id[3] << 16);
+				o.w[0] = w[0]; o.w[1] = w[1]; o.w[2] = w[2]; o.w[3] = w[3];
+				o.p[0] = rec[i * 10]; o.p[1] = rec[i * 10 + 1]; o.p[2] = rec[i * 10 + 2];
+				o.p[3] = Clampf(rec[i * 10 + 8] / swayMax, 0.f, 1.f);
+				hv.push_back(o);
+			}
+			m_hairVN[style] = hv.size() - m_hairV0[style];
+		}
+		auto up = [&](const void* src, UINT cnt, UINT stride, ID3D11Buffer** sb, ID3D11ShaderResourceView** srv) -> BOOL {
+			if (!src || cnt == 0) return FALSE;
+			D3D11_BUFFER_DESC bd = {};
+			bd.ByteWidth = cnt * stride;
+			bd.Usage = D3D11_USAGE_IMMUTABLE;
+			bd.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+			bd.MiscFlags = D3D11_RESOURCE_MISC_BUFFER_STRUCTURED;
+			bd.StructureByteStride = stride;
+			D3D11_SUBRESOURCE_DATA sd = { src, 0, 0 };
+			if (FAILED(m_dev->CreateBuffer(&bd, &sd, sb))) return FALSE;
+			D3D11_SHADER_RESOURCE_VIEW_DESC sv = {};
+			sv.Format = DXGI_FORMAT_UNKNOWN;
+			sv.ViewDimension = D3D11_SRV_DIMENSION_BUFFER;
+			sv.Buffer.NumElements = cnt;
+			if (FAILED(m_dev->CreateShaderResourceView(*sb, &sv, srv))) { TAC_REL(*sb); return FALSE; }
+			return TRUE;
+		};
+		if (!up(gd.data(), (UINT)gd.size(), 16, &m_hairGuideSB, &m_hairGuide)) { ReleaseHair(); return; }
+		if (hv.size() > 0 && !up(hv.data(), (UINT)hv.size(), 48, &m_hairVertSB, &m_hairVert)) { ReleaseHair(); return; }
+	}
 	m_hairNv = nv;
 	LoadPulse(4, 4);
 }
@@ -5025,7 +5877,7 @@ void Renderer::EnsureScalp(int model, int headJ)
 	}
 }
 
-BOOL Renderer::DrawHumanHair(int model, int style, int headJ, const Pose& pose, const M4& world, const DrawParams& dp, int avatar)
+BOOL Renderer::DrawHumanHair(int model, int style, int headJ, const Pose& pose, const M4& world, const DrawParams& dp, int avatar, const void* owner)
 {
 	const BOOL capOnly = style < 1;
 	if (!capOnly && (m_hairNv < 30 || !m_csSkin || !m_hairBind || !m_hairUAV || !m_hairDraw.ib || !m_cbSkinBone || !m_cbSkinParm || !m_cbHairCloth)) return FALSE;
@@ -5109,6 +5961,9 @@ BOOL Renderer::DrawHumanHair(int model, int style, int headJ, const Pose& pose, 
 			slot[14] = hz - rz;
 		}
 	}
+	M4 hairSeg;
+	memcpy(hairSeg.m, slot, sizeof(hairSeg.m));
+	const M4 hairPlace = MMul(hairSeg, pose.palette[headJ]);
 	m_ctx->Unmap(m_cbSkinBone, 0);
 	float cloth[36 + 4 + SKULL_NA * SKULL_NE];
 	memset(cloth, 0, sizeof(cloth));
@@ -5162,6 +6017,8 @@ BOOL Renderer::DrawHumanHair(int model, int style, int headJ, const Pose& pose, 
 	m_ctx->CSSetShaderResources(0, 3, nos);
 	m_ctx->CSSetConstantBuffers(0, 3, nob);
 	m_ctx->CSSetShader(NULL, NULL, 0);
+	if (style >= 1 && style < 16 && m_hairVN[style] > 0 && m_csHair[0] && m_csHair[1] && m_hairGuide && m_hairVert)
+		RunHair(model, style, headJ, pose, world, owner, hairPlace, pose.palette[headJ]);
 	if (m_capDraw.ib && m_capBind.size() >= 3 && headJ < pose.nJ) {
 		const M4& B = pose.palette[headJ];
 		static Buf<VtxS> posed;
@@ -5337,11 +6194,19 @@ void Renderer::BeginFrame()
 		TacAvaReset();
 	}
 	m_frame++;
+	m_fcb.q[0] = (float)m_quality;
+	m_fcb.q[1] = (m_quality == 2) ? 2.6f : ((m_quality == 3) ? 5.2f : 0.f);
+	m_fcb.q[2] = (m_quality == 3) ? 0.055f : 0.f;
+	m_fcb.q[3] = (m_quality == 2) ? 0.55f : ((m_quality == 3) ? 1.f : 0.f);
 	m_ctx->VSSetConstantBuffers(0, 1, &m_cbFrame);
 	m_ctx->PSSetConstantBuffers(0, 1, &m_cbFrame);
+	m_ctx->HSSetConstantBuffers(0, 1, &m_cbFrame);
+	m_ctx->DSSetConstantBuffers(0, 1, &m_cbFrame);
 	ID3D11Buffer* cb[2] = { m_cbObj, m_cbBones };
 	m_ctx->VSSetConstantBuffers(1, 2, cb);
 	m_ctx->PSSetConstantBuffers(1, 1, &m_cbObj);
+	m_ctx->HSSetConstantBuffers(1, 1, &m_cbObj);
+	m_ctx->DSSetConstantBuffers(1, 1, &m_cbObj);
 	ID3D11SamplerState* ss[2] = { m_sLin, m_sCmp };
 	m_ctx->PSSetSamplers(0, 2, ss);
 	m_fcb.screen[0] = (float)m_w; m_fcb.screen[1] = (float)m_h; m_fcb.screen[2] = 1.f / m_w; m_fcb.screen[3] = 1.f / m_h;
@@ -5424,9 +6289,12 @@ void Renderer::BeginMainPass()
 			c1->Release();
 		}
 	} else {
-		m_ctx->OMSetRenderTargets(1, &m_msRtv, m_dsv);
+		BOOL mrt = (m_quality == 2 || m_quality == 3) && m_zRtv && m_zSrv;
+		ID3D11RenderTargetView* rt[2] = { m_msRtv, m_zRtv };
+		m_ctx->OMSetRenderTargets(mrt ? 2 : 1, rt, m_dsv);
 		float cc[4] = { .4f, .55f, .75f, 1 };
 		m_ctx->ClearRenderTargetView(m_msRtv, cc);
+		if (mrt) { float zc[4] = { 1, 1, 1, 1 }; m_ctx->ClearRenderTargetView(m_zRtv, zc); }
 		m_ctx->ClearDepthStencilView(m_dsv, D3D11_CLEAR_DEPTH, 1.f, 0);
 		D3D11_VIEWPORT vp = { 0, 0, (float)m_w, (float)m_h, 0, 1 };
 		m_ctx->RSSetViewports(1, &vp);
@@ -5459,11 +6327,28 @@ void Renderer::SetObj(const M4& world, const DrawParams& dp, float outlineW)
 	if (SUCCEEDED(m_ctx->Map(m_cbObj, 0, D3D11_MAP_WRITE_DISCARD, 0, &ms))) { memcpy(ms.pData, &o, sizeof(o)); m_ctx->Unmap(m_cbObj, 0); }
 }
 
+void Renderer::ClearTess()
+{
+	if (!m_ctx) return;
+	m_ctx->HSSetShader(NULL, NULL, 0);
+	m_ctx->DSSetShader(NULL, NULL, 0);
+}
+
 void Renderer::BindForPass(BOOL skinned, BOOL outline)
 {
+	BOOL tess = m_allowTess && !skinned && !outline && !m_inPortrait
+		&& (m_quality == 2 || m_quality == 3) && m_vsT && m_hsT && m_dsT;
 	m_ctx->IASetInputLayout(skinned ? m_ilK : m_ilS);
-	m_ctx->VSSetShader(skinned ? m_vsK : m_vsS, NULL, 0);
-	m_ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+	if (tess) {
+		m_ctx->VSSetShader(m_vsT, NULL, 0);
+		m_ctx->HSSetShader(m_hsT, NULL, 0);
+		m_ctx->DSSetShader(m_dsT, NULL, 0);
+		m_ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_3_CONTROL_POINT_PATCHLIST);
+	} else {
+		ClearTess();
+		m_ctx->VSSetShader(skinned ? m_vsK : m_vsS, NULL, 0);
+		m_ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+	}
 	if (m_pass == PASS_SHADOW) {
 		m_ctx->PSSetShader(NULL, NULL, 0);
 		return;
@@ -5488,6 +6373,7 @@ static void ProjectSun(const M4& vp, V3 eye, const float* light, float& u, float
 
 void Renderer::DrawSky(DWORD top, DWORD bottom, int lines, DWORD lineColor)
 {
+	ClearTess();
 	DrawParams dp;
 	dp.tint = top;
 	dp.mode = (float)lines;
@@ -5524,6 +6410,7 @@ void Renderer::DrawStaticVerts(const GpuMesh& m, const VtxS* v, UINT nv, const M
 void Renderer::DrawStatic(const GpuMesh& m, const M4& world, const DrawParams& dp)
 {
 	if (!m.vb || !m.ib) return;
+	m_allowTess = !(dp.outline > 0.f);
 	UINT st = m.stride, off = 0;
 	m_ctx->IASetVertexBuffers(0, 1, &m.vb, &st, &off);
 	m_ctx->IASetIndexBuffer(m.ib, m.i32 ? DXGI_FORMAT_R32_UINT : DXGI_FORMAT_R16_UINT, 0);
@@ -5630,6 +6517,7 @@ void Renderer::DrawWater()
 
 void Renderer::DrawOverlayQuads(const VtxS* q, int n, int cursorStyle)
 {
+	ClearTess();
 	if (!q || n <= 0 || m_pass == PASS_SHADOW) return;
 	size_t bytes = (size_t)n * sizeof(VtxS);
 	if (bytes > m_vbDynBytes) return;
@@ -5656,6 +6544,7 @@ void Renderer::DrawOverlayQuads(const VtxS* q, int n, int cursorStyle)
 
 void Renderer::DrawRibbon(const Buf<VtxP>& v)
 {
+	ClearTess();
 	if (v.empty() || m_pass == PASS_SHADOW) return;
 	size_t bytes = v.size() * sizeof(VtxP);
 	if (bytes > m_vbDynBytes) return;
@@ -5679,6 +6568,7 @@ void Renderer::DrawRibbon(const Buf<VtxP>& v)
 
 void Renderer::DrawParticles(const Particle* ps, int nPart)
 {
+	ClearTess();
 	if (!ps || nPart <= 0 || m_pass == PASS_SHADOW) return;
 	V3 right = Norm(v3(m_view.m[0], m_view.m[4], m_view.m[8]));
 	V3 up = Norm(v3(m_view.m[1], m_view.m[5], m_view.m[9]));
@@ -6138,7 +7028,9 @@ BOOL Renderer::BeginPortrait(int slot)
 void Renderer::EndPortrait()
 {
 	m_inPortrait = FALSE;
-	m_ctx->OMSetRenderTargets(1, &m_msRtv, m_dsv);
+	BOOL mrt = (m_quality == 2 || m_quality == 3) && m_zRtv && m_zSrv;
+	ID3D11RenderTargetView* rt[2] = { m_msRtv, m_zRtv };
+	m_ctx->OMSetRenderTargets(mrt ? 2 : 1, rt, m_dsv);
 	D3D11_VIEWPORT vp = { 0, 0, (float)m_w, (float)m_h, 0, 1 };
 	m_ctx->RSSetViewports(1, &vp);
 	m_fcb.screen[0] = (float)m_w; m_fcb.screen[1] = (float)m_h;
@@ -6147,6 +7039,7 @@ void Renderer::EndPortrait()
 // ============================================================ HUD
 BOOL Renderer::ApplyPost()
 {
+	ClearTess();
 	if (m_inPortrait || !m_psBloom || !m_psBlur || !m_psGrade || !m_sceneTex || !m_blA || !m_blB || !m_bb) return FALSE;
 	ID3D11RenderTargetView* nullRT = NULL;
 	m_ctx->OMSetRenderTargets(0, &nullRT, NULL);
@@ -6176,21 +7069,38 @@ BOOL Renderer::ApplyPost()
 		m_ctx->PSSetSamplers(0, 1, &m_sClamp);
 		m_ctx->Draw(3, 0);
 	};
-	DrawParams ex;
-	ex.mode = 0.72f;
-	fs(m_psBloom, m_sceneSrv, NULL, m_blARtv, m_blW, m_blH, ex, 0);
-	for (int pass = 0; pass < 2; pass++) {
-		float rad = pass ? 2.2f : 1.f;
-		DrawParams bh; bh.mode = 0; bh.emissive = 1.f / m_blW; bh.hue = rad;
-		fs(m_psBlur, m_blASrv, NULL, m_blBRtv, m_blW, m_blH, bh, 1.f);
-		DrawParams bv; bv.mode = 1.f; bv.emissive = 1.f / m_blH; bv.hue = rad;
-		fs(m_psBlur, m_blBSrv, NULL, m_blARtv, m_blW, m_blH, bv, 0);
+	ID3D11ShaderResourceView* src = m_sceneSrv;
+	if ((m_quality == 2 || m_quality == 3) && m_dofSrv && m_zSrv && ((m_quality == 3) ? m_psDofU : m_psDofH)) {
+		if (m_msaa > 1 && m_zTex && m_zRes)
+			m_ctx->ResolveSubresource(m_zRes, 0, m_zTex, 0, DXGI_FORMAT_R16_FLOAT);
+		DrawParams df;
+		df.emissive = (m_quality == 3) ? 14.f : 6.f;
+		df.hue = 0.16f;
+		fs((m_quality == 3) ? m_psDofU : m_psDofH, m_sceneSrv, m_zSrv, m_dofRtv, m_w, m_h, df, 0);
+		src = m_dofSrv;
+	}
+	int nblur = (m_quality == 4) ? 0 : ((m_quality == 3) ? 3 : 2);
+	if (nblur > 0) {
+		DrawParams ex;
+		ex.mode = 0.72f;
+		fs(m_psBloom, m_sceneSrv, NULL, m_blARtv, m_blW, m_blH, ex, 0);
+		for (int pass = 0; pass < nblur; pass++) {
+			float rad = pass ? 2.2f : 1.f;
+			DrawParams bh; bh.mode = 0; bh.emissive = 1.f / m_blW; bh.hue = rad;
+			fs(m_psBlur, m_blASrv, NULL, m_blBRtv, m_blW, m_blH, bh, 1.f);
+			DrawParams bv; bv.mode = 1.f; bv.emissive = 1.f / m_blH; bv.hue = rad;
+			fs(m_psBlur, m_blBSrv, NULL, m_blARtv, m_blW, m_blH, bv, 0);
+		}
+	} else if (m_blARtv) {
+		float zc[4] = { 0, 0, 0, 0 };
+		m_ctx->ClearRenderTargetView(m_blARtv, zc);
 	}
 	float su, sv, svis;
 	ProjectSun(m_vp, m_eye, m_fcb.light, su, sv, svis);
 	DrawParams gr;
 	gr.mode = 0.62f; gr.emissive = su; gr.hue = sv; gr.rim = 1.f; gr.sway = svis;
-	fs(m_psGrade, m_sceneSrv, m_blASrv, m_bbRtv, m_w, m_h, gr, 0);
+	ID3D11PixelShader* grade = (m_quality == 4 && m_psGradeTiny) ? m_psGradeTiny : m_psGrade;
+	fs(grade, src, m_blASrv, m_bbRtv, m_w, m_h, gr, 0);
 	m_ctx->PSSetShaderResources(0, 2, unb);
 	ID3D11SamplerState* ss[2] = { m_sLin, m_sCmp };
 	m_ctx->PSSetSamplers(0, 2, ss);
@@ -6199,6 +7109,7 @@ BOOL Renderer::ApplyPost()
 
 void Renderer::BeginHud()
 {
+	ClearTess();
 	if (!ApplyPost() && m_msaa > 1 && m_msTex && m_bb)
 		m_ctx->ResolveSubresource(m_bb, 0, m_msTex, 0, DXGI_FORMAT_B8G8R8A8_UNORM);
 	m_ctx->OMSetRenderTargets(1, &m_bbRtv, NULL);
@@ -6212,6 +7123,7 @@ void Renderer::BeginHud()
 
 void Renderer::FlushHud()
 {
+	ClearTess();
 	if (m_hud.empty()) return;
 	m_ctx->IASetInputLayout(m_ilH);
 	m_ctx->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
@@ -6273,6 +7185,7 @@ void Renderer::HudPanel(float x, float y, float w, float h, DWORD fill, DWORD bo
 
 void Renderer::HudGlass(float x, float y, float w, float h, DWORD fill, DWORD border, float alpha)
 {
+	ClearTess();
 	if (!m_psUi || !m_vbHud || w < 4.f || h < 4.f) {
 		HudRectGrad(x + 2, y + 2, w - 4, h - 4, MulA(Shade(fill, 1.12f), alpha), MulA(Shade(fill, .82f), alpha));
 		DWORD b = MulA(border, alpha);

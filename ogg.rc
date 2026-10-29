@@ -353,11 +353,31 @@ IDR_CSO_TAC_CSCLTHR     RCDATA                  "res\\cso\\tac_csclthr.cso"
 
 IDR_CSO_TAC_CSCLTHW     RCDATA                  "res\\cso\\tac_csclthw.cso"
 
+IDR_CSO_TAC_CSSOFT      RCDATA                  "res\\cso\\tac_cssoft.cso"
+
+IDR_CSO_TAC_CSSOFTW     RCDATA                  "res\\cso\\tac_cssoftw.cso"
+
+IDR_CSO_TAC_CSHAIR      RCDATA                  "res\\cso\\tac_cshair.cso"
+
+IDR_CSO_TAC_CSHAIRW     RCDATA                  "res\\cso\\tac_cshairw.cso"
+
 IDR_CSO_TAC_PSBLOOM     RCDATA                  "res\\cso\\tac_psbloom.cso"
 
 IDR_CSO_TAC_PSBLUR      RCDATA                  "res\\cso\\tac_psblur.cso"
 
 IDR_CSO_TAC_PSGRADE     RCDATA                  "res\\cso\\tac_psgrade.cso"
+
+IDR_CSO_TAC_PSGRTINY    RCDATA                  "res\\cso\\tac_psgrtiny.cso"
+
+IDR_CSO_TAC_VST         RCDATA                  "res\\cso\\tac_vst.cso"
+
+IDR_CSO_TAC_HST         RCDATA                  "res\\cso\\tac_hst.cso"
+
+IDR_CSO_TAC_DST         RCDATA                  "res\\cso\\tac_dst.cso"
+
+IDR_CSO_TAC_PSDOFH      RCDATA                  "res\\cso\\tac_psdofh.cso"
+
+IDR_CSO_TAC_PSDOFU      RCDATA                  "res\\cso\\tac_psdofu.cso"
 
 IDR_CSO_TAC_PSUI        RCDATA                  "res\\cso\\tac_psui.cso"
 
@@ -204064,7 +204084,7 @@ END
 //
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 0,9,1,1602
+ FILEVERSION 0,9,1,1603
  PRODUCTVERSION 1,0,0,1
  FILEFLAGSMASK 0x3fL
 #ifdef _DEBUG
@@ -204082,8 +204102,8 @@ BEGIN
         BEGIN
             VALUE "Comments", "Falcom BGM Player & Media Player raira"
             VALUE "CompanyName", "Pre Prayer Power Soft"
-            VALUE "FileDescription", "Falcom BGM Player & Media Player Ver 0.9a Rel.2026.10.29 v1602"
-            VALUE "FileVersion", "0.9.1.1602"
+            VALUE "FileDescription", "Falcom BGM Player & Media Player Ver 0.9a Rel.2026.10.29 v1603"
+            VALUE "FileVersion", "0.9.1.1603"
             VALUE "InternalName", "ogg YS/ED bgm"
             VALUE "LegalCopyright", "Copyright (C) 2026.10.29"
             VALUE "LegalTrademarks", "Pre Prayer Power Soft"

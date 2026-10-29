@@ -447,6 +447,7 @@ bool EvoPartnerEligible(const CharData& main, const CharData& p);
 int EvoPartnersNeeded(const CharData& main);
 bool EvoGroupSatisfied(int needGroup, const CharData* partners, int n);
 void EvoApply(CharData& main, int target, const CharData* partners, int n);
+void EvoBrief(int cls, wchar_t* out, int cap);     // 進化先の説明。役割が分かる3行
 
 // ---------------- 敵 ----------------
 enum MonsterId {
@@ -668,6 +669,27 @@ void ConfusePlan(const Battle& b, int ui, AiPlan& p, Rng& r);
 
 // ---------------- セーブ ----------------
 #pragma pack(push, 4)
+// 画質の並び。保存値は 0軽量 1標準 2高 3超綺麗 4超軽量。画面では超軽量から超綺麗へ回す。
+inline int TacQualitySlot(int q)
+{
+	static const int ord[5] = { 4, 0, 1, 2, 3 };
+	for (int i = 0; i < 5; ++i) if (ord[i] == q) return i;
+	return 2;
+}
+inline int TacQualityAt(int slot)
+{
+	static const int ord[5] = { 4, 0, 1, 2, 3 };
+	if (slot < 0) slot += 5;
+	if (slot >= 5) slot %= 5;
+	return ord[slot];
+}
+inline int TacQualityTx(int q)
+{
+	static const int tx[5] = { TX_SET_Q_LOW, TX_SET_Q_STD, TX_SET_Q_HIGH, TX_SET_Q_ULTRA, TX_SET_Q_TINY };
+	if (q < 0 || q > 4) q = 1;
+	return tx[q];
+}
+
 struct SaveData {
 	DWORD magic;
 	int version;
@@ -677,7 +699,7 @@ struct SaveData {
 	int stageSel;
 	int winX, winY, winW, winH;
 	int camSpeed;
-	int quality;               // 0=軽量 1=標準 2=高
+	int quality;               // 0=軽量 1=標準 2=高 3=超綺麗 4=超軽量
 	int showGrid;              // bit0=グリッド bit1=敵の脅威範囲
 	int battleAnim;            // 0=フル 1=短縮
 	DWORD uidNext;
