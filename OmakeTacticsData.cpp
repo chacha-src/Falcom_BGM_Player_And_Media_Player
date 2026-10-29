@@ -223,7 +223,7 @@ V3 MXformDir(const M4& a, V3 d)
 
 // ============================================================ 地形・テーマ
 static const TerrainDef kTerrain[T_COUNT] = {
-	// costFoot は平地=2。道=1、森・丘=3、沼=4、水辺=6。溶岩は歩けるが、手番開始時に最大HPの12%。飛行は EnterCost で地形を無視し、溶岩でも傷まない。
+	// costFoot は平地=2。道=1、森・丘=3、沼=4、水辺=6。溶岩は歩けるが、手番を終えた地点で最大HPの12%。飛行は EnterCost で地形を無視し、溶岩でも傷まない。
 	{ TX_TER_PLAIN,    2, 1, 0, 0 },
 	{ TX_TER_FOREST,   3, 1, 10, 20 },
 	{ TX_TER_HILL,     3, 1, 15, 10 },

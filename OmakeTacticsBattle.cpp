@@ -704,15 +704,9 @@ void Game::BeginTurn()
 	Unit& u = m_b.u[ui];
 	int heal = 0, poison = 0;
 	TurnStartEffects(m_b, ui, &heal, &poison);
-	int lava = LavaHurt(m_b, ui);
 	V3 hp = v3(u.px, u.py + m_act[ui].height + .2f, u.pz);
 	wchar_t s[48];
 	if (heal > 0) { swprintf_s(s, L"+%s", TacNum(heal)); AddPopup(hp, s, RGBA8(120, 255, 140), 0); TacSfx(TS_HEAL); }
-	if (lava > 0) {
-		swprintf_s(s, L"-%s %s", TacNum(lava), TT(TX_TER_LAVA));
-		AddPopup(hp, s, RGBA8(255, 120, 40), 1);
-		TacSfx(u.hp > 0 ? TS_HURT : TS_FALL);
-	}
 	if (poison > 0) {
 		swprintf_s(s, L"-%s %s", TacNum(poison), TT(TX_BT_POISON));
 		AddPopup(hp, s, RGBA8(190, 120, 255), 1);
@@ -835,6 +829,25 @@ void Game::ConfuseSelf(int ui)
 
 void Game::FinishUnitTurn(int acted)
 {
+	// 溶岩は移動し終えて手番を閉じた位置で焼く。味方にも敵にも同じ。
+	if (m_cur >= 0 && m_cur < m_b.nUnits && m_b.u[m_cur].alive && m_b.u[m_cur].hp > 0) {
+		int ui = m_cur;
+		Unit& u = m_b.u[ui];
+		int lava = LavaHurt(m_b, ui);
+		if (lava > 0) {
+			V3 hp = v3(u.px, u.py + m_act[ui].height + .2f, u.pz);
+			wchar_t s[48];
+			swprintf_s(s, L"-%s %s", TacNum(lava), TT(TX_TER_LAVA));
+			AddPopup(hp, s, RGBA8(255, 120, 40), 1);
+			m_dispHp[ui] = (float)u.hp;
+			if (!u.alive || u.hp <= 0) {
+				u.hp = 0; u.alive = 0; u.killed = 1;
+				ActorPlay(m_act[ui], CL_DEATH, 0, .08f);
+				m_dieT[ui] = 0;
+				TacSfx(TS_FALL);
+			} else TacSfx(TS_HURT);
+		}
+	}
 	if (m_cur >= 0) FinishAction(m_b, m_cur, m_moved, acted);
 	m_turnOpen = FALSE;
 	if (CheckBattleOver()) return;
