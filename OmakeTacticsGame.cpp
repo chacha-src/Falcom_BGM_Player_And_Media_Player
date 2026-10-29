@@ -3054,7 +3054,10 @@ void Game::DrawShop()
 		}
 		listTop += U(28);
 	}
-	float listBot = y + h - U(56);
+	// 下のボタン列のすぐ上に説明枠を取る。一覧はそこまでで止める。
+	const float descH = U(58);
+	const float descY = y + h - U(48) - U(8) - descH;
+	float listBot = descY - U(6);
 	int per = (int)((listBot - listTop) / rowStep);
 	if (per > 30) per = 30;
 	if (per < 3) per = 3;
@@ -3385,8 +3388,12 @@ void Game::DrawShop()
 		m_r.HudText(spg, x + w * .66f + U(70), sy + U(14), U(13), RGBA8(230, 230, 236), 0, 1);
 		if (Btn(ID_SHOP_SELL0 + 9, x + w * .66f + U(110), sy, U(36), U(28), L"▶")) m_shopSellPage = (m_shopSellPage + 1) % spages;
 	}
-	if (hov && hov[0])
-		m_r.HudTextBox(hov, x + U(16), y + h - U(112), w * .6f, U(56), U(13), RGBA8(210, 220, 235));
+	if (hov && hov[0]) {
+		float dx = x + U(12);
+		float dw = x + w * .66f - dx - U(10);
+		m_r.HudGlass(dx, descY, dw, descH, RGBA8(14, 18, 34, 216), RGBA8(196, 168, 108, 210), 1.f);
+		m_r.HudTextBox(hov, dx + U(10), descY + U(6), dw - U(20), descH - U(12), U(13), RGBA8(232, 236, 244));
+	}
 	if (m_shopKind == 3) {
 		int tmp[512];
 		int piles = TrophyList(tmp, 512);
