@@ -602,12 +602,13 @@ void Game::Tick(float dt)
 
 static_assert(TAC_BGM_FALLS - TAC_BGM_PLAINS + 1 == TH_COUNT, "地形BGM");
 // 拠点=tactics.ogg。戦闘は地形ごとの tacticsgame*.ogg、無ければ tacticsgame.ogg。
-// 勝利目前は二つのときだけ。距離も匹数も見ない。
-// 敵全体の残りHPが、その最大HP合計の1/4以下。倒した敵の最大HPも分母に残す。
-// または生存しているボスのHPが最大の40%以下。
-// 一度入ったら bgmWin を立て、その戦闘では通常曲へ戻さない。スタンピードで敵が増えても戻さない。
+// 勝利目前は二つのときだけ。距離も匹数も見ない。毎フレーム組み直す。
+// 掃討は索敵の外も全員。最大HPも残りHPも数える。倒した敵の最大HPは分母に残す。
+// ボス戦は、索敵済みに加え、今いる地点からボスまでの途上と、ボスから8マス以内の未起動も入れる。
+// 生存ボスのHPが最大の半分を超えていれば通常曲。半分以下で勝利目前。雑魚の有無は見ない。
+// ボスがいないときだけ、対象の残りHPが最大HP合計の1/4以下で勝利目前。
 // 敗北寸前曲は毎フレーム見る。味方の残りHPが最大の33%未満、または死者が人数の半数以上。
-// その条件を外れたら、勝利目前に入っていればそちら、まだなら地形曲。危険曲はラッチしない。
+// その条件を外れたら、勝利目前ならそちら、まだなら地形曲。危険曲はラッチしない。
 // 勝利確定とリザルトは tacticsgameclear。店=tacticsshop、作成・編成・進化=tacticsmake。テンポは変えない。
 void Game::SyncBgm()
 {
@@ -624,15 +625,40 @@ void Game::SyncBgm()
 		int all = 0;
 		int hp = 0, mx = 0, partyN = 0, deadN = 0;
 		long long eHp = 0, eMx = 0;
-		int bossLow = 0;
+		int bossAlive = 0, bossLow = 0;
+		int bossX = -1, bossZ = -1;
+		for (int i = 0; i < m_b.nUnits; i++) {
+			const Unit& u = m_b.u[i];
+			if (u.team == TEAM_ENEMY && u.boss && u.alive && u.hp > 0) { bossX = u.x; bossZ = u.z; break; }
+		}
+		int hereX = 0, hereZ = 0, hereD = 9999;
+		if (bossX >= 0) {
+			for (int i = 0; i < m_b.nUnits; i++) {
+				const Unit& u = m_b.u[i];
+				if (u.team != TEAM_PLAYER || !u.alive || u.hp <= 0) continue;
+				int d = Dist(u.x, u.z, bossX, bossZ);
+				if (d < hereD) { hereD = d; hereX = u.x; hereZ = u.z; }
+			}
+		}
 		for (int i = 0; i < m_b.nUnits; i++) {
 			const Unit& u = m_b.u[i];
 			if (u.team == TEAM_ENEMY) {
 				all++;
 				int em = max(1, u.ch.stat[S_HP]);
+				if (u.boss && u.alive && u.hp > 0) {
+					bossAlive = 1;
+					if ((long long)u.hp * 2 <= (long long)em) bossLow = 1;
+				}
+				int inPool = m_b.sweep || u.alert != 0;
+				if (!inPool && bossX >= 0) {
+					int dBoss = Dist(u.x, u.z, bossX, bossZ);
+					// ボスの周囲と、今いる地点からボスまでの途上は起き上がる想定。
+					if (dBoss <= 8) inPool = 1;
+					else if (hereD < 9999 && Dist(hereX, hereZ, u.x, u.z) + dBoss <= hereD + 8) inPool = 1;
+				}
+				if (!inPool) continue;
 				eMx += em;
 				if (u.alive && u.hp > 0) eHp += u.hp;
-				if (u.boss && u.alive && u.hp > 0 && (long long)u.hp * 5 <= (long long)em * 2) bossLow = 1;
 			}
 			if (u.team != TEAM_PLAYER) continue;
 			partyN++;
@@ -641,7 +667,12 @@ void Game::SyncBgm()
 			else deadN++;
 		}
 		const int fightWon = (m_victory == 1) || (m_screen == SC_RESULT) || (m_bossDown && players > 0) || (alive == 0 && all > 0 && players > 0);
-		if (m_screen == SC_BATTLE && !fightWon && (bossLow || (eMx > 0 && eHp * 4 <= eMx))) m_b.bgmWin = 1;
+		int nearWin = 0;
+		if (m_screen == SC_BATTLE && !fightWon) {
+			if (bossAlive) nearWin = bossLow;
+			else nearWin = (eMx > 0 && eHp * 4 <= eMx) ? 1 : 0;
+		}
+		m_b.bgmWin = nearWin;
 		const int lowHp = mx > 0 && (long long)hp * 100 < (long long)mx * 33;
 		const int halfDown = partyN > 0 && deadN * 2 >= partyN;
 		if (fightWon || players <= 0 || m_phase == PH_OVER) danger = 0;
@@ -809,7 +840,7 @@ void Game::OnMouseMove(int x, int y)
 			m_camYaw = m_camYawGoal;
 			m_camPitch = Clampf(m_camPitch + dy * .004f, .45f, 1.35f);
 		}
-		if ((m_mDown && m_screen != SC_CREATE) || (scout && m_dragDist > 6)) {
+		if ((m_mDown && m_screen != SC_CREATE && m_dragDist > 6) || (scout && m_dragDist > 6)) {
 			m_dragPan = TRUE;
 			float s = m_camDist * .0022f;
 			V3 right = v3(-cosf(m_camYaw), 0, sinf(m_camYaw));
@@ -857,7 +888,17 @@ void Game::OnMouseUp(int btn, int x, int y)
 		if (!m_dragRot) { m_rclick = TRUE; NavBack(); }
 		m_dragRot = FALSE;
 	}
-	if (btn == 2) { m_mDown = FALSE; m_dragPan = FALSE; m_previewPanDrag = FALSE; }
+	if (btn == 2) {
+		BOOL tap = m_mDown && m_dragDist <= 6.f;
+		m_mDown = FALSE; m_dragPan = FALSE; m_previewPanDrag = FALSE;
+		BOOL battleMap = m_screen == SC_BATTLE && !m_showHelp
+			&& (m_phase == PH_P_MOVE || m_phase == PH_P_TARGET || m_phase == PH_P_SKILLTARGET || m_phase == PH_P_SHOVE);
+		if (tap && battleMap) {
+			BOOL overUi = FALSE;
+			for (auto& b : m_btnsPrev) if (x >= b.x && y >= b.y && x < b.x + b.w && y < b.y + b.h) overUi = TRUE;
+			if (!overUi) CycleLayer(1);
+		}
+	}
 }
 
 void Game::ApplyZoomHold(float dt)
@@ -1001,6 +1042,7 @@ void Game::OnKey(int vk, BOOL down)
 	case VK_PRIOR: case VK_ADD: case VK_OEM_PLUS: ZoomCam(.88f); break;
 	case VK_NEXT: case VK_SUBTRACT: case VK_OEM_MINUS: ZoomCam(1.14f); break;
 	case 'R': m_camPan = v3(0, 0, 0); break;
+	case 'C': if (battleMap) CycleLayer(m_keyShift ? -1 : 1); break;
 	case VK_TAB:
 		if (m_screen == SC_BATTLE && m_b.nUnits > 0) {
 			int start = m_hoverUnit >= 0 ? m_hoverUnit : m_cur;
@@ -2059,6 +2101,7 @@ void Game::DrawShowcase3D()
 	}
 	m_r.SetAmbient(e.ambSky, e.ambGnd, e.amb, e.hard);
 	m_r.SetLight(e.light, c, 18.f);
+	m_r.SetFadeAbove(-1);
 	m_r.BeginShadowPass();
 	m_r.DrawTerrain();
 	DrawParams dp;
@@ -2379,6 +2422,7 @@ void Game::DrawMonStage()
 	m_r.SetFog(dist * 1.6f, dist * 5.5f, .3f, e.fog);
 	m_r.SetAmbient(e.ambSky, e.ambGnd, e.amb, e.hard);
 	m_r.SetLight(e.light, c, 18.f);
+	m_r.SetFadeAbove(-1);
 	m_r.BeginShadowPass();
 	m_r.DrawTerrain();
 	DrawParams dp;
@@ -4183,6 +4227,18 @@ void Game::DrawBaseUi()
 				m_r.HudText(line, col, sy, U(12), RGBA8(220, 224, 236), 0, 0);
 			}
 	}
+	{
+		float ms = min(U(200), 210.f);
+		float mx = (float)m_w - ms - U(16);
+		float my = U(16);
+		float cardsBottom = cy + rows * (chh + gap);
+		if (mx < cx0 + total + U(8)) {
+			my = cardsBottom + U(8);
+			float themeTop = (float)m_h - U(38) - U(16) - U(52);
+			if (my + ms > themeTop) ms = max(72.f, themeTop - my);
+		}
+		if (ms >= 72.f) DrawShowMinimap(mx, my, ms);
+	}
 	if (!m_sortieAsk) {
 		float bw2 = min(U(220), max(120.f, (float)m_w * .2f));
 		float bh2 = U(38);
@@ -5140,14 +5196,19 @@ void Game::DrawPartyUi()
 		swprintf_s(gl, L"%s2: %s", SummonWord(), EquippedSummonName(c, 1));
 		if (Btn(ID_PT_SUM1, c1, gearRow(5), w1, gearH, gl, TRUE, FALSE, U(11))) { m_eqPick = 12; m_eqPage = 0; m_focusId = ID_EQ_NONE; }
 	}
-	if (!m_confirmDelete && Btn(ID_PT_EVO, dx + U(10), evoY, dw - U(20), evoH, TT(TX_BASE_EVOLVE), TRUE, FALSE, U(13))) {
+	wchar_t evLab[80];
+	const wchar_t* evTxt = TT(TX_BASE_EVOLVE);
+	if (EvoTrialOpen(c)) {
+		swprintf_s(evLab, L"%s Lv%d", TT(TX_EV_TRIAL), c.trialLv + 3);
+		evTxt = evLab;
+	}
+	if (!m_confirmDelete && Btn(ID_PT_EVO, dx + U(10), evoY, dw - U(20), evoH, evTxt, TRUE, FALSE, U(13))) {
 		m_evFromParty = 1;
 		int sel = m_partySel;
 		EnterEvolve();
 		m_evJump = 1;
-		if (sel >= 0 && m_save.roster[sel].used && EvoMainEligible(m_save.roster[sel])) {
-			EvoOption opt[4];
-			if (EvoOptions(m_save.roster[sel].cls, opt) > 0) { m_evMain = sel; m_evPick = 1; }
+		if (sel >= 0 && m_save.roster[sel].used && (EvoMainEligible(m_save.roster[sel]) || EvoTrialOpen(m_save.roster[sel]))) {
+			m_evMain = sel; m_evPick = 1;
 		}
 		return;
 	}
@@ -5195,7 +5256,14 @@ void Game::DoEvolve()
 	if (n < need) return;
 	int fromCls = mc.cls;
 	int roster = m_evMain;
-	EvoApply(mc, m_evTarget, ps, n);
+	if (EvoTrialOpen(mc)) {
+		EvoOption allow[4];
+		int na = EvoOptions(mc.trialFrom, allow);
+		bool ok = m_evTarget == mc.trialFrom;
+		for (int k = 0; k < na; k++) if (allow[k].target == m_evTarget) ok = true;
+		if (!ok || m_evTarget == mc.cls) return;
+		EvoRetrain(mc, m_evTarget);
+	} else EvoApply(mc, m_evTarget, ps, n);
 	m_evoCut = 1;
 	m_evoT = 0;
 	m_evoRoster = roster;
@@ -5290,7 +5358,7 @@ void Game::DrawEvolveUi()
 	float rowH = U(52);
 	if (m_evMain >= 0) {
 		const CharData& held = m_save.roster[m_evMain];
-		if (!held.used || !EvoMainEligible(held)) {
+		if (!held.used || (!EvoMainEligible(held) && !EvoTrialOpen(held))) {
 			m_evMain = -1;
 			m_evTarget = -1;
 			m_evPartner[0] = m_evPartner[1] = -1;
@@ -5303,9 +5371,11 @@ void Game::DrawEvolveUi()
 	int nElig = 0;
 	for (int i = 0; i < MAX_ROSTER; i++) {
 		const CharData& c = m_save.roster[i];
-		if (!c.used || !EvoMainEligible(c)) continue;
-		EvoOption opt[4];
-		if (EvoOptions(c.cls, opt) == 0) continue;
+		if (!c.used || (!EvoMainEligible(c) && !EvoTrialOpen(c))) continue;
+		if (!EvoTrialOpen(c)) {
+			EvoOption opt[4];
+			if (EvoOptions(c.cls, opt) == 0) continue;
+		}
 		mains[nElig++] = i;
 	}
 	float listTop = top + U(24);
@@ -5353,12 +5423,24 @@ void Game::DrawEvolveUi()
 	// 2列目: 進化先
 	if (m_evMain >= 0) {
 		const CharData& mc = m_save.roster[m_evMain];
-		m_r.HudText(TT(TX_EV_TARGET), c1, top + U(8), U(16), RGBA8(255, 226, 150), 0, 1);
+		BOOL trial = EvoTrialOpen(mc);
+		wchar_t head[96];
+		if (trial) swprintf_s(head, L"%s  Lv%d", TT(TX_EV_TRIAL), mc.trialLv + 3);
+		else wcscpy_s(head, TT(TX_EV_TARGET));
+		m_r.HudText(head, c1, top + U(8), U(16), RGBA8(255, 226, 150), 0, 1);
+		int tgt[5];
+		int nt = 0;
+		int revert = -1;
 		EvoOption opt[4];
-		int no = EvoOptions(mc.cls, opt);
+		int no = EvoOptions(trial ? mc.trialFrom : mc.cls, opt);
+		for (int k = 0; k < no && nt < 4; k++) {
+			if (trial && opt[k].target == mc.cls) continue;
+			tgt[nt++] = opt[k].target;
+		}
+		if (trial && mc.trialFrom != mc.cls) revert = mc.trialFrom;
 		if (m_evTarget >= 0) {
-			BOOL still = FALSE;
-			for (int k = 0; k < no; k++) if (opt[k].target == m_evTarget) still = TRUE;
+			BOOL still = m_evTarget == revert;
+			for (int k = 0; k < nt; k++) if (tgt[k] == m_evTarget) still = TRUE;
 			if (!still) {
 				m_evTarget = -1;
 				m_evPartner[0] = m_evPartner[1] = -1;
@@ -5367,19 +5449,27 @@ void Game::DrawEvolveUi()
 		}
 		int need = EvoPartnersNeeded(mc);
 		float ty = top + U(24);
-		for (int k = 0; k < no; k++) {
+		for (int k = 0; k < nt; k++) {
 			static const int gtx[G_COUNT] = { TX_G_MELEE, TX_G_SWIFT, TX_G_MAGIC, TX_G_HOLY };
 			wchar_t l[128];
-			swprintf_s(l, L"%s", ClassName(opt[k].target));
-			if (Btn(ID_EV_TGT0 + k, c1, ty, colW, rowH - U(6), l, TRUE, m_evTarget == opt[k].target, U(16))) {
-				m_evTarget = opt[k].target; m_evPartner[0] = m_evPartner[1] = -1; m_evPick = 2;
+			swprintf_s(l, L"%s", ClassName(tgt[k]));
+			if (Btn(ID_EV_TGT0 + k, c1, ty, colW, rowH - U(6), l, TRUE, m_evTarget == tgt[k], U(16))) {
+				m_evTarget = tgt[k]; m_evPartner[0] = m_evPartner[1] = -1; m_evPick = 2;
 			}
-			if (need > 0) {
+			if (need > 0 && !trial) {
 				wchar_t g[96];
-				swprintf_s(g, L"%s: %s", TT(TX_EV_NEED_GROUP), opt[k].needGroup < 0 ? TT(TX_EV_ANY) : TT(gtx[opt[k].needGroup]));
+				int ng = -1;
+				for (int t = 0; t < no; t++) if (opt[t].target == tgt[k]) ng = opt[t].needGroup;
+				swprintf_s(g, L"%s: %s", TT(TX_EV_NEED_GROUP), ng < 0 ? TT(TX_EV_ANY) : TT(gtx[ng]));
 				m_r.HudText(g, c1 + U(8), ty + rowH + U(2), U(12), RGBA8(200, 200, 210), 0, 0);
 				ty += rowH + U(22);
 			} else ty += rowH;
+		}
+		if (revert >= 0) {
+			if (Btn(ID_EV_TGT0 + 4, c1, ty, colW, rowH - U(6), TT(TX_EV_REVERT), TRUE, m_evTarget == revert, U(15))) {
+				m_evTarget = revert; m_evPartner[0] = m_evPartner[1] = -1; m_evPick = 2;
+			}
+			ty += rowH;
 		}
 		if (m_evTarget >= 0) {
 			wchar_t brief[1024];
@@ -5394,7 +5484,8 @@ void Game::DrawEvolveUi()
 			CharData ps[2];
 			int n = 0;
 			for (int kk = 0; kk < 2; kk++) if (m_evPartner[kk] >= 0) ps[n++] = m_save.roster[m_evPartner[kk]];
-			EvoApply(pv, m_evTarget, ps, n);
+			if (trial) EvoRetrain(pv, m_evTarget);
+			else EvoApply(pv, m_evTarget, ps, n);
 			int gains[S_COUNT];
 			for (int s = 0; s < S_COUNT; s++) gains[s] = pv.stat[s] - mc.stat[s];
 			DrawStatLines(pv, c1, ty + U(22), colW, gains, -1, -1);

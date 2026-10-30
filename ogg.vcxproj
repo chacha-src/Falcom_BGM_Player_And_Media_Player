@@ -1630,12 +1630,20 @@ if errorlevel 1 exit /b 1</Command>
     <None Include="res\cso\race_pscloud.cso" />
     <None Include="res\cso\race_gsw.cso" />
     <None Include="res\cso\race_vsw.cso" />
+    <None Include="res\cso\tac_cshair.cso" />
+    <None Include="res\cso\tac_cshairw.cso" />
     <None Include="res\cso\tac_csskin.cso" />
     <None Include="res\cso\tac_csclths.cso" />
     <None Include="res\cso\tac_csclthr.cso" />
     <None Include="res\cso\tac_csclthw.cso" />
+    <None Include="res\cso\tac_cssoft.cso" />
+    <None Include="res\cso\tac_cssoftw.cso" />
+    <None Include="res\cso\tac_dst.cso" />
+    <None Include="res\cso\tac_hst.cso" />
     <None Include="res\cso\tac_psbloom.cso" />
     <None Include="res\cso\tac_psblur.cso" />
+    <None Include="res\cso\tac_psdofh.cso" />
+    <None Include="res\cso\tac_psdofu.cso" />
     <None Include="res\cso\tac_psg0.cso" />
     <None Include="res\cso\tac_psg1.cso" />
     <None Include="res\cso\tac_psg2.cso" />
@@ -1647,6 +1655,7 @@ if errorlevel 1 exit /b 1</Command>
     <None Include="res\cso\tac_psg8.cso" />
     <None Include="res\cso\tac_psg9.cso" />
     <None Include="res\cso\tac_psgrade.cso" />
+    <None Include="res\cso\tac_psgrtiny.cso" />
     <None Include="res\cso\tac_psh.cso" />
     <None Include="res\cso\tac_pslava.cso" />
     <None Include="res\cso\tac_psm.cso" />
@@ -1662,6 +1671,7 @@ if errorlevel 1 exit /b 1</Command>
     <None Include="res\cso\tac_vsp.cso" />
     <None Include="res\cso\tac_vsq.cso" />
     <None Include="res\cso\tac_vss.cso" />
+    <None Include="res\cso\tac_vst.cso" />
     <None Include="res\tactics\tac_assets.bin" />
     <None Include="res\tactics\tac_ava.bin" />
     <None Include="res\tactics\tac_face.bin" />

@@ -1229,8 +1229,8 @@ R(TX_HELP_TEXT,
 	L"・移動後に「攻撃」「スキル」「待機」を選びます。行動前なら移動を戻せます。\n"
 	L"・必殺の一撃やスキル・魔法ではカットイン演出が入ります（設定で短縮できます）。\n"
 	L"・ボスを倒すか敵を全滅させると勝利。味方が全滅すると敗北です。\n"
-	L"【マウス】 左クリック: 選択・決定　左ドラッグ: 地図を見渡す　右クリック: 戻る　右ドラッグ: 視点回転　中ドラッグ: 視点移動　ホイール: ズーム\n"
-	L"【キーボード】 矢印/WASD: カーソル　Enter/Space/Z: 決定　Esc/X: 戻る　Q/E: 回転　PgUp/PgDn: ズーム　Tab: ユニット切替　R: 視点を戻す　Shift: 早送り　F1/H: この画面\n"
+	L"【マウス】 左クリック: 選択・決定　左ドラッグ: 地図を見渡す　右クリック: 戻る　右ドラッグ: 視点回転　中ドラッグ: 視点移動　ホイール: ズーム　ホイールクリック: 階層\n"
+	L"【キーボード】 矢印/WASD: カーソル　Enter/Space/Z: 決定　Esc/X: 戻る　Q/E: 回転　PgUp/PgDn: ズーム　Tab: ユニット切替　R: 視点を戻す　Shift: 早送り　F1/H: この画面　C: 上下に重なった道の階層を切り替え。坂から上の道へ進む\n"
 	L"【パッド】 左スティック/十字キー: カーソル　A: 決定　B: 戻る　LB/RB: 回転　右スティック: 視点　トリガー: ズーム　X: 早送り　Y: 中央へ　Start: 戻る　Back: 操作説明\n"
 	L"【育成】\n"
 	L"・攻撃・回復・補助で経験値を得てレベルアップ。一定のレベルでスキルを覚えます。\n"
@@ -1242,8 +1242,8 @@ R(TX_HELP_TEXT,
 	L"- After moving, choose Attack, Skill or Wait. You can undo the move before acting.\n"
 	L"- Critical hits, skills and spells play a cut-in scene (can be shortened in settings).\n"
 	L"- Win by defeating the boss or all enemies. You lose if all allies fall.\n"
-	L"[Mouse] Left click: select/confirm  Left drag: look around the map  Right click: back  Right drag: rotate view  Middle drag: pan  Wheel: zoom\n"
-	L"[Keyboard] Arrows/WASD: cursor  Enter/Space/Z: confirm  Esc/X: back  Q/E: rotate  PgUp/PgDn: zoom  Tab: next unit  R: recenter view  Shift: fast forward  F1/H: this screen\n"
+	L"[Mouse] Left click: select/confirm  Left drag: look around the map  Right click: back  Right drag: rotate view  Middle drag: pan  Wheel: zoom  Wheel click: change layer\n"
+	L"[Keyboard] Arrows/WASD: cursor  Enter/Space/Z: confirm  Esc/X: back  Q/E: rotate  PgUp/PgDn: zoom  Tab: next unit  R: recenter view  Shift: fast forward  F1/H: this screen  C: switch the stacked path. Climb the ramp to the upper path\n"
 	L"[Gamepad] Left stick/D-pad: cursor  A: confirm  B: back  LB/RB: rotate  Right stick: view  Triggers: zoom  X: fast forward  Y: recenter  Start: back  Back: controls\n"
 	L"[Growth]\n"
 	L"- Attacks, healing and buffs grant EXP and levels. Skills are learned at certain levels.\n"
@@ -1255,8 +1255,8 @@ R(TX_HELP_TEXT,
 	L"- Après le déplacement, choisissez Attaquer, Compétence ou Attendre. Vous pouvez annuler le déplacement avant d'agir.\n"
 	L"- Les coups critiques, compétences et sorts déclenchent une cinématique (raccourcissable dans les réglages).\n"
 	L"- Vainquez le boss ou tous les ennemis pour gagner. Vous perdez si tous vos alliés tombent.\n"
-	L"[Souris] Clic gauche : choisir/valider  Glisser gauche : regarder la carte  Clic droit : retour  Glisser droit : tourner la vue  Glisser milieu : déplacer  Molette : zoom\n"
-	L"[Clavier] Flèches/WASD : curseur  Entrée/Espace/Z : valider  Échap/X : retour  Q/E : tourner  PgPréc/PgSuiv : zoom  Tab : unité suivante  R : recentrer  Maj : avance rapide  F1/H : cet écran\n"
+	L"[Souris] Clic gauche : choisir/valider  Glisser gauche : regarder la carte  Clic droit : retour  Glisser droit : tourner la vue  Glisser milieu : déplacer  Molette : zoom  Clic molette : étage\n"
+	L"[Clavier] Flèches/WASD : curseur  Entrée/Espace/Z : valider  Échap/X : retour  Q/E : tourner  PgPréc/PgSuiv : zoom  Tab : unité suivante  R : recentrer  Maj : avance rapide  F1/H : cet écran  C : changer l'étage des chemins superposés. La rampe mène en haut\n"
 	L"[Manette] Stick gauche/croix : curseur  A : valider  B : retour  LB/RB : tourner  Stick droit : vue  Gâchettes : zoom  X : avance rapide  Y : recentrer  Start : retour  Back : commandes\n"
 	L"[Progression]\n"
 	L"- Attaques, soins et soutiens donnent de l'EXP et des niveaux. Des compétences s'apprennent à certains niveaux.\n"
@@ -1268,8 +1268,8 @@ R(TX_HELP_TEXT,
 	L"- Dopo il movimento scegli Attacca, Abilità o Attendi. Puoi annullare il movimento prima di agire.\n"
 	L"- Colpi critici, abilità e magie mostrano una scena speciale (accorciabile nelle impostazioni).\n"
 	L"- Vinci sconfiggendo il boss o tutti i nemici. Perdi se cadono tutti gli alleati.\n"
-	L"[Mouse] Clic sinistro: scegli/conferma  Trascina sinistro: guarda la mappa  Clic destro: indietro  Trascina destro: ruota vista  Trascina centrale: sposta  Rotella: zoom\n"
-	L"[Tastiera] Frecce/WASD: cursore  Invio/Spazio/Z: conferma  Esc/X: indietro  Q/E: ruota  PagSu/PagGiù: zoom  Tab: unità successiva  R: ricentra  Maiusc: avanti veloce  F1/H: questa schermata\n"
+	L"[Mouse] Clic sinistro: scegli/conferma  Trascina sinistro: guarda la mappa  Clic destro: indietro  Trascina destro: ruota vista  Trascina centrale: sposta  Rotella: zoom  Clic rotella: livello\n"
+	L"[Tastiera] Frecce/WASD: cursore  Invio/Spazio/Z: conferma  Esc/X: indietro  Q/E: ruota  PagSu/PagGiù: zoom  Tab: unità successiva  R: ricentra  Maiusc: avanti veloce  F1/H: questa schermata  C: cambia il livello dei percorsi sovrapposti. La rampa porta in alto\n"
 	L"[Gamepad] Stick sinistro/croce: cursore  A: conferma  B: indietro  LB/RB: ruota  Stick destro: vista  Grilletti: zoom  X: avanti veloce  Y: ricentra  Start: indietro  Back: comandi\n"
 	L"[Crescita]\n"
 	L"- Attacchi, cure e supporti danno ESP e livelli. Le abilità si imparano a certi livelli.\n"
@@ -1281,8 +1281,8 @@ R(TX_HELP_TEXT,
 	L"- Tras moverte, elige Atacar, Habilidad o Esperar. Puedes deshacer el movimiento antes de actuar.\n"
 	L"- Los críticos, habilidades y hechizos muestran una escena especial (se puede acortar en los ajustes).\n"
 	L"- Ganas al derrotar al jefe o a todos los enemigos. Pierdes si caen todos tus aliados.\n"
-	L"[Ratón] Clic izquierdo: elegir/confirmar  Arrastrar izquierdo: mirar el mapa  Clic derecho: volver  Arrastrar derecho: girar vista  Arrastrar central: desplazar  Rueda: zoom\n"
-	L"[Teclado] Flechas/WASD: cursor  Intro/Espacio/Z: confirmar  Esc/X: volver  Q/E: girar  RePág/AvPág: zoom  Tab: siguiente unidad  R: centrar vista  Mayús: avance rápido  F1/H: esta pantalla\n"
+	L"[Ratón] Clic izquierdo: elegir/confirmar  Arrastrar izquierdo: mirar el mapa  Clic derecho: volver  Arrastrar derecho: girar vista  Arrastrar central: desplazar  Rueda: zoom  Clic de rueda: nivel\n"
+	L"[Teclado] Flechas/WASD: cursor  Intro/Espacio/Z: confirmar  Esc/X: volver  Q/E: girar  RePág/AvPág: zoom  Tab: siguiente unidad  R: centrar vista  Mayús: avance rápido  F1/H: esta pantalla  C: cambia el nivel de los caminos superpuestos. La rampa sube al de arriba\n"
 	L"[Mando] Stick izquierdo/cruceta: cursor  A: confirmar  B: volver  LB/RB: girar  Stick derecho: vista  Gatillos: zoom  X: avance rápido  Y: centrar  Start: volver  Back: controles\n"
 	L"[Progreso]\n"
 	L"- Ataques, curaciones y mejoras dan EXP y niveles. Las habilidades se aprenden en ciertos niveles.\n"
@@ -1294,8 +1294,8 @@ R(TX_HELP_TEXT,
 	L"- 이동 후 '공격' '스킬' '대기'를 고릅니다. 행동 전이라면 이동을 되돌릴 수 있습니다.\n"
 	L"- 필살의 일격이나 스킬·마법에서는 컷인 연출이 들어갑니다 (설정에서 단축 가능).\n"
 	L"- 보스를 쓰러뜨리거나 적을 전멸시키면 승리. 아군이 전멸하면 패배입니다.\n"
-	L"[마우스] 왼쪽 클릭: 선택·결정  왼쪽 드래그: 지도 둘러보기  오른쪽 클릭: 돌아가기  오른쪽 드래그: 시점 회전  가운데 드래그: 시점 이동  휠: 줌\n"
-	L"[키보드] 방향키/WASD: 커서  Enter/Space/Z: 결정  Esc/X: 돌아가기  Q/E: 회전  PgUp/PgDn: 줌  Tab: 유닛 전환  R: 시점 복귀  Shift: 빨리 감기  F1/H: 이 화면\n"
+	L"[마우스] 왼쪽 클릭: 선택·결정  왼쪽 드래그: 지도 둘러보기  오른쪽 클릭: 돌아가기  오른쪽 드래그: 시점 회전  가운데 드래그: 시점 이동  휠: 줌  휠 클릭: 층\n"
+	L"[키보드] 방향키/WASD: 커서  Enter/Space/Z: 결정  Esc/X: 돌아가기  Q/E: 회전  PgUp/PgDn: 줌  Tab: 유닛 전환  R: 시점 복귀  Shift: 빨리 감기  F1/H: 이 화면  C: 겹친 길의 층을 바꿈. 비탈을 오르면 위쪽 길로 감\n"
 	L"[패드] 왼쪽 스틱/십자키: 커서  A: 결정  B: 돌아가기  LB/RB: 회전  오른쪽 스틱: 시점  트리거: 줌  X: 빨리 감기  Y: 중앙으로  Start: 돌아가기  Back: 조작 설명\n"
 	L"[육성]\n"
 	L"- 공격·회복·보조로 경험치를 얻어 레벨 업. 일정 레벨에서 스킬을 익힙니다.\n"
@@ -1307,8 +1307,8 @@ R(TX_HELP_TEXT,
 	L"・移动后选择“攻击”“技能”或“待机”。行动前可以撤销移动。\n"
 	L"・必杀一击、技能和魔法会播放特写演出（可在设置中缩短）。\n"
 	L"・击败首领或全灭敌人即为胜利。我方全灭则失败。\n"
-	L"【鼠标】左键：选择・确定　左键拖动：查看地图　右键：返回　右键拖动：旋转视角　中键拖动：移动视角　滚轮：缩放\n"
-	L"【键盘】方向键/WASD：光标　Enter/Space/Z：确定　Esc/X：返回　Q/E：旋转　PgUp/PgDn：缩放　Tab：切换单位　R：视角回中　Shift：快进　F1/H：本画面\n"
+	L"【鼠标】左键：选择・确定　左键拖动：查看地图　右键：返回　右键拖动：旋转视角　中键拖动：移动视角　滚轮：缩放　滚轮点击：切换层\n"
+	L"【键盘】方向键/WASD：光标　Enter/Space/Z：确定　Esc/X：返回　Q/E：旋转　PgUp/PgDn：缩放　Tab：切换单位　R：视角回中　Shift：快进　F1/H：本画面　C：切换重叠道路的层。从坡道走上层\n"
 	L"【手柄】左摇杆/十字键：光标　A：确定　B：返回　LB/RB：旋转　右摇杆：视角　扳机：缩放　X：快进　Y：回到中心　Start：返回　Back：操作说明\n"
 	L"【培养】\n"
 	L"・攻击、治疗和辅助都会获得经验值并升级。达到一定等级会习得技能。\n"
@@ -1320,8 +1320,8 @@ R(TX_HELP_TEXT,
 	L"- بعد الحركة اختر هجوم أو مهارة أو انتظار. يمكنك التراجع عن الحركة قبل الفعل.\n"
 	L"- الضربات الحاسمة والمهارات والتعاويذ تعرض مشهدًا خاصًا (يمكن تقصيره من الإعدادات).\n"
 	L"- تفوز بهزيمة الزعيم أو جميع الأعداء، وتخسر إذا سقط جميع حلفائك.\n"
-	L"[الفأرة] نقر أيسر: اختيار/تأكيد  سحب أيسر: النظر إلى الخريطة  نقر أيمن: رجوع  سحب أيمن: تدوير العرض  سحب أوسط: تحريك  العجلة: تكبير\n"
-	L"[لوحة المفاتيح] الأسهم/WASD: المؤشر  Enter/Space/Z: تأكيد  Esc/X: رجوع  Q/E: تدوير  PgUp/PgDn: تكبير  Tab: الوحدة التالية  R: توسيط العرض  Shift: تسريع  F1/H: هذه الشاشة\n"
+	L"[الفأرة] نقر أيسر: اختيار/تأكيد  سحب أيسر: النظر إلى الخريطة  نقر أيمن: رجوع  سحب أيمن: تدوير العرض  سحب أوسط: تحريك  العجلة: تكبير  نقر العجلة: الطبقة\n"
+	L"[لوحة المفاتيح] الأسهم/WASD: المؤشر  Enter/Space/Z: تأكيد  Esc/X: رجوع  Q/E: تدوير  PgUp/PgDn: تكبير  Tab: الوحدة التالية  R: توسيط العرض  Shift: تسريع  F1/H: هذه الشاشة  C: تبديل طبقة الطرق المتراكبة. المنحدر يصعد إلى الطريق الأعلى\n"
 	L"[ذراع التحكم] العصا اليسرى/الأسهم: المؤشر  A: تأكيد  B: رجوع  LB/RB: تدوير  العصا اليمنى: العرض  الزنادان: تكبير  X: تسريع  Y: توسيط  Start: رجوع  Back: التحكم\n"
 	L"[التطوير]\n"
 	L"- الهجوم والعلاج والدعم تمنح الخبرة والمستويات. تُتعلم المهارات عند مستويات معينة.\n"
@@ -1333,8 +1333,8 @@ R(TX_HELP_TEXT,
 	L"- После перемещения выберите «Атака», «Навык» или «Ждать». До действия ход можно отменить.\n"
 	L"- Критические удары, навыки и заклинания показывают вставку (можно сократить в настройках).\n"
 	L"- Победа — убить босса или всех врагов. Поражение — если пали все союзники.\n"
-	L"[Мышь] ЛКМ: выбор/подтверждение  Перетаскивание ЛКМ: осмотр карты  ПКМ: назад  Перетаскивание ПКМ: поворот  Перетаскивание СКМ: сдвиг  Колесо: масштаб\n"
-	L"[Клавиатура] Стрелки/WASD: курсор  Enter/Space/Z: подтвердить  Esc/X: назад  Q/E: поворот  PgUp/PgDn: масштаб  Tab: следующий боец  R: вернуть обзор  Shift: ускорение  F1/H: этот экран\n"
+	L"[Мышь] ЛКМ: выбор/подтверждение  Перетаскивание ЛКМ: осмотр карты  ПКМ: назад  Перетаскивание ПКМ: поворот  Перетаскивание СКМ: сдвиг  Колесо: масштаб  Щелчок колеса: слой\n"
+	L"[Клавиатура] Стрелки/WASD: курсор  Enter/Space/Z: подтвердить  Esc/X: назад  Q/E: поворот  PgUp/PgDn: масштаб  Tab: следующий боец  R: вернуть обзор  Shift: ускорение  F1/H: этот экран  C: слой наложенных троп. По пандусу на верхнюю\n"
 	L"[Геймпад] Левый стик/крестовина: курсор  A: подтвердить  B: назад  LB/RB: поворот  Правый стик: обзор  Курки: масштаб  X: ускорение  Y: центрировать  Start: назад  Back: управление\n"
 	L"[Развитие]\n"
 	L"- Атаки, лечение и поддержка дают опыт и уровни. Навыки изучаются на определённых уровнях.\n"
@@ -1346,8 +1346,8 @@ R(TX_HELP_TEXT,
 	L"- Nach dem Bewegen Angriff, Fertigkeit oder Warten wählen. Vor der Aktion kann die Bewegung zurückgenommen werden.\n"
 	L"- Kritische Treffer, Fertigkeiten und Zauber zeigen eine Zwischensequenz (in den Einstellungen kürzbar).\n"
 	L"- Sieg durch Besiegen des Bosses oder aller Feinde. Niederlage, wenn alle Verbündeten fallen.\n"
-	L"[Maus] Linksklick: wählen/bestätigen  Links ziehen: Karte umsehen  Rechtsklick: zurück  Rechts ziehen: Ansicht drehen  Mitte ziehen: verschieben  Rad: Zoom\n"
-	L"[Tastatur] Pfeile/WASD: Cursor  Enter/Leertaste/Z: bestätigen  Esc/X: zurück  Q/E: drehen  Bild↑/Bild↓: Zoom  Tab: nächste Einheit  R: Ansicht zurück  Umschalt: Vorspulen  F1/H: diese Hilfe\n"
+	L"[Maus] Linksklick: wählen/bestätigen  Links ziehen: Karte umsehen  Rechtsklick: zurück  Rechts ziehen: Ansicht drehen  Mitte ziehen: verschieben  Rad: Zoom  Radklick: Ebene\n"
+	L"[Tastatur] Pfeile/WASD: Cursor  Enter/Leertaste/Z: bestätigen  Esc/X: zurück  Q/E: drehen  Bild↑/Bild↓: Zoom  Tab: nächste Einheit  R: Ansicht zurück  Umschalt: Vorspulen  F1/H: diese Hilfe  C: Ebene der übereinanderliegenden Wege. Die Rampe führt nach oben\n"
 	L"[Gamepad] Linker Stick/Steuerkreuz: Cursor  A: bestätigen  B: zurück  LB/RB: drehen  Rechter Stick: Ansicht  Trigger: Zoom  X: Vorspulen  Y: zentrieren  Start: zurück  Back: Steuerung\n"
 	L"[Entwicklung]\n"
 	L"- Angriffe, Heilung und Unterstützung geben EP und Stufen. Fertigkeiten werden auf bestimmten Stufen erlernt.\n"
@@ -1359,8 +1359,8 @@ R(TX_HELP_TEXT,
 	L"- Depois de mover, escolha Atacar, Habilidade ou Esperar. É possível desfazer o movimento antes de agir.\n"
 	L"- Críticos, habilidades e magias exibem uma cena especial (pode ser encurtada nas configurações).\n"
 	L"- Vença derrotando o chefe ou todos os inimigos. Você perde se todos os aliados caírem.\n"
-	L"[Mouse] Clique esquerdo: escolher/confirmar  Arrastar esquerdo: ver o mapa  Clique direito: voltar  Arrastar direito: girar visão  Arrastar meio: mover  Roda: zoom\n"
-	L"[Teclado] Setas/WASD: cursor  Enter/Espaço/Z: confirmar  Esc/X: voltar  Q/E: girar  PgUp/PgDn: zoom  Tab: próxima unidade  R: recentralizar  Shift: acelerar  F1/H: esta tela\n"
+	L"[Mouse] Clique esquerdo: escolher/confirmar  Arrastar esquerdo: ver o mapa  Clique direito: voltar  Arrastar direito: girar visão  Arrastar meio: mover  Roda: zoom  Clique da roda: nível\n"
+	L"[Teclado] Setas/WASD: cursor  Enter/Espaço/Z: confirmar  Esc/X: voltar  Q/E: girar  PgUp/PgDn: zoom  Tab: próxima unidade  R: recentralizar  Shift: acelerar  F1/H: esta tela  C: troca o nível dos caminhos sobrepostos. A rampa sobe ao de cima\n"
 	L"[Controle] Analógico esquerdo/direcional: cursor  A: confirmar  B: voltar  LB/RB: girar  Analógico direito: visão  Gatilhos: zoom  X: acelerar  Y: centralizar  Start: voltar  Back: controles\n"
 	L"[Evolução]\n"
 	L"- Ataques, curas e apoio dão EXP e níveis. Habilidades são aprendidas em certos níveis.\n"
@@ -1372,8 +1372,8 @@ R(TX_HELP_TEXT,
 	L"- Kies na het bewegen Aanval, Vaardigheid of Wachten. Vóór de actie kun je de beweging ongedaan maken.\n"
 	L"- Kritieke treffers, vaardigheden en spreuken tonen een tussenscène (in te korten via instellingen).\n"
 	L"- Je wint door de baas of alle vijanden te verslaan. Je verliest als alle bondgenoten vallen.\n"
-	L"[Muis] Linksklik: kiezen/bevestigen  Links slepen: kaart bekijken  Rechtsklik: terug  Rechts slepen: beeld draaien  Middel slepen: verschuiven  Wiel: zoom\n"
-	L"[Toetsenbord] Pijlen/WASD: cursor  Enter/Spatie/Z: bevestigen  Esc/X: terug  Q/E: draaien  PgUp/PgDn: zoom  Tab: volgende eenheid  R: beeld terug  Shift: versnellen  F1/H: dit scherm\n"
+	L"[Muis] Linksklik: kiezen/bevestigen  Links slepen: kaart bekijken  Rechtsklik: terug  Rechts slepen: beeld draaien  Middel slepen: verschuiven  Wiel: zoom  Wielklik: laag\n"
+	L"[Toetsenbord] Pijlen/WASD: cursor  Enter/Spatie/Z: bevestigen  Esc/X: terug  Q/E: draaien  PgUp/PgDn: zoom  Tab: volgende eenheid  R: beeld terug  Shift: versnellen  F1/H: dit scherm  C: laag van gestapelde paden. De helling gaat naar het bovenpad\n"
 	L"[Gamepad] Linkerstick/D-pad: cursor  A: bevestigen  B: terug  LB/RB: draaien  Rechterstick: beeld  Triggers: zoom  X: versnellen  Y: centreren  Start: terug  Back: besturing\n"
 	L"[Groei]\n"
 	L"- Aanvallen, genezen en steun geven EP en levels. Vaardigheden leer je op bepaalde levels.\n"
@@ -1385,8 +1385,8 @@ R(TX_HELP_TEXT,
 	L"- Po ruchu wybierz Atak, Umiejętność lub Czekaj. Przed akcją możesz cofnąć ruch.\n"
 	L"- Trafienia krytyczne, umiejętności i czary pokazują przerywnik (można skrócić w ustawieniach).\n"
 	L"- Wygrywasz, pokonując bossa lub wszystkich wrogów. Przegrywasz, gdy padną wszyscy sojusznicy.\n"
-	L"[Mysz] LPM: wybór/zatwierdź  Przeciąganie LPM: rozejrzyj się po mapie  PPM: wstecz  Przeciąganie PPM: obrót widoku  Przeciąganie ŚPM: przesuwanie  Kółko: zoom\n"
-	L"[Klawiatura] Strzałki/WASD: kursor  Enter/Spacja/Z: zatwierdź  Esc/X: wstecz  Q/E: obrót  PgUp/PgDn: zoom  Tab: następna jednostka  R: widok na środek  Shift: przyspieszenie  F1/H: ten ekran\n"
+	L"[Mysz] LPM: wybór/zatwierdź  Przeciąganie LPM: rozejrzyj się po mapie  PPM: wstecz  Przeciąganie PPM: obrót widoku  Przeciąganie ŚPM: przesuwanie  Kółko: zoom  Klik kółka: poziom\n"
+	L"[Klawiatura] Strzałki/WASD: kursor  Enter/Spacja/Z: zatwierdź  Esc/X: wstecz  Q/E: obrót  PgUp/PgDn: zoom  Tab: następna jednostka  R: widok na środek  Shift: przyspieszenie  F1/H: ten ekran  C: poziom nałożonych dróg. Rampa prowadzi na górną\n"
 	L"[Pad] Lewa gałka/krzyżak: kursor  A: zatwierdź  B: wstecz  LB/RB: obrót  Prawa gałka: widok  Spusty: zoom  X: przyspieszenie  Y: wyśrodkuj  Start: wstecz  Back: sterowanie\n"
 	L"[Rozwój]\n"
 	L"- Ataki, leczenie i wsparcie dają PD i poziomy. Umiejętności poznaje się na określonych poziomach.\n"
@@ -1398,8 +1398,8 @@ R(TX_HELP_TEXT,
 	L"- Hareketten sonra Saldırı, Yetenek veya Bekle'yi seçin. Eylemden önce hareketi geri alabilirsiniz.\n"
 	L"- Kritik vuruşlar, yetenekler ve büyüler ara sahne gösterir (ayarlardan kısaltılabilir).\n"
 	L"- Patronu veya tüm düşmanları yenerek kazanırsınız. Tüm müttefikler düşerse kaybedersiniz.\n"
-	L"[Fare] Sol tık: seç/onayla  Sol sürükle: haritaya bak  Sağ tık: geri  Sağ sürükle: görüşü döndür  Orta sürükle: kaydır  Tekerlek: yakınlaştır\n"
-	L"[Klavye] Oklar/WASD: imleç  Enter/Boşluk/Z: onayla  Esc/X: geri  Q/E: döndür  PgUp/PgDn: yakınlaştır  Tab: sonraki birim  R: görüşü ortala  Shift: hızlandır  F1/H: bu ekran\n"
+	L"[Fare] Sol tık: seç/onayla  Sol sürükle: haritaya bak  Sağ tık: geri  Sağ sürükle: görüşü döndür  Orta sürükle: kaydır  Tekerlek: yakınlaştır  Tekerlek tıklaması: kat\n"
+	L"[Klavye] Oklar/WASD: imleç  Enter/Boşluk/Z: onayla  Esc/X: geri  Q/E: döndür  PgUp/PgDn: yakınlaştır  Tab: sonraki birim  R: görüşü ortala  Shift: hızlandır  F1/H: bu ekran  C: üst üste yolların katını değiştir. Rampa üst yola çıkar\n"
 	L"[Oyun kolu] Sol çubuk/yön tuşları: imleç  A: onayla  B: geri  LB/RB: döndür  Sağ çubuk: görüş  Tetikler: yakınlaştır  X: hızlandır  Y: ortala  Start: geri  Back: kontroller\n"
 	L"[Gelişim]\n"
 	L"- Saldırı, iyileştirme ve destek TP ve seviye kazandırır. Yetenekler belirli seviyelerde öğrenilir.\n"
@@ -1435,20 +1435,20 @@ R(TX_BT_ALLY, L"味方", L"Allies", L"Alliés", L"Alleati", L"Aliados", L"아군
 R(TX_BT_ENEMY, L"敵", L"Enemies", L"Ennemis", L"Nemici", L"Enemigos", L"적", L"敌方", L"الأعداء", L"Враги", L"Feinde", L"Inimigos", L"Vijanden", L"Wrogowie", L"Düşmanlar")
 R(TX_BT_CANCEL, L"キャンセル", L"Cancel", L"Annuler", L"Annulla", L"Cancelar", L"취소", L"取消", L"إلغاء", L"Отмена", L"Abbrechen", L"Cancelar", L"Annuleren", L"Anuluj", L"İptal")
 R(TX_BT_HINT_KEYS,
-	L"カーソル: マウス/矢印/左スティック　決定: クリック/Enter/A　戻る: 右クリック/Esc/B　回転: Q E/LB RB　ズーム: ホイール　早送り: Shift/X",
-	L"Cursor: mouse/arrows/left stick  Confirm: click/Enter/A  Back: right click/Esc/B  Rotate: Q E/LB RB  Zoom: wheel  Fast: Shift/X",
-	L"Curseur : souris/flèches/stick G  Valider : clic/Entrée/A  Retour : clic droit/Échap/B  Tourner : Q E/LB RB  Zoom : molette  Rapide : Maj/X",
-	L"Cursore: mouse/frecce/stick sx  Conferma: clic/Invio/A  Indietro: clic destro/Esc/B  Ruota: Q E/LB RB  Zoom: rotella  Veloce: Maiusc/X",
-	L"Cursor: ratón/flechas/stick izq.  Confirmar: clic/Intro/A  Volver: clic derecho/Esc/B  Girar: Q E/LB RB  Zoom: rueda  Rápido: Mayús/X",
-	L"커서: 마우스/방향키/왼쪽 스틱  결정: 클릭/Enter/A  돌아가기: 오른쪽 클릭/Esc/B  회전: Q E/LB RB  줌: 휠  빨리 감기: Shift/X",
-	L"光标：鼠标/方向键/左摇杆　确定：点击/Enter/A　返回：右键/Esc/B　旋转：Q E/LB RB　缩放：滚轮　快进：Shift/X",
-	L"المؤشر: الفأرة/الأسهم/العصا اليسرى  تأكيد: نقر/Enter/A  رجوع: نقر أيمن/Esc/B  تدوير: Q E/LB RB  تكبير: العجلة  تسريع: Shift/X",
-	L"Курсор: мышь/стрелки/левый стик  Подтвердить: щелчок/Enter/A  Назад: ПКМ/Esc/B  Поворот: Q E/LB RB  Масштаб: колесо  Ускорение: Shift/X",
-	L"Cursor: Maus/Pfeile/linker Stick  Bestätigen: Klick/Enter/A  Zurück: Rechtsklick/Esc/B  Drehen: Q E/LB RB  Zoom: Rad  Schnell: Umschalt/X",
-	L"Cursor: mouse/setas/analógico esq.  Confirmar: clique/Enter/A  Voltar: clique direito/Esc/B  Girar: Q E/LB RB  Zoom: roda  Acelerar: Shift/X",
-	L"Cursor: muis/pijlen/linkerstick  Bevestigen: klik/Enter/A  Terug: rechtsklik/Esc/B  Draaien: Q E/LB RB  Zoom: wiel  Snel: Shift/X",
-	L"Kursor: mysz/strzałki/lewa gałka  Zatwierdź: klik/Enter/A  Wstecz: PPM/Esc/B  Obrót: Q E/LB RB  Zoom: kółko  Szybko: Shift/X",
-	L"İmleç: fare/oklar/sol çubuk  Onayla: tık/Enter/A  Geri: sağ tık/Esc/B  Döndür: Q E/LB RB  Yakınlaştır: tekerlek  Hızlı: Shift/X")
+	L"マウス: 左クリック決定　右クリック戻る　左ドラッグ見渡す　右ドラッグ回転　中ドラッグ移動　ホイール拡大　ホイールクリックで階層\nキーボード: 矢印/WASD　Enter決定　Esc戻る　Q/E回転　PgUp/PgDn拡大　Cで階層　Shift早送り　パッド: スティック/A/B/LB/RB",
+	L"Mouse: left click confirm, right click back, left-drag look, right-drag rotate, middle-drag pan, wheel zoom, wheel click changes layer\nKeys: arrows/WASD, Enter confirm, Esc back, Q/E rotate, PgUp/PgDn zoom, C changes layer, Shift fast-forward  Pad: stick/A/B/LB/RB",
+	L"Souris : clic gauche valider, clic droit retour, glisser gauche regarder, glisser droit tourner, glisser milieu déplacer, molette zoom, clic molette change l'étage\nClavier : flèches/WASD, Entrée valider, Échap retour, Q/E tourner, PgUp/PgDn zoom, C change l'étage, Maj avance  Manette : stick/A/B/LB/RB",
+	L"Mouse: clic sinistro conferma, clic destro indietro, trascina sinistro guarda, trascina destro ruota, trascina centrale sposta, rotella zoom, clic rotella cambia livello\nTasti: frecce/WASD, Invio conferma, Esc indietro, Q/E ruota, PgUp/PgDn zoom, C cambia livello, Maiusc veloce  Pad: stick/A/B/LB/RB",
+	L"Ratón: clic izquierdo confirmar, clic derecho volver, arrastrar izquierdo mirar, arrastrar derecho girar, arrastrar central mover, rueda zoom, clic de rueda cambia el nivel\nTeclado: flechas/WASD, Intro confirmar, Esc volver, Q/E girar, PgUp/PgDn zoom, C cambia el nivel, Mayús rápido  Mando: stick/A/B/LB/RB",
+	L"마우스: 왼쪽 클릭 결정, 오른쪽 클릭 돌아가기, 왼쪽 드래그 둘러보기, 오른쪽 드래그 회전, 가운데 드래그 이동, 휠 확대, 휠 클릭으로 층 변경\n키보드: 방향키/WASD, Enter 결정, Esc 돌아가기, Q/E 회전, PgUp/PgDn 확대, C로 층 변경, Shift 빨리 감기  패드: 스틱/A/B/LB/RB",
+	L"鼠标：左键确定，右键返回，左键拖动查看，右键拖动旋转，中键拖动移动，滚轮缩放，滚轮点击切换层\n键盘：方向键/WASD，Enter确定，Esc返回，Q/E旋转，PgUp/PgDn缩放，C切换层，Shift快进　手柄：摇杆/A/B/LB/RB",
+	L"الفأرة: نقر أيسر تأكيد، نقر أيمن رجوع، سحب أيسر للنظر، سحب أيمن للتدوير، سحب أوسط للتحريك، العجلة تكبير، نقر العجلة يبدّل الطبقة\nلوحة المفاتيح: الأسهم/WASD، Enter تأكيد، Esc رجوع، Q/E تدوير، PgUp/PgDn تكبير، C يبدّل الطبقة، Shift تسريع  يد: عصا/A/B/LB/RB",
+	L"Мышь: ЛКМ подтвердить, ПКМ назад, тянуть ЛКМ осмотр, тянуть ПКМ поворот, тянуть СКМ сдвиг, колесо масштаб, щелчок колеса меняет слой\nКлавиши: стрелки/WASD, Enter подтвердить, Esc назад, Q/E поворот, PgUp/PgDn масштаб, C меняет слой, Shift ускорение  Геймпад: стик/A/B/LB/RB",
+	L"Maus: Linksklick bestätigen, Rechtsklick zurück, links ziehen umsehen, rechts ziehen drehen, Mitte ziehen verschieben, Rad Zoom, Radklick wechselt die Ebene\nTasten: Pfeile/WASD, Enter bestätigen, Esc zurück, Q/E drehen, Bild↑/Bild↓ Zoom, C wechselt die Ebene, Umschalt vorspulen  Pad: Stick/A/B/LB/RB",
+	L"Mouse: clique esquerdo confirmar, clique direito voltar, arrastar esquerdo olhar, arrastar direito girar, arrastar meio mover, roda zoom, clique da roda muda o nível\nTeclado: setas/WASD, Enter confirmar, Esc voltar, Q/E girar, PgUp/PgDn zoom, C muda o nível, Shift acelerar  Controle: analógico/A/B/LB/RB",
+	L"Muis: linksklik bevestigen, rechtsklik terug, links slepen kijken, rechts slepen draaien, middel slepen verschuiven, wiel zoom, wielklik wisselt de laag\nToetsen: pijlen/WASD, Enter bevestigen, Esc terug, Q/E draaien, PgUp/PgDn zoom, C wisselt de laag, Shift versnellen  Pad: stick/A/B/LB/RB",
+	L"Mysz: LPM zatwierdź, PPM wstecz, przeciągnij LPM rozejrzyj się, PPM obrót, ŚPM przesuń, kółko zoom, klik kółka zmienia poziom\nKlawisze: strzałki/WASD, Enter zatwierdź, Esc wstecz, Q/E obrót, PgUp/PgDn zoom, C zmienia poziom, Shift przyspieszenie  Pad: gałka/A/B/LB/RB",
+	L"Fare: sol tık onay, sağ tık geri, sol sürükle bak, sağ sürükle döndür, orta sürükle kaydır, tekerlek yakınlaştır, tekerlek tıklaması katı değiştirir\nTuşlar: oklar/WASD, Enter onay, Esc geri, Q/E döndür, PgUp/PgDn yakınlaştır, C katı değiştirir, Shift hızlandır  Kol: çubuk/A/B/LB/RB")
 R(TX_BT_REJOIN, L"次", L"Next", L"Suivant", L"Dopo", L"Siguiente", L"다음", L"下次", L"التالي", L"Дальше", L"Danach", L"Depois", L"Hierna", L"Potem", L"Sonra")
 R(TX_GM_HEAL, L"回復ポイント", L"Heal Point", L"Point de soin", L"Punto cura", L"Punto de cura", L"회복 지점", L"回复点", L"نقطة العلاج", L"Точка лечения", L"Heilpunkt", L"Ponto de cura", L"Genezingspunt", L"Punkt leczenia", L"İyileşme noktası")
 R(TX_GM_MIGHT, L"3ターン能力2倍", L"Stats ×2 for 3 turns", L"Stats ×2 pendant 3 tours", L"Stat ×2 per 3 turni", L"Atributos ×2 por 3 turnos", L"3턴 동안 능력 2배", L"3回合能力×2", L"الصفات ×2 لثلاث أدوار", L"Параметры ×2 на 3 хода", L"Werte ×2 für 3 Züge", L"Atributos ×2 por 3 turnos", L"Stats ×2 gedurende 3 beurten", L"Statystyki ×2 przez 3 tury", L"3 tur boyunca statü ×2")
@@ -2309,6 +2309,9 @@ R(TX_BT_STAMPEDE, L"スタンピードステージ", L"Stampede Stage", L"Étage
 R(TX_BT_STAMPEDE_GO, L"スタンピード発生！", L"Stampede!", L"Ruée !", L"Calca!", L"¡Estampida!", L"스탬피드 발생!", L"狂奔来袭！", L"اندفاع!", L"Натиск!", L"Stampede!", L"Estouro!", L"Stormloop!", L"Napór!", L"İzdiham!")
 R(TX_BT_STAMPEDE_HELP, L"この戦闘はスタンピードです。最初にいる敵を倒して残りの数が少なくなると、味方のすぐそばに新しい敵が数体あらわれます。あらわれた敵は先に動いて襲ってきて、その手番が終わると普通の行動順にもどります。この追加は、その戦闘で一度だけです。", L"This battle is a stampede. When only a few of the starting enemies remain, several new foes appear right beside your party. They act at once and attack, then join the normal turn order. This happens only once in the battle.", L"Ce combat est une ruée. Quand il ne reste que peu d'ennemis du début, plusieurs nouveaux surgissent juste à côté de vos alliés. Ils agissent tout de suite et attaquent, puis reprennent l'ordre normal. Ce renfort n'arrive qu'une fois.", L"Questa battaglia è una calca. Quando restano pochi dei nemici iniziali, alcuni nuovi compaiono accanto ai tuoi alleati. Agiscono subito e attaccano, poi tornano all'ordine normale. Questo gruppo arriva una sola volta.", L"Esta batalla es una estampida. Cuando quedan pocos de los enemigos iniciales, varios nuevos aparecen junto a tus aliados. Actúan enseguida y atacan, y después vuelven al orden normal. Este grupo sale solo una vez.", L"이 전투는 스탬피드입니다. 처음 있던 적을 줄여 얼마 남지 않으면, 아군 바로 옆에 새 적이 몇 체 나타납니다. 나타난 적은 먼저 움직여 덮치고, 차례가 끝나면 보통 순서로 돌아갑니다. 이 추가는 한 번만 일어납니다.", L"这场战斗是狂奔。把开场的敌人打到所剩不多时，会有数名新敌人出现在我方身旁。他们会先行动并攻击，该回合结束后回到正常顺序。这样的增援在这一战里只发生一次。", L"هذه المعركة اندفاع. حين يبقى قليل من أعداء البداية، يظهر عدة أعداء جدد بجوار حلفائك. يتحركون فورًا ويهاجمون، ثم يعودون إلى ترتيب الأدوار. تحدث هذه الدفعة مرة واحدة.", L"Этот бой — натиск. Когда от начальных врагов остаётся мало, рядом с вашими бойцами появляется несколько новых. Они ходят сразу и бьют, затем встают в обычный порядок. Такая волна бывает один раз за бой.", L"Dieser Kampf ist ein Stampede. Wenn von den Anfangsgegnern nur noch wenige übrig sind, erscheinen mehrere neue direkt neben der Gruppe. Sie handeln sofort und greifen an, danach gilt wieder die normale Zugreihenfolge. Das kommt nur einmal vor.", L"Esta batalha é um estouro. Quando restam poucos dos inimigos iniciais, vários novos surgem ao lado do seu grupo. Eles agem na hora e atacam, depois voltam à ordem normal. Esse grupo aparece só uma vez.", L"Dit gevecht is een stormloop. Als er nog maar weinig van de eerste vijanden over zijn, duiken er meerdere nieuwe vlak naast je groep op. Ze handelen meteen en vallen aan, daarna geldt weer de normale beurt. Dit komt maar één keer voor.", L"Ta walka to napór. Gdy z początkowych wrogów zostanie niewielu, kilku nowych pojawia się tuż przy drużynie. Działają od razu i atakują, a potem wracają do zwykłej kolejności tur. Ta grupa pojawia się tylko raz.", L"Bu savaş bir izdihamdır. Başlangıçtaki düşmanlardan azı kalınca, birkaç yeni düşman grubunuzun yanında belirir. Hemen sıraya girip saldırırlar, sonra normal tur sırasına dönerler. Bu dalga yalnız bir kez olur.")
 
+R(TX_BT_SWEEP, L"掃討ステージ", L"Sweep Stage", L"Étape de nettoyage", L"Fase di rastrellamento", L"Etapa de limpieza", L"소탕 스테이지", L"扫荡关卡", L"مرحلة التطهير", L"Стадия зачистки", L"Säuberungsstufe", L"Estágio de limpeza", L"Zuiveringsetappe", L"Etap oczyszczenia", L"Temizleme aşaması")
+R(TX_BT_SWEEP_HELP, L"この戦闘は掃討です。ボスはいません。索敵に入った敵も、まだ気づいていない敵も、すべて倒すとクリアです。スタンピードと同じく、いつもの戦闘のあいだにときどき入ります。", L"This battle is a sweep. There is no boss. Clear it by defeating every enemy, whether they have spotted you or not. Like a stampede, it comes up now and then among ordinary battles.", L"Ce combat est un nettoyage. Il n'y a pas de boss. Il faut vaincre tous les ennemis, qu'ils vous aient repérés ou non. Comme la ruée, il arrive de temps en temps.", L"Questa battaglia è un rastrellamento. Non c'è un boss. Si vince abbattendo tutti i nemici, avvistati o no. Come la calca, capita ogni tanto.", L"Esta batalla es una limpieza. No hay jefe. Se gana al derrotar a todos los enemigos, te hayan visto o no. Como la estampida, aparece de vez en cuando.", L"이 전투는 소탕입니다. 보스는 없습니다. 수색에 들킨 적도, 아직 모르는 적도, 모두 쓰러뜨리면 클리어입니다. 스탬피드처럼 가끔 나옵니다.", L"这场战斗是扫荡。没有首领。无论是否已被索敌发现，把所有敌人打倒即通关。和狂奔一样，会在普通战斗中偶尔出现。", L"هذه المعركة تطهير. لا زعيم. تنتصر بهزيمة كل الأعداء، سواء رصدوكم أم لا. مثل الاندفاع، تظهر بين الحين والآخر.", L"Этот бой — зачистка. Босса нет. Победа — когда падут все враги, заметили они вас или нет. Как и натиск, такая стадия иногда выпадает.", L"Dieser Kampf ist eine Säuberung. Es gibt keinen Boss. Sieg, wenn alle Feinde fallen, ob sie euch gesehen haben oder nicht. Wie ein Stampede kommt das ab und zu vor.", L"Esta batalha é uma limpeza. Não há chefe. Vence-se ao derrubar todos os inimigos, tenham eles vos visto ou não. Como o estouro, aparece de vez em quando.", L"Dit gevecht is een zuivering. Er is geen baas. Je wint als alle vijanden vallen, of ze je zagen of niet. Net als een stormloop komt dit af en toe voor.", L"Ta walka to oczyszczenie. Nie ma bossa. Wygrywasz, gdy padną wszyscy wrogowie, czy cię wypatrzyli, czy nie. Jak napór, trafia się od czasu do czasu.", L"Bu savaş bir temizlemedir. Patron yoktur. Sizi görsün ya da görmesin, tüm düşmanları yenmek galibiyettir. İzdiham gibi ara sıra çıkar.")
+
 // ---------------------------------------------------------------- 追加職の説明
 R(TX_CLD_JOB + 0, L"蛮族。ゴッドフィストを覚える。拳と斧で押し、力とHPが伸びる。", L"Barbarian. Learns God Fist. Presses with fist and axe. Strength and HP rise.", L"barbare. Apprend Poing divin. Pousse au poing et à la hache. Force et PV montent.", L"barbaro. Impara Pugno divino. Spinge con pugno e ascia. Forza e PS salgono.", L"bárbaro. Aprende Puño divino. Empuja con puño y hacha. Suben fuerza y PV.", L"야만인. 신권을 익힌다. 주먹과 도끼로 민다. 힘과 HP가 오른다.", L"蛮族。学会神拳。以拳和斧推进。力量和HP上升。", L"بربري. يتعلم قبضة إلهية. يضغط بالقبضة والفأس. ترتفع القوة والصحة.", L"варвар. Изучает Божественный кулак. Давит кулаком и топором. Растут сила и ОЗ.", L"Barbar. Erlernt Gottfaust. Drückt mit Faust und Axt. Stärke und LP steigen.", L"bárbaro. Aprende Punho divino. Pressiona com punho e machado. Sobem força e PV.", L"barbaar. Leert Godenvuist. Drukt met vuist en bijl. Kracht en LP stijgen.", L"barbarzyńca. Uczy się Boska pięść. Napiera pięścią i toporem. Rosną siła i PŻ.", L"barbar. Tanrı yumruğu öğrenir. Yumruk ve baltayla bastırır. Güç ve CP artar.")
 R(TX_CLD_JOB + 1, L"吟遊詩人。ファイア・ボルトを覚える。杖の魔法が伸び、魔力と魔防とMPが伸びる。", L"Bard. Learns Fire Bolt. Staff magic reaches farther. Magic, resistance, and MP rise.", L"barde. Apprend feu trait. La magie du bâton porte plus loin. Magie, résistance et PM montent.", L"bardo. Impara fuoco dardo. La magia del bastone arriva più lontano. Magia, resistenza e PM salgono.", L"bardo. Aprende fuego rayo. La magia del bastón llega más lejos. Suben magia, resistencia y PM.", L"음유시인. 화염화살을 익힌다. 지팡이 마법이 뻗는다. 마력, 마방, MP가 오른다.", L"吟游诗人。学会火焰矢。杖的魔法更远。魔力、魔防和MP上升。", L"شاعر. يتعلم نار سهم. سحر العصا يصل أبعد. يرتفع السحر والمقاومة والطاقة.", L"бард. Изучает огонь снаряд. Магия посоха бьёт дальше. Растут магия, стойкость и ОМ.", L"Barde. Erlernt Feuer Blitz. Stabmagie reicht weiter. Magie, Resistenz und MP steigen.", L"bardo. Aprende fogo seta. A magia do cajado alcança mais longe. Sobem magia, resistência e PM.", L"bard. Leert vuur schicht. Stafmagie reikt verder. Magie, weerstand en MP stijgen.", L"bard. Uczy się ogień pocisk. Magia laski sięga dalej. Rosną magia, odporność i PM.", L"ozan. ateş ok öğrenir. Asa büyüsü daha uzağa erer. Büyü, direnç ve MP artar.")
@@ -2567,6 +2570,9 @@ R(TX_SLOT_IN_Q, L"選んだスロットの内容は、このファイルに置�
 R(TX_SLOT_OUTTO, L"書き出すスロットを選んでください", L"Choose the slot to export", L"Choisissez l'emplacement à exporter", L"Scegli lo slot da esportare", L"Elige la ranura a exportar", L"내보낼 슬롯을 고르세요", L"请选择要导出的存档槽", L"اختر الخانة للتصدير", L"Выберите слот для экспорта", L"Speicherplatz zum Export wählen", L"Escolha o espaço a exportar", L"Kies het slot om te exporteren", L"Wybierz slot do eksportu", L"Dışa aktarılacak yuvayı seçin")
 R(TX_SLOT_INTO, L"読み込むスロットを選んでください", L"Choose the slot to import into", L"Choisissez l'emplacement de destination", L"Scegli lo slot di destinazione", L"Elige la ranura de destino", L"가져올 슬롯을 고르세요", L"请选择要导入的存档槽", L"اختر الخانة للاستيراد", L"Выберите слот для импорта", L"Speicherplatz zum Import wählen", L"Escolha o espaço de destino", L"Kies het slot om in te importeren", L"Wybierz slot docelowy", L"İçe aktarılacak yuvayı seçin")
 R(TX_SLOT_IO_BAD, L"ファイルを読めませんでした。", L"Could not read the file.", L"Impossible de lire le fichier.", L"Impossibile leggere il file.", L"No se pudo leer el archivo.", L"파일을 읽지 못했습니다.", L"无法读取文件。", L"تعذر قراءة الملف.", L"Не удалось прочитать файл.", L"Datei konnte nicht gelesen werden.", L"Não foi possível ler o arquivo.", L"Het bestand kon niet worden gelezen.", L"Nie udało się odczytać pliku.", L"Dosya okunamadı.")
+R(TX_EV_TRIAL, L"お試し", L"Trial", L"Essai", L"Prova", L"Prueba", L"체험", L"试用", L"تجربة", L"Проба", L"Probe", L"Prova", L"Proef", L"Próba", L"Deneme")
+R(TX_EV_REVERT, L"元の職へ戻す", L"Return to previous", L"Revenir à l'ancienne", L"Torna alla precedente", L"Volver a la anterior", L"이전 직업으로", L"回到原职业", L"العودة للسابقة", L"Вернуть прежнюю", L"Zurück zur vorigen", L"Voltar à anterior", L"Terug naar vorige", L"Wróć do poprzedniej", L"Önceki sınıfa dön")
+R(TX_EV_GRACE, L"Lv+3まで選び直せます", L"Rechoose until Lv+3", L"Rechoix jusqu'au Nv+3", L"Riscelta fino a Lv+3", L"Reelegir hasta Nv+3", L"Lv+3까지 다시 선택", L"Lv+3前可重选", L"إعادة الاختيار حتى +3", L"Перевыбор до Ур+3", L"Neu wählen bis Lv+3", L"Reescolher até Nv+3", L"Opnieuw tot Lv+3", L"Ponowny wybór do Poz+3", L"Sv+3'e kadar yeniden")
 
 };
 

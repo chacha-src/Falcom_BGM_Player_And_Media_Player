@@ -207,6 +207,8 @@ private:
 	void BattleConfirmCursor();
 	void ApplyTerrace(int tx, int tz);
 	void MoveCursor(int dx, int dz);
+	void CycleLayer(int dir);
+	void SyncCursorLayer();
 	void UpdateHover();
 	BOOL PickCell(float sx, float sy, int& cx, int& cz) const;
 	V3 CellCenter(int x, int z) const;
@@ -239,6 +241,7 @@ private:
 	void DrawForecast();
 	void PreviewBattleExp(long long& opt, long long& pes, int& showLv, int& nTg, BOOL& combat) const;
 	void DrawMinimap(float x, float y, float s);
+	void DrawShowMinimap(float x, float y, float s);
 	void DrawCommandMenu();
 	void DrawFormGuide(int skill, int tx, int tz, float avoidX, float avoidY, float avoidW, float avoidH);
 	void UseConsumable(int good, int target);
@@ -478,9 +481,11 @@ private:
 	int m_cur;           // 行動中ユニット
 	BOOL m_turnOpen;     // m_cur の行動が未確定（CT 未消費）
 	int m_curX0, m_curZ0;   // 行動開始位置（取消用）
+	int m_curDeck0;
 	float m_curFace0;
 	int m_moved;
 	int m_cx, m_cz;      // カーソル
+	int m_cLayer;        // 見ている層。0=下 1=中 2=上
 	BOOL m_cursorValid;
 	int m_hoverUnit;
 	int m_cmdSkill;      // 選択中スキル（-1=通常）

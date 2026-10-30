@@ -2872,6 +2872,16 @@
     <None Include="res\cso\maze_cssub.cso" />
     <None Include="res\cso\race_csgridc.cso" />
     <None Include="res\cso\race_csgridw.cso" />
+    <None Include="res\cso\tac_cssoft.cso" />
+    <None Include="res\cso\tac_cssoftw.cso" />
+    <None Include="res\cso\tac_cshair.cso" />
+    <None Include="res\cso\tac_cshairw.cso" />
+    <None Include="res\cso\tac_psgrtiny.cso" />
+    <None Include="res\cso\tac_vst.cso" />
+    <None Include="res\cso\tac_hst.cso" />
+    <None Include="res\cso\tac_dst.cso" />
+    <None Include="res\cso\tac_psdofh.cso" />
+    <None Include="res\cso\tac_psdofu.cso" />
   </ItemGroup>
   <ItemGroup>
     <Text Include="codec\APPLE_LICENSE.txt">

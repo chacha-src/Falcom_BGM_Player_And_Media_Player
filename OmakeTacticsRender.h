@@ -259,7 +259,7 @@ public:
 		int backN;
 		// 布（omake_tactics_cloth.hlsl）。[0] は格子の点 ClothN、[1] は動かす頂点 ClothV、[2] は脚の形の半径。clothN=0 は布を動かさない。
 		// clothAxis はスカートの中心軸（バインドの x, z）。脚が布に入ったら、この軸から外へ押し出す。
-		ID3D11Buffer* clothSB[3]; ID3D11ShaderResourceView* clothSRV[3]; int clothN, clothVN, clothHip; float clothAxis[2];
+		ID3D11Buffer* clothSB[3]; ID3D11ShaderResourceView* clothSRV[3]; int clothN, clothVN, clothHip; float clothAxis[2]; float clothY0;
 		// 胸と袖。softN=0 はタイト（体に沿ったまま）。softBone は 0 胸、1 上腕左、2 前腕左、3 上腕右、4 前腕右。
 		ID3D11Buffer* softSB[2]; ID3D11ShaderResourceView* softSRV[2]; int softN, softVN;
 		int softBone[6];
@@ -274,7 +274,7 @@ public:
 			for (int i = 0; i < 32; i++) backZ[i] = 0;
 			for (int b = 0; b < 3; b++) { clothSB[b] = NULL; clothSRV[b] = NULL; }
 			softSB[0] = softSB[1] = NULL; softSRV[0] = softSRV[1] = NULL;
-			clothAxis[0] = clothAxis[1] = 0.f;
+			clothAxis[0] = clothAxis[1] = clothY0 = 0.f;
 			for (int i = 0; i < 6; i++) softBone[i] = -1;
 			for (int i = 0; i < 4; i++) armJ[i][0] = armJ[i][1] = -1;
 			memset(bustA, 0, sizeof(bustA));
@@ -351,6 +351,8 @@ public:
 	void DrawSkinned(const Model& m, const Pose& p, const M4& world, const DrawParams& dp);
 	void DrawAttach(const Attach& a, const Pose& p, int joint, const M4& world, const DrawParams& dp, const M4* extra = NULL);
 	void DrawTerrain();
+	void SetFadeAbove(int layer, int x = -1, int z = -1) { m_fadeAbove = layer; m_fadeX = x; m_fadeZ = z; }
+	void SetDepthWrite(BOOL on) { if (m_ctx) m_ctx->OMSetDepthStencilState(on ? m_dsWrite : m_dsRead, 0); }
 	void DrawWater();
 	void DrawOverlayQuads(const VtxS* q, int n, int cursorStyle);
 	void DrawParticles(const Particle* ps, int n);
@@ -613,6 +615,9 @@ private:
 
 	// 地形
 	GpuMesh m_terrain;
+	GpuMesh m_cover1[16];
+	GpuMesh m_cover2[16];
+	int m_fadeAbove, m_fadeX, m_fadeZ;
 	GpuMesh m_water;
 	GpuMesh m_lava;
 	struct PropBatch { GpuMesh mesh; float hue; float mat; };

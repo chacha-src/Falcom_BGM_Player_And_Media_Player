@@ -186,6 +186,12 @@ int ThemeNameTx(int th);
 
 enum { MAPN = 64, MAXH = 12 };
 const float kHStep = 0.4f;
+// 経路の1点に「橋の上」を載せる。マス番号は 0..4095 なので 8192 とは重ならない。
+enum { LAY_N = 3, TAC_CELL_MASK = 8191 };
+inline int PackCell(int x, int z, int layer) { return (z * MAPN + x) | ((layer & 3) << 13); }
+inline int PackX(int c) { int i = c & TAC_CELL_MASK; return i % MAPN; }
+inline int PackZ(int c) { int i = c & TAC_CELL_MASK; return i / MAPN; }
+inline int PackDeck(int c) { return (c >> 13) & 3; }
 
 enum PropKind {
 	PK_NONE, PK_TREE, PK_TREES, PK_PINE, PK_DEAD, PK_ROCK, PK_MOUNT, PK_LILY, PK_PILLAR,
@@ -201,8 +207,46 @@ struct Cell {
 	BYTE prop;   // PropKind
 	BYTE var;    // 小物のバリエーション／回転
 	BYTE gimm;   // Gimmick
-	BYTE gparam; // ワープ組番号
+	BYTE gparam; // ワープ組番号。橋でギミックなしのとき、下を通れる床の高さ（0=床なし）
+	BYTE nLay;   // 0 か 1=このマスは下だけ。2=中層あり。3=上まで
+	BYTE t1, h1; // 中層。洞窟の天井や橋の上
+	BYTE t2, h2; // 上層。天井のさらに上
 };
+
+// 橋の下の床。0 なら橋板だけ（川に架かる普通の橋）。
+inline int BridgeFloor(const Cell& c)
+{
+	if (c.t != T_BRIDGE || c.gimm != GM_NONE) return 0;
+	if (c.gparam < 1) return 0;
+	if ((int)c.gparam + 3 > (int)c.h) return 0;
+	return (int)c.gparam;
+}
+inline int CellLayN(const Cell& c)
+{
+	int n = c.nLay;
+	if (n < 1) n = 1;
+	if (n > LAY_N) n = LAY_N;
+	if (n < 2 && BridgeFloor(c)) return 2;
+	return n;
+}
+inline int LayerOn(const Cell& c, int L)
+{
+	return L >= 0 && L < CellLayN(c);
+}
+inline int LayerHt(const Cell& c, int L)
+{
+	if (c.nLay < 2 && BridgeFloor(c)) return L <= 0 ? (int)c.gparam : (int)c.h;
+	if (L <= 0) return (int)c.h;
+	if (L == 1) return (int)c.h1;
+	return (int)c.h2;
+}
+inline int LayerTr(const Cell& c, int L)
+{
+	if (c.nLay < 2 && BridgeFloor(c)) return L <= 0 ? T_ROAD : T_BRIDGE;
+	if (L <= 0) return (int)c.t;
+	if (L == 1) return (int)c.t1;
+	return (int)c.t2;
+}
 
 enum { MAX_GROUPS = 200, GRP_CAP = 15 };
 
@@ -228,7 +272,8 @@ struct Map {
 	const Cell& At(int x, int z) const { return c[z][x]; }
 	static bool In(int x, int z) { return x >= 0 && z >= 0 && x < MAPN && z < MAPN; }
 	float TopY(int x, int z) const;      // セル上面のワールド高さ
-	float StandY(int x, int z) const;    // ユニットの足元
+	float StandY(int x, int z) const;    // ユニットの足元（橋は橋板）
+	float WalkY(int x, int z, int deck) const; // deck=0 で橋の下
 };
 
 void GenerateMap(Map& m, int stage, DWORD seed, int theme = -1);
@@ -395,6 +440,8 @@ struct CharData {
 	int kills, battles;
 	DWORD uid;
 	int reserved[8];
+	int trialFrom;   // 直前の転職元。お試し中だけ有効
+	int trialLv;     // 転職したレベル。0 はお試しなし。このレベル+3 まで選び直せる
 };
 #pragma pack(pop)
 
@@ -443,6 +490,8 @@ void CharGiveSkill(CharData& c, int s);
 struct EvoOption { int target; int needGroup; };   // needGroup=-1 で不問
 int EvoOptions(int cls, EvoOption out[4]);
 bool EvoMainEligible(const CharData& c);
+bool EvoTrialOpen(const CharData& c);             // 転職後 +3 レベルのお試し
+void EvoRetrain(CharData& c, int target);         // お試し中の選び直し。上乗せは重ねない
 bool EvoPartnerEligible(const CharData& main, const CharData& p);
 int EvoPartnersNeeded(const CharData& main);
 bool EvoGroupSatisfied(int needGroup, const CharData* partners, int n);
@@ -507,6 +556,7 @@ struct Unit {
 	int mulTurns;        // マス効果: この間ステータス倍
 	int alert;           // 1=行動順に入る（味方は常に 1。敵拠点は接近で起床）
 	int rush;            // 1=スタンピードの先制。手番が終わると通常の CT に戻す
+	int deck;            // 立っている層。0=下 1=中 2=上
 	int grp;             // 敵拠点番号（味方は -1）
 	int expGained;
 	int levelsGained;
@@ -553,13 +603,48 @@ void MakeEnemy(Unit& u, int monster, int lv, int boss, Rng& r);
 
 // ---------------- 経路 ----------------
 struct Reach {
-	short cost[MAPN][MAPN];   // -1=到達不可
-	short from[MAPN][MAPN];   // 前セル (z*MAPN+x)
+	short cost[MAPN][MAPN];   // -1=到達不可。層0
+	short from[MAPN][MAPN];   // 前セル。上位2ビットが前の層
 	BYTE  canStop[MAPN][MAPN];
+	short costHi[MAPN][MAPN]; // 層1
+	short fromHi[MAPN][MAPN];
+	BYTE  canStopHi[MAPN][MAPN];
+	short cost2[MAPN][MAPN];  // 層2
+	short from2[MAPN][MAPN];
+	BYTE  canStop2[MAPN][MAPN];
 };
+inline int ReachCostAt(const Reach& r, int layer, int x, int z)
+{
+	if (layer == 1) return r.costHi[z][x];
+	if (layer == 2) return r.cost2[z][x];
+	return r.cost[z][x];
+}
+inline int ReachBestCost(const Reach& r, int x, int z)
+{
+	int b = -1;
+	for (int L = 0; L < LAY_N; L++) {
+		int c = ReachCostAt(r, L, x, z);
+		if (c < 0) continue;
+		if (b < 0 || c < b) b = c;
+	}
+	return b;
+}
+inline int ReachCanStop(const Reach& r, int x, int z)
+{
+	if (r.cost[z][x] >= 0 && r.canStop[z][x]) return 1;
+	if (r.costHi[z][x] >= 0 && r.canStopHi[z][x]) return 1;
+	if (r.cost2[z][x] >= 0 && r.canStop2[z][x]) return 1;
+	return 0;
+}
+inline int ReachCanStopLayer(const Reach& r, int x, int z, int layer)
+{
+	if (layer == 1) return r.costHi[z][x] >= 0 && r.canStopHi[z][x];
+	if (layer == 2) return r.cost2[z][x] >= 0 && r.canStop2[z][x];
+	return r.cost[z][x] >= 0 && r.canStop[z][x];
+}
 struct Battle;
 void ComputeReach(const Battle& b, int ui, Reach& out);
-int  ReachPath(const Reach& r, int sx, int sz, int tx, int tz, int* outXZ, int maxN);   // 戻り: 点数（開始含む）
+int  ReachPath(const Reach& r, int sx, int sz, int tx, int tz, int* outXZ, int maxN, int preferLayer = -1);
 bool CanStep(const Map& m, int fromX, int fromZ, int toX, int toZ, int moveType, int jump);
 bool LineOfSight(const Map& m, int ax, int az, int bx, int bz);
 bool InAttackRange(const Battle& b, int ax, int az, int rMin, int rMax, int tx, int tz, bool needLos);
@@ -627,16 +712,22 @@ struct Battle {
 	int nUnits;
 	int stage;
 	int turnCount;
-	int occ[MAPN][MAPN];      // ユニット番号+1
+	int occ[LAY_N][MAPN][MAPN]; // [層][z][x] ユニット番号+1
 	void RebuildOcc();
-	int UnitAt(int x, int z) const { return Map::In(x, z) ? occ[z][x] - 1 : -1; }
+	int UnitAt(int x, int z, int layer) const { return (Map::In(x, z) && layer >= 0 && layer < LAY_N) ? occ[layer][z][x] - 1 : -1; }
+	int UnitAt(int x, int z) const {
+		if (!Map::In(x, z)) return -1;
+		for (int L = 0; L < LAY_N; L++) if (occ[L][z][x]) return occ[L][z][x] - 1;
+		return -1;
+	}
 	int AliveCount(int team) const;
 	int weather;              // Weather。戦闘中だけ。セーブの大きさは変えない
 	int stampede;             // 1=この戦闘はスタンピードステージ
 	int stampedeLeft;         // 残りの発生回数（1）
 	int stampedeLine;         // 生存している敵がこの数以下で次の波
 	int stampedeShow;         // 1=湧きを見せているあいだ、次の手番を少し待つ
-	int bgmWin;               // 1=勝利目前に入った。この戦闘では通常曲へ戻さない
+	int bgmWin;               // 1=今フレームは勝利目前。索敵が増えると戻す
+	int sweep;                // 1=掃討。ボスなし。全員倒すと勝ち
 	int NextActor();          // CT を進めて次の行動者を返す
 	// acting の手番終了後（CT を cost 消費）の並び。insertAt はそのユニットが次に入る位置
 	int PredictOrder(int* out, int n, int acting = -1, int cost = 1000, int* insertAt = NULL) const;
@@ -720,7 +811,7 @@ struct SaveData {
 	int rosterCap;             // 20,40,60,80,100。店の名簿の頁
 };
 // version 1 は名簿 20・編成 5。version 2 は能力 10 種。version 3 が能力 20 種・編成 10。
-// version 4 は編成 15。読込は全部受け、書き出しは 4。
+// version 4 は編成 15。version 5 は転職のお試し（trialFrom, trialLv）。読込は全部受け、書き出しは 5。
 #pragma pack(pop)
 inline int TacGridOn(const SaveData& s) { return (s.showGrid & 1) != 0; }
 inline int TacThreatOn(const SaveData& s) { return (s.showGrid & 2) != 0; }
