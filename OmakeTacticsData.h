@@ -442,6 +442,8 @@ struct CharData {
 	int reserved[8];
 	int trialFrom;   // 直前の転職元。お試し中だけ有効
 	int trialLv;     // 転職したレベル。0 はお試しなし。このレベル+3 まで選び直せる
+	int jobPath[12]; // 1次職から順。-1 は空。version 6
+	int jobDone;     // 1=振り直し済み、または新規。0 は一度だけの案内が残っている
 };
 #pragma pack(pop)
 
@@ -497,6 +499,13 @@ int EvoPartnersNeeded(const CharData& main);
 bool EvoGroupSatisfied(int needGroup, const CharData* partners, int n);
 void EvoApply(CharData& main, int target, const CharData* partners, int n);
 void EvoBrief(int cls, wchar_t* out, int cap);     // 進化先の説明。役割が分かる3行
+enum { JOB_PATH_N = 12 };
+int JobPathCount(const CharData& c);
+int JobStepsForLevel(int lv);
+void JobPathClear(CharData& c);
+void JobRebook(CharData& c, const int* path, int n);
+// 1次職の初期能力から、レベルアップと同じ式で次の職まで上げる。toNext=1 なら最後の職は次の転職で止める。
+void JobProject(CharData& c, const int* path, int n, int toNext);
 
 // ---------------- 敵 ----------------
 enum MonsterId {
@@ -811,7 +820,8 @@ struct SaveData {
 	int rosterCap;             // 20,40,60,80,100。店の名簿の頁
 };
 // version 1 は名簿 20・編成 5。version 2 は能力 10 種。version 3 が能力 20 種・編成 10。
-// version 4 は編成 15。version 5 は転職のお試し（trialFrom, trialLv）。読込は全部受け、書き出しは 5。
+// version 4 は編成 15。version 5 は転職のお試し（trialFrom, trialLv）。
+// version 6 は職の履歴（jobPath, jobDone）。読込は全部受け、書き出しは 6。
 #pragma pack(pop)
 inline int TacGridOn(const SaveData& s) { return (s.showGrid & 1) != 0; }
 inline int TacThreatOn(const SaveData& s) { return (s.showGrid & 2) != 0; }
@@ -855,6 +865,7 @@ int GearSellSurplus(SaveData& s);
 // 所持の中で、そのキャラの装着より高い同じ系統・種類。無ければ -1。
 int GearBestUpgrade(const SaveData& s, int roster, int kind);
 void GearEquip(CharData& c, SaveData& s, int stashIndex);
+void JobRefitGear(CharData& c, SaveData& s);
 int GearTryDrop(SaveData& s, int enemyLv, int monster, Rng& r);
 int MonsterDropLine(int monster);
 bool DropConsumable(SaveData& s, int monster, Rng& r, wchar_t* name = NULL, int nameN = 0);

@@ -4764,11 +4764,11 @@ static void PrepCloth(Renderer::AvaCache& nc, int nb, int nv, const Buf<WORD>& c
 			}
 			expose[k] = (dO > 0.008f * 0.008f && dS > 0.008f * 0.008f) ? 2 : 1;
 		}
-		// 腰から下でスカートの内側にある素体（3）。衣装の作りで残してある腰まわりの素体は元の重みで脚に付いて
-		// ねじれるので、布を腰に付けて動かすと布を突き抜ける。周 32 × 高さ 2cm の区画ごとの布の一番外の半径より
-		// 内にあれば隠す。腕は布より外なので残る。
+		// 腰から裾まで、スカートの内側にある素体（3）。ゆるいドレスは脚から 8mm 以上離れるので、上の判定だけだと
+		// ふくらはぎと足が「見えてよい」に戻り、布を突き抜ける。周の布が三方にある区画より内なら、裾の下まで隠す。
+		// 裾より下と、布の外（腕、短いスカートの下の足）は残る。
 		enum { HK = 32, HB = 64 };
-		const float hTop = y0 + 0.15f, hBot = hipY - 0.30f, hDy = (hTop - hBot) / (float)HB;
+		const float hTop = y0 + 0.15f, hBot = yMin - 0.02f, hDy = (hTop - hBot) / (float)HB;
 		float rOut[HB][HK];
 		for (int b = 0; b < HB; b++) for (int s = 0; s < HK; s++) rOut[b][s] = -1.f;
 		auto hBin = [&](const float* p, int* b, int* s, float* r) {
@@ -4784,12 +4784,12 @@ static void PrepCloth(Renderer::AvaCache& nc, int nb, int nv, const Buf<WORD>& c
 			if (hBin(V[nb + i].p, &b, &s, &r) && r > rOut[b][s]) rOut[b][s] = r;
 		}
 		for (int k = 0; k < nb; k++) {
-			if (expose[k]) continue;
+			if (expose[k] == 1 || expose[k] == 3) continue;
 			int b, s; float r;
 			if (!hBin(V[k].p, &b, &s, &r)) continue;
 			float cov = 1e9f;
 			for (int e = -1; e <= 1; e++) cov = fminf(cov, rOut[b][(s + e + HK) % HK]);
-			if (cov > 0.f && r < cov - 0.005f) expose[k] = 3;
+			if (cov > 0.f && r < cov - 0.012f) expose[k] = 3;
 		}
 	}
 	nc.clothN = NN;
@@ -5567,9 +5567,16 @@ void Renderer::RunHair(int model, int style, int headJ, const Pose& pose, const 
 		if (j >= 0) return j;
 		return (fallback >= 0 && fallback < pose.nJ) ? fallback : -1;
 	};
+	// パレットの平行移動はバインド位置からの差で、待機ではほぼ 0。関節そのものの位置は逆バインドから取る。
 	auto at = [&](int j, float* o) -> BOOL {
-		if (j < 0) return FALSE;
-		o[0] = pose.palette[j].m[12]; o[1] = pose.palette[j].m[13]; o[2] = pose.palette[j].m[14];
+		if (j < 0 || j >= pose.nJ) return FALSE;
+		V3 b = v3(0.f, 0.f, 0.f);
+		if (md && j < md->nJ) {
+			const M4 ib = MInverse(md->invBind[j]);
+			b = v3(ib.m[12], ib.m[13], ib.m[14]);
+		}
+		const V3 p = MXformPt(pose.palette[j], b);
+		o[0] = p.x; o[1] = p.y; o[2] = p.z;
 		return TRUE;
 	};
 	int nc = 0;
@@ -5588,17 +5595,21 @@ void Renderer::RunHair(int model, int style, int headJ, const Pose& pose, const 
 	const int jAb = findJ("Abdomen");
 	const int jHandL = jointOr("Hand.L", md ? md->handL : -1);
 	const int jHandR = jointOr("Hand.R", md ? md->handR : -1);
-	cap(jNeck, headJ, 0.078f, 0.086f);
-	cap(jTorso, jHip >= 0 ? jHip : jAb, 0.158f, 0.142f);
+	cap(jNeck, headJ, 0.072f, 0.080f);
+	// 胸側を太くすると、端の球が顎と前髪まで届いて毛が鍔になる。
+	cap(jTorso, jHip >= 0 ? jHip : jAb, 0.090f, 0.125f);
 	cap(findJ("Shoulder.L"), findJ("UpperArm.L"), 0.060f, 0.054f);
 	cap(findJ("Shoulder.R"), findJ("UpperArm.R"), 0.060f, 0.054f);
 	cap(findJ("UpperArm.L"), findJ("LowerArm.L"), 0.056f, 0.048f);
 	cap(findJ("UpperArm.R"), findJ("LowerArm.R"), 0.056f, 0.048f);
 	cap(findJ("LowerArm.L"), jHandL, 0.040f, 0.034f);
 	cap(findJ("LowerArm.R"), jHandR, 0.040f, 0.034f);
-	float body[3] = { pal.m[12], pal.m[13] - 0.18f, pal.m[14] };
+	float body[3] = { pal.m[12], pal.m[13] - 0.22f, pal.m[14] };
 	float tmp[3];
 	if (at(jTorso, tmp)) { body[0] = tmp[0]; body[1] = tmp[1]; body[2] = tmp[2]; }
+	else if (at(headJ, tmp)) {
+		body[0] = tmp[0]; body[1] = tmp[1] - 0.22f; body[2] = tmp[2];
+	}
 	cb.body[0] = body[0]; cb.body[1] = body[1]; cb.body[2] = body[2]; cb.body[3] = 1.f;
 	cb.cnt[0] = (unsigned)m_hairV0[style];
 	cb.cnt[1] = (unsigned)style;

@@ -195,6 +195,12 @@ private:
 	void DrawEvolveUi();
 	void DrawEvoCut();
 	void DoEvolve();
+	void DrawJobGate();
+	void DrawJobRedo();
+	int NextJobPending(int from) const;
+	void BeginJobRedo();
+	void ApplyJobPick(int cls);
+	void FinishJobSkip();
 
 	// 戦闘
 	void StartBattle(int stage);
@@ -471,6 +477,9 @@ private:
 	int m_evoCut;
 	float m_evoT;
 	int m_evoRoster, m_evoFrom, m_evoTo;
+	int m_jobRedo;     // 0なし 1案内 2進化画面で振り直し 3スキップ確認
+	int m_jobWho, m_jobStep, m_jobN, m_jobSkipAll, m_jobSel;
+	int m_jobPath[12];
 
 	// 戦闘
 	Battle m_b;
@@ -535,15 +544,16 @@ private:
 	int m_cutStage;      // 0=覆う 1=技名 2=攻防 3=覆う 4=マップへ
 	float m_cutStageT;
 	int m_cutA, m_cutD;
-	int m_cutAlly[6], m_cutFoe[6];
+	enum { CUT_ALLY_MAX = MAX_PARTY, CUT_FOE_MAX = 96 };
+	int m_cutAlly[CUT_ALLY_MAX], m_cutFoe[CUT_FOE_MAX];
 	int m_cutAllyN, m_cutFoeN;
 	int m_cutKind;       // 0=通常 1=戦技 2=陣形 3=召喚
 	int m_sumOn, m_sumFx, m_sumHit, m_sumHide;
 	float m_sumU, m_sumYaw, m_sumFade;
 	V3 m_sumPos, m_sumFrom, m_sumTo;
 	Actor m_sumAct;
-	V3 m_cutAllyPos[6];
-	V3 m_cutFoePos[6];
+	V3 m_cutAllyPos[CUT_ALLY_MAX];
+	V3 m_cutFoePos[CUT_FOE_MAX];
 	V3 m_cutPosA, m_cutPosD;
 	float m_flashWhite;
 	Fix<Popup, 64> m_deferPopups;

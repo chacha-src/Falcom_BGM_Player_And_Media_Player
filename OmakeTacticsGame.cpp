@@ -45,7 +45,8 @@ enum {
 	ID_BASE_REROLL = 940, ID_BASE_THEME,
 	ID_BASE_SAVESLOT = 947,
 	ID_SLOT_ROW0 = 981, ID_SLOT_USE = 991, ID_SLOT_REN, ID_SLOT_COPY, ID_SLOT_DEL, ID_SLOT_BACK, ID_SLOT_YES, ID_SLOT_NO,
-	ID_SLOT_OUT = 998, ID_SLOT_IN
+	ID_SLOT_OUT = 998, ID_SLOT_IN,
+	ID_JOB_GO = 2200, ID_JOB_SKIP, ID_JOB_YES, ID_JOB_NO, ID_JOB_BACK, ID_JOB_NEXT, ID_JOB_OPT0 = 2210
 };
 
 void ThemeEnv(int th, Env& e)
@@ -238,6 +239,10 @@ Game::Game()
 	m_evoCut = 0;
 	m_evoT = 0;
 	m_evoRoster = m_evoFrom = m_evoTo = -1;
+	m_jobRedo = 0;
+	m_jobWho = m_jobStep = m_jobN = m_jobSkipAll = 0;
+	m_jobSel = -1;
+	for (int i = 0; i < 12; i++) m_jobPath[i] = -1;
 	memset(&m_b, 0, sizeof(m_b));
 	m_phase = m_phaseBeforeMenu = PH_NONE;
 	m_phaseT = 0;
@@ -1265,6 +1270,24 @@ void Game::NavConfirm()
 void Game::NavBack()
 {
 	if (m_showHelp) { m_showHelp = FALSE; TacSfx(TS_CANCEL); return; }
+	if (m_jobRedo == 3) {
+		m_jobRedo = m_jobSkipAll && m_screen != SC_EVOLVE ? 1 : (m_screen == SC_EVOLVE ? 2 : 1);
+		TacSfx(TS_CANCEL);
+		return;
+	}
+	if (m_jobRedo == 2) {
+		if (m_jobStep > 0) {
+			m_jobStep--;
+			m_jobSel = m_jobPath[m_jobStep];
+			for (int i = m_jobStep; i < 12; i++) m_jobPath[i] = -1;
+		} else {
+			m_jobRedo = 1;
+			m_screen = SC_BASE;
+		}
+		TacSfx(TS_CANCEL);
+		return;
+	}
+	if (m_jobRedo == 1) { TacSfx(TS_CANCEL); return; }
 	if (m_slotUi) {
 		if (m_textFocus) { m_textFocus = 0; TacSfx(TS_CANCEL); return; }
 		if (m_slotUi == 5) m_slotUi = 4;
@@ -2050,6 +2073,16 @@ void Game::EnterBase()
 	m_wheelSign = 0;
 	m_camDistGoal = m_camDist = m_zoomDist = 12.f;
 	m_camPitch = .5f;
+	int young = PromoteLevel(1);
+	int ycap = RosterCap();
+	int ydirty = 0;
+	for (int i = 0; i < ycap; i++) {
+		CharData& yc = m_save.roster[i];
+		if (yc.used && yc.jobDone == 0 && yc.lv < young) { yc.jobDone = 1; ydirty = 1; }
+	}
+	if (ydirty) Persist();
+	if (NextJobPending(0) < 0) m_jobRedo = 0;
+	else if (m_jobRedo != 1) m_jobRedo = 1;
 }
 
 void Game::UpdateBase(float dt)
@@ -4021,6 +4054,7 @@ void Game::DrawSlotUi()
 
 void Game::DrawBaseUi()
 {
+	if (m_jobRedo == 1 || m_jobRedo == 3) { DrawJobGate(); return; }
 	if (m_slotUi) { DrawSlotUi(); return; }
 	if (m_codex) { DrawCodex(); return; }
 	if (m_shop) { DrawShop(); return; }
@@ -4969,14 +5003,30 @@ void Game::DrawPartyUi()
 	DrawPortrait(RosterPortrait(m_partySel), dx + U(14), y + U(14), ps2, RGBA8(200, 170, 110));
 	m_r.HudText(c.name, dx + ps2 + U(26), y + U(30), U(20), RGBA8(255, 255, 255), 0, 1);
 	m_r.HudText(ClassName(c.cls), dx + ps2 + U(26), y + U(56), U(15), RGBA8(255, 226, 150), 0, 1);
+	float histDrop = 0;
+	if (JobPathCount(c) > 0) {
+		wchar_t hist[512];
+		hist[0] = 0;
+		wcscpy_s(hist, TT(TX_JOB_HIST));
+		wcscat_s(hist, L"  ");
+		int pn = JobPathCount(c);
+		for (int pi = 0; pi < pn; pi++) {
+			wchar_t bit[64];
+			swprintf_s(bit, TT(TX_JOB_NTH), pi + 1, ClassName(c.jobPath[pi]));
+			if (pi) wcscat_s(hist, L" → ");
+			wcscat_s(hist, bit);
+		}
+		m_r.HudTextBox(hist, dx + ps2 + U(26), y + U(72), dw - ps2 - U(40), U(28), U(12), RGBA8(210, 210, 220));
+		histDrop = U(30);
+	}
 	wchar_t l[96];
 	int need = ExpToNext(c.lv);
 	int left = c.lv >= TAC_LV_MAX ? 0 : max(0, need - c.exp);
 	swprintf_s(l, L"%s %d   %s %d/%d  %s %d", TT(TX_MISC_LV), c.lv, TT(TX_MISC_EXP), c.exp, need, TT(TX_EXP_LEFT), left);
-	m_r.HudText(l, dx + ps2 + U(26), y + U(80), U(14), RGBA8(220, 220, 220), 0, 0);
-	Bar(dx + ps2 + U(26), y + U(94), dw - ps2 - U(44), U(8), need > 0 ? c.exp / (float)need : 0.f, RGBA8(120, 200, 255), RGBA8(60, 120, 220));
+	m_r.HudText(l, dx + ps2 + U(26), y + U(80) + histDrop, U(14), RGBA8(220, 220, 220), 0, 0);
+	Bar(dx + ps2 + U(26), y + U(94) + histDrop, dw - ps2 - U(44), U(8), need > 0 ? c.exp / (float)need : 0.f, RGBA8(120, 200, 255), RGBA8(60, 120, 220));
 	swprintf_s(l, L"%s %d  /  %s %d", TT(TX_BT_DEFEATED), c.kills, TT(TX_BT_STAGE), c.battles);
-	m_r.HudText(l, dx + ps2 + U(26), y + U(114), U(12), RGBA8(190, 190, 190), 0, 0);
+	m_r.HudText(l, dx + ps2 + U(26), y + U(114) + histDrop, U(12), RGBA8(190, 190, 190), 0, 0);
 	float gearH = U(22);
 	float gearGap = U(2);
 	float gearBlock = gearH * 6.f + gearGap * 5.f;
@@ -4989,7 +5039,7 @@ void Game::DrawPartyUi()
 	auto gearRow = [&](int r) { return gearY + r * (gearH + gearGap); };
 	int gearBonus[S_COUNT];
 	CharFightBonus(c, gearBonus);
-	float sy = y + max(ps2 + U(18.f), U(128.f));
+	float sy = y + max(ps2 + U(18.f), U(128.f) + histDrop);
 	sy += DrawStatLines(c, dx + U(14), sy, dw - U(28), gearBonus, -1, -1) + U(8);
 	m_r.HudText(TT(TX_PT_SKILLS), dx + U(14), sy + U(12), U(16), RGBA8(255, 226, 150), 0, 1);
 	sy += U(26);
@@ -5345,8 +5395,315 @@ void Game::DrawEvoCut()
 	}
 }
 
+int Game::NextJobPending(int from) const
+{
+	int cap = RosterCap();
+	if (from < 0) from = 0;
+	for (int i = from; i < cap; i++)
+		if (m_save.roster[i].used && m_save.roster[i].jobDone == 0 && m_save.roster[i].lv >= PromoteLevel(1)) return i;
+	return -1;
+}
+void Game::BeginJobRedo()
+{
+	int who = NextJobPending(0);
+	if (who < 0) { m_jobRedo = 0; return; }
+	m_jobWho = who;
+	m_jobStep = 0;
+	m_jobN = JobStepsForLevel(m_save.roster[who].lv);
+	m_jobSkipAll = 0;
+	m_jobSel = -1;
+	for (int i = 0; i < 12; i++) m_jobPath[i] = -1;
+	m_jobRedo = 2;
+	m_screen = SC_EVOLVE;
+	m_focusId = ID_JOB_OPT0;
+	for (int i = 0; i < Renderer::PORTRAIT_N; i++) m_portraitWant[i] = (i < MAX_ROSTER) ? i + 1 : 0;
+}
+void Game::FinishJobSkip()
+{
+	if (m_jobSkipAll) {
+		int cap = RosterCap();
+		for (int i = 0; i < cap; i++) if (m_save.roster[i].used && m_save.roster[i].jobDone == 0) m_save.roster[i].jobDone = 1;
+		m_jobRedo = 0;
+		Persist();
+		EnterBase();
+		return;
+	}
+	if (m_jobWho >= 0 && m_jobWho < MAX_ROSTER && m_save.roster[m_jobWho].used) m_save.roster[m_jobWho].jobDone = 1;
+	Persist();
+	int nxt = NextJobPending(m_jobWho + 1);
+	if (nxt < 0) { m_jobRedo = 0; EnterBase(); return; }
+	m_jobWho = nxt;
+	m_jobStep = 0;
+	m_jobN = JobStepsForLevel(m_save.roster[nxt].lv);
+	m_jobSel = -1;
+	for (int i = 0; i < 12; i++) m_jobPath[i] = -1;
+	m_jobRedo = 2;
+	m_screen = SC_EVOLVE;
+}
+void Game::ApplyJobPick(int cls)
+{
+	if (m_jobWho < 0 || m_jobWho >= MAX_ROSTER) return;
+	CharData& c = m_save.roster[m_jobWho];
+	if (!c.used || m_jobStep < 0 || m_jobStep >= 12) return;
+	m_jobPath[m_jobStep] = cls;
+	for (int i = m_jobStep + 1; i < 12; i++) m_jobPath[i] = -1;
+	m_jobSel = -1;
+	if (m_jobStep + 1 < m_jobN) { m_jobStep++; return; }
+	int n = m_jobStep + 1;
+	JobRebook(c, m_jobPath, n);
+	JobRefitGear(c, m_save);
+	AddBanner(c.name, ClassName(c.cls), RGBA8(255, 226, 150), 1, 2.2f);
+	Persist();
+	int nxt = NextJobPending(m_jobWho + 1);
+	if (nxt < 0) {
+		m_jobRedo = 0;
+		AddBanner(TT(TX_JOB_DONE), L"", RGBA8(255, 226, 120), 1, 2.4f);
+		EnterBase();
+		return;
+	}
+	m_jobWho = nxt;
+	m_jobStep = 0;
+	m_jobN = JobStepsForLevel(m_save.roster[nxt].lv);
+	m_jobSel = -1;
+	for (int i = 0; i < 12; i++) m_jobPath[i] = -1;
+}
+void Game::DrawJobGate()
+{
+	float w = min(U(640.f), (float)m_w - U(40));
+	float h = U(280);
+	float x = ((float)m_w - w) * .5f;
+	float y = ((float)m_h - h) * .5f;
+	Panel(x, y, w, h);
+	m_r.HudTextBox(TT(TX_JOB_BUG), x + U(24), y + U(28), w - U(48), U(80), U(20), RGBA8(255, 226, 150));
+	if (m_jobRedo == 3) {
+		m_r.HudTextBox(TT(TX_JOB_SKIP_Q), x + U(24), y + U(120), w - U(48), U(48), U(16), RGBA8(255, 180, 160));
+		if (Btn(ID_JOB_YES, x + U(40), y + h - U(64), U(200), U(40), TT(TX_PT_YES), TRUE, FALSE, U(16), RGBA8(150, 48, 40, 240))) { FinishJobSkip(); return; }
+		if (Btn(ID_JOB_NO, x + w - U(240), y + h - U(64), U(200), U(40), TT(TX_PT_NO))) { m_jobRedo = 1; return; }
+		return;
+	}
+	if (Btn(ID_JOB_GO, x + U(40), y + h - U(64), U(220), U(40), TT(TX_JOB_GO), TRUE, FALSE, U(16), RGBA8(60, 110, 170, 240))) { BeginJobRedo(); return; }
+	if (Btn(ID_JOB_SKIP, x + w - U(260), y + h - U(64), U(220), U(40), TT(TX_JOB_SKIP))) { m_jobSkipAll = 1; m_jobRedo = 3; }
+}
+void Game::DrawJobRedo()
+{
+	if (m_jobRedo == 3 && m_jobSkipAll) { DrawJobGate(); return; }
+	if (m_jobWho < 0 || m_jobWho >= RosterCap() || !m_save.roster[m_jobWho].used || m_save.roster[m_jobWho].jobDone != 0) {
+		int nxt = NextJobPending(0);
+		if (nxt < 0) { m_jobRedo = 0; EnterBase(); return; }
+		m_jobWho = nxt;
+		m_jobStep = 0;
+		m_jobN = JobStepsForLevel(m_save.roster[nxt].lv);
+		m_jobSel = -1;
+		for (int i = 0; i < 12; i++) m_jobPath[i] = -1;
+	}
+	const CharData& c = m_save.roster[m_jobWho];
+	int ord = 0, total = 0;
+	int cap = RosterCap();
+	int jobGate = PromoteLevel(1);
+	for (int i = 0; i < cap; i++) if (m_save.roster[i].used && m_save.roster[i].jobDone == 0 && m_save.roster[i].lv >= jobGate) {
+		total++;
+		if (i <= m_jobWho) ord++;
+	}
+	float w = min(U(720.f), (float)m_w - U(28));
+	float h = min(U(640.f), (float)m_h - U(28));
+	float x = ((float)m_w - w) * .5f;
+	float y = ((float)m_h - h) * .5f;
+	if (m_jobRedo == 3) {
+		Panel(x, y, w, h);
+		m_r.HudTextBox(TT(TX_JOB_SKIP_Q), x + U(28), y + h * .35f, w - U(56), U(64), U(18), RGBA8(255, 190, 170));
+		if (Btn(ID_JOB_YES, x + U(48), y + h - U(72), U(220), U(42), TT(TX_PT_YES), TRUE, FALSE, U(16), RGBA8(150, 48, 40, 240))) { FinishJobSkip(); return; }
+		if (Btn(ID_JOB_NO, x + w - U(268), y + h - U(72), U(220), U(42), TT(TX_PT_NO))) m_jobRedo = 2;
+		return;
+	}
+	x = U(16);
+	y = U(16);
+	w = (float)m_w - U(32);
+	h = (float)m_h - U(32);
+	Panel(x, y, w, h);
+	wchar_t head[128];
+	swprintf_s(head, L"%s   %d / %d", c.name, ord, total);
+	m_r.HudText(head, x + U(88), y + U(28), U(18), RGBA8(255, 255, 255), 0, 1);
+	DrawPortrait(RosterPortrait(m_jobWho), x + U(16), y + U(14), U(64), RGBA8(200, 170, 110));
+	wchar_t now[96];
+	swprintf_s(now, L"%s  %s  Lv%d", TT(TX_JOB_NOW), ClassName(c.cls), c.lv);
+	m_r.HudText(now, x + w - U(20), y + U(26), U(14), RGBA8(220, 210, 170), 2, 0);
+	BOOL strUp = c.stat[S_STR] >= c.stat[S_MAG];
+	BOOL hpUp = c.stat[S_HP] >= c.stat[S_MP];
+	static const int kNowStat[] = { S_STR, S_MAG, S_DEF, S_RES, S_HP, S_MP };
+	float kspan = (w - U(120)) / 6.f;
+	float ky0 = y + U(50);
+	for (int i = 0; i < 6; i++) {
+		int st = kNowStat[i];
+		wchar_t bit[32];
+		swprintf_s(bit, L"%s %d", TT(StatNameTx(st)), c.stat[st]);
+		DWORD col = RGBA8(168, 168, 176);
+		if (st == S_STR || st == S_DEF) col = strUp ? RGBA8(255, 196, 130) : RGBA8(150, 150, 158);
+		else if (st == S_MAG || st == S_RES) col = strUp ? RGBA8(150, 150, 158) : RGBA8(160, 200, 255);
+		else if (st == S_HP) col = hpUp ? RGBA8(230, 230, 230) : RGBA8(150, 150, 158);
+		else if (st == S_MP) col = hpUp ? RGBA8(150, 150, 158) : RGBA8(170, 210, 230);
+		m_r.HudText(bit, x + U(88) + kspan * (float)i, ky0, U(15), col, 0, 1);
+	}
+	m_r.HudTextBox(m_jobStep == 0 ? TT(TX_JOB_ASK1) : TT(TX_JOB_ASKN), x + U(20), y + U(78), w - U(40), U(40), U(16), RGBA8(255, 226, 150));
+	wchar_t chain[320];
+	chain[0] = 0;
+	for (int i = 0; i < m_jobStep && i < 12; i++) {
+		if (m_jobPath[i] < 0) break;
+		wchar_t bit[72];
+		swprintf_s(bit, TT(TX_JOB_NTH), i + 1, ClassName(m_jobPath[i]));
+		if (i) wcscat_s(chain, L" → ");
+		wcscat_s(chain, bit);
+	}
+	if (chain[0]) m_r.HudTextBox(chain, x + U(20), y + U(122), w - U(40), U(32), U(13), RGBA8(210, 220, 230));
+	int opt[8], no = 0;
+	if (m_jobStep <= 0) {
+		static const int base[6] = { C_SOLDIER, C_FIGHTER, C_ARCHER, C_THIEF, C_MAGE, C_CLERIC };
+		for (int i = 0; i < 6; i++) opt[no++] = base[i];
+	} else {
+		EvoOption raw[4];
+		int nr = EvoOptions(m_jobPath[m_jobStep - 1], raw);
+		int rootM = ClassInfo(m_jobPath[0]).magic;
+		for (int pass = 0; pass < 2 && no == 0; pass++) {
+			no = 0;
+			for (int k = 0; k < nr && no < 8; k++) {
+				int t = raw[k].target;
+				if (t < 0) continue;
+				if (pass == 0 && ClassInfo(t).magic != rootM) continue;
+				opt[no++] = t;
+			}
+		}
+	}
+	BOOL selOk = FALSE;
+	for (int k = 0; k < no; k++) if (opt[k] == m_jobSel) selOk = TRUE;
+	if (!selOk) m_jobSel = -1;
+	float leftW = min(U(860.f), w * .62f);
+	float top = y + U(162);
+	float bot = y + h - U(64);
+	float avail = bot - top;
+	float rowH = no > 0 ? avail / (float)no : U(72);
+	if (rowH > U(92)) rowH = U(92);
+	if (rowH < U(52)) rowH = U(52);
+	float bw = min(U(210.f), leftW * .28f);
+	float ty = top;
+	for (int k = 0; k < no; k++) {
+		BOOL on = opt[k] == m_jobSel;
+		if (Btn(ID_JOB_OPT0 + k, x + U(16), ty, bw, rowH - U(6), ClassName(opt[k]), TRUE, on, U(15))) m_jobSel = opt[k];
+		int pth[12], pn = 0;
+		for (int i = 0; i < m_jobStep && i < 12; i++) {
+			if (m_jobPath[i] < 0) break;
+			pth[pn++] = m_jobPath[i];
+		}
+		if (pn < 12) pth[pn++] = opt[k];
+		CharData pv = c;
+		JobProject(pv, pth, pn, 1);
+		float dx = x + U(24) + bw;
+		float dw = leftW - bw - U(36);
+		float statH = U(18);
+		float descH = rowH - U(8) - statH;
+		if (descH < U(18)) { descH = rowH - U(8); statH = 0; }
+		m_r.HudTextBox(ClassBlurb(opt[k]), dx, ty + U(2), dw, descH, U(13), on ? RGBA8(255, 236, 210) : RGBA8(214, 216, 222));
+		if (statH > 0) {
+			wchar_t sa[24], sb[24], sc2[24], sd[24];
+			swprintf_s(sa, L"%s %d", TT(TX_ST_STR), pv.stat[S_STR]);
+			swprintf_s(sb, L"%s %d", TT(TX_ST_MAG), pv.stat[S_MAG]);
+			swprintf_s(sc2, L"%s %d", TT(TX_ST_HP), pv.stat[S_HP]);
+			swprintf_s(sd, L"%s %d", TT(TX_ST_MP), pv.stat[S_MP]);
+			float kw = max(U(40.f), dw / 4.f);
+			float ky = ty + U(4) + descH;
+			DWORD scol = pv.stat[S_STR] >= pv.stat[S_MAG] ? RGBA8(255, 186, 120) : RGBA8(170, 170, 180);
+			DWORD mcol = pv.stat[S_MAG] > pv.stat[S_STR] ? RGBA8(160, 196, 255) : RGBA8(170, 170, 180);
+			m_r.HudText(sa, dx, ky, U(13), scol, 0, 1);
+			m_r.HudText(sb, dx + kw, ky, U(13), mcol, 0, 1);
+			m_r.HudText(sc2, dx + kw * 2.f, ky, U(13), RGBA8(230, 230, 230), 0, 1);
+			m_r.HudText(sd, dx + kw * 3.f, ky, U(13), RGBA8(190, 220, 230), 0, 1);
+		}
+		ty += rowH;
+	}
+	float rx = x + leftW + U(8);
+	float rw = w - leftW - U(28);
+	CharData shown = c;
+	CharData arrived = c;
+	int have = 0;
+	int pre[12];
+	for (int i = 0; i < m_jobStep && i < 12; i++) {
+		if (m_jobPath[i] < 0) break;
+		pre[have++] = m_jobPath[i];
+	}
+	if (m_jobSel >= 0) {
+		int pth[12], pn = have;
+		for (int i = 0; i < have; i++) pth[i] = pre[i];
+		pth[pn++] = m_jobSel;
+		shown = c;
+		JobProject(shown, pth, pn, 1);
+		if (have > 0) {
+			arrived = c;
+			JobProject(arrived, pre, have, 1);
+		} else {
+			arrived = shown;
+			const ClassDef& b = ClassInfo(m_jobSel);
+			for (int s = 0; s < S_COUNT; s++) arrived.stat[s] = b.base[s];
+			if (c.gender == 1) {
+				arrived.stat[S_AGI] += 1;
+				arrived.stat[S_RES] += 1;
+				arrived.stat[S_STR] = max(1, arrived.stat[S_STR] - 1);
+			}
+		}
+	} else if (have > 0) {
+		shown = c;
+		JobProject(shown, pre, have, 1);
+	}
+	wchar_t title[128];
+	if (m_jobSel >= 0) swprintf_s(title, L"%s  %s  Lv%d", TT(TX_JOB_PRE), ClassName(shown.cls), shown.lv);
+	else swprintf_s(title, L"%s  %s  Lv%d", TT(TX_JOB_NOW), ClassName(shown.cls), shown.lv);
+	m_r.HudText(title, rx, top, U(15), RGBA8(255, 226, 150), 0, 1);
+	int gains[S_COUNT];
+	const int* gp = NULL;
+	if (m_jobSel >= 0) {
+		for (int s = 0; s < S_COUNT; s++) gains[s] = shown.stat[s] - arrived.stat[s];
+		gp = gains;
+	}
+	float used = DrawStatLines(shown, rx, top + U(24), rw, gp, -1, -1);
+	float briefTop = top + U(28) + used;
+	float briefH = bot - briefTop - U(8);
+	if (briefH > U(48) && (m_jobSel >= 0 || have > 0 || m_jobStep == 0)) {
+		wchar_t brief[1024];
+		EvoBrief(shown.cls, brief, 1024);
+		m_r.HudTextBox(brief, rx, briefTop, rw, briefH, U(13), RGBA8(220, 220, 226));
+	}
+	if (no == 0 && m_jobStep > 0) {
+		if (Btn(ID_JOB_GO, x + U(16), ty, leftW - U(24), U(40), TT(TX_JOB_GO), TRUE, FALSE, U(16))) {
+			int n = m_jobStep;
+			if (n < 1) n = 1;
+			JobRebook(m_save.roster[m_jobWho], m_jobPath, n);
+			JobRefitGear(m_save.roster[m_jobWho], m_save);
+			Persist();
+			int nxt = NextJobPending(m_jobWho + 1);
+			if (nxt < 0) { m_jobRedo = 0; EnterBase(); return; }
+			m_jobWho = nxt;
+			m_jobStep = 0;
+			m_jobN = JobStepsForLevel(m_save.roster[nxt].lv);
+			m_jobSel = -1;
+			for (int i = 0; i < 12; i++) m_jobPath[i] = -1;
+			return;
+		}
+	}
+	if (Btn(ID_JOB_BACK, x + U(16), y + h - U(52), U(150), U(36), TT(TX_CR_BACK))) {
+		if (m_jobStep > 0) {
+			m_jobStep--;
+			m_jobSel = m_jobPath[m_jobStep];
+			for (int i = m_jobStep; i < 12; i++) m_jobPath[i] = -1;
+		} else { m_jobRedo = 1; m_screen = SC_BASE; }
+		return;
+	}
+	if (Btn(ID_JOB_NEXT, x + w * .5f - U(110), y + h - U(52), U(220), U(40), TT(TX_JOB_NEXT), m_jobSel >= 0, FALSE, U(16), RGBA8(60, 110, 170, 240))) {
+		ApplyJobPick(m_jobSel);
+		return;
+	}
+	if (Btn(ID_JOB_SKIP, x + w - U(180), y + h - U(52), U(160), U(36), TT(TX_JOB_SKIP))) { m_jobSkipAll = 0; m_jobRedo = 3; }
+}
+
 void Game::DrawEvolveUi()
 {
+	if (m_jobRedo == 2 || m_jobRedo == 3) { DrawJobRedo(); return; }
 	if (m_evoCut) { DrawEvoCut(); return; }
 	float x = U(20), y = U(20), w = (float)m_w - U(40), h = (float)m_h - U(40);
 	Panel(x, y, w, h);

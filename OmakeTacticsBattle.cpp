@@ -2109,6 +2109,17 @@ V3 Game::CutStand(int side, int idx) const
 		float x = (idx - (n - 1.f) * .5f) * .9f;
 		return v3(x, 0, (idx % 2) ? .22f : -.22f);
 	}
+	if (side == 1 && m_cutFoeN > 6) {
+		int cols = m_cutFoeN > 12 ? 6 : 4;
+		int col = idx % cols;
+		int row = idx / cols;
+		return v3(1.15f + row * .7f, 0, (col - (cols - 1) * .5f) * .48f);
+	}
+	if (side == 0 && m_cutAllyN > 6) {
+		int col = idx % 3;
+		int row = idx / 3;
+		return v3(-1.15f - row * .7f, 0, (col - 1) * .55f);
+	}
 	float x = (side == 0 ? -1.15f : 1.15f) + (side == 0 ? -1.f : 1.f) * idx * .82f;
 	float z = (idx % 2) ? .3f : -.14f;
 	return v3(x, 0, side == 0 ? z : -z);
@@ -2121,7 +2132,8 @@ void Game::GatherCut()
 		if (id < 0 || id >= m_b.nUnits) return;
 		int* arr = m_b.u[id].team == TEAM_PLAYER ? m_cutAlly : m_cutFoe;
 		int& n = m_b.u[id].team == TEAM_PLAYER ? m_cutAllyN : m_cutFoeN;
-		if (n >= 6) return;
+		int cap = m_b.u[id].team == TEAM_PLAYER ? CUT_ALLY_MAX : CUT_FOE_MAX;
+		if (n >= cap) return;
 		for (int i = 0; i < n; i++) if (arr[i] == id) return;
 		arr[n++] = id;
 	};
@@ -2142,9 +2154,12 @@ void Game::LayoutSpecialCut()
 {
 	if (m_cutKind == 0) return;
 	for (int i = 0; i < m_cutFoeN; i++) {
-		float z = (i == 0) ? 0.f : ((i & 1) ? .48f : -.36f);
-		float x = 1.55f + i * .78f;
-		if (m_cutKind == 1) x += .4f;
+		int cols = m_cutFoeN > 12 ? 6 : (m_cutFoeN > 6 ? 4 : 3);
+		int col = i % cols;
+		int row = i / cols;
+		float z = (col - (cols - 1) * .5f) * .52f;
+		float x = 1.45f + row * .72f;
+		if (m_cutKind == 1) x += .35f;
 		m_cutFoePos[i] = v3(x, 0, z);
 	}
 	if (m_cutKind == 1) {
@@ -3972,7 +3987,13 @@ void Game::DrawCutIn3D()
 		float ang = -0.35f - u * 0.85f;
 		int spread = max(m_cutAllyN, m_cutFoeN);
 		look = v3(0, .72f, 0);
-		float dist = (m_cutFoeN <= 0 ? 2.6f : 3.35f) + max(0, spread - 1) * .55f;
+		float extra = max(0, spread - 1) * .55f;
+		if (m_cutFoeN > 6) {
+			int cols = m_cutFoeN > 12 ? 6 : 4;
+			int rows = (m_cutFoeN + cols - 1) / cols;
+			extra = 2.8f + rows * .5f;
+		}
+		float dist = (m_cutFoeN <= 0 ? 2.6f : 3.35f) + extra;
 		dist = Lerpf(dist + .45f, dist, Smooth01(min(1.f, u * 1.4f)));
 		eye = v3(sinf(ang) * dist, 1.15f + sinf(u * 1.7f) * .06f, -cosf(ang) * dist);
 		if (m_shake > .3f) eye = Lerp(eye, look, .1f);
@@ -3980,7 +4001,13 @@ void Game::DrawCutIn3D()
 		int spread = max(m_cutAllyN, m_cutFoeN);
 		look = v3(0, .55f, 0);
 		float sw = sinf(t * .4f) * .35f;
-		float dist = (m_cutFoeN <= 0 ? 2.8f : 3.8f) + max(0, spread - 1) * .75f;
+		float extra = max(0, spread - 1) * .75f;
+		if (m_cutFoeN > 6) {
+			int cols = m_cutFoeN > 12 ? 6 : 4;
+			int rows = (m_cutFoeN + cols - 1) / cols;
+			extra = 3.4f + rows * .55f;
+		}
+		float dist = (m_cutFoeN <= 0 ? 2.8f : 3.8f) + extra;
 		eye = v3(.3f + sw, 1.05f, -dist);
 		if (m_shake > .3f) { eye = Lerp(eye, look, .12f); }
 	}
@@ -4004,13 +4031,16 @@ void Game::DrawCutIn3D()
 	M4 view = MLookAtLH(eye, look, v3(0, 1, 0));
 	M4 proj = MPerspLH(.75f, (float)m_w / max(1, m_h), .05f, 120.f);
 	m_r.SetCamera(view, proj, eye, m_time);
-	m_r.SetFog(10.f, 40.f, 0, e.skyBot);
+	float fogNear = 10.f, fogFar = 40.f;
+	if (max(m_cutAllyN, m_cutFoeN) > 6) { fogNear = 14.f; fogFar = 72.f; }
+	m_r.SetFog(fogNear, fogFar, 0, e.skyBot);
 	m_r.SetAmbient(e.ambSky, e.ambGnd, e.amb + .1f, e.hard);
 	m_r.SetLight(Norm(v3(-.4f, .8f, -.45f)), v3(0, 0, 0), 5.f);
-	int ids[12];
+	int ids[CUT_ALLY_MAX + CUT_FOE_MAX];
 	int nId = 0;
-	for (int i = 0; i < m_cutAllyN && nId < 12; i++) ids[nId++] = m_cutAlly[i];
-	for (int i = 0; i < m_cutFoeN && nId < 12; i++) ids[nId++] = m_cutFoe[i];
+	int idCap = CUT_ALLY_MAX + CUT_FOE_MAX;
+	for (int i = 0; i < m_cutAllyN && nId < idCap; i++) ids[nId++] = m_cutAlly[i];
+	for (int i = 0; i < m_cutFoeN && nId < idCap; i++) ids[nId++] = m_cutFoe[i];
 	if (nId == 0 && m_cutA >= 0) ids[nId++] = m_cutA;
 	auto cutWorld = [&](int id) {
 		const Actor& ac = m_act[id];
@@ -6206,20 +6236,39 @@ void Game::DrawPromoteOffer()
 		tgt[nt++] = opt[k].target;
 	}
 	if (grace && u.ch.trialFrom != u.ch.cls) revert = u.ch.trialFrom;
+	wchar_t hist[640];
+	hist[0] = 0;
+	int pn = JobPathCount(u.ch);
+	if (pn > 0) {
+		wcscpy_s(hist, TT(TX_JOB_HIST));
+		wcscat_s(hist, L"  ");
+		for (int pi = 0; pi < pn; pi++) {
+			wchar_t bit[80];
+			swprintf_s(bit, TT(TX_JOB_NTH), pi + 1, ClassName(u.ch.jobPath[pi]));
+			if (pi) wcscat_s(hist, L" → ");
+			wcscat_s(hist, bit);
+		}
+	}
+	float histH = hist[0] ? (pn > 4 ? U(56.f) : U(36.f)) : 0.f;
 	int rows = nt + (revert >= 0 ? 1 : 0);
 	float w = min(U(760.f), (float)m_w - U(24));
 	float row = U(150);
-	float h = U(126) + rows * row + U(56);
-	if (h > (float)m_h - U(16)) { h = (float)m_h - U(16); row = max(U(118.f), (h - U(182)) / max(1, rows)); }
+	float chrome = U(126) + histH + U(56);
+	float h = chrome + rows * row;
+	if (h > (float)m_h - U(16)) { h = (float)m_h - U(16); row = max(U(108.f), (h - chrome) / max(1, rows)); }
 	float x = (m_w - w) * .5f, y = max(U(8), (m_h - h) * .5f);
 	Panel(x, y, w, h, .92f);
 	m_r.HudText(grace ? TT(TX_EV_TRIAL) : TT(TX_EV_JOB), x + w * .5f, y + U(28), U(26), RGBA8(255, 226, 150), 1, 1);
-	wchar_t who[128];
-	if (grace) swprintf_s(who, L"%s  %s%d  Lv%d", u.ch.name, TT(TX_MISC_LV), u.ch.lv, u.ch.trialLv + 3);
-	else swprintf_s(who, L"%s  %s%d", u.ch.name, TT(TX_MISC_LV), u.ch.lv);
+	wchar_t who[192];
+	if (grace) swprintf_s(who, L"%s  %s  %s%d  Lv%d", u.ch.name, ClassName(u.ch.cls), TT(TX_MISC_LV), u.ch.lv, u.ch.trialLv + 3);
+	else swprintf_s(who, L"%s  %s  %s%d", u.ch.name, ClassName(u.ch.cls), TT(TX_MISC_LV), u.ch.lv);
 	m_r.HudText(who, x + w * .5f, y + U(54), U(15), RGBA8(230, 230, 240), 1, 0);
 	m_r.HudText(TT(TX_EV_GRACE), x + w * .5f, y + U(74), U(13), RGBA8(170, 220, 170), 1, 0);
 	float ty = y + U(96);
+	if (hist[0]) {
+		m_r.HudTextBox(hist, x + U(18), ty, w - U(36), histH - U(4), U(13), RGBA8(210, 220, 235));
+		ty += histH;
+	}
 	auto take = [&](int pick) {
 		int oldHp = u.ch.stat[S_HP], oldMp = u.ch.stat[S_MP];
 		if (grace) EvoRetrain(u.ch, pick);
@@ -6347,7 +6396,7 @@ void Game::DrawCutInUi()
 			m_r.HudRect(0, bar - U(4), (float)m_w, U(4), edge);
 			m_r.HudRect(0, (float)m_h - bar, (float)m_w, U(4), edge);
 		}
-		auto hpBox = [&](int ui, float x, int align, float y) {
+		auto hpBox = [&](int ui, float x, int align, float y, float row) {
 			if (ui < 0) return;
 			const Unit& u = m_b.u[ui];
 			float w = U(280);
@@ -6355,16 +6404,22 @@ void Game::DrawCutInUi()
 			wchar_t nm[64];
 			UnitTitle(u, nm, 64);
 			DWORD fc = u.team == TEAM_PLAYER ? RGBA8(110, 170, 255) : RGBA8(255, 110, 100);
-			m_r.HudText(nm, align ? bx + w : bx, y, U(14), fc, align ? 2 : 0, 1);
+			float fs = row >= U(20) ? U(14) : max(U(9.f), row * .42f);
+			float bh = max(U(3.f), min(U(8.f), row - fs - U(2)));
+			m_r.HudText(nm, align ? bx + w : bx, y, fs, fc, align ? 2 : 0, 1);
 			float frac = u.hpShow / max(1, u.ch.stat[S_HP]);
-			Bar(bx, y + U(14), w, U(8), frac, frac > .5f ? RGBA8(120, 240, 120) : (frac > .25f ? RGBA8(240, 210, 80) : RGBA8(255, 90, 70)), RGBA8(40, 120, 50));
+			Bar(bx, y + fs, w, bh, frac, frac > .5f ? RGBA8(120, 240, 120) : (frac > .25f ? RGBA8(240, 210, 80) : RGBA8(255, 90, 70)), RGBA8(40, 120, 50));
 		};
 		auto col = [&](const int* id, int n, int align) {
 			if (n < 1) return;
-			float row = U(n > 3 ? 16.f : 22.f);
-			float y0 = (float)m_h - bar - U(6) - n * row;
+			float top = bar + U(4);
+			float bot = (float)m_h - bar - U(4);
+			float avail = max(U(12.f), bot - top);
+			float row = avail / (float)n;
+			if (row > U(22)) row = U(22);
+			float y0 = top + (avail - n * row) * .5f;
 			for (int i = 0; i < n; i++)
-				hpBox(id[i], align ? (float)m_w - U(16) : U(16), align, y0 + i * row);
+				hpBox(id[i], align ? (float)m_w - U(16) : U(16), align, y0 + i * row, row);
 		};
 		col(m_cutAlly, m_cutAllyN, 0);
 		col(m_cutFoe, m_cutFoeN, 1);

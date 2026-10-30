@@ -1858,13 +1858,14 @@ static void BuildExt()
 #include "tactics_src/job_catalog.inc"
 static ClassDef s_job[TAC_JOB_N];
 static int s_jobOk = 0;
+// 並びは kLineParent と同じ。2聖者 3幻影 4竜王 5大錬金。技の説明もこの順。
 static const int kFamSig[8][4] = {
 	{ SKL_HOLYBLADE, SKL_CLEAVE, SKL_BRAVE, SKL_GRANDSLASH },
 	{ SKL_METEOR, SKL_FIRE, SKL_GRAVITY, SKL_RUIN },
-	{ SKL_SNIPE, SKL_ARROWRAIN, SKL_PIERCE, SKL_ARROWLINE },
-	{ SKL_ASSASSINATE, SKL_VITALSTAB, SKL_SHADOWSTEP, SKL_BACKCUT },
-	{ SKL_TRANSMUTE, SKL_RUNEBLADE, SKL_MIASMA, SKL_ELPOISON },
 	{ SKL_HEAL, SKL_SANCTUARY, SKL_RENEW, SKL_ESUNA },
+	{ SKL_SNIPE, SKL_ARROWRAIN, SKL_PIERCE, SKL_ARROWLINE },
+	{ SKL_DRAGONFANG, SKL_WHIRL, SKL_CLEAVE, SKL_BRAVE },
+	{ SKL_TRANSMUTE, SKL_RUNEBLADE, SKL_MIASMA, SKL_ELPOISON },
 	{ SKL_FISTGOD, SKL_BASH, SKL_WARLORD, SKL_BREAKKING },
 	{ SKL_GHOSTHAND, SKL_SMOKESCREEN, SKL_NIGHTRUN, SKL_DEATHMARK },
 };
@@ -2779,6 +2780,9 @@ void CharRecalcInit(CharData& c)
 	c.skills = 0;
 	memset(c.reserved, 0, sizeof(c.reserved));
 	CharGrantReached(c);
+	JobPathClear(c);
+	if (c.cls >= 0) c.jobPath[0] = c.cls;
+	c.jobDone = 1;
 }
 
 static int MoveCap(int moveType) { return moveType == MV_FLY ? 14 : 12; }
@@ -3046,6 +3050,194 @@ bool EvoGroupSatisfied(int g, const CharData* ps, int n)
 	return false;
 }
 
+void JobPathClear(CharData& c)
+{
+	for (int i = 0; i < JOB_PATH_N; i++) c.jobPath[i] = -1;
+}
+int JobPathCount(const CharData& c)
+{
+	int n = 0;
+	for (; n < JOB_PATH_N; n++) if (c.jobPath[n] < 0) break;
+	return n;
+}
+int JobStepsForLevel(int lv)
+{
+	int steps = 1;
+	for (int tier = 1; tier < 12; tier++) {
+		if (lv >= PromoteLevel(tier)) steps = tier + 1;
+		else break;
+	}
+	if (steps > JOB_PATH_N) steps = JOB_PATH_N;
+	if (steps < 1) steps = 1;
+	return steps;
+}
+static void JobPathNote(CharData& c, int from, int to, int replaceTip)
+{
+	if (to < 0) return;
+	int n = JobPathCount(c);
+	if (replaceTip) {
+		if (n <= 0) {
+			if (from >= 0) c.jobPath[0] = from;
+			if (to != from) c.jobPath[from >= 0 ? 1 : 0] = to;
+		} else c.jobPath[n - 1] = to;
+		return;
+	}
+	if (n <= 0) {
+		if (from >= 0) c.jobPath[0] = from;
+		if (to != from) c.jobPath[from >= 0 ? 1 : 0] = to;
+		return;
+	}
+	if (c.jobPath[n - 1] == to) return;
+	if (n < JOB_PATH_N) c.jobPath[n] = to;
+}
+// CharLevelUp と同じく成長率を2倍し、端数はレベルをまたいで積む。画面を開くたびに振らない。
+static void JobGrowOnce(CharData& c, int acc[S_COUNT])
+{
+	const ClassDef& cd = ClassInfo(c.cls);
+	int total = 0;
+	for (int s = 0; s < S_COUNT; s++) {
+		int g = cd.grow[s] * 2;
+		int add;
+		if (s == S_HP || s == S_MP) {
+			add = g / 10;
+			acc[s] += g % 10;
+			if (acc[s] >= 10) { add++; acc[s] -= 10; }
+		} else {
+			add = g / 100;
+			acc[s] += g % 100;
+			if (acc[s] >= 100) { add++; acc[s] -= 100; }
+		}
+		c.stat[s] += add;
+		if (s == S_MOV) {
+			int cap = MoveCap(cd.moveType);
+			if (c.stat[s] > cap) c.stat[s] = cap;
+		} else if (s == S_JMP && c.stat[s] > 12) c.stat[s] = 12;
+		else if (s == S_RNG && c.stat[s] > 3) c.stat[s] = 3;
+		if (s != S_HP && s != S_MP) total += add;
+	}
+	if (total == 0) {
+		int s = cd.magic ? S_MAG : S_STR;
+		c.stat[s]++;
+	}
+	if (c.lv < TAC_LV_MAX) c.lv++;
+}
+void JobProject(CharData& c, const int* path, int n, int toNext)
+{
+	if (!path || n < 1) return;
+	if (n > JOB_PATH_N) n = JOB_PATH_N;
+	while (n > 0 && path[n - 1] < 0) n--;
+	if (n < 1 || path[0] < 0) return;
+	int finalLv = c.lv > 0 ? c.lv : 1;
+	if (finalLv > TAC_LV_MAX) finalLv = TAC_LV_MAX;
+	int steps = JobStepsForLevel(finalLv);
+	int gender = c.gender;
+	const ClassDef& b = ClassInfo(path[0]);
+	for (int s = 0; s < S_COUNT; s++) c.stat[s] = b.base[s];
+	if (gender == 1) {
+		c.stat[S_AGI] += 1;
+		c.stat[S_RES] += 1;
+		c.stat[S_STR] = max(1, c.stat[S_STR] - 1);
+	}
+	c.cls = path[0];
+	c.lv = 1;
+	int acc[S_COUNT];
+	for (int s = 0; s < S_COUNT; s++) acc[s] = 0;
+	for (int idx = 0; idx < n; idx++) {
+		if (path[idx] < 0) break;
+		c.cls = path[idx];
+		BOOL last = (idx + 1 >= n);
+		int gate = finalLv;
+		if (!last || (toNext && n < steps)) gate = PromoteLevel(ClassInfo(path[idx]).tier);
+		if (gate > finalLv) gate = finalLv;
+		if (gate < c.lv) gate = c.lv;
+		while (c.lv < gate) JobGrowOnce(c, acc);
+		if (last || c.lv >= finalLv) break;
+	}
+	int tip = path[n - 1] >= 0 ? path[n - 1] : path[0];
+	c.cls = tip;
+}
+void JobRefitGear(CharData& c, SaveData& s)
+{
+	for (int slot = 6; slot <= 7; slot++) {
+		int id = c.reserved[slot];
+		if (id <= 0) continue;
+		const GearDef* old = GearOf(id);
+		if (!old) { c.reserved[slot] = 0; continue; }
+		if (GearCanWear(c.cls, old)) continue;
+		int kind = old->kind;
+		int exact = 0, exactPow = -1;
+		int best = 0, bestDiff = 0x7fffffff, bestPow = -1;
+		int gn = GearCount();
+		for (int i = 1; i <= gn; i++) {
+			const GearDef* g = GearOf(i);
+			if (!g || g->kind != kind || !GearCanWear(c.cls, g)) continue;
+			int pow = kind ? (g->def + g->res) : (g->str + g->mag);
+			int diff = g->price - old->price;
+			if (diff < 0) diff = -diff;
+			if (diff == 0 && pow > exactPow) { exactPow = pow; exact = i; }
+			if (diff < bestDiff || (diff == bestDiff && pow > bestPow)) {
+				bestDiff = diff;
+				bestPow = pow;
+				best = i;
+			}
+		}
+		int pick = exact > 0 ? exact : best;
+		if (pick > 0) c.reserved[slot] = pick;
+		else {
+			StashAdd(s, id);
+			c.reserved[slot] = 0;
+		}
+	}
+}
+void JobRebook(CharData& c, const int* path, int n)
+{
+	if (!path || n < 1) return;
+	if (n > JOB_PATH_N) n = JOB_PATH_N;
+	int lv = c.lv > 0 ? c.lv : 1;
+	int exp = c.exp;
+	int gearW = c.reserved[6];
+	int gearA = c.reserved[7];
+	c.skills = 0;
+	for (int i = 0; i < 6; i++) c.reserved[i] = 0;
+	c.reserved[6] = gearW;
+	c.reserved[7] = gearA;
+	JobPathClear(c);
+	for (int i = 0; i < n; i++) c.jobPath[i] = path[i];
+	c.jobDone = 1;
+	c.cls = path[0];
+	c.lv = 1;
+	for (int i = 0; i < n; i++) {
+		int hold = lv;
+		if (i + 1 < n) {
+			int gate = PromoteLevel(ClassInfo(path[i]).tier);
+			if (gate > 0 && gate < hold) hold = gate;
+		}
+		c.cls = path[i];
+		c.lv = hold > 0 ? hold : 1;
+		CharGrantReached(c);
+	}
+	c.cls = path[n - 1];
+	c.lv = lv;
+	c.exp = exp;
+	JobProject(c, path, n, 0);
+	c.exp = exp;
+	CharGrantReached(c);
+	if (n >= 2) {
+		int prev = path[n - 2];
+		int gate = PromoteLevel(ClassInfo(prev).tier);
+		if (lv >= gate && lv <= gate + 3) {
+			c.trialFrom = prev;
+			c.trialLv = gate > 0 ? gate : lv;
+		} else {
+			c.trialFrom = -1;
+			c.trialLv = 0;
+		}
+	} else {
+		c.trialFrom = -1;
+		c.trialLv = 0;
+	}
+}
+
 void EvoRetrain(CharData& c, int target)
 {
 	if (!EvoTrialAllows(c, target) || target == c.cls) return;
@@ -3055,6 +3247,7 @@ void EvoRetrain(CharData& c, int target)
 	if (target != from) EvoShift(c, from, target, +1);
 	c.cls = target;
 	CharGrantReached(c);
+	JobPathNote(c, from, target, 1);
 }
 
 void EvoApply(CharData& c, int target, const CharData* ps, int n)
@@ -3073,9 +3266,11 @@ void EvoApply(CharData& c, int target, const CharData* ps, int n)
 	if (window) {
 		c.trialFrom = keepFrom;
 		c.trialLv = keepLv;
+		JobPathNote(c, keepFrom, target, 1);
 	} else if (ClassInfo(target).tier > ClassInfo(old).tier) {
 		c.trialFrom = old;
 		c.trialLv = c.lv > 0 ? c.lv : 1;
+		JobPathNote(c, old, target, 0);
 	}
 	// 転職前に覚えたスキルはそのまま残し、新しい職業で到達している分を足す。
 	int inherited = 0;
@@ -6941,7 +7136,7 @@ void SaveDefaults(SaveData& s)
 {
 	memset(&s, 0, sizeof(s));
 	s.magic = kSaveMagic;
-	s.version = 5;
+	s.version = 6;
 	for (int i = 0; i < MAX_PARTY; i++) s.party[i] = -1;
 	s.stageSel = 1;
 	s.camSpeed = 1;
@@ -7037,16 +7232,52 @@ struct SaveV4 {
 	int bgmVol, seVol, optInit, gold, gearN, gearId[12], reserved[4];
 	int partyCap, rosterCap;
 };
+// version 5。お試し欄まで。職履歴はまだ無い。
+struct CharV5 {
+	wchar_t name[NAME_LEN];
+	int used;
+	int gender;
+	int cls;
+	int lv;
+	int exp;
+	int stat[S_COUNT];
+	unsigned __int64 skills;
+	int body, hair, hairColor, outfit, hat, cape;
+	int kills, battles;
+	DWORD uid;
+	int reserved[8];
+	int trialFrom;
+	int trialLv;
+};
+struct SaveV5 {
+	DWORD magic;
+	int version;
+	CharV5 roster[MAX_ROSTER];
+	int party[MAX_PARTY];
+	int stageCleared, stageSel, winX, winY, winW, winH;
+	int camSpeed, quality, showGrid, battleAnim;
+	DWORD uidNext;
+	int winSizeVer;
+	int itemN[8];
+	int bgmVol, seVol, optInit, gold, gearN, gearId[12], reserved[4];
+	int partyCap, rosterCap;
+};
 #pragma pack(pop)
 static_assert(sizeof(SaveV4) == sizeof(SaveV3) + 5 * sizeof(int), "編成 15 は version 3 より 5 枠");
-static_assert(sizeof(CharData) == sizeof(CharV4) + 2 * sizeof(int), "お試しは職とレベルの2欄");
-static_assert(sizeof(SaveData) == sizeof(SaveV4) + MAX_ROSTER * 2 * sizeof(int), "version 5 は名簿全員にお試し欄");
+static_assert(sizeof(CharV5) == sizeof(CharV4) + 2 * sizeof(int), "お試しは職とレベルの2欄");
+static_assert(sizeof(SaveV5) == sizeof(SaveV4) + MAX_ROSTER * 2 * sizeof(int), "version 5 は名簿全員にお試し欄");
+static_assert(sizeof(CharData) == sizeof(CharV5) + (JOB_PATH_N + 1) * sizeof(int), "version 6 は職履歴");
+static_assert(sizeof(SaveData) == sizeof(SaveV5) + MAX_ROSTER * (JOB_PATH_N + 1) * sizeof(int), "version 6");
 
 static int TacPeekClearBytes(FILE* fp, long sz)
 {
 	if (!fp) return 0;
 	if (sz == (long)sizeof(SaveData)) {
 		SaveData peek;
+		if (fread(&peek, 1, sizeof(peek), fp) == sizeof(peek) && peek.magic == kSaveMagic)
+			return peek.stageCleared < 0 ? 0 : peek.stageCleared;
+	} else if (sz == (long)sizeof(SaveV5)) {
+		SaveV5 peek;
 		if (fread(&peek, 1, sizeof(peek), fp) == sizeof(peek) && peek.magic == kSaveMagic)
 			return peek.stageCleared < 0 ? 0 : peek.stageCleared;
 	} else if (sz == (long)sizeof(SaveV4)) {
@@ -7092,6 +7323,34 @@ static void CopyCharV4(CharData& d, const CharV4& o)
 	for (int i = 0; i < 8; i++) d.reserved[i] = o.reserved[i];
 	d.trialFrom = 0;
 	d.trialLv = 0;
+	JobPathClear(d);
+	d.jobDone = 0;
+}
+static void CopyCharV5(CharData& d, const CharV5& o)
+{
+	memset(&d, 0, sizeof(d));
+	wcsncpy_s(d.name, o.name, _TRUNCATE);
+	d.used = o.used;
+	d.gender = o.gender;
+	d.cls = o.cls;
+	d.lv = o.lv;
+	d.exp = o.exp;
+	for (int s = 0; s < S_COUNT; s++) d.stat[s] = o.stat[s];
+	d.skills = o.skills;
+	d.body = o.body;
+	d.hair = o.hair;
+	d.hairColor = o.hairColor;
+	d.outfit = o.outfit;
+	d.hat = o.hat;
+	d.cape = o.cape;
+	d.kills = o.kills;
+	d.battles = o.battles;
+	d.uid = o.uid;
+	for (int i = 0; i < 8; i++) d.reserved[i] = o.reserved[i];
+	d.trialFrom = o.trialFrom;
+	d.trialLv = o.trialLv;
+	JobPathClear(d);
+	d.jobDone = 0;
 }
 static void CopyChar10(CharData& d, const CharSave10& o)
 {
@@ -7113,6 +7372,10 @@ static void CopyChar10(CharData& d, const CharSave10& o)
 	d.battles = o.battles;
 	d.uid = o.uid;
 	for (int i = 0; i < 8; i++) d.reserved[i] = o.reserved[i];
+	JobPathClear(d);
+	d.jobDone = 0;
+	d.trialFrom = 0;
+	d.trialLv = 0;
 }
 static void CopySaveTail(SaveData& s, int stageCleared, int stageSel, int winX, int winY, int winW, int winH,
 	int camSpeed, int quality, int showGrid, int battleAnim, DWORD uidNext, int winSizeVer,
@@ -7150,16 +7413,50 @@ static void EvoAttachRecent(CharData& c)
 		int slot = -1;
 		for (int k = 0; k < n; k++) if (o[k].target == c.cls) slot = k;
 		if (slot < 0) continue;
-		int sc = 0;
-		bool cross = slot == 3 && ClassInfo(p).magic != cd.magic;
-		if (cross) sc += 20;
-		else if (ClassInfo(p).magic == cd.magic) sc += 10;
+		if (ClassInfo(p).magic != cd.magic) continue;
+		int sc = 10;
+		int pf = LegacyLine(p);
+		int cf = JobFamOf(c.cls);
+		if (pf >= 0 && cf >= 0 && pf == cf) sc += 20;
 		if (slot < 3) sc += 1;
 		if (sc > score) { score = sc; best = p; }
 	}
 	if (best < 0) return;
 	c.trialFrom = best;
 	c.trialLv = gate > 0 ? gate : c.lv;
+}
+static void JobFixTrial(CharData& c)
+{
+	if (!c.used) return;
+	if (c.trialLv > 0 && c.lv > c.trialLv + 3) {
+		c.trialLv = 0;
+		c.trialFrom = -1;
+	}
+	if (c.trialLv > 0 && c.trialFrom >= 0 && c.cls != c.trialFrom) {
+		EvoOption o[4];
+		int n = EvoOptions(c.trialFrom, o);
+		bool listed = false;
+		for (int k = 0; k < n; k++) if (o[k].target == c.cls) listed = true;
+		if (listed && ClassInfo(c.trialFrom).magic == ClassInfo(c.cls).magic) return;
+		int keep = c.trialLv;
+		c.trialLv = 0;
+		c.trialFrom = -1;
+		EvoAttachRecent(c);
+		if (c.trialFrom >= 0 && keep > 0) c.trialLv = keep;
+		else c.trialLv = 0;
+		return;
+	}
+	if (c.trialLv <= 0) EvoAttachRecent(c);
+}
+static void JobPathSanitize(CharData& c)
+{
+	int last = C_JOB0 + JobCount() - 1;
+	bool end = false;
+	for (int i = 0; i < JOB_PATH_N; i++) {
+		int v = c.jobPath[i];
+		if (end || v < 0 || v > last) { c.jobPath[i] = -1; end = true; }
+	}
+	if (c.jobDone != 1) c.jobDone = 0;
 }
 
 bool SaveLoad(SaveData& s)
@@ -7219,24 +7516,35 @@ bool SaveLoad(SaveData& s)
 				o.itemN, o.bgmVol, o.seVol, o.optInit, o.gold, o.gearN, o.gearId, o.reserved, o.partyCap, o.rosterCap);
 			got = TRUE;
 		}
+	} else if (sz == (long)sizeof(SaveV5)) {
+		SaveV5 o;
+		if (fread(&o, 1, sizeof(o), fp) == sizeof(o) && o.magic == kSaveMagic && o.version == 5) {
+			s.magic = o.magic;
+			for (int i = 0; i < MAX_ROSTER; i++) CopyCharV5(s.roster[i], o.roster[i]);
+			for (int i = 0; i < MAX_PARTY; i++) s.party[i] = o.party[i];
+			CopySaveTail(s, o.stageCleared, o.stageSel, o.winX, o.winY, o.winW, o.winH,
+				o.camSpeed, o.quality, o.showGrid, o.battleAnim, o.uidNext, o.winSizeVer,
+				o.itemN, o.bgmVol, o.seVol, o.optInit, o.gold, o.gearN, o.gearId, o.reserved, o.partyCap, o.rosterCap);
+			got = TRUE;
+		}
 	} else if (sz == (long)sizeof(SaveData)) {
 		SaveData t;
-		if (fread(&t, 1, sizeof(t), fp) == sizeof(t) && t.magic == kSaveMagic && t.version == 5) {
+		if (fread(&t, 1, sizeof(t), fp) == sizeof(t) && t.magic == kSaveMagic && t.version == 6) {
 			s = t;
 			got = TRUE;
 		}
 	}
 	fclose(fp);
 	if (!got) return false;
-	s.version = 5;
+	s.version = 6;
 	for (int i = 0; i < MAX_ROSTER; i++) {
 		CharData& c = s.roster[i];
 		c.name[NAME_LEN - 1] = 0;
 		if (!c.used) continue;
+		JobPathSanitize(c);
 		c.cls = Clampi(c.cls, 0, C_JOB0 + JobCount() - 1);
 		c.lv = Clampi(c.lv, 1, TAC_LV_MAX);
-		if (c.trialLv > 0 && c.lv > c.trialLv + 3) c.trialLv = 0;
-		else if (c.trialLv <= 0) EvoAttachRecent(c);
+		JobFixTrial(c);
 		if (recalc) CharRecalcProgress(c);
 		CharGrantReached(c);
 		if (c.lv == 1) {
