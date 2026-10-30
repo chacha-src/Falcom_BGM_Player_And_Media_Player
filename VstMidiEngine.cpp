@@ -7827,7 +7827,7 @@ extern "C" int VstMidiRead(BYTE* dst, int bytesWanted)
 			g_eng.ringRead = 0;
 			g_eng.ringCount = frames * 2;
 			for (int i = 0; i < frames; ++i) {
-				float l = g_eng.outL[i], r = g_eng.outR[i];
+				float l = g_eng.outL[i] * 2.f, r = g_eng.outR[i] * 2.f;
 				if (l < -1) l = -1; if (l > 1) l = 1;
 				if (r < -1) r = -1; if (r > 1) r = 1;
 				g_eng.ring[i * 2] = (short)(l * 32767.0f);
@@ -11904,22 +11904,39 @@ extern "C" int VstLiveEditorOpen(int part1to32)
 		SetForegroundWindow(p.edWnd);
 		return 0;
 	}
-	/* Soft-close left the view attached to a hidden host — just show again. */
+	/* Soft-close may have released IPlugView and left an empty host.
+	   That class paints BLACK_BRUSH, so showing it again is a black editor.
+	   Reuse only while the plug-in view and a real child window are both still there. */
 	if (g_liveSoftHiddenWnd[part1to32] && IsWindow(g_liveSoftHiddenWnd[part1to32])) {
 		HWND host = g_liveSoftHiddenWnd[part1to32];
-		g_liveSoftHiddenWnd[part1to32] = NULL;
-		p.edWnd = host;
-		SetWindowLongPtrW(host, GWLP_USERDATA, (LONG_PTR)part1to32);
-		SetTimer(host, LIVE_EDITOR_IDLE_TIMER, 30, NULL);
-		ShowWindow(host, SW_SHOW);
-		SetForegroundWindow(host);
+		HWND child = GetWindow(host, GW_CHILD);
+		RECT cr = {};
+		const int childOk = (child && GetClientRect(child, &cr)
+			&& cr.right > 16 && cr.bottom > 16) ? 1 : 0;
+		const int viewOk = (!p.vst3 || Vst3EditorAttached(p.vst3)) ? 1 : 0;
+		if (viewOk && childOk) {
+			g_liveSoftHiddenWnd[part1to32] = NULL;
+			p.edWnd = host;
+			SetWindowLongPtrW(host, GWLP_USERDATA, (LONG_PTR)part1to32);
+			SetTimer(host, LIVE_EDITOR_IDLE_TIMER, 30, NULL);
+			ShowWindow(host, SW_SHOW);
+			InvalidateRect(child, NULL, TRUE);
+			SetForegroundWindow(host);
 #ifdef KPIHOST32_BUILD
-		VstHost32_NotifyEditorOpened(part1to32);
+			VstHost32_NotifyEditorOpened(part1to32);
 #endif
 #ifndef KPIHOST32_BUILD
-		VstLiveMonitorEnsure();
+			VstLiveMonitorEnsure();
 #endif
-		return 0;
+			return 0;
+		}
+		g_liveSoftHiddenWnd[part1to32] = NULL;
+		KillTimer(host, LIVE_EDITOR_IDLE_TIMER);
+		KillTimer(host, LIVE_EDITOR_HOME_TIMER);
+		SetWindowLongPtrW(host, GWLP_USERDATA, 0);
+		ShowWindow(host, SW_HIDE);
+		if (p.vst3 && Vst3EditorAttached(p.vst3))
+			Vst3EditorCloseEx(p.vst3, 1);
 	}
 	const int wantVst3 = p.vst3 != NULL;
 	if (!wantVst3) {
@@ -12061,8 +12078,15 @@ extern "C" void VstLiveEditorClose(int part1to32)
 	   hangs IPlugView — leftover ogg.exe. Hide and leak the HWND on VST3;
 	   ExitProcess reaps it. */
 	if (p.vst3 || softClose) {
-		g_liveSoftHiddenWnd[part1to32] = h;
-		ShowWindow(h, SW_HIDE);
+		/* In-process soft close drops IPlugView. Parking that HWND makes the
+		   next open a black frame. Host32 keeps the view, so it can reshow. */
+		if (p.vst3 && !Vst3EditorAttached(p.vst3)) {
+			g_liveSoftHiddenWnd[part1to32] = NULL;
+			ShowWindow(h, SW_HIDE);
+		} else {
+			g_liveSoftHiddenWnd[part1to32] = h;
+			ShowWindow(h, SW_HIDE);
+		}
 	} else {
 		DestroyWindow(h);
 	}

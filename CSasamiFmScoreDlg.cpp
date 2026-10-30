@@ -265,10 +265,12 @@ void CSasamiFmScoreDlg::ApplyLang()
 		L"음표", L"音符", L"نغمات", L"Ноты", L"Noten", L"Notas", L"Noten", L"Nuty", L"Notalar"));
 	m_btnPropUpd.SetWindowText(LL14(L"更新", L"Update", L"MAJ", L"Aggiorna", L"Actualizar",
 		L"업데이트", L"更新", L"تحديث", L"Обновить", L"Aktualisieren", L"Atualizar", L"Bijwerken", L"Aktualizuj", L"Güncelle"));
-	m_btnMark.SetWindowText(L">|");
+	m_btnMark.SetWindowText(LL14(L"位置", L"Mark", L"Repère", L"Segno", L"Marca",
+		L"위치", L"位置", L"علامة", L"Метка", L"Marke", L"Marca", L"Markering", L"Znacznik", L"İşaret"));
 	m_btnLoopA.SetWindowText(L"A");
 	m_btnLoopB.SetWindowText(L"B");
-	m_btnLoopClr.SetWindowText(L"A-Bx");
+	m_btnLoopClr.SetWindowText(LL14(L"解除", L"Clear", L"Effacer", L"Azzera", L"Borrar",
+		L"해제", L"清除", L"مسح", L"Сброс", L"Löschen", L"Limpar", L"Wissen", L"Wyczyść", L"Sil"));
 	m_btnShowAll.SetWindowText(LL14(L"全表示", L"All", L"Tout", L"Tutto", L"Todo",
 		L"전체", L"全部", L"الكل", L"Все", L"Alle", L"Tudo", L"Alles", L"Wszystko", L"Tümü"));
 	if (m_btnText.GetSafeHwnd())
@@ -795,7 +797,7 @@ void CSasamiFmScoreDlg::LayoutChrome()
 	CRect rc;
 	GetClientRect(&rc);
 	const int cap = CCC_GetCustomCaptionHeight(m_hWnd);
-	const int pad = 8, btnH = 26, cbH = 32, btnW = 52;
+	const int pad = 8, btnH = 28, cbH = 32;
 	const int sbW = ScStaffScrollGutterW();
 	const int sbH = ScStaffScrollGutterH();
 	auto layoutCombo = [&](CCustomComboBox& c, int x, int y, int w, int h, int dropW = 0) {
@@ -809,27 +811,42 @@ void CSasamiFmScoreDlg::LayoutChrome()
 	};
 	int y = cap + pad;
 	int x = pad;
-	auto place = [&](CWnd& w, int ww) {
-		if (w.GetSafeHwnd()) { w.MoveWindow(x, y, ww, btnH); x += ww + 4; }
+	const int right = rc.right - pad;
+	auto place = [&](CWnd& w, int minW) {
+		if (!w.GetSafeHwnd() || !(w.GetStyle() & WS_VISIBLE)) return;
+		const int ww = ScChromeButtonWidth(&w, minW, 168);
+		if (x > pad && x + ww > right) { y += btnH + 4; x = pad; }
+		w.MoveWindow(x, y, ww, btnH);
+		x += ww + 4;
 	};
-	place(m_btnOpen, btnW);
-	place(m_btnSave, btnW);
+	place(m_btnOpen, 64);
+	place(m_btnSave, 64);
 	place(m_btnPlay, 88);
-	place(m_btnExport, btnW);
-	place(m_btnPencil, btnW);
-	place(m_btnErase, btnW);
-	place(m_btnSel, btnW);
-	place(m_btnTempo, btnW);
-	if (m_btnPal.GetSafeHwnd()) m_btnPal.ShowWindow(SW_HIDE);
-	place(m_btnVoice, btnW);
-	if (m_ch.GetSafeHwnd()) { layoutCombo(m_ch, x, y, 104, btnH + 4); x += 112; }
-	place(m_btnHelp, 48);
+	place(m_btnExport, 72);
+	place(m_btnHelp, 64);
 	y += btnH + 6;
 	x = pad;
-	if (m_edNote.GetSafeHwnd()) m_edNote.MoveWindow(x + 28, y, 44, 22);
-	if (m_edGt.GetSafeHwnd()) m_edGt.MoveWindow(x + 104, y, 44, 22);
-	if (m_edVel.GetSafeHwnd()) m_edVel.MoveWindow(x + 180, y, 44, 22);
-	if (m_btnPropUpd.GetSafeHwnd()) m_btnPropUpd.MoveWindow(x + 232, y, 52, btnH);
+	place(m_btnPencil, 64);
+	place(m_btnErase, 72);
+	place(m_btnSel, 64);
+	place(m_btnTempo, 64);
+	if (m_btnPal.GetSafeHwnd()) m_btnPal.ShowWindow(SW_HIDE);
+	place(m_btnVoice, 64);
+	if (m_ch.GetSafeHwnd()) { layoutCombo(m_ch, x, y, 104, btnH + 4); x += 112; }
+	y += btnH + 6;
+	x = pad;
+	const int propY = y;
+	const int labW = 44;
+	const int edW = 52;
+	auto field = [&](CWnd& ed) {
+		if (!ed.GetSafeHwnd()) return;
+		ed.MoveWindow(x + labW, propY, edW, 22);
+		x += labW + edW + 8;
+	};
+	field(m_edNote);
+	field(m_edGt);
+	field(m_edVel);
+	place(m_btnPropUpd, 56);
 	y += btnH + 6;
 	x = pad;
 	layoutCombo(m_stripLanes, x, y, 120, cbH, 140); x += 126;
@@ -869,24 +886,25 @@ void CSasamiFmScoreDlg::LayoutChrome()
 		y += 2;
 	}
 	x = pad;
-	place(m_btnMark, 36);
+	place(m_btnMark, 48);
 	place(m_btnLoopA, 28);
 	place(m_btnLoopB, 28);
-	place(m_btnLoopClr, 40);
-	place(m_btnShowAll, 40);
-	place(m_btnText, 64);
-	place(m_btnRoll, 88);
+	place(m_btnLoopClr, 52);
+	place(m_btnShowAll, 56);
+	place(m_btnText, 72);
+	place(m_btnRoll, 96);
 	y += btnH + 6;
 	x = pad;
-	layoutCombo(m_midiInDev, x, y, 150, cbH); x += 156;
-	layoutCombo(m_midiInMode, x, y, 96, cbH); x += 102;
-	place(m_btnArr, 64);
-	if (m_btnLayout.GetSafeHwnd()) m_btnLayout.ShowWindow(SW_HIDE);
+	layoutCombo(m_midiInDev, x, y, 168, cbH); x += 174;
+	layoutCombo(m_midiInMode, x, y, 110, cbH); x += 116;
+	place(m_btnArr, 72);
+	if (m_btnLayout.GetSafeHwnd()) m_btnLayout.ShowWindow(SW_SHOW);
+	place(m_btnLayout, 56);
 	y += cbH + 4;
 	if (m_status.GetSafeHwnd())
-		m_status.MoveWindow(pad, y, max(200, rc.Width() - pad * 2), 20);
-	y += 22;
-	const int helpH = 56;
+		m_status.MoveWindow(pad, y, max(200, rc.Width() - pad * 2), 22);
+	y += 26;
+	const int helpH = 72;
 	const int rollH = m_ui.showRollSplit ? 140 : 0;
 	const int bodyBotLimit = rc.Height() - pad - helpH - rollH;
 	const int chromeBottom = y;
@@ -1150,15 +1168,24 @@ void CSasamiFmScoreDlg::OnPaint()
 	CFont* oldLab = dc.SelectObject(GetFont());
 	if (m_edNote.GetSafeHwnd()) {
 		CRect er; m_edNote.GetWindowRect(&er); ScreenToClient(&er);
-		dc.TextOut(er.left - 20, er.top + 2, L"N");
+		{
+			CRect lr(er.left - 42, er.top, er.left - 4, er.bottom);
+			dc.DrawText(L"音", lr, DT_RIGHT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+		}
 	}
 	if (m_edGt.GetSafeHwnd()) {
 		CRect er; m_edGt.GetWindowRect(&er); ScreenToClient(&er);
-		dc.TextOut(er.left - 24, er.top + 2, L"GT");
+		{
+			CRect lr(er.left - 42, er.top, er.left - 4, er.bottom);
+			dc.DrawText(L"長さ", lr, DT_RIGHT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+		}
 	}
 	if (m_edVel.GetSafeHwnd()) {
 		CRect er; m_edVel.GetWindowRect(&er); ScreenToClient(&er);
-		dc.TextOut(er.left - 28, er.top + 2, L"Vol");
+		{
+			CRect lr(er.left - 42, er.top, er.left - 4, er.bottom);
+			dc.DrawText(L"音量", lr, DT_RIGHT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+		}
 	}
 	dc.SelectObject(oldLab);
 }

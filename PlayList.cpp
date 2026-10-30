@@ -15793,10 +15793,13 @@ void CPlayList::OnBnClickedButton3()
 		CString oldKey = SongParams_CurrentListName();
 		_tcsncpy_s(savedata.playlistname[savedata.playlistnum], _countof(savedata.playlistname[0]), newName, _TRUNCATE);
 		CString newKey = SongParams_CurrentListName();
+		/* 曲パラメータと設定の Commit を1回のアーカイブ更新にまとめる */
+		DatArc_FlushSuspend(TRUE);
 		if (oldKey.CompareNoCase(newKey) != 0)
 			SongParams_RenameList(oldKey, newKey);
 		loadplaylistname();
 		MpPersistSavedataQuick();
+		DatArc_FlushSuspend(FALSE);
 		extern CMediaPlayerDlg* mp;
 		if (mp && ::IsWindow(mp->GetSafeHwnd()))
 			mp->ReloadPlaylistCombo();

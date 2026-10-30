@@ -12,8 +12,10 @@ public:
 	int m_isVst3;
 	int m_part;
 	int m_effectsOnly; /* 1 = insert FX picker (!instrument) */
+	int m_vst2Only; /* 1 = instruments whose path is not .vst3 */
 
 	static int PickForPart(CWnd* owner, int part1to32, wchar_t* outPath, int outCch, int* outIs3);
+	static int PickVst2ForPart(CWnd* owner, int part1to32, wchar_t* outPath, int outCch, int* outIs3);
 	static int PickEffect(CWnd* owner, wchar_t* outPath, int outCch, int* outIs3);
 
 protected:

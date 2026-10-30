@@ -175,7 +175,7 @@ BOOL Renderer::Init(HWND hwnd, int quality)
 	m_waitStuck = 0;
 	m_lastRebind = 0;
 	m_hwnd = hwnd;
-	m_quality = Clampi(quality, 0, 4);
+	m_quality = Clampi(quality, 0, 6);
 	m_failStage = 1;
 	UINT flags = D3D11_CREATE_DEVICE_BGRA_SUPPORT;
 	D3D_FEATURE_LEVEL req = D3D_FEATURE_LEVEL_11_0, got = (D3D_FEATURE_LEVEL)0;
@@ -221,16 +221,19 @@ BOOL Renderer::Init(HWND hwnd, int quality)
 	return TRUE;
 }
 
+static BOOL TacQRich(int q) { return q == 2 || q == 3 || q == 5 || q == 6; }
+static BOOL TacQUltra(int q) { return q == 3 || q == 5 || q == 6; }
+
 void Renderer::SetQuality(int q)
 {
-	q = Clampi(q, 0, 4);
+	q = Clampi(q, 0, 6);
 	if (q == m_quality) return;
 	m_quality = q;
 	if (m_dev) {
 		ReleaseTargets(); TAC_REL(m_shSrv); TAC_REL(m_shDsv); TAC_REL(m_shTex); CreateTargets();
 		TAC_REL(m_sLin);
 		D3D11_SAMPLER_DESC ss = {};
-		int an = (m_quality == 4) ? 1 : ((m_quality == 2 || m_quality == 3) ? 16 : 8);
+		int an = (m_quality == 4) ? 1 : (TacQRich(m_quality) ? 16 : 8);
 		ss.Filter = (an <= 1) ? D3D11_FILTER_MIN_MAG_MIP_LINEAR : D3D11_FILTER_ANISOTROPIC;
 		ss.MaxAnisotropy = an;
 		ss.AddressU = ss.AddressV = ss.AddressW = D3D11_TEXTURE_ADDRESS_WRAP;
@@ -259,7 +262,7 @@ BOOL Renderer::CreateTargets()
 	HRESULT hr = m_swap->GetBuffer(0, __uuidof(ID3D11Texture2D), (void**)&m_bb);
 	if (FAILED(hr)) { m_lastHr = hr; return FALSE; }
 	if (FAILED(hr = m_dev->CreateRenderTargetView(m_bb, NULL, &m_bbRtv))) { m_lastHr = hr; return FALSE; }
-	int want = (m_quality == 1) ? 4 : ((m_quality == 2 || m_quality == 3) ? 8 : 1);
+	int want = (m_quality == 1) ? 4 : (TacQRich(m_quality) ? 8 : 1);
 	m_msaa = 1;
 	for (int s = want; s >= 2; s /= 2) {
 		UINT ql = 0;
@@ -282,7 +285,7 @@ BOOL Renderer::CreateTargets()
 		if (m_quality == 4) ss = 512;
 		else if (m_quality == 1) ss = 2048;
 		else if (m_quality == 2) ss = 4096;
-		else if (m_quality == 3) ss = 8192;
+		else if (TacQUltra(m_quality)) ss = 8192;
 		for (; ss >= 512; ss /= 2) {
 			D3D11_TEXTURE2D_DESC st = {};
 			st.Width = st.Height = ss; st.MipLevels = 1; st.ArraySize = 1; st.SampleDesc.Count = 1;
@@ -306,7 +309,7 @@ BOOL Renderer::CreateTargets()
 		pt.Format = DXGI_FORMAT_D24_UNORM_S8_UINT; pt.BindFlags = D3D11_BIND_DEPTH_STENCIL;
 		if (SUCCEEDED(m_dev->CreateTexture2D(&pt, NULL, &m_ptDs))) m_dev->CreateDepthStencilView(m_ptDs, NULL, &m_ptDsv);
 	}
-	int div = (m_quality <= 0 || m_quality == 4) ? 4 : (m_quality == 3 ? 1 : 2);
+	int div = (m_quality <= 0 || m_quality == 4) ? 4 : (TacQUltra(m_quality) ? 1 : 2);
 	m_blW = max(8, m_w / div); m_blH = max(8, m_h / div);
 	if (!MakeColorRt(m_dev, m_w, m_h, &m_sceneTex, &m_sceneRtv, &m_sceneSrv)
 		|| !MakeColorRt(m_dev, m_blW, m_blH, &m_blA, &m_blARtv, &m_blASrv)
@@ -315,7 +318,7 @@ BOOL Renderer::CreateTargets()
 		TAC_REL(m_blASrv); TAC_REL(m_blARtv); TAC_REL(m_blA);
 		TAC_REL(m_blBSrv); TAC_REL(m_blBRtv); TAC_REL(m_blB);
 	}
-	if (m_quality == 2 || m_quality == 3) {
+	if (TacQRich(m_quality)) {
 		D3D11_TEXTURE2D_DESC zt = {};
 		zt.Width = m_w; zt.Height = m_h; zt.MipLevels = 1; zt.ArraySize = 1;
 		zt.Format = DXGI_FORMAT_R16_FLOAT; zt.SampleDesc.Count = m_msaa;
@@ -577,7 +580,7 @@ BOOL Renderer::CreateStates()
 	if (FAILED(m_dev->CreateBuffer(&bd, NULL, &m_vbDyn))) return FALSE;
 
 	D3D11_SAMPLER_DESC ss = {};
-	int an = (m_quality == 4) ? 1 : ((m_quality == 2 || m_quality == 3) ? 16 : 8);
+	int an = (m_quality == 4) ? 1 : (TacQRich(m_quality) ? 16 : 8);
 	ss.Filter = (an <= 1) ? D3D11_FILTER_MIN_MAG_MIP_LINEAR : D3D11_FILTER_ANISOTROPIC;
 	ss.MaxAnisotropy = an;
 	ss.AddressU = ss.AddressV = ss.AddressW = D3D11_TEXTURE_ADDRESS_WRAP; ss.MaxLOD = D3D11_FLOAT32_MAX;
@@ -6050,7 +6053,9 @@ BOOL Renderer::DrawHumanHair(int model, int style, int headJ, const Pose& pose, 
 	}
 	ID3D11Buffer* saved = m_hairDraw.vb;
 	m_hairDraw.vb = m_hairVB;
-	DrawStatic(m_hairDraw, world, dp);
+	DrawParams hd = dp;
+	if (hd.mode < 0.5f) hd.mode = 7.f;
+	DrawStatic(m_hairDraw, world, hd);
 	m_hairDraw.vb = saved;
 	return TRUE;
 }
@@ -6197,9 +6202,14 @@ void Renderer::BeginFrame()
 	}
 	m_frame++;
 	m_fcb.q[0] = (float)m_quality;
-	m_fcb.q[1] = (m_quality == 2) ? 2.6f : ((m_quality == 3) ? 5.2f : 0.f);
-	m_fcb.q[2] = (m_quality == 3) ? 0.055f : 0.f;
-	m_fcb.q[3] = (m_quality == 2) ? 0.55f : ((m_quality == 3) ? 1.f : 0.f);
+	float tess = 0.f, disp = 0.f, dof = 0.f;
+	if (m_quality == 2) { tess = 2.6f; dof = 0.55f; }
+	else if (m_quality == 3) { tess = 5.2f; disp = 0.055f; dof = 1.f; }
+	else if (m_quality == 5) { tess = 6.8f; disp = 0.08f; dof = 1.25f; }
+	else if (m_quality == 6) { tess = 8.6f; disp = 0.11f; dof = 1.55f; }
+	m_fcb.q[1] = tess;
+	m_fcb.q[2] = disp;
+	m_fcb.q[3] = dof;
 	m_ctx->VSSetConstantBuffers(0, 1, &m_cbFrame);
 	m_ctx->PSSetConstantBuffers(0, 1, &m_cbFrame);
 	m_ctx->HSSetConstantBuffers(0, 1, &m_cbFrame);
@@ -6291,7 +6301,7 @@ void Renderer::BeginMainPass()
 			c1->Release();
 		}
 	} else {
-		BOOL mrt = (m_quality == 2 || m_quality == 3) && m_zRtv && m_zSrv;
+		BOOL mrt = TacQRich(m_quality) && m_zRtv && m_zSrv;
 		ID3D11RenderTargetView* rt[2] = { m_msRtv, m_zRtv };
 		m_ctx->OMSetRenderTargets(mrt ? 2 : 1, rt, m_dsv);
 		float cc[4] = { .4f, .55f, .75f, 1 };
@@ -6339,7 +6349,7 @@ void Renderer::ClearTess()
 void Renderer::BindForPass(BOOL skinned, BOOL outline)
 {
 	BOOL tess = m_allowTess && !skinned && !outline && !m_inPortrait
-		&& (m_quality == 2 || m_quality == 3) && m_vsT && m_hsT && m_dsT;
+		&& TacQRich(m_quality) && m_vsT && m_hsT && m_dsT;
 	m_ctx->IASetInputLayout(skinned ? m_ilK : m_ilS);
 	if (tess) {
 		m_ctx->VSSetShader(m_vsT, NULL, 0);
@@ -6763,7 +6773,7 @@ static unsigned CellHash(int x, int z, int salt)
 
 static void AddPuff(Renderer::SceneryPuff* p, int& n, int kind, float x, float y, float z, float minD)
 {
-	if (n >= 12) return;
+	if (n >= 16) return;
 	float md = minD * minD;
 	for (int i = 0; i < n; i++) {
 		if (p[i].kind != kind) continue;
@@ -6870,6 +6880,7 @@ static void ScatterTheme(const Map& m, MeshBuild& mb, MeshBuild& lava, Renderer:
 				if ((h % 11) == 0) { bot = RGBA8(64, 88, 30); top = (h & 16) ? RGBA8(236, 196, 64, 90) : RGBA8(228, 120, 156, 90); }
 				Tuft(mb, px, py, pz, 0.22f + u * 0.26f, 0.06f + u * 0.04f, yaw, bot, top);
 				if ((h % 5) == 0) Tuft(mb, px + 0.14f, py, pz - 0.1f, 0.14f + u * 0.12f, 0.045f, yaw + 0.9f, RGBA8(52, 90, 32), RGBA8(130, 186, 64, 80));
+				if ((h % 23) == 0) AddPuff(puff, puffN, 4, px, py + 0.3f, pz, 12.f);
 			}
 			break;
 		case TH_CANYON:
@@ -6878,6 +6889,7 @@ static void ScatterTheme(const Map& m, MeshBuild& mb, MeshBuild& lava, Renderer:
 			if ((h % 8) == 0) {
 				AddBox(mb, v3(px, py + 0.05f, pz), v3(0.24f, 0.045f, 0.14f), RGBA8(138, 102, 72), -1);
 				AddBox(mb, v3(px + 0.06f, py + 0.12f, pz - 0.04f), v3(0.12f, 0.03f, 0.08f), RGBA8(156, 118, 84), -1);
+				AddPuff(puff, puffN, 5, px, py + 0.4f, pz, 14.f);
 			}
 			break;
 		case TH_FOREST:
@@ -6887,11 +6899,13 @@ static void ScatterTheme(const Map& m, MeshBuild& mb, MeshBuild& lava, Renderer:
 				AddBox(mb, v3(px, py + 0.05f, pz), v3(0.025f, 0.05f, 0.025f), RGBA8(214, 196, 164), -1);
 				AddBox(mb, v3(px, py + 0.11f, pz), v3(0.08f, 0.028f, 0.08f), (h & 32) ? RGBA8(168, 48, 40) : RGBA8(196, 170, 120), -1);
 			}
+			if ((h % 7) == 0) AddPuff(puff, puffN, 6, px, py + 0.8f, pz, 12.f);
 			break;
 		case TH_SNOW:
 			if ((h % 5) != 0) break;
 			AddBox(mb, v3(px, py + 0.035f, pz), v3(0.26f, 0.04f, 0.16f), RGBA8(236, 242, 248), -1);
 			if ((h % 2) == 0) Tuft(mb, px + 0.08f, py, pz, 0.1f + u * 0.06f, 0.035f, yaw, RGBA8(198, 214, 224), RGBA8(246, 250, 255, 150));
+			if ((h % 7) == 0) AddPuff(puff, puffN, 7, px, py, pz, 14.f);
 			break;
 		case TH_DESERT:
 			if ((h % 17) == 0 && c.t != T_ROCK) {
@@ -6904,6 +6918,7 @@ static void ScatterTheme(const Map& m, MeshBuild& mb, MeshBuild& lava, Renderer:
 			} else if ((h % 6) == 0) {
 				Tuft(mb, px, py, pz, 0.12f + u * 0.08f, 0.05f, yaw, RGBA8(122, 96, 54), RGBA8(176, 146, 84, 110));
 			}
+			if ((h % 21) == 0) AddPuff(puff, puffN, 8, px, py + 0.2f, pz, 14.f);
 			break;
 		case TH_VOLCANO:
 			if ((h % 4) != 0) break;
@@ -6917,6 +6932,7 @@ static void ScatterTheme(const Map& m, MeshBuild& mb, MeshBuild& lava, Renderer:
 		case TH_RUINS:
 			if ((h % 5) == 0) AddBox(mb, v3(px, py + 0.04f, pz), v3(0.12f, 0.045f, 0.08f), RGBA8(124, 118, 110), -1);
 			if ((h % 4) == 0) Tuft(mb, px, py, pz, 0.18f + u * 0.1f, 0.07f, yaw, RGBA8(28, 70, 32), RGBA8(72, 132, 58, 75));
+			if ((h % 17) == 0) AddPuff(puff, puffN, 9, px, py + 0.5f, pz, 12.f);
 			break;
 		case TH_SEABED:
 			if ((h % 4) == 0) {
@@ -7034,10 +7050,12 @@ BOOL Renderer::BuildTerrain(const Map& m)
 			// 川が高い側にある段差は、どの地形でも滝の面にする。海底の溝は落とさない。
 			if (m.theme != TH_SEABED && c.t == T_WATER && Map::In(nx, nz) && m.At(nx, nz).t != T_VOID && y - ny > 0.9f) {
 				float ox = n.x * 0.06f, oz = n.z * 0.06f;
+				float fallBot = ny + 0.15f;
+				if (m.theme == TH_FALLS && m.At(nx, nz).t == T_CHASM) fallBot = -9.f;
 				wb.Quad(v3(ex0 + ox, y, ez0 + oz), v3(ex1 + ox, y, ez1 + oz),
-					v3(ex1 + ox, ny + 0.15f, ez1 + oz), v3(ex0 + ox, ny + 0.15f, ez0 + oz),
+					v3(ex1 + ox, fallBot, ez1 + oz), v3(ex0 + ox, fallBot, ez0 + oz),
 					n, 0, 0, 1, 1, -1, 0xFFFFFFFF);
-				AddPuff(m_puff, m_puffN, 1, (ex0 + ex1) * 0.5f + ox, (y + ny) * 0.5f, (ez0 + ez1) * 0.5f + oz, 7.f);
+				AddPuff(m_puff, m_puffN, 1, (ex0 + ex1) * 0.5f + ox, (y + fallBot) * 0.5f, (ez0 + ez1) * 0.5f + oz, 7.f);
 			}
 		}
 		if (c.t == T_WATER) {
@@ -7046,6 +7064,24 @@ BOOL Renderer::BuildTerrain(const Map& m)
 		} else if (c.t == T_LAVA) {
 			float ly = m.StandY(x, z) - .02f;
 			lb.Quad(v3((float)x, ly, (float)z), v3((float)x, ly, z + 1.f), v3(x + 1.f, ly, z + 1.f), v3(x + 1.f, ly, (float)z), v3(0, 1, 0), 0, 0, 1, 1, -1, 0xFFFFFFFF);
+		}
+	}
+	if (m.theme == TH_FALLS) {
+		int fx = -1, fz = -1;
+		for (int z = 36; z < 56 && fx < 0; z++) for (int x = 4; x < 18; x++) {
+			if (m.At(x, z).t != T_WATER) continue;
+			if (!Map::In(x + 1, z) || m.At(x + 1, z).t != T_WATER) continue;
+			fx = x; fz = z;
+			break;
+		}
+		if (fx >= 0) {
+			float x0 = (float)fx, x1 = (float)fx + 2.f;
+			float z0 = (float)fz, z1 = (float)fz + 1.f;
+			float top = 22.f;
+			float bot = m.StandY(fx, fz);
+			wb.Quad(v3(x0, top, z0), v3(x1, top, z0), v3(x1, bot, z0), v3(x0, bot, z0), v3(0, 0, 1), 0, 0, 1, 1, -1, 0xFFFFFFFF);
+			wb.Quad(v3(x0, top, z1), v3(x0, top, z0), v3(x0, bot, z0), v3(x0, bot, z1), v3(-1, 0, 0), 0, 0, 1, 1, -1, 0xFFFFFFFF);
+			AddPuff(m_puff, m_puffN, 1, x0 + 1.f, (top + bot) * 0.5f, z0, 4.f);
 		}
 	}
 	ScatterTheme(m, sceneMb, lb, m_puff, m_puffN);
@@ -7270,7 +7306,7 @@ BOOL Renderer::BeginPortrait(int slot)
 void Renderer::EndPortrait()
 {
 	m_inPortrait = FALSE;
-	BOOL mrt = (m_quality == 2 || m_quality == 3) && m_zRtv && m_zSrv;
+	BOOL mrt = TacQRich(m_quality) && m_zRtv && m_zSrv;
 	ID3D11RenderTargetView* rt[2] = { m_msRtv, m_zRtv };
 	m_ctx->OMSetRenderTargets(mrt ? 2 : 1, rt, m_dsv);
 	D3D11_VIEWPORT vp = { 0, 0, (float)m_w, (float)m_h, 0, 1 };
@@ -7312,16 +7348,23 @@ BOOL Renderer::ApplyPost()
 		m_ctx->Draw(3, 0);
 	};
 	ID3D11ShaderResourceView* src = m_sceneSrv;
-	if ((m_quality == 2 || m_quality == 3) && m_dofSrv && m_zSrv && ((m_quality == 3) ? m_psDofU : m_psDofH)) {
+	if (TacQRich(m_quality) && m_dofSrv && m_zSrv && (TacQUltra(m_quality) ? m_psDofU : m_psDofH)) {
 		if (m_msaa > 1 && m_zTex && m_zRes)
 			m_ctx->ResolveSubresource(m_zRes, 0, m_zTex, 0, DXGI_FORMAT_R16_FLOAT);
 		DrawParams df;
-		df.emissive = (m_quality == 3) ? 14.f : 6.f;
+		df.emissive = 6.f;
+		if (m_quality == 3) df.emissive = 14.f;
+		else if (m_quality == 5) df.emissive = 18.f;
+		else if (m_quality == 6) df.emissive = 24.f;
 		df.hue = 0.16f;
-		fs((m_quality == 3) ? m_psDofU : m_psDofH, m_sceneSrv, m_zSrv, m_dofRtv, m_w, m_h, df, 0);
+		fs(TacQUltra(m_quality) ? m_psDofU : m_psDofH, m_sceneSrv, m_zSrv, m_dofRtv, m_w, m_h, df, 0);
 		src = m_dofSrv;
 	}
-	int nblur = (m_quality == 4) ? 0 : ((m_quality == 3) ? 3 : 2);
+	int nblur = 2;
+	if (m_quality == 4) nblur = 0;
+	else if (m_quality == 3) nblur = 3;
+	else if (m_quality == 5) nblur = 4;
+	else if (m_quality == 6) nblur = 5;
 	if (nblur > 0) {
 		DrawParams ex;
 		ex.mode = 0.72f;

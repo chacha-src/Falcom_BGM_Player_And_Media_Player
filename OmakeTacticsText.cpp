@@ -1225,7 +1225,7 @@ R(TX_RS_KO, L"戦闘不能", L"Knocked Out", L"K.O.", L"K.O.", L"Fuera de combat
 R(TX_HELP_TEXT,
 	L"【基本】\n"
 	L"・行動順は素早さで決まり、右上の「行動順」に表示されます。素早いキャラは割り込んで何度も動きます。\n"
-	L"・青いマスが移動範囲、赤いマスが攻撃範囲です。敵の手番では敵の移動範囲も表示されます。\n"
+	L"・移動では進めるマスだけ色が付きます。攻撃を選ぶと赤いマスが射程です。敵の移動範囲は、敵が動き終わるまで残ります。\n"
 	L"・移動後に「攻撃」「スキル」「待機」を選びます。行動前なら移動を戻せます。\n"
 	L"・必殺の一撃やスキル・魔法ではカットイン演出が入ります（設定で短縮できます）。\n"
 	L"・ボスを倒すか敵を全滅させると勝利。味方が全滅すると敗北です。\n"
@@ -1238,7 +1238,7 @@ R(TX_HELP_TEXT,
 	L"・ステージは1～9999。先へ進むほど敵が強くなり、得られる経験値も増えます。",
 	L"[Basics]\n"
 	L"- Turn order depends on agility and is shown in \"Turn Order\" at the top right. Fast units can cut in and act more often.\n"
-	L"- Blue cells show the movement range, red cells the attack range. During enemy turns their movement range is shown too.\n"
+	L"- While moving, only tiles you can enter are marked. Red tiles appear when you choose an attack. An enemy's move range stays until that move ends.\n"
 	L"- After moving, choose Attack, Skill or Wait. You can undo the move before acting.\n"
 	L"- Critical hits, skills and spells play a cut-in scene (can be shortened in settings).\n"
 	L"- Win by defeating the boss or all enemies. You lose if all allies fall.\n"
@@ -1251,7 +1251,7 @@ R(TX_HELP_TEXT,
 	L"- Stages run from 1 to 9999. Enemies grow stronger and give more EXP as you advance.",
 	L"[Bases]\n"
 	L"- L'ordre des tours dépend de l'agilité et s'affiche dans « Ordre des tours » en haut à droite. Les unités rapides s'intercalent et agissent plus souvent.\n"
-	L"- Les cases bleues indiquent le déplacement, les rouges la portée d'attaque. Pendant le tour ennemi, sa portée de déplacement est aussi affichée.\n"
+	L"- En déplacement, seules les cases accessibles sont marquées. Le rouge apparaît en choisissant une attaque. La portée ennemie reste jusqu'à la fin de son mouvement.\n"
 	L"- Après le déplacement, choisissez Attaquer, Compétence ou Attendre. Vous pouvez annuler le déplacement avant d'agir.\n"
 	L"- Les coups critiques, compétences et sorts déclenchent une cinématique (raccourcissable dans les réglages).\n"
 	L"- Vainquez le boss ou tous les ennemis pour gagner. Vous perdez si tous vos alliés tombent.\n"
@@ -1264,7 +1264,7 @@ R(TX_HELP_TEXT,
 	L"- Les niveaux vont de 1 à 9999. Les ennemis deviennent plus forts et donnent plus d'EXP au fil de la progression.",
 	L"[Basi]\n"
 	L"- L'ordine dei turni dipende dall'agilità ed è mostrato in \"Ordine dei turni\" in alto a destra. Le unità veloci si inseriscono e agiscono più spesso.\n"
-	L"- Le caselle blu indicano il movimento, quelle rosse la portata d'attacco. Durante il turno nemico viene mostrato anche il suo movimento.\n"
+	L"- In movimento si vedono solo le caselle raggiungibili. Il rosso compare scegliendo un attacco. Il movimento nemico resta fino alla fine dello spostamento.\n"
 	L"- Dopo il movimento scegli Attacca, Abilità o Attendi. Puoi annullare il movimento prima di agire.\n"
 	L"- Colpi critici, abilità e magie mostrano una scena speciale (accorciabile nelle impostazioni).\n"
 	L"- Vinci sconfiggendo il boss o tutti i nemici. Perdi se cadono tutti gli alleati.\n"
@@ -1277,7 +1277,7 @@ R(TX_HELP_TEXT,
 	L"- I livelli vanno da 1 a 9999. Avanzando i nemici diventano più forti e danno più ESP.",
 	L"[Básico]\n"
 	L"- El orden de turnos depende de la agilidad y se muestra en «Orden de turnos» arriba a la derecha. Las unidades rápidas se adelantan y actúan más a menudo.\n"
-	L"- Las casillas azules indican el movimiento y las rojas el alcance de ataque. En el turno enemigo también se muestra su movimiento.\n"
+	L"- Al moverte solo se marcan las casillas accesibles. El rojo aparece al elegir un ataque. El movimiento enemigo sigue hasta que termina de moverse.\n"
 	L"- Tras moverte, elige Atacar, Habilidad o Esperar. Puedes deshacer el movimiento antes de actuar.\n"
 	L"- Los críticos, habilidades y hechizos muestran una escena especial (se puede acortar en los ajustes).\n"
 	L"- Ganas al derrotar al jefe o a todos los enemigos. Pierdes si caen todos tus aliados.\n"
@@ -1290,7 +1290,7 @@ R(TX_HELP_TEXT,
 	L"- Las fases van de 1 a 9999. Al avanzar, los enemigos son más fuertes y dan más EXP.",
 	L"[기본]\n"
 	L"- 행동 순서는 민첩으로 정해지며 오른쪽 위의 '행동 순서'에 표시됩니다. 빠른 캐릭터는 끼어들어 더 자주 행동합니다.\n"
-	L"- 파란 칸은 이동 범위, 빨간 칸은 공격 범위입니다. 적의 차례에는 적의 이동 범위도 표시됩니다.\n"
+	L"- 이동 중에는 갈 수 있는 칸만 표시됩니다. 빨간 칸은 공격을 고르면 나옵니다. 적의 이동 범위는 적이 이동을 끝낼 때까지 남습니다.\n"
 	L"- 이동 후 '공격' '스킬' '대기'를 고릅니다. 행동 전이라면 이동을 되돌릴 수 있습니다.\n"
 	L"- 필살의 일격이나 스킬·마법에서는 컷인 연출이 들어갑니다 (설정에서 단축 가능).\n"
 	L"- 보스를 쓰러뜨리거나 적을 전멸시키면 승리. 아군이 전멸하면 패배입니다.\n"
@@ -1303,7 +1303,7 @@ R(TX_HELP_TEXT,
 	L"- 스테이지는 1~9999. 앞으로 갈수록 적이 강해지고 얻는 경험치도 늘어납니다.",
 	L"【基本】\n"
 	L"・行动顺序由敏捷决定，显示在右上角的“行动顺序”中。敏捷高的角色会插队，更频繁地行动。\n"
-	L"・蓝色格子为移动范围，红色格子为攻击范围。敌方回合时也会显示敌人的移动范围。\n"
+	L"・移动时只标出能进入的格子。选择攻击后才出现红色射程。敌人的移动范围会留到移动结束。\n"
 	L"・移动后选择“攻击”“技能”或“待机”。行动前可以撤销移动。\n"
 	L"・必杀一击、技能和魔法会播放特写演出（可在设置中缩短）。\n"
 	L"・击败首领或全灭敌人即为胜利。我方全灭则失败。\n"
@@ -1316,7 +1316,7 @@ R(TX_HELP_TEXT,
 	L"・关卡为1～9999。越往后敌人越强，获得的经验值也越多。",
 	L"[الأساسيات]\n"
 	L"- يتحدد ترتيب الأدوار بالرشاقة ويظهر في «ترتيب الأدوار» أعلى اليمين. الوحدات السريعة تتقدم وتتحرك أكثر.\n"
-	L"- الخانات الزرقاء مدى الحركة والحمراء مدى الهجوم. في دور العدو يظهر مدى حركته أيضًا.\n"
+	L"- أثناء الحركة تُعلَّم الخانات التي يمكن دخولها فقط. الأحمر يظهر عند اختيار هجوم. مدى حركة العدو يبقى حتى ينتهي تحركه.\n"
 	L"- بعد الحركة اختر هجوم أو مهارة أو انتظار. يمكنك التراجع عن الحركة قبل الفعل.\n"
 	L"- الضربات الحاسمة والمهارات والتعاويذ تعرض مشهدًا خاصًا (يمكن تقصيره من الإعدادات).\n"
 	L"- تفوز بهزيمة الزعيم أو جميع الأعداء، وتخسر إذا سقط جميع حلفائك.\n"
@@ -1329,7 +1329,7 @@ R(TX_HELP_TEXT,
 	L"- المراحل من 1 إلى 9999. كلما تقدمت ازداد الأعداء قوة وازدادت الخبرة.",
 	L"[Основы]\n"
 	L"- Порядок ходов зависит от ловкости и показан в «Порядке ходов» справа вверху. Быстрые бойцы вклиниваются и ходят чаще.\n"
-	L"- Синие клетки — дальность хода, красные — дальность атаки. В ход врага показывается и его дальность хода.\n"
+	L"- При ходе отмечены только клетки, куда можно встать. Красные появляются при выборе атаки. Дальность врага держится до конца его хода.\n"
 	L"- После перемещения выберите «Атака», «Навык» или «Ждать». До действия ход можно отменить.\n"
 	L"- Критические удары, навыки и заклинания показывают вставку (можно сократить в настройках).\n"
 	L"- Победа — убить босса или всех врагов. Поражение — если пали все союзники.\n"
@@ -1342,7 +1342,7 @@ R(TX_HELP_TEXT,
 	L"- Этапы с 1 по 9999. Чем дальше, тем сильнее враги и больше опыта.",
 	L"[Grundlagen]\n"
 	L"- Die Zugreihenfolge hängt von der Gewandtheit ab und wird oben rechts unter „Zugreihenfolge“ angezeigt. Schnelle Einheiten schieben sich dazwischen und handeln öfter.\n"
-	L"- Blaue Felder zeigen die Bewegungs-, rote die Angriffsreichweite. Im Zug des Feindes wird auch dessen Reichweite angezeigt.\n"
+	L"- Beim Bewegen sind nur betretbare Felder markiert. Rot erscheint bei der Angriffswahl. Die gegnerische Reichweite bleibt bis zum Ende der Bewegung.\n"
 	L"- Nach dem Bewegen Angriff, Fertigkeit oder Warten wählen. Vor der Aktion kann die Bewegung zurückgenommen werden.\n"
 	L"- Kritische Treffer, Fertigkeiten und Zauber zeigen eine Zwischensequenz (in den Einstellungen kürzbar).\n"
 	L"- Sieg durch Besiegen des Bosses oder aller Feinde. Niederlage, wenn alle Verbündeten fallen.\n"
@@ -1355,7 +1355,7 @@ R(TX_HELP_TEXT,
 	L"- Es gibt die Stufen 1 bis 9999. Je weiter du kommst, desto stärker werden die Feinde und desto mehr EP gibt es.",
 	L"[Básico]\n"
 	L"- A ordem dos turnos depende da agilidade e aparece em \"Ordem dos turnos\" no canto superior direito. Unidades rápidas passam à frente e agem mais vezes.\n"
-	L"- Casas azuis mostram o alcance de movimento, vermelhas o de ataque. No turno inimigo, o movimento dele também aparece.\n"
+	L"- Ao mover, só as casas acessíveis são marcadas. O vermelho aparece ao escolher um ataque. O movimento inimigo fica até ele terminar de andar.\n"
 	L"- Depois de mover, escolha Atacar, Habilidade ou Esperar. É possível desfazer o movimento antes de agir.\n"
 	L"- Críticos, habilidades e magias exibem uma cena especial (pode ser encurtada nas configurações).\n"
 	L"- Vença derrotando o chefe ou todos os inimigos. Você perde se todos os aliados caírem.\n"
@@ -1368,7 +1368,7 @@ R(TX_HELP_TEXT,
 	L"- As fases vão de 1 a 9999. Quanto mais avança, mais fortes ficam os inimigos e mais EXP eles dão.",
 	L"[Basis]\n"
 	L"- De beurtvolgorde hangt af van behendigheid en staat rechtsboven bij 'Beurtvolgorde'. Snelle eenheden dringen voor en handelen vaker.\n"
-	L"- Blauwe vakken tonen het bewegingsbereik, rode het aanvalsbereik. Tijdens de vijandelijke beurt wordt ook hun bereik getoond.\n"
+	L"- Tijdens bewegen zijn alleen betreedbare vakken gemarkeerd. Rood verschijnt bij een aanval. Het vijandelijke bereik blijft tot de beweging klaar is.\n"
 	L"- Kies na het bewegen Aanval, Vaardigheid of Wachten. Vóór de actie kun je de beweging ongedaan maken.\n"
 	L"- Kritieke treffers, vaardigheden en spreuken tonen een tussenscène (in te korten via instellingen).\n"
 	L"- Je wint door de baas of alle vijanden te verslaan. Je verliest als alle bondgenoten vallen.\n"
@@ -1381,7 +1381,7 @@ R(TX_HELP_TEXT,
 	L"- Er zijn levels 1 tot 9999. Hoe verder je komt, hoe sterker de vijanden en hoe meer EP.",
 	L"[Podstawy]\n"
 	L"- Kolejność tur zależy od zwinności i widać ją w „Kolejności tur” w prawym górnym rogu. Szybkie jednostki wskakują przed innych i działają częściej.\n"
-	L"- Niebieskie pola to zasięg ruchu, czerwone — zasięg ataku. W turze wroga widać także jego zasięg ruchu.\n"
+	L"- Przy ruchu widać tylko pola, na które można wejść. Czerwień pojawia się przy wyborze ataku. Zasięg wroga zostaje do końca jego ruchu.\n"
 	L"- Po ruchu wybierz Atak, Umiejętność lub Czekaj. Przed akcją możesz cofnąć ruch.\n"
 	L"- Trafienia krytyczne, umiejętności i czary pokazują przerywnik (można skrócić w ustawieniach).\n"
 	L"- Wygrywasz, pokonując bossa lub wszystkich wrogów. Przegrywasz, gdy padną wszyscy sojusznicy.\n"
@@ -1394,7 +1394,7 @@ R(TX_HELP_TEXT,
 	L"- Etapy od 1 do 9999. Im dalej, tym silniejsi wrogowie i więcej PD.",
 	L"[Temel]\n"
 	L"- Sıra düzeni çevikliğe bağlıdır ve sağ üstteki \"Sıra düzeni\"nde gösterilir. Hızlı birimler araya girip daha sık hareket eder.\n"
-	L"- Mavi kareler hareket menzilini, kırmızı kareler saldırı menzilini gösterir. Düşman sırasında onun hareket menzili de gösterilir.\n"
+	L"- Hareket ederken yalnızca girilebilen kareler işaretlenir. Kırmızı, saldırı seçilince çıkar. Düşmanın menzili hareketi bitene kadar kalır.\n"
 	L"- Hareketten sonra Saldırı, Yetenek veya Bekle'yi seçin. Eylemden önce hareketi geri alabilirsiniz.\n"
 	L"- Kritik vuruşlar, yetenekler ve büyüler ara sahne gösterir (ayarlardan kısaltılabilir).\n"
 	L"- Patronu veya tüm düşmanları yenerek kazanırsınız. Tüm müttefikler düşerse kaybedersiniz.\n"
@@ -2296,7 +2296,7 @@ R(TX_BT_SURVEY,
 	L"Rozpoznanie pola bitwy — wrogów: %d  Klik/Enter/A, by pominąć",
 	L"Savaş alanı inceleniyor — %d düşman  Atlamak için tıkla/Enter/A")
 R(TX_SET_THREAT, L"脅威範囲", L"Threat range", L"Zone de menace", L"Area di minaccia", L"Zona de amenaza", L"위협 범위", L"威胁范围", L"نطاق التهديد", L"Зона угрозы", L"Gefahrenzone", L"Área de ameaça", L"Dreigingsgebied", L"Zasięg zagrożenia", L"Tehdit alanı")
-R(TX_BT_REIN, L"援軍が来る", L"Reinforcements incoming", L"Renforts en approche", L"Arrivano rinforzi", L"Llegan refuerzos", L"지원군이 온다", L"援军将至", L"تعزيزات قادمة", L"Идёт подкрепление", L"Verstärkung naht", L"Reforços a caminho", L"Versterking onderweg", L"Nadchodzą posiłki", L"Takviye geliyor")
+R(TX_BT_REIN, L"敵の索敵に見つかった！", L"Spotted by the enemy!", L"Repérés par l'ennemi !", L"Avvistati dal nemico!", L"¡Os ha visto el enemigo!", L"적의 수색에 들켰다!", L"被敌人的索敌发现了！", L"رصدكم العدو!", L"Вас заметил дозор врага!", L"Vom Feind entdeckt!", L"O inimigo vos avistou!", L"Door de vijand opgemerkt!", L"Wróg was wypatrzył!", L"Düşman keşfi sizi gördü!")
 R(TX_WX_RAIN, L"雨", L"Rain", L"Pluie", L"Pioggia", L"Lluvia", L"비", L"雨", L"مطر", L"Дождь", L"Regen", L"Chuva", L"Regen", L"Deszcz", L"Yağmur")
 R(TX_WX_SNOW, L"雪", L"Snow", L"Neige", L"Neve", L"Nieve", L"눈", L"雪", L"ثلج", L"Снег", L"Schnee", L"Neve", L"Sneeuw", L"Śnieg", L"Kar")
 R(TX_WX_ASH, L"降灰", L"Ashfall", L"Cendres", L"Cenere", L"Ceniza", L"화산재", L"降灰", L"رماد", L"Пепел", L"Asche", L"Cinza", L"As", L"Popiół", L"Kül")
@@ -2307,6 +2307,7 @@ R(TX_BT_FENCE, L"柵を壊す", L"Break fence", L"Briser la barrière", L"Rompi 
 R(TX_BTD_FENCE, L"隣の柵を壊して手番を終えます。", L"Breaks an adjacent fence and ends the turn.", L"Brise une barrière voisine et finit le tour.", L"Rompe un recinto vicino e chiude il turno.", L"Rompe una valla vecina y termina el turno.", L"옆의 울타리를 부수고 차례를 끝냅니다.", L"拆掉相邻的栅栏，并结束回合。", L"يكسر سياجًا مجاورًا وينهي الدور.", L"Ломает соседнюю ограду и завершает ход.", L"Reißt einen benachbarten Zaun ein und beendet den Zug.", L"Quebra uma cerca vizinha e encerra o turno.", L"Sloopt een naburig hek en beëindigt de beurt.", L"Burzy sąsiedni płot i kończy turę.", L"Bitişik çiti kırar ve turu bitirir.")
 R(TX_BT_STAMPEDE, L"スタンピードステージ", L"Stampede Stage", L"Étage de ruée", L"Fase calca", L"Etapa de estampida", L"스탬피드 스테이지", L"狂奔关卡", L"مرحلة الاندفاع", L"Стадия натиска", L"Stampede-Stufe", L"Estágio de estouro", L"Stormloop-etappe", L"Etap naporu", L"İzdiham aşaması")
 R(TX_BT_STAMPEDE_GO, L"スタンピード発生！", L"Stampede!", L"Ruée !", L"Calca!", L"¡Estampida!", L"스탬피드 발생!", L"狂奔来袭！", L"اندفاع!", L"Натиск!", L"Stampede!", L"Estouro!", L"Stormloop!", L"Napór!", L"İzdiham!")
+R(TX_BT_STAMPEDE_HELP, L"この戦闘はスタンピードです。最初にいる敵を倒して残りの数が少なくなると、味方のすぐそばに新しい敵が数体あらわれます。あらわれた敵は先に動いて襲ってきて、その手番が終わると普通の行動順にもどります。この追加は、その戦闘で一度だけです。", L"This battle is a stampede. When only a few of the starting enemies remain, several new foes appear right beside your party. They act at once and attack, then join the normal turn order. This happens only once in the battle.", L"Ce combat est une ruée. Quand il ne reste que peu d'ennemis du début, plusieurs nouveaux surgissent juste à côté de vos alliés. Ils agissent tout de suite et attaquent, puis reprennent l'ordre normal. Ce renfort n'arrive qu'une fois.", L"Questa battaglia è una calca. Quando restano pochi dei nemici iniziali, alcuni nuovi compaiono accanto ai tuoi alleati. Agiscono subito e attaccano, poi tornano all'ordine normale. Questo gruppo arriva una sola volta.", L"Esta batalla es una estampida. Cuando quedan pocos de los enemigos iniciales, varios nuevos aparecen junto a tus aliados. Actúan enseguida y atacan, y después vuelven al orden normal. Este grupo sale solo una vez.", L"이 전투는 스탬피드입니다. 처음 있던 적을 줄여 얼마 남지 않으면, 아군 바로 옆에 새 적이 몇 체 나타납니다. 나타난 적은 먼저 움직여 덮치고, 차례가 끝나면 보통 순서로 돌아갑니다. 이 추가는 한 번만 일어납니다.", L"这场战斗是狂奔。把开场的敌人打到所剩不多时，会有数名新敌人出现在我方身旁。他们会先行动并攻击，该回合结束后回到正常顺序。这样的增援在这一战里只发生一次。", L"هذه المعركة اندفاع. حين يبقى قليل من أعداء البداية، يظهر عدة أعداء جدد بجوار حلفائك. يتحركون فورًا ويهاجمون، ثم يعودون إلى ترتيب الأدوار. تحدث هذه الدفعة مرة واحدة.", L"Этот бой — натиск. Когда от начальных врагов остаётся мало, рядом с вашими бойцами появляется несколько новых. Они ходят сразу и бьют, затем встают в обычный порядок. Такая волна бывает один раз за бой.", L"Dieser Kampf ist ein Stampede. Wenn von den Anfangsgegnern nur noch wenige übrig sind, erscheinen mehrere neue direkt neben der Gruppe. Sie handeln sofort und greifen an, danach gilt wieder die normale Zugreihenfolge. Das kommt nur einmal vor.", L"Esta batalha é um estouro. Quando restam poucos dos inimigos iniciais, vários novos surgem ao lado do seu grupo. Eles agem na hora e atacam, depois voltam à ordem normal. Esse grupo aparece só uma vez.", L"Dit gevecht is een stormloop. Als er nog maar weinig van de eerste vijanden over zijn, duiken er meerdere nieuwe vlak naast je groep op. Ze handelen meteen en vallen aan, daarna geldt weer de normale beurt. Dit komt maar één keer voor.", L"Ta walka to napór. Gdy z początkowych wrogów zostanie niewielu, kilku nowych pojawia się tuż przy drużynie. Działają od razu i atakują, a potem wracają do zwykłej kolejności tur. Ta grupa pojawia się tylko raz.", L"Bu savaş bir izdihamdır. Başlangıçtaki düşmanlardan azı kalınca, birkaç yeni düşman grubunuzun yanında belirir. Hemen sıraya girip saldırırlar, sonra normal tur sırasına dönerler. Bu dalga yalnız bir kez olur.")
 
 // ---------------------------------------------------------------- 追加職の説明
 R(TX_CLD_JOB + 0, L"蛮族。ゴッドフィストを覚える。拳と斧で押し、力とHPが伸びる。", L"Barbarian. Learns God Fist. Presses with fist and axe. Strength and HP rise.", L"barbare. Apprend Poing divin. Pousse au poing et à la hache. Force et PV montent.", L"barbaro. Impara Pugno divino. Spinge con pugno e ascia. Forza e PS salgono.", L"bárbaro. Aprende Puño divino. Empuja con puño y hacha. Suben fuerza y PV.", L"야만인. 신권을 익힌다. 주먹과 도끼로 민다. 힘과 HP가 오른다.", L"蛮族。学会神拳。以拳和斧推进。力量和HP上升。", L"بربري. يتعلم قبضة إلهية. يضغط بالقبضة والفأس. ترتفع القوة والصحة.", L"варвар. Изучает Божественный кулак. Давит кулаком и топором. Растут сила и ОЗ.", L"Barbar. Erlernt Gottfaust. Drückt mit Faust und Axt. Stärke und LP steigen.", L"bárbaro. Aprende Punho divino. Pressiona com punho e machado. Sobem força e PV.", L"barbaar. Leert Godenvuist. Drukt met vuist en bijl. Kracht en LP stijgen.", L"barbarzyńca. Uczy się Boska pięść. Napiera pięścią i toporem. Rosną siła i PŻ.", L"barbar. Tanrı yumruğu öğrenir. Yumruk ve baltayla bastırır. Güç ve CP artar.")
@@ -2537,22 +2538,35 @@ R(TX_SKD_AREAX + 14, L"スッゲスティオン。半径8の倒れた味方を�
 R(TX_SET_Q_TINY, L"超軽量", L"Ultra Light", L"Très léger", L"Leggerissima", L"Ultraligera", L"초경량", L"超轻量", L"خفيفة جداً", L"Сверхлёгкое", L"Ultraleicht", L"Ultraleve", L"Ultralicht", L"Ultralight", L"Ultra hafif")
 R(TX_SET_Q_ULTRA, L"超綺麗", L"Ultra Fine", L"Très belle", L"Bellissima", L"Muy bella", L"초고화질", L"超精细", L"فائقة الجمال", L"Прекрасное", L"Wunderschön", L"Lindíssima", L"Prachtig", L"Przepiękna", L"Çok güzel")
 R(TX_SKD_AREAX + 15, L"ワルディング・ボンド。半径9の倒れた味方を起こす。", L"Warding Bond. Raises fallen allies within radius 9.", L"Warding Bond. Relève les alliés tombés dans un rayon 9.", L"Warding Bond. Rialza gli alleati caduti nel raggio 9.", L"Warding Bond. Levanta a los aliados caídos en radio 9.", L"우아르드이느그 브오느드. 반경 9의 쓰러진 아군을 일으킨다.", L"乌阿尔德伊恩格布奥恩德。扶起半径9内倒下的同伴。", L"واردينغ بوند. ينهض الحلفاء الساقطين ضمن نصف قطر 9.", L"Вардинг Бонд. Поднимает павших союзников в радиусе 9.", L"Warding Bond. Richtet gefallene Verbündete im Radius 9 auf.", L"Warding Bond. Ergue aliados caídos no raio 9.", L"Warding Bond. Laat gevallenen binnen straal 9 opstaan.", L"Warding Bond. Podnosi poległych sojuszników w promieniu 9.", L"Warding Bond. Yarıçap 9 içindeki düşmüş yoldaşları kaldırır.")
-R(TX_BT_TOGAME, L"ゲーム画面へ", L"Back to the Game", L"Retour au jeu", L"Torna al gioco", L"Volver al juego", L"게임 화면으로", L"回到游戏画面", L"العودة إلى اللعبة", L"К экрану игры", L"Zum Spiel", L"Voltar ao jogo", L"Terug naar het spel", L"Do gry", L"Oyuna dön")
+R(TX_BT_TOGAME, L"ホームへ", L"Home", L"Accueil", L"Home", L"Inicio", L"홈으로", L"返回主页", L"إلى الرئيسية", L"На главную", L"Zur Basis", L"Início", L"Naar home", L"Do bazy", L"Ana sayfa")
 R(TX_BT_TOGAME_Q,
-	L"ゲーム画面へ戻りますか？ この戦闘はオートセーブから続けられます。",
-	L"Return to the game? This battle continues from the auto save.",
-	L"Revenir au jeu ? Ce combat reprend depuis la sauvegarde auto.",
-	L"Tornare al gioco? Questa battaglia riprende dal salvataggio auto.",
-	L"¿Volver al juego? Esta batalla sigue desde el autoguardado.",
-	L"게임 화면으로 돌아갈까요? 이 전투는 자동 저장에서 이어집니다.",
-	L"回到游戏画面吗？这场战斗可从自动保存继续。",
-	L"العودة إلى اللعبة؟ تستمر هذه المعركة من الحفظ التلقائي.",
-	L"Вернуться к игре? Этот бой продолжится из автосохранения.",
-	L"Zum Spiel zurück? Dieser Kampf geht aus dem Autospeichern weiter.",
-	L"Voltar ao jogo? Esta batalha continua a partir do autogravar.",
-	L"Terug naar het spel? Dit gevecht gaat verder vanuit de automatische opslag.",
-	L"Wrócić do gry? Ta bitwa będzie kontynuowana z autozapisu.",
-	L"Oyuna dönülsün mü? Bu savaş otomatik kayıttan sürer.")
+	L"ホームに戻りますか？ この戦闘はオートセーブから続けられます。",
+	L"Return home? This battle continues from the auto save.",
+	L"Retour à l'accueil ? Ce combat reprend depuis la sauvegarde auto.",
+	L"Tornare alla base? Questa battaglia riprende dal salvataggio auto.",
+	L"¿Volver al inicio? Esta batalla sigue desde el autoguardado.",
+	L"홈으로 돌아갈까요? 이 전투는 자동 저장에서 이어집니다.",
+	L"返回主页吗？这场战斗可从自动保存继续。",
+	L"العودة إلى الرئيسية؟ تستمر هذه المعركة من الحفظ التلقائي.",
+	L"На главную? Этот бой продолжится из автосохранения.",
+	L"Zur Basis zurück? Dieser Kampf geht aus dem Autospeichern weiter.",
+	L"Voltar ao início? Esta batalha continua a partir do autogravar.",
+	L"Naar home? Dit gevecht gaat verder vanuit de automatische opslag.",
+	L"Wrócić do bazy? Ta bitwa będzie kontynuowana z autozapisu.",
+	L"Ana sayfaya dönülsün mü? Bu savaş otomatik kayıttan sürer.")
+R(TX_SET_Q_PEAK, L"最高", L"Peak", L"Sommet", L"Massima", L"Cúspide", L"최고", L"最高", L"القصوى", L"Высшее", L"Höchste", L"Máxima", L"Hoogste", L"Najwyższa", L"Zirve")
+R(TX_SET_Q_LIMIT, L"限界突破", L"Limit Break", L"Au-delà", L"Oltre il limite", L"Más allá", L"한계 돌파", L"极限突破", L"تجاوز الحد", L"Прорыв", L"Grenzbruch", L"Além", L"Grensbreuk", L"Przełamanie", L"Sınır aşımı")
+R(TX_BASE_AVGLV, L"平均Lv", L"Avg Lv", L"Niv. moy.", L"Lv medio", L"Nv medio", L"평균 Lv", L"平均Lv", L"متوسط المستوى", L"Ср. ур.", L"Ø Lv", L"Nv médio", L"Gem. Lv", L"Śr. poz.", L"Ort. Sv")
+R(TX_BT_EXPEST, L"推定", L"est.", L"estim.", L"stima", L"est.", L"예상", L"预计", L"تقدير", L"оценка", L"geschätzt", L"est.", L"geschat", L"szacun.", L"tahmin")
+R(TX_BT_LVMAY, L"レベルアップの可能性", L"May level up", L"Niveau possible", L"Possibile livello", L"Posible nivel", L"레벨업 가능", L"可能升级", L"احتمال الارتقاء", L"Возможен уровень", L"Stufe möglich", L"Pode subir", L"Level mogelijk", L"Możliwy poziom", L"Seviye olabilir")
+R(TX_SLOT_OUT, L"書き出し", L"Export", L"Exporter", L"Esporta", L"Exportar", L"내보내기", L"导出", L"تصدير", L"Экспорт", L"Export", L"Exportar", L"Exporteren", L"Eksport", L"Dışa aktar")
+R(TX_SLOT_IN, L"読み込み", L"Import", L"Importer", L"Importa", L"Importar", L"가져오기", L"导入", L"استيراد", L"Импорт", L"Import", L"Importar", L"Importeren", L"Import", L"İçe aktar")
+R(TX_SLOT_OUT_OK, L"書き出しました", L"Exported", L"Exporté", L"Esportato", L"Exportado", L"내보냈습니다", L"已导出", L"تم التصدير", L"Экспортировано", L"Exportiert", L"Exportado", L"Geëxporteerd", L"Wyeksportowano", L"Dışa aktarıldı")
+R(TX_SLOT_IN_OK, L"読み込みました", L"Imported", L"Importé", L"Importato", L"Importado", L"가져왔습니다", L"已导入", L"تم الاستيراد", L"Импортировано", L"Importiert", L"Importado", L"Geïmporteerd", L"Zaimportowano", L"İçe aktarıldı")
+R(TX_SLOT_IN_Q, L"選んだスロットの内容は、このファイルに置き換わります。元には戻せません。", L"Replace the chosen slot with this file? This cannot be undone.", L"Remplacer l'emplacement choisi par ce fichier ? C'est irréversible.", L"Sostituire lo slot scelto con questo file? Non si può annullare.", L"¿Reemplazar la ranura elegida con este archivo? No se puede deshacer.", L"고른 슬롯을 이 파일로 바꿉니다. 되돌릴 수 없습니다.", L"将用此文件替换所选存档槽。此操作无法撤销。", L"استبدال الخانة المختارة بهذا الملف؟ لا يمكن التراجع.", L"Заменить выбранный слот этим файлом? Это необратимо.", L"Den gewählten Speicherplatz durch diese Datei ersetzen? Das geht nicht zurück.", L"Substituir o espaço escolhido por este arquivo? Não dá para desfazer.", L"Het gekozen slot vervangen door dit bestand? Dit kan niet terug.", L"Zastąpić wybrany slot tym plikiem? Tego nie cofniesz.", L"Seçilen yuva bu dosyayla değişsin mi? Bu geri alınamaz.")
+R(TX_SLOT_OUTTO, L"書き出すスロットを選んでください", L"Choose the slot to export", L"Choisissez l'emplacement à exporter", L"Scegli lo slot da esportare", L"Elige la ranura a exportar", L"내보낼 슬롯을 고르세요", L"请选择要导出的存档槽", L"اختر الخانة للتصدير", L"Выберите слот для экспорта", L"Speicherplatz zum Export wählen", L"Escolha o espaço a exportar", L"Kies het slot om te exporteren", L"Wybierz slot do eksportu", L"Dışa aktarılacak yuvayı seçin")
+R(TX_SLOT_INTO, L"読み込むスロットを選んでください", L"Choose the slot to import into", L"Choisissez l'emplacement de destination", L"Scegli lo slot di destinazione", L"Elige la ranura de destino", L"가져올 슬롯을 고르세요", L"请选择要导入的存档槽", L"اختر الخانة للاستيراد", L"Выберите слот для импорта", L"Speicherplatz zum Import wählen", L"Escolha o espaço de destino", L"Kies het slot om in te importeren", L"Wybierz slot docelowy", L"İçe aktarılacak yuvayı seçin")
+R(TX_SLOT_IO_BAD, L"ファイルを読めませんでした。", L"Could not read the file.", L"Impossible de lire le fichier.", L"Impossibile leggere il file.", L"No se pudo leer el archivo.", L"파일을 읽지 못했습니다.", L"无法读取文件。", L"تعذر قراءة الملف.", L"Не удалось прочитать файл.", L"Datei konnte nicht gelesen werden.", L"Não foi possível ler o arquivo.", L"Het bestand kon niet worden gelezen.", L"Nie udało się odczytać pliku.", L"Dosya okunamadı.")
 
 };
 

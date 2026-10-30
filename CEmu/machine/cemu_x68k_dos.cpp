@@ -625,7 +625,7 @@ static void emitDosImage(CHardX68k* hw, unsigned zmusicEntry, unsigned zmdBuf)
 		e.w16(0x0240); e.w16(0x00ff); /* TIMERDST — arcus 音楽 tick */
 
 		struct J { unsigned atBeq; };
-		unsigned at68, at6a, at6b, at6c, atf0, at86, at80, at69, at04, at00, at01;
+		unsigned at68, at6a, at6b, at6c, atf0, at86, at80, at69, at04, at00, at01, at8a;
 		auto beq = [&](unsigned fn, unsigned& slot) {
 			e.w16(0x0c40); e.w16((uint16_t)fn);
 			slot = e.mark();
@@ -642,6 +642,7 @@ static void emitDosImage(CHardX68k* hw, unsigned zmusicEntry, unsigned zmdBuf)
 		beq(0x04, at04); /* B_SUPER／共通 */
 		beq(0x00, at00); /* B_KEYINP 入口 */
 		beq(0x01, at01); /* B_KEYSNS 入口 */
+		beq(0x8a, at8a); /* ブロック転送: a1→a2 を d2 バイト。ZMUSIC の音色展開がここを使う */
 		/* $60..$67 は MSM6258 呼び出し（_ADPCMOUT.._ADPCMMOD）。CODE-ZERO の MUCO.X 等は IOCS ジャンプ表に独自本体を入れ HD63450 を組む。ここで「成功」と返すとそれらのリップは OPM は鳴るが PCM ノートが 1 つも出ない。スロットを所有していればゲストハンドラを走らせる。null、我々（$F0xxxx）、BOOT hang stub は缶詰成功へ落ちる。ADPCM 範囲に限定 — 未知 fn を全部表経由にすると BOOT コードオーバーレイへ歩く。 */
 		unsigned atUnder, atOver, atMask, atLow, atHigh, atStub, atGo;
 		e.w16(0x0c40); e.w16(0x0060);       /* 命令 cmpi.w #$60,d0 */
@@ -732,6 +733,15 @@ static void emitDosImage(CHardX68k* hw, unsigned zmusicEntry, unsigned zmdBuf)
 		e.w16(0x700d); e.w16(0x4e73); /* B_KEYINP → CR 入力 */
 		const unsigned t01 = e.mark();
 		e.w16(0x70ff); e.w16(0x4e73); /* B_KEYSNS → キー ready */
+		/* $8A: a1 から a2 へ d2 バイト。d2=0 は何もしない。 */
+		const unsigned t8a = e.mark();
+		e.w16(0x4a82);             /* 命令 tst.l d2 */
+		e.w16(0x6706);             /* 命令 beq.s done */
+		e.w16(0x14d9);             /* 命令 move.b (a1)+,(a2)+ */
+		e.w16(0x5382);             /* 命令 subq.l #1,d2 */
+		e.w16(0x66fa);             /* 命令 bne.s コピー先頭 */
+		e.w16(0x7000);
+		e.w16(0x4e73);
 
 		auto patch = [&](unsigned at, unsigned tgt) {
 			e.patch16(at + 2, (unsigned)((int)tgt - (int)(at + 2)) & 0xffffu);
@@ -754,6 +764,7 @@ static void emitDosImage(CHardX68k* hw, unsigned zmusicEntry, unsigned zmdBuf)
 		patch(at04, t04);
 		patch(at00, t00);
 		patch(at01, t01);
+		patch(at8a, t8a);
 	}
 
 	/* IOCS 表エントリは JSR/RTS（TRAP/RTE ではない）。スロット $F0 は番地 $7C0 — そのワードは FEFUNC/_OPMDRV 入口ポインタ自身なので stub は $7C0 を再読してはいけない。 */

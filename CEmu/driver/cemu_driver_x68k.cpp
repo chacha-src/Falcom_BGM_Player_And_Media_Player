@@ -108,6 +108,149 @@ static void CDriverX68kBindZmusicIsr(CHardX68k* hw)
 	hw->Write32(0x78u, CEMU_X68K_DOS_IRQ6);
 }
 
+/* レイドック系 ZMUSIC はチャンネル配列を $1C4(a6) に置く。BOOT の
+   `lea work / move.l a1,$1C4(a6) / lea $2000(a1)` を起動前に通さないと
+   配列が 0 番地になり、初期化がベクタを潰して TL も乗らない。
+   DOS に入る pea の手前で止める。ポインタが既にあれば触らない。 */
+static int CDriverX68kSex16(unsigned w)
+{
+	return (w & 0x8000u) ? ((int)w - 65536) : (int)w;
+}
+
+static unsigned CDriverX68kZmusicWork(CHardX68k* hw, unsigned zmusic)
+{
+	if (!hw || !zmusic)
+		return 0;
+	for (unsigned a = zmusic; a + 4u < zmusic + 32u; a += 2u) {
+		if (hw->Read16(a) != 0x4DFAu)
+			continue;
+		const int disp = CDriverX68kSex16(hw->Read16(a + 2u));
+		return (unsigned)((int)a + 2 + disp) & 0xffffffu;
+	}
+	return 0;
+}
+
+static void CDriverX68kPlantZmusicBuffers(CHardX68k* hw, unsigned zmusic)
+{
+	const unsigned a6 = CDriverX68kZmusicWork(hw, zmusic);
+	if (!a6)
+		return;
+	const unsigned hi = zmusic + 0xC000u;
+	unsigned hit = 0;
+	for (unsigned a = zmusic; a + 4u < hi; a += 2u) {
+		if (hw->Read16(a) == 0x2D49u && hw->Read16(a + 2u) == 0x01C4u) {
+			hit = a;
+			break;
+		}
+	}
+	if (!hit)
+		return;
+	if (hw->Read32((unsigned)((int)a6 + 0x1C4) & 0xffffffu) != 0u)
+		return;
+	unsigned at = hit;
+	for (int i = 0; i < 8; i++) {
+		if (at < 4u)
+			break;
+		const unsigned prev = at - 4u;
+		const unsigned w = hw->Read16(prev);
+		if (w == 0x43FAu) {
+			at = prev;
+			break;
+		}
+		if (w == 0x43E9u || w == 0x2D49u) {
+			at = prev;
+			continue;
+		}
+		break;
+	}
+	if (hw->Read16(at) != 0x43FAu)
+		return;
+	unsigned a1 = 0;
+	unsigned d0 = 0;
+	int zf = 0;
+	for (int step = 0; step < 48; step++) {
+		const unsigned op = hw->Read16(at);
+		if (op == 0x43FAu) {
+			const int disp = CDriverX68kSex16(hw->Read16(at + 2u));
+			a1 = (unsigned)((int)at + 2 + disp) & 0xffffffu;
+			at += 4u;
+		} else if (op == 0x43E9u) {
+			const int disp = CDriverX68kSex16(hw->Read16(at + 2u));
+			a1 = (unsigned)((int)a1 + disp) & 0xffffffu;
+			at += 4u;
+		} else if (op == 0x2D49u) {
+			const int disp = CDriverX68kSex16(hw->Read16(at + 2u));
+			hw->Write32((unsigned)((int)a6 + disp) & 0xffffffu, a1);
+			at += 4u;
+		} else if (op == 0x203Au) {
+			const int disp = CDriverX68kSex16(hw->Read16(at + 2u));
+			d0 = hw->Read32((unsigned)((int)at + 2 + disp) & 0xffffffu);
+			zf = (d0 == 0u);
+			at += 4u;
+		} else if ((op & 0xFF00u) == 0x6700u) {
+			const int disp = (int)(int8_t)(op & 0xFFu);
+			at = (unsigned)((int)at + 2 + (zf ? disp : 0)) & 0xffffffu;
+		} else if (op == 0xE788u) {
+			d0 <<= 3;
+			zf = (d0 == 0u);
+			at += 2u;
+		} else if (op == 0xD3C0u) {
+			a1 = (a1 + d0) & 0xffffffu;
+			at += 2u;
+		} else if (op == 0x4211u) {
+			hw->Write8(a1, 0);
+			at += 2u;
+		} else if (op == 0xD3FAu) {
+			const int disp = CDriverX68kSex16(hw->Read16(at + 2u));
+			const unsigned src = (unsigned)((int)at + 2 + disp) & 0xffffffu;
+			a1 = (a1 + hw->Read32(src)) & 0xffffffu;
+			at += 4u;
+		} else if (op == 0x4AAEu) {
+			const int disp = CDriverX68kSex16(hw->Read16(at + 2u));
+			zf = (hw->Read32((unsigned)((int)a6 + disp) & 0xffffffu) == 0u);
+			at += 4u;
+		} else if ((op & 0xFF00u) == 0x6600u) {
+			const int disp = (int)(int8_t)(op & 0xFFu);
+			at = (unsigned)((int)at + 2 + (zf ? 0 : disp)) & 0xffffffu;
+		} else if (op == 0x2D7Cu) {
+			const unsigned imm = hw->Read32(at + 2u);
+			const int disp = CDriverX68kSex16(hw->Read16(at + 6u));
+			hw->Write32((unsigned)((int)a6 + disp) & 0xffffffu, imm);
+			at += 8u;
+		} else if (op == 0x2D7Au) {
+			const int sdisp = CDriverX68kSex16(hw->Read16(at + 2u));
+			const int ddisp = CDriverX68kSex16(hw->Read16(at + 4u));
+			const unsigned src = (unsigned)((int)at + 2 + sdisp) & 0xffffffu;
+			hw->Write32((unsigned)((int)a6 + ddisp) & 0xffffffu, hw->Read32(src));
+			at += 6u;
+		} else {
+			break;
+		}
+	}
+}
+
+/* trap #3 の fn0 が m_init ではないビルドがある（レイドックは表の直前に
+   本物があり、d1=0 は rts）。`move.l #$C0,$D6(a6)` の手前を直接 jsr する。 */
+static unsigned CDriverX68kFindMInit(CHardX68k* hw, unsigned zmusic)
+{
+	if (!hw || !zmusic)
+		return 0;
+	const unsigned hi = zmusic + 0x4000u;
+	for (unsigned a = zmusic; a + 8u < hi; a += 2u) {
+		if (hw->Read16(a) != 0x2D7Cu)
+			continue;
+		if (hw->Read32(a + 2u) != 0x000000C0u)
+			continue;
+		if (hw->Read16(a + 6u) != 0x00D6u)
+			continue;
+		if (a >= 10u && hw->Read16(a - 10u) == 0x40E7u
+			&& hw->Read32(a - 8u) == 0x007C0700u)
+			return a - 10u;
+		return 0;
+	}
+	return 0;
+}
+
 /* CDriverX68kResume1040Hang の実装 */
 static void CDriverX68kResume1040Hang(CHardX68k* hw, unsigned code)
 {
@@ -141,6 +284,7 @@ static void CDriverX68kResume1040Hang(CHardX68k* hw, unsigned code)
 			break;
 		}
 		if (zmusic && zmd) {
+			CDriverX68kPlantZmusicBuffers(hw, zmusic);
 			unsigned isr = CDriverX68kZmusicIntEntry(hw, zmusic);
 			if (!isr) {
 				const unsigned hi = (zmusic + 0x10000u < 0x800000u)
@@ -180,22 +324,80 @@ static void CDriverX68kResume1040Hang(CHardX68k* hw, unsigned code)
 				return;
 			}
 			s_stubOnce = 1;
-			hw->Write16(stub + 0u, 0x7200u); /* 命令 moveq #0,d1  m_init */
-			hw->Write16(stub + 2u, 0x4E43u);
-			hw->Write16(stub + 4u, 0x227Cu); /* 命令 move.l #zmd,a1 */
-			hw->Write32(stub + 6u, zmd);
-			hw->Write16(stub + 10u, 0x7400u); /* 命令 moveq #0,d2 */
-			hw->Write16(stub + 12u, 0x7211u); /* 命令 moveq #$11,d1 play_cnv_data */
-			hw->Write16(stub + 14u, 0x4E43u);
+			unsigned o = 0;
+			const unsigned work = CDriverX68kZmusicWork(hw, zmusic);
+			const unsigned minit = CDriverX68kFindMInit(hw, zmusic);
+			unsigned pres[6];
+			int preN = 0;
+			unsigned call = 0;
+			if (minit) {
+				const unsigned hi = zmusic + 0x5000u;
+				for (unsigned a = zmusic; a + 4u < hi; a += 2u) {
+					if (hw->Read16(a) != 0x6100u)
+						continue;
+					const int disp = CDriverX68kSex16(hw->Read16(a + 2u));
+					const unsigned dest = (unsigned)((int)a + 2 + disp) & 0xffffffu;
+					if (dest == minit)
+						call = a;
+				}
+				if (call > 40u) {
+					for (unsigned a = call - 40u; a + 4u <= call; a += 2u) {
+						if (hw->Read16(a) != 0x6100u)
+							continue;
+						const int disp = CDriverX68kSex16(hw->Read16(a + 2u));
+						const unsigned dest = (unsigned)((int)a + 2 + disp) & 0xffffffu;
+						if (dest < 0x1000u || dest >= hi)
+							continue;
+						/* YM3802 の初期化はステータス待ちで戻らない。OPM には不要。
+						   次の関数まで走査すると短い準備ルーチンまで巻き込んで落とす。 */
+						int midi = 0;
+						for (unsigned s = dest; s + 6u < dest + 0x30u; s += 2u) {
+							if (hw->Read16(s) == 0x4E75u)
+								break;
+							if (hw->Read16(s) == 0x41F9u
+								&& (hw->Read32(s + 2u) & 0xFFFFFF00u) == 0x00EAFA00u) {
+								midi = 1;
+								break;
+							}
+						}
+						if (midi)
+							continue;
+						if (preN < 6)
+							pres[preN++] = dest;
+					}
+				}
+			}
+			if (work && minit) {
+				/* BOOT が $BC を自前ハンドラに差し替える。この m_init は音色を
+				   trap #15 $8A で展開するので、ここだけ IOCS に戻す。 */
+				hw->Write32(0xbcu, CEMU_X68K_DOS_TRAP15);
+				/* fn0 の trap は rts。起動が m_init の前に呼ぶ音色準備も通す。 */
+				hw->Write16(stub + o, 0x4DF9u); o += 2u;
+				hw->Write32(stub + o, work); o += 4u;
+				for (int i = 0; i < preN; i++) {
+					hw->Write16(stub + o, 0x4EB9u); o += 2u;
+					hw->Write32(stub + o, pres[i]); o += 4u;
+				}
+				hw->Write16(stub + o, 0x4EB9u); o += 2u;
+				hw->Write32(stub + o, minit); o += 4u;
+			} else {
+				hw->Write16(stub + o, 0x7200u); o += 2u; /* 命令 moveq #0,d1  m_init */
+				hw->Write16(stub + o, 0x4E43u); o += 2u;
+			}
+			hw->Write16(stub + o, 0x227Cu); o += 2u; /* 命令 move.l #zmd,a1 */
+			hw->Write32(stub + o, zmd); o += 4u;
+			hw->Write16(stub + o, 0x7400u); o += 2u; /* 命令 moveq #0,d2 */
+			hw->Write16(stub + o, 0x7211u); o += 2u; /* 命令 moveq #$11,d1 play_cnv_data */
+			hw->Write16(stub + o, 0x4E43u); o += 2u;
 			/* m_play00 `ori #$0700,sr` / t_dat_ok RTS。trap RTE が IPL7 のままだと YM Timer A が割り込めない。ここで落とす。 */
-			hw->Write16(stub + 16u, 0x027Cu); /* 命令 andi.w #$F8FF,sr */
-			hw->Write16(stub + 18u, 0xF8FFu);
+			hw->Write16(stub + o, 0x027Cu); o += 2u; /* 命令 andi.w #$F8FF,sr */
+			hw->Write16(stub + o, 0xF8FFu); o += 2u;
 			const unsigned boot = CDriverX68kFindZmusicBootJsr(hw);
 			if (boot) {
-				hw->Write16(stub + 20u, 0x4EF9u);
-				hw->Write32(stub + 22u, boot + 10u);
+				hw->Write16(stub + o, 0x4EF9u); o += 2u;
+				hw->Write32(stub + o, boot + 10u);
 			} else {
-				hw->Write16(stub + 20u, 0x60FEu);
+				hw->Write16(stub + o, 0x60FEu);
 			}
 			m68k_set_reg(M68K_REG_SR, 0x2500);
 			m68k_set_reg(M68K_REG_PC, stub);

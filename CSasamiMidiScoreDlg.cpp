@@ -254,10 +254,12 @@ void CSasamiMidiScoreDlg::ApplyLang()
 		L"음표", L"音符", L"نغمات", L"Ноты", L"Noten", L"Notas", L"Noten", L"Nuty", L"Notalar"));
 	m_btnPropUpd.SetWindowText(LL14(L"更新", L"Update", L"MAJ", L"Aggiorna", L"Actualizar",
 		L"업데이트", L"更新", L"تحديث", L"Обновить", L"Aktualisieren", L"Atualizar", L"Bijwerken", L"Aktualizuj", L"Güncelle"));
-	m_btnMark.SetWindowText(L">|");
+	m_btnMark.SetWindowText(LL14(L"位置", L"Mark", L"Repère", L"Segno", L"Marca",
+		L"위치", L"位置", L"علامة", L"Метка", L"Marke", L"Marca", L"Markering", L"Znacznik", L"İşaret"));
 	m_btnLoopA.SetWindowText(L"A");
 	m_btnLoopB.SetWindowText(L"B");
-	m_btnLoopClr.SetWindowText(L"A-Bx");
+	m_btnLoopClr.SetWindowText(LL14(L"解除", L"Clear", L"Effacer", L"Azzera", L"Borrar",
+		L"해제", L"清除", L"مسح", L"Сброс", L"Löschen", L"Limpar", L"Wissen", L"Wyczyść", L"Sil"));
 	m_btnShowAll.SetWindowText(L"32ch");
 	if (m_btnText.GetSafeHwnd())
 		m_btnText.SetWindowText(LL14(L"テキスト", L"Text", L"Texte", L"Testo", L"Texto",
@@ -356,7 +358,21 @@ BOOL CSasamiMidiScoreDlg::OnInitDialog()
 	m_edNote.SetWindowText(L"");
 	m_edGt.SetWindowText(L"100");
 	m_edVel.SetWindowText(L"100");
-	m_status.SetWindowText(LL14(L"Tone=VST。Exc/RPNレーン=SysEx・RPN。ツールバー「Insert FX」=パート・インサートEFX。", L"Tone=VST. Exc/RPN lane=SysEx/RPN. Toolbar Insert FX=per-part insert EFX.", L"Tone=VST. Piste Exc/RPN=SysEx/RPN. Insert FX=EFX d’insertion par partie.", L"Tone=VST. Corsia Exc/RPN=SysEx/RPN. Insert FX=EFX insert per parte.", L"Tone=VST. Pista Exc/RPN=SysEx/RPN. Insert FX=EFX de inserción por parte.", L"Tone=VST. Exc/RPN 레인=SysEx/RPN. Insert FX=파트 인서트 EFX.", L"Tone=VST。Exc/RPN 条带=SysEx/RPN。Insert FX=声部插入 EFX。", L"Tone=VST. مسار Exc/RPN=SysEx/RPN. Insert FX=EFX إدراج لكل جزء.", L"Tone=VST. Полоса Exc/RPN=SysEx/RPN. Insert FX=EFX вставки по партии.", L"Tone=VST. Exc/RPN-Spur=SysEx/RPN. Insert FX=Insert-EFX je Part.", L"Tone=VST. Faixa Exc/RPN=SysEx/RPN. Insert FX=EFX de inserção por parte.", L"Tone=VST. Exc/RPN-baan=SysEx/RPN. Insert FX=insert-EFX per partij.", L"Tone=VST. Pas Exc/RPN=SysEx/RPN. Insert FX=EFX wstawiania na partię.", L"Tone=VST. Exc/RPN şeridi=SysEx/RPN. Insert FX=parti insert EFX."));
+	m_status.SetWindowText(LL14(
+		L"左の「音色」で音源。五線に音符。Spaceで再生。",
+		L"Tone row picks the instrument. Click the staff for notes. Space plays.",
+		L"Ligne Timbre = instrument. Clic sur la portée. Espace = lecture.",
+		L"Riga Timbro = strumento. Clic sul pentagramma. Spazio = play.",
+		L"Fila Timbre = instrumento. Clic en el pentagrama. Espacio = play.",
+		L"왼쪽 「음색」이 음원. 보표에 음표. Space로 재생.",
+		L"左侧「音色」选音源。五线放音符。Space 播放。",
+		L"صف الطابع يختار الآلة. انقر المدرج. Space للتشغيل.",
+		L"Строка «Тембр» — инструмент. Клик по стану. Space — игра.",
+		L"Zeile Klang wählt das Instrument. Notensystem klicken. Leertaste spielt.",
+		L"Linha Timbre escolhe o instrumento. Clique na pauta. Espaço toca.",
+		L"Rij Klank kiest het instrument. Klik de notenbalk. Spatie speelt.",
+		L"Wiersz Barwa wybiera instrument. Klik na pięciolinii. Spacja gra.",
+		L"Tını satırı enstrümanı seçer. Portede tıkla. Space çalar."));
 	ScStaffLoadPartStrip(&m_ui, m_curCh);
 	SyncStripCombos();
 	if (!m_pasteMode.GetSafeHwnd())
@@ -507,7 +523,7 @@ void CSasamiMidiScoreDlg::LayoutChrome()
 	CRect rc;
 	GetClientRect(&rc);
 	const int cap = CCC_GetCustomCaptionHeight(m_hWnd);
-	const int pad = 8, btnH = 28, cbH = 32, btnW = 64;
+	const int pad = 8, btnH = 28, cbH = 32;
 	const int sbW = ScStaffScrollGutterW();
 	const int sbH = ScStaffScrollGutterH();
 	auto layoutCombo = [&](CCustomComboBox& c, int x, int y, int w, int h, int dropW = 0) {
@@ -521,29 +537,49 @@ void CSasamiMidiScoreDlg::LayoutChrome()
 	};
 	int y = cap + pad;
 	int x = pad;
-	auto place = [&](CWnd& w, int ww) {
-		if (w.GetSafeHwnd()) { w.MoveWindow(x, y, ww, btnH); x += ww + 4; }
+	const int right = rc.right - pad;
+	auto place = [&](CWnd& w, int minW) {
+		if (!w.GetSafeHwnd() || !(w.GetStyle() & WS_VISIBLE)) return;
+		const int ww = ScChromeButtonWidth(&w, minW, 168);
+		if (x > pad && x + ww > right) { y += btnH + 4; x = pad; }
+		w.MoveWindow(x, y, ww, btnH);
+		x += ww + 4;
 	};
-	place(m_btnOpen, btnW);
-	place(m_btnSave, btnW);
-	place(m_btnNew, btnW);
-	place(m_btnPlay, 100);
-	place(m_btnExport, btnW);
-	place(m_btnPencil, btnW);
-	place(m_btnErase, btnW);
-	place(m_btnSel, btnW);
-	place(m_btnTempo, btnW);
-	if (m_btnPal.GetSafeHwnd()) m_btnPal.ShowWindow(SW_HIDE);
-	if (m_ch.GetSafeHwnd()) { layoutCombo(m_ch, x, y, 104, btnH + 4); x += 112; }
-	place(m_btnHelp, 48);
+	auto groupGap = [&]() { x += 10; };
+	/* File, then listen, then help — the first things a new score needs. */
+	place(m_btnOpen, 64);
+	place(m_btnSave, 64);
+	place(m_btnNew, 64);
+	groupGap();
+	place(m_btnPlay, 88);
+	place(m_btnExport, 72);
+	groupGap();
+	place(m_btnHelp, 64);
+	y += btnH + 6;
+	x = pad;
+	/* Write tools, then which channel they write to. */
+	place(m_btnPencil, 64);
+	place(m_btnErase, 72);
+	place(m_btnSel, 64);
+	place(m_btnTempo, 64);
 	place(m_btnKey, 64);
+	if (m_btnPal.GetSafeHwnd()) m_btnPal.ShowWindow(SW_HIDE);
+	groupGap();
+	if (m_ch.GetSafeHwnd()) { layoutCombo(m_ch, x, y, 104, btnH + 4); x += 112; }
 	y += btnH + 6;
 	x = pad;
 	const int propY = y;
-	if (m_edNote.GetSafeHwnd()) m_edNote.MoveWindow(x + 28, propY, 44, 22);
-	if (m_edGt.GetSafeHwnd()) m_edGt.MoveWindow(x + 104, propY, 44, 22);
-	if (m_edVel.GetSafeHwnd()) m_edVel.MoveWindow(x + 180, propY, 44, 22);
-	if (m_btnPropUpd.GetSafeHwnd()) m_btnPropUpd.MoveWindow(x + 232, propY, 52, btnH);
+	const int labW = 44;
+	const int edW = 52;
+	auto field = [&](CWnd& ed) {
+		if (!ed.GetSafeHwnd()) return;
+		ed.MoveWindow(x + labW, propY, edW, 22);
+		x += labW + edW + 8;
+	};
+	field(m_edNote);
+	field(m_edGt);
+	field(m_edVel);
+	place(m_btnPropUpd, 56);
 	y += btnH + 6;
 	x = pad;
 	layoutCombo(m_stripLanes, x, y, 120, cbH, 140); x += 126;
@@ -583,30 +619,38 @@ void CSasamiMidiScoreDlg::LayoutChrome()
 		y += 2;
 	}
 	x = pad;
-	place(m_btnMark, 36);
+	/* Where you are, then other views of the same song. */
+	place(m_btnMark, 48);
 	place(m_btnLoopA, 28);
 	place(m_btnLoopB, 28);
-	place(m_btnLoopClr, 44);
+	place(m_btnLoopClr, 52);
 	place(m_btnShowAll, 48);
-	place(m_btnText, 68);
-	place(m_btnRoll, 88);
-	place(m_btnFx, 88);
+	groupGap();
+	place(m_btnText, 72);
+	place(m_btnRoll, 96);
+	place(m_btnFx, 96);
 	y += btnH + 6;
 	x = pad;
-	/* MIDI In / Arr row — combo closed height synced via layoutCombo */
-	layoutCombo(m_midiInDev, x, y, 150, cbH); x += 156;
-	layoutCombo(m_midiInCh, x, y, 64, cbH); x += 70;
-	layoutCombo(m_midiInMode, x, y, 96, cbH); x += 102;
-	place(m_btnArr, 64);
-	if (m_btnLayout.GetSafeHwnd()) m_btnLayout.ShowWindow(SW_HIDE);
-	place(m_btnChord, 52);
-	place(m_btnPatt, 72);
-	if (m_follow.GetSafeHwnd()) { m_follow.MoveWindow(x, y, 84, btnH); x += 90; }
+	/* Record, then writing helpers that used to be abbreviated. */
+	layoutCombo(m_midiInDev, x, y, 168, cbH); x += 174;
+	layoutCombo(m_midiInCh, x, y, 72, cbH); x += 78;
+	layoutCombo(m_midiInMode, x, y, 110, cbH); x += 116;
+	place(m_btnArr, 72);
+	if (m_btnLayout.GetSafeHwnd()) m_btnLayout.ShowWindow(SW_SHOW);
+	place(m_btnLayout, 56);
+	place(m_btnChord, 56);
+	place(m_btnPatt, 80);
+	if (m_follow.GetSafeHwnd()) {
+		const int fw = 96;
+		if (x > pad && x + fw > right) { y += btnH + 4; x = pad; }
+		m_follow.MoveWindow(x, y, fw, btnH);
+		x += fw + 4;
+	}
 	y += cbH + 4;
 	if (m_status.GetSafeHwnd())
-		m_status.MoveWindow(pad, y, max(200, rc.Width() - pad * 2), 20);
-	y += 22;
-	const int helpH = 56;
+		m_status.MoveWindow(pad, y, max(200, rc.Width() - pad * 2), 22);
+	y += 26;
+	const int helpH = 72;
 	const int rollH = m_ui.showRollSplit ? 140 : 0;
 	const int bodyBotLimit = rc.Height() - pad - helpH - rollH;
 	const int chromeBottom = y;
@@ -889,31 +933,25 @@ void CSasamiMidiScoreDlg::OnPaint()
 	dc.SetTextColor(RGB(40, 40, 55));
 	CFont* oldLab = dc.SelectObject(GetFont());
 	if (m_propMode == 1) {
-		if (m_edNote.GetSafeHwnd()) {
-			CRect er; m_edNote.GetWindowRect(&er); ScreenToClient(&er);
-			dc.TextOut(er.left - 36, er.top + 2, L"Prog");
-		}
-		if (m_edGt.GetSafeHwnd()) {
-			CRect er; m_edGt.GetWindowRect(&er); ScreenToClient(&er);
-			dc.TextOut(er.left - 36, er.top + 2, L"MSB");
-		}
-		if (m_edVel.GetSafeHwnd()) {
-			CRect er; m_edVel.GetWindowRect(&er); ScreenToClient(&er);
-			dc.TextOut(er.left - 32, er.top + 2, L"LSB");
-		}
+		auto lab = [&](CWnd& ed, const wchar_t* text) {
+			if (!ed.GetSafeHwnd()) return;
+			CRect er; ed.GetWindowRect(&er); ScreenToClient(&er);
+			CRect lr(er.left - 42, er.top, er.left - 4, er.bottom);
+			dc.DrawText(text, lr, DT_RIGHT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
+		};
+		lab(m_edNote, L"Prog");
+		lab(m_edGt, L"MSB");
+		lab(m_edVel, L"LSB");
 	} else {
-		if (m_edNote.GetSafeHwnd()) {
-			CRect er; m_edNote.GetWindowRect(&er); ScreenToClient(&er);
-			dc.TextOut(er.left - 20, er.top + 2, L"N");
-		}
-		if (m_edGt.GetSafeHwnd()) {
-			CRect er; m_edGt.GetWindowRect(&er); ScreenToClient(&er);
-			dc.TextOut(er.left - 24, er.top + 2, L"GT");
-		}
-		if (m_edVel.GetSafeHwnd()) {
-			CRect er; m_edVel.GetWindowRect(&er); ScreenToClient(&er);
-			dc.TextOut(er.left - 28, er.top + 2, L"Vel");
-		}
+		auto lab = [&](CWnd& ed, const wchar_t* text) {
+			if (!ed.GetSafeHwnd()) return;
+			CRect er; ed.GetWindowRect(&er); ScreenToClient(&er);
+			CRect lr(er.left - 42, er.top, er.left - 4, er.bottom);
+			dc.DrawText(text, lr, DT_RIGHT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
+		};
+		lab(m_edNote, LL14(L"音", L"Note", L"Note", L"Nota", L"Nota", L"음", L"音", L"نغمة", L"Нота", L"Note", L"Nota", L"Noot", L"Nuta", L"Nota"));
+		lab(m_edGt, LL14(L"長さ", L"Gate", L"Durée", L"Durata", L"Duración", L"길이", L"长度", L"مدة", L"Длина", L"Länge", L"Duração", L"Duur", L"Długość", L"Süre"));
+		lab(m_edVel, LL14(L"強さ", L"Vel", L"Vel", L"Vel", L"Vel", L"세기", L"力度", L"قوة", L"Сила", L"Stärke", L"Vel", L"Sterkte", L"Siła", L"Güç"));
 	}
 	dc.SelectObject(oldLab);
 
@@ -3523,7 +3561,21 @@ void CSasamiMidiScoreDlg::OnContextMenu(CWnd* pWnd, CPoint point)
 		menu.AddCommand(9010, LL14(
 			L"音色設定…", L"Tone settings…", L"Réglage du timbre…", L"Impostazioni timbro…", L"Ajustes de timbre…",
 			L"음색 설정…", L"音色设置…", L"إعدادات الطابع…", L"Настройки тембра…", L"Klang-Einstellungen…",
-			L"Ajustes de timbre…", L"Klankinstellingen…", L"Ustawienia barwy…", L"Tını ayarları…"));
+			L"Ajustes de timbre…", L"Klankinstellungen…", L"Ustawienia barwy…", L"Tını ayarları…"));
+		{
+			wchar_t livePath[520];
+			livePath[0] = 0;
+			if (VstLivePartIsLoaded(tr + 1))
+				VstLivePartGetPath(tr + 1, livePath, 520);
+			const wchar_t* chk = livePath[0] ? livePath : m_doc.bind.vstPath[tr];
+			const size_t n = chk ? wcslen(chk) : 0;
+			if (n >= 5 && _wcsicmp(chk + n - 5, L".vst3") == 0) {
+				menu.AddCommand(9014, LL14(
+					L"VST2に戻す", L"Return to VST2", L"Revenir au VST2", L"Torna al VST2", L"Volver a VST2",
+					L"VST2로 되돌리기", L"回到 VST2", L"العودة إلى VST2", L"Вернуться на VST2", L"Zurück zu VST2",
+					L"Voltar ao VST2", L"Terug naar VST2", L"Wróć do VST2", L"VST2'ye dön"));
+			}
+		}
 		menu.AddCommand(9011, LL14(
 			L"Exc / RPN / SysEx…", L"Exc / RPN / SysEx…", L"Exc / RPN / SysEx…", L"Exc / RPN / SysEx…", L"Exc / RPN / SysEx…",
 			L"Exc / RPN / SysEx…", L"Exc / RPN / SysEx…", L"Exc / RPN / SysEx…", L"Exc / RPN / SysEx…", L"Exc / RPN / SysEx…",
@@ -3740,6 +3792,25 @@ void CSasamiMidiScoreDlg::OnContextMenu(CWnd* pWnd, CPoint point)
 		if (m_ch.GetSafeHwnd()) m_ch.SetCurSel(m_curCh);
 		m_ui.visible[tr] = 1;
 		OpenVstForPart(tr + 1);
+	}
+	else if (tr >= 0 && cmd == 9014) {
+		m_curCh = tr;
+		if (m_ch.GetSafeHwnd()) m_ch.SetCurSel(m_curCh);
+		m_ui.visible[tr] = 1;
+		if (ScVstReturnPartToVst2(this, tr + 1, &m_doc.bind)) {
+			wchar_t path[520];
+			path[0] = 0;
+			if (!VstLivePartGetPath(tr + 1, path, 520) || !path[0])
+				wcsncpy_s(path, m_doc.bind.vstPath[tr], _TRUNCATE);
+			if (path[0])
+				ScMidiSetVstLabel(&m_ui, tr, path);
+			else
+				m_ui.vstLabel[tr][0] = 0;
+			m_doc.bind.isMpw3 = 1;
+			RefreshProgLabels();
+			PushDocToText();
+			InvalidateRect(m_trackRc, FALSE);
+		}
 	}
 	else if (tr >= 0 && cmd == 9011) {
 		m_curCh = tr;

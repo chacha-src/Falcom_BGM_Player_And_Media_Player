@@ -257,7 +257,7 @@ void CSasamiPianoRollDlg::LayoutChrome()
 		CFont* old = f ? pdc->SelectObject(f) : NULL;
 		CSize sz = pdc->GetTextExtent(t.IsEmpty() ? L"W" : t);
 		if (old) pdc->SelectObject(old);
-		return max(minW, sz.cx + 24);
+		return max(minW, sz.cx + 36);
 	};
 	int rowBottom = y;
 	auto endRow = [&]() {
@@ -266,7 +266,7 @@ void CSasamiPianoRollDlg::LayoutChrome()
 		rowBottom = y;
 	};
 	auto placeBtn = [&](CWnd& w, int minW) {
-		if (!w.GetSafeHwnd() || !w.IsWindowVisible()) return;
+		if (!w.GetSafeHwnd() || !(w.GetStyle() & WS_VISIBLE)) return;
 		const int ww = textW(w, minW);
 		if (x > pad && x + ww > maxX) { y = rowBottom + 6; x = pad; }
 		w.MoveWindow(x, y, ww, btnH);

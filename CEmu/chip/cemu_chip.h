@@ -10,6 +10,8 @@ public:
 	virtual void Write(uint32_t addr, uint32_t data) = 0;
 	virtual void AdvanceClocks(uint64_t chipCycles) = 0;
 	virtual void Render(int16_t* stereo, int frames) = 0;
+	/* アーケードミキサが YM 系だけ約2倍する。他チップは 0。 */
+	virtual int YamahaFm() const { return 0; }
 	virtual bool Irq() const = 0;
 	virtual void AckIrq() = 0;
 	virtual void SetAdpcmRom(const uint8_t* data, unsigned size, unsigned destOffset) { (void)data; (void)size; (void)destOffset; }

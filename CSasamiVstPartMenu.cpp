@@ -51,6 +51,13 @@ static int ScVstPathIsDedicated(const wchar_t* path)
 	return VstDetectMultiTimbral(path) ? 0 : 1;
 }
 
+static int ScVstIsVst3Path(const wchar_t* path)
+{
+	if (!path || !path[0]) return 0;
+	const size_t n = wcslen(path);
+	return (n >= 5 && _wcsicmp(path + n - 5, L".vst3") == 0) ? 1 : 0;
+}
+
 /* Another part on this port already runs this multi. 0 = none. */
 static int ScVstFindSameMulti(int part1to32, const wchar_t* path)
 {
@@ -80,22 +87,49 @@ static int ScVstFindAnyMulti(int part1to32)
 
 static int ScVstTryLoadPath(CWnd* owner, int part1to32, ScMidiVstBind* bind, const wchar_t* path);
 
-/* Drop a dedicated plug and let this channel hear the shared VST2 again.
-   If the port has no multi left, load the preferred GS/XG onto this part. */
+/* Leave a VST3 (multi or dedicated) and load a VST2 on this channel.
+   A shared VST2 that is already on the port is left alone. */
 static int ScVstReturnToShared(CWnd* owner, int part1to32, ScMidiVstBind* bind)
 {
+	wchar_t cur[520];
+	cur[0] = 0;
+	if (VstLivePartIsLoaded(part1to32))
+		VstLivePartGetPath(part1to32, cur, 520);
+	const int onVst3 = ScVstIsVst3Path(cur);
 	const int wasMulti = VstLivePartIsLoaded(part1to32) && VstLivePartIsMulti(part1to32);
-	if (VstLivePartIsLoaded(part1to32) && !wasMulti) {
-		VstLiveUnloadPart(part1to32);
-		ScVstClearBind(bind, part1to32);
+	if (!onVst3 && (wasMulti || !VstLivePartIsLoaded(part1to32))) {
+		if (wasMulti || ScVstFindAnyMulti(part1to32))
+			return 1;
 	}
-	if (wasMulti || ScVstFindAnyMulti(part1to32))
-		return 1;
+
 	wchar_t pref[520];
 	pref[0] = 0;
-	if (VstPickPreferredPlugin(pref, 520) && pref[0])
-		return ScVstTryLoadPath(owner, part1to32, bind, pref);
-	return 1;
+	int havePref = 0;
+	if (VstPickPreferredPlugin(pref, 520) && pref[0] && !ScVstIsVst3Path(pref))
+		havePref = 1;
+	if (!havePref) {
+		int is3 = 0;
+		if (CSasamiVstPickDlg::PickVst2ForPart(owner, part1to32, pref, 520, &is3) != IDOK)
+			return 0;
+		if (::GetCapture()) ::ReleaseCapture();
+		if (ScVstIsVst3Path(pref))
+			return 0;
+	}
+
+	/* The VST2 already plays another channel on this port: drop this VST3
+	   and let the shared instance take the channel. */
+	if (!ScVstPathIsDedicated(pref) && ScVstFindSameMulti(part1to32, pref)) {
+		if (VstLivePartIsLoaded(part1to32) && (onVst3 || !VstLivePartIsMulti(part1to32)))
+			VstLiveUnloadPart(part1to32);
+		ScVstClearBind(bind, part1to32);
+		return 1;
+	}
+	return ScVstTryLoadPath(owner, part1to32, bind, pref);
+}
+
+int ScVstReturnPartToVst2(CWnd* owner, int part1to32, ScMidiVstBind* bind)
+{
+	return ScVstReturnToShared(owner, part1to32, bind);
 }
 
 static int ScVstLoadPicked(CWnd* owner, int part1to32, ScMidiVstBind* bind)

@@ -14,9 +14,9 @@ enum {
 	SC_PART_GAP = 12,         /* space between parts */
 	SC_GRAND_STAFF_GAP = 20,  /* treble ↔ bass on grand staff */
 	SC_TRACK_COL_W = 220,
-	SC_NAME_BAND_H = 16, /* track title band (left + score spacer) */
-	SC_CTRL_LANE_H = 22, /* one SSW-style Tone or Exc/RPN lane */
-	SC_PART_GAUGE_H = 60, /* name + Tone + Exc/RPN */
+	SC_NAME_BAND_H = 20, /* track title band — Meiryo headings were clipped at 16 */
+	SC_CTRL_LANE_H = 22, /* one Tone or Exc/RPN lane */
+	SC_PART_GAUGE_H = 64, /* name + Tone + Exc/RPN */
 	SC_PART_DISABLED_H = 24, /* compact track-row when part disabled on score */
 	SC_PART_ENABLE_W = 18,  /* left ● enable hit zone in track column */
 	SC_CLEF_MARGIN = 58, /* space for clef before measure 1 */
@@ -493,6 +493,8 @@ const wchar_t* ScStaffStripLanesLabel(int lanes); /* 0..SC_STRIP_LANES_MAX */
 const wchar_t* ScStaffToolName(int tool);
 /* Fill bottom help bar from topic + current tool/strip state. */
 void ScStaffFormatHelpBar(wchar_t* out, int cch, const ScStaffUi* u, int isFm, int curPart);
+/* Flat toolbar button: icon + label must both fit or the label is dropped. */
+int ScChromeButtonWidth(CWnd* w, int minW, int maxW);
 void ScStaffSavePartStrip(ScStaffUi* u, int part);
 void ScStaffLoadPartStrip(ScStaffUi* u, int part);
 

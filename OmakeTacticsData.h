@@ -596,6 +596,8 @@ struct Forecast {
 	int weak;               // 弱点の一致数。1で2倍、2で4倍
 };
 void CalcForecast(const Battle& b, int a, int d, int skill, Forecast& f);
+// 防御を引く前の参考。skill<0 は通常攻撃。当たる回数ぶんの合計も返す。威力のない補助は 0。
+int EstimateText(const Unit& a, int skill, wchar_t* out, int cap);
 int  ResolveAttack(Battle& b, int a, int d, int skill, Rng& r, Strike* out, int maxOut, int cx, int cz);
 int  AppendAssists(Battle& b, Rng& r, Strike* out, int n, int maxOut);
 int  SkillTargets(const Battle& b, int caster, int skill, int cx, int cz, int* out, int maxOut);
@@ -615,6 +617,7 @@ void FormMarkPos(const Unit& u, int tx, int tz, const FormMark& m, int& ox, int&
 int  SkillCastRangeMin(const Unit& u, int skill);
 int  SkillCastRangeMax(const Unit& u, int skill);
 int  ExpForAction(const Unit& a, const Unit& d, int dmg, int stage);
+int  PreviewHealAmount(const Unit& a, const Unit& d, int skill);
 
 // ---------------- 戦闘全体 ----------------
 enum { MAX_UNITS = MAX_PARTY + MAX_ENEMY };
@@ -630,7 +633,7 @@ struct Battle {
 	int AliveCount(int team) const;
 	int weather;              // Weather。戦闘中だけ。セーブの大きさは変えない
 	int stampede;             // 1=この戦闘はスタンピードステージ
-	int stampedeLeft;         // 残りの発生回数（1 か 2）
+	int stampedeLeft;         // 残りの発生回数（1）
 	int stampedeLine;         // 生存している敵がこの数以下で次の波
 	int stampedeShow;         // 1=湧きを見せているあいだ、次の手番を少し待つ
 	int bgmWin;               // 1=勝利目前に入った。この戦闘では通常曲へ戻さない
@@ -669,24 +672,25 @@ void ConfusePlan(const Battle& b, int ui, AiPlan& p, Rng& r);
 
 // ---------------- セーブ ----------------
 #pragma pack(push, 4)
-// 画質の並び。保存値は 0軽量 1標準 2高 3超綺麗 4超軽量。画面では超軽量から超綺麗へ回す。
+// 画質の並び。保存値は 0軽量 1標準 2高 3超綺麗 4超軽量 5最高 6限界突破。
+// 画面では超軽量から限界突破へ回す。肌の瑞々しさは標準から段々強く、テッセレーションは肌に使わない。
 inline int TacQualitySlot(int q)
 {
-	static const int ord[5] = { 4, 0, 1, 2, 3 };
-	for (int i = 0; i < 5; ++i) if (ord[i] == q) return i;
+	static const int ord[7] = { 4, 0, 1, 2, 3, 5, 6 };
+	for (int i = 0; i < 7; ++i) if (ord[i] == q) return i;
 	return 2;
 }
 inline int TacQualityAt(int slot)
 {
-	static const int ord[5] = { 4, 0, 1, 2, 3 };
-	if (slot < 0) slot += 5;
-	if (slot >= 5) slot %= 5;
+	static const int ord[7] = { 4, 0, 1, 2, 3, 5, 6 };
+	if (slot < 0) slot += 7;
+	if (slot >= 7) slot %= 7;
 	return ord[slot];
 }
 inline int TacQualityTx(int q)
 {
-	static const int tx[5] = { TX_SET_Q_LOW, TX_SET_Q_STD, TX_SET_Q_HIGH, TX_SET_Q_ULTRA, TX_SET_Q_TINY };
-	if (q < 0 || q > 4) q = 1;
+	static const int tx[7] = { TX_SET_Q_LOW, TX_SET_Q_STD, TX_SET_Q_HIGH, TX_SET_Q_ULTRA, TX_SET_Q_TINY, TX_SET_Q_PEAK, TX_SET_Q_LIMIT };
+	if (q < 0 || q > 6) q = 1;
 	return tx[q];
 }
 
@@ -699,7 +703,7 @@ struct SaveData {
 	int stageSel;
 	int winX, winY, winW, winH;
 	int camSpeed;
-	int quality;               // 0=軽量 1=標準 2=高 3=超綺麗 4=超軽量
+	int quality;               // 0=軽量 1=標準 2=高 3=超綺麗 4=超軽量 5=最高 6=限界突破
 	int showGrid;              // bit0=グリッド bit1=敵の脅威範囲
 	int battleAnim;            // 0=フル 1=短縮
 	DWORD uidNext;
@@ -874,6 +878,8 @@ void SlotSelect(int slot);
 void SlotWipe(int slot);
 void SlotClearRuntime();
 bool SlotCopyFiles(int from, int to);
+bool SlotExportTo(int slot, const wchar_t* path);
+bool SlotImportFrom(int slot, const wchar_t* path);
 int SlotPeekClear(int slot);
 const TCHAR* TacLeafSave();
 const TCHAR* TacLeafPart();

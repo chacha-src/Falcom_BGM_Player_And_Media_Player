@@ -112,6 +112,10 @@ void SongParams_RebindEntries(LPCTSTR listName, LPCTSTR newListName, const playl
 // (listName, path, mode, ret2) のエントリを探して out へコピー。見つかれば true。
 bool SongParams_FindCopy(LPCTSTR listName, LPCTSTR path, int mode, int ret2, SongParam& out);
 
+// 索引だけを見る。表の線形走査はしない（メニューを開く前の全件走査を避ける）。
+// camelot が 1 以上なら true と値を返す。
+bool SongParams_TryIndexedCamelot(LPCTSTR listName, LPCTSTR path, int mode, int ret2, int* outCamelot);
+
 // エントリの有無だけ(リスト★列用。パラメータ本体は要らない)。
 bool SongParams_HasEntry(LPCTSTR listName, LPCTSTR path, int mode, int ret2);
 

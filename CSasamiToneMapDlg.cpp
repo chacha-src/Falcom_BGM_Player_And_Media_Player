@@ -4,6 +4,7 @@
 #include "CSasamiVstPartMenu.h"
 #include "SasamiToneNames.h"
 #include "VstMidiEngine.h"
+#include "CSasamiStaffCore.h"
 
 IMPLEMENT_DYNAMIC(CSasamiToneMapDlg, CCustomBlurDialogExBase)
 
@@ -102,7 +103,7 @@ BOOL CSasamiToneMapDlg::OnInitDialog()
 {
 	CCustomBlurDialogExBase::OnInitDialog();
 	SetWindowText(L"トーンマップ");
-	m_ok.SetWindowText(L"入力");
+	m_ok.SetWindowText(L"決定");
 	m_cancel.SetWindowText(L"キャンセル");
 	m_editor.SetWindowText(L"設定画面");
 	m_vst3.SetWindowText(L"VST3…");
@@ -177,8 +178,8 @@ BOOL CSasamiToneMapDlg::OnInitDialog()
 	RebuildGrid();
 	CString h;
 	h.Format(m_isDrum
-		? L"パート %d（ドラム/キット）— クリック試聴 / ダブルクリック決定。VST3…で専用音源へ"
-		: L"パート %d — クリック試聴 / ダブルクリック決定。VST3…で専用音源へ", m_part);
+		? L"パート %d（ドラム）\nクリックで試聴、ダブルクリックで決定。VST3…で専用音源。"
+		: L"パート %d\nクリックで試聴、ダブルクリックで決定。VST3…で専用音源。", m_part);
 	m_hint.SetWindowText(h);
 	CCC_BringDialogToForeground(this);
 	return TRUE;
@@ -201,14 +202,29 @@ void CSasamiToneMapDlg::LayoutChrome()
 	if (m_lblLsb.GetSafeHwnd()) m_lblLsb.MoveWindow(x, top, 40, lblH);
 	if (m_bankL.GetSafeHwnd()) m_bankL.MoveWindow(x, top + lblH, 72, comboH);
 	x += 84;
-	if (m_vst3.GetSafeHwnd()) m_vst3.MoveWindow(x, top + lblH, 64, 22);
-	x += 70;
-	if (m_editor.GetSafeHwnd()) m_editor.MoveWindow(x, top + lblH, 72, 22);
-	if (m_ok.GetSafeHwnd()) m_ok.MoveWindow(rc.right - 160, top + lblH, 70, 22);
-	if (m_cancel.GetSafeHwnd()) m_cancel.MoveWindow(rc.right - 84, top + lblH, 76, 22);
+	if (m_vst3.GetSafeHwnd()) {
+		const int ww = ScChromeButtonWidth(&m_vst3, 72, 100);
+		m_vst3.MoveWindow(x, top + lblH, ww, 22);
+		x += ww + 6;
+	}
+	if (m_editor.GetSafeHwnd()) {
+		const int ww = ScChromeButtonWidth(&m_editor, 80, 120);
+		m_editor.MoveWindow(x, top + lblH, ww, 22);
+		x += ww + 6;
+	}
+	{
+		const int cancelW = ScChromeButtonWidth(&m_cancel, 96, 130);
+		const int okW = ScChromeButtonWidth(&m_ok, 64, 90);
+		int cx = rc.right - 8 - cancelW;
+		int ox = cx - 6 - okW;
+		if (ox < x) ox = x;
+		if (cx < ox + okW + 6) cx = ox + okW + 6;
+		if (m_ok.GetSafeHwnd()) m_ok.MoveWindow(ox, top + lblH, okW, 22);
+		if (m_cancel.GetSafeHwnd()) m_cancel.MoveWindow(cx, top + lblH, cancelW, 22);
+	}
 	const int hintY = top + lblH + comboH + 4;
-	if (m_hint.GetSafeHwnd()) m_hint.MoveWindow(8, hintY, rc.Width() - 16, 18);
-	m_gridRc.SetRect(8, hintY + 22, rc.right - 8, rc.bottom - 8);
+	if (m_hint.GetSafeHwnd()) m_hint.MoveWindow(8, hintY, rc.Width() - 16, 36);
+	m_gridRc.SetRect(8, hintY + 40, rc.right - 8, rc.bottom - 8);
 	m_cellH = 18;
 	if (m_gridRc.Height() > 32) {
 		int h = m_gridRc.Height() / 32;

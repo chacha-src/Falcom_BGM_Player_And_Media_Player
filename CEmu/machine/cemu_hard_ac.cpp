@@ -4705,7 +4705,7 @@ void CHardAc::AlphaMixOpll(int16_t* stereo, int frames)
 	if (!stereo || frames <= 0 || !alphaOpll_) return;
 	OPLL* o = (OPLL*)alphaOpll_;
 	for (int i = 0; i < frames; i++) {
-		const int s = (int)(OPLL_calc(o) << 1);
+		const int s = (int)(OPLL_calc(o) << 2);
 		int l = (int)stereo[i * 2] + s;
 		int r = (int)stereo[i * 2 + 1] + s;
 		if (l > 32767) l = 32767; else if (l < -32768) l = -32768;

@@ -29,7 +29,7 @@ static const wchar_t KEY_VST_XG_SF[] = L"vstsoundfont_xg";
 
 /* fmmidi/ymfm の正規化が小さく、mpy/mpw2/rcp/mid が実聴で約 1/6。
    raira=0（本家）はさらに /2 のうえ 1.5 倍下げる。 */
-static const double kFmMidiOutGain = 6.0;
+static const double kFmMidiOutGain = 12.0;
 
 static uint8_t s_fileBuf[SASAMI_MAX_FILE];
 

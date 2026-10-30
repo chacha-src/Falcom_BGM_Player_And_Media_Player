@@ -12,6 +12,7 @@ unsigned g_opmIrqEdges;
 
 class CChipYm2151 : public CChip {
 public:
+	int YamahaFm() const override { return 1; }
 	CChipYm2151(uint32_t clockHz, int sampleRate)
 		: sampleRate_(sampleRate > 0 ? sampleRate : 44100)
 		, clockHz_(clockHz ? clockHz : 4000000u)

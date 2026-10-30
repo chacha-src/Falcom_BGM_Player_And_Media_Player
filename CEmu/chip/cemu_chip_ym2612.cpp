@@ -16,6 +16,7 @@ static int CEmuYm2612Clamp16(int32_t v)
 
 class CChipYm2612 : public CChip, public ymfm::ymfm_interface {
 public:
+	int YamahaFm() const override { return 1; }
 	CChipYm2612(uint32_t clockHz, int sampleRate)
 		: ym_(NULL)
 		, hostRate_(sampleRate > 0 ? sampleRate : 44100)

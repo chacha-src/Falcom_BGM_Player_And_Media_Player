@@ -190,7 +190,7 @@ BOOL CSasamiTextDlg::OnInitDialog()
 	m_b64Expanded = 1;
 	ApplyB64ViewToEdit();
 	m_status.SetWindowText(LL14(
-		L"MIDI: #ch / tBPM / 音符。FMは先頭に OPNA。", L"MIDI: #ch / tBPM / notes. FM: start with OPNA.",
+		L"MIDIは #チャンネル / tテンポ / 音符。\nFMは先頭に OPNA。", L"MIDI: #ch / tBPM / notes.\nFM: start with OPNA.",
 		L"MIDI: #ch / tBPM. FM: OPNA.", L"MIDI: #ch / tBPM. FM: OPNA.", L"MIDI: #ch / tBPM. FM: OPNA.",
 		L"MIDI: #ch / tBPM. FM: OPNA.", L"MIDI: #ch / tBPM。FM: OPNA。", L"MIDI: #ch / tBPM. FM: OPNA.",
 		L"MIDI: #ch / tBPM. FM: OPNA.", L"MIDI: #ch / tBPM. FM: OPNA.", L"MIDI: #ch / tBPM. FM: OPNA.",
@@ -211,27 +211,34 @@ void CSasamiTextDlg::LayoutChrome()
 	const int cap = CCC_GetCustomCaptionHeight(m_hWnd);
 	const int pad = 8;
 	const int btnH = 28;
-	const int btnW = 88;
 	int y = cap + pad;
 	int x = pad;
-	auto place = [&](CWnd& w, int ww) {
-		if (w.GetSafeHwnd()) { w.MoveWindow(x, y, ww, btnH); x += ww + 4; }
+	const int right = rc.right - pad;
+	auto place = [&](CWnd& w, int minW) {
+		if (!w.GetSafeHwnd() || !(w.GetStyle() & WS_VISIBLE)) return;
+		const int ww = ScChromeButtonWidth(&w, minW, 160);
+		if (x > pad && x + ww > right) { y += btnH + 4; x = pad; }
+		w.MoveWindow(x, y, ww, btnH);
+		x += ww + 4;
 	};
-	place(m_btnOpen, btnW);
-	place(m_btnSave, btnW);
+	place(m_btnOpen, 64);
+	place(m_btnSave, 64);
 	place(m_btnNew, 64);
-	place(m_btnCompile, btnW);
-	place(m_btnPlay, btnW + 12);
-	place(m_btnVst, btnW + 24);
-	place(m_btnExport, btnW);
-	place(m_btnHelp, 64);
+	place(m_btnCompile, 72);
+	place(m_btnPlay, 88);
+	x += 8;
 	place(m_btnScore, 64);
 	place(m_btnMode, 72);
+	y += btnH + 4;
+	x = pad;
+	place(m_btnVst, 96);
+	place(m_btnExport, 72);
+	place(m_btnHelp, 64);
 	place(m_btnB64Fold, 72);
 	y += btnH + 6;
 	if (m_status.GetSafeHwnd())
-		m_status.MoveWindow(pad, y, max(80, rc.Width() - pad * 2), 22);
-	y += 26;
+		m_status.MoveWindow(pad, y, max(80, rc.Width() - pad * 2), 36);
+	y += 40;
 	m_bodyRc.SetRect(pad, y, rc.Width() - pad, rc.Height() - pad);
 	if (m_edit.GetSafeHwnd()) m_edit.MoveWindow(m_bodyRc);
 }

@@ -41,6 +41,11 @@ struct DatArcMemEnt {
 	FILETIME stageMtime;
 	ULONGLONG stageSize;
 	BYTE stageFpValid;
+	/* 非圧縮バイトの指紋。mtime が動かない上書きでも、一致なら再圧縮しない */
+	ULONGLONG contentHash;
+	BYTE hashValid;
+	/* offset から次メンバまでの空き。cmpSize より大きくてもよい(差し替え用の余り) */
+	ULONGLONG slotCap;
 };
 
 static TCHAR g_exeDir[MAX_PATH] = { 0 };
@@ -53,6 +58,8 @@ static BYTE* g_arcMap = NULL;
 static ULONGLONG g_arcMapSize = 0;
 static int g_flushSuspend = 0;
 static BOOL g_flushDirty = FALSE;
+/* FlushAll のときだけ、mtime が同じでも内容ハッシュを見て古い塊を戻さない */
+static int g_verifyContent = 0;
 static CRITICAL_SECTION g_arcCs;
 static volatile LONG g_arcCsInit = 0;
 
@@ -200,6 +207,36 @@ static BOOL DatArc_WriteWholeFile(LPCTSTR path, const void* data, ULONGLONG size
 	return TRUE;
 }
 
+static ULONGLONG DatArc_Fnv64(const void* data, size_t size)
+{
+	const BYTE* p = (const BYTE*)data;
+	ULONGLONG h = 14695981039346656037ull;
+	size_t i = 0;
+	if (!p) size = 0;
+	for (; i + 8 <= size; i += 8) {
+		ULONGLONG v;
+		memcpy(&v, p + i, 8);
+		h ^= v;
+		h *= 1099511628211ull;
+	}
+	for (; i < size; ++i) {
+		h ^= (ULONGLONG)p[i];
+		h *= 1099511628211ull;
+	}
+	return h;
+}
+
+/* 後からの数バイト増減でアーカイブ全体を書き直さないための余り */
+static ULONGLONG DatArc_SlotStore(ULONGLONG cmpSz)
+{
+	ULONGLONG slack;
+	if (cmpSz == 0) return 0;
+	slack = cmpSz / 8;
+	if (slack < 4096ull) slack = 4096ull;
+	if (slack > (1024ull * 1024ull)) slack = 1024ull * 1024ull;
+	return cmpSz + slack;
+}
+
 static BOOL DatArc_LoadArcIntoMemory()
 {
 	DatArc_FreeMap();
@@ -234,6 +271,17 @@ static BOOL DatArc_ParseIndexFromMap()
 		e.inIndex = 1;
 		if (e.offset + e.cmpSize > g_arcMapSize)
 			return FALSE;
+		if (i + 1 < hdr->count) {
+			if (idx[i + 1].offset < idx[i].offset)
+				return FALSE;
+			e.slotCap = idx[i + 1].offset - idx[i].offset;
+		} else {
+			if (g_arcMapSize < idx[i].offset)
+				return FALSE;
+			e.slotCap = g_arcMapSize - idx[i].offset;
+		}
+		if (e.slotCap < e.cmpSize)
+			e.slotCap = e.cmpSize;
 		++g_n;
 	}
 	return TRUE;
@@ -251,6 +299,8 @@ static BOOL DatArc_ExtractOne(int i)
 	}
 	if (!g_arcMap || e.cmpSize == 0) {
 		// 空メンバー
+		e.contentHash = DatArc_Fnv64(NULL, 0);
+		e.hashValid = 1;
 		return DatArc_WriteWholeFile(path, "", 0);
 	}
 	if (e.offset + e.cmpSize > g_arcMapSize)
@@ -263,6 +313,8 @@ static BOOL DatArc_ExtractOne(int i)
 		free(dst);
 		return FALSE;
 	}
+	e.contentHash = DatArc_Fnv64(dst, (size_t)e.uncSize);
+	e.hashValid = 1;
 	const BOOL ok = DatArc_WriteWholeFile(path, dst, e.uncSize);
 	free(dst);
 	if (!ok)
@@ -350,6 +402,117 @@ static BOOL DatArc_StageMatchesEnt(int ei, const WIN32_FILE_ATTRIBUTE_DATA& fad)
 	return TRUE;
 }
 
+static void DatArc_NoteStageFp(int ei, LPCTSTR path)
+{
+	WIN32_FILE_ATTRIBUTE_DATA fad = {};
+	if (ei < 0 || ei >= g_n) return;
+	if (!path || !::GetFileAttributesEx(path, GetFileExInfoStandard, &fad)) {
+		g_ent[ei].stageFpValid = 0;
+		return;
+	}
+	ULARGE_INTEGER sz;
+	sz.LowPart = fad.nFileSizeLow;
+	sz.HighPart = fad.nFileSizeHigh;
+	g_ent[ei].stageSize = sz.QuadPart;
+	g_ent[ei].stageMtime = fad.ftLastWriteTime;
+	g_ent[ei].stageFpValid = 1;
+}
+
+static int DatArc_FileSlot(const char* nameU8)
+{
+	if (!nameU8 || !nameU8[0] || !g_arcMap || g_arcMapSize < sizeof(DatArcFileHdr))
+		return -1;
+	const DatArcFileHdr* hdr = (const DatArcFileHdr*)g_arcMap;
+	if (hdr->magic != DATARC_MAGIC || hdr->version != DATARC_VER)
+		return -1;
+	if (hdr->count > (DWORD)DATARC_MAX)
+		return -1;
+	const ULONGLONG need = sizeof(DatArcFileHdr) + (ULONGLONG)hdr->count * sizeof(DatArcIdxEnt);
+	if (g_arcMapSize < need)
+		return -1;
+	const DatArcIdxEnt* idx = (const DatArcIdxEnt*)(g_arcMap + sizeof(DatArcFileHdr));
+	for (DWORD s = 0; s < hdr->count; ++s) {
+		if (strncmp(idx[s].name, nameU8, DATARC_NAME) == 0)
+			return (int)s;
+	}
+	return -1;
+}
+
+/* 変わったメンバだけ、既存の空きに収まるならアーカイブ全体は書き直さない */
+static BOOL DatArc_TryPatchMembers(
+	TCHAR names[][DATARC_NAME],
+	int nNames,
+	BYTE* cmp[],
+	ULONGLONG uncSz[],
+	ULONGLONG cmpSz[],
+	BYTE cmpOwned[],
+	ULONGLONG hashV[],
+	BYTE hashOk[])
+{
+	if (!g_arcMap || !g_arcPath[0] || nNames != g_n || nNames <= 0)
+		return FALSE;
+	int dirty[DATARC_MAX];
+	int nDirty = 0;
+	for (int i = 0; i < nNames; ++i) {
+		const int oi = DatArc_FindIndex(names[i]);
+		if (oi < 0)
+			return FALSE;
+		if (!cmpOwned[i])
+			continue;
+		if (cmpSz[i] > 0x7fffffffULL || (cmpSz[i] > 0 && !cmp[i]))
+			return FALSE;
+		const int slot = DatArc_FileSlot(g_ent[oi].nameU8);
+		if (slot < 0)
+			return FALSE;
+		ULONGLONG cap = g_ent[oi].slotCap;
+		if (cap < g_ent[oi].cmpSize)
+			cap = g_ent[oi].cmpSize;
+		if (cmpSz[i] > cap)
+			return FALSE;
+		if (g_ent[oi].offset + cap > g_arcMapSize)
+			return FALSE;
+		dirty[nDirty++] = i;
+	}
+	if (nDirty <= 0)
+		return FALSE;
+
+	::SetFileAttributes(g_arcPath, FILE_ATTRIBUTE_NORMAL);
+	CFile f;
+	if (!f.Open(g_arcPath, CFile::modeReadWrite | CFile::shareExclusive, NULL))
+		return FALSE;
+
+	BOOL ok = TRUE;
+	try {
+		DatArcIdxEnt* idx = (DatArcIdxEnt*)(g_arcMap + sizeof(DatArcFileHdr));
+		for (int d = 0; d < nDirty && ok; ++d) {
+			const int i = dirty[d];
+			const int oi = DatArc_FindIndex(names[i]);
+			const int slot = DatArc_FileSlot(g_ent[oi].nameU8);
+			if (oi < 0 || slot < 0) { ok = FALSE; break; }
+			if (cmpSz[i] > 0) {
+				f.Seek((LONGLONG)g_ent[oi].offset, CFile::begin);
+				f.Write(cmp[i], (UINT)cmpSz[i]);
+				memcpy(g_arcMap + (size_t)g_ent[oi].offset, cmp[i], (size_t)cmpSz[i]);
+			}
+			idx[slot].uncSize = uncSz[i];
+			idx[slot].cmpSize = cmpSz[i];
+			f.Seek((LONGLONG)(sizeof(DatArcFileHdr) + (size_t)slot * sizeof(DatArcIdxEnt)), CFile::begin);
+			f.Write(&idx[slot], sizeof(DatArcIdxEnt));
+			g_ent[oi].uncSize = uncSz[i];
+			g_ent[oi].cmpSize = cmpSz[i];
+			g_ent[oi].contentHash = hashV[i];
+			g_ent[oi].hashValid = hashOk[i] ? 1 : 0;
+			DatArc_NoteStageFp(oi, DatArc_StagePath(names[i]));
+		}
+		f.Close();
+	}
+	catch (...) {
+		try { f.Close(); } catch (...) {}
+		ok = FALSE;
+	}
+	return ok;
+}
+
 static BOOL DatArc_RebuildFromStage()
 {
 	if (!DatArc_EnsureStageDir()) return FALSE;
@@ -386,8 +549,8 @@ static BOOL DatArc_RebuildFromStage()
 		::FindClose(h);
 	}
 
-	// 変更が無ければアーカイブ再生成を省略
-	if (nNames == g_n && g_arcMap && ::PathFileExists(g_arcPath)) {
+	// 変更が無ければアーカイブ再生成を省略（FlushAll の照合中はハッシュまで見る）
+	if (!g_verifyContent && nNames == g_n && g_arcMap && ::PathFileExists(g_arcPath)) {
 		BOOL allSame = TRUE;
 		for (int i = 0; i < nNames; ++i) {
 			const int oi = DatArc_FindIndex(names[i]);
@@ -400,8 +563,10 @@ static BOOL DatArc_RebuildFromStage()
 				break;
 			}
 		}
-		if (allSame)
+		if (allSame) {
+			g_flushDirty = FALSE;
 			return TRUE;
+		}
 	}
 
 	// 圧縮バッファと生データ (未変更分は旧マップの圧縮塊を流用)
@@ -409,12 +574,16 @@ static BOOL DatArc_RebuildFromStage()
 	BYTE* cmp[DATARC_MAX];
 	ULONGLONG uncSz[DATARC_MAX];
 	ULONGLONG cmpSz[DATARC_MAX];
+	ULONGLONG hashV[DATARC_MAX];
 	BYTE cmpOwned[DATARC_MAX]; // 1=malloc、0=旧マップ参照
+	BYTE hashOk[DATARC_MAX];
 	ZeroMemory(unc, sizeof(unc));
 	ZeroMemory(cmp, sizeof(cmp));
 	ZeroMemory(uncSz, sizeof(uncSz));
 	ZeroMemory(cmpSz, sizeof(cmpSz));
+	ZeroMemory(hashV, sizeof(hashV));
 	ZeroMemory(cmpOwned, sizeof(cmpOwned));
+	ZeroMemory(hashOk, sizeof(hashOk));
 
 	BOOL ok = TRUE;
 	for (int i = 0; i < nNames && ok; ++i) {
@@ -422,10 +591,13 @@ static BOOL DatArc_RebuildFromStage()
 		WIN32_FILE_ATTRIBUTE_DATA fad = {};
 		const BOOL gotFad = ::GetFileAttributesEx(path, GetFileExInfoStandard, &fad) != 0;
 		const int oi = DatArc_FindIndex(names[i]);
-		if (gotFad && oi >= 0 && DatArc_StageMatchesEnt(oi, fad)) {
+		if (gotFad && oi >= 0 && DatArc_StageMatchesEnt(oi, fad)
+			&& !(g_verifyContent && g_ent[oi].hashValid)) {
 			uncSz[i] = g_ent[oi].uncSize;
 			cmpSz[i] = g_ent[oi].cmpSize;
-			if (cmpSz[i] > 0)
+			hashV[i] = g_ent[oi].contentHash;
+			hashOk[i] = g_ent[oi].hashValid;
+			if (cmpSz[i] > 0 && g_arcMap)
 				cmp[i] = g_arcMap + (size_t)g_ent[oi].offset;
 			cmpOwned[i] = 0;
 			continue;
@@ -435,6 +607,8 @@ static BOOL DatArc_RebuildFromStage()
 				g_ent[oi].offset + g_ent[oi].cmpSize <= g_arcMapSize) {
 				uncSz[i] = g_ent[oi].uncSize;
 				cmpSz[i] = g_ent[oi].cmpSize;
+				hashV[i] = g_ent[oi].contentHash;
+				hashOk[i] = g_ent[oi].hashValid;
 				if (cmpSz[i] > 0)
 					cmp[i] = g_arcMap + (size_t)g_ent[oi].offset;
 				cmpOwned[i] = 0;
@@ -447,67 +621,115 @@ static BOOL DatArc_RebuildFromStage()
 			ok = FALSE;
 			break;
 		}
+		{
+			const ULONGLONG h = DatArc_Fnv64(unc[i], (size_t)uncSz[i]);
+			BOOL reused = FALSE;
+			if (oi >= 0 && g_ent[oi].hashValid && h == g_ent[oi].contentHash
+				&& uncSz[i] == g_ent[oi].uncSize) {
+				const BOOL blobOk = (g_ent[oi].cmpSize == 0) ||
+					(g_arcMap && g_ent[oi].offset + g_ent[oi].cmpSize <= g_arcMapSize);
+				if (blobOk) {
+					cmpSz[i] = g_ent[oi].cmpSize;
+					hashV[i] = h;
+					hashOk[i] = 1;
+					if (cmpSz[i] > 0)
+						cmp[i] = g_arcMap + (size_t)g_ent[oi].offset;
+					cmpOwned[i] = 0;
+					free(unc[i]);
+					unc[i] = NULL;
+					DatArc_NoteStageFp(oi, path);
+					reused = TRUE;
+				}
+			}
+			if (reused)
+				continue;
+			hashV[i] = h;
+			hashOk[i] = 1;
+		}
 		const size_t bound = ZSTD_compressBound((size_t)uncSz[i]);
 		cmp[i] = (BYTE*)malloc(bound ? bound : 1);
 		if (!cmp[i]) { ok = FALSE; break; }
 		cmpOwned[i] = 1;
 		int zlev = DATARC_ZSTD_LEVEL;
-		if (uncSz[i] > (512ull * 1024ull))
+		/* プレイリストや曲パラメータは大きい。対話中の保存は速度優先 */
+		if (uncSz[i] > (64ull * 1024ull))
 			zlev = 1;
 		const size_t csz = ZSTD_compress(cmp[i], bound, unc[i], (size_t)uncSz[i], zlev);
 		if (ZSTD_isError(csz)) { ok = FALSE; break; }
 		cmpSz[i] = (ULONGLONG)csz;
 	}
 
+	BYTE* out = NULL;
+	ULONGLONG total = 0;
+	int done = 0; /* 0=失敗 1=全体書き直し不要 2=tmp へ書き出した */
 	if (ok) {
-		const ULONGLONG hdrBytes = sizeof(DatArcFileHdr) + (ULONGLONG)nNames * sizeof(DatArcIdxEnt);
-		ULONGLONG total = hdrBytes;
-		for (int i = 0; i < nNames; ++i)
-			total += cmpSz[i];
-
-		BYTE* out = (BYTE*)malloc((size_t)total);
-		if (!out) {
-			ok = FALSE;
+		BOOL anyOwned = FALSE;
+		BOOL sameSet = (nNames == g_n && g_arcMap != NULL);
+		for (int i = 0; i < nNames; ++i) {
+			if (cmpOwned[i]) anyOwned = TRUE;
+			if (sameSet && DatArc_FindIndex(names[i]) < 0)
+				sameSet = FALSE;
+		}
+		if (!anyOwned && sameSet) {
+			done = 1;
+		} else if (anyOwned && sameSet &&
+			DatArc_TryPatchMembers(names, nNames, cmp, uncSz, cmpSz, cmpOwned, hashV, hashOk)) {
+			done = 1;
 		} else {
-			DatArcFileHdr* hdr = (DatArcFileHdr*)out;
-			hdr->magic = DATARC_MAGIC;
-			hdr->version = DATARC_VER;
-			hdr->count = (DWORD)nNames;
-			hdr->reserved = 0;
-			DatArcIdxEnt* idx = (DatArcIdxEnt*)(out + sizeof(DatArcFileHdr));
-			ULONGLONG off = hdrBytes;
-			for (int i = 0; i < nNames; ++i) {
-				ZeroMemory(&idx[i], sizeof(idx[i]));
-				DatArc_NameToUtf8(names[i], idx[i].name, DATARC_NAME);
-				idx[i].uncSize = uncSz[i];
-				idx[i].cmpSize = cmpSz[i];
-				idx[i].offset = off;
-				if (cmpSz[i] > 0 && cmp[i])
-					memcpy(out + (size_t)off, cmp[i], (size_t)cmpSz[i]);
-				off += cmpSz[i];
-			}
-
-			TCHAR tmpPath[MAX_PATH];
-			_tcsncpy(tmpPath, g_arcPath, MAX_PATH - 1);
-			tmpPath[MAX_PATH - 1] = 0;
-			size_t tlen = _tcslen(tmpPath);
-			if (tlen + 5 < MAX_PATH)
-				_tcscat(tmpPath, _T(".tmp"));
-			else
+			const ULONGLONG hdrBytes = sizeof(DatArcFileHdr) + (ULONGLONG)nNames * sizeof(DatArcIdxEnt);
+			total = hdrBytes;
+			for (int i = 0; i < nNames; ++i)
+				total += DatArc_SlotStore(cmpSz[i]);
+			if (total == 0 || total > 0xffffffffULL) {
 				ok = FALSE;
-
-			if (ok && DatArc_WriteWholeFile(tmpPath, out, total)) {
-				::SetFileAttributes(g_arcPath, FILE_ATTRIBUTE_NORMAL);
-				::DeleteFile(g_arcPath);
-				if (!::MoveFile(tmpPath, g_arcPath)) {
-					::DeleteFile(tmpPath);
-					ok = FALSE;
-				}
 			} else {
-				::DeleteFile(tmpPath);
-				ok = FALSE;
+				out = (BYTE*)malloc((size_t)total);
+				if (!out) {
+					ok = FALSE;
+				} else {
+					ZeroMemory(out, (size_t)total);
+					DatArcFileHdr* hdr = (DatArcFileHdr*)out;
+					hdr->magic = DATARC_MAGIC;
+					hdr->version = DATARC_VER;
+					hdr->count = (DWORD)nNames;
+					hdr->reserved = 0;
+					DatArcIdxEnt* idx = (DatArcIdxEnt*)(out + sizeof(DatArcFileHdr));
+					ULONGLONG off = hdrBytes;
+					for (int i = 0; i < nNames; ++i) {
+						ZeroMemory(&idx[i], sizeof(idx[i]));
+						DatArc_NameToUtf8(names[i], idx[i].name, DATARC_NAME);
+						idx[i].uncSize = uncSz[i];
+						idx[i].cmpSize = cmpSz[i];
+						idx[i].offset = off;
+						if (cmpSz[i] > 0 && cmp[i])
+							memcpy(out + (size_t)off, cmp[i], (size_t)cmpSz[i]);
+						off += DatArc_SlotStore(cmpSz[i]);
+					}
+
+					TCHAR tmpPath[MAX_PATH];
+					_tcsncpy(tmpPath, g_arcPath, MAX_PATH - 1);
+					tmpPath[MAX_PATH - 1] = 0;
+					size_t tlen = _tcslen(tmpPath);
+					if (tlen + 5 < MAX_PATH)
+						_tcscat(tmpPath, _T(".tmp"));
+					else
+						ok = FALSE;
+
+					if (ok && DatArc_WriteWholeFile(tmpPath, out, total)) {
+						::SetFileAttributes(g_arcPath, FILE_ATTRIBUTE_NORMAL);
+						::DeleteFile(g_arcPath);
+						if (!::MoveFile(tmpPath, g_arcPath)) {
+							::DeleteFile(tmpPath);
+							ok = FALSE;
+						} else {
+							done = 2;
+						}
+					} else {
+						::DeleteFile(tmpPath);
+						ok = FALSE;
+					}
+				}
 			}
-			free(out);
 		}
 	}
 
@@ -516,11 +738,27 @@ static BOOL DatArc_RebuildFromStage()
 		if (cmpOwned[i] && cmp[i]) free(cmp[i]);
 	}
 
-	if (!ok) return FALSE;
-
-	// メモリ上のインデックスを再読込
-	if (!DatArc_LoadArcIntoMemory() || !DatArc_ParseIndexFromMap())
+	if (!ok || done == 0) {
+		if (out) free(out);
 		return FALSE;
+	}
+	if (done == 1) {
+		g_flushDirty = FALSE;
+		return TRUE;
+	}
+
+	/* 書き出したバッファをそのままマップにする。ディスクから読み直さない */
+	DatArc_FreeMap();
+	g_arcMap = out;
+	g_arcMapSize = total;
+	if (!DatArc_ParseIndexFromMap())
+		return FALSE;
+	for (int i = 0; i < nNames; ++i) {
+		const int ei = DatArc_FindIndex(names[i]);
+		if (ei < 0 || !hashOk[i]) continue;
+		g_ent[ei].contentHash = hashV[i];
+		g_ent[ei].hashValid = 1;
+	}
 	DatArc_RefreshStageFingerprints();
 	g_flushDirty = FALSE;
 	return TRUE;
@@ -790,9 +1028,11 @@ BOOL DatArc_FlushAll()
 		g_flushDirty = TRUE;
 		return TRUE;
 	}
-	/* 同サイズ上書きは mtime が変わらず、指紋一致で OFF が ON の塊に戻る */
-	for (int i = 0; i < g_n; ++i)
-		g_ent[i].stageFpValid = 0;
+	/* 全メンバを再圧縮しない。ステージ上のファイルは内容ハッシュが違うときだけ圧縮し直す。 */
+	struct VerifyScope {
+		VerifyScope() { g_verifyContent = 1; }
+		~VerifyScope() { g_verifyContent = 0; }
+	} verifyScope;
 	return DatArc_RebuildFromStage();
 }
 

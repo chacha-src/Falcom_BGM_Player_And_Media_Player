@@ -1803,6 +1803,48 @@ void ScStaffLoadPartStrip(ScStaffUi* u, int part)
 	}
 }
 
+int ScChromeButtonWidth(CWnd* w, int minW, int maxW)
+{
+	if (!w || !w->GetSafeHwnd()) return minW;
+	CString s;
+	w->GetWindowText(s);
+	if (s.IsEmpty()) return minW;
+	CWindowDC dc(w);
+	CFont* f = w->GetFont();
+	CFont* old = dc.SelectObject(f ? f : CFont::FromHandle((HFONT)GetStockObject(DEFAULT_GUI_FONT)));
+	const CSize te = dc.GetTextExtent(s);
+	if (old) dc.SelectObject(old);
+	/* Flat button: 16px icon + gaps. Shorter than this and the caption is hidden. */
+	int wpx = (int)te.cx + 40;
+	if (wpx < minW) wpx = minW;
+	if (maxW > 0 && wpx > maxW) wpx = maxW;
+	return wpx;
+}
+
+/* CCustomStatic squeezes a single line until it is unreadable. Break long help. */
+static void ScWrapStaticText(wchar_t* s, int cch, int maxCjk)
+{
+	if (!s || cch < 8 || maxCjk < 8) return;
+	wchar_t tmp[768];
+	int o = 0;
+	int col = 0;
+	const int limit = maxCjk * 2;
+	for (int i = 0; s[i] && o + 2 < (int)(sizeof(tmp) / sizeof(tmp[0])); ++i) {
+		const wchar_t ch = s[i];
+		if (ch == L'\r') continue;
+		if (ch == L'\n') { tmp[o++] = L'\n'; col = 0; continue; }
+		const int wch = (ch >= 0x1100) ? 2 : 1;
+		if (col > 0 && col + wch > limit) {
+			tmp[o++] = L'\n';
+			col = 0;
+		}
+		tmp[o++] = ch;
+		col += wch;
+	}
+	tmp[o] = 0;
+	wcsncpy_s(s, (size_t)cch, tmp, _TRUNCATE);
+}
+
 void ScStaffFormatHelpBar(wchar_t* out, int cch, const ScStaffUi* u, int isFm, int curPart)
 {
 	if (!out || cch <= 0) return;
@@ -2340,6 +2382,7 @@ void ScStaffFormatHelpBar(wchar_t* out, int cch, const ScStaffUi* u, int isFm, i
 			tool, curPart + 1, stripInfo);
 		break;
 	}
+	ScWrapStaticText(out, cch, 38);
 }
 
 void ScStaffNormalizeStripStep(ScStaffUi* u)
@@ -2726,7 +2769,7 @@ void ScStaffDrawPalTab(CDC& dc, const CRect& rc, const wchar_t* label, int selec
 	}
 	dc.SetBkMode(TRANSPARENT);
 	CFont f;
-	f.CreateFont(max(11, rc.Height() - 4), 0, 0, 0, selected ? FW_BOLD : FW_NORMAL, 0, 0, 0,
+	f.CreateFont(max(11, rc.Height() - 8), 0, 0, 0, selected ? FW_BOLD : FW_NORMAL, 0, 0, 0,
 		DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Meiryo UI");
 	CFont* of = dc.SelectObject(&f);
 	dc.SetTextColor(selected ? RGB(255, 255, 255) : RGB(200, 210, 230));
@@ -3110,8 +3153,8 @@ static void ScStaffLaneFillColors(int toneCfg, int excUsed, COLORREF* toneBg, CO
 
 void ScStaffMuteSoloRects(const CRect& trackRc, int rowTop, CRect* mRc, CRect* sRc)
 {
-	if (mRc) mRc->SetRect(trackRc.left + 134, rowTop + 1, trackRc.left + 154, rowTop + 16);
-	if (sRc) sRc->SetRect(trackRc.left + 157, rowTop + 1, trackRc.left + 177, rowTop + 16);
+	if (mRc) mRc->SetRect(trackRc.left + 142, rowTop + 2, trackRc.left + 162, rowTop + 18);
+	if (sRc) sRc->SetRect(trackRc.left + 166, rowTop + 2, trackRc.left + 186, rowTop + 18);
 }
 
 void ScStaffPaintTracks(CDC& dc, const CRect& rc, const ScStaffUi* u, int curTrack,
@@ -3144,12 +3187,12 @@ void ScStaffPaintTracks(CDC& dc, const CRect& rc, const ScStaffUi* u, int curTra
 		dc.DrawText(u->visible[i] ? L"●" : L"○", enRc, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
 
 		dc.SetTextColor(u->visible[i] ? RGB(20, 20, 40) : RGB(130, 130, 145));
-		CRect nameRc(rc.left + SC_PART_ENABLE_W + 4, y + 1, rc.left + 88, y + 17);
+		CRect nameRc(rc.left + SC_PART_ENABLE_W + 4, y + 1, rc.left + 96, y + 19);
 		dc.DrawText(u->names[i], nameRc, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
 		/* Clickable clef chip: G / F / G+F / Dr */
 		const wchar_t* clefTag = (u->clef[i] == 3) ? L"Dr"
 			: (u->clef[i] == 2) ? L"G+F" : (u->clef[i] == 1 ? L"F" : L"G");
-		CRect clefBox(rc.left + 90, y + 1, rc.left + 128, y + 17);
+		CRect clefBox(rc.left + 98, y + 1, rc.left + 136, y + 19);
 		dc.FillSolidRect(clefBox, RGB(255, 250, 230));
 		dc.Draw3dRect(clefBox, RGB(160, 120, 40), RGB(160, 120, 40));
 		dc.SetTextColor(RGB(100, 60, 20));
@@ -3181,9 +3224,9 @@ void ScStaffPaintTracks(CDC& dc, const CRect& rc, const ScStaffUi* u, int curTra
 			dc.SetTextColor(toneCfg ? RGB(24, 90, 50) : RGB(120, 90, 50));
 			wchar_t tone[96];
 			if (u->vstLabel[i][0])
-				_snwprintf_s(tone, _TRUNCATE, L"Tone  %s", u->vstLabel[i]);
+				_snwprintf_s(tone, _TRUNCATE, L"音色  %s", u->vstLabel[i]);
 			else
-				_snwprintf_s(tone, _TRUNCATE, L"Tone  —");
+				_snwprintf_s(tone, _TRUNCATE, L"音色  —  クリックで設定");
 			dc.DrawText(tone, toneBox, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
 
 			const int excTop = toneTop + SC_CTRL_LANE_H;
@@ -3191,7 +3234,7 @@ void ScStaffPaintTracks(CDC& dc, const CRect& rc, const ScStaffUi* u, int curTra
 			dc.FillSolidRect(excBox, excBg);
 			dc.Draw3dRect(excBox, excEdge, excEdge);
 			dc.SetTextColor(excUsed ? RGB(40, 70, 110) : RGB(90, 110, 140));
-			dc.DrawText(L"Exc / RPN / SysEx", excBox, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+			dc.DrawText(L"制御  RPN / SysEx", excBox, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
 		}
 		y += rowH;
 	}
@@ -5053,9 +5096,9 @@ int ScStaffHitGauge(const CRect& trackRc, const ScStaffUi* u, CPoint pt, int* ou
 	if (gy < 0 || gy >= SC_PART_GAUGE_H) return tr;
 	if (outZone) {
 		if (gy < SC_NAME_BAND_H) {
-			/* Name band: clef chip at x ~90..128 relative to track column */
+			/* Name band: clef chip sits just right of the part name. */
 			const int lx = pt.x - trackRc.left;
-			*outZone = (lx >= 88 && lx < 132) ? SC_GAUGE_CLEF : SC_GAUGE_NONE;
+			*outZone = (lx >= 96 && lx < 140) ? SC_GAUGE_CLEF : SC_GAUGE_NONE;
 		} else if (gy < SC_NAME_BAND_H + SC_CTRL_LANE_H) *outZone = SC_GAUGE_TONE;
 		else if (gy < SC_PART_GAUGE_H) *outZone = SC_GAUGE_PROG;
 		else *outZone = SC_GAUGE_NONE;

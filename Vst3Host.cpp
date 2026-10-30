@@ -1245,6 +1245,11 @@ void Vst3EditorClose(Vst3Inst* v)
 	Vst3EditorCloseEx(v, 0);
 }
 
+int Vst3EditorAttached(Vst3Inst* v)
+{
+	return (v && v->view) ? 1 : 0;
+}
+
 /* soft!=0: skip view->removed(). VST3 IPlugView (Steinberg FrameWindowClass,
    SampleTank, Groove Agent, …) can wait there forever. */
 void Vst3EditorCloseEx(Vst3Inst* v, int soft)

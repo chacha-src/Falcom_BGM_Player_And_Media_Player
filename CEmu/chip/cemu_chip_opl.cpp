@@ -10,6 +10,7 @@ extern "C" {
 
 class CChipOpl2 : public CChip {
 public:
+	int YamahaFm() const override { return 1; }
 	CChipOpl2(uint32_t clockHz, int sampleRate)
 		: chip_(NULL)
 		, sampleRate_(sampleRate > 0 ? sampleRate : 44100)

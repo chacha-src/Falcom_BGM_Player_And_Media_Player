@@ -3,6 +3,7 @@
 #include "CSasamiInsertFxDlg.h"
 #include "CSasamiVstPickDlg.h"
 #include "VstMidiEngine.h"
+#include "CSasamiStaffCore.h"
 
 CSasamiInsertFxDlg* CSasamiInsertFxDlg::s_inst = NULL;
 
@@ -81,11 +82,11 @@ END_MESSAGE_MAP()
 
 void CSasamiInsertFxDlg::ApplyLang()
 {
-	SetWindowText(L"SASAMI Insert FX (VST effect)");
-	m_pick.SetWindowText(L"Pick...");
-	m_bypass.SetWindowText(L"Bypass");
-	m_editor.SetWindowText(L"Editor");
-	m_close.SetWindowText(L"Close");
+	SetWindowText(L"インサートFX");
+	m_pick.SetWindowText(L"選ぶ…");
+	m_bypass.SetWindowText(L"バイパス");
+	m_editor.SetWindowText(L"設定画面");
+	m_close.SetWindowText(L"閉じる");
 }
 
 BOOL CSasamiInsertFxDlg::OnInitDialog()
@@ -133,10 +134,16 @@ void CSasamiInsertFxDlg::LayoutChrome()
 	int y = cap + pad;
 	int x = pad;
 	if (m_slot.GetSafeHwnd()) { m_slot.MoveWindow(x, y, 72, 90); x += 82; }
-	if (m_pick.GetSafeHwnd()) { m_pick.MoveWindow(x, y, 76, 28); x += 84; }
-	if (m_bypass.GetSafeHwnd()) { m_bypass.MoveWindow(x, y, 78, 28); x += 86; }
-	if (m_editor.GetSafeHwnd()) { m_editor.MoveWindow(x, y, 78, 28); x += 86; }
-	if (m_close.GetSafeHwnd()) m_close.MoveWindow(x, y, 72, 28);
+	auto place = [&](CWnd& w, int minW) {
+		if (!w.GetSafeHwnd()) return;
+		const int ww = ScChromeButtonWidth(&w, minW, 140);
+		w.MoveWindow(x, y, ww, 28);
+		x += ww + 8;
+	};
+	place(m_pick, 72);
+	place(m_bypass, 80);
+	place(m_editor, 88);
+	place(m_close, 64);
 	y += 36;
 	if (m_hint.GetSafeHwnd()) m_hint.MoveWindow(pad, y, rc.Width() - pad * 2, 48);
 	y += 58;

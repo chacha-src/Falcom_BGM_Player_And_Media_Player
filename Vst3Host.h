@@ -24,6 +24,8 @@ void Vst3MidiSysex(Vst3Inst* inst, const unsigned char* data, int bytes, int sam
 void Vst3Process(Vst3Inst* inst, float* outL, float* outR, int frames);
 // プラグイン自身のエディタを parentHwnd に載せる。サイズを返すので窓を合わせる。
 int Vst3EditorOpen(Vst3Inst* inst, void* parentHwnd, int* outW, int* outH);
+/* 1 = IPlugView がまだ載っている。soft close で外したあとは 0。 */
+int Vst3EditorAttached(Vst3Inst* inst);
 void Vst3EditorClose(Vst3Inst* inst);
 /* soft: skip IPlugView::removed (SampleTank hang on close). */
 void Vst3EditorCloseEx(Vst3Inst* inst, int soft);

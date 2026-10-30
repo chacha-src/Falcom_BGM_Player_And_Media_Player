@@ -365,7 +365,7 @@ public:
 	SceneryPuff SceneryPuffAt(int i) const
 	{
 		SceneryPuff s = {};
-		if (i >= 0 && i < m_puffN && i < 12) s = m_puff[i];
+		if (i >= 0 && i < m_puffN && i < 16) s = m_puff[i];
 		return s;
 	}
 
@@ -619,7 +619,7 @@ private:
 	Fix<PropBatch, 16> m_props;
 	DWORD m_waterColor;
 	int m_theme;
-	SceneryPuff m_puff[12];
+	SceneryPuff m_puff[16];
 	int m_puffN;
 
 	// フレーム定数

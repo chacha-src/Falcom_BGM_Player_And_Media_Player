@@ -5,6 +5,10 @@
 #include "DatArchive.h"
 #include <stdio.h>
 #include <math.h>
+#include <zstd.h>
+#include <bcrypt.h>
+#pragma comment(lib, "libzstd_static.lib")
+#pragma comment(lib, "bcrypt.lib")
 
 namespace otac {
 
@@ -3502,6 +3506,58 @@ static bool CanCounter(const Battle& b, const Unit& d, const Unit& a)
 	return InRangeOfUnit(b, d, d.x, d.z, UnitRangeMin(d), UnitRangeMax(d), a, true);
 }
 
+int EstimateText(const Unit& a, int skill, wchar_t* out, int cap)
+{
+	if (!out || cap < 8) return 0;
+	out[0] = 0;
+	const SkillDef* sd = skill >= 0 ? &SkillInfo(skill) : NULL;
+	if (sd && (sd->kind == SK_HEAL || sd->kind == SK_BUFF || sd->kind == SK_PASSIVE)) return 0;
+	if (sd && sd->power <= 0 && !IsSummonId(skill)) return 0;
+	int magic = sd ? (sd->kind == SK_MAGIC || IsSummonId(skill)) : (UnitMagAttack(a) != 0);
+	int nHit = sd ? max(1, sd->hits) : 1;
+	float dm;
+	if (magic) {
+		int atk = UnitStat(a, S_MAG) + (sd ? 0 : UnitWeaponPow(a));
+		if (UnitHasSkill(a, SKL_P_SPELL)) atk = atk * 115 / 100;
+		float mult = sd ? (150 + sd->power * 5) / 100.f : 1.f;
+		dm = (float)atk * mult;
+		if (sd && IsSummonId(skill)) {
+			int phys = UnitStat(a, S_STR) + UnitWeaponPow(a);
+			float offense = (float)(phys > atk ? phys : atk);
+			float want = offense * (2.1f + sd->power * 0.02f);
+			float floorv = offense * 1.6f;
+			if (want < floorv) want = floorv;
+			dm = want * 0.75f;
+		} else if (nHit > 1) dm /= (float)nHit;
+	} else {
+		int atk = UnitStat(a, S_STR) + UnitWeaponPow(a);
+		if (sd && skill == SKL_HOLYBLADE) atk += UnitStat(a, S_MAG) / 2;
+		if (UnitHasSkill(a, SKL_P_MIGHT)) atk = atk * 115 / 100;
+		if (!sd && (WeaponOf(a) == WT_BOW || UnitAttackStyle(a) == AS_SHOOT || UnitAttackStyle(a) == AS_SHOOT1))
+			atk = atk * 6 / 5;
+		float mult = sd ? sd->power / 100.f : 1.f;
+		if (mult < 0.05f) mult = 1.f;
+		dm = (float)atk * mult;
+	}
+	int per = max(1, (int)(dm + 0.5f));
+	const wchar_t* kind = magic
+		? LangPick14(L"魔法", L"Magic", L"Magie", L"Magia", L"Magia", L"마법", L"魔法", L"سحر", L"Магия", L"Magie", L"Magia", L"Magie", L"Magia", L"Büyü")
+		: LangPick14(L"物理", L"Phys", L"Phys", L"Fis", L"Fís", L"물리", L"物理", L"جسدي", L"Физ", L"Physisch", L"Fís", L"Fys", L"Fiz", L"Fizik");
+	const wchar_t* ref = LangPick14(L"参考", L"Ref", L"Réf", L"Rif", L"Ref", L"참고", L"参考", L"مرجع", L"Оценка", L"Ref", L"Ref", L"Ref", L"Szac", L"Ref");
+	if (!sd) {
+		swprintf_s(out, cap, L"%s %s %d    %s %d", ref, kind, per,
+			LangPick14(L"2回", L"2 hits", L"2 coups", L"2 colpi", L"2 golpes", L"2회", L"2次", L"ضربتان", L"2 удара", L"2 Treffer", L"2 golpes", L"2 treffers", L"2 trafienia", L"2 vuruş"),
+			per * 2);
+	} else if (nHit > 1) {
+		swprintf_s(out, cap, L"%s %s %d×%d    %s %d", ref, kind, per, nHit,
+			LangPick14(L"推定", L"Est", L"Est", L"Stima", L"Est", L"추정", L"推定", L"تقدير", L"Итого", L"Schätz", L"Est", L"Schat", L"Suma", L"Tahmin"),
+			per * nHit);
+	} else {
+		swprintf_s(out, cap, L"%s %s %d", ref, kind, per);
+	}
+	return 1;
+}
+
 void CalcForecast(const Battle& b, int ai, int di, int skill, Forecast& f)
 {
 	memset(&f, 0, sizeof(f));
@@ -4006,6 +4062,14 @@ static int HealAmount(const Unit& a, const Unit& d, const SkillDef& sd, int skil
 	else if (UnitHasPas(a, PAS_HEAL)) amt = amt * 125 / 100;
 	if (amt < 1) amt = 1;
 	return amt;
+}
+
+int PreviewHealAmount(const Unit& a, const Unit& d, int skill)
+{
+	if (skill < 0) return 0;
+	const SkillDef& sd = SkillInfo(skill);
+	if (sd.kind != SK_HEAL || sd.effect == EF_RAISE) return 0;
+	return HealAmount(a, d, sd, skill);
 }
 
 int ResolveAttack(Battle& b, int ai, int di, int skill, Rng& r, Strike* out, int maxOut, int cx, int cz)
@@ -4573,18 +4637,19 @@ void SetupBattle(Battle& b, int stage, DWORD seed, const CharData* party, const 
 	b.nUnits = n;
 	b.RebuildOcc();
 	RescueStuckFeet(b);
-	WakeNearPlayers(b, 8, 1);
+	WakeNearPlayers(b, 16, 1);
 	b.stampede = 0;
 	b.stampedeLeft = 0;
 	b.stampedeLine = 0;
 	b.stampedeShow = 0;
 	int foes = b.AliveCount(TEAM_ENEMY);
-	if (foes >= 6 && (seed % 8u) == 3u) {
+	// 以前は 8 回に 1 で、波が 1 か 2。続くと重いので 16 回に 1、波は 1。
+	if (foes >= 8 && (seed % 16u) == 3u) {
 		int line = foes / 4;
 		if (line < 2) line = 2;
 		if (line < foes) {
 			b.stampede = 1;
-			b.stampedeLeft = 1 + (int)((seed / 8u) & 1u);
+			b.stampedeLeft = 1;
 			b.stampedeLine = line;
 		}
 	}
@@ -4758,47 +4823,75 @@ static void MarkGroup(Battle& b, int grp, int immediate, int& newly)
 	}
 }
 
+// 障害物を避けた歩数。山や段差で通れないマスは数えず、回り込んだ長さを返す。
+static void ScoutFlood(const Battle& b, int ei, int limit, short dist[MAPN][MAPN])
+{
+	for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) dist[z][x] = -1;
+	const Unit& u = b.u[ei];
+	if (!Map::In(u.x, u.z) || limit < 0) return;
+	static int qx[MAPN * MAPN], qz[MAPN * MAPN];
+	int qh = 0, qt = 0;
+	dist[u.z][u.x] = 0;
+	qx[qt] = u.x; qz[qt] = u.z; qt++;
+	static const int dx[4] = { 1, -1, 0, 0 }, dz[4] = { 0, 0, 1, -1 };
+	while (qh < qt) {
+		int x = qx[qh], z = qz[qh]; qh++;
+		int c0 = dist[z][x];
+		if (c0 >= limit) continue;
+		for (int k = 0; k < 4; k++) {
+			int nx = x + dx[k], nz = z + dz[k];
+			if (!Map::In(nx, nz) || dist[nz][nx] >= 0) continue;
+			if (!FootTerrain(b, ei, x, z, nx, nz)) continue;
+			dist[nz][nx] = (short)(c0 + 1);
+			qx[qt] = nx; qz[qt] = nz; qt++;
+		}
+	}
+}
+
+// 低い側から高い側は見えない。山や尾根で視線が切れるときも見えない。
+static bool ScoutSee(const Map& m, int ex, int ez, int px, int pz)
+{
+	if (!Map::In(ex, ez) || !Map::In(px, pz)) return false;
+	if ((int)m.At(ex, ez).h + 2 <= (int)m.At(px, pz).h) return false;
+	return LineOfSight(m, ex, ez, px, pz);
+}
+
+static bool UnitCanScout(const Battle& b, int ei, int pi, int limit, const short dist[MAPN][MAPN])
+{
+	const Unit& e = b.u[ei];
+	const Unit& p = b.u[pi];
+	int se = max(1, UnitSpan(e)), spn = max(1, UnitSpan(p));
+	bool reach = false;
+	for (int z = 0; z < spn && !reach; z++) for (int x = 0; x < spn; x++) {
+		int cx = p.x + x, cz = p.z + z;
+		if (Map::In(cx, cz) && dist[cz][cx] >= 0 && dist[cz][cx] <= limit) reach = true;
+	}
+	if (!reach) return false;
+	for (int ez = 0; ez < se; ez++) for (int ex = 0; ex < se; ex++)
+		for (int pz = 0; pz < spn; pz++) for (int px = 0; px < spn; px++)
+			if (ScoutSee(b.map, e.x + ex, e.z + ez, p.x + px, p.z + pz)) return true;
+	return false;
+}
+
 int WakeNearPlayers(Battle& b, int rad, int immediate)
 {
 	BYTE wake[MAX_GROUPS];
 	memset(wake, 0, sizeof(wake));
 	int newly = 0;
-	for (int p = 0; p < b.nUnits; p++) {
-		const Unit& a = b.u[p];
-		if (!a.alive || a.team != TEAM_PLAYER) continue;
-		for (int e = 0; e < b.nUnits; e++) {
-			const Unit& d = b.u[e];
-			if (!d.alive || d.team != TEAM_ENEMY || d.grp < 0 || d.alert) continue;
-			if (FootDist(a.x, a.z, UnitSpan(a), d.x, d.z, UnitSpan(d)) <= rad) wake[d.grp] = 1;
+	static short dist[MAPN][MAPN];
+	for (int e = 0; e < b.nUnits; e++) {
+		const Unit& u = b.u[e];
+		if (!u.alive || u.team != TEAM_ENEMY || u.alert || u.grp < 0 || u.grp >= MAX_GROUPS) continue;
+		if (wake[u.grp]) continue;
+		ScoutFlood(b, e, rad, dist);
+		for (int p = 0; p < b.nUnits; p++) {
+			if (!b.u[p].alive || b.u[p].team != TEAM_PLAYER) continue;
+			if (!UnitCanScout(b, e, p, rad, dist)) continue;
+			wake[u.grp] = 1;
+			break;
 		}
 	}
 	for (int g = 0; g < MAX_GROUPS; g++) if (wake[g]) MarkGroup(b, g, immediate, newly);
-	// 近い順に2拠点。3つ目は2つ目から8マス以内なら同じ戦いに入れる
-	struct GD { int grp; int dist; } gd[MAX_GROUPS];
-	int ng = 0;
-	BYTE seen[MAX_GROUPS];
-	memset(seen, 0, sizeof(seen));
-	for (int e = 0; e < b.nUnits; e++) {
-		const Unit& u = b.u[e];
-		if (!u.alive || u.team != TEAM_ENEMY || u.grp < 0 || u.grp >= MAX_GROUPS) continue;
-		int best = 9999;
-		for (int p = 0; p < b.nUnits; p++) {
-			if (!b.u[p].alive || b.u[p].team != TEAM_PLAYER) continue;
-			best = min(best, FootDist(u.x, u.z, UnitSpan(u), b.u[p].x, b.u[p].z, UnitSpan(b.u[p])));
-		}
-		if (best >= 9999) continue;
-		if (!seen[u.grp]) { seen[u.grp] = 1; gd[ng].grp = u.grp; gd[ng].dist = best; ng++; }
-		else for (int i = 0; i < ng; i++) if (gd[i].grp == u.grp && best < gd[i].dist) gd[i].dist = best;
-	}
-	for (int i = 1; i < ng; i++) {
-		GD t = gd[i];
-		int j = i;
-		while (j > 0 && gd[j - 1].dist > t.dist) { gd[j] = gd[j - 1]; j--; }
-		gd[j] = t;
-	}
-	int wakeN = min(2, ng);
-	if (ng >= 3 && gd[2].dist <= gd[1].dist + 8) wakeN = 3;
-	for (int i = 0; i < wakeN; i++) MarkGroup(b, gd[i].grp, immediate, newly);
 	return newly;
 }
 
@@ -5902,6 +5995,208 @@ bool SlotCopyFiles(int from, int to)
 	DatArc_FlushSuspend(FALSE);
 	return ok;
 }
+
+static void TacPut32(BYTE* p, unsigned v)
+{
+	p[0] = (BYTE)v; p[1] = (BYTE)(v >> 8); p[2] = (BYTE)(v >> 16); p[3] = (BYTE)(v >> 24);
+}
+static unsigned TacGet32(const BYTE* p)
+{
+	return (unsigned)p[0] | ((unsigned)p[1] << 8) | ((unsigned)p[2] << 16) | ((unsigned)p[3] << 24);
+}
+static const BYTE kTacKey[32] = {
+	0x6a, 0x1c, 0x91, 0x4e, 0xd3, 0x27, 0xb8, 0x55,
+	0x0f, 0xe2, 0x73, 0xac, 0x19, 0x86, 0x44, 0xcf,
+	0x38, 0x5d, 0xa1, 0x62, 0x9b, 0x07, 0xf4, 0x2c,
+	0xc8, 0x51, 0x7e, 0xd0, 0x16, 0x8a, 0x3b, 0xe9
+};
+static bool TacAesGcm(bool enc, const BYTE* in, unsigned inLen, BYTE* out, BYTE nonce[12], BYTE tag[16])
+{
+	if (!in || !out || !inLen) return false;
+	BCRYPT_ALG_HANDLE alg = NULL;
+	BCRYPT_KEY_HANDLE key = NULL;
+	if (BCryptOpenAlgorithmProvider(&alg, BCRYPT_AES_ALGORITHM, NULL, 0) != 0) return false;
+	if (BCryptSetProperty(alg, BCRYPT_CHAINING_MODE, (PUCHAR)BCRYPT_CHAIN_MODE_GCM, sizeof(BCRYPT_CHAIN_MODE_GCM), 0) != 0) {
+		BCryptCloseAlgorithmProvider(alg, 0);
+		return false;
+	}
+	NTSTATUS st = BCryptGenerateSymmetricKey(alg, &key, NULL, 0, (PUCHAR)kTacKey, 32, 0);
+	if (st != 0) { BCryptCloseAlgorithmProvider(alg, 0); return false; }
+	BCRYPT_AUTHENTICATED_CIPHER_MODE_INFO info;
+	BCRYPT_INIT_AUTH_MODE_INFO(info);
+	info.pbNonce = nonce;
+	info.cbNonce = 12;
+	info.pbTag = tag;
+	info.cbTag = 16;
+	ULONG done = 0;
+	if (enc) st = BCryptEncrypt(key, (PUCHAR)in, inLen, &info, NULL, 0, out, inLen, &done, 0);
+	else st = BCryptDecrypt(key, (PUCHAR)in, inLen, &info, NULL, 0, out, inLen, &done, 0);
+	BCryptDestroyKey(key);
+	BCryptCloseAlgorithmProvider(alg, 0);
+	return st == 0 && done == inLen;
+}
+static BYTE* TacReadLeafBytes(const TCHAR* leaf, unsigned* sz)
+{
+	*sz = 0;
+	if (!leaf || !DatArc_Exists(leaf)) return NULL;
+	CString path = DatArc_Path(leaf);
+	FILE* in = NULL;
+	if (_tfopen_s(&in, path, _T("rb")) != 0 || !in) return NULL;
+	fseek(in, 0, SEEK_END);
+	long n = ftell(in);
+	fseek(in, 0, SEEK_SET);
+	if (n < 0 || n > 16 * 1024 * 1024) { fclose(in); return NULL; }
+	BYTE* b = new BYTE[n ? (size_t)n : 1];
+	bool ok = !n || (fread(b, 1, (size_t)n, in) == (size_t)n);
+	fclose(in);
+	if (!ok) { delete[] b; return NULL; }
+	*sz = (unsigned)n;
+	return b;
+}
+static bool TacWriteLeafBytes(const TCHAR* leaf, const BYTE* b, unsigned n)
+{
+	CString path = DatArc_Path(leaf);
+	FILE* out = NULL;
+	if (_tfopen_s(&out, path, _T("wb")) != 0 || !out) return false;
+	bool ok = !n || (b && fwrite(b, 1, n, out) == n);
+	fclose(out);
+	if (!ok) return false;
+	return DatArc_Commit(leaf) != FALSE;
+}
+bool SlotExportTo(int slot, const wchar_t* path)
+{
+	SlotBoot();
+	if (!path || !path[0] || slot < 0 || slot >= TAC_SLOT_N) return false;
+	BYTE* part[SLF_N] = {};
+	unsigned psz[SLF_N] = {};
+	unsigned plainCap = 8 + TAC_SLOT_NAME * 2;
+	int nfiles = 0;
+	for (int k = 0; k < SLF_N; k++) {
+		TCHAR leaf[96];
+		SlotLeaf(leaf, 96, k, slot);
+		part[k] = TacReadLeafBytes(leaf, &psz[k]);
+		if (!part[k] && DatArc_Exists(leaf)) {
+			for (int i = 0; i < SLF_N; i++) delete[] part[i];
+			return false;
+		}
+		if (part[k]) { plainCap += 8 + psz[k]; nfiles++; }
+	}
+	BYTE* plain = new BYTE[plainCap];
+	unsigned o = 0;
+	TacPut32(plain + o, 0x50434154u); o += 4;
+	TacPut32(plain + o, 1); o += 4;
+	wchar_t nm[TAC_SLOT_NAME];
+	memset(nm, 0, sizeof(nm));
+	if (g_slotName[slot][0]) wcsncpy_s(nm, g_slotName[slot], _TRUNCATE);
+	memcpy(plain + o, nm, sizeof(nm)); o += (unsigned)sizeof(nm);
+	TacPut32(plain + o, (unsigned)nfiles); o += 4;
+	for (int k = 0; k < SLF_N; k++) {
+		if (!part[k]) continue;
+		TacPut32(plain + o, (unsigned)k); o += 4;
+		TacPut32(plain + o, psz[k]); o += 4;
+		if (psz[k]) memcpy(plain + o, part[k], psz[k]);
+		o += psz[k];
+		delete[] part[k];
+		part[k] = NULL;
+	}
+	size_t bound = ZSTD_compressBound(o);
+	BYTE* comp = new BYTE[bound];
+	size_t csz = ZSTD_compress(comp, bound, plain, o, 6);
+	delete[] plain;
+	bool ok = false;
+	if (!ZSTD_isError(csz) && csz > 0 && csz < 64u * 1024u * 1024u) {
+		BYTE* ciph = new BYTE[csz];
+		BYTE nonce[12], tag[16];
+		memset(tag, 0, sizeof(tag));
+		if (BCryptGenRandom(NULL, nonce, 12, BCRYPT_USE_SYSTEM_PREFERRED_RNG) == 0
+			&& TacAesGcm(true, comp, (unsigned)csz, ciph, nonce, tag)) {
+			FILE* fp = NULL;
+			if (_wfopen_s(&fp, path, L"wb") == 0 && fp) {
+				BYTE hdr[36];
+				memcpy(hdr, "OTS1", 4);
+				memcpy(hdr + 4, nonce, 12);
+				memcpy(hdr + 16, tag, 16);
+				TacPut32(hdr + 32, (unsigned)csz);
+				ok = fwrite(hdr, 1, 36, fp) == 36 && fwrite(ciph, 1, csz, fp) == csz;
+				fclose(fp);
+				if (!ok) _wremove(path);
+			}
+		}
+		delete[] ciph;
+	}
+	delete[] comp;
+	return ok;
+}
+bool SlotImportFrom(int slot, const wchar_t* path)
+{
+	SlotBoot();
+	if (!path || !path[0] || slot < 0 || slot >= TAC_SLOT_N) return false;
+	FILE* fp = NULL;
+	if (_wfopen_s(&fp, path, L"rb") != 0 || !fp) return false;
+	fseek(fp, 0, SEEK_END);
+	long fsz = ftell(fp);
+	fseek(fp, 0, SEEK_SET);
+	if (fsz < 36 || fsz > 64 * 1024 * 1024) { fclose(fp); return false; }
+	BYTE* file = new BYTE[(size_t)fsz];
+	bool rd = fread(file, 1, (size_t)fsz, fp) == (size_t)fsz;
+	fclose(fp);
+	if (!rd || memcmp(file, "OTS1", 4) != 0) { delete[] file; return false; }
+	BYTE nonce[12], tag[16];
+	memcpy(nonce, file + 4, 12);
+	memcpy(tag, file + 16, 16);
+	unsigned csz = TacGet32(file + 32);
+	if (csz == 0 || 36u + csz > (unsigned)fsz) { delete[] file; return false; }
+	BYTE* comp = new BYTE[csz];
+	bool dec = TacAesGcm(false, file + 36, csz, comp, nonce, tag);
+	delete[] file;
+	if (!dec) { delete[] comp; return false; }
+	unsigned long long need = ZSTD_getFrameContentSize(comp, csz);
+	if (need < 8 + TAC_SLOT_NAME * 2 || need > 32ull * 1024ull * 1024ull) { delete[] comp; return false; }
+	BYTE* plain = new BYTE[(size_t)need];
+	size_t got = ZSTD_decompress(plain, (size_t)need, comp, csz);
+	delete[] comp;
+	if (ZSTD_isError(got) || got != (size_t)need) { delete[] plain; return false; }
+	if (TacGet32(plain) != 0x50434154u || TacGet32(plain + 4) != 1) { delete[] plain; return false; }
+	wchar_t nm[TAC_SLOT_NAME];
+	memcpy(nm, plain + 8, sizeof(nm));
+	nm[TAC_SLOT_NAME - 1] = 0;
+	unsigned nfiles = TacGet32(plain + 8 + sizeof(nm));
+	unsigned o = 8 + (unsigned)sizeof(nm) + 4;
+	BYTE* part[SLF_N] = {};
+	unsigned psz[SLF_N] = {};
+	bool have[SLF_N] = {};
+	bool bad = nfiles > 8;
+	for (unsigned i = 0; !bad && i < nfiles; i++) {
+		if (o + 8 > got) { bad = true; break; }
+		unsigned kind = TacGet32(plain + o); o += 4;
+		unsigned sz = TacGet32(plain + o); o += 4;
+		if (kind >= SLF_N || o + sz > got || sz > 16u * 1024u * 1024u) { bad = true; break; }
+		delete[] part[kind];
+		part[kind] = new BYTE[sz ? sz : 1];
+		if (sz) memcpy(part[kind], plain + o, sz);
+		psz[kind] = sz;
+		have[kind] = true;
+		o += sz;
+	}
+	delete[] plain;
+	if (bad) {
+		for (int k = 0; k < SLF_N; k++) delete[] part[k];
+		return false;
+	}
+	DatArc_FlushSuspend(TRUE);
+	bool ok = true;
+	for (int k = 0; k < SLF_N; k++) {
+		TCHAR leaf[96];
+		SlotLeaf(leaf, 96, k, slot);
+		if (have[k]) {
+			if (!TacWriteLeafBytes(leaf, part[k], psz[k])) ok = false;
+		} else DatArc_Delete(leaf);
+		delete[] part[k];
+	}
+	DatArc_FlushSuspend(FALSE);
+	if (ok) SlotRename(slot, nm);
+	return ok;
+}
 static int TacPeekClearBytes(FILE* fp, long sz);
 int SlotPeekClear(int slot)
 {
@@ -6265,7 +6560,7 @@ static void CopySaveTail(SaveData& s, int stageCleared, int stageSel, int winX, 
 {
 	s.stageCleared = stageCleared; s.stageSel = stageSel;
 	s.winX = winX; s.winY = winY; s.winW = winW; s.winH = winH;
-	if (quality < 0 || quality > 4) quality = 1;
+	if (quality < 0 || quality > 6) quality = 1;
 	s.camSpeed = camSpeed; s.quality = quality; s.showGrid = showGrid; s.battleAnim = battleAnim;
 	s.uidNext = uidNext; s.winSizeVer = winSizeVer;
 	for (int i = 0; i < 8; i++) s.itemN[i] = itemN[i];

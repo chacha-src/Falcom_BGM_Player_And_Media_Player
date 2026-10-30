@@ -219,10 +219,10 @@ void CSasamiNotePropsDlg::ApplyLang()
 	m_btnVst.SetWindowText(m_isFm
 		? CString(LL14(L"FM音色…", L"FM Voice…", L"Timbre FM…", L"Voce FM…", L"Voz FM…", L"FM 음색…", L"FM音色…", L"صوت FM…", L"Тембр FM…", L"FM-Klang…", L"Voz FM…", L"FM-klank…", L"Głos FM…", L"FM ses…"))
 		: CString(LL14(L"音色/VST…", L"Timbre/VST…", L"Timbre/VST…", L"Timbro/VST…", L"Timbre/VST…", L"음색/VST…", L"音色/VST…", L"طابع/VST…", L"Тембр/VST…", L"Klang/VST…", L"Timbre/VST…", L"Klank/VST…", L"Barwa/VST…", L"Tını/VST…")));
-	m_btnEq.SetWindowText(LL14(L"EQ→CmdRoll", L"EQ→CmdRoll", L"EQ→CmdRoll", L"EQ→CmdRoll", L"EQ→CmdRoll", L"EQ→CmdRoll", L"EQ→CmdRoll", L"EQ→CmdRoll", L"EQ→CmdRoll", L"EQ→CmdRoll", L"EQ→CmdRoll", L"EQ→CmdRoll", L"EQ→CmdRoll", L"EQ→CmdRoll"));
+	m_btnEq.SetWindowText(L"EQを書く");
 	m_btnClose.SetWindowText(LL14(L"閉じる", L"Close", L"Fermer", L"Chiudi", L"Cerrar", L"닫기", L"关闭", L"إغلاق", L"Закрыть", L"Schließen", L"Fechar", L"Sluiten", L"Zamknij", L"Kapat"));
 	m_hint.SetWindowText(LL14(
-		L"音符=MIDI番号 / GT=ゲート% / Vel / 音色はパートのVST。EQはコマンドロールへ書き込み自動ON。",
+		L"音=MIDI番号、長さ=ゲート%。\n音色はパートのVST。EQを書くとコマンドロールが付きます。",
 		L"Note=MIDI# / GT=gate% / Vel / Timbre via part VST. EQ writes to command-roll (auto ON).",
 		L"Note=n°MIDI / GT=gate% / Vel / Timbre via VST. EQ → command-roll (ON auto).",
 		L"Nota=n°MIDI / GT=gate% / Vel / Timbro via VST. EQ → command-roll (ON auto).",
@@ -362,16 +362,19 @@ void CSasamiNotePropsDlg::OnPaint()
 		dc.FillSolidRect(&body, RGB(245, 246, 250));
 #endif
 	}
-	const int pad = 12;
-	int y = cap + 16;
 	dc.SetBkMode(TRANSPARENT);
 	dc.SetTextColor(RGB(40, 40, 55));
 	CFont* old = dc.SelectObject(GetFont());
-	dc.TextOut(pad, y, L"Note");
-	dc.TextOut(pad + 120, y, L"GT%");
-	dc.TextOut(pad + 240, y, L"Vel");
-	y += 36;
-	dc.TextOut(pad, y, L"EQ");
+	auto lab = [&](CWnd& ed, const wchar_t* text) {
+		if (!ed.GetSafeHwnd()) return;
+		CRect er; ed.GetWindowRect(&er); ScreenToClient(&er);
+		CRect lr(er.left - 48, er.top, er.left - 4, er.bottom);
+		dc.DrawText(text, lr, DT_RIGHT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
+	};
+	lab(m_edNote, L"音");
+	lab(m_edGt, L"長さ");
+	lab(m_edVel, L"強さ");
+	lab(m_edEq, L"EQ");
 	dc.SelectObject(old);
 	CCC_CaptionPaint(dc, m_hWnd);
 }

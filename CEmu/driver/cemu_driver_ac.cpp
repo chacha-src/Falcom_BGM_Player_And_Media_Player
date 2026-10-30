@@ -7260,6 +7260,19 @@ void CDriverAc::RunUntil(uint64_t endCycle)
 	}
 }
 
+/* アーケードの YM 系だけ他チップに揃えて約2倍。PCM/AY/SN はそのまま。 */
+static void AcBoostYamaha(CChip* chip, int16_t* stereo, int frames)
+{
+	if (!chip || !stereo || frames <= 0 || !chip->YamahaFm()) return;
+	const int n = frames * 2;
+	for (int i = 0; i < n; i++) {
+		int s = (int)stereo[i] * 2;
+		if (s > 32767) s = 32767;
+		else if (s < -32768) s = -32768;
+		stereo[i] = (int16_t)s;
+	}
+}
+
 /* Mega System 1: 音源 68000 の唯一の時基は YM2151。タイマ IRQ（とコマンドラッチ）を繰り返しサンプルできるようスライス — Musashi は IACK でラッチレベルを消し自分では再アサートしない。 */
 void CDriverAc::Ms1RunCycles(int cycles)
 {
@@ -7323,6 +7336,7 @@ int CDriverAc::Ms1Render(int16_t* stereo, int frames)
 		Ms1RunCycles(cycles);
 		int16_t* p = stereo + (size_t)done * 2;
 		chip->Render(p, n);
+		AcBoostYamaha(chip, p, n);
 		if (gx) {
 			/* K054539×2: 各チップをフルスケール近く。2 本目は MixAdd で約 3/4 にし、tkmmpzdm が 1 本目を埋めずに聞こえるようにする。 */
 			if (hw_->PcmChip()) hw_->PcmChip()->MixAdd(p, n, 192);
@@ -7390,6 +7404,7 @@ int CDriverAc::M92Render(int16_t* stereo, int frames)
 		{
 			int16_t* p = stereo + (size_t)done * 2;
 			chip->Render(p, n);
+			AcBoostYamaha(chip, p, n);
 			if (hw_->PcmChip()) hw_->PcmChip()->MixAdd(p, n, 256);
 		}
 		done += n;
@@ -7685,10 +7700,12 @@ int CDriverAc::DecoRender(int16_t* stereo, int frames)
 		{
 			int16_t* p = stereo + (size_t)done * 2;
 			chip->Render(p, n);
+			AcBoostYamaha(chip, p, n);
 			if (hw_->Chip2()) {
 				int16_t* mix = Scratch(n);
 				if (mix) {
 					hw_->Chip2()->Render(mix, n);
+					AcBoostYamaha(hw_->Chip2(), mix, n);
 					for (int i = 0; i < n * 2; i++) {
 						int s = (int)p[i] + ((int)mix[i] * 192) / 256;
 						if (s > 32767) s = 32767;
@@ -7840,6 +7857,7 @@ int CDriverAc::NamcoM6809Render(int16_t* stereo, int frames)
 		{
 			int16_t* p = stereo + (size_t)done * 2;
 			chip->Render(p, n);
+			AcBoostYamaha(chip, p, n);
 			if (hw_->PcmChip())
 				hw_->PcmChip()->MixAdd(p, n, 256);
 		}
@@ -7914,10 +7932,12 @@ int CDriverAc::M62Render(int16_t* stereo, int frames)
 		{
 			int16_t* p = stereo + (size_t)done * 2;
 			chip->Render(p, n);
+			AcBoostYamaha(chip, p, n);
 			if (hw_->Chip2()) {
 				int16_t* mix = Scratch(n);
 				if (mix) {
 					hw_->Chip2()->Render(mix, n);
+					AcBoostYamaha(hw_->Chip2(), mix, n);
 					for (int i = 0; i < n * 2; i++) {
 						int s = (int)p[i] + (int)mix[i];
 						if (s > 32767) s = 32767;
@@ -7998,6 +8018,7 @@ int CDriverAc::Sega68Render(int16_t* stereo, int frames)
 				/* Model 1 は YM3438 を MultiPCM×2 の隣で 0.30。Model 2A/3 では SCSP が基板全体なのでフルのまま。 */
 				const int g = hw_->SegaM1Audio() ? 77 : 256;
 				chip->Render(mix, n);
+				AcBoostYamaha(chip, mix, n);
 				for (int i = 0; i < n * 2; i++) {
 					int s = (int)p[i] + ((int)mix[i] * g) / 256;
 					if (s > 32767) s = 32767;
@@ -8055,6 +8076,7 @@ int CDriverAc::H8Render(int16_t* stereo, int frames)
 		{
 			int16_t* p = stereo + (size_t)done * 2;
 			chip->Render(p, n);
+			AcBoostYamaha(chip, p, n);
 		}
 		done += n;
 	}
@@ -8106,6 +8128,7 @@ int CDriverAc::M37702Render(int16_t* stereo, int frames)
 		{
 			int16_t* p = stereo + (size_t)done * 2;
 			chip->Render(p, n);
+			AcBoostYamaha(chip, p, n);
 		}
 		done += n;
 	}
@@ -8502,6 +8525,7 @@ int CDriverAc::Sys86Render(int16_t* stereo, int frames)
 					}
 				}
 				chip->Render(p, n);
+				AcBoostYamaha(chip, p, n);
 				/* MAME namcos86: YM2151 は右だけスピーカーへ。右が無音なら左を使う
 				   （roishtar は RL=Left のまま KeyOn → 旧コピーはピーク 0）。
 				   両方あるときは右だけ（実機）。L+R 加算は Sys86 既知曲をクリップした。 */
@@ -8548,10 +8572,12 @@ int CDriverAc::Render(int16_t* stereo, int frames)
 	if (!hasCpu_) {
 		/* この基板に音源 CPU コアは無い — 組んだチップを描画（他が駆動しなければ無音） */
 		chip->Render(stereo, frames);
+		AcBoostYamaha(chip, stereo, frames);
 		if (hw_->Chip2()) {
 			int16_t* mix2 = Scratch(frames);
 			if (mix2) {
 				hw_->Chip2()->Render(mix2, frames);
+				AcBoostYamaha(hw_->Chip2(), mix2, frames);
 				for (int i = 0; i < frames * 2; i++) {
 					int s = (int)stereo[i] + (int)mix2[i];
 					if (s > 32767) s = 32767;
@@ -8762,6 +8788,8 @@ int CDriverAc::Render(int16_t* stereo, int frames)
 			chip->MixAdd(stereo + i * 2, 1, 320);
 		} else {
 			chip->Render(stereo + i * 2, 1);
+			if (hw_->board_ != CEMU_AC_BOARD_CPS1)
+				AcBoostYamaha(chip, stereo + i * 2, 1);
 		}
 		/* フレーム毎なので下の無音ウォッチドッグが PCM のみ基板も見る。MixAdd は全て素のフレームループなので等価。 */
 		if (pcm) {
@@ -8806,6 +8834,8 @@ int CDriverAc::Render(int16_t* stereo, int frames)
 			heard_ = 1;
 	}
 
+	if (mix2) AcBoostYamaha(hw_->Chip2(), mix2, frames);
+	if (mix3) AcBoostYamaha(hw_->Chip3(), mix3, frames);
 	if (mix2 && hw_->board_ == CEMU_AC_BOARD_GNG) {
 		for (int i = 0; i < frames * 2; i++) {
 			/* YM2203×2 — 平均してハードクリップを避ける */

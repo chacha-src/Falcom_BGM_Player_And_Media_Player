@@ -16,5 +16,7 @@ int ScVstShowPartMenu(CWnd* owner, int part1to32, CPoint screenPt, ScMidiVstBind
 int ScVstAssignToneForPart(CWnd* owner, int part1to32, ScMidiVstBind* bind, int isDrum = -1);
 /* Instrument picker → load into part (used by tone map VST3… button). */
 int ScVstPickLoadForPart(CWnd* owner, int part1to32, ScMidiVstBind* bind);
+/* Unload this part's VST3 (or other dedicated plug) and load a VST2. */
+int ScVstReturnPartToVst2(CWnd* owner, int part1to32, ScMidiVstBind* bind);
 /* 1 = VST2 multi-timbre — mid-score prog/bank OK. VST3 / dedicated → tick 0 only. */
 int ScMidiPartAllowMidScoreTone(const ScMidiVstBind* bind, int ch0);

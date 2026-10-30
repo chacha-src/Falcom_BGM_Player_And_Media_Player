@@ -158,6 +158,8 @@ private:
 	void SwitchToSlot(int to);
 	void DeletePickedSlot();
 	void CopyPickedSlot();
+	void RunSlotFile(int job);
+	void ImportConfirmed();
 	void DrawShop();
 	float DrawSoundOpts(float x, float y, float w, float k);
 	void ApplyAudio();
@@ -235,12 +237,13 @@ private:
 	void DrawTurnOrder();
 	void DrawUnitPanel(const Unit& u, float x, float y, float w, BOOL big);
 	void DrawForecast();
+	void PreviewBattleExp(long long& opt, long long& pes, int& showLv, int& nTg, BOOL& combat) const;
 	void DrawMinimap(float x, float y, float s);
 	void DrawCommandMenu();
 	void DrawFormGuide(int skill, int tx, int tz, float avoidX, float avoidY, float avoidW, float avoidH);
 	void UseConsumable(int good, int target);
 	void DrawLevelUp();
-	void DrawBattleStatus();
+	void DrawBattleStatus(BOOL edit);
 	void DrawShopFit();
 	void DrawShopAsk();
 	void DrawShopArm();
@@ -352,8 +355,9 @@ private:
 
 	// カメラ
 	V3 m_camTarget, m_camGoal;
-	// 開戦前のマップ確認。16x16 マスの区画を蛇行で 0.5 秒ずつ見て、自軍の側で終わる。
-	enum { SURVEY_BLK = 16, SURVEY_MAX = (MAPN / SURVEY_BLK) * (MAPN / SURVEY_BLK) };
+	// 開戦前。遠い敵拠点から自軍まで、引いたカメラで一息に寄せる。
+	enum { SURVEY_MAX = 4 };
+	static constexpr float kIntroSweep = 2.6f;
 	V3 m_surveyPt[SURVEY_MAX];
 	int m_surveyN;
 	float m_camYaw, m_camYawGoal, m_camPitch, m_camDist, m_camDistGoal;
@@ -399,11 +403,14 @@ private:
 	int m_shopWho;
 	int m_partyBack;
 	int m_baseOpt;
-	int m_slotUi;                         // 0=閉 1=一覧 2=削除1 3=削除2 4=コピー先 5=コピー確認
+	int m_slotUi;                         // 0=閉 1=一覧 2=削除1 3=削除2 4=コピー先 5=コピー確認 6=読込確認 7=書出元 8=読込先
 	int m_slotPick;
 	int m_slotDest;
 	int m_slotClear[TAC_SLOT_N];
 	wchar_t m_slotEdit[TAC_SLOT_NAME];
+	int m_slotJob;
+	int m_slotBusy;
+	wchar_t m_impPath[MAX_PATH];
 	int m_createFromParty;
 	int m_evFromParty;
 	int m_evJump;

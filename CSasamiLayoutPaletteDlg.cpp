@@ -298,8 +298,8 @@ void CSasamiLayoutPaletteDlg::DrawKeyGroups(CDC& dc, const CRect& area) const
 		OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Meiryo UI");
 	CFont* of = dc.SelectObject(&f);
 	dc.SetTextColor(RGB(180, 190, 210));
-	CRect tl = m_keyMajorRc; tl.bottom = tl.top + 16; dc.DrawText(L"Major", tl, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-	CRect tr = m_keyMinorRc; tr.bottom = tr.top + 16; dc.DrawText(L"Minor", tr, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+	CRect tl = m_keyMajorRc; tl.bottom = tl.top + 18; dc.DrawText(L"長調", tl, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+	CRect tr = m_keyMinorRc; tr.bottom = tr.top + 18; dc.DrawText(L"短調", tr, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
 	dc.SelectObject(of);
 }
 

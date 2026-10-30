@@ -12,7 +12,7 @@ cbuffer Frame : register(b0)
 	float4 Screen;   // w,h,1/w,1/h
 	float4 SkyAmb;   // rgb=空の環境光 w=強さ
 	float4 GndAmb;   // rgb=地面の環境光 w=トゥーン段階の硬さ
-	float4 Q;        // x=段(0軽 1標準 2高 3超綺麗 4超軽量) y=テッセ係数 z=変位 w=被写界
+	float4 Q;        // x=段(0軽 1標準 2高 3超綺麗 4超軽量 5最高 6限界突破) y=テッセ係数 z=変位 w=被写界
 };
 cbuffer Obj : register(b1)
 {
@@ -123,17 +123,27 @@ float ShadowAt(float3 w, float3 n)
 		float2(0.089842, 0.323164), float2(-0.461230, 0.218612), float2(0.248110, 0.553812),
 		float2(-0.118392, -0.210418)
 	};
-	// 軽量と標準は従来の12タップ。高画質は同じ数で半径を絞る。超綺麗は16。超軽量は1。
+	// 軽量と標準は12。高は半径を絞る。超綺麗は16。最高は24、限界突破は32。超軽量は1。
 	int taps = 12;
 	float rad = 2.2;
-	if (Q.x > 3.5) { taps = 1; rad = 0; }
+	if (Q.x > 3.5 && Q.x < 4.5) { taps = 1; rad = 0; }
+	else if (Q.x > 5.5) { taps = 16; rad = 0.72; }
+	else if (Q.x > 4.5) { taps = 16; rad = 0.9; }
 	else if (Q.x > 2.5) { taps = 16; rad = 1.05; }
 	else if (Q.x > 1.5) { taps = 12; rad = 1.5; }
 	float t = Fog.w * rad;
 	float s = 0;
+	int ntap = taps;
 	[loop] for (int i = 0; i < taps; i++)
 		s += ShadowMap.SampleCmpLevelZero(SC, uv + k[i] * t, z);
-	s /= taps;
+	if (Q.x > 4.5) {
+		float t2 = t * (Q.x > 5.5 ? 2.35 : 1.75);
+		int extra = (Q.x > 5.5) ? 16 : 8;
+		[loop] for (int j = 0; j < extra; j++)
+			s += ShadowMap.SampleCmpLevelZero(SC, uv + k[j] * t2, z);
+		ntap += extra;
+	}
+	s /= ntap;
 	return saturate(s);
 }
 
@@ -150,6 +160,54 @@ float SkinMask(float3 c)
 	float sat = (mx - mn) / max(mx, 1e-3);
 	float warm = step(c.b, c.g) * step(c.g, c.r);
 	return warm * smoothstep(0.5, 0.62, mx) * (1. - smoothstep(0.38, 0.55, sat)) * smoothstep(0.12, 0.2, sat);
+}
+
+// 標準で薄く、限界突破まで段々。超軽量と軽量は無し。テッセレーションは使わない。
+float DewAmt()
+{
+	if (Q.x > 3.5 && Q.x < 4.5) return 0;
+	if (Q.x < 0.5) return 0;
+	if (Q.x < 1.5) return 0.22;
+	if (Q.x < 2.5) return 0.42;
+	if (Q.x < 3.5) return 0.64;
+	if (Q.x < 5.5) return 0.84;
+	return 1;
+}
+
+float3 DewShade(float3 col, float3 albedo, float3 n, float3 v, float sh, float flesh, float hair)
+{
+	float dew = DewAmt();
+	if (dew < 0.001) return col;
+	float mx = max(albedo.r, max(albedo.g, albedo.b));
+	float mn = min(albedo.r, min(albedo.g, albedo.b));
+	float sat = (mx - mn) / max(mx, 1e-3);
+	float gray = 1. - smoothstep(0.04, 0.16, sat);
+	float hide = smoothstep(0.07, 0.22, mx) * (1. - smoothstep(0.9, 0.98, mx)) * (1. - gray * 0.82);
+	float body = max(flesh, hide * 0.7);
+	float coat = max(body, hair);
+	if (coat < 0.02) return col;
+	float3 l = normalize(LightDir.xyz);
+	float3 h = normalize(l + v);
+	float ndl = saturate(dot(n, l));
+	float ndv = saturate(dot(n, v));
+	float ndh = saturate(dot(n, h));
+	float wrap = saturate(dot(n, l) * 0.5 + 0.5);
+	float3 sub = lerp(albedo, albedo * float3(1.18, 0.52, 0.4), flesh);
+	col += sub * wrap * dew * coat * 0.18 * sh;
+	if (hair > 0.5) {
+		float3 up = abs(n.y) > 0.92 ? float3(1, 0, 0) : float3(0, 1, 0);
+		float3 tng = normalize(cross(up, n));
+		float ah = dot(tng, h);
+		float spec = pow(saturate(sqrt(saturate(1. - ah * ah)) * ndh), lerp(28., 96., dew));
+		col += float3(1, 0.98, 0.94) * spec * ndl * dew * 0.62;
+		col += albedo * pow(1. - ndv, 3.) * dew * 0.28;
+	} else {
+		float spec = pow(ndh, lerp(16., 72., dew)) * ndl;
+		float wet = pow(1. - ndv, lerp(3.6, 2.1, dew));
+		col += float3(1, 0.97, 0.92) * spec * dew * coat * 0.24;
+		col += lerp(albedo, float3(1, 0.95, 0.9), 0.3) * wet * dew * coat * 0.2;
+	}
+	return col;
 }
 
 // ボロノイの最近点と、次点との差（溝の幅）。
@@ -227,7 +285,7 @@ float3 LitTiny(float3 albedo, float3 n, float sh)
 
 float3 Lit(float3 albedo, float3 n, float3 v, float rough, float3 f0, float sh, float skin)
 {
-	if (Q.x > 3.5) return LitTiny(albedo, n, sh);
+	if (Q.x > 3.5 && Q.x < 4.5) return LitTiny(albedo, n, sh);
 	float3 c = LitCore(albedo, n, v, rough, f0, sh, skin);
 	if (Q.x < 1.5) {
 		// 標準だけ、法線の折れに薄い接触陰。軽量は従来のまま。
@@ -248,6 +306,12 @@ float3 Lit(float3 albedo, float3 n, float3 v, float rough, float3 f0, float sh, 
 		float wrap = saturate(dot(n, l) * 0.5 + 0.5);
 		c += albedo * SkyAmb.rgb * wrap * sh * 0.06;
 		c += albedo * pow(saturate(dot(n, h)), 6.) * ndl * sh * 0.045;
+	}
+	if (Q.x > 4.5) {
+		float pwr = (Q.x > 5.5) ? 88. : 64.;
+		float gn = (Q.x > 5.5) ? 0.14 : 0.09;
+		c += float3(1, 0.98, 0.92) * pow(ndh, pwr) * ndl * sh * gn;
+		c += albedo * pow(saturate(1. - saturate(dot(n, v))), 4.) * (Q.x > 5.5 ? 0.06 : 0.035);
 	}
 	return c;
 }
@@ -275,15 +339,25 @@ float3 DetailN(float3 n, float3 w)
 	float s = 0;
 	if (Q.x > 1.5 && Q.x < 2.5) s = 0.32;
 	else if (Q.x > 2.5 && Q.x < 3.5) s = 0.85;
+	else if (Q.x > 4.5 && Q.x < 5.5) s = 1.15;
+	else if (Q.x > 5.5) s = 1.5;
 	else return n;
-	float e = 0.14;
-	float2 p = w.xz * (s > 0.5 ? 5.2 : 3.2);
+	float e = (Q.x > 5.5) ? 0.08 : 0.14;
+	float2 p = w.xz * (s > 1.2 ? 7.4 : (s > 0.5 ? 5.2 : 3.2));
 	float h0 = fbm2(p);
 	float hx = fbm2(p + float2(e, 0));
 	float hz = fbm2(p + float2(0, e));
 	float3 t = normalize(cross(abs(n.y) < 0.92 ? float3(0, 1, 0) : float3(1, 0, 0), n));
 	float3 b = cross(n, t);
-	return normalize(n + (t * (h0 - hx) + b * (h0 - hz)) * s);
+	float3 nn = n + (t * (h0 - hx) + b * (h0 - hz)) * s;
+	if (Q.x > 4.5) {
+		float2 q = p * (Q.x > 5.5 ? 2.7 : 1.8);
+		float g0 = fbm2(q);
+		float gx = fbm2(q + float2(e, 0));
+		float gz = fbm2(q + float2(0, e));
+		nn += (t * (g0 - gx) + b * (g0 - gz)) * (Q.x > 5.5 ? 0.55 : 0.32);
+	}
+	return normalize(nn);
 }
 
 GOut PSM(PSIn i)
@@ -307,12 +381,16 @@ GOut PSM(PSIn i)
 	float3 col = Lit(albedo, n, v, rough, f0, sh, skin * 0.85);
 	float rim = pow(1. - saturate(dot(n, v)), 3.) * Extra.z;
 	float rimK = 1;
-	if (Q.x > 3.5) rimK = 0;
+	if (Q.x > 3.5 && Q.x < 4.5) rimK = 0;
 	else if (Q.x < 0.5) rimK = 1;
+	else if (Q.x > 5.5) rimK = 1.7;
+	else if (Q.x > 4.5) rimK = 1.5;
 	else if (Q.x > 2.5) rimK = 1.35;
 	else if (Q.x > 1.5) rimK = 1.12;
 	col += rim * rimK * float3(1, 0.95, 0.85) * (0.35 + 0.65 * sh);
 	col += emis;
+	float hair = (Params.y > 6.5 && Params.y < 7.5) ? 1 : 0;
+	col = DewShade(col, albedo, n, v, sh, skin, hair);
 	col = FogAt(col, i.w);
 	if (Extra.x > 0.001) {
 		float nz = fbm2(i.w.xz * 7. + i.w.y * 5.);
@@ -396,7 +474,9 @@ GOut PSWater(PSIn i)
 	float3 H = normalize(L + v);
 	float sp = pow(saturate(dot(wn, H)), thw > 2.5 && thw < 3.5 ? 140. : 48.) * saturate(dot(wn, L) * 0.85 + 0.15);
 	float specK = 1;
-	if (Q.x > 3.5) specK = 0;
+	if (Q.x > 3.5 && Q.x < 4.5) specK = 0;
+	else if (Q.x > 5.5) specK = 1.85;
+	else if (Q.x > 4.5) specK = 1.6;
 	else if (Q.x > 2.5) specK = 1.4;
 	else if (Q.x > 1.5) specK = 1.15;
 	col += float3(1, 0.97, 0.88) * sp * (thw > 2.5 && thw < 3.5 ? 1.6 : 0.9) * specK;
@@ -441,7 +521,18 @@ GOut PSLava(PSIn i)
 	float3 v = normalize(Eye.xyz - i.w);
 	float t = Eye.w;
 	float3 col = LavaColor(i.w.xz, t, v);
-	if (Q.x < 3.5) {
+	if (Q.x > 4.5) {
+		float2 o = (Q.x > 5.5) ? float2(0.03, 0.014) : float2(0.04, 0.018);
+		col += LavaColor(i.w.xz + o, t, v);
+		col += LavaColor(i.w.xz - o, t, v);
+		col += LavaColor(i.w.xz + float2(-o.y, o.x), t, v);
+		col += LavaColor(i.w.xz + float2(o.y, -o.x), t, v);
+		if (Q.x > 5.5) {
+			col += LavaColor(i.w.xz + o * 2.2, t, v);
+			col += LavaColor(i.w.xz - o * 2.2, t, v);
+			col *= 1. / 7.;
+		} else col *= 0.2;
+	} else if (Q.x < 3.5) {
 		float2 o = float2(0.045, 0.02);
 		col += LavaColor(i.w.xz + o, t, v);
 		col += LavaColor(i.w.xz - o, t, v);
@@ -568,6 +659,14 @@ GOut GroundPS(PSIn i, float theme)
 		float2 g = abs(frac(i.w.xz) - 0.5);
 		float edge = smoothstep(0.475, 0.5, max(g.x, g.y));
 		col *= 1. - edge * (theme > 2.5 && theme < 4.5 ? 0.08 : 0.16);
+	}
+	if (Q.x > 4.5) {
+		float3 L = normalize(LightDir.xyz);
+		float3 H = normalize(L + v);
+		float sp = pow(saturate(dot(nLit, H)), Q.x > 5.5 ? 52. : 30.);
+		col += float3(1, 0.98, 0.92) * sp * saturate(dot(nLit, L)) * (Q.x > 5.5 ? 0.09 : 0.045);
+		float micro = fbm2(i.w.xz * (Q.x > 5.5 ? 14. : 8.));
+		col *= 0.94 + micro * (Q.x > 5.5 ? 0.12 : 0.07);
 	}
 	return Emit(float4(FogAt(col, i.w), 1), i.w);
 }
@@ -867,10 +966,21 @@ float4 PSGrade(QOut i) : SV_Target
 			+ Tex.Sample(SL, i.uv + float2(px.x, -px.y)).rgb + Tex.Sample(SL, i.uv + float2(-px.x, px.y)).rgb) * 0.25;
 		col += (col - nb) * k;
 	}
-	if (Q.x > 2.5 && Q.x < 3.5) {
-		float2 ca = (i.uv - 0.5) * px * 2.2;
+	if ((Q.x > 2.5 && Q.x < 3.5) || Q.x > 4.5) {
+		float spread = (Q.x > 5.5) ? 3.4 : ((Q.x > 4.5) ? 2.8 : 2.2);
+		float mixk = (Q.x > 5.5) ? 0.34 : ((Q.x > 4.5) ? 0.28 : 0.22);
+		float2 ca = (i.uv - 0.5) * px * spread;
 		float3 fr = float3(Tex.Sample(SL, i.uv + ca).r, col.g, Tex.Sample(SL, i.uv - ca).b);
-		col = lerp(col, fr, 0.22);
+		col = lerp(col, fr, mixk);
+	}
+	if (Q.x > 4.5) {
+		float rad = (Q.x > 5.5) ? 1.7 : 1.2;
+		float3 nb = 0;
+		[unroll] for (int s = 0; s < 8; s++) {
+			float a = s * 0.785398;
+			nb += Tex.Sample(SL, i.uv + float2(cos(a), sin(a)) * px * rad).rgb;
+		}
+		col += (col - nb * 0.125) * (Q.x > 5.5 ? 0.22 : 0.14);
 	}
 	return float4(saturate(col), 1);
 }

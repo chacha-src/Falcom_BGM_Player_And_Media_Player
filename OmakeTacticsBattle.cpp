@@ -597,33 +597,36 @@ void Game::StartBattle(int stage)
 	m_camPitch = .92f;
 	m_zoomHold = FALSE;
 	m_wheelSign = 0;
-	m_camDist = 34.f;
-	m_camDistGoal = 26.f;
-	m_zoomDist = 34.f;
+	m_camDist = 42.f;
+	m_camDistGoal = 42.f;
+	m_zoomDist = 18.f;
 	m_camGoal = v3(px + .5f, m_b.map.StandY((int)px, (int)pz), pz + .5f);
-	// 開戦前に戦場を区画ごとに見て回る。敵の側から蛇行し、自軍の区画で終わってから手番に入る。
-	// 区画の行は偶数なので、自軍に近い列から始めると最後も自軍の列に戻る。
+	// 自軍から一番遠い敵拠点を起点に、引いたまま自軍まで滑らせる。
 	{
-		const int nb = MAPN / SURVEY_BLK;
-		const BOOL nearX0 = px < MAPN * .5f, nearZ0 = pz < MAPN * .5f;
 		m_surveyN = 0;
-		for (int r = 0; r < nb; r++) {
-			const int bz = nearZ0 ? nb - 1 - r : r;
-			for (int c = 0; c < nb; c++) {
-				const int step = (r & 1) ? nb - 1 - c : c;
-				const int bx = nearX0 ? step : nb - 1 - step;
-				float sx = 0, sy = 0, sz = 0;
-				int n = 0;
-				for (int z = bz * SURVEY_BLK; z < (bz + 1) * SURVEY_BLK; z++)
-					for (int x = bx * SURVEY_BLK; x < (bx + 1) * SURVEY_BLK; x++) {
-						if (m_b.map.At(x, z).t == T_VOID) continue;
-						sx += x + .5f; sy += m_b.map.StandY(x, z); sz += z + .5f; n++;
-					}
-				if (n > 0 && m_surveyN < SURVEY_MAX) m_surveyPt[m_surveyN++] = v3(sx / n, sy / n, sz / n);
+		float best = 0.f;
+		int bx = (int)px, bz = (int)pz;
+		for (int g = 0; g < m_b.map.nGrp; g++) {
+			float dx = m_b.map.grp[g].ax + .5f - px, dz = m_b.map.grp[g].az + .5f - pz;
+			float d = dx * dx + dz * dz;
+			if (d > best) { best = d; bx = m_b.map.grp[g].ax; bz = m_b.map.grp[g].az; }
+		}
+		if (best < 16.f) {
+			for (int i = 0; i < m_b.nUnits; i++) {
+				const Unit& eu = m_b.u[i];
+				if (!eu.alive || eu.team != TEAM_ENEMY) continue;
+				float dx = eu.px - px, dz = eu.pz - pz;
+				float d = dx * dx + dz * dz;
+				if (d > best) { best = d; bx = eu.x; bz = eu.z; }
 			}
 		}
+		if (best >= 16.f && Map::In(bx, bz)) {
+			m_surveyPt[0] = v3(bx + .5f, m_b.map.StandY(bx, bz), bz + .5f);
+			m_surveyPt[1] = m_camGoal;
+			m_surveyN = 2;
+		}
 	}
-	m_camTarget = m_surveyN > 0 ? m_surveyPt[0] : v3(MAPN * .5f, 2.f, MAPN * .5f);
+	m_camTarget = m_surveyN > 0 ? m_surveyPt[0] : m_camGoal;
 	m_camPan = v3(0, 0, 0);
 	m_parts.clear();
 	m_popups.clear();
@@ -772,13 +775,13 @@ void Game::BeginTurn()
 	swprintf_s(b, L"%s  %s", TT(u.team == TEAM_PLAYER ? TX_BT_TURN_PLAYER : TX_BT_TURN_ENEMY), nm);
 	AddBanner(b, NULL, u.team == TEAM_PLAYER ? RGBA8(140, 200, 255) : RGBA8(255, 140, 130), 2, 1.3f);
 	m_lastTeam = u.team;
+	for (int i = 0; i < m_b.nUnits; i++)
+		if (m_b.u[i].alive && m_b.u[i].team == TEAM_ENEMY && m_b.u[i].alert == 2)
+			m_b.u[i].alert = 1;
 	if (u.team == TEAM_PLAYER) {
-		for (int i = 0; i < m_b.nUnits; i++)
-			if (m_b.u[i].alive && m_b.u[i].team == TEAM_ENEMY && m_b.u[i].alert == 2)
-				m_b.u[i].alert = 1;
+		int warned = WakeNearPlayers(m_b, 16);
+		if (warned) AddBanner(TT(TX_BT_REIN), NULL, RGBA8(255, 210, 120), 1, 1.4f);
 	}
-	int warned = WakeNearPlayers(m_b, 9);
-	if (warned) AddBanner(TT(TX_BT_REIN), NULL, RGBA8(255, 210, 120), 1, 1.4f);
 	TacSfx(u.team == TEAM_PLAYER ? TS_TURN_P : TS_TURN_E);
 	if (u.sleep > 0 || u.stun > 0) {
 		AddPopup(hp, TT(u.sleep > 0 ? TX_BT_ASLEEP : TX_BT_STUN), u.sleep > 0 ? RGBA8(170, 210, 255) : RGBA8(255, 220, 90), 1);
@@ -1092,11 +1095,11 @@ void Game::BuildOverlayQuads()
 	}
 	if (m_cur < 0) return;
 	const Unit& u = m_b.u[m_cur];
-	BOOL showMove = m_phase == PH_P_MOVE || m_phase == PH_E_SHOW;
+	BOOL showMove = m_phase == PH_P_MOVE || m_phase == PH_E_SHOW || m_phase == PH_E_MOVE;
 	DWORD moveCol = u.team == TEAM_PLAYER ? RGBA8(70, 150, 255, 150) : RGBA8(255, 80, 150, 135);
 	for (int z = 0; z < MAPN; z++) for (int x = 0; x < MAPN; x++) {
 		if (showMove && m_ovMove[z][x]) quad(x, z, moveCol, .035f);
-		else if (m_ovAtk[z][x]) {
+		else if (!showMove && m_ovAtk[z][x]) {
 			DWORD c;
 			switch (m_ovAtk[z][x]) {
 			case 2: c = RGBA8(255, 90, 60, 70); break;
@@ -1398,7 +1401,7 @@ void Game::BattleConfirmCursor()
 			V3 p = UnitGroundPos(d);
 			d.px = p.x; d.py = p.y; d.pz = p.z;
 			AddPopup(p + v3(0, m_act[t].height, 0), TT(TX_BT_SHOVE), RGBA8(255, 220, 140), 1);
-			WakeNearPlayers(m_b, 9);
+			if (WakeNearPlayers(m_b, 16)) AddBanner(TT(TX_BT_REIN), NULL, RGBA8(255, 210, 120), 1, 1.4f);
 			if (d.hp >= hp0) {
 				TacSfx(d.team == TEAM_PLAYER ? TS_HURT : TS_HIT);
 				FinishUnitTurn(1);
@@ -1483,7 +1486,7 @@ void Game::ApplyTerrace(int tx, int tz)
 void Game::BattleClick(int x, int y)
 {
 	if (m_statOpen) return;
-	if (m_phase == PH_INTRO) { m_phaseT = max(m_phaseT, m_surveyN * .5f); return; }
+	if (m_phase == PH_INTRO) { m_phaseT = max(m_phaseT, m_surveyN >= 2 ? kIntroSweep : 0.35f); return; }
 	if (m_phase != PH_P_MOVE && m_phase != PH_P_TARGET && m_phase != PH_P_SKILLTARGET && m_phase != PH_P_SHOVE) return;
 	if (y > m_h - U(150) && x < U(720)) return;
 	if (x > m_w - U(190)) return;
@@ -1497,17 +1500,21 @@ void Game::BattleClick(int x, int y)
 
 void Game::BattleCancel()
 {
+	if (m_statOpen) {
+		if (m_statEq) m_statEq = 0;
+		else { m_statOpen = 0; m_statEq = 0; }
+		TacSfx(TS_CANCEL);
+		return;
+	}
 	int sounded = 0;
 	switch (m_phase) {
 	case PH_P_MOVE:
-		if (m_statOpen) { m_statOpen = 0; m_statEq = 0; sounded = 1; break; }
 		if (m_cur >= 0 && (m_cx != m_b.u[m_cur].x || m_cz != m_b.u[m_cur].z)) {
 			m_cx = m_b.u[m_cur].x; m_cz = m_b.u[m_cur].z; m_camPan = v3(0, 0, 0); UpdateHover();
 		} else { m_phaseBeforeMenu = m_phase; m_phase = PH_MENU; m_menuConfirm = 0; m_navMode = TRUE; m_focusId = ID_BT_M_RESUME; }
 		sounded = 1;
 		break;
 	case PH_P_CMD:
-		if (m_statOpen) { m_statOpen = 0; m_statEq = 0; sounded = 1; break; }
 		if (m_moved && m_cur >= 0) {
 			Unit& u = m_b.u[m_cur];
 			u.x = m_curX0; u.z = m_curZ0; u.face = m_curFace0;
@@ -1690,7 +1697,8 @@ void Game::UpdateMove(float dt)
 				return;
 			}
 		}
-		WakeNearPlayers(m_b, 9);
+		if (u.team == TEAM_PLAYER && WakeNearPlayers(m_b, 16))
+			AddBanner(TT(TX_BT_REIN), NULL, RGBA8(255, 210, 120), 1, 1.4f);
 		m_act[ui].animSpeed = 1.f;
 		m_act[ui].flap = 0.f;
 		if (!PoseKeep(m_act[ui], u, m_dieT[ui])) ActorPlay(m_act[ui], CL_IDLE, 1, .15f);
@@ -1877,7 +1885,19 @@ void Game::BeginAttack(int ui, int target, int skill, int cx, int cz)
 	}
 	m_phase = PH_ACTION;
 	m_phaseT = 0;
-	if (target >= 0 && target < m_b.nUnits) WakeGroup(m_b, m_b.u[target].grp);
+	if (target >= 0 && target < m_b.nUnits && m_b.u[ui].team == TEAM_PLAYER && m_b.u[target].team == TEAM_ENEMY) {
+		int g = m_b.u[target].grp;
+		int fresh = 0;
+		if (g >= 0) {
+			for (int i = 0; i < m_b.nUnits; i++)
+				if (m_b.u[i].alive && m_b.u[i].grp == g && m_b.u[i].alert == 0) fresh = 1;
+			WakeGroup(m_b, g);
+		} else if (m_b.u[target].alive && m_b.u[target].alert == 0) {
+			m_b.u[target].alert = 1;
+			fresh = 1;
+		}
+		if (fresh) AddBanner(TT(TX_BT_REIN), NULL, RGBA8(255, 210, 120), 1, 1.4f);
+	}
 	m_proj.active = 0;
 	m_ovDirty = TRUE;
 	memset(m_ovMove, 0, sizeof(m_ovMove));
@@ -2888,20 +2908,10 @@ void Game::UpdateCamera(float dt)
 			focus = Lerp(focus, v3(d.px, d.py, d.pz), .5f);
 		}
 	}
-	if (m_phase == PH_INTRO) {
-		// 各区画は 0.5 秒。前半で次の区画へ寄せ、残りは止めて見せる。最後に自軍へ戻って寄る。
-		const float tEnd = m_surveyN * .5f;
-		if (m_phaseT < tEnd) {
-			int i = (int)(m_phaseT / .5f);
-			if (i > m_surveyN - 1) i = m_surveyN - 1;
-			float f = Smooth01(Clampf((m_phaseT - i * .5f) / .22f, 0, 1));
-			focus = Lerp(m_surveyPt[i > 0 ? i - 1 : 0], m_surveyPt[i], f);
-			m_camDistGoal = 26.f;
-		} else {
-			V3 from = m_surveyN > 0 ? m_surveyPt[m_surveyN - 1] : v3(MAPN * .5f, 2.f, MAPN * .5f);
-			focus = Lerp(from, m_camGoal, Smooth01((m_phaseT - tEnd) / 1.2f));
-			m_camDistGoal = 18.f;
-		}
+	if (m_phase == PH_INTRO && m_surveyN >= 2) {
+		float f = Smooth01(Clampf(m_phaseT / kIntroSweep, 0, 1));
+		focus = Lerp(m_surveyPt[0], m_surveyPt[1], f);
+		m_camDistGoal = Lerpf(42.f, 18.f, f);
 	}
 	BOOL playerSel = m_phase == PH_P_MOVE || m_phase == PH_P_TARGET || m_phase == PH_P_SKILLTARGET || m_phase == PH_P_SHOVE || m_phase == PH_P_CMD || m_phase == PH_P_SKILLS || m_phase == PH_P_ITEM || m_phase == PH_P_SUMMON || m_phase == PH_MENU;
 	if (!playerSel) m_camPan = m_camPan * expf(-dt * 4.f);
@@ -2909,11 +2919,11 @@ void Game::UpdateCamera(float dt)
 	focus.x = Clampf(focus.x, 0, (float)MAPN);
 	focus.z = Clampf(focus.z, 0, (float)MAPN);
 	float sp = m_save.camSpeed <= 0 ? .55f : (m_save.camSpeed >= 2 ? 1.75f : 1.f);
-	float k = Clampf(dt * (m_phase == PH_INTRO ? 9.f : 4.5f * sp), 0, 1);
+	float k = (m_phase == PH_INTRO) ? 1.f : Clampf(dt * 4.5f * sp, 0, 1);
 	m_camTarget = Lerp(m_camTarget, focus, k);
 	m_camYaw = AngLerp(m_camYaw, m_camYawGoal, Clampf(dt * 6.f * sp, 0, 1));
 	if (m_zoomHold) ApplyZoomHold(dt);
-	else m_camDist = Lerpf(m_camDist, m_camDistGoal, Clampf(dt * (m_phase == PH_INTRO ? 2.2f : 5.f), 0, 1));
+	else m_camDist = Lerpf(m_camDist, m_camDistGoal, Clampf(dt * (m_phase == PH_INTRO ? 6.f : 5.f), 0, 1));
 }
 
 void Game::UpdateBattle(float dt)
@@ -2923,7 +2933,7 @@ void Game::UpdateBattle(float dt)
 	UpdateUnitsVisual(dt);
 	switch (m_phase) {
 	case PH_INTRO:
-		if (m_phaseT > m_surveyN * .5f + 1.4f) { m_phase = PH_NEXT; m_phaseT = 0; }
+		if (m_phaseT > (m_surveyN >= 2 ? kIntroSweep + 0.7f : 0.35f)) { m_phase = PH_NEXT; m_phaseT = 0; }
 		break;
 	case PH_NEXT: BeginTurn(); break;
 	case PH_MOVING: case PH_E_MOVE: UpdateMove(dt); break;
@@ -2982,9 +2992,7 @@ void Game::DrawBattle3D()
 	ApplyZoomHold();
 	SetupCamera(target, m_camYaw, m_camPitch, m_camDist, .62f);
 	{
-		float fogA = m_camDist * 1.4f, fogB = m_camDist * 4.2f + 18.f;
-		if (m_b.map.theme == TH_SEABED) { fogA *= 0.42f; fogB *= 0.5f; }
-		m_r.SetFog(fogA, fogB, .35f, e.fog);
+		m_r.SetFog(m_camDist * 1.4f, m_camDist * 4.2f + 18.f, .35f, e.fog);
 	}
 	m_r.SetAmbient(e.ambSky, e.ambGnd, e.amb, e.hard);
 	m_r.SetLight(e.light, m_camTarget, min(30.f, m_camDist * 1.35f + 6.f));
@@ -4439,23 +4447,209 @@ void Game::DrawMinimap(float x, float y, float s)
 	}
 }
 
+static long long ApplyExpMods(const Battle& b, const Unit& u, long long g)
+{
+	if (g <= 0) return 0;
+	if (UnitHasPas(u, PAS_EXP2)) g = g * 140 / 100;
+	else if (UnitHasPas(u, PAS_EXP)) g = g * 120 / 100;
+	if (g < 1) g = 1;
+	int topLv = u.ch.lv;
+	for (int i = 0; i < b.nUnits; i++) {
+		if (b.u[i].team == TEAM_PLAYER && b.u[i].ch.lv > topLv)
+			topLv = b.u[i].ch.lv;
+	}
+	int gap = topLv - u.ch.lv;
+	if (gap > 0) {
+		int pct = 100 + gap * 10;
+		if (pct > 400) pct = 400;
+		long long boosted = g * (long long)pct / 100;
+		if (boosted > g) g = boosted;
+	}
+	if (g > 2147483647LL) g = 2147483647LL;
+	return g;
+}
+
+static float AimPanelH(float baseH, float contentFloor, float expBlock, float compactPad, BOOL combat)
+{
+	if (combat) {
+		float h = baseH;
+		float want = contentFloor + expBlock;
+		if (expBlock > 0.f && want > h) h = want;
+		return h;
+	}
+	if (expBlock <= 0.f) return 0.f;
+	return expBlock + compactPad;
+}
+
+void Game::PreviewBattleExp(long long& opt, long long& pes, int& showLv, int& nTg, BOOL& combat) const
+{
+	opt = 0;
+	pes = 0;
+	showLv = 0;
+	nTg = 0;
+	combat = FALSE;
+	if (m_cur < 0 || m_cur >= m_b.nUnits || !m_cursorValid) return;
+	if (!Map::In(m_cx, m_cz)) return;
+	const Unit& a = m_b.u[m_cur];
+	if (a.team != TEAM_PLAYER || a.hp <= 0) return;
+	int skill = m_phase == PH_P_SKILLTARGET ? m_cmdSkill : -1;
+	int ids[MAX_UNITS];
+	int n = 0;
+	int ax = m_cx, az = m_cz;
+	BOOL single = FALSE;
+	if (skill < 0) {
+		int t = m_b.UnitAt(m_cx, m_cz);
+		if (CanTarget(m_cur, t, -1)) ids[n++] = t;
+		single = TRUE;
+	} else {
+		const SkillDef& sd = SkillInfo(skill);
+		if (sd.kind == SK_PASSIVE) return;
+		BOOL areaCast = sd.rMax == 0 || sd.area > 0 || sd.kind == SK_HEAL || sd.kind == SK_BUFF;
+		if (sd.rMax == 0) { ax = a.x; az = a.z; }
+		if (areaCast) {
+			if (sd.rMax == 0 || m_ovAtk[m_cz][m_cx])
+				n = SkillTargets(m_b, m_cur, skill, ax, az, ids, MAX_UNITS);
+		} else {
+			int t = m_b.UnitAt(m_cx, m_cz);
+			if (CanTarget(m_cur, t, skill)) ids[n++] = t;
+			single = TRUE;
+		}
+	}
+	long long rawOpt = 0, rawPes = 0;
+	BOOL canMiss = FALSE;
+	int counted = 0;
+	for (int i = 0; i < n; i++) {
+		if (ids[i] < 0 || ids[i] >= m_b.nUnits) continue;
+		const Unit& d = m_b.u[ids[i]];
+		if (skill >= 0 && SkillInfo(skill).kind == SK_HEAL) {
+			const SkillDef& sd = SkillInfo(skill);
+			long long e;
+			int healed = 0;
+			if (sd.effect == EF_RAISE) healed = max(1, d.ch.stat[S_HP] * 45 / 100);
+			else {
+				int amt = PreviewHealAmount(a, d, skill);
+				amt = (int)((long long)amt * FormBoostPct(m_b, m_cur, skill, ax, az) / 100);
+				int room = d.ch.stat[S_HP] - d.hp;
+				if (room < 0) room = 0;
+				healed = amt < room ? amt : room;
+			}
+			if (healed > 0) {
+				e = ExpForAction(a, d, healed, m_battleStage);
+				e = e * 3 / 2;
+				if (e < 21) e = 21;
+			} else e = 12;
+			rawOpt += e;
+			rawPes += e;
+			counted++;
+		} else if (skill >= 0 && SkillInfo(skill).kind == SK_BUFF) {
+			long long e = 16 + m_battleStage / 2;
+			if (e < 1) e = 1;
+			rawOpt += e;
+			rawPes += e;
+			counted++;
+		} else {
+			if (!d.alive || d.hp <= 0) continue;
+			Forecast f;
+			CalcForecast(m_b, m_cur, ids[i], skill, f);
+			int hits = f.hits > 0 ? f.hits : 1;
+			int dmg = f.dmg;
+			if (skill >= 0) dmg = (int)((long long)dmg * FormBoostPct(m_b, m_cur, skill, ax, az) / 100);
+			if (dmg < 1) dmg = 1;
+			long long swingOpt = 0;
+			if (f.hit <= 0) {
+				swingOpt = hits;
+				canMiss = TRUE;
+			} else {
+				int hp = d.hp;
+				for (int s = 0; s < hits; s++) {
+					BOOL over = FALSE;
+					if (hp <= 0 || (long long)dmg >= (long long)hp * 2) over = TRUE;
+					long long e = ExpForAction(a, d, dmg, m_battleStage);
+					if (over && e > 1) e *= 2;
+					e /= 2;
+					if (e < 1) e = 1;
+					swingOpt += e;
+					if (hp > 0) {
+						hp -= dmg;
+						if (hp < 0) hp = 0;
+					}
+				}
+			}
+			rawOpt += swingOpt;
+			if (f.hit >= 100) rawPes += swingOpt;
+			else {
+				rawPes += hits;
+				canMiss = TRUE;
+			}
+			counted++;
+		}
+	}
+	opt = ApplyExpMods(m_b, a, rawOpt);
+	pes = ApplyExpMods(m_b, a, rawPes);
+	nTg = single && counted > 0 ? 1 : counted;
+	if (opt > 0 && a.ch.lv < TAC_LV_MAX) {
+		long long need = (long long)ExpToNext(a.ch.lv) - (long long)a.ch.exp;
+		if (need < 0) need = 0;
+		if (pes >= need) showLv = 2;
+		else if (opt >= need && canMiss) showLv = 1;
+		else if (opt >= need) showLv = 2;
+	}
+	int aim = m_b.UnitAt(m_cx, m_cz);
+	if (aim >= 0 && CanTarget(m_cur, aim, skill)) {
+		if (skill < 0) combat = TRUE;
+		else {
+			int k = SkillInfo(skill).kind;
+			if (k != SK_HEAL && k != SK_BUFF) combat = TRUE;
+		}
+	}
+}
+
 void Game::DrawForecast()
 {
-	if (m_cur < 0) return;
-	int t = m_b.UnitAt(m_cx, m_cz);
+	long long opt = 0, pes = 0;
+	int showLv = 0, nTg = 0;
+	BOOL combat = FALSE;
+	PreviewBattleExp(opt, pes, showLv, nTg, combat);
+	(void)pes;
+	if (!combat) {
+		if (opt <= 0) return;
+	} else {
+		int t = m_b.UnitAt(m_cx, m_cz);
+		int skill = m_phase == PH_P_SKILLTARGET ? m_cmdSkill : -1;
+		if (!CanTarget(m_cur, t, skill)) return;
+	}
 	int skill = m_phase == PH_P_SKILLTARGET ? m_cmdSkill : -1;
-	if (!CanTarget(m_cur, t, skill)) return;
-	if (skill >= 0) {
-		const SkillDef& sd = SkillInfo(skill);
-		if (sd.kind == SK_HEAL || sd.kind == SK_BUFF) return;
+	int t = m_b.UnitAt(m_cx, m_cz);
+	float expBlock = opt > 0 ? (showLv ? U(44.f) : U(24.f)) : 0.f;
+	float w = min(U(520.f), (float)m_w - U(16));
+	float baseH = min(U(204.f), max(U(148.f), (float)m_h * .42f));
+	float h = AimPanelH(baseH, U(208.f), expBlock, U(12.f), combat);
+	float x = ((float)m_w - w) * .5f, y = U(8);
+	auto drawExp = [&](float ex, float ey, float ew) {
+		if (opt <= 0) return;
+		wchar_t line[160];
+		if (nTg > 1)
+			swprintf_s(line, L"%s %s +%s   %s %d", TT(TX_BT_EXP), TT(TX_BT_EXPEST), TacNum((int)opt), TT(TX_BT_AOEN), nTg);
+		else
+			swprintf_s(line, L"%s %s +%s", TT(TX_BT_EXP), TT(TX_BT_EXPEST), TacNum((int)opt));
+		float px = FitTextPx(line, ew - U(16), U(14), 1);
+		float ty = showLv ? ey + U(11) : ey + expBlock * .5f;
+		m_r.HudText(line, ex + ew * .5f, ty, px, RGBA8(186, 230, 255), 1, 1);
+		if (showLv) {
+			const wchar_t* lv = showLv == 2 ? TT(TX_BT_LEVELUP) : TT(TX_BT_LVMAY);
+			float px2 = FitTextPx(lv, ew - U(16), U(13), 0);
+			m_r.HudText(lv, ex + ew * .5f, ey + U(30), px2, showLv == 2 ? RGBA8(255, 220, 110) : RGBA8(255, 206, 140), 1, 1);
+		}
+	};
+	if (!combat) {
+		Panel(x, y, w, h, .42f);
+		drawExp(x, y + U(6), w);
+		return;
 	}
 	Forecast f;
 	CalcForecast(m_b, m_cur, t, skill, f);
 	const Unit& a = m_b.u[m_cur];
 	const Unit& d = m_b.u[t];
-	float w = min(U(520.f), (float)m_w - U(16));
-	float h = min(U(204.f), max(U(148.f), (float)m_h * .42f));
-	float x = (m_w - w) * .5f, y = U(8);
 	Panel(x, y, w, h, .42f);
 	{
 		wchar_t ft[80];
@@ -4511,6 +4705,7 @@ void Game::DrawForecast()
 			m_r.HudText(l, x + w * .5f, y + U(186), U(12), RGBA8(200, 220, 200), 1, 0);
 		}
 	}
+	if (opt > 0) drawExp(x, y + h - expBlock, w);
 }
 
 static const int kItemThrow = 3;
@@ -4644,22 +4839,27 @@ void Game::UseConsumable(int good, int target)
 		m_b.u[who].ct = 1000 - m_rng.Range(0, 20);
 }
 
-void Game::DrawBattleStatus()
+void Game::DrawBattleStatus(BOOL edit)
 {
 	int who = m_statWho;
 	if (who < 0 || who >= m_b.nUnits) who = m_cur;
-	if (who < 0 || who >= m_b.nUnits) { m_statOpen = 0; m_statEq = 0; m_statWho = -1; return; }
+	if (who < 0 || who >= m_b.nUnits) {
+		if (edit) { m_statOpen = 0; m_statEq = 0; m_statWho = -1; }
+		return;
+	}
 	Unit& u = m_b.u[who];
 	float pw = min(U(640.f), (float)m_w - U(40));
 	float ph = min(U(520.f), (float)m_h - U(40));
 	float px = ((float)m_w - pw) * .5f, py = ((float)m_h - ph) * .5f;
-	m_r.HudRect(0, 0, (float)m_w, (float)m_h, RGBA8(0, 0, 0, 120));
-	if (m_click && !Hit(px, py, pw, ph)) {
-		m_click = FALSE;
-		if (m_statEq) m_statEq = 0;
-		else { m_statOpen = 0; m_statEq = 0; }
-		TacSfx(TS_CANCEL);
-		return;
+	if (edit) {
+		m_r.HudRect(0, 0, (float)m_w, (float)m_h, RGBA8(0, 0, 0, 120));
+		if (m_click && !Hit(px, py, pw, ph)) {
+			m_click = FALSE;
+			if (m_statEq) m_statEq = 0;
+			else { m_statOpen = 0; m_statEq = 0; }
+			TacSfx(TS_CANCEL);
+			return;
+		}
 	}
 	Panel(px, py, pw, ph);
 	wchar_t nm[80];
@@ -4689,7 +4889,7 @@ void Game::DrawBattleStatus()
 		if (u.alive) m_act[who].t = t;
 		else { ActorPlay(m_act[who], CL_DEATH, 0, 0.f); m_act[who].t = 8.f; }
 	};
-	if (m_statEq == 5 || m_statEq == 6) {
+	if (edit && (m_statEq == 5 || m_statEq == 6)) {
 		int slot = m_statEq - 5;
 		m_r.HudText(TT(TX_PAS), px + pw * .5f, py + U(48), U(16), RGBA8(255, 226, 150), 1, 1);
 		int ids[32], n = 0;
@@ -4745,7 +4945,7 @@ void Game::DrawBattleStatus()
 		if (Btn(ID_BT_BACK, px + pw - U(170), py + ph - U(46), U(150), U(32), TT(TX_CR_BACK))) m_statEq = 0;
 		return;
 	}
-	if (m_statEq >= 9 && m_statEq <= 12) {
+	if (edit && m_statEq >= 9 && m_statEq <= 12) {
 		BOOL summon = m_statEq >= 11;
 		int slot = summon ? m_statEq - 11 : m_statEq - 9;
 		m_r.HudText(summon ? SummonWord() : TT(TX_ACC), px + pw * .5f, py + U(48), U(16), RGBA8(255, 226, 150), 1, 1);
@@ -4813,7 +5013,14 @@ void Game::DrawBattleStatus()
 			}
 			yy += U(36);
 		}
-		if (summon && hov > 0) m_r.HudTextBox(SummonDesc(hov), px + U(16), py + ph - U(96), pw - U(32), U(40), U(12), RGBA8(210, 220, 235));
+		if (summon && hov > 0) {
+			wchar_t est[160];
+			float by = py + ph - U(96);
+			if (EstimateText(u, SUMMON_BASE + hov - 1, est, 160)) {
+				m_r.HudText(est, px + U(16), by - U(4), FitTextPx(est, pw - U(32), U(13), 0), RGBA8(255, 214, 140), 0, 0);
+			}
+			m_r.HudTextBox(SummonDesc(hov), px + U(16), by, pw - U(32), U(40), U(12), RGBA8(210, 220, 235));
+		}
 		if (pages > 1) {
 			wchar_t pg[32];
 			swprintf_s(pg, L"%d / %d", m_statEqPage + 1, pages);
@@ -4825,7 +5032,7 @@ void Game::DrawBattleStatus()
 		return;
 	}
 	int beadSlot = m_statEq == 3 ? 0 : m_statEq == 4 ? 1 : m_statEq == 7 ? 2 : m_statEq == 8 ? 3 : -1;
-	if (m_statEq == 1 || m_statEq == 2 || beadSlot >= 0) {
+	if (edit && (m_statEq == 1 || m_statEq == 2 || beadSlot >= 0)) {
 		int gearKind = (m_statEq == 1 || m_statEq == 2) ? (m_statEq == 1 ? 0 : 1) : -1;
 		const wchar_t* title = gearKind >= 0 ? TT(gearKind ? TX_GEAR_ARM : TX_GEAR_WPN) : (beadSlot == 3 ? TT(TX_OUGI) : TT(TX_BEAD));
 		m_r.HudText(title, px + pw * .5f, py + U(48), U(16), RGBA8(255, 226, 150), 1, 1);
@@ -4909,36 +5116,44 @@ void Game::DrawBattleStatus()
 	const GearDef* wpn = GearOf(u.ch.reserved[6]);
 	const GearDef* arm = GearOf(u.ch.reserved[7]);
 	wchar_t gl[96];
+	auto slot = [&](int id, float sx, float sy, float sw, const wchar_t* s, int eq) {
+		if (!edit) {
+			m_r.HudGlass(sx, sy, sw, U(32), RGBA8(44, 48, 72, 230), RGBA8(120, 108, 78), 1.f);
+			m_r.HudText(s, sx + sw * .5f, sy + U(16), FitTextPx(s, sw - U(12), U(12), 0), RGBA8(236, 232, 220), 1, 1);
+			return;
+		}
+		if (Btn(id, sx, sy, sw, U(32), s, TRUE, FALSE, U(12))) { m_statEq = eq; m_statEqPage = 0; }
+	};
 	swprintf_s(gl, L"%s: %s", TT(TX_GEAR_WPN), wpn ? GearName(u.ch.reserved[6]) : TT(TX_PT_NONE));
-	if (Btn(ID_BT_EQ0, px + U(16), yy, pw * .48f, U(32), gl, TRUE, FALSE, U(12))) { m_statEq = 1; m_statEqPage = 0; }
+	slot(ID_BT_EQ0, px + U(16), yy, pw * .48f, gl, 1);
 	swprintf_s(gl, L"%s: %s", TT(TX_GEAR_ARM), arm ? GearName(u.ch.reserved[7]) : TT(TX_PT_NONE));
-	if (Btn(ID_BT_EQ0 + 1, px + pw * .52f, yy, pw * .44f, U(32), gl, TRUE, FALSE, U(12))) { m_statEq = 2; m_statEqPage = 0; }
+	slot(ID_BT_EQ0 + 1, px + pw * .52f, yy, pw * .44f, gl, 2);
 	yy += U(36);
 	swprintf_s(gl, L"%s1: %s", TT(TX_ACC), EquippedAccName(u.ch, 0));
-	if (Btn(ID_BT_ACC0, px + U(16), yy, pw * .48f, U(32), gl, TRUE, FALSE, U(12))) { m_statEq = 9; m_statEqPage = 0; }
+	slot(ID_BT_ACC0, px + U(16), yy, pw * .48f, gl, 9);
 	swprintf_s(gl, L"%s2: %s", TT(TX_ACC), EquippedAccName(u.ch, 1));
-	if (Btn(ID_BT_ACC1, px + pw * .52f, yy, pw * .44f, U(32), gl, TRUE, FALSE, U(12))) { m_statEq = 10; m_statEqPage = 0; }
+	slot(ID_BT_ACC1, px + pw * .52f, yy, pw * .44f, gl, 10);
 	yy += U(36);
 	swprintf_s(gl, L"%s1: %s", TT(TX_CRAFT), EquippedBeadName(u.ch, 0));
-	if (Btn(ID_BT_EQ0 + 2, px + U(16), yy, pw * .48f, U(32), gl, TRUE, FALSE, U(12))) { m_statEq = 3; m_statEqPage = 0; }
+	slot(ID_BT_EQ0 + 2, px + U(16), yy, pw * .48f, gl, 3);
 	swprintf_s(gl, L"%s2: %s", TT(TX_CRAFT), EquippedBeadName(u.ch, 1));
-	if (Btn(ID_BT_EQ0 + 3, px + pw * .52f, yy, pw * .44f, U(32), gl, TRUE, FALSE, U(12))) { m_statEq = 4; m_statEqPage = 0; }
+	slot(ID_BT_EQ0 + 3, px + pw * .52f, yy, pw * .44f, gl, 4);
 	yy += U(36);
 	swprintf_s(gl, L"%s3: %s", TT(TX_CRAFT), EquippedBeadName(u.ch, 2));
-	if (Btn(ID_BT_BEAD2, px + U(16), yy, pw * .48f, U(32), gl, TRUE, FALSE, U(12))) { m_statEq = 7; m_statEqPage = 0; }
+	slot(ID_BT_BEAD2, px + U(16), yy, pw * .48f, gl, 7);
 	swprintf_s(gl, L"%s: %s", TT(TX_OUGI), EquippedBeadName(u.ch, 3));
-	if (Btn(ID_BT_BEAD3, px + pw * .52f, yy, pw * .44f, U(32), gl, TRUE, FALSE, U(12))) { m_statEq = 8; m_statEqPage = 0; }
+	slot(ID_BT_BEAD3, px + pw * .52f, yy, pw * .44f, gl, 8);
 	yy += U(36);
 	swprintf_s(gl, L"%s1: %s", TT(TX_PAS), EquippedPasName(u.ch, 0));
-	if (Btn(ID_BT_PAS0, px + U(16), yy, pw * .48f, U(32), gl, TRUE, FALSE, U(12))) { m_statEq = 5; m_statEqPage = 0; }
+	slot(ID_BT_PAS0, px + U(16), yy, pw * .48f, gl, 5);
 	swprintf_s(gl, L"%s2: %s", TT(TX_PAS), EquippedPasName(u.ch, 1));
-	if (Btn(ID_BT_PAS1, px + pw * .52f, yy, pw * .44f, U(32), gl, TRUE, FALSE, U(12))) { m_statEq = 6; m_statEqPage = 0; }
+	slot(ID_BT_PAS1, px + pw * .52f, yy, pw * .44f, gl, 6);
 	yy += U(36);
 	swprintf_s(gl, L"%s1: %s", SummonWord(), EquippedSummonName(u.ch, 0));
-	if (Btn(ID_BT_EQSUM0, px + U(16), yy, pw * .48f, U(32), gl, TRUE, FALSE, U(12))) { m_statEq = 11; m_statEqPage = 0; }
+	slot(ID_BT_EQSUM0, px + U(16), yy, pw * .48f, gl, 11);
 	swprintf_s(gl, L"%s2: %s", SummonWord(), EquippedSummonName(u.ch, 1));
-	if (Btn(ID_BT_EQSUM1, px + pw * .52f, yy, pw * .44f, U(32), gl, TRUE, FALSE, U(12))) { m_statEq = 12; m_statEqPage = 0; }
-	if (Btn(ID_BT_BACK, px + pw - U(170), py + ph - U(46), U(150), U(32), TT(TX_CR_BACK))) { m_statOpen = 0; m_statEq = 0; }
+	slot(ID_BT_EQSUM1, px + pw * .52f, yy, pw * .44f, gl, 12);
+	if (edit && Btn(ID_BT_BACK, px + pw - U(170), py + ph - U(46), U(150), U(32), TT(TX_CR_BACK))) { m_statOpen = 0; m_statEq = 0; }
 }
 
 static const wchar_t* FormRuleText(int form)
@@ -5083,6 +5298,7 @@ void Game::DrawFormGuide(int skill, int tx, int tz, float avoidX, float avoidY, 
 
 void Game::DrawCommandMenu()
 {
+	if (m_statOpen) return;
 	if (m_cur < 0) return;
 	const Unit& u = m_b.u[m_cur];
 	float w = U(220), bh = U(40);
@@ -5244,7 +5460,7 @@ void Game::DrawCommandMenu()
 		float sw = min(U(520.f), (float)m_w - U(24));
 		float gap = U(6);
 		int rows = 3;
-		float ph = bh * rows + gap * 2 + U(90);
+		float ph = bh * rows + gap * 2 + U(112);
 		x = min(max(U(8), x), max(U(8), (float)m_w - sw - U(12)));
 		y = min(y, max(U(8), (float)m_h - ph - U(8)));
 		Panel(x - U(8), y - U(8), sw + U(16), ph, .5f);
@@ -5276,7 +5492,16 @@ void Game::DrawCommandMenu()
 		}
 		m_btnSfx = -2;
 		if (Btn(ID_BT_BACK, x, yy, sw, bh, TT(TX_CR_BACK))) { BattleCancel(); return; }
-		if (hov > 0) m_r.HudTextBox(SummonDesc(hov), x, yy + bh + U(8), sw, U(56), U(12), RGBA8(230, 230, 236));
+		if (hov > 0) {
+			wchar_t est[160];
+			int sk = SUMMON_BASE + hov - 1;
+			float boxY = yy + bh + U(8);
+			if (EstimateText(u, sk, est, 160)) {
+				m_r.HudText(est, x, boxY + U(8), FitTextPx(est, sw, U(13), 0), RGBA8(255, 214, 140), 0, 0);
+				boxY += U(18);
+			}
+			m_r.HudTextBox(SummonDesc(hov), x, boxY, sw, U(56), U(12), RGBA8(230, 230, 236));
+		}
 		return;
 	}
 	if (m_phase == PH_P_CMD) {
@@ -5295,10 +5520,9 @@ void Game::DrawCommandMenu()
 		}
 		int haveItem = ConsumableCount(m_save);
 		int n = (m_moved ? 4 : 3) + (canShove ? 1 : 0) + (canDoor ? 1 : 0) + (canClimb ? 1 : 0) + (haveItem > 0 ? 1 : 0) + 1 + 1;
-		if (m_statOpen) { DrawBattleStatus(); return; }
 		float cw = min(U(320), (float)m_w - U(28));
 		float gapc = U(6);
-		float extra = U(88);
+		float extra = U(108);
 		float avail = (float)m_h - y - U(16);
 		float need = bh * n + gapc * max(0, n - 1) + extra;
 		if (need > avail && n > 0) {
@@ -5414,8 +5638,13 @@ void Game::DrawCommandMenu()
 		if (m_moved) m_btnSfx = -2;
 		if (m_moved && Btn(ID_BT_UNDO, x, yy, cw, bh, TT(TX_BT_UNDO))) BattleCancel();
 		float boxTop = (m_moved ? yy + bh : yy - U(6)) + U(8);
-		if (descW) m_r.HudTextBox(descW, x, boxTop, cw, U(62), U(13), RGBA8(230, 230, 236));
-		else if (desc >= 0) m_r.HudTextBox(TT(desc), x, boxTop, cw, U(62), U(13), RGBA8(230, 230, 236));
+		if (descW) m_r.HudTextBox(descW, x, boxTop, cw, U(46), U(13), RGBA8(230, 230, 236));
+		else if (desc >= 0) m_r.HudTextBox(TT(desc), x, boxTop, cw, U(46), U(13), RGBA8(230, 230, 236));
+		if (desc == TX_BTD_ATTACK) {
+			wchar_t est[160];
+			if (EstimateText(u, -1, est, 160))
+				m_r.HudText(est, x, boxTop + U(50), FitTextPx(est, cw, U(13), 0), RGBA8(255, 214, 140), 0, 0);
+		}
 		return;
 	}
 	if (m_phase == PH_P_SKILLS) {
@@ -5512,7 +5741,7 @@ void Game::DrawCommandMenu()
 		float extra = subN * (subH + gap);
 		float sw = min(U(460.f), max(U(220.f), (float)m_w - U(24)));
 		// 範囲行・属性見出し・説明枠。同じ高さに描くと重なるので、この分をパネルに取る。
-		float descBlock = U(16) + U(16) + U(44) + U(14);
+		float descBlock = U(16) + U(16) + U(18) + U(44) + U(14);
 		float chrome = tabH + gap + extra + (bh + gap) * 2.f + descBlock + U(24);
 		int per = 8;
 		int fit = (int)(((float)m_h - chrome) / (bh + gap));
@@ -5652,6 +5881,10 @@ void Game::DrawCommandMenu()
 			swprintf_s(l, L"%s %d-%d  %s  %s", TT(TX_MISC_RANGE), r0, r1, CraftShapeName(sd.area, sd.shape), cp);
 			float ly = yy + U(4);
 			footLine(l, RGBA8(255, 210, 120), ly);
+			{
+				wchar_t est[160];
+				if (EstimateText(u, hovCraft, est, 160)) footLine(est, RGBA8(255, 214, 140), ly);
+			}
 			m_r.HudTextBox(CraftDesc(hovCraft), x, ly + U(2), sw, U(40), U(12), RGBA8(230, 230, 236));
 		} else if (hov >= 0) {
 			const SkillDef& sd = SkillInfo(hov);
@@ -5663,6 +5896,10 @@ void Game::DrawCommandMenu()
 			float ly = yy + U(4);
 			footLine(l, RGBA8(255, 226, 150), ly);
 			if (attr[0]) footLine(attr, RGBA8(255, 214, 140), ly);
+			{
+				wchar_t est[160];
+				if (EstimateText(u, hov, est, 160)) footLine(est, RGBA8(186, 230, 255), ly);
+			}
 			m_r.HudTextBox(TT(sd.descTx), x, ly + U(2), sw, U(40), U(12), RGBA8(230, 230, 236));
 			if (IsFormSkill(hov)) DrawFormGuide(hov, u.x, u.z, x - U(8), y - U(8), sw + U(16), ph);
 		}
@@ -5883,6 +6120,7 @@ void Game::DrawCutInUi()
 
 void Game::DrawBattleUi()
 {
+	int partyLook = -1;
 	if (m_b.weather) {
 		DWORD veil = m_b.weather == WX_RAIN ? RGBA8(30, 48, 80, 16) : (m_b.weather == WX_SNOW ? RGBA8(210, 220, 235, 14) : RGBA8(70, 28, 12, 16));
 		m_r.HudRect(0, 0, (float)m_w, (float)m_h, veil);
@@ -5910,20 +6148,30 @@ void Game::DrawBattleUi()
 		DrawCutInUi();
 		return;
 	}
-	// 左上: ステージ情報
+	BOOL stampHov = FALSE;
+	float stampX = 0.f, stampW = 0.f;
+	// 左上: ステージ情報。スタンピードはその段のあいだ出し続ける。
 	{
-		float w = U(250), h = U(58);
-		Panel(U(14), U(14), w, h);
-		wchar_t l[96];
+		wchar_t l[96], th[80];
 		swprintf_s(l, L"%s %d", TT(TX_BT_STAGE), m_battleStage);
-		m_r.HudText(l, U(28), U(32), U(17), RGBA8(255, 226, 150), 0, 1);
-		{
-			int wx = m_b.weather == WX_RAIN ? TX_WX_RAIN : (m_b.weather == WX_SNOW ? TX_WX_SNOW : (m_b.weather == WX_ASH ? TX_WX_ASH : 0));
-			wchar_t th[80];
-			if (wx) swprintf_s(th, L"%s  %s", TT(ThemeNameTx(m_b.map.theme)), TT(wx));
-			else wcscpy_s(th, TT(ThemeNameTx(m_b.map.theme)));
-			m_r.HudText(th, U(14) + w - U(14), U(32), U(13), RGBA8(220, 220, 230), 2, 0);
+		int wx = m_b.weather == WX_RAIN ? TX_WX_RAIN : (m_b.weather == WX_SNOW ? TX_WX_SNOW : (m_b.weather == WX_ASH ? TX_WX_ASH : 0));
+		if (wx) swprintf_s(th, L"%s  %s", TT(ThemeNameTx(m_b.map.theme)), TT(wx));
+		else wcscpy_s(th, TT(ThemeNameTx(m_b.map.theme)));
+		const wchar_t* sp = m_b.stampede ? TT(TX_BT_STAMPEDE) : NULL;
+		float fs = U(17), sfs = U(13);
+		float need = U(42) + m_r.TextWidth(l, fs, 0) + U(18) + m_r.TextWidth(th, sfs, 0);
+		if (sp) need += U(14) + m_r.TextWidth(sp, sfs, 0);
+		float w = max(U(250.f), need);
+		float h = U(58);
+		Panel(U(14), U(14), w, h);
+		m_r.HudText(l, U(28), U(32), fs, RGBA8(255, 226, 150), 0, 1);
+		if (sp) {
+			stampX = U(28) + m_r.TextWidth(l, fs, 0) + U(12);
+			stampW = m_r.TextWidth(sp, sfs, 0);
+			stampHov = !m_navMode && !m_statOpen && Hit(stampX - U(6), U(16), stampW + U(12), U(32));
+			m_r.HudText(sp, stampX, U(32), sfs, stampHov ? RGBA8(255, 220, 160) : RGBA8(255, 150, 70), 0, 1);
 		}
+		m_r.HudText(th, U(14) + w - U(14), U(32), sfs, RGBA8(220, 220, 230), 2, 0);
 		swprintf_s(l, L"%s %d   %s %d / %s %d   %s %d", TT(TX_BT_ENDTURN), m_b.turnCount + 1, TT(TX_BT_ALLY), m_b.AliveCount(TEAM_PLAYER), TT(TX_BT_ENEMY), m_b.AliveCount(TEAM_ENEMY), TT(TX_GOLD), m_save.gold);
 		m_r.HudText(l, U(28), U(54), U(12), RGBA8(210, 210, 220), 0, 0);
 		float mx = U(14) + w + U(8);
@@ -5991,6 +6239,11 @@ void Game::DrawBattleUi()
 			float ty = ay + row * .45f;
 			BOOL rowHit = Hit(xName - U(8), ay, max(U(48.f), partyRight - xName + U(12)), row);
 			if (rowHit) m_r.HudRect(xName - U(8), ay, max(U(48.f), partyRight - xName + U(12)), max(1.f, row - 1.f), u.alive ? RGBA8(255, 255, 255, 28) : RGBA8(255, 160, 140, 46));
+			BOOL lookOk = m_phase != PH_P_MOVE && m_phase != PH_P_TARGET && m_phase != PH_P_SKILLTARGET
+				&& m_phase != PH_P_SKILLS && m_phase != PH_P_SUMMON && m_phase != PH_P_SHOVE && m_phase != PH_P_ITEM
+				&& m_phase != PH_ACTION && m_phase != PH_MOVING && m_phase != PH_E_MOVE
+				&& m_phase != PH_INTRO && m_phase != PH_OVER && m_phase != PH_LEVELUP && m_phase != PH_MENU;
+			if (lookOk && !m_statOpen && m_mouseSeen && rowHit) partyLook = i;
 			if (!m_statOpen && m_click && rowHit && m_phase != PH_ACTION && m_phase != PH_MOVING && m_phase != PH_E_MOVE && m_phase != PH_INTRO && m_phase != PH_OVER && m_phase != PH_LEVELUP) {
 				m_statWho = i;
 				m_statEq = 0;
@@ -6127,7 +6380,14 @@ void Game::DrawBattleUi()
 			if (showCount) block += countH;
 			if (nLine > 0) block += (showCount ? gap : 0.f) + nLine * tagH + (nLine - 1) * gap;
 			float fw = min(U(520.f), (float)m_w - U(16));
-			float fh = min(U(176.f), max(U(120.f), (float)m_h * .38f));
+			long long eOpt = 0, ePes = 0;
+			int eLv = 0, eN = 0;
+			BOOL eCombat = FALSE;
+			PreviewBattleExp(eOpt, ePes, eLv, eN, eCombat);
+			(void)ePes; (void)eN;
+			float eBlock = eOpt > 0 ? (eLv ? U(44.f) : U(24.f)) : 0.f;
+			float eBase = min(U(204.f), max(U(148.f), (float)m_h * .42f));
+			float fh = AimPanelH(eBase, U(208.f), eBlock, U(12.f), eCombat);
 			float fx = ((float)m_w - fw) * .5f, fy = U(8);
 			float top = sy - U(10) - block;
 			BOOL underForecast = top < fy + fh && sx > fx - U(40) && sx < fx + fw + U(40);
@@ -6206,6 +6466,12 @@ void Game::DrawBattleUi()
 		m_r.HudPanel(tx, ty, tw, U(30), RGBA8(16, 20, 36, 210), RGBA8(150, 128, 86));
 		m_r.HudText(l, tx + U(12), ty + U(15), U(13), RGBA8(236, 236, 240), 0, 0);
 	}
+	if (partyLook >= 0 && !m_statOpen) {
+		float pw = min(U(640.f), (float)m_w - U(40));
+		float ph = min(U(520.f), (float)m_h - U(40));
+		float px = ((float)m_w - pw) * .5f, py = ((float)m_h - ph) * .5f;
+		if (m_click && m_clickX >= px && m_clickY >= py && m_clickX < px + pw && m_clickY < py + ph) m_click = FALSE;
+	}
 	if (m_phase == PH_P_TARGET || m_phase == PH_P_SKILLTARGET) DrawForecast();
 	if (m_phase == PH_P_CMD || m_phase == PH_P_SKILLS || m_phase == PH_P_ITEM || m_phase == PH_P_SUMMON) DrawCommandMenu();
 	if (m_phase == PH_P_SKILLTARGET && m_cur >= 0 && IsFormSkill(m_cmdSkill)) {
@@ -6213,7 +6479,7 @@ void Game::DrawBattleUi()
 		if (m_cursorValid) { tx = m_cx; tz = m_cz; }
 		DrawFormGuide(m_cmdSkill, tx, tz, 0, 0, 0, 0);
 	}
-	if (m_statOpen && m_phase != PH_P_CMD && m_phase != PH_ACTION && m_phase != PH_MOVING && m_phase != PH_E_MOVE && m_phase != PH_INTRO && m_phase != PH_OVER && m_phase != PH_LEVELUP) DrawBattleStatus();
+	if (m_statOpen && m_phase != PH_ACTION && m_phase != PH_MOVING && m_phase != PH_E_MOVE && m_phase != PH_INTRO && m_phase != PH_OVER && m_phase != PH_LEVELUP) DrawBattleStatus(TRUE);
 	if (m_phase == PH_LEVELUP) DrawLevelUp();
 	// ヒント
 	{
@@ -6241,7 +6507,17 @@ void Game::DrawBattleUi()
 				float rightRoom = rightBound - fx1;
 				if (rightRoom >= leftRoom && rightRoom > U(220)) leftBound = fx1;
 				else if (leftRoom > U(220)) rightBound = fx0 - U(8);
-				else y = U(14) + U(176) + U(20);
+				else {
+					long long eOpt = 0, ePes = 0;
+					int eLv = 0, eN = 0;
+					BOOL eCombat = FALSE;
+					PreviewBattleExp(eOpt, ePes, eLv, eN, eCombat);
+					(void)ePes; (void)eN;
+					float eBlock = eOpt > 0 ? (eLv ? U(44.f) : U(24.f)) : 0.f;
+					float eBase = min(U(204.f), max(U(148.f), (float)m_h * .42f));
+					float ph = AimPanelH(eBase, U(208.f), eBlock, U(12.f), eCombat);
+					if (ph > 0.f) y = U(8) + ph + U(20);
+				}
 			}
 			float room = max(U(200.f), rightBound - leftBound);
 			float want = wide ? U(820) : (m_r.TextWidth(hs, U(16), 1) + U(40));
@@ -6263,14 +6539,14 @@ void Game::DrawBattleUi()
 			if (keys) m_r.HudTextBox(TT(TX_BT_HINT_KEYS), tx0 + U(12), top + textH + U(6), tw - U(24), keysH, U(12), RGBA8(210, 210, 220), 0);
 		}
 	}
-	if (m_phase == PH_INTRO && m_surveyN > 0 && m_phaseT < m_surveyN * .5f) {
+	if (m_phase == PH_INTRO && m_surveyN >= 2 && m_phaseT < kIntroSweep) {
 		wchar_t hs[160];
 		swprintf_s(hs, TT(TX_BT_SURVEY), m_b.AliveCount(TEAM_ENEMY));
 		float tw = m_r.TextWidth(hs, U(16), 1) + U(48);
 		float tx0 = ((float)m_w - tw) * .5f, top = (float)m_h - U(96);
 		m_r.HudPanel(tx0, top, tw, U(50), RGBA8(16, 20, 36, 150), RGBA8(150, 128, 86));
 		m_r.HudText(hs, tx0 + tw * .5f, top + U(17), U(16), RGBA8(255, 255, 255), 1, 1);
-		Bar(tx0 + U(16), top + U(34), tw - U(32), U(6), m_phaseT / (m_surveyN * .5f), RGBA8(255, 200, 110), RGBA8(255, 236, 170));
+		Bar(tx0 + U(16), top + U(34), tw - U(32), U(6), m_phaseT / kIntroSweep, RGBA8(255, 200, 110), RGBA8(255, 236, 170));
 	}
 	if (m_phase == PH_MENU) {
 		m_r.HudRect(0, 0, (float)m_w, (float)m_h, RGBA8(0, 0, 0, 120));
@@ -6321,7 +6597,8 @@ void Game::DrawBattleUi()
 				QueueSuspend(2);
 				WaitSuspend();
 				Persist();
-				m_wantClose = TRUE;
+				m_menuConfirm = 0;
+				EnterBase();
 				return;
 			}
 			if (Btn(ID_BT_M_NO, bx + bw * .53f, y + U(140), bw * .47f, bh, TT(TX_PT_NO))) m_menuConfirm = 0;
@@ -6331,8 +6608,22 @@ void Game::DrawBattleUi()
 			if (Btn(ID_BT_M_NO, bx + bw * .53f, y + U(140), bw * .47f, bh, TT(TX_PT_NO))) m_menuConfirm = 0;
 		}
 	}
+	if (stampHov) {
+		float tw = min(U(520.f), max(U(300.f), (float)m_w * .46f));
+		float tx = stampX;
+		if (tx + tw > (float)m_w - U(16)) tx = max(U(12.f), (float)m_w - U(16) - tw);
+		float ty = U(78), thb = U(168);
+		m_r.HudPanel(tx, ty, tw, thb, RGBA8(18, 14, 10, 236), RGBA8(255, 160, 70));
+		m_r.HudTextBox(TT(TX_BT_STAMPEDE_HELP), tx + U(14), ty + U(12), tw - U(28), thb - U(22), U(14), RGBA8(255, 236, 214));
+	}
 	if (m_seqCut) DrawCutInUi();
 	if (m_fastFwd && (m_phase == PH_E_SHOW || m_phase == PH_E_MOVE || m_phase == PH_ACTION)) m_r.HudText(L"▶▶", (float)m_w - U(210), U(30), U(20), RGBA8(255, 226, 150), 1, 1);
+	if (partyLook >= 0 && !m_statOpen) {
+		int prevWho = m_statWho;
+		m_statWho = partyLook;
+		DrawBattleStatus(FALSE);
+		m_statWho = prevWho;
+	}
 }
 
 } // namespace otac

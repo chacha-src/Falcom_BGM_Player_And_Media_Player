@@ -133,17 +133,16 @@ int MpKeyFindCompatibleInPlaylist(int maxOut, CString* outNames, int* outRows)
 	CString list = SongParams_CurrentListName();
 	const int lim = pl->playcnt;
 	for (int i = 0; i < lim && n < maxOut; ++i) {
-		SongParam e;
-		if (!SongParams_FindCopy(list, pl->pc[i].fol, pl->pc[i].sub, pl->pc[i].ret2, e))
+		int cam = 0;
+		if (!SongParams_TryIndexedCamelot(list, pl->pc[i].fol, pl->pc[i].sub, pl->pc[i].ret2, &cam))
 			continue;
-		if (e.camelot < 1) continue;
 		BOOL ok = FALSE;
-		for (int k = 0; k < nn; ++k) if (neigh[k] == e.camelot) { ok = TRUE; break; }
+		for (int k = 0; k < nn; ++k) if (neigh[k] == cam) { ok = TRUE; break; }
 		if (!ok) continue;
 		CString name = pl->pc[i].name;
 		if (name.IsEmpty()) name = pl->pc[i].fol;
 		CString lab;
-		lab.Format(L"%s [%s]", (LPCTSTR)name, (LPCTSTR)MpCamelotLabel(e.camelot));
+		lab.Format(L"%s [%s]", (LPCTSTR)name, (LPCTSTR)MpCamelotLabel(cam));
 		outNames[n] = lab;
 		outRows[n] = i;
 		++n;

@@ -2,12 +2,13 @@
 #include "ogg.h"
 #include "CSasamiVstPickDlg.h"
 #include "VstMidiEngine.h"
+#include "CSasamiStaffCore.h"
 
 IMPLEMENT_DYNAMIC(CSasamiVstPickDlg, CCustomBlurDialogExBase)
 
 CSasamiVstPickDlg::CSasamiVstPickDlg(CWnd* pParent)
 	: CCustomBlurDialogExBase(IDD_SASAMI_VST_PICK, pParent)
-	, m_isVst3(0), m_part(1), m_effectsOnly(0), m_scroll(0), m_sel(0), m_count(0)
+	, m_isVst3(0), m_part(1), m_effectsOnly(0), m_vst2Only(0), m_scroll(0), m_sel(0), m_count(0)
 {
 	m_path[0] = 0;
 }
@@ -24,6 +25,20 @@ int CSasamiVstPickDlg::PickForPart(CWnd* owner, int part1to32, wchar_t* outPath,
 	if (outPath && outCch > 0)
 		wcsncpy_s(outPath, outCch, dlg.m_path, _TRUNCATE);
 	if (outIs3) *outIs3 = dlg.m_isVst3;
+	return IDOK;
+}
+
+int CSasamiVstPickDlg::PickVst2ForPart(CWnd* owner, int part1to32, wchar_t* outPath, int outCch, int* outIs3)
+{
+	CSasamiVstPickDlg dlg(owner);
+	dlg.m_part = part1to32;
+	dlg.m_effectsOnly = 0;
+	dlg.m_vst2Only = 1;
+	const INT_PTR r = dlg.DoModal();
+	if (r != IDOK) return (int)r;
+	if (outPath && outCch > 0)
+		wcsncpy_s(outPath, outCch, dlg.m_path, _TRUNCATE);
+	if (outIs3) *outIs3 = 0;
 	return IDOK;
 }
 
@@ -66,6 +81,19 @@ void CSasamiVstPickDlg::ApplyLang()
 	if (m_effectsOnly) {
 		SetWindowText(L"Select VST Insert FX");
 		m_hint.SetWindowText(L"Scanned effects only (not instruments). Double-click to choose.");
+	} else if (m_vst2Only) {
+		SetWindowText(LL14(L"VST2音色を選択", L"Select VST2", L"Choisir VST2", L"Scegli VST2", L"Elegir VST2",
+			L"VST2 선택", L"选择 VST2", L"اختر VST2", L"Выбор VST2", L"VST2 wählen",
+			L"Escolher VST2", L"VST2 kiezen", L"Wybierz VST2", L"VST2 seç"));
+		CString h;
+		h.Format(LL14(
+			L"パート %d — VST2（.dll）だけ。ダブルクリックで決定",
+			L"Part %d — VST2 (.dll) only. Double-click to choose",
+			L"Partie %d — VST2 seulement", L"Parte %d — solo VST2", L"Parte %d — solo VST2",
+			L"파트 %d — VST2만", L"声部 %d — 仅 VST2", L"الجزء %d — VST2 فقط", L"Партия %d — только VST2",
+			L"Part %d — nur VST2", L"Parte %d — só VST2", L"Deel %d — alleen VST2",
+			L"Partia %d — tylko VST2", L"Parti %d — yalnız VST2"), m_part);
+		m_hint.SetWindowText(h);
 	} else {
 		SetWindowText(LL14(L"VST音色を選択", L"Select VST", L"Choisir VST", L"Scegli VST", L"Elegir VST",
 			L"VST 선택", L"选择 VST", L"اختر VST", L"Выбор VST", L"VST wählen",
@@ -95,6 +123,7 @@ void CSasamiVstPickDlg::RebuildList()
 			if (p->isInstrument) continue;
 		} else {
 			if (!p->isInstrument) continue;
+			if (m_vst2Only && p->isVst3) continue;
 			if (p->isLiveOk == 0) continue; /* prefer verified */
 		}
 		m_idx[m_count++] = i;
@@ -104,6 +133,7 @@ void CSasamiVstPickDlg::RebuildList()
 		for (int i = 0; i < n && m_count < 512; i++) {
 			const VstPluginInfo* p = VstScanGet(i);
 			if (!p || !p->isInstrument) continue;
+			if (m_vst2Only && p->isVst3) continue;
 			m_idx[m_count++] = i;
 		}
 	}
@@ -133,11 +163,14 @@ void CSasamiVstPickDlg::LayoutChrome()
 {
 	CRect rc; GetClientRect(&rc);
 	const int cap = CCC_GetCustomCaptionHeight(m_hWnd);
-	m_hint.MoveWindow(8, cap + 6, rc.Width() - 16, 36);
-	m_rescan.MoveWindow(8, rc.Height() - 30, 72, 24);
-	m_ok.MoveWindow(rc.Width() - 120, rc.Height() - 30, 50, 24);
-	m_cancel.MoveWindow(rc.Width() - 64, rc.Height() - 30, 56, 24);
-	m_listRc.SetRect(8, cap + 46, rc.Width() - 8, rc.Height() - 40);
+	m_hint.MoveWindow(8, cap + 6, rc.Width() - 16, 48);
+	const int rescanW = ScChromeButtonWidth(&m_rescan, 96, 140);
+	const int cancelW = ScChromeButtonWidth(&m_cancel, 72, 120);
+	const int okW = ScChromeButtonWidth(&m_ok, 56, 80);
+	m_rescan.MoveWindow(8, rc.Height() - 34, rescanW, 26);
+	m_cancel.MoveWindow(rc.Width() - 8 - cancelW, rc.Height() - 34, cancelW, 26);
+	m_ok.MoveWindow(rc.Width() - 16 - cancelW - okW, rc.Height() - 34, okW, 26);
+	m_listRc.SetRect(8, cap + 58, rc.Width() - 8, rc.Height() - 44);
 	Invalidate(FALSE);
 }
 

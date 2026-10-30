@@ -675,6 +675,29 @@ bool SongParams_FindCopy(LPCTSTR listName, LPCTSTR path, int mode, int ret2Val, 
 	return true;
 }
 
+bool SongParams_TryIndexedCamelot(LPCTSTR listName, LPCTSTR path, int mode, int ret2Val, int* outCamelot)
+{
+	if (outCamelot) *outCamelot = 0;
+	if (!listName || !*listName || !path) return false;
+	CSingleLock lk(&g_cs, TRUE);
+	CString key = SongParams_KeyPath(path);
+	if (key.IsEmpty()) return false;
+	int idx = SpFindExactLocked(listName, key, mode, ret2Val);
+	if (idx < 0) idx = SpFindExactLocked(listName, key, 0, 0);
+	if (idx < 0) {
+		CString np = NormalizePlaylistPath(path);
+		if (!np.IsEmpty() && np.CompareNoCase(key) != 0) {
+			idx = SpFindExactLocked(listName, np, mode, ret2Val);
+			if (idx < 0) idx = SpFindExactLocked(listName, np, 0, 0);
+		}
+	}
+	if (idx < 0 || idx >= (int)g_tbl.size()) return false;
+	const int cam = g_tbl[idx].camelot;
+	if (cam < 1) return false;
+	if (outCamelot) *outCamelot = cam;
+	return true;
+}
+
 bool SongParams_HasEntry(LPCTSTR listName, LPCTSTR path, int mode, int ret2Val)
 {
 	CSingleLock lk(&g_cs, TRUE);

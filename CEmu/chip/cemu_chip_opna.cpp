@@ -926,6 +926,7 @@ void CEmuChipOpnaShutdown(CEmuChipOpna* c)
 
 class CChipYm2608 : public CChip {
 public:
+	int YamahaFm() const override { return 1; }
 	CChipYm2608(uint32_t clockHz, int opnaMode, int sampleRate)
 	{
 		memset(&core_, 0, sizeof(core_));

@@ -1,6 +1,7 @@
 #include "stdafx.h"
 #include "OmakeTacticsGame.h"
 #include "OmakeTacticsAudio.h"
+#include <afxdlgs.h>
 #include <math.h>
 #include <stdio.h>
 
@@ -43,7 +44,8 @@ enum {
 	ID_HELP_CLOSE = 900,
 	ID_BASE_REROLL = 940, ID_BASE_THEME,
 	ID_BASE_SAVESLOT = 947,
-	ID_SLOT_ROW0 = 981, ID_SLOT_USE = 991, ID_SLOT_REN, ID_SLOT_COPY, ID_SLOT_DEL, ID_SLOT_BACK, ID_SLOT_YES, ID_SLOT_NO
+	ID_SLOT_ROW0 = 981, ID_SLOT_USE = 991, ID_SLOT_REN, ID_SLOT_COPY, ID_SLOT_DEL, ID_SLOT_BACK, ID_SLOT_YES, ID_SLOT_NO,
+	ID_SLOT_OUT = 998, ID_SLOT_IN
 };
 
 void ThemeEnv(int th, Env& e)
@@ -58,7 +60,7 @@ void ThemeEnv(int th, Env& e)
 		{ { 40, 24, 34 }, { 170, 66, 40 }, { 120, 52, 40 }, { 120, 70, 80 }, { 140, 60, 30 }, .3f, .75f, .55f, .48f, .65f, { 80, 70, 68 } },
 		{ { 70, 92, 82 }, { 156, 166, 132 }, { 124, 136, 112 }, { 120, 140, 120 }, { 80, 80, 50 }, .35f, .8f, .45f, .5f, .5f, { 80, 96, 60 } },
 		{ { 58, 56, 120 }, { 206, 170, 204 }, { 166, 144, 176 }, { 150, 140, 190 }, { 110, 90, 90 }, .6f, .6f, .35f, .52f, .6f, { 160, 156, 140 } },
-		{ { 12, 48, 72 }, { 36, 110, 128 }, { 16, 72, 96 }, { 70, 140, 160 }, { 20, 50, 60 }, .25f, .92f, .2f, .42f, .45f, { 48, 110, 100 } },
+		{ { 36, 110, 150 }, { 140, 206, 214 }, { 90, 168, 186 }, { 110, 186, 200 }, { 40, 80, 90 }, .4f, .62f, .28f, .55f, .4f, { 48, 110, 100 } },
 		{ { 150, 188, 214 }, { 226, 232, 236 }, { 200, 214, 220 }, { 170, 190, 200 }, { 80, 100, 80 }, .4f, .8f, .3f, .58f, .55f, { 90, 140, 80 } },
 	};
 	const T& t = k[Clampi(th, 0, TH_COUNT - 1)];
@@ -163,6 +165,9 @@ Game::Game()
 	m_slotPick = 0;
 	m_slotDest = -1;
 	m_slotEdit[0] = 0;
+	m_slotJob = 0;
+	m_slotBusy = 0;
+	m_impPath[0] = 0;
 	for (int si = 0; si < TAC_SLOT_N; si++) m_slotClear[si] = -1;
 	m_createFromParty = 0;
 	m_evFromParty = 0;
@@ -550,6 +555,14 @@ void Game::UnitTitle(const Unit& u, wchar_t* out, int n) const
 // ============================================================ メインループ
 void Game::Tick(float dt)
 {
+	if (m_slotBusy) return;
+	if (m_slotJob) {
+		int job = m_slotJob;
+		m_slotJob = 0;
+		m_slotBusy = 1;
+		RunSlotFile(job);
+		m_slotBusy = 0;
+	}
 	dt = Clampf(dt, 0, .1f);
 	m_time += dt;
 	if (m_screen == SC_LOADING) {
@@ -970,7 +983,7 @@ void Game::OnKey(int vk, BOOL down)
 		return;
 	}
 	if (m_screen == SC_BATTLE && m_phase == PH_INTRO && (vk == VK_RETURN || vk == VK_SPACE || vk == 'Z' || vk == VK_ESCAPE || vk == VK_BACK || vk == 'X')) {
-		m_phaseT = max(m_phaseT, m_surveyN * .5f);
+		m_phaseT = max(m_phaseT, m_surveyN >= 2 ? kIntroSweep : 0.35f);
 		return;
 	}
 	BOOL battleMap = m_screen == SC_BATTLE && (m_phase == PH_P_MOVE || m_phase == PH_P_TARGET || m_phase == PH_P_SKILLTARGET || m_phase == PH_P_SHOVE);
@@ -1020,7 +1033,7 @@ void Game::OnPad(const PadState& p, float dt)
 		}
 	}
 	m_padDirPrev = dir;
-	if (m_screen == SC_BATTLE && m_phase == PH_INTRO && !m_showHelp && (pressed(0) || pressed(1))) m_phaseT = max(m_phaseT, m_surveyN * .5f);
+	if (m_screen == SC_BATTLE && m_phase == PH_INTRO && !m_showHelp && (pressed(0) || pressed(1))) m_phaseT = max(m_phaseT, m_surveyN >= 2 ? kIntroSweep : 0.35f);
 	else {
 		if (pressed(0)) {
 			if (m_showHelp) { m_showHelp = FALSE; TacSfx(TS_CANCEL); }
@@ -1213,6 +1226,7 @@ void Game::NavBack()
 	if (m_slotUi) {
 		if (m_textFocus) { m_textFocus = 0; TacSfx(TS_CANCEL); return; }
 		if (m_slotUi == 5) m_slotUi = 4;
+		else if (m_slotUi == 6) m_slotUi = 8;
 		else if (m_slotUi > 1) m_slotUi = 1;
 		else m_slotUi = 0;
 		TacSfx(TS_CANCEL);
@@ -1439,8 +1453,18 @@ void Game::DrawSkillTip()
 		wcscpy_s(title, SummonName(m_skillTipId - SUMMON_BASE + 1));
 		wcscpy_s(body, SummonDesc(m_skillTipId - SUMMON_BASE + 1));
 	}
+	wchar_t est[160];
+	est[0] = 0;
+	if (m_skillTip != 2 && m_partySel >= 0 && m_partySel < MAX_ROSTER && m_save.roster[m_partySel].used) {
+		Unit eu{};
+		eu.monster = -1;
+		eu.alive = 1;
+		eu.ch = m_save.roster[m_partySel];
+		CraftBindUnit(eu);
+		EstimateText(eu, m_skillTipId, est, 160);
+	}
 	float tw = min(U(460), (float)m_w - U(16));
-	float th = extra[0] ? U(128) : U(108);
+	float th = (extra[0] ? U(128) : U(108)) + (est[0] ? U(18) : 0);
 	float tx = (float)m_mx + U(14);
 	float ty = (float)m_my + U(16);
 	if (tx + tw > (float)m_w - U(6)) tx = (float)m_mx - tw - U(10);
@@ -1452,6 +1476,10 @@ void Game::DrawSkillTip()
 	float by = ty + U(30);
 	if (extra[0]) {
 		m_r.HudText(extra, tx + U(10), by, U(12), RGBA8(255, 210, 140), 0, 0);
+		by += U(16);
+	}
+	if (est[0]) {
+		m_r.HudText(est, tx + U(10), by, FitTextPx(est, tw - U(20), U(13), 0), RGBA8(186, 230, 255), 0, 0);
 		by += U(16);
 	}
 	m_r.HudTextBox(body, tx + U(10), by, tw - U(20), th - (by - ty) - U(8), U(13), RGBA8(230, 230, 236));
@@ -1679,14 +1707,37 @@ void Game::UpdateParticles(float dt)
 				Renderer::SceneryPuff s = m_r.SceneryPuffAt(i);
 				V3 p = v3(s.x, s.y, s.z);
 				if (s.kind == 0) {
-					Burst(p, 2, 1.5f, 0.22f, 1.15f, 1.f, 0.36f, 0.05f, 2, 1, -3.2f, 0.1f, 5.f, 0.05f);
-					Burst(p + v3(0, 0.35f, 0), 1, 0.65f, 0.48f, 2.3f, 0.32f, 0.3f, 0.28f, 0, 1, -0.55f, 0.02f, 2.4f, 0.85f);
+					Burst(p, 4, 3.4f, 0.14f, 1.35f, 1.f, 0.32f, 0.05f, 2, 1, 7.5f, 0.08f, 2.1f, 0.03f);
+					Burst(p, 2, 2.2f, 0.1f, 1.1f, 0.45f, 0.28f, 0.22f, 3, 1, 9.f, 0, 1.6f, 0.04f);
+					Burst(p + v3(0, 0.2f, 0), 1, 0.7f, 0.55f, 2.4f, 0.28f, 0.26f, 0.24f, 0, 1, -0.35f, 0.02f, 2.6f, 0.95f);
 				} else if (s.kind == 1) {
 					Burst(p, 1, 0.35f, 0.5f, 1.7f, 0.92f, 0.96f, 1.f, 0, 1, -0.18f, 0, 1.4f, 0.75f);
 				} else if (s.kind == 2) {
-					Burst(p, 1, 0.3f, 0.06f, 2.5f, 0.78f, 0.92f, 1.f, 1, 1, -1.05f, 0, 4.f, 0.04f);
+					Burst(p, 2, 0.45f, 0.08f, 2.8f, 0.72f, 0.94f, 1.f, 1, 1, -1.4f, 0, 5.f, 0.03f);
 				} else if (s.kind == 3) {
-					Burst(p, 1, 0.18f, 0.62f, 2.8f, 0.68f, 0.78f, 0.58f, 0, 1, -0.06f, 0, 0.5f, 1.f);
+					Burst(p, 1, 0.22f, 0.55f, 2.6f, 0.62f, 0.82f, 0.48f, 0, 1, -0.15f, 0, 1.2f, 0.9f);
+					Burst(p, 1, 0.8f, 0.06f, 1.8f, 0.85f, 1.f, 0.45f, 1, 1, -0.4f, 0, 2.f, 0.02f);
+				} else if (s.kind == 4) {
+					Burst(p + v3(0, 0.4f, 0), 2, 1.6f, 0.07f, 2.2f, 0.95f, 0.82f, 0.35f, 2, 1, 0.6f, 0, 0.4f, 0.02f);
+				} else if (s.kind == 5) {
+					Burst(p, 2, 0.9f, 0.42f, 2.4f, 0.72f, 0.58f, 0.38f, 0, 1, -0.25f, 0, 2.8f, 0.7f);
+				} else if (s.kind == 6) {
+					Burst(p + v3(0, 0.6f, 0), 2, 0.55f, 0.05f, 2.6f, 0.75f, 1.f, 0.45f, 1, 1, -0.2f, 0, 1.6f, 0.02f);
+				} else if (s.kind == 7) {
+					for (int k = 0; k < 3; k++) {
+						Particle q = {};
+						q.p = p + v3(m_rng.F(-1.2f, 1.2f), m_rng.F(6.f, 9.f), m_rng.F(-1.2f, 1.2f));
+						q.v = v3(m_rng.F(-0.3f, 0.3f), m_rng.F(-1.6f, -0.7f), m_rng.F(-0.2f, 0.2f));
+						q.life = q.max = m_rng.F(2.2f, 3.4f);
+						q.size = 0.06f; q.size1 = 0.02f;
+						q.r = 0.92f; q.g = 0.96f; q.b = 1.f; q.a = 1;
+						q.shape = 2; q.add = 1; q.grav = 0.4f; q.drag = 0.3f;
+						m_parts.push_back(q);
+					}
+				} else if (s.kind == 8) {
+					Burst(p, 3, 2.8f, 0.08f, 1.3f, 0.86f, 0.72f, 0.42f, 3, 1, 2.4f, 0.1f, 0.25f, 0.02f);
+				} else if (s.kind == 9) {
+					Burst(p, 1, 0.4f, 0.08f, 2.4f, 0.65f, 0.82f, 1.f, 1, 1, -0.7f, 0, 2.2f, 0.03f);
 				}
 			}
 		}
@@ -2004,9 +2055,7 @@ void Game::DrawShowcase3D()
 	ApplyZoomHold();
 	SetupCamera(target, yaw, m_camPitch, m_camDist, .7f);
 	{
-		float fogA = m_camDist * 1.6f, fogB = m_camDist * 5.5f;
-		if (m_showMap.theme == TH_SEABED) { fogA *= 0.42f; fogB *= 0.5f; }
-		m_r.SetFog(fogA, fogB, .3f, e.fog);
+		m_r.SetFog(m_camDist * 1.6f, m_camDist * 5.5f, .3f, e.fog);
 	}
 	m_r.SetAmbient(e.ambSky, e.ambGnd, e.amb, e.hard);
 	m_r.SetLight(e.light, c, 18.f);
@@ -3703,6 +3752,70 @@ void Game::CopyPickedSlot()
 	AddBanner(TT(TX_SLOT_COPIED), dn, RGBA8(255, 226, 150), 0, 1.6f);
 }
 
+static void SlotFileTitle(wchar_t* out, int n, int slot)
+{
+	wchar_t nm[TAC_SLOT_NAME];
+	SlotTitle(slot, nm, TAC_SLOT_NAME);
+	for (wchar_t* p = nm; *p; p++)
+		if (wcschr(L"\\/:*?\"<>|", *p)) *p = L'_';
+	if (!nm[0]) wcsncpy_s(nm, L"slot", _TRUNCATE);
+	swprintf_s(out, n, L"%s.tacx", nm);
+}
+
+void Game::RunSlotFile(int job)
+{
+	CWnd* parent = CWnd::FromHandle(::GetForegroundWindow());
+	if (job == 1) {
+		int slot = m_slotDest;
+		if (slot < 0 || slot >= TAC_SLOT_N) return;
+		if (slot == SlotCurrent()) FlushCurrentSlot();
+		else WaitSuspend();
+		wchar_t def[MAX_PATH];
+		SlotFileTitle(def, MAX_PATH, slot);
+		CFileDialog dlg(FALSE, L"tacx", def, OFN_OVERWRITEPROMPT | OFN_HIDEREADONLY | OFN_EXPLORER,
+			L"Tactics (*.tacx)|*.tacx||", parent);
+		if (dlg.DoModal() != IDOK) return;
+		if (SlotExportTo(slot, dlg.GetPathName())) {
+			wchar_t sn[TAC_SLOT_NAME];
+			SlotTitle(slot, sn, TAC_SLOT_NAME);
+			AddBanner(TT(TX_SLOT_OUT_OK), sn, RGBA8(255, 226, 150), 0, 1.8f);
+			m_slotUi = 1;
+		} else { TacSfx(TS_ERROR); AddBanner(TT(TX_SLOT_IO_BAD), NULL, RGBA8(255, 160, 140), 0, 1.8f); }
+	} else if (job == 2) {
+		CFileDialog dlg(TRUE, L"tacx", NULL, OFN_FILEMUSTEXIST | OFN_HIDEREADONLY | OFN_EXPLORER,
+			L"Tactics (*.tacx)|*.tacx||", parent);
+		if (dlg.DoModal() != IDOK) return;
+		wcsncpy_s(m_impPath, dlg.GetPathName(), _TRUNCATE);
+		m_slotUi = 8;
+		m_slotDest = -1;
+		m_focusId = ID_SLOT_ROW0;
+	}
+}
+
+void Game::ImportConfirmed()
+{
+	int slot = m_slotDest;
+	if (slot < 0 || slot >= TAC_SLOT_N || !m_impPath[0]) { m_slotUi = 1; return; }
+	BOOL battle = m_screen == SC_BATTLE || m_screen == SC_RESULT;
+	BOOL cur = slot == SlotCurrent();
+	if (cur) WaitSuspend();
+	if (!SlotImportFrom(slot, m_impPath)) {
+		TacSfx(TS_ERROR);
+		AddBanner(TT(TX_SLOT_IO_BAD), NULL, RGBA8(255, 160, 140), 0, 1.8f);
+		m_slotUi = 8;
+		return;
+	}
+	m_impPath[0] = 0;
+	if (cur) AdoptActiveSlot(battle);
+	else RefreshSlotPeek();
+	m_slotUi = 1;
+	m_slotPick = slot;
+	m_textFocus = 0;
+	wchar_t sn[TAC_SLOT_NAME];
+	SlotTitle(slot, sn, TAC_SLOT_NAME);
+	AddBanner(TT(TX_SLOT_IN_OK), sn, RGBA8(255, 226, 150), 0, 1.8f);
+}
+
 void Game::DrawSlotUi()
 {
 	m_r.HudRect(0, 0, (float)m_w, (float)m_h, RGBA8(0, 0, 0, 150));
@@ -3715,19 +3828,32 @@ void Game::DrawSlotUi()
 	Panel(x, y, w, h);
 	float pad = U(18);
 	int mode = m_slotUi;
-	const wchar_t* title = mode == 4 ? TT(TX_SLOT_COPYTO) : TT(TX_SLOT);
+	const wchar_t* title = TT(TX_SLOT);
+	if (mode == 4) title = TT(TX_SLOT_COPYTO);
+	else if (mode == 7) title = TT(TX_SLOT_OUTTO);
+	else if (mode == 8) title = TT(TX_SLOT_INTO);
 	m_r.HudText(title, x + w * .5f, y + U(28), U(20), RGBA8(255, 226, 150), 1, 1);
-	if (mode == 1 || mode == 4) {
-		if (mode == 4) {
-			wchar_t sn[TAC_SLOT_NAME], sub[96];
-			SlotTitle(m_slotPick, sn, TAC_SLOT_NAME);
-			swprintf_s(sub, L"%s  %s", TT(TX_SLOT_COPY), sn);
+	BOOL picking = mode == 1 || mode == 4 || mode == 7 || mode == 8;
+	if (picking) {
+		if (mode == 4 || mode == 8) {
+			wchar_t sub[120];
+			if (mode == 4) {
+				wchar_t sn[TAC_SLOT_NAME];
+				SlotTitle(m_slotPick, sn, TAC_SLOT_NAME);
+				swprintf_s(sub, L"%s  %s", TT(TX_SLOT_COPY), sn);
+			} else {
+				const wchar_t* slash = wcsrchr(m_impPath, L'\\');
+				wchar_t fileCut[72];
+				wcsncpy_s(fileCut, slash ? slash + 1 : m_impPath, _TRUNCATE);
+				swprintf_s(sub, L"%s  %s", TT(TX_SLOT_IN), fileCut);
+			}
 			m_r.HudText(sub, x + w * .5f, y + U(52), U(14), RGBA8(220, 220, 230), 1, 0);
 		}
 		float btnH = U(38);
 		float btnY = y + h - pad - btnH;
-		float top = y + (mode == 4 ? U(70) : U(52));
-		float rowH = (btnY - U(8) - top) / (float)TAC_SLOT_N;
+		float ioH = (mode == 1) ? (btnH + U(6)) : 0.f;
+		float top = y + (mode == 1 || mode == 7 ? U(52) : U(70));
+		float rowH = (btnY - ioH - U(8) - top) / (float)TAC_SLOT_N;
 		if (rowH > U(44)) rowH = U(44);
 		if (rowH < U(22)) rowH = U(22);
 		for (int i = 0; i < TAC_SLOT_N; i++) {
@@ -3742,11 +3868,18 @@ void Game::DrawSlotUi()
 				editing ? m_slotEdit : nm, editing ? L"_" : L"",
 				info, (i == SlotCurrent()) ? L"    " : L"", (i == SlotCurrent()) ? TT(TX_SLOT_NOW) : L"");
 			BOOL en = !(mode == 4 && i == m_slotPick);
-			BOOL sel = i == m_slotPick;
+			BOOL sel = (mode == 1) ? (i == m_slotPick) : FALSE;
 			if (Btn(ID_SLOT_ROW0 + i, x + pad, top + rowH * i, w - pad * 2.f, rowH - U(3), line, en, sel, U(15))) {
 				if (mode == 4) {
 					m_slotDest = i;
 					m_slotUi = 5;
+					m_focusId = ID_SLOT_NO;
+				} else if (mode == 7) {
+					m_slotDest = i;
+					m_slotJob = 1;
+				} else if (mode == 8) {
+					m_slotDest = i;
+					m_slotUi = 6;
 					m_focusId = ID_SLOT_NO;
 				} else {
 					if (m_textFocus == 2 && m_slotPick != i) CommitSlotName();
@@ -3757,9 +3890,25 @@ void Game::DrawSlotUi()
 		float gap = U(6);
 		float bx = x + pad;
 		float bw = w - pad * 2.f;
-		if (mode == 4) {
-			if (Btn(ID_SLOT_BACK, bx, btnY, bw, btnH, TT(TX_CR_BACK))) { m_slotUi = 1; m_textFocus = 0; }
+		if (mode == 4 || mode == 7 || mode == 8) {
+			if (Btn(ID_SLOT_BACK, bx, btnY, bw, btnH, TT(TX_CR_BACK))) {
+				if (mode == 8) m_impPath[0] = 0;
+				m_slotUi = 1;
+				m_textFocus = 0;
+			}
 		} else {
+			float ioY = btnY - ioH;
+			float ioW = (bw - gap) * .5f;
+			if (Btn(ID_SLOT_OUT, bx, ioY, ioW, btnH, TT(TX_SLOT_OUT), TRUE, FALSE, U(14))) {
+				if (m_textFocus == 2) CommitSlotName();
+				m_slotUi = 7;
+				m_slotDest = -1;
+				m_focusId = ID_SLOT_ROW0;
+			}
+			if (Btn(ID_SLOT_IN, bx + ioW + gap, ioY, ioW, btnH, TT(TX_SLOT_IN), TRUE, FALSE, U(14))) {
+				if (m_textFocus == 2) CommitSlotName();
+				m_slotJob = 2;
+			}
 			float bw5 = (bw - gap * 4.f) / 5.f;
 			BOOL cur = m_slotPick == SlotCurrent();
 			if (Btn(ID_SLOT_USE, bx, btnY, bw5, btnH, cur ? TT(TX_SLOT_NOW) : TT(TX_SLOT_USE), !cur, FALSE, U(14))) {
@@ -3788,15 +3937,22 @@ void Game::DrawSlotUi()
 			}
 		}
 	} else {
-		wchar_t src[TAC_SLOT_NAME], dst[TAC_SLOT_NAME], head[120];
+		wchar_t src[TAC_SLOT_NAME], dst[TAC_SLOT_NAME], head[180];
 		SlotTitle(m_slotPick, src, TAC_SLOT_NAME);
 		if (mode == 5) {
 			SlotTitle(m_slotDest, dst, TAC_SLOT_NAME);
 			swprintf_s(head, L"%s   →   %s", src, dst);
+		} else if (mode == 6) {
+			SlotTitle(m_slotDest, src, TAC_SLOT_NAME);
+			const wchar_t* slash = wcsrchr(m_impPath, L'\\');
+			wchar_t fileCut[72];
+			wcsncpy_s(fileCut, slash ? slash + 1 : m_impPath, _TRUNCATE);
+			swprintf_s(head, L"%s   ←   %s", src, fileCut);
 		} else wcsncpy_s(head, src, _TRUNCATE);
 		const wchar_t* body = TT(TX_SLOT_WARN1);
 		if (mode == 3) body = TT(TX_SLOT_WARN2);
 		else if (mode == 5) body = TT(TX_SLOT_COPYQ);
+		else if (mode == 6) body = TT(TX_SLOT_IN_Q);
 		m_r.HudText(head, x + w * .5f, y + U(78), U(18), RGBA8(255, 236, 190), 1, 1);
 		m_r.HudTextBox(body, x + pad, y + U(110), w - pad * 2.f, U(110), U(16), RGBA8(255, 220, 210));
 		float bh = U(40);
@@ -3807,9 +3963,10 @@ void Game::DrawSlotUi()
 			if (mode == 2) { m_slotUi = 3; m_focusId = ID_SLOT_NO; }
 			else if (mode == 3) DeletePickedSlot();
 			else if (mode == 5) CopyPickedSlot();
+			else if (mode == 6) ImportConfirmed();
 		}
 		if (Btn(ID_SLOT_NO, x + pad + bw + U(10), by, bw, bh, TT(TX_PT_NO))) {
-			m_slotUi = (mode == 5) ? 4 : 1;
+			m_slotUi = (mode == 5) ? 4 : (mode == 6) ? 8 : 1;
 			m_focusId = ID_SLOT_BACK;
 		}
 	}
@@ -3841,7 +3998,7 @@ void Game::DrawBaseUi()
 	float helpY = y + ph - helpH - max(6.f, ph * .015f);
 	float top = y + titleH * 2.f + 14.f;
 	float midRoom = helpY - top - 4.f;
-	float midNeed = m_baseOpt ? U(620) : U(400);
+	float midNeed = m_baseOpt ? U(700) : U(470);
 	float k = midNeed > 1.f ? min(1.f, midRoom / midNeed) : 1.f;
 	if (k < .42f) k = .42f;
 	auto Ku = [&](float px) { return U(px) * k; };
@@ -3864,10 +4021,36 @@ void Game::DrawBaseUi()
 		}
 	}
 	by += Ku(46);
-	wchar_t cl[64];
-	swprintf_s(cl, L"%s: %s    %s %s", TT(TX_BASE_CLEARED), TacNum(m_save.stageCleared), TT(TX_GOLD), TacNum(m_save.gold));
-	m_r.HudText(cl, bx + U(4), by + Ku(8), min(U(14), Ku(16)), RGBA8(200, 200, 210), 0, 0);
-	by += Ku(28);
+	wchar_t cl[96];
+	int sumHp = 0, sumMp = 0, sumLv = 0, sumN = 0;
+	int pcap = PartyCap();
+	for (int i = 0; i < pcap; i++) {
+		int r = m_save.party[i];
+		if (r < 0 || r >= MAX_ROSTER || !m_save.roster[r].used) continue;
+		const CharData& c = m_save.roster[r];
+		sumHp += c.stat[S_HP];
+		sumMp += c.stat[S_MP];
+		sumLv += c.lv;
+		sumN++;
+	}
+	float statPx = min(U(14), Ku(16));
+	float statMax = bw - U(8);
+	auto statLine = [&](const wchar_t* s) {
+		float px = FitTextPx(s, statMax, statPx, 0);
+		m_r.HudText(s, bx + U(4), by + px * 0.15f, px, RGBA8(200, 200, 210), 0, 0);
+		by += Ku(18);
+	};
+	swprintf_s(cl, L"%s: %s", TT(TX_BASE_CLEARED), TacNum(m_save.stageCleared));
+	statLine(cl);
+	swprintf_s(cl, L"%s  %s", TT(TX_GOLD), TacNum(m_save.gold));
+	statLine(cl);
+	swprintf_s(cl, L"%s %s   %s %s", TT(TX_ST_HP), TacNum(sumHp), TT(TX_ST_MP), TacNum(sumMp));
+	statLine(cl);
+	if (sumN > 0) {
+		int avg10 = (sumLv * 10 + sumN / 2) / sumN;
+		swprintf_s(cl, L"%s  %d.%d", TT(TX_BASE_AVGLV), avg10 / 10, avg10 % 10);
+	} else swprintf_s(cl, L"%s  —", TT(TX_BASE_AVGLV));
+	statLine(cl);
 	int np = PartyCount();
 	if (Btn(ID_BASE_SORTIE, bx, by, bw, bh + Ku(8), TT(TX_BASE_SORTIE), np > 0, FALSE, min(U(22), bh * .5f), RGBA8(170, 60, 50, 240))) {
 		ProbeSuspend();
